@@ -172,6 +172,9 @@ def rename_with_accuracy(info: ModelInfo, hit_at_5_pct: int) -> ModelInfo:
         target = _build_files(f"{new_name}_{suffix}")
         suffix += 1
 
+    # active 가 이 모델을 가리키고 있었는지 ‘이동 전에’ 미리 캡처
+    was_active = (get_active() == info.name)
+
     # 파일 이동
     try:
         info.weights_path.rename(target.weights_path)
@@ -193,8 +196,7 @@ def rename_with_accuracy(info: ModelInfo, hit_at_5_pct: int) -> ModelInfo:
     except Exception:
         pass
 
-    # active 가 이 모델을 가리키고 있었다면 함께 갱신
-    if get_active() == info.name:
+    if was_active:
         set_active(target.name)
 
     target.meta = meta
@@ -229,3 +231,69 @@ def write_meta(info: ModelInfo, meta: dict) -> None:
         encoding="utf-8",
     )
     info.meta = meta
+
+
+# ---------------------------------------------------------------------------
+# Export / import (zip 패키지) — #22
+# ---------------------------------------------------------------------------
+def export_model(name: str, dst_zip: Path) -> Path:
+    """모델 1개 (.pt + .json + .jsonl) 를 zip 으로 묶어 ``dst_zip`` 에 저장."""
+    import zipfile
+    info = find(name)
+    if info is None:
+        raise FileNotFoundError(f"모델을 찾을 수 없습니다: {name}")
+    dst_zip = Path(dst_zip)
+    dst_zip.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(str(dst_zip), "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.write(info.weights_path, arcname=info.weights_path.name)
+        if info.meta_path.exists():
+            zf.write(info.meta_path, arcname=info.meta_path.name)
+        if info.eval_path.exists():
+            zf.write(info.eval_path, arcname=info.eval_path.name)
+    return dst_zip
+
+
+def import_model(src_zip: Path) -> str:
+    """``src_zip`` 의 모델 패키지를 현재 ``models_dir()`` 에 풀어넣는다.
+
+    동일 이름이 이미 있으면 ``_2``, ``_3`` 으로 자동 부여.
+    반환 = 실제로 들어간 모델 이름.
+    """
+    import zipfile
+    src_zip = Path(src_zip)
+    if not src_zip.exists():
+        raise FileNotFoundError(str(src_zip))
+
+    with zipfile.ZipFile(str(src_zip), "r") as zf:
+        names = zf.namelist()
+        pt = next((n for n in names if n.endswith(_WEIGHTS_EXT)), None)
+        if pt is None:
+            raise ValueError("zip 안에 가중치(.pt) 파일이 없습니다")
+
+        base = Path(pt).stem
+        # 충돌 회피
+        existing = {info.name for info in list_models()}
+        target_name = base
+        n = 2
+        while target_name in existing:
+            target_name = f"{base}_{n}"
+            n += 1
+
+        target = _build_files(target_name)
+
+        with zf.open(pt) as f:
+            target.weights_path.write_bytes(f.read())
+        meta_name = next((n for n in names if n.endswith(_META_EXT)), None)
+        if meta_name is not None:
+            data = json.loads(zf.read(meta_name).decode("utf-8"))
+            data["name"] = target_name
+            target.meta_path.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        eval_name = next((n for n in names if n.endswith(_EVAL_EXT)), None)
+        if eval_name is not None:
+            target.eval_path.parent.mkdir(parents=True, exist_ok=True)
+            target.eval_path.write_bytes(zf.read(eval_name))
+
+    return target_name

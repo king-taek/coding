@@ -29,7 +29,8 @@ class Feature:
     orb_kp: int
     orb_desc: Optional[np.ndarray]          # (N, 32) uint8 or None
     roi_gray: np.ndarray                    # SSIM 비교용 ROI
-    cnn: Optional[np.ndarray] = None        # 옵션
+    cnn: Optional[np.ndarray] = None        # 옵션 (특정 모델의 임베딩)
+    cnn_model: str = ""                     # cnn 을 만든 모델 이름 ("basic" 일 경우 빈문자열)
 
     # 디스크 직렬화 ----------------------------------------------------------
     def save(self, dst: Path) -> None:
@@ -42,12 +43,20 @@ class Feature:
             payload["orb_desc"] = self.orb_desc
         if self.cnn is not None:
             payload["cnn"] = self.cnn
+            if self.cnn_model:
+                payload["cnn_model"] = np.array([self.cnn_model], dtype=object)
         dst.parent.mkdir(parents=True, exist_ok=True)
         np.savez_compressed(str(dst), **payload)
 
     @classmethod
     def load(cls, src: Path, path: Path) -> "Feature":
-        data = np.load(str(src))
+        data = np.load(str(src), allow_pickle=True)
+        cnn_model = ""
+        if "cnn_model" in data.files:
+            try:
+                cnn_model = str(data["cnn_model"][0])
+            except Exception:
+                cnn_model = ""
         return cls(
             path=path,
             phash=data["phash"],
@@ -55,6 +64,7 @@ class Feature:
             orb_kp=int(data["orb_kp"][0]),
             orb_desc=data["orb_desc"] if "orb_desc" in data.files else None,
             cnn=data["cnn"] if "cnn" in data.files else None,
+            cnn_model=cnn_model,
         )
 
 
@@ -129,9 +139,17 @@ def score(a: Feature, b: Feature,
 
     s_cnn = 0.0
     if w.use_cnn:
-        # 캐시된 cnn 임베딩이 없으면 (basic 모드에서 만든 캐시) 즉시 계산
-        a_emb = a.cnn if a.cnn is not None else _cnn.compute_embedding(a.path)
-        b_emb = b.cnn if b.cnn is not None else _cnn.compute_embedding(b.path)
+        # 활성 모델과 캐시된 임베딩의 모델이 다르면 재계산 (차원/공간 충돌 방지).
+        active = _active_model_name()
+        a_emb = a.cnn if (a.cnn is not None and a.cnn_model == active) else _cnn.compute_embedding(a.path)
+        b_emb = b.cnn if (b.cnn is not None and b.cnn_model == active) else _cnn.compute_embedding(b.path)
+        # 즉시 재계산된 결과를 메모리상 Feature 에도 반영 (다음 비교에서 재사용).
+        if a_emb is not None and (a.cnn is None or a.cnn_model != active):
+            a.cnn = a_emb
+            a.cnn_model = active
+        if b_emb is not None and (b.cnn is None or b.cnn_model != active):
+            b.cnn = b_emb
+            b.cnn_model = active
         s_cnn = _cnn.cosine_similarity(a_emb, b_emb)
 
     total = (
@@ -141,6 +159,16 @@ def score(a: Feature, b: Feature,
         + (w.cnn * s_cnn if w.use_cnn else 0.0)
     )
     return max(0.0, min(1.0, float(total)))
+
+
+def _active_model_name() -> str:
+    """현재 active 모델 이름 — 학습 패키지가 없거나 basic 이면 ``""``."""
+    try:
+        from ..learning import embedder as _emb
+        m = _emb.get_active_mode()
+        return "" if m == "basic" else m
+    except Exception:
+        return ""
 
 
 def _resolve_weights(base: config.SimilarityWeights) -> config.SimilarityWeights:
@@ -161,3 +189,16 @@ def _resolve_weights(base: config.SimilarityWeights) -> config.SimilarityWeights
             cnn=base.cnn, use_cnn=True,
         )
     return base
+
+
+def invalidate_cnn_cache(model_name: str = "") -> None:
+    """디스크 feature 캐시의 .npz 들에서 cnn 필드만 제거(또는 파일 삭제).
+
+    모델 학습/삭제/모드 전환 후 호출. 가장 단순한 구현은 npz 전체 삭제.
+    """
+    from ..utils import paths as _paths
+    for npz in _paths.feature_cache_dir().glob("*.npz"):
+        try:
+            npz.unlink()
+        except OSError:
+            pass

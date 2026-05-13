@@ -80,6 +80,12 @@ class TrainHeadWorker(QThread):
         if not triplet_model.is_available():
             raise _AbortTraining("torch / torchvision 이 설치되어 있지 않습니다")
 
+        # 평가 로그의 confirmed pick 도 학습 데이터에 자동 통합 (#5).
+        try:
+            self._store.append_evaluation_picks()
+        except Exception:
+            pass
+
         pairs = self._store.load_all()
         if len(pairs) < 5:
             raise _AbortTraining(
@@ -106,27 +112,44 @@ class TrainHeadWorker(QThread):
         if not all_paths:
             raise _AbortTraining("학습용 이미지 파일이 모두 사라졌습니다")
 
-        # 1) 백본 임베딩 사전 추출 -----------------------------------
+        # 1) 백본 임베딩 사전 추출 (도메인 전처리 공유, 배치) -----------
         import torch
 
-        backbone, tfm = emb_mod._load_backbone()    # type: ignore[attr-defined]
+        backbone = emb_mod._load_backbone()    # type: ignore[attr-defined]
         feat_cache: dict[str, "torch.Tensor"] = {}
-        from PIL import Image
 
         total = len(all_paths)
-        for idx, path in enumerate(all_paths, start=1):
+        BATCH = 32
+        idx = 0
+        pending: list[tuple[str, "torch.Tensor"]] = []
+
+        def _flush_backbone():
+            if not pending:
+                return
+            keys = [k for k, _ in pending]
+            tensors = [t for _, t in pending]
+            x = torch.stack(tensors)
+            with torch.no_grad():
+                f = backbone(x).detach().cpu()
+            for k, v in zip(keys, f):
+                feat_cache[k] = v.flatten()
+            pending.clear()
+
+        for path in all_paths:
             if self._stop:
                 raise _AbortTraining("사용자가 학습을 중단했습니다")
-            try:
-                img = Image.open(path).convert("RGB")
-                with torch.no_grad():
-                    x = tfm(img).unsqueeze(0)
-                    f = backbone(x).flatten().detach().cpu()
-                feat_cache[path] = f
-            except Exception:
+            t = emb_mod.make_input_tensor(Path(path))
+            idx += 1
+            if t is None:
+                self.signals.backbone_progress.emit(idx, total)
                 continue
+            pending.append((path, t))
+            if len(pending) >= BATCH:
+                _flush_backbone()
             if idx == 1 or idx == total or idx % 5 == 0:
                 self.signals.backbone_progress.emit(idx, total)
+        _flush_backbone()
+        self.signals.backbone_progress.emit(total, total)
 
         # 유효 쌍만 필터링 (둘 다 캐시에 있어야 함)
         usable_pairs: list[TrainingPair] = [
@@ -154,34 +177,58 @@ class TrainHeadWorker(QThread):
 
         rng = random.Random(int(time.time()))
 
+        # 모든 사용 가능한 cross-slot 풀을 1차원으로 펼친 텐서 (hard mining 용)
+        all_slot_idx: list[tuple[str, str]] = []        # (slot, path)
+        for s, paths in slot_keys.items():
+            for q in paths:
+                all_slot_idx.append((s, q))
+
+        loss_history: list[float] = []
         for epoch in range(1, self._epochs + 1):
             if self._stop:
                 raise _AbortTraining("사용자가 학습을 중단했습니다")
             rng.shuffle(usable_pairs)
             ep_loss = 0.0
             n_batches = 0
+            # 첫 에폭은 랜덤 negative (워밍업), 이후는 hard mining.
+            use_hard = epoch > 1
 
             for start in range(0, len(usable_pairs), self._batch):
                 if self._stop:
                     raise _AbortTraining("사용자가 학습을 중단했습니다")
                 batch = usable_pairs[start: start + self._batch]
-                a, p, n = [], [], []
-                for pair in batch:
-                    neg = self._sample_negative(pair.slot, slot_keys, rng,
-                                                 anchor=pair.ref_path)
-                    if neg is None:
-                        continue
-                    a.append(feat_cache[pair.ref_path])
-                    p.append(feat_cache[pair.val_path])
-                    n.append(feat_cache[neg])
-                if not a:
+
+                # 1) anchor / positive 텐서 구성
+                a_keys = [p.ref_path for p in batch]
+                p_keys = [p.val_path for p in batch]
+                slots = [p.slot for p in batch]
+                A_raw = torch.stack([feat_cache[k] for k in a_keys])
+                P_raw = torch.stack([feat_cache[k] for k in p_keys])
+                zA = nn.functional.normalize(head(A_raw), p=2, dim=1)
+                zP = nn.functional.normalize(head(P_raw), p=2, dim=1)
+
+                # 2) negative 선택 — 워밍업이면 랜덤, 그 이후엔 hard mining.
+                n_paths: list[Optional[str]] = []
+                for i, pair in enumerate(batch):
+                    if use_hard:
+                        n_paths.append(self._hard_negative(
+                            zA[i], pair.slot, all_slot_idx,
+                            feat_cache, head, rng,
+                        ))
+                    else:
+                        n_paths.append(self._sample_negative(
+                            pair.slot, slot_keys, rng, anchor=pair.ref_path,
+                        ))
+
+                # negative 가 못 잡힌 행은 제거
+                keep_idx = [i for i, n in enumerate(n_paths) if n is not None]
+                if not keep_idx:
                     continue
-                A = torch.stack(a)
-                P = torch.stack(p)
-                N = torch.stack(n)
-                zA = nn.functional.normalize(head(A), p=2, dim=1)
-                zP = nn.functional.normalize(head(P), p=2, dim=1)
-                zN = nn.functional.normalize(head(N), p=2, dim=1)
+                zA = zA[keep_idx]
+                zP = zP[keep_idx]
+                N_raw = torch.stack([feat_cache[n_paths[i]] for i in keep_idx])
+                zN = nn.functional.normalize(head(N_raw), p=2, dim=1)
+
                 loss = loss_fn(zA, zP, zN)
                 opt.zero_grad()
                 loss.backward()
@@ -190,9 +237,10 @@ class TrainHeadWorker(QThread):
                 n_batches += 1
 
             avg = (ep_loss / n_batches) if n_batches else 0.0
+            loss_history.append(avg)
             self.signals.epoch_progress.emit(epoch, self._epochs, avg)
 
-        # 3) 저장 ----------------------------------------------------
+        # 3) 저장 — 임시 파일로 먼저 쓰고 atomic rename ---------------
         head.eval()
         name = registry.make_new_name(datetime.now())
         info = registry.ModelInfo(
@@ -201,7 +249,9 @@ class TrainHeadWorker(QThread):
             meta_path=registry.paths.models_dir() / f"{name}.json",
             eval_path=registry.paths.evaluations_dir() / f"{name}.jsonl",
         )
-        triplet_model.save_head(head, info.weights_path)
+        tmp = info.weights_path.with_suffix(".pt.tmp")
+        triplet_model.save_head(head, tmp)
+        tmp.replace(info.weights_path)
         registry.write_meta(info, {
             "name": name,
             "trained_at": datetime.now().isoformat(timespec="seconds"),
@@ -212,11 +262,33 @@ class TrainHeadWorker(QThread):
             "batch_size": self._batch,
             "lr": self._lr,
             "margin": self._margin,
+            "loss_history": [round(x, 4) for x in loss_history],
         })
 
-        # active 갱신 + 임베더 캐시 무효화
+        # 직전 모델 가중치를 백업 (rollback 가능) — #10 위험 완화
+        prev_active = registry.get_active()
+        if prev_active != registry.BASIC:
+            prev_info = registry.find(prev_active)
+            if prev_info and prev_info.weights_path.exists():
+                # 동일 작업 폴더에 .prev.pt 로 한 단계만 보관
+                try:
+                    backup = prev_info.weights_path.with_suffix(".prev.pt")
+                    if backup.exists():
+                        backup.unlink()
+                    prev_info.weights_path.replace(backup)
+                    # 백업한 자리에 원본을 다시 두진 않는다 — 이전 모델은 그대로
+                    backup.replace(prev_info.weights_path)
+                except OSError:
+                    pass
+
+        # active 갱신 + 임베더 캐시 무효화 + 디스크 cnn 캐시 정리
         registry.set_active(name)
         emb_mod.invalidate_caches()
+        try:
+            from ..similarity import pipeline as _pipe
+            _pipe.invalidate_cnn_cache()
+        except Exception:
+            pass
         return name
 
     # ------------------------------------------------------------------
@@ -238,6 +310,36 @@ class TrainHeadWorker(QThread):
             if pick != anchor:
                 return pick
         return None
+
+    @staticmethod
+    def _hard_negative(z_anchor,
+                       anchor_slot: str,
+                       all_slot_idx: list[tuple[str, str]],
+                       feat_cache: dict[str, "object"],
+                       head,
+                       rng: random.Random,
+                       *,
+                       sample_size: int = 64) -> Optional[str]:
+        """무작위로 sample_size 개의 cross-slot 임베딩을 뽑은 뒤, anchor 와 가장
+        가까운 것을 negative 로 선택 (semi-hard mining).
+
+        대규모 풀에서 매 step 전부 비교하면 OOM/속도 문제가 있으니 sampling 기반.
+        """
+        import torch
+        from torch.nn import functional as F
+        pool = [p for (s, p) in all_slot_idx if s != anchor_slot]
+        if not pool:
+            return None
+        rng.shuffle(pool)
+        cand = pool[:sample_size]
+        if not cand:
+            return None
+        feats = torch.stack([feat_cache[p] for p in cand])
+        with torch.no_grad():
+            z = F.normalize(head(feats), p=2, dim=1)
+            sims = (z * z_anchor.detach().unsqueeze(0)).sum(dim=1)
+            best = int(sims.argmax().item())
+        return cand[best]
 
 
 class _AbortTraining(Exception):

@@ -155,6 +155,74 @@ class MainWindow(QMainWindow):
         except Exception:
             return "basic"
 
+    def _resolve_slot_mismatch(self, sr: ScanResult) -> None:
+        """ref/val 한쪽에만 있는 슬롯이 있을 때 사용자에게 매핑을 묻는다 (#23)."""
+        from .widgets.slot_mapping_dialog import SlotMappingDialog
+        # 안내 → 다이얼로그 열기 여부 묻기
+        r = QMessageBox.question(
+            self, i18n.KO.WARN_SLOT_MISMATCH_TITLE,
+            i18n.KO.WARN_SLOT_MISMATCH_FMT.format(
+                ref_only=", ".join(sr.ref_only) or "없음",
+                val_only=", ".join(sr.val_only) or "없음",
+            ) + "\n\n" + i18n.KO.SLOT_MAP_OPEN + " ?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if r != QMessageBox.StandardButton.Yes:
+            return
+
+        dlg = SlotMappingDialog(sr.ref_only, sr.val_only, parent=self)
+        if dlg.exec() != QMessageBox.StandardButton.Ok.value and not dlg.result():
+            # exec() 의 반환 — Qt6 의 QDialog 는 Accepted=1, Rejected=0
+            pass  # 결과는 mapping property 로 판단
+        mapping = dlg.mapping
+        if not mapping.pairs:
+            return
+
+        # 매핑된 슬롯 쌍을 ScanResult.slots 에 통합 (val 측을 ref 측 이름으로 합침)
+        for ref_name, val_name in mapping.pairs:
+            ref_slot = sr.slots.get(ref_name)
+            val_slot = sr.slots.get(val_name)
+            if ref_slot is None or val_slot is None:
+                continue
+            # val 사진을 ref 슬롯에 결합 — side 는 유지하되 slot 명만 일치시킴.
+            from ..models.slot import ImageItem
+            rebuilt_val_imgs = [
+                ImageItem(slot=ref_name, path=it.path, side="val")
+                for it in val_slot.val_images
+            ]
+            ref_slot.val_images = rebuilt_val_imgs
+            # 매핑 적용된 val 슬롯은 제거
+            sr.slots.pop(val_name, None)
+
+        # ref_only / val_only 목록 갱신
+        sr.ref_only = [s for s in sr.ref_only
+                       if s not in {a for a, _ in mapping.pairs}]
+        sr.val_only = [s for s in sr.val_only
+                       if s not in {b for _, b in mapping.pairs}]
+
+    def _make_groups(self, items: list[ImageItem]):
+        """ImageItem 목록을 슬롯별로 pHash 그룹화 (#15)."""
+        try:
+            from ..models import group as _grp
+            from ..utils import prefs as _prefs
+        except Exception:
+            return None
+        if not items:
+            return None
+        by_slot: dict[str, list[ImageItem]] = defaultdict(list)
+        for it in items:
+            by_slot[it.slot].append(it)
+        p = _prefs.load()
+        try:
+            return _grp.cluster(
+                by_slot,
+                similarity_threshold=float(p.group_similarity),
+                min_group_size=int(p.group_min_size),
+            )
+        except Exception:
+            return None
+
     # ==================================================================
     # Setup → Stage 1
     # ==================================================================
@@ -183,15 +251,9 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, i18n.KO.APP_TITLE, i18n.KO.WARN_NO_SLOTS)
             return
 
-        # 한쪽 전용 Slot 알림 ---------------------------------------------
+        # 한쪽 전용 Slot 이 있으면 사용자에게 수동 매핑을 물어본다 (#23) ------
         if sr.ref_only or sr.val_only:
-            QMessageBox.information(
-                self, i18n.KO.WARN_SLOT_MISMATCH_TITLE,
-                i18n.KO.WARN_SLOT_MISMATCH_FMT.format(
-                    ref_only=", ".join(sr.ref_only) or "없음",
-                    val_only=", ".join(sr.val_only) or "없음",
-                ),
-            )
+            self._resolve_slot_mismatch(sr)
 
         # 썸네일 캐시 사전 생성 (백그라운드) -----------------------------
         all_items: list[ImageItem] = []
@@ -250,9 +312,13 @@ class MainWindow(QMainWindow):
         lower = self._lower_machine_side() if self._is_cross() else "ref"
         slots = [self._scan.slots[n] for n in self._scan.common_slot_names]
         # Phase A 의 queue: 낮은 호기 쪽 사진 전부 (Slot 명 / 파일명 오름차순)
-        queue: list[ImageItem] = []
+        queue_full: list[ImageItem] = []
         for slot in sorted(slots, key=lambda s: s.name):
-            queue.extend(slot.ref_images if lower == "ref" else slot.val_images)
+            queue_full.extend(slot.ref_images if lower == "ref" else slot.val_images)
+
+        # 같은 슬롯 안 거의 동일한 사진은 그룹으로 묶어 대표만 큐에 (#15)
+        grouping = self._make_groups(queue_full)
+        queue = grouping.representatives if grouping else queue_full
 
         phase_lab = (
             i18n.KO.PHASE_A_SELECT if self._is_cross()
@@ -262,6 +328,7 @@ class MainWindow(QMainWindow):
             queue=queue,
             targets={}, excluded={}, history=[],
             phase_label=phase_lab,
+            groups=grouping,
         )
         self._show_page(self._select_page)
         self._phase = PHASE_A_SELECT
@@ -346,7 +413,9 @@ class MainWindow(QMainWindow):
         if self._phase == PHASE_A_MATCH:
             st = self._match_page.get_state()
             if st is not None:
-                for slot, items in st.skipped.items():
+                # 미탐(=상대 호기가 놓침) 으로 기록할 것은 ‘매칭 없음 확정’ 만.
+                # ‘잠시 보류’ 는 사용자 결정 미정 → 미탐 시트에 넣지 않는다.
+                for slot, items in st.no_match.items():
                     self._skipped_a[slot].extend(items)
             if self._is_cross():
                 QMessageBox.information(
@@ -359,7 +428,7 @@ class MainWindow(QMainWindow):
         elif self._phase == PHASE_B_MATCH:
             st = self._match_page.get_state()
             if st is not None:
-                for slot, items in st.skipped.items():
+                for slot, items in st.no_match.items():
                     self._skipped_b[slot].extend(items)
             self._finish_session()
 
@@ -384,11 +453,14 @@ class MainWindow(QMainWindow):
                 else:
                     queue.append(it)
 
+        grouping_b = self._make_groups(queue)
+        queue_b = grouping_b.representatives if grouping_b else queue
         self._select_page.load_state(
-            queue=queue,
+            queue=queue_b,
             targets={}, excluded={}, history=[],
             phase_label=i18n.KO.PHASE_B_SELECT,
             phase_b_already_matched=dict(already_by_slot),
+            groups=grouping_b,
         )
         self._show_page(self._select_page)
         self._phase = PHASE_B_SELECT
@@ -582,6 +654,36 @@ class MainWindow(QMainWindow):
     def _autosave(self) -> None:
         if self._input is None:
             return
+        # Stage 1 / Stage 2 의 현재 상태도 함께 직렬화 (#19)
+        decisions: dict[str, str] = {}
+        no_match_keys: list[str] = []
+        skipped_keys: list[str] = []
+        matches_dump: list[dict] = []
+        st1 = self._select_page.get_state()
+        if st1 is not None:
+            for slot, items in st1.targets.items():
+                for it in items:
+                    decisions[it.key] = "verify"
+            for slot, items in st1.excluded.items():
+                for it in items:
+                    decisions[it.key] = "exclude"
+        st2 = self._match_page.get_state()
+        if st2 is not None:
+            for m in st2.matches:
+                matches_dump.append({
+                    "slot": m.slot,
+                    "ref_path": str(m.ref_path),
+                    "val_path": str(m.val_path),
+                    "score": float(m.score),
+                    "direction": str(m.direction),
+                })
+            for slot, items in st2.skipped.items():
+                for it in items:
+                    skipped_keys.append(it.key)
+            for slot, items in st2.no_match.items():
+                for it in items:
+                    no_match_keys.append(it.key)
+
         state = session_mod.SessionState(
             mode=self._input.mode,
             ref_root=str(self._input.ref_root),
@@ -589,8 +691,21 @@ class MainWindow(QMainWindow):
             ref_machine=self._input.ref_machine,
             val_machine=self._input.val_machine,
             threshold=self._input.threshold,
+            session_id=self._session_id,
             stage=self._phase or "setup",
             phase=("B" if self._phase in (PHASE_B_SELECT, PHASE_B_MATCH) else "A"),
+            decisions=decisions,
+            matches=matches_dump,
+            skipped=skipped_keys,
+            no_match=no_match_keys,
+            phase_a_matched_val_keys=sorted(self._matched_val_keys_in_a),
+            phase_a_matches=[{
+                "slot": m.slot,
+                "ref_path": str(m.ref_path),
+                "val_path": str(m.val_path),
+                "score": float(m.score),
+                "direction": str(m.direction),
+            } for m in self._matches_a],
         )
         try:
             session_mod.save(state)
@@ -604,4 +719,9 @@ class MainWindow(QMainWindow):
         if self._thumb_worker is not None and self._thumb_worker.isRunning():
             self._thumb_worker.stop()
             self._thumb_worker.wait(1000)
+        # 학습 워커도 안전 종료 (#17)
+        try:
+            self._setup_page.stop_training()
+        except Exception:
+            pass
         super().closeEvent(event)

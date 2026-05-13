@@ -16,6 +16,7 @@ from ...learning import registry as _registry
 from ...learning import triplet_model as _triplet
 from ...learning.dataset import TrainingDataStore
 from ...learning.trainer import TrainHeadWorker
+from ...utils import prefs as _prefs
 from ..widgets.loading_overlay import LoadingOverlay
 from ..widgets.neon_button import NeonButton
 from ..widgets.neon_card import NeonCard
@@ -99,12 +100,18 @@ class SetupPage(QWidget):
         self.btn_retrain = NeonButton(i18n.KO.BTN_RETRAIN, role="primary")
         self.btn_refresh_acc = NeonButton(i18n.KO.BTN_REFRESH_ACC, role="ghost")
         self.btn_delete_model = NeonButton(i18n.KO.BTN_DELETE_MODEL, role="danger")
+        self.btn_export_model = NeonButton(i18n.KO.BTN_EXPORT_MODEL, role="ghost")
+        self.btn_import_model = NeonButton(i18n.KO.BTN_IMPORT_MODEL, role="ghost")
         self.btn_retrain.clicked.connect(self._on_retrain)
         self.btn_refresh_acc.clicked.connect(self._on_refresh_accuracy)
         self.btn_delete_model.clicked.connect(self._on_delete_model)
+        self.btn_export_model.clicked.connect(self._on_export_model)
+        self.btn_import_model.clicked.connect(self._on_import_model)
         bar.addWidget(self.btn_retrain)
         bar.addWidget(self.btn_refresh_acc)
         bar.addWidget(self.btn_delete_model)
+        bar.addWidget(self.btn_export_model)
+        bar.addWidget(self.btn_import_model)
         bar.addStretch(1)
         self._model_card.body().addLayout(bar)
         root.addWidget(self._model_card)
@@ -144,12 +151,15 @@ class SetupPage(QWidget):
         sl.addWidget(QLabel(i18n.KO.SETUP_THRESHOLD_LABEL, slider_card))
         self.slider = QSlider(Qt.Orientation.Horizontal, slider_card)
         self.slider.setRange(0, 100)
-        self.slider.setValue(int(config.CONFIG.default_threshold * 100))
+        # 마지막 사용 값(#14) 우선, 없으면 config 기본값
+        _last_prefs = _prefs.load()
+        self.slider.setValue(int(round(_last_prefs.threshold * 100)))
         self.threshold_label = QLabel(f"{self.slider.value()} %", slider_card)
         self.threshold_label.setStyleSheet("color: #00D4FF; font-weight: 700;")
         self.threshold_label.setFixedWidth(60)
         self.slider.valueChanged.connect(
-            lambda v: self.threshold_label.setText(f"{v} %")
+            lambda v: (self.threshold_label.setText(f"{v} %"),
+                       _prefs.patch(threshold=v / 100.0))
         )
         sl.addWidget(self.slider, stretch=1)
         sl.addWidget(self.threshold_label)
@@ -234,6 +244,15 @@ class SetupPage(QWidget):
 
         mode = "cross" if self.radio_cross.isChecked() else "single"
         threshold = self.slider.value() / 100.0
+        # 마지막 입력 값을 영속화 (#14)
+        _prefs.patch(
+            threshold=threshold,
+            last_ref_root=str(ref_root),
+            last_val_root=str(val_root),
+            last_ref_machine=ref_machine,
+            last_val_machine=val_machine,
+            last_mode=mode,
+        )
         self.start_requested.emit(SetupInput(
             mode=mode,
             ref_root=ref_root,
@@ -276,32 +295,71 @@ class SetupPage(QWidget):
         torch_available = _triplet.is_available()
         active = _registry.get_active()
 
-        # 기본 모드 라디오는 항상 존재
-        rb_basic = QRadioButton(i18n.KO.MODEL_OPTION_BASIC, self._model_card)
+        # 기본 모드 라디오 — 별도로 basic.jsonl 을 집계해 같은 형식으로 표기
+        basic_metrics = _evaluator.aggregate(_registry.BASIC)
+        if basic_metrics.has_enough and basic_metrics.picks > 0:
+            basic_text = i18n.KO.MODEL_OPTION_BASELINE_FMT.format(
+                hit5=int(round(basic_metrics.hit_at_5 * 100)),
+                lo=int(round(basic_metrics.hit_at_5_lo * 100)),
+                hi=int(round(basic_metrics.hit_at_5_hi * 100)),
+                evals=basic_metrics.num_evaluations,
+            )
+        else:
+            basic_text = i18n.KO.MODEL_OPTION_BASIC
+
+        rb_basic = QRadioButton(basic_text, self._model_card)
         rb_basic.setProperty("model_name", _registry.BASIC)
         self._model_group.addButton(rb_basic)
         self._model_radios_layout.addWidget(rb_basic)
+
+        baseline_hit5 = (basic_metrics.hit_at_5
+                         if basic_metrics.has_enough else None)
 
         # 학습 모델 목록
         for info in _registry.list_models():
             num_evals = info.num_evaluations
             num_pairs = info.num_train_pairs
-            if info.accuracy_pct is not None:
+            metrics_dict = info.meta
+            hit5 = None
+            if num_evals >= _evaluator.MIN_EVALS_FOR_LABEL and metrics_dict.get("hit_at_5") is not None:
+                hit5 = int(round(float(metrics_dict["hit_at_5"]) * 100))
+            elif info.accuracy_pct is not None:
                 hit5 = info.accuracy_pct
-            elif info.meta.get("hit_at_5") is not None and num_evals >= _evaluator.MIN_EVALS_FOR_LABEL:
-                hit5 = int(round(float(info.meta["hit_at_5"]) * 100))
-            else:
-                hit5 = None
 
             if hit5 is None:
                 text = i18n.KO.MODEL_OPTION_NO_ACC_FMT.format(
                     name=info.name, pairs=num_pairs,
                 )
             else:
+                lo = int(round(float(metrics_dict.get("hit_at_5_lo", 0.0)) * 100))
+                hi = int(round(float(metrics_dict.get("hit_at_5_hi", 0.0)) * 100))
                 text = i18n.KO.MODEL_OPTION_FMT.format(
                     name=info.name, pairs=num_pairs,
-                    hit5=hit5, evals=num_evals,
+                    hit5=hit5, lo=lo, hi=hi, evals=num_evals,
                 )
+                # 기본 모드 대비 델타 (#6)
+                if baseline_hit5 is not None:
+                    delta = round((hit5 / 100.0 - baseline_hit5) * 100)
+                    sign = "+" if delta >= 0 else ""
+                    text += i18n.KO.MODEL_DELTA_FMT.format(
+                        sign=sign, delta=int(delta),
+                    )
+
+                # 최약 슬롯 (#7)
+                per_slot = metrics_dict.get("per_slot") or {}
+                weakest = None
+                for s, v in per_slot.items():
+                    p = int(v.get("picks", 0)) if isinstance(v, dict) else 0
+                    h = float(v.get("hit_at_5", 0.0)) if isinstance(v, dict) else 0.0
+                    if p >= 3 and (weakest is None or h < weakest[1]):
+                        weakest = (s, h, p)
+                if weakest is not None:
+                    text += "\n      " + i18n.KO.MODEL_WEAKEST_SLOT_FMT.format(
+                        slot=weakest[0],
+                        hit5=int(round(weakest[1] * 100)),
+                        picks=weakest[2],
+                    )
+
             rb = QRadioButton(text, self._model_card)
             rb.setProperty("model_name", info.name)
             self._model_group.addButton(rb)
@@ -382,11 +440,11 @@ class SetupPage(QWidget):
             )
         )
         self._train_worker.signals.epoch_progress.connect(
-            lambda e, t, loss: self._loading.set_progress(
+            lambda e, t, loss: (self._loading.set_progress(
                 e, t, i18n.KO.LOAD_TRAIN_FMT.format(
                     epoch=e, total=t, loss=float(loss),
                 ),
-            )
+            ), self._loading.push_sparkline(float(loss)))
         )
         self._train_worker.signals.finished.connect(self._on_train_finished)
         self._train_worker.signals.failed.connect(self._on_train_failed)
@@ -421,6 +479,64 @@ class SetupPage(QWidget):
                 self, i18n.KO.APP_TITLE,
                 i18n.KO.ACC_REFRESH_DONE_FMT.format(renamed=renamed),
             )
+        self.refresh_models()
+
+    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    def stop_training(self) -> None:
+        """학습 워커 안전 종료 (창 닫힘/세션 종료 시 호출)."""
+        if self._train_worker is not None and self._train_worker.isRunning():
+            self._train_worker.stop()
+            self._train_worker.wait(2000)
+
+    # ------------------------------------------------------------------
+    def _on_export_model(self) -> None:
+        active = _registry.get_active()
+        if active == _registry.BASIC:
+            return
+        dst, _ = QFileDialog.getSaveFileName(
+            self, i18n.KO.EXPORT_DIALOG_TITLE, f"{active}.zip",
+            "AOI Model (*.zip)",
+        )
+        if not dst:
+            return
+        try:
+            out = _registry.export_model(active, Path(dst))
+        except Exception as exc:
+            QMessageBox.warning(
+                self, i18n.KO.APP_TITLE,
+                i18n.KO.EXPORT_FAIL_FMT.format(error=str(exc)),
+            )
+            return
+        QMessageBox.information(
+            self, i18n.KO.APP_TITLE,
+            i18n.KO.EXPORT_DONE_FMT.format(path=str(out)),
+        )
+
+    def _on_import_model(self) -> None:
+        src, _ = QFileDialog.getOpenFileName(
+            self, i18n.KO.IMPORT_DIALOG_TITLE, "",
+            "AOI Model (*.zip)",
+        )
+        if not src:
+            return
+        try:
+            name = _registry.import_model(Path(src))
+        except Exception as exc:
+            QMessageBox.warning(
+                self, i18n.KO.APP_TITLE,
+                i18n.KO.IMPORT_FAIL_FMT.format(error=str(exc)),
+            )
+            return
+        try:
+            from ...learning import embedder as _emb
+            _emb.invalidate_caches()
+        except Exception:
+            pass
+        QMessageBox.information(
+            self, i18n.KO.APP_TITLE,
+            i18n.KO.IMPORT_DONE_FMT.format(name=name),
+        )
         self.refresh_models()
 
     # ------------------------------------------------------------------

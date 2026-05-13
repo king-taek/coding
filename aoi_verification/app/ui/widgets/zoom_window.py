@@ -247,8 +247,12 @@ class ZoomWindow(QDialog):
             self._btn_b = NeonButton(i18n.KO.ZOOM_BTN_TO_CENTER, role="warn")
             self._btn_a.clicked.connect(lambda: self._emit("verify"))
             self._btn_b.clicked.connect(lambda: self._emit("recenter"))
+        elif self._source == SOURCE_CANDIDATES:
+            # Stage 2 의 +N 후보 — 단일 선택으로 매칭 확정 가능 (#2)
+            self._btn_a = NeonButton(i18n.KO.ZOOM_BTN_PICK_MATCH, role="primary")
+            self._btn_a.clicked.connect(lambda: self._emit("pick"))
+            self._btn_b = None  # type: ignore[assignment]
         else:
-            # candidates — 자동 진행 중인 큐 안의 사진이므로 별도 액션 없음
             self._btn_a = self._btn_b = None  # type: ignore[assignment]
 
         if self._btn_a is not None:

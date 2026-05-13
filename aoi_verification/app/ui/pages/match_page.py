@@ -20,6 +20,7 @@ from ... import config, i18n
 from ...models.result import MatchResult
 from ...models.slot import ImageItem, Slot
 from ...utils import image_io
+from ...utils import prefs as _prefs
 from ...workers.matcher import Candidate, MatcherWorker
 from ..widgets.loading_overlay import LoadingOverlay
 from ..widgets.neon_button import NeonButton
@@ -35,7 +36,10 @@ from ..widgets.zoom_window import (ZoomWindow, SOURCE_TARGET, SOURCE_CANDIDATES)
 class Stage2State:
     queue: list[ImageItem]                        # 매칭해야 할 기준 사진 큐
     matches: list[MatchResult] = field(default_factory=list)
+    # ‘잠시 보류’ — Skip 재시도 대상
     skipped: dict[str, list[ImageItem]] = field(default_factory=lambda: defaultdict(list))
+    # ‘매칭 없음 확정’ — 미탐으로 영구 기록 (재시도 대상 아님)
+    no_match: dict[str, list[ImageItem]] = field(default_factory=lambda: defaultdict(list))
     # slot → 매칭에 사용할 검증 후보 풀
     val_pool: dict[str, list[ImageItem]] = field(default_factory=dict)
 
@@ -137,7 +141,12 @@ class MatchPage(QWidget):
         self.size_slider = QSlider(Qt.Orientation.Horizontal, center)
         self.size_slider.setRange(ScalableImage.MIN_LONG_EDGE,
                                    ScalableImage.MAX_LONG_EDGE)
-        self.size_slider.setValue(ScalableImage.DEFAULT_LONG_EDGE)
+        _p = _prefs.load()
+        self.size_slider.setValue(
+            max(ScalableImage.MIN_LONG_EDGE,
+                min(ScalableImage.MAX_LONG_EDGE,
+                    int(_p.image_long_edge_match)))
+        )
         self.size_slider.setSingleStep(20)
         self.size_slider.setPageStep(80)
         self.size_value = QLabel(f"{self.size_slider.value()} px", center)
@@ -171,8 +180,12 @@ class MatchPage(QWidget):
         self.skip_btn = NeonButton(i18n.KO.BTN_SKIP, role="warn")
         self.skip_btn.setToolTip(i18n.KO.SHORTCUT_STAGE2_TOOLTIP)
         self.skip_btn.clicked.connect(self._skip_current)
+        self.no_match_btn = NeonButton(i18n.KO.BTN_NO_MATCH, role="danger")
+        self.no_match_btn.setToolTip(i18n.KO.SHORTCUT_STAGE2_TOOLTIP)
+        self.no_match_btn.clicked.connect(self._confirm_no_match)
         bar.addStretch(1)
         bar.addWidget(self.skip_btn)
+        bar.addWidget(self.no_match_btn)
         cl.addLayout(bar)
 
         center.setMinimumWidth(540)
@@ -203,6 +216,7 @@ class MatchPage(QWidget):
         root.addLayout(row, stretch=1)
 
         QShortcut(QKeySequence("S"), self, activated=self._skip_current)
+        QShortcut(QKeySequence("N"), self, activated=self._confirm_no_match)
 
     # ------------------------------------------------------------------
     # Public API
@@ -311,6 +325,7 @@ class MatchPage(QWidget):
     def _on_size_changed(self, value: int) -> None:
         self.size_value.setText(f"{value} px")
         self.center_img.set_target_size(value)
+        _prefs.patch(image_long_edge_match=int(value))
 
     def _clear_right_grid(self) -> None:
         while self._right_grid.count():
@@ -353,8 +368,7 @@ class MatchPage(QWidget):
         )
         self._state.matches.append(match)
         self._state.queue.pop(0)
-        # 평가 로그 — 어떤 후보를 몇 순위에서 골랐는지 기록 ----------
-        self._log_decision(picked_item=val)
+        self._log_decision(decision="pick", picked_item=val)
         self.match_confirmed.emit(match)
         self.skipped_changed.emit()
         self._advance()
@@ -364,26 +378,53 @@ class MatchPage(QWidget):
             return
         items = [c.item for c in self._candidates]
         win = ZoomWindow(self._current.slot, items, SOURCE_CANDIDATES, parent=self)
-        # 후보 윈도우는 액션이 없고 단순 검토용 (선택해 picked 처리하고 싶은 경우)
-        # 더블 클릭으로 풀스크린만 가능
+        win.action_requested.connect(self._on_zoom_candidates_action)
         win.exec()
+
+    def _on_zoom_candidates_action(self, action: str, items: list[ImageItem]) -> None:
+        """줌-뷰에서 ‘이 사진을 매칭으로 확정’ 을 누른 경우 → _on_pick 흐름 재사용."""
+        if action != "pick" or not items:
+            return
+        picked = items[0]
+        # 후보 리스트에서 해당 item 의 ThumbEntry 를 만들어 _on_pick 으로 위임
+        score = 0.0
+        for c in self._candidates:
+            if c.item.path == picked.path:
+                score = float(c.score)
+                break
+        self._on_pick(ThumbEntry(item=picked, extra={"score": score}))
 
     # ------------------------------------------------------------------
     def _skip_current(self) -> None:
+        """잠시 보류 — Skip 재시도 풀로 들어감. 미탐 시트엔 들어가지 않음."""
         if self._state is None or self._current is None:
             return
         item = self._current
         self._state.queue.pop(0)
         self._state.skipped[item.slot].append(item)
-        # 평가 로그 — Skip 도 “모델 추천이 받아들여지지 않음” 으로 기록
-        self._log_decision(picked_item=None)
+        self._log_decision(decision="defer")
+        self._refresh_skipped_panel()
+        self.skipped_changed.emit()
+        self._advance()
+
+    def _confirm_no_match(self) -> None:
+        """매칭 없음 확정 — 미탐 시트에 들어가고, Skip 재시도 대상이 아님."""
+        if self._state is None or self._current is None:
+            return
+        item = self._current
+        self._state.queue.pop(0)
+        self._state.no_match[item.slot].append(item)
+        self._log_decision(decision="none")
         self._refresh_skipped_panel()
         self.skipped_changed.emit()
         self._advance()
 
     # ------------------------------------------------------------------
-    def _log_decision(self, *, picked_item) -> None:
-        """Evaluator 로 한 결정 로그 append (실패는 무시)."""
+    def _log_decision(self, *, decision: str, picked_item=None) -> None:
+        """Evaluator 로 한 결정 로그 append (실패는 무시).
+
+        decision: "pick" | "defer" | "none"
+        """
         if self._state is None or self._current is None:
             return
         try:
@@ -391,18 +432,16 @@ class MatchPage(QWidget):
         except Exception:
             return
         candidates = [(c.item.path, float(c.score)) for c in self._candidates]
-        if picked_item is None:
-            rank = None
-            picked_path = None
-            skipped = True
-        else:
-            skipped = False
+        if decision == "pick" and picked_item is not None:
             picked_path = picked_item.path
             rank = None
             for i, (p, _) in enumerate(candidates):
                 if p == picked_item.path:
                     rank = i
                     break
+        else:
+            picked_path = None
+            rank = None
         _ev.log_decision(
             model_name=self._model_name or "basic",
             session_id=self._session_id or "",
@@ -412,7 +451,7 @@ class MatchPage(QWidget):
             candidates=candidates,
             picked_path=picked_path,
             picked_rank=rank,
-            skipped=skipped,
+            decision=decision,
         )
 
     def _refresh_skipped_panel(self) -> None:
@@ -427,16 +466,40 @@ class MatchPage(QWidget):
             self.retry_btn.setEnabled(False)
             return
         has_any = False
-        for slot in sorted(self._state.skipped.keys()):
-            items = self._state.skipped[slot]
-            if not items:
-                continue
-            has_any = True
-            sec = SlotSection(slot, columns=3, select_mode=False,
-                              parent=self._left_host)
-            sec.set_entries([ThumbEntry(item=it) for it in items])
-            self._left_layout.addWidget(sec)
+
+        def _add_header(text: str) -> None:
+            from PyQt6.QtWidgets import QLabel
+            lab = QLabel(text, self._left_host)
+            lab.setStyleSheet(
+                "color: #7FB3D5; font-weight: 700; padding: 6px 2px;"
+            )
+            self._left_layout.addWidget(lab)
+
+        # ‘잠시 보류’ 섹션 ------------------------------------------------
+        defer_slots = [s for s, v in self._state.skipped.items() if v]
+        if defer_slots:
+            _add_header(i18n.KO.BTN_SKIP)
+            for slot in sorted(defer_slots):
+                items = self._state.skipped[slot]
+                has_any = True
+                sec = SlotSection(slot, columns=3, select_mode=False,
+                                  parent=self._left_host)
+                sec.set_entries([ThumbEntry(item=it) for it in items])
+                self._left_layout.addWidget(sec)
+
+        # ‘매칭 없음 확정’ 섹션 -------------------------------------------
+        none_slots = [s for s, v in self._state.no_match.items() if v]
+        if none_slots:
+            _add_header(i18n.KO.PANEL_NO_MATCH_LIST)
+            for slot in sorted(none_slots):
+                items = self._state.no_match[slot]
+                sec = SlotSection(slot, columns=3, select_mode=False,
+                                  parent=self._left_host)
+                sec.set_entries([ThumbEntry(item=it) for it in items])
+                self._left_layout.addWidget(sec)
+
         self._left_layout.addStretch(1)
+        # ‘보류 재시도’ 는 defer 만 활성 — none 은 영구 미탐
         self.retry_btn.setEnabled(has_any)
 
     def _retry_skipped(self) -> None:

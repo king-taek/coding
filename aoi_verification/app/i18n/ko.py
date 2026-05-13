@@ -19,8 +19,9 @@ BTN_BROWSE = "폴더 선택…"
 BTN_VERIFY = "검증"
 BTN_EXCLUDE = "제외"
 BTN_UNDO = "되돌리기"
-BTN_SKIP = "건너뛰기"
-BTN_RETRY_SKIP = "Skip 재시도"
+BTN_SKIP = "잠시 보류"
+BTN_NO_MATCH = "매칭 없음 확정"
+BTN_RETRY_SKIP = "보류 재시도"
 BTN_SELECT_MODE = "선택 모드"
 BTN_CANCEL_SELECT_MODE = "선택 해제"
 BTN_REMOVE_FROM_TARGET = "검증 대상에서 제거"
@@ -32,6 +33,16 @@ BTN_BATCH_VERIFY = "일괄 검증으로 이동"
 BTN_EXPORT_EXCEL = "엑셀로 저장"
 BTN_OPEN_RESULT = "결과 폴더 열기"
 BTN_NEW_SESSION = "새 검증 시작"
+BTN_REVIEW_MATCHES = "매칭 결과 검토"
+
+# ── 매칭 결과 검토 (#18) ───────────────────────────────────────────────────
+REVIEW_DIALOG_TITLE = "매칭 결과 검토"
+REVIEW_HINT = (
+    "잘못 매칭된 행이 있으면 [삭제] 로 결과에서 제외할 수 있습니다.\n"
+    "삭제된 항목은 엑셀 저장 시 결과에 포함되지 않습니다."
+)
+REVIEW_BTN_DELETE = "삭제"
+REVIEW_REMOVED_FMT = "{n} 개의 매칭이 결과에서 제외되었습니다."
 
 # ── 셋업 페이지 ────────────────────────────────────────────────────────────
 SETUP_TITLE = "AOI 검증 — 시작 설정"
@@ -71,12 +82,24 @@ ZOOM_TITLE_CANDIDATES = "검증 후보 사진들 — {slot}"
 ZOOM_BTN_EXCLUDE = "검증에서 제외"
 ZOOM_BTN_TO_TARGET = "검증 대상으로 변경"
 ZOOM_BTN_TO_CENTER = "재결정으로 복귀"
+ZOOM_BTN_PICK_MATCH = "이 사진을 매칭으로 확정"
+
+# ── 동일 사진 그룹 (#15) ───────────────────────────────────────────────────
+GROUP_BTN_VIEW_FMT = "동일 그룹 보기 ({n}장)"
+GROUP_DIALOG_TITLE_FMT = "동일 사진 그룹 — {slot}  ·  {n} 장"
+GROUP_DIALOG_HINT = (
+    "같은 슬롯 안에서 거의 동일한 사진이 자동으로 묶였습니다.\n"
+    "사용자가 대표 사진에 내린 결정(검증/제외) 이 그룹 전체에 똑같이 적용됩니다.\n"
+    "따로 결정하고 싶은 사진이 있으면 ‘그룹에서 분리’ 를 누르세요."
+)
+GROUP_BTN_DETACH = "그룹에서 분리"
 
 # ── 단축키 ────────────────────────────────────────────────────────────────
 SHORTCUT_TOOLTIP = (
     "단축키:  ← 또는 1 = 검증   /   → 또는 2 = 제외   /   Z = 되돌리기"
 )
-SHORTCUT_STAGE2_TOOLTIP = "단축키:  S = 건너뛰기"
+SHORTCUT_STAGE2_TOOLTIP = "단축키:  S = 잠시 보류    N = 매칭 없음 확정"
+PANEL_NO_MATCH_LIST = "매칭 없음 확정"
 
 # ── 사진 크기 슬라이더 ────────────────────────────────────────────────────
 IMAGE_SIZE_LABEL = "사진 크기"
@@ -122,15 +145,28 @@ CONSENT_FAIL_FMT = "학습 데이터 저장 실패: {error}"
 MODEL_CARD_TITLE = "학습 모델"
 MODEL_OPTION_BASIC = "기본 탐지 모드 (학습 모델 미사용)"
 MODEL_OPTION_FMT = (
-    "{name}  ·  {pairs}쌍 학습  ·  Hit@5 {hit5}%  ·  {evals}회 평가"
+    "{name}  ·  {pairs}쌍 학습  ·  Hit@5 {hit5}% [{lo}~{hi}]  ·  {evals}회"
 )
 MODEL_OPTION_NO_ACC_FMT = "{name}  ·  {pairs}쌍 학습  ·  평가 데이터 부족"
+MODEL_OPTION_BASELINE_FMT = (
+    "기본 탐지 모드  ·  Hit@5 {hit5}% [{lo}~{hi}]  ·  {evals}회 평가"
+)
+MODEL_DELTA_FMT = "  (vs 기본 모드: {sign}{delta}%p)"
+MODEL_WEAKEST_SLOT_FMT = "최약 슬롯: {slot}  ·  Hit@5 {hit5}%  ·  {picks}회"
 MODEL_DATA_COUNT_FMT = "수집된 학습 데이터: {n} 쌍"
 MODEL_NO_TORCH = "torch 가 설치되어 있지 않아 학습 기능을 사용할 수 없습니다."
 
 BTN_RETRAIN = "모델 재학습 시작"
 BTN_REFRESH_ACC = "정확도 갱신"
 BTN_DELETE_MODEL = "모델 삭제"
+BTN_EXPORT_MODEL = "내보내기"
+BTN_IMPORT_MODEL = "가져오기"
+EXPORT_DIALOG_TITLE = "모델 내보내기"
+IMPORT_DIALOG_TITLE = "모델 가져오기"
+EXPORT_DONE_FMT = "모델을 내보냈습니다:\n{path}"
+IMPORT_DONE_FMT = "모델 ‘{name}’ 을 가져왔습니다."
+EXPORT_FAIL_FMT = "내보내기 실패: {error}"
+IMPORT_FAIL_FMT = "가져오기 실패: {error}"
 
 LOAD_BACKBONE_FMT = "백본 임베딩 추출 중… {done} / {total}"
 LOAD_TRAIN_FMT = "헤드 학습 중… 에폭 {epoch} / {total}  ·  loss {loss:.3f}"
@@ -179,9 +215,21 @@ WARN_NO_SLOTS = "두 폴더에 공통된 Slot 이 존재하지 않습니다."
 WARN_NO_IMAGES = "선택된 Slot 에 이미지가 없습니다."
 WARN_SLOT_MISMATCH_TITLE = "Slot 불일치"
 WARN_SLOT_MISMATCH_FMT = (
-    "한쪽에만 존재하는 Slot 이 있습니다 — 매칭에서 제외됩니다.\n\n"
+    "한쪽에만 존재하는 Slot 이 있습니다.\n"
+    "사용자가 직접 슬롯 매핑을 정해주실 수 있습니다.\n\n"
     "기준 전용: {ref_only}\n검증 전용: {val_only}"
 )
+SLOT_MAP_TITLE = "Slot 수동 매핑"
+SLOT_MAP_HINT = (
+    "한쪽에만 존재하는 슬롯을 사용자가 직접 짝지어 줄 수 있습니다.\n"
+    "예) 기준 ‘Slot_01’ ↔ 검증 ‘S01’ 처럼 명명 규칙이 다를 때 사용하세요.\n"
+    "짝지어지지 않은 슬롯은 매칭에서 제외됩니다."
+)
+SLOT_MAP_REF_LABEL = "기준"
+SLOT_MAP_VAL_LABEL = "검증"
+SLOT_MAP_ADD = "추가"
+SLOT_MAP_REMOVE = "선택 해제"
+SLOT_MAP_OPEN = "매핑 다이얼로그 열기"
 INFO_RESUME_TITLE = "이전 검증 이어하기"
 INFO_RESUME_BODY = "진행 중인 검증이 있습니다. 이어서 하시겠습니까?"
 INFO_NEW_SESSION = "새로 시작"

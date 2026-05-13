@@ -22,8 +22,11 @@ from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QScrollArea,
                               QSizePolicy, QSlider, QVBoxLayout, QWidget)
 
 from ... import i18n
+from ...models.group import GroupingResult, PhotoGroup
 from ...models.slot import ImageItem
 from ...utils import image_io
+from ...utils import prefs as _prefs
+from ..widgets.group_dialog import GroupDialog
 from ..widgets.neon_button import NeonButton
 from ..widgets.neon_card import NeonCard
 from ..widgets.scalable_image import ScalableImage
@@ -190,6 +193,7 @@ class SelectPage(QWidget):
         self._current: Optional[ImageItem] = None
         self._phase_label_text = ""
         self._phase_b_already_matched: dict[str, list[ImageItem]] = {}
+        self._groups: GroupingResult | None = None
         self._build()
 
     # ------------------------------------------------------------------
@@ -256,7 +260,13 @@ class SelectPage(QWidget):
         self.size_slider = QSlider(Qt.Orientation.Horizontal, center_card)
         self.size_slider.setRange(ScalableImage.MIN_LONG_EDGE,
                                    ScalableImage.MAX_LONG_EDGE)
-        self.size_slider.setValue(ScalableImage.DEFAULT_LONG_EDGE)
+        # 마지막 사용 값(#13) 복원
+        _p = _prefs.load()
+        self.size_slider.setValue(
+            max(ScalableImage.MIN_LONG_EDGE,
+                min(ScalableImage.MAX_LONG_EDGE,
+                    int(_p.image_long_edge_select)))
+        )
         self.size_slider.setSingleStep(20)
         self.size_slider.setPageStep(80)
         self.size_value = QLabel(f"{self.size_slider.value()} px", center_card)
@@ -292,6 +302,10 @@ class SelectPage(QWidget):
         self.btn_verify = NeonButton("✓  " + i18n.KO.BTN_VERIFY, role="primary")
         self.btn_exclude = NeonButton("✕  " + i18n.KO.BTN_EXCLUDE, role="danger")
         self.btn_undo = NeonButton(i18n.KO.BTN_UNDO, role="ghost")
+        # 그룹 보기 — 현재 사진이 그룹 대표일 때만 활성 (#15)
+        self.btn_group = NeonButton("", role="warn")
+        self.btn_group.hide()
+        self.btn_group.clicked.connect(self._open_group_dialog)
         self.btn_verify.setToolTip(i18n.KO.SHORTCUT_TOOLTIP)
         self.btn_exclude.setToolTip(i18n.KO.SHORTCUT_TOOLTIP)
         self.btn_undo.setToolTip(i18n.KO.SHORTCUT_TOOLTIP)
@@ -299,6 +313,7 @@ class SelectPage(QWidget):
         self.btn_exclude.clicked.connect(lambda: self._decide("exclude"))
         self.btn_undo.clicked.connect(self._undo)
         btn_row.addWidget(self.btn_undo)
+        btn_row.addWidget(self.btn_group)
         btn_row.addStretch(1)
         btn_row.addWidget(self.btn_verify)
         btn_row.addWidget(self.btn_exclude)
@@ -358,7 +373,8 @@ class SelectPage(QWidget):
                    excluded: dict[str, list[ImageItem]] | None = None,
                    history: list[tuple[str, ImageItem]] | None = None,
                    phase_label: str = "",
-                   phase_b_already_matched: dict[str, list[ImageItem]] | None = None
+                   phase_b_already_matched: dict[str, list[ImageItem]] | None = None,
+                   groups: GroupingResult | None = None,
                    ) -> None:
         self._state = Stage1State(
             queue=list(queue),
@@ -369,6 +385,7 @@ class SelectPage(QWidget):
         self._phase_label_text = phase_label
         self.phase_label.setText(phase_label)
         self._phase_b_already_matched = phase_b_already_matched or {}
+        self._groups = groups
         self._refresh_all()
         self._advance_to_next()
 
@@ -435,10 +452,20 @@ class SelectPage(QWidget):
         self.center_img.set_image(item.path)
         # 파일명은 표시하지 않고 Slot 명만 노출한다 (요청 사항).
         self.slot_label.setText(i18n.KO.SLOT_LABEL_FMT.format(slot=item.slot))
+        # 현재 사진이 그룹 대표라면 ‘그룹 보기’ 버튼 활성 (#15)
+        g = self._groups.group_for(item) if self._groups else None
+        if g is not None and item.key == g.rep.key and g.siblings:
+            self.btn_group.setText(
+                i18n.KO.GROUP_BTN_VIEW_FMT.format(n=g.size())
+            )
+            self.btn_group.show()
+        else:
+            self.btn_group.hide()
 
     def _on_size_changed(self, value: int) -> None:
         self.size_value.setText(f"{value} px")
         self.center_img.set_target_size(value)
+        _prefs.patch(image_long_edge_select=int(value))
 
     # ------------------------------------------------------------------
     # Decisions
@@ -452,30 +479,83 @@ class SelectPage(QWidget):
             self._state.queue.remove(item)
         except ValueError:
             pass
-        if action == "verify":
-            self._state.targets[item.slot].append(item)
-        else:
-            self._state.excluded[item.slot].append(item)
+        target_pool = self._state.targets if action == "verify" else self._state.excluded
+        target_pool[item.slot].append(item)
         self._state.history.append((action, item))
         self.decision_made.emit(action, item)
+
+        # 그룹 대표인 경우 sibling 들에도 동일한 결정을 자동 적용 (#15)
+        applied_siblings: list[ImageItem] = []
+        if self._groups is not None:
+            g = self._groups.group_for(item)
+            if g is not None and item.key == g.rep.key and g.siblings:
+                for sib in list(g.siblings):
+                    target_pool[sib.slot].append(sib)
+                    applied_siblings.append(sib)
+                    self.decision_made.emit(action, sib)
+                # 그룹 자체 해체
+                self._groups.remove_from_group(item)
+
+        # undo 단순화: sibling 일괄 결정은 한 번에 되돌릴 수 있도록 별도 마커
+        if applied_siblings:
+            self._state.history.append(("_siblings", applied_siblings))  # type: ignore[arg-type]
+
         self.state_changed.emit()
         self._advance_to_next()
+
+    def _open_group_dialog(self) -> None:
+        if self._groups is None or self._current is None:
+            return
+        g = self._groups.group_for(self._current)
+        if g is None or self._current.key != g.rep.key:
+            return
+        dlg = GroupDialog(g, parent=self)
+        dlg.exec()
+        # 다이얼로그에서 분리된 항목은 ‘대표 바로 뒤’ 의 큐 위치에 끼워넣어
+        # 사용자가 곧장 그것들에 대한 결정을 이어할 수 있도록.
+        removed = dlg.removed_items
+        if not removed or self._state is None:
+            return
+        try:
+            pos = self._state.queue.index(self._current) + 1
+        except ValueError:
+            pos = 1
+        for r in removed:
+            self._state.queue.insert(pos, r)
+            pos += 1
+        # 화면도 갱신 (그룹 사이즈 표시가 바뀌었을 수 있음)
+        self._show_center(self._current)
+        self._refresh_all()
+        self.state_changed.emit()
 
     def _undo(self) -> None:
         if self._state is None or not self._state.history:
             return
         action, item = self._state.history.pop()
-        if action == "verify":
-            try:
-                self._state.targets[item.slot].remove(item)
-            except ValueError:
-                pass
-        else:
-            try:
-                self._state.excluded[item.slot].remove(item)
-            except ValueError:
-                pass
-        # 큐 맨 앞에 되돌려 놓기
+        # 그룹 일괄 결정 마커가 직전에 있으면 sibling 들도 함께 되돌린다.
+        if action == "_siblings":
+            # _siblings 마커는 두 번째 요소가 list[ImageItem]
+            siblings: list[ImageItem] = item  # type: ignore[assignment]
+            # 직전 action 한 번 더 pop
+            if self._state.history:
+                action, item = self._state.history.pop()
+            else:
+                action, item = ("verify", None)  # type: ignore[assignment]
+            if item is None:
+                return
+            for s in siblings:
+                pool = self._state.targets if action == "verify" else self._state.excluded
+                try:
+                    pool[s.slot].remove(s)
+                except ValueError:
+                    pass
+                self._state.queue.insert(0, s)
+        # 본 항목 되돌리기
+        pool = self._state.targets if action == "verify" else self._state.excluded
+        try:
+            pool[item.slot].remove(item)
+        except ValueError:
+            pass
         self._state.queue.insert(0, item)
         self.state_changed.emit()
         self._advance_to_next()

@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import QPropertyAnimation, QRect, QSize, Qt, QTimer
-from PyQt6.QtGui import QColor, QPainter, QPen
+from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import (QLabel, QProgressBar, QVBoxLayout, QWidget)
 
 
@@ -50,6 +50,56 @@ class _SpinnerDot(QWidget):
         super().closeEvent(event)
 
 
+class _Sparkline(QWidget):
+    """학습 loss 추이를 보여주는 작은 라인 그래프 (#16)."""
+
+    def __init__(self, parent=None, width: int = 360, height: int = 48) -> None:
+        super().__init__(parent)
+        self.setFixedSize(width, height)
+        self._values: list[float] = []
+
+    def set_values(self, values: list[float]) -> None:
+        self._values = list(values)
+        self.update()
+
+    def clear(self) -> None:
+        self._values.clear()
+        self.update()
+
+    def paintEvent(self, event):  # noqa: N802
+        if not self._values:
+            return
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        w, h = self.width(), self.height()
+        lo = min(self._values)
+        hi = max(self._values)
+        rng = max(1e-6, hi - lo)
+
+        # 가이드 라인
+        pen_grid = QPen(QColor(31, 42, 63))
+        pen_grid.setWidth(1)
+        p.setPen(pen_grid)
+        p.drawLine(0, h - 1, w, h - 1)
+
+        # 라인
+        path = QPainterPath()
+        n = len(self._values)
+        for i, v in enumerate(self._values):
+            x = int(i / max(1, n - 1) * (w - 4)) + 2
+            y = h - 4 - int((v - lo) / rng * (h - 10))
+            if i == 0:
+                path.moveTo(x, y)
+            else:
+                path.lineTo(x, y)
+        pen = QPen(QColor(0, 212, 255))
+        pen.setWidth(2)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        p.setPen(pen)
+        p.drawPath(path)
+
+
 class LoadingOverlay(QWidget):
     """부모 위젯의 size 를 따라가는 풀-커버 오버레이."""
 
@@ -72,9 +122,13 @@ class LoadingOverlay(QWidget):
         self._progress.setRange(0, 100)
         self._progress.setValue(0)
 
+        self._sparkline = _Sparkline(self)
+        self._sparkline.hide()
+
         v.addWidget(self._spinner, alignment=Qt.AlignmentFlag.AlignCenter)
         v.addWidget(self._label)
         v.addWidget(self._progress, alignment=Qt.AlignmentFlag.AlignCenter)
+        v.addWidget(self._sparkline, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self.hide()
         parent.installEventFilter(self)
@@ -88,6 +142,17 @@ class LoadingOverlay(QWidget):
 
     def hide_overlay(self) -> None:
         self.hide()
+        self._sparkline.hide()
+        self._sparkline.clear()
+
+    def push_sparkline(self, value: float) -> None:
+        """학습 진행 중 매 에폭마다 loss 값을 추가 (#16)."""
+        vals = list(self._sparkline._values) + [float(value)]
+        # 너무 길면 앞쪽 일부만 유지
+        if len(vals) > 64:
+            vals = vals[-64:]
+        self._sparkline.set_values(vals)
+        self._sparkline.show()
 
     def set_progress(self, done: int, total: int, message: str = "") -> None:
         if message:

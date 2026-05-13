@@ -55,6 +55,10 @@ class ResultPage(QWidget):
         self.new_btn.clicked.connect(self.new_session_requested.emit)
         bar.addWidget(self.new_btn)
 
+        self.review_btn = NeonButton(i18n.KO.BTN_REVIEW_MATCHES, role="warn")
+        self.review_btn.clicked.connect(self._on_review)
+        bar.addWidget(self.review_btn)
+
         self.export_btn = NeonButton(i18n.KO.BTN_EXPORT_EXCEL, role="primary")
         self.export_btn.setMinimumWidth(240)
         self.export_btn.setMinimumHeight(46)
@@ -109,6 +113,30 @@ class ResultPage(QWidget):
             )
 
     # ------------------------------------------------------------------
+    def _on_review(self) -> None:
+        if self._result is None:
+            return
+        from ..widgets.matches_review import MatchesReviewDialog
+        dlg = MatchesReviewDialog(self._result.matches, parent=self)
+        dlg.exec()
+        removed = dlg.removed
+        if not removed:
+            return
+        # 결과에서 제외 + 요약 라벨 갱신
+        keys = {(m.slot, m.ref_path.name, m.val_path.name) for m in removed}
+        self._result.matches = [
+            m for m in self._result.matches
+            if (m.slot, m.ref_path.name, m.val_path.name) not in keys
+        ]
+        QMessageBox.information(
+            self, i18n.KO.APP_TITLE,
+            i18n.KO.REVIEW_REMOVED_FMT.format(n=len(removed)),
+        )
+        # 요약을 다시 그린다.
+        self.show_result(self._result,
+                         template_path=self._template_path,
+                         target_path=self._target_path)
+
     def _on_export(self) -> None:
         if self._result is None:
             return

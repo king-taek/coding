@@ -121,6 +121,25 @@ def center_roi_gray(src: Path,
     return np.asarray(gray, dtype=np.uint8)
 
 
+def preprocessed_roi_gray(src: Path,
+                          roi_ratio: Optional[float] = None,
+                          long_edge: Optional[int] = None) -> np.ndarray:
+    """CLAHE + Gaussian blur 까지 적용된 중심 ROI gray (CNN/유사도 공유).
+
+    pHash·SSIM·ORB·CNN 모두가 같은 도메인 전처리 위에 동작하도록 일원화하기
+    위해 만들어진 헬퍼. CV2 가 있으면 CLAHE 를 적용하고, 없으면 단순 ROI gray.
+    """
+    gray = center_roi_gray(src, roi_ratio=roi_ratio, long_edge=long_edge)
+    try:
+        import cv2
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        gray = clahe.apply(gray)
+        gray = cv2.GaussianBlur(gray, (3, 3), 0)
+    except Exception:
+        pass
+    return gray
+
+
 def to_pil_thumb(src: Path) -> Image.Image:
     """캐시된 썸네일을 Pillow Image 로 즉시 로드."""
     return Image.open(str(get_thumb_path(src)))

@@ -15,6 +15,7 @@ from typing import Iterable, Iterator
 
 from ..models.result import MatchResult
 from ..utils import paths
+from ..utils import content_hash as _ch
 
 
 _PAIRS_FILE = "pairs.jsonl"
@@ -30,6 +31,14 @@ class TrainingPair:
     direction: str       # "A→B" | "B→A" | "양방향"
     score: float
     ts: float            # epoch seconds
+    ref_hash: str = ""   # 컨텐츠 해시 (경로 이동 대비)
+    val_hash: str = ""
+    source: str = "session"     # "session" | "evaluation"
+
+    @property
+    def dedup_key(self) -> tuple[str, str, str]:
+        """슬롯 + 양 끝 컨텐츠 해시 — 중복 학습 데이터 제거용."""
+        return (self.slot, self.ref_hash, self.val_hash)
 
     def to_json(self) -> str:
         return json.dumps(
@@ -42,6 +51,9 @@ class TrainingPair:
                 "direction": self.direction,
                 "score": self.score,
                 "ts": self.ts,
+                "ref_hash": self.ref_hash,
+                "val_hash": self.val_hash,
+                "source": self.source,
             },
             ensure_ascii=False,
         )
@@ -57,6 +69,9 @@ class TrainingPair:
             direction=str(d.get("direction", "A→B")),
             score=float(d.get("score", 0.0)),
             ts=float(d.get("ts", 0.0)),
+            ref_hash=str(d.get("ref_hash", "")),
+            val_hash=str(d.get("val_hash", "")),
+            source=str(d.get("source", "session")),
         )
 
 
@@ -77,12 +92,19 @@ class TrainingDataStore:
                        matches: Iterable[MatchResult],
                        *,
                        ref_machine: str,
-                       val_machine: str) -> int:
-        """한 세션의 매칭 쌍을 append. 추가된 줄 수를 반환."""
+                       val_machine: str,
+                       source: str = "session") -> int:
+        """한 세션의 매칭 쌍을 append. 이미 같은 ``dedup_key`` 가 있으면 skip.
+
+        반환 = 실제로 추가된 줄 수.
+        """
+        known = {p.dedup_key for p in self.iter_pairs()}
         rows = 0
         ts = time.time()
         with self._file.open("a", encoding="utf-8") as f:
             for m in matches:
+                rh = _ch.safe_content_hash(m.ref_path) or ""
+                vh = _ch.safe_content_hash(m.val_path) or ""
                 pair = TrainingPair(
                     slot=m.slot,
                     ref_path=str(Path(m.ref_path).resolve()),
@@ -92,9 +114,72 @@ class TrainingDataStore:
                     direction=str(m.direction),
                     score=float(m.score),
                     ts=ts,
+                    ref_hash=rh,
+                    val_hash=vh,
+                    source=source,
                 )
+                if pair.dedup_key in known:
+                    continue
+                known.add(pair.dedup_key)
                 f.write(pair.to_json() + "\n")
                 rows += 1
+        return rows
+
+    def append_evaluation_picks(self) -> int:
+        """``evaluations/*.jsonl`` 의 confirmed pick 항목을 학습 데이터로 통합 (#5).
+
+        해당 모델 평가 로그를 모두 읽어 ``decision == "pick"`` 인 항목을
+        dedup 후 append. 이미 session 으로 들어왔던 쌍은 자동 skip 된다.
+        반환 = 실제로 추가된 줄 수.
+        """
+        eval_dir = paths.evaluations_dir()
+        if not eval_dir.exists():
+            return 0
+
+        known = {p.dedup_key for p in self.iter_pairs()}
+        rows = 0
+        ts = time.time()
+
+        with self._file.open("a", encoding="utf-8") as f:
+            for log in eval_dir.glob("*.jsonl"):
+                model = log.stem
+                for line in log.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        row = json.loads(line)
+                    except Exception:
+                        continue
+                    decision = row.get("decision")
+                    if decision is None:
+                        decision = "defer" if row.get("skipped") else "pick"
+                    if decision != "pick":
+                        continue
+                    ref = row.get("ref_path")
+                    val = row.get("picked_path")
+                    if not (isinstance(ref, str) and isinstance(val, str)):
+                        continue
+                    slot = str(row.get("slot", ""))
+                    rh = _ch.safe_content_hash(ref) or ""
+                    vh = _ch.safe_content_hash(val) or ""
+                    pair = TrainingPair(
+                        slot=slot,
+                        ref_path=str(Path(ref).resolve()),
+                        val_path=str(Path(val).resolve()),
+                        ref_machine="", val_machine="",
+                        direction="A→B",
+                        score=float(0.0),
+                        ts=ts,
+                        ref_hash=rh,
+                        val_hash=vh,
+                        source=f"eval:{model}",
+                    )
+                    if pair.dedup_key in known:
+                        continue
+                    known.add(pair.dedup_key)
+                    f.write(pair.to_json() + "\n")
+                    rows += 1
         return rows
 
     # ------------------------------------------------------------------

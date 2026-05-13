@@ -107,6 +107,18 @@ def evaluations_dir() -> Path:
     return d
 
 
+def models_archive_dir() -> Path:
+    """모델 export/import 용 임시 작업 폴더."""
+    d = cache_root() / "models_archive"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def slot_mapping_path() -> Path:
+    """수동 슬롯 매핑 룰(JSON) 저장 경로 — 사용자 결정을 영속화."""
+    return cache_root() / "slot_mapping.json"
+
+
 # ---------------------------------------------------------------------------
 # 양식.xlsx 위치 찾기 — ‘양식’ 폴더 안의 ‘양식.xlsx’ 를 우선 탐색한다.
 # ---------------------------------------------------------------------------

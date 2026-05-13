@@ -22,21 +22,26 @@ class SessionState:
     ref_machine: str = ""
     val_machine: str = ""
     threshold: float = 0.7
+    session_id: str = ""
 
     # ── Stage 1 진행 상태 ────────────────────────────────────────────────
     stage: str = "setup"                       # setup|stage1|stage2|result
     phase: str = "A"                           # cross 모드에서 "A" / "B"
+    # ImageItem.key → "verify" | "exclude" (Stage 1 의 누적 결정)
     decisions: dict[str, str] = field(default_factory=dict)
-    # decisions key = ImageItem.key, value = "verify"|"exclude"
-    decision_history: list[tuple[str, str]] = field(default_factory=list)
-    # for Undo
+    decision_history: list[list[Any]] = field(default_factory=list)
+    # 직렬화 가능한 형태로 변경: [(action, key), ...]
 
     # ── Stage 2 진행 상태 ────────────────────────────────────────────────
     matches: list[dict[str, Any]] = field(default_factory=list)
-    skipped: list[str] = field(default_factory=list)   # ImageItem.key list
+    skipped: list[str] = field(default_factory=list)        # defer 풀
+    no_match: list[str] = field(default_factory=list)       # 매칭 없음 확정
 
     # ── 교차 검증 ────────────────────────────────────────────────────────
     phase_a_matched_val_keys: list[str] = field(default_factory=list)
+    phase_a_decisions: dict[str, str] = field(default_factory=dict)
+    phase_a_matches: list[dict[str, Any]] = field(default_factory=list)
+    phase_a_no_match: list[str] = field(default_factory=list)
     cross_matches_b: list[dict[str, Any]] = field(default_factory=list)
     cross_skipped_b: list[str] = field(default_factory=list)
 
