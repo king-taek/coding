@@ -215,7 +215,9 @@ class MatchPage(QWidget):
                    matches: list[MatchResult] | None = None,
                    skipped: dict[str, list[ImageItem]] | None = None,
                    phase_label: str = "",
-                   direction: str = "A→B") -> None:
+                   direction: str = "A→B",
+                   session_id: str = "",
+                   model_name: str = "basic") -> None:
         self._state = Stage2State(
             queue=list(queue),
             matches=list(matches or []),
@@ -224,6 +226,8 @@ class MatchPage(QWidget):
         )
         self._threshold = threshold
         self._mode_direction = direction
+        self._session_id = session_id or ""
+        self._model_name = model_name or "basic"
         self.phase_label.setText(phase_label)
         self._refresh_skipped_panel()
         self._advance()
@@ -349,6 +353,8 @@ class MatchPage(QWidget):
         )
         self._state.matches.append(match)
         self._state.queue.pop(0)
+        # 평가 로그 — 어떤 후보를 몇 순위에서 골랐는지 기록 ----------
+        self._log_decision(picked_item=val)
         self.match_confirmed.emit(match)
         self.skipped_changed.emit()
         self._advance()
@@ -369,9 +375,45 @@ class MatchPage(QWidget):
         item = self._current
         self._state.queue.pop(0)
         self._state.skipped[item.slot].append(item)
+        # 평가 로그 — Skip 도 “모델 추천이 받아들여지지 않음” 으로 기록
+        self._log_decision(picked_item=None)
         self._refresh_skipped_panel()
         self.skipped_changed.emit()
         self._advance()
+
+    # ------------------------------------------------------------------
+    def _log_decision(self, *, picked_item) -> None:
+        """Evaluator 로 한 결정 로그 append (실패는 무시)."""
+        if self._state is None or self._current is None:
+            return
+        try:
+            from ...learning import evaluator as _ev
+        except Exception:
+            return
+        candidates = [(c.item.path, float(c.score)) for c in self._candidates]
+        if picked_item is None:
+            rank = None
+            picked_path = None
+            skipped = True
+        else:
+            skipped = False
+            picked_path = picked_item.path
+            rank = None
+            for i, (p, _) in enumerate(candidates):
+                if p == picked_item.path:
+                    rank = i
+                    break
+        _ev.log_decision(
+            model_name=self._model_name or "basic",
+            session_id=self._session_id or "",
+            slot=self._current.slot,
+            ref_path=self._current.path,
+            threshold=self._threshold,
+            candidates=candidates,
+            picked_path=picked_path,
+            picked_rank=rank,
+            skipped=skipped,
+        )
 
     def _refresh_skipped_panel(self) -> None:
         # clear

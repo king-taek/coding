@@ -148,6 +148,41 @@ class ResultPage(QWidget):
             self, i18n.KO.APP_TITLE,
             i18n.KO.SAVE_SUCCESS_FMT.format(path=path),
         )
+        # 저장 알림 닫힌 직후 — 학습 데이터 동의 모달.
+        self._ask_training_consent()
+
+    def _ask_training_consent(self) -> None:
+        """저장 완료 후 ‘학습 자료로 사용?’ 모달을 띄우고 동의 시 누적."""
+        if self._result is None or not self._result.matches:
+            return
+        n = len(self._result.matches)
+        body = i18n.KO.CONSENT_BODY_FMT.format(n=n)
+        r = QMessageBox.question(
+            self, i18n.KO.CONSENT_TITLE, body,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if r != QMessageBox.StandardButton.Yes:
+            return
+
+        from ...learning.dataset import TrainingDataStore
+        try:
+            store = TrainingDataStore()
+            added = store.append_session(
+                self._result.matches,
+                ref_machine=self._result.ref_machine,
+                val_machine=self._result.val_machine,
+            )
+        except Exception as exc:
+            QMessageBox.warning(
+                self, i18n.KO.APP_TITLE,
+                i18n.KO.CONSENT_FAIL_FMT.format(error=str(exc)),
+            )
+            return
+        QMessageBox.information(
+            self, i18n.KO.APP_TITLE,
+            i18n.KO.CONSENT_OK_FMT.format(n=added),
+        )
 
     def _on_export_failed(self, msg: str) -> None:
         self._loading.hide_overlay()

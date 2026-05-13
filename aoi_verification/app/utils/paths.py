@@ -84,6 +84,30 @@ def session_cache_dir() -> Path:
 
 
 # ---------------------------------------------------------------------------
+# 학습 / 모델 / 평가 디렉토리
+# ---------------------------------------------------------------------------
+def training_data_dir() -> Path:
+    """매칭 쌍이 누적되는 폴더 (pairs.jsonl 보관)."""
+    d = cache_root() / "training_data"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def models_dir() -> Path:
+    """학습된 projection_head 가중치 + 메타 JSON 보관 폴더."""
+    d = cache_root() / "models"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def evaluations_dir() -> Path:
+    """모델별 매칭 결정 로그(.jsonl) 보관 폴더."""
+    d = cache_root() / "evaluations"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+# ---------------------------------------------------------------------------
 # 양식.xlsx 위치 찾기 — ‘양식’ 폴더 안의 ‘양식.xlsx’ 를 우선 탐색한다.
 # ---------------------------------------------------------------------------
 def template_path() -> Path:

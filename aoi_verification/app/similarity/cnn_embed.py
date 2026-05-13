@@ -1,60 +1,28 @@
-"""(선택) 사전학습 CNN 임베딩 — torchvision MobileNetV3.
+"""호환용 wrapper — 실제 구현은 ``aoi_verification.app.learning.embedder`` 가 담당.
 
-설치되어 있지 않으면 자동으로 비활성화된다. CONFIG.similarity.use_cnn 가
-True 이고 torch 가 import 가능할 때만 실제로 호출된다.
+- ``compute_embedding(path)`` → 활성 모델이 ``basic`` 이면 ``None`` 반환.
+- ``cosine_similarity`` 는 그대로 위임.
+- torch 미설치 시 graceful degrade (모든 함수가 0/None 반환).
 """
 
 from __future__ import annotations
 
-from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
 import numpy as np
 
-try:  # pragma: no cover — optional
-    import torch
-    from torch import nn
-    from torchvision import models, transforms
-    _HAS_TORCH = True
-except Exception:  # pragma: no cover
-    torch = None  # type: ignore
-    nn = None  # type: ignore
-    models = None  # type: ignore
-    transforms = None  # type: ignore
-    _HAS_TORCH = False
+from ..learning import embedder as _emb
 
 
 def is_available() -> bool:
-    return _HAS_TORCH
+    return _emb.is_available()
 
 
-@lru_cache(maxsize=1)
-def _load_backbone():  # pragma: no cover — heavy
-    weights = models.MobileNet_V3_Small_Weights.IMAGENET1K_V1
-    m = models.mobilenet_v3_small(weights=weights)
-    m.classifier = nn.Identity()
-    m.eval()
-    return m, weights.transforms()
-
-
-def compute_embedding(src: Path) -> Optional[np.ndarray]:  # pragma: no cover
-    if not _HAS_TORCH:
-        return None
-    from PIL import Image
-    img = Image.open(str(src)).convert("RGB")
-    model, tfm = _load_backbone()
-    with torch.no_grad():
-        x = tfm(img).unsqueeze(0)
-        feat = model(x).cpu().numpy().flatten()
-    n = np.linalg.norm(feat) + 1e-9
-    return (feat / n).astype(np.float32)
+def compute_embedding(src: Path) -> Optional[np.ndarray]:
+    return _emb.compute_embedding(Path(src))
 
 
 def cosine_similarity(a: Optional[np.ndarray],
                       b: Optional[np.ndarray]) -> float:
-    if a is None or b is None or a.size == 0 or b.size == 0:
-        return 0.0
-    dot = float(np.dot(a, b))
-    # 둘 다 unit 정규화 되어있다고 가정
-    return max(0.0, min(1.0, (dot + 1.0) / 2.0))
+    return _emb.cosine_similarity(a, b)

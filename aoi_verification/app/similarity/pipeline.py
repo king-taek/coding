@@ -111,8 +111,13 @@ def _preprocess(gray: np.ndarray) -> np.ndarray:
 
 def score(a: Feature, b: Feature,
           weights: Optional[config.SimilarityWeights] = None) -> float:
-    """두 Feature 사이의 최종 가중 평균 유사도 (0.0 ~ 1.0)."""
-    w = (weights or config.CONFIG.similarity).normalized()
+    """두 Feature 사이의 최종 가중 평균 유사도 (0.0 ~ 1.0).
+
+    active 모델이 ``basic`` 이 아니고 torch 가 사용 가능하면 CNN 항이 자동으로
+    활성화된다 (config 가 명시적으로 비활성화한 경우는 그대로 따름).
+    """
+    base = (weights or config.CONFIG.similarity)
+    w = _resolve_weights(base).normalized()
 
     s_phash = _phash.phash_similarity(a.phash, b.phash)
 
@@ -124,7 +129,10 @@ def score(a: Feature, b: Feature,
 
     s_cnn = 0.0
     if w.use_cnn:
-        s_cnn = _cnn.cosine_similarity(a.cnn, b.cnn)
+        # 캐시된 cnn 임베딩이 없으면 (basic 모드에서 만든 캐시) 즉시 계산
+        a_emb = a.cnn if a.cnn is not None else _cnn.compute_embedding(a.path)
+        b_emb = b.cnn if b.cnn is not None else _cnn.compute_embedding(b.path)
+        s_cnn = _cnn.cosine_similarity(a_emb, b_emb)
 
     total = (
         w.phash * s_phash
@@ -133,3 +141,23 @@ def score(a: Feature, b: Feature,
         + (w.cnn * s_cnn if w.use_cnn else 0.0)
     )
     return max(0.0, min(1.0, float(total)))
+
+
+def _resolve_weights(base: config.SimilarityWeights) -> config.SimilarityWeights:
+    """active 모델이 학습 모델이면 use_cnn 을 자동 활성, basic 이면 비활성."""
+    from ..learning import embedder as _emb
+    try:
+        active = _emb.get_active_mode()
+    except Exception:
+        return base
+
+    # config 가 명시적으로 use_cnn=True 라면 사용자 의도를 우선 존중
+    if base.use_cnn:
+        return base
+
+    if active != "basic" and _emb.is_available():
+        return config.SimilarityWeights(
+            phash=base.phash, orb=base.orb, ssim=base.ssim,
+            cnn=base.cnn, use_cnn=True,
+        )
+    return base

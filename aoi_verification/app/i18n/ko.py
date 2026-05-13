@@ -108,6 +108,59 @@ TEMPLATE_NOT_FOUND_BODY = (
 WORKING_FILE_READY_FMT = "결과 파일이 준비되었습니다:\n{path}"
 WORKING_FILE_LABEL = "결과 파일 위치"
 
+# ── 학습 모델 / 동의 / 정확도 ──────────────────────────────────────────────
+CONSENT_TITLE = "학습 데이터 사용 동의"
+CONSENT_BODY_FMT = (
+    "이번 세션의 매칭 쌍 {n} 개를\n"
+    "유사도 모델의 학습 데이터로 추가할까요?\n\n"
+    "(다음 [모델 재학습] 시 반영됩니다.\n"
+    " 매칭되지 않은 사진은 사용하지 않습니다.)"
+)
+CONSENT_OK_FMT = "학습 데이터 {n} 쌍이 추가되었습니다."
+CONSENT_FAIL_FMT = "학습 데이터 저장 실패: {error}"
+
+MODEL_CARD_TITLE = "학습 모델"
+MODEL_OPTION_BASIC = "기본 탐지 모드 (학습 모델 미사용)"
+MODEL_OPTION_FMT = (
+    "{name}  ·  {pairs}쌍 학습  ·  Hit@5 {hit5}%  ·  {evals}회 평가"
+)
+MODEL_OPTION_NO_ACC_FMT = "{name}  ·  {pairs}쌍 학습  ·  평가 데이터 부족"
+MODEL_DATA_COUNT_FMT = "수집된 학습 데이터: {n} 쌍"
+MODEL_NO_TORCH = "torch 가 설치되어 있지 않아 학습 기능을 사용할 수 없습니다."
+
+BTN_RETRAIN = "모델 재학습 시작"
+BTN_REFRESH_ACC = "정확도 갱신"
+BTN_DELETE_MODEL = "모델 삭제"
+
+LOAD_BACKBONE_FMT = "백본 임베딩 추출 중… {done} / {total}"
+LOAD_TRAIN_FMT = "헤드 학습 중… 에폭 {epoch} / {total}  ·  loss {loss:.3f}"
+
+TRAIN_DONE_FMT = "모델 ‘{name}’ 학습 완료. 다음 검증부터 적용됩니다."
+TRAIN_FAIL_FMT = "학습 실패: {error}"
+TRAIN_NEED_MORE_DATA = (
+    "학습 데이터가 부족합니다. 매칭 쌍을 더 모은 뒤 다시 시도해 주세요."
+)
+TRAIN_CONFIRM_TITLE = "모델 재학습"
+TRAIN_CONFIRM_BODY_FMT = (
+    "현재 수집된 {n} 쌍의 데이터로 새 모델을 학습합니다.\n"
+    "기존 모델은 그대로 유지되고, 새 모델이 생성됩니다.\n"
+    "계속할까요?"
+)
+
+DELETE_CONFIRM_TITLE = "모델 삭제"
+DELETE_CONFIRM_BODY_FMT = (
+    "‘{name}’ 모델을 삭제하시겠습니까?\n"
+    "가중치 파일, 메타 정보, 평가 로그가 모두 제거됩니다."
+)
+
+ACC_REFRESH_NO_CHANGE = "갱신할 모델이 없거나, 평가 데이터가 부족합니다."
+ACC_REFRESH_DONE_FMT = "정확도 갱신 완료. {renamed} 개의 모델 파일이 변경되었습니다."
+
+MODEL_TOOLTIP = (
+    "정확도 = 모델 추천 순위와 사용자가 실제 선택한 후보의 일치도입니다.\n"
+    "같은 슬롯에 중복 사진이 많을 경우 절대값보다는 모델 간 비교용으로 보세요."
+)
+
 # ── 로딩/진행 ──────────────────────────────────────────────────────────────
 LOAD_THUMBNAIL_FMT = "썸네일 생성 중… {done} / {total}"
 LOAD_FEATURE_FMT = "검증 장비 특징 추출 중… {done} / {total}"

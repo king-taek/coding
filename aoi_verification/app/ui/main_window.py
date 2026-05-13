@@ -97,6 +97,7 @@ class MainWindow(QMainWindow):
         self._matched_val_keys_in_a: set[str] = set()
         self._working_xlsx: Optional[Path] = None
         self._template_used: Optional[Path] = None
+        self._session_id: str = ""
 
         # 이어하기 ------------------------------------------------------
         QTimer.singleShot(50, self._maybe_resume)
@@ -105,6 +106,9 @@ class MainWindow(QMainWindow):
     # Entry / resume
     # ==================================================================
     def _maybe_resume(self) -> None:
+        # 셋업 진입 시 항상 정확도 최신화 + 모델 카드 갱신
+        self._refresh_models_safe()
+
         state = session_mod.load()
         if state is None or state.stage in ("setup", "result"):
             self._show_page(self._setup_page)
@@ -131,6 +135,26 @@ class MainWindow(QMainWindow):
         )
         self._show_page(self._setup_page)
 
+    def _refresh_models_safe(self) -> None:
+        """학습 모듈 import / 평가 집계 실패가 셋업 화면을 막지 않도록 wrap."""
+        try:
+            from ..learning import evaluator as _ev
+            _ev.refresh_accuracy()
+        except Exception:
+            pass
+        try:
+            self._setup_page.refresh_models()
+        except Exception:
+            pass
+
+    def _active_model_name(self) -> str:
+        """현재 active 모델 이름 (없으면 ``basic``)."""
+        try:
+            from ..learning import registry as _reg
+            return _reg.get_active()
+        except Exception:
+            return "basic"
+
     # ==================================================================
     # Setup → Stage 1
     # ==================================================================
@@ -141,6 +165,7 @@ class MainWindow(QMainWindow):
         self._skipped_a.clear()
         self._skipped_b.clear()
         self._matched_val_keys_in_a.clear()
+        self._session_id = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
 
         # 양식 폴더의 양식.xlsx 를 결과 폴더로 복사 → 작업 파일 준비 ----
         self._prepare_working_file(inp)
@@ -297,6 +322,8 @@ class MainWindow(QMainWindow):
             threshold=self._input.threshold,
             phase_label=phase_lab,
             direction=direction,
+            session_id=self._session_id,
+            model_name=self._active_model_name(),
         )
         self._show_page(self._match_page)
         self._phase = PHASE_A_MATCH
@@ -393,6 +420,8 @@ class MainWindow(QMainWindow):
             threshold=self._input.threshold,
             phase_label=i18n.KO.PHASE_B_MATCH,
             direction=direction,
+            session_id=self._session_id,
+            model_name=self._active_model_name(),
         )
         self._show_page(self._match_page)
         self._phase = PHASE_B_MATCH
@@ -533,6 +562,8 @@ class MainWindow(QMainWindow):
         self._stage1_a_snapshot = None
         self._stage1_b_snapshot = None
         self._phase = PHASE_NONE
+        # 세션 종료 직후 평가 집계를 갱신해서 모델 카드의 정확도를 새로 반영.
+        self._refresh_models_safe()
         self._show_page(self._setup_page)
 
     # ==================================================================
