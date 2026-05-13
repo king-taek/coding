@@ -78,6 +78,36 @@ SHORTCUT_TOOLTIP = (
 )
 SHORTCUT_STAGE2_TOOLTIP = "단축키:  S = 건너뛰기"
 
+# ── 사진 크기 슬라이더 ────────────────────────────────────────────────────
+IMAGE_SIZE_LABEL = "사진 크기"
+SLOT_LABEL_FMT = "Slot: {slot}"
+
+# ── 셋업 화면 사용 설명 ────────────────────────────────────────────────────
+SETUP_HOW_TO_USE_TITLE = "사용 방법"
+SETUP_HOW_TO_USE_BODY = (
+    "① 검증 모드를 선택합니다  ·  한쪽만 검증 / 양쪽 교차검증\n"
+    "② 기준 장비와 검증 장비의 폴더와 호기 번호를 입력합니다\n"
+    "③ 유사도 임계치를 조정합니다  (기본 70%)\n"
+    "④ [검증 시작] 을 누르면 다음 순서로 진행됩니다\n"
+    "      ㄱ. 후보 선별 — 결정할 사진을 한 장씩 보면서 [✓ 검증] / [✕ 제외]\n"
+    "      ㄴ. 유사도 매칭 — 기준 사진별로 가장 비슷한 검증 사진을 선택\n"
+    "      ㄷ. 결과 저장 — 양식 폴더의 양식.xlsx 를 복사하여 자동 저장\n"
+    "단축키 — ← / 1 = 검증,  → / 2 = 제외,  Z = 되돌리기,  S = 건너뛰기"
+)
+
+# ── 양식 파일 / 저장 파일 명명 ─────────────────────────────────────────────
+TEMPLATE_DIR_NAME = "양식"
+TEMPLATE_FILE_NAME = "양식.xlsx"
+RESULT_FILE_TITLE_FMT = "AOI {val} 검증 ({ref} 기준).xlsx"
+TEMPLATE_NOT_FOUND_TITLE = "양식 파일 없음"
+TEMPLATE_NOT_FOUND_BODY = (
+    "‘양식’ 폴더 안의 ‘양식.xlsx’ 를 찾을 수 없습니다.\n"
+    "기본 양식으로 결과를 생성합니다.\n\n"
+    "확인한 경로: {path}"
+)
+WORKING_FILE_READY_FMT = "결과 파일이 준비되었습니다:\n{path}"
+WORKING_FILE_LABEL = "결과 파일 위치"
+
 # ── 로딩/진행 ──────────────────────────────────────────────────────────────
 LOAD_THUMBNAIL_FMT = "썸네일 생성 중… {done} / {total}"
 LOAD_FEATURE_FMT = "검증 장비 특징 추출 중… {done} / {total}"

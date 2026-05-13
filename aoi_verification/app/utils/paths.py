@@ -81,3 +81,35 @@ def session_cache_dir() -> Path:
     d = cache_root() / "session"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+# ---------------------------------------------------------------------------
+# 양식.xlsx 위치 찾기 — ‘양식’ 폴더 안의 ‘양식.xlsx’ 를 우선 탐색한다.
+# ---------------------------------------------------------------------------
+def template_path() -> Path:
+    """`양식/양식.xlsx` 의 실제 경로를 찾는다 (없으면 후보 중 가장 가까운 것)."""
+    candidates = [
+        _project_root() / "양식" / "양식.xlsx",
+        package_root().parent / "양식" / "양식.xlsx",
+        _project_root() / "양식.xlsx",        # 호환을 위한 fallback
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+    # 존재하지 않으면 첫 후보 경로를 그대로 돌려준다 (호출자가 존재 여부 검사)
+    return candidates[0]
+
+
+def template_dir() -> Path:
+    """‘양식’ 폴더의 경로 (없을 수 있음 — 호출자가 mkdir 등을 결정)."""
+    return _project_root() / "양식"
+
+
+def results_dir() -> Path:
+    """결과 엑셀이 저장될 기본 폴더 — 양식 폴더와 같은 부모 디렉토리.
+
+    프로젝트 루트의 ‘결과’ 폴더에 자동 생성한다.
+    """
+    d = _project_root() / "결과"
+    d.mkdir(parents=True, exist_ok=True)
+    return d

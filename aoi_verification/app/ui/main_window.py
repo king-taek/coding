@@ -11,7 +11,9 @@
 
 from __future__ import annotations
 
+import shutil
 from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -93,6 +95,8 @@ class MainWindow(QMainWindow):
         self._stage1_a_snapshot: dict | None = None
         self._stage1_b_snapshot: dict | None = None
         self._matched_val_keys_in_a: set[str] = set()
+        self._working_xlsx: Optional[Path] = None
+        self._template_used: Optional[Path] = None
 
         # 이어하기 ------------------------------------------------------
         QTimer.singleShot(50, self._maybe_resume)
@@ -137,6 +141,9 @@ class MainWindow(QMainWindow):
         self._skipped_a.clear()
         self._skipped_b.clear()
         self._matched_val_keys_in_a.clear()
+
+        # 양식 폴더의 양식.xlsx 를 결과 폴더로 복사 → 작업 파일 준비 ----
+        self._prepare_working_file(inp)
 
         self._loading.show_overlay(i18n.KO.LOAD_SCAN)
         QApplication.processEvents()
@@ -409,15 +416,54 @@ class MainWindow(QMainWindow):
             slot_only_ref=list(self._scan.ref_only),
             slot_only_val=list(self._scan.val_only),
         )
-        template = paths.resource_path("양식.xlsx")
+        # 결과 페이지에는 ‘이미 복사해둔 작업 파일’ 과 ‘템플릿 원본’ 둘 다 전달.
         self._result_page.show_result(
             result,
-            template_path=template if Path(template).exists() else None,
+            template_path=self._template_used,
+            target_path=self._working_xlsx,
         )
         QMessageBox.information(self, i18n.KO.APP_TITLE, i18n.KO.INFO_ALL_DONE)
         self._show_page(self._result_page)
         self._phase = PHASE_NONE
         session_mod.clear()
+
+    # ------------------------------------------------------------------
+    # 양식 → 결과 파일 복사
+    # ------------------------------------------------------------------
+    def _prepare_working_file(self, inp: SetupInput) -> None:
+        """`양식/양식.xlsx` 를 결과 폴더로 복사해서 작업 파일을 만든다.
+
+        결과 파일 이름: ``AOI {val} 검증 ({ref} 기준).xlsx``.
+        이미 존재하면 타임스탬프를 붙여 충돌을 피한다.
+        """
+        template = paths.template_path()
+        if not template.exists():
+            QMessageBox.information(
+                self, i18n.KO.TEMPLATE_NOT_FOUND_TITLE,
+                i18n.KO.TEMPLATE_NOT_FOUND_BODY.format(path=str(template)),
+            )
+            self._template_used = None
+        else:
+            self._template_used = template
+
+        # 파일 이름
+        dst_name = i18n.KO.RESULT_FILE_TITLE_FMT.format(
+            val=inp.val_machine, ref=inp.ref_machine,
+        )
+        dst = paths.results_dir() / dst_name
+        if dst.exists():
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            dst = dst.with_name(dst.stem + f"_{ts}" + dst.suffix)
+
+        # 템플릿이 있으면 복사, 없으면 빈 파일 자리 표시만 (저장 시점에 생성)
+        try:
+            if self._template_used is not None:
+                shutil.copyfile(str(self._template_used), str(dst))
+        except Exception:
+            # 복사 실패 시에도 경로는 보존 — 저장 시점에 새 워크북 생성
+            pass
+
+        self._working_xlsx = dst
 
     def _merge_matches(self) -> list[MatchResult]:
         if not self._is_cross():

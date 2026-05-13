@@ -26,6 +26,7 @@ class ResultPage(QWidget):
         super().__init__(parent)
         self._result: FinalResult | None = None
         self._template_path: Path | None = None
+        self._target_path: Path | None = None     # 미리 복사된 작업 파일
         self._save_path: Path | None = None
         self._loading = LoadingOverlay(self)
         self._exporter: ExcelExporter | None = None
@@ -63,9 +64,11 @@ class ResultPage(QWidget):
 
     # ------------------------------------------------------------------
     def show_result(self, result: FinalResult,
-                    template_path: Path | None = None) -> None:
+                    template_path: Path | None = None,
+                    target_path: Path | None = None) -> None:
         self._result = result
         self._template_path = template_path
+        self._target_path = target_path
         # 기존 요약 비우기
         while self._summary_layout.count():
             it = self._summary_layout.takeAt(0)
@@ -99,23 +102,34 @@ class ResultPage(QWidget):
                 role="muted",
             )
 
+        if self._target_path is not None:
+            line(
+                f"{i18n.KO.WORKING_FILE_LABEL}: {self._target_path}",
+                role="muted",
+            )
+
     # ------------------------------------------------------------------
     def _on_export(self) -> None:
         if self._result is None:
             return
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = i18n.KO.SAVE_FILENAME_FMT.format(
-            ref=self._result.ref_machine,
-            val=self._result.val_machine,
-            ts=ts,
-        )
-        dst, _ = QFileDialog.getSaveFileName(
-            self, i18n.KO.SAVE_DIALOG_TITLE, filename,
-            "Excel (*.xlsx)",
-        )
-        if not dst:
-            return
-        self._save_path = Path(dst)
+        # 양식 → 작업 파일은 이미 검증 시작 시점에 복사되었으므로 그대로 채워 쓴다.
+        # 그 경로가 없다면(=양식 없음 + 복사 실패) 사용자에게 위치를 물어본다.
+        if self._target_path is not None:
+            self._save_path = self._target_path
+        else:
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = i18n.KO.SAVE_FILENAME_FMT.format(
+                ref=self._result.ref_machine,
+                val=self._result.val_machine,
+                ts=ts,
+            )
+            dst, _ = QFileDialog.getSaveFileName(
+                self, i18n.KO.SAVE_DIALOG_TITLE, filename,
+                "Excel (*.xlsx)",
+            )
+            if not dst:
+                return
+            self._save_path = Path(dst)
 
         self._loading.show_overlay(i18n.KO.LOAD_EXPORT)
         self._exporter = ExcelExporter(

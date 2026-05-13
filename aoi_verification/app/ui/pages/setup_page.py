@@ -49,6 +49,21 @@ class SetupPage(QWidget):
         subtitle.setWordWrap(True)
         root.addWidget(subtitle)
 
+        # 사용 방법 안내 카드 -------------------------------------------
+        howto_card = NeonCard(role="card-soft", parent=self)
+        howto_title = QLabel(i18n.KO.SETUP_HOW_TO_USE_TITLE, howto_card)
+        howto_title.setStyleSheet(
+            "color: #00D4FF; font-weight: 700; letter-spacing: 1px;"
+        )
+        howto_card.body().addWidget(howto_title)
+        howto_body = QLabel(i18n.KO.SETUP_HOW_TO_USE_BODY, howto_card)
+        howto_body.setWordWrap(True)
+        howto_body.setStyleSheet(
+            "color: #E5F4FF; line-height: 160%; padding-top: 4px;"
+        )
+        howto_card.body().addWidget(howto_body)
+        root.addWidget(howto_card)
+
         # 모드 선택 ------------------------------------------------------
         mode_card = NeonCard(role="card-soft", parent=self)
         h = QHBoxLayout()

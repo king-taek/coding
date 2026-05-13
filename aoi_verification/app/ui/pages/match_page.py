@@ -14,7 +14,7 @@ from typing import Optional
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QKeySequence, QPixmap, QShortcut
 from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QMessageBox,
-                              QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
+                              QScrollArea, QSizePolicy, QSlider, QVBoxLayout, QWidget)
 
 from ... import config, i18n
 from ...models.result import MatchResult
@@ -24,6 +24,7 @@ from ...workers.matcher import Candidate, MatcherWorker
 from ..widgets.loading_overlay import LoadingOverlay
 from ..widgets.neon_button import NeonButton
 from ..widgets.neon_card import NeonCard
+from ..widgets.scalable_image import ScalableImage
 from ..widgets.slot_section import SlotSection
 from ..widgets.thumb_grid import ThumbEntry, ThumbGrid
 from ..widgets.zoom_window import (ZoomWindow, SOURCE_TARGET, SOURCE_CANDIDATES)
@@ -120,22 +121,53 @@ class MatchPage(QWidget):
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         cl.addWidget(title)
 
-        self.center_img = QLabel(center)
-        self.center_img.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.center_img.setMinimumSize(520, 520)
-        self.center_img.setSizePolicy(QSizePolicy.Policy.Expanding,
-                                      QSizePolicy.Policy.Expanding)
-        self.center_img.setStyleSheet(
-            "background:#050810; border:1px solid #1F2A3F; border-radius:8px;"
+        # Slot 명만 표시 (파일명 미표시) -------------------------------
+        self.slot_label = QLabel("", center)
+        self.slot_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.slot_label.setStyleSheet(
+            "color: #7FB3D5; font-size: 14px; font-weight: 600; padding: 2px;"
         )
-        cl.addWidget(self.center_img, stretch=1)
+        cl.addWidget(self.slot_label)
 
-        self.center_caption = QLabel("", center)
-        self.center_caption.setProperty("role", "muted")
-        self.center_caption.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        cl.addWidget(self.center_caption)
+        # 사진 크기 슬라이더 -------------------------------------------
+        size_row = QHBoxLayout()
+        size_row.setSpacing(8)
+        size_label = QLabel(i18n.KO.IMAGE_SIZE_LABEL, center)
+        size_label.setProperty("role", "muted")
+        self.size_slider = QSlider(Qt.Orientation.Horizontal, center)
+        self.size_slider.setRange(ScalableImage.MIN_LONG_EDGE,
+                                   ScalableImage.MAX_LONG_EDGE)
+        self.size_slider.setValue(ScalableImage.DEFAULT_LONG_EDGE)
+        self.size_slider.setSingleStep(20)
+        self.size_slider.setPageStep(80)
+        self.size_value = QLabel(f"{self.size_slider.value()} px", center)
+        self.size_value.setProperty("role", "muted")
+        self.size_value.setFixedWidth(64)
+        self.size_value.setAlignment(Qt.AlignmentFlag.AlignRight
+                                     | Qt.AlignmentFlag.AlignVCenter)
+        self.size_slider.valueChanged.connect(self._on_size_changed)
+        size_row.addWidget(size_label)
+        size_row.addWidget(self.size_slider, stretch=1)
+        size_row.addWidget(self.size_value)
+        cl.addLayout(size_row)
+
+        # 이미지 (스크롤 영역) -----------------------------------------
+        self.center_img = ScalableImage(center)
+        self._img_scroll = QScrollArea(center)
+        self._img_scroll.setWidgetResizable(False)
+        self._img_scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._img_scroll.setWidget(self.center_img)
+        self._img_scroll.setStyleSheet(
+            "QScrollArea { background: #050810; border: 1px solid #1F2A3F; "
+            "border-radius: 8px; }"
+        )
+        self._img_scroll.setMinimumHeight(360)
+        self._img_scroll.setSizePolicy(QSizePolicy.Policy.Expanding,
+                                       QSizePolicy.Policy.Expanding)
+        cl.addWidget(self._img_scroll, stretch=1)
 
         bar = QHBoxLayout()
+        bar.setContentsMargins(0, 6, 0, 0)
         self.skip_btn = NeonButton(i18n.KO.BTN_SKIP, role="warn")
         self.skip_btn.setToolTip(i18n.KO.SHORTCUT_STAGE2_TOOLTIP)
         self.skip_btn.clicked.connect(self._skip_current)
@@ -205,8 +237,8 @@ class MatchPage(QWidget):
             return
         if not self._state.queue:
             self._current = None
-            self.center_img.clear()
-            self.center_caption.setText("")
+            self.center_img.clear_image()
+            self.slot_label.setText("")
             self._clear_right_grid()
             self.finished.emit()
             return
@@ -268,22 +300,13 @@ class MatchPage(QWidget):
 
     # ------------------------------------------------------------------
     def _show_center(self, item: ImageItem) -> None:
-        try:
-            mid = image_io.get_mid_path(item.path)
-            pix = QPixmap(str(mid))
-        except Exception:
-            pix = QPixmap(560, 560)
-            pix.fill(QColor(8, 16, 32))
-        if pix.isNull():
-            pix = QPixmap(560, 560)
-            pix.fill(QColor(8, 16, 32))
-        pix = pix.scaled(
-            self.center_img.size(),
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-        self.center_img.setPixmap(pix)
-        self.center_caption.setText(f"{item.slot}  ·  {item.filename}")
+        self.center_img.set_image(item.path)
+        # Stage 2 도 파일명은 미표시, Slot 만 노출 (요청 사항).
+        self.slot_label.setText(i18n.KO.SLOT_LABEL_FMT.format(slot=item.slot))
+
+    def _on_size_changed(self, value: int) -> None:
+        self.size_value.setText(f"{value} px")
+        self.center_img.set_target_size(value)
 
     def _clear_right_grid(self) -> None:
         while self._right_grid.count():

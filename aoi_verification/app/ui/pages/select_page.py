@@ -19,13 +19,14 @@ from typing import Optional
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QKeySequence, QPixmap, QShortcut
 from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QScrollArea,
-                              QSizePolicy, QVBoxLayout, QWidget)
+                              QSizePolicy, QSlider, QVBoxLayout, QWidget)
 
 from ... import i18n
 from ...models.slot import ImageItem
 from ...utils import image_io
 from ..widgets.neon_button import NeonButton
 from ..widgets.neon_card import NeonCard
+from ..widgets.scalable_image import ScalableImage
 from ..widgets.slot_section import SlotSection
 from ..widgets.thumb_grid import ThumbEntry
 from ..widgets.zoom_window import (ZoomWindow, SOURCE_TARGET, SOURCE_EXCLUDED,
@@ -239,24 +240,55 @@ class SelectPage(QWidget):
         center_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         cl.addWidget(center_title)
 
-        self.center_img = QLabel(center_card)
-        self.center_img.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.center_img.setMinimumSize(560, 560)
-        self.center_img.setStyleSheet(
-            "background: #050810; border: 1px solid #1F2A3F; border-radius: 8px;"
+        # Slot 명 (파일명은 표시하지 않음) -----------------------------
+        self.slot_label = QLabel("", center_card)
+        self.slot_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.slot_label.setStyleSheet(
+            "color: #7FB3D5; font-size: 14px; font-weight: 600; padding: 2px;"
         )
-        self.center_img.setSizePolicy(QSizePolicy.Policy.Expanding,
-                                      QSizePolicy.Policy.Expanding)
-        cl.addWidget(self.center_img, stretch=1)
+        cl.addWidget(self.slot_label)
 
-        self.center_caption = QLabel("", center_card)
-        self.center_caption.setProperty("role", "muted")
-        self.center_caption.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        cl.addWidget(self.center_caption)
+        # 사진 크기 슬라이더 -------------------------------------------
+        size_row = QHBoxLayout()
+        size_row.setSpacing(8)
+        size_label = QLabel(i18n.KO.IMAGE_SIZE_LABEL, center_card)
+        size_label.setProperty("role", "muted")
+        self.size_slider = QSlider(Qt.Orientation.Horizontal, center_card)
+        self.size_slider.setRange(ScalableImage.MIN_LONG_EDGE,
+                                   ScalableImage.MAX_LONG_EDGE)
+        self.size_slider.setValue(ScalableImage.DEFAULT_LONG_EDGE)
+        self.size_slider.setSingleStep(20)
+        self.size_slider.setPageStep(80)
+        self.size_value = QLabel(f"{self.size_slider.value()} px", center_card)
+        self.size_value.setProperty("role", "muted")
+        self.size_value.setFixedWidth(64)
+        self.size_value.setAlignment(Qt.AlignmentFlag.AlignRight
+                                     | Qt.AlignmentFlag.AlignVCenter)
+        self.size_slider.valueChanged.connect(self._on_size_changed)
+        size_row.addWidget(size_label)
+        size_row.addWidget(self.size_slider, stretch=1)
+        size_row.addWidget(self.size_value)
+        cl.addLayout(size_row)
 
-        # 버튼 줄
+        # 이미지 (스크롤 영역) -----------------------------------------
+        self.center_img = ScalableImage(center_card)
+        self._img_scroll = QScrollArea(center_card)
+        self._img_scroll.setWidgetResizable(False)
+        self._img_scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._img_scroll.setWidget(self.center_img)
+        self._img_scroll.setStyleSheet(
+            "QScrollArea { background: #050810; border: 1px solid #1F2A3F; "
+            "border-radius: 8px; }"
+        )
+        self._img_scroll.setMinimumHeight(360)
+        self._img_scroll.setSizePolicy(QSizePolicy.Policy.Expanding,
+                                       QSizePolicy.Policy.Expanding)
+        cl.addWidget(self._img_scroll, stretch=1)
+
+        # 버튼 줄 (사진 밑에 명확히 분리) -------------------------------
         btn_row = QHBoxLayout()
         btn_row.setSpacing(10)
+        btn_row.setContentsMargins(0, 6, 0, 0)
         self.btn_verify = NeonButton("✓  " + i18n.KO.BTN_VERIFY, role="primary")
         self.btn_exclude = NeonButton("✕  " + i18n.KO.BTN_EXCLUDE, role="danger")
         self.btn_undo = NeonButton(i18n.KO.BTN_UNDO, role="ghost")
@@ -368,8 +400,8 @@ class SelectPage(QWidget):
             return
         if not self._state.queue:
             self._current = None
-            self.center_img.clear()
-            self.center_caption.setText("")
+            self.center_img.clear_image()
+            self.slot_label.setText("")
             self.progress_label.setText("")
             self.finished.emit()
             return
@@ -400,23 +432,13 @@ class SelectPage(QWidget):
         return self._already_decided_count() + len(self._state.queue)
 
     def _show_center(self, item: ImageItem) -> None:
-        try:
-            mid = image_io.get_mid_path(item.path)
-            pix = QPixmap(str(mid))
-        except Exception:
-            pix = QPixmap(560, 560)
-            pix.fill(QColor(8, 16, 32))
-        if pix.isNull():
-            pix = QPixmap(560, 560)
-            pix.fill(QColor(8, 16, 32))
-        target = self.center_img.size()
-        scaled = pix.scaled(
-            target,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-        self.center_img.setPixmap(scaled)
-        self.center_caption.setText(f"{item.slot}  ·  {item.filename}")
+        self.center_img.set_image(item.path)
+        # 파일명은 표시하지 않고 Slot 명만 노출한다 (요청 사항).
+        self.slot_label.setText(i18n.KO.SLOT_LABEL_FMT.format(slot=item.slot))
+
+    def _on_size_changed(self, value: int) -> None:
+        self.size_value.setText(f"{value} px")
+        self.center_img.set_target_size(value)
 
     # ------------------------------------------------------------------
     # Decisions
