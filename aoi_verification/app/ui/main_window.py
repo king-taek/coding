@@ -171,10 +171,10 @@ class MainWindow(QMainWindow):
         if r != QMessageBox.StandardButton.Yes:
             return
 
+        from PyQt6.QtWidgets import QDialog
         dlg = SlotMappingDialog(sr.ref_only, sr.val_only, parent=self)
-        if dlg.exec() != QMessageBox.StandardButton.Ok.value and not dlg.result():
-            # exec() 의 반환 — Qt6 의 QDialog 는 Accepted=1, Rejected=0
-            pass  # 결과는 mapping property 로 판단
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
         mapping = dlg.mapping
         if not mapping.pairs:
             return
@@ -278,14 +278,45 @@ class MainWindow(QMainWindow):
 
     def _on_thumbs_ready(self) -> None:
         self._loading.hide_overlay()
-        # Phase 결정 → Stage 1 진입 -------------------------------------
         assert self._input is not None
-        if self._input.mode == "single":
-            self._phase = PHASE_A_SELECT
-            self._enter_stage1_phase_a()
-        else:
-            self._phase = PHASE_A_SELECT
-            self._enter_stage1_phase_a()
+        # 임계치 자동 추천 ----------------------------------------------
+        self._maybe_offer_threshold_suggestion()
+        # Phase 결정 → Stage 1 진입 -------------------------------------
+        self._phase = PHASE_A_SELECT
+        self._enter_stage1_phase_a()
+
+    def _maybe_offer_threshold_suggestion(self) -> None:
+        """스캔 데이터의 점수 분포를 분석해 임계치를 추천."""
+        if self._scan is None or self._input is None:
+            return
+        try:
+            from ..similarity import threshold as _thr
+            sug = _thr.suggest_threshold(self._scan)
+        except Exception:
+            return
+        if sug is None:
+            return
+        # 현재 임계치와 5%p 이상 차이날 때만 물어본다.
+        if abs(sug.suggested - self._input.threshold) < 0.05:
+            return
+        r = QMessageBox.question(
+            self, i18n.KO.THRESHOLD_SUGGESTION_TITLE,
+            i18n.KO.THRESHOLD_SUGGESTION_FMT.format(
+                suggested=sug.suggested, current=self._input.threshold,
+                same_median=sug.same_median, same_min=sug.same_min,
+                diff_median=sug.diff_median, diff_max=sug.diff_max,
+                margin=sug.margin,
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if r == QMessageBox.StandardButton.Yes:
+            self._input.threshold = float(sug.suggested)
+            try:
+                from ..utils import prefs as _prefs
+                _prefs.patch(threshold=float(sug.suggested))
+            except Exception:
+                pass
 
     # ==================================================================
     # Phase 식별 helpers

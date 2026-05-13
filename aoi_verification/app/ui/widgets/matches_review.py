@@ -65,7 +65,13 @@ class _Row(QWidget):
         lay.addWidget(btn)
 
     @staticmethod
-    def _make_thumb(p: Path) -> QLabel:
+    def _make_thumb(p: Path):
+        from PyQt6.QtWidgets import QVBoxLayout, QWidget
+        host = QWidget()
+        v = QVBoxLayout(host)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(2)
+
         lab = QLabel()
         lab.setFixedSize(_THUMB, _THUMB)
         lab.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -84,26 +90,16 @@ class _Row(QWidget):
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
-        # 파일명 캡션 (작게 — 검토 시점이라 이름이 필요함, #18 의 예외 케이스)
-        return lab.__class__._wrap_with_name(lab, pix, Path(p).name)
-
-    @classmethod
-    def _wrap_with_name(cls, lab, pix, name: str):
-        # 단순 wrap — pixmap + 작은 캡션을 한 라벨로 합쳐 표시
-        from PyQt6.QtWidgets import QVBoxLayout, QWidget
-        host = QWidget()
-        v = QVBoxLayout(host)
-        v.setContentsMargins(0, 0, 0, 0)
-        v.setSpacing(2)
         lab.setPixmap(pix)
         v.addWidget(lab)
-        cap = QLabel(name, host)
+
+        cap = QLabel(Path(p).name, host)
         cap.setProperty("role", "muted")
         cap.setStyleSheet("color: #7FB3D5; font-size: 11px; border: none;")
         cap.setAlignment(Qt.AlignmentFlag.AlignCenter)
         cap.setWordWrap(True)
         v.addWidget(cap)
-        return host  # type: ignore[return-value]
+        return host
 
 
 class MatchesReviewDialog(QDialog):

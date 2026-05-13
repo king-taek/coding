@@ -331,8 +331,17 @@ class SetupPage(QWidget):
                     name=info.name, pairs=num_pairs,
                 )
             else:
-                lo = int(round(float(metrics_dict.get("hit_at_5_lo", 0.0)) * 100))
-                hi = int(round(float(metrics_dict.get("hit_at_5_hi", 0.0)) * 100))
+                lo_val = metrics_dict.get("hit_at_5_lo")
+                hi_val = metrics_dict.get("hit_at_5_hi")
+                # 메타에 CI 가 없는 (옛 모델/import 한 모델) 경우 즉시 계산
+                if not lo_val and not hi_val:
+                    picks = int(metrics_dict.get("picks", 0))
+                    successes = int(round(float(metrics_dict.get("hit_at_5", 0.0)) * picks))
+                    lo_f, hi_f = _evaluator.wilson_interval(successes, picks)
+                else:
+                    lo_f, hi_f = float(lo_val or 0.0), float(hi_val or 0.0)
+                lo = int(round(lo_f * 100))
+                hi = int(round(hi_f * 100))
                 text = i18n.KO.MODEL_OPTION_FMT.format(
                     name=info.name, pairs=num_pairs,
                     hit5=hit5, lo=lo, hi=hi, evals=num_evals,

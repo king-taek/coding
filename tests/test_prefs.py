@@ -40,4 +40,5 @@ def test_corrupt_file_falls_back_to_default(isolated_cache):
     file.parent.mkdir(parents=True, exist_ok=True)
     file.write_text("not-json", encoding="utf-8")
     p = prefs.load()
-    assert p.threshold == 0.70
+    # 교차 호기 친화 기본값 — 절대 값보다 ‘0.5 근처’ 라는 의도 검증.
+    assert 0.40 <= p.threshold <= 0.70

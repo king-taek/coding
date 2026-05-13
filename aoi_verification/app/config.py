@@ -87,7 +87,9 @@ class SimilarityWeights:
 @dataclass
 class AppConfig:
     similarity: SimilarityWeights = field(default_factory=SimilarityWeights)
-    default_threshold: float = 0.70       # 0.0 ~ 1.0
+    # 교차 호기(다른 contrast/exposure) 데이터에서도 같은 슬롯 매칭이 잘 잡히도록
+    # 0.55 로 보수적으로 설정. 같은 호기끼리는 보통 0.7 이상이라 같이 잡힘.
+    default_threshold: float = 0.55       # 0.0 ~ 1.0
     autosave_interval_s: int = 30
     image_extensions: tuple[str, ...] = (".jpeg", ".jpg", ".png", ".bmp")
     max_thumbs_per_row: int = 4           # +N 시작 임계치 (4장 표시 → 5번째 +N)

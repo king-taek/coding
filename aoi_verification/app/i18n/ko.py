@@ -230,6 +230,17 @@ SLOT_MAP_VAL_LABEL = "검증"
 SLOT_MAP_ADD = "추가"
 SLOT_MAP_REMOVE = "선택 해제"
 SLOT_MAP_OPEN = "매핑 다이얼로그 열기"
+
+# ── 임계치 자동 추천 ───────────────────────────────────────────────────────
+THRESHOLD_SUGGESTION_TITLE = "임계치 추천"
+THRESHOLD_SUGGESTION_FMT = (
+    "스캔된 데이터의 분포를 분석한 결과 임계치 {suggested:.2f} 를 추천합니다.\n"
+    "(현재 설정: {current:.2f})\n\n"
+    "같은 슬롯 점수 — 중앙값 {same_median:.2f},  최소 {same_min:.2f}\n"
+    "다른 슬롯 점수 — 중앙값 {diff_median:.2f},  최대 {diff_max:.2f}\n"
+    "분포 간 여유: {margin:+.2f}\n\n"
+    "추천 값으로 변경하시겠습니까?"
+)
 INFO_RESUME_TITLE = "이전 검증 이어하기"
 INFO_RESUME_BODY = "진행 중인 검증이 있습니다. 이어서 하시겠습니까?"
 INFO_NEW_SESSION = "새로 시작"

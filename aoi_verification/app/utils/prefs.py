@@ -22,7 +22,7 @@ _PREFS_FILE = "ui_prefs.json"
 class UiPrefs:
     """다음 실행에도 이어갈 UI 상태."""
 
-    threshold: float = 0.70                  # 0.0 ~ 1.0
+    threshold: float = 0.55                  # 0.0 ~ 1.0 (교차 호기 친화적 기본)
     image_long_edge_select: int = 720        # Stage 1 사진 크기 (px)
     image_long_edge_match: int = 720         # Stage 2 사진 크기 (px)
     last_ref_root: str = ""
