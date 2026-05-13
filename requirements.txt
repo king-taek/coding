@@ -1,0 +1,10 @@
+PyQt6>=6.6
+Pillow>=10.0
+opencv-python>=4.8
+numpy>=1.24
+scikit-image>=0.21
+imagehash>=4.3
+openpyxl>=3.1
+# Optional — only if CNN embedding is enabled
+# torch>=2.0
+# torchvision>=0.15

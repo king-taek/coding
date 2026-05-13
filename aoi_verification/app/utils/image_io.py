@@ -1,0 +1,132 @@
+"""이미지 입출력/리사이즈 헬퍼.
+
+Pillow 기반으로 안전한 리사이즈를 수행하고, 캐시가 있으면 재사용한다.
+모든 함수는 동기지만 _작업 스레드_ 에서 호출하는 것을 전제로 한다.
+"""
+
+from __future__ import annotations
+
+import io
+from pathlib import Path
+from typing import Optional
+
+import numpy as np
+from PIL import Image, ImageOps
+
+from .. import config
+from . import cache
+
+
+# ---------------------------------------------------------------------------
+# Pillow open helper — robust against truncated images
+# ---------------------------------------------------------------------------
+Image.MAX_IMAGE_PIXELS = None  # 매우 큰 AOI 이미지를 허용
+
+
+def _open(src: Path) -> Image.Image:
+    """이미지 로드 + EXIF 회전 보정."""
+    img = Image.open(str(src))
+    img.load()
+    try:
+        img = ImageOps.exif_transpose(img)
+    except Exception:
+        pass
+    return img
+
+
+def _fit_long_edge(img: Image.Image, long_edge: int) -> Image.Image:
+    w, h = img.size
+    if max(w, h) <= long_edge:
+        return img.copy()
+    if w >= h:
+        new_w = long_edge
+        new_h = int(round(h * long_edge / w))
+    else:
+        new_h = long_edge
+        new_w = int(round(w * long_edge / h))
+    return img.resize((new_w, new_h), Image.LANCZOS)
+
+
+def _to_rgb(img: Image.Image) -> Image.Image:
+    if img.mode in ("RGB",):
+        return img
+    if img.mode in ("RGBA", "LA"):
+        bg = Image.new("RGB", img.size, (0, 0, 0))
+        bg.paste(img, mask=img.split()[-1])
+        return bg
+    return img.convert("RGB")
+
+
+# ---------------------------------------------------------------------------
+# Public — cached thumbnail / mid generation
+# ---------------------------------------------------------------------------
+def get_thumb_path(src: Path) -> Path:
+    """200px 썸네일 캐시 파일 경로를 보장 (없으면 생성)."""
+    return _ensure_resized(src, size_option="thumb",
+                           long_edge=config.Sizing.THUMB_PX,
+                           jpeg_q=config.Sizing.THUMB_JPEG_Q)
+
+
+def get_mid_path(src: Path) -> Path:
+    """800px 중간 이미지 캐시 파일 경로를 보장 (없으면 생성)."""
+    return _ensure_resized(src, size_option="mid",
+                           long_edge=config.Sizing.MID_PX,
+                           jpeg_q=config.Sizing.MID_JPEG_Q)
+
+
+def _ensure_resized(src: Path, *, size_option: str,
+                    long_edge: int, jpeg_q: int) -> Path:
+    out = cache.cache_path(src, size_option)  # type: ignore[arg-type]
+    if out.exists() and out.stat().st_size > 0:
+        return out
+    try:
+        img = _open(src)
+    except Exception as exc:  # pragma: no cover — handled by caller
+        raise RuntimeError(f"이미지 로드 실패: {src} ({exc})") from exc
+    img = _to_rgb(_fit_long_edge(img, long_edge))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    img.save(str(out), format="JPEG", quality=jpeg_q, optimize=True)
+    return out
+
+
+def load_bytes(path: Path) -> bytes:
+    return Path(path).read_bytes()
+
+
+# ---------------------------------------------------------------------------
+# Cropping for similarity ROI (centered) + numpy gray conversion
+# ---------------------------------------------------------------------------
+def center_roi_gray(src: Path,
+                    roi_ratio: Optional[float] = None,
+                    long_edge: Optional[int] = None) -> np.ndarray:
+    """중심 ROI 를 잘라낸 후 그레이스케일 NumPy 배열로 돌려준다.
+
+    유사도 파이프라인(pHash·SSIM·ORB) 모두가 공유하는 1차 전처리.
+    """
+    if roi_ratio is None:
+        roi_ratio = config.Sizing.ROI_RATIO
+    if long_edge is None:
+        long_edge = config.Sizing.SIMILARITY_PX
+
+    img = _open(src)
+    img = _to_rgb(img)
+    w, h = img.size
+    rw = int(round(w * roi_ratio))
+    rh = int(round(h * roi_ratio))
+    x0 = (w - rw) // 2
+    y0 = (h - rh) // 2
+    img = img.crop((x0, y0, x0 + rw, y0 + rh))
+    img = _fit_long_edge(img, long_edge)
+    gray = img.convert("L")
+    return np.asarray(gray, dtype=np.uint8)
+
+
+def to_pil_thumb(src: Path) -> Image.Image:
+    """캐시된 썸네일을 Pillow Image 로 즉시 로드."""
+    return Image.open(str(get_thumb_path(src)))
+
+
+def encode_jpeg(img: Image.Image, quality: int = 85) -> bytes:
+    buf = io.BytesIO()
+    _to_rgb(img).save(buf, format="JPEG", quality=quality, optimize=True)
+    return buf.getvalue()
