@@ -210,7 +210,9 @@ class MatchPage(QWidget):
         self._right_grid.setSpacing(8)
         self._right_scroll.setWidget(self._right_host)
         rl.addWidget(self._right_scroll, stretch=1)
-        right.setMinimumWidth(320)
+        # 3 col × 134(tile) + spacing 16 + 패널 padding 20 = 438 → 후보 9 장이
+        # 가로 스크롤 없이 한 화면에 깔리도록.
+        right.setMinimumWidth(440)
         row.addWidget(right, stretch=3)
 
         root.addLayout(row, stretch=1)

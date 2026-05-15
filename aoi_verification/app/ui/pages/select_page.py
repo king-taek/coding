@@ -228,11 +228,14 @@ class SelectPage(QWidget):
                 ("batch_verify", i18n.KO.BTN_BATCH_VERIFY, "primary"),
                 ("batch_exclude", i18n.KO.BTN_BATCH_EXCLUDE, "danger"),
             ],
+            columns=2,
         )
         self.left_panel.selection_action.connect(self._on_batch_action)
         self.left_panel.tile_clicked.connect(self._on_tile_click)
         self.left_panel.plus_clicked.connect(self._on_plus_click)
-        self.left_panel.setMinimumWidth(200)
+        # 2 col 그리드 (120px thumb + 14 padding) × 2 + spacing + 패널 padding 을
+        # 모두 담을 최소 너비. 작게(1100) preset 에서도 가로 스크롤 없이 보이게.
+        self.left_panel.setMinimumWidth(280)
         center_row.addWidget(self.left_panel, stretch=2)
 
         # CENTER ------------------------------------------------------
@@ -330,11 +333,12 @@ class SelectPage(QWidget):
                 ("to_exclude", i18n.KO.BTN_MOVE_TO_EXCLUDE, "warn"),
                 ("recenter", i18n.KO.BTN_BACK_TO_CENTER, "ghost"),
             ],
+            columns=2,
         )
         self.right_panel.selection_action.connect(self._on_batch_action)
         self.right_panel.tile_clicked.connect(self._on_tile_click)
         self.right_panel.plus_clicked.connect(self._on_plus_click)
-        self.right_panel.setMinimumWidth(200)
+        self.right_panel.setMinimumWidth(280)
         center_row.addWidget(self.right_panel, stretch=2)
 
         root.addLayout(center_row, stretch=1)
@@ -347,7 +351,8 @@ class SelectPage(QWidget):
                 ("to_target", i18n.KO.BTN_MOVE_TO_TARGET, "primary"),
                 ("recenter", i18n.KO.BTN_BACK_TO_CENTER, "ghost"),
             ],
-            columns=8,
+            # 7 col × 134px = 938 → 기본 폭 1280 에서 가로 스크롤 없이 보임.
+            columns=7,
         )
         self.bottom_panel.selection_action.connect(self._on_batch_action)
         self.bottom_panel.tile_clicked.connect(self._on_tile_click)

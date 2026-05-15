@@ -128,7 +128,15 @@ class FullscreenViewer(QDialog):
         self.setWindowTitle(image_path.name)
         self.setModal(True)
         self.setStyleSheet("background-color: #000;")
-        self.resize(1280, 800)
+        # 작은 모니터에서 1280×800 이 화면을 넘어가지 않도록 화면 가용 영역의
+        # 90% 안으로 제한.
+        scr = QApplication.primaryScreen()
+        if scr is not None:
+            g = scr.availableGeometry()
+            self.resize(min(1280, int(g.width() * 0.9)),
+                        min(800, int(g.height() * 0.9)))
+        else:
+            self.resize(1280, 800)
 
         self._scale = 1.0
         self._offset_x = 0
@@ -223,9 +231,27 @@ class ZoomWindow(QDialog):
             SOURCE_CANDIDATES: i18n.KO.ZOOM_TITLE_CANDIDATES,
         }[source]
         self.setWindowTitle(title_fmt.format(slot=slot_name))
-        self.resize(1280, 800)
+        self._resize_within_screen(1280, 800)
 
         self._build()
+
+    @staticmethod
+    def _screen_available(parent) -> tuple[int, int]:
+        """다이얼로그가 띄워질 모니터의 ‘작업 영역(taskbar 제외)’ 크기."""
+        scr = None
+        if parent is not None and hasattr(parent, "screen"):
+            scr = parent.screen()
+        if scr is None:
+            scr = QApplication.primaryScreen()
+        if scr is None:
+            return (1280, 800)
+        g = scr.availableGeometry()
+        return (g.width(), g.height())
+
+    def _resize_within_screen(self, w: int, h: int) -> None:
+        sw, sh = self._screen_available(self.parent())
+        # 모니터의 90% 까지만 차지 → 다이얼로그 옆 / 작업표시줄이 가려지지 않도록.
+        self.resize(min(w, int(sw * 0.9)), min(h, int(sh * 0.9)))
 
     # ------------------------------------------------------------------
     def _build(self) -> None:

@@ -56,8 +56,9 @@ class MainWindow(QMainWindow):
         self._prefs = _prefs
         saved = _prefs.load().window_preset
         self._apply_window_preset(saved if saved else "보통", persist=False)
-        # 사용자가 어떤 모니터에서도 자유롭게 줄일 수 있도록 최소 크기를 작게
-        self.setMinimumSize(900, 600)
+        # 가장 작은 preset(1120×760) 까지가 실용적 하한. 그보다 작으면 매칭
+        # 후보 그리드와 측면 패널이 가로 스크롤을 일으킨다.
+        self.setMinimumSize(1120, 720)
 
         self._stack = QStackedWidget(self)
         self.setCentralWidget(self._stack)

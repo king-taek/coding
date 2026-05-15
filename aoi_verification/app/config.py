@@ -46,7 +46,11 @@ class Fonts:
 # Image / thumbnail sizing
 # ---------------------------------------------------------------------------
 class Sizing:
-    THUMB_PX = 160          # left/right/bottom grid thumbnails (기존 200 → 20% 축소)
+    # 좌/우/하 패널 그리드용 작은 썸네일. 측면 패널의 실제 폭(stretch 2:4:2
+    # 기준 1280→~300px)에 2 col 그리드가 들어가도록 120 으로 잡는다. AOI
+    # 결함 식별은 중앙 이미지(슬라이더 300~700px)로 하고, 측면은 ‘이미 결정
+    # 한 사진들’ 의 시각적 참조 용도.
+    THUMB_PX = 120
     MID_PX = 800            # zoom-view + Excel embed
     SIMILARITY_PX = 384     # cropped ROI longest-edge for similarity
     ROI_RATIO = 0.55        # 중심 영역 비율 (0.5~0.6)
