@@ -73,6 +73,40 @@ class GroupingResult:
             self.by_rep.pop(g.rep.key, None)
         return item
 
+    # ------------------------------------------------------------------
+    def detach(self, item: ImageItem) -> list[ImageItem]:
+        """그룹에서 ``item`` 을 빼고 ``representatives`` 에도 반영.
+
+        반환값: 큐에 새로 추가된 ImageItem 들의 리스트.
+        - sibling 분리 → [item]
+        - rep 분리   → group 의 siblings 전부 (rep 자체는 이미 큐에 있음)
+        - 그룹에 속하지 않은 item → []
+        """
+        g = self.item_to_group.get(item.key)
+        if g is None:
+            return []
+        existing_keys = {r.key for r in self.representatives}
+        if item.key == g.rep.key:
+            siblings_snapshot = list(g.siblings)
+            self.remove_from_group(item)
+            added: list[ImageItem] = []
+            for s in siblings_snapshot:
+                if s.key not in existing_keys:
+                    self.representatives.append(s)
+                    existing_keys.add(s.key)
+                    added.append(s)
+            return added
+        # sibling 분리
+        self.remove_from_group(item)
+        if item.key not in existing_keys:
+            self.representatives.append(item)
+            return [item]
+        return []
+
+    def remaining_groups(self) -> list[PhotoGroup]:
+        """현재까지 살아있는 그룹들 (rep 가 dissolve 되지 않은 그룹만)."""
+        return list(self.by_rep.values())
+
 
 # ---------------------------------------------------------------------------
 # Clustering

@@ -29,6 +29,7 @@ from ..models.result import FinalResult, MatchResult, MissEntry
 from ..models.slot import ImageItem, ScanResult, Slot, scan
 from ..utils import paths
 from ..utils import prefs as _prefs
+from ..utils.prefs import AutomationLevel
 from ..workers.thumbnailer import (PRIORITY_ACTIVE_SLOT, PRIORITY_BACKGROUND,
                                      ThumbnailPool, ThumbnailWorker)
 from .pages.match_page import MatchPage
@@ -91,9 +92,15 @@ class MainWindow(QMainWindow):
         self._select_page = SelectPage()
         self._match_page = MatchPage()
         self._result_page = ResultPage()
+        # 올인원 모드 (#3) 의 두 검토 페이지 — 신규.
+        from .pages.group_review_page import GroupReviewPage
+        from .pages.match_review_page import MatchReviewPage
+        self._group_review_page = GroupReviewPage()
+        self._match_review_page = MatchReviewPage()
 
         for w in (self._setup_page, self._select_page,
-                  self._match_page, self._result_page):
+                  self._match_page, self._result_page,
+                  self._group_review_page, self._match_review_page):
             self._stack.addWidget(w)
 
         # 화면 크기 메뉴 -------------------------------------------------
@@ -108,6 +115,11 @@ class MainWindow(QMainWindow):
         self._match_page.skipped_changed.connect(self._schedule_autosave)
         self._match_page.finished.connect(self._on_match_finished)
         self._result_page.new_session_requested.connect(self._new_session)
+        # 그룹 검토 → 매치 시작 / 매치 검토 → 결과
+        self._group_review_page.match_requested.connect(
+            self._on_group_review_done
+        )
+        self._match_review_page.finished.connect(self._on_match_review_done)
 
         # 자동 저장 타이머 -----------------------------------------------
         self._autosave_timer = QTimer(self)
@@ -129,6 +141,10 @@ class MainWindow(QMainWindow):
         self._matches_b: list[MatchResult] = []
         self._skipped_a: dict[str, list[ImageItem]] = defaultdict(list)
         self._skipped_b: dict[str, list[ImageItem]] = defaultdict(list)
+        # 올인원/사진 직접 선택 모드의 매치 검토 결과 (#3).
+        # 비어있지 않으면 _finish_session 이 _matches_a/_b 대신 이걸 사용한다.
+        self._reviewed_matches: list[MatchResult] = []
+        self._reviewed_unmatched: list[MissEntry] = []
         self._stage1_a_snapshot: dict | None = None
         self._stage1_b_snapshot: dict | None = None
         self._matched_val_keys_in_a: set[str] = set()
@@ -342,6 +358,8 @@ class MainWindow(QMainWindow):
         self._skipped_a.clear()
         self._skipped_b.clear()
         self._matched_val_keys_in_a.clear()
+        self._reviewed_matches.clear()
+        self._reviewed_unmatched.clear()
         self._session_id = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
 
         # 양식 폴더의 양식.xlsx 를 결과 폴더로 복사 → 작업 파일 준비 ----
@@ -420,13 +438,64 @@ class MainWindow(QMainWindow):
         # 임계치 자동 추천 ----------------------------------------------
         self._maybe_offer_threshold_suggestion()
         # 자동화 수준에 따라 흐름 분기 (#3 올인원 모드) -------------------
-        if self._input.automation_level == "auto_all":
-            # Stage 1 건너뜀 — 모든 ref + 그룹 대표만 큐에 → 곧장 Stage 2 자동.
-            self._enter_stage2_auto_all()
+        if self._input.automation_level == AutomationLevel.AUTO_ALL:
+            # Stage 1 건너뜀 — 그룹화 결과를 사용자가 검토 → 매치 시작.
+            self._enter_group_review()
             return
         # 'manual' 과 'user_select' 둘 다 Stage 1 은 동일 (사용자 직접).
         self._phase = PHASE_A_SELECT
         self._enter_stage1_phase_a()
+
+    # ==================================================================
+    # 올인원 자동 모드: 그룹 검토 → 매치 시작 → 매치 검토 → 결과 (#3)
+    # ==================================================================
+    def _enter_group_review(self) -> None:
+        """모든 ref 를 그룹화해서 사용자가 검토하는 화면으로 이동."""
+        assert self._scan is not None
+        slots = [self._scan.slots[n] for n in self._scan.common_slot_names]
+        all_refs: list[ImageItem] = []
+        for slot in sorted(slots, key=lambda s: s.name):
+            all_refs.extend(slot.ref_images)
+        grouping = self._make_groups(all_refs)
+        # 그룹화 결과가 없으면 (사진 수 부족) 그냥 모든 ref 를 representatives 로.
+        if grouping is None:
+            from ..models.group import GroupingResult
+            grouping = GroupingResult(representatives=list(all_refs))
+        self._group_review_page.load_state(grouping)
+        self._show_page(self._group_review_page)
+
+    def _on_group_review_done(self) -> None:
+        """GroupReviewPage 의 [매치 시작] 시그널 → Stage 2 자동 진입."""
+        assert self._scan is not None and self._input is not None
+        queue = self._group_review_page.get_queue()
+        if not queue:
+            QMessageBox.warning(self, i18n.KO.APP_TITLE, i18n.KO.WARN_NO_IMAGES)
+            return
+        pool: dict[str, list[ImageItem]] = {}
+        for name in self._scan.common_slot_names:
+            slot = self._scan.slots[name]
+            pool[name] = list(slot.val_images)
+        self._match_page.load_state(
+            queue=queue,
+            val_pool_by_slot=pool,
+            threshold=self._input.threshold,
+            phase_label=i18n.KO.STAGE2_TITLE,
+            direction="A→B",
+            session_id=self._session_id,
+            model_name=self._active_model_name(),
+            auto_mode=True,
+        )
+        self._show_page(self._match_page)
+        self._phase = PHASE_A_MATCH
+        self._autosave()
+
+    def _on_match_review_done(self,
+                              kept: list,
+                              unmatched_refs: list) -> None:
+        """MatchReviewPage 의 [검토 완료] 시그널 → 결과 페이지 진입."""
+        self._reviewed_matches = list(kept)
+        self._reviewed_unmatched = list(unmatched_refs)
+        self._finish_session()
 
     def _maybe_offer_threshold_suggestion(self) -> None:
         """스캔 데이터의 점수 분포를 분석해 임계치를 추천."""
@@ -537,45 +606,6 @@ class MainWindow(QMainWindow):
         return {k: list(v) for k, v in panel.items() if v}
 
     # ==================================================================
-    # Stage 2 — 올인원 자동 모드 (#3): Stage 1 건너뛰기
-    # ==================================================================
-    def _enter_stage2_auto_all(self) -> None:
-        """모든 ref 를 자동으로 큐에 넣고 Stage 2 자동 매치로 진입.
-
-        교차 검증 모드와 호환되지 않는 단순화된 흐름 — single 모드 기준으로
-        진행한다. 사용자가 cross + auto_all 을 함께 골랐다면 single 처럼 동작.
-        """
-        assert self._scan is not None and self._input is not None
-        slots = [self._scan.slots[n] for n in self._scan.common_slot_names]
-        # 모든 ref 이미지 모으기 (낮은 호기 = ref 기준 — single 모드 기본)
-        all_refs: list[ImageItem] = []
-        for slot in sorted(slots, key=lambda s: s.name):
-            all_refs.extend(slot.ref_images)
-        # 그룹화로 거의 동일한 사진은 대표 한 장만 큐에.
-        grouping = self._make_groups(all_refs)
-        queue = grouping.representatives if grouping else all_refs
-
-        # 매칭 대상 풀 = 같은 Slot 의 val 측 모든 사진.
-        pool: dict[str, list[ImageItem]] = {}
-        for name in self._scan.common_slot_names:
-            slot = self._scan.slots[name]
-            pool[name] = list(slot.val_images)
-
-        self._match_page.load_state(
-            queue=queue,
-            val_pool_by_slot=pool,
-            threshold=self._input.threshold,
-            phase_label=i18n.KO.STAGE2_TITLE,
-            direction="A→B",
-            session_id=self._session_id,
-            model_name=self._active_model_name(),
-            auto_mode=True,
-        )
-        self._show_page(self._match_page)
-        self._phase = PHASE_A_MATCH
-        self._autosave()
-
-    # ==================================================================
     # Stage 2 — Phase A
     # ==================================================================
     def _enter_stage2_phase_a(self) -> None:
@@ -596,7 +626,7 @@ class MainWindow(QMainWindow):
 
         direction = "A→B"
         phase_lab = i18n.KO.PHASE_A_MATCH if self._is_cross() else i18n.KO.STAGE2_TITLE
-        auto_mode = self._input.automation_level in ("user_select", "auto_all")
+        auto_mode = AutomationLevel.is_auto(self._input.automation_level)
         self._match_page.load_state(
             queue=queue,
             val_pool_by_slot=pool,
@@ -635,7 +665,7 @@ class MainWindow(QMainWindow):
             # auto_all 모드는 single 흐름 강제 — Phase B 로 진입하지 않는다.
             auto_all = (
                 self._input is not None
-                and self._input.automation_level == "auto_all"
+                and self._input.automation_level == AutomationLevel.AUTO_ALL
             )
             if self._is_cross() and not auto_all:
                 QMessageBox.information(
@@ -644,13 +674,27 @@ class MainWindow(QMainWindow):
                 )
                 self._enter_stage1_phase_b()
             else:
-                self._finish_session()
+                self._proceed_to_review_or_finish()
         elif self._phase == PHASE_B_MATCH:
             st = self._match_page.get_state()
             if st is not None:
                 for slot, items in st.no_match.items():
                     self._skipped_b[slot].extend(items)
+            self._proceed_to_review_or_finish()
+
+    def _proceed_to_review_or_finish(self) -> None:
+        """자동 모드(user_select / auto_all)면 MatchReviewPage 로,
+        수동 모드면 곧장 결과 페이지로."""
+        if self._input is None:
             self._finish_session()
+            return
+        auto_mode = AutomationLevel.is_auto(self._input.automation_level)
+        if not auto_mode:
+            self._finish_session()
+            return
+        merged = self._merge_matches()
+        self._match_review_page.load_state(merged)
+        self._show_page(self._match_review_page)
 
     # ==================================================================
     # Stage 1 — Phase B (reverse direction)
@@ -706,7 +750,7 @@ class MainWindow(QMainWindow):
             pool[name] = slot.ref_images if lower == "ref" else slot.val_images
 
         direction = "B→A"
-        auto_mode = self._input.automation_level in ("user_select", "auto_all")
+        auto_mode = AutomationLevel.is_auto(self._input.automation_level)
         self._match_page.load_state(
             queue=queue,
             val_pool_by_slot=pool,
@@ -726,9 +770,16 @@ class MainWindow(QMainWindow):
     # ==================================================================
     def _finish_session(self) -> None:
         assert self._scan is not None and self._input is not None
-        merged = self._merge_matches()
+        # 자동 모드 + 매치 검토를 거친 경우 reviewed_matches 가 우선.
+        if self._reviewed_matches:
+            merged = list(self._reviewed_matches)
+        else:
+            merged = self._merge_matches()
         miss_fast, miss_slow = self._compute_miss_lists()
         unmatched_refs = self._compute_unmatched_refs()
+        # 사용자가 매치 검토에서 ‘매치 없음’ 으로 표시한 ref 들 합치기.
+        if self._reviewed_unmatched:
+            unmatched_refs.extend(self._reviewed_unmatched)
 
         result = FinalResult(
             mode=self._input.mode,
@@ -744,7 +795,7 @@ class MainWindow(QMainWindow):
         # 결과 페이지에는 ‘이미 복사해둔 작업 파일’ 과 ‘템플릿 원본’ 둘 다 전달.
         auto_mode = (
             self._input is not None
-            and self._input.automation_level in ("user_select", "auto_all")
+            and AutomationLevel.is_auto(self._input.automation_level)
         )
         self._result_page.show_result(
             result,
@@ -881,6 +932,8 @@ class MainWindow(QMainWindow):
         self._matched_val_keys_in_a.clear()
         self._stage1_a_snapshot = None
         self._stage1_b_snapshot = None
+        self._reviewed_matches.clear()
+        self._reviewed_unmatched.clear()
         self._phase = PHASE_NONE
         # 세션 종료 직후 평가 집계를 갱신해서 모델 카드의 정확도를 새로 반영.
         self._refresh_models_safe()

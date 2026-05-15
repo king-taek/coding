@@ -182,3 +182,38 @@ def encode_jpeg(img: Image.Image, quality: int = 85) -> bytes:
     buf = io.BytesIO()
     _to_rgb(img).save(buf, format="JPEG", quality=quality, optimize=True)
     return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Qt 픽스맵 공용 로더 — 위젯에서 매번 직접 작성하던 try/scale/fallback 패턴을 통합.
+# Qt 가용 환경에서만 의미 있음. QPixmap 은 import 시점에서만 만들 수 있어 함수
+# 내부에서 lazy import.
+# ---------------------------------------------------------------------------
+def load_thumb_qpixmap(path: "Path", size: int, *,
+                       kind: str = "thumb"):
+    """캐시된 썸네일/중간 이미지를 ``size`` x ``size`` 박스에 맞춰 스케일된
+    ``QPixmap`` 으로 돌려준다. 캐시 미스/파일 오류 시 어두운 회색 fallback.
+
+    ``kind`` 는 ``"thumb"`` 또는 ``"mid"``.  각각 ``get_thumb_path`` /
+    ``get_mid_path`` 를 사용.
+
+    GUI 스레드에서만 호출해야 한다 (QPixmap 은 main-thread only).
+    """
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtGui import QColor, QPixmap
+
+    fallback = QPixmap(size, size)
+    fallback.fill(QColor(20, 28, 40))
+    try:
+        cache_path_fn = get_mid_path if kind == "mid" else get_thumb_path
+        tp = cache_path_fn(Path(path))
+        pix = QPixmap(str(tp))
+        if pix.isNull():
+            return fallback
+        return pix.scaled(
+            size, size,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+    except Exception:
+        return fallback

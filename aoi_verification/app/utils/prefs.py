@@ -18,6 +18,19 @@ from . import paths
 _PREFS_FILE = "ui_prefs.json"
 
 
+# 자동화 수준 상수 (#3 올인원 모드) — 코드 전반에서 raw string 대신 이걸 사용.
+class AutomationLevel:
+    MANUAL = "manual"
+    USER_SELECT = "user_select"
+    AUTO_ALL = "auto_all"
+
+    AUTO_MODES = frozenset({USER_SELECT, AUTO_ALL})
+
+    @classmethod
+    def is_auto(cls, level: str) -> bool:
+        return level in cls.AUTO_MODES
+
+
 @dataclass
 class UiPrefs:
     """다음 실행에도 이어갈 UI 상태."""

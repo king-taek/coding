@@ -18,6 +18,7 @@ from ...learning import triplet_model as _triplet
 from ...learning.dataset import TrainingDataStore
 from ...learning.trainer import TrainHeadWorker
 from ...utils import prefs as _prefs
+from ...utils.prefs import AutomationLevel
 from ..widgets.collapsible_section import CollapsibleSection
 from ..widgets.loading_overlay import LoadingOverlay
 from ..widgets.neon_button import NeonButton
@@ -32,7 +33,7 @@ class SetupInput:
     ref_machine: str
     val_machine: str
     threshold: float
-    automation_level: str = "manual"   # "manual" | "user_select" | "auto_all"
+    automation_level: str = AutomationLevel.MANUAL
 
 
 class SetupPage(QWidget):
@@ -193,10 +194,10 @@ class SetupPage(QWidget):
         self.radio_auto_user = QRadioButton(i18n.KO.AUTOMATION_USER_SELECT, auto_card)
         self.radio_auto_all = QRadioButton(i18n.KO.AUTOMATION_AUTO_ALL, auto_card)
         # 마지막 선택 복원.
-        _last_auto = getattr(_prefs_now, "automation_level", "manual")
-        if _last_auto == "user_select":
+        _last_auto = getattr(_prefs_now, "automation_level", AutomationLevel.MANUAL)
+        if _last_auto == AutomationLevel.USER_SELECT:
             self.radio_auto_user.setChecked(True)
-        elif _last_auto == "auto_all":
+        elif _last_auto == AutomationLevel.AUTO_ALL:
             self.radio_auto_all.setChecked(True)
         else:
             self.radio_auto_manual.setChecked(True)
@@ -333,11 +334,11 @@ class SetupPage(QWidget):
         mode = "cross" if self.radio_cross.isChecked() else "single"
         threshold = self.slider.value() / 100.0
         if self.radio_auto_all.isChecked():
-            automation = "auto_all"
+            automation = AutomationLevel.AUTO_ALL
         elif self.radio_auto_user.isChecked():
-            automation = "user_select"
+            automation = AutomationLevel.USER_SELECT
         else:
-            automation = "manual"
+            automation = AutomationLevel.MANUAL
         # 마지막 입력 값을 영속화 (#14)
         _prefs.patch(
             threshold=threshold,
