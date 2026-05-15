@@ -23,9 +23,20 @@ from . import cache
 Image.MAX_IMAGE_PIXELS = None  # 매우 큰 AOI 이미지를 허용
 
 
-def _open(src: Path) -> Image.Image:
-    """이미지 로드 + EXIF 회전 보정."""
+def _open(src: Path, *, draft_long_edge: Optional[int] = None) -> Image.Image:
+    """이미지 로드 + EXIF 회전 보정.
+
+    ``draft_long_edge`` 가 주어지면 JPEG 일 때 libjpeg 의 빠른 다운스케일
+    디코드를 사용한다 (전체 해상도로 디코드 후 리사이즈하는 것보다
+    3~5× 빠름). 다른 포맷에는 영향이 없다.
+    """
     img = Image.open(str(src))
+    if draft_long_edge is not None:
+        try:
+            # libjpeg 가 1/2, 1/4, 1/8 스케일로 다운스케일 디코드.
+            img.draft("RGB", (draft_long_edge, draft_long_edge))
+        except Exception:
+            pass
     img.load()
     try:
         img = ImageOps.exif_transpose(img)
@@ -60,27 +71,49 @@ def _to_rgb(img: Image.Image) -> Image.Image:
 # ---------------------------------------------------------------------------
 # Public — cached thumbnail / mid generation
 # ---------------------------------------------------------------------------
-def get_thumb_path(src: Path) -> Path:
-    """200px 썸네일 캐시 파일 경로를 보장 (없으면 생성)."""
+def get_thumb_path(src: Path, *,
+                   tier: Optional["config.SizingTier"] = None) -> Path:
+    """썸네일 캐시 파일 경로를 보장 (없으면 생성).
+
+    ``tier`` 가 주어지면 해당 화질 티어로 생성/캐시. 미지정 시 기본 200px/Q80.
+    """
+    if tier is None:
+        return _ensure_resized(src, size_option="thumb",
+                               long_edge=config.Sizing.THUMB_PX,
+                               jpeg_q=config.Sizing.THUMB_JPEG_Q,
+                               extra="")
     return _ensure_resized(src, size_option="thumb",
-                           long_edge=config.Sizing.THUMB_PX,
-                           jpeg_q=config.Sizing.THUMB_JPEG_Q)
+                           long_edge=int(tier.thumb_px),
+                           jpeg_q=int(tier.thumb_q),
+                           extra=f"t{tier.thumb_px}q{tier.thumb_q}")
 
 
-def get_mid_path(src: Path) -> Path:
-    """800px 중간 이미지 캐시 파일 경로를 보장 (없으면 생성)."""
+def get_mid_path(src: Path, *,
+                 tier: Optional["config.SizingTier"] = None) -> Path:
+    """중간 이미지 캐시 파일 경로를 보장 (없으면 생성).
+
+    ``tier`` 가 주어지면 해당 화질 티어로 생성/캐시. 미지정 시 기본 800px/Q85.
+    """
+    if tier is None:
+        return _ensure_resized(src, size_option="mid",
+                               long_edge=config.Sizing.MID_PX,
+                               jpeg_q=config.Sizing.MID_JPEG_Q,
+                               extra="")
     return _ensure_resized(src, size_option="mid",
-                           long_edge=config.Sizing.MID_PX,
-                           jpeg_q=config.Sizing.MID_JPEG_Q)
+                           long_edge=int(tier.mid_px),
+                           jpeg_q=int(tier.mid_q),
+                           extra=f"t{tier.mid_px}q{tier.mid_q}")
 
 
 def _ensure_resized(src: Path, *, size_option: str,
-                    long_edge: int, jpeg_q: int) -> Path:
-    out = cache.cache_path(src, size_option)  # type: ignore[arg-type]
+                    long_edge: int, jpeg_q: int,
+                    extra: str = "") -> Path:
+    out = cache.cache_path(src, size_option, extra=extra)  # type: ignore[arg-type]
     if out.exists() and out.stat().st_size > 0:
         return out
     try:
-        img = _open(src)
+        # JPEG 빠른 디코드를 위해 draft 힌트를 함께 전달.
+        img = _open(src, draft_long_edge=long_edge)
     except Exception as exc:  # pragma: no cover — handled by caller
         raise RuntimeError(f"이미지 로드 실패: {src} ({exc})") from exc
     img = _to_rgb(_fit_long_edge(img, long_edge))

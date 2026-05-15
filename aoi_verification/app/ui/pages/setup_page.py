@@ -6,9 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import (QButtonGroup, QFileDialog, QFormLayout, QGroupBox,
-                              QHBoxLayout, QLabel, QLineEdit, QMessageBox,
-                              QRadioButton, QSlider, QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import (QButtonGroup, QCheckBox, QFileDialog, QFormLayout,
+                              QGroupBox, QHBoxLayout, QLabel, QLineEdit,
+                              QMessageBox, QRadioButton, QSlider, QVBoxLayout,
+                              QWidget)
 
 from ... import config, i18n
 from ...learning import evaluator as _evaluator
@@ -184,6 +185,18 @@ class SetupPage(QWidget):
         sl.addWidget(self.slider, stretch=1)
         sl.addWidget(self.threshold_label)
         slider_card.body().addLayout(sl)
+
+        # 빠른 모드 (썸네일 화질 낮춤) ----------------------------------
+        speed_row = QHBoxLayout()
+        self.check_speed_mode = QCheckBox(i18n.KO.SPEED_MODE_LABEL, slider_card)
+        self.check_speed_mode.setToolTip(i18n.KO.SPEED_MODE_TOOLTIP)
+        self.check_speed_mode.setChecked(bool(_last_prefs.speed_mode))
+        self.check_speed_mode.toggled.connect(
+            lambda on: _prefs.patch(speed_mode=bool(on))
+        )
+        speed_row.addWidget(self.check_speed_mode)
+        speed_row.addStretch(1)
+        slider_card.body().addLayout(speed_row)
         root.addWidget(slider_card)
 
         root.addStretch(1)
