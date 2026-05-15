@@ -47,7 +47,8 @@ class SetupPage(QWidget):
     # ------------------------------------------------------------------
     def _build(self) -> None:
         # 좁은/짧은 창에서도 모든 컨트롤에 접근 가능하도록 스크롤 영역으로 감싼다.
-        # ‘검증 시작’ 버튼은 스크롤 영역 밖에 고정해 어떤 창 크기에서도 항상 보임.
+        # 기존 디자인을 유지하려고 별도 마진·배경·푸터 chrome 은 추가하지 않는다.
+        # 스크롤바는 ‘필요할 때만’ 자동으로 나타난다.
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
@@ -57,21 +58,22 @@ class SetupPage(QWidget):
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        outer.addWidget(scroll, stretch=1)
+        # QScrollArea 자체의 배경/보더가 페이지 배경 위에 겹쳐 보이지 않게.
+        scroll.setStyleSheet(
+            "QScrollArea { background: transparent; border: none; }"
+        )
+        scroll.viewport().setStyleSheet("background: transparent;")
+        outer.addWidget(scroll)
 
         host = QWidget()
         host.setSizePolicy(QSizePolicy.Policy.Expanding,
                            QSizePolicy.Policy.MinimumExpanding)
         scroll.setWidget(host)
 
+        # 원본과 동일한 외곽 마진/스페이싱 유지.
         root = QVBoxLayout(host)
-        # 마진/스페이싱 축소 — 좁은 창에서 카드가 잘리지 않도록.
-        root.setContentsMargins(24, 20, 24, 20)
-        root.setSpacing(12)
-
-        # 외부에서 채워줄 placeholder — 본문 끝의 stretch + start_btn 은
-        # 스크롤 영역 밖 sticky 행으로 옮긴다.
-        self._outer_layout = outer
+        root.setContentsMargins(40, 40, 40, 40)
+        root.setSpacing(20)
 
         # 제목 행 + 우측 [화면 크기 설정] 버튼 ---------------------------
         title_row = QHBoxLayout()
@@ -139,6 +141,8 @@ class SetupPage(QWidget):
         self._model_data_label.setProperty("role", "muted")
         self._model_card.body().addWidget(self._model_data_label)
 
+        bar = QHBoxLayout()
+        bar.setSpacing(8)
         self.btn_retrain = NeonButton(i18n.KO.BTN_RETRAIN, role="primary")
         self.btn_refresh_acc = NeonButton(i18n.KO.BTN_REFRESH_ACC, role="ghost")
         self.btn_delete_model = NeonButton(i18n.KO.BTN_DELETE_MODEL, role="danger")
@@ -149,20 +153,13 @@ class SetupPage(QWidget):
         self.btn_delete_model.clicked.connect(self._on_delete_model)
         self.btn_export_model.clicked.connect(self._on_export_model)
         self.btn_import_model.clicked.connect(self._on_import_model)
-        # 5 개 버튼을 한 줄에 모두 넣으면 좁은 창에서 잘리므로 두 줄로 분할.
-        bar1 = QHBoxLayout()
-        bar1.setSpacing(8)
-        bar1.addWidget(self.btn_retrain)
-        bar1.addWidget(self.btn_refresh_acc)
-        bar1.addWidget(self.btn_delete_model)
-        bar1.addStretch(1)
-        bar2 = QHBoxLayout()
-        bar2.setSpacing(8)
-        bar2.addWidget(self.btn_export_model)
-        bar2.addWidget(self.btn_import_model)
-        bar2.addStretch(1)
-        self._model_card.body().addLayout(bar1)
-        self._model_card.body().addLayout(bar2)
+        bar.addWidget(self.btn_retrain)
+        bar.addWidget(self.btn_refresh_acc)
+        bar.addWidget(self.btn_delete_model)
+        bar.addWidget(self.btn_export_model)
+        bar.addWidget(self.btn_import_model)
+        bar.addStretch(1)
+        self._model_card.body().addLayout(bar)
         root.addWidget(self._model_card)
 
         # 학습 워커 / 로딩 상태
@@ -229,22 +226,15 @@ class SetupPage(QWidget):
 
         root.addStretch(1)
 
-        # 시작 버튼 — 스크롤 영역 ‘밖’ 의 sticky 푸터로 배치 -----------------
-        footer = QWidget(self)
-        footer.setObjectName("setupFooter")
-        footer.setStyleSheet(
-            "QWidget#setupFooter { background: rgba(10, 14, 26, 220); "
-            "  border-top: 1px solid #1F2A3F; }"
-        )
-        bar = QHBoxLayout(footer)
-        bar.setContentsMargins(24, 10, 24, 10)
+        # 시작 버튼 -----------------------------------------------------
+        bar = QHBoxLayout()
         bar.addStretch(1)
         self.start_btn = NeonButton(i18n.KO.BTN_START, role="primary")
         self.start_btn.setMinimumWidth(220)
         self.start_btn.setMinimumHeight(46)
         self.start_btn.clicked.connect(self._on_start)
         bar.addWidget(self.start_btn)
-        self._outer_layout.addWidget(footer)
+        root.addLayout(bar)
 
     # ------------------------------------------------------------------
     def _make_machine_group(self, title: str) -> tuple[QGroupBox, QLineEdit, QLineEdit]:
