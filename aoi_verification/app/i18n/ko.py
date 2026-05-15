@@ -105,6 +105,23 @@ PANEL_NO_MATCH_LIST = "매칭 없음 확정"
 IMAGE_SIZE_LABEL = "사진 크기"
 SLOT_LABEL_FMT = "Slot: {slot}"
 
+# ── 화면 크기 설정 ─────────────────────────────────────────────────────────
+WINDOW_SIZE_BTN = "화면 크기 설정"
+WINDOW_SIZE_DIALOG_TITLE = "화면 크기 설정"
+WINDOW_SIZE_PRESET_LABEL = "표준 해상도"
+WINDOW_SIZE_CUSTOM_LABEL = "사용자 지정 (Custom)"
+WINDOW_SIZE_FULLSCREEN_LABEL = "전체 화면 (Fullscreen)"
+WINDOW_SIZE_WIDTH_LABEL = "너비"
+WINDOW_SIZE_HEIGHT_LABEL = "높이"
+WINDOW_SIZE_CURRENT_MAX_FMT = "현재 모니터 최대 ({w}×{h})"
+WINDOW_SIZE_PRESET_ITEM_FMT = "{w}×{h}"
+WINDOW_SIZE_APPLY = "적용"
+WINDOW_SIZE_CANCEL = "취소"
+
+# ── 사용 방법 토글 ────────────────────────────────────────────────────────
+HOWTO_TOGGLE_OPEN = "사용 방법 ▾"
+HOWTO_TOGGLE_CLOSE = "사용 방법 ▴"
+
 # ── 셋업 화면 사용 설명 ────────────────────────────────────────────────────
 SETUP_HOW_TO_USE_TITLE = "사용 방법"
 SETUP_HOW_TO_USE_BODY = (

@@ -17,6 +17,7 @@ from ...learning import triplet_model as _triplet
 from ...learning.dataset import TrainingDataStore
 from ...learning.trainer import TrainHeadWorker
 from ...utils import prefs as _prefs
+from ..widgets.collapsible_section import CollapsibleSection
 from ..widgets.loading_overlay import LoadingOverlay
 from ..widgets.neon_button import NeonButton
 from ..widgets.neon_card import NeonCard
@@ -35,7 +36,8 @@ class SetupInput:
 class SetupPage(QWidget):
     """검증 시작 화면."""
 
-    start_requested = pyqtSignal(object)     # SetupInput
+    start_requested = pyqtSignal(object)             # SetupInput
+    window_size_requested = pyqtSignal()             # MainWindow 가 모달을 띄움
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -47,17 +49,31 @@ class SetupPage(QWidget):
         root.setContentsMargins(40, 40, 40, 40)
         root.setSpacing(20)
 
+        # 제목 행 + 우측 [화면 크기 설정] 버튼 ---------------------------
+        title_row = QHBoxLayout()
         title = QLabel(i18n.KO.SETUP_TITLE, self)
         title.setProperty("role", "title")
-        root.addWidget(title)
+        title_row.addWidget(title, stretch=1)
+
+        self.btn_window_size = NeonButton(i18n.KO.WINDOW_SIZE_BTN, role="ghost")
+        self.btn_window_size.clicked.connect(self.window_size_requested.emit)
+        title_row.addWidget(self.btn_window_size)
+        root.addLayout(title_row)
 
         subtitle = QLabel(i18n.KO.SETUP_HINT, self)
         subtitle.setProperty("role", "subtitle")
         subtitle.setWordWrap(True)
         root.addWidget(subtitle)
 
-        # 사용 방법 안내 카드 -------------------------------------------
-        howto_card = NeonCard(role="card-soft", parent=self)
+        # 사용 방법 안내 — 접을 수 있는 섹션 (기본 접힘) ----------------
+        _prefs_now = _prefs.load()
+        self._howto_section = CollapsibleSection(
+            open_label=i18n.KO.HOWTO_TOGGLE_OPEN,
+            close_label=i18n.KO.HOWTO_TOGGLE_CLOSE,
+            expanded=bool(_prefs_now.howto_expanded),
+            parent=self,
+        )
+        howto_card = NeonCard(role="card-soft", parent=self._howto_section)
         howto_title = QLabel(i18n.KO.SETUP_HOW_TO_USE_TITLE, howto_card)
         howto_title.setStyleSheet(
             "color: #00D4FF; font-weight: 700; letter-spacing: 1px;"
@@ -69,7 +85,11 @@ class SetupPage(QWidget):
             "color: #E5F4FF; line-height: 160%; padding-top: 4px;"
         )
         howto_card.body().addWidget(howto_body)
-        root.addWidget(howto_card)
+        self._howto_section.add_content_widget(howto_card)
+        self._howto_section.toggled.connect(
+            lambda expanded: _prefs.patch(howto_expanded=bool(expanded))
+        )
+        root.addWidget(self._howto_section)
 
         # 학습 모델 카드 ------------------------------------------------
         self._model_card = NeonCard(role="card-soft", parent=self)

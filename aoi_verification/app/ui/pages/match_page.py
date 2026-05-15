@@ -11,10 +11,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QByteArray, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QKeySequence, QPixmap, QShortcut
-from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QMessageBox,
-                              QScrollArea, QSizePolicy, QSlider, QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel,
+                              QMessageBox, QScrollArea, QSizePolicy, QSlider,
+                              QSplitter, QVBoxLayout, QWidget)
 
 from ... import config, i18n
 from ...models.result import MatchResult
@@ -82,9 +83,10 @@ class MatchPage(QWidget):
         top.addWidget(self.progress_label)
         root.addLayout(top)
 
-        # 3 pane --------------------------------------------------------
-        row = QHBoxLayout()
-        row.setSpacing(10)
+        # 3 pane — QSplitter 로 사용자가 분할 비율 조절 -------------------
+        self._h_splitter = QSplitter(Qt.Orientation.Horizontal, self)
+        self._h_splitter.setHandleWidth(6)
+        self._h_splitter.setChildrenCollapsible(False)
 
         # LEFT: skip pool
         left = QFrame(self)
@@ -114,7 +116,7 @@ class MatchPage(QWidget):
         self._left_scroll.setWidget(self._left_host)
         ll.addWidget(self._left_scroll, stretch=1)
         left.setMinimumWidth(260)
-        row.addWidget(left, stretch=2)
+        self._h_splitter.addWidget(left)
 
         # CENTER: 기준 사진 1장
         center = NeonCard(role="card", parent=self)
@@ -189,7 +191,7 @@ class MatchPage(QWidget):
         cl.addLayout(bar)
 
         center.setMinimumWidth(540)
-        row.addWidget(center, stretch=4)
+        self._h_splitter.addWidget(center)
 
         # RIGHT: 후보들
         right = QFrame(self)
@@ -211,12 +213,36 @@ class MatchPage(QWidget):
         self._right_scroll.setWidget(self._right_host)
         rl.addWidget(self._right_scroll, stretch=1)
         right.setMinimumWidth(420)
-        row.addWidget(right, stretch=3)
+        self._h_splitter.addWidget(right)
 
-        root.addLayout(row, stretch=1)
+        self._h_splitter.setStretchFactor(0, 2)
+        self._h_splitter.setStretchFactor(1, 4)
+        self._h_splitter.setStretchFactor(2, 3)
+        root.addWidget(self._h_splitter, stretch=1)
+
+        # 저장된 분할 비율 복원 + 변경 시 영속화 -------------------------
+        _p_match = _prefs.load()
+        if _p_match.splitter_state_match_h:
+            self._h_splitter.restoreState(
+                QByteArray.fromBase64(
+                    _p_match.splitter_state_match_h.encode("ascii")
+                )
+            )
+        self._h_splitter.splitterMoved.connect(self._save_splitter_state)
 
         QShortcut(QKeySequence("S"), self, activated=self._skip_current)
         QShortcut(QKeySequence("N"), self, activated=self._confirm_no_match)
+
+    # ------------------------------------------------------------------
+    def _save_splitter_state(self, *args) -> None:
+        try:
+            _prefs.patch(
+                splitter_state_match_h=bytes(
+                    self._h_splitter.saveState().toBase64()
+                ).decode("ascii"),
+            )
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Public API

@@ -33,8 +33,29 @@ def main() -> int:
     _ensure_package_on_path()
 
     from PyQt6.QtCore import Qt
-    from PyQt6.QtGui import QFont
+    from PyQt6.QtGui import QFont, QGuiApplication
     from PyQt6.QtWidgets import QApplication
+
+    # High-DPI 모니터에서 흐릿함 방지. QApplication 생성 전에 적용해야 한다.
+    # 일부 PyQt6 빌드에서는 AA_EnableHighDpiScaling 이 deprecated 이므로 try.
+    try:
+        QApplication.setAttribute(
+            Qt.ApplicationAttribute.AA_EnableHighDpiScaling, True
+        )
+    except (AttributeError, TypeError):
+        pass
+    try:
+        QApplication.setAttribute(
+            Qt.ApplicationAttribute.AA_UseHighDpiPixmaps, True
+        )
+    except (AttributeError, TypeError):
+        pass
+    try:
+        QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
+            Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+        )
+    except (AttributeError, TypeError):
+        pass
 
     # Spyder/IPython 호환: 기존 인스턴스가 있으면 재사용
     app = QApplication.instance()

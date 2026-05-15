@@ -32,6 +32,18 @@ class UiPrefs:
     last_mode: str = "single"
     group_similarity: float = 0.92           # pHash 그룹화 임계치 (#15)
     group_min_size: int = 3                  # 이 수 이상이어야 그룹으로 묶음
+    # 창 크기 / 전체화면 (사용자가 직접 선택) — 0 은 “미설정” 으로 간주.
+    window_width: int = 0
+    window_height: int = 0
+    fullscreen: bool = False
+    # QSplitter 상태 (Select/Match 페이지). base64 인코딩 문자열.
+    splitter_state_select_h: str = ""
+    splitter_state_select_v: str = ""
+    splitter_state_match_h: str = ""
+    # 사용 방법 패널 펼침 상태 (기본 접힘)
+    howto_expanded: bool = False
+    # 썸네일 빠른 모드 (사용자가 강제로 가장 낮은 품질 티어 사용)
+    speed_mode: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
 
     # ------------------------------------------------------------------

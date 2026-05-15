@@ -42,3 +42,37 @@ def test_corrupt_file_falls_back_to_default(isolated_cache):
     p = prefs.load()
     # 교차 호기 친화 기본값 — 절대 값보다 ‘0.5 근처’ 라는 의도 검증.
     assert 0.40 <= p.threshold <= 0.70
+
+
+def test_window_and_splitter_keys_round_trip(isolated_cache):
+    """창 크기 / 전체화면 / splitter 상태 / 사용 방법 펼침 / 빠른 모드."""
+    p = prefs.UiPrefs(
+        window_width=1600,
+        window_height=900,
+        fullscreen=True,
+        splitter_state_select_h="QlpoOTFBWQ==",
+        splitter_state_select_v="YWJjZA==",
+        splitter_state_match_h="ZHVtbXk=",
+        howto_expanded=True,
+        speed_mode=True,
+    )
+    prefs.save(p)
+    loaded = prefs.load()
+    assert loaded.window_width == 1600
+    assert loaded.window_height == 900
+    assert loaded.fullscreen is True
+    assert loaded.splitter_state_select_h == "QlpoOTFBWQ=="
+    assert loaded.splitter_state_select_v == "YWJjZA=="
+    assert loaded.splitter_state_match_h == "ZHVtbXk="
+    assert loaded.howto_expanded is True
+    assert loaded.speed_mode is True
+
+
+def test_window_keys_default_to_unset(isolated_cache):
+    """기본값은 ‘미설정’ 의미로 0/False."""
+    p = prefs.UiPrefs()
+    assert p.window_width == 0
+    assert p.window_height == 0
+    assert p.fullscreen is False
+    assert p.howto_expanded is False
+    assert p.speed_mode is False
