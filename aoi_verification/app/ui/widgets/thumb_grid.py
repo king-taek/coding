@@ -9,7 +9,7 @@ from typing import Callable, Iterable, Optional
 from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (QCheckBox, QFrame, QGridLayout, QLabel,
-                              QVBoxLayout, QWidget)
+                              QToolButton, QVBoxLayout, QWidget)
 
 from ... import config, i18n
 from ...models.slot import ImageItem
@@ -31,6 +31,7 @@ class _ThumbTile(QFrame):
 
     clicked = pyqtSignal(object)              # ThumbEntry
     toggled = pyqtSignal(object, bool)        # (ThumbEntry, selected)
+    expand_requested = pyqtSignal(object)     # ThumbEntry — ‘더 크게 보기’
 
     def __init__(self,
                  entry: ThumbEntry,
@@ -38,6 +39,7 @@ class _ThumbTile(QFrame):
                  select_mode: bool = False,
                  dim: bool = False,
                  footer: str = "",
+                 show_expand: bool = False,
                  parent=None) -> None:
         super().__init__(parent)
         self.entry = entry
@@ -64,6 +66,27 @@ class _ThumbTile(QFrame):
         self._checkbox: Optional[QCheckBox] = None
         if select_mode:
             self._enable_checkbox()
+
+        # ‘더 크게 보기’ 버튼 (선택 사항 — Stage 2 후보 타일에만 표시) ----
+        self._expand_btn: Optional[QToolButton] = None
+        if show_expand:
+            btn = QToolButton(self)
+            btn.setText("🔍")
+            btn.setToolTip(i18n.KO.EXPAND_VIEW_TOOLTIP)
+            btn.setAutoRaise(True)
+            btn.setFixedSize(QSize(24, 24))
+            btn.setStyleSheet(
+                "QToolButton { background: rgba(0,212,255,0.18);"
+                "  color: #00D4FF; border: 1px solid #00D4FF;"
+                "  border-radius: 4px; font-size: 14px; }"
+                "QToolButton:hover { background: rgba(0,212,255,0.35); }"
+            )
+            btn.move(self.width() - 28, 4)
+            btn.show()
+            btn.clicked.connect(
+                lambda: self.expand_requested.emit(self.entry)
+            )
+            self._expand_btn = btn
 
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
@@ -106,9 +129,11 @@ class _ThumbTile(QFrame):
         cb.show()
         self._checkbox = cb
 
-    # 마우스 클릭 → 시그널 (체크박스 클릭과 분리) -------------------------
+    # 마우스 클릭 → 시그널 (체크박스/확대 버튼 클릭과 분리) -----------------
     def mousePressEvent(self, event):  # noqa: N802
         if self._checkbox is not None and self._checkbox.geometry().contains(event.pos()):
+            return super().mousePressEvent(event)
+        if self._expand_btn is not None and self._expand_btn.geometry().contains(event.pos()):
             return super().mousePressEvent(event)
         if event.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit(self.entry)
@@ -156,17 +181,20 @@ class ThumbGrid(QWidget):
     tile_clicked = pyqtSignal(object)                  # ThumbEntry
     plus_clicked = pyqtSignal()
     selected_changed = pyqtSignal(list)                # list[ThumbEntry]
+    expand_requested = pyqtSignal(object)              # ThumbEntry
 
     def __init__(self,
                  *,
                  columns: int = 4,
                  select_mode: bool = False,
                  truncate: bool = True,
+                 show_expand: bool = False,
                  parent=None) -> None:
         super().__init__(parent)
         self._columns = columns
         self._select_mode = select_mode
         self._truncate = truncate
+        self._show_expand = show_expand
         self._entries: list[ThumbEntry] = []
         self._selected: list[ThumbEntry] = []
 
@@ -213,9 +241,11 @@ class ThumbGrid(QWidget):
         col = 0
         for ent in visible:
             tile = _ThumbTile(ent, select_mode=self._select_mode,
-                              footer=ent.item.filename)
+                              footer=ent.item.filename,
+                              show_expand=self._show_expand)
             tile.clicked.connect(self.tile_clicked.emit)
             tile.toggled.connect(self._on_toggle)
+            tile.expand_requested.connect(self.expand_requested.emit)
             self._grid.addWidget(tile, row, col)
             col += 1
             if col >= self._columns:

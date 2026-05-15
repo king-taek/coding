@@ -659,6 +659,7 @@ class MainWindow(QMainWindow):
         assert self._scan is not None and self._input is not None
         merged = self._merge_matches()
         miss_fast, miss_slow = self._compute_miss_lists()
+        unmatched_refs = self._compute_unmatched_refs()
 
         result = FinalResult(
             mode=self._input.mode,
@@ -669,6 +670,7 @@ class MainWindow(QMainWindow):
             miss_slow=miss_slow,
             slot_only_ref=list(self._scan.ref_only),
             slot_only_val=list(self._scan.val_only),
+            unmatched_refs=unmatched_refs,
         )
         # 결과 페이지에는 ‘이미 복사해둔 작업 파일’ 과 ‘템플릿 원본’ 둘 다 전달.
         self._result_page.show_result(
@@ -776,6 +778,25 @@ class MainWindow(QMainWindow):
                     note="Phase B 매칭 실패",
                 ))
         return miss_fast, miss_slow
+
+    def _compute_unmatched_refs(self) -> list[MissEntry]:
+        """Stage 2 에서 매칭 못 찾은 기준 사진들 (Skip + No-match).
+
+        교차 검증 모드에서는 Phase A 와 Phase B 양쪽에서 수집된다.
+        엑셀에 ‘기준 이미지 + 빨간 파일명’ 행으로 표기되는 정보.
+        """
+        out: list[MissEntry] = []
+        for slot, items in self._skipped_a.items():
+            for it in items:
+                out.append(MissEntry(
+                    slot=slot, side="ref", path=it.path, note="미매칭",
+                ))
+        for slot, items in self._skipped_b.items():
+            for it in items:
+                out.append(MissEntry(
+                    slot=slot, side="val", path=it.path, note="미매칭",
+                ))
+        return out
 
     def _new_session(self) -> None:
         session_mod.clear()

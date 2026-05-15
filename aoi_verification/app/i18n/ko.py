@@ -137,6 +137,15 @@ SIZE_TIER_NOTICE_FMT = (
 MEMORY_USAGE_FMT = "메모리 사용량: {mb} MB"
 MEMORY_PRESSURE_TOAST = "메모리 사용량이 높아 캐시를 정리했습니다"
 
+# ── Stage 2 더 크게 보기 ───────────────────────────────────────────────────
+BTN_EXPAND_VIEW = "더 크게 보기"
+EXPAND_VIEW_TOOLTIP = "이 사진을 크게 보기 (←/→ 이전·다음, Enter 매칭, Esc 돌아가기)"
+BTN_CONFIRM_AS_MATCH = "이 사진으로 매칭"
+BTN_BACK_TO_GRID = "← 돌아가기"
+BTN_EXPAND_PREV = "◀ 이전"
+BTN_EXPAND_NEXT = "다음 ▶"
+EXPAND_POSITION_FMT = "{cur} / {total}"
+
 # ── 셋업 화면 사용 설명 ────────────────────────────────────────────────────
 SETUP_HOW_TO_USE_TITLE = "사용 방법"
 SETUP_HOW_TO_USE_BODY = (

@@ -43,3 +43,6 @@ class FinalResult:
     miss_slow: list[MissEntry] = field(default_factory=list)   # 느린(높은) 호기 쪽
     slot_only_ref: list[str] = field(default_factory=list)
     slot_only_val: list[str] = field(default_factory=list)
+    # Stage 2 에서 매칭을 찾지 못한 (Skip + No-match) 기준 사진들 — 엑셀에
+    # ‘기준 이미지 + 빨간 파일명’ 행으로 함께 표기 (#7).
+    unmatched_refs: list[MissEntry] = field(default_factory=list)
