@@ -241,6 +241,8 @@ MODEL_TOOLTIP = (
 # ── 로딩/진행 ──────────────────────────────────────────────────────────────
 LOAD_THUMBNAIL_FMT = "썸네일 생성 중… {done} / {total}"
 LOAD_FEATURE_FMT = "검증 장비 특징 추출 중… {done} / {total}"
+LOAD_FEATURE_DONE = "검증 장비 특징 추출 완료 — 이후 매칭은 즉시 처리됩니다"
+LOAD_SCORING_FMT = "유사도 계산 중… {done} / {total}"
 LOAD_SCAN = "폴더 스캔 중…"
 LOAD_EXPORT = "엑셀로 저장 중…"
 LOAD_PRECOMPUTE_REF = "기준 장비 특징 추출 중… {done} / {total}"

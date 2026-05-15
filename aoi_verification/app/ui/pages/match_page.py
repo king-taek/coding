@@ -197,7 +197,8 @@ class MatchPage(QWidget):
         center.setMinimumWidth(420)
         self._h_splitter.addWidget(center)
 
-        # RIGHT: 후보들
+        # RIGHT: 후보들 — 내부에 ‘그리드 ↔ 더 크게 보기’ 스택을 두어
+        # 좌측 skip 패널과 중앙 기준 사진은 그대로 두고 후보 패널 안에서만 확대.
         right = QFrame(self)
         right.setProperty("role", "section")
         rl = QVBoxLayout(right)
@@ -208,14 +209,31 @@ class MatchPage(QWidget):
         rt.setStyleSheet("font-weight:700; color:#00D4FF;")
         rl.addWidget(rt)
 
-        self._right_scroll = QScrollArea(right)
+        # 후보 패널 내부 스택: page 0 = 썸네일 그리드, page 1 = 확대 보기
+        self._right_stack = QStackedWidget(right)
+
+        # page 0 — 기존 그리드 (scroll area 를 host widget 으로 감싼다)
+        grid_host = QWidget(self._right_stack)
+        grid_host_layout = QVBoxLayout(grid_host)
+        grid_host_layout.setContentsMargins(0, 0, 0, 0)
+        grid_host_layout.setSpacing(0)
+        self._right_scroll = QScrollArea(grid_host)
         self._right_scroll.setWidgetResizable(True)
         self._right_host = QWidget()
         self._right_grid = QGridLayout(self._right_host)
         self._right_grid.setContentsMargins(4, 4, 4, 4)
         self._right_grid.setSpacing(8)
         self._right_scroll.setWidget(self._right_host)
-        rl.addWidget(self._right_scroll, stretch=1)
+        grid_host_layout.addWidget(self._right_scroll, stretch=1)
+        self._right_stack.addWidget(grid_host)
+
+        # page 1 — 확대 보기 (기준 사진과 나란히 비교 가능하도록 후보 칸 안에서만)
+        self._expand_view = MatchExpandView(self._right_stack)
+        self._expand_view.confirm_match.connect(self._on_expand_confirm)
+        self._expand_view.back_requested.connect(self._exit_expand_view)
+        self._right_stack.addWidget(self._expand_view)
+
+        rl.addWidget(self._right_stack, stretch=1)
         # 3 col × 134(tile) + spacing 16 + 패널 padding 20 = 438 → 후보 9 장이
         # 가로 스크롤 없이 한 화면에 깔리도록.
         right.setMinimumWidth(440)
@@ -224,15 +242,7 @@ class MatchPage(QWidget):
         self._h_splitter.setStretchFactor(0, 2)
         self._h_splitter.setStretchFactor(1, 4)
         self._h_splitter.setStretchFactor(2, 3)
-
-        # 3-pane 과 ‘더 크게 보기’ 페이지를 QStackedWidget 으로 전환 -------
-        self._content_stack = QStackedWidget(self)
-        self._content_stack.addWidget(self._h_splitter)        # page 0
-        self._expand_view = MatchExpandView(self._content_stack)
-        self._expand_view.confirm_match.connect(self._on_expand_confirm)
-        self._expand_view.back_requested.connect(self._exit_expand_view)
-        self._content_stack.addWidget(self._expand_view)        # page 1
-        root.addWidget(self._content_stack, stretch=1)
+        root.addWidget(self._h_splitter, stretch=1)
 
         # 저장된 분할 비율 복원 + 변경 시 영속화 -------------------------
         _p_match = _prefs.load()
@@ -337,14 +347,24 @@ class MatchPage(QWidget):
                 self._worker.stop()
                 self._worker.wait(500)
 
-        self._loading.show_overlay(
-            i18n.KO.LOAD_FEATURE_FMT.format(done=0, total=len(val_items))
-        )
-
-        # 슬롯 단위 RAM 캐시 — 같은 슬롯에서 두 번째 reference 부터 즉시 사용.
-        # 첫 reference 진입 시 워커 thread 가 캐시를 빌드한다 (GUI 블록 방지).
+        # 슬롯 단위 RAM 캐시 — 같은 슬롯의 두 번째 reference 부터 즉시 사용.
+        # 첫 reference 진입 시에만 워커 thread 에서 캐시를 빌드 (GUI 미블록).
         self._slot_cache.set_active(ref.slot)
         val_features = self._slot_cache.get_features(ref.slot) or {}
+        # 모든 val 이 이미 캐시에 들어 있으면 ‘유사도 계산’ 모드.
+        # 누락이 있으면 ‘특징 추출’ 모드로 표시.
+        self._slot_features_ready = (
+            len(val_features) >= len(val_items)
+            and all(it.path in val_features for it in val_items)
+        )
+        loading_fmt = (
+            i18n.KO.LOAD_SCORING_FMT if self._slot_features_ready
+            else i18n.KO.LOAD_FEATURE_FMT
+        )
+        self._loading.show_overlay(
+            loading_fmt.format(done=0, total=len(val_items))
+        )
+        self._current_loading_fmt = loading_fmt
 
         self._worker = MatcherWorker(
             ref, val_items, threshold=self._threshold,
@@ -359,9 +379,9 @@ class MatchPage(QWidget):
         self._worker.start()
 
     def _on_matcher_progress(self, done: int, total: int) -> None:
+        fmt = getattr(self, "_current_loading_fmt", i18n.KO.LOAD_FEATURE_FMT)
         self._loading.set_progress(
-            done, total,
-            i18n.KO.LOAD_FEATURE_FMT.format(done=done, total=total),
+            done, total, fmt.format(done=done, total=total),
         )
 
     def _on_matcher_done(self, candidates: list) -> None:
@@ -453,12 +473,12 @@ class MatchPage(QWidget):
                 start = i
                 break
         self._expand_view.load_candidates(self._current.slot, items, start)
-        self._content_stack.setCurrentIndex(1)
+        self._right_stack.setCurrentIndex(1)
         # 단축키가 동작하도록 포커스 이동.
         self._expand_view.setFocus()
 
     def _exit_expand_view(self) -> None:
-        self._content_stack.setCurrentIndex(0)
+        self._right_stack.setCurrentIndex(0)
 
     def _on_expand_confirm(self, item: ImageItem) -> None:
         """확대 모드에서 [이 사진으로 매칭] 또는 Enter."""
