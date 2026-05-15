@@ -132,30 +132,27 @@ class ExcelExporter(QThread):
         from openpyxl.styles import Alignment, Font, PatternFill
         from openpyxl.utils import get_column_letter
 
-        # 템플릿 확보 — 양식.xlsx 가 있으면 그대로 열고, 없으면 기본 헤더 ----
-        template = self._template or paths.resource_path("양식.xlsx")
-        if template and Path(template).exists():
-            wb = load_workbook(str(template))
-            ws = wb.active
-            layout = _detect_layout(ws)
-        else:
-            wb = Workbook()
-            ws = wb.active
-            ws.title = "AOI 검증 결과"
-            ws[f"{COL_SLOT}{HEADER_ROW}"] = "Slot"
-            ws[f"{COL_REF}{HEADER_ROW}"] = "기준 장비 이미지"
-            ws[f"{COL_VAL}{HEADER_ROW}"] = "검증 장비 이미지"
-            if self._result.mode == "cross":
-                ws[f"{COL_DIR}{HEADER_ROW}"] = "매칭 방향"
-            for c in (COL_SLOT, COL_REF, COL_VAL, COL_DIR):
-                cell = ws[f"{c}{HEADER_ROW}"]
-                cell.font = Font(bold=True)
-                cell.fill = PatternFill("solid", fgColor="111827")
-                cell.alignment = Alignment(horizontal="center", vertical="center")
-            layout = {
-                "slot": COL_SLOT, "ref": COL_REF, "val": COL_VAL, "dir": COL_DIR,
-                "header_row": HEADER_ROW, "data_start_row": DATA_START_ROW,
-            }
+        # 항상 깨끗한 새 워크북 생성 — 회사 SharePoint 출신 ‘양식.xlsx’ 가
+        # (a) MIP/SharePoint 메타데이터로 ‘읽기 전용’ 으로 열리고,
+        # (b) 병합 셀 + 우리 스키마와 다른 컬럼 구조라 직접 채울 수 없는 문제를
+        # 한 번에 해결.  사용자가 보던 Slot/기준/검증/(방향) 헤더는 그대로.
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "AOI 검증 결과"
+        ws[f"{COL_SLOT}{HEADER_ROW}"] = "Slot"
+        ws[f"{COL_REF}{HEADER_ROW}"] = "기준 장비 이미지"
+        ws[f"{COL_VAL}{HEADER_ROW}"] = "검증 장비 이미지"
+        if self._result.mode == "cross":
+            ws[f"{COL_DIR}{HEADER_ROW}"] = "매칭 방향"
+        for c in (COL_SLOT, COL_REF, COL_VAL, COL_DIR):
+            cell = ws[f"{c}{HEADER_ROW}"]
+            cell.font = Font(bold=True, color="FFFFFFFF")
+            cell.fill = PatternFill("solid", fgColor="111827")
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        layout = {
+            "slot": COL_SLOT, "ref": COL_REF, "val": COL_VAL, "dir": COL_DIR,
+            "header_row": HEADER_ROW, "data_start_row": DATA_START_ROW,
+        }
 
         col_slot, col_ref, col_val, col_dir = (
             layout["slot"], layout["ref"], layout["val"], layout["dir"],
@@ -250,6 +247,14 @@ class ExcelExporter(QThread):
 
             self._dst.parent.mkdir(parents=True, exist_ok=True)
             wb.save(str(self._dst))
+            # SharePoint / MIP 메타데이터 제거 — 회사 Excel 에서 ‘읽기 전용’
+            # / ‘보호 보기’ 로 열리는 것을 방지 (양식.xlsx 가 SharePoint
+            # 출신이라 본 메타데이터가 결과 파일에 상속되는 문제).
+            try:
+                _strip_corporate_metadata(self._dst)
+            except Exception:
+                # 메타데이터 정리 실패는 치명적이지 않다 — 결과 파일은 이미 저장됨.
+                pass
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
@@ -305,3 +310,88 @@ def _shrink(xli, max_px: int) -> None:
     else:
         xli.height = max_px
         xli.width = int(w * max_px / h)
+
+
+# ---------------------------------------------------------------------------
+# SharePoint / MIP 메타데이터 청소
+# ---------------------------------------------------------------------------
+# 양식.xlsx 가 SharePoint 에서 다운로드된 파일이라 다음 메타데이터를 가지고
+# 있다 — 회사 Excel 이 이 파일을 ‘기밀/보호 보기/읽기 전용’ 으로 여는 원인:
+#
+#   - customXml/*               : SharePoint Media Service 메타데이터
+#   - docMetadata/LabelInfo.xml : Microsoft Information Protection 라벨
+#   - docProps/custom.xml       : ContentTypeId 등 SharePoint content type 바인딩
+#
+# 저장 직후 zip 안에서 이 항목들을 제거하고, 참조하는 [Content_Types].xml /
+# _rels 파일에서도 해당 라인을 삭제한다.
+import re as _re
+import zipfile as _zip
+
+_STRIP_PREFIXES = ("customXml/", "docMetadata/")
+_STRIP_REL_TARGETS = _re.compile(
+    r'(?i)Target="(?:[^"]*/)?(?:customXml|docMetadata)[^"]*"'
+)
+_STRIP_CONTENT_TYPE_OVERRIDES = _re.compile(
+    r'<Override[^>]*PartName="/(?:customXml|docMetadata)[^"]*"[^>]*/>'
+)
+_STRIP_RELATIONSHIP_LINE = _re.compile(
+    r'<Relationship[^/]*?Target="(?:[^"]*/)?(?:customXml|docMetadata)[^"]*"[^/]*?/>'
+)
+
+
+def _strip_corporate_metadata(xlsx_path: Path) -> None:
+    """저장된 xlsx 에서 SharePoint / MIP 메타데이터를 제거한다.
+
+    실패해도 결과 파일 자체는 손상되지 않도록 임시 파일에 다시 쓴 뒤 atomic
+    rename 으로 교체한다.
+    """
+    xlsx_path = Path(xlsx_path)
+    tmp_out = xlsx_path.with_suffix(xlsx_path.suffix + ".clean.tmp")
+
+    with _zip.ZipFile(xlsx_path, "r") as src:
+        names = src.namelist()
+        has_metadata = any(
+            n.startswith(_STRIP_PREFIXES) for n in names
+        )
+        if not has_metadata:
+            return        # 청소할 게 없으면 그대로 둠
+
+        with _zip.ZipFile(tmp_out, "w", _zip.ZIP_DEFLATED) as dst:
+            for info in src.infolist():
+                name = info.filename
+                if name.startswith(_STRIP_PREFIXES):
+                    continue                # 메타데이터 파일은 통째로 제외
+                data = src.read(name)
+                # 참조 라인 제거 — text XML 만 정리
+                if name in (
+                    "[Content_Types].xml",
+                    "_rels/.rels",
+                    "xl/_rels/workbook.xml.rels",
+                ):
+                    try:
+                        text = data.decode("utf-8")
+                    except UnicodeDecodeError:
+                        dst.writestr(info, data)
+                        continue
+                    text = _STRIP_CONTENT_TYPE_OVERRIDES.sub("", text)
+                    text = _STRIP_RELATIONSHIP_LINE.sub("", text)
+                    data = text.encode("utf-8")
+                elif name == "docProps/custom.xml":
+                    # ContentTypeId 만 가진 custom.xml 은 통째로 비워도 무방.
+                    # Excel 이 ContentTypeId 를 보면 SharePoint 문서로 인식.
+                    try:
+                        text = data.decode("utf-8")
+                        if 'name="ContentTypeId"' in text:
+                            # 빈 properties 로 대체.
+                            data = (
+                                b'<?xml version="1.0" encoding="UTF-8" '
+                                b'standalone="yes"?>\n'
+                                b'<Properties xmlns='
+                                b'"http://schemas.openxmlformats.org/'
+                                b'officeDocument/2006/custom-properties"/>'
+                            )
+                    except UnicodeDecodeError:
+                        pass
+                dst.writestr(info, data)
+
+    tmp_out.replace(xlsx_path)
