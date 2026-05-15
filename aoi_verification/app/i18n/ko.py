@@ -105,6 +105,47 @@ PANEL_NO_MATCH_LIST = "매칭 없음 확정"
 IMAGE_SIZE_LABEL = "사진 크기"
 SLOT_LABEL_FMT = "Slot: {slot}"
 
+# ── 화면 크기 설정 ─────────────────────────────────────────────────────────
+WINDOW_SIZE_BTN = "화면 크기 설정"
+WINDOW_SIZE_DIALOG_TITLE = "화면 크기 설정"
+WINDOW_SIZE_PRESET_LABEL = "표준 해상도"
+WINDOW_SIZE_CUSTOM_LABEL = "사용자 지정 (Custom)"
+WINDOW_SIZE_FULLSCREEN_LABEL = "전체 화면 (Fullscreen)"
+WINDOW_SIZE_WIDTH_LABEL = "너비"
+WINDOW_SIZE_HEIGHT_LABEL = "높이"
+WINDOW_SIZE_CURRENT_MAX_FMT = "현재 모니터 최대 ({w}×{h})"
+WINDOW_SIZE_PRESET_ITEM_FMT = "{w}×{h}"
+WINDOW_SIZE_APPLY = "적용"
+WINDOW_SIZE_CANCEL = "취소"
+
+# ── 사용 방법 토글 ────────────────────────────────────────────────────────
+HOWTO_TOGGLE_OPEN = "사용 방법 ▾"
+HOWTO_TOGGLE_CLOSE = "사용 방법 ▴"
+
+# ── 썸네일 빠른 모드 ──────────────────────────────────────────────────────
+SPEED_MODE_LABEL = "빠른 모드 (썸네일 화질 낮춤)"
+SPEED_MODE_TOOLTIP = (
+    "사진이 많을 때 썸네일/중간 이미지 화질을 자동으로 낮춰 처리 시간을\n"
+    "줄입니다. 체크하면 항상 가장 빠른 티어 (140px / Q65) 를 사용합니다.\n"
+    "결과 엑셀에 들어가는 중간 이미지에도 영향을 줍니다."
+)
+SIZE_TIER_NOTICE_FMT = (
+    "사진이 많아 썸네일 화질을 자동 조정했습니다 ({thumb}px / Q{q})"
+)
+
+# ── 상태 바: 메모리 / 진행 ────────────────────────────────────────────────
+MEMORY_USAGE_FMT = "메모리 사용량: {mb} MB"
+MEMORY_PRESSURE_TOAST = "메모리 사용량이 높아 캐시를 정리했습니다"
+
+# ── Stage 2 더 크게 보기 ───────────────────────────────────────────────────
+BTN_EXPAND_VIEW = "더 크게 보기"
+EXPAND_VIEW_TOOLTIP = "이 사진을 크게 보기 (←/→ 이전·다음, Enter 매칭, Esc 돌아가기)"
+BTN_CONFIRM_AS_MATCH = "이 사진으로 매칭"
+BTN_BACK_TO_GRID = "← 돌아가기"
+BTN_EXPAND_PREV = "◀ 이전"
+BTN_EXPAND_NEXT = "다음 ▶"
+EXPAND_POSITION_FMT = "{cur} / {total}"
+
 # ── 셋업 화면 사용 설명 ────────────────────────────────────────────────────
 SETUP_HOW_TO_USE_TITLE = "사용 방법"
 SETUP_HOW_TO_USE_BODY = (

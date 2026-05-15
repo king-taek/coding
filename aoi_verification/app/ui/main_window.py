@@ -20,19 +20,25 @@ from typing import Iterable, Optional
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QMainWindow,
-                              QMessageBox, QStackedWidget, QVBoxLayout, QWidget)
+                              QMessageBox, QStackedWidget, QStatusBar,
+                              QVBoxLayout, QWidget)
 
 from .. import config, i18n
 from ..models import session as session_mod
 from ..models.result import FinalResult, MatchResult, MissEntry
 from ..models.slot import ImageItem, ScanResult, Slot, scan
 from ..utils import paths
-from ..workers.thumbnailer import ThumbnailWorker
+from ..utils import prefs as _prefs
+from ..workers.thumbnailer import (PRIORITY_ACTIVE_SLOT, PRIORITY_BACKGROUND,
+                                     ThumbnailPool, ThumbnailWorker)
 from .pages.match_page import MatchPage
 from .pages.result_page import ResultPage
 from .pages.select_page import SelectPage
 from .pages.setup_page import SetupInput, SetupPage
 from .widgets.loading_overlay import LoadingOverlay
+from .widgets.window_size_dialog import (MIN_HEIGHT, MIN_WIDTH,
+                                           WindowSizeDialog,
+                                           suggest_default_size)
 
 
 # ---------------------------------------------------------------------------
@@ -63,6 +69,23 @@ class MainWindow(QMainWindow):
         self._stack = QStackedWidget(self)
         self.setCentralWidget(self._stack)
 
+        # 상태 바 + 메모리 표시 (psutil 가용 시) ----------------------------
+        self._status_bar = QStatusBar(self)
+        self.setStatusBar(self._status_bar)
+        self._mem_label = QLabel("", self._status_bar)
+        self._mem_label.setProperty("role", "muted")
+        self._status_bar.addPermanentWidget(self._mem_label)
+        self._mem_timer = QTimer(self)
+        self._mem_timer.setInterval(2000)
+        self._mem_timer.timeout.connect(self._update_memory_label)
+        self._mem_pressure_shown = False
+        try:
+            import psutil  # noqa: F401
+            self._mem_timer.start()
+            self._update_memory_label()
+        except Exception:
+            pass
+
         # 페이지 ---------------------------------------------------------
         self._setup_page = SetupPage()
         self._select_page = SelectPage()
@@ -78,6 +101,7 @@ class MainWindow(QMainWindow):
 
         # 시그널 ---------------------------------------------------------
         self._setup_page.start_requested.connect(self._on_start)
+        self._setup_page.window_size_requested.connect(self._open_window_size_dialog)
         self._select_page.finished.connect(self._on_select_finished)
         self._select_page.state_changed.connect(self._schedule_autosave)
         self._match_page.match_confirmed.connect(self._on_match_confirmed)
@@ -96,6 +120,8 @@ class MainWindow(QMainWindow):
         # 상태 -----------------------------------------------------------
         self._loading = LoadingOverlay(self)
         self._thumb_worker: Optional[ThumbnailWorker] = None
+        self._thumb_pool: Optional[ThumbnailPool] = None
+        self._sizing_tier: Optional[config.SizingTier] = None
         self._scan: Optional[ScanResult] = None
         self._input: Optional[SetupInput] = None
         self._phase: str = PHASE_NONE
@@ -112,6 +138,72 @@ class MainWindow(QMainWindow):
 
         # 이어하기 ------------------------------------------------------
         QTimer.singleShot(50, self._maybe_resume)
+
+    # ==================================================================
+    # 메모리 사용량 표시
+    # ==================================================================
+    def _update_memory_label(self) -> None:
+        try:
+            import psutil
+            rss = psutil.Process().memory_info().rss
+        except Exception:
+            return
+        self._mem_label.setText(
+            i18n.KO.MEMORY_USAGE_FMT.format(mb=int(rss / (1024 * 1024)))
+        )
+        # 한도 초과 시 단발 토스트.
+        if rss > config.MEMORY_PRESSURE_BYTES and not self._mem_pressure_shown:
+            self._mem_pressure_shown = True
+            self._status_bar.showMessage(
+                i18n.KO.MEMORY_PRESSURE_TOAST, 4000
+            )
+        elif rss < int(config.MEMORY_PRESSURE_BYTES * 0.9):
+            # 압박이 해제되면 다시 알릴 수 있도록 플래그 재설정.
+            self._mem_pressure_shown = False
+
+    # ==================================================================
+    # 창 크기 — 사용자 선택값 복원 / 모달
+    # ==================================================================
+    def _apply_saved_window_size(self) -> None:
+        """저장된 크기를 복원하거나, 없으면 모니터 영역에 맞춰 추천."""
+        p = _prefs.load()
+        if p.fullscreen:
+            # 우선 합리적인 normal 크기로 resize 한 뒤 fullscreen 진입 — 토글 시
+            # 자연스러운 복귀 크기 확보.
+            dw, dh = suggest_default_size()
+            self.resize(dw, dh)
+            self.showFullScreen()
+            return
+        if p.window_width >= MIN_WIDTH and p.window_height >= MIN_HEIGHT:
+            self.resize(p.window_width, p.window_height)
+            return
+        # 미설정 → 모니터 영역에 맞는 권장값.
+        dw, dh = suggest_default_size()
+        self.resize(dw, dh)
+
+    def _open_window_size_dialog(self) -> None:
+        from PyQt6.QtWidgets import QDialog
+        p = _prefs.load()
+        dlg = WindowSizeDialog(
+            current_width=p.window_width,
+            current_height=p.window_height,
+            current_fullscreen=p.fullscreen,
+            parent=self,
+        )
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        choice = dlg.chosen()
+        _prefs.patch(
+            window_width=int(choice.width),
+            window_height=int(choice.height),
+            fullscreen=bool(choice.fullscreen),
+        )
+        if choice.fullscreen:
+            self.showFullScreen()
+        else:
+            if self.isFullScreen():
+                self.showNormal()
+            self.resize(int(choice.width), int(choice.height))
 
     # ==================================================================
     # Entry / resume
@@ -148,6 +240,12 @@ class MainWindow(QMainWindow):
 
     def _refresh_models_safe(self) -> None:
         """학습 모듈 import / 평가 집계 실패가 셋업 화면을 막지 않도록 wrap."""
+        # 첫 실행에서 active.txt 가 없으면 latest.txt 로 fallback (스펙 §8.2-c).
+        try:
+            from ..learning import registry as _reg
+            _reg.apply_latest_if_active_unset()
+        except Exception:
+            pass
         try:
             from ..learning import evaluator as _ev
             _ev.refresh_accuracy()
@@ -273,19 +371,48 @@ class MainWindow(QMainWindow):
             all_items.extend(slot.ref_images)
             all_items.extend(slot.val_images)
 
+        # 이미지 수에 따라 화질 티어 자동 선택 (사용자 강제 빠른 모드 우선).
+        _ui = _prefs.load()
+        per_side_total = max(
+            sum(len(sr.slots[n].ref_images) for n in common),
+            sum(len(sr.slots[n].val_images) for n in common),
+        )
+        self._sizing_tier = config.pick_tier(
+            per_side_total, speed_mode=bool(_ui.speed_mode)
+        )
+
+        # 기본 티어보다 낮은 화질이 적용되면 한 번만 안내.
+        if self._sizing_tier is not config.SIZING_TIERS[0]:
+            self._loading.set_progress(
+                0, len(all_items),
+                i18n.KO.SIZE_TIER_NOTICE_FMT.format(
+                    thumb=self._sizing_tier.thumb_px,
+                    q=self._sizing_tier.thumb_q,
+                ),
+            )
+
         self._loading.set_progress(
             0, len(all_items),
             i18n.KO.LOAD_THUMBNAIL_FMT.format(done=0, total=len(all_items)),
         )
 
-        self._thumb_worker = ThumbnailWorker(all_items, also_mid=True, parent=self)
-        self._thumb_worker.signals.progress.connect(
+        # 다중 스레드 + 우선순위 큐 풀 사용. 첫 슬롯 (사전식으로 가장 앞)
+        # 의 작업을 ACTIVE_SLOT 우선순위로 끌어올린다.
+        if self._thumb_pool is not None:
+            self._thumb_pool.stop()
+        self._thumb_pool = ThumbnailPool(
+            tier=self._sizing_tier, also_mid=True, parent=self,
+        )
+        self._thumb_pool.enqueue(all_items, priority=PRIORITY_BACKGROUND)
+        if common:
+            self._thumb_pool.reprioritize_slot(common[0], PRIORITY_ACTIVE_SLOT)
+        self._thumb_pool.signals.progress.connect(
             lambda d, t, _p: self._loading.set_progress(
                 d, t, i18n.KO.LOAD_THUMBNAIL_FMT.format(done=d, total=t),
             )
         )
-        self._thumb_worker.signals.finished.connect(self._on_thumbs_ready)
-        self._thumb_worker.start()
+        self._thumb_pool.signals.finished.connect(self._on_thumbs_ready)
+        self._thumb_pool.start()
 
     def _on_thumbs_ready(self) -> None:
         self._loading.hide_overlay()
@@ -548,6 +675,7 @@ class MainWindow(QMainWindow):
         assert self._scan is not None and self._input is not None
         merged = self._merge_matches()
         miss_fast, miss_slow = self._compute_miss_lists()
+        unmatched_refs = self._compute_unmatched_refs()
 
         result = FinalResult(
             mode=self._input.mode,
@@ -558,6 +686,7 @@ class MainWindow(QMainWindow):
             miss_slow=miss_slow,
             slot_only_ref=list(self._scan.ref_only),
             slot_only_val=list(self._scan.val_only),
+            unmatched_refs=unmatched_refs,
         )
         # 결과 페이지에는 ‘이미 복사해둔 작업 파일’ 과 ‘템플릿 원본’ 둘 다 전달.
         self._result_page.show_result(
@@ -665,6 +794,25 @@ class MainWindow(QMainWindow):
                     note="Phase B 매칭 실패",
                 ))
         return miss_fast, miss_slow
+
+    def _compute_unmatched_refs(self) -> list[MissEntry]:
+        """Stage 2 에서 매칭 못 찾은 기준 사진들 (Skip + No-match).
+
+        교차 검증 모드에서는 Phase A 와 Phase B 양쪽에서 수집된다.
+        엑셀에 ‘기준 이미지 + 빨간 파일명’ 행으로 표기되는 정보.
+        """
+        out: list[MissEntry] = []
+        for slot, items in self._skipped_a.items():
+            for it in items:
+                out.append(MissEntry(
+                    slot=slot, side="ref", path=it.path, note="미매칭",
+                ))
+        for slot, items in self._skipped_b.items():
+            for it in items:
+                out.append(MissEntry(
+                    slot=slot, side="val", path=it.path, note="미매칭",
+                ))
+        return out
 
     def _new_session(self) -> None:
         session_mod.clear()
@@ -793,6 +941,9 @@ class MainWindow(QMainWindow):
         if self._thumb_worker is not None and self._thumb_worker.isRunning():
             self._thumb_worker.stop()
             self._thumb_worker.wait(1000)
+        if self._thumb_pool is not None:
+            self._thumb_pool.stop()
+            self._thumb_pool.wait(1000)
         # 학습 워커도 안전 종료 (#17)
         try:
             self._setup_page.stop_training()

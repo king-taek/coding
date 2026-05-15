@@ -17,15 +17,17 @@ def _touch_model(name: str, meta: dict | None = None) -> None:
         )
 
 
-def test_make_new_name_increments_for_same_date(isolated_cache):
+def test_make_new_name_uses_timestamp(isolated_cache):
+    """신규 timestamp 형식 (스펙 §8.2-c): model_YYYY-MM-DD_HHMMSS."""
     today = datetime(2026, 5, 13, 10, 0, 0)
     a = R.make_new_name(today)
-    assert a == "2026-05-13"
+    assert a == "model_2026-05-13_100000"
     _touch_model(a)
+    # 같은 초에 또 학습 → _2.
     b = R.make_new_name(today)
-    assert b == "2026-05-13_2"
+    assert b == "model_2026-05-13_100000_2"
     _touch_model(b)
-    assert R.make_new_name(today) == "2026-05-13_3"
+    assert R.make_new_name(today) == "model_2026-05-13_100000_3"
 
 
 def test_active_basic_when_no_models(isolated_cache):

@@ -11,18 +11,21 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QByteArray, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QKeySequence, QPixmap, QShortcut
-from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QMessageBox,
-                              QScrollArea, QSizePolicy, QSlider, QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel,
+                              QMessageBox, QScrollArea, QSizePolicy, QSlider,
+                              QSplitter, QStackedWidget, QVBoxLayout, QWidget)
 
 from ... import config, i18n
 from ...models.result import MatchResult
 from ...models.slot import ImageItem, Slot
 from ...utils import image_io
 from ...utils import prefs as _prefs
+from ...similarity.slot_features import SlotFeatureCache
 from ...workers.matcher import Candidate, MatcherWorker
 from ..widgets.loading_overlay import LoadingOverlay
+from ..widgets.match_expand_view import MatchExpandView
 from ..widgets.neon_button import NeonButton
 from ..widgets.neon_card import NeonCard
 from ..widgets.scalable_image import ScalableImage
@@ -61,6 +64,8 @@ class MatchPage(QWidget):
         self._loading = LoadingOverlay(self)
         self._worker: Optional[MatcherWorker] = None
         self._candidates: list[Candidate] = []
+        # 슬롯 단위 검증측 특징 캐시 — 같은 슬롯의 reference 들이 공유.
+        self._slot_cache = SlotFeatureCache(keep_lookahead=False)
 
     # ------------------------------------------------------------------
     def _build(self) -> None:
@@ -82,9 +87,10 @@ class MatchPage(QWidget):
         top.addWidget(self.progress_label)
         root.addLayout(top)
 
-        # 3 pane --------------------------------------------------------
-        row = QHBoxLayout()
-        row.setSpacing(10)
+        # 3 pane — QSplitter 로 사용자가 분할 비율 조절 -------------------
+        self._h_splitter = QSplitter(Qt.Orientation.Horizontal, self)
+        self._h_splitter.setHandleWidth(6)
+        self._h_splitter.setChildrenCollapsible(False)
 
         # LEFT: skip pool
         left = QFrame(self)
@@ -114,7 +120,7 @@ class MatchPage(QWidget):
         self._left_scroll.setWidget(self._left_host)
         ll.addWidget(self._left_scroll, stretch=1)
         left.setMinimumWidth(200)
-        row.addWidget(left, stretch=2)
+        self._h_splitter.addWidget(left)
 
         # CENTER: 기준 사진 1장
         center = NeonCard(role="card", parent=self)
@@ -189,7 +195,7 @@ class MatchPage(QWidget):
         cl.addLayout(bar)
 
         center.setMinimumWidth(420)
-        row.addWidget(center, stretch=4)
+        self._h_splitter.addWidget(center)
 
         # RIGHT: 후보들
         right = QFrame(self)
@@ -213,12 +219,44 @@ class MatchPage(QWidget):
         # 3 col × 134(tile) + spacing 16 + 패널 padding 20 = 438 → 후보 9 장이
         # 가로 스크롤 없이 한 화면에 깔리도록.
         right.setMinimumWidth(440)
-        row.addWidget(right, stretch=3)
+        self._h_splitter.addWidget(right)
 
-        root.addLayout(row, stretch=1)
+        self._h_splitter.setStretchFactor(0, 2)
+        self._h_splitter.setStretchFactor(1, 4)
+        self._h_splitter.setStretchFactor(2, 3)
+
+        # 3-pane 과 ‘더 크게 보기’ 페이지를 QStackedWidget 으로 전환 -------
+        self._content_stack = QStackedWidget(self)
+        self._content_stack.addWidget(self._h_splitter)        # page 0
+        self._expand_view = MatchExpandView(self._content_stack)
+        self._expand_view.confirm_match.connect(self._on_expand_confirm)
+        self._expand_view.back_requested.connect(self._exit_expand_view)
+        self._content_stack.addWidget(self._expand_view)        # page 1
+        root.addWidget(self._content_stack, stretch=1)
+
+        # 저장된 분할 비율 복원 + 변경 시 영속화 -------------------------
+        _p_match = _prefs.load()
+        if _p_match.splitter_state_match_h:
+            self._h_splitter.restoreState(
+                QByteArray.fromBase64(
+                    _p_match.splitter_state_match_h.encode("ascii")
+                )
+            )
+        self._h_splitter.splitterMoved.connect(self._save_splitter_state)
 
         QShortcut(QKeySequence("S"), self, activated=self._skip_current)
         QShortcut(QKeySequence("N"), self, activated=self._confirm_no_match)
+
+    # ------------------------------------------------------------------
+    def _save_splitter_state(self, *args) -> None:
+        try:
+            _prefs.patch(
+                splitter_state_match_h=bytes(
+                    self._h_splitter.saveState().toBase64()
+                ).decode("ascii"),
+            )
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Public API
@@ -303,7 +341,16 @@ class MatchPage(QWidget):
             i18n.KO.LOAD_FEATURE_FMT.format(done=0, total=len(val_items))
         )
 
-        self._worker = MatcherWorker(ref, val_items, threshold=self._threshold)
+        # 슬롯 단위 RAM 캐시 — 같은 슬롯에서 두 번째 reference 부터 즉시 사용.
+        # 첫 reference 진입 시 워커 thread 가 캐시를 빌드한다 (GUI 블록 방지).
+        self._slot_cache.set_active(ref.slot)
+        val_features = self._slot_cache.get_features(ref.slot) or {}
+
+        self._worker = MatcherWorker(
+            ref, val_items, threshold=self._threshold,
+            val_features=val_features,
+            slot_cache=self._slot_cache,
+        )
         self._worker.signals.progress.connect(self._on_matcher_progress)
         self._worker.signals.done.connect(self._on_matcher_done)
         self._worker.signals.failed.connect(
@@ -351,10 +398,11 @@ class MatchPage(QWidget):
         extra = len(candidates) - len(visible)
 
         grid = ThumbGrid(columns=3, select_mode=False, truncate=False,
-                         parent=self._right_host)
+                         show_expand=True, parent=self._right_host)
         entries = [ThumbEntry(item=c.item, extra={"score": c.score}) for c in visible]
         grid.set_entries(entries)
         grid.tile_clicked.connect(self._on_pick)
+        grid.expand_requested.connect(self._on_expand_requested)
         self._right_grid.addWidget(grid, 0, 0)
 
         if extra > 0:
@@ -391,6 +439,37 @@ class MatchPage(QWidget):
         win = ZoomWindow(self._current.slot, items, SOURCE_CANDIDATES, parent=self)
         win.action_requested.connect(self._on_zoom_candidates_action)
         win.exec()
+
+    # ------------------------------------------------------------------
+    # ‘더 크게 보기’ 모드
+    # ------------------------------------------------------------------
+    def _on_expand_requested(self, entry: ThumbEntry) -> None:
+        if self._current is None or not self._candidates:
+            return
+        items = [c.item for c in self._candidates]
+        start = 0
+        for i, c in enumerate(self._candidates):
+            if c.item.path == entry.item.path:
+                start = i
+                break
+        self._expand_view.load_candidates(self._current.slot, items, start)
+        self._content_stack.setCurrentIndex(1)
+        # 단축키가 동작하도록 포커스 이동.
+        self._expand_view.setFocus()
+
+    def _exit_expand_view(self) -> None:
+        self._content_stack.setCurrentIndex(0)
+
+    def _on_expand_confirm(self, item: ImageItem) -> None:
+        """확대 모드에서 [이 사진으로 매칭] 또는 Enter."""
+        score = 0.0
+        for c in self._candidates:
+            if c.item.path == item.path:
+                score = float(c.score)
+                break
+        # 그리드 복귀 후 매칭 확정 흐름 재사용.
+        self._exit_expand_view()
+        self._on_pick(ThumbEntry(item=item, extra={"score": score}))
 
     def _on_zoom_candidates_action(self, action: str, items: list[ImageItem]) -> None:
         """줌-뷰에서 ‘이 사진을 매칭으로 확정’ 을 누른 경우 → _on_pick 흐름 재사용."""

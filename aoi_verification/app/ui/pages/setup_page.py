@@ -6,9 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import (QButtonGroup, QFileDialog, QFormLayout, QGroupBox,
-                              QHBoxLayout, QLabel, QLineEdit, QMessageBox,
-                              QRadioButton, QSlider, QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import (QButtonGroup, QCheckBox, QFileDialog, QFormLayout,
+                              QGroupBox, QHBoxLayout, QLabel, QLineEdit,
+                              QMessageBox, QRadioButton, QScrollArea,
+                              QSizePolicy, QSlider, QVBoxLayout, QWidget)
 
 from ... import config, i18n
 from ...learning import evaluator as _evaluator
@@ -17,6 +18,7 @@ from ...learning import triplet_model as _triplet
 from ...learning.dataset import TrainingDataStore
 from ...learning.trainer import TrainHeadWorker
 from ...utils import prefs as _prefs
+from ..widgets.collapsible_section import CollapsibleSection
 from ..widgets.loading_overlay import LoadingOverlay
 from ..widgets.neon_button import NeonButton
 from ..widgets.neon_card import NeonCard
@@ -35,7 +37,8 @@ class SetupInput:
 class SetupPage(QWidget):
     """검증 시작 화면."""
 
-    start_requested = pyqtSignal(object)     # SetupInput
+    start_requested = pyqtSignal(object)             # SetupInput
+    window_size_requested = pyqtSignal()             # MainWindow 가 모달을 띄움
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -43,21 +46,60 @@ class SetupPage(QWidget):
 
     # ------------------------------------------------------------------
     def _build(self) -> None:
-        root = QVBoxLayout(self)
+        # 좁은/짧은 창에서도 모든 컨트롤에 접근 가능하도록 스크롤 영역으로 감싼다.
+        # 기존 디자인을 유지하려고 별도 마진·배경·푸터 chrome 은 추가하지 않는다.
+        # 스크롤바는 ‘필요할 때만’ 자동으로 나타난다.
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        # QScrollArea 자체의 배경/보더가 페이지 배경 위에 겹쳐 보이지 않게.
+        scroll.setStyleSheet(
+            "QScrollArea { background: transparent; border: none; }"
+        )
+        scroll.viewport().setStyleSheet("background: transparent;")
+        outer.addWidget(scroll)
+
+        host = QWidget()
+        host.setSizePolicy(QSizePolicy.Policy.Expanding,
+                           QSizePolicy.Policy.MinimumExpanding)
+        scroll.setWidget(host)
+
+        # 원본과 동일한 외곽 마진/스페이싱 유지.
+        root = QVBoxLayout(host)
         root.setContentsMargins(40, 40, 40, 40)
         root.setSpacing(20)
 
+        # 제목 행 + 우측 [화면 크기 설정] 버튼 ---------------------------
+        title_row = QHBoxLayout()
         title = QLabel(i18n.KO.SETUP_TITLE, self)
         title.setProperty("role", "title")
-        root.addWidget(title)
+        title_row.addWidget(title, stretch=1)
+
+        self.btn_window_size = NeonButton(i18n.KO.WINDOW_SIZE_BTN, role="ghost")
+        self.btn_window_size.clicked.connect(self.window_size_requested.emit)
+        title_row.addWidget(self.btn_window_size)
+        root.addLayout(title_row)
 
         subtitle = QLabel(i18n.KO.SETUP_HINT, self)
         subtitle.setProperty("role", "subtitle")
         subtitle.setWordWrap(True)
         root.addWidget(subtitle)
 
-        # 사용 방법 안내 카드 -------------------------------------------
-        howto_card = NeonCard(role="card-soft", parent=self)
+        # 사용 방법 안내 — 접을 수 있는 섹션 (기본 접힘) ----------------
+        _prefs_now = _prefs.load()
+        self._howto_section = CollapsibleSection(
+            open_label=i18n.KO.HOWTO_TOGGLE_OPEN,
+            close_label=i18n.KO.HOWTO_TOGGLE_CLOSE,
+            expanded=bool(_prefs_now.howto_expanded),
+            parent=self,
+        )
+        howto_card = NeonCard(role="card-soft", parent=self._howto_section)
         howto_title = QLabel(i18n.KO.SETUP_HOW_TO_USE_TITLE, howto_card)
         howto_title.setStyleSheet(
             "color: #00D4FF; font-weight: 700; letter-spacing: 1px;"
@@ -69,7 +111,11 @@ class SetupPage(QWidget):
             "color: #E5F4FF; line-height: 160%; padding-top: 4px;"
         )
         howto_card.body().addWidget(howto_body)
-        root.addWidget(howto_card)
+        self._howto_section.add_content_widget(howto_card)
+        self._howto_section.toggled.connect(
+            lambda expanded: _prefs.patch(howto_expanded=bool(expanded))
+        )
+        root.addWidget(self._howto_section)
 
         # 학습 모델 카드 ------------------------------------------------
         self._model_card = NeonCard(role="card-soft", parent=self)
@@ -161,6 +207,18 @@ class SetupPage(QWidget):
         sl.addWidget(self.slider, stretch=1)
         sl.addWidget(self.threshold_label)
         slider_card.body().addLayout(sl)
+
+        # 빠른 모드 (썸네일 화질 낮춤) ----------------------------------
+        speed_row = QHBoxLayout()
+        self.check_speed_mode = QCheckBox(i18n.KO.SPEED_MODE_LABEL, slider_card)
+        self.check_speed_mode.setToolTip(i18n.KO.SPEED_MODE_TOOLTIP)
+        self.check_speed_mode.setChecked(bool(_last_prefs.speed_mode))
+        self.check_speed_mode.toggled.connect(
+            lambda on: _prefs.patch(speed_mode=bool(on))
+        )
+        speed_row.addWidget(self.check_speed_mode)
+        speed_row.addStretch(1)
+        slider_card.body().addLayout(speed_row)
         root.addWidget(slider_card)
 
         root.addStretch(1)

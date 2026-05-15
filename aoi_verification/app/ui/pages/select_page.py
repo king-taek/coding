@@ -16,10 +16,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QByteArray, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QKeySequence, QPixmap, QShortcut
 from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QScrollArea,
-                              QSizePolicy, QSlider, QVBoxLayout, QWidget)
+                              QSizePolicy, QSlider, QSplitter, QVBoxLayout,
+                              QWidget)
 
 from ... import i18n
 from ...models.group import GroupingResult, PhotoGroup
@@ -217,9 +218,10 @@ class SelectPage(QWidget):
         top.addWidget(self.progress_label)
         root.addLayout(top)
 
-        # 중앙 3-pane ---------------------------------------------------
-        center_row = QHBoxLayout()
-        center_row.setSpacing(10)
+        # 중앙 3-pane — QSplitter 로 사용자 조절 + 상태 영속 -------------
+        self._h_splitter = QSplitter(Qt.Orientation.Horizontal, self)
+        self._h_splitter.setHandleWidth(6)
+        self._h_splitter.setChildrenCollapsible(False)
 
         # LEFT --------------------------------------------------------
         self.left_panel = _SidePanel(
@@ -236,7 +238,7 @@ class SelectPage(QWidget):
         # 2 col 그리드 (120px thumb + 14 padding) × 2 + spacing + 패널 padding 을
         # 모두 담을 최소 너비. 작게(1100) preset 에서도 가로 스크롤 없이 보이게.
         self.left_panel.setMinimumWidth(280)
-        center_row.addWidget(self.left_panel, stretch=2)
+        self._h_splitter.addWidget(self.left_panel)
 
         # CENTER ------------------------------------------------------
         center_card = NeonCard(role="card", parent=self)
@@ -323,7 +325,7 @@ class SelectPage(QWidget):
         cl.addLayout(btn_row)
 
         center_card.setMinimumWidth(420)
-        center_row.addWidget(center_card, stretch=4)
+        self._h_splitter.addWidget(center_card)
 
         # RIGHT -------------------------------------------------------
         self.right_panel = _SidePanel(
@@ -339,9 +341,11 @@ class SelectPage(QWidget):
         self.right_panel.tile_clicked.connect(self._on_tile_click)
         self.right_panel.plus_clicked.connect(self._on_plus_click)
         self.right_panel.setMinimumWidth(280)
-        center_row.addWidget(self.right_panel, stretch=2)
+        self._h_splitter.addWidget(self.right_panel)
 
-        root.addLayout(center_row, stretch=1)
+        self._h_splitter.setStretchFactor(0, 2)
+        self._h_splitter.setStretchFactor(1, 4)
+        self._h_splitter.setStretchFactor(2, 2)
 
         # BOTTOM ------------------------------------------------------
         self.bottom_panel = _SidePanel(
@@ -358,7 +362,29 @@ class SelectPage(QWidget):
         self.bottom_panel.tile_clicked.connect(self._on_tile_click)
         self.bottom_panel.plus_clicked.connect(self._on_plus_click)
         self.bottom_panel.setMinimumHeight(180)
-        root.addWidget(self.bottom_panel)
+
+        # 상하 QSplitter (3-pane 위쪽 / 제외 패널 아래쪽) -----------------
+        self._v_splitter = QSplitter(Qt.Orientation.Vertical, self)
+        self._v_splitter.setHandleWidth(6)
+        self._v_splitter.setChildrenCollapsible(False)
+        self._v_splitter.addWidget(self._h_splitter)
+        self._v_splitter.addWidget(self.bottom_panel)
+        self._v_splitter.setStretchFactor(0, 4)
+        self._v_splitter.setStretchFactor(1, 1)
+        root.addWidget(self._v_splitter, stretch=1)
+
+        # 저장된 분할 비율 복원 + 변경 시 영속화 -------------------------
+        _p2 = _prefs.load()
+        if _p2.splitter_state_select_h:
+            self._h_splitter.restoreState(
+                QByteArray.fromBase64(_p2.splitter_state_select_h.encode("ascii"))
+            )
+        if _p2.splitter_state_select_v:
+            self._v_splitter.restoreState(
+                QByteArray.fromBase64(_p2.splitter_state_select_v.encode("ascii"))
+            )
+        self._h_splitter.splitterMoved.connect(self._save_splitter_state)
+        self._v_splitter.splitterMoved.connect(self._save_splitter_state)
 
         # 단축키 --------------------------------------------------------
         for key in ("Left", "1"):
@@ -368,6 +394,20 @@ class SelectPage(QWidget):
             QShortcut(QKeySequence(key), self,
                       activated=lambda: self._decide("exclude"))
         QShortcut(QKeySequence("Z"), self, activated=self._undo)
+
+    # ------------------------------------------------------------------
+    def _save_splitter_state(self, *args) -> None:
+        try:
+            _prefs.patch(
+                splitter_state_select_h=bytes(
+                    self._h_splitter.saveState().toBase64()
+                ).decode("ascii"),
+                splitter_state_select_v=bytes(
+                    self._v_splitter.saveState().toBase64()
+                ).decode("ascii"),
+            )
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Public API

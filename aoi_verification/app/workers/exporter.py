@@ -17,7 +17,7 @@ from typing import Optional
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
 from .. import i18n
-from ..models.result import FinalResult
+from ..models.result import FinalResult, MatchResult, MissEntry
 from ..utils import image_io, paths
 
 
@@ -127,6 +127,7 @@ class ExcelExporter(QThread):
     # ------------------------------------------------------------------
     def _do_export(self) -> None:
         from openpyxl import Workbook, load_workbook
+        from openpyxl.comments import Comment
         from openpyxl.drawing.image import Image as XLImage
         from openpyxl.styles import Alignment, Font, PatternFill
         from openpyxl.utils import get_column_letter
@@ -172,37 +173,65 @@ class ExcelExporter(QThread):
         if self._result.mode == "cross":
             _ensure_width(col_dir, 14)
 
-        # 매칭 결과 정렬 → Slot 오름차순, slot 내 입력 순서
-        matches = sorted(
-            self._result.matches,
-            key=lambda m: (m.slot, str(m.ref_path).lower()),
-        )
+        # 매칭/미매칭 통합 정렬 → Slot 오름차순, 그 안에서 기준 파일명 오름차순.
+        # 미매칭 reference 도 같은 정렬 키로 끼워넣어 ‘기준 사진 순서’ 가 유지되게.
+        rows_input: list[tuple[str, str, object]] = []
+        for m in self._result.matches:
+            rows_input.append((m.slot, str(m.ref_path.name).lower(), m))
+        for u in self._result.unmatched_refs:
+            rows_input.append((u.slot, str(u.path.name).lower(), u))
+        rows_input.sort(key=lambda x: (x[0], x[1]))
 
-        total = len(matches)
+        total = len(rows_input)
         row = data_start
+        red_font = Font(color="FFFF2D55", bold=True)
         tmp_dir = Path(tempfile.mkdtemp(prefix="aoi_export_"))
         try:
-            for idx, m in enumerate(matches, start=1):
+            for idx, (_slot, _key, payload) in enumerate(rows_input, start=1):
                 # 양식이 정한 행 높이가 너무 작을 때만 키운다.
                 cur_h = ws.row_dimensions[row].height
                 if not cur_h or cur_h < ROW_HEIGHT_PT:
                     ws.row_dimensions[row].height = ROW_HEIGHT_PT
-                ws[f"{col_slot}{row}"] = m.slot
-                if self._result.mode == "cross":
-                    ws[f"{col_dir}{row}"] = m.direction
 
-                ref_mid = image_io.get_mid_path(m.ref_path)
-                val_mid = image_io.get_mid_path(m.val_path)
+                if isinstance(payload, MatchResult):
+                    m = payload
+                    ws[f"{col_slot}{row}"] = m.slot
+                    if self._result.mode == "cross":
+                        ws[f"{col_dir}{row}"] = m.direction
 
-                xli_ref = XLImage(str(ref_mid))
-                xli_val = XLImage(str(val_mid))
-                _shrink(xli_ref, max_px=560)
-                _shrink(xli_val, max_px=560)
-                ws.add_image(xli_ref, f"{col_ref}{row}")
-                ws.add_image(xli_val, f"{col_val}{row}")
+                    ref_mid = image_io.get_mid_path(m.ref_path)
+                    val_mid = image_io.get_mid_path(m.val_path)
+                    xli_ref = XLImage(str(ref_mid))
+                    xli_val = XLImage(str(val_mid))
+                    _shrink(xli_ref, max_px=560)
+                    _shrink(xli_val, max_px=560)
+                    ws.add_image(xli_ref, f"{col_ref}{row}")
+                    ws.add_image(xli_val, f"{col_val}{row}")
+                    self.signals.progress.emit(idx, total, m.slot)
+                else:
+                    u: MissEntry = payload
+                    ws[f"{col_slot}{row}"] = u.slot
+                    # 기준 이미지: 정상 임베드.
+                    try:
+                        ref_mid = image_io.get_mid_path(Path(u.path))
+                        xli_ref = XLImage(str(ref_mid))
+                        _shrink(xli_ref, max_px=560)
+                        ws.add_image(xli_ref, f"{col_ref}{row}")
+                    except Exception:
+                        ws[f"{col_ref}{row}"] = str(Path(u.path).name)
+                    # 검증 컬럼에 파일명 텍스트 (빨강).
+                    cell_val = ws[f"{col_val}{row}"]
+                    cell_val.value = Path(u.path).name
+                    cell_val.font = red_font
+                    cell_val.alignment = Alignment(
+                        horizontal="center", vertical="center", wrap_text=True,
+                    )
+                    cell_val.comment = Comment("미매칭", "AOI")
+                    if self._result.mode == "cross":
+                        ws[f"{col_dir}{row}"] = "미매칭"
+                    self.signals.progress.emit(idx, total, u.slot)
 
                 row += 1
-                self.signals.progress.emit(idx, total, m.slot)
 
             # 교차 검증 미탐 시트 ----------------------------------------
             if self._result.mode == "cross":

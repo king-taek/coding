@@ -15,20 +15,27 @@ from . import paths
 SizeOption = Literal["thumb", "mid", "feature"]
 
 
-def _hash_key(absolute_path: str, mtime: float, size_option: SizeOption) -> str:
+def _hash_key(absolute_path: str, mtime: float, size_option: SizeOption,
+              extra: str = "") -> str:
     h = hashlib.sha1()
     h.update(absolute_path.encode("utf-8", errors="replace"))
-    h.update(f"|{int(mtime)}|{size_option}".encode("utf-8"))
+    h.update(f"|{int(mtime)}|{size_option}|{extra}".encode("utf-8"))
     return h.hexdigest()
 
 
-def cache_path(src: Path, size_option: SizeOption) -> Path:
-    """원본 이미지 파일에 대응되는 캐시 파일 경로 (없을 수도 있음)."""
+def cache_path(src: Path, size_option: SizeOption, *,
+               extra: str = "") -> Path:
+    """원본 이미지 파일에 대응되는 캐시 파일 경로 (없을 수도 있음).
+
+    ``extra`` 는 같은 이미지에 대해 서로 다른 화질 티어를 캐시할 때 키를
+    분기하기 위한 문자열이다 (예: ``"t180q75"``). 기본값은 빈 문자열로,
+    기존 호출 형태와 호환된다.
+    """
     try:
         mtime = src.stat().st_mtime
     except OSError:
         mtime = 0.0
-    key = _hash_key(str(src.resolve()), mtime, size_option)
+    key = _hash_key(str(src.resolve()), mtime, size_option, extra)
 
     if size_option == "thumb":
         return paths.thumb_cache_dir() / f"{key}.jpg"
