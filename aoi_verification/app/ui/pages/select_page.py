@@ -232,7 +232,7 @@ class SelectPage(QWidget):
         self.left_panel.selection_action.connect(self._on_batch_action)
         self.left_panel.tile_clicked.connect(self._on_tile_click)
         self.left_panel.plus_clicked.connect(self._on_plus_click)
-        self.left_panel.setMinimumWidth(260)
+        self.left_panel.setMinimumWidth(200)
         center_row.addWidget(self.left_panel, stretch=2)
 
         # CENTER ------------------------------------------------------
@@ -290,7 +290,7 @@ class SelectPage(QWidget):
             "QScrollArea { background: #050810; border: 1px solid #1F2A3F; "
             "border-radius: 8px; }"
         )
-        self._img_scroll.setMinimumHeight(360)
+        self._img_scroll.setMinimumHeight(300)
         self._img_scroll.setSizePolicy(QSizePolicy.Policy.Expanding,
                                        QSizePolicy.Policy.Expanding)
         cl.addWidget(self._img_scroll, stretch=1)
@@ -319,7 +319,7 @@ class SelectPage(QWidget):
         btn_row.addWidget(self.btn_exclude)
         cl.addLayout(btn_row)
 
-        center_card.setMinimumWidth(560)
+        center_card.setMinimumWidth(420)
         center_row.addWidget(center_card, stretch=4)
 
         # RIGHT -------------------------------------------------------
@@ -334,7 +334,7 @@ class SelectPage(QWidget):
         self.right_panel.selection_action.connect(self._on_batch_action)
         self.right_panel.tile_clicked.connect(self._on_tile_click)
         self.right_panel.plus_clicked.connect(self._on_plus_click)
-        self.right_panel.setMinimumWidth(260)
+        self.right_panel.setMinimumWidth(200)
         center_row.addWidget(self.right_panel, stretch=2)
 
         root.addLayout(center_row, stretch=1)
@@ -352,7 +352,7 @@ class SelectPage(QWidget):
         self.bottom_panel.selection_action.connect(self._on_batch_action)
         self.bottom_panel.tile_clicked.connect(self._on_tile_click)
         self.bottom_panel.plus_clicked.connect(self._on_plus_click)
-        self.bottom_panel.setMinimumHeight(240)
+        self.bottom_panel.setMinimumHeight(180)
         root.addWidget(self.bottom_panel)
 
         # 단축키 --------------------------------------------------------

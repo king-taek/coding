@@ -113,7 +113,7 @@ class MatchPage(QWidget):
         self._left_layout.addStretch(1)
         self._left_scroll.setWidget(self._left_host)
         ll.addWidget(self._left_scroll, stretch=1)
-        left.setMinimumWidth(260)
+        left.setMinimumWidth(200)
         row.addWidget(left, stretch=2)
 
         # CENTER: 기준 사진 1장
@@ -170,7 +170,7 @@ class MatchPage(QWidget):
             "QScrollArea { background: #050810; border: 1px solid #1F2A3F; "
             "border-radius: 8px; }"
         )
-        self._img_scroll.setMinimumHeight(360)
+        self._img_scroll.setMinimumHeight(300)
         self._img_scroll.setSizePolicy(QSizePolicy.Policy.Expanding,
                                        QSizePolicy.Policy.Expanding)
         cl.addWidget(self._img_scroll, stretch=1)
@@ -188,7 +188,7 @@ class MatchPage(QWidget):
         bar.addWidget(self.no_match_btn)
         cl.addLayout(bar)
 
-        center.setMinimumWidth(540)
+        center.setMinimumWidth(420)
         row.addWidget(center, stretch=4)
 
         # RIGHT: 후보들
@@ -210,7 +210,7 @@ class MatchPage(QWidget):
         self._right_grid.setSpacing(8)
         self._right_scroll.setWidget(self._right_host)
         rl.addWidget(self._right_scroll, stretch=1)
-        right.setMinimumWidth(420)
+        right.setMinimumWidth(320)
         row.addWidget(right, stretch=3)
 
         root.addLayout(row, stretch=1)

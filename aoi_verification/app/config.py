@@ -46,7 +46,7 @@ class Fonts:
 # Image / thumbnail sizing
 # ---------------------------------------------------------------------------
 class Sizing:
-    THUMB_PX = 200          # left/right/bottom grid thumbnails
+    THUMB_PX = 160          # left/right/bottom grid thumbnails (기존 200 → 20% 축소)
     MID_PX = 800            # zoom-view + Excel embed
     SIMILARITY_PX = 384     # cropped ROI longest-edge for similarity
     ROI_RATIO = 0.55        # 중심 영역 비율 (0.5~0.6)
@@ -92,8 +92,8 @@ class AppConfig:
     default_threshold: float = 0.55       # 0.0 ~ 1.0
     autosave_interval_s: int = 30
     image_extensions: tuple[str, ...] = (".jpeg", ".jpg", ".png", ".bmp")
-    max_thumbs_per_row: int = 4           # +N 시작 임계치 (4장 표시 → 5번째 +N)
-    show_n_threshold: int = 5             # 5장 이상이면 +N 처리
+    max_thumbs_per_row: int = 8           # 8장까지 보여주고 9번째 자리에 +N
+    show_n_threshold: int = 9             # 9장 이상이면 +N 처리 (그 미만은 전부 표시)
     match_top_visible: int = 8            # Stage 2 우측 9장 이상이면 8 + +N
 
     def is_image(self, filename: str) -> bool:

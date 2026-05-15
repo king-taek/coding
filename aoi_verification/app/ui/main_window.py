@@ -50,7 +50,14 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(i18n.KO.APP_TITLE)
-        self.resize(1500, 940)
+
+        # 화면 크기 프리셋 — 저장된 값이 있으면 그대로 적용 ---------------
+        from ..utils import prefs as _prefs
+        self._prefs = _prefs
+        saved = _prefs.load().window_preset
+        self._apply_window_preset(saved if saved else "보통", persist=False)
+        # 사용자가 어떤 모니터에서도 자유롭게 줄일 수 있도록 최소 크기를 작게
+        self.setMinimumSize(900, 600)
 
         self._stack = QStackedWidget(self)
         self.setCentralWidget(self._stack)
@@ -64,6 +71,9 @@ class MainWindow(QMainWindow):
         for w in (self._setup_page, self._select_page,
                   self._match_page, self._result_page):
             self._stack.addWidget(w)
+
+        # 화면 크기 메뉴 -------------------------------------------------
+        self._build_view_menu()
 
         # 시그널 ---------------------------------------------------------
         self._setup_page.start_requested.connect(self._on_start)
@@ -746,6 +756,38 @@ class MainWindow(QMainWindow):
     # ==================================================================
     # Cleanup
     # ==================================================================
+    # ==================================================================
+    # 화면 크기 프리셋 (#2)
+    # ==================================================================
+    def _build_view_menu(self) -> None:
+        from PyQt6.QtGui import QAction
+        menu_bar = self.menuBar()
+        view_menu = menu_bar.addMenu(i18n.KO.MENU_VIEW)
+        for label, w, h in i18n.KO.WINDOW_PRESETS:
+            act = QAction(label, self)
+            act.triggered.connect(
+                lambda _checked=False, name=label: self._apply_window_preset(name)
+            )
+            view_menu.addAction(act)
+
+    def _apply_window_preset(self, name: str, *, persist: bool = True) -> None:
+        for label, w, h in i18n.KO.WINDOW_PRESETS:
+            if label != name:
+                continue
+            if w == 0 or h == 0:
+                self.showMaximized()
+            else:
+                # 최대화 상태였다면 풀고 새 크기 적용
+                if self.isMaximized():
+                    self.showNormal()
+                self.resize(w, h)
+            if persist:
+                try:
+                    self._prefs.patch(window_preset=name)
+                except Exception:
+                    pass
+            return
+
     def closeEvent(self, event):  # noqa: N802
         if self._thumb_worker is not None and self._thumb_worker.isRunning():
             self._thumb_worker.stop()

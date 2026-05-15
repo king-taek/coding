@@ -22,7 +22,7 @@ from ..utils import image_io, paths
 
 
 # ---------------------------------------------------------------------------
-# Layout constants — keep in sync with the customer's 양식.xlsx
+# Fallback layout (양식이 없거나 헤더 자동 감지가 실패할 때 적용)
 # ---------------------------------------------------------------------------
 COL_SLOT = "B"
 COL_REF = "C"
@@ -32,6 +32,68 @@ HEADER_ROW = 1
 DATA_START_ROW = 2
 ROW_HEIGHT_PT = 120          # 약 800px 사진이 들어갈 행 높이
 IMG_COL_WIDTH = 28           # 컬럼 너비 (문자 단위, openpyxl)
+
+
+# ---------------------------------------------------------------------------
+# 헤더 키워드 → 어느 컬럼이 무엇인지 자동 감지 (#1 — 사용자 양식 호환)
+# ---------------------------------------------------------------------------
+_KEYWORDS = {
+    "slot": ("slot", "슬롯"),
+    "ref":  ("기준", "ref", "reference"),
+    "val":  ("검증", "val", "validation", "타겟", "target"),
+    "dir":  ("방향", "direction", "매칭 방향"),
+}
+
+
+def _detect_layout(ws) -> dict:
+    """``양식`` 워크시트의 1~5 행을 훑어 헤더 위치를 자동 감지.
+
+    전략: 각 행마다 키워드를 몇 개나 찾았는지 점수를 매겨, **가장 점수가 높은
+    행 하나를 헤더로 확정**. 페이지 제목 같은 단일 셀이 키워드를 포함해도
+    헤더 행과 헷갈리지 않는다.
+    """
+    layout = {
+        "slot": COL_SLOT, "ref": COL_REF, "val": COL_VAL, "dir": COL_DIR,
+        "header_row": HEADER_ROW, "data_start_row": DATA_START_ROW,
+    }
+    max_r = min(5, ws.max_row or 1)
+    max_c = min(15, ws.max_column or 1)
+
+    candidates: list[tuple[int, int, dict]] = []     # (score, row, mapping)
+    for r in range(1, max_r + 1):
+        found: dict[str, str | None] = {
+            "slot": None, "ref": None, "val": None, "dir": None,
+        }
+        for c in range(1, max_c + 1):
+            cell = ws.cell(row=r, column=c)
+            if cell.value is None:
+                continue
+            text = str(cell.value).strip().lower()
+            if not text or len(text) > 25:        # 너무 긴 문장은 헤더 아님
+                continue
+            for key, kws in _KEYWORDS.items():
+                if found[key] is not None:
+                    continue
+                if any(kw.lower() in text for kw in kws):
+                    found[key] = cell.column_letter
+                    break
+        score = sum(1 for v in found.values() if v)
+        if score > 0:
+            candidates.append((score, r, found))
+
+    if not candidates:
+        return layout
+    # 동점이면 더 위쪽 행을 선호 (-row 가 큰 쪽)
+    best_score, best_row, best_found = max(candidates, key=lambda x: (x[0], -x[1]))
+    # 단일 키워드만 잡힌 행은 페이지 제목일 가능성이 높음 — fallback 유지
+    if best_score < 2:
+        return layout
+    layout["header_row"] = best_row
+    layout["data_start_row"] = best_row + 1
+    for k, v in best_found.items():
+        if v:
+            layout[k] = v
+    return layout
 
 
 class ExporterSignals(QObject):
@@ -69,11 +131,12 @@ class ExcelExporter(QThread):
         from openpyxl.styles import Alignment, Font, PatternFill
         from openpyxl.utils import get_column_letter
 
-        # 템플릿 확보 ---------------------------------------------------
+        # 템플릿 확보 — 양식.xlsx 가 있으면 그대로 열고, 없으면 기본 헤더 ----
         template = self._template or paths.resource_path("양식.xlsx")
         if template and Path(template).exists():
             wb = load_workbook(str(template))
             ws = wb.active
+            layout = _detect_layout(ws)
         else:
             wb = Workbook()
             ws = wb.active
@@ -88,13 +151,26 @@ class ExcelExporter(QThread):
                 cell.font = Font(bold=True)
                 cell.fill = PatternFill("solid", fgColor="111827")
                 cell.alignment = Alignment(horizontal="center", vertical="center")
+            layout = {
+                "slot": COL_SLOT, "ref": COL_REF, "val": COL_VAL, "dir": COL_DIR,
+                "header_row": HEADER_ROW, "data_start_row": DATA_START_ROW,
+            }
 
-        # 컬럼 폭/행 높이 조정 ----------------------------------------------
-        for col in (COL_REF, COL_VAL):
-            ws.column_dimensions[col].width = IMG_COL_WIDTH
-        ws.column_dimensions[COL_SLOT].width = 14
+        col_slot, col_ref, col_val, col_dir = (
+            layout["slot"], layout["ref"], layout["val"], layout["dir"],
+        )
+        data_start = int(layout["data_start_row"])
+
+        # 컬럼 폭/행 높이 조정 — 양식이 이미 너비를 지정해 두었다면 그 값 보존
+        def _ensure_width(col_letter: str, min_w: float) -> None:
+            cur = ws.column_dimensions[col_letter].width
+            if not cur or cur < min_w:
+                ws.column_dimensions[col_letter].width = min_w
+        _ensure_width(col_ref, IMG_COL_WIDTH)
+        _ensure_width(col_val, IMG_COL_WIDTH)
+        _ensure_width(col_slot, 14)
         if self._result.mode == "cross":
-            ws.column_dimensions[COL_DIR].width = 14
+            _ensure_width(col_dir, 14)
 
         # 매칭 결과 정렬 → Slot 오름차순, slot 내 입력 순서
         matches = sorted(
@@ -103,26 +179,27 @@ class ExcelExporter(QThread):
         )
 
         total = len(matches)
-        row = DATA_START_ROW
+        row = data_start
         tmp_dir = Path(tempfile.mkdtemp(prefix="aoi_export_"))
         try:
             for idx, m in enumerate(matches, start=1):
-                ws.row_dimensions[row].height = ROW_HEIGHT_PT
-                ws[f"{COL_SLOT}{row}"] = m.slot
+                # 양식이 정한 행 높이가 너무 작을 때만 키운다.
+                cur_h = ws.row_dimensions[row].height
+                if not cur_h or cur_h < ROW_HEIGHT_PT:
+                    ws.row_dimensions[row].height = ROW_HEIGHT_PT
+                ws[f"{col_slot}{row}"] = m.slot
                 if self._result.mode == "cross":
-                    ws[f"{COL_DIR}{row}"] = m.direction
+                    ws[f"{col_dir}{row}"] = m.direction
 
                 ref_mid = image_io.get_mid_path(m.ref_path)
                 val_mid = image_io.get_mid_path(m.val_path)
 
-                # openpyxl 의 Image 는 원본 파일을 참조하므로 캐시 파일을
-                # 그대로 사용하면 안전하다.
                 xli_ref = XLImage(str(ref_mid))
                 xli_val = XLImage(str(val_mid))
                 _shrink(xli_ref, max_px=560)
                 _shrink(xli_val, max_px=560)
-                ws.add_image(xli_ref, f"{COL_REF}{row}")
-                ws.add_image(xli_val, f"{COL_VAL}{row}")
+                ws.add_image(xli_ref, f"{col_ref}{row}")
+                ws.add_image(xli_val, f"{col_val}{row}")
 
                 row += 1
                 self.signals.progress.emit(idx, total, m.slot)

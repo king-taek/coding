@@ -23,8 +23,9 @@ class UiPrefs:
     """다음 실행에도 이어갈 UI 상태."""
 
     threshold: float = 0.55                  # 0.0 ~ 1.0 (교차 호기 친화적 기본)
-    image_long_edge_select: int = 720        # Stage 1 사진 크기 (px)
-    image_long_edge_match: int = 720         # Stage 2 사진 크기 (px)
+    image_long_edge_select: int = 400        # Stage 1 사진 크기 (px) — 300~700
+    image_long_edge_match: int = 400         # Stage 2 사진 크기 (px) — 300~700
+    window_preset: str = "보통"               # 화면 크기 프리셋 (5가지 중 하나)
     last_ref_root: str = ""
     last_val_root: str = ""
     last_ref_machine: str = ""
