@@ -230,6 +230,12 @@ class MainWindow(QMainWindow):
 
     def _refresh_models_safe(self) -> None:
         """학습 모듈 import / 평가 집계 실패가 셋업 화면을 막지 않도록 wrap."""
+        # 첫 실행에서 active.txt 가 없으면 latest.txt 로 fallback (스펙 §8.2-c).
+        try:
+            from ..learning import registry as _reg
+            _reg.apply_latest_if_active_unset()
+        except Exception:
+            pass
         try:
             from ..learning import evaluator as _ev
             _ev.refresh_accuracy()

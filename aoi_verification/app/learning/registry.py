@@ -23,13 +23,25 @@ from ..utils import paths
 # ---------------------------------------------------------------------------
 BASIC = "basic"             # 학습 모델 미사용 (기본 탐지 모드) 식별자
 _ACTIVE_FILE = "active.txt"
+_LATEST_FILE = "latest.txt"
 _WEIGHTS_EXT = ".pt"
 _META_EXT = ".json"
 _EVAL_EXT = ".jsonl"
 
-# 모델 이름 ↔ 표시 정확도 매핑 정규식
+# 모델 이름 ↔ 표시 정확도 매핑 정규식 (옛 날짜 이름 형식)
 _ACC_RE = re.compile(r"^(?P<date>\d{4}-\d{2}-\d{2}(?:_\d+)?)"
                      r"(?:_HitAt5_(?P<acc>\d{1,3}))?$")
+
+# 신규 timestamp 이름: ``model_YYYY-MM-DD_HHMMSS`` (스펙 §8.2-c).
+# 동일 초에 2 회 학습 시 ``_2``, ``_3`` 등이 붙을 수 있음.
+_TIMESTAMP_RE = re.compile(
+    r"^model_\d{4}-\d{2}-\d{2}_\d{6}(?:_\d+)?$"
+)
+
+
+def is_timestamp_name(name: str) -> bool:
+    """신규 timestamp 형식의 모델 이름인지."""
+    return bool(_TIMESTAMP_RE.match(name))
 
 
 # ---------------------------------------------------------------------------
@@ -130,13 +142,50 @@ def set_active(name: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Latest pointer — 마지막으로 학습된 모델 이름 (스펙 §8.2-c).
+# ---------------------------------------------------------------------------
+def _latest_file() -> Path:
+    return paths.models_dir() / _LATEST_FILE
+
+
+def get_latest() -> Optional[str]:
+    """가장 최근 학습된 모델 이름. 없으면 None."""
+    p = _latest_file()
+    if not p.exists():
+        return None
+    try:
+        v = p.read_text(encoding="utf-8").strip()
+    except Exception:
+        return None
+    if not v or find(v) is None:
+        return None
+    return v
+
+
+def set_latest(name: str) -> None:
+    """학습 성공 시 호출. 첫 실행 시 ``active`` 가 비어있다면 자동 적용."""
+    _latest_file().parent.mkdir(parents=True, exist_ok=True)
+    _latest_file().write_text(name, encoding="utf-8")
+
+
+def apply_latest_if_active_unset() -> None:
+    """active.txt 가 비어있거나 basic 이면 latest 로 활성 모델을 설정."""
+    if get_active() == BASIC and get_latest() is not None:
+        set_active(get_latest() or BASIC)
+
+
+# ---------------------------------------------------------------------------
 # Name generation / rename
 # ---------------------------------------------------------------------------
 def make_new_name(today: Optional[datetime] = None) -> str:
-    """오늘 날짜 기준의 새 모델 이름을 만든다 (동일 날짜는 ``_2`` …)."""
+    """신규 timestamp 형식의 모델 이름을 만든다 (스펙 §8.2-c).
+
+    형식: ``model_YYYY-MM-DD_HHMMSS``. 같은 초에 두 번 학습되면 ``_2``, ``_3``
+    으로 disambiguate. 옛 ``YYYY-MM-DD`` 모델은 그대로 보존되며 충돌하지 않는다.
+    """
     today = today or datetime.now()
-    base = today.strftime("%Y-%m-%d")
-    existing = {info.base_date for info in list_models()}
+    base = "model_" + today.strftime("%Y-%m-%d_%H%M%S")
+    existing = {info.name for info in list_models()}
     if base not in existing:
         return base
     n = 2
@@ -158,7 +207,13 @@ def rename_with_accuracy(info: ModelInfo, hit_at_5_pct: int) -> ModelInfo:
     """모델 파일/메타/평가 로그/active.txt 를 정확도가 표기된 이름으로 일괄 변경.
 
     이미 동일한 정확도가 붙어 있으면 작업 없이 그대로 반환.
+    신규 timestamp 이름(``model_YYYY-MM-DD_HHMMSS``) 은 자동 리네임 대상에서
+    제외 — 스펙 §8.3 ‘모든 학습 버전을 보존’ 원칙과 맞춤.
     """
+    # 신규 timestamp 형식은 절대 이름을 바꾸지 않는다.
+    if is_timestamp_name(info.name):
+        return info
+
     base = info.base_date
     new_name = f"{base}_HitAt5_{int(round(hit_at_5_pct))}"
     if new_name == info.name:

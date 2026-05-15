@@ -252,12 +252,24 @@ class TrainHeadWorker(QThread):
         tmp = info.weights_path.with_suffix(".pt.tmp")
         triplet_model.save_head(head, tmp)
         tmp.replace(info.weights_path)
+        # pairs.jsonl 의 내용 SHA1 — 학습 시점 데이터 식별자 (스펙 §8.2-c)
+        pairs_hash = ""
+        try:
+            import hashlib
+            jsonl = self._store.path()
+            if jsonl.exists():
+                pairs_hash = hashlib.sha1(jsonl.read_bytes()).hexdigest()
+        except Exception:
+            pass
         registry.write_meta(info, {
             "name": name,
             "trained_at": datetime.now().isoformat(timespec="seconds"),
             "backbone": "mobilenet_v3_small",
             "head_dims": list(head.dims),
             "num_train_pairs": len(usable_pairs),
+            "pairs_used": len(usable_pairs),
+            "pairs_hash": pairs_hash,
+            "notes": "",
             "epochs": self._epochs,
             "batch_size": self._batch,
             "lr": self._lr,
@@ -281,8 +293,9 @@ class TrainHeadWorker(QThread):
                 except OSError:
                     pass
 
-        # active 갱신 + 임베더 캐시 무효화 + 디스크 cnn 캐시 정리
+        # active 갱신 + latest.txt 기록 + 임베더 캐시 무효화 + 디스크 cnn 캐시 정리
         registry.set_active(name)
+        registry.set_latest(name)
         emb_mod.invalidate_caches()
         try:
             from ..similarity import pipeline as _pipe
