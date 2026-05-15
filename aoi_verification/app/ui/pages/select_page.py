@@ -471,6 +471,10 @@ class SelectPage(QWidget):
     # Decisions
     # ------------------------------------------------------------------
     def _decide(self, action: str) -> None:
+        # QShortcut 의 기본 context 가 WindowShortcut 이라 다른 페이지가
+        # 보이는 상태에서도 ←/→/1/2 가 여기로 전달된다. 보이지 않을 땐 무시.
+        if not self.isVisible():
+            return
         if self._state is None or self._current is None:
             return
         item = self._current
@@ -529,6 +533,9 @@ class SelectPage(QWidget):
         self.state_changed.emit()
 
     def _undo(self) -> None:
+        # Z 가 MatchPage 가 보일 때도 SelectPage 로 전달되는 것을 차단.
+        if not self.isVisible():
+            return
         if self._state is None or not self._state.history:
             return
         action, item = self._state.history.pop()

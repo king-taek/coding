@@ -406,6 +406,10 @@ class MatchPage(QWidget):
     # ------------------------------------------------------------------
     def _skip_current(self) -> None:
         """잠시 보류 — Skip 재시도 풀로 들어감. 미탐 시트엔 들어가지 않음."""
+        # QShortcut("S") 는 WindowShortcut 컨텍스트라 SelectPage 가 보일 때도
+        # 이 핸들러로 전달된다. 보이지 않을 땐 조용히 무시.
+        if not self.isVisible():
+            return
         if self._state is None or self._current is None:
             return
         item = self._current
@@ -418,6 +422,8 @@ class MatchPage(QWidget):
 
     def _confirm_no_match(self) -> None:
         """매칭 없음 확정 — 미탐 시트에 들어가고, Skip 재시도 대상이 아님."""
+        if not self.isVisible():
+            return
         if self._state is None or self._current is None:
             return
         item = self._current
