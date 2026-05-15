@@ -45,6 +45,12 @@ class UiPrefs:
     howto_expanded: bool = False
     # 썸네일 빠른 모드 (사용자가 강제로 가장 낮은 품질 티어 사용)
     speed_mode: bool = False
+    # 자동화 수준 — 사용자 개입 정도 (#3 올인원 모드)
+    #   "manual"      : 기존 흐름. Stage 1 (검증/제외) + Stage 2 (수동 매치).
+    #   "user_select" : Stage 1 만 직접, Stage 2 자동 매치 + 검토.
+    #   "auto_all"    : Stage 1 건너뜀 (모든 ref 사용 + 그룹 대표만 큐에),
+    #                   Stage 2 자동 매치 + 그룹/매치 검토.
+    automation_level: str = "manual"
     extra: dict[str, Any] = field(default_factory=dict)
 
     # ------------------------------------------------------------------

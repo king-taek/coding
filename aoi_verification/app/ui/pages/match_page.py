@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import QByteArray, Qt, pyqtSignal
+from PyQt6.QtCore import QByteArray, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QKeySequence, QPixmap, QShortcut
 from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel,
                               QMessageBox, QScrollArea, QSizePolicy, QSlider,
@@ -71,6 +71,9 @@ class MatchPage(QWidget):
         # 매 reference 마다 점수 재계산을 회피한다.
         self._score_cache = SlotScoreCache()
         self._precompute_worker: Optional[SlotPrecomputeWorker] = None
+        # 자동 매치 모드 (#3): True 면 사용자 클릭 없이 임계치 이상 최고 점수 후보를
+        # 자동으로 매치 / 후보 없으면 ‘매치 없음’ 으로 자동 처리.
+        self._auto_mode: bool = False
 
     # ------------------------------------------------------------------
     def _build(self) -> None:
@@ -286,7 +289,8 @@ class MatchPage(QWidget):
                    phase_label: str = "",
                    direction: str = "A→B",
                    session_id: str = "",
-                   model_name: str = "basic") -> None:
+                   model_name: str = "basic",
+                   auto_mode: bool = False) -> None:
         self._state = Stage2State(
             queue=list(queue),
             matches=list(matches or []),
@@ -297,6 +301,7 @@ class MatchPage(QWidget):
         self._mode_direction = direction
         self._session_id = session_id or ""
         self._model_name = model_name or "basic"
+        self._auto_mode = bool(auto_mode)
         self.phase_label.setText(phase_label)
         self._refresh_skipped_panel()
         # 모든 (ref, val) 쌍 점수를 미리 계산 → 이후 매칭은 캐시 조회만.
@@ -357,7 +362,15 @@ class MatchPage(QWidget):
         )
 
     def _on_precompute_finished(self) -> None:
-        self._loading.hide_overlay()
+        # 자동 모드면 곧장 자동 매치 진행 표시로 전환, 수동 모드면 오버레이 숨김.
+        if getattr(self, "_auto_mode", False):
+            total = len(self._state.queue) if self._state else 0
+            self._loading.set_progress(
+                0, total,
+                i18n.KO.LOAD_AUTO_MATCH_FMT.format(done=0, total=total),
+            )
+        else:
+            self._loading.hide_overlay()
         self._advance()
 
     def get_state(self) -> Stage2State | None:
@@ -372,6 +385,7 @@ class MatchPage(QWidget):
             self.center_img.clear_image()
             self.slot_label.setText("")
             self._clear_right_grid()
+            self._loading.hide_overlay()
             self.finished.emit()
             return
 
@@ -460,14 +474,44 @@ class MatchPage(QWidget):
         )
 
     def _on_matcher_done(self, candidates: list) -> None:
-        self._loading.hide_overlay()
         self._candidates = list(candidates)
         if not self._candidates:
-            QMessageBox.information(self, i18n.KO.APP_TITLE,
-                                    i18n.KO.INFO_NO_MATCH_FOUND)
-            self._skip_current()
+            # 자동 모드면 모달 없이 ‘매칭 없음’ 으로 즉시 처리 (이벤트 루프에
+            # 한 번 양보해 진행 라벨이 보이도록 QTimer.singleShot 으로 defer).
+            if self._auto_mode:
+                self._update_auto_progress()
+                QTimer.singleShot(0, self._confirm_no_match)
+            else:
+                self._loading.hide_overlay()
+                QMessageBox.information(self, i18n.KO.APP_TITLE,
+                                        i18n.KO.INFO_NO_MATCH_FOUND)
+                self._skip_current()
             return
+
+        # 자동 매치 모드: 최고 점수 후보를 즉시 확정하고 다음 ref 로.
+        if self._auto_mode:
+            top = self._candidates[0]
+            self._update_auto_progress()
+            QTimer.singleShot(0, lambda: self._on_pick(
+                ThumbEntry(item=top.item, extra={"score": float(top.score)})
+            ))
+            return
+
+        self._loading.hide_overlay()
         self._populate_right(self._candidates)
+
+    def _update_auto_progress(self) -> None:
+        """자동 모드에서 진행 상황 표시 — done / total ref."""
+        if self._state is None:
+            return
+        done = len(self._state.matches) + sum(
+            len(v) for v in self._state.no_match.values()
+        )
+        total = done + len(self._state.queue)
+        self._loading.set_progress(
+            done, total,
+            i18n.KO.LOAD_AUTO_MATCH_FMT.format(done=done, total=total),
+        )
 
     # ------------------------------------------------------------------
     def _show_center(self, item: ImageItem) -> None:

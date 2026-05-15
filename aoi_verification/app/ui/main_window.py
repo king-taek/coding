@@ -419,7 +419,12 @@ class MainWindow(QMainWindow):
         assert self._input is not None
         # 임계치 자동 추천 ----------------------------------------------
         self._maybe_offer_threshold_suggestion()
-        # Phase 결정 → Stage 1 진입 -------------------------------------
+        # 자동화 수준에 따라 흐름 분기 (#3 올인원 모드) -------------------
+        if self._input.automation_level == "auto_all":
+            # Stage 1 건너뜀 — 모든 ref + 그룹 대표만 큐에 → 곧장 Stage 2 자동.
+            self._enter_stage2_auto_all()
+            return
+        # 'manual' 과 'user_select' 둘 다 Stage 1 은 동일 (사용자 직접).
         self._phase = PHASE_A_SELECT
         self._enter_stage1_phase_a()
 
@@ -532,6 +537,45 @@ class MainWindow(QMainWindow):
         return {k: list(v) for k, v in panel.items() if v}
 
     # ==================================================================
+    # Stage 2 — 올인원 자동 모드 (#3): Stage 1 건너뛰기
+    # ==================================================================
+    def _enter_stage2_auto_all(self) -> None:
+        """모든 ref 를 자동으로 큐에 넣고 Stage 2 자동 매치로 진입.
+
+        교차 검증 모드와 호환되지 않는 단순화된 흐름 — single 모드 기준으로
+        진행한다. 사용자가 cross + auto_all 을 함께 골랐다면 single 처럼 동작.
+        """
+        assert self._scan is not None and self._input is not None
+        slots = [self._scan.slots[n] for n in self._scan.common_slot_names]
+        # 모든 ref 이미지 모으기 (낮은 호기 = ref 기준 — single 모드 기본)
+        all_refs: list[ImageItem] = []
+        for slot in sorted(slots, key=lambda s: s.name):
+            all_refs.extend(slot.ref_images)
+        # 그룹화로 거의 동일한 사진은 대표 한 장만 큐에.
+        grouping = self._make_groups(all_refs)
+        queue = grouping.representatives if grouping else all_refs
+
+        # 매칭 대상 풀 = 같은 Slot 의 val 측 모든 사진.
+        pool: dict[str, list[ImageItem]] = {}
+        for name in self._scan.common_slot_names:
+            slot = self._scan.slots[name]
+            pool[name] = list(slot.val_images)
+
+        self._match_page.load_state(
+            queue=queue,
+            val_pool_by_slot=pool,
+            threshold=self._input.threshold,
+            phase_label=i18n.KO.STAGE2_TITLE,
+            direction="A→B",
+            session_id=self._session_id,
+            model_name=self._active_model_name(),
+            auto_mode=True,
+        )
+        self._show_page(self._match_page)
+        self._phase = PHASE_A_MATCH
+        self._autosave()
+
+    # ==================================================================
     # Stage 2 — Phase A
     # ==================================================================
     def _enter_stage2_phase_a(self) -> None:
@@ -552,6 +596,7 @@ class MainWindow(QMainWindow):
 
         direction = "A→B"
         phase_lab = i18n.KO.PHASE_A_MATCH if self._is_cross() else i18n.KO.STAGE2_TITLE
+        auto_mode = self._input.automation_level in ("user_select", "auto_all")
         self._match_page.load_state(
             queue=queue,
             val_pool_by_slot=pool,
@@ -560,6 +605,7 @@ class MainWindow(QMainWindow):
             direction=direction,
             session_id=self._session_id,
             model_name=self._active_model_name(),
+            auto_mode=auto_mode,
         )
         self._show_page(self._match_page)
         self._phase = PHASE_A_MATCH
@@ -586,7 +632,12 @@ class MainWindow(QMainWindow):
                 # ‘잠시 보류’ 는 사용자 결정 미정 → 미탐 시트에 넣지 않는다.
                 for slot, items in st.no_match.items():
                     self._skipped_a[slot].extend(items)
-            if self._is_cross():
+            # auto_all 모드는 single 흐름 강제 — Phase B 로 진입하지 않는다.
+            auto_all = (
+                self._input is not None
+                and self._input.automation_level == "auto_all"
+            )
+            if self._is_cross() and not auto_all:
                 QMessageBox.information(
                     self, i18n.KO.INFO_PHASE_TRANSITION_TITLE,
                     i18n.KO.INFO_PHASE_A_TO_B,
@@ -655,6 +706,7 @@ class MainWindow(QMainWindow):
             pool[name] = slot.ref_images if lower == "ref" else slot.val_images
 
         direction = "B→A"
+        auto_mode = self._input.automation_level in ("user_select", "auto_all")
         self._match_page.load_state(
             queue=queue,
             val_pool_by_slot=pool,
@@ -663,6 +715,7 @@ class MainWindow(QMainWindow):
             direction=direction,
             session_id=self._session_id,
             model_name=self._active_model_name(),
+            auto_mode=auto_mode,
         )
         self._show_page(self._match_page)
         self._phase = PHASE_B_MATCH
@@ -689,10 +742,15 @@ class MainWindow(QMainWindow):
             unmatched_refs=unmatched_refs,
         )
         # 결과 페이지에는 ‘이미 복사해둔 작업 파일’ 과 ‘템플릿 원본’ 둘 다 전달.
+        auto_mode = (
+            self._input is not None
+            and self._input.automation_level in ("user_select", "auto_all")
+        )
         self._result_page.show_result(
             result,
             template_path=self._template_used,
             target_path=self._working_xlsx,
+            auto_mode=auto_mode,
         )
         QMessageBox.information(self, i18n.KO.APP_TITLE, i18n.KO.INFO_ALL_DONE)
         self._show_page(self._result_page)

@@ -69,7 +69,8 @@ class ResultPage(QWidget):
     # ------------------------------------------------------------------
     def show_result(self, result: FinalResult,
                     template_path: Path | None = None,
-                    target_path: Path | None = None) -> None:
+                    target_path: Path | None = None,
+                    auto_mode: bool = False) -> None:
         self._result = result
         self._template_path = template_path
         self._target_path = target_path
@@ -86,6 +87,22 @@ class ResultPage(QWidget):
             lab.setProperty("role", role)
             lab.setWordWrap(True)
             self._summary_layout.addWidget(lab)
+
+        # 자동 매치 모드면 검토를 권하는 안내를 가장 위에 노출.
+        if auto_mode:
+            n_match = len(result.matches)
+            n_miss = len(result.unmatched_refs)
+            hint = QLabel(
+                i18n.KO.AUTO_REVIEW_HINT_FMT.format(
+                    n_match=n_match, n_miss=n_miss,
+                ),
+                self._summary_card,
+            )
+            hint.setWordWrap(True)
+            hint.setStyleSheet(
+                "color: #FFD600; font-weight: 700; padding: 4px;"
+            )
+            self._summary_layout.addWidget(hint)
 
         mode_text = "한쪽만 검증" if result.mode == "single" else "양쪽 교차검증"
         line(f"모드: {mode_text}")

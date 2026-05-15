@@ -32,6 +32,7 @@ class SetupInput:
     ref_machine: str
     val_machine: str
     threshold: float
+    automation_level: str = "manual"   # "manual" | "user_select" | "auto_all"
 
 
 class SetupPage(QWidget):
@@ -180,6 +181,34 @@ class SetupPage(QWidget):
         mode_card.body().addLayout(h)
         root.addWidget(mode_card)
 
+        # 자동화 수준 — 올인원 모드 (#3) ---------------------------------
+        auto_card = NeonCard(role="card-soft", parent=self)
+        auto_title = QLabel(i18n.KO.AUTOMATION_TITLE, auto_card)
+        auto_title.setStyleSheet(
+            "color: #00D4FF; font-weight: 700; letter-spacing: 1px;"
+        )
+        auto_card.body().addWidget(auto_title)
+
+        self.radio_auto_manual = QRadioButton(i18n.KO.AUTOMATION_MANUAL, auto_card)
+        self.radio_auto_user = QRadioButton(i18n.KO.AUTOMATION_USER_SELECT, auto_card)
+        self.radio_auto_all = QRadioButton(i18n.KO.AUTOMATION_AUTO_ALL, auto_card)
+        # 마지막 선택 복원.
+        _last_auto = getattr(_prefs_now, "automation_level", "manual")
+        if _last_auto == "user_select":
+            self.radio_auto_user.setChecked(True)
+        elif _last_auto == "auto_all":
+            self.radio_auto_all.setChecked(True)
+        else:
+            self.radio_auto_manual.setChecked(True)
+        for rb in (self.radio_auto_manual, self.radio_auto_user, self.radio_auto_all):
+            auto_card.body().addWidget(rb)
+        auto_hint = QLabel(i18n.KO.AUTOMATION_HINT, auto_card)
+        auto_hint.setProperty("role", "muted")
+        auto_hint.setWordWrap(True)
+        auto_hint.setStyleSheet("color: #7FB3D5; padding-top: 4px;")
+        auto_card.body().addWidget(auto_hint)
+        root.addWidget(auto_card)
+
         # 폴더/호기 2칸 ---------------------------------------------------
         row = QHBoxLayout()
         row.setSpacing(20)
@@ -303,6 +332,12 @@ class SetupPage(QWidget):
 
         mode = "cross" if self.radio_cross.isChecked() else "single"
         threshold = self.slider.value() / 100.0
+        if self.radio_auto_all.isChecked():
+            automation = "auto_all"
+        elif self.radio_auto_user.isChecked():
+            automation = "user_select"
+        else:
+            automation = "manual"
         # 마지막 입력 값을 영속화 (#14)
         _prefs.patch(
             threshold=threshold,
@@ -311,6 +346,7 @@ class SetupPage(QWidget):
             last_ref_machine=ref_machine,
             last_val_machine=val_machine,
             last_mode=mode,
+            automation_level=automation,
         )
         self.start_requested.emit(SetupInput(
             mode=mode,
@@ -319,6 +355,7 @@ class SetupPage(QWidget):
             ref_machine=ref_machine,
             val_machine=val_machine,
             threshold=threshold,
+            automation_level=automation,
         ))
 
     # ------------------------------------------------------------------

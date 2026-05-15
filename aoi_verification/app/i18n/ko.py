@@ -247,6 +247,30 @@ LOAD_PRECOMPUTE_FMT = (
     "유사도 사전 계산 중… {done} / {total}\n"
     "(한 번 끝나면 이후 매칭은 즉시 처리됩니다)"
 )
+LOAD_AUTO_MATCH_FMT = "자동 매치 진행 중… {done} / {total}"
+
+# ── 자동화 수준 (#3 올인원 모드) ───────────────────────────────────────────
+AUTOMATION_TITLE = "자동화 수준"
+AUTOMATION_MANUAL = "수동 — 모든 단계 직접 처리 (기존 방식)"
+AUTOMATION_USER_SELECT = "사진 직접 선택 + 매치는 자동"
+AUTOMATION_AUTO_ALL = "모든 사진 자동 — Stage 1 도 그룹화로 건너뛰기"
+AUTOMATION_HINT = (
+    "자동 모드에서는 임계치 이상에서 가장 점수가 높은 후보가 자동으로 선택됩니다.\n"
+    "‘모든 사진 자동’ 은 거의 동일한 사진을 그룹화로 한 장만 남깁니다.\n"
+    "자동 매치 종료 후 결과 화면에서 [매칭 결과 검토] 로 잘못된 매치를 제거할 수 있습니다."
+)
+AUTO_REVIEW_HINT_FMT = (
+    "자동 매치 완료 — 총 {n_match} 쌍이 자동으로 매치되었고,\n"
+    "{n_miss} 장은 임계치 미달로 ‘매칭 없음’ 처리되었습니다.\n"
+    "[매칭 결과 검토] 로 결과를 확인해 주세요."
+)
+GROUP_REVIEW_PHASE = "그룹 검토"
+GROUP_REVIEW_HINT = (
+    "같은 슬롯에서 거의 동일한 사진들끼리 자동으로 묶었습니다.  잘못 묶인 사진이\n"
+    "있으면 ‘그룹에서 분리’ 로 빼내면 그 사진도 매치 후보에 포함됩니다.\n"
+    "검토가 끝나면 [매치 시작] 을 누르세요."
+)
+BTN_START_AUTO_MATCH = "매치 시작 ▶"
 LOAD_SCAN = "폴더 스캔 중…"
 LOAD_EXPORT = "엑셀로 저장 중…"
 LOAD_PRECOMPUTE_REF = "기준 장비 특징 추출 중… {done} / {total}"
