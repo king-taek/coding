@@ -66,6 +66,11 @@ def _load_backbone():  # pragma: no cover — heavy
     return backbone
 
 
+def load_backbone():  # pragma: no cover — heavy
+    """학습 워커가 backbone 인스턴스를 공유하기 위한 공개 진입점."""
+    return _load_backbone()
+
+
 @lru_cache(maxsize=8)
 def _load_head_for(model_name: str):  # pragma: no cover — heavy
     if model_name == registry.BASIC:

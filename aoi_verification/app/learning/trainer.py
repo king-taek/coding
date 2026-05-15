@@ -115,7 +115,7 @@ class TrainHeadWorker(QThread):
         # 1) 백본 임베딩 사전 추출 (도메인 전처리 공유, 배치) -----------
         import torch
 
-        backbone = emb_mod._load_backbone()    # type: ignore[attr-defined]
+        backbone = emb_mod.load_backbone()
         feat_cache: dict[str, "torch.Tensor"] = {}
 
         total = len(all_paths)
@@ -264,22 +264,6 @@ class TrainHeadWorker(QThread):
             "margin": self._margin,
             "loss_history": [round(x, 4) for x in loss_history],
         })
-
-        # 직전 모델 가중치를 백업 (rollback 가능) — #10 위험 완화
-        prev_active = registry.get_active()
-        if prev_active != registry.BASIC:
-            prev_info = registry.find(prev_active)
-            if prev_info and prev_info.weights_path.exists():
-                # 동일 작업 폴더에 .prev.pt 로 한 단계만 보관
-                try:
-                    backup = prev_info.weights_path.with_suffix(".prev.pt")
-                    if backup.exists():
-                        backup.unlink()
-                    prev_info.weights_path.replace(backup)
-                    # 백업한 자리에 원본을 다시 두진 않는다 — 이전 모델은 그대로
-                    backup.replace(prev_info.weights_path)
-                except OSError:
-                    pass
 
         # active 갱신 + 임베더 캐시 무효화 + 디스크 cnn 캐시 정리
         registry.set_active(name)

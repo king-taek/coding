@@ -284,9 +284,18 @@ class MatchPage(QWidget):
                         ref: ImageItem,
                         val_items: list[ImageItem]) -> None:
         self._clear_right_grid()
-        if self._worker is not None and self._worker.isRunning():
-            self._worker.stop()
-            self._worker.wait(500)
+        # 이전 워커가 살아있으면 시그널부터 끊는다. wait() 가 timeout 으로
+        # 끝나도 ‘늦게 도착한 done’ 이 새 후보 리스트를 덮어쓰지 않게.
+        if self._worker is not None:
+            try:
+                self._worker.signals.progress.disconnect()
+                self._worker.signals.done.disconnect()
+                self._worker.signals.failed.disconnect()
+            except (TypeError, RuntimeError):
+                pass
+            if self._worker.isRunning():
+                self._worker.stop()
+                self._worker.wait(500)
 
         self._loading.show_overlay(
             i18n.KO.LOAD_FEATURE_FMT.format(done=0, total=len(val_items))
