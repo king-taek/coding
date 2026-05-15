@@ -944,6 +944,14 @@ class MainWindow(QMainWindow):
         if self._thumb_pool is not None:
             self._thumb_pool.stop()
             self._thumb_pool.wait(1000)
+        # MatchPage 의 점수 사전 계산 워커도 안전 종료.
+        try:
+            pre = getattr(self._match_page, "_precompute_worker", None)
+            if pre is not None and pre.isRunning():
+                pre.stop()
+                pre.wait(500)
+        except Exception:
+            pass
         # 학습 워커도 안전 종료 (#17)
         try:
             self._setup_page.stop_training()

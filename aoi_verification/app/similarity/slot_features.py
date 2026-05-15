@@ -1,7 +1,9 @@
-"""Slot 단위 in-RAM 특징 캐시.
+"""Slot 단위 in-RAM 특징 / 점수 캐시 + 사전 계산 워커.
 
 Stage 2 에서 한 슬롯의 모든 검증측 이미지 ``Feature`` 객체를 한 번만 추출하고,
 같은 슬롯의 여러 reference 가 매칭될 때 디스크 재로드 없이 그대로 재사용한다.
+나아가 (ref, val) 모든 쌍의 점수도 Stage 2 진입 시 미리 한 번에 계산해서
+``SlotScoreCache`` 에 보관 → 매 reference 마다 점수 재계산 없이 즉시 응답.
 
 설계 원칙:
 - **per-image 디스크 캐시 (``feature_cache_dir`` 의 .npz) 는 그대로 사용**.
@@ -16,7 +18,9 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Tuple
+
+from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
 from ..models.slot import ImageItem
 from . import pipeline as _pipeline
@@ -110,3 +114,144 @@ class SlotFeatureCache:
     def known_slots(self) -> List[str]:
         with self._lock:
             return list(self._slots.keys())
+
+
+# ---------------------------------------------------------------------------
+# 점수 캐시 — (slot, ref_path, val_path) → score
+# ---------------------------------------------------------------------------
+class SlotScoreCache:
+    """Stage 2 에서 모든 reference 와 모든 검증 후보 사이의 유사도 점수를
+    미리 계산해 보관. 매 reference 마다 점수를 다시 매길 필요 없음.
+
+    메모리 비용: float 한 개 ≈ 32 bytes. 슬롯당 (refs × vals) entries 라서
+    1000 쌍 ≈ 32 KB — 사실상 무시 가능.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._scores: Dict[str, Dict[Tuple[Path, Path], float]] = {}
+
+    def put(self, slot: str, ref_path: Path, val_path: Path, score: float) -> None:
+        with self._lock:
+            self._scores.setdefault(slot, {})[(ref_path, val_path)] = float(score)
+
+    def has_pair(self, slot: str, ref_path: Path, val_path: Path) -> bool:
+        with self._lock:
+            return (slot in self._scores
+                    and (ref_path, val_path) in self._scores[slot])
+
+    def get_pair(self, slot: str, ref_path: Path, val_path: Path) -> Optional[float]:
+        with self._lock:
+            return self._scores.get(slot, {}).get((ref_path, val_path))
+
+    def has_all_pairs(self,
+                      slot: str,
+                      ref_path: Path,
+                      val_paths: Iterable[Path]) -> bool:
+        """ref 와 주어진 모든 val 쌍 점수가 캐시에 있는지."""
+        with self._lock:
+            slot_scores = self._scores.get(slot)
+            if not slot_scores:
+                return False
+            for v in val_paths:
+                if (ref_path, v) not in slot_scores:
+                    return False
+            return True
+
+    def has_slot(self, slot: str) -> bool:
+        with self._lock:
+            return slot in self._scores
+
+    def clear_slot(self, slot: str) -> None:
+        with self._lock:
+            self._scores.pop(slot, None)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._scores.clear()
+
+    def size(self) -> int:
+        with self._lock:
+            return sum(len(d) for d in self._scores.values())
+
+
+# ---------------------------------------------------------------------------
+# 사전 계산 워커 — 슬롯들의 모든 (ref, val) 쌍 점수를 한 번에 계산
+# ---------------------------------------------------------------------------
+class _PrecomputeSignals(QObject):
+    progress = pyqtSignal(int, int)    # done, total
+    finished = pyqtSignal()
+    failed = pyqtSignal(str)
+
+
+class SlotPrecomputeWorker(QThread):
+    """주어진 슬롯들의 모든 (ref, val) 쌍 점수를 미리 계산해서
+    ``SlotScoreCache`` 에 저장한다.  완료 후 사용자가 reference 를 넘길 때마다
+    점수 재계산 없이 즉시 후보 리스트를 만들 수 있다.
+    """
+
+    def __init__(self,
+                 tasks: List[Tuple[str, List[ImageItem], List[ImageItem]]],
+                 slot_cache: SlotFeatureCache,
+                 score_cache: SlotScoreCache,
+                 parent: Optional[QObject] = None) -> None:
+        super().__init__(parent)
+        # (slot 이름, ref ImageItem 리스트, val ImageItem 리스트)
+        self._tasks = [
+            (slot, list(refs), list(vals)) for slot, refs, vals in tasks
+        ]
+        self._slot_cache = slot_cache
+        self._score_cache = score_cache
+        self._stop = False
+        self.signals = _PrecomputeSignals()
+
+    def stop(self) -> None:
+        self._stop = True
+
+    def run(self) -> None:        # type: ignore[override]
+        try:
+            total = sum(len(r) * len(v) for _, r, v in self._tasks)
+            if total == 0:
+                self.signals.finished.emit()
+                return
+            done = 0
+            for slot, refs, vals in self._tasks:
+                if self._stop:
+                    return
+                if not refs or not vals:
+                    continue
+                # 1) val features 빌드 (디스크 캐시 있으면 빠름)
+                val_feats = self._slot_cache.build(slot, vals)
+                # 2) ref features (sim.extract 가 디스크 캐시 자동 사용)
+                ref_feats: Dict[Path, Feature] = {}
+                for r in refs:
+                    if self._stop:
+                        return
+                    try:
+                        ref_feats[r.path] = _pipeline.extract(r.path)
+                    except Exception:
+                        pass
+                # 3) 모든 (ref, val) 쌍 점수
+                for r in refs:
+                    if self._stop:
+                        return
+                    rf = ref_feats.get(r.path)
+                    for v in vals:
+                        if self._stop:
+                            return
+                        vf = val_feats.get(v.path)
+                        done += 1
+                        if rf is None or vf is None:
+                            continue
+                        try:
+                            s = _pipeline.score(rf, vf)
+                        except Exception:
+                            continue
+                        self._score_cache.put(slot, r.path, v.path, s)
+                        if done % 25 == 0:
+                            self.signals.progress.emit(done, total)
+                # 슬롯 단위로 진행률 emit (마지막 한 번)
+                self.signals.progress.emit(done, total)
+            self.signals.finished.emit()
+        except Exception as exc:        # pragma: no cover — 안전망
+            self.signals.failed.emit(str(exc))

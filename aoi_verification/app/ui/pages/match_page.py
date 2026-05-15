@@ -22,7 +22,8 @@ from ...models.result import MatchResult
 from ...models.slot import ImageItem, Slot
 from ...utils import image_io
 from ...utils import prefs as _prefs
-from ...similarity.slot_features import SlotFeatureCache
+from ...similarity.slot_features import (SlotFeatureCache, SlotPrecomputeWorker,
+                                            SlotScoreCache)
 from ...workers.matcher import Candidate, MatcherWorker
 from ..widgets.loading_overlay import LoadingOverlay
 from ..widgets.match_expand_view import MatchExpandView
@@ -66,6 +67,10 @@ class MatchPage(QWidget):
         self._candidates: list[Candidate] = []
         # 슬롯 단위 검증측 특징 캐시 — 같은 슬롯의 reference 들이 공유.
         self._slot_cache = SlotFeatureCache(keep_lookahead=False)
+        # (ref, val) 쌍 점수 사전 계산 캐시 — load_state 시 한 번에 채워서
+        # 매 reference 마다 점수 재계산을 회피한다.
+        self._score_cache = SlotScoreCache()
+        self._precompute_worker: Optional[SlotPrecomputeWorker] = None
 
     # ------------------------------------------------------------------
     def _build(self) -> None:
@@ -294,6 +299,65 @@ class MatchPage(QWidget):
         self._model_name = model_name or "basic"
         self.phase_label.setText(phase_label)
         self._refresh_skipped_panel()
+        # 모든 (ref, val) 쌍 점수를 미리 계산 → 이후 매칭은 캐시 조회만.
+        self._start_precompute()
+
+    # ------------------------------------------------------------------
+    def _start_precompute(self) -> None:
+        """현재 state.queue 의 모든 ref 와 슬롯별 val 사이의 점수를 미리 계산.
+
+        한 번 끝나면 ``_launch_matcher`` 는 사실상 디스크/CPU 작업 없이
+        ``_score_cache`` 조회만 한다. precompute 가 완료될 때까지 첫
+        reference 의 ``_advance`` 호출도 잠깐 지연시켜 ‘로딩 후 즉시’ UX 보장.
+        """
+        if self._state is None:
+            return
+        # 슬롯별 ref 수집
+        refs_by_slot: dict[str, list[ImageItem]] = defaultdict(list)
+        for r in self._state.queue:
+            refs_by_slot[r.slot].append(r)
+        tasks: list[tuple[str, list[ImageItem], list[ImageItem]]] = []
+        for slot, refs in refs_by_slot.items():
+            vals = self._state.val_pool.get(slot, [])
+            if refs and vals:
+                tasks.append((slot, refs, vals))
+        total_pairs = sum(len(r) * len(v) for _, r, v in tasks)
+        if total_pairs == 0:
+            # 계산할 게 없으면 바로 진행
+            self._advance()
+            return
+
+        # 이전 precompute 워커가 살아있으면 중단
+        if self._precompute_worker is not None and self._precompute_worker.isRunning():
+            self._precompute_worker.stop()
+            self._precompute_worker.wait(500)
+
+        self._loading.show_overlay(
+            i18n.KO.LOAD_PRECOMPUTE_FMT.format(done=0, total=total_pairs)
+        )
+        self._precompute_worker = SlotPrecomputeWorker(
+            tasks, slot_cache=self._slot_cache,
+            score_cache=self._score_cache, parent=self,
+        )
+        self._precompute_worker.signals.progress.connect(
+            self._on_precompute_progress
+        )
+        self._precompute_worker.signals.finished.connect(
+            self._on_precompute_finished
+        )
+        self._precompute_worker.signals.failed.connect(
+            lambda msg: self._loading.set_progress(0, 0, msg)
+        )
+        self._precompute_worker.start()
+
+    def _on_precompute_progress(self, done: int, total: int) -> None:
+        self._loading.set_progress(
+            done, total,
+            i18n.KO.LOAD_PRECOMPUTE_FMT.format(done=done, total=total),
+        )
+
+    def _on_precompute_finished(self) -> None:
+        self._loading.hide_overlay()
         self._advance()
 
     def get_state(self) -> Stage2State | None:
@@ -347,8 +411,19 @@ class MatchPage(QWidget):
                 self._worker.stop()
                 self._worker.wait(500)
 
-        # 슬롯 단위 RAM 캐시 — 같은 슬롯의 두 번째 reference 부터 즉시 사용.
-        # 첫 reference 진입 시에만 워커 thread 에서 캐시를 빌드 (GUI 미블록).
+        # 점수 사전 계산이 끝나 있으면 캐시 조회만으로 즉시 응답.
+        val_paths = [v.path for v in val_items]
+        if self._score_cache.has_all_pairs(ref.slot, ref.path, val_paths):
+            cached: list = []
+            for v in val_items:
+                s = self._score_cache.get_pair(ref.slot, ref.path, v.path)
+                if s is not None and s >= self._threshold:
+                    cached.append(Candidate(item=v, score=float(s)))
+            cached.sort(key=lambda c: c.score, reverse=True)
+            self._on_matcher_done(cached)
+            return
+
+        # 사전 계산이 안 됐거나 누락된 경우 — 기존 워커 fallback.
         self._slot_cache.set_active(ref.slot)
         val_features = self._slot_cache.get_features(ref.slot) or {}
         # 모든 val 이 이미 캐시에 들어 있으면 ‘유사도 계산’ 모드.

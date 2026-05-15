@@ -30,8 +30,14 @@ COL_VAL = "D"
 COL_DIR = "E"
 HEADER_ROW = 1
 DATA_START_ROW = 2
-ROW_HEIGHT_PT = 120          # 약 800px 사진이 들어갈 행 높이
-IMG_COL_WIDTH = 28           # 컬럼 너비 (문자 단위, openpyxl)
+# 셀 ↔ 사진 크기 정합 (사용자 요청):
+#   · 사진을 작게 두어 프린트 / 부분 확대 모두에 유리하게.
+#   · 1 column width unit ≈ 7 px (Calibri 11pt) → 22 chars ≈ 154 px
+#   · 1 row height pt ≈ 1.333 px → 115 pt ≈ 153 px
+#   · 이미지 max 150 px → 양쪽 모두 약간의 여백을 두고 정사각형 영역에 안착.
+ROW_HEIGHT_PT = 115
+IMG_COL_WIDTH = 22
+IMG_MAX_PX = 150             # 셀 안에 들어갈 사진의 최대 변 길이
 
 
 # ---------------------------------------------------------------------------
@@ -200,8 +206,8 @@ class ExcelExporter(QThread):
                     val_mid = image_io.get_mid_path(m.val_path)
                     xli_ref = XLImage(str(ref_mid))
                     xli_val = XLImage(str(val_mid))
-                    _shrink(xli_ref, max_px=560)
-                    _shrink(xli_val, max_px=560)
+                    _shrink(xli_ref, max_px=IMG_MAX_PX)
+                    _shrink(xli_val, max_px=IMG_MAX_PX)
                     ws.add_image(xli_ref, f"{col_ref}{row}")
                     ws.add_image(xli_val, f"{col_val}{row}")
                     self.signals.progress.emit(idx, total, m.slot)
@@ -212,7 +218,7 @@ class ExcelExporter(QThread):
                     try:
                         ref_mid = image_io.get_mid_path(Path(u.path))
                         xli_ref = XLImage(str(ref_mid))
-                        _shrink(xli_ref, max_px=560)
+                        _shrink(xli_ref, max_px=IMG_MAX_PX)
                         ws.add_image(xli_ref, f"{col_ref}{row}")
                     except Exception:
                         ws[f"{col_ref}{row}"] = str(Path(u.path).name)
@@ -275,7 +281,7 @@ class ExcelExporter(QThread):
             try:
                 mid = image_io.get_mid_path(Path(e.path))
                 xli = XLImage(str(mid))
-                _shrink(xli, max_px=560)
+                _shrink(xli, max_px=IMG_MAX_PX)
                 ws.add_image(xli, f"C{i}")
             except Exception:
                 ws[f"C{i}"] = str(e.path)
