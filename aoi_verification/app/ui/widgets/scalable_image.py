@@ -19,9 +19,9 @@ from ...utils import image_io
 class ScalableImage(QLabel):
     """원본(=mid 캐시) 픽스맵을 보존하면서 슬라이더 값으로 크기를 조절."""
 
-    DEFAULT_LONG_EDGE = 720
+    DEFAULT_LONG_EDGE = 400     # 최대 700 / 최소 300 / 기본 400
     MIN_LONG_EDGE = 300
-    MAX_LONG_EDGE = 1400
+    MAX_LONG_EDGE = 700
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)

@@ -63,6 +63,39 @@ def test_rename_preserves_active_pointer(isolated_cache):
     assert R.get_active() == new_info.name
 
 
+def test_rename_rolls_back_on_partial_failure(isolated_cache, monkeypatch):
+    """meta rename 이 OSError 면 이미 옮긴 weights 도 원위치 — 분열 상태 방지."""
+    _touch_model("2026-05-13", meta={"name": "2026-05-13"})
+    # eval 로그도 만들어서 3개 파일 모두 옮길 거리가 있도록.
+    info = R.find("2026-05-13")
+    info.eval_path.parent.mkdir(parents=True, exist_ok=True)
+    info.eval_path.write_text('{"ts":"x"}\n', encoding="utf-8")
+    info = R.find("2026-05-13")
+
+    real_rename = type(info.weights_path).rename
+    calls = {"n": 0}
+
+    def _flaky_rename(self, target):
+        calls["n"] += 1
+        # 첫 호출(weights) 은 성공, 두 번째(meta) 는 실패시킨다.
+        if calls["n"] == 2:
+            raise OSError("disk full")
+        return real_rename(self, target)
+
+    monkeypatch.setattr(type(info.weights_path), "rename", _flaky_rename)
+
+    result = R.rename_with_accuracy(info, 80)
+    # 실패 시 원래 info 그대로 반환 (이름 미변경)
+    assert result.name == "2026-05-13"
+    # 디스크에도 원래 이름이 남아 있어야 한다 (rollback 성공).
+    assert info.weights_path.exists()
+    assert info.meta_path.exists()
+    # 새 이름 파일은 없어야 한다.
+    target = R._build_files("2026-05-13_HitAt5_80")
+    assert not target.weights_path.exists()
+    assert not target.meta_path.exists()
+
+
 def test_export_import_round_trip(isolated_cache, tmp_path):
     _touch_model("2026-05-13", meta={"name": "2026-05-13", "hit_at_5": 0.7})
     zip_path = tmp_path / "out.zip"

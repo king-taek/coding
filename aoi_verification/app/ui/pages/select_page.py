@@ -230,11 +230,14 @@ class SelectPage(QWidget):
                 ("batch_verify", i18n.KO.BTN_BATCH_VERIFY, "primary"),
                 ("batch_exclude", i18n.KO.BTN_BATCH_EXCLUDE, "danger"),
             ],
+            columns=2,
         )
         self.left_panel.selection_action.connect(self._on_batch_action)
         self.left_panel.tile_clicked.connect(self._on_tile_click)
         self.left_panel.plus_clicked.connect(self._on_plus_click)
-        self.left_panel.setMinimumWidth(260)
+        # 2 col 그리드 (120px thumb + 14 padding) × 2 + spacing + 패널 padding 을
+        # 모두 담을 최소 너비. 작게(1100) preset 에서도 가로 스크롤 없이 보이게.
+        self.left_panel.setMinimumWidth(280)
         self._h_splitter.addWidget(self.left_panel)
 
         # CENTER ------------------------------------------------------
@@ -292,7 +295,7 @@ class SelectPage(QWidget):
             "QScrollArea { background: #050810; border: 1px solid #1F2A3F; "
             "border-radius: 8px; }"
         )
-        self._img_scroll.setMinimumHeight(360)
+        self._img_scroll.setMinimumHeight(300)
         self._img_scroll.setSizePolicy(QSizePolicy.Policy.Expanding,
                                        QSizePolicy.Policy.Expanding)
         cl.addWidget(self._img_scroll, stretch=1)
@@ -321,7 +324,7 @@ class SelectPage(QWidget):
         btn_row.addWidget(self.btn_exclude)
         cl.addLayout(btn_row)
 
-        center_card.setMinimumWidth(560)
+        center_card.setMinimumWidth(420)
         self._h_splitter.addWidget(center_card)
 
         # RIGHT -------------------------------------------------------
@@ -332,11 +335,12 @@ class SelectPage(QWidget):
                 ("to_exclude", i18n.KO.BTN_MOVE_TO_EXCLUDE, "warn"),
                 ("recenter", i18n.KO.BTN_BACK_TO_CENTER, "ghost"),
             ],
+            columns=2,
         )
         self.right_panel.selection_action.connect(self._on_batch_action)
         self.right_panel.tile_clicked.connect(self._on_tile_click)
         self.right_panel.plus_clicked.connect(self._on_plus_click)
-        self.right_panel.setMinimumWidth(260)
+        self.right_panel.setMinimumWidth(280)
         self._h_splitter.addWidget(self.right_panel)
 
         self._h_splitter.setStretchFactor(0, 2)
@@ -351,7 +355,8 @@ class SelectPage(QWidget):
                 ("to_target", i18n.KO.BTN_MOVE_TO_TARGET, "primary"),
                 ("recenter", i18n.KO.BTN_BACK_TO_CENTER, "ghost"),
             ],
-            columns=8,
+            # 7 col × 134px = 938 → 기본 폭 1280 에서 가로 스크롤 없이 보임.
+            columns=7,
         )
         self.bottom_panel.selection_action.connect(self._on_batch_action)
         self.bottom_panel.tile_clicked.connect(self._on_tile_click)
@@ -511,6 +516,10 @@ class SelectPage(QWidget):
     # Decisions
     # ------------------------------------------------------------------
     def _decide(self, action: str) -> None:
+        # QShortcut 의 기본 context 가 WindowShortcut 이라 다른 페이지가
+        # 보이는 상태에서도 ←/→/1/2 가 여기로 전달된다. 보이지 않을 땐 무시.
+        if not self.isVisible():
+            return
         if self._state is None or self._current is None:
             return
         item = self._current
@@ -569,6 +578,9 @@ class SelectPage(QWidget):
         self.state_changed.emit()
 
     def _undo(self) -> None:
+        # Z 가 MatchPage 가 보일 때도 SelectPage 로 전달되는 것을 차단.
+        if not self.isVisible():
+            return
         if self._state is None or not self._state.history:
             return
         action, item = self._state.history.pop()

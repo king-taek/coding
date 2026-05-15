@@ -49,7 +49,9 @@ def test_export_writes_matches_and_unmatched(qapp, isolated_cache, tmp_path):
                                    note="미매칭")],
     )
     dst = tmp_path / "out.xlsx"
-    exp = ExcelExporter(result, dst_path=dst, template_path=None)
+    # 양식 자동 감지를 피하려고 일부러 존재하지 않는 템플릿 경로를 명시 지정.
+    no_tpl = tmp_path / "no_template.xlsx"
+    exp = ExcelExporter(result, dst_path=dst, template_path=no_tpl)
     exp.run()  # QThread.run() 을 동기 실행
     assert dst.exists()
 
@@ -91,7 +93,8 @@ def test_export_no_unmatched_unaffected(qapp, isolated_cache, tmp_path):
                               score=0.9, direction="A→B")],
     )
     dst = tmp_path / "out2.xlsx"
-    ExcelExporter(result, dst_path=dst, template_path=None).run()
+    no_tpl = tmp_path / "no_template.xlsx"
+    ExcelExporter(result, dst_path=dst, template_path=no_tpl).run()
     assert dst.exists()
 
     from openpyxl import load_workbook

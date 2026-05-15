@@ -203,10 +203,7 @@ class SetupPage(QWidget):
         self.threshold_label = QLabel(f"{self.slider.value()} %", slider_card)
         self.threshold_label.setStyleSheet("color: #00D4FF; font-weight: 700;")
         self.threshold_label.setFixedWidth(60)
-        self.slider.valueChanged.connect(
-            lambda v: (self.threshold_label.setText(f"{v} %"),
-                       _prefs.patch(threshold=v / 100.0))
-        )
+        self.slider.valueChanged.connect(self._on_threshold_changed)
         sl.addWidget(self.slider, stretch=1)
         sl.addWidget(self.threshold_label)
         slider_card.body().addLayout(sl)
@@ -270,6 +267,10 @@ class SetupPage(QWidget):
         path = QFileDialog.getExistingDirectory(self, i18n.KO.SETUP_FOLDER_LABEL)
         if path:
             target.setText(path)
+
+    def _on_threshold_changed(self, v: int) -> None:
+        self.threshold_label.setText(f"{v} %")
+        _prefs.patch(threshold=v / 100.0)
 
     # ------------------------------------------------------------------
     def _on_start(self) -> None:

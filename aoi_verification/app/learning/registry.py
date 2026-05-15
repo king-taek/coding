@@ -230,15 +230,35 @@ def rename_with_accuracy(info: ModelInfo, hit_at_5_pct: int) -> ModelInfo:
     # active 가 이 모델을 가리키고 있었는지 ‘이동 전에’ 미리 캡처
     was_active = (get_active() == info.name)
 
-    # 파일 이동
+    # 파일 이동 — 셋 중 하나라도 실패하면 이미 이동된 것을 원복한다.
+    # 그렇지 않으면 `list_models()` 가 새 이름으로 모델을 찾아오는데 meta/eval
+    # 은 옛 이름에 남아 있는 분열 상태가 발생한다.
+    moved: list[tuple[Path, Path]] = []
     try:
         info.weights_path.rename(target.weights_path)
+        moved.append((info.weights_path, target.weights_path))
+        if info.meta_path.exists():
+            info.meta_path.rename(target.meta_path)
+            moved.append((info.meta_path, target.meta_path))
+        if info.eval_path.exists():
+            info.eval_path.rename(target.eval_path)
+            moved.append((info.eval_path, target.eval_path))
     except FileNotFoundError:
+        if not moved:
+            return info
+        for src, dst in reversed(moved):
+            try:
+                dst.rename(src)
+            except OSError:
+                pass
         return info
-    if info.meta_path.exists():
-        info.meta_path.rename(target.meta_path)
-    if info.eval_path.exists():
-        info.eval_path.rename(target.eval_path)
+    except OSError:
+        for src, dst in reversed(moved):
+            try:
+                dst.rename(src)
+            except OSError:
+                pass
+        return info
 
     # meta 내부의 name 도 갱신
     meta = info.meta.copy()

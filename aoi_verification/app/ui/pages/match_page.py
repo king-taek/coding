@@ -119,7 +119,7 @@ class MatchPage(QWidget):
         self._left_layout.addStretch(1)
         self._left_scroll.setWidget(self._left_host)
         ll.addWidget(self._left_scroll, stretch=1)
-        left.setMinimumWidth(260)
+        left.setMinimumWidth(200)
         self._h_splitter.addWidget(left)
 
         # CENTER: 기준 사진 1장
@@ -176,7 +176,7 @@ class MatchPage(QWidget):
             "QScrollArea { background: #050810; border: 1px solid #1F2A3F; "
             "border-radius: 8px; }"
         )
-        self._img_scroll.setMinimumHeight(360)
+        self._img_scroll.setMinimumHeight(300)
         self._img_scroll.setSizePolicy(QSizePolicy.Policy.Expanding,
                                        QSizePolicy.Policy.Expanding)
         cl.addWidget(self._img_scroll, stretch=1)
@@ -194,7 +194,7 @@ class MatchPage(QWidget):
         bar.addWidget(self.no_match_btn)
         cl.addLayout(bar)
 
-        center.setMinimumWidth(540)
+        center.setMinimumWidth(420)
         self._h_splitter.addWidget(center)
 
         # RIGHT: 후보들
@@ -216,7 +216,9 @@ class MatchPage(QWidget):
         self._right_grid.setSpacing(8)
         self._right_scroll.setWidget(self._right_host)
         rl.addWidget(self._right_scroll, stretch=1)
-        right.setMinimumWidth(420)
+        # 3 col × 134(tile) + spacing 16 + 패널 padding 20 = 438 → 후보 9 장이
+        # 가로 스크롤 없이 한 화면에 깔리도록.
+        right.setMinimumWidth(440)
         self._h_splitter.addWidget(right)
 
         self._h_splitter.setStretchFactor(0, 2)
@@ -322,9 +324,18 @@ class MatchPage(QWidget):
                         ref: ImageItem,
                         val_items: list[ImageItem]) -> None:
         self._clear_right_grid()
-        if self._worker is not None and self._worker.isRunning():
-            self._worker.stop()
-            self._worker.wait(500)
+        # 이전 워커가 살아있으면 시그널부터 끊는다. wait() 가 timeout 으로
+        # 끝나도 ‘늦게 도착한 done’ 이 새 후보 리스트를 덮어쓰지 않게.
+        if self._worker is not None:
+            try:
+                self._worker.signals.progress.disconnect()
+                self._worker.signals.done.disconnect()
+                self._worker.signals.failed.disconnect()
+            except (TypeError, RuntimeError):
+                pass
+            if self._worker.isRunning():
+                self._worker.stop()
+                self._worker.wait(500)
 
         self._loading.show_overlay(
             i18n.KO.LOAD_FEATURE_FMT.format(done=0, total=len(val_items))
@@ -476,6 +487,10 @@ class MatchPage(QWidget):
     # ------------------------------------------------------------------
     def _skip_current(self) -> None:
         """잠시 보류 — Skip 재시도 풀로 들어감. 미탐 시트엔 들어가지 않음."""
+        # QShortcut("S") 는 WindowShortcut 컨텍스트라 SelectPage 가 보일 때도
+        # 이 핸들러로 전달된다. 보이지 않을 땐 조용히 무시.
+        if not self.isVisible():
+            return
         if self._state is None or self._current is None:
             return
         item = self._current
@@ -488,6 +503,8 @@ class MatchPage(QWidget):
 
     def _confirm_no_match(self) -> None:
         """매칭 없음 확정 — 미탐 시트에 들어가고, Skip 재시도 대상이 아님."""
+        if not self.isVisible():
+            return
         if self._state is None or self._current is None:
             return
         item = self._current

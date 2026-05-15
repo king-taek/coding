@@ -115,7 +115,7 @@ class TrainHeadWorker(QThread):
         # 1) 백본 임베딩 사전 추출 (도메인 전처리 공유, 배치) -----------
         import torch
 
-        backbone = emb_mod._load_backbone()    # type: ignore[attr-defined]
+        backbone = emb_mod.load_backbone()
         feat_cache: dict[str, "torch.Tensor"] = {}
 
         total = len(all_paths)

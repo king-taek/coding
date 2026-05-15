@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QPropertyAnimation, QRect, QSize, Qt, QTimer
+from PyQt6.QtCore import QEvent, QRect, QSize, Qt, QTimer
 from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import (QLabel, QProgressBar, QVBoxLayout, QWidget)
 
@@ -60,6 +60,12 @@ class _Sparkline(QWidget):
 
     def set_values(self, values: list[float]) -> None:
         self._values = list(values)
+        self.update()
+
+    def append_value(self, value: float, *, max_keep: int = 64) -> None:
+        self._values.append(float(value))
+        if len(self._values) > max_keep:
+            del self._values[: len(self._values) - max_keep]
         self.update()
 
     def clear(self) -> None:
@@ -147,11 +153,7 @@ class LoadingOverlay(QWidget):
 
     def push_sparkline(self, value: float) -> None:
         """학습 진행 중 매 에폭마다 loss 값을 추가 (#16)."""
-        vals = list(self._sparkline._values) + [float(value)]
-        # 너무 길면 앞쪽 일부만 유지
-        if len(vals) > 64:
-            vals = vals[-64:]
-        self._sparkline.set_values(vals)
+        self._sparkline.append_value(value)
         self._sparkline.show()
 
     def set_progress(self, done: int, total: int, message: str = "") -> None:
@@ -167,7 +169,7 @@ class LoadingOverlay(QWidget):
 
     # ------------------------------------------------------------------
     def eventFilter(self, obj, event) -> bool:  # noqa: N802
-        if obj is self.parent() and event.type().name == "Resize":
+        if obj is self.parent() and event.type() == QEvent.Type.Resize:
             self._cover_parent()
         return super().eventFilter(obj, event)
 
