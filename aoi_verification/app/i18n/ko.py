@@ -24,6 +24,16 @@ BTN_NO_MATCH = "매칭 없음 확정"
 BTN_RETRY_SKIP = "보류 재시도"
 BTN_SELECT_MODE = "선택 모드"
 BTN_CANCEL_SELECT_MODE = "선택 해제"
+
+# ── 다중 선택 다이얼로그 (Stage 1 선택 모드) ─────────────────────────────
+BULK_SELECT_TITLE_FMT = "{panel} — 다중 선택"
+BULK_SELECT_HINT = (
+    "사진을 클릭해서 선택/해제하세요. 선택된 사진들에 아래 액션이 적용됩니다."
+)
+BULK_SELECT_SUMMARY_FMT = "선택됨: {n} 장"
+BULK_SELECT_EMPTY = "표시할 사진이 없습니다."
+BULK_SELECT_ALL = "전체 선택"
+BULK_DESELECT_ALL = "선택 해제"
 BTN_REMOVE_FROM_TARGET = "검증 대상에서 제거"
 BTN_MOVE_TO_EXCLUDE = "제외로 이동"
 BTN_MOVE_TO_TARGET = "검증 대상으로 이동"

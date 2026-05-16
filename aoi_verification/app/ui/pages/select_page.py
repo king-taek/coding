@@ -49,7 +49,11 @@ class Stage1State:
 
 
 class _SidePanel(QFrame):
-    """Slot 별 누적 표시 패널 (좌/우/하단 공용)."""
+    """Slot 별 누적 표시 패널 (좌/우/하단 공용).
+
+    [선택 모드] 버튼 클릭 시 inline 체크박스가 아니라 큰 팝업 다이얼로그가
+    뜬다 — 사진을 가리지 않고 시원하게 다중 선택 가능.
+    """
 
     selection_action = pyqtSignal(str, str, list)
     # (panel_name, action_id, [ImageItem])
@@ -64,7 +68,8 @@ class _SidePanel(QFrame):
                  parent=None) -> None:
         super().__init__(parent)
         self._name = name
-        self._select_mode = False
+        self._title = title
+        self._actions = list(actions or [])
         self._sections: dict[str, SlotSection] = {}
         self._cached: dict[str, list[ImageItem]] = {}
 
@@ -73,7 +78,7 @@ class _SidePanel(QFrame):
         outer.setContentsMargins(10, 10, 10, 10)
         outer.setSpacing(8)
 
-        # 헤더 ----------------------------------------------------------
+        # 헤더 — 제목 + ‘선택 모드’ 버튼 (클릭 시 팝업 다이얼로그)
         head = QHBoxLayout()
         ttl = QLabel(title, self)
         ttl.setProperty("role", "subtitle")
@@ -81,28 +86,11 @@ class _SidePanel(QFrame):
         head.addWidget(ttl)
         head.addStretch(1)
 
-        self._select_btn = NeonButton(i18n.KO.BTN_SELECT_MODE, role="ghost")
-        self._select_btn.setCheckable(True)
-        self._select_btn.toggled.connect(self._on_select_mode)
-        head.addWidget(self._select_btn)
+        if self._actions:
+            self._select_btn = NeonButton(i18n.KO.BTN_SELECT_MODE, role="ghost")
+            self._select_btn.clicked.connect(self._open_bulk_select)
+            head.addWidget(self._select_btn)
         outer.addLayout(head)
-
-        # 일괄 액션 바 (선택 모드 ON 일 때만 노출) ----------------------
-        self._action_bar = QHBoxLayout()
-        self._action_bar.setSpacing(6)
-        self._action_buttons: list[NeonButton] = []
-        for action_id, label, role in actions or []:
-            btn = NeonButton(label, role=role)
-            btn.clicked.connect(
-                lambda _checked=False, a=action_id: self._fire_batch(a)
-            )
-            self._action_bar.addWidget(btn)
-            self._action_buttons.append(btn)
-        self._action_bar.addStretch(1)
-        self._action_host = QWidget(self)
-        self._action_host.setLayout(self._action_bar)
-        self._action_host.hide()
-        outer.addWidget(self._action_host)
 
         # 스크롤 영역 ---------------------------------------------------
         self._scroll = QScrollArea(self)
@@ -130,7 +118,6 @@ class _SidePanel(QFrame):
         """Slot → ImageItem 리스트 매핑으로 패널 갱신."""
         self._cached = {k: list(v) for k, v in data.items() if v}
 
-        # 기존 Slot 섹션 + 종료 stretch 제거
         while self._host_layout.count():
             item = self._host_layout.takeAt(0)
             w = item.widget()
@@ -139,7 +126,7 @@ class _SidePanel(QFrame):
 
         for slot in sorted(self._cached.keys()):
             sec = SlotSection(slot, columns=self._columns,
-                              select_mode=self._select_mode, parent=self)
+                              select_mode=False, parent=self)
             entries = [ThumbEntry(item=it) for it in self._cached[slot]]
             sec.set_entries(entries)
             sec.tile_clicked.connect(
@@ -156,23 +143,23 @@ class _SidePanel(QFrame):
         return {k: list(v) for k, v in self._cached.items()}
 
     # ------------------------------------------------------------------
-    def _on_select_mode(self, on: bool) -> None:
-        self._select_mode = on
-        self._select_btn.setText(
-            i18n.KO.BTN_CANCEL_SELECT_MODE if on else i18n.KO.BTN_SELECT_MODE
-        )
-        self._action_host.setVisible(on)
-        for sec in self._sections.values():
-            sec.set_select_mode(on)
-
-    def _fire_batch(self, action_id: str) -> None:
-        items: list[ImageItem] = []
-        for sec in self._sections.values():
-            for ent in sec.grid.selected():
-                items.append(ent.item)
-        if not items:
+    def _open_bulk_select(self) -> None:
+        """[선택 모드] 클릭 → 큰 팝업 다이얼로그 띄움."""
+        from ..widgets.bulk_select_dialog import BulkSelectDialog
+        if not self._cached:
             return
-        self.selection_action.emit(self._name, action_id, items)
+        dlg = BulkSelectDialog(
+            title=i18n.KO.BULK_SELECT_TITLE_FMT.format(panel=self._title),
+            data=self._cached,
+            actions=self._actions,
+            parent=self,
+        )
+        dlg.selection_action.connect(
+            lambda action_id, items: self.selection_action.emit(
+                self._name, action_id, items,
+            )
+        )
+        dlg.exec()
 
 
 # ---------------------------------------------------------------------------
