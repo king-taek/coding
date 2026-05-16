@@ -119,6 +119,17 @@ def _preprocess(gray: np.ndarray) -> np.ndarray:
     return g
 
 
+def score_phash_only(a: Feature, b: Feature) -> float:
+    """매우 빠른 1차 스크리닝 점수 — pHash 만 사용 (0~1).
+
+    SlotPrecomputeWorker 의 2 단계 스캔에서 활용: 1 차로 이 함수로 전체 쌍을
+    훑어 상위 K 개 후보를 추리고, 2 차로 무거운 ``score()`` (pHash+ORB+SSIM+CNN)
+    를 그 K 개에만 적용한다. pHash 는 미세한 차이엔 둔감하지만 ‘완전히 다른
+    사진’ 을 빠르게 걸러내는 데는 충분히 신뢰할 수 있다.
+    """
+    return float(_phash.phash_similarity(a.phash, b.phash))
+
+
 def score(a: Feature, b: Feature,
           weights: Optional[config.SimilarityWeights] = None) -> float:
     """두 Feature 사이의 최종 가중 평균 유사도 (0.0 ~ 1.0).

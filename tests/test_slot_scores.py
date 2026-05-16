@@ -75,6 +75,9 @@ def test_precompute_fills_score_cache(isolated_cache, monkeypatch, qtbot=None):
 
     monkeypatch.setattr(pipeline, "extract", fake_extract)
     monkeypatch.setattr(pipeline, "score", fake_score)
+    # 2 단계 스캔이 1 차로 pHash 점수도 부른다 — 가짜 도 mock.
+    monkeypatch.setattr(pipeline, "score_phash_only",
+                        lambda a, b: fake_score(a, b))
 
     slot_cache = SlotFeatureCache()
     score_cache = SlotScoreCache()
@@ -98,6 +101,44 @@ def test_precompute_fills_score_cache(isolated_cache, monkeypatch, qtbot=None):
         assert score_cache.has_all_pairs("S1", r.path, [v.path for v in vals])
 
 
+def test_precompute_two_stage_shortlist(isolated_cache, monkeypatch):
+    """val 이 많으면 1 차 pHash 로 추린 상위 K 만 정밀 score() 호출."""
+    from aoi_verification.app.similarity import pipeline
+
+    class _FF:
+        def __init__(self, p): self.path = p
+
+    full_calls: list = []
+    fast_calls: list = []
+
+    monkeypatch.setattr(pipeline, "extract", lambda p, **_kw: _FF(p))
+    monkeypatch.setattr(pipeline, "score",
+                        lambda a, b, weights=None:
+                            (full_calls.append((a.path, b.path)), 0.5)[1])
+    monkeypatch.setattr(pipeline, "score_phash_only",
+                        lambda a, b:
+                            (fast_calls.append((a.path, b.path)),
+                             0.5 - len(fast_calls) * 0.001)[1])
+
+    slot_cache = SlotFeatureCache()
+    score_cache = SlotScoreCache()
+    refs = _items("S1", 2, side="ref")
+    vals = _items("S1", 50, side="val")     # > _TWO_STAGE_THRESHOLD (20)
+
+    worker = SlotPrecomputeWorker(
+        [("S1", refs, vals)],
+        slot_cache=slot_cache, score_cache=score_cache,
+    )
+    worker.run()
+
+    # 1 차는 모든 쌍 (2 × 50 = 100) 호출.
+    assert len(fast_calls) == 100
+    # 2 차는 ref 당 max(8, 50*0.4) = 20 개만 → 총 2 × 20 = 40 호출.
+    assert len(full_calls) == 2 * 20
+    # 캐시는 모든 쌍 (1 차 점수 포함 — 추리지 못한 것은 1 차 점수 그대로) 가짐.
+    assert score_cache.size() == 100
+
+
 def test_precompute_stop_aborts_early(isolated_cache, monkeypatch):
     """stop() 호출 시 워커는 즉시 중단."""
     from aoi_verification.app.similarity import pipeline
@@ -107,6 +148,7 @@ def test_precompute_stop_aborts_early(isolated_cache, monkeypatch):
 
     monkeypatch.setattr(pipeline, "extract", lambda p, **_kw: _FF(p))
     monkeypatch.setattr(pipeline, "score", lambda a, b, weights=None: 0.5)
+    monkeypatch.setattr(pipeline, "score_phash_only", lambda a, b: 0.5)
 
     slot_cache = SlotFeatureCache()
     score_cache = SlotScoreCache()
