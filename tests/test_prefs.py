@@ -45,11 +45,11 @@ def test_corrupt_file_falls_back_to_default(isolated_cache):
 
 
 def test_window_and_splitter_keys_round_trip(isolated_cache):
-    """창 크기 / 전체화면 / splitter 상태 / 사용 방법 펼침 / 빠른 모드."""
+    """창 크기 / 최대화 / splitter 상태 / 사용 방법 펼침 / 빠른 모드."""
     p = prefs.UiPrefs(
         window_width=1600,
         window_height=900,
-        fullscreen=True,
+        window_maximized=True,
         splitter_state_select_h="QlpoOTFBWQ==",
         splitter_state_select_v="YWJjZA==",
         splitter_state_match_h="ZHVtbXk=",
@@ -60,7 +60,7 @@ def test_window_and_splitter_keys_round_trip(isolated_cache):
     loaded = prefs.load()
     assert loaded.window_width == 1600
     assert loaded.window_height == 900
-    assert loaded.fullscreen is True
+    assert loaded.window_maximized is True
     assert loaded.splitter_state_select_h == "QlpoOTFBWQ=="
     assert loaded.splitter_state_select_v == "YWJjZA=="
     assert loaded.splitter_state_match_h == "ZHVtbXk="
@@ -73,6 +73,6 @@ def test_window_keys_default_to_unset(isolated_cache):
     p = prefs.UiPrefs()
     assert p.window_width == 0
     assert p.window_height == 0
-    assert p.fullscreen is False
+    assert p.window_maximized is False
     assert p.howto_expanded is False
     assert p.speed_mode is False

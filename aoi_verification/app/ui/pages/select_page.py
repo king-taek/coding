@@ -265,13 +265,9 @@ class SelectPage(QWidget):
         self.size_slider = QSlider(Qt.Orientation.Horizontal, center_card)
         self.size_slider.setRange(ScalableImage.MIN_LONG_EDGE,
                                    ScalableImage.MAX_LONG_EDGE)
-        # 마지막 사용 값(#13) 복원
-        _p = _prefs.load()
-        self.size_slider.setValue(
-            max(ScalableImage.MIN_LONG_EDGE,
-                min(ScalableImage.MAX_LONG_EDGE,
-                    int(_p.image_long_edge_select)))
-        )
+        # 모니터 크기에 맞춰 자동 시작값. 사용자가 바꾸면 세션 동안만 유지되고
+        # 프로그램 재시작 시 다시 자동 맞춤으로 초기화 (prefs 저장 안 함).
+        self.size_slider.setValue(ScalableImage.auto_fit_long_edge())
         self.size_slider.setSingleStep(20)
         self.size_slider.setPageStep(80)
         self.size_value = QLabel(f"{self.size_slider.value()} px", center_card)
@@ -510,7 +506,7 @@ class SelectPage(QWidget):
     def _on_size_changed(self, value: int) -> None:
         self.size_value.setText(f"{value} px")
         self.center_img.set_target_size(value)
-        _prefs.patch(image_long_edge_select=int(value))
+        # 사용자 변경은 세션 동안만 유지 — 재시작 시 자동 맞춤으로 초기화.
 
     # ------------------------------------------------------------------
     # Decisions

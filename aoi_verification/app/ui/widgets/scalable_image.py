@@ -19,9 +19,25 @@ from ...utils import image_io
 class ScalableImage(QLabel):
     """원본(=mid 캐시) 픽스맵을 보존하면서 슬라이더 값으로 크기를 조절."""
 
-    DEFAULT_LONG_EDGE = 400     # 최대 700 / 최소 300 / 기본 400
-    MIN_LONG_EDGE = 300
+    DEFAULT_LONG_EDGE = 400
+    MIN_LONG_EDGE = 250
     MAX_LONG_EDGE = 700
+
+    @staticmethod
+    def auto_fit_long_edge() -> int:
+        """현재 모니터 크기에 맞춰 적절한 시작값 — 화면 짧은 변의 약 절반."""
+        try:
+            from PyQt6.QtGui import QGuiApplication
+            screen = QGuiApplication.primaryScreen()
+            if screen is not None:
+                geo = screen.availableGeometry()
+                short_edge = min(geo.width(), geo.height())
+                return max(ScalableImage.MIN_LONG_EDGE,
+                           min(ScalableImage.MAX_LONG_EDGE,
+                               int(short_edge * 0.5)))
+        except Exception:
+            pass
+        return ScalableImage.DEFAULT_LONG_EDGE
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)

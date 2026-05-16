@@ -105,19 +105,6 @@ PANEL_NO_MATCH_LIST = "매칭 없음 확정"
 IMAGE_SIZE_LABEL = "사진 크기"
 SLOT_LABEL_FMT = "Slot: {slot}"
 
-# ── 화면 크기 설정 ─────────────────────────────────────────────────────────
-WINDOW_SIZE_BTN = "화면 크기 설정"
-WINDOW_SIZE_DIALOG_TITLE = "화면 크기 설정"
-WINDOW_SIZE_PRESET_LABEL = "표준 해상도"
-WINDOW_SIZE_CUSTOM_LABEL = "사용자 지정 (Custom)"
-WINDOW_SIZE_FULLSCREEN_LABEL = "전체 화면 (Fullscreen)"
-WINDOW_SIZE_WIDTH_LABEL = "너비"
-WINDOW_SIZE_HEIGHT_LABEL = "높이"
-WINDOW_SIZE_CURRENT_MAX_FMT = "현재 모니터 최대 ({w}×{h})"
-WINDOW_SIZE_PRESET_ITEM_FMT = "{w}×{h}"
-WINDOW_SIZE_APPLY = "적용"
-WINDOW_SIZE_CANCEL = "취소"
-
 # ── 사용 방법 토글 ────────────────────────────────────────────────────────
 HOWTO_TOGGLE_OPEN = "사용 방법 ▾"
 HOWTO_TOGGLE_CLOSE = "사용 방법 ▴"
@@ -313,20 +300,6 @@ SLOT_MAP_VAL_LABEL = "검증"
 SLOT_MAP_ADD = "추가"
 SLOT_MAP_REMOVE = "선택 해제"
 SLOT_MAP_OPEN = "매핑 다이얼로그 열기"
-
-# ── 화면 크기 프리셋 ───────────────────────────────────────────────────────
-MENU_VIEW = "화면 크기"
-WINDOW_PRESETS = [
-    # 작게: 1366×768 노트북(taskbar 빼면 ~728 가용) 에서 잘리지 않게 720.
-    # 가로는 MatchPage min-sum(200/420/440 + spacing + 여백 = 1112) 가 들어
-    # 가도록 1120.  SelectPage 세로 컨텐츠가 ~722 라 720 은 빠듯하지만 하단
-    # 패널 안의 스크롤이 흡수해 준다.
-    ("작게",       1120, 720),
-    ("보통",       1280, 820),
-    ("크게",       1500, 940),
-    ("매우 크게",  1760, 1080),
-    ("최대화",     0,    0),       # (0,0) = showMaximized
-]
 
 # ── 임계치 자동 추천 ───────────────────────────────────────────────────────
 THRESHOLD_SUGGESTION_TITLE = "임계치 추천"

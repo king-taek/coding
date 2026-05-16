@@ -90,16 +90,26 @@ def _load_head_for(model_name: str):  # pragma: no cover — heavy
 # Tensor preparation — domain-preprocessed gray-3ch input
 # ---------------------------------------------------------------------------
 def _make_input_tensor(path: Path):  # pragma: no cover
-    """1장의 도메인 전처리 텐서를 만든다 (3, H, W) float32, ImageNet 정규화."""
+    """1장의 도메인 전처리 텐서를 만든다 (3, _INPUT_PX, _INPUT_PX) float32.
+
+    원본 ROI 의 aspect ratio 가 제각각이라 그대로 두면 ``torch.stack`` 시
+    크기 불일치 에러 발생.  중앙 zero-pad 로 정사각형 강제.
+    """
     if not _HAS_TORCH:
         return None
     try:
         gray = image_io.preprocessed_roi_gray(path, long_edge=_INPUT_PX)
     except Exception:
         return None
-    # (H, W) → (3, H, W)
-    arr = np.repeat(gray[None, :, :], 3, axis=0).astype(np.float32) / 255.0
-    # ImageNet 정규화 (gray 복제이긴 하지만 일관성 위해 적용)
+    h, w = gray.shape
+    # 정사각형 zero-padded 캔버스에 중앙 배치 → 모든 텐서가 (3, _INPUT_PX, _INPUT_PX).
+    canvas = np.zeros((_INPUT_PX, _INPUT_PX), dtype=np.uint8)
+    y0 = max(0, (_INPUT_PX - h) // 2)
+    x0 = max(0, (_INPUT_PX - w) // 2)
+    h_use = min(h, _INPUT_PX)
+    w_use = min(w, _INPUT_PX)
+    canvas[y0:y0 + h_use, x0:x0 + w_use] = gray[:h_use, :w_use]
+    arr = np.repeat(canvas[None, :, :], 3, axis=0).astype(np.float32) / 255.0
     for c, (mean, std) in enumerate(zip(_IMAGENET_MEAN, _IMAGENET_STD)):
         arr[c] = (arr[c] - mean) / std
     return torch.from_numpy(arr)

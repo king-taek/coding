@@ -36,20 +36,20 @@ class UiPrefs:
     """다음 실행에도 이어갈 UI 상태."""
 
     threshold: float = 0.55                  # 0.0 ~ 1.0 (교차 호기 친화적 기본)
-    image_long_edge_select: int = 400        # Stage 1 사진 크기 (px) — 300~700
-    image_long_edge_match: int = 400         # Stage 2 사진 크기 (px) — 300~700
-    window_preset: str = "보통"               # 화면 크기 프리셋 (5가지 중 하나)
+    image_long_edge_select: int = 400        # Stage 1 사진 크기 (px) — 250~700
+    image_long_edge_match: int = 400         # Stage 2 사진 크기 (px) — 250~700
     last_ref_root: str = ""
     last_val_root: str = ""
     last_ref_machine: str = ""
     last_val_machine: str = ""
     last_mode: str = "single"
-    group_similarity: float = 0.92           # pHash 그룹화 임계치 (#15)
+    group_similarity: float = 0.3            # pHash 그룹화 임계치
     group_min_size: int = 3                  # 이 수 이상이어야 그룹으로 묶음
-    # 창 크기 / 전체화면 (사용자가 직접 선택) — 0 은 “미설정” 으로 간주.
+    # 창 크기 — 사용자가 마지막으로 드래그/리사이즈 한 값을 자동 저장.
+    # 0 = 미설정 (첫 실행에서는 모니터 영역의 90% 로 시작).
     window_width: int = 0
     window_height: int = 0
-    fullscreen: bool = False
+    window_maximized: bool = False
     # QSplitter 상태 (Select/Match 페이지). base64 인코딩 문자열.
     splitter_state_select_h: str = ""
     splitter_state_select_v: str = ""

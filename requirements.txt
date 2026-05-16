@@ -6,7 +6,5 @@ scikit-image>=0.21
 imagehash>=4.3
 openpyxl>=3.1
 psutil>=5.9
-
-# 학습/임베딩 기능에 필요. 미설치 시 ‘기본 탐지 모드’ 만 사용 가능.
 torch>=2.0
 torchvision>=0.15

@@ -37,9 +37,6 @@ from .pages.result_page import ResultPage
 from .pages.select_page import SelectPage
 from .pages.setup_page import SetupInput, SetupPage
 from .widgets.loading_overlay import LoadingOverlay
-from .widgets.window_size_dialog import (MIN_HEIGHT, MIN_WIDTH,
-                                           WindowSizeDialog,
-                                           suggest_default_size)
 
 
 # ---------------------------------------------------------------------------
@@ -54,18 +51,21 @@ PHASE_B_MATCH = "B_match"
 
 class MainWindow(QMainWindow):
 
+    # 가장 작은 노트북 (14인치 1366×768) 에서도 무리 없는 하한.  매칭
+    # 후보 그리드와 측면 패널이 가로 스크롤을 일으키지 않는 최소 너비.
+    _MIN_W = 1120
+    _MIN_H = 700
+
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(i18n.KO.APP_TITLE)
-
-        # 화면 크기 프리셋 — 저장된 값이 있으면 그대로 적용 ---------------
-        from ..utils import prefs as _prefs
-        self._prefs = _prefs
-        saved = _prefs.load().window_preset
-        self._apply_window_preset(saved if saved else "보통", persist=False)
-        # 가장 작은 preset(1120×760) 까지가 실용적 하한. 그보다 작으면 매칭
-        # 후보 그리드와 측면 패널이 가로 스크롤을 일으킨다.
-        self.setMinimumSize(1120, 720)
+        self.setMinimumSize(self._MIN_W, self._MIN_H)
+        self._apply_initial_geometry()
+        # 사용자가 창 크기를 바꾸면 짧은 debounce 후 자동 저장.
+        self._save_geom_timer = QTimer(self)
+        self._save_geom_timer.setSingleShot(True)
+        self._save_geom_timer.setInterval(400)
+        self._save_geom_timer.timeout.connect(self._persist_geometry)
 
         self._stack = QStackedWidget(self)
         self.setCentralWidget(self._stack)
@@ -103,12 +103,8 @@ class MainWindow(QMainWindow):
                   self._group_review_page, self._match_review_page):
             self._stack.addWidget(w)
 
-        # 화면 크기 메뉴 -------------------------------------------------
-        self._build_view_menu()
-
         # 시그널 ---------------------------------------------------------
         self._setup_page.start_requested.connect(self._on_start)
-        self._setup_page.window_size_requested.connect(self._open_window_size_dialog)
         self._select_page.finished.connect(self._on_select_finished)
         self._select_page.state_changed.connect(self._schedule_autosave)
         self._match_page.match_confirmed.connect(self._on_match_confirmed)
@@ -180,46 +176,75 @@ class MainWindow(QMainWindow):
     # ==================================================================
     # 창 크기 — 사용자 선택값 복원 / 모달
     # ==================================================================
-    def _apply_saved_window_size(self) -> None:
-        """저장된 크기를 복원하거나, 없으면 모니터 영역에 맞춰 추천."""
-        p = _prefs.load()
-        if p.fullscreen:
-            # 우선 합리적인 normal 크기로 resize 한 뒤 fullscreen 진입 — 토글 시
-            # 자연스러운 복귀 크기 확보.
-            dw, dh = suggest_default_size()
-            self.resize(dw, dh)
-            self.showFullScreen()
-            return
-        if p.window_width >= MIN_WIDTH and p.window_height >= MIN_HEIGHT:
-            self.resize(p.window_width, p.window_height)
-            return
-        # 미설정 → 모니터 영역에 맞는 권장값.
-        dw, dh = suggest_default_size()
-        self.resize(dw, dh)
+    def _available_geom(self):
+        """현재 마우스 커서가 놓인 모니터의 작업 가능 영역."""
+        from PyQt6.QtGui import QCursor, QGuiApplication
+        screen = QGuiApplication.screenAt(QCursor.pos())
+        if screen is None:
+            screen = QGuiApplication.primaryScreen()
+        return screen.availableGeometry()
 
-    def _open_window_size_dialog(self) -> None:
-        from PyQt6.QtWidgets import QDialog
+    def _apply_initial_geometry(self) -> None:
+        """프로그램 시작 시 창 크기/위치 결정.
+
+        - 저장된 크기가 있으면 그걸 우선하되 현재 모니터 영역을 절대 넘지 않게
+          클램프 (14인치 ↔ 23인치 모니터 사이 이동에 안전).
+        - 저장된 크기가 없으면 모니터 가용 영역의 약 90% 로 시작 (양옆 5% 마진).
+        - 마지막으로 최대화 상태였다면 그대로 최대화.
+        """
+        geo = self._available_geom()
+        avail_w, avail_h = geo.width(), geo.height()
         p = _prefs.load()
-        dlg = WindowSizeDialog(
-            current_width=p.window_width,
-            current_height=p.window_height,
-            current_fullscreen=p.fullscreen,
-            parent=self,
-        )
-        if dlg.exec() != QDialog.DialogCode.Accepted:
+        if p.window_maximized:
+            # 최대화 전 크기도 합리적인 값으로 세팅해 ‘복원’ 동작이 자연스럽게.
+            self.resize(int(avail_w * 0.9), int(avail_h * 0.9))
+            self.showMaximized()
             return
-        choice = dlg.chosen()
-        _prefs.patch(
-            window_width=int(choice.width),
-            window_height=int(choice.height),
-            fullscreen=bool(choice.fullscreen),
-        )
-        if choice.fullscreen:
-            self.showFullScreen()
+        w = p.window_width
+        h = p.window_height
+        if w < self._MIN_W or h < self._MIN_H:
+            # 미설정 / 잘못된 값 — 모니터의 90% 로 시작.
+            w = max(self._MIN_W, int(avail_w * 0.9))
+            h = max(self._MIN_H, int(avail_h * 0.9))
         else:
-            if self.isFullScreen():
-                self.showNormal()
-            self.resize(int(choice.width), int(choice.height))
+            # 모니터 영역 초과 방지 (다른 모니터에서 저장된 값일 수 있음).
+            w = min(w, avail_w)
+            h = min(h, avail_h)
+        self.resize(w, h)
+        # 화면 중앙에 배치.
+        self.move(
+            geo.x() + (avail_w - w) // 2,
+            geo.y() + (avail_h - h) // 2,
+        )
+
+    def _persist_geometry(self) -> None:
+        """현재 창 크기/최대화 여부를 prefs 에 저장."""
+        try:
+            if self.isMaximized() or self.isFullScreen():
+                _prefs.patch(window_maximized=True)
+                return
+            size = self.size()
+            _prefs.patch(
+                window_width=int(size.width()),
+                window_height=int(size.height()),
+                window_maximized=False,
+            )
+        except Exception:
+            pass
+
+    def resizeEvent(self, event):       # noqa: N802
+        super().resizeEvent(event)
+        # 사용자가 드래그로 크기를 바꾸는 동안 매 이벤트마다 prefs 에 쓰지 않도록
+        # debounce — 마지막 변경 후 400ms 가 지나면 한 번만 저장.
+        if hasattr(self, "_save_geom_timer"):
+            self._save_geom_timer.start()
+
+    def changeEvent(self, event):       # noqa: N802
+        from PyQt6.QtCore import QEvent
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.WindowStateChange:
+            if hasattr(self, "_save_geom_timer"):
+                self._save_geom_timer.start()
 
     # ==================================================================
     # Entry / resume
@@ -1016,39 +1041,9 @@ class MainWindow(QMainWindow):
     # ==================================================================
     # Cleanup
     # ==================================================================
-    # ==================================================================
-    # 화면 크기 프리셋 (#2)
-    # ==================================================================
-    def _build_view_menu(self) -> None:
-        from PyQt6.QtGui import QAction
-        menu_bar = self.menuBar()
-        view_menu = menu_bar.addMenu(i18n.KO.MENU_VIEW)
-        for label, w, h in i18n.KO.WINDOW_PRESETS:
-            act = QAction(label, self)
-            act.triggered.connect(
-                lambda _checked=False, name=label: self._apply_window_preset(name)
-            )
-            view_menu.addAction(act)
-
-    def _apply_window_preset(self, name: str, *, persist: bool = True) -> None:
-        for label, w, h in i18n.KO.WINDOW_PRESETS:
-            if label != name:
-                continue
-            if w == 0 or h == 0:
-                self.showMaximized()
-            else:
-                # 최대화 상태였다면 풀고 새 크기 적용
-                if self.isMaximized():
-                    self.showNormal()
-                self.resize(w, h)
-            if persist:
-                try:
-                    self._prefs.patch(window_preset=name)
-                except Exception:
-                    pass
-            return
-
     def closeEvent(self, event):  # noqa: N802
+        # 종료 직전 마지막 크기/최대화 상태 저장 → 다음 실행에서 그대로 복원.
+        self._persist_geometry()
         if self._thumb_worker is not None and self._thumb_worker.isRunning():
             self._thumb_worker.stop()
             self._thumb_worker.wait(1000)

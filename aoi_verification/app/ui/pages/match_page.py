@@ -155,12 +155,8 @@ class MatchPage(QWidget):
         self.size_slider = QSlider(Qt.Orientation.Horizontal, center)
         self.size_slider.setRange(ScalableImage.MIN_LONG_EDGE,
                                    ScalableImage.MAX_LONG_EDGE)
-        _p = _prefs.load()
-        self.size_slider.setValue(
-            max(ScalableImage.MIN_LONG_EDGE,
-                min(ScalableImage.MAX_LONG_EDGE,
-                    int(_p.image_long_edge_match)))
-        )
+        # 모니터 크기에 맞춰 자동 시작값 — 세션 한정 (재시작 시 다시 자동맞춤).
+        self.size_slider.setValue(ScalableImage.auto_fit_long_edge())
         self.size_slider.setSingleStep(20)
         self.size_slider.setPageStep(80)
         self.size_value = QLabel(f"{self.size_slider.value()} px", center)
@@ -522,7 +518,7 @@ class MatchPage(QWidget):
     def _on_size_changed(self, value: int) -> None:
         self.size_value.setText(f"{value} px")
         self.center_img.set_target_size(value)
-        _prefs.patch(image_long_edge_match=int(value))
+        # 사용자 변경은 세션 동안만 유지 — 재시작 시 자동 맞춤으로 초기화.
 
     def _clear_right_grid(self) -> None:
         while self._right_grid.count():

@@ -40,7 +40,6 @@ class SetupPage(QWidget):
     """검증 시작 화면."""
 
     start_requested = pyqtSignal(object)             # SetupInput
-    window_size_requested = pyqtSignal()             # MainWindow 가 모달을 띄움
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -77,16 +76,11 @@ class SetupPage(QWidget):
         root.setContentsMargins(40, 40, 40, 40)
         root.setSpacing(20)
 
-        # 제목 행 + 우측 [화면 크기 설정] 버튼 ---------------------------
-        title_row = QHBoxLayout()
+        # 제목 — 화면 크기 컨트롤은 별도 버튼 없이 OS 의 표준 창 조작
+        # (드래그, 최대화/복원, 모서리 리사이즈) 으로만 처리.
         title = QLabel(i18n.KO.SETUP_TITLE, self)
         title.setProperty("role", "title")
-        title_row.addWidget(title, stretch=1)
-
-        self.btn_window_size = NeonButton(i18n.KO.WINDOW_SIZE_BTN, role="ghost")
-        self.btn_window_size.clicked.connect(self.window_size_requested.emit)
-        title_row.addWidget(self.btn_window_size)
-        root.addLayout(title_row)
+        root.addWidget(title)
 
         subtitle = QLabel(i18n.KO.SETUP_HINT, self)
         subtitle.setProperty("role", "subtitle")
