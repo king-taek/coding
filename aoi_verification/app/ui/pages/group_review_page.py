@@ -168,6 +168,21 @@ class GroupReviewPage(QWidget):
     # ------------------------------------------------------------------
     def load_state(self, grouping: GroupingResult) -> None:
         self._grouping = grouping
+        # 사용자 변경 사항 추적을 위해 초기 그룹 구성을 snapshot —
+        # ‘유지된 그룹 (kept)’ vs ‘분리된 사진 (detached)’ 을 구분해서 학습기로 보냄.
+        self._initial_membership: dict[str, str] = {}
+        for rep_key, grp in grouping.by_rep.items():
+            self._initial_membership[grp.rep.key] = rep_key
+            for s in grp.siblings:
+                self._initial_membership[s.key] = rep_key
+        self._initial_rep_path: dict[str, "Path"] = {
+            rep_key: grp.rep.path for rep_key, grp in grouping.by_rep.items()
+        }
+        self._initial_item_path: dict[str, "Path"] = {}
+        for grp in grouping.by_rep.values():
+            self._initial_item_path[grp.rep.key] = grp.rep.path
+            for s in grp.siblings:
+                self._initial_item_path[s.key] = s.path
         self._refresh()
 
     def get_queue(self) -> list[ImageItem]:
@@ -175,6 +190,39 @@ class GroupReviewPage(QWidget):
         if self._grouping is None:
             return []
         return list(self._grouping.representatives)
+
+    # ------------------------------------------------------------------
+    def collect_feedback(self) -> tuple[list, list]:
+        """초기 상태 vs 현재 상태를 비교해 학습기로 보낼 (kept, detached) 쌍 생성.
+
+        - kept     : 여전히 같은 그룹에 머무는 (rep, sibling) 의 (path, path).
+        - detached : 원래 같은 그룹이었지만 이제 분리된 (원 rep_path, item_path).
+        """
+        kept: list[tuple] = []
+        detached: list[tuple] = []
+        if self._grouping is None:
+            return (kept, detached)
+        # 현재 그룹 구성
+        current_membership: dict[str, str] = {}
+        for rep_key, grp in self._grouping.by_rep.items():
+            current_membership[grp.rep.key] = rep_key
+            for s in grp.siblings:
+                current_membership[s.key] = rep_key
+        # 초기 group 의 각 멤버에 대해 — 같은 그룹에 있나, 분리됐나?
+        for item_key, init_rep_key in self._initial_membership.items():
+            if item_key == init_rep_key:
+                continue   # rep 자기 자신 — 비교 의미 없음.
+            init_rep_path = self._initial_rep_path.get(init_rep_key)
+            item_path = self._initial_item_path.get(item_key)
+            if init_rep_path is None or item_path is None:
+                continue
+            cur_rep_key = current_membership.get(item_key)
+            if cur_rep_key == init_rep_key:
+                kept.append((init_rep_path, item_path))
+            else:
+                # rep 분리로 그룹 자체가 해체되었거나, sibling 만 분리됐거나.
+                detached.append((init_rep_path, item_path))
+        return (kept, detached)
 
     # ------------------------------------------------------------------
     def _refresh(self) -> None:

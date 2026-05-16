@@ -550,12 +550,23 @@ class SetupPage(QWidget):
         self._train_worker.signals.failed.connect(self._on_train_failed)
         self._train_worker.start()
 
-    def _on_train_finished(self, new_name: str) -> None:
+    def _on_train_finished(self, result) -> None:
         self._loading.hide_overlay()
-        QMessageBox.information(
-            self, i18n.KO.APP_TITLE,
-            i18n.KO.TRAIN_DONE_FMT.format(name=new_name),
-        )
+        # result 는 TrainResult dataclass (name, activated, hit_at_5_*).
+        try:
+            name = getattr(result, "name", "") or str(result)
+            activated = bool(getattr(result, "activated", True))
+        except Exception:
+            name, activated = str(result), True
+        if activated:
+            msg = i18n.KO.TRAIN_DONE_FMT.format(name=name)
+        else:
+            new_h = int(round(getattr(result, "hit_at_5_new", 0.0) * 100))
+            base_h = int(round(getattr(result, "hit_at_5_basic", 0.0) * 100))
+            msg = i18n.KO.TRAIN_KEPT_BASIC_FMT.format(
+                name=name, new=new_h, basic=base_h,
+            )
+        QMessageBox.information(self, i18n.KO.APP_TITLE, msg)
         self.refresh_models()
 
     def _on_train_failed(self, msg: str) -> None:

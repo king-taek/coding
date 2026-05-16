@@ -210,7 +210,23 @@ LOAD_BACKBONE_FMT = "백본 임베딩 추출 중… {done} / {total}"
 LOAD_TRAIN_FMT = "헤드 학습 중… 에폭 {epoch} / {total}  ·  loss {loss:.3f}"
 
 TRAIN_DONE_FMT = "모델 ‘{name}’ 학습 완료. 다음 검증부터 적용됩니다."
+TRAIN_KEPT_BASIC_FMT = (
+    "모델 ‘{name}’ 학습은 완료했으나 기본 탐지 모드보다 정확도가 낮아\n"
+    "기본 모드를 유지합니다 (새 모델 Hit@1 {new}% vs 기본 {basic}%).\n"
+    "학습 데이터가 더 모이면 자동으로 다시 시도됩니다."
+)
 TRAIN_FAIL_FMT = "학습 실패: {error}"
+AUTO_RETRAIN_STARTED_FMT = (
+    "수집된 학습 데이터 {n} 쌍으로 모델 재학습을 백그라운드에서 시작합니다.\n"
+    "결과 화면을 그대로 두고 다른 작업을 해도 됩니다."
+)
+AUTO_RETRAIN_DONE_FMT = (
+    "자동 재학습 완료 — 새 모델 ‘{name}’ 이 적용되었습니다."
+)
+AUTO_RETRAIN_KEPT_BASIC_FMT = (
+    "자동 재학습 완료 — 모델 ‘{name}’ 은 저장되었지만, 기본 탐지 모드 보다\n"
+    "정확도가 낮아 기본 모드를 유지합니다."
+)
 TRAIN_NEED_MORE_DATA = (
     "학습 데이터가 부족합니다. 매칭 쌍을 더 모은 뒤 다시 시도해 주세요."
 )

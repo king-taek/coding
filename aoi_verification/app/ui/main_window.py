@@ -490,8 +490,24 @@ class MainWindow(QMainWindow):
         self._show_page(self._group_review_page)
 
     def _on_group_review_done(self) -> None:
-        """GroupReviewPage 의 [매치 시작] 시그널 → Stage 2 자동 진입."""
+        """GroupReviewPage 의 [매치 시작] 시그널 → Stage 2 자동 진입.
+
+        그룹 검토 결과(유지/분리)는 grouping_learner 로 보내 누적 — 향후 자동
+        그룹화 임계치가 사용자 검토 패턴에 맞춰 자동 조정된다.
+        """
         assert self._scan is not None and self._input is not None
+        # 사용자 검토 결과를 학습기에 누적 + 충분히 모이면 임계치 자동 갱신.
+        try:
+            kept, detached = self._group_review_page.collect_feedback()
+            if kept or detached:
+                from ..learning import grouping_learner
+                grouping_learner.record_feedback(
+                    kept_pairs=kept, detached_pairs=detached,
+                )
+                grouping_learner.maybe_retune_threshold()
+        except Exception:
+            # 학습 단계 실패가 검증 흐름을 막지 않도록.
+            pass
         queue = self._group_review_page.get_queue()
         if not queue:
             QMessageBox.warning(self, i18n.KO.APP_TITLE, i18n.KO.WARN_NO_IMAGES)

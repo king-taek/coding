@@ -28,11 +28,24 @@ from .dataset import TrainingDataStore, TrainingPair
 
 
 # ---------------------------------------------------------------------------
+from dataclasses import dataclass
+
+
+@dataclass
+class TrainResult:
+    """학습 워커가 ``finished`` 시그널로 보내는 결과 묶음."""
+
+    name: str
+    activated: bool                # active 모델로 설정됐는지 (성능 충족 시 True)
+    hit_at_5_new: float = 0.0
+    hit_at_5_basic: float = 0.0
+
+
 class TrainerSignals(QObject):
     """학습 단계별 시그널."""
     backbone_progress = pyqtSignal(int, int)               # done, total
     epoch_progress = pyqtSignal(int, int, float)           # epoch, total, loss
-    finished = pyqtSignal(str)                             # 새 모델 이름
+    finished = pyqtSignal(object)                          # TrainResult
     failed = pyqtSignal(str)
 
 
@@ -44,6 +57,8 @@ class TrainHeadWorker(QThread):
     DEFAULT_BATCH = 64
     DEFAULT_LR = 1e-3
     DEFAULT_MARGIN = 0.3
+    # 자동 재학습이 시작되려면 최소한 이만큼의 매칭 쌍이 필요.
+    MIN_PAIRS = 5
 
     def __init__(self,
                  store: TrainingDataStore,
@@ -68,8 +83,8 @@ class TrainHeadWorker(QThread):
     # ------------------------------------------------------------------
     def run(self) -> None:                          # type: ignore[override]
         try:
-            new_name = self._train()
-            self.signals.finished.emit(new_name)
+            result = self._train()
+            self.signals.finished.emit(result)
         except _AbortTraining as exc:
             self.signals.failed.emit(str(exc))
         except Exception as exc:                    # pragma: no cover
@@ -87,9 +102,9 @@ class TrainHeadWorker(QThread):
             pass
 
         pairs = self._store.load_all()
-        if len(pairs) < 5:
+        if len(pairs) < self.MIN_PAIRS:
             raise _AbortTraining(
-                "학습 데이터가 너무 적습니다 (5쌍 이상 필요)"
+                f"학습 데이터가 너무 적습니다 ({self.MIN_PAIRS}쌍 이상 필요)"
             )
 
         # Slot 별 그룹핑 — cross-slot negative 샘플링
@@ -293,16 +308,111 @@ class TrainHeadWorker(QThread):
                 except OSError:
                     pass
 
-        # active 갱신 + latest.txt 기록 + 임베더 캐시 무효화 + 디스크 cnn 캐시 정리
-        registry.set_active(name)
+        # 항상 latest 는 기록 — 사용자가 모델 카드에서 직접 골라볼 수 있도록.
         registry.set_latest(name)
+
+        # ‘성능 보장’ — 새 모델을 basic 보다 떨어지지 않을 때만 active 로 승급
+        # (사용자 요청: ‘생성된 모델은 기본 탐지모드보다 성능이 낮으면 안 됨’).
+        # held-out 일부 페어에 대해 hit@1 비교.
+        try:
+            new_hit, basic_hit = self._validate_against_basic(name, pairs)
+        except Exception:
+            # 평가 자체가 실패하면 안전하게 basic 유지.
+            new_hit, basic_hit = 0.0, 0.0
+
+        activated = new_hit >= basic_hit
+        if activated:
+            registry.set_active(name)
         emb_mod.invalidate_caches()
         try:
             from ..similarity import pipeline as _pipe
             _pipe.invalidate_cnn_cache()
         except Exception:
             pass
-        return name
+        return TrainResult(
+            name=name,
+            activated=activated,
+            hit_at_5_new=float(new_hit),
+            hit_at_5_basic=float(basic_hit),
+        )
+
+    # ------------------------------------------------------------------
+    def _validate_against_basic(self,
+                                 new_model_name: str,
+                                 pairs: list[TrainingPair]) -> tuple[float, float]:
+        """학습된 새 모델과 basic 모드의 hit@1 을 같은 검증 set 으로 비교.
+
+        검증 set = 슬롯별로 매칭 페어가 2개 이상인 슬롯만 사용.  각 페어에
+        대해 ref 의 임베딩을 같은 슬롯 다른 val 들과 비교해서 정답 val 의
+        rank 1 여부를 측정 (hit@1).  새 모델 / basic 둘 다 동일 set 으로.
+        """
+        try:
+            import numpy as np
+        except Exception:
+            return (0.0, 0.0)
+        # 슬롯별 grouping — val 후보가 충분히 많은 슬롯만.
+        by_slot: dict[str, list[TrainingPair]] = {}
+        for p in pairs:
+            by_slot.setdefault(p.slot, []).append(p)
+        eval_pairs: list[tuple[str, str, list[str]]] = []
+        # (ref_path, correct_val, [val_pool])
+        for slot, ps in by_slot.items():
+            if len(ps) < 2:
+                continue
+            val_pool = [p.val_path for p in ps]
+            for p in ps:
+                eval_pairs.append((p.ref_path, p.val_path, val_pool))
+        if not eval_pairs:
+            return (0.0, 0.0)
+        # 처리량 보호 — 최대 30 페어만 sample.
+        rng = random.Random(0)
+        if len(eval_pairs) > 30:
+            eval_pairs = rng.sample(eval_pairs, 30)
+
+        def _hit_at_1(model_name: str) -> float:
+            registry.set_active(model_name)
+            emb_mod.invalidate_caches()
+            hits = 0
+            for ref, correct, pool in eval_pairs:
+                ref_emb = emb_mod.compute_embedding(Path(ref))
+                if ref_emb is None and model_name == registry.BASIC:
+                    # basic 은 CNN 임베딩이 없음 — pHash 유사도로 대신.
+                    ref_emb = None
+                # 모든 val 점수 → top1 이 정답이면 hit.
+                best_v = None
+                best_s = -1.0
+                for v in pool:
+                    if model_name == registry.BASIC:
+                        # basic 모드: pHash 유사도로 대신.
+                        from ..similarity import pipeline as _pipe
+                        try:
+                            rf = _pipe.extract(Path(ref))
+                            vf = _pipe.extract(Path(v))
+                            s = _pipe.score(rf, vf)
+                        except Exception:
+                            s = 0.0
+                    else:
+                        v_emb = emb_mod.compute_embedding(Path(v))
+                        if ref_emb is None or v_emb is None:
+                            s = 0.0
+                        else:
+                            s = emb_mod.cosine_similarity(ref_emb, v_emb)
+                    if s > best_s:
+                        best_s = s
+                        best_v = v
+                if best_v == correct:
+                    hits += 1
+            return hits / max(1, len(eval_pairs))
+
+        prev_active = registry.get_active()
+        try:
+            new_hit = _hit_at_1(new_model_name)
+            basic_hit = _hit_at_1(registry.BASIC)
+        finally:
+            # 평가 동안 active 를 잠깐 바꾼 것이라 원래대로 (caller 가 곧 다시 설정).
+            registry.set_active(prev_active)
+            emb_mod.invalidate_caches()
+        return (new_hit, basic_hit)
 
     # ------------------------------------------------------------------
     @staticmethod
