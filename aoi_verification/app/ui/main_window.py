@@ -253,6 +253,11 @@ class MainWindow(QMainWindow):
         # 셋업 진입 시 항상 정확도 최신화 + 모델 카드 갱신
         self._refresh_models_safe()
 
+        # 이미 다른 페이지 (e.g. _on_start 가 먼저 GroupReviewPage 로 전환)
+        # 로 넘어간 경우엔 setup 으로 되돌리지 않는다.
+        if self._stack.currentWidget() is not self._setup_page:
+            return
+
         state = session_mod.load()
         if state is None or state.stage in ("setup", "result"):
             self._show_page(self._setup_page)
@@ -1084,6 +1089,15 @@ class MainWindow(QMainWindow):
         # 학습 워커도 안전 종료 (#17)
         try:
             self._setup_page.stop_training()
+        except Exception:
+            pass
+        # ResultPage 의 자동 재학습 워커도 함께 종료 — 사용자가 검증 도중
+        # 자동 학습이 백그라운드로 시작됐을 수 있음.
+        try:
+            auto = getattr(self._result_page, "_auto_retrain_worker", None)
+            if auto is not None and auto.isRunning():
+                auto.stop()
+                auto.wait(500)
         except Exception:
             pass
         super().closeEvent(event)

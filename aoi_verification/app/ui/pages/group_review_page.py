@@ -114,6 +114,10 @@ class GroupReviewPage(QWidget):
         super().__init__(parent)
         self._grouping: GroupingResult | None = None
         self._group_cards: dict[str, _GroupCard] = {}   # rep.key → card
+        # 학습 자료용 snapshot (load_state 에서 채움) — 호출 순서 사고 방지.
+        self._initial_membership: dict[str, str] = {}
+        self._initial_rep_path: dict = {}
+        self._initial_item_path: dict = {}
         self._build()
 
     # ------------------------------------------------------------------

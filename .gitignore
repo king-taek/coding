@@ -20,3 +20,6 @@ Thumbs.db
 
 # Project caches
 .aoi_verification_cache/
+
+# 결과 엑셀 — 테스트/실행 산출물은 repo 에 포함하지 않는다.
+결과/

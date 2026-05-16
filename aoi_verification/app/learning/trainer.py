@@ -271,7 +271,7 @@ class TrainHeadWorker(QThread):
         pairs_hash = ""
         try:
             import hashlib
-            jsonl = self._store.path()
+            jsonl = self._store.path
             if jsonl.exists():
                 pairs_hash = hashlib.sha1(jsonl.read_bytes()).hexdigest()
         except Exception:
@@ -311,16 +311,21 @@ class TrainHeadWorker(QThread):
         # 항상 latest 는 기록 — 사용자가 모델 카드에서 직접 골라볼 수 있도록.
         registry.set_latest(name)
 
-        # ‘성능 보장’ — 새 모델을 basic 보다 떨어지지 않을 때만 active 로 승급
-        # (사용자 요청: ‘생성된 모델은 기본 탐지모드보다 성능이 낮으면 안 됨’).
-        # held-out 일부 페어에 대해 hit@1 비교.
+        # ‘성능 보장’ — 새 모델이 basic 보다 ‘분명히’ 좋을 때만 active 로 승급
+        # (사용자 요청: ‘기본 탐지모드보다 성능이 낮으면 안 된다’).
+        # 평가 자체가 실패하거나 차이가 미미(< 2%p)하면 보수적으로 basic 유지.
+        new_hit = 0.0
+        basic_hit = 0.0
+        eval_failed = False
         try:
             new_hit, basic_hit = self._validate_against_basic(name, pairs)
         except Exception:
-            # 평가 자체가 실패하면 안전하게 basic 유지.
-            new_hit, basic_hit = 0.0, 0.0
+            eval_failed = True
 
-        activated = new_hit >= basic_hit
+        if eval_failed:
+            activated = False
+        else:
+            activated = new_hit > basic_hit + 0.02
         if activated:
             registry.set_active(name)
         emb_mod.invalidate_caches()

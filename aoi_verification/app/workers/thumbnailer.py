@@ -132,6 +132,9 @@ class ThumbnailPool(QObject):
         self._workers: list[_PoolWorker] = []
         self._total = 0
         self._done = 0
+        # finished 시그널이 race condition 으로 두 번 emit / 한 번도 안 됨을 막기
+        # 위한 단발 플래그.  _on_worker_progress 가 lock 아래서 set.
+        self._finished_emitted = False
 
     # ------------------------------------------------------------------
     def enqueue(self, items: Iterable[ImageItem], *,
@@ -200,13 +203,22 @@ class ThumbnailPool(QObject):
     # 내부 사용 — 워커가 한 작업을 끝낼 때마다 호출
     # ------------------------------------------------------------------
     def _on_worker_progress(self, item: ImageItem, ok: bool, err: str) -> None:
-        self._done += 1
+        # 멀티 워커가 동시에 호출 — _done 증가와 ‘마지막 작업이냐’ 판단을 lock
+        # 으로 묶지 않으면 race condition 으로 finished 가 한 번도 emit 되지
+        # 않거나 두 번 emit 될 수 있다.
+        with self._lock:
+            self._done += 1
+            done = self._done
+            total = self._total
+            is_finished = (done >= total and not self._finished_emitted)
+            if is_finished:
+                self._finished_emitted = True
         if not ok:
             self.signals.failed.emit(f"{item.path}: {err}")
         else:
             self.signals.item_ready.emit(item)
-        self.signals.progress.emit(self._done, self._total, str(item.path))
-        if self._done >= self._total:
+        self.signals.progress.emit(done, total, str(item.path))
+        if is_finished:
             self.signals.finished.emit()
 
 
