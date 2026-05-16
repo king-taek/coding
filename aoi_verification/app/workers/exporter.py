@@ -146,8 +146,14 @@ class ExcelExporter(QThread):
         ws = wb.active
         ws.title = "AOI 검증 결과"
         ws[f"{COL_SLOT}{HEADER_ROW}"] = "Slot"
-        ws[f"{COL_REF}{HEADER_ROW}"] = "기준 장비 이미지"
-        ws[f"{COL_VAL}{HEADER_ROW}"] = "검증 장비 이미지"
+        ref_label = (self._result.ref_machine or "").strip()
+        val_label = (self._result.val_machine or "").strip()
+        ws[f"{COL_REF}{HEADER_ROW}"] = (
+            f"기준 장비 이미지 ({ref_label})" if ref_label else "기준 장비 이미지"
+        )
+        ws[f"{COL_VAL}{HEADER_ROW}"] = (
+            f"검증 장비 이미지 ({val_label})" if val_label else "검증 장비 이미지"
+        )
         if self._result.mode == "cross":
             ws[f"{COL_DIR}{HEADER_ROW}"] = "매칭 방향"
         for c in (COL_SLOT, COL_REF, COL_VAL, COL_DIR):

@@ -92,15 +92,13 @@ class MainWindow(QMainWindow):
         self._select_page = SelectPage()
         self._match_page = MatchPage()
         self._result_page = ResultPage()
-        # 올인원 모드 (#3) 의 두 검토 페이지 — 신규.
-        from .pages.group_review_page import GroupReviewPage
+        # 자동 매치 결과 검토 페이지 (auto_all / user_select 모드 공용).
         from .pages.match_review_page import MatchReviewPage
-        self._group_review_page = GroupReviewPage()
         self._match_review_page = MatchReviewPage()
 
         for w in (self._setup_page, self._select_page,
                   self._match_page, self._result_page,
-                  self._group_review_page, self._match_review_page):
+                  self._match_review_page):
             self._stack.addWidget(w)
 
         # 시그널 ---------------------------------------------------------
@@ -111,10 +109,7 @@ class MainWindow(QMainWindow):
         self._match_page.skipped_changed.connect(self._schedule_autosave)
         self._match_page.finished.connect(self._on_match_finished)
         self._result_page.new_session_requested.connect(self._new_session)
-        # 그룹 검토 → 매치 시작 / 매치 검토 → 결과
-        self._group_review_page.match_requested.connect(
-            self._on_group_review_done
-        )
+        # 매치 검토 → 결과 페이지
         self._match_review_page.finished.connect(self._on_match_review_done)
 
         # 자동 저장 타이머 -----------------------------------------------
@@ -356,28 +351,6 @@ class MainWindow(QMainWindow):
         sr.val_only = [s for s in sr.val_only
                        if s not in {b for _, b in mapping.pairs}]
 
-    def _make_groups(self, items: list[ImageItem]):
-        """ImageItem 목록을 슬롯별로 pHash 그룹화 (#15)."""
-        try:
-            from ..models import group as _grp
-            from ..utils import prefs as _prefs
-        except Exception:
-            return None
-        if not items:
-            return None
-        by_slot: dict[str, list[ImageItem]] = defaultdict(list)
-        for it in items:
-            by_slot[it.slot].append(it)
-        p = _prefs.load()
-        try:
-            return _grp.cluster(
-                by_slot,
-                similarity_threshold=float(p.group_similarity),
-                min_group_size=int(p.group_min_size),
-            )
-        except Exception:
-            return None
-
     # ==================================================================
     # Setup → Stage 1
     # ==================================================================
@@ -469,51 +442,22 @@ class MainWindow(QMainWindow):
         self._maybe_offer_threshold_suggestion()
         # 자동화 수준에 따라 흐름 분기 (#3 올인원 모드) -------------------
         if self._input.automation_level == AutomationLevel.AUTO_ALL:
-            # Stage 1 건너뜀 — 그룹화 결과를 사용자가 검토 → 매치 시작.
-            self._enter_group_review()
+            # Stage 1 건너뜀 — 모든 ref 를 Stage 2 자동 매치 큐에 직접.
+            self._enter_stage2_auto_all()
             return
         # 'manual' 과 'user_select' 둘 다 Stage 1 은 동일 (사용자 직접).
         self._phase = PHASE_A_SELECT
         self._enter_stage1_phase_a()
 
     # ==================================================================
-    # 올인원 자동 모드: 그룹 검토 → 매치 시작 → 매치 검토 → 결과 (#3)
+    # 올인원 자동 모드 (auto_all): Stage 1 건너뛰고 모든 ref 자동 매치.
     # ==================================================================
-    def _enter_group_review(self) -> None:
-        """모든 ref 를 그룹화해서 사용자가 검토하는 화면으로 이동."""
-        assert self._scan is not None
-        slots = [self._scan.slots[n] for n in self._scan.common_slot_names]
-        all_refs: list[ImageItem] = []
-        for slot in sorted(slots, key=lambda s: s.name):
-            all_refs.extend(slot.ref_images)
-        grouping = self._make_groups(all_refs)
-        # 그룹화 결과가 없으면 (사진 수 부족) 그냥 모든 ref 를 representatives 로.
-        if grouping is None:
-            from ..models.group import GroupingResult
-            grouping = GroupingResult(representatives=list(all_refs))
-        self._group_review_page.load_state(grouping)
-        self._show_page(self._group_review_page)
-
-    def _on_group_review_done(self) -> None:
-        """GroupReviewPage 의 [매치 시작] 시그널 → Stage 2 자동 진입.
-
-        그룹 검토 결과(유지/분리)는 grouping_learner 로 보내 누적 — 향후 자동
-        그룹화 임계치가 사용자 검토 패턴에 맞춰 자동 조정된다.
-        """
+    def _enter_stage2_auto_all(self) -> None:
         assert self._scan is not None and self._input is not None
-        # 사용자 검토 결과를 학습기에 누적 + 충분히 모이면 임계치 자동 갱신.
-        try:
-            kept, detached = self._group_review_page.collect_feedback()
-            if kept or detached:
-                from ..learning import grouping_learner
-                grouping_learner.record_feedback(
-                    kept_pairs=kept, detached_pairs=detached,
-                )
-                grouping_learner.maybe_retune_threshold()
-        except Exception:
-            # 학습 단계 실패가 검증 흐름을 막지 않도록.
-            pass
-        queue = self._group_review_page.get_queue()
+        slots = [self._scan.slots[n] for n in self._scan.common_slot_names]
+        queue: list[ImageItem] = []
+        for slot in sorted(slots, key=lambda s: s.name):
+            queue.extend(slot.ref_images)
         if not queue:
             QMessageBox.warning(self, i18n.KO.APP_TITLE, i18n.KO.WARN_NO_IMAGES)
             return
@@ -601,13 +545,9 @@ class MainWindow(QMainWindow):
         lower = self._lower_machine_side() if self._is_cross() else "ref"
         slots = [self._scan.slots[n] for n in self._scan.common_slot_names]
         # Phase A 의 queue: 낮은 호기 쪽 사진 전부 (Slot 명 / 파일명 오름차순)
-        queue_full: list[ImageItem] = []
+        queue: list[ImageItem] = []
         for slot in sorted(slots, key=lambda s: s.name):
-            queue_full.extend(slot.ref_images if lower == "ref" else slot.val_images)
-
-        # 같은 슬롯 안 거의 동일한 사진은 그룹으로 묶어 대표만 큐에 (#15)
-        grouping = self._make_groups(queue_full)
-        queue = grouping.representatives if grouping else queue_full
+            queue.extend(slot.ref_images if lower == "ref" else slot.val_images)
 
         phase_lab = (
             i18n.KO.PHASE_A_SELECT if self._is_cross()
@@ -617,7 +557,6 @@ class MainWindow(QMainWindow):
             queue=queue,
             targets={}, excluded={}, history=[],
             phase_label=phase_lab,
-            groups=grouping,
         )
         self._show_page(self._select_page)
         self._phase = PHASE_A_SELECT
@@ -770,14 +709,11 @@ class MainWindow(QMainWindow):
                 else:
                     queue.append(it)
 
-        grouping_b = self._make_groups(queue)
-        queue_b = grouping_b.representatives if grouping_b else queue
         self._select_page.load_state(
-            queue=queue_b,
+            queue=queue,
             targets={}, excluded={}, history=[],
             phase_label=i18n.KO.PHASE_B_SELECT,
             phase_b_already_matched=dict(already_by_slot),
-            groups=grouping_b,
         )
         self._show_page(self._select_page)
         self._phase = PHASE_B_SELECT

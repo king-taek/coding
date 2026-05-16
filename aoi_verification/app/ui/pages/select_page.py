@@ -1,7 +1,9 @@
 """Stage 1 — 후보 선별 화면.
 
-레이아웃: 상단 컨트롤 바 / 좌 (남은 후보) · 중앙 (결정 대상) · 우 (검증 대상)
-        / 하단 (제외됨). 모두 Slot 별로 그룹화.
+레이아웃: 상단 컨트롤 바 (검증 제외 사진 보기 버튼 포함)
+        / 좌 (남은 후보) · 중앙 (결정 대상) · 우 (검증 대상).
+검증에서 제외한 사진들은 화면을 차지하지 않고, 상단 버튼을 누르면 팝업으로
+모아 볼 수 있다.
 
 키보드 단축키:
   ← 또는 1 → 검증
@@ -23,11 +25,9 @@ from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QScrollArea,
                               QWidget)
 
 from ... import i18n
-from ...models.group import GroupingResult, PhotoGroup
 from ...models.slot import ImageItem
 from ...utils import image_io
 from ...utils import prefs as _prefs
-from ..widgets.group_dialog import GroupDialog
 from ..widgets.neon_button import NeonButton
 from ..widgets.neon_card import NeonCard
 from ..widgets.scalable_image import ScalableImage
@@ -181,7 +181,6 @@ class SelectPage(QWidget):
         self._current: Optional[ImageItem] = None
         self._phase_label_text = ""
         self._phase_b_already_matched: dict[str, list[ImageItem]] = {}
-        self._groups: GroupingResult | None = None
         self._build()
 
     # ------------------------------------------------------------------
@@ -196,6 +195,15 @@ class SelectPage(QWidget):
         self.title.setProperty("role", "title")
         top.addWidget(self.title)
         top.addStretch(1)
+        # [검증 제외 사진 보기 (n)] — 제외된 사진은 화면에서 숨기고,
+        # 이 버튼으로 팝업에서 모아 본다. 0 장이면 비활성.
+        self.btn_view_excluded = NeonButton(
+            i18n.KO.BTN_VIEW_EXCLUDED_FMT.format(n=0), role="ghost",
+        )
+        self.btn_view_excluded.clicked.connect(self._open_excluded_dialog)
+        self.btn_view_excluded.setEnabled(False)
+        top.addWidget(self.btn_view_excluded)
+        top.addSpacing(20)
         self.phase_label = QLabel("", self)
         self.phase_label.setProperty("role", "subtitle")
         top.addWidget(self.phase_label)
@@ -290,10 +298,6 @@ class SelectPage(QWidget):
         self.btn_verify = NeonButton("✓  " + i18n.KO.BTN_VERIFY, role="primary")
         self.btn_exclude = NeonButton("✕  " + i18n.KO.BTN_EXCLUDE, role="danger")
         self.btn_undo = NeonButton(i18n.KO.BTN_UNDO, role="ghost")
-        # 그룹 보기 — 현재 사진이 그룹 대표일 때만 활성 (#15)
-        self.btn_group = NeonButton("", role="warn")
-        self.btn_group.hide()
-        self.btn_group.clicked.connect(self._open_group_dialog)
         self.btn_verify.setToolTip(i18n.KO.SHORTCUT_TOOLTIP)
         self.btn_exclude.setToolTip(i18n.KO.SHORTCUT_TOOLTIP)
         self.btn_undo.setToolTip(i18n.KO.SHORTCUT_TOOLTIP)
@@ -301,7 +305,6 @@ class SelectPage(QWidget):
         self.btn_exclude.clicked.connect(lambda: self._decide("exclude"))
         self.btn_undo.clicked.connect(self._undo)
         btn_row.addWidget(self.btn_undo)
-        btn_row.addWidget(self.btn_group)
         btn_row.addStretch(1)
         btn_row.addWidget(self.btn_verify)
         btn_row.addWidget(self.btn_exclude)
@@ -330,31 +333,7 @@ class SelectPage(QWidget):
         self._h_splitter.setStretchFactor(1, 4)
         self._h_splitter.setStretchFactor(2, 2)
 
-        # BOTTOM ------------------------------------------------------
-        self.bottom_panel = _SidePanel(
-            self.PANEL_BOTTOM, i18n.KO.PANEL_BOTTOM_EXCLUDED,
-            vertical_scroll=False,
-            actions=[
-                ("to_target", i18n.KO.BTN_MOVE_TO_TARGET, "primary"),
-                ("recenter", i18n.KO.BTN_BACK_TO_CENTER, "ghost"),
-            ],
-            # 7 col × 134px = 938 → 기본 폭 1280 에서 가로 스크롤 없이 보임.
-            columns=7,
-        )
-        self.bottom_panel.selection_action.connect(self._on_batch_action)
-        self.bottom_panel.tile_clicked.connect(self._on_tile_click)
-        self.bottom_panel.plus_clicked.connect(self._on_plus_click)
-        self.bottom_panel.setMinimumHeight(180)
-
-        # 상하 QSplitter (3-pane 위쪽 / 제외 패널 아래쪽) -----------------
-        self._v_splitter = QSplitter(Qt.Orientation.Vertical, self)
-        self._v_splitter.setHandleWidth(6)
-        self._v_splitter.setChildrenCollapsible(False)
-        self._v_splitter.addWidget(self._h_splitter)
-        self._v_splitter.addWidget(self.bottom_panel)
-        self._v_splitter.setStretchFactor(0, 4)
-        self._v_splitter.setStretchFactor(1, 1)
-        root.addWidget(self._v_splitter, stretch=1)
+        root.addWidget(self._h_splitter, stretch=1)
 
         # 저장된 분할 비율 복원 + 변경 시 영속화 -------------------------
         _p2 = _prefs.load()
@@ -362,12 +341,7 @@ class SelectPage(QWidget):
             self._h_splitter.restoreState(
                 QByteArray.fromBase64(_p2.splitter_state_select_h.encode("ascii"))
             )
-        if _p2.splitter_state_select_v:
-            self._v_splitter.restoreState(
-                QByteArray.fromBase64(_p2.splitter_state_select_v.encode("ascii"))
-            )
         self._h_splitter.splitterMoved.connect(self._save_splitter_state)
-        self._v_splitter.splitterMoved.connect(self._save_splitter_state)
 
         # 단축키 --------------------------------------------------------
         for key in ("Left", "1"):
@@ -385,9 +359,6 @@ class SelectPage(QWidget):
                 splitter_state_select_h=bytes(
                     self._h_splitter.saveState().toBase64()
                 ).decode("ascii"),
-                splitter_state_select_v=bytes(
-                    self._v_splitter.saveState().toBase64()
-                ).decode("ascii"),
             )
         except Exception:
             pass
@@ -402,7 +373,6 @@ class SelectPage(QWidget):
                    history: list[tuple[str, ImageItem]] | None = None,
                    phase_label: str = "",
                    phase_b_already_matched: dict[str, list[ImageItem]] | None = None,
-                   groups: GroupingResult | None = None,
                    ) -> None:
         self._state = Stage1State(
             queue=list(queue),
@@ -413,7 +383,6 @@ class SelectPage(QWidget):
         self._phase_label_text = phase_label
         self.phase_label.setText(phase_label)
         self._phase_b_already_matched = phase_b_already_matched or {}
-        self._groups = groups
         self._refresh_all()
         self._advance_to_next()
 
@@ -438,7 +407,20 @@ class SelectPage(QWidget):
         self.left_panel.update_data(left_groups)
 
         self.right_panel.update_data({k: list(v) for k, v in self._state.targets.items()})
-        self.bottom_panel.update_data({k: list(v) for k, v in self._state.excluded.items()})
+        self._refresh_excluded_button()
+
+    def _refresh_excluded_button(self) -> None:
+        if self._state is None:
+            self.btn_view_excluded.setText(
+                i18n.KO.BTN_VIEW_EXCLUDED_FMT.format(n=0)
+            )
+            self.btn_view_excluded.setEnabled(False)
+            return
+        n = sum(len(v) for v in self._state.excluded.values())
+        self.btn_view_excluded.setText(
+            i18n.KO.BTN_VIEW_EXCLUDED_FMT.format(n=n)
+        )
+        self.btn_view_excluded.setEnabled(n > 0)
 
     def _advance_to_next(self) -> None:
         if self._state is None:
@@ -480,15 +462,6 @@ class SelectPage(QWidget):
         self.center_img.set_image(item.path)
         # 파일명은 표시하지 않고 Slot 명만 노출한다 (요청 사항).
         self.slot_label.setText(i18n.KO.SLOT_LABEL_FMT.format(slot=item.slot))
-        # 현재 사진이 그룹 대표라면 ‘그룹 보기’ 버튼 활성 (#15)
-        g = self._groups.group_for(item) if self._groups else None
-        if g is not None and item.key == g.rep.key and g.siblings:
-            self.btn_group.setText(
-                i18n.KO.GROUP_BTN_VIEW_FMT.format(n=g.size())
-            )
-            self.btn_group.show()
-        else:
-            self.btn_group.hide()
 
     def _on_size_changed(self, value: int) -> None:
         self.size_value.setText(f"{value} px")
@@ -515,50 +488,8 @@ class SelectPage(QWidget):
         target_pool[item.slot].append(item)
         self._state.history.append((action, item))
         self.decision_made.emit(action, item)
-
-        # 그룹 대표인 경우 sibling 들에도 동일한 결정을 자동 적용 (#15)
-        applied_siblings: list[ImageItem] = []
-        if self._groups is not None:
-            g = self._groups.group_for(item)
-            if g is not None and item.key == g.rep.key and g.siblings:
-                for sib in list(g.siblings):
-                    target_pool[sib.slot].append(sib)
-                    applied_siblings.append(sib)
-                    self.decision_made.emit(action, sib)
-                # 그룹 자체 해체
-                self._groups.remove_from_group(item)
-
-        # undo 단순화: sibling 일괄 결정은 한 번에 되돌릴 수 있도록 별도 마커
-        if applied_siblings:
-            self._state.history.append(("_siblings", applied_siblings))  # type: ignore[arg-type]
-
         self.state_changed.emit()
         self._advance_to_next()
-
-    def _open_group_dialog(self) -> None:
-        if self._groups is None or self._current is None:
-            return
-        g = self._groups.group_for(self._current)
-        if g is None or self._current.key != g.rep.key:
-            return
-        dlg = GroupDialog(g, parent=self)
-        dlg.exec()
-        # 다이얼로그에서 분리된 항목은 ‘대표 바로 뒤’ 의 큐 위치에 끼워넣어
-        # 사용자가 곧장 그것들에 대한 결정을 이어할 수 있도록.
-        removed = dlg.removed_items
-        if not removed or self._state is None:
-            return
-        try:
-            pos = self._state.queue.index(self._current) + 1
-        except ValueError:
-            pos = 1
-        for r in removed:
-            self._state.queue.insert(pos, r)
-            pos += 1
-        # 화면도 갱신 (그룹 사이즈 표시가 바뀌었을 수 있음)
-        self._show_center(self._current)
-        self._refresh_all()
-        self.state_changed.emit()
 
     def _undo(self) -> None:
         # Z 가 MatchPage 가 보일 때도 SelectPage 로 전달되는 것을 차단.
@@ -567,25 +498,6 @@ class SelectPage(QWidget):
         if self._state is None or not self._state.history:
             return
         action, item = self._state.history.pop()
-        # 그룹 일괄 결정 마커가 직전에 있으면 sibling 들도 함께 되돌린다.
-        if action == "_siblings":
-            # _siblings 마커는 두 번째 요소가 list[ImageItem]
-            siblings: list[ImageItem] = item  # type: ignore[assignment]
-            # 직전 action 한 번 더 pop
-            if self._state.history:
-                action, item = self._state.history.pop()
-            else:
-                action, item = ("verify", None)  # type: ignore[assignment]
-            if item is None:
-                return
-            for s in siblings:
-                pool = self._state.targets if action == "verify" else self._state.excluded
-                try:
-                    pool[s.slot].remove(s)
-                except ValueError:
-                    pass
-                self._state.queue.insert(0, s)
-        # 본 항목 되돌리기
         pool = self._state.targets if action == "verify" else self._state.excluded
         try:
             pool[item.slot].remove(item)
@@ -642,6 +554,7 @@ class SelectPage(QWidget):
     def _open_zoom(self, panel: str, slot: str) -> None:
         if self._state is None:
             return
+        view_only = False
         if panel == self.PANEL_RIGHT:
             items = list(self._state.targets.get(slot, []))
             source = SOURCE_TARGET
@@ -651,13 +564,16 @@ class SelectPage(QWidget):
             source = SOURCE_EXCLUDED
             already = []
         else:
+            # Stage 1 의 검증 후보 — 단순 확대 뷰어로만 동작 (액션 없음).
             items = [it for it in self._state.queue if it.slot == slot]
             source = SOURCE_CANDIDATES
             already = []
+            view_only = True
         if not items and not already:
             return
         win = ZoomWindow(slot, items, source,
-                         already_matched_items=already, parent=self)
+                         already_matched_items=already,
+                         view_only=view_only, parent=self)
         win.action_requested.connect(
             lambda act, sel: self._apply_zoom_action(panel, act, sel)
         )
@@ -685,3 +601,30 @@ class SelectPage(QWidget):
                     self._state.queue.insert(0, it)
         self.state_changed.emit()
         self._advance_to_next()
+
+    # ------------------------------------------------------------------
+    # 검증 제외 사진 팝업 다이얼로그
+    # ------------------------------------------------------------------
+    def _open_excluded_dialog(self) -> None:
+        """[검증 제외 사진 보기] 클릭 → 큰 팝업으로 표시 + 다중 액션."""
+        from ..widgets.bulk_select_dialog import BulkSelectDialog
+        if self._state is None:
+            return
+        data = {k: list(v) for k, v in self._state.excluded.items() if v}
+        if not data:
+            return
+        dlg = BulkSelectDialog(
+            title=i18n.KO.BULK_SELECT_EXCLUDED_TITLE,
+            data=data,
+            actions=[
+                ("to_target", i18n.KO.BTN_MOVE_TO_TARGET, "primary"),
+                ("recenter", i18n.KO.BTN_BACK_TO_CENTER, "ghost"),
+            ],
+            parent=self,
+        )
+        dlg.selection_action.connect(
+            lambda action_id, items: self._on_batch_action(
+                self.PANEL_BOTTOM, action_id, items,
+            )
+        )
+        dlg.exec()

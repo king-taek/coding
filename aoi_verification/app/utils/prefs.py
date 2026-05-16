@@ -43,11 +43,6 @@ class UiPrefs:
     last_ref_machine: str = ""
     last_val_machine: str = ""
     last_mode: str = "single"
-    # 그룹화 임계치 — pipeline.score() (pHash+ORB+SSIM+CNN) 기준.
-    # 매칭 임계치(0.55) 보다 살짝 관대하게 — 같은 슬롯의 ‘비슷한 결함’ 사진들이
-    # 변동(노이즈/색감) 으로 점수가 흩어져도 안정적으로 묶이도록.
-    group_similarity: float = 0.45
-    group_min_size: int = 2                  # 이 수 이상이어야 그룹으로 묶음
     # 창 크기 — 사용자가 마지막으로 드래그/리사이즈 한 값을 자동 저장.
     # 0 = 미설정 (첫 실행에서는 모니터 영역의 90% 로 시작).
     window_width: int = 0

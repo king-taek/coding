@@ -216,8 +216,10 @@ class ZoomWindow(QDialog):
                  source: str,
                  *,
                  already_matched_items: Iterable[ImageItem] = (),
+                 view_only: bool = False,
                  parent=None) -> None:
         super().__init__(parent)
+        self._view_only = bool(view_only)
         self._slot = slot_name
         self._items = list(items)
         self._already_matched = list(already_matched_items)
@@ -263,7 +265,10 @@ class ZoomWindow(QDialog):
         bar = QHBoxLayout()
         bar.setSpacing(8)
 
-        if self._source == SOURCE_TARGET:
+        if self._view_only:
+            # 액션 없음 — 단순 확대 뷰어.
+            self._btn_a = self._btn_b = None  # type: ignore[assignment]
+        elif self._source == SOURCE_TARGET:
             self._btn_a = NeonButton(i18n.KO.ZOOM_BTN_EXCLUDE, role="danger")
             self._btn_b = NeonButton(i18n.KO.ZOOM_BTN_TO_CENTER, role="warn")
             self._btn_a.clicked.connect(lambda: self._emit("exclude"))

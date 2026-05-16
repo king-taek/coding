@@ -17,7 +17,8 @@ from ...utils import image_io
 from .neon_button import NeonButton
 
 
-_TILE_PX = 180          # 시원하게 보이는 다중 선택 그리드 썸네일
+_TILE_PX = 180          # 시원하게 보이는 다중 선택 그리드 썸네일 (원본 비율 유지)
+_CAP_PX = 28            # 파일명 한 줄 — 사진을 가리지 않도록 충분히 확보
 _COLS = 6
 
 
@@ -32,22 +33,33 @@ class _SelectTile(QFrame):
         self._selected = False
         self.setProperty("role", "card-soft")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedSize(_TILE_PX + 14, _TILE_PX + 40)
+        # 사진 정사각 영역(_TILE_PX) + 캡션 한 줄(_CAP_PX) + 마진/스페이싱.
+        self.setFixedSize(_TILE_PX + 14, _TILE_PX + _CAP_PX + 18)
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(6, 6, 6, 6)
         lay.setSpacing(4)
 
+        # 이미지 영역 — 정사각 박스에 KeepAspectRatio 로 들어가므로 가로/세로
+        # 사진 모두 잘림 없이 원본 비율 그대로 표시된다.
         self._img = QLabel(self)
         self._img.setFixedSize(_TILE_PX, _TILE_PX)
         self._img.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._img.setPixmap(image_io.load_thumb_qpixmap(item.path, _TILE_PX))
         lay.addWidget(self._img, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        cap = QLabel(item.filename, self)
-        cap.setProperty("role", "muted")
+        # 파일명 — 한 줄 고정, 너무 길면 가운데 ‘…’ 으로 elide (사진을 가리지 않게).
+        from PyQt6.QtGui import QFontMetrics
+        cap = QLabel(self)
+        cap.setFixedHeight(_CAP_PX)
         cap.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        cap.setWordWrap(True)
+        cap.setProperty("role", "muted")
+        cap.setWordWrap(False)
+        fm = QFontMetrics(cap.font())
+        cap.setText(fm.elidedText(
+            item.filename, Qt.TextElideMode.ElideMiddle, _TILE_PX - 4,
+        ))
+        cap.setToolTip(item.filename)
         lay.addWidget(cap)
 
     def mousePressEvent(self, event):  # noqa: N802

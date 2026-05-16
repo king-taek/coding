@@ -18,7 +18,7 @@ BTN_START = "검증 시작"
 BTN_BROWSE = "폴더 선택…"
 BTN_VERIFY = "검증"
 BTN_EXCLUDE = "제외"
-BTN_UNDO = "되돌리기"
+BTN_UNDO = "되돌리기(Z)"
 BTN_SKIP = "잠시 보류"
 BTN_NO_MATCH = "매칭 없음 확정"
 BTN_RETRY_SKIP = "보류 재시도"
@@ -38,8 +38,10 @@ BTN_REMOVE_FROM_TARGET = "검증 대상에서 제거"
 BTN_MOVE_TO_EXCLUDE = "제외로 이동"
 BTN_MOVE_TO_TARGET = "검증 대상으로 이동"
 BTN_BACK_TO_CENTER = "중앙으로 복귀(재결정)"
-BTN_BATCH_EXCLUDE = "일괄 제외"
-BTN_BATCH_VERIFY = "일괄 검증으로 이동"
+BTN_BATCH_EXCLUDE = "선택 항목 검증 제외"
+BTN_BATCH_VERIFY = "선택 항목 검증 대상 지정"
+BTN_VIEW_EXCLUDED_FMT = "검증 제외 사진 보기 ({n})"
+BULK_SELECT_EXCLUDED_TITLE = "검증 제외 사진"
 BTN_EXPORT_EXCEL = "엑셀로 저장"
 BTN_OPEN_RESULT = "결과 폴더 열기"
 BTN_NEW_SESSION = "새 검증 시작"
@@ -93,16 +95,6 @@ ZOOM_BTN_EXCLUDE = "검증에서 제외"
 ZOOM_BTN_TO_TARGET = "검증 대상으로 변경"
 ZOOM_BTN_TO_CENTER = "재결정으로 복귀"
 ZOOM_BTN_PICK_MATCH = "이 사진을 매칭으로 확정"
-
-# ── 동일 사진 그룹 (#15) ───────────────────────────────────────────────────
-GROUP_BTN_VIEW_FMT = "동일 그룹 보기 ({n}장)"
-GROUP_DIALOG_TITLE_FMT = "동일 사진 그룹 — {slot}  ·  {n} 장"
-GROUP_DIALOG_HINT = (
-    "같은 슬롯 안에서 거의 동일한 사진이 자동으로 묶였습니다.\n"
-    "사용자가 대표 사진에 내린 결정(검증/제외) 이 그룹 전체에 똑같이 적용됩니다.\n"
-    "따로 결정하고 싶은 사진이 있으면 ‘그룹에서 분리’ 를 누르세요."
-)
-GROUP_BTN_DETACH = "그룹에서 분리"
 
 # ── 단축키 ────────────────────────────────────────────────────────────────
 SHORTCUT_TOOLTIP = (
@@ -277,15 +269,6 @@ AUTO_REVIEW_HINT_FMT = (
     "{n_miss} 장은 임계치 미달로 ‘매칭 없음’ 처리되었습니다.\n"
     "[매칭 결과 검토] 로 결과를 확인해 주세요."
 )
-GROUP_REVIEW_PHASE = "그룹 검토"
-GROUP_REVIEW_HINT = (
-    "같은 슬롯에서 거의 동일한 사진들끼리 자동으로 묶었습니다.  잘못 묶인 사진이\n"
-    "있으면 사진을 클릭해서 그룹에서 분리하세요. 분리된 사진은 다음 매치 단계에\n"
-    "별도로 포함됩니다.  ⭐ 표시가 그룹 대표 사진입니다.  검토가 끝나면\n"
-    "[매치 시작] 을 누르세요."
-)
-BTN_START_AUTO_MATCH = "매치 시작 ▶"
-
 # ── 매치 검토 페이지 ───────────────────────────────────────────────────────
 MATCH_REVIEW_TITLE = "매치 검토"
 MATCH_REVIEW_HINT = (
