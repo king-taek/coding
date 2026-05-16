@@ -1,12 +1,13 @@
 """올인원 / 사진 직접 선택 모드의 ‘매치 검토’ 페이지.
 
 자동 매치 결과를 사용자가 스크롤하며 확인하고, 잘못된 매치는 ‘매치 없음’
-처리해서 엑셀에 ‘기준 사진 + 빨간 파일명’ 행으로 들어가도록 한다.
+처리해서 엑셀에 ‘기준 사진 + 빨간 파일명’ 행으로 들어가도록 한다.  또한
+차순위 후보를 클릭하면 그것으로 매치를 ‘교체’ 할 수 있다.
 
 흐름:
-- 입력: list[MatchResult] (자동 매치 결과)
+- 입력: list[MatchResult] (자동 매치 결과) + score_cache + val_pool (차순위 lookup 용)
 - 출력 (finished 시): kept_matches, unmatched_refs
-  · kept_matches : 사용자가 ‘유지’ 한 매치들
+  · kept_matches : 사용자가 ‘유지’ 또는 ‘swap’ 한 매치들
   · unmatched_refs : 사용자가 ‘잘못된 매치’ 라고 표시한 ref 들 (MissEntry 로 변환)
 """
 
@@ -20,6 +21,7 @@ from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QScrollArea,
 
 from ... import i18n
 from ...models.result import MatchResult, MissEntry
+from ...models.slot import ImageItem
 from ...utils import image_io
 from ..widgets.neon_button import NeonButton
 
@@ -28,10 +30,46 @@ _THUMB_PX = 140
 _RUNNERUP_PX = int(_THUMB_PX * 0.8)         # 차순위는 20% 작게
 
 
-class _MatchRow(QFrame):
-    """한 매치 — ref + 1위 매치 + 점수 + 차순위 2장 (20% 작게) + 토글 버튼."""
+class _RunnerUpTile(QFrame):
+    """클릭 가능한 차순위 후보 썸네일.  클릭 시 swap_requested(item, score)."""
 
-    toggle_requested = pyqtSignal(object)        # MatchResult
+    swap_requested = pyqtSignal(object, float)        # (ImageItem, score)
+
+    def __init__(self, item: ImageItem, score: float, parent=None) -> None:
+        super().__init__(parent)
+        self.item = item
+        self.score = float(score)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip(i18n.KO.RUNNERUP_TOOLTIP)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(2)
+
+        self._img = QLabel(self)
+        self._img.setFixedSize(_RUNNERUP_PX, _RUNNERUP_PX)
+        self._img.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._img.setStyleSheet(
+            "border: 1px dashed #1F2A3F; border-radius: 6px;"
+        )
+        self._img.setPixmap(image_io.load_thumb_qpixmap(item.path, _RUNNERUP_PX))
+        lay.addWidget(self._img, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self._score_label = QLabel(f"{int(round(self.score * 100))} %", self)
+        self._score_label.setStyleSheet("color: #7FB3D5; font-size: 11px;")
+        self._score_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(self._score_label)
+
+    def mousePressEvent(self, event):  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.swap_requested.emit(self.item, self.score)
+        super().mousePressEvent(event)
+
+
+class _MatchRow(QFrame):
+    """한 매치 — ref + 1위 매치 + 점수 + 차순위 2장 (20% 작게, 클릭 가능)."""
+
+    toggle_requested = pyqtSignal(object)                  # MatchResult
+    swap_requested = pyqtSignal(object, object, float)     # (old_match, new_val_item, new_score)
 
     def __init__(self,
                  match: MatchResult,
@@ -82,26 +120,17 @@ class _MatchRow(QFrame):
         primary_lay.addWidget(score_label)
         row.addWidget(primary_host)
 
-        # 차순위 2장 (20% 작게) + 점수 — 참고용
+        # 차순위 2장 — 클릭하면 그 사진으로 매치 교체 (swap_requested emit).
         if self._runners_up:
             sep = QLabel("│", self)
             sep.setStyleSheet("color: #1F2A3F; font-size: 36px;")
             row.addWidget(sep)
             for item, score in self._runners_up[:2]:
-                r_host = QWidget(self)
-                r_lay = QVBoxLayout(r_host)
-                r_lay.setContentsMargins(0, 0, 0, 0)
-                r_lay.setSpacing(2)
-                r_img = self._make_thumb(item.path, size=_RUNNERUP_PX,
-                                          subtle=True)
-                r_lay.addWidget(r_img, alignment=Qt.AlignmentFlag.AlignCenter)
-                r_score = QLabel(f"{int(round(float(score) * 100))} %", r_host)
-                r_score.setStyleSheet(
-                    "color: #7FB3D5; font-size: 11px;"
+                tile = _RunnerUpTile(item, score, parent=self)
+                tile.swap_requested.connect(
+                    lambda it, s: self.swap_requested.emit(self.match, it, s)
                 )
-                r_score.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                r_lay.addWidget(r_score)
-                row.addWidget(r_host)
+                row.addWidget(tile)
 
         row.addStretch(1)
 
@@ -214,10 +243,14 @@ class MatchReviewPage(QWidget):
         """매치 검토 화면 초기화.
 
         ``score_cache`` 와 ``val_pool`` 이 함께 주어지면 각 매치 행에 차순위
-        2 장(20% 작게) 을 참고용으로 표시한다.
+        2 장(20% 작게) 을 클릭 가능한 형태로 보여주고, 클릭 시 그 후보로
+        매치를 교체한다.
         """
         self._matches = list(matches)
         self._unmatched_keys.clear()
+        # 차순위 swap / 재계산용으로 score_cache + val_pool 참조 보관.
+        self._score_cache = score_cache
+        self._val_pool = val_pool
 
         while self._list_layout.count():
             it = self._list_layout.takeAt(0)
@@ -240,13 +273,69 @@ class MatchReviewPage(QWidget):
                 key=lambda m: (m.slot, m.ref_path.name.lower()),
             )
             for m in ordered:
-                runners = self._lookup_runners_up(m, score_cache, val_pool)
-                row = _MatchRow(m, runners_up=runners, parent=self)
-                row.toggle_requested.connect(self._on_toggle)
-                self._list_layout.addWidget(row)
-                self._rows.append(row)
-                self._rows_by_key[m.key] = row
+                self._append_row(m)
         self._list_layout.addStretch(1)
+        self._update_summary()
+
+    def _append_row(self, match: MatchResult) -> "_MatchRow":
+        runners = self._lookup_runners_up(match, self._score_cache, self._val_pool)
+        row = _MatchRow(match, runners_up=runners, parent=self)
+        row.toggle_requested.connect(self._on_toggle)
+        row.swap_requested.connect(self._on_swap)
+        # stretch 직전에 삽입 (마지막 stretch 가 있으면).
+        idx = self._list_layout.count()
+        if idx > 0:
+            last = self._list_layout.itemAt(idx - 1)
+            # stretch item 은 widget=None.
+            if last is not None and last.widget() is None:
+                self._list_layout.insertWidget(idx - 1, row)
+                self._rows.append(row)
+                self._rows_by_key[match.key] = row
+                return row
+        self._list_layout.addWidget(row)
+        self._rows.append(row)
+        self._rows_by_key[match.key] = row
+        return row
+
+    def _on_swap(self,
+                 old_match: MatchResult,
+                 new_val_item,
+                 new_score: float) -> None:
+        """차순위 후보 클릭 시 매치 교체.  엔트리/행을 in-place 갱신."""
+        from ...models.result import MatchResult as _M
+        new_match = _M(
+            slot=old_match.slot,
+            ref_path=old_match.ref_path,
+            val_path=new_val_item.path,
+            score=float(new_score),
+            direction=old_match.direction,
+        )
+        # matches 리스트에서 old → new 교체
+        for i, m in enumerate(self._matches):
+            if m.key == old_match.key:
+                self._matches[i] = new_match
+                break
+        # unmatched 표시는 swap 시 자동 해제 (사용자가 새 매치를 골랐으니).
+        self._unmatched_keys.discard(old_match.key)
+        # 행 위젯 제거 후 같은 자리에 새 행 삽입.
+        old_row = self._rows_by_key.pop(old_match.key, None)
+        if old_row is not None:
+            layout_idx = self._list_layout.indexOf(old_row)
+            self._rows = [r for r in self._rows if r is not old_row]
+            old_row.setParent(None)
+            old_row.deleteLater()
+            new_row = _MatchRow(
+                new_match,
+                runners_up=self._lookup_runners_up(
+                    new_match, self._score_cache, self._val_pool,
+                ),
+                parent=self,
+            )
+            new_row.toggle_requested.connect(self._on_toggle)
+            new_row.swap_requested.connect(self._on_swap)
+            self._list_layout.insertWidget(layout_idx, new_row)
+            self._rows.append(new_row)
+            self._rows_by_key[new_match.key] = new_row
         self._update_summary()
 
     @staticmethod

@@ -296,6 +296,7 @@ MATCH_REVIEW_HINT = (
 BTN_MARK_NO_MATCH = "매치 없음 ✕"
 BTN_RESTORE_MATCH = "되돌리기 ↩"
 BTN_FINISH_REVIEW = "검토 완료 ▶"
+RUNNERUP_TOOLTIP = "클릭하면 이 사진으로 매치를 교체합니다."
 LOAD_SCAN = "폴더 스캔 중…"
 LOAD_EXPORT = "엑셀로 저장 중…"
 LOAD_PRECOMPUTE_REF = "기준 장비 특징 추출 중… {done} / {total}"

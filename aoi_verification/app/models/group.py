@@ -1,4 +1,4 @@
-"""같은 슬롯 안의 거의 동일한 사진들을 pHash 로 묶는 그룹 매니저.
+"""같은 슬롯 안에서 유사한 사진들을 묶는 그룹 매니저.
 
 목적 (#15):
 - Stage 1 에서 거의 똑같은 사진이 여러 장 나오는 피로를 줄임.
@@ -6,6 +6,12 @@
   방향을 그대로 따라간다.
 - 단, **사용자는 그룹 전체를 미리 볼 수 있어야** 하고, 특정 사진을 그룹에서
   빼서 따로 결정하게 할 수 있어야 한다.
+
+알고리즘:
+- pHash 단일 점수만 쓰면 같은 결함의 다른 각도/조명 사진이 묶이지 않는 경우가
+  많았다. ``pipeline.score()`` (pHash + ORB + SSIM + 선택적 CNN) 의 가중 평균
+  유사도로 ‘매치라고 부를 정도로 닮은 사진’ 끼리 그룹화한다.  feature 추출은
+  디스크 캐시 (.npz) 를 그대로 활용한다.
 """
 
 from __future__ import annotations
@@ -14,11 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Optional
 
-import numpy as np
-
 from ..models.slot import ImageItem
-from ..similarity import phash as _phash
-from ..utils import image_io
 
 
 @dataclass
@@ -113,14 +115,22 @@ class GroupingResult:
 # ---------------------------------------------------------------------------
 def cluster(slots_items: dict[str, Iterable[ImageItem]],
             *,
-            similarity_threshold: float = 0.92,
-            min_group_size: int = 3) -> GroupingResult:
-    """슬롯별로 pHash 기반 그룹화. 그룹 크기가 min_group_size 미만이면 묶지 않음.
+            similarity_threshold: float = 0.45,
+            min_group_size: int = 2) -> GroupingResult:
+    """슬롯별 그룹화 — pipeline.score() (pHash+ORB+SSIM+CNN) 기반 greedy.
 
-    Greedy clustering: 각 사진에 대해 미할당 사진들 중 pHash 유사도가
-    ``similarity_threshold`` 이상인 것들을 모두 한 그룹으로 묶음.
-    파일명 오름차순으로 첫 사진이 대표가 된다.
+    매 anchor 별로 미할당 사진들과 ``pipeline.score()`` 점수를 계산해 임계치
+    이상인 것들을 한 그룹으로 묶는다. pHash 단일 점수보다 ‘같은 결함의 다른
+    각도/조명’ 사진을 훨씬 안정적으로 묶는다 (특히 ORB/SSIM 항이 결합돼).
+
+    ``similarity_threshold`` 의 의미는 매칭 임계치와 동일하다 — ‘매치라고 부를
+    수준의 유사도’ 이상이면 같은 그룹. ``min_group_size`` 가 1 이면 단독 사진도
+    그룹으로 본다 (특수 용도).
     """
+    # ``pipeline`` import 는 함수 내부 — 모듈 import cycle 회피.
+    from ..similarity import pipeline as _pipeline
+    from ..similarity.pipeline import Feature
+
     reps: list[ImageItem] = []
     by_rep: dict[str, PhotoGroup] = {}
     item_to_group: dict[str, PhotoGroup] = {}
@@ -129,24 +139,23 @@ def cluster(slots_items: dict[str, Iterable[ImageItem]],
         items = list(items)
         if not items:
             continue
-        # 각 사진의 pHash 미리 계산 (한 슬롯만 — 적은 비용)
-        hashes: dict[str, np.ndarray] = {}
+        # 슬롯의 모든 이미지 feature 추출 — 디스크 캐시 (.npz) 가 있으면 매우 빠름.
+        feats: dict[str, Optional[Feature]] = {}
         for it in items:
             try:
-                gray = image_io.center_roi_gray(it.path)
-                hashes[it.key] = _phash.compute_phash(gray)
+                feats[it.key] = _pipeline.extract(it.path)
             except Exception:
-                hashes[it.key] = np.zeros(0, dtype=np.uint8)
+                feats[it.key] = None
 
-        # 파일명 순으로 정렬해 안정적인 rep 선택
+        # 파일명 순으로 정렬해 안정적인 rep 선택.
         ordered = sorted(items, key=lambda x: x.path.name.lower())
         assigned: set[str] = set()
         for i, anchor in enumerate(ordered):
             if anchor.key in assigned:
                 continue
-            ha = hashes.get(anchor.key)
-            if ha is None or ha.size == 0:
-                # 해시 실패 → 단독 처리, 그룹 없음
+            af = feats.get(anchor.key)
+            if af is None:
+                # feature 추출 실패 → 단독 처리.
                 reps.append(anchor)
                 assigned.add(anchor.key)
                 continue
@@ -154,10 +163,14 @@ def cluster(slots_items: dict[str, Iterable[ImageItem]],
             for other in ordered[i + 1:]:
                 if other.key in assigned:
                     continue
-                hb = hashes.get(other.key)
-                if hb is None or hb.size == 0:
+                of = feats.get(other.key)
+                if of is None:
                     continue
-                if _phash.phash_similarity(ha, hb) >= similarity_threshold:
+                try:
+                    s = _pipeline.score(af, of)
+                except Exception:
+                    continue
+                if s >= similarity_threshold:
                     members.append(other)
             if len(members) + 1 >= min_group_size:
                 grp = PhotoGroup(slot=slot, rep=anchor, siblings=members)
@@ -169,7 +182,6 @@ def cluster(slots_items: dict[str, Iterable[ImageItem]],
                 reps.append(anchor)
                 assigned.add(anchor.key)
             else:
-                # 그룹 미달 — 그냥 개별 큐로 보냄
                 reps.append(anchor)
                 assigned.add(anchor.key)
 
