@@ -190,13 +190,6 @@ class SlotPrecomputeWorker(QThread):
     점수 재계산 없이 즉시 후보 리스트를 만들 수 있다.
     """
 
-    # 1 차 스캔 후 상위 후보로 추릴 최소 개수.  val 이 매우 적을 때 충분히 많은
-    # 후보가 정밀 스캔으로 넘어가도록 보장.  ``val_count`` 가 작으면 그대로
-    # 전체를 정밀 스캔 (분기 비용이 절감 효과를 능가).
-    _SHORTLIST_MIN = 8
-    _SHORTLIST_RATIO = 0.4          # val 의 40%
-    _TWO_STAGE_THRESHOLD = 20       # val 이 이 수보다 작으면 그냥 전체 정밀.
-
     def __init__(self,
                  tasks: List[Tuple[str, List[ImageItem], List[ImageItem]]],
                  slot_cache: SlotFeatureCache,
@@ -227,7 +220,9 @@ class SlotPrecomputeWorker(QThread):
                     return
                 if not refs or not vals:
                     continue
+                # 1) val features 빌드 (디스크 캐시 있으면 빠름)
                 val_feats = self._slot_cache.build(slot, vals)
+                # 2) ref features (sim.extract 가 디스크 캐시 자동 사용)
                 ref_feats: Dict[Path, Feature] = {}
                 for r in refs:
                     if self._stop:
@@ -236,73 +231,28 @@ class SlotPrecomputeWorker(QThread):
                         ref_feats[r.path] = _pipeline.extract(r.path)
                     except Exception:
                         pass
-
-                # ---- 2 단계 스캔: 1 차 pHash → 상위 K 개만 2 차 정밀 ----
-                n_val = len(vals)
-                use_two_stage = n_val >= self._TWO_STAGE_THRESHOLD
-                k = max(
-                    self._SHORTLIST_MIN,
-                    int(n_val * self._SHORTLIST_RATIO),
-                )
-
+                # 3) 모든 (ref, val) 쌍 점수 — 정밀 score() 한 번 호출.
+                # (이전 2 단계 pHash shortlist 가 진짜 매치를 떨어뜨리는 경우가
+                # 있어 단순 전체 정밀 스캔으로 원복.)
                 for r in refs:
                     if self._stop:
                         return
                     rf = ref_feats.get(r.path)
-                    if rf is None:
-                        # 1차도 못하는 ref — 진행률만 갱신.
-                        done += n_val
-                        self.signals.progress.emit(done, total)
-                        continue
-
-                    # 1차: pHash 만 (매우 빠름) → (val, phash_score) 리스트
-                    fast_scored: list[tuple] = []
                     for v in vals:
                         if self._stop:
                             return
                         vf = val_feats.get(v.path)
-                        if vf is None:
-                            continue
-                        try:
-                            ps = _pipeline.score_phash_only(rf, vf)
-                        except Exception:
-                            continue
-                        fast_scored.append((v, ps))
-
-                    if use_two_stage:
-                        # 정밀 스캔할 상위 후보 추리기.
-                        fast_scored.sort(key=lambda x: x[1], reverse=True)
-                        shortlist = fast_scored[:k]
-                        rest = fast_scored[k:]
-                    else:
-                        shortlist = fast_scored
-                        rest = []
-
-                    # 2차: 정밀 점수 (pHash+ORB+SSIM+CNN) — shortlist 만.
-                    for v, _ in shortlist:
-                        if self._stop:
-                            return
-                        vf = val_feats.get(v.path)
-                        if vf is None:
-                            done += 1
+                        done += 1
+                        if rf is None or vf is None:
                             continue
                         try:
                             s = _pipeline.score(rf, vf)
                         except Exception:
-                            s = 0.0
+                            continue
                         self._score_cache.put(slot, r.path, v.path, s)
-                        done += 1
                         if done % 25 == 0:
                             self.signals.progress.emit(done, total)
-
-                    # 나머지는 1 차 점수 자체를 결과로 — ‘아예 다른 사진’ 임을
-                    # 빠르게 가려내기만 하면 되므로 그대로 캐시에 적재.
-                    for v, ps in rest:
-                        if self._stop:
-                            return
-                        self._score_cache.put(slot, r.path, v.path, float(ps))
-                        done += 1
-
+                # 슬롯 단위로 진행률 emit (마지막 한 번)
                 self.signals.progress.emit(done, total)
             self.signals.finished.emit()
         except Exception as exc:        # pragma: no cover — 안전망
