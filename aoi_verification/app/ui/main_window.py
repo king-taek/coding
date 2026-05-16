@@ -718,7 +718,14 @@ class MainWindow(QMainWindow):
             self._finish_session()
             return
         merged = self._merge_matches()
-        self._match_review_page.load_state(merged)
+        # MatchPage 가 들고 있는 점수 캐시 + val_pool 을 매치 검토 페이지에
+        # 넘겨 차순위 후보 2 장을 행마다 표시한다 (참고용 시각 정보).
+        score_cache = getattr(self._match_page, "_score_cache", None)
+        match_state = self._match_page.get_state()
+        val_pool = match_state.val_pool if match_state is not None else None
+        self._match_review_page.load_state(
+            merged, score_cache=score_cache, val_pool=val_pool,
+        )
         self._show_page(self._match_review_page)
 
     # ==================================================================

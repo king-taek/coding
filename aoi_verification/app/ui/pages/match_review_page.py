@@ -25,18 +25,22 @@ from ..widgets.neon_button import NeonButton
 
 
 _THUMB_PX = 140
+_RUNNERUP_PX = int(_THUMB_PX * 0.8)         # 차순위는 20% 작게
 
 
 class _MatchRow(QFrame):
-    """한 매치 — ref 이미지 + → + val 이미지 + 점수 + ✕ 매치 없음 버튼."""
+    """한 매치 — ref + 1위 매치 + 점수 + 차순위 2장 (20% 작게) + 토글 버튼."""
 
     toggle_requested = pyqtSignal(object)        # MatchResult
-    open_zoom = pyqtSignal(object, str)          # (Path, kind: 'ref'|'val')
 
-    def __init__(self, match: MatchResult, parent=None) -> None:
+    def __init__(self,
+                 match: MatchResult,
+                 runners_up: list[tuple] | None = None,
+                 parent=None) -> None:
         super().__init__(parent)
         self.match = match
         self._is_unmatched = False
+        self._runners_up = list(runners_up or [])     # [(ImageItem, score), ...]
         self.setProperty("role", "card-soft")
         self.setMinimumHeight(_THUMB_PX + 32)
 
@@ -53,7 +57,7 @@ class _MatchRow(QFrame):
         row.addWidget(self._slot_label)
 
         # ref 이미지
-        self._ref_img = self._make_thumb(match.ref_path)
+        self._ref_img = self._make_thumb(match.ref_path, size=_THUMB_PX)
         row.addWidget(self._ref_img)
 
         # 화살표
@@ -62,18 +66,42 @@ class _MatchRow(QFrame):
         arrow.setAlignment(Qt.AlignmentFlag.AlignCenter)
         row.addWidget(arrow)
 
-        # val 이미지
-        self._val_img = self._make_thumb(match.val_path)
-        row.addWidget(self._val_img)
-
-        # 점수
-        self._score_label = QLabel(f"{int(round(match.score * 100))} %", self)
-        self._score_label.setStyleSheet(
-            "color: #FFD600; font-weight: 700; font-size: 16px;"
+        # 1위 매치 이미지 + 점수 (수직 라벨링)
+        primary_host = QWidget(self)
+        primary_lay = QVBoxLayout(primary_host)
+        primary_lay.setContentsMargins(0, 0, 0, 0)
+        primary_lay.setSpacing(2)
+        self._val_img = self._make_thumb(match.val_path, size=_THUMB_PX)
+        primary_lay.addWidget(self._val_img,
+                              alignment=Qt.AlignmentFlag.AlignCenter)
+        score_label = QLabel(f"{int(round(match.score * 100))} %", primary_host)
+        score_label.setStyleSheet(
+            "color: #FFD600; font-weight: 700; font-size: 14px;"
         )
-        self._score_label.setMinimumWidth(60)
-        self._score_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        row.addWidget(self._score_label)
+        score_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        primary_lay.addWidget(score_label)
+        row.addWidget(primary_host)
+
+        # 차순위 2장 (20% 작게) + 점수 — 참고용
+        if self._runners_up:
+            sep = QLabel("│", self)
+            sep.setStyleSheet("color: #1F2A3F; font-size: 36px;")
+            row.addWidget(sep)
+            for item, score in self._runners_up[:2]:
+                r_host = QWidget(self)
+                r_lay = QVBoxLayout(r_host)
+                r_lay.setContentsMargins(0, 0, 0, 0)
+                r_lay.setSpacing(2)
+                r_img = self._make_thumb(item.path, size=_RUNNERUP_PX,
+                                          subtle=True)
+                r_lay.addWidget(r_img, alignment=Qt.AlignmentFlag.AlignCenter)
+                r_score = QLabel(f"{int(round(float(score) * 100))} %", r_host)
+                r_score.setStyleSheet(
+                    "color: #7FB3D5; font-size: 11px;"
+                )
+                r_score.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                r_lay.addWidget(r_score)
+                row.addWidget(r_host)
 
         row.addStretch(1)
 
@@ -84,14 +112,21 @@ class _MatchRow(QFrame):
         )
         row.addWidget(self.btn_toggle)
 
-    def _make_thumb(self, path: Path) -> QLabel:
+    def _make_thumb(self, path: Path, *, size: int = _THUMB_PX,
+                    subtle: bool = False) -> QLabel:
         lab = QLabel(self)
-        lab.setFixedSize(_THUMB_PX, _THUMB_PX)
+        lab.setFixedSize(size, size)
         lab.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lab.setStyleSheet(
-            "border: 1px solid #1F2A3F; border-radius: 6px;"
-        )
-        lab.setPixmap(image_io.load_thumb_qpixmap(path, _THUMB_PX))
+        # 차순위 (subtle) 는 더 옅은 보더로 시각적으로 보조 정보임을 표시.
+        if subtle:
+            lab.setStyleSheet(
+                "border: 1px dashed #1F2A3F; border-radius: 6px;"
+            )
+        else:
+            lab.setStyleSheet(
+                "border: 1px solid #1F2A3F; border-radius: 6px;"
+            )
+        lab.setPixmap(image_io.load_thumb_qpixmap(path, size))
         return lab
 
     def set_unmatched(self, unmatched: bool) -> None:
@@ -171,7 +206,16 @@ class MatchReviewPage(QWidget):
         root.addLayout(bar)
 
     # ------------------------------------------------------------------
-    def load_state(self, matches: list[MatchResult]) -> None:
+    def load_state(self,
+                   matches: list[MatchResult],
+                   *,
+                   score_cache=None,
+                   val_pool: dict | None = None) -> None:
+        """매치 검토 화면 초기화.
+
+        ``score_cache`` 와 ``val_pool`` 이 함께 주어지면 각 매치 행에 차순위
+        2 장(20% 작게) 을 참고용으로 표시한다.
+        """
         self._matches = list(matches)
         self._unmatched_keys.clear()
 
@@ -196,13 +240,31 @@ class MatchReviewPage(QWidget):
                 key=lambda m: (m.slot, m.ref_path.name.lower()),
             )
             for m in ordered:
-                row = _MatchRow(m, parent=self)
+                runners = self._lookup_runners_up(m, score_cache, val_pool)
+                row = _MatchRow(m, runners_up=runners, parent=self)
                 row.toggle_requested.connect(self._on_toggle)
                 self._list_layout.addWidget(row)
                 self._rows.append(row)
                 self._rows_by_key[m.key] = row
         self._list_layout.addStretch(1)
         self._update_summary()
+
+    @staticmethod
+    def _lookup_runners_up(match: MatchResult, score_cache, val_pool) -> list:
+        """주어진 매치의 ref 와 같은 slot 내 다른 val 들 중 점수 상위 2 개 (자기 자신 제외)."""
+        if score_cache is None or val_pool is None:
+            return []
+        slot_vals = val_pool.get(match.slot, []) or []
+        scored: list[tuple] = []
+        for v in slot_vals:
+            if v.path == match.val_path:
+                continue
+            s = score_cache.get_pair(match.slot, match.ref_path, v.path)
+            if s is None:
+                continue
+            scored.append((v, float(s)))
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return scored[:2]
 
     def _on_toggle(self, match: MatchResult) -> None:
         key = match.key
