@@ -42,6 +42,23 @@ BTN_BATCH_EXCLUDE = "선택 항목 검증 제외"
 BTN_BATCH_VERIFY = "선택 항목 검증 대상 지정"
 BTN_VIEW_EXCLUDED_FMT = "검증 제외 사진 보기 ({n})"
 BULK_SELECT_EXCLUDED_TITLE = "검증 제외 사진"
+
+# 동일 defect 그룹화 (#5)
+BTN_VIEW_GROUPS = "동일 defect 그룹 보기"
+BTN_VIEW_GROUPS_FMT = "동일 defect 그룹 보기 ({n})"
+GROUP_DIALOG_TITLE_FMT = "동일 defect 그룹 — {g} 그룹 / {n} 장"
+GROUP_DIALOG_HINT = (
+    "동일 슬롯 안에서 카메라 위치만 조금 다른 같은 defect 사진들을 묶었습니다. "
+    "그룹별로 [전체 검증] / [전체 제외] 를 한 번에 적용할 수 있습니다."
+)
+GROUP_DIALOG_EMPTY = (
+    "묶을 만한 동일 defect 그룹을 찾지 못했습니다 (모든 후보가 서로 다른 사진)."
+)
+GROUP_ROW_HEADER_FMT = "{slot} — {n} 장"
+GROUP_BTN_VERIFY_ALL = "이 그룹 전체 검증"
+GROUP_BTN_EXCLUDE_ALL = "이 그룹 전체 제외"
+GROUP_LOAD_FMT = "동일 defect 그룹 계산 중… {done} / {total}\n{status}"
+GROUP_RESULT_TOAST_FMT = "{n} 장이 {action} 처리되었습니다 (1 개 그룹)"
 BTN_EXPORT_EXCEL = "엑셀로 저장"
 BTN_OPEN_RESULT = "결과 폴더 열기"
 BTN_NEW_SESSION = "새 검증 시작"

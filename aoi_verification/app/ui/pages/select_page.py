@@ -26,8 +26,10 @@ from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QScrollArea,
 
 from ... import i18n
 from ...models.slot import ImageItem
+from ...similarity.grouping import GroupingWorker
 from ...utils import image_io
 from ...utils import prefs as _prefs
+from ..widgets.loading_overlay import LoadingOverlay
 from ..widgets.neon_button import NeonButton
 from ..widgets.neon_card import NeonCard
 from ..widgets.scalable_image import ScalableImage
@@ -90,6 +92,8 @@ class _SidePanel(QFrame):
             self._select_btn = NeonButton(i18n.KO.BTN_SELECT_MODE, role="ghost")
             self._select_btn.clicked.connect(self._open_bulk_select)
             head.addWidget(self._select_btn)
+        # 외부에서 추가 헤더 버튼을 꽂을 수 있도록 head 레이아웃을 노출 (그룹화 등).
+        self._head_layout = head
         outer.addLayout(head)
 
         # 스크롤 영역 ---------------------------------------------------
@@ -181,7 +185,10 @@ class SelectPage(QWidget):
         self._current: Optional[ImageItem] = None
         self._phase_label_text = ""
         self._phase_b_already_matched: dict[str, list[ImageItem]] = {}
+        self._group_worker: Optional[GroupingWorker] = None
         self._build()
+        # 그룹화 진행 중 차단 오버레이.
+        self._loading = LoadingOverlay(self)
 
     # ------------------------------------------------------------------
     def _build(self) -> None:
@@ -230,6 +237,11 @@ class SelectPage(QWidget):
         self.left_panel.selection_action.connect(self._on_batch_action)
         self.left_panel.tile_clicked.connect(self._on_tile_click)
         self.left_panel.plus_clicked.connect(self._on_plus_click)
+        # 동일 defect 그룹 보기 — 좌측 후보 패널 헤더에 버튼 추가 (#5).
+        self.btn_view_groups = NeonButton(i18n.KO.BTN_VIEW_GROUPS, role="ghost")
+        self.btn_view_groups.clicked.connect(self._open_defect_groups)
+        # 헤더 head 레이아웃에 ‘선택 모드’ 옆에 끼워넣는다.
+        self.left_panel._head_layout.addWidget(self.btn_view_groups)
         # 2 col 그리드 (120px thumb + 14 padding) × 2 + spacing + 패널 padding 을
         # 모두 담을 최소 너비. 작게(1100) preset 에서도 가로 스크롤 없이 보이게.
         self.left_panel.setMinimumWidth(280)
@@ -628,3 +640,92 @@ class SelectPage(QWidget):
             )
         )
         dlg.exec()
+
+    # ------------------------------------------------------------------
+    # 동일 defect 그룹 보기 (#5)
+    # ------------------------------------------------------------------
+    def _open_defect_groups(self) -> None:
+        """[동일 defect 그룹 보기] 클릭 → 백그라운드 워커로 슬롯별 그룹 계산
+        후 팝업 표시. 같은 defect 인 사진들 (촬영 위치만 조금 다름) 을 묶어
+        그룹 단위로 [전체 검증] / [전체 제외] 가능."""
+        if self._state is None:
+            return
+        # 현재 남은 후보 (queue) 만 그룹화 — 결정 끝난 사진은 대상이 아님.
+        items_by_slot: dict[str, list[ImageItem]] = defaultdict(list)
+        for it in self._state.queue:
+            items_by_slot[it.slot].append(it)
+        if not items_by_slot:
+            return
+
+        # 기존 워커가 실행 중이면 중복 클릭 방지.
+        if (self._group_worker is not None
+                and self._group_worker.isRunning()):
+            return
+
+        self._loading.show_overlay(
+            i18n.KO.GROUP_LOAD_FMT.format(done=0, total=0, status="시작")
+        )
+        worker = GroupingWorker(items_by_slot, parent=self)
+        worker.signals.progress.connect(self._on_group_progress)
+        worker.signals.finished.connect(self._on_group_finished)
+        worker.signals.failed.connect(self._on_group_failed)
+        self._group_worker = worker
+        worker.start()
+
+    def _on_group_progress(self, done: int, total: int, status: str) -> None:
+        self._loading.set_progress(
+            done, total,
+            i18n.KO.GROUP_LOAD_FMT.format(
+                done=done, total=total, status=status,
+            ),
+        )
+
+    def _on_group_finished(self, groups: list) -> None:
+        self._loading.hide_overlay()
+        from ..widgets.defect_group_dialog import DefectGroupDialog
+        dlg = DefectGroupDialog(groups, parent=self)
+        dlg.group_action.connect(self._apply_group_action)
+        dlg.exec()
+        # 워커 참조 정리 — 다음 클릭 시 새 워커 시작 가능하게.
+        self._group_worker = None
+
+    def _on_group_failed(self, msg: str) -> None:
+        self._loading.hide_overlay()
+        from PyQt6.QtWidgets import QMessageBox
+        QMessageBox.warning(self, i18n.KO.APP_TITLE, msg)
+        self._group_worker = None
+
+    def _apply_group_action(self, action_id: str,
+                             items: list[ImageItem]) -> None:
+        """그룹의 모든 사진에 동일 결정을 적용 — 큐에서 빼고 검증/제외 풀로 이동.
+
+        이미 큐에 없는 사진(다른 그룹 액션으로 먼저 처리됨) 은 자연스럽게 skip.
+        현재 _current 가 처리된 항목 안에 있으면 다음 사진으로 자동 진행.
+        """
+        if self._state is None:
+            return
+        moved = 0
+        for it in items:
+            try:
+                self._state.queue.remove(it)
+            except ValueError:
+                continue
+            pool = (self._state.targets if action_id == "verify"
+                    else self._state.excluded)
+            pool[it.slot].append(it)
+            self._state.history.append((
+                "verify" if action_id == "verify" else "exclude",
+                it,
+            ))
+            self.decision_made.emit(
+                "verify" if action_id == "verify" else "exclude", it,
+            )
+            moved += 1
+        if moved == 0:
+            return
+        self.state_changed.emit()
+        # 현재 결정 중인 사진이 처리됐다면 다음 사진으로.
+        if self._current is None or self._current not in self._state.queue:
+            self._advance_to_next()
+        else:
+            self._refresh_all()
