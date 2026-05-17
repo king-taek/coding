@@ -40,11 +40,13 @@ class _ThumbTile(QFrame):
                  dim: bool = False,
                  footer: str = "",
                  show_expand: bool = False,
+                 tile_px: Optional[int] = None,
                  parent=None) -> None:
         super().__init__(parent)
         self.entry = entry
         self._dim = dim
-        self.setFixedSize(THUMB_PX + 14, THUMB_PX + (40 if footer else 18))
+        self._tile_px = int(tile_px) if tile_px else THUMB_PX
+        self.setFixedSize(self._tile_px + 14, self._tile_px + (40 if footer else 18))
         self.setProperty("role", "card-soft")
 
         lay = QVBoxLayout(self)
@@ -52,7 +54,7 @@ class _ThumbTile(QFrame):
         lay.setSpacing(4)
 
         self._img = QLabel(self)
-        self._img.setFixedSize(THUMB_PX, THUMB_PX)
+        self._img.setFixedSize(self._tile_px, self._tile_px)
         self._img.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._load_pix()
         lay.addWidget(self._img, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -92,19 +94,20 @@ class _ThumbTile(QFrame):
 
     # ------------------------------------------------------------------
     def _load_pix(self) -> None:
+        size = self._tile_px
         try:
             tp = image_io.get_thumb_path(self.entry.item.path)
             pix = QPixmap(str(tp))
             if pix.isNull():
-                pix = QPixmap(THUMB_PX, THUMB_PX)
+                pix = QPixmap(size, size)
                 pix.fill(QColor(20, 28, 40))
             pix = pix.scaled(
-                THUMB_PX, THUMB_PX,
+                size, size,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
         except Exception:
-            pix = QPixmap(THUMB_PX, THUMB_PX)
+            pix = QPixmap(size, size)
             pix.fill(QColor(20, 28, 40))
 
         if self._dim:
@@ -145,10 +148,12 @@ class _PlusTile(QFrame):
 
     clicked = pyqtSignal()
 
-    def __init__(self, n: int, parent=None) -> None:
+    def __init__(self, n: int, *, tile_px: Optional[int] = None,
+                 parent=None) -> None:
         super().__init__(parent)
+        size = int(tile_px) if tile_px else THUMB_PX
         self.setProperty("role", "card-soft")
-        self.setFixedSize(THUMB_PX + 14, THUMB_PX + 18)
+        self.setFixedSize(size + 14, size + 18)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         lay = QVBoxLayout(self)
@@ -162,7 +167,7 @@ class _PlusTile(QFrame):
             "border: 2px dashed #00D4FF;"
             "border-radius: 8px;"
         )
-        lab.setMinimumHeight(THUMB_PX)
+        lab.setMinimumHeight(size)
         lay.addWidget(lab)
 
     def mousePressEvent(self, event):  # noqa: N802
@@ -189,12 +194,14 @@ class ThumbGrid(QWidget):
                  select_mode: bool = False,
                  truncate: bool = True,
                  show_expand: bool = False,
+                 tile_px: Optional[int] = None,
                  parent=None) -> None:
         super().__init__(parent)
         self._columns = columns
         self._select_mode = select_mode
         self._truncate = truncate
         self._show_expand = show_expand
+        self._tile_px = tile_px
         self._entries: list[ThumbEntry] = []
         self._selected: list[ThumbEntry] = []
 
@@ -242,7 +249,8 @@ class ThumbGrid(QWidget):
         for ent in visible:
             tile = _ThumbTile(ent, select_mode=self._select_mode,
                               footer=ent.item.filename,
-                              show_expand=self._show_expand)
+                              show_expand=self._show_expand,
+                              tile_px=self._tile_px)
             tile.clicked.connect(self.tile_clicked.emit)
             tile.toggled.connect(self._on_toggle)
             tile.expand_requested.connect(self.expand_requested.emit)
@@ -252,7 +260,7 @@ class ThumbGrid(QWidget):
                 col = 0
                 row += 1
         if extra > 0:
-            plus = _PlusTile(extra)
+            plus = _PlusTile(extra, tile_px=self._tile_px)
             plus.clicked.connect(self.plus_clicked.emit)
             self._grid.addWidget(plus, row, col)
 

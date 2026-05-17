@@ -232,12 +232,31 @@ def _make_input_tensor(path: Path):  # pragma: no cover
 # ---------------------------------------------------------------------------
 # Public — single image
 # ---------------------------------------------------------------------------
+def has_accelerator() -> bool:
+    """OpenVINO NPU/GPU 또는 PyTorch CUDA/XPU/MPS 가 가용한지.
+
+    True 면 basic 모드에서도 CNN 임베딩 (raw ImageNet backbone) 을 활용해
+    가속기 활용도를 높인다 — CPU only 환경에선 비활성 (오버헤드 회피).
+    """
+    if _DEVICE is not None and _DEVICE.type != "cpu":
+        return True
+    try:
+        from . import embedder_openvino as _ov
+        return _ov.is_available()
+    except Exception:
+        return False
+
+
 def compute_embedding(src: Path) -> Optional[np.ndarray]:
-    """현재 활성 모델로 한 이미지의 임베딩(unit 정규화 1-D 벡터)을 만든다."""
+    """현재 활성 모델로 한 이미지의 임베딩(unit 정규화 1-D 벡터)을 만든다.
+
+    basic 모드여도 가속기 (NPU/GPU) 가 있으면 raw backbone 출력을 임베딩
+    으로 사용 — 가속기 활용 + 추가 유사도 신호.  가속기 없으면 None.
+    """
     if not is_available():
         return None
     mode = get_active_mode()
-    if mode == registry.BASIC:
+    if mode == registry.BASIC and not has_accelerator():
         return None
     out = compute_embeddings([src])
     return out.get(Path(src))
@@ -319,7 +338,10 @@ def compute_embeddings(paths: Iterable[Path],
     if not is_available():
         return out
     mode = get_active_mode()
-    if mode == registry.BASIC:
+    # basic 모드는 head 가 없지만 가속기가 있으면 raw backbone (576-d) 을
+    # 임베딩으로 사용 → NPU/GPU 활용 + 추가 유사도 신호.
+    # CPU only 환경에선 오버헤드만 늘므로 건너뜀.
+    if mode == registry.BASIC and not has_accelerator():
         return out
     items = [Path(p) for p in paths]
     if not items:

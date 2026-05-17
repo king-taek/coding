@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QScrollArea,
                               QSizePolicy, QSlider, QSplitter, QVBoxLayout,
                               QWidget)
 
-from ... import i18n
+from ... import config, i18n
 from ...models.slot import ImageItem
 from ...similarity.grouping import GroupingWorker
 from ...utils import image_io
@@ -67,11 +67,13 @@ class _SidePanel(QFrame):
                  *, vertical_scroll: bool = True,
                  actions: Optional[list[tuple[str, str, str]]] = None,
                  columns: int = 4,
+                 tile_px: Optional[int] = None,
                  parent=None) -> None:
         super().__init__(parent)
         self._name = name
         self._title = title
         self._actions = list(actions or [])
+        self._tile_px = tile_px
         self._sections: dict[str, SlotSection] = {}
         self._cached: dict[str, list[ImageItem]] = {}
 
@@ -130,7 +132,8 @@ class _SidePanel(QFrame):
 
         for slot in sorted(self._cached.keys()):
             sec = SlotSection(slot, columns=self._columns,
-                              select_mode=False, parent=self)
+                              select_mode=False, tile_px=self._tile_px,
+                              parent=self)
             entries = [ThumbEntry(item=it) for it in self._cached[slot]]
             sec.set_entries(entries)
             sec.tile_clicked.connect(
@@ -232,13 +235,18 @@ class SelectPage(QWidget):
         self._h_splitter.setChildrenCollapsible(False)
 
         # LEFT --------------------------------------------------------
+        # 측면 패널 타일 — 기본(240px)의 50% (사용자 요청).  같은 패널 폭에서
+        # 한 줄에 더 많은 사진이 들어가고 한눈에 더 많은 후보를 비교할 수 있다.
+        side_tile = config.Sizing.THUMB_PX // 2     # 240 → 120
         self.left_panel = _SidePanel(
             self.PANEL_LEFT, i18n.KO.PANEL_LEFT_CANDIDATES,
             actions=[
                 ("batch_verify", i18n.KO.BTN_BATCH_VERIFY, "primary"),
                 ("batch_exclude", i18n.KO.BTN_BATCH_EXCLUDE, "danger"),
             ],
-            columns=2,
+            # 타일 절반 크기 → 같은 폭에 3 열 그리드 깔리도록.
+            columns=3,
+            tile_px=side_tile,
         )
         self.left_panel.selection_action.connect(self._on_batch_action)
         self.left_panel.tile_clicked.connect(self._on_tile_click)
@@ -248,10 +256,9 @@ class SelectPage(QWidget):
         self.btn_view_groups.clicked.connect(self._open_defect_groups)
         # 헤더 head 레이아웃에 ‘선택 모드’ 옆에 끼워넣는다.
         self.left_panel._head_layout.addWidget(self.btn_view_groups)
-        # 2 col 그리드 (120px thumb + 14 padding) × 2 + spacing + 패널 padding 을
-        # 모두 담을 최소 너비. 작게(1100) preset 에서도 가로 스크롤 없이 보이게.
-        # 좁은 창에서 세로 스택으로 reflow 할 수 있도록 최소폭을 작게.
-        self.left_panel.setMinimumWidth(240)
+        # 3 col × (120 thumb + 14 padding) + spacing + 패널 padding 을 담을 최소
+        # 너비.  좁은 창에선 세로 스택으로 reflow 되어 무관.
+        self.left_panel.setMinimumWidth(220)
         self._h_splitter.addWidget(self.left_panel)
 
         # CENTER ------------------------------------------------------
@@ -332,7 +339,7 @@ class SelectPage(QWidget):
         center_card.setMinimumWidth(360)
         self._h_splitter.addWidget(center_card)
 
-        # RIGHT -------------------------------------------------------
+        # RIGHT — 좌측과 동일한 절반 타일 크기 + 3열 그리드 (사용자 요청).
         self.right_panel = _SidePanel(
             self.PANEL_RIGHT, i18n.KO.PANEL_RIGHT_TARGETS,
             actions=[
@@ -340,12 +347,13 @@ class SelectPage(QWidget):
                 ("to_exclude", i18n.KO.BTN_MOVE_TO_EXCLUDE, "warn"),
                 ("recenter", i18n.KO.BTN_BACK_TO_CENTER, "ghost"),
             ],
-            columns=2,
+            columns=3,
+            tile_px=side_tile,
         )
         self.right_panel.selection_action.connect(self._on_batch_action)
         self.right_panel.tile_clicked.connect(self._on_tile_click)
         self.right_panel.plus_clicked.connect(self._on_plus_click)
-        self.right_panel.setMinimumWidth(240)
+        self.right_panel.setMinimumWidth(220)
         self._h_splitter.addWidget(self.right_panel)
 
         self._h_splitter.setStretchFactor(0, 2)

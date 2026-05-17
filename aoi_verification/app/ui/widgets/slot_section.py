@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Iterable, Optional
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
@@ -22,6 +22,7 @@ class SlotSection(QWidget):
                  *,
                  columns: int = 4,
                  select_mode: bool = False,
+                 tile_px: Optional[int] = None,
                  parent=None) -> None:
         super().__init__(parent)
         self._slot = slot_name
@@ -39,7 +40,7 @@ class SlotSection(QWidget):
         outer.addLayout(header)
 
         self.grid = ThumbGrid(columns=columns, select_mode=select_mode,
-                              truncate=True, parent=self)
+                              truncate=True, tile_px=tile_px, parent=self)
         self.grid.tile_clicked.connect(self.tile_clicked.emit)
         self.grid.plus_clicked.connect(lambda: self.plus_clicked.emit(self._slot))
         outer.addWidget(self.grid)

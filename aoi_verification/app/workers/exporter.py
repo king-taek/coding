@@ -110,11 +110,13 @@ class ExcelExporter(QThread):
         # (~8) 으로 떨어져 사진이 작아 보이는 문제가 있다.  병합된 헤더 쌍의
         # 왼쪽 컬럼 width 를 오른쪽 컬럼에도 그대로 미러링한다.
         self._mirror_paired_column_widths(ws)
-        # D 는 C 와 동일하게, E~H 는 모두 같은 폭으로 정규화 (#3).
-        #   · C/D: max(현재 최대, IMG_COL_WIDTH=22) — 보통 양식의 31.83.
-        #   · E~H: max(현재 최대, 18) — 사용자 수기 영역.
-        self._equalize_column_group(ws, [COL_REF, COL_VAL], floor=IMG_COL_WIDTH)
-        self._equalize_column_group(ws, ["E", "F", "G", "H"], floor=18.0)
+        # C, D, E, F, G, H 모두 같은 폭 — 양식 C(31.83) 를 기준값으로 통일
+        # (#3 — 사용자 요청: D 도 C 와 같고, E~H 도 모두 동일).  사진이 들어가는
+        # C/D 와 사용자 수기 영역인 E~H 가 시각적으로 일관된 폭을 갖도록.
+        self._equalize_column_group(
+            ws, [COL_REF, COL_VAL, "E", "F", "G", "H"],
+            floor=IMG_COL_WIDTH,
+        )
         self._ensure_width(ws, COL_SLOT, 14)
         self._ensure_width(ws, COL_NO, 6)
 

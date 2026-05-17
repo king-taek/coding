@@ -200,3 +200,68 @@ def test_openvino_installer_offers_when_intel_and_missing(monkeypatch):
     monkeypatch.setattr(_oi, "is_openvino_installed", lambda: False)
     monkeypatch.setattr(_oi, "is_intel_cpu", lambda: True)
     assert _oi.should_offer_install(declined=False) is True
+
+
+# ---------------------------------------------------------------------------
+# 가속기 활용 (NPU/GPU) — 기본 모드에서도 CNN 자동 활성
+# ---------------------------------------------------------------------------
+def test_has_accelerator_true_when_gpu_device(monkeypatch):
+    """torch device 가 cpu 가 아니면 has_accelerator() True."""
+    monkeypatch.setattr(embedder, "_DEVICE", torch.device("cuda"))
+    monkeypatch.setattr(embedder_openvino, "is_available", lambda: False)
+    assert embedder.has_accelerator() is True
+
+
+def test_has_accelerator_true_when_openvino_available(monkeypatch):
+    monkeypatch.setattr(embedder, "_DEVICE", torch.device("cpu"))
+    monkeypatch.setattr(embedder_openvino, "is_available", lambda: True)
+    assert embedder.has_accelerator() is True
+
+
+def test_has_accelerator_false_when_cpu_only(monkeypatch):
+    monkeypatch.setattr(embedder, "_DEVICE", torch.device("cpu"))
+    monkeypatch.setattr(embedder_openvino, "is_available", lambda: False)
+    assert embedder.has_accelerator() is False
+
+
+def test_basic_mode_with_accelerator_runs_pytorch_path(monkeypatch, tmp_path):
+    """basic 모드라도 가속기 있으면 raw backbone 으로 임베딩 계산.
+
+    이 분기가 동작해야 NPU/GPU 가 idle 이 아니다 (사용자 핵심 요청).
+    """
+    import numpy as np
+    monkeypatch.setattr(embedder, "is_available", lambda: True)
+    monkeypatch.setattr(embedder, "get_active_mode", lambda: "basic")
+    monkeypatch.setattr(embedder.registry, "BASIC", "basic")
+    # 가속기 ‘있음’ 시뮬레이션.
+    monkeypatch.setattr(embedder, "has_accelerator", lambda: True)
+    # PyTorch 경로가 실제로 호출되는지 확인 — sentinel 반환.
+    called = []
+    def _fake_pt(paths, *, batch_size, mode):
+        called.extend(paths)
+        return {p: np.zeros(576, dtype=np.float32) for p in paths}
+    monkeypatch.setattr(embedder, "_compute_embeddings_pytorch", _fake_pt)
+    monkeypatch.setattr(embedder_openvino, "is_available", lambda: False)
+    monkeypatch.setattr(embedder, "_load_head_for", lambda mode: None)
+
+    paths = [tmp_path / f"c{i}.jpg" for i in range(2)]
+    out = embedder.compute_embeddings(paths)
+    assert set(called) == set(paths), "basic + 가속기 = PyTorch 경로가 호출돼야 함"
+    assert len(out) == 2
+
+
+def test_basic_mode_without_accelerator_skips(monkeypatch, tmp_path):
+    """CPU only + basic 모드는 CNN 미실행 (기존 동작 보존)."""
+    monkeypatch.setattr(embedder, "is_available", lambda: True)
+    monkeypatch.setattr(embedder, "get_active_mode", lambda: "basic")
+    monkeypatch.setattr(embedder.registry, "BASIC", "basic")
+    monkeypatch.setattr(embedder, "has_accelerator", lambda: False)
+    called = []
+    monkeypatch.setattr(
+        embedder, "_compute_embeddings_pytorch",
+        lambda *a, **kw: called.append("nope") or {},
+    )
+    paths = [tmp_path / "x.jpg"]
+    out = embedder.compute_embeddings(paths)
+    assert called == [], "CPU only basic 모드는 PyTorch 경로 미호출"
+    assert out == {}

@@ -98,18 +98,18 @@ def device_label() -> str:  # pragma: no cover — 환경 의존
 
 
 # ---------------------------------------------------------------------------
-# Backbone 컴파일 (lazy)
+# Backbone 컴파일 (lazy) + 디바이스별 최적 처리량 hint
 # ---------------------------------------------------------------------------
-# 주의: OpenVINO NPU 플러그인은 dynamic shape 지원이 제한적이라 (특히
-# Meteor Lake 1세대) 고정 배치 = 1 로 컴파일하고 한 장씩 추론하는 게
-# 가장 호환성 높다.  GPU/CPU 는 dynamic 도 가능하지만 단순성 위해 통일.
-# 한 번 컴파일한 ``compiled_model`` 은 InferRequest 를 재사용해 여러 장을
-# 빠르게 처리.
+# NPU/GPU 활용도를 끌어올리려면 ‘여러 추론을 동시 in-flight’ 하게 해야 한다
+# (AsyncInferQueue).  OpenVINO 에 PERFORMANCE_HINT=THROUGHPUT 을 주면
+# 디바이스에 맞는 최적 스트림 수가 자동 설정됨.
+# Batch 는 1 로 고정 — NPU 는 dynamic shape 미지원이 잦아 단순/호환성 우선.
 @lru_cache(maxsize=1)
 def _compile_backbone():  # pragma: no cover — 환경 의존
     """MobileNetV3-Small backbone 을 OpenVINO 로 변환 후 NPU/GPU 컴파일.
 
     Thread-safe: ``functools.lru_cache`` 는 CPython 에서 내부 락으로 보호.
+    반환 — (compiled_model, target_device_str) 튜플.
     """
     if not is_available():
         return None
@@ -121,15 +121,30 @@ def _compile_backbone():  # pragma: no cover — 환경 의존
     ov_model = ov.convert_model(backbone, example_input=example)
     core = ov.Core()
     primary = target_device()
-    # NPU 가 실패하면 GPU 로 자동 fallback (모델/op 미지원 등).
+    # NPU 가 실패하면 GPU → CPU 로 자동 fallback (op 미지원 등).
     for cand in (primary, "GPU", "CPU"):
         if cand is None:
             continue
         try:
-            return core.compile_model(ov_model, cand)
+            # THROUGHPUT 힌트 — 디바이스에 따라 적정 stream/infer-request 수
+            # 를 OpenVINO 가 알아서 설정 → AsyncInferQueue 와 함께 NPU 최대 활용.
+            compiled = core.compile_model(
+                ov_model, cand,
+                config={"PERFORMANCE_HINT": "THROUGHPUT"},
+            )
+            return (compiled, cand)
         except Exception:
             continue
     return None
+
+
+def _optimal_streams(compiled) -> int:  # pragma: no cover — 환경 의존
+    """디바이스가 권장하는 동시 추론 스트림 수 — AsyncInferQueue jobs."""
+    try:
+        n = compiled.get_property("OPTIMAL_NUMBER_OF_INFER_REQUESTS")
+        return max(1, int(n))
+    except Exception:
+        return 4    # 합리적 기본값 (NPU 2~4 / GPU 4~8 사이).
 
 
 def invalidate_caches() -> None:
@@ -171,57 +186,92 @@ def compute_embeddings(paths: Iterable[Path],
                        batch_size: int = 1,        # NPU 호환을 위해 사실상 1
                        head=None
                        ) -> Dict[Path, np.ndarray]:  # pragma: no cover
-    """OpenVINO 백본 + (선택) PyTorch head 로 임베딩을 계산.
+    """OpenVINO 백본 + (선택) PyTorch head 로 임베딩을 ``AsyncInferQueue``
+    로 병렬 계산 — NPU/GPU 활용도 최대화.
 
-    NPU 플러그인의 dynamic shape 제약을 우회하기 위해 **한 장씩** 추론
-    (``InferRequest`` 재사용으로 호출 오버헤드 최소화).  ``head`` 는
-    ``triplet_model.ProjectionHead`` (CPU 실행, ~150K params 라 빠름).
+    NPU 플러그인의 dynamic shape 제약을 우회하기 위해 **batch=1** 고정.
+    대신 ``AsyncInferQueue(jobs=N)`` 으로 N 개 추론을 동시 in-flight 시켜
+    파이프라인을 채우면 NPU 가 idle 없이 일한다 (THROUGHPUT 힌트와 함께).
 
-    ``batch_size`` 파라미터는 시그니처 호환만 위해 유지하고 내부는 항상
-    1 장씩 처리.  실패한 path 는 결과 dict 에서 빠지므로 ``embedder.
-    compute_embeddings`` 가 PyTorch 경로로 보완할 수 있다 (partial-result
-    fallback).
+    실패 path 는 결과 dict 에 누락 — 호출자(``embedder.compute_embeddings``)
+    가 PyTorch 로 보완.
     """
     out: Dict[Path, np.ndarray] = {}
     if not is_available():
         return out
-    compiled = _compile_backbone()
-    if compiled is None:
+    pack = _compile_backbone()
+    if pack is None:
         return out
+    compiled, _dev = pack
 
     items = [Path(p) for p in paths]
     if not items:
         return out
 
-    # InferRequest 재사용 — compile 비용은 1 회, 추론은 N 회.
-    try:
-        req = compiled.create_infer_request()
-    except Exception:
-        return out
-    # 출력 텐서 키 (모델 변환 직후라 첫 output 만 있음).
-
+    # 입력 텐서 사전 생성 — async 시작 시점에 즉시 큐잉.
+    inputs: list[tuple[Path, np.ndarray]] = []
     for p in items:
         arr = _make_input_array(p)
-        if arr is None:
-            continue
-        # (1, 3, H, W) — NPU 는 고정 배치 1 만 안전하게 받음.
-        x = arr[np.newaxis]
+        if arr is not None:
+            inputs.append((p, arr[np.newaxis]))   # (1, 3, H, W)
+    if not inputs:
+        return out
+
+    # AsyncInferQueue 로 N 개 동시 진행 — NPU/GPU 파이프라인 saturate.
+    try:
+        from openvino.runtime import AsyncInferQueue
+    except Exception:
+        AsyncInferQueue = None  # type: ignore
+    n_streams = _optimal_streams(compiled)
+    raw: Dict[Path, np.ndarray] = {}
+
+    if AsyncInferQueue is not None:
         try:
-            res = req.infer({0: x})
+            queue = AsyncInferQueue(compiled, jobs=n_streams)
         except Exception:
-            continue
-        # res 는 OrderedDict-like. 첫 output 의 (1, 576) 텐서.
+            queue = None
+    else:
+        queue = None
+
+    if queue is not None:
+        def _cb(infer_request, userdata):
+            try:
+                res = infer_request.results
+                feat = list(res.values())[0]
+                raw[userdata] = feat
+            except Exception:
+                pass
+        queue.set_callback(_cb)
+        for p, x in inputs:
+            try:
+                queue.start_async({0: x}, userdata=p)
+            except Exception:
+                continue
         try:
-            feat = list(res.values())[0]
+            queue.wait_all()
         except Exception:
-            continue
+            pass
+    else:
+        # AsyncInferQueue 없는 OpenVINO 버전 — InferRequest 재사용 단일 흐름.
+        try:
+            req = compiled.create_infer_request()
+        except Exception:
+            return out
+        for p, x in inputs:
+            try:
+                res = req.infer({0: x})
+                raw[p] = list(res.values())[0]
+            except Exception:
+                continue
+
+    # head 통과 + L2 정규화 → PyTorch 경로와 동일 형식.
+    for p, feat in raw.items():
         if head is not None and _HAS_TORCH:
             try:
                 with torch.no_grad():
                     feat = head(torch.from_numpy(feat)).cpu().numpy()
             except Exception:
                 continue
-        # L2 정규화 (PyTorch 경로와 동일 결과 보장).
         norm = float(np.linalg.norm(feat[0])) + 1e-9
         out[p] = (feat[0] / norm).astype(np.float32)
     return out

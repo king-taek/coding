@@ -318,7 +318,9 @@ class SlotPrecomputeWorker(QThread):
         if not _emb.is_available():
             return
         mode = _emb.get_active_mode()
-        if mode == _emb.registry.BASIC:
+        # basic 모드여도 NPU/GPU 가속기가 있으면 raw backbone embedding 으로
+        # 가속기 활용 — score() 의 _resolve_weights 가 use_cnn=True 자동.
+        if mode == _emb.registry.BASIC and not _emb.has_accelerator():
             return
         # 캐시에 없는 이미지만 계산.
         paths_needed = []
