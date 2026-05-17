@@ -39,7 +39,6 @@ HEADER_AOI_ROW = 2
 #     이미지가 셀 안에 여유 있게 들어간다.
 ROW_HEIGHT_PT = 165.75
 IMG_COL_WIDTH = 22
-IMG_MAX_PX = 150
 
 
 def _machine_label(raw: str) -> str:
@@ -104,15 +103,17 @@ class ExcelExporter(QThread):
         if val_label:
             ws[f"{COL_VAL}{HEADER_AOI_ROW}"] = val_label
 
-        # 기본 폭 보장 — 템플릿에 폭이 지정 안 된 컬럼만.
-        def _ensure_width(col_letter: str, min_w: float) -> None:
-            cur = ws.column_dimensions[col_letter].width
-            if not cur or cur < min_w:
-                ws.column_dimensions[col_letter].width = min_w
-        _ensure_width(COL_REF, IMG_COL_WIDTH)
-        _ensure_width(COL_VAL, IMG_COL_WIDTH)
-        _ensure_width(COL_SLOT, 14)
-        _ensure_width(COL_NO, 6)
+        # 컬럼 폭 보정 — 양식.xlsx 는 ‘Scan Defect (C1:D1)’ 같은 병합 헤더의
+        # 왼쪽 셀에만 width 를 지정해 두어, 오른쪽 셀(D, F, H 등) 이 기본 폭
+        # (~8) 으로 떨어져 사진이 작아 보이는 문제가 있다.  병합된 헤더 쌍의
+        # 왼쪽 컬럼 width 를 오른쪽 컬럼에도 그대로 미러링한다.
+        self._mirror_paired_column_widths(ws)
+        # 그 위에 ‘우리 데이터 컬럼은 최소 IMG_COL_WIDTH 보장’ — 양식 폭이
+        # 더 크면 양식 값을 유지.
+        self._ensure_width(ws, COL_REF, IMG_COL_WIDTH)
+        self._ensure_width(ws, COL_VAL, IMG_COL_WIDTH)
+        self._ensure_width(ws, COL_SLOT, 14)
+        self._ensure_width(ws, COL_NO, 6)
 
         # 매칭/미매칭 통합 정렬 → Slot 오름차순, 그 안에서 기준 파일명 오름차순.
         rows_input: list[tuple[str, str, object]] = []
@@ -159,6 +160,36 @@ class ExcelExporter(QThread):
             pass
 
     # ------------------------------------------------------------------
+    @staticmethod
+    def _ensure_width(ws, col_letter: str, min_w: float) -> None:
+        cur = ws.column_dimensions[col_letter].width
+        if not cur or cur < min_w:
+            ws.column_dimensions[col_letter].width = min_w
+
+    @staticmethod
+    def _mirror_paired_column_widths(ws) -> None:
+        """병합된 헤더 (예: C1:D1) 의 오른쪽 컬럼이 width 미지정인 경우 왼쪽
+        컬럼의 width 를 그대로 복사한다.  양식.xlsx 처럼 ‘왼쪽만 폭 지정’ 한
+        템플릿에서 오른쪽 셀이 좁아 사진이 작게 임베드되는 문제 해결."""
+        from openpyxl.utils import column_index_from_string, get_column_letter
+        for rng in list(ws.merged_cells.ranges):
+            # 헤더 행에 걸친 가로 병합만 대상 (단일 행, 가로 폭 ≥ 2)
+            if rng.min_row != rng.max_row:
+                continue
+            if rng.max_col - rng.min_col < 1:
+                continue
+            left = get_column_letter(rng.min_col)
+            left_w = ws.column_dimensions[left].width
+            if not left_w:
+                continue
+            for c in range(rng.min_col + 1, rng.max_col + 1):
+                col_letter = get_column_letter(c)
+                cd = ws.column_dimensions[col_letter]
+                if not cd.width:
+                    cd.width = left_w
+                    cd.customWidth = True
+
+    # ------------------------------------------------------------------
     def _build_minimal_headers(self, ws) -> None:
         """양식.xlsx 가 없을 때 사용할 최소 헤더 (양식의 구조를 흉내)."""
         from openpyxl.styles import Alignment, Font, PatternFill
@@ -197,6 +228,11 @@ class ExcelExporter(QThread):
         # 템플릿 데이터 행의 ‘기준 높이’ 를 한 번만 측정 — 보통 165.75pt.
         # 양식이 없거나 데이터 행에 높이가 안 잡혀 있으면 ROW_HEIGHT_PT 사용.
         template_row_h = ws.row_dimensions[DATA_START_ROW].height or ROW_HEIGHT_PT
+        # C / D 컬럼 폭은 행마다 동일하므로 한 번만 계산.
+        cell_w_px = _col_width_to_px(
+            ws.column_dimensions[COL_REF].width or IMG_COL_WIDTH
+        )
+        cell_h_px = _row_height_to_px(template_row_h)
         for idx, (_slot, _key, payload) in enumerate(rows_input, start=1):
             # 새 행은 템플릿의 데이터 행과 같은 높이로 통일 → 양식 안팎 일관성.
             cur_h = ws.row_dimensions[row].height
@@ -216,8 +252,8 @@ class ExcelExporter(QThread):
                 val_mid = image_io.get_mid_path(m.val_path)
                 xli_ref = XLImage(str(ref_mid))
                 xli_val = XLImage(str(val_mid))
-                _shrink(xli_ref, max_px=IMG_MAX_PX)
-                _shrink(xli_val, max_px=IMG_MAX_PX)
+                _fit_to_cell(xli_ref, cell_w_px, cell_h_px)
+                _fit_to_cell(xli_val, cell_w_px, cell_h_px)
                 ws.add_image(xli_ref, f"{COL_REF}{row}")
                 ws.add_image(xli_val, f"{COL_VAL}{row}")
                 self.signals.progress.emit(idx, total, m.slot)
@@ -229,7 +265,7 @@ class ExcelExporter(QThread):
                 try:
                     ref_mid = image_io.get_mid_path(Path(u.path))
                     xli_ref = XLImage(str(ref_mid))
-                    _shrink(xli_ref, max_px=IMG_MAX_PX)
+                    _fit_to_cell(xli_ref, cell_w_px, cell_h_px)
                     ws.add_image(xli_ref, f"{COL_REF}{row}")
                 except Exception:
                     ws[f"{COL_REF}{row}"] = str(Path(u.path).name)
@@ -255,6 +291,8 @@ class ExcelExporter(QThread):
         ws.column_dimensions["B"].width = 14
         ws.column_dimensions["C"].width = IMG_COL_WIDTH
         ws.column_dimensions["D"].width = 30
+        cell_w_px = _col_width_to_px(IMG_COL_WIDTH)
+        cell_h_px = _row_height_to_px(ROW_HEIGHT_PT)
         for i, e in enumerate(entries, start=2):
             ws.row_dimensions[i].height = ROW_HEIGHT_PT
             ws[f"B{i}"] = e.slot
@@ -262,7 +300,7 @@ class ExcelExporter(QThread):
             try:
                 mid = image_io.get_mid_path(Path(e.path))
                 xli = XLImage(str(mid))
-                _shrink(xli, max_px=IMG_MAX_PX)
+                _fit_to_cell(xli, cell_w_px, cell_h_px)
                 ws.add_image(xli, f"C{i}")
             except Exception:
                 ws[f"C{i}"] = str(e.path)
@@ -282,21 +320,39 @@ class ExcelExporter(QThread):
             r += 1
 
 
-def _shrink(xli, max_px: int) -> None:
-    """openpyxl 의 Image 객체를 셀에 들어갈 만한 크기로 축소."""
+# ---------------------------------------------------------------------------
+# 사진 ↔ 셀 크기 정합 헬퍼
+# ---------------------------------------------------------------------------
+# Excel 의 column width 는 ‘기본 폰트의 0 자리 글자 수’ 단위라 직접 px 변환이
+# 까다롭다.  Calibri 11pt 기준 1 unit ≈ 7 px 정도가 일반 통용 근사값.
+# row height 는 pt 단위이므로 96 DPI 환산 (1pt = 4/3 px).
+def _col_width_to_px(width_units: float) -> int:
+    return max(8, int(round((float(width_units) or 0) * 7.0)))
+
+
+def _row_height_to_px(height_pt: float) -> int:
+    return max(8, int(round((float(height_pt) or 0) * 4.0 / 3.0)))
+
+
+def _fit_to_cell(xli, cell_w_px: int, cell_h_px: int) -> None:
+    """openpyxl 의 Image 를 셀 크기에 ‘비율 유지 + 한쪽 변 가득’ 으로 맞춤.
+
+    가로/세로 중 비율상 먼저 셀에 닿는 변이 cell 의 변 길이에 정확히 일치하고
+    반대 변은 남는 여백이 생긴다 (사용자 요청: ‘가로나 세로가 셀에 딱 들어맞을
+    때까지 크게’).
+    """
     try:
-        w = xli.width
-        h = xli.height
+        w = float(xli.width)
+        h = float(xli.height)
     except Exception:
         return
-    if max(w, h) <= max_px:
+    if w <= 0 or h <= 0:
         return
-    if w >= h:
-        xli.width = max_px
-        xli.height = int(h * max_px / w)
-    else:
-        xli.height = max_px
-        xli.width = int(w * max_px / h)
+    scale = min(cell_w_px / w, cell_h_px / h)
+    if scale <= 0:
+        return
+    xli.width = max(1, int(round(w * scale)))
+    xli.height = max(1, int(round(h * scale)))
 
 
 # ---------------------------------------------------------------------------

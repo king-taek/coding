@@ -46,16 +46,15 @@ class Fonts:
 # Image / thumbnail sizing
 # ---------------------------------------------------------------------------
 class Sizing:
-    # 좌/우/하 패널 그리드용 작은 썸네일. 측면 패널의 실제 폭(stretch 2:4:2
-    # 기준 1280→~300px)에 2 col 그리드가 들어가도록 120 으로 잡는다. AOI
-    # 결함 식별은 중앙 이미지(슬라이더 300~700px)로 하고, 측면은 ‘이미 결정
-    # 한 사진들’ 의 시각적 참조 용도.
-    THUMB_PX = 120
+    # 좌/우/하 패널 그리드용 작은 썸네일.  실제 노출되는 타일은 120~240 px 사이
+    # (BulkSelectDialog=180, UnmatchedReviewDialog ref=380 등) 라 캐시 thumb 가
+    # 작으면 업스케일 시 흐릿해진다.  240 px / Q90 으로 한 단계 키워 화질 향상.
+    THUMB_PX = 240
     MID_PX = 800            # zoom-view + Excel embed
     SIMILARITY_PX = 384     # cropped ROI longest-edge for similarity
     ROI_RATIO = 0.55        # 중심 영역 비율 (0.5~0.6)
-    THUMB_JPEG_Q = 80
-    MID_JPEG_Q = 85
+    THUMB_JPEG_Q = 90
+    MID_JPEG_Q = 88
 
 
 @dataclass(frozen=True)
@@ -85,9 +84,12 @@ class SizingTier:
 
 # 평가 순서: 적은 쪽부터. 마지막 티어의 threshold 는 충분히 큰 값.
 SIZING_TIERS: tuple[SizingTier, ...] = (
-    SizingTier(threshold=200,        thumb_px=200, thumb_q=80, mid_px=800, mid_q=85),
-    SizingTier(threshold=500,        thumb_px=180, thumb_q=75, mid_px=720, mid_q=82),
-    SizingTier(threshold=1000,       thumb_px=160, thumb_q=70, mid_px=640, mid_q=78),
+    # 작은~중간 세션은 시각 품질을 우선해 한 단계 키운다 (썸네일 표시 크기와
+    # 캐시 크기를 맞춰 업스케일 블러를 피함).
+    SizingTier(threshold=200,        thumb_px=240, thumb_q=90, mid_px=800, mid_q=88),
+    SizingTier(threshold=500,        thumb_px=200, thumb_q=85, mid_px=720, mid_q=85),
+    # 대규모 세션은 처리 속도/메모리 우선이라 기존 값 유지.
+    SizingTier(threshold=1000,       thumb_px=160, thumb_q=72, mid_px=640, mid_q=80),
     SizingTier(threshold=10 ** 9,    thumb_px=140, thumb_q=65, mid_px=560, mid_q=75),
 )
 

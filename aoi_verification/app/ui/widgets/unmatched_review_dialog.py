@@ -15,8 +15,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable, Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QCursor
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QColor, QCursor, QPixmap
 from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout,
                               QHBoxLayout, QLabel, QMessageBox, QScrollArea,
                               QSizePolicy, QVBoxLayout, QWidget)
@@ -24,17 +24,38 @@ from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout,
 from ... import i18n
 from ...models.result import MatchResult, MissEntry
 from ...models.slot import ImageItem
-from ...utils import image_io
 from .neon_button import NeonButton
 
-_REF_PX = 380           # 좌측 기준 사진 크기 (mid)
-_CAND_PX = 200          # 우측 후보 썸네일 크기
+_REF_PX = 420           # 좌측 기준 사진 크기 — 원본 화질에서 다운스케일.
+_CAND_PX = 260          # 우측 후보 타일 — 썸네일 대신 원본을 lazy 로드.
 _CAND_CAP_PX = 28       # 캡션 한 줄
 
 
 # ---------------------------------------------------------------------------
+def _load_full_pixmap_scaled(path: Path, size: int) -> QPixmap:
+    """원본 파일을 그대로 디코드한 뒤 ``size`` 박스에 맞춰 축소.
+
+    캐시된 썸네일/mid 가 아닌 ‘원본 화질’ 을 그대로 보고 싶을 때 사용 — JPEG
+    압축이 한 번만 적용된 결과를 사용자가 보게 된다.  full pixmap 은 함수
+    스코프 안에서만 살아 있다가 GC 되므로 메모리는 축소된 사본만 유지.
+    """
+    fallback = QPixmap(size, size)
+    fallback.fill(QColor(20, 28, 40))
+    try:
+        full = QPixmap(str(path))
+        if full.isNull():
+            return fallback
+        return full.scaled(
+            size, size,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+    except Exception:
+        return fallback
+
+
 class _CandidateTile(QFrame):
-    """후보 사진 — 클릭하면 매칭 확정."""
+    """후보 사진 — 클릭하면 매칭 확정. 원본 화질 lazy 로드 (paintEvent 트리거)."""
 
     picked = pyqtSignal(object)            # ImageItem
 
@@ -42,6 +63,7 @@ class _CandidateTile(QFrame):
         super().__init__(parent)
         self.item = item
         self.score = float(score)
+        self._image_loaded = False
         self.setProperty("role", "card-soft")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedSize(_CAND_PX + 16, _CAND_PX + _CAND_CAP_PX + 32)
@@ -50,11 +72,14 @@ class _CandidateTile(QFrame):
         lay.setContentsMargins(8, 8, 8, 8)
         lay.setSpacing(4)
 
-        img = QLabel(self)
-        img.setFixedSize(_CAND_PX, _CAND_PX)
-        img.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        img.setPixmap(image_io.load_thumb_qpixmap(item.path, _CAND_PX))
-        lay.addWidget(img, alignment=Qt.AlignmentFlag.AlignCenter)
+        self._img_label = QLabel(self)
+        self._img_label.setFixedSize(_CAND_PX, _CAND_PX)
+        self._img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # 우선 placeholder — paintEvent 첫 발생 시 원본을 비동기로 로드.
+        ph = QPixmap(_CAND_PX, _CAND_PX)
+        ph.fill(QColor(20, 28, 40))
+        self._img_label.setPixmap(ph)
+        lay.addWidget(self._img_label, alignment=Qt.AlignmentFlag.AlignCenter)
 
         score_text = f"유사도 {int(round(self.score * 100))}%"
         sc = QLabel(score_text, self)
@@ -76,6 +101,22 @@ class _CandidateTile(QFrame):
         ))
         cap.setToolTip(item.filename)
         lay.addWidget(cap)
+
+    def paintEvent(self, event):  # noqa: N802
+        super().paintEvent(event)
+        if not self._image_loaded:
+            self._image_loaded = True
+            # 첫 paint 이벤트 시점 = 위젯이 실제 viewport 에 들어온 시점.
+            # 무거운 디코드를 paintEvent 안에서 동기로 돌리면 스크롤이 끊기므로
+            # 다음 이벤트 루프 tick 에 지연 실행.
+            QTimer.singleShot(0, self._load_full)
+
+    def _load_full(self) -> None:
+        try:
+            pix = _load_full_pixmap_scaled(Path(self.item.path), _CAND_PX)
+            self._img_label.setPixmap(pix)
+        except Exception:
+            pass
 
     def mousePressEvent(self, event):  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton:
@@ -246,8 +287,9 @@ class UnmatchedReviewDialog(QDialog):
         self.btn_prev.setEnabled(self._idx > 0)
         self.ref_filename.setText(Path(cur.path).name)
 
-        # 기준 사진 mid (load_thumb_qpixmap 으로 동일 캐시 활용)
-        pm = image_io.load_thumb_qpixmap(Path(cur.path), _REF_PX)
+        # 기준 사진 — 원본 파일을 직접 디코드해서 ‘원본 화질’ 그대로 보여준다.
+        # 현재 ref 한 장만 로드되므로 비용은 낮다.
+        pm = _load_full_pixmap_scaled(Path(cur.path), _REF_PX)
         self.ref_img.setPixmap(pm)
 
         # 후보 = 같은 슬롯의 val_pool 중 (a) 이미 다른 매칭에 쓰이지 않은 항목.

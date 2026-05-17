@@ -122,12 +122,21 @@ class SetupPage(QWidget):
         )
         self._model_card.body().addWidget(m_title)
 
-        # 라디오 그룹 + 데이터 카운트 + 버튼은 _refresh_model_card 에서 갱신
-        self._model_radios_host = QWidget(self._model_card)
+        # 라디오 그룹 + 데이터 카운트 + 버튼은 _refresh_model_card 에서 갱신.
+        # 모델이 많으면 (>5) 카드 자체가 너무 길어지므로 ScrollArea 로 감싸서
+        # 최대 높이를 두고, 그 이상은 세로 스크롤로 선택하게 한다.
+        self._model_scroll = QScrollArea(self._model_card)
+        self._model_scroll.setWidgetResizable(True)
+        self._model_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self._model_scroll.setStyleSheet(
+            "QScrollArea { background: transparent; border: none; }"
+        )
+        self._model_radios_host = QWidget()
         self._model_radios_layout = QVBoxLayout(self._model_radios_host)
         self._model_radios_layout.setContentsMargins(0, 4, 0, 4)
         self._model_radios_layout.setSpacing(4)
-        self._model_card.body().addWidget(self._model_radios_host)
+        self._model_scroll.setWidget(self._model_radios_host)
+        self._model_card.body().addWidget(self._model_scroll)
 
         self._model_group = QButtonGroup(self._model_card)
         self._model_group.setExclusive(True)
@@ -464,6 +473,20 @@ class SetupPage(QWidget):
             rb.setProperty("model_name", info.name)
             self._model_group.addButton(rb)
             self._model_radios_layout.addWidget(rb)
+
+        # 모델 라디오가 5 개를 넘으면 ScrollArea 의 최대 높이를 라디오 5 줄
+        # 분량으로 제한 → 스크롤바가 자동 노출. 그 이하면 자연 높이 (스크롤
+        # 없이 모두 보임).
+        radio_count = len(self._model_group.buttons())
+        if radio_count > 5:
+            sample = self._model_group.buttons()[0]
+            row_h = max(sample.sizeHint().height(),
+                        sample.minimumSizeHint().height(), 28)
+            max_h = row_h * 5 + 24
+            self._model_scroll.setMaximumHeight(max_h)
+        else:
+            # 항상 최대 높이 해제 — 적은 수 모델은 자연 높이로.
+            self._model_scroll.setMaximumHeight(16777215)
 
         # 활성 모델 표시
         for b in self._model_group.buttons():

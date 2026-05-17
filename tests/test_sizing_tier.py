@@ -4,14 +4,15 @@ from aoi_verification.app import config
 
 
 def test_default_tier_for_small_dataset():
+    # 화질 향상 (#3) — 작은 세션은 thumb 240/Q90, mid 800/Q88 로 한 단계 키움.
     t = config.pick_tier(50)
-    assert t.thumb_px == 200 and t.thumb_q == 80
-    assert t.mid_px == 800 and t.mid_q == 85
+    assert t.thumb_px == 240 and t.thumb_q == 90
+    assert t.mid_px == 800 and t.mid_q == 88
 
 
 def test_mid_tier_for_201_500():
-    assert config.pick_tier(201).thumb_px == 180
-    assert config.pick_tier(500).thumb_px == 180
+    assert config.pick_tier(201).thumb_px == 200
+    assert config.pick_tier(500).thumb_px == 200
 
 
 def test_third_tier_for_501_1000():
