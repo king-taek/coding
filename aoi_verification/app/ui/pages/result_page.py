@@ -28,6 +28,9 @@ class ResultPage(QWidget):
         self._template_path: Path | None = None
         self._target_path: Path | None = None     # 미리 복사된 작업 파일
         self._save_path: Path | None = None
+        # 매치 실패 사진 검토(#8) 에 필요한 외부 데이터 — main_window 가 주입.
+        self._val_pool: dict | None = None
+        self._score_cache = None
         self._loading = LoadingOverlay(self)
         self._exporter: ExcelExporter | None = None
         self._build()
@@ -59,6 +62,14 @@ class ResultPage(QWidget):
         self.review_btn.clicked.connect(self._on_review)
         bar.addWidget(self.review_btn)
 
+        # 매치 실패 사진 검토 — 엑셀 저장 직전, 마지막 한 번 더 매칭 기회 (#8).
+        self.review_unmatched_btn = NeonButton(
+            i18n.KO.BTN_REVIEW_UNMATCHED, role="warn",
+        )
+        self.review_unmatched_btn.setMinimumWidth(200)
+        self.review_unmatched_btn.clicked.connect(self._on_review_unmatched)
+        bar.addWidget(self.review_unmatched_btn)
+
         self.export_btn = NeonButton(i18n.KO.BTN_EXPORT_EXCEL, role="primary")
         self.export_btn.setMinimumWidth(240)
         self.export_btn.setMinimumHeight(46)
@@ -70,10 +81,15 @@ class ResultPage(QWidget):
     def show_result(self, result: FinalResult,
                     template_path: Path | None = None,
                     target_path: Path | None = None,
-                    auto_mode: bool = False) -> None:
+                    auto_mode: bool = False,
+                    val_pool: dict | None = None,
+                    score_cache=None) -> None:
         self._result = result
         self._template_path = template_path
         self._target_path = target_path
+        # 매치 실패 검토에 사용할 후보 풀 / 점수 캐시 (#8).
+        self._val_pool = val_pool
+        self._score_cache = score_cache
         # 기존 요약 비우기
         while self._summary_layout.count():
             it = self._summary_layout.takeAt(0)
@@ -129,6 +145,18 @@ class ResultPage(QWidget):
                 role="muted",
             )
 
+        # 검토 가능한 매치 실패 사진이 있을 때만 검토 버튼 활성.
+        n_unmatched = len(result.unmatched_refs)
+        self.review_unmatched_btn.setEnabled(
+            n_unmatched > 0 and self._val_pool is not None
+        )
+        if n_unmatched > 0:
+            self.review_unmatched_btn.setText(
+                f"{i18n.KO.BTN_REVIEW_UNMATCHED} ({n_unmatched})"
+            )
+        else:
+            self.review_unmatched_btn.setText(i18n.KO.BTN_REVIEW_UNMATCHED)
+
     # ------------------------------------------------------------------
     def _on_review(self) -> None:
         if self._result is None:
@@ -152,7 +180,53 @@ class ResultPage(QWidget):
         # 요약을 다시 그린다.
         self.show_result(self._result,
                          template_path=self._template_path,
-                         target_path=self._target_path)
+                         target_path=self._target_path,
+                         val_pool=self._val_pool,
+                         score_cache=self._score_cache)
+
+    # ------------------------------------------------------------------
+    def _on_review_unmatched(self) -> None:
+        """매치 실패 사진을 하나씩 검토 (#8). 신규 매칭이 생기면 result 에 합친다."""
+        if self._result is None:
+            return
+        from ..widgets.unmatched_review_dialog import UnmatchedReviewDialog
+        if not self._result.unmatched_refs:
+            UnmatchedReviewDialog.show_empty_message(self)
+            return
+        if self._val_pool is None:
+            QMessageBox.information(
+                self, i18n.KO.APP_TITLE, i18n.KO.UNMATCHED_REVIEW_EMPTY,
+            )
+            return
+        # 이미 결과에 들어간 val 경로 — 중복 매칭 방지용.
+        already_used = {m.val_path for m in self._result.matches}
+        dlg = UnmatchedReviewDialog(
+            unmatched=self._result.unmatched_refs,
+            val_pool=self._val_pool,
+            already_used_vals=already_used,
+            score_cache=self._score_cache,
+            parent=self,
+        )
+        dlg.exec()
+        if not dlg.new_matches:
+            return
+        # 신규 매칭을 결과에 합치고 미매칭 리스트에서 해당 ref 들을 제거.
+        self._result.matches.extend(dlg.new_matches)
+        resolved_paths = {Path(r.path) for r in dlg.resolved_refs}
+        self._result.unmatched_refs = [
+            u for u in self._result.unmatched_refs
+            if Path(u.path) not in resolved_paths
+        ]
+        QMessageBox.information(
+            self, i18n.KO.APP_TITLE,
+            i18n.KO.UNMATCHED_REVIEW_DONE_FMT.format(n=len(dlg.new_matches)),
+        )
+        # 요약 다시 그리기 (매칭 수 / 미매칭 수 갱신).
+        self.show_result(self._result,
+                         template_path=self._template_path,
+                         target_path=self._target_path,
+                         val_pool=self._val_pool,
+                         score_cache=self._score_cache)
 
     def _on_export(self) -> None:
         if self._result is None:

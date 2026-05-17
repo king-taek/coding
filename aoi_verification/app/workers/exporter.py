@@ -1,16 +1,17 @@
 """엑셀(`양식.xlsx`) 출력 워커.
 
-- 양식.xlsx 를 템플릿으로 로드한다. 없으면 빈 워크북에 헤더만 적는다.
-- B = Slot 명 / C = 기준 이미지 / D = 검증 이미지
-- 교차 검증 모드에서는 E = 매칭 방향, 추가 시트(미탐, Slot 불일치) 작성.
-- 임베드 이미지는 800px(JPEG q85) 중간 크기로 변환되어 임시 파일을 통해 삽입.
+- 양식.xlsx 를 그대로 템플릿으로 로드해서 셀 서식/병합/열폭/행높이를 보존한다.
+- 헤더(C2/D2)의 ‘AOI-N’ 만 검증 세션의 호기 번호로 교체.
+- 데이터: A=번호, B=Slot, C=기준(낮은 호기) 이미지, D=검증(높은 호기) 이미지.
+- E~H 컬럼(Escape Defect Camtek/KLA)은 사용자가 수기로 채울 영역이라 비워 둔다.
+- ‘매칭 방향’ 컬럼은 사용자 요청으로 더 이상 쓰지 않는다 (#4).
 """
 
 from __future__ import annotations
 
+import re
 import shutil
 import tempfile
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -18,88 +19,37 @@ from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
 from .. import i18n
 from ..models.result import FinalResult, MatchResult, MissEntry
-from ..utils import image_io, paths
+from ..utils import image_io
 
 
 # ---------------------------------------------------------------------------
-# Fallback layout (양식이 없거나 헤더 자동 감지가 실패할 때 적용)
+# 양식.xlsx 의 컬럼 레이아웃 (사용자 양식과 1:1)
+#   A = No / B = slot# / C = 기준(낮은 호기) / D = 검증(높은 호기)
+# Header 는 두 줄: row 1 (그룹) + row 2 (호기 번호 = ‘AOI-N’). 데이터는 row 3 부터.
 # ---------------------------------------------------------------------------
+COL_NO = "A"
 COL_SLOT = "B"
 COL_REF = "C"
 COL_VAL = "D"
-COL_DIR = "E"
-HEADER_ROW = 1
-DATA_START_ROW = 2
+DATA_START_ROW = 3
+HEADER_AOI_ROW = 2
+
 # 셀 ↔ 사진 크기 정합 (사용자 요청):
 #   · 사진을 작게 두어 프린트 / 부분 확대 모두에 유리하게.
-#   · 1 column width unit ≈ 7 px (Calibri 11pt) → 22 chars ≈ 154 px
-#   · 1 row height pt ≈ 1.333 px → 115 pt ≈ 153 px
-#   · 이미지 max 150 px → 양쪽 모두 약간의 여백을 두고 정사각형 영역에 안착.
 ROW_HEIGHT_PT = 115
 IMG_COL_WIDTH = 22
-IMG_MAX_PX = 150             # 셀 안에 들어갈 사진의 최대 변 길이
+IMG_MAX_PX = 150
 
 
-# ---------------------------------------------------------------------------
-# 헤더 키워드 → 어느 컬럼이 무엇인지 자동 감지 (#1 — 사용자 양식 호환)
-# ---------------------------------------------------------------------------
-_KEYWORDS = {
-    "slot": ("slot", "슬롯"),
-    "ref":  ("기준", "ref", "reference"),
-    "val":  ("검증", "val", "validation", "타겟", "target"),
-    "dir":  ("방향", "direction", "매칭 방향"),
-}
-
-
-def _detect_layout(ws) -> dict:
-    """``양식`` 워크시트의 1~5 행을 훑어 헤더 위치를 자동 감지.
-
-    전략: 각 행마다 키워드를 몇 개나 찾았는지 점수를 매겨, **가장 점수가 높은
-    행 하나를 헤더로 확정**. 페이지 제목 같은 단일 셀이 키워드를 포함해도
-    헤더 행과 헷갈리지 않는다.
-    """
-    layout = {
-        "slot": COL_SLOT, "ref": COL_REF, "val": COL_VAL, "dir": COL_DIR,
-        "header_row": HEADER_ROW, "data_start_row": DATA_START_ROW,
-    }
-    max_r = min(5, ws.max_row or 1)
-    max_c = min(15, ws.max_column or 1)
-
-    candidates: list[tuple[int, int, dict]] = []     # (score, row, mapping)
-    for r in range(1, max_r + 1):
-        found: dict[str, str | None] = {
-            "slot": None, "ref": None, "val": None, "dir": None,
-        }
-        for c in range(1, max_c + 1):
-            cell = ws.cell(row=r, column=c)
-            if cell.value is None:
-                continue
-            text = str(cell.value).strip().lower()
-            if not text or len(text) > 25:        # 너무 긴 문장은 헤더 아님
-                continue
-            for key, kws in _KEYWORDS.items():
-                if found[key] is not None:
-                    continue
-                if any(kw.lower() in text for kw in kws):
-                    found[key] = cell.column_letter
-                    break
-        score = sum(1 for v in found.values() if v)
-        if score > 0:
-            candidates.append((score, r, found))
-
-    if not candidates:
-        return layout
-    # 동점이면 더 위쪽 행을 선호 (-row 가 큰 쪽)
-    best_score, best_row, best_found = max(candidates, key=lambda x: (x[0], -x[1]))
-    # 단일 키워드만 잡힌 행은 페이지 제목일 가능성이 높음 — fallback 유지
-    if best_score < 2:
-        return layout
-    layout["header_row"] = best_row
-    layout["data_start_row"] = best_row + 1
-    for k, v in best_found.items():
-        if v:
-            layout[k] = v
-    return layout
+def _machine_label(raw: str) -> str:
+    """‘1호기’ / ‘AOI-1’ / ‘1’ 같은 입력을 모두 ‘AOI-N’ 형식으로 정규화."""
+    s = (raw or "").strip()
+    if not s:
+        return ""
+    m = re.search(r"\d+", s)
+    if not m:
+        return s
+    return f"AOI-{m.group(0)}"
 
 
 class ExporterSignals(QObject):
@@ -133,57 +83,37 @@ class ExcelExporter(QThread):
     # ------------------------------------------------------------------
     def _do_export(self) -> None:
         from openpyxl import Workbook, load_workbook
-        from openpyxl.comments import Comment
-        from openpyxl.drawing.image import Image as XLImage
-        from openpyxl.styles import Alignment, Font, PatternFill
-        from openpyxl.utils import get_column_letter
 
-        # 항상 깨끗한 새 워크북 생성 — 회사 SharePoint 출신 ‘양식.xlsx’ 가
-        # (a) MIP/SharePoint 메타데이터로 ‘읽기 전용’ 으로 열리고,
-        # (b) 병합 셀 + 우리 스키마와 다른 컬럼 구조라 직접 채울 수 없는 문제를
-        # 한 번에 해결.  사용자가 보던 Slot/기준/검증/(방향) 헤더는 그대로.
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "AOI 검증 결과"
-        ws[f"{COL_SLOT}{HEADER_ROW}"] = "Slot"
-        ref_label = (self._result.ref_machine or "").strip()
-        val_label = (self._result.val_machine or "").strip()
-        ws[f"{COL_REF}{HEADER_ROW}"] = (
-            f"기준 장비 이미지 ({ref_label})" if ref_label else "기준 장비 이미지"
-        )
-        ws[f"{COL_VAL}{HEADER_ROW}"] = (
-            f"검증 장비 이미지 ({val_label})" if val_label else "검증 장비 이미지"
-        )
-        if self._result.mode == "cross":
-            ws[f"{COL_DIR}{HEADER_ROW}"] = "매칭 방향"
-        for c in (COL_SLOT, COL_REF, COL_VAL, COL_DIR):
-            cell = ws[f"{c}{HEADER_ROW}"]
-            cell.font = Font(bold=True, color="FFFFFFFF")
-            cell.fill = PatternFill("solid", fgColor="111827")
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-        layout = {
-            "slot": COL_SLOT, "ref": COL_REF, "val": COL_VAL, "dir": COL_DIR,
-            "header_row": HEADER_ROW, "data_start_row": DATA_START_ROW,
-        }
+        # 양식이 있으면 그대로 로드해서 셀 서식을 모두 보존.
+        # 없으면 동일 컬럼 구조의 워크북을 빈 상태로 만든다.
+        if self._template is not None and self._template.exists():
+            wb = load_workbook(str(self._template))
+            ws = wb.active
+        else:
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "AOI 검증 결과"
+            self._build_minimal_headers(ws)
 
-        col_slot, col_ref, col_val, col_dir = (
-            layout["slot"], layout["ref"], layout["val"], layout["dir"],
-        )
-        data_start = int(layout["data_start_row"])
+        # row 2 의 ‘AOI-N’ 헤더를 실제 호기 번호로 교체 (#3).
+        ref_label = _machine_label(self._result.ref_machine)
+        val_label = _machine_label(self._result.val_machine)
+        if ref_label:
+            ws[f"{COL_REF}{HEADER_AOI_ROW}"] = ref_label
+        if val_label:
+            ws[f"{COL_VAL}{HEADER_AOI_ROW}"] = val_label
 
-        # 컬럼 폭/행 높이 조정 — 양식이 이미 너비를 지정해 두었다면 그 값 보존
+        # 기본 폭 보장 — 템플릿에 폭이 지정 안 된 컬럼만.
         def _ensure_width(col_letter: str, min_w: float) -> None:
             cur = ws.column_dimensions[col_letter].width
             if not cur or cur < min_w:
                 ws.column_dimensions[col_letter].width = min_w
-        _ensure_width(col_ref, IMG_COL_WIDTH)
-        _ensure_width(col_val, IMG_COL_WIDTH)
-        _ensure_width(col_slot, 14)
-        if self._result.mode == "cross":
-            _ensure_width(col_dir, 14)
+        _ensure_width(COL_REF, IMG_COL_WIDTH)
+        _ensure_width(COL_VAL, IMG_COL_WIDTH)
+        _ensure_width(COL_SLOT, 14)
+        _ensure_width(COL_NO, 6)
 
         # 매칭/미매칭 통합 정렬 → Slot 오름차순, 그 안에서 기준 파일명 오름차순.
-        # 미매칭 reference 도 같은 정렬 키로 끼워넣어 ‘기준 사진 순서’ 가 유지되게.
         rows_input: list[tuple[str, str, object]] = []
         for m in self._result.matches:
             rows_input.append((m.slot, str(m.ref_path.name).lower(), m))
@@ -191,82 +121,119 @@ class ExcelExporter(QThread):
             rows_input.append((u.slot, str(u.path.name).lower(), u))
         rows_input.sort(key=lambda x: (x[0], x[1]))
 
+        self._fill_rows(ws, rows_input)
+
+        # 교차 검증 미탐 시트 ----------------------------------------
+        if self._result.mode == "cross":
+            if self._result.miss_fast:
+                self._write_miss_sheet(
+                    wb, i18n.KO.SHEET_MISS_FAST, self._result.miss_fast,
+                )
+            if self._result.miss_slow:
+                self._write_miss_sheet(
+                    wb, i18n.KO.SHEET_MISS_SLOW, self._result.miss_slow,
+                )
+
+        # Slot 불일치 ---------------------------------------------------
+        if self._result.slot_only_ref or self._result.slot_only_val:
+            self._write_slot_mismatch_sheet(wb)
+
+        self._dst.parent.mkdir(parents=True, exist_ok=True)
+        wb.save(str(self._dst))
+        # SharePoint / MIP 메타데이터 제거 — 회사 Excel 에서 ‘읽기 전용’ /
+        # ‘보호 보기’ 로 열리는 것을 방지.
+        try:
+            _strip_corporate_metadata(self._dst)
+        except Exception:
+            # 메타데이터 정리 실패는 치명적이지 않다 — 결과 파일은 이미 저장됨.
+            pass
+
+    # ------------------------------------------------------------------
+    def _build_minimal_headers(self, ws) -> None:
+        """양식.xlsx 가 없을 때 사용할 최소 헤더 (양식의 구조를 흉내)."""
+        from openpyxl.styles import Alignment, Font, PatternFill
+        yellow = PatternFill("solid", fgColor="FFFF00")
+        center = Alignment(horizontal="center", vertical="center")
+        ws["A1"] = "No"
+        ws["B1"] = "slot#"
+        ws["C1"] = "Scan Defect"
+        ws.merge_cells("A1:A2")
+        ws.merge_cells("B1:B2")
+        ws.merge_cells("C1:D1")
+        for coord in ("A1", "B1", "C1"):
+            c = ws[coord]
+            c.font = Font(bold=True)
+            c.fill = yellow
+            c.alignment = center
+        # row 2 의 AOI-N 자리는 _do_export 에서 채움.
+        for coord in ("C2", "D2"):
+            c = ws[coord]
+            c.font = Font(bold=True)
+            c.fill = yellow
+            c.alignment = center
+        ws.row_dimensions[1].height = 21.75
+        ws.row_dimensions[2].height = 19.5
+
+    # ------------------------------------------------------------------
+    def _fill_rows(self, ws, rows_input: list[tuple[str, str, object]]) -> None:
+        from openpyxl.comments import Comment
+        from openpyxl.drawing.image import Image as XLImage
+        from openpyxl.styles import Alignment, Font
+
         total = len(rows_input)
-        row = data_start
+        row = DATA_START_ROW
         red_font = Font(color="FFFF2D55", bold=True)
+        center = Alignment(horizontal="center", vertical="center")
         tmp_dir = Path(tempfile.mkdtemp(prefix="aoi_export_"))
         try:
             for idx, (_slot, _key, payload) in enumerate(rows_input, start=1):
-                # 양식이 정한 행 높이가 너무 작을 때만 키운다.
+                # 양식이 정한 행 높이가 너무 작을 때만 키운다 — 보통 양식이
+                # row3 부터 165.75pt 로 고정되어 있어 그대로 두면 된다.
                 cur_h = ws.row_dimensions[row].height
                 if not cur_h or cur_h < ROW_HEIGHT_PT:
                     ws.row_dimensions[row].height = ROW_HEIGHT_PT
 
+                # A 열: 행 번호 (사용자 양식의 ‘No’).
+                no_cell = ws[f"{COL_NO}{row}"]
+                no_cell.value = idx
+                no_cell.alignment = center
+
                 if isinstance(payload, MatchResult):
                     m = payload
-                    ws[f"{col_slot}{row}"] = m.slot
-                    if self._result.mode == "cross":
-                        ws[f"{col_dir}{row}"] = m.direction
-
+                    ws[f"{COL_SLOT}{row}"] = m.slot
+                    ws[f"{COL_SLOT}{row}"].alignment = center
                     ref_mid = image_io.get_mid_path(m.ref_path)
                     val_mid = image_io.get_mid_path(m.val_path)
                     xli_ref = XLImage(str(ref_mid))
                     xli_val = XLImage(str(val_mid))
                     _shrink(xli_ref, max_px=IMG_MAX_PX)
                     _shrink(xli_val, max_px=IMG_MAX_PX)
-                    ws.add_image(xli_ref, f"{col_ref}{row}")
-                    ws.add_image(xli_val, f"{col_val}{row}")
+                    ws.add_image(xli_ref, f"{COL_REF}{row}")
+                    ws.add_image(xli_val, f"{COL_VAL}{row}")
                     self.signals.progress.emit(idx, total, m.slot)
                 else:
                     u: MissEntry = payload
-                    ws[f"{col_slot}{row}"] = u.slot
+                    ws[f"{COL_SLOT}{row}"] = u.slot
+                    ws[f"{COL_SLOT}{row}"].alignment = center
                     # 기준 이미지: 정상 임베드.
                     try:
                         ref_mid = image_io.get_mid_path(Path(u.path))
                         xli_ref = XLImage(str(ref_mid))
                         _shrink(xli_ref, max_px=IMG_MAX_PX)
-                        ws.add_image(xli_ref, f"{col_ref}{row}")
+                        ws.add_image(xli_ref, f"{COL_REF}{row}")
                     except Exception:
-                        ws[f"{col_ref}{row}"] = str(Path(u.path).name)
+                        ws[f"{COL_REF}{row}"] = str(Path(u.path).name)
                     # 검증 컬럼에 파일명 텍스트 (빨강).
-                    cell_val = ws[f"{col_val}{row}"]
+                    cell_val = ws[f"{COL_VAL}{row}"]
                     cell_val.value = Path(u.path).name
                     cell_val.font = red_font
                     cell_val.alignment = Alignment(
                         horizontal="center", vertical="center", wrap_text=True,
                     )
                     cell_val.comment = Comment("미매칭", "AOI")
-                    if self._result.mode == "cross":
-                        ws[f"{col_dir}{row}"] = "미매칭"
                     self.signals.progress.emit(idx, total, u.slot)
 
                 row += 1
-
-            # 교차 검증 미탐 시트 ----------------------------------------
-            if self._result.mode == "cross":
-                if self._result.miss_fast:
-                    self._write_miss_sheet(
-                        wb, i18n.KO.SHEET_MISS_FAST, self._result.miss_fast,
-                    )
-                if self._result.miss_slow:
-                    self._write_miss_sheet(
-                        wb, i18n.KO.SHEET_MISS_SLOW, self._result.miss_slow,
-                    )
-
-            # Slot 불일치 ---------------------------------------------------
-            if self._result.slot_only_ref or self._result.slot_only_val:
-                self._write_slot_mismatch_sheet(wb)
-
-            self._dst.parent.mkdir(parents=True, exist_ok=True)
-            wb.save(str(self._dst))
-            # SharePoint / MIP 메타데이터 제거 — 회사 Excel 에서 ‘읽기 전용’
-            # / ‘보호 보기’ 로 열리는 것을 방지 (양식.xlsx 가 SharePoint
-            # 출신이라 본 메타데이터가 결과 파일에 상속되는 문제).
-            try:
-                _strip_corporate_metadata(self._dst)
-            except Exception:
-                # 메타데이터 정리 실패는 치명적이지 않다 — 결과 파일은 이미 저장됨.
-                pass
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 

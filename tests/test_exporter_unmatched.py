@@ -58,24 +58,29 @@ def test_export_writes_matches_and_unmatched(qapp, isolated_cache, tmp_path):
     from openpyxl import load_workbook
     wb = load_workbook(str(dst))
     ws = wb.active
+    # 헤더는 row 1~2 (양식.xlsx 형식), 데이터는 row 3 부터 시작.
     # 정렬: a_ref.jpeg, b_ref.jpeg → 매칭이 먼저, 미매칭이 그 다음 행.
-    # row 2: a → 매칭 (D 셀 비어있고 이미지 임베드만)
-    # row 3: b → 미매칭 (D 셀에 파일명 텍스트)
-    d2 = ws["D2"].value
+    # row 3: a → 매칭 (D 셀 비어있고 이미지 임베드만)
+    # row 4: b → 미매칭 (D 셀에 파일명 텍스트)
     d3 = ws["D3"].value
-    assert d2 is None, f"매칭 행의 D 셀은 비어있어야 (이미지만 임베드): {d2}"
-    assert d3 == "b_ref.jpeg", f"미매칭 행의 D 셀에 파일명: {d3}"
+    d4 = ws["D4"].value
+    assert d3 is None, f"매칭 행의 D 셀은 비어있어야 (이미지만 임베드): {d3}"
+    assert d4 == "b_ref.jpeg", f"미매칭 행의 D 셀에 파일명: {d4}"
 
     # 빨간 폰트 확인
-    font = ws["D3"].font
+    font = ws["D4"].font
     assert font.color is not None
     # openpyxl 의 color 는 ARGB hex 또는 indexed.
     color_str = str(font.color.rgb or font.color.value or "")
     assert "FF2D55" in color_str.upper()
 
     # 코멘트 ‘미매칭’ 확인
-    assert ws["D3"].comment is not None
-    assert "미매칭" in str(ws["D3"].comment.text)
+    assert ws["D4"].comment is not None
+    assert "미매칭" in str(ws["D4"].comment.text)
+
+    # AOI-N 헤더가 row 2 에 들어갔는지 (#3).
+    assert ws["C2"].value == "AOI-1"
+    assert ws["D2"].value == "AOI-2"
 
 
 def test_export_no_unmatched_unaffected(qapp, isolated_cache, tmp_path):
@@ -99,7 +104,7 @@ def test_export_no_unmatched_unaffected(qapp, isolated_cache, tmp_path):
 
     from openpyxl import load_workbook
     ws = load_workbook(str(dst)).active
-    # 행 2 = 매칭, 행 3 은 헤더 외엔 없음.
-    assert ws["B2"].value == "S1"
-    assert ws["D2"].value is None  # 이미지 임베드만, 텍스트 없음
-    assert ws["B3"].value is None
+    # 헤더 2 줄 + 데이터 row 3 부터. 행 3 = 매칭, 행 4 는 데이터 없음.
+    assert ws["B3"].value == "S1"
+    assert ws["D3"].value is None  # 이미지 임베드만, 텍스트 없음
+    assert ws["B4"].value is None

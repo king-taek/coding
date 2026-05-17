@@ -178,7 +178,11 @@ class TrainHeadWorker(QThread):
 
         # 2) 헤드 학습 -----------------------------------------------
         from torch import nn, optim
-        head = triplet_model.ProjectionHead()
+        # 백본 출력 차원을 첫 텐서에서 직접 측정 → ProjectionHead 의 in_dim 일치
+        # (구버전 디폴트 1280 이 백본 576 과 안 맞아 학습이 깨지던 버그 방지).
+        sample = next(iter(feat_cache.values()))
+        in_dim = int(sample.numel())
+        head = triplet_model.ProjectionHead(in_dim=in_dim)
         head.train()
         opt = optim.Adam(head.parameters(), lr=self._lr)
         loss_fn = nn.TripletMarginLoss(margin=self._margin, p=2)

@@ -1,7 +1,10 @@
 """Stage 2 — 유사도 기반 매칭 화면.
 
-좌: Skip 된 사진 누적 / 중앙: 기준 사진 1장 / 우: 검증 장비 후보 (점수 정렬)
+중앙: 기준 사진 1장 / 우: 검증 장비 후보 (점수 정렬).
 9장 이상이면 8장 + +N. 우측 사진 클릭 → 매칭 확정.
+
+보류/매칭없음 사진들은 상단 [보류된 사진 보기 (n)] 버튼으로 팝업에서 모아 본다
+(좁은 화면에서 좌측 패널이 자리만 차지하던 문제 해결).
 """
 
 from __future__ import annotations
@@ -86,6 +89,19 @@ class MatchPage(QWidget):
         self.title.setProperty("role", "title")
         top.addWidget(self.title)
         top.addStretch(1)
+        # [보류된 사진 보기 (n)] — 좌측 패널 대신 팝업으로 모아 보기.
+        self.btn_view_skipped = NeonButton(
+            i18n.KO.BTN_VIEW_SKIPPED_FMT.format(n=0), role="ghost",
+        )
+        self.btn_view_skipped.clicked.connect(self._open_skipped_dialog)
+        self.btn_view_skipped.setEnabled(False)
+        top.addWidget(self.btn_view_skipped)
+        # [보류 재시도] 버튼은 보류 사진이 있을 때만 활성.
+        self.retry_btn = NeonButton(i18n.KO.BTN_RETRY_SKIP, role="warn")
+        self.retry_btn.setEnabled(False)
+        self.retry_btn.clicked.connect(self._retry_skipped)
+        top.addWidget(self.retry_btn)
+        top.addSpacing(20)
         self.phase_label = QLabel("", self)
         self.phase_label.setProperty("role", "subtitle")
         top.addWidget(self.phase_label)
@@ -95,40 +111,10 @@ class MatchPage(QWidget):
         top.addWidget(self.progress_label)
         root.addLayout(top)
 
-        # 3 pane — QSplitter 로 사용자가 분할 비율 조절 -------------------
+        # 2 pane — QSplitter 로 사용자가 분할 비율 조절 -------------------
         self._h_splitter = QSplitter(Qt.Orientation.Horizontal, self)
         self._h_splitter.setHandleWidth(6)
         self._h_splitter.setChildrenCollapsible(False)
-
-        # LEFT: skip pool
-        left = QFrame(self)
-        left.setProperty("role", "section")
-        ll = QVBoxLayout(left)
-        ll.setContentsMargins(10, 10, 10, 10)
-        ll.setSpacing(8)
-        lt = QLabel(i18n.KO.PANEL_SKIP_LIST, left)
-        lt.setProperty("role", "subtitle")
-        lt.setStyleSheet("font-weight:700; color:#00D4FF;")
-        ll.addWidget(lt)
-
-        head = QHBoxLayout()
-        head.addStretch(1)
-        self.retry_btn = NeonButton(i18n.KO.BTN_RETRY_SKIP, role="warn")
-        self.retry_btn.setEnabled(False)
-        self.retry_btn.clicked.connect(self._retry_skipped)
-        head.addWidget(self.retry_btn)
-        ll.addLayout(head)
-
-        self._left_scroll = QScrollArea(left)
-        self._left_scroll.setWidgetResizable(True)
-        self._left_host = QWidget()
-        self._left_layout = QVBoxLayout(self._left_host)
-        self._left_layout.setSpacing(10)
-        self._left_layout.addStretch(1)
-        self._left_scroll.setWidget(self._left_host)
-        ll.addWidget(self._left_scroll, stretch=1)
-        left.setMinimumWidth(200)
-        self._h_splitter.addWidget(left)
 
         # CENTER: 기준 사진 1장
         center = NeonCard(role="card", parent=self)
@@ -243,9 +229,9 @@ class MatchPage(QWidget):
         right.setMinimumWidth(440)
         self._h_splitter.addWidget(right)
 
-        self._h_splitter.setStretchFactor(0, 2)
-        self._h_splitter.setStretchFactor(1, 4)
-        self._h_splitter.setStretchFactor(2, 3)
+        # 좌측 skip 패널을 제거했으므로 splitter index 가 0/1 로 줄었다.
+        self._h_splitter.setStretchFactor(0, 4)
+        self._h_splitter.setStretchFactor(1, 3)
         root.addWidget(self._h_splitter, stretch=1)
 
         # 저장된 분할 비율 복원 + 변경 시 영속화 -------------------------
@@ -686,52 +672,104 @@ class MatchPage(QWidget):
         )
 
     def _refresh_skipped_panel(self) -> None:
-        # clear
-        while self._left_layout.count():
-            it = self._left_layout.takeAt(0)
-            w = it.widget()
-            if w is not None:
-                w.deleteLater()
-
+        """상단 [보류된 사진 보기 (n)] / [보류 재시도] 버튼 활성/카운트 갱신."""
         if self._state is None:
+            self.btn_view_skipped.setText(
+                i18n.KO.BTN_VIEW_SKIPPED_FMT.format(n=0)
+            )
+            self.btn_view_skipped.setEnabled(False)
             self.retry_btn.setEnabled(False)
             return
-        has_any = False
-
-        def _add_header(text: str) -> None:
-            from PyQt6.QtWidgets import QLabel
-            lab = QLabel(text, self._left_host)
-            lab.setStyleSheet(
-                "color: #7FB3D5; font-weight: 700; padding: 6px 2px;"
-            )
-            self._left_layout.addWidget(lab)
-
-        # ‘잠시 보류’ 섹션 ------------------------------------------------
-        defer_slots = [s for s, v in self._state.skipped.items() if v]
-        if defer_slots:
-            _add_header(i18n.KO.BTN_SKIP)
-            for slot in sorted(defer_slots):
-                items = self._state.skipped[slot]
-                has_any = True
-                sec = SlotSection(slot, columns=3, select_mode=False,
-                                  parent=self._left_host)
-                sec.set_entries([ThumbEntry(item=it) for it in items])
-                self._left_layout.addWidget(sec)
-
-        # ‘매칭 없음 확정’ 섹션 -------------------------------------------
-        none_slots = [s for s, v in self._state.no_match.items() if v]
-        if none_slots:
-            _add_header(i18n.KO.PANEL_NO_MATCH_LIST)
-            for slot in sorted(none_slots):
-                items = self._state.no_match[slot]
-                sec = SlotSection(slot, columns=3, select_mode=False,
-                                  parent=self._left_host)
-                sec.set_entries([ThumbEntry(item=it) for it in items])
-                self._left_layout.addWidget(sec)
-
-        self._left_layout.addStretch(1)
+        n_defer = sum(len(v) for v in self._state.skipped.values())
+        n_none = sum(len(v) for v in self._state.no_match.values())
+        total = n_defer + n_none
+        self.btn_view_skipped.setText(
+            i18n.KO.BTN_VIEW_SKIPPED_FMT.format(n=total)
+        )
+        self.btn_view_skipped.setEnabled(total > 0)
         # ‘보류 재시도’ 는 defer 만 활성 — none 은 영구 미탐
-        self.retry_btn.setEnabled(has_any)
+        self.retry_btn.setEnabled(n_defer > 0)
+
+    def _open_skipped_dialog(self) -> None:
+        """[보류된 사진 보기] 클릭 → 보류/매칭없음 사진을 큰 팝업에 모아 표시."""
+        if self._state is None:
+            return
+        from PyQt6.QtWidgets import QDialog as _QDialog
+        dlg = _QDialog(self)
+        dlg.setWindowTitle(i18n.KO.SKIPPED_DIALOG_TITLE)
+        dlg.setModal(True)
+        from PyQt6.QtWidgets import QApplication as _QA
+        scr = (self.screen() if hasattr(self, "screen") else None) \
+            or _QA.primaryScreen()
+        if scr is not None:
+            g = scr.availableGeometry()
+            dlg.resize(min(1200, int(g.width() * 0.9)),
+                       min(800, int(g.height() * 0.85)))
+        else:
+            dlg.resize(1200, 800)
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
+
+        defer_slots = sorted(s for s, v in self._state.skipped.items() if v)
+        none_slots = sorted(s for s, v in self._state.no_match.items() if v)
+        if not defer_slots and not none_slots:
+            lab = QLabel(i18n.KO.SKIPPED_DIALOG_EMPTY, dlg)
+            lab.setProperty("role", "muted")
+            layout.addWidget(lab)
+        else:
+            scroll = QScrollArea(dlg)
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+            host = QWidget()
+            hl = QVBoxLayout(host)
+            hl.setContentsMargins(4, 4, 4, 4)
+            hl.setSpacing(10)
+            if defer_slots:
+                n = sum(len(self._state.skipped[s]) for s in defer_slots)
+                hdr = QLabel(
+                    i18n.KO.SKIPPED_SECTION_DEFER_FMT.format(n=n), host,
+                )
+                hdr.setStyleSheet(
+                    "color: #FFD600; font-weight: 700; padding: 6px 2px;"
+                )
+                hl.addWidget(hdr)
+                for slot in defer_slots:
+                    sec = SlotSection(slot, columns=4, select_mode=False,
+                                      parent=host)
+                    sec.set_entries([
+                        ThumbEntry(item=it)
+                        for it in self._state.skipped[slot]
+                    ])
+                    hl.addWidget(sec)
+            if none_slots:
+                n = sum(len(self._state.no_match[s]) for s in none_slots)
+                hdr = QLabel(
+                    i18n.KO.SKIPPED_SECTION_NO_MATCH_FMT.format(n=n), host,
+                )
+                hdr.setStyleSheet(
+                    "color: #FF2D55; font-weight: 700; padding: 6px 2px;"
+                )
+                hl.addWidget(hdr)
+                for slot in none_slots:
+                    sec = SlotSection(slot, columns=4, select_mode=False,
+                                      parent=host)
+                    sec.set_entries([
+                        ThumbEntry(item=it)
+                        for it in self._state.no_match[slot]
+                    ])
+                    hl.addWidget(sec)
+            hl.addStretch(1)
+            scroll.setWidget(host)
+            layout.addWidget(scroll, stretch=1)
+
+        bar = QHBoxLayout()
+        bar.addStretch(1)
+        close = NeonButton(i18n.KO.BTN_OK, role="ghost")
+        close.clicked.connect(dlg.accept)
+        bar.addWidget(close)
+        layout.addLayout(bar)
+        dlg.exec()
 
     def _retry_skipped(self) -> None:
         """Skip 된 항목들을 큐 앞으로 다시 밀어넣고, 임계치를 낮춰 재시도."""

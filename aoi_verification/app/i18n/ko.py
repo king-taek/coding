@@ -87,6 +87,29 @@ PANEL_SKIP_LIST = "Skip 된 사진들"
 PANEL_MATCH_REF = "기준 사진"
 PANEL_MATCH_CANDIDATES = "검증 장비 후보"
 
+# Stage 2 의 보류/매칭없음 사진 팝업
+BTN_VIEW_SKIPPED_FMT = "보류된 사진 보기 ({n})"
+SKIPPED_DIALOG_TITLE = "보류 / 매칭 없음 사진"
+SKIPPED_SECTION_DEFER_FMT = "잠시 보류 ({n} 장)"
+SKIPPED_SECTION_NO_MATCH_FMT = "매칭 없음 확정 ({n} 장)"
+SKIPPED_DIALOG_EMPTY = "보류 / 매칭 없음 사진이 없습니다."
+
+# 매치 실패 사진 검토 다이얼로그 (#8)
+BTN_REVIEW_UNMATCHED = "매치 실패 사진 검토"
+UNMATCHED_REVIEW_TITLE = "매치 실패 사진 검토 — {n} 장"
+UNMATCHED_REVIEW_PROGRESS_FMT = "{idx} / {total} — {slot}"
+UNMATCHED_REVIEW_HINT = (
+    "매치 실패한 기준 사진을 하나씩 검토합니다. 같은 슬롯의 검증 장비 후보를"
+    " 유사도 순으로 보여주니, 맞는 사진이 있으면 클릭해서 매칭으로 확정하세요."
+)
+UNMATCHED_REVIEW_NO_CANDIDATES = "이 슬롯에는 검증 장비 후보가 없습니다."
+UNMATCHED_REVIEW_DONE_FMT = "{n} 건의 신규 매칭을 확정했습니다."
+UNMATCHED_REVIEW_EMPTY = "검토할 매치 실패 사진이 없습니다."
+BTN_UNMATCHED_PICK = "이 사진으로 매칭"
+BTN_UNMATCHED_NEXT = "건너뛰기 (다음)"
+BTN_UNMATCHED_PREV = "← 이전"
+BTN_UNMATCHED_CLOSE = "검토 종료"
+
 # ── 줌-뷰 윈도우 ───────────────────────────────────────────────────────────
 ZOOM_TITLE_TARGETS = "검증 대상인 사진들 — {slot}"
 ZOOM_TITLE_EXCLUDED = "검증 하지 않을 사진 — {slot}"
@@ -94,7 +117,7 @@ ZOOM_TITLE_CANDIDATES = "검증 후보 사진들 — {slot}"
 ZOOM_BTN_EXCLUDE = "검증에서 제외"
 ZOOM_BTN_TO_TARGET = "검증 대상으로 변경"
 ZOOM_BTN_TO_CENTER = "재결정으로 복귀"
-ZOOM_BTN_PICK_MATCH = "이 사진을 매칭으로 확정"
+ZOOM_BTN_PICK_MATCH = "이 사진으로 매칭"
 
 # ── 단축키 ────────────────────────────────────────────────────────────────
 SHORTCUT_TOOLTIP = (

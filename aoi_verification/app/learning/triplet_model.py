@@ -15,8 +15,10 @@ except Exception:  # pragma: no cover
     _HAS_TORCH = False
 
 
-# 기본 차원 — meta.json 의 head_dims 와 맞춤
-DEFAULT_DIMS: Tuple[int, int, int] = (1280, 512, 128)
+# 기본 차원 — meta.json 의 head_dims 와 맞춤.
+# MobileNetV3-Small 의 `features` 출력은 **576-d** (classifier=Identity 이후).
+# 과거에 1280 으로 잘못 잡았다가 학습 시 mat1/mat2 shape mismatch 가 났던 이슈.
+DEFAULT_DIMS: Tuple[int, int, int] = (576, 512, 128)
 
 
 def is_available() -> bool:

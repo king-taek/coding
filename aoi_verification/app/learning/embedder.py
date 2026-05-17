@@ -34,6 +34,8 @@ _INPUT_PX = 256
 _IMAGENET_MEAN = (0.485, 0.456, 0.406)
 _IMAGENET_STD = (0.229, 0.224, 0.225)
 _DEFAULT_BATCH = 32
+# MobileNetV3-Small 의 features 출력 채널 수 — classifier=Identity 이후 backbone(x) 의 dim.
+BACKBONE_OUT_DIM = 576
 
 
 def is_available() -> bool:
@@ -80,10 +82,18 @@ def _load_head_for(model_name: str):  # pragma: no cover — heavy
         return None
     try:
         head = triplet_model.load_head(info.weights_path)
-        head.eval()
-        return head
     except Exception:
         return None
+    # 백본 출력 차원과 head 의 입력 차원이 다르면 안전하게 무시 (basic 으로 fallback).
+    # 과거 1280 으로 잘못 저장된 .pt 가 있어도 추론을 깨뜨리지 않게 방어.
+    try:
+        in_dim = int(head.dims[0])
+    except Exception:
+        in_dim = -1
+    if in_dim != BACKBONE_OUT_DIM:
+        return None
+    head.eval()
+    return head
 
 
 # ---------------------------------------------------------------------------

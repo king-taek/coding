@@ -282,15 +282,26 @@ class ZoomWindow(QDialog):
             # Stage 2 의 +N 후보 — 단일 선택으로 매칭 확정 가능 (#2)
             self._btn_a = NeonButton(i18n.KO.ZOOM_BTN_PICK_MATCH, role="primary")
             self._btn_a.clicked.connect(lambda: self._emit("pick"))
+            # 좁은 노트북 화면에서도 라벨이 잘리지 않도록 최소 폭 확보.
+            self._btn_a.setMinimumWidth(220)
             self._btn_b = None  # type: ignore[assignment]
         else:
             self._btn_a = self._btn_b = None  # type: ignore[assignment]
 
         if self._btn_a is not None:
             self._btn_a.setEnabled(False)
+            # 라벨이 잘리지 않도록 sizeHint 를 최소값으로 보장.
+            self._btn_a.setMinimumWidth(
+                max(self._btn_a.sizeHint().width(),
+                    self._btn_a.minimumWidth())
+            )
             bar.addWidget(self._btn_a)
         if self._btn_b is not None:
             self._btn_b.setEnabled(False)
+            self._btn_b.setMinimumWidth(
+                max(self._btn_b.sizeHint().width(),
+                    self._btn_b.minimumWidth())
+            )
             bar.addWidget(self._btn_b)
         bar.addStretch(1)
         close = NeonButton(i18n.KO.BTN_OK, role="ghost")

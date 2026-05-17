@@ -786,11 +786,25 @@ class MainWindow(QMainWindow):
             self._input is not None
             and AutomationLevel.is_auto(self._input.automation_level)
         )
+        # 매치 실패 사진 검토(#8) 용 후보 풀 + 점수 캐시.
+        # cross 모드는 Phase A/B 에서 ref/val 양쪽 모두 미매칭이 생길 수 있어
+        # ‘unmatched.side 기준의 반대편 사진들’ 을 슬롯별로 만든다:
+        #   side == "ref"  → 후보 = 같은 슬롯의 val_images
+        #   side == "val"  → 후보 = 같은 슬롯의 ref_images
+        # 단일 모드는 unmatched.side 가 항상 "ref" 라 val_images 만 쓰인다.
+        review_pool: dict[tuple[str, str], list] = {}
+        for slot_name in self._scan.common_slot_names:
+            slot = self._scan.slots[slot_name]
+            review_pool[(slot_name, "ref")] = list(slot.val_images)
+            review_pool[(slot_name, "val")] = list(slot.ref_images)
+        review_score_cache = getattr(self._match_page, "_score_cache", None)
         self._result_page.show_result(
             result,
             template_path=self._template_used,
             target_path=self._working_xlsx,
             auto_mode=auto_mode,
+            val_pool=review_pool,
+            score_cache=review_score_cache,
         )
         QMessageBox.information(self, i18n.KO.APP_TITLE, i18n.KO.INFO_ALL_DONE)
         self._show_page(self._result_page)

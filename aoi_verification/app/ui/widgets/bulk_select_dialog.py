@@ -8,8 +8,9 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import (QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel,
-                              QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout,
+                              QHBoxLayout, QLabel, QScrollArea, QSizePolicy,
+                              QVBoxLayout, QWidget)
 
 from ... import i18n
 from ...models.slot import ImageItem
@@ -103,7 +104,17 @@ class BulkSelectDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setModal(True)
-        self.resize(_COLS * (_TILE_PX + 22) + 80, 800)
+        # 노트북 등 작은 화면에서 하단 액션 버튼이 화면 밖으로 잘려
+        # ‘버튼이 안 보인다’ 라고 느껴지지 않도록 화면 작업영역의 90% 로 클램프.
+        want_w = _COLS * (_TILE_PX + 22) + 80
+        want_h = 800
+        scr = (parent.screen() if parent is not None and hasattr(parent, "screen")
+               else None) or QApplication.primaryScreen()
+        if scr is not None:
+            g = scr.availableGeometry()
+            want_w = min(want_w, int(g.width() * 0.92))
+            want_h = min(want_h, int(g.height() * 0.88))
+        self.resize(want_w, want_h)
         self._tiles_by_key: dict[str, _SelectTile] = {}
         self._selected_keys: set[str] = set()
         self._selected_items_by_key: dict[str, ImageItem] = {}
@@ -198,13 +209,14 @@ class BulkSelectDialog(QDialog):
         bar.addWidget(self.btn_clear)
         bar.addStretch(1)
 
-        # 액션 버튼들
+        # 액션 버튼들 — sizeHint 보다 작게 줄어들지 않도록 최소 폭을 명시.
         self._action_buttons: list[NeonButton] = []
         for action_id, label, role in actions:
             btn = NeonButton(label, role=role)
             btn.clicked.connect(
                 lambda _c=False, a=action_id: self._fire(a)
             )
+            btn.setMinimumWidth(max(btn.sizeHint().width(), 160))
             bar.addWidget(btn)
             self._action_buttons.append(btn)
 
