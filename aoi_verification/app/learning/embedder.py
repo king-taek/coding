@@ -243,56 +243,35 @@ def compute_embedding(src: Path) -> Optional[np.ndarray]:
     return out.get(Path(src))
 
 
-def compute_embeddings(paths: Iterable[Path],
-                       *,
-                       batch_size: int = _DEFAULT_BATCH
-                       ) -> dict[Path, np.ndarray]:
-    """여러 이미지의 임베딩을 배치로 계산. basic 모드면 빈 dict.
+def _cpu_head_clone(head):  # pragma: no cover — torch optional
+    """``_load_head_for`` 가 반환한 head 를 OpenVINO 용 CPU 사본으로.
 
-    OpenVINO + NPU/Intel GPU 가용 시 그 경로를 우선 사용 (#5 — Intel
-    노트북 호환).  실패 시 PyTorch device (CUDA/XPU/MPS/CPU) 경로로 폴백.
+    ``head.to('cpu')`` 를 그대로 호출하면 lru_cache 가 보관 중인 객체가
+    in-place mutation 되어, 이후 PyTorch 경로가 GPU 텐서 vs CPU 가중치로
+    device mismatch 가 난다.  deepcopy 후 CPU 로 이동해 캐시 원본은 보존.
     """
+    if head is None:
+        return None
+    if _DEVICE is None or _DEVICE.type == "cpu":
+        return head        # 이미 CPU — mutation 위험 없음
+    import copy as _copy
+    return _copy.deepcopy(head).to("cpu")
+
+
+def _compute_embeddings_pytorch(paths: list[Path],
+                                 *,
+                                 batch_size: int,
+                                 mode: str) -> dict[Path, np.ndarray]:
+    """PyTorch backbone+head 로 임베딩 계산 (CUDA/XPU/MPS/CPU)."""
     out: dict[Path, np.ndarray] = {}
-    if not is_available():
+    if not paths:
         return out
-    mode = get_active_mode()
-    if mode == registry.BASIC:
-        return out
-
-    # 1) OpenVINO NPU/GPU 우선 — Intel AI Boost NPU / Iris Xe / Arc.
-    try:
-        from . import embedder_openvino as _ov
-        if _ov.is_available():
-            head_for_ov = _load_head_for(mode)
-            # OpenVINO 는 CPU 디바이스 head 를 요구.  PyTorch head 가 _DEVICE
-            # 로 옮겨져 있을 수 있으니 CPU 사본 사용.
-            if head_for_ov is not None and _DEVICE is not None and _DEVICE.type != "cpu":
-                try:
-                    head_cpu = head_for_ov.to("cpu")
-                except Exception:
-                    head_cpu = head_for_ov
-            else:
-                head_cpu = head_for_ov
-            ov_out = _ov.compute_embeddings(
-                paths, batch_size=batch_size, head=head_cpu,
-            )
-            if ov_out:
-                return ov_out
-            # 빈 dict 면 OpenVINO 가 실패 → PyTorch 폴백.
-    except Exception:
-        pass
-
-    # 2) GPU 디바이스라면 배치를 키워 처리량 ↑.
+    # GPU 디바이스라면 배치 ↑.
     if _DEVICE is not None and _DEVICE.type in ("cuda", "xpu"):
         batch_size = max(batch_size, 64)
 
     backbone = _load_backbone()
     head = _load_head_for(mode)
-
-    items = [Path(p) for p in paths]
-    if not items:
-        return out
-
     pending: list[Tuple[Path, "torch.Tensor"]] = []
 
     def _flush_batch() -> None:
@@ -301,8 +280,6 @@ def compute_embeddings(paths: Iterable[Path],
         keys = [p for p, _ in pending]
         tensors = [t for _, t in pending]
         x = torch.stack(tensors)
-        # 가속 디바이스가 있으면 입력 텐서도 함께 이동 (#5).
-        # non_blocking 은 CUDA 이외 디바이스에선 무시되므로 안전.
         if _DEVICE is not None and _DEVICE.type != "cpu":
             x = x.to(_DEVICE, non_blocking=True)
         with torch.no_grad():
@@ -310,14 +287,13 @@ def compute_embeddings(paths: Iterable[Path],
             if head is not None:
                 feat = head(feat)
             feat = feat.detach().cpu().numpy()
-        # L2 정규화
         norms = np.linalg.norm(feat, axis=1, keepdims=True) + 1e-9
         feat = (feat / norms).astype(np.float32)
         for k, v in zip(keys, feat):
             out[k] = v
         pending.clear()
 
-    for p in items:
+    for p in paths:
         t = _make_input_tensor(p)
         if t is None:
             continue
@@ -325,6 +301,51 @@ def compute_embeddings(paths: Iterable[Path],
         if len(pending) >= batch_size:
             _flush_batch()
     _flush_batch()
+    return out
+
+
+def compute_embeddings(paths: Iterable[Path],
+                       *,
+                       batch_size: int = _DEFAULT_BATCH
+                       ) -> dict[Path, np.ndarray]:
+    """여러 이미지의 임베딩을 배치로 계산. basic 모드면 빈 dict.
+
+    OpenVINO + NPU/Intel GPU 가용 시 그 경로를 우선 사용 (Intel 노트북
+    호환).  OpenVINO 가 일부 path 만 처리한 경우 누락된 path 는 PyTorch
+    경로로 보완해서 합친다 — 누락 임베딩이 score() 단계에서 sentinel 로
+    빠지면서 매칭 품질이 떨어지는 것 방지.
+    """
+    out: dict[Path, np.ndarray] = {}
+    if not is_available():
+        return out
+    mode = get_active_mode()
+    if mode == registry.BASIC:
+        return out
+    items = [Path(p) for p in paths]
+    if not items:
+        return out
+
+    # 1) OpenVINO NPU/GPU 우선 — Intel AI Boost NPU / Iris Xe / Arc.
+    ov_handled: set[Path] = set()
+    try:
+        from . import embedder_openvino as _ov
+        if _ov.is_available():
+            head_for_ov = _cpu_head_clone(_load_head_for(mode))
+            ov_out = _ov.compute_embeddings(
+                items, batch_size=batch_size, head=head_for_ov,
+            )
+            if ov_out:
+                out.update(ov_out)
+                ov_handled = set(ov_out.keys())
+    except Exception:
+        pass
+
+    # 2) OpenVINO 가 처리하지 못한 path 들은 PyTorch 경로로 보완.
+    missing = [p for p in items if p not in ov_handled]
+    if missing:
+        out.update(_compute_embeddings_pytorch(
+            missing, batch_size=batch_size, mode=mode,
+        ))
     return out
 
 
@@ -339,8 +360,13 @@ def cosine_similarity(a: Optional[np.ndarray],
 
 
 def invalidate_caches() -> None:
-    """모델 파일이 새로 학습/리네임된 후 호출."""
+    """모델 파일이 새로 학습/리네임된 후 호출 — head 캐시 + OpenVINO 컴파일 캐시 모두 정리."""
     _load_head_for.cache_clear()
+    try:
+        from . import embedder_openvino as _ov
+        _ov.invalidate_caches()
+    except Exception:
+        pass
 
 
 def make_input_tensor(path: Path):  # pragma: no cover — 외부 노출(트레이너용)

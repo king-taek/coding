@@ -6,6 +6,26 @@ UI/로그/툴팁/오류 메시지 모두 이 모듈을 통해 참조합니다.
 
 # ── 앱/메타 ────────────────────────────────────────────────────────────────
 APP_TITLE = "AOI 검증"
+
+# ── OpenVINO 자동 설치 안내 ───────────────────────────────────────────────
+OPENVINO_OFFER_TITLE = "Intel GPU / NPU 가속 활성화"
+OPENVINO_OFFER_BODY = (
+    "Intel CPU 가 감지되었습니다.\n"
+    "OpenVINO 를 설치하면 Intel GPU (Iris Xe / Arc) 와 NPU (AI Boost) "
+    "가속이 자동으로 활성화되어 유사도 계산이 빨라집니다.\n\n"
+    "지금 설치할까요? (약 200 MB)"
+)
+OPENVINO_OFFER_BTN_INSTALL = "지금 설치"
+OPENVINO_OFFER_BTN_LATER = "다음에"
+OPENVINO_OFFER_BTN_NEVER = "다시 보지 않기"
+OPENVINO_INSTALL_PROGRESS = "OpenVINO 설치 중…"
+OPENVINO_INSTALL_DONE = (
+    "OpenVINO 설치 완료!\n프로그램을 다시 시작하면 Intel GPU / NPU 가속이 적용됩니다."
+)
+OPENVINO_INSTALL_FAILED_FMT = (
+    "OpenVINO 설치에 실패했습니다 — {error}\n\n"
+    "수동으로 시도해보세요:  pip install openvino"
+)
 APP_DEVELOPER = "임현택 (HyunTaek Lim)"
 APP_AFFILIATION = "Bump 2 Dept. / AOI Engineer"
 

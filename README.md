@@ -76,7 +76,7 @@ pip install -r requirements.txt
 | 표시 | 조건 | 추가 설치 |
 |---|---|---|
 | `GPU 가속 (NVIDIA …)` | NVIDIA GPU + CUDA 드라이버 | 일반 `torch` (CUDA 빌드) |
-| `Intel GPU 가속 (xpu)` | Intel Iris Xe / Arc GPU | **PyTorch 2.5+** 만 있으면 native 인식 |
+| `Intel GPU 가속 (xpu)` | Intel Iris Xe / Arc GPU | **PyTorch 2.5+** + 인텔 oneAPI / Level Zero 런타임. `pip install --index-url https://download.pytorch.org/whl/xpu torch torchvision` 로 XPU 빌드 설치 |
 | `NPU 가속 (Intel AI Boost — OpenVINO)` | Meteor Lake+ Intel 노트북의 NPU | `pip install openvino` (≈ 200 MB) |
 | `Intel GPU 가속 (OpenVINO)` | Intel GPU + OpenVINO | `pip install openvino` |
 | `Apple GPU 가속 (Metal)` | Apple M1/M2/M3 Mac | torch 기본 |

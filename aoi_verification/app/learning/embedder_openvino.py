@@ -100,9 +100,17 @@ def device_label() -> str:  # pragma: no cover — 환경 의존
 # ---------------------------------------------------------------------------
 # Backbone 컴파일 (lazy)
 # ---------------------------------------------------------------------------
+# 주의: OpenVINO NPU 플러그인은 dynamic shape 지원이 제한적이라 (특히
+# Meteor Lake 1세대) 고정 배치 = 1 로 컴파일하고 한 장씩 추론하는 게
+# 가장 호환성 높다.  GPU/CPU 는 dynamic 도 가능하지만 단순성 위해 통일.
+# 한 번 컴파일한 ``compiled_model`` 은 InferRequest 를 재사용해 여러 장을
+# 빠르게 처리.
 @lru_cache(maxsize=1)
 def _compile_backbone():  # pragma: no cover — 환경 의존
-    """MobileNetV3-Small backbone 을 OpenVINO 로 변환 후 NPU/GPU 컴파일."""
+    """MobileNetV3-Small backbone 을 OpenVINO 로 변환 후 NPU/GPU 컴파일.
+
+    Thread-safe: ``functools.lru_cache`` 는 CPython 에서 내부 락으로 보호.
+    """
     if not is_available():
         return None
     weights = models.MobileNet_V3_Small_Weights.IMAGENET1K_V1
@@ -112,19 +120,23 @@ def _compile_backbone():  # pragma: no cover — 환경 의존
     example = torch.randn(1, 3, _INPUT_PX, _INPUT_PX)
     ov_model = ov.convert_model(backbone, example_input=example)
     core = ov.Core()
-    try:
-        compiled = core.compile_model(ov_model, target_device())
-    except Exception:
-        # NPU 가 실패하면 GPU 시도, GPU 도 실패면 None.
+    primary = target_device()
+    # NPU 가 실패하면 GPU 로 자동 fallback (모델/op 미지원 등).
+    for cand in (primary, "GPU", "CPU"):
+        if cand is None:
+            continue
         try:
-            compiled = core.compile_model(ov_model, "GPU")
+            return core.compile_model(ov_model, cand)
         except Exception:
-            return None
-    return compiled
+            continue
+    return None
 
 
 def invalidate_caches() -> None:
-    """모델 변경 등으로 컴파일 캐시를 무효화해야 할 때 호출."""
+    """모델 변경 등으로 컴파일 캐시를 무효화해야 할 때 호출.
+
+    ``embedder.invalidate_caches()`` 가 학습 / 모델 교체 후 함께 호출.
+    """
     _compile_backbone.cache_clear()
 
 
@@ -156,13 +168,19 @@ def _make_input_array(path: Path) -> Optional[np.ndarray]:  # pragma: no cover
 # ---------------------------------------------------------------------------
 def compute_embeddings(paths: Iterable[Path],
                        *,
-                       batch_size: int = 16,
+                       batch_size: int = 1,        # NPU 호환을 위해 사실상 1
                        head=None
                        ) -> Dict[Path, np.ndarray]:  # pragma: no cover
     """OpenVINO 백본 + (선택) PyTorch head 로 임베딩을 계산.
 
-    ``head`` 는 ``triplet_model.ProjectionHead`` (CPU 에서 실행 — 작아서
-    OpenVINO 변환 오버헤드보다 빠름).  None 이면 backbone 만 적용.
+    NPU 플러그인의 dynamic shape 제약을 우회하기 위해 **한 장씩** 추론
+    (``InferRequest`` 재사용으로 호출 오버헤드 최소화).  ``head`` 는
+    ``triplet_model.ProjectionHead`` (CPU 실행, ~150K params 라 빠름).
+
+    ``batch_size`` 파라미터는 시그니처 호환만 위해 유지하고 내부는 항상
+    1 장씩 처리.  실패한 path 는 결과 dict 에서 빠지므로 ``embedder.
+    compute_embeddings`` 가 PyTorch 경로로 보완할 수 있다 (partial-result
+    fallback).
     """
     out: Dict[Path, np.ndarray] = {}
     if not is_available():
@@ -175,36 +193,35 @@ def compute_embeddings(paths: Iterable[Path],
     if not items:
         return out
 
-    pending: list[tuple[Path, np.ndarray]] = []
-
-    def _flush() -> None:
-        if not pending:
-            return
-        keys = [k for k, _ in pending]
-        x = np.stack([a for _, a in pending])
-        try:
-            result = compiled([x])
-        except Exception:
-            pending.clear()
-            return
-        # result 는 dict-like — 첫 출력 값 사용.
-        feat = list(result.values())[0]
-        if head is not None and _HAS_TORCH:
-            with torch.no_grad():
-                t = torch.from_numpy(feat)
-                feat = head(t).cpu().numpy()
-        norms = np.linalg.norm(feat, axis=1, keepdims=True) + 1e-9
-        feat = (feat / norms).astype(np.float32)
-        for k, v in zip(keys, feat):
-            out[k] = v
-        pending.clear()
+    # InferRequest 재사용 — compile 비용은 1 회, 추론은 N 회.
+    try:
+        req = compiled.create_infer_request()
+    except Exception:
+        return out
+    # 출력 텐서 키 (모델 변환 직후라 첫 output 만 있음).
 
     for p in items:
         arr = _make_input_array(p)
         if arr is None:
             continue
-        pending.append((p, arr))
-        if len(pending) >= batch_size:
-            _flush()
-    _flush()
+        # (1, 3, H, W) — NPU 는 고정 배치 1 만 안전하게 받음.
+        x = arr[np.newaxis]
+        try:
+            res = req.infer({0: x})
+        except Exception:
+            continue
+        # res 는 OrderedDict-like. 첫 output 의 (1, 576) 텐서.
+        try:
+            feat = list(res.values())[0]
+        except Exception:
+            continue
+        if head is not None and _HAS_TORCH:
+            try:
+                with torch.no_grad():
+                    feat = head(torch.from_numpy(feat)).cpu().numpy()
+            except Exception:
+                continue
+        # L2 정규화 (PyTorch 경로와 동일 결과 보장).
+        norm = float(np.linalg.norm(feat[0])) + 1e-9
+        out[p] = (feat[0] / norm).astype(np.float32)
     return out
