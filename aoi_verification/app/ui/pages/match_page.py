@@ -74,6 +74,9 @@ class MatchPage(QWidget):
         # 매 reference 마다 점수 재계산을 회피한다.
         self._score_cache = SlotScoreCache()
         self._precompute_worker: Optional[SlotPrecomputeWorker] = None
+        # 수동 모드 한정: 슬롯 단위 스트리밍 사전 계산 상태.
+        self._streaming_precompute: bool = False
+        self._waiting_for_slot: Optional[str] = None
         # 자동 매치 모드 (#3): True 면 사용자 클릭 없이 임계치 이상 최고 점수 후보를
         # 자동으로 매치 / 후보 없으면 ‘매치 없음’ 으로 자동 처리.
         self._auto_mode: bool = False
@@ -109,6 +112,14 @@ class MatchPage(QWidget):
         self.progress_label = QLabel("", self)
         self.progress_label.setProperty("role", "muted")
         top.addWidget(self.progress_label)
+        top.addSpacing(20)
+        # 백그라운드 사전 계산 상태 — 수동 모드에서만 표시. 매칭 화면이 이미
+        # 열려 있는 동안에도 ‘나머지 슬롯이 X / Y 완료’ 임을 알려준다.
+        self.bg_status_label = QLabel("", self)
+        self.bg_status_label.setStyleSheet(
+            "color: #00FFA3; padding: 2px 8px;"
+        )
+        top.addWidget(self.bg_status_label)
         root.addLayout(top)
 
         # 2 pane — QSplitter 로 사용자가 분할 비율 조절 -------------------
@@ -291,15 +302,16 @@ class MatchPage(QWidget):
 
     # ------------------------------------------------------------------
     def _start_precompute(self) -> None:
-        """현재 state.queue 의 모든 ref 와 슬롯별 val 사이의 점수를 미리 계산.
+        """슬롯별 (ref, val) 점수를 사전 계산.
 
-        한 번 끝나면 ``_launch_matcher`` 는 사실상 디스크/CPU 작업 없이
-        ``_score_cache`` 조회만 한다. precompute 가 완료될 때까지 첫
-        reference 의 ``_advance`` 호출도 잠깐 지연시켜 ‘로딩 후 즉시’ UX 보장.
+        - 자동 모드: 기존처럼 전체 슬롯이 끝날 때까지 기다린 뒤 매칭 시작.
+        - 수동 모드: 첫 슬롯이 끝나면 곧장 매칭 시작 + 나머지 슬롯은
+          백그라운드에서 슬롯 단위로 진행 (메모리 절약을 위해 features 는
+          슬롯 처리 직후 폐기).
         """
         if self._state is None:
             return
-        # 슬롯별 ref 수집
+        # 슬롯별 ref 수집 — queue 순서를 따라 사용자가 마주칠 순서대로 처리.
         refs_by_slot: dict[str, list[ImageItem]] = defaultdict(list)
         for r in self._state.queue:
             refs_by_slot[r.slot].append(r)
@@ -311,23 +323,44 @@ class MatchPage(QWidget):
         total_pairs = sum(len(r) * len(v) for _, r, v in tasks)
         if total_pairs == 0:
             # 계산할 게 없으면 바로 진행
+            self.bg_status_label.setText("")
+            self._streaming_precompute = False
+            self._waiting_for_slot = None
             self._advance()
             return
 
-        # 이전 precompute 워커가 살아있으면 중단
+        # 이전 precompute 워커가 살아있으면 중단 + 상태 초기화
         if self._precompute_worker is not None and self._precompute_worker.isRunning():
             self._precompute_worker.stop()
             self._precompute_worker.wait(500)
 
-        self._loading.show_overlay(
-            i18n.KO.LOAD_PRECOMPUTE_FMT.format(done=0, total=total_pairs)
-        )
+        streaming = not bool(self._auto_mode)
+        self._streaming_precompute = streaming
+        self._waiting_for_slot = None
+
+        if streaming:
+            # 첫 슬롯이 끝날 때까지만 차단 오버레이 — 그 다음은 백그라운드.
+            self._loading.show_overlay(i18n.KO.LOAD_PRECOMPUTE_FIRST_SLOT)
+            self.bg_status_label.setText(
+                i18n.KO.PRECOMPUTE_BG_STATUS_FMT.format(idx=0, total=len(tasks))
+            )
+        else:
+            self._loading.show_overlay(
+                i18n.KO.LOAD_PRECOMPUTE_FMT.format(done=0, total=total_pairs)
+            )
+            self.bg_status_label.setText("")
+
         self._precompute_worker = SlotPrecomputeWorker(
             tasks, slot_cache=self._slot_cache,
-            score_cache=self._score_cache, parent=self,
+            score_cache=self._score_cache,
+            release_after_slot=streaming,
+            parent=self,
         )
         self._precompute_worker.signals.progress.connect(
             self._on_precompute_progress
+        )
+        self._precompute_worker.signals.slot_finished.connect(
+            self._on_precompute_slot_finished
         )
         self._precompute_worker.signals.finished.connect(
             self._on_precompute_finished
@@ -338,22 +371,55 @@ class MatchPage(QWidget):
         self._precompute_worker.start()
 
     def _on_precompute_progress(self, done: int, total: int) -> None:
-        self._loading.set_progress(
-            done, total,
-            i18n.KO.LOAD_PRECOMPUTE_FMT.format(done=done, total=total),
+        # 자동 모드 (기존 동작) 에서만 차단 오버레이 진행률 갱신.
+        # 수동/스트리밍 모드에서는 슬롯 단위 라벨만 갱신하므로 noop.
+        if not self._streaming_precompute:
+            self._loading.set_progress(
+                done, total,
+                i18n.KO.LOAD_PRECOMPUTE_FMT.format(done=done, total=total),
+            )
+
+    def _on_precompute_slot_finished(self,
+                                      slot: str,
+                                      idx: int,
+                                      total: int) -> None:
+        """슬롯 1 개의 점수 계산이 끝났을 때 호출.
+
+        수동 모드에서는:
+        - 첫 슬롯 완료 시 매칭 화면을 즉시 활성화 (_advance).
+        - 사용자가 ‘아직 점수 안 끝난 슬롯’ 에 도착해 기다리는 중이라면
+          그 슬롯이 끝났을 때 자동으로 _advance 를 재시도.
+        - 상단 상태 라벨 갱신 (백그라운드 진행 표시).
+        """
+        self.bg_status_label.setText(
+            i18n.KO.PRECOMPUTE_BG_STATUS_FMT.format(idx=idx, total=total)
         )
+        if not self._streaming_precompute:
+            return
+        if idx == 1:
+            # 첫 슬롯 끝 → 차단 오버레이를 내리고 매칭 시작.
+            self._loading.hide_overlay()
+            self._advance()
+            return
+        if self._waiting_for_slot == slot:
+            self._waiting_for_slot = None
+            self._loading.hide_overlay()
+            self._advance()
 
     def _on_precompute_finished(self) -> None:
-        # 자동 모드면 곧장 자동 매치 진행 표시로 전환, 수동 모드면 오버레이 숨김.
-        if getattr(self, "_auto_mode", False):
+        # 자동 모드면 곧장 자동 매치 진행 표시로 전환, 수동 모드면 ‘완료’ 라벨로.
+        if self._auto_mode:
             total = len(self._state.queue) if self._state else 0
             self._loading.set_progress(
                 0, total,
                 i18n.KO.LOAD_AUTO_MATCH_FMT.format(done=0, total=total),
             )
-        else:
-            self._loading.hide_overlay()
-        self._advance()
+            self._advance()
+            return
+        # 수동/스트리밍 모드: 첫 슬롯 시점에 이미 _advance 가 호출돼 매칭이
+        # 진행 중이므로 여기서 추가 _advance 는 불필요. 상태 라벨만 정리.
+        self.bg_status_label.setText(i18n.KO.PRECOMPUTE_BG_DONE)
+        self._streaming_precompute = False
 
     def get_state(self) -> Stage2State | None:
         return self._state
@@ -386,6 +452,22 @@ class MatchPage(QWidget):
             QMessageBox.information(self, i18n.KO.APP_TITLE,
                                     i18n.KO.INFO_NO_MATCH_FOUND)
             self._skip_current()
+            return
+
+        # 스트리밍 모드에서 사용자가 ‘아직 점수 계산 중인 슬롯’ 에 도착하면
+        # 짧은 오버레이로 안내 후, 그 슬롯이 끝났다는 시그널이 오면 자동으로
+        # 다시 _advance 가 호출된다 (_on_precompute_slot_finished 에서).
+        slot = self._current.slot
+        if (self._streaming_precompute
+                and self._precompute_worker is not None
+                and self._precompute_worker.isRunning()
+                and not self._score_cache.has_all_pairs(
+                    slot, self._current.path, [v.path for v in val_items],
+                )):
+            self._waiting_for_slot = slot
+            self._loading.show_overlay(
+                i18n.KO.LOAD_PRECOMPUTE_WAIT_FMT.format(slot=slot)
+            )
             return
 
         self._launch_matcher(self._current, val_items)

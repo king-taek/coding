@@ -275,6 +275,15 @@ LOAD_PRECOMPUTE_FMT = (
     "유사도 사전 계산 중… {done} / {total}\n"
     "(한 번 끝나면 이후 매칭은 즉시 처리됩니다)"
 )
+# 수동 모드: 첫 슬롯만 기다리고 나머지는 백그라운드 (#streaming).
+LOAD_PRECOMPUTE_FIRST_SLOT = (
+    "첫 슬롯 유사도 계산 중… 잠시만 기다려 주세요."
+)
+LOAD_PRECOMPUTE_WAIT_FMT = (
+    "{slot} 슬롯 유사도 계산을 기다리는 중… 다음 슬롯은 백그라운드에서 준비됩니다"
+)
+PRECOMPUTE_BG_STATUS_FMT = "백그라운드 유사도 계산: {idx} / {total} 슬롯 완료"
+PRECOMPUTE_BG_DONE = "유사도 사전 계산 완료"
 LOAD_AUTO_MATCH_FMT = "자동 매치 진행 중… {done} / {total}"
 
 # ── 자동화 수준 (#3 올인원 모드) ───────────────────────────────────────────

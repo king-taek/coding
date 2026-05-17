@@ -111,6 +111,20 @@ class SlotFeatureCache:
             self._active = None
             self._lookahead = None
 
+    def release(self, slot: str) -> None:
+        """슬롯의 RAM features 를 즉시 폐기.
+
+        점수 계산이 끝나 더는 features 가 필요 없을 때 (스트리밍 사전 계산
+        워커가 다음 슬롯으로 넘어갈 때) 호출. 점수 캐시는 별도 객체에 남아
+        있어 그대로 유지되고, RAM 만 비운다.
+        """
+        with self._lock:
+            self._slots.pop(slot, None)
+            if self._active == slot:
+                self._active = None
+            if self._lookahead == slot:
+                self._lookahead = None
+
     def known_slots(self) -> List[str]:
         with self._lock:
             return list(self._slots.keys())
@@ -176,24 +190,30 @@ class SlotScoreCache:
 
 
 # ---------------------------------------------------------------------------
-# 사전 계산 워커 — 슬롯들의 모든 (ref, val) 쌍 점수를 한 번에 계산
+# 사전 계산 워커 — 슬롯 단위 스트리밍 점수 계산
 # ---------------------------------------------------------------------------
 class _PrecomputeSignals(QObject):
-    progress = pyqtSignal(int, int)    # done, total
+    progress = pyqtSignal(int, int)            # done_pairs, total_pairs
+    slot_finished = pyqtSignal(str, int, int)  # slot, idx (1-base), total_slots
     finished = pyqtSignal()
     failed = pyqtSignal(str)
 
 
 class SlotPrecomputeWorker(QThread):
-    """주어진 슬롯들의 모든 (ref, val) 쌍 점수를 미리 계산해서
-    ``SlotScoreCache`` 에 저장한다.  완료 후 사용자가 reference 를 넘길 때마다
-    점수 재계산 없이 즉시 후보 리스트를 만들 수 있다.
+    """주어진 슬롯들의 (ref, val) 쌍 점수를 슬롯 하나씩 계산해서
+    ``SlotScoreCache`` 에 저장한다.
+
+    슬롯 하나의 점수 계산이 끝날 때마다 ``slot_finished`` 시그널을 발생.
+    ``release_after_slot=True`` 면 그 슬롯의 features 를 즉시 RAM 에서 폐기
+    (점수만 남기고 메모리 회수) → 백그라운드에서 돌아도 메모리 사용 최소화.
     """
 
     def __init__(self,
                  tasks: List[Tuple[str, List[ImageItem], List[ImageItem]]],
                  slot_cache: SlotFeatureCache,
                  score_cache: SlotScoreCache,
+                 *,
+                 release_after_slot: bool = False,
                  parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
         # (slot 이름, ref ImageItem 리스트, val ImageItem 리스트)
@@ -202,6 +222,7 @@ class SlotPrecomputeWorker(QThread):
         ]
         self._slot_cache = slot_cache
         self._score_cache = score_cache
+        self._release_after_slot = bool(release_after_slot)
         self._stop = False
         self.signals = _PrecomputeSignals()
 
@@ -211,14 +232,18 @@ class SlotPrecomputeWorker(QThread):
     def run(self) -> None:        # type: ignore[override]
         try:
             total = sum(len(r) * len(v) for _, r, v in self._tasks)
+            total_slots = len(self._tasks)
             if total == 0:
                 self.signals.finished.emit()
                 return
             done = 0
-            for slot, refs, vals in self._tasks:
+            for slot_idx, (slot, refs, vals) in enumerate(self._tasks):
                 if self._stop:
                     return
                 if not refs or not vals:
+                    self.signals.slot_finished.emit(
+                        slot, slot_idx + 1, total_slots,
+                    )
                     continue
                 # 1) val features 빌드 (디스크 캐시 있으면 빠름)
                 val_feats = self._slot_cache.build(slot, vals)
@@ -232,8 +257,6 @@ class SlotPrecomputeWorker(QThread):
                     except Exception:
                         pass
                 # 3) 모든 (ref, val) 쌍 점수 — 정밀 score() 한 번 호출.
-                # (이전 2 단계 pHash shortlist 가 진짜 매치를 떨어뜨리는 경우가
-                # 있어 단순 전체 정밀 스캔으로 원복.)
                 for r in refs:
                     if self._stop:
                         return
@@ -252,8 +275,18 @@ class SlotPrecomputeWorker(QThread):
                         self._score_cache.put(slot, r.path, v.path, s)
                         if done % 25 == 0:
                             self.signals.progress.emit(done, total)
-                # 슬롯 단위로 진행률 emit (마지막 한 번)
+                # 슬롯 단위로 진행률 + 슬롯 완료 emit.
                 self.signals.progress.emit(done, total)
+                self.signals.slot_finished.emit(
+                    slot, slot_idx + 1, total_slots,
+                )
+                # 메모리 절약: 점수 계산이 끝났으니 features 는 더 이상
+                # 필요 없음 (점수 캐시만 남으면 _launch_matcher 가 즉시 응답).
+                if self._release_after_slot:
+                    self._slot_cache.release(slot)
+                    # ref features 도 같이 회수.
+                    ref_feats.clear()
+                    val_feats.clear()
             self.signals.finished.emit()
         except Exception as exc:        # pragma: no cover — 안전망
             self.signals.failed.emit(str(exc))

@@ -103,3 +103,56 @@ def test_clear_resets_everything(isolated_cache, monkeypatch):
     assert c.size() == 0
     assert c.active_slot() is None
     assert c.known_slots() == []
+
+
+def test_release_drops_single_slot(isolated_cache, monkeypatch):
+    """``release(slot)`` 은 그 슬롯의 features 만 RAM 에서 폐기 — 점수 캐시는 별도."""
+    from aoi_verification.app.similarity import pipeline
+    monkeypatch.setattr(pipeline, "extract", lambda p, **_kw: object())
+
+    c = SlotFeatureCache(keep_lookahead=False)
+    c.build("S1", _items("S1", 2))
+    c.build("S2", _items("S2", 2))
+    c.set_active("S2")
+    c.set_lookahead("S2")
+    c.release("S2")
+    assert c.has("S2") is False
+    assert c.active_slot() is None
+    # S1 은 set_active 의 자동 정리로 이미 사라졌어야.
+    assert c.known_slots() == []
+
+
+def test_streaming_precompute_releases_and_signals(isolated_cache, monkeypatch):
+    """``release_after_slot=True`` 시 슬롯마다 features 가 사라지고
+    ``slot_finished`` 시그널이 순서대로 emit 되는지 (백그라운드 스트리밍)."""
+    from aoi_verification.app.similarity import pipeline
+    from aoi_verification.app.similarity.slot_features import (
+        SlotPrecomputeWorker, SlotScoreCache,
+    )
+
+    # 가짜 feature / score — 실제 이미지 없어도 동작.
+    monkeypatch.setattr(pipeline, "extract", lambda p, **_kw: object())
+    monkeypatch.setattr(pipeline, "score", lambda a, b, **_kw: 0.5)
+
+    cache = SlotFeatureCache(keep_lookahead=False)
+    scores = SlotScoreCache()
+    tasks = [
+        ("S1", _items("S1", 2), _items("S1", 2)),
+        ("S2", _items("S2", 2), _items("S2", 2)),
+        ("S3", _items("S3", 2), _items("S3", 2)),
+    ]
+    worker = SlotPrecomputeWorker(
+        tasks, cache, scores, release_after_slot=True,
+    )
+
+    finished_slots: list[tuple[str, int, int]] = []
+    worker.signals.slot_finished.connect(
+        lambda s, i, t: finished_slots.append((s, i, t))
+    )
+    # QThread 의 run() 을 메인 스레드에서 동기 호출 (기존 테스트와 동일 패턴).
+    worker.run()
+
+    assert finished_slots == [("S1", 1, 3), ("S2", 2, 3), ("S3", 3, 3)]
+    # 슬롯 features 는 모두 해제, 점수 12 개 (3 slot × 2 ref × 2 val) 보존.
+    assert cache.known_slots() == []
+    assert scores.size() == 12
