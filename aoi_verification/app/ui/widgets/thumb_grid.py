@@ -41,11 +41,15 @@ class _ThumbTile(QFrame):
                  footer: str = "",
                  show_expand: bool = False,
                  tile_px: Optional[int] = None,
+                 prefer_mid: bool = False,
                  parent=None) -> None:
         super().__init__(parent)
         self.entry = entry
         self._dim = dim
         self._tile_px = int(tile_px) if tile_px else THUMB_PX
+        # 후보 패널은 prefer_mid=True 로 mid 캐시 (~800px) 를 소스로 사용 →
+        # 같은 표시 크기에서도 더 선명 (#5).
+        self._prefer_mid = bool(prefer_mid)
         self.setFixedSize(self._tile_px + 14, self._tile_px + (40 if footer else 18))
         self.setProperty("role", "card-soft")
 
@@ -96,7 +100,12 @@ class _ThumbTile(QFrame):
     def _load_pix(self) -> None:
         size = self._tile_px
         try:
-            tp = image_io.get_thumb_path(self.entry.item.path)
+            # prefer_mid: 후보 패널처럼 더 선명한 표시가 필요하면 mid 캐시
+            # (~800px) 를 소스로.  표시 크기는 동일해도 다운스케일 품질이 ↑.
+            if self._prefer_mid:
+                tp = image_io.get_mid_path(self.entry.item.path)
+            else:
+                tp = image_io.get_thumb_path(self.entry.item.path)
             pix = QPixmap(str(tp))
             if pix.isNull():
                 pix = QPixmap(size, size)
@@ -195,6 +204,7 @@ class ThumbGrid(QWidget):
                  truncate: bool = True,
                  show_expand: bool = False,
                  tile_px: Optional[int] = None,
+                 prefer_mid: bool = False,
                  parent=None) -> None:
         super().__init__(parent)
         self._columns = columns
@@ -202,6 +212,7 @@ class ThumbGrid(QWidget):
         self._truncate = truncate
         self._show_expand = show_expand
         self._tile_px = tile_px
+        self._prefer_mid = bool(prefer_mid)
         self._entries: list[ThumbEntry] = []
         self._selected: list[ThumbEntry] = []
 
@@ -250,7 +261,8 @@ class ThumbGrid(QWidget):
             tile = _ThumbTile(ent, select_mode=self._select_mode,
                               footer=ent.item.filename,
                               show_expand=self._show_expand,
-                              tile_px=self._tile_px)
+                              tile_px=self._tile_px,
+                              prefer_mid=self._prefer_mid)
             tile.clicked.connect(self.tile_clicked.emit)
             tile.toggled.connect(self._on_toggle)
             tile.expand_requested.connect(self.expand_requested.emit)

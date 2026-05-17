@@ -105,11 +105,11 @@ class MatchPage(QWidget):
             i18n.KO.BTN_VIEW_SKIPPED_FMT.format(n=0), role="ghost",
         )
         self.btn_view_skipped.clicked.connect(self._open_skipped_dialog)
-        self.btn_view_skipped.setEnabled(False)
+        self.btn_view_skipped.setVisible(False)        # (#3) — 기본 숨김
         top.addWidget(self.btn_view_skipped)
-        # [보류 재시도] 버튼은 보류 사진이 있을 때만 활성.
+        # [보류 재시도] 버튼은 보류 사진이 있을 때만 표시 (#3).
         self.retry_btn = NeonButton(i18n.KO.BTN_RETRY_SKIP, role="warn")
-        self.retry_btn.setEnabled(False)
+        self.retry_btn.setVisible(False)
         self.retry_btn.clicked.connect(self._retry_skipped)
         top.addWidget(self.retry_btn)
         top.addSpacing(20)
@@ -192,14 +192,11 @@ class MatchPage(QWidget):
 
         bar = QHBoxLayout()
         bar.setContentsMargins(0, 6, 0, 0)
-        self.skip_btn = NeonButton(i18n.KO.BTN_SKIP, role="warn")
-        self.skip_btn.setToolTip(i18n.KO.SHORTCUT_STAGE2_TOOLTIP)
-        self.skip_btn.clicked.connect(self._skip_current)
+        # ‘잠시 보류’ 버튼 제거 (#3 — 사용자 요청).  ‘매칭 없음’ 만 남김.
         self.no_match_btn = NeonButton(i18n.KO.BTN_NO_MATCH, role="danger")
         self.no_match_btn.setToolTip(i18n.KO.SHORTCUT_STAGE2_TOOLTIP)
         self.no_match_btn.clicked.connect(self._confirm_no_match)
         bar.addStretch(1)
-        bar.addWidget(self.skip_btn)
         bar.addWidget(self.no_match_btn)
         cl.addLayout(bar)
 
@@ -263,7 +260,7 @@ class MatchPage(QWidget):
             )
         self._h_splitter.splitterMoved.connect(self._save_splitter_state)
 
-        QShortcut(QKeySequence("S"), self, activated=self._skip_current)
+        # ‘S’ (skip) 단축키 — 잠시 보류 버튼 제거와 함께 비활성 (#3).
         QShortcut(QKeySequence("N"), self, activated=self._confirm_no_match)
 
     # ------------------------------------------------------------------
@@ -518,7 +515,7 @@ class MatchPage(QWidget):
         if not val_items:
             QMessageBox.information(self, i18n.KO.APP_TITLE,
                                     i18n.KO.INFO_NO_MATCH_FOUND)
-            self._skip_current()
+            self._confirm_no_match()              # ‘잠시 보류’ 제거 (#3)
             return
 
         # 스트리밍 모드에서 사용자가 ‘아직 점수 계산 중인 슬롯’ 에 도착하면
@@ -622,7 +619,7 @@ class MatchPage(QWidget):
                 self._loading.hide_overlay()
                 QMessageBox.information(self, i18n.KO.APP_TITLE,
                                         i18n.KO.INFO_NO_MATCH_FOUND)
-                self._skip_current()
+                self._confirm_no_match()           # ‘잠시 보류’ 제거 (#3)
             return
 
         # 자동 매치 모드: 최고 점수 후보를 즉시 확정하고 다음 ref 로.
@@ -673,8 +670,11 @@ class MatchPage(QWidget):
         visible = candidates[: config.CONFIG.match_top_visible]
         extra = len(candidates) - len(visible)
 
-        grid = ThumbGrid(columns=3, select_mode=False, truncate=False,
-                         show_expand=True, parent=self._right_host)
+        # 후보는 가로 2 개씩 + mid 캐시 (~800px) 를 소스로 (#5).  표시 크기
+        # 도 일반 썸네일보다 크게 (260 px) 잡아 시인성 ↑.
+        grid = ThumbGrid(columns=2, select_mode=False, truncate=False,
+                         show_expand=True, tile_px=260, prefer_mid=True,
+                         parent=self._right_host)
         entries = [ThumbEntry(item=c.item, extra={"score": c.score}) for c in visible]
         grid.set_entries(entries)
         grid.tile_clicked.connect(self._on_pick)
@@ -728,7 +728,12 @@ class MatchPage(QWidget):
             if c.item.path == entry.item.path:
                 start = i
                 break
-        self._expand_view.load_candidates(self._current.slot, items, start)
+        # 기본 표시 크기 = 중앙 기준 사진의 현재 크기 (#1).  사용자가 확대
+        # 보기 안에서 슬라이더를 만진 적이 있으면 그 값이 우선 (세션 유지).
+        self._expand_view.load_candidates(
+            self._current.slot, items, start,
+            default_long_edge=self.size_slider.value(),
+        )
         self._right_stack.setCurrentIndex(1)
         # 단축키가 동작하도록 포커스 이동.
         self._expand_view.setFocus()
@@ -827,13 +832,18 @@ class MatchPage(QWidget):
         )
 
     def _refresh_skipped_panel(self) -> None:
-        """상단 [보류된 사진 보기 (n)] / [보류 재시도] 버튼 활성/카운트 갱신."""
+        """상단 [보류된 사진 보기 (n)] / [보류 재시도] 버튼 활성/카운트 갱신.
+
+        ‘잠시 보류’ 버튼 제거 (#3) 이후로는 새로 보류가 만들어지지 않지만,
+        과거 autosave 의 보류 항목이 있을 수 있어 두 버튼 자체는 유지하고
+        해당 항목 수가 0 이면 ‘완전히 숨김’ 처리 — 화면이 깔끔하게 보임.
+        """
         if self._state is None:
             self.btn_view_skipped.setText(
                 i18n.KO.BTN_VIEW_SKIPPED_FMT.format(n=0)
             )
-            self.btn_view_skipped.setEnabled(False)
-            self.retry_btn.setEnabled(False)
+            self.btn_view_skipped.setVisible(False)
+            self.retry_btn.setVisible(False)
             return
         n_defer = sum(len(v) for v in self._state.skipped.values())
         n_none = sum(len(v) for v in self._state.no_match.values())
@@ -841,9 +851,10 @@ class MatchPage(QWidget):
         self.btn_view_skipped.setText(
             i18n.KO.BTN_VIEW_SKIPPED_FMT.format(n=total)
         )
-        self.btn_view_skipped.setEnabled(total > 0)
+        # 0 이면 숨김 — ‘잠시 보류’ 자체가 사라졌으므로.
+        self.btn_view_skipped.setVisible(total > 0)
         # ‘보류 재시도’ 는 defer 만 활성 — none 은 영구 미탐
-        self.retry_btn.setEnabled(n_defer > 0)
+        self.retry_btn.setVisible(n_defer > 0)
 
     def _open_skipped_dialog(self) -> None:
         """[보류된 사진 보기] 클릭 → 보류/매칭없음 사진을 큰 팝업에 모아 표시."""

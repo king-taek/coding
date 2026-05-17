@@ -474,19 +474,22 @@ class SetupPage(QWidget):
             self._model_group.addButton(rb)
             self._model_radios_layout.addWidget(rb)
 
-        # 모델 라디오가 5 개를 넘으면 ScrollArea 의 최대 높이를 라디오 5 줄
-        # 분량으로 제한 → 스크롤바가 자동 노출. 그 이하면 자연 높이 (스크롤
-        # 없이 모두 보임).
+        # 모델 라디오 ScrollArea 의 높이 정책 (#4):
+        # - 최소 3 줄은 항상 보이도록 minimumHeight 보장.
+        # - 5 개를 넘으면 최대 5 줄까지만 보이고 그 이상은 세로 스크롤.
+        # - 1~5 개면 자연 높이 (minimum 만 보장).
         radio_count = len(self._model_group.buttons())
-        if radio_count > 5:
+        if radio_count > 0:
             sample = self._model_group.buttons()[0]
             row_h = max(sample.sizeHint().height(),
                         sample.minimumSizeHint().height(), 28)
-            max_h = row_h * 5 + 24
-            self._model_scroll.setMaximumHeight(max_h)
-        else:
-            # 항상 최대 높이 해제 — 적은 수 모델은 자연 높이로.
-            self._model_scroll.setMaximumHeight(16777215)
+            min_h = row_h * 3 + 16
+            self._model_scroll.setMinimumHeight(min_h)
+            if radio_count > 5:
+                max_h = row_h * 5 + 24
+                self._model_scroll.setMaximumHeight(max_h)
+            else:
+                self._model_scroll.setMaximumHeight(16777215)
 
         # 활성 모델 표시
         for b in self._model_group.buttons():

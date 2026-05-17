@@ -297,12 +297,9 @@ class MainWindow(QMainWindow):
 
     def _refresh_models_safe(self) -> None:
         """학습 모듈 import / 평가 집계 실패가 셋업 화면을 막지 않도록 wrap."""
-        # 첫 실행에서 active.txt 가 없으면 latest.txt 로 fallback (스펙 §8.2-c).
-        try:
-            from ..learning import registry as _reg
-            _reg.apply_latest_if_active_unset()
-        except Exception:
-            pass
+        # 사용자 요청 (#4) — ‘기본 탐지 모드’ 가 기본 선택이 되도록 latest 의
+        # 자동 활성 로직을 적용하지 않는다.  학습 모델은 사용자가 명시적으로
+        # 라디오 버튼을 클릭해야만 활성화.
         try:
             from ..learning import evaluator as _ev
             _ev.refresh_accuracy()
@@ -452,16 +449,22 @@ class MainWindow(QMainWindow):
         self._thumb_pool.start()
 
     def _on_thumbs_ready(self) -> None:
-        self._loading.hide_overlay()
         assert self._input is not None
-        # 임계치 자동 추천 ----------------------------------------------
+        # 썸네일 생성 직후의 ‘멈춰 보이는’ 시간을 가시화 (#7).  오버레이를
+        # 끄지 않고 ‘임계치 추천 분석 중…’ 메시지로 갱신 → 임계치 계산이
+        # 끝나면 ‘다음 단계 준비 중…’ → 페이지 전환 직전에 hide.
+        self._loading.set_progress(0, 0, i18n.KO.LOAD_THRESHOLD_ANALYSIS)
+        QApplication.processEvents()              # 메시지가 즉시 보이도록
         self._maybe_offer_threshold_suggestion()
+        self._loading.set_progress(0, 0, i18n.KO.LOAD_STAGE_PREP)
+        QApplication.processEvents()
         # 자동화 수준에 따라 흐름 분기 (#3 올인원 모드) -------------------
         if self._input.automation_level == AutomationLevel.AUTO_ALL:
-            # Stage 1 건너뜀 — 모든 ref 를 Stage 2 자동 매치 큐에 직접.
+            self._loading.hide_overlay()
             self._enter_stage2_auto_all()
             return
         # 'manual' 과 'user_select' 둘 다 Stage 1 은 동일 (사용자 직접).
+        self._loading.hide_overlay()
         self._phase = PHASE_A_SELECT
         self._enter_stage1_phase_a()
 

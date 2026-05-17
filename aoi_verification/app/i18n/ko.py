@@ -39,8 +39,8 @@ BTN_BROWSE = "폴더 선택…"
 BTN_VERIFY = "검증"
 BTN_EXCLUDE = "제외"
 BTN_UNDO = "되돌리기(Z)"
-BTN_SKIP = "잠시 보류"
-BTN_NO_MATCH = "매칭 없음 확정"
+BTN_SKIP = "잠시 보류"            # 더이상 표시되지 않음 (#3) — 호환용
+BTN_NO_MATCH = "매칭 없음"
 BTN_RETRY_SKIP = "보류 재시도"
 BTN_SELECT_MODE = "선택 모드"
 BTN_CANCEL_SELECT_MODE = "선택 해제"
@@ -196,8 +196,8 @@ MEMORY_PRESSURE_TOAST = "메모리 사용량이 높아 캐시를 정리했습니
 # ── Stage 2 더 크게 보기 ───────────────────────────────────────────────────
 BTN_EXPAND_VIEW = "더 크게 보기"
 EXPAND_VIEW_TOOLTIP = "이 사진을 크게 보기 (←/→ 이전·다음, Enter 매칭, Esc 돌아가기)"
-BTN_CONFIRM_AS_MATCH = "이 사진으로 매칭"
-BTN_BACK_TO_GRID = "← 돌아가기"
+BTN_CONFIRM_AS_MATCH = "매치"            # 확대 보기 — 단순화 (#2)
+BTN_BACK_TO_GRID = "돌아가기"            # 확대 보기 — 화살표 제거 (#2)
 BTN_EXPAND_PREV = "◀ 이전"
 BTN_EXPAND_NEXT = "다음 ▶"
 EXPAND_POSITION_FMT = "{cur} / {total}"
@@ -312,6 +312,11 @@ MODEL_TOOLTIP = (
 
 # ── 로딩/진행 ──────────────────────────────────────────────────────────────
 LOAD_THUMBNAIL_FMT = "썸네일 생성 중… {done} / {total}"
+LOAD_THRESHOLD_ANALYSIS = (
+    "임계치 추천 분석 중…\n"
+    "샘플 사진들의 유사도 분포를 측정해 권장 임계치를 계산합니다."
+)
+LOAD_STAGE_PREP = "다음 단계 준비 중…"
 LOAD_FEATURE_FMT = "검증 장비 특징 추출 중… {done} / {total}"
 LOAD_FEATURE_DONE = "검증 장비 특징 추출 완료 — 이후 매칭은 즉시 처리됩니다"
 LOAD_SCORING_FMT = "유사도 계산 중… {done} / {total}"

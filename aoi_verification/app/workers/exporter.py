@@ -31,8 +31,8 @@ COL_REF = "C"
 COL_VAL = "D"
 DATA_START_ROW = 3
 HEADER_AOI_ROW = 2
-# 슬롯 구분선이 그려지는 컬럼 (#4 — 양식.xlsx 의 A~H 모두 커버).
-BORDER_COLS = ["A", "B", "C", "D", "E", "F", "G", "H"]
+# 슬롯 구분선이 그려지는 컬럼 — 사용자 요청 (#6): A~D 만, 두껍게.
+BORDER_COLS = ["A", "B", "C", "D"]
 
 # 셀 ↔ 사진 크기 정합:
 #   · 양식.xlsx 의 데이터 행 높이 (165.75pt) 와 일치시켜 템플릿 안팎의 행 높이를
@@ -249,7 +249,7 @@ class ExcelExporter(QThread):
         center = Alignment(horizontal="center", vertical="center")
         # 슬롯이 바뀌는 첫 행 위에 굵은 가로 구분선 (#4).  같은 슬롯끼리
         # 시각적으로 묶이도록.
-        slot_sep_side = Side(border_style="medium", color="FF666666")
+        slot_sep_side = Side(border_style="thick", color="FF333333")
         prev_slot: Optional[str] = None
         # 템플릿 데이터 행의 ‘기준 높이’ 를 한 번만 측정 — 보통 165.75pt.
         # 양식이 없거나 데이터 행에 높이가 안 잡혀 있으면 ROW_HEIGHT_PT 사용.
