@@ -172,12 +172,13 @@ def _active_model_name() -> str:
 
 
 def _resolve_weights(base: config.SimilarityWeights) -> config.SimilarityWeights:
-    """가속기 / 학습 모델 가용 여부에 따라 use_cnn 을 자동 결정.
+    """가속기 / 학습 모델 가용 여부에 따라 use_cnn 과 가중치를 자동 결정.
 
-    조건 (어느 하나라도 충족하면 CNN 활성):
-    - 학습 모델이 active (basic 이 아님)  → 학습된 임베딩으로 매칭 정확도 ↑
-    - NPU / GPU 가속기 가용                → raw backbone 으로도 가속기 활용
-    base.use_cnn=True 면 사용자 의도 우선 존중.
+    - 학습 모델 active (basic 이 아님): CNN 활성, 기존 가중치 유지.
+    - NPU / GPU 가속기 가용: CNN 활성 + **CNN 비중 0.9** 로 재분배 — 가속기
+      가 실질 결정자가 되도록 (pHash/ORB/SSIM 은 미세 보정).  CPU 만 있는
+      환경에선 기존 가중치 유지.
+    - base.use_cnn=True 면 사용자 명시 의도 우선 존중.
     """
     from ..learning import embedder as _emb
     try:
@@ -191,13 +192,21 @@ def _resolve_weights(base: config.SimilarityWeights) -> config.SimilarityWeights
     if not _emb.is_available():
         return base
 
-    enable_cnn = (active != "basic") or _emb.has_accelerator()
-    if enable_cnn:
+    has_accel = _emb.has_accelerator()
+    enable_cnn = (active != "basic") or has_accel
+    if not enable_cnn:
+        return base
+
+    # 가속기 있으면 CNN 이 실질 결정자가 되도록 가중치 재분배 (#3 — NPU
+    # 가 0% idle 이던 문제 해결).  사용자 결정: cnn=0.9, 나머지 합계 0.1.
+    if has_accel:
         return config.SimilarityWeights(
-            phash=base.phash, orb=base.orb, ssim=base.ssim,
-            cnn=base.cnn, use_cnn=True,
+            phash=0.04, orb=0.04, ssim=0.02, cnn=0.9, use_cnn=True,
         )
-    return base
+    return config.SimilarityWeights(
+        phash=base.phash, orb=base.orb, ssim=base.ssim,
+        cnn=base.cnn, use_cnn=True,
+    )
 
 
 def invalidate_cnn_cache(model_name: str = "") -> None:

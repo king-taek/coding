@@ -219,6 +219,14 @@ class SelectPage(QWidget):
         self.btn_view_excluded.clicked.connect(self._open_excluded_dialog)
         self.btn_view_excluded.setEnabled(False)
         top.addWidget(self.btn_view_excluded)
+        # [선택 종료] — 남은 미결정 사진을 모두 ‘검증 제외’ 로 처리하고
+        # Stage 2 로 진행 (사용자 결정).  큐가 비어 있으면 자동 비활성.
+        self.btn_end_selection = NeonButton(
+            i18n.KO.BTN_END_SELECTION, role="warn",
+        )
+        self.btn_end_selection.clicked.connect(self._end_selection_now)
+        self.btn_end_selection.setEnabled(False)
+        top.addWidget(self.btn_end_selection)
         top.addSpacing(20)
         self.phase_label = QLabel("", self)
         self.phase_label.setProperty("role", "subtitle")
@@ -455,6 +463,12 @@ class SelectPage(QWidget):
 
         self.right_panel.update_data({k: list(v) for k, v in self._state.targets.items()})
         self._refresh_excluded_button()
+        self._refresh_end_selection_button()
+
+    def _refresh_end_selection_button(self) -> None:
+        """큐에 미결정 사진이 남아 있으면 활성, 비면 비활성."""
+        n_remaining = len(self._state.queue) if self._state else 0
+        self.btn_end_selection.setEnabled(n_remaining > 0)
 
     def _refresh_excluded_button(self) -> None:
         if self._state is None:
@@ -646,6 +660,38 @@ class SelectPage(QWidget):
                     self._state.targets[it.slot].append(it)
                 elif action == "recenter":
                     self._state.queue.insert(0, it)
+        self.state_changed.emit()
+        self._advance_to_next()
+
+    # ------------------------------------------------------------------
+    # 선택 종료 — 남은 미결정 사진을 모두 ‘검증 제외’ 로 처리하고 진행
+    # ------------------------------------------------------------------
+    def _end_selection_now(self) -> None:
+        """[선택 종료] — 남은 큐를 모두 excluded 로 옮기고 Stage 2 로."""
+        if self._state is None:
+            return
+        n_remaining = len(self._state.queue)
+        if n_remaining == 0:
+            return
+        from PyQt6.QtWidgets import QMessageBox
+        ret = QMessageBox.question(
+            self, i18n.KO.END_SELECTION_CONFIRM_TITLE,
+            i18n.KO.END_SELECTION_CONFIRM_FMT.format(n=n_remaining),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if ret != QMessageBox.StandardButton.Yes:
+            return
+        # 큐의 모든 항목을 슬롯별 excluded 에 추가 + history 기록.
+        # 큐의 사본을 만든 뒤 비운다 (반복 중 mutate 방지).
+        for it in list(self._state.queue):
+            self._state.excluded[it.slot].append(it)
+            self._state.history.append(("exclude", it))
+            self.decision_made.emit("exclude", it)
+        self._state.queue.clear()
+        # 현재 결정 중인 사진은 _advance_to_next 에서 자연스럽게 None 으로
+        # 떨어지면서 finished 시그널이 emit 된다.
+        self._current = None
         self.state_changed.emit()
         self._advance_to_next()
 

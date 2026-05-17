@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout,
                               QHBoxLayout, QLabel, QScrollArea, QSizePolicy,
                               QVBoxLayout, QWidget)
@@ -20,7 +20,12 @@ from .neon_button import NeonButton
 
 _TILE_PX = 180          # 시원하게 보이는 다중 선택 그리드 썸네일 (원본 비율 유지)
 _CAP_PX = 28            # 파일명 한 줄 — 사진을 가리지 않도록 충분히 확보
-_COLS = 6
+# 가로 최대 5 컬럼 + 6 번째부터 다음 행으로 wrap (사용자 요청 — 가로 스크롤
+# 발생하지 않도록).  좁은 창에선 viewport 폭 기반으로 더 적게 동적 계산.
+_COLS = 5
+# _SelectTile 의 실제 점유 폭 (frame 14 + spacing 8 마진 포함) — _relayout_
+# grids 의 viewport 폭 → cols 변환 상수.
+_SelectTile_FIXED_W = _TILE_PX + 22
 
 
 class _SelectTile(QFrame):
@@ -150,13 +155,15 @@ class BulkSelectDialog(QDialog):
         self._summary_label.setStyleSheet("color: #00FFA3; font-weight: 700;")
         root.addWidget(self._summary_label)
 
-        # 슬롯별 섹션 (스크롤)
+        # 슬롯별 섹션 (스크롤) — 가로 스크롤 절대 발생하지 않게 AlwaysOff.
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         scroll.setStyleSheet(
             "QScrollArea { background: transparent; border: none; }"
         )
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         host = QWidget()
         host.setSizePolicy(QSizePolicy.Policy.Expanding,
                            QSizePolicy.Policy.MinimumExpanding)
@@ -164,6 +171,9 @@ class BulkSelectDialog(QDialog):
         host_layout.setContentsMargins(0, 0, 0, 0)
         host_layout.setSpacing(12)
 
+        # 슬롯별 그리드 재배치를 위해 (items, grid) 쌍을 보관.  resizeEvent
+        # 에서 viewport 폭 기반으로 cols 자동 계산.
+        self._slot_grids: list[tuple[list[ImageItem], QGridLayout]] = []
         total_items = 0
         for slot in sorted(data.keys()):
             items = list(data[slot])
@@ -183,16 +193,19 @@ class BulkSelectDialog(QDialog):
             grid = QGridLayout(grid_host)
             grid.setContentsMargins(0, 0, 0, 0)
             grid.setSpacing(8)
-            for i, item in enumerate(items):
+            for item in items:
                 tile = _SelectTile(item, parent=grid_host)
                 tile.toggled.connect(self._on_tile_toggle)
                 self._tiles_by_key[item.key] = tile
-                grid.addWidget(tile, i // _COLS, i % _COLS)
             host_layout.addWidget(grid_host)
+            self._slot_grids.append((items, grid))
 
         host_layout.addStretch(1)
         scroll.setWidget(host)
+        self._scroll = scroll
         root.addWidget(scroll, stretch=1)
+        # 첫 렌더 직후 + resize 마다 cols 재계산.
+        QTimer.singleShot(0, self._relayout_grids)
 
         if total_items == 0:
             empty = QLabel(i18n.KO.BULK_SELECT_EMPTY, self)
@@ -229,6 +242,36 @@ class BulkSelectDialog(QDialog):
         root.addLayout(bar)
 
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    def _relayout_grids(self) -> None:
+        """viewport 폭에 맞춰 슬롯별 grid columns 자동 계산 — 가로 스크롤 회피."""
+        if not getattr(self, "_slot_grids", None):
+            return
+        vp_w = self._scroll.viewport().width() if hasattr(self, "_scroll") else 0
+        if vp_w <= 0:
+            vp_w = self.width()
+        tile_w = _SelectTile_FIXED_W  # 타일 1 개의 폭 + spacing
+        cols = max(1, min(_COLS, max(1, vp_w // tile_w)))
+        for items, grid in self._slot_grids:
+            # 현재 grid 의 위젯들을 한 번 비우고 cols 로 재배치 (위젯 자체는
+            # 보존 — 선택 상태 유지).
+            widgets = []
+            for i in reversed(range(grid.count())):
+                it = grid.takeAt(i)
+                w = it.widget()
+                if w is not None:
+                    widgets.append(w)
+            widgets.reverse()
+            # widgets 는 items 순서대로 들어가 있어야 — 보조 사전 키 매핑.
+            ordered = [self._tiles_by_key.get(item.key) for item in items]
+            ordered = [w for w in ordered if w is not None]
+            for i, w in enumerate(ordered):
+                grid.addWidget(w, i // cols, i % cols)
+
+    def resizeEvent(self, event):                       # noqa: N802
+        super().resizeEvent(event)
+        QTimer.singleShot(0, self._relayout_grids)
+
     def _on_tile_toggle(self, item: ImageItem, selected: bool) -> None:
         if selected:
             self._selected_keys.add(item.key)

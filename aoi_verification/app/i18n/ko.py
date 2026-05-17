@@ -61,6 +61,13 @@ BTN_BACK_TO_CENTER = "중앙으로 복귀(재결정)"
 BTN_BATCH_EXCLUDE = "선택 항목 검증 제외"
 BTN_BATCH_VERIFY = "선택 항목 검증 대상 지정"
 BTN_VIEW_EXCLUDED_FMT = "검증 제외 사진 보기 ({n})"
+# Stage 1 ‘선택 종료’ — 미결정 사진 모두 제외 처리 후 다음 단계로.
+BTN_END_SELECTION = "선택 종료"
+END_SELECTION_CONFIRM_TITLE = "선택 종료"
+END_SELECTION_CONFIRM_FMT = (
+    "남은 {n} 장의 미결정 사진을 모두 ‘검증 제외’ 로 처리하고 "
+    "다음 단계로 진행할까요?"
+)
 BULK_SELECT_EXCLUDED_TITLE = "검증 제외 사진"
 
 # 동일 defect 그룹화 (#5)
