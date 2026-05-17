@@ -39,14 +39,39 @@ BACKBONE_OUT_DIM = 576
 
 
 # ---------------------------------------------------------------------------
-# Device 감지 — CUDA 가 있으면 GPU, 없으면 CPU (#5).
+# Device 감지 — CUDA / Intel XPU / Apple MPS / DirectML / CPU 순서.
+# Intel 노트북 (Iris Xe / Arc GPU, AI Boost NPU) 도 자동 인식:
+#   · torch.xpu  — PyTorch 2.5+ 의 native Intel GPU 백엔드 (IPEX 불필요).
+#   · torch_directml — Windows DirectML fallback (선택 설치).
+#   · OpenVINO + NPU — embedder_openvino.py 별도 모듈에서 처리 (선택).
 # ---------------------------------------------------------------------------
 def _detect_device():  # pragma: no cover — 환경 의존
     if not _HAS_TORCH:
         return None
+    # 1) NVIDIA CUDA
     try:
         if torch.cuda.is_available():
             return torch.device("cuda")
+    except Exception:
+        pass
+    # 2) Intel GPU (Arc / Iris Xe) — PyTorch 2.5+ native XPU.
+    try:
+        if hasattr(torch, "xpu") and torch.xpu.is_available():
+            return torch.device("xpu")
+    except Exception:
+        pass
+    # 3) Apple Silicon GPU (M1/M2/M3) — Metal Performance Shaders.
+    try:
+        mps = getattr(torch.backends, "mps", None)
+        if mps is not None and mps.is_available() and mps.is_built():
+            return torch.device("mps")
+    except Exception:
+        pass
+    # 4) DirectML (Windows, 모든 GPU — 옵션 패키지).
+    try:
+        import torch_directml  # type: ignore
+        if torch_directml.is_available():
+            return torch_directml.device()
     except Exception:
         pass
     return torch.device("cpu")
@@ -60,17 +85,52 @@ def device():
     return _DEVICE
 
 
+def _ov_device_label() -> str:
+    """OpenVINO 가 별도 인식한 가속 디바이스 라벨 (있으면)."""
+    try:
+        from . import embedder_openvino as _ov
+    except Exception:
+        return ""
+    try:
+        return _ov.device_label() or ""
+    except Exception:
+        return ""
+
+
 def device_label() -> str:
-    """상태바 표시용 — 'GPU 가속 (NVIDIA...)' / 'CPU N 코어' / ''."""
+    """상태바 표시용 라벨.
+
+    예:
+      'GPU 가속 (NVIDIA GeForce RTX 4060)'
+      'Intel GPU 가속 (xpu)'
+      'Apple GPU 가속 (mps)'
+      'NPU 가속 (Intel AI Boost — OpenVINO)'
+      'CPU 7 코어'
+    """
     import os
+    # OpenVINO NPU/GPU 가 별도로 인식되면 그것을 우선 표시.
+    ov = _ov_device_label()
+    if ov:
+        return ov
     if _DEVICE is None:
         return ""
-    if _DEVICE.type == "cuda":
+    dtype = _DEVICE.type
+    if dtype == "cuda":
         try:
             name = torch.cuda.get_device_name(0)
         except Exception:
             name = "CUDA"
         return f"GPU 가속 ({name})"
+    if dtype == "xpu":
+        try:
+            name = torch.xpu.get_device_name(0)
+        except Exception:
+            name = "Intel XPU"
+        return f"Intel GPU 가속 ({name})"
+    if dtype == "mps":
+        return "Apple GPU 가속 (Metal)"
+    if dtype == "privateuseone":   # torch_directml 이 등록하는 device type
+        return "DirectML GPU 가속"
     return f"CPU {max(1, (os.cpu_count() or 1) - 1)} 코어"
 
 
@@ -101,12 +161,12 @@ def _load_backbone():  # pragma: no cover — heavy
     backbone = models.mobilenet_v3_small(weights=weights)
     backbone.classifier = torch.nn.Identity()
     backbone.eval()
-    # CUDA 가 있으면 GPU 로 옮겨 추론 가속 (#5).
-    if _DEVICE is not None:
-        try:
-            backbone = backbone.to(_DEVICE)
-        except Exception:
-            pass
+    # 감지된 디바이스로 이동 (CUDA / Intel XPU / MPS / DirectML).
+    # _detect_device 가 이미 is_available() 검사를 통과한 결과만 반환하므로
+    # 여기서 추가 fallback 은 불필요 — 실패 시 사용자가 원인을 볼 수 있게
+    # 그대로 raise.
+    if _DEVICE is not None and _DEVICE.type != "cpu":
+        backbone = backbone.to(_DEVICE)
     return backbone
 
 
@@ -135,11 +195,8 @@ def _load_head_for(model_name: str):  # pragma: no cover — heavy
     if in_dim != BACKBONE_OUT_DIM:
         return None
     head.eval()
-    if _DEVICE is not None:
-        try:
-            head = head.to(_DEVICE)
-        except Exception:
-            pass
+    if _DEVICE is not None and _DEVICE.type != "cpu":
+        head = head.to(_DEVICE)
     return head
 
 
@@ -190,7 +247,11 @@ def compute_embeddings(paths: Iterable[Path],
                        *,
                        batch_size: int = _DEFAULT_BATCH
                        ) -> dict[Path, np.ndarray]:
-    """여러 이미지의 임베딩을 배치로 계산. basic 모드면 빈 dict."""
+    """여러 이미지의 임베딩을 배치로 계산. basic 모드면 빈 dict.
+
+    OpenVINO + NPU/Intel GPU 가용 시 그 경로를 우선 사용 (#5 — Intel
+    노트북 호환).  실패 시 PyTorch device (CUDA/XPU/MPS/CPU) 경로로 폴백.
+    """
     out: dict[Path, np.ndarray] = {}
     if not is_available():
         return out
@@ -198,8 +259,31 @@ def compute_embeddings(paths: Iterable[Path],
     if mode == registry.BASIC:
         return out
 
-    # GPU 에선 batch 를 키워 forward 횟수 감소 → 처리량 ↑.
-    if _DEVICE is not None and _DEVICE.type == "cuda":
+    # 1) OpenVINO NPU/GPU 우선 — Intel AI Boost NPU / Iris Xe / Arc.
+    try:
+        from . import embedder_openvino as _ov
+        if _ov.is_available():
+            head_for_ov = _load_head_for(mode)
+            # OpenVINO 는 CPU 디바이스 head 를 요구.  PyTorch head 가 _DEVICE
+            # 로 옮겨져 있을 수 있으니 CPU 사본 사용.
+            if head_for_ov is not None and _DEVICE is not None and _DEVICE.type != "cpu":
+                try:
+                    head_cpu = head_for_ov.to("cpu")
+                except Exception:
+                    head_cpu = head_for_ov
+            else:
+                head_cpu = head_for_ov
+            ov_out = _ov.compute_embeddings(
+                paths, batch_size=batch_size, head=head_cpu,
+            )
+            if ov_out:
+                return ov_out
+            # 빈 dict 면 OpenVINO 가 실패 → PyTorch 폴백.
+    except Exception:
+        pass
+
+    # 2) GPU 디바이스라면 배치를 키워 처리량 ↑.
+    if _DEVICE is not None and _DEVICE.type in ("cuda", "xpu"):
         batch_size = max(batch_size, 64)
 
     backbone = _load_backbone()
@@ -217,12 +301,10 @@ def compute_embeddings(paths: Iterable[Path],
         keys = [p for p, _ in pending]
         tensors = [t for _, t in pending]
         x = torch.stack(tensors)
-        # GPU 디바이스가 있으면 입력 텐서도 함께 이동 (#5).
-        if _DEVICE is not None:
-            try:
-                x = x.to(_DEVICE, non_blocking=True)
-            except Exception:
-                pass
+        # 가속 디바이스가 있으면 입력 텐서도 함께 이동 (#5).
+        # non_blocking 은 CUDA 이외 디바이스에선 무시되므로 안전.
+        if _DEVICE is not None and _DEVICE.type != "cpu":
+            x = x.to(_DEVICE, non_blocking=True)
         with torch.no_grad():
             feat = backbone(x)
             if head is not None:

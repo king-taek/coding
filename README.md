@@ -67,6 +67,26 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
+### 3.5 (선택) 가속 디바이스 자동 활용
+
+검증 / 학습의 CNN 임베딩 단계는 사용 가능한 가속 디바이스를 자동으로
+인식해 가장 빠른 경로로 추론합니다.  설치된 패키지/하드웨어에 따라 다음
+중 하나가 상태바에 표시됩니다:
+
+| 표시 | 조건 | 추가 설치 |
+|---|---|---|
+| `GPU 가속 (NVIDIA …)` | NVIDIA GPU + CUDA 드라이버 | 일반 `torch` (CUDA 빌드) |
+| `Intel GPU 가속 (xpu)` | Intel Iris Xe / Arc GPU | **PyTorch 2.5+** 만 있으면 native 인식 |
+| `NPU 가속 (Intel AI Boost — OpenVINO)` | Meteor Lake+ Intel 노트북의 NPU | `pip install openvino` (≈ 200 MB) |
+| `Intel GPU 가속 (OpenVINO)` | Intel GPU + OpenVINO | `pip install openvino` |
+| `Apple GPU 가속 (Metal)` | Apple M1/M2/M3 Mac | torch 기본 |
+| `DirectML GPU 가속` | Windows + 임의의 GPU | `pip install torch-directml` |
+| `CPU N 코어` | 위 모두 없음 | 추가 설치 불필요 |
+
+우선 순위: NVIDIA CUDA → Intel GPU (XPU) → Apple MPS → DirectML → CPU.
+OpenVINO 가 설치돼 있고 NPU/GPU 를 인식하면 PyTorch device 보다 OpenVINO
+경로를 우선 사용합니다 (Intel 노트북에서 NPU/GPU 둘 다 활용).
+
 5~10 분 소요. `torch` 가 가장 무겁습니다. **학습 모델을 안 쓸 거면**
 `requirements.txt` 의 `torch` / `torchvision` 두 줄을 `#` 로 주석 처리하면
 설치가 1 분 안에 끝납니다.
