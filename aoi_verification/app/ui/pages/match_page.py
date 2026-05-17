@@ -77,6 +77,10 @@ class MatchPage(QWidget):
         # 수동 모드 한정: 슬롯 단위 스트리밍 사전 계산 상태.
         self._streaming_precompute: bool = False
         self._waiting_for_slot: Optional[str] = None
+        # 스트리밍 워커가 이미 ‘처리 완료’ 한 슬롯 목록 — extract 실패로 점수가
+        # 누락된 슬롯에서도 무한 대기에 빠지지 않도록 추적 (워커는 슬롯마다
+        # 한 번만 slot_finished 를 emit 하므로 두 번째 신호를 기대하면 안 됨).
+        self._precompute_processed_slots: set[str] = set()
         # 자동 매치 모드 (#3): True 면 사용자 클릭 없이 임계치 이상 최고 점수 후보를
         # 자동으로 매치 / 후보 없으면 ‘매치 없음’ 으로 자동 처리.
         self._auto_mode: bool = False
@@ -329,10 +333,10 @@ class MatchPage(QWidget):
             self._advance()
             return
 
-        # 이전 precompute 워커가 살아있으면 중단 + 상태 초기화
-        if self._precompute_worker is not None and self._precompute_worker.isRunning():
-            self._precompute_worker.stop()
-            self._precompute_worker.wait(500)
+        # 이전 워커가 살아있으면 시그널 끊은 뒤 중단 — 늦게 도착할 ``slot_finished``
+        # 가 새 워커의 상태(_streaming_precompute / _waiting_for_slot) 를 건드리지
+        # 않도록 (MatcherWorker 의 동일 패턴 참고).
+        self._stop_precompute_worker()
 
         streaming = not bool(self._auto_mode)
         self._streaming_precompute = streaming
@@ -391,6 +395,7 @@ class MatchPage(QWidget):
           그 슬롯이 끝났을 때 자동으로 _advance 를 재시도.
         - 상단 상태 라벨 갱신 (백그라운드 진행 표시).
         """
+        self._precompute_processed_slots.add(slot)
         self.bg_status_label.setText(
             i18n.KO.PRECOMPUTE_BG_STATUS_FMT.format(idx=idx, total=total)
         )
@@ -420,9 +425,44 @@ class MatchPage(QWidget):
         # 진행 중이므로 여기서 추가 _advance 는 불필요. 상태 라벨만 정리.
         self.bg_status_label.setText(i18n.KO.PRECOMPUTE_BG_DONE)
         self._streaming_precompute = False
+        # 방어적 정리 — slot_finished 가 어떤 이유로 누락된 채 finished 가 먼저
+        # 도착했더라도 마지막 슬롯의 점수는 이미 캐시에 들어 있다.  대기 중인
+        # 슬롯이 있으면 즉시 풀어 매칭을 재개.
+        if self._waiting_for_slot is not None:
+            self._waiting_for_slot = None
+            self._loading.hide_overlay()
+            self._advance()
 
     def get_state(self) -> Stage2State | None:
         return self._state
+
+    # ------------------------------------------------------------------
+    def _stop_precompute_worker(self) -> None:
+        """현재 precompute 워커의 시그널을 모두 끊고 중단 + 대기.
+
+        - 다음 _start_precompute 호출 전에 호출되어 ‘이전 워커의 늦은 시그널이
+          새 워커 상태를 건드리는’ race 를 방지.
+        - 매칭 완료 (queue 비움) 시점에도 호출되어 단일 모드 → 결과 페이지로
+          넘어갈 때 백그라운드 워커가 헛돌지 않도록 정리.
+
+        호출 후 스트리밍 관련 상태(streaming flag / waiting slot / 처리된 슬롯
+        집합 / 상단 상태 라벨) 도 모두 초기화. 워커가 없어도 상태는 항상 비운다.
+        """
+        w = self._precompute_worker
+        if w is not None:
+            for sig in (w.signals.progress, w.signals.slot_finished,
+                        w.signals.finished, w.signals.failed):
+                try:
+                    sig.disconnect()
+                except (TypeError, RuntimeError):
+                    pass
+            if w.isRunning():
+                w.stop()
+                w.wait(500)
+        self._streaming_precompute = False
+        self._waiting_for_slot = None
+        self._precompute_processed_slots.clear()
+        self.bg_status_label.setText("")
 
     # ------------------------------------------------------------------
     def _advance(self) -> None:
@@ -434,6 +474,9 @@ class MatchPage(QWidget):
             self.slot_label.setText("")
             self._clear_right_grid()
             self._loading.hide_overlay()
+            # 백그라운드 사전 계산이 아직 돌고 있으면 즉시 중단 — 매칭이 끝났으니
+            # 이후 슬롯 점수는 더 이상 필요 없음 (CPU/RAM 회수).
+            self._stop_precompute_worker()
             self.finished.emit()
             return
 
@@ -457,13 +500,19 @@ class MatchPage(QWidget):
         # 스트리밍 모드에서 사용자가 ‘아직 점수 계산 중인 슬롯’ 에 도착하면
         # 짧은 오버레이로 안내 후, 그 슬롯이 끝났다는 시그널이 오면 자동으로
         # 다시 _advance 가 호출된다 (_on_precompute_slot_finished 에서).
+        # 단, 워커가 이미 그 슬롯을 처리했는데도 점수가 누락된 경우 (extract
+        # 실패 등) 무한 대기에 빠지지 않도록 처리 여부도 함께 확인.
         slot = self._current.slot
-        if (self._streaming_precompute
-                and self._precompute_worker is not None
-                and self._precompute_worker.isRunning()
-                and not self._score_cache.has_all_pairs(
-                    slot, self._current.path, [v.path for v in val_items],
-                )):
+        slot_pending = (
+            self._streaming_precompute
+            and self._precompute_worker is not None
+            and self._precompute_worker.isRunning()
+            and slot not in self._precompute_processed_slots
+            and not self._score_cache.has_all_pairs(
+                slot, self._current.path, [v.path for v in val_items],
+            )
+        )
+        if slot_pending:
             self._waiting_for_slot = slot
             self._loading.show_overlay(
                 i18n.KO.LOAD_PRECOMPUTE_WAIT_FMT.format(slot=slot)

@@ -156,3 +156,41 @@ def test_streaming_precompute_releases_and_signals(isolated_cache, monkeypatch):
     # 슬롯 features 는 모두 해제, 점수 12 개 (3 slot × 2 ref × 2 val) 보존.
     assert cache.known_slots() == []
     assert scores.size() == 12
+
+
+def test_worker_signal_disconnect_blocks_late_emit(isolated_cache, monkeypatch):
+    """워커의 시그널을 disconnect 한 뒤 늦은 emit 이 도착해도 핸들러로
+    라우팅되지 않는다 (이전 워커의 race 가 새 워커 상태를 망가뜨리는 것 방지)."""
+    from aoi_verification.app.similarity import pipeline
+    from aoi_verification.app.similarity.slot_features import (
+        SlotPrecomputeWorker, SlotScoreCache,
+    )
+
+    monkeypatch.setattr(pipeline, "extract", lambda p, **_kw: object())
+    monkeypatch.setattr(pipeline, "score", lambda a, b, **_kw: 0.5)
+
+    cache = SlotFeatureCache(keep_lookahead=False)
+    scores = SlotScoreCache()
+    worker = SlotPrecomputeWorker(
+        [("S1", _items("S1", 1), _items("S1", 1))],
+        cache, scores, release_after_slot=True,
+    )
+    received: list[tuple] = []
+    worker.signals.slot_finished.connect(
+        lambda s, i, t: received.append(("slot_finished", s, i, t))
+    )
+    worker.signals.finished.connect(
+        lambda: received.append(("finished",))
+    )
+
+    # _stop_precompute_worker 가 하는 일과 동일 — 모든 시그널 disconnect.
+    worker.signals.slot_finished.disconnect()
+    worker.signals.finished.disconnect()
+
+    # 정지 후에 워커가 ‘늦게’ emit 했다고 가정.
+    worker.signals.slot_finished.emit("S1", 1, 1)
+    worker.signals.finished.emit()
+
+    assert received == [], (
+        "disconnect 이후의 emit 은 어떤 핸들러로도 라우팅되지 않아야 함"
+    )
