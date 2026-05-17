@@ -248,15 +248,11 @@ def has_accelerator() -> bool:
 
 
 def compute_embedding(src: Path) -> Optional[np.ndarray]:
-    """현재 활성 모델로 한 이미지의 임베딩(unit 정규화 1-D 벡터)을 만든다.
-
-    basic 모드여도 가속기 (NPU/GPU) 가 있으면 raw backbone 출력을 임베딩
-    으로 사용 — 가속기 활용 + 추가 유사도 신호.  가속기 없으면 None.
-    """
+    """현재 활성 모델로 한 이미지의 임베딩(unit 정규화 1-D 벡터)을 만든다."""
     if not is_available():
         return None
     mode = get_active_mode()
-    if mode == registry.BASIC and not has_accelerator():
+    if mode == registry.BASIC:
         return None
     out = compute_embeddings([src])
     return out.get(Path(src))
@@ -338,10 +334,7 @@ def compute_embeddings(paths: Iterable[Path],
     if not is_available():
         return out
     mode = get_active_mode()
-    # basic 모드는 head 가 없지만 가속기가 있으면 raw backbone (576-d) 을
-    # 임베딩으로 사용 → NPU/GPU 활용 + 추가 유사도 신호.
-    # CPU only 환경에선 오버헤드만 늘므로 건너뜀.
-    if mode == registry.BASIC and not has_accelerator():
+    if mode == registry.BASIC:
         return out
     items = [Path(p) for p in paths]
     if not items:

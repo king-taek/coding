@@ -132,10 +132,9 @@ class MainWindow(QMainWindow):
         self._autosave_timer.timeout.connect(self._autosave)
         self._autosave_timer.start()
 
-        # OpenVINO 자동 설치 안내 — Intel 하드웨어 사용자에게 한 번만.
-        # 이벤트 루프가 시작된 다음에 띄우기 위해 singleShot defer.
+        # OpenVINO 자동 설치 안내 — 사용자 요청으로 rollback (시작 시 팝업
+        # 띄우지 않음).  설치 도우미 모듈은 남겨두어 향후 수동 호출 가능.
         self._openvino_worker: Optional[QThread] = None
-        QTimer.singleShot(500, self._maybe_offer_openvino_install)
 
         # 상태 -----------------------------------------------------------
         self._loading = LoadingOverlay(self)
@@ -162,89 +161,6 @@ class MainWindow(QMainWindow):
 
         # 이어하기 ------------------------------------------------------
         QTimer.singleShot(50, self._maybe_resume)
-
-    # ==================================================================
-    # OpenVINO 자동 설치 안내 (Intel GPU/NPU 가속 활성화)
-    # ==================================================================
-    def _maybe_offer_openvino_install(self) -> None:
-        """Intel CPU 사용자에게 첫 실행 시 OpenVINO 설치 권유 — 거절 시 재안내 안 함."""
-        try:
-            from ..learning import openvino_installer as _oi
-            from ..utils import prefs as _prefs_mod
-            from PyQt6.QtWidgets import QMessageBox
-
-            p = _prefs_mod.load()
-            if not _oi.should_offer_install(
-                declined=bool(getattr(p, "openvino_install_declined", False))
-            ):
-                return
-
-            box = QMessageBox(self)
-            box.setIcon(QMessageBox.Icon.Information)
-            box.setWindowTitle(i18n.KO.OPENVINO_OFFER_TITLE)
-            box.setText(i18n.KO.OPENVINO_OFFER_BODY)
-            btn_install = box.addButton(
-                i18n.KO.OPENVINO_OFFER_BTN_INSTALL,
-                QMessageBox.ButtonRole.AcceptRole,
-            )
-            btn_later = box.addButton(
-                i18n.KO.OPENVINO_OFFER_BTN_LATER,
-                QMessageBox.ButtonRole.RejectRole,
-            )
-            btn_never = box.addButton(
-                i18n.KO.OPENVINO_OFFER_BTN_NEVER,
-                QMessageBox.ButtonRole.DestructiveRole,
-            )
-            box.setDefaultButton(btn_install)
-            box.exec()
-            clicked = box.clickedButton()
-            if clicked is btn_never:
-                _prefs_mod.patch(openvino_install_declined=True)
-                return
-            if clicked is not btn_install:
-                # ‘다음에’ — 거절 플래그 변경 없음, 다음 실행 때 다시 묻는다.
-                return
-            # 설치 워커 시작.
-            self._start_openvino_install()
-        except Exception:
-            # 안내 자체가 실패해도 검증 흐름은 영향 없음.
-            pass
-
-    def _start_openvino_install(self) -> None:
-        from ..learning.openvino_installer import OpenVinoInstallWorker
-        if self._openvino_worker is not None and self._openvino_worker.isRunning():
-            return
-        self._loading.show_overlay(i18n.KO.OPENVINO_INSTALL_PROGRESS)
-        worker = OpenVinoInstallWorker(self)
-        worker.signals.progress.connect(self._on_openvino_install_progress)
-        worker.signals.finished.connect(self._on_openvino_install_finished)
-        self._openvino_worker = worker
-        worker.start()
-
-    def _on_openvino_install_progress(self, line: str) -> None:
-        # pip 출력의 가장 마지막 라인만 status 라벨에 보여준다.
-        self._loading.set_progress(
-            0, 0, f"{i18n.KO.OPENVINO_INSTALL_PROGRESS}\n{line[-200:]}",
-        )
-
-    def _on_openvino_install_finished(self, ok: bool, message: str) -> None:
-        from ..utils import prefs as _prefs_mod
-        self._loading.hide_overlay()
-        if ok:
-            QMessageBox.information(
-                self, i18n.KO.APP_TITLE, i18n.KO.OPENVINO_INSTALL_DONE,
-            )
-            # 디바이스 라벨도 갱신 시도 (런타임 import 는 위험할 수 있어
-            # 다음 실행에서 적용. 라벨만 ‘재시작 후 활성화’ 로 변경).
-            self._device_label.setText("재시작 후 OpenVINO 가속 적용")
-        else:
-            # 실패도 한 번 거절 처리 — 매번 묻지 않게.
-            _prefs_mod.patch(openvino_install_declined=True)
-            QMessageBox.warning(
-                self, i18n.KO.APP_TITLE,
-                i18n.KO.OPENVINO_INSTALL_FAILED_FMT.format(error=message),
-            )
-        self._openvino_worker = None
 
     # ==================================================================
     # 메모리 사용량 표시

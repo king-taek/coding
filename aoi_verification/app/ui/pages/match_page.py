@@ -330,21 +330,14 @@ class MatchPage(QWidget):
     def _start_precompute(self) -> None:
         """슬롯별 (ref, val) 점수를 사전 계산.
 
+        - 자동 모드: 모든 슬롯의 모든 쌍을 한 번에 (ThreadPoolExecutor 병렬)
+          사전 계산한 뒤 자동 매치 시작.  ‘한장한장 따로’ 가 아니라 ‘여러
+          장 동시’ 처리.
         - 수동 모드: 첫 슬롯이 끝나면 곧장 매칭 시작 + 나머지 슬롯은
           백그라운드에서 슬롯 단위로 진행 (메모리 절약을 위해 features 는
           슬롯 처리 직후 폐기).
-        - 자동 모드: 사전 계산 자체를 스킵 (#2 — 사용자 요청).  ref 1 개씩
-          MatcherWorker 폴백 경로로 즉시 매치 → 매치 후 다음 ref.  ‘백그라
-          운드에서 이후 슬롯 미리 계산’ 이 자동 모드엔 의미 없으므로 제거.
         """
         if self._state is None:
-            return
-        if self._auto_mode:
-            # 자동 모드는 _advance() 즉시 호출 — _launch_matcher 가 score_
-            # cache 미스 시 MatcherWorker 폴백으로 lazy 계산.  사용자가
-            # 보지 않는 백그라운드 ThreadPoolExecutor / NPU 배치 부담 없음.
-            self._stop_precompute_worker()
-            self._advance()
             return
         # 슬롯별 ref 수집 — queue 순서를 따라 사용자가 마주칠 순서대로 처리.
         refs_by_slot: dict[str, list[ImageItem]] = defaultdict(list)
