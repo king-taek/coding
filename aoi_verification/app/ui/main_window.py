@@ -414,6 +414,10 @@ class MainWindow(QMainWindow):
         self._sizing_tier = config.pick_tier(
             per_side_total, speed_mode=bool(_ui.speed_mode)
         )
+        # UI 가 무인자로 호출하는 get_thumb_path / get_mid_path 가 백그라운드
+        # 풀과 같은 캐시 파일을 가리키도록 세션 티어 등록 (Bug #1 fix).
+        from ..utils import image_io as _io
+        _io.set_active_tier(self._sizing_tier)
 
         # 기본 티어보다 낮은 화질이 적용되면 한 번만 안내.
         if self._sizing_tier is not config.SIZING_TIERS[0]:
@@ -446,24 +450,38 @@ class MainWindow(QMainWindow):
             )
         )
         self._thumb_pool.signals.finished.connect(self._on_thumbs_ready)
+        # 빈 큐 (모든 슬롯의 양측이 0 장) 일 때 워커가 한 번도 progress 를
+        # 보내지 않아 ``finished`` 가 emit 되지 않는 행 (Bug #5) 을 방지 — 풀을
+        # 시작하지 않고 즉시 다음 단계로.
+        if not all_items:
+            QTimer.singleShot(0, self._on_thumbs_ready)
+            return
         self._thumb_pool.start()
 
     def _on_thumbs_ready(self) -> None:
-        assert self._input is not None
-        # 썸네일 생성 직후의 ‘멈춰 보이는’ 시간을 가시화 (#7).  오버레이를
-        # 끄지 않고 ‘임계치 추천 분석 중…’ 메시지로 갱신 → 임계치 계산이
-        # 끝나면 ‘다음 단계 준비 중…’ → 페이지 전환 직전에 hide.
+        """썸네일 풀 finished 시그널 슬롯 — 모달/페이지 전환은 한 틱 뒤로 defer.
+
+        finished 시그널 콜백 안에서 직접 ``QMessageBox`` 를 열거나
+        ``QApplication.processEvents()`` 를 호출하면 nested event loop 가 만들
+        어져 워커의 stale 시그널이 재진입할 수 있다 (Bug #2).  여기서는 오버
+        레이 메시지만 갱신하고, 실제 진행은 ``QTimer.singleShot(0, ...)`` 로
+        다음 이벤트 루프 틱에 넘긴다.
+        """
+        if self._input is None:
+            return
         self._loading.set_progress(0, 0, i18n.KO.LOAD_THRESHOLD_ANALYSIS)
-        QApplication.processEvents()              # 메시지가 즉시 보이도록
+        QTimer.singleShot(0, self._continue_after_thumbs)
+
+    def _continue_after_thumbs(self) -> None:
+        """``_on_thumbs_ready`` 의 안전한 후속 — 모달/페이지 전환 OK."""
+        if self._input is None:
+            return
         self._maybe_offer_threshold_suggestion()
         self._loading.set_progress(0, 0, i18n.KO.LOAD_STAGE_PREP)
-        QApplication.processEvents()
-        # 자동화 수준에 따라 흐름 분기 (#3 올인원 모드) -------------------
         if self._input.automation_level == AutomationLevel.AUTO_ALL:
             self._loading.hide_overlay()
             self._enter_stage2_auto_all()
             return
-        # 'manual' 과 'user_select' 둘 다 Stage 1 은 동일 (사용자 직접).
         self._loading.hide_overlay()
         self._phase = PHASE_A_SELECT
         self._enter_stage1_phase_a()

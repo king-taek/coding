@@ -75,8 +75,13 @@ def get_thumb_path(src: Path, *,
                    tier: Optional["config.SizingTier"] = None) -> Path:
     """썸네일 캐시 파일 경로를 보장 (없으면 생성).
 
-    ``tier`` 가 주어지면 해당 화질 티어로 생성/캐시. 미지정 시 기본 200px/Q80.
+    ``tier`` 가 주어지면 해당 화질 티어로 생성/캐시.  주어지지 않았고 세션
+    티어 (``set_active_tier`` 로 등록) 가 있으면 그것을 사용 — 그래야 백그라
+    운드 풀이 pre-warm 한 캐시와 UI 가 같은 파일을 가리킨다.  둘 다 없으면
+    기본 200px/Q80 으로 생성.
     """
+    if tier is None:
+        tier = _active_tier
     if tier is None:
         return _ensure_resized(src, size_option="thumb",
                                long_edge=config.Sizing.THUMB_PX,
@@ -92,8 +97,11 @@ def get_mid_path(src: Path, *,
                  tier: Optional["config.SizingTier"] = None) -> Path:
     """중간 이미지 캐시 파일 경로를 보장 (없으면 생성).
 
-    ``tier`` 가 주어지면 해당 화질 티어로 생성/캐시. 미지정 시 기본 800px/Q85.
+    ``tier`` 미지정 시 세션 티어 (``set_active_tier``) → 기본 800px/Q85 순으로
+    fallback.  UI 와 백그라운드 풀이 같은 캐시 파일을 보도록 일치시킨다.
     """
+    if tier is None:
+        tier = _active_tier
     if tier is None:
         return _ensure_resized(src, size_option="mid",
                                long_edge=config.Sizing.MID_PX,
@@ -103,6 +111,24 @@ def get_mid_path(src: Path, *,
                            long_edge=int(tier.mid_px),
                            jpeg_q=int(tier.mid_q),
                            extra=f"t{tier.mid_px}q{tier.mid_q}")
+
+
+# ---------------------------------------------------------------------------
+# 세션 단위 티어 — 스캔 직후 MainWindow 가 등록하면 그 이후의 무인자
+# get_thumb_path / get_mid_path 가 같은 캐시 키를 사용 (백그라운드 pre-warm
+# 과 UI 가 같은 파일을 보도록).  세션 종료 시 None 으로 클리어 권장.
+# ---------------------------------------------------------------------------
+_active_tier: Optional["config.SizingTier"] = None
+
+
+def set_active_tier(tier: Optional["config.SizingTier"]) -> None:
+    """세션 시작 시 활성 티어 등록 → 캐시 키 정합 보장."""
+    global _active_tier
+    _active_tier = tier
+
+
+def get_active_tier() -> Optional["config.SizingTier"]:
+    return _active_tier
 
 
 def _ensure_resized(src: Path, *, size_option: str,

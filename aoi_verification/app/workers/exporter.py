@@ -290,14 +290,25 @@ class ExcelExporter(QThread):
                 m = payload
                 ws[f"{COL_SLOT}{row}"] = m.slot
                 ws[f"{COL_SLOT}{row}"].alignment = center
-                ref_mid = image_io.get_mid_path(m.ref_path)
-                val_mid = image_io.get_mid_path(m.val_path)
-                xli_ref = XLImage(str(ref_mid))
-                xli_val = XLImage(str(val_mid))
-                _fit_to_cell(xli_ref, cell_w_px, cell_h_px)
-                _fit_to_cell(xli_val, cell_w_px, cell_h_px)
-                ws.add_image(xli_ref, f"{COL_REF}{row}")
-                ws.add_image(xli_val, f"{COL_VAL}{row}")
+                # 손상/누락 이미지 1 장 때문에 전체 export 가 abort 되지 않도록
+                # 각 사진을 개별 try 로 감싼다 (Bug #3).  실패하면 파일명 텍스트
+                # 로 대체하고 이어서 진행.
+                try:
+                    ref_mid = image_io.get_mid_path(m.ref_path)
+                    xli_ref = XLImage(str(ref_mid))
+                    _fit_to_cell(xli_ref, cell_w_px, cell_h_px)
+                    ws.add_image(xli_ref, f"{COL_REF}{row}")
+                except Exception:
+                    ws[f"{COL_REF}{row}"] = str(Path(m.ref_path).name)
+                    ws[f"{COL_REF}{row}"].alignment = center
+                try:
+                    val_mid = image_io.get_mid_path(m.val_path)
+                    xli_val = XLImage(str(val_mid))
+                    _fit_to_cell(xli_val, cell_w_px, cell_h_px)
+                    ws.add_image(xli_val, f"{COL_VAL}{row}")
+                except Exception:
+                    ws[f"{COL_VAL}{row}"] = str(Path(m.val_path).name)
+                    ws[f"{COL_VAL}{row}"].alignment = center
                 self.signals.progress.emit(idx, total, m.slot)
             else:
                 u: MissEntry = payload

@@ -390,9 +390,7 @@ class MatchPage(QWidget):
         self._precompute_worker.signals.finished.connect(
             self._on_precompute_finished
         )
-        self._precompute_worker.signals.failed.connect(
-            lambda msg: self._loading.set_progress(0, 0, msg)
-        )
+        self._precompute_worker.signals.failed.connect(self._on_precompute_failed)
         self._precompute_worker.start()
 
     def _on_precompute_progress(self, done: int, total: int) -> None:
@@ -430,6 +428,28 @@ class MatchPage(QWidget):
         if self._waiting_for_slot == slot:
             self._waiting_for_slot = None
             self._loading.hide_overlay()
+            self._advance()
+
+    def _on_precompute_failed(self, msg: str) -> None:
+        """사전 계산 워커가 실패로 종료 — 사용자가 오버레이에 갇히지 않도록
+        대기 상태를 해제하고 ``_advance`` 로 폴백 (MatcherWorker 가 lazy 계산).
+
+        Bug #6: 이전엔 오버레이 텍스트만 갱신하고 _waiting_for_slot 을 풀지
+        않아, 사용자가 점수 계산 대기 중인 슬롯에 도달했을 때 워커가 죽으면
+        영구히 ‘잠시만 기다려주세요’ 오버레이에 갇혔다.
+        """
+        try:
+            self._loading.hide_overlay()
+        except Exception:
+            pass
+        self._waiting_for_slot = None
+        # 스트리밍 모드 종료 표시 — 이후 _launch_matcher 가 MatcherWorker 폴백
+        # 경로로 작동.
+        self._streaming_precompute = False
+        if self.bg_status_label is not None:
+            self.bg_status_label.setText(msg or "")
+        # 현재 ref 가 있으면 폴백 매칭으로 진행.
+        if self._current is not None or (self._state and self._state.queue):
             self._advance()
 
     def _on_precompute_finished(self) -> None:
@@ -513,9 +533,12 @@ class MatchPage(QWidget):
 
         val_items = self._state.val_pool.get(self._current.slot, [])
         if not val_items:
-            QMessageBox.information(self, i18n.KO.APP_TITLE,
-                                    i18n.KO.INFO_NO_MATCH_FOUND)
-            self._confirm_no_match()              # ‘잠시 보류’ 제거 (#3)
+            # 자동 모드는 매 ref 마다 모달이 뜨는 ‘모달 폭격’ 을 피하려고
+            # 모달 없이 조용히 ‘매칭 없음’ 처리 (Bug #4).  수동 모드만 안내.
+            if not self._auto_mode:
+                QMessageBox.information(self, i18n.KO.APP_TITLE,
+                                        i18n.KO.INFO_NO_MATCH_FOUND)
+            self._confirm_no_match()
             return
 
         # 스트리밍 모드에서 사용자가 ‘아직 점수 계산 중인 슬롯’ 에 도착하면
