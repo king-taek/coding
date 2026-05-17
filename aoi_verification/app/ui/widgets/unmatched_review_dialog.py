@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QCursor
 from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout,
                               QHBoxLayout, QLabel, QMessageBox, QScrollArea,
                               QSizePolicy, QVBoxLayout, QWidget)
@@ -111,6 +112,9 @@ class UnmatchedReviewDialog(QDialog):
         self.resolved_refs: list[MissEntry] = []     # 매칭 찾음
         self.skipped_refs: list[MissEntry] = []      # 사용자가 종료한 것
 
+        # 닫는 즉시 C++ 위젯 해제 — 매번 열 때마다 부모에 누적되지 않도록.
+        # exec() 직후엔 Python 측 new_matches/resolved_refs 접근이 여전히 안전.
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.setWindowTitle(
             i18n.KO.UNMATCHED_REVIEW_TITLE.format(n=len(self._unmatched))
         )
@@ -256,9 +260,15 @@ class UnmatchedReviewDialog(QDialog):
         ]
         scored: list[tuple[float, ImageItem]] = []
         if candidates:
-            for v in candidates:
-                s = self._lookup_or_compute_score(cur, v)
-                scored.append((s, v))
+            # 점수 캐시 hit 이 대부분이지만, miss 시 pipeline.score 가 무거워
+            # UI 가 잠깐 굳을 수 있다. 모래시계 커서로 사용자에게 알린다.
+            QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
+            try:
+                for v in candidates:
+                    s = self._lookup_or_compute_score(cur, v)
+                    scored.append((s, v))
+            finally:
+                QApplication.restoreOverrideCursor()
             scored.sort(key=lambda x: x[0], reverse=True)
 
         self._clear_grid()
@@ -309,17 +319,31 @@ class UnmatchedReviewDialog(QDialog):
         cur = self._current()
         if cur is None:
             return
-        ref_path = Path(cur.path)
-        val_path = Path(val_item.path)
+        cur_path = Path(cur.path)
+        cand_path = Path(val_item.path)
         score = self._lookup_or_compute_score(cur, val_item)
+        # MatchResult 컨벤션 (main_window._merge_matches 와 일치):
+        #   ref_path = ‘낮은 호기 (또는 ref 측)’ 경로,
+        #   val_path = ‘높은 호기 (또는 val 측)’ 경로.
+        # Phase A 미매칭(side="ref")은 cur 가 ref 측 → 그대로 둔다.
+        # Phase B 미매칭(side="val")은 cur 가 val 측(높은 호기), candidate 가
+        # ref 측(낮은 호기) → ref/val 을 교환해서 엑셀의 C/D 컬럼이 호기 라벨
+        # 과 일치하도록.
+        if cur.side == "val":
+            ref_path, val_path = cand_path, cur_path
+            direction = "B→A"
+        else:
+            ref_path, val_path = cur_path, cand_path
+            direction = "A→B"
         self.new_matches.append(MatchResult(
             slot=cur.slot,
             ref_path=ref_path,
             val_path=val_path,
             score=float(score),
+            direction=direction,
         ))
         self.resolved_refs.append(cur)
-        self._used_vals.add(val_path)
+        self._used_vals.add(cand_path)
         # 같은 ref 가 다른 곳에서 다시 나오지 않도록 idx 만 전진.
         self._idx += 1
         self._render_current()
@@ -340,20 +364,28 @@ class UnmatchedReviewDialog(QDialog):
         cur = self._current()
         if cur is None:
             return
-        # 되돌릴 신규 매칭이 있으면 제거.
+        # 되돌릴 신규 매칭이 있으면 제거. side="val" 매칭은 ref/val 을 교환해
+        # 저장하므로 cur 가 m.ref_path / m.val_path 중 어디에 있는지 양쪽 모두 검사.
         for i in range(len(self.new_matches) - 1, -1, -1):
             m = self.new_matches[i]
-            if (m.slot == cur.slot
-                    and Path(m.ref_path) == Path(cur.path)):
-                self._used_vals.discard(Path(m.val_path))
-                self.new_matches.pop(i)
-                # resolved_refs 에서도 동일 ref 한 건 제거
-                for j, r in enumerate(self.resolved_refs):
-                    if (r.slot == cur.slot
-                            and Path(r.path) == Path(cur.path)):
-                        self.resolved_refs.pop(j)
-                        break
-                break
+            if m.slot != cur.slot:
+                continue
+            mr = Path(m.ref_path)
+            mv = Path(m.val_path)
+            cp = Path(cur.path)
+            if cp == mr:
+                self._used_vals.discard(mv)
+            elif cp == mv:
+                self._used_vals.discard(mr)
+            else:
+                continue
+            self.new_matches.pop(i)
+            # resolved_refs 에서도 동일 ref 한 건 제거
+            for j, r in enumerate(self.resolved_refs):
+                if r.slot == cur.slot and Path(r.path) == cp:
+                    self.resolved_refs.pop(j)
+                    break
+            break
         # skip 으로 마크된 경우엔 그 항목만 풀어준다.
         for i in range(len(self.skipped_refs) - 1, -1, -1):
             r = self.skipped_refs[i]

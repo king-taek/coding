@@ -10,8 +10,6 @@
 from __future__ import annotations
 
 import re
-import shutil
-import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -34,9 +32,12 @@ COL_VAL = "D"
 DATA_START_ROW = 3
 HEADER_AOI_ROW = 2
 
-# 셀 ↔ 사진 크기 정합 (사용자 요청):
-#   · 사진을 작게 두어 프린트 / 부분 확대 모두에 유리하게.
-ROW_HEIGHT_PT = 115
+# 셀 ↔ 사진 크기 정합:
+#   · 양식.xlsx 의 데이터 행 높이 (165.75pt) 와 일치시켜 템플릿 안팎의 행 높이를
+#     맞춘다. 양식이 없을 때(폴백) 도 동일 값으로 통일.
+#   · 이미지 max 변 = 150 px. 1pt ≈ 1.333 px 이므로 165pt ≈ 220 px → 150 px
+#     이미지가 셀 안에 여유 있게 들어간다.
+ROW_HEIGHT_PT = 165.75
 IMG_COL_WIDTH = 22
 IMG_MAX_PX = 150
 
@@ -123,6 +124,15 @@ class ExcelExporter(QThread):
 
         self._fill_rows(ws, rows_input)
 
+        # 양식.xlsx 는 A3..A22 에 1..20 행번호를 미리 박아두었다.  데이터가
+        # 그보다 적게 들어가면 ‘빈 행에 번호만 떠 있는’ 모양이 되어 혼란스러우니
+        # 우리가 채우지 않은 모든 데이터 행의 A 컬럼을 비운다.
+        data_end_row = DATA_START_ROW + len(rows_input) - 1
+        for r in range(max(data_end_row + 1, DATA_START_ROW), ws.max_row + 1):
+            a = ws.cell(row=r, column=1)
+            if isinstance(a.value, (int, float)):
+                a.value = None
+
         # 교차 검증 미탐 시트 ----------------------------------------
         if self._result.mode == "cross":
             if self._result.miss_fast:
@@ -184,58 +194,56 @@ class ExcelExporter(QThread):
         row = DATA_START_ROW
         red_font = Font(color="FFFF2D55", bold=True)
         center = Alignment(horizontal="center", vertical="center")
-        tmp_dir = Path(tempfile.mkdtemp(prefix="aoi_export_"))
-        try:
-            for idx, (_slot, _key, payload) in enumerate(rows_input, start=1):
-                # 양식이 정한 행 높이가 너무 작을 때만 키운다 — 보통 양식이
-                # row3 부터 165.75pt 로 고정되어 있어 그대로 두면 된다.
-                cur_h = ws.row_dimensions[row].height
-                if not cur_h or cur_h < ROW_HEIGHT_PT:
-                    ws.row_dimensions[row].height = ROW_HEIGHT_PT
+        # 템플릿 데이터 행의 ‘기준 높이’ 를 한 번만 측정 — 보통 165.75pt.
+        # 양식이 없거나 데이터 행에 높이가 안 잡혀 있으면 ROW_HEIGHT_PT 사용.
+        template_row_h = ws.row_dimensions[DATA_START_ROW].height or ROW_HEIGHT_PT
+        for idx, (_slot, _key, payload) in enumerate(rows_input, start=1):
+            # 새 행은 템플릿의 데이터 행과 같은 높이로 통일 → 양식 안팎 일관성.
+            cur_h = ws.row_dimensions[row].height
+            if not cur_h or cur_h < template_row_h:
+                ws.row_dimensions[row].height = template_row_h
 
-                # A 열: 행 번호 (사용자 양식의 ‘No’).
-                no_cell = ws[f"{COL_NO}{row}"]
-                no_cell.value = idx
-                no_cell.alignment = center
+            # A 열: 행 번호 (사용자 양식의 ‘No’).
+            no_cell = ws[f"{COL_NO}{row}"]
+            no_cell.value = idx
+            no_cell.alignment = center
 
-                if isinstance(payload, MatchResult):
-                    m = payload
-                    ws[f"{COL_SLOT}{row}"] = m.slot
-                    ws[f"{COL_SLOT}{row}"].alignment = center
-                    ref_mid = image_io.get_mid_path(m.ref_path)
-                    val_mid = image_io.get_mid_path(m.val_path)
+            if isinstance(payload, MatchResult):
+                m = payload
+                ws[f"{COL_SLOT}{row}"] = m.slot
+                ws[f"{COL_SLOT}{row}"].alignment = center
+                ref_mid = image_io.get_mid_path(m.ref_path)
+                val_mid = image_io.get_mid_path(m.val_path)
+                xli_ref = XLImage(str(ref_mid))
+                xli_val = XLImage(str(val_mid))
+                _shrink(xli_ref, max_px=IMG_MAX_PX)
+                _shrink(xli_val, max_px=IMG_MAX_PX)
+                ws.add_image(xli_ref, f"{COL_REF}{row}")
+                ws.add_image(xli_val, f"{COL_VAL}{row}")
+                self.signals.progress.emit(idx, total, m.slot)
+            else:
+                u: MissEntry = payload
+                ws[f"{COL_SLOT}{row}"] = u.slot
+                ws[f"{COL_SLOT}{row}"].alignment = center
+                # 기준 이미지: 정상 임베드.
+                try:
+                    ref_mid = image_io.get_mid_path(Path(u.path))
                     xli_ref = XLImage(str(ref_mid))
-                    xli_val = XLImage(str(val_mid))
                     _shrink(xli_ref, max_px=IMG_MAX_PX)
-                    _shrink(xli_val, max_px=IMG_MAX_PX)
                     ws.add_image(xli_ref, f"{COL_REF}{row}")
-                    ws.add_image(xli_val, f"{COL_VAL}{row}")
-                    self.signals.progress.emit(idx, total, m.slot)
-                else:
-                    u: MissEntry = payload
-                    ws[f"{COL_SLOT}{row}"] = u.slot
-                    ws[f"{COL_SLOT}{row}"].alignment = center
-                    # 기준 이미지: 정상 임베드.
-                    try:
-                        ref_mid = image_io.get_mid_path(Path(u.path))
-                        xli_ref = XLImage(str(ref_mid))
-                        _shrink(xli_ref, max_px=IMG_MAX_PX)
-                        ws.add_image(xli_ref, f"{COL_REF}{row}")
-                    except Exception:
-                        ws[f"{COL_REF}{row}"] = str(Path(u.path).name)
-                    # 검증 컬럼에 파일명 텍스트 (빨강).
-                    cell_val = ws[f"{COL_VAL}{row}"]
-                    cell_val.value = Path(u.path).name
-                    cell_val.font = red_font
-                    cell_val.alignment = Alignment(
-                        horizontal="center", vertical="center", wrap_text=True,
-                    )
-                    cell_val.comment = Comment("미매칭", "AOI")
-                    self.signals.progress.emit(idx, total, u.slot)
+                except Exception:
+                    ws[f"{COL_REF}{row}"] = str(Path(u.path).name)
+                # 검증 컬럼에 파일명 텍스트 (빨강).
+                cell_val = ws[f"{COL_VAL}{row}"]
+                cell_val.value = Path(u.path).name
+                cell_val.font = red_font
+                cell_val.alignment = Alignment(
+                    horizontal="center", vertical="center", wrap_text=True,
+                )
+                cell_val.comment = Comment("미매칭", "AOI")
+                self.signals.progress.emit(idx, total, u.slot)
 
-                row += 1
-        finally:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
+            row += 1
 
     # ------------------------------------------------------------------
     def _write_miss_sheet(self, wb, title: str, entries) -> None:

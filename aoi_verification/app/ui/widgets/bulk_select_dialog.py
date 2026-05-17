@@ -102,6 +102,8 @@ class BulkSelectDialog(QDialog):
                  actions: list[tuple[str, str, str]],
                  parent=None) -> None:
         super().__init__(parent)
+        # 닫는 즉시 C++ 위젯 해제 — 매번 열 때마다 부모에 누적되지 않도록.
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.setWindowTitle(title)
         self.setModal(True)
         # 노트북 등 작은 화면에서 하단 액션 버튼이 화면 밖으로 잘려

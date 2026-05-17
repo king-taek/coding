@@ -696,6 +696,8 @@ class MatchPage(QWidget):
             return
         from PyQt6.QtWidgets import QDialog as _QDialog
         dlg = _QDialog(self)
+        # 닫는 즉시 C++ 위젯 해제 — 버튼 클릭마다 누적되지 않도록.
+        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dlg.setWindowTitle(i18n.KO.SKIPPED_DIALOG_TITLE)
         dlg.setModal(True)
         from PyQt6.QtWidgets import QApplication as _QA

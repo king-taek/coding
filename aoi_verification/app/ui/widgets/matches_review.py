@@ -105,6 +105,10 @@ class _Row(QWidget):
 class MatchesReviewDialog(QDialog):
     def __init__(self, matches: Iterable[MatchResult], parent=None) -> None:
         super().__init__(parent)
+        # 닫는 즉시 C++ 위젯 해제 — 부모 (ResultPage) 에 dialog 가 쌓이지 않도록.
+        # exec() 가 반환된 직후엔 deleteLater 가 아직 처리되지 않아 Python 측
+        # 속성 (self._removed) 접근은 안전.
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.setWindowTitle(i18n.KO.REVIEW_DIALOG_TITLE)
         self.resize(1400, 800)
         self._removed: list[MatchResult] = []

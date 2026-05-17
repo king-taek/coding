@@ -219,6 +219,8 @@ class ZoomWindow(QDialog):
                  view_only: bool = False,
                  parent=None) -> None:
         super().__init__(parent)
+        # 닫는 즉시 C++ 위젯 해제 — 매번 열 때마다 부모에 누적되지 않도록.
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self._view_only = bool(view_only)
         self._slot = slot_name
         self._items = list(items)

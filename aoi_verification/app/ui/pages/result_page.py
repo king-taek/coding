@@ -90,6 +90,9 @@ class ResultPage(QWidget):
         # 매치 실패 검토에 사용할 후보 풀 / 점수 캐시 (#8).
         self._val_pool = val_pool
         self._score_cache = score_cache
+        # 검토 후 다시 그려도 ‘자동 매치 결과 검토 권장’ 라벨이 살아 있도록
+        # 마지막 auto_mode 값을 기억해 재렌더링에서 재사용한다.
+        self._auto_mode = bool(auto_mode)
         # 기존 요약 비우기
         while self._summary_layout.count():
             it = self._summary_layout.takeAt(0)
@@ -105,7 +108,7 @@ class ResultPage(QWidget):
             self._summary_layout.addWidget(lab)
 
         # 자동 매치 모드면 검토를 권하는 안내를 가장 위에 노출.
-        if auto_mode:
+        if self._auto_mode:
             n_match = len(result.matches)
             n_miss = len(result.unmatched_refs)
             hint = QLabel(
@@ -177,10 +180,11 @@ class ResultPage(QWidget):
             self, i18n.KO.APP_TITLE,
             i18n.KO.REVIEW_REMOVED_FMT.format(n=len(removed)),
         )
-        # 요약을 다시 그린다.
+        # 요약을 다시 그린다 (auto_mode 도 보존).
         self.show_result(self._result,
                          template_path=self._template_path,
                          target_path=self._target_path,
+                         auto_mode=getattr(self, "_auto_mode", False),
                          val_pool=self._val_pool,
                          score_cache=self._score_cache)
 
@@ -198,8 +202,12 @@ class ResultPage(QWidget):
                 self, i18n.KO.APP_TITLE, i18n.KO.UNMATCHED_REVIEW_EMPTY,
             )
             return
-        # 이미 결과에 들어간 val 경로 — 중복 매칭 방지용.
-        already_used = {m.val_path for m in self._result.matches}
+        # 이미 결과에 들어간 모든 경로 — 중복 매칭 방지용. cross 모드에서
+        # side="val" 미매칭의 후보가 ref 측 사진이라 ref_path 도 포함해야 한다.
+        already_used = set()
+        for m in self._result.matches:
+            already_used.add(m.val_path)
+            already_used.add(m.ref_path)
         dlg = UnmatchedReviewDialog(
             unmatched=self._result.unmatched_refs,
             val_pool=self._val_pool,
