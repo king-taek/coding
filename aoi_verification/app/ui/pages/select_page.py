@@ -179,6 +179,12 @@ class SelectPage(QWidget):
     PANEL_RIGHT = "right"
     PANEL_BOTTOM = "bottom"
 
+    # 좁은 창 (≤ THRESH_LO) 에선 좌/중/우 3-pane 을 위→아래 세로 스택으로
+    # 자동 전환 → 가로 스크롤 회피.  넓은 창 (≥ THRESH_HI) 에선 원래 가로
+    # 배치.  hysteresis 갭으로 임계 근처에서 flicker 방지 (#2).
+    _RESPONSIVE_THRESH_LO = 960
+    _RESPONSIVE_THRESH_HI = 1080
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._state: Stage1State | None = None
@@ -244,7 +250,8 @@ class SelectPage(QWidget):
         self.left_panel._head_layout.addWidget(self.btn_view_groups)
         # 2 col 그리드 (120px thumb + 14 padding) × 2 + spacing + 패널 padding 을
         # 모두 담을 최소 너비. 작게(1100) preset 에서도 가로 스크롤 없이 보이게.
-        self.left_panel.setMinimumWidth(280)
+        # 좁은 창에서 세로 스택으로 reflow 할 수 있도록 최소폭을 작게.
+        self.left_panel.setMinimumWidth(240)
         self._h_splitter.addWidget(self.left_panel)
 
         # CENTER ------------------------------------------------------
@@ -322,7 +329,7 @@ class SelectPage(QWidget):
         btn_row.addWidget(self.btn_exclude)
         cl.addLayout(btn_row)
 
-        center_card.setMinimumWidth(420)
+        center_card.setMinimumWidth(360)
         self._h_splitter.addWidget(center_card)
 
         # RIGHT -------------------------------------------------------
@@ -338,7 +345,7 @@ class SelectPage(QWidget):
         self.right_panel.selection_action.connect(self._on_batch_action)
         self.right_panel.tile_clicked.connect(self._on_tile_click)
         self.right_panel.plus_clicked.connect(self._on_plus_click)
-        self.right_panel.setMinimumWidth(280)
+        self.right_panel.setMinimumWidth(240)
         self._h_splitter.addWidget(self.right_panel)
 
         self._h_splitter.setStretchFactor(0, 2)
@@ -363,6 +370,26 @@ class SelectPage(QWidget):
             QShortcut(QKeySequence(key), self,
                       activated=lambda: self._decide("exclude"))
         QShortcut(QKeySequence("Z"), self, activated=self._undo)
+
+    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    def resizeEvent(self, event):                       # noqa: N802
+        super().resizeEvent(event)
+        self._update_splitter_orientation()
+
+    def _update_splitter_orientation(self) -> None:
+        """창 폭에 따라 H ↔ V splitter 전환 — 가로 스크롤 없이 reflow."""
+        if not hasattr(self, "_h_splitter"):
+            return
+        cur = self._h_splitter.orientation()
+        w = self.width()
+        # hysteresis — 임계 근처에서 토글이 깜빡이지 않도록.
+        if cur == Qt.Orientation.Horizontal and w < self._RESPONSIVE_THRESH_LO:
+            self._h_splitter.setOrientation(Qt.Orientation.Vertical)
+            self._h_splitter.setSizes([200, 500, 200])
+        elif cur == Qt.Orientation.Vertical and w > self._RESPONSIVE_THRESH_HI:
+            self._h_splitter.setOrientation(Qt.Orientation.Horizontal)
+            self._h_splitter.setSizes([300, 600, 300])
 
     # ------------------------------------------------------------------
     def _save_splitter_state(self, *args) -> None:

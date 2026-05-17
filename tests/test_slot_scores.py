@@ -121,3 +121,45 @@ def test_precompute_stop_aborts_early(isolated_cache, monkeypatch):
     worker.run()
     # 거의 아무 것도 처리 안 됐어야.
     assert score_cache.size() < 100
+
+
+def test_threaded_scoring_matches_serial_result(isolated_cache, monkeypatch):
+    """ThreadPoolExecutor 병렬 (#5) 결과가 직렬 결과와 일치 — score() 가
+    결정적이므로 동일 입력엔 동일 출력."""
+    from aoi_verification.app.similarity import pipeline
+
+    class _FF:
+        def __init__(self, p): self.path = p
+
+    monkeypatch.setattr(pipeline, "extract", lambda p, **_kw: _FF(p))
+    # 결정적 score: 두 path 의 hash xor 로 0.0~1.0 사이 값.
+    monkeypatch.setattr(
+        pipeline, "score",
+        lambda a, b, weights=None:
+            ((hash(str(a.path)) ^ hash(str(b.path))) & 0xFFFF) / 65535.0,
+    )
+
+    refs = _items("S1", 5, side="ref")
+    vals = _items("S1", 6, side="val")
+
+    # 직렬 결과 (참조용) — score 만 직접 계산.
+    expected: dict[tuple, float] = {}
+    for r in refs:
+        for v in vals:
+            expected[(r.path, v.path)] = pipeline.score(_FF(r.path), _FF(v.path))
+
+    # 병렬 워커 — run() 동기 호출.
+    slot_cache = SlotFeatureCache()
+    score_cache = SlotScoreCache()
+    worker = SlotPrecomputeWorker(
+        [("S1", refs, vals)], slot_cache=slot_cache, score_cache=score_cache,
+    )
+    worker.run()
+
+    assert score_cache.size() == len(refs) * len(vals)
+    for (rp, vp), exp_val in expected.items():
+        got = score_cache.get_pair("S1", rp, vp)
+        assert got is not None
+        assert abs(got - exp_val) < 1e-9, (
+            f"병렬 결과가 직렬 기대값과 다름: {got} vs {exp_val}"
+        )

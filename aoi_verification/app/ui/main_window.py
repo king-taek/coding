@@ -51,10 +51,11 @@ PHASE_B_MATCH = "B_match"
 
 class MainWindow(QMainWindow):
 
-    # 가장 작은 노트북 (14인치 1366×768) 에서도 무리 없는 하한.  매칭
-    # 후보 그리드와 측면 패널이 가로 스크롤을 일으키지 않는 최소 너비.
-    _MIN_W = 1120
-    _MIN_H = 700
+    # 좁은 창에서도 동작하도록 충분히 작게 (#2 — 사용자 요청: 좌우 스크롤
+    # 발생하지 않게 상하 스크롤만으로 충분한 상태).  Stage 1/2 페이지는
+    # 폭이 좁아지면 H-splitter 가 V-splitter 로 자동 전환되어 reflow.
+    _MIN_W = 800
+    _MIN_H = 600
 
     def __init__(self) -> None:
         super().__init__()
@@ -70,9 +71,20 @@ class MainWindow(QMainWindow):
         self._stack = QStackedWidget(self)
         self.setCentralWidget(self._stack)
 
-        # 상태 바 + 메모리 표시 (psutil 가용 시) ----------------------------
+        # 상태 바 + 메모리 표시 (psutil 가용 시) + 가속 디바이스 표시 (#5).
         self._status_bar = QStatusBar(self)
         self.setStatusBar(self._status_bar)
+        # 디바이스 표시 — 'GPU 가속 (...)' / 'CPU N 코어'.
+        self._device_label = QLabel("", self._status_bar)
+        self._device_label.setStyleSheet(
+            "color: #00FFA3; padding: 0 8px; font-weight: 600;"
+        )
+        try:
+            from ..learning import embedder as _emb
+            self._device_label.setText(_emb.device_label())
+        except Exception:
+            self._device_label.setText("")
+        self._status_bar.addPermanentWidget(self._device_label)
         self._mem_label = QLabel("", self._status_bar)
         self._mem_label.setProperty("role", "muted")
         self._status_bar.addPermanentWidget(self._mem_label)

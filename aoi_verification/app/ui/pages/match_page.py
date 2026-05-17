@@ -58,6 +58,10 @@ class MatchPage(QWidget):
     skipped_changed = pyqtSignal()              # 외부 자동 저장 트리거
     finished = pyqtSignal()                     # 모든 큐 처리 완료
 
+    # 좁은 창에선 중앙/우측 2-pane 을 세로 스택으로 자동 전환 (#2).
+    _RESPONSIVE_THRESH_LO = 840
+    _RESPONSIVE_THRESH_HI = 940
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._state: Stage2State | None = None
@@ -199,7 +203,7 @@ class MatchPage(QWidget):
         bar.addWidget(self.no_match_btn)
         cl.addLayout(bar)
 
-        center.setMinimumWidth(420)
+        center.setMinimumWidth(360)
         self._h_splitter.addWidget(center)
 
         # RIGHT: 후보들 — 내부에 ‘그리드 ↔ 더 크게 보기’ 스택을 두어
@@ -241,7 +245,7 @@ class MatchPage(QWidget):
         rl.addWidget(self._right_stack, stretch=1)
         # 3 col × 134(tile) + spacing 16 + 패널 padding 20 = 438 → 후보 9 장이
         # 가로 스크롤 없이 한 화면에 깔리도록.
-        right.setMinimumWidth(440)
+        right.setMinimumWidth(360)
         self._h_splitter.addWidget(right)
 
         # 좌측 skip 패널을 제거했으므로 splitter index 가 0/1 로 줄었다.
@@ -261,6 +265,24 @@ class MatchPage(QWidget):
 
         QShortcut(QKeySequence("S"), self, activated=self._skip_current)
         QShortcut(QKeySequence("N"), self, activated=self._confirm_no_match)
+
+    # ------------------------------------------------------------------
+    def resizeEvent(self, event):                       # noqa: N802
+        super().resizeEvent(event)
+        self._update_splitter_orientation()
+
+    def _update_splitter_orientation(self) -> None:
+        """창 폭에 따라 H ↔ V splitter 전환 — 가로 스크롤 회피 (#2)."""
+        if not hasattr(self, "_h_splitter"):
+            return
+        cur = self._h_splitter.orientation()
+        w = self.width()
+        if cur == Qt.Orientation.Horizontal and w < self._RESPONSIVE_THRESH_LO:
+            self._h_splitter.setOrientation(Qt.Orientation.Vertical)
+            self._h_splitter.setSizes([400, 400])
+        elif cur == Qt.Orientation.Vertical and w > self._RESPONSIVE_THRESH_HI:
+            self._h_splitter.setOrientation(Qt.Orientation.Horizontal)
+            self._h_splitter.setSizes([500, 500])
 
     # ------------------------------------------------------------------
     def _save_splitter_state(self, *args) -> None:

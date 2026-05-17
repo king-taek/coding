@@ -38,6 +38,42 @@ _DEFAULT_BATCH = 32
 BACKBONE_OUT_DIM = 576
 
 
+# ---------------------------------------------------------------------------
+# Device 감지 — CUDA 가 있으면 GPU, 없으면 CPU (#5).
+# ---------------------------------------------------------------------------
+def _detect_device():  # pragma: no cover — 환경 의존
+    if not _HAS_TORCH:
+        return None
+    try:
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+    except Exception:
+        pass
+    return torch.device("cpu")
+
+
+_DEVICE = _detect_device()
+
+
+def device():
+    """현재 torch device (None = torch 미설치)."""
+    return _DEVICE
+
+
+def device_label() -> str:
+    """상태바 표시용 — 'GPU 가속 (NVIDIA...)' / 'CPU N 코어' / ''."""
+    import os
+    if _DEVICE is None:
+        return ""
+    if _DEVICE.type == "cuda":
+        try:
+            name = torch.cuda.get_device_name(0)
+        except Exception:
+            name = "CUDA"
+        return f"GPU 가속 ({name})"
+    return f"CPU {max(1, (os.cpu_count() or 1) - 1)} 코어"
+
+
 def is_available() -> bool:
     return _HAS_TORCH and triplet_model.is_available()
 
@@ -65,6 +101,12 @@ def _load_backbone():  # pragma: no cover — heavy
     backbone = models.mobilenet_v3_small(weights=weights)
     backbone.classifier = torch.nn.Identity()
     backbone.eval()
+    # CUDA 가 있으면 GPU 로 옮겨 추론 가속 (#5).
+    if _DEVICE is not None:
+        try:
+            backbone = backbone.to(_DEVICE)
+        except Exception:
+            pass
     return backbone
 
 
@@ -93,6 +135,11 @@ def _load_head_for(model_name: str):  # pragma: no cover — heavy
     if in_dim != BACKBONE_OUT_DIM:
         return None
     head.eval()
+    if _DEVICE is not None:
+        try:
+            head = head.to(_DEVICE)
+        except Exception:
+            pass
     return head
 
 
@@ -151,6 +198,10 @@ def compute_embeddings(paths: Iterable[Path],
     if mode == registry.BASIC:
         return out
 
+    # GPU 에선 batch 를 키워 forward 횟수 감소 → 처리량 ↑.
+    if _DEVICE is not None and _DEVICE.type == "cuda":
+        batch_size = max(batch_size, 64)
+
     backbone = _load_backbone()
     head = _load_head_for(mode)
 
@@ -166,11 +217,17 @@ def compute_embeddings(paths: Iterable[Path],
         keys = [p for p, _ in pending]
         tensors = [t for _, t in pending]
         x = torch.stack(tensors)
+        # GPU 디바이스가 있으면 입력 텐서도 함께 이동 (#5).
+        if _DEVICE is not None:
+            try:
+                x = x.to(_DEVICE, non_blocking=True)
+            except Exception:
+                pass
         with torch.no_grad():
             feat = backbone(x)
             if head is not None:
                 feat = head(feat)
-            feat = feat.cpu().numpy()
+            feat = feat.detach().cpu().numpy()
         # L2 정규화
         norms = np.linalg.norm(feat, axis=1, keepdims=True) + 1e-9
         feat = (feat / norms).astype(np.float32)

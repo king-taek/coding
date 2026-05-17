@@ -31,6 +31,8 @@ COL_REF = "C"
 COL_VAL = "D"
 DATA_START_ROW = 3
 HEADER_AOI_ROW = 2
+# 슬롯 구분선이 그려지는 컬럼 (#4 — 양식.xlsx 의 A~H 모두 커버).
+BORDER_COLS = ["A", "B", "C", "D", "E", "F", "G", "H"]
 
 # 셀 ↔ 사진 크기 정합:
 #   · 양식.xlsx 의 데이터 행 높이 (165.75pt) 와 일치시켜 템플릿 안팎의 행 높이를
@@ -108,10 +110,11 @@ class ExcelExporter(QThread):
         # (~8) 으로 떨어져 사진이 작아 보이는 문제가 있다.  병합된 헤더 쌍의
         # 왼쪽 컬럼 width 를 오른쪽 컬럼에도 그대로 미러링한다.
         self._mirror_paired_column_widths(ws)
-        # 그 위에 ‘우리 데이터 컬럼은 최소 IMG_COL_WIDTH 보장’ — 양식 폭이
-        # 더 크면 양식 값을 유지.
-        self._ensure_width(ws, COL_REF, IMG_COL_WIDTH)
-        self._ensure_width(ws, COL_VAL, IMG_COL_WIDTH)
+        # D 는 C 와 동일하게, E~H 는 모두 같은 폭으로 정규화 (#3).
+        #   · C/D: max(현재 최대, IMG_COL_WIDTH=22) — 보통 양식의 31.83.
+        #   · E~H: max(현재 최대, 18) — 사용자 수기 영역.
+        self._equalize_column_group(ws, [COL_REF, COL_VAL], floor=IMG_COL_WIDTH)
+        self._equalize_column_group(ws, ["E", "F", "G", "H"], floor=18.0)
         self._ensure_width(ws, COL_SLOT, 14)
         self._ensure_width(ws, COL_NO, 6)
 
@@ -167,6 +170,24 @@ class ExcelExporter(QThread):
             ws.column_dimensions[col_letter].width = min_w
 
     @staticmethod
+    def _equalize_column_group(ws, cols: list[str], floor: float) -> None:
+        """주어진 열들의 width 를 모두 같은 값으로 통일.
+
+        target = max(현재 지정된 width 중 최대, floor). 모든 입력 컬럼이
+        target 으로 설정되어 D == C, E == F == G == H 가 보장됨 (#3).
+        """
+        widths: list[float] = []
+        for c in cols:
+            w = ws.column_dimensions[c].width
+            if w:
+                widths.append(float(w))
+        target = max(widths + [float(floor)])
+        for c in cols:
+            # ColumnDimension.customWidth 는 property (no setter) — width 만
+            # 세팅하면 openpyxl 이 자동으로 customWidth=True 처리.
+            ws.column_dimensions[c].width = target
+
+    @staticmethod
     def _mirror_paired_column_widths(ws) -> None:
         """병합된 헤더 (예: C1:D1) 의 오른쪽 컬럼이 width 미지정인 경우 왼쪽
         컬럼의 width 를 그대로 복사한다.  양식.xlsx 처럼 ‘왼쪽만 폭 지정’ 한
@@ -187,7 +208,6 @@ class ExcelExporter(QThread):
                 cd = ws.column_dimensions[col_letter]
                 if not cd.width:
                     cd.width = left_w
-                    cd.customWidth = True
 
     # ------------------------------------------------------------------
     def _build_minimal_headers(self, ws) -> None:
@@ -219,12 +239,16 @@ class ExcelExporter(QThread):
     def _fill_rows(self, ws, rows_input: list[tuple[str, str, object]]) -> None:
         from openpyxl.comments import Comment
         from openpyxl.drawing.image import Image as XLImage
-        from openpyxl.styles import Alignment, Font
+        from openpyxl.styles import Alignment, Border, Font, Side
 
         total = len(rows_input)
         row = DATA_START_ROW
         red_font = Font(color="FFFF2D55", bold=True)
         center = Alignment(horizontal="center", vertical="center")
+        # 슬롯이 바뀌는 첫 행 위에 굵은 가로 구분선 (#4).  같은 슬롯끼리
+        # 시각적으로 묶이도록.
+        slot_sep_side = Side(border_style="medium", color="FF666666")
+        prev_slot: Optional[str] = None
         # 템플릿 데이터 행의 ‘기준 높이’ 를 한 번만 측정 — 보통 165.75pt.
         # 양식이 없거나 데이터 행에 높이가 안 잡혀 있으면 ROW_HEIGHT_PT 사용.
         template_row_h = ws.row_dimensions[DATA_START_ROW].height or ROW_HEIGHT_PT
@@ -233,11 +257,27 @@ class ExcelExporter(QThread):
             ws.column_dimensions[COL_REF].width or IMG_COL_WIDTH
         )
         cell_h_px = _row_height_to_px(template_row_h)
-        for idx, (_slot, _key, payload) in enumerate(rows_input, start=1):
+        for idx, (cur_slot, _key, payload) in enumerate(rows_input, start=1):
             # 새 행은 템플릿의 데이터 행과 같은 높이로 통일 → 양식 안팎 일관성.
             cur_h = ws.row_dimensions[row].height
             if not cur_h or cur_h < template_row_h:
                 ws.row_dimensions[row].height = template_row_h
+
+            # 슬롯 변경 시 A~H 전 열에 top border 적용 (기존 좌/우/하 보존).
+            if prev_slot is not None and cur_slot != prev_slot:
+                for col in BORDER_COLS:
+                    cell = ws[f"{col}{row}"]
+                    old = cell.border
+                    cell.border = Border(
+                        top=slot_sep_side,
+                        left=old.left, right=old.right, bottom=old.bottom,
+                        diagonal=old.diagonal,
+                        diagonal_direction=old.diagonal_direction,
+                        outline=old.outline,
+                        vertical=old.vertical,
+                        horizontal=old.horizontal,
+                    )
+            prev_slot = cur_slot
 
             # A 열: 행 번호 (사용자 양식의 ‘No’).
             no_cell = ws[f"{COL_NO}{row}"]

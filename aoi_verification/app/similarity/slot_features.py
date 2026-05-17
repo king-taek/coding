@@ -16,7 +16,9 @@ Stage 2 에서 한 슬롯의 모든 검증측 이미지 ``Feature`` 객체를 �
 
 from __future__ import annotations
 
+import os
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -25,6 +27,19 @@ from PyQt6.QtCore import QObject, QThread, pyqtSignal
 from ..models.slot import ImageItem
 from . import pipeline as _pipeline
 from .pipeline import Feature
+
+# OpenCV 가 내부에서 multi-threading 하면 우리 ThreadPoolExecutor 와
+# over-subscription 발생 → 오히려 느려짐.  외부에서만 병렬화하도록 끔.
+try:
+    import cv2 as _cv2
+    _cv2.setNumThreads(1)
+except Exception:
+    pass
+
+
+def _worker_count() -> int:
+    """ThreadPoolExecutor 워커 수 — CPU 코어 -1 (UI 응답성 확보)."""
+    return max(2, (os.cpu_count() or 2) - 1)
 
 
 class SlotFeatureCache:
@@ -256,25 +271,23 @@ class SlotPrecomputeWorker(QThread):
                         ref_feats[r.path] = _pipeline.extract(r.path)
                     except Exception:
                         pass
-                # 3) 모든 (ref, val) 쌍 점수 — 정밀 score() 한 번 호출.
-                for r in refs:
-                    if self._stop:
-                        return
-                    rf = ref_feats.get(r.path)
-                    for v in vals:
-                        if self._stop:
-                            return
-                        vf = val_feats.get(v.path)
-                        done += 1
-                        if rf is None or vf is None:
-                            continue
-                        try:
-                            s = _pipeline.score(rf, vf)
-                        except Exception:
-                            continue
-                        self._score_cache.put(slot, r.path, v.path, s)
-                        if done % 25 == 0:
-                            self.signals.progress.emit(done, total)
+
+                # 2.5) CNN 임베딩 사전 배치 (#5 — GPU 가속 + thread-safety).
+                # score() 안에서 lazy 계산 + Feature.cnn 변형이 일어나면
+                # ThreadPoolExecutor 환경에서 race condition / torch 비-스레드
+                # 안전성에 걸린다.  슬롯 단위로 한 번에 GPU 배치 추론 → score()
+                # 는 캐시 hit 만 하게 한다.
+                self._prefetch_cnn_embeddings(ref_feats, val_feats)
+
+                # 3) 모든 (ref, val) 쌍 점수 — ThreadPoolExecutor 로 병렬 (#5).
+                # _pipeline.score 의 cv2/numpy/skimage 호출은 GIL 을 잘 양보
+                # 하므로 thread 가 실제 병렬 처리 가능.  cv2 내부 multi-thread
+                # 는 over-subscription 회피 위해 외부에서만 병렬화한다.
+                self._score_pairs_parallel(
+                    slot, refs, vals, ref_feats, val_feats,
+                    done_offset=done, total=total,
+                )
+                done += len(refs) * len(vals)
                 # 슬롯 단위로 진행률 + 슬롯 완료 emit.
                 self.signals.progress.emit(done, total)
                 self.signals.slot_finished.emit(
@@ -290,3 +303,89 @@ class SlotPrecomputeWorker(QThread):
             self.signals.finished.emit()
         except Exception as exc:        # pragma: no cover — 안전망
             self.signals.failed.emit(str(exc))
+
+    # ------------------------------------------------------------------
+    def _prefetch_cnn_embeddings(self,
+                                  ref_feats: Dict[Path, Feature],
+                                  val_feats: Dict[Path, Feature]) -> None:
+        """CNN 활성 모드라면 슬롯의 모든 이미지에 대한 임베딩을 한 번에 GPU
+        배치 추론으로 계산 → Feature.cnn 에 주입 (#5).  병렬 score() 단계에서
+        torch 호출 / Feature 변형을 모두 없애서 thread-safe 보장."""
+        try:
+            from ..learning import embedder as _emb
+        except Exception:
+            return
+        if not _emb.is_available():
+            return
+        mode = _emb.get_active_mode()
+        if mode == _emb.registry.BASIC:
+            return
+        # 캐시에 없는 이미지만 계산.
+        paths_needed = []
+        for d in (ref_feats, val_feats):
+            for p, f in d.items():
+                if f is None:
+                    continue
+                if f.cnn is None or f.cnn_model != mode:
+                    paths_needed.append(p)
+        # 중복 제거 (ref 와 val 에 동일 path 가 있을 수 있음).
+        paths_needed = list(dict.fromkeys(paths_needed))
+        if not paths_needed:
+            return
+        try:
+            emb_map = _emb.compute_embeddings(paths_needed, batch_size=64)
+        except Exception:
+            return
+        # Feature 객체에 결과 주입 (main thread, 병렬 진입 전).
+        for d in (ref_feats, val_feats):
+            for p, f in d.items():
+                e = emb_map.get(p)
+                if e is not None and f is not None:
+                    f.cnn = e
+                    f.cnn_model = mode
+
+    def _score_pairs_parallel(self,
+                               slot: str,
+                               refs: List[ImageItem],
+                               vals: List[ImageItem],
+                               ref_feats: Dict[Path, Feature],
+                               val_feats: Dict[Path, Feature],
+                               *,
+                               done_offset: int,
+                               total: int) -> None:
+        """(ref × val) 모든 쌍을 ThreadPoolExecutor 로 병렬 계산해 score_cache 에 저장."""
+        pair_args: list[tuple[Path, Path, Feature, Feature]] = []
+        for r in refs:
+            rf = ref_feats.get(r.path)
+            if rf is None:
+                continue
+            for v in vals:
+                vf = val_feats.get(v.path)
+                if vf is None:
+                    continue
+                pair_args.append((r.path, v.path, rf, vf))
+
+        if not pair_args:
+            return
+
+        def _score(args):
+            rp, vp, rf, vf = args
+            try:
+                return rp, vp, float(_pipeline.score(rf, vf))
+            except Exception:
+                return rp, vp, None
+
+        n_workers = _worker_count()
+        done = done_offset
+        with ThreadPoolExecutor(max_workers=n_workers) as pool:
+            futures = [pool.submit(_score, a) for a in pair_args]
+            for fut in as_completed(futures):
+                if self._stop:
+                    pool.shutdown(wait=False, cancel_futures=True)
+                    return
+                rp, vp, s = fut.result()
+                done += 1
+                if s is not None:
+                    self._score_cache.put(slot, rp, vp, s)
+                if done % 25 == 0:
+                    self.signals.progress.emit(done, total)

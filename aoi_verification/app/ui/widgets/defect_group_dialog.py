@@ -11,11 +11,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable, Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFontMetrics, QPixmap
-from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QHBoxLayout,
-                              QLabel, QScrollArea, QSizePolicy, QVBoxLayout,
-                              QWidget)
+from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout,
+                              QHBoxLayout, QLabel, QScrollArea, QSizePolicy,
+                              QVBoxLayout, QWidget)
 
 from ... import i18n
 from ...models.slot import ImageItem
@@ -75,24 +75,53 @@ class _GroupRow(QFrame):
         head.addWidget(btn_exclude)
         outer.addLayout(head)
 
-        # 사진 가로 strip — 그룹이 많으면 가로 스크롤.
-        strip_host = QWidget(self)
-        strip = QHBoxLayout(strip_host)
-        strip.setContentsMargins(0, 0, 0, 0)
-        strip.setSpacing(6)
+        # 사진 wrap 그리드 — 좁은 창에서 가로 스크롤 발생하지 않도록
+        # viewport 폭에 맞춰 자동 columns 계산 (#2).
+        self._strip_host = QWidget(self)
+        self._strip_grid = QGridLayout(self._strip_host)
+        self._strip_grid.setContentsMargins(0, 0, 0, 0)
+        self._strip_grid.setHorizontalSpacing(6)
+        self._strip_grid.setVerticalSpacing(6)
+        self._tiles: list[_GroupTile] = []
         for it in group.items:
-            tile = _GroupTile(it, parent=strip_host)
-            strip.addWidget(tile)
-        strip.addStretch(1)
+            tile = _GroupTile(it, parent=self._strip_host)
+            self._tiles.append(tile)
 
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroll.setWidget(strip_host)
-        scroll.setFixedHeight(_TILE_PX + _CAP_PX + 24)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setWidget(self._strip_host)
+        # 최대 3 행까지 보이고 그 이상은 세로 스크롤 — 가로 스크롤 제거.
+        scroll.setMaximumHeight((_TILE_PX + _CAP_PX + 14) * 3 + 16)
+        self._scroll = scroll
         outer.addWidget(scroll)
+        # 첫 렌더 + resize 시 자동 reflow.
+        QTimer.singleShot(0, self._relayout_tiles)
+
+    def _relayout_tiles(self) -> None:
+        """viewport 폭에 맞춰 columns 자동 계산 후 grid 재배치."""
+        if not self._tiles:
+            return
+        vp_w = self._scroll.viewport().width() if hasattr(self, "_scroll") else 0
+        if vp_w <= 0:
+            vp_w = self._strip_host.width() or (_TILE_PX + 14)
+        cols = max(1, vp_w // (_TILE_PX + 14))
+        # 기존 grid 비우기.
+        while self._strip_grid.count():
+            it = self._strip_grid.takeAt(0)
+            w = it.widget()
+            if w is not None:
+                self._strip_grid.removeWidget(w)
+        for i, tile in enumerate(self._tiles):
+            self._strip_grid.addWidget(tile, i // cols, i % cols)
+
+    def resizeEvent(self, event):                       # noqa: N802
+        super().resizeEvent(event)
+        # 리사이즈 시 columns 재계산 — 즉시 호출하면 viewport 폭이 아직
+        # 갱신되지 않은 경우가 있어 한 tick 뒤로 미룬다.
+        QTimer.singleShot(0, self._relayout_tiles)
 
 
 class _GroupTile(QFrame):
