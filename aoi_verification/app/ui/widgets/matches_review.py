@@ -29,11 +29,11 @@ class _Row(QWidget):
     delete_requested = pyqtSignal(object)        # MatchResult
 
     _STYLE_NORMAL = (
-        "_Row { background: #0E1424; border: 1px solid #1F2A3F; "
+        "QWidget#matchRow { background: #0E1424; border: 1px solid #1F2A3F; "
         "border-radius: 8px; }"
     )
     _STYLE_PENDING = (
-        "_Row { background: #0E1424; border: 2px solid #FF2D55; "
+        "QWidget#matchRow { background: #2A0E16; border: 3px solid #FF2D55; "
         "border-radius: 8px; }"
     )
 
@@ -41,8 +41,11 @@ class _Row(QWidget):
         super().__init__(parent)
         self.match = m
         self._pending = False
+        self.setObjectName("matchRow")
+        # 스타일시트 배경/테두리가 일반 QWidget 에도 칠해지도록.
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setMinimumHeight(_THUMB + 40)
-        # 스타일은 _Row 선택자로 한정 — 자식 위젯에 빨간 테두리가 번지지 않게.
+        # objectName 선택자로 한정 — 자식 위젯에 빨간 테두리가 번지지 않게.
         self.setStyleSheet(self._STYLE_NORMAL)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(8, 8, 8, 8)

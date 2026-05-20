@@ -732,10 +732,16 @@ class SelectPage(QWidget):
         if self._state is None:
             return
         # 현재 남은 후보 (queue) 만 그룹화 — 결정 끝난 사진은 대상이 아님.
+        # 그룹화는 '기준 장비(ref)' 사진에 대해서만 진행한다 (#3).
         items_by_slot: dict[str, list[ImageItem]] = defaultdict(list)
         for it in self._state.queue:
+            if getattr(it, "side", "ref") != "ref":
+                continue
             items_by_slot[it.slot].append(it)
         if not items_by_slot:
+            QMessageBox.information(
+                self, i18n.KO.APP_TITLE, i18n.KO.GROUP_REF_ONLY_INFO,
+            )
             return
 
         # 기존 워커가 실행 중이면 중복 클릭 방지.

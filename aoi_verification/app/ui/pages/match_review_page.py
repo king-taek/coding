@@ -30,11 +30,14 @@ from ..widgets.zoom_window import FullscreenViewer
 
 _THUMB_PX = 140
 _RUNNERUP_PX = int(_THUMB_PX * 0.8)         # 차순위는 20% 작게
-# 화면 너비를 아직 모를 때 한 줄에 채울 차순위 후보 기본 열 수 (#4/#5 fallback).
-_FALLBACK_COLS = 6
-# 한 줄(첫 줄/아래 추가 줄)에 들어갈 후보 타일 수 (#3). 첫 줄은 1위 매치 옆에
-# 인라인으로 붙고, 그 아래 추가 줄도 같은 열 수로 채운다.
-_FIRST_LINE_COLS = 3
+_TILE_W = _RUNNERUP_PX + 12                 # 타일 1개 점유 폭(간격 포함)
+# 후보 열 수 — 창 너비에 따라 가변, 최소값만 보장 (#1).
+#   첫 줄(1위 매치 옆 인라인)은 최소 4 장, ‘한 줄 더 보기’ 의 아래 줄은 최소 5 장.
+#   가로로 넘치지 않도록 가용 폭 안에서만 늘린다 (큰 해상도일수록 더 많이).
+_MIN_FIRST_COLS = 4
+_MIN_GRID_COLS = 5
+# 1위 매치 옆 인라인 첫 줄이 쓰는 고정 위젯 폭 추정(슬롯+ref+화살표+val+버튼+여백).
+_FIRST_LINE_RESERVED_PX = 700
 # _lookup_runners_up 가 보관하는 차순위 후보 최대 개수 (#16).
 _MAX_RUNNERS = 50
 
@@ -187,7 +190,7 @@ class _MatchRow(QFrame):
         top.addWidget(primary_host)
 
         # ── 첫 줄 차순위 후보 — 1위 매치 바로 옆(인라인)에 붙는다 (#3). ──
-        # 이 컨테이너 안의 가로 레이아웃에 _FIRST_LINE_COLS 개까지 채운다.
+        # 이 컨테이너 안의 가로 레이아웃에 _first_cols() 개까지 채운다.
         self._first_line_host = QWidget(self)
         self._first_line_lay = QHBoxLayout(self._first_line_host)
         self._first_line_lay.setContentsMargins(0, 0, 0, 0)
@@ -240,9 +243,35 @@ class _MatchRow(QFrame):
             self.btn_more = None
             self._first_line_host.setVisible(False)
 
-    def _runner_cols(self) -> int:
-        """한 줄에 들어갈 후보 열 수 — 고정값으로 예측 가능하게 한다 (#3)."""
-        return _FIRST_LINE_COLS
+    def _row_width(self) -> int:
+        """현재 행의 가용 너비 — 아직 표시 전이면 부모/페이지 너비로 추정."""
+        w = self.width()
+        if w <= 1:
+            p = self.parentWidget()
+            w = (p.width() if p is not None else 0) or 1280
+        return w
+
+    def _first_cols(self) -> int:
+        """첫 줄(인라인) 후보 열 수 — 최소 4, 가용 폭 안에서 가변 (#1)."""
+        avail = self._row_width() - _FIRST_LINE_RESERVED_PX
+        fit = avail // _TILE_W if avail > 0 else 0
+        return max(_MIN_FIRST_COLS, int(fit))
+
+    def _grid_cols(self) -> int:
+        """아래 추가 줄 후보 열 수 — 최소 5, 전체 폭 기준 가변 (#1)."""
+        avail = self._row_width() - 60
+        fit = avail // _TILE_W if avail > 0 else 0
+        return max(_MIN_GRID_COLS, int(fit))
+
+    def resizeEvent(self, event):  # noqa: N802
+        super().resizeEvent(event)
+        # 창 크기가 바뀌어 열 수가 달라지면 후보를 다시 배치 (가로 넘침 방지/#1).
+        if not self._runners_up:
+            return
+        cur = (self._first_cols(), self._grid_cols())
+        if cur != getattr(self, "_last_cols", None):
+            self._last_cols = cur
+            self._render_runners()
 
     def _make_tile(self, item: ImageItem, score: float, parent) -> "_RunnerUpTile":
         """후보 타일 하나를 만들고 swap 시그널을 연결한다 (#3)."""
@@ -258,7 +287,8 @@ class _MatchRow(QFrame):
         ``_visible_lines`` 가 보이는 총 줄 수.  1줄째는 1위 매치 옆에 인라인으로,
         2줄째부터는 그 아래 그리드에 ``cols`` 개씩 줄바꿈으로 표시한다.
         """
-        cols = self._runner_cols()
+        fc = self._first_cols()      # 첫 줄(인라인) 열 수 — 최소 4, 가변
+        gc = self._grid_cols()       # 추가 줄(그리드) 열 수 — 최소 5, 가변
 
         # 인라인 첫 줄을 비우고 다시 채운다.
         while self._first_line_lay.count():
@@ -266,8 +296,7 @@ class _MatchRow(QFrame):
             w = it.widget()
             if w is not None:
                 w.deleteLater()
-        first_line = self._runners_up[:cols]
-        for item, score in first_line:
+        for item, score in self._runners_up[:fc]:
             self._first_line_lay.addWidget(
                 self._make_tile(item, score, self._first_line_host)
             )
@@ -281,19 +310,19 @@ class _MatchRow(QFrame):
             w = it.widget()
             if w is not None:
                 w.deleteLater()
-        visible_count = max(1, self._visible_lines) * cols
-        # 첫 줄(cols 개)은 인라인이 담당하므로 그 이후 분만 그리드에 둔다.
-        rest = self._runners_up[cols:visible_count]
+        # _visible_lines: 보이는 총 줄 수(첫 줄 포함).  추가 줄 = _visible_lines-1.
+        extra_lines = max(0, self._visible_lines - 1)
+        rest = self._runners_up[fc:fc + extra_lines * gc]
         for idx, (item, score) in enumerate(rest):
             self._runner_grid.addWidget(
                 self._make_tile(item, score, self._runner_host),
-                idx // cols, idx % cols,
+                idx // gc, idx % gc,
             )
 
         # 모두 표시했으면 ‘더 보기’ 버튼을 숨긴다.
-        shown_total = min(visible_count, len(self._runners_up))
+        visible_count = fc + len(rest)
         if self.btn_more is not None:
-            self.btn_more.setVisible(shown_total < len(self._runners_up))
+            self.btn_more.setVisible(visible_count < len(self._runners_up))
 
     def _on_more(self) -> None:
         """‘후보 한 줄 더 보기’ — 표시 줄 수를 1 늘리고 재렌더 (#5)."""

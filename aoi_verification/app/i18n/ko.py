@@ -81,6 +81,10 @@ GROUP_DIALOG_HINT = (
 GROUP_DIALOG_EMPTY = (
     "묶을 만한 동일 defect 그룹을 찾지 못했습니다 (모든 후보가 서로 다른 사진)."
 )
+GROUP_REF_ONLY_INFO = (
+    "동일 defect 그룹화는 기준 장비 사진에 대해서만 진행합니다.\n"
+    "현재 화면에는 그룹화할 기준 장비 후보가 없습니다."
+)
 GROUP_ROW_HEADER_FMT = "{slot} — {n} 장"
 GROUP_BTN_VERIFY_ALL = "이 그룹 전체 검증"
 GROUP_BTN_EXCLUDE_ALL = "이 그룹 전체 제외"
