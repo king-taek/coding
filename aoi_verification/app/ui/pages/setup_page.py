@@ -406,6 +406,12 @@ class SetupPage(QWidget):
         pre_contrast = bool(self.check_pre_contrast.isChecked())
         pre_bg = bool(self.check_pre_bg.isChecked())
         kla_crop = bool(self.check_kla_crop.isChecked())
+
+        # 고속 모드를 골랐는데 의존성(hnswlib 등)이 없으면 조용히 기본 모드로
+        # 폴백돼 "속도 차이가 없다"는 혼란을 준다.  설치를 안내하고, 설치 전에는
+        # 세션 시작을 보류한다 (사용자가 '기본 모드로 진행' 을 고르면 그대로 진행).
+        if engine_mode == "fast" and not self._ensure_fast_ready():
+            return
         # 마지막 입력 값을 영속화 (#14)
         _prefs.patch(
             threshold=threshold,
@@ -435,6 +441,74 @@ class SetupPage(QWidget):
             pre_bg_removal=pre_bg,
             kla_crop=kla_crop,
         ))
+
+    # ------------------------------------------------------------------
+    def _ensure_fast_ready(self) -> bool:
+        """고속 모드 의존성 확인.  준비됐으면 True(세션 시작 진행).
+
+        미설치면 설치 안내 모달을 띄우고, 사용자가 '기본 모드로 진행' 을 고를
+        때만 True 를 반환한다 (이 경우 엔진은 기본으로 폴백).  '지금 설치' 를
+        고르면 백그라운드 설치를 시작하고 False 를 반환(세션 보류) — 설치가
+        끝나면 다시 [검증 시작] 을 누르도록 안내한다.
+        """
+        from ...learning import fast_deps_installer as _fdi
+        if _fdi.fast_ready():
+            return True
+        pkgs = _fdi.missing_packages()
+        if not pkgs:
+            return True
+        body = i18n.KO.FAST_DEPS_BODY_FMT.format(pkgs=", ".join(pkgs))
+        if "openvino" in pkgs:
+            body += i18n.KO.FAST_DEPS_NOTE_OPENVINO
+        box = QMessageBox(self)
+        box.setWindowTitle(i18n.KO.FAST_DEPS_TITLE)
+        box.setText(body)
+        btn_install = box.addButton(i18n.KO.FAST_DEPS_BTN_INSTALL,
+                                    QMessageBox.ButtonRole.AcceptRole)
+        btn_basic = box.addButton(i18n.KO.FAST_DEPS_BTN_BASIC,
+                                  QMessageBox.ButtonRole.DestructiveRole)
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is btn_basic:
+            return True                       # 기본 모드로 폴백 진행 (사용자 선택)
+        if clicked is btn_install:
+            self._start_fast_install(pkgs)
+            return False                      # 설치 후 다시 시작하도록 보류
+        return False                          # 취소
+
+    def _start_fast_install(self, packages: list) -> None:
+        from ...learning.fast_deps_installer import FastDepsInstallWorker
+        self._loading.show_overlay(
+            i18n.KO.FAST_DEPS_INSTALLING.format(line="")
+        )
+        self._fast_install_worker = FastDepsInstallWorker(packages, parent=self)
+        self._fast_install_worker.signals.progress.connect(
+            lambda line: self._loading.show_overlay(
+                i18n.KO.FAST_DEPS_INSTALLING.format(line=line[-80:])
+            )
+        )
+        self._fast_install_worker.signals.finished.connect(
+            self._on_fast_install_finished
+        )
+        self._fast_install_worker.start()
+
+    def _on_fast_install_finished(self, ok: bool, message: str) -> None:
+        import importlib
+        from ...learning import fast_deps_installer as _fdi
+        # 방금 설치된 패키지를 현재 프로세스가 import 할 수 있도록 finder 캐시 갱신.
+        importlib.invalidate_caches()
+        self._loading.hide_overlay()
+        if not ok:
+            QMessageBox.warning(
+                self, i18n.KO.FAST_DEPS_TITLE,
+                i18n.KO.FAST_DEPS_FAILED_FMT.format(error=message),
+            )
+            return
+        # 설치 성공 — 현재 프로세스에서 즉시 import 되면 재시작 불필요.
+        msg = (i18n.KO.FAST_DEPS_DONE if _fdi.fast_ready()
+               else i18n.KO.FAST_DEPS_DONE_RESTART)
+        QMessageBox.information(self, i18n.KO.FAST_DEPS_TITLE, msg)
 
     # ------------------------------------------------------------------
     def apply_state(self, ref_root: str, val_root: str,

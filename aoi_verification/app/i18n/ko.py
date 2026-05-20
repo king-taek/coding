@@ -199,6 +199,31 @@ ENGINE_FAST_UNAVAILABLE = (
     "고속 모드를 사용할 수 없어 기본 모드로 진행합니다 "
     "(hnswlib/torch 미설치)."
 )
+# 고속 모드 의존성 설치 안내
+FAST_DEPS_TITLE = "고속 모드 준비"
+FAST_DEPS_BODY_FMT = (
+    "고속 모드(임베딩 + ANN)를 사용하려면 아래 패키지 설치가 필요합니다.\n"
+    "설치하지 않으면 고속 모드가 기본 모드로 폴백되어 속도 차이가 없습니다.\n\n"
+    "  • {pkgs}\n\n"
+    "지금 설치할까요?  (인터넷 필요)"
+)
+FAST_DEPS_NOTE_OPENVINO = (
+    "\n※ openvino 는 Intel GPU/NPU 가속용(선택) — 설치 시 임베딩이 크게 빨라집니다."
+)
+FAST_DEPS_BTN_INSTALL = "지금 설치"
+FAST_DEPS_BTN_BASIC = "기본 모드로 진행"
+FAST_DEPS_INSTALLING = "고속 모드 패키지 설치 중…\n{line}"
+FAST_DEPS_DONE = (
+    "설치 완료!  [검증 시작] 을 다시 누르면 고속 모드로 진행됩니다."
+)
+FAST_DEPS_DONE_RESTART = (
+    "설치는 끝났지만 적용하려면 프로그램을 다시 시작해야 합니다.\n"
+    "재시작 후 [검증 시작] 을 누르면 고속 모드가 적용됩니다."
+)
+FAST_DEPS_FAILED_FMT = (
+    "설치 실패 — {error}\n\n"
+    "수동 설치:  pip install hnswlib"
+)
 PRE_GROUP_TITLE = "강화 전처리 (계산 전용 — 화면 표시는 원본 유지)"
 PRE_GRAYSCALE_LABEL = "흑백 + 고감도"
 PRE_CONTRAST_LABEL = "고대비"

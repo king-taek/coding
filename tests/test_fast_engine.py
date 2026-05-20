@@ -223,3 +223,19 @@ def test_precompute_progress_moves_fast(tmp_path, isolated_cache, monkeypatch):
     assert finished is True
     assert calls > 0
     assert max_pct > 0
+
+
+# ---- 고속 모드 의존성 감지 (속도 차이 없음 = 폴백 진단) ------------------
+def test_fast_deps_detection(monkeypatch):
+    from aoi_verification.app.learning import fast_deps_installer as fdi
+
+    # hnswlib 없으면 fast_ready False + missing 에 포함.
+    monkeypatch.setattr(fdi, "is_hnswlib_installed", lambda: False)
+    monkeypatch.setattr(fdi, "is_torch_installed", lambda: True)
+    assert fdi.fast_ready() is False
+    assert "hnswlib" in fdi.missing_packages(recommend_openvino=False)
+
+    # 둘 다 있으면 ready, 필수 패키지 없음.
+    monkeypatch.setattr(fdi, "is_hnswlib_installed", lambda: True)
+    assert fdi.fast_ready() is True
+    assert fdi.missing_packages(recommend_openvino=False) == []
