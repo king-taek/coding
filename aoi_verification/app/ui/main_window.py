@@ -162,6 +162,9 @@ class MainWindow(QMainWindow):
 
         # 이어하기 ------------------------------------------------------
         QTimer.singleShot(50, self._maybe_resume)
+        # Intel GPU/NPU 가속(OpenVINO) 설치 안내 — 첫 모달(이어하기) 이후 표시.
+        # 모달 exec() 가 이벤트 루프를 막으므로 두 모달이 겹치지 않는다.
+        QTimer.singleShot(300, self._maybe_offer_openvino)
 
     # ==================================================================
     # 메모리 사용량 표시
@@ -304,6 +307,70 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         self._show_page(self._setup_page)
+
+    # ------------------------------------------------------------------
+    def _maybe_offer_openvino(self) -> None:
+        """Intel 하드웨어인데 OpenVINO 가 없으면 설치를 한 번 안내.
+
+        OpenVINO 를 설치하면 임베딩(고속 모드)이 Intel GPU/NPU 에서 가속된다.
+        '다시 보지 않기' 를 고르면 prefs 에 기록해 다음부터 묻지 않는다.
+        """
+        try:
+            from ..learning import openvino_installer as _ovi
+        except Exception:
+            return
+        declined = bool(getattr(_prefs.load(), "openvino_install_declined", False))
+        if not _ovi.should_offer_install(declined):
+            return
+        box = QMessageBox(self)
+        box.setWindowTitle(i18n.KO.OPENVINO_OFFER_TITLE)
+        box.setText(i18n.KO.OPENVINO_OFFER_BODY)
+        btn_install = box.addButton(i18n.KO.OPENVINO_OFFER_BTN_INSTALL,
+                                    QMessageBox.ButtonRole.AcceptRole)
+        box.addButton(i18n.KO.OPENVINO_OFFER_BTN_LATER,
+                      QMessageBox.ButtonRole.RejectRole)
+        btn_never = box.addButton(i18n.KO.OPENVINO_OFFER_BTN_NEVER,
+                                  QMessageBox.ButtonRole.DestructiveRole)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is btn_never:
+            _prefs.patch(openvino_install_declined=True)
+        elif clicked is btn_install:
+            self._start_openvino_install()
+        # '다음에' → 아무것도 하지 않음 (다음 실행 때 다시 안내).
+
+    def _start_openvino_install(self) -> None:
+        from ..learning.openvino_installer import OpenVinoInstallWorker
+        self._loading.show_overlay(i18n.KO.OPENVINO_INSTALL_PROGRESS)
+        self._openvino_worker = OpenVinoInstallWorker(parent=self)
+        self._openvino_worker.signals.progress.connect(
+            lambda line: self._loading.show_overlay(
+                i18n.KO.OPENVINO_INSTALL_PROGRESS + "\n" + line[-80:]
+            )
+        )
+        self._openvino_worker.signals.finished.connect(
+            self._on_openvino_install_finished
+        )
+        self._openvino_worker.start()
+
+    def _on_openvino_install_finished(self, ok: bool, message: str) -> None:
+        import importlib
+        importlib.invalidate_caches()
+        self._loading.hide_overlay()
+        if ok:
+            # 상태바 가속 표시 갱신 — OpenVINO 는 런타임 호출 시점에 적용된다.
+            try:
+                from ..learning import embedder as _emb
+                self._device_label.setText(_emb.device_label())
+            except Exception:
+                pass
+            QMessageBox.information(self, i18n.KO.OPENVINO_OFFER_TITLE,
+                                    i18n.KO.OPENVINO_INSTALL_DONE)
+        else:
+            QMessageBox.warning(
+                self, i18n.KO.OPENVINO_OFFER_TITLE,
+                i18n.KO.OPENVINO_INSTALL_FAILED_FMT.format(error=message),
+            )
 
     def _refresh_models_safe(self) -> None:
         """학습 모듈 import / 평가 집계 실패가 셋업 화면을 막지 않도록 wrap."""
