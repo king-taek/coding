@@ -348,6 +348,9 @@ class MatchPage(QWidget):
         """
         if self._state is None:
             return
+        # 사전 계산은 항상 첫 매칭(_advance)보다 앞선다 — 진행 바 갱신 가드
+        # (_current is None) 가 직전 세션의 잔여 상태에 흔들리지 않도록 초기화.
+        self._current = None
         # 슬롯별 ref 수집 — queue 순서를 따라 사용자가 마주칠 순서대로 처리.
         refs_by_slot: dict[str, list[ImageItem]] = defaultdict(list)
         for r in self._state.queue:
@@ -421,9 +424,12 @@ class MatchPage(QWidget):
         self._precompute_worker.start()
 
     def _on_precompute_progress(self, done: int, total: int) -> None:
-        # 자동 모드 (기존 동작) 에서만 차단 오버레이 진행률 갱신.
-        # 수동/스트리밍 모드에서는 슬롯 단위 라벨만 갱신하므로 noop.
-        if not self._streaming_precompute:
+        # 첫 슬롯이 끝나 매칭이 시작되기 전(차단 오버레이 표시 중)에는 진행 바를
+        # 갱신해 "0% 에서 멈춘 것처럼" 보이지 않게 한다.  매칭이 시작되면
+        # (_current 설정) 백그라운드 슬롯의 progress 는 매칭 오버레이를 건드리지
+        # 않도록 무시 — bg_status_label 이 슬롯 단위 진행을 대신 보여준다.
+        # (set_progress 는 hidden 오버레이를 다시 show 하지 않으므로 안전.)
+        if self._current is None:
             self._loading.set_progress(
                 done, total,
                 i18n.KO.LOAD_PRECOMPUTE_FMT.format(done=done, total=total),

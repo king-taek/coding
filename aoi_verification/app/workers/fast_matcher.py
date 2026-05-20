@@ -156,23 +156,44 @@ class FastIndexWorker(QThread):
     def stop(self) -> None:
         self._stop = True
 
+    _EMB_CHUNK = 64        # 임베딩 청크 크기 — 진행률 피드백 단위.
+
+    def _embed_chunked(self, items, done_box, total_images):
+        """``items`` 임베딩을 청크로 계산하며 이미지 단위 progress 를 emit.
+
+        ``done_box`` 는 전역 누적 카운터를 담은 1-원소 리스트(가변 참조).
+        """
+        out = {}
+        for i in range(0, len(items), self._EMB_CHUNK):
+            if self._stop:
+                return out
+            chunk = items[i:i + self._EMB_CHUNK]
+            out.update(compute_slot_embeddings(chunk, cfg=self._cfg))
+            done_box[0] += len(chunk)
+            self.signals.progress.emit(done_box[0], total_images)
+        return out
+
     def run(self) -> None:        # type: ignore[override]
         try:
             total = len(self._tasks)
+            # 첫 슬롯 임베딩 동안에도 바가 움직이도록 이미지 단위로 진행 보고.
+            total_images = max(1, sum(len(r) + len(v) for _, r, v in self._tasks))
+            done_box = [0]
             for idx, (slot, refs, vals) in enumerate(self._tasks, start=1):
                 if self._stop:
                     return
-                # val 임베딩 → 인덱스, ref 임베딩 보관.
-                val_emb = compute_slot_embeddings(vals, cfg=self._cfg)
+                # val 임베딩 → 인덱스, ref 임베딩 보관 (청크 단위 progress).
+                val_emb = self._embed_chunked(vals, done_box, total_images)
                 if self._stop:
                     return
                 built = _ann.build_from(val_emb)
-                ref_emb = compute_slot_embeddings(refs, cfg=self._cfg)
+                ref_emb = self._embed_chunked(refs, done_box, total_images)
+                if self._stop:
+                    return
                 if built is not None:
                     index, val_paths = built
                     self._index_cache.put(slot, index, val_paths, ref_emb)
                 # built=None(임베딩 0) 이면 그 슬롯은 match_page 가 폴백.
-                self.signals.progress.emit(idx, total)
                 self.signals.slot_finished.emit(slot, idx, total)
             self.signals.finished.emit()
         except Exception as exc:                # pragma: no cover - 방어

@@ -14,6 +14,14 @@ from aoi_verification.app.similarity import preprocess as pp
 from aoi_verification.app.similarity.slot_features import SlotScoreCache
 
 
+def _save_img(path, seed, size=(120, 150)):
+    from PIL import Image
+    h, w = size
+    Image.fromarray(
+        np.random.RandomState(seed).randint(0, 255, (h, w, 3), dtype=np.uint8)
+    ).save(path)
+
+
 # ---- SimilarityConfig ----------------------------------------------------
 def test_default_cfg_cache_extra_empty():
     """기본 모드 + 전처리 OFF 면 캐시 키 extra 가 빈 문자열 (기존 캐시 호환)."""
@@ -134,3 +142,84 @@ def test_score_cache_get_refreshes_lru():
     assert c.has_slot("A") is True
     assert c.has_slot("C") is True
     assert c.has_slot("B") is False
+
+
+# ---- 사전 계산 진행 바 회귀 (0% 멈춤 버그) -------------------------------
+def _drive_match_page(tmp_path, engine, monkeypatch=None):
+    """MatchPage 를 합성 데이터로 구동하고 (finished?, max_progress_pct) 반환.
+
+    ``_loading.set_progress`` 를 가로채 사전 계산 단계에서 진행 바 값이 0 보다
+    커지는지 관찰한다.
+    """
+    import time
+    from PyQt6.QtWidgets import QApplication
+    from aoi_verification.app.models.slot import ImageItem
+    from aoi_verification.app.ui.pages.match_page import MatchPage
+
+    app = QApplication.instance() or QApplication([])
+
+    # 첫 슬롯에 충분한 쌍을 만들어 progress emit(25쌍마다)이 일어나게 한다.
+    queue = [ImageItem("S0", tmp_path / "r0.png", "ref")]
+    _save_img(tmp_path / "r0.png", 0)
+    vals = []
+    for k in range(30):
+        vp = tmp_path / f"v0_{k}.png"
+        _save_img(vp, 100 + k)
+        vals.append(ImageItem("S0", vp, "val"))
+    pool = {"S0": vals}
+
+    mp = MatchPage()
+    seen = {"max": -1, "calls": 0}
+    orig = mp._loading.set_progress
+
+    def spy(done, total, message=""):
+        seen["calls"] += 1
+        if total > 0:
+            seen["max"] = max(seen["max"], int(done * 100 / total))
+        return orig(done, total, message)
+
+    mp._loading.set_progress = spy
+    done = {"f": False}
+    mp.finished.connect(lambda: done.__setitem__("f", True))
+    cfg = config.SimilarityConfig(engine=engine, top_k=5)
+    mp.load_state(queue, pool, threshold=0.0, auto_mode=True, engine_cfg=cfg)
+
+    start = time.time()
+    while not done["f"] and time.time() - start < 40:
+        app.processEvents()
+        time.sleep(0.01)
+    return done["f"], seen["max"], seen["calls"]
+
+
+def test_precompute_progress_moves_basic(tmp_path, isolated_cache):
+    """정밀(기본) 모드: 사전 계산 중 진행 바가 0% 를 넘어야 한다 (멈춤 버그 회귀)."""
+    finished, max_pct, calls = _drive_match_page(tmp_path, "basic")
+    assert finished is True
+    assert calls > 0, "set_progress 가 한 번도 호출되지 않음 (진행 바 갱신 안 됨)"
+    assert max_pct > 0, "진행 바가 0% 에서 움직이지 않음"
+
+
+def test_precompute_progress_moves_fast(tmp_path, isolated_cache, monkeypatch):
+    """고속 모드: 임베딩을 mock 하고 사전 계산 중 진행 바가 0% 를 넘는지 확인."""
+    import re
+    from aoi_verification.app.workers import fast_matcher as fm
+    if not fm.is_available():
+        pytest.skip("hnswlib/torch 미설치")
+
+    def fake_embed(items, *, cfg=None):
+        out = {}
+        for it in items:
+            name = Path(it.path).name
+            s = int(re.search(r"\d", name).group())
+            rng = np.random.RandomState(1000 + s)
+            v = rng.randn(16).astype(np.float32)
+            v = v / np.linalg.norm(v)
+            out[Path(it.path)] = v
+        return out
+
+    # FastIndexWorker 가 부르는 임베딩 함수만 교체 (가중치 다운로드 회피).
+    monkeypatch.setattr(fm, "compute_slot_embeddings", fake_embed)
+    finished, max_pct, calls = _drive_match_page(tmp_path, "fast")
+    assert finished is True
+    assert calls > 0
+    assert max_pct > 0
