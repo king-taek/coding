@@ -259,15 +259,15 @@ def test_brute_force_index_used_without_hnswlib(monkeypatch):
     assert ann.is_available() is True       # NumPy 폴백 → 항상 사용 가능
 
 
-# ---- 중앙 20% side 별 적용 (#2/#7) ---------------------------------------
-def test_center20_side_aware_cache_extra():
+# ---- 중앙 영역(30%) side 별 적용 (#2/#7) ---------------------------------
+def test_center_side_aware_cache_extra():
     cfg = config.SimilarityConfig(center20_ref=True, center20_val=False)
-    assert cfg.cache_extra("ref") == "c20"
+    assert cfg.cache_extra("ref") == "c30"
     assert cfg.cache_extra("val") == ""
     assert cfg.cache_extra(None) == ""          # side 미지정 → crop 안 함
     assert cfg.has_preprocess is True
     both = config.SimilarityConfig(center20_ref=True, center20_val=True)
-    assert both.cache_extra("ref") == "c20" and both.cache_extra("val") == "c20"
+    assert both.cache_extra("ref") == "c30" and both.cache_extra("val") == "c30"
 
 
 # ---- 그룹화 임계치 파라미터 (#6) -----------------------------------------

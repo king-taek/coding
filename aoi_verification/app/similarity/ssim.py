@@ -11,53 +11,24 @@ except Exception:  # pragma: no cover
     _HAS_SKIMAGE = False
 
 
-# 고정 비교 해상도 — 두 이미지를 항상 같은 크기로 맞춰 비교 (작은 쪽으로
-# 맞추던 기존 방식은 종횡비가 다를 때 왜곡/오정렬을 유발했다, #2/#5).
-_CMP_PX = 256
-
-
 def ssim_score(a_gray: np.ndarray, b_gray: np.ndarray) -> float:
-    """구조 유사도 점수 — 0.0 ~ 1.0.
-
-    정확도 강화 (#5): 두 이미지를 동일한 고정 해상도(256²)로 맞춘 뒤 SSIM 과
-    정규화 상호상관(NCC)을 함께 사용해 블렌딩한다.  SSIM 은 국소 구조를, NCC 는
-    전역 패턴 정합을 보므로 조명/노이즈 변화에 더 강인하다.
-    """
+    """SSIM 점수 — 0.0 ~ 1.0 (음수가 나올 수 있어 0 으로 클램프)."""
     if a_gray.size == 0 or b_gray.size == 0:
         return 0.0
 
-    try:
+    # 모양을 맞춰주기 위해 작은 쪽으로 리사이즈
+    if a_gray.shape != b_gray.shape:
         import cv2  # local import — heavy
-        a2 = cv2.resize(a_gray, (_CMP_PX, _CMP_PX), interpolation=cv2.INTER_AREA)
-        b2 = cv2.resize(b_gray, (_CMP_PX, _CMP_PX), interpolation=cv2.INTER_AREA)
-    except Exception:
-        a2, b2 = a_gray, b_gray
-        if a2.shape != b2.shape:                # cv2 없을 때 최소 보정
-            h = min(a2.shape[0], b2.shape[0])
-            w = min(a2.shape[1], b2.shape[1])
-            a2 = a2[:h, :w]
-            b2 = b2[:h, :w]
+        h = min(a_gray.shape[0], b_gray.shape[0])
+        w = min(a_gray.shape[1], b_gray.shape[1])
+        a_gray = cv2.resize(a_gray, (w, h), interpolation=cv2.INTER_AREA)
+        b_gray = cv2.resize(b_gray, (w, h), interpolation=cv2.INTER_AREA)
 
     if _HAS_SKIMAGE:
-        s_ssim = float(_ssim(a2, b2, data_range=255))
+        score = float(_ssim(a_gray, b_gray, data_range=255))
     else:
-        s_ssim = _ssim_fallback(a2, b2)
-    s_ncc = _ncc(a2, b2)
-    # SSIM(국소 구조) 70% + NCC(전역 상관) 30% 블렌딩.
-    score = 0.7 * s_ssim + 0.3 * s_ncc
+        score = _ssim_fallback(a_gray, b_gray)
     return max(0.0, min(1.0, score))
-
-
-def _ncc(a: np.ndarray, b: np.ndarray) -> float:
-    """정규화 상호상관 (Normalized Cross-Correlation) → [-1,1] → [0,1] 클램프."""
-    a = a.astype(np.float64)
-    b = b.astype(np.float64)
-    a -= a.mean()
-    b -= b.mean()
-    denom = float(np.sqrt((a * a).sum()) * np.sqrt((b * b).sum()))
-    if denom <= 1e-9:
-        return 0.0
-    return max(0.0, min(1.0, float((a * b).sum() / denom)))
 
 
 def _ssim_fallback(a: np.ndarray, b: np.ndarray) -> float:

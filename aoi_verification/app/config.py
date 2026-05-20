@@ -120,8 +120,8 @@ MEMORY_PRESSURE_BYTES = PIXMAP_CACHE_MAX_BYTES + 1024 * 1024 * 1024
 @dataclass(frozen=True)
 class SimilarityConfig:
     engine: str = "basic"          # "basic" | "fast"
-    center20_ref: bool = False     # 기준 사진 중앙 20% 영역만 사용
-    center20_val: bool = False     # 검증 사진 중앙 20% 영역만 사용
+    center20_ref: bool = False     # 기준 사진 중앙 30% 영역만 사용
+    center20_val: bool = False     # 검증 사진 중앙 30% 영역만 사용
     grayscale: bool = False        # 강화: 흑백 + 고감도
     contrast: bool = False         # 강화: 고대비
     kla_crop: bool = False         # KLA 상/하단 정보영역 crop
@@ -130,7 +130,7 @@ class SimilarityConfig:
     top_k: int = 50                # ANN 재정렬 깊이 (고속 모드)
 
     def _center20_for(self, side) -> bool:
-        """이 side(ref/val)에 중앙 20% crop 을 적용할지."""
+        """이 side(ref/val)에 중앙 영역 crop(30%)을 적용할지."""
         if side == "ref":
             return self.center20_ref
         if side == "val":
@@ -151,7 +151,7 @@ class SimilarityConfig:
         쓰일 때 캐시 충돌 방지)."""
         parts = []
         if self._center20_for(side):
-            parts.append("c20")
+            parts.append("c30")          # 중앙 30% — 키 변경으로 이전 캐시와 분리
         if self.grayscale:
             parts.append("g")
         if self.contrast:

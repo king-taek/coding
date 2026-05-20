@@ -173,12 +173,10 @@ def center_roi_gray(src: Path,
         roi_ratio = config.Sizing.ROI_RATIO
     if long_edge is None:
         long_edge = config.Sizing.SIMILARITY_PX
-    # 중앙 20% 만 사용 옵션 (#7/#2) — side(ref/val) 별로 적용.
-    center20_applied = False
+    # 중앙 영역만 사용 옵션 (#7/#2) — side(ref/val) 별로 적용.  비율은 30%.
     if cfg is not None and getattr(cfg, "_center20_for", None) is not None:
         if cfg._center20_for(side):
-            roi_ratio = 0.2
-            center20_applied = True
+            roi_ratio = 0.3
 
     img = _open(src)
     img = _to_rgb(img)
@@ -192,17 +190,7 @@ def center_roi_gray(src: Path,
     x0 = (w - rw) // 2
     y0 = (h - rh) // 2
     img = img.crop((x0, y0, x0 + rw, y0 + rh))
-    if center20_applied:
-        # #2 — 중앙 20% 는 기준/검증 사진이 동일 크기가 되도록 고정 정사각형
-        # (long_edge × long_edge) 으로 정규화한다.  원본 해상도/종횡비가 달라도
-        # 비교 대상 배열 크기가 같아져 SSIM 등이 왜곡 없이 정렬된다.
-        try:
-            _res = Image.Resampling.LANCZOS
-        except AttributeError:
-            _res = Image.LANCZOS
-        img = img.resize((int(long_edge), int(long_edge)), _res)
-    else:
-        img = _fit_long_edge(img, long_edge)
+    img = _fit_long_edge(img, long_edge)
     gray = np.asarray(img.convert("L"), dtype=np.uint8)
     # Gray 단계 전처리 (흑백+고감도 → 고대비).
     if cfg is not None and (getattr(cfg, "grayscale", False)
