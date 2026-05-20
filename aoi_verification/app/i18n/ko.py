@@ -196,8 +196,7 @@ ENGINE_MODE_TOOLTIP = (
     "  사진이 수천 장 이상일 때 권장 (Intel GPU/NPU 가속 시 더 빠름)."
 )
 ENGINE_FAST_UNAVAILABLE = (
-    "고속 모드를 사용할 수 없어 기본 모드로 진행합니다 "
-    "(hnswlib/torch 미설치)."
+    "고속 모드를 사용할 수 없어 기본 모드로 진행합니다 (torch 미설치)."
 )
 # 고속 모드 의존성 설치 안내
 FAST_DEPS_TITLE = "고속 모드 준비"

@@ -34,7 +34,7 @@ class AutomationLevel:
 # 유사도 엔진 모드 — 기본(현행) vs 고속(임베딩+ANN).  raw string 대신 사용.
 class EngineMode:
     BASIC = "basic"        # 기존 파이프라인, 변경 없음 (기본값)
-    FAST = "fast"          # 임베딩 + hnswlib ANN, 상위 K 재정렬
+    FAST = "fast"          # 임베딩 + ANN(hnswlib 또는 NumPy 폴백), 상위 K 재정렬
 
     ALL = frozenset({BASIC, FAST})
 

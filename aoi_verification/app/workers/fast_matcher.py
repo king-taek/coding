@@ -25,8 +25,11 @@ from ..utils import cache
 
 
 def is_available() -> bool:
-    """고속 모드 가용 = 임베딩(embedder) + hnswlib 둘 다 사용 가능."""
-    if not _ann.is_available():
+    """고속 모드 가용 = 임베딩(embedder/torch) 사용 가능.
+
+    ANN 검색은 hnswlib 가 없어도 NumPy 브루트포스 폴백(``embedding_index``)으로
+    동작하므로, hnswlib 설치 여부는 가용성을 좌우하지 않는다 (속도 옵션일 뿐)."""
+    if not _ann.is_available():            # NumPy 폴백이 있어 사실상 항상 True
         return False
     try:
         from ..learning import embedder as _emb

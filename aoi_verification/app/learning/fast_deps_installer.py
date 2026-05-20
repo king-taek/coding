@@ -36,22 +36,22 @@ def is_torch_installed() -> bool:
 
 
 def fast_ready() -> bool:
-    """고속 모드가 실제로 동작 가능한 상태인지 (hnswlib + torch)."""
-    return is_hnswlib_installed() and is_torch_installed()
+    """고속 모드가 실제로 동작 가능한 상태인지.
+
+    ANN 검색은 NumPy 브루트포스 폴백이 있어 hnswlib 가 없어도 되므로, 임베딩을
+    만들 torch 만 있으면 고속 모드가 동작한다.  hnswlib 는 대용량 가속용 옵션."""
+    return is_torch_installed()
 
 
 def missing_packages(*, recommend_openvino: bool = True) -> List[str]:
     """고속 모드를 위해 설치가 필요/권장되는 pip 패키지 목록.
 
-    - ``hnswlib`` : 없으면 고속 모드 자체가 불가 (필수).
+    - ``torch`` : 임베딩 추출에 필수 (보통 requirements 로 이미 설치됨).
     - ``openvino``: Intel CPU 인데 없으면 GPU/NPU 가속 권장 (선택).
-    torch 는 requirements 기본 포함이라 보통 이미 있음 — 없으면 목록에 포함.
-    """
+    hnswlib 는 네이티브 빌드가 필요해 제한된 환경에서 설치 불가할 수 있고,
+    NumPy 폴백으로 대체되므로 목록에 넣지 않는다 (강제하지 않음)."""
     pkgs: List[str] = []
-    if not is_hnswlib_installed():
-        pkgs.append("hnswlib")
     if not is_torch_installed():
-        # torch 는 대용량이라 사용자에게 보일 때 별도 안내가 낫지만, 목록엔 포함.
         pkgs.append("torch")
     if recommend_openvino:
         try:

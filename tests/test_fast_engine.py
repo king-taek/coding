@@ -225,17 +225,40 @@ def test_precompute_progress_moves_fast(tmp_path, isolated_cache, monkeypatch):
     assert max_pct > 0
 
 
-# ---- 고속 모드 의존성 감지 (속도 차이 없음 = 폴백 진단) ------------------
+# ---- 고속 모드 의존성 감지 (hnswlib 불필요 — torch 만 필요) ---------------
 def test_fast_deps_detection(monkeypatch):
     from aoi_verification.app.learning import fast_deps_installer as fdi
 
-    # hnswlib 없으면 fast_ready False + missing 에 포함.
-    monkeypatch.setattr(fdi, "is_hnswlib_installed", lambda: False)
-    monkeypatch.setattr(fdi, "is_torch_installed", lambda: True)
+    # torch 없으면 fast_ready False + missing 에 torch 포함.
+    monkeypatch.setattr(fdi, "is_torch_installed", lambda: False)
     assert fdi.fast_ready() is False
-    assert "hnswlib" in fdi.missing_packages(recommend_openvino=False)
+    assert "torch" in fdi.missing_packages(recommend_openvino=False)
 
-    # 둘 다 있으면 ready, 필수 패키지 없음.
-    monkeypatch.setattr(fdi, "is_hnswlib_installed", lambda: True)
+    # torch 있으면 ready — hnswlib 는 필수가 아니라 목록에 없음 (NumPy 폴백).
+    monkeypatch.setattr(fdi, "is_torch_installed", lambda: True)
     assert fdi.fast_ready() is True
-    assert fdi.missing_packages(recommend_openvino=False) == []
+    assert "hnswlib" not in fdi.missing_packages(recommend_openvino=False)
+
+
+# ---- hnswlib 없이 NumPy 브루트포스 폴백 검색 -----------------------------
+def test_brute_force_index_used_without_hnswlib(monkeypatch):
+    """hnswlib 미가용 시 build_from 이 BruteForceIndex 를 쓰고 정확히 클러스터링."""
+    monkeypatch.setattr(ann, "hnswlib_available", lambda: False)
+    rng = np.random.RandomState(7)
+    centers = [_unit(rng.randn(16)) for _ in range(3)]
+    emb = {}
+    truth = {}
+    for s in range(3):
+        for k in range(6):
+            p = Path(f"/tmp/bf_{s}_{k}.png")
+            emb[p] = _unit(centers[s] + 0.03 * rng.randn(16))
+            truth[p] = s
+    idx, paths = ann.build_from(emb)
+    assert type(idx).__name__ == "BruteForceIndex"
+    q = _unit(centers[1] + 0.03 * rng.randn(16))
+    hits = idx.query(q, 5)
+    top = [truth[paths[label]] for label, _ in hits]
+    assert top[:3] == [1, 1, 1]
+    sims = [s for _, s in hits]
+    assert sims == sorted(sims, reverse=True)
+    assert ann.is_available() is True       # NumPy 폴백 → 항상 사용 가능
