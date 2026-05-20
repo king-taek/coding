@@ -99,6 +99,8 @@ class MatchPage(QWidget):
         self._index_cache = _fast.SlotIndexCache()
         # 자동 모드 고속 선계산 결과: {(slot, ref_path): [(val_path, score), ...]}.
         self._fast_results: dict = {}
+        # 현재 사전 계산 단계 라벨 (#8).
+        self._precompute_phase: str = ""
 
     # ------------------------------------------------------------------
     def _build(self) -> None:
@@ -433,7 +435,15 @@ class MatchPage(QWidget):
             self._on_precompute_finished
         )
         self._precompute_worker.signals.failed.connect(self._on_precompute_failed)
+        try:
+            self._precompute_worker.signals.phase.connect(self._on_precompute_phase)
+        except (AttributeError, TypeError):
+            pass
         self._precompute_worker.start()
+
+    def _on_precompute_phase(self, phase: str) -> None:
+        """현재 작업 단계 라벨 갱신 (#8) — '이미지 특징 분석'/'유사도 계산' 등."""
+        self._precompute_phase = phase or i18n.KO.PHASE_SCORING
 
     def _on_precompute_progress(self, done: int, total: int) -> None:
         # 첫 슬롯이 끝나 매칭이 시작되기 전(차단 오버레이 표시 중)에는 진행 바를
@@ -442,9 +452,10 @@ class MatchPage(QWidget):
         # 않도록 무시 — bg_status_label 이 슬롯 단위 진행을 대신 보여준다.
         # (set_progress 는 hidden 오버레이를 다시 show 하지 않으므로 안전.)
         if self._current is None:
+            phase = getattr(self, "_precompute_phase", "") or i18n.KO.PHASE_SCORING
             self._loading.set_progress(
                 done, total,
-                i18n.KO.LOAD_PRECOMPUTE_FMT.format(done=done, total=total),
+                i18n.KO.LOAD_PHASE_FMT.format(phase=phase, done=done, total=total),
             )
 
     def _on_precompute_slot_finished(self,
@@ -516,6 +527,37 @@ class MatchPage(QWidget):
 
     def get_state(self) -> Stage2State | None:
         return self._state
+
+    def build_candidates_by_ref(self, matches) -> dict:
+        """매치 검토 화면(#7)용 — 각 ref 의 후보 [(ImageItem, score), ...] 산출.
+
+        고속 모드는 _fast_results(선계산 top-K)에서, 기본 모드는 score_cache
+        에서 가져온다.  키는 (slot, ref_path.name) — 점수 내림차순.
+        """
+        out: dict = {}
+        if self._state is None:
+            return out
+        for m in matches:
+            key = (m.slot, m.ref_path.name)
+            if key in out:
+                continue
+            vitems = self._state.val_pool.get(m.slot, []) or []
+            by_path = {v.path: v for v in vitems}
+            scored: list = []
+            fres = self._fast_results.get((m.slot, m.ref_path))
+            if fres:
+                for vp, s in fres:
+                    vi = by_path.get(vp)
+                    if vi is not None:
+                        scored.append((vi, float(s)))
+            else:
+                for vi in vitems:
+                    s = self._score_cache.get_pair(m.slot, m.ref_path, vi.path)
+                    if s is not None:
+                        scored.append((vi, float(s)))
+            scored.sort(key=lambda x: x[1], reverse=True)
+            out[key] = scored
+        return out
 
     # ------------------------------------------------------------------
     def _on_cancel_requested(self) -> None:

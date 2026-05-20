@@ -176,6 +176,19 @@ class ResultPage(QWidget):
             m for m in self._result.matches
             if (m.slot, m.ref_path.name, m.val_path.name) not in keys
         ]
+        # 제외된 매치는 '매치 실패(매칭 취소)' 로 재분류 → 매치 실패 검토에서
+        # ‘매칭 취소 목록’ 으로 다시 검토 가능 (#14).  중복 추가 방지.
+        from ...models.result import MissEntry
+        existing = {(u.slot, Path(u.path).name) for u in self._result.unmatched_refs}
+        for m in removed:
+            k = (m.slot, m.ref_path.name)
+            if k in existing:
+                continue
+            existing.add(k)
+            self._result.unmatched_refs.append(MissEntry(
+                slot=m.slot, side="ref", path=m.ref_path,
+                note="매칭 취소 (검토에서 삭제)",
+            ))
         QMessageBox.information(
             self, i18n.KO.APP_TITLE,
             i18n.KO.REVIEW_REMOVED_FMT.format(n=len(removed)),

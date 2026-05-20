@@ -16,9 +16,10 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QCursor, QPixmap
+from PyQt6.QtGui import (QColor, QCursor, QKeySequence, QPixmap, QShortcut)
 from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout,
-                              QHBoxLayout, QLabel, QMenu, QMessageBox,
+                              QHBoxLayout, QLabel, QListWidget,
+                              QListWidgetItem, QMenu, QMessageBox,
                               QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
 
 from ... import i18n
@@ -26,37 +27,114 @@ from ...models.result import MatchResult, MissEntry
 from ...models.slot import ImageItem
 from .neon_button import NeonButton
 from .window_controls import add_fullscreen_shortcut, enable_window_controls
-from .zoom_window import FullscreenViewer
+
+
+class _OriginalImageViewer(QDialog):
+    """원본 이미지를 화면 대부분에 KeepAspectRatio 로 크게 보여주는 모달 (#4).
+
+    ``FullscreenViewer`` 는 mid(다운스케일) 이미지를 쓰지만, 여기서는 사용자가
+    요청한 대로 ``QPixmap(str(path))`` 로 ‘원본’ 파일을 직접 디코드해 보여준다.
+    """
+
+    def __init__(self, path: Path, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(Path(path).name)
+        self.setModal(True)
+        self.setStyleSheet("background-color: #000;")
+        scr = QApplication.primaryScreen()
+        if scr is not None:
+            g = scr.availableGeometry()
+            self.resize(int(g.width() * 0.9), int(g.height() * 0.9))
+        else:
+            self.resize(1280, 800)
+
+        self._pix = QPixmap(str(path))
+        if self._pix.isNull():
+            self._pix = QPixmap(800, 600)
+            self._pix.fill(QColor(20, 28, 40))
+
+        self._label = QLabel(self)
+        self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._label.setStyleSheet("background-color: #000;")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(self._label)
+
+        QShortcut(QKeySequence("Esc"), self, activated=self.close)
+        self._redraw()
+
+    def resizeEvent(self, e):  # noqa: N802
+        self._redraw()
+        super().resizeEvent(e)
+
+    def _redraw(self) -> None:
+        if self._pix.isNull():
+            return
+        target = self._label.size()
+        if target.width() <= 0 or target.height() <= 0:
+            target = self.size()
+        scaled = self._pix.scaled(
+            target,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        self._label.setPixmap(scaled)
 
 
 def _open_fullscreen(path: Path, parent=None) -> None:
-    """기존 풀스크린 뷰어로 원본 이미지를 크게 보여준다 (#13)."""
+    """원본 이미지를 크게 보여준다 (#4 — 반드시 원본 화질)."""
     try:
-        viewer = FullscreenViewer(Path(path), parent)
+        viewer = _OriginalImageViewer(Path(path), parent)
         viewer.exec()
     except Exception:
         pass
 
 
 def _attach_view_larger(label: QLabel, path_getter) -> None:
-    """라벨에 우클릭 ‘크게보기’ 컨텍스트 메뉴를 붙인다 (#13).
+    """라벨에 ‘크게 보기’ 동작을 붙인다 (#4).
+
+    - 우클릭 → 컨텍스트 메뉴 ‘크게 보기’
+    - 더블 클릭 → 동일한 원본 큰 화면
 
     ``path_getter`` 는 호출 시점의 원본 경로를 돌려주는 콜러블 (현재 ref 가
     바뀌는 좌측 패널에서도 항상 최신 경로를 가리키도록).
     """
     label.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
 
+    def _show_large() -> None:
+        path = path_getter()
+        if not path:
+            return
+        _open_fullscreen(Path(path), label.window())
+
     def _on_menu(pos) -> None:
         path = path_getter()
         if not path:
             return
         menu = QMenu(label)
-        act = menu.addAction(i18n.KO.CTX_VIEW_LARGER)
+        # 인라인 한글 리터럴 (i18n.KO 미수정 정책 — #4).
+        act = menu.addAction("크게 보기")
         chosen = menu.exec(label.mapToGlobal(pos))
         if chosen is act:
-            _open_fullscreen(Path(path), label.window())
+            _show_large()
 
     label.customContextMenuRequested.connect(_on_menu)
+
+    # 더블 클릭으로도 같은 큰 화면을 연다 (#4). 이벤트 필터 대신 메서드 대체로
+    # 가볍게 처리 — 라벨은 이 다이얼로그 안에서만 쓰이므로 안전.
+    orig_dbl = label.mouseDoubleClickEvent
+
+    def _on_dbl(ev):
+        if ev.button() == Qt.MouseButton.LeftButton:
+            _show_large()
+        try:
+            orig_dbl(ev)
+        except Exception:
+            pass
+
+    label.mouseDoubleClickEvent = _on_dbl  # type: ignore[assignment]
+    # 외부에서 동일 동작을 호출할 수 있도록 콜러블 노출 (스모크 테스트 등).
+    label.view_larger = _show_large  # type: ignore[attr-defined]
 
 _REF_PX = 420           # 좌측 기준 사진 크기 — 원본 화질에서 다운스케일.
 _CAND_PX = 260          # 우측 후보 타일 — 썸네일 대신 원본을 lazy 로드.
@@ -243,9 +321,34 @@ class UnmatchedReviewDialog(QDialog):
         hint.setStyleSheet("color: #7FB3D5; padding: 4px;")
         root.addWidget(hint)
 
-        # 본문: 좌(기준 사진) + 우(후보 그리드)
+        # 본문: 좌(실패 목록) + 중(기준 사진) + 우(후보 그리드)
         body = QHBoxLayout()
         body.setSpacing(16)
+
+        # LIST: 매치 실패 ref 전체 목록 (#12) — 클릭하면 해당 항목으로 점프.
+        list_panel = QFrame(self)
+        list_panel.setProperty("role", "section")
+        lpl = QVBoxLayout(list_panel)
+        lpl.setContentsMargins(12, 12, 12, 12)
+        lpl.setSpacing(6)
+        list_title = QLabel("실패 목록", list_panel)   # 인라인 한글 (#12).
+        list_title.setStyleSheet("color: #00D4FF; font-weight: 700;")
+        lpl.addWidget(list_title)
+        self.fail_list = QListWidget(list_panel)
+        self.fail_list.setStyleSheet(
+            "QListWidget { background: #0A0F1C; border: 1px solid #1F2A3F; "
+            "border-radius: 6px; color: #C8D6E5; }"
+            "QListWidget::item { padding: 4px 6px; }"
+            "QListWidget::item:selected { background: #123047; color: #00FFA3; }"
+        )
+        self.fail_list.itemClicked.connect(self._on_list_item_clicked)
+        lpl.addWidget(self.fail_list, stretch=1)
+        list_panel.setFixedWidth(260)
+        body.addWidget(list_panel)
+        # display-row → self._unmatched 인덱스 매핑 (#14 분리 정렬용).
+        self._row_to_idx: dict[int, int] = {}
+        self._idx_to_row: dict[int, int] = {}
+        self._populate_list()
 
         # LEFT: 기준 사진
         left = QFrame(self)
@@ -309,12 +412,107 @@ class UnmatchedReviewDialog(QDialog):
                 w.deleteLater()
 
     # ------------------------------------------------------------------
+    @staticmethod
+    def _is_cancelled(entry: MissEntry) -> bool:
+        """결과 검토 화면에서 ‘매칭 취소’ 로 발생한 실패인지 (#14)."""
+        return "매칭 취소" in (getattr(entry, "note", "") or "")
+
+    def _display_order(self) -> tuple[list[int], list[int]]:
+        """리스트에 표시할 ``self._unmatched`` 인덱스 순서 (#14).
+
+        ``(normal, cancelled)`` 두 인덱스 리스트를 돌려준다 — 일반 매치 실패가
+        먼저, 그 다음 ‘매칭 취소’ 항목.  ``self._unmatched`` 자체는 재정렬하지
+        않고(인덱싱 보존) 표시 순서만 만든다.
+        """
+        normal = [i for i, e in enumerate(self._unmatched)
+                  if not self._is_cancelled(e)]
+        cancelled = [i for i, e in enumerate(self._unmatched)
+                     if self._is_cancelled(e)]
+        return normal, cancelled
+
+    def _entry_resolved(self, idx: int) -> bool:
+        """해당 인덱스의 ref 가 신규 매칭으로 확정됐는지 (#12 진행 표시)."""
+        if idx < 0 or idx >= len(self._unmatched):
+            return False
+        e = self._unmatched[idx]
+        ep = Path(e.path)
+        for r in self.resolved_refs:
+            if r.slot == e.slot and Path(r.path) == ep:
+                return True
+        return False
+
+    def _list_label(self, idx: int) -> str:
+        e = self._unmatched[idx]
+        prefix = "✓ " if self._entry_resolved(idx) else ""
+        return f"{prefix}[{e.slot}] {Path(e.path).name}"
+
+    def _populate_list(self) -> None:
+        """전체 실패 목록을 채운다 — 일반 → 구분선 → 매칭 취소 (#12/#14)."""
+        if not hasattr(self, "fail_list"):
+            return
+        self.fail_list.blockSignals(True)
+        self.fail_list.clear()
+        self._row_to_idx.clear()
+        self._idx_to_row.clear()
+        normal, cancelled = self._display_order()
+
+        def _add_entry_row(idx: int) -> None:
+            row = self.fail_list.count()
+            it = QListWidgetItem(self._list_label(idx))
+            it.setToolTip(str(self._unmatched[idx].path))
+            self.fail_list.addItem(it)
+            self._row_to_idx[row] = idx
+            self._idx_to_row[idx] = row
+
+        for idx in normal:
+            _add_entry_row(idx)
+
+        if cancelled:
+            # 구분선/헤더 — 선택 불가, 클릭해도 점프하지 않음.
+            sep = QListWidgetItem("── 매칭 취소 목록 ──")
+            sep.setFlags(Qt.ItemFlag.NoItemFlags)
+            sep.setForeground(QColor("#FF8A65"))
+            self.fail_list.addItem(sep)
+            for idx in cancelled:
+                _add_entry_row(idx)
+
+        self.fail_list.blockSignals(False)
+
+    def _sync_list_selection(self) -> None:
+        """현재 ``self._idx`` 항목을 리스트에서 강조 + 라벨 갱신 (#12)."""
+        if not hasattr(self, "fail_list"):
+            return
+        # 진행 상태(✓)가 바뀌었을 수 있으므로 라벨을 모두 새로 그린다.
+        self.fail_list.blockSignals(True)
+        for row in range(self.fail_list.count()):
+            idx = self._row_to_idx.get(row)
+            if idx is None:
+                continue          # 구분선 행
+            self.fail_list.item(row).setText(self._list_label(idx))
+        row = self._idx_to_row.get(self._idx)
+        if row is not None:
+            self.fail_list.setCurrentRow(row)
+        else:
+            self.fail_list.clearSelection()
+        self.fail_list.blockSignals(False)
+
+    def _on_list_item_clicked(self, item: QListWidgetItem) -> None:
+        row = self.fail_list.row(item)
+        idx = self._row_to_idx.get(row)
+        if idx is None:
+            return                # 구분선/헤더 클릭은 무시.
+        self._idx = idx
+        self._render_current()
+
+    # ------------------------------------------------------------------
     def _current(self) -> Optional[MissEntry]:
         if self._idx < 0 or self._idx >= len(self._unmatched):
             return None
         return self._unmatched[self._idx]
 
     def _render_current(self) -> None:
+        # 리스트 강조/진행 표시를 항상 현재 idx 와 동기화 (#12).
+        self._sync_list_selection()
         cur = self._current()
         if cur is None:
             self._show_done()
@@ -365,9 +563,12 @@ class UnmatchedReviewDialog(QDialog):
             return
 
         self.candidates_summary.setText(f"후보 {len(scored)} 장 (유사도 순)")
-        cols = max(1, min(5, self._scroll.viewport().width() // (_CAND_PX + 24)))
-        if cols <= 0:
-            cols = 4
+        # #4 — 한 줄에 최소 3개, 최대 5개. 작은 창에서도 3개를 강제(가로 스크롤
+        # 허용)해 사용자가 한 번에 3개 이상 비교할 수 있게 한다.
+        spacing = self._grid.spacing()
+        viewport_width = self._scroll.viewport().width()
+        fit = viewport_width // (_CAND_PX + spacing)
+        cols = max(3, min(5, fit))
         for i, (score, v) in enumerate(scored):
             tile = _CandidateTile(v, score, parent=self._host)
             tile.picked.connect(self._on_pick)

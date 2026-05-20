@@ -104,12 +104,15 @@ class SlotFeatureCache:
         with self._lock:
             existing = dict(self._slots.get(slot, {}))
 
-        # 누락된 path 만 새로 추출 (디스크 캐시가 있다면 거의 무비용).
-        to_build = [it.path for it in items_list if it.path not in existing]
-        for p in to_build:
+        # 누락된 항목만 새로 추출 (디스크 캐시가 있다면 거의 무비용).
+        # 검증측 특징 캐시이므로 side='val' (중앙 20% crop 의 side 별 적용).
+        for it in items_list:
+            if it.path in existing:
+                continue
             try:
-                feat = _pipeline.extract(p, cfg=cfg)
-                existing[p] = feat
+                existing[it.path] = _pipeline.extract(
+                    it.path, cfg=cfg, side=getattr(it, "side", "val"),
+                )
             except Exception:
                 # 단일 이미지 실패는 무시 — 호출자가 빈 dict 로 처리.
                 pass
@@ -251,6 +254,7 @@ class SlotScoreCache:
 class _PrecomputeSignals(QObject):
     progress = pyqtSignal(int, int)            # done_pairs, total_pairs
     slot_finished = pyqtSignal(str, int, int)  # slot, idx (1-base), total_slots
+    phase = pyqtSignal(str)                    # 현재 작업 단계 라벨 (#8)
     finished = pyqtSignal()
     failed = pyqtSignal(str)
 
@@ -304,6 +308,8 @@ class SlotPrecomputeWorker(QThread):
                     )
                     continue
                 # 1) val features 빌드 (디스크 캐시 있으면 빠름)
+                from .. import i18n
+                self.signals.phase.emit(i18n.KO.PHASE_FEATURE)
                 val_feats = self._slot_cache.build(slot, vals, cfg=self._cfg)
                 # 2) ref features (sim.extract 가 디스크 캐시 자동 사용)
                 ref_feats: Dict[Path, Feature] = {}
@@ -311,7 +317,9 @@ class SlotPrecomputeWorker(QThread):
                     if self._stop:
                         return
                     try:
-                        ref_feats[r.path] = _pipeline.extract(r.path, cfg=self._cfg)
+                        ref_feats[r.path] = _pipeline.extract(
+                            r.path, cfg=self._cfg, side="ref",
+                        )
                     except Exception:
                         pass
 
@@ -326,6 +334,7 @@ class SlotPrecomputeWorker(QThread):
                 # _pipeline.score 의 cv2/numpy/skimage 호출은 GIL 을 잘 양보
                 # 하므로 thread 가 실제 병렬 처리 가능.  cv2 내부 multi-thread
                 # 는 over-subscription 회피 위해 외부에서만 병렬화한다.
+                self.signals.phase.emit(i18n.KO.PHASE_SCORING)
                 self._score_pairs_parallel(
                     slot, refs, vals, ref_feats, val_feats,
                     done_offset=done, total=total,

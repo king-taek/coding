@@ -257,3 +257,24 @@ def test_brute_force_index_used_without_hnswlib(monkeypatch):
     sims = [s for _, s in hits]
     assert sims == sorted(sims, reverse=True)
     assert ann.is_available() is True       # NumPy 폴백 → 항상 사용 가능
+
+
+# ---- 중앙 20% side 별 적용 (#2/#7) ---------------------------------------
+def test_center20_side_aware_cache_extra():
+    cfg = config.SimilarityConfig(center20_ref=True, center20_val=False)
+    assert cfg.cache_extra("ref") == "c20"
+    assert cfg.cache_extra("val") == ""
+    assert cfg.cache_extra(None) == ""          # side 미지정 → crop 안 함
+    assert cfg.has_preprocess is True
+    both = config.SimilarityConfig(center20_ref=True, center20_val=True)
+    assert both.cache_extra("ref") == "c20" and both.cache_extra("val") == "c20"
+
+
+# ---- 그룹화 임계치 파라미터 (#6) -----------------------------------------
+def test_group_slot_accepts_threshold():
+    import inspect
+    from aoi_verification.app.similarity import grouping
+    sig = inspect.signature(grouping.group_slot)
+    assert "phash_threshold" in sig.parameters
+    sig2 = inspect.signature(grouping.GroupingWorker.__init__)
+    assert "phash_threshold" in sig2.parameters

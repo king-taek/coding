@@ -196,6 +196,7 @@ ProgressFn = Callable[[int, int, str], None]
 
 def group_slot(items: Iterable[ImageItem],
                *,
+               phash_threshold: float = PHASH_THRESHOLD,
                progress_cb: Optional[ProgressFn] = None,
                stop_fn: Optional[Callable[[], bool]] = None,
                ) -> list[list[ImageItem]]:
@@ -254,7 +255,7 @@ def group_slot(items: Iterable[ImageItem],
             fa, fb = phashes[i], phashes[j]
             if fa is None or fb is None:
                 continue
-            if _phash.phash_similarity(fa, fb) < PHASH_THRESHOLD:
+            if _phash.phash_similarity(fa, fb) < phash_threshold:
                 continue
 
             # ORB + RANSAC 검증.
@@ -293,9 +294,12 @@ class GroupingWorker(QThread):
 
     def __init__(self,
                  items_by_slot: dict[str, list[ImageItem]],
+                 *,
+                 phash_threshold: float = PHASH_THRESHOLD,
                  parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
         self._items_by_slot = {k: list(v) for k, v in items_by_slot.items()}
+        self._phash_threshold = float(phash_threshold)
         self.signals = GroupingSignals()
         self._stop = False
 
@@ -321,7 +325,8 @@ class GroupingWorker(QThread):
                     )
 
                 groups = group_slot(
-                    items, progress_cb=_cb, stop_fn=lambda: self._stop,
+                    items, phash_threshold=self._phash_threshold,
+                    progress_cb=_cb, stop_fn=lambda: self._stop,
                 )
                 # 의미 있는 묶음만 (≥2). 싱글톤은 ‘그룹 아님’ 으로 제외.
                 for g in groups:

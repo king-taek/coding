@@ -120,28 +120,45 @@ MEMORY_PRESSURE_BYTES = PIXMAP_CACHE_MAX_BYTES + 1024 * 1024 * 1024
 @dataclass(frozen=True)
 class SimilarityConfig:
     engine: str = "basic"          # "basic" | "fast"
-    center20: bool = False         # 기준/검증 사진의 중앙 20% 영역만 비교
+    center20_ref: bool = False     # 기준 사진 중앙 20% 영역만 사용
+    center20_val: bool = False     # 검증 사진 중앙 20% 영역만 사용
     grayscale: bool = False        # 강화: 흑백 + 고감도
     contrast: bool = False         # 강화: 고대비
-    bg_removal: bool = False       # 강화: 배경 제거(누끼)
     kla_crop: bool = False         # KLA 상/하단 정보영역 crop
     kla_top: float = 0.08          # 상단 잘라낼 비율
     kla_bottom: float = 0.08       # 하단 잘라낼 비율
     top_k: int = 50                # ANN 재정렬 깊이 (고속 모드)
 
+    def _center20_for(self, side) -> bool:
+        """이 side(ref/val)에 중앙 20% crop 을 적용할지."""
+        if side == "ref":
+            return self.center20_ref
+        if side == "val":
+            return self.center20_val
+        return False               # side 미지정 → crop 안 함 (캐시 키와 일관)
+
     @property
     def has_preprocess(self) -> bool:
         """전처리가 하나라도 켜져 있으면 True — 캐시 키 분기/적용 판단용."""
-        return bool(self.center20 or self.grayscale or self.contrast
-                    or self.bg_removal or self.kla_crop)
+        return bool(self.center20_ref or self.center20_val or self.grayscale
+                    or self.contrast or self.kla_crop)
 
-    def cache_extra(self) -> str:
-        """캐시 키 판별자.  전처리 OFF 면 빈 문자열 → 기본 캐시와 동일 키."""
-        if not self.has_preprocess:
-            return ""
-        return (f"c20{int(self.center20)}g{int(self.grayscale)}"
-                f"c{int(self.contrast)}b{int(self.bg_removal)}"
-                f"k{int(self.kla_crop)}-{self.kla_top:.2f}-{self.kla_bottom:.2f}")
+    def cache_extra(self, side=None) -> str:
+        """캐시 키 판별자.  전처리 OFF 면 빈 문자열 → 기본 캐시와 동일 키.
+
+        중앙 20% crop 은 side(ref/val)에 따라 실제 적용 여부가 달라지므로
+        side 별로 키를 분리한다 (교차검증에서 동일 파일이 ref/val 양쪽으로
+        쓰일 때 캐시 충돌 방지)."""
+        parts = []
+        if self._center20_for(side):
+            parts.append("c20")
+        if self.grayscale:
+            parts.append("g")
+        if self.contrast:
+            parts.append("ct")
+        if self.kla_crop:
+            parts.append(f"k{self.kla_top:.2f}-{self.kla_bottom:.2f}")
+        return "-".join(parts)
 
 
 # 기본 cfg 싱글턴 — engine=basic, 전처리 전부 OFF (현행 동작).

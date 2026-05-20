@@ -43,11 +43,12 @@ class SetupInput:
     automation_level: str = AutomationLevel.MANUAL
     # 유사도 엔진 + 강화/KLA 전처리 (계산 전용).
     engine_mode: str = "basic"       # EngineMode.{BASIC,FAST}
-    center20: bool = False           # 중앙 20% 만 비교
+    center20_ref: bool = False       # 기준 사진 중앙 20% 만 사용
+    center20_val: bool = False       # 검증 사진 중앙 20% 만 사용
     pre_grayscale: bool = False
     pre_contrast: bool = False
-    pre_bg_removal: bool = False
     kla_crop: bool = False
+    group_threshold: float = 0.45    # 동일 defect 그룹화 임계치 (#6)
 
 
 class SetupPage(QWidget):
@@ -232,6 +233,26 @@ class SetupPage(QWidget):
         auto_hint.setWordWrap(True)
         auto_hint.setStyleSheet("color: #7FB3D5; padding-top: 4px;")
         auto_card.body().addWidget(auto_hint)
+
+        # 그룹화 유사도 임계치 (#6) — '모든 사진 자동' 등 그룹화 민감도 조절.
+        grp_row = QHBoxLayout()
+        grp_row.addWidget(QLabel(i18n.KO.GROUP_THRESHOLD_LABEL, auto_card))
+        self.group_slider = _NoWheelSlider(Qt.Orientation.Horizontal, auto_card)
+        self.group_slider.setRange(0, 100)
+        self.group_slider.setValue(
+            int(round(float(getattr(_prefs_now, "group_threshold", 0.45)) * 100))
+        )
+        self.group_threshold_label = QLabel(
+            f"{self.group_slider.value()} %", auto_card)
+        self.group_threshold_label.setStyleSheet("color: #00D4FF; font-weight: 700;")
+        self.group_threshold_label.setFixedWidth(60)
+        self.group_slider.valueChanged.connect(
+            lambda v: self.group_threshold_label.setText(f"{v} %")
+        )
+        self.group_slider.setToolTip(i18n.KO.GROUP_THRESHOLD_TOOLTIP)
+        grp_row.addWidget(self.group_slider, stretch=1)
+        grp_row.addWidget(self.group_threshold_label)
+        auto_card.body().addLayout(grp_row)
         root.addWidget(auto_card)
 
         # 폴더/호기 2칸 ---------------------------------------------------
@@ -254,12 +275,6 @@ class SetupPage(QWidget):
         )
         engine_card.body().addWidget(eng_title)
 
-        # 유사도 계산 옵션 최상단 — 기준 사진 중앙 20% 만 사용 (#7).
-        self.check_center20 = QCheckBox(i18n.KO.CENTER20_LABEL, engine_card)
-        self.check_center20.setToolTip(i18n.KO.CENTER20_TOOLTIP)
-        self.check_center20.setChecked(bool(getattr(_prefs_now, "center20", False)))
-        engine_card.body().addWidget(self.check_center20)
-
         self.radio_engine_basic = QRadioButton(i18n.KO.ENGINE_MODE_BASIC, engine_card)
         self.radio_engine_fast = QRadioButton(i18n.KO.ENGINE_MODE_FAST, engine_card)
         _last_engine = getattr(_prefs_now, "engine_mode", "basic")
@@ -278,16 +293,22 @@ class SetupPage(QWidget):
         pre_title.setToolTip(i18n.KO.PRE_GROUP_TOOLTIP)
         pre_title.setStyleSheet("color: #7FB3D5; padding-top: 6px;")
         engine_card.body().addWidget(pre_title)
+        # 중앙 20% 만 사용 — 기준/검증 독립 토글 (#2/#5).
+        self.check_center20_ref = QCheckBox(i18n.KO.CENTER20_REF_LABEL, engine_card)
+        self.check_center20_val = QCheckBox(i18n.KO.CENTER20_VAL_LABEL, engine_card)
+        self.check_center20_ref.setToolTip(i18n.KO.CENTER20_TOOLTIP)
+        self.check_center20_val.setToolTip(i18n.KO.CENTER20_TOOLTIP)
+        self.check_center20_ref.setChecked(bool(getattr(_prefs_now, "center20_ref", False)))
+        self.check_center20_val.setChecked(bool(getattr(_prefs_now, "center20_val", False)))
         self.check_pre_grayscale = QCheckBox(i18n.KO.PRE_GRAYSCALE_LABEL, engine_card)
         self.check_pre_contrast = QCheckBox(i18n.KO.PRE_CONTRAST_LABEL, engine_card)
-        self.check_pre_bg = QCheckBox(i18n.KO.PRE_BG_REMOVAL_LABEL, engine_card)
         self.check_kla_crop = QCheckBox(i18n.KO.KLA_CROP_LABEL, engine_card)
         self.check_pre_grayscale.setChecked(bool(getattr(_prefs_now, "pre_grayscale", False)))
         self.check_pre_contrast.setChecked(bool(getattr(_prefs_now, "pre_contrast", False)))
-        self.check_pre_bg.setChecked(bool(getattr(_prefs_now, "pre_bg_removal", False)))
         self.check_kla_crop.setChecked(bool(getattr(_prefs_now, "kla_crop", False)))
-        for _c in (self.check_pre_grayscale, self.check_pre_contrast,
-                   self.check_pre_bg, self.check_kla_crop):
+        for _c in (self.check_center20_ref, self.check_center20_val,
+                   self.check_pre_grayscale, self.check_pre_contrast,
+                   self.check_kla_crop):
             engine_card.body().addWidget(_c)
         root.addWidget(engine_card)
 
@@ -410,10 +431,11 @@ class SetupPage(QWidget):
         else:
             automation = AutomationLevel.MANUAL
         engine_mode = "fast" if self.radio_engine_fast.isChecked() else "basic"
-        center20 = bool(self.check_center20.isChecked())
+        center20_ref = bool(self.check_center20_ref.isChecked())
+        center20_val = bool(self.check_center20_val.isChecked())
+        group_threshold = self.group_slider.value() / 100.0
         pre_grayscale = bool(self.check_pre_grayscale.isChecked())
         pre_contrast = bool(self.check_pre_contrast.isChecked())
-        pre_bg = bool(self.check_pre_bg.isChecked())
         kla_crop = bool(self.check_kla_crop.isChecked())
 
         # 고속 모드를 골랐는데 의존성(hnswlib 등)이 없으면 조용히 기본 모드로
@@ -431,11 +453,12 @@ class SetupPage(QWidget):
             last_mode=mode,
             automation_level=automation,
             engine_mode=engine_mode,
-            center20=center20,
+            center20_ref=center20_ref,
+            center20_val=center20_val,
             pre_grayscale=pre_grayscale,
             pre_contrast=pre_contrast,
-            pre_bg_removal=pre_bg,
             kla_crop=kla_crop,
+            group_threshold=group_threshold,
         )
         self.start_requested.emit(SetupInput(
             mode=mode,
@@ -446,11 +469,12 @@ class SetupPage(QWidget):
             threshold=threshold,
             automation_level=automation,
             engine_mode=engine_mode,
-            center20=center20,
+            center20_ref=center20_ref,
+            center20_val=center20_val,
             pre_grayscale=pre_grayscale,
             pre_contrast=pre_contrast,
-            pre_bg_removal=pre_bg,
             kla_crop=kla_crop,
+            group_threshold=group_threshold,
         ))
 
     # ------------------------------------------------------------------

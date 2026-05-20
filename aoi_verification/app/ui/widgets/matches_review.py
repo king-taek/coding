@@ -28,14 +28,22 @@ _THUMB = 240
 class _Row(QWidget):
     delete_requested = pyqtSignal(object)        # MatchResult
 
+    _STYLE_NORMAL = (
+        "_Row { background: #0E1424; border: 1px solid #1F2A3F; "
+        "border-radius: 8px; }"
+    )
+    _STYLE_PENDING = (
+        "_Row { background: #0E1424; border: 2px solid #FF2D55; "
+        "border-radius: 8px; }"
+    )
+
     def __init__(self, m: MatchResult, parent=None) -> None:
         super().__init__(parent)
         self.match = m
+        self._pending = False
         self.setMinimumHeight(_THUMB + 40)
-        self.setStyleSheet(
-            "QWidget { background: #0E1424; border: 1px solid #1F2A3F; "
-            "border-radius: 8px; }"
-        )
+        # 스타일은 _Row 선택자로 한정 — 자식 위젯에 빨간 테두리가 번지지 않게.
+        self.setStyleSheet(self._STYLE_NORMAL)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(8, 8, 8, 8)
         lay.setSpacing(10)
@@ -61,9 +69,20 @@ class _Row(QWidget):
         lay.addWidget(self._make_thumb(m.val_path))
         lay.addStretch(1)
 
-        btn = NeonButton(i18n.KO.REVIEW_BTN_DELETE, role="danger")
-        btn.clicked.connect(lambda: self.delete_requested.emit(self.match))
-        lay.addWidget(btn)
+        self.btn = NeonButton(i18n.KO.REVIEW_BTN_DELETE, role="danger")
+        self.btn.clicked.connect(lambda: self.delete_requested.emit(self.match))
+        lay.addWidget(self.btn)
+
+    def set_pending_delete(self, pending: bool) -> None:
+        """삭제 예정 표시 — 빨간 테두리 + 버튼 토글 (확인 전까지 실제 삭제 안 함)."""
+        self._pending = bool(pending)
+        self.setStyleSheet(self._STYLE_PENDING if pending else self._STYLE_NORMAL)
+        if pending:
+            self.btn.setText(i18n.KO.REVIEW_BTN_UNDELETE)
+            self.btn.setRole("ghost")
+        else:
+            self.btn.setText(i18n.KO.REVIEW_BTN_DELETE)
+            self.btn.setRole("danger")
 
     @staticmethod
     def _make_thumb(p: Path):
@@ -113,6 +132,8 @@ class MatchesReviewDialog(QDialog):
         self.setWindowTitle(i18n.KO.REVIEW_DIALOG_TITLE)
         self.resize(1400, 800)
         self._removed: list[MatchResult] = []
+        self._pending_keys: set = set()       # 삭제 예정 (확인 전) MatchResult.key
+        self._rows_by_key: dict = {}
         self._matches: list[MatchResult] = sorted(
             matches, key=lambda m: (m.slot, m.ref_path.name.lower()),
         )
@@ -149,7 +170,7 @@ class MatchesReviewDialog(QDialog):
         bar = QHBoxLayout()
         bar.addStretch(1)
         ok = NeonButton(i18n.KO.BTN_OK, role="primary")
-        ok.clicked.connect(self.accept)
+        ok.clicked.connect(self._confirm)
         bar.addWidget(ok)
         root.addLayout(bar)
 
@@ -161,15 +182,26 @@ class MatchesReviewDialog(QDialog):
             w = it.widget()
             if w is not None:
                 w.deleteLater()
+        self._rows_by_key = {}
         for m in self._matches:
             row = _Row(m)
             row.delete_requested.connect(self._on_delete)
+            row.set_pending_delete(m.key in self._pending_keys)
+            self._rows_by_key[m.key] = row
             self._list.addWidget(row)
         self._list.addStretch(1)
 
     def _on_delete(self, m: MatchResult) -> None:
-        self._removed.append(m)
-        self._matches = [x for x in self._matches
-                         if (x.slot, x.ref_path.name, x.val_path.name) !=
-                            (m.slot, m.ref_path.name, m.val_path.name)]
-        self._render()
+        # 즉시 삭제하지 않고 '삭제 예정'(빨간 테두리)으로 토글 (#14).
+        if m.key in self._pending_keys:
+            self._pending_keys.discard(m.key)
+        else:
+            self._pending_keys.add(m.key)
+        row = self._rows_by_key.get(m.key)
+        if row is not None:
+            row.set_pending_delete(m.key in self._pending_keys)
+
+    def _confirm(self) -> None:
+        """[확인] — 삭제 예정으로 표시된 매치들을 실제 제외 처리하고 닫는다."""
+        self._removed = [m for m in self._matches if m.key in self._pending_keys]
+        self.accept()

@@ -451,10 +451,10 @@ class MainWindow(QMainWindow):
             return config.DEFAULT_SIM_CONFIG
         return config.SimilarityConfig(
             engine=getattr(inp, "engine_mode", "basic"),
-            center20=bool(getattr(inp, "center20", False)),
+            center20_ref=bool(getattr(inp, "center20_ref", False)),
+            center20_val=bool(getattr(inp, "center20_val", False)),
             grayscale=bool(getattr(inp, "pre_grayscale", False)),
             contrast=bool(getattr(inp, "pre_contrast", False)),
-            bg_removal=bool(getattr(inp, "pre_bg_removal", False)),
             kla_crop=bool(getattr(inp, "kla_crop", False)),
         )
 
@@ -815,12 +815,19 @@ class MainWindow(QMainWindow):
             return
         merged = self._merge_matches()
         # MatchPage 가 들고 있는 점수 캐시 + val_pool 을 매치 검토 페이지에
-        # 넘겨 차순위 후보 2 장을 행마다 표시한다 (참고용 시각 정보).
+        # 넘겨 차순위 후보를 행마다 표시한다 (참고용 시각 정보).
         score_cache = getattr(self._match_page, "_score_cache", None)
         match_state = self._match_page.get_state()
         val_pool = match_state.val_pool if match_state is not None else None
+        # 고속 모드는 score_cache 가 비어 있으므로 후보를 별도 산출해 전달 (#7).
+        candidates_by_ref = None
+        try:
+            candidates_by_ref = self._match_page.build_candidates_by_ref(merged)
+        except Exception:
+            candidates_by_ref = None
         self._match_review_page.load_state(
             merged, score_cache=score_cache, val_pool=val_pool,
+            candidates_by_ref=candidates_by_ref,
         )
         self._show_page(self._match_review_page)
 

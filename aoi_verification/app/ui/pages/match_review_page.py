@@ -32,6 +32,9 @@ _THUMB_PX = 140
 _RUNNERUP_PX = int(_THUMB_PX * 0.8)         # 차순위는 20% 작게
 # 화면 너비를 아직 모를 때 한 줄에 채울 차순위 후보 기본 열 수 (#4/#5 fallback).
 _FALLBACK_COLS = 6
+# 한 줄(첫 줄/아래 추가 줄)에 들어갈 후보 타일 수 (#3). 첫 줄은 1위 매치 옆에
+# 인라인으로 붙고, 그 아래 추가 줄도 같은 열 수로 채운다.
+_FIRST_LINE_COLS = 3
 # _lookup_runners_up 가 보관하는 차순위 후보 최대 개수 (#16).
 _MAX_RUNNERS = 50
 
@@ -183,6 +186,15 @@ class _MatchRow(QFrame):
         primary_lay.addWidget(score_label)
         top.addWidget(primary_host)
 
+        # ── 첫 줄 차순위 후보 — 1위 매치 바로 옆(인라인)에 붙는다 (#3). ──
+        # 이 컨테이너 안의 가로 레이아웃에 _FIRST_LINE_COLS 개까지 채운다.
+        self._first_line_host = QWidget(self)
+        self._first_line_lay = QHBoxLayout(self._first_line_host)
+        self._first_line_lay.setContentsMargins(0, 0, 0, 0)
+        self._first_line_lay.setSpacing(8)
+        self._first_line_lay.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        top.addWidget(self._first_line_host)
+
         top.addStretch(1)
 
         # ✕ 매치 없음 / ↩ 되돌리기 버튼
@@ -194,16 +206,17 @@ class _MatchRow(QFrame):
 
         outer.addLayout(top)
 
-        # ── 차순위 후보 영역 — 상단 한 줄 아래에 그리드로 줄바꿈 (#4/#5). ──
-        # 클릭하면 그 사진으로 매치 교체 (swap_requested).  처음엔 한 줄만
-        # 보이고 ‘후보 한 줄 더 보기’ 로 늘린다.
+        # ── 차순위 후보 영역 — 첫 줄은 위 인라인, 추가 줄은 아래 그리드 (#3/#5). ──
+        # 클릭하면 그 사진으로 매치 교체 (swap_requested).  처음엔 첫 줄만
+        # 인라인으로 보이고 ‘후보 한 줄 더 보기’ 로 아래에 줄을 추가한다.
+        # ‘매치 없음’ 처리 시 _candidate_host 전체(인라인 첫 줄 포함)를 숨긴다 (#1).
         if self._runners_up:
             self._runner_host = QWidget(self)
             host_lay = QVBoxLayout(self._runner_host)
             host_lay.setContentsMargins(0, 0, 0, 0)
             host_lay.setSpacing(6)
 
-            # 후보 타일을 담는 그리드.
+            # 추가 줄(2번째 줄부터)을 담는 그리드.
             self._runner_grid = QGridLayout()
             self._runner_grid.setContentsMargins(0, 0, 0, 0)
             self._runner_grid.setSpacing(8)
@@ -225,41 +238,62 @@ class _MatchRow(QFrame):
             self._runner_host = None
             self._runner_grid = None
             self.btn_more = None
+            self._first_line_host.setVisible(False)
 
     def _runner_cols(self) -> int:
-        """현재 가용 너비에 맞춰 한 줄에 들어갈 후보 열 수를 계산 (#4/#5)."""
-        spacing = 8
-        # 가용 너비: 후보 호스트 → 자기 자신 → 부모 순으로 추정.
-        width = 0
-        for w in (self._runner_host, self, self.parentWidget()):
-            if w is not None:
-                width = max(width, w.width())
-        if width <= 0:
-            return _FALLBACK_COLS
-        cols = width // (_RUNNERUP_PX + spacing)
-        return max(1, int(cols))
+        """한 줄에 들어갈 후보 열 수 — 고정값으로 예측 가능하게 한다 (#3)."""
+        return _FIRST_LINE_COLS
+
+    def _make_tile(self, item: ImageItem, score: float, parent) -> "_RunnerUpTile":
+        """후보 타일 하나를 만들고 swap 시그널을 연결한다 (#3)."""
+        tile = _RunnerUpTile(item, score, parent=parent)
+        tile.swap_requested.connect(
+            lambda it, s: self.swap_requested.emit(self.match, it, s)
+        )
+        return tile
 
     def _render_runners(self) -> None:
-        """차순위 그리드를 비우고 ``_visible_lines`` 줄 만큼 다시 채운다 (#5)."""
+        """첫 줄은 인라인(_first_line_host), 추가 줄은 아래 그리드에 채운다 (#3/#5).
+
+        ``_visible_lines`` 가 보이는 총 줄 수.  1줄째는 1위 매치 옆에 인라인으로,
+        2줄째부터는 그 아래 그리드에 ``cols`` 개씩 줄바꿈으로 표시한다.
+        """
+        cols = self._runner_cols()
+
+        # 인라인 첫 줄을 비우고 다시 채운다.
+        while self._first_line_lay.count():
+            it = self._first_line_lay.takeAt(0)
+            w = it.widget()
+            if w is not None:
+                w.deleteLater()
+        first_line = self._runners_up[:cols]
+        for item, score in first_line:
+            self._first_line_lay.addWidget(
+                self._make_tile(item, score, self._first_line_host)
+            )
+
         if self._runner_grid is None:
             return
+
+        # 아래 그리드(추가 줄)를 비우고 다시 채운다.
         while self._runner_grid.count():
             it = self._runner_grid.takeAt(0)
             w = it.widget()
             if w is not None:
                 w.deleteLater()
-        cols = self._runner_cols()
         visible_count = max(1, self._visible_lines) * cols
-        shown = self._runners_up[:visible_count]
-        for idx, (item, score) in enumerate(shown):
-            tile = _RunnerUpTile(item, score, parent=self._runner_host)
-            tile.swap_requested.connect(
-                lambda it, s: self.swap_requested.emit(self.match, it, s)
+        # 첫 줄(cols 개)은 인라인이 담당하므로 그 이후 분만 그리드에 둔다.
+        rest = self._runners_up[cols:visible_count]
+        for idx, (item, score) in enumerate(rest):
+            self._runner_grid.addWidget(
+                self._make_tile(item, score, self._runner_host),
+                idx // cols, idx % cols,
             )
-            self._runner_grid.addWidget(tile, idx // cols, idx % cols)
+
         # 모두 표시했으면 ‘더 보기’ 버튼을 숨긴다.
+        shown_total = min(visible_count, len(self._runners_up))
         if self.btn_more is not None:
-            self.btn_more.setVisible(len(shown) < len(self._runners_up))
+            self.btn_more.setVisible(shown_total < len(self._runners_up))
 
     def _on_more(self) -> None:
         """‘후보 한 줄 더 보기’ — 표시 줄 수를 1 늘리고 재렌더 (#5)."""
@@ -274,16 +308,31 @@ class _MatchRow(QFrame):
     def set_unmatched(self, unmatched: bool) -> None:
         self._is_unmatched = unmatched
         if unmatched:
+            # 빨간 강조는 가장 바깥 프레임 테두리에만 둔다 (배경 틴트/내부 위젯
+            # 테두리 없음) (#1). 자식 위젯에 번지지 않도록 셀렉터를 self 로 한정.
             self.setStyleSheet(
-                "QFrame { border: 2px solid #FF2D55; border-radius: 6px; "
-                "  background: rgba(255, 45, 85, 0.05); }"
+                "_MatchRow { border: 2px solid #FF2D55; border-radius: 6px; }"
             )
             self.btn_toggle.setText(i18n.KO.BTN_RESTORE_MATCH)
             self.btn_toggle.setRole("ghost")
+            # 후보 영역(인라인 첫 줄 + 아래 그리드/‘더 보기’)을 모두 숨긴다 (#1/#3).
+            self._set_candidates_visible(False)
         else:
             self.setStyleSheet("")
             self.btn_toggle.setText(i18n.KO.BTN_MARK_NO_MATCH)
             self.btn_toggle.setRole("danger")
+            # 후보 영역을 이전 표시 상태로 복원한다 (#1).
+            self._set_candidates_visible(True)
+
+    def _set_candidates_visible(self, visible: bool) -> None:
+        """인라인 첫 줄 + 아래 후보 호스트의 표시 여부를 한꺼번에 토글 (#1/#3).
+
+        후보가 아예 없는 행이면 첫 줄 컨테이너는 계속 숨김 상태로 둔다.
+        """
+        if self._runners_up:
+            self._first_line_host.setVisible(visible)
+        if self._runner_host is not None:
+            self._runner_host.setVisible(visible)
 
 
 class MatchReviewPage(QWidget):
@@ -297,6 +346,9 @@ class MatchReviewPage(QWidget):
         self._unmatched_keys: set[tuple] = set()    # MatchResult.key set
         self._rows: list[_MatchRow] = []
         self._rows_by_key: dict[tuple, _MatchRow] = {}
+        self._score_cache = None
+        self._val_pool: dict | None = None
+        self._candidates_by_ref: dict | None = None
         self._build()
 
     # ------------------------------------------------------------------
@@ -364,17 +416,24 @@ class MatchReviewPage(QWidget):
                    matches: list[MatchResult],
                    *,
                    score_cache=None,
-                   val_pool: dict | None = None) -> None:
+                   val_pool: dict | None = None,
+                   candidates_by_ref: dict | None = None) -> None:
         """매치 검토 화면 초기화.
 
         ``score_cache`` 와 ``val_pool`` 이 함께 주어지면 각 매치 행에 차순위
         후보를 클릭 가능한 형태로 보여주고, 클릭 시 그 후보로 매치를 교체한다.
+
+        ``candidates_by_ref`` 가 주어지면 (fast 모드, #7) ``(slot, ref_path.name)``
+        키로 미리 점수 내림차순 정렬된 ``[(ImageItem, score), ...]`` 후보 목록을
+        직접 사용한다.  score_cache 가 비어있는 fast 모드에서도 후보가 보인다.
         """
         self._matches = list(matches)
         self._unmatched_keys.clear()
         # 차순위 swap / 재계산용으로 score_cache + val_pool 참조 보관.
         self._score_cache = score_cache
         self._val_pool = val_pool
+        # fast 모드용 미리 계산된 후보 목록 (#7).
+        self._candidates_by_ref = candidates_by_ref
 
         while self._list_layout.count():
             it = self._list_layout.takeAt(0)
@@ -453,13 +512,26 @@ class MatchReviewPage(QWidget):
             self._rows_by_key[new_match.key] = new_row
         self._update_summary()
 
-    @staticmethod
-    def _lookup_runners_up(match: MatchResult, score_cache, val_pool) -> list:
+    def _lookup_runners_up(self, match: MatchResult, score_cache, val_pool) -> list:
         """주어진 매치의 ref 와 같은 slot 내 다른 val 들을 점수 내림차순으로 (자기 자신 제외).
+
+        fast 모드 (#7): ``self._candidates_by_ref`` 에 ``(slot, ref_path.name)``
+        키가 있으면 미리 정렬된 후보 목록에서 1위(현재 val) 를 제외하고 사용한다.
+        그렇지 않으면 기존 score_cache + val_pool 로직으로 폴백한다 (basic 모드).
 
         _MatchRow 가 처음엔 한 줄만 보여주고 ‘후보 한 줄 더 보기’ 로 늘릴 수
         있도록 최대 ``_MAX_RUNNERS`` 개까지 보관해서 돌려준다 (#5/#16).
         """
+        cbr = self._candidates_by_ref
+        if cbr is not None:
+            key = (match.slot, match.ref_path.name)
+            if key in cbr:
+                scored = [
+                    (item, float(s))
+                    for item, s in (cbr.get(key) or [])
+                    if item.path != match.val_path
+                ]
+                return scored[:_MAX_RUNNERS]
         if score_cache is None or val_pool is None:
             return []
         slot_vals = val_pool.get(match.slot, []) or []

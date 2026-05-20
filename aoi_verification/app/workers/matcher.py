@@ -63,7 +63,7 @@ class MatcherWorker(QThread):
 
     def run(self) -> None:        # type: ignore[override]
         try:
-            ref_feat = sim.extract(self._ref.path, cfg=self._cfg)
+            ref_feat = sim.extract(self._ref.path, cfg=self._cfg, side="ref")
         except Exception as exc:
             self.signals.failed.emit(str(exc))
             return
@@ -85,7 +85,7 @@ class MatcherWorker(QThread):
             try:
                 vf = self._val_features.get(vi.path)
                 if vf is None:
-                    vf = sim.extract(vi.path, cfg=self._cfg)
+                    vf = sim.extract(vi.path, cfg=self._cfg, side="val")
                     # 다음 reference 를 위해 인메모리에 추가.
                     self._val_features[vi.path] = vf
                 s = sim.score(ref_feat, vf)

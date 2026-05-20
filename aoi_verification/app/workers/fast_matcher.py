@@ -75,10 +75,11 @@ def compute_slot_embeddings(items: List[ImageItem],
     재실행이 빠르다.
     """
     from ..utils import image_io
-    cfg_extra = cfg.cache_extra() if cfg is not None else ""
     out: Dict[Path, np.ndarray] = {}
     for it in items:
         p = Path(it.path)
+        side = getattr(it, "side", None)
+        cfg_extra = cfg.cache_extra(side) if cfg is not None else ""
         cp = _desc_cache_path(p, cfg_extra)
         if cp.exists() and cp.stat().st_size > 0:
             try:
@@ -87,7 +88,8 @@ def compute_slot_embeddings(items: List[ImageItem],
             except Exception:
                 pass
         try:
-            gray = image_io.center_roi_gray(p, cfg=cfg, long_edge=_DESC_DECODE_PX)
+            gray = image_io.center_roi_gray(p, cfg=cfg, side=side,
+                                            long_edge=_DESC_DECODE_PX)
             v = _descriptor_from_gray(gray)
         except Exception:
             continue
@@ -115,13 +117,13 @@ def rerank_ref(ref_item: ImageItem,
     if rv is None:
         return []
     hits = index.query(rv, top_k)
-    ref_feat = _pipeline.extract(ref_item.path, cfg=cfg)
+    ref_feat = _pipeline.extract(ref_item.path, cfg=cfg, side="ref")
     out: List[Tuple[Path, float]] = []
     for label, _sim in hits:
         if 0 <= label < len(val_paths):
             vpath = val_paths[label]
             try:
-                vf = _pipeline.extract(vpath, cfg=cfg)
+                vf = _pipeline.extract(vpath, cfg=cfg, side="val")
                 out.append((vpath, float(_pipeline.score(ref_feat, vf))))
             except Exception:
                 continue
@@ -170,6 +172,7 @@ class SlotIndexCache:
 class _FastSignals(QObject):
     progress = pyqtSignal(int, int)            # done_slots, total_slots
     slot_finished = pyqtSignal(str, int, int)  # slot, idx(1-base), total
+    phase = pyqtSignal(str)                     # 현재 작업 단계 라벨 (#8)
     finished = pyqtSignal()
     failed = pyqtSignal(str)
 
@@ -232,9 +235,11 @@ class FastIndexWorker(QThread):
             total_units = max(1, total_imgs + (
                 sum(len(r) for _, r, _ in self._tasks) if self._auto else 0))
             done_box = [0]
+            from .. import i18n
             for idx, (slot, refs, vals) in enumerate(self._tasks, start=1):
                 if self._stop:
                     return
+                self.signals.phase.emit(i18n.KO.PHASE_FEATURE)
                 val_emb = self._embed_chunked(vals, done_box, total_units)
                 if self._stop:
                     return
@@ -247,6 +252,7 @@ class FastIndexWorker(QThread):
                     self._index_cache.put(slot, index, val_paths, ref_emb)
                     if self._auto:
                         # 자동 모드 — 모든 ref 를 미리 재정렬해 결과 저장.
+                        self.signals.phase.emit(i18n.KO.PHASE_SCORING)
                         entry = (index, val_paths, ref_emb)
                         for r in refs:
                             if self._stop:

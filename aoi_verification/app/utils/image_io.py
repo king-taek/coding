@@ -158,22 +158,25 @@ def load_bytes(path: Path) -> bytes:
 def center_roi_gray(src: Path,
                     roi_ratio: Optional[float] = None,
                     long_edge: Optional[int] = None,
-                    cfg=None) -> np.ndarray:
+                    cfg=None,
+                    side=None) -> np.ndarray:
     """중심 ROI 를 잘라낸 후 그레이스케일 NumPy 배열로 돌려준다.
 
     유사도 파이프라인(pHash·SSIM·ORB) 모두가 공유하는 1차 전처리.
 
     ``cfg`` (SimilarityConfig) 가 주어지고 전처리 토글이 켜져 있으면 강화/KLA
-    변환을 **계산 전용**으로 적용 — 화면 표시 이미지는 영향 없음.  cfg=None
-    또는 모든 토글 OFF 면 현행과 동일 동작 (기본 모드 불변).
+    변환을 **계산 전용**으로 적용 — 화면 표시 이미지는 영향 없음.  ``side``
+    ('ref'/'val') 에 따라 중앙 20% crop 을 선택 적용한다.  cfg=None 또는 모든
+    토글 OFF 면 현행과 동일 동작 (기본 모드 불변).
     """
     if roi_ratio is None:
         roi_ratio = config.Sizing.ROI_RATIO
     if long_edge is None:
         long_edge = config.Sizing.SIMILARITY_PX
-    # 중앙 20% 만 비교 옵션 (#7) — 호출자가 명시 roi_ratio 를 주지 않은 경우에만.
-    if cfg is not None and getattr(cfg, "center20", False):
-        roi_ratio = 0.2
+    # 중앙 20% 만 사용 옵션 (#7/#2) — side(ref/val) 별로 적용.
+    if cfg is not None and getattr(cfg, "_center20_for", None) is not None:
+        if cfg._center20_for(side):
+            roi_ratio = 0.2
 
     img = _open(src)
     img = _to_rgb(img)
@@ -200,13 +203,15 @@ def center_roi_gray(src: Path,
 def preprocessed_roi_gray(src: Path,
                           roi_ratio: Optional[float] = None,
                           long_edge: Optional[int] = None,
-                          cfg=None) -> np.ndarray:
+                          cfg=None,
+                          side=None) -> np.ndarray:
     """CLAHE + Gaussian blur 까지 적용된 중심 ROI gray (CNN/유사도 공유).
 
     pHash·SSIM·ORB·CNN 모두가 같은 도메인 전처리 위에 동작하도록 일원화하기
     위해 만들어진 헬퍼. CV2 가 있으면 CLAHE 를 적용하고, 없으면 단순 ROI gray.
     """
-    gray = center_roi_gray(src, roi_ratio=roi_ratio, long_edge=long_edge, cfg=cfg)
+    gray = center_roi_gray(src, roi_ratio=roi_ratio, long_edge=long_edge,
+                           cfg=cfg, side=side)
     try:
         import cv2
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))

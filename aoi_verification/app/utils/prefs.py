@@ -79,11 +79,12 @@ class UiPrefs:
     openvino_install_declined: bool = False
     # 유사도 엔진 모드 + 강화 전처리 토글 (계산 전용, 화면 표시는 원본 유지).
     engine_mode: str = "basic"               # EngineMode.{BASIC,FAST}
-    center20: bool = False                   # 기준/검증 사진 중앙 20% 만 비교
+    center20_ref: bool = False               # 기준 사진 중앙 20% 만 사용
+    center20_val: bool = False               # 검증 사진 중앙 20% 만 사용
     pre_grayscale: bool = False              # 강화: 흑백 + 고감도
     pre_contrast: bool = False               # 강화: 고대비
-    pre_bg_removal: bool = False             # 강화: 배경 제거(누끼)
     kla_crop: bool = False                   # KLA 상/하단 정보영역 crop
+    group_threshold: float = 0.45            # 동일 defect 그룹화 pHash 임계치(#6)
     kla_crop_top: float = 0.08               # 상단 잘라낼 비율 (0~0.4)
     kla_crop_bottom: float = 0.08            # 하단 잘라낼 비율 (0~0.4)
     extra: dict[str, Any] = field(default_factory=dict)

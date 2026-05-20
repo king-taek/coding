@@ -94,10 +94,12 @@ BTN_REVIEW_MATCHES = "매칭 결과 검토"
 # ── 매칭 결과 검토 (#18) ───────────────────────────────────────────────────
 REVIEW_DIALOG_TITLE = "매칭 결과 검토"
 REVIEW_HINT = (
-    "잘못 매칭된 행이 있으면 [삭제] 로 결과에서 제외할 수 있습니다.\n"
-    "삭제된 항목은 엑셀 저장 시 결과에 포함되지 않습니다."
+    "잘못 매칭된 행은 [삭제] 로 표시(빨간 테두리)한 뒤 [확인] 을 누르면\n"
+    "결과에서 제외됩니다.  제외된 사진은 ‘매치 실패’ 로 분류되어 매치 실패\n"
+    "사진 검토에서 ‘매칭 취소 목록’ 으로 다시 검토할 수 있습니다."
 )
 REVIEW_BTN_DELETE = "삭제"
+REVIEW_BTN_UNDELETE = "삭제 취소 ↩"
 REVIEW_REMOVED_FMT = "{n} 개의 매칭이 결과에서 제외되었습니다."
 
 # ── 셋업 페이지 ────────────────────────────────────────────────────────────
@@ -189,11 +191,12 @@ SPEED_MODE_TOOLTIP = (
 # ── 유사도 엔진 모드 + 강화/KLA 전처리 ────────────────────────────────────
 ENGINE_CARD_TITLE = "유사도 엔진"
 ENGINE_MODE_BASIC = "기본 모드 (정밀 비교)"
-ENGINE_MODE_FAST = "고속 모드 (임베딩 + ANN, 대용량 권장)"
+ENGINE_MODE_FAST = "고속 모드 (대용량 권장)"
 ENGINE_MODE_TOOLTIP = (
-    "기본 모드: 기존 정밀 비교 (정확하지만 대용량에서 느림).\n"
-    "고속 모드: AI 임베딩으로 후보를 빠르게 추린 뒤 정밀 재정렬.\n"
-    "  사진이 수천 장 이상일 때 권장 (Intel GPU/NPU 가속 시 더 빠름)."
+    "기본 모드: 모든 후보를 정밀 비교 (정확하지만 대용량에서 느림).\n"
+    "고속 모드: 가벼운 이미지 특징으로 후보를 빠르게 추린 뒤, 상위 후보만\n"
+    "  정밀 비교로 재정렬합니다.  사진이 수천 장 이상일 때 권장.\n"
+    "  (별도 설치/인터넷 없이 동작합니다.)"
 )
 ENGINE_FAST_UNAVAILABLE = (
     "고속 모드를 사용할 수 없어 기본 모드로 진행합니다 (torch 미설치)."
@@ -223,16 +226,23 @@ FAST_DEPS_FAILED_FMT = (
     "설치 실패 — {error}\n\n"
     "수동 설치:  pip install hnswlib"
 )
-CENTER20_LABEL = "기준 사진 중앙 20%만 사용 (유사도 계산)"
+CENTER20_REF_LABEL = "기준 사진 중앙 20%만 사용"
+CENTER20_VAL_LABEL = "검증 사진 중앙 20%만 사용"
 CENTER20_TOOLTIP = (
-    "유사도 계산 시 사진의 중앙 20% 영역만 비교합니다.\n"
+    "유사도 계산 시 사진의 중앙 20% 영역만 사용합니다.\n"
     "테두리/배경 차이를 무시하고 중심부 패턴에 집중할 때 유용합니다.\n"
+    "기준·검증을 각각 켤 수 있으며, 보통 둘 다 켜는 것이 정확합니다.\n"
     "썸네일/엑셀 이미지는 원본 그대로 유지됩니다."
+)
+GROUP_THRESHOLD_LABEL = "그룹화 임계치"
+GROUP_THRESHOLD_TOOLTIP = (
+    "동일 defect 그룹화의 pHash 유사도 임계치입니다.\n"
+    "높일수록 더 비슷한 사진끼리만 묶이고(엄격), 낮출수록 느슨하게 묶입니다.\n"
+    "'모든 사진 자동' 모드의 대표 사진 선별에 영향을 줍니다."
 )
 PRE_GROUP_TITLE = "강화 전처리 (계산 전용 — 화면 표시는 원본 유지)"
 PRE_GRAYSCALE_LABEL = "흑백 + 고감도"
 PRE_CONTRAST_LABEL = "고대비"
-PRE_BG_REMOVAL_LABEL = "배경 제거 (누끼)"
 KLA_CROP_LABEL = "KLA 정보영역 잘라내기 (상·하단 텍스트)"
 PRE_GROUP_TOOLTIP = (
     "유사도 계산에만 적용되는 이미지 보정입니다. 썸네일/엑셀 이미지는\n"
@@ -373,9 +383,13 @@ LOAD_STAGE_PREP = "다음 단계 준비 중…"
 LOAD_FEATURE_FMT = "검증 장비 특징 추출 중… {done} / {total}"
 LOAD_FEATURE_DONE = "검증 장비 특징 추출 완료 — 이후 매칭은 즉시 처리됩니다"
 LOAD_SCORING_FMT = "유사도 계산 중… {done} / {total}"
+# 진행 단계(phase)를 실제 작업에 맞춰 표시 (#8) — phase 예: '이미지 특징 분석',
+# '유사도 계산'.  done/total 과 함께 사용자가 지금 무슨 작업인지 알 수 있다.
+LOAD_PHASE_FMT = "{phase} 중… {done} / {total}"
+PHASE_FEATURE = "이미지 특징 분석"
+PHASE_SCORING = "유사도 계산"
 LOAD_PRECOMPUTE_FMT = (
-    "유사도 사전 계산 중… {done} / {total}\n"
-    "(한 번 끝나면 이후 매칭은 즉시 처리됩니다)"
+    "유사도 계산 중… {done} / {total}"
 )
 # 수동 모드: 첫 슬롯만 기다리고 나머지는 백그라운드 (#streaming).
 LOAD_PRECOMPUTE_FIRST_SLOT = (
@@ -385,7 +399,7 @@ LOAD_PRECOMPUTE_WAIT_FMT = (
     "{slot} 슬롯 유사도 계산을 기다리는 중… 다음 슬롯은 백그라운드에서 준비됩니다"
 )
 PRECOMPUTE_BG_STATUS_FMT = "백그라운드 유사도 계산: {idx} / {total} 슬롯 완료"
-PRECOMPUTE_BG_DONE = "유사도 사전 계산 완료"
+PRECOMPUTE_BG_DONE = "유사도 계산 완료"
 LOAD_AUTO_MATCH_FMT = "자동 매치 진행 중… {done} / {total}"
 
 # ── 자동화 수준 (#3 올인원 모드) ───────────────────────────────────────────

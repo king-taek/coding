@@ -746,7 +746,13 @@ class SelectPage(QWidget):
         self._loading.show_overlay(
             i18n.KO.GROUP_LOAD_FMT.format(done=0, total=0, status="시작")
         )
-        worker = GroupingWorker(items_by_slot, parent=self)
+        # 그룹화 임계치(#6) — 마지막 설정값 사용.
+        try:
+            from ...utils import prefs as _prefs
+            _gthr = float(getattr(_prefs.load(), "group_threshold", 0.45))
+        except Exception:
+            _gthr = 0.45
+        worker = GroupingWorker(items_by_slot, phash_threshold=_gthr, parent=self)
         worker.signals.progress.connect(self._on_group_progress)
         worker.signals.finished.connect(self._on_group_finished)
         worker.signals.failed.connect(self._on_group_failed)

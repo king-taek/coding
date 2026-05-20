@@ -82,13 +82,11 @@ def remove_background_rgb(img: "_PILImage.Image") -> "_PILImage.Image":
 
 
 def apply_rgb_chain(img: "_PILImage.Image", cfg: "SimilarityConfig") -> "_PILImage.Image":
-    """중심 ROI crop 이전 단계의 RGB 변환 적용 (KLA crop → 배경 제거)."""
+    """중심 ROI crop 이전 단계의 RGB 변환 적용 (현재: KLA crop)."""
     if cfg is None:
         return img
     if cfg.kla_crop:
         img = kla_crop_rgb(img, cfg.kla_top, cfg.kla_bottom)
-    if cfg.bg_removal:
-        img = remove_background_rgb(img)
     return img
 
 
