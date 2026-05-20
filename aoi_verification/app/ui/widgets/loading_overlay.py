@@ -5,9 +5,10 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QEvent, QRect, QSize, Qt, QTimer
+from PyQt6.QtCore import QEvent, QRect, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen
-from PyQt6.QtWidgets import (QLabel, QProgressBar, QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import (QLabel, QProgressBar, QPushButton, QVBoxLayout,
+                             QWidget)
 
 
 class _SpinnerDot(QWidget):
@@ -109,6 +110,8 @@ class _Sparkline(QWidget):
 class LoadingOverlay(QWidget):
     """부모 위젯의 size 를 따라가는 풀-커버 오버레이."""
 
+    cancel_requested = pyqtSignal()        # #8 중지 버튼 클릭
+
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
@@ -131,17 +134,32 @@ class LoadingOverlay(QWidget):
         self._sparkline = _Sparkline(self)
         self._sparkline.hide()
 
+        # #8 중지 버튼 — cancelable=True 로 보여진 작업에서만 노출.
+        self._cancel_btn = QPushButton("중지", self)
+        self._cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._cancel_btn.setFixedWidth(160)
+        self._cancel_btn.setStyleSheet(
+            "QPushButton { color: #FFD6D6; background: rgba(255,45,85,0.18);"
+            " border: 1px solid #FF2D55; border-radius: 8px; padding: 8px 14px;"
+            " font-weight: 700; }"
+            "QPushButton:hover { background: rgba(255,45,85,0.30); }"
+        )
+        self._cancel_btn.clicked.connect(self.cancel_requested.emit)
+        self._cancel_btn.hide()
+
         v.addWidget(self._spinner, alignment=Qt.AlignmentFlag.AlignCenter)
         v.addWidget(self._label)
         v.addWidget(self._progress, alignment=Qt.AlignmentFlag.AlignCenter)
         v.addWidget(self._sparkline, alignment=Qt.AlignmentFlag.AlignCenter)
+        v.addWidget(self._cancel_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self.hide()
         parent.installEventFilter(self)
 
     # ------------------------------------------------------------------
-    def show_overlay(self, message: str = "") -> None:
+    def show_overlay(self, message: str = "", *, cancelable: bool = False) -> None:
         self._label.setText(message)
+        self._cancel_btn.setVisible(bool(cancelable))
         self._cover_parent()
         self.raise_()
         self.show()
@@ -150,6 +168,7 @@ class LoadingOverlay(QWidget):
         self.hide()
         self._sparkline.hide()
         self._sparkline.clear()
+        self._cancel_btn.hide()
 
     def push_sparkline(self, value: float) -> None:
         """학습 진행 중 매 에폭마다 loss 값을 추가 (#16)."""

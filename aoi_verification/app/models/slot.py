@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
@@ -53,12 +54,24 @@ class ScanResult:
 # Scanning
 # ---------------------------------------------------------------------------
 def _list_images(folder: Path) -> list[Path]:
+    """폴더 내 이미지 파일 목록.
+
+    ``os.scandir`` 의 캐시된 ``DirEntry.is_file()`` 를 써서 파일당 별도
+    ``stat()`` 시스템콜을 피한다 — 폴더에 수만 장이 있어도 빠르게 열거 (#3).
+    """
     if not folder.exists() or not folder.is_dir():
         return []
     out: list[Path] = []
-    for p in folder.iterdir():
-        if p.is_file() and config.CONFIG.is_image(p.name):
-            out.append(p)
+    try:
+        with os.scandir(folder) as it:
+            for entry in it:
+                try:
+                    if entry.is_file() and config.CONFIG.is_image(entry.name):
+                        out.append(Path(entry.path))
+                except OSError:
+                    continue
+    except OSError:
+        return []
     out.sort(key=lambda p: p.name.lower())
     return out
 
@@ -68,9 +81,16 @@ def _enum_slot_dirs(root: Path) -> dict[str, Path]:
     if not root.exists():
         return {}
     out: dict[str, Path] = {}
-    for child in root.iterdir():
-        if child.is_dir():
-            out[child.name] = child
+    try:
+        with os.scandir(root) as it:
+            for entry in it:
+                try:
+                    if entry.is_dir():
+                        out[entry.name] = Path(entry.path)
+                except OSError:
+                    continue
+    except OSError:
+        return {}
     return out
 
 

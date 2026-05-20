@@ -132,10 +132,39 @@ def _compile_backbone():  # pragma: no cover — 환경 의존
                 ov_model, cand,
                 config={"PERFORMANCE_HINT": "THROUGHPUT"},
             )
+            # 실제로 어떤 디바이스에 컴파일됐는지 로그로 검증 — Intel iGPU 가
+            # 진짜 쓰이는지 확인 (CPU 로 조용히 폴백되는 상황 탐지용).
+            _log_compiled_device(core, cand)
             return (compiled, cand)
         except Exception:
             continue
     return None
+
+
+# 마지막으로 컴파일에 성공한 OpenVINO 디바이스 ("GPU"/"NPU"/"CPU") — UI 표시용.
+_last_compiled_target: Optional[str] = None
+_last_compiled_name: str = ""
+
+
+def _log_compiled_device(core, cand: str) -> None:  # pragma: no cover - 환경 의존
+    """컴파일된 실제 디바이스의 풀 네임을 로그로 남긴다 (iGPU 실사용 검증)."""
+    global _last_compiled_target, _last_compiled_name
+    import logging
+    name = ""
+    try:
+        name = str(core.get_property(cand, "FULL_DEVICE_NAME"))
+    except Exception:
+        name = cand
+    _last_compiled_target = cand
+    _last_compiled_name = name
+    logging.getLogger("aoi.openvino").info(
+        "OpenVINO backbone compiled on %s (%s)", cand, name,
+    )
+
+
+def last_compiled_device() -> tuple:  # pragma: no cover - 환경 의존
+    """(target, full_name) — 컴파일이 실제로 어디서 됐는지 (UI/디버그용)."""
+    return (_last_compiled_target, _last_compiled_name)
 
 
 def _optimal_streams(compiled) -> int:  # pragma: no cover — 환경 의존
@@ -158,11 +187,12 @@ def invalidate_caches() -> None:
 # ---------------------------------------------------------------------------
 # 입력 텐서 만들기 (PyTorch 와 동일 전처리 — 결과 호환 보장)
 # ---------------------------------------------------------------------------
-def _make_input_array(path: Path) -> Optional[np.ndarray]:  # pragma: no cover
-    """``(3, _INPUT_PX, _INPUT_PX)`` float32 NumPy 배열."""
+def _make_input_array(path: Path, cfg=None) -> Optional[np.ndarray]:  # pragma: no cover
+    """``(3, _INPUT_PX, _INPUT_PX)`` float32 NumPy 배열.  ``cfg`` 가 주어지면
+    강화/KLA 전처리 적용 (PyTorch 경로와 동일하게)."""
     from ..utils import image_io
     try:
-        gray = image_io.preprocessed_roi_gray(path, long_edge=_INPUT_PX)
+        gray = image_io.preprocessed_roi_gray(path, long_edge=_INPUT_PX, cfg=cfg)
     except Exception:
         return None
     h, w = gray.shape
@@ -184,7 +214,8 @@ def _make_input_array(path: Path) -> Optional[np.ndarray]:  # pragma: no cover
 def compute_embeddings(paths: Iterable[Path],
                        *,
                        batch_size: int = 1,        # NPU 호환을 위해 사실상 1
-                       head=None
+                       head=None,
+                       cfg=None
                        ) -> Dict[Path, np.ndarray]:  # pragma: no cover
     """OpenVINO 백본 + (선택) PyTorch head 로 임베딩을 ``AsyncInferQueue``
     로 병렬 계산 — NPU/GPU 활용도 최대화.
@@ -211,7 +242,7 @@ def compute_embeddings(paths: Iterable[Path],
     # 입력 텐서 사전 생성 — async 시작 시점에 즉시 큐잉.
     inputs: list[tuple[Path, np.ndarray]] = []
     for p in items:
-        arr = _make_input_array(p)
+        arr = _make_input_array(p, cfg)
         if arr is not None:
             inputs.append((p, arr[np.newaxis]))   # (1, 3, H, W)
     if not inputs:

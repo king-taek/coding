@@ -31,6 +31,18 @@ class AutomationLevel:
         return level in cls.AUTO_MODES
 
 
+# 유사도 엔진 모드 — 기본(현행) vs 고속(임베딩+ANN).  raw string 대신 사용.
+class EngineMode:
+    BASIC = "basic"        # 기존 파이프라인, 변경 없음 (기본값)
+    FAST = "fast"          # 임베딩 + hnswlib ANN, 상위 K 재정렬
+
+    ALL = frozenset({BASIC, FAST})
+
+    @classmethod
+    def is_fast(cls, mode: str) -> bool:
+        return mode == cls.FAST
+
+
 @dataclass
 class UiPrefs:
     """다음 실행에도 이어갈 UI 상태."""
@@ -65,6 +77,14 @@ class UiPrefs:
     # OpenVINO (Intel GPU/NPU 가속) 자동 설치 안내를 거절한 경우 — 다시 묻지
     # 않음.  사용자가 ‘다시 보지 않기’ 를 선택했거나 설치 시도 후 실패하면 True.
     openvino_install_declined: bool = False
+    # 유사도 엔진 모드 + 강화 전처리 토글 (계산 전용, 화면 표시는 원본 유지).
+    engine_mode: str = "basic"               # EngineMode.{BASIC,FAST}
+    pre_grayscale: bool = False              # 강화: 흑백 + 고감도
+    pre_contrast: bool = False               # 강화: 고대비
+    pre_bg_removal: bool = False             # 강화: 배경 제거(누끼)
+    kla_crop: bool = False                   # KLA 상/하단 정보영역 crop
+    kla_crop_top: float = 0.08               # 상단 잘라낼 비율 (0~0.4)
+    kla_crop_bottom: float = 0.08            # 하단 잘라낼 비율 (0~0.4)
     extra: dict[str, Any] = field(default_factory=dict)
 
     # ------------------------------------------------------------------

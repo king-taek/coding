@@ -109,7 +109,7 @@ def test_compute_embeddings_routes_through_openvino(monkeypatch, tmp_path):
     monkeypatch.setattr(embedder_openvino, "is_available", lambda: True)
     monkeypatch.setattr(
         embedder_openvino, "compute_embeddings",
-        lambda paths, *, batch_size=1, head=None: dict(sentinel),
+        lambda paths, *, batch_size=1, head=None, cfg=None: dict(sentinel),
     )
     # PyTorch 폴백이 호출되지 않아야 함 — 호출되면 sentinel 과 다른 값을 섞을 것.
     def _unexpected_pytorch(*_a, **_kw):
@@ -138,11 +138,11 @@ def test_partial_openvino_result_falls_through_to_pytorch(monkeypatch, tmp_path)
     monkeypatch.setattr(embedder_openvino, "is_available", lambda: True)
     monkeypatch.setattr(
         embedder_openvino, "compute_embeddings",
-        lambda paths, *, batch_size=1, head=None: dict(ov_part),
+        lambda paths, *, batch_size=1, head=None, cfg=None: dict(ov_part),
     )
     # PyTorch fallback 은 누락된 path 만 받아야 한다.
     received_paths = []
-    def _fake_pt(paths, *, batch_size, mode):
+    def _fake_pt(paths, *, batch_size, mode, cfg=None):
         received_paths.extend(paths)
         return dict(pt_part)
     monkeypatch.setattr(embedder, "_compute_embeddings_pytorch", _fake_pt)

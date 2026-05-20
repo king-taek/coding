@@ -114,6 +114,40 @@ MEMORY_PRESSURE_BYTES = PIXMAP_CACHE_MAX_BYTES + 1024 * 1024 * 1024
 
 
 # ---------------------------------------------------------------------------
+# Similarity engine/preprocess config — 모든 유사도 경로에 단일 객체로 전달.
+# engine=basic + 모든 토글 OFF = 현행과 byte 단위 동일 (기본 모드 불변).
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class SimilarityConfig:
+    engine: str = "basic"          # "basic" | "fast"
+    grayscale: bool = False        # 강화: 흑백 + 고감도
+    contrast: bool = False         # 강화: 고대비
+    bg_removal: bool = False       # 강화: 배경 제거(누끼)
+    kla_crop: bool = False         # KLA 상/하단 정보영역 crop
+    kla_top: float = 0.08          # 상단 잘라낼 비율
+    kla_bottom: float = 0.08       # 하단 잘라낼 비율
+    top_k: int = 50                # ANN 재정렬 깊이 (고속 모드)
+
+    @property
+    def has_preprocess(self) -> bool:
+        """전처리가 하나라도 켜져 있으면 True — 캐시 키 분기/적용 판단용."""
+        return bool(self.grayscale or self.contrast
+                    or self.bg_removal or self.kla_crop)
+
+    def cache_extra(self) -> str:
+        """캐시 키 판별자.  전처리 OFF 면 빈 문자열 → 기본 캐시와 동일 키."""
+        if not self.has_preprocess:
+            return ""
+        return (f"g{int(self.grayscale)}c{int(self.contrast)}"
+                f"b{int(self.bg_removal)}"
+                f"k{int(self.kla_crop)}-{self.kla_top:.2f}-{self.kla_bottom:.2f}")
+
+
+# 기본 cfg 싱글턴 — engine=basic, 전처리 전부 OFF (현행 동작).
+DEFAULT_SIM_CONFIG = SimilarityConfig()
+
+
+# ---------------------------------------------------------------------------
 # Similarity pipeline weights — tunable from a YAML/JSON config later.
 # ---------------------------------------------------------------------------
 @dataclass

@@ -295,78 +295,23 @@ class ResultPage(QWidget):
         from ...learning.dataset import TrainingDataStore
         try:
             store = TrainingDataStore()
-            added = store.append_session(
+            store.append_session(
                 self._result.matches,
                 ref_machine=self._result.ref_machine,
                 val_machine=self._result.val_machine,
             )
         except Exception as exc:
-            QMessageBox.warning(
-                self, i18n.KO.APP_TITLE,
-                i18n.KO.CONSENT_FAIL_FMT.format(error=str(exc)),
+            # 성공 여부는 사용자에게 직접 노출하지 않고, 실패만 로그로 남긴다 (#4).
+            try:
+                from ...utils.error_log import log_error
+                log_error("training_consent_append_session", str(exc))
+            except Exception:
+                pass
+            QMessageBox.information(
+                self, i18n.KO.APP_TITLE, i18n.KO.ERROR_LOGGED,
             )
             return
-        QMessageBox.information(
-            self, i18n.KO.APP_TITLE,
-            i18n.KO.CONSENT_OK_FMT.format(n=added),
-        )
-        # 데이터 누적이 끝났으면 곧장 자동 재학습 트리거 (#5).
-        # torch 가 없거나 학습 가능 페어가 부족하면 조용히 스킵.
-        self._maybe_auto_retrain()
-
-    def _maybe_auto_retrain(self) -> None:
-        """학습 데이터 동의 후 모델 재학습을 자동으로 시작.
-
-        사용자가 SetupPage 의 [모델 재학습 시작] 버튼을 직접 누르지 않아도
-        검증을 끝낼 때마다 모델이 새 데이터를 흡수한다.  학습 모델은
-        ‘성능 보장’ 로직(trainer 내부) 으로 기본 모드보다 떨어질 때 active
-        승급을 막아 안전.
-        """
-        try:
-            from ...learning import registry, triplet_model
-            from ...learning.dataset import TrainingDataStore
-            from ...learning.trainer import TrainHeadWorker
-        except Exception:
-            return
-        if not triplet_model.is_available():
-            return
-        try:
-            store = TrainingDataStore()
-            pairs = store.load_all()
-        except Exception:
-            return
-        # 학습이 의미 있을 만큼의 페어가 모인 경우에만 시작.
-        if len(pairs) < TrainHeadWorker.MIN_PAIRS:
-            return
-        QMessageBox.information(
-            self, i18n.KO.APP_TITLE,
-            i18n.KO.AUTO_RETRAIN_STARTED_FMT.format(n=len(pairs)),
-        )
-        # 백그라운드 학습 — UI 는 그대로 ResultPage 에 머문다.
-        worker = TrainHeadWorker(store, parent=self)
-        # 부모가 ResultPage 라 가비지 컬렉트되지 않고 안전하게 동작.
-        self._auto_retrain_worker = worker
-        worker.signals.finished.connect(self._on_auto_retrain_done)
-        worker.signals.failed.connect(
-            lambda msg: QMessageBox.warning(
-                self, i18n.KO.APP_TITLE,
-                i18n.KO.TRAIN_FAIL_FMT.format(error=msg),
-            )
-        )
-        worker.start()
-
-    def _on_auto_retrain_done(self, result) -> None:
-        # trainer 가 active 변경 여부를 result.activated 로 알려줌.
-        try:
-            name = getattr(result, "name", "") or str(result)
-            activated = bool(getattr(result, "activated", True))
-            if activated:
-                msg = i18n.KO.AUTO_RETRAIN_DONE_FMT.format(name=name)
-            else:
-                msg = i18n.KO.AUTO_RETRAIN_KEPT_BASIC_FMT.format(name=name)
-            QMessageBox.information(self, i18n.KO.APP_TITLE, msg)
-        except Exception:
-            pass
+        # 성공 팝업 / 자동 재학습 트리거는 제거 (#4) — 조용히 누적만 한다.
 
     def _on_export_failed(self, msg: str) -> None:
         self._loading.hide_overlay()

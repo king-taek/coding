@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (QComboBox, QDialog, QHBoxLayout, QLabel,
 
 from ... import i18n
 from .neon_button import NeonButton
+from .window_controls import add_fullscreen_shortcut, enable_window_controls
 
 
 @dataclass
@@ -41,6 +42,9 @@ class SlotMappingDialog(QDialog):
         self._ref_only = sorted(set(ref_only))
         self._val_only = sorted(set(val_only))
         self._pairs: list[tuple[str, str]] = []
+        # 창에 최소화/최대화 버튼 + F11 전체화면 토글 (#9). 첫 show 이전에 설정.
+        enable_window_controls(self)
+        add_fullscreen_shortcut(self)
         self._build()
 
     @property

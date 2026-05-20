@@ -71,9 +71,15 @@ class Feature:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
-def extract(src: Path, *, use_cnn: Optional[bool] = None) -> Feature:
-    """디스크 캐시를 거쳐 한 이미지의 Feature 를 반환."""
-    cache_file = cache.cache_path(src, "feature")
+def extract(src: Path, *, use_cnn: Optional[bool] = None, cfg=None) -> Feature:
+    """디스크 캐시를 거쳐 한 이미지의 Feature 를 반환.
+
+    ``cfg`` (SimilarityConfig) 전처리 토글이 켜져 있으면 강화/KLA 변환을
+    계산 전용으로 적용하고, 캐시 키에 ``cfg.cache_extra()`` 를 섞어 기본 특징과
+    분리 저장한다.  cfg=None / 토글 OFF → 현행과 동일 (extra="").
+    """
+    extra = cfg.cache_extra() if cfg is not None else ""
+    cache_file = cache.cache_path(src, "feature", extra=extra)
     path = Path(src)
     if cache_file.exists() and cache_file.stat().st_size > 0:
         try:
@@ -85,7 +91,7 @@ def extract(src: Path, *, use_cnn: Optional[bool] = None) -> Feature:
             except OSError:
                 pass
 
-    roi_gray = image_io.center_roi_gray(path)
+    roi_gray = image_io.center_roi_gray(path, cfg=cfg)
     # CLAHE + 가벼운 블러 (cv2 사용)
     roi_gray = _preprocess(roi_gray)
 

@@ -22,6 +22,7 @@ from ...models.slot import ImageItem
 from ...similarity.grouping import DefectGroup
 from ...utils import image_io
 from .neon_button import NeonButton
+from .window_controls import add_fullscreen_shortcut, enable_window_controls
 
 
 _TILE_PX = 130          # 그룹 내 사진 한 장의 표시 크기
@@ -187,6 +188,9 @@ class DefectGroupDialog(QDialog):
                         min(820, int(g.height() * 0.88)))
         else:
             self.resize(1280, 820)
+        # 창에 최소화/최대화 버튼 + F11 전체화면 토글 (#9). 첫 show 이전에 설정.
+        enable_window_controls(self)
+        add_fullscreen_shortcut(self)
         self._build()
 
     # ------------------------------------------------------------------

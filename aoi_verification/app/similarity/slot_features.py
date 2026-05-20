@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import threading
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
@@ -91,11 +92,12 @@ class SlotFeatureCache:
                     del self._slots[k]
 
     # ------------------------------------------------------------------
-    def build(self, slot: str, items: Iterable[ImageItem]) -> Dict[Path, Feature]:
+    def build(self, slot: str, items: Iterable[ImageItem],
+              *, cfg=None) -> Dict[Path, Feature]:
         """슬롯의 ``Feature`` 들을 추출(또는 캐시 로드) 해서 dict 로 반환·저장.
 
         이미 빌드된 슬롯은 그대로 반환한다 (idempotent). 항목이 추가됐다면
-        새 path 만 추가 추출한다.
+        새 path 만 추가 추출한다.  ``cfg`` 는 강화/KLA 전처리를 extract 에 전달.
         """
         items_list = list(items)
         existing: Dict[Path, Feature] = {}
@@ -106,7 +108,7 @@ class SlotFeatureCache:
         to_build = [it.path for it in items_list if it.path not in existing]
         for p in to_build:
             try:
-                feat = _pipeline.extract(p)
+                feat = _pipeline.extract(p, cfg=cfg)
                 existing[p] = feat
             except Exception:
                 # 단일 이미지 실패는 무시 — 호출자가 빈 dict 로 처리.
@@ -152,17 +154,48 @@ class SlotScoreCache:
     """Stage 2 에서 모든 reference 와 모든 검증 후보 사이의 유사도 점수를
     미리 계산해 보관. 매 reference 마다 점수를 다시 매길 필요 없음.
 
-    메모리 비용: float 한 개 ≈ 32 bytes. 슬롯당 (refs × vals) entries 라서
-    1000 쌍 ≈ 32 KB — 사실상 무시 가능.
+    메모리 비용: 한 항목 ≈ 수십~수백 bytes(tuple+Path 참조).  대용량(슬롯
+    수백 개 × 수백만 쌍)에서 무제한 증가하면 GB 단위가 되므로 **슬롯 LRU
+    상한**(``max_pairs``)을 둔다.  상한 초과 시 가장 오래 접근하지 않은
+    슬롯부터 제거 — 제거된 슬롯이 다시 필요해지면 matcher 폴백이 재계산
+    하므로 정확도는 유지되고 메모리만 절약된다 (#17).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, max_pairs: int = 3_000_000) -> None:
         self._lock = threading.Lock()
-        self._scores: Dict[str, Dict[Tuple[Path, Path], float]] = {}
+        self._scores: "OrderedDict[str, Dict[Tuple[Path, Path], float]]" = OrderedDict()
+        self._max_pairs = int(max_pairs)
+        self._total = 0
+
+    def _evict_locked(self, protect: str) -> None:
+        """상한 초과 시 LRU 슬롯 제거 (``protect`` 슬롯은 보존)."""
+        while self._total > self._max_pairs and len(self._scores) > 1:
+            # OrderedDict 앞쪽 = 가장 오래 접근한 슬롯.
+            victim = next(iter(self._scores))
+            if victim == protect:
+                # 보호 슬롯이 앞에 있으면 뒤로 미루고 다음 후보 평가.
+                self._scores.move_to_end(victim)
+                victim2 = next(iter(self._scores))
+                if victim2 == protect:
+                    break
+                victim = victim2
+            d = self._scores.pop(victim, None)
+            if d:
+                self._total -= len(d)
 
     def put(self, slot: str, ref_path: Path, val_path: Path, score: float) -> None:
         with self._lock:
-            self._scores.setdefault(slot, {})[(ref_path, val_path)] = float(score)
+            d = self._scores.get(slot)
+            if d is None:
+                d = {}
+                self._scores[slot] = d
+            self._scores.move_to_end(slot)
+            key = (ref_path, val_path)
+            if key not in d:
+                self._total += 1
+            d[key] = float(score)
+            if self._total > self._max_pairs:
+                self._evict_locked(protect=slot)
 
     def has_pair(self, slot: str, ref_path: Path, val_path: Path) -> bool:
         with self._lock:
@@ -171,7 +204,11 @@ class SlotScoreCache:
 
     def get_pair(self, slot: str, ref_path: Path, val_path: Path) -> Optional[float]:
         with self._lock:
-            return self._scores.get(slot, {}).get((ref_path, val_path))
+            d = self._scores.get(slot)
+            if d is None:
+                return None
+            self._scores.move_to_end(slot)        # LRU 갱신
+            return d.get((ref_path, val_path))
 
     def has_all_pairs(self,
                       slot: str,
@@ -185,6 +222,7 @@ class SlotScoreCache:
             for v in val_paths:
                 if (ref_path, v) not in slot_scores:
                     return False
+            self._scores.move_to_end(slot)        # LRU 갱신
             return True
 
     def has_slot(self, slot: str) -> bool:
@@ -193,15 +231,18 @@ class SlotScoreCache:
 
     def clear_slot(self, slot: str) -> None:
         with self._lock:
-            self._scores.pop(slot, None)
+            d = self._scores.pop(slot, None)
+            if d:
+                self._total -= len(d)
 
     def clear(self) -> None:
         with self._lock:
             self._scores.clear()
+            self._total = 0
 
     def size(self) -> int:
         with self._lock:
-            return sum(len(d) for d in self._scores.values())
+            return self._total
 
 
 # ---------------------------------------------------------------------------
@@ -229,6 +270,7 @@ class SlotPrecomputeWorker(QThread):
                  score_cache: SlotScoreCache,
                  *,
                  release_after_slot: bool = False,
+                 cfg=None,
                  parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
         # (slot 이름, ref ImageItem 리스트, val ImageItem 리스트)
@@ -238,6 +280,7 @@ class SlotPrecomputeWorker(QThread):
         self._slot_cache = slot_cache
         self._score_cache = score_cache
         self._release_after_slot = bool(release_after_slot)
+        self._cfg = cfg                 # 강화/KLA 전처리 설정 (extract 에 전달)
         self._stop = False
         self.signals = _PrecomputeSignals()
 
@@ -261,14 +304,14 @@ class SlotPrecomputeWorker(QThread):
                     )
                     continue
                 # 1) val features 빌드 (디스크 캐시 있으면 빠름)
-                val_feats = self._slot_cache.build(slot, vals)
+                val_feats = self._slot_cache.build(slot, vals, cfg=self._cfg)
                 # 2) ref features (sim.extract 가 디스크 캐시 자동 사용)
                 ref_feats: Dict[Path, Feature] = {}
                 for r in refs:
                     if self._stop:
                         return
                     try:
-                        ref_feats[r.path] = _pipeline.extract(r.path)
+                        ref_feats[r.path] = _pipeline.extract(r.path, cfg=self._cfg)
                     except Exception:
                         pass
 

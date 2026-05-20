@@ -20,6 +20,7 @@ from ... import i18n
 from ...models.slot import ImageItem
 from ...utils import image_io
 from .neon_button import NeonButton
+from .window_controls import add_fullscreen_shortcut, enable_window_controls
 
 # source 종류 ----------------------------------------------------------------
 SOURCE_TARGET = "target"        # 검증 대상 (Right)
@@ -236,6 +237,10 @@ class ZoomWindow(QDialog):
         }[source]
         self.setWindowTitle(title_fmt.format(slot=slot_name))
         self._resize_within_screen(1280, 800)
+
+        # 창에 최소화/최대화 버튼 + F11 전체화면 토글 (#9). 첫 show 이전에 설정.
+        enable_window_controls(self)
+        add_fullscreen_shortcut(self)
 
         self._build()
 

@@ -157,10 +157,15 @@ def load_bytes(path: Path) -> bytes:
 # ---------------------------------------------------------------------------
 def center_roi_gray(src: Path,
                     roi_ratio: Optional[float] = None,
-                    long_edge: Optional[int] = None) -> np.ndarray:
+                    long_edge: Optional[int] = None,
+                    cfg=None) -> np.ndarray:
     """중심 ROI 를 잘라낸 후 그레이스케일 NumPy 배열로 돌려준다.
 
     유사도 파이프라인(pHash·SSIM·ORB) 모두가 공유하는 1차 전처리.
+
+    ``cfg`` (SimilarityConfig) 가 주어지고 전처리 토글이 켜져 있으면 강화/KLA
+    변환을 **계산 전용**으로 적용 — 화면 표시 이미지는 영향 없음.  cfg=None
+    또는 모든 토글 OFF 면 현행과 동일 동작 (기본 모드 불변).
     """
     if roi_ratio is None:
         roi_ratio = config.Sizing.ROI_RATIO
@@ -169,6 +174,10 @@ def center_roi_gray(src: Path,
 
     img = _open(src)
     img = _to_rgb(img)
+    # RGB 단계 전처리 (KLA crop → 배경 제거) — 중심 ROI 이전.
+    if cfg is not None and getattr(cfg, "has_preprocess", False):
+        from ..similarity import preprocess
+        img = preprocess.apply_rgb_chain(img, cfg)
     w, h = img.size
     rw = int(round(w * roi_ratio))
     rh = int(round(h * roi_ratio))
@@ -176,19 +185,25 @@ def center_roi_gray(src: Path,
     y0 = (h - rh) // 2
     img = img.crop((x0, y0, x0 + rw, y0 + rh))
     img = _fit_long_edge(img, long_edge)
-    gray = img.convert("L")
-    return np.asarray(gray, dtype=np.uint8)
+    gray = np.asarray(img.convert("L"), dtype=np.uint8)
+    # Gray 단계 전처리 (흑백+고감도 → 고대비).
+    if cfg is not None and (getattr(cfg, "grayscale", False)
+                            or getattr(cfg, "contrast", False)):
+        from ..similarity import preprocess
+        gray = preprocess.apply_gray_chain(gray, cfg)
+    return gray
 
 
 def preprocessed_roi_gray(src: Path,
                           roi_ratio: Optional[float] = None,
-                          long_edge: Optional[int] = None) -> np.ndarray:
+                          long_edge: Optional[int] = None,
+                          cfg=None) -> np.ndarray:
     """CLAHE + Gaussian blur 까지 적용된 중심 ROI gray (CNN/유사도 공유).
 
     pHash·SSIM·ORB·CNN 모두가 같은 도메인 전처리 위에 동작하도록 일원화하기
     위해 만들어진 헬퍼. CV2 가 있으면 CLAHE 를 적용하고, 없으면 단순 ROI gray.
     """
-    gray = center_roi_gray(src, roi_ratio=roi_ratio, long_edge=long_edge)
+    gray = center_roi_gray(src, roi_ratio=roi_ratio, long_edge=long_edge, cfg=cfg)
     try:
         import cv2
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))

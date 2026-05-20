@@ -25,6 +25,13 @@ from ..widgets.neon_button import NeonButton
 from ..widgets.neon_card import NeonCard
 
 
+class _NoWheelSlider(QSlider):
+    """마우스 휠로 값이 바뀌지 않는 슬라이더 (#2).  드래그/클릭/키보드는 정상."""
+
+    def wheelEvent(self, event):  # noqa: N802
+        event.ignore()
+
+
 @dataclass
 class SetupInput:
     mode: str        # "single" | "cross"
@@ -34,6 +41,12 @@ class SetupInput:
     val_machine: str
     threshold: float
     automation_level: str = AutomationLevel.MANUAL
+    # 유사도 엔진 + 강화/KLA 전처리 (계산 전용).
+    engine_mode: str = "basic"       # EngineMode.{BASIC,FAST}
+    pre_grayscale: bool = False
+    pre_contrast: bool = False
+    pre_bg_removal: bool = False
+    kla_crop: bool = False
 
 
 class SetupPage(QWidget):
@@ -167,6 +180,13 @@ class SetupPage(QWidget):
         self._model_card.body().addLayout(bar)
         root.addWidget(self._model_card)
 
+        # #4 학습 모델 기능 숨김 — 모델 선택/버튼은 감추고 누적 데이터 개수만
+        # 표시한다.  위젯은 살려두어 _refresh_model_card 가 안전하게 동작.
+        self._model_scroll.hide()
+        for _b in (self.btn_retrain, self.btn_refresh_acc, self.btn_delete_model,
+                   self.btn_export_model, self.btn_import_model):
+            _b.hide()
+
         # 학습 워커 / 로딩 상태
         self._loading = LoadingOverlay(self)
         self._train_worker: TrainHeadWorker | None = None
@@ -224,11 +244,50 @@ class SetupPage(QWidget):
         row.addWidget(self.val_group)
         root.addLayout(row)
 
+        # 유사도 엔진 모드 + 강화 전처리 (#1/#10) -----------------------
+        engine_card = NeonCard(role="card-soft", parent=self)
+        engine_card.setToolTip(i18n.KO.ENGINE_MODE_TOOLTIP)
+        eng_title = QLabel(i18n.KO.ENGINE_CARD_TITLE, engine_card)
+        eng_title.setStyleSheet(
+            "color: #00D4FF; font-weight: 700; letter-spacing: 1px;"
+        )
+        engine_card.body().addWidget(eng_title)
+        self.radio_engine_basic = QRadioButton(i18n.KO.ENGINE_MODE_BASIC, engine_card)
+        self.radio_engine_fast = QRadioButton(i18n.KO.ENGINE_MODE_FAST, engine_card)
+        _last_engine = getattr(_prefs_now, "engine_mode", "basic")
+        if _last_engine == "fast":
+            self.radio_engine_fast.setChecked(True)
+        else:
+            self.radio_engine_basic.setChecked(True)
+        self._engine_group = QButtonGroup(engine_card)
+        self._engine_group.setExclusive(True)
+        self._engine_group.addButton(self.radio_engine_basic)
+        self._engine_group.addButton(self.radio_engine_fast)
+        engine_card.body().addWidget(self.radio_engine_basic)
+        engine_card.body().addWidget(self.radio_engine_fast)
+
+        pre_title = QLabel(i18n.KO.PRE_GROUP_TITLE, engine_card)
+        pre_title.setToolTip(i18n.KO.PRE_GROUP_TOOLTIP)
+        pre_title.setStyleSheet("color: #7FB3D5; padding-top: 6px;")
+        engine_card.body().addWidget(pre_title)
+        self.check_pre_grayscale = QCheckBox(i18n.KO.PRE_GRAYSCALE_LABEL, engine_card)
+        self.check_pre_contrast = QCheckBox(i18n.KO.PRE_CONTRAST_LABEL, engine_card)
+        self.check_pre_bg = QCheckBox(i18n.KO.PRE_BG_REMOVAL_LABEL, engine_card)
+        self.check_kla_crop = QCheckBox(i18n.KO.KLA_CROP_LABEL, engine_card)
+        self.check_pre_grayscale.setChecked(bool(getattr(_prefs_now, "pre_grayscale", False)))
+        self.check_pre_contrast.setChecked(bool(getattr(_prefs_now, "pre_contrast", False)))
+        self.check_pre_bg.setChecked(bool(getattr(_prefs_now, "pre_bg_removal", False)))
+        self.check_kla_crop.setChecked(bool(getattr(_prefs_now, "kla_crop", False)))
+        for _c in (self.check_pre_grayscale, self.check_pre_contrast,
+                   self.check_pre_bg, self.check_kla_crop):
+            engine_card.body().addWidget(_c)
+        root.addWidget(engine_card)
+
         # 임계치 슬라이더 ------------------------------------------------
         slider_card = NeonCard(role="card-soft", parent=self)
         sl = QHBoxLayout()
         sl.addWidget(QLabel(i18n.KO.SETUP_THRESHOLD_LABEL, slider_card))
-        self.slider = QSlider(Qt.Orientation.Horizontal, slider_card)
+        self.slider = _NoWheelSlider(Qt.Orientation.Horizontal, slider_card)
         self.slider.setRange(0, 100)
         # 마지막 사용 값(#14) 우선, 없으면 config 기본값
         _last_prefs = _prefs.load()
@@ -342,6 +401,11 @@ class SetupPage(QWidget):
             automation = AutomationLevel.USER_SELECT
         else:
             automation = AutomationLevel.MANUAL
+        engine_mode = "fast" if self.radio_engine_fast.isChecked() else "basic"
+        pre_grayscale = bool(self.check_pre_grayscale.isChecked())
+        pre_contrast = bool(self.check_pre_contrast.isChecked())
+        pre_bg = bool(self.check_pre_bg.isChecked())
+        kla_crop = bool(self.check_kla_crop.isChecked())
         # 마지막 입력 값을 영속화 (#14)
         _prefs.patch(
             threshold=threshold,
@@ -351,6 +415,11 @@ class SetupPage(QWidget):
             last_val_machine=val_machine,
             last_mode=mode,
             automation_level=automation,
+            engine_mode=engine_mode,
+            pre_grayscale=pre_grayscale,
+            pre_contrast=pre_contrast,
+            pre_bg_removal=pre_bg,
+            kla_crop=kla_crop,
         )
         self.start_requested.emit(SetupInput(
             mode=mode,
@@ -360,6 +429,11 @@ class SetupPage(QWidget):
             val_machine=val_machine,
             threshold=threshold,
             automation_level=automation,
+            engine_mode=engine_mode,
+            pre_grayscale=pre_grayscale,
+            pre_contrast=pre_contrast,
+            pre_bg_removal=pre_bg,
+            kla_crop=kla_crop,
         ))
 
     # ------------------------------------------------------------------

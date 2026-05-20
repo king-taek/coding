@@ -28,6 +28,8 @@ from ...utils import prefs as _prefs
 from ...similarity.slot_features import (SlotFeatureCache, SlotPrecomputeWorker,
                                             SlotScoreCache)
 from ...workers.matcher import Candidate, MatcherWorker
+from ...workers import fast_matcher as _fast
+from ...utils.prefs import EngineMode
 from ..widgets.loading_overlay import LoadingOverlay
 from ..widgets.match_expand_view import MatchExpandView
 from ..widgets.neon_button import NeonButton
@@ -57,6 +59,7 @@ class MatchPage(QWidget):
     match_confirmed = pyqtSignal(object)        # MatchResult
     skipped_changed = pyqtSignal()              # 외부 자동 저장 트리거
     finished = pyqtSignal()                     # 모든 큐 처리 완료
+    cancelled = pyqtSignal()                    # #8 사용자가 중지 버튼 누름
 
     # 좁은 창에선 중앙/우측 2-pane 을 세로 스택으로 자동 전환 (#2).
     _RESPONSIVE_THRESH_LO = 840
@@ -70,6 +73,7 @@ class MatchPage(QWidget):
         self._mode_direction = "A→B"
         self._build()
         self._loading = LoadingOverlay(self)
+        self._loading.cancel_requested.connect(self._on_cancel_requested)
         self._worker: Optional[MatcherWorker] = None
         self._candidates: list[Candidate] = []
         # 슬롯 단위 검증측 특징 캐시 — 같은 슬롯의 reference 들이 공유.
@@ -88,6 +92,11 @@ class MatchPage(QWidget):
         # 자동 매치 모드 (#3): True 면 사용자 클릭 없이 임계치 이상 최고 점수 후보를
         # 자동으로 매치 / 후보 없으면 ‘매치 없음’ 으로 자동 처리.
         self._auto_mode: bool = False
+        # 유사도 엔진 설정 (기본/고속 + 강화/KLA 토글).  기본값 = 현행 동작.
+        self._engine_cfg = config.DEFAULT_SIM_CONFIG
+        # 고속 모드(임베딩+ANN) 활성 여부 + 슬롯 인덱스 캐시.
+        self._fast_mode: bool = False
+        self._index_cache = _fast.SlotIndexCache()
 
     # ------------------------------------------------------------------
     def _build(self) -> None:
@@ -306,7 +315,8 @@ class MatchPage(QWidget):
                    direction: str = "A→B",
                    session_id: str = "",
                    model_name: str = "basic",
-                   auto_mode: bool = False) -> None:
+                   auto_mode: bool = False,
+                   engine_cfg=None) -> None:
         self._state = Stage2State(
             queue=list(queue),
             matches=list(matches or []),
@@ -318,6 +328,8 @@ class MatchPage(QWidget):
         self._session_id = session_id or ""
         self._model_name = model_name or "basic"
         self._auto_mode = bool(auto_mode)
+        self._engine_cfg = engine_cfg or config.DEFAULT_SIM_CONFIG
+        self._index_cache.clear()
         self.phase_label.setText(phase_label)
         self._refresh_skipped_panel()
         # 모든 (ref, val) 쌍 점수를 미리 계산 → 이후 매칭은 캐시 조회만.
@@ -359,28 +371,43 @@ class MatchPage(QWidget):
         # 않도록 (MatcherWorker 의 동일 패턴 참고).
         self._stop_precompute_worker()
 
-        streaming = not bool(self._auto_mode)
+        # 고속 모드 — 임베딩+ANN.  hnswlib/embedder 가용 시에만, 아니면 기본 폴백.
+        self._fast_mode = (EngineMode.is_fast(self._engine_cfg.engine)
+                           and _fast.is_available())
+        if EngineMode.is_fast(self._engine_cfg.engine) and not self._fast_mode:
+            # 고속 모드 요청했으나 의존성 없음 → 기본 모드로 조용히 폴백(로그만).
+            import logging
+            logging.getLogger("aoi.match").info(i18n.KO.ENGINE_FAST_UNAVAILABLE)
+
+        # 스트리밍(슬롯 단위 점진 처리)은 두 엔진 모두 동일하게 사용.
+        streaming = True
         self._streaming_precompute = streaming
         self._waiting_for_slot = None
 
         if streaming:
             # 첫 슬롯이 끝날 때까지만 차단 오버레이 — 그 다음은 백그라운드.
-            self._loading.show_overlay(i18n.KO.LOAD_PRECOMPUTE_FIRST_SLOT)
+            self._loading.show_overlay(i18n.KO.LOAD_PRECOMPUTE_FIRST_SLOT,
+                                       cancelable=True)
             self.bg_status_label.setText(
                 i18n.KO.PRECOMPUTE_BG_STATUS_FMT.format(idx=0, total=len(tasks))
             )
-        else:
-            self._loading.show_overlay(
-                i18n.KO.LOAD_PRECOMPUTE_FMT.format(done=0, total=total_pairs)
-            )
-            self.bg_status_label.setText("")
 
-        self._precompute_worker = SlotPrecomputeWorker(
-            tasks, slot_cache=self._slot_cache,
-            score_cache=self._score_cache,
-            release_after_slot=streaming,
-            parent=self,
-        )
+        if self._fast_mode:
+            # 임베딩 추출 + 슬롯별 ANN 인덱스 구축 (슬롯 단위 스트리밍).
+            # FastIndexWorker 는 SlotPrecomputeWorker 와 동일한 시그널
+            # (progress/slot_finished/finished/failed) 을 노출하므로 기존
+            # 핸들러/중단 로직을 그대로 재사용한다.
+            self._precompute_worker = _fast.FastIndexWorker(
+                tasks, self._index_cache, cfg=self._engine_cfg, parent=self,
+            )
+        else:
+            self._precompute_worker = SlotPrecomputeWorker(
+                tasks, slot_cache=self._slot_cache,
+                score_cache=self._score_cache,
+                release_after_slot=streaming,
+                cfg=self._engine_cfg,
+                parent=self,
+            )
         self._precompute_worker.signals.progress.connect(
             self._on_precompute_progress
         )
@@ -453,17 +480,11 @@ class MatchPage(QWidget):
             self._advance()
 
     def _on_precompute_finished(self) -> None:
-        # 자동 모드면 곧장 자동 매치 진행 표시로 전환, 수동 모드면 ‘완료’ 라벨로.
-        if self._auto_mode:
-            total = len(self._state.queue) if self._state else 0
-            self._loading.set_progress(
-                0, total,
-                i18n.KO.LOAD_AUTO_MATCH_FMT.format(done=0, total=total),
-            )
-            self._advance()
-            return
-        # 수동/스트리밍 모드: 첫 슬롯 시점에 이미 _advance 가 호출돼 매칭이
-        # 진행 중이므로 여기서 추가 _advance 는 불필요. 상태 라벨만 정리.
+        # 자동/수동 모두 스트리밍 단일 패스 — 첫 슬롯 완료(_on_precompute_slot_
+        # finished, idx==1) 시점에 이미 _advance 가 호출돼 매칭이 진행 중이다.
+        # 따라서 여기서 추가 _advance 는 하지 않는다 (#15 중복 계산/이중 진행
+        # 방지).  매칭이 아직 도달하지 못한 슬롯은 slot_finished 또는 아래
+        # 대기-해제 경로로 자연히 이어진다.
         self.bg_status_label.setText(i18n.KO.PRECOMPUTE_BG_DONE)
         self._streaming_precompute = False
         # 방어적 정리 — slot_finished 가 어떤 이유로 누락된 채 finished 가 먼저
@@ -476,6 +497,24 @@ class MatchPage(QWidget):
 
     def get_state(self) -> Stage2State | None:
         return self._state
+
+    # ------------------------------------------------------------------
+    def _on_cancel_requested(self) -> None:
+        """#8 중지 — 진행 중인 사전계산/매칭 워커를 안전하게 멈추고 세션 중단."""
+        self._stop_precompute_worker()
+        if self._worker is not None:
+            try:
+                self._worker.signals.progress.disconnect()
+                self._worker.signals.done.disconnect()
+                self._worker.signals.failed.disconnect()
+            except (TypeError, RuntimeError):
+                pass
+            if self._worker.isRunning():
+                self._worker.stop()
+                self._worker.wait(500)
+        self._index_cache.clear()
+        self._loading.hide_overlay()
+        self.cancelled.emit()
 
     # ------------------------------------------------------------------
     def _stop_precompute_worker(self) -> None:
@@ -559,7 +598,8 @@ class MatchPage(QWidget):
         if slot_pending:
             self._waiting_for_slot = slot
             self._loading.show_overlay(
-                i18n.KO.LOAD_PRECOMPUTE_WAIT_FMT.format(slot=slot)
+                i18n.KO.LOAD_PRECOMPUTE_WAIT_FMT.format(slot=slot),
+                cancelable=True,
             )
             return
 
@@ -581,6 +621,32 @@ class MatchPage(QWidget):
             if self._worker.isRunning():
                 self._worker.stop()
                 self._worker.wait(500)
+
+        # 고속 모드 — 슬롯 인덱스가 준비됐으면 임베딩 top-K + 정밀 재정렬.
+        # 인덱스가 없으면(임베딩 실패 등) 아래 기본 경로로 자연 폴백.
+        if self._fast_mode:
+            entry = self._index_cache.get(ref.slot)
+            if entry is not None:
+                self._slot_cache.set_active(ref.slot)
+                self._loading.show_overlay(
+                    i18n.KO.LOAD_SCORING_FMT.format(done=0, total=self._engine_cfg.top_k),
+                    cancelable=True,
+                )
+                self._current_loading_fmt = i18n.KO.LOAD_SCORING_FMT
+                self._worker = _fast.FastMatchWorker(
+                    ref, entry, val_items,
+                    threshold=self._threshold,
+                    top_k=self._engine_cfg.top_k,
+                    cfg=self._engine_cfg,
+                    slot_cache=self._slot_cache,
+                )
+                self._worker.signals.progress.connect(self._on_matcher_progress)
+                self._worker.signals.done.connect(self._on_matcher_done)
+                self._worker.signals.failed.connect(
+                    lambda msg: self._loading.set_progress(0, 0, msg)
+                )
+                self._worker.start()
+                return
 
         # 점수 사전 계산이 끝나 있으면 캐시 조회만으로 즉시 응답.
         val_paths = [v.path for v in val_items]
@@ -608,7 +674,8 @@ class MatchPage(QWidget):
             else i18n.KO.LOAD_FEATURE_FMT
         )
         self._loading.show_overlay(
-            loading_fmt.format(done=0, total=len(val_items))
+            loading_fmt.format(done=0, total=len(val_items)),
+            cancelable=True,
         )
         self._current_loading_fmt = loading_fmt
 
@@ -616,6 +683,7 @@ class MatchPage(QWidget):
             ref, val_items, threshold=self._threshold,
             val_features=val_features,
             slot_cache=self._slot_cache,
+            cfg=self._engine_cfg,
         )
         self._worker.signals.progress.connect(self._on_matcher_progress)
         self._worker.signals.done.connect(self._on_matcher_done)

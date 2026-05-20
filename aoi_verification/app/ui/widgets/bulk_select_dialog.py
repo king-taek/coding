@@ -16,6 +16,7 @@ from ... import i18n
 from ...models.slot import ImageItem
 from ...utils import image_io
 from .neon_button import NeonButton
+from .window_controls import add_fullscreen_shortcut, enable_window_controls
 
 
 _TILE_PX = 180          # 시원하게 보이는 다중 선택 그리드 썸네일 (원본 비율 유지)
@@ -122,6 +123,9 @@ class BulkSelectDialog(QDialog):
             want_w = min(want_w, int(g.width() * 0.92))
             want_h = min(want_h, int(g.height() * 0.88))
         self.resize(want_w, want_h)
+        # 창에 최소화/최대화 버튼 + F11 전체화면 토글 (#9). 첫 show 이전에 설정.
+        enable_window_controls(self)
+        add_fullscreen_shortcut(self)
         self._tiles_by_key: dict[str, _SelectTile] = {}
         self._selected_keys: set[str] = set()
         self._selected_items_by_key: dict[str, ImageItem] = {}

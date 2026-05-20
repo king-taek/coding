@@ -45,6 +45,7 @@ class MatcherWorker(QThread):
                  *,
                  val_features: Optional[Mapping[Path, sim.Feature]] = None,
                  slot_cache: Optional[object] = None,
+                 cfg=None,
                  parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._ref = ref_item
@@ -53,6 +54,7 @@ class MatcherWorker(QThread):
         # 호출자가 미리 빌드한 val Feature 캐시 (Optional). 누락된 path 는 폴백으로 sim.extract.
         self._val_features: dict[Path, sim.Feature] = dict(val_features or {})
         self._slot_cache = slot_cache
+        self._cfg = cfg                 # 강화/KLA 전처리 설정
         self.signals = MatcherSignals()
         self._stop = False
 
@@ -61,7 +63,7 @@ class MatcherWorker(QThread):
 
     def run(self) -> None:        # type: ignore[override]
         try:
-            ref_feat = sim.extract(self._ref.path)
+            ref_feat = sim.extract(self._ref.path, cfg=self._cfg)
         except Exception as exc:
             self.signals.failed.emit(str(exc))
             return
@@ -70,7 +72,7 @@ class MatcherWorker(QThread):
         if self._slot_cache is not None and not self._val_features:
             try:
                 self._val_features = self._slot_cache.build(
-                    self._ref.slot, self._vals,
+                    self._ref.slot, self._vals, cfg=self._cfg,
                 )
             except Exception:
                 self._val_features = {}
@@ -83,7 +85,7 @@ class MatcherWorker(QThread):
             try:
                 vf = self._val_features.get(vi.path)
                 if vf is None:
-                    vf = sim.extract(vi.path)
+                    vf = sim.extract(vi.path, cfg=self._cfg)
                     # 다음 reference 를 위해 인메모리에 추가.
                     self._val_features[vi.path] = vf
                 s = sim.score(ref_feat, vf)

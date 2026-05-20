@@ -18,13 +18,45 @@ from typing import Iterable, Optional
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QCursor, QPixmap
 from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout,
-                              QHBoxLayout, QLabel, QMessageBox, QScrollArea,
-                              QSizePolicy, QVBoxLayout, QWidget)
+                              QHBoxLayout, QLabel, QMenu, QMessageBox,
+                              QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
 
 from ... import i18n
 from ...models.result import MatchResult, MissEntry
 from ...models.slot import ImageItem
 from .neon_button import NeonButton
+from .window_controls import add_fullscreen_shortcut, enable_window_controls
+from .zoom_window import FullscreenViewer
+
+
+def _open_fullscreen(path: Path, parent=None) -> None:
+    """기존 풀스크린 뷰어로 원본 이미지를 크게 보여준다 (#13)."""
+    try:
+        viewer = FullscreenViewer(Path(path), parent)
+        viewer.exec()
+    except Exception:
+        pass
+
+
+def _attach_view_larger(label: QLabel, path_getter) -> None:
+    """라벨에 우클릭 ‘크게보기’ 컨텍스트 메뉴를 붙인다 (#13).
+
+    ``path_getter`` 는 호출 시점의 원본 경로를 돌려주는 콜러블 (현재 ref 가
+    바뀌는 좌측 패널에서도 항상 최신 경로를 가리키도록).
+    """
+    label.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+
+    def _on_menu(pos) -> None:
+        path = path_getter()
+        if not path:
+            return
+        menu = QMenu(label)
+        act = menu.addAction(i18n.KO.CTX_VIEW_LARGER)
+        chosen = menu.exec(label.mapToGlobal(pos))
+        if chosen is act:
+            _open_fullscreen(Path(path), label.window())
+
+    label.customContextMenuRequested.connect(_on_menu)
 
 _REF_PX = 420           # 좌측 기준 사진 크기 — 원본 화질에서 다운스케일.
 _CAND_PX = 260          # 우측 후보 타일 — 썸네일 대신 원본을 lazy 로드.
@@ -79,9 +111,11 @@ class _CandidateTile(QFrame):
         ph = QPixmap(_CAND_PX, _CAND_PX)
         ph.fill(QColor(20, 28, 40))
         self._img_label.setPixmap(ph)
+        # 우클릭 ‘크게보기’ (#13) — 후보 원본 경로를 그대로 연다.
+        _attach_view_larger(self._img_label, lambda: self.item.path)
         lay.addWidget(self._img_label, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        score_text = f"유사도 {int(round(self.score * 100))}%"
+        score_text = f"유사도 {self.score * 100:.1f}%"
         sc = QLabel(score_text, self)
         sc.setAlignment(Qt.AlignmentFlag.AlignCenter)
         sc.setStyleSheet(
@@ -148,6 +182,8 @@ class UnmatchedReviewDialog(QDialog):
         self._used_vals: set[Path] = {Path(p) for p in already_used_vals}
         self._score_cache = score_cache
         self._idx = 0
+        # 현재 검토 중인 ref 원본 경로 — 우클릭 ‘크게보기’ 가 참조 (#13).
+        self._cur_ref_path: Path | None = None
         # 결과: 호출자가 다이얼로그가 끝난 뒤 가져갈 데이터.
         self.new_matches: list[MatchResult] = []
         self.resolved_refs: list[MissEntry] = []     # 매칭 찾음
@@ -169,6 +205,10 @@ class UnmatchedReviewDialog(QDialog):
                         min(900, int(g.height() * 0.88)))
         else:
             self.resize(1400, 900)
+        # 다이얼로그 창에 최소화/최대화 버튼 + F11 전체화면 토글 (#9).
+        # 반드시 첫 show 이전에 플래그를 설정해야 창이 사라지지 않는다.
+        enable_window_controls(self)
+        add_fullscreen_shortcut(self)
         self._build()
         self._render_current()
 
@@ -228,6 +268,8 @@ class UnmatchedReviewDialog(QDialog):
         self.ref_img.setStyleSheet(
             "background: #050810; border: 1px solid #1F2A3F; border-radius: 6px;"
         )
+        # 우클릭 ‘크게보기’ (#13) — 현재 검토 중인 ref 원본을 연다.
+        _attach_view_larger(self.ref_img, lambda: self._cur_ref_path)
         ll.addWidget(self.ref_img, alignment=Qt.AlignmentFlag.AlignCenter)
         ll.addStretch(1)
         left.setFixedWidth(_REF_PX + 40)
@@ -286,6 +328,7 @@ class UnmatchedReviewDialog(QDialog):
         )
         self.btn_prev.setEnabled(self._idx > 0)
         self.ref_filename.setText(Path(cur.path).name)
+        self._cur_ref_path = Path(cur.path)
 
         # 기준 사진 — 원본 파일을 직접 디코드해서 ‘원본 화질’ 그대로 보여준다.
         # 현재 ref 한 장만 로드되므로 비용은 낮다.
@@ -322,7 +365,7 @@ class UnmatchedReviewDialog(QDialog):
             return
 
         self.candidates_summary.setText(f"후보 {len(scored)} 장 (유사도 순)")
-        cols = max(3, min(5, self._scroll.viewport().width() // (_CAND_PX + 24)))
+        cols = max(1, min(5, self._scroll.viewport().width() // (_CAND_PX + 24)))
         if cols <= 0:
             cols = 4
         for i, (score, v) in enumerate(scored):
@@ -445,6 +488,7 @@ class UnmatchedReviewDialog(QDialog):
         )
         self.ref_filename.setText("")
         self.ref_img.clear()
+        self._cur_ref_path = None
         self.candidates_summary.setText("")
         self.btn_prev.setEnabled(self._idx > 0)
         self.btn_skip.setEnabled(False)

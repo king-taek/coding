@@ -203,16 +203,17 @@ def _load_head_for(model_name: str):  # pragma: no cover — heavy
 # ---------------------------------------------------------------------------
 # Tensor preparation — domain-preprocessed gray-3ch input
 # ---------------------------------------------------------------------------
-def _make_input_tensor(path: Path):  # pragma: no cover
+def _make_input_tensor(path: Path, cfg=None):  # pragma: no cover
     """1장의 도메인 전처리 텐서를 만든다 (3, _INPUT_PX, _INPUT_PX) float32.
 
     원본 ROI 의 aspect ratio 가 제각각이라 그대로 두면 ``torch.stack`` 시
-    크기 불일치 에러 발생.  중앙 zero-pad 로 정사각형 강제.
+    크기 불일치 에러 발생.  중앙 zero-pad 로 정사각형 강제.  ``cfg`` 가 주어지면
+    강화/KLA 전처리를 적용 (고속 모드 임베딩이 KLA 텍스트밴드를 무시하도록).
     """
     if not _HAS_TORCH:
         return None
     try:
-        gray = image_io.preprocessed_roi_gray(path, long_edge=_INPUT_PX)
+        gray = image_io.preprocessed_roi_gray(path, long_edge=_INPUT_PX, cfg=cfg)
     except Exception:
         return None
     h, w = gray.shape
@@ -276,7 +277,8 @@ def _cpu_head_clone(head):  # pragma: no cover — torch optional
 def _compute_embeddings_pytorch(paths: list[Path],
                                  *,
                                  batch_size: int,
-                                 mode: str) -> dict[Path, np.ndarray]:
+                                 mode: str,
+                                 cfg=None) -> dict[Path, np.ndarray]:
     """PyTorch backbone+head 로 임베딩 계산 (CUDA/XPU/MPS/CPU)."""
     out: dict[Path, np.ndarray] = {}
     if not paths:
@@ -309,7 +311,7 @@ def _compute_embeddings_pytorch(paths: list[Path],
         pending.clear()
 
     for p in paths:
-        t = _make_input_tensor(p)
+        t = _make_input_tensor(p, cfg)
         if t is None:
             continue
         pending.append((p, t))
@@ -321,20 +323,26 @@ def _compute_embeddings_pytorch(paths: list[Path],
 
 def compute_embeddings(paths: Iterable[Path],
                        *,
-                       batch_size: int = _DEFAULT_BATCH
+                       batch_size: int = _DEFAULT_BATCH,
+                       force_backbone: bool = False,
+                       cfg=None,
                        ) -> dict[Path, np.ndarray]:
-    """여러 이미지의 임베딩을 배치로 계산. basic 모드면 빈 dict.
+    """여러 이미지의 임베딩을 배치로 계산.
 
     OpenVINO + NPU/Intel GPU 가용 시 그 경로를 우선 사용 (Intel 노트북
     호환).  OpenVINO 가 일부 path 만 처리한 경우 누락된 path 는 PyTorch
-    경로로 보완해서 합친다 — 누락 임베딩이 score() 단계에서 sentinel 로
-    빠지면서 매칭 품질이 떨어지는 것 방지.
+    경로로 보완해서 합친다.
+
+    ``force_backbone=True`` 면 basic 모드(학습 head 없음)여도 raw MobileNetV3
+    backbone(576-d) 임베딩을 계산한다 — 고속 모드(임베딩+ANN)에서 학습 모델
+    없이도 Intel GPU(OpenVINO) 가속을 실제로 활용하기 위함.  False(기본)면
+    basic 모드는 현행대로 빈 dict.
     """
     out: dict[Path, np.ndarray] = {}
     if not is_available():
         return out
     mode = get_active_mode()
-    if mode == registry.BASIC:
+    if mode == registry.BASIC and not force_backbone:
         return out
     items = [Path(p) for p in paths]
     if not items:
@@ -347,7 +355,7 @@ def compute_embeddings(paths: Iterable[Path],
         if _ov.is_available():
             head_for_ov = _cpu_head_clone(_load_head_for(mode))
             ov_out = _ov.compute_embeddings(
-                items, batch_size=batch_size, head=head_for_ov,
+                items, batch_size=batch_size, head=head_for_ov, cfg=cfg,
             )
             if ov_out:
                 out.update(ov_out)
@@ -359,7 +367,7 @@ def compute_embeddings(paths: Iterable[Path],
     missing = [p for p in items if p not in ov_handled]
     if missing:
         out.update(_compute_embeddings_pytorch(
-            missing, batch_size=batch_size, mode=mode,
+            missing, batch_size=batch_size, mode=mode, cfg=cfg,
         ))
     return out
 

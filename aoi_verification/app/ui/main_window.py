@@ -120,6 +120,7 @@ class MainWindow(QMainWindow):
         self._match_page.match_confirmed.connect(self._on_match_confirmed)
         self._match_page.skipped_changed.connect(self._schedule_autosave)
         self._match_page.finished.connect(self._on_match_finished)
+        self._match_page.cancelled.connect(self._on_match_cancelled)
         self._result_page.new_session_requested.connect(self._new_session)
         # 매치 검토 → 결과 페이지
         self._match_review_page.finished.connect(self._on_match_review_done)
@@ -295,6 +296,15 @@ class MainWindow(QMainWindow):
         )
         self._show_page(self._setup_page)
 
+    def _on_match_cancelled(self) -> None:
+        """#8 매치 페이지에서 중지 — 진행 중 작업을 멈추고 셋업 화면으로 복귀."""
+        try:
+            from ..utils import wakelock as _wl
+            _wl.release()
+        except Exception:
+            pass
+        self._show_page(self._setup_page)
+
     def _refresh_models_safe(self) -> None:
         """학습 모듈 import / 평가 집계 실패가 셋업 화면을 막지 않도록 wrap."""
         # 사용자 요청 (#4) — ‘기본 탐지 모드’ 가 기본 선택이 되도록 latest 의
@@ -367,8 +377,27 @@ class MainWindow(QMainWindow):
     # ==================================================================
     # Setup → Stage 1
     # ==================================================================
+    def _make_sim_cfg(self) -> "config.SimilarityConfig":
+        """현재 SetupInput 으로부터 유사도 엔진/전처리 설정 객체 생성."""
+        inp = self._input
+        if inp is None:
+            return config.DEFAULT_SIM_CONFIG
+        return config.SimilarityConfig(
+            engine=getattr(inp, "engine_mode", "basic"),
+            grayscale=bool(getattr(inp, "pre_grayscale", False)),
+            contrast=bool(getattr(inp, "pre_contrast", False)),
+            bg_removal=bool(getattr(inp, "pre_bg_removal", False)),
+            kla_crop=bool(getattr(inp, "kla_crop", False)),
+        )
+
     def _on_start(self, inp: SetupInput) -> None:
         self._input = inp
+        # #14 세션 동안 OS 절전/화면보호기 억제.
+        try:
+            from ..utils import wakelock as _wl
+            _wl.acquire()
+        except Exception:
+            pass
         self._matches_a.clear()
         self._matches_b.clear()
         self._skipped_a.clear()
@@ -511,6 +540,7 @@ class MainWindow(QMainWindow):
             session_id=self._session_id,
             model_name=self._active_model_name(),
             auto_mode=True,
+            engine_cfg=self._make_sim_cfg(),
         )
         self._show_page(self._match_page)
         self._phase = PHASE_A_MATCH
@@ -658,6 +688,7 @@ class MainWindow(QMainWindow):
             session_id=self._session_id,
             model_name=self._active_model_name(),
             auto_mode=auto_mode,
+            engine_cfg=self._make_sim_cfg(),
         )
         self._show_page(self._match_page)
         self._phase = PHASE_A_MATCH
@@ -786,6 +817,7 @@ class MainWindow(QMainWindow):
             session_id=self._session_id,
             model_name=self._active_model_name(),
             auto_mode=auto_mode,
+            engine_cfg=self._make_sim_cfg(),
         )
         self._show_page(self._match_page)
         self._phase = PHASE_B_MATCH
@@ -965,6 +997,12 @@ class MainWindow(QMainWindow):
 
     def _new_session(self) -> None:
         session_mod.clear()
+        # #14 세션 종료 — 절전 억제 해제.
+        try:
+            from ..utils import wakelock as _wl
+            _wl.release()
+        except Exception:
+            pass
         self._matches_a.clear()
         self._matches_b.clear()
         self._skipped_a.clear()
@@ -1059,6 +1097,12 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):  # noqa: N802
         # 종료 직전 마지막 크기/최대화 상태 저장 → 다음 실행에서 그대로 복원.
         self._persist_geometry()
+        # #14 절전 억제 해제 (남아 있을 경우).
+        try:
+            from ..utils import wakelock as _wl
+            _wl.release()
+        except Exception:
+            pass
         if self._thumb_worker is not None and self._thumb_worker.isRunning():
             self._thumb_worker.stop()
             self._thumb_worker.wait(1000)
