@@ -97,6 +97,8 @@ class MatchPage(QWidget):
         # 고속 모드(임베딩+ANN) 활성 여부 + 슬롯 인덱스 캐시.
         self._fast_mode: bool = False
         self._index_cache = _fast.SlotIndexCache()
+        # 자동 모드 고속 선계산 결과: {(slot, ref_path): [(val_path, score), ...]}.
+        self._fast_results: dict = {}
 
     # ------------------------------------------------------------------
     def _build(self) -> None:
@@ -330,6 +332,7 @@ class MatchPage(QWidget):
         self._auto_mode = bool(auto_mode)
         self._engine_cfg = engine_cfg or config.DEFAULT_SIM_CONFIG
         self._index_cache.clear()
+        self._fast_results.clear()
         self.phase_label.setText(phase_label)
         self._refresh_skipped_panel()
         # 모든 (ref, val) 쌍 점수를 미리 계산 → 이후 매칭은 캐시 조회만.
@@ -382,8 +385,10 @@ class MatchPage(QWidget):
             import logging
             logging.getLogger("aoi.match").info(i18n.KO.ENGINE_FAST_UNAVAILABLE)
 
-        # 스트리밍(슬롯 단위 점진 처리)은 두 엔진 모두 동일하게 사용.
-        streaming = True
+        # 수동 = 스트리밍(첫 슬롯 후 곧장 검토 + 나머지 백그라운드).
+        # 자동 = 전체 선계산(한 번의 진행 바) → 끝난 뒤 자동 매칭, 백그라운드 없음
+        #        (#2/#3: 사진 한 장씩/이중 계산처럼 보이는 현상 제거).
+        streaming = not bool(self._auto_mode)
         self._streaming_precompute = streaming
         self._waiting_for_slot = None
 
@@ -394,14 +399,21 @@ class MatchPage(QWidget):
             self.bg_status_label.setText(
                 i18n.KO.PRECOMPUTE_BG_STATUS_FMT.format(idx=0, total=len(tasks))
             )
+        else:
+            # 자동 — 전체 진행을 하나의 차단 오버레이로 표시.
+            self._loading.show_overlay(
+                i18n.KO.LOAD_PRECOMPUTE_FMT.format(done=0, total=total_pairs),
+                cancelable=True,
+            )
+            self.bg_status_label.setText("")
 
         if self._fast_mode:
-            # 임베딩 추출 + 슬롯별 ANN 인덱스 구축 (슬롯 단위 스트리밍).
-            # FastIndexWorker 는 SlotPrecomputeWorker 와 동일한 시그널
-            # (progress/slot_finished/finished/failed) 을 노출하므로 기존
-            # 핸들러/중단 로직을 그대로 재사용한다.
+            # FastIndexWorker — SlotPrecomputeWorker 와 동일 시그널.  자동 모드면
+            # 모든 ref 를 미리 재정렬해 _fast_results 에 저장(매칭 즉시 응답).
             self._precompute_worker = _fast.FastIndexWorker(
-                tasks, self._index_cache, cfg=self._engine_cfg, parent=self,
+                tasks, self._index_cache, cfg=self._engine_cfg,
+                auto=self._auto_mode, top_k=self._engine_cfg.top_k,
+                results=self._fast_results, parent=self,
             )
         else:
             self._precompute_worker = SlotPrecomputeWorker(
@@ -486,16 +498,17 @@ class MatchPage(QWidget):
             self._advance()
 
     def _on_precompute_finished(self) -> None:
-        # 자동/수동 모두 스트리밍 단일 패스 — 첫 슬롯 완료(_on_precompute_slot_
-        # finished, idx==1) 시점에 이미 _advance 가 호출돼 매칭이 진행 중이다.
-        # 따라서 여기서 추가 _advance 는 하지 않는다 (#15 중복 계산/이중 진행
-        # 방지).  매칭이 아직 도달하지 못한 슬롯은 slot_finished 또는 아래
-        # 대기-해제 경로로 자연히 이어진다.
+        was_streaming = self._streaming_precompute
         self.bg_status_label.setText(i18n.KO.PRECOMPUTE_BG_DONE)
         self._streaming_precompute = False
-        # 방어적 정리 — slot_finished 가 어떤 이유로 누락된 채 finished 가 먼저
-        # 도착했더라도 마지막 슬롯의 점수는 이미 캐시에 들어 있다.  대기 중인
-        # 슬롯이 있으면 즉시 풀어 매칭을 재개.
+        if not was_streaming:
+            # 자동(전체 선계산) — 모든 계산이 끝났으니 이제 매칭 시작.
+            # _current 가 아직 None 이므로 진행 바가 정상 갱신됐고, 여기서 한 번만
+            # _advance → 캐시/결과 조회로 즉시 자동 매칭 (백그라운드 없음).
+            self._loading.hide_overlay()
+            self._advance()
+            return
+        # 수동 스트리밍 — 첫 슬롯에서 이미 _advance 됨.  대기 슬롯만 해제.
         if self._waiting_for_slot is not None:
             self._waiting_for_slot = None
             self._loading.hide_overlay()
@@ -628,8 +641,23 @@ class MatchPage(QWidget):
                 self._worker.stop()
                 self._worker.wait(500)
 
-        # 고속 모드 — 슬롯 인덱스가 준비됐으면 임베딩 top-K + 정밀 재정렬.
-        # 인덱스가 없으면(임베딩 실패 등) 아래 기본 경로로 자연 폴백.
+        # 고속 모드 자동 — 선계산된 결과(_fast_results)가 있으면 즉시 응답
+        # (사진 한 장씩 백그라운드 계산 없이 바로 매칭, #2/#3).
+        if self._fast_mode:
+            key = (ref.slot, ref.path)
+            if key in self._fast_results:
+                by_path = {v.path: v for v in val_items}
+                cands = []
+                for vp, s in self._fast_results[key]:
+                    vitem = by_path.get(vp)
+                    if vitem is not None and s >= self._threshold:
+                        cands.append(Candidate(item=vitem, score=float(s)))
+                cands.sort(key=lambda c: c.score, reverse=True)
+                self._on_matcher_done(cands)
+                return
+
+        # 고속 모드 (수동) — 슬롯 인덱스가 준비됐으면 임베딩 top-K + 정밀 재정렬.
+        # 인덱스가 없으면(디스크립터 실패 등) 아래 기본 경로로 자연 폴백.
         if self._fast_mode:
             entry = self._index_cache.get(ref.slot)
             if entry is not None:

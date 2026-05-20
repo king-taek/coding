@@ -451,6 +451,7 @@ class MainWindow(QMainWindow):
             return config.DEFAULT_SIM_CONFIG
         return config.SimilarityConfig(
             engine=getattr(inp, "engine_mode", "basic"),
+            center20=bool(getattr(inp, "center20", False)),
             grayscale=bool(getattr(inp, "pre_grayscale", False)),
             contrast=bool(getattr(inp, "pre_contrast", False)),
             bg_removal=bool(getattr(inp, "pre_bg_removal", False)),

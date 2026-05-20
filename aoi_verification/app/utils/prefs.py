@@ -79,6 +79,7 @@ class UiPrefs:
     openvino_install_declined: bool = False
     # 유사도 엔진 모드 + 강화 전처리 토글 (계산 전용, 화면 표시는 원본 유지).
     engine_mode: str = "basic"               # EngineMode.{BASIC,FAST}
+    center20: bool = False                   # 기준/검증 사진 중앙 20% 만 비교
     pre_grayscale: bool = False              # 강화: 흑백 + 고감도
     pre_contrast: bool = False               # 강화: 고대비
     pre_bg_removal: bool = False             # 강화: 배경 제거(누끼)

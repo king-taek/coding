@@ -43,6 +43,7 @@ class SetupInput:
     automation_level: str = AutomationLevel.MANUAL
     # 유사도 엔진 + 강화/KLA 전처리 (계산 전용).
     engine_mode: str = "basic"       # EngineMode.{BASIC,FAST}
+    center20: bool = False           # 중앙 20% 만 비교
     pre_grayscale: bool = False
     pre_contrast: bool = False
     pre_bg_removal: bool = False
@@ -252,6 +253,13 @@ class SetupPage(QWidget):
             "color: #00D4FF; font-weight: 700; letter-spacing: 1px;"
         )
         engine_card.body().addWidget(eng_title)
+
+        # 유사도 계산 옵션 최상단 — 기준 사진 중앙 20% 만 사용 (#7).
+        self.check_center20 = QCheckBox(i18n.KO.CENTER20_LABEL, engine_card)
+        self.check_center20.setToolTip(i18n.KO.CENTER20_TOOLTIP)
+        self.check_center20.setChecked(bool(getattr(_prefs_now, "center20", False)))
+        engine_card.body().addWidget(self.check_center20)
+
         self.radio_engine_basic = QRadioButton(i18n.KO.ENGINE_MODE_BASIC, engine_card)
         self.radio_engine_fast = QRadioButton(i18n.KO.ENGINE_MODE_FAST, engine_card)
         _last_engine = getattr(_prefs_now, "engine_mode", "basic")
@@ -402,6 +410,7 @@ class SetupPage(QWidget):
         else:
             automation = AutomationLevel.MANUAL
         engine_mode = "fast" if self.radio_engine_fast.isChecked() else "basic"
+        center20 = bool(self.check_center20.isChecked())
         pre_grayscale = bool(self.check_pre_grayscale.isChecked())
         pre_contrast = bool(self.check_pre_contrast.isChecked())
         pre_bg = bool(self.check_pre_bg.isChecked())
@@ -422,6 +431,7 @@ class SetupPage(QWidget):
             last_mode=mode,
             automation_level=automation,
             engine_mode=engine_mode,
+            center20=center20,
             pre_grayscale=pre_grayscale,
             pre_contrast=pre_contrast,
             pre_bg_removal=pre_bg,
@@ -436,6 +446,7 @@ class SetupPage(QWidget):
             threshold=threshold,
             automation_level=automation,
             engine_mode=engine_mode,
+            center20=center20,
             pre_grayscale=pre_grayscale,
             pre_contrast=pre_contrast,
             pre_bg_removal=pre_bg,

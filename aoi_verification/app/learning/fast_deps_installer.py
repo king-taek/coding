@@ -36,31 +36,19 @@ def is_torch_installed() -> bool:
 
 
 def fast_ready() -> bool:
-    """고속 모드가 실제로 동작 가능한 상태인지.
+    """고속 모드 동작 가능 여부.
 
-    ANN 검색은 NumPy 브루트포스 폴백이 있어 hnswlib 가 없어도 되므로, 임베딩을
-    만들 torch 만 있으면 고속 모드가 동작한다.  hnswlib 는 대용량 가속용 옵션."""
-    return is_torch_installed()
+    고속 모드는 경량 디스크립터(NumPy/OpenCV/Pillow — 핵심 의존성)만 사용하므로
+    별도 설치 없이 항상 동작한다.  torch/hnswlib/모델 다운로드 모두 불필요."""
+    return True
 
 
 def missing_packages(*, recommend_openvino: bool = True) -> List[str]:
-    """고속 모드를 위해 설치가 필요/권장되는 pip 패키지 목록.
+    """고속 모드를 위해 추가 설치가 필요한 pip 패키지 — 이제 없음.
 
-    - ``torch`` : 임베딩 추출에 필수 (보통 requirements 로 이미 설치됨).
-    - ``openvino``: Intel CPU 인데 없으면 GPU/NPU 가속 권장 (선택).
-    hnswlib 는 네이티브 빌드가 필요해 제한된 환경에서 설치 불가할 수 있고,
-    NumPy 폴백으로 대체되므로 목록에 넣지 않는다 (강제하지 않음)."""
-    pkgs: List[str] = []
-    if not is_torch_installed():
-        pkgs.append("torch")
-    if recommend_openvino:
-        try:
-            from . import openvino_installer as _ovi
-            if _ovi.is_intel_cpu() and not _ovi.is_openvino_installed():
-                pkgs.append("openvino")
-        except Exception:
-            pass
-    return pkgs
+    고속 모드가 핵심 의존성만으로 동작하므로 빈 목록을 반환한다.  (과거에는
+    hnswlib/torch 를 요구했으나 경량 디스크립터로 대체됨.)"""
+    return []
 
 
 # ---------------------------------------------------------------------------

@@ -171,6 +171,9 @@ def center_roi_gray(src: Path,
         roi_ratio = config.Sizing.ROI_RATIO
     if long_edge is None:
         long_edge = config.Sizing.SIMILARITY_PX
+    # 중앙 20% 만 비교 옵션 (#7) — 호출자가 명시 roi_ratio 를 주지 않은 경우에만.
+    if cfg is not None and getattr(cfg, "center20", False):
+        roi_ratio = 0.2
 
     img = _open(src)
     img = _to_rgb(img)

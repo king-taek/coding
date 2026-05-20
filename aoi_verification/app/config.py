@@ -120,6 +120,7 @@ MEMORY_PRESSURE_BYTES = PIXMAP_CACHE_MAX_BYTES + 1024 * 1024 * 1024
 @dataclass(frozen=True)
 class SimilarityConfig:
     engine: str = "basic"          # "basic" | "fast"
+    center20: bool = False         # 기준/검증 사진의 중앙 20% 영역만 비교
     grayscale: bool = False        # 강화: 흑백 + 고감도
     contrast: bool = False         # 강화: 고대비
     bg_removal: bool = False       # 강화: 배경 제거(누끼)
@@ -131,15 +132,15 @@ class SimilarityConfig:
     @property
     def has_preprocess(self) -> bool:
         """전처리가 하나라도 켜져 있으면 True — 캐시 키 분기/적용 판단용."""
-        return bool(self.grayscale or self.contrast
+        return bool(self.center20 or self.grayscale or self.contrast
                     or self.bg_removal or self.kla_crop)
 
     def cache_extra(self) -> str:
         """캐시 키 판별자.  전처리 OFF 면 빈 문자열 → 기본 캐시와 동일 키."""
         if not self.has_preprocess:
             return ""
-        return (f"g{int(self.grayscale)}c{int(self.contrast)}"
-                f"b{int(self.bg_removal)}"
+        return (f"c20{int(self.center20)}g{int(self.grayscale)}"
+                f"c{int(self.contrast)}b{int(self.bg_removal)}"
                 f"k{int(self.kla_crop)}-{self.kla_top:.2f}-{self.kla_bottom:.2f}")
 
 

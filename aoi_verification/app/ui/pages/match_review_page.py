@@ -17,7 +17,7 @@ from pathlib import Path
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QPixmap
-from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QInputDialog, QLabel, QMenu,
+from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu,
                               QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
 
 from ... import i18n
@@ -30,8 +30,8 @@ from ..widgets.zoom_window import FullscreenViewer
 
 _THUMB_PX = 140
 _RUNNERUP_PX = int(_THUMB_PX * 0.8)         # 차순위는 20% 작게
-# 차순위 후보를 한 행에 기본 몇 장 보여줄지 (#16). ‘+더보기’ 로 늘릴 수 있다.
-_DEFAULT_RUNNERS = 4
+# 화면 너비를 아직 모를 때 한 줄에 채울 차순위 후보 기본 열 수 (#4/#5 fallback).
+_FALLBACK_COLS = 6
 # _lookup_runners_up 가 보관하는 차순위 후보 최대 개수 (#16).
 _MAX_RUNNERS = 50
 
@@ -120,7 +120,8 @@ class _RunnerUpTile(QFrame):
 
 
 class _MatchRow(QFrame):
-    """한 매치 — ref + 1위 매치 + 점수 + 차순위 2장 (20% 작게, 클릭 가능)."""
+    """한 매치 — 상단 한 줄(ref + 1위 매치 + 점수 + 토글) 아래에 차순위 후보
+    그리드(20% 작게, 클릭 가능)를 줄바꿈으로 펼친다."""
 
     toggle_requested = pyqtSignal(object)                  # MatchResult
     swap_requested = pyqtSignal(object, object, float)     # (old_match, new_val_item, new_score)
@@ -132,15 +133,21 @@ class _MatchRow(QFrame):
         super().__init__(parent)
         self.match = match
         self._is_unmatched = False
-        # 전체 차순위 후보 (정렬됨) 를 보관하고, 화면에는 일부만 표시 (#16).
+        # 전체 차순위 후보 (정렬됨) 를 보관하고, 화면에는 일부 줄만 표시 (#5).
         self._runners_up = list(runners_up or [])     # [(ImageItem, score), ...]
-        self._visible_runners = _DEFAULT_RUNNERS
+        # ‘후보 한 줄 더 보기’ 클릭마다 1 씩 늘어나는 표시 줄 수 (#5).
+        self._visible_lines = 1
         self.setProperty("role", "card-soft")
-        self.setMinimumHeight(_THUMB_PX + 32)
 
-        row = QHBoxLayout(self)
-        row.setContentsMargins(10, 8, 10, 8)
-        row.setSpacing(12)
+        # 행 전체를 세로로 쌓는다: [상단 한 줄] → [차순위 후보 영역] (#4).
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(10, 8, 10, 8)
+        outer.setSpacing(8)
+
+        # ── 상단 한 줄 — slot · ref · → · 1위 매치 + 점수 · (stretch) · 토글 ──
+        top = QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
+        top.setSpacing(12)
 
         # slot 라벨
         self._slot_label = QLabel(match.slot, self)
@@ -148,17 +155,17 @@ class _MatchRow(QFrame):
             "color: #00D4FF; font-weight: 700; font-size: 14px;"
         )
         self._slot_label.setMinimumWidth(80)
-        row.addWidget(self._slot_label)
+        top.addWidget(self._slot_label)
 
         # ref 이미지
         self._ref_img = self._make_thumb(match.ref_path, size=_THUMB_PX)
-        row.addWidget(self._ref_img)
+        top.addWidget(self._ref_img)
 
         # 화살표
         arrow = QLabel("→", self)
         arrow.setStyleSheet("color: #7FB3D5; font-size: 28px;")
         arrow.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        row.addWidget(arrow)
+        top.addWidget(arrow)
 
         # 1위 매치 이미지 + 점수 (수직 라벨링)
         primary_host = QWidget(self)
@@ -174,69 +181,89 @@ class _MatchRow(QFrame):
         )
         score_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         primary_lay.addWidget(score_label)
-        row.addWidget(primary_host)
+        top.addWidget(primary_host)
 
-        # 차순위 후보 — 클릭하면 그 사진으로 매치 교체 (swap_requested).
-        # 기본 4장만 보여주고 ‘+N개 더 보기’ 로 늘릴 수 있다 (#16).
-        if self._runners_up:
-            sep = QLabel("│", self)
-            sep.setStyleSheet("color: #1F2A3F; font-size: 36px;")
-            row.addWidget(sep)
-            # 차순위 타일 + ‘더보기’ 버튼을 담는 컨테이너 — in-place 재렌더용.
-            self._runner_host = QWidget(self)
-            self._runner_lay = QHBoxLayout(self._runner_host)
-            self._runner_lay.setContentsMargins(0, 0, 0, 0)
-            self._runner_lay.setSpacing(8)
-            row.addWidget(self._runner_host)
-            self._render_runners()
-        else:
-            self._runner_host = None
-            self._runner_lay = None
-
-        row.addStretch(1)
+        top.addStretch(1)
 
         # ✕ 매치 없음 / ↩ 되돌리기 버튼
         self.btn_toggle = NeonButton(i18n.KO.BTN_MARK_NO_MATCH, role="danger")
         self.btn_toggle.clicked.connect(
             lambda: self.toggle_requested.emit(self.match)
         )
-        row.addWidget(self.btn_toggle)
+        top.addWidget(self.btn_toggle)
+
+        outer.addLayout(top)
+
+        # ── 차순위 후보 영역 — 상단 한 줄 아래에 그리드로 줄바꿈 (#4/#5). ──
+        # 클릭하면 그 사진으로 매치 교체 (swap_requested).  처음엔 한 줄만
+        # 보이고 ‘후보 한 줄 더 보기’ 로 늘린다.
+        if self._runners_up:
+            self._runner_host = QWidget(self)
+            host_lay = QVBoxLayout(self._runner_host)
+            host_lay.setContentsMargins(0, 0, 0, 0)
+            host_lay.setSpacing(6)
+
+            # 후보 타일을 담는 그리드.
+            self._runner_grid = QGridLayout()
+            self._runner_grid.setContentsMargins(0, 0, 0, 0)
+            self._runner_grid.setSpacing(8)
+            self._runner_grid.setAlignment(Qt.AlignmentFlag.AlignLeft)
+            host_lay.addLayout(self._runner_grid)
+
+            # ‘후보 한 줄 더 보기’ 버튼 — 클릭마다 한 줄씩 더 표시 (#5).
+            self.btn_more = NeonButton(i18n.KO.RUNNERUP_MORE_ROW, role="ghost")
+            self.btn_more.clicked.connect(self._on_more)
+            more_bar = QHBoxLayout()
+            more_bar.setContentsMargins(0, 0, 0, 0)
+            more_bar.addWidget(self.btn_more)
+            more_bar.addStretch(1)
+            host_lay.addLayout(more_bar)
+
+            outer.addWidget(self._runner_host)
+            self._render_runners()
+        else:
+            self._runner_host = None
+            self._runner_grid = None
+            self.btn_more = None
+
+    def _runner_cols(self) -> int:
+        """현재 가용 너비에 맞춰 한 줄에 들어갈 후보 열 수를 계산 (#4/#5)."""
+        spacing = 8
+        # 가용 너비: 후보 호스트 → 자기 자신 → 부모 순으로 추정.
+        width = 0
+        for w in (self._runner_host, self, self.parentWidget()):
+            if w is not None:
+                width = max(width, w.width())
+        if width <= 0:
+            return _FALLBACK_COLS
+        cols = width // (_RUNNERUP_PX + spacing)
+        return max(1, int(cols))
 
     def _render_runners(self) -> None:
-        """차순위 컨테이너를 비우고 ``_visible_runners`` 만큼 다시 채운다 (#16)."""
-        if self._runner_lay is None:
+        """차순위 그리드를 비우고 ``_visible_lines`` 줄 만큼 다시 채운다 (#5)."""
+        if self._runner_grid is None:
             return
-        while self._runner_lay.count():
-            it = self._runner_lay.takeAt(0)
+        while self._runner_grid.count():
+            it = self._runner_grid.takeAt(0)
             w = it.widget()
             if w is not None:
                 w.deleteLater()
-        shown = self._runners_up[:self._visible_runners]
-        for item, score in shown:
+        cols = self._runner_cols()
+        visible_count = max(1, self._visible_lines) * cols
+        shown = self._runners_up[:visible_count]
+        for idx, (item, score) in enumerate(shown):
             tile = _RunnerUpTile(item, score, parent=self._runner_host)
             tile.swap_requested.connect(
                 lambda it, s: self.swap_requested.emit(self.match, it, s)
             )
-            self._runner_lay.addWidget(tile)
-        remaining = len(self._runners_up) - len(shown)
-        if remaining > 0:
-            more = NeonButton(
-                i18n.KO.RUNNERUP_MORE_FMT.format(n=remaining), role="ghost",
-            )
-            more.clicked.connect(self._on_more)
-            self._runner_lay.addWidget(more)
+            self._runner_grid.addWidget(tile, idx // cols, idx % cols)
+        # 모두 표시했으면 ‘더 보기’ 버튼을 숨긴다.
+        if self.btn_more is not None:
+            self.btn_more.setVisible(len(shown) < len(self._runners_up))
 
     def _on_more(self) -> None:
-        """‘+N개 더 보기’ — 표시 개수를 사용자에게 물어 재렌더 (#16)."""
-        total = len(self._runners_up)
-        n, ok = QInputDialog.getInt(
-            self, i18n.KO.RUNNERUP_MORE_TITLE, i18n.KO.RUNNERUP_MORE_PROMPT,
-            min(total, max(self._visible_runners, _DEFAULT_RUNNERS)),
-            1, total, 1,
-        )
-        if not ok:
-            return
-        self._visible_runners = int(n)
+        """‘후보 한 줄 더 보기’ — 표시 줄 수를 1 늘리고 재렌더 (#5)."""
+        self._visible_lines += 1
         self._render_runners()
 
     def _make_thumb(self, path: Path, *, size: int = _THUMB_PX,
@@ -293,11 +320,14 @@ class MatchReviewPage(QWidget):
         self._summary_label.setStyleSheet("color: #00FFA3; font-weight: 700;")
         root.addWidget(self._summary_label)
 
-        # 매치 리스트 (스크롤). 위쪽 = 유지 중인 매치(active), 아래쪽 =
-        # ‘매치 없음’ 처리된 사진들 (deleted) 을 별도 섹션으로 분리 (#11).
+        # 매치 리스트 (세로 스크롤만). 가로 스크롤은 끄고 창 너비에 맞춰
+        # 후보 타일이 줄바꿈 되도록 한다 (#4).
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
         scroll.setStyleSheet(
             "QScrollArea { background: transparent; border: none; }"
         )
@@ -309,27 +339,12 @@ class MatchReviewPage(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(6)
 
-        # active 영역.
+        # 매치 행 영역. ‘매치 없음’ 처리해도 이 자리에 그대로 두고 빨간
+        # 테두리로만 표시한다 (#1).
         self._list_layout = QVBoxLayout()
         self._list_layout.setContentsMargins(0, 0, 0, 0)
         self._list_layout.setSpacing(6)
         outer.addLayout(self._list_layout)
-
-        # deleted 섹션 — 헤더 라벨 + 리스트. 비어 있으면 헤더를 숨긴다.
-        self._deleted_header = QLabel(
-            i18n.KO.MATCH_REVIEW_DELETED_SECTION, host,
-        )
-        self._deleted_header.setStyleSheet(
-            "color: #FF6B81; font-weight: 700; font-size: 15px; "
-            "padding: 10px 0 4px 0; border-top: 1px solid #1F2A3F;"
-        )
-        self._deleted_header.setVisible(False)
-        outer.addWidget(self._deleted_header)
-
-        self._deleted_layout = QVBoxLayout()
-        self._deleted_layout.setContentsMargins(0, 0, 0, 0)
-        self._deleted_layout.setSpacing(6)
-        outer.addLayout(self._deleted_layout)
 
         outer.addStretch(1)
         root.addWidget(scroll, stretch=1)
@@ -361,12 +376,11 @@ class MatchReviewPage(QWidget):
         self._score_cache = score_cache
         self._val_pool = val_pool
 
-        for lay in (self._list_layout, self._deleted_layout):
-            while lay.count():
-                it = lay.takeAt(0)
-                w = it.widget()
-                if w is not None:
-                    w.deleteLater()
+        while self._list_layout.count():
+            it = self._list_layout.takeAt(0)
+            w = it.widget()
+            if w is not None:
+                w.deleteLater()
         self._rows.clear()
         self._rows_by_key.clear()
 
@@ -383,7 +397,6 @@ class MatchReviewPage(QWidget):
             )
             for m in ordered:
                 self._append_row(m)
-        self._update_deleted_header()
         self._update_summary()
 
     def _append_row(self, match: MatchResult) -> "_MatchRow":
@@ -395,21 +408,6 @@ class MatchReviewPage(QWidget):
         self._rows.append(row)
         self._rows_by_key[match.key] = row
         return row
-
-    def _update_deleted_header(self) -> None:
-        """삭제 섹션에 항목이 하나라도 있을 때만 헤더를 보인다 (#11)."""
-        has_deleted = self._deleted_layout.count() > 0
-        self._deleted_header.setVisible(has_deleted)
-
-    def _move_row(self, row: "_MatchRow", *, to_deleted: bool) -> None:
-        """행 위젯을 active ↔ deleted 섹션 사이로 옮긴다 (#11)."""
-        src = self._list_layout if to_deleted else self._deleted_layout
-        dst = self._deleted_layout if to_deleted else self._list_layout
-        idx = src.indexOf(row)
-        if idx >= 0:
-            src.takeAt(idx)
-        dst.addWidget(row)
-        self._update_deleted_header()
 
     def _on_swap(self,
                  old_match: MatchResult,
@@ -429,16 +427,12 @@ class MatchReviewPage(QWidget):
             if m.key == old_match.key:
                 self._matches[i] = new_match
                 break
-        # 새 매치를 고른 것이므로 unmatched 표시는 자동 해제. 행도 active 로 복귀.
-        was_unmatched = old_match.key in self._unmatched_keys
+        # 새 매치를 고른 것이므로 unmatched 표시는 자동 해제 (빨간 테두리 제거).
         self._unmatched_keys.discard(old_match.key)
-        # 행 위젯 제거 후 active 섹션 같은 자리에 새 행 삽입.
+        # 행 위젯 제거 후 같은 자리에 새 행 삽입 (행은 옮기지 않는다, #1).
         old_row = self._rows_by_key.pop(old_match.key, None)
         if old_row is not None:
-            # swap 으로 행은 항상 active 로 복귀시킨다.
-            host_lay = (self._deleted_layout if was_unmatched
-                        else self._list_layout)
-            layout_idx = host_lay.indexOf(old_row)
+            layout_idx = self._list_layout.indexOf(old_row)
             self._rows = [r for r in self._rows if r is not old_row]
             old_row.setParent(None)
             old_row.deleteLater()
@@ -451,22 +445,20 @@ class MatchReviewPage(QWidget):
             )
             new_row.toggle_requested.connect(self._on_toggle)
             new_row.swap_requested.connect(self._on_swap)
-            if was_unmatched:
-                # deleted 섹션에서 빠져나오므로 active 끝에 붙인다.
-                self._list_layout.addWidget(new_row)
-            else:
+            if layout_idx >= 0:
                 self._list_layout.insertWidget(layout_idx, new_row)
+            else:
+                self._list_layout.addWidget(new_row)
             self._rows.append(new_row)
             self._rows_by_key[new_match.key] = new_row
-        self._update_deleted_header()
         self._update_summary()
 
     @staticmethod
     def _lookup_runners_up(match: MatchResult, score_cache, val_pool) -> list:
         """주어진 매치의 ref 와 같은 slot 내 다른 val 들을 점수 내림차순으로 (자기 자신 제외).
 
-        _MatchRow 가 기본 4 장만 보여주고 ‘+더보기’ 로 늘릴 수 있도록 최대
-        ``_MAX_RUNNERS`` 개까지 보관해서 돌려준다 (#16).
+        _MatchRow 가 처음엔 한 줄만 보여주고 ‘후보 한 줄 더 보기’ 로 늘릴 수
+        있도록 최대 ``_MAX_RUNNERS`` 개까지 보관해서 돌려준다 (#5/#16).
         """
         if score_cache is None or val_pool is None:
             return []
@@ -492,10 +484,8 @@ class MatchReviewPage(QWidget):
             now_unmatched = True
         row = self._rows_by_key.get(key)
         if row is not None:
+            # 행은 제자리에 두고 빨간 테두리 강조만 토글한다 (#1).
             row.set_unmatched(now_unmatched)
-            # ‘매치 없음’ 처리된 행은 하단 ‘검토에서 삭제한 사진’ 섹션으로,
-            # 되돌리면 다시 위쪽 active 섹션으로 이동 (#11).
-            self._move_row(row, to_deleted=now_unmatched)
         self._update_summary()
 
     def _update_summary(self) -> None:

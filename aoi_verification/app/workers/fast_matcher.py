@@ -25,71 +25,107 @@ from ..utils import cache
 
 
 def is_available() -> bool:
-    """고속 모드 가용 = 임베딩(embedder/torch) 사용 가능.
+    """고속 모드 가용 여부.
 
-    ANN 검색은 hnswlib 가 없어도 NumPy 브루트포스 폴백(``embedding_index``)으로
-    동작하므로, hnswlib 설치 여부는 가용성을 좌우하지 않는다 (속도 옵션일 뿐)."""
-    if not _ann.is_available():            # NumPy 폴백이 있어 사실상 항상 True
-        return False
+    경량 디스크립터(중심 ROI gray → 32×32 정규화 벡터)만 사용하므로 torch /
+    모델 다운로드 / hnswlib 가 전혀 필요 없다.  NumPy·OpenCV·Pillow(핵심
+    의존성)만 있으면 되어 오프라인/제한 환경에서도 항상 동작한다."""
+    return _ann.is_available()             # NumPy 폴백 → 항상 True
+
+
+# ---------------------------------------------------------------------------
+# 경량 디스크립터 (디스크 캐시 경유) — torch/CNN 불필요
+# ---------------------------------------------------------------------------
+_DESC_PX = 32          # 디스크립터 그리드 — 32×32 = 1024 차원
+
+# 디스크립터 계산용 ROI 디코드 크기 (작게 → 빠름).  유사도 정밀 비교(SSIM)는
+# 별도로 pipeline.extract 가 원래 해상도로 수행하므로 여기선 작아도 무방.
+_DESC_DECODE_PX = 96
+
+
+def _descriptor_from_gray(gray: np.ndarray) -> np.ndarray:
+    """중심 ROI gray → 32×32 축소 → 평균 제거 → L2 정규화 1-D 벡터.
+
+    near-identical 검사 사진의 거시 구조를 잘 포착하면서 매우 빠르다 (행렬곱
+    cosine 검색용 후보 추림).  밝기 차이에 강인하도록 평균을 뺀다."""
     try:
-        from ..learning import embedder as _emb
-        return _emb.is_available()
+        import cv2
+        small = cv2.resize(gray, (_DESC_PX, _DESC_PX), interpolation=cv2.INTER_AREA)
     except Exception:
-        return False
+        from PIL import Image
+        small = np.asarray(
+            Image.fromarray(gray).resize((_DESC_PX, _DESC_PX)), dtype=np.uint8,
+        )
+    v = small.astype(np.float32).reshape(-1)
+    v -= float(v.mean())
+    n = float(np.linalg.norm(v)) + 1e-9
+    return (v / n).astype(np.float32)
 
 
-# ---------------------------------------------------------------------------
-# 임베딩 (디스크 캐시 경유)
-# ---------------------------------------------------------------------------
-def _emb_cache_path(src: Path, model: str, cfg_extra: str) -> Path:
-    return cache.cache_path(src, "feature", extra=f"emb-{model}-{cfg_extra}")
+def _desc_cache_path(src: Path, cfg_extra: str) -> Path:
+    return cache.cache_path(src, "feature", extra=f"desc{_DESC_PX}-{cfg_extra}")
 
 
 def compute_slot_embeddings(items: List[ImageItem],
                             *, cfg=None) -> Dict[Path, np.ndarray]:
-    """슬롯 이미지들의 임베딩을 {path: vec(L2 정규화)} 로 반환.
+    """슬롯 이미지들의 경량 디스크립터를 {path: vec(L2 정규화)} 로 반환.
 
-    디스크 캐시 히트는 즉시 로드, 미스만 ``embedder.compute_embeddings``
-    (force_backbone — 학습 모델 없이 raw backbone, OpenVINO/GPU 가속) 로 계산
-    후 캐시.  embedder 가 빈 dict 를 주면(가속/torch 없음) 빈 dict 반환 →
-    호출자 폴백.
+    CNN/torch/모델 다운로드 없이 중심 ROI gray 를 축소·정규화한 벡터를 쓴다.
+    cfg(중앙20%/KLA/강화)가 디스크립터에도 반영된다.  결과는 디스크 캐시되어
+    재실행이 빠르다.
     """
-    from ..learning import embedder as _emb
-    try:
-        model = _emb.get_active_mode()
-    except Exception:
-        model = "basic"
+    from ..utils import image_io
     cfg_extra = cfg.cache_extra() if cfg is not None else ""
-
     out: Dict[Path, np.ndarray] = {}
-    missing: List[Path] = []
     for it in items:
         p = Path(it.path)
-        cp = _emb_cache_path(p, model, cfg_extra)
+        cp = _desc_cache_path(p, cfg_extra)
         if cp.exists() and cp.stat().st_size > 0:
             try:
-                out[p] = np.load(str(cp))["emb"]
+                out[p] = np.load(str(cp))["d"]
                 continue
             except Exception:
                 pass
-        missing.append(p)
-
-    if missing:
         try:
-            computed = _emb.compute_embeddings(
-                missing, force_backbone=True, cfg=cfg,
-            )
+            gray = image_io.center_roi_gray(p, cfg=cfg, long_edge=_DESC_DECODE_PX)
+            v = _descriptor_from_gray(gray)
         except Exception:
-            computed = {}
-        for p, vec in computed.items():
-            v = np.asarray(vec, dtype=np.float32)
-            out[Path(p)] = v
+            continue
+        out[p] = v
+        try:
+            cp.parent.mkdir(parents=True, exist_ok=True)
+            np.savez_compressed(str(cp), d=v)
+        except Exception:
+            pass
+    return out
+
+
+# ---------------------------------------------------------------------------
+# 단일 ref 재정렬 — top-K 후보를 정밀 score() 로 재정렬 (공용)
+# ---------------------------------------------------------------------------
+def rerank_ref(ref_item: ImageItem,
+               index_entry: Tuple[object, List[Path], Dict[Path, np.ndarray]],
+               *, top_k: int, cfg=None) -> List[Tuple[Path, float]]:
+    """ref 디스크립터로 인덱스에서 top-K 후보를 뽑아 ``pipeline.score()`` 로
+    정밀 재정렬.  반환: ``[(val_path, score), ...]`` 점수 내림차순."""
+    index, val_paths, ref_emb = index_entry
+    rv = ref_emb.get(Path(ref_item.path)) if ref_emb else None
+    if rv is None:
+        rv = compute_slot_embeddings([ref_item], cfg=cfg).get(Path(ref_item.path))
+    if rv is None:
+        return []
+    hits = index.query(rv, top_k)
+    ref_feat = _pipeline.extract(ref_item.path, cfg=cfg)
+    out: List[Tuple[Path, float]] = []
+    for label, _sim in hits:
+        if 0 <= label < len(val_paths):
+            vpath = val_paths[label]
             try:
-                cp = _emb_cache_path(Path(p), model, cfg_extra)
-                cp.parent.mkdir(parents=True, exist_ok=True)
-                np.savez_compressed(str(cp), emb=v)
+                vf = _pipeline.extract(vpath, cfg=cfg)
+                out.append((vpath, float(_pipeline.score(ref_feat, vf))))
             except Exception:
-                pass
+                continue
+    out.sort(key=lambda x: x[1], reverse=True)
     return out
 
 
@@ -139,8 +175,14 @@ class _FastSignals(QObject):
 
 
 class FastIndexWorker(QThread):
-    """슬롯별 임베딩 추출 + ANN 인덱스 구축.  슬롯 1 개 끝날 때마다
-    ``slot_finished`` → match_page 가 그 슬롯의 ref 매칭을 시작할 수 있다.
+    """슬롯별 디스크립터 추출 + ANN 인덱스 구축.
+
+    ``auto=True`` 면(자동 매칭) 각 슬롯 인덱스를 만든 직후 그 슬롯의 모든 ref 를
+    미리 재정렬해 ``results[(slot, ref_path)] = [(val_path, score), ...]`` 에
+    저장한다 — 매칭 단계는 즉시 결과만 읽으면 되므로 사진 한 장씩 백그라운드
+    계산이 보이지 않고(#2/#3) 단일 진행 바로 끝난다.
+
+    ``auto=False`` 면(수동) 인덱스만 만들고 슬롯 단위 스트리밍으로 진행한다.
     """
 
     def __init__(self,
@@ -148,11 +190,17 @@ class FastIndexWorker(QThread):
                  index_cache: SlotIndexCache,
                  *,
                  cfg=None,
+                 auto: bool = False,
+                 top_k: int = 50,
+                 results: Optional[dict] = None,
                  parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
         self._tasks = [(s, list(r), list(v)) for s, r, v in tasks]
         self._index_cache = index_cache
         self._cfg = cfg
+        self._auto = bool(auto)
+        self._top_k = int(top_k)
+        self._results = results if results is not None else {}
         self._stop = False
         self.signals = _FastSignals()
 
@@ -179,24 +227,41 @@ class FastIndexWorker(QThread):
     def run(self) -> None:        # type: ignore[override]
         try:
             total = len(self._tasks)
-            # 첫 슬롯 임베딩 동안에도 바가 움직이도록 이미지 단위로 진행 보고.
-            total_images = max(1, sum(len(r) + len(v) for _, r, v in self._tasks))
+            # 진행 바 단위 = 디스크립터(이미지) + (자동이면) ref 재정렬.
+            total_imgs = sum(len(r) + len(v) for _, r, v in self._tasks)
+            total_units = max(1, total_imgs + (
+                sum(len(r) for _, r, _ in self._tasks) if self._auto else 0))
             done_box = [0]
             for idx, (slot, refs, vals) in enumerate(self._tasks, start=1):
                 if self._stop:
                     return
-                # val 임베딩 → 인덱스, ref 임베딩 보관 (청크 단위 progress).
-                val_emb = self._embed_chunked(vals, done_box, total_images)
+                val_emb = self._embed_chunked(vals, done_box, total_units)
                 if self._stop:
                     return
                 built = _ann.build_from(val_emb)
-                ref_emb = self._embed_chunked(refs, done_box, total_images)
+                ref_emb = self._embed_chunked(refs, done_box, total_units)
                 if self._stop:
                     return
                 if built is not None:
                     index, val_paths = built
                     self._index_cache.put(slot, index, val_paths, ref_emb)
-                # built=None(임베딩 0) 이면 그 슬롯은 match_page 가 폴백.
+                    if self._auto:
+                        # 자동 모드 — 모든 ref 를 미리 재정렬해 결과 저장.
+                        entry = (index, val_paths, ref_emb)
+                        for r in refs:
+                            if self._stop:
+                                return
+                            self._results[(slot, Path(r.path))] = rerank_ref(
+                                r, entry, top_k=self._top_k, cfg=self._cfg,
+                            )
+                            done_box[0] += 1
+                            self.signals.progress.emit(done_box[0], total_units)
+                elif self._auto:
+                    # 인덱스 미생성(디스크립터 0) — 빈 결과로 진행 카운트만 맞춤.
+                    for r in refs:
+                        self._results[(slot, Path(r.path))] = []
+                        done_box[0] += 1
+                        self.signals.progress.emit(done_box[0], total_units)
                 self.signals.slot_finished.emit(slot, idx, total)
             self.signals.finished.emit()
         except Exception as exc:                # pragma: no cover - 방어
@@ -242,36 +307,16 @@ class FastMatchWorker(QThread):
     def run(self) -> None:        # type: ignore[override]
         from ..workers.matcher import Candidate
         try:
-            rv = self._ref_emb.get(Path(self._ref.path))
-            if rv is None:
-                got = compute_slot_embeddings([self._ref], cfg=self._cfg)
-                rv = got.get(Path(self._ref.path))
-            if rv is None:
-                # 임베딩 실패 → 빈 결과(호출자 폴백 판단).
-                self.signals.done.emit([])
-                return
-            hits = self._index.query(rv, self._top_k)
-            ref_feat = _pipeline.extract(self._ref.path, cfg=self._cfg)
-            slot_feats = (self._slot_cache.get_features(self._ref.slot)
-                          if self._slot_cache is not None else None) or {}
+            results = rerank_ref(
+                self._ref, (self._index, self._val_paths, self._ref_emb),
+                top_k=self._top_k, cfg=self._cfg,
+            )
             out: List[Candidate] = []
-            total = len(hits)
-            for i, (label, _sim) in enumerate(hits, start=1):
-                if self._stop:
-                    break
-                if label < 0 or label >= len(self._val_paths):
-                    continue
-                vpath = self._val_paths[label]
-                vitem = self._val_by_path.get(vpath)
-                if vitem is None:
-                    continue
-                vf = slot_feats.get(vpath)
-                if vf is None:
-                    vf = _pipeline.extract(vpath, cfg=self._cfg)
-                s = _pipeline.score(ref_feat, vf)
+            for vpath, s in results:
                 if s >= self._threshold:
-                    out.append(Candidate(item=vitem, score=float(s)))
-                self.signals.progress.emit(i, total)
+                    vitem = self._val_by_path.get(vpath)
+                    if vitem is not None:
+                        out.append(Candidate(item=vitem, score=float(s)))
             out.sort(key=lambda c: c.score, reverse=True)
             self.signals.done.emit(out)
         except Exception as exc:                # pragma: no cover - 방어

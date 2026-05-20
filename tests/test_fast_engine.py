@@ -225,19 +225,14 @@ def test_precompute_progress_moves_fast(tmp_path, isolated_cache, monkeypatch):
     assert max_pct > 0
 
 
-# ---- 고속 모드 의존성 감지 (hnswlib 불필요 — torch 만 필요) ---------------
-def test_fast_deps_detection(monkeypatch):
+# ---- 고속 모드 의존성 — 경량 디스크립터라 추가 설치 불필요 ----------------
+def test_fast_deps_no_install_needed(monkeypatch):
     from aoi_verification.app.learning import fast_deps_installer as fdi
-
-    # torch 없으면 fast_ready False + missing 에 torch 포함.
+    # torch 없어도 고속 모드는 동작 (경량 디스크립터, NumPy/cv2 만 사용).
     monkeypatch.setattr(fdi, "is_torch_installed", lambda: False)
-    assert fdi.fast_ready() is False
-    assert "torch" in fdi.missing_packages(recommend_openvino=False)
-
-    # torch 있으면 ready — hnswlib 는 필수가 아니라 목록에 없음 (NumPy 폴백).
-    monkeypatch.setattr(fdi, "is_torch_installed", lambda: True)
     assert fdi.fast_ready() is True
-    assert "hnswlib" not in fdi.missing_packages(recommend_openvino=False)
+    assert fdi.missing_packages() == []
+    assert fdi.missing_packages(recommend_openvino=False) == []
 
 
 # ---- hnswlib 없이 NumPy 브루트포스 폴백 검색 -----------------------------
