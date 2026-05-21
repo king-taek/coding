@@ -192,6 +192,8 @@ class SelectPage(QWidget):
         self._current: Optional[ImageItem] = None
         self._phase_label_text = ""
         self._phase_b_already_matched: dict[str, list[ImageItem]] = {}
+        # 스플리터 방향을 첫 showEvent 에서 한 번만 확정했는지 (#cold-start).
+        self._orientation_seeded = False
         self._build()
 
     # ------------------------------------------------------------------
@@ -383,9 +385,36 @@ class SelectPage(QWidget):
         super().resizeEvent(event)
         self._update_splitter_orientation()
 
+    def showEvent(self, event):                         # noqa: N802
+        super().showEvent(event)
+        # 실제로 보여질 때의 너비로 방향을 한 번 확정한다. 구성 중 잠깐 좁아졌다
+        # 다시 넓어지는 과도기 때문에 세로로 굳는 버그를 방지 — 히스테리시스는
+        # 그 이후의 사용자 리사이즈에만 적용된다.
+        if not self._orientation_seeded:
+            self._seed_splitter_orientation()
+
+    def _seed_splitter_orientation(self) -> None:
+        """히스테리시스 없이 중점 기준으로 초기 방향을 확정 (#cold-start)."""
+        if not hasattr(self, "_h_splitter"):
+            return
+        w = self.width()
+        mid = (self._RESPONSIVE_THRESH_LO + self._RESPONSIVE_THRESH_HI) // 2
+        target = (Qt.Orientation.Horizontal if w >= mid
+                  else Qt.Orientation.Vertical)
+        if self._h_splitter.orientation() != target:
+            self._h_splitter.setOrientation(target)
+            self._h_splitter.setSizes([300, 600, 300]
+                                      if target == Qt.Orientation.Horizontal
+                                      else [200, 500, 200])
+        self._orientation_seeded = True
+
     def _update_splitter_orientation(self) -> None:
         """창 폭에 따라 H ↔ V splitter 전환 — 가로 스크롤 없이 reflow."""
         if not hasattr(self, "_h_splitter"):
+            return
+        # 첫 표시(showEvent)로 방향이 확정되기 전의 구성 중 리사이즈는 무시 —
+        # 과도기 너비로 방향이 잘못 굳는 것을 막는다.
+        if not self._orientation_seeded:
             return
         cur = self._h_splitter.orientation()
         w = self.width()

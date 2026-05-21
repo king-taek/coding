@@ -181,6 +181,8 @@ class _CandidateTile(QFrame):
         self.score = float(score)
         self._size = int(size)
         self._image_loaded = False
+        # 슬라이더 리사이즈를 재디코드 없이 처리하기 위한 원본(최대크기) 픽스맵.
+        self._source_pix: Optional[QPixmap] = None
         self.setProperty("role", "card-soft")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedSize(self._size + 16, self._size + _CAND_CAP_PX + 32)
@@ -219,6 +221,7 @@ class _CandidateTile(QFrame):
             item.filename, Qt.TextElideMode.ElideMiddle, self._size - 4,
         ))
         cap.setToolTip(item.filename)
+        self._cap = cap
         lay.addWidget(cap)
 
     def paintEvent(self, event):  # noqa: N802
@@ -232,10 +235,35 @@ class _CandidateTile(QFrame):
 
     def _load_full(self) -> None:
         try:
-            pix = _load_full_pixmap_scaled(Path(self.item.path), self._size)
-            self._img_label.setPixmap(pix)
+            # 원본을 최대 크기로 한 번만 디코드해 보관 → 슬라이더 변경 시
+            # 재디코드 없이 그 자리에서 재스케일.
+            self._source_pix = _load_full_pixmap_scaled(
+                Path(self.item.path), _SIZE_MAX_PX,
+            )
+            self._img_label.setPixmap(self._source_pix.scaled(
+                self._size, self._size,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            ))
         except Exception:
             pass
+
+    def set_display_size(self, size: int) -> None:
+        """슬라이더로 타일 크기 변경 (#1) — 재생성/재디코드 없이 보관 픽스맵 재스케일."""
+        self._size = int(size)
+        self.setFixedSize(self._size + 16, self._size + _CAND_CAP_PX + 32)
+        self._img_label.setFixedSize(self._size, self._size)
+        if self._source_pix is not None and not self._source_pix.isNull():
+            self._img_label.setPixmap(self._source_pix.scaled(
+                self._size, self._size,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            ))
+        from PyQt6.QtGui import QFontMetrics
+        fm = QFontMetrics(self._cap.font())
+        self._cap.setText(fm.elidedText(
+            self.item.filename, Qt.TextElideMode.ElideMiddle, self._size - 4,
+        ))
 
     def mousePressEvent(self, event):  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton:
@@ -270,10 +298,8 @@ class UnmatchedReviewDialog(QDialog):
         # 사진 크기 (#1) — 슬라이더로 조절. 후보 타일은 비율로 파생.
         self._ref_px = _REF_PX
         self._cand_px = _CAND_PX
-        # 슬라이더 드래그 중 후보 그리드 재생성을 디바운스 (#1).
-        self._resize_timer = QTimer(self)
-        self._resize_timer.setSingleShot(True)
-        self._resize_timer.timeout.connect(self._render_current)
+        # 기준 사진 원본(최대크기) 픽스맵 — 슬라이더 변경 시 재디코드 없이 재스케일.
+        self._ref_source: QPixmap | None = None
         # 현재 검토 중인 ref 원본 경로 — 우클릭 ‘크게보기’ 가 참조 (#13).
         self._cur_ref_path: Path | None = None
         # 결과: 호출자가 다이얼로그가 끝난 뒤 가져갈 데이터.
@@ -563,10 +589,14 @@ class UnmatchedReviewDialog(QDialog):
         # 현재 슬라이더 크기를 ref 패널에 반영 (#1).
         self.ref_img.setFixedSize(self._ref_px, self._ref_px)
         self._left_panel.setFixedWidth(self._ref_px + 40)
-        # 기준 사진 — 원본 파일을 직접 디코드해서 ‘원본 화질’ 그대로 보여준다.
-        # 현재 ref 한 장만 로드되므로 비용은 낮다.
-        pm = _load_full_pixmap_scaled(Path(cur.path), self._ref_px)
-        self.ref_img.setPixmap(pm)
+        # 기준 사진 — 원본을 최대 크기로 한 번만 디코드해 보관하고, 현재 크기로
+        # 재스케일해 표시 (슬라이더 변경 시 재디코드 없이 재사용).
+        self._ref_source = _load_full_pixmap_scaled(Path(cur.path), _SIZE_MAX_PX)
+        self.ref_img.setPixmap(self._ref_source.scaled(
+            self._ref_px, self._ref_px,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        ))
 
         # 후보 = 같은 슬롯의 val_pool 중 (a) 이미 다른 매칭에 쓰이지 않은 항목.
         pool = (self._val_pool_keyed.get((cur.slot, cur.side))
@@ -612,18 +642,25 @@ class UnmatchedReviewDialog(QDialog):
 
     # ------------------------------------------------------------------
     def _on_size_changed(self, value: int) -> None:
-        """사진 크기 슬라이더 변경 (#1) — 후보 그리드 재생성은 디바운스."""
+        """사진 크기 슬라이더 변경 (#1) — 행/타일을 재생성하지 않고 그 자리에서
+        보관 픽스맵을 재스케일한다 (재빌드/재디코드 없음 → 대량 후보에서도 즉시)."""
         self._ref_px = int(value)
         self._cand_px = max(60, int(value * _CAND_RATIO))
         self.size_value.setText(f"{value} px")
-        # 기준 사진은 즉시 재스케일(한 장이라 가벼움), 후보 그리드는 디바운스.
-        if self._cur_ref_path is not None:
-            self.ref_img.setFixedSize(self._ref_px, self._ref_px)
-            self._left_panel.setFixedWidth(self._ref_px + 40)
-            self.ref_img.setPixmap(
-                _load_full_pixmap_scaled(self._cur_ref_path, self._ref_px)
-            )
-        self._resize_timer.start(150)
+        # 기준 사진 — 보관된 원본에서 재스케일.
+        self.ref_img.setFixedSize(self._ref_px, self._ref_px)
+        self._left_panel.setFixedWidth(self._ref_px + 40)
+        if self._ref_source is not None and not self._ref_source.isNull():
+            self.ref_img.setPixmap(self._ref_source.scaled(
+                self._ref_px, self._ref_px,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            ))
+        # 후보 타일 — 기존 타일을 그 자리에서 재스케일.
+        for i in range(self._grid.count()):
+            w = self._grid.itemAt(i).widget()
+            if isinstance(w, _CandidateTile):
+                w.set_display_size(self._cand_px)
 
     # ------------------------------------------------------------------
     def _lookup_or_compute_score(self,

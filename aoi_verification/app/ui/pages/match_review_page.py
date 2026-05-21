@@ -63,6 +63,8 @@ class _LazyThumb(QLabel):
         self._path = Path(path)
         self._size = int(size)
         self._image_loaded = False
+        # 슬라이더 리사이즈를 재디코드 없이 처리하기 위한 원본(최대크기) 픽스맵.
+        self._source_pix: QPixmap | None = None
         self.setFixedSize(self._size, self._size)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         if subtle:
@@ -85,16 +87,27 @@ class _LazyThumb(QLabel):
 
     def _load(self) -> None:
         try:
-            self.setPixmap(image_io.load_thumb_qpixmap(self._path, self._size))
+            # 최대 크기로 한 번만 디코드해 보관 → 슬라이더 변경 시 재디코드 없이 재스케일.
+            self._source_pix = image_io.load_thumb_qpixmap(self._path, _SIZE_MAX_PX)
+            self._apply_scaled()
         except Exception:
             pass
 
+    def _apply_scaled(self) -> None:
+        if self._source_pix is None or self._source_pix.isNull():
+            return
+        self.setPixmap(self._source_pix.scaled(
+            self._size, self._size,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        ))
+
     def set_size(self, size: int) -> None:
-        """슬라이더로 크기를 바꿀 때 호출 — 즉시 새 크기로 재로드 (#2)."""
+        """슬라이더로 크기를 바꿀 때 호출 (#2) — 재디코드 없이 보관 픽스맵 재스케일.
+        아직 로드 전이면 다음 paint 에서 새 크기 기준으로 로드된다."""
         self._size = int(size)
         self.setFixedSize(self._size, self._size)
-        self._image_loaded = True
-        self._load()
+        self._apply_scaled()
 
     def _on_context_menu(self, pos) -> None:
         menu = QMenu(self)
@@ -130,6 +143,10 @@ class _RunnerUpTile(QFrame):
         self._score_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(self._score_label)
 
+    def set_size(self, size: int) -> None:
+        """슬라이더 변경 시 썸네일을 그 자리에서 재스케일 (#2)."""
+        self._img.set_size(size)
+
     def mousePressEvent(self, event):  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton:
             self.swap_requested.emit(self.item, self.score)
@@ -157,6 +174,8 @@ class _MatchRow(QFrame):
         self._runnerup_px = max(40, int(thumb_px * 0.8))
         # 전체 차순위 후보 (정렬됨) 를 보관하고, 화면에는 일부 줄만 표시 (#5).
         self._runners_up = list(runners_up or [])     # [(ImageItem, score), ...]
+        # 현재 화면에 만들어진 차순위 타일 — 슬라이더 인플레이스 재스케일용 (#2).
+        self._runner_tiles: list["_RunnerUpTile"] = []
         # ‘후보 한 줄 더 보기’ 클릭마다 1 씩 늘어나는 표시 줄 수 (#5).
         self._visible_lines = 1
         self.setProperty("role", "card-soft")
@@ -302,16 +321,16 @@ class _MatchRow(QFrame):
         return tile
 
     def set_thumb_size(self, thumb_px: int) -> None:
-        """슬라이더로 썸네일 크기 변경 (#2) — 행 상태(매치없음 등)는 보존하고
-        보유 중인 썸네일만 새 크기로 갱신한다 (load_state 재호출 없음)."""
+        """슬라이더로 썸네일 크기 변경 (#2) — 행 상태(매치없음 등)는 보존하고,
+        타일을 재생성하지 않고 보유 중인 썸네일만 그 자리에서 재스케일한다
+        (재빌드/재디코드 없음 → 대량 행에서도 즉시 반응). 열 수 재배치는 다음
+        창 크기 변경(resizeEvent)에서 자연히 반영된다."""
         self._thumb_px = int(thumb_px)
         self._runnerup_px = max(40, int(thumb_px * 0.8))
         self._ref_img.set_size(self._thumb_px)
         self._val_img.set_size(self._thumb_px)
-        # 차순위 타일은 새 크기로 재생성 (열 수도 함께 재계산).
-        if self._runners_up:
-            self._last_cols = (self._first_cols(), self._grid_cols())
-            self._render_runners()
+        for tile in self._runner_tiles:
+            tile.set_size(self._runnerup_px)
 
     def _render_runners(self) -> None:
         """첫 줄은 인라인(_first_line_host), 추가 줄은 아래 그리드에 채운다 (#3/#5).
@@ -322,6 +341,9 @@ class _MatchRow(QFrame):
         fc = self._first_cols()      # 첫 줄(인라인) 열 수 — 최소 4, 가변
         gc = self._grid_cols()       # 추가 줄(그리드) 열 수 — 최소 5, 가변
 
+        # 재생성하므로 인플레이스 재스케일용 타일 목록도 비운다 (#2).
+        self._runner_tiles = []
+
         # 인라인 첫 줄을 비우고 다시 채운다.
         while self._first_line_lay.count():
             it = self._first_line_lay.takeAt(0)
@@ -329,9 +351,9 @@ class _MatchRow(QFrame):
             if w is not None:
                 w.deleteLater()
         for item, score in self._runners_up[:fc]:
-            self._first_line_lay.addWidget(
-                self._make_tile(item, score, self._first_line_host)
-            )
+            tile = self._make_tile(item, score, self._first_line_host)
+            self._runner_tiles.append(tile)
+            self._first_line_lay.addWidget(tile)
 
         if self._runner_grid is None:
             return
@@ -346,10 +368,9 @@ class _MatchRow(QFrame):
         extra_lines = max(0, self._visible_lines - 1)
         rest = self._runners_up[fc:fc + extra_lines * gc]
         for idx, (item, score) in enumerate(rest):
-            self._runner_grid.addWidget(
-                self._make_tile(item, score, self._runner_host),
-                idx // gc, idx % gc,
-            )
+            tile = self._make_tile(item, score, self._runner_host)
+            self._runner_tiles.append(tile)
+            self._runner_grid.addWidget(tile, idx // gc, idx % gc)
 
         # 모두 표시했으면 ‘더 보기’ 버튼을 숨긴다.
         visible_count = fc + len(rest)

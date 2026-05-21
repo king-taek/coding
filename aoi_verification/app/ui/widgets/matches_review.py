@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPixmap
 from PyQt6.QtWidgets import (QDialog, QHBoxLayout, QLabel, QScrollArea,
                               QVBoxLayout, QWidget)
@@ -45,6 +45,8 @@ class _Row(QWidget):
         self.match = m
         self._size = int(size)
         self._pending = False
+        # 슬라이더 리사이즈를 재빌드 없이 처리하기 위한 (label, source_pix) 보관.
+        self._thumbs: list[tuple[QLabel, QPixmap]] = []
         self.setObjectName("matchRow")
         # 스타일시트 배경/테두리가 일반 QWidget 에도 칠해지도록.
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -80,6 +82,20 @@ class _Row(QWidget):
         self.btn.clicked.connect(lambda: self.delete_requested.emit(self.match))
         lay.addWidget(self.btn)
 
+    def set_thumb_size(self, size: int) -> None:
+        """슬라이더로 크기 변경 (#2) — 행을 재생성하지 않고 보관된 source 픽스맵을
+        그 자리에서 재스케일한다.  대량 행에서도 즉시 반응(재빌드/재디코드 없음)."""
+        self._size = int(size)
+        self.setMinimumHeight(self._size + 40)
+        for label, source in self._thumbs:
+            label.setFixedSize(self._size, self._size)
+            label.setPixmap(source.scaled(
+                self._size, self._size,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            ))
+
+
     def set_pending_delete(self, pending: bool) -> None:
         """삭제 예정 표시 — 빨간 테두리 + 버튼 토글 (확인 전까지 실제 삭제 안 함)."""
         self._pending = bool(pending)
@@ -91,8 +107,7 @@ class _Row(QWidget):
             self.btn.setText(i18n.KO.REVIEW_BTN_DELETE)
             self.btn.setRole("danger")
 
-    @staticmethod
-    def _make_thumb(p: Path, size: int = _THUMB):
+    def _make_thumb(self, p: Path, size: int = _THUMB):
         from PyQt6.QtWidgets import QVBoxLayout, QWidget
         host = QWidget()
         v = QVBoxLayout(host)
@@ -112,12 +127,19 @@ class _Row(QWidget):
         if pix.isNull():
             pix = QPixmap(size, size)
             pix.fill(QColor(20, 28, 40))
-        pix = pix.scaled(
+        # source 픽스맵은 최대 슬라이더 크기로 한 번만 다운스케일해 보관 →
+        # 슬라이더 리사이즈 시 재디코드 없이 또렷하게 재스케일, 메모리도 상한.
+        source = pix.scaled(
+            _SIZE_MAX_PX, _SIZE_MAX_PX,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        ) if max(pix.width(), pix.height()) > _SIZE_MAX_PX else pix
+        self._thumbs.append((lab, source))
+        lab.setPixmap(source.scaled(
             size, size,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
-        )
-        lab.setPixmap(pix)
+        ))
         v.addWidget(lab)
 
         cap = QLabel(Path(p).name, host)
@@ -142,9 +164,6 @@ class MatchesReviewDialog(QDialog):
         self._pending_keys: set = set()       # 삭제 예정 (확인 전) MatchResult.key
         self._rows_by_key: dict = {}
         self._thumb_px = _THUMB               # 사진 크기 (#2)
-        self._resize_timer = QTimer(self)     # 슬라이더 드래그 디바운스
-        self._resize_timer.setSingleShot(True)
-        self._resize_timer.timeout.connect(self._render)
         self._matches: list[MatchResult] = sorted(
             matches, key=lambda m: (m.slot, m.ref_path.name.lower()),
         )
@@ -206,7 +225,9 @@ class MatchesReviewDialog(QDialog):
     def _on_size_changed(self, value: int) -> None:
         self._thumb_px = int(value)
         self.size_value.setText(f"{value} px")
-        self._resize_timer.start(150)
+        # 행을 재생성하지 않고 보관된 픽스맵을 그 자리에서 재스케일 (#2 성능).
+        for row in self._rows_by_key.values():
+            row.set_thumb_size(self._thumb_px)
 
     def _render(self) -> None:
         while self._list.count():
