@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QPixmap
 from PyQt6.QtWidgets import (QDialog, QHBoxLayout, QLabel, QScrollArea,
                               QVBoxLayout, QWidget)
@@ -19,10 +19,13 @@ from ... import i18n
 from ...models.result import MatchResult
 from ...utils import image_io
 from .neon_button import NeonButton
+from .no_wheel_slider import NoWheelSlider
 from .window_controls import add_fullscreen_shortcut, enable_window_controls
 
 
-_THUMB = 240
+_THUMB = 240            # 썸네일 기본 크기 (px) — 슬라이더로 조절 (#2).
+_SIZE_MIN_PX = 140
+_SIZE_MAX_PX = 480
 
 
 class _Row(QWidget):
@@ -37,14 +40,15 @@ class _Row(QWidget):
         "border-radius: 8px; }"
     )
 
-    def __init__(self, m: MatchResult, parent=None) -> None:
+    def __init__(self, m: MatchResult, parent=None, *, size: int = _THUMB) -> None:
         super().__init__(parent)
         self.match = m
+        self._size = int(size)
         self._pending = False
         self.setObjectName("matchRow")
         # 스타일시트 배경/테두리가 일반 QWidget 에도 칠해지도록.
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setMinimumHeight(_THUMB + 40)
+        self.setMinimumHeight(self._size + 40)
         # objectName 선택자로 한정 — 자식 위젯에 빨간 테두리가 번지지 않게.
         self.setStyleSheet(self._STYLE_NORMAL)
         lay = QHBoxLayout(self)
@@ -62,14 +66,14 @@ class _Row(QWidget):
         meta.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         lay.addWidget(meta)
 
-        lay.addWidget(self._make_thumb(m.ref_path))
+        lay.addWidget(self._make_thumb(m.ref_path, self._size))
         arrow = QLabel("→", self)
         arrow.setStyleSheet(
             "color: #7FB3D5; font-size: 24px; border: none;"
         )
         arrow.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(arrow)
-        lay.addWidget(self._make_thumb(m.val_path))
+        lay.addWidget(self._make_thumb(m.val_path, self._size))
         lay.addStretch(1)
 
         self.btn = NeonButton(i18n.KO.REVIEW_BTN_DELETE, role="danger")
@@ -88,7 +92,7 @@ class _Row(QWidget):
             self.btn.setRole("danger")
 
     @staticmethod
-    def _make_thumb(p: Path):
+    def _make_thumb(p: Path, size: int = _THUMB):
         from PyQt6.QtWidgets import QVBoxLayout, QWidget
         host = QWidget()
         v = QVBoxLayout(host)
@@ -96,20 +100,20 @@ class _Row(QWidget):
         v.setSpacing(2)
 
         lab = QLabel()
-        lab.setFixedSize(_THUMB, _THUMB)
+        lab.setFixedSize(size, size)
         lab.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lab.setStyleSheet("border: none;")
         try:
             mid = image_io.get_mid_path(Path(p))
             pix = QPixmap(str(mid))
         except Exception:
-            pix = QPixmap(_THUMB, _THUMB)
+            pix = QPixmap(size, size)
             pix.fill(QColor(20, 28, 40))
         if pix.isNull():
-            pix = QPixmap(_THUMB, _THUMB)
+            pix = QPixmap(size, size)
             pix.fill(QColor(20, 28, 40))
         pix = pix.scaled(
-            _THUMB, _THUMB,
+            size, size,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
@@ -137,6 +141,10 @@ class MatchesReviewDialog(QDialog):
         self._removed: list[MatchResult] = []
         self._pending_keys: set = set()       # 삭제 예정 (확인 전) MatchResult.key
         self._rows_by_key: dict = {}
+        self._thumb_px = _THUMB               # 사진 크기 (#2)
+        self._resize_timer = QTimer(self)     # 슬라이더 드래그 디바운스
+        self._resize_timer.setSingleShot(True)
+        self._resize_timer.timeout.connect(self._render)
         self._matches: list[MatchResult] = sorted(
             matches, key=lambda m: (m.slot, m.ref_path.name.lower()),
         )
@@ -171,6 +179,22 @@ class MatchesReviewDialog(QDialog):
         root.addWidget(scroll, stretch=1)
 
         bar = QHBoxLayout()
+        # 사진 크기 슬라이더 (#2) — 마우스 휠로는 조절 불가 (NoWheelSlider).
+        size_label = QLabel(i18n.KO.IMAGE_SIZE_LABEL, self)
+        size_label.setProperty("role", "muted")
+        bar.addWidget(size_label)
+        self.size_slider = NoWheelSlider(Qt.Orientation.Horizontal, self)
+        self.size_slider.setRange(_SIZE_MIN_PX, _SIZE_MAX_PX)
+        self.size_slider.setValue(self._thumb_px)
+        self.size_slider.setSingleStep(20)
+        self.size_slider.setPageStep(80)
+        self.size_slider.setFixedWidth(180)
+        self.size_slider.valueChanged.connect(self._on_size_changed)
+        bar.addWidget(self.size_slider)
+        self.size_value = QLabel(f"{self._thumb_px} px", self)
+        self.size_value.setProperty("role", "muted")
+        self.size_value.setFixedWidth(56)
+        bar.addWidget(self.size_value)
         bar.addStretch(1)
         ok = NeonButton(i18n.KO.BTN_OK, role="primary")
         ok.clicked.connect(self._confirm)
@@ -178,6 +202,11 @@ class MatchesReviewDialog(QDialog):
         root.addLayout(bar)
 
         self._render()
+
+    def _on_size_changed(self, value: int) -> None:
+        self._thumb_px = int(value)
+        self.size_value.setText(f"{value} px")
+        self._resize_timer.start(150)
 
     def _render(self) -> None:
         while self._list.count():
@@ -187,7 +216,7 @@ class MatchesReviewDialog(QDialog):
                 w.deleteLater()
         self._rows_by_key = {}
         for m in self._matches:
-            row = _Row(m)
+            row = _Row(m, size=self._thumb_px)
             row.delete_requested.connect(self._on_delete)
             row.set_pending_delete(m.key in self._pending_keys)
             self._rows_by_key[m.key] = row

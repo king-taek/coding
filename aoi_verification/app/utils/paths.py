@@ -77,6 +77,13 @@ def feature_cache_dir() -> Path:
     return d
 
 
+def score_cache_dir() -> Path:
+    """(ref, val) 유사도 점수의 슬롯 단위 영속 캐시 폴더 (#5B)."""
+    d = cache_root() / "scores"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def session_cache_dir() -> Path:
     d = cache_root() / "session"
     d.mkdir(parents=True, exist_ok=True)

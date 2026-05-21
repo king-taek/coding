@@ -71,8 +71,7 @@ class UiPrefs:
     # 자동화 수준 — 사용자 개입 정도 (#3 올인원 모드)
     #   "manual"      : 기존 흐름. Stage 1 (검증/제외) + Stage 2 (수동 매치).
     #   "user_select" : Stage 1 만 직접, Stage 2 자동 매치 + 검토.
-    #   "auto_all"    : Stage 1 건너뜀 (모든 ref 사용 + 그룹 대표만 큐에),
-    #                   Stage 2 자동 매치 + 그룹/매치 검토.
+    #   "auto_all"    : Stage 1 건너뜀 (모든 ref 사용), Stage 2 자동 매치 + 검토.
     automation_level: str = "manual"
     # OpenVINO (Intel GPU/NPU 가속) 자동 설치 안내를 거절한 경우 — 다시 묻지
     # 않음.  사용자가 ‘다시 보지 않기’ 를 선택했거나 설치 시도 후 실패하면 True.
@@ -84,7 +83,7 @@ class UiPrefs:
     pre_grayscale: bool = False              # 강화: 흑백 + 고감도
     pre_contrast: bool = False               # 강화: 고대비
     kla_crop: bool = False                   # KLA 상/하단 정보영역 crop
-    group_threshold: float = 0.45            # 동일 defect 그룹화 pHash 임계치(#6)
+    persist_scores: bool = False             # 유사도 점수 디스크 캐시 (#5B)
     kla_crop_top: float = 0.08               # 상단 잘라낼 비율 (0~0.4)
     kla_crop_bottom: float = 0.08            # 하단 잘라낼 비율 (0~0.4)
     extra: dict[str, Any] = field(default_factory=dict)

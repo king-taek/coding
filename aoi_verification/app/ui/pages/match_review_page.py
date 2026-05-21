@@ -25,12 +25,15 @@ from ...models.result import MatchResult, MissEntry
 from ...models.slot import ImageItem
 from ...utils import image_io
 from ..widgets.neon_button import NeonButton
+from ..widgets.no_wheel_slider import NoWheelSlider
 from ..widgets.zoom_window import FullscreenViewer
 
 
-_THUMB_PX = 140
+_THUMB_PX = 140                             # 기준 썸네일 기본 크기 (#2)
 _RUNNERUP_PX = int(_THUMB_PX * 0.8)         # 차순위는 20% 작게
 _TILE_W = _RUNNERUP_PX + 12                 # 타일 1개 점유 폭(간격 포함)
+_SIZE_MIN_PX = 100
+_SIZE_MAX_PX = 360
 # 후보 열 수 — 창 너비에 따라 가변, 최소값만 보장 (#1).
 #   첫 줄(1위 매치 옆 인라인)은 최소 4 장, ‘한 줄 더 보기’ 의 아래 줄은 최소 5 장.
 #   가로로 넘치지 않도록 가용 폭 안에서만 늘린다 (큰 해상도일수록 더 많이).
@@ -86,6 +89,13 @@ class _LazyThumb(QLabel):
         except Exception:
             pass
 
+    def set_size(self, size: int) -> None:
+        """슬라이더로 크기를 바꿀 때 호출 — 즉시 새 크기로 재로드 (#2)."""
+        self._size = int(size)
+        self.setFixedSize(self._size, self._size)
+        self._image_loaded = True
+        self._load()
+
     def _on_context_menu(self, pos) -> None:
         menu = QMenu(self)
         act = menu.addAction(i18n.KO.CTX_VIEW_LARGER)
@@ -99,7 +109,8 @@ class _RunnerUpTile(QFrame):
 
     swap_requested = pyqtSignal(object, float)        # (ImageItem, score)
 
-    def __init__(self, item: ImageItem, score: float, parent=None) -> None:
+    def __init__(self, item: ImageItem, score: float, parent=None,
+                 *, size: int = _RUNNERUP_PX) -> None:
         super().__init__(parent)
         self.item = item
         self.score = float(score)
@@ -110,7 +121,7 @@ class _RunnerUpTile(QFrame):
         lay.setSpacing(2)
 
         # 지연 로드 + 우클릭 ‘크게보기’ 지원 (#6-4/#13).
-        self._img = _LazyThumb(item.path, size=_RUNNERUP_PX, subtle=True,
+        self._img = _LazyThumb(item.path, size=size, subtle=True,
                                parent=self)
         lay.addWidget(self._img, alignment=Qt.AlignmentFlag.AlignCenter)
 
@@ -135,10 +146,15 @@ class _MatchRow(QFrame):
     def __init__(self,
                  match: MatchResult,
                  runners_up: list[tuple] | None = None,
-                 parent=None) -> None:
+                 parent=None,
+                 *,
+                 thumb_px: int = _THUMB_PX) -> None:
         super().__init__(parent)
         self.match = match
         self._is_unmatched = False
+        # 썸네일 크기 (#2) — 차순위는 20% 작게 파생.
+        self._thumb_px = int(thumb_px)
+        self._runnerup_px = max(40, int(thumb_px * 0.8))
         # 전체 차순위 후보 (정렬됨) 를 보관하고, 화면에는 일부 줄만 표시 (#5).
         self._runners_up = list(runners_up or [])     # [(ImageItem, score), ...]
         # ‘후보 한 줄 더 보기’ 클릭마다 1 씩 늘어나는 표시 줄 수 (#5).
@@ -164,7 +180,7 @@ class _MatchRow(QFrame):
         top.addWidget(self._slot_label)
 
         # ref 이미지
-        self._ref_img = self._make_thumb(match.ref_path, size=_THUMB_PX)
+        self._ref_img = self._make_thumb(match.ref_path, size=self._thumb_px)
         top.addWidget(self._ref_img)
 
         # 화살표
@@ -178,7 +194,7 @@ class _MatchRow(QFrame):
         primary_lay = QVBoxLayout(primary_host)
         primary_lay.setContentsMargins(0, 0, 0, 0)
         primary_lay.setSpacing(2)
-        self._val_img = self._make_thumb(match.val_path, size=_THUMB_PX)
+        self._val_img = self._make_thumb(match.val_path, size=self._thumb_px)
         primary_lay.addWidget(self._val_img,
                               alignment=Qt.AlignmentFlag.AlignCenter)
         score_label = QLabel(f"{match.score * 100:.1f} %", primary_host)
@@ -251,16 +267,20 @@ class _MatchRow(QFrame):
             w = (p.width() if p is not None else 0) or 1280
         return w
 
+    def _tile_w(self) -> int:
+        """타일 1개 점유 폭 — 현재 차순위 썸네일 크기 + 간격 (#2)."""
+        return self._runnerup_px + 12
+
     def _first_cols(self) -> int:
         """첫 줄(인라인) 후보 열 수 — 최소 4, 가용 폭 안에서 가변 (#1)."""
         avail = self._row_width() - _FIRST_LINE_RESERVED_PX
-        fit = avail // _TILE_W if avail > 0 else 0
+        fit = avail // self._tile_w() if avail > 0 else 0
         return max(_MIN_FIRST_COLS, int(fit))
 
     def _grid_cols(self) -> int:
         """아래 추가 줄 후보 열 수 — 최소 5, 전체 폭 기준 가변 (#1)."""
         avail = self._row_width() - 60
-        fit = avail // _TILE_W if avail > 0 else 0
+        fit = avail // self._tile_w() if avail > 0 else 0
         return max(_MIN_GRID_COLS, int(fit))
 
     def resizeEvent(self, event):  # noqa: N802
@@ -275,11 +295,23 @@ class _MatchRow(QFrame):
 
     def _make_tile(self, item: ImageItem, score: float, parent) -> "_RunnerUpTile":
         """후보 타일 하나를 만들고 swap 시그널을 연결한다 (#3)."""
-        tile = _RunnerUpTile(item, score, parent=parent)
+        tile = _RunnerUpTile(item, score, parent=parent, size=self._runnerup_px)
         tile.swap_requested.connect(
             lambda it, s: self.swap_requested.emit(self.match, it, s)
         )
         return tile
+
+    def set_thumb_size(self, thumb_px: int) -> None:
+        """슬라이더로 썸네일 크기 변경 (#2) — 행 상태(매치없음 등)는 보존하고
+        보유 중인 썸네일만 새 크기로 갱신한다 (load_state 재호출 없음)."""
+        self._thumb_px = int(thumb_px)
+        self._runnerup_px = max(40, int(thumb_px * 0.8))
+        self._ref_img.set_size(self._thumb_px)
+        self._val_img.set_size(self._thumb_px)
+        # 차순위 타일은 새 크기로 재생성 (열 수도 함께 재계산).
+        if self._runners_up:
+            self._last_cols = (self._first_cols(), self._grid_cols())
+            self._render_runners()
 
     def _render_runners(self) -> None:
         """첫 줄은 인라인(_first_line_host), 추가 줄은 아래 그리드에 채운다 (#3/#5).
@@ -378,6 +410,10 @@ class MatchReviewPage(QWidget):
         self._score_cache = None
         self._val_pool: dict | None = None
         self._candidates_by_ref: dict | None = None
+        self._thumb_px = _THUMB_PX                  # 사진 크기 (#2)
+        self._resize_timer = QTimer(self)           # 슬라이더 드래그 디바운스
+        self._resize_timer.setSingleShot(True)
+        self._resize_timer.timeout.connect(self._apply_thumb_size)
         self._build()
 
     # ------------------------------------------------------------------
@@ -396,10 +432,29 @@ class MatchReviewPage(QWidget):
         hint.setStyleSheet("color: #7FB3D5;")
         root.addWidget(hint)
 
-        # 요약 라벨
+        # 요약 라벨 + 사진 크기 슬라이더 (#2)
+        summary_row = QHBoxLayout()
         self._summary_label = QLabel("", self)
         self._summary_label.setStyleSheet("color: #00FFA3; font-weight: 700;")
-        root.addWidget(self._summary_label)
+        summary_row.addWidget(self._summary_label)
+        summary_row.addStretch(1)
+        size_label = QLabel(i18n.KO.IMAGE_SIZE_LABEL, self)
+        size_label.setStyleSheet("color: #7FB3D5;")
+        summary_row.addWidget(size_label)
+        # 마우스 휠로는 조절 불가 (NoWheelSlider).
+        self.size_slider = NoWheelSlider(Qt.Orientation.Horizontal, self)
+        self.size_slider.setRange(_SIZE_MIN_PX, _SIZE_MAX_PX)
+        self.size_slider.setValue(self._thumb_px)
+        self.size_slider.setSingleStep(20)
+        self.size_slider.setPageStep(80)
+        self.size_slider.setFixedWidth(180)
+        self.size_slider.valueChanged.connect(self._on_size_changed)
+        summary_row.addWidget(self.size_slider)
+        self.size_value = QLabel(f"{self._thumb_px} px", self)
+        self.size_value.setStyleSheet("color: #7FB3D5;")
+        self.size_value.setFixedWidth(56)
+        summary_row.addWidget(self.size_value)
+        root.addLayout(summary_row)
 
         # 매치 리스트 (세로 스크롤만). 가로 스크롤은 끄고 창 너비에 맞춰
         # 후보 타일이 줄바꿈 되도록 한다 (#4).
@@ -487,9 +542,20 @@ class MatchReviewPage(QWidget):
                 self._append_row(m)
         self._update_summary()
 
+    def _on_size_changed(self, value: int) -> None:
+        self._thumb_px = int(value)
+        self.size_value.setText(f"{value} px")
+        self._resize_timer.start(150)
+
+    def _apply_thumb_size(self) -> None:
+        """슬라이더 변경 적용 (#2) — 행 상태를 보존한 채 썸네일 크기만 갱신."""
+        for row in self._rows:
+            row.set_thumb_size(self._thumb_px)
+
     def _append_row(self, match: MatchResult) -> "_MatchRow":
         runners = self._lookup_runners_up(match, self._score_cache, self._val_pool)
-        row = _MatchRow(match, runners_up=runners, parent=self)
+        row = _MatchRow(match, runners_up=runners, parent=self,
+                        thumb_px=self._thumb_px)
         row.toggle_requested.connect(self._on_toggle)
         row.swap_requested.connect(self._on_swap)
         self._list_layout.addWidget(row)
@@ -530,6 +596,7 @@ class MatchReviewPage(QWidget):
                     new_match, self._score_cache, self._val_pool,
                 ),
                 parent=self,
+                thumb_px=self._thumb_px,
             )
             new_row.toggle_requested.connect(self._on_toggle)
             new_row.swap_requested.connect(self._on_swap)

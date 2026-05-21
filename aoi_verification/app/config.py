@@ -128,6 +128,7 @@ class SimilarityConfig:
     kla_top: float = 0.08          # 상단 잘라낼 비율
     kla_bottom: float = 0.08       # 하단 잘라낼 비율
     top_k: int = 50                # ANN 재정렬 깊이 (고속 모드)
+    persist_scores: bool = False   # (ref,val) 점수 디스크 영속 캐시 (basic 엔진)
 
     def _center20_for(self, side) -> bool:
         """이 side(ref/val)에 중앙 영역 crop(30%)을 적용할지."""

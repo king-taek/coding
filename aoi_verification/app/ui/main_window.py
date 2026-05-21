@@ -456,6 +456,7 @@ class MainWindow(QMainWindow):
             grayscale=bool(getattr(inp, "pre_grayscale", False)),
             contrast=bool(getattr(inp, "pre_contrast", False)),
             kla_crop=bool(getattr(inp, "kla_crop", False)),
+            persist_scores=bool(getattr(inp, "persist_scores", False)),
         )
 
     def _on_start(self, inp: SetupInput) -> None:
@@ -566,14 +567,13 @@ class MainWindow(QMainWindow):
         """
         if self._input is None:
             return
-        self._loading.set_progress(0, 0, i18n.KO.LOAD_THRESHOLD_ANALYSIS)
+        self._loading.set_progress(0, 0, i18n.KO.LOAD_STAGE_PREP)
         QTimer.singleShot(0, self._continue_after_thumbs)
 
     def _continue_after_thumbs(self) -> None:
         """``_on_thumbs_ready`` 의 안전한 후속 — 모달/페이지 전환 OK."""
         if self._input is None:
             return
-        self._maybe_offer_threshold_suggestion()
         self._loading.set_progress(0, 0, i18n.KO.LOAD_STAGE_PREP)
         if self._input.automation_level == AutomationLevel.AUTO_ALL:
             self._loading.hide_overlay()
@@ -621,39 +621,6 @@ class MainWindow(QMainWindow):
         self._reviewed_matches = list(kept)
         self._reviewed_unmatched = list(unmatched_refs)
         self._finish_session()
-
-    def _maybe_offer_threshold_suggestion(self) -> None:
-        """스캔 데이터의 점수 분포를 분석해 임계치를 추천."""
-        if self._scan is None or self._input is None:
-            return
-        try:
-            from ..similarity import threshold as _thr
-            sug = _thr.suggest_threshold(self._scan)
-        except Exception:
-            return
-        if sug is None:
-            return
-        # 현재 임계치와 5%p 이상 차이날 때만 물어본다.
-        if abs(sug.suggested - self._input.threshold) < 0.05:
-            return
-        r = QMessageBox.question(
-            self, i18n.KO.THRESHOLD_SUGGESTION_TITLE,
-            i18n.KO.THRESHOLD_SUGGESTION_FMT.format(
-                suggested=sug.suggested, current=self._input.threshold,
-                same_median=sug.same_median, same_min=sug.same_min,
-                diff_median=sug.diff_median, diff_max=sug.diff_max,
-                margin=sug.margin,
-            ),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes,
-        )
-        if r == QMessageBox.StandardButton.Yes:
-            self._input.threshold = float(sug.suggested)
-            try:
-                from ..utils import prefs as _prefs
-                _prefs.patch(threshold=float(sug.suggested))
-            except Exception:
-                pass
 
     # ==================================================================
     # Phase 식별 helpers

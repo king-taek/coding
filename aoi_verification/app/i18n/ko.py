@@ -70,26 +70,6 @@ END_SELECTION_CONFIRM_FMT = (
 )
 BULK_SELECT_EXCLUDED_TITLE = "검증 제외 사진"
 
-# 동일 defect 그룹화 (#5)
-BTN_VIEW_GROUPS = "동일 defect 그룹 보기"
-BTN_VIEW_GROUPS_FMT = "동일 defect 그룹 보기 ({n})"
-GROUP_DIALOG_TITLE_FMT = "동일 defect 그룹 — {g} 그룹 / {n} 장"
-GROUP_DIALOG_HINT = (
-    "동일 슬롯 안에서 카메라 위치만 조금 다른 같은 defect 사진들을 묶었습니다. "
-    "그룹별로 [전체 검증] / [전체 제외] 를 한 번에 적용할 수 있습니다."
-)
-GROUP_DIALOG_EMPTY = (
-    "묶을 만한 동일 defect 그룹을 찾지 못했습니다 (모든 후보가 서로 다른 사진)."
-)
-GROUP_REF_ONLY_INFO = (
-    "동일 defect 그룹화는 기준 장비 사진에 대해서만 진행합니다.\n"
-    "현재 화면에는 그룹화할 기준 장비 후보가 없습니다."
-)
-GROUP_ROW_HEADER_FMT = "{slot} — {n} 장"
-GROUP_BTN_VERIFY_ALL = "이 그룹 전체 검증"
-GROUP_BTN_EXCLUDE_ALL = "이 그룹 전체 제외"
-GROUP_LOAD_FMT = "동일 defect 그룹 계산 중… {done} / {total}\n{status}"
-GROUP_RESULT_TOAST_FMT = "{n} 장이 {action} 처리되었습니다 (1 개 그룹)"
 BTN_EXPORT_EXCEL = "엑셀로 저장"
 BTN_OPEN_RESULT = "결과 폴더 열기"
 BTN_NEW_SESSION = "새 검증 시작"
@@ -238,16 +218,16 @@ CENTER20_TOOLTIP = (
     "기준·검증을 각각 켤 수 있으며, 보통 둘 다 켜는 것이 정확합니다.\n"
     "썸네일/엑셀 이미지는 원본 그대로 유지됩니다."
 )
-GROUP_THRESHOLD_LABEL = "그룹화 임계치"
-GROUP_THRESHOLD_TOOLTIP = (
-    "동일 defect 그룹화의 pHash 유사도 임계치입니다.\n"
-    "높일수록 더 비슷한 사진끼리만 묶이고(엄격), 낮출수록 느슨하게 묶입니다.\n"
-    "'모든 사진 자동' 모드의 대표 사진 선별에 영향을 줍니다."
-)
 PRE_GROUP_TITLE = "강화 전처리 (계산 전용 — 화면 표시는 원본 유지)"
 PRE_GRAYSCALE_LABEL = "흑백 + 고감도"
 PRE_CONTRAST_LABEL = "고대비"
 KLA_CROP_LABEL = "KLA 정보영역 잘라내기 (상·하단 텍스트)"
+PERSIST_SCORES_LABEL = "유사도 점수 디스크 캐시 (재실행 시 재계산 생략)"
+PERSIST_SCORES_TOOLTIP = (
+    "basic 엔진에서 계산한 (기준, 검증) 쌍의 유사도 점수를 디스크에 저장합니다.\n"
+    "같은 사진/설정으로 다시 실행하면 저장된 점수를 불러와 재계산을 건너뜁니다.\n"
+    "사진이 바뀌거나 전처리/엔진 설정이 달라지면 자동으로 다시 계산합니다."
+)
 PRE_GROUP_TOOLTIP = (
     "유사도 계산에만 적용되는 이미지 보정입니다. 썸네일/엑셀 이미지는\n"
     "원본 그대로 유지됩니다. 각 옵션은 독립적으로 켤 수 있습니다."
@@ -379,10 +359,6 @@ MODEL_TOOLTIP = (
 
 # ── 로딩/진행 ──────────────────────────────────────────────────────────────
 LOAD_THUMBNAIL_FMT = "썸네일 생성 중… {done} / {total}"
-LOAD_THRESHOLD_ANALYSIS = (
-    "임계치 추천 분석 중…\n"
-    "샘플 사진들의 유사도 분포를 측정해 권장 임계치를 계산합니다."
-)
 LOAD_STAGE_PREP = "다음 단계 준비 중…"
 LOAD_FEATURE_FMT = "검증 장비 특징 추출 중… {done} / {total}"
 LOAD_FEATURE_DONE = "검증 장비 특징 추출 완료 — 이후 매칭은 즉시 처리됩니다"
@@ -410,10 +386,10 @@ LOAD_AUTO_MATCH_FMT = "자동 매치 진행 중… {done} / {total}"
 AUTOMATION_TITLE = "자동화 수준"
 AUTOMATION_MANUAL = "수동 — 모든 단계 직접 처리 (기존 방식)"
 AUTOMATION_USER_SELECT = "사진 직접 선택 + 매치는 자동"
-AUTOMATION_AUTO_ALL = "모든 사진 자동 — Stage 1 도 그룹화로 건너뛰기"
+AUTOMATION_AUTO_ALL = "모든 사진 자동 — Stage 1 건너뛰기"
 AUTOMATION_HINT = (
     "자동 모드에서는 임계치 이상에서 가장 점수가 높은 후보가 자동으로 선택됩니다.\n"
-    "‘모든 사진 자동’ 은 거의 동일한 사진을 그룹화로 한 장만 남깁니다.\n"
+    "‘모든 사진 자동’ 은 Stage 1 을 건너뛰고 모든 기준 사진을 자동으로 매치합니다.\n"
     "자동 매치 종료 후 결과 화면에서 [매칭 결과 검토] 로 잘못된 매치를 제거할 수 있습니다."
 )
 AUTO_REVIEW_HINT_FMT = (
@@ -463,16 +439,6 @@ SLOT_MAP_ADD = "추가"
 SLOT_MAP_REMOVE = "선택 해제"
 SLOT_MAP_OPEN = "매핑 다이얼로그 열기"
 
-# ── 임계치 자동 추천 ───────────────────────────────────────────────────────
-THRESHOLD_SUGGESTION_TITLE = "임계치 추천"
-THRESHOLD_SUGGESTION_FMT = (
-    "스캔된 데이터의 분포를 분석한 결과 임계치 {suggested:.2f} 를 추천합니다.\n"
-    "(현재 설정: {current:.2f})\n\n"
-    "같은 슬롯 점수 — 중앙값 {same_median:.2f},  최소 {same_min:.2f}\n"
-    "다른 슬롯 점수 — 중앙값 {diff_median:.2f},  최대 {diff_max:.2f}\n"
-    "분포 간 여유: {margin:+.2f}\n\n"
-    "추천 값으로 변경하시겠습니까?"
-)
 INFO_RESUME_TITLE = "이전 검증 이어하기"
 INFO_RESUME_BODY = "진행 중인 검증이 있습니다. 이어서 하시겠습니까?"
 INFO_NEW_SESSION = "새로 시작"

@@ -268,13 +268,3 @@ def test_center_side_aware_cache_extra():
     assert cfg.has_preprocess is True
     both = config.SimilarityConfig(center20_ref=True, center20_val=True)
     assert both.cache_extra("ref") == "c30" and both.cache_extra("val") == "c30"
-
-
-# ---- 그룹화 임계치 파라미터 (#6) -----------------------------------------
-def test_group_slot_accepts_threshold():
-    import inspect
-    from aoi_verification.app.similarity import grouping
-    sig = inspect.signature(grouping.group_slot)
-    assert "phash_threshold" in sig.parameters
-    sig2 = inspect.signature(grouping.GroupingWorker.__init__)
-    assert "phash_threshold" in sig2.parameters

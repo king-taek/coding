@@ -26,6 +26,7 @@ from ... import i18n
 from ...models.result import MatchResult, MissEntry
 from ...models.slot import ImageItem
 from .neon_button import NeonButton
+from .no_wheel_slider import NoWheelSlider
 from .window_controls import add_fullscreen_shortcut, enable_window_controls
 
 
@@ -136,9 +137,13 @@ def _attach_view_larger(label: QLabel, path_getter) -> None:
     # 외부에서 동일 동작을 호출할 수 있도록 콜러블 노출 (스모크 테스트 등).
     label.view_larger = _show_large  # type: ignore[attr-defined]
 
-_REF_PX = 420           # 좌측 기준 사진 크기 — 원본 화질에서 다운스케일.
-_CAND_PX = 260          # 우측 후보 타일 — 썸네일 대신 원본을 lazy 로드.
+_REF_PX = 420           # 좌측 기준 사진 기본 크기 — 원본 화질에서 다운스케일.
+_CAND_PX = 260          # 우측 후보 타일 기본 크기 — 썸네일 대신 원본을 lazy 로드.
 _CAND_CAP_PX = 28       # 캡션 한 줄
+# 크기 슬라이더 범위 (기준 사진 한 변, px) — 후보 타일은 비율로 파생 (#1).
+_SIZE_MIN_PX = 250
+_SIZE_MAX_PX = 700
+_CAND_RATIO = _CAND_PX / _REF_PX        # ≈ 0.62
 
 
 # ---------------------------------------------------------------------------
@@ -169,24 +174,26 @@ class _CandidateTile(QFrame):
 
     picked = pyqtSignal(object)            # ImageItem
 
-    def __init__(self, item: ImageItem, score: float, parent=None) -> None:
+    def __init__(self, item: ImageItem, score: float, parent=None,
+                 *, size: int = _CAND_PX) -> None:
         super().__init__(parent)
         self.item = item
         self.score = float(score)
+        self._size = int(size)
         self._image_loaded = False
         self.setProperty("role", "card-soft")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedSize(_CAND_PX + 16, _CAND_PX + _CAND_CAP_PX + 32)
+        self.setFixedSize(self._size + 16, self._size + _CAND_CAP_PX + 32)
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(8, 8, 8, 8)
         lay.setSpacing(4)
 
         self._img_label = QLabel(self)
-        self._img_label.setFixedSize(_CAND_PX, _CAND_PX)
+        self._img_label.setFixedSize(self._size, self._size)
         self._img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         # 우선 placeholder — paintEvent 첫 발생 시 원본을 비동기로 로드.
-        ph = QPixmap(_CAND_PX, _CAND_PX)
+        ph = QPixmap(self._size, self._size)
         ph.fill(QColor(20, 28, 40))
         self._img_label.setPixmap(ph)
         # 우클릭 ‘크게보기’ (#13) — 후보 원본 경로를 그대로 연다.
@@ -209,7 +216,7 @@ class _CandidateTile(QFrame):
         cap.setWordWrap(False)
         fm = QFontMetrics(cap.font())
         cap.setText(fm.elidedText(
-            item.filename, Qt.TextElideMode.ElideMiddle, _CAND_PX - 4,
+            item.filename, Qt.TextElideMode.ElideMiddle, self._size - 4,
         ))
         cap.setToolTip(item.filename)
         lay.addWidget(cap)
@@ -225,7 +232,7 @@ class _CandidateTile(QFrame):
 
     def _load_full(self) -> None:
         try:
-            pix = _load_full_pixmap_scaled(Path(self.item.path), _CAND_PX)
+            pix = _load_full_pixmap_scaled(Path(self.item.path), self._size)
             self._img_label.setPixmap(pix)
         except Exception:
             pass
@@ -260,6 +267,13 @@ class UnmatchedReviewDialog(QDialog):
         self._used_vals: set[Path] = {Path(p) for p in already_used_vals}
         self._score_cache = score_cache
         self._idx = 0
+        # 사진 크기 (#1) — 슬라이더로 조절. 후보 타일은 비율로 파생.
+        self._ref_px = _REF_PX
+        self._cand_px = _CAND_PX
+        # 슬라이더 드래그 중 후보 그리드 재생성을 디바운스 (#1).
+        self._resize_timer = QTimer(self)
+        self._resize_timer.setSingleShot(True)
+        self._resize_timer.timeout.connect(self._render_current)
         # 현재 검토 중인 ref 원본 경로 — 우클릭 ‘크게보기’ 가 참조 (#13).
         self._cur_ref_path: Path | None = None
         # 결과: 호출자가 다이얼로그가 끝난 뒤 가져갈 데이터.
@@ -303,6 +317,23 @@ class UnmatchedReviewDialog(QDialog):
             "color: #00D4FF; font-weight: 700; font-size: 15px;"
         )
         head.addWidget(self.progress_label)
+        head.addSpacing(20)
+        # 사진 크기 슬라이더 (#1) — 마우스 휠로는 조절 불가 (NoWheelSlider).
+        size_label = QLabel(i18n.KO.IMAGE_SIZE_LABEL, self)
+        size_label.setStyleSheet("color: #7FB3D5;")
+        head.addWidget(size_label)
+        self.size_slider = NoWheelSlider(Qt.Orientation.Horizontal, self)
+        self.size_slider.setRange(_SIZE_MIN_PX, _SIZE_MAX_PX)
+        self.size_slider.setValue(self._ref_px)
+        self.size_slider.setSingleStep(20)
+        self.size_slider.setPageStep(80)
+        self.size_slider.setFixedWidth(160)
+        self.size_slider.valueChanged.connect(self._on_size_changed)
+        head.addWidget(self.size_slider)
+        self.size_value = QLabel(f"{self._ref_px} px", self)
+        self.size_value.setStyleSheet("color: #7FB3D5;")
+        self.size_value.setFixedWidth(56)
+        head.addWidget(self.size_value)
         head.addStretch(1)
         # 네비게이션 버튼
         self.btn_prev = NeonButton(i18n.KO.BTN_UNMATCHED_PREV, role="ghost")
@@ -366,7 +397,7 @@ class UnmatchedReviewDialog(QDialog):
         self.ref_filename.setWordWrap(True)
         ll.addWidget(self.ref_filename)
         self.ref_img = QLabel(left)
-        self.ref_img.setFixedSize(_REF_PX, _REF_PX)
+        self.ref_img.setFixedSize(self._ref_px, self._ref_px)
         self.ref_img.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.ref_img.setStyleSheet(
             "background: #050810; border: 1px solid #1F2A3F; border-radius: 6px;"
@@ -375,7 +406,8 @@ class UnmatchedReviewDialog(QDialog):
         _attach_view_larger(self.ref_img, lambda: self._cur_ref_path)
         ll.addWidget(self.ref_img, alignment=Qt.AlignmentFlag.AlignCenter)
         ll.addStretch(1)
-        left.setFixedWidth(_REF_PX + 40)
+        self._left_panel = left
+        left.setFixedWidth(self._ref_px + 40)
         body.addWidget(left)
 
         # RIGHT: 후보 그리드 (스크롤)
@@ -528,9 +560,12 @@ class UnmatchedReviewDialog(QDialog):
         self.ref_filename.setText(Path(cur.path).name)
         self._cur_ref_path = Path(cur.path)
 
+        # 현재 슬라이더 크기를 ref 패널에 반영 (#1).
+        self.ref_img.setFixedSize(self._ref_px, self._ref_px)
+        self._left_panel.setFixedWidth(self._ref_px + 40)
         # 기준 사진 — 원본 파일을 직접 디코드해서 ‘원본 화질’ 그대로 보여준다.
         # 현재 ref 한 장만 로드되므로 비용은 낮다.
-        pm = _load_full_pixmap_scaled(Path(cur.path), _REF_PX)
+        pm = _load_full_pixmap_scaled(Path(cur.path), self._ref_px)
         self.ref_img.setPixmap(pm)
 
         # 후보 = 같은 슬롯의 val_pool 중 (a) 이미 다른 매칭에 쓰이지 않은 항목.
@@ -567,12 +602,28 @@ class UnmatchedReviewDialog(QDialog):
         # 허용)해 사용자가 한 번에 3개 이상 비교할 수 있게 한다.
         spacing = self._grid.spacing()
         viewport_width = self._scroll.viewport().width()
-        fit = viewport_width // (_CAND_PX + spacing)
+        fit = viewport_width // (self._cand_px + spacing)
         cols = max(3, min(5, fit))
         for i, (score, v) in enumerate(scored):
-            tile = _CandidateTile(v, score, parent=self._host)
+            tile = _CandidateTile(v, score, parent=self._host,
+                                  size=self._cand_px)
             tile.picked.connect(self._on_pick)
             self._grid.addWidget(tile, i // cols, i % cols)
+
+    # ------------------------------------------------------------------
+    def _on_size_changed(self, value: int) -> None:
+        """사진 크기 슬라이더 변경 (#1) — 후보 그리드 재생성은 디바운스."""
+        self._ref_px = int(value)
+        self._cand_px = max(60, int(value * _CAND_RATIO))
+        self.size_value.setText(f"{value} px")
+        # 기준 사진은 즉시 재스케일(한 장이라 가벼움), 후보 그리드는 디바운스.
+        if self._cur_ref_path is not None:
+            self.ref_img.setFixedSize(self._ref_px, self._ref_px)
+            self._left_panel.setFixedWidth(self._ref_px + 40)
+            self.ref_img.setPixmap(
+                _load_full_pixmap_scaled(self._cur_ref_path, self._ref_px)
+            )
+        self._resize_timer.start(150)
 
     # ------------------------------------------------------------------
     def _lookup_or_compute_score(self,

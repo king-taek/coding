@@ -9,7 +9,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (QButtonGroup, QCheckBox, QFileDialog, QFormLayout,
                               QGroupBox, QHBoxLayout, QLabel, QLineEdit,
                               QMessageBox, QRadioButton, QScrollArea,
-                              QSizePolicy, QSlider, QVBoxLayout, QWidget)
+                              QSizePolicy, QVBoxLayout, QWidget)
 
 from ... import config, i18n
 from ...learning import evaluator as _evaluator
@@ -23,13 +23,7 @@ from ..widgets.collapsible_section import CollapsibleSection
 from ..widgets.loading_overlay import LoadingOverlay
 from ..widgets.neon_button import NeonButton
 from ..widgets.neon_card import NeonCard
-
-
-class _NoWheelSlider(QSlider):
-    """마우스 휠로 값이 바뀌지 않는 슬라이더 (#2).  드래그/클릭/키보드는 정상."""
-
-    def wheelEvent(self, event):  # noqa: N802
-        event.ignore()
+from ..widgets.no_wheel_slider import NoWheelSlider
 
 
 @dataclass
@@ -48,7 +42,7 @@ class SetupInput:
     pre_grayscale: bool = False
     pre_contrast: bool = False
     kla_crop: bool = False
-    group_threshold: float = 0.45    # 동일 defect 그룹화 임계치 (#6)
+    persist_scores: bool = False     # 유사도 점수 디스크 캐시 (basic 엔진)
 
 
 class SetupPage(QWidget):
@@ -233,26 +227,6 @@ class SetupPage(QWidget):
         auto_hint.setWordWrap(True)
         auto_hint.setStyleSheet("color: #7FB3D5; padding-top: 4px;")
         auto_card.body().addWidget(auto_hint)
-
-        # 그룹화 유사도 임계치 (#6) — '모든 사진 자동' 등 그룹화 민감도 조절.
-        grp_row = QHBoxLayout()
-        grp_row.addWidget(QLabel(i18n.KO.GROUP_THRESHOLD_LABEL, auto_card))
-        self.group_slider = _NoWheelSlider(Qt.Orientation.Horizontal, auto_card)
-        self.group_slider.setRange(0, 100)
-        self.group_slider.setValue(
-            int(round(float(getattr(_prefs_now, "group_threshold", 0.45)) * 100))
-        )
-        self.group_threshold_label = QLabel(
-            f"{self.group_slider.value()} %", auto_card)
-        self.group_threshold_label.setStyleSheet("color: #00D4FF; font-weight: 700;")
-        self.group_threshold_label.setFixedWidth(60)
-        self.group_slider.valueChanged.connect(
-            lambda v: self.group_threshold_label.setText(f"{v} %")
-        )
-        self.group_slider.setToolTip(i18n.KO.GROUP_THRESHOLD_TOOLTIP)
-        grp_row.addWidget(self.group_slider, stretch=1)
-        grp_row.addWidget(self.group_threshold_label)
-        auto_card.body().addLayout(grp_row)
         root.addWidget(auto_card)
 
         # 폴더/호기 2칸 ---------------------------------------------------
@@ -306,9 +280,15 @@ class SetupPage(QWidget):
         self.check_pre_grayscale.setChecked(bool(getattr(_prefs_now, "pre_grayscale", False)))
         self.check_pre_contrast.setChecked(bool(getattr(_prefs_now, "pre_contrast", False)))
         self.check_kla_crop.setChecked(bool(getattr(_prefs_now, "kla_crop", False)))
+        # 유사도 점수 디스크 캐시 (#5B) — basic 엔진에서 재실행 시 재계산 생략.
+        self.check_persist_scores = QCheckBox(
+            i18n.KO.PERSIST_SCORES_LABEL, engine_card)
+        self.check_persist_scores.setToolTip(i18n.KO.PERSIST_SCORES_TOOLTIP)
+        self.check_persist_scores.setChecked(
+            bool(getattr(_prefs_now, "persist_scores", False)))
         for _c in (self.check_center20_ref, self.check_center20_val,
                    self.check_pre_grayscale, self.check_pre_contrast,
-                   self.check_kla_crop):
+                   self.check_kla_crop, self.check_persist_scores):
             engine_card.body().addWidget(_c)
         root.addWidget(engine_card)
 
@@ -316,7 +296,7 @@ class SetupPage(QWidget):
         slider_card = NeonCard(role="card-soft", parent=self)
         sl = QHBoxLayout()
         sl.addWidget(QLabel(i18n.KO.SETUP_THRESHOLD_LABEL, slider_card))
-        self.slider = _NoWheelSlider(Qt.Orientation.Horizontal, slider_card)
+        self.slider = NoWheelSlider(Qt.Orientation.Horizontal, slider_card)
         self.slider.setRange(0, 100)
         # 마지막 사용 값(#14) 우선, 없으면 config 기본값
         _last_prefs = _prefs.load()
@@ -433,10 +413,10 @@ class SetupPage(QWidget):
         engine_mode = "fast" if self.radio_engine_fast.isChecked() else "basic"
         center20_ref = bool(self.check_center20_ref.isChecked())
         center20_val = bool(self.check_center20_val.isChecked())
-        group_threshold = self.group_slider.value() / 100.0
         pre_grayscale = bool(self.check_pre_grayscale.isChecked())
         pre_contrast = bool(self.check_pre_contrast.isChecked())
         kla_crop = bool(self.check_kla_crop.isChecked())
+        persist_scores = bool(self.check_persist_scores.isChecked())
 
         # 고속 모드를 골랐는데 의존성(hnswlib 등)이 없으면 조용히 기본 모드로
         # 폴백돼 "속도 차이가 없다"는 혼란을 준다.  설치를 안내하고, 설치 전에는
@@ -458,7 +438,7 @@ class SetupPage(QWidget):
             pre_grayscale=pre_grayscale,
             pre_contrast=pre_contrast,
             kla_crop=kla_crop,
-            group_threshold=group_threshold,
+            persist_scores=persist_scores,
         )
         self.start_requested.emit(SetupInput(
             mode=mode,
@@ -474,7 +454,7 @@ class SetupPage(QWidget):
             pre_grayscale=pre_grayscale,
             pre_contrast=pre_contrast,
             kla_crop=kla_crop,
-            group_threshold=group_threshold,
+            persist_scores=persist_scores,
         ))
 
     # ------------------------------------------------------------------
