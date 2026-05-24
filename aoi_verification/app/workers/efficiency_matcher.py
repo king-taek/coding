@@ -119,13 +119,22 @@ def build_units(cfg, threshold: float) -> List[object]:
 
     ``compile_model_on`` 사전 호출은 (스케줄러 스레드에서) 콜드 컴파일을 미리
     끝내 워커 루프의 lru_cache 직렬 대기를 없앤다."""
+    import logging
+    log = logging.getLogger("aoi.openvino")
     units: List[object] = [_CpuUnit(cfg, threshold)]
     avail = _ov.available_units()              # ["GPU","NPU"] 중 존재분
-    if "GPU" in avail and _ov.compile_model_on(_ov.MODEL_MOBILENET_V3, "GPU") is not None:
-        units.append(_EmbedUnit("gpu", _ov.MODEL_MOBILENET_V3, "GPU", cfg, threshold))
-    if "NPU" in avail and _ov.compile_model_on(_ov.MODEL_RESNET18, "NPU") is not None:
-        # NPU 8GB — 다수 추론 동시 in-flight 로 메모리/파이프라인 적극 활용.
-        units.append(_EmbedUnit("npu", _ov.MODEL_RESNET18, "NPU", cfg, threshold, jobs=16))
+    if "GPU" in avail:
+        if _ov.compile_model_on(_ov.MODEL_MOBILENET_V3, "GPU") is not None:
+            units.append(_EmbedUnit("gpu", _ov.MODEL_MOBILENET_V3, "GPU", cfg, threshold))
+        else:
+            log.warning("GPU 감지됐으나 컴파일 실패 → GPU 유닛 비활성")
+    if "NPU" in avail:
+        if _ov.compile_model_on(_ov.MODEL_RESNET18, "NPU") is not None:
+            # NPU 8GB — 다수 추론 동시 in-flight 로 메모리/파이프라인 적극 활용.
+            units.append(_EmbedUnit("npu", _ov.MODEL_RESNET18, "NPU", cfg, threshold, jobs=16))
+        else:
+            log.warning("NPU 감지됐으나 컴파일 실패 → NPU 유닛 비활성 "
+                        "(상태바 툴팁의 NPU 에러 참고)")
     return units
 
 

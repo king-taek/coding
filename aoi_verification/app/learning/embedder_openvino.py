@@ -151,6 +151,22 @@ def device_label() -> str:  # pragma: no cover — 환경 의존
 # (AsyncInferQueue).  OpenVINO 에 PERFORMANCE_HINT=THROUGHPUT 을 주면
 # 디바이스에 맞는 최적 스트림 수가 자동 설정됨.
 # Batch 는 1 로 고정 — NPU 는 dynamic shape 미지원이 잦아 단순/호환성 우선.
+def _force_static_shape(ov_model) -> None:  # pragma: no cover — 환경 의존
+    """입력을 정적 ``[1,3,_INPUT_PX,_INPUT_PX]`` 으로 고정.
+
+    ``ov.convert_model`` 은 배치 차원을 동적(-1)으로 남기는 경우가 있는데,
+    Intel **NPU 플러그인은 동적 shape 컴파일을 거부**한다(GPU 는 허용).  추론은
+    항상 batch=1 이므로 정적화해도 무해하며, 이게 없으면 NPU 컴파일이 조용히
+    실패해 NPU 가 영영 '대기' 로 남는다.  실패해도(이미 정적 등) 무시."""
+    try:
+        ov_model.reshape([1, 3, _INPUT_PX, _INPUT_PX])
+    except Exception:
+        import logging
+        logging.getLogger("aoi.openvino").debug(
+            "reshape→static 실패(무시 가능)", exc_info=True,
+        )
+
+
 @lru_cache(maxsize=1)
 def _compile_backbone():  # pragma: no cover — 환경 의존
     """MobileNetV3-Small backbone 을 OpenVINO 로 변환 후 NPU/GPU 컴파일.
@@ -166,6 +182,7 @@ def _compile_backbone():  # pragma: no cover — 환경 의존
     backbone.eval()
     example = torch.randn(1, 3, _INPUT_PX, _INPUT_PX)
     ov_model = ov.convert_model(backbone, example_input=example)
+    _force_static_shape(ov_model)
     core = ov.Core()
     primary = target_device()
     # NPU 가 실패하면 GPU → CPU 로 자동 fallback (op 미지원 등).
@@ -183,7 +200,13 @@ def _compile_backbone():  # pragma: no cover — 환경 의존
             # 진짜 쓰이는지 확인 (CPU 로 조용히 폴백되는 상황 탐지용).
             _log_compiled_device(core, cand)
             return (compiled, cand)
-        except Exception:
+        except Exception as e:
+            import logging
+            _compile_errors[("backbone", cand)] = repr(e)
+            logging.getLogger("aoi.openvino").warning(
+                "OpenVINO backbone 컴파일 실패: %s → 다음 디바이스로 폴백", cand,
+                exc_info=True,
+            )
             continue
     return None
 
@@ -231,6 +254,7 @@ def invalidate_caches() -> None:
     _compile_backbone.cache_clear()
     compile_model_on.cache_clear()
     _compiled_units.clear()
+    _compile_errors.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -423,11 +447,15 @@ def _build_ov_model(model_kind: str):  # pragma: no cover - 환경 의존
         backbone.classifier = torch.nn.Identity()
     backbone.eval()
     example = torch.randn(1, 3, _INPUT_PX, _INPUT_PX)
-    return ov.convert_model(backbone, example_input=example)
+    ov_model = ov.convert_model(backbone, example_input=example)
+    _force_static_shape(ov_model)
+    return ov_model
 
 
 # (model_kind, device) → 실제 컴파일된 디바이스 풀네임 — 상태표시/디버그용.
 _compiled_units: Dict[tuple, str] = {}
+# (model_kind, device) → 컴파일 실패 에러 문자열 — 상태바 툴팁/진단용.
+_compile_errors: Dict[tuple, str] = {}
 
 
 @lru_cache(maxsize=4)
@@ -440,30 +468,51 @@ def compile_model_on(model_kind: str, device: str):  # pragma: no cover - 환경
     """
     if not (_HAS_TORCH and _HAS_OPENVINO):
         return None
+    import logging
+    log = logging.getLogger("aoi.openvino")
     try:
         ov_model = _build_ov_model(model_kind)
         core = ov.Core()
         compiled = core.compile_model(
             ov_model, device, config={"PERFORMANCE_HINT": "THROUGHPUT"},
         )
-    except Exception:
+    except Exception as e:
+        # 조용히 None 만 반환하면 NPU 가 왜 '대기' 인지 알 수 없으므로
+        # 에러를 보존(상태바 툴팁용) + 로그.
+        _compile_errors[(model_kind, device)] = repr(e)
+        log.warning("OpenVINO %s 컴파일 실패 on %s — 해당 유닛 비활성",
+                    model_kind, device, exc_info=True)
         return None
+    _compile_errors.pop((model_kind, device), None)
     name = device
     try:
         name = str(core.get_property(device, "FULL_DEVICE_NAME"))
     except Exception:
         pass
     _compiled_units[(model_kind, device)] = name
-    import logging
-    logging.getLogger("aoi.openvino").info(
-        "OpenVINO %s compiled on %s (%s)", model_kind, device, name,
-    )
+    log.info("OpenVINO %s compiled on %s (%s)", model_kind, device, name)
     return (compiled, name)
 
 
 def active_unit_labels() -> List[str]:
     """컴파일에 성공한 유닛 디바이스 라벨 (중복 제거).  상태바 표시용."""
     return sorted({dev for (_kind, dev) in _compiled_units})
+
+
+def compile_diagnostics() -> Dict[str, object]:
+    """상태바 툴팁/디버그용 컴파일 진단 — 추측을 끝내기 위한 가시화.
+
+    반환::
+
+        {"compiled": ["GPU", ...],            # 컴파일 성공 디바이스
+         "errors": {"NPU": "<에러 문자열>"}}  # 디바이스별 마지막 실패 사유
+
+    추론 컴파일은 lazy(첫 매칭 시) 이므로, 매칭을 한 번 돌린 뒤에 값이 채워진다.
+    """
+    errors: Dict[str, str] = {}
+    for (_kind, device), msg in _compile_errors.items():
+        errors[_unit_tag(device)] = msg
+    return {"compiled": active_unit_labels(), "errors": errors}
 
 
 def device_embed(paths: Iterable[Path],

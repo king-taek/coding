@@ -100,6 +100,8 @@ class MainWindow(QMainWindow):
         # 가속 장치(Intel GPU/NPU) 존재 여부 — 세션 중 불변이라 1회만 조회.
         # torch 설치와 무관하게 OpenVINO 만으로 존재 여부를 본다(상태바 표시용).
         self._accel_present = {"GPU": False, "NPU": False}
+        # 세션 불변인 ‘감지’ 부분 툴팁 — 동적 컴파일 진단은 매 틱 덧붙인다.
+        self._accel_tip_base = ""
         try:
             from ..learning import embedder_openvino as _ovw
             info = _ovw.accelerator_presence()
@@ -108,12 +110,14 @@ class MainWindow(QMainWindow):
             # 자가 진단 — 마우스오버로 감지 디바이스/원인을 확인.
             devs = info.get("devices") or []
             reason = info.get("reason") or ""
-            tip = "OpenVINO 감지: " + (", ".join(devs) if devs else "(없음)")
+            self._accel_tip_base = (
+                "OpenVINO 감지: " + (", ".join(devs) if devs else "(없음)")
+            )
             if reason:
-                tip += f"\n사유: {reason}"
-            self._usage_label.setToolTip(tip)
+                self._accel_tip_base += f"\n사유: {reason}"
         except Exception:
-            self._usage_label.setToolTip("가속 장치 조회 실패")
+            self._accel_tip_base = "가속 장치 조회 실패"
+        self._usage_label.setToolTip(self._accel_tip_base)
         self._proc = None
         self._mem_label = QLabel("", self._status_bar)
         self._mem_label.setProperty("role", "muted")
@@ -253,6 +257,16 @@ class MainWindow(QMainWindow):
                 else:
                     state = i18n.KO.USAGE_STATE_IDLE
                 parts.append(fmt.format(state=state))
+            # 툴팁에 컴파일 진단을 덧붙임 — 매칭을 한 번 돌린 뒤 NPU 가 '가동'
+            # 으로 안 바뀌면, 여기에 실제 컴파일 에러가 떠서 원인을 알 수 있다.
+            diag = _ovw.compile_diagnostics()
+            tip = self._accel_tip_base
+            compiled = diag.get("compiled") or []
+            if compiled:
+                tip += "\n추론 컴파일 성공: " + ", ".join(compiled)
+            for dev, msg in (diag.get("errors") or {}).items():
+                tip += f"\n{dev} 컴파일 실패: {msg}"
+            self._usage_label.setToolTip(tip)
         except Exception:
             pass
         if parts:
