@@ -171,6 +171,79 @@ def test_candidate_tile_border_is_object_scoped(qapp):
     assert tile._img_label.styleSheet() == ""
 
 
+def test_candidates_keep_two_columns_when_narrow(qapp):
+    slots = ["A1"]
+    unmatched = [MissEntry(slot="A1", side="ref", path=Path("/tmp/ref_A1.jpg"))]
+    val_pool = {"A1": [ImageItem(slot="A1", path=Path(f"/tmp/v{i}.jpg"), side="val")
+                       for i in range(5)]}
+    from aoi_verification.app.ui.widgets.unmatched_review_dialog import (
+        UnmatchedReviewDialog,
+    )
+    dlg = UnmatchedReviewDialog(unmatched, val_pool)
+    dlg._lookup_or_compute_score = lambda r, v: 0.9
+    dlg.resize(1000, 700)
+    dlg.show()
+    qapp.processEvents()
+    dlg._idx = 0
+    dlg._render_current()
+    # 후보 영역을 아주 좁게 → 타일이 축소되며 2열은 유지돼야 한다.
+    dlg._scroll.setFixedWidth(360)
+    qapp.processEvents()
+    dlg._relayout_candidates()
+    used_cols = max((dlg._grid.getItemPosition(i)[1]
+                     for i in range(dlg._grid.count())), default=-1) + 1
+    assert used_cols >= 2
+    assert dlg._cand_tiles[0]._size < 260      # 슬라이더 기본보다 축소됨
+
+
+def test_side_by_side_pane_image_does_not_grow(qapp):
+    from PyQt6.QtWidgets import QSizePolicy
+    from aoi_verification.app.ui.widgets.side_by_side_viewer import _Pane
+    pane = _Pane("t")
+    pol = pane._img.sizePolicy()
+    # Ignored 정책 + 1×1 최소크기 → pixmap 이 레이아웃/창을 키우지 못함(성장 버그 방지).
+    assert pol.horizontalPolicy() == QSizePolicy.Policy.Ignored
+    assert pol.verticalPolicy() == QSizePolicy.Policy.Ignored
+    assert pane._img.minimumSize().width() == 1
+
+
+def test_ref_right_click_opens_compare_in_score_order(qapp, monkeypatch):
+    # 기준 우클릭 → 후보와 동일한 SideBySideViewer 를, 유사도 1위(start=0)부터.
+    import aoi_verification.app.ui.widgets.unmatched_review_dialog as M
+    captured = {}
+
+    class _FakeViewer:
+        action_requested = type("S", (), {"connect": lambda self, *a: None})()
+        def __init__(self, ref, candidates, start, **kw):
+            captured["candidates"] = candidates
+            captured["start"] = start
+            self.action_requested = type("S", (), {"connect": staticmethod(lambda *a: None)})()
+        def exec(self):
+            return 0
+
+    monkeypatch.setattr(M, "SideBySideViewer", _FakeViewer, raising=False)
+    # _open_compare 가 지연 import 하므로 모듈 경로도 패치.
+    import aoi_verification.app.ui.widgets.side_by_side_viewer as SBS
+    monkeypatch.setattr(SBS, "SideBySideViewer", _FakeViewer)
+
+    slots = ["A1"]
+    unmatched = [MissEntry(slot="A1", side="ref", path=Path("/tmp/ref_A1.jpg"))]
+    val_pool = {"A1": [ImageItem(slot="A1", path=Path(f"/tmp/v{i}.jpg"), side="val")
+                       for i in range(3)]}
+    dlg = M.UnmatchedReviewDialog(unmatched, val_pool)
+    # 점수: v2 > v1 > v0 (내림차순 정렬 확인용)
+    score = {"/tmp/v0.jpg": 0.5, "/tmp/v1.jpg": 0.7, "/tmp/v2.jpg": 0.9}
+    dlg._lookup_or_compute_score = lambda r, v: score[str(v.path)]
+    dlg.resize(900, 700); dlg.show(); qapp.processEvents()
+    dlg._idx = 0; dlg._render_current()
+
+    dlg._open_compare(0)
+    assert captured["start"] == 0
+    caps = [cap for _item, cap in captured["candidates"]]
+    # 첫 후보가 가장 높은 유사도여야(내림차순).
+    assert "90" in caps[0]
+
+
 # ---------------------------------------------------------------------------
 # GPU/NPU 감지 진단
 # ---------------------------------------------------------------------------

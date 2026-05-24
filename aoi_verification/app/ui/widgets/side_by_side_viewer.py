@@ -14,7 +14,7 @@ from typing import List, Optional, Tuple
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QKeySequence, QPixmap, QShortcut
 from PyQt6.QtWidgets import (QApplication, QDialog, QHBoxLayout, QLabel,
-                             QVBoxLayout, QWidget)
+                             QSizePolicy, QVBoxLayout, QWidget)
 
 from ...models.slot import ImageItem
 from .neon_button import NeonButton
@@ -45,6 +45,12 @@ class _Pane(QWidget):
         self._img = QLabel(self)
         self._img.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._img.setStyleSheet("background: #000; border: 1px solid #1F2A3F;")
+        # 크기 제약 없는 QLabel 에 라벨 크기로 스케일한 pixmap 을 넣으면
+        # minimumSizeHint 이 그 pixmap 크기로 커져 리사이즈마다 창이 계속 커진다.
+        # Ignored 정책 + 1×1 최소크기로 레이아웃 성장 피드백을 끊는다.
+        self._img.setSizePolicy(QSizePolicy.Policy.Ignored,
+                                QSizePolicy.Policy.Ignored)
+        self._img.setMinimumSize(1, 1)
         lay.addWidget(self._img, stretch=1)
 
     def set_title(self, text: str) -> None:
@@ -103,6 +109,7 @@ class SideBySideViewer(QDialog):
         if scr is not None:
             g = scr.availableGeometry()
             self.resize(int(g.width() * 0.9), int(g.height() * 0.88))
+            self.setMaximumSize(g.size())      # 화면 초과 성장 차단(#방어)
         else:
             self.resize(1400, 850)
         enable_window_controls(self)

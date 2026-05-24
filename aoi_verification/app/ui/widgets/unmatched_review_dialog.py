@@ -32,113 +32,6 @@ from .no_wheel_slider import NoWheelSlider
 from .window_controls import add_fullscreen_shortcut, enable_window_controls
 
 
-class _OriginalImageViewer(QDialog):
-    """원본 이미지를 화면 대부분에 KeepAspectRatio 로 크게 보여주는 모달 (#4).
-
-    ``FullscreenViewer`` 는 mid(다운스케일) 이미지를 쓰지만, 여기서는 사용자가
-    요청한 대로 ``QPixmap(str(path))`` 로 ‘원본’ 파일을 직접 디코드해 보여준다.
-    """
-
-    def __init__(self, path: Path, parent=None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle(Path(path).name)
-        self.setModal(True)
-        self.setStyleSheet("background-color: #000;")
-        scr = QApplication.primaryScreen()
-        if scr is not None:
-            g = scr.availableGeometry()
-            self.resize(int(g.width() * 0.9), int(g.height() * 0.9))
-        else:
-            self.resize(1280, 800)
-
-        self._pix = QPixmap(str(path))
-        if self._pix.isNull():
-            self._pix = QPixmap(800, 600)
-            self._pix.fill(QColor(20, 28, 40))
-
-        self._label = QLabel(self)
-        self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._label.setStyleSheet("background-color: #000;")
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.addWidget(self._label)
-
-        QShortcut(QKeySequence("Esc"), self, activated=self.close)
-        self._redraw()
-
-    def resizeEvent(self, e):  # noqa: N802
-        self._redraw()
-        super().resizeEvent(e)
-
-    def _redraw(self) -> None:
-        if self._pix.isNull():
-            return
-        target = self._label.size()
-        if target.width() <= 0 or target.height() <= 0:
-            target = self.size()
-        scaled = self._pix.scaled(
-            target,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-        self._label.setPixmap(scaled)
-
-
-def _open_fullscreen(path: Path, parent=None) -> None:
-    """원본 이미지를 크게 보여준다 (#4 — 반드시 원본 화질)."""
-    try:
-        viewer = _OriginalImageViewer(Path(path), parent)
-        viewer.exec()
-    except Exception:
-        pass
-
-
-def _attach_view_larger(label: QLabel, path_getter) -> None:
-    """라벨에 ‘크게 보기’ 동작을 붙인다 (#4).
-
-    - 우클릭 → 컨텍스트 메뉴 ‘크게 보기’
-    - 더블 클릭 → 동일한 원본 큰 화면
-
-    ``path_getter`` 는 호출 시점의 원본 경로를 돌려주는 콜러블 (현재 ref 가
-    바뀌는 좌측 패널에서도 항상 최신 경로를 가리키도록).
-    """
-    label.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-
-    def _show_large() -> None:
-        path = path_getter()
-        if not path:
-            return
-        _open_fullscreen(Path(path), label.window())
-
-    def _on_menu(pos) -> None:
-        path = path_getter()
-        if not path:
-            return
-        menu = QMenu(label)
-        # 인라인 한글 리터럴 (i18n.KO 미수정 정책 — #4).
-        act = menu.addAction("크게 보기")
-        chosen = menu.exec(label.mapToGlobal(pos))
-        if chosen is act:
-            _show_large()
-
-    label.customContextMenuRequested.connect(_on_menu)
-
-    # 더블 클릭으로도 같은 큰 화면을 연다 (#4). 이벤트 필터 대신 메서드 대체로
-    # 가볍게 처리 — 라벨은 이 다이얼로그 안에서만 쓰이므로 안전.
-    orig_dbl = label.mouseDoubleClickEvent
-
-    def _on_dbl(ev):
-        if ev.button() == Qt.MouseButton.LeftButton:
-            _show_large()
-        try:
-            orig_dbl(ev)
-        except Exception:
-            pass
-
-    label.mouseDoubleClickEvent = _on_dbl  # type: ignore[assignment]
-    # 외부에서 동일 동작을 호출할 수 있도록 콜러블 노출 (스모크 테스트 등).
-    label.view_larger = _show_large  # type: ignore[attr-defined]
-
 _LIST_THUMB_PX = 56     # 좌측 ‘실패 목록’ 항목 썸네일 한 변(px).
 _REF_PX = 420           # 좌측 기준 사진 기본 크기 — 원본 화질에서 다운스케일.
 _CAND_PX = 260          # 우측 후보 타일 기본 크기 — 썸네일 대신 원본을 lazy 로드.
@@ -473,8 +366,14 @@ class UnmatchedReviewDialog(QDialog):
         self.ref_img.setStyleSheet(
             "background: #050810; border: 1px solid #1F2A3F; border-radius: 6px;"
         )
-        # 우클릭 ‘크게보기’ (#13) — 현재 검토 중인 ref 원본을 연다.
-        _attach_view_larger(self.ref_img, lambda: self._cur_ref_path)
+        # 우클릭/더블클릭 ‘크게보기’ — 후보와 동일한 좌우 비교 창을 열되,
+        # 기준 사진은 가장 유사도가 높은 후보부터(start=0) 보여준다 (#13).
+        self.ref_img.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.ref_img.customContextMenuRequested.connect(self._on_ref_context_menu)
+        self.ref_img.mouseDoubleClickEvent = (  # type: ignore[assignment]
+            lambda ev: self._open_compare(0)
+            if ev.button() == Qt.MouseButton.LeftButton else None
+        )
         ll.addWidget(self.ref_img, alignment=Qt.AlignmentFlag.AlignCenter)
         ll.addStretch(1)
         self._left_panel = left
@@ -714,18 +613,29 @@ class UnmatchedReviewDialog(QDialog):
 
     # ------------------------------------------------------------------
     def _relayout_candidates(self) -> None:
-        """viewport 폭에 맞춰 후보 열 수를 계산해 기존 타일을 재배치 — 가로
-        스크롤 방지(#3). 타일 위젯은 재사용(재생성/재디코드 없음)."""
+        """viewport 폭에 맞춰 후보 열 수를 계산해 기존 타일을 재배치.
+
+        **항상 가로 2개 이상**이 보이도록, 슬라이더가 설정한 ``_cand_px`` 가
+        창에 비해 크면 2열이 들어갈 크기까지 자동 축소한다(#1). 타일 위젯은
+        재사용(재생성/재디코드 없음)."""
         if not self._cand_tiles:
             return
         while self._grid.count():
             self._grid.takeAt(0)
         spacing = self._grid.spacing()
+        margins = 8                      # 그리드 좌우 contentsMargins(4+4)
+        frame = 16                       # 타일 1개의 chrome (set_display_size: size+16)
         vp = self._scroll.viewport().width() or self.width()
-        tile_w = self._cand_px + 16 + spacing
-        cols = max(1, vp // tile_w)
-        for i, t in enumerate(self._cand_tiles):
+        # 2열이 들어갈 최대 타일 한 변 — 부족하면 슬라이더 값보다 축소.
+        two_col_px = (vp - margins - spacing) // 2 - frame
+        display_px = max(60, min(self._cand_px, two_col_px))
+        tile_w = display_px + frame + spacing
+        cols = max(2, max(1, vp // tile_w))
+        for t in self._cand_tiles:
+            if t._size != display_px:
+                t.set_display_size(display_px)
             t.setVisible(True)
+        for i, t in enumerate(self._cand_tiles):
             self._grid.addWidget(t, i // cols, i % cols)
 
     def resizeEvent(self, event):  # noqa: N802
@@ -748,8 +658,7 @@ class UnmatchedReviewDialog(QDialog):
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             ))
-        for t in self._cand_tiles:
-            t.set_display_size(self._cand_px)
+        # 후보 타일 실제 크기는 _relayout_candidates 가 결정(2열 보장 위해 축소 가능).
         self._relayout_candidates()
 
     # ------------------------------------------------------------------
@@ -796,16 +705,17 @@ class UnmatchedReviewDialog(QDialog):
         for t in self._cand_tiles:
             t.set_selected(sel is not None and t.item.path == sel.path)
 
-    def _on_tile_view(self, val_item: ImageItem) -> None:
-        """후보 크게보기 — 좌(기준)·우(후보) + 이전/다음 + ‘이 후보로 선택’ (#1e)."""
+    def _open_compare(self, start_index: int) -> None:
+        """좌(기준)·우(후보) 비교 크게보기 — 후보 더블클릭/우클릭 및 기준 우클릭
+        공용.  ``self._cand_tiles`` 는 이미 유사도 내림차순이므로 start_index=0
+        이면 가장 유사한 후보부터 보인다 (기준 우클릭용)."""
         from .side_by_side_viewer import SideBySideViewer
         cur = self._current()
-        if cur is None:
+        if cur is None or not self._cand_tiles:
             return
         candidates = [(t.item, f"유사도 {t.score * 100:.1f}%")
                       for t in self._cand_tiles]
-        start = next((i for i, t in enumerate(self._cand_tiles)
-                      if t.item.path == val_item.path), 0)
+        start = max(0, min(int(start_index), len(candidates) - 1))
         viewer = SideBySideViewer(
             Path(cur.path), candidates, start,
             ref_caption=f"기준 — {Path(cur.path).name}",
@@ -814,6 +724,19 @@ class UnmatchedReviewDialog(QDialog):
         )
         viewer.action_requested.connect(self._on_tile_selected)
         viewer.exec()
+
+    def _on_tile_view(self, val_item: ImageItem) -> None:
+        """후보 크게보기 — 클릭한 후보 위치부터."""
+        start = next((i for i, t in enumerate(self._cand_tiles)
+                      if t.item.path == val_item.path), 0)
+        self._open_compare(start)
+
+    def _on_ref_context_menu(self, pos) -> None:
+        """기준 사진 우클릭 → 유사도순 좌우 비교 크게보기."""
+        menu = QMenu(self.ref_img)
+        act = menu.addAction(i18n.KO.CTX_VIEW_LARGER)
+        if menu.exec(self.ref_img.mapToGlobal(pos)) is act:
+            self._open_compare(0)
 
     def _make_match(self, ref_entry: MissEntry, val_item: ImageItem) -> None:
         """선택된 (ref, 후보) 한 쌍을 MatchResult 로 확정 (side 별 ref/val 교환)."""
