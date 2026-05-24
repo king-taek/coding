@@ -55,6 +55,11 @@ class _CpuUnit:
             ref, vals, threshold=self._threshold, cfg=self._cfg,
         )
 
+    def match_batch(self, refs: List[ImageItem],
+                    vals: List[ImageItem]) -> Dict[Path, List[Candidate]]:
+        # CPU 고전 경로는 동시성 이득이 없어 ref 별로 그대로 처리(정확·안전).
+        return {Path(r.path): self.match(r, vals) for r in refs}
+
 
 class _EmbedUnit:
     """OpenVINO 임베딩 유닛 (GPU=MobileNetV3 / NPU=ResNet18).
@@ -89,18 +94,8 @@ class _EmbedUnit:
         self._built = _ann.build_from(emb) if emb else None
         return self._built
 
-    def match(self, ref: ImageItem, vals: List[ImageItem]) -> List[Candidate]:
-        built = self._slot_index(ref.slot, vals)
-        remb = None
-        if built is not None:
-            remb = self._embed([Path(ref.path)]).get(Path(ref.path))
-        if built is None or remb is None:
-            # 임베딩 불가(컴파일/디코드 실패) — 이 ref 만 고전으로 폴백.
-            return score_ref_classical(
-                ref, vals, threshold=self._threshold, cfg=self._cfg,
-            )
+    def _rank(self, remb, built, by_path: Dict[Path, ImageItem]) -> List[Candidate]:
         index, val_paths = built
-        by_path = {Path(v.path): v for v in vals}
         hits = index.query(remb, len(val_paths))
         out: List[Candidate] = []
         for label, cos in hits:
@@ -113,6 +108,54 @@ class _EmbedUnit:
         out.sort(key=lambda c: c.score, reverse=True)
         return out
 
+    def match(self, ref: ImageItem, vals: List[ImageItem]) -> List[Candidate]:
+        return self.match_batch([ref], vals).get(Path(ref.path), [])
+
+    def match_batch(self, refs: List[ImageItem],
+                    vals: List[ImageItem]) -> Dict[Path, List[Candidate]]:
+        """묶음 ref 를 한 번에 동시 임베딩 → ref 별 cosine 랭킹.
+
+        ref 전체를 단일 ``device_embed`` 호출로 임베딩해 ``AsyncInferQueue`` 가
+        여러 추론을 동시 in-flight 로 돌리게 한다(디바이스 idle 제거).  결과는
+        per-ref 단건 처리와 동일(임베딩은 순서·동시성 무관)."""
+        out: Dict[Path, List[Candidate]] = {}
+        if not refs:
+            return out
+        slot = refs[0].slot
+        built = self._slot_index(slot, vals)
+        if built is None:
+            # 슬롯 인덱스 자체 실패(컴파일/디코드) — 전부 고전 폴백.
+            return {Path(r.path): score_ref_classical(
+                r, vals, threshold=self._threshold, cfg=self._cfg) for r in refs}
+        by_path = {Path(v.path): v for v in vals}
+        embs = self._embed([Path(r.path) for r in refs])   # 묶음 동시 임베딩
+        for r in refs:
+            rp = Path(r.path)
+            remb = embs.get(rp)
+            if remb is None:
+                # 이 ref 만 임베딩 실패 → 고전 폴백.
+                out[rp] = score_ref_classical(
+                    r, vals, threshold=self._threshold, cfg=self._cfg)
+            else:
+                out[rp] = self._rank(remb, built, by_path)
+        return out
+
+
+DEFAULT_ACCEL_CONCURRENCY = 32     # 기본 in-flight 추론 수(NPU 기준)
+
+
+def accel_concurrency(cfg) -> int:
+    """cfg 의 동시 추론 수(in-flight) — 없거나 잘못되면 기본값.  최소 1 보장.
+
+    이 값이 throughput·메모리의 핵심 노브: 높일수록 NPU/GPU 가 더 많은 추론을
+    동시에 in-flight 로 돌려 메모리·시간당 계산량이 올라간다(계산 결과는 불변)."""
+    n = getattr(cfg, "accel_concurrency", None)
+    try:
+        n = int(n)
+    except (TypeError, ValueError):
+        return DEFAULT_ACCEL_CONCURRENCY
+    return max(1, n)
+
 
 def build_units(cfg, threshold: float) -> List[object]:
     """가용 유닛 워커 목록.  CPU 는 항상.  GPU/NPU 는 OpenVINO 컴파일 성공 시만.
@@ -121,17 +164,22 @@ def build_units(cfg, threshold: float) -> List[object]:
     끝내 워커 루프의 lru_cache 직렬 대기를 없앤다."""
     import logging
     log = logging.getLogger("aoi.openvino")
+    # 동시 추론 수(in-flight) — 사용자 조절 노브.  높일수록 NPU/GPU 메모리·
+    # throughput↑.  NPU 가 메모리(8GB)가 커서 더 적극, GPU 는 절반.
+    npu_jobs = accel_concurrency(cfg)
+    gpu_jobs = max(1, npu_jobs // 2)
     units: List[object] = [_CpuUnit(cfg, threshold)]
     avail = _ov.available_units()              # ["GPU","NPU"] 중 존재분
     if "GPU" in avail:
         if _ov.compile_model_on(_ov.MODEL_MOBILENET_V3, "GPU") is not None:
-            units.append(_EmbedUnit("gpu", _ov.MODEL_MOBILENET_V3, "GPU", cfg, threshold))
+            units.append(_EmbedUnit("gpu", _ov.MODEL_MOBILENET_V3, "GPU", cfg,
+                                    threshold, jobs=gpu_jobs))
         else:
             log.warning("GPU 감지됐으나 컴파일 실패 → GPU 유닛 비활성")
     if "NPU" in avail:
         if _ov.compile_model_on(_ov.MODEL_RESNET18, "NPU") is not None:
-            # NPU 8GB — 다수 추론 동시 in-flight 로 메모리/파이프라인 적극 활용.
-            units.append(_EmbedUnit("npu", _ov.MODEL_RESNET18, "NPU", cfg, threshold, jobs=16))
+            units.append(_EmbedUnit("npu", _ov.MODEL_RESNET18, "NPU", cfg,
+                                    threshold, jobs=npu_jobs))
         else:
             log.warning("NPU 감지됐으나 컴파일 실패 → NPU 유닛 비활성 "
                         "(상태바 툴팁의 NPU 에러 참고)")
@@ -197,7 +245,11 @@ class EfficiencyScheduler(QThread):
 
     def _run(self) -> None:
         from .. import i18n
-        # 1) 공유 큐 — 슬롯 순서대로 적재(수동 모드 조기 슬롯 우선).
+        # 1) 공유 큐 — 슬롯 순서대로 ref 를 묶음(chunk)으로 적재.  묶음 단위로
+        # 한 번에 동시 추론하면 GPU/NPU 가 idle 없이 채워진다.  묶음 크기는
+        # in-flight 수와 맞추되(파이프라인 충전), 슬롯당 여러 묶음이 나오게 해
+        # 3 유닛 간 work-stealing 부하분산을 유지한다.
+        chunk = max(1, accel_concurrency(self._cfg))
         q: "queue.Queue" = queue.Queue()
         slot_remaining: Dict[str, int] = {}
         slot_order: List[str] = []
@@ -206,10 +258,11 @@ class EfficiencyScheduler(QThread):
             if slot not in slot_remaining:
                 slot_remaining[slot] = 0
                 slot_order.append(slot)
-            for r in refs:
-                q.put((slot, r, vals))
-                slot_remaining[slot] += 1
-                total_refs += 1
+            for i in range(0, len(refs), chunk):
+                ref_chunk = refs[i:i + chunk]
+                q.put((slot, ref_chunk, vals))
+                slot_remaining[slot] += len(ref_chunk)
+                total_refs += len(ref_chunk)
         total_slots = len(slot_order)
         if total_refs == 0:
             self.signals.finished.emit()
@@ -228,19 +281,23 @@ class EfficiencyScheduler(QThread):
         def worker(unit) -> None:
             while not self._stop.is_set():
                 try:
-                    slot, ref, vals = q.get_nowait()
+                    slot, ref_chunk, vals = q.get_nowait()
                 except queue.Empty:
                     break
                 try:
-                    cands = unit.match(ref, vals)
+                    res = unit.match_batch(ref_chunk, vals)
                 except Exception:
-                    cands = []
-                rec = [(c.item.path, float(c.score)) for c in cands]
+                    res = {}
+                n = len(ref_chunk)
                 with lock:
-                    self._results[(slot, Path(ref.path))] = rec
-                    done[0] += 1
+                    for r in ref_chunk:
+                        cands = res.get(Path(r.path), [])
+                        self._results[(slot, Path(r.path))] = [
+                            (c.item.path, float(c.score)) for c in cands
+                        ]
+                    done[0] += n
                     cur_done = done[0]
-                    slot_remaining[slot] -= 1
+                    slot_remaining[slot] -= n
                     slot_done = slot_remaining[slot] <= 0
                     fs = finished_slots[0]
                     if slot_done:

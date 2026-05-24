@@ -197,6 +197,14 @@ ENGINE_MODE_TOOLTIP = (
     "  동시에 가동해 기준 사진별로 나눠 처리합니다 (Intel 하드웨어+OpenVINO\n"
     "  필요, 없으면 가능한 장치만 자동 사용)."
 )
+ACCEL_CONCURRENCY_LABEL = "동시 추론 수"
+ACCEL_CONCURRENCY_TOOLTIP = (
+    "고효율 모드에서 GPU/NPU 가 동시에 처리할 추론 개수(in-flight) 입니다.\n"
+    "값을 높일수록 NPU/GPU 메모리 사용량과 시간당 처리량(throughput)이 함께\n"
+    "올라갑니다 — 계산(모델·점수) 자체는 동일합니다.\n"
+    "NPU 기준 값이며 GPU 는 그 절반을 사용합니다.  작업 관리자/상태바로 메모리를\n"
+    "보면서 ~80% 정도까지 올려도 됩니다(정확한 상한이 아니라 강도 조절)."
+)
 ENGINE_FAST_UNAVAILABLE = (
     "고속 모드를 사용할 수 없어 기본 모드로 진행합니다 (torch 미설치)."
 )

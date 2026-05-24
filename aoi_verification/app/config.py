@@ -126,6 +126,9 @@ class SimilarityConfig:
     kla_bottom: float = 0.08       # 하단 잘라낼 비율
     top_k: int = 50                # ANN 재정렬 깊이 (고속 모드)
     persist_scores: bool = False   # (ref,val) 점수 디스크 영속 캐시 (basic 엔진)
+    # 고효율 모드 동시 추론 수(in-flight) — NPU 기준, GPU 는 절반.  높일수록
+    # NPU/GPU 메모리·throughput↑(계산 결과는 불변).  사용자 조절 노브.
+    accel_concurrency: int = 32
 
     def _center_crop_for(self, side) -> bool:
         """이 side(ref/val)에 중앙 영역 crop(30%)을 적용할지."""

@@ -26,11 +26,13 @@ class _FakeUnit:
         self.seen = []
         self._lock = threading.Lock()
 
-    def match(self, ref, vals):
+    def match_batch(self, refs, vals):
+        # 스케줄러는 ref 묶음(chunk)을 한 번에 넘긴다 — 각 ref 를 1 회 기록.
         time.sleep(0.001)               # 작업 시뮬레이션 → 스레드 인터리빙 유도
         with self._lock:
-            self.seen.append((ref.slot, ref.path))
-        return []
+            for r in refs:
+                self.seen.append((r.slot, r.path))
+        return {Path(r.path): [] for r in refs}
 
 
 def _make_tasks(n_slots=3, refs_per_slot=5):

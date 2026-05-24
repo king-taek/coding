@@ -88,6 +88,9 @@ class UiPrefs:
     persist_scores: bool = False             # 유사도 점수 디스크 캐시 (#5B)
     kla_crop_top: float = 0.08               # 상단 잘라낼 비율 (0~0.4)
     kla_crop_bottom: float = 0.08            # 하단 잘라낼 비율 (0~0.4)
+    # 고효율 모드 동시 추론 수(in-flight, NPU 기준; GPU 절반).  높일수록 NPU/GPU
+    # 메모리·throughput↑ (계산 결과 불변).  setup_page 슬라이더로 조절.
+    accel_concurrency: int = 32
     extra: dict[str, Any] = field(default_factory=dict)
 
     # ------------------------------------------------------------------

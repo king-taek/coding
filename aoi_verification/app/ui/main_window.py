@@ -538,6 +538,7 @@ class MainWindow(QMainWindow):
             center_crop=bool(getattr(inp, "center_crop", False)),
             kla_crop=bool(getattr(inp, "kla_crop", False)),
             persist_scores=bool(getattr(inp, "persist_scores", False)),
+            accel_concurrency=int(getattr(inp, "accel_concurrency", 32)),
         )
 
     def _on_start(self, inp: SetupInput) -> None:

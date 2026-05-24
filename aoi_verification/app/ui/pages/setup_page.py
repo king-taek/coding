@@ -40,6 +40,7 @@ class SetupInput:
     center_crop: bool = False        # 사진 중앙 30% 만 사용 (기준·검증)
     kla_crop: bool = False
     persist_scores: bool = False     # 유사도 점수 디스크 캐시 (basic 엔진)
+    accel_concurrency: int = 32      # 고효율 모드 동시 추론 수(in-flight)
 
 
 class SetupPage(QWidget):
@@ -266,6 +267,33 @@ class SetupPage(QWidget):
         engine_card.body().addWidget(self.radio_engine_fast)
         engine_card.body().addWidget(self.radio_engine_efficiency)
 
+        # 고효율 모드 동시 추론 수(in-flight) — 높일수록 NPU/GPU 메모리·속도↑.
+        accel_row = QHBoxLayout()
+        accel_lbl = QLabel(i18n.KO.ACCEL_CONCURRENCY_LABEL, engine_card)
+        accel_lbl.setToolTip(i18n.KO.ACCEL_CONCURRENCY_TOOLTIP)
+        self.slider_accel = NoWheelSlider(Qt.Orientation.Horizontal, engine_card)
+        self.slider_accel.setRange(8, 96)
+        self.slider_accel.setSingleStep(4)
+        self.slider_accel.setPageStep(8)
+        self.slider_accel.setValue(int(getattr(_prefs_now, "accel_concurrency", 32)))
+        self.slider_accel.setToolTip(i18n.KO.ACCEL_CONCURRENCY_TOOLTIP)
+        self.accel_value = QLabel(str(self.slider_accel.value()), engine_card)
+        self.accel_value.setStyleSheet("color: #00D4FF; font-weight: 700;")
+        self.accel_value.setFixedWidth(40)
+        self.slider_accel.valueChanged.connect(
+            lambda v: self.accel_value.setText(str(v)))
+        accel_row.addWidget(accel_lbl)
+        accel_row.addWidget(self.slider_accel, stretch=1)
+        accel_row.addWidget(self.accel_value)
+        engine_card.body().addLayout(accel_row)
+        # 효율 모드에서만 의미 → 다른 엔진을 고르면 비활성.
+        def _sync_accel_enabled() -> None:
+            self.slider_accel.setEnabled(self.radio_engine_efficiency.isChecked())
+        for _rb in (self.radio_engine_basic, self.radio_engine_fast,
+                    self.radio_engine_efficiency):
+            _rb.toggled.connect(lambda _on: _sync_accel_enabled())
+        _sync_accel_enabled()
+
         pre_title = QLabel(i18n.KO.PRE_GROUP_TITLE, engine_card)
         pre_title.setToolTip(i18n.KO.PRE_GROUP_TOOLTIP)
         pre_title.setStyleSheet("color: #7FB3D5; padding-top: 6px;")
@@ -420,6 +448,7 @@ class SetupPage(QWidget):
         center_crop = bool(self.check_center_crop.isChecked())
         kla_crop = bool(self.check_kla_crop.isChecked())
         persist_scores = bool(self.check_persist_scores.isChecked())
+        accel_concurrency = int(self.slider_accel.value())
 
         # 고속 모드를 골랐는데 의존성(hnswlib 등)이 없으면 조용히 기본 모드로
         # 폴백돼 "속도 차이가 없다"는 혼란을 준다.  설치를 안내하고, 설치 전에는
@@ -439,6 +468,7 @@ class SetupPage(QWidget):
             center_crop=center_crop,
             kla_crop=kla_crop,
             persist_scores=persist_scores,
+            accel_concurrency=accel_concurrency,
         )
         self.start_requested.emit(SetupInput(
             mode=mode,
@@ -452,6 +482,7 @@ class SetupPage(QWidget):
             center_crop=center_crop,
             kla_crop=kla_crop,
             persist_scores=persist_scores,
+            accel_concurrency=accel_concurrency,
         ))
 
     # ------------------------------------------------------------------
