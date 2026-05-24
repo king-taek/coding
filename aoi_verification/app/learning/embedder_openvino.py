@@ -22,6 +22,8 @@ NPU 플러그인 (``openvino-tokenizers`` 는 불필요) 이 함께 설치되어
 from __future__ import annotations
 
 import os
+import threading
+import time
 from functools import lru_cache
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
@@ -57,6 +59,39 @@ _IMAGENET_STD = (0.229, 0.224, 0.225)
 MODEL_MOBILENET_V3 = "mobilenet_v3_small"   # GPU 유닛 (현행 CNN)
 MODEL_RESNET18 = "resnet18"                 # NPU 유닛 (다른 추론 모델)
 EMBED_DIM = {MODEL_MOBILENET_V3: 576, MODEL_RESNET18: 512}  # 문서용 (인덱스는 dim 무관)
+
+
+# ---------------------------------------------------------------------------
+# 가속 유닛 활동 추적 — 상태바의 GPU/NPU '가동/대기' 표시용.
+# OpenVINO 추론이 돌 때마다 디바이스별 timestamp 를 찍고, GUI 가 최근 활동
+# 여부(window 초 이내)를 폴링한다.  Intel GPU/NPU 의 실제 점유율(%)은 이식성
+# 있게 얻을 수 없으므로, '우리가 그 장치로 추론 중인지'를 대신 보여준다.
+# ---------------------------------------------------------------------------
+_unit_activity: Dict[str, float] = {}
+_unit_activity_lock = threading.Lock()
+
+
+def _unit_tag(device: str) -> str:
+    d = str(device).upper()
+    if d.startswith("NPU"):
+        return "NPU"
+    if d.startswith("GPU"):
+        return "GPU"
+    return d
+
+
+def mark_unit_active(device: str) -> None:
+    """``device`` ("GPU"/"NPU"/"GPU.0" 등) 에서 추론이 발생했음을 기록."""
+    with _unit_activity_lock:
+        _unit_activity[_unit_tag(device)] = time.monotonic()
+
+
+def unit_busy(device: str, window: float = 2.0) -> bool:
+    """``device`` 가 최근 ``window`` 초 이내에 추론했으면 True ('가동 중')."""
+    tag = _unit_tag(device)
+    with _unit_activity_lock:
+        t = _unit_activity.get(tag)
+    return t is not None and (time.monotonic() - t) <= window
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +276,7 @@ def compute_embeddings(paths: Iterable[Path],
     if pack is None:
         return out
     compiled, _dev = pack
+    mark_unit_active(_dev)
 
     items = [Path(p) for p in paths]
     if not items:
@@ -411,6 +447,7 @@ def device_embed(paths: Iterable[Path],
     if pack is None:
         return out
     compiled, _name = pack
+    mark_unit_active(device)
     items = [Path(p) for p in paths]
     if not items:
         return out

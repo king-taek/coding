@@ -91,19 +91,40 @@ class MainWindow(QMainWindow):
         except Exception:
             self._device_label.setText("")
         self._status_bar.addPermanentWidget(self._device_label)
+        # CPU/GPU/NPU 사용량 — CPU 실제 %, GPU/NPU 가동/대기.
+        self._usage_label = QLabel("", self._status_bar)
+        self._usage_label.setStyleSheet(
+            "color: #00D4FF; padding: 0 8px; font-weight: 600;"
+        )
+        self._status_bar.addPermanentWidget(self._usage_label)
+        # 가속 장치(Intel GPU/NPU) 존재 여부 — 세션 중 불변이라 1회만 조회.
+        self._accel_present = {"GPU": False, "NPU": False}
+        try:
+            from ..learning import embedder_openvino as _ovw
+            _units = set(_ovw.available_units())
+            self._accel_present = {"GPU": "GPU" in _units, "NPU": "NPU" in _units}
+        except Exception:
+            pass
+        self._proc = None
         self._mem_label = QLabel("", self._status_bar)
         self._mem_label.setProperty("role", "muted")
         self._status_bar.addPermanentWidget(self._mem_label)
         self._mem_timer = QTimer(self)
         self._mem_timer.setInterval(2000)
         self._mem_timer.timeout.connect(self._update_memory_label)
+        self._mem_timer.timeout.connect(self._update_usage_label)
         self._mem_pressure_shown = False
         try:
-            import psutil  # noqa: F401
-            self._mem_timer.start()
-            self._update_memory_label()
+            import psutil
+            self._proc = psutil.Process()
+            self._proc.cpu_percent(None)        # prime — 첫 호출은 0.0 반환
         except Exception:
-            pass
+            self._proc = None
+        # 타이머는 psutil 유무와 무관하게 구동 — 콜백이 각자 안전 가드한다
+        # (메모리/CPU 는 psutil 가용 시, GPU/NPU 가동표시는 항상).
+        self._mem_timer.start()
+        self._update_memory_label()
+        self._update_usage_label()
 
         # 페이지 ---------------------------------------------------------
         self._setup_page = SetupPage()
@@ -193,6 +214,40 @@ class MainWindow(QMainWindow):
         elif rss < int(config.MEMORY_PRESSURE_BYTES * 0.9):
             # 압박이 해제되면 다시 알릴 수 있도록 플래그 재설정.
             self._mem_pressure_shown = False
+
+    def _update_usage_label(self) -> None:
+        """상태바 CPU/GPU/NPU 표시 갱신.
+
+        CPU 는 프로세스 실제 사용률(코어 수로 정규화한 0~100%), GPU/NPU 는
+        OpenVINO 추론 활동 기준 '가동/대기'(없으면 '없음')."""
+        parts: list[str] = []
+        # CPU — 프로그램 프로세스 사용률을 코어 수로 나눠 0~100% 로 표시.
+        try:
+            import psutil
+            ncpu = psutil.cpu_count() or 1
+            if self._proc is not None:
+                pct = self._proc.cpu_percent(None) / ncpu
+            else:
+                pct = psutil.cpu_percent(None)
+            parts.append(i18n.KO.USAGE_CPU_FMT.format(pct=int(round(pct))))
+        except Exception:
+            pass
+        # GPU / NPU — 존재하면 가동/대기, 없으면 '없음'.
+        try:
+            from ..learning import embedder_openvino as _ovw
+            for tag, fmt in (("GPU", i18n.KO.USAGE_GPU_FMT),
+                             ("NPU", i18n.KO.USAGE_NPU_FMT)):
+                if not self._accel_present.get(tag):
+                    state = i18n.KO.USAGE_STATE_NONE
+                elif _ovw.unit_busy(tag):
+                    state = i18n.KO.USAGE_STATE_BUSY
+                else:
+                    state = i18n.KO.USAGE_STATE_IDLE
+                parts.append(fmt.format(state=state))
+        except Exception:
+            pass
+        if parts:
+            self._usage_label.setText(i18n.KO.USAGE_SEP.join(parts))
 
     # ==================================================================
     # 창 크기 — 사용자 선택값 복원 / 모달
