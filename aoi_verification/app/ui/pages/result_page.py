@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (QFileDialog, QHBoxLayout, QLabel, QMessageBox,
 
 from ... import i18n
 from ...models.result import FinalResult
+from ...utils import reference_log as _reflog
 from ...workers.exporter import ExcelExporter
 from ..widgets.loading_overlay import LoadingOverlay
 from ..widgets.neon_button import NeonButton
@@ -31,9 +32,16 @@ class ResultPage(QWidget):
         # 매치 실패 사진 검토(#8) 에 필요한 외부 데이터 — main_window 가 주입.
         self._val_pool: dict | None = None
         self._score_cache = None
+        # 진단용 레퍼런스 로그 경로(임시) — main_window 가 주입.
+        self._ref_log_path = None
         self._loading = LoadingOverlay(self)
         self._exporter: ExcelExporter | None = None
         self._build()
+
+    # ------------------------------------------------------------------
+    def set_reference_log(self, path) -> None:
+        """현재 세션의 레퍼런스 로그 파일 경로 주입(진단용, 임시)."""
+        self._ref_log_path = path
 
     # ------------------------------------------------------------------
     def _build(self) -> None:
@@ -277,6 +285,9 @@ class ResultPage(QWidget):
                 return
             self._save_path = Path(dst)
 
+        # 진단용 — 엑셀 저장 시점의 최종 매치를 레퍼런스 파일에 추가(임시).
+        self._log_final_matches()
+
         self._loading.show_overlay(i18n.KO.LOAD_EXPORT)
         self._exporter = ExcelExporter(
             self._result, self._save_path, template_path=self._template_path,
@@ -338,3 +349,32 @@ class ResultPage(QWidget):
             self, i18n.KO.APP_TITLE,
             i18n.KO.SAVE_FAIL_FMT.format(error=msg),
         )
+
+    # ------------------------------------------------------------------
+    # 진단용 레퍼런스 로깅 (임시) — 나중에 제거 예정.
+    # ------------------------------------------------------------------
+    def _log_final_matches(self) -> None:
+        if self._ref_log_path is None or self._result is None:
+            return
+        try:
+            matches = [
+                {"slot": m.slot,
+                 "ref_filename": Path(m.ref_path).name,
+                 "val_filename": Path(m.val_path).name,
+                 "score": round(float(m.score), 4)}
+                for m in self._result.matches
+            ]
+            unmatched = [
+                {"slot": u.slot, "ref_filename": Path(u.path).name}
+                for u in self._result.unmatched_refs
+            ]
+            _reflog.append_final(self._ref_log_path, {
+                "save_path": (str(self._save_path)
+                              if self._save_path is not None else None),
+                "n_matches": len(matches),
+                "n_unmatched": len(unmatched),
+                "matches": matches,
+                "unmatched": unmatched,
+            })
+        except Exception:
+            pass

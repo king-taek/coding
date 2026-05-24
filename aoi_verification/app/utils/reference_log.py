@@ -58,3 +58,10 @@ def append_ref(path: Optional[Path], record: dict) -> None:
     rec = {"type": "ref", "ts": time.strftime("%Y-%m-%dT%H:%M:%S")}
     rec.update(record or {})
     _append(path, rec)
+
+
+def append_final(path: Optional[Path], record: dict) -> None:
+    """엑셀 저장 시점의 최종 매치 묶음(검토·미탐검토 반영 후)을 기록."""
+    rec = {"type": "final", "ts": time.strftime("%Y-%m-%dT%H:%M:%S")}
+    rec.update(record or {})
+    _append(path, rec)

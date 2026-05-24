@@ -112,3 +112,35 @@ def test_match_page_log_reference(qapp, tmp_path, monkeypatch):
     assert len(rec["top10"]) == 10                  # 캡
     assert rec["top10"][0]["filename"] == "v0.png"
     assert rec["picked"] == {"filename": "v3.png", "rank": 3}
+
+
+# ---------------------------------------------------------------------------
+def test_result_page_logs_final_matches_on_export(qapp, tmp_path, monkeypatch):
+    monkeypatch.setattr(rl.paths, "results_dir", lambda: tmp_path)
+    from aoi_verification.app.ui.pages.result_page import ResultPage
+    from aoi_verification.app.models.result import FinalResult, MatchResult, MissEntry
+
+    ref_log = rl.session_path("sess")            # 빈 세션 파일 경로
+    page = ResultPage()
+    page.set_reference_log(ref_log)
+    page._result = FinalResult(
+        mode="single", ref_machine="1호기", val_machine="3호기",
+        matches=[
+            MatchResult(slot="A1", ref_path=Path("/r/a.png"),
+                        val_path=Path("/v/b.png"), score=0.88),
+            MatchResult(slot="A2", ref_path=Path("/r/c.png"),
+                        val_path=Path("/v/d.png"), score=0.71),
+        ],
+        unmatched_refs=[MissEntry(slot="A3", side="ref", path=Path("/r/e.png"))],
+    )
+    page._save_path = Path("/tmp/out.xlsx")
+    page._log_final_matches()
+
+    lines = Path(ref_log).read_text(encoding="utf-8").splitlines()
+    rec = json.loads(lines[-1])
+    assert rec["type"] == "final"
+    assert rec["n_matches"] == 2 and rec["n_unmatched"] == 1
+    assert rec["matches"][0] == {"slot": "A1", "ref_filename": "a.png",
+                                 "val_filename": "b.png", "score": 0.88}
+    assert rec["unmatched"][0] == {"slot": "A3", "ref_filename": "e.png"}
+    assert rec["save_path"] == "/tmp/out.xlsx"

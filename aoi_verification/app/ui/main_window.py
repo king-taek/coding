@@ -1003,6 +1003,10 @@ class MainWindow(QMainWindow):
             val_pool=review_pool,
             score_cache=review_score_cache,
         )
+        # 진단용 — 엑셀 저장 시 최종 매치를 같은 레퍼런스 파일에 추가(임시).
+        self._result_page.set_reference_log(
+            getattr(self._match_page, "_ref_log_path", None)
+        )
         QMessageBox.information(self, i18n.KO.APP_TITLE, i18n.KO.INFO_ALL_DONE)
         self._show_page(self._result_page)
         self._phase = PHASE_NONE
