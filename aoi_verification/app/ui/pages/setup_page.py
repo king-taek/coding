@@ -334,6 +334,12 @@ class SetupPage(QWidget):
         bar.addWidget(self.start_btn)
         root.addLayout(bar)
 
+        # 개발자 크레딧 (메인 화면) -------------------------------------
+        credit = QLabel(i18n.KO.CREDIT, self)
+        credit.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        credit.setStyleSheet("color: #7FB3D5; padding-top: 10px;")
+        root.addWidget(credit)
+
     # ------------------------------------------------------------------
     def _make_machine_group(self, title: str) -> tuple[QGroupBox, QLineEdit, QLineEdit]:
         box = QGroupBox(title, self)

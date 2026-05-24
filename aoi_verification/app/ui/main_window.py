@@ -74,6 +74,12 @@ class MainWindow(QMainWindow):
         # 상태 바 + 메모리 표시 (psutil 가용 시) + 가속 디바이스 표시 (#5).
         self._status_bar = QStatusBar(self)
         self.setStatusBar(self._status_bar)
+        # 개발자 크레딧 — 모든 화면 공통(상태바 좌측).
+        self._credit_label = QLabel(i18n.KO.CREDIT, self._status_bar)
+        self._credit_label.setStyleSheet(
+            "color: #7FB3D5; padding: 0 8px; font-weight: 600;"
+        )
+        self._status_bar.addWidget(self._credit_label)
         # 디바이스 표시 — 'GPU 가속 (...)' / 'CPU N 코어'.
         self._device_label = QLabel("", self._status_bar)
         self._device_label.setStyleSheet(

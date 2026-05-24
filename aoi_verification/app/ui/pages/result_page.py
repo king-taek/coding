@@ -77,6 +77,12 @@ class ResultPage(QWidget):
         bar.addWidget(self.export_btn)
         root.addLayout(bar)
 
+        # 개발자 크레딧 (마지막 화면) -----------------------------------
+        credit = QLabel(i18n.KO.CREDIT, self)
+        credit.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        credit.setStyleSheet("color: #7FB3D5; padding-top: 8px;")
+        root.addWidget(credit)
+
     # ------------------------------------------------------------------
     def show_result(self, result: FinalResult,
                     template_path: Path | None = None,
