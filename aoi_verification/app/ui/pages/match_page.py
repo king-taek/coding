@@ -25,6 +25,7 @@ from ...models.result import MatchResult
 from ...models.slot import ImageItem, Slot
 from ...utils import image_io
 from ...utils import prefs as _prefs
+from ...utils import reference_log as _reflog
 from ...similarity.slot_features import (SlotFeatureCache, SlotPrecomputeWorker,
                                             SlotScoreCache)
 from ...workers.matcher import Candidate, MatcherWorker
@@ -101,6 +102,10 @@ class MatchPage(QWidget):
         self._index_cache = _fast.SlotIndexCache()
         # 자동 모드 고속 선계산 결과: {(slot, ref_path): [(val_path, score), ...]}.
         self._fast_results: dict = {}
+        # ref별 처리 장치(cpu/gpu/npu) — 고효율 모드 진단 레퍼런스 로깅용.
+        self._result_device: dict = {}
+        # 현재 세션 레퍼런스 로그 파일 경로(진단용, 임시).
+        self._ref_log_path = None
         # 현재 사전 계산 단계 라벨 (#8).
         self._precompute_phase: str = ""
 
@@ -337,6 +342,8 @@ class MatchPage(QWidget):
         self._engine_cfg = engine_cfg or config.DEFAULT_SIM_CONFIG
         self._index_cache.clear()
         self._fast_results.clear()
+        self._result_device.clear()
+        self._start_reference_log()
         self.phase_label.setText(phase_label)
         self._refresh_skipped_panel()
         # 모든 (ref, val) 쌍 점수를 미리 계산 → 이후 매칭은 캐시 조회만.
@@ -427,7 +434,8 @@ class MatchPage(QWidget):
             self.bg_status_label.setText(_eff.describe_active_units())
             self._precompute_worker = _eff.EfficiencyScheduler(
                 tasks, cfg=self._engine_cfg, threshold=self._threshold,
-                auto=self._auto_mode, results=self._fast_results, parent=self,
+                auto=self._auto_mode, results=self._fast_results,
+                device_results=self._result_device, parent=self,
             )
         elif self._fast_mode:
             # FastIndexWorker — SlotPrecomputeWorker 와 동일 시그널.  자동 모드면
@@ -1017,6 +1025,56 @@ class MatchPage(QWidget):
             picked_rank=rank,
             decision=decision,
         )
+        # 진단용 레퍼런스 로그 — 검토 전 top-10 + 최종 매치 + 처리 장치 (임시).
+        self._log_reference(candidates, picked_path, rank, decision)
+
+    # ------------------------------------------------------------------
+    # 임시 레퍼런스 로깅 (GPU/NPU vs CPU 정확도 진단) — 나중에 제거 예정.
+    # ------------------------------------------------------------------
+    def _start_reference_log(self) -> None:
+        try:
+            self._ref_log_path = _reflog.session_path(self._session_id)
+            cfg = self._engine_cfg
+            _reflog.write_options(self._ref_log_path, {
+                "session_id": self._session_id or "",
+                "engine": getattr(cfg, "engine", "basic"),
+                "model": self._model_name or "basic",
+                "direction": self._mode_direction or "",
+                "auto_mode": bool(self._auto_mode),
+                "threshold": float(self._threshold),
+                "use_cpu": bool(getattr(cfg, "use_cpu", True)),
+                "use_gpu": bool(getattr(cfg, "use_gpu", True)),
+                "use_npu": bool(getattr(cfg, "use_npu", True)),
+                "accel_concurrency": int(getattr(cfg, "accel_concurrency", 32)),
+                "embed_batch": int(getattr(cfg, "embed_batch", 1)),
+            })
+        except Exception:
+            self._ref_log_path = None
+
+    def _log_reference(self, candidates, picked_path, rank, decision) -> None:
+        if self._ref_log_path is None or self._current is None:
+            return
+        try:
+            top10 = [
+                {"rank": i, "filename": Path(p).name, "score": round(float(s), 4)}
+                for i, (p, s) in enumerate(candidates[:10])
+            ]
+            device = (self._result_device.get(
+                (self._current.slot, self._current.path))
+                or getattr(self._engine_cfg, "engine", "basic"))
+            picked = ({"filename": Path(picked_path).name, "rank": rank}
+                      if picked_path is not None else None)
+            _reflog.append_ref(self._ref_log_path, {
+                "slot": self._current.slot,
+                "ref_filename": Path(self._current.path).name,
+                "device": device,
+                "decision": decision,
+                "threshold": float(self._threshold),
+                "top10": top10,
+                "picked": picked,
+            })
+        except Exception:
+            pass
 
     def _refresh_skipped_panel(self) -> None:
         """상단 [보류된 사진 보기 (n)] / [보류 재시도] 버튼 활성/카운트 갱신.

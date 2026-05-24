@@ -243,6 +243,7 @@ class EfficiencyScheduler(QThread):
                  threshold: float = 0.0,
                  auto: bool = False,
                  results: Optional[dict] = None,
+                 device_results: Optional[dict] = None,
                  parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
         self._tasks = [(s, list(r), list(v)) for s, r, v in tasks]
@@ -250,6 +251,8 @@ class EfficiencyScheduler(QThread):
         self._threshold = float(threshold)
         self._auto = bool(auto)
         self._results = results if results is not None else {}
+        # ref별 처리 장치 기록(진단용) — work-stealing 이라 실제 처리 유닛이 남음.
+        self._device_results = device_results
         self._stop = threading.Event()
         self._active_units: List[str] = []
         self.signals = _SchedSignals()
@@ -321,6 +324,8 @@ class EfficiencyScheduler(QThread):
                         self._results[(slot, Path(r.path))] = [
                             (c.item.path, float(c.score)) for c in cands
                         ]
+                        if self._device_results is not None:
+                            self._device_results[(slot, Path(r.path))] = unit.tag
                     done_pairs[0] += n * len(vals)
                     cur_done = done_pairs[0]
                     slot_remaining[slot] -= n
