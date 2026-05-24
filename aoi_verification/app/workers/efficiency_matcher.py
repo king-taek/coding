@@ -253,7 +253,10 @@ class EfficiencyScheduler(QThread):
         q: "queue.Queue" = queue.Queue()
         slot_remaining: Dict[str, int] = {}
         slot_order: List[str] = []
-        total_refs = 0
+        # 진행률은 '계산 건수(ref×val 비교 수)' 로 표시 — 기본 모드
+        # (SlotPrecomputeWorker) 와 동일 의미.  slot_remaining 은 슬롯 완료
+        # 판정을 위해 ref 수로 따로 센다.
+        total_pairs = 0
         for slot, refs, vals in self._tasks:
             if slot not in slot_remaining:
                 slot_remaining[slot] = 0
@@ -262,9 +265,9 @@ class EfficiencyScheduler(QThread):
                 ref_chunk = refs[i:i + chunk]
                 q.put((slot, ref_chunk, vals))
                 slot_remaining[slot] += len(ref_chunk)
-                total_refs += len(ref_chunk)
+                total_pairs += len(ref_chunk) * len(vals)
         total_slots = len(slot_order)
-        if total_refs == 0:
+        if total_pairs == 0:
             self.signals.finished.emit()
             return
 
@@ -275,7 +278,7 @@ class EfficiencyScheduler(QThread):
 
         # 3) 유닛별 스레드 — 공유 큐에서 work-stealing.
         lock = threading.Lock()
-        done = [0]
+        done_pairs = [0]
         finished_slots = [0]
 
         def worker(unit) -> None:
@@ -295,15 +298,15 @@ class EfficiencyScheduler(QThread):
                         self._results[(slot, Path(r.path))] = [
                             (c.item.path, float(c.score)) for c in cands
                         ]
-                    done[0] += n
-                    cur_done = done[0]
+                    done_pairs[0] += n * len(vals)
+                    cur_done = done_pairs[0]
                     slot_remaining[slot] -= n
                     slot_done = slot_remaining[slot] <= 0
                     fs = finished_slots[0]
                     if slot_done:
                         finished_slots[0] += 1
                         fs = finished_slots[0]
-                self.signals.progress.emit(cur_done, total_refs)
+                self.signals.progress.emit(cur_done, total_pairs)
                 if slot_done:
                     self.signals.slot_finished.emit(slot, fs, total_slots)
 

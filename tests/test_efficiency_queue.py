@@ -85,6 +85,24 @@ def test_empty_tasks_finishes(monkeypatch):
     assert finished == [1]
 
 
+def test_progress_counts_pairs_not_refs(monkeypatch):
+    """진행률은 '계산 건수(ref×val)' — 기준 사진 개수가 아니라 비교 수."""
+    units = [_FakeUnit("cpu")]
+    monkeypatch.setattr(eff, "build_units", lambda cfg, thr: units)
+    # S0: 5 ref × 3 val = 15, S1: 5 ref × 3 val = 15  → total 30 pairs (not 10 refs).
+    tasks = _make_tasks(n_slots=2, refs_per_slot=5)
+    expected_pairs = sum(len(r) * len(v) for _, r, v in tasks)
+    seen = []
+    sched = eff.EfficiencyScheduler(tasks, cfg=None, threshold=0.0, results={})
+    sched.signals.progress.connect(lambda d, t: seen.append((d, t)))
+    sched._run()
+    _APP.processEvents()                               # 워커 스레드 큐드 시그널 flush
+    assert expected_pairs == 30                        # refs=10 와 구분
+    assert seen, "progress 시그널이 한 번도 안 옴"
+    assert all(t == expected_pairs for _, t in seen)   # 분모는 항상 총 비교 수
+    assert seen[-1] == (expected_pairs, expected_pairs)  # 끝나면 done==total
+
+
 def test_single_cpu_unit_processes_all(monkeypatch):
     unit = _FakeUnit("cpu")
     monkeypatch.setattr(eff, "build_units", lambda cfg, thr: [unit])
