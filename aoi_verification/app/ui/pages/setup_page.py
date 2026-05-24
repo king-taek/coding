@@ -9,7 +9,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (QButtonGroup, QCheckBox, QFileDialog, QFormLayout,
                               QGroupBox, QHBoxLayout, QLabel, QLineEdit,
                               QMessageBox, QRadioButton, QScrollArea,
-                              QSizePolicy, QVBoxLayout, QWidget)
+                              QSizePolicy, QSpinBox, QVBoxLayout, QWidget)
 
 from ... import config, i18n
 from ...learning import evaluator as _evaluator
@@ -41,6 +41,10 @@ class SetupInput:
     kla_crop: bool = False
     persist_scores: bool = False     # 유사도 점수 디스크 캐시 (basic 엔진)
     accel_concurrency: int = 32      # 고효율 모드 동시 추론 수(in-flight)
+    use_cpu: bool = True             # 고효율 장치 토글(테스트용)
+    use_gpu: bool = True
+    use_npu: bool = True
+    embed_batch: int = 1             # 정적 배치 B (1=끔)
 
 
 class SetupPage(QWidget):
@@ -286,9 +290,35 @@ class SetupPage(QWidget):
         accel_row.addWidget(self.slider_accel, stretch=1)
         accel_row.addWidget(self.accel_value)
         engine_card.body().addLayout(accel_row)
+
+        # 장치 사용 토글 + 정적 배치 B — 단기 테스트용 (#opt).
+        dev_row = QHBoxLayout()
+        self.check_use_cpu = QCheckBox(i18n.KO.DEVICE_CPU_LABEL, engine_card)
+        self.check_use_cpu.setChecked(bool(getattr(_prefs_now, "use_cpu", True)))
+        self.check_use_gpu = QCheckBox(i18n.KO.DEVICE_GPU_LABEL, engine_card)
+        self.check_use_gpu.setChecked(bool(getattr(_prefs_now, "use_gpu", True)))
+        self.check_use_npu = QCheckBox(i18n.KO.DEVICE_NPU_LABEL, engine_card)
+        self.check_use_npu.setChecked(bool(getattr(_prefs_now, "use_npu", True)))
+        for _c in (self.check_use_cpu, self.check_use_gpu, self.check_use_npu):
+            _c.setToolTip(i18n.KO.DEVICE_TOGGLE_TOOLTIP)
+            dev_row.addWidget(_c)
+        dev_row.addStretch(1)
+        batch_lbl = QLabel(i18n.KO.EMBED_BATCH_LABEL, engine_card)
+        batch_lbl.setToolTip(i18n.KO.EMBED_BATCH_TOOLTIP)
+        self.spin_embed_batch = QSpinBox(engine_card)
+        self.spin_embed_batch.setRange(1, 32)
+        self.spin_embed_batch.setValue(int(getattr(_prefs_now, "embed_batch", 1)))
+        self.spin_embed_batch.setToolTip(i18n.KO.EMBED_BATCH_TOOLTIP)
+        dev_row.addWidget(batch_lbl)
+        dev_row.addWidget(self.spin_embed_batch)
+        engine_card.body().addLayout(dev_row)
+
         # 효율 모드에서만 의미 → 다른 엔진을 고르면 비활성.
         def _sync_accel_enabled() -> None:
-            self.slider_accel.setEnabled(self.radio_engine_efficiency.isChecked())
+            on = self.radio_engine_efficiency.isChecked()
+            for _w in (self.slider_accel, self.check_use_cpu, self.check_use_gpu,
+                       self.check_use_npu, self.spin_embed_batch):
+                _w.setEnabled(on)
         for _rb in (self.radio_engine_basic, self.radio_engine_fast,
                     self.radio_engine_efficiency):
             _rb.toggled.connect(lambda _on: _sync_accel_enabled())
@@ -449,6 +479,10 @@ class SetupPage(QWidget):
         kla_crop = bool(self.check_kla_crop.isChecked())
         persist_scores = bool(self.check_persist_scores.isChecked())
         accel_concurrency = int(self.slider_accel.value())
+        use_cpu = bool(self.check_use_cpu.isChecked())
+        use_gpu = bool(self.check_use_gpu.isChecked())
+        use_npu = bool(self.check_use_npu.isChecked())
+        embed_batch = int(self.spin_embed_batch.value())
 
         # 고속 모드를 골랐는데 의존성(hnswlib 등)이 없으면 조용히 기본 모드로
         # 폴백돼 "속도 차이가 없다"는 혼란을 준다.  설치를 안내하고, 설치 전에는
@@ -469,6 +503,10 @@ class SetupPage(QWidget):
             kla_crop=kla_crop,
             persist_scores=persist_scores,
             accel_concurrency=accel_concurrency,
+            use_cpu=use_cpu,
+            use_gpu=use_gpu,
+            use_npu=use_npu,
+            embed_batch=embed_batch,
         )
         self.start_requested.emit(SetupInput(
             mode=mode,
@@ -483,6 +521,10 @@ class SetupPage(QWidget):
             kla_crop=kla_crop,
             persist_scores=persist_scores,
             accel_concurrency=accel_concurrency,
+            use_cpu=use_cpu,
+            use_gpu=use_gpu,
+            use_npu=use_npu,
+            embed_batch=embed_batch,
         ))
 
     # ------------------------------------------------------------------

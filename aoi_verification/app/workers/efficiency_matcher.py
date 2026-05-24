@@ -69,20 +69,22 @@ class _EmbedUnit:
     """
 
     def __init__(self, tag: str, model_kind: str, device: str,
-                 cfg, threshold: float, *, jobs: Optional[int] = None) -> None:
+                 cfg, threshold: float, *, jobs: Optional[int] = None,
+                 batch: int = 1) -> None:
         self.tag = tag
         self._model_kind = model_kind
         self._device = device
         self._cfg = cfg
         self._threshold = float(threshold)
         self._jobs = jobs
+        self._batch = max(1, int(batch))
         self._slot: Optional[str] = None
         self._built: Optional[Tuple[object, list]] = None
 
     def _embed(self, paths: List[Path]) -> Dict[Path, "object"]:
         return _ov.device_embed(
             paths, model_kind=self._model_kind, device=self._device,
-            cfg=self._cfg, jobs=self._jobs,
+            cfg=self._cfg, jobs=self._jobs, batch=self._batch,
         )
 
     def _slot_index(self, slot: str, vals: List[ImageItem]):
@@ -157,6 +159,16 @@ def accel_concurrency(cfg) -> int:
     return max(1, n)
 
 
+def embed_batch(cfg) -> int:
+    """cfg 의 정적 배치 B (테스트용) — 없거나 잘못되면 1(끔).  최소 1."""
+    b = getattr(cfg, "embed_batch", None)
+    try:
+        b = int(b)
+    except (TypeError, ValueError):
+        return 1
+    return max(1, b)
+
+
 def build_units(cfg, threshold: float) -> List[object]:
     """가용 유닛 워커 목록.  CPU 는 항상.  GPU/NPU 는 OpenVINO 컴파일 성공 시만.
 
@@ -168,21 +180,32 @@ def build_units(cfg, threshold: float) -> List[object]:
     # throughput↑.  NPU 가 메모리(8GB)가 커서 더 적극, GPU 는 절반.
     npu_jobs = accel_concurrency(cfg)
     gpu_jobs = max(1, npu_jobs // 2)
-    units: List[object] = [_CpuUnit(cfg, threshold)]
+    batch = embed_batch(cfg)               # 정적 배치 B (테스트용, 기본 1)
+    # 장치 사용 토글(테스트용) — 끄면 해당 유닛을 안 띄움.  기본 전부 True.
+    use_cpu = bool(getattr(cfg, "use_cpu", True))
+    use_gpu = bool(getattr(cfg, "use_gpu", True))
+    use_npu = bool(getattr(cfg, "use_npu", True))
+    units: List[object] = []
+    if use_cpu:
+        units.append(_CpuUnit(cfg, threshold))
     avail = _ov.available_units()              # ["GPU","NPU"] 중 존재분
-    if "GPU" in avail:
-        if _ov.compile_model_on(_ov.MODEL_MOBILENET_V3, "GPU") is not None:
+    if use_gpu and "GPU" in avail:
+        if _ov.compile_model_on(_ov.MODEL_MOBILENET_V3, "GPU", batch) is not None:
             units.append(_EmbedUnit("gpu", _ov.MODEL_MOBILENET_V3, "GPU", cfg,
-                                    threshold, jobs=gpu_jobs))
+                                    threshold, jobs=gpu_jobs, batch=batch))
         else:
             log.warning("GPU 감지됐으나 컴파일 실패 → GPU 유닛 비활성")
-    if "NPU" in avail:
-        if _ov.compile_model_on(_ov.MODEL_RESNET18, "NPU") is not None:
+    if use_npu and "NPU" in avail:
+        if _ov.compile_model_on(_ov.MODEL_RESNET18, "NPU", batch) is not None:
             units.append(_EmbedUnit("npu", _ov.MODEL_RESNET18, "NPU", cfg,
-                                    threshold, jobs=npu_jobs))
+                                    threshold, jobs=npu_jobs, batch=batch))
         else:
             log.warning("NPU 감지됐으나 컴파일 실패 → NPU 유닛 비활성 "
                         "(상태바 툴팁의 NPU 에러 참고)")
+    if not units:
+        # 모든 장치를 끄거나(또는 가용/컴파일 실패) → 유닛 0개 방지: CPU 폴백.
+        log.warning("활성 유닛이 없어 CPU 로 폴백(장치 토글/컴파일 확인)")
+        units.append(_CpuUnit(cfg, threshold))
     return units
 
 

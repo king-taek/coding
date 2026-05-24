@@ -539,6 +539,10 @@ class MainWindow(QMainWindow):
             kla_crop=bool(getattr(inp, "kla_crop", False)),
             persist_scores=bool(getattr(inp, "persist_scores", False)),
             accel_concurrency=int(getattr(inp, "accel_concurrency", 32)),
+            use_cpu=bool(getattr(inp, "use_cpu", True)),
+            use_gpu=bool(getattr(inp, "use_gpu", True)),
+            use_npu=bool(getattr(inp, "use_npu", True)),
+            embed_batch=int(getattr(inp, "embed_batch", 1)),
         )
 
     def _on_start(self, inp: SetupInput) -> None:

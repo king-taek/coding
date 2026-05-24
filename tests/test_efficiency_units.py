@@ -30,7 +30,7 @@ def test_cpu_only_when_no_accel(monkeypatch):
 def test_gpu_added_when_available(monkeypatch):
     monkeypatch.setattr(eff._ov, "available_units", lambda: ["GPU"])
     monkeypatch.setattr(eff._ov, "compile_model_on",
-                        lambda mk, dev: (object(), "Intel GPU"))
+                        lambda mk, dev, batch=1: (object(), "Intel GPU"))
     units = eff.build_units(cfg=None, threshold=0.5)
     assert _tags(units) == ["cpu", "gpu"]
 
@@ -38,7 +38,7 @@ def test_gpu_added_when_available(monkeypatch):
 def test_gpu_and_npu_added(monkeypatch):
     monkeypatch.setattr(eff._ov, "available_units", lambda: ["GPU", "NPU"])
     monkeypatch.setattr(eff._ov, "compile_model_on",
-                        lambda mk, dev: (object(), "dev"))
+                        lambda mk, dev, batch=1: (object(), "dev"))
     units = eff.build_units(cfg=None, threshold=0.5)
     assert _tags(units) == ["cpu", "gpu", "npu"]
 
@@ -46,7 +46,7 @@ def test_gpu_and_npu_added(monkeypatch):
 def test_unit_dropped_when_compile_fails(monkeypatch):
     """장치는 보이지만 컴파일 실패(None) → 그 유닛은 빠지고 CPU 만."""
     monkeypatch.setattr(eff._ov, "available_units", lambda: ["GPU", "NPU"])
-    monkeypatch.setattr(eff._ov, "compile_model_on", lambda mk, dev: None)
+    monkeypatch.setattr(eff._ov, "compile_model_on", lambda mk, dev, batch=1: None)
     units = eff.build_units(cfg=None, threshold=0.5)
     assert _tags(units) == ["cpu"]
 
@@ -54,7 +54,7 @@ def test_unit_dropped_when_compile_fails(monkeypatch):
 def test_npu_only_when_gpu_compile_fails(monkeypatch):
     monkeypatch.setattr(eff._ov, "available_units", lambda: ["GPU", "NPU"])
 
-    def compile(mk, dev):
+    def compile(mk, dev, batch=1):
         return None if dev == "GPU" else (object(), "npu")
 
     monkeypatch.setattr(eff._ov, "compile_model_on", compile)

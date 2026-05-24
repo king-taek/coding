@@ -205,6 +205,20 @@ ACCEL_CONCURRENCY_TOOLTIP = (
     "NPU 기준 값이며 GPU 는 그 절반을 사용합니다.  작업 관리자/상태바로 메모리를\n"
     "보면서 ~80% 정도까지 올려도 됩니다(정확한 상한이 아니라 강도 조절)."
 )
+# 고효율 모드 장치 토글 + 정적 배치 B (단기 테스트용).
+DEVICE_CPU_LABEL = "CPU"
+DEVICE_GPU_LABEL = "GPU"
+DEVICE_NPU_LABEL = "NPU"
+DEVICE_TOGGLE_TOOLTIP = (
+    "고효율 모드에서 사용할 연산 장치 (테스트용).  끄면 그 장치 유닛을 띄우지\n"
+    "않습니다.  전부 끄면 안전하게 CPU 로 폴백합니다.  계산 결과는 동일."
+)
+EMBED_BATCH_LABEL = "배치 B"
+EMBED_BATCH_TOOLTIP = (
+    "정적 배치 B 재컴파일 (테스트용).  1=끔(현행).  >1 이면 요청당 B장을 한 번에\n"
+    "추론해 NPU/GPU 점유율을 더 높일 수 있습니다.  단, NPU 가 정적 배치를 지원\n"
+    "해야 하며 실패 시 해당 유닛은 비활성(상태바 툴팁의 에러 참고).  계산 결과는 동일."
+)
 ENGINE_FAST_UNAVAILABLE = (
     "고속 모드를 사용할 수 없어 기본 모드로 진행합니다 (torch 미설치)."
 )

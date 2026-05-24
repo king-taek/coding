@@ -91,6 +91,11 @@ class UiPrefs:
     # 고효율 모드 동시 추론 수(in-flight, NPU 기준; GPU 절반).  높일수록 NPU/GPU
     # 메모리·throughput↑ (계산 결과 불변).  setup_page 슬라이더로 조절.
     accel_concurrency: int = 32
+    # 고효율 모드 장치 사용 토글 + 정적 배치 B (테스트용).
+    use_cpu: bool = True
+    use_gpu: bool = True
+    use_npu: bool = True
+    embed_batch: int = 1
     extra: dict[str, Any] = field(default_factory=dict)
 
     # ------------------------------------------------------------------

@@ -60,7 +60,7 @@ def test_compile_diagnostics_reports_success_and_failure():
 def test_build_units_drops_npu_on_compile_failure_without_crash(monkeypatch):
     monkeypatch.setattr(eff._ov, "available_units", lambda: ["GPU", "NPU"])
 
-    def compile(mk, dev):
+    def compile(mk, dev, batch=1):
         return (object(), "gpu") if dev == "GPU" else None  # NPU 실패
 
     monkeypatch.setattr(eff._ov, "compile_model_on", compile)

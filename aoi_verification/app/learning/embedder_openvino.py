@@ -151,15 +151,15 @@ def device_label() -> str:  # pragma: no cover — 환경 의존
 # (AsyncInferQueue).  OpenVINO 에 PERFORMANCE_HINT=THROUGHPUT 을 주면
 # 디바이스에 맞는 최적 스트림 수가 자동 설정됨.
 # Batch 는 1 로 고정 — NPU 는 dynamic shape 미지원이 잦아 단순/호환성 우선.
-def _force_static_shape(ov_model) -> None:  # pragma: no cover — 환경 의존
-    """입력을 정적 ``[1,3,_INPUT_PX,_INPUT_PX]`` 으로 고정.
+def _force_static_shape(ov_model, batch: int = 1) -> None:  # pragma: no cover
+    """입력을 정적 ``[batch,3,_INPUT_PX,_INPUT_PX]`` 으로 고정.
 
     ``ov.convert_model`` 은 배치 차원을 동적(-1)으로 남기는 경우가 있는데,
-    Intel **NPU 플러그인은 동적 shape 컴파일을 거부**한다(GPU 는 허용).  추론은
-    항상 batch=1 이므로 정적화해도 무해하며, 이게 없으면 NPU 컴파일이 조용히
-    실패해 NPU 가 영영 '대기' 로 남는다.  실패해도(이미 정적 등) 무시."""
+    Intel **NPU 플러그인은 동적 shape 컴파일을 거부**한다(GPU 는 허용).  정적화
+    하지 않으면 NPU 컴파일이 조용히 실패해 NPU 가 영영 '대기' 로 남는다.
+    ``batch>1`` 이면 요청당 B장을 한 번에 추론(테스트용).  실패해도 무시."""
     try:
-        ov_model.reshape([1, 3, _INPUT_PX, _INPUT_PX])
+        ov_model.reshape([int(batch), 3, _INPUT_PX, _INPUT_PX])
     except Exception:
         import logging
         logging.getLogger("aoi.openvino").debug(
@@ -432,10 +432,11 @@ def accelerator_presence() -> Dict[str, object]:
             "devices": devs, "reason": reason}
 
 
-def _build_ov_model(model_kind: str):  # pragma: no cover - 환경 의존
+def _build_ov_model(model_kind: str, batch: int = 1):  # pragma: no cover - 환경 의존
     """torchvision 백본 → OpenVINO 모델 (raw 임베딩 — classifier/fc 제거).
 
     ``.eval()`` 로 BatchNorm 을 폴딩한 뒤 변환해야 NPU/GPU 에서 정확하다.
+    ``batch`` 로 정적 배치 크기를 지정(테스트용, 기본 1).
     """
     if model_kind == MODEL_RESNET18:
         weights = models.ResNet18_Weights.IMAGENET1K_V1
@@ -448,7 +449,7 @@ def _build_ov_model(model_kind: str):  # pragma: no cover - 환경 의존
     backbone.eval()
     example = torch.randn(1, 3, _INPUT_PX, _INPUT_PX)
     ov_model = ov.convert_model(backbone, example_input=example)
-    _force_static_shape(ov_model)
+    _force_static_shape(ov_model, batch)
     return ov_model
 
 
@@ -458,20 +459,22 @@ _compiled_units: Dict[tuple, str] = {}
 _compile_errors: Dict[tuple, str] = {}
 
 
-@lru_cache(maxsize=4)
-def compile_model_on(model_kind: str, device: str):  # pragma: no cover - 환경 의존
-    """``model_kind`` 백본을 ``device`` ("GPU"/"NPU") 에 고정 컴파일.
+@lru_cache(maxsize=8)
+def compile_model_on(model_kind: str, device: str, batch: int = 1):  # pragma: no cover
+    """``model_kind`` 백본을 ``device`` ("GPU"/"NPU") 에 정적 배치 ``batch`` 로 컴파일.
 
     반환 ``(compiled, full_name)`` 또는 실패 시 ``None``.  **다른 디바이스로
     silent fallback 하지 않는다** — 폴백은 스케줄러가 유닛 단위로 결정하므로,
-    GPU 컴파일 실패는 단지 그 유닛을 띄우지 않는다는 뜻이다.
+    GPU 컴파일 실패는 단지 그 유닛을 띄우지 않는다는 뜻이다.  lru_cache 가
+    ``(model_kind, device, batch)`` 별로 컴파일 결과를 보관한다.
     """
     if not (_HAS_TORCH and _HAS_OPENVINO):
         return None
     import logging
     log = logging.getLogger("aoi.openvino")
+    batch = max(1, int(batch))
     try:
-        ov_model = _build_ov_model(model_kind)
+        ov_model = _build_ov_model(model_kind, batch)
         core = ov.Core()
         compiled = core.compile_model(
             ov_model, device, config={"PERFORMANCE_HINT": "THROUGHPUT"},
@@ -480,8 +483,8 @@ def compile_model_on(model_kind: str, device: str):  # pragma: no cover - 환경
         # 조용히 None 만 반환하면 NPU 가 왜 '대기' 인지 알 수 없으므로
         # 에러를 보존(상태바 툴팁용) + 로그.
         _compile_errors[(model_kind, device)] = repr(e)
-        log.warning("OpenVINO %s 컴파일 실패 on %s — 해당 유닛 비활성",
-                    model_kind, device, exc_info=True)
+        log.warning("OpenVINO %s 컴파일 실패 on %s (batch=%d) — 해당 유닛 비활성",
+                    model_kind, device, batch, exc_info=True)
         return None
     _compile_errors.pop((model_kind, device), None)
     name = device
@@ -490,7 +493,8 @@ def compile_model_on(model_kind: str, device: str):  # pragma: no cover - 환경
     except Exception:
         pass
     _compiled_units[(model_kind, device)] = name
-    log.info("OpenVINO %s compiled on %s (%s)", model_kind, device, name)
+    log.info("OpenVINO %s compiled on %s (%s) batch=%d",
+             model_kind, device, name, batch)
     return (compiled, name)
 
 
@@ -515,36 +519,62 @@ def compile_diagnostics() -> Dict[str, object]:
     return {"compiled": active_unit_labels(), "errors": errors}
 
 
+def _l2(vec: np.ndarray) -> np.ndarray:  # pragma: no cover - 환경 의존
+    norm = float(np.linalg.norm(vec)) + 1e-9
+    return (vec / norm).astype(np.float32)
+
+
 def device_embed(paths: Iterable[Path],
                  *,
                  model_kind: str,
                  device: str,
                  cfg=None,
-                 jobs: Optional[int] = None) -> Dict[Path, np.ndarray]:  # pragma: no cover - 환경 의존
+                 jobs: Optional[int] = None,
+                 batch: int = 1) -> Dict[Path, np.ndarray]:  # pragma: no cover - 환경 의존
     """``model_kind`` 백본을 ``device`` 에 고정 컴파일해 raw 임베딩(L2 정규화) 계산.
 
-    ``jobs`` 로 동시 in-flight 추론 수를 지정 — NPU(8GB)는 크게(예: 16) 주어
-    메모리/파이프라인을 적극 활용한다.  실패 path 는 결과에서 누락.
+    ``jobs`` 로 동시 in-flight 추론 수를 지정 — NPU(8GB)는 크게 주어 메모리/
+    파이프라인을 적극 활용한다.  ``batch>1`` 이면 요청당 B장을 한 번에 추론
+    (정적 배치 B, 테스트용).  실패 path 는 결과에서 누락.  배치 결과는 batch=1
+    과 동일(임베딩은 배치 무관).
     """
     out: Dict[Path, np.ndarray] = {}
-    pack = compile_model_on(model_kind, device)
+    batch = max(1, int(batch))
+    pack = compile_model_on(model_kind, device, batch)
     if pack is None:
         return out
     compiled, _name = pack
     mark_unit_active(device)
-    items = [Path(p) for p in paths]
-    if not items:
-        return out
-    inputs: list[tuple[Path, np.ndarray]] = []
-    for p in items:
+    arrs: list[tuple[Path, np.ndarray]] = []
+    for p in [Path(p) for p in paths]:
         arr = _make_input_array(p, cfg)
         if arr is not None:
-            inputs.append((p, arr[np.newaxis]))
-    if not inputs:
+            arrs.append((p, arr))
+    if not arrs:
         return out
     n_streams = _optimal_streams(compiled) if jobs is None else max(1, int(jobs))
-    raw = _infer_raw(compiled, inputs, n_streams)
-    for p, feat in raw.items():
-        norm = float(np.linalg.norm(feat[0])) + 1e-9
-        out[p] = (feat[0] / norm).astype(np.float32)
+
+    if batch <= 1:
+        inputs = [(p, a[np.newaxis]) for p, a in arrs]      # (1,3,H,W) per path
+        raw = _infer_raw(compiled, inputs, n_streams)
+        for p, feat in raw.items():
+            out[p] = _l2(feat[0])
+        return out
+
+    # 정적 배치 B — B장씩 묶어 (B,3,H,W) 로 추론.  마지막 그룹은 0-pad 후
+    # 실제 path 수만큼만 결과를 취한다.  userdata 는 실제 path 튜플.
+    groups: list[tuple[tuple, np.ndarray]] = []
+    for i in range(0, len(arrs), batch):
+        grp = arrs[i:i + batch]
+        real_paths = tuple(p for p, _ in grp)
+        stack = np.stack([a for _, a in grp], axis=0)        # (r,3,H,W)
+        if stack.shape[0] < batch:
+            pad = np.zeros((batch - stack.shape[0],) + stack.shape[1:],
+                           dtype=stack.dtype)
+            stack = np.concatenate([stack, pad], axis=0)     # (B,3,H,W)
+        groups.append((real_paths, stack))
+    raw = _infer_raw(compiled, groups, n_streams)
+    for real_paths, feat in raw.items():
+        for b, p in enumerate(real_paths):                   # 실제 행만(패딩 무시)
+            out[p] = _l2(feat[b])
     return out
