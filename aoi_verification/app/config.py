@@ -119,7 +119,7 @@ MEMORY_PRESSURE_BYTES = PIXMAP_CACHE_MAX_BYTES + 1024 * 1024 * 1024
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True)
 class SimilarityConfig:
-    engine: str = "basic"          # "basic" | "fast"
+    engine: str = "basic"          # "basic" | "fast" | "efficiency"
     center_crop: bool = False      # 사진 중앙 30% 영역만 사용 (기준·검증 모두)
     kla_crop: bool = False         # KLA 상/하단 정보영역 crop
     kla_top: float = 0.08          # 상단 잘라낼 비율

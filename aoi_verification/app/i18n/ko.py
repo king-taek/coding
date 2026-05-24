@@ -186,15 +186,23 @@ SPEED_MODE_TOOLTIP = (
 ENGINE_CARD_TITLE = "유사도 엔진"
 ENGINE_MODE_BASIC = "기본 모드 (정밀 비교)"
 ENGINE_MODE_FAST = "고속 모드 (대용량 권장)"
+ENGINE_MODE_EFFICIENCY = "고효율 모드 (CPU+GPU+NPU 동시)"
 ENGINE_MODE_TOOLTIP = (
     "기본 모드: 모든 후보를 정밀 비교 (정확하지만 대용량에서 느림).\n"
     "고속 모드: 가벼운 이미지 특징으로 후보를 빠르게 추린 뒤, 상위 후보만\n"
     "  정밀 비교로 재정렬합니다.  사진이 수천 장 이상일 때 권장.\n"
-    "  (별도 설치/인터넷 없이 동작합니다.)"
+    "  (별도 설치/인터넷 없이 동작합니다.)\n"
+    "고효율 모드: CPU(고전)·Intel GPU(MobileNetV3)·Intel NPU(ResNet18) 를\n"
+    "  동시에 가동해 기준 사진별로 나눠 처리합니다 (Intel 하드웨어+OpenVINO\n"
+    "  필요, 없으면 가능한 장치만 자동 사용)."
 )
 ENGINE_FAST_UNAVAILABLE = (
     "고속 모드를 사용할 수 없어 기본 모드로 진행합니다 (torch 미설치)."
 )
+ENGINE_EFFICIENCY_CPU_ONLY = (
+    "가속 장치(Intel GPU/NPU)가 없어 CPU만으로 고효율 모드를 실행합니다."
+)
+ACCEL_UNITS_FMT = "가속: {units}"
 # 고속 모드 의존성 설치 안내
 FAST_DEPS_TITLE = "고속 모드 준비"
 FAST_DEPS_BODY_FMT = (

@@ -53,6 +53,11 @@ _INPUT_PX = 256
 _IMAGENET_MEAN = (0.485, 0.456, 0.406)
 _IMAGENET_STD = (0.229, 0.224, 0.225)
 
+# 고효율 모드(다중 유닛) 용 백본 종류 — 유닛별로 서로 다른 모델을 고정한다.
+MODEL_MOBILENET_V3 = "mobilenet_v3_small"   # GPU 유닛 (현행 CNN)
+MODEL_RESNET18 = "resnet18"                 # NPU 유닛 (다른 추론 모델)
+EMBED_DIM = {MODEL_MOBILENET_V3: 576, MODEL_RESNET18: 512}  # 문서용 (인덱스는 dim 무관)
+
 
 # ---------------------------------------------------------------------------
 # Device 감지
@@ -182,6 +187,8 @@ def invalidate_caches() -> None:
     ``embedder.invalidate_caches()`` 가 학습 / 모델 교체 후 함께 호출.
     """
     _compile_backbone.cache_clear()
+    compile_model_on.cache_clear()
+    _compiled_units.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -248,28 +255,45 @@ def compute_embeddings(paths: Iterable[Path],
     if not inputs:
         return out
 
-    # AsyncInferQueue 로 N 개 동시 진행 — NPU/GPU 파이프라인 saturate.
+    raw = _infer_raw(compiled, inputs, _optimal_streams(compiled))
+
+    # head 통과 + L2 정규화 → PyTorch 경로와 동일 형식.
+    for p, feat in raw.items():
+        if head is not None and _HAS_TORCH:
+            try:
+                with torch.no_grad():
+                    feat = head(torch.from_numpy(feat)).cpu().numpy()
+            except Exception:
+                continue
+        norm = float(np.linalg.norm(feat[0])) + 1e-9
+        out[p] = (feat[0] / norm).astype(np.float32)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# 공용 비동기 추론 — AsyncInferQueue 로 N 개 동시 in-flight (NPU/GPU saturate)
+# ---------------------------------------------------------------------------
+def _infer_raw(compiled, inputs, n_streams: int) -> Dict[Path, np.ndarray]:  # pragma: no cover - 환경 의존
+    """``inputs=[(path, (1,3,H,W) ndarray), ...]`` → ``{path: raw_feat}``.
+
+    ``AsyncInferQueue(jobs=n_streams)`` 로 다수 추론을 동시에 띄워 파이프라인을
+    채운다.  큐를 못 만들면 InferRequest 단일 흐름으로 폴백.  실패 path 는 누락.
+    """
     try:
         from openvino.runtime import AsyncInferQueue
     except Exception:
         AsyncInferQueue = None  # type: ignore
-    n_streams = _optimal_streams(compiled)
     raw: Dict[Path, np.ndarray] = {}
-
+    queue = None
     if AsyncInferQueue is not None:
         try:
-            queue = AsyncInferQueue(compiled, jobs=n_streams)
+            queue = AsyncInferQueue(compiled, jobs=max(1, int(n_streams)))
         except Exception:
             queue = None
-    else:
-        queue = None
-
     if queue is not None:
         def _cb(infer_request, userdata):
             try:
-                res = infer_request.results
-                feat = list(res.values())[0]
-                raw[userdata] = feat
+                raw[userdata] = list(infer_request.results.values())[0]
             except Exception:
                 pass
         queue.set_callback(_cb)
@@ -283,26 +307,123 @@ def compute_embeddings(paths: Iterable[Path],
         except Exception:
             pass
     else:
-        # AsyncInferQueue 없는 OpenVINO 버전 — InferRequest 재사용 단일 흐름.
         try:
             req = compiled.create_infer_request()
         except Exception:
-            return out
+            return raw
         for p, x in inputs:
             try:
-                res = req.infer({0: x})
-                raw[p] = list(res.values())[0]
+                raw[p] = list(req.infer({0: x}).values())[0]
             except Exception:
                 continue
+    return raw
 
-    # head 통과 + L2 정규화 → PyTorch 경로와 동일 형식.
+
+# ---------------------------------------------------------------------------
+# 고효율 모드 — 장치 고정 컴파일/추론 (유닛별 서로 다른 모델 동시 가동)
+# ---------------------------------------------------------------------------
+def available_units() -> List[str]:
+    """OpenVINO 로 가속 가능한 Intel 유닛 — ``["GPU","NPU"]`` 중 실제 존재분.
+
+    torch/openvino 가 없으면 빈 리스트.  스케줄러가 이 결과로 어떤 워커를
+    띄울지 결정한다 (CPU 는 항상 별도로 가동)."""
+    if not (_HAS_TORCH and _HAS_OPENVINO):
+        return []
+    devs = _list_ov_devices()
+    out: List[str] = []
+    for cand in ("GPU", "NPU"):
+        if any(d == cand or d.startswith(cand + ".") for d in devs):
+            out.append(cand)
+    return out
+
+
+def _build_ov_model(model_kind: str):  # pragma: no cover - 환경 의존
+    """torchvision 백본 → OpenVINO 모델 (raw 임베딩 — classifier/fc 제거).
+
+    ``.eval()`` 로 BatchNorm 을 폴딩한 뒤 변환해야 NPU/GPU 에서 정확하다.
+    """
+    if model_kind == MODEL_RESNET18:
+        weights = models.ResNet18_Weights.IMAGENET1K_V1
+        backbone = models.resnet18(weights=weights)
+        backbone.fc = torch.nn.Identity()       # 512-d 임베딩
+    else:                                        # MobileNetV3-Small (576-d)
+        weights = models.MobileNet_V3_Small_Weights.IMAGENET1K_V1
+        backbone = models.mobilenet_v3_small(weights=weights)
+        backbone.classifier = torch.nn.Identity()
+    backbone.eval()
+    example = torch.randn(1, 3, _INPUT_PX, _INPUT_PX)
+    return ov.convert_model(backbone, example_input=example)
+
+
+# (model_kind, device) → 실제 컴파일된 디바이스 풀네임 — 상태표시/디버그용.
+_compiled_units: Dict[tuple, str] = {}
+
+
+@lru_cache(maxsize=4)
+def compile_model_on(model_kind: str, device: str):  # pragma: no cover - 환경 의존
+    """``model_kind`` 백본을 ``device`` ("GPU"/"NPU") 에 고정 컴파일.
+
+    반환 ``(compiled, full_name)`` 또는 실패 시 ``None``.  **다른 디바이스로
+    silent fallback 하지 않는다** — 폴백은 스케줄러가 유닛 단위로 결정하므로,
+    GPU 컴파일 실패는 단지 그 유닛을 띄우지 않는다는 뜻이다.
+    """
+    if not (_HAS_TORCH and _HAS_OPENVINO):
+        return None
+    try:
+        ov_model = _build_ov_model(model_kind)
+        core = ov.Core()
+        compiled = core.compile_model(
+            ov_model, device, config={"PERFORMANCE_HINT": "THROUGHPUT"},
+        )
+    except Exception:
+        return None
+    name = device
+    try:
+        name = str(core.get_property(device, "FULL_DEVICE_NAME"))
+    except Exception:
+        pass
+    _compiled_units[(model_kind, device)] = name
+    import logging
+    logging.getLogger("aoi.openvino").info(
+        "OpenVINO %s compiled on %s (%s)", model_kind, device, name,
+    )
+    return (compiled, name)
+
+
+def active_unit_labels() -> List[str]:
+    """컴파일에 성공한 유닛 디바이스 라벨 (중복 제거).  상태바 표시용."""
+    return sorted({dev for (_kind, dev) in _compiled_units})
+
+
+def device_embed(paths: Iterable[Path],
+                 *,
+                 model_kind: str,
+                 device: str,
+                 cfg=None,
+                 jobs: Optional[int] = None) -> Dict[Path, np.ndarray]:  # pragma: no cover - 환경 의존
+    """``model_kind`` 백본을 ``device`` 에 고정 컴파일해 raw 임베딩(L2 정규화) 계산.
+
+    ``jobs`` 로 동시 in-flight 추론 수를 지정 — NPU(8GB)는 크게(예: 16) 주어
+    메모리/파이프라인을 적극 활용한다.  실패 path 는 결과에서 누락.
+    """
+    out: Dict[Path, np.ndarray] = {}
+    pack = compile_model_on(model_kind, device)
+    if pack is None:
+        return out
+    compiled, _name = pack
+    items = [Path(p) for p in paths]
+    if not items:
+        return out
+    inputs: list[tuple[Path, np.ndarray]] = []
+    for p in items:
+        arr = _make_input_array(p, cfg)
+        if arr is not None:
+            inputs.append((p, arr[np.newaxis]))
+    if not inputs:
+        return out
+    n_streams = _optimal_streams(compiled) if jobs is None else max(1, int(jobs))
+    raw = _infer_raw(compiled, inputs, n_streams)
     for p, feat in raw.items():
-        if head is not None and _HAS_TORCH:
-            try:
-                with torch.no_grad():
-                    feat = head(torch.from_numpy(feat)).cpu().numpy()
-            except Exception:
-                continue
         norm = float(np.linalg.norm(feat[0])) + 1e-9
         out[p] = (feat[0] / norm).astype(np.float32)
     return out

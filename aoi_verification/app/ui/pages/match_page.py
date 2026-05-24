@@ -29,6 +29,7 @@ from ...similarity.slot_features import (SlotFeatureCache, SlotPrecomputeWorker,
                                             SlotScoreCache)
 from ...workers.matcher import Candidate, MatcherWorker
 from ...workers import fast_matcher as _fast
+from ...workers import efficiency_matcher as _eff
 from ...utils.prefs import EngineMode
 from ..widgets.loading_overlay import LoadingOverlay
 from ..widgets.match_expand_view import MatchExpandView
@@ -96,6 +97,7 @@ class MatchPage(QWidget):
         self._engine_cfg = config.DEFAULT_SIM_CONFIG
         # 고속 모드(임베딩+ANN) 활성 여부 + 슬롯 인덱스 캐시.
         self._fast_mode: bool = False
+        self._efficiency_mode: bool = False
         self._index_cache = _fast.SlotIndexCache()
         # 자동 모드 고속 선계산 결과: {(slot, ref_path): [(val_path, score), ...]}.
         self._fast_results: dict = {}
@@ -379,13 +381,23 @@ class MatchPage(QWidget):
         # 않도록 (MatcherWorker 의 동일 패턴 참고).
         self._stop_precompute_worker()
 
-        # 고속 모드 — 임베딩+ANN.  hnswlib/embedder 가용 시에만, 아니면 기본 폴백.
-        self._fast_mode = (EngineMode.is_fast(self._engine_cfg.engine)
-                           and _fast.is_available())
+        # 고속 모드 — 임베딩+ANN(hnswlib/embedder 가용 시).
+        # 고효율 모드 — CPU+GPU+NPU work-stealing (가능한 유닛만, CPU 항상).
+        eff_mode = EngineMode.is_efficiency(self._engine_cfg.engine)
+        self._efficiency_mode = eff_mode
+        # 두 모드 모두 결과를 _fast_results 에 채워 _launch_matcher 가 즉시 응답.
+        self._fast_mode = (
+            eff_mode
+            or (EngineMode.is_fast(self._engine_cfg.engine) and _fast.is_available())
+        )
         if EngineMode.is_fast(self._engine_cfg.engine) and not self._fast_mode:
             # 고속 모드 요청했으나 의존성 없음 → 기본 모드로 조용히 폴백(로그만).
             import logging
             logging.getLogger("aoi.match").info(i18n.KO.ENGINE_FAST_UNAVAILABLE)
+        if eff_mode and not _eff.has_accel_units():
+            # 가속 장치 없음 → CPU 단독으로 고효율 모드 실행 (안내 로그).
+            import logging
+            logging.getLogger("aoi.match").info(i18n.KO.ENGINE_EFFICIENCY_CPU_ONLY)
 
         # 수동 = 스트리밍(첫 슬롯 후 곧장 검토 + 나머지 백그라운드).
         # 자동 = 전체 선계산(한 번의 진행 바) → 끝난 뒤 자동 매칭, 백그라운드 없음
@@ -409,7 +421,15 @@ class MatchPage(QWidget):
             )
             self.bg_status_label.setText("")
 
-        if self._fast_mode:
+        if eff_mode:
+            # 고효율 모드 — CPU/GPU/NPU 가 공유 큐에서 ref 를 나눠 처리,
+            # 결과를 _fast_results 에 저장 (FastIndexWorker 와 동일 시그널 계약).
+            self.bg_status_label.setText(_eff.describe_active_units())
+            self._precompute_worker = _eff.EfficiencyScheduler(
+                tasks, cfg=self._engine_cfg, threshold=self._threshold,
+                auto=self._auto_mode, results=self._fast_results, parent=self,
+            )
+        elif self._fast_mode:
             # FastIndexWorker — SlotPrecomputeWorker 와 동일 시그널.  자동 모드면
             # 모든 ref 를 미리 재정렬해 _fast_results 에 저장(매칭 즉시 응답).
             self._precompute_worker = _fast.FastIndexWorker(

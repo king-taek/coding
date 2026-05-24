@@ -31,16 +31,21 @@ class AutomationLevel:
         return level in cls.AUTO_MODES
 
 
-# 유사도 엔진 모드 — 기본(현행) vs 고속(임베딩+ANN).  raw string 대신 사용.
+# 유사도 엔진 모드 — 기본(현행) vs 고속(임베딩+ANN) vs 고효율(다중 유닛).
 class EngineMode:
     BASIC = "basic"        # 기존 파이프라인, 변경 없음 (기본값)
     FAST = "fast"          # 임베딩 + ANN(hnswlib 또는 NumPy 폴백), 상위 K 재정렬
+    EFFICIENCY = "efficiency"  # CPU(고전)+GPU(MobileNetV3)+NPU(ResNet18) 동시 work-stealing
 
-    ALL = frozenset({BASIC, FAST})
+    ALL = frozenset({BASIC, FAST, EFFICIENCY})
 
     @classmethod
     def is_fast(cls, mode: str) -> bool:
         return mode == cls.FAST
+
+    @classmethod
+    def is_efficiency(cls, mode: str) -> bool:
+        return mode == cls.EFFICIENCY
 
 
 @dataclass
@@ -77,7 +82,7 @@ class UiPrefs:
     # 않음.  사용자가 ‘다시 보지 않기’ 를 선택했거나 설치 시도 후 실패하면 True.
     openvino_install_declined: bool = False
     # 유사도 엔진 모드 + 강화 전처리 토글 (계산 전용, 화면 표시는 원본 유지).
-    engine_mode: str = "basic"               # EngineMode.{BASIC,FAST}
+    engine_mode: str = "basic"               # EngineMode.{BASIC,FAST,EFFICIENCY}
     center_crop: bool = False                # 사진 중앙 30% 만 사용 (기준·검증)
     kla_crop: bool = False                   # KLA 상/하단 정보영역 crop
     persist_scores: bool = False             # 유사도 점수 디스크 캐시 (#5B)

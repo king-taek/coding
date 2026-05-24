@@ -248,17 +248,23 @@ class SetupPage(QWidget):
 
         self.radio_engine_basic = QRadioButton(i18n.KO.ENGINE_MODE_BASIC, engine_card)
         self.radio_engine_fast = QRadioButton(i18n.KO.ENGINE_MODE_FAST, engine_card)
+        self.radio_engine_efficiency = QRadioButton(
+            i18n.KO.ENGINE_MODE_EFFICIENCY, engine_card)
         _last_engine = getattr(_prefs_now, "engine_mode", "basic")
         if _last_engine == "fast":
             self.radio_engine_fast.setChecked(True)
+        elif _last_engine == "efficiency":
+            self.radio_engine_efficiency.setChecked(True)
         else:
             self.radio_engine_basic.setChecked(True)
         self._engine_group = QButtonGroup(engine_card)
         self._engine_group.setExclusive(True)
         self._engine_group.addButton(self.radio_engine_basic)
         self._engine_group.addButton(self.radio_engine_fast)
+        self._engine_group.addButton(self.radio_engine_efficiency)
         engine_card.body().addWidget(self.radio_engine_basic)
         engine_card.body().addWidget(self.radio_engine_fast)
+        engine_card.body().addWidget(self.radio_engine_efficiency)
 
         pre_title = QLabel(i18n.KO.PRE_GROUP_TITLE, engine_card)
         pre_title.setToolTip(i18n.KO.PRE_GROUP_TOOLTIP)
@@ -405,7 +411,12 @@ class SetupPage(QWidget):
             automation = AutomationLevel.USER_SELECT
         else:
             automation = AutomationLevel.MANUAL
-        engine_mode = "fast" if self.radio_engine_fast.isChecked() else "basic"
+        if self.radio_engine_efficiency.isChecked():
+            engine_mode = "efficiency"
+        elif self.radio_engine_fast.isChecked():
+            engine_mode = "fast"
+        else:
+            engine_mode = "basic"
         center_crop = bool(self.check_center_crop.isChecked())
         kla_crop = bool(self.check_kla_crop.isChecked())
         persist_scores = bool(self.check_persist_scores.isChecked())
