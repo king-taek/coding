@@ -172,9 +172,14 @@ class _ThumbTile(QFrame):
         super().mousePressEvent(event)
 
     def mouseDoubleClickEvent(self, event):  # noqa: N802
-        # 인라인 선택 모드에서 더블클릭 = 확대 보기 (#2).
+        # 인라인 선택 모드에서 더블클릭 = 선택 해제 (확대 모드 제거).
+        # 더블클릭 직전의 단일 press 가 토글했더라도 여기서 OFF 로 고정 →
+        # 더블클릭은 항상 ‘해제’로 끝난다.  super() 를 호출하면 QWidget 기본
+        # 구현이 press 를 재생성해 다시 토글하므로 여기서 종료한다.
         if self._inline_select and event.button() == Qt.MouseButton.LeftButton:
-            self.expand_requested.emit(self.entry)
+            self.set_inline_selected(False)
+            self.sel_toggled.emit(self.entry, False)
+            return
         super().mouseDoubleClickEvent(event)
 
 
@@ -245,6 +250,7 @@ class ThumbGrid(QWidget):
         self._entries: list[ThumbEntry] = []
         self._selected: list[ThumbEntry] = []
         self._tiles: list[_ThumbTile] = []         # 인라인 선택용 타일 참조
+        self._active_cols = columns                # 현재 적용 중인 열 수(반응형)
 
         self._grid = QGridLayout(self)
         self._grid.setContentsMargins(0, 0, 0, 0)
@@ -289,6 +295,8 @@ class ThumbGrid(QWidget):
             visible = self._entries
             extra = 0
 
+        cols = self._effective_columns()
+        self._active_cols = cols
         row = 0
         col = 0
         for ent in visible:
@@ -305,13 +313,44 @@ class ThumbGrid(QWidget):
             self._tiles.append(tile)
             self._grid.addWidget(tile, row, col)
             col += 1
-            if col >= self._columns:
+            if col >= cols:
                 col = 0
                 row += 1
         if extra > 0:
             plus = _PlusTile(extra, tile_px=self._tile_px)
             plus.clicked.connect(self.plus_clicked.emit)
             self._grid.addWidget(plus, row, col)
+
+    # ------------------------------------------------------------------
+    # 반응형 열 수 — 패널 폭에 맞춰 가로 스크롤 없이 자동 reflow.
+    # ------------------------------------------------------------------
+    def _effective_columns(self) -> int:
+        spacing = self._grid.spacing()
+        tile_w = (self._tile_px or THUMB_PX) + 14 + spacing
+        avail = self.width()
+        if avail <= 0:
+            return self._columns
+        return max(1, min(self._columns, avail // tile_w))
+
+    def resizeEvent(self, event):  # noqa: N802
+        super().resizeEvent(event)
+        cols = self._effective_columns()
+        if cols != self._active_cols:
+            self._active_cols = cols
+            self._relayout_columns(cols)
+
+    def _relayout_columns(self, cols: int) -> None:
+        """기존 그리드 위젯(타일 + +N)을 순서 보존하여 새 cols 로 재배치 —
+        위젯 재생성/재디코드 없음."""
+        widgets = []
+        for i in reversed(range(self._grid.count())):
+            it = self._grid.takeAt(i)
+            w = it.widget()
+            if w is not None:
+                widgets.append(w)
+        widgets.reverse()
+        for i, w in enumerate(widgets):
+            self._grid.addWidget(w, i // cols, i % cols)
 
     def _on_toggle(self, entry: ThumbEntry, selected: bool) -> None:
         if selected:

@@ -15,8 +15,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable, Optional
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import (QColor, QCursor, QKeySequence, QPixmap, QShortcut)
+from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import (QColor, QCursor, QIcon, QKeySequence, QPixmap,
+                         QShortcut)
 from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout,
                               QHBoxLayout, QLabel, QListWidget,
                               QListWidgetItem, QMenu, QMessageBox,
@@ -138,6 +139,7 @@ def _attach_view_larger(label: QLabel, path_getter) -> None:
     # 외부에서 동일 동작을 호출할 수 있도록 콜러블 노출 (스모크 테스트 등).
     label.view_larger = _show_large  # type: ignore[attr-defined]
 
+_LIST_THUMB_PX = 56     # 좌측 ‘실패 목록’ 항목 썸네일 한 변(px).
 _REF_PX = 420           # 좌측 기준 사진 기본 크기 — 원본 화질에서 다운스케일.
 _CAND_PX = 260          # 우측 후보 타일 기본 크기 — 썸네일 대신 원본을 lazy 로드.
 _CAND_CAP_PX = 28       # 캡션 한 줄
@@ -182,7 +184,9 @@ class _CandidateTile(QFrame):
     selected = pyqtSignal(object)          # ImageItem (클릭 선택)
     view_requested = pyqtSignal(object)    # ImageItem (크게보기)
 
-    _SEL_STYLE = ("QFrame { border: 3px solid #00D4FF; border-radius: 8px;"
+    # objectName 스코프 셀렉터 — 최외곽 프레임에만 테두리. (QLabel 이 QFrame
+    # 서브클래스라 ``QFrame {…}`` 는 내부 이미지/점수/캡션 라벨까지 번진다.)
+    _SEL_STYLE = ("#candTile { border: 3px solid #00D4FF; border-radius: 8px;"
                   " background: rgba(0, 212, 255, 0.06); }")
 
     def __init__(self, item: ImageItem, score: float, parent=None,
@@ -195,6 +199,7 @@ class _CandidateTile(QFrame):
         self._is_selected = False
         # 슬라이더 리사이즈를 재디코드 없이 처리하기 위한 소스(최대크기) 픽스맵.
         self._source_pix: Optional[QPixmap] = None
+        self.setObjectName("candTile")
         self.setProperty("role", "card-soft")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedSize(self._size + 16, self._size + _CAND_CAP_PX + 32)
@@ -431,6 +436,7 @@ class UnmatchedReviewDialog(QDialog):
         list_title.setStyleSheet("color: #00D4FF; font-weight: 700;")
         lpl.addWidget(list_title)
         self.fail_list = QListWidget(list_panel)
+        self.fail_list.setIconSize(QSize(_LIST_THUMB_PX, _LIST_THUMB_PX))
         self.fail_list.setStyleSheet(
             "QListWidget { background: #0A0F1C; border: 1px solid #1F2A3F; "
             "border-radius: 6px; color: #C8D6E5; }"
@@ -519,12 +525,13 @@ class UnmatchedReviewDialog(QDialog):
 
         ``(normal, cancelled)`` 두 인덱스 리스트를 돌려준다 — 일반 매치 실패가
         먼저, 그 다음 ‘매칭 취소’ 항목.  ``self._unmatched`` 자체는 재정렬하지
-        않고(인덱싱 보존) 표시 순서만 만든다.
+        않고(인덱싱 보존) 표시 순서만 만든다.  매치 확정된 항목은 목록에서
+        제외한다(확정 시 사라지게).
         """
         normal = [i for i, e in enumerate(self._unmatched)
-                  if not self._is_cancelled(e)]
+                  if not self._is_cancelled(e) and not self._entry_resolved(i)]
         cancelled = [i for i, e in enumerate(self._unmatched)
-                     if self._is_cancelled(e)]
+                     if self._is_cancelled(e) and not self._entry_resolved(i)]
         return normal, cancelled
 
     def _entry_resolved(self, idx: int) -> bool:
@@ -539,9 +546,9 @@ class UnmatchedReviewDialog(QDialog):
         return False
 
     def _list_label(self, idx: int) -> str:
-        e = self._unmatched[idx]
-        prefix = "✓ " if self._entry_resolved(idx) else ""
-        return f"{prefix}[{e.slot}] {Path(e.path).name}"
+        # 썸네일 표시이므로 파일명 대신 짧은 슬롯 태그만. (확정 항목은 목록에서
+        # 제외되므로 ✓ 진행 표시는 더 이상 필요 없다.)
+        return f"[{self._unmatched[idx].slot}]"
 
     def _populate_list(self) -> None:
         """전체 실패 목록을 채운다 — 일반 → 구분선 → 매칭 취소 (#12/#14)."""
@@ -556,7 +563,10 @@ class UnmatchedReviewDialog(QDialog):
         def _add_entry_row(idx: int) -> None:
             row = self.fail_list.count()
             it = QListWidgetItem(self._list_label(idx))
-            it.setToolTip(str(self._unmatched[idx].path))
+            # 파일명 텍스트 대신 작은 썸네일로 표시 — 파일명은 툴팁으로.
+            path = Path(self._unmatched[idx].path)
+            it.setIcon(QIcon(image_io.load_thumb_qpixmap(path, _LIST_THUMB_PX)))
+            it.setToolTip(str(path))
             self.fail_list.addItem(it)
             self._row_to_idx[row] = idx
             self._idx_to_row[idx] = row
@@ -840,6 +850,9 @@ class UnmatchedReviewDialog(QDialog):
         return n
 
     def _on_confirm(self) -> None:
+        # 확정 직전 현재 항목의 표시 행 — 확정 후 그 자리로 올라온 다음
+        # 미해결 항목으로 자연스럽게 이동하기 위해.
+        prev_row = self._idx_to_row.get(self._idx, 0)
         n = self._finalize_pending()
         if n:
             QMessageBox.information(
@@ -848,7 +861,25 @@ class UnmatchedReviewDialog(QDialog):
             )
         # 확정으로 used_vals 가 바뀌어 후보 집합이 달라졌을 수 있으니 키 무효화.
         self._last_cand_key = None
+        # 확정된 항목은 목록에서 사라진다(재생성) → 다음 미해결 항목으로 이동.
+        self._populate_list()
+        self._idx = self._next_idx_after(prev_row)
         self._render_current()
+
+    def _next_idx_after(self, prev_row: int) -> int:
+        """``_populate_list`` 재생성 후, ``prev_row`` 위치(또는 그 다음/이전)에
+        남아 있는 첫 유효 항목의 ``self._unmatched`` 인덱스.  남은 게 없으면
+        ``len(self._unmatched)`` 을 돌려준다(→ 완료 화면)."""
+        count = self.fail_list.count()
+        for row in range(prev_row, count):
+            idx = self._row_to_idx.get(row)
+            if idx is not None:
+                return idx
+        for row in range(min(prev_row, count) - 1, -1, -1):
+            idx = self._row_to_idx.get(row)
+            if idx is not None:
+                return idx
+        return len(self._unmatched)
 
     def _maybe_prompt_pending(self) -> None:
         """미확정(파란 테두리) 선택이 남은 채 창을 닫으면 매칭 여부를 묻는다 (#1a)."""

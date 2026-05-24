@@ -18,12 +18,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import (QByteArray, QEvent, QPoint, QRect, QSize, Qt,
-                          pyqtSignal)
+from PyQt6.QtCore import QByteArray, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QKeySequence, QPixmap, QShortcut
-from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QRubberBand,
-                              QScrollArea, QSizePolicy, QSlider, QSplitter,
-                              QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QScrollArea,
+                              QSizePolicy, QSlider, QSplitter, QVBoxLayout,
+                              QWidget)
 
 from ... import config, i18n
 from ...models.slot import ImageItem
@@ -78,8 +77,6 @@ class _SidePanel(QFrame):
         self._inline_select = bool(inline_select)
         self._sections: dict[str, SlotSection] = {}
         self._cached: dict[str, list[ImageItem]] = {}
-        self._rubber: Optional[QRubberBand] = None
-        self._rubber_origin: Optional[QPoint] = None
 
         self.setProperty("role", "section")
         outer = QVBoxLayout(self)
@@ -94,24 +91,9 @@ class _SidePanel(QFrame):
         head.addWidget(ttl)
         head.addStretch(1)
 
-        # 인라인 선택 도구 — 선택 개수 + 전체선택/해제 + 액션 버튼 (#2).
-        if self._inline_select and self._actions:
-            self._sel_count = QLabel("", self)
-            self._sel_count.setStyleSheet("color: #00FFA3; font-weight: 700;")
-            head.addWidget(self._sel_count)
-            btn_all = NeonButton(i18n.KO.BULK_SELECT_ALL, role="primary")
-            btn_all.clicked.connect(lambda: self._set_all_inline(True))
-            head.addWidget(btn_all)
-            btn_none = NeonButton(i18n.KO.BULK_DESELECT_ALL, role="default")
-            btn_none.clicked.connect(lambda: self._set_all_inline(False))
-            head.addWidget(btn_none)
-            self._action_btns: list[NeonButton] = []
-            for action_id, label, role in self._actions:
-                b = NeonButton(label, role=role)
-                b.clicked.connect(lambda _c=False, a=action_id: self._fire_inline(a))
-                head.addWidget(b)
-                self._action_btns.append(b)
-
+        # 인라인 선택 일괄작업·전체선택 등은 ‘선택 모드’ 팝업으로 일원화 —
+        # 메인 헤더는 ‘선택 모드’ 버튼만 둔다.  타일 클릭=선택 / 더블클릭=해제는
+        # inline_select 로 계속 동작(헤더 도구 없이).
         if self._actions:
             self._select_btn = NeonButton(i18n.KO.BTN_SELECT_MODE, role="ghost")
             self._select_btn.clicked.connect(self._open_bulk_select)
@@ -130,22 +112,18 @@ class _SidePanel(QFrame):
         self._host_layout.setSpacing(10)
         self._host_layout.addStretch(1)
 
+        # 후보 영역은 가로 스크롤이 절대 생기지 않도록 — 타일은 ThumbGrid 가
+        # 패널 폭에 맞춰 열 수를 자동 reflow 한다.
+        self._scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff,
+        )
         if not vertical_scroll:
             self._scroll.setVerticalScrollBarPolicy(
                 Qt.ScrollBarPolicy.ScrollBarAlwaysOff,
             )
-            self._scroll.setHorizontalScrollBarPolicy(
-                Qt.ScrollBarPolicy.ScrollBarAsNeeded,
-            )
-
-        # 드래그(러버밴드) 다중 선택 — viewport 빈 영역에서 시작 (#2).
-        if self._inline_select:
-            self._scroll.viewport().installEventFilter(self)
 
         outer.addWidget(self._scroll, stretch=1)
         self._columns = columns
-        if self._inline_select and self._actions:
-            self._update_selection_ui()
 
     # ------------------------------------------------------------------
     def update_data(self, data: dict[str, list[ImageItem]]) -> None:
@@ -177,84 +155,20 @@ class _SidePanel(QFrame):
                 lambda ent, s=slot: self.expand_requested.emit(
                     self._name, s, ent.item)
             )
-            sec.inline_changed.connect(self._update_selection_ui)
             self._sections[slot] = sec
             self._host_layout.addWidget(sec)
         self._host_layout.addStretch(1)
-        if self._inline_select and self._actions:
-            self._update_selection_ui()
 
     def cached(self) -> dict[str, list[ImageItem]]:
         return {k: list(v) for k, v in self._cached.items()}
 
     # ------------------------------------------------------------------
-    # 인라인 선택 (#2)
+    # 인라인 선택 — 타일 클릭=선택 / 더블클릭=해제.  일괄작업·드래그는
+    # ‘선택 모드’ 팝업으로 일원화했으므로 여기엔 전체선택(Ctrl+A) 헬퍼만 둔다.
     # ------------------------------------------------------------------
-    def selected_items(self) -> list[ImageItem]:
-        out: list[ImageItem] = []
-        for sec in self._sections.values():
-            out.extend(sec.grid.inline_selected_items())
-        return out
-
     def _set_all_inline(self, selected: bool) -> None:
         for sec in self._sections.values():
             sec.grid.set_all_inline_selected(selected)
-        self._update_selection_ui()
-
-    def _update_selection_ui(self) -> None:
-        if not (self._inline_select and self._actions):
-            return
-        n = len(self.selected_items())
-        self._sel_count.setText(i18n.KO.INLINE_SELECT_COUNT_FMT.format(n=n))
-        for b in getattr(self, "_action_btns", []):
-            b.setEnabled(n > 0)
-
-    def _fire_inline(self, action_id: str) -> None:
-        items = self.selected_items()
-        if not items:
-            return
-        self.selection_action.emit(self._name, action_id, items)
-
-    # ------------------------------------------------------------------
-    def eventFilter(self, obj, event):  # noqa: N802
-        if obj is not self._scroll.viewport() or not self._inline_select:
-            return super().eventFilter(obj, event)
-        et = event.type()
-        if et == QEvent.Type.MouseButtonPress \
-                and event.button() == Qt.MouseButton.LeftButton:
-            self._rubber_origin = event.pos()
-            if self._rubber is None:
-                self._rubber = QRubberBand(QRubberBand.Shape.Rectangle,
-                                           self._scroll.viewport())
-            self._rubber.setGeometry(QRect(self._rubber_origin, QSize()))
-            self._rubber.show()
-            return True
-        if et == QEvent.Type.MouseMove and self._rubber_origin is not None:
-            self._rubber.setGeometry(
-                QRect(self._rubber_origin, event.pos()).normalized())
-            return True
-        if et == QEvent.Type.MouseButtonRelease and self._rubber_origin is not None:
-            rect = self._rubber.geometry()
-            self._rubber.hide()
-            self._rubber_origin = None
-            # 드래그 거리가 작으면(사실상 클릭) 선택 변경 없이 통과.
-            if rect.width() > 6 or rect.height() > 6:
-                self._select_in_rect(rect)
-            return True
-        return super().eventFilter(obj, event)
-
-    def _select_in_rect(self, rect: QRect) -> None:
-        vp = self._scroll.viewport()
-        changed = False
-        for sec in self._sections.values():
-            for tile in sec.grid.tiles():
-                tl = tile.mapTo(vp, QPoint(0, 0))
-                tile_rect = QRect(tl, tile.size())
-                if rect.intersects(tile_rect):
-                    tile.set_inline_selected(True)
-                    changed = True
-        if changed:
-            self._update_selection_ui()
 
     # ------------------------------------------------------------------
     def _open_bulk_select(self) -> None:
@@ -361,15 +275,12 @@ class SelectPage(QWidget):
             # 타일 절반 크기 → 같은 폭에 3 열 그리드 깔리도록.
             columns=3,
             tile_px=side_tile,
-            inline_select=True,        # 클릭 선택·Ctrl+A·드래그 선택 (#2)
+            inline_select=True,        # 타일 클릭=선택 / 더블클릭=해제 (Ctrl+A=전체)
         )
         self.left_panel.selection_action.connect(self._on_batch_action)
         self.left_panel.tile_clicked.connect(self._on_tile_click)
         self.left_panel.plus_clicked.connect(self._on_plus_click)
-        # 인라인 선택 모드: 더블클릭/우클릭 = 확대 보기 (#2).
-        self.left_panel.expand_requested.connect(
-            lambda panel, slot, _item: self._open_zoom(panel, slot)
-        )
+        # 후보 패널은 확대(줌) 모드를 두지 않는다 — 더블클릭은 선택 해제용.
         # 3 col × (120 thumb + 14 padding) + spacing + 패널 padding 을 담을 최소
         # 너비.  좁은 창에선 세로 스택으로 reflow 되어 무관.
         self.left_panel.setMinimumWidth(220)
@@ -457,7 +368,6 @@ class SelectPage(QWidget):
         self.right_panel = _SidePanel(
             self.PANEL_RIGHT, i18n.KO.PANEL_RIGHT_TARGETS,
             actions=[
-                ("remove", i18n.KO.BTN_REMOVE_FROM_TARGET, "danger"),
                 ("to_exclude", i18n.KO.BTN_MOVE_TO_EXCLUDE, "warn"),
                 ("recenter", i18n.KO.BTN_BACK_TO_CENTER, "ghost"),
             ],

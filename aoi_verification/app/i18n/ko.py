@@ -50,7 +50,8 @@ BTN_CANCEL_SELECT_MODE = "선택 해제"
 # ── 다중 선택 다이얼로그 (Stage 1 선택 모드) ─────────────────────────────
 BULK_SELECT_TITLE_FMT = "{panel} — 다중 선택"
 BULK_SELECT_HINT = (
-    "사진을 클릭해서 선택/해제하세요. 선택된 사진들에 아래 액션이 적용됩니다."
+    "사진을 클릭하거나 빈 곳에서 드래그해 여러 장을 선택/해제하세요. "
+    "선택된 사진들에 아래 액션이 적용됩니다."
 )
 BULK_SELECT_SUMMARY_FMT = "선택됨: {n} 장"
 BULK_SELECT_EMPTY = "표시할 사진이 없습니다."

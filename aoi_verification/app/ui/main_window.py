@@ -98,13 +98,22 @@ class MainWindow(QMainWindow):
         )
         self._status_bar.addPermanentWidget(self._usage_label)
         # 가속 장치(Intel GPU/NPU) 존재 여부 — 세션 중 불변이라 1회만 조회.
+        # torch 설치와 무관하게 OpenVINO 만으로 존재 여부를 본다(상태바 표시용).
         self._accel_present = {"GPU": False, "NPU": False}
         try:
             from ..learning import embedder_openvino as _ovw
-            _units = set(_ovw.available_units())
-            self._accel_present = {"GPU": "GPU" in _units, "NPU": "NPU" in _units}
+            info = _ovw.accelerator_presence()
+            self._accel_present = {"GPU": bool(info.get("GPU")),
+                                   "NPU": bool(info.get("NPU"))}
+            # 자가 진단 — 마우스오버로 감지 디바이스/원인을 확인.
+            devs = info.get("devices") or []
+            reason = info.get("reason") or ""
+            tip = "OpenVINO 감지: " + (", ".join(devs) if devs else "(없음)")
+            if reason:
+                tip += f"\n사유: {reason}"
+            self._usage_label.setToolTip(tip)
         except Exception:
-            pass
+            self._usage_label.setToolTip("가속 장치 조회 실패")
         self._proc = None
         self._mem_label = QLabel("", self._status_bar)
         self._mem_label.setProperty("role", "muted")

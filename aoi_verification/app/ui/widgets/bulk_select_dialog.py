@@ -7,10 +7,12 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from typing import Optional
+
+from PyQt6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout,
-                              QHBoxLayout, QLabel, QScrollArea, QSizePolicy,
-                              QVBoxLayout, QWidget)
+                              QHBoxLayout, QLabel, QRubberBand, QScrollArea,
+                              QSizePolicy, QVBoxLayout, QWidget)
 
 from ... import i18n
 from ...models.slot import ImageItem
@@ -38,6 +40,8 @@ class _SelectTile(QFrame):
         super().__init__(parent)
         self.item = item
         self._selected = False
+        # objectName 스코프 셀렉터로 테두리가 내부 라벨까지 번지지 않게 한다.
+        self.setObjectName("selTile")
         self.setProperty("role", "card-soft")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         # 사진 정사각 영역(_TILE_PX) + 캡션 한 줄(_CAP_PX) + 마진/스페이싱.
@@ -85,7 +89,7 @@ class _SelectTile(QFrame):
     def _refresh_visual(self) -> None:
         if self._selected:
             self.setStyleSheet(
-                "QFrame { border: 3px solid #00D4FF; border-radius: 8px;"
+                "#selTile { border: 3px solid #00D4FF; border-radius: 8px;"
                 " background: rgba(0, 212, 255, 0.06); }"
             )
         else:
@@ -129,6 +133,8 @@ class BulkSelectDialog(QDialog):
         self._tiles_by_key: dict[str, _SelectTile] = {}
         self._selected_keys: set[str] = set()
         self._selected_items_by_key: dict[str, ImageItem] = {}
+        self._rubber: Optional[QRubberBand] = None
+        self._rubber_origin: Optional[QPoint] = None
         self._build(title, data, actions)
 
     # ------------------------------------------------------------------
@@ -207,6 +213,8 @@ class BulkSelectDialog(QDialog):
         host_layout.addStretch(1)
         scroll.setWidget(host)
         self._scroll = scroll
+        # 드래그(러버밴드) 다중 선택 — viewport 빈 영역에서 시작.
+        scroll.viewport().installEventFilter(self)
         root.addWidget(scroll, stretch=1)
         # 첫 렌더 직후 + resize 마다 cols 재계산.
         QTimer.singleShot(0, self._relayout_grids)
@@ -272,10 +280,60 @@ class BulkSelectDialog(QDialog):
             ordered = [w for w in ordered if w is not None]
             for i, w in enumerate(ordered):
                 grid.addWidget(w, i // cols, i % cols)
+            # 왼쪽 정렬 — 사용 컬럼은 stretch 0, 트레일링 컬럼에 여백을 몰아준다
+            # (기본 QGridLayout 은 폭을 균등 분배해 사진이 가운데처럼 퍼진다).
+            for c in range(cols):
+                grid.setColumnStretch(c, 0)
+            grid.setColumnStretch(cols, 1)
 
     def resizeEvent(self, event):                       # noqa: N802
         super().resizeEvent(event)
         QTimer.singleShot(0, self._relayout_grids)
+
+    # ------------------------------------------------------------------
+    # 드래그(러버밴드) 다중 선택
+    # ------------------------------------------------------------------
+    def eventFilter(self, obj, event):                  # noqa: N802
+        if not hasattr(self, "_scroll") or obj is not self._scroll.viewport():
+            return super().eventFilter(obj, event)
+        et = event.type()
+        if et == QEvent.Type.MouseButtonPress \
+                and event.button() == Qt.MouseButton.LeftButton:
+            self._rubber_origin = event.pos()
+            if self._rubber is None:
+                self._rubber = QRubberBand(QRubberBand.Shape.Rectangle,
+                                           self._scroll.viewport())
+            self._rubber.setGeometry(QRect(self._rubber_origin, QSize()))
+            self._rubber.show()
+            return True
+        if et == QEvent.Type.MouseMove and self._rubber_origin is not None:
+            self._rubber.setGeometry(
+                QRect(self._rubber_origin, event.pos()).normalized())
+            return True
+        if et == QEvent.Type.MouseButtonRelease and self._rubber_origin is not None:
+            rect = self._rubber.geometry()
+            self._rubber.hide()
+            self._rubber_origin = None
+            # 드래그 거리가 작으면(사실상 클릭) 타일의 클릭 토글에 맡긴다.
+            if rect.width() > 6 or rect.height() > 6:
+                self._select_in_rect(rect)
+            return True
+        return super().eventFilter(obj, event)
+
+    def _select_in_rect(self, rect: QRect) -> None:
+        vp = self._scroll.viewport()
+        changed = False
+        for item_key, tile in self._tiles_by_key.items():
+            tl = tile.mapTo(vp, QPoint(0, 0))
+            if rect.intersects(QRect(tl, tile.size())):
+                tile.set_selected(True)
+                self._selected_keys.add(item_key)
+                self._selected_items_by_key[item_key] = tile.item
+                changed = True
+        if changed:
+            self._summary_label.setText(
+                i18n.KO.BULK_SELECT_SUMMARY_FMT.format(n=len(self._selected_keys))
+            )
 
     def _on_tile_toggle(self, item: ImageItem, selected: bool) -> None:
         if selected:

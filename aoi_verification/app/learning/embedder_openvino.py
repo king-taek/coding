@@ -98,11 +98,18 @@ def unit_busy(device: str, window: float = 2.0) -> bool:
 # Device 감지
 # ---------------------------------------------------------------------------
 def _list_ov_devices() -> List[str]:  # pragma: no cover — 환경 의존
+    import logging
+    log = logging.getLogger("aoi.openvino")
     if not _HAS_OPENVINO:
+        log.warning("OpenVINO 미설치 — GPU/NPU 가속 불가 (requirements 의 "
+                    "openvino 설치 필요). torch=%s", _HAS_TORCH)
         return []
     try:
-        return list(ov.Core().available_devices)
+        devs = list(ov.Core().available_devices)
+        log.info("OpenVINO available_devices: %s", devs)
+        return devs
     except Exception:
+        log.warning("OpenVINO 디바이스 조회 실패", exc_info=True)
         return []
 
 
@@ -371,6 +378,34 @@ def available_units() -> List[str]:
         if any(d == cand or d.startswith(cand + ".") for d in devs):
             out.append(cand)
     return out
+
+
+def accelerator_presence() -> Dict[str, object]:
+    """상태바 표시용 — 인텔 GPU/NPU **존재 여부**를 OpenVINO 만으로 조사.
+
+    스케줄러용 ``available_units()`` 와 달리 torch 설치 여부에 의존하지 않는다
+    (장치 존재는 추론 백엔드와 무관).  반환::
+
+        {"GPU": bool, "NPU": bool, "devices": [...], "reason": str}
+
+    ``reason`` 은 GPU/NPU 가 안 잡힐 때의 진단 문자열(미설치/조회실패/디바이스
+    없음) — GUI 툴팁으로 노출해 사용자가 원인을 바로 알 수 있게 한다."""
+    if not _HAS_OPENVINO:
+        return {"GPU": False, "NPU": False, "devices": [],
+                "reason": "OpenVINO 미설치"}
+    devs = _list_ov_devices()
+    present = {
+        cand: any(d == cand or d.startswith(cand + ".") for d in devs)
+        for cand in ("GPU", "NPU")
+    }
+    if not devs:
+        reason = "OpenVINO 디바이스 조회 실패"
+    elif not (present["GPU"] or present["NPU"]):
+        reason = "GPU/NPU 미감지 (드라이버/플러그인 확인)"
+    else:
+        reason = ""
+    return {"GPU": present["GPU"], "NPU": present["NPU"],
+            "devices": devs, "reason": reason}
 
 
 def _build_ov_model(model_kind: str):  # pragma: no cover - 환경 의존
