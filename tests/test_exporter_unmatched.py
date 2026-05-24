@@ -108,3 +108,22 @@ def test_export_no_unmatched_unaffected(qapp, isolated_cache, tmp_path):
     assert ws["B3"].value == "S1"
     assert ws["D3"].value is None  # 이미지 임베드만, 텍스트 없음
     assert ws["B4"].value is None
+
+
+def test_machine_label_rule():
+    """호기 라벨 규칙: 숫자/N호기 → AOI-N, 그 외 문자 포함 → AOI(원본)."""
+    from aoi_verification.app.workers.exporter import _machine_label
+    # 순수 숫자 / N호기 → AOI-N
+    assert _machine_label("2") == "AOI-2"
+    assert _machine_label("2호기") == "AOI-2"
+    assert _machine_label("1호기") == "AOI-1"
+    assert _machine_label(" 7 호기 ") == "AOI-7"
+    assert _machine_label("10") == "AOI-10"
+    # 다른 문자 포함 → AOI(원본값)
+    assert _machine_label("K-2") == "AOI(K-2)"
+    assert _machine_label("K-6") == "AOI(K-6)"
+    assert _machine_label("AOI-3") == "AOI(AOI-3)"
+    # 빈 입력 → ""
+    assert _machine_label("") == ""
+    assert _machine_label("   ") == ""
+    assert _machine_label(None) == ""

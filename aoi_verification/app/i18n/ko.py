@@ -54,6 +54,7 @@ BULK_SELECT_SUMMARY_FMT = "선택됨: {n} 장"
 BULK_SELECT_EMPTY = "표시할 사진이 없습니다."
 BULK_SELECT_ALL = "전체 선택"
 BULK_DESELECT_ALL = "선택 해제"
+INLINE_SELECT_COUNT_FMT = "선택 {n}장"
 BTN_REMOVE_FROM_TARGET = "검증 대상에서 제거"
 BTN_MOVE_TO_EXCLUDE = "제외로 이동"
 BTN_MOVE_TO_TARGET = "검증 대상으로 이동"
@@ -130,12 +131,19 @@ UNMATCHED_REVIEW_TITLE = "매치 실패 사진 검토 — {n} 장"
 UNMATCHED_REVIEW_PROGRESS_FMT = "{idx} / {total} — {slot}"
 UNMATCHED_REVIEW_HINT = (
     "매치 실패한 기준 사진을 하나씩 검토합니다. 같은 슬롯의 검증 장비 후보를"
-    " 유사도 순으로 보여주니, 맞는 사진이 있으면 클릭해서 매칭으로 확정하세요."
+    " 유사도 순으로 보여줍니다. 맞는 사진을 클릭해 선택(파란 테두리)한 뒤"
+    " [매치 확정] 을 누르세요. 후보를 더블클릭/우클릭하면 크게 비교할 수 있습니다."
 )
 UNMATCHED_REVIEW_NO_CANDIDATES = "이 슬롯에는 검증 장비 후보가 없습니다."
 UNMATCHED_REVIEW_DONE_FMT = "{n} 건의 신규 매칭을 확정했습니다."
 UNMATCHED_REVIEW_EMPTY = "검토할 매치 실패 사진이 없습니다."
+UNMATCHED_CONFIRM_ON_CLOSE = (
+    "선택(파란 테두리)했지만 아직 확정하지 않은 후보가 있습니다.\n"
+    "선택한 대로 매칭하시겠습니까?"
+)
 BTN_UNMATCHED_PICK = "이 사진으로 매칭"
+BTN_UNMATCHED_CONFIRM = "매치 확정"
+BTN_UNMATCHED_SELECT_THIS = "이 후보로 선택"
 BTN_UNMATCHED_NEXT = "건너뛰기 (다음)"
 BTN_UNMATCHED_PREV = "← 이전"
 BTN_UNMATCHED_CLOSE = "검토 종료"
@@ -493,8 +501,11 @@ ERROR_LOGGED = "오류가 기록되었습니다"
 MATCH_REVIEW_DELETED_SECTION = "검토에서 삭제한 사진"
 # 썸네일 우클릭 컨텍스트 메뉴 — 원본 크게 보기 (#13).
 CTX_VIEW_LARGER = "크게보기"
-# 차순위 후보 ‘후보 한 줄 더 보기’ 버튼 — 클릭마다 한 줄씩 더 보여준다 (#5).
+# 좌우 비교 뷰어에서 ‘이 후보로 매치’ 액션 버튼 (#4).
+BTN_MATCH_THIS = "이 후보로 매치"
+# 차순위 후보 ‘후보 한 줄 더 보기’ / ‘접기’ 버튼 (#5/#4).
 RUNNERUP_MORE_ROW = "후보 한 줄 더 보기 ▾"
+RUNNERUP_LESS_ROW = "접기 ▴"
 # (사용 안 함) 예전 ‘+N개 더 보기’ + 표시 개수 입력 다이얼로그 (#16).
 RUNNERUP_MORE_FMT = "+{n}개 더 보기"
 RUNNERUP_MORE_TITLE = "후보 더 보기"

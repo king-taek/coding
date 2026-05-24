@@ -18,11 +18,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import QByteArray, Qt, pyqtSignal
+from PyQt6.QtCore import (QByteArray, QEvent, QPoint, QRect, QSize, Qt,
+                          pyqtSignal)
 from PyQt6.QtGui import QColor, QKeySequence, QPixmap, QShortcut
-from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QScrollArea,
-                              QSizePolicy, QSlider, QSplitter, QVBoxLayout,
-                              QWidget)
+from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QRubberBand,
+                              QScrollArea, QSizePolicy, QSlider, QSplitter,
+                              QVBoxLayout, QWidget)
 
 from ... import config, i18n
 from ...models.slot import ImageItem
@@ -60,27 +61,32 @@ class _SidePanel(QFrame):
 
     tile_clicked = pyqtSignal(str, str, object)        # (panel_name, slot, ImageItem)
     plus_clicked = pyqtSignal(str, str)                # (panel_name, slot)
+    expand_requested = pyqtSignal(str, str, object)    # (panel_name, slot, ImageItem)
 
     def __init__(self, name: str, title: str,
                  *, vertical_scroll: bool = True,
                  actions: Optional[list[tuple[str, str, str]]] = None,
                  columns: int = 4,
                  tile_px: Optional[int] = None,
+                 inline_select: bool = False,
                  parent=None) -> None:
         super().__init__(parent)
         self._name = name
         self._title = title
         self._actions = list(actions or [])
         self._tile_px = tile_px
+        self._inline_select = bool(inline_select)
         self._sections: dict[str, SlotSection] = {}
         self._cached: dict[str, list[ImageItem]] = {}
+        self._rubber: Optional[QRubberBand] = None
+        self._rubber_origin: Optional[QPoint] = None
 
         self.setProperty("role", "section")
         outer = QVBoxLayout(self)
         outer.setContentsMargins(10, 10, 10, 10)
         outer.setSpacing(8)
 
-        # 헤더 — 제목 + ‘선택 모드’ 버튼 (클릭 시 팝업 다이얼로그)
+        # 헤더 — 제목 + (인라인 선택 도구) + ‘선택 모드’ 버튼
         head = QHBoxLayout()
         ttl = QLabel(title, self)
         ttl.setProperty("role", "subtitle")
@@ -88,11 +94,29 @@ class _SidePanel(QFrame):
         head.addWidget(ttl)
         head.addStretch(1)
 
+        # 인라인 선택 도구 — 선택 개수 + 전체선택/해제 + 액션 버튼 (#2).
+        if self._inline_select and self._actions:
+            self._sel_count = QLabel("", self)
+            self._sel_count.setStyleSheet("color: #00FFA3; font-weight: 700;")
+            head.addWidget(self._sel_count)
+            btn_all = NeonButton(i18n.KO.BULK_SELECT_ALL, role="primary")
+            btn_all.clicked.connect(lambda: self._set_all_inline(True))
+            head.addWidget(btn_all)
+            btn_none = NeonButton(i18n.KO.BULK_DESELECT_ALL, role="default")
+            btn_none.clicked.connect(lambda: self._set_all_inline(False))
+            head.addWidget(btn_none)
+            self._action_btns: list[NeonButton] = []
+            for action_id, label, role in self._actions:
+                b = NeonButton(label, role=role)
+                b.clicked.connect(lambda _c=False, a=action_id: self._fire_inline(a))
+                head.addWidget(b)
+                self._action_btns.append(b)
+
         if self._actions:
             self._select_btn = NeonButton(i18n.KO.BTN_SELECT_MODE, role="ghost")
             self._select_btn.clicked.connect(self._open_bulk_select)
             head.addWidget(self._select_btn)
-        # 외부에서 추가 헤더 버튼을 꽂을 수 있도록 head 레이아웃을 노출 (그룹화 등).
+        # 외부에서 추가 헤더 버튼을 꽂을 수 있도록 head 레이아웃을 노출.
         self._head_layout = head
         outer.addLayout(head)
 
@@ -114,13 +138,20 @@ class _SidePanel(QFrame):
                 Qt.ScrollBarPolicy.ScrollBarAsNeeded,
             )
 
+        # 드래그(러버밴드) 다중 선택 — viewport 빈 영역에서 시작 (#2).
+        if self._inline_select:
+            self._scroll.viewport().installEventFilter(self)
+
         outer.addWidget(self._scroll, stretch=1)
         self._columns = columns
+        if self._inline_select and self._actions:
+            self._update_selection_ui()
 
     # ------------------------------------------------------------------
     def update_data(self, data: dict[str, list[ImageItem]]) -> None:
         """Slot → ImageItem 리스트 매핑으로 패널 갱신."""
         self._cached = {k: list(v) for k, v in data.items() if v}
+        self._sections = {}
 
         while self._host_layout.count():
             item = self._host_layout.takeAt(0)
@@ -130,8 +161,10 @@ class _SidePanel(QFrame):
 
         for slot in sorted(self._cached.keys()):
             sec = SlotSection(slot, columns=self._columns,
-                              select_mode=False, tile_px=self._tile_px,
-                              parent=self)
+                              select_mode=False,
+                              inline_select=self._inline_select,
+                              truncate=not self._inline_select,
+                              tile_px=self._tile_px, parent=self)
             entries = [ThumbEntry(item=it) for it in self._cached[slot]]
             sec.set_entries(entries)
             sec.tile_clicked.connect(
@@ -140,12 +173,88 @@ class _SidePanel(QFrame):
             sec.plus_clicked.connect(
                 lambda s: self.plus_clicked.emit(self._name, s)
             )
+            sec.expand_requested.connect(
+                lambda ent, s=slot: self.expand_requested.emit(
+                    self._name, s, ent.item)
+            )
+            sec.inline_changed.connect(self._update_selection_ui)
             self._sections[slot] = sec
             self._host_layout.addWidget(sec)
         self._host_layout.addStretch(1)
+        if self._inline_select and self._actions:
+            self._update_selection_ui()
 
     def cached(self) -> dict[str, list[ImageItem]]:
         return {k: list(v) for k, v in self._cached.items()}
+
+    # ------------------------------------------------------------------
+    # 인라인 선택 (#2)
+    # ------------------------------------------------------------------
+    def selected_items(self) -> list[ImageItem]:
+        out: list[ImageItem] = []
+        for sec in self._sections.values():
+            out.extend(sec.grid.inline_selected_items())
+        return out
+
+    def _set_all_inline(self, selected: bool) -> None:
+        for sec in self._sections.values():
+            sec.grid.set_all_inline_selected(selected)
+        self._update_selection_ui()
+
+    def _update_selection_ui(self) -> None:
+        if not (self._inline_select and self._actions):
+            return
+        n = len(self.selected_items())
+        self._sel_count.setText(i18n.KO.INLINE_SELECT_COUNT_FMT.format(n=n))
+        for b in getattr(self, "_action_btns", []):
+            b.setEnabled(n > 0)
+
+    def _fire_inline(self, action_id: str) -> None:
+        items = self.selected_items()
+        if not items:
+            return
+        self.selection_action.emit(self._name, action_id, items)
+
+    # ------------------------------------------------------------------
+    def eventFilter(self, obj, event):  # noqa: N802
+        if obj is not self._scroll.viewport() or not self._inline_select:
+            return super().eventFilter(obj, event)
+        et = event.type()
+        if et == QEvent.Type.MouseButtonPress \
+                and event.button() == Qt.MouseButton.LeftButton:
+            self._rubber_origin = event.pos()
+            if self._rubber is None:
+                self._rubber = QRubberBand(QRubberBand.Shape.Rectangle,
+                                           self._scroll.viewport())
+            self._rubber.setGeometry(QRect(self._rubber_origin, QSize()))
+            self._rubber.show()
+            return True
+        if et == QEvent.Type.MouseMove and self._rubber_origin is not None:
+            self._rubber.setGeometry(
+                QRect(self._rubber_origin, event.pos()).normalized())
+            return True
+        if et == QEvent.Type.MouseButtonRelease and self._rubber_origin is not None:
+            rect = self._rubber.geometry()
+            self._rubber.hide()
+            self._rubber_origin = None
+            # 드래그 거리가 작으면(사실상 클릭) 선택 변경 없이 통과.
+            if rect.width() > 6 or rect.height() > 6:
+                self._select_in_rect(rect)
+            return True
+        return super().eventFilter(obj, event)
+
+    def _select_in_rect(self, rect: QRect) -> None:
+        vp = self._scroll.viewport()
+        changed = False
+        for sec in self._sections.values():
+            for tile in sec.grid.tiles():
+                tl = tile.mapTo(vp, QPoint(0, 0))
+                tile_rect = QRect(tl, tile.size())
+                if rect.intersects(tile_rect):
+                    tile.set_inline_selected(True)
+                    changed = True
+        if changed:
+            self._update_selection_ui()
 
     # ------------------------------------------------------------------
     def _open_bulk_select(self) -> None:
@@ -252,10 +361,15 @@ class SelectPage(QWidget):
             # 타일 절반 크기 → 같은 폭에 3 열 그리드 깔리도록.
             columns=3,
             tile_px=side_tile,
+            inline_select=True,        # 클릭 선택·Ctrl+A·드래그 선택 (#2)
         )
         self.left_panel.selection_action.connect(self._on_batch_action)
         self.left_panel.tile_clicked.connect(self._on_tile_click)
         self.left_panel.plus_clicked.connect(self._on_plus_click)
+        # 인라인 선택 모드: 더블클릭/우클릭 = 확대 보기 (#2).
+        self.left_panel.expand_requested.connect(
+            lambda panel, slot, _item: self._open_zoom(panel, slot)
+        )
         # 3 col × (120 thumb + 14 padding) + spacing + 패널 padding 을 담을 최소
         # 너비.  좁은 창에선 세로 스택으로 reflow 되어 무관.
         self.left_panel.setMinimumWidth(220)
@@ -378,6 +492,13 @@ class SelectPage(QWidget):
             QShortcut(QKeySequence(key), self,
                       activated=lambda: self._decide("exclude"))
         QShortcut(QKeySequence("Z"), self, activated=self._undo)
+        # Ctrl+A — 좌측 후보 패널 전체 선택 (#2).
+        QShortcut(QKeySequence.StandardKey.SelectAll, self,
+                  activated=self._select_all_candidates)
+
+    def _select_all_candidates(self) -> None:
+        if self.isVisible():
+            self.left_panel._set_all_inline(True)
 
     # ------------------------------------------------------------------
     # ------------------------------------------------------------------

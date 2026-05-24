@@ -25,6 +25,7 @@ from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout,
 from ... import i18n
 from ...models.result import MatchResult, MissEntry
 from ...models.slot import ImageItem
+from ...utils import image_io
 from .neon_button import NeonButton
 from .no_wheel_slider import NoWheelSlider
 from .window_controls import add_fullscreen_shortcut, enable_window_controls
@@ -170,9 +171,19 @@ def _load_full_pixmap_scaled(path: Path, size: int) -> QPixmap:
 
 
 class _CandidateTile(QFrame):
-    """후보 사진 — 클릭하면 매칭 확정. 원본 화질 lazy 로드 (paintEvent 트리거)."""
+    """후보 사진 타일.
 
-    picked = pyqtSignal(object)            # ImageItem
+    - 클릭 = 선택(파란 테두리)만, 즉시 매칭하지 않는다 (#1a).
+    - 더블클릭 / 우클릭 = 좌우(기준·후보) 비교 크게보기 (#1e).
+    - 이미지는 사전 생성된 mid 캐시를 소스로 빠르게 로드하고(#1c), 슬라이더로
+      재디코드 없이 인플레이스 재스케일한다.
+    """
+
+    selected = pyqtSignal(object)          # ImageItem (클릭 선택)
+    view_requested = pyqtSignal(object)    # ImageItem (크게보기)
+
+    _SEL_STYLE = ("QFrame { border: 3px solid #00D4FF; border-radius: 8px;"
+                  " background: rgba(0, 212, 255, 0.06); }")
 
     def __init__(self, item: ImageItem, score: float, parent=None,
                  *, size: int = _CAND_PX) -> None:
@@ -181,11 +192,15 @@ class _CandidateTile(QFrame):
         self.score = float(score)
         self._size = int(size)
         self._image_loaded = False
-        # 슬라이더 리사이즈를 재디코드 없이 처리하기 위한 원본(최대크기) 픽스맵.
+        self._is_selected = False
+        # 슬라이더 리사이즈를 재디코드 없이 처리하기 위한 소스(최대크기) 픽스맵.
         self._source_pix: Optional[QPixmap] = None
         self.setProperty("role", "card-soft")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedSize(self._size + 16, self._size + _CAND_CAP_PX + 32)
+        # 우클릭 → 좌우 비교 크게보기 (#1e).
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._on_context_menu)
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(8, 8, 8, 8)
@@ -194,21 +209,17 @@ class _CandidateTile(QFrame):
         self._img_label = QLabel(self)
         self._img_label.setFixedSize(self._size, self._size)
         self._img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        # 우선 placeholder — paintEvent 첫 발생 시 원본을 비동기로 로드.
         ph = QPixmap(self._size, self._size)
         ph.fill(QColor(20, 28, 40))
         self._img_label.setPixmap(ph)
-        # 우클릭 ‘크게보기’ (#13) — 후보 원본 경로를 그대로 연다.
-        _attach_view_larger(self._img_label, lambda: self.item.path)
         lay.addWidget(self._img_label, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        score_text = f"유사도 {self.score * 100:.1f}%"
-        sc = QLabel(score_text, self)
-        sc.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        sc.setStyleSheet(
+        self._score_label = QLabel(f"유사도 {self.score * 100:.1f}%", self)
+        self._score_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._score_label.setStyleSheet(
             "color: #00FFA3; font-weight: 700; padding: 2px;"
         )
-        lay.addWidget(sc)
+        lay.addWidget(self._score_label)
 
         from PyQt6.QtGui import QFontMetrics
         cap = QLabel(self)
@@ -228,47 +239,65 @@ class _CandidateTile(QFrame):
         super().paintEvent(event)
         if not self._image_loaded:
             self._image_loaded = True
-            # 첫 paint 이벤트 시점 = 위젯이 실제 viewport 에 들어온 시점.
-            # 무거운 디코드를 paintEvent 안에서 동기로 돌리면 스크롤이 끊기므로
-            # 다음 이벤트 루프 tick 에 지연 실행.
             QTimer.singleShot(0, self._load_full)
 
     def _load_full(self) -> None:
         try:
-            # 원본을 최대 크기로 한 번만 디코드해 보관 → 슬라이더 변경 시
-            # 재디코드 없이 그 자리에서 재스케일.
-            self._source_pix = _load_full_pixmap_scaled(
-                Path(self.item.path), _SIZE_MAX_PX,
-            )
-            self._img_label.setPixmap(self._source_pix.scaled(
-                self._size, self._size,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            ))
+            # 사전 생성된 mid 캐시(~800px)를 소스로 → 원본 디코드 없이 빠르게 (#1c).
+            self._source_pix = image_io.load_thumb_qpixmap(
+                Path(self.item.path), _SIZE_MAX_PX, kind="mid")
+            self._apply_scaled()
         except Exception:
             pass
+
+    def _apply_scaled(self) -> None:
+        if self._source_pix is None or self._source_pix.isNull():
+            return
+        self._img_label.setPixmap(self._source_pix.scaled(
+            self._size, self._size,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        ))
 
     def set_display_size(self, size: int) -> None:
         """슬라이더로 타일 크기 변경 (#1) — 재생성/재디코드 없이 보관 픽스맵 재스케일."""
         self._size = int(size)
         self.setFixedSize(self._size + 16, self._size + _CAND_CAP_PX + 32)
         self._img_label.setFixedSize(self._size, self._size)
-        if self._source_pix is not None and not self._source_pix.isNull():
-            self._img_label.setPixmap(self._source_pix.scaled(
-                self._size, self._size,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            ))
+        self._apply_scaled()
         from PyQt6.QtGui import QFontMetrics
         fm = QFontMetrics(self._cap.font())
         self._cap.setText(fm.elidedText(
             self.item.filename, Qt.TextElideMode.ElideMiddle, self._size - 4,
         ))
 
+    def set_score(self, score: float) -> None:
+        """같은 슬롯 재사용 시 새 기준 사진 기준으로 점수만 갱신 (#1b)."""
+        self.score = float(score)
+        self._score_label.setText(f"유사도 {self.score * 100:.1f}%")
+
+    def set_selected(self, selected: bool) -> None:
+        if selected == self._is_selected:
+            return
+        self._is_selected = bool(selected)
+        self.setStyleSheet(self._SEL_STYLE if self._is_selected else "")
+
     def mousePressEvent(self, event):  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton:
-            self.picked.emit(self.item)
+            self.selected.emit(self.item)
         super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.view_requested.emit(self.item)
+        super().mouseDoubleClickEvent(event)
+
+    def _on_context_menu(self, pos) -> None:
+        menu = QMenu(self)
+        act = menu.addAction(i18n.KO.CTX_VIEW_LARGER)
+        chosen = menu.exec(self.mapToGlobal(pos))
+        if chosen is act:
+            self.view_requested.emit(self.item)
 
 
 # ---------------------------------------------------------------------------
@@ -306,6 +335,12 @@ class UnmatchedReviewDialog(QDialog):
         self.new_matches: list[MatchResult] = []
         self.resolved_refs: list[MissEntry] = []     # 매칭 찾음
         self.skipped_refs: list[MissEntry] = []      # 사용자가 종료한 것
+        # 선택(파란 테두리) 보류 상태 — ref 인덱스 → 선택한 후보 (확정 전, #1a).
+        self._pending: dict[int, ImageItem] = {}
+        # 현재 후보 타일들 + 후보 집합 키(같은 슬롯 재사용 판단, #1b).
+        self._cand_tiles: list[_CandidateTile] = []
+        self._last_cand_key: tuple | None = None
+        self._close_prompted = False
 
         # 닫는 즉시 C++ 위젯 해제 — 매번 열 때마다 부모에 누적되지 않도록.
         # exec() 직후엔 Python 측 new_matches/resolved_refs 접근이 여전히 안전.
@@ -368,7 +403,11 @@ class UnmatchedReviewDialog(QDialog):
         self.btn_skip = NeonButton(i18n.KO.BTN_UNMATCHED_NEXT, role="warn")
         self.btn_skip.clicked.connect(self._skip)
         head.addWidget(self.btn_skip)
-        self.btn_close = NeonButton(i18n.KO.BTN_UNMATCHED_CLOSE, role="primary")
+        # 선택한 후보들을 실제 매칭으로 확정 (#1a) — 별도 액션.
+        self.btn_confirm = NeonButton(i18n.KO.BTN_UNMATCHED_CONFIRM, role="primary")
+        self.btn_confirm.clicked.connect(self._on_confirm)
+        head.addWidget(self.btn_confirm)
+        self.btn_close = NeonButton(i18n.KO.BTN_UNMATCHED_CLOSE, role="ghost")
         self.btn_close.clicked.connect(self.accept)
         head.addWidget(self.btn_close)
         root.addLayout(head)
@@ -606,6 +645,7 @@ class UnmatchedReviewDialog(QDialog):
             v for v in pool
             if Path(v.path) not in self._used_vals
         ]
+        cand_key = (cur.slot, frozenset(Path(v.path) for v in candidates))
         scored: list[tuple[float, ImageItem]] = []
         if candidates:
             # 점수 캐시 hit 이 대부분이지만, miss 시 pipeline.score 가 무거워
@@ -619,31 +659,73 @@ class UnmatchedReviewDialog(QDialog):
                 QApplication.restoreOverrideCursor()
             scored.sort(key=lambda x: x[0], reverse=True)
 
-        self._clear_grid()
         if not scored:
+            self._clear_grid()
+            self._cand_tiles = []
+            self._last_cand_key = None
             empty = QLabel(i18n.KO.UNMATCHED_REVIEW_NO_CANDIDATES, self._host)
             empty.setStyleSheet("color: #7FB3D5; padding: 20px;")
             self._grid.addWidget(empty, 0, 0)
             self.candidates_summary.setText("후보 0 장")
             return
 
-        self.candidates_summary.setText(f"후보 {len(scored)} 장 (유사도 순)")
-        # #4 — 한 줄에 최소 3개, 최대 5개. 작은 창에서도 3개를 강제(가로 스크롤
-        # 허용)해 사용자가 한 번에 3개 이상 비교할 수 있게 한다.
+        if cand_key == self._last_cand_key and self._cand_tiles:
+            # 같은 슬롯 → 이미지 재로딩 없이 점수만 갱신 후 재정렬 (#1b).
+            by_path = {t.item.path: t for t in self._cand_tiles}
+            ordered: list[_CandidateTile] = []
+            for s, v in scored:
+                t = by_path.get(v.path)
+                if t is None:
+                    continue
+                t.set_score(s)
+                ordered.append(t)
+            self._cand_tiles = ordered
+        else:
+            # 후보 집합이 달라졌으면 새로 빌드.
+            self._clear_grid()
+            self._cand_tiles = []
+            for s, v in scored:
+                tile = _CandidateTile(v, s, parent=self._host,
+                                      size=self._cand_px)
+                tile.selected.connect(self._on_tile_selected)
+                tile.view_requested.connect(self._on_tile_view)
+                self._cand_tiles.append(tile)
+            self._last_cand_key = cand_key
+
+        self.candidates_summary.setText(
+            f"후보 {len(self._cand_tiles)} 장 (유사도 순)")
+        # 현재 ref 의 선택(보류) 상태를 테두리로 반영 (#1a).
+        sel = self._pending.get(self._idx)
+        for t in self._cand_tiles:
+            t.set_selected(sel is not None and t.item.path == sel.path)
+        self._relayout_candidates()
+        # 다음 사진으로 넘어오면 스크롤 최상단 복귀 (#1d).
+        self._scroll.verticalScrollBar().setValue(0)
+
+    # ------------------------------------------------------------------
+    def _relayout_candidates(self) -> None:
+        """viewport 폭에 맞춰 후보 열 수를 계산해 기존 타일을 재배치 — 가로
+        스크롤 방지(#3). 타일 위젯은 재사용(재생성/재디코드 없음)."""
+        if not self._cand_tiles:
+            return
+        while self._grid.count():
+            self._grid.takeAt(0)
         spacing = self._grid.spacing()
-        viewport_width = self._scroll.viewport().width()
-        fit = viewport_width // (self._cand_px + spacing)
-        cols = max(3, min(5, fit))
-        for i, (score, v) in enumerate(scored):
-            tile = _CandidateTile(v, score, parent=self._host,
-                                  size=self._cand_px)
-            tile.picked.connect(self._on_pick)
-            self._grid.addWidget(tile, i // cols, i % cols)
+        vp = self._scroll.viewport().width() or self.width()
+        tile_w = self._cand_px + 16 + spacing
+        cols = max(1, vp // tile_w)
+        for i, t in enumerate(self._cand_tiles):
+            t.setVisible(True)
+            self._grid.addWidget(t, i // cols, i % cols)
+
+    def resizeEvent(self, event):  # noqa: N802
+        super().resizeEvent(event)
+        self._relayout_candidates()
 
     # ------------------------------------------------------------------
     def _on_size_changed(self, value: int) -> None:
-        """사진 크기 슬라이더 변경 (#1) — 행/타일을 재생성하지 않고 그 자리에서
-        보관 픽스맵을 재스케일한다 (재빌드/재디코드 없음 → 대량 후보에서도 즉시)."""
+        """사진 크기 슬라이더 변경 (#1) — 타일을 재생성하지 않고 보관 픽스맵을
+        재스케일하고, 열 수를 다시 계산해 가로 넘침 없이 재배치한다 (#3)."""
         self._ref_px = int(value)
         self._cand_px = max(60, int(value * _CAND_RATIO))
         self.size_value.setText(f"{value} px")
@@ -656,11 +738,9 @@ class UnmatchedReviewDialog(QDialog):
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             ))
-        # 후보 타일 — 기존 타일을 그 자리에서 재스케일.
-        for i in range(self._grid.count()):
-            w = self._grid.itemAt(i).widget()
-            if isinstance(w, _CandidateTile):
-                w.set_display_size(self._cand_px)
+        for t in self._cand_tiles:
+            t.set_display_size(self._cand_px)
+        self._relayout_candidates()
 
     # ------------------------------------------------------------------
     def _lookup_or_compute_score(self,
@@ -689,84 +769,118 @@ class UnmatchedReviewDialog(QDialog):
         return s
 
     # ------------------------------------------------------------------
-    def _on_pick(self, val_item: ImageItem) -> None:
+    # 선택(보류) → 확정 흐름 (#1a)
+    # ------------------------------------------------------------------
+    def _on_tile_selected(self, val_item: ImageItem) -> None:
+        """후보 클릭/‘이 후보로 선택’ — 현재 ref 의 보류 선택을 토글 (파란 테두리)."""
         cur = self._current()
         if cur is None:
             return
-        cur_path = Path(cur.path)
+        prev = self._pending.get(self._idx)
+        if prev is not None and Path(prev.path) == Path(val_item.path):
+            # 같은 후보 재선택 → 해제.
+            self._pending.pop(self._idx, None)
+        else:
+            self._pending[self._idx] = val_item
+        sel = self._pending.get(self._idx)
+        for t in self._cand_tiles:
+            t.set_selected(sel is not None and t.item.path == sel.path)
+
+    def _on_tile_view(self, val_item: ImageItem) -> None:
+        """후보 크게보기 — 좌(기준)·우(후보) + 이전/다음 + ‘이 후보로 선택’ (#1e)."""
+        from .side_by_side_viewer import SideBySideViewer
+        cur = self._current()
+        if cur is None:
+            return
+        candidates = [(t.item, f"유사도 {t.score * 100:.1f}%")
+                      for t in self._cand_tiles]
+        start = next((i for i, t in enumerate(self._cand_tiles)
+                      if t.item.path == val_item.path), 0)
+        viewer = SideBySideViewer(
+            Path(cur.path), candidates, start,
+            ref_caption=f"기준 — {Path(cur.path).name}",
+            action_label=i18n.KO.BTN_UNMATCHED_SELECT_THIS,
+            parent=self,
+        )
+        viewer.action_requested.connect(self._on_tile_selected)
+        viewer.exec()
+
+    def _make_match(self, ref_entry: MissEntry, val_item: ImageItem) -> None:
+        """선택된 (ref, 후보) 한 쌍을 MatchResult 로 확정 (side 별 ref/val 교환)."""
+        cur_path = Path(ref_entry.path)
         cand_path = Path(val_item.path)
-        score = self._lookup_or_compute_score(cur, val_item)
-        # MatchResult 컨벤션 (main_window._merge_matches 와 일치):
-        #   ref_path = ‘낮은 호기 (또는 ref 측)’ 경로,
-        #   val_path = ‘높은 호기 (또는 val 측)’ 경로.
-        # Phase A 미매칭(side="ref")은 cur 가 ref 측 → 그대로 둔다.
-        # Phase B 미매칭(side="val")은 cur 가 val 측(높은 호기), candidate 가
-        # ref 측(낮은 호기) → ref/val 을 교환해서 엑셀의 C/D 컬럼이 호기 라벨
-        # 과 일치하도록.
-        if cur.side == "val":
+        score = self._lookup_or_compute_score(ref_entry, val_item)
+        if ref_entry.side == "val":
             ref_path, val_path = cand_path, cur_path
             direction = "B→A"
         else:
             ref_path, val_path = cur_path, cand_path
             direction = "A→B"
         self.new_matches.append(MatchResult(
-            slot=cur.slot,
-            ref_path=ref_path,
-            val_path=val_path,
-            score=float(score),
-            direction=direction,
+            slot=ref_entry.slot, ref_path=ref_path, val_path=val_path,
+            score=float(score), direction=direction,
         ))
-        self.resolved_refs.append(cur)
+        self.resolved_refs.append(ref_entry)
         self._used_vals.add(cand_path)
-        # 같은 ref 가 다른 곳에서 다시 나오지 않도록 idx 만 전진.
-        self._idx += 1
+
+    def _finalize_pending(self) -> int:
+        """보류 선택을 모두 실제 매칭으로 확정. 확정한 건수를 돌려준다."""
+        n = 0
+        for idx in sorted(self._pending.keys()):
+            if idx < 0 or idx >= len(self._unmatched):
+                continue
+            if self._entry_resolved(idx):
+                continue
+            val_item = self._pending[idx]
+            if Path(val_item.path) in self._used_vals:
+                continue                      # 이미 다른 ref 에 쓰인 후보.
+            self._make_match(self._unmatched[idx], val_item)
+            n += 1
+        self._pending.clear()
+        return n
+
+    def _on_confirm(self) -> None:
+        n = self._finalize_pending()
+        if n:
+            QMessageBox.information(
+                self, i18n.KO.APP_TITLE,
+                i18n.KO.UNMATCHED_REVIEW_DONE_FMT.format(n=n),
+            )
+        # 확정으로 used_vals 가 바뀌어 후보 집합이 달라졌을 수 있으니 키 무효화.
+        self._last_cand_key = None
         self._render_current()
 
+    def _maybe_prompt_pending(self) -> None:
+        """미확정(파란 테두리) 선택이 남은 채 창을 닫으면 매칭 여부를 묻는다 (#1a)."""
+        if self._close_prompted or not self._pending:
+            return
+        self._close_prompted = True
+        r = QMessageBox.question(
+            self, i18n.KO.APP_TITLE, i18n.KO.UNMATCHED_CONFIRM_ON_CLOSE,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if r == QMessageBox.StandardButton.Yes:
+            self._finalize_pending()
+
+    def accept(self) -> None:  # noqa: D401
+        self._maybe_prompt_pending()
+        super().accept()
+
+    def closeEvent(self, event):  # noqa: N802
+        self._maybe_prompt_pending()
+        super().closeEvent(event)
+
+    # ------------------------------------------------------------------
     def _skip(self) -> None:
-        cur = self._current()
-        if cur is not None:
-            self.skipped_refs.append(cur)
+        """다음 ref 로 이동 (확정하지 않음 — 보류 선택은 유지)."""
         self._idx += 1
         self._render_current()
 
     def _go_prev(self) -> None:
         if self._idx <= 0:
             return
-        # 이전 ref 로 가면서, 그 ref 가 (a) 이전에 매칭으로 확정됐다면 그 매칭을
-        # 되돌리고 val 을 다시 사용 가능으로 풀어준다.
         self._idx -= 1
-        cur = self._current()
-        if cur is None:
-            return
-        # 되돌릴 신규 매칭이 있으면 제거. side="val" 매칭은 ref/val 을 교환해
-        # 저장하므로 cur 가 m.ref_path / m.val_path 중 어디에 있는지 양쪽 모두 검사.
-        for i in range(len(self.new_matches) - 1, -1, -1):
-            m = self.new_matches[i]
-            if m.slot != cur.slot:
-                continue
-            mr = Path(m.ref_path)
-            mv = Path(m.val_path)
-            cp = Path(cur.path)
-            if cp == mr:
-                self._used_vals.discard(mv)
-            elif cp == mv:
-                self._used_vals.discard(mr)
-            else:
-                continue
-            self.new_matches.pop(i)
-            # resolved_refs 에서도 동일 ref 한 건 제거
-            for j, r in enumerate(self.resolved_refs):
-                if r.slot == cur.slot and Path(r.path) == cp:
-                    self.resolved_refs.pop(j)
-                    break
-            break
-        # skip 으로 마크된 경우엔 그 항목만 풀어준다.
-        for i in range(len(self.skipped_refs) - 1, -1, -1):
-            r = self.skipped_refs[i]
-            if (r.slot == cur.slot
-                    and Path(r.path) == Path(cur.path)):
-                self.skipped_refs.pop(i)
-                break
         self._render_current()
 
     # ------------------------------------------------------------------

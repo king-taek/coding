@@ -220,10 +220,11 @@ class BulkSelectDialog(QDialog):
         bar = QHBoxLayout()
         bar.setSpacing(8)
         # 전체 선택 / 해제 보조 버튼
-        self.btn_select_all = NeonButton(i18n.KO.BULK_SELECT_ALL, role="ghost")
+        # 가독성 개선 (#2) — ghost(어두움) 대신 대비 높은 role 사용.
+        self.btn_select_all = NeonButton(i18n.KO.BULK_SELECT_ALL, role="primary")
         self.btn_select_all.clicked.connect(self._select_all)
         bar.addWidget(self.btn_select_all)
-        self.btn_clear = NeonButton(i18n.KO.BULK_DESELECT_ALL, role="ghost")
+        self.btn_clear = NeonButton(i18n.KO.BULK_DESELECT_ALL, role="default")
         self.btn_clear.clicked.connect(self._clear_selection)
         bar.addWidget(self.btn_clear)
         bar.addStretch(1)

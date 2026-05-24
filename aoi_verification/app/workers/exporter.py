@@ -44,14 +44,19 @@ IMG_COL_WIDTH = 22
 
 
 def _machine_label(raw: str) -> str:
-    """‘1호기’ / ‘AOI-1’ / ‘1’ 같은 입력을 모두 ‘AOI-N’ 형식으로 정규화."""
+    """호기 입력을 엑셀 헤더 라벨로 정규화.
+
+    - 순수 숫자(``2``) 또는 ``N호기``(``2호기``, 공백 허용) → ``AOI-N``
+    - 그 외 문자가 포함되면(``K-2`` 등) → ``AOI(원본값)``
+    - 빈 입력 → ``""``
+    """
     s = (raw or "").strip()
     if not s:
         return ""
-    m = re.search(r"\d+", s)
-    if not m:
-        return s
-    return f"AOI-{m.group(0)}"
+    m = re.fullmatch(r"(\d+)(\s*호기)?", s)
+    if m:
+        return f"AOI-{m.group(1)}"
+    return f"AOI({s})"
 
 
 class ExporterSignals(QObject):

@@ -32,11 +32,16 @@ class _ThumbTile(QFrame):
     clicked = pyqtSignal(object)              # ThumbEntry
     toggled = pyqtSignal(object, bool)        # (ThumbEntry, selected)
     expand_requested = pyqtSignal(object)     # ThumbEntry — ‘더 크게 보기’
+    sel_toggled = pyqtSignal(object, bool)    # (ThumbEntry, selected) — 인라인 선택
+
+    _SEL_STYLE = ("QFrame { border: 3px solid #00D4FF; border-radius: 8px;"
+                  " background: rgba(0, 212, 255, 0.06); }")
 
     def __init__(self,
                  entry: ThumbEntry,
                  *,
                  select_mode: bool = False,
+                 inline_select: bool = False,
                  dim: bool = False,
                  footer: str = "",
                  show_expand: bool = False,
@@ -46,6 +51,8 @@ class _ThumbTile(QFrame):
         super().__init__(parent)
         self.entry = entry
         self._dim = dim
+        self._inline_select = bool(inline_select)
+        self._inline_selected = False
         self._tile_px = int(tile_px) if tile_px else THUMB_PX
         # 후보 패널은 prefer_mid=True 로 mid 캐시 (~800px) 를 소스로 사용 →
         # 같은 표시 크기에서도 더 선명 (#5).
@@ -141,6 +148,14 @@ class _ThumbTile(QFrame):
         cb.show()
         self._checkbox = cb
 
+    # 인라인 선택(체크박스 없이 클릭 토글) ---------------------------------
+    def set_inline_selected(self, selected: bool) -> None:
+        self._inline_selected = bool(selected)
+        self.setStyleSheet(self._SEL_STYLE if self._inline_selected else "")
+
+    def is_inline_selected(self) -> bool:
+        return self._inline_selected
+
     # 마우스 클릭 → 시그널 (체크박스/확대 버튼 클릭과 분리) -----------------
     def mousePressEvent(self, event):  # noqa: N802
         if self._checkbox is not None and self._checkbox.geometry().contains(event.pos()):
@@ -148,8 +163,19 @@ class _ThumbTile(QFrame):
         if self._expand_btn is not None and self._expand_btn.geometry().contains(event.pos()):
             return super().mousePressEvent(event)
         if event.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit(self.entry)
+            if self._inline_select:
+                # 인라인 선택 모드: 클릭=선택 토글(파란 테두리), 즉시 동작 없음 (#2).
+                self.set_inline_selected(not self._inline_selected)
+                self.sel_toggled.emit(self.entry, self._inline_selected)
+            else:
+                self.clicked.emit(self.entry)
         super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):  # noqa: N802
+        # 인라인 선택 모드에서 더블클릭 = 확대 보기 (#2).
+        if self._inline_select and event.button() == Qt.MouseButton.LeftButton:
+            self.expand_requested.emit(self.entry)
+        super().mouseDoubleClickEvent(event)
 
 
 class _PlusTile(QFrame):
@@ -196,11 +222,13 @@ class ThumbGrid(QWidget):
     plus_clicked = pyqtSignal()
     selected_changed = pyqtSignal(list)                # list[ThumbEntry]
     expand_requested = pyqtSignal(object)              # ThumbEntry
+    inline_changed = pyqtSignal()                      # 인라인 선택 변경 알림
 
     def __init__(self,
                  *,
                  columns: int = 4,
                  select_mode: bool = False,
+                 inline_select: bool = False,
                  truncate: bool = True,
                  show_expand: bool = False,
                  tile_px: Optional[int] = None,
@@ -209,12 +237,14 @@ class ThumbGrid(QWidget):
         super().__init__(parent)
         self._columns = columns
         self._select_mode = select_mode
+        self._inline_select = bool(inline_select)
         self._truncate = truncate
         self._show_expand = show_expand
         self._tile_px = tile_px
         self._prefer_mid = bool(prefer_mid)
         self._entries: list[ThumbEntry] = []
         self._selected: list[ThumbEntry] = []
+        self._tiles: list[_ThumbTile] = []         # 인라인 선택용 타일 참조
 
         self._grid = QGridLayout(self)
         self._grid.setContentsMargins(0, 0, 0, 0)
@@ -244,11 +274,15 @@ class ThumbGrid(QWidget):
             w = item.widget()
             if w is not None:
                 w.deleteLater()
+        self._tiles = []
 
         threshold = config.CONFIG.show_n_threshold
         max_visible = config.CONFIG.max_thumbs_per_row
 
-        if self._truncate and len(self._entries) >= threshold:
+        # 인라인 선택 모드는 +N 생략 없이 전체를 표시(전체 선택/드래그가 모두
+        # 유효하도록, #2). 그 외에는 기존 +N 트렁케이션 유지.
+        if self._truncate and not self._inline_select \
+                and len(self._entries) >= threshold:
             visible = self._entries[:max_visible]
             extra = len(self._entries) - max_visible
         else:
@@ -259,13 +293,16 @@ class ThumbGrid(QWidget):
         col = 0
         for ent in visible:
             tile = _ThumbTile(ent, select_mode=self._select_mode,
+                              inline_select=self._inline_select,
                               footer=ent.item.filename,
                               show_expand=self._show_expand,
                               tile_px=self._tile_px,
                               prefer_mid=self._prefer_mid)
             tile.clicked.connect(self.tile_clicked.emit)
             tile.toggled.connect(self._on_toggle)
+            tile.sel_toggled.connect(self._on_sel_toggle)
             tile.expand_requested.connect(self.expand_requested.emit)
+            self._tiles.append(tile)
             self._grid.addWidget(tile, row, col)
             col += 1
             if col >= self._columns:
@@ -284,3 +321,30 @@ class ThumbGrid(QWidget):
             if entry in self._selected:
                 self._selected.remove(entry)
         self.selected_changed.emit(list(self._selected))
+
+    # ------------------------------------------------------------------
+    # 인라인 선택 (체크박스 없이 클릭/드래그/전체선택) (#2)
+    # ------------------------------------------------------------------
+    def _on_sel_toggle(self, entry: ThumbEntry, selected: bool) -> None:
+        self.inline_changed.emit()
+
+    def tiles(self) -> list[_ThumbTile]:
+        return list(self._tiles)
+
+    def inline_selected_items(self) -> list[ImageItem]:
+        return [t.entry.item for t in self._tiles if t.is_inline_selected()]
+
+    def set_all_inline_selected(self, selected: bool) -> None:
+        for t in self._tiles:
+            t.set_inline_selected(selected)
+        self.inline_changed.emit()
+
+    def set_inline_selected_for(self, items: set, selected: bool) -> None:
+        """``items`` (ImageItem.key 집합) 에 해당하는 타일만 선택/해제."""
+        changed = False
+        for t in self._tiles:
+            if t.entry.item.key in items:
+                t.set_inline_selected(selected)
+                changed = True
+        if changed:
+            self.inline_changed.emit()
