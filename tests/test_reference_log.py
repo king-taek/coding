@@ -123,6 +123,18 @@ def test_result_page_logs_final_matches_on_export(qapp, tmp_path, monkeypatch):
     ref_log = rl.session_path("sess")            # 빈 세션 파일 경로
     page = ResultPage()
     page.set_reference_log(ref_log)
+    # 엔진 뷰: A1 은 정답(b.png)을 후보엔 넣었으나 1위는 x.png(=변별력 실패, rank 1),
+    #          A2 는 정답(d.png)이 후보에 아예 없음(=recall 실패, rank -1).
+    page.set_engine_view({
+        ("A1", "a.png"): {"order": ["x.png", "b.png", "y.png"],
+                          "score": {"x.png": 0.94, "b.png": 0.93, "y.png": 0.90},
+                          "device": "gpu", "top1": ("x.png", 0.94), "n": 3},
+        ("A2", "c.png"): {"order": ["p.png", "q.png"],
+                          "score": {"p.png": 0.95, "q.png": 0.91},
+                          "device": "npu", "top1": ("p.png", 0.95), "n": 2},
+        ("A3", "e.png"): {"order": ["z.png"], "score": {"z.png": 0.9},
+                          "device": "npu", "top1": ("z.png", 0.9), "n": 1},
+    })
     page._result = FinalResult(
         mode="single", ref_machine="1호기", val_machine="3호기",
         matches=[
@@ -140,7 +152,14 @@ def test_result_page_logs_final_matches_on_export(qapp, tmp_path, monkeypatch):
     rec = json.loads(lines[-1])
     assert rec["type"] == "final"
     assert rec["n_matches"] == 2 and rec["n_unmatched"] == 1
-    assert rec["matches"][0] == {"slot": "A1", "ref_filename": "a.png",
-                                 "val_filename": "b.png", "score": 0.88}
-    assert rec["unmatched"][0] == {"slot": "A3", "ref_filename": "e.png"}
+    assert rec["recall_miss"] == 1                      # A2 정답이 엔진 랭킹에 없음
+    m0 = rec["matches"][0]
+    assert m0["ref_filename"] == "a.png" and m0["user_val"] == "b.png"
+    assert m0["device"] == "gpu"
+    assert m0["engine_top1_val"] == "x.png"             # 엔진 초기 매치
+    assert m0["user_val_engine_rank"] == 1              # 정답은 후보 2위(변별력 실패)
+    m1 = rec["matches"][1]
+    assert m1["user_val"] == "d.png" and m1["user_val_engine_rank"] == -1   # recall 실패
+    assert rec["unmatched"][0]["slot"] == "A3"
+    assert rec["unmatched"][0]["engine_top1_val"] == "z.png"
     assert rec["save_path"] == "/tmp/out.xlsx"

@@ -556,6 +556,53 @@ class MatchPage(QWidget):
     def get_state(self) -> Stage2State | None:
         return self._state
 
+    def build_engine_view(self, refs) -> dict:
+        """진단용(임시) — ref별 엔진 전체 랭킹 + 처리 장치 뷰.
+
+        ``refs``: iterable of (slot, ref_path).  반환 키 (slot, ref_path.name) →
+        ``{"order": [val_name…(점수 내림차순)], "score": {val_name: score},
+        "device": tag, "top1": (val_name, score)|None, "n": int}``.
+
+        ``order`` 는 엔진(고속=_fast_results / 기본=score_cache)이 실제로 산출한
+        후보 전체 순위.  사용자 최종 매치가 이 안에 없으면 = recall 실패(검색
+        단계에서 정답을 못 가져옴)로 판정할 수 있다.
+        """
+        out: dict = {}
+        if self._state is None:
+            return out
+        for slot, ref_path in refs:
+            ref_path = Path(ref_path)
+            key = (slot, ref_path.name)
+            if key in out:
+                continue
+            vitems = self._state.val_pool.get(slot, []) or []
+            by_path = {v.path: v for v in vitems}
+            scored: list = []
+            fres = self._fast_results.get((slot, ref_path))
+            if fres:
+                for vp, s in fres:
+                    vi = by_path.get(vp)
+                    if vi is not None:
+                        scored.append((vi, float(s)))
+            else:
+                for vi in vitems:
+                    s = self._score_cache.get_pair(slot, ref_path, vi.path)
+                    if s is not None:
+                        scored.append((vi, float(s)))
+            scored.sort(key=lambda x: x[1], reverse=True)
+            order = [vi.path.name for vi, _ in scored]
+            scoremap = {vi.path.name: round(float(s), 4) for vi, s in scored}
+            device = (self._result_device.get((slot, ref_path))
+                      or getattr(self._engine_cfg, "engine", "basic"))
+            out[key] = {
+                "order": order,
+                "score": scoremap,
+                "device": device,
+                "top1": (order[0], scoremap[order[0]]) if order else None,
+                "n": len(order),
+            }
+        return out
+
     def build_candidates_by_ref(self, matches) -> dict:
         """매치 검토 화면(#7)용 — 각 ref 의 후보 [(ImageItem, score), ...] 산출.
 

@@ -34,6 +34,8 @@ class ResultPage(QWidget):
         self._score_cache = None
         # 진단용 레퍼런스 로그 경로(임시) — main_window 가 주입.
         self._ref_log_path = None
+        # 진단용 — ref별 엔진 전체 랭킹/장치 뷰 (recall 측정용). main_window 주입.
+        self._engine_view: dict = {}
         self._loading = LoadingOverlay(self)
         self._exporter: ExcelExporter | None = None
         self._build()
@@ -42,6 +44,10 @@ class ResultPage(QWidget):
     def set_reference_log(self, path) -> None:
         """현재 세션의 레퍼런스 로그 파일 경로 주입(진단용, 임시)."""
         self._ref_log_path = path
+
+    def set_engine_view(self, view: dict) -> None:
+        """ref별 엔진 전체 랭킹/장치 뷰 주입(진단용, recall 측정용)."""
+        self._engine_view = view or {}
 
     # ------------------------------------------------------------------
     def _build(self) -> None:
@@ -357,22 +363,62 @@ class ResultPage(QWidget):
         if self._ref_log_path is None or self._result is None:
             return
         try:
-            matches = [
-                {"slot": m.slot,
-                 "ref_filename": Path(m.ref_path).name,
-                 "val_filename": Path(m.val_path).name,
-                 "score": round(float(m.score), 4)}
-                for m in self._result.matches
-            ]
-            unmatched = [
-                {"slot": u.slot, "ref_filename": Path(u.path).name}
-                for u in self._result.unmatched_refs
-            ]
+            ev = self._engine_view or {}
+            matches = []
+            recall_miss = 0          # 사용자 최종 매치가 엔진 랭킹에 없던 수
+            for m in self._result.matches:
+                ref_name = Path(m.ref_path).name
+                val_name = Path(m.val_path).name
+                view = ev.get((m.slot, ref_name))
+                # 엔진 랭킹에서 '사용자 최종(육안) 매치' 의 위치 = recall 신호.
+                #   rank 0     → 엔진 초기 매치가 곧 정답
+                #   rank N>0   → 엔진이 후보엔 넣었으나 순위를 못 맞춤(변별력)
+                #   rank -1    → 엔진이 정답을 아예 못 가져옴(recall 실패)
+                engine_rank = -1
+                engine_score = None
+                engine_top1 = None
+                device = None
+                if view is not None:
+                    order = view.get("order", [])
+                    if val_name in order:
+                        engine_rank = order.index(val_name)
+                        engine_score = view.get("score", {}).get(val_name)
+                    engine_top1 = view.get("top1")
+                    device = view.get("device")
+                if engine_rank == -1:
+                    recall_miss += 1
+                matches.append({
+                    "slot": m.slot,
+                    "ref_filename": ref_name,
+                    "device": device,
+                    # 사용자 육안 최종 매치
+                    "user_val": val_name,
+                    "user_score": round(float(m.score), 4),
+                    # 엔진 초기 매치(자동 top-1)
+                    "engine_top1_val": engine_top1[0] if engine_top1 else None,
+                    "engine_top1_score": engine_top1[1] if engine_top1 else None,
+                    # 사용자 최종 매치의 엔진 랭킹 내 위치(-1=recall 실패)
+                    "user_val_engine_rank": engine_rank,
+                    "user_val_engine_score": engine_score,
+                    "engine_n_candidates": view.get("n") if view else None,
+                })
+            unmatched = []
+            for u in self._result.unmatched_refs:
+                ref_name = Path(u.path).name
+                view = ev.get((u.slot, ref_name))
+                unmatched.append({
+                    "slot": u.slot,
+                    "ref_filename": ref_name,
+                    "device": view.get("device") if view else None,
+                    "engine_top1_val": (view.get("top1") or [None])[0]
+                                       if view else None,
+                })
             _reflog.append_final(self._ref_log_path, {
                 "save_path": (str(self._save_path)
                               if self._save_path is not None else None),
                 "n_matches": len(matches),
                 "n_unmatched": len(unmatched),
+                "recall_miss": recall_miss,      # 정답이 엔진 랭킹에 없던 매치 수
                 "matches": matches,
                 "unmatched": unmatched,
             })

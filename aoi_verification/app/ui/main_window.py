@@ -1007,6 +1007,16 @@ class MainWindow(QMainWindow):
         self._result_page.set_reference_log(
             getattr(self._match_page, "_ref_log_path", None)
         )
+        # 진단용 — recall 측정: 모든 ref(매치+미탐)의 엔진 전체 랭킹/장치 뷰를
+        # 결과 페이지에 넘겨, 엑셀 저장 시 '사용자 최종 매치가 엔진 랭킹 몇 위
+        # 였는지(없으면 -1=recall 실패)' 까지 기록하게 한다.
+        try:
+            refs_for_view = [(m.slot, m.ref_path) for m in result.matches]
+            refs_for_view += [(u.slot, u.path) for u in result.unmatched_refs]
+            engine_view = self._match_page.build_engine_view(refs_for_view)
+        except Exception:
+            engine_view = {}
+        self._result_page.set_engine_view(engine_view)
         QMessageBox.information(self, i18n.KO.APP_TITLE, i18n.KO.INFO_ALL_DONE)
         self._show_page(self._result_page)
         self._phase = PHASE_NONE
