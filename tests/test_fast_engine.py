@@ -30,12 +30,12 @@ def test_default_cfg_cache_extra_empty():
 
 
 def test_cfg_cache_extra_changes_with_toggles():
-    a = config.SimilarityConfig(grayscale=True)
-    b = config.SimilarityConfig(contrast=True)
-    c = config.SimilarityConfig(grayscale=True)
-    assert a.cache_extra() != ""
-    assert a.cache_extra() != b.cache_extra()
-    assert a.cache_extra() == c.cache_extra()       # 결정적
+    a = config.SimilarityConfig(center_crop=True)
+    b = config.SimilarityConfig(kla_crop=True)
+    c = config.SimilarityConfig(center_crop=True)
+    assert a.cache_extra("ref") != ""
+    assert a.cache_extra("ref") != b.cache_extra("ref")
+    assert a.cache_extra("ref") == c.cache_extra("ref")   # 결정적
     assert config.SimilarityConfig(kla_crop=True).has_preprocess is True
 
 
@@ -51,22 +51,6 @@ def test_kla_crop_noop_when_zero():
     from PIL import Image
     img = Image.fromarray(np.zeros((50, 50, 3), dtype=np.uint8))
     assert pp.kla_crop_rgb(img, 0.0, 0.0).size == (50, 50)
-
-
-def test_gray_transforms_full_range_and_shape():
-    g = np.random.RandomState(3).randint(60, 190, (40, 40), dtype=np.uint8)
-    hs = pp.grayscale_highsens(g)
-    hc = pp.high_contrast(g)
-    assert hs.shape == g.shape and hc.shape == g.shape
-    assert hs.dtype == np.uint8 and hc.dtype == np.uint8
-
-
-def test_apply_gray_chain_respects_flags():
-    g = np.random.RandomState(4).randint(60, 190, (32, 32), dtype=np.uint8)
-    same = pp.apply_gray_chain(g, config.SimilarityConfig())     # 전부 OFF
-    assert np.array_equal(same, g)
-    diff = pp.apply_gray_chain(g, config.SimilarityConfig(contrast=True))
-    assert diff.shape == g.shape
 
 
 # ---- EmbeddingIndex ------------------------------------------------------
@@ -259,12 +243,12 @@ def test_brute_force_index_used_without_hnswlib(monkeypatch):
     assert ann.is_available() is True       # NumPy 폴백 → 항상 사용 가능
 
 
-# ---- 중앙 영역(30%) side 별 적용 (#2/#7) ---------------------------------
-def test_center_side_aware_cache_extra():
-    cfg = config.SimilarityConfig(center20_ref=True, center20_val=False)
+# ---- 중앙 영역(30%) 단일 토글 → ref·val 모두 적용 (#2/#7) -----------------
+def test_center_crop_cache_extra():
+    cfg = config.SimilarityConfig(center_crop=True)
     assert cfg.cache_extra("ref") == "c30"
-    assert cfg.cache_extra("val") == ""
+    assert cfg.cache_extra("val") == "c30"      # 켜면 기준·검증 모두
     assert cfg.cache_extra(None) == ""          # side 미지정 → crop 안 함
     assert cfg.has_preprocess is True
-    both = config.SimilarityConfig(center20_ref=True, center20_val=True)
-    assert both.cache_extra("ref") == "c30" and both.cache_extra("val") == "c30"
+    off = config.SimilarityConfig(center_crop=False)
+    assert off.cache_extra("ref") == "" and off.has_preprocess is False

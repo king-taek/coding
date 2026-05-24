@@ -35,12 +35,9 @@ class SetupInput:
     val_machine: str
     threshold: float
     automation_level: str = AutomationLevel.MANUAL
-    # 유사도 엔진 + 강화/KLA 전처리 (계산 전용).
+    # 유사도 엔진 + KLA/중앙 전처리 (계산 전용).
     engine_mode: str = "basic"       # EngineMode.{BASIC,FAST}
-    center20_ref: bool = False       # 기준 사진 중앙 20% 만 사용
-    center20_val: bool = False       # 검증 사진 중앙 20% 만 사용
-    pre_grayscale: bool = False
-    pre_contrast: bool = False
+    center_crop: bool = False        # 사진 중앙 30% 만 사용 (기준·검증)
     kla_crop: bool = False
     persist_scores: bool = False     # 유사도 점수 디스크 캐시 (basic 엔진)
 
@@ -267,18 +264,11 @@ class SetupPage(QWidget):
         pre_title.setToolTip(i18n.KO.PRE_GROUP_TOOLTIP)
         pre_title.setStyleSheet("color: #7FB3D5; padding-top: 6px;")
         engine_card.body().addWidget(pre_title)
-        # 중앙 20% 만 사용 — 기준/검증 독립 토글 (#2/#5).
-        self.check_center20_ref = QCheckBox(i18n.KO.CENTER20_REF_LABEL, engine_card)
-        self.check_center20_val = QCheckBox(i18n.KO.CENTER20_VAL_LABEL, engine_card)
-        self.check_center20_ref.setToolTip(i18n.KO.CENTER20_TOOLTIP)
-        self.check_center20_val.setToolTip(i18n.KO.CENTER20_TOOLTIP)
-        self.check_center20_ref.setChecked(bool(getattr(_prefs_now, "center20_ref", False)))
-        self.check_center20_val.setChecked(bool(getattr(_prefs_now, "center20_val", False)))
-        self.check_pre_grayscale = QCheckBox(i18n.KO.PRE_GRAYSCALE_LABEL, engine_card)
-        self.check_pre_contrast = QCheckBox(i18n.KO.PRE_CONTRAST_LABEL, engine_card)
+        # 사진 중앙 30% 만 사용 — 기준·검증 공통 단일 토글 (#2/#5).
+        self.check_center_crop = QCheckBox(i18n.KO.CENTER_CROP_LABEL, engine_card)
+        self.check_center_crop.setToolTip(i18n.KO.CENTER_CROP_TOOLTIP)
+        self.check_center_crop.setChecked(bool(getattr(_prefs_now, "center_crop", False)))
         self.check_kla_crop = QCheckBox(i18n.KO.KLA_CROP_LABEL, engine_card)
-        self.check_pre_grayscale.setChecked(bool(getattr(_prefs_now, "pre_grayscale", False)))
-        self.check_pre_contrast.setChecked(bool(getattr(_prefs_now, "pre_contrast", False)))
         self.check_kla_crop.setChecked(bool(getattr(_prefs_now, "kla_crop", False)))
         # 유사도 점수 디스크 캐시 (#5B) — basic 엔진에서 재실행 시 재계산 생략.
         self.check_persist_scores = QCheckBox(
@@ -286,9 +276,8 @@ class SetupPage(QWidget):
         self.check_persist_scores.setToolTip(i18n.KO.PERSIST_SCORES_TOOLTIP)
         self.check_persist_scores.setChecked(
             bool(getattr(_prefs_now, "persist_scores", False)))
-        for _c in (self.check_center20_ref, self.check_center20_val,
-                   self.check_pre_grayscale, self.check_pre_contrast,
-                   self.check_kla_crop, self.check_persist_scores):
+        for _c in (self.check_center_crop, self.check_kla_crop,
+                   self.check_persist_scores):
             engine_card.body().addWidget(_c)
         root.addWidget(engine_card)
 
@@ -417,10 +406,7 @@ class SetupPage(QWidget):
         else:
             automation = AutomationLevel.MANUAL
         engine_mode = "fast" if self.radio_engine_fast.isChecked() else "basic"
-        center20_ref = bool(self.check_center20_ref.isChecked())
-        center20_val = bool(self.check_center20_val.isChecked())
-        pre_grayscale = bool(self.check_pre_grayscale.isChecked())
-        pre_contrast = bool(self.check_pre_contrast.isChecked())
+        center_crop = bool(self.check_center_crop.isChecked())
         kla_crop = bool(self.check_kla_crop.isChecked())
         persist_scores = bool(self.check_persist_scores.isChecked())
 
@@ -439,10 +425,7 @@ class SetupPage(QWidget):
             last_mode=mode,
             automation_level=automation,
             engine_mode=engine_mode,
-            center20_ref=center20_ref,
-            center20_val=center20_val,
-            pre_grayscale=pre_grayscale,
-            pre_contrast=pre_contrast,
+            center_crop=center_crop,
             kla_crop=kla_crop,
             persist_scores=persist_scores,
         )
@@ -455,10 +438,7 @@ class SetupPage(QWidget):
             threshold=threshold,
             automation_level=automation,
             engine_mode=engine_mode,
-            center20_ref=center20_ref,
-            center20_val=center20_val,
-            pre_grayscale=pre_grayscale,
-            pre_contrast=pre_contrast,
+            center_crop=center_crop,
             kla_crop=kla_crop,
             persist_scores=persist_scores,
         ))

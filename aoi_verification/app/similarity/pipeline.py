@@ -77,7 +77,7 @@ def extract(src: Path, *, use_cnn: Optional[bool] = None, cfg=None,
 
     ``cfg`` (SimilarityConfig) 전처리 토글이 켜져 있으면 강화/KLA 변환을
     계산 전용으로 적용하고, 캐시 키에 ``cfg.cache_extra(side)`` 를 섞어 기본
-    특징과 분리 저장한다.  ``side`` ('ref'/'val') 는 중앙 20% crop 의 side 별
+    특징과 분리 저장한다.  ``side`` ('ref'/'val') 는 중앙 30% crop 의 side 별
     적용을 위해 전달.  cfg=None / 토글 OFF → 현행과 동일 (extra="").
     """
     extra = cfg.cache_extra(side) if cfg is not None else ""

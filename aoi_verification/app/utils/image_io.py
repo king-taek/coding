@@ -164,18 +164,18 @@ def center_roi_gray(src: Path,
 
     유사도 파이프라인(pHash·SSIM·ORB) 모두가 공유하는 1차 전처리.
 
-    ``cfg`` (SimilarityConfig) 가 주어지고 전처리 토글이 켜져 있으면 강화/KLA
+    ``cfg`` (SimilarityConfig) 가 주어지고 전처리 토글이 켜져 있으면 KLA/중앙
     변환을 **계산 전용**으로 적용 — 화면 표시 이미지는 영향 없음.  ``side``
-    ('ref'/'val') 에 따라 중앙 20% crop 을 선택 적용한다.  cfg=None 또는 모든
+    ('ref'/'val') 에 따라 중앙 30% crop 을 선택 적용한다.  cfg=None 또는 모든
     토글 OFF 면 현행과 동일 동작 (기본 모드 불변).
     """
     if roi_ratio is None:
         roi_ratio = config.Sizing.ROI_RATIO
     if long_edge is None:
         long_edge = config.Sizing.SIMILARITY_PX
-    # 중앙 영역만 사용 옵션 (#7/#2) — side(ref/val) 별로 적용.  비율은 30%.
-    if cfg is not None and getattr(cfg, "_center20_for", None) is not None:
-        if cfg._center20_for(side):
+    # 중앙 영역만 사용 옵션 (#7/#2) — side(ref/val) 에 적용.  비율은 30%.
+    if cfg is not None and getattr(cfg, "_center_crop_for", None) is not None:
+        if cfg._center_crop_for(side):
             roi_ratio = 0.3
 
     img = _open(src)
@@ -192,11 +192,6 @@ def center_roi_gray(src: Path,
     img = img.crop((x0, y0, x0 + rw, y0 + rh))
     img = _fit_long_edge(img, long_edge)
     gray = np.asarray(img.convert("L"), dtype=np.uint8)
-    # Gray 단계 전처리 (흑백+고감도 → 고대비).
-    if cfg is not None and (getattr(cfg, "grayscale", False)
-                            or getattr(cfg, "contrast", False)):
-        from ..similarity import preprocess
-        gray = preprocess.apply_gray_chain(gray, cfg)
     return gray
 
 

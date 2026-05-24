@@ -71,7 +71,7 @@ def compute_slot_embeddings(items: List[ImageItem],
     """슬롯 이미지들의 경량 디스크립터를 {path: vec(L2 정규화)} 로 반환.
 
     CNN/torch/모델 다운로드 없이 중심 ROI gray 를 축소·정규화한 벡터를 쓴다.
-    cfg(중앙20%/KLA/강화)가 디스크립터에도 반영된다.  결과는 디스크 캐시되어
+    cfg(중앙30%/KLA)가 디스크립터에도 반영된다.  결과는 디스크 캐시되어
     재실행이 빠르다.
     """
     from ..utils import image_io

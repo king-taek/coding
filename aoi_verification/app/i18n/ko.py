@@ -220,17 +220,14 @@ FAST_DEPS_FAILED_FMT = (
     "설치 실패 — {error}\n\n"
     "수동 설치:  pip install hnswlib"
 )
-CENTER20_REF_LABEL = "기준 사진 중앙 30%만 사용"
-CENTER20_VAL_LABEL = "검증 사진 중앙 30%만 사용"
-CENTER20_TOOLTIP = (
+CENTER_CROP_LABEL = "사진 중앙 30%만 사용 (기준·검증)"
+CENTER_CROP_TOOLTIP = (
     "유사도 계산 시 사진의 중앙 30% 영역만 사용합니다.\n"
     "테두리/배경 차이를 무시하고 중심부 패턴에 집중할 때 유용합니다.\n"
-    "기준·검증을 각각 켤 수 있으며, 보통 둘 다 켜는 것이 정확합니다.\n"
+    "켜면 기준·검증 사진 모두에 적용됩니다.\n"
     "썸네일/엑셀 이미지는 원본 그대로 유지됩니다."
 )
 PRE_GROUP_TITLE = "강화 전처리 (계산 전용 — 화면 표시는 원본 유지)"
-PRE_GRAYSCALE_LABEL = "흑백 + 고감도"
-PRE_CONTRAST_LABEL = "고대비"
 KLA_CROP_LABEL = "KLA 정보영역 잘라내기 (상·하단 텍스트)"
 PERSIST_SCORES_LABEL = "유사도 점수 디스크 캐시 (재실행 시 재계산 생략)"
 PERSIST_SCORES_TOOLTIP = (

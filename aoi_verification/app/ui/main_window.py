@@ -457,10 +457,7 @@ class MainWindow(QMainWindow):
             return config.DEFAULT_SIM_CONFIG
         return config.SimilarityConfig(
             engine=getattr(inp, "engine_mode", "basic"),
-            center20_ref=bool(getattr(inp, "center20_ref", False)),
-            center20_val=bool(getattr(inp, "center20_val", False)),
-            grayscale=bool(getattr(inp, "pre_grayscale", False)),
-            contrast=bool(getattr(inp, "pre_contrast", False)),
+            center_crop=bool(getattr(inp, "center_crop", False)),
             kla_crop=bool(getattr(inp, "kla_crop", False)),
             persist_scores=bool(getattr(inp, "persist_scores", False)),
         )

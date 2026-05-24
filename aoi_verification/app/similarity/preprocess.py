@@ -6,8 +6,6 @@
 
 - KLA crop  : KLA 사진 상/하단 텍스트 정보 영역을 잘라냄 (#7).
 - 배경 제거 : OpenCV GrabCut 기본 (cv2 는 이미 의존), rembg 가 있으면 lazy 사용.
-- 흑백+고감도: 강한 CLAHE + 히스토그램 스트레치.
-- 고대비    : 선형 스트레치(상/하위 퍼센타일 클리핑).
 
 image_io 가 이 모듈을 lazy import 한다 (순환 import 방지 — 이 모듈은
 image_io 를 import 하지 않는다).
@@ -90,41 +88,3 @@ def apply_rgb_chain(img: "_PILImage.Image", cfg: "SimilarityConfig") -> "_PILIma
     return img
 
 
-# ---------------------------------------------------------------------------
-# Gray 단계 변환 (grayscale 변환 이후) — 흑백+고감도, 고대비
-# ---------------------------------------------------------------------------
-def grayscale_highsens(gray: np.ndarray) -> np.ndarray:
-    """강한 CLAHE + 풀 히스토그램 스트레치 — 미세 결함 대비를 키운다."""
-    try:
-        import cv2
-        clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8, 8))
-        gray = clahe.apply(gray)
-    except Exception:
-        pass
-    return _stretch(gray, 1.0, 99.0)
-
-
-def high_contrast(gray: np.ndarray) -> np.ndarray:
-    """상/하위 2 퍼센타일 클리핑 후 0~255 선형 스트레치."""
-    return _stretch(gray, 2.0, 98.0)
-
-
-def _stretch(gray: np.ndarray, lo_pct: float, hi_pct: float) -> np.ndarray:
-    g = gray.astype(np.float32)
-    lo = float(np.percentile(g, lo_pct))
-    hi = float(np.percentile(g, hi_pct))
-    if hi - lo < 1e-3:
-        return gray
-    g = (g - lo) * (255.0 / (hi - lo))
-    return np.clip(g, 0, 255).astype(np.uint8)
-
-
-def apply_gray_chain(gray: np.ndarray, cfg: "SimilarityConfig") -> np.ndarray:
-    """grayscale 단계 변환 적용 (흑백+고감도 → 고대비)."""
-    if cfg is None:
-        return gray
-    if cfg.grayscale:
-        gray = grayscale_highsens(gray)
-    if cfg.contrast:
-        gray = high_contrast(gray)
-    return gray

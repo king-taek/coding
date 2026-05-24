@@ -180,7 +180,7 @@ class SlotFeatureCache:
             existing = dict(self._slots.get(slot, {}))
 
         # 누락된 항목만 새로 추출 (디스크 캐시가 있다면 거의 무비용).
-        # 검증측 특징 캐시이므로 side='val' (중앙 20% crop 의 side 별 적용).
+        # 검증측 특징 캐시이므로 side='val' (중앙 30% crop 의 side 별 적용).
         for it in items_list:
             if it.path in existing:
                 continue
