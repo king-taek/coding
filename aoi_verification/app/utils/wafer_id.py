@@ -35,8 +35,12 @@ _CROP_LADDER = (
     (0.30, 0.65),    # 더 넉넉히
 )
 
-# 한 폴더에서 인식을 시도할 최대 이미지 수(첫 장이 실패하면 다음 장으로).
+# 한 폴더에서 인식을 시도할 최대 이미지 수(다수결 투표에 사용).
 _MAX_IMAGES_PER_FOLDER = 5
+# 한 WaferID 가 이만큼 표를 모으면 합의로 보고 조기 종료(정확도/속도 균형).
+_VOTE_EARLY_STOP = 3
+# 이 신뢰도 미만의 인식 결과는 투표에서 무시(쓰레기 값 제거).
+_MIN_CONF = 0.30
 
 # "WaferID : 00MML090XYG5" 형태에서 값(영숫자) 추출.
 _WAFER_ID_RE = re.compile(r"WaferID\s*[:：]?\s*([A-Za-z0-9]+)", re.IGNORECASE)
@@ -91,7 +95,7 @@ def _crop_box(size, top_frac: float, left_frac: float):
 
 
 def _texts_from_result(result) -> list:
-    """RapidOCR 결과에서 텍스트만 추출.
+    """RapidOCR 결과에서 ``(텍스트, 신뢰도)`` 목록을 추출.
 
     det+rec 모드 item 은 ``[box, text, score]`` (len 3), rec-only 모드 item 은
     ``[text, score]`` (len 2) 로 형태가 다르므로 둘 다 처리한다.
@@ -99,13 +103,35 @@ def _texts_from_result(result) -> list:
     out = []
     for item in (result or []):
         try:
-            if len(item) >= 3:
-                out.append(str(item[1]))
-            elif len(item) == 2:
-                out.append(str(item[0]))
+            if len(item) >= 3:                       # det+rec: [box, text, score]
+                out.append((str(item[1]), float(item[2])))
+            elif len(item) == 2:                     # rec-only: [text, score]
+                out.append((str(item[0]), float(item[1])))
         except Exception:
             continue
     return out
+
+
+def _wafer_candidates(result):
+    """OCR 결과에서 ``(WaferID, 신뢰도)`` 후보 목록을 만든다.
+
+    1) 각 텍스트 조각에서 단독으로 WaferID 가 잡히면 그 조각 점수로 채택.
+    2) 조각 단위로 못 잡으면(라벨/값 분리 등) 전체를 이어 붙여 한 번 더 시도하고,
+       이때는 조각 점수 평균을 신뢰도로 본다.
+    """
+    seq = _texts_from_result(result)
+    cands = []
+    for text, score in seq:
+        wid = _parse_wafer_id(text)
+        if wid:
+            cands.append((wid, score))
+    if not cands and seq:
+        joined = " ".join(t for t, _ in seq)
+        wid = _parse_wafer_id(joined)
+        if wid:
+            avg = sum(s for _, s in seq) / len(seq)
+            cands.append((wid, avg))
+    return cands
 
 
 def _band_box(size, top_frac: float, bottom_frac: float, left_frac: float):
@@ -115,10 +141,11 @@ def _band_box(size, top_frac: float, bottom_frac: float, left_frac: float):
             max(1, int(round(h * bottom_frac))))
 
 
-def _read_fast(reader, img) -> Optional[str]:
+def _read_fast(reader, img):
     """rec-only 빠른 경로 — 헤더 줄 밴드들을 검출 없이 인식만 돌린다(빠름).
 
-    겹치지 않는 한 줄짜리 밴드를 순서대로 인식하고, WaferID 가 잡히면 즉시 반환.
+    겹치지 않는 한 줄짜리 밴드를 순서대로 인식하고, WaferID 가 잡히면 그 밴드의
+    최고 신뢰도 후보를 ``(WaferID, 신뢰도)`` 로 즉시 반환.  실패 시 None.
     """
     import numpy as np
     for top_f, bot_f in _LINE_BANDS:
@@ -127,32 +154,32 @@ def _read_fast(reader, img) -> Optional[str]:
             out = reader(np.asarray(crop.convert("RGB")),
                          use_det=False, use_cls=False, use_rec=True)
             result = out[0] if isinstance(out, tuple) else out
-            wid = _parse_wafer_id(" ".join(_texts_from_result(result)))
-            if wid:
-                return wid
+            cands = [c for c in _wafer_candidates(result) if c[1] >= _MIN_CONF]
+            if cands:
+                return max(cands, key=lambda c: c[1])
         except Exception:
             continue
     return None
 
 
-def _read_robust(reader, img) -> Optional[str]:
-    """느린 폴백 — det+rec 크롭 사다리(빠른 경로가 실패할 때만)."""
+def _read_robust(reader, img):
+    """느린 폴백 — det+rec 크롭 사다리.  ``(WaferID, 신뢰도)`` 또는 None."""
     import numpy as np
     for top_frac, left_frac in _CROP_LADDER:
         try:
             crop = img.crop(_crop_box(img.size, top_frac, left_frac))
             out = reader(np.asarray(crop.convert("RGB")))
             result = out[0] if isinstance(out, tuple) else out
-            wid = _parse_wafer_id(" ".join(_texts_from_result(result)))
-            if wid:
-                return wid
+            cands = [c for c in _wafer_candidates(result) if c[1] >= _MIN_CONF]
+            if cands:
+                return max(cands, key=lambda c: c[1])
         except Exception:
             continue
     return None
 
 
-def _read_one(path, robust: bool) -> Optional[str]:
-    """원본을 1회 열어 빠른 경로 → (robust 면) 느린 폴백 순으로 시도."""
+def _read_one(path, robust: bool):
+    """원본을 1회 열어 빠른 경로 → (robust 면) 느린 폴백.  ``(WaferID, 신뢰도)``|None."""
     reader = _get_reader()
     if reader is None:
         return None
@@ -161,43 +188,14 @@ def _read_one(path, robust: bool) -> Optional[str]:
         img = image_io._open(Path(path))          # 항상 원본 전체 해상도
     except Exception:
         return None
-    wid = _read_fast(reader, img)
-    if wid or not robust:
-        return wid
+    r = _read_fast(reader, img)
+    if r or not robust:
+        return r
     return _read_robust(reader, img)
 
 
-def read_wafer_id(path) -> Optional[str]:
-    """이미지의 좌상단 헤더를 OCR 해 WaferID 값을 돌려준다. 실패 시 None.
-
-    **항상 원본 전체 해상도**로 진행한다.  먼저 검출을 건너뛰는 rec-only 빠른
-    경로를 쓰고, 실패하면 det+rec 크롭 사다리로 폴백한다.
-    """
-    return _read_one(path, robust=True)
-
-
-def read_folder_wafer_id(paths, limit: int = _MAX_IMAGES_PER_FOLDER) -> Optional[str]:
-    """한 폴더의 여러 이미지를 OCR — 첫 성공 값을 돌려준다.
-
-    같은 폴더의 사진들은 WaferID 가 동일하므로, **빠른 경로(rec-only)를 먼저**
-    여러 장에 적용하고(폴더당 최대 ``limit`` 장), 전부 실패할 때만 느린 det+rec
-    폴백을 첫 1장에만 적용해 최악 비용을 제한한다.
-    """
-    paths = list(paths)
-    if not paths:
-        return None
-    n = max(1, int(limit))
-    # 1) 빠른 경로(rec-only)를 이미지들에 우선 적용.
-    for p in paths[:n]:
-        wid = _read_one(p, robust=False)
-        if wid:
-            return wid
-    # 2) 전부 실패 시에만 느린 det+rec 폴백을 첫 장에 적용.
-    return _read_robust_only(paths[0])
-
-
-def _read_robust_only(path) -> Optional[str]:
-    """느린 폴백 경로만 단독 실행(빠른 경로가 이미 실패한 뒤 첫 장에 사용)."""
+def _read_robust_only(path):
+    """느린 폴백 경로만 단독 실행.  ``(WaferID, 신뢰도)`` 또는 None."""
     reader = _get_reader()
     if reader is None:
         return None
@@ -207,6 +205,47 @@ def _read_robust_only(path) -> Optional[str]:
     except Exception:
         return None
     return _read_robust(reader, img)
+
+
+def read_wafer_id(path) -> Optional[str]:
+    """이미지의 좌상단 헤더를 OCR 해 WaferID 값을 돌려준다. 실패 시 None.
+
+    **항상 원본 전체 해상도**로 진행한다.  먼저 검출을 건너뛰는 rec-only 빠른
+    경로를 쓰고, 실패하면 det+rec 크롭 사다리로 폴백한다.
+    """
+    r = _read_one(path, robust=True)
+    return r[0] if r else None
+
+
+def read_folder_wafer_id(paths, limit: int = _MAX_IMAGES_PER_FOLDER) -> Optional[str]:
+    """한 폴더의 여러 이미지를 OCR 해 **다수결**로 WaferID 를 정한다(정확도↑).
+
+    같은 폴더의 사진들은 WaferID 가 동일하므로, 빠른 경로로 여러 장(최대
+    ``limit`` 장)을 읽어 ``(표 수, 신뢰도 합)`` 으로 가장 많이 나온 WaferID 를
+    채택한다.  단일 이미지 오인식이 있어도 합의로 보정된다.  한 값이
+    ``_VOTE_EARLY_STOP`` 표에 도달하면 조기 종료(속도).  빠른 경로가 한 장도 못
+    읽으면 느린 det+rec 폴백을 첫 장에 적용한다.
+    """
+    paths = list(paths)
+    if not paths:
+        return None
+    n = max(1, int(limit))
+    votes: dict[str, list] = {}     # wid -> [표 수, 신뢰도 합]
+    for p in paths[:n]:
+        r = _read_one(p, robust=False)
+        if r:
+            wid, conf = r
+            v = votes.setdefault(wid, [0, 0.0])
+            v[0] += 1
+            v[1] += float(conf)
+            if v[0] >= _VOTE_EARLY_STOP:
+                break
+    if votes:
+        # 표 수 우선, 동률이면 신뢰도 합으로 결정.
+        return max(votes.items(), key=lambda kv: (kv[1][0], kv[1][1]))[0]
+    # 빠른 경로 전부 실패 → 느린 det+rec 폴백을 첫 장에 적용.
+    r = _read_robust_only(paths[0])
+    return r[0] if r else None
 
 
 def header_crop_image(path, top_frac: float = 0.12, left_frac: float = 0.5):

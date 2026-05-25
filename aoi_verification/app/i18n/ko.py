@@ -368,6 +368,15 @@ SLOT_MAP_PREVIEW_HINT = (
 )
 SLOT_MAP_NO_PREVIEW = "(미리보기 없음)"
 
+# OCR 후 수동 매치 — KLA 사진(헤더)별로 매칭할 wafer(slot)을 드롭다운으로 선택.
+WAFER_MATCH_TITLE = "WaferID 수동 매치"
+WAFER_MATCH_HINT = (
+    "자동 인식으로 짝짓지 못한 KLA 사진입니다.  각 사진의 WaferID 를 직접 확인하고, "
+    "오른쪽 드롭다운에서 매칭할 wafer(폴더)를 선택하세요.  선택하지 않은 사진은 "
+    "매칭에서 제외됩니다."
+)
+WAFER_MATCH_NONE = "(매칭 안 함)"
+
 # setup 화면 — 각 장비(기준/검증) 폴더 설정 아래의 ‘KLA 장비’ 체크박스.
 SETUP_KLA_LABEL = "KLA 장비 (WaferID 자동 인식)"
 SETUP_KLA_TOOLTIP = (

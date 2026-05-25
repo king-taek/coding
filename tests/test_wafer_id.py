@@ -282,19 +282,45 @@ def test_read_wafer_id_crop_ladder_retries(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# 폴더 내 여러 장 시도 — 빠른 경로 우선, 전부 실패 시 첫 장에만 폴백
+# 폴더 다수결 — 여러 장을 읽어 (표 수, 신뢰도)로 WaferID 결정
 # ---------------------------------------------------------------------------
 def test_read_folder_uses_multiple_images(monkeypatch):
     calls: list[str] = []
 
     def fake_one(p, robust=False):
         calls.append(str(p))
-        return None if str(p).endswith("a.jpg") else "WID999"
+        return None if str(p).endswith("a.jpg") else ("WID999", 0.9)
 
     monkeypatch.setattr(wafer_id, "_read_one", fake_one)
     got = wafer_id.read_folder_wafer_id([Path("/f/a.jpg"), Path("/f/b.jpg")])
     assert got == "WID999"
     assert calls == ["/f/a.jpg", "/f/b.jpg"]
+
+
+def test_read_folder_majority_vote(monkeypatch):
+    """오인식이 섞여도 다수결로 올바른 WaferID 를 고른다."""
+    seq = {"a": ("WIDX", 0.8), "b": ("WIDY", 0.9), "c": ("WIDX", 0.7)}
+    monkeypatch.setattr(wafer_id, "_read_one",
+                        lambda p, robust=False: seq[Path(p).name])
+    got = wafer_id.read_folder_wafer_id(
+        [Path("/f/a"), Path("/f/b"), Path("/f/c")])
+    assert got == "WIDX"        # 2표 vs 1표
+
+
+def test_read_folder_early_stop_on_consensus(monkeypatch):
+    """한 값이 합의 임계(3표)에 도달하면 더 읽지 않고 종료."""
+    seen: list = []
+
+    def f(p, robust=False):
+        seen.append(p)
+        return ("WIDZ", 0.9)
+
+    monkeypatch.setattr(wafer_id, "_read_one", f)
+    monkeypatch.setattr(wafer_id, "_read_robust_only", lambda p: None)
+    got = wafer_id.read_folder_wafer_id(
+        [Path(str(i)) for i in range(10)], limit=10)
+    assert got == "WIDZ"
+    assert len(seen) == 3
 
 
 def test_read_folder_none_when_all_fail(monkeypatch):
@@ -306,7 +332,7 @@ def test_read_folder_none_when_all_fail(monkeypatch):
 def test_read_folder_robust_fallback_on_first(monkeypatch):
     """빠른 경로가 모두 실패하면 첫 장에 det+rec 폴백을 적용한다."""
     monkeypatch.setattr(wafer_id, "_read_one", lambda p, robust=False: None)
-    monkeypatch.setattr(wafer_id, "_read_robust_only", lambda p: "WIDROB")
+    monkeypatch.setattr(wafer_id, "_read_robust_only", lambda p: ("WIDROB", 0.5))
     assert wafer_id.read_folder_wafer_id(
         [Path("/a"), Path("/b")]) == "WIDROB"
 
