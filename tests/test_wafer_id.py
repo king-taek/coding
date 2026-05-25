@@ -211,39 +211,6 @@ class _FakeReader:
         return (None, 0.0)
 
 
-class _RecOnlyReader:
-    """rec-only 호출에서 즉시 WaferID 를 돌려주는 가짜(검출은 호출되면 안 됨)."""
-
-    def __init__(self, value: str) -> None:
-        self.value = value
-        self.det_calls = 0
-        self.rec_calls = 0
-
-    def __call__(self, arr, use_det=True, use_cls=True, use_rec=True):
-        if use_det is False:
-            self.rec_calls += 1
-            return ([[f"WaferID : {self.value}", 0.98]], 0.01)
-        self.det_calls += 1
-        return (None, 0.0)
-
-
-class _DetOnlyReader:
-    """rec-only 는 빈 결과, det+rec 에서만 WaferID 를 돌려주는 가짜(폴백 검증)."""
-
-    def __init__(self, value: str) -> None:
-        self.value = value
-        self.det_calls = 0
-        self.rec_calls = 0
-
-    def __call__(self, arr, use_det=True, use_cls=True, use_rec=True):
-        if use_det is False:
-            self.rec_calls += 1
-            return (None, 0.0)
-        self.det_calls += 1
-        box = [[0, 0], [1, 0], [1, 1], [0, 1]]
-        return ([[box, f"WaferID : {self.value}", 0.99]], 0.01)
-
-
 def _patch_img(monkeypatch, size=(1000, 1000)):
     from PIL import Image as PILImage
     from aoi_verification.app.utils import image_io
@@ -251,33 +218,41 @@ def _patch_img(monkeypatch, size=(1000, 1000)):
     monkeypatch.setattr(image_io, "_open", lambda p: fake_img)
 
 
-def test_fast_path_skips_detection(monkeypatch):
-    """rec-only 빠른 경로가 검출 없이 WaferID 를 읽으면 det 은 호출되지 않는다."""
-    reader = _RecOnlyReader("W6460169XYF6")
-    monkeypatch.setattr(wafer_id, "_get_reader", lambda: reader)
-    _patch_img(monkeypatch)
-    assert wafer_id.read_wafer_id(Path("/x.jpg")) == "W6460169XYF6"
-    assert reader.rec_calls >= 1
-    assert reader.det_calls == 0
+def test_get_reader_uses_reduced_det_limit(monkeypatch):
+    """엔진은 검출 입력 크기를 줄인(det_limit_side_len) 채로 생성된다."""
+    captured = {}
+
+    class _FakeRapid:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    import types
+    fake_mod = types.ModuleType("rapidocr_onnxruntime")
+    fake_mod.RapidOCR = _FakeRapid
+    monkeypatch.setitem(__import__("sys").modules, "rapidocr_onnxruntime",
+                        fake_mod)
+    monkeypatch.setattr(wafer_id, "_reader", None)
+    monkeypatch.setattr(wafer_id, "_reader_failed", False)
+    wafer_id._get_reader()
+    assert captured.get("det_limit_side_len") == wafer_id._DET_LIMIT_SIDE_LEN
 
 
-def test_falls_back_to_detection_when_fast_fails(monkeypatch):
-    """빠른 경로(rec-only)가 실패하면 det+rec 폴백으로 넘어가 인식한다."""
-    reader = _DetOnlyReader("W6459081XYE1")
+def test_detrec_reads_wafer_id(monkeypatch):
+    """det+rec 주 경로가 헤더에서 WaferID 를 읽는다."""
+    reader = _FakeReader(min_h=0, value="W6459081XYE1")
     monkeypatch.setattr(wafer_id, "_get_reader", lambda: reader)
     _patch_img(monkeypatch)
     assert wafer_id.read_wafer_id(Path("/x.jpg")) == "W6459081XYE1"
-    assert reader.rec_calls >= 1 and reader.det_calls >= 1
 
 
 def test_read_wafer_id_crop_ladder_retries(monkeypatch):
-    """det+rec 폴백에서 작은 크롭이 실패하면 더 큰 크롭으로 재시도."""
+    """작은 크롭이 실패하면 더 큰(넓은) 크롭으로 재시도한다."""
     reader = _FakeReader(min_h=200, value="W6460169XYF6")
     monkeypatch.setattr(wafer_id, "_get_reader", lambda: reader)
     _patch_img(monkeypatch)
     got = wafer_id.read_wafer_id(Path("/x.jpg"))
     assert got == "W6460169XYF6"
-    # 빠른 경로(작은 줄 밴드)는 실패하고, det+rec 사다리의 큰 크롭에서 성공.
+    # 첫 크롭(상단 12%)은 실패하고, 더 큰 크롭에서 성공해야 한다.
     assert reader.heights[0] < 200 and max(reader.heights) >= 200
 
 
@@ -287,7 +262,7 @@ def test_read_wafer_id_crop_ladder_retries(monkeypatch):
 def test_read_folder_uses_multiple_images(monkeypatch):
     calls: list[str] = []
 
-    def fake_one(p, robust=False):
+    def fake_one(p):
         calls.append(str(p))
         return None if str(p).endswith("a.jpg") else ("WID999", 0.9)
 
@@ -300,48 +275,36 @@ def test_read_folder_uses_multiple_images(monkeypatch):
 def test_read_folder_majority_vote(monkeypatch):
     """오인식이 섞여도 다수결로 올바른 WaferID 를 고른다."""
     seq = {"a": ("WIDX", 0.8), "b": ("WIDY", 0.9), "c": ("WIDX", 0.7)}
-    monkeypatch.setattr(wafer_id, "_read_one",
-                        lambda p, robust=False: seq[Path(p).name])
+    monkeypatch.setattr(wafer_id, "_read_one", lambda p: seq[Path(p).name])
     got = wafer_id.read_folder_wafer_id(
         [Path("/f/a"), Path("/f/b"), Path("/f/c")])
     assert got == "WIDX"        # 2표 vs 1표
 
 
 def test_read_folder_early_stop_on_consensus(monkeypatch):
-    """한 값이 합의 임계(3표)에 도달하면 더 읽지 않고 종료."""
+    """한 값이 합의 임계(2표)에 도달하면 더 읽지 않고 종료."""
     seen: list = []
 
-    def f(p, robust=False):
+    def f(p):
         seen.append(p)
         return ("WIDZ", 0.9)
 
     monkeypatch.setattr(wafer_id, "_read_one", f)
-    monkeypatch.setattr(wafer_id, "_read_robust_only", lambda p: None)
     got = wafer_id.read_folder_wafer_id(
         [Path(str(i)) for i in range(10)], limit=10)
     assert got == "WIDZ"
-    assert len(seen) == 3
+    assert len(seen) == wafer_id._VOTE_EARLY_STOP   # 2
 
 
 def test_read_folder_none_when_all_fail(monkeypatch):
-    monkeypatch.setattr(wafer_id, "_read_one", lambda p, robust=False: None)
-    monkeypatch.setattr(wafer_id, "_read_robust_only", lambda p: None)
+    monkeypatch.setattr(wafer_id, "_read_one", lambda p: None)
     assert wafer_id.read_folder_wafer_id([Path("/a"), Path("/b")]) is None
-
-
-def test_read_folder_robust_fallback_on_first(monkeypatch):
-    """빠른 경로가 모두 실패하면 첫 장에 det+rec 폴백을 적용한다."""
-    monkeypatch.setattr(wafer_id, "_read_one", lambda p, robust=False: None)
-    monkeypatch.setattr(wafer_id, "_read_robust_only", lambda p: ("WIDROB", 0.5))
-    assert wafer_id.read_folder_wafer_id(
-        [Path("/a"), Path("/b")]) == "WIDROB"
 
 
 def test_read_folder_respects_limit(monkeypatch):
     seen: list = []
     monkeypatch.setattr(wafer_id, "_read_one",
-                        lambda p, robust=False: seen.append(p) or None)
-    monkeypatch.setattr(wafer_id, "_read_robust_only", lambda p: None)
+                        lambda p: seen.append(p) or None)
     wafer_id.read_folder_wafer_id([Path(str(i)) for i in range(10)], limit=3)
     assert len(seen) == 3
 
