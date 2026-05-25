@@ -18,6 +18,7 @@ GPU 대비 정확도 이득이 없고 느려서 비활성화했다(docs/NPU 효�
 
 from __future__ import annotations
 
+import queue
 import threading
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -151,11 +152,22 @@ DEFAULT_ACCEL_CONCURRENCY = 32
 
 
 def accel_concurrency(cfg) -> int:
-    """cfg 의 동시 추론 수(in-flight).  없거나 잘못되면 기본값.  최소 1."""
+    """동시 추론 수(in-flight) 상한.  사용자 설정이 없으면 기본 32.  최소 1."""
     try:
         return max(1, int(getattr(cfg, "accel_concurrency", None)))
     except (TypeError, ValueError):
         return DEFAULT_ACCEL_CONCURRENCY
+
+
+def dynamic_concurrency(n_items: int, batch: int, cap: int = DEFAULT_ACCEL_CONCURRENCY) -> int:
+    """워크로드에 맞춰 동시 in-flight 추론 수를 **자동 산정**(사용자 설정 없음).
+
+    실제 필요한 추론 요청 수(≈ceil(n/batch))만큼만 띄우되 [8, cap(기본 32)] 로
+    클램프 — 후보가 적으면 줄이고 많으면 상한까지.  추론 결과는 동시수와 무관."""
+    if n_items <= 0:
+        return min(cap, 8)
+    reqs = -(-int(n_items) // max(1, int(batch)))     # ceil division
+    return max(8, min(int(cap), reqs)) if cap >= 8 else max(1, min(int(cap), reqs))
 
 
 def build_units(cfg, threshold: float) -> List[object]:
@@ -276,6 +288,41 @@ class EfficiencyScheduler(QThread):
         out.sort(key=lambda x: -x[1])
         return out
 
+    def _embed_slot(self, backend, refs, vals):
+        """슬롯 val+ref 임베딩(GPU) → (built_index, ref_emb).  동시추론수는 자동 산정."""
+        mk, dev, batch = backend
+        cap = accel_concurrency(self._cfg)
+        val_emb = _ov.device_embed(
+            [Path(v.path) for v in vals], model_kind=mk, device=dev, cfg=self._cfg,
+            jobs=dynamic_concurrency(len(vals), batch, cap), batch=batch)
+        built = _ann.build_from(val_emb) if val_emb else None
+        ref_emb: Dict = {}
+        if built is not None:
+            ref_emb = _ov.device_embed(
+                [Path(r.path) for r in refs], model_kind=mk, device=dev, cfg=self._cfg,
+                jobs=dynamic_concurrency(len(refs), batch, cap), batch=batch)
+        return built, ref_emb
+
+    def _consume_slot(self, slot, refs, vals, built, ref_emb, total_pairs, counters):
+        """한 슬롯의 ref들을 CPU 고전으로 재채점·융합해 results 저장 + 진행 emit."""
+        by_path = {Path(v.path): v for v in vals}
+        for r in refs:
+            if self._stop.is_set():
+                break
+            rp = Path(r.path)
+            try:
+                cands = self._fuse_ref(r, vals, built, ref_emb, by_path)
+            except Exception:
+                cands = None
+            if cands is None:                        # 고전 폴백(임베딩 실패/미가용)
+                cc = score_ref_classical(r, vals, threshold=self._threshold, cfg=self._cfg)
+                cands = [(c.item.path, float(c.score)) for c in cc]
+            self._results[(slot, rp)] = cands
+            counters["pairs"] += len(vals)
+            self.signals.progress.emit(counters["pairs"], total_pairs)
+        counters["slots"] += 1
+        self.signals.slot_finished.emit(slot, counters["slots"], counters["total_slots"])
+
     def _run(self) -> None:
         from .. import i18n
         tasks = self._tasks
@@ -284,56 +331,47 @@ class EfficiencyScheduler(QThread):
         for s, _r, _v in tasks:
             if s not in slot_order:
                 slot_order.append(s)
-        total_slots = len(slot_order)
         if total_pairs == 0:
             self.signals.finished.emit()
             return
 
         backend = _select_backend(self._cfg)         # (model_kind, device, batch) | None
-        jobs = accel_concurrency(self._cfg)
         self._active_units = ["cpu"] + ([backend[1].lower()] if backend else [])
         self.signals.phase.emit(i18n.KO.PHASE_SCORING)
+        counters = {"pairs": 0, "slots": 0, "total_slots": len(slot_order)}
 
-        done_pairs = 0
-        finished_slots = 0
-        cfg, thr = self._cfg, self._threshold
-        for slot, refs, vals in tasks:
-            if self._stop.is_set():
-                break
-            by_path = {Path(v.path): v for v in vals}
-            built = None
-            ref_emb: Dict = {}
-            if backend is not None and vals:
-                mk, dev, batch = backend
-                try:
-                    val_emb = _ov.device_embed([Path(v.path) for v in vals],
-                                               model_kind=mk, device=dev, cfg=cfg,
-                                               jobs=jobs, batch=batch)
-                    built = _ann.build_from(val_emb) if val_emb else None
-                    if built is not None:
-                        ref_emb = _ov.device_embed([Path(r.path) for r in refs],
-                                                   model_kind=mk, device=dev, cfg=cfg,
-                                                   jobs=jobs, batch=batch)
-                except Exception:
-                    built, ref_emb = None, {}
-
-            for r in refs:
+        if backend is None:
+            # GPU 미가용 — 겹칠 임베딩 작업이 없어 CPU 고전 단독 순차.
+            for slot, refs, vals in tasks:
                 if self._stop.is_set():
                     break
-                rp = Path(r.path)
-                cands = None
+                self._consume_slot(slot, refs, vals, None, {}, total_pairs, counters)
+            self.signals.finished.emit()
+            return
+
+        # GPU 임베딩(생산자 스레드) ∥ CPU 고전 재채점(이 스레드) — 동시 가동.
+        # 큐 maxsize=2 로 메모리 절제(최대 2개 슬롯 임베딩만 상주).
+        embed_q: "queue.Queue" = queue.Queue(maxsize=2)
+
+        def producer() -> None:
+            for slot, refs, vals in tasks:
+                if self._stop.is_set():
+                    break
                 try:
-                    cands = self._fuse_ref(r, vals, built, ref_emb, by_path)
+                    built, ref_emb = (self._embed_slot(backend, refs, vals)
+                                      if vals else (None, {}))
                 except Exception:
-                    cands = None
-                if cands is None:                    # 고전 폴백(ref 또는 슬롯 임베딩 실패)
-                    cc = score_ref_classical(r, vals, threshold=thr, cfg=cfg)
-                    cands = [(c.item.path, float(c.score)) for c in cc]
-                self._results[(slot, rp)] = cands
-                done_pairs += len(vals)
-                self.signals.progress.emit(done_pairs, total_pairs)
+                    built, ref_emb = None, {}
+                embed_q.put((slot, refs, vals, built, ref_emb))
+            embed_q.put(None)                         # 종료 신호
 
-            finished_slots += 1
-            self.signals.slot_finished.emit(slot, finished_slots, total_slots)
-
+        pt = threading.Thread(target=producer, daemon=True)
+        pt.start()
+        while not self._stop.is_set():
+            item = embed_q.get()
+            if item is None:
+                break
+            slot, refs, vals, built, ref_emb = item
+            self._consume_slot(slot, refs, vals, built, ref_emb, total_pairs, counters)
+        pt.join(timeout=1.0)
         self.signals.finished.emit()

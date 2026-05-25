@@ -41,6 +41,14 @@ def test_map_score():
     assert eff.map_score([]) == []
 
 
+def test_dynamic_concurrency():
+    # 워크로드에 맞춰 [8, cap] 로 클램프 (사용자 설정 없음).
+    assert eff.dynamic_concurrency(184, 16, 32) == 12     # ceil(184/16)
+    assert eff.dynamic_concurrency(3, 16, 32) == 8        # 적은 후보 → 하한 8
+    assert eff.dynamic_concurrency(1000, 16, 32) == 32    # 많으면 상한 32
+    assert eff.dynamic_concurrency(0, 16, 32) == 8
+
+
 def test_select_backend_cpu_gpu_only(monkeypatch):
     monkeypatch.setattr(eff._ov, "available_units", lambda: [])
     assert eff._select_backend(None) is None                     # GPU 없음 → CPU 폴백

@@ -271,33 +271,7 @@ class SetupPage(QWidget):
         engine_card.body().addWidget(self.radio_engine_fast)
         engine_card.body().addWidget(self.radio_engine_efficiency)
 
-        # 고효율 모드 동시 추론 수(in-flight) — 높일수록 NPU/GPU 메모리·속도↑.
-        accel_row = QHBoxLayout()
-        accel_lbl = QLabel(i18n.KO.ACCEL_CONCURRENCY_LABEL, engine_card)
-        accel_lbl.setToolTip(i18n.KO.ACCEL_CONCURRENCY_TOOLTIP)
-        self.slider_accel = NoWheelSlider(Qt.Orientation.Horizontal, engine_card)
-        self.slider_accel.setRange(8, 96)
-        self.slider_accel.setSingleStep(4)
-        self.slider_accel.setPageStep(8)
-        self.slider_accel.setValue(int(getattr(_prefs_now, "accel_concurrency", 32)))
-        self.slider_accel.setToolTip(i18n.KO.ACCEL_CONCURRENCY_TOOLTIP)
-        self.accel_value = QLabel(str(self.slider_accel.value()), engine_card)
-        self.accel_value.setStyleSheet("color: #00D4FF; font-weight: 700;")
-        self.accel_value.setFixedWidth(40)
-        self.slider_accel.valueChanged.connect(
-            lambda v: self.accel_value.setText(str(v)))
-        accel_row.addWidget(accel_lbl)
-        accel_row.addWidget(self.slider_accel, stretch=1)
-        accel_row.addWidget(self.accel_value)
-        engine_card.body().addLayout(accel_row)
-
-        # 효율 모드(GPU 임베딩 + CPU 고전 fusion)에서만 의미 → 다른 엔진이면 비활성.
-        def _sync_accel_enabled() -> None:
-            self.slider_accel.setEnabled(self.radio_engine_efficiency.isChecked())
-        for _rb in (self.radio_engine_basic, self.radio_engine_fast,
-                    self.radio_engine_efficiency):
-            _rb.toggled.connect(lambda _on: _sync_accel_enabled())
-        _sync_accel_enabled()
+        # 동시 추론 수(in-flight)는 워크로드에 맞춰 자동 산정 — 사용자 설정 없음.
 
         pre_title = QLabel(i18n.KO.PRE_GROUP_TITLE, engine_card)
         pre_title.setToolTip(i18n.KO.PRE_GROUP_TOOLTIP)
@@ -461,7 +435,7 @@ class SetupPage(QWidget):
         center_crop = bool(self.check_center_crop.isChecked())
         kla_crop = bool(self.check_kla_crop.isChecked())
         persist_scores = bool(self.check_persist_scores.isChecked())
-        accel_concurrency = int(self.slider_accel.value())
+        accel_concurrency = 32      # 자동 산정 상한(슬라이더 제거) — 워크로드 기반 유동.
         # 효율 모드 = CPU+GPU fusion-zscore 고정.  NPU 는 비활성(코드만 보존).
         use_cpu = True
         use_gpu = True

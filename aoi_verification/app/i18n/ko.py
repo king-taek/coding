@@ -187,15 +187,16 @@ SPEED_MODE_TOOLTIP = (
 ENGINE_CARD_TITLE = "유사도 엔진"
 ENGINE_MODE_BASIC = "기본 모드 (정밀 비교)"
 ENGINE_MODE_FAST = "고속 모드 (대용량 권장)"
-ENGINE_MODE_EFFICIENCY = "고효율 모드 (CPU+GPU+NPU 동시)"
+ENGINE_MODE_EFFICIENCY = "고효율 모드 (CPU+GPU)"
 ENGINE_MODE_TOOLTIP = (
     "기본 모드: 모든 후보를 정밀 비교 (정확하지만 대용량에서 느림).\n"
     "고속 모드: 가벼운 이미지 특징으로 후보를 빠르게 추린 뒤, 상위 후보만\n"
     "  정밀 비교로 재정렬합니다.  사진이 수천 장 이상일 때 권장.\n"
     "  (별도 설치/인터넷 없이 동작합니다.)\n"
-    "고효율 모드: CPU(고전)·Intel GPU(MobileNetV3)·Intel NPU(ResNet18) 를\n"
-    "  동시에 가동해 기준 사진별로 나눠 처리합니다 (Intel 하드웨어+OpenVINO\n"
-    "  필요, 없으면 가능한 장치만 자동 사용)."
+    "고효율 모드: Intel GPU(MobileNetV3) 임베딩으로 후보를 빠르게 추리고,\n"
+    "  CPU 고전(pHash+ORB+SSIM)으로 상위 후보를 정밀 재채점해 융합합니다\n"
+    "  (Intel GPU+OpenVINO 권장, 없으면 CPU 고전 단독으로 자동 폴백).\n"
+    "  GPU 와 CPU 가 동시에 가동됩니다."
 )
 ACCEL_CONCURRENCY_LABEL = "동시 추론 수"
 ACCEL_CONCURRENCY_TOOLTIP = (
