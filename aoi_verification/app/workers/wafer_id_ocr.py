@@ -22,10 +22,11 @@ class _OcrSignals(QObject):
 
 
 class WaferIdOcrWorker(QThread):
-    """미매칭 폴더 대표 이미지들의 WaferID 를 순차 OCR.
+    """미매칭 폴더들의 WaferID 를 순차 OCR.
 
-    ``jobs`` 는 ``(side, slot_name, image_path)`` 튜플 목록.  ``side`` 는
-    ``"ref"`` 또는 ``"val"``.
+    ``jobs`` 는 ``(side, slot_name, [image_paths])`` 튜플 목록.  ``side`` 는
+    ``"ref"`` 또는 ``"val"``.  각 폴더에서 첫 장이 실패하면 다음 장으로 넘어가며
+    여러 장을 시도한다(``read_folder_wafer_id``).
     """
 
     def __init__(self, jobs, parent: Optional[QObject] = None) -> None:
@@ -42,10 +43,11 @@ class WaferIdOcrWorker(QThread):
         wid_by_val: dict[str, str] = {}
         total = len(self._jobs)
         try:
-            for idx, (side, name, path) in enumerate(self._jobs, start=1):
+            for idx, (side, name, paths) in enumerate(self._jobs, start=1):
                 if self._stop:
                     break
-                wid = wafer_id.read_wafer_id(Path(path))
+                wid = wafer_id.read_folder_wafer_id(
+                    [Path(p) for p in paths])
                 if wid:
                     if side == "ref":
                         wid_by_ref[name] = wid

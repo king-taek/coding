@@ -450,8 +450,13 @@ class MainWindow(QMainWindow):
         """학습 모델 기능 제거됨 — 항상 기본(``basic``)."""
         return "basic"
 
-    def _resolve_slot_mismatch(self, sr: ScanResult) -> None:
-        """ref/val 한쪽에만 있는 슬롯이 있을 때 사용자에게 매핑을 묻는다 (#23)."""
+    def _resolve_slot_mismatch(self, sr: ScanResult,
+                               show_headers: bool = False) -> None:
+        """ref/val 한쪽에만 있는 슬롯이 있을 때 사용자에게 매핑을 묻는다 (#23).
+
+        ``show_headers`` 면 각 폴더의 좌상단 헤더(‘OCR 부분’)를 다이얼로그 미리
+        보기로 함께 보여줘, WaferID 를 눈으로 확인하며 수동 매치할 수 있게 한다.
+        """
         from .widgets.slot_mapping_dialog import SlotMappingDialog
         # 안내 → 다이얼로그 열기 여부 묻기
         r = QMessageBox.question(
@@ -466,8 +471,12 @@ class MainWindow(QMainWindow):
         if r != QMessageBox.StandardButton.Yes:
             return
 
+        header_pixmaps = (
+            self._build_header_pixmaps(sr) if show_headers else None)
+
         from PyQt6.QtWidgets import QDialog
-        dlg = SlotMappingDialog(sr.ref_only, sr.val_only, parent=self)
+        dlg = SlotMappingDialog(sr.ref_only, sr.val_only, parent=self,
+                                header_pixmaps=header_pixmaps)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         mapping = dlg.mapping
@@ -540,29 +549,75 @@ class MainWindow(QMainWindow):
         sr = scan(inp.ref_root, inp.val_root)
         self._scan = sr
 
-        # slot명이 ref/val 간 일치하지 않으면, 먼저 KLA 사진의 WaferID 를 OCR
-        # 로 읽어 같은 WaferID 끼리 자동 매칭한다(WaferID 는 매칭 키로만 사용 —
-        # 이후 검토/엑셀 단계는 원본 폴더명을 그대로 사용).  남는 미매칭만 기존
-        # 수동 매핑 다이얼로그로 폴백.  ‘공통 slot 없음’ 검사는 매칭 확정 이후로
-        # 미뤄, 폴더명이 전부 다른 경우에도 OCR 자동 매칭이 동작하도록 한다.
-        if (sr.ref_only or sr.val_only) and wafer_id.ocr_available():
+        # slot명(폴더명)이 ref/val 간 일치하지 않을 때.  먼저 "KLA 장비 사진인가요?"
+        # 를 묻고, 사용자가 ‘예’ 라고 하면 사진 속 WaferID 를 OCR 로 읽어 같은
+        # WaferID 끼리 자동 매칭한다(WaferID 는 매칭 키로만 사용 — 이후 검토/엑셀
+        # 단계는 원본 폴더명을 그대로 사용).  ‘아니오’ 거나 OCR 불가면 수동 매핑.
+        # ‘공통 slot 없음’ 검사는 매칭 확정 이후로 미뤄, 폴더명이 전부 달라도
+        # OCR 자동 매칭이 동작하도록 한다.
+        if (sr.ref_only or sr.val_only) and wafer_id.ocr_available() \
+                and self._ask_kla_confirm():
             self._start_wafer_id_ocr(sr)
             return
-        self._after_slot_resolved(sr)
+        self._after_slot_resolved(sr, ocr_attempted=False)
+
+    def _ask_kla_confirm(self) -> bool:
+        """‘이 사진들이 KLA 장비 사진인가요?’ 확인 — 예면 WaferID OCR 진행."""
+        r = QMessageBox.question(
+            self, i18n.KO.OCR_KLA_CONFIRM_TITLE, i18n.KO.OCR_KLA_CONFIRM_BODY,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        return r == QMessageBox.StandardButton.Yes
+
+    def _build_header_pixmaps(self, sr: ScanResult) -> dict:
+        """미매칭 폴더별 대표 이미지의 헤더 크롭(‘OCR 부분’)을 QPixmap 으로."""
+        out: dict = {}
+        for name in list(sr.ref_only):
+            imgs = sr.slots[name].ref_images if name in sr.slots else []
+            pm = self._header_pixmap(imgs[0].path) if imgs else None
+            if pm is not None:
+                out[name] = pm
+        for name in list(sr.val_only):
+            imgs = sr.slots[name].val_images if name in sr.slots else []
+            pm = self._header_pixmap(imgs[0].path) if imgs else None
+            if pm is not None:
+                out[name] = pm
+        return out
+
+    @staticmethod
+    def _header_pixmap(path):
+        """헤더 크롭 PIL 이미지를 QPixmap 으로 변환. 실패 시 None."""
+        from PyQt6.QtGui import QImage, QPixmap
+        pil = wafer_id.header_crop_image(path)
+        if pil is None:
+            return None
+        pil = pil.convert("RGB")
+        data = pil.tobytes("raw", "RGB")
+        qimg = QImage(data, pil.width, pil.height, pil.width * 3,
+                      QImage.Format.Format_RGB888)
+        return QPixmap.fromImage(qimg.copy())
 
     def _start_wafer_id_ocr(self, sr: ScanResult) -> None:
-        """미매칭 폴더 대표 이미지의 WaferID 를 백그라운드 OCR (로딩창 표시)."""
-        jobs: list[tuple[str, str, Path]] = []
+        """미매칭 폴더들의 WaferID 를 백그라운드 OCR (로딩창 표시).
+
+        폴더당 여러 장(대표 ~5장)을 전달해, 첫 장이 실패하면 다음 장으로 넘어가며
+        시도하도록 한다(워커가 read_folder_wafer_id 사용).
+        """
+        def _paths(images):
+            return [it.path for it in images[:5]]
+
+        jobs: list[tuple[str, str, list]] = []
         for name in list(sr.ref_only):
             imgs = sr.slots[name].ref_images
             if imgs:
-                jobs.append(("ref", name, imgs[0].path))
+                jobs.append(("ref", name, _paths(imgs)))
         for name in list(sr.val_only):
             imgs = sr.slots[name].val_images
             if imgs:
-                jobs.append(("val", name, imgs[0].path))
+                jobs.append(("val", name, _paths(imgs)))
         if not jobs:
-            self._after_slot_resolved(sr)
+            self._after_slot_resolved(sr, ocr_attempted=True)
             return
         self._loading.show_overlay(i18n.KO.LOAD_OCR_WAFERID)
         self._wafer_ocr_worker = WaferIdOcrWorker(jobs, parent=self)
@@ -583,13 +638,17 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         # finished 콜백 내 모달/페이지 전환 재진입 방지 — 다음 틱에 진행.
-        QTimer.singleShot(0, lambda: self._after_slot_resolved(sr))
+        QTimer.singleShot(0, lambda: self._after_slot_resolved(sr, ocr_attempted=True))
 
-    def _after_slot_resolved(self, sr: ScanResult) -> None:
-        """slot 매칭 확정 후 — 남은 미매칭은 수동 매핑, 그 다음 썸네일 단계."""
-        # OCR 자동 매칭으로도 남는 한쪽 전용 Slot 은 사용자 수동 매핑 (#23).
+    def _after_slot_resolved(self, sr: ScanResult,
+                             ocr_attempted: bool = False) -> None:
+        """slot 매칭 확정 후 — 남은 미매칭은 수동 매핑, 그 다음 썸네일 단계.
+
+        ``ocr_attempted`` 가 True 면(=KLA OCR 을 돌렸으나 일부가 끝까지 실패),
+        수동 매핑 다이얼로그에 우리가 읽으려 한 헤더(‘OCR 부분’)를 함께 보여준다.
+        """
         if sr.ref_only or sr.val_only:
-            self._resolve_slot_mismatch(sr)
+            self._resolve_slot_mismatch(sr, show_headers=ocr_attempted)
         common = sr.common_slot_names
         if not common:
             self._loading.hide_overlay()

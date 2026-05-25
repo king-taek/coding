@@ -22,6 +22,20 @@ from typing import Optional
 _CROP_TOP_FRAC = 0.12
 _CROP_LEFT_FRAC = 0.5
 
+# 인식이 빗나갈 때 자동으로 시도하는 크롭 비율 사다리 (top_frac, left_frac).
+# 기본 크롭부터 점점 넓혀 가며, 마지막엔 전체 이미지까지 시도한다.
+_CROP_LADDER = (
+    (0.12, 0.5),     # 기본 — 상단 헤더 + 좌측 열
+    (0.20, 0.5),     # 헤더가 더 두꺼운 경우
+    (0.12, 1.0),     # 좌측 열이 잘렸거나 열 배치가 다른 경우 — 상단 전체 폭
+    (0.30, 0.65),    # 더 넉넉히
+    (0.08, 0.35),    # 더 좁게(주변 텍스트 노이즈 최소화)
+    (1.0, 1.0),      # 최후 — 전체 이미지(느리지만 확실)
+)
+
+# 한 폴더에서 인식을 시도할 최대 이미지 수(첫 장이 실패하면 다음 장으로).
+_MAX_IMAGES_PER_FOLDER = 5
+
 # "WaferID : 00MML090XYG5" 형태에서 값(영숫자) 추출.
 _WAFER_ID_RE = re.compile(r"WaferID\s*[:：]?\s*([A-Za-z0-9]+)", re.IGNORECASE)
 
@@ -67,29 +81,71 @@ def _parse_wafer_id(text: str) -> Optional[str]:
     return m.group(1).strip().upper() or None
 
 
+def _crop_box(size, top_frac: float, left_frac: float):
+    w, h = size
+    return (0, 0,
+            max(1, int(round(w * left_frac))),
+            max(1, int(round(h * top_frac))))
+
+
+def _ocr_text(reader, pil_crop) -> str:
+    """RapidOCR 로 크롭 이미지의 텍스트를 합쳐 돌려준다."""
+    import numpy as np
+    out = reader(np.asarray(pil_crop.convert("RGB")))
+    # RapidOCR 반환: (result, elapse).  result 는 [[box, text, score], ...] 또는 None.
+    result = out[0] if isinstance(out, tuple) else out
+    parts = [item[1] for item in result] if result else []
+    return " ".join(parts)
+
+
 def read_wafer_id(path) -> Optional[str]:
-    """이미지의 좌상단 헤더를 OCR 해 WaferID 값을 돌려준다. 실패 시 None."""
+    """이미지의 좌상단 헤더를 OCR 해 WaferID 값을 돌려준다. 실패 시 None.
+
+    **항상 원본 전체 해상도**로 진행하며(헤더 글자는 원본에서만 선명), 인식이
+    빗나가면 크롭 비율을 ``_CROP_LADDER`` 순서로 자동 조절하며 재시도한다.
+    """
     reader = _get_reader()
     if reader is None:
         return None
     try:
-        import numpy as np
-
         from . import image_io
         img = image_io._open(Path(path))          # 원본 전체 해상도
-        w, h = img.size
-        crop = img.crop((
-            0, 0,
-            max(1, int(w * _CROP_LEFT_FRAC)),
-            max(1, int(h * _CROP_TOP_FRAC)),
-        ))
-        arr = np.asarray(crop.convert("RGB"))
-        out = reader(arr)
-        # RapidOCR 반환: (result, elapse).  result 는 [[box, text, score], ...] 또는 None.
-        result = out[0] if isinstance(out, tuple) else out
-        parts = [item[1] for item in result] if result else []
-        text = " ".join(parts)
-        return _parse_wafer_id(text)
+    except Exception:
+        return None
+    for top_frac, left_frac in _CROP_LADDER:
+        try:
+            crop = img.crop(_crop_box(img.size, top_frac, left_frac))
+            wid = _parse_wafer_id(_ocr_text(reader, crop))
+            if wid:
+                return wid
+        except Exception:
+            continue
+    return None
+
+
+def read_folder_wafer_id(paths, limit: int = _MAX_IMAGES_PER_FOLDER) -> Optional[str]:
+    """한 폴더의 여러 이미지를 차례로 OCR — 첫 성공 값을 돌려준다.
+
+    같은 폴더의 사진들은 WaferID 가 동일하므로, 첫 장이 (크롭 사다리로도) 실패
+    하면 다음 장으로 넘어가며 최대 ``limit`` 장까지 시도한다.
+    """
+    for p in list(paths)[:max(1, int(limit))]:
+        wid = read_wafer_id(p)
+        if wid:
+            return wid
+    return None
+
+
+def header_crop_image(path, top_frac: float = 0.12, left_frac: float = 0.5):
+    """수동 매핑 다이얼로그 미리보기용 — 좌상단 헤더 크롭 PIL 이미지(RGB). 실패 시 None.
+
+    OCR 이 끝까지 실패한 폴더를 사용자에게 보여줄 때, 우리가 읽으려 한 ‘그 부분’
+    (헤더)을 그대로 보여주기 위한 헬퍼.  Qt 비의존(PIL 만 사용).
+    """
+    try:
+        from . import image_io
+        img = image_io._open(Path(path))          # 원본 전체 해상도
+        return img.crop(_crop_box(img.size, top_frac, left_frac)).convert("RGB")
     except Exception:
         return None
 

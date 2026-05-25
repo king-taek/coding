@@ -362,6 +362,21 @@ SLOT_MAP_VAL_LABEL = "검증"
 SLOT_MAP_ADD = "추가"
 SLOT_MAP_REMOVE = "선택 해제"
 SLOT_MAP_OPEN = "매핑 다이얼로그 열기"
+SLOT_MAP_PREVIEW_HINT = (
+    "WaferID 자동 인식이 끝까지 실패한 폴더입니다.  아래 미리보기에서 선택한 "
+    "폴더의 좌상단(WaferID)을 직접 확인하고 기준↔검증을 짝지어 주세요."
+)
+SLOT_MAP_NO_PREVIEW = "(미리보기 없음)"
+
+# slot 불일치 시 ‘KLA 장비 사진인가요?’ 확인 — 예면 WaferID OCR 진행.
+OCR_KLA_CONFIRM_TITLE = "KLA 장비 사진인가요?"
+OCR_KLA_CONFIRM_BODY = (
+    "매칭되는 Slot(폴더)명이 없습니다.\n\n"
+    "이 사진들이 KLA 장비로 촬영된 것이라면, 사진 좌상단의 WaferID 를 자동으로 "
+    "읽어 같은 WaferID 끼리 매칭할 수 있습니다.\n\n"
+    "WaferID 자동 인식을 진행할까요?\n"
+    "(아니오를 누르면 곧바로 수동 매핑합니다.)"
+)
 
 INFO_RESUME_TITLE = "이전 검증 이어하기"
 INFO_RESUME_BODY = "진행 중인 검증이 있습니다. 이어서 하시겠습니까?"

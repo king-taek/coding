@@ -130,3 +130,74 @@ def test_read_wafer_id_returns_none_when_reader_unavailable(monkeypatch):
     """Reader 생성 실패(엔진 없음) 시 read_wafer_id 는 None 으로 폴백."""
     monkeypatch.setattr(wafer_id, "_get_reader", lambda: None)
     assert wafer_id.read_wafer_id(Path("/nonexistent.jpg")) is None
+
+
+# ---------------------------------------------------------------------------
+# 크롭 비율 자동 조절(사다리) — 작은 크롭이 실패하면 더 큰 크롭으로 재시도
+# ---------------------------------------------------------------------------
+class _FakeReader:
+    """크롭 높이가 임계 이상일 때만 WaferID 텍스트를 돌려주는 가짜 RapidOCR."""
+
+    def __init__(self, min_h: int, value: str) -> None:
+        self.min_h = min_h
+        self.value = value
+        self.heights: list[int] = []
+
+    def __call__(self, arr):
+        h = int(arr.shape[0])
+        self.heights.append(h)
+        if h >= self.min_h:
+            box = [[0, 0], [1, 0], [1, 1], [0, 1]]
+            return ([[box, f"WaferID : {self.value}", 0.99]], 0.01)
+        return (None, 0.0)
+
+
+def test_read_wafer_id_crop_ladder_retries(monkeypatch):
+    from PIL import Image as PILImage
+
+    from aoi_verification.app.utils import image_io
+    fake_img = PILImage.new("RGB", (1000, 1000), (0, 0, 0))
+    reader = _FakeReader(min_h=200, value="W6460169XYF6")
+    monkeypatch.setattr(wafer_id, "_get_reader", lambda: reader)
+    monkeypatch.setattr(image_io, "_open", lambda p: fake_img)
+    got = wafer_id.read_wafer_id(Path("/x.jpg"))
+    assert got == "W6460169XYF6"
+    # 첫(작은) 크롭은 실패하고, 더 큰 크롭에서 성공해야 한다.
+    assert reader.heights[0] < 200 and max(reader.heights) >= 200
+
+
+# ---------------------------------------------------------------------------
+# 폴더 내 여러 장 시도 — 첫 장이 실패하면 다음 장으로
+# ---------------------------------------------------------------------------
+def test_read_folder_uses_multiple_images(monkeypatch):
+    calls: list[str] = []
+
+    def fake_read(p):
+        calls.append(str(p))
+        return None if str(p).endswith("a.jpg") else "WID999"
+
+    monkeypatch.setattr(wafer_id, "read_wafer_id", fake_read)
+    got = wafer_id.read_folder_wafer_id([Path("/f/a.jpg"), Path("/f/b.jpg")])
+    assert got == "WID999"
+    assert calls == ["/f/a.jpg", "/f/b.jpg"]
+
+
+def test_read_folder_none_when_all_fail(monkeypatch):
+    monkeypatch.setattr(wafer_id, "read_wafer_id", lambda p: None)
+    assert wafer_id.read_folder_wafer_id([Path("/a"), Path("/b")]) is None
+
+
+def test_read_folder_respects_limit(monkeypatch):
+    seen: list = []
+
+    def fake_read(p):
+        seen.append(p)
+        return None
+
+    monkeypatch.setattr(wafer_id, "read_wafer_id", fake_read)
+    wafer_id.read_folder_wafer_id([Path(str(i)) for i in range(10)], limit=3)
+    assert len(seen) == 3
+
+
+def test_header_crop_image_none_on_bad_path():
+    assert wafer_id.header_crop_image(Path("/nonexistent_xyz.jpg")) is None
