@@ -34,7 +34,7 @@ EMBED_VARIANTS = [
     "whiten-hybrid", "aqe-hybrid", "kreciprocal", "mutualnn-hybrid",
     "assign-hungarian",
 ]
-ENSEMBLE_VARIANTS = ["ensemble-rerank", "ensemble-assign"]
+ENSEMBLE_VARIANTS = ["ensemble-rerank", "ensemble-assign", "fusion-zscore-3way"]
 ALL_VARIANTS = ["classical"] + EMBED_VARIANTS + ENSEMBLE_VARIANTS
 
 # 고정 하이퍼파라미터(문헌 표준 — 데이터에 맞춰 탐색하지 않음).
@@ -527,8 +527,20 @@ class BenchmarkWorker(QThread):
             for ri, r in enumerate(common_refs):
                 rg = _l2n(Rg[rgi[r.path.name]][None, :])[0]
                 rn = _l2n(Rn[rni[r.path.name]][None, :])[0]
-                o1, _ = cosine_order(rg, Vg_n)
-                o2, _ = cosine_order(rn, Vn_n)
+                g = Vg_n @ rg
+                nn = Vn_n @ rn
+                if variant == "fusion-zscore-3way":
+                    # CPU(고전)+GPU+NPU 3개 신호 z-융합 — gpu/fusion-zscore(2개)와 직접 비교.
+                    order_g = list(np.argsort(-g))
+                    head = order_g[:FUSION_K]
+                    cls = np.array([self._sc.cscore(r.path, vitems[j].path) for j in head])
+                    z = lambda x: (x - x.mean()) / (x.std() + 1e-9)
+                    f = z(g[head]) + z(nn[head]) + z(cls)
+                    ranked = [head[t] for t in np.argsort(-f)] + order_g[FUSION_K:]
+                    rows.append((slot, r, [(vnames[j], 0.0) for j in ranked[:TOPK_LOG]])); n += 1
+                    continue
+                o1 = np.argsort(-g)
+                o2 = np.argsort(-nn)
                 fused = rrf_scores([list(o1), list(o2)], len(vnames))
                 order = list(np.argsort(-fused))
                 if variant == "ensemble-rerank":
