@@ -474,13 +474,29 @@ class MainWindow(QMainWindow):
             self._apply_slot_pairs(sr, dlg.mapping.pairs)
 
     def _ask_has_kla(self) -> bool:
-        """매칭 실패 폴더가 있을 때 'KLA 장비가 있나요?' 를 묻는다."""
-        r = QMessageBox.question(
-            self, i18n.KO.KLA_ASK_TITLE, i18n.KO.KLA_ASK_BODY,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes,
-        )
-        return r == QMessageBox.StandardButton.Yes
+        """매칭 실패 폴더가 있을 때 'KLA 장비가 있나요?' 를 묻는다.
+
+        본문 안내 문장이 한 줄로 나오도록 다이얼로그 최소 폭을 넓힌다(가로 스페이서).
+        """
+        from PyQt6.QtWidgets import QSizePolicy, QSpacerItem
+        box = QMessageBox(self)
+        box.setWindowTitle(i18n.KO.KLA_ASK_TITLE)
+        box.setText(i18n.KO.KLA_ASK_BODY)
+        box.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        box.setDefaultButton(QMessageBox.StandardButton.Yes)
+        # 본문에서 가장 긴 줄이 줄바꿈 없이 한 줄로 들어가도록 최소 폭을 잡는다
+        # (실제 폰트 기준으로 측정 — 폰트/DPI 가 달라도 한 줄 유지).  +아이콘/여백 여유.
+        fm = box.fontMetrics()
+        longest = max((fm.horizontalAdvance(line)
+                       for line in i18n.KO.KLA_ASK_BODY.split("\n")), default=0)
+        layout = box.layout()
+        if layout is not None:
+            layout.addItem(
+                QSpacerItem(longest + 160, 0, QSizePolicy.Policy.Minimum,
+                            QSizePolicy.Policy.Expanding),
+                layout.rowCount(), 0, 1, layout.columnCount())
+        return box.exec() == QMessageBox.StandardButton.Yes
 
     def _match_by_filename(self, sr: ScanResult) -> None:
         """미매칭 폴더를 '한쪽 폴더명이 반대쪽 사진 파일명에 들어있는지' 로 자동 매칭.
