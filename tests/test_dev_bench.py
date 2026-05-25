@@ -49,14 +49,22 @@ def test_whiten_improves_discrimination():
     assert list(wh_order).index(3) <= list(raw_order).index(3)
 
 
-def test_rerank_topk_classical_reorders_head():
+def test_rerank_topk_reorders_head():
     order = np.array([0, 1, 2, 3, 4])
-    names = ["a", "b", "c", "d", "e"]
-    # 고전 점수: c 최고 → top-3 안에서 c가 1위로
-    cs = {"a": 0.1, "b": 0.2, "c": 0.9, "d": 0.0, "e": 0.0}
-    out = bench.rerank_topk_classical(order, names, 3, lambda n: cs[n])
-    assert names[out[0]] == "c"
-    assert out[3:] == [3, 4]                       # 꼬리는 임베딩 순서 유지
+    # 인덱스별 재채점 점수: idx 2 최고 → top-3 안에서 1위로
+    score = {0: 0.1, 1: 0.2, 2: 0.9, 3: 0.0, 4: 0.0}
+    out = bench.rerank_topk(order, 3, lambda i: score[i])
+    assert out[0] == 2
+    assert out[3:] == [3, 4]                        # 꼬리는 임베딩 순서 유지
+
+
+def test_rrf_and_hungarian():
+    # RRF: 두 순위에서 공통 상위가 높은 점수
+    sc = bench.rrf_scores([[2, 0, 1], [2, 1, 0]], n=3)
+    assert int(np.argmax(sc)) == 2
+    # Hungarian: 대각이 최고면 항등 배정
+    S = np.array([[9.0, 1, 1], [1, 9, 1], [1, 1, 9]])
+    assert list(bench.hungarian_assign(S)) == [0, 1, 2]
 
 
 # ---------------------------------------------------------------------------
@@ -104,11 +112,13 @@ def test_worker_runs_all_variants(qapp, tmp_path, monkeypatch):
     assert out.exists()
     recs = [json.loads(l) for l in out.read_text(encoding="utf-8").splitlines()]
     runs = {(r["device"], r["variant"]) for r in recs if r.get("type") == "run"}
-    # classical(cpu) + gpu·npu × 6 변형
+    # classical(cpu) + gpu·npu × 14 변형 + 앙상블 2
     assert ("cpu", "classical") in runs
     for dev in ("gpu", "npu"):
         for v in bench.EMBED_VARIANTS:
             assert (dev, v) in runs, f"missing {dev}/{v}"
+    for v in bench.ENSEMBLE_VARIANTS:
+        assert ("ens", v) in runs, f"missing ensemble {v}"
     # 결과 라인 구조
     res = [r for r in recs if r.get("type") == "result"]
     assert res and all("topk" in r and "ref_filename" in r for r in res)

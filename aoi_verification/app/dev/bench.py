@@ -1,20 +1,19 @@
-"""개발자 벤치마크 (진단용·임시) — CPU/GPU/NPU 를 *각각 따로* 돌려 개선안 변형들의
-매치 결과 + 도달 시간을 한 번에 자동 기록.
+"""개발자 벤치마크 (진단용·임시) — CPU/GPU/NPU 를 *각각 따로* 돌려 매칭 알고리즘
+변형들의 매치 결과(top-K) + 도달 시간을 한 번에 자동 기록.  사용자 리뷰 없음.
 
-- 자동화 모드 기반: 사용자 리뷰 없음.  모델의 매치(top-K)만 남긴다(정답은 별도 보유).
-- 장치는 동시(work-stealing)가 아니라 **순차 단독** 실행 — 장치별 정확도·시간을 분리 측정.
+모든 변형은 **라벨 미사용(unsupervised, 추론 시점 계산)** 이며 하이퍼파라미터는
+문헌 표준값으로 고정 — 이 데이터에 맞춰 튜닝하지 않는다(과적합 방지).
 
-변형(최소 5개 초과):
-  classical    CPU 고전(pHash+ORB+SSIM) — 정확도 기준점
-  raw          임베딩 cosine (현행)
-  whiten-mean  슬롯 평균 제거 후 cosine
-  whiten-pc1   평균 + top-1 주성분 제거(all-but-top1)
-  hybrid       임베딩 top-K → 고전 재채점
-  margin       임베딩 margin 작을 때만 고전 재채점(그 외 임베딩 top1)
-  center-crop  중앙 30% crop 입력으로 임베딩(raw)
+변형 목록
+  anchor:    classical(CPU) / raw / whiten-mean / hybrid / margin
+  재채점:    rerank-geom(ORB+RANSAC) / rerank-ssim / rerank-ncc-masked
+  융합:      fusion-rrf / fusion-zscore
+  표현개선:  whiten-hybrid / aqe-hybrid / kreciprocal / mutualnn-hybrid
+  1:1 배정:  assign-hungarian
+  앙상블:    ensemble-rerank / ensemble-assign  (GPU+NPU 둘 다 가용 시)
 
-출력: ``결과/레퍼런스/dev_benchmark_{ts}.jsonl`` (모든 run 을 한 파일에).
-실패는 run 단위로 격리(한 장치/변형이 죽어도 나머지는 계속).
+출력: 결과/레퍼런스/dev_benchmark_{ts}.jsonl
+실패는 (장치, 변형) 단위로 격리.
 """
 
 from __future__ import annotations
@@ -22,40 +21,51 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
-# 임베딩 변형 7종(+classical) — UI/문서에서 공유.
-EMBED_VARIANTS = ["raw", "whiten-mean", "whiten-pc1", "hybrid", "margin", "center-crop"]
-ALL_VARIANTS = ["classical"] + EMBED_VARIANTS
+# 장치별(임베딩) 변형 — anchor 4 + 신규 10 (앙상블·classical 제외).
+EMBED_VARIANTS = [
+    "raw", "whiten-mean", "hybrid", "margin",
+    "rerank-geom", "rerank-ssim", "rerank-ncc-masked",
+    "fusion-rrf", "fusion-zscore",
+    "whiten-hybrid", "aqe-hybrid", "kreciprocal", "mutualnn-hybrid",
+    "assign-hungarian",
+]
+ENSEMBLE_VARIANTS = ["ensemble-rerank", "ensemble-assign"]
+ALL_VARIANTS = ["classical"] + EMBED_VARIANTS + ENSEMBLE_VARIANTS
 
-TOPK_LOG = 10          # 기록할 상위 후보 수
-HYBRID_K = 20          # 고전 재채점할 임베딩 상위 후보 수
-MARGIN_EPS = 0.02      # 이 미만이면 '애매' → margin 변형에서 고전 재채점
+# 고정 하이퍼파라미터(문헌 표준 — 데이터에 맞춰 탐색하지 않음).
+TOPK_LOG = 10
+RERANK_K = 20          # 재채점할 임베딩 상위 후보 수
+FUSION_K = 40          # 융합 시 고전 점수 계산 범위
+AQE_N = 5              # average query expansion 이웃 수
+KRECIP_K = 10          # 문맥(k-reciprocal 풍) 이웃 집합 크기
+RRF_K = 60             # reciprocal rank fusion 상수
+MARGIN_EPS = 0.02
+MUTUAL_R = 10          # mutual-NN 게이팅 시 val 의 상위 ref 수
 
-# 동시추론수(in-flight)·정적 배치 B 최적값 탐색 그리드 (속도만 측정; 정확도 불변).
+# 동시추론수·배치 B 최적값 탐색 그리드 (속도만 측정; 정확도 불변).
 TUNE_CONCURRENCY = [8, 16, 32, 64, 96, 128]
 TUNE_BATCH = [1, 4, 8, 16]
-TUNE_SAMPLE_CAP = 120          # 타이밍용 표본 이미지 수(가장 큰 슬롯의 val)
+TUNE_SAMPLE_CAP = 120
 
 
 # ---------------------------------------------------------------------------
-# 순수 변형 함수 (numpy) — 헤드리스 단위 테스트 대상
+# 순수 함수 (numpy) — 헤드리스 테스트 대상
 # ---------------------------------------------------------------------------
 def _l2n(M: np.ndarray) -> np.ndarray:
-    return M / (np.linalg.norm(M, axis=1, keepdims=True) + 1e-9)
+    return M / (np.linalg.norm(M, axis=-1, keepdims=True) + 1e-9)
 
 
 def whiten_fit(val_mat: np.ndarray, n_pc: int = 0):
-    """val 임베딩 기준 (mu, comps) 반환.  comps = 제거할 상위 주성분(단위, 행)."""
     mu = val_mat.mean(axis=0)
     comps = np.zeros((0, val_mat.shape[1]), dtype=np.float32)
     if n_pc > 0 and val_mat.shape[0] > n_pc:
-        Vc = val_mat - mu
         try:
-            _u, _s, Wt = np.linalg.svd(Vc, full_matrices=False)
+            _u, _s, Wt = np.linalg.svd(val_mat - mu, full_matrices=False)
             comps = Wt[:n_pc].astype(np.float32)
         except np.linalg.LinAlgError:
             pass
@@ -63,7 +73,6 @@ def whiten_fit(val_mat: np.ndarray, n_pc: int = 0):
 
 
 def whiten_apply(M: np.ndarray, mu: np.ndarray, comps: np.ndarray) -> np.ndarray:
-    """평균/주성분 제거 후 재정규화."""
     X = M - mu
     for c in comps:
         X = X - np.outer(X @ c, c)
@@ -71,19 +80,255 @@ def whiten_apply(M: np.ndarray, mu: np.ndarray, comps: np.ndarray) -> np.ndarray
 
 
 def cosine_order(ref_vec: np.ndarray, val_mat: np.ndarray):
-    """ref 벡터 vs val 행렬 cosine 내림차순 인덱스 + 점수."""
     sims = val_mat @ ref_vec
-    order = np.argsort(-sims)
-    return order, sims
+    return np.argsort(-sims), sims
 
 
-def rerank_topk_classical(order: np.ndarray, val_names: List[str], k: int,
-                          cscore: Callable[[str], float]):
-    """임베딩 순위 상위 k 를 고전 점수로 재정렬, 나머지는 임베딩 순서 유지."""
+def rerank_topk(order: np.ndarray, k: int, scorer) -> List[int]:
+    """임베딩 상위 k 인덱스를 scorer(i)->높을수록 좋음 로 재정렬, 나머지는 유지."""
     head = list(order[:k])
-    scored = sorted(head, key=lambda i: -cscore(val_names[i]))
-    rest = [i for i in order[k:]]
-    return scored + rest
+    head.sort(key=lambda i: -scorer(i))
+    return head + list(order[k:])
+
+
+def rrf_scores(orders: List[List[int]], n: int, k: int = RRF_K) -> np.ndarray:
+    sc = np.zeros(n, dtype=np.float64)
+    for order in orders:
+        for rank, idx in enumerate(order):
+            sc[idx] += 1.0 / (k + rank + 1)
+    return sc
+
+
+def aqe_query(qvec: np.ndarray, val_mat: np.ndarray, n: int = AQE_N) -> np.ndarray:
+    sims = val_mat @ qvec
+    idx = np.argsort(-sims)[:max(1, n)]
+    newq = qvec + val_mat[idx].sum(axis=0)
+    return newq / (np.linalg.norm(newq) + 1e-9)
+
+
+def context_jaccard(sims_rv: np.ndarray, val_nbr_sets: List[set], k: int = KRECIP_K) -> np.ndarray:
+    """ref 의 상위-k 이웃 집합과 각 val 의 상위-k 이웃 집합 간 Jaccard(=문맥 유사도).
+
+    k-reciprocal 재순위화의 단순·강건 변형(이웃 집합 중첩).  값이 클수록 같은 문맥.
+    """
+    ref_top = set(np.argsort(-sims_rv)[:k].tolist())
+    out = np.zeros(len(val_nbr_sets), dtype=np.float64)
+    for j, s in enumerate(val_nbr_sets):
+        if not s:
+            continue
+        inter = len(ref_top & s)
+        out[j] = inter / (len(ref_top | s) or 1)
+    return out
+
+
+def hungarian_assign(score: np.ndarray) -> np.ndarray:
+    """(nref, nval) 점수행렬 → ref별 배정 val 인덱스(없으면 -1).  높을수록 선호."""
+    from scipy.optimize import linear_sum_assignment
+    nref, nval = score.shape
+    assign = np.full(nref, -1, dtype=int)
+    if nref == 0 or nval == 0:
+        return assign
+    rows, cols = linear_sum_assignment(-score)
+    for r, c in zip(rows, cols):
+        assign[r] = c
+    return assign
+
+
+# ---------------------------------------------------------------------------
+# 고전 점수 헬퍼 (Feature 캐시 + 쌍 점수 메모)
+# ---------------------------------------------------------------------------
+class _Scorers:
+    def __init__(self, cfg) -> None:
+        from ..similarity import pipeline, ssim as _ssim
+        self._pipeline = pipeline
+        self._ssim = _ssim
+        self._cfg = cfg
+        self._feat: Dict[tuple, object] = {}
+        self._memo: Dict[tuple, float] = {}
+
+    def feat(self, path, side):
+        key = (str(path), side)
+        f = self._feat.get(key)
+        if f is None:
+            f = self._pipeline.extract(Path(path), cfg=self._cfg, side=side)
+            self._feat[key] = f
+        return f
+
+    def _m(self, kind, rp, vp, fn):
+        key = (kind, str(rp), str(vp))
+        v = self._memo.get(key)
+        if v is None:
+            try:
+                v = float(fn())
+            except Exception:
+                v = 0.0
+            self._memo[key] = v
+        return v
+
+    def cscore(self, rp, vp):
+        return self._m("c", rp, vp,
+                       lambda: self._pipeline.score(self.feat(rp, "ref"), self.feat(vp, "val")))
+
+    def ssim(self, rp, vp):
+        return self._m("s", rp, vp,
+                       lambda: self._ssim.ssim_score(self.feat(rp, "ref").roi_gray,
+                                                     self.feat(vp, "val").roi_gray))
+
+    def orb_inliers(self, rp, vp):
+        return self._m("g", rp, vp,
+                       lambda: _orb_ransac_inliers(self.feat(rp, "ref").roi_gray,
+                                                   self.feat(vp, "val").roi_gray))
+
+    def ncc(self, rp, vp):
+        return self._m("n", rp, vp,
+                       lambda: _ncc_masked(self.feat(rp, "ref").roi_gray,
+                                           self.feat(vp, "val").roi_gray))
+
+
+def _orb_ransac_inliers(g1: np.ndarray, g2: np.ndarray) -> float:
+    import cv2
+    orb = cv2.ORB_create(500)
+    k1, d1 = orb.detectAndCompute(g1, None)
+    k2, d2 = orb.detectAndCompute(g2, None)
+    if d1 is None or d2 is None or len(k1) < 4 or len(k2) < 4:
+        return 0.0
+    bf = cv2.BFMatcher(cv2.NORM_HAMMING)
+    good = []
+    for mm in bf.knnMatch(d1, d2, k=2):
+        if len(mm) == 2 and mm[0].distance < 0.75 * mm[1].distance:
+            good.append(mm[0])
+    if len(good) < 4:
+        return float(len(good))
+    src = np.float32([k1[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
+    dst = np.float32([k2[m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
+    H, mask = cv2.findHomography(src, dst, cv2.RANSAC, 5.0)
+    return float(int(mask.sum())) if mask is not None else float(len(good))
+
+
+def _ncc_masked(g1: np.ndarray, g2: np.ndarray, px: int = 128) -> float:
+    import cv2
+    a = cv2.resize(g1, (px, px)).astype(np.float32)
+    b = cv2.resize(g2, (px, px)).astype(np.float32)
+    m = (a > 15) & (a < 240)            # 큰 이물 덩어리(극단 밝기) 제외
+    if m.sum() < px * px * 0.2:
+        m = np.ones_like(a, dtype=bool)
+    av = a[m] - a[m].mean()
+    bv = b[m] - b[m].mean()
+    denom = (np.linalg.norm(av) * np.linalg.norm(bv)) + 1e-9
+    return float((av @ bv) / denom)
+
+
+# ---------------------------------------------------------------------------
+# 슬롯 단위 랭킹 — 변형별 ref→정렬 val 인덱스
+# ---------------------------------------------------------------------------
+def rank_slot(variant: str, refs, vals, V: np.ndarray, ref_vecs: List[np.ndarray],
+              sc: _Scorers) -> Dict[int, List[int]]:
+    """반환: ref 인덱스 → val 인덱스 리스트(상위부터).  V: (Nv,D) val 임베딩.
+    단일 장치 변형 전용(앙상블은 워커에서 두 백본을 직접 융합)."""
+    Nv = V.shape[0]
+    Vn = _l2n(V)
+    out: Dict[int, List[int]] = {}
+
+    # 공통 준비물 (lazy)
+    def cval(ri, j):  # 고전 점수 (ref i, val j)
+        return sc.cscore(refs[ri].path, vals[j].path)
+
+    if variant in ("whiten-mean", "whiten-hybrid"):
+        mu, comps = whiten_fit(V, n_pc=0)
+        Vw = whiten_apply(V, mu, comps)
+
+    # val 별 이웃 집합 (kreciprocal 문맥용)
+    if variant == "kreciprocal":
+        sim_vv = Vn @ Vn.T
+        val_nbr = [set(np.argsort(-sim_vv[j])[1:KRECIP_K + 1].tolist()) for j in range(Nv)]
+
+    # mutual-NN: 각 val 의 상위 ref 집합
+    if variant == "mutualnn-hybrid":
+        Rmat = _l2n(np.stack(ref_vecs)) if ref_vecs else np.zeros((0, V.shape[1]))
+        sim_vr = Vn @ Rmat.T if Rmat.shape[0] else np.zeros((Nv, 0))
+        val_top_refs = [set(np.argsort(-sim_vr[j])[:MUTUAL_R].tolist()) for j in range(Nv)]
+
+    # ---- 배정형(슬롯 전역 1:1) ----
+    if variant == "assign-hungarian":
+        nref = len(refs)
+        S = np.full((nref, Nv), -1e9, dtype=np.float64)
+        for ri in range(nref):
+            rv = _l2n(ref_vecs[ri][None, :])[0]
+            order, _sims = cosine_order(rv, Vn)
+            for j in order[:RERANK_K]:
+                S[ri, j] = cval(ri, j)
+        assign = hungarian_assign(S)
+        for ri in range(nref):
+            order = list(np.argsort(-S[ri]))
+            a = assign[ri]
+            if a >= 0:
+                order = [a] + [j for j in order if j != a]
+            out[ri] = order
+        return out
+
+    # ---- 장치 단독 변형 ----
+    for ri, rv0 in enumerate(ref_vecs):
+        rv = _l2n(rv0[None, :])[0]
+        order, sims = cosine_order(rv, Vn)
+
+        if variant == "raw":
+            out[ri] = list(order)
+        elif variant == "whiten-mean":
+            rw = whiten_apply(rv0[None, :], mu, comps)[0]
+            o2, _ = cosine_order(rw, Vw)
+            out[ri] = list(o2)
+        elif variant == "hybrid":
+            out[ri] = rerank_topk(order, RERANK_K, lambda j, _ri=ri: cval(_ri, j))
+        elif variant == "margin":
+            s = np.sort(sims)[::-1]
+            mgn = float(s[0] - s[1]) if len(s) >= 2 else 1.0
+            out[ri] = (rerank_topk(order, RERANK_K, lambda j, _ri=ri: cval(_ri, j))
+                       if mgn < MARGIN_EPS else list(order))
+        elif variant == "rerank-geom":
+            out[ri] = rerank_topk(order, RERANK_K,
+                                  lambda j, _ri=ri: sc.orb_inliers(refs[_ri].path, vals[j].path))
+        elif variant == "rerank-ssim":
+            out[ri] = rerank_topk(order, RERANK_K,
+                                  lambda j, _ri=ri: sc.ssim(refs[_ri].path, vals[j].path))
+        elif variant == "rerank-ncc-masked":
+            out[ri] = rerank_topk(order, RERANK_K,
+                                  lambda j, _ri=ri: sc.ncc(refs[_ri].path, vals[j].path))
+        elif variant == "fusion-rrf":
+            head = list(order[:FUSION_K])
+            crank = sorted(head, key=lambda j, _ri=ri: -cval(_ri, j))
+            fused = rrf_scores([list(order), crank + list(order[FUSION_K:])], Nv)
+            out[ri] = list(np.argsort(-fused))
+        elif variant == "fusion-zscore":
+            head = list(order[:FUSION_K])
+            emb = np.array([sims[j] for j in head])
+            cls = np.array([cval(ri, j) for j in head])
+            z = lambda x: (x - x.mean()) / (x.std() + 1e-9)
+            f = z(emb) + z(cls)
+            ranked = [head[t] for t in np.argsort(-f)]
+            out[ri] = ranked + list(order[FUSION_K:])
+        elif variant == "whiten-hybrid":
+            rw = whiten_apply(rv0[None, :], mu, comps)[0]
+            o2, _ = cosine_order(rw, Vw)
+            out[ri] = rerank_topk(o2, RERANK_K, lambda j, _ri=ri: cval(_ri, j))
+        elif variant == "aqe-hybrid":
+            q = aqe_query(rv, Vn, AQE_N)
+            o2, _ = cosine_order(q, Vn)
+            out[ri] = rerank_topk(o2, RERANK_K, lambda j, _ri=ri: cval(_ri, j))
+        elif variant == "kreciprocal":
+            ctx = context_jaccard(sims, val_nbr, KRECIP_K)
+            combined = sims + 0.5 * ctx        # 원거리 + 문맥(동일 가중 계열)
+            o2 = np.argsort(-combined)
+            out[ri] = rerank_topk(o2, RERANK_K, lambda j, _ri=ri: cval(_ri, j))
+        elif variant == "mutualnn-hybrid":
+            head = list(order[:RERANK_K])
+            mutual = [j for j in head if ri in val_top_refs[j]]
+            non = [j for j in head if ri not in val_top_refs[j]]
+            mutual.sort(key=lambda j, _ri=ri: -cval(_ri, j))
+            non.sort(key=lambda j, _ri=ri: -cval(_ri, j))
+            out[ri] = mutual + non + list(order[RERANK_K:])
+        else:
+            out[ri] = list(order)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -91,22 +336,13 @@ def rerank_topk_classical(order: np.ndarray, val_names: List[str], k: int,
 # ---------------------------------------------------------------------------
 class _BenchSignals(QObject):
     progress = pyqtSignal(str)
-    done = pyqtSignal(str)        # 출력 jsonl 경로
+    done = pyqtSignal(str)
     failed = pyqtSignal(str)
 
 
 class BenchmarkWorker(QThread):
-    """CPU/GPU/NPU × 변형 전체를 순차 실행하고 jsonl 한 파일에 기록."""
-
-    def __init__(self,
-                 tasks: List[Tuple[str, list, list]],
-                 *,
-                 cfg,
-                 threshold: float,
-                 use_gpu: bool = True,
-                 use_npu: bool = True,
-                 session_id: str = "",
-                 tune: bool = True,
+    def __init__(self, tasks, *, cfg, threshold: float, use_gpu: bool = True,
+                 use_npu: bool = True, session_id: str = "", tune: bool = True,
                  parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
         self._tasks = [(s, list(r), list(v)) for s, r, v in tasks]
@@ -118,62 +354,38 @@ class BenchmarkWorker(QThread):
         self._session_id = session_id or time.strftime("%Y%m%d_%H%M%S")
         self.signals = _BenchSignals()
         self._fh = None
+        self._sc = _Scorers(cfg)
+        self._emb_cache: Dict[str, Dict[str, tuple]] = {}   # device -> slot -> (V,vnames,Rvecs,refs,vals)
 
-    # -- logging ------------------------------------------------------
     def _log(self, obj: dict) -> None:
-        if self._fh is None:
-            return
-        try:
-            self._fh.write(json.dumps(obj, ensure_ascii=False) + "\n")
-            self._fh.flush()
-        except Exception:
-            pass
+        if self._fh is not None:
+            try:
+                self._fh.write(json.dumps(obj, ensure_ascii=False) + "\n"); self._fh.flush()
+            except Exception:
+                pass
 
-    def _emit(self, msg: str) -> None:
-        self.signals.progress.emit(msg)
+    def _emit(self, m): self.signals.progress.emit(m)
 
-    # -- classical helpers -------------------------------------------
-    def _feat_fn(self):
-        """side 별 고전 Feature 캐시 함수 (pipeline.extract 재사용)."""
-        from ..similarity import pipeline
-        cache: dict = {}
-
-        def feat(path, side):
-            key = (str(path), side)
-            f = cache.get(key)
-            if f is None:
-                f = pipeline.extract(Path(path), cfg=self._cfg, side=side)
-                cache[key] = f
-            return f
-        return feat, pipeline
-
-    # -- run ----------------------------------------------------------
-    def run(self) -> None:  # noqa: C901
+    # -- run ---------------------------------------------------------
+    def run(self) -> None:
         try:
             from ..utils import paths
-            out_dir = paths.results_dir() / "레퍼런스"
-            out_dir.mkdir(parents=True, exist_ok=True)
+            out_dir = paths.results_dir() / "레퍼런스"; out_dir.mkdir(parents=True, exist_ok=True)
             out_path = out_dir / f"dev_benchmark_{self._session_id}.jsonl"
             self._fh = open(out_path, "w", encoding="utf-8")
-            self._log({
-                "type": "bench_config", "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                "session_id": self._session_id,
-                "engine": getattr(self._cfg, "engine", "?"),
-                "center_crop": bool(getattr(self._cfg, "center_crop", False)),
-                "threshold": self._threshold,
-                "n_slots": len(self._tasks),
-                "variants": ALL_VARIANTS,
-                "hybrid_k": HYBRID_K, "margin_eps": MARGIN_EPS, "topk_log": TOPK_LOG,
-            })
+            self._log({"type": "bench_config", "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                       "session_id": self._session_id,
+                       "engine": getattr(self._cfg, "engine", "?"),
+                       "center_crop": bool(getattr(self._cfg, "center_crop", False)),
+                       "persist_scores": bool(getattr(self._cfg, "persist_scores", False)),
+                       "threshold": self._threshold, "n_slots": len(self._tasks),
+                       "variants": ALL_VARIANTS, "rerank_k": RERANK_K, "topk_log": TOPK_LOG})
 
-            # 어떤 임베딩 장치가 가용한가
-            avail = []
             try:
                 from ..learning import embedder_openvino as _ov
-                units = _ov.available_units()        # ["GPU","NPU"] 중 존재분
+                units = _ov.available_units()
             except Exception:
-                _ov = None
-                units = []
+                _ov, units = None, []
             emb_devices = []
             if _ov is not None:
                 if self._use_gpu and "GPU" in units:
@@ -181,25 +393,29 @@ class BenchmarkWorker(QThread):
                 if self._use_npu and "NPU" in units:
                     emb_devices.append(("npu", "NPU", _ov.MODEL_RESNET18))
 
-            # 1) CPU classical (항상)
             self._run_classical()
 
-            # 표본(가장 큰 슬롯의 val) — 동시추론/배치 튜닝용.
             sample = []
             if self._tasks:
                 _, _r, _v = max(self._tasks, key=lambda t: len(t[2]))
                 sample = [v.path for v in _v[:TUNE_SAMPLE_CAP]]
 
-            # 2) 임베딩 장치 각각 따로 — 정확도 변형 + 동시추론/배치 최적화
-            for tag, ov_dev, model_kind in emb_devices:
-                self._run_embed_device(_ov, tag, ov_dev, model_kind)
+            for tag, ov_dev, mk in emb_devices:
+                self._embed_all_slots(_ov, tag, ov_dev, mk)
+                for variant in EMBED_VARIANTS:
+                    self._run_embed_variant(tag, variant)
                 if self._tune and sample:
-                    self._run_tune(_ov, tag, ov_dev, model_kind, sample)
+                    self._run_tune(_ov, tag, ov_dev, mk, sample)
+
+            # 앙상블 — GPU+NPU 둘 다 임베딩 성공 시
+            if "gpu" in self._emb_cache and "npu" in self._emb_cache:
+                for variant in ENSEMBLE_VARIANTS:
+                    self._run_ensemble_variant(variant)
 
             self._log({"type": "bench_done", "ts": time.strftime("%Y-%m-%dT%H:%M:%S")})
             self._fh.close(); self._fh = None
             self.signals.done.emit(str(out_path))
-        except Exception as exc:    # 절대 UI 크래시 금지
+        except Exception as exc:
             try:
                 if self._fh is not None:
                     self._fh.close()
@@ -207,175 +423,158 @@ class BenchmarkWorker(QThread):
                 pass
             self.signals.failed.emit(repr(exc))
 
-    # -- CPU classical -----------------------------------------------
+    # -- classical (anchor) ------------------------------------------
     def _run_classical(self) -> None:
-        self._emit("CPU 고전(classical) 벤치마크…")
-        feat, pipeline = self._feat_fn()
-        t_pre = 0.0; t_rank = 0.0; n_refs = 0; npool = 0
-        results = []
+        self._emit("CPU 고전(classical)…")
+        t_pre = 0.0; t_rank = 0.0; n = 0; npool = 0; rows = []
         for slot, refs, vals in self._tasks:
             t0 = time.perf_counter()
-            vfeats = [(v, feat(v.path, "val")) for v in vals]    # extract(=precompute)
+            for v in vals:
+                self._sc.feat(v.path, "val")
             t_pre += time.perf_counter() - t0
             npool = max(npool, len(vals))
             for r in refs:
                 t0 = time.perf_counter()
-                rf = feat(r.path, "ref")
-                scored = sorted(((v, pipeline.score(rf, vf)) for v, vf in vfeats),
-                                key=lambda x: -x[1])
-                t_rank += time.perf_counter() - t0
-                n_refs += 1
-                results.append((slot, r, scored))
+                scored = sorted(vals, key=lambda v, _r=r: -self._sc.cscore(_r.path, v.path))
+                t_rank += time.perf_counter() - t0; n += 1
+                rows.append((slot, r, [(v.path.name, self._sc.cscore(r.path, v.path)) for v in scored[:TOPK_LOG]]))
         self._log({"type": "run", "device": "cpu", "variant": "classical",
                    "precompute_s": round(t_pre, 2), "decide_s": round(t_rank, 2),
-                   "n_refs": n_refs, "val_pool_max": npool})
-        for slot, r, scored in results:
-            self._log_result("cpu", "classical", slot, r,
-                             [(v.path.name, s) for v, s in scored])
+                   "n_refs": n, "val_pool_max": npool})
+        for slot, r, topk in rows:
+            self._log_result("cpu", "classical", slot, r, topk)
 
-    # -- embedding device --------------------------------------------
-    def _run_embed_device(self, _ov, tag, ov_dev, model_kind) -> None:
-        self._emit(f"{tag.upper()} 임베딩 벤치마크…")
-        cfg = self._cfg
-        jobs = getattr(cfg, "accel_concurrency", 32)
+    # -- embed all slots for a device (cache) ------------------------
+    def _embed_all_slots(self, _ov, tag, ov_dev, mk) -> None:
+        self._emit(f"{tag.upper()} 임베딩 계산…")
+        cfg = self._cfg; jobs = getattr(cfg, "accel_concurrency", 32)
         batch = max(1, int(getattr(cfg, "embed_batch", 1)))
-        feat, pipeline = self._feat_fn()
-
-        # 슬롯별 임베딩(비크롭/크롭) 미리 계산 + 시간 측정
-        per_slot = {}          # slot -> dict
-        t_embed = 0.0; t_embed_crop = 0.0
+        cache = {}; t_embed = 0.0
         for slot, refs, vals in self._tasks:
             try:
                 t0 = time.perf_counter()
-                ve = _ov.device_embed([v.path for v in vals], model_kind=model_kind,
-                                      device=ov_dev, cfg=cfg, jobs=jobs, batch=batch)
-                re = _ov.device_embed([r.path for r in refs], model_kind=model_kind,
-                                      device=ov_dev, cfg=cfg, jobs=jobs, batch=batch)
+                ve = _ov.device_embed([v.path for v in vals], model_kind=mk, device=ov_dev,
+                                      cfg=cfg, jobs=jobs, batch=batch)
+                re = _ov.device_embed([r.path for r in refs], model_kind=mk, device=ov_dev,
+                                      cfg=cfg, jobs=jobs, batch=batch)
                 t_embed += time.perf_counter() - t0
-                # center-crop 변형용(중앙 30%) — side 전달
-                from .. import config as _cfgmod
-                cfg_crop = _cfgmod.SimilarityConfig(
-                    engine=getattr(cfg, "engine", "efficiency"), center_crop=True,
-                    use_cpu=cfg.use_cpu, use_gpu=cfg.use_gpu, use_npu=cfg.use_npu,
-                    accel_concurrency=jobs, embed_batch=batch)
-                t0 = time.perf_counter()
-                vec = _ov.device_embed([v.path for v in vals], model_kind=model_kind,
-                                       device=ov_dev, cfg=cfg_crop, jobs=jobs,
-                                       batch=batch, side="val")
-                rec = _ov.device_embed([r.path for r in refs], model_kind=model_kind,
-                                       device=ov_dev, cfg=cfg_crop, jobs=jobs,
-                                       batch=batch, side="ref")
-                t_embed_crop += time.perf_counter() - t0
             except Exception as exc:
                 self._log({"type": "run", "device": tag, "variant": "ERROR",
                            "slot": slot, "error": repr(exc)})
                 continue
-            per_slot[slot] = dict(refs=refs, vals=vals, ve=ve, re=re, vec=vec, rec=rec)
+            vkeep = [v for v in vals if v.path in ve]
+            rkeep = [r for r in refs if r.path in re]
+            if not vkeep or not rkeep:
+                continue
+            V = np.stack([ve[v.path] for v in vkeep]).astype(np.float32)
+            Rvecs = [re[r.path].astype(np.float32) for r in rkeep]
+            cache[slot] = (V, [v.path.name for v in vkeep], Rvecs, rkeep, vkeep)
+        self._emb_cache[tag] = cache
+        self._embed_s = getattr(self, "_embed_s", {}); self._embed_s[tag] = round(t_embed, 2)
+        self._log({"type": "embed_precompute", "device": tag, "embed_s": round(t_embed, 2),
+                   "n_slots": len(cache)})
 
-        if not per_slot:
-            self._log({"type": "run", "device": tag, "variant": "ERROR",
-                       "error": "임베딩 결과 없음(컴파일/추론 실패 가능)"})
-            return
+    def _run_embed_variant(self, tag, variant) -> None:
+        cache = self._emb_cache.get(tag, {})
+        t0 = time.perf_counter(); n = 0; npool = 0; rows = []
+        for slot, (V, vnames, Rvecs, refs, vals) in cache.items():
+            npool = max(npool, V.shape[0])
+            ranked = rank_slot(variant, refs, vals, V, Rvecs, self._sc)
+            for ri, order in ranked.items():
+                rows.append((slot, refs[ri], [(vnames[j], 0.0) for j in order[:TOPK_LOG]])); n += 1
+        dt = time.perf_counter() - t0
+        pre = getattr(self, "_embed_s", {}).get(tag, 0.0)   # 공유 임베딩 precompute
+        self._log({"type": "run", "device": tag, "variant": variant,
+                   "precompute_s": pre, "decide_s": round(dt, 2),
+                   "n_refs": n, "val_pool_max": npool})
+        for slot, r, topk in rows:
+            self._log_result(tag, variant, slot, r, topk)
+        self._emit(f"{tag.upper()} / {variant} 완료")
 
-        # 각 변형별로 랭킹 산출 + 기록
-        for variant in EMBED_VARIANTS:
-            t_rank = 0.0; n_refs = 0; npool = 0; rows = []
-            for slot, d in per_slot.items():
-                refs, vals = d["refs"], d["vals"]
-                use_crop = (variant == "center-crop")
-                vemb, remb = (d["vec"], d["rec"]) if use_crop else (d["ve"], d["re"])
-                # 임베딩 성공한 val 만 풀에 포함
-                vnames = [v.path.name for v in vals if v.path in vemb]
-                vmat = np.stack([vemb[v.path] for v in vals if v.path in vemb]) \
-                    if vnames else np.zeros((0, 1), np.float32)
-                if vmat.shape[0] == 0:
-                    continue
-                npool = max(npool, vmat.shape[0])
-                # 변형별 행렬 준비
-                if variant in ("whiten-mean", "whiten-pc1"):
-                    mu, comps = whiten_fit(vmat, n_pc=(1 if variant == "whiten-pc1" else 0))
-                    vmat_t = whiten_apply(vmat, mu, comps)
-                else:
-                    mu = comps = None
-                    vmat_t = _l2n(vmat)
-                for r in refs:
-                    if r.path not in remb:
-                        continue
-                    rvec = remb[r.path]
-                    t0 = time.perf_counter()
-                    if variant in ("whiten-mean", "whiten-pc1"):
-                        rv = whiten_apply(rvec[None, :], mu, comps)[0]
-                    else:
-                        rv = rvec / (np.linalg.norm(rvec) + 1e-9)
-                    order, sims = cosine_order(rv, vmat_t)
-                    if variant in ("hybrid", "margin"):
-                        do_rerank = True
-                        if variant == "margin":
-                            s = np.sort(sims)[::-1]
-                            margin = float(s[0] - s[1]) if len(s) >= 2 else 1.0
-                            do_rerank = margin < MARGIN_EPS
-                        if do_rerank:
-                            rf = feat(r.path, "ref")
+    def _run_ensemble_variant(self, variant) -> None:
+        """GPU(MobileNet)+NPU(ResNet18) 두 백본을 융합 — 각 백본의 ref·val 임베딩으로
+        ref별 순위를 내고 RRF 로 합친 뒤(=recall) 고전 재채점/배정(=정밀)."""
+        gpu, npu = self._emb_cache["gpu"], self._emb_cache["npu"]
+        t0 = time.perf_counter(); n = 0; npool = 0; rows = []
+        for slot in gpu:
+            if slot not in npu:
+                continue
+            Vg, vng, Rg, refs_g, vals_g = gpu[slot]
+            Vn_, vnn, Rn, refs_n, vals_n = npu[slot]
+            # 공통 val(이름 기준) + 두 백본 정렬
+            nidx = {name: k for k, name in enumerate(vnn)}
+            keep = [k for k, name in enumerate(vng) if name in nidx]
+            if not keep:
+                continue
+            vnames = [vng[k] for k in keep]
+            vitems = [vals_g[k] for k in keep]
+            Vg_n = _l2n(Vg[keep]); Vn_n = _l2n(np.stack([Vn_[nidx[vng[k]]] for k in keep]))
+            # 공통 ref(이름 기준) + 두 백본 ref 벡터
+            rgi = {r.path.name: i for i, r in enumerate(refs_g)}
+            rni = {r.path.name: i for i, r in enumerate(refs_n)}
+            common_refs = [r for r in refs_g if r.path.name in rni]
+            npool = max(npool, len(vnames))
+            S = np.full((len(common_refs), len(vnames)), -1e9, dtype=np.float64)
+            for ri, r in enumerate(common_refs):
+                rg = _l2n(Rg[rgi[r.path.name]][None, :])[0]
+                rn = _l2n(Rn[rni[r.path.name]][None, :])[0]
+                o1, _ = cosine_order(rg, Vg_n)
+                o2, _ = cosine_order(rn, Vn_n)
+                fused = rrf_scores([list(o1), list(o2)], len(vnames))
+                order = list(np.argsort(-fused))
+                if variant == "ensemble-rerank":
+                    ordered = rerank_topk(np.array(order), RERANK_K,
+                                          lambda j, _r=r: self._sc.cscore(_r.path, vitems[j].path))
+                    rows.append((slot, r, [(vnames[j], 0.0) for j in ordered[:TOPK_LOG]])); n += 1
+                else:  # ensemble-assign — 점수행렬 채우고 슬롯 끝나면 배정
+                    for j in order[:RERANK_K]:
+                        S[ri, j] = self._sc.cscore(r.path, vitems[j].path)
+            if variant == "ensemble-assign":
+                assign = hungarian_assign(S)
+                for ri, r in enumerate(common_refs):
+                    order = list(np.argsort(-S[ri])); a = assign[ri]
+                    if a >= 0:
+                        order = [a] + [j for j in order if j != a]
+                    rows.append((slot, r, [(vnames[j], 0.0) for j in order[:TOPK_LOG]])); n += 1
+        dt = time.perf_counter() - t0
+        self._log({"type": "run", "device": "ens", "variant": variant,
+                   "precompute_s": 0.0, "decide_s": round(dt, 2),
+                   "n_refs": n, "val_pool_max": npool})
+        for slot, r, topk in rows:
+            self._log_result("ens", variant, slot, r, topk)
+        self._emit(f"ensemble / {variant} 완료")
 
-                            def cscore(vn, _rf=rf):
-                                vobj = next(v for v in vals if v.path.name == vn)
-                                return pipeline.score(_rf, feat(vobj.path, "val"))
-                            order = rerank_topk_classical(order, vnames, HYBRID_K, cscore)
-                    t_rank += time.perf_counter() - t0
-                    n_refs += 1
-                    topk = [(vnames[i], float(sims[i])) for i in list(order)[:TOPK_LOG]]
-                    rows.append((slot, r, topk))
-            pre = t_embed_crop if variant == "center-crop" else t_embed
-            self._log({"type": "run", "device": tag, "variant": variant,
-                       "precompute_s": round(pre, 2), "decide_s": round(t_rank, 2),
-                       "n_refs": n_refs, "val_pool_max": npool})
-            for slot, r, topk in rows:
-                self._log_result(tag, variant, slot, r, topk)
-            self._emit(f"{tag.upper()} / {variant} 완료")
-
-    # -- concurrency / batch 최적값 탐색 (속도만; 정확도 불변) ----------
-    def _run_tune(self, _ov, tag, ov_dev, model_kind, sample_paths) -> None:
-        self._emit(f"{tag.upper()} 동시추론수·배치 최적화 탐색…")
+    # -- concurrency/batch 튜닝 --------------------------------------
+    def _run_tune(self, _ov, tag, ov_dev, mk, sample_paths) -> None:
+        self._emit(f"{tag.upper()} 동시추론수·배치 최적화…")
         best = None
         for batch in TUNE_BATCH:
-            # 워밍업 — (model_kind,device,batch) 컴파일을 미리 끝내 타이밍에서 제외.
             try:
-                _ov.device_embed(sample_paths[:4], model_kind=model_kind,
-                                 device=ov_dev, cfg=self._cfg, jobs=8, batch=batch)
+                _ov.device_embed(sample_paths[:4], model_kind=mk, device=ov_dev,
+                                 cfg=self._cfg, jobs=8, batch=batch)
             except Exception:
                 pass
             for conc in TUNE_CONCURRENCY:
                 try:
                     t0 = time.perf_counter()
-                    emb = _ov.device_embed(sample_paths, model_kind=model_kind,
-                                           device=ov_dev, cfg=self._cfg,
-                                           jobs=conc, batch=batch)
-                    dt = time.perf_counter() - t0
-                    n = len(emb)
+                    emb = _ov.device_embed(sample_paths, model_kind=mk, device=ov_dev,
+                                           cfg=self._cfg, jobs=conc, batch=batch)
+                    dt = time.perf_counter() - t0; nimg = len(emb)
                 except Exception as exc:
                     self._log({"type": "tune", "device": tag, "concurrency": conc,
-                               "batch": batch, "error": repr(exc)})
-                    continue
-                ips = (n / dt) if dt > 0 else 0.0
-                self._log({"type": "tune", "device": tag, "concurrency": conc,
-                           "batch": batch, "embed_s": round(dt, 3),
-                           "n_images": n, "img_per_s": round(ips, 2)})
-                if n > 0 and (best is None or dt < best[2]):
+                               "batch": batch, "error": repr(exc)}); continue
+                ips = (nimg / dt) if dt > 0 else 0.0
+                self._log({"type": "tune", "device": tag, "concurrency": conc, "batch": batch,
+                           "embed_s": round(dt, 3), "n_images": nimg, "img_per_s": round(ips, 2)})
+                if nimg > 0 and (best is None or dt < best[2]):
                     best = (conc, batch, dt, ips)
         if best is not None:
-            self._log({"type": "tune_best", "device": tag,
-                       "concurrency": best[0], "batch": best[1],
-                       "embed_s": round(best[2], 3), "img_per_s": round(best[3], 2),
-                       "n_images": len(sample_paths)})
-            self._emit(f"{tag.upper()} 최적 concurrency={best[0]} batch={best[1]} "
-                       f"({best[2]:.1f}s/{len(sample_paths)}장)")
+            self._log({"type": "tune_best", "device": tag, "concurrency": best[0],
+                       "batch": best[1], "embed_s": round(best[2], 3),
+                       "img_per_s": round(best[3], 2), "n_images": len(sample_paths)})
 
-    # -- per-ref result line -----------------------------------------
     def _log_result(self, device, variant, slot, ref_item, scored) -> None:
         topk = [{"rank": i, "filename": Path(n).name, "score": round(float(s), 4)}
                 for i, (n, s) in enumerate(scored[:TOPK_LOG])]
-        self._log({
-            "type": "result", "device": device, "variant": variant,
-            "slot": slot, "ref_filename": Path(ref_item.path).name,
-            "topk": topk,
-        })
+        self._log({"type": "result", "device": device, "variant": variant,
+                   "slot": slot, "ref_filename": Path(ref_item.path).name, "topk": topk})
