@@ -418,6 +418,7 @@ LOAD_SCORING_FMT = "유사도 계산 중… {done} / {total}"
 LOAD_PHASE_FMT = "{phase} 중… {done} / {total}"
 PHASE_FEATURE = "이미지 특징 분석"
 PHASE_SCORING = "유사도 계산"
+PHASE_EMBED = "후보 생성 (GPU 임베딩)"      # 고효율 모드 1단계 — 유사도 계산 직전
 LOAD_PRECOMPUTE_FMT = (
     "유사도 계산 중… {done} / {total}"
 )

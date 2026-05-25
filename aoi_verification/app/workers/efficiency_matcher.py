@@ -303,7 +303,21 @@ class EfficiencyScheduler(QThread):
                 jobs=dynamic_concurrency(len(refs), batch, cap), batch=batch)
         return built, ref_emb
 
-    def _consume_slot(self, slot, refs, vals, built, ref_emb, total_pairs, counters):
+    def _emit_progress(self) -> None:
+        """임베딩(후보 생성)+재채점(유사도 계산) 결합 진행도를 0~1000‰ 로 emit.
+
+        두 단계는 시간이 비슷해 50:50 가중(임베딩만/재채점만 있는 구간은 그쪽
+        100%).  부드러운 % 바는 LoadingOverlay 가 tween 으로 처리한다."""
+        with self._plock:
+            fs = (self._score_done / self._total_score) if self._total_score else 0.0
+            if self._total_embed > 0:
+                fe = self._embed_done / self._total_embed
+                frac = 0.5 * min(1.0, fe) + 0.5 * min(1.0, fs)
+            else:
+                frac = min(1.0, fs)
+        self.signals.progress.emit(int(round(frac * 1000)), 1000)
+
+    def _consume_slot(self, slot, refs, vals, built, ref_emb) -> None:
         """한 슬롯의 ref들을 CPU 고전으로 재채점·융합해 results 저장 + 진행 emit."""
         by_path = {Path(v.path): v for v in vals}
         for r in refs:
@@ -318,39 +332,54 @@ class EfficiencyScheduler(QThread):
                 cc = score_ref_classical(r, vals, threshold=self._threshold, cfg=self._cfg)
                 cands = [(c.item.path, float(c.score)) for c in cc]
             self._results[(slot, rp)] = cands
-            counters["pairs"] += len(vals)
-            self.signals.progress.emit(counters["pairs"], total_pairs)
-        counters["slots"] += 1
-        self.signals.slot_finished.emit(slot, counters["slots"], counters["total_slots"])
+            with self._plock:
+                self._score_done += len(vals)
+                first = not self._scoring_started
+                self._scoring_started = True
+            if first:
+                self.signals.phase.emit(self._PHASE_SCORING)   # '유사도 계산' 라벨
+            self._emit_progress()
+        self._finished_slots += 1
+        self.signals.slot_finished.emit(slot, self._finished_slots, self._total_slots)
 
     def _run(self) -> None:
         from .. import i18n
         tasks = self._tasks
-        total_pairs = sum(len(refs) * len(vals) for _, refs, vals in tasks)
+        self._total_score = sum(len(refs) * len(vals) for _, refs, vals in tasks)
         slot_order: List[str] = []
         for s, _r, _v in tasks:
             if s not in slot_order:
                 slot_order.append(s)
-        if total_pairs == 0:
+        if self._total_score == 0:
             self.signals.finished.emit()
             return
 
         backend = _select_backend(self._cfg)         # (model_kind, device, batch) | None
+        self._plock = threading.Lock()
+        self._embed_done = 0
+        self._score_done = 0
+        self._scoring_started = False
+        self._finished_slots = 0
+        self._total_slots = len(slot_order)
+        self._total_embed = (sum(len(refs) + len(vals) for _, refs, vals in tasks)
+                             if backend is not None else 0)
+        self._PHASE_SCORING = i18n.KO.PHASE_SCORING
         self._active_units = ["cpu"] + ([backend[1].lower()] if backend else [])
-        self.signals.phase.emit(i18n.KO.PHASE_SCORING)
-        counters = {"pairs": 0, "slots": 0, "total_slots": len(slot_order)}
 
         if backend is None:
             # GPU 미가용 — 겹칠 임베딩 작업이 없어 CPU 고전 단독 순차.
+            self.signals.phase.emit(i18n.KO.PHASE_SCORING)
             for slot, refs, vals in tasks:
                 if self._stop.is_set():
                     break
-                self._consume_slot(slot, refs, vals, None, {}, total_pairs, counters)
+                self._consume_slot(slot, refs, vals, None, {})
             self.signals.finished.emit()
             return
 
         # GPU 임베딩(생산자 스레드) ∥ CPU 고전 재채점(이 스레드) — 동시 가동.
         # 큐 maxsize=2 로 메모리 절제(최대 2개 슬롯 임베딩만 상주).
+        self.signals.phase.emit(i18n.KO.PHASE_EMBED)     # '후보 생성(임베딩)' 먼저 표시
+        self._emit_progress()
         embed_q: "queue.Queue" = queue.Queue(maxsize=2)
 
         def producer() -> None:
@@ -362,8 +391,14 @@ class EfficiencyScheduler(QThread):
                                       if vals else (None, {}))
                 except Exception:
                     built, ref_emb = None, {}
+                with self._plock:
+                    self._embed_done += len(refs) + len(vals)
+                    pre_scoring = not self._scoring_started
+                if pre_scoring:                          # 재채점 시작 전엔 임베딩 라벨 유지
+                    self.signals.phase.emit(i18n.KO.PHASE_EMBED)
+                self._emit_progress()
                 embed_q.put((slot, refs, vals, built, ref_emb))
-            embed_q.put(None)                         # 종료 신호
+            embed_q.put(None)                            # 종료 신호
 
         pt = threading.Thread(target=producer, daemon=True)
         pt.start()
@@ -372,6 +407,6 @@ class EfficiencyScheduler(QThread):
             if item is None:
                 break
             slot, refs, vals, built, ref_emb = item
-            self._consume_slot(slot, refs, vals, built, ref_emb, total_pairs, counters)
+            self._consume_slot(slot, refs, vals, built, ref_emb)
         pt.join(timeout=1.0)
         self.signals.finished.emit()

@@ -473,10 +473,9 @@ class MatchPage(QWidget):
         # (set_progress 는 hidden 오버레이를 다시 show 하지 않으므로 안전.)
         if self._current is None:
             phase = getattr(self, "_precompute_phase", "") or i18n.KO.PHASE_SCORING
-            self._loading.set_progress(
-                done, total,
-                i18n.KO.LOAD_PHASE_FMT.format(phase=phase, done=done, total=total),
-            )
+            # 라벨엔 현재 작업명만, 진행도는 부드러운 % 바로 표시(어떤 작업이 얼마나
+            # 진행됐는지 한눈에).  done/total 은 단계별 단위가 달라 바(%)로 통일.
+            self._loading.set_progress(done, total, phase)
 
     def _on_precompute_slot_finished(self,
                                       slot: str,
