@@ -32,7 +32,7 @@ class SetupInput:
     # 유사도 엔진 + 중앙 전처리 (계산 전용).
     engine_mode: str = "basic"       # EngineMode.{BASIC,EFFICIENCY}
     center_crop: bool = False        # 사진 중앙 30% 만 사용 (기준·검증)
-    persist_scores: bool = False     # 유사도 점수 디스크 캐시 (basic 엔진)
+    persist_scores: bool = True      # 유사도 점수 디스크 캐시 — 항상 기본 적용
     accel_concurrency: int = 32      # 고효율 모드 동시 추론 수(in-flight)
     use_cpu: bool = True             # 고효율 장치 토글(테스트용)
     use_gpu: bool = True
@@ -187,14 +187,8 @@ class SetupPage(QWidget):
         self.check_center_crop = QCheckBox(i18n.KO.CENTER_CROP_LABEL, engine_card)
         self.check_center_crop.setToolTip(i18n.KO.CENTER_CROP_TOOLTIP)
         self.check_center_crop.setChecked(bool(getattr(_prefs_now, "center_crop", False)))
-        # 유사도 점수 디스크 캐시 (#5B) — basic 엔진에서 재실행 시 재계산 생략.
-        self.check_persist_scores = QCheckBox(
-            i18n.KO.PERSIST_SCORES_LABEL, engine_card)
-        self.check_persist_scores.setToolTip(i18n.KO.PERSIST_SCORES_TOOLTIP)
-        self.check_persist_scores.setChecked(
-            bool(getattr(_prefs_now, "persist_scores", False)))
-        for _c in (self.check_center_crop, self.check_persist_scores):
-            engine_card.body().addWidget(_c)
+        # 유사도 점수 디스크 캐시(#5B)는 항상 기본 적용 — 사용자 토글 제거.
+        engine_card.body().addWidget(self.check_center_crop)
         root.addWidget(engine_card)
 
         # 임계치 슬라이더 ------------------------------------------------
@@ -318,7 +312,7 @@ class SetupPage(QWidget):
         else:
             engine_mode = "basic"
         center_crop = bool(self.check_center_crop.isChecked())
-        persist_scores = bool(self.check_persist_scores.isChecked())
+        persist_scores = True   # 디스크 점수 캐시 항상 기본 적용(토글 제거).
         accel_concurrency = 32      # 자동 산정 상한(슬라이더 제거) — 워크로드 기반 유동.
         # 효율 모드 = CPU+GPU fusion-zscore 고정.  NPU 는 비활성(코드만 보존).
         use_cpu = True
