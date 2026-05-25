@@ -26,7 +26,8 @@ from PyQt6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QMainWindow,
 from .. import config, i18n
 from ..models import session as session_mod
 from ..models.result import FinalResult, MatchResult, MissEntry
-from ..models.slot import ImageItem, ScanResult, Slot, scan
+from ..models.slot import (ImageItem, ScanResult, Slot, drop_empty_unmatched,
+                           scan)
 from ..utils import paths, wafer_id
 from ..utils import prefs as _prefs
 from ..utils.prefs import AutomationLevel
@@ -548,27 +549,22 @@ class MainWindow(QMainWindow):
         # 폴더 스캔 (저비용 — 메인 스레드에서 진행)
         sr = scan(inp.ref_root, inp.val_root)
         self._scan = sr
+        # 사진이 한 장도 없는 한쪽 전용 폴더는 매칭 대상에서 제외(그냥 넘어감).
+        drop_empty_unmatched(sr)
 
-        # slot명(폴더명)이 ref/val 간 일치하지 않을 때.  먼저 "KLA 장비 사진인가요?"
-        # 를 묻고, 사용자가 ‘예’ 라고 하면 사진 속 WaferID 를 OCR 로 읽어 같은
-        # WaferID 끼리 자동 매칭한다(WaferID 는 매칭 키로만 사용 — 이후 검토/엑셀
-        # 단계는 원본 폴더명을 그대로 사용).  ‘아니오’ 거나 OCR 불가면 수동 매핑.
-        # ‘공통 slot 없음’ 검사는 매칭 확정 이후로 미뤄, 폴더명이 전부 달라도
-        # OCR 자동 매칭이 동작하도록 한다.
+        # slot명(폴더명)이 ref/val 간 일치하지 않을 때.  setup 화면에서 KLA 로
+        # 표시한 쪽의 WaferID 를 OCR 로 읽어 반대쪽 폴더명(또는 WaferID)과 같은 것
+        # 끼리 자동 매칭한다(WaferID 는 매칭 키로만 사용 — 이후 검토/엑셀 단계는
+        # 원본 폴더명을 그대로 사용).  KLA 표시가 없거나 OCR 불가면 수동 매핑.
+        # ‘공통 slot 없음’ 검사는 매칭 확정 이후로 미뤄, 폴더명이 전부 달라도 OCR
+        # 자동 매칭이 동작하도록 한다.
+        ref_kla = bool(getattr(inp, "ref_is_kla", False))
+        val_kla = bool(getattr(inp, "val_is_kla", False))
         if (sr.ref_only or sr.val_only) and wafer_id.ocr_available() \
-                and self._ask_kla_confirm():
-            self._start_wafer_id_ocr(sr)
+                and (ref_kla or val_kla):
+            self._start_wafer_id_ocr(sr, ref_kla, val_kla)
             return
         self._after_slot_resolved(sr, ocr_attempted=False)
-
-    def _ask_kla_confirm(self) -> bool:
-        """‘이 사진들이 KLA 장비 사진인가요?’ 확인 — 예면 WaferID OCR 진행."""
-        r = QMessageBox.question(
-            self, i18n.KO.OCR_KLA_CONFIRM_TITLE, i18n.KO.OCR_KLA_CONFIRM_BODY,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes,
-        )
-        return r == QMessageBox.StandardButton.Yes
 
     def _build_header_pixmaps(self, sr: ScanResult) -> dict:
         """미매칭 폴더별 대표 이미지의 헤더 크롭(‘OCR 부분’)을 QPixmap 으로."""
@@ -598,24 +594,27 @@ class MainWindow(QMainWindow):
                       QImage.Format.Format_RGB888)
         return QPixmap.fromImage(qimg.copy())
 
-    def _start_wafer_id_ocr(self, sr: ScanResult) -> None:
-        """미매칭 폴더들의 WaferID 를 백그라운드 OCR (로딩창 표시).
+    def _start_wafer_id_ocr(self, sr: ScanResult,
+                            ref_kla: bool, val_kla: bool) -> None:
+        """KLA 라고 선택한 쪽의 WaferID 를 백그라운드 OCR (로딩창 표시).
 
-        폴더당 여러 장(대표 ~5장)을 전달해, 첫 장이 실패하면 다음 장으로 넘어가며
-        시도하도록 한다(워커가 read_folder_wafer_id 사용).
+        선택한 쪽만 OCR 하고, 반대쪽은 폴더명을 키로 매칭한다(merge 가 처리).
+        폴더당 여러 장(대표 ~5장)을 전달해 첫 장이 실패하면 다음 장으로 넘어간다.
         """
         def _paths(images):
             return [it.path for it in images[:5]]
 
         jobs: list[tuple[str, str, list]] = []
-        for name in list(sr.ref_only):
-            imgs = sr.slots[name].ref_images
-            if imgs:
-                jobs.append(("ref", name, _paths(imgs)))
-        for name in list(sr.val_only):
-            imgs = sr.slots[name].val_images
-            if imgs:
-                jobs.append(("val", name, _paths(imgs)))
+        if ref_kla:
+            for name in list(sr.ref_only):
+                imgs = sr.slots[name].ref_images
+                if imgs:
+                    jobs.append(("ref", name, _paths(imgs)))
+        if val_kla:
+            for name in list(sr.val_only):
+                imgs = sr.slots[name].val_images
+                if imgs:
+                    jobs.append(("val", name, _paths(imgs)))
         if not jobs:
             self._after_slot_resolved(sr, ocr_attempted=True)
             return

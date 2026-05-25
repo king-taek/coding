@@ -368,14 +368,13 @@ SLOT_MAP_PREVIEW_HINT = (
 )
 SLOT_MAP_NO_PREVIEW = "(미리보기 없음)"
 
-# slot 불일치 시 ‘KLA 장비 사진인가요?’ 확인 — 예면 WaferID OCR 진행.
-OCR_KLA_CONFIRM_TITLE = "KLA 장비 사진인가요?"
-OCR_KLA_CONFIRM_BODY = (
-    "매칭되는 Slot(폴더)명이 없습니다.\n\n"
-    "이 사진들이 KLA 장비로 촬영된 것이라면, 사진 좌상단의 WaferID 를 자동으로 "
-    "읽어 같은 WaferID 끼리 매칭할 수 있습니다.\n\n"
-    "WaferID 자동 인식을 진행할까요?\n"
-    "(아니오를 누르면 곧바로 수동 매핑합니다.)"
+# setup 화면 — 각 장비(기준/검증) 폴더 설정 아래의 ‘KLA 장비’ 체크박스.
+SETUP_KLA_LABEL = "KLA 장비 (WaferID 자동 인식)"
+SETUP_KLA_TOOLTIP = (
+    "이 장비가 KLA 인 경우 체크하세요.  KLA 사진은 좌상단에 WaferID 가 표시됩니다.\n"
+    "Slot(폴더)명이 반대쪽과 맞지 않을 때, 체크한 쪽 사진의 WaferID 를 자동으로 "
+    "읽어 반대쪽 폴더명(또는 WaferID)과 같은 것끼리 매칭합니다.\n"
+    "WaferID 는 매칭에만 쓰이고, 검토/엑셀에는 원본 폴더명이 그대로 쓰입니다."
 )
 
 INFO_RESUME_TITLE = "이전 검증 이어하기"

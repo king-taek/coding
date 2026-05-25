@@ -122,6 +122,18 @@ def scan(ref_root: Path, val_root: Path) -> ScanResult:
     return ScanResult(slots=slots, ref_only=ref_only, val_only=val_only)
 
 
+def drop_empty_unmatched(sr: ScanResult) -> None:
+    """한쪽 전용(ref_only/val_only) 중 **사진이 한 장도 없는 폴더**를 목록에서 제거.
+
+    매칭할 사진 자체가 없으므로 OCR/수동 매핑 대상에서 그냥 제외한다(사용자 요청).
+    ``ScanResult`` 를 직접 수정한다.
+    """
+    sr.ref_only = [n for n in sr.ref_only
+                   if n in sr.slots and sr.slots[n].ref_images]
+    sr.val_only = [n for n in sr.val_only
+                   if n in sr.slots and sr.slots[n].val_images]
+
+
 def iter_in_order(slots: Iterable[Slot], side: str = "ref") -> list[ImageItem]:
     """Slot 명 오름차순 → 파일명 오름차순으로 펼친 ImageItem 리스트."""
     items: list[ImageItem] = []

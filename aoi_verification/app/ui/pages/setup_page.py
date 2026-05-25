@@ -33,6 +33,8 @@ class SetupInput:
     engine_mode: str = "basic"       # EngineMode.{BASIC,EFFICIENCY}
     center_crop: bool = False        # 사진 중앙 30% 만 사용 (기준·검증)
     persist_scores: bool = True      # 유사도 점수 디스크 캐시 — 항상 기본 적용
+    ref_is_kla: bool = False          # 기준 장비가 KLA (WaferID OCR 매칭용)
+    val_is_kla: bool = False          # 검증 장비가 KLA (WaferID OCR 매칭용)
     accel_concurrency: int = 32      # 고효율 모드 동시 추론 수(in-flight)
     use_cpu: bool = True             # 고효율 장치 토글(테스트용)
     use_gpu: bool = True
@@ -145,10 +147,12 @@ class SetupPage(QWidget):
         # 폴더/호기 2칸 ---------------------------------------------------
         row = QHBoxLayout()
         row.setSpacing(20)
-        self.ref_group, self.ref_path_edit, self.ref_machine_edit = \
-            self._make_machine_group(i18n.KO.SETUP_REF_GROUP)
-        self.val_group, self.val_path_edit, self.val_machine_edit = \
-            self._make_machine_group(i18n.KO.SETUP_VAL_GROUP)
+        (self.ref_group, self.ref_path_edit, self.ref_machine_edit,
+         self.check_ref_kla) = self._make_machine_group(i18n.KO.SETUP_REF_GROUP)
+        (self.val_group, self.val_path_edit, self.val_machine_edit,
+         self.check_val_kla) = self._make_machine_group(i18n.KO.SETUP_VAL_GROUP)
+        self.check_ref_kla.setChecked(bool(getattr(_prefs_now, "ref_is_kla", False)))
+        self.check_val_kla.setChecked(bool(getattr(_prefs_now, "val_is_kla", False)))
         row.addWidget(self.ref_group)
         row.addWidget(self.val_group)
         root.addLayout(row)
@@ -228,7 +232,9 @@ class SetupPage(QWidget):
         root.addWidget(credit)
 
     # ------------------------------------------------------------------
-    def _make_machine_group(self, title: str) -> tuple[QGroupBox, QLineEdit, QLineEdit]:
+    def _make_machine_group(
+            self, title: str
+    ) -> tuple[QGroupBox, QLineEdit, QLineEdit, QCheckBox]:
         box = QGroupBox(title, self)
         form = QFormLayout(box)
         form.setContentsMargins(14, 18, 14, 14)
@@ -249,7 +255,12 @@ class SetupPage(QWidget):
         machine_edit.setPlaceholderText(i18n.KO.SETUP_MACHINE_PLACEHOLDER)
         form.addRow(QLabel(i18n.KO.SETUP_MACHINE_LABEL, box), machine_edit)
 
-        return box, path_edit, machine_edit
+        # 이 장비가 KLA 인지 — 경로 설정 바로 아래 체크박스(사용자 요청).
+        kla_check = QCheckBox(i18n.KO.SETUP_KLA_LABEL, box)
+        kla_check.setToolTip(i18n.KO.SETUP_KLA_TOOLTIP)
+        form.addRow(kla_check)
+
+        return box, path_edit, machine_edit, kla_check
 
     @staticmethod
     def _wrap(lay):
@@ -313,6 +324,8 @@ class SetupPage(QWidget):
             engine_mode = "basic"
         center_crop = bool(self.check_center_crop.isChecked())
         persist_scores = True   # 디스크 점수 캐시 항상 기본 적용(토글 제거).
+        ref_is_kla = bool(self.check_ref_kla.isChecked())
+        val_is_kla = bool(self.check_val_kla.isChecked())
         accel_concurrency = 32      # 자동 산정 상한(슬라이더 제거) — 워크로드 기반 유동.
         # 효율 모드 = CPU+GPU fusion-zscore 고정.  NPU 는 비활성(코드만 보존).
         use_cpu = True
@@ -332,6 +345,8 @@ class SetupPage(QWidget):
             engine_mode=engine_mode,
             center_crop=center_crop,
             persist_scores=persist_scores,
+            ref_is_kla=ref_is_kla,
+            val_is_kla=val_is_kla,
             accel_concurrency=accel_concurrency,
             use_cpu=use_cpu,
             use_gpu=use_gpu,
@@ -349,6 +364,8 @@ class SetupPage(QWidget):
             engine_mode=engine_mode,
             center_crop=center_crop,
             persist_scores=persist_scores,
+            ref_is_kla=ref_is_kla,
+            val_is_kla=val_is_kla,
             accel_concurrency=accel_concurrency,
             use_cpu=use_cpu,
             use_gpu=use_gpu,

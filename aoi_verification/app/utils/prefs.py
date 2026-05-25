@@ -87,6 +87,10 @@ class UiPrefs:
     use_gpu: bool = True
     use_npu: bool = False        # 효율 모드는 CPU+GPU fusion. NPU 비활성(코드만 보존).
     embed_batch: int = 1
+    # 기준/검증 장비가 KLA 인지 — slot명(폴더명) 불일치 시 그 쪽 사진의 WaferID 를
+    # OCR 로 읽어 반대쪽 폴더명과 매칭하는 데 사용(setup 화면 체크박스).
+    ref_is_kla: bool = False
+    val_is_kla: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
 
     # ------------------------------------------------------------------

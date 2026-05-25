@@ -110,6 +110,58 @@ def test_merge_empty_maps_noop():
     assert sr.ref_only == ["R1"] and sr.val_only == ["V1"]
 
 
+def test_merge_ocr_wid_matches_other_side_folder_name():
+    """한쪽만 OCR — 그 WaferID 가 반대쪽 폴더명과 같으면 매칭(사용자 규칙).
+
+    val 폴더 'DIE_1' OCR → '00MML090XYG5'.  ref 폴더 이름이 '00MML090XYG5'
+    (WaferID 로 명명)이고 OCR 은 안 됨 → 이름-OCR 매칭.  slot명은 ref 폴더명 유지.
+    """
+    sr = _make_scan(["00MML090XYG5"], ["DIE_1"])
+    paired = wafer_id.merge_unmatched_by_wafer_id(
+        sr, {}, {"DIE_1": "00MML090XYG5"})
+    assert paired == [("00MML090XYG5", "DIE_1")]
+    assert sr.common_slot_names == ["00MML090XYG5"]
+    assert sr.ref_only == [] and sr.val_only == []
+
+
+def test_merge_ref_ocr_matches_val_folder_name_keeps_ref_name():
+    """반대 방향 — ref OCR 가 val 폴더명과 같아도 매칭, slot명은 ref 폴더명."""
+    sr = _make_scan(["RING_A"], ["00MML090XYG5"])
+    paired = wafer_id.merge_unmatched_by_wafer_id(
+        sr, {"RING_A": "00MML090XYG5"}, {})
+    assert paired == [("RING_A", "00MML090XYG5")]
+    assert sr.common_slot_names == ["RING_A"]   # 원본 ref 폴더명 유지
+
+
+def test_merge_name_match_is_case_insensitive():
+    """폴더명/WaferID 키 비교는 대소문자 무시(OCR 은 대문자 정규화)."""
+    sr = _make_scan(["w6460169xyf6"], ["DIE_2"])
+    paired = wafer_id.merge_unmatched_by_wafer_id(
+        sr, {}, {"DIE_2": "W6460169XYF6"})
+    assert paired == [("w6460169xyf6", "DIE_2")]
+
+
+def test_drop_empty_unmatched_skips_imageless_folders():
+    """사진이 없는 한쪽 전용 폴더는 미매칭 목록에서 제외(그냥 넘어감)."""
+    from aoi_verification.app.models.slot import (ImageItem, ScanResult, Slot,
+                                                  drop_empty_unmatched)
+    slots = {
+        "R_ok": Slot("R_ok",
+                     ref_images=[ImageItem("R_ok", Path("/r/a.jpg"), "ref")],
+                     val_images=[]),
+        "R_empty": Slot("R_empty", ref_images=[], val_images=[]),
+        "V_ok": Slot("V_ok", ref_images=[],
+                     val_images=[ImageItem("V_ok", Path("/v/a.jpg"), "val")]),
+        "V_empty": Slot("V_empty", ref_images=[], val_images=[]),
+    }
+    sr = ScanResult(slots=slots,
+                    ref_only=["R_ok", "R_empty"],
+                    val_only=["V_ok", "V_empty"])
+    drop_empty_unmatched(sr)
+    assert sr.ref_only == ["R_ok"]
+    assert sr.val_only == ["V_ok"]
+
+
 # ---------------------------------------------------------------------------
 # ocr_available — rapidocr 미설치 시 graceful False
 # ---------------------------------------------------------------------------
@@ -133,68 +185,137 @@ def test_read_wafer_id_returns_none_when_reader_unavailable(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# 크롭 비율 자동 조절(사다리) — 작은 크롭이 실패하면 더 큰 크롭으로 재시도
+# rec-only 빠른 경로 + det+rec 폴백
 # ---------------------------------------------------------------------------
 class _FakeReader:
-    """크롭 높이가 임계 이상일 때만 WaferID 텍스트를 돌려주는 가짜 RapidOCR."""
+    """크롭 높이가 임계 이상일 때만 WaferID 를 돌려주는 가짜 RapidOCR.
+
+    rec-only 호출(use_det=False)이면 ``[text, score]`` 형태, det+rec 면
+    ``[box, text, score]`` 형태로 돌려준다(실제 RapidOCR 과 동일).
+    """
 
     def __init__(self, min_h: int, value: str) -> None:
         self.min_h = min_h
         self.value = value
         self.heights: list[int] = []
 
-    def __call__(self, arr):
+    def __call__(self, arr, use_det=True, use_cls=True, use_rec=True):
         h = int(arr.shape[0])
         self.heights.append(h)
         if h >= self.min_h:
+            text = f"WaferID : {self.value}"
+            if use_det is False:
+                return ([[text, 0.99]], 0.01)              # rec-only 형태
             box = [[0, 0], [1, 0], [1, 1], [0, 1]]
-            return ([[box, f"WaferID : {self.value}", 0.99]], 0.01)
+            return ([[box, text, 0.99]], 0.01)             # det+rec 형태
         return (None, 0.0)
 
 
-def test_read_wafer_id_crop_ladder_retries(monkeypatch):
-    from PIL import Image as PILImage
+class _RecOnlyReader:
+    """rec-only 호출에서 즉시 WaferID 를 돌려주는 가짜(검출은 호출되면 안 됨)."""
 
+    def __init__(self, value: str) -> None:
+        self.value = value
+        self.det_calls = 0
+        self.rec_calls = 0
+
+    def __call__(self, arr, use_det=True, use_cls=True, use_rec=True):
+        if use_det is False:
+            self.rec_calls += 1
+            return ([[f"WaferID : {self.value}", 0.98]], 0.01)
+        self.det_calls += 1
+        return (None, 0.0)
+
+
+class _DetOnlyReader:
+    """rec-only 는 빈 결과, det+rec 에서만 WaferID 를 돌려주는 가짜(폴백 검증)."""
+
+    def __init__(self, value: str) -> None:
+        self.value = value
+        self.det_calls = 0
+        self.rec_calls = 0
+
+    def __call__(self, arr, use_det=True, use_cls=True, use_rec=True):
+        if use_det is False:
+            self.rec_calls += 1
+            return (None, 0.0)
+        self.det_calls += 1
+        box = [[0, 0], [1, 0], [1, 1], [0, 1]]
+        return ([[box, f"WaferID : {self.value}", 0.99]], 0.01)
+
+
+def _patch_img(monkeypatch, size=(1000, 1000)):
+    from PIL import Image as PILImage
     from aoi_verification.app.utils import image_io
-    fake_img = PILImage.new("RGB", (1000, 1000), (0, 0, 0))
+    fake_img = PILImage.new("RGB", size, (0, 0, 0))
+    monkeypatch.setattr(image_io, "_open", lambda p: fake_img)
+
+
+def test_fast_path_skips_detection(monkeypatch):
+    """rec-only 빠른 경로가 검출 없이 WaferID 를 읽으면 det 은 호출되지 않는다."""
+    reader = _RecOnlyReader("W6460169XYF6")
+    monkeypatch.setattr(wafer_id, "_get_reader", lambda: reader)
+    _patch_img(monkeypatch)
+    assert wafer_id.read_wafer_id(Path("/x.jpg")) == "W6460169XYF6"
+    assert reader.rec_calls >= 1
+    assert reader.det_calls == 0
+
+
+def test_falls_back_to_detection_when_fast_fails(monkeypatch):
+    """빠른 경로(rec-only)가 실패하면 det+rec 폴백으로 넘어가 인식한다."""
+    reader = _DetOnlyReader("W6459081XYE1")
+    monkeypatch.setattr(wafer_id, "_get_reader", lambda: reader)
+    _patch_img(monkeypatch)
+    assert wafer_id.read_wafer_id(Path("/x.jpg")) == "W6459081XYE1"
+    assert reader.rec_calls >= 1 and reader.det_calls >= 1
+
+
+def test_read_wafer_id_crop_ladder_retries(monkeypatch):
+    """det+rec 폴백에서 작은 크롭이 실패하면 더 큰 크롭으로 재시도."""
     reader = _FakeReader(min_h=200, value="W6460169XYF6")
     monkeypatch.setattr(wafer_id, "_get_reader", lambda: reader)
-    monkeypatch.setattr(image_io, "_open", lambda p: fake_img)
+    _patch_img(monkeypatch)
     got = wafer_id.read_wafer_id(Path("/x.jpg"))
     assert got == "W6460169XYF6"
-    # 첫(작은) 크롭은 실패하고, 더 큰 크롭에서 성공해야 한다.
+    # 빠른 경로(작은 줄 밴드)는 실패하고, det+rec 사다리의 큰 크롭에서 성공.
     assert reader.heights[0] < 200 and max(reader.heights) >= 200
 
 
 # ---------------------------------------------------------------------------
-# 폴더 내 여러 장 시도 — 첫 장이 실패하면 다음 장으로
+# 폴더 내 여러 장 시도 — 빠른 경로 우선, 전부 실패 시 첫 장에만 폴백
 # ---------------------------------------------------------------------------
 def test_read_folder_uses_multiple_images(monkeypatch):
     calls: list[str] = []
 
-    def fake_read(p):
+    def fake_one(p, robust=False):
         calls.append(str(p))
         return None if str(p).endswith("a.jpg") else "WID999"
 
-    monkeypatch.setattr(wafer_id, "read_wafer_id", fake_read)
+    monkeypatch.setattr(wafer_id, "_read_one", fake_one)
     got = wafer_id.read_folder_wafer_id([Path("/f/a.jpg"), Path("/f/b.jpg")])
     assert got == "WID999"
     assert calls == ["/f/a.jpg", "/f/b.jpg"]
 
 
 def test_read_folder_none_when_all_fail(monkeypatch):
-    monkeypatch.setattr(wafer_id, "read_wafer_id", lambda p: None)
+    monkeypatch.setattr(wafer_id, "_read_one", lambda p, robust=False: None)
+    monkeypatch.setattr(wafer_id, "_read_robust_only", lambda p: None)
     assert wafer_id.read_folder_wafer_id([Path("/a"), Path("/b")]) is None
+
+
+def test_read_folder_robust_fallback_on_first(monkeypatch):
+    """빠른 경로가 모두 실패하면 첫 장에 det+rec 폴백을 적용한다."""
+    monkeypatch.setattr(wafer_id, "_read_one", lambda p, robust=False: None)
+    monkeypatch.setattr(wafer_id, "_read_robust_only", lambda p: "WIDROB")
+    assert wafer_id.read_folder_wafer_id(
+        [Path("/a"), Path("/b")]) == "WIDROB"
 
 
 def test_read_folder_respects_limit(monkeypatch):
     seen: list = []
-
-    def fake_read(p):
-        seen.append(p)
-        return None
-
-    monkeypatch.setattr(wafer_id, "read_wafer_id", fake_read)
+    monkeypatch.setattr(wafer_id, "_read_one",
+                        lambda p, robust=False: seen.append(p) or None)
+    monkeypatch.setattr(wafer_id, "_read_robust_only", lambda p: None)
     wafer_id.read_folder_wafer_id([Path(str(i)) for i in range(10)], limit=3)
     assert len(seen) == 3
 
