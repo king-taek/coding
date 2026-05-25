@@ -131,9 +131,10 @@ class LoadingOverlay(QWidget):
         self._progress.setRange(0, 100)
         self._progress.setValue(0)
         self._progress.setTextVisible(True)
-        self._progress.setFormat("%p%")
-        # 진행 바 부드러운 채움 — 목표치(%)로 매끄럽게 tween (ease-out).
-        self._target_pct = 0
+        # %가 아니라 처리 갯수(done / total)로 표시한다.
+        self._progress.setFormat("%v / %m")
+        # 진행 바 부드러운 채움 — 목표 갯수로 매끄럽게 tween (ease-out).
+        self._target_val = 0
         self._anim = QTimer(self)
         self._anim.setInterval(16)            # ~60fps
         self._anim.timeout.connect(self._tween_step)
@@ -187,16 +188,19 @@ class LoadingOverlay(QWidget):
         if message:
             self._label.setText(message)
         if total > 0:
-            pct = max(0, min(100, int(done * 100 / total)))
-            if self._progress.maximum() == 0:        # 무한(busy) → 확정 바로 복귀
-                self._progress.setRange(0, 100)
-            self._target_pct = pct
-            cur = self._progress.value()
-            if pct <= cur:                            # 리셋/감소 → 즉시 스냅
+            done = max(0, min(int(done), int(total)))
+            self._target_val = done
+            if self._progress.maximum() != total:     # 단계 전환/총량 변경 → 스냅
                 self._anim.stop()
-                self._progress.setValue(pct)
-            elif not self._anim.isActive():           # 증가 → 부드럽게 tween
-                self._anim.start()
+                self._progress.setRange(0, total)
+                self._progress.setValue(done)
+            else:
+                cur = self._progress.value()
+                if done <= cur:                       # 리셋/감소 → 즉시 스냅
+                    self._anim.stop()
+                    self._progress.setValue(done)
+                elif not self._anim.isActive():       # 증가 → 부드럽게 tween
+                    self._anim.start()
         else:
             self._anim.stop()
             self._progress.setRange(0, 0)             # 무한 진행(busy)
@@ -204,13 +208,13 @@ class LoadingOverlay(QWidget):
 
     def _tween_step(self) -> None:
         cur = self._progress.value()
-        if cur >= self._target_pct:
-            self._progress.setValue(self._target_pct)
+        if cur >= self._target_val:
+            self._progress.setValue(self._target_val)
             self._anim.stop()
             return
-        gap = self._target_pct - cur
+        gap = self._target_val - cur
         cur += max(1, gap // 4)                       # ease-out: 남은 격차의 1/4
-        self._progress.setValue(min(cur, self._target_pct))
+        self._progress.setValue(min(cur, self._target_val))
 
     # ------------------------------------------------------------------
     def eventFilter(self, obj, event) -> bool:  # noqa: N802

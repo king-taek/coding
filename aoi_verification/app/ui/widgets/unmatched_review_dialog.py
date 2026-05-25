@@ -28,7 +28,6 @@ from ...models.result import MatchResult, MissEntry
 from ...models.slot import ImageItem
 from ...utils import image_io
 from .neon_button import NeonButton
-from .no_wheel_slider import NoWheelSlider
 from .window_controls import add_fullscreen_shortcut, enable_window_controls
 
 
@@ -207,6 +206,7 @@ class UnmatchedReviewDialog(QDialog):
                  val_pool,
                  already_used_vals: Iterable[Path] = (),
                  score_cache=None,
+                 fast_results: dict | None = None,
                  parent=None) -> None:
         """``val_pool`` 키는 두 형태를 모두 지원:
 
@@ -221,6 +221,9 @@ class UnmatchedReviewDialog(QDialog):
             self._val_pool_keyed[k] = list(v)
         self._used_vals: set[Path] = {Path(p) for p in already_used_vals}
         self._score_cache = score_cache
+        # 효율 모드 선계산 top-K {(slot, ref_path): [(val_path, score)]} — 후보 풀이
+        # 300장 이상이면 CPU 재계산 대신 이걸 재사용한다 (#1).
+        self._fast_results = fast_results or {}
         self._idx = 0
         # 사진 크기 (#1) — 슬라이더로 조절. 후보 타일은 비율로 파생.
         self._ref_px = _REF_PX
@@ -276,23 +279,6 @@ class UnmatchedReviewDialog(QDialog):
             "color: #00D4FF; font-weight: 700; font-size: 15px;"
         )
         head.addWidget(self.progress_label)
-        head.addSpacing(20)
-        # 사진 크기 슬라이더 (#1) — 마우스 휠로는 조절 불가 (NoWheelSlider).
-        size_label = QLabel(i18n.KO.IMAGE_SIZE_LABEL, self)
-        size_label.setStyleSheet("color: #7FB3D5;")
-        head.addWidget(size_label)
-        self.size_slider = NoWheelSlider(Qt.Orientation.Horizontal, self)
-        self.size_slider.setRange(_SIZE_MIN_PX, _SIZE_MAX_PX)
-        self.size_slider.setValue(self._ref_px)
-        self.size_slider.setSingleStep(20)
-        self.size_slider.setPageStep(80)
-        self.size_slider.setFixedWidth(160)
-        self.size_slider.valueChanged.connect(self._on_size_changed)
-        head.addWidget(self.size_slider)
-        self.size_value = QLabel(f"{self._ref_px} px", self)
-        self.size_value.setStyleSheet("color: #7FB3D5;")
-        self.size_value.setFixedWidth(56)
-        head.addWidget(self.size_value)
         head.addStretch(1)
         # 네비게이션 버튼
         self.btn_prev = NeonButton(i18n.KO.BTN_UNMATCHED_PREV, role="ghost")
@@ -501,6 +487,21 @@ class UnmatchedReviewDialog(QDialog):
         else:
             self.fail_list.clearSelection()
         self.fail_list.blockSignals(False)
+        self._refresh_list_colors()
+
+    def _refresh_list_colors(self) -> None:
+        """후보를 선택(보류)한 ref 는 실패 목록에서 파일명을 파란색으로 표시 (#4)."""
+        if not hasattr(self, "fail_list"):
+            return
+        for row in range(self.fail_list.count()):
+            idx = self._row_to_idx.get(row)
+            if idx is None:
+                continue                              # 구분선 행.
+            item = self.fail_list.item(row)
+            if idx in self._pending:
+                item.setForeground(QColor("#00D4FF"))
+            else:
+                item.setForeground(QColor("#C8D6E5"))
 
     def _on_list_item_clicked(self, item: QListWidgetItem) -> None:
         row = self.fail_list.row(item)
@@ -557,13 +558,12 @@ class UnmatchedReviewDialog(QDialog):
         cand_key = (cur.slot, frozenset(Path(v.path) for v in candidates))
         scored: list[tuple[float, ImageItem]] = []
         if candidates:
-            # 점수 캐시 hit 이 대부분이지만, miss 시 pipeline.score 가 무거워
-            # UI 가 잠깐 굳을 수 있다. 모래시계 커서로 사용자에게 알린다.
+            # 후보 풀이 300장 이상이면 효율 모드 선계산 점수를 재사용해 CPU 재계산을
+            # 건너뛴다(즉시 표시). 미만이면 기존처럼 캐시 miss 를 그 자리 계산 (#1).
+            allow_compute = len(candidates) < 300
             QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
             try:
-                for v in candidates:
-                    s = self._lookup_or_compute_score(cur, v)
-                    scored.append((s, v))
+                scored = self._score_candidates(cur, candidates, allow_compute)
             finally:
                 QApplication.restoreOverrideCursor()
             scored.sort(key=lambda x: x[0], reverse=True)
@@ -643,35 +643,46 @@ class UnmatchedReviewDialog(QDialog):
         self._relayout_candidates()
 
     # ------------------------------------------------------------------
-    def _on_size_changed(self, value: int) -> None:
-        """사진 크기 슬라이더 변경 (#1) — 타일을 재생성하지 않고 보관 픽스맵을
-        재스케일하고, 열 수를 다시 계산해 가로 넘침 없이 재배치한다 (#3)."""
-        self._ref_px = int(value)
-        self._cand_px = max(60, int(value * _CAND_RATIO))
-        self.size_value.setText(f"{value} px")
-        # 기준 사진 — 보관된 원본에서 재스케일.
-        self.ref_img.setFixedSize(self._ref_px, self._ref_px)
-        self._left_panel.setFixedWidth(self._ref_px + 40)
-        if self._ref_source is not None and not self._ref_source.isNull():
-            self.ref_img.setPixmap(self._ref_source.scaled(
-                self._ref_px, self._ref_px,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            ))
-        # 후보 타일 실제 크기는 _relayout_candidates 가 결정(2열 보장 위해 축소 가능).
-        self._relayout_candidates()
+    def _score_candidates(self, cur: MissEntry, candidates: list,
+                          allow_compute: bool) -> list[tuple[float, ImageItem]]:
+        """후보들의 (score, item) 목록 — 내림차순 정렬 전.
+
+        후보 풀이 300장 이상(``allow_compute=False``)이면 효율 모드 선계산
+        top-K(``_fast_results``)를 그대로 재사용하고, 그게 없으면 점수 캐시 hit
+        만 사용한다(둘 다 **CPU 재계산 없음**). 300장 미만이면 캐시 miss 를
+        그 자리에서 계산한다 (#1)."""
+        if not allow_compute:
+            fres = self._fast_results.get((cur.slot, Path(cur.path)))
+            if fres:
+                by_path = {Path(v.path): v for v in candidates}
+                out = []
+                for vp, s in fres:
+                    vi = by_path.get(Path(vp))
+                    if vi is not None:
+                        out.append((float(s), vi))
+                return out
+        out = []
+        for v in candidates:
+            s = self._lookup_or_compute_score(cur, v, allow_compute=allow_compute)
+            if s is None:
+                continue                     # ≥300 & 캐시 miss → 재계산 없이 제외.
+            out.append((float(s), v))
+        return out
 
     # ------------------------------------------------------------------
     def _lookup_or_compute_score(self,
                                   ref: MissEntry,
-                                  val: ImageItem) -> float:
-        """캐시 우선, 없으면 즉석 계산."""
+                                  val: ImageItem,
+                                  allow_compute: bool = True):
+        """캐시 우선, 없으면(``allow_compute``) 즉석 계산. 재계산 불가 시 None."""
         ref_path = Path(ref.path)
         val_path = Path(val.path)
         if self._score_cache is not None:
             s = self._score_cache.get_pair(ref.slot, ref_path, val_path)
             if s is not None:
                 return float(s)
+        if not allow_compute:
+            return None                    # ≥300: CPU 재계산 금지.
         # 캐시 miss — pipeline 으로 직접 계산. 캐시에 저장해서 재방문 시 빠르게.
         try:
             from ...similarity import pipeline as _pipeline
@@ -704,6 +715,8 @@ class UnmatchedReviewDialog(QDialog):
         sel = self._pending.get(self._idx)
         for t in self._cand_tiles:
             t.set_selected(sel is not None and t.item.path == sel.path)
+        # 선택한 후보가 있으면 좌측 실패 목록에서 그 ref 를 파란색으로 (#4).
+        self._refresh_list_colors()
 
     def _open_compare(self, start_index: int) -> None:
         """좌(기준)·우(후보) 비교 크게보기 — 후보 더블클릭/우클릭 및 기준 우클릭

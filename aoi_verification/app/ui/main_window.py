@@ -45,8 +45,6 @@ from .widgets.loading_overlay import LoadingOverlay
 PHASE_NONE = "none"
 PHASE_A_SELECT = "A_select"
 PHASE_A_MATCH = "A_match"
-PHASE_B_SELECT = "B_select"
-PHASE_B_MATCH = "B_match"
 
 
 class MainWindow(QMainWindow):
@@ -99,14 +97,13 @@ class MainWindow(QMainWindow):
         self._status_bar.addPermanentWidget(self._usage_label)
         # 가속 장치(Intel GPU/NPU) 존재 여부 — 세션 중 불변이라 1회만 조회.
         # torch 설치와 무관하게 OpenVINO 만으로 존재 여부를 본다(상태바 표시용).
-        self._accel_present = {"GPU": False, "NPU": False}
+        self._accel_present = {"GPU": False}
         # 세션 불변인 ‘감지’ 부분 툴팁 — 동적 컴파일 진단은 매 틱 덧붙인다.
         self._accel_tip_base = ""
         try:
             from ..learning import embedder_openvino as _ovw
             info = _ovw.accelerator_presence()
-            self._accel_present = {"GPU": bool(info.get("GPU")),
-                                   "NPU": bool(info.get("NPU"))}
+            self._accel_present = {"GPU": bool(info.get("GPU"))}
             # 자가 진단 — 마우스오버로 감지 디바이스/원인을 확인.
             devs = info.get("devices") or []
             reason = info.get("reason") or ""
@@ -186,16 +183,12 @@ class MainWindow(QMainWindow):
         self._input: Optional[SetupInput] = None
         self._phase: str = PHASE_NONE
         self._matches_a: list[MatchResult] = []
-        self._matches_b: list[MatchResult] = []
         self._skipped_a: dict[str, list[ImageItem]] = defaultdict(list)
-        self._skipped_b: dict[str, list[ImageItem]] = defaultdict(list)
         # 올인원/사진 직접 선택 모드의 매치 검토 결과 (#3).
         # 비어있지 않으면 _finish_session 이 _matches_a/_b 대신 이걸 사용한다.
         self._reviewed_matches: list[MatchResult] = []
         self._reviewed_unmatched: list[MissEntry] = []
         self._stage1_a_snapshot: dict | None = None
-        self._stage1_b_snapshot: dict | None = None
-        self._matched_val_keys_in_a: set[str] = set()
         self._working_xlsx: Optional[Path] = None
         self._template_used: Optional[Path] = None
         self._session_id: str = ""
@@ -229,9 +222,9 @@ class MainWindow(QMainWindow):
             self._mem_pressure_shown = False
 
     def _update_usage_label(self) -> None:
-        """상태바 CPU/GPU/NPU 표시 갱신.
+        """상태바 CPU/GPU 표시 갱신.
 
-        CPU 는 프로세스 실제 사용률(코어 수로 정규화한 0~100%), GPU/NPU 는
+        CPU 는 프로세스 실제 사용률(코어 수로 정규화한 0~100%), GPU 는
         OpenVINO 추론 활동 기준 '가동/대기'(없으면 '없음')."""
         parts: list[str] = []
         # CPU — 프로그램 프로세스 사용률을 코어 수로 나눠 0~100% 로 표시.
@@ -245,19 +238,17 @@ class MainWindow(QMainWindow):
             parts.append(i18n.KO.USAGE_CPU_FMT.format(pct=int(round(pct))))
         except Exception:
             pass
-        # GPU / NPU — 존재하면 가동/대기, 없으면 '없음'.
+        # GPU — 존재하면 가동/대기, 없으면 '없음'. (NPU 표시는 제거됨.)
         try:
             from ..learning import embedder_openvino as _ovw
-            for tag, fmt in (("GPU", i18n.KO.USAGE_GPU_FMT),
-                             ("NPU", i18n.KO.USAGE_NPU_FMT)):
-                if not self._accel_present.get(tag):
-                    state = i18n.KO.USAGE_STATE_NONE
-                elif _ovw.unit_busy(tag):
-                    state = i18n.KO.USAGE_STATE_BUSY
-                else:
-                    state = i18n.KO.USAGE_STATE_IDLE
-                parts.append(fmt.format(state=state))
-            # 툴팁에 컴파일 진단을 덧붙임 — 매칭을 한 번 돌린 뒤 NPU 가 '가동'
+            if not self._accel_present.get("GPU"):
+                state = i18n.KO.USAGE_STATE_NONE
+            elif _ovw.unit_busy("GPU"):
+                state = i18n.KO.USAGE_STATE_BUSY
+            else:
+                state = i18n.KO.USAGE_STATE_IDLE
+            parts.append(i18n.KO.USAGE_GPU_FMT.format(state=state))
+            # 툴팁에 컴파일 진단을 덧붙임 — 매칭을 한 번 돌린 뒤 GPU 가 '가동'
             # 으로 안 바뀌면, 여기에 실제 컴파일 에러가 떠서 원인을 알 수 있다.
             diag = _ovw.compile_diagnostics()
             tip = self._accel_tip_base
@@ -349,9 +340,6 @@ class MainWindow(QMainWindow):
     # Entry / resume
     # ==================================================================
     def _maybe_resume(self) -> None:
-        # 셋업 진입 시 항상 정확도 최신화 + 모델 카드 갱신
-        self._refresh_models_safe()
-
         # 이미 다른 페이지 (e.g. _on_start 가 먼저 GroupReviewPage 로 전환)
         # 로 넘어간 경우엔 setup 으로 되돌리지 않는다.
         if self._stack.currentWidget() is not self._setup_page:
@@ -456,28 +444,9 @@ class MainWindow(QMainWindow):
                 i18n.KO.OPENVINO_INSTALL_FAILED_FMT.format(error=message),
             )
 
-    def _refresh_models_safe(self) -> None:
-        """학습 모듈 import / 평가 집계 실패가 셋업 화면을 막지 않도록 wrap."""
-        # 사용자 요청 (#4) — ‘기본 탐지 모드’ 가 기본 선택이 되도록 latest 의
-        # 자동 활성 로직을 적용하지 않는다.  학습 모델은 사용자가 명시적으로
-        # 라디오 버튼을 클릭해야만 활성화.
-        try:
-            from ..learning import evaluator as _ev
-            _ev.refresh_accuracy()
-        except Exception:
-            pass
-        try:
-            self._setup_page.refresh_models()
-        except Exception:
-            pass
-
     def _active_model_name(self) -> str:
-        """현재 active 모델 이름 (없으면 ``basic``)."""
-        try:
-            from ..learning import registry as _reg
-            return _reg.get_active()
-        except Exception:
-            return "basic"
+        """학습 모델 기능 제거됨 — 항상 기본(``basic``)."""
+        return "basic"
 
     def _resolve_slot_mismatch(self, sr: ScanResult) -> None:
         """ref/val 한쪽에만 있는 슬롯이 있을 때 사용자에게 매핑을 묻는다 (#23)."""
@@ -536,7 +505,6 @@ class MainWindow(QMainWindow):
         return config.SimilarityConfig(
             engine=getattr(inp, "engine_mode", "basic"),
             center_crop=bool(getattr(inp, "center_crop", False)),
-            kla_crop=bool(getattr(inp, "kla_crop", False)),
             persist_scores=bool(getattr(inp, "persist_scores", False)),
             accel_concurrency=int(getattr(inp, "accel_concurrency", 32)),
             use_cpu=bool(getattr(inp, "use_cpu", True)),
@@ -555,10 +523,7 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         self._matches_a.clear()
-        self._matches_b.clear()
         self._skipped_a.clear()
-        self._skipped_b.clear()
-        self._matched_val_keys_in_a.clear()
         self._reviewed_matches.clear()
         self._reviewed_unmatched.clear()
         self._session_id = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
@@ -590,15 +555,12 @@ class MainWindow(QMainWindow):
             all_items.extend(slot.ref_images)
             all_items.extend(slot.val_images)
 
-        # 이미지 수에 따라 화질 티어 자동 선택 (사용자 강제 빠른 모드 우선).
-        _ui = _prefs.load()
+        # 이미지 수에 따라 화질 티어 자동 선택 — 빠른 모드(썸네일 화질↓)는 상시 적용.
         per_side_total = max(
             sum(len(sr.slots[n].ref_images) for n in common),
             sum(len(sr.slots[n].val_images) for n in common),
         )
-        self._sizing_tier = config.pick_tier(
-            per_side_total, speed_mode=bool(_ui.speed_mode)
-        )
+        self._sizing_tier = config.pick_tier(per_side_total, speed_mode=True)
         # UI 가 무인자로 호출하는 get_thumb_path / get_mid_path 가 백그라운드
         # 풀과 같은 캐시 파일을 가리키도록 세션 티어 등록 (Bug #1 fix).
         from ..utils import image_io as _io
@@ -710,42 +672,20 @@ class MainWindow(QMainWindow):
         self._finish_session()
 
     # ==================================================================
-    # Phase 식별 helpers
-    # ==================================================================
-    def _is_cross(self) -> bool:
-        return self._input is not None and self._input.mode == "cross"
-
-    def _lower_machine_side(self) -> str:
-        """교차검증에서 '낮은 호기' 가 ref 인지 val 인지 추정 ('ref'/'val')."""
-        if self._input is None:
-            return "ref"
-        # 호기명에서 숫자만 뽑아서 비교 → 실패하면 ref 우선
-        def num(s: str) -> int:
-            digits = "".join(ch for ch in s if ch.isdigit())
-            return int(digits) if digits else 9999
-        return "ref" if num(self._input.ref_machine) <= num(self._input.val_machine) else "val"
-
-    # ==================================================================
-    # Stage 1 — Phase A
+    # Stage 1
     # ==================================================================
     def _enter_stage1_phase_a(self) -> None:
         assert self._scan is not None and self._input is not None
-        # 낮은 호기 쪽이 Phase A 의 기준
-        lower = self._lower_machine_side() if self._is_cross() else "ref"
         slots = [self._scan.slots[n] for n in self._scan.common_slot_names]
-        # Phase A 의 queue: 낮은 호기 쪽 사진 전부 (Slot 명 / 파일명 오름차순)
+        # queue: 기준(ref) 사진 전부 (Slot 명 / 파일명 오름차순)
         queue: list[ImageItem] = []
         for slot in sorted(slots, key=lambda s: s.name):
-            queue.extend(slot.ref_images if lower == "ref" else slot.val_images)
+            queue.extend(slot.ref_images)
 
-        phase_lab = (
-            i18n.KO.PHASE_A_SELECT if self._is_cross()
-            else i18n.KO.STAGE1_TITLE
-        )
         self._select_page.load_state(
             queue=queue,
             targets={}, excluded={}, history=[],
-            phase_label=phase_lab,
+            phase_label=i18n.KO.STAGE1_TITLE,
         )
         self._show_page(self._select_page)
         self._phase = PHASE_A_SELECT
@@ -762,16 +702,6 @@ class MainWindow(QMainWindow):
                 i18n.KO.INFO_PHASE_A_TO_MATCH,
             )
             self._enter_stage2_phase_a()
-        elif self._phase == PHASE_B_SELECT:
-            self._stage1_b_snapshot = {
-                "targets": self._collect_panel(self._select_page.get_state().targets),
-                "excluded": self._collect_panel(self._select_page.get_state().excluded),
-            }
-            QMessageBox.information(
-                self, i18n.KO.INFO_PHASE_TRANSITION_TITLE,
-                i18n.KO.INFO_PHASE_B_TO_MATCH,
-            )
-            self._enter_stage2_phase_b()
 
     @staticmethod
     def _collect_panel(
@@ -780,32 +710,29 @@ class MainWindow(QMainWindow):
         return {k: list(v) for k, v in panel.items() if v}
 
     # ==================================================================
-    # Stage 2 — Phase A
+    # Stage 2
     # ==================================================================
     def _enter_stage2_phase_a(self) -> None:
         assert self._scan is not None and self._input is not None
-        # Phase A 의 기준 큐 = Stage 1 에서 verify 로 분류된 낮은 호기 사진들
-        lower = self._lower_machine_side() if self._is_cross() else "ref"
+        # 기준 큐 = Stage 1 에서 verify 로 분류된 기준 사진들
         targets = self._stage1_a_snapshot["targets"] if self._stage1_a_snapshot else {}
         queue: list[ImageItem] = []
         for slot in sorted(targets.keys()):
             queue.extend(targets[slot])
 
-        # 매칭 대상 풀 = 같은 Slot 의 높은 호기 쪽 모든 사진
-        higher = "val" if lower == "ref" else "ref"
+        # 매칭 대상 풀 = 같은 Slot 의 검증(val) 쪽 모든 사진
         pool: dict[str, list[ImageItem]] = {}
         for name in self._scan.common_slot_names:
             slot = self._scan.slots[name]
-            pool[name] = slot.val_images if higher == "val" else slot.ref_images
+            pool[name] = slot.val_images
 
         direction = "A→B"
-        phase_lab = i18n.KO.PHASE_A_MATCH if self._is_cross() else i18n.KO.STAGE2_TITLE
         auto_mode = AutomationLevel.is_auto(self._input.automation_level)
         self._match_page.load_state(
             queue=queue,
             val_pool_by_slot=pool,
             threshold=self._input.threshold,
-            phase_label=phase_lab,
+            phase_label=i18n.KO.STAGE2_TITLE,
             direction=direction,
             session_id=self._session_id,
             model_name=self._active_model_name(),
@@ -819,52 +746,21 @@ class MainWindow(QMainWindow):
     def _on_match_confirmed(self, match: MatchResult) -> None:
         if self._phase == PHASE_A_MATCH:
             self._matches_a.append(match)
-            # Phase A 에서 매칭된 검증 쪽 파일을 기록 (Phase B 에서 자동 제외)
-            self._matched_val_keys_in_a.add(self._val_key(match))
-        elif self._phase == PHASE_B_MATCH:
-            self._matches_b.append(match)
         self._schedule_autosave()
-
-    @staticmethod
-    def _val_key(match: MatchResult) -> str:
-        return f"{match.slot}::{match.val_path.name}"
 
     def _on_match_finished(self) -> None:
         if self._phase == PHASE_A_MATCH:
             st = self._match_page.get_state()
             if st is not None:
-                # 미탐(=상대 호기가 놓침) 으로 기록할 것은 ‘매칭 없음 확정’ 만.
-                # ‘잠시 보류’ 는 사용자 결정 미정 → 미탐 시트에 넣지 않는다.
+                # 미탐으로 기록할 것은 ‘매칭 없음 확정’ 만. ‘잠시 보류’ 는 사용자
+                # 결정 미정 → 미탐 시트에 넣지 않는다.
                 for slot, items in st.no_match.items():
                     self._skipped_a[slot].extend(items)
-            # auto_all 모드는 single 흐름 강제 — Phase B 로 진입하지 않는다.
-            auto_all = (
-                self._input is not None
-                and self._input.automation_level == AutomationLevel.AUTO_ALL
-            )
-            if self._is_cross() and not auto_all:
-                QMessageBox.information(
-                    self, i18n.KO.INFO_PHASE_TRANSITION_TITLE,
-                    i18n.KO.INFO_PHASE_A_TO_B,
-                )
-                self._enter_stage1_phase_b()
-            else:
-                self._proceed_to_review_or_finish()
-        elif self._phase == PHASE_B_MATCH:
-            st = self._match_page.get_state()
-            if st is not None:
-                for slot, items in st.no_match.items():
-                    self._skipped_b[slot].extend(items)
             self._proceed_to_review_or_finish()
 
     def _proceed_to_review_or_finish(self) -> None:
-        """자동 모드(user_select / auto_all)면 MatchReviewPage 로,
-        수동 모드면 곧장 결과 페이지로."""
+        """자동 매치 결과를 MatchReviewPage 로 넘겨 검토하게 한다."""
         if self._input is None:
-            self._finish_session()
-            return
-        auto_mode = AutomationLevel.is_auto(self._input.automation_level)
-        if not auto_mode:
             self._finish_session()
             return
         merged = self._merge_matches()
@@ -873,7 +769,7 @@ class MainWindow(QMainWindow):
         score_cache = getattr(self._match_page, "_score_cache", None)
         match_state = self._match_page.get_state()
         val_pool = match_state.val_pool if match_state is not None else None
-        # 고속 모드는 score_cache 가 비어 있으므로 후보를 별도 산출해 전달 (#7).
+        # 효율 모드는 score_cache 가 비어 있으므로 후보를 별도 산출해 전달 (#7).
         candidates_by_ref = None
         try:
             candidates_by_ref = self._match_page.build_candidates_by_ref(merged)
@@ -886,73 +782,6 @@ class MainWindow(QMainWindow):
         self._show_page(self._match_review_page)
 
     # ==================================================================
-    # Stage 1 — Phase B (reverse direction)
-    # ==================================================================
-    def _enter_stage1_phase_b(self) -> None:
-        assert self._scan is not None and self._input is not None
-        lower = self._lower_machine_side()
-        higher = "val" if lower == "ref" else "ref"
-
-        # 큐 = 높은 호기의 모든 사진, 단 이미 Phase A 에서 매칭된 항목은 제외
-        # 그리고 Phase 1 화면에는 "이미 매칭됨" 섹션으로 표시 가능하도록 전달.
-        queue: list[ImageItem] = []
-        already_by_slot: dict[str, list[ImageItem]] = defaultdict(list)
-        for name in self._scan.common_slot_names:
-            slot = self._scan.slots[name]
-            higher_imgs = slot.val_images if higher == "val" else slot.ref_images
-            for it in higher_imgs:
-                if f"{name}::{it.path.name}" in self._matched_val_keys_in_a:
-                    already_by_slot[name].append(it)
-                else:
-                    queue.append(it)
-
-        self._select_page.load_state(
-            queue=queue,
-            targets={}, excluded={}, history=[],
-            phase_label=i18n.KO.PHASE_B_SELECT,
-            phase_b_already_matched=dict(already_by_slot),
-        )
-        self._show_page(self._select_page)
-        self._phase = PHASE_B_SELECT
-        self._autosave()
-
-    # ==================================================================
-    # Stage 2 — Phase B
-    # ==================================================================
-    def _enter_stage2_phase_b(self) -> None:
-        assert self._scan is not None and self._input is not None
-        lower = self._lower_machine_side()
-        higher = "val" if lower == "ref" else "ref"
-        targets = self._stage1_b_snapshot["targets"] if self._stage1_b_snapshot else {}
-
-        queue: list[ImageItem] = []
-        for slot in sorted(targets.keys()):
-            queue.extend(targets[slot])
-
-        # 매칭 대상 풀 = 같은 Slot 의 낮은 호기 사진들 (반대 방향)
-        pool: dict[str, list[ImageItem]] = {}
-        for name in self._scan.common_slot_names:
-            slot = self._scan.slots[name]
-            pool[name] = slot.ref_images if lower == "ref" else slot.val_images
-
-        direction = "B→A"
-        auto_mode = AutomationLevel.is_auto(self._input.automation_level)
-        self._match_page.load_state(
-            queue=queue,
-            val_pool_by_slot=pool,
-            threshold=self._input.threshold,
-            phase_label=i18n.KO.PHASE_B_MATCH,
-            direction=direction,
-            session_id=self._session_id,
-            model_name=self._active_model_name(),
-            auto_mode=auto_mode,
-            engine_cfg=self._make_sim_cfg(),
-        )
-        self._show_page(self._match_page)
-        self._phase = PHASE_B_MATCH
-        self._autosave()
-
-    # ==================================================================
     # Result
     # ==================================================================
     def _finish_session(self) -> None:
@@ -962,7 +791,6 @@ class MainWindow(QMainWindow):
             merged = list(self._reviewed_matches)
         else:
             merged = self._merge_matches()
-        miss_fast, miss_slow = self._compute_miss_lists()
         unmatched_refs = self._compute_unmatched_refs()
         # 사용자가 매치 검토에서 ‘매치 없음’ 으로 표시한 ref 들 합치기.
         if self._reviewed_unmatched:
@@ -973,8 +801,8 @@ class MainWindow(QMainWindow):
             ref_machine=self._input.ref_machine,
             val_machine=self._input.val_machine,
             matches=merged,
-            miss_fast=miss_fast,
-            miss_slow=miss_slow,
+            miss_fast=[],
+            miss_slow=[],
             slot_only_ref=list(self._scan.ref_only),
             slot_only_val=list(self._scan.val_only),
             unmatched_refs=unmatched_refs,
@@ -984,18 +812,15 @@ class MainWindow(QMainWindow):
             self._input is not None
             and AutomationLevel.is_auto(self._input.automation_level)
         )
-        # 매치 실패 사진 검토(#8) 용 후보 풀 + 점수 캐시.
-        # cross 모드는 Phase A/B 에서 ref/val 양쪽 모두 미매칭이 생길 수 있어
-        # ‘unmatched.side 기준의 반대편 사진들’ 을 슬롯별로 만든다:
-        #   side == "ref"  → 후보 = 같은 슬롯의 val_images
-        #   side == "val"  → 후보 = 같은 슬롯의 ref_images
-        # 단일 모드는 unmatched.side 가 항상 "ref" 라 val_images 만 쓰인다.
+        # 매치 실패 사진 검토(#8) 용 후보 풀 + 점수 캐시.  단일 모드는
+        # unmatched.side 가 항상 "ref" 라 val_images 가 후보가 된다.
         review_pool: dict[tuple[str, str], list] = {}
         for slot_name in self._scan.common_slot_names:
             slot = self._scan.slots[slot_name]
             review_pool[(slot_name, "ref")] = list(slot.val_images)
             review_pool[(slot_name, "val")] = list(slot.ref_images)
         review_score_cache = getattr(self._match_page, "_score_cache", None)
+        review_fast_results = getattr(self._match_page, "_fast_results", None)
         self._result_page.show_result(
             result,
             template_path=self._template_used,
@@ -1003,8 +828,8 @@ class MainWindow(QMainWindow):
             auto_mode=auto_mode,
             val_pool=review_pool,
             score_cache=review_score_cache,
+            fast_results=review_fast_results,
         )
-        QMessageBox.information(self, i18n.KO.APP_TITLE, i18n.KO.INFO_ALL_DONE)
         self._show_page(self._result_page)
         self._phase = PHASE_NONE
         session_mod.clear()
@@ -1048,67 +873,11 @@ class MainWindow(QMainWindow):
         self._working_xlsx = dst
 
     def _merge_matches(self) -> list[MatchResult]:
-        if not self._is_cross():
-            return list(self._matches_a)
-
-        # 키 = (Slot, 낮은호기 파일명, 높은호기 파일명).
-        # Phase A: ref_path = 낮은호기 / val_path = 높은호기
-        # Phase B: ref_path = 높은호기 / val_path = 낮은호기  ← 이걸 정규화한다.
-        lower = self._lower_machine_side()
-        higher = "val" if lower == "ref" else "ref"
-
-        def _norm(m: MatchResult) -> tuple[str, str, str, MatchResult]:
-            # Phase A 는 그대로, Phase B 는 ref/val 을 뒤집어 정규화
-            if m.direction == "A→B":
-                low_path = m.ref_path
-                high_path = m.val_path
-            else:
-                low_path = m.val_path
-                high_path = m.ref_path
-            norm = MatchResult(
-                slot=m.slot,
-                ref_path=low_path,
-                val_path=high_path,
-                score=m.score,
-                direction=m.direction,
-            )
-            return (m.slot, low_path.name, high_path.name, norm)
-
-        bag: dict[tuple[str, str, str], MatchResult] = {}
-        for m in self._matches_a + self._matches_b:
-            k0, k1, k2, norm = _norm(m)
-            key = (k0, k1, k2)
-            if key in bag:
-                bag[key].direction = "양방향"
-            else:
-                bag[key] = norm
-        return sorted(bag.values(), key=lambda x: (x.slot, x.ref_path.name.lower()))
-
-    def _compute_miss_lists(self) -> tuple[list[MissEntry], list[MissEntry]]:
-        if not self._is_cross():
-            return [], []
-        # 빠른(낮은) 호기 미탐 = Phase A 에서 skip 된 사진들
-        miss_fast: list[MissEntry] = []
-        for slot, items in self._skipped_a.items():
-            for it in items:
-                miss_fast.append(MissEntry(
-                    slot=slot, side="ref", path=it.path,
-                    note="Phase A 매칭 실패",
-                ))
-        # 느린(높은) 호기 미탐 = Phase B 에서 skip 된 사진들
-        miss_slow: list[MissEntry] = []
-        for slot, items in self._skipped_b.items():
-            for it in items:
-                miss_slow.append(MissEntry(
-                    slot=slot, side="val", path=it.path,
-                    note="Phase B 매칭 실패",
-                ))
-        return miss_fast, miss_slow
+        return list(self._matches_a)
 
     def _compute_unmatched_refs(self) -> list[MissEntry]:
         """Stage 2 에서 매칭 못 찾은 기준 사진들 (Skip + No-match).
 
-        교차 검증 모드에서는 Phase A 와 Phase B 양쪽에서 수집된다.
         엑셀에 ‘기준 이미지 + 빨간 파일명’ 행으로 표기되는 정보.
         """
         out: list[MissEntry] = []
@@ -1116,11 +885,6 @@ class MainWindow(QMainWindow):
             for it in items:
                 out.append(MissEntry(
                     slot=slot, side="ref", path=it.path, note="미매칭",
-                ))
-        for slot, items in self._skipped_b.items():
-            for it in items:
-                out.append(MissEntry(
-                    slot=slot, side="val", path=it.path, note="미매칭",
                 ))
         return out
 
@@ -1133,17 +897,11 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         self._matches_a.clear()
-        self._matches_b.clear()
         self._skipped_a.clear()
-        self._skipped_b.clear()
-        self._matched_val_keys_in_a.clear()
         self._stage1_a_snapshot = None
-        self._stage1_b_snapshot = None
         self._reviewed_matches.clear()
         self._reviewed_unmatched.clear()
         self._phase = PHASE_NONE
-        # 세션 종료 직후 평가 집계를 갱신해서 모델 카드의 정확도를 새로 반영.
-        self._refresh_models_safe()
         self._show_page(self._setup_page)
 
     # ==================================================================
@@ -1201,12 +959,12 @@ class MainWindow(QMainWindow):
             threshold=self._input.threshold,
             session_id=self._session_id,
             stage=self._phase or "setup",
-            phase=("B" if self._phase in (PHASE_B_SELECT, PHASE_B_MATCH) else "A"),
+            phase="A",
             decisions=decisions,
             matches=matches_dump,
             skipped=skipped_keys,
             no_match=no_match_keys,
-            phase_a_matched_val_keys=sorted(self._matched_val_keys_in_a),
+            phase_a_matched_val_keys=[],
             phase_a_matches=[{
                 "slot": m.slot,
                 "ref_path": str(m.ref_path),
@@ -1244,20 +1002,6 @@ class MainWindow(QMainWindow):
             if pre is not None and pre.isRunning():
                 pre.stop()
                 pre.wait(500)
-        except Exception:
-            pass
-        # 학습 워커도 안전 종료 (#17)
-        try:
-            self._setup_page.stop_training()
-        except Exception:
-            pass
-        # ResultPage 의 자동 재학습 워커도 함께 종료 — 사용자가 검증 도중
-        # 자동 학습이 백그라운드로 시작됐을 수 있음.
-        try:
-            auto = getattr(self._result_page, "_auto_retrain_worker", None)
-            if auto is not None and auto.isRunning():
-                auto.stop()
-                auto.wait(500)
         except Exception:
             pass
         # OpenVINO 설치 워커 정리.

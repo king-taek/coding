@@ -23,22 +23,8 @@ if TYPE_CHECKING:                                   # pragma: no cover
 
 
 # ---------------------------------------------------------------------------
-# RGB 단계 변환 (중심 ROI crop 이전에 적용) — KLA crop, 배경 제거
+# RGB 단계 변환 (중심 ROI crop 이전에 적용) — 배경 제거
 # ---------------------------------------------------------------------------
-def kla_crop_rgb(img: "_PILImage.Image", top: float, bottom: float) -> "_PILImage.Image":
-    """이미지 상단 ``top``, 하단 ``bottom`` 비율을 잘라낸다 (KLA 정보영역 제거)."""
-    top = max(0.0, min(0.45, float(top)))
-    bottom = max(0.0, min(0.45, float(bottom)))
-    if top <= 0 and bottom <= 0:
-        return img
-    w, h = img.size
-    y0 = int(round(h * top))
-    y1 = h - int(round(h * bottom))
-    if y1 - y0 < 8:                                 # 너무 많이 자르면 무시
-        return img
-    return img.crop((0, y0, w, y1))
-
-
 def remove_background_rgb(img: "_PILImage.Image") -> "_PILImage.Image":
     """배경을 제거(누끼)하고 배경 픽셀을 검정으로 채운 RGB 이미지 반환.
 
@@ -77,14 +63,5 @@ def remove_background_rgb(img: "_PILImage.Image") -> "_PILImage.Image":
         return _Image.fromarray(out, mode="RGB")
     except Exception:
         return img
-
-
-def apply_rgb_chain(img: "_PILImage.Image", cfg: "SimilarityConfig") -> "_PILImage.Image":
-    """중심 ROI crop 이전 단계의 RGB 변환 적용 (현재: KLA crop)."""
-    if cfg is None:
-        return img
-    if cfg.kla_crop:
-        img = kla_crop_rgb(img, cfg.kla_top, cfg.kla_bottom)
-    return img
 
 

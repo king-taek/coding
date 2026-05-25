@@ -180,10 +180,6 @@ def center_roi_gray(src: Path,
 
     img = _open(src)
     img = _to_rgb(img)
-    # RGB 단계 전처리 (KLA crop) — 중심 ROI 이전.
-    if cfg is not None and getattr(cfg, "has_preprocess", False):
-        from ..similarity import preprocess
-        img = preprocess.apply_rgb_chain(img, cfg)
     w, h = img.size
     rw = int(round(w * roi_ratio))
     rh = int(round(h * roi_ratio))

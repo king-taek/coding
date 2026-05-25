@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QKeySequence, QPixmap, QShortcut
 from PyQt6.QtWidgets import (QApplication, QDialog, QHBoxLayout, QLabel,
                              QSizePolicy, QVBoxLayout, QWidget)
@@ -35,6 +35,8 @@ class _Pane(QWidget):
     def __init__(self, title: str, parent=None) -> None:
         super().__init__(parent)
         self._pix: Optional[QPixmap] = None
+        # 기준·후보가 동일한 크기로 보이도록 두 패널이 공유하는 목표 박스 (#3).
+        self._box: Optional[QSize] = None
         lay = QVBoxLayout(self)
         lay.setContentsMargins(6, 6, 6, 6)
         lay.setSpacing(4)
@@ -60,6 +62,14 @@ class _Pane(QWidget):
         self._pix = pix
         self._redraw()
 
+    def set_target_box(self, box: QSize) -> None:
+        """두 패널이 같은 박스에 맞춰 스케일하도록 공통 목표 크기 주입 (#3)."""
+        self._box = box
+        self._redraw()
+
+    def img_size(self) -> QSize:
+        return self._img.size()
+
     def resizeEvent(self, e):  # noqa: N802
         self._redraw()
         super().resizeEvent(e)
@@ -67,7 +77,10 @@ class _Pane(QWidget):
     def _redraw(self) -> None:
         if self._pix is None or self._pix.isNull():
             return
-        target = self._img.size()
+        # 공통 박스가 있으면 그 박스에 맞춰(기준·후보 동일 크기), 없으면 라벨 크기.
+        target = self._box if (self._box is not None
+                               and self._box.width() > 0
+                               and self._box.height() > 0) else self._img.size()
         if target.width() <= 0 or target.height() <= 0:
             return
         self._img.setPixmap(self._pix.scaled(
@@ -128,15 +141,19 @@ class SideBySideViewer(QDialog):
         root.setContentsMargins(12, 12, 12, 12)
         root.setSpacing(8)
 
-        # 상단 바: 이전 · 위치 · 다음 · (액션) · 닫기
+        # 상단 바: 위치 · (방향키 안내) · 이전 · 다음 · (액션) · 닫기 (#4).
+        # 이전 버튼을 다음 버튼 바로 옆으로 모으고, 방향키 조작 가능을 표기한다.
         bar = QHBoxLayout()
+        self.pos_label = QLabel("", self)
+        self.pos_label.setStyleSheet("color: #7FB3D5; font-weight: 700;")
+        bar.addWidget(self.pos_label)
+        bar.addStretch(1)
+        key_hint = QLabel("← → 방향키로 이동", self)
+        key_hint.setStyleSheet("color: #5A6B82; font-size: 12px;")
+        bar.addWidget(key_hint)
         self.btn_prev = NeonButton("◀ 이전", role="ghost")
         self.btn_prev.clicked.connect(self._prev)
         bar.addWidget(self.btn_prev)
-        self.pos_label = QLabel("", self)
-        self.pos_label.setStyleSheet("color: #7FB3D5; font-weight: 700;")
-        self.pos_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        bar.addWidget(self.pos_label, stretch=1)
         self.btn_next = NeonButton("다음 ▶", role="ghost")
         self.btn_next.clicked.connect(self._next)
         bar.addWidget(self.btn_next)
@@ -158,6 +175,25 @@ class SideBySideViewer(QDialog):
         root.addLayout(body, stretch=1)
 
     # ------------------------------------------------------------------
+    def _sync_panes(self) -> None:
+        """기준·후보가 동일한 크기로 보이도록 두 패널의 공통 목표 박스를 맞춘다 (#3).
+
+        두 이미지 라벨 크기의 원소별 최소값을 공통 박스로 삼아 양쪽에 주입한다.
+        같은 종횡비(같은 웨이퍼 크롭)면 표시 크기가 정확히 일치하고, 종횡비가
+        달라도 두 이미지가 같은 박스 안에 동일 기준으로 맞춰진다."""
+        rs = self._ref_pane.img_size()
+        cs = self._cand_pane.img_size()
+        box = QSize(min(rs.width(), cs.width()), min(rs.height(), cs.height()))
+        if box.width() <= 0 or box.height() <= 0:
+            return
+        self._ref_pane.set_target_box(box)
+        self._cand_pane.set_target_box(box)
+
+    def resizeEvent(self, e):  # noqa: N802
+        super().resizeEvent(e)
+        self._sync_panes()
+
+    # ------------------------------------------------------------------
     def _current_item(self) -> Optional[ImageItem]:
         if not self._candidates:
             return None
@@ -175,6 +211,7 @@ class SideBySideViewer(QDialog):
         self.pos_label.setText(f"{self._idx + 1} / {len(self._candidates)}")
         self.btn_prev.setEnabled(self._idx > 0)
         self.btn_next.setEnabled(self._idx < len(self._candidates) - 1)
+        self._sync_panes()
 
     def _prev(self) -> None:
         if self._idx > 0:

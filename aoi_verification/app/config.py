@@ -119,12 +119,9 @@ MEMORY_PRESSURE_BYTES = PIXMAP_CACHE_MAX_BYTES + 1024 * 1024 * 1024
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True)
 class SimilarityConfig:
-    engine: str = "basic"          # "basic" | "fast" | "efficiency"
+    engine: str = "basic"          # "basic" | "efficiency"
     center_crop: bool = False      # 사진 중앙 30% 영역만 사용 (기준·검증 모두)
-    kla_crop: bool = False         # KLA 상/하단 정보영역 crop
-    kla_top: float = 0.08          # 상단 잘라낼 비율
-    kla_bottom: float = 0.08       # 하단 잘라낼 비율
-    top_k: int = 50                # ANN 재정렬 깊이 (고속 모드)
+    top_k: int = 50                # 후보 재정렬 깊이
     persist_scores: bool = False   # (ref,val) 점수 디스크 영속 캐시 (basic 엔진)
     # 고효율 모드 동시 추론 수(in-flight) — NPU 기준, GPU 는 절반.  높일수록
     # NPU/GPU 메모리·throughput↑(계산 결과는 불변).  사용자 조절 노브.
@@ -146,7 +143,7 @@ class SimilarityConfig:
     @property
     def has_preprocess(self) -> bool:
         """전처리가 하나라도 켜져 있으면 True — 캐시 키 분기/적용 판단용."""
-        return bool(self.center_crop or self.kla_crop)
+        return bool(self.center_crop)
 
     def cache_extra(self, side=None) -> str:
         """캐시 키 판별자.  전처리 OFF 면 빈 문자열 → 기본 캐시와 동일 키.
@@ -156,8 +153,6 @@ class SimilarityConfig:
         parts = []
         if self._center_crop_for(side):
             parts.append("c30")          # 중앙 30% — 키 변경으로 이전 캐시와 분리
-        if self.kla_crop:
-            parts.append(f"k{self.kla_top:.2f}-{self.kla_bottom:.2f}")
         return "-".join(parts)
 
 

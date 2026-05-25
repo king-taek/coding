@@ -144,17 +144,6 @@ class ExcelExporter(QThread):
             if isinstance(a.value, (int, float)):
                 a.value = None
 
-        # 교차 검증 미탐 시트 ----------------------------------------
-        if self._result.mode == "cross":
-            if self._result.miss_fast:
-                self._write_miss_sheet(
-                    wb, i18n.KO.SHEET_MISS_FAST, self._result.miss_fast,
-                )
-            if self._result.miss_slow:
-                self._write_miss_sheet(
-                    wb, i18n.KO.SHEET_MISS_SLOW, self._result.miss_slow,
-                )
-
         # Slot 불일치 ---------------------------------------------------
         if self._result.slot_only_ref or self._result.slot_only_val:
             self._write_slot_mismatch_sheet(wb)
@@ -340,29 +329,6 @@ class ExcelExporter(QThread):
             row += 1
 
     # ------------------------------------------------------------------
-    def _write_miss_sheet(self, wb, title: str, entries) -> None:
-        from openpyxl.drawing.image import Image as XLImage
-        ws = wb.create_sheet(title=title)
-        ws["B1"] = "Slot"
-        ws["C1"] = "이미지"
-        ws["D1"] = "비고"
-        ws.column_dimensions["B"].width = 14
-        ws.column_dimensions["C"].width = IMG_COL_WIDTH
-        ws.column_dimensions["D"].width = 30
-        cell_w_px = _col_width_to_px(IMG_COL_WIDTH)
-        cell_h_px = _row_height_to_px(ROW_HEIGHT_PT)
-        for i, e in enumerate(entries, start=2):
-            ws.row_dimensions[i].height = ROW_HEIGHT_PT
-            ws[f"B{i}"] = e.slot
-            ws[f"D{i}"] = e.note or ""
-            try:
-                mid = image_io.get_mid_path(Path(e.path))
-                xli = XLImage(str(mid))
-                _fit_to_cell(xli, cell_w_px, cell_h_px)
-                ws.add_image(xli, f"C{i}")
-            except Exception:
-                ws[f"C{i}"] = str(e.path)
-
     def _write_slot_mismatch_sheet(self, wb) -> None:
         ws = wb.create_sheet(title=i18n.KO.SLOT_MISMATCH_SHEET)
         ws["A1"] = "구분"

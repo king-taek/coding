@@ -128,7 +128,7 @@ def _make_review_dialog():
     val_pool = {s: [ImageItem(slot=s, path=Path(f"/tmp/val_{s}.jpg"), side="val")]
                 for s in slots}
     dlg = UnmatchedReviewDialog(unmatched, val_pool)
-    dlg._lookup_or_compute_score = lambda ref, val: 0.9    # 무거운 pipeline 회피
+    dlg._lookup_or_compute_score = lambda ref, val, allow_compute=True: 0.9    # 무거운 pipeline 회피
     return dlg, val_pool
 
 
@@ -180,7 +180,7 @@ def test_candidates_keep_two_columns_when_narrow(qapp):
         UnmatchedReviewDialog,
     )
     dlg = UnmatchedReviewDialog(unmatched, val_pool)
-    dlg._lookup_or_compute_score = lambda r, v: 0.9
+    dlg._lookup_or_compute_score = lambda r, v, allow_compute=True: 0.9
     dlg.resize(1000, 700)
     dlg.show()
     qapp.processEvents()
@@ -233,7 +233,7 @@ def test_ref_right_click_opens_compare_in_score_order(qapp, monkeypatch):
     dlg = M.UnmatchedReviewDialog(unmatched, val_pool)
     # 점수: v2 > v1 > v0 (내림차순 정렬 확인용)
     score = {"/tmp/v0.jpg": 0.5, "/tmp/v1.jpg": 0.7, "/tmp/v2.jpg": 0.9}
-    dlg._lookup_or_compute_score = lambda r, v: score[str(v.path)]
+    dlg._lookup_or_compute_score = lambda r, v, allow_compute=True: score[str(v.path)]
     dlg.resize(900, 700); dlg.show(); qapp.processEvents()
     dlg._idx = 0; dlg._render_current()
 

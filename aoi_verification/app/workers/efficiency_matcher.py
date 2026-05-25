@@ -221,7 +221,7 @@ def _select_backend(cfg):
 
 
 # ---------------------------------------------------------------------------
-# 스케줄러 — 슬롯 순차 fusion 파이프라인 (FastIndexWorker 와 동일 시그널 계약)
+# 스케줄러 — 슬롯 순차 fusion 파이프라인 (SlotPrecomputeWorker 와 동일 시그널 계약)
 # ---------------------------------------------------------------------------
 class _SchedSignals(QObject):
     progress = pyqtSignal(int, int)            # done_pairs, total_pairs
@@ -316,18 +316,16 @@ class EfficiencyScheduler(QThread):
         return built, ref_emb
 
     def _emit_progress(self) -> None:
-        """임베딩(후보 생성)+재채점(유사도 계산) 결합 진행도를 0~1000‰ 로 emit.
-
-        두 단계는 시간이 비슷해 50:50 가중(임베딩만/재채점만 있는 구간은 그쪽
-        100%).  부드러운 % 바는 LoadingOverlay 가 tween 으로 처리한다."""
+        """현재 단계의 실제 처리 갯수를 emit — 재채점이 시작됐으면 유사도 계산
+        갯수(쌍), 그 전이면 임베딩(후보 생성) 갯수(장).  LoadingOverlay 가 done/total
+        갯수로 표시하고, phase 시그널이 단계 라벨을 바꾼다."""
         with self._plock:
-            fs = (self._score_done / self._total_score) if self._total_score else 0.0
-            if self._total_embed > 0:
-                fe = self._embed_done / self._total_embed
-                frac = 0.5 * min(1.0, fe) + 0.5 * min(1.0, fs)
+            if self._scoring_started or self._total_embed <= 0:
+                done, total = self._score_done, self._total_score
             else:
-                frac = min(1.0, fs)
-        self.signals.progress.emit(int(round(frac * 1000)), 1000)
+                done, total = self._embed_done, self._total_embed
+        if total > 0:
+            self.signals.progress.emit(int(done), int(total))
 
     def _slot_val_features(self, vals) -> dict:
         """슬롯 val 의 고전 Feature 를 **1회만** 병렬 추출(읽기 전용 캐시).  모든 ref

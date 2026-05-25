@@ -19,8 +19,8 @@ _PREFS_FILE = "ui_prefs.json"
 
 
 # 자동화 수준 상수 (#3 올인원 모드) — 코드 전반에서 raw string 대신 이걸 사용.
+# ‘수동’은 제거되어 사진 직접 선택 / 모두 자동 두 가지만 남는다(둘 다 자동 매치).
 class AutomationLevel:
-    MANUAL = "manual"
     USER_SELECT = "user_select"
     AUTO_ALL = "auto_all"
 
@@ -31,17 +31,12 @@ class AutomationLevel:
         return level in cls.AUTO_MODES
 
 
-# 유사도 엔진 모드 — 기본(현행) vs 고속(임베딩+ANN) vs 고효율(다중 유닛).
+# 유사도 엔진 모드 — 기본(현행) vs 고효율(CPU+GPU fusion).
 class EngineMode:
     BASIC = "basic"        # 기존 파이프라인, 변경 없음 (기본값)
-    FAST = "fast"          # 임베딩 + ANN(hnswlib 또는 NumPy 폴백), 상위 K 재정렬
-    EFFICIENCY = "efficiency"  # CPU(고전)+GPU(MobileNetV3)+NPU(ResNet18) 동시 work-stealing
+    EFFICIENCY = "efficiency"  # CPU(고전)+GPU(MobileNetV3) fusion-zscore
 
-    ALL = frozenset({BASIC, FAST, EFFICIENCY})
-
-    @classmethod
-    def is_fast(cls, mode: str) -> bool:
-        return mode == cls.FAST
+    ALL = frozenset({BASIC, EFFICIENCY})
 
     @classmethod
     def is_efficiency(cls, mode: str) -> bool:
@@ -74,20 +69,16 @@ class UiPrefs:
     # 썸네일 빠른 모드 (사용자가 강제로 가장 낮은 품질 티어 사용)
     speed_mode: bool = False
     # 자동화 수준 — 사용자 개입 정도 (#3 올인원 모드)
-    #   "manual"      : 기존 흐름. Stage 1 (검증/제외) + Stage 2 (수동 매치).
-    #   "user_select" : Stage 1 만 직접, Stage 2 자동 매치 + 검토.
+    #   "user_select" : Stage 1 만 직접, Stage 2 자동 매치 + 검토.  (기본)
     #   "auto_all"    : Stage 1 건너뜀 (모든 ref 사용), Stage 2 자동 매치 + 검토.
-    automation_level: str = "manual"
+    automation_level: str = "user_select"
     # OpenVINO (Intel GPU/NPU 가속) 자동 설치 안내를 거절한 경우 — 다시 묻지
     # 않음.  사용자가 ‘다시 보지 않기’ 를 선택했거나 설치 시도 후 실패하면 True.
     openvino_install_declined: bool = False
     # 유사도 엔진 모드 + 강화 전처리 토글 (계산 전용, 화면 표시는 원본 유지).
-    engine_mode: str = "basic"               # EngineMode.{BASIC,FAST,EFFICIENCY}
+    engine_mode: str = "basic"               # EngineMode.{BASIC,EFFICIENCY}
     center_crop: bool = False                # 사진 중앙 30% 만 사용 (기준·검증)
-    kla_crop: bool = False                   # KLA 상/하단 정보영역 crop
     persist_scores: bool = False             # 유사도 점수 디스크 캐시 (#5B)
-    kla_crop_top: float = 0.08               # 상단 잘라낼 비율 (0~0.4)
-    kla_crop_bottom: float = 0.08            # 하단 잘라낼 비율 (0~0.4)
     # 고효율 모드 동시 추론 수(in-flight, NPU 기준; GPU 절반).  높일수록 NPU/GPU
     # 메모리·throughput↑ (계산 결과 불변).  setup_page 슬라이더로 조절.
     accel_concurrency: int = 32

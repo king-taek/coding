@@ -31,6 +31,8 @@ class ResultPage(QWidget):
         # 매치 실패 사진 검토(#8) 에 필요한 외부 데이터 — main_window 가 주입.
         self._val_pool: dict | None = None
         self._score_cache = None
+        # 효율 모드 선계산 top-K — 실패 검토에서 후보 풀≥300 일 때 재사용 (#1).
+        self._fast_results: dict | None = None
         self._loading = LoadingOverlay(self)
         self._exporter: ExcelExporter | None = None
         self._build()
@@ -89,13 +91,15 @@ class ResultPage(QWidget):
                     target_path: Path | None = None,
                     auto_mode: bool = False,
                     val_pool: dict | None = None,
-                    score_cache=None) -> None:
+                    score_cache=None,
+                    fast_results: dict | None = None) -> None:
         self._result = result
         self._template_path = template_path
         self._target_path = target_path
-        # 매치 실패 검토에 사용할 후보 풀 / 점수 캐시 (#8).
+        # 매치 실패 검토에 사용할 후보 풀 / 점수 캐시 / 선계산 결과 (#8/#1).
         self._val_pool = val_pool
         self._score_cache = score_cache
+        self._fast_results = fast_results
         # 검토 후 다시 그려도 ‘자동 매치 결과 검토 권장’ 라벨이 살아 있도록
         # 마지막 auto_mode 값을 기억해 재렌더링에서 재사용한다.
         self._auto_mode = bool(auto_mode)
@@ -129,13 +133,8 @@ class ResultPage(QWidget):
             )
             self._summary_layout.addWidget(hint)
 
-        mode_text = "한쪽만 검증" if result.mode == "single" else "양쪽 교차검증"
-        line(f"모드: {mode_text}")
         line(f"기준 장비: {result.ref_machine}    검증 장비: {result.val_machine}")
         line(f"매칭 성공 사진: {len(result.matches)} 장")
-        if result.mode == "cross":
-            line(f"미탐(빠른 호기): {len(result.miss_fast)} 장")
-            line(f"미탐(느린 호기): {len(result.miss_slow)} 장")
         if result.slot_only_ref or result.slot_only_val:
             line(
                 "Slot 불일치  ·  기준 전용: "
@@ -205,7 +204,8 @@ class ResultPage(QWidget):
                          target_path=self._target_path,
                          auto_mode=getattr(self, "_auto_mode", False),
                          val_pool=self._val_pool,
-                         score_cache=self._score_cache)
+                         score_cache=self._score_cache,
+                         fast_results=self._fast_results)
 
     # ------------------------------------------------------------------
     def _on_review_unmatched(self) -> None:
@@ -232,6 +232,7 @@ class ResultPage(QWidget):
             val_pool=self._val_pool,
             already_used_vals=already_used,
             score_cache=self._score_cache,
+            fast_results=self._fast_results,
             parent=self,
         )
         dlg.exec()
@@ -294,43 +295,6 @@ class ResultPage(QWidget):
             self, i18n.KO.APP_TITLE,
             i18n.KO.SAVE_SUCCESS_FMT.format(path=path),
         )
-        # 저장 알림 닫힌 직후 — 학습 데이터 동의 모달.
-        self._ask_training_consent()
-
-    def _ask_training_consent(self) -> None:
-        """저장 완료 후 ‘학습 자료로 사용?’ 모달을 띄우고 동의 시 누적."""
-        if self._result is None or not self._result.matches:
-            return
-        n = len(self._result.matches)
-        body = i18n.KO.CONSENT_BODY_FMT.format(n=n)
-        r = QMessageBox.question(
-            self, i18n.KO.CONSENT_TITLE, body,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes,
-        )
-        if r != QMessageBox.StandardButton.Yes:
-            return
-
-        from ...learning.dataset import TrainingDataStore
-        try:
-            store = TrainingDataStore()
-            store.append_session(
-                self._result.matches,
-                ref_machine=self._result.ref_machine,
-                val_machine=self._result.val_machine,
-            )
-        except Exception as exc:
-            # 성공 여부는 사용자에게 직접 노출하지 않고, 실패만 로그로 남긴다 (#4).
-            try:
-                from ...utils.error_log import log_error
-                log_error("training_consent_append_session", str(exc))
-            except Exception:
-                pass
-            QMessageBox.information(
-                self, i18n.KO.APP_TITLE, i18n.KO.ERROR_LOGGED,
-            )
-            return
-        # 성공 팝업 / 자동 재학습 트리거는 제거 (#4) — 조용히 누적만 한다.
 
     def _on_export_failed(self, msg: str) -> None:
         self._loading.hide_overlay()

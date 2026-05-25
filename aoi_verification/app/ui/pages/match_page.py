@@ -28,7 +28,6 @@ from ...utils import prefs as _prefs
 from ...similarity.slot_features import (SlotFeatureCache, SlotPrecomputeWorker,
                                             SlotScoreCache)
 from ...workers.matcher import Candidate, MatcherWorker
-from ...workers import fast_matcher as _fast
 from ...workers import efficiency_matcher as _eff
 from ...utils.prefs import EngineMode
 from ..widgets.loading_overlay import LoadingOverlay
@@ -93,13 +92,12 @@ class MatchPage(QWidget):
         # 자동 매치 모드 (#3): True 면 사용자 클릭 없이 임계치 이상 최고 점수 후보를
         # 자동으로 매치 / 후보 없으면 ‘매치 없음’ 으로 자동 처리.
         self._auto_mode: bool = False
-        # 유사도 엔진 설정 (기본/고속 + 강화/KLA 토글).  기본값 = 현행 동작.
+        # 유사도 엔진 설정 (기본/고효율 + 중앙 crop 토글).  기본값 = 현행 동작.
         self._engine_cfg = config.DEFAULT_SIM_CONFIG
-        # 고속 모드(임베딩+ANN) 활성 여부 + 슬롯 인덱스 캐시.
+        # 고효율 모드 활성 여부 — 결과를 _fast_results 에 선계산해 즉시 응답.
         self._fast_mode: bool = False
         self._efficiency_mode: bool = False
-        self._index_cache = _fast.SlotIndexCache()
-        # 자동 모드 고속 선계산 결과: {(slot, ref_path): [(val_path, score), ...]}.
+        # 고효율 선계산 결과: {(slot, ref_path): [(val_path, score), ...]}.
         self._fast_results: dict = {}
         # 현재 사전 계산 단계 라벨 (#8).
         self._precompute_phase: str = ""
@@ -335,7 +333,6 @@ class MatchPage(QWidget):
         self._model_name = model_name or "basic"
         self._auto_mode = bool(auto_mode)
         self._engine_cfg = engine_cfg or config.DEFAULT_SIM_CONFIG
-        self._index_cache.clear()
         self._fast_results.clear()
         self.phase_label.setText(phase_label)
         self._refresh_skipped_panel()
@@ -381,19 +378,11 @@ class MatchPage(QWidget):
         # 않도록 (MatcherWorker 의 동일 패턴 참고).
         self._stop_precompute_worker()
 
-        # 고속 모드 — 임베딩+ANN(hnswlib/embedder 가용 시).
-        # 고효율 모드 — CPU+GPU+NPU work-stealing (가능한 유닛만, CPU 항상).
+        # 고효율 모드 — CPU+GPU fusion-zscore.  결과를 _fast_results 에 채워
+        # _launch_matcher 가 즉시 응답한다(기본 모드는 score_cache 사용).
         eff_mode = EngineMode.is_efficiency(self._engine_cfg.engine)
         self._efficiency_mode = eff_mode
-        # 두 모드 모두 결과를 _fast_results 에 채워 _launch_matcher 가 즉시 응답.
-        self._fast_mode = (
-            eff_mode
-            or (EngineMode.is_fast(self._engine_cfg.engine) and _fast.is_available())
-        )
-        if EngineMode.is_fast(self._engine_cfg.engine) and not self._fast_mode:
-            # 고속 모드 요청했으나 의존성 없음 → 기본 모드로 조용히 폴백(로그만).
-            import logging
-            logging.getLogger("aoi.match").info(i18n.KO.ENGINE_FAST_UNAVAILABLE)
+        self._fast_mode = eff_mode
         if eff_mode and not _eff.has_accel_units():
             # 가속 장치 없음 → CPU 단독으로 고효율 모드 실행 (안내 로그).
             import logging
@@ -422,20 +411,11 @@ class MatchPage(QWidget):
             self.bg_status_label.setText("")
 
         if eff_mode:
-            # 고효율 모드 — CPU/GPU/NPU 가 공유 큐에서 ref 를 나눠 처리,
-            # 결과를 _fast_results 에 저장 (FastIndexWorker 와 동일 시그널 계약).
+            # 고효율 모드 — CPU+GPU 가 협업해 ref 를 처리, 결과를 _fast_results 에 저장.
             self.bg_status_label.setText(_eff.describe_active_units())
             self._precompute_worker = _eff.EfficiencyScheduler(
                 tasks, cfg=self._engine_cfg, threshold=self._threshold,
                 auto=self._auto_mode, results=self._fast_results, parent=self,
-            )
-        elif self._fast_mode:
-            # FastIndexWorker — SlotPrecomputeWorker 와 동일 시그널.  자동 모드면
-            # 모든 ref 를 미리 재정렬해 _fast_results 에 저장(매칭 즉시 응답).
-            self._precompute_worker = _fast.FastIndexWorker(
-                tasks, self._index_cache, cfg=self._engine_cfg,
-                auto=self._auto_mode, top_k=self._engine_cfg.top_k,
-                results=self._fast_results, parent=self,
             )
         else:
             self._precompute_worker = SlotPrecomputeWorker(
@@ -473,8 +453,7 @@ class MatchPage(QWidget):
         # (set_progress 는 hidden 오버레이를 다시 show 하지 않으므로 안전.)
         if self._current is None:
             phase = getattr(self, "_precompute_phase", "") or i18n.KO.PHASE_SCORING
-            # 라벨엔 현재 작업명만, 진행도는 부드러운 % 바로 표시(어떤 작업이 얼마나
-            # 진행됐는지 한눈에).  done/total 은 단계별 단위가 달라 바(%)로 통일.
+            # 라벨엔 현재 작업명, 진행도는 처리 갯수(done / total)로 표시.
             self._loading.set_progress(done, total, phase)
 
     def _on_precompute_slot_finished(self,
@@ -592,7 +571,6 @@ class MatchPage(QWidget):
             if self._worker.isRunning():
                 self._worker.stop()
                 self._worker.wait(500)
-        self._index_cache.clear()
         self._loading.hide_overlay()
         self.cancelled.emit()
 
@@ -715,32 +693,6 @@ class MatchPage(QWidget):
                         cands.append(Candidate(item=vitem, score=float(s)))
                 cands.sort(key=lambda c: c.score, reverse=True)
                 self._on_matcher_done(cands)
-                return
-
-        # 고속 모드 (수동) — 슬롯 인덱스가 준비됐으면 임베딩 top-K + 정밀 재정렬.
-        # 인덱스가 없으면(디스크립터 실패 등) 아래 기본 경로로 자연 폴백.
-        if self._fast_mode:
-            entry = self._index_cache.get(ref.slot)
-            if entry is not None:
-                self._slot_cache.set_active(ref.slot)
-                self._loading.show_overlay(
-                    i18n.KO.LOAD_SCORING_FMT.format(done=0, total=self._engine_cfg.top_k),
-                    cancelable=True,
-                )
-                self._current_loading_fmt = i18n.KO.LOAD_SCORING_FMT
-                self._worker = _fast.FastMatchWorker(
-                    ref, entry, val_items,
-                    threshold=self._threshold,
-                    top_k=self._engine_cfg.top_k,
-                    cfg=self._engine_cfg,
-                    slot_cache=self._slot_cache,
-                )
-                self._worker.signals.progress.connect(self._on_matcher_progress)
-                self._worker.signals.done.connect(self._on_matcher_done)
-                self._worker.signals.failed.connect(
-                    lambda msg: self._loading.set_progress(0, 0, msg)
-                )
-                self._worker.start()
                 return
 
         # 점수 사전 계산이 끝나 있으면 캐시 조회만으로 즉시 응답.
@@ -889,7 +841,6 @@ class MatchPage(QWidget):
         )
         self._state.matches.append(match)
         self._state.queue.pop(0)
-        self._log_decision(decision="pick", picked_item=val)
         self.match_confirmed.emit(match)
         self.skipped_changed.emit()
         self._advance()
@@ -963,7 +914,6 @@ class MatchPage(QWidget):
         item = self._current
         self._state.queue.pop(0)
         self._state.skipped[item.slot].append(item)
-        self._log_decision(decision="defer")
         self._refresh_skipped_panel()
         self.skipped_changed.emit()
         self._advance()
@@ -977,46 +927,11 @@ class MatchPage(QWidget):
         item = self._current
         self._state.queue.pop(0)
         self._state.no_match[item.slot].append(item)
-        self._log_decision(decision="none")
         self._refresh_skipped_panel()
         self.skipped_changed.emit()
         self._advance()
 
     # ------------------------------------------------------------------
-    def _log_decision(self, *, decision: str, picked_item=None) -> None:
-        """Evaluator 로 한 결정 로그 append (실패는 무시).
-
-        decision: "pick" | "defer" | "none"
-        """
-        if self._state is None or self._current is None:
-            return
-        try:
-            from ...learning import evaluator as _ev
-        except Exception:
-            return
-        candidates = [(c.item.path, float(c.score)) for c in self._candidates]
-        if decision == "pick" and picked_item is not None:
-            picked_path = picked_item.path
-            rank = None
-            for i, (p, _) in enumerate(candidates):
-                if p == picked_item.path:
-                    rank = i
-                    break
-        else:
-            picked_path = None
-            rank = None
-        _ev.log_decision(
-            model_name=self._model_name or "basic",
-            session_id=self._session_id or "",
-            slot=self._current.slot,
-            ref_path=self._current.path,
-            threshold=self._threshold,
-            candidates=candidates,
-            picked_path=picked_path,
-            picked_rank=rank,
-            decision=decision,
-        )
-
     def _refresh_skipped_panel(self) -> None:
         """상단 [보류된 사진 보기 (n)] / [보류 재시도] 버튼 활성/카운트 갱신.
 
