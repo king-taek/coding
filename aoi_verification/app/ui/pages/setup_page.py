@@ -52,6 +52,7 @@ class SetupPage(QWidget):
 
     start_requested = pyqtSignal(object)             # SetupInput
     benchmark_requested = pyqtSignal(object)         # SetupInput (개발자 모드)
+    groundtruth_requested = pyqtSignal(object)       # SetupInput (정답 만들기)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -400,8 +401,13 @@ class SetupPage(QWidget):
         self.bench_btn.setMinimumHeight(40)
         self.bench_btn.clicked.connect(self._on_benchmark)
         dev_bar.addWidget(self.bench_btn)
+        self.gt_btn = NeonButton("✅ 정답 만들기 (복수 선택)", role="ghost")
+        self.gt_btn.setMinimumHeight(40)
+        self.gt_btn.clicked.connect(self._on_groundtruth)
+        dev_bar.addWidget(self.gt_btn)
         root.addLayout(dev_bar)
         self.bench_btn.setVisible(self.check_dev_mode.isChecked())
+        self.gt_btn.setVisible(self.check_dev_mode.isChecked())
 
         # 개발자 크레딧 (메인 화면) -------------------------------------
         credit = QLabel(i18n.KO.CREDIT, self)
@@ -452,6 +458,13 @@ class SetupPage(QWidget):
     def _on_dev_toggled(self, on: bool) -> None:
         _prefs.patch(developer_mode=bool(on))
         self.bench_btn.setVisible(bool(on))
+        self.gt_btn.setVisible(bool(on))
+
+    def _on_groundtruth(self) -> None:
+        inp = self._collect_input()
+        if inp is None:
+            return
+        self.groundtruth_requested.emit(inp)
 
     def _on_start(self) -> None:
         inp = self._collect_input()

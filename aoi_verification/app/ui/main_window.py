@@ -147,15 +147,21 @@ class MainWindow(QMainWindow):
         # 자동 매치 결과 검토 페이지 (auto_all / user_select 모드 공용).
         from .pages.match_review_page import MatchReviewPage
         self._match_review_page = MatchReviewPage()
+        # 정답 만들기 페이지 (검증용, 복수 정답).
+        from .pages.groundtruth_page import GroundTruthPage
+        self._groundtruth_page = GroundTruthPage()
 
         for w in (self._setup_page, self._select_page,
                   self._match_page, self._result_page,
-                  self._match_review_page):
+                  self._match_review_page, self._groundtruth_page):
             self._stack.addWidget(w)
 
         # 시그널 ---------------------------------------------------------
         self._setup_page.start_requested.connect(self._on_start)
         self._setup_page.benchmark_requested.connect(self._on_benchmark)
+        self._setup_page.groundtruth_requested.connect(self._on_groundtruth)
+        self._groundtruth_page.finished.connect(
+            lambda _p: self._show_page(self._setup_page))
         self._select_page.finished.connect(self._on_select_finished)
         self._select_page.state_changed.connect(self._schedule_autosave)
         self._match_page.match_confirmed.connect(self._on_match_confirmed)
@@ -545,6 +551,28 @@ class MainWindow(QMainWindow):
             use_npu=bool(getattr(inp, "use_npu", True)),
             embed_batch=int(getattr(inp, "embed_batch", 1)),
         )
+
+    def _on_groundtruth(self, inp: SetupInput) -> None:
+        """정답 만들기 — ref별 정답(복수)을 직접 선택해 검증용 truth jsonl 로 저장."""
+        self._input = inp
+        self._session_id = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+        self._loading.show_overlay(i18n.KO.LOAD_SCAN)
+        QApplication.processEvents()
+        sr = scan(inp.ref_root, inp.val_root)
+        self._scan = sr
+        if sr.ref_only or sr.val_only:
+            self._resolve_slot_mismatch(sr)
+        common = sr.common_slot_names
+        self._loading.hide_overlay()
+        if not common:
+            QMessageBox.warning(self, i18n.KO.APP_TITLE, i18n.KO.WARN_NO_SLOTS)
+            return
+        tasks = [(n, sr.slots[n].ref_images, sr.slots[n].val_images) for n in common]
+        cfg = config.SimilarityConfig(
+            engine="basic", center_crop=bool(getattr(inp, "center_crop", False)),
+            kla_crop=bool(getattr(inp, "kla_crop", False)))
+        self._groundtruth_page.load_state(tasks, cfg=cfg, session_id=self._session_id)
+        self._show_page(self._groundtruth_page)
 
     def _on_benchmark(self, inp: SetupInput) -> None:
         """개발자 벤치마크 — CPU/GPU/NPU × 변형 전체를 순차 자동 실행, jsonl 기록."""
