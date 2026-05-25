@@ -1,6 +1,6 @@
 """WaferID OCR 보조 로직 — 파싱 / WaferID 기반 자동 병합 검증.
 
-OCR 엔진(easyocr)·Qt 없이도 도는 순수 로직만 테스트한다.
+OCR 엔진(rapidocr-onnxruntime)·Qt 없이도 도는 순수 로직만 테스트한다.
 """
 
 from __future__ import annotations
@@ -111,15 +111,15 @@ def test_merge_empty_maps_noop():
 
 
 # ---------------------------------------------------------------------------
-# ocr_available — easyocr 미설치 시 graceful False
+# ocr_available — rapidocr 미설치 시 graceful False
 # ---------------------------------------------------------------------------
 def test_ocr_available_false_when_import_fails(monkeypatch):
     import builtins
     real_import = builtins.__import__
 
     def fake_import(name, *args, **kwargs):
-        if name == "easyocr":
-            raise ImportError("no easyocr")
+        if name == "rapidocr_onnxruntime":
+            raise ImportError("no rapidocr")
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", fake_import)
