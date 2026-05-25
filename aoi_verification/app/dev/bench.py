@@ -401,11 +401,17 @@ class BenchmarkWorker(QThread):
                 sample = [v.path for v in _v[:TUNE_SAMPLE_CAP]]
 
             for tag, ov_dev, mk in emb_devices:
-                self._embed_all_slots(_ov, tag, ov_dev, mk)
+                jobs = int(getattr(self._cfg, "accel_concurrency", 32))
+                batch = max(1, int(getattr(self._cfg, "embed_batch", 1)))
+                # 정확도 임베딩 전에 tune 을 먼저 돌려 최적 batch/concurrency 적용
+                # → GPU 가 batch=1 에서 멈춘 듯 느려지는 문제 회피.
+                if self._tune and sample:
+                    best = self._run_tune(_ov, tag, ov_dev, mk, sample)
+                    if best:
+                        jobs, batch = best
+                self._embed_all_slots(_ov, tag, ov_dev, mk, jobs=jobs, batch=batch)
                 for variant in EMBED_VARIANTS:
                     self._run_embed_variant(tag, variant)
-                if self._tune and sample:
-                    self._run_tune(_ov, tag, ov_dev, mk, sample)
 
             # 앙상블 — GPU+NPU 둘 다 임베딩 성공 시
             if "gpu" in self._emb_cache and "npu" in self._emb_cache:
@@ -445,10 +451,13 @@ class BenchmarkWorker(QThread):
             self._log_result("cpu", "classical", slot, r, topk)
 
     # -- embed all slots for a device (cache) ------------------------
-    def _embed_all_slots(self, _ov, tag, ov_dev, mk) -> None:
-        self._emit(f"{tag.upper()} 임베딩 계산…")
-        cfg = self._cfg; jobs = getattr(cfg, "accel_concurrency", 32)
-        batch = max(1, int(getattr(cfg, "embed_batch", 1)))
+    def _embed_all_slots(self, _ov, tag, ov_dev, mk, jobs=None, batch=None) -> None:
+        cfg = self._cfg
+        if jobs is None:
+            jobs = int(getattr(cfg, "accel_concurrency", 32))
+        if batch is None:
+            batch = max(1, int(getattr(cfg, "embed_batch", 1)))
+        self._emit(f"{tag.upper()} 임베딩 계산 (batch={batch}, conc={jobs})…")
         cache = {}; t_embed = 0.0
         for slot, refs, vals in self._tasks:
             try:
@@ -472,7 +481,7 @@ class BenchmarkWorker(QThread):
         self._emb_cache[tag] = cache
         self._embed_s = getattr(self, "_embed_s", {}); self._embed_s[tag] = round(t_embed, 2)
         self._log({"type": "embed_precompute", "device": tag, "embed_s": round(t_embed, 2),
-                   "n_slots": len(cache)})
+                   "n_slots": len(cache), "batch": batch, "concurrency": jobs})
 
     def _run_embed_variant(self, tag, variant) -> None:
         cache = self._emb_cache.get(tag, {})
@@ -545,7 +554,7 @@ class BenchmarkWorker(QThread):
         self._emit(f"ensemble / {variant} 완료")
 
     # -- concurrency/batch 튜닝 --------------------------------------
-    def _run_tune(self, _ov, tag, ov_dev, mk, sample_paths) -> None:
+    def _run_tune(self, _ov, tag, ov_dev, mk, sample_paths):
         self._emit(f"{tag.upper()} 동시추론수·배치 최적화…")
         best = None
         for batch in TUNE_BATCH:
@@ -572,6 +581,8 @@ class BenchmarkWorker(QThread):
             self._log({"type": "tune_best", "device": tag, "concurrency": best[0],
                        "batch": best[1], "embed_s": round(best[2], 3),
                        "img_per_s": round(best[3], 2), "n_images": len(sample_paths)})
+            return (best[0], best[1])
+        return None
 
     def _log_result(self, device, variant, slot, ref_item, scored) -> None:
         topk = [{"rank": i, "filename": Path(n).name, "score": round(float(s), 4)}
