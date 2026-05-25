@@ -9,4 +9,3 @@ psutil>=5.9
 torch>=2.0
 torchvision>=0.15
 openvino>=2024.0
-rapidocr-onnxruntime>=1.3

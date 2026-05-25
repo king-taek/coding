@@ -332,9 +332,6 @@ RUNNERUP_TOOLTIP = "클릭하면 이 사진으로 매치를 교체합니다."
 LOAD_SCAN = "폴더 스캔 중…"
 LOAD_EXPORT = "엑셀로 저장 중…"
 LOAD_PRECOMPUTE_REF = "기준 장비 특징 추출 중… {done} / {total}"
-# slot명 불일치 시, KLA 사진 속 WaferID 를 OCR 로 읽는 동안 표시.
-LOAD_OCR_WAFERID = "KLA 사진 속 WaferID를 읽고 있습니다…"
-LOAD_OCR_WAFERID_FMT = "KLA 사진 속 WaferID를 읽는 중… {done} / {total}"
 
 # ── 경고/안내 모달 ─────────────────────────────────────────────────────────
 WARN_SAME_PATH_TITLE = "경로 확인"
@@ -362,29 +359,6 @@ SLOT_MAP_VAL_LABEL = "검증"
 SLOT_MAP_ADD = "추가"
 SLOT_MAP_REMOVE = "선택 해제"
 SLOT_MAP_OPEN = "매핑 다이얼로그 열기"
-SLOT_MAP_PREVIEW_HINT = (
-    "WaferID 자동 인식이 끝까지 실패한 폴더입니다.  아래 미리보기에서 선택한 "
-    "폴더의 좌상단(WaferID)을 직접 확인하고 기준↔검증을 짝지어 주세요."
-)
-SLOT_MAP_NO_PREVIEW = "(미리보기 없음)"
-
-# OCR 후 수동 매치 — KLA 사진(헤더)별로 매칭할 wafer(slot)을 드롭다운으로 선택.
-WAFER_MATCH_TITLE = "WaferID 수동 매치"
-WAFER_MATCH_HINT = (
-    "자동 인식으로 짝짓지 못한 KLA 사진입니다.  각 사진의 WaferID 를 직접 확인하고, "
-    "오른쪽 드롭다운에서 매칭할 wafer(폴더)를 선택하세요.  선택하지 않은 사진은 "
-    "매칭에서 제외됩니다."
-)
-WAFER_MATCH_NONE = "(매칭 안 함)"
-
-# setup 화면 — 각 장비(기준/검증) 폴더 설정 아래의 ‘KLA 장비’ 체크박스.
-SETUP_KLA_LABEL = "KLA 장비 (WaferID 자동 인식)"
-SETUP_KLA_TOOLTIP = (
-    "이 장비가 KLA 인 경우 체크하세요.  KLA 사진은 좌상단에 WaferID 가 표시됩니다.\n"
-    "Slot(폴더)명이 반대쪽과 맞지 않을 때, 체크한 쪽 사진의 WaferID 를 자동으로 "
-    "읽어 반대쪽 폴더명(또는 WaferID)과 같은 것끼리 매칭합니다.\n"
-    "WaferID 는 매칭에만 쓰이고, 검토/엑셀에는 원본 폴더명이 그대로 쓰입니다."
-)
 
 INFO_RESUME_TITLE = "이전 검증 이어하기"
 INFO_RESUME_BODY = "진행 중인 검증이 있습니다. 이어서 하시겠습니까?"

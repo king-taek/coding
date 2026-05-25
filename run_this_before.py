@@ -117,7 +117,6 @@ def verify_imports() -> None:
         ("openpyxl", "openpyxl"),
         ("psutil", "psutil"),
         ("openvino", "openvino (Intel GPU 가속 — 필수)"),
-        ("rapidocr_onnxruntime", "rapidocr-onnxruntime (WaferID OCR — 필수)"),
     ]
     optional: list[tuple[str, str]] = [
         ("torch", "torch (학습 기능 — 옵션)"),
@@ -155,26 +154,6 @@ def prepare_cache_dir() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 5) WaferID OCR(RapidOCR) 엔진 초기화 확인
-# ---------------------------------------------------------------------------
-def prepare_ocr_model() -> None:
-    """RapidOCR 엔진을 한 번 초기화해 동작을 확인한다.
-
-    인식 모델(ONNX)이 패키지에 내장되어 있어 **다운로드가 필요 없다**(오프라인/
-    폐쇄망 PC 에서도 동작).  여기서는 엔진 로딩만 확인하고, 실패해도 준비 스크립트
-    전체를 중단시키지 않는다(실제 사용 시 재시도되며, 그때도 실패하면 수동
-    매핑으로 폴백한다).
-    """
-    try:
-        from rapidocr_onnxruntime import RapidOCR
-        _info("WaferID OCR 엔진 초기화 중… (모델 내장 — 다운로드 불필요)")
-        RapidOCR()
-        _ok("WaferID OCR 엔진 준비 완료")
-    except Exception as exc:
-        _info(f"WaferID OCR 엔진 초기화를 건너뜀 ({exc}).")
-
-
-# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 def main() -> int:
@@ -182,7 +161,7 @@ def main() -> int:
     print("AOI 검증 프로그램 — 환경 준비 스크립트")
     print(_hr())
 
-    total = 5
+    total = 4
     _step(1, total, "Python 버전 확인")
     check_python()
 
@@ -194,9 +173,6 @@ def main() -> int:
 
     _step(4, total, "캐시 디렉토리 사전 생성")
     prepare_cache_dir()
-
-    _step(5, total, "WaferID OCR 엔진 초기화 확인")
-    prepare_ocr_model()
 
     print()
     print(_hr())

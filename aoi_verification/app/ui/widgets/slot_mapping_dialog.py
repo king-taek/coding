@@ -13,7 +13,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
-from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (QComboBox, QDialog, QHBoxLayout, QLabel,
                               QListWidget, QListWidgetItem, QVBoxLayout,
                               QWidget)
@@ -35,16 +34,13 @@ class SlotMappingDialog(QDialog):
     def __init__(self,
                  ref_only: Iterable[str],
                  val_only: Iterable[str],
-                 parent=None,
-                 header_pixmaps: dict | None = None) -> None:
+                 parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle(i18n.KO.SLOT_MAP_TITLE)
         self.resize(720, 520)
         self._ref_only = sorted(set(ref_only))
         self._val_only = sorted(set(val_only))
         self._pairs: list[tuple[str, str]] = []
-        # 폴더명 → 헤더(‘OCR 부분’) 미리보기 QPixmap.  주어지면 콤보 선택 시 표시.
-        self._header_pixmaps = dict(header_pixmaps or {})
         # 창에 최소화/최대화 버튼 + F11 전체화면 토글 (#9). 첫 show 이전에 설정.
         enable_window_controls(self)
         add_fullscreen_shortcut(self)
@@ -88,29 +84,6 @@ class SlotMappingDialog(QDialog):
         select_row.addWidget(add_btn)
         root.addLayout(select_row)
 
-        # 헤더(‘OCR 부분’) 미리보기 — OCR 자동 인식이 끝까지 실패했을 때, 선택한
-        # 폴더의 좌상단(WaferID)을 직접 보고 짝지을 수 있게 한다.
-        if self._header_pixmaps:
-            prev_hint = QLabel(i18n.KO.SLOT_MAP_PREVIEW_HINT, self)
-            prev_hint.setProperty("role", "muted")
-            prev_hint.setWordWrap(True)
-            root.addWidget(prev_hint)
-            prev_row = QHBoxLayout()
-            self._ref_preview = QLabel(self)
-            self._val_preview = QLabel(self)
-            for lab in (self._ref_preview, self._val_preview):
-                lab.setMinimumHeight(72)
-                lab.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                lab.setStyleSheet(
-                    "background: #050810; border: 1px solid #1F2A3F;")
-            prev_row.addWidget(self._ref_preview, stretch=1)
-            prev_row.addWidget(self._val_preview, stretch=1)
-            root.addLayout(prev_row)
-            self._ref_combo.currentTextChanged.connect(self._update_ref_preview)
-            self._val_combo.currentTextChanged.connect(self._update_val_preview)
-            self._update_ref_preview(self._ref_combo.currentText())
-            self._update_val_preview(self._val_combo.currentText())
-
         self._pairs_list = QListWidget(self)
         self._pairs_list.setMinimumHeight(220)
         root.addWidget(self._pairs_list, stretch=1)
@@ -131,23 +104,6 @@ class SlotMappingDialog(QDialog):
         bar.addWidget(cancel)
         bar.addWidget(ok)
         root.addLayout(bar)
-
-    # ------------------------------------------------------------------
-    def _update_ref_preview(self, name: str) -> None:
-        self._set_preview(self._ref_preview, name)
-
-    def _update_val_preview(self, name: str) -> None:
-        self._set_preview(self._val_preview, name)
-
-    def _set_preview(self, label: QLabel, name: str) -> None:
-        pm = self._header_pixmaps.get(name)
-        if pm is None or pm.isNull():
-            label.clear()
-            label.setText(i18n.KO.SLOT_MAP_NO_PREVIEW)
-            return
-        w = min(360, pm.width())
-        label.setPixmap(pm.scaledToWidth(
-            w, Qt.TransformationMode.SmoothTransformation))
 
     # ------------------------------------------------------------------
     def _on_add(self) -> None:

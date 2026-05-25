@@ -33,7 +33,6 @@ from ..utils import prefs as _prefs
 from ..utils.prefs import AutomationLevel
 from ..workers.thumbnailer import (PRIORITY_ACTIVE_SLOT, PRIORITY_BACKGROUND,
                                      ThumbnailPool, ThumbnailWorker)
-from ..workers.wafer_id_ocr import WaferIdOcrWorker
 from .pages.match_page import MatchPage
 from .pages.result_page import ResultPage
 from .pages.select_page import SelectPage
@@ -175,7 +174,6 @@ class MainWindow(QMainWindow):
         # OpenVINO 자동 설치 안내 — 사용자 요청으로 rollback (시작 시 팝업
         # 띄우지 않음).  설치 도우미 모듈은 남겨두어 향후 수동 호출 가능.
         self._openvino_worker: Optional[QThread] = None
-        self._wafer_ocr_worker: Optional[QThread] = None
 
         # 상태 -----------------------------------------------------------
         self._loading = LoadingOverlay(self)
@@ -451,17 +449,9 @@ class MainWindow(QMainWindow):
         """학습 모델 기능 제거됨 — 항상 기본(``basic``)."""
         return "basic"
 
-    def _resolve_slot_mismatch(self, sr: ScanResult, show_headers: bool = False,
-                               ref_kla: bool = False, val_kla: bool = False) -> None:
-        """ref/val 한쪽에만 있는 슬롯이 있을 때 사용자에게 매핑을 묻는다 (#23).
-
-        ``show_headers`` (=OCR 을 돌린 뒤 남은 미매칭) 면, KLA(OCR 대상) 쪽 사진을
-        모두 보여주고 각 사진 오른쪽 드롭다운으로 매칭할 wafer(slot)를 고르게 한다.
-        그 외(비-OCR)면 기존 텍스트 콤보 매핑 다이얼로그를 쓴다.
-        """
-        if show_headers and (ref_kla or val_kla):
-            self._resolve_via_wafer_match(sr, ref_kla, val_kla)
-            return
+    def _resolve_slot_mismatch(self, sr: ScanResult) -> None:
+        """ref/val 한쪽에만 있는 슬롯이 있을 때 사용자에게 수동 매핑을 묻는다 (#23)."""
+        from PyQt6.QtWidgets import QDialog
 
         from .widgets.slot_mapping_dialog import SlotMappingDialog
         # 안내 → 다이얼로그 열기 여부 묻기
@@ -477,35 +467,27 @@ class MainWindow(QMainWindow):
         if r != QMessageBox.StandardButton.Yes:
             return
 
-        from PyQt6.QtWidgets import QDialog
         dlg = SlotMappingDialog(sr.ref_only, sr.val_only, parent=self)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         if dlg.mapping.pairs:
             self._apply_slot_pairs(sr, dlg.mapping.pairs)
 
-    def _resolve_via_wafer_match(self, sr: ScanResult,
-                                 ref_kla: bool, val_kla: bool) -> None:
-        """OCR 후 수동 매치 — KLA 쪽 사진(헤더)별 드롭다운으로 wafer(slot) 선택."""
-        from PyQt6.QtWidgets import QDialog
+    def _auto_match_by_filename(self, sr: ScanResult) -> None:
+        """미매칭 폴더의 **파일명**에서 WaferID(slot명)를 뽑아 같은 wafer 끼리 자동 병합.
 
-        from .widgets.wafer_match_dialog import WaferMatchDialog
-        source = "ref" if ref_kla else "val"        # KLA(OCR 대상) 쪽
-        source_names = list(sr.ref_only if source == "ref" else sr.val_only)
-        option_names = list(sr.val_only if source == "ref" else sr.ref_only)
-        if not source_names or not option_names:
-            return        # 한쪽이 비면 매칭 불가 — 미매칭으로 둠
-        pixmaps = self._header_pixmaps_for(sr, source)
-        rows = [(name, pixmaps.get(name)) for name in source_names]
-        dlg = WaferMatchDialog(rows, option_names, parent=self)
-        if dlg.exec() != QDialog.DialogCode.Accepted:
-            return
-        sels = dlg.selections        # source폴더명 → 선택한 반대쪽 폴더명("" 가능)
-        if source == "ref":
-            pairs = [(s, t) for s, t in sels.items() if t]
-        else:                        # slot명은 항상 ref 폴더명을 유지
-            pairs = [(t, s) for s, t in sels.items() if t]
-        self._apply_slot_pairs(sr, pairs)
+        KLA 사진은 파일명에 WaferID 가 있어 그 값이 반대쪽 폴더명(또는 WaferID)과
+        같으면 자동으로 짝지어진다(OCR 없이 파일명만 — 빠름).  병합된 slot 은 원본
+        ref 폴더명을 유지한다.
+        """
+        wid_by_ref = {n: wafer_id.wafer_id_from_images(sr.slots[n].ref_images)
+                      for n in list(sr.ref_only)}
+        wid_by_val = {n: wafer_id.wafer_id_from_images(sr.slots[n].val_images)
+                      for n in list(sr.val_only)}
+        try:
+            wafer_id.merge_unmatched_by_wafer_id(sr, wid_by_ref, wid_by_val)
+        except Exception:
+            pass
 
     def _apply_slot_pairs(self, sr: ScanResult, pairs) -> None:
         """(ref폴더명, val폴더명) 쌍을 통합 — val 사진을 ref slot명으로 합치고 제거."""
@@ -571,107 +553,18 @@ class MainWindow(QMainWindow):
         # 사진이 한 장도 없는 한쪽 전용 폴더는 매칭 대상에서 제외(그냥 넘어감).
         drop_empty_unmatched(sr)
 
-        # slot명(폴더명)이 ref/val 간 일치하지 않을 때.  setup 화면에서 KLA 로
-        # 표시한 쪽의 WaferID 를 OCR 로 읽어 반대쪽 폴더명(또는 WaferID)과 같은 것
-        # 끼리 자동 매칭한다(WaferID 는 매칭 키로만 사용 — 이후 검토/엑셀 단계는
-        # 원본 폴더명을 그대로 사용).  KLA 표시가 없거나 OCR 불가면 수동 매핑.
-        # ‘공통 slot 없음’ 검사는 매칭 확정 이후로 미뤄, 폴더명이 전부 달라도 OCR
-        # 자동 매칭이 동작하도록 한다.
-        ref_kla = bool(getattr(inp, "ref_is_kla", False))
-        val_kla = bool(getattr(inp, "val_is_kla", False))
-        if (sr.ref_only or sr.val_only) and wafer_id.ocr_available() \
-                and (ref_kla or val_kla):
-            self._start_wafer_id_ocr(sr, ref_kla, val_kla)
-            return
-        self._after_slot_resolved(sr, ocr_attempted=False)
-
-    def _header_pixmaps_for(self, sr: ScanResult, side: str) -> dict:
-        """한쪽(side="ref"/"val") 미매칭 폴더별 헤더 크롭(‘OCR 부분’)을 QPixmap 으로.
-
-        KLA(OCR 대상) 쪽만 만든다 — 반대쪽(비-KLA) 사진은 OCR/헤더가 의미 없으므로
-        제외한다.
-        """
-        out: dict = {}
-        names = sr.ref_only if side == "ref" else sr.val_only
-        for name in list(names):
-            slot = sr.slots.get(name)
-            imgs = (slot.ref_images if side == "ref" else slot.val_images) \
-                if slot else []
-            pm = self._header_pixmap(imgs[0].path) if imgs else None
-            if pm is not None:
-                out[name] = pm
-        return out
-
-    @staticmethod
-    def _header_pixmap(path):
-        """헤더 크롭 PIL 이미지를 QPixmap 으로 변환. 실패 시 None."""
-        from PyQt6.QtGui import QImage, QPixmap
-        pil = wafer_id.header_crop_image(path)
-        if pil is None:
-            return None
-        pil = pil.convert("RGB")
-        data = pil.tobytes("raw", "RGB")
-        qimg = QImage(data, pil.width, pil.height, pil.width * 3,
-                      QImage.Format.Format_RGB888)
-        return QPixmap.fromImage(qimg.copy())
-
-    def _start_wafer_id_ocr(self, sr: ScanResult,
-                            ref_kla: bool, val_kla: bool) -> None:
-        """KLA 라고 선택한 쪽의 WaferID 를 백그라운드 OCR (로딩창 표시).
-
-        선택한 쪽만 OCR 하고, 반대쪽은 폴더명을 키로 매칭한다(merge 가 처리).
-        폴더당 여러 장(대표 ~5장)을 전달해 첫 장이 실패하면 다음 장으로 넘어간다.
-        """
-        def _paths(images):
-            return [it.path for it in images[:5]]
-
-        jobs: list[tuple[str, str, list]] = []
-        if ref_kla:
-            for name in list(sr.ref_only):
-                imgs = sr.slots[name].ref_images
-                if imgs:
-                    jobs.append(("ref", name, _paths(imgs)))
-        if val_kla:
-            for name in list(sr.val_only):
-                imgs = sr.slots[name].val_images
-                if imgs:
-                    jobs.append(("val", name, _paths(imgs)))
-        if not jobs:
-            self._after_slot_resolved(sr, ocr_attempted=True)
-            return
-        self._loading.show_overlay(i18n.KO.LOAD_OCR_WAFERID)
-        self._wafer_ocr_worker = WaferIdOcrWorker(jobs, parent=self)
-        self._wafer_ocr_worker.signals.progress.connect(
-            lambda d, t: self._loading.set_progress(
-                d, t, i18n.KO.LOAD_OCR_WAFERID_FMT.format(done=d, total=t)))
-        self._wafer_ocr_worker.signals.done.connect(
-            lambda wr, wv: self._on_wafer_id_ocr_done(sr, wr, wv, ref_kla, val_kla))
-        self._wafer_ocr_worker.signals.failed.connect(
-            lambda _msg: self._on_wafer_id_ocr_done(sr, {}, {}, ref_kla, val_kla))
-        self._wafer_ocr_worker.start()
-
-    def _on_wafer_id_ocr_done(self, sr: ScanResult,
-                              wid_by_ref: dict, wid_by_val: dict,
-                              ref_kla: bool = False, val_kla: bool = False) -> None:
-        """OCR 결과로 같은 WaferID 폴더를 자동 병합 후 다음 단계로."""
-        try:
-            wafer_id.merge_unmatched_by_wafer_id(sr, wid_by_ref, wid_by_val)
-        except Exception:
-            pass
-        # finished 콜백 내 모달/페이지 전환 재진입 방지 — 다음 틱에 진행.
-        QTimer.singleShot(0, lambda: self._after_slot_resolved(
-            sr, ocr_attempted=True, ref_kla=ref_kla, val_kla=val_kla))
-
-    def _after_slot_resolved(self, sr: ScanResult, ocr_attempted: bool = False,
-                             ref_kla: bool = False, val_kla: bool = False) -> None:
-        """slot 매칭 확정 후 — 남은 미매칭은 수동 매핑, 그 다음 썸네일 단계.
-
-        ``ocr_attempted`` 가 True 면(=KLA OCR 을 돌렸으나 일부가 끝까지 실패),
-        KLA 쪽 사진(헤더)을 모두 보여주는 드롭다운 매치 다이얼로그로 넘긴다.
-        """
+        # slot명(폴더명)이 ref/val 간 일치하지 않을 때, KLA 사진 파일명에 든
+        # WaferID(=slot명)로 같은 wafer 끼리 자동 매칭한다(OCR 없이 파일명만 — 빠름).
+        # 자동 매칭으로 안 되는 나머지는 수동 매핑.  ‘공통 slot 없음’ 검사는 매칭
+        # 확정 이후로 미뤄, 폴더명이 전부 달라도 자동 매칭이 동작하도록 한다.
         if sr.ref_only or sr.val_only:
-            self._resolve_slot_mismatch(sr, show_headers=ocr_attempted,
-                                        ref_kla=ref_kla, val_kla=val_kla)
+            self._auto_match_by_filename(sr)
+        self._after_slot_resolved(sr)
+
+    def _after_slot_resolved(self, sr: ScanResult) -> None:
+        """slot 매칭 확정 후 — 남은 미매칭은 수동 매핑, 그 다음 썸네일 단계."""
+        if sr.ref_only or sr.val_only:
+            self._resolve_slot_mismatch(sr)
         common = sr.common_slot_names
         if not common:
             self._loading.hide_overlay()
