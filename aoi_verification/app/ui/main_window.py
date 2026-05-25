@@ -564,19 +564,21 @@ class MainWindow(QMainWindow):
         tasks = [(n, sr.slots[n].ref_images, sr.slots[n].val_images) for n in common]
         from ..dev.bench import BenchmarkWorker
         self._loading.show_overlay("개발자 벤치마크 실행 중…")
+        # 고정 옵션만 적용(메인 화면 설정 무시): 고효율 + 중앙30% + 점수 디스크 캐시.
+        # 동시추론수·배치 B 는 벤치마크가 직접 최적값을 탐색하므로 정확도 변형은
+        # 기본값(32/1)으로 돌린다(정확도는 이 값에 불변).
         cfg = config.SimilarityConfig(
             engine="efficiency",
-            center_crop=bool(getattr(inp, "center_crop", False)),
-            kla_crop=bool(getattr(inp, "kla_crop", False)),
-            accel_concurrency=int(getattr(inp, "accel_concurrency", 32)),
-            use_cpu=bool(getattr(inp, "use_cpu", True)),
-            use_gpu=bool(getattr(inp, "use_gpu", True)),
-            use_npu=bool(getattr(inp, "use_npu", True)),
-            embed_batch=int(getattr(inp, "embed_batch", 1)),
+            center_crop=True,
+            kla_crop=False,
+            persist_scores=True,
+            accel_concurrency=32,
+            use_cpu=True, use_gpu=True, use_npu=True,
+            embed_batch=1,
         )
         self._bench_worker = BenchmarkWorker(
             tasks, cfg=cfg, threshold=float(inp.threshold),
-            use_gpu=cfg.use_gpu, use_npu=cfg.use_npu,
+            use_gpu=True, use_npu=True, tune=True,
             session_id=self._session_id, parent=self,
         )
         self._bench_worker.signals.progress.connect(

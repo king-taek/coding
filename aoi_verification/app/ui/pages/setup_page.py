@@ -466,8 +466,19 @@ class SetupPage(QWidget):
         if inp is None:
             return
         import dataclasses
-        # 벤치마크는 GPU/NPU 임베딩 + 고전 비교가 목적 → efficiency 강제.
-        inp = dataclasses.replace(inp, engine_mode="efficiency")
+        # 개발자 벤치마크는 메인 화면의 사용자 옵션을 전부 무시하고 아래 고정 옵션만
+        # 적용한다: 자동화 모드 + 고효율 모드 + 사진 중앙 30% + 점수 디스크 캐시 +
+        # 빠른 모드(썸네일 화질↓).  (동시추론수·배치 B 는 벤치마크가 직접 최적값 탐색.)
+        _prefs.patch(speed_mode=True)
+        inp = dataclasses.replace(
+            inp,
+            engine_mode="efficiency",
+            automation_level=AutomationLevel.AUTO_ALL,
+            center_crop=True,
+            kla_crop=False,
+            persist_scores=True,
+            use_cpu=True, use_gpu=True, use_npu=True,
+        )
         self.benchmark_requested.emit(inp)
 
     def _collect_input(self):

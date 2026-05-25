@@ -116,3 +116,10 @@ def test_worker_runs_all_variants(qapp, tmp_path, monkeypatch):
     for r in recs:
         if r.get("type") == "run":
             assert "precompute_s" in r and "decide_s" in r
+    # 동시추론수/배치 튜닝 sweep — tune 라인 + 장치별 tune_best
+    tunes = [r for r in recs if r.get("type") == "tune" and "embed_s" in r]
+    assert tunes, "tune sweep 라인 없음"
+    combos = {(t["device"], t["concurrency"], t["batch"]) for t in tunes}
+    assert len(combos) >= len(bench.TUNE_CONCURRENCY)        # 그리드 일부라도
+    best = {r["device"] for r in recs if r.get("type") == "tune_best"}
+    assert "gpu" in best and "npu" in best

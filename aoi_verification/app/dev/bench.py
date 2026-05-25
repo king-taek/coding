@@ -35,6 +35,11 @@ TOPK_LOG = 10          # 기록할 상위 후보 수
 HYBRID_K = 20          # 고전 재채점할 임베딩 상위 후보 수
 MARGIN_EPS = 0.02      # 이 미만이면 '애매' → margin 변형에서 고전 재채점
 
+# 동시추론수(in-flight)·정적 배치 B 최적값 탐색 그리드 (속도만 측정; 정확도 불변).
+TUNE_CONCURRENCY = [8, 16, 32, 64, 96, 128]
+TUNE_BATCH = [1, 4, 8, 16]
+TUNE_SAMPLE_CAP = 120          # 타이밍용 표본 이미지 수(가장 큰 슬롯의 val)
+
 
 # ---------------------------------------------------------------------------
 # 순수 변형 함수 (numpy) — 헤드리스 단위 테스트 대상
@@ -101,6 +106,7 @@ class BenchmarkWorker(QThread):
                  use_gpu: bool = True,
                  use_npu: bool = True,
                  session_id: str = "",
+                 tune: bool = True,
                  parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
         self._tasks = [(s, list(r), list(v)) for s, r, v in tasks]
@@ -108,6 +114,7 @@ class BenchmarkWorker(QThread):
         self._threshold = float(threshold)
         self._use_gpu = bool(use_gpu)
         self._use_npu = bool(use_npu)
+        self._tune = bool(tune)
         self._session_id = session_id or time.strftime("%Y%m%d_%H%M%S")
         self.signals = _BenchSignals()
         self._fh = None
@@ -177,9 +184,17 @@ class BenchmarkWorker(QThread):
             # 1) CPU classical (항상)
             self._run_classical()
 
-            # 2) 임베딩 장치 각각 따로
+            # 표본(가장 큰 슬롯의 val) — 동시추론/배치 튜닝용.
+            sample = []
+            if self._tasks:
+                _, _r, _v = max(self._tasks, key=lambda t: len(t[2]))
+                sample = [v.path for v in _v[:TUNE_SAMPLE_CAP]]
+
+            # 2) 임베딩 장치 각각 따로 — 정확도 변형 + 동시추론/배치 최적화
             for tag, ov_dev, model_kind in emb_devices:
                 self._run_embed_device(_ov, tag, ov_dev, model_kind)
+                if self._tune and sample:
+                    self._run_tune(_ov, tag, ov_dev, model_kind, sample)
 
             self._log({"type": "bench_done", "ts": time.strftime("%Y-%m-%dT%H:%M:%S")})
             self._fh.close(); self._fh = None
@@ -317,6 +332,43 @@ class BenchmarkWorker(QThread):
             for slot, r, topk in rows:
                 self._log_result(tag, variant, slot, r, topk)
             self._emit(f"{tag.upper()} / {variant} 완료")
+
+    # -- concurrency / batch 최적값 탐색 (속도만; 정확도 불변) ----------
+    def _run_tune(self, _ov, tag, ov_dev, model_kind, sample_paths) -> None:
+        self._emit(f"{tag.upper()} 동시추론수·배치 최적화 탐색…")
+        best = None
+        for batch in TUNE_BATCH:
+            # 워밍업 — (model_kind,device,batch) 컴파일을 미리 끝내 타이밍에서 제외.
+            try:
+                _ov.device_embed(sample_paths[:4], model_kind=model_kind,
+                                 device=ov_dev, cfg=self._cfg, jobs=8, batch=batch)
+            except Exception:
+                pass
+            for conc in TUNE_CONCURRENCY:
+                try:
+                    t0 = time.perf_counter()
+                    emb = _ov.device_embed(sample_paths, model_kind=model_kind,
+                                           device=ov_dev, cfg=self._cfg,
+                                           jobs=conc, batch=batch)
+                    dt = time.perf_counter() - t0
+                    n = len(emb)
+                except Exception as exc:
+                    self._log({"type": "tune", "device": tag, "concurrency": conc,
+                               "batch": batch, "error": repr(exc)})
+                    continue
+                ips = (n / dt) if dt > 0 else 0.0
+                self._log({"type": "tune", "device": tag, "concurrency": conc,
+                           "batch": batch, "embed_s": round(dt, 3),
+                           "n_images": n, "img_per_s": round(ips, 2)})
+                if n > 0 and (best is None or dt < best[2]):
+                    best = (conc, batch, dt, ips)
+        if best is not None:
+            self._log({"type": "tune_best", "device": tag,
+                       "concurrency": best[0], "batch": best[1],
+                       "embed_s": round(best[2], 3), "img_per_s": round(best[3], 2),
+                       "n_images": len(sample_paths)})
+            self._emit(f"{tag.upper()} 최적 concurrency={best[0]} batch={best[1]} "
+                       f"({best[2]:.1f}s/{len(sample_paths)}장)")
 
     # -- per-ref result line -----------------------------------------
     def _log_result(self, device, variant, slot, ref_item, scored) -> None:
