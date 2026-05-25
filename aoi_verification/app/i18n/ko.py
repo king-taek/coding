@@ -338,6 +338,9 @@ RUNNERUP_TOOLTIP = "클릭하면 이 사진으로 매치를 교체합니다."
 LOAD_SCAN = "폴더 스캔 중…"
 LOAD_EXPORT = "엑셀로 저장 중…"
 LOAD_PRECOMPUTE_REF = "기준 장비 특징 추출 중… {done} / {total}"
+# slot명 불일치 시, KLA 사진 속 WaferID 를 OCR 로 읽는 동안 표시.
+LOAD_OCR_WAFERID = "KLA 사진 속 WaferID를 읽고 있습니다…"
+LOAD_OCR_WAFERID_FMT = "KLA 사진 속 WaferID를 읽는 중… {done} / {total}"
 
 # ── 경고/안내 모달 ─────────────────────────────────────────────────────────
 WARN_SAME_PATH_TITLE = "경로 확인"

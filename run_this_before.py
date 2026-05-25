@@ -117,6 +117,7 @@ def verify_imports() -> None:
         ("openpyxl", "openpyxl"),
         ("psutil", "psutil"),
         ("openvino", "openvino (Intel GPU 가속 — 필수)"),
+        ("easyocr", "easyocr (WaferID OCR — 필수)"),
     ]
     optional: list[tuple[str, str]] = [
         ("torch", "torch (학습 기능 — 옵션)"),
@@ -154,6 +155,28 @@ def prepare_cache_dir() -> None:
 
 
 # ---------------------------------------------------------------------------
+# 5) WaferID OCR(EasyOCR) 인식 모델 사전 다운로드
+# ---------------------------------------------------------------------------
+def prepare_ocr_model() -> None:
+    """EasyOCR 인식 모델을 미리 받아 둔다(첫 실행이 빨라지고 오프라인 대비).
+
+    인터넷이 없으면 다운로드가 실패할 수 있으나, 그래도 준비 스크립트 전체를
+    중단시키지 않는다(실제 사용 시 재시도되며, 그때도 실패하면 수동 매핑으로
+    폴백한다).
+    """
+    try:
+        import easyocr
+        _info("EasyOCR 인식 모델 준비 중… (최초 1회, 인터넷 필요)")
+        easyocr.Reader(["en"], gpu=False)
+        _ok("EasyOCR 인식 모델 준비 완료")
+    except Exception as exc:
+        _info(
+            "EasyOCR 모델 사전 다운로드를 건너뜀 "
+            f"({exc}). 인터넷 연결 후 다시 실행하면 미리 받아 둘 수 있습니다."
+        )
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 def main() -> int:
@@ -161,7 +184,7 @@ def main() -> int:
     print("AOI 검증 프로그램 — 환경 준비 스크립트")
     print(_hr())
 
-    total = 4
+    total = 5
     _step(1, total, "Python 버전 확인")
     check_python()
 
@@ -173,6 +196,9 @@ def main() -> int:
 
     _step(4, total, "캐시 디렉토리 사전 생성")
     prepare_cache_dir()
+
+    _step(5, total, "WaferID OCR 인식 모델 사전 다운로드")
+    prepare_ocr_model()
 
     print()
     print(_hr())

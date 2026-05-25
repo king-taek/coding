@@ -27,11 +27,12 @@ from .. import config, i18n
 from ..models import session as session_mod
 from ..models.result import FinalResult, MatchResult, MissEntry
 from ..models.slot import ImageItem, ScanResult, Slot, scan
-from ..utils import paths
+from ..utils import paths, wafer_id
 from ..utils import prefs as _prefs
 from ..utils.prefs import AutomationLevel
 from ..workers.thumbnailer import (PRIORITY_ACTIVE_SLOT, PRIORITY_BACKGROUND,
                                      ThumbnailPool, ThumbnailWorker)
+from ..workers.wafer_id_ocr import WaferIdOcrWorker
 from .pages.match_page import MatchPage
 from .pages.result_page import ResultPage
 from .pages.select_page import SelectPage
@@ -173,6 +174,7 @@ class MainWindow(QMainWindow):
         # OpenVINO 자동 설치 안내 — 사용자 요청으로 rollback (시작 시 팝업
         # 띄우지 않음).  설치 도우미 모듈은 남겨두어 향후 수동 호출 가능.
         self._openvino_worker: Optional[QThread] = None
+        self._wafer_ocr_worker: Optional[QThread] = None
 
         # 상태 -----------------------------------------------------------
         self._loading = LoadingOverlay(self)
@@ -538,17 +540,68 @@ class MainWindow(QMainWindow):
         sr = scan(inp.ref_root, inp.val_root)
         self._scan = sr
 
+        # slot명이 ref/val 간 일치하지 않으면, 먼저 KLA 사진의 WaferID 를 OCR
+        # 로 읽어 같은 WaferID 끼리 자동 매칭한다(WaferID 는 매칭 키로만 사용 —
+        # 이후 검토/엑셀 단계는 원본 폴더명을 그대로 사용).  남는 미매칭만 기존
+        # 수동 매핑 다이얼로그로 폴백.  ‘공통 slot 없음’ 검사는 매칭 확정 이후로
+        # 미뤄, 폴더명이 전부 다른 경우에도 OCR 자동 매칭이 동작하도록 한다.
+        if (sr.ref_only or sr.val_only) and wafer_id.ocr_available():
+            self._start_wafer_id_ocr(sr)
+            return
+        self._after_slot_resolved(sr)
+
+    def _start_wafer_id_ocr(self, sr: ScanResult) -> None:
+        """미매칭 폴더 대표 이미지의 WaferID 를 백그라운드 OCR (로딩창 표시)."""
+        jobs: list[tuple[str, str, Path]] = []
+        for name in list(sr.ref_only):
+            imgs = sr.slots[name].ref_images
+            if imgs:
+                jobs.append(("ref", name, imgs[0].path))
+        for name in list(sr.val_only):
+            imgs = sr.slots[name].val_images
+            if imgs:
+                jobs.append(("val", name, imgs[0].path))
+        if not jobs:
+            self._after_slot_resolved(sr)
+            return
+        self._loading.show_overlay(i18n.KO.LOAD_OCR_WAFERID)
+        self._wafer_ocr_worker = WaferIdOcrWorker(jobs, parent=self)
+        self._wafer_ocr_worker.signals.progress.connect(
+            lambda d, t: self._loading.set_progress(
+                d, t, i18n.KO.LOAD_OCR_WAFERID_FMT.format(done=d, total=t)))
+        self._wafer_ocr_worker.signals.done.connect(
+            lambda wr, wv: self._on_wafer_id_ocr_done(sr, wr, wv))
+        self._wafer_ocr_worker.signals.failed.connect(
+            lambda _msg: self._on_wafer_id_ocr_done(sr, {}, {}))
+        self._wafer_ocr_worker.start()
+
+    def _on_wafer_id_ocr_done(self, sr: ScanResult,
+                              wid_by_ref: dict, wid_by_val: dict) -> None:
+        """OCR 결과로 같은 WaferID 폴더를 자동 병합 후 다음 단계로."""
+        try:
+            wafer_id.merge_unmatched_by_wafer_id(sr, wid_by_ref, wid_by_val)
+        except Exception:
+            pass
+        # finished 콜백 내 모달/페이지 전환 재진입 방지 — 다음 틱에 진행.
+        QTimer.singleShot(0, lambda: self._after_slot_resolved(sr))
+
+    def _after_slot_resolved(self, sr: ScanResult) -> None:
+        """slot 매칭 확정 후 — 남은 미매칭은 수동 매핑, 그 다음 썸네일 단계."""
+        # OCR 자동 매칭으로도 남는 한쪽 전용 Slot 은 사용자 수동 매핑 (#23).
+        if sr.ref_only or sr.val_only:
+            self._resolve_slot_mismatch(sr)
         common = sr.common_slot_names
         if not common:
             self._loading.hide_overlay()
             QMessageBox.warning(self, i18n.KO.APP_TITLE, i18n.KO.WARN_NO_SLOTS)
             return
+        self._continue_start_after_scan(common)
 
-        # 한쪽 전용 Slot 이 있으면 사용자에게 수동 매핑을 물어본다 (#23) ------
-        if sr.ref_only or sr.val_only:
-            self._resolve_slot_mismatch(sr)
-
-        # 썸네일 캐시 사전 생성 (백그라운드) -----------------------------
+    def _continue_start_after_scan(self, common: list[str]) -> None:
+        """slot 확정 후 썸네일 캐시 사전 생성(백그라운드) → 다음 단계."""
+        sr = self._scan
+        if sr is None:
+            return
         all_items: list[ImageItem] = []
         for name in common:
             slot = sr.slots[name]
