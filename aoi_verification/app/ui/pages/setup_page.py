@@ -9,7 +9,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (QButtonGroup, QCheckBox, QFileDialog, QFormLayout,
                               QGroupBox, QHBoxLayout, QLabel, QLineEdit,
                               QMessageBox, QRadioButton, QScrollArea,
-                              QSizePolicy, QSpinBox, QVBoxLayout, QWidget)
+                              QSizePolicy, QVBoxLayout, QWidget)
 
 from ... import config, i18n
 from ...learning import evaluator as _evaluator
@@ -51,8 +51,6 @@ class SetupPage(QWidget):
     """검증 시작 화면."""
 
     start_requested = pyqtSignal(object)             # SetupInput
-    benchmark_requested = pyqtSignal(object)         # SetupInput (개발자 모드)
-    groundtruth_requested = pyqtSignal(object)       # SetupInput (정답 만들기)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -293,34 +291,9 @@ class SetupPage(QWidget):
         accel_row.addWidget(self.accel_value)
         engine_card.body().addLayout(accel_row)
 
-        # 장치 사용 토글 + 정적 배치 B — 단기 테스트용 (#opt).
-        dev_row = QHBoxLayout()
-        self.check_use_cpu = QCheckBox(i18n.KO.DEVICE_CPU_LABEL, engine_card)
-        self.check_use_cpu.setChecked(bool(getattr(_prefs_now, "use_cpu", True)))
-        self.check_use_gpu = QCheckBox(i18n.KO.DEVICE_GPU_LABEL, engine_card)
-        self.check_use_gpu.setChecked(bool(getattr(_prefs_now, "use_gpu", True)))
-        self.check_use_npu = QCheckBox(i18n.KO.DEVICE_NPU_LABEL, engine_card)
-        self.check_use_npu.setChecked(bool(getattr(_prefs_now, "use_npu", True)))
-        for _c in (self.check_use_cpu, self.check_use_gpu, self.check_use_npu):
-            _c.setToolTip(i18n.KO.DEVICE_TOGGLE_TOOLTIP)
-            dev_row.addWidget(_c)
-        dev_row.addStretch(1)
-        batch_lbl = QLabel(i18n.KO.EMBED_BATCH_LABEL, engine_card)
-        batch_lbl.setToolTip(i18n.KO.EMBED_BATCH_TOOLTIP)
-        self.spin_embed_batch = QSpinBox(engine_card)
-        self.spin_embed_batch.setRange(1, 32)
-        self.spin_embed_batch.setValue(int(getattr(_prefs_now, "embed_batch", 1)))
-        self.spin_embed_batch.setToolTip(i18n.KO.EMBED_BATCH_TOOLTIP)
-        dev_row.addWidget(batch_lbl)
-        dev_row.addWidget(self.spin_embed_batch)
-        engine_card.body().addLayout(dev_row)
-
-        # 효율 모드에서만 의미 → 다른 엔진을 고르면 비활성.
+        # 효율 모드(GPU 임베딩 + CPU 고전 fusion)에서만 의미 → 다른 엔진이면 비활성.
         def _sync_accel_enabled() -> None:
-            on = self.radio_engine_efficiency.isChecked()
-            for _w in (self.slider_accel, self.check_use_cpu, self.check_use_gpu,
-                       self.check_use_npu, self.spin_embed_batch):
-                _w.setEnabled(on)
+            self.slider_accel.setEnabled(self.radio_engine_efficiency.isChecked())
         for _rb in (self.radio_engine_basic, self.radio_engine_fast,
                     self.radio_engine_efficiency):
             _rb.toggled.connect(lambda _on: _sync_accel_enabled())
@@ -389,26 +362,6 @@ class SetupPage(QWidget):
         bar.addWidget(self.start_btn)
         root.addLayout(bar)
 
-        # 개발자 모드 — 토글 + 전체 자동 벤치마크 버튼 (prefs.developer_mode 로 표시).
-        dev_bar = QHBoxLayout()
-        dev_bar.addStretch(1)
-        self.check_dev_mode = QCheckBox("개발자 모드", self)
-        self.check_dev_mode.setChecked(bool(getattr(_prefs.load(), "developer_mode", False)))
-        self.check_dev_mode.toggled.connect(self._on_dev_toggled)
-        dev_bar.addWidget(self.check_dev_mode)
-        self.bench_btn = NeonButton("🔬 개발자 벤치마크 (CPU/GPU/NPU × 변형 전체 자동)",
-                                    role="ghost")
-        self.bench_btn.setMinimumHeight(40)
-        self.bench_btn.clicked.connect(self._on_benchmark)
-        dev_bar.addWidget(self.bench_btn)
-        self.gt_btn = NeonButton("✅ 정답 만들기 (복수 선택)", role="ghost")
-        self.gt_btn.setMinimumHeight(40)
-        self.gt_btn.clicked.connect(self._on_groundtruth)
-        dev_bar.addWidget(self.gt_btn)
-        root.addLayout(dev_bar)
-        self.bench_btn.setVisible(self.check_dev_mode.isChecked())
-        self.gt_btn.setVisible(self.check_dev_mode.isChecked())
-
         # 개발자 크레딧 (메인 화면) -------------------------------------
         credit = QLabel(i18n.KO.CREDIT, self)
         credit.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -455,17 +408,6 @@ class SetupPage(QWidget):
         _prefs.patch(threshold=v / 100.0)
 
     # ------------------------------------------------------------------
-    def _on_dev_toggled(self, on: bool) -> None:
-        _prefs.patch(developer_mode=bool(on))
-        self.bench_btn.setVisible(bool(on))
-        self.gt_btn.setVisible(bool(on))
-
-    def _on_groundtruth(self) -> None:
-        inp = self._collect_input()
-        if inp is None:
-            return
-        self.groundtruth_requested.emit(inp)
-
     def _on_start(self) -> None:
         inp = self._collect_input()
         if inp is None:
@@ -473,26 +415,6 @@ class SetupPage(QWidget):
         if inp.engine_mode == "fast" and not self._ensure_fast_ready():
             return
         self.start_requested.emit(inp)
-
-    def _on_benchmark(self) -> None:
-        inp = self._collect_input()
-        if inp is None:
-            return
-        import dataclasses
-        # 개발자 벤치마크는 메인 화면의 사용자 옵션을 전부 무시하고 아래 고정 옵션만
-        # 적용한다: 자동화 모드 + 고효율 모드 + 사진 중앙 30% + 점수 디스크 캐시 +
-        # 빠른 모드(썸네일 화질↓).  (동시추론수·배치 B 는 벤치마크가 직접 최적값 탐색.)
-        _prefs.patch(speed_mode=True)
-        inp = dataclasses.replace(
-            inp,
-            engine_mode="efficiency",
-            automation_level=AutomationLevel.AUTO_ALL,
-            center_crop=True,
-            kla_crop=False,
-            persist_scores=True,
-            use_cpu=True, use_gpu=True, use_npu=True,
-        )
-        self.benchmark_requested.emit(inp)
 
     def _collect_input(self):
         ref_root = Path(self.ref_path_edit.text().strip())
@@ -540,10 +462,11 @@ class SetupPage(QWidget):
         kla_crop = bool(self.check_kla_crop.isChecked())
         persist_scores = bool(self.check_persist_scores.isChecked())
         accel_concurrency = int(self.slider_accel.value())
-        use_cpu = bool(self.check_use_cpu.isChecked())
-        use_gpu = bool(self.check_use_gpu.isChecked())
-        use_npu = bool(self.check_use_npu.isChecked())
-        embed_batch = int(self.spin_embed_batch.value())
+        # 효율 모드 = CPU+GPU fusion-zscore 고정.  NPU 는 비활성(코드만 보존).
+        use_cpu = True
+        use_gpu = True
+        use_npu = False
+        embed_batch = 1
 
         # 고속 모드를 골랐는데 의존성(hnswlib 등)이 없으면 조용히 기본 모드로
         # 폴백돼 "속도 차이가 없다"는 혼란을 준다.  설치를 안내하고, 설치 전에는

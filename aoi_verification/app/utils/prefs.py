@@ -94,11 +94,8 @@ class UiPrefs:
     # 고효율 모드 장치 사용 토글 + 정적 배치 B (테스트용).
     use_cpu: bool = True
     use_gpu: bool = True
-    use_npu: bool = True
+    use_npu: bool = False        # 효율 모드는 CPU+GPU fusion. NPU 비활성(코드만 보존).
     embed_batch: int = 1
-    # 개발자 모드 — 켜면 셋업 화면에 'CPU/GPU/NPU × 개선안 변형 전체 자동 벤치마크'
-    # 버튼이 노출된다 (정확도/속도 비교용 진단, 일반 사용자에겐 숨김).
-    developer_mode: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
 
     # ------------------------------------------------------------------

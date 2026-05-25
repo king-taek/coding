@@ -147,21 +147,14 @@ class MainWindow(QMainWindow):
         # 자동 매치 결과 검토 페이지 (auto_all / user_select 모드 공용).
         from .pages.match_review_page import MatchReviewPage
         self._match_review_page = MatchReviewPage()
-        # 정답 만들기 페이지 (검증용, 복수 정답).
-        from .pages.groundtruth_page import GroundTruthPage
-        self._groundtruth_page = GroundTruthPage()
 
         for w in (self._setup_page, self._select_page,
                   self._match_page, self._result_page,
-                  self._match_review_page, self._groundtruth_page):
+                  self._match_review_page):
             self._stack.addWidget(w)
 
         # 시그널 ---------------------------------------------------------
         self._setup_page.start_requested.connect(self._on_start)
-        self._setup_page.benchmark_requested.connect(self._on_benchmark)
-        self._setup_page.groundtruth_requested.connect(self._on_groundtruth)
-        self._groundtruth_page.finished.connect(
-            lambda _p: self._show_page(self._setup_page))
         self._select_page.finished.connect(self._on_select_finished)
         self._select_page.state_changed.connect(self._schedule_autosave)
         self._match_page.match_confirmed.connect(self._on_match_confirmed)
@@ -552,82 +545,6 @@ class MainWindow(QMainWindow):
             embed_batch=int(getattr(inp, "embed_batch", 1)),
         )
 
-    def _on_groundtruth(self, inp: SetupInput) -> None:
-        """정답 만들기 — ref별 정답(복수)을 직접 선택해 검증용 truth jsonl 로 저장."""
-        self._input = inp
-        self._session_id = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
-        self._loading.show_overlay(i18n.KO.LOAD_SCAN)
-        QApplication.processEvents()
-        sr = scan(inp.ref_root, inp.val_root)
-        self._scan = sr
-        if sr.ref_only or sr.val_only:
-            self._resolve_slot_mismatch(sr)
-        common = sr.common_slot_names
-        self._loading.hide_overlay()
-        if not common:
-            QMessageBox.warning(self, i18n.KO.APP_TITLE, i18n.KO.WARN_NO_SLOTS)
-            return
-        tasks = [(n, sr.slots[n].ref_images, sr.slots[n].val_images) for n in common]
-        cfg = config.SimilarityConfig(
-            engine="basic", center_crop=bool(getattr(inp, "center_crop", False)),
-            kla_crop=bool(getattr(inp, "kla_crop", False)))
-        self._groundtruth_page.load_state(tasks, cfg=cfg, session_id=self._session_id)
-        self._show_page(self._groundtruth_page)
-
-    def _on_benchmark(self, inp: SetupInput) -> None:
-        """개발자 벤치마크 — CPU/GPU/NPU × 변형 전체를 순차 자동 실행, jsonl 기록."""
-        self._input = inp
-        self._session_id = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
-        self._loading.show_overlay(i18n.KO.LOAD_SCAN)
-        QApplication.processEvents()
-        sr = scan(inp.ref_root, inp.val_root)
-        self._scan = sr
-        if sr.ref_only or sr.val_only:
-            self._resolve_slot_mismatch(sr)
-        common = sr.common_slot_names
-        if not common:
-            self._loading.hide_overlay()
-            QMessageBox.warning(self, i18n.KO.APP_TITLE, i18n.KO.WARN_NO_SLOTS)
-            return
-        tasks = [(n, sr.slots[n].ref_images, sr.slots[n].val_images) for n in common]
-        from ..dev.bench import BenchmarkWorker
-        self._loading.show_overlay("개발자 벤치마크 실행 중…")
-        # 고정 옵션만 적용(메인 화면 설정 무시): 고효율 + 중앙30% + 점수 디스크 캐시.
-        # 동시추론수·배치 B 는 벤치마크가 직접 최적값을 탐색하므로 정확도 변형은
-        # 기본값(32/1)으로 돌린다(정확도는 이 값에 불변).
-        cfg = config.SimilarityConfig(
-            engine="efficiency",
-            center_crop=True,
-            kla_crop=False,
-            persist_scores=True,
-            accel_concurrency=32,
-            use_cpu=True, use_gpu=True, use_npu=True,
-            embed_batch=1,
-        )
-        self._bench_worker = BenchmarkWorker(
-            tasks, cfg=cfg, threshold=float(inp.threshold),
-            use_gpu=True, use_npu=True, tune=True,
-            session_id=self._session_id, parent=self,
-        )
-        self._bench_worker.signals.progress.connect(
-            lambda m: self._loading.show_overlay(f"개발자 벤치마크: {m}")
-        )
-        self._bench_worker.signals.done.connect(self._on_benchmark_done)
-        self._bench_worker.signals.failed.connect(self._on_benchmark_failed)
-        self._bench_worker.start()
-
-    def _on_benchmark_done(self, path: str) -> None:
-        self._loading.hide_overlay()
-        QMessageBox.information(
-            self, i18n.KO.APP_TITLE,
-            f"개발자 벤치마크 완료.\n\n결과 파일:\n{path}\n\n"
-            "이 jsonl 을 GitHub 에 올려주세요.",
-        )
-
-    def _on_benchmark_failed(self, msg: str) -> None:
-        self._loading.hide_overlay()
-        QMessageBox.warning(self, i18n.KO.APP_TITLE,
-                            f"개발자 벤치마크 실패:\n{msg}")
 
     def _on_start(self, inp: SetupInput) -> None:
         self._input = inp
@@ -1087,20 +1004,6 @@ class MainWindow(QMainWindow):
             val_pool=review_pool,
             score_cache=review_score_cache,
         )
-        # 진단용 — 엑셀 저장 시 최종 매치를 같은 레퍼런스 파일에 추가(임시).
-        self._result_page.set_reference_log(
-            getattr(self._match_page, "_ref_log_path", None)
-        )
-        # 진단용 — recall 측정: 모든 ref(매치+미탐)의 엔진 전체 랭킹/장치 뷰를
-        # 결과 페이지에 넘겨, 엑셀 저장 시 '사용자 최종 매치가 엔진 랭킹 몇 위
-        # 였는지(없으면 -1=recall 실패)' 까지 기록하게 한다.
-        try:
-            refs_for_view = [(m.slot, m.ref_path) for m in result.matches]
-            refs_for_view += [(u.slot, u.path) for u in result.unmatched_refs]
-            engine_view = self._match_page.build_engine_view(refs_for_view)
-        except Exception:
-            engine_view = {}
-        self._result_page.set_engine_view(engine_view)
         QMessageBox.information(self, i18n.KO.APP_TITLE, i18n.KO.INFO_ALL_DONE)
         self._show_page(self._result_page)
         self._phase = PHASE_NONE

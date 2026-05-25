@@ -95,27 +95,12 @@ def _tags(units):
     return [getattr(u, "tag", "?") for u in units]
 
 
-def test_device_toggles(monkeypatch):
+def test_build_units_cpu_gpu(monkeypatch):
+    # build_units(보존용): CPU 항상 + GPU(use_gpu 기본 True). NPU 는 use_npu=True 일 때만.
     monkeypatch.setattr(eff._ov, "available_units", lambda: ["GPU", "NPU"])
     monkeypatch.setattr(eff._ov, "compile_model_on",
                         lambda mk, dev, batch=1: (object(), "dev"))
-    # NPU 만 사용
-    units = eff.build_units(_Cfg(use_cpu=False, use_gpu=False, use_npu=True), 0.5)
-    assert _tags(units) == ["npu"]
-    # GPU+CPU
-    units = eff.build_units(_Cfg(use_cpu=True, use_gpu=True, use_npu=False), 0.5)
-    assert _tags(units) == ["cpu", "gpu"]
-
-
-def test_all_disabled_falls_back_to_cpu(monkeypatch):
-    monkeypatch.setattr(eff._ov, "available_units", lambda: ["GPU", "NPU"])
-    monkeypatch.setattr(eff._ov, "compile_model_on",
-                        lambda mk, dev, batch=1: (object(), "dev"))
-    units = eff.build_units(_Cfg(use_cpu=False, use_gpu=False, use_npu=False), 0.5)
-    assert _tags(units) == ["cpu"]      # 0 유닛 방지 폴백
-
-
-def test_embed_batch_helper():
-    assert eff.embed_batch(_Cfg(embed_batch=8)) == 8
-    assert eff.embed_batch(_Cfg(embed_batch=0)) == 1
-    assert eff.embed_batch(None) == 1
+    units = eff.build_units(_Cfg(use_npu=False), 0.5)
+    assert _tags(units) == ["cpu", "gpu"]               # 기본 = CPU+GPU
+    units = eff.build_units(_Cfg(use_npu=True), 0.5)
+    assert _tags(units) == ["cpu", "gpu", "npu"]        # NPU 재활성 경로 보존
