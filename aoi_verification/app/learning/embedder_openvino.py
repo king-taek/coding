@@ -260,12 +260,14 @@ def invalidate_caches() -> None:
 # ---------------------------------------------------------------------------
 # 입력 텐서 만들기 (PyTorch 와 동일 전처리 — 결과 호환 보장)
 # ---------------------------------------------------------------------------
-def _make_input_array(path: Path, cfg=None) -> Optional[np.ndarray]:  # pragma: no cover
+def _make_input_array(path: Path, cfg=None, side=None) -> Optional[np.ndarray]:  # pragma: no cover
     """``(3, _INPUT_PX, _INPUT_PX)`` float32 NumPy 배열.  ``cfg`` 가 주어지면
-    강화/KLA 전처리 적용 (PyTorch 경로와 동일하게)."""
+    강화/KLA 전처리 적용 (PyTorch 경로와 동일하게).  ``side`` ('ref'/'val') 가
+    주어지면 중앙 30% crop 도 side 별로 적용(center_crop 옵션이 켜진 경우)."""
     from ..utils import image_io
     try:
-        gray = image_io.preprocessed_roi_gray(path, long_edge=_INPUT_PX, cfg=cfg)
+        gray = image_io.preprocessed_roi_gray(path, long_edge=_INPUT_PX, cfg=cfg,
+                                               side=side)
     except Exception:
         return None
     h, w = gray.shape
@@ -530,8 +532,12 @@ def device_embed(paths: Iterable[Path],
                  device: str,
                  cfg=None,
                  jobs: Optional[int] = None,
-                 batch: int = 1) -> Dict[Path, np.ndarray]:  # pragma: no cover - 환경 의존
+                 batch: int = 1,
+                 side=None) -> Dict[Path, np.ndarray]:  # pragma: no cover - 환경 의존
     """``model_kind`` 백본을 ``device`` 에 고정 컴파일해 raw 임베딩(L2 정규화) 계산.
+
+    ``side`` ('ref'/'val') 가 주어지고 cfg.center_crop 이 켜져 있으면 중앙 30%
+    crop 입력으로 임베딩한다(개발자 벤치마크의 center-crop 변형용).
 
     ``jobs`` 로 동시 in-flight 추론 수를 지정 — NPU(8GB)는 크게 주어 메모리/
     파이프라인을 적극 활용한다.  ``batch>1`` 이면 요청당 B장을 한 번에 추론
@@ -547,7 +553,7 @@ def device_embed(paths: Iterable[Path],
     mark_unit_active(device)
     arrs: list[tuple[Path, np.ndarray]] = []
     for p in [Path(p) for p in paths]:
-        arr = _make_input_array(p, cfg)
+        arr = _make_input_array(p, cfg, side=side)
         if arr is not None:
             arrs.append((p, arr))
     if not arrs:

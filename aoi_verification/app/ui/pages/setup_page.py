@@ -51,6 +51,7 @@ class SetupPage(QWidget):
     """검증 시작 화면."""
 
     start_requested = pyqtSignal(object)             # SetupInput
+    benchmark_requested = pyqtSignal(object)         # SetupInput (개발자 모드)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -387,6 +388,21 @@ class SetupPage(QWidget):
         bar.addWidget(self.start_btn)
         root.addLayout(bar)
 
+        # 개발자 모드 — 토글 + 전체 자동 벤치마크 버튼 (prefs.developer_mode 로 표시).
+        dev_bar = QHBoxLayout()
+        dev_bar.addStretch(1)
+        self.check_dev_mode = QCheckBox("개발자 모드", self)
+        self.check_dev_mode.setChecked(bool(getattr(_prefs.load(), "developer_mode", False)))
+        self.check_dev_mode.toggled.connect(self._on_dev_toggled)
+        dev_bar.addWidget(self.check_dev_mode)
+        self.bench_btn = NeonButton("🔬 개발자 벤치마크 (CPU/GPU/NPU × 변형 전체 자동)",
+                                    role="ghost")
+        self.bench_btn.setMinimumHeight(40)
+        self.bench_btn.clicked.connect(self._on_benchmark)
+        dev_bar.addWidget(self.bench_btn)
+        root.addLayout(dev_bar)
+        self.bench_btn.setVisible(self.check_dev_mode.isChecked())
+
         # 개발자 크레딧 (메인 화면) -------------------------------------
         credit = QLabel(i18n.KO.CREDIT, self)
         credit.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -433,7 +449,28 @@ class SetupPage(QWidget):
         _prefs.patch(threshold=v / 100.0)
 
     # ------------------------------------------------------------------
+    def _on_dev_toggled(self, on: bool) -> None:
+        _prefs.patch(developer_mode=bool(on))
+        self.bench_btn.setVisible(bool(on))
+
     def _on_start(self) -> None:
+        inp = self._collect_input()
+        if inp is None:
+            return
+        if inp.engine_mode == "fast" and not self._ensure_fast_ready():
+            return
+        self.start_requested.emit(inp)
+
+    def _on_benchmark(self) -> None:
+        inp = self._collect_input()
+        if inp is None:
+            return
+        import dataclasses
+        # 벤치마크는 GPU/NPU 임베딩 + 고전 비교가 목적 → efficiency 강제.
+        inp = dataclasses.replace(inp, engine_mode="efficiency")
+        self.benchmark_requested.emit(inp)
+
+    def _collect_input(self):
         ref_root = Path(self.ref_path_edit.text().strip())
         val_root = Path(self.val_path_edit.text().strip())
         ref_machine = self.ref_machine_edit.text().strip()
@@ -508,7 +545,7 @@ class SetupPage(QWidget):
             use_npu=use_npu,
             embed_batch=embed_batch,
         )
-        self.start_requested.emit(SetupInput(
+        return SetupInput(
             mode=mode,
             ref_root=ref_root,
             val_root=val_root,
@@ -525,7 +562,7 @@ class SetupPage(QWidget):
             use_gpu=use_gpu,
             use_npu=use_npu,
             embed_batch=embed_batch,
-        ))
+        )
 
     # ------------------------------------------------------------------
     def _ensure_fast_ready(self) -> bool:

@@ -155,6 +155,7 @@ class MainWindow(QMainWindow):
 
         # 시그널 ---------------------------------------------------------
         self._setup_page.start_requested.connect(self._on_start)
+        self._setup_page.benchmark_requested.connect(self._on_benchmark)
         self._select_page.finished.connect(self._on_select_finished)
         self._select_page.state_changed.connect(self._schedule_autosave)
         self._match_page.match_confirmed.connect(self._on_match_confirmed)
@@ -544,6 +545,59 @@ class MainWindow(QMainWindow):
             use_npu=bool(getattr(inp, "use_npu", True)),
             embed_batch=int(getattr(inp, "embed_batch", 1)),
         )
+
+    def _on_benchmark(self, inp: SetupInput) -> None:
+        """개발자 벤치마크 — CPU/GPU/NPU × 변형 전체를 순차 자동 실행, jsonl 기록."""
+        self._input = inp
+        self._session_id = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+        self._loading.show_overlay(i18n.KO.LOAD_SCAN)
+        QApplication.processEvents()
+        sr = scan(inp.ref_root, inp.val_root)
+        self._scan = sr
+        if sr.ref_only or sr.val_only:
+            self._resolve_slot_mismatch(sr)
+        common = sr.common_slot_names
+        if not common:
+            self._loading.hide_overlay()
+            QMessageBox.warning(self, i18n.KO.APP_TITLE, i18n.KO.WARN_NO_SLOTS)
+            return
+        tasks = [(n, sr.slots[n].ref_images, sr.slots[n].val_images) for n in common]
+        from ..dev.bench import BenchmarkWorker
+        self._loading.show_overlay("개발자 벤치마크 실행 중…")
+        cfg = config.SimilarityConfig(
+            engine="efficiency",
+            center_crop=bool(getattr(inp, "center_crop", False)),
+            kla_crop=bool(getattr(inp, "kla_crop", False)),
+            accel_concurrency=int(getattr(inp, "accel_concurrency", 32)),
+            use_cpu=bool(getattr(inp, "use_cpu", True)),
+            use_gpu=bool(getattr(inp, "use_gpu", True)),
+            use_npu=bool(getattr(inp, "use_npu", True)),
+            embed_batch=int(getattr(inp, "embed_batch", 1)),
+        )
+        self._bench_worker = BenchmarkWorker(
+            tasks, cfg=cfg, threshold=float(inp.threshold),
+            use_gpu=cfg.use_gpu, use_npu=cfg.use_npu,
+            session_id=self._session_id, parent=self,
+        )
+        self._bench_worker.signals.progress.connect(
+            lambda m: self._loading.show_overlay(f"개발자 벤치마크: {m}")
+        )
+        self._bench_worker.signals.done.connect(self._on_benchmark_done)
+        self._bench_worker.signals.failed.connect(self._on_benchmark_failed)
+        self._bench_worker.start()
+
+    def _on_benchmark_done(self, path: str) -> None:
+        self._loading.hide_overlay()
+        QMessageBox.information(
+            self, i18n.KO.APP_TITLE,
+            f"개발자 벤치마크 완료.\n\n결과 파일:\n{path}\n\n"
+            "이 jsonl 을 GitHub 에 올려주세요.",
+        )
+
+    def _on_benchmark_failed(self, msg: str) -> None:
+        self._loading.hide_overlay()
+        QMessageBox.warning(self, i18n.KO.APP_TITLE,
+                            f"개발자 벤치마크 실패:\n{msg}")
 
     def _on_start(self, inp: SetupInput) -> None:
         self._input = inp

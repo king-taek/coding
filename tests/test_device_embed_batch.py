@@ -23,7 +23,7 @@ def _code(p) -> float:
     return float(int(Path(p).stem[1:]))      # x0->0, x1->1, ...
 
 
-def _fake_make_input(p, cfg):
+def _fake_make_input(p, cfg, side=None):
     return np.full((3, 2, 2), _code(p), dtype=np.float32)
 
 

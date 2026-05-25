@@ -96,6 +96,9 @@ class UiPrefs:
     use_gpu: bool = True
     use_npu: bool = True
     embed_batch: int = 1
+    # 개발자 모드 — 켜면 셋업 화면에 'CPU/GPU/NPU × 개선안 변형 전체 자동 벤치마크'
+    # 버튼이 노출된다 (정확도/속도 비교용 진단, 일반 사용자에겐 숨김).
+    developer_mode: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
 
     # ------------------------------------------------------------------
