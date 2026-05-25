@@ -473,19 +473,23 @@ class MainWindow(QMainWindow):
         if dlg.mapping.pairs:
             self._apply_slot_pairs(sr, dlg.mapping.pairs)
 
-    def _auto_match_by_filename(self, sr: ScanResult) -> None:
-        """미매칭 폴더의 **파일명**에서 WaferID(slot명)를 뽑아 같은 wafer 끼리 자동 병합.
+    def _ask_has_kla(self) -> bool:
+        """매칭 실패 폴더가 있을 때 'KLA 장비가 있나요?' 를 묻는다."""
+        r = QMessageBox.question(
+            self, i18n.KO.KLA_ASK_TITLE, i18n.KO.KLA_ASK_BODY,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        return r == QMessageBox.StandardButton.Yes
 
-        KLA 사진은 파일명에 WaferID 가 있어 그 값이 반대쪽 폴더명(또는 WaferID)과
-        같으면 자동으로 짝지어진다(OCR 없이 파일명만 — 빠름).  병합된 slot 은 원본
-        ref 폴더명을 유지한다.
+    def _match_by_filename(self, sr: ScanResult) -> None:
+        """미매칭 폴더를 '한쪽 폴더명이 반대쪽 사진 파일명에 들어있는지' 로 자동 매칭.
+
+        KLA 사진의 파일명에 반대쪽(정확히 명명된) 폴더의 slot명이 포함돼 있으면 같은
+        slot 으로 보고 병합한다(패턴 무관, OCR 불필요).
         """
-        wid_by_ref = {n: wafer_id.wafer_id_from_images(sr.slots[n].ref_images)
-                      for n in list(sr.ref_only)}
-        wid_by_val = {n: wafer_id.wafer_id_from_images(sr.slots[n].val_images)
-                      for n in list(sr.val_only)}
         try:
-            wafer_id.merge_unmatched_by_wafer_id(sr, wid_by_ref, wid_by_val)
+            wafer_id.match_by_filename_containment(sr)
         except Exception:
             pass
 
@@ -553,12 +557,12 @@ class MainWindow(QMainWindow):
         # 사진이 한 장도 없는 한쪽 전용 폴더는 매칭 대상에서 제외(그냥 넘어감).
         drop_empty_unmatched(sr)
 
-        # slot명(폴더명)이 ref/val 간 일치하지 않을 때, KLA 사진 파일명에 든
-        # WaferID(=slot명)로 같은 wafer 끼리 자동 매칭한다(OCR 없이 파일명만 — 빠름).
-        # 자동 매칭으로 안 되는 나머지는 수동 매핑.  ‘공통 slot 없음’ 검사는 매칭
-        # 확정 이후로 미뤄, 폴더명이 전부 달라도 자동 매칭이 동작하도록 한다.
-        if sr.ref_only or sr.val_only:
-            self._auto_match_by_filename(sr)
+        # slot(폴더)명이 ref/val 간 일치하지 않으면, 먼저 'KLA 장비가 있나요?' 를
+        # 묻고, 예면 미매칭 폴더에 대해 '한쪽 폴더명이 반대쪽 사진 파일명에 들어있는지'
+        # 로 자동 매칭한다(패턴 무관, OCR 불필요).  나머지는 수동 매핑.  ‘공통 slot
+        # 없음’ 검사는 매칭 확정 이후로 미뤄, 폴더명이 전부 달라도 동작하게 한다.
+        if (sr.ref_only or sr.val_only) and self._ask_has_kla():
+            self._match_by_filename(sr)
         self._after_slot_resolved(sr)
 
     def _after_slot_resolved(self, sr: ScanResult) -> None:

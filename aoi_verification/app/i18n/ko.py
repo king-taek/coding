@@ -360,6 +360,15 @@ SLOT_MAP_ADD = "추가"
 SLOT_MAP_REMOVE = "선택 해제"
 SLOT_MAP_OPEN = "매핑 다이얼로그 열기"
 
+# slot 매칭 실패 시 'KLA 장비가 있나요?' 확인 — 예면 파일명-폴더명 포함관계로 자동 매칭.
+KLA_ASK_TITLE = "KLA 장비 확인"
+KLA_ASK_BODY = (
+    "매칭되지 않은 Slot(폴더)이 있습니다.\n\n"
+    "KLA 장비가 있나요?\n"
+    "‘예’ 를 누르면, KLA 사진의 파일명에 들어 있는 slot명으로 자동 매칭을 시도합니다.\n"
+    "(반대쪽 폴더명이 KLA 사진 파일명에 포함되어 있으면 같은 slot 으로 봅니다.)"
+)
+
 INFO_RESUME_TITLE = "이전 검증 이어하기"
 INFO_RESUME_BODY = "진행 중인 검증이 있습니다. 이어서 하시겠습니까?"
 INFO_NEW_SESSION = "새로 시작"
