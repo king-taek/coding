@@ -674,6 +674,10 @@ class MatchReviewPage(QWidget):
             for m in ordered:
                 self._append_row(m)
         self._update_summary()
+        # 검토 화면이 새로 열릴 때마다 스크롤을 항상 최상단으로 (이전 세션의
+        # 스크롤 위치가 남지 않도록). 레이아웃 확정 후 적용.
+        QTimer.singleShot(
+            0, lambda: self._scroll.verticalScrollBar().setValue(0))
 
     def _on_size_changed(self, value: int) -> None:
         self._thumb_px = int(value)

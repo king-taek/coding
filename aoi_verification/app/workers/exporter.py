@@ -291,7 +291,8 @@ class ExcelExporter(QThread):
                     ref_mid = image_io.get_mid_path(m.ref_path)
                     xli_ref = XLImage(str(ref_mid))
                     _fit_to_cell(xli_ref, cell_w_px, cell_h_px)
-                    ws.add_image(xli_ref, f"{COL_REF}{row}")
+                    _add_image_centered(ws, xli_ref, COL_REF, row,
+                                        cell_w_px, cell_h_px)
                 except Exception:
                     ws[f"{COL_REF}{row}"] = str(Path(m.ref_path).name)
                     ws[f"{COL_REF}{row}"].alignment = center
@@ -299,7 +300,8 @@ class ExcelExporter(QThread):
                     val_mid = image_io.get_mid_path(m.val_path)
                     xli_val = XLImage(str(val_mid))
                     _fit_to_cell(xli_val, cell_w_px, cell_h_px)
-                    ws.add_image(xli_val, f"{COL_VAL}{row}")
+                    _add_image_centered(ws, xli_val, COL_VAL, row,
+                                        cell_w_px, cell_h_px)
                 except Exception:
                     ws[f"{COL_VAL}{row}"] = str(Path(m.val_path).name)
                     ws[f"{COL_VAL}{row}"].alignment = center
@@ -313,7 +315,8 @@ class ExcelExporter(QThread):
                     ref_mid = image_io.get_mid_path(Path(u.path))
                     xli_ref = XLImage(str(ref_mid))
                     _fit_to_cell(xli_ref, cell_w_px, cell_h_px)
-                    ws.add_image(xli_ref, f"{COL_REF}{row}")
+                    _add_image_centered(ws, xli_ref, COL_REF, row,
+                                        cell_w_px, cell_h_px)
                 except Exception:
                     ws[f"{COL_REF}{row}"] = str(Path(u.path).name)
                 # 검증 컬럼에 파일명 텍스트 (빨강).
@@ -377,6 +380,35 @@ def _fit_to_cell(xli, cell_w_px: int, cell_h_px: int) -> None:
         return
     xli.width = max(1, int(round(w * scale)))
     xli.height = max(1, int(round(h * scale)))
+
+
+def _add_image_centered(ws, xli, col_letter: str, row: int,
+                        cell_w_px: int, cell_h_px: int) -> None:
+    """``_fit_to_cell`` 로 맞춘 이미지를 셀 안에 **중앙 정렬**로 삽입.
+
+    openpyxl 기본 동작은 셀 좌상단 고정이라 비율상 남는 여백이 한쪽(우/하)에
+    몰려 사진이 작아 보인다.  ``OneCellAnchor`` + 오프셋으로 남는 여백을 양쪽에
+    균등 분배해 시각적으로 ‘셀에 가득’ 차도록 한다 (크롭/왜곡 없음).
+    """
+    from openpyxl.drawing.spreadsheet_drawing import (AnchorMarker,
+                                                      OneCellAnchor)
+    from openpyxl.drawing.xdr import XDRPositiveSize2D
+    from openpyxl.utils import column_index_from_string
+    from openpyxl.utils.units import pixels_to_EMU
+
+    img_w = int(xli.width)
+    img_h = int(xli.height)
+    x_off = max(0, (cell_w_px - img_w) // 2)
+    y_off = max(0, (cell_h_px - img_h) // 2)
+    marker = AnchorMarker(
+        col=column_index_from_string(col_letter) - 1,
+        colOff=pixels_to_EMU(x_off),
+        row=int(row) - 1,
+        rowOff=pixels_to_EMU(y_off),
+    )
+    ext = XDRPositiveSize2D(pixels_to_EMU(img_w), pixels_to_EMU(img_h))
+    xli.anchor = OneCellAnchor(_from=marker, ext=ext)
+    ws.add_image(xli)
 
 
 # ---------------------------------------------------------------------------

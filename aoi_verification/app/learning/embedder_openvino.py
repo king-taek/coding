@@ -133,15 +133,18 @@ def target_device() -> Optional[str]:
 
 
 def device_label() -> str:  # pragma: no cover — 환경 의존
-    """상태바 표시용 — 사용 가능할 때만 비어있지 않은 문자열 반환."""
+    """상태바 표시용 — 사용 가능할 때만 비어있지 않은 문자열 반환.
+
+    NPU 가속 문구는 표시하지 않는다(사용자 요청).  Intel GPU 가 있으면 그것만
+    표시하고, NPU 전용 환경에서는 빈 문자열을 반환해 embedder 가 torch/CPU
+    라벨로 폴백하도록 둔다.
+    """
     if not is_available():
         return ""
-    t = target_device()
-    if t == "NPU":
-        return "NPU 가속 (Intel AI Boost — OpenVINO)"
-    if t == "GPU":
+    devs = _list_ov_devices()
+    if any(d == "GPU" or d.startswith("GPU.") for d in devs):
         return "Intel GPU 가속 (OpenVINO)"
-    return f"OpenVINO 가속 ({t})"
+    return ""
 
 
 # ---------------------------------------------------------------------------

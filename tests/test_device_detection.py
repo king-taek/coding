@@ -72,15 +72,27 @@ def test_device_label_describes_cuda(monkeypatch):
     assert "GPU 가속" in label
 
 
-def test_openvino_label_takes_precedence(monkeypatch):
-    """OpenVINO + NPU 가 인식되면 PyTorch device 라벨보다 우선."""
+def test_openvino_npu_label_suppressed(monkeypatch):
+    """NPU 전용 환경에서는 상태바에 NPU 가속 문구를 표시하지 않는다(사용자 요청).
+
+    NPU 만 있을 때 device_label 은 ""를 반환하고, embedder 는 torch/CPU 라벨로
+    폴백한다.  여기서는 torch device 도 비워 빈 문자열이 되도록 한다.
+    """
     monkeypatch.setattr(embedder_openvino, "is_available", lambda: True)
-    monkeypatch.setattr(
-        embedder_openvino, "device_label",
-        lambda: "NPU 가속 (Intel AI Boost — OpenVINO)",
-    )
+    monkeypatch.setattr(embedder_openvino, "_list_ov_devices",
+                        lambda: ["NPU", "CPU"])
+    monkeypatch.setattr(embedder, "_DEVICE", None)
     label = embedder.device_label()
-    assert "NPU" in label
+    assert "NPU" not in label
+
+
+def test_openvino_gpu_label_still_shown(monkeypatch):
+    """Intel GPU(OpenVINO) 는 NPU 와 달리 그대로 표시된다."""
+    monkeypatch.setattr(embedder_openvino, "is_available", lambda: True)
+    monkeypatch.setattr(embedder_openvino, "_list_ov_devices",
+                        lambda: ["GPU", "CPU"])
+    label = embedder.device_label()
+    assert "GPU" in label
 
 
 def test_openvino_unavailable_when_module_missing():

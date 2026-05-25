@@ -116,6 +116,7 @@ def verify_imports() -> None:
         ("imagehash", "imagehash"),
         ("openpyxl", "openpyxl"),
         ("psutil", "psutil"),
+        ("openvino", "openvino (Intel GPU 가속 — 필수)"),
     ]
     optional: list[tuple[str, str]] = [
         ("torch", "torch (학습 기능 — 옵션)"),
