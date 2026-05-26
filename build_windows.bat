@@ -1,0 +1,38 @@
+@echo off
+REM ===========================================================================
+REM AOI 검증 - Windows 단독 실행형(.exe) 빌드 스크립트
+REM ---------------------------------------------------------------------------
+REM 반드시 Windows 에서, 파이썬(3.9+)이 설치된 상태로 실행하세요.
+REM PyInstaller 는 크로스컴파일이 안 되므로 Windows exe 는 Windows 에서만 만듭니다.
+REM
+REM 사용법: 이 파일을 더블클릭하거나, 명령 프롬프트에서  build_windows.bat  실행.
+REM 산출물: dist\AOI_Verify\AOI_Verify.exe  (dist\AOI_Verify 폴더 통째로 배포)
+REM ===========================================================================
+setlocal
+chcp 65001 >nul
+cd /d "%~dp0"
+
+echo [1/4] 가상환경 준비...
+if not exist ".venv" (
+    python -m venv .venv || goto :fail
+)
+call .venv\Scripts\activate || goto :fail
+
+echo [2/4] 의존성 설치 (시간이 걸릴 수 있습니다: torch/openvino 포함)...
+python -m pip install --upgrade pip || goto :fail
+pip install -r requirements.txt || goto :fail
+pip install "pyinstaller>=6" || goto :fail
+
+echo [3/4] PyInstaller 빌드 (onedir)...
+pyinstaller --noconfirm aoi_verification.spec || goto :fail
+
+echo [4/4] 완료!
+echo   실행 파일: dist\AOI_Verify\AOI_Verify.exe
+echo   배포 시 dist\AOI_Verify 폴더를 통째로 zip 으로 묶어 전달하세요.
+echo   (고효율 모드 포함 빌드라 폴더 용량은 대략 1.3~2.0GB 입니다.)
+goto :eof
+
+:fail
+echo.
+echo [실패] 위 오류 메시지를 확인하세요. (파이썬 설치/네트워크/권한 등)
+exit /b 1

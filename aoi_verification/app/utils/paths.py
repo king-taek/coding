@@ -135,6 +135,7 @@ def template_path() -> Path:
         _project_root() / "양식" / "양식.xlsx",
         package_root().parent / "양식" / "양식.xlsx",
         _project_root() / "양식.xlsx",        # 호환을 위한 fallback
+        resource_path("양식.xlsx"),            # PyInstaller 번들(_MEIPASS) 대응
     ]
     for c in candidates:
         if c.exists():
