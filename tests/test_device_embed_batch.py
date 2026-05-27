@@ -27,7 +27,7 @@ def _fake_make_input(p, cfg, side=None):
     return np.full((3, 2, 2), _code(p), dtype=np.float32)
 
 
-def _fake_infer(compiled, inputs, n_streams):
+def _fake_infer(compiled, inputs, n_streams, progress_cb=None):
     # inputs: [(userdata, (B,3,2,2)), ...].  행별 임베딩 = [mean, 1.0].
     raw = {}
     for userdata, x in inputs:
@@ -36,7 +36,17 @@ def _fake_infer(compiled, inputs, n_streams):
         for i in range(b):
             out[i] = [float(x[i].mean()), 1.0]
         raw[userdata] = out
+        if progress_cb is not None:
+            progress_cb(len(userdata) if isinstance(userdata, tuple) else 1)
     return raw
+
+
+def test_progress_cb_counts_all_images(_mock_ov):
+    paths = [Path(f"x{i}.png") for i in range(5)]
+    seen = {"n": 0}
+    ov.device_embed(paths, model_kind=ov.MODEL_RESNET18, device="NPU",
+                    jobs=4, batch=1, progress_cb=lambda n: seen.__setitem__("n", seen["n"] + n))
+    assert seen["n"] == 5            # 모든 사진이 진행률에 반영(per-image)
 
 
 @pytest.fixture

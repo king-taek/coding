@@ -388,12 +388,18 @@ def compute_embeddings(paths: Iterable[Path],
 # ---------------------------------------------------------------------------
 # 공용 비동기 추론 — AsyncInferQueue 로 N 개 동시 in-flight (NPU/GPU saturate)
 # ---------------------------------------------------------------------------
-def _infer_raw(compiled, inputs, n_streams: int) -> Dict[Path, np.ndarray]:  # pragma: no cover - 환경 의존
+def _udata_count(userdata) -> int:
+    """userdata 가 path 면 1, (real_paths) 튜플(정적 배치)이면 그 길이."""
+    return len(userdata) if isinstance(userdata, tuple) else 1
+
+
+def _infer_raw(compiled, inputs, n_streams: int, progress_cb=None) -> Dict[Path, np.ndarray]:  # pragma: no cover - 환경 의존
     """``inputs=[(path, (1,3,H,W) ndarray), ...]`` → ``{path: raw_feat}``.
 
     ``AsyncInferQueue(jobs=n_streams)`` 로 다수 추론을 동시에 띄워 파이프라인을
     채운다.  큐를 못 만들면 InferRequest 단일 흐름으로 폴백.  실패 path 는 누락.
-    """
+    ``progress_cb(n)`` 이 주어지면 추론 결과가 나올 때마다 처리 장수를 보고한다
+    (느린 NAS 에서도 진행률이 per-image 로 즉시 올라가게 — #3)."""
     try:
         from openvino.runtime import AsyncInferQueue
     except Exception:
@@ -411,6 +417,11 @@ def _infer_raw(compiled, inputs, n_streams: int) -> Dict[Path, np.ndarray]:  # p
                 raw[userdata] = list(infer_request.results.values())[0]
             except Exception:
                 pass
+            if progress_cb is not None:
+                try:
+                    progress_cb(_udata_count(userdata))
+                except Exception:
+                    pass
         queue.set_callback(_cb)
         for p, x in inputs:
             try:
@@ -431,6 +442,11 @@ def _infer_raw(compiled, inputs, n_streams: int) -> Dict[Path, np.ndarray]:  # p
                 raw[p] = list(req.infer({0: x}).values())[0]
             except Exception:
                 continue
+            if progress_cb is not None:
+                try:
+                    progress_cb(_udata_count(p))
+                except Exception:
+                    pass
     return raw
 
 
@@ -645,7 +661,8 @@ def device_embed(paths: Iterable[Path],
                  cfg=None,
                  jobs: Optional[int] = None,
                  batch: int = 1,
-                 side=None) -> Dict[Path, np.ndarray]:  # pragma: no cover - 환경 의존
+                 side=None,
+                 progress_cb=None) -> Dict[Path, np.ndarray]:  # pragma: no cover - 환경 의존
     """``model_kind`` 백본을 ``device`` 에 고정 컴파일해 raw 임베딩(L2 정규화) 계산.
 
     ``side`` ('ref'/'val') 가 주어지고 cfg.center_crop 이 켜져 있으면 중앙 30%
@@ -680,6 +697,11 @@ def device_embed(paths: Iterable[Path],
                 n_hit += 1
             else:
                 items.append(p)
+        if n_hit and progress_cb is not None:     # 캐시 적중분도 진행률에 반영(#3)
+            try:
+                progress_cb(n_hit)
+            except Exception:
+                pass
         if not items:
             logging.getLogger("aoi.openvino").debug(
                 "embed: %d개 전부 캐시 적중(%s)", n_hit, model_kind,
@@ -699,7 +721,7 @@ def device_embed(paths: Iterable[Path],
 
     if batch <= 1:
         inputs = ((p, a[np.newaxis]) for p, a in prepped)   # (1,3,H,W) per path
-        raw = _infer_raw(compiled, inputs, n_streams)
+        raw = _infer_raw(compiled, inputs, n_streams, progress_cb=progress_cb)
         for p, feat in raw.items():
             out[p] = _l2(feat[0])
         _emb_finish(out, items, sig, use_cache, model_kind, device, n_hit, _t0)
@@ -724,7 +746,7 @@ def device_embed(paths: Iterable[Path],
                 stack = np.concatenate([stack, pad], axis=0)  # (B,3,H,W)
             yield tuple(buf_p), stack
 
-    raw = _infer_raw(compiled, _grouped(), n_streams)
+    raw = _infer_raw(compiled, _grouped(), n_streams, progress_cb=progress_cb)
     for real_paths, feat in raw.items():
         for b, p in enumerate(real_paths):                   # 실제 행만(패딩 무시)
             out[p] = _l2(feat[b])

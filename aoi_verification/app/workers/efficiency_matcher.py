@@ -329,19 +329,33 @@ class EfficiencyScheduler(QThread):
         out.sort(key=lambda x: -x[1])
         return out
 
+    def _on_embed_image(self, n: int) -> None:
+        """device_embed 가 사진 n장을 처리할 때마다 호출 — per-image 진행률(#3).
+
+        슬롯 단위가 아니라 **사진 단위**로 카운트가 올라가, 느린 NAS 에서도 '후보
+        생성' 진행률이 0 에 머물지 않는다."""
+        with self._plock:
+            self._embed_done += int(n)
+        self._emit_progress()
+
     def _embed_slot(self, backend, refs, vals):
-        """슬롯 val+ref 임베딩(GPU) → (built_index, ref_emb).  동시추론수는 자동 산정."""
+        """슬롯 val+ref 임베딩(GPU) → (built_index, ref_emb).  동시추론수는 자동 산정.
+
+        device_embed 에 per-image 콜백을 전달해 사진이 임베딩되는 즉시 진행률을 올린다."""
         mk, dev, batch = backend
         cap = accel_concurrency(self._cfg)
+        cb = self._on_embed_image
         val_emb = _ov.device_embed(
             [Path(v.path) for v in vals], model_kind=mk, device=dev, cfg=self._cfg,
-            jobs=dynamic_concurrency(len(vals), batch, cap), batch=batch)
+            jobs=dynamic_concurrency(len(vals), batch, cap), batch=batch,
+            progress_cb=cb)
         built = _ann.build_from(val_emb) if val_emb else None
         ref_emb: Dict = {}
         if built is not None:
             ref_emb = _ov.device_embed(
                 [Path(r.path) for r in refs], model_kind=mk, device=dev, cfg=self._cfg,
-                jobs=dynamic_concurrency(len(refs), batch, cap), batch=batch)
+                jobs=dynamic_concurrency(len(refs), batch, cap), batch=batch,
+                progress_cb=cb)
         return built, ref_emb
 
     def _emit_progress(self) -> None:
@@ -470,19 +484,26 @@ class EfficiencyScheduler(QThread):
                 # 큐 maxsize=2 로 메모리 절제(최대 2개 슬롯 임베딩만 상주).
                 self.signals.phase.emit(i18n.KO.PHASE_EMBED)   # '후보 생성(임베딩)' 먼저
                 self._emit_progress()
-                embed_q: "queue.Queue" = queue.Queue(maxsize=2)
+                embed_q: "queue.Queue" = queue.Queue(maxsize=3)
+                embed_seen = 0          # 지금까지 임베딩 대상이 된 사진 누계(예상치)
 
                 def producer() -> None:
+                    nonlocal embed_seen
                     for slot, refs, vals in tasks:
                         if self._stop.is_set():
                             break
+                        # per-image 콜백(_on_embed_image)이 임베딩 중 _embed_done 을
+                        # 실시간으로 올린다.  여기선 슬롯 경계에서 누락분(디코드 실패
+                        # 등 콜백이 안 온 사진)만 보정해 100% 도달을 보장한다.
                         try:
                             built, ref_emb = (self._embed_slot(backend, refs, vals)
                                               if vals else (None, {}))
                         except Exception:
                             built, ref_emb = None, {}
+                        embed_seen += len(refs) + len(vals)
                         with self._plock:
-                            self._embed_done += len(refs) + len(vals)
+                            if self._embed_done < embed_seen:
+                                self._embed_done = embed_seen
                             pre_scoring = not self._scoring_started
                         if pre_scoring:                    # 재채점 전엔 임베딩 라벨 유지
                             self.signals.phase.emit(i18n.KO.PHASE_EMBED)
