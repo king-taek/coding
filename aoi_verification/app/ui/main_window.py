@@ -1181,6 +1181,40 @@ class MainWindow(QMainWindow):
         )
         self._show_page(self._result_page)
         self._phase = PHASE_NONE
+        self._write_run_log()
+
+    def _write_run_log(self) -> None:
+        """검증 1회의 사용 통계를 컴퓨터별 폴더에 기록(캐시 빠른 매치는 제외)."""
+        try:
+            from ..utils import run_log
+            sr, inp = self._scan, self._input
+            if sr is None or inp is None:
+                return
+            common = sr.common_slot_names
+            ref_photos = sum(len(sr.slots[n].ref_images) for n in common)
+            val_photos = sum(len(sr.slots[n].val_images) for n in common)
+            elapsed = float(getattr(self._match_page, "_precompute_elapsed", 0.0))
+            options = {
+                "mode": getattr(inp, "mode", ""),
+                "automation": getattr(inp, "automation_level", ""),
+                "engine": getattr(inp, "engine_mode", ""),
+                "threshold": getattr(inp, "threshold", None),
+                "center_crop": bool(getattr(inp, "center_crop", False)),
+                "use_gpu": bool(getattr(inp, "use_gpu", True)),
+                "use_npu": bool(getattr(inp, "use_npu", True)),
+            }
+            kla_used = bool(getattr(self, "_slot_meta_ref", None)
+                            or getattr(self, "_slot_meta_val", None))
+            ocr_used = any((m or {}).get("method") == "ocr"
+                           for m in {**getattr(self, "_slot_meta_ref", {}),
+                                     **getattr(self, "_slot_meta_val", {})}.values())
+            rec = run_log.build_record(
+                options=options, ref_root=inp.ref_root, val_root=inp.val_root,
+                slot_count=len(common), ref_photos=ref_photos, val_photos=val_photos,
+                elapsed_s=elapsed, kla_used=kla_used, ocr_used=ocr_used)
+            run_log.record(rec, elapsed_s=elapsed, uploader=None)
+        except Exception:
+            pass
         session_mod.clear()
 
     # ------------------------------------------------------------------

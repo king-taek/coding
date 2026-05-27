@@ -355,6 +355,10 @@ class MatchPage(QWidget):
         """
         if self._state is None:
             return
+        # 매칭(사전 계산) 소요시간 측정 시작 — run_log 통계용.
+        import time as _t
+        self._precompute_t0 = _t.perf_counter()
+        self._precompute_elapsed = 0.0
         # 사전 계산은 항상 첫 매칭(_advance)보다 앞선다 — 진행 바 갱신 가드
         # (_current is None) 가 직전 세션의 잔여 상태에 흔들리지 않도록 초기화.
         self._current = None
@@ -522,6 +526,9 @@ class MatchPage(QWidget):
             self._advance()
 
     def _on_precompute_finished(self) -> None:
+        import time as _t
+        if getattr(self, "_precompute_t0", None):
+            self._precompute_elapsed = _t.perf_counter() - self._precompute_t0
         was_streaming = self._streaming_precompute
         self.bg_status_label.setText(i18n.KO.PRECOMPUTE_BG_DONE)
         self._streaming_precompute = False
