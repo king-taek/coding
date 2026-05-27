@@ -34,7 +34,9 @@ except Exception:
 
 MIN_PYTHON = (3, 9)
 HERE = Path(__file__).resolve().parent
-REQ_FILE = HERE / "requirements.txt"
+# 이 스크립트는 scripts\ 안에 있고 requirements.txt 는 저장소 루트(부모)에 있다.
+REPO_ROOT = HERE.parent
+REQ_FILE = REPO_ROOT / "requirements.txt"
 CACHE_ROOT = Path.home() / ".aoi_verification_cache"
 CACHE_SUBDIRS = (
     "thumbs", "mid", "features", "session",
