@@ -591,12 +591,22 @@ class MainWindow(QMainWindow):
         from PyQt6.QtWidgets import QSizePolicy, QSpacerItem
         box = QMessageBox(self)
         box.setWindowTitle(i18n.KO.KLA_ASK_TITLE)
-        box.setText(i18n.KO.KLA_ASK_BODY)
+        box.setIcon(QMessageBox.Icon.Question)
+        # 핵심 질문을 팝업 최상단에 크게·강조색으로(#2).  세부 안내는 그 아래.
+        box.setTextFormat(Qt.TextFormat.RichText)
+        box.setText(
+            "<div style='font-size:18pt; font-weight:800; color:#F39C12;'>"
+            f"{i18n.KO.KLA_ASK_HEADING}</div>"
+        )
+        box.setInformativeText(
+            "<div style='font-size:11pt; color:#E8E8E8;'>"
+            + i18n.KO.KLA_ASK_BODY.replace("\n", "<br>")
+            + "</div>"
+        )
         box.setStandardButtons(
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         box.setDefaultButton(QMessageBox.StandardButton.Yes)
-        # 본문에서 가장 긴 줄이 줄바꿈 없이 한 줄로 들어가도록 최소 폭을 잡는다
-        # (실제 폰트 기준으로 측정 — 폰트/DPI 가 달라도 한 줄 유지).  +아이콘/여백 여유.
+        # 안내 문장이 한 줄로 들어가도록 최소 폭 확보(가로 스페이서).
         fm = box.fontMetrics()
         longest = max((fm.horizontalAdvance(line)
                        for line in i18n.KO.KLA_ASK_BODY.split("\n")), default=0)
@@ -964,8 +974,6 @@ class MainWindow(QMainWindow):
             slot_only_ref=list(self._scan.ref_only),
             slot_only_val=list(self._scan.val_only),
             unmatched_refs=unmatched_refs,
-            kla_folders={n: s.kla_folder
-                         for n, s in self._scan.slots.items() if s.kla_folder},
         )
         # 결과 페이지에는 ‘이미 복사해둔 작업 파일’ 과 ‘템플릿 원본’ 둘 다 전달.
         auto_mode = (
