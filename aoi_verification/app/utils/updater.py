@@ -25,6 +25,9 @@ from typing import Optional
 from . import paths
 
 DEFAULT_REPO = "king-taek/coding"
+# VERSION·git 이 모두 없을 때(일반 사용자 PC) 도 업데이트를 받을 수 있도록, 추적
+# 대상 저장소/브랜치를 코드에 내장한다(현재 작업 브랜치).
+DEFAULT_BRANCH = "claude/matching-npu-gpu-modes-GwTRB"
 _API = "https://api.github.com/repos/{repo}/commits/{branch}"
 # 사내망이 api.github.com 만 막고 github.com(웹)은 허용하는 경우의 폴백 — 공개
 # 저장소의 커밋 Atom 피드(github.com 호스트)에서 최신 커밋 SHA 를 읽는다.
@@ -199,30 +202,44 @@ def _git_head() -> Optional[dict]:
     return None
 
 
+def _identity() -> tuple:
+    """추적 대상 ``(repo, branch, current_sha)`` 를 결정한다.
+
+    우선순위: VERSION 파일 → git HEAD → 코드 내장 기본값(DEFAULT_REPO/BRANCH).
+    VERSION·git 이 모두 없으면 current_sha 는 빈 문자열("미상")이지만, repo/branch 는
+    기본값으로 알 수 있으므로 **최신 버전을 받아 적용하는 것은 가능**하다."""
+    cur = current_version()
+    if cur and cur.get("branch"):
+        return (cur.get("repo") or DEFAULT_REPO, cur["branch"], str(cur.get("sha") or ""))
+    gh = _git_head()
+    if gh and gh.get("branch"):
+        return (gh.get("repo") or DEFAULT_REPO, gh["branch"], str(gh.get("sha") or ""))
+    return (DEFAULT_REPO, DEFAULT_BRANCH, "")
+
+
 def manual_check() -> tuple:
     """사용자가 직접 '업데이트 확인' 을 눌렀을 때 — 결과를 명시적으로 돌려준다.
 
     반환 ``(status, info)``:
-      · ``("update", {repo,branch,sha,message})`` — 새 버전 있음
+      · ``("update", {repo,branch,sha,message[,current_unknown]})`` — 받을 버전 있음
       · ``("latest", {})``  — 이미 최신
-      · ``("unknown", {})`` — 버전 정보 없음 또는 네트워크 실패(확인 불가)
-    VERSION 이 없으면 git HEAD 로 폴백해 개발/클론 실행에서도 확인 가능.
-    ``unknown`` 일 때 ``info["error"]`` 에 실패 사유를 담아 사용자에게 표시한다."""
+      · ``("unknown", {"error":…})`` — 네트워크 실패(확인 불가)
+    현재 버전(SHA)을 모르면(VERSION·git 모두 없음) 비교는 못 하지만, 내장된 기본
+    repo/branch 로 **최신 버전을 받아 적용**하도록 ``current_unknown`` 으로 안내한다.
+    (한 번 받으면 VERSION 이 기록돼 이후엔 정상 비교)"""
     global _last_error
     _last_error = ""
-    cur = current_version()
-    if not cur or not cur.get("sha"):
-        cur = _git_head()
-    if not cur or not cur.get("sha") or not cur.get("branch"):
-        return ("unknown", {"error": "현재 버전 정보를 찾을 수 없습니다 (VERSION/git 없음)."})
-    repo = cur.get("repo") or DEFAULT_REPO
-    latest = latest_commit(repo, cur["branch"])
+    repo, branch, cur_sha = _identity()
+    latest = latest_commit(repo, branch)
     if not latest or not latest.get("sha"):
         return ("unknown", {"error": _last_error or "GitHub 연결 실패"})
-    if str(latest["sha"]) != str(cur["sha"]):
-        return ("update", {"repo": repo, "branch": cur["branch"],
-                           "sha": latest["sha"], "message": latest.get("message", "")})
-    return ("latest", {})
+    if cur_sha and str(latest["sha"]) == str(cur_sha):
+        return ("latest", {})
+    info = {"repo": repo, "branch": branch, "sha": latest["sha"],
+            "message": latest.get("message", "")}
+    if not cur_sha:
+        info["current_unknown"] = True
+    return ("update", info)
 
 
 def download_and_apply(repo: str, branch: str, target_sha: str,

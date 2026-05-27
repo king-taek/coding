@@ -92,11 +92,16 @@ def test_manual_check_git_fallback_when_no_version(tmp_path, monkeypatch):
     assert status == "update" and info["branch"] == "dev"
 
 
-def test_manual_check_unknown_when_no_version_no_git(tmp_path, monkeypatch):
+def test_manual_check_offers_latest_when_current_unknown(tmp_path, monkeypatch):
+    # VERSION·git 모두 없어도 내장 기본 repo/branch 로 최신을 받아 적용 제안.
     _write_version(tmp_path, monkeypatch, None)
     monkeypatch.setattr(updater, "_git_head", lambda: None)
+    monkeypatch.setattr(updater, "latest_commit", lambda r, b: {"sha": "NEW"})
     status, info = updater.manual_check()
-    assert status == "unknown" and info.get("error")   # 사유 포함
+    assert status == "update"
+    assert info["current_unknown"] is True
+    assert info["branch"] == updater.DEFAULT_BRANCH
+    assert info["repo"] == updater.DEFAULT_REPO
 
 
 def test_manual_check_unknown_on_network_fail(tmp_path, monkeypatch):

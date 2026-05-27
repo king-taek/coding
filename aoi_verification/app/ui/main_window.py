@@ -295,7 +295,9 @@ class MainWindow(QMainWindow):
     def _on_update_found(self, info: dict) -> None:
         """'업데이트 있음' 안내 → 동의하면 백그라운드로 다운로드/교체."""
         msg = (info or {}).get("message", "")
-        body = i18n.KO.UPDATE_AVAILABLE_BODY
+        # 현재 버전을 모르는 경우(VERSION·git 없음): 비교 없이 최신을 받는다고 안내.
+        body = (i18n.KO.UPDATE_UNKNOWN_CURRENT if (info or {}).get("current_unknown")
+                else i18n.KO.UPDATE_AVAILABLE_BODY)
         if msg:
             body = f"{body}\n\n· {msg}"
         ans = QMessageBox.question(
