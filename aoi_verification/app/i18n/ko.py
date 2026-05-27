@@ -383,16 +383,23 @@ SLOT_MAP_REMOVE = "선택 해제"
 SLOT_MAP_PAIRS_LABEL = "묶은 쌍"
 SLOT_MAP_OPEN = "매핑 다이얼로그 열기"
 LOAD_OCR = "KLA WaferID 판독(OCR) 중… 잠시만 기다려 주세요."
+# KLA slot 해석 단계 — 로딩창에 현재 진행 단계(파일명/OCR)를 실시간 표시.
+LOAD_KLA_FILENAME = "KLA slot 매칭 중 — 파일명 분석…"
+LOAD_KLA_OCR_FMT = "KLA WaferID 판독 (OCR) 중… {done} / {total}"
 
-# slot 매칭 실패 시 'KLA 장비가 있나요?' 확인 — 예면 파일명/ OCR 로 자동 매칭.
+# slot 매칭 실패 시 'KLA 가 어느 쪽?' 확인 — 호기가 K-n 이면 자동, 아니면 묻는다.
 KLA_ASK_TITLE = "KLA 장비 확인"
 # 팝업 최상단에 크게·색상으로 강조되는 핵심 질문(#2).
-KLA_ASK_HEADING = "KLA 장비가 있나요?"
-KLA_ASK_BODY = (
+KLA_ASK_SIDE_HEADING = "KLA 장비가 어느 쪽인가요?"
+KLA_ASK_SIDE_BODY = (
     "매칭되지 않은 Slot(폴더)이 있습니다.\n"
-    "‘예’ 를 누르면, KLA 사진의 파일명(또는 OCR)에서 읽은 slot명으로 자동 매칭을 시도합니다.\n"
-    "(반대쪽 폴더명이 KLA 사진 파일명에 포함되어 있으면 같은 slot 으로 봅니다.)"
+    "파일명(또는 이미지 헤더)에 WaferID 가 들어 있는 KLA 장비가 기준·검증 중 어느 "
+    "쪽인지 선택하세요. 선택한 쪽의 WaferID 로 자동 매칭을 시도합니다.\n"
+    "(호기 번호가 'K-6' 처럼 K-n 형식이면 이 창 없이 자동으로 KLA 로 처리됩니다.)"
 )
+KLA_SIDE_REF = "기준 (낮은 호기)"
+KLA_SIDE_VAL = "검증 (높은 호기)"
+KLA_SIDE_NONE = "KLA 아님"
 
 INFO_RESUME_TITLE = "이전 검증 이어하기"
 INFO_RESUME_BODY = "진행 중인 검증이 있습니다. 이어서 하시겠습니까?"

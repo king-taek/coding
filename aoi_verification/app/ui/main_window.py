@@ -631,58 +631,79 @@ class MainWindow(QMainWindow):
         if dlg.mapping.pairs:
             self._apply_slot_pairs(sr, dlg.mapping.pairs)
 
-    def _ask_has_kla(self) -> bool:
-        """매칭 실패 폴더가 있을 때 'KLA 장비가 있나요?' 를 묻는다.
+    @staticmethod
+    def _kla_machine_side(inp) -> Optional[str]:
+        """호기 번호가 'K-n'(예: K-6) 이면 그 쪽을 KLA 로 자동 판정.
 
-        본문 안내 문장이 한 줄로 나오도록 다이얼로그 최소 폭을 넓힌다(가로 스페이서).
-        """
-        from PyQt6.QtWidgets import QSizePolicy, QSpacerItem
+        반환 "ref"/"val"/"both" 또는 None(둘 다 K-n 아님 → 사용자에게 물어봐야 함)."""
+        import re
+
+        def is_kla(label) -> bool:
+            return bool(re.fullmatch(r"\s*[Kk]\s*-\s*\d+\s*", str(label or "")))
+
+        ref_k = is_kla(getattr(inp, "ref_machine", ""))
+        val_k = is_kla(getattr(inp, "val_machine", ""))
+        if ref_k and val_k:
+            return "both"
+        if ref_k:
+            return "ref"
+        if val_k:
+            return "val"
+        return None
+
+    def _ask_kla_side(self) -> Optional[str]:
+        """매칭 실패 폴더가 있을 때 'KLA 가 어느 쪽인가?' 를 묻는다.
+
+        반환 "ref"/"val" 또는 None(KLA 아님 → 파일명/OCR 자동 매칭 건너뜀)."""
         box = QMessageBox(self)
         box.setWindowTitle(i18n.KO.KLA_ASK_TITLE)
         box.setIcon(QMessageBox.Icon.Question)
-        # 핵심 질문을 팝업 최상단에 크게·강조색으로(#2).  세부 안내는 그 아래.
         box.setTextFormat(Qt.TextFormat.RichText)
         box.setText(
             "<div style='font-size:18pt; font-weight:800; color:#F39C12;'>"
-            f"{i18n.KO.KLA_ASK_HEADING}</div>"
+            f"{i18n.KO.KLA_ASK_SIDE_HEADING}</div>"
         )
         box.setInformativeText(
             "<div style='font-size:11pt; color:#E8E8E8;'>"
-            + i18n.KO.KLA_ASK_BODY.replace("\n", "<br>")
-            + "</div>"
+            + i18n.KO.KLA_ASK_SIDE_BODY.replace("\n", "<br>") + "</div>"
         )
-        box.setStandardButtons(
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        box.setDefaultButton(QMessageBox.StandardButton.Yes)
-        # 안내 문장이 한 줄로 들어가도록 최소 폭 확보(가로 스페이서).
-        fm = box.fontMetrics()
-        longest = max((fm.horizontalAdvance(line)
-                       for line in i18n.KO.KLA_ASK_BODY.split("\n")), default=0)
-        layout = box.layout()
-        if layout is not None:
-            layout.addItem(
-                QSpacerItem(longest + 160, 0, QSizePolicy.Policy.Minimum,
-                            QSizePolicy.Policy.Expanding),
-                layout.rowCount(), 0, 1, layout.columnCount())
-        return box.exec() == QMessageBox.StandardButton.Yes
+        ref_btn = box.addButton(i18n.KO.KLA_SIDE_REF,
+                                QMessageBox.ButtonRole.YesRole)
+        val_btn = box.addButton(i18n.KO.KLA_SIDE_VAL,
+                                QMessageBox.ButtonRole.NoRole)
+        box.addButton(i18n.KO.KLA_SIDE_NONE, QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(ref_btn)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is ref_btn:
+            return "ref"
+        if clicked is val_btn:
+            return "val"
+        return None
 
-    def _match_by_filename(self, sr: ScanResult) -> None:
-        """KLA 미매칭 폴더의 slot명(WaferID)을 **파일명 우선·OCR 폴백**으로 해석해
-        ref↔val 을 자동 병합한다.  남은 항목 표시용 메타(_slot_meta_*)도 채운다."""
+    def _match_by_filename(self, sr: ScanResult, kla_side: str) -> None:
+        """KLA(``kla_side``) 미매칭 폴더의 slot명(WaferID)을 **파일명 우선·OCR 폴백**
+        으로 해석해 ref↔val 을 자동 병합한다.  남은 항목 메타(_slot_meta_*)도 채운다."""
         try:
-            self._resolve_and_merge_kla(sr)
+            self._resolve_and_merge_kla(sr, kla_side)
         except Exception:
             pass
 
-    def _resolve_and_merge_kla(self, sr: ScanResult) -> None:
+    def _resolve_and_merge_kla(self, sr: ScanResult, kla_side: str) -> None:
+        do_ref = kla_side in ("ref", "both")
+        do_val = kla_side in ("val", "both")
+
         def imgs_of(name: str, is_ref: bool) -> list:
             slot = sr.slots.get(name)
             if slot is None:
                 return []
             return slot.ref_images if is_ref else slot.val_images
 
-        # 1) 파일명 prefix(첫 '_' 이전 전체)를 slot명 후보로 읽어 **먼저 매치**한다.
-        #    형식 검증은 하지 않는다 — 매치되면 그대로 채택.
+        # 1) [파일명] KLA 쪽 폴더의 파일명 prefix(첫 '_' 이전 전체)를 slot명 후보로
+        #    읽어 먼저 매치한다(형식 검증 없음).  비-KLA 쪽은 폴더명이 곧 slot명이라
+        #    키셋에 자동 포함된다.  로딩창에 '파일명 분석' 단계 표시(실시간).
+        self._loading.show_overlay(i18n.KO.LOAD_KLA_FILENAME)
+        QApplication.processEvents()
         fn_ref: dict[str, str] = {}
         fn_val: dict[str, str] = {}
         img0_ref: dict[str, Path] = {}
@@ -691,53 +712,66 @@ class MainWindow(QMainWindow):
             ii = imgs_of(n, True)
             if ii:
                 img0_ref[n] = ii[0].path
-                w = wafer_id.folder_wafer_id_from_filenames(ii)
-                if w:
-                    fn_ref[n] = w
+                if do_ref:
+                    w = wafer_id.folder_wafer_id_from_filenames(ii)
+                    if w:
+                        fn_ref[n] = w
         for n in list(sr.val_only):
             ii = imgs_of(n, False)
             if ii:
                 img0_val[n] = ii[0].path
-                w = wafer_id.folder_wafer_id_from_filenames(ii)
-                if w:
-                    fn_val[n] = w
+                if do_val:
+                    w = wafer_id.folder_wafer_id_from_filenames(ii)
+                    if w:
+                        fn_val[n] = w
         wafer_id.merge_unmatched_by_wafer_id(sr, fn_ref, fn_val)
 
-        # 2) 파일명으로 매치되지 않고 남은 폴더만 OCR → 한 번 더 매치(폴백).
+        # 2) [OCR] 파일명으로 매치 안 된 KLA 쪽 폴더만 OCR 로 헤더 WaferID 판독 →
+        #    한 번 더 매치.  로딩창에 'OCR 판독' 단계 + 진행수(done/total) 실시간 표시.
         ocr_ref: dict[str, str] = {}
         ocr_val: dict[str, str] = {}
-        pend = ([("ref", n) for n in sr.ref_only if n in img0_ref]
-                + [("val", n) for n in sr.val_only if n in img0_val])
+        pend: list[tuple[str, str]] = []
+        if do_ref:
+            pend += [("ref", n) for n in sr.ref_only if n in img0_ref]
+        if do_val:
+            pend += [("val", n) for n in sr.val_only if n in img0_val]
         if pend and wafer_id.ocr_available():
-            self._loading.show_overlay(i18n.KO.LOAD_OCR)
-            QApplication.processEvents()
-            try:
-                for side, name in pend:
-                    paths = [it.path for it in imgs_of(name, side == "ref")]
-                    w = wafer_id.read_folder_wafer_id(paths)
-                    if w:
-                        (ocr_ref if side == "ref" else ocr_val)[name] = w
-                    QApplication.processEvents()
-            finally:
-                self._loading.hide_overlay()
+            total = len(pend)
+            for i, (side, name) in enumerate(pend):
+                self._loading.set_progress(
+                    i, total,
+                    i18n.KO.LOAD_KLA_OCR_FMT.format(done=i, total=total))
+                QApplication.processEvents()
+                w = wafer_id.read_folder_wafer_id(
+                    [it.path for it in imgs_of(name, side == "ref")])
+                if w:
+                    (ocr_ref if side == "ref" else ocr_val)[name] = w
+            self._loading.set_progress(
+                total, total,
+                i18n.KO.LOAD_KLA_OCR_FMT.format(done=total, total=total))
             wafer_id.merge_unmatched_by_wafer_id(sr, ocr_ref, ocr_val)
 
-        # 3) 여전히 남은 항목 메타(수동 매핑 다이얼로그용) — OCR값 우선, 없으면 파일명값.
-        def build_meta(names, fn, ocr, img0) -> dict:
+        # 3) 여전히 남은 항목 메타(수동 매핑 다이얼로그용).  KLA 쪽은 OCR>파일명 값,
+        #    비-KLA 쪽은 폴더명 그대로(plain), 사진 없으면 'none'.
+        def build_meta(names, is_kla, fn, ocr, img0) -> dict:
             meta: dict[str, dict] = {}
             for n in names:
                 if n not in img0:
                     meta[n] = {"slot": None, "method": "none", "image": None}
-                elif n in ocr:
+                elif is_kla and n in ocr:
                     meta[n] = {"slot": ocr[n], "method": "ocr", "image": img0[n]}
-                elif n in fn:
+                elif is_kla and n in fn:
                     meta[n] = {"slot": fn[n], "method": "filename", "image": img0[n]}
-                else:
+                elif is_kla:
                     meta[n] = {"slot": None, "method": "unread", "image": img0[n]}
+                else:
+                    meta[n] = {"slot": None, "method": "plain", "image": img0[n]}
             return meta
 
-        self._slot_meta_ref = build_meta(list(sr.ref_only), fn_ref, ocr_ref, img0_ref)
-        self._slot_meta_val = build_meta(list(sr.val_only), fn_val, ocr_val, img0_val)
+        self._slot_meta_ref = build_meta(list(sr.ref_only), do_ref, fn_ref,
+                                         ocr_ref, img0_ref)
+        self._slot_meta_val = build_meta(list(sr.val_only), do_val, fn_val,
+                                         ocr_val, img0_val)
 
     def _apply_slot_pairs(self, sr: ScanResult, pairs) -> None:
         """(ref폴더명, val폴더명) 쌍을 통합 — val 사진을 ref slot명으로 합치고 제거."""
@@ -803,12 +837,16 @@ class MainWindow(QMainWindow):
         # 사진이 한 장도 없는 한쪽 전용 폴더는 매칭 대상에서 제외(그냥 넘어감).
         drop_empty_unmatched(sr)
 
-        # slot(폴더)명이 ref/val 간 일치하지 않으면, 먼저 'KLA 장비가 있나요?' 를
-        # 묻고, 예면 미매칭 폴더에 대해 '한쪽 폴더명이 반대쪽 사진 파일명에 들어있는지'
-        # 로 자동 매칭한다(패턴 무관, OCR 불필요).  나머지는 수동 매핑.  ‘공통 slot
-        # 없음’ 검사는 매칭 확정 이후로 미뤄, 폴더명이 전부 달라도 동작하게 한다.
-        if (sr.ref_only or sr.val_only) and self._ask_has_kla():
-            self._match_by_filename(sr)
+        # slot(폴더)명이 ref/val 간 일치하지 않으면, KLA 장비의 위치(기준/검증)를
+        # 정한다 — 호기가 'K-n' 이면 그 쪽이 KLA(묻지 않음), 아니면 사용자에게 묻는다.
+        # KLA 쪽은 파일명(첫 '_' 이전)→OCR 순으로 WaferID 를 읽어 자동 매칭하고,
+        # 나머지는 수동 매핑.  '공통 slot 없음' 검사는 매칭 확정 이후로 미룬다.
+        if sr.ref_only or sr.val_only:
+            side = self._kla_machine_side(inp)
+            if side is None:
+                side = self._ask_kla_side()
+            if side:
+                self._match_by_filename(sr, side)
         self._after_slot_resolved(sr)
 
     def _after_slot_resolved(self, sr: ScanResult) -> None:
@@ -827,6 +865,11 @@ class MainWindow(QMainWindow):
         sr = self._scan
         if sr is None:
             return
+        # 매핑/OCR 단계에서 오버레이가 숨겨졌을 수 있으므로 **반드시 다시 띄운다** —
+        # 그렇지 않으면 썸네일 생성 동안 메인 창이 클릭 가능 상태로 남아 버그 유발.
+        # (set_progress 는 숨겨진 오버레이를 다시 띄우지 않으므로 show_overlay 필수.)
+        self._loading.show_overlay(i18n.KO.LOAD_THUMBNAIL_FMT.format(done=0, total=0))
+        QApplication.processEvents()
         all_items: list[ImageItem] = []
         for name in common:
             slot = sr.slots[name]

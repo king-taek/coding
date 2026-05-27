@@ -201,9 +201,10 @@ def merge_unmatched_by_wafer_id(sr, wid_by_ref: dict, wid_by_val: dict):
     """``ref_only``/``val_only`` 를 ‘폴더명 또는 WaferID’ 키 교집합으로 병합.
 
     각 폴더 키 = {폴더명, (있으면) WaferID}.  ref·val 키가 겹치면 같은 slot.
-    병합 slot명 = 원본 ref 폴더명 유지.  ``sr`` 를 직접 수정하고 짝지은
-    ``(ref, val)`` 목록 반환.  ``wid_by_*`` : {폴더명 → WaferID}."""
-    from ..models.slot import ImageItem
+    병합 **slot명 = 교집합 키(WaferID 우선)** — KLA 가 기준/검증 어느 쪽이든 깔끔한
+    WaferID 가 slot명이 된다(KLA 의 임의 폴더명이 slot명이 되는 것 방지).
+    ``sr`` 를 직접 수정하고 짝지은 ``(ref, val)`` 목록 반환.  ``wid_by_*`` : {폴더명 → WaferID}."""
+    from ..models.slot import ImageItem, Slot
 
     wid_by_ref = wid_by_ref or {}
     wid_by_val = wid_by_val or {}
@@ -220,27 +221,41 @@ def merge_unmatched_by_wafer_id(sr, wid_by_ref: dict, wid_by_val: dict):
     for ref_name in list(sr.ref_only):
         rk = keyset(ref_name, wid_by_ref.get(ref_name))
         match_val = None
+        slot_name = None
         for val_name in list(sr.val_only):
             if val_name in used_val:
                 continue
-            if rk & val_keys.get(val_name, set()):
-                match_val = val_name
-                break
+            inter = rk & val_keys.get(val_name, set())
+            if not inter:
+                continue
+            match_val = val_name
+            # slot명 = 교집합 키 중 WaferID 우선(없으면 임의의 교집합 키).
+            wids = {_norm_key(w) for w in
+                    (wid_by_ref.get(ref_name), wid_by_val.get(val_name)) if w}
+            pref = inter & wids
+            slot_name = sorted(pref)[0] if pref else sorted(inter)[0]
+            break
         if match_val is None:
             continue
         ref_slot = sr.slots.get(ref_name)
         vs = sr.slots.get(match_val)
         if ref_slot is None or vs is None:
             continue
-        ref_slot.val_images.extend(
-            ImageItem(slot=ref_name, path=it.path, side="val")
-            for it in vs.val_images
-        )
-        sr.slots.pop(match_val, None)
+        merged = sr.slots.get(slot_name) or Slot(name=slot_name)
+        merged.ref_images = [ImageItem(slot=slot_name, path=it.path, side="ref")
+                             for it in ref_slot.ref_images]
+        merged.val_images = [ImageItem(slot=slot_name, path=it.path, side="val")
+                             for it in vs.val_images]
+        if ref_name != slot_name:
+            sr.slots.pop(ref_name, None)
+        if match_val != slot_name:
+            sr.slots.pop(match_val, None)
+        sr.slots[slot_name] = merged
         used_val.add(match_val)
-        if match_val in sr.val_only:
-            sr.val_only.remove(match_val)
-        if ref_name in sr.ref_only:
-            sr.ref_only.remove(ref_name)
+        for n in (ref_name, match_val, slot_name):
+            if n in sr.ref_only:
+                sr.ref_only.remove(n)
+            if n in sr.val_only:
+                sr.val_only.remove(n)
         paired.append((ref_name, match_val))
     return paired

@@ -66,8 +66,25 @@ def test_merge_by_wafer_id_filename_prefix():
         sr.slots["KLA_RAW_07"].ref_images)}
     paired = wafer_id.merge_unmatched_by_wafer_id(sr, wid_ref, {})
     assert paired == [("KLA_RAW_07", "W6459080XYHX")]
-    assert sr.common_slot_names == ["KLA_RAW_07"]   # 병합 slot명 = ref 폴더명 유지
+    # 병합 slot명 = WaferID(교집합 키) — KLA 임의 폴더명이 아니라.
+    assert sr.common_slot_names == ["W6459080XYHX"]
+    merged = sr.slots["W6459080XYHX"]
+    assert merged.has_both
+    assert all(it.slot == "W6459080XYHX"
+               for it in merged.ref_images + merged.val_images)
     assert sr.ref_only == [] and sr.val_only == []
+
+
+def test_merge_slot_named_wafer_id_when_kla_is_ref():
+    """KLA 가 기준(ref) 쪽이어도 slot명은 WaferID(=검증 폴더명) 가 된다."""
+    sr = _scan(
+        ref_specs={"KLA_LOT_X": ["W1234567ABCD_1.jpg"]},   # 기준=KLA(임의 폴더명)
+        val_specs={"W1234567ABCD": ["shot.jpg"]},           # 검증=WaferID 폴더명
+    )
+    wid_ref = {"KLA_LOT_X": "W1234567ABCD"}
+    wafer_id.merge_unmatched_by_wafer_id(sr, wid_ref, {})
+    assert sr.common_slot_names == ["W1234567ABCD"]
+    assert "KLA_LOT_X" not in sr.slots
 
 
 def test_merge_no_match_when_wafer_id_differs():
