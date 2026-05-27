@@ -300,6 +300,12 @@ class MainWindow(QMainWindow):
                 else i18n.KO.UPDATE_AVAILABLE_BODY)
         if msg:
             body = f"{body}\n\n· {msg}"
+        try:
+            from ..utils import updater as _upd
+            if _upd.insecure_fallback_used():
+                body = f"{body}\n\n{i18n.KO.UPDATE_INSECURE_NOTE}"
+        except Exception:
+            pass
         ans = QMessageBox.question(
             self, i18n.KO.UPDATE_AVAILABLE_TITLE, body,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,

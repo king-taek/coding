@@ -140,18 +140,49 @@ def test_latest_commit_records_error_on_total_failure(monkeypatch):
     assert updater.last_error()        # 사유 기록됨
 
 
-def test_ssl_context_default_verifies(monkeypatch):
+def test_ssl_context_default_verifies():
     import ssl
-    monkeypatch.delenv("AOI_UPDATE_INSECURE", raising=False)
     ctx = updater._ssl_context()
     assert ctx is not None and ctx.verify_mode == ssl.CERT_REQUIRED
 
 
-def test_ssl_context_insecure_env_disables_verify(monkeypatch):
+def test_ssl_context_insecure_disables_verify():
     import ssl
-    monkeypatch.setenv("AOI_UPDATE_INSECURE", "1")
-    ctx = updater._ssl_context()
+    ctx = updater._ssl_context(insecure=True)
     assert ctx.verify_mode == ssl.CERT_NONE and ctx.check_hostname is False
+
+
+def test_urlopen_falls_back_to_insecure_on_cert_error(monkeypatch):
+    import ssl
+
+    class _Resp:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self): return b"OK"
+
+    calls = {"insecure": []}
+
+    class _Op:
+        def __init__(self, insecure): self.insecure = insecure
+        def open(self, req, timeout=None):
+            calls["insecure"].append(self.insecure)
+            if not self.insecure:
+                raise urllib_error_ssl()
+            return _Resp()
+
+    monkeypatch.setattr(updater, "_opener", lambda insecure=False: _Op(insecure))
+    monkeypatch.delenv("AOI_UPDATE_INSECURE", raising=False)
+    updater._insecure_used = False
+    with updater._urlopen("https://github.com/x", {}, 5) as r:
+        assert r.read() == b"OK"
+    assert calls["insecure"] == [False, True]          # 검증 시도 → 실패 → 비검증 재시도
+    assert updater.insecure_fallback_used() is True
+
+
+def urllib_error_ssl():
+    import ssl
+    import urllib.error
+    return urllib.error.URLError(ssl.SSLCertVerificationError("bad cert"))
 
 
 def test_is_git_checkout(tmp_path, monkeypatch):
