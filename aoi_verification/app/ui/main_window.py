@@ -60,6 +60,7 @@ class MainWindow(QMainWindow):
     _update_found = pyqtSignal(dict)
     _update_applied = pyqtSignal(bool, dict)
     _update_none = pyqtSignal(str)          # 수동 확인: 최신/확인불가 안내
+    _startup_proceed = pyqtSignal()         # 업데이트 흐름 종료 → 나머지 시작 팝업
 
     def __init__(self) -> None:
         super().__init__()
@@ -201,19 +202,26 @@ class MainWindow(QMainWindow):
         self._session_id: str = ""
 
         # 이어하기 ------------------------------------------------------
-        QTimer.singleShot(50, self._maybe_resume)
-        # Intel GPU/NPU 가속(OpenVINO) 설치 안내 — 첫 모달(이어하기) 이후 표시.
-        # 모달 exec() 가 이벤트 루프를 막으므로 두 모달이 겹치지 않는다.
-        QTimer.singleShot(300, self._maybe_offer_openvino)
         # 1일 지난 썸네일/중간이미지 캐시 정리 — 백그라운드 데몬으로 UI 비차단.
         self._prune_old_cache_async()
         # GPU 임베딩 모델을 미리 컴파일/워밍업 — 첫 슬롯의 커널 JIT 지연 제거(#3).
         self._warmup_accel_async()
-        # 자동 업데이트 확인 — 백그라운드로 GitHub 현재 브랜치 최신 커밋과 비교.
+        # 시작 팝업 순서: ① 자동 업데이트 확인 → (업데이트 처리 후) ② 이어하기 →
+        # ③ OpenVINO 안내.  팝업이 겹치지 않도록 ②③ 은 업데이트 흐름이 끝난 뒤에만 띄운다.
+        self._startup_done = False
         self._update_found.connect(self._on_update_found)
         self._update_applied.connect(self._on_update_applied)
         self._update_none.connect(self._on_update_none)
-        QTimer.singleShot(800, self._check_for_update_async)
+        self._startup_proceed.connect(self._run_startup_popups)
+        QTimer.singleShot(400, self._check_for_update_async)
+
+    def _run_startup_popups(self) -> None:
+        """업데이트 흐름이 끝난 뒤(없음/거절/실패) 나머지 시작 팝업을 순서대로 1회만."""
+        if self._startup_done:
+            return
+        self._startup_done = True
+        self._maybe_resume()                 # 모달(exec) — 닫힌 뒤 OpenVINO 안내.
+        QTimer.singleShot(0, self._maybe_offer_openvino)
 
     @staticmethod
     def _prune_old_cache_async() -> None:
@@ -253,13 +261,16 @@ class MainWindow(QMainWindow):
         import threading
 
         def _work() -> None:
+            info = None
             try:
                 from ..utils import updater
                 info = updater.check_for_update()
-                if info:
-                    self._update_found.emit(info)
             except Exception:
-                pass
+                info = None
+            if info:
+                self._update_found.emit(info)
+            else:
+                self._startup_proceed.emit()   # 업데이트 없음 → 나머지 시작 팝업 진행
 
         threading.Thread(target=_work, name="update-check", daemon=True).start()
 
@@ -303,6 +314,7 @@ class MainWindow(QMainWindow):
             QMessageBox.StandardButton.Yes,
         )
         if ans != QMessageBox.StandardButton.Yes:
+            self._run_startup_popups()       # 거절 → 나머지 시작 팝업 진행
             return
         # 개발(git) 작업트리에서는 자동 덮어쓰기로 로컬 변경을 날릴 수 있어 막는다.
         try:
@@ -310,6 +322,7 @@ class MainWindow(QMainWindow):
             if updater.is_git_checkout():
                 QMessageBox.information(
                     self, i18n.KO.UPDATE_AVAILABLE_TITLE, i18n.KO.UPDATE_GIT_HINT)
+                self._run_startup_popups()
                 return
         except Exception:
             pass
@@ -330,7 +343,7 @@ class MainWindow(QMainWindow):
         threading.Thread(target=_work, name="update-apply", daemon=True).start()
 
     def _on_update_applied(self, ok: bool, info: dict) -> None:
-        """다운로드/교체 결과 처리 — 성공 시 '수동 재시작' 안내(자동 재시작 안 함)."""
+        """다운로드/교체 결과 — 성공 시 안내 후 **프로그램 자동 종료**(재시작은 사용자가)."""
         self._loading.hide_overlay()
         if not ok:
             msg = i18n.KO.UPDATE_FAILED
@@ -341,10 +354,12 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
             QMessageBox.warning(self, i18n.KO.UPDATE_AVAILABLE_TITLE, msg)
+            self._run_startup_popups()       # 실패 → 나머지 시작 팝업 진행
             return
-        # 자동 재시작하지 않고, 사용자가 직접 종료 후 다시 실행하도록 안내.
+        # 안내 후 프로그램을 자동 종료한다(자동 재실행은 하지 않음 — 사용자가 다시 실행).
         QMessageBox.information(
             self, i18n.KO.UPDATE_AVAILABLE_TITLE, i18n.KO.UPDATE_DONE_RESTART)
+        QApplication.quit()
 
     # ==================================================================
     # 메모리 사용량 표시

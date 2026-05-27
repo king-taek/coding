@@ -17,7 +17,6 @@ import json
 import os
 import socket
 import ssl
-import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -351,14 +350,3 @@ def download_and_apply(repo: str, branch: str, target_sha: str,
         return False
     finally:
         shutil.rmtree(tmpd, ignore_errors=True)
-
-
-def restart_app() -> bool:
-    """현재 파이썬으로 ``main.py`` 를 새로 띄운다(호출자가 곧바로 종료해야 함)."""
-    import subprocess
-    try:
-        subprocess.Popen([sys.executable, str(_app_root() / "main.py")],
-                         cwd=str(_app_root()))
-        return True
-    except Exception:
-        return False
