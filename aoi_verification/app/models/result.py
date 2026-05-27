@@ -42,3 +42,6 @@ class FinalResult:
     # Stage 2 에서 매칭을 찾지 못한 (Skip + No-match) 기준 사진들 — 엑셀에
     # ‘기준 이미지 + 빨간 파일명’ 행으로 함께 표기 (#7).
     unmatched_refs: list[MissEntry] = field(default_factory=list)
+    # KLA 장비 사용 시: {slot명(WaferID) → KLA 하위폴더명}.  엑셀 B열에 slot명 아래
+    # 회색 글씨로 KLA 폴더명을 함께 표기한다.
+    kla_folders: dict[str, str] = field(default_factory=dict)

@@ -232,6 +232,30 @@ class ExcelExporter(QThread):
         ws.row_dimensions[2].height = 19.5
 
     # ------------------------------------------------------------------
+    def _write_slot_cell(self, ws, row: int, slot: str, center) -> None:
+        """B열에 slot명을 쓴다.  KLA 장비면 slot명(WaferID) 아래 줄에 KLA 하위폴더명을
+        **회색 글씨**로 함께 표기한다 (#KLA).  rich text 미지원 시 plain 폴백."""
+        from openpyxl.styles import Alignment
+
+        cell = ws[f"{COL_SLOT}{row}"]
+        kf = (self._result.kla_folders or {}).get(slot)
+        if not kf:
+            cell.value = slot
+            cell.alignment = center
+            return
+        wrap = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        try:
+            from openpyxl.cell.rich_text import CellRichText, TextBlock
+            from openpyxl.cell.text import InlineFont
+            cell.value = CellRichText(
+                TextBlock(InlineFont(), f"{slot}\n"),
+                TextBlock(InlineFont(sz=8, color="808080"), str(kf)),
+            )
+        except Exception:
+            cell.value = f"{slot}\n{kf}"
+        cell.alignment = wrap
+
+    # ------------------------------------------------------------------
     def _fill_rows(self, ws, rows_input: list[tuple[str, str, object]]) -> None:
         from openpyxl.comments import Comment
         from openpyxl.drawing.image import Image as XLImage
@@ -282,8 +306,7 @@ class ExcelExporter(QThread):
 
             if isinstance(payload, MatchResult):
                 m = payload
-                ws[f"{COL_SLOT}{row}"] = m.slot
-                ws[f"{COL_SLOT}{row}"].alignment = center
+                self._write_slot_cell(ws, row, m.slot, center)
                 # 손상/누락 이미지 1 장 때문에 전체 export 가 abort 되지 않도록
                 # 각 사진을 개별 try 로 감싼다 (Bug #3).  실패하면 파일명 텍스트
                 # 로 대체하고 이어서 진행.
@@ -308,8 +331,7 @@ class ExcelExporter(QThread):
                 self.signals.progress.emit(idx, total, m.slot)
             else:
                 u: MissEntry = payload
-                ws[f"{COL_SLOT}{row}"] = u.slot
-                ws[f"{COL_SLOT}{row}"].alignment = center
+                self._write_slot_cell(ws, row, u.slot, center)
                 # 기준 이미지: 정상 임베드.
                 try:
                     ref_mid = image_io.get_mid_path(Path(u.path))

@@ -744,6 +744,17 @@ class MainWindow(QMainWindow):
         def finalize(ocr_ref=None, ocr_val=None) -> None:
             ocr_ref = ocr_ref or {}
             ocr_val = ocr_val or {}
+            # 병합된 slot명(WaferID) → KLA 하위폴더명 매핑(엑셀 B열 회색 표기용).
+            kla: dict[str, str] = {}
+            if do_ref:
+                for n, w in {**fn_ref, **ocr_ref}.items():
+                    if w:
+                        kla[str(w).upper()] = n
+            if do_val:
+                for n, w in {**fn_val, **ocr_val}.items():
+                    if w:
+                        kla[str(w).upper()] = n
+            self._kla_folders = kla
             self._slot_meta_ref = build_meta(list(sr.ref_only), do_ref, fn_ref,
                                              ocr_ref, img0_ref)
             self._slot_meta_val = build_meta(list(sr.val_only), do_val, fn_val,
@@ -847,6 +858,7 @@ class MainWindow(QMainWindow):
         # 원본 mtime 메모이즈 초기화 — 이번 세션 동안 캐시 키용 stat() 을 경로당 1회로(#5).
         from ..utils import cache as _cache
         _cache.reset_mtime_cache()
+        self._kla_folders: dict[str, str] = {}      # KLA slot명→폴더명(엑셀 회색 표기)
 
         self._loading.show_overlay(i18n.KO.LOAD_SCAN)
         QApplication.processEvents()
@@ -1152,6 +1164,7 @@ class MainWindow(QMainWindow):
             slot_only_ref=list(self._scan.ref_only),
             slot_only_val=list(self._scan.val_only),
             unmatched_refs=unmatched_refs,
+            kla_folders=dict(getattr(self, "_kla_folders", {})),
         )
         # 결과 페이지에는 ‘이미 복사해둔 작업 파일’ 과 ‘템플릿 원본’ 둘 다 전달.
         auto_mode = (
