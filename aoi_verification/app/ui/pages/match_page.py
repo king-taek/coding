@@ -70,7 +70,6 @@ class MatchPage(QWidget):
         self._state: Stage2State | None = None
         self._current: Optional[ImageItem] = None
         self._threshold = config.CONFIG.default_threshold
-        self._mode_direction = "A→B"
         self._build()
         self._loading = LoadingOverlay(self)
         self._loading.cancel_requested.connect(self._on_cancel_requested)
@@ -319,7 +318,6 @@ class MatchPage(QWidget):
                    matches: list[MatchResult] | None = None,
                    skipped: dict[str, list[ImageItem]] | None = None,
                    phase_label: str = "",
-                   direction: str = "A→B",
                    session_id: str = "",
                    model_name: str = "basic",
                    auto_mode: bool = False,
@@ -331,7 +329,6 @@ class MatchPage(QWidget):
             val_pool={k: list(v) for k, v in val_pool_by_slot.items()},
         )
         self._threshold = threshold
-        self._mode_direction = direction
         self._session_id = session_id or ""
         self._model_name = model_name or "basic"
         self._auto_mode = bool(auto_mode)
@@ -859,7 +856,6 @@ class MatchPage(QWidget):
             ref_path=ref.path,
             val_path=val.path,
             score=score,
-            direction=self._mode_direction,    # type: ignore[arg-type]
         )
         self._state.matches.append(match)
         self._state.queue.pop(0)

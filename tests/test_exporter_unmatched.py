@@ -44,7 +44,7 @@ def test_export_writes_matches_and_unmatched(qapp, isolated_cache, tmp_path):
         ref_machine="1호기",
         val_machine="2호기",
         matches=[MatchResult(slot="S1", ref_path=a_ref, val_path=a_val,
-                              score=0.9, direction="A→B")],
+                              score=0.9)],
         unmatched_refs=[MissEntry(slot="S1", side="ref", path=b_ref,
                                    note="미매칭")],
     )
@@ -95,7 +95,7 @@ def test_export_no_unmatched_unaffected(qapp, isolated_cache, tmp_path):
         ref_machine="1호기",
         val_machine="2호기",
         matches=[MatchResult(slot="S1", ref_path=ref, val_path=val,
-                              score=0.9, direction="A→B")],
+                              score=0.9)],
     )
     dst = tmp_path / "out2.xlsx"
     no_tpl = tmp_path / "no_template.xlsx"

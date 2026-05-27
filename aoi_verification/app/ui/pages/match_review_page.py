@@ -730,7 +730,6 @@ class MatchReviewPage(QWidget):
             ref_path=old_match.ref_path,
             val_path=new_val_item.path,
             score=float(new_score),
-            direction=old_match.direction,
         )
         # matches 리스트에서 old → new 교체
         for i, m in enumerate(self._matches):

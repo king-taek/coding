@@ -59,7 +59,7 @@ class _Row(QWidget):
 
         # Slot 메타
         meta = QLabel(
-            f"{m.slot}\n{m.direction}\nscore {m.score * 100:.1f} %", self,
+            f"{m.slot}\nscore {m.score * 100:.1f} %", self,
         )
         meta.setStyleSheet(
             "color: #00D4FF; font-weight: 700; border: none; padding: 4px;"

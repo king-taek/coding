@@ -47,7 +47,7 @@ def test_side_by_side_viewer_layout(qapp, tmp_path):
 # ── 매치 검토: 접기 = 전부 접기 + 시그널 ──────────────────────────────────
 def _mk_match(slot="S1"):
     return MatchResult(slot=slot, ref_path=Path("/tmp/r.jpg"),
-                       val_path=Path("/tmp/v.jpg"), score=0.9, direction="A→B")
+                       val_path=Path("/tmp/v.jpg"), score=0.9)
 
 
 def test_match_review_collapse_all(qapp):

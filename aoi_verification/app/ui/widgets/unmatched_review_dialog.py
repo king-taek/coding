@@ -210,7 +210,7 @@ class UnmatchedReviewDialog(QDialog):
                  parent=None) -> None:
         """``val_pool`` 키는 두 형태를 모두 지원:
 
-        - ``(slot, side)`` → list[ImageItem]  : cross 모드 양방향 후보
+        - ``(slot, side)`` → list[ImageItem]  : 후보 풀
         - ``slot``          → list[ImageItem]  : 단일 모드 호환 (side 무시)
         """
         super().__init__(parent)
@@ -758,13 +758,11 @@ class UnmatchedReviewDialog(QDialog):
         score = self._lookup_or_compute_score(ref_entry, val_item)
         if ref_entry.side == "val":
             ref_path, val_path = cand_path, cur_path
-            direction = "B→A"
         else:
             ref_path, val_path = cur_path, cand_path
-            direction = "A→B"
         self.new_matches.append(MatchResult(
             slot=ref_entry.slot, ref_path=ref_path, val_path=val_path,
-            score=float(score), direction=direction,
+            score=float(score),
         ))
         self.resolved_refs.append(ref_entry)
         self._used_vals.add(cand_path)

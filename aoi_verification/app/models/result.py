@@ -4,19 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
-
-MatchDirection = Literal["A→B", "B→A", "양방향"]
 
 
 @dataclass
 class MatchResult:
     """기준 사진 ↔ 검증 사진 1:1 매칭 한 줄."""
     slot: str
-    ref_path: Path        # 항상 "낮은 호기" 쪽 사진을 가리키도록 정규화
-    val_path: Path        # "높은 호기" 쪽 사진
+    ref_path: Path        # 기준 쪽 사진
+    val_path: Path        # 검증 쪽 사진
     score: float
-    direction: MatchDirection = "A→B"
 
     @property
     def key(self) -> tuple[str, str, str]:

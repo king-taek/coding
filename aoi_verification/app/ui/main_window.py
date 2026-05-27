@@ -3,7 +3,7 @@
 다음 페이지를 StackedWidget 로 갈아끼우며 흐름을 관리한다.
 1) SetupPage           → 입력
 2) SelectPage          → Stage 1 (Phase A / Phase B 양쪽 모두에서 재사용)
-3) MatchPage           → Stage 2 (방향만 바꿔 재사용)
+3) MatchPage           → Stage 2 (유사도 매칭)
 4) ResultPage          → 결과 + 엑셀 저장
 
 세션 자동 저장 / 이어하기, 단계 전환 모달, 진행 상태 라벨도 여기서 처리한다.
@@ -1002,7 +1002,6 @@ class MainWindow(QMainWindow):
             val_pool_by_slot=pool,
             threshold=self._input.threshold,
             phase_label=i18n.KO.STAGE2_TITLE,
-            direction="A→B",
             session_id=self._session_id,
             model_name=self._active_model_name(),
             auto_mode=True,
@@ -1075,14 +1074,12 @@ class MainWindow(QMainWindow):
             slot = self._scan.slots[name]
             pool[name] = slot.val_images
 
-        direction = "A→B"
         auto_mode = AutomationLevel.is_auto(self._input.automation_level)
         self._match_page.load_state(
             queue=queue,
             val_pool_by_slot=pool,
             threshold=self._input.threshold,
             phase_label=i18n.KO.STAGE2_TITLE,
-            direction=direction,
             session_id=self._session_id,
             model_name=self._active_model_name(),
             auto_mode=auto_mode,
@@ -1324,7 +1321,6 @@ class MainWindow(QMainWindow):
                     "ref_path": str(m.ref_path),
                     "val_path": str(m.val_path),
                     "score": float(m.score),
-                    "direction": str(m.direction),
                 })
             for slot, items in st2.skipped.items():
                 for it in items:
@@ -1353,7 +1349,6 @@ class MainWindow(QMainWindow):
                 "ref_path": str(m.ref_path),
                 "val_path": str(m.val_path),
                 "score": float(m.score),
-                "direction": str(m.direction),
             } for m in self._matches_a],
         )
         try:
