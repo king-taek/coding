@@ -372,9 +372,16 @@ class UnmatchedReviewDialog(QDialog):
         rl = QVBoxLayout(right)
         rl.setContentsMargins(12, 12, 12, 12)
         rl.setSpacing(6)
+        cand_head = QHBoxLayout()
         cand_title = QLabel(i18n.KO.PANEL_MATCH_CANDIDATES, right)
         cand_title.setStyleSheet("color: #00D4FF; font-weight: 700;")
-        rl.addWidget(cand_title)
+        cand_head.addWidget(cand_title)
+        # '검증 장비 후보' 옆 '크게 보기' — 선택 후보(없으면 1순위)부터 좌우 비교.
+        self.btn_zoom_cand = NeonButton(i18n.KO.BTN_VIEW_LARGER, role="ghost")
+        self.btn_zoom_cand.clicked.connect(self._open_compare_selected)
+        cand_head.addWidget(self.btn_zoom_cand)
+        cand_head.addStretch(1)
+        rl.addLayout(cand_head)
         self.candidates_summary = QLabel("", right)
         self.candidates_summary.setStyleSheet("color: #7FB3D5; padding: 2px;")
         rl.addWidget(self.candidates_summary)
@@ -717,6 +724,15 @@ class UnmatchedReviewDialog(QDialog):
             t.set_selected(sel is not None and t.item.path == sel.path)
         # 선택한 후보가 있으면 좌측 실패 목록에서 그 ref 를 파란색으로 (#4).
         self._refresh_list_colors()
+
+    def _open_compare_selected(self) -> None:
+        """'크게 보기' 버튼 — 선택한 후보(없으면 1순위)부터 좌우 비교 뷰어를 연다."""
+        sel = self._pending.get(self._idx)
+        start = 0
+        if sel is not None:
+            start = next((i for i, t in enumerate(self._cand_tiles)
+                          if t.item.path == sel.path), 0)
+        self._open_compare(start)
 
     def _open_compare(self, start_index: int) -> None:
         """좌(기준)·우(후보) 비교 크게보기 — 후보 더블클릭/우클릭 및 기준 우클릭
