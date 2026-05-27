@@ -70,12 +70,17 @@ def folder_wafer_id_from_filenames(paths) -> Optional[str]:
 # ---------------------------------------------------------------------------
 # 2) OCR 폴백 (RapidOCR) — 이미지 좌상단 헤더의 'WaferID : XXXX' 판독
 # ---------------------------------------------------------------------------
-_DET_LIMIT_SIDE_LEN = 320          # 검출 입력 한 변 — 속도/정확 균형
-_CROP_LADDER = ((0.12, 0.5),)      # (top_frac, left_frac) — 헤더 1구역만(속도↑)
-_MAX_IMAGES_PER_FOLDER = 3         # 폴더당 최대 시도 장수(속도↑, 과거 5)
-_VOTE_EARLY_STOP = 1               # 첫 성공 판독에서 즉시 종료(속도↑, 과거 2)
+_DET_LIMIT_SIDE_LEN = 640          # 검출 입력 한 변 — 헤더 글자 검출 정확도↑(과거 320)
+# KLA 사진은 **왼쪽 최상단**에 3줄 헤더(Lot:/WaferID:/Gain:)가 있다.  WaferID 가
+# 가운데 줄이라 3줄이 모두 들어가도록 위 18% 높이를 잡고, 못 읽으면 더 넓게 재시도.
+# (top_frac, left_frac)
+_CROP_LADDER = ((0.18, 0.5), (0.30, 1.0))
+_MAX_IMAGES_PER_FOLDER = 3         # 폴더당 최대 시도 장수
+_VOTE_EARLY_STOP = 1               # 첫 성공 판독에서 즉시 종료
 _MIN_CONF = 0.30
-_WAFER_ID_RE = re.compile(r"WaferID\s*[:：]?\s*([A-Za-z0-9]+)", re.IGNORECASE)
+# 'WaferID : XXXX' / 'WAFER ID: XXXX' 둘 다 매칭(WAFER 와 ID 사이 공백 허용),
+# 콜론/공백 변형 허용.  Lot:/Gain: 줄과 섞여 있어도 WaferID 값만 추출.
+_WAFER_ID_RE = re.compile(r"WAFER\s*ID\s*[:：]?\s*([A-Za-z0-9]+)", re.IGNORECASE)
 
 _reader = None
 _reader_failed = False
@@ -195,9 +200,9 @@ def read_folder_wafer_id(paths, limit: int = _MAX_IMAGES_PER_FOLDER) -> Optional
     return max(votes.items(), key=lambda kv: (kv[1][0], kv[1][1]))[0]
 
 
-def header_crop_image(path, top_frac: float = 0.12, left_frac: float = 0.5):
-    """매핑 미리보기용 — 좌상단 헤더 크롭 PIL 이미지(RGB).  OCR 이 읽으려 한 ‘그
-    부분’ 을 사용자에게 보여줄 때 사용(Qt 비의존)."""
+def header_crop_image(path, top_frac: float = 0.18, left_frac: float = 0.5):
+    """매핑 미리보기용 — 좌상단 헤더(Lot/WaferID/Gain 3줄) 크롭 PIL 이미지(RGB).
+    OCR 이 읽으려 한 ‘그 부분’ 을 사용자에게 보여줘 직접 WaferID 를 읽게 한다."""
     try:
         from . import image_io
         img = image_io._open(Path(path))

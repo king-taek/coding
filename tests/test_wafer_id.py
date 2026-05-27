@@ -53,6 +53,15 @@ def test_folder_wafer_id_majority_vote():
     assert wafer_id.folder_wafer_id_from_filenames(items) == "W6459153XYF5"
 
 
+def test_parse_wafer_id_handles_label_variants():
+    # 'WaferID :' / 'WAFER ID:' 둘 다, Lot/Gain 줄과 섞여 있어도 WaferID 값만 추출.
+    assert wafer_id._parse_wafer_id("WaferID : 00MML090XYG5") == "00MML090XYG5"
+    assert wafer_id._parse_wafer_id("WAFER ID: W6459153XYF5") == "W6459153XYF5"
+    multi = "Lot : AB12CD\nWaferID : 00NJ3159XYC1\nGain : 12"
+    assert wafer_id._parse_wafer_id(multi) == "00NJ3159XYC1"
+    assert wafer_id._parse_wafer_id("Gain : 12") is None
+
+
 def test_looks_like_wafer_id_gates_ocr():
     # WaferID 형식이면 True(파일명 신뢰 → OCR 생략), 아니면 False(OCR 필요).
     assert wafer_id.looks_like_wafer_id("W6459153XYF5") is True

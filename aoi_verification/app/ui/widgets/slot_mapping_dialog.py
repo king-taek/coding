@@ -36,6 +36,16 @@ _CROP_W = 260
 _CROP_H = 72
 _KLA_METHODS = ("ocr", "unread", "filename")
 
+# 선택(클릭) 시 파란 테두리가 또렷하게 보이도록.  미선택 항목에도 투명 테두리를
+# 미리 둬서 선택 시 레이아웃이 흔들리지 않게 한다.
+_LIST_SEL_QSS = (
+    "QListWidget::item { border: 2px solid transparent; border-radius: 4px;"
+    " padding: 2px; margin: 1px; }"
+    "QListWidget::item:selected { border: 2px solid #3DA5FF;"
+    " background: rgba(61,165,255,0.22); color: #FFFFFF; }"
+    "QListWidget::item:selected:active { border: 2px solid #3DA5FF; }"
+)
+
 _METHOD_LABEL = {
     "filename": "파일명",
     "ocr": "OCR",
@@ -136,6 +146,7 @@ class SlotMappingDialog(QDialog):
     def _fill_list(self, lst: QListWidget, names: list[str], meta: dict) -> None:
         # 아이콘 박스는 넓은 헤더(OCR 구간)가 보이도록 가로로 크게.
         lst.setIconSize(QSize(_CROP_W, _CROP_H))
+        lst.setStyleSheet(_LIST_SEL_QSS)        # 선택 시 파란 테두리 또렷하게
         for n in names:
             item = QListWidgetItem(self._label_for(n, meta))
             item.setData(Qt.ItemDataRole.UserRole, n)

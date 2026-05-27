@@ -41,7 +41,7 @@ def _rerank_workers() -> int:
     return max(2, min(32, os.cpu_count() or 4))
 
 # 고정 하이퍼파라미터(벤치마크에서 확정 — 데이터에 맞춰 튜닝하지 않음).
-FUSION_TOPK = 40          # 고전 재채점할 임베딩 상위 후보 수
+FUSION_TOPK = 40          # CPU 고전 재채점 최소 후보 수(실제론 후보의 절반 vs 40 중 큰 값)
 GPU_BATCH = 16            # GPU 정적 배치(=batch=1 이면 처리량 폭락 → 멈춤)
 
 
@@ -309,7 +309,10 @@ class EfficiencyScheduler(QThread):
                    if 0 <= lab < len(val_paths)]
         if not ordered:
             return None
-        top = ordered[:FUSION_TOPK]
+        # CPU 재검증 범위 = 후보의 **최소 절반**, 단 최소 FUSION_TOPK(40) 이상.
+        # (후보가 80장↑이면 절반, 80장 미만이면 40장(또는 후보 전부)을 재검증.)
+        topk = max(FUSION_TOPK, (len(ordered) + 1) // 2)
+        top = ordered[:topk]
         items = [by_path.get(Path(vp)) for vp, _ in top]
         valid = [it for it in items if it is not None]
         cls_cands = (score_ref_classical(ref, valid, threshold=0.0, cfg=self._cfg,
@@ -324,7 +327,7 @@ class EfficiencyScheduler(QThread):
             cls_scores.append(cls_map.get(it.path, 0.0) if it is not None else 0.0)
         mapped = map_score(zfuse(emb_scores, cls_scores))
         head = sorted(zip([vp for vp, _ in top], mapped), key=lambda x: -x[1])
-        tail = [(vp, _cos_to_unit(cos)) for vp, cos in ordered[FUSION_TOPK:]]
+        tail = [(vp, _cos_to_unit(cos)) for vp, cos in ordered[topk:]]
         out = list(head) + tail
         out.sort(key=lambda x: -x[1])
         return out
