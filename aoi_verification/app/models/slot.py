@@ -32,9 +32,6 @@ class Slot:
     name: str
     ref_images: list[ImageItem] = field(default_factory=list)
     val_images: list[ImageItem] = field(default_factory=list)
-    # KLA 장비처럼 폴더명이 slot 명이 아니고 하위 ``.001`` 파일명에서 slot 을 뽑은
-    # 경우, 원본 폴더명을 보관(엑셀에 'slot명 / 폴더명' 두 줄로 표기).
-    kla_folder: str | None = None
 
     @property
     def has_both(self) -> bool:
@@ -79,55 +76,19 @@ def _list_images(folder: Path) -> list[Path]:
     return out
 
 
-def _kla_slot_name(folder: Path) -> str | None:
-    """KLA 폴더라면 하위 ``*.001`` 파일명에서 slot 명을 뽑아 돌려준다 (없으면 None).
-
-    slot 명 = ``.001`` 파일 stem 의 **마지막 '_' 뒤** 토큰.  예)
-    ``..._W6459079XYE1.001`` → ``W6459079XYE1``.  파일 **내용은 읽지 않고 파일명만**
-    사용한다.  여러 개면 이름 오름차순 첫 파일을 쓴다(보통 동일 slot).
-    """
-    names: list[str] = []
-    try:
-        with os.scandir(folder) as it:
-            for entry in it:
-                try:
-                    if entry.is_file() and entry.name.lower().endswith(".001"):
-                        names.append(entry.name)
-                except OSError:
-                    continue
-    except OSError:
-        return None
-    if not names:
-        return None
-    stem = Path(sorted(names, key=str.lower)[0]).stem
-    token = stem.rsplit("_", 1)[-1].strip()
-    return token or None
-
-
-def _enum_slot_dirs(root: Path) -> dict[str, tuple[Path, str | None]]:
-    """root/*/ 들 중 폴더만 골라 ``슬롯명 → (경로, kla_folder)`` 매핑.
-
-    하위에 ``.001`` 파일이 있는 KLA 폴더는 그 파일명에서 뽑은 slot 명을 키로 쓰고
-    원본 폴더명을 ``kla_folder`` 로 함께 보관한다.  ``.001`` 이 없으면 폴더명을
-    그대로 slot 키로 쓴다(``kla_folder=None``).
-    """
+def _enum_slot_dirs(root: Path) -> dict[str, Path]:
+    """root/*/ 들 중 폴더만 골라 슬롯명 → 경로 매핑."""
     if not root.exists():
         return {}
-    out: dict[str, tuple[Path, str | None]] = {}
+    out: dict[str, Path] = {}
     try:
         with os.scandir(root) as it:
             for entry in it:
                 try:
-                    if not entry.is_dir():
-                        continue
+                    if entry.is_dir():
+                        out[entry.name] = Path(entry.path)
                 except OSError:
                     continue
-                path = Path(entry.path)
-                kla = _kla_slot_name(path)
-                if kla:
-                    out[kla] = (path, entry.name)
-                else:
-                    out[entry.name] = (path, None)
     except OSError:
         return {}
     return out
@@ -144,10 +105,8 @@ def scan(ref_root: Path, val_root: Path) -> ScanResult:
     val_only: list[str] = []
 
     for name in all_names:
-        ref_e = ref_dirs.get(name)
-        val_e = val_dirs.get(name)
-        ref_d = ref_e[0] if ref_e else None
-        val_d = val_e[0] if val_e else None
+        ref_d = ref_dirs.get(name)
+        val_d = val_dirs.get(name)
         ref_imgs: list[ImageItem] = []
         val_imgs: list[ImageItem] = []
         if ref_d:
@@ -158,10 +117,7 @@ def scan(ref_root: Path, val_root: Path) -> ScanResult:
             ref_only.append(name)
         elif val_d and not ref_d:
             val_only.append(name)
-        # 어느 쪽이든 KLA 폴더명이 있으면 보관(엑셀 두 줄 표기용).
-        kla_folder = (ref_e[1] if ref_e else None) or (val_e[1] if val_e else None)
-        slots[name] = Slot(name=name, ref_images=ref_imgs, val_images=val_imgs,
-                           kla_folder=kla_folder)
+        slots[name] = Slot(name=name, ref_images=ref_imgs, val_images=val_imgs)
 
     return ScanResult(slots=slots, ref_only=ref_only, val_only=val_only)
 
