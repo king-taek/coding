@@ -62,3 +62,51 @@ def test_check_none_when_network_fails(tmp_path, monkeypatch):
                    {"sha": "OLD", "branch": "feat", "repo": "o/r"})
     monkeypatch.setattr(updater, "latest_commit", lambda repo, branch: None)
     assert updater.check_for_update() is None
+
+
+# ---------------------------------------------------------------------------
+# 수동 확인(manual_check) — 소스/클론에서도 git HEAD 폴백
+# ---------------------------------------------------------------------------
+def test_manual_check_latest(tmp_path, monkeypatch):
+    _write_version(tmp_path, monkeypatch,
+                   {"sha": "SAME", "branch": "feat", "repo": "o/r"})
+    monkeypatch.setattr(updater, "latest_commit", lambda r, b: {"sha": "SAME"})
+    assert updater.manual_check() == ("latest", {})
+
+
+def test_manual_check_update(tmp_path, monkeypatch):
+    _write_version(tmp_path, monkeypatch,
+                   {"sha": "OLD", "branch": "feat", "repo": "o/r"})
+    monkeypatch.setattr(updater, "latest_commit",
+                        lambda r, b: {"sha": "NEW", "message": "fix"})
+    status, info = updater.manual_check()
+    assert status == "update" and info["sha"] == "NEW" and info["branch"] == "feat"
+
+
+def test_manual_check_git_fallback_when_no_version(tmp_path, monkeypatch):
+    _write_version(tmp_path, monkeypatch, None)            # VERSION 없음
+    monkeypatch.setattr(updater, "_git_head",
+                        lambda: {"sha": "G", "branch": "dev", "repo": "o/r"})
+    monkeypatch.setattr(updater, "latest_commit", lambda r, b: {"sha": "H"})
+    status, info = updater.manual_check()
+    assert status == "update" and info["branch"] == "dev"
+
+
+def test_manual_check_unknown_when_no_version_no_git(tmp_path, monkeypatch):
+    _write_version(tmp_path, monkeypatch, None)
+    monkeypatch.setattr(updater, "_git_head", lambda: None)
+    assert updater.manual_check() == ("unknown", {})
+
+
+def test_manual_check_unknown_on_network_fail(tmp_path, monkeypatch):
+    _write_version(tmp_path, monkeypatch,
+                   {"sha": "OLD", "branch": "feat", "repo": "o/r"})
+    monkeypatch.setattr(updater, "latest_commit", lambda r, b: None)
+    assert updater.manual_check() == ("unknown", {})
+
+
+def test_is_git_checkout(tmp_path, monkeypatch):
+    monkeypatch.setattr(updater, "_app_root", lambda: tmp_path)
+    assert updater.is_git_checkout() is False
+    (tmp_path / ".git").mkdir()
+    assert updater.is_git_checkout() is True

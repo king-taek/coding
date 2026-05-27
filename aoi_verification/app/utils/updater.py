@@ -98,6 +98,54 @@ def check_for_update() -> Optional[dict]:
     return None
 
 
+def is_git_checkout() -> bool:
+    """앱 소스가 git 작업트리인지 — 개발/클론 실행(포터블 아님)."""
+    return (_app_root() / ".git").exists()
+
+
+def _git_head() -> Optional[dict]:
+    """VERSION 이 없을 때, git 작업트리의 현재 커밋/브랜치를 읽는다(개발/클론 실행).
+
+    포터블(VERSION 동봉)에선 쓰이지 않는다.  git 미설치/실패 시 None."""
+    import subprocess
+    root = str(_app_root())
+    try:
+        sha = subprocess.check_output(
+            ["git", "-C", root, "rev-parse", "HEAD"],
+            stderr=subprocess.DEVNULL, timeout=5).decode().strip()
+        branch = subprocess.check_output(
+            ["git", "-C", root, "rev-parse", "--abbrev-ref", "HEAD"],
+            stderr=subprocess.DEVNULL, timeout=5).decode().strip()
+    except Exception:
+        return None
+    if sha and branch and branch != "HEAD":
+        return {"sha": sha, "branch": branch, "repo": DEFAULT_REPO}
+    return None
+
+
+def manual_check() -> tuple:
+    """사용자가 직접 '업데이트 확인' 을 눌렀을 때 — 결과를 명시적으로 돌려준다.
+
+    반환 ``(status, info)``:
+      · ``("update", {repo,branch,sha,message})`` — 새 버전 있음
+      · ``("latest", {})``  — 이미 최신
+      · ``("unknown", {})`` — 버전 정보 없음 또는 네트워크 실패(확인 불가)
+    VERSION 이 없으면 git HEAD 로 폴백해 개발/클론 실행에서도 확인 가능."""
+    cur = current_version()
+    if not cur or not cur.get("sha"):
+        cur = _git_head()
+    if not cur or not cur.get("sha") or not cur.get("branch"):
+        return ("unknown", {})
+    repo = cur.get("repo") or DEFAULT_REPO
+    latest = latest_commit(repo, cur["branch"])
+    if not latest or not latest.get("sha"):
+        return ("unknown", {})
+    if str(latest["sha"]) != str(cur["sha"]):
+        return ("update", {"repo": repo, "branch": cur["branch"],
+                           "sha": latest["sha"], "message": latest.get("message", "")})
+    return ("latest", {})
+
+
 def download_and_apply(repo: str, branch: str, target_sha: str,
                        timeout: float = 60.0) -> bool:
     """브랜치 zip 을 받아 앱 소스만 덮어쓴다.  성공 시 VERSION 갱신 후 True."""

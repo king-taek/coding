@@ -59,6 +59,7 @@ class MainWindow(QMainWindow):
     # 자동 업데이트 — 백그라운드 스레드에서 메인 스레드로 결과를 넘기는 시그널.
     _update_found = pyqtSignal(dict)
     _update_applied = pyqtSignal(bool, dict)
+    _update_none = pyqtSignal(str)          # 수동 확인: 최신/확인불가 안내
 
     def __init__(self) -> None:
         super().__init__()
@@ -210,7 +211,15 @@ class MainWindow(QMainWindow):
         # 자동 업데이트 확인 — 백그라운드로 GitHub 현재 브랜치 최신 커밋과 비교.
         self._update_found.connect(self._on_update_found)
         self._update_applied.connect(self._on_update_applied)
+        self._update_none.connect(self._on_update_none)
+        self._build_menubar()
         QTimer.singleShot(800, self._check_for_update_async)
+
+    def _build_menubar(self) -> None:
+        """도움말 메뉴 — 수동 '업데이트 확인'(소스/포터블 모두에서 동작)."""
+        help_menu = self.menuBar().addMenu(i18n.KO.MENU_HELP)
+        act = help_menu.addAction(i18n.KO.MENU_CHECK_UPDATE)
+        act.triggered.connect(self._manual_update_check)
 
     @staticmethod
     def _prune_old_cache_async() -> None:
@@ -260,6 +269,31 @@ class MainWindow(QMainWindow):
 
         threading.Thread(target=_work, name="update-check", daemon=True).start()
 
+    def _manual_update_check(self) -> None:
+        """도움말 > '업데이트 확인' — 소스/포터블 모두에서 결과를 명시적으로 안내."""
+        import threading
+        self._status_bar.showMessage(i18n.KO.UPDATE_CHECKING, 3000)
+
+        def _work() -> None:
+            status, info = "unknown", {}
+            try:
+                from ..utils import updater
+                status, info = updater.manual_check()
+            except Exception:
+                status, info = "unknown", {}
+            if status == "update":
+                self._update_found.emit(info)
+            elif status == "latest":
+                self._update_none.emit(i18n.KO.UPDATE_LATEST)
+            else:
+                self._update_none.emit(i18n.KO.UPDATE_UNKNOWN)
+
+        threading.Thread(target=_work, name="update-check-manual",
+                         daemon=True).start()
+
+    def _on_update_none(self, msg: str) -> None:
+        QMessageBox.information(self, i18n.KO.UPDATE_AVAILABLE_TITLE, msg)
+
     def _on_update_found(self, info: dict) -> None:
         """'업데이트 있음' 안내 → 동의하면 백그라운드로 다운로드/교체."""
         msg = (info or {}).get("message", "")
@@ -273,6 +307,15 @@ class MainWindow(QMainWindow):
         )
         if ans != QMessageBox.StandardButton.Yes:
             return
+        # 개발(git) 작업트리에서는 자동 덮어쓰기로 로컬 변경을 날릴 수 있어 막는다.
+        try:
+            from ..utils import updater
+            if updater.is_git_checkout():
+                QMessageBox.information(
+                    self, i18n.KO.UPDATE_AVAILABLE_TITLE, i18n.KO.UPDATE_GIT_HINT)
+                return
+        except Exception:
+            pass
         self._loading.show_overlay(i18n.KO.UPDATE_DOWNLOADING)
 
         import threading
