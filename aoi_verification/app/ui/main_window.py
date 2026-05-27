@@ -280,7 +280,11 @@ class MainWindow(QMainWindow):
             elif status == "latest":
                 self._update_none.emit(i18n.KO.UPDATE_LATEST)
             else:
-                self._update_none.emit(i18n.KO.UPDATE_UNKNOWN)
+                reason = (info or {}).get("error", "")
+                msg = i18n.KO.UPDATE_UNKNOWN
+                if reason:
+                    msg = f"{msg}\n\n[원인] {reason}"
+                self._update_none.emit(msg)
 
         threading.Thread(target=_work, name="update-check-manual",
                          daemon=True).start()
@@ -330,8 +334,14 @@ class MainWindow(QMainWindow):
         """다운로드/교체 결과 처리 — 성공 시 재시작 안내."""
         self._loading.hide_overlay()
         if not ok:
-            QMessageBox.warning(
-                self, i18n.KO.UPDATE_AVAILABLE_TITLE, i18n.KO.UPDATE_FAILED)
+            msg = i18n.KO.UPDATE_FAILED
+            try:
+                from ..utils import updater
+                if updater.last_error():
+                    msg = f"{msg}\n\n[원인] {updater.last_error()}"
+            except Exception:
+                pass
+            QMessageBox.warning(self, i18n.KO.UPDATE_AVAILABLE_TITLE, msg)
             return
         ans = QMessageBox.question(
             self, i18n.KO.UPDATE_AVAILABLE_TITLE, i18n.KO.UPDATE_DONE_RESTART,

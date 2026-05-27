@@ -95,14 +95,44 @@ def test_manual_check_git_fallback_when_no_version(tmp_path, monkeypatch):
 def test_manual_check_unknown_when_no_version_no_git(tmp_path, monkeypatch):
     _write_version(tmp_path, monkeypatch, None)
     monkeypatch.setattr(updater, "_git_head", lambda: None)
-    assert updater.manual_check() == ("unknown", {})
+    status, info = updater.manual_check()
+    assert status == "unknown" and info.get("error")   # 사유 포함
 
 
 def test_manual_check_unknown_on_network_fail(tmp_path, monkeypatch):
     _write_version(tmp_path, monkeypatch,
                    {"sha": "OLD", "branch": "feat", "repo": "o/r"})
     monkeypatch.setattr(updater, "latest_commit", lambda r, b: None)
-    assert updater.manual_check() == ("unknown", {})
+    status, info = updater.manual_check()
+    assert status == "unknown" and "error" in info
+
+
+def test_latest_commit_atom_fallback(monkeypatch):
+    """api.github.com 실패 시 github.com Atom 피드로 SHA 를 읽어 폴백."""
+    sha = "a" * 40
+    atom = f'<feed><entry><id>tag:github.com,2008:Grit::Commit/{sha}</id></entry></feed>'
+
+    def fake_get(url, headers, timeout):
+        if "api.github.com" in url:
+            raise urllib_error_403()
+        return atom.encode("utf-8")
+
+    monkeypatch.setattr(updater, "_http_get", fake_get)
+    info = updater.latest_commit("o/r", "feat")
+    assert info and info["sha"] == sha
+
+
+def urllib_error_403():
+    import urllib.error
+    return urllib.error.HTTPError("http://api", 403, "blocked", {}, None)
+
+
+def test_latest_commit_records_error_on_total_failure(monkeypatch):
+    def boom(url, headers, timeout):
+        raise ConnectionError("proxy down")
+    monkeypatch.setattr(updater, "_http_get", boom)
+    assert updater.latest_commit("o/r", "feat") is None
+    assert updater.last_error()        # 사유 기록됨
 
 
 def test_is_git_checkout(tmp_path, monkeypatch):
