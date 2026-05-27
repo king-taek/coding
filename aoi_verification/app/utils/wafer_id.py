@@ -71,10 +71,10 @@ def folder_wafer_id_from_filenames(paths) -> Optional[str]:
 # 2) OCR 폴백 (RapidOCR) — 이미지 좌상단 헤더의 'WaferID : XXXX' 판독
 # ---------------------------------------------------------------------------
 _DET_LIMIT_SIDE_LEN = 640          # 검출 입력 한 변 — 헤더 글자 검출 정확도↑(과거 320)
-# KLA 사진은 **왼쪽 최상단**에 3줄 헤더(Lot:/WaferID:/Gain:)가 있다.  WaferID 가
-# 가운데 줄이라 3줄이 모두 들어가도록 위 18% 높이를 잡고, 못 읽으면 더 넓게 재시도.
+# KLA 사진 **왼쪽 최상단** 헤더(Lot:/WaferID:/Gain:) 영역만 좁게 크롭(가로·세로를
+# 절반으로 — 너무 넓으면 OCR 정확도↓).  못 읽으면 한 단계 넓혀 재시도.
 # (top_frac, left_frac)
-_CROP_LADDER = ((0.18, 0.5), (0.30, 1.0))
+_CROP_LADDER = ((0.09, 0.25), (0.15, 0.5))
 _MAX_IMAGES_PER_FOLDER = 3         # 폴더당 최대 시도 장수
 _VOTE_EARLY_STOP = 1               # 첫 성공 판독에서 즉시 종료
 _MIN_CONF = 0.30
@@ -200,9 +200,9 @@ def read_folder_wafer_id(paths, limit: int = _MAX_IMAGES_PER_FOLDER) -> Optional
     return max(votes.items(), key=lambda kv: (kv[1][0], kv[1][1]))[0]
 
 
-def header_crop_image(path, top_frac: float = 0.18, left_frac: float = 0.5):
-    """매핑 미리보기용 — 좌상단 헤더(Lot/WaferID/Gain 3줄) 크롭 PIL 이미지(RGB).
-    OCR 이 읽으려 한 ‘그 부분’ 을 사용자에게 보여줘 직접 WaferID 를 읽게 한다."""
+def header_crop_image(path, top_frac: float = 0.09, left_frac: float = 0.25):
+    """매핑 미리보기용 — 좌상단 헤더(WaferID 등) 크롭 PIL 이미지(RGB).  OCR 이 읽으려
+    한 ‘그 부분’ 을 사용자에게 보여줘 직접 WaferID 를 읽게 한다(좁게 크롭)."""
     try:
         from . import image_io
         img = image_io._open(Path(path))
