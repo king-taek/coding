@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Optional
 
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QMainWindow,
                               QMessageBox, QStackedWidget, QStatusBar,
@@ -55,6 +55,10 @@ class MainWindow(QMainWindow):
     # 폭이 좁아지면 H-splitter 가 V-splitter 로 자동 전환되어 reflow.
     _MIN_W = 800
     _MIN_H = 600
+
+    # 자동 업데이트 — 백그라운드 스레드에서 메인 스레드로 결과를 넘기는 시그널.
+    _update_found = pyqtSignal(dict)
+    _update_applied = pyqtSignal(bool, dict)
 
     def __init__(self) -> None:
         super().__init__()
@@ -203,6 +207,10 @@ class MainWindow(QMainWindow):
         self._prune_old_cache_async()
         # GPU 임베딩 모델을 미리 컴파일/워밍업 — 첫 슬롯의 커널 JIT 지연 제거(#3).
         self._warmup_accel_async()
+        # 자동 업데이트 확인 — 백그라운드로 GitHub 현재 브랜치 최신 커밋과 비교.
+        self._update_found.connect(self._on_update_found)
+        self._update_applied.connect(self._on_update_applied)
+        QTimer.singleShot(800, self._check_for_update_async)
 
     @staticmethod
     def _prune_old_cache_async() -> None:
@@ -233,6 +241,74 @@ class MainWindow(QMainWindow):
                 pass
 
         threading.Thread(target=_work, name="accel-warmup", daemon=True).start()
+
+    # ==================================================================
+    # 자동 업데이트 (GitHub 공개 저장소의 현재 브랜치)
+    # ==================================================================
+    def _check_for_update_async(self) -> None:
+        """백그라운드로 업데이트 확인 → 있으면 _update_found 시그널로 UI 에 알림."""
+        import threading
+
+        def _work() -> None:
+            try:
+                from ..utils import updater
+                info = updater.check_for_update()
+                if info:
+                    self._update_found.emit(info)
+            except Exception:
+                pass
+
+        threading.Thread(target=_work, name="update-check", daemon=True).start()
+
+    def _on_update_found(self, info: dict) -> None:
+        """'업데이트 있음' 안내 → 동의하면 백그라운드로 다운로드/교체."""
+        msg = (info or {}).get("message", "")
+        body = i18n.KO.UPDATE_AVAILABLE_BODY
+        if msg:
+            body = f"{body}\n\n· {msg}"
+        ans = QMessageBox.question(
+            self, i18n.KO.UPDATE_AVAILABLE_TITLE, body,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if ans != QMessageBox.StandardButton.Yes:
+            return
+        self._loading.show_overlay(i18n.KO.UPDATE_DOWNLOADING)
+
+        import threading
+
+        def _work() -> None:
+            ok = False
+            try:
+                from ..utils import updater
+                ok = updater.download_and_apply(
+                    info["repo"], info["branch"], info["sha"])
+            except Exception:
+                ok = False
+            self._update_applied.emit(bool(ok), info or {})
+
+        threading.Thread(target=_work, name="update-apply", daemon=True).start()
+
+    def _on_update_applied(self, ok: bool, info: dict) -> None:
+        """다운로드/교체 결과 처리 — 성공 시 재시작 안내."""
+        self._loading.hide_overlay()
+        if not ok:
+            QMessageBox.warning(
+                self, i18n.KO.UPDATE_AVAILABLE_TITLE, i18n.KO.UPDATE_FAILED)
+            return
+        ans = QMessageBox.question(
+            self, i18n.KO.UPDATE_AVAILABLE_TITLE, i18n.KO.UPDATE_DONE_RESTART,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if ans != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            from ..utils import updater
+            if updater.restart_app():
+                QApplication.quit()
+        except Exception:
+            pass
 
     # ==================================================================
     # 메모리 사용량 표시

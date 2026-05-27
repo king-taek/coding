@@ -303,6 +303,13 @@ LOAD_PRECOMPUTE_WAIT_FMT = (
 )
 PRECOMPUTE_BG_STATUS_FMT = "백그라운드 유사도 계산: {idx} / {total} 슬롯 완료"
 PRECOMPUTE_BG_DONE = "유사도 계산 완료"
+
+# ── 자동 업데이트 ─────────────────────────────────────────────────────────
+UPDATE_AVAILABLE_TITLE = "업데이트 있음"
+UPDATE_AVAILABLE_BODY = "업데이트가 있습니다!\n최신 버전으로 업데이트하시겠습니까?"
+UPDATE_DOWNLOADING = "업데이트 다운로드 중… 잠시만 기다려 주세요."
+UPDATE_DONE_RESTART = "업데이트 완료! 지금 재시작하면 적용됩니다.\n지금 재시작할까요?"
+UPDATE_FAILED = "업데이트에 실패했습니다. 네트워크 상태를 확인하고 나중에 다시 시도해 주세요."
 LOAD_AUTO_MATCH_FMT = "자동 매치 진행 중… {done} / {total}"
 
 # ── 자동화 수준 (#3 올인원 모드) ───────────────────────────────────────────

@@ -52,6 +52,17 @@ copy /Y "run_aoi.bat" "%OUT%\run_aoi.bat" >nul
 copy /Y "run_aoi_debug.bat" "%OUT%\run_aoi_debug.bat" >nul
 copy /Y "update_app.bat" "%OUT%\update_app.bat" >nul
 
+REM 자동 업데이트용 버전 스탬프 — 현재 커밋 SHA + 브랜치를 app\VERSION 에 기록.
+REM (git 이 없으면 건너뜀 → 앱은 '개발 모드' 로 업데이트 확인 안 함)
+set "SHA="
+set "BR="
+for /f %%i in ('git rev-parse HEAD 2^>nul') do set "SHA=%%i"
+for /f %%i in ('git rev-parse --abbrev-ref HEAD 2^>nul') do set "BR=%%i"
+if defined SHA if defined BR (
+    > "%OUT%\app\VERSION" echo {"sha":"!SHA!","branch":"!BR!","repo":"king-taek/coding"}
+    echo   - VERSION 기록: !BR! @ !SHA!
+)
+
 echo [4/4] 완료!
 echo   배포: %OUT% 폴더 전체를 zip 으로 묶어 전달 → 대상 PC 에서 압축 해제 후
 echo         run_aoi.bat 더블클릭(파이썬 불필요).
