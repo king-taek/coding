@@ -1,4 +1,4 @@
-"""파일명 ↔ 폴더명 포함관계 기반 slot 매칭 검증(OCR/패턴 무관, 순수 로직)."""
+"""KLA slot명(WaferID) 해석 — 파일명 파싱 + WaferID/폴더명 병합 (순수 로직)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ from aoi_verification.app.utils import wafer_id
 
 
 def _slot(name, side, filenames):
-    """한쪽 전용 폴더 Slot 생성 — side('ref'/'val') 에 주어진 파일명들로."""
     items = [ImageItem(slot=name, path=Path(f"/{side}/{name}/{fn}"), side=side)
              for fn in filenames]
     if side == "ref":
@@ -19,7 +18,6 @@ def _slot(name, side, filenames):
 
 
 def _scan(ref_specs, val_specs) -> ScanResult:
-    """ref_specs/val_specs = {폴더명: [파일명,...]} (모두 한쪽 전용)."""
     slots = {}
     for n, fns in ref_specs.items():
         slots[n] = _slot(n, "ref", fns)
@@ -30,76 +28,56 @@ def _scan(ref_specs, val_specs) -> ScanResult:
 
 
 # ---------------------------------------------------------------------------
-# 내부 헬퍼
+# 파일명 → WaferID 파싱
 # ---------------------------------------------------------------------------
-def test_name_in_files_substring_case_insensitive():
-    assert wafer_id._name_in_files(
-        "W6459080XYH", ["W6459080XYH2_3_0_23_1".upper()]) is True
-    assert wafer_id._name_in_files(
-        "w6459080xyh", ["W6459080XYH2_3_0_23_1"]) is True
+def test_parse_wafer_id_from_filename():
+    assert wafer_id.parse_wafer_id_from_filename(
+        "W6459153XYF5_3_0_23_1.jpg") == "W6459153XYF5"
+    assert wafer_id.parse_wafer_id_from_filename(
+        "00NJ3159XYC1_0_-3_7_2.jpg") == "00NJ3159XYC1"
+    assert wafer_id.parse_wafer_id_from_filename(
+        "00nwv257xya5_-1_-1_23_3.jpg") == "00NWV257XYA5"   # 대문자 정규화
 
 
-def test_name_in_files_too_short_rejected():
-    # 너무 짧은 이름은 우연 일치를 막기 위해 제외.
-    assert wafer_id._name_in_files("12", ["12_345.jpg"]) is False
+def test_parse_wafer_id_rejects_non_wafer_format():
+    # WaferID 형식이 아니면(숫자 0개 prefix) None → OCR 폴백 대상.
+    assert wafer_id.parse_wafer_id_from_filename(
+        "FrontSideADRImg_544131.jpg") is None
+    assert wafer_id._is_wafer_id("FrontSideADRImg") is False
+    assert wafer_id._is_wafer_id("W6459153XYF5") is True
 
 
-def test_name_in_files_no_match():
-    assert wafer_id._name_in_files(
-        "W6459080XYH", ["81090.137592.c.212779204.1"]) is False
+def test_folder_wafer_id_majority_vote():
+    items = [ImageItem("d", Path(f"/d/{fn}"), "val") for fn in (
+        "W6459153XYF5_1.jpg", "W6459153XYF5_2.jpg", "GARBAGEname_3.jpg")]
+    assert wafer_id.folder_wafer_id_from_filenames(items) == "W6459153XYF5"
 
 
 # ---------------------------------------------------------------------------
-# match_by_filename_containment
+# WaferID/폴더명 키로 병합
 # ---------------------------------------------------------------------------
-def test_match_val_folder_name_in_ref_filenames():
-    """val 폴더가 정확한 slot명, ref(KLA) 파일명에 그 이름이 포함 → 매칭."""
+def test_merge_by_wafer_id_filename_prefix():
+    """val 폴더명이 WaferID, ref(KLA) 파일명 prefix 가 같은 WaferID → 병합."""
     sr = _scan(
-        ref_specs={"KLA_RAW_07": ["W6459080XYH2_3_0_23_1.jpg",
-                                  "W6459080XYH2_5_1_10_2.jpg"]},
-        val_specs={"W6459080XYH": ["81090.137592.c.212779204.1.jpg"]},
+        ref_specs={"KLA_RAW_07": ["W6459080XYHX_3_0_23_1.jpg"]},
+        val_specs={"W6459080XYHX": ["81090.137592.c.1.jpg"]},
     )
-    paired = wafer_id.match_by_filename_containment(sr)
-    assert paired == [("KLA_RAW_07", "W6459080XYH")]
-    # 정확한 쪽(val) 폴더명이 slot명이 된다.
-    assert sr.common_slot_names == ["W6459080XYH"]
-    merged = sr.slots["W6459080XYH"]
-    assert merged.has_both
-    assert all(it.slot == "W6459080XYH"
-               for it in merged.ref_images + merged.val_images)
+    wid_ref = {"KLA_RAW_07": wafer_id.folder_wafer_id_from_filenames(
+        sr.slots["KLA_RAW_07"].ref_images)}
+    paired = wafer_id.merge_unmatched_by_wafer_id(sr, wid_ref, {})
+    assert paired == [("KLA_RAW_07", "W6459080XYHX")]
+    assert sr.common_slot_names == ["KLA_RAW_07"]   # 병합 slot명 = ref 폴더명 유지
     assert sr.ref_only == [] and sr.val_only == []
 
 
-def test_match_ref_folder_name_in_val_filenames():
-    """ref 폴더가 정확한 slot명, val(KLA) 파일명에 포함 → 매칭, slot명=ref명."""
+def test_merge_no_match_when_wafer_id_differs():
     sr = _scan(
-        ref_specs={"W6459080XYH": ["anything.jpg"]},
-        val_specs={"KLA_RAW_07": ["W6459080XYH2_3_0_23_1.jpg"]},
+        ref_specs={"RAW_A": ["ZZZZ1234XYZ9_1.jpg"]},
+        val_specs={"W6459080XYHX": ["b.jpg"]},
     )
-    paired = wafer_id.match_by_filename_containment(sr)
-    assert paired == [("W6459080XYH", "KLA_RAW_07")]
-    assert sr.common_slot_names == ["W6459080XYH"]
-    assert sr.ref_only == [] and sr.val_only == []
-
-
-def test_no_match_when_name_absent():
-    sr = _scan(
-        ref_specs={"RAW_A": ["81090.137592.c.1.jpg"]},
-        val_specs={"W6459080XYH": ["81090.137592.c.2.jpg"]},
-    )
-    assert wafer_id.match_by_filename_containment(sr) == []
-    assert sr.ref_only == ["RAW_A"] and sr.val_only == ["W6459080XYH"]
-
-
-def test_partial_only_matching_pairs():
-    sr = _scan(
-        ref_specs={"KLA1": ["W6459080XYH2_1.jpg"], "KLA2": ["zzzz_1.jpg"]},
-        val_specs={"W6459080XYH": ["a.jpg"], "W0000000XYZ": ["b.jpg"]},
-    )
-    paired = wafer_id.match_by_filename_containment(sr)
-    assert paired == [("KLA1", "W6459080XYH")]
-    assert sr.common_slot_names == ["W6459080XYH"]
-    assert sr.ref_only == ["KLA2"] and sr.val_only == ["W0000000XYZ"]
+    wid_ref = {"RAW_A": "ZZZZ1234XYZ9"}
+    assert wafer_id.merge_unmatched_by_wafer_id(sr, wid_ref, {}) == []
+    assert sr.ref_only == ["RAW_A"] and sr.val_only == ["W6459080XYHX"]
 
 
 # ---------------------------------------------------------------------------

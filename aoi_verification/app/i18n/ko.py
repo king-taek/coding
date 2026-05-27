@@ -358,15 +358,18 @@ WARN_SLOT_MISMATCH_FMT = (
 )
 SLOT_MAP_TITLE = "Slot 수동 매핑"
 SLOT_MAP_HINT = (
-    "한쪽에만 존재하는 슬롯을 사용자가 직접 짝지어 줄 수 있습니다.\n"
-    "예) 기준 ‘Slot_01’ ↔ 검증 ‘S01’ 처럼 명명 규칙이 다를 때 사용하세요.\n"
-    "짝지어지지 않은 슬롯은 매칭에서 제외됩니다."
+    "자동으로 짝지어진(WaferID/폴더명 일치) 슬롯은 이미 매칭되었습니다. 아래는 "
+    "남은 항목입니다.\n"
+    "왼쪽(기준)·오른쪽(검증)에서 같은 슬롯을 하나씩 골라 ‘묶기’ 로 짝지어 주세요.\n"
+    "‘사진파일 없음’ 폴더는 짝지을 수 없으며, 짝짓지 않은 슬롯은 매칭에서 제외됩니다."
 )
-SLOT_MAP_REF_LABEL = "기준"
-SLOT_MAP_VAL_LABEL = "검증"
-SLOT_MAP_ADD = "추가"
+SLOT_MAP_REF_LABEL = "기준 (남은 슬롯)"
+SLOT_MAP_VAL_LABEL = "검증 (남은 슬롯)"
+SLOT_MAP_ADD = "묶기 ↔"
 SLOT_MAP_REMOVE = "선택 해제"
+SLOT_MAP_PAIRS_LABEL = "묶은 쌍"
 SLOT_MAP_OPEN = "매핑 다이얼로그 열기"
+LOAD_OCR = "KLA WaferID 판독(OCR) 중… 잠시만 기다려 주세요."
 
 # slot 매칭 실패 시 'KLA 장비가 있나요?' 확인 — 예면 파일명/ OCR 로 자동 매칭.
 KLA_ASK_TITLE = "KLA 장비 확인"

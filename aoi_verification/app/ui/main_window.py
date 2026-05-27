@@ -577,7 +577,12 @@ class MainWindow(QMainWindow):
         if r != QMessageBox.StandardButton.Yes:
             return
 
-        dlg = SlotMappingDialog(sr.ref_only, sr.val_only, parent=self)
+        dlg = SlotMappingDialog(
+            sr.ref_only, sr.val_only,
+            ref_meta=getattr(self, "_slot_meta_ref", None),
+            val_meta=getattr(self, "_slot_meta_val", None),
+            parent=self,
+        )
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         if dlg.mapping.pairs:
@@ -619,15 +624,62 @@ class MainWindow(QMainWindow):
         return box.exec() == QMessageBox.StandardButton.Yes
 
     def _match_by_filename(self, sr: ScanResult) -> None:
-        """미매칭 폴더를 '한쪽 폴더명이 반대쪽 사진 파일명에 들어있는지' 로 자동 매칭.
-
-        KLA 사진의 파일명에 반대쪽(정확히 명명된) 폴더의 slot명이 포함돼 있으면 같은
-        slot 으로 보고 병합한다(패턴 무관, OCR 불필요).
-        """
+        """KLA 미매칭 폴더의 slot명(WaferID)을 **파일명 우선·OCR 폴백**으로 해석해
+        ref↔val 을 자동 병합한다.  남은 항목 표시용 메타(_slot_meta_*)도 채운다."""
         try:
-            wafer_id.match_by_filename_containment(sr)
+            self._resolve_and_merge_kla(sr)
         except Exception:
             pass
+
+    def _resolve_and_merge_kla(self, sr: ScanResult) -> None:
+        def resolve_side(names: list[str], is_ref: bool):
+            meta: dict[str, dict] = {}
+            wid: dict[str, str] = {}
+            ocr_jobs: list[tuple[str, list]] = []
+            for name in names:
+                slot = sr.slots.get(name)
+                imgs = (slot.ref_images if is_ref else slot.val_images) if slot else []
+                if not imgs:
+                    meta[name] = {"slot": None, "method": "none", "image": None}
+                    continue
+                w = wafer_id.folder_wafer_id_from_filenames(imgs)
+                if w:
+                    wid[name] = w
+                    meta[name] = {"slot": w, "method": "filename",
+                                  "image": imgs[0].path}
+                else:
+                    meta[name] = {"slot": None, "method": "unread",
+                                  "image": imgs[0].path}
+                    ocr_jobs.append((name, [it.path for it in imgs]))
+            return meta, wid, ocr_jobs
+
+        meta_ref, wid_ref, jobs_ref = resolve_side(list(sr.ref_only), True)
+        meta_val, wid_val, jobs_val = resolve_side(list(sr.val_only), False)
+
+        # 파일명이 WaferID 형식이 아닌 폴더는 OCR 로 헤더의 WaferID 를 판독(폴백).
+        ocr_jobs = [("ref", n, p) for n, p in jobs_ref] + \
+                   [("val", n, p) for n, p in jobs_val]
+        if ocr_jobs and wafer_id.ocr_available():
+            self._loading.show_overlay(i18n.KO.LOAD_OCR)
+            QApplication.processEvents()
+            try:
+                for side, name, paths in ocr_jobs:
+                    w = wafer_id.read_folder_wafer_id(paths)
+                    if w:
+                        if side == "ref":
+                            wid_ref[name] = w
+                            meta_ref[name].update(slot=w, method="ocr")
+                        else:
+                            wid_val[name] = w
+                            meta_val[name].update(slot=w, method="ocr")
+                    QApplication.processEvents()
+            finally:
+                self._loading.hide_overlay()
+
+        wafer_id.merge_unmatched_by_wafer_id(sr, wid_ref, wid_val)
+        # 병합 후 남은 항목만 메타로 보관 — 수동 매핑 다이얼로그에서 표시.
+        self._slot_meta_ref = {n: meta_ref[n] for n in sr.ref_only if n in meta_ref}
+        self._slot_meta_val = {n: meta_val[n] for n in sr.val_only if n in meta_val}
 
     def _apply_slot_pairs(self, sr: ScanResult, pairs) -> None:
         """(ref폴더명, val폴더명) 쌍을 통합 — val 사진을 ref slot명으로 합치고 제거."""

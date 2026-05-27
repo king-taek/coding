@@ -24,7 +24,8 @@ binaries = []
 hiddenimports = []
 
 # 네이티브 DLL/데이터가 많은 패키지는 collect_all 로 모두 끌어온다.
-_collect_pkgs = ["openvino", "cv2", "skimage", "scipy", "imagehash", "openpyxl"]
+_collect_pkgs = ["openvino", "cv2", "skimage", "scipy", "imagehash", "openpyxl",
+                 "rapidocr_onnxruntime"]
 if INCLUDE_EFFICIENCY:
     _collect_pkgs = ["torch", "torchvision"] + _collect_pkgs
 
@@ -41,7 +42,7 @@ for _pkg in _collect_pkgs:
 # 빌드 군더더기 제외.  INCLUDE_EFFICIENCY=False 면 torch 계열도 제외.
 excludes = [
     "tkinter", "matplotlib", "pytest", "IPython", "notebook",
-    "PyQt5", "PySide6", "PySide2", "rapidocr_onnxruntime", "tests",
+    "PyQt5", "PySide6", "PySide2", "tests",
 ]
 if not INCLUDE_EFFICIENCY:
     excludes += ["torch", "torchvision", "openvino"]

@@ -9,3 +9,6 @@ psutil>=5.9
 torch>=2.0
 torchvision>=0.15
 openvino>=2024.0
+# KLA WaferID OCR 폴백 — 파일명이 WaferID 형식이 아닐 때 이미지 헤더를 판독.
+# 인식 모델(ONNX) 내장이라 런타임 다운로드 없이 오프라인 동작.
+rapidocr-onnxruntime>=1.3
