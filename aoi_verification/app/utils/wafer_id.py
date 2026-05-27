@@ -21,36 +21,26 @@ from pathlib import Path
 from typing import Optional
 
 # ---------------------------------------------------------------------------
-# 1) 파일명에서 WaferID 파싱 (OCR 불필요 — 빠름)
+# 1) 파일명에서 slot명(WaferID) 파싱 — 형식 검증 없이 'prefix 그대로' 읽는다.
+#    (먼저 이 값으로 매칭을 시도하고, 매칭이 안 되면 호출부가 OCR 로 폴백)
 # ---------------------------------------------------------------------------
-def _is_wafer_id(token: str) -> bool:
-    """토큰이 WaferID 형식인지 — 영숫자 8~16자, 숫자 ≥3 & 영문 ≥2.
-
-    ``W6459153XYF5``·``00NJ3159XYC1`` 는 통과, ``FrontSideADRImg``(숫자 0개) 는
-    탈락 → 형식이 아니면 OCR 폴백으로 넘긴다."""
-    if not token or not token.isalnum():
-        return False
-    if not (8 <= len(token) <= 16):
-        return False
-    n_dig = sum(c.isdigit() for c in token)
-    n_alpha = sum(c.isalpha() for c in token)
-    return n_dig >= 3 and n_alpha >= 2
-
-
 def parse_wafer_id_from_filename(name) -> Optional[str]:
-    """파일명 첫 ``_`` 앞 토큰이 WaferID 형식이면 대문자로 반환, 아니면 None.
+    """파일명 첫 ``_`` 앞 토큰을 slot명 후보로 그대로 반환(대문자).
 
-    예) ``W6459153XYF5_3_0_23_1.jpg`` → ``W6459153XYF5``."""
+    **형식 검증을 하지 않는다** — 일단 파일명에서 읽은 값으로 매칭을 시도하고,
+    매칭이 안 되면 호출부가 OCR 로 폴백한다(사용자 요청).
+    예) ``W6459153XYF5_3_0_23_1.jpg`` → ``W6459153XYF5``,
+        ``FrontSideADRImg_544131.jpg`` → ``FRONTSIDEADRIMG`` (매칭 실패 시 OCR)."""
     stem = Path(str(name)).stem
     token = stem.split("_", 1)[0].strip()
-    return token.upper() if _is_wafer_id(token) else None
+    return token.upper() if token else None
 
 
 def folder_wafer_id_from_filenames(paths) -> Optional[str]:
-    """폴더 이미지들의 파일명에서 WaferID 를 다수결로 정한다(OCR 불필요).
+    """폴더 이미지 파일명들의 prefix 토큰을 다수결로 골라 slot명 후보로 반환.
 
-    같은 폴더 사진은 보통 동일 WaferID 이므로 첫 유효 토큰을 곧장 채택해도 되지만,
-    드문 혼입에 대비해 다수결로 고른다.  하나도 형식에 안 맞으면 None(→OCR 폴백)."""
+    같은 폴더 사진은 보통 동일 prefix 이므로 다수결로 안정화한다.  이미지가
+    없으면 None."""
     votes: dict[str, int] = {}
     for p in paths:
         wid = parse_wafer_id_from_filename(getattr(p, "name", None) or Path(str(p)).name)

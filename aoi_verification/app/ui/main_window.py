@@ -632,54 +632,69 @@ class MainWindow(QMainWindow):
             pass
 
     def _resolve_and_merge_kla(self, sr: ScanResult) -> None:
-        def resolve_side(names: list[str], is_ref: bool):
-            meta: dict[str, dict] = {}
-            wid: dict[str, str] = {}
-            ocr_jobs: list[tuple[str, list]] = []
-            for name in names:
-                slot = sr.slots.get(name)
-                imgs = (slot.ref_images if is_ref else slot.val_images) if slot else []
-                if not imgs:
-                    meta[name] = {"slot": None, "method": "none", "image": None}
-                    continue
-                w = wafer_id.folder_wafer_id_from_filenames(imgs)
+        def imgs_of(name: str, is_ref: bool) -> list:
+            slot = sr.slots.get(name)
+            if slot is None:
+                return []
+            return slot.ref_images if is_ref else slot.val_images
+
+        # 1) 파일명 prefix(첫 '_' 이전 전체)를 slot명 후보로 읽어 **먼저 매치**한다.
+        #    형식 검증은 하지 않는다 — 매치되면 그대로 채택.
+        fn_ref: dict[str, str] = {}
+        fn_val: dict[str, str] = {}
+        img0_ref: dict[str, Path] = {}
+        img0_val: dict[str, Path] = {}
+        for n in list(sr.ref_only):
+            ii = imgs_of(n, True)
+            if ii:
+                img0_ref[n] = ii[0].path
+                w = wafer_id.folder_wafer_id_from_filenames(ii)
                 if w:
-                    wid[name] = w
-                    meta[name] = {"slot": w, "method": "filename",
-                                  "image": imgs[0].path}
-                else:
-                    meta[name] = {"slot": None, "method": "unread",
-                                  "image": imgs[0].path}
-                    ocr_jobs.append((name, [it.path for it in imgs]))
-            return meta, wid, ocr_jobs
+                    fn_ref[n] = w
+        for n in list(sr.val_only):
+            ii = imgs_of(n, False)
+            if ii:
+                img0_val[n] = ii[0].path
+                w = wafer_id.folder_wafer_id_from_filenames(ii)
+                if w:
+                    fn_val[n] = w
+        wafer_id.merge_unmatched_by_wafer_id(sr, fn_ref, fn_val)
 
-        meta_ref, wid_ref, jobs_ref = resolve_side(list(sr.ref_only), True)
-        meta_val, wid_val, jobs_val = resolve_side(list(sr.val_only), False)
-
-        # 파일명이 WaferID 형식이 아닌 폴더는 OCR 로 헤더의 WaferID 를 판독(폴백).
-        ocr_jobs = [("ref", n, p) for n, p in jobs_ref] + \
-                   [("val", n, p) for n, p in jobs_val]
-        if ocr_jobs and wafer_id.ocr_available():
+        # 2) 파일명으로 매치되지 않고 남은 폴더만 OCR → 한 번 더 매치(폴백).
+        ocr_ref: dict[str, str] = {}
+        ocr_val: dict[str, str] = {}
+        pend = ([("ref", n) for n in sr.ref_only if n in img0_ref]
+                + [("val", n) for n in sr.val_only if n in img0_val])
+        if pend and wafer_id.ocr_available():
             self._loading.show_overlay(i18n.KO.LOAD_OCR)
             QApplication.processEvents()
             try:
-                for side, name, paths in ocr_jobs:
+                for side, name in pend:
+                    paths = [it.path for it in imgs_of(name, side == "ref")]
                     w = wafer_id.read_folder_wafer_id(paths)
                     if w:
-                        if side == "ref":
-                            wid_ref[name] = w
-                            meta_ref[name].update(slot=w, method="ocr")
-                        else:
-                            wid_val[name] = w
-                            meta_val[name].update(slot=w, method="ocr")
+                        (ocr_ref if side == "ref" else ocr_val)[name] = w
                     QApplication.processEvents()
             finally:
                 self._loading.hide_overlay()
+            wafer_id.merge_unmatched_by_wafer_id(sr, ocr_ref, ocr_val)
 
-        wafer_id.merge_unmatched_by_wafer_id(sr, wid_ref, wid_val)
-        # 병합 후 남은 항목만 메타로 보관 — 수동 매핑 다이얼로그에서 표시.
-        self._slot_meta_ref = {n: meta_ref[n] for n in sr.ref_only if n in meta_ref}
-        self._slot_meta_val = {n: meta_val[n] for n in sr.val_only if n in meta_val}
+        # 3) 여전히 남은 항목 메타(수동 매핑 다이얼로그용) — OCR값 우선, 없으면 파일명값.
+        def build_meta(names, fn, ocr, img0) -> dict:
+            meta: dict[str, dict] = {}
+            for n in names:
+                if n not in img0:
+                    meta[n] = {"slot": None, "method": "none", "image": None}
+                elif n in ocr:
+                    meta[n] = {"slot": ocr[n], "method": "ocr", "image": img0[n]}
+                elif n in fn:
+                    meta[n] = {"slot": fn[n], "method": "filename", "image": img0[n]}
+                else:
+                    meta[n] = {"slot": None, "method": "unread", "image": img0[n]}
+            return meta
+
+        self._slot_meta_ref = build_meta(list(sr.ref_only), fn_ref, ocr_ref, img0_ref)
+        self._slot_meta_val = build_meta(list(sr.val_only), fn_val, ocr_val, img0_val)
 
     def _apply_slot_pairs(self, sr: ScanResult, pairs) -> None:
         """(ref폴더명, val폴더명) 쌍을 통합 — val 사진을 ref slot명으로 합치고 제거."""

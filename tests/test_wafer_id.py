@@ -28,7 +28,7 @@ def _scan(ref_specs, val_specs) -> ScanResult:
 
 
 # ---------------------------------------------------------------------------
-# 파일명 → WaferID 파싱
+# 파일명 → slot명 파싱: 첫 '_' 이전 전체(확장자 제외), 형식 검증 없음
 # ---------------------------------------------------------------------------
 def test_parse_wafer_id_from_filename():
     assert wafer_id.parse_wafer_id_from_filename(
@@ -39,17 +39,17 @@ def test_parse_wafer_id_from_filename():
         "00nwv257xya5_-1_-1_23_3.jpg") == "00NWV257XYA5"   # 대문자 정규화
 
 
-def test_parse_wafer_id_rejects_non_wafer_format():
-    # WaferID 형식이 아니면(숫자 0개 prefix) None → OCR 폴백 대상.
+def test_parse_wafer_id_no_format_gate():
+    # 형식 검증을 하지 않으므로 prefix 를 그대로 읽는다(매치 실패 시 OCR 로 폴백).
     assert wafer_id.parse_wafer_id_from_filename(
-        "FrontSideADRImg_544131.jpg") is None
-    assert wafer_id._is_wafer_id("FrontSideADRImg") is False
-    assert wafer_id._is_wafer_id("W6459153XYF5") is True
+        "FrontSideADRImg_544131.jpg") == "FRONTSIDEADRIMG"
+    # 언더바가 없으면 확장자만 떼고 전체 stem 이 토큰.
+    assert wafer_id.parse_wafer_id_from_filename("W6459153XYF5.jpg") == "W6459153XYF5"
 
 
 def test_folder_wafer_id_majority_vote():
     items = [ImageItem("d", Path(f"/d/{fn}"), "val") for fn in (
-        "W6459153XYF5_1.jpg", "W6459153XYF5_2.jpg", "GARBAGEname_3.jpg")]
+        "W6459153XYF5_1.jpg", "W6459153XYF5_2.jpg", "OTHER_3.jpg")]
     assert wafer_id.folder_wafer_id_from_filenames(items) == "W6459153XYF5"
 
 
