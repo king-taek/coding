@@ -210,6 +210,33 @@ def has_accel_units() -> bool:
     return "GPU" in _ov.available_units()
 
 
+def warmup(cfg=None) -> bool:
+    """고효율 모드가 쓸 백엔드(MobileNetV3, GPU, batch16)를 **미리 컴파일 + 더미
+    추론 1회** 수행해, 첫 슬롯에서 한꺼번에 걸리던 GPU 커널 JIT 컴파일 지연을
+    앱 시작 시점으로 옮긴다(#3).  가속 장치가 없으면 아무것도 안 하고 False.
+
+    실패해도 조용히 무시(워밍업은 최적화일 뿐 정확성과 무관).  앱 시작 시
+    백그라운드 스레드에서 호출하면 UI 를 막지 않는다."""
+    backend = _select_backend(cfg)
+    if backend is None:
+        return False
+    mk, dev, batch = backend
+    try:
+        import numpy as np
+        pack = _ov.compile_model_on(mk, dev, batch)
+        if pack is None:
+            return False
+        compiled, _name = pack
+        _ov.mark_unit_active(dev)
+        px = _ov._INPUT_PX
+        dummy = [(("__warmup__",),
+                  np.zeros((batch, 3, px, px), dtype=np.float32))]
+        _ov._infer_raw(compiled, dummy, 1)
+        return True
+    except Exception:
+        return False
+
+
 def _select_backend(cfg):
     """효율 모드 임베딩 백엔드 선택 — **CPU+GPU만**.  GPU 가용·컴파일 OK 면
     (MobileNetV3, "GPU", batch=16), 아니면 None(=CPU 고전 단독 폴백).

@@ -572,6 +572,73 @@ def _l2(vec: np.ndarray) -> np.ndarray:  # pragma: no cover - 환경 의존
     return (vec / norm).astype(np.float32)
 
 
+# ---------------------------------------------------------------------------
+# 임베딩 영속 디스크 캐시 (#3) — 재실행/같은 이미지는 디코드·추론을 건너뛴다.
+# 키 = 원본경로 | mtime | 모델 | 입력해상도 | center-crop 여부.  device 는 키에
+# 넣지 않아 GPU/CPU 폴백이 캐시를 공유한다(같은 모델이라 매칭엔 영향 없음).
+# ---------------------------------------------------------------------------
+def _emb_signature(model_kind: str, cfg, side) -> str:
+    cc = 0
+    try:
+        if cfg is not None and getattr(cfg, "_center_crop_for", None) is not None:
+            cc = 1 if cfg._center_crop_for(side) else 0
+    except Exception:
+        cc = 0
+    return f"{model_kind}|px{_INPUT_PX}|cc{cc}"
+
+
+def _emb_cache_file(path: Path, sig: str) -> Path:
+    import hashlib
+
+    from ..utils import paths as _paths
+    try:
+        mtime = int(Path(path).stat().st_mtime)
+    except OSError:
+        mtime = 0
+    h = hashlib.sha1(
+        f"{Path(path).resolve()}|{mtime}|{sig}".encode("utf-8", "replace")
+    ).hexdigest()
+    return _paths.embedding_cache_dir() / f"{h}.npy"
+
+
+def _emb_cache_load(path: Path, sig: str) -> Optional[np.ndarray]:
+    f = _emb_cache_file(path, sig)
+    if f.exists():
+        try:
+            return np.load(str(f))
+        except Exception:
+            return None
+    return None
+
+
+def _emb_cache_save(path: Path, vec: np.ndarray, sig: str) -> None:
+    try:
+        tmp = _emb_cache_file(path, sig)
+        np.save(str(tmp), np.asarray(vec, dtype=np.float32))
+    except Exception:
+        pass
+
+
+def _emb_finish(out, computed_paths, sig, use_cache, model_kind, device,
+                n_hit, t0) -> None:  # pragma: no cover - 환경 의존
+    """새로 계산한 임베딩을 디스크에 저장하고, 단계 소요시간을 로그로 남긴다(#3)."""
+    import logging
+    import time as _time
+    dt = _time.perf_counter() - t0
+    n_new = 0
+    if use_cache:
+        for p in computed_paths:
+            v = out.get(p)
+            if v is not None:
+                _emb_cache_save(p, v, sig)
+                n_new += 1
+    rate = (len(computed_paths) / dt) if dt > 1e-6 else 0.0
+    logging.getLogger("aoi.openvino").info(
+        "embed[%s/%s]: 신규 %d장 %.2fs(%.1f img/s) · 캐시적중 %d장 · 저장 %d장",
+        model_kind, device, len(computed_paths), dt, rate, n_hit, n_new,
+    )
+
+
 def device_embed(paths: Iterable[Path],
                  *,
                  model_kind: str,
@@ -590,19 +657,45 @@ def device_embed(paths: Iterable[Path],
     (정적 배치 B, 테스트용).  실패 path 는 결과에서 누락.  배치 결과는 batch=1
     과 동일(임베딩은 배치 무관).
     """
+    import logging
+    import time as _time
+
     out: Dict[Path, np.ndarray] = {}
     batch = max(1, int(batch))
+    all_items = [Path(p) for p in paths]
+    if not all_items:
+        return out
+
+    # 디스크 캐시 히트는 디코드·추론을 통째로 건너뛴다(#3).  cfg 가 있을 때만
+    # 캐시(테스트의 cfg=None 경로는 영향 없음).
+    use_cache = cfg is not None
+    sig = _emb_signature(model_kind, cfg, side) if use_cache else ""
+    items = all_items
+    n_hit = 0
+    if use_cache:
+        items = []
+        for p in all_items:
+            v = _emb_cache_load(p, sig)
+            if v is not None:
+                out[p] = v
+                n_hit += 1
+            else:
+                items.append(p)
+        if not items:
+            logging.getLogger("aoi.openvino").debug(
+                "embed: %d개 전부 캐시 적중(%s)", n_hit, model_kind,
+            )
+            return out
+
     pack = compile_model_on(model_kind, device, batch)
     if pack is None:
         return out
     compiled, _name = pack
     mark_unit_active(device)
-    items = [Path(p) for p in paths]
-    if not items:
-        return out
     n_streams = _optimal_streams(compiled) if jobs is None else max(1, int(jobs))
     # 전처리를 멀티스레드로 돌려 준비되는 텐서를 즉시 추론 큐로 흘려보낸다(#3) —
     # 전처리(CPU)와 추론(GPU/NPU)이 동시에 돌아 장치 유휴를 줄인다.
+    _t0 = _time.perf_counter()
     prepped = _preprocess_parallel(items, cfg, side)
 
     if batch <= 1:
@@ -610,6 +703,7 @@ def device_embed(paths: Iterable[Path],
         raw = _infer_raw(compiled, inputs, n_streams)
         for p, feat in raw.items():
             out[p] = _l2(feat[0])
+        _emb_finish(out, items, sig, use_cache, model_kind, device, n_hit, _t0)
         return out
 
     # 정적 배치 B — 준비되는 대로 B장씩 묶어 (B,3,H,W) 로 추론.  마지막 그룹은
@@ -635,4 +729,5 @@ def device_embed(paths: Iterable[Path],
     for real_paths, feat in raw.items():
         for b, p in enumerate(real_paths):                   # 실제 행만(패딩 무시)
             out[p] = _l2(feat[b])
+    _emb_finish(out, items, sig, use_cache, model_kind, device, n_hit, _t0)
     return out

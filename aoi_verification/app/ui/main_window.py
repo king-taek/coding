@@ -201,6 +201,8 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(300, self._maybe_offer_openvino)
         # 1일 지난 썸네일/중간이미지 캐시 정리 — 백그라운드 데몬으로 UI 비차단.
         self._prune_old_cache_async()
+        # GPU 임베딩 모델을 미리 컴파일/워밍업 — 첫 슬롯의 커널 JIT 지연 제거(#3).
+        self._warmup_accel_async()
 
     @staticmethod
     def _prune_old_cache_async() -> None:
@@ -216,6 +218,21 @@ class MainWindow(QMainWindow):
                 pass
 
         threading.Thread(target=_work, name="cache-prune", daemon=True).start()
+
+    @staticmethod
+    def _warmup_accel_async() -> None:
+        """가속(GPU)이 있으면 임베딩 모델을 백그라운드에서 미리 컴파일/워밍업한다."""
+        import threading
+
+        def _work() -> None:
+            try:
+                from ..workers import efficiency_matcher as _eff
+                if _eff.has_accel_units():
+                    _eff.warmup()
+            except Exception:
+                pass
+
+        threading.Thread(target=_work, name="accel-warmup", daemon=True).start()
 
     # ==================================================================
     # 메모리 사용량 표시

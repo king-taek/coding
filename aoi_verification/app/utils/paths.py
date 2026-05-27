@@ -77,6 +77,16 @@ def feature_cache_dir() -> Path:
     return d
 
 
+def embedding_cache_dir() -> Path:
+    """GPU/OpenVINO 임베딩 벡터(.npy) 영속 캐시 — 재실행 시 재추출 생략(#3).
+
+    썸네일/중간이미지와 달리 1일 TTL 정리 대상이 아니다(재계산 비용이 크고
+    원본 mtime 키라 자동 무효화됨)."""
+    d = cache_root() / "embeddings"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def score_cache_dir() -> Path:
     """(ref, val) 유사도 점수의 슬롯 단위 영속 캐시 폴더 (#5B)."""
     d = cache_root() / "scores"
