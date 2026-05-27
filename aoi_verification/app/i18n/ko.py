@@ -306,29 +306,15 @@ PRECOMPUTE_BG_DONE = "유사도 계산 완료"
 
 # ── 자동 업데이트 ─────────────────────────────────────────────────────────
 UPDATE_AVAILABLE_TITLE = "업데이트 있음"
-UPDATE_AVAILABLE_BODY = "업데이트가 있습니다!\n최신 버전으로 업데이트하시겠습니까?"
-UPDATE_INSECURE_NOTE = (
-    "※ 회사 보안(SSL 검사) 환경이라 인증서 검증 없이 연결했습니다."
-)
-UPDATE_UNKNOWN_CURRENT = (
-    "현재 설치된 버전 정보를 확인할 수 없습니다.\n"
-    "최신 버전을 내려받아 적용하시겠습니까? (적용 후에는 버전이 기록되어 다음부터 "
-    "정상 비교됩니다.)"
-)
-UPDATE_DOWNLOADING = "업데이트 다운로드 중… 잠시만 기다려 주세요."
-UPDATE_DONE_RESTART = "업데이트 완료! 지금 재시작하면 적용됩니다.\n지금 재시작할까요?"
-UPDATE_FAILED = "업데이트에 실패했습니다. 네트워크 상태를 확인하고 나중에 다시 시도해 주세요."
+UPDATE_AVAILABLE_BODY = "새 버전이 있습니다. 지금 업데이트할까요?"
+UPDATE_UNKNOWN_CURRENT = "최신 버전을 받아 적용할까요?"
+UPDATE_DOWNLOADING = "업데이트 다운로드 중…"
+UPDATE_DONE_RESTART = "업데이트가 적용되었습니다.\n프로그램을 닫고 다시 실행해 주세요."
+UPDATE_FAILED = "업데이트에 실패했습니다. 잠시 후 다시 시도해 주세요."
 UPDATE_CHECKING = "업데이트 확인 중…"
-UPDATE_LATEST = "이미 최신 버전입니다."
-UPDATE_UNKNOWN = (
-    "업데이트를 확인할 수 없습니다.\n"
-    "(인터넷 연결, 또는 포터블 빌드의 버전 정보를 확인하세요. 사내망이 GitHub 접속을 "
-    "막는 경우 자동 업데이트가 동작하지 않습니다.)"
-)
-UPDATE_GIT_HINT = (
-    "개발(git) 환경입니다. 자동 덮어쓰기 대신 'git pull' 로 업데이트하세요.\n"
-    "(자동 교체는 배포된 포터블 빌드에서만 동작합니다.)"
-)
+UPDATE_LATEST = "최신 버전입니다."
+UPDATE_UNKNOWN = "업데이트를 확인할 수 없습니다. 인터넷 연결을 확인해 주세요."
+UPDATE_GIT_HINT = "개발(git) 환경입니다. 'git pull' 로 업데이트하세요."
 # 첫 화면 '업데이트 확인' 버튼 라벨(좌상단 도움말 메뉴 대체).
 MENU_CHECK_UPDATE = "업데이트 확인"
 LOAD_AUTO_MATCH_FMT = "자동 매치 진행 중… {done} / {total}"
@@ -380,10 +366,7 @@ WARN_SLOT_MISMATCH_FMT = (
 )
 SLOT_MAP_TITLE = "Slot 수동 매핑"
 SLOT_MAP_HINT = (
-    "자동으로 짝지어진(WaferID/폴더명 일치) 슬롯은 이미 매칭되었습니다. 아래는 "
-    "남은 항목입니다.\n"
-    "왼쪽(기준)·오른쪽(검증)에서 같은 슬롯을 하나씩 골라 ‘묶기’ 로 짝지어 주세요.\n"
-    "‘사진파일 없음’ 폴더는 짝지을 수 없으며, 짝짓지 않은 슬롯은 매칭에서 제외됩니다."
+    "남은 슬롯을 직접 짝지어 주세요. 양쪽에서 하나씩 골라 ‘묶기’, 다시 누르면 해제."
 )
 SLOT_MAP_REF_LABEL = "기준 (남은 슬롯)"
 SLOT_MAP_VAL_LABEL = "검증 (남은 슬롯)"
@@ -400,12 +383,7 @@ LOAD_KLA_OCR_FMT = "KLA WaferID 판독 (OCR) 중… {done} / {total}"
 KLA_ASK_TITLE = "KLA 장비 확인"
 # 팝업 최상단에 크게·색상으로 강조되는 핵심 질문(#2).
 KLA_ASK_SIDE_HEADING = "KLA 장비가 어느 쪽인가요?"
-KLA_ASK_SIDE_BODY = (
-    "매칭되지 않은 Slot(폴더)이 있습니다.\n"
-    "파일명(또는 이미지 헤더)에 WaferID 가 들어 있는 KLA 장비가 기준·검증 중 어느 "
-    "쪽인지 선택하세요. 선택한 쪽의 WaferID 로 자동 매칭을 시도합니다.\n"
-    "(호기 번호가 'K-6' 처럼 K-n 형식이면 이 창 없이 자동으로 KLA 로 처리됩니다.)"
-)
+KLA_ASK_SIDE_BODY = "KLA(WaferID) 장비 위치를 선택하세요. 없으면 ‘KLA 아님’."
 KLA_SIDE_REF = "기준 (낮은 호기)"
 KLA_SIDE_VAL = "검증 (높은 호기)"
 KLA_SIDE_NONE = "KLA 아님"

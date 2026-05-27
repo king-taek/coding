@@ -294,18 +294,9 @@ class MainWindow(QMainWindow):
 
     def _on_update_found(self, info: dict) -> None:
         """'업데이트 있음' 안내 → 동의하면 백그라운드로 다운로드/교체."""
-        msg = (info or {}).get("message", "")
-        # 현재 버전을 모르는 경우(VERSION·git 없음): 비교 없이 최신을 받는다고 안내.
+        # 사용자에겐 개발자용 커밋 메시지/SSL 멘트 대신 간단한 안내만.
         body = (i18n.KO.UPDATE_UNKNOWN_CURRENT if (info or {}).get("current_unknown")
                 else i18n.KO.UPDATE_AVAILABLE_BODY)
-        if msg:
-            body = f"{body}\n\n· {msg}"
-        try:
-            from ..utils import updater as _upd
-            if _upd.insecure_fallback_used():
-                body = f"{body}\n\n{i18n.KO.UPDATE_INSECURE_NOTE}"
-        except Exception:
-            pass
         ans = QMessageBox.question(
             self, i18n.KO.UPDATE_AVAILABLE_TITLE, body,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -339,7 +330,7 @@ class MainWindow(QMainWindow):
         threading.Thread(target=_work, name="update-apply", daemon=True).start()
 
     def _on_update_applied(self, ok: bool, info: dict) -> None:
-        """다운로드/교체 결과 처리 — 성공 시 재시작 안내."""
+        """다운로드/교체 결과 처리 — 성공 시 '수동 재시작' 안내(자동 재시작 안 함)."""
         self._loading.hide_overlay()
         if not ok:
             msg = i18n.KO.UPDATE_FAILED
@@ -351,19 +342,9 @@ class MainWindow(QMainWindow):
                 pass
             QMessageBox.warning(self, i18n.KO.UPDATE_AVAILABLE_TITLE, msg)
             return
-        ans = QMessageBox.question(
-            self, i18n.KO.UPDATE_AVAILABLE_TITLE, i18n.KO.UPDATE_DONE_RESTART,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes,
-        )
-        if ans != QMessageBox.StandardButton.Yes:
-            return
-        try:
-            from ..utils import updater
-            if updater.restart_app():
-                QApplication.quit()
-        except Exception:
-            pass
+        # 자동 재시작하지 않고, 사용자가 직접 종료 후 다시 실행하도록 안내.
+        QMessageBox.information(
+            self, i18n.KO.UPDATE_AVAILABLE_TITLE, i18n.KO.UPDATE_DONE_RESTART)
 
     # ==================================================================
     # 메모리 사용량 표시
