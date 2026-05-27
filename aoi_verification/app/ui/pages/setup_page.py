@@ -44,6 +44,7 @@ class SetupPage(QWidget):
     """검증 시작 화면."""
 
     start_requested = pyqtSignal(object)             # SetupInput
+    update_check_requested = pyqtSignal()            # '업데이트 확인' 버튼
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -211,8 +212,13 @@ class SetupPage(QWidget):
 
         root.addStretch(1)
 
-        # 시작 버튼 -----------------------------------------------------
+        # 시작 / 업데이트 확인 버튼 -------------------------------------
         bar = QHBoxLayout()
+        # 업데이트 확인은 좌측(보조), 검증 시작은 우측(주). 좌상단 도움말 메뉴 대체.
+        self.update_btn = NeonButton(i18n.KO.MENU_CHECK_UPDATE, role="ghost")
+        self.update_btn.setMinimumHeight(46)
+        self.update_btn.clicked.connect(self.update_check_requested.emit)
+        bar.addWidget(self.update_btn)
         bar.addStretch(1)
         self.start_btn = NeonButton(i18n.KO.BTN_START, role="primary")
         self.start_btn.setMinimumWidth(220)

@@ -158,6 +158,7 @@ class MainWindow(QMainWindow):
 
         # 시그널 ---------------------------------------------------------
         self._setup_page.start_requested.connect(self._on_start)
+        self._setup_page.update_check_requested.connect(self._manual_update_check)
         self._select_page.finished.connect(self._on_select_finished)
         self._select_page.state_changed.connect(self._schedule_autosave)
         self._match_page.match_confirmed.connect(self._on_match_confirmed)
@@ -212,14 +213,7 @@ class MainWindow(QMainWindow):
         self._update_found.connect(self._on_update_found)
         self._update_applied.connect(self._on_update_applied)
         self._update_none.connect(self._on_update_none)
-        self._build_menubar()
         QTimer.singleShot(800, self._check_for_update_async)
-
-    def _build_menubar(self) -> None:
-        """도움말 메뉴 — 수동 '업데이트 확인'(소스/포터블 모두에서 동작)."""
-        help_menu = self.menuBar().addMenu(i18n.KO.MENU_HELP)
-        act = help_menu.addAction(i18n.KO.MENU_CHECK_UPDATE)
-        act.triggered.connect(self._manual_update_check)
 
     @staticmethod
     def _prune_old_cache_async() -> None:

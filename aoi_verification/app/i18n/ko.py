@@ -321,7 +321,7 @@ UPDATE_GIT_HINT = (
     "개발(git) 환경입니다. 자동 덮어쓰기 대신 'git pull' 로 업데이트하세요.\n"
     "(자동 교체는 배포된 포터블 빌드에서만 동작합니다.)"
 )
-MENU_HELP = "도움말"
+# 첫 화면 '업데이트 확인' 버튼 라벨(좌상단 도움말 메뉴 대체).
 MENU_CHECK_UPDATE = "업데이트 확인"
 LOAD_AUTO_MATCH_FMT = "자동 매치 진행 중… {done} / {total}"
 
