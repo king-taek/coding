@@ -294,8 +294,9 @@ LOAD_PRECOMPUTE_FMT = (
     "유사도 계산 중… {done} / {total}"
 )
 # 수동 모드: 첫 슬롯만 기다리고 나머지는 백그라운드 (#streaming).
+# 선행 단계(특징 분석/임베딩) 동안에도 '유사도 계산' 으로 오인되지 않도록 중립 문구.
 LOAD_PRECOMPUTE_FIRST_SLOT = (
-    "첫 슬롯 유사도 계산 중… 잠시만 기다려 주세요."
+    "첫 슬롯 준비 중… 잠시만 기다려 주세요."
 )
 LOAD_PRECOMPUTE_WAIT_FMT = (
     "{slot} 슬롯 유사도 계산을 기다리는 중… 다음 슬롯은 백그라운드에서 준비됩니다"

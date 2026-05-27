@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -55,3 +57,35 @@ class CacheKey:
     def for_(cls, src: Path, size_option: SizeOption) -> "CacheKey":
         return cls(src=src, size_option=size_option,
                    cache_file=cache_path(src, size_option))
+
+
+# ---------------------------------------------------------------------------
+# 오래된 사진 캐시 정리 (TTL)
+# ---------------------------------------------------------------------------
+def prune_old_cache(max_age_days: float = 1.0) -> int:
+    """썸네일/중간이미지 캐시 중 ``max_age_days`` 보다 오래된 ``*.jpg`` 를 삭제한다.
+
+    디스크가 무한정 커지는 것을 막기 위한 단순 TTL 청소.  features/scores 캐시는
+    재계산 비용이 커서 대상에서 제외한다.  읽기는 mtime 을 갱신하지 않으므로 매일
+    쓰는 썸네일도 만료되면 삭제→다음 조회 시 저렴하게 재생성된다.
+
+    삭제한 파일 수를 돌려준다.  개별 파일 오류는 무시(다른 프로세스가 사용 중일 수
+    있음).
+    """
+    cutoff = time.time() - max(0.0, float(max_age_days)) * 86400.0
+    removed = 0
+    for cache_dir in (paths.thumb_cache_dir(), paths.mid_cache_dir()):
+        try:
+            with os.scandir(cache_dir) as it:
+                for entry in it:
+                    try:
+                        if not entry.name.lower().endswith(".jpg"):
+                            continue
+                        if entry.stat().st_mtime < cutoff:
+                            os.unlink(entry.path)
+                            removed += 1
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+    return removed

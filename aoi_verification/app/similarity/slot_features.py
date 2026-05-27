@@ -388,11 +388,16 @@ class SlotPrecomputeWorker(QThread):
                     continue
                 # 1) val features 빌드 (디스크 캐시 있으면 빠름)
                 from .. import i18n
+                # 특징 분석 단계도 진행률을 표시해 '0 에서 멈춘 것처럼' 보이지 않게
+                # 한다(#2) — 이미지 장수(ref+val) 기준 카운트.
                 self.signals.phase.emit(i18n.KO.PHASE_FEATURE)
+                feat_total = len(refs) + len(vals)
+                self.signals.progress.emit(0, feat_total)
                 val_feats = self._slot_cache.build(slot, vals, cfg=self._cfg)
+                self.signals.progress.emit(len(vals), feat_total)
                 # 2) ref features (sim.extract 가 디스크 캐시 자동 사용)
                 ref_feats: Dict[Path, Feature] = {}
-                for r in refs:
+                for ri, r in enumerate(refs, start=1):
                     if self._stop:
                         return
                     try:
@@ -401,6 +406,7 @@ class SlotPrecomputeWorker(QThread):
                         )
                     except Exception:
                         pass
+                    self.signals.progress.emit(len(vals) + ri, feat_total)
 
                 # 2.5) CNN 임베딩 사전 배치 (#5 — GPU 가속 + thread-safety).
                 # score() 안에서 lazy 계산 + Feature.cnn 변형이 일어나면

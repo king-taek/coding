@@ -35,8 +35,10 @@ from .matcher import Candidate, score_ref_classical
 
 
 def _rerank_workers() -> int:
-    """CPU 재채점 병렬 워커 수 — 코어 수 기반(과도 구독 방지 위해 [2,12])."""
-    return max(2, min(12, os.cpu_count() or 4))
+    """CPU 재채점 병렬 워커 수 — 코어 수 기반.  유휴 코어를 줄이기 위해 상한을 32
+    로(과거 12) 올린다(#3).  cv2 내부 스레드는 ``cv2.setNumThreads(1)`` 로 막혀 있어
+    외부 풀과 과도구독되지 않는다."""
+    return max(2, min(32, os.cpu_count() or 4))
 
 # 고정 하이퍼파라미터(벤치마크에서 확정 — 데이터에 맞춰 튜닝하지 않음).
 FUSION_TOPK = 40          # 고전 재채점할 임베딩 상위 후보 수
@@ -329,16 +331,27 @@ class EfficiencyScheduler(QThread):
 
     def _slot_val_features(self, vals) -> dict:
         """슬롯 val 의 고전 Feature 를 **1회만** 병렬 추출(읽기 전용 캐시).  모든 ref
-        가 공유 → ref마다 같은 val 을 재추출하던 중복 제거(결과 동일)."""
+        가 공유 → ref마다 같은 val 을 재추출하던 중복 제거(결과 동일).
+
+        CPU-단독 폴백(``_emit_feat``)에선 추출 진행률도 emit 해 '특징 분석' 단계에서
+        진행 바가 0에 멈춘 것처럼 보이지 않게 한다(#2)."""
         def _ex(v):
             try:
                 return v.path, _pipeline.extract(v.path, cfg=self._cfg, side="val")
             except Exception:
                 return v.path, None
         out: dict = {}
-        for path, feat in self._pool.map(_ex, vals):
+        futs = [self._pool.submit(_ex, v) for v in vals]
+        for fut in as_completed(futs):
+            path, feat = fut.result()
             if feat is not None:
                 out[path] = feat
+            if getattr(self, "_emit_feat", False):
+                with self._plock:
+                    self._feat_done += 1
+                    fd, ft = self._feat_done, self._total_feat
+                if ft > 0:
+                    self.signals.progress.emit(int(fd), int(ft))
         return out
 
     def _rerank_one(self, r, vals, built, ref_emb, by_path, vfmap):
@@ -377,6 +390,7 @@ class EfficiencyScheduler(QThread):
                 first = not self._scoring_started
                 self._scoring_started = True
             if first:
+                self._emit_feat = False            # 특징 분석 단계 종료 → 점수 진행률로
                 self.signals.phase.emit(self._PHASE_SCORING)   # '유사도 계산' 라벨
             self._emit_progress()
             if self._stop.is_set():
@@ -405,6 +419,11 @@ class EfficiencyScheduler(QThread):
         self._total_slots = len(slot_order)
         self._total_embed = (sum(len(refs) + len(vals) for _, refs, vals in tasks)
                              if backend is not None else 0)
+        # CPU-단독 폴백에선 GPU 임베딩 진행률이 없으므로, val 특징 추출(특징 분석)
+        # 단계의 진행률을 대신 표시한다(#2).  GPU 경로는 임베딩 진행률이 있어 불필요.
+        self._total_feat = sum(len(vals) for _, _refs, vals in tasks)
+        self._feat_done = 0
+        self._emit_feat = backend is None
         self._PHASE_SCORING = i18n.KO.PHASE_SCORING
         self._active_units = ["cpu"] + ([backend[1].lower()] if backend else [])
         # ① 재채점 멀티코어 풀 — val 특징 추출 + ref별 재채점을 병렬로(결과 동일).
@@ -412,7 +431,9 @@ class EfficiencyScheduler(QThread):
         try:
             if backend is None:
                 # GPU 미가용 — 겹칠 임베딩 작업이 없어 CPU 고전 단독(슬롯별 병렬 재채점).
-                self.signals.phase.emit(i18n.KO.PHASE_SCORING)
+                # '유사도 계산' 라벨을 미리 띄우지 말고, 먼저 '특징 분석' 으로 시작해
+                # val 특징 추출 진행률을 보여준다(#2).  재채점 시작 시 SCORING 으로 전환.
+                self.signals.phase.emit(i18n.KO.PHASE_FEATURE)
                 for slot, refs, vals in tasks:
                     if self._stop.is_set():
                         break

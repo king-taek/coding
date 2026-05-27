@@ -286,6 +286,55 @@ def _make_input_array(path: Path, cfg=None, side=None) -> Optional[np.ndarray]: 
     return arr
 
 
+def _preprocess_workers() -> int:
+    """전처리(디코드/리사이즈) 병렬 워커 수 — cv2/PIL 은 GIL 을 풀어 멀티코어 활용."""
+    return max(2, min(8, (os.cpu_count() or 4)))
+
+
+def _preprocess_parallel(items, cfg=None, side=None):  # pragma: no cover - 환경 의존
+    """경로들을 **멀티스레드로 전처리**해 ``(path, arr)`` 를 준비되는 대로 yield.
+
+    기존엔 모든 이미지를 단일 스레드로 전처리한 *뒤* 일괄 추론해, 전처리 동안 GPU
+    가 놀고 추론 동안 CPU 가 놀았다(#3).  여기서는 전처리를 코어 수만큼 병렬로
+    돌리고 준비되는 텐서를 즉시 흘려보내, 호출자가 추론 큐(``AsyncInferQueue``)에
+    바로 투입해 전처리(CPU)·추론(GPU) 이 동시에 돌게 한다.
+
+    메모리 폭주를 막기 위해 in-flight 전처리 수를 ``window`` 로 제한(완료될 때마다
+    다음 항목을 채움).  실패(``None``)는 건너뛴다.
+    """
+    from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+
+    items = [Path(p) for p in items]
+    if not items:
+        return
+    workers = _preprocess_workers()
+    window = max(workers * 2, 4)
+    it = iter(items)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        inflight: dict = {}
+        for _ in range(window):
+            try:
+                p = next(it)
+            except StopIteration:
+                break
+            inflight[pool.submit(_make_input_array, p, cfg, side)] = p
+        while inflight:
+            done, _pending = wait(list(inflight), return_when=FIRST_COMPLETED)
+            for fut in done:
+                p = inflight.pop(fut)
+                try:
+                    arr = fut.result()
+                except Exception:
+                    arr = None
+                try:                                   # 완료분만큼 다음 항목 보충
+                    nxt = next(it)
+                    inflight[pool.submit(_make_input_array, nxt, cfg, side)] = nxt
+                except StopIteration:
+                    pass
+                if arr is not None:
+                    yield p, arr
+
+
 # ---------------------------------------------------------------------------
 # 공개 API — PyTorch embedder 에서 가용 시 호출
 # ---------------------------------------------------------------------------
@@ -318,15 +367,9 @@ def compute_embeddings(paths: Iterable[Path],
     if not items:
         return out
 
-    # 입력 텐서 사전 생성 — async 시작 시점에 즉시 큐잉.
-    inputs: list[tuple[Path, np.ndarray]] = []
-    for p in items:
-        arr = _make_input_array(p, cfg)
-        if arr is not None:
-            inputs.append((p, arr[np.newaxis]))   # (1, 3, H, W)
-    if not inputs:
-        return out
-
+    # 전처리(멀티스레드)와 추론(GPU/NPU)을 파이프라인으로 겹쳐 가동(#3) — 준비되는
+    # 텐서를 즉시 AsyncInferQueue 로 흘려보내 장치가 놀지 않게 한다.
+    inputs = ((p, arr[np.newaxis]) for p, arr in _preprocess_parallel(items, cfg))
     raw = _infer_raw(compiled, inputs, _optimal_streams(compiled))
 
     # head 통과 + L2 정규화 → PyTorch 경로와 동일 형식.
@@ -554,35 +597,41 @@ def device_embed(paths: Iterable[Path],
         return out
     compiled, _name = pack
     mark_unit_active(device)
-    arrs: list[tuple[Path, np.ndarray]] = []
-    for p in [Path(p) for p in paths]:
-        arr = _make_input_array(p, cfg, side=side)
-        if arr is not None:
-            arrs.append((p, arr))
-    if not arrs:
+    items = [Path(p) for p in paths]
+    if not items:
         return out
     n_streams = _optimal_streams(compiled) if jobs is None else max(1, int(jobs))
+    # 전처리를 멀티스레드로 돌려 준비되는 텐서를 즉시 추론 큐로 흘려보낸다(#3) —
+    # 전처리(CPU)와 추론(GPU/NPU)이 동시에 돌아 장치 유휴를 줄인다.
+    prepped = _preprocess_parallel(items, cfg, side)
 
     if batch <= 1:
-        inputs = [(p, a[np.newaxis]) for p, a in arrs]      # (1,3,H,W) per path
+        inputs = ((p, a[np.newaxis]) for p, a in prepped)   # (1,3,H,W) per path
         raw = _infer_raw(compiled, inputs, n_streams)
         for p, feat in raw.items():
             out[p] = _l2(feat[0])
         return out
 
-    # 정적 배치 B — B장씩 묶어 (B,3,H,W) 로 추론.  마지막 그룹은 0-pad 후
-    # 실제 path 수만큼만 결과를 취한다.  userdata 는 실제 path 튜플.
-    groups: list[tuple[tuple, np.ndarray]] = []
-    for i in range(0, len(arrs), batch):
-        grp = arrs[i:i + batch]
-        real_paths = tuple(p for p, _ in grp)
-        stack = np.stack([a for _, a in grp], axis=0)        # (r,3,H,W)
-        if stack.shape[0] < batch:
-            pad = np.zeros((batch - stack.shape[0],) + stack.shape[1:],
-                           dtype=stack.dtype)
-            stack = np.concatenate([stack, pad], axis=0)     # (B,3,H,W)
-        groups.append((real_paths, stack))
-    raw = _infer_raw(compiled, groups, n_streams)
+    # 정적 배치 B — 준비되는 대로 B장씩 묶어 (B,3,H,W) 로 추론.  마지막 그룹은
+    # 0-pad 후 실제 path 수만큼만 결과를 취한다.  userdata 는 실제 path 튜플.
+    def _grouped():
+        buf_p: list = []
+        buf_a: list = []
+        for p, a in prepped:
+            buf_p.append(p)
+            buf_a.append(a)
+            if len(buf_a) == batch:
+                yield tuple(buf_p), np.stack(buf_a, axis=0)
+                buf_p, buf_a = [], []
+        if buf_a:
+            stack = np.stack(buf_a, axis=0)
+            if stack.shape[0] < batch:
+                pad = np.zeros((batch - stack.shape[0],) + stack.shape[1:],
+                               dtype=stack.dtype)
+                stack = np.concatenate([stack, pad], axis=0)  # (B,3,H,W)
+            yield tuple(buf_p), stack
+
+    raw = _infer_raw(compiled, _grouped(), n_streams)
     for real_paths, feat in raw.items():
         for b, p in enumerate(real_paths):                   # 실제 행만(패딩 무시)
             out[p] = _l2(feat[b])

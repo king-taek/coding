@@ -199,6 +199,23 @@ class MainWindow(QMainWindow):
         # Intel GPU/NPU 가속(OpenVINO) 설치 안내 — 첫 모달(이어하기) 이후 표시.
         # 모달 exec() 가 이벤트 루프를 막으므로 두 모달이 겹치지 않는다.
         QTimer.singleShot(300, self._maybe_offer_openvino)
+        # 1일 지난 썸네일/중간이미지 캐시 정리 — 백그라운드 데몬으로 UI 비차단.
+        self._prune_old_cache_async()
+
+    @staticmethod
+    def _prune_old_cache_async() -> None:
+        """1일 지난 썸네일/중간이미지 캐시를 백그라운드 스레드에서 1회 정리."""
+        import threading
+
+        from ..utils import cache as _cache
+
+        def _work() -> None:
+            try:
+                _cache.prune_old_cache(max_age_days=1.0)
+            except Exception:
+                pass
+
+        threading.Thread(target=_work, name="cache-prune", daemon=True).start()
 
     # ==================================================================
     # 메모리 사용량 표시
@@ -854,6 +871,8 @@ class MainWindow(QMainWindow):
             slot_only_ref=list(self._scan.ref_only),
             slot_only_val=list(self._scan.val_only),
             unmatched_refs=unmatched_refs,
+            kla_folders={n: s.kla_folder
+                         for n, s in self._scan.slots.items() if s.kla_folder},
         )
         # 결과 페이지에는 ‘이미 복사해둔 작업 파일’ 과 ‘템플릿 원본’ 둘 다 전달.
         auto_mode = (

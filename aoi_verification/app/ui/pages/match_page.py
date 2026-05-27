@@ -101,6 +101,9 @@ class MatchPage(QWidget):
         self._fast_results: dict = {}
         # 현재 사전 계산 단계 라벨 (#8).
         self._precompute_phase: str = ""
+        # 마지막으로 받은 사전 계산 진행도(라벨만 바뀔 때 진행 바 유지용).
+        self._precompute_done: int = 0
+        self._precompute_total: int = 0
 
     # ------------------------------------------------------------------
     def _build(self) -> None:
@@ -442,8 +445,18 @@ class MatchPage(QWidget):
         self._precompute_worker.start()
 
     def _on_precompute_phase(self, phase: str) -> None:
-        """현재 작업 단계 라벨 갱신 (#8) — '이미지 특징 분석'/'유사도 계산' 등."""
+        """현재 작업 단계 라벨 갱신 (#8) — '이미지 특징 분석'/'유사도 계산' 등.
+
+        선행 단계(특징 분석/임베딩)에서 progress emit 이 늦어도 라벨은 **즉시**
+        오버레이에 반영해, '유사도 계산 0' 처럼 보이던 문제를 없앤다.
+        """
         self._precompute_phase = phase or i18n.KO.PHASE_SCORING
+        if self._current is None:
+            # 마지막으로 받은 진행도를 유지하며 라벨만 바꾼다(아직 없으면 busy 표시).
+            self._loading.set_progress(
+                self._precompute_done, self._precompute_total,
+                self._precompute_phase,
+            )
 
     def _on_precompute_progress(self, done: int, total: int) -> None:
         # 첫 슬롯이 끝나 매칭이 시작되기 전(차단 오버레이 표시 중)에는 진행 바를
@@ -451,6 +464,8 @@ class MatchPage(QWidget):
         # (_current 설정) 백그라운드 슬롯의 progress 는 매칭 오버레이를 건드리지
         # 않도록 무시 — bg_status_label 이 슬롯 단위 진행을 대신 보여준다.
         # (set_progress 는 hidden 오버레이를 다시 show 하지 않으므로 안전.)
+        self._precompute_done = done
+        self._precompute_total = total
         if self._current is None:
             phase = getattr(self, "_precompute_phase", "") or i18n.KO.PHASE_SCORING
             # 라벨엔 현재 작업명, 진행도는 처리 갯수(done / total)로 표시.
