@@ -36,8 +36,11 @@ def test_embedding_cache_invalidated_by_mtime(tmp_path, monkeypatch):
     assert ov._emb_cache_load(img, sig) is not None
 
     # 원본 mtime 이 바뀌면(=재촬영) 키가 달라져 캐시 미스 → 재추출 유도.
+    # mtime 은 세션 단위로 메모이즈되므로(#5), 새 세션처럼 캐시를 초기화한 뒤 확인.
+    from aoi_verification.app.utils import cache as _cache
     future = time.time() + 10_000
     os.utime(img, (future, future))
+    _cache.reset_mtime_cache()
     assert ov._emb_cache_load(img, sig) is None
 
 

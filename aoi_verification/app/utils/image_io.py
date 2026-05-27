@@ -135,8 +135,11 @@ def _ensure_resized(src: Path, *, size_option: str,
                     long_edge: int, jpeg_q: int,
                     extra: str = "") -> Path:
     out = cache.cache_path(src, size_option, extra=extra)  # type: ignore[arg-type]
-    if out.exists() and out.stat().st_size > 0:
-        return out
+    try:                                  # exists()+stat() 2회 → stat() 1회로
+        if out.stat().st_size > 0:
+            return out
+    except OSError:
+        pass
     try:
         # JPEG 빠른 디코드를 위해 draft 힌트를 함께 전달.
         img = _open(src, draft_long_edge=long_edge)

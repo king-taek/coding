@@ -589,15 +589,14 @@ def _emb_signature(model_kind: str, cfg, side) -> str:
 
 def _emb_cache_file(path: Path, sig: str) -> Path:
     import hashlib
+    import os as _os
 
+    from ..utils import cache as _cache
     from ..utils import paths as _paths
-    try:
-        mtime = int(Path(path).stat().st_mtime)
-    except OSError:
-        mtime = 0
-    h = hashlib.sha1(
-        f"{Path(path).resolve()}|{mtime}|{sig}".encode("utf-8", "replace")
-    ).hexdigest()
+    # NAS 왕복 감소(#5): resolve() 미사용(순수 abspath) + 세션 메모이즈된 mtime 재사용.
+    ap = _os.path.abspath(str(path))
+    mtime = int(_cache.memo_mtime(path))
+    h = hashlib.sha1(f"{ap}|{mtime}|{sig}".encode("utf-8", "replace")).hexdigest()
     return _paths.embedding_cache_dir() / f"{h}.npy"
 
 

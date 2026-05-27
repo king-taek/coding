@@ -16,6 +16,35 @@ from . import paths
 
 SizeOption = Literal["thumb", "mid", "feature"]
 
+# 원본 mtime 메모이즈 — NAS(느린 원격 디스크)에서 같은 파일을 thumb/mid/feature/
+# embedding 등 여러 캐시가 각각 stat() 하던 왕복을 세션당 1회로 줄인다(#5).
+# 런(검증 1회) 동안 원본은 불변이라고 가정한다.  세션 시작 시 reset 한다.
+_mtime_cache: dict[str, float] = {}
+
+
+def reset_mtime_cache() -> None:
+    """세션(검증) 시작 시 호출 — 원본 mtime 메모이즈를 비운다."""
+    _mtime_cache.clear()
+
+
+def _abspath(src) -> str:
+    # ``Path.resolve()`` 는 심볼릭/마운트 해석으로 NAS 왕복이 생길 수 있어, FS 를
+    # 건드리지 않는 순수 문자열 ``abspath`` 를 캐시 키에 쓴다.
+    return os.path.abspath(str(src))
+
+
+def memo_mtime(src) -> float:
+    """원본 mtime(메모이즈).  같은 경로는 세션 내 1회만 stat() 한다."""
+    ap = _abspath(src)
+    v = _mtime_cache.get(ap)
+    if v is None:
+        try:
+            v = os.stat(ap).st_mtime
+        except OSError:
+            v = 0.0
+        _mtime_cache[ap] = v
+    return v
+
 
 def _hash_key(absolute_path: str, mtime: float, size_option: SizeOption,
               extra: str = "") -> str:
@@ -33,11 +62,9 @@ def cache_path(src: Path, size_option: SizeOption, *,
     분기하기 위한 문자열이다 (예: ``"t180q75"``). 기본값은 빈 문자열로,
     기존 호출 형태와 호환된다.
     """
-    try:
-        mtime = src.stat().st_mtime
-    except OSError:
-        mtime = 0.0
-    key = _hash_key(str(src.resolve()), mtime, size_option, extra)
+    ap = _abspath(src)
+    mtime = memo_mtime(src)
+    key = _hash_key(ap, mtime, size_option, extra)
 
     if size_option == "thumb":
         return paths.thumb_cache_dir() / f"{key}.jpg"

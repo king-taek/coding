@@ -832,6 +832,10 @@ class MainWindow(QMainWindow):
         # 양식 폴더의 양식.xlsx 를 결과 폴더로 복사 → 작업 파일 준비 ----
         self._prepare_working_file(inp)
 
+        # 원본 mtime 메모이즈 초기화 — 이번 세션 동안 캐시 키용 stat() 을 경로당 1회로(#5).
+        from ..utils import cache as _cache
+        _cache.reset_mtime_cache()
+
         self._loading.show_overlay(i18n.KO.LOAD_SCAN)
         QApplication.processEvents()
 
