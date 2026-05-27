@@ -30,6 +30,11 @@ from .neon_button import NeonButton
 from .window_controls import add_fullscreen_shortcut, enable_window_controls
 
 _THUMB_PX = 72
+# KLA 쪽 항목은 WaferID 가 찍힌 '헤더(OCR 구간)' 를 가로로 넓게 보여줘 사용자가 직접
+# 읽고 매핑할 수 있게 한다(가로:세로 ≈ 4:1 띠 영역).
+_CROP_W = 260
+_CROP_H = 72
+_KLA_METHODS = ("ocr", "unread", "filename")
 
 _METHOD_LABEL = {
     "filename": "파일명",
@@ -93,9 +98,12 @@ class SlotMappingDialog(QDialog):
         img = info.get("image")
         if not img:
             return None
+        # KLA 쪽(파일명/OCR/판독실패) 은 WaferID 헤더(OCR 구간)를 보여줘 사용자가
+        # 직접 읽고 매핑하게 한다.  비-KLA(plain) 은 일반 썸네일.
+        is_kla = info.get("method") in _KLA_METHODS
         pix: Optional[QPixmap] = None
         try:
-            if info.get("method") == "ocr":
+            if is_kla:
                 from ...utils import wafer_id
                 crop = wafer_id.header_crop_image(Path(img))
                 if crop is not None:
@@ -106,7 +114,8 @@ class SlotMappingDialog(QDialog):
             pix = None
         if pix is None or pix.isNull():
             return None
-        pix = pix.scaled(_THUMB_PX, _THUMB_PX, Qt.AspectRatioMode.KeepAspectRatio,
+        w, h = (_CROP_W, _CROP_H) if is_kla else (_THUMB_PX, _THUMB_PX)
+        pix = pix.scaled(w, h, Qt.AspectRatioMode.KeepAspectRatio,
                          Qt.TransformationMode.SmoothTransformation)
         return QIcon(pix)
 
@@ -125,7 +134,8 @@ class SlotMappingDialog(QDialog):
         return name
 
     def _fill_list(self, lst: QListWidget, names: list[str], meta: dict) -> None:
-        lst.setIconSize(QSize(_THUMB_PX, _THUMB_PX))
+        # 아이콘 박스는 넓은 헤더(OCR 구간)가 보이도록 가로로 크게.
+        lst.setIconSize(QSize(_CROP_W, _CROP_H))
         for n in names:
             item = QListWidgetItem(self._label_for(n, meta))
             item.setData(Qt.ItemDataRole.UserRole, n)
