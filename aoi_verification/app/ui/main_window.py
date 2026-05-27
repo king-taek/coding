@@ -862,8 +862,13 @@ class MainWindow(QMainWindow):
         self._loading.show_overlay(i18n.KO.LOAD_SCAN)
         QApplication.processEvents()
 
-        # 폴더 스캔 (저비용 — 메인 스레드에서 진행)
-        sr = scan(inp.ref_root, inp.val_root)
+        # 폴더 스캔 — NAS 처럼 폴더가 많아도 진행 개수를 실시간 표시(#6).
+        def _scan_progress(done: int, total: int) -> None:
+            self._loading.set_progress(
+                done, total, i18n.KO.LOAD_SCAN_FMT.format(done=done, total=total))
+            QApplication.processEvents()
+
+        sr = scan(inp.ref_root, inp.val_root, progress=_scan_progress)
         self._scan = sr
         # 사진이 한 장도 없는 한쪽 전용 폴더는 매칭 대상에서 제외(그냥 넘어감).
         drop_empty_unmatched(sr)

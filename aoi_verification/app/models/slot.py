@@ -94,17 +94,21 @@ def _enum_slot_dirs(root: Path) -> dict[str, Path]:
     return out
 
 
-def scan(ref_root: Path, val_root: Path) -> ScanResult:
-    """기준/검증 두 최상위 폴더를 스캔하여 Slot 매핑을 만든다."""
+def scan(ref_root: Path, val_root: Path, progress=None) -> ScanResult:
+    """기준/검증 두 최상위 폴더를 스캔하여 Slot 매핑을 만든다.
+
+    ``progress(done, total)`` 콜백이 주어지면 폴더(slot) 하나를 열거할 때마다 호출해,
+    NAS 처럼 느린 원격에서 폴더가 많아도 진행 개수를 실시간 표시할 수 있다."""
     ref_dirs = _enum_slot_dirs(Path(ref_root))
     val_dirs = _enum_slot_dirs(Path(val_root))
 
     all_names = sorted(set(ref_dirs.keys()) | set(val_dirs.keys()))
+    total = len(all_names)
     slots: dict[str, Slot] = {}
     ref_only: list[str] = []
     val_only: list[str] = []
 
-    for name in all_names:
+    for idx, name in enumerate(all_names, start=1):
         ref_d = ref_dirs.get(name)
         val_d = val_dirs.get(name)
         ref_imgs: list[ImageItem] = []
@@ -118,6 +122,11 @@ def scan(ref_root: Path, val_root: Path) -> ScanResult:
         elif val_d and not ref_d:
             val_only.append(name)
         slots[name] = Slot(name=name, ref_images=ref_imgs, val_images=val_imgs)
+        if progress is not None:
+            try:
+                progress(idx, total)
+            except Exception:
+                pass
 
     return ScanResult(slots=slots, ref_only=ref_only, val_only=val_only)
 
