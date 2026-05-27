@@ -53,6 +53,16 @@ def test_folder_wafer_id_majority_vote():
     assert wafer_id.folder_wafer_id_from_filenames(items) == "W6459153XYF5"
 
 
+def test_looks_like_wafer_id_gates_ocr():
+    # WaferID 형식이면 True(파일명 신뢰 → OCR 생략), 아니면 False(OCR 필요).
+    assert wafer_id.looks_like_wafer_id("W6459153XYF5") is True
+    assert wafer_id.looks_like_wafer_id("00NJ3159XYC1") is True
+    assert wafer_id.looks_like_wafer_id("FRONTSIDEADRIMG") is False   # 숫자 없음
+    assert wafer_id.looks_like_wafer_id("ABCDEFGH") is False
+    assert wafer_id.looks_like_wafer_id("123") is False               # 너무 짧음
+    assert wafer_id.looks_like_wafer_id(None) is False
+
+
 # ---------------------------------------------------------------------------
 # WaferID/폴더명 키로 병합
 # ---------------------------------------------------------------------------

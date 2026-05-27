@@ -36,6 +36,22 @@ def parse_wafer_id_from_filename(name) -> Optional[str]:
     return token.upper() if token else None
 
 
+def looks_like_wafer_id(token) -> bool:
+    """토큰이 WaferID 처럼 보이는지 — **OCR 필요 여부 판단에만** 사용(매칭엔 미사용).
+
+    파일명 prefix 가 WaferID 형식이면(영숫자 8~20, 숫자≥3·영문≥2) 그 값을 신뢰하고
+    OCR 을 건너뛴다.  ``FrontSideADRImg`` 처럼 숫자 없는 라벨이면 False → OCR 로
+    이미지 헤더의 실제 WaferID 를 읽는다."""
+    if not token:
+        return False
+    t = str(token)
+    if not t.isalnum() or not (8 <= len(t) <= 20):
+        return False
+    n_dig = sum(c.isdigit() for c in t)
+    n_alpha = sum(c.isalpha() for c in t)
+    return n_dig >= 3 and n_alpha >= 2
+
+
 def folder_wafer_id_from_filenames(paths) -> Optional[str]:
     """폴더 이미지 파일명들의 prefix 토큰을 다수결로 골라 slot명 후보로 반환.
 
@@ -55,9 +71,9 @@ def folder_wafer_id_from_filenames(paths) -> Optional[str]:
 # 2) OCR 폴백 (RapidOCR) — 이미지 좌상단 헤더의 'WaferID : XXXX' 판독
 # ---------------------------------------------------------------------------
 _DET_LIMIT_SIDE_LEN = 320          # 검출 입력 한 변 — 속도/정확 균형
-_CROP_LADDER = ((0.12, 0.5), (0.20, 1.0))   # (top_frac, left_frac) 헤더 크롭 사다리
-_MAX_IMAGES_PER_FOLDER = 5
-_VOTE_EARLY_STOP = 2
+_CROP_LADDER = ((0.12, 0.5),)      # (top_frac, left_frac) — 헤더 1구역만(속도↑)
+_MAX_IMAGES_PER_FOLDER = 3         # 폴더당 최대 시도 장수(속도↑, 과거 5)
+_VOTE_EARLY_STOP = 1               # 첫 성공 판독에서 즉시 종료(속도↑, 과거 2)
 _MIN_CONF = 0.30
 _WAFER_ID_RE = re.compile(r"WaferID\s*[:：]?\s*([A-Za-z0-9]+)", re.IGNORECASE)
 

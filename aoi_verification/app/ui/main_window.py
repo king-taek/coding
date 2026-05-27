@@ -637,13 +637,15 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _kla_machine_side(inp) -> Optional[str]:
-        """호기 번호가 'K-n'(예: K-6) 이면 그 쪽을 KLA 로 자동 판정.
+        """호기 번호가 'K-n' 또는 'KLA-n'(예: K-6, KLA-1, 대소문자 무관)이면 그 쪽을
+        KLA 로 자동 판정.
 
-        반환 "ref"/"val"/"both" 또는 None(둘 다 K-n 아님 → 사용자에게 물어봐야 함)."""
+        반환 "ref"/"val"/"both" 또는 None(둘 다 아님 → 사용자에게 물어봐야 함)."""
         import re
 
         def is_kla(label) -> bool:
-            return bool(re.fullmatch(r"\s*[Kk]\s*-\s*\d+\s*", str(label or "")))
+            return bool(re.fullmatch(r"(?:KLA|K)\s*-\s*\d+",
+                                     str(label or "").strip(), re.IGNORECASE))
 
         ref_k = is_kla(getattr(inp, "ref_machine", ""))
         val_k = is_kla(getattr(inp, "val_machine", ""))
@@ -685,15 +687,20 @@ class MainWindow(QMainWindow):
             return "val"
         return None
 
-    def _match_by_filename(self, sr: ScanResult, kla_side: str) -> None:
+    def _resolve_and_merge_kla(self, sr: ScanResult, kla_side: str,
+                               on_done) -> None:
         """KLA(``kla_side``) 미매칭 폴더의 slot명(WaferID)을 **파일명 우선·OCR 폴백**
-        으로 해석해 ref↔val 을 자동 병합한다.  남은 항목 메타(_slot_meta_*)도 채운다."""
-        try:
-            self._resolve_and_merge_kla(sr, kla_side)
-        except Exception:
-            pass
+        으로 해석해 ref↔val 을 자동 병합한다.
 
-    def _resolve_and_merge_kla(self, sr: ScanResult, kla_side: str) -> None:
+        OCR 은 **메인 스레드를 막지 않도록 백그라운드 워커**에서 돌리므로, 이 메서드는
+        OCR 이 끝난 뒤(또는 OCR 불필요 시 즉시) ``on_done()`` 콜백으로 다음 단계를
+        잇는다.  OCR 은 **파일명에서 WaferID 를 못 읽은 폴더에만** 돈다(불필요한 OCR 방지)."""
+        try:
+            self._kla_resolve_impl(sr, kla_side, on_done)
+        except Exception:
+            on_done()
+
+    def _kla_resolve_impl(self, sr: ScanResult, kla_side: str, on_done) -> None:
         do_ref = kla_side in ("ref", "both")
         do_val = kla_side in ("val", "both")
 
@@ -703,9 +710,8 @@ class MainWindow(QMainWindow):
                 return []
             return slot.ref_images if is_ref else slot.val_images
 
-        # 1) [파일명] KLA 쪽 폴더의 파일명 prefix(첫 '_' 이전 전체)를 slot명 후보로
-        #    읽어 먼저 매치한다(형식 검증 없음).  비-KLA 쪽은 폴더명이 곧 slot명이라
-        #    키셋에 자동 포함된다.  로딩창에 '파일명 분석' 단계 표시(실시간).
+        # 1) [파일명] KLA 쪽 폴더의 사진 파일명 prefix(첫 '_' 이전 전체)를 slot명
+        #    후보로 읽어 먼저 매치(형식 검증 없음).  비-KLA 쪽은 폴더명이 곧 slot명.
         self._loading.show_overlay(i18n.KO.LOAD_KLA_FILENAME)
         QApplication.processEvents()
         fn_ref: dict[str, str] = {}
@@ -730,33 +736,7 @@ class MainWindow(QMainWindow):
                         fn_val[n] = w
         wafer_id.merge_unmatched_by_wafer_id(sr, fn_ref, fn_val)
 
-        # 2) [OCR] 파일명으로 매치 안 된 KLA 쪽 폴더만 OCR 로 헤더 WaferID 판독 →
-        #    한 번 더 매치.  로딩창에 'OCR 판독' 단계 + 진행수(done/total) 실시간 표시.
-        ocr_ref: dict[str, str] = {}
-        ocr_val: dict[str, str] = {}
-        pend: list[tuple[str, str]] = []
-        if do_ref:
-            pend += [("ref", n) for n in sr.ref_only if n in img0_ref]
-        if do_val:
-            pend += [("val", n) for n in sr.val_only if n in img0_val]
-        if pend and wafer_id.ocr_available():
-            total = len(pend)
-            for i, (side, name) in enumerate(pend):
-                self._loading.set_progress(
-                    i, total,
-                    i18n.KO.LOAD_KLA_OCR_FMT.format(done=i, total=total))
-                QApplication.processEvents()
-                w = wafer_id.read_folder_wafer_id(
-                    [it.path for it in imgs_of(name, side == "ref")])
-                if w:
-                    (ocr_ref if side == "ref" else ocr_val)[name] = w
-            self._loading.set_progress(
-                total, total,
-                i18n.KO.LOAD_KLA_OCR_FMT.format(done=total, total=total))
-            wafer_id.merge_unmatched_by_wafer_id(sr, ocr_ref, ocr_val)
-
-        # 3) 여전히 남은 항목 메타(수동 매핑 다이얼로그용).  KLA 쪽은 OCR>파일명 값,
-        #    비-KLA 쪽은 폴더명 그대로(plain), 사진 없으면 'none'.
+        # 메타 작성 + 다음 단계 — OCR 결과(있으면)를 반영해 최종 메타를 만든다.
         def build_meta(names, is_kla, fn, ocr, img0) -> dict:
             meta: dict[str, dict] = {}
             for n in names:
@@ -772,10 +752,53 @@ class MainWindow(QMainWindow):
                     meta[n] = {"slot": None, "method": "plain", "image": img0[n]}
             return meta
 
-        self._slot_meta_ref = build_meta(list(sr.ref_only), do_ref, fn_ref,
-                                         ocr_ref, img0_ref)
-        self._slot_meta_val = build_meta(list(sr.val_only), do_val, fn_val,
-                                         ocr_val, img0_val)
+        def finalize(ocr_ref=None, ocr_val=None) -> None:
+            ocr_ref = ocr_ref or {}
+            ocr_val = ocr_val or {}
+            self._slot_meta_ref = build_meta(list(sr.ref_only), do_ref, fn_ref,
+                                             ocr_ref, img0_ref)
+            self._slot_meta_val = build_meta(list(sr.val_only), do_val, fn_val,
+                                             ocr_val, img0_val)
+            self._ocr_worker = None
+            on_done()
+
+        # 2) [OCR] **파일명에서 WaferID 를 못 읽은(형식이 아닌) 폴더에만** 헤더 OCR.
+        #    파일명이 WaferID 형식이면 그 값을 신뢰하고 OCR 을 건너뛴다(불필요한 OCR·
+        #    응답없음 방지).  OCR 은 백그라운드 워커에서 → UI 비차단.
+        jobs: list = []
+        if do_ref:
+            for n in list(sr.ref_only):
+                if n in img0_ref and not wafer_id.looks_like_wafer_id(fn_ref.get(n)):
+                    jobs.append(("ref", n, [it.path for it in imgs_of(n, True)]))
+        if do_val:
+            for n in list(sr.val_only):
+                if n in img0_val and not wafer_id.looks_like_wafer_id(fn_val.get(n)):
+                    jobs.append(("val", n, [it.path for it in imgs_of(n, False)]))
+
+        if jobs and wafer_id.ocr_available():
+            from ..workers.wafer_id_ocr import WaferIdOcrWorker
+            self._loading.show_overlay(
+                i18n.KO.LOAD_KLA_OCR_FMT.format(done=0, total=len(jobs)))
+            worker = WaferIdOcrWorker(jobs, parent=self)
+            self._ocr_worker = worker          # GC 방지 참조 보관
+
+            def _on_progress(d: int, t: int) -> None:
+                self._loading.set_progress(
+                    d, t, i18n.KO.LOAD_KLA_OCR_FMT.format(done=d, total=t))
+
+            def _on_ocr_done(ocr_ref: dict, ocr_val: dict) -> None:
+                try:
+                    wafer_id.merge_unmatched_by_wafer_id(sr, ocr_ref, ocr_val)
+                finally:
+                    finalize(ocr_ref, ocr_val)
+
+            worker.signals.progress.connect(_on_progress)
+            worker.signals.done.connect(_on_ocr_done)
+            worker.signals.failed.connect(lambda _msg: finalize())
+            worker.start()
+            return
+
+        finalize()
 
     def _apply_slot_pairs(self, sr: ScanResult, pairs) -> None:
         """(ref폴더명, val폴더명) 쌍을 통합 — val 사진을 ref slot명으로 합치고 제거."""
@@ -854,7 +877,10 @@ class MainWindow(QMainWindow):
             if side is None:
                 side = self._ask_kla_side()
             if side:
-                self._match_by_filename(sr, side)
+                # OCR 은 백그라운드 워커에서 → 끝나면 on_done 으로 다음 단계 진행.
+                self._resolve_and_merge_kla(
+                    sr, side, on_done=lambda: self._after_slot_resolved(sr))
+                return
         self._after_slot_resolved(sr)
 
     def _after_slot_resolved(self, sr: ScanResult) -> None:
