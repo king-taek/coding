@@ -12,3 +12,6 @@ openvino>=2024.0
 # KLA WaferID OCR 폴백 — 파일명이 WaferID 형식이 아닐 때 이미지 헤더를 판독.
 # 인식 모델(ONNX) 내장이라 런타임 다운로드 없이 오프라인 동작.
 rapidocr-onnxruntime>=1.3
+# 자동 업데이트가 회사 SSL 검사(인터셉트) 프록시 환경에서도 동작하도록, Chrome 처럼
+# OS(Windows) 신뢰 인증서 저장소를 사용(파이썬 기본 인증서 묶음 문제 회피). py3.10+.
+truststore>=0.8 ; python_version >= "3.10"

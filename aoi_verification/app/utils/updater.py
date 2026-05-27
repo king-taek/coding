@@ -44,16 +44,50 @@ def last_error() -> str:
     return _last_error
 
 
-def _opener():
-    """시스템/환경 프록시를 적용한 opener(1회 생성).
+def _ssl_context():
+    """HTTPS 검증용 SSL 컨텍스트.
 
-    회사 PC 는 보통 시스템 프록시를 쓰므로 ``getproxies()`` 로 자동 적용한다.
-    (단, PAC/자동구성 프록시는 urllib 가 해석하지 못함 — 그 경우 Atom 폴백/수동
-    프록시가 필요할 수 있다.)"""
+    회사 SSL 검사(인터셉트) 프록시 환경에서는 HTTPS 가 **회사 루트 CA** 로 재서명되어,
+    파이썬 기본 인증서 묶음으로는 'unable to get local issuer certificate' 가 난다
+    (Chrome 은 OS 저장소를 써서 됨).  그래서 ``truststore`` 로 **OS(Windows) 신뢰
+    저장소**를 쓰게 한다(Chrome 과 동일).  없으면 시스템 인증서 로드로 폴백.
+
+    마지막 수단으로 ``AOI_UPDATE_INSECURE=1`` 환경변수를 주면 검증을 끈다(권장하지
+    않음 — 인증서 확보가 불가능한 폐쇄망용 비상 옵션)."""
+    import os as _os
+    if _os.environ.get("AOI_UPDATE_INSECURE") == "1":
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        return ctx
+    try:                                   # Chrome 처럼 OS 신뢰 저장소 사용(권장)
+        import truststore
+        return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    except Exception:
+        pass
+    try:                                   # 폴백: 시스템 인증서 로드(Windows ROOT/CA)
+        ctx = ssl.create_default_context()
+        ctx.load_default_certs()
+        return ctx
+    except Exception:
+        return None
+
+
+def _opener():
+    """시스템/환경 프록시 + OS 신뢰 저장소(SSL)를 적용한 opener(1회 생성).
+
+    회사 PC 는 보통 시스템 프록시를 쓰므로 ``getproxies()`` 로 자동 적용하고,
+    SSL 검사 프록시 대비 OS 인증서 저장소(``_ssl_context``)로 검증한다.
+    (PAC/자동구성 프록시는 urllib 가 해석 못 함 — 그 경우 수동 프록시 필요.)"""
     global _OPENER
     if _OPENER is None:
+        handlers = []
         proxies = urllib.request.getproxies()
-        handlers = [urllib.request.ProxyHandler(proxies)] if proxies else []
+        if proxies:
+            handlers.append(urllib.request.ProxyHandler(proxies))
+        ctx = _ssl_context()
+        if ctx is not None:
+            handlers.append(urllib.request.HTTPSHandler(context=ctx))
         _OPENER = urllib.request.build_opener(*handlers)
     return _OPENER
 

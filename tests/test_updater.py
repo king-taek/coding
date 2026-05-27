@@ -140,6 +140,20 @@ def test_latest_commit_records_error_on_total_failure(monkeypatch):
     assert updater.last_error()        # 사유 기록됨
 
 
+def test_ssl_context_default_verifies(monkeypatch):
+    import ssl
+    monkeypatch.delenv("AOI_UPDATE_INSECURE", raising=False)
+    ctx = updater._ssl_context()
+    assert ctx is not None and ctx.verify_mode == ssl.CERT_REQUIRED
+
+
+def test_ssl_context_insecure_env_disables_verify(monkeypatch):
+    import ssl
+    monkeypatch.setenv("AOI_UPDATE_INSECURE", "1")
+    ctx = updater._ssl_context()
+    assert ctx.verify_mode == ssl.CERT_NONE and ctx.check_hostname is False
+
+
 def test_is_git_checkout(tmp_path, monkeypatch):
     monkeypatch.setattr(updater, "_app_root", lambda: tmp_path)
     assert updater.is_git_checkout() is False
