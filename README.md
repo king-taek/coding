@@ -12,8 +12,7 @@
 
 - Windows 10/11
 - **VS Code** 와 **Python 확장**(Microsoft 공식) 설치
-- 시스템에 Python 3.10 이상이 깔려 있어야 함. (별도 Python 이 없으면
-  Anaconda/Spyder 와 함께 깔린 Python 의 `python.exe` 경로를 활용해도 됨.)
+- 시스템에 **Python 3.10 이상**이 설치돼 있어야 함 ([python.org](https://www.python.org/downloads/) 에서 공식 설치본 사용).
 
 ## 2. 폰트 안내
 
@@ -38,12 +37,9 @@ VS Code 안에서 **터미널 열기** (`Ctrl + ` ` 또는 메뉴 `Terminal → 
 PowerShell 이 기본일 텐데 그대로 사용하면 됩니다.
 
 ```powershell
-# Spyder 가 설치돼 있다면 그 Python 으로 venv 를 만드는 게 가장 안전:
-& "C:\ProgramData\spyder-6\envs\spyder-runtime\python.exe" -m venv .venv
-
-# Python 을 별도 설치했다면:
-# py -m venv .venv
-# 또는: python -m venv .venv
+py -m venv .venv
+# 또는
+python -m venv .venv
 ```
 
 ### 3.3 venv 활성화
