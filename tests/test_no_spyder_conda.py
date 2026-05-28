@@ -16,7 +16,7 @@ _REPO = Path(__file__).resolve().parents[1]
 # 단어 경계로 보호: '(ana|mini)?conda' 와 'spyder' (대소문자 무관).  TEXT_SECONDARY
 # 같은 우연한 substring 은 통과(c 앞·a 뒤가 모두 단어문자라 \b 가 안 잡힘).
 _PATTERN = re.compile(r"\b(?:ana|mini)?conda\b|\bspyder\b", re.IGNORECASE)
-_TEXT_EXT = {".py", ".bat", ".md", ".txt", ".spec", ".ini", ".toml",
+_TEXT_EXT = {".py", ".pyi", ".bat", ".md", ".txt", ".spec", ".ini", ".toml",
              ".cfg", ".yml", ".yaml", ".json", ".cmd", ".ps1"}
 _EXCLUDE_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv",
                  "build", "dist", "dist_portable", ".idea", ".vscode"}
@@ -33,6 +33,12 @@ def _scan_offenders() -> list[str]:
             continue
         if p.name in _WHITELIST:
             continue
+        rel = p.relative_to(_REPO)
+        # 파일 '이름' 자체에 금지 키워드가 들어 있으면 즉시 위반
+        # (예: create_conda.py, conda.pyi, spyder_kernels.json).
+        if _PATTERN.search(p.name):
+            hits.append(f"{rel}: 파일명에 금지 키워드 포함")
+            continue
         if p.suffix.lower() not in _TEXT_EXT:
             continue
         try:
@@ -41,7 +47,6 @@ def _scan_offenders() -> list[str]:
             continue
         for lineno, line in enumerate(text.splitlines(), start=1):
             if _PATTERN.search(line):
-                rel = p.relative_to(_REPO)
                 hits.append(f"{rel}:{lineno}: {line.strip()[:140]}")
     return hits
 
