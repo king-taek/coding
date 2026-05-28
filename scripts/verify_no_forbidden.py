@@ -51,6 +51,18 @@ def main() -> int:
     sys.stderr.write("[금지] 회사 보안 정책 위반 — 빌드를 중단합니다.\n")
     if pkgs:
         sys.stderr.write(f"  · 설치된 금지 패키지: {pkgs}\n")
+        sys.stderr.write(
+            f"  · 현재 Python: {sys.executable}\n"
+            "  · 조치(아래 명령을 그대로 실행):\n")
+        for name in pkgs:
+            sys.stderr.write(f"      python -m pip uninstall -y {name}\n")
+        sys.stderr.write(
+            "  · 무엇이 끌어들였는지 확인하려면(Required-by 항목 보기):\n")
+        for name in pkgs:
+            sys.stderr.write(f"      python -m pip show {name}\n")
+        sys.stderr.write(
+            "  · 비어 있지 않으면 requirements.txt 의 해당 의존을 검토하세요.\n"
+            "    (보통은 과거 시스템 Python 에 남은 잔재 — 제거 후 재실행하면 통과)\n")
     if paths:
         sys.stderr.write(
             "  · Python 환경 경로에 금지 키워드 — 다른 Python(공식 설치본)으로 실행하세요:\n")
