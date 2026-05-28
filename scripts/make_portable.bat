@@ -43,6 +43,8 @@ if not exist "%OUT%\python\python.exe" (
 echo [2/4] 의존성 설치 (torch/openvino 포함 — 시간이 걸립니다)...
 "%OUT%\python\python.exe" -m pip install --upgrade pip || goto :fail
 "%OUT%\python\python.exe" -m pip install -r requirements.txt || goto :fail
+REM 회사 보안 정책 가드 — 설치된 패키지/환경에 금지 도구가 끼어 있으면 즉시 중단.
+"%OUT%\python\python.exe" "%~dp0verify_no_forbidden.py" || goto :fail
 
 echo [3/4] 앱 소스 복사 (app\)...
 if not exist "%OUT%\app" mkdir "%OUT%\app"

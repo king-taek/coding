@@ -149,6 +149,16 @@ def verify_imports() -> None:
 # ---------------------------------------------------------------------------
 # 4) 캐시 디렉토리 사전 생성
 # ---------------------------------------------------------------------------
+def verify_no_forbidden() -> None:
+    """회사 보안 정책 가드 — 같은 폴더의 verify_no_forbidden.py 를 실행한다."""
+    import subprocess as _sp
+    here = Path(__file__).resolve().parent
+    rc = _sp.call([sys.executable, str(here / "verify_no_forbidden.py")])
+    if rc != 0:
+        _fail("금지된 도구가 설치/연관돼 있습니다. 위 메시지를 확인하세요.")
+    _ok("회사 보안 정책 가드 통과")
+
+
 def prepare_cache_dir() -> None:
     for sub in CACHE_SUBDIRS:
         (CACHE_ROOT / sub).mkdir(parents=True, exist_ok=True)
@@ -163,7 +173,7 @@ def main() -> int:
     print("AOI 검증 프로그램 — 환경 준비 스크립트")
     print(_hr())
 
-    total = 4
+    total = 5
     _step(1, total, "Python 버전 확인")
     check_python()
 
@@ -173,7 +183,10 @@ def main() -> int:
     _step(3, total, "핵심 의존성 import 검증")
     verify_imports()
 
-    _step(4, total, "캐시 디렉토리 사전 생성")
+    _step(4, total, "회사 보안 정책 가드 (금지 도구 검사)")
+    verify_no_forbidden()
+
+    _step(5, total, "캐시 디렉토리 사전 생성")
     prepare_cache_dir()
 
     print()
