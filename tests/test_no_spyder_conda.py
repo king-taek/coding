@@ -20,8 +20,10 @@ _TEXT_EXT = {".py", ".pyi", ".bat", ".md", ".txt", ".spec", ".ini", ".toml",
              ".cfg", ".yml", ".yaml", ".json", ".cmd", ".ps1"}
 _EXCLUDE_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv",
                  "build", "dist", "dist_portable", ".idea", ".vscode"}
-# 이 테스트 자신과 런타임 가드 스크립트는 키워드를 포함해야 하므로 화이트리스트.
-_WHITELIST = {Path(__file__).name, "verify_no_forbidden.py"}
+# 이 테스트 자신과 런타임 가드 스크립트, 사고 기록 보고서는 키워드를 포함해야 하므로
+# 화이트리스트.  (보고서는 정책 의도에 맞는 *의도된* 참조 — 코드/의존성과 무관.)
+_WHITELIST = {Path(__file__).name, "verify_no_forbidden.py",
+              "외부도구_탐지_보고서.md"}
 
 
 def _scan_offenders() -> list[str]:
