@@ -50,7 +50,7 @@ class _BenchSignals(QObject):
 class _BenchWorker(QThread):
     def __init__(self, *, ref_root: str, val_root: str, self_test: bool,
                  recipe_keys: List[str], timeout: float, max_slots: int,
-                 max_images: int, parent=None) -> None:
+                 max_images: int, labels_path: str = "", parent=None) -> None:
         super().__init__(parent)
         self._ref = ref_root
         self._val = val_root
@@ -59,6 +59,7 @@ class _BenchWorker(QThread):
         self._timeout = timeout
         self._max_slots = max_slots
         self._max_images = max_images
+        self._labels_path = labels_path
         self._stop = threading.Event()
         self.signals = _BenchSignals()
         self._tmp: Optional[str] = None
@@ -74,6 +75,11 @@ class _BenchWorker(QThread):
                 self._tmp = tempfile.mkdtemp(prefix="aoi_bench_val_")
                 labels = _bm.synthesize_val(self._ref, self._tmp)
                 val_root = self._tmp
+            elif self._labels_path:
+                # 사용자가 만든 정답 라벨 → 실제 정확도(recall@K) 측정.
+                from ...dev import labels as _lab
+                loaded = _lab.load(self._labels_path)
+                labels = loaded or None
             ds = _bm.build_dataset(self._ref, val_root, labels=labels,
                                    max_slots=self._max_slots,
                                    max_images_per_side=self._max_images)
@@ -125,6 +131,15 @@ class DevBenchmarkDialog(QDialog):
         self.self_test.toggled.connect(self._on_selftest_toggled)
         self.val_edit.setEnabled(not self.self_test.isChecked())
         form.addRow("", self.self_test)
+
+        # 정답 라벨 파일(선택) — 있으면 recall@K(실제 정확도)로 측정.  옆 버튼으로
+        # 라벨 만들기 다이얼로그를 연다.  자기검증이 켜져 있으면 무시된다.
+        self.labels_edit = QLineEdit("", self)
+        labels_row = self._with_browse(self.labels_edit, folder=False)
+        make_btn = QPushButton(i18n.KO.DEV_LABEL_BUTTON, self)
+        make_btn.clicked.connect(self._open_label_maker)
+        labels_row.layout().addWidget(make_btn)
+        form.addRow(i18n.KO.DEV_LABEL_PATH_LABEL, labels_row)
 
         self.timeout_spin = QSpinBox(self)
         self.timeout_spin.setRange(0, 3600)
@@ -180,21 +195,36 @@ class DevBenchmarkDialog(QDialog):
             QHeaderView.ResizeMode.Stretch)
         root.addWidget(self.table, stretch=1)
 
-    def _with_browse(self, edit: QLineEdit) -> QWidget:
+    def _with_browse(self, edit: QLineEdit, *, folder: bool = True) -> QWidget:
         host = QWidget(self)
         lay = QHBoxLayout(host)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(edit, stretch=1)
         btn = QPushButton("…", host)
         btn.setFixedWidth(36)
-        btn.clicked.connect(lambda: self._browse(edit))
+        btn.clicked.connect(lambda: self._browse(edit, folder))
         lay.addWidget(btn)
         return host
 
-    def _browse(self, edit: QLineEdit) -> None:
-        path = QFileDialog.getExistingDirectory(self, i18n.KO.DEV_BENCH_REF_LABEL)
+    def _browse(self, edit: QLineEdit, folder: bool = True) -> None:
+        if folder:
+            path = QFileDialog.getExistingDirectory(self, i18n.KO.DEV_BENCH_REF_LABEL)
+        else:
+            path, _ = QFileDialog.getOpenFileName(
+                self, i18n.KO.DEV_LABEL_PATH_LABEL, "", "JSON (*.json)")
         if path:
             edit.setText(path)
+
+    def _open_label_maker(self) -> None:
+        """정답 라벨 만들기 다이얼로그 — 닫힌 뒤 저장 경로를 라벨 필드에 채운다."""
+        from .label_maker_dialog import LabelMakerDialog
+        dlg = LabelMakerDialog(self, default_ref=self.ref_edit.text().strip(),
+                               default_val=self.val_edit.text().strip())
+        dlg.showMaximized()
+        dlg.exec()
+        if dlg.labels_path():
+            self.labels_edit.setText(dlg.labels_path())
+            self.self_test.setChecked(False)
 
     def _on_selftest_toggled(self, on: bool) -> None:
         self.val_edit.setEnabled(not on)
@@ -220,6 +250,7 @@ class DevBenchmarkDialog(QDialog):
             timeout=float(self.timeout_spin.value()),
             max_slots=int(self.maxslots_spin.value()),
             max_images=int(self.maximg_spin.value()),
+            labels_path=self.labels_edit.text().strip(),
             parent=self,
         )
         self._worker.signals.progress.connect(self._on_progress)

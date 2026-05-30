@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (QButtonGroup, QCheckBox, QFileDialog, QFormLayout,
                               QGroupBox, QHBoxLayout, QLabel, QLineEdit,
                               QMessageBox, QRadioButton, QScrollArea,
@@ -220,16 +221,12 @@ class SetupPage(QWidget):
         self.update_btn.clicked.connect(self.update_check_requested.emit)
         bar.addWidget(self.update_btn)
         # 개발자 모드(환경변수 AOI_DEV_MODE 또는 prefs.dev_mode)에서만 보이는
-        # ‘개발자 벤치마크’ 진입 버튼 — 일반 사용자 화면에는 나타나지 않는다.
-        try:
-            from ..widgets.dev_benchmark_dialog import dev_mode_enabled
-            if dev_mode_enabled():
-                self.dev_bench_btn = NeonButton(i18n.KO.DEV_BENCH_BUTTON, role="ghost")
-                self.dev_bench_btn.setMinimumHeight(46)
-                self.dev_bench_btn.clicked.connect(self._open_dev_benchmark)
-                bar.addWidget(self.dev_bench_btn)
-        except Exception:
-            pass
+        # ‘개발자 벤치마크 / 정답 라벨’ 버튼 — 일반 사용자 화면에는 나타나지 않는다.
+        # 앱 안에서 Ctrl+Shift+D 로 켜고 끌 수 있으며, 토글 시 버튼이 즉시
+        # 나타나거나 사라진다(아래 _refresh_dev_buttons).
+        self._action_bar = bar
+        self.dev_bench_btn: NeonButton | None = None
+        self.dev_label_btn: NeonButton | None = None
         bar.addStretch(1)
         self.start_btn = NeonButton(i18n.KO.BTN_START, role="primary")
         self.start_btn.setMinimumWidth(220)
@@ -237,6 +234,12 @@ class SetupPage(QWidget):
         self.start_btn.clicked.connect(self._on_start)
         bar.addWidget(self.start_btn)
         root.addLayout(bar)
+        self._refresh_dev_buttons()
+
+        # 개발자 모드 토글 단축키 — 일반 사용자에게는 보이지 않는 진입점.
+        self._dev_shortcut = QShortcut(QKeySequence("Ctrl+Shift+D"), self)
+        self._dev_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self._dev_shortcut.activated.connect(self._toggle_dev_mode)
 
         # 개발자 크레딧 (메인 화면) -------------------------------------
         credit = QLabel(i18n.KO.CREDIT, self)
@@ -279,21 +282,87 @@ class SetupPage(QWidget):
         if path:
             target.setText(path)
 
+    # ------------------------------------------------------------------
+    # 개발자 모드 — 앱 내 토글 + 버튼 갱신
+    # ------------------------------------------------------------------
+    def _dev_mode_enabled(self) -> bool:
+        try:
+            from ..widgets.dev_benchmark_dialog import dev_mode_enabled
+            return bool(dev_mode_enabled())
+        except Exception:
+            return False
+
+    def _refresh_dev_buttons(self) -> None:
+        """개발자 모드 상태에 맞춰 ‘개발자 벤치마크 / 정답 라벨’ 버튼을 추가·제거."""
+        bar = getattr(self, "_action_bar", None)
+        if bar is None:
+            return
+        enabled = self._dev_mode_enabled()
+        # 켜짐 → 없으면 생성해 update_btn 다음(index 1)에 삽입.
+        if enabled:
+            if self.dev_bench_btn is None:
+                self.dev_bench_btn = NeonButton(i18n.KO.DEV_BENCH_BUTTON, role="ghost")
+                self.dev_bench_btn.setMinimumHeight(46)
+                self.dev_bench_btn.clicked.connect(self._open_dev_benchmark)
+                bar.insertWidget(1, self.dev_bench_btn)
+            if self.dev_label_btn is None:
+                self.dev_label_btn = NeonButton(i18n.KO.DEV_LABEL_BUTTON, role="ghost")
+                self.dev_label_btn.setMinimumHeight(46)
+                self.dev_label_btn.clicked.connect(self._open_label_maker)
+                bar.insertWidget(2, self.dev_label_btn)
+        else:
+            for attr in ("dev_bench_btn", "dev_label_btn"):
+                btn = getattr(self, attr, None)
+                if btn is not None:
+                    bar.removeWidget(btn)
+                    btn.deleteLater()
+                    setattr(self, attr, None)
+
+    def _toggle_dev_mode(self) -> None:
+        """Ctrl+Shift+D — 개발자 모드 on/off (prefs 영속) + 버튼 즉시 갱신."""
+        # 환경변수로 강제된 경우엔 그 상태가 우선하지만, prefs 플래그는 토글한다.
+        cur = bool(getattr(_prefs.load(), "dev_mode", False))
+        new = not cur
+        _prefs.patch(dev_mode=new)
+        self._refresh_dev_buttons()
+        if self._dev_mode_enabled():
+            QMessageBox.information(
+                self, i18n.KO.DEV_MODE_TOGGLE_TITLE,
+                i18n.KO.DEV_MODE_ON_FMT.format(button=i18n.KO.DEV_BENCH_BUTTON))
+        else:
+            QMessageBox.information(
+                self, i18n.KO.DEV_MODE_TOGGLE_TITLE, i18n.KO.DEV_MODE_OFF)
+
+    def _default_dev_roots(self) -> tuple[str, str]:
+        """개발자 도구의 기본 기준/검증 폴더 — 현재 입력 → 마지막 입력 → 예시 ‘기준’."""
+        from ...utils import paths as _paths
+        ref = self.ref_path_edit.text().strip()
+        if not ref:
+            ref = getattr(_prefs.load(), "last_ref_root", "") or ""
+            if not ref:
+                cand = _paths.resource_path("기준")
+                if cand.is_dir():
+                    ref = str(cand)
+        val = self.val_path_edit.text().strip()
+        if not val:
+            val = getattr(_prefs.load(), "last_val_root", "") or ""
+        return ref, val
+
     def _open_dev_benchmark(self) -> None:
         """개발자 벤치마크 다이얼로그 — 매칭 가속 조합 실험(개발자 모드 전용)."""
         from ..widgets.dev_benchmark_dialog import DevBenchmarkDialog
-        default_ref = self.ref_path_edit.text().strip()
-        if not default_ref:
-            # 마지막 입력 → 저장소의 ‘기준’ 예시 폴더 순으로 기본값을 채운다.
-            from ...utils import paths as _paths
-            default_ref = getattr(_prefs.load(), "last_ref_root", "") or ""
-            if not default_ref:
-                cand = _paths.resource_path("기준")
-                if cand.is_dir():
-                    default_ref = str(cand)
-        default_val = self.val_path_edit.text().strip()
+        default_ref, default_val = self._default_dev_roots()
         dlg = DevBenchmarkDialog(self, default_ref=default_ref,
                                  default_val=default_val)
+        dlg.showMaximized()
+        dlg.exec()
+
+    def _open_label_maker(self) -> None:
+        """정답 라벨 만들기 다이얼로그 — 기준 사진별 정답 검증 사진 지정(개발자 모드 전용)."""
+        from ..widgets.label_maker_dialog import LabelMakerDialog
+        default_ref, default_val = self._default_dev_roots()
+        dlg = LabelMakerDialog(self, default_ref=default_ref,
+                               default_val=default_val)
         dlg.showMaximized()
         dlg.exec()
 

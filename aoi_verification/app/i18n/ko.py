@@ -470,3 +470,38 @@ DEV_BENCH_COL_IPS = "img/s"
 DEV_BENCH_COL_PEAK = "피크MB"
 DEV_BENCH_COL_ACC = "정확도"
 DEV_BENCH_COL_NOTE = "비고"
+
+# ── 개발자 모드 토글 (Ctrl+Shift+D) ────────────────────────────────────────
+DEV_MODE_TOGGLE_TITLE = "개발자 모드"
+DEV_MODE_ON_FMT = (
+    "개발자 모드가 켜졌습니다.\n\n"
+    "화면 하단에 ‘{button}’ 버튼이 나타납니다.\n"
+    "(이 단축키 Ctrl+Shift+D 로 다시 끌 수 있습니다.)"
+)
+DEV_MODE_OFF = "개발자 모드가 꺼졌습니다."
+
+# ── 정답 라벨 만들기 (개발자 모드 전용) ────────────────────────────────────
+DEV_LABEL_BUTTON = "정답 라벨 만들기"
+DEV_LABEL_TITLE = "정답 라벨 만들기 — 기준 사진별 정답 검증 사진 지정"
+DEV_LABEL_HINT = (
+    "기준 사진마다 ‘정답’인 검증 사진을 클릭해 표시합니다. 정답은 여러 개일 수도, "
+    "없을 수도 있습니다. 후보는 유사도순으로 정렬해 보여줍니다(표시 순서일 뿐 "
+    "정답에는 영향 없음). 저장하면 벤치마크의 실제 정확도 측정에 사용됩니다."
+)
+DEV_LABEL_NEED_FOLDERS = "기준 폴더와 검증 폴더를 모두 지정하세요."
+DEV_LABEL_NO_COMMON = "공통 slot 이 없습니다 — 폴더 구조를 확인하세요."
+DEV_LABEL_PROGRESS_FMT = "기준 {idx}/{total}  ·  slot {slot}  ·  {name}"
+DEV_LABEL_NONE_BTN = "정답 없음"
+DEV_LABEL_PREV = "◀ 이전"
+DEV_LABEL_NEXT = "다음 ▶"
+DEV_LABEL_SAVE = "저장"
+DEV_LABEL_SAVE_AS = "다른 이름으로 저장…"
+DEV_LABEL_LOAD = "불러오기…"
+DEV_LABEL_CLOSE = "닫기"
+DEV_LABEL_SAVED_FMT = "저장됨: {path}\n라벨한 기준 {labeled}개(정답 없음 {none}개, 복수정답 {multi}개)."
+DEV_LABEL_SORT_SIM = "유사도순 정렬"
+DEV_LABEL_SORT_NAME = "파일명순 정렬"
+DEV_LABEL_SELECTED_FMT = "선택 {n}개"
+DEV_LABEL_UNREVIEWED = "미검토"
+DEV_LABEL_PATH_LABEL = "정답 라벨 파일"
+DEV_LABEL_DISCARD_CONFIRM = "저장하지 않은 변경이 있습니다. 닫을까요?"

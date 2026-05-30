@@ -792,11 +792,35 @@ def main(argv=None) -> int:
     ap.add_argument("--threshold", type=float, default=0.0)
     ap.add_argument("--out", help="기록 폴더(기본: 캐시/dev_bench/<host>)")
     ap.add_argument("--list", action="store_true", help="레시피 목록만 출력")
+    ap.add_argument("--make-labels-template",
+                    help="정답 라벨 빈 템플릿 JSON 을 생성할 경로(--ref/--val 필요)")
+    ap.add_argument("--labels-stats",
+                    help="정답 라벨 JSON 의 통계(정답수/없음/복수)만 출력")
     args = ap.parse_args(argv)
 
     if args.list:
         for r in _rx.REGISTRY:
             print(f"{r.key:24s} {r.name}\n    {r.desc}")
+        return 0
+
+    from . import labels as _lab
+
+    if args.labels_stats:
+        st = _lab.stats(_lab.load(args.labels_stats))
+        print(f"라벨 통계 — 기준 {st['refs']}개 · 정답있음 {st['labeled']}개 · "
+              f"정답없음 {st['none']}개 · 복수정답 {st['multi']}개")
+        return 0
+
+    if args.make_labels_template:
+        if not args.ref or not args.val:
+            ap.error("--make-labels-template 에는 --ref 와 --val 이 필요합니다")
+        tmpl = _lab.make_template(args.ref, args.val,
+                                  max_slots=args.max_slots,
+                                  max_images_per_side=args.max_images)
+        out = _lab.save(args.make_labels_template, tmpl)
+        st = _lab.stats(tmpl)
+        print(f"라벨 템플릿 저장: {out}  (기준 {st['refs']}개 — 각 항목에 "
+              f"정답 검증사진 경로를 채우세요. 정답 없음은 빈 리스트 []로 둡니다.)")
         return 0
 
     if not args.ref:
@@ -811,7 +835,7 @@ def main(argv=None) -> int:
         labels = synthesize_val(args.ref, tmp)
         val_root = tmp
     elif args.labels:
-        labels = json.loads(Path(args.labels).read_text(encoding="utf-8"))
+        labels = _lab.load(args.labels)
 
     if not val_root:
         ap.error("--val 또는 --self-test 가 필요합니다")
