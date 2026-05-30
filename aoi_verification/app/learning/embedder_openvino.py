@@ -154,15 +154,18 @@ def device_label() -> str:  # pragma: no cover — 환경 의존
 # (AsyncInferQueue).  OpenVINO 에 PERFORMANCE_HINT=THROUGHPUT 을 주면
 # 디바이스에 맞는 최적 스트림 수가 자동 설정됨.
 # Batch 는 1 로 고정 — NPU 는 dynamic shape 미지원이 잦아 단순/호환성 우선.
-def _force_static_shape(ov_model, batch: int = 1) -> None:  # pragma: no cover
-    """입력을 정적 ``[batch,3,_INPUT_PX,_INPUT_PX]`` 으로 고정.
+def _force_static_shape(ov_model, batch: int = 1,
+                        px: Optional[int] = None) -> None:  # pragma: no cover
+    """입력을 정적 ``[batch,3,P,P]`` 으로 고정 (P=``px`` 또는 ``_INPUT_PX``).
 
     ``ov.convert_model`` 은 배치 차원을 동적(-1)으로 남기는 경우가 있는데,
     Intel **NPU 플러그인은 동적 shape 컴파일을 거부**한다(GPU 는 허용).  정적화
     하지 않으면 NPU 컴파일이 조용히 실패해 NPU 가 영영 '대기' 로 남는다.
-    ``batch>1`` 이면 요청당 B장을 한 번에 추론(테스트용).  실패해도 무시."""
+    ``batch>1`` 이면 요청당 B장을 한 번에 추론.  ``px`` 는 입력 해상도 스윕용.
+    실패해도 무시."""
+    P = int(px) if px else _INPUT_PX
     try:
-        ov_model.reshape([int(batch), 3, _INPUT_PX, _INPUT_PX])
+        ov_model.reshape([int(batch), 3, P, P])
     except Exception:
         import logging
         logging.getLogger("aoi.openvino").debug(
@@ -263,22 +266,25 @@ def invalidate_caches() -> None:
 # ---------------------------------------------------------------------------
 # 입력 텐서 만들기 (PyTorch 와 동일 전처리 — 결과 호환 보장)
 # ---------------------------------------------------------------------------
-def _make_input_array(path: Path, cfg=None, side=None) -> Optional[np.ndarray]:  # pragma: no cover
-    """``(3, _INPUT_PX, _INPUT_PX)`` float32 NumPy 배열.  ``cfg`` 가 주어지면
-    강화/KLA 전처리 적용 (PyTorch 경로와 동일하게).  ``side`` ('ref'/'val') 가
-    주어지면 중앙 30% crop 도 side 별로 적용(center_crop 옵션이 켜진 경우)."""
+def _make_input_array(path: Path, cfg=None, side=None,
+                      px: Optional[int] = None) -> Optional[np.ndarray]:  # pragma: no cover
+    """``(3, P, P)`` float32 NumPy 배열 (P=``px`` 또는 기본 ``_INPUT_PX``).
+
+    ``cfg`` 가 주어지면 강화/KLA 전처리 적용.  ``side`` ('ref'/'val') 가 주어지면
+    중앙 30% crop 도 side 별로 적용.  ``px`` 는 개발자 벤치마크의 입력 해상도 스윕용
+    — 컴파일 reshape 와 같은 px 를 써야 추론 shape 가 맞는다."""
+    P = int(px) if px else _INPUT_PX
     from ..utils import image_io
     try:
-        gray = image_io.preprocessed_roi_gray(path, long_edge=_INPUT_PX, cfg=cfg,
-                                               side=side)
+        gray = image_io.preprocessed_roi_gray(path, long_edge=P, cfg=cfg, side=side)
     except Exception:
         return None
     h, w = gray.shape
-    canvas = np.zeros((_INPUT_PX, _INPUT_PX), dtype=np.uint8)
-    y0 = max(0, (_INPUT_PX - h) // 2)
-    x0 = max(0, (_INPUT_PX - w) // 2)
-    h_use = min(h, _INPUT_PX)
-    w_use = min(w, _INPUT_PX)
+    canvas = np.zeros((P, P), dtype=np.uint8)
+    y0 = max(0, (P - h) // 2)
+    x0 = max(0, (P - w) // 2)
+    h_use = min(h, P)
+    w_use = min(w, P)
     canvas[y0:y0 + h_use, x0:x0 + w_use] = gray[:h_use, :w_use]
     arr = np.repeat(canvas[None, :, :], 3, axis=0).astype(np.float32) / 255.0
     for c, (mean, std) in enumerate(zip(_IMAGENET_MEAN, _IMAGENET_STD)):
@@ -291,7 +297,9 @@ def _preprocess_workers() -> int:
     return max(2, min(8, (os.cpu_count() or 4)))
 
 
-def _preprocess_parallel(items, cfg=None, side=None):  # pragma: no cover - 환경 의존
+def _preprocess_parallel(items, cfg=None, side=None, *,
+                         workers: Optional[int] = None,
+                         px: Optional[int] = None):  # pragma: no cover - 환경 의존
     """경로들을 **멀티스레드로 전처리**해 ``(path, arr)`` 를 준비되는 대로 yield.
 
     기존엔 모든 이미지를 단일 스레드로 전처리한 *뒤* 일괄 추론해, 전처리 동안 GPU
@@ -299,15 +307,16 @@ def _preprocess_parallel(items, cfg=None, side=None):  # pragma: no cover - 환�
     돌리고 준비되는 텐서를 즉시 흘려보내, 호출자가 추론 큐(``AsyncInferQueue``)에
     바로 투입해 전처리(CPU)·추론(GPU) 이 동시에 돌게 한다.
 
-    메모리 폭주를 막기 위해 in-flight 전처리 수를 ``window`` 로 제한(완료될 때마다
-    다음 항목을 채움).  실패(``None``)는 건너뛴다.
+    ``workers`` 로 전처리 스레드 수를(개발자 벤치마크의 멀티스레드 스윕), ``px`` 로
+    입력 해상도를 지정할 수 있다(미지정 시 자동/기본).  메모리 폭주를 막기 위해
+    in-flight 전처리 수를 ``window`` 로 제한.  실패(``None``)는 건너뛴다.
     """
     from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
     items = [Path(p) for p in items]
     if not items:
         return
-    workers = _preprocess_workers()
+    workers = int(workers) if workers and int(workers) > 0 else _preprocess_workers()
     window = max(workers * 2, 4)
     it = iter(items)
     with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -317,7 +326,7 @@ def _preprocess_parallel(items, cfg=None, side=None):  # pragma: no cover - 환�
                 p = next(it)
             except StopIteration:
                 break
-            inflight[pool.submit(_make_input_array, p, cfg, side)] = p
+            inflight[pool.submit(_make_input_array, p, cfg, side, px)] = p
         while inflight:
             done, _pending = wait(list(inflight), return_when=FIRST_COMPLETED)
             for fut in done:
@@ -328,7 +337,7 @@ def _preprocess_parallel(items, cfg=None, side=None):  # pragma: no cover - 환�
                     arr = None
                 try:                                   # 완료분만큼 다음 항목 보충
                     nxt = next(it)
-                    inflight[pool.submit(_make_input_array, nxt, cfg, side)] = nxt
+                    inflight[pool.submit(_make_input_array, nxt, cfg, side, px)] = nxt
                 except StopIteration:
                     pass
                 if arr is not None:
@@ -496,24 +505,36 @@ def accelerator_presence() -> Dict[str, object]:
             "devices": devs, "reason": reason}
 
 
-def _build_ov_model(model_kind: str, batch: int = 1):  # pragma: no cover - 환경 의존
-    """torchvision 백본 → OpenVINO 모델 (raw 임베딩 — classifier/fc 제거).
+def _build_ov_model(model_kind: str, batch: int = 1,
+                    input_px: Optional[int] = None):  # pragma: no cover - 환경 의존
+    """torchvision/모델주머니 백본 → OpenVINO 모델 (raw 임베딩 — classifier/fc 제거).
 
     ``.eval()`` 로 BatchNorm 을 폴딩한 뒤 변환해야 NPU/GPU 에서 정확하다.
-    ``batch`` 로 정적 배치 크기를 지정(테스트용, 기본 1).
-    """
+    ``batch`` 로 정적 배치 크기를, ``input_px`` 로 입력 해상도를 지정.  기본 두 모델
+    (MobileNetV3-Small / ResNet18) 외에는 ``dev.model_zoo`` 빌더로 위임한다
+    (MobileViT·CAE·U-Net 등 — 미가용 시 None → 호출부가 폴백)."""
+    P = int(input_px) if input_px else _INPUT_PX
     if model_kind == MODEL_RESNET18:
         weights = models.ResNet18_Weights.IMAGENET1K_V1
         backbone = models.resnet18(weights=weights)
         backbone.fc = torch.nn.Identity()       # 512-d 임베딩
-    else:                                        # MobileNetV3-Small (576-d)
+    elif model_kind == MODEL_MOBILENET_V3:       # MobileNetV3-Small (576-d)
         weights = models.MobileNet_V3_Small_Weights.IMAGENET1K_V1
         backbone = models.mobilenet_v3_small(weights=weights)
         backbone.classifier = torch.nn.Identity()
+    else:
+        # 모델 주머니(추가 백본) — 임베딩 계열만 빌드 가능, 아니면 None.
+        try:
+            from ..dev import model_zoo as _mz
+        except Exception:
+            return None
+        backbone = _mz.build_backbone(model_kind, input_px=P)
+        if backbone is None:
+            return None
     backbone.eval()
-    example = torch.randn(1, 3, _INPUT_PX, _INPUT_PX)
+    example = torch.randn(1, 3, P, P)
     ov_model = ov.convert_model(backbone, example_input=example)
-    _force_static_shape(ov_model, batch)
+    _force_static_shape(ov_model, batch, P)
     return ov_model
 
 
@@ -523,26 +544,37 @@ _compiled_units: Dict[tuple, str] = {}
 _compile_errors: Dict[tuple, str] = {}
 
 
-@lru_cache(maxsize=8)
-def compile_model_on(model_kind: str, device: str, batch: int = 1):  # pragma: no cover
+@lru_cache(maxsize=32)
+def compile_model_on(model_kind: str, device: str, batch: int = 1, *,
+                     perf_hint: str = "THROUGHPUT", streams: int = 0,
+                     input_px: int = 0):  # pragma: no cover
     """``model_kind`` 백본을 ``device`` ("GPU"/"NPU") 에 정적 배치 ``batch`` 로 컴파일.
 
     반환 ``(compiled, full_name)`` 또는 실패 시 ``None``.  **다른 디바이스로
     silent fallback 하지 않는다** — 폴백은 스케줄러가 유닛 단위로 결정하므로,
     GPU 컴파일 실패는 단지 그 유닛을 띄우지 않는다는 뜻이다.  lru_cache 가
-    ``(model_kind, device, batch)`` 별로 컴파일 결과를 보관한다.
+    ``(model_kind, device, batch, perf_hint, streams, input_px)`` 별로 보관한다.
+
+    개발자 벤치마크의 NPU 사용 방식 스윕용 노브:
+    - ``perf_hint`` — OpenVINO PERFORMANCE_HINT (THROUGHPUT/LATENCY/CUMULATIVE_THROUGHPUT).
+    - ``streams``   — NUM_STREAMS(다중 동시 추론 스트림, 0=자동).
+    - ``input_px``  — 입력 해상도(0=기본 256).  전처리도 같은 px 를 써야 한다.
     """
     if not (_HAS_TORCH and _HAS_OPENVINO):
         return None
     import logging
     log = logging.getLogger("aoi.openvino")
     batch = max(1, int(batch))
+    cfg_compile = {"PERFORMANCE_HINT": str(perf_hint or "THROUGHPUT")}
+    if streams and int(streams) > 0:
+        cfg_compile["NUM_STREAMS"] = str(int(streams))
     try:
-        ov_model = _build_ov_model(model_kind, batch)
+        ov_model = _build_ov_model(model_kind, batch, input_px or None)
+        if ov_model is None:               # 모델 주머니 빌드 불가(미가용) → 폴백.
+            _compile_errors[(model_kind, device)] = "백본 빌드 불가(패키지/가중치)"
+            return None
         core = ov.Core()
-        compiled = core.compile_model(
-            ov_model, device, config={"PERFORMANCE_HINT": "THROUGHPUT"},
-        )
+        compiled = core.compile_model(ov_model, device, config=cfg_compile)
     except Exception as e:
         # 조용히 None 만 반환하면 NPU 가 왜 '대기' 인지 알 수 없으므로
         # 에러를 보존(상태바 툴팁용) + 로그.
@@ -557,8 +589,8 @@ def compile_model_on(model_kind: str, device: str, batch: int = 1):  # pragma: n
     except Exception:
         pass
     _compiled_units[(model_kind, device)] = name
-    log.info("OpenVINO %s compiled on %s (%s) batch=%d",
-             model_kind, device, name, batch)
+    log.info("OpenVINO %s compiled on %s (%s) batch=%d hint=%s streams=%s px=%s",
+             model_kind, device, name, batch, perf_hint, streams, input_px)
     return (compiled, name)
 
 
@@ -662,6 +694,10 @@ def device_embed(paths: Iterable[Path],
                  jobs: Optional[int] = None,
                  batch: int = 1,
                  side=None,
+                 perf_hint: str = "THROUGHPUT",
+                 streams: int = 0,
+                 preprocess_threads: int = 0,
+                 input_px: int = 0,
                  progress_cb=None) -> Dict[Path, np.ndarray]:  # pragma: no cover - 환경 의존
     """``model_kind`` 백본을 ``device`` 에 고정 컴파일해 raw 임베딩(L2 정규화) 계산.
 
@@ -672,6 +708,10 @@ def device_embed(paths: Iterable[Path],
     파이프라인을 적극 활용한다.  ``batch>1`` 이면 요청당 B장을 한 번에 추론
     (정적 배치 B, 테스트용).  실패 path 는 결과에서 누락.  배치 결과는 batch=1
     과 동일(임베딩은 배치 무관).
+
+    개발자 벤치마크 NPU 사용 방식 노브 — ``perf_hint``(성능 힌트), ``streams``
+    (NUM_STREAMS, 다중 동시 작업), ``preprocess_threads``(전처리 멀티스레드),
+    ``input_px``(입력 해상도).  모두 0/기본이면 현행과 동일하게 동작한다.
     """
     import logging
     import time as _time
@@ -709,7 +749,8 @@ def device_embed(paths: Iterable[Path],
             )
             return out
 
-    pack = compile_model_on(model_kind, device, batch)
+    pack = compile_model_on(model_kind, device, batch, perf_hint=perf_hint,
+                            streams=streams, input_px=input_px)
     if pack is None:
         return out
     compiled, _name = pack
@@ -718,7 +759,9 @@ def device_embed(paths: Iterable[Path],
     # 전처리를 멀티스레드로 돌려 준비되는 텐서를 즉시 추론 큐로 흘려보낸다(#3) —
     # 전처리(CPU)와 추론(GPU/NPU)이 동시에 돌아 장치 유휴를 줄인다.
     _t0 = _time.perf_counter()
-    prepped = _preprocess_parallel(items, cfg, side)
+    prepped = _preprocess_parallel(items, cfg, side,
+                                   workers=preprocess_threads or None,
+                                   px=input_px or None)
 
     if batch <= 1:
         inputs = ((p, a[np.newaxis]) for p, a in prepped)   # (1,3,H,W) per path

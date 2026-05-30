@@ -27,6 +27,25 @@ from .recipes import (RECALL_CPU, RECALL_GPU, RECALL_GPU_NPU, RECALL_NONE,
                       RECALL_NPU, SCORE_CLASSICAL, SCORE_EMBED_ONLY,
                       SCORE_FUSION, Recipe)
 
+# 외부 ThreadPool 로 ref 를 병렬 재채점하므로 cv2 내부 스레드는 끈다(과도구독 방지).
+try:
+    import cv2 as _cv2
+    _cv2.setNumThreads(1)
+except Exception:
+    pass
+
+
+# 고속 재채점 노브 → 사용할 고전 컴포넌트 집합(None=전체 pHash+ORB+SSIM).
+def _rerank_components(recipe) -> Optional[set]:
+    mode = str(getattr(recipe, "rerank", "classical") or "classical")
+    return {
+        "classical": None,
+        "phash": {"phash"},
+        "phash_ssim": {"phash", "ssim"},
+        "orb_ssim": {"orb", "ssim"},
+    }.get(mode, None)
+
+
 # 결과에 보관할 ref 당 후보 상한(메모리 절제) — recall@5 + 일치율@1 에 충분.
 RESULT_KEEP = 10
 # 한 추론 in-flight 당 대략적 작업 메모리(입력 텐서+오버헤드) — 동시성 상한 산정용.
@@ -182,6 +201,11 @@ def _embed_paths(paths: List[Path], recipe: Recipe, cfg, devices: set,
     model = recipe.embed_model or _rx.MODEL_MOBILENET_V3
     cap = safe_concurrency(len(paths), recipe.concurrency)
     batch = max(1, int(recipe.embed_batch))
+    # NPU 사용 방식 노브 — perf_hint/streams/멀티스레드/해상도(레시피에서).
+    knobs = dict(perf_hint=getattr(recipe, "perf_hint", "THROUGHPUT"),
+                 streams=int(getattr(recipe, "streams", 0) or 0),
+                 preprocess_threads=int(getattr(recipe, "preprocess_threads", 0) or 0),
+                 input_px=int(getattr(recipe, "input_px", 0) or 0))
 
     # GPU+NPU '분담' — 절반씩 두 장치에서 동시에 뽑아 처리량을 올린다.
     if (recipe.recall == RECALL_GPU_NPU and not recipe.ensemble
@@ -196,7 +220,8 @@ def _embed_paths(paths: List[Path], recipe: Recipe, cfg, devices: set,
                 return
             try:
                 part = _ov.device_embed(ps, model_kind=model, device=dev, cfg=cfg,
-                                        jobs=cap, batch=batch, progress_cb=progress)
+                                        jobs=cap, batch=batch, progress_cb=progress,
+                                        **knobs)
             except Exception:
                 part = {}
             with lock:
@@ -213,7 +238,7 @@ def _embed_paths(paths: List[Path], recipe: Recipe, cfg, devices: set,
     dev = _device_for(recipe.recall if recipe.recall != RECALL_GPU_NPU else RECALL_GPU)
     try:
         return _ov.device_embed(paths, model_kind=model, device=dev, cfg=cfg,
-                                jobs=cap, batch=batch, progress_cb=progress)
+                                jobs=cap, batch=batch, progress_cb=progress, **knobs)
     except Exception:
         return {}
 
@@ -257,6 +282,7 @@ def run_recipe(ds: Dataset, recipe: Recipe, *,
     if devices is None:
         devices = detect_devices()
     cfg = recipe.to_cfg()
+    comp = _rerank_components(recipe)        # 고속 재채점 컴포넌트(None=전체 고전)
     run = RecipeRun(key=recipe.key, name=recipe.name, desc=recipe.desc,
                     n_images=ds.n_images(), n_pairs=ds.n_pairs())
     results: Results = {}
@@ -270,6 +296,33 @@ def run_recipe(ds: Dataset, recipe: Recipe, *,
         ranked = sorted(ranked, key=lambda x: -x[1])[:RESULT_KEEP]
         results[(slot, str(ref_path))] = [(str(p), float(s)) for p, s in ranked]
 
+    def _classical_refs(slot, refs, vals):
+        """refs 전부를 vals 와 고전(또는 고속 부분) 채점해 저장.  ``rerank_workers``>1
+        이면 ref 들을 멀티코어로 병렬 채점(결과 동일, 시간만↓)."""
+        workers = int(getattr(recipe, "rerank_workers", 0) or 0)
+
+        def one(r):
+            cands = score_ref_classical(r, vals, threshold=threshold, cfg=cfg,
+                                        components=comp, stop_cb=stopped)
+            return [(c.item.path, c.score) for c in cands]
+
+        if workers > 1 and len(refs) > 1:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=min(workers, len(refs))) as pool:
+                futs = {pool.submit(one, r): r for r in refs}
+                for fut in futs:
+                    r = futs[fut]
+                    try:
+                        ranked = fut.result()
+                    except Exception:
+                        ranked = []
+                    _store(slot, r.path, ranked)
+        else:
+            for r in refs:
+                if stopped():
+                    break
+                _store(slot, r.path, one(r))
+
     classical_recall = (recipe.scoring == SCORE_CLASSICAL
                         or recipe.recall == RECALL_NONE)
 
@@ -282,12 +335,7 @@ def run_recipe(ds: Dataset, recipe: Recipe, *,
         # ── 순수 고전(임베딩 없음) ────────────────────────────────────
         if classical_recall:
             t0 = time.perf_counter()
-            for r in refs:
-                if stopped():
-                    break
-                cands = score_ref_classical(r, vals, threshold=threshold, cfg=cfg,
-                                            stop_cb=stopped)
-                _store(slot, r.path, [(c.item.path, c.score) for c in cands])
+            _classical_refs(slot, refs, vals)
             score_t += time.perf_counter() - t0
             continue
 
@@ -307,12 +355,7 @@ def run_recipe(ds: Dataset, recipe: Recipe, *,
             # 임베딩 미가용/실패 → CPU 고전 폴백(정확도 보존, 측정은 폴백 표시).
             run.fell_back_classical = True
             t0 = time.perf_counter()
-            for r in refs:
-                if stopped():
-                    break
-                cands = score_ref_classical(r, vals, threshold=threshold, cfg=cfg,
-                                            stop_cb=stopped)
-                _store(slot, r.path, [(c.item.path, c.score) for c in cands])
+            _classical_refs(slot, refs, vals)
             score_t += time.perf_counter() - t0
             continue
 
@@ -323,38 +366,56 @@ def run_recipe(ds: Dataset, recipe: Recipe, *,
         ref_emb = _embed_paths([Path(r.path) for r in refs], recipe, cfg, devices)
         embed_t += time.perf_counter() - t0
 
-        t0 = time.perf_counter()
-        for r in refs:
-            if stopped():
-                break
+        comp = _rerank_components(recipe)        # 고속 재채점 컴포넌트(None=전체)
+
+        def _fuse_one(r):
+            """ref 1장 → 저장할 ranked 리스트.  병렬 워커에서도 안전(읽기 전용 공유)."""
             remb = ref_emb.get(Path(r.path))
             if remb is None:
                 cands = score_ref_classical(r, vals, threshold=threshold, cfg=cfg,
-                                            stop_cb=stopped)
-                _store(slot, r.path, [(c.item.path, c.score) for c in cands])
-                continue
+                                            components=comp, stop_cb=stopped)
+                return [(c.item.path, c.score) for c in cands]
             hits = index.query(remb, len(val_paths))          # [(label, cos)] desc
             ordered = [(val_paths[lab], float(cos)) for lab, cos in hits
                        if 0 <= lab < len(val_paths)]
             if built_b is not None:                            # 앙상블: 두 코사인 평균
                 ordered = _ensemble_merge(ordered, built_b, ref_emb_b_get(r))
             if recipe.scoring == SCORE_EMBED_ONLY:
-                _store(slot, r.path, [(vp, _cos_to_unit(c)) for vp, c in ordered])
-                continue
-            # fusion — 상위 topk 를 CPU 고전 재채점 후 z-융합
+                return [(vp, _cos_to_unit(c)) for vp, c in ordered]
+            # fusion — 상위 topk 를 CPU 고전(또는 고속 부분) 재채점 후 z-융합
             topk = max(int(recipe.fusion_topk), 1)
             top = ordered[:topk]
             items = [by_path.get(Path(vp)) for vp, _ in top]
             valid = [it for it in items if it is not None]
             cls = (score_ref_classical(r, valid, threshold=0.0, cfg=cfg,
-                                       stop_cb=stopped) if valid else [])
+                                       components=comp, stop_cb=stopped) if valid else [])
             cls_map = {str(c.item.path): float(c.score) for c in cls}
             emb_scores = [c for _, c in top]
             cls_scores = [cls_map.get(str(vp), 0.0) for vp, _ in top]
             mapped = map_score(zfuse(emb_scores, cls_scores))
             head = list(zip([vp for vp, _ in top], mapped))
             tail = [(vp, _cos_to_unit(c)) for vp, c in ordered[topk:]]
-            _store(slot, r.path, head + tail)
+            return head + tail
+
+        t0 = time.perf_counter()
+        workers = int(getattr(recipe, "rerank_workers", 0) or 0)
+        if workers > 1 and len(refs) > 1:
+            # CPU 멀티코어로 ref 들을 병렬 재채점 — 결과는 직렬과 동일, 시간만↓.
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=min(workers, len(refs))) as pool:
+                futs = {pool.submit(_fuse_one, r): r for r in refs}
+                for fut in futs:
+                    r = futs[fut]
+                    try:
+                        ranked = fut.result()
+                    except Exception:
+                        ranked = []
+                    _store(slot, r.path, ranked)
+        else:
+            for r in refs:
+                if stopped():
+                    break
+                _store(slot, r.path, _fuse_one(r))
         score_t += time.perf_counter() - t0
 
     run.total_sec = round(time.perf_counter() - t_total, 3)
@@ -364,7 +425,10 @@ def run_recipe(ds: Dataset, recipe: Recipe, *,
     n = run.n_images
     run.img_per_sec = round(n / run.total_sec, 1) if run.total_sec > 1e-6 else 0.0
     if run.fell_back_classical and recipe.uses_embedding():
-        run.note = "가속 장치 미가용 → CPU 고전 폴백(속도는 CPU 기준)"
+        run.note = "가속/모델 미가용 → CPU 고전 폴백(속도는 CPU 기준)"
+        need = str(getattr(recipe, "needs", "") or "")
+        if need:
+            run.note += f" · 필요: {need}"
     return results, run
 
 

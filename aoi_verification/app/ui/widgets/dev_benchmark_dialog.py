@@ -156,6 +156,24 @@ class DevBenchmarkDialog(QDialog):
         root.addLayout(form)
 
         root.addWidget(QLabel(i18n.KO.DEV_BENCH_RECIPES, self))
+        # 확장 그룹 토글 — 체크하면 그 그룹 전체(NPU 사용방식 스윕/NPU 단독/고속
+        # 재채점/모델 주머니)를 실험에 포함한다(개별 core 레시피는 아래 목록).
+        grp_row = QHBoxLayout()
+        self._group_checks = {}
+        for gkey, glabel in (
+            ("npu-sweep", i18n.KO.DEV_BENCH_GROUP_NPU_SWEEP),
+            ("npu-only", i18n.KO.DEV_BENCH_GROUP_NPU_ONLY),
+            ("fast-rerank", i18n.KO.DEV_BENCH_GROUP_FAST_RERANK),
+            ("model-zoo", i18n.KO.DEV_BENCH_GROUP_MODEL_ZOO),
+        ):
+            n = len(_rx.group(gkey))
+            cb = QCheckBox(f"{glabel} (+{n})", self)
+            cb.setChecked(False)
+            self._group_checks[gkey] = cb
+            grp_row.addWidget(cb)
+        grp_row.addStretch(1)
+        root.addLayout(grp_row)
+
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
         scroll.setMaximumHeight(200)
@@ -231,7 +249,16 @@ class DevBenchmarkDialog(QDialog):
 
     # ------------------------------------------------------------------
     def _selected_keys(self) -> List[str]:
-        return [k for k, cb in self._recipe_checks.items() if cb.isChecked()]
+        # 개별 core 레시피 + 체크된 확장 그룹 전체(중복 제거, 순서 보존).
+        keys = [k for k, cb in self._recipe_checks.items() if cb.isChecked()]
+        seen = set(keys)
+        for gkey, cb in getattr(self, "_group_checks", {}).items():
+            if cb.isChecked():
+                for r in _rx.group(gkey):
+                    if r.key not in seen:
+                        seen.add(r.key)
+                        keys.append(r.key)
+        return keys
 
     def _on_run(self) -> None:
         ref = self.ref_edit.text().strip()

@@ -72,19 +72,25 @@ class Feature:
 # Public API
 # ---------------------------------------------------------------------------
 def extract(src: Path, *, use_cnn: Optional[bool] = None, cfg=None,
-            side=None) -> Feature:
+            side=None, need_orb: bool = True) -> Feature:
     """디스크 캐시를 거쳐 한 이미지의 Feature 를 반환.
 
     ``cfg`` (SimilarityConfig) 전처리 토글이 켜져 있으면 강화/KLA 변환을
     계산 전용으로 적용하고, 캐시 키에 ``cfg.cache_extra(side)`` 를 섞어 기본
     특징과 분리 저장한다.  ``side`` ('ref'/'val') 는 중앙 30% crop 의 side 별
     적용을 위해 전달.  cfg=None / 토글 OFF → 현행과 동일 (extra="").
+
+    ``need_orb=False`` 면 ORB(키포인트 검출/디스크립터) 계산을 생략한다 — 고전
+    재채점에서 ORB 를 안 쓰는 고속 변형(개발자 벤치마크)이 추출 비용을 줄이려고
+    사용한다.  부분 특징이 캐시에 섞이지 않도록 이 경우 캐시 읽기/쓰기를 끈다.
     """
     extra = cfg.cache_extra(side) if cfg is not None else ""
     cache_file = cache.cache_path(src, "feature", extra=extra)
     path = Path(src)
     # 개발자 벤치마크는 디스크 캐시를 통째로 우회해 '처음 추출'처럼 측정한다.
     no_cache = bool(getattr(cfg, "bench_no_cache", False)) if cfg is not None else False
+    if not need_orb:                 # 부분(ORB 생략) 특징은 캐시와 분리.
+        no_cache = True
     if not no_cache and cache_file.exists() and cache_file.stat().st_size > 0:
         try:
             return Feature.load(cache_file, path)
@@ -100,7 +106,7 @@ def extract(src: Path, *, use_cnn: Optional[bool] = None, cfg=None,
     roi_gray = _preprocess(roi_gray)
 
     ph = _phash.compute_phash(roi_gray)
-    od = _orb.compute_orb(roi_gray)
+    od = _orb.compute_orb(roi_gray) if need_orb else _orb.OrbDescriptor(0, None)
 
     use_cnn = (config.CONFIG.similarity.use_cnn if use_cnn is None else use_cnn)
     cnn_vec = _cnn.compute_embedding(path) if (use_cnn and _cnn.is_available()) else None
@@ -131,22 +137,31 @@ def _preprocess(gray: np.ndarray) -> np.ndarray:
 
 
 def score(a: Feature, b: Feature,
-          weights: Optional[config.SimilarityWeights] = None) -> float:
+          weights: Optional[config.SimilarityWeights] = None,
+          *, components: Optional[set] = None) -> float:
     """두 Feature 사이의 최종 가중 평균 유사도 (0.0 ~ 1.0).
 
     active 모델이 ``basic`` 이 아니고 torch 가 사용 가능하면 CNN 항이 자동으로
     활성화된다 (config 가 명시적으로 비활성화한 경우는 그대로 따름).
-    """
+
+    ``components`` (예: ``{"phash","ssim"}``) 가 주어지면 그 항들만 사용하고 가중치를
+    그 부분집합으로 재정규화한다.  비싼 ORB(디스크립터 정합)·SSIM 을 빼서 CPU 재채점
+    속도를 올리는 고속 변형(개발자 벤치마크)이 사용한다.  None=현행(전체)."""
     base = (weights or config.CONFIG.similarity)
     w = _resolve_weights(base).normalized()
 
-    s_phash = _phash.phash_similarity(a.phash, b.phash)
+    use = components if components is not None else {"phash", "orb", "ssim", "cnn"}
 
-    orb_a = _orb.OrbDescriptor(a.orb_kp, a.orb_desc)
-    orb_b = _orb.OrbDescriptor(b.orb_kp, b.orb_desc)
-    s_orb = _orb.orb_score(orb_a, orb_b)
+    s_phash = _phash.phash_similarity(a.phash, b.phash) if "phash" in use else 0.0
 
-    s_ssim = _ssim.ssim_score(a.roi_gray, b.roi_gray)
+    if "orb" in use:
+        orb_a = _orb.OrbDescriptor(a.orb_kp, a.orb_desc)
+        orb_b = _orb.OrbDescriptor(b.orb_kp, b.orb_desc)
+        s_orb = _orb.orb_score(orb_a, orb_b)
+    else:
+        s_orb = 0.0
+
+    s_ssim = _ssim.ssim_score(a.roi_gray, b.roi_gray) if "ssim" in use else 0.0
 
     s_cnn = 0.0
     if w.use_cnn:
@@ -163,12 +178,21 @@ def score(a: Feature, b: Feature,
             b.cnn_model = active
         s_cnn = _cnn.cosine_similarity(a_emb, b_emb)
 
-    total = (
-        w.phash * s_phash
-        + w.orb * s_orb
-        + w.ssim * s_ssim
-        + (w.cnn * s_cnn if w.use_cnn else 0.0)
-    )
+    # 사용 컴포넌트의 가중치만 모아 재정규화 — 부분집합도 [0,1] 스케일을 유지해
+    # 임계치/융합이 그대로 동작하게 한다(전체일 때는 현행과 동일).
+    parts = []
+    if "phash" in use:
+        parts.append((w.phash, s_phash))
+    if "orb" in use:
+        parts.append((w.orb, s_orb))
+    if "ssim" in use:
+        parts.append((w.ssim, s_ssim))
+    if w.use_cnn and "cnn" in use:
+        parts.append((w.cnn, s_cnn))
+    wsum = sum(wt for wt, _ in parts)
+    if wsum <= 0:
+        return 0.0
+    total = sum(wt * sv for wt, sv in parts) / wsum
     return max(0.0, min(1.0, float(total)))
 
 

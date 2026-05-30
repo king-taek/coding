@@ -471,6 +471,12 @@ DEV_BENCH_COL_PEAK = "피크MB"
 DEV_BENCH_COL_ACC = "정확도"
 DEV_BENCH_COL_NOTE = "비고"
 
+# 확장 그룹(개발자 벤치마크) — 체크 시 그룹 전체 포함.
+DEV_BENCH_GROUP_NPU_SWEEP = "NPU 사용방식 스윕"
+DEV_BENCH_GROUP_NPU_ONLY = "NPU 단독 채점"
+DEV_BENCH_GROUP_FAST_RERANK = "CPU 고속 재채점"
+DEV_BENCH_GROUP_MODEL_ZOO = "모델 주머니"
+
 # ── 개발자 모드 토글 (Ctrl+Shift+D) ────────────────────────────────────────
 DEV_MODE_TOGGLE_TITLE = "개발자 모드"
 DEV_MODE_ON_FMT = (

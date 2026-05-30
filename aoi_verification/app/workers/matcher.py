@@ -30,6 +30,7 @@ def score_ref_classical(ref_item: ImageItem,
                         threshold: float,
                         cfg=None,
                         val_features: Optional[Mapping[Path, sim.Feature]] = None,
+                        components: Optional[set] = None,
                         progress_cb=None,
                         stop_cb=None) -> list[Candidate]:
     """기준 1장 vs 후보 N장을 고전 파이프라인(pHash+ORB+SSIM)으로 채점.
@@ -37,8 +38,12 @@ def score_ref_classical(ref_item: ImageItem,
     ``MatcherWorker`` 와 고효율 모드 CPU 유닛이 공유하는 순수 함수 (Qt 비의존).
     점수는 ``sim.score`` 가 이미 [0,1] 로 돌려준다.  ``val_features`` 가 주어지면
     재추출을 생략한다.  ``progress_cb(idx,total)`` / ``stop_cb()->bool`` 은 옵션.
-    """
-    ref_feat = sim.extract(ref_item.path, cfg=cfg, side="ref")
+
+    ``components`` (예: ``{"phash","ssim"}``) 가 주어지면 그 항만으로 채점한다 —
+    비싼 ORB 를 빼서 CPU 재채점을 빠르게 하는 고속 변형용.  ORB 를 안 쓰면 특징
+    추출에서도 ORB 검출을 생략(``need_orb=False``)해 추출 비용까지 줄인다."""
+    need_orb = components is None or ("orb" in components)
+    ref_feat = sim.extract(ref_item.path, cfg=cfg, side="ref", need_orb=need_orb)
     vfmap: dict[Path, sim.Feature] = dict(val_features or {})
     total = len(val_items)
     out: list[Candidate] = []
@@ -48,9 +53,9 @@ def score_ref_classical(ref_item: ImageItem,
         try:
             vf = vfmap.get(vi.path)
             if vf is None:
-                vf = sim.extract(vi.path, cfg=cfg, side="val")
+                vf = sim.extract(vi.path, cfg=cfg, side="val", need_orb=need_orb)
                 vfmap[vi.path] = vf
-            s = sim.score(ref_feat, vf)
+            s = sim.score(ref_feat, vf, components=components)
         except Exception:
             s = 0.0
         if s >= threshold:

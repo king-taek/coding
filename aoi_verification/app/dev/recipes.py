@@ -52,12 +52,24 @@ class Recipe:
     name: str                      # 짧은 한국어 라벨
     recall: str                    # RECALL_*
     scoring: str                   # SCORE_*
-    embed_model: str = ""          # MODEL_* (recall 이 임베딩일 때)
+    embed_model: str = ""          # MODEL_* / model_zoo id (recall 이 임베딩일 때)
     embed_batch: int = 1           # 정적 배치 B (GPU 는 16 권장)
     fusion_topk: int = 40          # 고전 재채점 깊이(fusion 일 때)
     center_crop: bool = False      # 고전 재채점 시 중앙 30% crop
-    concurrency: int = 32          # 동시 in-flight 추론 상한
+    concurrency: int = 32          # 동시 in-flight 추론 상한(병렬 수준)
     ensemble: bool = False         # gpu+npu 를 '분담' 대신 '앙상블'로(대조군)
+    # ── NPU 사용 방식 노브(병렬 수준/멀티스레드/다중 동시 작업) ─────────────
+    perf_hint: str = "THROUGHPUT"  # OpenVINO PERFORMANCE_HINT (THROUGHPUT/LATENCY/CUMULATIVE_THROUGHPUT)
+    streams: int = 0               # NUM_STREAMS (0=자동) — 다중 동시 추론 스트림
+    preprocess_threads: int = 0    # 전처리(디코드/리사이즈) 멀티스레드 수(0=자동)
+    input_px: int = 0              # 입력 해상도(0=기본 256) — 처리량↔표현력
+    # ── CPU 재채점(rerank) 고속화 노브 ─────────────────────────────────────
+    rerank: str = "classical"      # classical / phash / phash_ssim / orb_ssim (고전 비용 절감)
+    rerank_workers: int = 0        # 재채점 병렬 워커 수(0=직렬) — CPU 멀티코어 활용
+    # ── 모델 주머니(키포인트/이상탐지 등 전용 채점기 라우팅) ───────────────
+    method: str = ""               # "" / model_zoo family (keypoint/anomaly 등)
+    needs: str = ""                # 대상 장비에 필요한 추가 패키지/가중치(폴백 안내용)
+    tag: str = "core"              # 그룹(core / npu_sweep / npu_only / fast_rerank / model_zoo)
     desc: str = ""                 # 각 연산을 어느 장치에서 어떻게 하는지
 
     # ------------------------------------------------------------------
@@ -208,10 +220,195 @@ BASELINE_ACCURACY_KEY = "cpu_classical_full"   # 정확도의 정답 기준선
 PRODUCTION_SPEED_KEY = "gpu_fusion_b16"        # 현행(속도 3배 목표의 분모)
 
 
+# ===========================================================================
+# (A) NPU 사용 방식 스윕 — 모델/배치/병렬수준/스트림/멀티스레드/해상도 ≥20가지.
+#     추천(NPU MobileNet) 주변에서 한 축씩만 바꿔 원인 귀속을 명확히 한다.
+#     모든 항목 recall=NPU, scoring=fusion(정확도 보존).  대상 장비의 NPU 에서 측정.
+# ===========================================================================
+def _npu(key, name, desc, **kw) -> Recipe:
+    base = dict(recall=RECALL_NPU, scoring=SCORE_FUSION,
+                embed_model=MODEL_MOBILENET_V3, embed_batch=8, fusion_topk=40,
+                concurrency=32, tag="npu_sweep")
+    base.update(kw)
+    return Recipe(key=key, name=name, desc=desc, **base)
+
+
+def _build_npu_sweep() -> List[Recipe]:
+    out: List[Recipe] = []
+    # 1) 정적 배치 B 스윕 — NPU 처리량에 배치가 주는 영향.
+    for b in (1, 4, 8, 16, 32):
+        out.append(_npu(f"npu_b{b}", f"NPU 배치{b}",
+                        f"NPU(MobileNet) 임베딩 배치={b}. 정적 배치가 NPU 처리량에 "
+                        f"주는 영향 측정(NPU 는 보고서상 배치 이득이 작음).",
+                        embed_batch=b))
+    # 2) 동시 추론 수(병렬 수준) 스윕 — AsyncInferQueue in-flight 요청 수.
+    for c in (1, 2, 4, 8, 16, 32, 64, 96):
+        out.append(_npu(f"npu_c{c}", f"NPU 동시추론{c}",
+                        f"NPU 동시 in-flight 추론 {c}개(병렬 수준). 다중 동시 작업으로 "
+                        f"NPU 파이프라인을 채워 유휴를 줄이는 효과 측정.",
+                        concurrency=c))
+    # 3) 성능 힌트 — 처리량 vs 지연 vs 누적 처리량.
+    for h in ("THROUGHPUT", "LATENCY", "CUMULATIVE_THROUGHPUT"):
+        out.append(_npu(f"npu_hint_{h.lower()}", f"NPU 힌트 {h}",
+                        f"OpenVINO PERFORMANCE_HINT={h}. 처리량/지연 트레이드오프를 "
+                        f"NPU 에서 비교.",
+                        perf_hint=h))
+    # 4) 스트림 수 — NUM_STREAMS(다중 동시 작업 스트림).
+    for s in (1, 2, 4):
+        out.append(_npu(f"npu_streams{s}", f"NPU 스트림{s}",
+                        f"NPU NUM_STREAMS={s}. 여러 추론 스트림을 동시에 돌려 처리량을 "
+                        f"올리는 효과(메모리 여유 필요).",
+                        streams=s))
+    # 5) 전처리 멀티스레드 — 디코드/리사이즈 CPU 병렬이 NPU 공급을 따라가는지.
+    for t in (2, 4, 8):
+        out.append(_npu(f"npu_prep{t}", f"NPU 전처리{t}스레드",
+                        f"전처리(디코드/리사이즈)를 {t}스레드로 — NPU 가 굶지 않게 텐서 "
+                        f"공급을 멀티스레드로 채운다.",
+                        preprocess_threads=t))
+    # 6) 입력 해상도 — 처리량↔표현력.
+    for px in (224, 256):
+        out.append(_npu(f"npu_px{px}", f"NPU 입력{px}px",
+                        f"입력 해상도 {px}px. 작을수록 NPU 처리량↑(표현력 약간↓).",
+                        input_px=px))
+    # 7) NPU 위 모델 변형 — 같은 NPU 에서 백본만 교체.
+    for m in ("mobilenet_v3_small", "resnet18", "mobilenet_v2",
+              "squeezenet1_1", "efficientnet_b0"):
+        out.append(_npu(f"npu_model_{m}", f"NPU 모델 {m}",
+                        f"NPU 에서 {m} 백본으로 임베딩 추출(추출비용↔표현력 비교).",
+                        embed_model=m, needs=_zoo_needs(m)))
+    return out
+
+
+# ===========================================================================
+# (C) NPU 단독 채점 — CPU 재채점 없이 NPU 임베딩 코사인만으로 매칭.
+#     'NPU 단독이 빠르고 정확하면 CPU 불필요'를 직접 검증.  scoring=embed_only.
+# ===========================================================================
+def _build_npu_only() -> List[Recipe]:
+    out: List[Recipe] = []
+    for m, b in (("mobilenet_v3_small", 8), ("resnet18", 8),
+                 ("mobilevit_s", 8), ("efficientnet_b0", 8)):
+        out.append(Recipe(
+            key=f"npu_only_{m}", name=f"NPU 단독 {m}",
+            recall=RECALL_NPU, scoring=SCORE_EMBED_ONLY,
+            embed_model=m, embed_batch=b, concurrency=32, tag="npu_only",
+            needs=_zoo_needs(m),
+            desc=(f"NPU 가 {m} 임베딩을 뽑아 코사인 순위만으로 매칭한다(CPU 재채점 "
+                  f"없음). NPU 단독으로 충분히 빠르고 정확하면 CPU 가 불필요함을 검증.")))
+    # NPU 단독 + 가벼운 pHash 보정(임베딩은 NPU, 최소 CPU 한 항목만) — 단독에 근접.
+    out.append(Recipe(
+        key="npu_only_mbnet_phash", name="NPU 단독+pHash 보정",
+        recall=RECALL_NPU, scoring=SCORE_FUSION, embed_model=MODEL_MOBILENET_V3,
+        embed_batch=8, fusion_topk=10, rerank="phash", rerank_workers=8,
+        concurrency=32, tag="npu_only",
+        desc=("거의 NPU 단독 — 상위 10개만 CPU pHash(가장 싼 1개 항목)로 살짝 보정. "
+              "완전 단독과 전수 융합의 중간(CPU 부하 최소).")))
+    return out
+
+
+# ===========================================================================
+# (D) CPU 재채점 고속화 — 병목인 고전 재채점을 싸게/병렬로.  scoring=fusion.
+#     pHash 는 사전계산 해시 비교라 매우 싸고, ORB(디스크립터 정합)·SSIM 이 비싸다.
+#     → ORB/SSIM 를 빼거나 병렬화해 재채점 시간을 줄인다(정확도 검증 필수).
+# ===========================================================================
+def _build_fast_rerank() -> List[Recipe]:
+    g = dict(recall=RECALL_GPU, scoring=SCORE_FUSION,
+             embed_model=MODEL_MOBILENET_V3, embed_batch=16, fusion_topk=40,
+             tag="fast_rerank")
+    return [
+        Recipe(key="rr_phash", name="고속재채점 pHash단독",
+               rerank="phash", rerank_workers=8, **g,
+               desc=("재채점을 pHash(사전계산 해시 비교)만으로 — ORB/SSIM 생략. "
+                     "가장 싼 재채점. 정확도가 유지되면 CPU 시간 대폭↓.")),
+        Recipe(key="rr_phash_ssim", name="고속재채점 pHash+SSIM",
+               rerank="phash_ssim", rerank_workers=8, **g,
+               desc=("ORB(디스크립터 정합, 가장 비쌈)만 빼고 pHash+SSIM 으로 재채점. "
+                     "구조 유사도는 남겨 정확도 손실을 줄이며 속도↑.")),
+        Recipe(key="rr_orb_ssim", name="고속재채점 ORB+SSIM",
+               rerank="orb_ssim", rerank_workers=8, **g,
+               desc=("pHash 만 빼고 ORB+SSIM. pHash 영향 분리용 대조.")),
+        Recipe(key="rr_parallel", name="고속재채점 병렬(전체)",
+               rerank="classical", rerank_workers=16, **g,
+               desc=("재채점 항목은 그대로(정확도 동일)지만 ref 들을 16스레드로 병렬 "
+                     "채점해 CPU 멀티코어로 시간↓. 정확도 100% 보존하며 속도만↑.")),
+        Recipe(key="rr_phash_topk20", name="고속재채점 pHash+topk20",
+               rerank="phash", rerank_workers=8, fusion_topk=20,
+               recall=RECALL_GPU, scoring=SCORE_FUSION,
+               embed_model=MODEL_MOBILENET_V3, embed_batch=16, tag="fast_rerank",
+               desc=("싼 pHash 재채점 + 상위 20개만 — 깊이와 비용을 동시에 줄인 최속 "
+                     "융합 후보. 정확도 검증 필수.")),
+        Recipe(key="rr_npu_phash_parallel", name="NPU추출+pHash병렬재채점",
+               recall=RECALL_NPU, scoring=SCORE_FUSION,
+               embed_model=MODEL_MOBILENET_V3, embed_batch=8, fusion_topk=40,
+               rerank="phash_ssim", rerank_workers=16, tag="fast_rerank",
+               desc=("NPU 가 임베딩을 뽑고, CPU 는 ORB 를 뺀 pHash+SSIM 을 16스레드 "
+                     "병렬로 재채점 — 추출=NPU·계산=경량/병렬 CPU 의 결합 최적 후보.")),
+    ]
+
+
+# ===========================================================================
+# (B) 모델 주머니 — SuperPoint/LightGlue·PatchCore·PaDiM·CAE·U-Net·MobileViT.
+#     주로 NPU 추출 + 전용 채점기(미설치 시 폴백+안내).  대상 장비에 패키지 필요.
+# ===========================================================================
+def _zoo_needs(model_id: str) -> str:
+    try:
+        from . import model_zoo as _mz
+        return _mz.needs(model_id)
+    except Exception:
+        return ""
+
+
+def _build_model_zoo() -> List[Recipe]:
+    from . import model_zoo as _mz
+    out: List[Recipe] = []
+    # 임베딩 계열(ViT/AE) — NPU 추출 + CPU 융합.
+    for m in ("mobilevit_s", "mobilevit_xs", "cae", "unet", "attention_unet"):
+        sp = _mz.spec(m)
+        out.append(Recipe(
+            key=f"zoo_{m}", name=f"모델 {m}(NPU추출+융합)",
+            recall=RECALL_NPU, scoring=SCORE_FUSION, embed_model=m,
+            embed_batch=8, fusion_topk=40, concurrency=32, tag="model_zoo",
+            needs=_mz.needs(m), method=_mz.family(m),
+            desc=(sp.desc if sp else "") + " NPU 추출 + CPU 융합."))
+    # 키포인트 정합(SuperPoint+LightGlue) — 전용 채점기.
+    sp = _mz.spec("superpoint_lightglue")
+    out.append(Recipe(
+        key="zoo_superpoint_lightglue", name="SuperPoint+LightGlue(NPU)",
+        recall=RECALL_NPU, scoring=SCORE_EMBED_ONLY,
+        embed_model="superpoint_lightglue", method=_mz.FAMILY_KEYPOINT,
+        needs=_mz.needs("superpoint_lightglue"), tag="model_zoo",
+        desc=(sp.desc if sp else "")))
+    # 이상탐지(PatchCore/PaDiM) — 전용 채점기.
+    for m in ("patchcore", "padim"):
+        sp = _mz.spec(m)
+        out.append(Recipe(
+            key=f"zoo_{m}", name=f"{m}(이상탐지 거리)",
+            recall=RECALL_NPU, scoring=SCORE_EMBED_ONLY, embed_model=m,
+            method=_mz.FAMILY_ANOMALY, needs=_mz.needs(m), tag="model_zoo",
+            desc=(sp.desc if sp else "")))
+    return out
+
+
+NPU_SWEEP: List[Recipe] = _build_npu_sweep()
+NPU_ONLY: List[Recipe] = _build_npu_only()
+FAST_RERANK: List[Recipe] = _build_fast_rerank()
+MODEL_ZOO: List[Recipe] = _build_model_zoo()
+
+# 확장 그룹(이름 → 레시피 리스트).  'core' = 기본 13가지.
+GROUPS = {
+    "core": REGISTRY,
+    "npu-sweep": NPU_SWEEP,
+    "npu-only": NPU_ONLY,
+    "fast-rerank": FAST_RERANK,
+    "model-zoo": MODEL_ZOO,
+}
+ALL_EXTENDED: List[Recipe] = (REGISTRY + NPU_SWEEP + NPU_ONLY
+                              + FAST_RERANK + MODEL_ZOO)
+_BY_KEY = {r.key: r for r in ALL_EXTENDED}
+
+
 def by_key(key: str) -> Recipe:
-    for r in REGISTRY:
-        if r.key == key:
-            return r
+    if key in _BY_KEY:
+        return _BY_KEY[key]
     raise KeyError(key)
 
 
@@ -219,11 +416,40 @@ def all_keys() -> List[str]:
     return [r.key for r in REGISTRY]
 
 
+def all_extended_keys() -> List[str]:
+    return [r.key for r in ALL_EXTENDED]
+
+
+def group(name: str) -> List[Recipe]:
+    return list(GROUPS.get(name, []))
+
+
 def select(keys=None) -> List[Recipe]:
-    """``keys`` (리스트/콤마문자열/None=전체) 로 레시피 부분집합을 고른다."""
+    """레시피 부분집합 선택.
+
+    - ``None`` / ``"all"`` → 핵심 13가지(``REGISTRY``).
+    - ``"all+"`` / ``"everything"`` → 확장 포함 전부(``ALL_EXTENDED``).
+    - 그룹명(``"npu-sweep"`` / ``"npu-only"`` / ``"fast-rerank"`` / ``"model-zoo"``
+      / ``"core"``) → 그 그룹.  여러 그룹/키를 콤마로 섞을 수 있다.
+    - 그 외 → 개별 레시피 키.
+    """
     if keys is None or keys == "all" or keys == ["all"]:
         return list(REGISTRY)
     if isinstance(keys, str):
         keys = [k.strip() for k in keys.split(",") if k.strip()]
-    want = list(keys)
-    return [by_key(k) for k in want]
+    if list(keys) in (["all+"], ["everything"]):
+        return list(ALL_EXTENDED)
+    out: List[Recipe] = []
+    seen: Set[str] = set()
+    for k in keys:
+        if k in ("all+", "everything"):
+            picked = ALL_EXTENDED
+        elif k in GROUPS:
+            picked = GROUPS[k]
+        else:
+            picked = [by_key(k)]
+        for r in picked:
+            if r.key not in seen:
+                seen.add(r.key)
+                out.append(r)
+    return out
