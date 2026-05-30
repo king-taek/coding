@@ -96,17 +96,20 @@ REGISTRY: Dict[str, ModelSpec] = {
     "superpoint_lightglue": ModelSpec(
         "superpoint_lightglue", FAMILY_KEYPOINT,
         "SuperPoint 로 키포인트/디스크립터를 NPU 추출 → LightGlue 로 정합, 정합 수를 "
-        "유사도로. 회로 패턴의 국소 대응에 강함.",
-        needs="kornia(LightGlue/SuperPoint)"),
+        "유사도로. 회로 패턴의 국소 대응에 강함. (현재 전용 채점기는 스캐폴드 단계 — "
+        "kornia 설치 + 대상 장비 검증 후 활성화, 그 전엔 CPU 고전 폴백)",
+        needs="kornia(LightGlue/SuperPoint) — 전용 채점기 검증 후 활성"),
     # 이상탐지 패치 특징(PatchCore / PaDiM) ---------------------------------
     "patchcore": ModelSpec(
         "patchcore", FAMILY_ANOMALY,
-        "PatchCore — 기준 패치 특징 메모리뱅크와의 최근접 거리로 매칭/이상 점수.",
-        needs="anomalib"),
+        "PatchCore — 기준 패치 특징 메모리뱅크와의 최근접 거리로 매칭/이상 점수. "
+        "(현재 스캐폴드 — anomalib 설치 + 검증 후 활성, 그 전엔 CPU 고전 폴백)",
+        needs="anomalib — 전용 채점기 검증 후 활성"),
     "padim": ModelSpec(
         "padim", FAMILY_ANOMALY,
-        "PaDiM — 패치 위치별 가우시안 분포의 마할라노비스 거리로 매칭/이상 점수.",
-        needs="anomalib"),
+        "PaDiM — 패치 위치별 가우시안 분포의 마할라노비스 거리로 매칭/이상 점수. "
+        "(현재 스캐폴드 — anomalib 설치 + 검증 후 활성, 그 전엔 CPU 고전 폴백)",
+        needs="anomalib — 전용 채점기 검증 후 활성"),
 }
 
 
