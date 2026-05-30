@@ -83,7 +83,9 @@ def extract(src: Path, *, use_cnn: Optional[bool] = None, cfg=None,
     extra = cfg.cache_extra(side) if cfg is not None else ""
     cache_file = cache.cache_path(src, "feature", extra=extra)
     path = Path(src)
-    if cache_file.exists() and cache_file.stat().st_size > 0:
+    # 개발자 벤치마크는 디스크 캐시를 통째로 우회해 '처음 추출'처럼 측정한다.
+    no_cache = bool(getattr(cfg, "bench_no_cache", False)) if cfg is not None else False
+    if not no_cache and cache_file.exists() and cache_file.stat().st_size > 0:
         try:
             return Feature.load(cache_file, path)
         except Exception:
@@ -112,7 +114,8 @@ def extract(src: Path, *, use_cnn: Optional[bool] = None, cfg=None,
         cnn=cnn_vec,
     )
     try:
-        feat.save(cache_file)
+        if not no_cache:
+            feat.save(cache_file)
     except Exception:
         pass
     return feat

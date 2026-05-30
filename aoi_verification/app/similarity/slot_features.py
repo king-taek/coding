@@ -375,7 +375,8 @@ class SlotPrecomputeWorker(QThread):
                 return
             # 점수 디스크 캐시 옵션 (#5B) — active 모델은 실행 중 불변이므로
             # 시그니처는 한 번만 계산한다.
-            persist = bool(getattr(self._cfg, "persist_scores", False))
+            persist = (bool(getattr(self._cfg, "persist_scores", False))
+                       and not bool(getattr(self._cfg, "bench_no_cache", False)))
             score_sig = _score_signature(self._cfg) if persist else ""
             done = 0
             for slot_idx, (slot, refs, vals) in enumerate(self._tasks):

@@ -219,6 +219,17 @@ class SetupPage(QWidget):
         self.update_btn.setMinimumHeight(46)
         self.update_btn.clicked.connect(self.update_check_requested.emit)
         bar.addWidget(self.update_btn)
+        # 개발자 모드(환경변수 AOI_DEV_MODE 또는 prefs.dev_mode)에서만 보이는
+        # ‘개발자 벤치마크’ 진입 버튼 — 일반 사용자 화면에는 나타나지 않는다.
+        try:
+            from ..widgets.dev_benchmark_dialog import dev_mode_enabled
+            if dev_mode_enabled():
+                self.dev_bench_btn = NeonButton(i18n.KO.DEV_BENCH_BUTTON, role="ghost")
+                self.dev_bench_btn.setMinimumHeight(46)
+                self.dev_bench_btn.clicked.connect(self._open_dev_benchmark)
+                bar.addWidget(self.dev_bench_btn)
+        except Exception:
+            pass
         bar.addStretch(1)
         self.start_btn = NeonButton(i18n.KO.BTN_START, role="primary")
         self.start_btn.setMinimumWidth(220)
@@ -267,6 +278,24 @@ class SetupPage(QWidget):
         path = QFileDialog.getExistingDirectory(self, i18n.KO.SETUP_FOLDER_LABEL)
         if path:
             target.setText(path)
+
+    def _open_dev_benchmark(self) -> None:
+        """개발자 벤치마크 다이얼로그 — 매칭 가속 조합 실험(개발자 모드 전용)."""
+        from ..widgets.dev_benchmark_dialog import DevBenchmarkDialog
+        default_ref = self.ref_path_edit.text().strip()
+        if not default_ref:
+            # 마지막 입력 → 저장소의 ‘기준’ 예시 폴더 순으로 기본값을 채운다.
+            from ...utils import paths as _paths
+            default_ref = getattr(_prefs.load(), "last_ref_root", "") or ""
+            if not default_ref:
+                cand = _paths.resource_path("기준")
+                if cand.is_dir():
+                    default_ref = str(cand)
+        default_val = self.val_path_edit.text().strip()
+        dlg = DevBenchmarkDialog(self, default_ref=default_ref,
+                                 default_val=default_val)
+        dlg.showMaximized()
+        dlg.exec()
 
     def _on_threshold_changed(self, v: int) -> None:
         self.threshold_label.setText(f"{v} %")

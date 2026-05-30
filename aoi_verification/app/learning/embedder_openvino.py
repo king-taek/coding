@@ -683,8 +683,9 @@ def device_embed(paths: Iterable[Path],
         return out
 
     # 디스크 캐시 히트는 디코드·추론을 통째로 건너뛴다(#3).  cfg 가 있을 때만
-    # 캐시(테스트의 cfg=None 경로는 영향 없음).
-    use_cache = cfg is not None
+    # 캐시(테스트의 cfg=None 경로는 영향 없음).  개발자 벤치마크(bench_no_cache)
+    # 는 임베딩 캐시도 우회해 '처음 추론'처럼 측정한다.
+    use_cache = cfg is not None and not bool(getattr(cfg, "bench_no_cache", False))
     sig = _emb_signature(model_kind, cfg, side) if use_cache else ""
     items = all_items
     n_hit = 0

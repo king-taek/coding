@@ -1,0 +1,275 @@
+"""개발자 벤치마크 다이얼로그 — 매칭 가속 조합(레시피) 실험·기록 GUI.
+
+개발자 모드(환경변수 ``AOI_DEV_MODE`` 또는 prefs.dev_mode)에서만 진입 가능.
+헤드리스 코어(``app.dev.benchmark``)를 그대로 호출하고, 실행은 워커 스레드에서
+돌려 UI 를 막지 않는다.  **유사도 캐시를 우회**(처음 매칭처럼)하며 정확도가
+떨어지는 조합은 추천하지 않는다.
+"""
+
+from __future__ import annotations
+
+import os
+import tempfile
+import threading
+from pathlib import Path
+from typing import List, Optional
+
+from PyQt6.QtCore import QObject, Qt, QThread, pyqtSignal
+from PyQt6.QtWidgets import (QCheckBox, QDialog, QFileDialog, QFormLayout,
+                              QHBoxLayout, QHeaderView, QLabel, QLineEdit,
+                              QMessageBox, QPushButton, QScrollArea, QSpinBox,
+                              QTableWidget, QTableWidgetItem, QVBoxLayout,
+                              QWidget)
+
+from ... import i18n
+from ...dev import benchmark as _bm
+from ...dev import recipes as _rx
+from ...utils import prefs as _prefs
+
+
+def dev_mode_enabled() -> bool:
+    """개발자 모드 켜짐 여부 — 환경변수 또는 prefs 플래그."""
+    env = str(os.environ.get("AOI_DEV_MODE", "")).strip()
+    if env not in ("", "0", "false", "False"):
+        return True
+    try:
+        return bool(getattr(_prefs.load(), "dev_mode", False))
+    except Exception:
+        return False
+
+
+# ---------------------------------------------------------------------------
+# 워커 — 데이터셋 구성 + 스위트 실행 + 기록 (UI 비차단)
+# ---------------------------------------------------------------------------
+class _BenchSignals(QObject):
+    progress = pyqtSignal(str, int, int)        # name, done, total
+    finished = pyqtSignal(object, object, str)   # suite, ds, run_dir
+    failed = pyqtSignal(str)
+
+
+class _BenchWorker(QThread):
+    def __init__(self, *, ref_root: str, val_root: str, self_test: bool,
+                 recipe_keys: List[str], timeout: float, max_slots: int,
+                 max_images: int, parent=None) -> None:
+        super().__init__(parent)
+        self._ref = ref_root
+        self._val = val_root
+        self._self_test = self_test
+        self._keys = recipe_keys
+        self._timeout = timeout
+        self._max_slots = max_slots
+        self._max_images = max_images
+        self._stop = threading.Event()
+        self.signals = _BenchSignals()
+        self._tmp: Optional[str] = None
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    def run(self) -> None:        # type: ignore[override]
+        try:
+            labels = None
+            val_root = self._val
+            if self._self_test:
+                self._tmp = tempfile.mkdtemp(prefix="aoi_bench_val_")
+                labels = _bm.synthesize_val(self._ref, self._tmp)
+                val_root = self._tmp
+            ds = _bm.build_dataset(self._ref, val_root, labels=labels,
+                                   max_slots=self._max_slots,
+                                   max_images_per_side=self._max_images)
+            if not ds.tasks:
+                self.signals.failed.emit(i18n.KO.DEV_BENCH_NO_COMMON)
+                return
+            recipes = _rx.select(self._keys) if self._keys else list(_rx.REGISTRY)
+
+            def _prog(name, done, total):
+                self.signals.progress.emit(str(name), int(done), int(total))
+
+            suite = _bm.run_suite(ds, recipes, per_recipe_timeout=self._timeout,
+                                  progress=_prog, stop=self._stop.is_set)
+            run_dir = _bm.write_report(suite, ds)
+            self.signals.finished.emit(suite, ds, str(run_dir))
+        except Exception as exc:        # pragma: no cover - 방어
+            self.signals.failed.emit(str(exc))
+
+
+# ---------------------------------------------------------------------------
+# 다이얼로그
+# ---------------------------------------------------------------------------
+class DevBenchmarkDialog(QDialog):
+    def __init__(self, parent=None, *, default_ref: str = "",
+                 default_val: str = "") -> None:
+        super().__init__(parent)
+        self.setWindowTitle(i18n.KO.DEV_BENCH_TITLE)
+        self._worker: Optional[_BenchWorker] = None
+        self._recipe_checks: dict = {}
+        self._build(default_ref, default_val)
+
+    # ------------------------------------------------------------------
+    def _build(self, default_ref: str, default_val: str) -> None:
+        root = QVBoxLayout(self)
+
+        hint = QLabel(i18n.KO.DEV_BENCH_HINT, self)
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #7FB3D5;")
+        root.addWidget(hint)
+
+        form = QFormLayout()
+        self.ref_edit = QLineEdit(default_ref, self)
+        form.addRow(i18n.KO.DEV_BENCH_REF_LABEL, self._with_browse(self.ref_edit))
+        self.val_edit = QLineEdit(default_val, self)
+        form.addRow(i18n.KO.DEV_BENCH_VAL_LABEL, self._with_browse(self.val_edit))
+
+        self.self_test = QCheckBox(i18n.KO.DEV_BENCH_SELFTEST, self)
+        self.self_test.setChecked(not default_val)
+        self.self_test.toggled.connect(self._on_selftest_toggled)
+        self.val_edit.setEnabled(not self.self_test.isChecked())
+        form.addRow("", self.self_test)
+
+        self.timeout_spin = QSpinBox(self)
+        self.timeout_spin.setRange(0, 3600)
+        self.timeout_spin.setValue(120)
+        form.addRow(i18n.KO.DEV_BENCH_TIMEOUT_LABEL, self.timeout_spin)
+
+        self.maxslots_spin = QSpinBox(self)
+        self.maxslots_spin.setRange(0, 100000)
+        form.addRow(i18n.KO.DEV_BENCH_MAXSLOTS_LABEL, self.maxslots_spin)
+
+        self.maximg_spin = QSpinBox(self)
+        self.maximg_spin.setRange(0, 100000)
+        form.addRow(i18n.KO.DEV_BENCH_MAXIMG_LABEL, self.maximg_spin)
+        root.addLayout(form)
+
+        root.addWidget(QLabel(i18n.KO.DEV_BENCH_RECIPES, self))
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setMaximumHeight(200)
+        host = QWidget()
+        hl = QVBoxLayout(host)
+        for r in _rx.REGISTRY:
+            cb = QCheckBox(f"{r.name}  [{r.key}]", host)
+            cb.setChecked(True)
+            cb.setToolTip(r.desc)
+            self._recipe_checks[r.key] = cb
+            hl.addWidget(cb)
+        scroll.setWidget(host)
+        root.addWidget(scroll)
+
+        bar = QHBoxLayout()
+        self.run_btn = QPushButton(i18n.KO.DEV_BENCH_RUN, self)
+        self.run_btn.clicked.connect(self._on_run)
+        self.stop_btn = QPushButton(i18n.KO.DEV_BENCH_STOP, self)
+        self.stop_btn.setEnabled(False)
+        self.stop_btn.clicked.connect(self._on_stop)
+        bar.addWidget(self.run_btn)
+        bar.addWidget(self.stop_btn)
+        bar.addStretch(1)
+        root.addLayout(bar)
+
+        self.status = QLabel(i18n.KO.DEV_BENCH_CACHE_NOTE, self)
+        self.status.setStyleSheet("color: #00D4FF; font-weight: 600;")
+        root.addWidget(self.status)
+
+        cols = [i18n.KO.DEV_BENCH_COL_RECIPE, i18n.KO.DEV_BENCH_COL_TOTAL,
+                i18n.KO.DEV_BENCH_COL_EMBED, i18n.KO.DEV_BENCH_COL_SCORE,
+                i18n.KO.DEV_BENCH_COL_IPS, i18n.KO.DEV_BENCH_COL_PEAK,
+                i18n.KO.DEV_BENCH_COL_ACC, i18n.KO.DEV_BENCH_COL_NOTE]
+        self.table = QTableWidget(0, len(cols), self)
+        self.table.setHorizontalHeaderLabels(cols)
+        self.table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch)
+        root.addWidget(self.table, stretch=1)
+
+    def _with_browse(self, edit: QLineEdit) -> QWidget:
+        host = QWidget(self)
+        lay = QHBoxLayout(host)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(edit, stretch=1)
+        btn = QPushButton("…", host)
+        btn.setFixedWidth(36)
+        btn.clicked.connect(lambda: self._browse(edit))
+        lay.addWidget(btn)
+        return host
+
+    def _browse(self, edit: QLineEdit) -> None:
+        path = QFileDialog.getExistingDirectory(self, i18n.KO.DEV_BENCH_REF_LABEL)
+        if path:
+            edit.setText(path)
+
+    def _on_selftest_toggled(self, on: bool) -> None:
+        self.val_edit.setEnabled(not on)
+
+    # ------------------------------------------------------------------
+    def _selected_keys(self) -> List[str]:
+        return [k for k, cb in self._recipe_checks.items() if cb.isChecked()]
+
+    def _on_run(self) -> None:
+        ref = self.ref_edit.text().strip()
+        self_test = self.self_test.isChecked()
+        val = self.val_edit.text().strip()
+        if not ref or (not self_test and not val) or not Path(ref).is_dir():
+            QMessageBox.warning(self, i18n.KO.DEV_BENCH_TITLE,
+                                i18n.KO.DEV_BENCH_NEED_FOLDER)
+            return
+        self.table.setRowCount(0)
+        self.run_btn.setEnabled(False)
+        self.stop_btn.setEnabled(True)
+        self._worker = _BenchWorker(
+            ref_root=ref, val_root=val, self_test=self_test,
+            recipe_keys=self._selected_keys(),
+            timeout=float(self.timeout_spin.value()),
+            max_slots=int(self.maxslots_spin.value()),
+            max_images=int(self.maximg_spin.value()),
+            parent=self,
+        )
+        self._worker.signals.progress.connect(self._on_progress)
+        self._worker.signals.finished.connect(self._on_finished)
+        self._worker.signals.failed.connect(self._on_failed)
+        self._worker.start()
+
+    def _on_stop(self) -> None:
+        if self._worker is not None:
+            self._worker.stop()
+        self.stop_btn.setEnabled(False)
+
+    def _on_progress(self, name: str, done: int, total: int) -> None:
+        self.status.setText(i18n.KO.DEV_BENCH_RUNNING_FMT.format(
+            name=name, done=done, total=total))
+
+    def _on_failed(self, msg: str) -> None:
+        self.run_btn.setEnabled(True)
+        self.stop_btn.setEnabled(False)
+        QMessageBox.warning(self, i18n.KO.DEV_BENCH_TITLE, msg)
+
+    def _on_finished(self, suite, ds, run_dir: str) -> None:
+        self.run_btn.setEnabled(True)
+        self.stop_btn.setEnabled(False)
+        self._populate(suite)
+        rec = next((r for r in suite.runs if r.key == suite.recommended_key), None)
+        rec_name = rec.name if rec else "-"
+        txt = i18n.KO.DEV_BENCH_DONE_FMT.format(rec=rec_name, path=run_dir)
+        if suite.speedup_vs_production:
+            txt += "  ·  " + i18n.KO.DEV_BENCH_SPEEDUP_FMT.format(
+                x=suite.speedup_vs_production)
+        self.status.setText(txt)
+
+    def _populate(self, suite) -> None:
+        runs = sorted(suite.runs, key=lambda r: (not r.ok, r.total_sec or 1e9))
+        self.table.setRowCount(len(runs))
+        for i, r in enumerate(runs):
+            star = " ⭐" if r.key == suite.recommended_key else ""
+            if r.recall1 is not None:
+                acc = f"{r.recall1 * 100:.1f}%"
+            elif r.agree1 is not None:
+                acc = f"{r.agree1 * 100:.1f}%"
+            else:
+                acc = "-"
+            peak = f"{r.peak_mb:.0f}" if r.peak_mb else "-"
+            vals = [f"{r.name}{star}", f"{r.total_sec:.2f}", f"{r.embed_sec:.2f}",
+                    f"{r.score_sec:.2f}", f"{r.img_per_sec:.1f}", peak, acc,
+                    r.note or ("폴백" if r.fell_back_classical else "")]
+            for c, v in enumerate(vals):
+                item = QTableWidgetItem(str(v))
+                if r.key == suite.recommended_key:
+                    item.setForeground(Qt.GlobalColor.green)
+                self.table.setItem(i, c, item)

@@ -133,6 +133,10 @@ class SimilarityConfig:
     use_npu: bool = True
     # 정적 배치 B 재컴파일(테스트용).  1=끔(현행), >1=요청당 B장 추론.
     embed_batch: int = 1
+    # 개발자 벤치마크 전용 — 모든 유사도 디스크 캐시(특징 .npz / 임베딩 .npy /
+    # 점수 .json.gz)를 우회해 '처음 매칭하는 것처럼' 측정한다.  결과(점수/정확도)
+    # 에는 영향이 없고 속도만 달라진다(공정한 벤치마크용).  기본 OFF.
+    bench_no_cache: bool = False
 
     def _center_crop_for(self, side) -> bool:
         """이 side(ref/val)에 중앙 영역 crop(30%)을 적용할지."""
