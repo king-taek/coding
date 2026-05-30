@@ -23,7 +23,7 @@ def _code(p) -> float:
     return float(int(Path(p).stem[1:]))      # x0->0, x1->1, ...
 
 
-def _fake_make_input(p, cfg, side=None):
+def _fake_make_input(p, cfg, side=None, px=None):
     return np.full((3, 2, 2), _code(p), dtype=np.float32)
 
 
@@ -52,7 +52,7 @@ def test_progress_cb_counts_all_images(_mock_ov):
 @pytest.fixture
 def _mock_ov(monkeypatch):
     monkeypatch.setattr(ov, "compile_model_on",
-                        lambda mk, dev, batch=1: (object(), "dev"))
+                        lambda mk, dev, batch=1, **kw: (object(), "dev"))
     monkeypatch.setattr(ov, "_make_input_array", _fake_make_input)
     monkeypatch.setattr(ov, "_infer_raw", _fake_infer)
     monkeypatch.setattr(ov, "mark_unit_active", lambda dev: None)
@@ -109,7 +109,7 @@ def test_build_units_cpu_gpu(monkeypatch):
     # build_units(보존용): CPU 항상 + GPU(use_gpu 기본 True). NPU 는 use_npu=True 일 때만.
     monkeypatch.setattr(eff._ov, "available_units", lambda: ["GPU", "NPU"])
     monkeypatch.setattr(eff._ov, "compile_model_on",
-                        lambda mk, dev, batch=1: (object(), "dev"))
+                        lambda mk, dev, batch=1, **kw: (object(), "dev"))
     units = eff.build_units(_Cfg(use_npu=False), 0.5)
     assert _tags(units) == ["cpu", "gpu"]               # 기본 = CPU+GPU
     units = eff.build_units(_Cfg(use_npu=True), 0.5)
