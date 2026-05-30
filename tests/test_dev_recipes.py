@@ -28,6 +28,26 @@ def test_baseline_and_production_keys_present():
     assert rx.PRODUCTION_SPEED_KEY in keys
 
 
+def test_quick_preset_is_small_and_valid():
+    # '빠른' 프리셋 — 항목이 적고(<=6), 모든 키가 실존하며, 기준선/현행을 포함한다.
+    assert 0 < len(rx.QUICK_KEYS) <= 6
+    for k in rx.QUICK_KEYS:
+        rx.by_key(k)                              # KeyError 면 실패
+    assert rx.BASELINE_ACCURACY_KEY in rx.QUICK_KEYS
+    assert rx.PRODUCTION_SPEED_KEY in rx.QUICK_KEYS
+    # 3배의 레버인 재채점 축소 후보(fast-rerank)가 들어 있어야 한다.
+    assert any(k.startswith("rr_") for k in rx.QUICK_KEYS)
+
+
+def test_select_quick_returns_quick_keys_in_order():
+    assert [r.key for r in rx.select("quick")] == list(rx.QUICK_KEYS)
+
+
+def test_explicit_keys_expands_quick_for_skip_exemption():
+    # 'quick' 으로 펼쳐도 개별 명시로 취급돼 스킵이 면제된다(대상 장비에서 측정 보장).
+    assert rx.explicit_keys("quick") == set(rx.QUICK_KEYS)
+
+
 def test_user_npu_extract_cpu_compute_recipe_exists():
     """'NPU 로 데이터 뽑고 CPU 로 계산' 사용자 아이디어가 레시피에 있어야 한다."""
     r = rx.by_key("npu_extract_cpu_fuse")

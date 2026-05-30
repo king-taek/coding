@@ -190,3 +190,34 @@ def test_is_git_checkout(tmp_path, monkeypatch):
     assert updater.is_git_checkout() is False
     (tmp_path / ".git").mkdir()
     assert updater.is_git_checkout() is True
+
+
+# ── 의존성 변경 감지(requirements.txt) — 자동 재설치는 안 하고 알림만 ─────────
+def _dirs(tmp_path, old_req, new_req):
+    src = tmp_path / "src"
+    app = tmp_path / "app"
+    src.mkdir(parents=True); app.mkdir(parents=True)
+    if new_req is not None:
+        (src / "requirements.txt").write_text(new_req, encoding="utf-8")
+    if old_req is not None:
+        (app / "requirements.txt").write_text(old_req, encoding="utf-8")
+    return src, app
+
+
+def test_apply_requirements_detects_change(tmp_path):
+    src, app = _dirs(tmp_path, old_req="numpy==1\n", new_req="numpy==1\ntimm\n")
+    assert updater._apply_requirements(src, app) is True
+
+
+def test_apply_requirements_no_change_when_same(tmp_path):
+    src, app = _dirs(tmp_path, old_req="numpy==1\n", new_req="numpy==1\n")
+    assert updater._apply_requirements(src, app) is False
+    # 공백/개행만 다른 경우도 변경으로 보지 않는다.
+    src2, app2 = _dirs(tmp_path / "b", old_req="numpy==1", new_req="numpy==1\n\n")
+    assert updater._apply_requirements(src2, app2) is False
+
+
+def test_apply_requirements_first_time_does_not_falsely_flag(tmp_path):
+    # 기존 requirements.txt 가 아직 없으면(이 기능 도입 후 첫 업데이트) 오인 안 함.
+    src, app = _dirs(tmp_path, old_req=None, new_req="numpy==1\n")
+    assert updater._apply_requirements(src, app) is False

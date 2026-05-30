@@ -41,6 +41,8 @@ _OPENER = None
 _OPENER_INSECURE = None
 # 인증서 검증 실패로 '검증 없이' 폴백했는지(회사 SSL 검사 환경) — UI 안내용.
 _insecure_used: bool = False
+# 직전 업데이트로 필요한 패키지 목록(requirements.txt)이 바뀌었는지 — 의존성 재설치 안내용.
+_deps_changed: bool = False
 
 
 def last_error() -> str:
@@ -49,6 +51,14 @@ def last_error() -> str:
 
 def insecure_fallback_used() -> bool:
     return _insecure_used
+
+
+def deps_changed() -> bool:
+    """직전 ``download_and_apply`` 가 requirements.txt 변경을 감지했는지.
+
+    자동 업데이트는 앱 소스만 바꾸고 **의존성 패키지는 다시 설치하지 않는다**(번들 런타임
+    보존).  목록이 바뀌었으면 UI 가 사용자에게 '의존성을 갱신하라'고 안내하는 데 쓴다."""
+    return _deps_changed
 
 
 def _ssl_context(insecure: bool = False):
@@ -320,7 +330,8 @@ def download_and_apply(repo: str, branch: str, target_sha: str,
     import tempfile
     import zipfile
 
-    global _last_error
+    global _last_error, _deps_changed
+    _deps_changed = False
     url = _ZIP.format(repo=repo, branch=branch)
     tmpd = Path(tempfile.mkdtemp(prefix="aoi_update_"))
     try:
@@ -339,10 +350,15 @@ def download_and_apply(repo: str, branch: str, target_sha: str,
             return False
         # 실행 중 .py 를 덮어써도 메모리의 모듈엔 영향 없음 → 재시작 시 적용.
         shutil.copytree(pkg, app_root / "aoi_verification", dirs_exist_ok=True)
-        for fn in ("main.py", "양식.xlsx"):
+        # requirements.txt 도 함께 받아 두되, 변경 여부를 먼저 비교한다(자동 재설치는
+        # 하지 않고, 바뀌었으면 UI 가 '의존성을 갱신하라'고 안내).  최신 준비 스크립트도
+        # best-effort 로 동봉한다.
+        _deps_changed = _apply_requirements(src_root, app_root)
+        for fn in ("main.py", "양식.xlsx", "requirements.txt"):
             srcf = src_root / fn
             if srcf.exists():
                 shutil.copy2(srcf, app_root / fn)
+        _copy_run_this_before(src_root, app_root)
         _write_version(target_sha, branch, repo)
         return True
     except Exception as exc:
@@ -350,3 +366,38 @@ def download_and_apply(repo: str, branch: str, target_sha: str,
         return False
     finally:
         shutil.rmtree(tmpd, ignore_errors=True)
+
+
+def _file_text(path: Path) -> Optional[str]:
+    try:
+        return path.read_text(encoding="utf-8")
+    except Exception:
+        return None
+
+
+def _apply_requirements(src_root: Path, app_root: Path) -> bool:
+    """새 requirements.txt 가 **기존과 다른지** 판단(복사는 호출부에서 수행).
+
+    기존 파일이 없으면(이 기능 도입 후 첫 업데이트) '바뀜'으로 오인해 불필요하게
+    안내하지 않도록 False 를 돌려준다(둘 다 있고 내용이 다를 때만 True)."""
+    new = _file_text(src_root / "requirements.txt")
+    if new is None:
+        return False
+    old = _file_text(app_root / "requirements.txt")
+    if old is None:
+        return False
+    return old.strip() != new.strip()
+
+
+def _copy_run_this_before(src_root: Path, app_root: Path) -> None:
+    """최신 준비 스크립트를 앱 루트의 scripts/ 에 동봉(best-effort)."""
+    import shutil
+    srcf = src_root / "scripts" / "run_this_before.py"
+    if not srcf.exists():
+        return
+    try:
+        dst = app_root / "scripts"
+        dst.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(srcf, dst / "run_this_before.py")
+    except Exception:
+        pass

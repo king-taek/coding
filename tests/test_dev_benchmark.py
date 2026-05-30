@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -131,6 +133,28 @@ def test_selftest_synthesis_and_suite_end_to_end(tmp_path):
     assert (run_dir / "report.md").exists()
     md = bm.render_markdown(suite, ds)
     assert "벤치마크" in md and "추천" in md
+
+
+def test_cli_emit_progress_and_checkpoint(tmp_path, capsys):
+    """--emit-progress 가 기계가 읽는 진행/런디렉토리 줄을 내보내고, 부분 저장(result.json)
+    이 생긴다(부모 프로세스가 크래시 시에도 여기서 결과를 읽는다)."""
+    ref_root = _make_ref_root(tmp_path)
+    out = tmp_path / "runs"
+    rc = bm.main(["--ref", str(ref_root), "--self-test",
+                  "--recipes", "cpu_classical_full", "--emit-progress",
+                  "--out", str(out)])
+    assert rc == 0
+    text = capsys.readouterr().out
+    # 런디렉토리와 진행 줄(시작/완료)이 기계가 읽는 형식으로 나온다.
+    assert "@@AOI_RUNDIR\t" in text
+    prog = [ln for ln in text.splitlines() if ln.startswith("@@AOI_PROG\t")]
+    assert prog, "@@AOI_PROG 줄이 없음"
+    parts = prog[0].split("\t")
+    assert len(parts) >= 6 and parts[1] in ("start", "done")
+    # 런디렉토리에 result.json 이 남는다(부분 저장 + 최종).
+    run_dir = Path([ln.split("\t", 1)[1] for ln in text.splitlines()
+                    if ln.startswith("@@AOI_RUNDIR\t")][0])
+    assert (run_dir / "result.json").exists()
 
 
 def test_build_dataset_subsample_limits(tmp_path):

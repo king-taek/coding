@@ -221,6 +221,18 @@ REGISTRY: List[Recipe] = [
 BASELINE_ACCURACY_KEY = "cpu_classical_full"   # 정확도의 정답 기준선
 PRODUCTION_SPEED_KEY = "gpu_fusion_b16"        # 현행(속도 3배 목표의 분모)
 
+# '빠른' 프리셋(기본 선택) — 항목을 적게 두되 **속도 3배 판단에 바로 필요한** 비교군.
+# 실측(bench결과)에서 임베딩은 ~3.7s·CPU 재채점이 ~57s 로, 임베딩 장치를 바꿔도 총시간은
+# 거의 그대로(현행 대비 ×1.02)였다.  그래서 3배의 레버는 'CPU 재채점 축소'이고, 그 후보인
+# fast-rerank 2종을 기본에 포함한다(함정/대조용·대규모 스윕은 제외).
+QUICK_KEYS: List[str] = [
+    BASELINE_ACCURACY_KEY,      # 정확도 gold(100%) — 일치율 기준선
+    PRODUCTION_SPEED_KEY,       # 현행 anchor(62s·97.6%) = '3배'의 분모
+    "npu_mbnet_cpu_fuse",       # 사용자 아이디어 anchor(정확도 동률·속도 ×1.02 재확인)
+    "rr_parallel",              # 재채점 항목 동일·16스레드 병렬 → 정확도 보존하며 시간↓
+    "rr_npu_phash_parallel",    # NPU추출+ORB제거+병렬 = 3배 핵심 후보
+]
+
 
 # ===========================================================================
 # (A) NPU 사용 방식 스윕 — 모델/배치/병렬수준/스트림/멀티스레드/해상도 ≥20가지.
@@ -426,23 +438,35 @@ def group(name: str) -> List[Recipe]:
     return list(GROUPS.get(name, []))
 
 
+def quick_recipes() -> List[Recipe]:
+    """'빠른' 프리셋 레시피(``QUICK_KEYS`` 순서)."""
+    return [by_key(k) for k in QUICK_KEYS if k in _BY_KEY]
+
+
 def explicit_keys(keys=None) -> Set[str]:
     """사용자가 **개별 레시피 키로 직접 고른** 것만 추출(그룹명/전체 토큰 제외).
 
     ``select`` 와 같은 입력을 받되, ``all``/``all+``/그룹명은 '개별 명시'가 아니므로
-    뺀다.  벤치마크가 '이 키는 스킵하지 말고 그대로 측정' 판단에 쓴다."""
+    뺀다.  벤치마크가 '이 키는 스킵하지 말고 그대로 측정' 판단에 쓴다.
+
+    ``"quick"`` 은 핵심 소수를 **개별 명시**한 것으로 보고 QUICK_KEYS 로 펼친다(그래야
+    fast-rerank 후보가 대상 장비에서 스킵되지 않고 그대로 측정된다)."""
     if keys is None:
         return set()
     if isinstance(keys, str):
         keys = [k.strip() for k in keys.split(",") if k.strip()]
-    special = set(GROUPS) | {"all", "all+", "everything"}
-    return {k for k in keys if k not in special and k in _BY_KEY}
+    special = set(GROUPS) | {"all", "all+", "everything", "quick"}
+    out = {k for k in keys if k not in special and k in _BY_KEY}
+    if "quick" in keys:
+        out |= {k for k in QUICK_KEYS if k in _BY_KEY}
+    return out
 
 
 def select(keys=None) -> List[Recipe]:
     """레시피 부분집합 선택.
 
     - ``None`` / ``"all"`` → 핵심 13가지(``REGISTRY``).
+    - ``"quick"`` → '빠른' 프리셋(``QUICK_KEYS``) — 3배 판단에 필요한 핵심 소수.
     - ``"all+"`` / ``"everything"`` → 확장 포함 전부(``ALL_EXTENDED``).
     - 그룹명(``"npu-sweep"`` / ``"npu-only"`` / ``"fast-rerank"`` / ``"model-zoo"``
       / ``"core"``) → 그 그룹.  여러 그룹/키를 콤마로 섞을 수 있다.
@@ -459,6 +483,8 @@ def select(keys=None) -> List[Recipe]:
     for k in keys:
         if k in ("all+", "everything"):
             picked = ALL_EXTENDED
+        elif k == "quick":
+            picked = quick_recipes()
         elif k in GROUPS:
             picked = GROUPS[k]
         else:

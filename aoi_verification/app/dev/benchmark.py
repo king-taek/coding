@@ -569,6 +569,17 @@ def accuracy_metric(run: RecipeRun) -> Optional[float]:
     return run.agree1
 
 
+def _evaluate_run(run: RecipeRun, res: Results, baseline_results: Results,
+                  gt) -> None:
+    """한 레시피 결과의 정확도(recall@K + 기준선 일치율)를 ``run`` 에 채운다."""
+    if not res:
+        return
+    r1, r5, _n = evaluate(res, gt)
+    run.recall1, run.recall5 = r1, r5
+    run.agree1 = (1.0 if run.key == _rx.BASELINE_ACCURACY_KEY
+                  else agreement(res, baseline_results))
+
+
 # ---------------------------------------------------------------------------
 # 스위트 실행 — 순차 + 타임아웃 + 메모리 안전, 그리고 추천
 # ---------------------------------------------------------------------------
@@ -614,7 +625,8 @@ def run_suite(ds: Dataset, recipes: Optional[List[Recipe]] = None, *,
               skip_redundant: bool = True,
               skip_low_history: bool = True,
               explicit_keys: Optional[set] = None,
-              progress: Optional[Callable[[str, int, int], None]] = None,
+              progress: Optional[Callable[..., None]] = None,
+              checkpoint: Optional[Callable[["SuiteResult"], None]] = None,
               stop: Optional[Callable[[], bool]] = None) -> SuiteResult:
     """레시피들을 **순차** 실행(로딩 안전)하고 정확도/속도/추천을 산출한다.
 
@@ -650,13 +662,34 @@ def run_suite(ds: Dataset, recipes: Optional[List[Recipe]] = None, *,
     if baseline_recipe not in recipes:
         recipes = [baseline_recipe] + list(recipes)
 
+    def _emit(name, done, total, key=""):
+        """progress 콜백 호출 — 키(4번째 인자)를 받는 콜백/안 받는 콜백 모두 지원."""
+        if not progress:
+            return
+        try:
+            progress(name, done, total, key)
+        except TypeError:                 # 구형 3-인자 콜백 호환
+            progress(name, done, total)
+
+    def _checkpoint():
+        """레시피 하나가 끝날 때마다 부분 결과를 저장(자식 크래시 대비 복구점)."""
+        if not checkpoint:
+            return
+        try:
+            checkpoint(suite)
+        except Exception:                 # 저장 실패가 측정을 막지 않게
+            pass
+
+    def _append(run):
+        suite.runs.append(run)
+        _checkpoint()
+
     all_results: Dict[str, Results] = {}
     total = len(recipes)
     for i, recipe in enumerate(recipes, start=1):
         if stop and stop():
             break
-        if progress:
-            progress(recipe.name, i - 1, total)
+        _emit(recipe.name, i - 1, total, recipe.key)
 
         # 불필요한 레시피는 측정하지 않고 건너뛴다 — 단, 정확도 기준선은 항상
         # 실행(다른 레시피의 일치율 평가에 필요)하고, 사용자가 정확히 그 키를
@@ -668,7 +701,7 @@ def run_suite(ds: Dataset, recipes: Optional[List[Recipe]] = None, *,
             if not why and skip_low_history and recipe.key in low_hist:
                 why = low_hist[recipe.key]
             if why:
-                suite.runs.append(RecipeRun(
+                _append(RecipeRun(
                     key=recipe.key, name=recipe.name, ok=False, skipped=True,
                     note=why, desc=recipe.desc))
                 continue
@@ -684,16 +717,14 @@ def run_suite(ds: Dataset, recipes: Optional[List[Recipe]] = None, *,
         try:
             out, timed_out = _run_with_timeout(_do, per_recipe_timeout)
         except Exception as e:
-            run = RecipeRun(key=recipe.key, name=recipe.name, ok=False,
-                            note=f"실패: {e}", desc=recipe.desc)
-            suite.runs.append(run)
+            _append(RecipeRun(key=recipe.key, name=recipe.name, ok=False,
+                              note=f"실패: {e}", desc=recipe.desc))
             continue
         if out is None:
-            run = RecipeRun(key=recipe.key, name=recipe.name, ok=False,
-                            timed_out=timed_out,
-                            note="타임아웃" if timed_out else "결과 없음",
-                            desc=recipe.desc)
-            suite.runs.append(run)
+            _append(RecipeRun(key=recipe.key, name=recipe.name, ok=False,
+                              timed_out=timed_out,
+                              note="타임아웃" if timed_out else "결과 없음",
+                              desc=recipe.desc))
             continue
         res, run = out
         run.timed_out = run.timed_out or timed_out
@@ -701,25 +732,15 @@ def run_suite(ds: Dataset, recipes: Optional[List[Recipe]] = None, *,
             run.note = (run.note + " · 타임아웃 중단").strip(" ·")
             run.ok = False
         all_results[recipe.key] = res
-        suite.runs.append(run)
-
-    # 정확도 평가 — GT recall@K + 기준선(고전 전수) 대비 일치율.
-    baseline_results = all_results.get(_rx.BASELINE_ACCURACY_KEY, {})
-    for run in suite.runs:
-        res = all_results.get(run.key, {})
-        if not res:
-            continue
-        r1, r5, _n = evaluate(res, ds.gt)
-        run.recall1, run.recall5 = r1, r5
-        if run.key != _rx.BASELINE_ACCURACY_KEY:
-            run.agree1 = agreement(res, baseline_results)
-        else:
-            run.agree1 = 1.0
+        # 정확도를 **즉시** 평가한다(기준선은 항상 먼저 실행되므로 사용 가능).
+        # 이렇게 해야 부분 저장(체크포인트)에도 정확도가 포함돼 크래시 복구가 온전하다.
+        _evaluate_run(run, res, all_results.get(_rx.BASELINE_ACCURACY_KEY, {}), ds.gt)
+        _append(run)
 
     suite.recommended_key = recommend(suite.runs)
     _fill_speedup(suite)
-    if progress:
-        progress("완료", total, total)
+    _checkpoint()
+    _emit("완료", total, total, "")
     return suite
 
 
@@ -860,13 +881,9 @@ def low_performers(history: Optional[List[dict]] = None, *,
     return out
 
 
-def write_report(suite: SuiteResult, ds: Dataset, out_dir: Optional[Path] = None) -> Path:
-    """스위트 결과를 ``out_dir/<timestamp>/`` 에 JSON+MD 로 저장하고 폴더를 반환."""
-    out_dir = Path(out_dir) if out_dir else default_out_dir()
-    ts = time.strftime("%Y%m%d-%H%M%S")
-    run_dir = out_dir / ts
-    run_dir.mkdir(parents=True, exist_ok=True)
-    payload = {
+def result_payload(suite: SuiteResult, ds: Dataset) -> dict:
+    """``result.json`` 으로 직렬화할 dict — 부분 저장(체크포인트)과 최종 보고서가 공유."""
+    return {
         "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "ref_root": ds.ref_root,
         "val_root": ds.val_root,
@@ -881,8 +898,28 @@ def write_report(suite: SuiteResult, ds: Dataset, out_dir: Optional[Path] = None
         "speedup_vs_production": suite.speedup_vs_production,
         "runs": [asdict(r) for r in suite.runs],
     }
-    (run_dir / "result.json").write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def write_result_json(run_dir: Path, suite: SuiteResult, ds: Dataset) -> Path:
+    """``run_dir/result.json`` 만 쓴다(레시피마다 갱신되는 부분 저장에 사용)."""
+    run_dir.mkdir(parents=True, exist_ok=True)
+    p = run_dir / "result.json"
+    p.write_text(json.dumps(result_payload(suite, ds), ensure_ascii=False,
+                            indent=2), encoding="utf-8")
+    return p
+
+
+def write_report(suite: SuiteResult, ds: Dataset, out_dir: Optional[Path] = None,
+                 *, run_dir: Optional[Path] = None) -> Path:
+    """스위트 결과를 JSON+MD 로 저장하고 폴더를 반환.
+
+    ``run_dir`` 가 주어지면 그 폴더에 그대로 쓰고(부분 저장과 같은 폴더에 최종 확정),
+    없으면 ``out_dir/<timestamp>/`` 를 새로 만든다."""
+    if run_dir is None:
+        out_dir = Path(out_dir) if out_dir else default_out_dir()
+        run_dir = out_dir / time.strftime("%Y%m%d-%H%M%S")
+    run_dir = Path(run_dir)
+    write_result_json(run_dir, suite, ds)
     (run_dir / "report.md").write_text(render_markdown(suite, ds), encoding="utf-8")
     return run_dir
 
@@ -1000,6 +1037,126 @@ def _augment(arr, rng):
 
 
 # ---------------------------------------------------------------------------
+# 프로세스 격리 실행 — 레시피 실행(네이티브 크래시 위험)을 자식 프로세스로 돌리고,
+# 자식이 죽으면 범인 레시피를 빼고 이어서 다시 띄운다.  부모(GUI)는 안 죽는다.
+# 아래는 spawn 주입이 가능한 '순수 오케스트레이션'이라 헤드리스로 단위 테스트된다.
+# ---------------------------------------------------------------------------
+@dataclass
+class ChildOutcome:
+    """자식 한 번 실행의 결과."""
+    returncode: int                       # 0=정상 완료, 그 외=크래시/중단
+    last_started_key: str = ""            # 마지막으로 '시작'된 레시피 키(크래시 범인 추정)
+    payload: Optional[dict] = None        # 자식이 남긴 result.json 내용(부분 저장 포함)
+
+
+def reconstruct_run(d: dict) -> RecipeRun:
+    """result.json 의 run dict 를 RecipeRun 으로 복원(여분 키는 무시)."""
+    from dataclasses import fields
+    allowed = {f.name for f in fields(RecipeRun)}
+    return RecipeRun(**{k: v for k, v in d.items() if k in allowed})
+
+
+def _run_rank(r: RecipeRun) -> int:
+    """merge 시 같은 키 중 무엇을 남길지 — 실제 측정된 것을 실패/스킵보다 우선."""
+    if r.ok and not r.skipped and (r.total_sec or 0) > 0:
+        return 2
+    if not r.skipped:
+        return 1
+    return 0
+
+
+def merge_suite(payloads: List[dict],
+                extra_runs: Optional[List[RecipeRun]] = None) -> SuiteResult:
+    """여러 자식의 result.json(payloads) + 부모가 만든 크래시 run 을 합쳐 한 스위트로.
+
+    같은 키가 여러 번 나오면(재실행으로 기준선 중복 등) '실제 측정' 쪽을 남기고,
+    추천/배속은 합본 기준으로 다시 계산한다."""
+    best: Dict[str, RecipeRun] = {}
+    order: List[str] = []
+    meta: Dict[str, object] = {}
+
+    def _consider(run: RecipeRun) -> None:
+        if run.key not in best:
+            best[run.key] = run
+            order.append(run.key)
+        elif _run_rank(run) > _run_rank(best[run.key]):
+            best[run.key] = run
+
+    for p in payloads or []:
+        for mk in ("baseline_key", "production_key", "has_ground_truth", "devices"):
+            if mk not in meta and p.get(mk) is not None:
+                meta[mk] = p[mk]
+        for d in p.get("runs", []):
+            _consider(reconstruct_run(d))
+    for run in extra_runs or []:
+        _consider(run)
+
+    suite = SuiteResult(
+        baseline_key=str(meta.get("baseline_key", _rx.BASELINE_ACCURACY_KEY)),
+        production_key=str(meta.get("production_key", _rx.PRODUCTION_SPEED_KEY)),
+        has_gt=bool(meta.get("has_ground_truth", False)),
+        devices=list(meta.get("devices", []) or []),
+        runs=[best[k] for k in order],
+    )
+    suite.recommended_key = recommend(suite.runs)
+    _fill_speedup(suite)
+    return suite
+
+
+def _crashed_run(key: str) -> RecipeRun:
+    """자식 프로세스를 죽인 것으로 추정되는 레시피의 실패 run(표/기록용)."""
+    try:
+        rc = _rx.by_key(key)
+        name, desc = rc.name, rc.desc
+    except Exception:
+        name, desc = key, ""
+    return RecipeRun(key=key, name=name, ok=False,
+                     note="워커 프로세스가 종료됨(네이티브 크래시 추정) — 제외하고 계속",
+                     desc=desc)
+
+
+def drive_isolated_suite(keys: List[str], *, spawn: Callable[[List[str]], ChildOutcome],
+                         stop: Optional[Callable[[], bool]] = None,
+                         max_respawns: int = 20) -> SuiteResult:
+    """``keys`` 를 자식으로 실행하되, 크래시면 범인을 빼고 살아남은 것만 이어서 측정.
+
+    ``spawn(keys_subset) -> ChildOutcome`` 가 실제 자식 실행(주입점, 테스트는 가짜로 대체).
+    반환은 모든 자식 결과 + 크래시 표시를 합본한 ``SuiteResult``."""
+    payloads: List[dict] = []
+    crashed: List[RecipeRun] = []
+    done: set = set()
+    remaining = list(dict.fromkeys(keys))     # 순서 보존 + 중복 제거
+    guard = 0
+    while remaining:
+        if stop and stop():
+            break
+        guard += 1
+        if guard > max_respawns:
+            break
+        outcome = spawn(remaining)
+        if outcome.payload:
+            payloads.append(outcome.payload)
+            for d in outcome.payload.get("runs", []):
+                if d.get("key"):
+                    done.add(d["key"])
+        if outcome.returncode == 0:
+            break                              # 정상 완료
+        # 비정상 종료(크래시/멈춤) — 범인을 빼고 살아남은 키로 재시도.
+        culprit = outcome.last_started_key
+        if culprit and culprit not in done:
+            crashed.append(_crashed_run(culprit))
+            done.add(culprit)
+        new_remaining = [k for k in remaining if k not in done]
+        if new_remaining == remaining:
+            # 아무 진행도 없었다(첫 키에서 즉사 등) → 무한루프 방지 위해 첫 키를 버린다.
+            if remaining:
+                crashed.append(_crashed_run(remaining[0]))
+                new_remaining = remaining[1:]
+        remaining = new_remaining
+    return merge_suite(payloads, crashed)
+
+
+# ---------------------------------------------------------------------------
 # CLI — 헤드리스 실험·기록
 # ---------------------------------------------------------------------------
 def _print_table(suite: SuiteResult, ds: Dataset) -> None:
@@ -1027,7 +1184,13 @@ def main(argv=None) -> int:
     ap.add_argument("--out", help="기록 폴더(기본: 캐시/dev_bench/<host>)")
     ap.add_argument("--all-recipes", action="store_true",
                     help="불필요 스킵 해제 — 함정/대조·폴백중복·과거저성능까지 전부 측정")
+    ap.add_argument("--explicit",
+                    help="스킵 면제(개별 명시) 키 콤마목록 — 미지정 시 --recipes 에서 추론"
+                         "(GUI 가 '개별 체크' 와 '그룹 펼침' 을 구분해 넘길 때 사용)")
     ap.add_argument("--list", action="store_true", help="레시피 목록만 출력")
+    ap.add_argument("--emit-progress", action="store_true",
+                    help="레시피 시작/완료를 기계가 읽는 '@@AOI_PROG' 줄로 출력"
+                         "(GUI 가 별도 프로세스로 실행하며 진행/크래시 추적에 사용)")
     ap.add_argument("--make-labels-template",
                     help="정답 라벨 빈 템플릿 JSON 을 생성할 경로(--ref/--val 필요)")
     ap.add_argument("--labels-stats",
@@ -1084,18 +1247,38 @@ def main(argv=None) -> int:
         return 2
     print(f"데이터: slot {len(ds.tasks)} · 이미지 {ds.n_images()} · 쌍 {ds.n_pairs()}")
 
-    def _prog(name, done, total):
-        print(f"  [{done}/{total}] {name}")
+    # 격리 실행이면 결과 폴더를 미리 만들고 부모에게 알린다(크래시해도 부분 결과를 그 폴더에서 읽음).
+    run_dir = None
+    if args.emit_progress:
+        out_dir = Path(args.out) if args.out else default_out_dir()
+        run_dir = out_dir / time.strftime("%Y%m%d-%H%M%S")
+        run_dir.mkdir(parents=True, exist_ok=True)
+        print(f"@@AOI_RUNDIR\t{run_dir}", flush=True)
 
+    def _prog(name, done, total, key=""):
+        print(f"  [{done}/{total}] {name}")
+        if args.emit_progress:
+            # 한 줄 = 한 레시피 '시작'.  부모(GUI)는 마지막 시작 키를 추적해, 자식이
+            # 네이티브 크래시로 죽으면 그 키를 범인으로 보고 나머지를 이어서 측정한다.
+            # flush 필수 — 파이프 버퍼링으로 진행이 지연되면 안 됨.
+            tag = "done" if name == "완료" else "start"
+            print(f"@@AOI_PROG\t{tag}\t{done}\t{total}\t{key}\t{name}", flush=True)
+
+    # 레시피마다 부분 result.json 저장 — 자식이 도중에 죽어도 거기까지는 복구된다.
+    _ckpt = (lambda s: write_result_json(run_dir, s, ds)) if run_dir else None
+
+    explicit = (_rx.explicit_keys(args.explicit) if args.explicit
+                else _rx.explicit_keys(args.recipes))
     suite = run_suite(ds, _rx.select(args.recipes), threshold=args.threshold,
                       per_recipe_timeout=args.timeout,
                       include_diagnostic=args.all_recipes,
                       skip_redundant=not args.all_recipes,
                       skip_low_history=not args.all_recipes,
-                      explicit_keys=_rx.explicit_keys(args.recipes),
-                      progress=_prog)
+                      explicit_keys=explicit,
+                      progress=_prog, checkpoint=_ckpt)
     _print_table(suite, ds)
-    run_dir = write_report(suite, ds, Path(args.out) if args.out else None)
+    run_dir = write_report(suite, ds, Path(args.out) if args.out else None,
+                           run_dir=run_dir)
     print(f"기록 저장: {run_dir}")
     return 0
 

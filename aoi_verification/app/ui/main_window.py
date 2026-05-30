@@ -357,8 +357,15 @@ class MainWindow(QMainWindow):
             self._run_startup_popups()       # 실패 → 나머지 시작 팝업 진행
             return
         # 안내 후 프로그램을 자동 종료한다(자동 재실행은 하지 않음 — 사용자가 다시 실행).
+        msg = i18n.KO.UPDATE_DONE_RESTART
+        try:
+            from ..utils import updater
+            if updater.deps_changed():       # 필요한 패키지 목록이 바뀐 경우 갱신 안내 추가
+                msg = msg + i18n.KO.UPDATE_DEPS_CHANGED
+        except Exception:
+            pass
         QMessageBox.information(
-            self, i18n.KO.UPDATE_AVAILABLE_TITLE, i18n.KO.UPDATE_DONE_RESTART)
+            self, i18n.KO.UPDATE_AVAILABLE_TITLE, msg)
         QApplication.quit()
 
     # ==================================================================
