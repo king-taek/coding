@@ -477,6 +477,13 @@ DEV_BENCH_GROUP_NPU_ONLY = "NPU 단독 채점"
 DEV_BENCH_GROUP_FAST_RERANK = "CPU 고속 재채점"
 DEV_BENCH_GROUP_MODEL_ZOO = "모델 주머니"
 
+# 불필요 스킵 해제 토글.
+DEV_BENCH_ALL_RECIPES = "모든 레시피 측정(불필요 스킵 해제)"
+DEV_BENCH_ALL_RECIPES_TIP = (
+    "평소엔 함정/대조용·장치 없어 폴백 중복·과거에 정확도가 낮았던 레시피를 "
+    "자동으로 건너뜁니다. 체크하면 그것까지 전부 측정합니다(느려질 수 있음)."
+)
+
 # ── 개발자 모드 토글 (Ctrl+Shift+D) ────────────────────────────────────────
 DEV_MODE_TOGGLE_TITLE = "개발자 모드"
 DEV_MODE_ON_FMT = (

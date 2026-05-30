@@ -50,7 +50,9 @@ class _BenchSignals(QObject):
 class _BenchWorker(QThread):
     def __init__(self, *, ref_root: str, val_root: str, self_test: bool,
                  recipe_keys: List[str], timeout: float, max_slots: int,
-                 max_images: int, labels_path: str = "", parent=None) -> None:
+                 max_images: int, labels_path: str = "",
+                 all_recipes: bool = False, explicit_keys=None,
+                 parent=None) -> None:
         super().__init__(parent)
         self._ref = ref_root
         self._val = val_root
@@ -60,6 +62,8 @@ class _BenchWorker(QThread):
         self._max_slots = max_slots
         self._max_images = max_images
         self._labels_path = labels_path
+        self._all_recipes = all_recipes
+        self._explicit_keys = explicit_keys or []
         self._stop = threading.Event()
         self.signals = _BenchSignals()
         self._tmp: Optional[str] = None
@@ -87,11 +91,17 @@ class _BenchWorker(QThread):
                 self.signals.failed.emit(i18n.KO.DEV_BENCH_NO_COMMON)
                 return
             recipes = _rx.select(self._keys) if self._keys else list(_rx.REGISTRY)
+            # 개별 체크된 레시피 키(그룹 제외)만 '명시 선택'으로 — 스킵 면제.
+            explicit = set(self._explicit_keys or [])
 
             def _prog(name, done, total):
                 self.signals.progress.emit(str(name), int(done), int(total))
 
             suite = _bm.run_suite(ds, recipes, per_recipe_timeout=self._timeout,
+                                  include_diagnostic=self._all_recipes,
+                                  skip_redundant=not self._all_recipes,
+                                  skip_low_history=not self._all_recipes,
+                                  explicit_keys=explicit,
                                   progress=_prog, stop=self._stop.is_set)
             run_dir = _bm.write_report(suite, ds)
             self.signals.finished.emit(suite, ds, str(run_dir))
@@ -131,6 +141,12 @@ class DevBenchmarkDialog(QDialog):
         self.self_test.toggled.connect(self._on_selftest_toggled)
         self.val_edit.setEnabled(not self.self_test.isChecked())
         form.addRow("", self.self_test)
+
+        # 불필요 스킵 해제 — 기본은 함정/대조·폴백중복·과거저성능을 자동 제외한다.
+        self.all_recipes = QCheckBox(i18n.KO.DEV_BENCH_ALL_RECIPES, self)
+        self.all_recipes.setChecked(False)
+        self.all_recipes.setToolTip(i18n.KO.DEV_BENCH_ALL_RECIPES_TIP)
+        form.addRow("", self.all_recipes)
 
         # 정답 라벨 파일(선택) — 있으면 recall@K(실제 정확도)로 측정.  옆 버튼으로
         # 라벨 만들기 다이얼로그를 연다.  자기검증이 켜져 있으면 무시된다.
@@ -278,6 +294,9 @@ class DevBenchmarkDialog(QDialog):
             max_slots=int(self.maxslots_spin.value()),
             max_images=int(self.maximg_spin.value()),
             labels_path=self.labels_edit.text().strip(),
+            all_recipes=self.all_recipes.isChecked(),
+            explicit_keys=[k for k, cb in self._recipe_checks.items()
+                           if cb.isChecked()],
             parent=self,
         )
         self._worker.signals.progress.connect(self._on_progress)

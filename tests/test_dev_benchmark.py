@@ -112,8 +112,11 @@ def test_selftest_synthesis_and_suite_end_to_end(tmp_path):
     assert ds.gt, "GT 비어 있음"
     assert ds.n_images() > 0 and ds.n_pairs() > 0
 
-    chosen = rx.select("cpu_classical_full,gpu_fusion_b16")
-    suite = bm.run_suite(ds, chosen, per_recipe_timeout=120)
+    spec = "cpu_classical_full,gpu_fusion_b16"
+    chosen = rx.select(spec)
+    # 개별 키를 직접 골랐으므로 explicit — 스킵 없이 그대로 측정(가속기 없으면 폴백).
+    suite = bm.run_suite(ds, chosen, per_recipe_timeout=120,
+                         explicit_keys=rx.explicit_keys(spec))
 
     keys = {r.key for r in suite.runs}
     assert "cpu_classical_full" in keys and "gpu_fusion_b16" in keys

@@ -253,6 +253,7 @@ class RecipeRun:
     ok: bool = True
     used_embedding: bool = False
     fell_back_classical: bool = False
+    skipped: bool = False
     timed_out: bool = False
     total_sec: float = 0.0
     embed_sec: float = 0.0
@@ -267,6 +268,33 @@ class RecipeRun:
     recall5: Optional[float] = None
     agree1: Optional[float] = None
     desc: str = ""
+
+
+def skip_reason(recipe: Recipe, devices: set) -> str:
+    """이 레시피를 **실험할 필요가 없는** 이유(있으면 사유 문자열, 없으면 "").
+
+    '불필요한 테스트는 하지 않는다' — 다음은 실행해도 새 정보가 없거나 같은 CPU
+    고전 결과만 반복하므로 기본 스위트에서 건너뛴다(명시 선택하면 그래도 실행):
+      · 필요한 가속 장치(GPU/NPU)가 없어 어차피 CPU 고전으로 폴백 → 중복 결과.
+      · 모델 주머니 백본(MobileViT/키포인트/이상탐지 등)이 패키지 미설치로
+        빌드 불가 → 역시 CPU 폴백 중복.
+    함정/대조용(diagnostic)은 여기서 막지 않고 호출부에서 기본 제외한다."""
+    need = recipe.required_devices()
+    if need and not (need <= set(devices or set())):
+        miss = ", ".join(sorted(need - set(devices or set())))
+        return f"{miss} 미감지 → CPU 폴백 중복(건너뜀)"
+    # 임베딩 모델이 model_zoo 의 추가 백본인데 가용하지 않으면 폴백 중복.
+    model = recipe.embed_model or ""
+    if recipe.uses_embedding() and model not in (
+            "", _rx.MODEL_MOBILENET_V3, _rx.MODEL_RESNET18):
+        try:
+            from . import model_zoo as _mz
+            ok, why = _mz.availability(model)
+            if not ok:
+                return f"{model}: {why} → CPU 폴백 중복(건너뜀)"
+        except Exception:
+            pass
+    return ""
 
 
 def run_recipe(ds: Dataset, recipe: Recipe, *,
@@ -582,14 +610,40 @@ def _run_with_timeout(fn, timeout_sec: float):
 def run_suite(ds: Dataset, recipes: Optional[List[Recipe]] = None, *,
               threshold: float = 0.0,
               per_recipe_timeout: float = 0.0,
+              include_diagnostic: bool = False,
+              skip_redundant: bool = True,
+              skip_low_history: bool = True,
+              explicit_keys: Optional[set] = None,
               progress: Optional[Callable[[str, int, int], None]] = None,
               stop: Optional[Callable[[], bool]] = None) -> SuiteResult:
-    """레시피들을 **순차** 실행(로딩 안전)하고 정확도/속도/추천을 산출한다."""
-    recipes = recipes or list(_rx.REGISTRY)
+    """레시피들을 **순차** 실행(로딩 안전)하고 정확도/속도/추천을 산출한다.
+
+    '불필요한 테스트는 하지 않는다'(사용자 요구):
+    - ``include_diagnostic=False``(기본): 함정/대조용(diagnostic) 레시피는 사용자가
+      **명시적으로 그 키를 고른 게 아니면** 실행하지 않는다(예: gpu_fusion_b1 함정).
+    - ``skip_redundant=True``(기본): 필요한 가속 장치/패키지가 없어 어차피 CPU 고전
+      으로 폴백해 **같은 결과를 반복**할 레시피는 측정하지 않고 'skipped' 로 기록한다.
+    - ``skip_low_history=True``(기본): **이전 실험에서 운영 대비 정확도가 낮았던**
+      레시피는 이번에도 측정하지 않는다(과거 기록 기반).  명시 선택한 키는 예외.
+
+    ``explicit_keys`` 는 사용자가 **개별 키로 직접 고른** 집합이다(그룹/전체로 펼쳐진
+    것은 제외).  여기 든 키는 어떤 스킵 규칙도 적용하지 않고 그대로 측정한다.  None
+    이면 '개별 명시 없음'으로 보고 모든 스킵 규칙을 적용한다(그룹/전체 실행).
+    """
+    recipes = recipes if recipes is not None else list(_rx.REGISTRY)
     devices = detect_devices()
+    # 과거 저성능 레시피(운영보다 정확도가 낮았던) — 명시 선택하지 않은 것만 스킵.
+    low_hist = low_performers() if skip_low_history else {}
     suite = SuiteResult(baseline_key=_rx.BASELINE_ACCURACY_KEY,
                         production_key=_rx.PRODUCTION_SPEED_KEY,
                         has_gt=bool(ds.gt), devices=sorted(devices))
+
+    # 함정/대조용은 사용자가 그 키를 **개별 명시**했을 때만 둔다.  '전체/그룹'으로
+    # 들어온 diagnostic 은 제외해 불필요한 장시간 측정(예: batch1 함정)을 막는다.
+    explicit = set(explicit_keys or set())
+    if not include_diagnostic:
+        recipes = [r for r in recipes
+                   if (not getattr(r, "diagnostic", False)) or r.key in explicit]
 
     # 정확도 기준선(GT 없을 때 일치율 산정용)은 항상 먼저 한 번 확보한다.
     baseline_recipe = _rx.by_key(_rx.BASELINE_ACCURACY_KEY)
@@ -603,6 +657,21 @@ def run_suite(ds: Dataset, recipes: Optional[List[Recipe]] = None, *,
             break
         if progress:
             progress(recipe.name, i - 1, total)
+
+        # 불필요한 레시피는 측정하지 않고 건너뛴다 — 단, 정확도 기준선은 항상
+        # 실행(다른 레시피의 일치율 평가에 필요)하고, 사용자가 정확히 그 키를
+        # 명시 선택(explicit)했으면 존중해 그래도 측정한다.
+        if recipe.key != _rx.BASELINE_ACCURACY_KEY and recipe.key not in explicit:
+            why = ""
+            if skip_redundant:
+                why = skip_reason(recipe, devices)
+            if not why and skip_low_history and recipe.key in low_hist:
+                why = low_hist[recipe.key]
+            if why:
+                suite.runs.append(RecipeRun(
+                    key=recipe.key, name=recipe.name, ok=False, skipped=True,
+                    note=why, desc=recipe.desc))
+                continue
 
         def _do(local_stop):
             with PeakMem() as pm:
@@ -701,6 +770,96 @@ def default_out_dir() -> Path:
     return d
 
 
+def iter_history(extra_dirs: Optional[List[Path]] = None) -> List[dict]:
+    """과거 벤치 기록(result.json)들을 모아 리스트로 반환(최신순 아님, 단순 수집).
+
+    기본 기록 폴더(``dev_bench/<host>/*/result.json``) + 저장소의 ``bench결과/`` +
+    ``extra_dirs`` 를 훑는다.  손상/무관 파일은 건너뛴다."""
+    out: List[dict] = []
+    seen: set = set()
+    roots: List[Path] = []
+    try:
+        roots.append(default_out_dir())
+    except Exception:
+        pass
+    try:
+        from ..utils import paths as _paths
+        roots.append(_paths._project_root() / "bench결과")
+    except Exception:
+        pass
+    for d in (extra_dirs or []):
+        roots.append(Path(d))
+    for root in roots:
+        if not root or not Path(root).exists():
+            continue
+        # result.json 이 root 바로 아래거나 한 단계 하위(타임스탬프 폴더)일 수 있다.
+        cands = list(Path(root).glob("result.json")) + \
+            list(Path(root).glob("*/result.json"))
+        for f in cands:
+            rp = str(f.resolve())
+            if rp in seen:
+                continue
+            seen.add(rp)
+            try:
+                out.append(json.loads(f.read_text(encoding="utf-8")))
+            except Exception:
+                continue
+    return out
+
+
+def low_performers(history: Optional[List[dict]] = None, *,
+                   margin: float = 0.03) -> Dict[str, str]:
+    """과거 기록에서 '성능(실제 정확도)이 낮았던' 레시피 키 → 사유 매핑.
+
+    각 기록의 운영(production) 정확도를 그 회차의 하한으로 삼아, **운영보다
+    정확도가 margin(기본 3%p) 넘게 낮았던** 레시피를 저성능으로 본다.  작은 차이
+    (≤margin)는 데이터/측정 노이즈로 보고 관용한다(사용자 아이디어가 근소차로
+    잘려나가지 않게).  한 번이라도 운영-margin 이상을 기록하면 제외하지 않는다.
+    정확도 지표는 recall@1 우선, 없으면 기준선 일치율(agree1).  가속기 없는 CPU
+    폴백 기록은 변별력이 없어 판정에서 제외한다.
+
+    이걸로 '이전에 낮았던 항목은 이번 실험에서 스킵' 을 구현한다(명시 선택 시 예외)."""
+    history = history if history is not None else iter_history()
+
+    def _acc(run: dict):
+        v = run.get("recall1")
+        return v if v is not None else run.get("agree1")
+
+    ever_ok: set = set()
+    bad: Dict[str, float] = {}        # key → 관측된 최악(운영대비) 정확도 차
+    for rec in history:
+        runs = rec.get("runs") or []
+        # 가속기 없는 CPU 폴백 기록은 모든 임베딩 레시피가 동일 CPU 결과로 폴백돼
+        # 변별력이 없다 — 저성능 판정에서 제외(실제 GPU/NPU 측정만 신뢰).
+        if not (rec.get("devices") or []):
+            continue
+        prod_key = rec.get("production_key") or _rx.PRODUCTION_SPEED_KEY
+        prod = next((r for r in runs if r.get("key") == prod_key), None)
+        floor = _acc(prod) if prod else None
+        if floor is None:
+            continue
+        for r in runs:
+            k = r.get("key")
+            if not k or k == prod_key:
+                continue
+            # 폴백/스킵된 항목은 그 회차에서 변별 불가 → 판정 근거에서 제외.
+            if r.get("fell_back_classical") or r.get("skipped"):
+                continue
+            a = _acc(r)
+            if a is None or not r.get("ok", True):
+                continue
+            if a + 1e-9 >= floor - margin:
+                ever_ok.add(k)
+            else:
+                bad[k] = max(bad.get(k, 0.0), floor - a)
+    out: Dict[str, str] = {}
+    for k, gap in bad.items():
+        if k in ever_ok:
+            continue                  # 다른 회차에서 운영 이상 → 저성능으로 단정 안 함
+        out[k] = f"과거 실험에서 운영 대비 정확도 {gap*100:.1f}%p 낮음 → 건너뜀"
+    return out
+
+
 def write_report(suite: SuiteResult, ds: Dataset, out_dir: Optional[Path] = None) -> Path:
     """스위트 결과를 ``out_dir/<timestamp>/`` 에 JSON+MD 로 저장하고 폴더를 반환."""
     out_dir = Path(out_dir) if out_dir else default_out_dir()
@@ -745,15 +904,26 @@ def render_markdown(suite: SuiteResult, ds: Dataset) -> str:
             return f"{r.agree1*100:.1f}%"
         return "-"
 
+    measured = [r for r in suite.runs if not getattr(r, "skipped", False)]
+    skipped = [r for r in suite.runs if getattr(r, "skipped", False)]
+
     L.append("| 레시피 | 총시간(s) | 임베딩(s) | 재채점(s) | img/s | 피크MB | 정확도 | 비고 |")
     L.append("|---|--:|--:|--:|--:|--:|--:|---|")
-    for r in sorted(suite.runs, key=lambda x: (not x.ok, x.total_sec or 1e9)):
+    for r in sorted(measured, key=lambda x: (not x.ok, x.total_sec or 1e9)):
         mark = " ⭐" if r.key == suite.recommended_key else ""
         peak = f"{r.peak_mb:.0f}" if r.peak_mb else "-"
         note = r.note or ("폴백" if r.fell_back_classical else "")
         L.append(f"| {r.name}{mark} | {r.total_sec:.2f} | {r.embed_sec:.2f} | "
                  f"{r.score_sec:.2f} | {r.img_per_sec:.1f} | {peak} | "
                  f"{acc_str(r)} | {note} |")
+
+    # 불필요해서 측정하지 않은(건너뛴) 레시피 — 사유와 함께 투명하게 남긴다.
+    if skipped:
+        L.append("\n### 건너뛴 레시피(불필요 — 측정 안 함)")
+        L.append("| 레시피 | 사유 |")
+        L.append("|---|---|")
+        for r in sorted(skipped, key=lambda x: x.name):
+            L.append(f"| {r.name} (`{r.key}`) | {r.note} |")
 
     L.append("")
     rec = next((r for r in suite.runs if r.key == suite.recommended_key), None)
@@ -855,6 +1025,8 @@ def main(argv=None) -> int:
                     help="레시피별 타임아웃(초, 0=무제한)")
     ap.add_argument("--threshold", type=float, default=0.0)
     ap.add_argument("--out", help="기록 폴더(기본: 캐시/dev_bench/<host>)")
+    ap.add_argument("--all-recipes", action="store_true",
+                    help="불필요 스킵 해제 — 함정/대조·폴백중복·과거저성능까지 전부 측정")
     ap.add_argument("--list", action="store_true", help="레시피 목록만 출력")
     ap.add_argument("--make-labels-template",
                     help="정답 라벨 빈 템플릿 JSON 을 생성할 경로(--ref/--val 필요)")
@@ -916,7 +1088,12 @@ def main(argv=None) -> int:
         print(f"  [{done}/{total}] {name}")
 
     suite = run_suite(ds, _rx.select(args.recipes), threshold=args.threshold,
-                      per_recipe_timeout=args.timeout, progress=_prog)
+                      per_recipe_timeout=args.timeout,
+                      include_diagnostic=args.all_recipes,
+                      skip_redundant=not args.all_recipes,
+                      skip_low_history=not args.all_recipes,
+                      explicit_keys=_rx.explicit_keys(args.recipes),
+                      progress=_prog)
     _print_table(suite, ds)
     run_dir = write_report(suite, ds, Path(args.out) if args.out else None)
     print(f"기록 저장: {run_dir}")

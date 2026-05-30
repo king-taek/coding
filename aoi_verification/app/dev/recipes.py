@@ -70,6 +70,7 @@ class Recipe:
     method: str = ""               # "" / model_zoo family (keypoint/anomaly 등)
     needs: str = ""                # 대상 장비에 필요한 추가 패키지/가중치(폴백 안내용)
     tag: str = "core"              # 그룹(core / npu_sweep / npu_only / fast_rerank / model_zoo)
+    diagnostic: bool = False       # 함정/대조용(평소엔 불필요) — 기본 실험에서 제외
     desc: str = ""                 # 각 연산을 어느 장치에서 어떻게 하는지
 
     # ------------------------------------------------------------------
@@ -153,7 +154,7 @@ REGISTRY: List[Recipe] = [
     Recipe(
         key="gpu_embed_only", name="GPU 임베딩 단독(재채점 없음)",
         recall=RECALL_GPU, scoring=SCORE_EMBED_ONLY,
-        embed_model=MODEL_MOBILENET_V3, embed_batch=16,
+        embed_model=MODEL_MOBILENET_V3, embed_batch=16, diagnostic=True,
         desc=("GPU 임베딩 코사인 순위만으로 매칭(CPU 재채점 생략). 가장 빠르지만 "
               "정확도가 낮아 '왜 융합이 필요한가'를 보여주는 대조군."),
     ),
@@ -195,6 +196,7 @@ REGISTRY: List[Recipe] = [
         key="gpu_fusion_b1", name="GPU 융합 batch1(함정 재현)",
         recall=RECALL_GPU, scoring=SCORE_FUSION,
         embed_model=MODEL_MOBILENET_V3, embed_batch=1, fusion_topk=40,
+        diagnostic=True,
         desc=("GPU batch=1 — 보고서상 처리량이 ~1 img/s 로 폭락(멈춤)하는 함정 "
               "조합. 운영에서 피해야 함을 수치로 보이는 대조군."),
     ),
@@ -209,7 +211,7 @@ REGISTRY: List[Recipe] = [
         key="gpu_npu_ensemble_fusion", name="GPU+NPU 앙상블+CPU 융합(대조)",
         recall=RECALL_GPU_NPU, scoring=SCORE_FUSION,
         embed_model=MODEL_MOBILENET_V3, embed_batch=16, fusion_topk=40,
-        ensemble=True,
+        ensemble=True, diagnostic=True,
         desc=("GPU 와 NPU 가 '각각 전체'를 임베딩해 두 코사인을 평균(앙상블). "
               "보고서상 정확도 이득 0 · 시간 약 2배인 안티패턴 — 분담과 대조."),
     ),
@@ -422,6 +424,19 @@ def all_extended_keys() -> List[str]:
 
 def group(name: str) -> List[Recipe]:
     return list(GROUPS.get(name, []))
+
+
+def explicit_keys(keys=None) -> Set[str]:
+    """사용자가 **개별 레시피 키로 직접 고른** 것만 추출(그룹명/전체 토큰 제외).
+
+    ``select`` 와 같은 입력을 받되, ``all``/``all+``/그룹명은 '개별 명시'가 아니므로
+    뺀다.  벤치마크가 '이 키는 스킵하지 말고 그대로 측정' 판단에 쓴다."""
+    if keys is None:
+        return set()
+    if isinstance(keys, str):
+        keys = [k.strip() for k in keys.split(",") if k.strip()]
+    special = set(GROUPS) | {"all", "all+", "everything"}
+    return {k for k in keys if k not in special and k in _BY_KEY}
 
 
 def select(keys=None) -> List[Recipe]:
