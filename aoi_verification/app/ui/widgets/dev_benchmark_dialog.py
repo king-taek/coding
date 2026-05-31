@@ -338,9 +338,7 @@ class DevBenchmarkDialog(QDialog):
         preset_hint.setStyleSheet("color: #9AA;")
         root.addWidget(preset_hint)
         preset_row = QHBoxLayout()
-        for label, name in ((i18n.KO.DEV_BENCH_PRESET_QUICK, "quick"),
-                            (i18n.KO.DEV_BENCH_PRESET_FACEOFF, "faceoff"),
-                            (i18n.KO.DEV_BENCH_PRESET_MAIN, "main"),
+        for label, name in ((i18n.KO.DEV_BENCH_PRESET_TOP5, "top5"),
                             (i18n.KO.DEV_BENCH_PRESET_FINAL, "final")):
             btn = QPushButton(label, self)
             btn.clicked.connect(lambda _=False, n=name: self._apply_preset(n))
@@ -348,21 +346,20 @@ class DevBenchmarkDialog(QDialog):
         preset_row.addStretch(1)
         root.addLayout(preset_row)
 
-        # 그룹 토글 없음 — 사패 그룹을 옵션에서 제거했다(아카이브는 CLI all+ 로만).
+        # 그룹 토글 없음 — 실험 종료로 옵션은 TOP5 비교만 남겼다(아카이브는 CLI all+ 로만).
         self._group_checks = {}
 
-        # 개별 레시피 목록 = 메인 옵션(앵커 + 생존자) + 최종 벤치 키(고전 워밍업·NPU 고가동).
-        # '빠른' 키만 기본 체크.  최종 프리셋용 키도 체크박스로 노출해 GUI 에서 선택 가능.
+        # 개별 레시피 목록 = 메인 옵션(앵커 + TOP5) + 최종 프리셋의 고전 워밍업.  기본 전체 체크.
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
         scroll.setMaximumHeight(220)
         host = QWidget()
         hl = QVBoxLayout(host)
-        _final_extra = [_rx.by_key(k) for k in _rx.FINAL_KEYS
-                        if k not in {x.key for x in _rx.main_recipes()}]
-        for r in list(_rx.main_recipes()) + _final_extra:
+        _extra = [_rx.by_key(k) for k in _rx.FINAL_KEYS
+                  if k not in {x.key for x in _rx.main_recipes()}]
+        for r in list(_rx.main_recipes()) + _extra:
             cb = QCheckBox(f"{r.name}  [{r.key}]", host)
-            cb.setChecked(r.key in _rx.QUICK_KEYS)
+            cb.setChecked(r.key in _rx.MAIN_KEYS)
             cb.setToolTip(r.desc)
             self._recipe_checks[r.key] = cb
             hl.addWidget(cb)
@@ -430,23 +427,17 @@ class DevBenchmarkDialog(QDialog):
 
     # ------------------------------------------------------------------
     def _apply_preset(self, name: str) -> None:
-        """프리셋 버튼 — 체크박스/그룹 토글을 일괄 설정.
+        """프리셋 버튼 — 체크박스를 일괄 설정.
 
-        - ``quick``: 빠른 프리셋(QUICK_KEYS)만 체크.
-        - ``faceoff``: 현행 vs 재채점 생존자(FACEOFF_KEYS)만 체크.
-        - ``final``: 최종 벤치(고전 워밍업→정식 + 현행 + TOP5 + NPU 고가동)만 체크.
-        - ``main``(그 외): 메인 옵션(앵커 + 생존자) 전부 체크.
+        - ``final``: 최종 벤치(고전 워밍업→정식 + 현행 + TOP5)만 체크.
+        - ``top5``(그 외): 앵커(gold·현행) + TOP5 만 체크.
         """
-        main_set = {r.key for r in _rx.main_recipes()}
+        if name == "final":
+            want = set(_rx.FINAL_KEYS)
+        else:                                    # top5 — 앵커 + TOP5
+            want = {r.key for r in _rx.main_recipes()}
         for key, cb in self._recipe_checks.items():
-            if name == "quick":
-                cb.setChecked(key in _rx.QUICK_KEYS)
-            elif name == "faceoff":
-                cb.setChecked(key in _rx.FACEOFF_KEYS)
-            elif name == "final":
-                cb.setChecked(key in set(_rx.FINAL_KEYS))
-            else:                                # main — 앵커 + 생존자(최종 전용 키 제외)
-                cb.setChecked(key in main_set)
+            cb.setChecked(key in want)
 
     def _selected_keys(self) -> List[str]:
         # 개별 레시피 + 체크된 확장 그룹 전체(중복 제거, 순서 보존).

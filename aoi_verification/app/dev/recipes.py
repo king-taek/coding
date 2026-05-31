@@ -257,17 +257,15 @@ CENTER_ORB_KEYS: List[str] = ["rr_orb_center50", "rr_orb_center70", "rr_fusion_c
 # NPU 병렬 보조기 신규 실험(3신호 융합).
 NPU_ASSIST_KEYS: List[str] = ["npu_assist_r25", "npu_assist_r20"]
 
-# 개발자 모드 '메인 옵션' = 앵커(gold·현행) + 생존자 + 중앙-가중 ORB + NPU 보조 신규 실험.
-MAIN_KEYS: List[str] = ([BASELINE_ACCURACY_KEY, PRODUCTION_SPEED_KEY]
-                        + SURVIVOR_KEYS + CENTER_ORB_KEYS + NPU_ASSIST_KEYS)
-
 # ── 최종 후보 TOP5 — 실측 97.6%(현행 동률)·런 간 안정적인 5가지(성능+안정성) ─────
+# 실험은 끝났고 개발자 모드 옵션은 이 TOP5 비교만 남긴다(나머지 레시피·그룹은 코드로
+# 보존하되 기본 옵션에서 내림 — 나중에 다시 볼 때 `--recipes all+` 로 도달).
 TOP5_KEYS: List[str] = [
     "cpu_rr_phash_orb",   # pHash+ORB(SSIM 뺌) — 최속(~×4.2)
-    "rr_parallel",        # 풀 고전(pHash+ORB+SSIM)·병렬 — 성분 동일(가장 안전)
+    "rr_parallel",        # 풀 고전(pHash+ORB+SSIM)·병렬 — 성분 동일(가장 안전)·기본 모드 채택
     "cpu_rr_parallel16",  # 풀 고전·병렬16 — 안전 동률
     "cpu_rr_orb_only",    # ORB 단독 — 빠름·동률
-    "rr_orb_center50",    # 중앙가중 ORB — defect 정중앙 강건성(동급 속도)
+    "rr_orb_center50",    # 중앙가중 ORB — defect 정중앙 강건성(최속)·고효율 모드 채택
 ]
 
 # 고전 전수의 '워밍업' 별칭 — 같은 채점이나 키가 달라 **첫 순서로 한 번 더** 돌린다.
@@ -279,22 +277,11 @@ WARMUP_CLASSICAL = Recipe(
     desc=("정식 측정 전 워밍업 1회차 — cpu_classical_full 과 동일 채점이나 첫 순서의 "
           "느림(캐시/JIT)을 흡수해 버리는 용도.  정식 기준선은 두 번째 cpu_classical_full."))
 
-# '빠른' 프리셋(기본 선택) — 앵커 + 핵심 생존자 소수(빠른 반복용).  현행을 **항상 포함**해
-# 추천 엔진이 production 대비 speedup 을 정상 계산한다.
-QUICK_KEYS: List[str] = [
-    BASELINE_ACCURACY_KEY,         # 정확도 gold(100%) — 일치율 기준선
-    PRODUCTION_SPEED_KEY,          # 현행 anchor(97.6%) = '3배'의 분모
-    "rr_parallel",                 # ×3.95 @97.6% (추천)
-    "cpu_rr_orb_only",             # 97.6% 생존자
-    "cpu_rr_phash_orb",            # 97.6% 생존자
-    "cpu_rr_parallel16",           # 97.6% 생존자
-]
+# 개발자 모드 '메인 옵션' = 앵커(gold·현행, 추천 엔진용) + TOP5.  GUI/CLI 가 보여주는 목록.
+MAIN_KEYS: List[str] = [BASELINE_ACCURACY_KEY, PRODUCTION_SPEED_KEY] + TOP5_KEYS
 
-# 동일-런 head-to-head — 현행 + 재채점 생존자(반복 측정으로 분산까지 확인).
-FACEOFF_KEYS: List[str] = [
-    BASELINE_ACCURACY_KEY, PRODUCTION_SPEED_KEY,
-    "rr_parallel", "cpu_rr_orb_only", "cpu_rr_phash_orb", "cpu_rr_parallel16",
-]
+# 기본 선택(빠른) = 메인 전체(앵커+TOP5).  현행을 항상 포함해 추천 엔진이 speedup 을 계산.
+QUICK_KEYS: List[str] = list(MAIN_KEYS)
 
 
 # ===========================================================================
@@ -709,9 +696,10 @@ def _build_npu_hi() -> List[Recipe]:
 NPU_HI: List[Recipe] = _build_npu_hi()
 NPU_HI_KEYS: List[str] = [r.key for r in NPU_HI]
 
-# 최종 벤치 순서 — ①고전 워밍업 → ②고전(정식 기준선) → ③현행 → TOP5 → NPU 고가동 5.
+# 최종 벤치 순서 — ①고전 워밍업 → ②고전(정식 기준선) → ③현행 → TOP5.
+# (NPU 고가동·model-zoo 등은 실험 종료로 제외 — 아카이브는 `--recipes all+` 로.)
 FINAL_KEYS: List[str] = (["cpu_classical_warmup", BASELINE_ACCURACY_KEY,
-                          PRODUCTION_SPEED_KEY] + TOP5_KEYS + NPU_HI_KEYS)
+                          PRODUCTION_SPEED_KEY] + TOP5_KEYS)
 
 
 NPU_SWEEP: List[Recipe] = _build_npu_sweep()
@@ -783,13 +771,11 @@ def explicit_keys(keys=None) -> Set[str]:
         return set()
     if isinstance(keys, str):
         keys = [k.strip() for k in keys.split(",") if k.strip()]
-    special = set(GROUPS) | {"all", "all+", "everything", "quick", "faceoff",
+    special = set(GROUPS) | {"all", "all+", "everything", "quick",
                              "main", "survivors", "gpu-models", "top5", "final"}
     out = {k for k in keys if k not in special and k in _BY_KEY}
     if "quick" in keys:
         out |= {k for k in QUICK_KEYS if k in _BY_KEY}
-    if "faceoff" in keys:
-        out |= {k for k in FACEOFF_KEYS if k in _BY_KEY}
     if "main" in keys or "survivors" in keys:
         out |= {k for k in MAIN_KEYS if k in _BY_KEY}
     if "gpu-models" in keys:
@@ -826,11 +812,9 @@ def select(keys=None) -> List[Recipe]:
             picked = quick_recipes()
         elif k in ("main", "survivors"):
             picked = main_recipes()
-        elif k == "faceoff":
-            picked = [by_key(x) for x in FACEOFF_KEYS if x in _BY_KEY]
         elif k == "top5":
             picked = [by_key(x) for x in TOP5_KEYS if x in _BY_KEY]
-        elif k == "final":               # 최종: 고전 워밍업→정식 + 현행 + TOP5 + NPU 고가동
+        elif k == "final":               # 최종: 고전 워밍업→정식 + 현행 + TOP5
             picked = [by_key(x) for x in FINAL_KEYS if x in _BY_KEY]
         elif k == "gpu-models":          # 모델 비교(MobileNetV3 + ResNet18)
             picked = [by_key(x) for x in GPU_MODEL_KEYS if x in _BY_KEY]

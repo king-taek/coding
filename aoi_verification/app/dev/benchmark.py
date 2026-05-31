@@ -1472,9 +1472,9 @@ def main(argv=None) -> int:
     ap.add_argument("--labels", help="정답 라벨 JSON 경로(없으면 기준선 일치율 사용)")
     ap.add_argument("--self-test", action="store_true",
                     help="--ref 의 사진을 증강해 정답 있는 검증셋을 합성(2호기 불필요)")
-    ap.add_argument("--recipes", default="quick",
-                    help="콤마 구분 레시피 키 또는 프리셋: quick(린 기본)·faceoff·"
-                         "center·core·all+(아카이브 전부)·그룹명")
+    ap.add_argument("--recipes", default="top5",
+                    help="콤마 구분 레시피 키 또는 프리셋: top5(기본·최종 후보)·final(고전2회+TOP5)"
+                         "·all+(아카이브 전부)·그룹명(보존)")
     ap.add_argument("--max-slots", type=int, default=0, help="서브샘플: slot 수 상한")
     ap.add_argument("--max-images", type=int, default=0,
                     help="서브샘플: 측당 이미지 수 상한")

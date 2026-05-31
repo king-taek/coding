@@ -463,15 +463,12 @@ DEV_BENCH_RECIPES = "실험할 조합 (선택 안 하면 전체)"
 
 # 프리셋 — 항목을 적게 두는 '빠른'을 기본으로.
 DEV_BENCH_PRESET_HINT = (
-    "옵션은 실측으로 **정확도 97.6%(현행 동률) 확인된 ‘생존자’** 재채점과 앵커(현행·기준선)만 "
-    "보여줍니다. 3배는 rr_parallel(×3.95)로 확정됐고, 입증된 사패(임베딩 장치 교체·ORB 제거·NPU "
-    "배치·center-aware·모델주머니)는 옵션에서 내렸습니다. ‘빠른’=핵심 소수, ‘대결’=현행 vs 생존자, "
-    "‘생존자 전체’=모든 생존자. (아카이브 전체는 CLI ``--recipes all+`` 로만.)"
+    "실험은 끝났고 옵션은 **최종 후보 TOP5** + 앵커(현행·기준선)만 보여줍니다. 'TOP5'=앵커+TOP5, "
+    "'최종'=고전 2회(워밍업→정식)+현행+TOP5. (나머지 레시피·그룹은 코드로 보존 — 나중에 다시 "
+    "보려면 CLI ``--recipes all+``.)"
 )
-DEV_BENCH_PRESET_QUICK = "빠른"
-DEV_BENCH_PRESET_FACEOFF = "대결(현행vs생존자)"
-DEV_BENCH_PRESET_MAIN = "생존자 전체"
-DEV_BENCH_PRESET_FINAL = "최종(고전2회+TOP5+NPU고가동)"
+DEV_BENCH_PRESET_TOP5 = "TOP5"
+DEV_BENCH_PRESET_FINAL = "최종(고전2회+TOP5)"
 DEV_BENCH_TIMEOUT_LABEL = "조합별 타임아웃(초, 0=무제한)"
 DEV_BENCH_MAXSLOTS_LABEL = "서브샘플: slot 수 상한(0=전체)"
 DEV_BENCH_MAXIMG_LABEL = "서브샘플: 측당 이미지 상한(0=전체)"

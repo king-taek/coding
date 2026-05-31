@@ -61,6 +61,9 @@ def _score_signature(cfg) -> str:
         getattr(cfg, "engine", "basic"),
         cfg.cache_extra("ref") if cfg is not None else "",
         cfg.cache_extra("val") if cfg is not None else "",
+        # 재채점 항 선택·중앙가중도 점수를 바꾸므로 시그니처에 포함(캐시 분리).
+        repr(sorted(getattr(cfg, "rerank_components", None) or [])) if cfg is not None else "",
+        repr(float(getattr(cfg, "orb_center_weight", 0.0) or 0.0)) if cfg is not None else "",
         _pipeline._active_model_name(),
         repr(_config.CONFIG.similarity.normalized()),
     ])

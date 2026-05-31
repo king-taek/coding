@@ -315,8 +315,12 @@ class EfficiencyScheduler(QThread):
         top = ordered[:topk]
         items = [by_path.get(Path(vp)) for vp, _ in top]
         valid = [it for it in items if it is not None]
+        # 재채점 항 선택 — 고효율 모드는 rr_orb_center50(ORB 단독+중앙가중)을 위해
+        # cfg.rerank_components={"orb"} 를 쓴다.  None 이면 전체(pHash+ORB+SSIM).
+        comps = getattr(self._cfg, "rerank_components", None)
+        comps = set(comps) if comps else None
         cls_cands = (score_ref_classical(ref, valid, threshold=0.0, cfg=self._cfg,
-                                         val_features=vfmap,
+                                         val_features=vfmap, components=comps,
                                          stop_cb=self._stop.is_set)
                      if valid else [])
         cls_map = {c.item.path: float(c.score) for c in cls_cands}

@@ -77,23 +77,16 @@ def test_quick_is_survivors_only_no_dead_ends():
     assert not any(k.startswith("center_") for k in quick)
 
 
-def test_main_options_are_anchors_plus_survivors():
+def test_main_options_are_anchors_plus_top5():
+    # 실험 종료 후 옵션은 앵커(gold·현행) + TOP5 만 노출.
     main = [r.key for r in rx.select("main")]
     assert rx.BASELINE_ACCURACY_KEY in main and rx.PRODUCTION_SPEED_KEY in main
-    assert set(rx.SURVIVOR_KEYS) <= set(main)
-    # 사패는 메인 옵션에 없다(아카이브 all+ 로만).
-    for dead in ("npu_mbnet_cpu_fuse", "gpu_fusion_topk20", "cpu_rr_phash",
-                 "center_fusion_r25_w60", "rr_npu_phash_parallel"):
-        assert dead not in main
-        assert dead in set(rx.all_extended_keys())   # 기록은 보존(all+)
-
-
-def test_faceoff_preset_resolves_and_is_skip_exempt():
-    face = [r.key for r in rx.select("faceoff")]
-    assert rx.PRODUCTION_SPEED_KEY in face and "cpu_rr_phash_orb" in face
-    # faceoff 는 '개별 명시'로 취급돼 대상 장비에서 스킵되지 않아야 한다.
-    exempt = rx.explicit_keys("faceoff")
-    assert set(rx.FACEOFF_KEYS) <= exempt
+    assert set(rx.TOP5_KEYS) <= set(main)
+    # 옵션에서 내린 레시피(사패·신규 실험)는 메인엔 없지만 코드(all+)엔 보존.
+    for archived in ("npu_mbnet_cpu_fuse", "gpu_fusion_topk20", "cpu_rr_phash",
+                     "center_fusion_r25_w60", "rr_npu_phash_parallel", "npu_hi_conc96"):
+        assert archived not in main
+        assert archived in set(rx.all_extended_keys())   # 기록은 보존(all+)
 
 
 def test_center_group_selectable_and_in_all_extended():
@@ -152,8 +145,8 @@ def test_center_orb_recipes_registered_and_wired():
         assert cfg.orb_center_weight > 0          # 중앙 가중 켜짐
         assert r.rerank_workers >= 2              # 병렬(단일 패스·생존자 속도)
         assert r.recall == rx.RECALL_GPU          # 현행과 동일 베이스
-    # 옵션(MAIN)에 노출돼 측정 가능.
-    assert set(rx.CENTER_ORB_KEYS) <= set(rx.MAIN_KEYS)
+    # rr_orb_center50(고효율 모드 채택)은 TOP5/옵션에 노출돼 측정 가능.
+    assert "rr_orb_center50" in set(rx.MAIN_KEYS)
 
 
 # ── 확정·고착: 운영 채점기는 이미 재채점을 병렬화한다(직렬로 회귀 금지) ─────────
@@ -188,7 +181,9 @@ def test_npu_assist_recipes_registered_and_wired():
         assert r.npu_defect_assist is True
         assert r.recall == rx.RECALL_GPU             # GPU 임베딩 recall 은 현행 그대로
         assert r.center_ratio > 0 and r.rerank_workers >= 2
-    assert set(rx.NPU_ASSIST_KEYS) <= set(rx.MAIN_KEYS)   # 옵션 노출
+    # 실험 종료로 옵션(MAIN)에선 내렸지만 코드(all+)엔 보존.
+    assert set(rx.NPU_ASSIST_KEYS) & set(rx.MAIN_KEYS) == set()
+    assert set(rx.NPU_ASSIST_KEYS) <= set(rx.all_extended_keys())
 
 
 # ── 임베딩 후보 recall: 정답이 GPU/NPU 순위 몇 위에 있나(topk 안전성) ─────────
@@ -253,11 +248,12 @@ def test_final_preset_runs_classical_first_and_second():
     w = rx.by_key("cpu_classical_warmup")
     g = rx.by_key(rx.BASELINE_ACCURACY_KEY)
     assert w.scoring == g.scoring and w.recall == g.recall and w.key != g.key
-    # TOP5 + NPU 고가동 5종이 뒤따른다.
-    assert set(rx.TOP5_KEYS) <= set(final) and set(rx.NPU_HI_KEYS) <= set(final)
-    # 워밍업·NPU 고가동은 '개별 명시'로 스킵 면제(대상 장비에서 그대로 측정).
+    # TOP5 가 뒤따른다(실험 종료로 NPU 고가동은 final 에서 제외).
+    assert set(rx.TOP5_KEYS) <= set(final)
+    assert not (set(rx.NPU_HI_KEYS) & set(final))
+    # 워밍업·TOP5 는 '개별 명시'로 스킵 면제(대상 장비에서 그대로 측정).
     ek = rx.explicit_keys("final")
-    assert "cpu_classical_warmup" in ek and set(rx.NPU_HI_KEYS) <= ek
+    assert "cpu_classical_warmup" in ek and set(rx.TOP5_KEYS) <= ek
 
 
 def test_npu_hi_recipes_drive_npu_hard_batch1():

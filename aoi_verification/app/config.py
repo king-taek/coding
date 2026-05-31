@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Optional
 
 
 # ---------------------------------------------------------------------------
@@ -145,6 +146,10 @@ class SimilarityConfig:
     # 중앙 근접도로 가중해(단일 패스·추가 추출 없음) defect 판별력을 높인다.  추출이
     # 아니라 '채점' 단계 파라미터라 특징 캐시 키는 그대로(좌표는 항상 저장).
     orb_center_weight: float = 0.0
+    # 재채점 항 선택 — None=전체(pHash+ORB+SSIM, 기본 모드).  부분집합(예: {"orb"})이면
+    # 그 항만으로 재채점한다.  고효율 모드는 실측 최적인 rr_orb_center50(ORB 단독+중앙가중)
+    # 을 위해 {"orb"} 를 쓴다.  ``efficiency_matcher`` 가 이 값으로 ``components`` 를 넘긴다.
+    rerank_components: Optional[frozenset] = None
     # 중앙-인식(center-aware) 채점 노브 — center_crop 이 켜졌을 때 사용할 중앙 ROI
     # 비율(0=기본 0.3).  반도체 AOI 이미지는 defect 이 정중앙에 있으므로, 작은 중앙
     # crop(예: 0.25)은 'defect 신호'를, 풀 ROI 는 '주변 패턴'을 본다.  벤치마크의

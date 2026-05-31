@@ -859,8 +859,19 @@ class MainWindow(QMainWindow):
         inp = self._input
         if inp is None:
             return config.DEFAULT_SIM_CONFIG
+        engine = getattr(inp, "engine_mode", "basic")
+        # 실측 최적 프로파일 적용:
+        #   기본 모드  = rr_parallel  → 전수 고전(pHash+ORB+SSIM)·CPU 멀티코어 병렬(현행 동작).
+        #   고효율 모드 = rr_orb_center50 → GPU 임베딩 추림 + 상위 후보를 ORB 단독·중앙(defect)
+        #                가중으로 재채점.  defect 가 정중앙인 특성을 활용한 최속·정확도 보존 조합.
+        if engine == "efficiency":
+            rerank_components = frozenset({"orb"})
+            orb_center_weight = 0.5
+        else:
+            rerank_components = None       # 전체 항(전수 고전)
+            orb_center_weight = 0.0
         return config.SimilarityConfig(
-            engine=getattr(inp, "engine_mode", "basic"),
+            engine=engine,
             center_crop=bool(getattr(inp, "center_crop", False)),
             persist_scores=bool(getattr(inp, "persist_scores", False)),
             accel_concurrency=int(getattr(inp, "accel_concurrency", 32)),
@@ -868,6 +879,8 @@ class MainWindow(QMainWindow):
             use_gpu=bool(getattr(inp, "use_gpu", True)),
             use_npu=bool(getattr(inp, "use_npu", True)),
             embed_batch=int(getattr(inp, "embed_batch", 1)),
+            rerank_components=rerank_components,
+            orb_center_weight=orb_center_weight,
         )
 
 

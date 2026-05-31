@@ -31,10 +31,10 @@ def test_dialog_defaults_to_quick_preset(app):
         DevBenchmarkDialog
     dlg = DevBenchmarkDialog(default_ref="/tmp/x")
     try:
-        # 개별 체크박스 = 메인 옵션(앵커 + 생존자) + 최종 프리셋 키(고전 워밍업·NPU 고가동).
+        # 개별 체크박스 = 메인 옵션(앵커 + TOP5) + 최종 프리셋의 고전 워밍업.
         assert set(dlg._recipe_checks.keys()) == set(rx.MAIN_KEYS) | set(rx.FINAL_KEYS)
-        # 기본 선택은 '빠른'(핵심 소수) — 메인 전체가 아니다.
-        assert dlg._selected_keys() == list(rx.QUICK_KEYS)
+        # 기본 선택은 앵커 + TOP5(=MAIN).
+        assert set(dlg._selected_keys()) == set(rx.MAIN_KEYS)
         assert dlg.table.columnCount() == 8
         assert dlg.self_test.isChecked() is True
     finally:
@@ -46,15 +46,11 @@ def test_dialog_presets_switch_selection(app):
         DevBenchmarkDialog
     dlg = DevBenchmarkDialog(default_ref="/tmp/x")
     try:
-        dlg._apply_preset("main")
+        dlg._apply_preset("top5")             # 앵커 + TOP5
         assert set(dlg._selected_keys()) == set(rx.MAIN_KEYS)
-        dlg._apply_preset("faceoff")
-        assert set(dlg._selected_keys()) == set(rx.FACEOFF_KEYS)
-        dlg._apply_preset("final")            # 최종 벤치(고전2회+현행+TOP5+NPU고가동)
+        dlg._apply_preset("final")            # 고전 2회(워밍업→정식) + 현행 + TOP5
         assert set(dlg._selected_keys()) == set(rx.FINAL_KEYS)
-        dlg._apply_preset("quick")
-        assert dlg._selected_keys() == list(rx.QUICK_KEYS)
-        # 사패 그룹 토글은 옵션에서 사라졌다.
+        # 그룹 토글은 옵션에서 사라졌다(실험 종료).
         assert dlg._group_checks == {}
     finally:
         dlg.deleteLater()
