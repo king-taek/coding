@@ -270,6 +270,13 @@ class RecipeRun:
     recall1: Optional[float] = None
     recall5: Optional[float] = None
     agree1: Optional[float] = None
+    # 임베딩 후보 recall — GPU/NPU 가 추린 순위에서 정답이 몇 위에 있나(CPU 재채점 전).
+    #   topk 재채점이 안전한지(정답이 잘려나가지 않는지) 판단용.  embed_recall[K]=정답이
+    #   top-K 안에 든 쿼리 비율.  worst_correct_rank=정답의 최악 순위(=100% 잡으려면
+    #   필요한 최소 topk).  cand_n=평가된 쿼리 수.
+    embed_recall: Optional[dict] = None
+    worst_correct_rank: Optional[int] = None
+    cand_n: int = 0
     desc: str = ""
 
 
@@ -347,6 +354,9 @@ def run_recipe(ds: Dataset, recipe: Recipe, *,
     if devices is None:
         devices = detect_devices()
     cfg = recipe.to_cfg()
+    # 임베딩(GPU/NPU) 후보 순위 — 쿼리별 (CPU 재채점 전) 전체 코사인 정렬.  GT 와 대조해
+    # '정답이 몇 위에 있나'(후보 recall)를 계산한다.
+    embed_order: Dict[Tuple[str, str], List[str]] = {}
     comp = _rerank_components(recipe)        # 고속 재채점 컴포넌트(None=전체 고전)
     run = RecipeRun(key=recipe.key, name=recipe.name, desc=recipe.desc,
                     n_images=ds.n_images(), n_pairs=ds.n_pairs())
@@ -494,6 +504,8 @@ def run_recipe(ds: Dataset, recipe: Recipe, *,
                        if 0 <= lab < len(val_paths)]
             if built_b is not None:                            # 앙상블: 두 코사인 평균
                 ordered = _ensemble_merge(ordered, built_b, ref_emb_b_get(r))
+            # 후보 recall 계산용 — CPU 재채점 전 임베딩 순위(정답이 몇 위에 있나).
+            embed_order[(slot, str(r.path))] = [str(vp) for vp, _ in ordered]
             if recipe.scoring == SCORE_EMBED_ONLY:
                 return [(vp, _cos_to_unit(c)) for vp, c in ordered]
             # fusion — 상위 topk 를 CPU 고전(또는 고속 부분) 재채점 후 z-융합
@@ -540,6 +552,12 @@ def run_recipe(ds: Dataset, recipe: Recipe, *,
     run.timed_out = stopped()
     n = run.n_images
     run.img_per_sec = round(n / run.total_sec, 1) if run.total_sec > 1e-6 else 0.0
+    # 임베딩 후보 recall — 정답이 GPU/NPU 순위에서 몇 위에 있나(topk 안전성 판단).
+    if embed_order and ds.gt:
+        rec_k, worst, cn = candidate_recall(embed_order, ds.gt)
+        run.embed_recall = {str(k): v for k, v in rec_k.items()}
+        run.worst_correct_rank = worst
+        run.cand_n = cn
     if run.fell_back_classical and recipe.uses_embedding():
         run.note = "가속/모델 미가용 → CPU 고전 폴백(속도는 CPU 기준)"
         need = str(getattr(recipe, "needs", "") or "")
@@ -702,6 +720,39 @@ def evaluate(results: Results, gt: Dict[Tuple[str, str], set]) -> Tuple[Optional
     if n == 0:
         return None, None, 0
     return round(hit1 / n, 4), round(hit5 / n, 4), n
+
+
+CAND_RECALL_KS = (5, 10, 20, 40, 100)
+
+
+def candidate_recall(embed_order: Dict[Tuple[str, str], List[str]],
+                     gt: Dict[Tuple[str, str], set],
+                     ks=CAND_RECALL_KS):
+    """임베딩(GPU/NPU) 후보 순위에서 **정답이 몇 위에 있나**를 집계.
+
+    반환 ``({K: recall@K}, worst_correct_rank, n)``.  ``embed_order`` 는 쿼리별
+    임베딩 코사인 내림차순 val 경로 리스트(=CPU 재채점 전 후보 순서).
+      · recall@K = 정답이 top-K 안에 든 쿼리 비율 → topk 재채점이 그 정답을 포함하는지.
+      · worst_correct_rank = 정답의 최악 순위 → **100% 안 놓치려면 필요한 최소 topk**.
+    검증셋이 커질수록(수백 장) 정답이 더 밀릴 수 있어, 이 값으로 안전한 topk 를 정한다.
+    순수 함수(헤드리스 테스트)."""
+    ranks: List[Optional[int]] = []
+    for key, order in embed_order.items():
+        correct = gt.get(key)
+        if not correct:
+            continue
+        r = next((i + 1 for i, vp in enumerate(order) if vp in correct), None)
+        ranks.append(r)
+    n = len(ranks)
+    if n == 0:
+        return {k: None for k in ks}, None, 0
+    out = {}
+    for k in ks:
+        hit = sum(1 for r in ranks if r is not None and r <= k)
+        out[k] = round(hit / n, 4)
+    valid = [r for r in ranks if r is not None]
+    worst = max(valid) if valid else None
+    return out, worst, n
 
 
 def query_failures(results: Results, gt: Dict[Tuple[str, str], set]) -> List[dict]:
@@ -1132,6 +1183,23 @@ def render_markdown(suite: SuiteResult, ds: Dataset) -> str:
         L.append(f"| {r.name}{mark} | {r.total_sec:.2f} | {r.embed_sec:.2f} | "
                  f"{r.score_sec:.2f} | {r.img_per_sec:.1f} | {peak} | "
                  f"{acc_str(r)} | {note} |")
+
+    # 임베딩 후보 recall — GPU/NPU 가 추린 순위에서 정답이 몇 위에 있나.  검증셋이 커질수록
+    # (수백 장) 정답이 밀릴 수 있어, topk 재채점이 정답을 자르지 않는지 판단하는 핵심 표.
+    cand = [r for r in measured if r.embed_recall and r.cand_n]
+    if cand:
+        L.append("\n### 임베딩 후보 recall — 정답이 GPU/NPU 순위 몇 위에 있나(CPU 재채점 전)")
+        L.append("> `worst순위`=정답의 최악 순위(=**놓치지 않을 최소 topk**).  검증셋이 크면 "
+                 "이 값이 커질 수 있으니, 운영 topk(=후보의 최소 절반·최소 40)가 이보다 큰지 본다.")
+        ks = sorted(int(k) for k in (cand[0].embed_recall or {}).keys())
+        L.append("| 임베딩 모델 · 레시피 | "
+                 + " | ".join(f"@{k}" for k in ks) + " | worst순위 | 쿼리수 |")
+        L.append("|---|" + "--:|" * (len(ks) + 2))
+        for r in cand:
+            cells = " | ".join(
+                (f"{(r.embed_recall.get(str(k)) or 0)*100:.0f}%") for k in ks)
+            L.append(f"| {r.name} | {cells} | "
+                     f"{r.worst_correct_rank if r.worst_correct_rank else '-'} | {r.cand_n} |")
 
     # 불필요해서 측정하지 않은(건너뛴) 레시피 — 사유와 함께 투명하게 남긴다.
     if skipped:

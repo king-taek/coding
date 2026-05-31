@@ -633,6 +633,32 @@ def _build_npu_assist() -> List[Recipe]:
 NPU_ASSIST: List[Recipe] = _build_npu_assist()
 
 
+# ===========================================================================
+# (D2) GPU 임베딩 모델 선택 — NPU 없는 PC 는 GPU 로 임베딩한다.  어떤 백본이 정답을
+#      후보 상위에 잘 올리는지(후보 recall) 비교해 고르기 위한 묶음.  embed_only 는
+#      순수 임베딩 순위(=후보 recall)를, fusion 은 재채점 포함 최종 정확도를 본다.
+# ===========================================================================
+def _build_gpu_models() -> List[Recipe]:
+    return [
+        Recipe(key="gpu_embed_resnet18", name="GPU 임베딩 ResNet18(후보순위)",
+               recall=RECALL_GPU, scoring=SCORE_EMBED_ONLY,
+               embed_model=MODEL_RESNET18, embed_batch=16, tag="gpu_models",
+               desc=("GPU(ResNet18) 임베딩 코사인 순위만 — 재채점 없이 '정답을 후보 상위에 "
+                     "올리는 능력'(후보 recall)을 MobileNetV3 와 비교.")),
+        Recipe(key="gpu_fusion_resnet18", name="GPU 융합 ResNet18(병렬)",
+               recall=RECALL_GPU, scoring=SCORE_FUSION,
+               embed_model=MODEL_RESNET18, embed_batch=16, fusion_topk=40,
+               rerank_workers=16, tag="gpu_models",
+               desc="GPU(ResNet18) 임베딩 + CPU 병렬 재채점 — MobileNetV3(현행)과 최종 정확도 비교."),
+    ]
+
+
+GPU_MODELS: List[Recipe] = _build_gpu_models()
+# 모델 선택 비교 프리셋 — MobileNetV3(현행) vs ResNet18, 후보순위 + 최종.
+GPU_MODEL_KEYS: List[str] = ["gpu_embed_only", "gpu_fusion_b16",
+                             "gpu_embed_resnet18", "gpu_fusion_resnet18"]
+
+
 NPU_SWEEP: List[Recipe] = _build_npu_sweep()
 NPU_ONLY: List[Recipe] = _build_npu_only()
 FAST_RERANK: List[Recipe] = _build_fast_rerank()
@@ -652,8 +678,10 @@ GROUPS = {
     "fast-rerank": FAST_RERANK,
     "model-zoo": MODEL_ZOO,
 }
+# 'gpu-models' 는 그룹이 아니라 **비교 프리셋**(MobileNetV3 현행 + ResNet18) — select() 에서 처리.
 ALL_EXTENDED: List[Recipe] = (REGISTRY + CENTER_AWARE + CENTER_ORB + NPU_ASSIST
-                              + NPU_SWEEP + NPU_ONLY + FAST_RERANK + MODEL_ZOO)
+                              + GPU_MODELS + NPU_SWEEP + NPU_ONLY + FAST_RERANK
+                              + MODEL_ZOO)
 _BY_KEY = {r.key: r for r in ALL_EXTENDED}
 
 
@@ -700,7 +728,7 @@ def explicit_keys(keys=None) -> Set[str]:
     if isinstance(keys, str):
         keys = [k.strip() for k in keys.split(",") if k.strip()]
     special = set(GROUPS) | {"all", "all+", "everything", "quick", "faceoff",
-                             "main", "survivors"}
+                             "main", "survivors", "gpu-models"}
     out = {k for k in keys if k not in special and k in _BY_KEY}
     if "quick" in keys:
         out |= {k for k in QUICK_KEYS if k in _BY_KEY}
@@ -708,6 +736,8 @@ def explicit_keys(keys=None) -> Set[str]:
         out |= {k for k in FACEOFF_KEYS if k in _BY_KEY}
     if "main" in keys or "survivors" in keys:
         out |= {k for k in MAIN_KEYS if k in _BY_KEY}
+    if "gpu-models" in keys:
+        out |= {k for k in GPU_MODEL_KEYS if k in _BY_KEY}
     return out
 
 
@@ -738,6 +768,8 @@ def select(keys=None) -> List[Recipe]:
             picked = main_recipes()
         elif k == "faceoff":
             picked = [by_key(x) for x in FACEOFF_KEYS if x in _BY_KEY]
+        elif k == "gpu-models":          # 모델 비교(MobileNetV3 + ResNet18)
+            picked = [by_key(x) for x in GPU_MODEL_KEYS if x in _BY_KEY]
         elif k in GROUPS:
             picked = GROUPS[k]
         else:

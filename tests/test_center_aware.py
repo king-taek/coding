@@ -191,6 +191,37 @@ def test_npu_assist_recipes_registered_and_wired():
     assert set(rx.NPU_ASSIST_KEYS) <= set(rx.MAIN_KEYS)   # 옵션 노출
 
 
+# ── 임베딩 후보 recall: 정답이 GPU/NPU 순위 몇 위에 있나(topk 안전성) ─────────
+def test_candidate_recall_ranks_and_worst():
+    order = {("A", "r1"): ["v1", "v2", "v3"],
+             ("A", "r2"): ["x", "y", "vc", "z"],     # 정답 vc = 3위
+             ("A", "r3"): ["a", "vd"]}               # 정답 vd = 2위
+    gt = {("A", "r1"): {"v1"}, ("A", "r2"): {"vc"}, ("A", "r3"): {"vd"}}
+    rec, worst, n = bm.candidate_recall(order, gt, ks=(1, 2, 5))
+    assert n == 3 and worst == 3                      # 최악 순위 3 → 최소 topk 3 필요
+    assert rec[1] == round(1 / 3, 4) and rec[2] == round(2 / 3, 4) and rec[5] == 1.0
+    # 정답이 후보에 아예 없으면 rank=None(어떤 topk 로도 못 잡음).
+    rec2, worst2, _ = bm.candidate_recall({("A", "r"): ["x", "y"]}, {("A", "r"): {"z"}}, ks=(5,))
+    assert rec2[5] == 0.0 and worst2 is None
+
+
+def test_gpu_models_preset_compares_mobilenet_and_resnet18():
+    gm = [r.key for r in rx.select("gpu-models")]
+    assert gm == rx.GPU_MODEL_KEYS
+    assert "gpu_fusion_b16" in gm and "gpu_fusion_resnet18" in gm   # 두 모델 비교
+    assert rx.by_key("gpu_embed_resnet18").embed_model == "resnet18"
+    assert rx.by_key("gpu_fusion_resnet18").recall == rx.RECALL_GPU  # NPU 없이 GPU
+    assert set(rx.GPU_MODEL_KEYS) <= rx.explicit_keys("gpu-models")
+
+
+def test_recipe_run_records_candidate_recall_fields():
+    from dataclasses import asdict
+    rr = bm.RecipeRun(key="x", name="x", embed_recall={"40": 0.9},
+                      worst_correct_rank=55, cand_n=41)
+    d = asdict(rr)
+    assert d["embed_recall"] == {"40": 0.9} and d["worst_correct_rank"] == 55
+
+
 # ── 실패 분석: recall@1 이 놓친 '그 쿼리'를 짚어낸다(순수) ────────────────────
 def test_query_failures_identifies_missed_query_and_rank():
     res = {("A", "r1.jpg"): [("v1", 0.9), ("v2", 0.8)],
