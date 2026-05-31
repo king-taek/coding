@@ -45,9 +45,19 @@ def test_output_paths():
 
 
 def test_main_usage_and_unknown(capsys):
-    assert build.main([]) == 0                      # 사용법 출력
+    assert build.main([]) == 0                      # 비대화형 → 사용법 출력
     assert "online" in capsys.readouterr().out
     assert build.main(["nope"]) == 2                # 알 수 없는 종류
+
+
+def test_prompt_kind_selection():
+    # VS Code ▶ 처럼 인자 없이 실행 시 번호/이름으로 빌드 종류 선택.
+    assert build._prompt_kind(input_fn=lambda _: "1") == "online"
+    assert build._prompt_kind(input_fn=lambda _: "2") == "portable"
+    assert build._prompt_kind(input_fn=lambda _: "3") == "windows"
+    assert build._prompt_kind(input_fn=lambda _: "windows") == "windows"
+    assert build._prompt_kind(input_fn=lambda _: "") is None       # Enter=취소
+    assert build._prompt_kind(input_fn=lambda _: "9") is None      # 범위 밖
 
 
 def test_build_online_injected_flow():

@@ -156,11 +156,47 @@ def _usage() -> str:
         "예) python scripts/build.py online")
 
 
+_MENU = [("online", "작은 온라인 launcher exe (권장)"),
+         ("portable", "자체 포함 CPython 폴더 (인터넷 없는 PC)"),
+         ("windows", "단독 exe (전부 동봉)")]
+
+
+def _prompt_kind(input_fn=input) -> Optional[str]:
+    """인자 없이 실행(예: VS Code ▶)했을 때 번호로 빌드 종류를 고르게 한다.
+
+    대화형 입력이 불가하면 None 을 돌려준다(=사용법만 출력)."""
+    print("어떤 빌드를 만들까요? 번호를 입력하세요 (취소: Enter):")
+    for i, (k, desc) in enumerate(_MENU, start=1):
+        print(f"  {i}) {k:9s} {desc}")
+    try:
+        sel = input_fn("선택 [1-3]: ").strip()
+    except (EOFError, OSError):
+        return None
+    if not sel:
+        return None
+    if sel.isdigit() and 1 <= int(sel) <= len(_MENU):
+        return _MENU[int(sel) - 1][0]
+    if sel in _ACTIONS:                      # 'online' 처럼 이름을 직접 입력해도 허용
+        return sel
+    print("잘못된 선택:", sel)
+    return None
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
-    if not argv or argv[0] in ("-h", "--help"):
+    if argv and argv[0] in ("-h", "--help"):
         print(_usage())
         return 0
+    if not argv:
+        # 인자 없이 실행(VS Code '▶ Run Python File' 등) → 대화형 메뉴로 선택.
+        if not sys.stdin or not sys.stdin.isatty():
+            print(_usage())
+            return 0
+        kind = _prompt_kind()
+        if kind is None:
+            print("취소되었습니다.")
+            return 0
+        argv = [kind]
     kind = argv[0]
     action = _ACTIONS.get(kind)
     if action is None:

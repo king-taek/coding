@@ -28,6 +28,8 @@ REM 저장소 루트에서 (둘 중 편한 것)
 python scripts\build.py online
 REM 또는: scripts\internal\build_online.bat (위 명령을 부르는 얇은 래퍼)
 ```
+> VS Code 라면 `scripts/build.py` 를 열고 **▶ Run Python File** 을 눌러도 됩니다 —
+> 인자 없이 실행되면 빌드 종류(online/portable/windows)를 번호로 고르는 메뉴가 뜹니다.
 - 산출물: **`dist\AOI_Verify_Online.exe`** — 이 파일 **하나만** 배포(메일·USB·공유 폴더 등).
 - 빌드가 하는 일: 가상환경 준비 → PyInstaller 설치 → 보안 가드 통과 확인 →
   `scripts\internal\online.spec` 으로 작은 onefile exe 생성.
