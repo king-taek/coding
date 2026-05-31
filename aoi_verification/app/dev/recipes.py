@@ -673,15 +673,16 @@ GROUPS = {
     "center": CENTER_AWARE,
     "orb-center": CENTER_ORB,
     "npu-assist": NPU_ASSIST,
+    "npu-hi": NPU_HI,
     "npu-sweep": NPU_SWEEP,
     "npu-only": NPU_ONLY,
     "fast-rerank": FAST_RERANK,
     "model-zoo": MODEL_ZOO,
 }
 # 'gpu-models' 는 그룹이 아니라 **비교 프리셋**(MobileNetV3 현행 + ResNet18) — select() 에서 처리.
-ALL_EXTENDED: List[Recipe] = (REGISTRY + CENTER_AWARE + CENTER_ORB + NPU_ASSIST
-                              + GPU_MODELS + NPU_SWEEP + NPU_ONLY + FAST_RERANK
-                              + MODEL_ZOO)
+ALL_EXTENDED: List[Recipe] = (REGISTRY + [WARMUP_CLASSICAL] + CENTER_AWARE
+                              + CENTER_ORB + NPU_ASSIST + NPU_HI + GPU_MODELS
+                              + NPU_SWEEP + NPU_ONLY + FAST_RERANK + MODEL_ZOO)
 _BY_KEY = {r.key: r for r in ALL_EXTENDED}
 
 
@@ -728,7 +729,7 @@ def explicit_keys(keys=None) -> Set[str]:
     if isinstance(keys, str):
         keys = [k.strip() for k in keys.split(",") if k.strip()]
     special = set(GROUPS) | {"all", "all+", "everything", "quick", "faceoff",
-                             "main", "survivors", "gpu-models"}
+                             "main", "survivors", "gpu-models", "top5", "final"}
     out = {k for k in keys if k not in special and k in _BY_KEY}
     if "quick" in keys:
         out |= {k for k in QUICK_KEYS if k in _BY_KEY}
@@ -738,6 +739,10 @@ def explicit_keys(keys=None) -> Set[str]:
         out |= {k for k in MAIN_KEYS if k in _BY_KEY}
     if "gpu-models" in keys:
         out |= {k for k in GPU_MODEL_KEYS if k in _BY_KEY}
+    if "top5" in keys:
+        out |= {k for k in TOP5_KEYS if k in _BY_KEY}
+    if "final" in keys:
+        out |= {k for k in FINAL_KEYS if k in _BY_KEY}
     return out
 
 
@@ -768,6 +773,10 @@ def select(keys=None) -> List[Recipe]:
             picked = main_recipes()
         elif k == "faceoff":
             picked = [by_key(x) for x in FACEOFF_KEYS if x in _BY_KEY]
+        elif k == "top5":
+            picked = [by_key(x) for x in TOP5_KEYS if x in _BY_KEY]
+        elif k == "final":               # 최종 벤치: gold 워밍업→gold(정식) + 현행 + TOP5 + NPU 고가동
+            picked = [by_key(x) for x in FINAL_KEYS if x in _BY_KEY]
         elif k == "gpu-models":          # 모델 비교(MobileNetV3 + ResNet18)
             picked = [by_key(x) for x in GPU_MODEL_KEYS if x in _BY_KEY]
         elif k in GROUPS:

@@ -471,6 +471,7 @@ DEV_BENCH_PRESET_HINT = (
 DEV_BENCH_PRESET_QUICK = "빠른"
 DEV_BENCH_PRESET_FACEOFF = "대결(현행vs생존자)"
 DEV_BENCH_PRESET_MAIN = "생존자 전체"
+DEV_BENCH_PRESET_FINAL = "최종(고전2회+TOP5+NPU고가동)"
 DEV_BENCH_TIMEOUT_LABEL = "조합별 타임아웃(초, 0=무제한)"
 DEV_BENCH_MAXSLOTS_LABEL = "서브샘플: slot 수 상한(0=전체)"
 DEV_BENCH_MAXIMG_LABEL = "서브샘플: 측당 이미지 상한(0=전체)"

@@ -233,3 +233,48 @@ def test_query_failures_identifies_missed_query_and_rank():
     assert m["ok"] is False and m["top1"] == "vx" and m["correct_rank"] == 2
     # GT 없는 쿼리는 제외.
     assert len(bm.query_failures(res, {("A", "r1.jpg"): {"v1"}})) == 1
+
+
+# ── 최종 벤치 프리셋(top5 / final) + 고전 워밍업 2회 + NPU 고가동 5종 ──────────
+def test_top5_preset_is_five_stable_survivors():
+    top5 = [r.key for r in rx.select("top5")]
+    assert len(top5) == 5
+    assert "cpu_rr_phash_orb" in top5 and "rr_orb_center50" in top5
+    assert set(top5) <= set(rx.all_extended_keys())
+
+
+def test_final_preset_runs_classical_first_and_second():
+    final = [r.key for r in rx.select("final")]
+    # 고전이 ①워밍업(1번째) → ②정식(2번째) 으로 연속(순서 편향 제거 — 사용자 요청).
+    assert final[0] == "cpu_classical_warmup"
+    assert final[1] == rx.BASELINE_ACCURACY_KEY
+    assert final[2] == rx.PRODUCTION_SPEED_KEY
+    # 워밍업은 정식 고전과 같은 채점(같은 scoring/recall)이되 키만 다르다.
+    w = rx.by_key("cpu_classical_warmup")
+    g = rx.by_key(rx.BASELINE_ACCURACY_KEY)
+    assert w.scoring == g.scoring and w.recall == g.recall and w.key != g.key
+    # TOP5 + NPU 고가동 5종이 뒤따른다.
+    assert set(rx.TOP5_KEYS) <= set(final) and set(rx.NPU_HI_KEYS) <= set(final)
+    # 워밍업·NPU 고가동은 '개별 명시'로 스킵 면제(대상 장비에서 그대로 측정).
+    ek = rx.explicit_keys("final")
+    assert "cpu_classical_warmup" in ek and set(rx.NPU_HI_KEYS) <= ek
+
+
+def test_npu_hi_recipes_drive_npu_hard_batch1():
+    g = {r.key: r for r in rx.group("npu-hi")}
+    assert len(g) == 5
+    for r in g.values():
+        assert r.embed_batch == 1          # 배치 정확도 버그 회피
+        assert (r.concurrency >= 64 or r.streams >= 4 or r.npu_defect_assist)
+    assert g["npu_hi_split"].recall == rx.RECALL_GPU_NPU
+    assert g["npu_hi_throughput"].perf_hint == "THROUGHPUT"
+
+
+def test_recipe_run_records_npu_usage_fields():
+    from dataclasses import asdict
+    rr = bm.RecipeRun(key="x", name="x", npu_used=True, npu_sec=4.2,
+                      npu_infer=809, npu_throughput=192.6, npu_busy_frac=0.2,
+                      npu_drive="jobs=96 streams=0 batch=1 hint=THROUGHPUT")
+    d = asdict(rr)
+    assert d["npu_used"] is True and d["npu_busy_frac"] == 0.2
+    assert "jobs=96" in d["npu_drive"]

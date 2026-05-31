@@ -340,7 +340,8 @@ class DevBenchmarkDialog(QDialog):
         preset_row = QHBoxLayout()
         for label, name in ((i18n.KO.DEV_BENCH_PRESET_QUICK, "quick"),
                             (i18n.KO.DEV_BENCH_PRESET_FACEOFF, "faceoff"),
-                            (i18n.KO.DEV_BENCH_PRESET_MAIN, "main")):
+                            (i18n.KO.DEV_BENCH_PRESET_MAIN, "main"),
+                            (i18n.KO.DEV_BENCH_PRESET_FINAL, "final")):
             btn = QPushButton(label, self)
             btn.clicked.connect(lambda _=False, n=name: self._apply_preset(n))
             preset_row.addWidget(btn)
@@ -350,13 +351,16 @@ class DevBenchmarkDialog(QDialog):
         # 그룹 토글 없음 — 사패 그룹을 옵션에서 제거했다(아카이브는 CLI all+ 로만).
         self._group_checks = {}
 
-        # 개별 레시피 목록 = 메인 옵션(앵커 + 생존자).  '빠른' 키만 기본 체크.
+        # 개별 레시피 목록 = 메인 옵션(앵커 + 생존자) + 최종 벤치 키(고전 워밍업·NPU 고가동).
+        # '빠른' 키만 기본 체크.  최종 프리셋용 키도 체크박스로 노출해 GUI 에서 선택 가능.
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
-        scroll.setMaximumHeight(200)
+        scroll.setMaximumHeight(220)
         host = QWidget()
         hl = QVBoxLayout(host)
-        for r in _rx.main_recipes():
+        _final_extra = [_rx.by_key(k) for k in _rx.FINAL_KEYS
+                        if k not in {x.key for x in _rx.main_recipes()}]
+        for r in list(_rx.main_recipes()) + _final_extra:
             cb = QCheckBox(f"{r.name}  [{r.key}]", host)
             cb.setChecked(r.key in _rx.QUICK_KEYS)
             cb.setToolTip(r.desc)

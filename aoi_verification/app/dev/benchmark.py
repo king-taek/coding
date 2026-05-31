@@ -277,6 +277,14 @@ class RecipeRun:
     embed_recall: Optional[dict] = None
     worst_correct_rank: Optional[int] = None
     cand_n: int = 0
+    # NPU 사용량(프록시) — 진짜 HW 가동률 % 는 플랫폼 의존이라, 드라이브 설정과 실제 NPU
+    # 추론 시간/처리량으로 '얼마나 바쁘게 굴렸나'를 기록한다(사용자 요청).
+    npu_used: bool = False
+    npu_sec: float = 0.0            # NPU 추론에 쓴 시간(임베딩 분담분)
+    npu_infer: int = 0             # NPU 로 임베딩한 이미지 수(추론 횟수 프록시)
+    npu_throughput: float = 0.0    # NPU img/s
+    npu_busy_frac: Optional[float] = None  # npu_sec / total_sec (가동률 프록시)
+    npu_drive: str = ""            # 드라이브 설정: jobs/streams/batch/hint
     desc: str = ""
 
 
@@ -558,6 +566,23 @@ def run_recipe(ds: Dataset, recipe: Recipe, *,
         run.embed_recall = {str(k): v for k, v in rec_k.items()}
         run.worst_correct_rank = worst
         run.cand_n = cn
+    # NPU 사용량(프록시) — 드라이브 설정 + 추정 NPU 시간/처리량/가동률.
+    uses_npu = (recipe.recall in (RECALL_NPU, RECALL_GPU_NPU)
+                or bool(getattr(recipe, "npu_defect_assist", False)))
+    run.npu_used = bool(uses_npu and "NPU" in (devices or set()))
+    _assist = " assist" if getattr(recipe, "npu_defect_assist", False) else ""
+    run.npu_drive = (f"jobs={recipe.concurrency} streams={getattr(recipe,'streams',0)} "
+                     f"batch={recipe.embed_batch} hint={getattr(recipe,'perf_hint','')}{_assist}")
+    if run.npu_used:
+        # NPU 분담분 — NPU 단독=전체, GPU+NPU 분담=절반, defect 보조=별도 추정 어려워 0 처리.
+        frac = (1.0 if recipe.recall == RECALL_NPU
+                else 0.5 if recipe.recall == RECALL_GPU_NPU else 0.0)
+        run.npu_sec = round(embed_t * frac, 3)
+        run.npu_infer = int(run.n_images * frac)
+        if run.npu_sec > 1e-6:
+            run.npu_throughput = round(run.npu_infer / run.npu_sec, 1)
+            run.npu_busy_frac = (round(run.npu_sec / run.total_sec, 3)
+                                 if run.total_sec > 1e-6 else None)
     if run.fell_back_classical and recipe.uses_embedding():
         run.note = "가속/모델 미가용 → CPU 고전 폴백(속도는 CPU 기준)"
         need = str(getattr(recipe, "needs", "") or "")
@@ -1208,6 +1233,33 @@ def render_markdown(suite: SuiteResult, ds: Dataset) -> str:
         L.append("|---|---|")
         for r in sorted(skipped, key=lambda x: x.name):
             L.append(f"| {r.name} (`{r.key}`) | {r.note} |")
+
+    # 임베딩 후보 recall — 정답이 GPU/NPU 순위 몇 위에 있나(CPU 재채점 전).  검증셋이
+    # 커지면(수백 장) 정답이 밀릴 수 있어, topk 재채점이 정답을 자르지 않는지 판단하는 표.
+    cand = [r for r in measured if r.embed_recall and r.cand_n]
+    if cand:
+        ks = sorted(int(k) for k in (cand[0].embed_recall or {}).keys())
+        L.append("\n### 임베딩 후보 recall — 정답이 GPU/NPU 순위 몇 위에(CPU 재채점 전)")
+        L.append("> `worst순위`=정답의 최악 순위(=**놓치지 않을 최소 topk**). 운영 재채점은 "
+                 "후보의 최소 절반(≥40)이라, 이 값이 그보다 작으면 안전.")
+        L.append("| 레시피 | " + " | ".join(f"@{k}" for k in ks) + " | worst순위 | 쿼리수 |")
+        L.append("|---|" + "--:|" * (len(ks) + 2))
+        for r in cand:
+            cells = " | ".join(f"{(r.embed_recall.get(str(k)) or 0)*100:.0f}%" for k in ks)
+            L.append(f"| {r.name} | {cells} | "
+                     f"{r.worst_correct_rank if r.worst_correct_rank else '-'} | {r.cand_n} |")
+
+    # NPU 사용량 — 'NPU 를 얼마나 바쁘게 굴렸나'(드라이브 설정 + 추론시간/처리량/가동률).
+    npu = [r for r in measured if r.npu_used]
+    if npu:
+        L.append("\n### NPU 사용량(가동률 프록시)")
+        L.append("> 진짜 HW% 는 플랫폼 의존이라, 드라이브 설정과 NPU 추론 시간/처리량/가동률로 본다.")
+        L.append("| 레시피 | NPU시간(s) | NPU img/s | 가동률 | 드라이브 설정 |")
+        L.append("|---|--:|--:|--:|---|")
+        for r in npu:
+            bf = f"{r.npu_busy_frac*100:.0f}%" if r.npu_busy_frac is not None else "-"
+            L.append(f"| {r.name} | {r.npu_sec:.2f} | {r.npu_throughput:.1f} | {bf} | "
+                     f"{r.npu_drive} |")
 
     L.append("")
     rec = next((r for r in suite.runs if r.key == suite.recommended_key), None)
