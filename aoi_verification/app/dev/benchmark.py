@@ -704,6 +704,25 @@ def evaluate(results: Results, gt: Dict[Tuple[str, str], set]) -> Tuple[Optional
     return round(hit1 / n, 4), round(hit5 / n, 4), n
 
 
+def query_failures(results: Results, gt: Dict[Tuple[str, str], set]) -> List[dict]:
+    """쿼리별 top-1 정오 + 정답 순위.  recall@1 이 놓친 '그 쿼리'를 짚어내는 데 쓴다.
+
+    각 항목: {slot, query(ref 경로), ok(top1 정답?), top1(예측), correct_rank(정답이 몇
+    위), n_correct}.  순수 함수(헤드리스 테스트) — 예측 결과만 있으면 GT 와 대조한다."""
+    out: List[dict] = []
+    for key, ranked in results.items():
+        correct = gt.get(key)
+        if not correct:
+            continue
+        top = [vp for vp, _ in ranked]
+        ok = bool(top[:1] and top[0] in correct)
+        rank = next((i + 1 for i, vp in enumerate(top) if vp in correct), None)
+        out.append({"slot": key[0], "query": key[1], "ok": ok,
+                    "top1": top[0] if top else None, "correct_rank": rank,
+                    "n_correct": len(correct)})
+    return out
+
+
 def agreement(results: Results, baseline: Results) -> Optional[float]:
     """기준선(보통 CPU 고전 전수)의 top-1 과 일치하는 ref 비율 — '정확도 보존' 측정."""
     if not baseline:
@@ -1352,6 +1371,9 @@ def main(argv=None) -> int:
     ap.add_argument("--npu-embed-diag", action="store_true",
                     help="NPU 배치 정확도 붕괴 원인 규명 — GPU vs NPU(b1) vs NPU(b16) "
                          "임베딩 일치도(코사인/L2) 측정.  --ref 사진 사용.")
+    ap.add_argument("--miss-report", action="store_true",
+                    help="recall@1 이 놓친 '그 쿼리'를 짚어낸다 — gold(전수)는 맞히고 "
+                         "--recipes 가 놓치는 쿼리를 슬롯·파일명·정답순위로 출력(--labels 필요).")
     ap.add_argument("--emit-progress", action="store_true",
                     help="레시피 시작/완료를 기계가 읽는 '@@AOI_PROG' 줄로 출력"
                          "(GUI 가 별도 프로세스로 실행하며 진행/크래시 추적에 사용)")
@@ -1429,6 +1451,34 @@ def main(argv=None) -> int:
         print("공통 slot 이 없습니다(폴더 구조 확인).")
         return 2
     print(f"데이터: slot {len(ds.tasks)} · 이미지 {ds.n_images()} · 쌍 {ds.n_pairs()}")
+
+    if args.miss_report:
+        if not ds.gt:
+            print("정답 라벨이 없어 실패 분석 불가 — --labels 를 주세요(self-test 도 가능).")
+            return 2
+        devices = detect_devices()
+        gold = _rx.by_key(_rx.BASELINE_ACCURACY_KEY)
+        print(f"[miss-report] gold({gold.key}) 채점 중…")
+        gold_res, _ = run_recipe(ds, gold, threshold=args.threshold, devices=devices)
+        gold_ok = {(f["slot"], f["query"]): f["ok"]
+                   for f in query_failures(gold_res, ds.gt)}
+        # 비교 대상 — gold 제외한 --recipes(없으면 추천 winner 후보).
+        targets = [r for r in _rx.select(args.recipes)
+                   if r.key != _rx.BASELINE_ACCURACY_KEY]
+        for recipe in targets:
+            res, _ = run_recipe(ds, recipe, threshold=args.threshold, devices=devices)
+            fails = [f for f in query_failures(res, ds.gt) if not f["ok"]]
+            print(f"\n=== {recipe.key} — 놓친 쿼리 {len(fails)}개 ===")
+            for f in sorted(fails, key=lambda x: (x["slot"], x["query"])):
+                gok = gold_ok.get((f["slot"], f["query"]))
+                rank = f["correct_rank"]
+                print(f"  · slot={f['slot']}  쿼리={Path(f['query']).name}")
+                print(f"      오답 top1={Path(f['top1']).name if f['top1'] else '∅'}"
+                      f"  · 정답 순위={rank if rank else '후보밖'}/{f['n_correct']}정답"
+                      f"  · gold(전수) 맞힘={gok}")
+            if not fails:
+                print("  (놓친 쿼리 없음 — 이 레시피는 전부 정답)")
+        return 0
 
     # 격리 실행이면 결과 폴더를 미리 만들고 부모에게 알린다(크래시해도 부분 결과를 그 폴더에서 읽음).
     run_dir = None

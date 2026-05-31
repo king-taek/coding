@@ -189,3 +189,16 @@ def test_npu_assist_recipes_registered_and_wired():
         assert r.recall == rx.RECALL_GPU             # GPU 임베딩 recall 은 현행 그대로
         assert r.center_ratio > 0 and r.rerank_workers >= 2
     assert set(rx.NPU_ASSIST_KEYS) <= set(rx.MAIN_KEYS)   # 옵션 노출
+
+
+# ── 실패 분석: recall@1 이 놓친 '그 쿼리'를 짚어낸다(순수) ────────────────────
+def test_query_failures_identifies_missed_query_and_rank():
+    res = {("A", "r1.jpg"): [("v1", 0.9), ("v2", 0.8)],
+           ("A", "r2.jpg"): [("vx", 0.7), ("vc", 0.6)]}     # r2: top1=vx 오답, 정답 vc=2위
+    gt = {("A", "r1.jpg"): {"v1"}, ("A", "r2.jpg"): {"vc"}}
+    fa = {(f["slot"], f["query"]): f for f in bm.query_failures(res, gt)}
+    assert fa[("A", "r1.jpg")]["ok"] is True and fa[("A", "r1.jpg")]["correct_rank"] == 1
+    m = fa[("A", "r2.jpg")]
+    assert m["ok"] is False and m["top1"] == "vx" and m["correct_rank"] == 2
+    # GT 없는 쿼리는 제외.
+    assert len(bm.query_failures(res, {("A", "r1.jpg"): {"v1"}})) == 1
