@@ -35,9 +35,10 @@ def test_quick_preset_is_small_and_valid():
         rx.by_key(k)                              # KeyError 면 실패
     assert rx.BASELINE_ACCURACY_KEY in rx.QUICK_KEYS
     assert rx.PRODUCTION_SPEED_KEY in rx.QUICK_KEYS
-    # 재채점 축소 생존자(rr_)와 중앙-인식(center_) 신규 실험이 들어 있어야 한다.
-    assert any(k.startswith("rr_") for k in rx.QUICK_KEYS)
-    assert any(k.startswith("center_") for k in rx.QUICK_KEYS)
+    # 재채점 생존자(rr_/cpu_rr_)가 들어 있어야 한다.
+    assert any(k.startswith(("rr_", "cpu_rr_")) for k in rx.QUICK_KEYS)
+    # quick 은 메인 옵션(앵커+생존자)의 부분집합이다.
+    assert set(rx.QUICK_KEYS) <= set(rx.MAIN_KEYS)
 
 
 def test_select_quick_returns_quick_keys_in_order():

@@ -329,9 +329,10 @@ class DevBenchmarkDialog(QDialog):
 
         root.addWidget(QLabel(i18n.KO.DEV_BENCH_RECIPES, self))
 
-        # 프리셋 — 기본은 '빠른'(핵심 소수).  실측상 임베딩 장치 교체는 속도 이득이
-        # 거의 없고(×1.02), 3배의 레버는 'CPU 재채점 축소'라 빠른 프리셋은 현행·기준선과
-        # 재채점 경량/병렬 후보를 함께 본다.  '표준'=core 13, '전체'=확장 그룹까지.
+        # 프리셋 — 옵션은 **생존자(정확도 97.6% 보존 확인)** + 앵커(현행·기준선)만 노출한다.
+        # 입증된 사패(임베딩 장치 교체·ORB 제거 붕괴·NPU 배치·center-aware·모델주머니)는
+        # 옵션에서 내렸다(필요 시 CLI `--recipes all+` 로만).  '빠른'=핵심 소수, '대결'=현행 vs
+        # 생존자, '생존자 전체'=모든 생존자.
         preset_hint = QLabel(i18n.KO.DEV_BENCH_PRESET_HINT, self)
         preset_hint.setWordWrap(True)
         preset_hint.setStyleSheet("color: #9AA;")
@@ -339,50 +340,24 @@ class DevBenchmarkDialog(QDialog):
         preset_row = QHBoxLayout()
         for label, name in ((i18n.KO.DEV_BENCH_PRESET_QUICK, "quick"),
                             (i18n.KO.DEV_BENCH_PRESET_FACEOFF, "faceoff"),
-                            (i18n.KO.DEV_BENCH_PRESET_CORE, "core"),
-                            (i18n.KO.DEV_BENCH_PRESET_ALL, "all")):
+                            (i18n.KO.DEV_BENCH_PRESET_MAIN, "main")):
             btn = QPushButton(label, self)
             btn.clicked.connect(lambda _=False, n=name: self._apply_preset(n))
             preset_row.addWidget(btn)
         preset_row.addStretch(1)
         root.addLayout(preset_row)
 
-        # 확장 그룹 토글 — 체크하면 그 그룹 전체(NPU 사용방식 스윕/NPU 단독/고속
-        # 재채점/모델 주머니)를 실험에 포함한다(개별 레시피는 아래 목록).
-        grp_row = QHBoxLayout()
+        # 그룹 토글 없음 — 사패 그룹을 옵션에서 제거했다(아카이브는 CLI all+ 로만).
         self._group_checks = {}
-        for gkey, glabel in (
-            ("center", i18n.KO.DEV_BENCH_GROUP_CENTER),
-            ("npu-sweep", i18n.KO.DEV_BENCH_GROUP_NPU_SWEEP),
-            ("npu-only", i18n.KO.DEV_BENCH_GROUP_NPU_ONLY),
-            ("fast-rerank", i18n.KO.DEV_BENCH_GROUP_FAST_RERANK),
-            ("model-zoo", i18n.KO.DEV_BENCH_GROUP_MODEL_ZOO),
-        ):
-            n = len(_rx.group(gkey))
-            cb = QCheckBox(f"{glabel} (+{n})", self)
-            cb.setChecked(False)
-            self._group_checks[gkey] = cb
-            grp_row.addWidget(cb)
-        grp_row.addStretch(1)
-        root.addLayout(grp_row)
 
-        # 개별 레시피 목록 — core 13 + (빠른 프리셋에 든 fast-rerank 후보).  빠른 프리셋
-        # 키만 기본 체크해 항목 수를 줄인다.  나머지는 그룹 토글/전체 프리셋으로 펼친다.
+        # 개별 레시피 목록 = 메인 옵션(앵커 + 생존자).  '빠른' 키만 기본 체크.
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
         scroll.setMaximumHeight(200)
         host = QWidget()
         hl = QVBoxLayout(host)
-        core_set = {r.key for r in _rx.REGISTRY}
-        # core 외 추가 체크박스 = 빠른(린) + 대결 프리셋이 쓰는 생존자/중앙-인식 키.
-        extra, _seen = [], set()
-        for k in list(_rx.QUICK_KEYS) + list(_rx.FACEOFF_KEYS):
-            if k not in core_set and k not in _seen:
-                _seen.add(k)
-                extra.append(_rx.by_key(k))
-        for r in list(_rx.REGISTRY) + extra:
-            tag = "" if r.key in core_set else f"  ({r.tag})"
-            cb = QCheckBox(f"{r.name}  [{r.key}]{tag}", host)
+        for r in _rx.main_recipes():
+            cb = QCheckBox(f"{r.name}  [{r.key}]", host)
             cb.setChecked(r.key in _rx.QUICK_KEYS)
             cb.setToolTip(r.desc)
             self._recipe_checks[r.key] = cb
@@ -453,23 +428,17 @@ class DevBenchmarkDialog(QDialog):
     def _apply_preset(self, name: str) -> None:
         """프리셋 버튼 — 체크박스/그룹 토글을 일괄 설정.
 
-        - ``quick``: 빠른(린) 프리셋(QUICK_KEYS)만 체크, 그룹 해제.
-        - ``faceoff``: 현행 vs 재채점 생존자(FACEOFF_KEYS)만 체크, 그룹 해제.
-        - ``core``: core 레지스트리 전부 체크(추가분 해제), 그룹 해제.
-        - ``all``: 모든 개별 체크 + 모든 그룹 토글 on.
+        - ``quick``: 빠른 프리셋(QUICK_KEYS)만 체크.
+        - ``faceoff``: 현행 vs 재채점 생존자(FACEOFF_KEYS)만 체크.
+        - ``main``(그 외): 메인 옵션(앵커 + 생존자) 전부 체크.
         """
-        core_set = {r.key for r in _rx.REGISTRY}
         for key, cb in self._recipe_checks.items():
             if name == "quick":
                 cb.setChecked(key in _rx.QUICK_KEYS)
             elif name == "faceoff":
                 cb.setChecked(key in _rx.FACEOFF_KEYS)
-            elif name == "core":
-                cb.setChecked(key in core_set)
-            else:                                # all
+            else:                                # main — 생존자 전체
                 cb.setChecked(True)
-        for gcb in getattr(self, "_group_checks", {}).values():
-            gcb.setChecked(name == "all")
 
     def _selected_keys(self) -> List[str]:
         # 개별 레시피 + 체크된 확장 그룹 전체(중복 제거, 순서 보존).

@@ -64,17 +64,28 @@ def test_center_ratio_cache_key_and_ratio():
 
 
 # ── 개발자 모드 테스트 목록 정리 — 린 기본 + faceoff + 아카이브 ──────────────
-def test_quick_is_lean_and_includes_production_and_center():
+def test_quick_is_survivors_only_no_dead_ends():
+    # center-aware 가 비효율로 입증된 뒤, 옵션은 '생존자'만 남겼다(center 는 quick 에서 제외).
     quick = [r.key for r in rx.select("quick")]
     assert len(quick) <= 12                         # 린(작게)
     # 추천 엔진이 production 대비 speedup 을 계산할 수 있게 현행/기준선 항상 포함.
     assert rx.PRODUCTION_SPEED_KEY in quick
     assert rx.BASELINE_ACCURACY_KEY in quick
-    # 사용자 제안(중앙-인식)과 생존자가 들어있다.
-    assert any(k.startswith("center_") for k in quick)
-    assert "rr_parallel" in quick
-    # 입증된 사패(임베딩 장치 교체)는 린 기본에서 빠진다.
+    assert "rr_parallel" in quick                    # ×3.95 생존자
+    # 입증된 사패(임베딩 장치 교체·center-aware)는 옵션/quick 에서 빠진다.
     assert "npu_mbnet_cpu_fuse" not in quick
+    assert not any(k.startswith("center_") for k in quick)
+
+
+def test_main_options_are_anchors_plus_survivors():
+    main = [r.key for r in rx.select("main")]
+    assert rx.BASELINE_ACCURACY_KEY in main and rx.PRODUCTION_SPEED_KEY in main
+    assert set(rx.SURVIVOR_KEYS) <= set(main)
+    # 사패는 메인 옵션에 없다(아카이브 all+ 로만).
+    for dead in ("npu_mbnet_cpu_fuse", "gpu_fusion_topk20", "cpu_rr_phash",
+                 "center_fusion_r25_w60", "rr_npu_phash_parallel"):
+        assert dead not in main
+        assert dead in set(rx.all_extended_keys())   # 기록은 보존(all+)
 
 
 def test_faceoff_preset_resolves_and_is_skip_exempt():

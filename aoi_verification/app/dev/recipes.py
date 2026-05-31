@@ -232,21 +232,35 @@ REGISTRY: List[Recipe] = [
 BASELINE_ACCURACY_KEY = "cpu_classical_full"   # 정확도의 정답 기준선
 PRODUCTION_SPEED_KEY = "gpu_fusion_b16"        # 현행(속도 3배 목표의 분모)
 
-# '빠른' 프리셋(기본 선택) — **린 기본**.  실측 결론을 반영해, 입증된 사패(임베딩 장치
-# 교체 ×1.02·ORB 제거 시 정확도 붕괴·NPU 배치 정확도 손상)는 빼고, **3배 판단에 바로
-# 필요한 생존자 + 중앙-인식 신규 실험**만 둔다.  나머지는 그룹/`all+`(아카이브)로 opt-in.
-#   · 정확도 gold + 현행 anchor 를 **항상 포함** → 추천 엔진이 production 대비 speedup 을
-#     정상 계산(예전엔 production 미포함 런에서 추천이 cpu_classical_full 로 잘못 나왔다).
+# 실측으로 **정확도 보존(97.6%, 현행 동률) 확인된 '생존자'** 재채점 레시피.  3배 달성은
+# `rr_parallel`(×3.95)로 확정됐고, 이 묶음만 추가 실험 대상으로 남긴다.  나머지(임베딩 장치
+# 교체 ×1.02·ORB 제거 시 정확도 붕괴·NPU 배치 손상·center-aware 비효율·모델주머니)는
+# 옵션에서 내리고 아카이브(`all+`/그룹)로만 둔다.
+SURVIVOR_KEYS: List[str] = [
+    "rr_parallel",            # 재채점 항 동일·16스레드 병렬 — ×3.95 @97.6% (추천)
+    "cpu_rr_orb_only",        # ORB 단독 — 97.6%
+    "cpu_rr_phash_orb",       # pHash+ORB(SSIM 뺌) — 97.6%
+    "cpu_rr_parallel8",       # 병렬8 — 97.6%
+    "cpu_rr_parallel16",      # 병렬16 — 97.6%
+    "cpu_rr_parallel32",      # 병렬32 — 97.6%
+    "cpu_rr_orb128",          # ORB 특징 128 — 97.6%
+    "cpu_rr_orb256",          # ORB 특징 256 — 97.6%
+    "rr_orb_ssim",            # ORB+SSIM — 97.6%
+    "cpu_rr_orb256_parallel", # ORB256+병렬 — 95.1%(1장 차·빠름)
+]
+
+# 개발자 모드 '메인 옵션' = 앵커(gold·현행) + 생존자.  GUI/CLI 가 보여주는 목록은 이것뿐.
+MAIN_KEYS: List[str] = [BASELINE_ACCURACY_KEY, PRODUCTION_SPEED_KEY] + SURVIVOR_KEYS
+
+# '빠른' 프리셋(기본 선택) — 앵커 + 핵심 생존자 소수(빠른 반복용).  현행을 **항상 포함**해
+# 추천 엔진이 production 대비 speedup 을 정상 계산한다.
 QUICK_KEYS: List[str] = [
     BASELINE_ACCURACY_KEY,         # 정확도 gold(100%) — 일치율 기준선
     PRODUCTION_SPEED_KEY,          # 현행 anchor(97.6%) = '3배'의 분모
-    "rr_parallel",                 # 재채점 병렬(항 동일) — 정확도 보존·×3.6 생존자
-    "cpu_rr_orb_only",             # ORB 단독(정확도 보존) — 경량 재채점 생존자
-    "cpu_rr_parallel16",           # 병렬16(정확도 보존) — 생존자
-    "center_fusion_r25_w60",       # (A) 중앙 defect + 주변 패턴 융합 — 사용자 제안
-    "center_fusion_r25_w60_par",   # (A) + 병렬 — 정확도·속도 동시
-    "center_cascade_r25_k8",       # (B) 중앙 coarse → 풀 fine 캐스케이드
-    "center_cascade_r25_k8_par",   # (B) + 병렬 — center-aware 속도 최적 후보
+    "rr_parallel",                 # ×3.95 @97.6% (추천)
+    "cpu_rr_orb_only",             # 97.6% 생존자
+    "cpu_rr_phash_orb",            # 97.6% 생존자
+    "cpu_rr_parallel16",           # 97.6% 생존자
 ]
 
 # 동일-런 head-to-head — 현행 + 재채점 생존자(반복 측정으로 분산까지 확인).
@@ -602,6 +616,13 @@ def quick_recipes() -> List[Recipe]:
     return [by_key(k) for k in QUICK_KEYS if k in _BY_KEY]
 
 
+def main_recipes() -> List[Recipe]:
+    """개발자 모드에 **노출하는 메인 옵션** = 앵커 + 생존자(``MAIN_KEYS``).
+
+    입증된 사패는 옵션에서 내렸다(아카이브는 ``all+``/그룹으로만)."""
+    return [by_key(k) for k in MAIN_KEYS if k in _BY_KEY]
+
+
 def explicit_keys(keys=None) -> Set[str]:
     """사용자가 **개별 레시피 키로 직접 고른** 것만 추출(그룹명/전체 토큰 제외).
 
@@ -614,12 +635,15 @@ def explicit_keys(keys=None) -> Set[str]:
         return set()
     if isinstance(keys, str):
         keys = [k.strip() for k in keys.split(",") if k.strip()]
-    special = set(GROUPS) | {"all", "all+", "everything", "quick", "faceoff"}
+    special = set(GROUPS) | {"all", "all+", "everything", "quick", "faceoff",
+                             "main", "survivors"}
     out = {k for k in keys if k not in special and k in _BY_KEY}
     if "quick" in keys:
         out |= {k for k in QUICK_KEYS if k in _BY_KEY}
     if "faceoff" in keys:
         out |= {k for k in FACEOFF_KEYS if k in _BY_KEY}
+    if "main" in keys or "survivors" in keys:
+        out |= {k for k in MAIN_KEYS if k in _BY_KEY}
     return out
 
 
@@ -646,6 +670,8 @@ def select(keys=None) -> List[Recipe]:
             picked = ALL_EXTENDED
         elif k == "quick":
             picked = quick_recipes()
+        elif k in ("main", "survivors"):
+            picked = main_recipes()
         elif k == "faceoff":
             picked = [by_key(x) for x in FACEOFF_KEYS if x in _BY_KEY]
         elif k in GROUPS:

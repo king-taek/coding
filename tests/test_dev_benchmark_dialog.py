@@ -31,12 +31,9 @@ def test_dialog_defaults_to_quick_preset(app):
         DevBenchmarkDialog
     dlg = DevBenchmarkDialog(default_ref="/tmp/x")
     try:
-        # 개별 체크박스 = core 레지스트리 + 빠른(린)·대결 프리셋의 추가분(생존자/중앙-인식).
-        core = set(rx.all_keys())
-        extra = {k for k in (list(rx.QUICK_KEYS) + list(rx.FACEOFF_KEYS))
-                 if k not in core}
-        assert set(dlg._recipe_checks.keys()) == core | extra
-        # 기본 선택은 '빠른'(핵심 소수) — 전체가 아니다.
+        # 개별 체크박스 = 메인 옵션(앵커 + 생존자)뿐 — 사패는 옵션에서 제거됐다.
+        assert set(dlg._recipe_checks.keys()) == set(rx.MAIN_KEYS)
+        # 기본 선택은 '빠른'(핵심 소수) — 메인 전체가 아니다.
         assert dlg._selected_keys() == list(rx.QUICK_KEYS)
         assert dlg.table.columnCount() == 8
         assert dlg.self_test.isChecked() is True
@@ -49,14 +46,14 @@ def test_dialog_presets_switch_selection(app):
         DevBenchmarkDialog
     dlg = DevBenchmarkDialog(default_ref="/tmp/x")
     try:
-        dlg._apply_preset("core")
-        assert set(dlg._selected_keys()) == set(rx.all_keys())
-        dlg._apply_preset("all")
-        sel = set(dlg._selected_keys())
-        # 전체는 확장 그룹(예: npu-sweep)까지 포함한다.
-        assert {r.key for r in rx.group("npu-sweep")} <= sel
+        dlg._apply_preset("main")
+        assert set(dlg._selected_keys()) == set(rx.MAIN_KEYS)
+        dlg._apply_preset("faceoff")
+        assert set(dlg._selected_keys()) == set(rx.FACEOFF_KEYS)
         dlg._apply_preset("quick")
         assert dlg._selected_keys() == list(rx.QUICK_KEYS)
+        # 사패 그룹 토글은 옵션에서 사라졌다.
+        assert dlg._group_checks == {}
     finally:
         dlg.deleteLater()
 
