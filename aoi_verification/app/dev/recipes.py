@@ -261,6 +261,24 @@ NPU_ASSIST_KEYS: List[str] = ["npu_assist_r25", "npu_assist_r20"]
 MAIN_KEYS: List[str] = ([BASELINE_ACCURACY_KEY, PRODUCTION_SPEED_KEY]
                         + SURVIVOR_KEYS + CENTER_ORB_KEYS + NPU_ASSIST_KEYS)
 
+# ── 최종 후보 TOP5 — 실측 97.6%(현행 동률)·런 간 안정적인 5가지(성능+안정성) ─────
+TOP5_KEYS: List[str] = [
+    "cpu_rr_phash_orb",   # pHash+ORB(SSIM 뺌) — 최속(~×4.2)
+    "rr_parallel",        # 풀 고전(pHash+ORB+SSIM)·병렬 — 성분 동일(가장 안전)
+    "cpu_rr_parallel16",  # 풀 고전·병렬16 — 안전 동률
+    "cpu_rr_orb_only",    # ORB 단독 — 빠름·동률
+    "rr_orb_center50",    # 중앙가중 ORB — defect 정중앙 강건성(동급 속도)
+]
+
+# 고전 전수의 '워밍업' 별칭 — 같은 채점이나 키가 달라 **첫 순서로 한 번 더** 돌린다.
+# 첫 레시피는 캐시/JIT/디스크 워밍업으로 느릴 수 있어, 이 1회차는 버리고 두 번째
+# (정식 cpu_classical_full)를 기준선으로 쓴다(순서 편향 제거 — 사용자 요청).
+WARMUP_CLASSICAL = Recipe(
+    key="cpu_classical_warmup", name="CPU 고전 전수(워밍업·1회차)",
+    recall=RECALL_NONE, scoring=SCORE_CLASSICAL, diagnostic=True,
+    desc=("정식 측정 전 워밍업 1회차 — cpu_classical_full 과 동일 채점이나 첫 순서의 "
+          "느림(캐시/JIT)을 흡수해 버리는 용도.  정식 기준선은 두 번째 cpu_classical_full."))
+
 # '빠른' 프리셋(기본 선택) — 앵커 + 핵심 생존자 소수(빠른 반복용).  현행을 **항상 포함**해
 # 추천 엔진이 production 대비 speedup 을 정상 계산한다.
 QUICK_KEYS: List[str] = [
@@ -659,6 +677,43 @@ GPU_MODEL_KEYS: List[str] = ["gpu_embed_only", "gpu_fusion_b16",
                              "gpu_embed_resnet18", "gpu_fusion_resnet18"]
 
 
+# ===========================================================================
+# (E) NPU 사용량을 '높인' 5가지 — 가설: NPU 를 더 바쁘게(동시추론/스트림/분담) 굴리면
+#     속도·정확도가 개선될 수도.  배치 정확도 버그를 피해 **batch=1 고정**하고, in-flight
+#     작업(jobs)·스트림·GPU+NPU 분담으로 가동률을 끌어올린다.  벤치가 NPU 사용량(시간·
+#     처리량·드라이브 설정)을 함께 기록한다.
+# ===========================================================================
+def _build_npu_hi() -> List[Recipe]:
+    base = dict(scoring=SCORE_FUSION, embed_model=MODEL_MOBILENET_V3,
+                embed_batch=1, fusion_topk=40, rerank_workers=16, tag="npu_hi")
+    return [
+        Recipe(key="npu_hi_conc96", name="NPU고가동 동시추론96",
+               recall=RECALL_NPU, concurrency=96, **base,
+               desc="NPU 동시 in-flight 추론 96개로 가동률↑(batch=1 정확도 보존). 추출=NPU·재채점=CPU병렬."),
+        Recipe(key="npu_hi_streams4", name="NPU고가동 스트림4",
+               recall=RECALL_NPU, concurrency=64, streams=4, **base,
+               desc="NPU 실행 스트림 4개로 병렬 실행 단위↑(batch=1). 동시추론과 결합해 가동률을 끌어올림."),
+        Recipe(key="npu_hi_throughput", name="NPU고가동 THROUGHPUT힌트",
+               recall=RECALL_NPU, concurrency=96, perf_hint="THROUGHPUT", **base,
+               desc="OpenVINO THROUGHPUT 힌트 + 동시추론96 — 처리량 우선으로 NPU 를 최대한 바쁘게."),
+        Recipe(key="npu_hi_split", name="NPU고가동 GPU+NPU분담",
+               recall=RECALL_GPU_NPU, concurrency=64, **base,
+               desc="임베딩을 GPU·NPU 에 절반씩 동시 분담(batch=1) — 두 장치를 동시에 가동해 추출 처리량↑."),
+        Recipe(key="npu_hi_assist_conc", name="NPU고가동 defect보조+동시96",
+               recall=RECALL_GPU, npu_defect_assist=True, center_ratio=0.25,
+               concurrency=96, **base,
+               desc="GPU 임베딩 + NPU 가 중앙 defect 임베딩(batch=1·동시96)을 3신호로 — NPU 를 재채점과 겹쳐 바쁘게."),
+    ]
+
+
+NPU_HI: List[Recipe] = _build_npu_hi()
+NPU_HI_KEYS: List[str] = [r.key for r in NPU_HI]
+
+# 최종 벤치 순서 — ①고전 워밍업 → ②고전(정식 기준선) → ③현행 → TOP5 → NPU 고가동 5.
+FINAL_KEYS: List[str] = (["cpu_classical_warmup", BASELINE_ACCURACY_KEY,
+                          PRODUCTION_SPEED_KEY] + TOP5_KEYS + NPU_HI_KEYS)
+
+
 NPU_SWEEP: List[Recipe] = _build_npu_sweep()
 NPU_ONLY: List[Recipe] = _build_npu_only()
 FAST_RERANK: List[Recipe] = _build_fast_rerank()
@@ -679,7 +734,7 @@ GROUPS = {
     "fast-rerank": FAST_RERANK,
     "model-zoo": MODEL_ZOO,
 }
-# 'gpu-models' 는 그룹이 아니라 **비교 프리셋**(MobileNetV3 현행 + ResNet18) — select() 에서 처리.
+# 'gpu-models'·'top5'·'final' 은 그룹이 아니라 **비교/최종 프리셋** — select() 에서 처리.
 ALL_EXTENDED: List[Recipe] = (REGISTRY + [WARMUP_CLASSICAL] + CENTER_AWARE
                               + CENTER_ORB + NPU_ASSIST + NPU_HI + GPU_MODELS
                               + NPU_SWEEP + NPU_ONLY + FAST_RERANK + MODEL_ZOO)
@@ -775,7 +830,7 @@ def select(keys=None) -> List[Recipe]:
             picked = [by_key(x) for x in FACEOFF_KEYS if x in _BY_KEY]
         elif k == "top5":
             picked = [by_key(x) for x in TOP5_KEYS if x in _BY_KEY]
-        elif k == "final":               # 최종 벤치: gold 워밍업→gold(정식) + 현행 + TOP5 + NPU 고가동
+        elif k == "final":               # 최종: 고전 워밍업→정식 + 현행 + TOP5 + NPU 고가동
             picked = [by_key(x) for x in FINAL_KEYS if x in _BY_KEY]
         elif k == "gpu-models":          # 모델 비교(MobileNetV3 + ResNet18)
             picked = [by_key(x) for x in GPU_MODEL_KEYS if x in _BY_KEY]
