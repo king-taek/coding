@@ -29,14 +29,15 @@ def test_baseline_and_production_keys_present():
 
 
 def test_quick_preset_is_small_and_valid():
-    # '빠른' 프리셋 — 항목이 적고(<=6), 모든 키가 실존하며, 기준선/현행을 포함한다.
-    assert 0 < len(rx.QUICK_KEYS) <= 6
+    # '빠른(린)' 프리셋 — 항목이 적고(<=12), 모든 키가 실존하며, 기준선/현행을 포함한다.
+    assert 0 < len(rx.QUICK_KEYS) <= 12
     for k in rx.QUICK_KEYS:
         rx.by_key(k)                              # KeyError 면 실패
     assert rx.BASELINE_ACCURACY_KEY in rx.QUICK_KEYS
     assert rx.PRODUCTION_SPEED_KEY in rx.QUICK_KEYS
-    # 3배의 레버인 재채점 축소 후보(fast-rerank)가 들어 있어야 한다.
+    # 재채점 축소 생존자(rr_)와 중앙-인식(center_) 신규 실험이 들어 있어야 한다.
     assert any(k.startswith("rr_") for k in rx.QUICK_KEYS)
+    assert any(k.startswith("center_") for k in rx.QUICK_KEYS)
 
 
 def test_select_quick_returns_quick_keys_in_order():

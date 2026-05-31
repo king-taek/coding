@@ -67,6 +67,14 @@ class Recipe:
     rerank: str = "classical"      # classical / phash / phash_ssim / orb_ssim / phash_orb / orb / ssim
     rerank_workers: int = 0        # 재채점 병렬 워커 수(0=직렬) — CPU 멀티코어 활용
     orb_nfeatures: int = 0         # ORB 검출 특징 수(0=기본 500) — 줄이면 ORB 비용↓
+    # ── 중앙-인식(center-aware) 재채점 — defect 이 정중앙인 특성 활용 ──────────
+    #   region_fusion: 중앙(defect) crop 점수 + 풀 ROI(주변 패턴) 점수를 가중 융합.
+    #   cascade: 중앙 점수로 거칠게 추려(coarse) 풀 ROI 로 정밀 재채점(fine)만 — 속도↑.
+    region_fusion: bool = False
+    cascade: bool = False
+    center_ratio: float = 0.0      # 중앙 crop 비율(0=0.3) — defect 신호 영역 크기
+    center_weight: float = 0.0     # region_fusion 시 중앙(defect) 가중(0=0.6)
+    cascade_keep: int = 0          # cascade 시 coarse 후 남길 후보 수(0=8)
     # ── 모델 주머니(키포인트/이상탐지 등 전용 채점기 라우팅) ───────────────
     method: str = ""               # "" / model_zoo family (keypoint/anomaly 등)
     needs: str = ""                # 대상 장비에 필요한 추가 패키지/가중치(폴백 안내용)
@@ -98,6 +106,7 @@ class Recipe:
         return _config.SimilarityConfig(
             engine=engine,
             center_crop=bool(self.center_crop),
+            center_ratio=float(self.center_ratio or 0.0),
             top_k=int(self.fusion_topk),
             persist_scores=False,            # 벤치마크는 점수 영속 캐시도 끔
             accel_concurrency=int(self.concurrency),
@@ -223,16 +232,27 @@ REGISTRY: List[Recipe] = [
 BASELINE_ACCURACY_KEY = "cpu_classical_full"   # 정확도의 정답 기준선
 PRODUCTION_SPEED_KEY = "gpu_fusion_b16"        # 현행(속도 3배 목표의 분모)
 
-# '빠른' 프리셋(기본 선택) — 항목을 적게 두되 **속도 3배 판단에 바로 필요한** 비교군.
-# 실측(bench결과)에서 임베딩은 ~3.7s·CPU 재채점이 ~57s 로, 임베딩 장치를 바꿔도 총시간은
-# 거의 그대로(현행 대비 ×1.02)였다.  그래서 3배의 레버는 'CPU 재채점 축소'이고, 그 후보인
-# fast-rerank 2종을 기본에 포함한다(함정/대조용·대규모 스윕은 제외).
+# '빠른' 프리셋(기본 선택) — **린 기본**.  실측 결론을 반영해, 입증된 사패(임베딩 장치
+# 교체 ×1.02·ORB 제거 시 정확도 붕괴·NPU 배치 정확도 손상)는 빼고, **3배 판단에 바로
+# 필요한 생존자 + 중앙-인식 신규 실험**만 둔다.  나머지는 그룹/`all+`(아카이브)로 opt-in.
+#   · 정확도 gold + 현행 anchor 를 **항상 포함** → 추천 엔진이 production 대비 speedup 을
+#     정상 계산(예전엔 production 미포함 런에서 추천이 cpu_classical_full 로 잘못 나왔다).
 QUICK_KEYS: List[str] = [
-    BASELINE_ACCURACY_KEY,      # 정확도 gold(100%) — 일치율 기준선
-    PRODUCTION_SPEED_KEY,       # 현행 anchor(62s·97.6%) = '3배'의 분모
-    "npu_mbnet_cpu_fuse",       # 사용자 아이디어 anchor(정확도 동률·속도 ×1.02 재확인)
-    "rr_parallel",              # 재채점 항목 동일·16스레드 병렬 → 정확도 보존하며 시간↓
-    "rr_npu_phash_parallel",    # NPU추출+ORB제거+병렬 = 3배 핵심 후보
+    BASELINE_ACCURACY_KEY,         # 정확도 gold(100%) — 일치율 기준선
+    PRODUCTION_SPEED_KEY,          # 현행 anchor(97.6%) = '3배'의 분모
+    "rr_parallel",                 # 재채점 병렬(항 동일) — 정확도 보존·×3.6 생존자
+    "cpu_rr_orb_only",             # ORB 단독(정확도 보존) — 경량 재채점 생존자
+    "cpu_rr_parallel16",           # 병렬16(정확도 보존) — 생존자
+    "center_fusion_r25_w60",       # (A) 중앙 defect + 주변 패턴 융합 — 사용자 제안
+    "center_fusion_r25_w60_par",   # (A) + 병렬 — 정확도·속도 동시
+    "center_cascade_r25_k8",       # (B) 중앙 coarse → 풀 fine 캐스케이드
+    "center_cascade_r25_k8_par",   # (B) + 병렬 — center-aware 속도 최적 후보
+]
+
+# 동일-런 head-to-head — 현행 + 재채점 생존자(반복 측정으로 분산까지 확인).
+FACEOFF_KEYS: List[str] = [
+    BASELINE_ACCURACY_KEY, PRODUCTION_SPEED_KEY,
+    "rr_parallel", "cpu_rr_orb_only", "cpu_rr_phash_orb", "cpu_rr_parallel16",
 ]
 
 
@@ -487,20 +507,74 @@ def _build_model_zoo() -> List[Recipe]:
     return out
 
 
+# ===========================================================================
+# (C) 중앙-인식(center-aware) — defect 이 정중앙인 특성 활용.  사용자 제안:
+#     "주변 패턴 유사도를 먼저 보고 defect 유사도를 다시 본다."
+#       · region_fusion: 중앙(defect) + 풀ROI(주변) 점수를 가중 융합(한 패스).
+#       · cascade: 중앙 점수로 거칠게 추려(coarse) → 풀ROI 정밀 재채점(fine)만(속도↑).
+#     베이스는 현행과 동일(GPU MobileNetV3 b16, topk40, fusion) — 정확도 비교 공정.
+# ===========================================================================
+def _build_center_aware() -> List[Recipe]:
+    base = dict(recall=RECALL_GPU, scoring=SCORE_FUSION,
+                embed_model=MODEL_MOBILENET_V3, embed_batch=16,
+                fusion_topk=40, tag="center")
+    out: List[Recipe] = [
+        # ── A. 영역분해 융합 — 중앙 비율/가중 스윕 ──────────────────────
+        Recipe(key="center_fusion_r25_w60", name="중앙융합 r0.25·w0.6",
+               region_fusion=True, center_ratio=0.25, center_weight=0.6, **base,
+               desc=("defect(중앙 25%) 유사도와 주변 패턴(풀 ROI) 유사도를 따로 "
+                     "계산해 중앙에 0.6 가중으로 융합 — 사용자 2단계 아이디어(한 패스).")),
+        Recipe(key="center_fusion_r25_w70", name="중앙융합 r0.25·w0.7",
+               region_fusion=True, center_ratio=0.25, center_weight=0.7, **base,
+               desc="중앙(defect) 가중을 0.7 로 — defect 비중을 더 키운 변형."),
+        Recipe(key="center_fusion_r20_w60", name="중앙융합 r0.20·w0.6",
+               region_fusion=True, center_ratio=0.20, center_weight=0.6, **base,
+               desc="중앙 crop 을 더 좁혀(20%) defect 에 집중한 변형."),
+        Recipe(key="center_fusion_r30_w50", name="중앙융합 r0.30·w0.5",
+               region_fusion=True, center_ratio=0.30, center_weight=0.5, **base,
+               desc="중앙 30%·동등 가중 — 주변 맥락을 더 보존한 변형."),
+        # 정확도 보존 + 속도(병렬) 결합 — region_fusion 에 16스레드 병렬.
+        Recipe(key="center_fusion_r25_w60_par", name="중앙융합 r0.25·w0.6·병렬16",
+               region_fusion=True, center_ratio=0.25, center_weight=0.6,
+               rerank_workers=16, **base,
+               desc="중앙융합(r0.25·w0.6) + ref 16스레드 병렬 — 정확도·속도 동시 노림."),
+        # ── B. 거친→정밀 캐스케이드 — coarse(중앙)로 추리고 fine(풀) 정밀 ──
+        Recipe(key="center_cascade_r25_k8", name="캐스케이드 r0.25·keep8",
+               cascade=True, center_ratio=0.25, cascade_keep=8, **base,
+               desc=("①중앙(defect) 점수로 topk 를 8개로 거칠게 추리고 "
+                     "②풀 ROI 고전을 그 8개에만 — 비싼 풀 재채점을 줄여 속도↑.")),
+        Recipe(key="center_cascade_r25_k12", name="캐스케이드 r0.25·keep12",
+               cascade=True, center_ratio=0.25, cascade_keep=12, **base,
+               desc="캐스케이드 keep 를 12 로 — 정밀 단계 후보를 더 남긴 변형."),
+        Recipe(key="center_cascade_r25_k8_par", name="캐스케이드 r0.25·keep8·병렬16",
+               cascade=True, center_ratio=0.25, cascade_keep=8,
+               rerank_workers=16, **base,
+               desc="캐스케이드(keep8) + 16스레드 병렬 — center-aware 속도 최적 후보."),
+    ]
+    return out
+
+
+CENTER_AWARE: List[Recipe] = _build_center_aware()
+
+
 NPU_SWEEP: List[Recipe] = _build_npu_sweep()
 NPU_ONLY: List[Recipe] = _build_npu_only()
 FAST_RERANK: List[Recipe] = _build_fast_rerank()
 MODEL_ZOO: List[Recipe] = _build_model_zoo()
 
-# 확장 그룹(이름 → 레시피 리스트).  'core' = 기본 13가지.
+# 확장 그룹(이름 → 레시피 리스트).  'core' = 기본 레지스트리.
+#   center      = 중앙-인식(사용자 제안) 신규 실험군.
+#   npu-sweep/npu-only/fast-rerank/model-zoo = opt-in 아카이브(대부분 사패 입증) —
+#     기본 프리셋에는 없고, 필요할 때만 그룹/`all+` 로 펼쳐 측정한다.
 GROUPS = {
     "core": REGISTRY,
+    "center": CENTER_AWARE,
     "npu-sweep": NPU_SWEEP,
     "npu-only": NPU_ONLY,
     "fast-rerank": FAST_RERANK,
     "model-zoo": MODEL_ZOO,
 }
-ALL_EXTENDED: List[Recipe] = (REGISTRY + NPU_SWEEP + NPU_ONLY
+ALL_EXTENDED: List[Recipe] = (REGISTRY + CENTER_AWARE + NPU_SWEEP + NPU_ONLY
                               + FAST_RERANK + MODEL_ZOO)
 _BY_KEY = {r.key: r for r in ALL_EXTENDED}
 
@@ -540,10 +614,12 @@ def explicit_keys(keys=None) -> Set[str]:
         return set()
     if isinstance(keys, str):
         keys = [k.strip() for k in keys.split(",") if k.strip()]
-    special = set(GROUPS) | {"all", "all+", "everything", "quick"}
+    special = set(GROUPS) | {"all", "all+", "everything", "quick", "faceoff"}
     out = {k for k in keys if k not in special and k in _BY_KEY}
     if "quick" in keys:
         out |= {k for k in QUICK_KEYS if k in _BY_KEY}
+    if "faceoff" in keys:
+        out |= {k for k in FACEOFF_KEYS if k in _BY_KEY}
     return out
 
 
@@ -570,6 +646,8 @@ def select(keys=None) -> List[Recipe]:
             picked = ALL_EXTENDED
         elif k == "quick":
             picked = quick_recipes()
+        elif k == "faceoff":
+            picked = [by_key(x) for x in FACEOFF_KEYS if x in _BY_KEY]
         elif k in GROUPS:
             picked = GROUPS[k]
         else:

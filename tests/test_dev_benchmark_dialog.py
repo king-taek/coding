@@ -31,10 +31,11 @@ def test_dialog_defaults_to_quick_preset(app):
         DevBenchmarkDialog
     dlg = DevBenchmarkDialog(default_ref="/tmp/x")
     try:
-        # 개별 체크박스 = core 13 + 빠른 프리셋의 fast-rerank 추가분.
+        # 개별 체크박스 = core 레지스트리 + 빠른(린)·대결 프리셋의 추가분(생존자/중앙-인식).
         core = set(rx.all_keys())
-        quick_extra = {k for k in rx.QUICK_KEYS if k not in core}
-        assert set(dlg._recipe_checks.keys()) == core | quick_extra
+        extra = {k for k in (list(rx.QUICK_KEYS) + list(rx.FACEOFF_KEYS))
+                 if k not in core}
+        assert set(dlg._recipe_checks.keys()) == core | extra
         # 기본 선택은 '빠른'(핵심 소수) — 전체가 아니다.
         assert dlg._selected_keys() == list(rx.QUICK_KEYS)
         assert dlg.table.columnCount() == 8

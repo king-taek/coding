@@ -463,13 +463,15 @@ DEV_BENCH_RECIPES = "실험할 조합 (선택 안 하면 전체)"
 
 # 프리셋 — 항목을 적게 두는 '빠른'을 기본으로.
 DEV_BENCH_PRESET_HINT = (
-    "기본은 ‘빠른’입니다 — 실측상 임베딩 장치(GPU/NPU) 교체는 속도 이득이 거의 없고"
-    "(현행 대비 ×1.02), 속도 3배의 열쇠는 ‘CPU 재채점 줄이기’입니다. 그래서 빠른 묶음은 "
-    "현행·정확도 기준선과 함께 재채점 경량/병렬 후보를 봅니다. ‘표준’=핵심 13, ‘전체’=확장 포함."
+    "기본은 ‘빠른(린)’입니다 — 실측상 임베딩 장치(GPU/NPU) 교체는 속도 이득이 거의 없고"
+    "(현행 대비 ×1.02), 속도 3배의 열쇠는 ‘CPU 재채점 줄이기’입니다. 빠른 묶음은 현행·정확도 "
+    "기준선 + 재채점 생존자 + 중앙-인식(defect 정중앙 활용) 신규 실험만 봅니다. ‘대결’=현행 vs "
+    "재채점 생존자 직접 비교, ‘표준’=핵심 레지스트리, ‘전체’=아카이브(사패 입증)까지 전부."
 )
-DEV_BENCH_PRESET_QUICK = "빠른(핵심 5)"
-DEV_BENCH_PRESET_CORE = "표준(13)"
-DEV_BENCH_PRESET_ALL = "전체(확장)"
+DEV_BENCH_PRESET_QUICK = "빠른(린)"
+DEV_BENCH_PRESET_FACEOFF = "대결(현행vs생존자)"
+DEV_BENCH_PRESET_CORE = "표준"
+DEV_BENCH_PRESET_ALL = "전체(아카이브)"
 DEV_BENCH_TIMEOUT_LABEL = "조합별 타임아웃(초, 0=무제한)"
 DEV_BENCH_MAXSLOTS_LABEL = "서브샘플: slot 수 상한(0=전체)"
 DEV_BENCH_MAXIMG_LABEL = "서브샘플: 측당 이미지 상한(0=전체)"
@@ -491,6 +493,7 @@ DEV_BENCH_COL_ACC = "정확도"
 DEV_BENCH_COL_NOTE = "비고"
 
 # 확장 그룹(개발자 벤치마크) — 체크 시 그룹 전체 포함.
+DEV_BENCH_GROUP_CENTER = "중앙-인식(defect 정중앙)"
 DEV_BENCH_GROUP_NPU_SWEEP = "NPU 사용방식 스윕"
 DEV_BENCH_GROUP_NPU_ONLY = "NPU 단독 채점"
 DEV_BENCH_GROUP_FAST_RERANK = "CPU 고속 재채점"

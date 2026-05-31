@@ -338,6 +338,7 @@ class DevBenchmarkDialog(QDialog):
         root.addWidget(preset_hint)
         preset_row = QHBoxLayout()
         for label, name in ((i18n.KO.DEV_BENCH_PRESET_QUICK, "quick"),
+                            (i18n.KO.DEV_BENCH_PRESET_FACEOFF, "faceoff"),
                             (i18n.KO.DEV_BENCH_PRESET_CORE, "core"),
                             (i18n.KO.DEV_BENCH_PRESET_ALL, "all")):
             btn = QPushButton(label, self)
@@ -351,6 +352,7 @@ class DevBenchmarkDialog(QDialog):
         grp_row = QHBoxLayout()
         self._group_checks = {}
         for gkey, glabel in (
+            ("center", i18n.KO.DEV_BENCH_GROUP_CENTER),
             ("npu-sweep", i18n.KO.DEV_BENCH_GROUP_NPU_SWEEP),
             ("npu-only", i18n.KO.DEV_BENCH_GROUP_NPU_ONLY),
             ("fast-rerank", i18n.KO.DEV_BENCH_GROUP_FAST_RERANK),
@@ -372,9 +374,14 @@ class DevBenchmarkDialog(QDialog):
         host = QWidget()
         hl = QVBoxLayout(host)
         core_set = {r.key for r in _rx.REGISTRY}
-        quick_extra = [_rx.by_key(k) for k in _rx.QUICK_KEYS if k not in core_set]
-        for r in list(_rx.REGISTRY) + quick_extra:
-            tag = "" if r.key in core_set else "  (fast-rerank)"
+        # core 외 추가 체크박스 = 빠른(린) + 대결 프리셋이 쓰는 생존자/중앙-인식 키.
+        extra, _seen = [], set()
+        for k in list(_rx.QUICK_KEYS) + list(_rx.FACEOFF_KEYS):
+            if k not in core_set and k not in _seen:
+                _seen.add(k)
+                extra.append(_rx.by_key(k))
+        for r in list(_rx.REGISTRY) + extra:
+            tag = "" if r.key in core_set else f"  ({r.tag})"
             cb = QCheckBox(f"{r.name}  [{r.key}]{tag}", host)
             cb.setChecked(r.key in _rx.QUICK_KEYS)
             cb.setToolTip(r.desc)
@@ -446,14 +453,17 @@ class DevBenchmarkDialog(QDialog):
     def _apply_preset(self, name: str) -> None:
         """프리셋 버튼 — 체크박스/그룹 토글을 일괄 설정.
 
-        - ``quick``: 빠른 프리셋(QUICK_KEYS)만 체크, 그룹 해제.
-        - ``core``: core 13 전부 체크(빠른 추가분 해제), 그룹 해제.
+        - ``quick``: 빠른(린) 프리셋(QUICK_KEYS)만 체크, 그룹 해제.
+        - ``faceoff``: 현행 vs 재채점 생존자(FACEOFF_KEYS)만 체크, 그룹 해제.
+        - ``core``: core 레지스트리 전부 체크(추가분 해제), 그룹 해제.
         - ``all``: 모든 개별 체크 + 모든 그룹 토글 on.
         """
         core_set = {r.key for r in _rx.REGISTRY}
         for key, cb in self._recipe_checks.items():
             if name == "quick":
                 cb.setChecked(key in _rx.QUICK_KEYS)
+            elif name == "faceoff":
+                cb.setChecked(key in _rx.FACEOFF_KEYS)
             elif name == "core":
                 cb.setChecked(key in core_set)
             else:                                # all

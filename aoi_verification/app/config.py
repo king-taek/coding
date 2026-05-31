@@ -141,9 +141,19 @@ class SimilarityConfig:
     # 정합)는 고전 채점에서 가장 비싼 항이라, 특징 수를 줄이면 CPU 매치 단계가 빨라진다
     # (정확도는 검증 필요).  개발자 벤치마크 전용으로만 0 이 아닌 값을 쓴다.
     orb_nfeatures: int = 0
+    # 중앙-인식(center-aware) 채점 노브 — center_crop 이 켜졌을 때 사용할 중앙 ROI
+    # 비율(0=기본 0.3).  반도체 AOI 이미지는 defect 이 정중앙에 있으므로, 작은 중앙
+    # crop(예: 0.25)은 'defect 신호'를, 풀 ROI 는 '주변 패턴'을 본다.  벤치마크의
+    # region-fusion/cascade 가 이 값으로 중앙 변형 cfg 를 만든다.
+    center_ratio: float = 0.0
+
+    def _center_crop_ratio(self) -> float:
+        """center_crop 적용 시 실제 ROI 비율(0=레거시 0.3)."""
+        r = float(self.center_ratio or 0.0)
+        return r if r > 0.0 else 0.3
 
     def _center_crop_for(self, side) -> bool:
-        """이 side(ref/val)에 중앙 영역 crop(30%)을 적용할지."""
+        """이 side(ref/val)에 중앙 영역 crop 을 적용할지."""
         if side in ("ref", "val"):
             return self.center_crop
         return False               # side 미지정 → crop 안 함 (캐시 키와 일관)
@@ -160,7 +170,8 @@ class SimilarityConfig:
         (교차검증에서 동일 파일이 ref/val 양쪽으로 쓰일 때 캐시 충돌 방지)."""
         parts = []
         if self._center_crop_for(side):
-            parts.append("c30")          # 중앙 30% — 키 변경으로 이전 캐시와 분리
+            # 중앙 crop 비율을 키에 반영 — 비율이 다르면 캐시 분리(c30/c25/…).
+            parts.append(f"c{int(round(self._center_crop_ratio() * 100))}")
         if self.orb_nfeatures:
             parts.append(f"orb{int(self.orb_nfeatures)}")   # 특징 수 다르면 캐시 분리
         return "-".join(parts)

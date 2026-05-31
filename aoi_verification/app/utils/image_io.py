@@ -176,10 +176,13 @@ def center_roi_gray(src: Path,
         roi_ratio = config.Sizing.ROI_RATIO
     if long_edge is None:
         long_edge = config.Sizing.SIMILARITY_PX
-    # 중앙 영역만 사용 옵션 (#7/#2) — side(ref/val) 에 적용.  비율은 30%.
+    # 중앙 영역만 사용 옵션 (#7/#2) — side(ref/val) 에 적용.  비율은 cfg.center_ratio
+    # (0=기본 0.3).  defect 이 정중앙인 AOI 이미지에서 'defect 신호'만 보는 변형용.
     if cfg is not None and getattr(cfg, "_center_crop_for", None) is not None:
         if cfg._center_crop_for(side):
-            roi_ratio = 0.3
+            roi_ratio = (cfg._center_crop_ratio()
+                         if getattr(cfg, "_center_crop_ratio", None) is not None
+                         else 0.3)
 
     img = _open(src)
     img = _to_rgb(img)

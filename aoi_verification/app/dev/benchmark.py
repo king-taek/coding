@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import threading
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace as _dc_replace
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -300,6 +300,26 @@ def skip_reason(recipe: Recipe, devices: set) -> str:
     return ""
 
 
+# ── 중앙-인식(center-aware) 채점 — 순수 함수(헤드리스 테스트 가능) ───────────
+def blend_region_scores(center_map: Dict[str, float], full_map: Dict[str, float],
+                        center_weight: float) -> Dict[str, float]:
+    """defect(중앙) 점수와 주변 패턴(풀 ROI) 점수를 가중 융합.
+
+    사용자 제안: "주변 패턴 유사도 + defect 유사도".  ``center_weight`` 는 중앙
+    (defect) 비중 [0,1].  두 맵에 없는 경로는 0 으로 본다."""
+    w = max(0.0, min(1.0, float(center_weight)))
+    out: Dict[str, float] = {}
+    for p in set(center_map) | set(full_map):
+        out[p] = w * float(center_map.get(p, 0.0)) + (1.0 - w) * float(full_map.get(p, 0.0))
+    return out
+
+
+def cascade_survivors(center_map: Dict[str, float], keep: int) -> List[str]:
+    """coarse(중앙) 점수 상위 ``keep`` 개 경로 — fine(풀 ROI) 정밀 재채점 대상."""
+    keep = max(1, int(keep))
+    return [p for p, _ in sorted(center_map.items(), key=lambda kv: -kv[1])[:keep]]
+
+
 def run_recipe(ds: Dataset, recipe: Recipe, *,
                threshold: float = 0.0,
                devices: Optional[set] = None,
@@ -323,6 +343,35 @@ def run_recipe(ds: Dataset, recipe: Recipe, *,
     def stopped() -> bool:
         return bool(stop and stop())
 
+    def _smap(r, items, c, comp_) -> Dict[str, float]:
+        cands = score_ref_classical(r, items, threshold=0.0, cfg=c,
+                                    components=comp_, stop_cb=stopped)
+        return {str(x.item.path): float(x.score) for x in cands}
+
+    def _rerank_score_map(r, items, comp_) -> Dict[str, float]:
+        """ref 1장 vs 후보들의 고전 점수 맵 {경로:점수}.  recipe 가 center-aware 면
+        중앙(defect)/풀(주변) 영역을 조합한다(B 캐스케이드 / A 영역융합)."""
+        if not items:
+            return {}
+        if getattr(recipe, "cascade", False):
+            ratio = float(getattr(recipe, "center_ratio", 0.0) or 0.25)
+            keep = int(getattr(recipe, "cascade_keep", 0) or 8)
+            cfg_c = _dc_replace(cfg, center_crop=True, center_ratio=ratio)
+            cmap = _smap(r, items, cfg_c, comp_)            # coarse: 중앙(defect)
+            keep_set = set(cascade_survivors(cmap, keep))
+            survivors = [it for it in items if str(it.path) in keep_set]
+            cfg_f = _dc_replace(cfg, center_crop=False)
+            return _smap(r, survivors, cfg_f, comp_)        # fine: 풀 ROI(추려진 것만)
+        if getattr(recipe, "region_fusion", False):
+            ratio = float(getattr(recipe, "center_ratio", 0.0) or 0.25)
+            w = float(getattr(recipe, "center_weight", 0.0) or 0.6)
+            cfg_c = _dc_replace(cfg, center_crop=True, center_ratio=ratio)
+            cfg_f = _dc_replace(cfg, center_crop=False)
+            cmap = _smap(r, items, cfg_c, comp_)            # defect 유사도
+            fmap = _smap(r, items, cfg_f, comp_)            # 주변 패턴 유사도
+            return blend_region_scores(cmap, fmap, w)
+        return _smap(r, items, cfg, comp_)                  # 일반(현행)
+
     def _store(slot, ref_path, ranked):
         ranked = sorted(ranked, key=lambda x: -x[1])[:RESULT_KEEP]
         results[(slot, str(ref_path))] = [(str(p), float(s)) for p, s in ranked]
@@ -333,9 +382,8 @@ def run_recipe(ds: Dataset, recipe: Recipe, *,
         workers = int(getattr(recipe, "rerank_workers", 0) or 0)
 
         def one(r):
-            cands = score_ref_classical(r, vals, threshold=threshold, cfg=cfg,
-                                        components=comp, stop_cb=stopped)
-            return [(c.item.path, c.score) for c in cands]
+            m = _rerank_score_map(r, vals, comp)            # center-aware 면 영역 조합
+            return [(Path(p), s) for p, s in m.items()]
 
         if workers > 1 and len(refs) > 1:
             from concurrent.futures import ThreadPoolExecutor
@@ -418,9 +466,7 @@ def run_recipe(ds: Dataset, recipe: Recipe, *,
             top = ordered[:topk]
             items = [by_path.get(Path(vp)) for vp, _ in top]
             valid = [it for it in items if it is not None]
-            cls = (score_ref_classical(r, valid, threshold=0.0, cfg=cfg,
-                                       components=comp, stop_cb=stopped) if valid else [])
-            cls_map = {str(c.item.path): float(c.score) for c in cls}
+            cls_map = _rerank_score_map(r, valid, comp)     # center-aware 면 영역 조합
             emb_scores = [c for _, c in top]
             cls_scores = [cls_map.get(str(vp), 0.0) for vp, _ in top]
             mapped = map_score(zfuse(emb_scores, cls_scores))
@@ -520,6 +566,78 @@ def detect_devices() -> set:
         return set(_ov.available_units())
     except Exception:
         return set()
+
+
+def _cosine(a, b) -> float:
+    import numpy as np
+    a = np.asarray(a, dtype="float64").ravel()
+    b = np.asarray(b, dtype="float64").ravel()
+    na, nb = np.linalg.norm(a), np.linalg.norm(b)
+    if na == 0 or nb == 0:
+        return 0.0
+    return float(np.dot(a, b) / (na * nb))
+
+
+def diagnose_npu_embedding(paths: List[Path], *, model: str = "",
+                           max_images: int = 24) -> dict:
+    """NPU 배치 정확도 붕괴 **원인 규명** — 같은 이미지에서 GPU vs NPU(batch1) vs
+    NPU(batch16) 임베딩이 수치적으로 같은지 측정한다.
+
+    실측(bench결과)에서 NPU 는 batch=1 만 정확(97.6%)하고 batch≥4 는 78~85% 로
+    떨어졌다.  배치 추론이 임베딩 벡터 자체를 바꾸면(코사인<1·L2>0) 후보 선정이
+    틀어져 정확도가 깨지는 것이므로, 이 진단이 그 직접 증거를 제공한다.
+
+    반환: {'rows': [...per-image...], 'summary': {pair: {cos_mean,cos_min,l2_mean}}}.
+    openvino 미가용이면 {'error': ...}.  GUI/CLI 양쪽에서 호출 가능."""
+    try:
+        from ..learning import embedder_openvino as _ov
+    except Exception as exc:
+        return {"error": f"openvino 미가용: {exc}"}
+    import numpy as np
+    model = model or _rx.MODEL_MOBILENET_V3
+    paths = [Path(p) for p in paths][:max_images]
+    if not paths:
+        return {"error": "이미지 경로가 없습니다"}
+    cfg = Recipe(key="diag", name="diag", recall=RECALL_NPU,
+                 scoring=SCORE_FUSION, embed_model=model).to_cfg()
+
+    def _emb(device, batch):
+        return _ov.device_embed(paths, model_kind=model, device=device,
+                                cfg=cfg, jobs=8, batch=int(batch))
+
+    configs = {"gpu_b1": ("GPU", 1), "npu_b1": ("NPU", 1), "npu_b16": ("NPU", 16)}
+    embs: dict = {}
+    errors: dict = {}
+    for name, (dev, b) in configs.items():
+        try:
+            embs[name] = _emb(dev, b)
+        except Exception as exc:                 # 장치 없음/실패 — 그 설정만 건너뜀
+            errors[name] = str(exc)
+
+    # 비교 대상 쌍 — 핵심은 npu_b1 vs npu_b16(배치 효과)과 npu_* vs gpu_b1(장치 효과).
+    pairs = [("npu_b1", "npu_b16"), ("gpu_b1", "npu_b1"), ("gpu_b1", "npu_b16")]
+    rows = []
+    summary = {}
+    for x, y in pairs:
+        if x not in embs or y not in embs:
+            continue
+        coss, l2s = [], []
+        for p in paths:
+            ax, ay = embs[x].get(p), embs[y].get(p)
+            if ax is None or ay is None:
+                continue
+            c = _cosine(ax, ay)
+            l2 = float(np.linalg.norm(np.asarray(ax, "float64").ravel()
+                                      - np.asarray(ay, "float64").ravel()))
+            coss.append(c)
+            l2s.append(l2)
+            rows.append({"image": p.name, "pair": f"{x}|{y}", "cosine": c, "l2": l2})
+        if coss:
+            summary[f"{x}|{y}"] = {
+                "cos_mean": float(np.mean(coss)), "cos_min": float(np.min(coss)),
+                "l2_mean": float(np.mean(l2s)), "n": len(coss)}
+    return {"model": model, "n_images": len(paths), "errors": errors,
+            "summary": summary, "rows": rows}
 
 
 # ---------------------------------------------------------------------------
@@ -1176,8 +1294,9 @@ def main(argv=None) -> int:
     ap.add_argument("--labels", help="정답 라벨 JSON 경로(없으면 기준선 일치율 사용)")
     ap.add_argument("--self-test", action="store_true",
                     help="--ref 의 사진을 증강해 정답 있는 검증셋을 합성(2호기 불필요)")
-    ap.add_argument("--recipes", default="all",
-                    help="콤마 구분 레시피 키 또는 'all'")
+    ap.add_argument("--recipes", default="quick",
+                    help="콤마 구분 레시피 키 또는 프리셋: quick(린 기본)·faceoff·"
+                         "center·core·all+(아카이브 전부)·그룹명")
     ap.add_argument("--max-slots", type=int, default=0, help="서브샘플: slot 수 상한")
     ap.add_argument("--max-images", type=int, default=0,
                     help="서브샘플: 측당 이미지 수 상한")
@@ -1191,6 +1310,9 @@ def main(argv=None) -> int:
                     help="스킵 면제(개별 명시) 키 콤마목록 — 미지정 시 --recipes 에서 추론"
                          "(GUI 가 '개별 체크' 와 '그룹 펼침' 을 구분해 넘길 때 사용)")
     ap.add_argument("--list", action="store_true", help="레시피 목록만 출력")
+    ap.add_argument("--npu-embed-diag", action="store_true",
+                    help="NPU 배치 정확도 붕괴 원인 규명 — GPU vs NPU(b1) vs NPU(b16) "
+                         "임베딩 일치도(코사인/L2) 측정.  --ref 사진 사용.")
     ap.add_argument("--emit-progress", action="store_true",
                     help="레시피 시작/완료를 기계가 읽는 '@@AOI_PROG' 줄로 출력"
                          "(GUI 가 별도 프로세스로 실행하며 진행/크래시 추적에 사용)")
@@ -1203,6 +1325,25 @@ def main(argv=None) -> int:
     if args.list:
         for r in _rx.REGISTRY:
             print(f"{r.key:24s} {r.name}\n    {r.desc}")
+        return 0
+
+    if args.npu_embed_diag:
+        if not args.ref:
+            ap.error("--npu-embed-diag 는 --ref 가 필요합니다")
+        exts = {".png", ".jpg", ".jpeg", ".bmp"}
+        imgs = sorted(p for p in Path(args.ref).rglob("*") if p.suffix.lower() in exts)
+        rep = diagnose_npu_embedding(imgs, max_images=args.max_images or 24)
+        if rep.get("error"):
+            print("진단 불가:", rep["error"])
+            return 2
+        print(f"NPU 임베딩 진단 — model={rep['model']} · 이미지 {rep['n_images']}장")
+        if rep.get("errors"):
+            print("  (건너뜀)", rep["errors"])
+        print(f"  {'비교(설정쌍)':22} {'코사인평균':>9} {'코사인최소':>9} {'L2평균':>9}")
+        for pair, s in rep["summary"].items():
+            print(f"  {pair:22} {s['cos_mean']:9.4f} {s['cos_min']:9.4f} {s['l2_mean']:9.4f}")
+        print("해석: npu_b1|npu_b16 코사인이 1.0 에서 멀수록 '배치가 임베딩을 바꿔' "
+              "정확도가 깨지는 직접 증거(배치=후보선정 손상).")
         return 0
 
     from . import labels as _lab
