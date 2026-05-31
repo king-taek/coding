@@ -31,8 +31,8 @@ def test_dialog_defaults_to_quick_preset(app):
         DevBenchmarkDialog
     dlg = DevBenchmarkDialog(default_ref="/tmp/x")
     try:
-        # 개별 체크박스 = 메인 옵션(앵커 + 생존자)뿐 — 사패는 옵션에서 제거됐다.
-        assert set(dlg._recipe_checks.keys()) == set(rx.MAIN_KEYS)
+        # 개별 체크박스 = 메인 옵션(앵커 + 생존자) + 최종 프리셋 키(고전 워밍업·NPU 고가동).
+        assert set(dlg._recipe_checks.keys()) == set(rx.MAIN_KEYS) | set(rx.FINAL_KEYS)
         # 기본 선택은 '빠른'(핵심 소수) — 메인 전체가 아니다.
         assert dlg._selected_keys() == list(rx.QUICK_KEYS)
         assert dlg.table.columnCount() == 8
@@ -50,6 +50,8 @@ def test_dialog_presets_switch_selection(app):
         assert set(dlg._selected_keys()) == set(rx.MAIN_KEYS)
         dlg._apply_preset("faceoff")
         assert set(dlg._selected_keys()) == set(rx.FACEOFF_KEYS)
+        dlg._apply_preset("final")            # 최종 벤치(고전2회+현행+TOP5+NPU고가동)
+        assert set(dlg._selected_keys()) == set(rx.FINAL_KEYS)
         dlg._apply_preset("quick")
         assert dlg._selected_keys() == list(rx.QUICK_KEYS)
         # 사패 그룹 토글은 옵션에서 사라졌다.
