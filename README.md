@@ -130,17 +130,32 @@ scripts\internal\make_portable.bat
   [releases](https://github.com/astral-sh/python-build-standalone/releases) 에서 최신
   *install_only Windows x86_64* `.tar.gz` 링크로 `PY_URL` 을 교체 후 재실행하세요.
 
-### 3.8 (선택) 단일 .exe — PyInstaller
+### 3.8 (권장·파이썬 없는 사용자) 온라인 다운로드형 작은 .exe
 
-회사 보안 정책상 외부 런타임 동봉이 곤란하고 단일 exe 가 꼭 필요할 때만 사용합니다
-(부트로더가 백신에 막히면 포터블 방식을 쓰세요).  **Windows(파이썬 설치) PC 에서**:
+파이썬이 없는 사용자에게 **작은 exe 하나**(수십 MB)만 주면 되는 방식입니다. exe 는 앱·무거운
+의존성(torch·openvino)을 포함하지 않고, **처음 실행할 때 인터넷에서** 앱과 패키지를 받아
+`%LOCALAPPDATA%\AOI_Verify` 에 설치한 뒤 실행합니다.  **Windows(파이썬 설치) + 인터넷 PC 에서**:
+
+```powershell
+scripts\internal\build_online.bat
+```
+
+- 산출물: `dist\AOI_Verify_Online.exe` — **이 파일 하나만 배포**.
+- 사용자 경험: 더블클릭 → 첫 실행은 다운로드/설치로 시간이 걸리고(수백 MB), 이후는 빠릅니다.
+- **자동 업데이트 그대로 동작:** 앱이 쓰기 가능한 `%LOCALAPPDATA%\AOI_Verify` 에 설치되므로,
+  앱 내 자동 업데이트가 그 폴더를 갱신합니다(exe 재배포 불필요).
+- **주의:** 인터넷이 막힌 폐쇄망이면 이 방식은 첫 설치가 불가합니다 → 아래 포터블/단독 exe 를 쓰세요.
+
+### 3.9 (선택) 단독 .exe — PyInstaller(전부 동봉)
+
+인터넷이 막힌 환경 등에서 의존성까지 모두 포함한 단독 실행형이 필요할 때.  **Windows(파이썬 설치) PC 에서**:
 
 ```powershell
 scripts\internal\build_windows.bat
 ```
 
-- 산출물: `dist\AOI_Verify\AOI_Verify.exe` (폴더 통째로 zip 배포). 설정은
-  `scripts\internal\aoi_verification.spec`(스타일시트·`양식.xlsx` 자동 동봉).
+- 산출물: `dist\AOI_Verify\AOI_Verify.exe` (폴더 통째로 zip 배포, ~1.5GB). 설정은
+  `scripts\internal\aoi_verification.spec`(스타일시트·`dev\양식.xlsx` 자동 동봉).
 - **첫 실행 경고:** 미서명 exe 는 SmartScreen/Defender 가 “알 수 없는 게시자” 로
   경고할 수 있습니다 — *추가 정보 → 실행*.  경고 제거가 필요하면 코드 서명(EV 권장).
 
