@@ -53,8 +53,14 @@ _CACHE_DIRNAME = ".aoi_verification_cache"
 
 
 def cache_root() -> Path:
-    """사용자 홈 디렉토리 아래의 공용 캐시 폴더."""
-    root = Path.home() / _CACHE_DIRNAME
+    """캐시(썸네일/특징/임베딩/점수/세션) 폴더.
+
+    기본은 사용자 홈의 ``~/.aoi_verification_cache``.  단, 환경변수 ``AOI_DATA_HOME``
+    이 지정되면 그 폴더 아래(``<AOI_DATA_HOME>/cache``)에 둔다 — exe 설치 시 launcher 가
+    설치 폴더("AOI Recipe Verification")를 가리키게 해, **앱·패키지·캐시를 모두 한 폴더**
+    안에 담기 위함."""
+    home = os.environ.get("AOI_DATA_HOME")
+    root = (Path(home) / "cache") if home else (Path.home() / _CACHE_DIRNAME)
     root.mkdir(parents=True, exist_ok=True)
     return root
 

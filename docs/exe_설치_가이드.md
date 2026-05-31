@@ -20,7 +20,7 @@
 ## A. 온라인 launcher exe (권장)
 
 작은 exe 하나만 전달하면 되는 방식. exe 에는 앱·무거운 의존성(torch·openvino)이 **없고**,
-사용자가 처음 실행할 때 인터넷에서 앱과 패키지를 받아 `%LOCALAPPDATA%\AOI_Verify` 에 설치한다.
+사용자가 처음 실행할 때 인터넷에서 앱과 패키지를 받아 `%LOCALAPPDATA%\AOI Recipe Verification` 에 설치한다.
 
 ### A-1. 빌드 (전달하는 사람, 1회)
 ```powershell
@@ -36,7 +36,7 @@ scripts\internal\build_online.bat
 2. **첫 실행만** 인터넷으로 앱과 패키지를 내려받아 설치한다(수백 MB — 수 분 걸릴 수 있음).
    진행 메시지가 표시되고, 끝나면 앱 창이 뜬다.
 3. 두 번째 실행부터는 이미 설치된 것을 바로 써서 빠르게 켜진다.
-4. 설치 위치: `%LOCALAPPDATA%\AOI_Verify` (예: `C:\Users\<사용자>\AppData\Local\AOI_Verify`).
+4. 설치 위치: `%LOCALAPPDATA%\AOI Recipe Verification` (예: `C:\Users\<사용자>\AppData\Local\AOI Recipe Verification`).
    지우고 싶으면 이 폴더를 삭제하면 처음 상태로 돌아간다.
 
 ### A-3. 주의
@@ -97,7 +97,7 @@ scripts\internal\build_windows.bat
 
 ## 4. 자동 업데이트 (세 방식 공통)
 
-- 앱은 **쓰기 가능한 폴더**에 설치된다(A: `%LOCALAPPDATA%\AOI_Verify`, B/C: 배포 폴더의 `app\`).
+- 앱은 **쓰기 가능한 폴더**에 설치된다(A: `%LOCALAPPDATA%\AOI Recipe Verification`, B/C: 배포 폴더의 `app\`).
   그래서 **앱 내 자동 업데이트가 그 폴더를 갱신**한다 — exe/폴더를 **다시 배포할 필요가 없다**.
 - 동작: 앱 시작 시 GitHub 브랜치 HEAD 와 동봉된 `VERSION` 을 비교해 새 버전이 있으면 받아
   앱 폴더에 미러링하고 재시작을 안내한다(개발 전용 `dev/` 는 제외, `dev\양식.xlsx` 만 앱 루트로 복사).

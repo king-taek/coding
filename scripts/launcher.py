@@ -32,6 +32,11 @@ def main() -> int:
     root = bootstrap.data_root()
     repo, branch = updater.DEFAULT_REPO, updater.DEFAULT_BRANCH
 
+    # 앱·패키지·캐시를 모두 설치 폴더("AOI Recipe Verification") 안에 담기 위해, 앱이
+    # 캐시를 이 폴더 아래에 두도록 환경변수로 지정한다(paths.cache_root 가 읽음).
+    import os
+    os.environ["AOI_DATA_HOME"] = str(root)
+
     def fetch_app(dest: Path) -> bool:
         # 데이터 폴더를 app_root 로 고정하고 최신 브랜치 zip 을 받아 푼다(=자동 업데이트와 동일 경로).
         updater._app_root = lambda: dest          # type: ignore[attr-defined]

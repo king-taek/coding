@@ -3,7 +3,8 @@
 배포 시나리오: PyInstaller 로 이 모듈(``bootstrap_main``)을 진입점으로 하는 **작은 exe**
 하나만 만든다(수십 MB).  사용자가 그 exe 를 처음 실행하면:
 
-  1) 쓰기 가능한 데이터 폴더(``%LOCALAPPDATA%\\AOI_Verify`` 등)를 만든다.
+  1) 쓰기 가능한 설치 폴더(``%LOCALAPPDATA%\\AOI Recipe Verification``)를 만든다.
+     앱 소스·패키지·캐시가 모두 이 폴더 안에 담긴다.
   2) 앱 소스(``aoi_verification/`` · ``main.py`` · ``양식.xlsx`` …)가 없으면 GitHub
      브랜치 zip 으로 받아 그 폴더에 푼다(=기존 ``updater.download_and_apply``).
   3) 의존성(requirements.txt)이 아직 없으면 **인터넷에서 pip 로 설치**한다(번들 파이썬
@@ -27,18 +28,19 @@ from pathlib import Path
 from typing import Callable, List, Optional
 
 
-APP_DIRNAME = "AOI_Verify"          # 사용자 데이터 폴더 이름
-_MARKER = ".deps_installed"          # 의존성 설치 완료 표식(버전별)
+APP_DIRNAME = "AOI Recipe Verification"   # 사용자 데이터(설치) 폴더 이름
+_MARKER = ".deps_installed"               # 의존성 설치 완료 표식(버전별)
 
 
 # ---------------------------------------------------------------------------
 # 순수 로직 (테스트 대상) — 부수효과 없음
 # ---------------------------------------------------------------------------
 def data_root(env: Optional[dict] = None) -> Path:
-    """앱을 풀어 둘 **쓰기 가능한** 데이터 폴더.
+    """앱을 풀어 둘 **쓰기 가능한** 설치 폴더(앱·패키지·캐시가 모두 이 안에 담긴다).
 
-    Windows 는 ``%LOCALAPPDATA%\\AOI_Verify``, 그 외/미설정은 ``~/.AOI_Verify``.
-    여기에 앱 소스를 풀고 자동 업데이트도 이 폴더를 덮어쓴다(읽기 전용 exe 와 분리)."""
+    Windows 는 ``%LOCALAPPDATA%\\AOI Recipe Verification``, 그 외/미설정은
+    ``~/.AOI Recipe Verification``.  여기에 앱 소스를 풀고 자동 업데이트도 이 폴더를
+    덮어쓴다(읽기 전용 exe 와 분리)."""
     env = env if env is not None else os.environ
     base = env.get("LOCALAPPDATA") or env.get("APPDATA")
     if base:

@@ -134,7 +134,7 @@ scripts\internal\make_portable.bat
 
 파이썬이 없는 사용자에게 **작은 exe 하나**(수십 MB)만 주면 되는 방식입니다. exe 는 앱·무거운
 의존성(torch·openvino)을 포함하지 않고, **처음 실행할 때 인터넷에서** 앱과 패키지를 받아
-`%LOCALAPPDATA%\AOI_Verify` 에 설치한 뒤 실행합니다.  **Windows(파이썬 설치) + 인터넷 PC 에서**:
+`%LOCALAPPDATA%\AOI Recipe Verification` 에 설치한 뒤 실행합니다.  **Windows(파이썬 설치) + 인터넷 PC 에서**:
 
 ```powershell
 scripts\internal\build_online.bat
@@ -142,7 +142,7 @@ scripts\internal\build_online.bat
 
 - 산출물: `dist\AOI_Verify_Online.exe` — **이 파일 하나만 배포**.
 - 사용자 경험: 더블클릭 → 첫 실행은 다운로드/설치로 시간이 걸리고(수백 MB), 이후는 빠릅니다.
-- **자동 업데이트 그대로 동작:** 앱이 쓰기 가능한 `%LOCALAPPDATA%\AOI_Verify` 에 설치되므로,
+- **자동 업데이트 그대로 동작:** 앱이 쓰기 가능한 `%LOCALAPPDATA%\AOI Recipe Verification` 에 설치되므로,
   앱 내 자동 업데이트가 그 폴더를 갱신합니다(exe 재배포 불필요).
 - **주의:** 인터넷이 막힌 폐쇄망이면 이 방식은 첫 설치가 불가합니다 → 아래 포터블/단독 exe 를 쓰세요.
 

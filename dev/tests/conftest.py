@@ -20,6 +20,8 @@ import pytest
 def isolated_cache(monkeypatch, tmp_path):
     """모든 테스트가 임시 HOME 의 캐시 디렉토리를 쓰도록 강제."""
     monkeypatch.setenv("HOME", str(tmp_path))
+    # exe launcher 가 설정하는 캐시 위치 override 가 테스트에 새지 않도록 제거.
+    monkeypatch.delenv("AOI_DATA_HOME", raising=False)
     # paths.cache_root() 는 Path.home() 으로 시작하니, HOME 만 바꿔도 동작.
     # 세션 간 mtime 메모이즈가 새지 않도록 테스트마다 초기화(#5).
     try:

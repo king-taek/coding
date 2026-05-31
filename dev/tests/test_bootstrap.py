@@ -13,9 +13,21 @@ from aoi_verification.app.utils import bootstrap as bs
 def test_data_root_prefers_localappdata(tmp_path):
     r = bs.data_root({"LOCALAPPDATA": str(tmp_path)})
     assert r == tmp_path / bs.APP_DIRNAME
+    assert bs.APP_DIRNAME == "AOI Recipe Verification"   # 설치 폴더 이름
     # LOCALAPPDATA 없으면 HOME 아래 숨김 폴더.
     r2 = bs.data_root({"HOME": str(tmp_path)})
     assert r2 == tmp_path / ("." + bs.APP_DIRNAME)
+
+
+def test_cache_root_honors_data_home(tmp_path, monkeypatch):
+    # AOI_DATA_HOME 이 지정되면 캐시가 그 폴더 안(<home>/cache)에 담긴다(설치 폴더 일원화).
+    from aoi_verification.app.utils import paths
+    monkeypatch.setenv("AOI_DATA_HOME", str(tmp_path / "install"))
+    assert paths.cache_root() == tmp_path / "install" / "cache"
+    # 미지정이면 사용자 홈의 기본 캐시.
+    monkeypatch.delenv("AOI_DATA_HOME", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path / "h"))
+    assert paths.cache_root() == tmp_path / "h" / ".aoi_verification_cache"
 
 
 def test_app_is_present(tmp_path):
