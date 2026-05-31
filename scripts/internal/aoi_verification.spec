@@ -3,7 +3,7 @@
 
 빌드(반드시 Windows 에서, **저장소 루트**에서 실행 — datas 경로가 루트 기준):
     pip install -r requirements.txt pyinstaller
-    pyinstaller --noconfirm scripts\aoi_verification.spec
+    pyinstaller --noconfirm scripts\internal\aoi_verification.spec
 산출물: dist/AOI_Verify/AOI_Verify.exe  (폴더 통째 배포)
 
 고효율 모드(Intel GPU 임베딩)를 위해 torch/torchvision/openvino 를 포함한다.

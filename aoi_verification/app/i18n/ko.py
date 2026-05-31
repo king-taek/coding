@@ -494,7 +494,6 @@ DEV_BENCH_GROUP_CENTER = "중앙-인식(defect 정중앙)"
 DEV_BENCH_GROUP_NPU_SWEEP = "NPU 사용방식 스윕"
 DEV_BENCH_GROUP_NPU_ONLY = "NPU 단독 채점"
 DEV_BENCH_GROUP_FAST_RERANK = "CPU 고속 재채점"
-DEV_BENCH_GROUP_MODEL_ZOO = "모델 주머니"
 
 # 불필요 스킵 해제 토글.
 DEV_BENCH_ALL_RECIPES = "모든 레시피 측정(불필요 스킵 해제)"

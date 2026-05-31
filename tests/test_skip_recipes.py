@@ -20,12 +20,6 @@ def test_skip_reason_needs_device():
     assert not bm.skip_reason(rx.by_key("cpu_embed_fusion"), set())    # CPU recall
 
 
-def test_skip_reason_model_zoo_without_package():
-    # timm/kornia/anomalib 미설치 환경 → 폴백 중복이라 스킵.
-    assert bm.skip_reason(rx.by_key("zoo_mobilevit_s"), {"NPU"})
-    assert bm.skip_reason(rx.by_key("zoo_patchcore"), {"NPU"})
-
-
 # ---------------------------------------------------------------------------
 # diagnostic — 함정/대조용은 플래그가 붙어 있다
 # ---------------------------------------------------------------------------

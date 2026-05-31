@@ -294,24 +294,11 @@ def skip_reason(recipe: Recipe, devices: set) -> str:
     '불필요한 테스트는 하지 않는다' — 다음은 실행해도 새 정보가 없거나 같은 CPU
     고전 결과만 반복하므로 기본 스위트에서 건너뛴다(명시 선택하면 그래도 실행):
       · 필요한 가속 장치(GPU/NPU)가 없어 어차피 CPU 고전으로 폴백 → 중복 결과.
-      · 모델 주머니 백본(MobileViT/키포인트/이상탐지 등)이 패키지 미설치로
-        빌드 불가 → 역시 CPU 폴백 중복.
     함정/대조용(diagnostic)은 여기서 막지 않고 호출부에서 기본 제외한다."""
     need = recipe.required_devices()
     if need and not (need <= set(devices or set())):
         miss = ", ".join(sorted(need - set(devices or set())))
         return f"{miss} 미감지 → CPU 폴백 중복(건너뜀)"
-    # 임베딩 모델이 model_zoo 의 추가 백본인데 가용하지 않으면 폴백 중복.
-    model = recipe.embed_model or ""
-    if recipe.uses_embedding() and model not in (
-            "", _rx.MODEL_MOBILENET_V3, _rx.MODEL_RESNET18):
-        try:
-            from . import model_zoo as _mz
-            ok, why = _mz.availability(model)
-            if not ok:
-                return f"{model}: {why} → CPU 폴백 중복(건너뜀)"
-        except Exception:
-            pass
     return ""
 
 

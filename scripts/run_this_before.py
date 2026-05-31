@@ -43,17 +43,6 @@ CACHE_SUBDIRS = (
     "models", "training_data", "evaluations", "dev_bench",
 )
 
-# 개발자 벤치마크의 '모델 주머니'(SuperPoint/LightGlue·MobileViT·PatchCore/PaDiM)
-# 를 대상 장비에서 실험하려면 필요한 추가 패키지.  **옵션**이라 설치에 실패해도
-# 핵심 앱/벤치마크는 그대로 동작한다(해당 레시피만 CPU 고전으로 폴백).  무겁고
-# (특히 anomalib) 시간이 걸릴 수 있어 best-effort 로 설치하고 실패는 경고만 한다.
-#   (import 이름, pip 이름, 설명)
-OPTIONAL_DEV_PACKAGES: list[tuple[str, str, str]] = [
-    ("timm", "timm", "MobileViT 등 ViT 백본 — 개발자 벤치마크 모델 주머니"),
-    ("kornia", "kornia", "SuperPoint + LightGlue 키포인트 정합 — 모델 주머니"),
-    ("anomalib", "anomalib", "PatchCore / PaDiM 이상탐지 — 모델 주머니(대용량)"),
-]
-
 
 # ---------------------------------------------------------------------------
 # 출력 헬퍼 (이모지 없이 [OK]/[FAIL]/[INFO] 형태)
@@ -117,39 +106,6 @@ def install_requirements() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 2.5) 개발자 벤치마크 '모델 주머니' 옵션 패키지 (best-effort)
-# ---------------------------------------------------------------------------
-def install_dev_extras() -> None:
-    """모델 주머니용 옵션 패키지를 설치한다.  실패해도 setup 을 중단하지 않는다.
-
-    ``--no-dev-extras`` 인자를 주면 이 단계를 건너뛴다(가벼운 설치).  네트워크/
-    디스크 제약 환경에서 무거운 anomalib 설치로 시스템이 막히지 않도록, 각 패키지를
-    개별 설치하고 실패는 경고만 남긴다."""
-    if "--no-dev-extras" in sys.argv:
-        _info("옵션 패키지 설치 건너뜀(--no-dev-extras).")
-        return
-    _info("모델 주머니(개발자 벤치마크) 옵션 패키지 — 실패해도 핵심 기능엔 영향 없음.")
-    for mod, pip_name, label in OPTIONAL_DEV_PACKAGES:
-        try:
-            importlib.import_module(mod)
-            _ok(f"{label} — 이미 설치됨")
-            continue
-        except Exception:
-            pass
-        _info(f"설치 시도: {pip_name}  ({label})")
-        try:
-            rc = subprocess.call(
-                [sys.executable, "-m", "pip", "install", pip_name])
-        except Exception as exc:                       # pragma: no cover
-            rc = 1
-            _info(f"  설치 호출 실패: {exc}")
-        if rc == 0:
-            _ok(f"{pip_name} 설치 완료")
-        else:
-            _info(f"{pip_name} 설치 실패/건너뜀 — 해당 레시피는 CPU 폴백으로 동작.")
-
-
-# ---------------------------------------------------------------------------
 # 3) 핵심 의존성 import 검증
 # ---------------------------------------------------------------------------
 def verify_imports() -> None:
@@ -167,9 +123,6 @@ def verify_imports() -> None:
     optional: list[tuple[str, str]] = [
         ("torch", "torch (임베딩/학습 — 옵션)"),
         ("torchvision", "torchvision (임베딩/학습 — 옵션)"),
-        ("timm", "timm (MobileViT — 모델 주머니 옵션)"),
-        ("kornia", "kornia (SuperPoint+LightGlue — 모델 주머니 옵션)"),
-        ("anomalib", "anomalib (PatchCore/PaDiM — 모델 주머니 옵션)"),
     ]
 
     failed: list[str] = []
@@ -197,10 +150,10 @@ def verify_imports() -> None:
 # 4) 캐시 디렉토리 사전 생성
 # ---------------------------------------------------------------------------
 def verify_no_forbidden() -> None:
-    """회사 보안 정책 가드 — 같은 폴더의 verify_no_forbidden.py 를 실행한다."""
+    """회사 보안 정책 가드 — scripts/internal/verify_no_forbidden.py 를 실행한다."""
     import subprocess as _sp
     here = Path(__file__).resolve().parent
-    rc = _sp.call([sys.executable, str(here / "verify_no_forbidden.py")])
+    rc = _sp.call([sys.executable, str(here / "internal" / "verify_no_forbidden.py")])
     if rc != 0:
         _fail("금지된 도구가 설치/연관돼 있습니다. 위 메시지를 확인하세요.")
     _ok("회사 보안 정책 가드 통과")
@@ -220,23 +173,20 @@ def main() -> int:
     print("AOI 검증 프로그램 — 환경 준비 스크립트")
     print(_hr())
 
-    total = 6
+    total = 5
     _step(1, total, "Python 버전 확인")
     check_python()
 
     _step(2, total, "requirements.txt 의 패키지 설치 (pip)")
     install_requirements()
 
-    _step(3, total, "개발자 벤치마크 모델 주머니 옵션 패키지 (best-effort)")
-    install_dev_extras()
-
-    _step(4, total, "핵심 의존성 import 검증")
+    _step(3, total, "핵심 의존성 import 검증")
     verify_imports()
 
-    _step(5, total, "회사 보안 정책 가드 (금지 도구 검사)")
+    _step(4, total, "회사 보안 정책 가드 (금지 도구 검사)")
     verify_no_forbidden()
 
-    _step(6, total, "캐시 디렉토리 사전 생성")
+    _step(5, total, "캐시 디렉토리 사전 생성")
     prepare_cache_dir()
 
     print()

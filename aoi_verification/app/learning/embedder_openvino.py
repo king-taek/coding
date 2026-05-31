@@ -507,12 +507,12 @@ def accelerator_presence() -> Dict[str, object]:
 
 def _build_ov_model(model_kind: str, batch: int = 1,
                     input_px: Optional[int] = None):  # pragma: no cover - 환경 의존
-    """torchvision/모델주머니 백본 → OpenVINO 모델 (raw 임베딩 — classifier/fc 제거).
+    """torchvision 백본 → OpenVINO 모델 (raw 임베딩 — classifier/fc 제거).
 
     ``.eval()`` 로 BatchNorm 을 폴딩한 뒤 변환해야 NPU/GPU 에서 정확하다.
-    ``batch`` 로 정적 배치 크기를, ``input_px`` 로 입력 해상도를 지정.  기본 두 모델
-    (MobileNetV3-Small / ResNet18) 외에는 ``dev.model_zoo`` 빌더로 위임한다
-    (MobileViT·CAE·U-Net 등 — 미가용 시 None → 호출부가 폴백)."""
+    ``batch`` 로 정적 배치 크기를, ``input_px`` 로 입력 해상도를 지정.  지원 백본은
+    MobileNetV3-Small / ResNet18 두 가지로, 그 외 모델은 ``None`` 을 돌려
+    호출부가 CPU 고전으로 폴백한다."""
     P = int(input_px) if input_px else _INPUT_PX
     if model_kind == MODEL_RESNET18:
         weights = models.ResNet18_Weights.IMAGENET1K_V1
@@ -523,14 +523,8 @@ def _build_ov_model(model_kind: str, batch: int = 1,
         backbone = models.mobilenet_v3_small(weights=weights)
         backbone.classifier = torch.nn.Identity()
     else:
-        # 모델 주머니(추가 백본) — 임베딩 계열만 빌드 가능, 아니면 None.
-        try:
-            from ..dev import model_zoo as _mz
-        except Exception:
-            return None
-        backbone = _mz.build_backbone(model_kind, input_px=P)
-        if backbone is None:
-            return None
+        # 지원하지 않는 백본 — 호출부가 CPU 고전으로 폴백한다.
+        return None
     backbone.eval()
     example = torch.randn(1, 3, P, P)
     ov_model = ov.convert_model(backbone, example_input=example)

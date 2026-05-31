@@ -1,9 +1,8 @@
-"""개발자 벤치마크 확장 — NPU 스윕·NPU 단독·고속 재채점·모델 주머니 테스트(헤드리스)."""
+"""개발자 벤치마크 확장 — NPU 스윕·NPU 단독·고속 재채점 테스트(헤드리스)."""
 
 from __future__ import annotations
 
 from aoi_verification.app.dev import benchmark as bm
-from aoi_verification.app.dev import model_zoo as mz
 from aoi_verification.app.dev import recipes as rx
 
 
@@ -105,35 +104,7 @@ def test_orb_nfeatures_flows_into_cfg():
 
 
 # ---------------------------------------------------------------------------
-# (B) 모델 주머니 — 레지스트리/가용성/레시피
-# ---------------------------------------------------------------------------
-def test_model_zoo_registry_has_requested_models():
-    for m in ("mobilevit_s", "cae", "unet", "attention_unet",
-              "superpoint_lightglue", "patchcore", "padim"):
-        sp = mz.spec(m)
-        assert sp is not None and sp.desc
-
-
-def test_model_zoo_availability_reasons_without_deps():
-    # torch/timm/kornia/anomalib 미설치 환경 → (False, 사유) 로 친절히 보고.
-    ok, reason = mz.availability("mobilevit_s")
-    assert ok is False and reason
-    ok2, _ = mz.availability("patchcore")
-    assert ok2 is False
-    assert mz.availability("does_not_exist")[0] is False
-
-
-def test_model_zoo_recipes_carry_needs_and_method():
-    keys = {r.key for r in rx.MODEL_ZOO}
-    assert "zoo_superpoint_lightglue" in keys
-    assert "zoo_patchcore" in keys
-    for r in rx.MODEL_ZOO:
-        assert r.tag == "model_zoo"
-        r.to_cfg()                          # 예외 없이 설정 생성
-
-
-# ---------------------------------------------------------------------------
-# select() 그룹 — core / npu-sweep / npu-only / fast-rerank / model-zoo / all+
+# select() 그룹 — core / npu-sweep / npu-only / fast-rerank / all+
 # ---------------------------------------------------------------------------
 def test_select_groups_and_all_extended():
     assert len(rx.select("all")) == len(rx.REGISTRY)
