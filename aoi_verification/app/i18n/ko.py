@@ -177,11 +177,12 @@ ENGINE_CARD_TITLE = "유사도 엔진"
 ENGINE_MODE_BASIC = "기본 모드 (정밀 비교)"
 ENGINE_MODE_EFFICIENCY = "고효율 모드 (CPU+GPU)"
 ENGINE_MODE_TOOLTIP = (
-    "기본 모드: 모든 후보를 정밀 비교 (정확하지만 대용량에서 느림).\n"
-    "고효율 모드: Intel GPU(MobileNetV3) 임베딩으로 후보를 빠르게 추리고,\n"
-    "  CPU 고전(pHash+ORB+SSIM)으로 상위 후보를 정밀 재채점해 융합합니다\n"
-    "  (Intel GPU+OpenVINO 권장, 없으면 CPU 고전 단독으로 자동 폴백).\n"
-    "  GPU 와 CPU 가 동시에 가동됩니다."
+    "기본 모드: 모든 후보를 CPU 고전(pHash+ORB+SSIM)으로 정밀 전수 비교\n"
+    "  (멀티코어 병렬). 가장 안전하고 정확하지만 대용량에서 느립니다 (CPU 만 사용).\n"
+    "고효율 모드: Intel GPU(MobileNetV3) 임베딩으로 후보를 빠르게 추리고, 상위 후보를\n"
+    "  CPU 가 ORB(키포인트) 단독·중앙(defect) 가중으로 정밀 재채점해 융합합니다.\n"
+    "  반도체 AOI 이미지는 defect 이 정중앙에 있어 중앙 가중이 판별력을 높입니다.\n"
+    "  (Intel GPU+OpenVINO 권장, 없으면 CPU 단독으로 자동 폴백. GPU+CPU 동시 가동.)"
 )
 ACCEL_CONCURRENCY_LABEL = "동시 추론 수"
 ACCEL_CONCURRENCY_TOOLTIP = (
