@@ -27,6 +27,7 @@ from ... import i18n
 from ...models.result import MatchResult, MissEntry
 from ...models.slot import ImageItem
 from ...utils import image_io
+from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
 from .window_controls import add_fullscreen_shortcut, enable_window_controls
 
@@ -264,6 +265,9 @@ class UnmatchedReviewDialog(QDialog):
         enable_window_controls(self)
         add_fullscreen_shortcut(self)
         self._build()
+        # 후보 풀이 작아(<300) 캐시 miss 를 그 자리에서 CPU 재계산할 때 띄우는 로딩 오버레이.
+        # 다이얼로그 전체를 덮어 '계산 중'을 알린다(부모 위젯 size 추적).
+        self._loading = LoadingOverlay(self)
         self._render_current()
 
     # ------------------------------------------------------------------
@@ -568,11 +572,32 @@ class UnmatchedReviewDialog(QDialog):
             # 후보 풀이 300장 이상이면 효율 모드 선계산 점수를 재사용해 CPU 재계산을
             # 건너뛴다(즉시 표시). 미만이면 기존처럼 캐시 miss 를 그 자리 계산 (#1).
             allow_compute = len(candidates) < 300
+            # 캐시에 없어 **실제로 다시 계산**해야 하는 후보 수를 먼저 센다 — 0 이면
+            # 로딩을 띄우지 않고(즉시), >0 이면 로딩 오버레이로 진행을 보여준다 (#로딩).
+            need = self._count_recompute(cur, candidates) if allow_compute else 0
+            if need > 0:
+                self._loading.show_overlay(i18n.KO.PHASE_SCORING)
+                self._loading.set_progress(0, need, i18n.KO.PHASE_SCORING)
+                self._recompute_done = 0
+
+                def _on_recompute() -> None:
+                    self._recompute_done += 1
+                    self._loading.set_progress(
+                        self._recompute_done, need,
+                        i18n.KO.LOAD_SCORING_FMT.format(
+                            done=self._recompute_done, total=need))
+                    QApplication.processEvents()
+                progress_cb = _on_recompute
+            else:
+                progress_cb = None
             QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
             try:
-                scored = self._score_candidates(cur, candidates, allow_compute)
+                scored = self._score_candidates(cur, candidates, allow_compute,
+                                                on_computed=progress_cb)
             finally:
                 QApplication.restoreOverrideCursor()
+                if need > 0:
+                    self._loading.hide_overlay()
             scored.sort(key=lambda x: x[0], reverse=True)
 
         if not scored:
@@ -650,8 +675,20 @@ class UnmatchedReviewDialog(QDialog):
         self._relayout_candidates()
 
     # ------------------------------------------------------------------
+    def _count_recompute(self, cur: MissEntry, candidates: list) -> int:
+        """캐시에 없어 그 자리에서 CPU 재계산해야 하는 후보 수(로딩 표시 여부 판단)."""
+        if self._score_cache is None:
+            return len(candidates)
+        ref_path = Path(cur.path)
+        n = 0
+        for v in candidates:
+            if self._score_cache.get_pair(cur.slot, ref_path, Path(v.path)) is None:
+                n += 1
+        return n
+
     def _score_candidates(self, cur: MissEntry, candidates: list,
-                          allow_compute: bool) -> list[tuple[float, ImageItem]]:
+                          allow_compute: bool,
+                          on_computed=None) -> list[tuple[float, ImageItem]]:
         """후보들의 (score, item) 목록 — 내림차순 정렬 전.
 
         후보 풀이 300장 이상(``allow_compute=False``)이면 효율 모드 선계산
@@ -670,10 +707,15 @@ class UnmatchedReviewDialog(QDialog):
                 return out
         out = []
         for v in candidates:
+            cached = (self._score_cache is not None and
+                      self._score_cache.get_pair(
+                          cur.slot, Path(cur.path), Path(v.path)) is not None)
             s = self._lookup_or_compute_score(cur, v, allow_compute=allow_compute)
             if s is None:
                 continue                     # ≥300 & 캐시 miss → 재계산 없이 제외.
             out.append((float(s), v))
+            if on_computed is not None and not cached:
+                on_computed()                # 실제 재계산한 후보만 진행 보고.
         return out
 
     # ------------------------------------------------------------------

@@ -12,8 +12,8 @@ from typing import Iterable
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPixmap
-from PyQt6.QtWidgets import (QDialog, QHBoxLayout, QLabel, QScrollArea,
-                              QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import (QDialog, QGridLayout, QHBoxLayout, QLabel,
+                              QScrollArea, QVBoxLayout, QWidget)
 
 from ... import i18n
 from ...models.result import MatchResult
@@ -191,10 +191,13 @@ class MatchesReviewDialog(QDialog):
         scroll.setWidgetResizable(True)
         host = QWidget()
         scroll.setWidget(host)
-        self._list = QVBoxLayout(host)
+        # 한 줄에 매치 2개씩 — 그리드(2열)로 배치.  열은 동일 너비로 늘린다.
+        self._list = QGridLayout(host)
         self._list.setContentsMargins(4, 4, 4, 4)
-        self._list.setSpacing(8)
-        self._list.addStretch(1)
+        self._list.setHorizontalSpacing(12)
+        self._list.setVerticalSpacing(8)
+        self._list.setColumnStretch(0, 1)
+        self._list.setColumnStretch(1, 1)
         root.addWidget(scroll, stretch=1)
 
         bar = QHBoxLayout()
@@ -229,6 +232,8 @@ class MatchesReviewDialog(QDialog):
         for row in self._rows_by_key.values():
             row.set_thumb_size(self._thumb_px)
 
+    _COLS = 2          # 한 줄에 매치 2개씩 (#2)
+
     def _render(self) -> None:
         while self._list.count():
             it = self._list.takeAt(0)
@@ -236,13 +241,14 @@ class MatchesReviewDialog(QDialog):
             if w is not None:
                 w.deleteLater()
         self._rows_by_key = {}
-        for m in self._matches:
+        for i, m in enumerate(self._matches):
             row = _Row(m, size=self._thumb_px)
             row.delete_requested.connect(self._on_delete)
             row.set_pending_delete(m.key in self._pending_keys)
             self._rows_by_key[m.key] = row
-            self._list.addWidget(row)
-        self._list.addStretch(1)
+            # 2열 그리드 — 왼쪽→오른쪽, 위→아래 순으로 채운다.
+            self._list.addWidget(row, i // self._COLS, i % self._COLS,
+                                 Qt.AlignmentFlag.AlignTop)
 
     def _on_delete(self, m: MatchResult) -> None:
         # 즉시 삭제하지 않고 '삭제 예정'(빨간 테두리)으로 토글 (#14).

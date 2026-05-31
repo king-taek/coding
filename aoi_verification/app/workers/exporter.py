@@ -31,6 +31,8 @@ COL_REF = "C"
 COL_VAL = "D"
 DATA_START_ROW = 3
 HEADER_AOI_ROW = 2
+# 시트 분리 (#사용자 요청): 1번째=요약(A~D, 파일명), 2번째=전체 양식(E~H 포함).
+SHEET_FULL_NAME = "전체 양식"
 # 슬롯 구분선이 그려지는 컬럼 — 사용자 요청 (#6): A~D 만, 두껍게.
 BORDER_COLS = ["A", "B", "C", "D"]
 
@@ -102,6 +104,13 @@ class ExcelExporter(QThread):
             ws.title = "AOI 검증 결과"
             self._build_minimal_headers(ws)
 
+        # 시트는 둘로 나눈다 (#사용자 요청):
+        #   · 1번째 시트 = 결과 파일명과 같은 이름, A~D 열만(요약).
+        #   · 2번째 시트 = 기존 양식 그대로(전체 — E~H 수기 영역 포함), 이름 '전체 양식'.
+        # 구현: 템플릿(현재 ws)을 채워 '전체 양식' 으로 두고, 그 시트를 복제해 E~H 를
+        #       지운 요약 시트를 앞쪽에 만든다(이미지/서식 보존을 위해 채운 뒤 복제).
+        ws.title = SHEET_FULL_NAME
+
         # row 2 의 ‘AOI-N’ 헤더를 실제 호기 번호로 교체 (#3).
         ref_label = _machine_label(self._result.ref_machine)
         val_label = _machine_label(self._result.val_machine)
@@ -144,6 +153,9 @@ class ExcelExporter(QThread):
             if isinstance(a.value, (int, float)):
                 a.value = None
 
+        # 1번째 시트(요약) = A~D 만.  결과 파일명과 같은 이름으로, 전체 양식 앞에 만든다.
+        self._build_summary_sheet(wb, rows_input)
+
         # Slot 불일치 ---------------------------------------------------
         if self._result.slot_only_ref or self._result.slot_only_val:
             self._write_slot_mismatch_sheet(wb)
@@ -157,6 +169,60 @@ class ExcelExporter(QThread):
         except Exception:
             # 메타데이터 정리 실패는 치명적이지 않다 — 결과 파일은 이미 저장됨.
             pass
+
+    # ------------------------------------------------------------------
+    def _summary_sheet_name(self) -> str:
+        """요약 시트 이름 = 결과 파일명(확장자 제외).  엑셀 시트명 제약(31자·금지문자)
+        에 맞춰 정리하고, 비면 안전한 기본값을 쓴다."""
+        import re as _re
+        name = Path(self._dst).stem or "결과"
+        name = _re.sub(r'[:\\/?*\[\]]', "_", name)   # 엑셀 시트명 금지문자 → _
+        name = name.strip() or "결과"
+        if name == SHEET_FULL_NAME:                  # 2번째 시트와 충돌 방지
+            name = name + " "
+        return name[:31]
+
+    def _build_summary_sheet(self, wb, rows_input: list) -> None:
+        """1번째 시트(요약) — A~D 열만.  전체 양식 시트의 A~D 헤더/병합/폭/행높이를
+        복사하고 같은 데이터로 A~D(번호·slot·기준/검증 이미지)를 다시 채운다.
+        결과 파일명과 같은 이름으로, 전체 양식 시트보다 **앞에** 만든다."""
+        full = wb[SHEET_FULL_NAME]
+        ws = wb.create_sheet(title=self._summary_sheet_name(), index=0)
+
+        # A~D 헤더(row 1~2) 값/서식 복사.  E~H 는 만들지 않는다(요약 시트엔 없음).
+        from copy import copy as _copy
+        for r in (1, 2):
+            for col in ("A", "B", "C", "D"):
+                src = full[f"{col}{r}"]
+                dst = ws[f"{col}{r}"]
+                dst.value = src.value
+                if src.has_style:
+                    dst.font = _copy(src.font)
+                    dst.fill = _copy(src.fill)
+                    dst.border = _copy(src.border)
+                    dst.alignment = _copy(src.alignment)
+                    dst.number_format = src.number_format
+        # 병합 헤더(A1:A2, B1:B2, C1:D1) 재현 — A~D 범위만.
+        for rng in ("A1:A2", "B1:B2", "C1:D1"):
+            try:
+                ws.merge_cells(rng)
+            except Exception:
+                pass
+        # 열 폭 — A~D 만 전체 시트와 동일하게.
+        for col in ("A", "B", "C", "D"):
+            w = full.column_dimensions[col].width
+            if w:
+                ws.column_dimensions[col].width = w
+        # 데이터 행 높이도 동일하게(이미지가 같은 크기로 들어가도록).
+        h = full.row_dimensions[DATA_START_ROW].height or ROW_HEIGHT_PT
+        ws.row_dimensions[DATA_START_ROW].height = h
+        # A~D 데이터 채우기(이미지는 mid 캐시에서 다시 임베드 — 시트 간 공유 불가).
+        self._fill_rows(ws, rows_input)
+        data_end = DATA_START_ROW + len(rows_input) - 1
+        for rr in range(max(data_end + 1, DATA_START_ROW), ws.max_row + 1):
+            a = ws.cell(row=rr, column=1)
+            if isinstance(a.value, (int, float)):
+                a.value = None
 
     # ------------------------------------------------------------------
     @staticmethod

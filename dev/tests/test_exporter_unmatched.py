@@ -110,6 +110,40 @@ def test_export_no_unmatched_unaffected(qapp, isolated_cache, tmp_path):
     assert ws["B4"].value is None
 
 
+def test_export_splits_into_two_sheets(qapp, isolated_cache, tmp_path):
+    """결과는 두 시트로 나뉜다: 1번째=파일명·A~D만, 2번째='전체 양식'(E~H 포함)."""
+    src = tmp_path / "src"
+    src.mkdir()
+    ref = _make_image(src, "ref.jpeg")
+    val = _make_image(src, "val.jpeg")
+    result = FinalResult(
+        mode="single", ref_machine="1호기", val_machine="2호기",
+        matches=[MatchResult(slot="S1", ref_path=ref, val_path=val, score=0.9)],
+    )
+    # 실제 양식 템플릿(E~H 포함)을 써서 전체 양식 시트 구조를 검증.
+    from aoi_verification.app.utils import paths
+    dst = tmp_path / "결과_AOI-1_vs_AOI-2.xlsx"
+    ExcelExporter(result, dst_path=dst, template_path=paths.template_path()).run()
+    assert dst.exists()
+
+    from openpyxl import load_workbook
+    wb = load_workbook(str(dst))
+    # 1번째 시트 = 파일명(확장자 제외)과 동일, 그리고 활성 시트(맨 앞).
+    assert wb.sheetnames[0] == "결과_AOI-1_vs_AOI-2"
+    assert "전체 양식" in wb.sheetnames
+    assert wb.sheetnames.index("전체 양식") > 0           # 요약이 앞, 전체가 뒤
+
+    summary = wb["결과_AOI-1_vs_AOI-2"]
+    full = wb["전체 양식"]
+    # 요약 시트는 A~D 만 — E~H 헤더가 없다.
+    assert summary["A1"].value == "No" and summary["C1"].value == "Scan Defect"
+    assert summary["E1"].value is None and summary["G1"].value is None
+    # 전체 양식 시트는 E~H 수기 영역 헤더를 보존한다.
+    assert full["E1"].value is not None and full["G1"].value is not None
+    # 두 시트 모두 데이터(slot)가 채워진다.
+    assert summary["B3"].value == "S1" and full["B3"].value == "S1"
+
+
 def test_machine_label_rule():
     """호기 라벨 규칙: 숫자/N호기 → AOI-N, 그 외 문자 포함 → AOI(원본)."""
     from aoi_verification.app.workers.exporter import _machine_label
