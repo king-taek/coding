@@ -59,6 +59,7 @@ class MainWindow(QMainWindow):
     # 자동 업데이트 — 백그라운드 스레드에서 메인 스레드로 결과를 넘기는 시그널.
     _update_found = pyqtSignal(dict)
     _update_applied = pyqtSignal(bool, dict)
+    _update_progress = pyqtSignal(int, int, str)   # 다운로드/적용 진행(로딩바)
     _update_none = pyqtSignal(str)          # 수동 확인: 최신/확인불가 안내
     _startup_proceed = pyqtSignal()         # 업데이트 흐름 종료 → 나머지 시작 팝업
 
@@ -211,6 +212,7 @@ class MainWindow(QMainWindow):
         self._startup_done = False
         self._update_found.connect(self._on_update_found)
         self._update_applied.connect(self._on_update_applied)
+        self._update_progress.connect(self._on_update_progress)
         self._update_none.connect(self._on_update_none)
         self._startup_proceed.connect(self._run_startup_popups)
         QTimer.singleShot(400, self._check_for_update_async)
@@ -327,20 +329,29 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         self._loading.show_overlay(i18n.KO.UPDATE_DOWNLOADING)
+        self._loading.set_progress(0, 0, i18n.KO.UPDATE_DOWNLOADING)   # busy → 0 에서 안 멈춤
 
         import threading
+
+        def _report(done: int, total: int, phase: str) -> None:
+            # 백그라운드 스레드 → 메인 스레드로 시그널 전달(큐).  로딩바가 단계별로 움직인다.
+            self._update_progress.emit(int(done), int(total), str(phase))
 
         def _work() -> None:
             ok = False
             try:
                 from ..utils import updater
                 ok = updater.download_and_apply(
-                    info["repo"], info["branch"], info["sha"])
+                    info["repo"], info["branch"], info["sha"], progress=_report)
             except Exception:
                 ok = False
             self._update_applied.emit(bool(ok), info or {})
 
         threading.Thread(target=_work, name="update-apply", daemon=True).start()
+
+    def _on_update_progress(self, done: int, total: int, phase: str) -> None:
+        """업데이트 진행(다운로드/압축해제/적용) → 로딩바 갱신(메인 스레드)."""
+        self._loading.set_progress(done, total, phase)
 
     def _on_update_applied(self, ok: bool, info: dict) -> None:
         """다운로드/교체 결과 — 성공 시 안내 후 **프로그램 자동 종료**(재시작은 사용자가)."""

@@ -221,3 +221,80 @@ def test_apply_requirements_first_time_does_not_falsely_flag(tmp_path):
     # 기존 requirements.txt 가 아직 없으면(이 기능 도입 후 첫 업데이트) 오인 안 함.
     src, app = _dirs(tmp_path, old_req=None, new_req="numpy==1\n")
     assert updater._apply_requirements(src, app) is False
+
+
+# ── download_and_apply — 미러링(필요한 것 전부) + 진행 보고 + dev 데이터 제외 ──
+def _make_branch_zip(tmp_path):
+    """가짜 브랜치 zip 을 만든다 — 'coding-x/' 최상위 폴더 아래 앱 트리."""
+    import io
+    import zipfile
+    buf = io.BytesIO()
+    files = {
+        "coding-x/aoi_verification/app/__init__.py": "x = 1\n",
+        "coding-x/main.py": "print('hi')\n",
+        "coding-x/requirements.txt": "numpy==1\n",
+        "coding-x/양식.xlsx": "TEMPLATE",
+        "coding-x/docs/새문서.md": "doc\n",
+        "coding-x/scripts/run_this_before.py": "setup\n",
+        "coding-x/tests/test_x.py": "def test(): pass\n",      # 제외 대상
+        "coding-x/기준/Slot/a.png": "img",                      # 제외 대상(대용량 샘플)
+        "coding-x/bench결과/result.json": "{}",                 # 제외 대상
+    }
+    with zipfile.ZipFile(buf, "w") as z:
+        for name, content in files.items():
+            z.writestr(name, content)
+    return buf.getvalue()
+
+
+class _FakeResp:
+    def __init__(self, data: bytes):
+        self._d = data
+        self._i = 0
+        self.headers = {"Content-Length": str(len(data))}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def read(self, n=-1):
+        if n is None or n < 0:
+            chunk, self._i = self._d[self._i:], len(self._d)
+            return chunk
+        chunk = self._d[self._i:self._i + n]
+        self._i += len(chunk)
+        return chunk
+
+
+def test_download_and_apply_mirrors_needed_and_skips_dev_data(tmp_path, monkeypatch):
+    app = tmp_path / "app"
+    app.mkdir()
+    (app / "requirements.txt").write_text("numpy==1\n", encoding="utf-8")  # 동일 → 변경 아님
+    zip_bytes = _make_branch_zip(tmp_path)
+    monkeypatch.setattr(updater, "_app_root", lambda: app)
+    monkeypatch.setattr(updater, "_urlopen",
+                        lambda url, headers, timeout: _FakeResp(zip_bytes))
+
+    seen = []
+    ok = updater.download_and_apply("o/r", "x", "SHA123",
+                                    progress=lambda d, t, p: seen.append((d, t, p)))
+    assert ok is True
+    # 구동에 필요한 것은 전부 받아 미러링된다.
+    assert (app / "aoi_verification" / "app" / "__init__.py").exists()
+    assert (app / "main.py").exists()
+    assert (app / "양식.xlsx").read_text() == "TEMPLATE"
+    assert (app / "docs" / "새문서.md").exists()              # 새 문서도 함께
+    assert (app / "scripts" / "run_this_before.py").exists()
+    # 개발 전용·대용량 데이터는 제외된다.
+    assert not (app / "tests").exists()
+    assert not (app / "기준").exists()
+    assert not (app / "bench결과").exists()
+    # VERSION 기록 + 진행 보고(단계 메시지)가 있었다.
+    import json as _json
+    ver = _json.loads((app / "VERSION").read_text())
+    assert ver["sha"] == "SHA123"
+    phases = {p for _, _, p in seen}
+    assert any("다운로드" in p for p in phases)
+    assert any("적용" in p for p in phases)
+    assert updater.deps_changed() is False               # requirements 동일

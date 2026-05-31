@@ -3,8 +3,11 @@
 배포(포터블) 빌드는 ``app/VERSION`` (JSON: ``{"sha","branch"}``) 을 동봉한다.
 실행 시 백그라운드로 브랜치 최신 커밋 SHA 를 GitHub API 로 받아 현재 SHA 와
 비교하고, 다르면 UI 가 '업데이트 있음' 팝업을 띄운다.  사용자가 동의하면 브랜치
-zip 을 받아 앱 소스(``aoi_verification/``, ``main.py``, ``양식.xlsx``)만 교체하고
-재시작을 안내한다(무거운 ``python/`` 런타임은 건드리지 않음).
+zip 을 받아 **앱 구동에 필요한 것을 전부** 앱 폴더로 미러링한다(``aoi_verification/`` ·
+``main.py`` · ``양식.xlsx`` · ``requirements.txt`` · ``docs/`` · ``scripts/`` 등 — 새
+모듈/리소스 누락 방지).  개발 전용·대용량 데이터(``tests/`` · ``기준/`` · ``bench결과/``)와
+VCS/캐시는 제외하고, 무거운 ``python/`` 런타임도 건드리지 않는다.  의존성 패키지는
+다시 설치하지 않으며, ``requirements.txt`` 변경은 감지해 사용자에게 안내만 한다.
 
 - 공개 저장소라 토큰 불필요.  모든 네트워크 오류는 **조용히 무시**(부가 기능).
 - ``VERSION`` 이 없으면(소스 체크아웃/개발 모드) 업데이트 확인을 하지 않는다.
@@ -323,43 +326,86 @@ def manual_check() -> tuple:
     return ("update", info)
 
 
+# 앱 구동에 필요 없는(또는 받지 말아야 할) 최상위 항목 — 개발 전용·대용량 데이터·VCS/캐시.
+# 그 외에는 리포에 있는 것을 **전부** 받아 앱 폴더로 미러링한다(새 모듈·리소스 누락 방지).
+_UPDATE_SKIP_TOP = {
+    ".git", ".github", "__pycache__", ".pytest_cache", ".idea",
+    "tests",          # 테스트는 구동에 불필요
+    "기준", "bench결과",  # 샘플/실측 데이터(대용량) — 구동에 불필요, 사용자 데이터로 대체
+}
+
+
 def download_and_apply(repo: str, branch: str, target_sha: str,
-                       timeout: float = 60.0) -> bool:
-    """브랜치 zip 을 받아 앱 소스만 덮어쓴다.  성공 시 VERSION 갱신 후 True."""
+                       timeout: float = 60.0,
+                       progress: Optional[callable] = None) -> bool:
+    """브랜치 zip 을 받아 **앱 구동에 필요한 것을 전부** 덮어쓴다(미러링).  성공 시 True.
+
+    ``progress(done, total, phase)`` 가 주어지면 다운로드/압축해제/적용 단계의 진행을
+    보고한다(로딩바가 0 에서 멈추지 않도록).  total<=0 이면 진행량 미상(busy) 의미."""
     import shutil
     import tempfile
     import zipfile
 
     global _last_error, _deps_changed
     _deps_changed = False
+
+    def _emit(done, total, phase):
+        if progress:
+            try:
+                progress(int(done), int(total), str(phase))
+            except Exception:
+                pass
+
     url = _ZIP.format(repo=repo, branch=branch)
     tmpd = Path(tempfile.mkdtemp(prefix="aoi_update_"))
     try:
+        # 1) 다운로드 — Content-Length 가 있으면 바이트 진행, 없으면 busy.
         zip_path = tmpd / "src.zip"
         with _urlopen(url, _UA, timeout) as r, open(zip_path, "wb") as f:
-            shutil.copyfileobj(r, f)
+            total = int(getattr(r, "headers", {}).get("Content-Length", 0) or 0)
+            done = 0
+            _emit(0, total, "다운로드 중…")
+            while True:
+                chunk = r.read(64 * 1024)
+                if not chunk:
+                    break
+                f.write(chunk)
+                done += len(chunk)
+                _emit(done, total, "다운로드 중…")
+
+        # 2) 압축 해제 — 파일 수 기준 진행.
         with zipfile.ZipFile(zip_path) as z:
-            z.extractall(tmpd)
+            names = z.namelist()
+            n = len(names)
+            for i, name in enumerate(names, start=1):
+                z.extract(name, tmpd)
+                if i % 20 == 0 or i == n:
+                    _emit(i, n, "압축 해제 중…")
+
         roots = [p for p in tmpd.iterdir() if p.is_dir()]
         if not roots:
             return False
         src_root = roots[0]                 # coding-<branch> 형태의 단일 최상위 폴더
         app_root = _app_root()
-        pkg = src_root / "aoi_verification"
-        if not pkg.exists():
+        if not (src_root / "aoi_verification").exists():
             return False
-        # 실행 중 .py 를 덮어써도 메모리의 모듈엔 영향 없음 → 재시작 시 적용.
-        shutil.copytree(pkg, app_root / "aoi_verification", dirs_exist_ok=True)
-        # requirements.txt 도 함께 받아 두되, 변경 여부를 먼저 비교한다(자동 재설치는
-        # 하지 않고, 바뀌었으면 UI 가 '의존성을 갱신하라'고 안내).  최신 준비 스크립트도
-        # best-effort 로 동봉한다.
+
+        # 의존성 변경은 덮어쓰기 **전에** 비교한다(자동 재설치는 안 함 — UI 가 안내).
         _deps_changed = _apply_requirements(src_root, app_root)
-        for fn in ("main.py", "양식.xlsx", "requirements.txt"):
-            srcf = src_root / fn
-            if srcf.exists():
-                shutil.copy2(srcf, app_root / fn)
-        _copy_run_this_before(src_root, app_root)
+
+        # 3) 적용(미러링) — skip 목록 외 최상위 항목을 전부 앱 폴더로 복사.
+        items = [p for p in src_root.iterdir() if p.name not in _UPDATE_SKIP_TOP]
+        m = len(items)
+        for i, item in enumerate(items, start=1):
+            dst = app_root / item.name
+            if item.is_dir():
+                shutil.copytree(item, dst, dirs_exist_ok=True)
+            else:
+                shutil.copy2(item, dst)
+            _emit(i, m, "적용 중…")
+
         _write_version(target_sha, branch, repo)
+        _emit(m, m, "완료")
         return True
     except Exception as exc:
         _last_error = _describe_err(exc, url)
@@ -387,17 +433,3 @@ def _apply_requirements(src_root: Path, app_root: Path) -> bool:
     if old is None:
         return False
     return old.strip() != new.strip()
-
-
-def _copy_run_this_before(src_root: Path, app_root: Path) -> None:
-    """최신 준비 스크립트를 앱 루트의 scripts/ 에 동봉(best-effort)."""
-    import shutil
-    srcf = src_root / "scripts" / "run_this_before.py"
-    if not srcf.exists():
-        return
-    try:
-        dst = app_root / "scripts"
-        dst.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(srcf, dst / "run_this_before.py")
-    except Exception:
-        pass
