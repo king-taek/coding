@@ -113,3 +113,57 @@ def test_cosine_helper():
     assert abs(bm._cosine([1, 0], [1, 0]) - 1.0) < 1e-9
     assert abs(bm._cosine([1, 0], [0, 1])) < 1e-9
     assert bm._cosine([0, 0], [1, 1]) == 0.0
+
+
+# ── 중앙-가중 ORB(단일 패스) — 순수 가중 로직(cv2 불필요) ────────────────────
+def test_centrality_weights_center_high_edge_low():
+    import numpy as np
+    from aoi_verification.app.similarity import orb
+    coords = np.array([[50, 50], [0, 0], [100, 100]], dtype=float)  # 중앙·모서리·모서리
+    w = orb.centrality_weights(coords, (100, 100), 1.0)
+    assert abs(w[0] - 1.0) < 1e-9 and w[1] < 0.1 and w[2] < 0.1
+
+
+def test_centrality_weighted_ratio_strength0_equals_plain_and_upweights_center():
+    import numpy as np
+    from aoi_verification.app.similarity import orb
+    coords = np.array([[50, 50], [0, 0], [100, 100]], dtype=float)
+    # strength=0 → 단순 good/base
+    assert abs(orb.centrality_weighted_ratio([0, 1], coords, (100, 100), 0.0, 3) - 2 / 3) < 1e-9
+    # 좌표 없음 → 폴백(good/base)
+    assert abs(orb.centrality_weighted_ratio([0, 1], None, (100, 100), 0.5, 4) - 0.5) < 1e-9
+    # strength>0 → 중앙 매치가 가장자리 매치보다 높은 점수
+    c = orb.centrality_weighted_ratio([0], coords, (100, 100), 0.8, 3)
+    e = orb.centrality_weighted_ratio([1], coords, (100, 100), 0.8, 3)
+    assert c > e
+
+
+def test_orb_descriptor_carries_coords():
+    from aoi_verification.app.similarity import orb
+    od = orb.OrbDescriptor(keypoints=0, descriptors=None)   # 기본값 — 좌표/shape 옵션
+    assert od.coords is None and od.shape == (0, 0)
+
+
+def test_center_orb_recipes_registered_and_wired():
+    g = {r.key: r for r in rx.group("orb-center")}
+    assert set(rx.CENTER_ORB_KEYS) == set(g)
+    for r in g.values():
+        cfg = r.to_cfg()
+        assert cfg.orb_center_weight > 0          # 중앙 가중 켜짐
+        assert r.rerank_workers >= 2              # 병렬(단일 패스·생존자 속도)
+        assert r.recall == rx.RECALL_GPU          # 현행과 동일 베이스
+    # 옵션(MAIN)에 노출돼 측정 가능.
+    assert set(rx.CENTER_ORB_KEYS) <= set(rx.MAIN_KEYS)
+
+
+# ── 확정·고착: 운영 채점기는 이미 재채점을 병렬화한다(직렬로 회귀 금지) ─────────
+def test_production_rerank_is_parallel():
+    import pytest
+    pytest.importorskip("PyQt6")
+    from aoi_verification.app.workers import efficiency_matcher as em
+    # 운영 FusionScheduler 는 ref 별 재채점을 코어 수만큼 풀로 돌린다(>=2).
+    assert em._rerank_workers() >= 2
+    # 회귀 가드: 스케줄러가 풀에 재채점을 submit 하는 코드가 유지돼야 한다.
+    import inspect
+    src = inspect.getsource(em.EfficiencyScheduler._consume_slot)
+    assert "_pool.submit" in src and "_rerank_one" in src

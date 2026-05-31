@@ -31,6 +31,7 @@ class Feature:
     roi_gray: np.ndarray                    # SSIM 비교용 ROI
     cnn: Optional[np.ndarray] = None        # 옵션 (특정 모델의 임베딩)
     cnn_model: str = ""                     # cnn 을 만든 모델 이름 ("basic" 일 경우 빈문자열)
+    orb_xy: Optional[np.ndarray] = None     # (N, 2) float32 ORB 키포인트 좌표 — 중앙가중용
 
     # 디스크 직렬화 ----------------------------------------------------------
     def save(self, dst: Path) -> None:
@@ -41,6 +42,8 @@ class Feature:
         }
         if self.orb_desc is not None:
             payload["orb_desc"] = self.orb_desc
+        if self.orb_xy is not None:
+            payload["orb_xy"] = self.orb_xy
         if self.cnn is not None:
             payload["cnn"] = self.cnn
             if self.cnn_model:
@@ -65,6 +68,7 @@ class Feature:
             orb_desc=data["orb_desc"] if "orb_desc" in data.files else None,
             cnn=data["cnn"] if "cnn" in data.files else None,
             cnn_model=cnn_model,
+            orb_xy=data["orb_xy"] if "orb_xy" in data.files else None,   # 구 캐시엔 없음→None
         )
 
 
@@ -120,6 +124,7 @@ def extract(src: Path, *, use_cnn: Optional[bool] = None, cfg=None,
         orb_desc=od.descriptors,
         roi_gray=roi_gray,
         cnn=cnn_vec,
+        orb_xy=od.coords,                # 중앙-가중 채점용 키포인트 좌표
     )
     try:
         if not no_cache:
@@ -140,7 +145,7 @@ def _preprocess(gray: np.ndarray) -> np.ndarray:
 
 def score(a: Feature, b: Feature,
           weights: Optional[config.SimilarityWeights] = None,
-          *, components: Optional[set] = None) -> float:
+          *, components: Optional[set] = None, center_strength: float = 0.0) -> float:
     """두 Feature 사이의 최종 가중 평균 유사도 (0.0 ~ 1.0).
 
     active 모델이 ``basic`` 이 아니고 torch 가 사용 가능하면 CNN 항이 자동으로
@@ -157,9 +162,11 @@ def score(a: Feature, b: Feature,
     s_phash = _phash.phash_similarity(a.phash, b.phash) if "phash" in use else 0.0
 
     if "orb" in use:
-        orb_a = _orb.OrbDescriptor(a.orb_kp, a.orb_desc)
-        orb_b = _orb.OrbDescriptor(b.orb_kp, b.orb_desc)
-        s_orb = _orb.orb_score(orb_a, orb_b)
+        orb_a = _orb.OrbDescriptor(a.orb_kp, a.orb_desc, getattr(a, "orb_xy", None),
+                                   tuple(a.roi_gray.shape[:2]))
+        orb_b = _orb.OrbDescriptor(b.orb_kp, b.orb_desc, getattr(b, "orb_xy", None),
+                                   tuple(b.roi_gray.shape[:2]))
+        s_orb = _orb.orb_score(orb_a, orb_b, center_strength=center_strength)
     else:
         s_orb = 0.0
 

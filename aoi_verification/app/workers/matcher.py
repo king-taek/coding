@@ -43,6 +43,9 @@ def score_ref_classical(ref_item: ImageItem,
     비싼 ORB 를 빼서 CPU 재채점을 빠르게 하는 고속 변형용.  ORB 를 안 쓰면 특징
     추출에서도 ORB 검출을 생략(``need_orb=False``)해 추출 비용까지 줄인다."""
     need_orb = components is None or ("orb" in components)
+    # 중앙-가중 ORB — cfg.orb_center_weight>0 이면 defect(중앙) 근접 매치에 가중(단일 패스).
+    center_strength = (float(getattr(cfg, "orb_center_weight", 0.0) or 0.0)
+                       if cfg is not None else 0.0)
     ref_feat = sim.extract(ref_item.path, cfg=cfg, side="ref", need_orb=need_orb)
     vfmap: dict[Path, sim.Feature] = dict(val_features or {})
     total = len(val_items)
@@ -55,7 +58,8 @@ def score_ref_classical(ref_item: ImageItem,
             if vf is None:
                 vf = sim.extract(vi.path, cfg=cfg, side="val", need_orb=need_orb)
                 vfmap[vi.path] = vf
-            s = sim.score(ref_feat, vf, components=components)
+            s = sim.score(ref_feat, vf, components=components,
+                          center_strength=center_strength)
         except Exception:
             s = 0.0
         if s >= threshold:

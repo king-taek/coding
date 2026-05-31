@@ -67,6 +67,7 @@ class Recipe:
     rerank: str = "classical"      # classical / phash / phash_ssim / orb_ssim / phash_orb / orb / ssim
     rerank_workers: int = 0        # 재채점 병렬 워커 수(0=직렬) — CPU 멀티코어 활용
     orb_nfeatures: int = 0         # ORB 검출 특징 수(0=기본 500) — 줄이면 ORB 비용↓
+    orb_center_weight: float = 0.0 # 중앙-가중 ORB(0=끔) — defect 정중앙 매치에 가중
     # ── 중앙-인식(center-aware) 재채점 — defect 이 정중앙인 특성 활용 ──────────
     #   region_fusion: 중앙(defect) crop 점수 + 풀 ROI(주변 패턴) 점수를 가중 융합.
     #   cascade: 중앙 점수로 거칠게 추려(coarse) 풀 ROI 로 정밀 재채점(fine)만 — 속도↑.
@@ -116,6 +117,7 @@ class Recipe:
             embed_batch=int(self.embed_batch),
             bench_no_cache=bool(bench_no_cache),
             orb_nfeatures=int(self.orb_nfeatures),
+            orb_center_weight=float(self.orb_center_weight or 0.0),
         )
 
 
@@ -249,8 +251,12 @@ SURVIVOR_KEYS: List[str] = [
     "cpu_rr_orb256_parallel", # ORB256+병렬 — 95.1%(1장 차·빠름)
 ]
 
-# 개발자 모드 '메인 옵션' = 앵커(gold·현행) + 생존자.  GUI/CLI 가 보여주는 목록은 이것뿐.
-MAIN_KEYS: List[str] = [BASELINE_ACCURACY_KEY, PRODUCTION_SPEED_KEY] + SURVIVOR_KEYS
+# 중앙-가중 ORB 신규 실험(단일 패스) — defect 정중앙 활용.  옵션에 노출해 측정한다.
+CENTER_ORB_KEYS: List[str] = ["rr_orb_center50", "rr_orb_center70", "rr_fusion_center50"]
+
+# 개발자 모드 '메인 옵션' = 앵커(gold·현행) + 생존자 + 중앙-가중 ORB 신규 실험.
+MAIN_KEYS: List[str] = ([BASELINE_ACCURACY_KEY, PRODUCTION_SPEED_KEY]
+                        + SURVIVOR_KEYS + CENTER_ORB_KEYS)
 
 # '빠른' 프리셋(기본 선택) — 앵커 + 핵심 생존자 소수(빠른 반복용).  현행을 **항상 포함**해
 # 추천 엔진이 production 대비 speedup 을 정상 계산한다.
@@ -571,6 +577,34 @@ def _build_center_aware() -> List[Recipe]:
 CENTER_AWARE: List[Recipe] = _build_center_aware()
 
 
+# ===========================================================================
+# (C2) 중앙-가중 ORB — defect 정중앙 특성을 **단일 패스**로 활용(영역분해 A 의 실패를
+#      교정).  ROI 를 384px 로 재정규화하는 파이프라인 특성상 중앙 crop 은 비용을 못
+#      줄였으므로, 추가 패스 없이 ORB 매치를 '중앙 근접도'로 가중한다(비용 거의 동일).
+#      베이스는 현행과 동일(GPU MobileNetV3 b16·topk40·병렬16) — 정확도 비교 공정.
+# ===========================================================================
+def _build_center_orb() -> List[Recipe]:
+    base = dict(recall=RECALL_GPU, scoring=SCORE_FUSION,
+                embed_model=MODEL_MOBILENET_V3, embed_batch=16,
+                fusion_topk=40, rerank_workers=16, tag="orb_center")
+    return [
+        Recipe(key="rr_orb_center50", name="ORB중앙가중0.5(단독·병렬)",
+               rerank="orb", orb_center_weight=0.5, **base,
+               desc=("ORB 단독 재채점 + 중앙(defect) 근접 매치에 0.5 가중 — 배경(반복 "
+                     "패턴) 매치 영향을 줄여 defect 판별력↑.  단일 패스(추가 비용 없음).")),
+        Recipe(key="rr_orb_center70", name="ORB중앙가중0.7(단독·병렬)",
+               rerank="orb", orb_center_weight=0.7, **base,
+               desc="ORB 단독 + 중앙 가중 0.7 — defect 비중을 더 키운 변형."),
+        Recipe(key="rr_fusion_center50", name="융합+ORB중앙가중0.5(병렬)",
+               rerank="classical", orb_center_weight=0.5, **base,
+               desc="전체 고전(pHash+ORB+SSIM) 융합에서 ORB 항만 중앙 가중 0.5 — 현행 "
+                    "정확도를 유지하며 defect 신호를 강화하는 보수적 변형."),
+    ]
+
+
+CENTER_ORB: List[Recipe] = _build_center_orb()
+
+
 NPU_SWEEP: List[Recipe] = _build_npu_sweep()
 NPU_ONLY: List[Recipe] = _build_npu_only()
 FAST_RERANK: List[Recipe] = _build_fast_rerank()
@@ -583,13 +617,14 @@ MODEL_ZOO: List[Recipe] = _build_model_zoo()
 GROUPS = {
     "core": REGISTRY,
     "center": CENTER_AWARE,
+    "orb-center": CENTER_ORB,
     "npu-sweep": NPU_SWEEP,
     "npu-only": NPU_ONLY,
     "fast-rerank": FAST_RERANK,
     "model-zoo": MODEL_ZOO,
 }
-ALL_EXTENDED: List[Recipe] = (REGISTRY + CENTER_AWARE + NPU_SWEEP + NPU_ONLY
-                              + FAST_RERANK + MODEL_ZOO)
+ALL_EXTENDED: List[Recipe] = (REGISTRY + CENTER_AWARE + CENTER_ORB + NPU_SWEEP
+                              + NPU_ONLY + FAST_RERANK + MODEL_ZOO)
 _BY_KEY = {r.key: r for r in ALL_EXTENDED}
 
 
