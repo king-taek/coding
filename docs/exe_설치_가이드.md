@@ -24,8 +24,9 @@
 
 ### A-1. 빌드 (전달하는 사람, 1회)
 ```powershell
-REM 저장소 루트에서
-scripts\internal\build_online.bat
+REM 저장소 루트에서 (둘 중 편한 것)
+python scripts\build.py online
+REM 또는: scripts\internal\build_online.bat (위 명령을 부르는 얇은 래퍼)
 ```
 - 산출물: **`dist\AOI_Verify_Online.exe`** — 이 파일 **하나만** 배포(메일·USB·공유 폴더 등).
 - 빌드가 하는 일: 가상환경 준비 → PyInstaller 설치 → 보안 가드 통과 확인 →
@@ -54,7 +55,8 @@ scripts\internal\build_online.bat
 
 ### B-1. 빌드 (전달하는 사람, 1회)
 ```powershell
-scripts\internal\make_portable.bat
+python scripts\build.py portable
+REM 또는: scripts\internal\make_portable.bat
 ```
 - 산출물 `dist_portable\` 구조:
   ```
@@ -80,7 +82,8 @@ scripts\internal\make_portable.bat
 
 ### C-1. 빌드 (전달하는 사람, 1회)
 ```powershell
-scripts\internal\build_windows.bat
+python scripts\build.py windows
+REM 또는: scripts\internal\build_windows.bat
 ```
 - 산출물: **`dist\AOI_Verify\`** 폴더(통째로 zip 배포, ~1.5GB). 진입 exe 는 `AOI_Verify.exe`.
 - 설정 스펙: `scripts\internal\aoi_verification.spec`(스타일시트 · `dev\양식.xlsx` 자동 동봉).
@@ -112,9 +115,10 @@ scripts\internal\build_windows.bat
 
 | 파일 | 역할 |
 |---|---|
-| `scripts\internal\build_online.bat` · `online.spec` | A. 온라인 launcher exe 빌드 |
+| `scripts\build.py` | 빌드 진입점(파이썬) — `online`/`portable`/`windows` |
+| `scripts\internal\build_online.bat` · `online.spec` | A. 온라인 launcher exe 빌드(.bat 은 build.py 래퍼) |
 | `scripts\launcher.py` | A. exe 진입점(앱 다운로드+pip 설치+실행) |
-| `scripts\internal\make_portable.bat` | B. 포터블 폴더 빌드 |
+| `scripts\internal\portable_build.py` · `make_portable.bat` | B. 포터블 폴더 빌드 |
 | `scripts\internal\build_windows.bat` · `aoi_verification.spec` | C. 단독 exe 빌드 |
 | `aoi_verification\app\utils\bootstrap.py` | A. 부트스트랩 핵심 로직(데이터 폴더·의존성 판단) |
 | `scripts\run_aoi.bat` · `update_app.bat` | B/C. 사용자 실행·수동 갱신 |
