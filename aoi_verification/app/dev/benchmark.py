@@ -41,8 +41,11 @@ def _rerank_components(recipe) -> Optional[set]:
     return {
         "classical": None,
         "phash": {"phash"},
-        "phash_ssim": {"phash", "ssim"},
-        "orb_ssim": {"orb", "ssim"},
+        "phash_ssim": {"phash", "ssim"},      # ORB(최고비용) 제거
+        "orb_ssim": {"orb", "ssim"},          # pHash 제거(대조)
+        "phash_orb": {"phash", "orb"},        # SSIM 제거
+        "orb": {"orb"},                       # ORB 단독(변별력/비용 분리)
+        "ssim": {"ssim"},                     # SSIM 단독
     }.get(mode, None)
 
 

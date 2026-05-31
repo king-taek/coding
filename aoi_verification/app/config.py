@@ -137,6 +137,10 @@ class SimilarityConfig:
     # 점수 .json.gz)를 우회해 '처음 매칭하는 것처럼' 측정한다.  결과(점수/정확도)
     # 에는 영향이 없고 속도만 달라진다(공정한 벤치마크용).  기본 OFF.
     bench_no_cache: bool = False
+    # CPU 재채점 고속화 노브 — ORB 검출 특징 수(0=기본 500).  ORB(디스크립터 검출/
+    # 정합)는 고전 채점에서 가장 비싼 항이라, 특징 수를 줄이면 CPU 매치 단계가 빨라진다
+    # (정확도는 검증 필요).  개발자 벤치마크 전용으로만 0 이 아닌 값을 쓴다.
+    orb_nfeatures: int = 0
 
     def _center_crop_for(self, side) -> bool:
         """이 side(ref/val)에 중앙 영역 crop(30%)을 적용할지."""
@@ -147,7 +151,7 @@ class SimilarityConfig:
     @property
     def has_preprocess(self) -> bool:
         """전처리가 하나라도 켜져 있으면 True — 캐시 키 분기/적용 판단용."""
-        return bool(self.center_crop)
+        return bool(self.center_crop) or bool(self.orb_nfeatures)
 
     def cache_extra(self, side=None) -> str:
         """캐시 키 판별자.  전처리 OFF 면 빈 문자열 → 기본 캐시와 동일 키.
@@ -157,6 +161,8 @@ class SimilarityConfig:
         parts = []
         if self._center_crop_for(side):
             parts.append("c30")          # 중앙 30% — 키 변경으로 이전 캐시와 분리
+        if self.orb_nfeatures:
+            parts.append(f"orb{int(self.orb_nfeatures)}")   # 특징 수 다르면 캐시 분리
         return "-".join(parts)
 
 

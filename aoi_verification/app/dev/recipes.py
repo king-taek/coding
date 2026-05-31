@@ -64,8 +64,9 @@ class Recipe:
     preprocess_threads: int = 0    # 전처리(디코드/리사이즈) 멀티스레드 수(0=자동)
     input_px: int = 0              # 입력 해상도(0=기본 256) — 처리량↔표현력
     # ── CPU 재채점(rerank) 고속화 노브 ─────────────────────────────────────
-    rerank: str = "classical"      # classical / phash / phash_ssim / orb_ssim (고전 비용 절감)
+    rerank: str = "classical"      # classical / phash / phash_ssim / orb_ssim / phash_orb / orb / ssim
     rerank_workers: int = 0        # 재채점 병렬 워커 수(0=직렬) — CPU 멀티코어 활용
+    orb_nfeatures: int = 0         # ORB 검출 특징 수(0=기본 500) — 줄이면 ORB 비용↓
     # ── 모델 주머니(키포인트/이상탐지 등 전용 채점기 라우팅) ───────────────
     method: str = ""               # "" / model_zoo family (keypoint/anomaly 등)
     needs: str = ""                # 대상 장비에 필요한 추가 패키지/가중치(폴백 안내용)
@@ -105,6 +106,7 @@ class Recipe:
             use_npu=self.recall in (RECALL_NPU, RECALL_GPU_NPU),
             embed_batch=int(self.embed_batch),
             bench_no_cache=bool(bench_no_cache),
+            orb_nfeatures=int(self.orb_nfeatures),
         )
 
 
@@ -356,6 +358,89 @@ def _build_fast_rerank() -> List[Recipe]:
                rerank="phash_ssim", rerank_workers=16, tag="fast_rerank",
                desc=("NPU 가 임베딩을 뽑고, CPU 는 ORB 를 뺀 pHash+SSIM 을 16스레드 "
                      "병렬로 재채점 — 추출=NPU·계산=경량/병렬 CPU 의 결합 최적 후보.")),
+    ] + _build_cpu_rerank()
+
+
+# ===========================================================================
+# (D-2) CPU 매치 단계 고속화 — '끝까지 CPU'(recall=CPU 임베딩 후보 + CPU 재채점)로
+#   매치 단계를 빠르게 만드는 ≥10가지 방법을 한 축씩 바꿔 측정한다.  병목인 CPU
+#   재채점(특히 ORB)을 (1) 항 빼기 (2) 병렬화 (3) ORB 특징 수 줄이기 (4) 깊이 줄이기
+#   (5) 중앙 crop 으로 공략한다.  전부 정확도 검증이 전제(떨어지면 추천 안 함).
+# ===========================================================================
+def _build_cpu_rerank() -> List[Recipe]:
+    # CPU 끝까지 — CPU(OpenVINO)로 임베딩 후보를 추리고 CPU 가 고전 재채점.
+    c = dict(recall=RECALL_CPU, scoring=SCORE_FUSION,
+             embed_model=MODEL_MOBILENET_V3, embed_batch=8, fusion_topk=40,
+             tag="fast_rerank")
+    return [
+        # (1) 항 빼기 — pHash 는 사전계산이라 매우 싸고, ORB(정합)·SSIM 이 비싸다.
+        Recipe(key="cpu_rr_phash", name="CPU재채점 pHash단독",
+               rerank="phash", rerank_workers=8, **c,
+               desc=("CPU 후보 + 재채점을 pHash 만으로(ORB·SSIM 생략). 가장 싼 재채점 — "
+                     "CPU 매치 단계 최속 후보. 정확도 유지되면 채택.")),
+        Recipe(key="cpu_rr_phash_ssim", name="CPU재채점 pHash+SSIM(ORB뺌)",
+               rerank="phash_ssim", rerank_workers=8, **c,
+               desc=("가장 비싼 ORB 만 빼고 pHash+SSIM. 구조 유사도를 남겨 정확도 손실을 "
+                     "줄이면서 ORB 비용을 없앤다.")),
+        Recipe(key="cpu_rr_phash_orb", name="CPU재채점 pHash+ORB(SSIM뺌)",
+               rerank="phash_orb", rerank_workers=8, **c,
+               desc=("SSIM 만 빼고 pHash+ORB. SSIM(전 픽셀 비교) 비용을 없애 속도↑. "
+                     "ORB 가 정확도에 기여하는지 분리 측정.")),
+        Recipe(key="cpu_rr_orb_only", name="CPU재채점 ORB단독",
+               rerank="orb", rerank_workers=8, **c,
+               desc=("ORB 단독 재채점 — ORB 만의 변별력·비용을 분리해 본다(대조).")),
+        Recipe(key="cpu_rr_ssim_only", name="CPU재채점 SSIM단독",
+               rerank="ssim", rerank_workers=8, **c,
+               desc=("SSIM 단독 재채점 — 구조 유사도만의 변별력·비용을 분리해 본다(대조).")),
+        # (2) 병렬화 — 항은 그대로(정확도 동일) ref 를 멀티코어로 동시 채점.
+        Recipe(key="cpu_rr_parallel8", name="CPU재채점 병렬8(전체)",
+               rerank="classical", rerank_workers=8, **c,
+               desc=("전체 항(pHash+ORB+SSIM) 그대로, ref 를 8스레드 병렬 채점 — "
+                     "정확도 보존하며 멀티코어로 시간↓.")),
+        Recipe(key="cpu_rr_parallel16", name="CPU재채점 병렬16(전체)",
+               rerank="classical", rerank_workers=16, **c,
+               desc=("전체 항 그대로 16스레드 병렬 — 코어 많을수록 이득. 정확도 100% 보존.")),
+        Recipe(key="cpu_rr_parallel32", name="CPU재채점 병렬32(전체)",
+               rerank="classical", rerank_workers=32, **c,
+               desc=("전체 항 그대로 32스레드 병렬 — 과도구독 한계점 확인(코어 수 초과 시 이득 둔화).")),
+        # (3) ORB 특징 수 줄이기 — ORB 검출/정합 비용은 특징 수에 비례.
+        Recipe(key="cpu_rr_orb256", name="CPU재채점 ORB특징256",
+               rerank="classical", rerank_workers=16, orb_nfeatures=256, **c,
+               desc=("전체 융합이되 ORB 특징을 256개로(기본 500↓) — 검출/정합 비용을 줄여 "
+                     "정확도를 크게 안 깎고 속도↑.")),
+        Recipe(key="cpu_rr_orb128", name="CPU재채점 ORB특징128",
+               rerank="classical", rerank_workers=16, orb_nfeatures=128, **c,
+               desc=("ORB 특징 128개 — 더 공격적으로 ORB 비용↓. 정확도 한계 확인용.")),
+        # (4) 재채점 깊이 줄이기 — 상위 K 만 정밀 채점.
+        Recipe(key="cpu_rr_topk10", name="CPU재채점 깊이10",
+               rerank="classical", rerank_workers=16, fusion_topk=10,
+               recall=RECALL_CPU, scoring=SCORE_FUSION,
+               embed_model=MODEL_MOBILENET_V3, embed_batch=8, tag="fast_rerank",
+               desc=("임베딩 상위 10개만 CPU 정밀 재채점 — 깊이를 얕게 해 재채점 횟수↓. "
+                     "정답이 10위 밖이면 놓치므로 정확도 검증 필수.")),
+        Recipe(key="cpu_rr_topk20", name="CPU재채점 깊이20",
+               rerank="classical", rerank_workers=16, fusion_topk=20,
+               recall=RECALL_CPU, scoring=SCORE_FUSION,
+               embed_model=MODEL_MOBILENET_V3, embed_batch=8, tag="fast_rerank",
+               desc=("상위 20개만 정밀 재채점 — 깊이10 보다 안전, 전수보다 빠름.")),
+        # (5) 중앙 crop — 재채점 영역(면적)을 줄여 ORB·SSIM 비용↓.
+        Recipe(key="cpu_rr_crop", name="CPU재채점 중앙crop",
+               rerank="classical", rerank_workers=16, center_crop=True, **c,
+               desc=("재채점을 사진 중앙 30% 로 한정 — 비교 면적이 작아 ORB·SSIM 이 빨라지고, "
+                     "호기 간 외곽 차이도 줄여 교차호기 정확도에 도움될 수 있음.")),
+        # 실용 결합 후보 — 위 레버를 합쳐 '정확도 보존 + 최속' 을 노린다.
+        Recipe(key="cpu_rr_light_parallel", name="CPU재채점 경량+병렬(추천후보)",
+               rerank="phash_ssim", rerank_workers=16, fusion_topk=20,
+               recall=RECALL_CPU, scoring=SCORE_FUSION,
+               embed_model=MODEL_MOBILENET_V3, embed_batch=8, tag="fast_rerank",
+               desc=("ORB 제거(pHash+SSIM) + 16스레드 병렬 + 상위 20개 — CPU 매치 단계를 "
+                     "여러 레버로 동시에 줄인 실용 최속 후보.")),
+        Recipe(key="cpu_rr_orb256_parallel", name="CPU재채점 ORB256+병렬(정확도보존형)",
+               rerank="classical", rerank_workers=16, orb_nfeatures=256, fusion_topk=30,
+               recall=RECALL_CPU, scoring=SCORE_FUSION,
+               embed_model=MODEL_MOBILENET_V3, embed_batch=8, tag="fast_rerank",
+               desc=("전체 항을 쓰되 ORB 특징만 256개로 줄이고 16스레드 병렬 — 정확도를 "
+                     "최대한 지키면서 ORB 비용을 깎는 균형형 후보.")),
     ]
 
 

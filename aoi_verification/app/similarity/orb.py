@@ -16,10 +16,10 @@ class OrbDescriptor:
     descriptors: np.ndarray | None     # (N, 32) uint8
 
 
-def _orb_create():
+def _orb_create(nfeatures: int = 500):
     import cv2
     return cv2.ORB_create(
-        nfeatures=500,
+        nfeatures=int(nfeatures) if nfeatures and nfeatures > 0 else 500,
         scaleFactor=1.2,
         nlevels=6,
         edgeThreshold=10,
@@ -29,10 +29,13 @@ def _orb_create():
     )
 
 
-def compute_orb(roi_gray: np.ndarray) -> OrbDescriptor:
-    """ROI 에서 ORB 키포인트와 descriptor 계산."""
+def compute_orb(roi_gray: np.ndarray, *, nfeatures: int = 0) -> OrbDescriptor:
+    """ROI 에서 ORB 키포인트와 descriptor 계산.
+
+    ``nfeatures`` >0 이면 검출 특징 수를 그 값으로 제한한다(0=기본 500).  특징을
+    줄이면 검출/정합 비용이 작아져 CPU 재채점이 빨라진다(개발자 벤치마크 고속 변형)."""
     import cv2
-    orb = _orb_create()
+    orb = _orb_create(nfeatures)
     kp, desc = orb.detectAndCompute(roi_gray, None)
     if desc is None:
         return OrbDescriptor(keypoints=0, descriptors=None)

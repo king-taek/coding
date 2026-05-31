@@ -52,3 +52,37 @@ def test_score_components_skip_orb_ignores_missing_desc():
                   orb_desc=None, roi_gray=a.roi_gray.copy())
     s = P.score(a, b, components={"phash", "ssim"})
     assert s > 0.9            # 동일 해시 + 동일 ROI → 높은 유사도
+
+
+def test_score_new_single_component_subsets_normalized():
+    # 새 모드(ORB 단독 / SSIM 단독 / pHash+ORB)도 [0,1] 범위로 정규화된다.
+    a, b = _feat(11), _feat(12)
+    for comp in ({"orb"}, {"ssim"}, {"phash", "orb"}):
+        s = P.score(a, b, components=comp)
+        assert 0.0 <= s <= 1.0
+
+
+def test_orb_nfeatures_limits_keypoints():
+    # CPU 재채점 고속화 노브 — ORB 특징 수를 줄이면 키포인트가 그만큼 이하로 준다.
+    from aoi_verification.app.similarity import orb as O
+    rng = np.random.default_rng(7)
+    img = (rng.integers(0, 255, (200, 200))).astype("uint8")
+    full = O.compute_orb(img)                    # 기본 500
+    few = O.compute_orb(img, nfeatures=64)
+    assert few.keypoints <= full.keypoints
+    assert few.keypoints <= 64                   # 요청한 상한 이내
+
+
+def test_orb_nfeatures_flows_through_cfg_in_extract(tmp_path):
+    # cfg.orb_nfeatures 가 extract → compute_orb 로 전달돼 ORB 특징 수를 제한한다.
+    import cv2
+    from aoi_verification.app import config as C
+    p = tmp_path / "x.png"
+    rng = np.random.default_rng(3)
+    cv2.imwrite(str(p), (rng.integers(0, 255, (160, 160, 3))).astype("uint8"))
+    cfg_full = C.SimilarityConfig(bench_no_cache=True)
+    cfg_few = C.SimilarityConfig(bench_no_cache=True, orb_nfeatures=48)
+    f_full = P.extract(p, cfg=cfg_full, side="ref")
+    f_few = P.extract(p, cfg=cfg_few, side="ref")
+    assert f_few.orb_kp <= 48
+    assert f_few.orb_kp <= f_full.orb_kp

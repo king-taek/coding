@@ -106,7 +106,9 @@ def extract(src: Path, *, use_cnn: Optional[bool] = None, cfg=None,
     roi_gray = _preprocess(roi_gray)
 
     ph = _phash.compute_phash(roi_gray)
-    od = _orb.compute_orb(roi_gray) if need_orb else _orb.OrbDescriptor(0, None)
+    orb_nf = int(getattr(cfg, "orb_nfeatures", 0) or 0) if cfg is not None else 0
+    od = (_orb.compute_orb(roi_gray, nfeatures=orb_nf) if need_orb
+          else _orb.OrbDescriptor(0, None))
 
     use_cnn = (config.CONFIG.similarity.use_cnn if use_cnn is None else use_cnn)
     cnn_vec = _cnn.compute_embedding(path) if (use_cnn and _cnn.is_available()) else None
