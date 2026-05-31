@@ -434,15 +434,19 @@ class DevBenchmarkDialog(QDialog):
 
         - ``quick``: 빠른 프리셋(QUICK_KEYS)만 체크.
         - ``faceoff``: 현행 vs 재채점 생존자(FACEOFF_KEYS)만 체크.
+        - ``final``: 최종 벤치(고전 워밍업→정식 + 현행 + TOP5 + NPU 고가동)만 체크.
         - ``main``(그 외): 메인 옵션(앵커 + 생존자) 전부 체크.
         """
+        main_set = {r.key for r in _rx.main_recipes()}
         for key, cb in self._recipe_checks.items():
             if name == "quick":
                 cb.setChecked(key in _rx.QUICK_KEYS)
             elif name == "faceoff":
                 cb.setChecked(key in _rx.FACEOFF_KEYS)
-            else:                                # main — 생존자 전체
-                cb.setChecked(True)
+            elif name == "final":
+                cb.setChecked(key in set(_rx.FINAL_KEYS))
+            else:                                # main — 앵커 + 생존자(최종 전용 키 제외)
+                cb.setChecked(key in main_set)
 
     def _selected_keys(self) -> List[str]:
         # 개별 레시피 + 체크된 확장 그룹 전체(중복 제거, 순서 보존).
