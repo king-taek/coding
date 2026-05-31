@@ -320,6 +320,20 @@ def cascade_survivors(center_map: Dict[str, float], keep: int) -> List[str]:
     return [p for p, _ in sorted(center_map.items(), key=lambda kv: -kv[1])[:keep]]
 
 
+def fuse_zscore_signals(signals: List[List[float]]) -> List[float]:
+    """N개 신호를 각각 z-정규화해 합산 — efficiency_matcher.zfuse 의 일반화.
+
+    임베딩 코사인 + CPU 고전 + NPU defect 임베딩 등 **스케일이 다른 여러 신호**를
+    동등 융합한다(NPU 병렬 보조기의 3신호 융합용).  순수 함수(헤드리스 테스트)."""
+    from ..workers.efficiency_matcher import _zscores
+    usable = [s for s in signals if s]
+    if not usable:
+        return []
+    n = len(usable[0])
+    zs = [_zscores(s) for s in usable if len(s) == n]
+    return [sum(z[i] for z in zs) for i in range(n)]
+
+
 def run_recipe(ds: Dataset, recipe: Recipe, *,
                threshold: float = 0.0,
                devices: Optional[set] = None,
@@ -447,6 +461,27 @@ def run_recipe(ds: Dataset, recipe: Recipe, *,
 
         comp = _rerank_components(recipe)        # 고속 재채점 컴포넌트(None=전체)
 
+        def _npu_defect_signal(r, top):
+            """NPU 병렬 보조기 — 상위 후보의 중앙(defect) 임베딩을 NPU(batch=1)로 뽑아
+            ref 대비 코사인을 돌려준다(top 순서).  NPU 없음/실패/미설정이면 None."""
+            if not getattr(recipe, "npu_defect_assist", False) or "NPU" not in devices:
+                return None
+            try:
+                from ..learning import embedder_openvino as _ov
+                ratio = float(getattr(recipe, "center_ratio", 0.0) or 0.25)
+                model = recipe.embed_model or _rx.MODEL_MOBILENET_V3
+                cfg_c = _dc_replace(cfg, center_crop=True, center_ratio=ratio, use_npu=True)
+                paths = [Path(r.path)] + [Path(vp) for vp, _ in top]
+                emb = _ov.device_embed(paths, model_kind=model, device="NPU",
+                                       cfg=cfg_c, jobs=8, batch=1)
+                rv = emb.get(Path(r.path))
+                if rv is None:
+                    return None
+                return [(_cosine(rv, emb[Path(vp)]) if emb.get(Path(vp)) is not None
+                         else 0.0) for vp, _ in top]
+            except Exception:
+                return None
+
         def _fuse_one(r):
             """ref 1장 → 저장할 ranked 리스트.  병렬 워커에서도 안전(읽기 전용 공유)."""
             remb = ref_emb.get(Path(r.path))
@@ -469,7 +504,11 @@ def run_recipe(ds: Dataset, recipe: Recipe, *,
             cls_map = _rerank_score_map(r, valid, comp)     # center-aware 면 영역 조합
             emb_scores = [c for _, c in top]
             cls_scores = [cls_map.get(str(vp), 0.0) for vp, _ in top]
-            mapped = map_score(zfuse(emb_scores, cls_scores))
+            npu_sig = _npu_defect_signal(r, top)            # NPU 병렬 보조기(3신호) or None
+            if npu_sig is not None:
+                mapped = map_score(fuse_zscore_signals([emb_scores, cls_scores, npu_sig]))
+            else:
+                mapped = map_score(zfuse(emb_scores, cls_scores))
             head = list(zip([vp for vp, _ in top], mapped))
             tail = [(vp, _cos_to_unit(c)) for vp, c in ordered[topk:]]
             return head + tail

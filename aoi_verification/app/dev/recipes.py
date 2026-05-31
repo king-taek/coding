@@ -68,6 +68,7 @@ class Recipe:
     rerank_workers: int = 0        # 재채점 병렬 워커 수(0=직렬) — CPU 멀티코어 활용
     orb_nfeatures: int = 0         # ORB 검출 특징 수(0=기본 500) — 줄이면 ORB 비용↓
     orb_center_weight: float = 0.0 # 중앙-가중 ORB(0=끔) — defect 정중앙 매치에 가중
+    npu_defect_assist: bool = False # NPU 병렬 보조기 — 중앙(defect) 임베딩을 3번째 융합 신호로
     # ── 중앙-인식(center-aware) 재채점 — defect 이 정중앙인 특성 활용 ──────────
     #   region_fusion: 중앙(defect) crop 점수 + 풀 ROI(주변 패턴) 점수를 가중 융합.
     #   cascade: 중앙 점수로 거칠게 추려(coarse) 풀 ROI 로 정밀 재채점(fine)만 — 속도↑.
@@ -253,10 +254,12 @@ SURVIVOR_KEYS: List[str] = [
 
 # 중앙-가중 ORB 신규 실험(단일 패스) — defect 정중앙 활용.  옵션에 노출해 측정한다.
 CENTER_ORB_KEYS: List[str] = ["rr_orb_center50", "rr_orb_center70", "rr_fusion_center50"]
+# NPU 병렬 보조기 신규 실험(3신호 융합).
+NPU_ASSIST_KEYS: List[str] = ["npu_assist_r25", "npu_assist_r20"]
 
-# 개발자 모드 '메인 옵션' = 앵커(gold·현행) + 생존자 + 중앙-가중 ORB 신규 실험.
+# 개발자 모드 '메인 옵션' = 앵커(gold·현행) + 생존자 + 중앙-가중 ORB + NPU 보조 신규 실험.
 MAIN_KEYS: List[str] = ([BASELINE_ACCURACY_KEY, PRODUCTION_SPEED_KEY]
-                        + SURVIVOR_KEYS + CENTER_ORB_KEYS)
+                        + SURVIVOR_KEYS + CENTER_ORB_KEYS + NPU_ASSIST_KEYS)
 
 # '빠른' 프리셋(기본 선택) — 앵커 + 핵심 생존자 소수(빠른 반복용).  현행을 **항상 포함**해
 # 추천 엔진이 production 대비 speedup 을 정상 계산한다.
@@ -605,6 +608,31 @@ def _build_center_orb() -> List[Recipe]:
 CENTER_ORB: List[Recipe] = _build_center_orb()
 
 
+# ===========================================================================
+# (C3) NPU 병렬 보조기 — 재채점(CPU) 동안 노는 NPU 에 '진짜 일'을 준다: 상위 후보의
+#      **중앙(defect) crop 임베딩을 NPU(batch=1, 배치 정확도 버그 회피)** 로 인코딩해
+#      (임베딩 코사인 + CPU 고전 + NPU defect) **3신호 z-융합**.  GPU 임베딩 recall 은
+#      그대로(=현행)고, NPU 는 defect 신호만 더한다.  NPU 없으면 2신호로 자동 폴백.
+# ===========================================================================
+def _build_npu_assist() -> List[Recipe]:
+    base = dict(recall=RECALL_GPU, scoring=SCORE_FUSION,
+                embed_model=MODEL_MOBILENET_V3, embed_batch=16,
+                fusion_topk=40, rerank_workers=16, npu_defect_assist=True,
+                tag="npu_assist")
+    return [
+        Recipe(key="npu_assist_r25", name="NPU보조 defect임베딩 r0.25(3신호)",
+               center_ratio=0.25, **base,
+               desc=("CPU 재채점과 병행해 NPU 가 상위 후보의 중앙 25%(defect) 임베딩을 "
+                     "batch=1 로 뽑아 3번째 신호로 융합 — 3장치(GPU·CPU·NPU) 동시 활용.")),
+        Recipe(key="npu_assist_r20", name="NPU보조 defect임베딩 r0.20(3신호)",
+               center_ratio=0.20, **base,
+               desc="NPU defect 임베딩 영역을 더 좁혀(20%) defect 에 집중한 변형."),
+    ]
+
+
+NPU_ASSIST: List[Recipe] = _build_npu_assist()
+
+
 NPU_SWEEP: List[Recipe] = _build_npu_sweep()
 NPU_ONLY: List[Recipe] = _build_npu_only()
 FAST_RERANK: List[Recipe] = _build_fast_rerank()
@@ -618,13 +646,14 @@ GROUPS = {
     "core": REGISTRY,
     "center": CENTER_AWARE,
     "orb-center": CENTER_ORB,
+    "npu-assist": NPU_ASSIST,
     "npu-sweep": NPU_SWEEP,
     "npu-only": NPU_ONLY,
     "fast-rerank": FAST_RERANK,
     "model-zoo": MODEL_ZOO,
 }
-ALL_EXTENDED: List[Recipe] = (REGISTRY + CENTER_AWARE + CENTER_ORB + NPU_SWEEP
-                              + NPU_ONLY + FAST_RERANK + MODEL_ZOO)
+ALL_EXTENDED: List[Recipe] = (REGISTRY + CENTER_AWARE + CENTER_ORB + NPU_ASSIST
+                              + NPU_SWEEP + NPU_ONLY + FAST_RERANK + MODEL_ZOO)
 _BY_KEY = {r.key: r for r in ALL_EXTENDED}
 
 
