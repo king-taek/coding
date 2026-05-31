@@ -1047,6 +1047,8 @@ def iter_history(extra_dirs: Optional[List[Path]] = None) -> List[dict]:
         pass
     try:
         from ..utils import paths as _paths
+        # bench결과 는 개발 전용 데이터라 dev/ 로 정리했다(구버전 호환: 루트도 본다).
+        roots.append(_paths._project_root() / "dev" / "bench결과")
         roots.append(_paths._project_root() / "bench결과")
     except Exception:
         pass

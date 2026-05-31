@@ -233,12 +233,14 @@ def _make_branch_zip(tmp_path):
         "coding-x/aoi_verification/app/__init__.py": "x = 1\n",
         "coding-x/main.py": "print('hi')\n",
         "coding-x/requirements.txt": "numpy==1\n",
-        "coding-x/양식.xlsx": "TEMPLATE",
         "coding-x/docs/새문서.md": "doc\n",
         "coding-x/scripts/run_this_before.py": "setup\n",
-        "coding-x/tests/test_x.py": "def test(): pass\n",      # 제외 대상
-        "coding-x/기준/Slot/a.png": "img",                      # 제외 대상(대용량 샘플)
-        "coding-x/bench결과/result.json": "{}",                 # 제외 대상
+        # 개발 전용 모음(dev/) — 통째로 제외 대상.  단, dev/양식.xlsx 는 구동에
+        # 필요하므로 앱 루트로 따로 복사돼야 한다.
+        "coding-x/dev/양식.xlsx": "TEMPLATE",
+        "coding-x/dev/tests/test_x.py": "def test(): pass\n",
+        "coding-x/dev/bench결과/result.json": "{}",
+        "coding-x/pytest.ini": "[pytest]\n",                   # 제외 대상(루트 앵커)
     }
     with zipfile.ZipFile(buf, "w") as z:
         for name, content in files.items():
@@ -283,13 +285,13 @@ def test_download_and_apply_mirrors_needed_and_skips_dev_data(tmp_path, monkeypa
     # 구동에 필요한 것은 전부 받아 미러링된다.
     assert (app / "aoi_verification" / "app" / "__init__.py").exists()
     assert (app / "main.py").exists()
+    # dev/ 는 통째로 제외되지만, 그 안의 양식.xlsx 는 앱 루트로 따로 복사된다.
     assert (app / "양식.xlsx").read_text() == "TEMPLATE"
     assert (app / "docs" / "새문서.md").exists()              # 새 문서도 함께
     assert (app / "scripts" / "run_this_before.py").exists()
-    # 개발 전용·대용량 데이터는 제외된다.
-    assert not (app / "tests").exists()
-    assert not (app / "기준").exists()
-    assert not (app / "bench결과").exists()
+    # 개발 전용 모음(dev/)·루트 앵커 설정은 제외된다.
+    assert not (app / "dev").exists()
+    assert not (app / "pytest.ini").exists()
     # VERSION 기록 + 진행 보고(단계 메시지)가 있었다.
     import json as _json
     ver = _json.loads((app / "VERSION").read_text())

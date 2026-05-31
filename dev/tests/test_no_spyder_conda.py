@@ -12,7 +12,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-_REPO = Path(__file__).resolve().parents[1]
+# 저장소 전체를 스캔한다.  tests 는 dev/tests/ 로 정리됨 → 루트는 parents[2].
+_REPO = Path(__file__).resolve().parents[2]
 # 단어 경계로 보호: '(ana|mini)?conda' 와 'spyder' (대소문자 무관).  TEXT_SECONDARY
 # 같은 우연한 substring 은 통과(c 앞·a 뒤가 모두 단어문자라 \b 가 안 잡힘).
 _PATTERN = re.compile(r"\b(?:ana|mini)?conda\b|\bspyder\b", re.IGNORECASE)

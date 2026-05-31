@@ -329,10 +329,10 @@ def manual_check() -> tuple:
 # 앱 구동에 필요 없는(또는 받지 말아야 할) 최상위 항목 — 개발 전용·대용량 데이터·VCS/캐시.
 # 그 외에는 리포에 있는 것을 **전부** 받아 앱 폴더로 미러링한다(새 모듈·리소스 누락 방지).
 _UPDATE_SKIP_TOP = {
-    ".git", ".github", "__pycache__", ".pytest_cache", ".idea",
-    "tests",          # 테스트는 구동에 불필요
-    "기준", "bench결과",  # 샘플/실측 데이터(대용량) — 구동에 불필요, 사용자 데이터로 대체
-}
+    ".git", ".github", "__pycache__", ".pytest_cache", ".idea", ".vscode",
+    "dev",            # 개발 전용 모음(tests·bench결과·양식.xlsx) — 구동에 불필요.
+    "pytest.ini",     #   ※ 양식.xlsx 는 포터블 빌드 시 app\ 루트로 따로 복사되므로
+}                     #     dev/ 를 통째로 건너뛰어도 구동에 지장 없음.
 
 
 def download_and_apply(repo: str, branch: str, target_sha: str,
@@ -403,6 +403,15 @@ def download_and_apply(repo: str, branch: str, target_sha: str,
             else:
                 shutil.copy2(item, dst)
             _emit(i, m, "적용 중…")
+
+        # dev/ 는 통째로 건너뛰지만, 그 안의 엑셀 템플릿(양식.xlsx)은 구동에 필요하므로
+        # 앱 루트로 따로 복사한다(포터블 레이아웃: app\양식.xlsx → template_path 가 찾음).
+        tmpl = src_root / "dev" / "양식.xlsx"
+        if tmpl.exists():
+            try:
+                shutil.copy2(tmpl, app_root / "양식.xlsx")
+            except Exception:
+                pass
 
         _write_version(target_sha, branch, repo)
         _emit(m, m, "완료")

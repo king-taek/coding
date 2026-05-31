@@ -50,7 +50,8 @@ echo [3/4] 앱 소스 복사 (app\)...
 if not exist "%OUT%\app" mkdir "%OUT%\app"
 xcopy /E /I /Y "aoi_verification" "%OUT%\app\aoi_verification" || goto :fail
 copy /Y "main.py" "%OUT%\app\main.py" >nul || goto :fail
-copy /Y "양식.xlsx" "%OUT%\app\양식.xlsx" >nul || goto :fail
+REM 엑셀 템플릿(양식.xlsx)은 dev\ 로 정리됨 → 배포 app\ 루트로 복사(template_path 가 찾음).
+copy /Y "dev\양식.xlsx" "%OUT%\app\양식.xlsx" >nul || goto :fail
 REM 런처/업데이트 스크립트는 상위 scripts\ 폴더(%~dp0..)에 있고, 배포 폴더 최상위로 복사.
 copy /Y "%~dp0..\run_aoi.bat" "%OUT%\run_aoi.bat" >nul
 copy /Y "%~dp0..\run_aoi_debug.bat" "%OUT%\run_aoi_debug.bat" >nul

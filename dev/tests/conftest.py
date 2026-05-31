@@ -9,8 +9,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-# 패키지 import 가능하도록
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+# 패키지 import 가능하도록 저장소 루트를 path 에 추가.
+# (tests 는 dev/tests/ 로 정리됨 → 루트는 parents[2])
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import pytest
 

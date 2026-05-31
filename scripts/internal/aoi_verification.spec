@@ -15,10 +15,10 @@ from PyInstaller.utils.hooks import collect_all
 
 INCLUDE_EFFICIENCY = True   # torch+torchvision+openvino 포함(고효율 모드)
 
-# 동봉 리소스 — 스타일시트 + 엑셀 템플릿(양식.xlsx).
+# 동봉 리소스 — 스타일시트 + 엑셀 템플릿(양식.xlsx, dev/ 에 위치 → 번들 루트로).
 datas = [
     ("aoi_verification/app/ui/style.qss", "aoi_verification/app/ui"),
-    ("양식.xlsx", "."),
+    ("dev/양식.xlsx", "."),
 ]
 binaries = []
 hiddenimports = []

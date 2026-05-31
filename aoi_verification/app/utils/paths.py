@@ -140,12 +140,15 @@ def slot_mapping_path() -> Path:
 # 양식.xlsx 위치 찾기 — ‘양식’ 폴더 안의 ‘양식.xlsx’ 를 우선 탐색한다.
 # ---------------------------------------------------------------------------
 def template_path() -> Path:
-    """`양식/양식.xlsx` 의 실제 경로를 찾는다 (없으면 후보 중 가장 가까운 것)."""
+    """엑셀 출력용 ``양식.xlsx`` 의 실제 경로를 찾는다 (없으면 후보 중 가장 가까운 것).
+
+    개발 트리에서는 사용자가 직접 건드리지 않는 파일을 모은 ``dev/`` 안에 둔다.
+    포터블/PyInstaller 빌드에서는 호환을 위해 루트·_MEIPASS 후보도 함께 본다."""
     candidates = [
-        _project_root() / "양식" / "양식.xlsx",
-        package_root().parent / "양식" / "양식.xlsx",
-        _project_root() / "양식.xlsx",        # 호환을 위한 fallback
-        resource_path("양식.xlsx"),            # PyInstaller 번들(_MEIPASS) 대응
+        _project_root() / "dev" / "양식.xlsx",      # 개발 트리(dev/ 로 정리)
+        _project_root() / "양식" / "양식.xlsx",      # 폴더형(호환)
+        _project_root() / "양식.xlsx",              # 루트 fallback(포터블 빌드)
+        resource_path("양식.xlsx"),                 # PyInstaller 번들(_MEIPASS) 대응
     ]
     for c in candidates:
         if c.exists():
