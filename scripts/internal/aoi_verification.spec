@@ -11,14 +11,21 @@
 아래 INCLUDE_EFFICIENCY 를 False 로.
 """
 
+import os
 from PyInstaller.utils.hooks import collect_all
 
 INCLUDE_EFFICIENCY = True   # torch+torchvision+openvino 포함(고효율 모드)
 
+# 이 spec 은 scripts/internal/ 에 있으므로, 저장소 루트는 두 단계 위.  PyInstaller 가
+# 상대경로를 spec 폴더 기준으로 해석하는 문제를 피하려고 모두 절대경로로 만든다.
+_ROOT = os.path.abspath(os.path.join(SPECPATH, "..", ".."))
+_MAIN = os.path.join(_ROOT, "main.py")
+
 # 동봉 리소스 — 스타일시트 + 엑셀 템플릿(양식.xlsx, dev/ 에 위치 → 번들 루트로).
 datas = [
-    ("aoi_verification/app/ui/style.qss", "aoi_verification/app/ui"),
-    ("dev/양식.xlsx", "."),
+    (os.path.join(_ROOT, "aoi_verification", "app", "ui", "style.qss"),
+     "aoi_verification/app/ui"),
+    (os.path.join(_ROOT, "dev", "양식.xlsx"), "."),
 ]
 binaries = []
 hiddenimports = []
@@ -49,8 +56,8 @@ if not INCLUDE_EFFICIENCY:
 
 
 a = Analysis(
-    ["main.py"],
-    pathex=[],
+    [_MAIN],
+    pathex=[_ROOT],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
