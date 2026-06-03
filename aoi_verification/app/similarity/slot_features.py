@@ -20,9 +20,11 @@ import gzip
 import hashlib
 import json
 import os
+import queue
 import threading
 from collections import OrderedDict
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -337,6 +339,23 @@ class _PrecomputeSignals(QObject):
     failed = pyqtSignal(str)
 
 
+@dataclass
+class _SlotJob:
+    """생산자(GPU)→소비자(CPU) 핸드오프 단위.
+
+    생산자가 한 슬롯의 Feature 빌드 + CNN 임베딩 주입까지 끝낸 뒤 큐에 올린다.
+    소비자는 이 Feature 들로 스코어링만 하므로 torch 호출이 없다(thread-safe).
+    """
+    slot_idx: int
+    slot: str
+    refs: List[ImageItem] = field(default_factory=list)
+    vals: List[ImageItem] = field(default_factory=list)
+    ref_feats: Dict[Path, Feature] = field(default_factory=dict)
+    val_feats: Dict[Path, Feature] = field(default_factory=dict)
+    empty: bool = False
+    error: Optional[str] = None
+
+
 class SlotPrecomputeWorker(QThread):
     """주어진 슬롯들의 (ref, val) 쌍 점수를 슬롯 하나씩 계산해서
     ``SlotScoreCache`` 에 저장한다.
@@ -353,6 +372,8 @@ class SlotPrecomputeWorker(QThread):
                  *,
                  release_after_slot: bool = False,
                  cfg=None,
+                 pipeline: bool = True,
+                 lookahead: int = 1,
                  parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
         # (slot 이름, ref ImageItem 리스트, val ImageItem 리스트)
@@ -363,13 +384,74 @@ class SlotPrecomputeWorker(QThread):
         self._score_cache = score_cache
         self._release_after_slot = bool(release_after_slot)
         self._cfg = cfg                 # 강화/KLA 전처리 설정 (extract 에 전달)
+        self._pipeline_enabled = bool(pipeline)
+        self._lookahead = max(1, int(lookahead))
         self._stop = False
         self.signals = _PrecomputeSignals()
 
     def stop(self) -> None:
         self._stop = True
 
+    # ------------------------------------------------------------------
+    def _should_pipeline(self) -> bool:
+        """GPU 임베딩 ↔ CPU 스코어링을 겹칠 이득이 있을 때만 파이프라인 사용.
+
+        가속기(Intel GPU/NPU·CUDA 등)가 있고 학습 모델(CNN 임베딩)이 활성일
+        때만 겹칠 GPU 작업이 존재한다.  CPU-only/BASIC 모드는 producer 의 작업이
+        CPU 라 스코어링과 경합만 하므로 기존 순차 경로가 안전·동등하다.
+        """
+        if not self._pipeline_enabled or len(self._tasks) <= 1:
+            return False
+        try:
+            from ..learning import embedder as _emb
+            return bool(
+                _emb.has_accelerator()
+                and _emb.is_available()
+                and _emb.get_active_mode() != _emb.registry.BASIC
+            )
+        except Exception:
+            return False
+
     def run(self) -> None:        # type: ignore[override]
+        if self._should_pipeline():
+            self._run_pipelined()
+        else:
+            self._run_sequential()
+
+    # ------------------------------------------------------------------
+    def _score_signature_or_blank(self) -> Tuple[bool, str]:
+        """persist 여부 + 점수 시그니처 (sequential/pipeline 공용)."""
+        persist = (bool(getattr(self._cfg, "persist_scores", False))
+                   and not bool(getattr(self._cfg, "bench_no_cache", False)))
+        return persist, (_score_signature(self._cfg) if persist else "")
+
+    def _consume_slot(self, job: "_SlotJob", *, persist: bool, score_sig: str,
+                      done: int, total: int, total_slots: int) -> int:
+        """한 슬롯의 CPU 스코어링 + 디스크 캐시 + 시그널.  새 ``done`` 반환.
+
+        sequential/pipeline 양쪽이 공유하는 소비자 측 로직 (torch 호출 없음)."""
+        from .. import i18n
+        slot, refs, vals = job.slot, job.refs, job.vals
+        self.signals.phase.emit(i18n.KO.PHASE_SCORING)
+        disk_scores = (_load_slot_scores(slot, score_sig) if persist else None)
+        out_map = self._score_pairs_parallel(
+            slot, refs, vals, job.ref_feats, job.val_feats,
+            done_offset=done, total=total, disk_scores=disk_scores,
+        )
+        done += len(refs) * len(vals)
+        if persist and out_map:
+            _save_slot_scores(slot, score_sig, out_map)
+        self.signals.progress.emit(done, total)
+        self.signals.slot_finished.emit(slot, job.slot_idx + 1, total_slots)
+        if self._release_after_slot:
+            self._slot_cache.release(slot)
+            job.ref_feats.clear()
+            job.val_feats.clear()
+        return done
+
+    # ------------------------------------------------------------------
+    def _run_sequential(self) -> None:
+        """기존(검증된) 순차 경로 — 슬롯마다 임베딩 완료 후 스코어링."""
         try:
             total = sum(len(r) * len(v) for _, r, v in self._tasks)
             total_slots = len(self._tasks)
@@ -450,6 +532,118 @@ class SlotPrecomputeWorker(QThread):
             self.signals.finished.emit()
         except Exception as exc:        # pragma: no cover — 안전망
             self.signals.failed.emit(str(exc))
+
+    # ------------------------------------------------------------------
+    # 파이프라인 경로 — GPU 임베딩(생산자) ↔ CPU 스코어링(소비자) 겹침
+    # ------------------------------------------------------------------
+    def _run_pipelined(self) -> None:
+        """생산자 스레드가 다음 슬롯을 미리 GPU 임베딩하고, 소비자(이 스레드)가
+        이미 임베딩된 슬롯을 CPU 로 스코어링한다.  슬롯 처리/시그널 순서는 순차
+        경로와 동일하게 유지 → 다운스트림 가정 불변, 점수 결과 bit-identical."""
+        try:
+            total = sum(len(r) * len(v) for _, r, v in self._tasks)
+            total_slots = len(self._tasks)
+            if total == 0:
+                self.signals.finished.emit()
+                return
+            persist, score_sig = self._score_signature_or_blank()
+
+            q: "queue.Queue[Optional[_SlotJob]]" = queue.Queue(
+                maxsize=self._lookahead
+            )
+            prod = threading.Thread(target=self._producer, args=(q,),
+                                    daemon=True)
+            prod.start()
+
+            done = 0
+            try:
+                while not self._stop:
+                    try:
+                        job = q.get(timeout=0.2)
+                    except queue.Empty:
+                        continue
+                    if job is None:               # sentinel — 생산자 종료
+                        break
+                    if job.error is not None:
+                        self.signals.failed.emit(job.error)
+                        return
+                    if job.empty:
+                        self.signals.slot_finished.emit(
+                            job.slot, job.slot_idx + 1, total_slots,
+                        )
+                        continue
+                    done = self._consume_slot(
+                        job, persist=persist, score_sig=score_sig,
+                        done=done, total=total, total_slots=total_slots,
+                    )
+            finally:
+                prod.join(timeout=2.0)
+
+            if not self._stop:
+                self.signals.finished.emit()
+        except Exception as exc:        # pragma: no cover — 안전망
+            self.signals.failed.emit(str(exc))
+
+    def _producer(self, q: "queue.Queue[Optional[_SlotJob]]") -> None:
+        """슬롯을 순서대로 Feature 빌드 + CNN 임베딩(유일한 GPU 호출)하여 큐로.
+
+        torch/OpenVINO 는 이 단일 스레드에서만 호출된다 → thread-safe.  진행률
+        시그널은 첫 슬롯(차단 오버레이 표시 중)에서만 emit 해 소비자의 전역
+        스코어링 진행률과 스케일이 섞이지 않게 한다.
+        """
+        from .. import i18n
+        try:
+            for slot_idx, (slot, refs, vals) in enumerate(self._tasks):
+                if self._stop:
+                    break
+                if not refs or not vals:
+                    self._put(q, _SlotJob(slot_idx, slot, empty=True))
+                    continue
+                first = (slot_idx == 0)
+                if first:
+                    self.signals.phase.emit(i18n.KO.PHASE_FEATURE)
+                    feat_total = len(refs) + len(vals)
+                    self.signals.progress.emit(0, feat_total)
+                # 1) val features 빌드 (디스크 캐시 있으면 빠름)
+                val_feats = self._slot_cache.build(slot, vals, cfg=self._cfg)
+                if first:
+                    self.signals.progress.emit(len(vals), feat_total)
+                if self._stop:
+                    break
+                # 2) ref features (sim.extract 가 디스크 캐시 자동 사용)
+                ref_feats: Dict[Path, Feature] = {}
+                for ri, r in enumerate(refs, start=1):
+                    if self._stop:
+                        break
+                    try:
+                        ref_feats[r.path] = _pipeline.extract(
+                            r.path, cfg=self._cfg, side="ref",
+                        )
+                    except Exception:
+                        pass
+                    if first:
+                        self.signals.progress.emit(len(vals) + ri, feat_total)
+                if self._stop:
+                    break
+                # 2.5) CNN 임베딩 사전 배치 (#5 — GPU 가속 + thread-safety).
+                self._prefetch_cnn_embeddings(ref_feats, val_feats)
+                # 3) 임베딩 완료된 슬롯을 소비자에게 넘김 (backpressure 로 RAM 경계).
+                self._put(q, _SlotJob(
+                    slot_idx, slot, refs, vals, ref_feats, val_feats,
+                ))
+        except Exception as exc:        # pragma: no cover — 안전망
+            self._put(q, _SlotJob(-1, "", error=str(exc)))
+        finally:
+            self._put(q, None)          # sentinel
+
+    def _put(self, q: "queue.Queue", item) -> None:
+        """``_stop`` 을 존중하는 인터럽트 가능 put (소비자가 사라져도 안 멈춤)."""
+        while not self._stop:
+            try:
+                q.put(item, timeout=0.2)
+                return
+            except queue.Full:
+                continue
 
     # ------------------------------------------------------------------
     def _prefetch_cnn_embeddings(self,

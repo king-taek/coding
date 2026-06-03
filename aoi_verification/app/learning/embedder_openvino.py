@@ -244,7 +244,20 @@ def last_compiled_device() -> tuple:  # pragma: no cover - 환경 의존
 
 
 def _optimal_streams(compiled) -> int:  # pragma: no cover — 환경 의존
-    """디바이스가 권장하는 동시 추론 스트림 수 — AsyncInferQueue jobs."""
+    """디바이스가 권장하는 동시 추론 스트림 수 — AsyncInferQueue jobs.
+
+    환경변수 ``AOI_OV_STREAMS`` 가 양수면 그 값으로 강제한다 — 임베딩이 느린
+    대용량 배치에서 in-flight 추론을 더 늘려 Intel GPU/NPU 사용률을 끌어올리는
+    노브.  값은 처리량 힌트일 뿐이라 임베딩 결과는 스트림 수와 무관하게 동일.
+    """
+    env = os.environ.get("AOI_OV_STREAMS")
+    if env:
+        try:
+            v = int(env)
+            if v > 0:
+                return v
+        except ValueError:
+            pass
     try:
         n = compiled.get_property("OPTIMAL_NUMBER_OF_INFER_REQUESTS")
         return max(1, int(n))

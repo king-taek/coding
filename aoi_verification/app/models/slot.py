@@ -53,11 +53,25 @@ class ScanResult:
 # ---------------------------------------------------------------------------
 # Scanning
 # ---------------------------------------------------------------------------
+def is_ignored_name(name: str) -> bool:
+    """파일명에 점으로 구분된 't' 토큰이 있으면 무시 대상.
+
+    예: ``-86955.68631.t.1.jpg`` → 확장자 제거한 stem ``-86955.68631.t.1`` 을
+    ``.`` 으로 나눈 토큰 ``[-86955, 68631, t, 1]`` 에 정확히 ``t`` 가 있으므로
+    무시한다 (썸네일 생성·매칭 등 모든 단계에서 처음부터 배제).
+    """
+    stem = name.rsplit(".", 1)[0]        # 확장자 한 단계 제거
+    return "t" in stem.split(".")
+
+
 def _list_images(folder: Path) -> list[Path]:
     """폴더 내 이미지 파일 목록.
 
     ``os.scandir`` 의 캐시된 ``DirEntry.is_file()`` 를 써서 파일당 별도
     ``stat()`` 시스템콜을 피한다 — 폴더에 수만 장이 있어도 빠르게 열거 (#3).
+
+    점 토큰 't' 가 포함된 파일 (예: ``*.t.1.jpg``) 은 ``is_ignored_name`` 으로
+    처음부터 건너뛴다 — 열거가 유일한 소스라 썸네일도 만들어지지 않는다.
     """
     if not folder.exists() or not folder.is_dir():
         return []
@@ -66,7 +80,9 @@ def _list_images(folder: Path) -> list[Path]:
         with os.scandir(folder) as it:
             for entry in it:
                 try:
-                    if entry.is_file() and config.CONFIG.is_image(entry.name):
+                    if (entry.is_file()
+                            and config.CONFIG.is_image(entry.name)
+                            and not is_ignored_name(entry.name)):
                         out.append(Path(entry.path))
                 except OSError:
                     continue
@@ -74,6 +90,14 @@ def _list_images(folder: Path) -> list[Path]:
         return []
     out.sort(key=lambda p: p.name.lower())
     return out
+
+
+def list_slot_dirs(root: Path) -> dict[str, Path]:
+    """root/*/ 들 중 폴더만 골라 슬롯명 → 경로 매핑 (공개 래퍼).
+
+    Setup 단계의 '일부 슬롯만 진행' 옵션이 폴더를 스캔하기 위해 사용한다.
+    """
+    return _enum_slot_dirs(Path(root))
 
 
 def _enum_slot_dirs(root: Path) -> dict[str, Path]:

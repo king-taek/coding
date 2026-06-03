@@ -916,6 +916,16 @@ class MainWindow(QMainWindow):
             QApplication.processEvents()
 
         sr = scan(inp.ref_root, inp.val_root, progress=_scan_progress)
+
+        # '일부 슬롯만 진행' 옵션 — 선택된 슬롯만 남긴다.  slots dict 만 줄이면
+        # common_slot_names / ref_only / val_only 가 모두 이를 기반으로 계산되어
+        # 다운스트림 전체가 자연히 선택 슬롯으로 제한된다.
+        sel = getattr(inp, "selected_slots", None)
+        if sel:
+            sr.slots = {n: s for n, s in sr.slots.items() if n in sel}
+            sr.ref_only = [n for n in sr.ref_only if n in sel]
+            sr.val_only = [n for n in sr.val_only if n in sel]
+
         self._scan = sr
         # 사진이 한 장도 없는 한쪽 전용 폴더는 매칭 대상에서 제외(그냥 넘어감).
         drop_empty_unmatched(sr)
@@ -1088,9 +1098,11 @@ class MainWindow(QMainWindow):
         for slot in sorted(slots, key=lambda s: s.name):
             queue.extend(slot.ref_images)
 
+        # 이전에 이 기준 폴더로 고른 기준 사진이 있으면 재사용할지 물어본다 (#6).
+        restored = self._maybe_restore_ref_selection(queue)
         self._select_page.load_state(
             queue=queue,
-            targets={}, excluded={}, history=[],
+            targets=restored, excluded={}, history=[],
             phase_label=i18n.KO.STAGE1_TITLE,
         )
         self._show_page(self._select_page)
@@ -1103,11 +1115,71 @@ class MainWindow(QMainWindow):
                 "targets": self._collect_panel(self._select_page.get_state().targets),
                 "excluded": self._collect_panel(self._select_page.get_state().excluded),
             }
+            # 기준 폴더로 직접 고른 기준 사진을 기록 (다음에 재사용 질의용, #6).
+            self._save_ref_selection(self._stage1_a_snapshot["targets"])
             QMessageBox.information(
                 self, i18n.KO.INFO_PHASE_TRANSITION_TITLE,
                 i18n.KO.INFO_PHASE_A_TO_MATCH,
             )
             self._enter_stage2_phase_a()
+
+    # ------------------------------------------------------------------
+    # 기준 사진 재사용 기록 (#6)
+    # ------------------------------------------------------------------
+    def _save_ref_selection(
+        self, targets: dict[str, list[ImageItem]]
+    ) -> None:
+        """직접 고른 기준 사진(검증 대상)을 기준 폴더 절대경로로 영속화."""
+        if self._input is None:
+            return
+        try:
+            from ..utils import ref_history
+            slots_to_names = {
+                slot: [it.filename for it in items]
+                for slot, items in (targets or {}).items() if items
+            }
+            ref_history.save_chosen(self._input.ref_root, slots_to_names)
+        except Exception:
+            pass
+
+    def _maybe_restore_ref_selection(
+        self, queue: list[ImageItem]
+    ) -> dict[str, list[ImageItem]]:
+        """기록이 있으면 사용자에게 재사용 여부를 묻고, 예이면 해당 사진을
+        queue 에서 빼서 targets(검증 대상) 로 옮긴 매핑을 반환한다.
+
+        반환된 항목은 ``queue`` 에서 제거된다 (in-place).  아니오/기록 없음이면
+        빈 dict 반환(현행대로 빈 targets).
+        """
+        if self._input is None:
+            return {}
+        try:
+            from ..utils import ref_history
+            if not ref_history.has_history(self._input.ref_root):
+                return {}
+            chosen = ref_history.get_chosen(self._input.ref_root)
+        except Exception:
+            return {}
+        if not chosen:
+            return {}
+        wanted = {(slot, name) for slot, names in chosen.items() for name in names}
+        matched = [it for it in queue if (it.slot, it.filename) in wanted]
+        if not matched:
+            return {}
+        r = QMessageBox.question(
+            self, i18n.KO.REF_REUSE_TITLE,
+            i18n.KO.REF_REUSE_BODY_FMT.format(n=len(matched)),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if r != QMessageBox.StandardButton.Yes:
+            return {}
+        restored: dict[str, list[ImageItem]] = {}
+        matched_set = set(matched)
+        for it in matched:
+            restored.setdefault(it.slot, []).append(it)
+        queue[:] = [it for it in queue if it not in matched_set]
+        return restored
 
     @staticmethod
     def _collect_panel(

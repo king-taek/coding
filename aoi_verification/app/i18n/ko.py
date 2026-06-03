@@ -58,6 +58,12 @@ BULK_SELECT_EMPTY = "표시할 사진이 없습니다."
 BULK_SELECT_ALL = "전체 선택"
 BULK_DESELECT_ALL = "선택 해제"
 INLINE_SELECT_COUNT_FMT = "선택 {n}장"
+# 사진 크기 슬라이더 / 페이지네이션 / 우클릭 확대 (대량 표시 대응)
+BULK_SIZE_LABEL = "사진 크기"
+BULK_PAGE_PREV = "◀ 이전"
+BULK_PAGE_NEXT = "다음 ▶"
+BULK_PAGE_LABEL_FMT = "페이지 {page} / {total}"
+BULK_TILE_ZOOM_TOOLTIP = "우클릭하여 크게 보기"
 BTN_REMOVE_FROM_TARGET = "검증 대상에서 제거"
 BTN_MOVE_TO_EXCLUDE = "제외로 이동"
 BTN_MOVE_TO_TARGET = "검증 대상으로 이동"
@@ -384,6 +390,33 @@ SLOT_MAP_ADD = "묶기 ↔"
 SLOT_MAP_REMOVE = "선택 해제"
 SLOT_MAP_PAIRS_LABEL = "묶은 쌍"
 SLOT_MAP_OPEN = "매핑 다이얼로그 열기"
+
+# ── 일부 슬롯만 진행 (Setup) ───────────────────────────────────────────────
+SLOT_SELECT_BTN = "일부 슬롯만 진행…"
+SLOT_SELECT_BTN_TOOLTIP = (
+    "기준 폴더의 슬롯 중 이번 검증에서 진행할 슬롯만 선택합니다.\n"
+    "선택하지 않으면 모든 공통 슬롯을 진행합니다."
+)
+SLOT_SELECT_TITLE = "진행할 슬롯 선택"
+SLOT_SELECT_HINT = (
+    "이번 검증에서 진행할 슬롯만 체크하세요.\n"
+    "체크하지 않은 슬롯은 스캔·매칭에서 제외됩니다."
+)
+SLOT_SELECT_ALL = "전체 선택"
+SLOT_SELECT_NONE = "전체 해제"
+SLOT_SELECT_ALL_HINT = "모든 슬롯 진행 (기본)"
+SLOT_SELECT_COUNT_FMT = "선택한 슬롯: {n} / {total} 개만 진행"
+SLOT_SELECT_NEED_REF = "먼저 기준 폴더를 선택하세요."
+SLOT_SELECT_EMPTY = "기준 폴더에서 슬롯(하위 폴더)을 찾지 못했습니다."
+
+# ── 기준 사진 재사용 (#6) ──────────────────────────────────────────────────
+REF_REUSE_TITLE = "이전 기준 사진 재사용"
+REF_REUSE_BODY_FMT = (
+    "이 기준 폴더로 이전에 매치를 진행한 기록이 있습니다.\n"
+    "그때 직접 고른 기준 사진 {n} 장을 그대로 사용하시겠습니까?\n\n"
+    "예 — 해당 사진들을 자동으로 ‘검증 대상’ 으로 옮긴 상태에서 시작합니다.\n"
+    "아니오 — 처음부터 직접 고릅니다."
+)
 LOAD_OCR = "KLA WaferID 판독(OCR) 중… 잠시만 기다려 주세요."
 # KLA slot 해석 단계 — 로딩창에 현재 진행 단계(파일명/OCR)를 실시간 표시.
 LOAD_KLA_FILENAME = "KLA slot 매칭 중 — 파일명 분석…"

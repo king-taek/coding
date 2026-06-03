@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
@@ -39,6 +40,8 @@ class SetupInput:
     use_gpu: bool = True
     use_npu: bool = False            # 효율 모드 = CPU+GPU. NPU 비활성(코드만 보존).
     embed_batch: int = 1             # 정적 배치 B (1=끔)
+    # 진행할 슬롯 부분집합 (None = 전체 진행). '일부 슬롯만 진행' 옵션으로 설정.
+    selected_slots: Optional[set] = None
 
 
 class SetupPage(QWidget):
@@ -154,6 +157,21 @@ class SetupPage(QWidget):
         row.addWidget(self.ref_group)
         row.addWidget(self.val_group)
         root.addLayout(row)
+
+        # 일부 슬롯만 진행 옵션 ------------------------------------------
+        # None = 전체 진행.  버튼으로 기준 폴더의 슬롯을 스캔해 부분 선택.
+        self._selected_slots: Optional[set] = None
+        slot_row = QHBoxLayout()
+        self.btn_select_slots = NeonButton(
+            i18n.KO.SLOT_SELECT_BTN, role="ghost",
+        )
+        self.btn_select_slots.setToolTip(i18n.KO.SLOT_SELECT_BTN_TOOLTIP)
+        self.btn_select_slots.clicked.connect(self._open_slot_select)
+        self.slot_select_label = QLabel(i18n.KO.SLOT_SELECT_ALL_HINT, self)
+        self.slot_select_label.setProperty("role", "muted")
+        slot_row.addWidget(self.btn_select_slots)
+        slot_row.addWidget(self.slot_select_label, stretch=1)
+        root.addLayout(slot_row)
 
         # 유사도 엔진 모드 + 강화 전처리 (#1/#10) -----------------------
         engine_card = NeonCard(role="card-soft", parent=self)
@@ -281,6 +299,48 @@ class SetupPage(QWidget):
         path = QFileDialog.getExistingDirectory(self, i18n.KO.SETUP_FOLDER_LABEL)
         if path:
             target.setText(path)
+            # 기준 폴더가 바뀌면 이전 슬롯 선택은 더 이상 유효하지 않다.
+            if target is self.ref_path_edit:
+                self._reset_slot_selection()
+
+    # ------------------------------------------------------------------
+    def _reset_slot_selection(self) -> None:
+        self._selected_slots = None
+        self.slot_select_label.setText(i18n.KO.SLOT_SELECT_ALL_HINT)
+
+    def _open_slot_select(self) -> None:
+        """'일부 슬롯만 진행' — 기준 폴더의 슬롯을 스캔해 부분 선택."""
+        from ...models.slot import list_slot_dirs
+        from ..widgets.slot_select_dialog import SlotSelectDialog
+
+        ref_text = self.ref_path_edit.text().strip()
+        ref_root = Path(ref_text) if ref_text else None
+        if ref_root is None or not ref_root.is_dir():
+            QMessageBox.warning(
+                self, i18n.KO.APP_TITLE, i18n.KO.SLOT_SELECT_NEED_REF,
+            )
+            return
+        slot_names = sorted(list_slot_dirs(ref_root).keys())
+        if not slot_names:
+            QMessageBox.information(
+                self, i18n.KO.APP_TITLE, i18n.KO.SLOT_SELECT_EMPTY,
+            )
+            return
+        dlg = SlotSelectDialog(
+            slot_names, preselected=self._selected_slots, parent=self,
+        )
+        if dlg.exec() and dlg.accepted_ok:
+            chosen = dlg.selected
+            # 전체 선택과 동일하면 '전체 진행'(None)으로 정규화.
+            if not chosen or chosen == set(slot_names):
+                self._reset_slot_selection()
+            else:
+                self._selected_slots = set(chosen)
+                self.slot_select_label.setText(
+                    i18n.KO.SLOT_SELECT_COUNT_FMT.format(
+                        n=len(chosen), total=len(slot_names),
+                    )
+                )
 
     # ------------------------------------------------------------------
     # 개발자 모드 — 앱 내 토글 + 버튼 갱신
@@ -458,6 +518,8 @@ class SetupPage(QWidget):
             use_gpu=use_gpu,
             use_npu=use_npu,
             embed_batch=embed_batch,
+            selected_slots=(set(self._selected_slots)
+                            if self._selected_slots is not None else None),
         )
 
     # ------------------------------------------------------------------
