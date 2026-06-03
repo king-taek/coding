@@ -577,7 +577,12 @@ class SlotPrecomputeWorker(QThread):
                         done=done, total=total, total_slots=total_slots,
                     )
             finally:
-                prod.join(timeout=2.0)
+                # 타임아웃 없이 join — 생산자(유일한 GPU 호출자)가 진행 중인
+                # 임베딩을 끝내고 완전히 종료한 뒤에야 run() 이 반환된다.
+                # 그래야 ``isRunning()`` 이 True 인 동안 GPU 작업이 살아있어,
+                # 다음 워커가 GPU 호출을 중첩 실행하는 일이 없다(순차 경로와 동일
+                # 의미).  생산자는 stop 후 현재 슬롯만 마치고 빠지므로 유한 시간.
+                prod.join()
 
             if not self._stop:
                 self.signals.finished.emit()
