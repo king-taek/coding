@@ -188,6 +188,11 @@ class MainWindow(QMainWindow):
 
         # 상태 -----------------------------------------------------------
         self._loading = LoadingOverlay(self)
+        # 썸네일 사전생성 단계 취소(#C2) — 풀을 멈추고 곧바로 다음 단계로.
+        self._loading.cancel_requested.connect(self._on_loading_cancel)
+        # 썸네일 완료 처리 one-shot 가드 — finished 시그널/취소가 이중 진입해
+        # Stage 1 에 두 번 들어가는 것을 방지.
+        self._thumbs_handled = False
         self._thumb_worker: Optional[ThumbnailWorker] = None
         self._thumb_pool: Optional[ThumbnailPool] = None
         self._sizing_tier: Optional[config.SizingTier] = None
@@ -899,6 +904,7 @@ class MainWindow(QMainWindow):
         self._skipped_a.clear()
         self._reviewed_matches.clear()
         self._reviewed_unmatched.clear()
+        self._thumbs_handled = False        # 썸네일 완료 one-shot 가드 리셋(#C2)
         self._session_id = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
 
         # 양식 폴더의 양식.xlsx 를 결과 폴더로 복사 → 작업 파일 준비 ----
@@ -967,7 +973,9 @@ class MainWindow(QMainWindow):
         # 매핑/OCR 단계에서 오버레이가 숨겨졌을 수 있으므로 **반드시 다시 띄운다** —
         # 그렇지 않으면 썸네일 생성 동안 메인 창이 클릭 가능 상태로 남아 버그 유발.
         # (set_progress 는 숨겨진 오버레이를 다시 띄우지 않으므로 show_overlay 필수.)
-        self._loading.show_overlay(i18n.KO.LOAD_THUMBNAIL_FMT.format(done=0, total=0))
+        # 썸네일 단계는 가장 오래 걸리므로 [중지] 로 건너뛸 수 있게 한다(#C2).
+        self._loading.show_overlay(
+            i18n.KO.LOAD_THUMBNAIL_FMT.format(done=0, total=0), cancelable=True)
         QApplication.processEvents()
         all_items: list[ImageItem] = []
         for name in common:
@@ -1033,11 +1041,28 @@ class MainWindow(QMainWindow):
         어져 워커의 stale 시그널이 재진입할 수 있다 (Bug #2).  여기서는 오버
         레이 메시지만 갱신하고, 실제 진행은 ``QTimer.singleShot(0, ...)`` 로
         다음 이벤트 루프 틱에 넘긴다.
+
+        one-shot 가드(#C2): finished 시그널과 취소(_on_loading_cancel) 가 모두
+        이 함수를 부를 수 있으므로, 단 한 번만 다음 단계로 진행하게 한다.
         """
         if self._input is None:
             return
+        if self._thumbs_handled:
+            return
+        self._thumbs_handled = True
         self._loading.set_progress(0, 0, i18n.KO.LOAD_STAGE_PREP)
         QTimer.singleShot(0, self._continue_after_thumbs)
+
+    def _on_loading_cancel(self) -> None:
+        """로딩 오버레이의 [중지] — 썸네일 사전생성만 취소 대상.
+
+        썸네일은 비필수(이후 UI 가 필요 시 생성)이므로, 풀을 멈추고 곧바로
+        다음 단계로 진행한다.  다른 단계의 오버레이는 cancelable=False 라 이
+        핸들러가 호출되지 않는다(버튼 자체가 없음)."""
+        pool = self._thumb_pool
+        if pool is not None and pool.isRunning() and not self._thumbs_handled:
+            pool.stop()
+            self._on_thumbs_ready()
 
     def _continue_after_thumbs(self) -> None:
         """``_on_thumbs_ready`` 의 안전한 후속 — 모달/페이지 전환 OK."""
@@ -1055,6 +1080,16 @@ class MainWindow(QMainWindow):
     # ==================================================================
     # 올인원 자동 모드 (auto_all): Stage 1 건너뛰고 모든 ref 자동 매치.
     # ==================================================================
+    def _build_val_pool_by_slot(self) -> dict[str, list[ImageItem]]:
+        """공통 슬롯의 검증(val) 후보 풀 — Stage 2 매칭 대상 (중복 제거 #D1).
+
+        ``_enter_stage2_auto_all`` / ``_enter_stage2_phase_a`` 가 동일하게 만들던
+        풀 구성을 한 곳으로 모은다.  값은 동일(공통 슬롯의 val_images 복사본).
+        """
+        assert self._scan is not None
+        return {name: list(self._scan.slots[name].val_images)
+                for name in self._scan.common_slot_names}
+
     def _enter_stage2_auto_all(self) -> None:
         assert self._scan is not None and self._input is not None
         slots = [self._scan.slots[n] for n in self._scan.common_slot_names]
@@ -1064,10 +1099,7 @@ class MainWindow(QMainWindow):
         if not queue:
             QMessageBox.warning(self, i18n.KO.APP_TITLE, i18n.KO.WARN_NO_IMAGES)
             return
-        pool: dict[str, list[ImageItem]] = {}
-        for name in self._scan.common_slot_names:
-            slot = self._scan.slots[name]
-            pool[name] = list(slot.val_images)
+        pool = self._build_val_pool_by_slot()
         self._match_page.load_state(
             queue=queue,
             val_pool_by_slot=pool,
@@ -1202,10 +1234,7 @@ class MainWindow(QMainWindow):
             queue.extend(targets[slot])
 
         # 매칭 대상 풀 = 같은 Slot 의 검증(val) 쪽 모든 사진
-        pool: dict[str, list[ImageItem]] = {}
-        for name in self._scan.common_slot_names:
-            slot = self._scan.slots[name]
-            pool[name] = slot.val_images
+        pool = self._build_val_pool_by_slot()
 
         auto_mode = AutomationLevel.is_auto(self._input.automation_level)
         self._match_page.load_state(

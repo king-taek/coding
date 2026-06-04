@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout,
                               QListWidgetItem, QMenu, QMessageBox,
                               QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
 
-from ... import i18n
+from ... import config, i18n
 from ...models.result import MatchResult, MissEntry
 from ...models.slot import ImageItem
 from ...utils import image_io
@@ -33,8 +33,8 @@ from .window_controls import add_fullscreen_shortcut, enable_window_controls
 
 
 _LIST_THUMB_PX = 56     # 좌측 ‘실패 목록’ 항목 썸네일 한 변(px).
-_REF_PX = 420           # 좌측 기준 사진 기본 크기 — 원본 화질에서 다운스케일.
-_CAND_PX = 260          # 우측 후보 타일 기본 크기 — 썸네일 대신 원본을 lazy 로드.
+_REF_PX = config.Sizing.DIALOG_REF_PX    # 좌측 기준 사진 기본 크기 (= 420)
+_CAND_PX = config.Sizing.DIALOG_CAND_PX  # 우측 후보 타일 기본 크기 (= 260)
 _CAND_CAP_PX = 28       # 캡션 한 줄
 # 크기 슬라이더 범위 (기준 사진 한 변, px) — 후보 타일은 비율로 파생 (#1).
 _SIZE_MIN_PX = 250

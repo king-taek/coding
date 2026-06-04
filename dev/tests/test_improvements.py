@@ -123,6 +123,42 @@ def test_c1_undo_match_and_no_match(qapp, isolated_cache, monkeypatch):
     mp.deleteLater()
 
 
+# ===========================================================================
+# C2 — 긴 작업(썸네일) 취소 프리미티브: cancelable 오버레이가 취소 신호를 emit
+# ===========================================================================
+def test_c2_loading_overlay_cancelable(qapp):
+    from PyQt6.QtWidgets import QWidget
+    from aoi_verification.app.ui.widgets.loading_overlay import LoadingOverlay
+    host = QWidget()
+    ov = LoadingOverlay(host)
+    fired = []
+    ov.cancel_requested.connect(lambda: fired.append(True))
+    # 기본(취소 불가) — 버튼 숨김 (오프스크린이라 isHidden 으로 플래그 검증)
+    ov.show_overlay("작업 중")
+    assert ov._cancel_btn.isHidden() is True
+    # cancelable=True — 버튼 노출, 클릭 시 신호
+    ov.show_overlay("썸네일 생성", cancelable=True)
+    assert ov._cancel_btn.isHidden() is False
+    ov._cancel_btn.click()
+    assert fired == [True]
+    host.deleteLater()
+
+
+def test_c2_thumbs_oneshot_guard_pattern():
+    """_on_thumbs_ready 의 one-shot 가드와 동일한 패턴: 두 번 호출돼도 1회만 진행."""
+    state = {"handled": False, "proceeded": 0}
+
+    def on_ready():
+        if state["handled"]:
+            return
+        state["handled"] = True
+        state["proceeded"] += 1
+
+    on_ready()          # 정상 finished
+    on_ready()          # 취소가 같은 함수를 또 호출
+    assert state["proceeded"] == 1
+
+
 def test_c1_main_window_aggregation_undo():
     """main_window._on_match_undone 가 _matches_a 에서 같은 key 항목을 제거."""
     from aoi_verification.app.models.result import MatchResult

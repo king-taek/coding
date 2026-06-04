@@ -56,6 +56,13 @@ class Sizing:
     ROI_RATIO = 0.55        # 중심 영역 비율 (0.5~0.6)
     THUMB_JPEG_Q = 90
     MID_JPEG_Q = 88
+    # 다이얼로그/패널별 타일 기본 크기 — 흩어져 있던 매직 넘버를 한 곳에 모음(D2).
+    # (값은 기존과 동일 — 동작 불변.  슬라이더가 있는 화면은 이를 시작값으로 사용.)
+    SIDE_TILE_PX = 120      # Stage1 좌/우 사이드 패널 타일 (= THUMB_PX // 2)
+    BULK_TILE_PX = 180      # '선택 모드' 다이얼로그 기본 타일
+    REVIEW_THUMB_PX = 240   # 매칭 결과 검토 썸네일
+    DIALOG_REF_PX = 420     # 미매칭 검토 좌측 기준 사진
+    DIALOG_CAND_PX = 260    # 미매칭 검토 우측 후보 / 매치 확대 타일
 
 
 @dataclass(frozen=True)

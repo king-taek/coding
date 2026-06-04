@@ -15,7 +15,7 @@ from PyQt6.QtGui import QColor, QPixmap
 from PyQt6.QtWidgets import (QDialog, QGridLayout, QHBoxLayout, QLabel,
                               QScrollArea, QVBoxLayout, QWidget)
 
-from ... import i18n
+from ... import config, i18n
 from ...models.result import MatchResult
 from ...utils import image_io
 from .neon_button import NeonButton
@@ -23,7 +23,7 @@ from .no_wheel_slider import NoWheelSlider
 from .window_controls import add_fullscreen_shortcut, enable_window_controls
 
 
-_THUMB = 240            # 썸네일 기본 크기 (px) — 슬라이더로 조절 (#2).
+_THUMB = config.Sizing.REVIEW_THUMB_PX  # 썸네일 기본 크기 (= 240), 슬라이더로 조절(#2).
 _SIZE_MIN_PX = 140
 _SIZE_MAX_PX = 480
 

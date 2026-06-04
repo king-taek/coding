@@ -21,14 +21,14 @@ from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout,
                              QHBoxLayout, QLabel, QRubberBand, QScrollArea,
                              QSizePolicy, QSlider, QVBoxLayout, QWidget)
 
-from ... import i18n
+from ... import config, i18n
 from ...models.slot import ImageItem
 from ...utils import image_io
 from .neon_button import NeonButton
 from .window_controls import add_fullscreen_shortcut, enable_window_controls
 
 
-_TILE_PX = 180          # 시원하게 보이는 다중 선택 그리드 썸네일 (원본 비율 유지)
+_TILE_PX = config.Sizing.BULK_TILE_PX   # 다중 선택 그리드 기본 타일 (= 180)
 _CAP_PX = 28            # 파일명 한 줄 — 사진을 가리지 않도록 충분히 확보
 # 가로 최대 5 컬럼 + 6 번째부터 다음 행으로 wrap (사용자 요청 — 가로 스크롤
 # 발생하지 않도록).  좁은 창에선 viewport 폭 기반으로 더 적게 동적 계산.

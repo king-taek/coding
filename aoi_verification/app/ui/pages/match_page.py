@@ -870,7 +870,8 @@ class MatchPage(QWidget):
         # 후보는 가로 2 개씩 + mid 캐시 (~800px) 를 소스로 (#5).  표시 크기
         # 도 일반 썸네일보다 크게 (260 px) 잡아 시인성 ↑.
         grid = ThumbGrid(columns=2, select_mode=False, truncate=False,
-                         show_expand=True, tile_px=260, prefer_mid=True,
+                         show_expand=True, tile_px=config.Sizing.DIALOG_CAND_PX,
+                         prefer_mid=True,
                          parent=self._right_host)
         entries = [ThumbEntry(item=c.item, extra={"score": c.score}) for c in visible]
         grid.set_entries(entries)
