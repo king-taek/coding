@@ -47,8 +47,8 @@ class Fonts:
 # Image / thumbnail sizing
 # ---------------------------------------------------------------------------
 class Sizing:
-    # 좌/우/하 패널 그리드용 작은 썸네일.  실제 노출되는 타일은 120~240 px 사이
-    # (BulkSelectDialog=180, UnmatchedReviewDialog ref=380 등) 라 캐시 thumb 가
+    # 좌/우/하 패널 그리드용 작은 썸네일.  실제 노출되는 타일은 120~420 px 사이
+    # (BulkSelectDialog=180, UnmatchedReviewDialog ref=420 등) 라 캐시 thumb 가
     # 작으면 업스케일 시 흐릿해진다.  240 px / Q90 으로 한 단계 키워 화질 향상.
     THUMB_PX = 240
     MID_PX = 800            # zoom-view + Excel embed

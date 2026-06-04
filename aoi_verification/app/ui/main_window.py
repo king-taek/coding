@@ -2,7 +2,7 @@
 
 다음 페이지를 StackedWidget 로 갈아끼우며 흐름을 관리한다.
 1) SetupPage           → 입력
-2) SelectPage          → Stage 1 (Phase A / Phase B 양쪽 모두에서 재사용)
+2) SelectPage          → Stage 1 (후보 선별)
 3) MatchPage           → Stage 2 (유사도 매칭)
 4) ResultPage          → 결과 + 엑셀 저장
 
