@@ -680,7 +680,11 @@ class SlotPrecomputeWorker(QThread):
             return
         try:
             emb_map = _emb.compute_embeddings(paths_needed, batch_size=64)
-        except Exception:
+        except Exception as exc:
+            # 임베딩 사전 배치 실패 — CNN 없이 진행(동작 불변)하되 원인 로깅.
+            from ..utils import errors as _errors
+            _errors.log_silent("slot_features: CNN 임베딩 사전 배치 실패",
+                               exc, level=_errors.logging.WARNING)
             return
         # Feature 객체에 결과 주입 (main thread, 병렬 진입 전).
         for d in (ref_feats, val_feats):

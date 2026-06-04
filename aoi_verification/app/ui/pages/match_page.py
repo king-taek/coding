@@ -57,6 +57,7 @@ class MatchPage(QWidget):
     """Stage 2 의 메인 페이지."""
 
     match_confirmed = pyqtSignal(object)        # MatchResult
+    match_undone = pyqtSignal(object)           # MatchResult — 되돌리기(#C1)
     skipped_changed = pyqtSignal()              # 외부 자동 저장 트리거
     finished = pyqtSignal()                     # 모든 큐 처리 완료
     cancelled = pyqtSignal()                    # #8 사용자가 중지 버튼 누름
@@ -70,6 +71,9 @@ class MatchPage(QWidget):
         self._state: Stage2State | None = None
         self._current: Optional[ImageItem] = None
         self._threshold = config.CONFIG.default_threshold
+        # 되돌리기 히스토리 (#C1) — 세션 직렬화에 영향 없도록 인메모리 전용.
+        # 각 항목: (action, ref_item, match_or_None), action ∈ {match,no_match,skip}.
+        self._match_history: list[tuple[str, ImageItem, object]] = []
         self._build()
         self._loading = LoadingOverlay(self)
         self._loading.cancel_requested.connect(self._on_cancel_requested)
@@ -207,6 +211,13 @@ class MatchPage(QWidget):
 
         bar = QHBoxLayout()
         bar.setContentsMargins(0, 6, 0, 0)
+        # 되돌리기 (#C1) — 직전 매칭/매칭없음 결정을 취소하고 그 기준 사진을 다시
+        # 큐 맨 앞으로 복귀.  Stage 1 은 Z 를 쓰므로 충돌을 피해 Ctrl+Z 사용.
+        self.undo_btn = NeonButton(i18n.KO.BTN_MATCH_UNDO, role="ghost")
+        self.undo_btn.setToolTip(i18n.KO.MATCH_UNDO_TOOLTIP)
+        self.undo_btn.clicked.connect(self._undo_match)
+        self.undo_btn.setEnabled(False)
+        bar.addWidget(self.undo_btn)
         # ‘잠시 보류’ 버튼 제거 (#3 — 사용자 요청).  ‘매칭 없음’ 만 남김.
         self.no_match_btn = NeonButton(i18n.KO.BTN_NO_MATCH, role="danger")
         self.no_match_btn.setToolTip(i18n.KO.SHORTCUT_STAGE2_TOOLTIP)
@@ -277,6 +288,8 @@ class MatchPage(QWidget):
 
         # ‘S’ (skip) 단축키 — 잠시 보류 버튼 제거와 함께 비활성 (#3).
         QShortcut(QKeySequence("N"), self, activated=self._confirm_no_match)
+        # 되돌리기 (#C1) — Stage 1 의 Z 와 충돌하지 않도록 Ctrl+Z.
+        QShortcut(QKeySequence("Ctrl+Z"), self, activated=self._undo_match)
 
     # ------------------------------------------------------------------
     def resizeEvent(self, event):                       # noqa: N802
@@ -334,6 +347,8 @@ class MatchPage(QWidget):
         self._auto_mode = bool(auto_mode)
         self._engine_cfg = engine_cfg or config.DEFAULT_SIM_CONFIG
         self._fast_results.clear()
+        self._match_history.clear()        # 되돌리기 히스토리 초기화 (#C1)
+        self._update_undo_button()
         self.phase_label.setText(phase_label)
         self._refresh_skipped_panel()
         # 모든 (ref, val) 쌍 점수를 미리 계산 → 이후 매칭은 캐시 조회만.
@@ -445,12 +460,29 @@ class MatchPage(QWidget):
             pass
         self._precompute_worker.start()
 
+    def _precompute_signal_is_current(self) -> bool:
+        """이 시그널이 **현재 활성** precompute 워커에서 온 것인지 (#B2).
+
+        정지된 구 워커가 disconnect 직전 이벤트 루프에 이미 쌓아둔 늦은 시그널이
+        새 워커의 상태를 건드리는 race 를 차단한다.  단, 판별이 불확실하면(sender
+        없음/워커 참조 없음) 막지 않아 정상 시그널은 절대 누락되지 않게 한다.
+        """
+        w = self._precompute_worker
+        if w is None:
+            return True
+        s = self.sender()
+        if s is None:
+            return True
+        return s is w.signals
+
     def _on_precompute_phase(self, phase: str) -> None:
         """현재 작업 단계 라벨 갱신 (#8) — '이미지 특징 분석'/'유사도 계산' 등.
 
         선행 단계(특징 분석/임베딩)에서 progress emit 이 늦어도 라벨은 **즉시**
         오버레이에 반영해, '유사도 계산 0' 처럼 보이던 문제를 없앤다.
         """
+        if not self._precompute_signal_is_current():
+            return
         self._precompute_phase = phase or i18n.KO.PHASE_SCORING
         if self._current is None:
             # 마지막으로 받은 진행도를 유지하며 라벨만 바꾼다(아직 없으면 busy 표시).
@@ -460,6 +492,8 @@ class MatchPage(QWidget):
             )
 
     def _on_precompute_progress(self, done: int, total: int) -> None:
+        if not self._precompute_signal_is_current():
+            return
         # 첫 슬롯이 끝나 매칭이 시작되기 전(차단 오버레이 표시 중)에는 진행 바를
         # 갱신해 "0% 에서 멈춘 것처럼" 보이지 않게 한다.  매칭이 시작되면
         # (_current 설정) 백그라운드 슬롯의 progress 는 매칭 오버레이를 건드리지
@@ -484,6 +518,8 @@ class MatchPage(QWidget):
           그 슬롯이 끝났을 때 자동으로 _advance 를 재시도.
         - 상단 상태 라벨 갱신 (백그라운드 진행 표시).
         """
+        if not self._precompute_signal_is_current():
+            return
         self._precompute_processed_slots.add(slot)
         self.bg_status_label.setText(
             i18n.KO.PRECOMPUTE_BG_STATUS_FMT.format(idx=idx, total=total)
@@ -508,6 +544,8 @@ class MatchPage(QWidget):
         않아, 사용자가 점수 계산 대기 중인 슬롯에 도달했을 때 워커가 죽으면
         영구히 ‘잠시만 기다려주세요’ 오버레이에 갇혔다.
         """
+        if not self._precompute_signal_is_current():
+            return
         try:
             self._loading.hide_overlay()
         except Exception:
@@ -523,6 +561,8 @@ class MatchPage(QWidget):
             self._advance()
 
     def _on_precompute_finished(self) -> None:
+        if not self._precompute_signal_is_current():
+            return
         import time as _t
         if getattr(self, "_precompute_t0", None):
             self._precompute_elapsed = _t.perf_counter() - self._precompute_t0
@@ -857,10 +897,12 @@ class MatchPage(QWidget):
             val_path=val.path,
             score=score,
         )
+        self._match_history.append(("match", ref, match))
         self._state.matches.append(match)
         self._state.queue.pop(0)
         self.match_confirmed.emit(match)
         self.skipped_changed.emit()
+        self._update_undo_button()
         self._advance()
 
     def _open_all_candidates(self) -> None:
@@ -930,10 +972,12 @@ class MatchPage(QWidget):
         if self._state is None or self._current is None:
             return
         item = self._current
+        self._match_history.append(("skip", item, None))
         self._state.queue.pop(0)
         self._state.skipped[item.slot].append(item)
         self._refresh_skipped_panel()
         self.skipped_changed.emit()
+        self._update_undo_button()
         self._advance()
 
     def _confirm_no_match(self) -> None:
@@ -943,10 +987,56 @@ class MatchPage(QWidget):
         if self._state is None or self._current is None:
             return
         item = self._current
+        self._match_history.append(("no_match", item, None))
         self._state.queue.pop(0)
         self._state.no_match[item.slot].append(item)
         self._refresh_skipped_panel()
         self.skipped_changed.emit()
+        self._update_undo_button()
+        self._advance()
+
+    # ------------------------------------------------------------------
+    # 되돌리기 (#C1) — 직전 매칭/매칭없음/보류 결정을 취소
+    # ------------------------------------------------------------------
+    def _update_undo_button(self) -> None:
+        btn = getattr(self, "undo_btn", None)
+        if btn is not None:
+            btn.setEnabled(bool(self._match_history))
+
+    def _undo_match(self) -> None:
+        """직전 결정을 취소하고 해당 기준 사진을 큐 맨 앞으로 복귀.
+
+        - 'match' : state.matches 에서 제거 + ``match_undone`` 으로 상위(main_window)
+                    집계까지 되돌림 (결과에 남지 않도록).
+        - 'no_match'/'skip' : 해당 풀에서 제거.
+        매칭 화면이 보이지 않을 때(이미 다음 단계로 이동)는 무시.
+        """
+        if not self.isVisible():
+            return
+        if self._state is None or not self._match_history:
+            return
+        action, ref, match = self._match_history.pop()
+        if action == "match" and match is not None:
+            for i in range(len(self._state.matches) - 1, -1, -1):
+                if self._state.matches[i].key == match.key:
+                    del self._state.matches[i]
+                    break
+            self.match_undone.emit(match)
+        elif action == "no_match":
+            lst = self._state.no_match.get(ref.slot)
+            if lst and ref in lst:
+                lst.remove(ref)
+            self._refresh_skipped_panel()
+        elif action == "skip":
+            lst = self._state.skipped.get(ref.slot)
+            if lst and ref in lst:
+                lst.remove(ref)
+            self._refresh_skipped_panel()
+        # 기준 사진을 큐 맨 앞으로 되돌리고 현재 항목 재설정 → _advance 가 다시 표시.
+        self._state.queue.insert(0, ref)
+        self._current = None
+        self.skipped_changed.emit()
+        self._update_undo_button()
         self._advance()
 
     # ------------------------------------------------------------------

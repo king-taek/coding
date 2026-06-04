@@ -94,8 +94,10 @@ class MainWindow(QMainWindow):
         try:
             from ..learning import embedder as _emb
             self._device_label.setText(_emb.device_label())
-        except Exception:
+        except Exception as exc:
             self._device_label.setText("")
+            from ..utils import errors as _errors
+            _errors.log_silent("main_window: 디바이스 라벨 조회 실패", exc)
         self._status_bar.addPermanentWidget(self._device_label)
         # CPU/GPU/NPU 사용량 — CPU 실제 %, GPU/NPU 가동/대기.
         self._usage_label = QLabel("", self._status_bar)
@@ -164,6 +166,7 @@ class MainWindow(QMainWindow):
         self._select_page.finished.connect(self._on_select_finished)
         self._select_page.state_changed.connect(self._schedule_autosave)
         self._match_page.match_confirmed.connect(self._on_match_confirmed)
+        self._match_page.match_undone.connect(self._on_match_undone)
         self._match_page.skipped_changed.connect(self._schedule_autosave)
         self._match_page.finished.connect(self._on_match_finished)
         self._match_page.cancelled.connect(self._on_match_cancelled)
@@ -1222,6 +1225,18 @@ class MainWindow(QMainWindow):
     def _on_match_confirmed(self, match: MatchResult) -> None:
         if self._phase == PHASE_A_MATCH:
             self._matches_a.append(match)
+        self._schedule_autosave()
+
+    def _on_match_undone(self, match: MatchResult) -> None:
+        """Stage 2 되돌리기(#C1) — 집계된 매칭에서도 해당 항목을 제거.
+
+        같은 ``key``(slot/ref명/val명) 의 마지막 항목을 제거한다.
+        """
+        if self._phase == PHASE_A_MATCH:
+            for i in range(len(self._matches_a) - 1, -1, -1):
+                if self._matches_a[i].key == match.key:
+                    del self._matches_a[i]
+                    break
         self._schedule_autosave()
 
     def _on_match_finished(self) -> None:
