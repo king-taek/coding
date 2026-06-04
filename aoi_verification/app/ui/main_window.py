@@ -1058,11 +1058,15 @@ class MainWindow(QMainWindow):
 
         썸네일은 비필수(이후 UI 가 필요 시 생성)이므로, 풀을 멈추고 곧바로
         다음 단계로 진행한다.  다른 단계의 오버레이는 cancelable=False 라 이
-        핸들러가 호출되지 않는다(버튼 자체가 없음)."""
+        핸들러가 호출되지 않는다(버튼 자체가 없음).
+
+        ``ThumbnailPool`` 은 QObject(워커만 QThread)라 ``isRunning()`` 이 없다.
+        이미 다음 단계로 넘어갔는지는 one-shot 플래그로 판별하고, ``stop()`` 은
+        이미 끝난 풀에 호출해도 무해하므로 그 조합으로 가드한다."""
         pool = self._thumb_pool
-        if pool is not None and pool.isRunning() and not self._thumbs_handled:
-            pool.stop()
-            self._on_thumbs_ready()
+        if pool is not None and not self._thumbs_handled:
+            pool.stop()                 # 이미 완료된 풀이어도 무해(플래그만 set)
+            self._on_thumbs_ready()     # one-shot 가드로 1회만 진행
 
     def _continue_after_thumbs(self) -> None:
         """``_on_thumbs_ready`` 의 안전한 후속 — 모달/페이지 전환 OK."""

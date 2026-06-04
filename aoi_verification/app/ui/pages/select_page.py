@@ -265,7 +265,7 @@ class SelectPage(QWidget):
         # LEFT --------------------------------------------------------
         # 측면 패널 타일 — 기본(240px)의 50% (사용자 요청).  같은 패널 폭에서
         # 한 줄에 더 많은 사진이 들어가고 한눈에 더 많은 후보를 비교할 수 있다.
-        side_tile = config.Sizing.THUMB_PX // 2     # 240 → 120
+        side_tile = config.Sizing.SIDE_TILE_PX      # 사이드 패널 타일(=120, D2)
         self.left_panel = _SidePanel(
             self.PANEL_LEFT, i18n.KO.PANEL_LEFT_CANDIDATES,
             actions=[

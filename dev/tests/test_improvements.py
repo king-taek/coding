@@ -144,6 +144,46 @@ def test_c2_loading_overlay_cancelable(qapp):
     host.deleteLater()
 
 
+def test_c2_thumbnail_pool_has_no_isrunning():
+    """리뷰에서 잡힌 회귀 방지: ThumbnailPool 은 QObject(워커만 QThread)라
+    isRunning() 이 없다.  _on_loading_cancel 가드는 이를 호출하면 AttributeError
+    가 나므로, 풀 활성 판별에 isRunning() 을 쓰지 않아야 한다 (stop()+one-shot
+    플래그로 가드)."""
+    from aoi_verification.app.workers.thumbnailer import ThumbnailPool
+    assert hasattr(ThumbnailPool, "stop")
+    assert hasattr(ThumbnailPool, "wait")
+    assert not hasattr(ThumbnailPool, "isRunning"), (
+        "ThumbnailPool 에 isRunning 이 추가되면 _on_loading_cancel 가드를 재검토"
+    )
+
+
+def test_c2_cancel_guard_pattern_without_isrunning():
+    """_on_loading_cancel 와 동일한 가드 패턴: isRunning 없이 stop()+one-shot."""
+    calls = {"stop": 0, "ready": 0}
+
+    class _FakePool:          # isRunning() 없음 — 실제 ThumbnailPool 과 동일
+        def stop(self):
+            calls["stop"] += 1
+
+    state = {"handled": False, "pool": _FakePool()}
+
+    def on_ready():
+        if state["handled"]:
+            return
+        state["handled"] = True
+        calls["ready"] += 1
+
+    def on_cancel():
+        pool = state["pool"]
+        if pool is not None and not state["handled"]:
+            pool.stop()
+            on_ready()
+
+    on_cancel()               # 취소 → stop + 진행 1회
+    on_cancel()               # 두 번째 취소 → 가드로 no-op
+    assert calls == {"stop": 1, "ready": 1}
+
+
 def test_c2_thumbs_oneshot_guard_pattern():
     """_on_thumbs_ready 의 one-shot 가드와 동일한 패턴: 두 번 호출돼도 1회만 진행."""
     state = {"handled": False, "proceeded": 0}
