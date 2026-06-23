@@ -74,11 +74,14 @@ class ExcelExporter(QThread):
                  result: FinalResult,
                  dst_path: Path,
                  template_path: Optional[Path] = None,
+                 include_full_template: bool = False,
                  parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._result = result
         self._dst = Path(dst_path)
         self._template = Path(template_path) if template_path else None
+        # 전체 양식(E~H 수기 영역 포함) 시트 생성 여부 — 기본 off(가볍고 빠른 출력).
+        self._include_full_template = bool(include_full_template)
         self.signals = ExporterSignals()
 
     # ------------------------------------------------------------------
@@ -142,23 +145,35 @@ class ExcelExporter(QThread):
             rows_input.append((u.slot, str(u.path.name).lower(), u))
         rows_input.sort(key=lambda x: (x[0], x[1]))
 
-        self._fill_rows(ws, rows_input)
+        # 전체 양식(E~H 포함) 시트는 옵션 — 기본 off 면 이미지 임베드를 1회만 하게
+        # 요약 시트만 채운다(더 빠르고 가벼운 파일).  켜면 전체 양식도 채운다.
+        if self._include_full_template:
+            self._fill_rows(ws, rows_input)
+            # 양식.xlsx 의 A3..A22 미리 박힌 1..20 행번호 중 안 채운 행은 비운다.
+            data_end_row = DATA_START_ROW + len(rows_input) - 1
+            for r in range(max(data_end_row + 1, DATA_START_ROW), ws.max_row + 1):
+                a = ws.cell(row=r, column=1)
+                if isinstance(a.value, (int, float)):
+                    a.value = None
 
-        # 양식.xlsx 는 A3..A22 에 1..20 행번호를 미리 박아두었다.  데이터가
-        # 그보다 적게 들어가면 ‘빈 행에 번호만 떠 있는’ 모양이 되어 혼란스러우니
-        # 우리가 채우지 않은 모든 데이터 행의 A 컬럼을 비운다.
-        data_end_row = DATA_START_ROW + len(rows_input) - 1
-        for r in range(max(data_end_row + 1, DATA_START_ROW), ws.max_row + 1):
-            a = ws.cell(row=r, column=1)
-            if isinstance(a.value, (int, float)):
-                a.value = None
-
-        # 1번째 시트(요약) = A~D 만.  결과 파일명과 같은 이름으로, 전체 양식 앞에 만든다.
+        # 1번째 시트(요약) = A~D 만.  결과 파일명과 같은 이름으로 맨 앞에.
         self._build_summary_sheet(wb, rows_input)
+
+        # 미매칭 사진만 모은 시트(이미지 포함) — 미매칭이 있을 때만 (#3).
+        unmatched_rows = [r for r in rows_input if isinstance(r[2], MissEntry)]
+        if unmatched_rows:
+            self._write_unmatched_sheet(wb, unmatched_rows)
 
         # Slot 불일치 ---------------------------------------------------
         if self._result.slot_only_ref or self._result.slot_only_val:
             self._write_slot_mismatch_sheet(wb)
+
+        # 전체 양식 미포함이면, 헤더 복사가 끝난 지금 전체 양식 시트를 제거.
+        if not self._include_full_template:
+            try:
+                wb.remove(wb[SHEET_FULL_NAME])
+            except Exception:
+                pass
 
         self._dst.parent.mkdir(parents=True, exist_ok=True)
         wb.save(str(self._dst))
@@ -183,11 +198,20 @@ class ExcelExporter(QThread):
         return name[:31]
 
     def _build_summary_sheet(self, wb, rows_input: list) -> None:
-        """1번째 시트(요약) — A~D 열만.  전체 양식 시트의 A~D 헤더/병합/폭/행높이를
-        복사하고 같은 데이터로 A~D(번호·slot·기준/검증 이미지)를 다시 채운다.
-        결과 파일명과 같은 이름으로, 전체 양식 시트보다 **앞에** 만든다."""
+        """1번째 시트(요약) — A~D 열만, 전체 데이터.  맨 앞(index 0)에."""
+        self._build_ad_sheet(wb, self._summary_sheet_name(), 0, rows_input)
+
+    def _write_unmatched_sheet(self, wb, unmatched_rows: list) -> None:
+        """미매칭 사진만 모은 A~D 시트(이미지 포함) — 요약 다음(index 1)에 (#3)."""
+        self._build_ad_sheet(wb, i18n.KO.SHEET_UNMATCHED, 1, unmatched_rows)
+
+    def _build_ad_sheet(self, wb, title: str, index: int, rows_input: list) -> None:
+        """A~D(번호·slot·기준/검증 이미지) 전용 시트를 만든다.
+
+        전체 양식 시트의 A~D 헤더/병합/폭/행높이를 복사하고 ``rows_input`` 으로
+        이미지를 임베드한다.  요약(전체)·미매칭(부분) 시트가 공유한다."""
         full = wb[SHEET_FULL_NAME]
-        ws = wb.create_sheet(title=self._summary_sheet_name(), index=0)
+        ws = wb.create_sheet(title=title, index=index)
 
         # A~D 헤더(row 1~2) 값/서식 복사.  E~H 는 만들지 않는다(요약 시트엔 없음).
         from copy import copy as _copy

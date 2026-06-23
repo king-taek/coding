@@ -117,6 +117,10 @@ def pick_tier(total_images: int, *, speed_mode: bool = False) -> SizingTier:
 # ---------------------------------------------------------------------------
 # in-memory LRU 픽스맵 캐시 기본 한도 — 512 MB.
 PIXMAP_CACHE_MAX_BYTES = 512 * 1024 * 1024
+
+# 후보 선별(Stage 1): 측당 총 사진이 이 수 이상이면 좌/우 패널에 '현재 슬롯' 하나만
+# 표시해 위젯 수를 최소화한다(#렉).  미만이면 모든 슬롯 표시.
+SELECT_SINGLE_SLOT_THRESHOLD = 300
 # 메모리 압박 토스트 임계치 — 캐시 한도 + 1 GB 워킹셋.
 MEMORY_PRESSURE_BYTES = PIXMAP_CACHE_MAX_BYTES + 1024 * 1024 * 1024
 

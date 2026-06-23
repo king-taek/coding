@@ -263,3 +263,70 @@ def load_thumb_qpixmap(path: "Path", size: int, *,
         )
     except Exception:
         return fallback
+
+
+# ---------------------------------------------------------------------------
+# 타일 픽스맵 LRU 캐시 (#렉) — 후보 선별에서 결정마다 타일을 재생성해도 디스크
+# 재로딩/스케일을 반복하지 않도록 스케일 완료된 QPixmap 을 RAM 에 둔다.
+# GUI 스레드 전용(QPixmap main-thread only) — _ThumbTile._load_pix 에서 호출.
+# ---------------------------------------------------------------------------
+_tile_pixmap_cache = None        # lazy 생성 (LRUPixmapCache)
+
+
+def _get_tile_cache():
+    global _tile_pixmap_cache
+    if _tile_pixmap_cache is None:
+        from .lru_pixmap_cache import LRUPixmapCache
+        _tile_pixmap_cache = LRUPixmapCache(config.PIXMAP_CACHE_MAX_BYTES)
+    return _tile_pixmap_cache
+
+
+def clear_tile_cache() -> None:
+    """타일 픽스맵 캐시를 비운다 (세션 전환 시 호출 — staleness 방지)."""
+    if _tile_pixmap_cache is not None:
+        _tile_pixmap_cache.clear()
+
+
+def cached_tile_pixmap(src: "Path", size: int, *,
+                       prefer_mid: bool = False, dim: bool = False):
+    """``size`` 박스에 맞춰 스케일(+옵션 dim) 완료된 QPixmap 을 캐시에서 반환.
+
+    같은 (경로·크기·prefer_mid·dim) 조합은 한 번만 디스크에서 로드·스케일하고
+    이후엔 RAM 히트.  캐시 미스 시 기존 ``_ThumbTile._load_pix`` 와 동일 로직 수행.
+    GUI 스레드에서만 호출 (QPixmap main-thread only).
+    """
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtGui import QColor, QPainter, QPixmap
+
+    key = (str(src), int(size), bool(prefer_mid), bool(dim))
+    cache_obj = _get_tile_cache()
+    cached = cache_obj.get(key)
+    if cached is not None:
+        return cached
+
+    try:
+        tp = get_mid_path(Path(src)) if prefer_mid else get_thumb_path(Path(src))
+        pix = QPixmap(str(tp))
+        if pix.isNull():
+            pix = QPixmap(size, size)
+            pix.fill(QColor(20, 28, 40))
+        pix = pix.scaled(
+            size, size,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+    except Exception:
+        pix = QPixmap(size, size)
+        pix.fill(QColor(20, 28, 40))
+
+    if dim:
+        faded = QPixmap(pix.size())
+        faded.fill(Qt.GlobalColor.transparent)
+        p = QPainter(faded)
+        p.setOpacity(0.35)
+        p.drawPixmap(0, 0, pix)
+        p.end()
+        pix = faded
+
+    cache_obj.put(key, pix)
+    return pix

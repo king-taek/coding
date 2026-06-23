@@ -6,8 +6,8 @@ from datetime import datetime
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import (QFileDialog, QHBoxLayout, QLabel, QMessageBox,
-                              QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import (QCheckBox, QFileDialog, QHBoxLayout, QLabel,
+                              QMessageBox, QVBoxLayout, QWidget)
 
 from ... import i18n
 from ...models.result import FinalResult
@@ -78,6 +78,17 @@ class ResultPage(QWidget):
         self.export_btn.clicked.connect(self._on_export)
         bar.addWidget(self.export_btn)
         root.addLayout(bar)
+
+        # 전체 양식(E~H 수기 영역) 포함 옵션 — 기본 해제(#3).  체크 시에만 무거운
+        # 전체 양식 시트를 함께 저장한다.
+        opt_row = QHBoxLayout()
+        opt_row.addStretch(1)
+        self.full_template_chk = QCheckBox(i18n.KO.EXPORT_FULL_TEMPLATE_LABEL, self)
+        self.full_template_chk.setChecked(False)
+        self.full_template_chk.setToolTip(i18n.KO.EXPORT_FULL_TEMPLATE_TOOLTIP)
+        opt_row.addWidget(self.full_template_chk)
+        opt_row.addStretch(1)
+        root.addLayout(opt_row)
 
         # 개발자 크레딧 (마지막 화면) -----------------------------------
         credit = QLabel(i18n.KO.CREDIT, self)
@@ -281,6 +292,7 @@ class ResultPage(QWidget):
         self._loading.show_overlay(i18n.KO.LOAD_EXPORT)
         self._exporter = ExcelExporter(
             self._result, self._save_path, template_path=self._template_path,
+            include_full_template=self.full_template_chk.isChecked(),
         )
         self._exporter.signals.progress.connect(
             lambda d, t, msg: self._loading.set_progress(d, t, i18n.KO.LOAD_EXPORT)

@@ -452,12 +452,21 @@ EXPORT_TEMPLATE_NOT_FOUND = (
     "양식.xlsx 템플릿을 찾을 수 없습니다. 기본 양식으로 저장합니다."
 )
 SLOT_MISMATCH_SHEET = "Slot 불일치 목록"
+SHEET_UNMATCHED = "미매칭 사진"
+# 결과 화면 — 전체 양식(E~H 수기 영역) 포함 옵션 (기본 해제, #3).
+EXPORT_FULL_TEMPLATE_LABEL = "전체 양식(E~H 수기 영역) 포함"
+EXPORT_FULL_TEMPLATE_TOOLTIP = (
+    "체크하면 E~H 수기 입력 영역을 포함한 ‘전체 양식’ 시트도 함께 저장합니다.\n"
+    "기본(해제)은 요약·미매칭 시트만 생성해 더 빠르고 가벼운 파일이 됩니다."
+)
 
 # ── 일반 상태 표시 ─────────────────────────────────────────────────────────
 SLOT_COUNT_FMT = "{slot}: 기준 {ref}장 / 검증 {val}장"
 COUNT_PLUS_N_FMT = "+{n}"
 PROGRESS_SLOT_FMT = "{slot}  ·  {done} / {total}"
 GROUP_HEADER_FMT = "{slot}  ·  {count} 장"
+# 후보 선별 상단의 LOT(slot)별 전체 장수 — 참고용 (#2).
+LOT_COUNTS_PREFIX = "LOT별 장수:  "
 
 # ── 오류 ────────────────────────────────────────────────────────────────
 ERR_GENERIC = "오류가 발생했습니다: {error}"

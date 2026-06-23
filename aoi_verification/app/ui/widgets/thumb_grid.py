@@ -105,36 +105,13 @@ class _ThumbTile(QFrame):
 
     # ------------------------------------------------------------------
     def _load_pix(self) -> None:
-        size = self._tile_px
-        try:
-            # prefer_mid: 후보 패널처럼 더 선명한 표시가 필요하면 mid 캐시
-            # (~800px) 를 소스로.  표시 크기는 동일해도 다운스케일 품질이 ↑.
-            if self._prefer_mid:
-                tp = image_io.get_mid_path(self.entry.item.path)
-            else:
-                tp = image_io.get_thumb_path(self.entry.item.path)
-            pix = QPixmap(str(tp))
-            if pix.isNull():
-                pix = QPixmap(size, size)
-                pix.fill(QColor(20, 28, 40))
-            pix = pix.scaled(
-                size, size,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-        except Exception:
-            pix = QPixmap(size, size)
-            pix.fill(QColor(20, 28, 40))
-
-        if self._dim:
-            faded = QPixmap(pix.size())
-            faded.fill(Qt.GlobalColor.transparent)
-            p = QPainter(faded)
-            p.setOpacity(0.35)
-            p.drawPixmap(0, 0, pix)
-            p.end()
-            pix = faded
-
+        # 스케일(+dim) 완료 픽스맵을 RAM 캐시에서 가져온다(#렉) — 후보 선별에서
+        # 결정마다 타일을 재생성해도 디스크 재로딩/스케일을 반복하지 않는다.
+        # prefer_mid: 후보 패널처럼 더 선명한 표시가 필요하면 mid 캐시(~800px) 소스.
+        pix = image_io.cached_tile_pixmap(
+            self.entry.item.path, self._tile_px,
+            prefer_mid=self._prefer_mid, dim=self._dim,
+        )
         self._img.setPixmap(pix)
 
     def _enable_checkbox(self) -> None:

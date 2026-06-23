@@ -905,6 +905,12 @@ class MainWindow(QMainWindow):
         self._reviewed_matches.clear()
         self._reviewed_unmatched.clear()
         self._thumbs_handled = False        # 썸네일 완료 one-shot 가드 리셋(#C2)
+        # 타일 픽스맵 캐시 비우기 — 폴더가 바뀌어도 stale 픽스맵이 남지 않게(#렉).
+        try:
+            from ..utils import image_io as _io
+            _io.clear_tile_cache()
+        except Exception:
+            pass
         self._session_id = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
 
         # 양식 폴더의 양식.xlsx 를 결과 폴더로 복사 → 작업 파일 준비 ----

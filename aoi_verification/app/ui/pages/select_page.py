@@ -159,6 +159,52 @@ class _SidePanel(QFrame):
             self._host_layout.addWidget(sec)
         self._host_layout.addStretch(1)
 
+    # ------------------------------------------------------------------
+    def set_slot(self, slot: str, items: list[ImageItem]) -> None:
+        """한 슬롯의 섹션만 갱신/생성/제거 — 전체 재생성 없이 증분 갱신(#렉).
+
+        - items 가 비면 그 슬롯 섹션을 제거.
+        - 섹션이 있으면 그 섹션의 타일만 다시 그린다(``set_entries``).
+        - 없으면 슬롯명 정렬 위치에 새 섹션을 삽입(끝 stretch 앞).
+        """
+        items = list(items)
+        if not items:
+            self._cached.pop(slot, None)
+            sec = self._sections.pop(slot, None)
+            if sec is not None:
+                self._host_layout.removeWidget(sec)
+                sec.deleteLater()
+            return
+
+        self._cached[slot] = items
+        entries = [ThumbEntry(item=it) for it in items]
+        sec = self._sections.get(slot)
+        if sec is not None:
+            sec.set_entries(entries)
+            return
+
+        sec = SlotSection(slot, columns=self._columns,
+                          select_mode=False,
+                          inline_select=self._inline_select,
+                          truncate=not self._inline_select,
+                          tile_px=self._tile_px, parent=self)
+        sec.set_entries(entries)
+        sec.tile_clicked.connect(
+            lambda ent, s=slot: self.tile_clicked.emit(self._name, s, ent.item)
+        )
+        sec.plus_clicked.connect(
+            lambda s: self.plus_clicked.emit(self._name, s)
+        )
+        sec.expand_requested.connect(
+            lambda ent, s=slot: self.expand_requested.emit(
+                self._name, s, ent.item)
+        )
+        self._sections[slot] = sec
+        # 슬롯명 정렬 위치에 삽입 — 끝 stretch 보다 앞.
+        ordered = sorted(self._sections.keys())
+        idx = ordered.index(slot)
+        self._host_layout.insertWidget(idx, sec)
+
     def cached(self) -> dict[str, list[ImageItem]]:
         return {k: list(v) for k, v in self._cached.items()}
 
@@ -256,6 +302,14 @@ class SelectPage(QWidget):
         self.progress_label.setProperty("role", "muted")
         top.addWidget(self.progress_label)
         root.addLayout(top)
+
+        # LOT(slot)별 전체 장수 — 참고용으로 작게 한 줄 (#2).  세션 내 불변이라
+        # load_state 에서 1회만 채운다.  슬롯이 많으면 elide + 전체는 툴팁.
+        self.lot_counts_label = QLabel("", self)
+        self.lot_counts_label.setProperty("role", "muted")
+        self.lot_counts_label.setStyleSheet("color: #586378; font-size: 11px;")
+        self.lot_counts_label.setWordWrap(False)
+        root.addWidget(self.lot_counts_label)
 
         # 중앙 3-pane — QSplitter 로 사용자 조절 + 상태 영속 -------------
         self._h_splitter = QSplitter(Qt.Orientation.Horizontal, self)
@@ -488,8 +542,28 @@ class SelectPage(QWidget):
         self._phase_label_text = phase_label
         self.phase_label.setText(phase_label)
         self._phase_b_already_matched = phase_b_already_matched or {}
+        self._update_lot_counts()
         self._refresh_all()
         self._advance_to_next()
+
+    def _update_lot_counts(self) -> None:
+        """LOT(slot)별 전체 장수 라벨 갱신 (#2) — 세션 내 불변이라 1회만."""
+        if self._state is None:
+            self.lot_counts_label.setText("")
+            return
+        totals: dict[str, int] = defaultdict(int)
+        for it in self._state.queue:
+            totals[it.slot] += 1
+        for pool in (self._state.targets, self._state.excluded):
+            for slot, items in pool.items():
+                totals[slot] += len(items)
+        if not totals:
+            self.lot_counts_label.setText("")
+            return
+        parts = [f"{slot} {totals[slot]}" for slot in sorted(totals)]
+        full = i18n.KO.LOT_COUNTS_PREFIX + "  ·  ".join(parts)
+        self.lot_counts_label.setText(full)
+        self.lot_counts_label.setToolTip(full)
 
     def get_state(self) -> Stage1State | None:
         return self._state
@@ -497,21 +571,66 @@ class SelectPage(QWidget):
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # 표시 모드 / 슬롯별 표시 항목 (one-slot 모드 반영, #렉)
+    # ------------------------------------------------------------------
+    def _is_single_slot_mode(self) -> bool:
+        """측당 총 사진이 임계 이상이면 현재 슬롯만 표시(위젯 수 최소화)."""
+        if self._state is None:
+            return False
+        return self._total_count() >= config.SELECT_SINGLE_SLOT_THRESHOLD
+
+    def _left_items_for_slot(self, slot: str) -> list[ImageItem]:
+        """좌(후보) 패널에 그 슬롯이 보여줄 항목 = 큐 항목 − 현재 결정중 사진."""
+        if self._state is None:
+            return []
+        if self._is_single_slot_mode() and (
+                self._current is None or slot != self._current.slot):
+            return []
+        items = [it for it in self._state.queue if it.slot == slot]
+        if self._current is not None and self._current.slot == slot:
+            items = [it for it in items if it is not self._current]
+        return items
+
+    def _right_items_for_slot(self, slot: str) -> list[ImageItem]:
+        """우(검증 대상) 패널에 그 슬롯이 보여줄 항목."""
+        if self._state is None:
+            return []
+        if self._is_single_slot_mode() and (
+                self._current is None or slot != self._current.slot):
+            return []
+        return list(self._state.targets.get(slot, []))
+
+    def _update_slots_incremental(self, slots) -> None:
+        """주어진 슬롯들만 좌·우 패널에서 증분 갱신(전체 재생성 없음, #렉)."""
+        for s in slots:
+            if not s:
+                continue
+            self.left_panel.set_slot(s, self._left_items_for_slot(s))
+            self.right_panel.set_slot(s, self._right_items_for_slot(s))
+
     def _refresh_all(self) -> None:
         if self._state is None:
             return
-        # left = 남은 큐를 Slot 별로 그룹화
-        left_groups: dict[str, list[ImageItem]] = defaultdict(list)
-        for it in self._state.queue:
-            left_groups[it.slot].append(it)
-        # 현재 결정 중인 사진은 left 에서 제외
-        if self._current is not None and self._current in left_groups[self._current.slot]:
-            left_groups[self._current.slot].remove(self._current)
-            if not left_groups[self._current.slot]:
-                left_groups.pop(self._current.slot, None)
-        self.left_panel.update_data(left_groups)
-
-        self.right_panel.update_data({k: list(v) for k, v in self._state.targets.items()})
+        if self._is_single_slot_mode():
+            cur = self._current.slot if self._current is not None else None
+            left = {cur: self._left_items_for_slot(cur)} if cur else {}
+            right = {cur: self._right_items_for_slot(cur)} if cur else {}
+            self.left_panel.update_data(left)
+            self.right_panel.update_data(right)
+        else:
+            # left = 남은 큐를 Slot 별로 그룹화
+            left_groups: dict[str, list[ImageItem]] = defaultdict(list)
+            for it in self._state.queue:
+                left_groups[it.slot].append(it)
+            # 현재 결정 중인 사진은 left 에서 제외
+            if self._current is not None and self._current in left_groups[self._current.slot]:
+                left_groups[self._current.slot].remove(self._current)
+                if not left_groups[self._current.slot]:
+                    left_groups.pop(self._current.slot, None)
+            self.left_panel.update_data(left_groups)
+            self.right_panel.update_data(
+                {k: list(v) for k, v in self._state.targets.items()})
         self._refresh_excluded_button()
         self._refresh_end_selection_button()
 
@@ -553,6 +672,37 @@ class SelectPage(QWidget):
             )
         )
         self._refresh_all()
+
+    def _advance_incremental(self, prev_slot: str) -> None:
+        """결정 1건 후 — 바뀐 슬롯만 증분 갱신(전체 재생성 금지, #렉).
+
+        ``_advance_to_next`` 과 달리 ``_refresh_all`` (전 패널 재생성) 을 호출하지
+        않고, 영향받은 슬롯(직전 슬롯 + 새 현재 슬롯) 섹션만 갱신한다.
+        """
+        if self._state is None:
+            return
+        if not self._state.queue:
+            self._current = None
+            self.center_img.clear_image()
+            self.slot_label.setText("")
+            self.progress_label.setText("")
+            self._update_slots_incremental({prev_slot})
+            self._refresh_excluded_button()
+            self._refresh_end_selection_button()
+            self.finished.emit()
+            return
+        self._current = self._state.queue[0]
+        self._show_center(self._current)
+        self.progress_label.setText(
+            i18n.KO.PROGRESS_SLOT_FMT.format(
+                slot=self._current.slot,
+                done=self._already_decided_count(),
+                total=self._total_count(),
+            )
+        )
+        self._update_slots_incremental({prev_slot, self._current.slot})
+        self._refresh_excluded_button()
+        self._refresh_end_selection_button()
 
     def _already_decided_count(self) -> int:
         if self._state is None:
@@ -600,7 +750,8 @@ class SelectPage(QWidget):
         self._state.history.append((action, item))
         self.decision_made.emit(action, item)
         self.state_changed.emit()
-        self._advance_to_next()
+        # 핫 경로 — 전체 재생성 대신 영향 슬롯만 증분 갱신(#렉).
+        self._advance_incremental(item.slot)
 
     def _undo(self) -> None:
         # Z 가 MatchPage 가 보일 때도 SelectPage 로 전달되는 것을 차단.

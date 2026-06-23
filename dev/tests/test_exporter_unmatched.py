@@ -110,8 +110,8 @@ def test_export_no_unmatched_unaffected(qapp, isolated_cache, tmp_path):
     assert ws["B4"].value is None
 
 
-def test_export_splits_into_two_sheets(qapp, isolated_cache, tmp_path):
-    """결과는 두 시트로 나뉜다: 1번째=파일명·A~D만, 2번째='전체 양식'(E~H 포함)."""
+def test_export_full_template_optional(qapp, isolated_cache, tmp_path):
+    """전체 양식(E~H 포함) 시트는 옵션 — 기본(off)이면 생성 안 하고, 켜면 생성(#3)."""
     src = tmp_path / "src"
     src.mkdir()
     ref = _make_image(src, "ref.jpeg")
@@ -120,28 +120,56 @@ def test_export_splits_into_two_sheets(qapp, isolated_cache, tmp_path):
         mode="single", ref_machine="1호기", val_machine="2호기",
         matches=[MatchResult(slot="S1", ref_path=ref, val_path=val, score=0.9)],
     )
-    # 실제 양식 템플릿(E~H 포함)을 써서 전체 양식 시트 구조를 검증.
     from aoi_verification.app.utils import paths
-    dst = tmp_path / "결과_AOI-1_vs_AOI-2.xlsx"
-    ExcelExporter(result, dst_path=dst, template_path=paths.template_path()).run()
-    assert dst.exists()
-
     from openpyxl import load_workbook
-    wb = load_workbook(str(dst))
-    # 1번째 시트 = 파일명(확장자 제외)과 동일, 그리고 활성 시트(맨 앞).
-    assert wb.sheetnames[0] == "결과_AOI-1_vs_AOI-2"
-    assert "전체 양식" in wb.sheetnames
-    assert wb.sheetnames.index("전체 양식") > 0           # 요약이 앞, 전체가 뒤
 
+    # 기본(off) — 요약 시트만, '전체 양식' 없음.
+    dst = tmp_path / "결과_AOI-1_vs_AOI-2.xlsx"
+    ExcelExporter(result, dst_path=dst,
+                  template_path=paths.template_path()).run()
+    wb = load_workbook(str(dst))
+    assert wb.sheetnames[0] == "결과_AOI-1_vs_AOI-2"
+    assert "전체 양식" not in wb.sheetnames
     summary = wb["결과_AOI-1_vs_AOI-2"]
-    full = wb["전체 양식"]
-    # 요약 시트는 A~D 만 — E~H 헤더가 없다.
+    # 요약 시트는 A~D 만 — E~H 헤더 없음 + 데이터 채워짐.
     assert summary["A1"].value == "No" and summary["C1"].value == "Scan Defect"
     assert summary["E1"].value is None and summary["G1"].value is None
-    # 전체 양식 시트는 E~H 수기 영역 헤더를 보존한다.
+    assert summary["B3"].value == "S1"
+
+    # 옵션 on — '전체 양식'(E~H 포함) 시트도 생성.
+    dst2 = tmp_path / "결과2.xlsx"
+    ExcelExporter(result, dst_path=dst2, template_path=paths.template_path(),
+                  include_full_template=True).run()
+    wb2 = load_workbook(str(dst2))
+    assert "전체 양식" in wb2.sheetnames
+    assert wb2.sheetnames.index("전체 양식") > 0          # 요약이 앞, 전체가 뒤
+    full = wb2["전체 양식"]
     assert full["E1"].value is not None and full["G1"].value is not None
-    # 두 시트 모두 데이터(slot)가 채워진다.
-    assert summary["B3"].value == "S1" and full["B3"].value == "S1"
+    assert full["B3"].value == "S1"
+
+
+def test_export_unmatched_sheet(qapp, isolated_cache, tmp_path):
+    """미매칭이 있으면 '미매칭 사진' 시트가 추가된다(이미지 포함, #3)."""
+    src = tmp_path / "src"
+    src.mkdir()
+    ref = _make_image(src, "ref.jpeg")
+    val = _make_image(src, "val.jpeg")
+    miss = _make_image(src, "miss.jpeg")
+    result = FinalResult(
+        mode="single", ref_machine="1호기", val_machine="2호기",
+        matches=[MatchResult(slot="S1", ref_path=ref, val_path=val, score=0.9)],
+        unmatched_refs=[MissEntry(slot="S2", side="ref", path=miss, note="미매칭")],
+    )
+    from openpyxl import load_workbook
+    no_tpl = tmp_path / "no_template.xlsx"
+    dst = tmp_path / "out.xlsx"
+    ExcelExporter(result, dst_path=dst, template_path=no_tpl).run()
+    wb = load_workbook(str(dst))
+    assert "미매칭 사진" in wb.sheetnames
+    um = wb["미매칭 사진"]
+    # 미매칭 시트엔 미매칭 행만 — 첫 데이터 행 slot=S2, D열에 빨강 파일명.
+    assert um["B3"].value == "S2"
+    assert um["D3"].value == "miss.jpeg"
 
 
 def test_machine_label_rule():
