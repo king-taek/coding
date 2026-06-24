@@ -465,8 +465,8 @@ SLOT_COUNT_FMT = "{slot}: 기준 {ref}장 / 검증 {val}장"
 COUNT_PLUS_N_FMT = "+{n}"
 PROGRESS_SLOT_FMT = "{slot}  ·  {done} / {total}"
 GROUP_HEADER_FMT = "{slot}  ·  {count} 장"
-# 후보 선별 상단의 LOT(slot)별 전체 장수 — 참고용 (#2).
-LOT_COUNTS_PREFIX = "LOT별 장수:  "
+# 후보 선별 상단의 Slot 별 전체 장수 — 참고용 (#2).
+LOT_COUNTS_PREFIX = "Slot별 장수:  "
 
 # ── 오류 ────────────────────────────────────────────────────────────────
 ERR_GENERIC = "오류가 발생했습니다: {error}"
