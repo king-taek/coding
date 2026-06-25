@@ -8,7 +8,8 @@ from typing import Optional
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
-from PyQt6.QtWidgets import (QButtonGroup, QCheckBox, QFileDialog, QFormLayout,
+from PyQt6.QtWidgets import (QButtonGroup, QCheckBox, QDoubleSpinBox,
+                              QFileDialog, QFormLayout,
                               QGroupBox, QHBoxLayout, QLabel, QLineEdit,
                               QMessageBox, QRadioButton, QScrollArea,
                               QSizePolicy, QVBoxLayout, QWidget)
@@ -206,7 +207,6 @@ class SetupPage(QWidget):
         engine_card.body().addWidget(self.radio_engine_coordinate)
 
         # 좌표 모드 허용 오차 스핀박스 (좌표 모드 선택 시만 표시)
-        from PyQt6.QtWidgets import QDoubleSpinBox, QHBoxLayout, QLabel
         _tol_row = QWidget(engine_card)
         _tol_layout = QHBoxLayout(_tol_row)
         _tol_layout.setContentsMargins(20, 0, 0, 0)
