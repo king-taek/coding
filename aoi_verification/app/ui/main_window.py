@@ -1387,6 +1387,14 @@ class MainWindow(QMainWindow):
             review_pool[(slot_name, "val")] = list(slot.ref_images)
         review_score_cache = getattr(self._match_page, "_score_cache", None)
         review_fast_results = getattr(self._match_page, "_fast_results", None)
+        _engine_cfg = getattr(self._match_page, "_engine_cfg", None)
+        _coord_mode = False
+        _tolerance = 500.0
+        if _engine_cfg is not None:
+            from ..utils.prefs import EngineMode
+            _coord_mode = EngineMode.is_coordinate(
+                getattr(_engine_cfg, "engine", ""))
+            _tolerance = float(getattr(_engine_cfg, "coord_tolerance", 500.0))
         self._result_page.show_result(
             result,
             template_path=self._template_used,
@@ -1395,6 +1403,8 @@ class MainWindow(QMainWindow):
             val_pool=review_pool,
             score_cache=review_score_cache,
             fast_results=review_fast_results,
+            coord_mode=_coord_mode,
+            tolerance=_tolerance,
         )
         self._show_page(self._result_page)
         self._phase = PHASE_NONE

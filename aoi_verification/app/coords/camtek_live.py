@@ -1,10 +1,12 @@
 """Camtek LIVE 파일명에서 좌표 추출.
 
-실제 파일명 형식: R_{장치}_{WaferID}_{col}_{row}_{x.xx}_{y.yy}[_{DefectName}]
-예) R_TB500_LIVE_PI4_PXU-PIDS3_00RMF043XYE0_5_3_21620.2113348411_7230.80771621759_Foreign Material
+두 가지 파일명 형식을 지원한다:
+  A) ..._col_row_x_y[_DefectName]  — x/y 뒤에 DefectName (선택)
+     예) R_TB500_LIVE_PI4_PXU-PIDS3_00RMF043XYE0_5_3_21620.211_7230.807_Foreign Material
+  B) ..._col_row_DefectName_x_y    — x/y 앞에 DefectName
+     예) R_TB500_LIVE_PI4_VLP-PDIS3_W6317098XYB5_4_5_Over Sized Bump_30229.803_1987.994
 
-col/row 는 정수, x/y 는 소수점 포함 실수(µm).
-DefectName 은 x/y 뒤에 오며 언더스코어·스페이스 모두 허용, 없어도 됨.
+col/row 는 정수, x/y 는 정수 또는 소수점 실수(µm). 형식 A 를 먼저 시도한다.
 """
 
 from __future__ import annotations
@@ -17,25 +19,35 @@ from .models import DefectCoord
 
 __all__ = ["resolve"]
 
-# 형식: ..._col_row_x.xx_y.yy[_DefectName]
-# col/row: 정수, x/y: 소수점 필수 실수(µm) → 정수 col/row와 명확히 구별.
-# DefectName: x/y 뒤에 오며 선택적(없을 수도 있음), 언더스코어 포함 가능.
-_PAT = re.compile(
-    r'_(\d+)_(\d+)_([\d]+\.[\d]+)_([\d]+\.[\d]+)(?:_.+)?$'
+# 형식 A: ..._col_row_x[.xx]_y[.yy][_DefectName]
+_PAT_A = re.compile(
+    r'_(\d+)_(\d+)_([\d]+(?:\.[\d]+)?)_([\d]+(?:\.[\d]+)?)(?:_.+)?$'
+)
+
+# 형식 B: ..._col_row_DefectName_x[.xx]_y[.yy]  (DefectName 이 x/y 앞)
+_PAT_B = re.compile(
+    r'_(\d+)_(\d+)_.+_([\d]+(?:\.[\d]+)?)_([\d]+(?:\.[\d]+)?)$'
 )
 
 
-def resolve(image_path: Path) -> Optional[DefectCoord]:
-    """LIVE 형식 파일명에서 DefectCoord 추출. 형식이 맞지 않으면 None."""
-    stem = image_path.stem
-    m = _PAT.search(stem)
-    if not m:
-        return None
+def _extract(m) -> Optional[DefectCoord]:
     try:
         col = int(m.group(1))
         row = int(m.group(2))
         x = float(m.group(3))
         y = float(m.group(4))
-    except ValueError:
+    except (ValueError, IndexError):
         return None
     return DefectCoord(col=col, row=row, x=x, y=y, source="camtek_live")
+
+
+def resolve(image_path: Path) -> Optional[DefectCoord]:
+    """LIVE 형식 파일명에서 DefectCoord 추출. 형식이 맞지 않으면 None."""
+    stem = image_path.stem
+    m = _PAT_A.search(stem)
+    if m:
+        return _extract(m)
+    m = _PAT_B.search(stem)
+    if m:
+        return _extract(m)
+    return None

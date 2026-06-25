@@ -43,6 +43,15 @@ _CAND_RATIO = _CAND_PX / _REF_PX        # ≈ 0.62
 
 
 # ---------------------------------------------------------------------------
+def _fmt_score(score: float, coord_mode: bool, tolerance: float) -> str:
+    if coord_mode:
+        tol = float(tolerance) if tolerance > 0 else 500.0
+        dist = (1.0 - score) * tol if score >= 0 else (-score) * tol
+        return (i18n.KO.SCORE_DIST_FMT.format(dist=dist) if score >= 0
+                else i18n.KO.SCORE_DIST_OVER_FMT.format(dist=dist))
+    return f"유사도 {score * 100:.1f}%"
+
+
 def _load_full_pixmap_scaled(path: Path, size: int) -> QPixmap:
     """원본 파일을 그대로 디코드한 뒤 ``size`` 박스에 맞춰 축소.
 
@@ -83,10 +92,13 @@ class _CandidateTile(QFrame):
                   " background: rgba(57, 255, 20, 0.06); }")
 
     def __init__(self, item: ImageItem, score: float, parent=None,
-                 *, size: int = _CAND_PX) -> None:
+                 *, size: int = _CAND_PX,
+                 coord_mode: bool = False, tolerance: float = 500.0) -> None:
         super().__init__(parent)
         self.item = item
         self.score = float(score)
+        self._coord_mode = bool(coord_mode)
+        self._tolerance = float(tolerance) if tolerance > 0 else 500.0
         self._size = int(size)
         self._image_loaded = False
         self._is_selected = False
@@ -112,7 +124,8 @@ class _CandidateTile(QFrame):
         self._img_label.setPixmap(ph)
         lay.addWidget(self._img_label, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        self._score_label = QLabel(f"유사도 {self.score * 100:.1f}%", self)
+        self._score_label = QLabel(
+            _fmt_score(self.score, self._coord_mode, self._tolerance), self)
         self._score_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._score_label.setStyleSheet(
             "color: #00FFA3; font-weight: 700; padding: 2px;"
@@ -172,7 +185,8 @@ class _CandidateTile(QFrame):
     def set_score(self, score: float) -> None:
         """같은 슬롯 재사용 시 새 기준 사진 기준으로 점수만 갱신 (#1b)."""
         self.score = float(score)
-        self._score_label.setText(f"유사도 {self.score * 100:.1f}%")
+        self._score_label.setText(
+            _fmt_score(self.score, self._coord_mode, self._tolerance))
 
     def set_selected(self, selected: bool) -> None:
         if selected == self._is_selected:
@@ -208,7 +222,10 @@ class UnmatchedReviewDialog(QDialog):
                  already_used_vals: Iterable[Path] = (),
                  score_cache=None,
                  fast_results: dict | None = None,
-                 parent=None) -> None:
+                 parent=None,
+                 *,
+                 coord_mode: bool = False,
+                 tolerance: float = 500.0) -> None:
         """``val_pool`` 키는 두 형태를 모두 지원:
 
         - ``(slot, side)`` → list[ImageItem]  : 후보 풀
@@ -225,6 +242,8 @@ class UnmatchedReviewDialog(QDialog):
         # 효율 모드 선계산 top-K {(slot, ref_path): [(val_path, score)]} — 후보 풀이
         # 300장 이상이면 CPU 재계산 대신 이걸 재사용한다 (#1).
         self._fast_results = fast_results or {}
+        self._coord_mode = bool(coord_mode)
+        self._tolerance = float(tolerance) if tolerance > 0 else 500.0
         self._idx = 0
         # 사진 크기 (#1) — 슬라이더로 조절. 후보 타일은 비율로 파생.
         self._ref_px = _REF_PX
@@ -627,7 +646,9 @@ class UnmatchedReviewDialog(QDialog):
             self._cand_tiles = []
             for s, v in scored:
                 tile = _CandidateTile(v, s, parent=self._host,
-                                      size=self._cand_px)
+                                      size=self._cand_px,
+                                      coord_mode=self._coord_mode,
+                                      tolerance=self._tolerance)
                 tile.selected.connect(self._on_tile_selected)
                 tile.view_requested.connect(self._on_tile_view)
                 self._cand_tiles.append(tile)
@@ -784,7 +805,7 @@ class UnmatchedReviewDialog(QDialog):
         cur = self._current()
         if cur is None or not self._cand_tiles:
             return
-        candidates = [(t.item, f"유사도 {t.score * 100:.1f}%")
+        candidates = [(t.item, _fmt_score(t.score, self._coord_mode, self._tolerance))
                       for t in self._cand_tiles]
         start = max(0, min(int(start_index), len(candidates) - 1))
         viewer = SideBySideViewer(

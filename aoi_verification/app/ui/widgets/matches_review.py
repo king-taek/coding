@@ -28,6 +28,15 @@ _SIZE_MIN_PX = 140
 _SIZE_MAX_PX = 480
 
 
+def _fmt_score(score: float, coord_mode: bool, tolerance: float) -> str:
+    if coord_mode:
+        tol = float(tolerance) if tolerance > 0 else 500.0
+        dist = (1.0 - score) * tol if score >= 0 else (-score) * tol
+        return (i18n.KO.SCORE_DIST_FMT.format(dist=dist) if score >= 0
+                else i18n.KO.SCORE_DIST_OVER_FMT.format(dist=dist))
+    return f"유사도 {score * 100:.1f}%"
+
+
 class _Row(QWidget):
     delete_requested = pyqtSignal(object)        # MatchResult
 
@@ -40,7 +49,9 @@ class _Row(QWidget):
         "border-radius: 8px; }"
     )
 
-    def __init__(self, m: MatchResult, parent=None, *, size: int = _THUMB) -> None:
+    def __init__(self, m: MatchResult, parent=None, *,
+                 size: int = _THUMB,
+                 coord_mode: bool = False, tolerance: float = 500.0) -> None:
         super().__init__(parent)
         self.match = m
         self._size = int(size)
@@ -59,7 +70,7 @@ class _Row(QWidget):
 
         # Slot 메타
         meta = QLabel(
-            f"{m.slot}\nscore {m.score * 100:.1f} %", self,
+            f"{m.slot}\n{_fmt_score(m.score, coord_mode, tolerance)}", self,
         )
         meta.setStyleSheet(
             "color: #39FF14; font-weight: 700; border: none; padding: 4px;"
@@ -152,7 +163,8 @@ class _Row(QWidget):
 
 
 class MatchesReviewDialog(QDialog):
-    def __init__(self, matches: Iterable[MatchResult], parent=None) -> None:
+    def __init__(self, matches: Iterable[MatchResult], parent=None,
+                 *, coord_mode: bool = False, tolerance: float = 500.0) -> None:
         super().__init__(parent)
         # 닫는 즉시 C++ 위젯 해제 — 부모 (ResultPage) 에 dialog 가 쌓이지 않도록.
         # exec() 가 반환된 직후엔 deleteLater 가 아직 처리되지 않아 Python 측
@@ -164,6 +176,8 @@ class MatchesReviewDialog(QDialog):
         self._pending_keys: set = set()       # 삭제 예정 (확인 전) MatchResult.key
         self._rows_by_key: dict = {}
         self._thumb_px = _THUMB               # 사진 크기 (#2)
+        self._coord_mode = bool(coord_mode)
+        self._tolerance = float(tolerance) if tolerance > 0 else 500.0
         self._matches: list[MatchResult] = sorted(
             matches, key=lambda m: (m.slot, m.ref_path.name.lower()),
         )
@@ -242,7 +256,8 @@ class MatchesReviewDialog(QDialog):
                 w.deleteLater()
         self._rows_by_key = {}
         for i, m in enumerate(self._matches):
-            row = _Row(m, size=self._thumb_px)
+            row = _Row(m, size=self._thumb_px,
+                       coord_mode=self._coord_mode, tolerance=self._tolerance)
             row.delete_requested.connect(self._on_delete)
             row.set_pending_delete(m.key in self._pending_keys)
             self._rows_by_key[m.key] = row

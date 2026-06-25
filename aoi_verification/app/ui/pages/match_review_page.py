@@ -133,7 +133,8 @@ class _RunnerUpTile(QFrame):
     view_requested = pyqtSignal(object)               # ImageItem (크게보기)
 
     def __init__(self, item: ImageItem, score: float, parent=None,
-                 *, size: int = _RUNNERUP_PX) -> None:
+                 *, size: int = _RUNNERUP_PX,
+                 coord_mode: bool = False, tolerance: float = 500.0) -> None:
         super().__init__(parent)
         self.item = item
         self.score = float(score)
@@ -151,7 +152,14 @@ class _RunnerUpTile(QFrame):
                                enable_context_menu=False, parent=self)
         lay.addWidget(self._img, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        self._score_label = QLabel(f"{self.score * 100:.1f} %", self)
+        if coord_mode:
+            tol = float(tolerance) if tolerance > 0 else 500.0
+            dist = (1.0 - score) * tol if score >= 0 else (-score) * tol
+            score_text = (i18n.KO.SCORE_DIST_FMT.format(dist=dist) if score >= 0
+                          else i18n.KO.SCORE_DIST_OVER_FMT.format(dist=dist))
+        else:
+            score_text = f"{score * 100:.1f} %"
+        self._score_label = QLabel(score_text, self)
         self._score_label.setStyleSheet("color: #7FB3D5; font-size: 11px;")
         self._score_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(self._score_label)
@@ -392,7 +400,8 @@ class _MatchRow(QFrame):
 
     def _make_tile(self, item: ImageItem, score: float, parent) -> "_RunnerUpTile":
         """후보 타일 하나를 만들고 swap/크게보기 시그널을 연결한다 (#3/#4)."""
-        tile = _RunnerUpTile(item, score, parent=parent, size=self._runnerup_px)
+        tile = _RunnerUpTile(item, score, parent=parent, size=self._runnerup_px,
+                             coord_mode=self._coord_mode, tolerance=self._tolerance)
         tile.swap_requested.connect(
             lambda it, s: self.swap_requested.emit(self.match, it, s)
         )
@@ -402,7 +411,7 @@ class _MatchRow(QFrame):
     def _open_candidate_viewer(self, item: ImageItem) -> None:
         """차순위 후보 크게보기 — 좌(기준)·우(후보) + 이전/다음 + 매치 버튼 (#4)."""
         from ..widgets.side_by_side_viewer import SideBySideViewer
-        candidates = [(it, f"유사도 {s * 100:.1f}%")
+        candidates = [(it, self._format_score(s))
                       for it, s in self._runners_up]
         start = 0
         for i, (it, _s) in enumerate(self._runners_up):
@@ -431,8 +440,8 @@ class _MatchRow(QFrame):
         비교 뷰어. 1위 매치를 후보 맨 앞에 포함해 실제 비교가 되도록 한다 (#2/#5)."""
         from ..widgets.side_by_side_viewer import SideBySideViewer
         candidates = [(self._primary_val_item(),
-                       f"매치 {self.match.score * 100:.1f}%")]
-        candidates += [(it, f"유사도 {s * 100:.1f}%")
+                       self._format_score(self.match.score))]
+        candidates += [(it, self._format_score(s))
                        for it, s in self._runners_up]
         viewer = SideBySideViewer(
             self.match.ref_path, candidates, max(0, int(start)),
@@ -828,6 +837,8 @@ class MatchReviewPage(QWidget):
                 ),
                 parent=self,
                 thumb_px=self._thumb_px,
+                coord_mode=self._coord_mode,
+                tolerance=self._tolerance,
             )
             new_row.toggle_requested.connect(self._on_toggle)
             new_row.swap_requested.connect(self._on_swap)

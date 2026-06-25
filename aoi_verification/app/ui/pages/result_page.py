@@ -33,6 +33,8 @@ class ResultPage(QWidget):
         self._score_cache = None
         # 효율 모드 선계산 top-K — 실패 검토에서 후보 풀≥300 일 때 재사용 (#1).
         self._fast_results: dict | None = None
+        self._coord_mode: bool = False
+        self._tolerance: float = 500.0
         self._loading = LoadingOverlay(self)
         self._exporter: ExcelExporter | None = None
         self._build()
@@ -103,7 +105,9 @@ class ResultPage(QWidget):
                     auto_mode: bool = False,
                     val_pool: dict | None = None,
                     score_cache=None,
-                    fast_results: dict | None = None) -> None:
+                    fast_results: dict | None = None,
+                    coord_mode: bool = False,
+                    tolerance: float = 500.0) -> None:
         self._result = result
         self._template_path = template_path
         self._target_path = target_path
@@ -111,6 +115,8 @@ class ResultPage(QWidget):
         self._val_pool = val_pool
         self._score_cache = score_cache
         self._fast_results = fast_results
+        self._coord_mode = bool(coord_mode)
+        self._tolerance = float(tolerance) if tolerance > 0 else 500.0
         # 검토 후 다시 그려도 ‘자동 매치 결과 검토 권장’ 라벨이 살아 있도록
         # 마지막 auto_mode 값을 기억해 재렌더링에서 재사용한다.
         self._auto_mode = bool(auto_mode)
@@ -181,7 +187,9 @@ class ResultPage(QWidget):
         if self._result is None:
             return
         from ..widgets.matches_review import MatchesReviewDialog
-        dlg = MatchesReviewDialog(self._result.matches, parent=self)
+        dlg = MatchesReviewDialog(self._result.matches, parent=self,
+                                  coord_mode=self._coord_mode,
+                                  tolerance=self._tolerance)
         dlg.exec()
         removed = dlg.removed
         if not removed:
@@ -216,7 +224,9 @@ class ResultPage(QWidget):
                          auto_mode=getattr(self, "_auto_mode", False),
                          val_pool=self._val_pool,
                          score_cache=self._score_cache,
-                         fast_results=self._fast_results)
+                         fast_results=self._fast_results,
+                         coord_mode=self._coord_mode,
+                         tolerance=self._tolerance)
 
     # ------------------------------------------------------------------
     def _on_review_unmatched(self) -> None:
@@ -245,6 +255,8 @@ class ResultPage(QWidget):
             score_cache=self._score_cache,
             fast_results=self._fast_results,
             parent=self,
+            coord_mode=self._coord_mode,
+            tolerance=self._tolerance,
         )
         dlg.exec()
         if not dlg.new_matches:
@@ -265,7 +277,9 @@ class ResultPage(QWidget):
                          template_path=self._template_path,
                          target_path=self._target_path,
                          val_pool=self._val_pool,
-                         score_cache=self._score_cache)
+                         score_cache=self._score_cache,
+                         coord_mode=self._coord_mode,
+                         tolerance=self._tolerance)
 
     def _on_export(self) -> None:
         if self._result is None:
