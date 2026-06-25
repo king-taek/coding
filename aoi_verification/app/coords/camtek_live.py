@@ -1,11 +1,10 @@
 """Camtek LIVE 파일명에서 좌표 추출.
 
-파일명 형식: {prefix}_{...}_{col}_{row}_{DefectName}_{x.xx}_{y.yy}.jpg
-예) R_TB500_LIVE_PI4_VLP-PDIS3_W6317098XYB5_4_5_Over Sized Bump_30229.803_1987.994.jpg
-    또는 DefectName에 언더스코어가 포함된 형식도 허용.
+실제 파일명 형식: R_{장치}_{WaferID}_{col}_{row}_{x.xx}_{y.yy}[_{DefectName}]
+예) R_TB500_LIVE_PI4_PXU-PIDS3_00RMF043XYE0_5_3_21620.2113348411_7230.80771621759_Foreign Material
 
-파일명 끝에서부터: y(소수), x(소수), DefectName(임의), row(정수), col(정수) 순서.
-x/y 는 소수점 필수 → col/row 정수와 명확히 구별, R_ 접두어 불필요.
+col/row 는 정수, x/y 는 소수점 포함 실수(µm).
+DefectName 은 x/y 뒤에 오며 언더스코어·스페이스 모두 허용, 없어도 됨.
 """
 
 from __future__ import annotations
@@ -18,10 +17,11 @@ from .models import DefectCoord
 
 __all__ = ["resolve"]
 
-# 끝 부분이 _col_row_{DefectName(임의)}_x.xx_y.yy 형식.
-# x/y: 소수점 필수 실수(µm 좌표), col/row: 정수, DefectName: 언더스코어 포함 가능.
+# 형식: ..._col_row_x.xx_y.yy[_DefectName]
+# col/row: 정수, x/y: 소수점 필수 실수(µm) → 정수 col/row와 명확히 구별.
+# DefectName: x/y 뒤에 오며 선택적(없을 수도 있음), 언더스코어 포함 가능.
 _PAT = re.compile(
-    r'_(\d+)_(\d+)_.+_([\d]+\.[\d]+)_([\d]+\.[\d]+)$'
+    r'_(\d+)_(\d+)_([\d]+\.[\d]+)_([\d]+\.[\d]+)(?:_.+)?$'
 )
 
 
