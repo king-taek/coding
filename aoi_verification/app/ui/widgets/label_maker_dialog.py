@@ -71,7 +71,7 @@ class LabelMakerDialog(QDialog):
         body = QHBoxLayout()
         left = QVBoxLayout()
         self.progress_lbl = QLabel("", self)
-        self.progress_lbl.setStyleSheet("color: #00D4FF; font-weight: 700;")
+        self.progress_lbl.setStyleSheet("color: #39FF14; font-weight: 700;")
         self.progress_lbl.setWordWrap(True)
         left.addWidget(self.progress_lbl)
         self.ref_img = QLabel(self)

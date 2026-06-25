@@ -79,8 +79,8 @@ class _CandidateTile(QFrame):
 
     # objectName 스코프 셀렉터 — 최외곽 프레임에만 테두리. (QLabel 이 QFrame
     # 서브클래스라 ``QFrame {…}`` 는 내부 이미지/점수/캡션 라벨까지 번진다.)
-    _SEL_STYLE = ("#candTile { border: 3px solid #00D4FF; border-radius: 8px;"
-                  " background: rgba(0, 212, 255, 0.06); }")
+    _SEL_STYLE = ("#candTile { border: 3px solid #39FF14; border-radius: 8px;"
+                  " background: rgba(57, 255, 20, 0.06); }")
 
     def __init__(self, item: ImageItem, score: float, parent=None,
                  *, size: int = _CAND_PX) -> None:
@@ -280,7 +280,7 @@ class UnmatchedReviewDialog(QDialog):
         head = QHBoxLayout()
         self.progress_label = QLabel("", self)
         self.progress_label.setStyleSheet(
-            "color: #00D4FF; font-weight: 700; font-size: 15px;"
+            "color: #39FF14; font-weight: 700; font-size: 15px;"
         )
         head.addWidget(self.progress_label)
         head.addStretch(1)
@@ -316,7 +316,7 @@ class UnmatchedReviewDialog(QDialog):
         lpl.setContentsMargins(12, 12, 12, 12)
         lpl.setSpacing(6)
         list_title = QLabel("실패 목록", list_panel)   # 인라인 한글 (#12).
-        list_title.setStyleSheet("color: #00D4FF; font-weight: 700;")
+        list_title.setStyleSheet("color: #39FF14; font-weight: 700;")
         lpl.addWidget(list_title)
         self.fail_list = QListWidget(list_panel)
         self.fail_list.setIconSize(QSize(_LIST_THUMB_PX, _LIST_THUMB_PX))
@@ -342,7 +342,7 @@ class UnmatchedReviewDialog(QDialog):
         ll.setContentsMargins(12, 12, 12, 12)
         ll.setSpacing(6)
         ref_title = QLabel(i18n.KO.PANEL_MATCH_REF, left)
-        ref_title.setStyleSheet("color: #00D4FF; font-weight: 700;")
+        ref_title.setStyleSheet("color: #39FF14; font-weight: 700;")
         ref_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         ll.addWidget(ref_title)
         self.ref_filename = QLabel("", left)
@@ -378,7 +378,7 @@ class UnmatchedReviewDialog(QDialog):
         rl.setSpacing(6)
         cand_head = QHBoxLayout()
         cand_title = QLabel(i18n.KO.PANEL_MATCH_CANDIDATES, right)
-        cand_title.setStyleSheet("color: #00D4FF; font-weight: 700;")
+        cand_title.setStyleSheet("color: #39FF14; font-weight: 700;")
         cand_head.addWidget(cand_title)
         # '검증 장비 후보' 옆 '크게 보기' — 선택 후보(없으면 1순위)부터 좌우 비교.
         self.btn_zoom_cand = NeonButton(i18n.KO.BTN_VIEW_LARGER, role="ghost")
@@ -510,7 +510,7 @@ class UnmatchedReviewDialog(QDialog):
                 continue                              # 구분선 행.
             item = self.fail_list.item(row)
             if idx in self._pending:
-                item.setForeground(QColor("#00D4FF"))
+                item.setForeground(QColor("#39FF14"))
             else:
                 item.setForeground(QColor("#C8D6E5"))
 

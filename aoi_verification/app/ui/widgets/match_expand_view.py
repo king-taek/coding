@@ -52,7 +52,7 @@ class MatchExpandView(QWidget):
         bar.setSpacing(10)
         self.slot_label = QLabel("", self)
         self.slot_label.setStyleSheet(
-            "color: #00D4FF; font-weight: 700; font-size: 16px;"
+            "color: #39FF14; font-weight: 700; font-size: 16px;"
         )
         bar.addWidget(self.slot_label)
         bar.addSpacing(20)

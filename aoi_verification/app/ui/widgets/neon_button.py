@@ -23,13 +23,13 @@ class NeonButton(QPushButton):
     # ------------------------------------------------------------------
     def _apply_glow(self, role: str) -> None:
         color_map = {
-            "primary": "#00D4FF",
+            "primary": "#39FF14",
             "danger": "#FF2D55",
             "warn": "#FFD600",
             "ghost": "#1F2A3F",
-            "default": "#00D4FF",
+            "default": "#39FF14",
         }
-        color = QColor(color_map.get(role, "#00D4FF"))
+        color = QColor(color_map.get(role, "#39FF14"))
         eff = QGraphicsDropShadowEffect(self)
         eff.setOffset(0, 0)
         eff.setBlurRadius(18)

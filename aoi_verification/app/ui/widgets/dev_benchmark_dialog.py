@@ -378,7 +378,7 @@ class DevBenchmarkDialog(QDialog):
         root.addLayout(bar)
 
         self.status = QLabel(i18n.KO.DEV_BENCH_CACHE_NOTE, self)
-        self.status.setStyleSheet("color: #00D4FF; font-weight: 600;")
+        self.status.setStyleSheet("color: #39FF14; font-weight: 600;")
         root.addWidget(self.status)
 
         cols = [i18n.KO.DEV_BENCH_COL_RECIPE, i18n.KO.DEV_BENCH_COL_TOTAL,

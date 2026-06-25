@@ -29,6 +29,7 @@ from ...similarity.slot_features import (SlotFeatureCache, SlotPrecomputeWorker,
                                             SlotScoreCache)
 from ...workers.matcher import Candidate, MatcherWorker
 from ...workers import efficiency_matcher as _eff
+from ...workers import coord_matcher as _coord
 from ...utils.prefs import EngineMode
 from ..widgets.loading_overlay import LoadingOverlay
 from ..widgets.match_expand_view import MatchExpandView
@@ -159,7 +160,7 @@ class MatchPage(QWidget):
         cl = center.body()
         title = QLabel(i18n.KO.PANEL_MATCH_REF, center)
         title.setProperty("role", "subtitle")
-        title.setStyleSheet("font-weight:700; color:#00D4FF;")
+        title.setStyleSheet("font-weight:700; color:#39FF14;")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         cl.addWidget(title)
 
@@ -238,7 +239,7 @@ class MatchPage(QWidget):
         rl.setSpacing(8)
         rt = QLabel(i18n.KO.PANEL_MATCH_CANDIDATES, right)
         rt.setProperty("role", "subtitle")
-        rt.setStyleSheet("font-weight:700; color:#00D4FF;")
+        rt.setStyleSheet("font-weight:700; color:#39FF14;")
         rl.addWidget(rt)
 
         # 후보 패널 내부 스택: page 0 = 썸네일 그리드, page 1 = 확대 보기
@@ -397,11 +398,12 @@ class MatchPage(QWidget):
         # 않도록 (MatcherWorker 의 동일 패턴 참고).
         self._stop_precompute_worker()
 
-        # 고효율 모드 — CPU+GPU fusion-zscore.  결과를 _fast_results 에 채워
-        # _launch_matcher 가 즉시 응답한다(기본 모드는 score_cache 사용).
-        eff_mode = EngineMode.is_efficiency(self._engine_cfg.engine)
+        # 엔진 모드 판별
+        _engine = self._engine_cfg.engine
+        eff_mode = EngineMode.is_efficiency(_engine)
+        coord_mode = EngineMode.is_coordinate(_engine)
         self._efficiency_mode = eff_mode
-        self._fast_mode = eff_mode
+        self._fast_mode = eff_mode or coord_mode
         if eff_mode and not _eff.has_accel_units():
             # 가속 장치 없음 → CPU 단독으로 고효율 모드 실행 (안내 로그).
             import logging
@@ -429,7 +431,14 @@ class MatchPage(QWidget):
             )
             self.bg_status_label.setText("")
 
-        if eff_mode:
+        if coord_mode:
+            # 좌표 매칭 모드(v2) — 유사도 계산 없이 좌표로 직접 매칭.
+            self.bg_status_label.setText(i18n.KO.PHASE_COORD)
+            self._precompute_worker = _coord.CoordScheduler(
+                tasks, cfg=self._engine_cfg, threshold=self._threshold,
+                auto=self._auto_mode, results=self._fast_results, parent=self,
+            )
+        elif eff_mode:
             # 고효율 모드 — CPU+GPU 가 협업해 ref 를 처리, 결과를 _fast_results 에 저장.
             self.bg_status_label.setText(_eff.describe_active_units())
             self._precompute_worker = _eff.EfficiencyScheduler(

@@ -31,16 +31,21 @@ class AutomationLevel:
         return level in cls.AUTO_MODES
 
 
-# 유사도 엔진 모드 — 기본(현행) vs 고효율(CPU+GPU fusion).
+# 유사도 엔진 모드 — 기본(현행) vs 고효율(CPU+GPU fusion) vs 좌표 기반(v2).
 class EngineMode:
-    BASIC = "basic"        # 기존 파이프라인, 변경 없음 (기본값)
+    BASIC = "basic"            # 기존 파이프라인, 변경 없음 (기본값)
     EFFICIENCY = "efficiency"  # CPU(고전)+GPU(MobileNetV3) fusion-zscore
+    COORDINATE = "coordinate"  # 좌표 직접 매칭 (v2) — 유사도 계산 없음
 
-    ALL = frozenset({BASIC, EFFICIENCY})
+    ALL = frozenset({BASIC, EFFICIENCY, COORDINATE})
 
     @classmethod
     def is_efficiency(cls, mode: str) -> bool:
         return mode == cls.EFFICIENCY
+
+    @classmethod
+    def is_coordinate(cls, mode: str) -> bool:
+        return mode == cls.COORDINATE
 
 
 @dataclass
@@ -90,6 +95,8 @@ class UiPrefs:
     # 개발자 모드 — 켜면 셋업 화면에 ‘개발자 벤치마크’ 진입 버튼이 보인다.
     # (환경변수 AOI_DEV_MODE 로도 켤 수 있다.)  일반 사용자에겐 영향 없음.
     dev_mode: bool = False
+    # 좌표 기반 매칭(v2) 허용 오차 — µm 단위.  두 좌표가 이 거리 이내면 매칭.
+    coord_tolerance: float = 500.0
     extra: dict[str, Any] = field(default_factory=dict)
 
     # ------------------------------------------------------------------

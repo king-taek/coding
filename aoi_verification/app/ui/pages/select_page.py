@@ -87,7 +87,7 @@ class _SidePanel(QFrame):
         head = QHBoxLayout()
         ttl = QLabel(title, self)
         ttl.setProperty("role", "subtitle")
-        ttl.setStyleSheet("font-weight: 700; color: #00D4FF;")
+        ttl.setStyleSheet("font-weight: 700; color: #39FF14;")
         head.addWidget(ttl)
         head.addStretch(1)
 
@@ -345,7 +345,7 @@ class SelectPage(QWidget):
         cl = center_card.body()
         center_title = QLabel(i18n.KO.PANEL_CENTER_DECIDE, center_card)
         center_title.setProperty("role", "subtitle")
-        center_title.setStyleSheet("font-weight: 700; color: #00D4FF;")
+        center_title.setStyleSheet("font-weight: 700; color: #39FF14;")
         center_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         cl.addWidget(center_title)
 

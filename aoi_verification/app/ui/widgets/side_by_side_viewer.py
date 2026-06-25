@@ -42,7 +42,7 @@ class _Pane(QWidget):
         lay.setSpacing(4)
         self._title = QLabel(title, self)
         self._title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._title.setStyleSheet("color: #00D4FF; font-weight: 700;")
+        self._title.setStyleSheet("color: #39FF14; font-weight: 700;")
         lay.addWidget(self._title)
         self._img = QLabel(self)
         self._img.setAlignment(Qt.AlignmentFlag.AlignCenter)

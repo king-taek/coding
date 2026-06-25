@@ -14,8 +14,8 @@ class Colors:
     BG_DEEP = "#000000"
     CARD = "#111827"
     CARD_ALT = "#0E1424"
-    NEON_CYAN = "#00D4FF"
-    NEON_BLUE = "#0099FF"
+    NEON_CYAN = "#39FF14"
+    NEON_BLUE = "#00C853"
     NEON_MAGENTA = "#FF00AA"
     NEON_RED = "#FF2D55"
     NEON_GREEN = "#00FFA3"
@@ -149,6 +149,8 @@ class SimilarityConfig:
     # 점수 .json.gz)를 우회해 '처음 매칭하는 것처럼' 측정한다.  결과(점수/정확도)
     # 에는 영향이 없고 속도만 달라진다(공정한 벤치마크용).  기본 OFF.
     bench_no_cache: bool = False
+    # 좌표 기반 매칭(v2) 허용 오차 — µm 단위.  두 좌표의 유클리드 거리가 이 이내면 매칭.
+    coord_tolerance: float = 500.0
     # CPU 재채점 고속화 노브 — ORB 검출 특징 수(0=기본 500).  ORB(디스크립터 검출/
     # 정합)는 고전 채점에서 가장 비싼 항이라, 특징 수를 줄이면 CPU 매치 단계가 빨라진다
     # (정확도는 검증 필요).  개발자 벤치마크 전용으로만 0 이 아닌 값을 쓴다.

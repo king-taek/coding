@@ -108,8 +108,8 @@ class _SelectTile(QFrame):
     def _refresh_visual(self) -> None:
         if self._selected:
             self.setStyleSheet(
-                "#selTile { border: 3px solid #00D4FF; border-radius: 8px;"
-                " background: rgba(0, 212, 255, 0.06); }"
+                "#selTile { border: 3px solid #39FF14; border-radius: 8px;"
+                " background: rgba(57, 255, 20, 0.06); }"
             )
         else:
             self.setStyleSheet("")
@@ -194,7 +194,7 @@ class BulkSelectDialog(QDialog):
         # 헤더 / 안내
         head = QLabel(title, self)
         head.setStyleSheet(
-            "color: #00D4FF; font-weight: 700; font-size: 16px;"
+            "color: #39FF14; font-weight: 700; font-size: 16px;"
         )
         root.addWidget(head)
 
@@ -323,7 +323,7 @@ class BulkSelectDialog(QDialog):
                 host,
             )
             slot_label.setStyleSheet(
-                "color: #00D4FF; font-weight: 700; padding-top: 4px;"
+                "color: #39FF14; font-weight: 700; padding-top: 4px;"
             )
             host_layout.addWidget(slot_label)
 

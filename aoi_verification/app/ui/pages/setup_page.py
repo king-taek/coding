@@ -32,7 +32,7 @@ class SetupInput:
     threshold: float
     automation_level: str = AutomationLevel.USER_SELECT
     # 유사도 엔진 + 중앙 전처리 (계산 전용).
-    engine_mode: str = "basic"       # EngineMode.{BASIC,EFFICIENCY}
+    engine_mode: str = "basic"       # EngineMode.{BASIC,EFFICIENCY,COORDINATE}
     center_crop: bool = False        # 사진 중앙 30% 만 사용 (기준·검증)
     persist_scores: bool = True      # 유사도 점수 디스크 캐시 — 항상 기본 적용
     accel_concurrency: int = 32      # 고효율 모드 동시 추론 수(in-flight)
@@ -40,6 +40,8 @@ class SetupInput:
     use_gpu: bool = True
     use_npu: bool = False            # 효율 모드 = CPU+GPU. NPU 비활성(코드만 보존).
     embed_batch: int = 1             # 정적 배치 B (1=끔)
+    # 좌표 기반 매칭(v2) 허용 오차 — µm 단위.
+    coord_tolerance: float = 500.0
     # 진행할 슬롯 부분집합 (None = 전체 진행). '일부 슬롯만 진행' 옵션으로 설정.
     selected_slots: Optional[set] = None
 
@@ -107,7 +109,7 @@ class SetupPage(QWidget):
         howto_card = NeonCard(role="card-soft", parent=self._howto_section)
         howto_title = QLabel(i18n.KO.SETUP_HOW_TO_USE_TITLE, howto_card)
         howto_title.setStyleSheet(
-            "color: #00D4FF; font-weight: 700; letter-spacing: 1px;"
+            "color: #39FF14; font-weight: 700; letter-spacing: 1px;"
         )
         howto_card.body().addWidget(howto_title)
         howto_body = QLabel(i18n.KO.SETUP_HOW_TO_USE_BODY, howto_card)
@@ -126,7 +128,7 @@ class SetupPage(QWidget):
         auto_card = NeonCard(role="card-soft", parent=self)
         auto_title = QLabel(i18n.KO.AUTOMATION_TITLE, auto_card)
         auto_title.setStyleSheet(
-            "color: #00D4FF; font-weight: 700; letter-spacing: 1px;"
+            "color: #39FF14; font-weight: 700; letter-spacing: 1px;"
         )
         auto_card.body().addWidget(auto_title)
 
@@ -178,24 +180,53 @@ class SetupPage(QWidget):
         engine_card.setToolTip(i18n.KO.ENGINE_MODE_TOOLTIP)
         eng_title = QLabel(i18n.KO.ENGINE_CARD_TITLE, engine_card)
         eng_title.setStyleSheet(
-            "color: #00D4FF; font-weight: 700; letter-spacing: 1px;"
+            "color: #39FF14; font-weight: 700; letter-spacing: 1px;"
         )
         engine_card.body().addWidget(eng_title)
 
         self.radio_engine_basic = QRadioButton(i18n.KO.ENGINE_MODE_BASIC, engine_card)
         self.radio_engine_efficiency = QRadioButton(
             i18n.KO.ENGINE_MODE_EFFICIENCY, engine_card)
+        self.radio_engine_coordinate = QRadioButton(
+            i18n.KO.ENGINE_MODE_COORDINATE, engine_card)
         _last_engine = getattr(_prefs_now, "engine_mode", "basic")
         if _last_engine == "efficiency":
             self.radio_engine_efficiency.setChecked(True)
+        elif _last_engine == "coordinate":
+            self.radio_engine_coordinate.setChecked(True)
         else:
             self.radio_engine_basic.setChecked(True)
         self._engine_group = QButtonGroup(engine_card)
         self._engine_group.setExclusive(True)
         self._engine_group.addButton(self.radio_engine_basic)
         self._engine_group.addButton(self.radio_engine_efficiency)
+        self._engine_group.addButton(self.radio_engine_coordinate)
         engine_card.body().addWidget(self.radio_engine_basic)
         engine_card.body().addWidget(self.radio_engine_efficiency)
+        engine_card.body().addWidget(self.radio_engine_coordinate)
+
+        # 좌표 모드 허용 오차 스핀박스 (좌표 모드 선택 시만 표시)
+        from PyQt6.QtWidgets import QDoubleSpinBox, QHBoxLayout, QLabel
+        _tol_row = QWidget(engine_card)
+        _tol_layout = QHBoxLayout(_tol_row)
+        _tol_layout.setContentsMargins(20, 0, 0, 0)
+        _tol_layout.setSpacing(6)
+        _tol_label = QLabel(i18n.KO.COORD_TOLERANCE_LABEL, _tol_row)
+        _tol_label.setToolTip(i18n.KO.COORD_TOLERANCE_TOOLTIP)
+        self.coord_tol_spin = QDoubleSpinBox(_tol_row)
+        self.coord_tol_spin.setRange(10.0, 5000.0)
+        self.coord_tol_spin.setSingleStep(50.0)
+        self.coord_tol_spin.setDecimals(1)
+        self.coord_tol_spin.setSuffix(" µm")
+        self.coord_tol_spin.setValue(getattr(_prefs_now, "coord_tolerance", 500.0))
+        self.coord_tol_spin.setToolTip(i18n.KO.COORD_TOLERANCE_TOOLTIP)
+        _tol_layout.addWidget(_tol_label)
+        _tol_layout.addWidget(self.coord_tol_spin)
+        _tol_layout.addStretch()
+        engine_card.body().addWidget(_tol_row)
+        _tol_row.setVisible(_last_engine == "coordinate")
+        self.radio_engine_coordinate.toggled.connect(
+            lambda checked: _tol_row.setVisible(checked))
 
         # 동시 추론 수(in-flight)는 워크로드에 맞춰 자동 산정 — 사용자 설정 없음.
 
@@ -221,7 +252,7 @@ class SetupPage(QWidget):
         _last_prefs = _prefs.load()
         self.slider.setValue(int(round(_last_prefs.threshold * 100)))
         self.threshold_label = QLabel(f"{self.slider.value()} %", slider_card)
-        self.threshold_label.setStyleSheet("color: #00D4FF; font-weight: 700;")
+        self.threshold_label.setStyleSheet("color: #39FF14; font-weight: 700;")
         self.threshold_label.setFixedWidth(60)
         self.slider.valueChanged.connect(self._on_threshold_changed)
         sl.addWidget(self.slider, stretch=1)
@@ -473,8 +504,11 @@ class SetupPage(QWidget):
             automation = AutomationLevel.USER_SELECT
         if self.radio_engine_efficiency.isChecked():
             engine_mode = "efficiency"
+        elif self.radio_engine_coordinate.isChecked():
+            engine_mode = "coordinate"
         else:
             engine_mode = "basic"
+        coord_tolerance = float(self.coord_tol_spin.value())
         center_crop = bool(self.check_center_crop.isChecked())
         persist_scores = True   # 디스크 점수 캐시 항상 기본 적용(토글 제거).
         accel_concurrency = 32      # 자동 산정 상한(슬라이더 제거) — 워크로드 기반 유동.
@@ -501,6 +535,7 @@ class SetupPage(QWidget):
             use_gpu=use_gpu,
             use_npu=use_npu,
             embed_batch=embed_batch,
+            coord_tolerance=coord_tolerance,
         )
         return SetupInput(
             mode=mode,
@@ -518,6 +553,7 @@ class SetupPage(QWidget):
             use_gpu=use_gpu,
             use_npu=use_npu,
             embed_batch=embed_batch,
+            coord_tolerance=coord_tolerance,
             selected_slots=(set(self._selected_slots)
                             if self._selected_slots is not None else None),
         )

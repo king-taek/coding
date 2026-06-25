@@ -34,8 +34,8 @@ class _ThumbTile(QFrame):
     expand_requested = pyqtSignal(object)     # ThumbEntry — ‘더 크게 보기’
     sel_toggled = pyqtSignal(object, bool)    # (ThumbEntry, selected) — 인라인 선택
 
-    _SEL_STYLE = ("QFrame { border: 3px solid #00D4FF; border-radius: 8px;"
-                  " background: rgba(0, 212, 255, 0.06); }")
+    _SEL_STYLE = ("QFrame { border: 3px solid #39FF14; border-radius: 8px;"
+                  " background: rgba(57, 255, 20, 0.06); }")
 
     def __init__(self,
                  entry: ThumbEntry,
@@ -90,7 +90,7 @@ class _ThumbTile(QFrame):
             btn.setFixedSize(QSize(24, 24))
             btn.setStyleSheet(
                 "QToolButton { background: rgba(0,212,255,0.18);"
-                "  color: #00D4FF; border: 1px solid #00D4FF;"
+                "  color: #39FF14; border: 1px solid #39FF14;"
                 "  border-radius: 4px; font-size: 14px; }"
                 "QToolButton:hover { background: rgba(0,212,255,0.35); }"
             )
@@ -178,10 +178,10 @@ class _PlusTile(QFrame):
         lab = QLabel(i18n.KO.COUNT_PLUS_N_FMT.format(n=n), self)
         lab.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lab.setStyleSheet(
-            "color: #00D4FF;"
+            "color: #39FF14;"
             "font-size: 28px;"
             "font-weight: 700;"
-            "border: 2px dashed #00D4FF;"
+            "border: 2px dashed #39FF14;"
             "border-radius: 8px;"
         )
         lab.setMinimumHeight(size)

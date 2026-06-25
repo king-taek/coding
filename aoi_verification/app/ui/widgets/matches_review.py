@@ -62,7 +62,7 @@ class _Row(QWidget):
             f"{m.slot}\nscore {m.score * 100:.1f} %", self,
         )
         meta.setStyleSheet(
-            "color: #00D4FF; font-weight: 700; border: none; padding: 4px;"
+            "color: #39FF14; font-weight: 700; border: none; padding: 4px;"
         )
         meta.setFixedWidth(120)
         meta.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)

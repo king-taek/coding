@@ -102,7 +102,7 @@ class MainWindow(QMainWindow):
         # CPU/GPU/NPU 사용량 — CPU 실제 %, GPU/NPU 가동/대기.
         self._usage_label = QLabel("", self._status_bar)
         self._usage_label.setStyleSheet(
-            "color: #00D4FF; padding: 0 8px; font-weight: 600;"
+            "color: #39FF14; padding: 0 8px; font-weight: 600;"
         )
         self._status_bar.addPermanentWidget(self._usage_label)
         # 가속 장치(Intel GPU/NPU) 존재 여부 — 세션 중 불변이라 1회만 조회.
@@ -889,6 +889,7 @@ class MainWindow(QMainWindow):
             embed_batch=int(getattr(inp, "embed_batch", 1)),
             rerank_components=rerank_components,
             orb_center_weight=orb_center_weight,
+            coord_tolerance=float(getattr(inp, "coord_tolerance", 500.0)),
         )
 
 

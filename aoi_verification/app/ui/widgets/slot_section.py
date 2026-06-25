@@ -38,7 +38,7 @@ class SlotSection(QWidget):
         header = QHBoxLayout()
         self._label = QLabel(self)
         self._label.setProperty("role", "subtitle")
-        self._label.setStyleSheet("font-weight: 700; color: #00D4FF;")
+        self._label.setStyleSheet("font-weight: 700; color: #39FF14;")
         header.addWidget(self._label)
         header.addStretch(1)
         outer.addLayout(header)

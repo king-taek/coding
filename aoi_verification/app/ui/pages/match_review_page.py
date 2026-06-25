@@ -227,7 +227,7 @@ class _MatchRow(QFrame):
         slot_lay.setSpacing(4)
         self._slot_label = QLabel(match.slot, slot_host)
         self._slot_label.setStyleSheet(
-            "color: #00D4FF; font-weight: 700; font-size: 14px;"
+            "color: #39FF14; font-weight: 700; font-size: 14px;"
         )
         slot_lay.addWidget(self._slot_label)
         self.btn_view = NeonButton(i18n.KO.BTN_VIEW_LARGER, role="ghost")

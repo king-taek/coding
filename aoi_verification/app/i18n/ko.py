@@ -115,6 +115,7 @@ SETUP_HINT = (
 # ── 검증 단계 헤더 ─────────────────────────────────────────────────────────
 STAGE1_TITLE = "Stage 1 — 후보 선별"
 STAGE2_TITLE = "Stage 2 — 유사도 기반 매칭"
+STAGE2_TITLE_COORD = "Stage 2 — 좌표 기반 매칭 (v2)"
 RESULT_TITLE = "검증 결과"
 
 PANEL_LEFT_CANDIDATES = "검증 후보들 (남은 사진)"
@@ -184,13 +185,23 @@ HOWTO_TOGGLE_CLOSE = "사용 방법 ▴"
 ENGINE_CARD_TITLE = "유사도 엔진"
 ENGINE_MODE_BASIC = "기본 모드 (정밀 비교)"
 ENGINE_MODE_EFFICIENCY = "고효율 모드 (CPU+GPU)"
+ENGINE_MODE_COORDINATE = "좌표 매칭 모드 (v2)"
 ENGINE_MODE_TOOLTIP = (
     "기본 모드: 모든 후보를 CPU 고전(pHash+ORB+SSIM)으로 정밀 전수 비교\n"
     "  (멀티코어 병렬). 가장 안전하고 정확하지만 대용량에서 느립니다 (CPU 만 사용).\n"
     "고효율 모드: Intel GPU(MobileNetV3) 임베딩으로 후보를 빠르게 추리고, 상위 후보를\n"
     "  CPU 가 ORB(키포인트) 단독·중앙(defect) 가중으로 정밀 재채점해 융합합니다.\n"
     "  반도체 AOI 이미지는 defect 이 정중앙에 있어 중앙 가중이 판별력을 높입니다.\n"
-    "  (Intel GPU+OpenVINO 권장, 없으면 CPU 단독으로 자동 폴백. GPU+CPU 동시 가동.)"
+    "  (Intel GPU+OpenVINO 권장, 없으면 CPU 단독으로 자동 폴백. GPU+CPU 동시 가동.)\n"
+    "좌표 매칭 모드(v2): 이미지 유사도 대신 defect 좌표(col/row + x/y µm)로 직접 매칭.\n"
+    "  Camtek INI / LIVE 파일명 / KLA .001 파일에서 자동 추출합니다.\n"
+    "  좌표가 없는 이미지는 기본 모드로 폴백하여 처리합니다."
+)
+COORD_TOLERANCE_LABEL = "허용 오차 (µm)"
+COORD_TOLERANCE_TOOLTIP = (
+    "좌표 매칭 모드에서 두 defect 좌표의 최대 허용 거리 (µm).\n"
+    "이 값 이하면 동일 defect 으로 간주합니다.\n"
+    "기본값 500 µm 은 TB500 한 die 크기 대비 약 1% 수준입니다."
 )
 ACCEL_CONCURRENCY_LABEL = "동시 추론 수"
 ACCEL_CONCURRENCY_TOOLTIP = (
@@ -300,6 +311,7 @@ LOAD_PHASE_FMT = "{phase} 중… {done} / {total}"
 PHASE_FEATURE = "이미지 특징 분석"
 PHASE_SCORING = "유사도 계산"
 PHASE_EMBED = "후보 생성 (GPU 임베딩)"      # 고효율 모드 1단계 — 유사도 계산 직전
+PHASE_COORD = "좌표 매칭 중"                # 좌표 기반 매칭 v2
 LOAD_PRECOMPUTE_FMT = (
     "유사도 계산 중… {done} / {total}"
 )
