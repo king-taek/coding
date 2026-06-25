@@ -82,7 +82,6 @@ class UiPrefs:
     openvino_install_declined: bool = False
     # 유사도 엔진 모드 + 강화 전처리 토글 (계산 전용, 화면 표시는 원본 유지).
     engine_mode: str = "basic"               # EngineMode.{BASIC,EFFICIENCY}
-    center_crop: bool = False                # 사진 중앙 30% 만 사용 (기준·검증)
     persist_scores: bool = False             # 유사도 점수 디스크 캐시 (#5B)
     # 고효율 모드 동시 추론 수(in-flight, NPU 기준; GPU 절반).  높일수록 NPU/GPU
     # 메모리·throughput↑ (계산 결과 불변).  setup_page 슬라이더로 조절.

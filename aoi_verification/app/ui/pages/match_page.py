@@ -119,6 +119,10 @@ class MatchPage(QWidget):
         root.setSpacing(10)
 
         top = QHBoxLayout()
+        self.btn_back_to_setup = NeonButton(i18n.KO.BTN_BACK_TO_SETUP, role="ghost")
+        self.btn_back_to_setup.clicked.connect(self._on_cancel_requested)
+        top.addWidget(self.btn_back_to_setup)
+        top.addSpacing(12)
         self.title = QLabel(i18n.KO.STAGE2_TITLE, self)
         self.title.setProperty("role", "title")
         top.addWidget(self.title)
@@ -570,9 +574,10 @@ class MatchPage(QWidget):
             pass
         self._waiting_for_slot = None
         self._streaming_precompute = False
-        # 좌표 매칭 모드에서 좌표 없음 오류 — 사용자에게 명시적으로 안내.
+        # 좌표 매칭 모드에서 좌표 없음 오류 — 사용자에게 안내 후 설정 화면 복귀.
         if self._coord_mode and msg and "좌표 정보가 없습니다" in msg:
             QMessageBox.warning(self, i18n.KO.APP_TITLE, msg)
+            self.cancelled.emit()
             return
         if self.bg_status_label is not None:
             self.bg_status_label.setText(msg or "")

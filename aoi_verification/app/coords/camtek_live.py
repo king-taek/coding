@@ -1,10 +1,11 @@
 """Camtek LIVE 파일명에서 좌표 추출.
 
-파일명 형식: R_{장치/레이어}_{WaferID}_{col}_{row}_{DefectName}_{x}_{y}.jpg
+파일명 형식: {prefix}_{...}_{col}_{row}_{DefectName}_{x.xx}_{y.yy}.jpg
 예) R_TB500_LIVE_PI4_VLP-PDIS3_W6317098XYB5_4_5_Over Sized Bump_30229.803_1987.994.jpg
+    또는 DefectName에 언더스코어가 포함된 형식도 허용.
 
-파일명 끝에서부터: y, x, DefectName, row, col 순서.
-DefectName 에 '_' 가 없다고 가정(스페이스는 허용).
+파일명 끝에서부터: y(소수), x(소수), DefectName(임의), row(정수), col(정수) 순서.
+x/y 는 소수점 필수 → col/row 정수와 명확히 구별, R_ 접두어 불필요.
 """
 
 from __future__ import annotations
@@ -17,18 +18,16 @@ from .models import DefectCoord
 
 __all__ = ["resolve"]
 
-# R_ 로 시작하고, 끝 부분이 _col_row_defectname_x_y
-# col/row: 정수, x/y: 소수점 포함 실수(정수도 허용)
+# 끝 부분이 _col_row_{DefectName(임의)}_x.xx_y.yy 형식.
+# x/y: 소수점 필수 실수(µm 좌표), col/row: 정수, DefectName: 언더스코어 포함 가능.
 _PAT = re.compile(
-    r'_(\d+)_(\d+)_[^_]+_([\d]+(?:\.[\d]+)?)_([\d]+(?:\.[\d]+)?)$'
+    r'_(\d+)_(\d+)_.+_([\d]+\.[\d]+)_([\d]+\.[\d]+)$'
 )
 
 
 def resolve(image_path: Path) -> Optional[DefectCoord]:
     """LIVE 형식 파일명에서 DefectCoord 추출. 형식이 맞지 않으면 None."""
     stem = image_path.stem
-    if not stem.startswith('R_'):
-        return None
     m = _PAT.search(stem)
     if not m:
         return None

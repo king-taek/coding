@@ -880,7 +880,7 @@ class MainWindow(QMainWindow):
             orb_center_weight = 0.0
         return config.SimilarityConfig(
             engine=engine,
-            center_crop=bool(getattr(inp, "center_crop", False)),
+            center_crop=False,
             persist_scores=bool(getattr(inp, "persist_scores", False)),
             accel_concurrency=int(getattr(inp, "accel_concurrency", 32)),
             use_cpu=bool(getattr(inp, "use_cpu", True)),
@@ -1112,24 +1112,24 @@ class MainWindow(QMainWindow):
             return
         pool = self._build_val_pool_by_slot()
         _sim_cfg = self._make_sim_cfg()
+        try:
+            from ..utils.prefs import EngineMode
+            _is_coord = EngineMode.is_coordinate(getattr(_sim_cfg, "engine", ""))
+        except Exception:
+            _is_coord = False
         self._match_page.load_state(
             queue=queue,
             val_pool_by_slot=pool,
             threshold=self._input.threshold,
-            phase_label=i18n.KO.STAGE2_TITLE,
+            phase_label=(i18n.KO.STAGE2_TITLE_COORD if _is_coord
+                         else i18n.KO.STAGE2_TITLE),
             session_id=self._session_id,
             model_name=self._active_model_name(),
             auto_mode=True,
             engine_cfg=_sim_cfg,
         )
-        # 좌표 모드에서는 하드웨어 가속 라벨 숨김
-        try:
-            from ..utils.prefs import EngineMode
-            _is_coord = EngineMode.is_coordinate(getattr(_sim_cfg, "engine", ""))
-            self._device_label.setVisible(not _is_coord)
-            self._usage_label.setVisible(not _is_coord)
-        except Exception:
-            pass
+        self._device_label.setVisible(not _is_coord)
+        self._usage_label.setVisible(not _is_coord)
         self._show_page(self._match_page)
         self._phase = PHASE_A_MATCH
         self._autosave()
@@ -1258,23 +1258,24 @@ class MainWindow(QMainWindow):
 
         _sim_cfg = self._make_sim_cfg()
         auto_mode = AutomationLevel.is_auto(self._input.automation_level)
+        try:
+            from ..utils.prefs import EngineMode
+            _is_coord = EngineMode.is_coordinate(getattr(_sim_cfg, "engine", ""))
+        except Exception:
+            _is_coord = False
         self._match_page.load_state(
             queue=queue,
             val_pool_by_slot=pool,
             threshold=self._input.threshold,
-            phase_label=i18n.KO.STAGE2_TITLE,
+            phase_label=(i18n.KO.STAGE2_TITLE_COORD if _is_coord
+                         else i18n.KO.STAGE2_TITLE),
             session_id=self._session_id,
             model_name=self._active_model_name(),
             auto_mode=auto_mode,
             engine_cfg=_sim_cfg,
         )
-        try:
-            from ..utils.prefs import EngineMode
-            _is_coord = EngineMode.is_coordinate(getattr(_sim_cfg, "engine", ""))
-            self._device_label.setVisible(not _is_coord)
-            self._usage_label.setVisible(not _is_coord)
-        except Exception:
-            pass
+        self._device_label.setVisible(not _is_coord)
+        self._usage_label.setVisible(not _is_coord)
         self._show_page(self._match_page)
         self._phase = PHASE_A_MATCH
         self._autosave()
@@ -1415,7 +1416,7 @@ class MainWindow(QMainWindow):
                 "automation": getattr(inp, "automation_level", ""),
                 "engine": getattr(inp, "engine_mode", ""),
                 "threshold": getattr(inp, "threshold", None),
-                "center_crop": bool(getattr(inp, "center_crop", False)),
+                "center_crop": False,
                 "use_gpu": bool(getattr(inp, "use_gpu", True)),
                 "use_npu": bool(getattr(inp, "use_npu", True)),
             }

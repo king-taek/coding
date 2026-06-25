@@ -8,11 +8,11 @@ from typing import Optional
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
-from PyQt6.QtWidgets import (QButtonGroup, QCheckBox, QDoubleSpinBox,
+from PyQt6.QtWidgets import (QButtonGroup, QDoubleSpinBox,
                               QFileDialog, QFormLayout,
                               QGroupBox, QHBoxLayout, QLabel, QLineEdit,
                               QMessageBox, QRadioButton, QScrollArea,
-                              QSizePolicy, QVBoxLayout, QWidget)
+                              QSizePolicy, QToolButton, QVBoxLayout, QWidget)
 
 from ... import config, i18n
 from ...utils import prefs as _prefs
@@ -32,9 +32,8 @@ class SetupInput:
     val_machine: str
     threshold: float
     automation_level: str = AutomationLevel.USER_SELECT
-    # 유사도 엔진 + 중앙 전처리 (계산 전용).
+    # 유사도 엔진 + 기타 설정 (계산 전용).
     engine_mode: str = "basic"       # EngineMode.{BASIC,EFFICIENCY,COORDINATE}
-    center_crop: bool = False        # 사진 중앙 30% 만 사용 (기준·검증)
     persist_scores: bool = True      # 유사도 점수 디스크 캐시 — 항상 기본 적용
     accel_concurrency: int = 32      # 고효율 모드 동시 추론 수(in-flight)
     use_cpu: bool = True             # 고효율 장치 토글(테스트용)
@@ -127,11 +126,23 @@ class SetupPage(QWidget):
 
         # 자동화 수준 — 올인원 모드 (#3) ---------------------------------
         auto_card = NeonCard(role="card-soft", parent=self)
+
+        # 제목 행: "자동화 수준" + "?" 토글 버튼
+        auto_title_row = QHBoxLayout()
+        auto_title_row.setContentsMargins(0, 0, 0, 0)
         auto_title = QLabel(i18n.KO.AUTOMATION_TITLE, auto_card)
         auto_title.setStyleSheet(
             "color: #39FF14; font-weight: 700; letter-spacing: 1px;"
         )
-        auto_card.body().addWidget(auto_title)
+        self._auto_help_btn = QToolButton(auto_card)
+        self._auto_help_btn.setText("?")
+        self._auto_help_btn.setObjectName("helpToggle")
+        self._auto_help_btn.setCheckable(True)
+        self._auto_help_btn.setToolTip("설명 보기/숨기기")
+        auto_title_row.addWidget(auto_title)
+        auto_title_row.addStretch()
+        auto_title_row.addWidget(self._auto_help_btn)
+        auto_card.body().addLayout(auto_title_row)
 
         self.radio_auto_user = QRadioButton(i18n.KO.AUTOMATION_USER_SELECT, auto_card)
         self.radio_auto_all = QRadioButton(i18n.KO.AUTOMATION_AUTO_ALL, auto_card)
@@ -143,11 +154,13 @@ class SetupPage(QWidget):
             self.radio_auto_user.setChecked(True)
         for rb in (self.radio_auto_user, self.radio_auto_all):
             auto_card.body().addWidget(rb)
-        auto_hint = QLabel(i18n.KO.AUTOMATION_HINT, auto_card)
-        auto_hint.setProperty("role", "muted")
-        auto_hint.setWordWrap(True)
-        auto_hint.setStyleSheet("color: #7FB3D5; padding-top: 4px;")
-        auto_card.body().addWidget(auto_hint)
+        self._auto_hint = QLabel(i18n.KO.AUTOMATION_HINT, auto_card)
+        self._auto_hint.setProperty("role", "muted")
+        self._auto_hint.setWordWrap(True)
+        self._auto_hint.setStyleSheet("padding-top: 4px;")
+        self._auto_hint.setVisible(False)
+        auto_card.body().addWidget(self._auto_hint)
+        self._auto_help_btn.toggled.connect(self._auto_hint.setVisible)
         root.addWidget(auto_card)
 
         # 폴더/호기 2칸 ---------------------------------------------------
@@ -202,12 +215,6 @@ class SetupPage(QWidget):
         _tol_layout.addWidget(self.coord_tol_spin)
         _tol_layout.addStretch()
         engine_card.body().addWidget(_tol_row)
-
-        # 사진 중앙 30% 만 사용 — 기준·검증 공통 단일 토글
-        self.check_center_crop = QCheckBox(i18n.KO.CENTER_CROP_LABEL, engine_card)
-        self.check_center_crop.setToolTip(i18n.KO.CENTER_CROP_TOOLTIP)
-        self.check_center_crop.setChecked(bool(getattr(_prefs_now, "center_crop", False)))
-        engine_card.body().addWidget(self.check_center_crop)
 
         # 구형 모드 (유사도 엔진) — 접힌 상태로 기본 비활성 -----------------
         _last_engine = getattr(_prefs_now, "engine_mode", "coordinate")
@@ -512,7 +519,6 @@ class SetupPage(QWidget):
         else:
             engine_mode = "coordinate"
         coord_tolerance = float(self.coord_tol_spin.value())
-        center_crop = bool(self.check_center_crop.isChecked())
         persist_scores = True   # 디스크 점수 캐시 항상 기본 적용(토글 제거).
         accel_concurrency = 32      # 자동 산정 상한(슬라이더 제거) — 워크로드 기반 유동.
         # 효율 모드 = CPU+GPU fusion-zscore 고정.  NPU 는 비활성(코드만 보존).
@@ -531,7 +537,6 @@ class SetupPage(QWidget):
             last_mode=mode,
             automation_level=automation,
             engine_mode=engine_mode,
-            center_crop=center_crop,
             persist_scores=persist_scores,
             accel_concurrency=accel_concurrency,
             use_cpu=use_cpu,
@@ -549,7 +554,6 @@ class SetupPage(QWidget):
             threshold=threshold,
             automation_level=automation,
             engine_mode=engine_mode,
-            center_crop=center_crop,
             persist_scores=persist_scores,
             accel_concurrency=accel_concurrency,
             use_cpu=use_cpu,
