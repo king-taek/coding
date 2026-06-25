@@ -1111,6 +1111,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, i18n.KO.APP_TITLE, i18n.KO.WARN_NO_IMAGES)
             return
         pool = self._build_val_pool_by_slot()
+        _sim_cfg = self._make_sim_cfg()
         self._match_page.load_state(
             queue=queue,
             val_pool_by_slot=pool,
@@ -1119,8 +1120,16 @@ class MainWindow(QMainWindow):
             session_id=self._session_id,
             model_name=self._active_model_name(),
             auto_mode=True,
-            engine_cfg=self._make_sim_cfg(),
+            engine_cfg=_sim_cfg,
         )
+        # 좌표 모드에서는 하드웨어 가속 라벨 숨김
+        try:
+            from ..utils.prefs import EngineMode
+            _is_coord = EngineMode.is_coordinate(getattr(_sim_cfg, "engine", ""))
+            self._device_label.setVisible(not _is_coord)
+            self._usage_label.setVisible(not _is_coord)
+        except Exception:
+            pass
         self._show_page(self._match_page)
         self._phase = PHASE_A_MATCH
         self._autosave()
@@ -1247,6 +1256,7 @@ class MainWindow(QMainWindow):
         # 매칭 대상 풀 = 같은 Slot 의 검증(val) 쪽 모든 사진
         pool = self._build_val_pool_by_slot()
 
+        _sim_cfg = self._make_sim_cfg()
         auto_mode = AutomationLevel.is_auto(self._input.automation_level)
         self._match_page.load_state(
             queue=queue,
@@ -1256,8 +1266,15 @@ class MainWindow(QMainWindow):
             session_id=self._session_id,
             model_name=self._active_model_name(),
             auto_mode=auto_mode,
-            engine_cfg=self._make_sim_cfg(),
+            engine_cfg=_sim_cfg,
         )
+        try:
+            from ..utils.prefs import EngineMode
+            _is_coord = EngineMode.is_coordinate(getattr(_sim_cfg, "engine", ""))
+            self._device_label.setVisible(not _is_coord)
+            self._usage_label.setVisible(not _is_coord)
+        except Exception:
+            pass
         self._show_page(self._match_page)
         self._phase = PHASE_A_MATCH
         self._autosave()
@@ -1306,9 +1323,25 @@ class MainWindow(QMainWindow):
             candidates_by_ref = self._match_page.build_candidates_by_ref(merged)
         except Exception:
             candidates_by_ref = None
+        # 좌표 매칭 모드 정보 전달 — 검토 화면에서 거리(µm) 표시 + 통계 3분류.
+        _engine_cfg = getattr(self._match_page, "_engine_cfg", None)
+        _coord_mode = False
+        _tolerance = 500.0
+        _coord_failed_count = 0
+        if _engine_cfg is not None:
+            from ..utils.prefs import EngineMode
+            _coord_mode = EngineMode.is_coordinate(getattr(_engine_cfg, "engine", ""))
+            _tolerance = float(getattr(_engine_cfg, "coord_tolerance", 500.0))
+        if _coord_mode:
+            _coord_failed_count = len(
+                getattr(self._match_page, "_coord_failed_set", set())
+            )
         self._match_review_page.load_state(
             merged, score_cache=score_cache, val_pool=val_pool,
             candidates_by_ref=candidates_by_ref,
+            coord_mode=_coord_mode,
+            tolerance=_tolerance,
+            coord_failed_count=_coord_failed_count,
         )
         self._show_page(self._match_review_page)
 

@@ -101,6 +101,7 @@ class MatchPage(QWidget):
         # 고효율 모드 활성 여부 — 결과를 _fast_results 에 선계산해 즉시 응답.
         self._fast_mode: bool = False
         self._efficiency_mode: bool = False
+        self._coord_mode: bool = False
         # 고효율 선계산 결과: {(slot, ref_path): [(val_path, score), ...]}.
         self._fast_results: dict = {}
         # 현재 사전 계산 단계 라벨 (#8).
@@ -108,6 +109,8 @@ class MatchPage(QWidget):
         # 마지막으로 받은 사전 계산 진행도(라벨만 바뀔 때 진행 바 유지용).
         self._precompute_done: int = 0
         self._precompute_total: int = 0
+        # 좌표 매칭 실패 목록 — 검토 화면으로 전달용
+        self._coord_failed_set: set = set()
 
     # ------------------------------------------------------------------
     def _build(self) -> None:
@@ -403,7 +406,13 @@ class MatchPage(QWidget):
         eff_mode = EngineMode.is_efficiency(_engine)
         coord_mode = EngineMode.is_coordinate(_engine)
         self._efficiency_mode = eff_mode
+        self._coord_mode = coord_mode
         self._fast_mode = eff_mode or coord_mode
+        # 좌표 모드에서는 하드웨어 가속 라벨 숨김
+        if coord_mode:
+            self.bg_status_label.setVisible(False)
+        else:
+            self.bg_status_label.setVisible(True)
         if eff_mode and not _eff.has_accel_units():
             # 가속 장치 없음 → CPU 단독으로 고효율 모드 실행 (안내 로그).
             import logging
@@ -560,12 +569,13 @@ class MatchPage(QWidget):
         except Exception:
             pass
         self._waiting_for_slot = None
-        # 스트리밍 모드 종료 표시 — 이후 _launch_matcher 가 MatcherWorker 폴백
-        # 경로로 작동.
         self._streaming_precompute = False
+        # 좌표 매칭 모드에서 좌표 없음 오류 — 사용자에게 명시적으로 안내.
+        if self._coord_mode and msg and "좌표 정보가 없습니다" in msg:
+            QMessageBox.warning(self, i18n.KO.APP_TITLE, msg)
+            return
         if self.bg_status_label is not None:
             self.bg_status_label.setText(msg or "")
-        # 현재 ref 가 있으면 폴백 매칭으로 진행.
         if self._current is not None or (self._state and self._state.queue):
             self._advance()
 
@@ -575,6 +585,12 @@ class MatchPage(QWidget):
         import time as _t
         if getattr(self, "_precompute_t0", None):
             self._precompute_elapsed = _t.perf_counter() - self._precompute_t0
+        # 좌표 매칭 실패 목록 수집 — 검토 화면 통계용.
+        if self._coord_mode and self._precompute_worker is not None:
+            fs = getattr(self._precompute_worker, "failed_set", set())
+            self._coord_failed_set = set(fs)
+        else:
+            self._coord_failed_set = set()
         was_streaming = self._streaming_precompute
         self.bg_status_label.setText(i18n.KO.PRECOMPUTE_BG_DONE)
         self._streaming_precompute = False
@@ -755,9 +771,11 @@ class MatchPage(QWidget):
             if key in self._fast_results:
                 by_path = {v.path: v for v in val_items}
                 cands = []
+                # 좌표 모드: 음수 score(허용범위 초과 근접 1장)도 포함
+                effective_threshold = -float("inf") if self._coord_mode else self._threshold
                 for vp, s in self._fast_results[key]:
                     vitem = by_path.get(vp)
-                    if vitem is not None and s >= self._threshold:
+                    if vitem is not None and s >= effective_threshold:
                         cands.append(Candidate(item=vitem, score=float(s)))
                 cands.sort(key=lambda c: c.score, reverse=True)
                 self._on_matcher_done(cands)

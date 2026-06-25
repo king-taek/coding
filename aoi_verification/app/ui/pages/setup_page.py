@@ -176,40 +176,18 @@ class SetupPage(QWidget):
         slot_row.addWidget(self.slot_select_label, stretch=1)
         root.addLayout(slot_row)
 
-        # 유사도 엔진 모드 + 강화 전처리 (#1/#10) -----------------------
+        # 매칭 설정 카드 ------------------------------------------------
         engine_card = NeonCard(role="card-soft", parent=self)
-        engine_card.setToolTip(i18n.KO.ENGINE_MODE_TOOLTIP)
         eng_title = QLabel(i18n.KO.ENGINE_CARD_TITLE, engine_card)
         eng_title.setStyleSheet(
             "color: #39FF14; font-weight: 700; letter-spacing: 1px;"
         )
         engine_card.body().addWidget(eng_title)
 
-        self.radio_engine_basic = QRadioButton(i18n.KO.ENGINE_MODE_BASIC, engine_card)
-        self.radio_engine_efficiency = QRadioButton(
-            i18n.KO.ENGINE_MODE_EFFICIENCY, engine_card)
-        self.radio_engine_coordinate = QRadioButton(
-            i18n.KO.ENGINE_MODE_COORDINATE, engine_card)
-        _last_engine = getattr(_prefs_now, "engine_mode", "basic")
-        if _last_engine == "efficiency":
-            self.radio_engine_efficiency.setChecked(True)
-        elif _last_engine == "coordinate":
-            self.radio_engine_coordinate.setChecked(True)
-        else:
-            self.radio_engine_basic.setChecked(True)
-        self._engine_group = QButtonGroup(engine_card)
-        self._engine_group.setExclusive(True)
-        self._engine_group.addButton(self.radio_engine_basic)
-        self._engine_group.addButton(self.radio_engine_efficiency)
-        self._engine_group.addButton(self.radio_engine_coordinate)
-        engine_card.body().addWidget(self.radio_engine_basic)
-        engine_card.body().addWidget(self.radio_engine_efficiency)
-        engine_card.body().addWidget(self.radio_engine_coordinate)
-
-        # 좌표 모드 허용 오차 스핀박스 (좌표 모드 선택 시만 표시)
+        # 좌표 매칭 허용 오차 스핀박스 (항상 표시 — 기본 모드)
         _tol_row = QWidget(engine_card)
         _tol_layout = QHBoxLayout(_tol_row)
-        _tol_layout.setContentsMargins(20, 0, 0, 0)
+        _tol_layout.setContentsMargins(0, 0, 0, 0)
         _tol_layout.setSpacing(6)
         _tol_label = QLabel(i18n.KO.COORD_TOLERANCE_LABEL, _tol_row)
         _tol_label.setToolTip(i18n.KO.COORD_TOLERANCE_TOOLTIP)
@@ -224,41 +202,64 @@ class SetupPage(QWidget):
         _tol_layout.addWidget(self.coord_tol_spin)
         _tol_layout.addStretch()
         engine_card.body().addWidget(_tol_row)
-        _tol_row.setVisible(_last_engine == "coordinate")
-        self.radio_engine_coordinate.toggled.connect(
-            lambda checked: _tol_row.setVisible(checked))
 
-        # 동시 추론 수(in-flight)는 워크로드에 맞춰 자동 산정 — 사용자 설정 없음.
-
-        pre_title = QLabel(i18n.KO.PRE_GROUP_TITLE, engine_card)
-        pre_title.setToolTip(i18n.KO.PRE_GROUP_TOOLTIP)
-        pre_title.setStyleSheet("color: #7FB3D5; padding-top: 6px;")
-        engine_card.body().addWidget(pre_title)
-        # 사진 중앙 30% 만 사용 — 기준·검증 공통 단일 토글 (#2/#5).
+        # 사진 중앙 30% 만 사용 — 기준·검증 공통 단일 토글
         self.check_center_crop = QCheckBox(i18n.KO.CENTER_CROP_LABEL, engine_card)
         self.check_center_crop.setToolTip(i18n.KO.CENTER_CROP_TOOLTIP)
         self.check_center_crop.setChecked(bool(getattr(_prefs_now, "center_crop", False)))
-        # 유사도 점수 디스크 캐시(#5B)는 항상 기본 적용 — 사용자 토글 제거.
         engine_card.body().addWidget(self.check_center_crop)
-        root.addWidget(engine_card)
 
-        # 임계치 슬라이더 ------------------------------------------------
-        slider_card = NeonCard(role="card-soft", parent=self)
-        sl = QHBoxLayout()
-        sl.addWidget(QLabel(i18n.KO.SETUP_THRESHOLD_LABEL, slider_card))
-        self.slider = NoWheelSlider(Qt.Orientation.Horizontal, slider_card)
+        # 구형 모드 (유사도 엔진) — 접힌 상태로 기본 비활성 -----------------
+        _last_engine = getattr(_prefs_now, "engine_mode", "coordinate")
+        _legacy_expanded = _last_engine in ("basic", "efficiency")
+        self._legacy_section = CollapsibleSection(
+            open_label=i18n.KO.LEGACY_MODE_OPEN,
+            close_label=i18n.KO.LEGACY_MODE_CLOSE,
+            expanded=_legacy_expanded,
+            parent=engine_card,
+        )
+        legacy_inner = QWidget(self._legacy_section)
+        legacy_lay = QVBoxLayout(legacy_inner)
+        legacy_lay.setContentsMargins(8, 6, 8, 6)
+        legacy_lay.setSpacing(6)
+
+        _legacy_hint = QLabel(i18n.KO.LEGACY_MODE_HINT, legacy_inner)
+        _legacy_hint.setWordWrap(True)
+        _legacy_hint.setStyleSheet("color: #7FB3D5; font-size: 12px;")
+        legacy_lay.addWidget(_legacy_hint)
+
+        self.radio_engine_basic = QRadioButton(i18n.KO.ENGINE_MODE_BASIC, legacy_inner)
+        self.radio_engine_efficiency = QRadioButton(
+            i18n.KO.ENGINE_MODE_EFFICIENCY, legacy_inner)
+        if _last_engine == "efficiency":
+            self.radio_engine_efficiency.setChecked(True)
+        else:
+            self.radio_engine_basic.setChecked(True)
+        self._engine_group = QButtonGroup(legacy_inner)
+        self._engine_group.setExclusive(True)
+        self._engine_group.addButton(self.radio_engine_basic)
+        self._engine_group.addButton(self.radio_engine_efficiency)
+        legacy_lay.addWidget(self.radio_engine_basic)
+        legacy_lay.addWidget(self.radio_engine_efficiency)
+
+        # 임계치 슬라이더 (구형 모드 전용)
+        sl_row = QHBoxLayout()
+        sl_row.addWidget(QLabel(i18n.KO.SETUP_THRESHOLD_LABEL, legacy_inner))
+        self.slider = NoWheelSlider(Qt.Orientation.Horizontal, legacy_inner)
         self.slider.setRange(0, 100)
-        # 마지막 사용 값(#14) 우선, 없으면 config 기본값
         _last_prefs = _prefs.load()
         self.slider.setValue(int(round(_last_prefs.threshold * 100)))
-        self.threshold_label = QLabel(f"{self.slider.value()} %", slider_card)
+        self.threshold_label = QLabel(f"{self.slider.value()} %", legacy_inner)
         self.threshold_label.setStyleSheet("color: #39FF14; font-weight: 700;")
         self.threshold_label.setFixedWidth(60)
         self.slider.valueChanged.connect(self._on_threshold_changed)
-        sl.addWidget(self.slider, stretch=1)
-        sl.addWidget(self.threshold_label)
-        slider_card.body().addLayout(sl)
-        root.addWidget(slider_card)
+        sl_row.addWidget(self.slider, stretch=1)
+        sl_row.addWidget(self.threshold_label)
+        legacy_lay.addLayout(sl_row)
+
+        self._legacy_section.add_content_widget(legacy_inner)
+        engine_card.body().addWidget(self._legacy_section)
+        root.addWidget(engine_card)
 
         root.addStretch(1)
 
@@ -502,12 +503,14 @@ class SetupPage(QWidget):
             automation = AutomationLevel.AUTO_ALL
         else:
             automation = AutomationLevel.USER_SELECT
-        if self.radio_engine_efficiency.isChecked():
-            engine_mode = "efficiency"
-        elif self.radio_engine_coordinate.isChecked():
-            engine_mode = "coordinate"
+        # 구형 섹션이 펼쳐진 상태에서만 유사도 엔진 모드 사용
+        if self._legacy_section.is_expanded():
+            if self.radio_engine_efficiency.isChecked():
+                engine_mode = "efficiency"
+            else:
+                engine_mode = "basic"
         else:
-            engine_mode = "basic"
+            engine_mode = "coordinate"
         coord_tolerance = float(self.coord_tol_spin.value())
         center_crop = bool(self.check_center_crop.isChecked())
         persist_scores = True   # 디스크 점수 캐시 항상 기본 적용(토글 제거).

@@ -182,7 +182,23 @@ HOWTO_TOGGLE_OPEN = "사용 방법 ▾"
 HOWTO_TOGGLE_CLOSE = "사용 방법 ▴"
 
 # ── 유사도 엔진 모드 + 중앙 전처리 ────────────────────────────────────────
-ENGINE_CARD_TITLE = "유사도 엔진"
+ENGINE_CARD_TITLE = "매칭 설정"
+LEGACY_MODE_OPEN = "▼ 구형 모드 (유사도 엔진)"
+LEGACY_MODE_CLOSE = "▲ 구형 모드 (유사도 엔진)"
+LEGACY_MODE_HINT = (
+    "펼치면 유사도 엔진 및 임계치를 사용하는 구형 모드로 전환됩니다.\n"
+    "기본 동작은 좌표 매칭 모드입니다."
+)
+COORD_NO_DATA_MSG = (
+    "좌표 정보가 없습니다.\n\n"
+    "이미지 파일명 또는 폴더에 좌표 데이터(Camtek LIVE / INI / KLA .001)가\n"
+    "없어 좌표 매칭을 진행할 수 없습니다.\n\n"
+    "구형 모드(유사도 엔진)로 다시 시작하세요."
+)
+NEAR_MATCH_BADGE = "허용범위 초과"
+SCORE_DIST_FMT = "{dist:.0f} µm"
+SCORE_DIST_OVER_FMT = "{dist:.0f} µm (허용범위 초과)"
+ENGINE_CARD_LEGACY_TITLE = "유사도 엔진"
 ENGINE_MODE_BASIC = "기본 모드 (정밀 비교)"
 ENGINE_MODE_EFFICIENCY = "고효율 모드 (CPU+GPU)"
 ENGINE_MODE_COORDINATE = "좌표 매칭 모드 (v2)"

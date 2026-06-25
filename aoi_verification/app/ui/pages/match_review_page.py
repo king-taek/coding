@@ -192,10 +192,14 @@ class _MatchRow(QFrame):
                  runners_up: list[tuple] | None = None,
                  parent=None,
                  *,
-                 thumb_px: int = _THUMB_PX) -> None:
+                 thumb_px: int = _THUMB_PX,
+                 coord_mode: bool = False,
+                 tolerance: float = 500.0) -> None:
         super().__init__(parent)
         self.match = match
         self._is_unmatched = False
+        self._coord_mode = bool(coord_mode)
+        self._tolerance = float(tolerance) if tolerance > 0 else 500.0
         # 썸네일 크기 (#2) — 차순위는 20% 작게 파생.
         # ``_requested_thumb_px`` 는 슬라이더 요청값, ``_thumb_px`` 는 행 폭에 맞춰
         # 클램프된 실제 적용값(가로 넘침 방지).  창 리사이즈 때 요청값으로 재클램프.
@@ -256,9 +260,10 @@ class _MatchRow(QFrame):
                                          on_view=lambda: self._open_compare(0))
         primary_lay.addWidget(self._val_img,
                               alignment=Qt.AlignmentFlag.AlignCenter)
-        score_label = QLabel(f"{match.score * 100:.1f} %", primary_host)
+        score_label = QLabel(self._format_score(match.score), primary_host)
+        score_color = "#FF6B35" if (self._coord_mode and match.score < 0) else "#FFD600"
         score_label.setStyleSheet(
-            "color: #FFD600; font-weight: 700; font-size: 14px;"
+            f"color: {score_color}; font-weight: 700; font-size: 14px;"
         )
         score_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         primary_lay.addWidget(score_label)
@@ -322,6 +327,22 @@ class _MatchRow(QFrame):
             self.btn_more = None
             self.btn_less = None
             self._first_line_host.setVisible(False)
+
+    def _format_score(self, score: float) -> str:
+        """score 값을 표시 문자열로 변환.
+
+        좌표 모드: 거리(µm)로 역산 (score ≥ 0 → 허용 내, score < 0 → 허용 초과).
+        일반 모드: 0~100% 백분율.
+        """
+        if self._coord_mode:
+            from ... import i18n as _i18n
+            if score >= 0:
+                dist = (1.0 - score) * self._tolerance
+                return _i18n.KO.SCORE_DIST_FMT.format(dist=dist)
+            else:
+                dist = (-score) * self._tolerance
+                return _i18n.KO.SCORE_DIST_OVER_FMT.format(dist=dist)
+        return f"{score * 100:.1f} %"
 
     def _row_width(self) -> int:
         """현재 행의 가용 너비 — 아직 표시 전이면 부모/페이지 너비로 추정."""
@@ -585,6 +606,10 @@ class MatchReviewPage(QWidget):
         self._resize_timer = QTimer(self)           # 슬라이더 드래그 디바운스
         self._resize_timer.setSingleShot(True)
         self._resize_timer.timeout.connect(self._apply_thumb_size)
+        # 좌표 매칭 모드 관련
+        self._coord_mode: bool = False
+        self._tolerance: float = 500.0
+        self._coord_failed_count: int = 0
         self._build()
 
     # ------------------------------------------------------------------
@@ -674,7 +699,10 @@ class MatchReviewPage(QWidget):
                    *,
                    score_cache=None,
                    val_pool: dict | None = None,
-                   candidates_by_ref: dict | None = None) -> None:
+                   candidates_by_ref: dict | None = None,
+                   coord_mode: bool = False,
+                   tolerance: float = 500.0,
+                   coord_failed_count: int = 0) -> None:
         """매치 검토 화면 초기화.
 
         ``score_cache`` 와 ``val_pool`` 이 함께 주어지면 각 매치 행에 차순위
@@ -683,9 +711,15 @@ class MatchReviewPage(QWidget):
         ``candidates_by_ref`` 가 주어지면 (fast 모드, #7) ``(slot, ref_path.name)``
         키로 미리 점수 내림차순 정렬된 ``[(ImageItem, score), ...]`` 후보 목록을
         직접 사용한다.  score_cache 가 비어있는 fast 모드에서도 후보가 보인다.
+
+        ``coord_mode=True`` 면 score 를 µm 거리로 역산해 표시하고,
+        ``coord_failed_count`` 를 요약에 "매치 실패 N쌍" 으로 포함한다.
         """
         self._matches = list(matches)
         self._unmatched_keys.clear()
+        self._coord_mode = bool(coord_mode)
+        self._tolerance = float(tolerance) if tolerance and tolerance > 0 else 500.0
+        self._coord_failed_count = int(coord_failed_count)
         # 차순위 swap / 재계산용으로 score_cache + val_pool 참조 보관.
         self._score_cache = score_cache
         self._val_pool = val_pool
@@ -749,7 +783,9 @@ class MatchReviewPage(QWidget):
     def _append_row(self, match: MatchResult) -> "_MatchRow":
         runners = self._lookup_runners_up(match, self._score_cache, self._val_pool)
         row = _MatchRow(match, runners_up=runners, parent=self,
-                        thumb_px=self._thumb_px)
+                        thumb_px=self._thumb_px,
+                        coord_mode=self._coord_mode,
+                        tolerance=self._tolerance)
         row.toggle_requested.connect(self._on_toggle)
         row.swap_requested.connect(self._on_swap)
         row.more_clicked.connect(self._on_row_more)
@@ -857,9 +893,13 @@ class MatchReviewPage(QWidget):
         total = len(self._matches)
         unmatched = len(self._unmatched_keys)
         kept = total - unmatched
-        self._summary_label.setText(
-            f"유지: {kept} 쌍  ·  매치 없음 처리: {unmatched} 장"
-        )
+        parts = [
+            f"유지 {kept}쌍",
+            f"매치 없음처리 {unmatched}쌍",
+        ]
+        if self._coord_failed_count > 0:
+            parts.append(f"매치 실패 {self._coord_failed_count}쌍")
+        self._summary_label.setText("  ·  ".join(parts))
 
     def _on_done(self) -> None:
         kept: list[MatchResult] = []

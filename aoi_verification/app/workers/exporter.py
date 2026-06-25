@@ -156,13 +156,14 @@ class ExcelExporter(QThread):
                 if isinstance(a.value, (int, float)):
                     a.value = None
 
-        # 1번째 시트(요약) = A~D 만.  결과 파일명과 같은 이름으로 맨 앞에.
-        self._build_summary_sheet(wb, rows_input)
-
-        # 미매칭 사진만 모은 시트(이미지 포함) — 미매칭이 있을 때만 (#3).
+        # 시트 순서: 미매칭(첫 번째, 조건부) → 요약 → 전체 양식.
         unmatched_rows = [r for r in rows_input if isinstance(r[2], MissEntry)]
         if unmatched_rows:
+            # 미매칭 시트를 index 0(첫 번째)에 만들고, 요약은 index 1.
             self._write_unmatched_sheet(wb, unmatched_rows)
+            self._build_summary_sheet(wb, rows_input, index=1)
+        else:
+            self._build_summary_sheet(wb, rows_input, index=0)
 
         # Slot 불일치 ---------------------------------------------------
         if self._result.slot_only_ref or self._result.slot_only_val:
@@ -197,13 +198,13 @@ class ExcelExporter(QThread):
             name = name + " "
         return name[:31]
 
-    def _build_summary_sheet(self, wb, rows_input: list) -> None:
-        """1번째 시트(요약) — A~D 열만, 전체 데이터.  맨 앞(index 0)에."""
-        self._build_ad_sheet(wb, self._summary_sheet_name(), 0, rows_input)
+    def _build_summary_sheet(self, wb, rows_input: list, *, index: int = 0) -> None:
+        """요약 시트 — A~D 열만, 전체 데이터."""
+        self._build_ad_sheet(wb, self._summary_sheet_name(), index, rows_input)
 
     def _write_unmatched_sheet(self, wb, unmatched_rows: list) -> None:
-        """미매칭 사진만 모은 A~D 시트(이미지 포함) — 요약 다음(index 1)에 (#3)."""
-        self._build_ad_sheet(wb, i18n.KO.SHEET_UNMATCHED, 1, unmatched_rows)
+        """미매칭 사진만 모은 A~D 시트(이미지 포함) — 첫 번째 시트(index 0)."""
+        self._build_ad_sheet(wb, i18n.KO.SHEET_UNMATCHED, 0, unmatched_rows)
 
     def _build_ad_sheet(self, wb, title: str, index: int, rows_input: list) -> None:
         """A~D(번호·slot·기준/검증 이미지) 전용 시트를 만든다.

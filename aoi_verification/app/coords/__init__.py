@@ -14,7 +14,7 @@ from typing import Optional
 from . import camtek_ini, camtek_live, kla_info
 from .models import DefectCoord
 
-__all__ = ["resolve", "DefectCoord"]
+__all__ = ["resolve", "resolve_batch", "DefectCoord"]
 
 
 def resolve(image_path: Path) -> Optional[DefectCoord]:
@@ -26,3 +26,15 @@ def resolve(image_path: Path) -> Optional[DefectCoord]:
     if coord is not None:
         return coord
     return kla_info.resolve(image_path)
+
+
+def resolve_batch(paths) -> dict:
+    """여러 이미지 경로를 한꺼번에 resolve → {path: DefectCoord | None}.
+
+    INI/KLA 파일은 폴더별로 한 번만 파싱(lru_cache 활용)하므로
+    같은 폴더 내 여러 이미지를 반복 파싱하지 않는다.
+    """
+    result: dict = {}
+    for p in paths:
+        result[p] = resolve(p)
+    return result
