@@ -108,20 +108,48 @@ def test_crosstab_and_shortlist(tmp_path):
 
 
 def test_markdown_output(tmp_path):
-    """결과물은 단일 .md — 핵심 섹션과 UI 빈칸이 들어있다."""
+    """결과물은 단일 .md — 확대된 핵심 섹션과 UI 빈칸이 들어있다."""
     wafer = _build_tree(tmp_path)
+    ctx = {"pixel_hits": [], "optic": [], "zone_map": {},
+           "field_dump": None, "field_dump_folder": "-", "hunt_budget": 20}
     rows, schema = [], []
-    ad.process_folder(wafer, 5.0, rows, schema, lambda m: None)
+    ad.process_folder(wafer, 5.0, rows, schema, lambda m: None, ctx)
     out = tmp_path / "결과.md"
 
     class _Args:
         roots = []
-    ad.write_markdown(str(out), [wafer], schema, rows, ["log1"], _Args())
+    ad.write_markdown(str(out), [wafer], schema, rows, ["log1"], _Args(), ctx)
     text = out.read_text(encoding="utf-8")
     for section in ["## 1. 요약", "## 2. zone × recipe", "## 3. UI 수기확인 shortlist",
-                    "## 4. 폴더 스키마 정합성", "## 5. 검증결과", "## 6. 실행 로그"]:
-        assert section in text
-    # zone1(비0)·zone63(0) 둘 다 표에 등장, 매칭 성공/실패 카운트 노출.
+                    "## 4. 픽셀크기(0.77) 출처 후보", "## 5. Surface.flt 레코드 전체 필드 덤프",
+                    "## 6. INI PixelSize", "## 7. 제품별 contrast", "## 8. zone 코드",
+                    "## 9. 폴더 스키마 정합성", "## 10. 검증결과", "## 11. 실행 로그"]:
+        assert section in text, f"누락 섹션: {section}"
     assert "123.667" in text and "좌표 매칭 성공" in text
-    # UI 칸은 빈칸 — shortlist 헤더에 UI_contrast 가 있고 값은 자동 채우지 않음.
     assert "UI_contrast" in text
+    # 필드 덤프에 알려진 라벨(area 등)이 보임.
+    assert "area" in text
+
+
+def test_hunt_pixel_factor_text_and_binary(tmp_path):
+    """0.77 출처 추적 — 텍스트 recipe 파일과 바이너리에서 0.77 을 찾아낸다."""
+    import struct
+    folder = tmp_path / "wafer"
+    folder.mkdir()
+    # 텍스트 recipe 파일에 0.77 박기
+    (folder / "scan.rcp").write_text("InspectionPixelSize=0.770000\nFoo=1.23\n",
+                                     encoding="utf-8")
+    # 바이너리(.dat)에 float64 0.77 박기
+    buf = bytearray(32)
+    struct.pack_into("<d", buf, 8, 0.77)
+    (folder / "setup.dat").write_bytes(bytes(buf))
+    hits = ad.hunt_pixel_factor(folder)
+    files = {h["file"] for h in hits}
+    matches = {h["match"] for h in hits}
+    assert "scan.rcp" in files and "setup.dat" in files
+    assert "len_factor_0.77" in matches
+
+
+def test_product_extraction():
+    p = r"X:\AOI-3\Scanresult\R_TB500 LIVE_FS\6324\GML-FS\W7315004XYC5"
+    assert ad._product_of(p) == "R_TB500 LIVE_FS"
