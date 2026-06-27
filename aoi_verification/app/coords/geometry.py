@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from . import abs_coord, pixel_size, surface_flt
+from . import abs_coord, pixel_size, surface_flt, zone_name
 from .models import DefectGeometry, SURFACE_LEN_FACTOR
 from .surface_flt import RawRecord
 
@@ -78,6 +78,7 @@ def resolve(image_path: Path) -> GeometryResult:
             zone=int(rec.zone),
             recipe=int(rec.recipe),
             pixel_um=px,
+            zone_name=zone_name.name_for(folder, int(rec.zone)) or "",
         )
         return GeometryResult("ok", geom)
     except Exception:

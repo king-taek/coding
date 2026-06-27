@@ -11,7 +11,7 @@ import struct
 from pathlib import Path
 
 from aoi_verification.app.coords import (abs_coord, camtek_ini, geometry,
-                                         pixel_size, surface_flt)
+                                         pixel_size, surface_flt, zone_name)
 
 
 # 합성 레코드 레이아웃: 32바이트. geometry 는 float32, zone/recipe 는 uint8.
@@ -142,6 +142,34 @@ def test_geometry_dynamic_pixel_size(monkeypatch, tmp_path):
     assert abs(g.pixel_um - 0.8452004) < 1e-9
     assert abs(g.width_um - 2.0 * 0.8452004) < 1e-6
     assert abs(g.area_um2 - 55.0 * 0.8452004 ** 2) < 1e-4
+
+
+def test_zone_name_dynamic(monkeypatch, tmp_path):
+    """결과 폴더 recipe 파일의 ZoneName/ZoneID 로 zone 이름을 읽는다(자재별)."""
+    _install_schema(monkeypatch)
+    zone_name.zone_map.cache_clear()
+    pixel_size.scan_pixel_size.cache_clear()
+    _write_flt(tmp_path, _pack_record(
+        actual_x=100.0, actual_y=200.0, area=10.0, blob_breadth=1.0,
+        blob_feret_max=2.0, contrast=5.0, zone=1, recipe=2))
+    (tmp_path / "ProductInfo.ini").write_text(
+        "[Zone0]\nZoneName=PI_Opening\nZoneID=1\n"
+        "[Zone1]\nZoneName=Scan Area\nZoneID=63\n", encoding="utf-8")
+    img = _write_ini(tmp_path, "x.100.200", 100.0, 200.0)
+    g = geometry.resolve(img).geometry
+    assert g.zone == 1 and g.zone_name == "PI_Opening"
+
+
+def test_zone_name_map_and_missing(tmp_path):
+    zone_name.zone_map.cache_clear()
+    (tmp_path / "RecipesInfo.ini").write_text(
+        "[A]\nZoneName=VIA\nZoneID=1\n[B]\nZoneName=Scan Area\nZoneID=63\n",
+        encoding="utf-8")
+    assert zone_name.name_for(tmp_path, 1) == "VIA"      # 자재별로 다를 수 있음
+    assert zone_name.name_for(tmp_path, 63) == "Scan Area"
+    assert zone_name.name_for(tmp_path, 999) is None
+    zone_name.zone_map.cache_clear()
+    assert zone_name.name_for(tmp_path / "none", 1) is None
 
 
 def test_pixel_size_priority(tmp_path):
