@@ -26,10 +26,8 @@ from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QScrollArea,
 
 from ... import config, i18n
 from ...models.slot import ImageItem
-from ...similarity.grouping import GroupingWorker
 from ...utils import image_io
 from ...utils import prefs as _prefs
-from ..widgets.loading_overlay import LoadingOverlay
 from ..widgets.neon_button import NeonButton
 from ..widgets.neon_card import NeonCard
 from ..widgets.scalable_image import ScalableImage
@@ -62,18 +60,21 @@ class _SidePanel(QFrame):
 
     tile_clicked = pyqtSignal(str, str, object)        # (panel_name, slot, ImageItem)
     plus_clicked = pyqtSignal(str, str)                # (panel_name, slot)
+    expand_requested = pyqtSignal(str, str, object)    # (panel_name, slot, ImageItem)
 
     def __init__(self, name: str, title: str,
                  *, vertical_scroll: bool = True,
                  actions: Optional[list[tuple[str, str, str]]] = None,
                  columns: int = 4,
                  tile_px: Optional[int] = None,
+                 inline_select: bool = False,
                  parent=None) -> None:
         super().__init__(parent)
         self._name = name
         self._title = title
         self._actions = list(actions or [])
         self._tile_px = tile_px
+        self._inline_select = bool(inline_select)
         self._sections: dict[str, SlotSection] = {}
         self._cached: dict[str, list[ImageItem]] = {}
 
@@ -82,19 +83,22 @@ class _SidePanel(QFrame):
         outer.setContentsMargins(10, 10, 10, 10)
         outer.setSpacing(8)
 
-        # 헤더 — 제목 + ‘선택 모드’ 버튼 (클릭 시 팝업 다이얼로그)
+        # 헤더 — 제목 + (인라인 선택 도구) + ‘선택 모드’ 버튼
         head = QHBoxLayout()
         ttl = QLabel(title, self)
         ttl.setProperty("role", "subtitle")
-        ttl.setStyleSheet("font-weight: 700; color: #00D4FF;")
+        ttl.setStyleSheet("font-weight: 700; color: #39FF14;")
         head.addWidget(ttl)
         head.addStretch(1)
 
+        # 인라인 선택 일괄작업·전체선택 등은 ‘선택 모드’ 팝업으로 일원화 —
+        # 메인 헤더는 ‘선택 모드’ 버튼만 둔다.  타일 클릭=선택 / 더블클릭=해제는
+        # inline_select 로 계속 동작(헤더 도구 없이).
         if self._actions:
             self._select_btn = NeonButton(i18n.KO.BTN_SELECT_MODE, role="ghost")
             self._select_btn.clicked.connect(self._open_bulk_select)
             head.addWidget(self._select_btn)
-        # 외부에서 추가 헤더 버튼을 꽂을 수 있도록 head 레이아웃을 노출 (그룹화 등).
+        # 외부에서 추가 헤더 버튼을 꽂을 수 있도록 head 레이아웃을 노출.
         self._head_layout = head
         outer.addLayout(head)
 
@@ -108,12 +112,14 @@ class _SidePanel(QFrame):
         self._host_layout.setSpacing(10)
         self._host_layout.addStretch(1)
 
+        # 후보 영역은 가로 스크롤이 절대 생기지 않도록 — 타일은 ThumbGrid 가
+        # 패널 폭에 맞춰 열 수를 자동 reflow 한다.
+        self._scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff,
+        )
         if not vertical_scroll:
             self._scroll.setVerticalScrollBarPolicy(
                 Qt.ScrollBarPolicy.ScrollBarAlwaysOff,
-            )
-            self._scroll.setHorizontalScrollBarPolicy(
-                Qt.ScrollBarPolicy.ScrollBarAsNeeded,
             )
 
         outer.addWidget(self._scroll, stretch=1)
@@ -123,6 +129,7 @@ class _SidePanel(QFrame):
     def update_data(self, data: dict[str, list[ImageItem]]) -> None:
         """Slot → ImageItem 리스트 매핑으로 패널 갱신."""
         self._cached = {k: list(v) for k, v in data.items() if v}
+        self._sections = {}
 
         while self._host_layout.count():
             item = self._host_layout.takeAt(0)
@@ -132,8 +139,10 @@ class _SidePanel(QFrame):
 
         for slot in sorted(self._cached.keys()):
             sec = SlotSection(slot, columns=self._columns,
-                              select_mode=False, tile_px=self._tile_px,
-                              parent=self)
+                              select_mode=False,
+                              inline_select=self._inline_select,
+                              truncate=not self._inline_select,
+                              tile_px=self._tile_px, parent=self)
             entries = [ThumbEntry(item=it) for it in self._cached[slot]]
             sec.set_entries(entries)
             sec.tile_clicked.connect(
@@ -142,12 +151,70 @@ class _SidePanel(QFrame):
             sec.plus_clicked.connect(
                 lambda s: self.plus_clicked.emit(self._name, s)
             )
+            sec.expand_requested.connect(
+                lambda ent, s=slot: self.expand_requested.emit(
+                    self._name, s, ent.item)
+            )
             self._sections[slot] = sec
             self._host_layout.addWidget(sec)
         self._host_layout.addStretch(1)
 
+    # ------------------------------------------------------------------
+    def set_slot(self, slot: str, items: list[ImageItem]) -> None:
+        """한 슬롯의 섹션만 갱신/생성/제거 — 전체 재생성 없이 증분 갱신(#렉).
+
+        - items 가 비면 그 슬롯 섹션을 제거.
+        - 섹션이 있으면 그 섹션의 타일만 다시 그린다(``set_entries``).
+        - 없으면 슬롯명 정렬 위치에 새 섹션을 삽입(끝 stretch 앞).
+        """
+        items = list(items)
+        if not items:
+            self._cached.pop(slot, None)
+            sec = self._sections.pop(slot, None)
+            if sec is not None:
+                self._host_layout.removeWidget(sec)
+                sec.deleteLater()
+            return
+
+        self._cached[slot] = items
+        entries = [ThumbEntry(item=it) for it in items]
+        sec = self._sections.get(slot)
+        if sec is not None:
+            sec.set_entries(entries)
+            return
+
+        sec = SlotSection(slot, columns=self._columns,
+                          select_mode=False,
+                          inline_select=self._inline_select,
+                          truncate=not self._inline_select,
+                          tile_px=self._tile_px, parent=self)
+        sec.set_entries(entries)
+        sec.tile_clicked.connect(
+            lambda ent, s=slot: self.tile_clicked.emit(self._name, s, ent.item)
+        )
+        sec.plus_clicked.connect(
+            lambda s: self.plus_clicked.emit(self._name, s)
+        )
+        sec.expand_requested.connect(
+            lambda ent, s=slot: self.expand_requested.emit(
+                self._name, s, ent.item)
+        )
+        self._sections[slot] = sec
+        # 슬롯명 정렬 위치에 삽입 — 끝 stretch 보다 앞.
+        ordered = sorted(self._sections.keys())
+        idx = ordered.index(slot)
+        self._host_layout.insertWidget(idx, sec)
+
     def cached(self) -> dict[str, list[ImageItem]]:
         return {k: list(v) for k, v in self._cached.items()}
+
+    # ------------------------------------------------------------------
+    # 인라인 선택 — 타일 클릭=선택 / 더블클릭=해제.  일괄작업·드래그는
+    # ‘선택 모드’ 팝업으로 일원화했으므로 여기엔 전체선택(Ctrl+A) 헬퍼만 둔다.
+    # ------------------------------------------------------------------
+    def _set_all_inline(self, selected: bool) -> None:
+        for sec in self._sections.values():
+            sec.grid.set_all_inline_selected(selected)
 
     # ------------------------------------------------------------------
     def _open_bulk_select(self) -> None:
@@ -194,10 +261,9 @@ class SelectPage(QWidget):
         self._current: Optional[ImageItem] = None
         self._phase_label_text = ""
         self._phase_b_already_matched: dict[str, list[ImageItem]] = {}
-        self._group_worker: Optional[GroupingWorker] = None
+        # 스플리터 방향을 첫 showEvent 에서 한 번만 확정했는지 (#cold-start).
+        self._orientation_seeded = False
         self._build()
-        # 그룹화 진행 중 차단 오버레이.
-        self._loading = LoadingOverlay(self)
 
     # ------------------------------------------------------------------
     def _build(self) -> None:
@@ -237,6 +303,14 @@ class SelectPage(QWidget):
         top.addWidget(self.progress_label)
         root.addLayout(top)
 
+        # LOT(slot)별 전체 장수 — 참고용으로 작게 한 줄 (#2).  세션 내 불변이라
+        # load_state 에서 1회만 채운다.  슬롯이 많으면 elide + 전체는 툴팁.
+        self.lot_counts_label = QLabel("", self)
+        self.lot_counts_label.setProperty("role", "muted")
+        self.lot_counts_label.setStyleSheet("color: #586378; font-size: 11px;")
+        self.lot_counts_label.setWordWrap(False)
+        root.addWidget(self.lot_counts_label)
+
         # 중앙 3-pane — QSplitter 로 사용자 조절 + 상태 영속 -------------
         self._h_splitter = QSplitter(Qt.Orientation.Horizontal, self)
         self._h_splitter.setHandleWidth(6)
@@ -245,7 +319,7 @@ class SelectPage(QWidget):
         # LEFT --------------------------------------------------------
         # 측면 패널 타일 — 기본(240px)의 50% (사용자 요청).  같은 패널 폭에서
         # 한 줄에 더 많은 사진이 들어가고 한눈에 더 많은 후보를 비교할 수 있다.
-        side_tile = config.Sizing.THUMB_PX // 2     # 240 → 120
+        side_tile = config.Sizing.SIDE_TILE_PX      # 사이드 패널 타일(=120, D2)
         self.left_panel = _SidePanel(
             self.PANEL_LEFT, i18n.KO.PANEL_LEFT_CANDIDATES,
             actions=[
@@ -255,15 +329,12 @@ class SelectPage(QWidget):
             # 타일 절반 크기 → 같은 폭에 3 열 그리드 깔리도록.
             columns=3,
             tile_px=side_tile,
+            inline_select=True,        # 타일 클릭=선택 / 더블클릭=해제 (Ctrl+A=전체)
         )
         self.left_panel.selection_action.connect(self._on_batch_action)
         self.left_panel.tile_clicked.connect(self._on_tile_click)
         self.left_panel.plus_clicked.connect(self._on_plus_click)
-        # 동일 defect 그룹 보기 — 좌측 후보 패널 헤더에 버튼 추가 (#5).
-        self.btn_view_groups = NeonButton(i18n.KO.BTN_VIEW_GROUPS, role="ghost")
-        self.btn_view_groups.clicked.connect(self._open_defect_groups)
-        # 헤더 head 레이아웃에 ‘선택 모드’ 옆에 끼워넣는다.
-        self.left_panel._head_layout.addWidget(self.btn_view_groups)
+        # 후보 패널은 확대(줌) 모드를 두지 않는다 — 더블클릭은 선택 해제용.
         # 3 col × (120 thumb + 14 padding) + spacing + 패널 padding 을 담을 최소
         # 너비.  좁은 창에선 세로 스택으로 reflow 되어 무관.
         self.left_panel.setMinimumWidth(220)
@@ -274,7 +345,7 @@ class SelectPage(QWidget):
         cl = center_card.body()
         center_title = QLabel(i18n.KO.PANEL_CENTER_DECIDE, center_card)
         center_title.setProperty("role", "subtitle")
-        center_title.setStyleSheet("font-weight: 700; color: #00D4FF;")
+        center_title.setStyleSheet("font-weight: 700; color: #39FF14;")
         center_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         cl.addWidget(center_title)
 
@@ -351,7 +422,6 @@ class SelectPage(QWidget):
         self.right_panel = _SidePanel(
             self.PANEL_RIGHT, i18n.KO.PANEL_RIGHT_TARGETS,
             actions=[
-                ("remove", i18n.KO.BTN_REMOVE_FROM_TARGET, "danger"),
                 ("to_exclude", i18n.KO.BTN_MOVE_TO_EXCLUDE, "warn"),
                 ("recenter", i18n.KO.BTN_BACK_TO_CENTER, "ghost"),
             ],
@@ -386,6 +456,13 @@ class SelectPage(QWidget):
             QShortcut(QKeySequence(key), self,
                       activated=lambda: self._decide("exclude"))
         QShortcut(QKeySequence("Z"), self, activated=self._undo)
+        # Ctrl+A — 좌측 후보 패널 전체 선택 (#2).
+        QShortcut(QKeySequence.StandardKey.SelectAll, self,
+                  activated=self._select_all_candidates)
+
+    def _select_all_candidates(self) -> None:
+        if self.isVisible():
+            self.left_panel._set_all_inline(True)
 
     # ------------------------------------------------------------------
     # ------------------------------------------------------------------
@@ -393,9 +470,36 @@ class SelectPage(QWidget):
         super().resizeEvent(event)
         self._update_splitter_orientation()
 
+    def showEvent(self, event):                         # noqa: N802
+        super().showEvent(event)
+        # 실제로 보여질 때의 너비로 방향을 한 번 확정한다. 구성 중 잠깐 좁아졌다
+        # 다시 넓어지는 과도기 때문에 세로로 굳는 버그를 방지 — 히스테리시스는
+        # 그 이후의 사용자 리사이즈에만 적용된다.
+        if not self._orientation_seeded:
+            self._seed_splitter_orientation()
+
+    def _seed_splitter_orientation(self) -> None:
+        """히스테리시스 없이 중점 기준으로 초기 방향을 확정 (#cold-start)."""
+        if not hasattr(self, "_h_splitter"):
+            return
+        w = self.width()
+        mid = (self._RESPONSIVE_THRESH_LO + self._RESPONSIVE_THRESH_HI) // 2
+        target = (Qt.Orientation.Horizontal if w >= mid
+                  else Qt.Orientation.Vertical)
+        if self._h_splitter.orientation() != target:
+            self._h_splitter.setOrientation(target)
+            self._h_splitter.setSizes([300, 600, 300]
+                                      if target == Qt.Orientation.Horizontal
+                                      else [200, 500, 200])
+        self._orientation_seeded = True
+
     def _update_splitter_orientation(self) -> None:
         """창 폭에 따라 H ↔ V splitter 전환 — 가로 스크롤 없이 reflow."""
         if not hasattr(self, "_h_splitter"):
+            return
+        # 첫 표시(showEvent)로 방향이 확정되기 전의 구성 중 리사이즈는 무시 —
+        # 과도기 너비로 방향이 잘못 굳는 것을 막는다.
+        if not self._orientation_seeded:
             return
         cur = self._h_splitter.orientation()
         w = self.width()
@@ -438,8 +542,28 @@ class SelectPage(QWidget):
         self._phase_label_text = phase_label
         self.phase_label.setText(phase_label)
         self._phase_b_already_matched = phase_b_already_matched or {}
+        self._update_lot_counts()
         self._refresh_all()
         self._advance_to_next()
+
+    def _update_lot_counts(self) -> None:
+        """LOT(slot)별 전체 장수 라벨 갱신 (#2) — 세션 내 불변이라 1회만."""
+        if self._state is None:
+            self.lot_counts_label.setText("")
+            return
+        totals: dict[str, int] = defaultdict(int)
+        for it in self._state.queue:
+            totals[it.slot] += 1
+        for pool in (self._state.targets, self._state.excluded):
+            for slot, items in pool.items():
+                totals[slot] += len(items)
+        if not totals:
+            self.lot_counts_label.setText("")
+            return
+        parts = [f"{slot} {totals[slot]}" for slot in sorted(totals)]
+        full = i18n.KO.LOT_COUNTS_PREFIX + "  ·  ".join(parts)
+        self.lot_counts_label.setText(full)
+        self.lot_counts_label.setToolTip(full)
 
     def get_state(self) -> Stage1State | None:
         return self._state
@@ -447,21 +571,66 @@ class SelectPage(QWidget):
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # 표시 모드 / 슬롯별 표시 항목 (one-slot 모드 반영, #렉)
+    # ------------------------------------------------------------------
+    def _is_single_slot_mode(self) -> bool:
+        """측당 총 사진이 임계 이상이면 현재 슬롯만 표시(위젯 수 최소화)."""
+        if self._state is None:
+            return False
+        return self._total_count() >= config.SELECT_SINGLE_SLOT_THRESHOLD
+
+    def _left_items_for_slot(self, slot: str) -> list[ImageItem]:
+        """좌(후보) 패널에 그 슬롯이 보여줄 항목 = 큐 항목 − 현재 결정중 사진."""
+        if self._state is None:
+            return []
+        if self._is_single_slot_mode() and (
+                self._current is None or slot != self._current.slot):
+            return []
+        items = [it for it in self._state.queue if it.slot == slot]
+        if self._current is not None and self._current.slot == slot:
+            items = [it for it in items if it is not self._current]
+        return items
+
+    def _right_items_for_slot(self, slot: str) -> list[ImageItem]:
+        """우(검증 대상) 패널에 그 슬롯이 보여줄 항목."""
+        if self._state is None:
+            return []
+        if self._is_single_slot_mode() and (
+                self._current is None or slot != self._current.slot):
+            return []
+        return list(self._state.targets.get(slot, []))
+
+    def _update_slots_incremental(self, slots) -> None:
+        """주어진 슬롯들만 좌·우 패널에서 증분 갱신(전체 재생성 없음, #렉)."""
+        for s in slots:
+            if not s:
+                continue
+            self.left_panel.set_slot(s, self._left_items_for_slot(s))
+            self.right_panel.set_slot(s, self._right_items_for_slot(s))
+
     def _refresh_all(self) -> None:
         if self._state is None:
             return
-        # left = 남은 큐를 Slot 별로 그룹화
-        left_groups: dict[str, list[ImageItem]] = defaultdict(list)
-        for it in self._state.queue:
-            left_groups[it.slot].append(it)
-        # 현재 결정 중인 사진은 left 에서 제외
-        if self._current is not None and self._current in left_groups[self._current.slot]:
-            left_groups[self._current.slot].remove(self._current)
-            if not left_groups[self._current.slot]:
-                left_groups.pop(self._current.slot, None)
-        self.left_panel.update_data(left_groups)
-
-        self.right_panel.update_data({k: list(v) for k, v in self._state.targets.items()})
+        if self._is_single_slot_mode():
+            cur = self._current.slot if self._current is not None else None
+            left = {cur: self._left_items_for_slot(cur)} if cur else {}
+            right = {cur: self._right_items_for_slot(cur)} if cur else {}
+            self.left_panel.update_data(left)
+            self.right_panel.update_data(right)
+        else:
+            # left = 남은 큐를 Slot 별로 그룹화
+            left_groups: dict[str, list[ImageItem]] = defaultdict(list)
+            for it in self._state.queue:
+                left_groups[it.slot].append(it)
+            # 현재 결정 중인 사진은 left 에서 제외
+            if self._current is not None and self._current in left_groups[self._current.slot]:
+                left_groups[self._current.slot].remove(self._current)
+                if not left_groups[self._current.slot]:
+                    left_groups.pop(self._current.slot, None)
+            self.left_panel.update_data(left_groups)
+            self.right_panel.update_data(
+                {k: list(v) for k, v in self._state.targets.items()})
         self._refresh_excluded_button()
         self._refresh_end_selection_button()
 
@@ -503,6 +672,37 @@ class SelectPage(QWidget):
             )
         )
         self._refresh_all()
+
+    def _advance_incremental(self, prev_slot: str) -> None:
+        """결정 1건 후 — 바뀐 슬롯만 증분 갱신(전체 재생성 금지, #렉).
+
+        ``_advance_to_next`` 과 달리 ``_refresh_all`` (전 패널 재생성) 을 호출하지
+        않고, 영향받은 슬롯(직전 슬롯 + 새 현재 슬롯) 섹션만 갱신한다.
+        """
+        if self._state is None:
+            return
+        if not self._state.queue:
+            self._current = None
+            self.center_img.clear_image()
+            self.slot_label.setText("")
+            self.progress_label.setText("")
+            self._update_slots_incremental({prev_slot})
+            self._refresh_excluded_button()
+            self._refresh_end_selection_button()
+            self.finished.emit()
+            return
+        self._current = self._state.queue[0]
+        self._show_center(self._current)
+        self.progress_label.setText(
+            i18n.KO.PROGRESS_SLOT_FMT.format(
+                slot=self._current.slot,
+                done=self._already_decided_count(),
+                total=self._total_count(),
+            )
+        )
+        self._update_slots_incremental({prev_slot, self._current.slot})
+        self._refresh_excluded_button()
+        self._refresh_end_selection_button()
 
     def _already_decided_count(self) -> int:
         if self._state is None:
@@ -550,7 +750,8 @@ class SelectPage(QWidget):
         self._state.history.append((action, item))
         self.decision_made.emit(action, item)
         self.state_changed.emit()
-        self._advance_to_next()
+        # 핫 경로 — 전체 재생성 대신 영향 슬롯만 증분 갱신(#렉).
+        self._advance_incremental(item.slot)
 
     def _undo(self) -> None:
         # Z 가 MatchPage 가 보일 때도 SelectPage 로 전달되는 것을 차단.
@@ -721,104 +922,3 @@ class SelectPage(QWidget):
             )
         )
         dlg.exec()
-
-    # ------------------------------------------------------------------
-    # 동일 defect 그룹 보기 (#5)
-    # ------------------------------------------------------------------
-    def _open_defect_groups(self) -> None:
-        """[동일 defect 그룹 보기] 클릭 → 백그라운드 워커로 슬롯별 그룹 계산
-        후 팝업 표시. 같은 defect 인 사진들 (촬영 위치만 조금 다름) 을 묶어
-        그룹 단위로 [전체 검증] / [전체 제외] 가능."""
-        if self._state is None:
-            return
-        # 현재 남은 후보 (queue) 만 그룹화 — 결정 끝난 사진은 대상이 아님.
-        # 그룹화는 '기준 장비(ref)' 사진에 대해서만 진행한다 (#3).
-        items_by_slot: dict[str, list[ImageItem]] = defaultdict(list)
-        for it in self._state.queue:
-            if getattr(it, "side", "ref") != "ref":
-                continue
-            items_by_slot[it.slot].append(it)
-        if not items_by_slot:
-            QMessageBox.information(
-                self, i18n.KO.APP_TITLE, i18n.KO.GROUP_REF_ONLY_INFO,
-            )
-            return
-
-        # 기존 워커가 실행 중이면 중복 클릭 방지.
-        if (self._group_worker is not None
-                and self._group_worker.isRunning()):
-            return
-
-        self._loading.show_overlay(
-            i18n.KO.GROUP_LOAD_FMT.format(done=0, total=0, status="시작")
-        )
-        # 그룹화 임계치(#6) — 마지막 설정값 사용.
-        try:
-            from ...utils import prefs as _prefs
-            _gthr = float(getattr(_prefs.load(), "group_threshold", 0.45))
-        except Exception:
-            _gthr = 0.45
-        worker = GroupingWorker(items_by_slot, phash_threshold=_gthr, parent=self)
-        worker.signals.progress.connect(self._on_group_progress)
-        worker.signals.finished.connect(self._on_group_finished)
-        worker.signals.failed.connect(self._on_group_failed)
-        self._group_worker = worker
-        worker.start()
-
-    def _on_group_progress(self, done: int, total: int, status: str) -> None:
-        self._loading.set_progress(
-            done, total,
-            i18n.KO.GROUP_LOAD_FMT.format(
-                done=done, total=total, status=status,
-            ),
-        )
-
-    def _on_group_finished(self, groups: list) -> None:
-        self._loading.hide_overlay()
-        from ..widgets.defect_group_dialog import DefectGroupDialog
-        dlg = DefectGroupDialog(groups, parent=self)
-        dlg.group_action.connect(self._apply_group_action)
-        dlg.exec()
-        # 워커 참조 정리 — 다음 클릭 시 새 워커 시작 가능하게.
-        self._group_worker = None
-
-    def _on_group_failed(self, msg: str) -> None:
-        self._loading.hide_overlay()
-        from PyQt6.QtWidgets import QMessageBox
-        QMessageBox.warning(self, i18n.KO.APP_TITLE, msg)
-        self._group_worker = None
-
-    def _apply_group_action(self, action_id: str,
-                             items: list[ImageItem]) -> None:
-        """그룹의 모든 사진에 동일 결정을 적용 — 큐에서 빼고 검증/제외 풀로 이동.
-
-        이미 큐에 없는 사진(다른 그룹 액션으로 먼저 처리됨) 은 자연스럽게 skip.
-        현재 _current 가 처리된 항목 안에 있으면 다음 사진으로 자동 진행.
-        """
-        if self._state is None:
-            return
-        moved = 0
-        for it in items:
-            try:
-                self._state.queue.remove(it)
-            except ValueError:
-                continue
-            pool = (self._state.targets if action_id == "verify"
-                    else self._state.excluded)
-            pool[it.slot].append(it)
-            self._state.history.append((
-                "verify" if action_id == "verify" else "exclude",
-                it,
-            ))
-            self.decision_made.emit(
-                "verify" if action_id == "verify" else "exclude", it,
-            )
-            moved += 1
-        if moved == 0:
-            return
-        self.state_changed.emit()
-        # 현재 결정 중인 사진이 처리됐다면 다음 사진으로.
-        if self._current is None or self._current not in self._state.queue:
-            self._advance_to_next()
-        else:
-            self._refresh_all()

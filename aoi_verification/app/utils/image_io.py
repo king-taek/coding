@@ -135,8 +135,11 @@ def _ensure_resized(src: Path, *, size_option: str,
                     long_edge: int, jpeg_q: int,
                     extra: str = "") -> Path:
     out = cache.cache_path(src, size_option, extra=extra)  # type: ignore[arg-type]
-    if out.exists() and out.stat().st_size > 0:
-        return out
+    try:                                  # exists()+stat() 2회 → stat() 1회로
+        if out.stat().st_size > 0:
+            return out
+    except OSError:
+        pass
     try:
         # JPEG 빠른 디코드를 위해 draft 힌트를 함께 전달.
         img = _open(src, draft_long_edge=long_edge)
@@ -164,26 +167,25 @@ def center_roi_gray(src: Path,
 
     유사도 파이프라인(pHash·SSIM·ORB) 모두가 공유하는 1차 전처리.
 
-    ``cfg`` (SimilarityConfig) 가 주어지고 전처리 토글이 켜져 있으면 강화/KLA
+    ``cfg`` (SimilarityConfig) 가 주어지고 전처리 토글이 켜져 있으면 KLA/중앙
     변환을 **계산 전용**으로 적용 — 화면 표시 이미지는 영향 없음.  ``side``
-    ('ref'/'val') 에 따라 중앙 20% crop 을 선택 적용한다.  cfg=None 또는 모든
+    ('ref'/'val') 에 따라 중앙 30% crop 을 선택 적용한다.  cfg=None 또는 모든
     토글 OFF 면 현행과 동일 동작 (기본 모드 불변).
     """
     if roi_ratio is None:
         roi_ratio = config.Sizing.ROI_RATIO
     if long_edge is None:
         long_edge = config.Sizing.SIMILARITY_PX
-    # 중앙 영역만 사용 옵션 (#7/#2) — side(ref/val) 별로 적용.  비율은 30%.
-    if cfg is not None and getattr(cfg, "_center20_for", None) is not None:
-        if cfg._center20_for(side):
-            roi_ratio = 0.3
+    # 중앙 영역만 사용 옵션 (#7/#2) — side(ref/val) 에 적용.  비율은 cfg.center_ratio
+    # (0=기본 0.3).  defect 이 정중앙인 AOI 이미지에서 'defect 신호'만 보는 변형용.
+    if cfg is not None and getattr(cfg, "_center_crop_for", None) is not None:
+        if cfg._center_crop_for(side):
+            roi_ratio = (cfg._center_crop_ratio()
+                         if getattr(cfg, "_center_crop_ratio", None) is not None
+                         else 0.3)
 
     img = _open(src)
     img = _to_rgb(img)
-    # RGB 단계 전처리 (KLA crop) — 중심 ROI 이전.
-    if cfg is not None and getattr(cfg, "has_preprocess", False):
-        from ..similarity import preprocess
-        img = preprocess.apply_rgb_chain(img, cfg)
     w, h = img.size
     rw = int(round(w * roi_ratio))
     rh = int(round(h * roi_ratio))
@@ -192,11 +194,6 @@ def center_roi_gray(src: Path,
     img = img.crop((x0, y0, x0 + rw, y0 + rh))
     img = _fit_long_edge(img, long_edge)
     gray = np.asarray(img.convert("L"), dtype=np.uint8)
-    # Gray 단계 전처리 (흑백+고감도 → 고대비).
-    if cfg is not None and (getattr(cfg, "grayscale", False)
-                            or getattr(cfg, "contrast", False)):
-        from ..similarity import preprocess
-        gray = preprocess.apply_gray_chain(gray, cfg)
     return gray
 
 
@@ -266,3 +263,70 @@ def load_thumb_qpixmap(path: "Path", size: int, *,
         )
     except Exception:
         return fallback
+
+
+# ---------------------------------------------------------------------------
+# 타일 픽스맵 LRU 캐시 (#렉) — 후보 선별에서 결정마다 타일을 재생성해도 디스크
+# 재로딩/스케일을 반복하지 않도록 스케일 완료된 QPixmap 을 RAM 에 둔다.
+# GUI 스레드 전용(QPixmap main-thread only) — _ThumbTile._load_pix 에서 호출.
+# ---------------------------------------------------------------------------
+_tile_pixmap_cache = None        # lazy 생성 (LRUPixmapCache)
+
+
+def _get_tile_cache():
+    global _tile_pixmap_cache
+    if _tile_pixmap_cache is None:
+        from .lru_pixmap_cache import LRUPixmapCache
+        _tile_pixmap_cache = LRUPixmapCache(config.PIXMAP_CACHE_MAX_BYTES)
+    return _tile_pixmap_cache
+
+
+def clear_tile_cache() -> None:
+    """타일 픽스맵 캐시를 비운다 (세션 전환 시 호출 — staleness 방지)."""
+    if _tile_pixmap_cache is not None:
+        _tile_pixmap_cache.clear()
+
+
+def cached_tile_pixmap(src: "Path", size: int, *,
+                       prefer_mid: bool = False, dim: bool = False):
+    """``size`` 박스에 맞춰 스케일(+옵션 dim) 완료된 QPixmap 을 캐시에서 반환.
+
+    같은 (경로·크기·prefer_mid·dim) 조합은 한 번만 디스크에서 로드·스케일하고
+    이후엔 RAM 히트.  캐시 미스 시 기존 ``_ThumbTile._load_pix`` 와 동일 로직 수행.
+    GUI 스레드에서만 호출 (QPixmap main-thread only).
+    """
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtGui import QColor, QPainter, QPixmap
+
+    key = (str(src), int(size), bool(prefer_mid), bool(dim))
+    cache_obj = _get_tile_cache()
+    cached = cache_obj.get(key)
+    if cached is not None:
+        return cached
+
+    try:
+        tp = get_mid_path(Path(src)) if prefer_mid else get_thumb_path(Path(src))
+        pix = QPixmap(str(tp))
+        if pix.isNull():
+            pix = QPixmap(size, size)
+            pix.fill(QColor(20, 28, 40))
+        pix = pix.scaled(
+            size, size,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+    except Exception:
+        pix = QPixmap(size, size)
+        pix.fill(QColor(20, 28, 40))
+
+    if dim:
+        faded = QPixmap(pix.size())
+        faded.fill(Qt.GlobalColor.transparent)
+        p = QPainter(faded)
+        p.setOpacity(0.35)
+        p.drawPixmap(0, 0, pix)
+        p.end()
+        pix = faded
+
+    cache_obj.put(key, pix)
+    return pix

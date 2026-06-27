@@ -53,8 +53,14 @@ _CACHE_DIRNAME = ".aoi_verification_cache"
 
 
 def cache_root() -> Path:
-    """사용자 홈 디렉토리 아래의 공용 캐시 폴더."""
-    root = Path.home() / _CACHE_DIRNAME
+    """캐시(썸네일/특징/임베딩/점수/세션) 폴더.
+
+    기본은 사용자 홈의 ``~/.aoi_verification_cache``.  단, 환경변수 ``AOI_DATA_HOME``
+    이 지정되면 그 폴더 아래(``<AOI_DATA_HOME>/cache``)에 둔다 — exe 설치 시 launcher 가
+    설치 폴더("AOI Recipe Verification")를 가리키게 해, **앱·패키지·캐시를 모두 한 폴더**
+    안에 담기 위함."""
+    home = os.environ.get("AOI_DATA_HOME")
+    root = (Path(home) / "cache") if home else (Path.home() / _CACHE_DIRNAME)
     root.mkdir(parents=True, exist_ok=True)
     return root
 
@@ -73,6 +79,23 @@ def mid_cache_dir() -> Path:
 
 def feature_cache_dir() -> Path:
     d = cache_root() / "features"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def embedding_cache_dir() -> Path:
+    """GPU/OpenVINO 임베딩 벡터(.npy) 영속 캐시 — 재실행 시 재추출 생략(#3).
+
+    썸네일/중간이미지와 달리 1일 TTL 정리 대상이 아니다(재계산 비용이 크고
+    원본 mtime 키라 자동 무효화됨)."""
+    d = cache_root() / "embeddings"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def score_cache_dir() -> Path:
+    """(ref, val) 유사도 점수의 슬롯 단위 영속 캐시 폴더 (#5B)."""
+    d = cache_root() / "scores"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -123,11 +146,15 @@ def slot_mapping_path() -> Path:
 # 양식.xlsx 위치 찾기 — ‘양식’ 폴더 안의 ‘양식.xlsx’ 를 우선 탐색한다.
 # ---------------------------------------------------------------------------
 def template_path() -> Path:
-    """`양식/양식.xlsx` 의 실제 경로를 찾는다 (없으면 후보 중 가장 가까운 것)."""
+    """엑셀 출력용 ``양식.xlsx`` 의 실제 경로를 찾는다 (없으면 후보 중 가장 가까운 것).
+
+    개발 트리에서는 사용자가 직접 건드리지 않는 파일을 모은 ``dev/`` 안에 둔다.
+    포터블/PyInstaller 빌드에서는 호환을 위해 루트·_MEIPASS 후보도 함께 본다."""
     candidates = [
-        _project_root() / "양식" / "양식.xlsx",
-        package_root().parent / "양식" / "양식.xlsx",
-        _project_root() / "양식.xlsx",        # 호환을 위한 fallback
+        _project_root() / "dev" / "양식.xlsx",      # 개발 트리(dev/ 로 정리)
+        _project_root() / "양식" / "양식.xlsx",      # 폴더형(호환)
+        _project_root() / "양식.xlsx",              # 루트 fallback(포터블 빌드)
+        resource_path("양식.xlsx"),                 # PyInstaller 번들(_MEIPASS) 대응
     ]
     for c in candidates:
         if c.exists():

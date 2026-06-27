@@ -98,7 +98,7 @@ class _MidTile(QWidget):
         self._selected = on
         if on:
             self.setStyleSheet(
-                "QWidget { background: #0E1424; border: 2px solid #00D4FF; "
+                "QWidget { background: #0E1424; border: 2px solid #39FF14; "
                 "border-radius: 8px; }"
             )
         else:

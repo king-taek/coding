@@ -24,6 +24,52 @@ class Candidate:
     score: float
 
 
+def score_ref_classical(ref_item: ImageItem,
+                        val_items: list[ImageItem],
+                        *,
+                        threshold: float,
+                        cfg=None,
+                        val_features: Optional[Mapping[Path, sim.Feature]] = None,
+                        components: Optional[set] = None,
+                        progress_cb=None,
+                        stop_cb=None) -> list[Candidate]:
+    """기준 1장 vs 후보 N장을 고전 파이프라인(pHash+ORB+SSIM)으로 채점.
+
+    ``MatcherWorker`` 와 고효율 모드 CPU 유닛이 공유하는 순수 함수 (Qt 비의존).
+    점수는 ``sim.score`` 가 이미 [0,1] 로 돌려준다.  ``val_features`` 가 주어지면
+    재추출을 생략한다.  ``progress_cb(idx,total)`` / ``stop_cb()->bool`` 은 옵션.
+
+    ``components`` (예: ``{"phash","ssim"}``) 가 주어지면 그 항만으로 채점한다 —
+    비싼 ORB 를 빼서 CPU 재채점을 빠르게 하는 고속 변형용.  ORB 를 안 쓰면 특징
+    추출에서도 ORB 검출을 생략(``need_orb=False``)해 추출 비용까지 줄인다."""
+    need_orb = components is None or ("orb" in components)
+    # 중앙-가중 ORB — cfg.orb_center_weight>0 이면 defect(중앙) 근접 매치에 가중(단일 패스).
+    center_strength = (float(getattr(cfg, "orb_center_weight", 0.0) or 0.0)
+                       if cfg is not None else 0.0)
+    ref_feat = sim.extract(ref_item.path, cfg=cfg, side="ref", need_orb=need_orb)
+    vfmap: dict[Path, sim.Feature] = dict(val_features or {})
+    total = len(val_items)
+    out: list[Candidate] = []
+    for idx, vi in enumerate(val_items, start=1):
+        if stop_cb is not None and stop_cb():
+            break
+        try:
+            vf = vfmap.get(vi.path)
+            if vf is None:
+                vf = sim.extract(vi.path, cfg=cfg, side="val", need_orb=need_orb)
+                vfmap[vi.path] = vf
+            s = sim.score(ref_feat, vf, components=components,
+                          center_strength=center_strength)
+        except Exception:
+            s = 0.0
+        if s >= threshold:
+            out.append(Candidate(item=vi, score=s))
+        if progress_cb is not None:
+            progress_cb(idx, total)
+    out.sort(key=lambda c: c.score, reverse=True)
+    return out
+
+
 class MatcherSignals(QObject):
     done = pyqtSignal(list)            # list[Candidate]
     progress = pyqtSignal(int, int)
@@ -62,12 +108,6 @@ class MatcherWorker(QThread):
         self._stop = True
 
     def run(self) -> None:        # type: ignore[override]
-        try:
-            ref_feat = sim.extract(self._ref.path, cfg=self._cfg, side="ref")
-        except Exception as exc:
-            self.signals.failed.emit(str(exc))
-            return
-
         # 슬롯 캐시에 미적재면 워커 thread 에서 한 번 빌드 (GUI 미블록).
         if self._slot_cache is not None and not self._val_features:
             try:
@@ -77,24 +117,15 @@ class MatcherWorker(QThread):
             except Exception:
                 self._val_features = {}
 
-        total = len(self._vals)
-        out: list[Candidate] = []
-        for idx, vi in enumerate(self._vals, start=1):
-            if self._stop:
-                break
-            try:
-                vf = self._val_features.get(vi.path)
-                if vf is None:
-                    vf = sim.extract(vi.path, cfg=self._cfg, side="val")
-                    # 다음 reference 를 위해 인메모리에 추가.
-                    self._val_features[vi.path] = vf
-                s = sim.score(ref_feat, vf)
-            except Exception as exc:
-                self.signals.failed.emit(f"{vi.path}: {exc}")
-                s = 0.0
-            if s >= self._threshold:
-                out.append(Candidate(item=vi, score=s))
-            self.signals.progress.emit(idx, total)
-
-        out.sort(key=lambda c: c.score, reverse=True)
+        try:
+            out = score_ref_classical(
+                self._ref, self._vals,
+                threshold=self._threshold, cfg=self._cfg,
+                val_features=self._val_features,
+                progress_cb=lambda idx, total: self.signals.progress.emit(idx, total),
+                stop_cb=lambda: self._stop,
+            )
+        except Exception as exc:
+            self.signals.failed.emit(str(exc))
+            return
         self.signals.done.emit(out)

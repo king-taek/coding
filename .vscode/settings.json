@@ -1,0 +1,17 @@
+{
+  "//1": "회사 보안 정책 가드 — 외부 패키지 매니저 자동 설치/실험을 차단.",
+  "python.experiments.enabled": false,
+  "python.experiments.optOutFrom": ["All"],
+
+  "//2": "이 저장소 표준 인터프리터 — .venv 의 Python 만 사용(외부 환경 매니저 불필요).",
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
+  "python.terminal.activateEnvironment": true,
+  "python.terminal.activateEnvInCurrentTerminal": false,
+
+  "//3": "테스트 러너 일치 — pytest 사용.",
+  "python.testing.pytestEnabled": true,
+  "python.testing.unittestEnabled": false,
+
+  "//4": "PowerShell/cmd 자동 활성화 시 외부 환경 매니저로 빠지지 않게.",
+  "python.envFile": "${workspaceFolder}/.env"
+}

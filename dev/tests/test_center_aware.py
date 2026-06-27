@@ -1,0 +1,276 @@
+"""중앙-인식(center-aware) 채점 + 린 프리셋 정리 + NPU 진단 — 헤드리스 단위 테스트.
+
+defect 이 정중앙인 AOI 이미지 특성을 활용하는 신규 레시피(영역융합 A·캐스케이드 B)와,
+개발자 모드 테스트 목록 정리(린 기본 + faceoff), 영역 점수 융합/캐스케이드 순수 로직,
+config 의 center_ratio 캐시 키를 무거운 의존성 없이 검증한다.
+"""
+
+from __future__ import annotations
+
+from dataclasses import replace
+
+from aoi_verification.app.config import SimilarityConfig
+from aoi_verification.app.dev import benchmark as bm
+from aoi_verification.app.dev import recipes as rx
+
+
+# ── 순수 함수: 영역 점수 융합 / 캐스케이드 선택 ─────────────────────────────
+def test_blend_region_scores_weighted():
+    cmap = {"a": 0.9, "b": 0.2}
+    fmap = {"a": 0.4, "b": 0.8}
+    out = bm.blend_region_scores(cmap, fmap, 0.6)
+    assert abs(out["a"] - (0.6 * 0.9 + 0.4 * 0.4)) < 1e-9
+    assert abs(out["b"] - (0.6 * 0.2 + 0.4 * 0.8)) < 1e-9
+
+
+def test_blend_handles_missing_and_clamps_weight():
+    out = bm.blend_region_scores({"a": 1.0}, {"b": 1.0}, 2.0)   # w>1 → 1.0 로 클램프
+    assert out["a"] == 1.0 and out["b"] == 0.0
+
+
+def test_cascade_survivors_keeps_top_center_scores():
+    cmap = {"a": 0.9, "b": 0.2, "c": 0.5, "d": 0.7}
+    assert bm.cascade_survivors(cmap, 2) == ["a", "d"]
+    assert bm.cascade_survivors(cmap, 99) == ["a", "d", "c", "b"]
+    assert len(bm.cascade_survivors(cmap, 0)) == 1            # 최소 1
+
+
+# ── 신규 레시피 등록 + 실제 채점 경로 배선용 필드 ──────────────────────────
+def test_center_aware_recipes_registered_and_wired():
+    g = {r.key: r for r in rx.group("center")}
+    assert len(g) >= 6
+    a = g["center_fusion_r25_w60"]
+    assert a.region_fusion and not a.cascade
+    assert a.center_ratio == 0.25 and a.center_weight == 0.6
+    b = g["center_cascade_r25_k8"]
+    assert b.cascade and not b.region_fusion and b.cascade_keep == 8
+    # 베이스는 현행과 동일(정확도 비교 공정) — GPU 융합.
+    assert a.recall == rx.RECALL_GPU and a.scoring == rx.SCORE_FUSION
+
+
+def test_center_recipe_to_cfg_passes_center_ratio():
+    cfg = rx.by_key("center_fusion_r20_w60").to_cfg()
+    assert cfg.center_ratio == 0.20
+
+
+# ── config: center_ratio 가 ROI 비율/캐시 키에 반영 ───────────────────────
+def test_center_ratio_cache_key_and_ratio():
+    c25 = replace(SimilarityConfig(center_crop=True), center_ratio=0.25)
+    assert c25._center_crop_ratio() == 0.25
+    assert c25.cache_extra("ref") == "c25"          # side 별 키 분리
+    assert c25.cache_extra(None) == ""              # side 미지정 → crop 안 함
+    legacy = SimilarityConfig(center_crop=True)      # ratio 0 → 레거시 0.3
+    assert legacy._center_crop_ratio() == 0.3 and legacy.cache_extra("val") == "c30"
+
+
+# ── 개발자 모드 테스트 목록 정리 — 린 기본 + faceoff + 아카이브 ──────────────
+def test_quick_is_survivors_only_no_dead_ends():
+    # center-aware 가 비효율로 입증된 뒤, 옵션은 '생존자'만 남겼다(center 는 quick 에서 제외).
+    quick = [r.key for r in rx.select("quick")]
+    assert len(quick) <= 12                         # 린(작게)
+    # 추천 엔진이 production 대비 speedup 을 계산할 수 있게 현행/기준선 항상 포함.
+    assert rx.PRODUCTION_SPEED_KEY in quick
+    assert rx.BASELINE_ACCURACY_KEY in quick
+    assert "rr_parallel" in quick                    # ×3.95 생존자
+    # 입증된 사패(임베딩 장치 교체·center-aware)는 옵션/quick 에서 빠진다.
+    assert "npu_mbnet_cpu_fuse" not in quick
+    assert not any(k.startswith("center_") for k in quick)
+
+
+def test_main_options_are_anchors_plus_top5():
+    # 실험 종료 후 옵션은 앵커(gold·현행) + TOP5 만 노출.
+    main = [r.key for r in rx.select("main")]
+    assert rx.BASELINE_ACCURACY_KEY in main and rx.PRODUCTION_SPEED_KEY in main
+    assert set(rx.TOP5_KEYS) <= set(main)
+    # 옵션에서 내린 레시피(사패·신규 실험)는 메인엔 없지만 코드(all+)엔 보존.
+    for archived in ("npu_mbnet_cpu_fuse", "gpu_fusion_topk20", "cpu_rr_phash",
+                     "center_fusion_r25_w60", "rr_npu_phash_parallel", "npu_hi_conc96"):
+        assert archived not in main
+        assert archived in set(rx.all_extended_keys())   # 기록은 보존(all+)
+
+
+def test_center_group_selectable_and_in_all_extended():
+    cen = {r.key for r in rx.select("center")}
+    assert "center_cascade_r25_k8_par" in cen
+    allx = set(rx.all_extended_keys())
+    assert cen <= allx                              # 아카이브/전체에 포함
+
+
+# ── NPU 배치 정확도 진단 — openvino 미가용 환경에서 안전 동작 ────────────────
+def test_npu_diag_returns_error_without_openvino():
+    rep = bm.diagnose_npu_embedding([], max_images=4)
+    assert "error" in rep                            # 빈 입력/미가용 → 에러 메시지(크래시 X)
+
+
+def test_cosine_helper():
+    assert abs(bm._cosine([1, 0], [1, 0]) - 1.0) < 1e-9
+    assert abs(bm._cosine([1, 0], [0, 1])) < 1e-9
+    assert bm._cosine([0, 0], [1, 1]) == 0.0
+
+
+# ── 중앙-가중 ORB(단일 패스) — 순수 가중 로직(cv2 불필요) ────────────────────
+def test_centrality_weights_center_high_edge_low():
+    import numpy as np
+    from aoi_verification.app.similarity import orb
+    coords = np.array([[50, 50], [0, 0], [100, 100]], dtype=float)  # 중앙·모서리·모서리
+    w = orb.centrality_weights(coords, (100, 100), 1.0)
+    assert abs(w[0] - 1.0) < 1e-9 and w[1] < 0.1 and w[2] < 0.1
+
+
+def test_centrality_weighted_ratio_strength0_equals_plain_and_upweights_center():
+    import numpy as np
+    from aoi_verification.app.similarity import orb
+    coords = np.array([[50, 50], [0, 0], [100, 100]], dtype=float)
+    # strength=0 → 단순 good/base
+    assert abs(orb.centrality_weighted_ratio([0, 1], coords, (100, 100), 0.0, 3) - 2 / 3) < 1e-9
+    # 좌표 없음 → 폴백(good/base)
+    assert abs(orb.centrality_weighted_ratio([0, 1], None, (100, 100), 0.5, 4) - 0.5) < 1e-9
+    # strength>0 → 중앙 매치가 가장자리 매치보다 높은 점수
+    c = orb.centrality_weighted_ratio([0], coords, (100, 100), 0.8, 3)
+    e = orb.centrality_weighted_ratio([1], coords, (100, 100), 0.8, 3)
+    assert c > e
+
+
+def test_orb_descriptor_carries_coords():
+    from aoi_verification.app.similarity import orb
+    od = orb.OrbDescriptor(keypoints=0, descriptors=None)   # 기본값 — 좌표/shape 옵션
+    assert od.coords is None and od.shape == (0, 0)
+
+
+def test_center_orb_recipes_registered_and_wired():
+    g = {r.key: r for r in rx.group("orb-center")}
+    assert set(rx.CENTER_ORB_KEYS) == set(g)
+    for r in g.values():
+        cfg = r.to_cfg()
+        assert cfg.orb_center_weight > 0          # 중앙 가중 켜짐
+        assert r.rerank_workers >= 2              # 병렬(단일 패스·생존자 속도)
+        assert r.recall == rx.RECALL_GPU          # 현행과 동일 베이스
+    # rr_orb_center50(고효율 모드 채택)은 TOP5/옵션에 노출돼 측정 가능.
+    assert "rr_orb_center50" in set(rx.MAIN_KEYS)
+
+
+# ── 확정·고착: 운영 채점기는 이미 재채점을 병렬화한다(직렬로 회귀 금지) ─────────
+def test_production_rerank_is_parallel():
+    import pytest
+    pytest.importorskip("PyQt6")
+    from aoi_verification.app.workers import efficiency_matcher as em
+    # 운영 FusionScheduler 는 ref 별 재채점을 코어 수만큼 풀로 돌린다(>=2).
+    assert em._rerank_workers() >= 2
+    # 회귀 가드: 스케줄러가 풀에 재채점을 submit 하는 코드가 유지돼야 한다.
+    import inspect
+    src = inspect.getsource(em.EfficiencyScheduler._consume_slot)
+    assert "_pool.submit" in src and "_rerank_one" in src
+
+
+# ── NPU 병렬 보조기 — N신호 z-융합(순수) + 레시피 배선 ──────────────────────
+def test_fuse_zscore_signals_combines_and_ignores_bad():
+    f = bm.fuse_zscore_signals([[0.9, 0.1, 0.5], [0.2, 0.8, 0.5], [0.7, 0.3, 0.5]])
+    assert len(f) == 3 and abs(sum(f)) < 1e-9        # z-합산은 평균 0
+    # 빈/길이불일치 신호는 무시(2신호와 동일).
+    assert bm.fuse_zscore_signals([[1, 2, 3], []]) == bm.fuse_zscore_signals([[1, 2, 3]])
+    assert bm.fuse_zscore_signals([]) == []
+    # 한 신호에서 큰 값일수록 융합 점수도 큼(순위 보존).
+    g = bm.fuse_zscore_signals([[3.0, 2.0, 1.0], [1.0, 2.0, 3.0]])
+    assert abs(g[1]) < 1e-9 and g[0] == -g[2]        # 대칭(반대 신호) → 가운데 0
+
+
+def test_npu_assist_recipes_registered_and_wired():
+    g = {r.key: r for r in rx.group("npu-assist")}
+    assert set(rx.NPU_ASSIST_KEYS) == set(g)
+    for r in g.values():
+        assert r.npu_defect_assist is True
+        assert r.recall == rx.RECALL_GPU             # GPU 임베딩 recall 은 현행 그대로
+        assert r.center_ratio > 0 and r.rerank_workers >= 2
+    # 실험 종료로 옵션(MAIN)에선 내렸지만 코드(all+)엔 보존.
+    assert set(rx.NPU_ASSIST_KEYS) & set(rx.MAIN_KEYS) == set()
+    assert set(rx.NPU_ASSIST_KEYS) <= set(rx.all_extended_keys())
+
+
+# ── 임베딩 후보 recall: 정답이 GPU/NPU 순위 몇 위에 있나(topk 안전성) ─────────
+def test_candidate_recall_ranks_and_worst():
+    order = {("A", "r1"): ["v1", "v2", "v3"],
+             ("A", "r2"): ["x", "y", "vc", "z"],     # 정답 vc = 3위
+             ("A", "r3"): ["a", "vd"]}               # 정답 vd = 2위
+    gt = {("A", "r1"): {"v1"}, ("A", "r2"): {"vc"}, ("A", "r3"): {"vd"}}
+    rec, worst, n = bm.candidate_recall(order, gt, ks=(1, 2, 5))
+    assert n == 3 and worst == 3                      # 최악 순위 3 → 최소 topk 3 필요
+    assert rec[1] == round(1 / 3, 4) and rec[2] == round(2 / 3, 4) and rec[5] == 1.0
+    # 정답이 후보에 아예 없으면 rank=None(어떤 topk 로도 못 잡음).
+    rec2, worst2, _ = bm.candidate_recall({("A", "r"): ["x", "y"]}, {("A", "r"): {"z"}}, ks=(5,))
+    assert rec2[5] == 0.0 and worst2 is None
+
+
+def test_gpu_models_preset_compares_mobilenet_and_resnet18():
+    gm = [r.key for r in rx.select("gpu-models")]
+    assert gm == rx.GPU_MODEL_KEYS
+    assert "gpu_fusion_b16" in gm and "gpu_fusion_resnet18" in gm   # 두 모델 비교
+    assert rx.by_key("gpu_embed_resnet18").embed_model == "resnet18"
+    assert rx.by_key("gpu_fusion_resnet18").recall == rx.RECALL_GPU  # NPU 없이 GPU
+    assert set(rx.GPU_MODEL_KEYS) <= rx.explicit_keys("gpu-models")
+
+
+def test_recipe_run_records_candidate_recall_fields():
+    from dataclasses import asdict
+    rr = bm.RecipeRun(key="x", name="x", embed_recall={"40": 0.9},
+                      worst_correct_rank=55, cand_n=41)
+    d = asdict(rr)
+    assert d["embed_recall"] == {"40": 0.9} and d["worst_correct_rank"] == 55
+
+
+# ── 실패 분석: recall@1 이 놓친 '그 쿼리'를 짚어낸다(순수) ────────────────────
+def test_query_failures_identifies_missed_query_and_rank():
+    res = {("A", "r1.jpg"): [("v1", 0.9), ("v2", 0.8)],
+           ("A", "r2.jpg"): [("vx", 0.7), ("vc", 0.6)]}     # r2: top1=vx 오답, 정답 vc=2위
+    gt = {("A", "r1.jpg"): {"v1"}, ("A", "r2.jpg"): {"vc"}}
+    fa = {(f["slot"], f["query"]): f for f in bm.query_failures(res, gt)}
+    assert fa[("A", "r1.jpg")]["ok"] is True and fa[("A", "r1.jpg")]["correct_rank"] == 1
+    m = fa[("A", "r2.jpg")]
+    assert m["ok"] is False and m["top1"] == "vx" and m["correct_rank"] == 2
+    # GT 없는 쿼리는 제외.
+    assert len(bm.query_failures(res, {("A", "r1.jpg"): {"v1"}})) == 1
+
+
+# ── 최종 벤치 프리셋(top5 / final) + 고전 워밍업 2회 + NPU 고가동 5종 ──────────
+def test_top5_preset_is_five_stable_survivors():
+    top5 = [r.key for r in rx.select("top5")]
+    assert len(top5) == 5
+    assert "cpu_rr_phash_orb" in top5 and "rr_orb_center50" in top5
+    assert set(top5) <= set(rx.all_extended_keys())
+
+
+def test_final_preset_runs_classical_first_and_second():
+    final = [r.key for r in rx.select("final")]
+    # 고전이 ①워밍업(1번째) → ②정식(2번째) 으로 연속(순서 편향 제거 — 사용자 요청).
+    assert final[0] == "cpu_classical_warmup"
+    assert final[1] == rx.BASELINE_ACCURACY_KEY
+    assert final[2] == rx.PRODUCTION_SPEED_KEY
+    # 워밍업은 정식 고전과 같은 채점(같은 scoring/recall)이되 키만 다르다.
+    w = rx.by_key("cpu_classical_warmup")
+    g = rx.by_key(rx.BASELINE_ACCURACY_KEY)
+    assert w.scoring == g.scoring and w.recall == g.recall and w.key != g.key
+    # TOP5 가 뒤따른다(실험 종료로 NPU 고가동은 final 에서 제외).
+    assert set(rx.TOP5_KEYS) <= set(final)
+    assert not (set(rx.NPU_HI_KEYS) & set(final))
+    # 워밍업·TOP5 는 '개별 명시'로 스킵 면제(대상 장비에서 그대로 측정).
+    ek = rx.explicit_keys("final")
+    assert "cpu_classical_warmup" in ek and set(rx.TOP5_KEYS) <= ek
+
+
+def test_npu_hi_recipes_drive_npu_hard_batch1():
+    g = {r.key: r for r in rx.group("npu-hi")}
+    assert len(g) == 5
+    for r in g.values():
+        assert r.embed_batch == 1          # 배치 정확도 버그 회피
+        assert (r.concurrency >= 64 or r.streams >= 4 or r.npu_defect_assist)
+    assert g["npu_hi_split"].recall == rx.RECALL_GPU_NPU
+    assert g["npu_hi_throughput"].perf_hint == "THROUGHPUT"
+
+
+def test_recipe_run_records_npu_usage_fields():
+    from dataclasses import asdict
+    rr = bm.RecipeRun(key="x", name="x", npu_used=True, npu_sec=4.2,
+                      npu_infer=809, npu_throughput=192.6, npu_busy_frac=0.2,
+                      npu_drive="jobs=96 streams=0 batch=1 hint=THROUGHPUT")
+    d = asdict(rr)
+    assert d["npu_used"] is True and d["npu_busy_frac"] == 0.2
+    assert "jobs=96" in d["npu_drive"]

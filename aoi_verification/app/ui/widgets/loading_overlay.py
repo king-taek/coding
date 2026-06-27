@@ -130,6 +130,14 @@ class LoadingOverlay(QWidget):
         self._progress.setFixedWidth(360)
         self._progress.setRange(0, 100)
         self._progress.setValue(0)
+        self._progress.setTextVisible(True)
+        # %가 아니라 처리 갯수(done / total)로 표시한다.
+        self._progress.setFormat("%v / %m")
+        # 진행 바 부드러운 채움 — 목표 갯수로 매끄럽게 tween (ease-out).
+        self._target_val = 0
+        self._anim = QTimer(self)
+        self._anim.setInterval(16)            # ~60fps
+        self._anim.timeout.connect(self._tween_step)
 
         self._sparkline = _Sparkline(self)
         self._sparkline.hide()
@@ -166,6 +174,7 @@ class LoadingOverlay(QWidget):
 
     def hide_overlay(self) -> None:
         self.hide()
+        self._anim.stop()
         self._sparkline.hide()
         self._sparkline.clear()
         self._cancel_btn.hide()
@@ -179,12 +188,33 @@ class LoadingOverlay(QWidget):
         if message:
             self._label.setText(message)
         if total > 0:
-            pct = int(done * 100 / total)
-            self._progress.setRange(0, 100)
-            self._progress.setValue(pct)
+            done = max(0, min(int(done), int(total)))
+            self._target_val = done
+            if self._progress.maximum() != total:     # 단계 전환/총량 변경 → 스냅
+                self._anim.stop()
+                self._progress.setRange(0, total)
+                self._progress.setValue(done)
+            else:
+                cur = self._progress.value()
+                if done <= cur:                       # 리셋/감소 → 즉시 스냅
+                    self._anim.stop()
+                    self._progress.setValue(done)
+                elif not self._anim.isActive():       # 증가 → 부드럽게 tween
+                    self._anim.start()
         else:
-            self._progress.setRange(0, 0)
+            self._anim.stop()
+            self._progress.setRange(0, 0)             # 무한 진행(busy)
         self._cover_parent()
+
+    def _tween_step(self) -> None:
+        cur = self._progress.value()
+        if cur >= self._target_val:
+            self._progress.setValue(self._target_val)
+            self._anim.stop()
+            return
+        gap = self._target_val - cur
+        cur += max(1, gap // 4)                       # ease-out: 남은 격차의 1/4
+        self._progress.setValue(min(cur, self._target_val))
 
     # ------------------------------------------------------------------
     def eventFilter(self, obj, event) -> bool:  # noqa: N802

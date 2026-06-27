@@ -1,0 +1,32 @@
+"""테스트 공통 설정.
+
+- 캐시 디렉토리를 임시 폴더로 격리해서 실제 사용자 디렉토리를 더럽히지 않는다.
+- 테스트는 PyQt6/torch/cv2 같은 무거운 의존성을 거의 쓰지 않도록 설계.
+"""
+
+import os
+import sys
+import tempfile
+from pathlib import Path
+
+# 패키지 import 가능하도록 저장소 루트를 path 에 추가.
+# (tests 는 dev/tests/ 로 정리됨 → 루트는 parents[2])
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def isolated_cache(monkeypatch, tmp_path):
+    """모든 테스트가 임시 HOME 의 캐시 디렉토리를 쓰도록 강제."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    # exe launcher 가 설정하는 캐시 위치 override 가 테스트에 새지 않도록 제거.
+    monkeypatch.delenv("AOI_DATA_HOME", raising=False)
+    # paths.cache_root() 는 Path.home() 으로 시작하니, HOME 만 바꿔도 동작.
+    # 세션 간 mtime 메모이즈가 새지 않도록 테스트마다 초기화(#5).
+    try:
+        from aoi_verification.app.utils import cache as _cache
+        _cache.reset_mtime_cache()
+    except Exception:
+        pass
+    yield tmp_path

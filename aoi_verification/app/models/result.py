@@ -4,19 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
-
-MatchDirection = Literal["A→B", "B→A", "양방향"]
 
 
 @dataclass
 class MatchResult:
     """기준 사진 ↔ 검증 사진 1:1 매칭 한 줄."""
     slot: str
-    ref_path: Path        # 항상 "낮은 호기" 쪽 사진을 가리키도록 정규화
-    val_path: Path        # "높은 호기" 쪽 사진
+    ref_path: Path        # 기준 쪽 사진
+    val_path: Path        # 검증 쪽 사진
     score: float
-    direction: MatchDirection = "A→B"
 
     @property
     def key(self) -> tuple[str, str, str]:
@@ -46,3 +42,6 @@ class FinalResult:
     # Stage 2 에서 매칭을 찾지 못한 (Skip + No-match) 기준 사진들 — 엑셀에
     # ‘기준 이미지 + 빨간 파일명’ 행으로 함께 표기 (#7).
     unmatched_refs: list[MissEntry] = field(default_factory=list)
+    # KLA 장비 사용 시: {slot명(WaferID) → KLA 하위폴더명}.  엑셀 B열에 slot명 아래
+    # 회색 글씨로 KLA 폴더명을 함께 표기한다.
+    kla_folders: dict[str, str] = field(default_factory=dict)

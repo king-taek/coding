@@ -5,7 +5,7 @@ QWidget {
     color: #E5F4FF;
     font-family: "Rajdhani", "Pretendard", "Noto Sans KR",
                  "Malgun Gothic", "Segoe UI", sans-serif;
-    font-size: 13px;
+    font-size: 14px;
 }
 
 QMainWindow, QDialog {
@@ -21,56 +21,57 @@ QLabel[role="title"] {
                  "Malgun Gothic", "Segoe UI", sans-serif;
     font-size: 22px;
     font-weight: 700;
-    color: #00D4FF;
+    color: #39FF14;
     letter-spacing: 2px;
 }
 
 QLabel[role="subtitle"] {
-    font-size: 14px;
-    color: #7FB3D5;
+    font-size: 15px;
+    color: #9CC5E8;
 }
 
 QLabel[role="muted"] {
-    color: #586378;
+    color: #7FB3D5;
 }
 
 /* ── 카드 ───────────────────────────────────────────────────────────── */
 QFrame[role="card"] {
     background-color: #111827;
-    border: 1px solid #00D4FF;
+    border: 1px solid #39FF14;
     border-radius: 10px;
 }
 
 QFrame[role="card-soft"] {
     background-color: #0E1424;
-    border: 1px solid #1F2A3F;
+    border: 1px solid #2A3A5A;
     border-radius: 10px;
 }
 
 QFrame[role="section"] {
     background-color: #0E1424;
-    border: 1px solid #1F2A3F;
+    border: 1px solid #2A3A5A;
     border-radius: 8px;
 }
 
 /* ── 버튼 ───────────────────────────────────────────────────────────── */
 QPushButton {
     background-color: transparent;
-    color: #00D4FF;
-    border: 1px solid #00D4FF;
+    color: #39FF14;
+    border: 1px solid #39FF14;
     border-radius: 6px;
-    padding: 8px 18px;
+    padding: 9px 20px;
+    font-size: 14px;
     font-weight: 600;
     letter-spacing: 1px;
 }
 
 QPushButton:hover {
-    background-color: rgba(0, 212, 255, 32);
+    background-color: rgba(57, 255, 20, 32);
     color: #E5F4FF;
 }
 
 QPushButton:pressed {
-    background-color: rgba(0, 212, 255, 60);
+    background-color: rgba(57, 255, 20, 60);
 }
 
 QPushButton:disabled {
@@ -79,9 +80,9 @@ QPushButton:disabled {
 }
 
 QPushButton[role="primary"] {
-    background-color: rgba(0, 212, 255, 24);
+    background-color: rgba(57, 255, 20, 24);
     color: #E5F4FF;
-    border: 1px solid #00D4FF;
+    border: 1px solid #39FF14;
 }
 
 QPushButton[role="danger"] {
@@ -102,21 +103,22 @@ QPushButton[role="ghost"] {
     border-color: #1F2A3F;
 }
 QPushButton[role="ghost"]:hover {
-    color: #00D4FF;
-    border-color: #00D4FF;
+    color: #39FF14;
+    border-color: #39FF14;
 }
 
 /* ── 입력 위젯 ──────────────────────────────────────────────────────── */
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
     background-color: #0E1424;
-    border: 1px solid #1F2A3F;
+    border: 1px solid #2A3A5A;
     border-radius: 6px;
-    padding: 6px 10px;
+    padding: 7px 12px;
     color: #E5F4FF;
 }
 
 QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {
-    border-color: #00D4FF;
+    border-color: #39FF14;
+    border-width: 2px;
 }
 
 QSlider::groove:horizontal {
@@ -125,13 +127,13 @@ QSlider::groove:horizontal {
     border-radius: 3px;
 }
 QSlider::handle:horizontal {
-    background: #00D4FF;
+    background: #39FF14;
     width: 16px;
     margin: -6px 0;
     border-radius: 8px;
 }
 QSlider::sub-page:horizontal {
-    background: #0099FF;
+    background: #00C853;
     border-radius: 3px;
 }
 
@@ -140,14 +142,14 @@ QCheckBox {
     spacing: 8px;
 }
 QCheckBox::indicator {
-    width: 16px;
-    height: 16px;
-    border: 1px solid #00D4FF;
-    border-radius: 3px;
+    width: 18px;
+    height: 18px;
+    border: 2px solid #39FF14;
+    border-radius: 4px;
     background: transparent;
 }
 QCheckBox::indicator:checked {
-    background: #00D4FF;
+    background: #39FF14;
 }
 
 QRadioButton {
@@ -155,14 +157,14 @@ QRadioButton {
     spacing: 8px;
 }
 QRadioButton::indicator {
-    width: 14px;
-    height: 14px;
-    border: 1px solid #00D4FF;
-    border-radius: 7px;
+    width: 16px;
+    height: 16px;
+    border: 2px solid #39FF14;
+    border-radius: 8px;
     background: transparent;
 }
 QRadioButton::indicator:checked {
-    background: #00D4FF;
+    background: #39FF14;
 }
 
 /* ── 스크롤 ────────────────────────────────────────────────────────── */
@@ -179,7 +181,7 @@ QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
     min-width: 24px;
 }
 QScrollBar::handle:vertical:hover, QScrollBar::handle:horizontal:hover {
-    background: #00D4FF;
+    background: #39FF14;
 }
 QScrollBar::add-line, QScrollBar::sub-line {
     width: 0; height: 0; background: transparent;
@@ -194,23 +196,23 @@ QProgressBar {
     color: #E5F4FF;
 }
 QProgressBar::chunk {
-    background: #00D4FF;
+    background: #39FF14;
     border-radius: 5px;
 }
 
 /* ── 그룹박스 ───────────────────────────────────────────────────────── */
 QGroupBox {
-    border: 1px solid #1F2A3F;
+    border: 1px solid #2A3A5A;
     border-radius: 8px;
     margin-top: 14px;
     padding: 10px 8px 8px 8px;
-    color: #7FB3D5;
+    color: #9CC5E8;
 }
 QGroupBox::title {
     subcontrol-origin: margin;
     left: 14px;
     padding: 0 6px;
-    color: #00D4FF;
+    color: #39FF14;
     font-weight: 700;
     letter-spacing: 1px;
 }
@@ -219,7 +221,29 @@ QGroupBox::title {
 QToolTip {
     background-color: #111827;
     color: #E5F4FF;
-    border: 1px solid #00D4FF;
-    padding: 6px;
+    border: 1px solid #39FF14;
+    padding: 8px;
     border-radius: 4px;
+}
+
+/* ── 도움말 토글 버튼 (? 버튼) ───────────────────────────────────────────── */
+QToolButton[objectName="helpToggle"] {
+    color: #39FF14;
+    border: 1px solid #39FF14;
+    border-radius: 11px;
+    min-width: 22px;
+    min-height: 22px;
+    max-width: 22px;
+    max-height: 22px;
+    font-weight: 700;
+    font-size: 13px;
+    background: transparent;
+    padding: 0;
+}
+QToolButton[objectName="helpToggle"]:hover {
+    background: rgba(57, 255, 20, 24);
+}
+QToolButton[objectName="helpToggle"]:checked {
+    background: rgba(57, 255, 20, 48);
+    color: #E5F4FF;
 }

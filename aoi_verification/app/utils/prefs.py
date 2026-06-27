@@ -19,8 +19,8 @@ _PREFS_FILE = "ui_prefs.json"
 
 
 # 자동화 수준 상수 (#3 올인원 모드) — 코드 전반에서 raw string 대신 이걸 사용.
+# ‘수동’은 제거되어 사진 직접 선택 / 모두 자동 두 가지만 남는다(둘 다 자동 매치).
 class AutomationLevel:
-    MANUAL = "manual"
     USER_SELECT = "user_select"
     AUTO_ALL = "auto_all"
 
@@ -31,16 +31,21 @@ class AutomationLevel:
         return level in cls.AUTO_MODES
 
 
-# 유사도 엔진 모드 — 기본(현행) vs 고속(임베딩+ANN).  raw string 대신 사용.
+# 유사도 엔진 모드 — 기본(현행) vs 고효율(CPU+GPU fusion) vs 좌표 기반(v2).
 class EngineMode:
-    BASIC = "basic"        # 기존 파이프라인, 변경 없음 (기본값)
-    FAST = "fast"          # 임베딩 + ANN(hnswlib 또는 NumPy 폴백), 상위 K 재정렬
+    BASIC = "basic"            # 기존 파이프라인, 변경 없음 (기본값)
+    EFFICIENCY = "efficiency"  # CPU(고전)+GPU(MobileNetV3) fusion-zscore
+    COORDINATE = "coordinate"  # 좌표 직접 매칭 (v2) — 유사도 계산 없음
 
-    ALL = frozenset({BASIC, FAST})
+    ALL = frozenset({BASIC, EFFICIENCY, COORDINATE})
 
     @classmethod
-    def is_fast(cls, mode: str) -> bool:
-        return mode == cls.FAST
+    def is_efficiency(cls, mode: str) -> bool:
+        return mode == cls.EFFICIENCY
+
+    @classmethod
+    def is_coordinate(cls, mode: str) -> bool:
+        return mode == cls.COORDINATE
 
 
 @dataclass
@@ -69,24 +74,28 @@ class UiPrefs:
     # 썸네일 빠른 모드 (사용자가 강제로 가장 낮은 품질 티어 사용)
     speed_mode: bool = False
     # 자동화 수준 — 사용자 개입 정도 (#3 올인원 모드)
-    #   "manual"      : 기존 흐름. Stage 1 (검증/제외) + Stage 2 (수동 매치).
-    #   "user_select" : Stage 1 만 직접, Stage 2 자동 매치 + 검토.
-    #   "auto_all"    : Stage 1 건너뜀 (모든 ref 사용 + 그룹 대표만 큐에),
-    #                   Stage 2 자동 매치 + 그룹/매치 검토.
-    automation_level: str = "manual"
+    #   "user_select" : Stage 1 만 직접, Stage 2 자동 매치 + 검토.  (기본)
+    #   "auto_all"    : Stage 1 건너뜀 (모든 ref 사용), Stage 2 자동 매치 + 검토.
+    automation_level: str = "user_select"
     # OpenVINO (Intel GPU/NPU 가속) 자동 설치 안내를 거절한 경우 — 다시 묻지
     # 않음.  사용자가 ‘다시 보지 않기’ 를 선택했거나 설치 시도 후 실패하면 True.
     openvino_install_declined: bool = False
     # 유사도 엔진 모드 + 강화 전처리 토글 (계산 전용, 화면 표시는 원본 유지).
-    engine_mode: str = "basic"               # EngineMode.{BASIC,FAST}
-    center20_ref: bool = False               # 기준 사진 중앙 20% 만 사용
-    center20_val: bool = False               # 검증 사진 중앙 20% 만 사용
-    pre_grayscale: bool = False              # 강화: 흑백 + 고감도
-    pre_contrast: bool = False               # 강화: 고대비
-    kla_crop: bool = False                   # KLA 상/하단 정보영역 crop
-    group_threshold: float = 0.45            # 동일 defect 그룹화 pHash 임계치(#6)
-    kla_crop_top: float = 0.08               # 상단 잘라낼 비율 (0~0.4)
-    kla_crop_bottom: float = 0.08            # 하단 잘라낼 비율 (0~0.4)
+    engine_mode: str = "basic"               # EngineMode.{BASIC,EFFICIENCY}
+    persist_scores: bool = False             # 유사도 점수 디스크 캐시 (#5B)
+    # 고효율 모드 동시 추론 수(in-flight, NPU 기준; GPU 절반).  높일수록 NPU/GPU
+    # 메모리·throughput↑ (계산 결과 불변).  setup_page 슬라이더로 조절.
+    accel_concurrency: int = 32
+    # 고효율 모드 장치 사용 토글 + 정적 배치 B (테스트용).
+    use_cpu: bool = True
+    use_gpu: bool = True
+    use_npu: bool = False        # 효율 모드는 CPU+GPU fusion. NPU 비활성(코드만 보존).
+    embed_batch: int = 1
+    # 개발자 모드 — 켜면 셋업 화면에 ‘개발자 벤치마크’ 진입 버튼이 보인다.
+    # (환경변수 AOI_DEV_MODE 로도 켤 수 있다.)  일반 사용자에겐 영향 없음.
+    dev_mode: bool = False
+    # 좌표 기반 매칭(v2) 허용 오차 — µm 단위.  두 좌표가 이 거리 이내면 매칭.
+    coord_tolerance: float = 500.0
     extra: dict[str, Any] = field(default_factory=dict)
 
     # ------------------------------------------------------------------

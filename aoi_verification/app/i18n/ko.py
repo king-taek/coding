@@ -6,6 +6,8 @@ UI/로그/툴팁/오류 메시지 모두 이 모듈을 통해 참조합니다.
 
 # ── 앱/메타 ────────────────────────────────────────────────────────────────
 APP_TITLE = "AOI 검증"
+# 개발자 크레딧 — 주요 화면/상태바 공통 표시.
+CREDIT = "Developed by 임현택"
 
 # ── OpenVINO 자동 설치 안내 ───────────────────────────────────────────────
 OPENVINO_OFFER_TITLE = "Intel GPU / NPU 가속 활성화"
@@ -33,6 +35,7 @@ APP_AFFILIATION = "Bump 2 Dept. / AOI Engineer"
 BTN_OK = "확인"
 BTN_CANCEL = "취소"
 BTN_BACK = "뒤로"
+BTN_BACK_TO_SETUP = "← 설정으로"
 BTN_NEXT = "다음"
 BTN_START = "검증 시작"
 BTN_BROWSE = "폴더 선택…"
@@ -41,6 +44,8 @@ BTN_EXCLUDE = "제외"
 BTN_UNDO = "되돌리기(Z)"
 BTN_SKIP = "잠시 보류"            # 더이상 표시되지 않음 (#3) — 호환용
 BTN_NO_MATCH = "매칭 없음"
+BTN_MATCH_UNDO = "되돌리기"
+MATCH_UNDO_TOOLTIP = "직전 매칭/매칭없음 결정을 취소합니다 (Ctrl+Z)"
 BTN_RETRY_SKIP = "보류 재시도"
 BTN_SELECT_MODE = "선택 모드"
 BTN_CANCEL_SELECT_MODE = "선택 해제"
@@ -48,12 +53,20 @@ BTN_CANCEL_SELECT_MODE = "선택 해제"
 # ── 다중 선택 다이얼로그 (Stage 1 선택 모드) ─────────────────────────────
 BULK_SELECT_TITLE_FMT = "{panel} — 다중 선택"
 BULK_SELECT_HINT = (
-    "사진을 클릭해서 선택/해제하세요. 선택된 사진들에 아래 액션이 적용됩니다."
+    "사진을 클릭하거나 빈 곳에서 드래그해 여러 장을 선택/해제하세요. "
+    "선택된 사진들에 아래 액션이 적용됩니다."
 )
 BULK_SELECT_SUMMARY_FMT = "선택됨: {n} 장"
 BULK_SELECT_EMPTY = "표시할 사진이 없습니다."
 BULK_SELECT_ALL = "전체 선택"
 BULK_DESELECT_ALL = "선택 해제"
+INLINE_SELECT_COUNT_FMT = "선택 {n}장"
+# 사진 크기 슬라이더 / 페이지네이션 / 우클릭 확대 (대량 표시 대응)
+BULK_SIZE_LABEL = "사진 크기"
+BULK_PAGE_PREV = "◀ 이전"
+BULK_PAGE_NEXT = "다음 ▶"
+BULK_PAGE_LABEL_FMT = "페이지 {page} / {total}"
+BULK_TILE_ZOOM_TOOLTIP = "우클릭하여 크게 보기"
 BTN_REMOVE_FROM_TARGET = "검증 대상에서 제거"
 BTN_MOVE_TO_EXCLUDE = "제외로 이동"
 BTN_MOVE_TO_TARGET = "검증 대상으로 이동"
@@ -70,26 +83,6 @@ END_SELECTION_CONFIRM_FMT = (
 )
 BULK_SELECT_EXCLUDED_TITLE = "검증 제외 사진"
 
-# 동일 defect 그룹화 (#5)
-BTN_VIEW_GROUPS = "동일 defect 그룹 보기"
-BTN_VIEW_GROUPS_FMT = "동일 defect 그룹 보기 ({n})"
-GROUP_DIALOG_TITLE_FMT = "동일 defect 그룹 — {g} 그룹 / {n} 장"
-GROUP_DIALOG_HINT = (
-    "동일 슬롯 안에서 카메라 위치만 조금 다른 같은 defect 사진들을 묶었습니다. "
-    "그룹별로 [전체 검증] / [전체 제외] 를 한 번에 적용할 수 있습니다."
-)
-GROUP_DIALOG_EMPTY = (
-    "묶을 만한 동일 defect 그룹을 찾지 못했습니다 (모든 후보가 서로 다른 사진)."
-)
-GROUP_REF_ONLY_INFO = (
-    "동일 defect 그룹화는 기준 장비 사진에 대해서만 진행합니다.\n"
-    "현재 화면에는 그룹화할 기준 장비 후보가 없습니다."
-)
-GROUP_ROW_HEADER_FMT = "{slot} — {n} 장"
-GROUP_BTN_VERIFY_ALL = "이 그룹 전체 검증"
-GROUP_BTN_EXCLUDE_ALL = "이 그룹 전체 제외"
-GROUP_LOAD_FMT = "동일 defect 그룹 계산 중… {done} / {total}\n{status}"
-GROUP_RESULT_TOAST_FMT = "{n} 장이 {action} 처리되었습니다 (1 개 그룹)"
 BTN_EXPORT_EXCEL = "엑셀로 저장"
 BTN_OPEN_RESULT = "결과 폴더 열기"
 BTN_NEW_SESSION = "새 검증 시작"
@@ -107,10 +100,7 @@ REVIEW_BTN_UNDELETE = "삭제 취소 ↩"
 REVIEW_REMOVED_FMT = "{n} 개의 매칭이 결과에서 제외되었습니다."
 
 # ── 셋업 페이지 ────────────────────────────────────────────────────────────
-SETUP_TITLE = "AOI 검증 — 시작 설정"
-SETUP_MODE_LABEL = "검증 모드"
-SETUP_MODE_SINGLE = "한쪽만 검증"
-SETUP_MODE_CROSS = "양쪽 교차검증"
+SETUP_TITLE = "AOI Recipe Verificator"
 SETUP_REF_GROUP = "기준 장비"
 SETUP_VAL_GROUP = "검증 장비"
 SETUP_FOLDER_LABEL = "최상위 폴더"
@@ -126,6 +116,7 @@ SETUP_HINT = (
 # ── 검증 단계 헤더 ─────────────────────────────────────────────────────────
 STAGE1_TITLE = "Stage 1 — 후보 선별"
 STAGE2_TITLE = "Stage 2 — 유사도 기반 매칭"
+STAGE2_TITLE_COORD = "Stage 2 — 좌표 기반 매칭 (v2)"
 RESULT_TITLE = "검증 결과"
 
 PANEL_LEFT_CANDIDATES = "검증 후보들 (남은 사진)"
@@ -150,13 +141,20 @@ UNMATCHED_REVIEW_TITLE = "매치 실패 사진 검토 — {n} 장"
 UNMATCHED_REVIEW_PROGRESS_FMT = "{idx} / {total} — {slot}"
 UNMATCHED_REVIEW_HINT = (
     "매치 실패한 기준 사진을 하나씩 검토합니다. 같은 슬롯의 검증 장비 후보를"
-    " 유사도 순으로 보여주니, 맞는 사진이 있으면 클릭해서 매칭으로 확정하세요."
+    " 유사도 순으로 보여줍니다. 맞는 사진을 클릭해 선택(파란 테두리)한 뒤"
+    " [매치 확정] 을 누르세요. 후보를 더블클릭/우클릭하면 크게 비교할 수 있습니다."
 )
 UNMATCHED_REVIEW_NO_CANDIDATES = "이 슬롯에는 검증 장비 후보가 없습니다."
 UNMATCHED_REVIEW_DONE_FMT = "{n} 건의 신규 매칭을 확정했습니다."
 UNMATCHED_REVIEW_EMPTY = "검토할 매치 실패 사진이 없습니다."
+UNMATCHED_CONFIRM_ON_CLOSE = (
+    "선택(파란 테두리)했지만 아직 확정하지 않은 후보가 있습니다.\n"
+    "선택한 대로 매칭하시겠습니까?"
+)
 BTN_UNMATCHED_PICK = "이 사진으로 매칭"
-BTN_UNMATCHED_NEXT = "건너뛰기 (다음)"
+BTN_UNMATCHED_CONFIRM = "매치 확정"
+BTN_UNMATCHED_SELECT_THIS = "이 후보로 선택"
+BTN_UNMATCHED_NEXT = "다음 사진"
 BTN_UNMATCHED_PREV = "← 이전"
 BTN_UNMATCHED_CLOSE = "검토 종료"
 
@@ -173,7 +171,7 @@ ZOOM_BTN_PICK_MATCH = "이 사진으로 매칭"
 SHORTCUT_TOOLTIP = (
     "단축키:  ← 또는 1 = 검증   /   → 또는 2 = 제외   /   Z = 되돌리기"
 )
-SHORTCUT_STAGE2_TOOLTIP = "단축키:  S = 잠시 보류    N = 매칭 없음 확정"
+SHORTCUT_STAGE2_TOOLTIP = "단축키:  N = 매칭 없음 확정    Ctrl+Z = 되돌리기"
 PANEL_NO_MATCH_LIST = "매칭 없음 확정"
 
 # ── 사진 크기 슬라이더 ────────────────────────────────────────────────────
@@ -184,70 +182,73 @@ SLOT_LABEL_FMT = "Slot: {slot}"
 HOWTO_TOGGLE_OPEN = "사용 방법 ▾"
 HOWTO_TOGGLE_CLOSE = "사용 방법 ▴"
 
-# ── 썸네일 빠른 모드 ──────────────────────────────────────────────────────
-SPEED_MODE_LABEL = "빠른 모드 (썸네일 화질 낮춤)"
-SPEED_MODE_TOOLTIP = (
-    "사진이 많을 때 썸네일/중간 이미지 화질을 자동으로 낮춰 처리 시간을\n"
-    "줄입니다. 체크하면 항상 가장 빠른 티어 (140px / Q65) 를 사용합니다.\n"
-    "결과 엑셀에 들어가는 중간 이미지에도 영향을 줍니다."
+# ── 유사도 엔진 모드 + 중앙 전처리 ────────────────────────────────────────
+ENGINE_CARD_TITLE = "매칭 설정"
+LEGACY_MODE_OPEN = "▼ 구형 모드 (유사도 엔진)"
+LEGACY_MODE_CLOSE = "▲ 구형 모드 (유사도 엔진)"
+LEGACY_MODE_HINT = (
+    "이 섹션을 펼치면 유사도 엔진·임계치 기반 구형 모드로 전환됩니다.\n"
+    "기본 동작은 좌표 매칭 모드(파일명/INI/KLA 좌표 데이터 활용)입니다.\n"
+    "유사도 점수가 임계치 이상인 가장 가까운 후보를 자동 선택합니다.\n"
+    "기본 모드 — CPU 정밀 비교 / 고효율 모드 — CPU+GPU 임베딩."
 )
-
-# ── 유사도 엔진 모드 + 강화/KLA 전처리 ────────────────────────────────────
-ENGINE_CARD_TITLE = "유사도 엔진"
+COORD_NO_DATA_MSG = (
+    "좌표 정보가 없습니다.\n\n"
+    "이미지 파일명 또는 폴더에 좌표 데이터(Camtek LIVE / INI / KLA .001)가\n"
+    "없어 좌표 매칭을 진행할 수 없습니다.\n\n"
+    "구형 모드(유사도 엔진)로 다시 시작하세요."
+)
+NEAR_MATCH_BADGE = "허용범위 초과"
+SCORE_DIST_FMT = "{dist:.0f} µm"
+SCORE_DIST_OVER_FMT = "{dist:.0f} µm (허용범위 초과)"
+ENGINE_CARD_LEGACY_TITLE = "유사도 엔진"
 ENGINE_MODE_BASIC = "기본 모드 (정밀 비교)"
-ENGINE_MODE_FAST = "고속 모드 (대용량 권장)"
+ENGINE_MODE_EFFICIENCY = "고효율 모드 (CPU+GPU)"
+ENGINE_MODE_COORDINATE = "좌표 매칭 모드 (v2)"
 ENGINE_MODE_TOOLTIP = (
-    "기본 모드: 모든 후보를 정밀 비교 (정확하지만 대용량에서 느림).\n"
-    "고속 모드: 가벼운 이미지 특징으로 후보를 빠르게 추린 뒤, 상위 후보만\n"
-    "  정밀 비교로 재정렬합니다.  사진이 수천 장 이상일 때 권장.\n"
-    "  (별도 설치/인터넷 없이 동작합니다.)"
+    "기본 모드: 모든 후보를 CPU 고전(pHash+ORB+SSIM)으로 정밀 전수 비교\n"
+    "  (멀티코어 병렬). 가장 안전하고 정확하지만 대용량에서 느립니다 (CPU 만 사용).\n"
+    "고효율 모드: Intel GPU(MobileNetV3) 임베딩으로 후보를 빠르게 추리고, 상위 후보를\n"
+    "  CPU 가 ORB(키포인트) 단독·중앙(defect) 가중으로 정밀 재채점해 융합합니다.\n"
+    "  반도체 AOI 이미지는 defect 이 정중앙에 있어 중앙 가중이 판별력을 높입니다.\n"
+    "  (Intel GPU+OpenVINO 권장, 없으면 CPU 단독으로 자동 폴백. GPU+CPU 동시 가동.)\n"
+    "좌표 매칭 모드(v2): 이미지 유사도 대신 defect 좌표(col/row + x/y µm)로 직접 매칭.\n"
+    "  Camtek INI / LIVE 파일명 / KLA .001 파일에서 자동 추출합니다.\n"
+    "  좌표가 없는 이미지는 기본 모드로 폴백하여 처리합니다."
 )
-ENGINE_FAST_UNAVAILABLE = (
-    "고속 모드를 사용할 수 없어 기본 모드로 진행합니다 (torch 미설치)."
+COORD_TOLERANCE_LABEL = "허용 오차 (µm)"
+COORD_TOLERANCE_TOOLTIP = (
+    "좌표 매칭 모드에서 두 defect 좌표의 최대 허용 거리 (µm).\n"
+    "이 값 이하면 동일 defect 으로 간주합니다.\n"
+    "기본값 500 µm 은 TB500 한 die 크기 대비 약 1% 수준입니다."
 )
-# 고속 모드 의존성 설치 안내
-FAST_DEPS_TITLE = "고속 모드 준비"
-FAST_DEPS_BODY_FMT = (
-    "고속 모드(임베딩 + ANN)를 사용하려면 아래 패키지 설치가 필요합니다.\n"
-    "설치하지 않으면 고속 모드가 기본 모드로 폴백되어 속도 차이가 없습니다.\n\n"
-    "  • {pkgs}\n\n"
-    "지금 설치할까요?  (인터넷 필요)"
+ACCEL_CONCURRENCY_LABEL = "동시 추론 수"
+ACCEL_CONCURRENCY_TOOLTIP = (
+    "고효율 모드에서 GPU/NPU 가 동시에 처리할 추론 개수(in-flight) 입니다.\n"
+    "값을 높일수록 NPU/GPU 메모리 사용량과 시간당 처리량(throughput)이 함께\n"
+    "올라갑니다 — 계산(모델·점수) 자체는 동일합니다.\n"
+    "NPU 기준 값이며 GPU 는 그 절반을 사용합니다.  작업 관리자/상태바로 메모리를\n"
+    "보면서 ~80% 정도까지 올려도 됩니다(정확한 상한이 아니라 강도 조절)."
 )
-FAST_DEPS_NOTE_OPENVINO = (
-    "\n※ openvino 는 Intel GPU/NPU 가속용(선택) — 설치 시 임베딩이 크게 빨라집니다."
+# 고효율 모드 장치 토글 + 정적 배치 B (단기 테스트용).
+DEVICE_CPU_LABEL = "CPU"
+DEVICE_GPU_LABEL = "GPU"
+DEVICE_NPU_LABEL = "NPU"
+DEVICE_TOGGLE_TOOLTIP = (
+    "고효율 모드에서 사용할 연산 장치 (테스트용).  끄면 그 장치 유닛을 띄우지\n"
+    "않습니다.  전부 끄면 안전하게 CPU 로 폴백합니다.  계산 결과는 동일."
 )
-FAST_DEPS_BTN_INSTALL = "지금 설치"
-FAST_DEPS_BTN_BASIC = "기본 모드로 진행"
-FAST_DEPS_INSTALLING = "고속 모드 패키지 설치 중…\n{line}"
-FAST_DEPS_DONE = (
-    "설치 완료!  [검증 시작] 을 다시 누르면 고속 모드로 진행됩니다."
+EMBED_BATCH_LABEL = "배치 B"
+EMBED_BATCH_TOOLTIP = (
+    "정적 배치 B 재컴파일 (테스트용).  1=끔(현행).  >1 이면 요청당 B장을 한 번에\n"
+    "추론해 NPU/GPU 점유율을 더 높일 수 있습니다.  단, NPU 가 정적 배치를 지원\n"
+    "해야 하며 실패 시 해당 유닛은 비활성(상태바 툴팁의 에러 참고).  계산 결과는 동일."
 )
-FAST_DEPS_DONE_RESTART = (
-    "설치는 끝났지만 적용하려면 프로그램을 다시 시작해야 합니다.\n"
-    "재시작 후 [검증 시작] 을 누르면 고속 모드가 적용됩니다."
+ENGINE_EFFICIENCY_CPU_ONLY = (
+    "가속 장치(Intel GPU/NPU)가 없어 CPU만으로 고효율 모드를 실행합니다."
 )
-FAST_DEPS_FAILED_FMT = (
-    "설치 실패 — {error}\n\n"
-    "수동 설치:  pip install hnswlib"
-)
-CENTER20_REF_LABEL = "기준 사진 중앙 30%만 사용"
-CENTER20_VAL_LABEL = "검증 사진 중앙 30%만 사용"
-CENTER20_TOOLTIP = (
-    "유사도 계산 시 사진의 중앙 30% 영역만 사용합니다.\n"
-    "테두리/배경 차이를 무시하고 중심부 패턴에 집중할 때 유용합니다.\n"
-    "기준·검증을 각각 켤 수 있으며, 보통 둘 다 켜는 것이 정확합니다.\n"
-    "썸네일/엑셀 이미지는 원본 그대로 유지됩니다."
-)
-GROUP_THRESHOLD_LABEL = "그룹화 임계치"
-GROUP_THRESHOLD_TOOLTIP = (
-    "동일 defect 그룹화의 pHash 유사도 임계치입니다.\n"
-    "높일수록 더 비슷한 사진끼리만 묶이고(엄격), 낮출수록 느슨하게 묶입니다.\n"
-    "'모든 사진 자동' 모드의 대표 사진 선별에 영향을 줍니다."
-)
+ACCEL_UNITS_FMT = "가속: {units}"
 PRE_GROUP_TITLE = "강화 전처리 (계산 전용 — 화면 표시는 원본 유지)"
-PRE_GRAYSCALE_LABEL = "흑백 + 고감도"
-PRE_CONTRAST_LABEL = "고대비"
-KLA_CROP_LABEL = "KLA 정보영역 잘라내기 (상·하단 텍스트)"
 PRE_GROUP_TOOLTIP = (
     "유사도 계산에만 적용되는 이미지 보정입니다. 썸네일/엑셀 이미지는\n"
     "원본 그대로 유지됩니다. 각 옵션은 독립적으로 켤 수 있습니다."
@@ -259,6 +260,16 @@ SIZE_TIER_NOTICE_FMT = (
 # ── 상태 바: 메모리 / 진행 ────────────────────────────────────────────────
 MEMORY_USAGE_FMT = "메모리 사용량: {mb} MB"
 MEMORY_PRESSURE_TOAST = "메모리 사용량이 높아 캐시를 정리했습니다"
+
+# ── 상태 바: CPU/GPU 사용량 ──────────────────────────────────────────────
+# CPU 는 실제 사용률(%), GPU 는 가동/대기(추론 중 여부) — Intel GPU 의 실제
+# 점유율(%)은 이식성 있게 얻을 수 없어 '가동/대기'로 표시한다.
+USAGE_CPU_FMT = "CPU {pct}%"
+USAGE_GPU_FMT = "GPU {state}"
+USAGE_STATE_BUSY = "가동"
+USAGE_STATE_IDLE = "대기"
+USAGE_STATE_NONE = "없음"
+USAGE_SEP = "   "
 
 # ── Stage 2 더 크게 보기 ───────────────────────────────────────────────────
 BTN_EXPAND_VIEW = "더 크게 보기"
@@ -272,14 +283,18 @@ EXPAND_POSITION_FMT = "{cur} / {total}"
 # ── 셋업 화면 사용 설명 ────────────────────────────────────────────────────
 SETUP_HOW_TO_USE_TITLE = "사용 방법"
 SETUP_HOW_TO_USE_BODY = (
-    "① 검증 모드를 선택합니다  ·  한쪽만 검증 / 양쪽 교차검증\n"
-    "② 기준 장비와 검증 장비의 폴더와 호기 번호를 입력합니다\n"
-    "③ 유사도 임계치를 조정합니다  (기본 70%)\n"
+    "① 자동화 수준을 선택합니다  ·  사진 직접 선택 / 모두 자동\n"
+    "② 기준·검증 장비의 폴더와 호기 번호를 입력합니다\n"
+    "③ 허용 오차(µm)를 설정합니다  (기본 500 µm)\n"
+    "      ※ ‘구형 모드’ 섹션을 펼치면 유사도 엔진·임계치 기반으로 전환됩니다\n"
     "④ [검증 시작] 을 누르면 다음 순서로 진행됩니다\n"
-    "      ㄱ. 후보 선별 — 결정할 사진을 한 장씩 보면서 [✓ 검증] / [✕ 제외]\n"
-    "      ㄴ. 유사도 매칭 — 기준 사진별로 가장 비슷한 검증 사진을 선택\n"
+    "      ㄱ. 후보 선별 — 사진 직접 선택 시 기준 사진을 한 장씩 [✓ 검증] / [✕ 제외]\n"
+    "          (‘모두 자동’ 은 이 단계를 건너뜁니다)\n"
+    "      ㄴ. 좌표 매칭 — 허용 오차 내 자동 매치 후 ‘매치 검토’에서 확인·교체\n"
     "      ㄷ. 결과 저장 — 양식 폴더의 양식.xlsx 를 복사하여 자동 저장\n"
-    "단축키 — ← / 1 = 검증,  → / 2 = 제외,  Z = 되돌리기,  S = 건너뛰기"
+    "매치 검토에서 ‘크게 보기’로 기준·후보를 나란히 비교(←/→ 이동)\n"
+    "단축키 — 후보 선별: ← / 1 = 검증,  → / 2 = 제외,  Z = 되돌리기\n"
+    "             좌표 매칭: N = 매칭 없음,  Ctrl+Z = 되돌리기"
 )
 
 # ── 양식 파일 / 저장 파일 명명 ─────────────────────────────────────────────
@@ -295,94 +310,8 @@ TEMPLATE_NOT_FOUND_BODY = (
 WORKING_FILE_READY_FMT = "결과 파일이 준비되었습니다:\n{path}"
 WORKING_FILE_LABEL = "결과 파일 위치"
 
-# ── 학습 모델 / 동의 / 정확도 ──────────────────────────────────────────────
-CONSENT_TITLE = "학습 데이터 사용 동의"
-CONSENT_BODY_FMT = (
-    "이번 세션의 매칭 쌍 {n} 개를\n"
-    "유사도 모델의 학습 데이터로 추가할까요?\n\n"
-    "(다음 [모델 재학습] 시 반영됩니다.\n"
-    " 매칭되지 않은 사진은 사용하지 않습니다.)"
-)
-CONSENT_OK_FMT = "학습 데이터 {n} 쌍이 추가되었습니다."
-CONSENT_FAIL_FMT = "학습 데이터 저장 실패: {error}"
-
-MODEL_CARD_TITLE = "학습 모델"
-MODEL_OPTION_BASIC = "기본 탐지 모드 (학습 모델 미사용)"
-MODEL_OPTION_FMT = (
-    "{name}  ·  {pairs}쌍 학습  ·  Hit@5 {hit5}% [{lo}~{hi}]  ·  {evals}회"
-)
-MODEL_OPTION_NO_ACC_FMT = "{name}  ·  {pairs}쌍 학습  ·  평가 데이터 부족"
-MODEL_OPTION_BASELINE_FMT = (
-    "기본 탐지 모드  ·  Hit@5 {hit5}% [{lo}~{hi}]  ·  {evals}회 평가"
-)
-MODEL_DELTA_FMT = "  (vs 기본 모드: {sign}{delta}%p)"
-MODEL_WEAKEST_SLOT_FMT = "최약 슬롯: {slot}  ·  Hit@5 {hit5}%  ·  {picks}회"
-MODEL_DATA_COUNT_FMT = "수집된 학습 데이터: {n} 쌍"
-MODEL_NO_TORCH = "torch 가 설치되어 있지 않아 학습 기능을 사용할 수 없습니다."
-
-BTN_RETRAIN = "모델 재학습 시작"
-BTN_REFRESH_ACC = "정확도 갱신"
-BTN_DELETE_MODEL = "모델 삭제"
-BTN_EXPORT_MODEL = "내보내기"
-BTN_IMPORT_MODEL = "가져오기"
-EXPORT_DIALOG_TITLE = "모델 내보내기"
-IMPORT_DIALOG_TITLE = "모델 가져오기"
-EXPORT_DONE_FMT = "모델을 내보냈습니다:\n{path}"
-IMPORT_DONE_FMT = "모델 ‘{name}’ 을 가져왔습니다."
-EXPORT_FAIL_FMT = "내보내기 실패: {error}"
-IMPORT_FAIL_FMT = "가져오기 실패: {error}"
-
-LOAD_BACKBONE_FMT = "백본 임베딩 추출 중… {done} / {total}"
-LOAD_TRAIN_FMT = "헤드 학습 중… 에폭 {epoch} / {total}  ·  loss {loss:.3f}"
-
-TRAIN_DONE_FMT = "모델 ‘{name}’ 학습 완료. 다음 검증부터 적용됩니다."
-TRAIN_KEPT_BASIC_FMT = (
-    "모델 ‘{name}’ 학습은 완료했으나 기본 탐지 모드보다 정확도가 낮아\n"
-    "기본 모드를 유지합니다 (새 모델 Hit@1 {new}% vs 기본 {basic}%).\n"
-    "학습 데이터가 더 모이면 자동으로 다시 시도됩니다."
-)
-TRAIN_FAIL_FMT = "학습 실패: {error}"
-AUTO_RETRAIN_STARTED_FMT = (
-    "수집된 학습 데이터 {n} 쌍으로 모델 재학습을 백그라운드에서 시작합니다.\n"
-    "결과 화면을 그대로 두고 다른 작업을 해도 됩니다."
-)
-AUTO_RETRAIN_DONE_FMT = (
-    "자동 재학습 완료 — 새 모델 ‘{name}’ 이 적용되었습니다."
-)
-AUTO_RETRAIN_KEPT_BASIC_FMT = (
-    "자동 재학습 완료 — 모델 ‘{name}’ 은 저장되었지만, 기본 탐지 모드 보다\n"
-    "정확도가 낮아 기본 모드를 유지합니다."
-)
-TRAIN_NEED_MORE_DATA = (
-    "학습 데이터가 부족합니다. 매칭 쌍을 더 모은 뒤 다시 시도해 주세요."
-)
-TRAIN_CONFIRM_TITLE = "모델 재학습"
-TRAIN_CONFIRM_BODY_FMT = (
-    "현재 수집된 {n} 쌍의 데이터로 새 모델을 학습합니다.\n"
-    "기존 모델은 그대로 유지되고, 새 모델이 생성됩니다.\n"
-    "계속할까요?"
-)
-
-DELETE_CONFIRM_TITLE = "모델 삭제"
-DELETE_CONFIRM_BODY_FMT = (
-    "‘{name}’ 모델을 삭제하시겠습니까?\n"
-    "가중치 파일, 메타 정보, 평가 로그가 모두 제거됩니다."
-)
-
-ACC_REFRESH_NO_CHANGE = "갱신할 모델이 없거나, 평가 데이터가 부족합니다."
-ACC_REFRESH_DONE_FMT = "정확도 갱신 완료. {renamed} 개의 모델 파일이 변경되었습니다."
-
-MODEL_TOOLTIP = (
-    "정확도 = 모델 추천 순위와 사용자가 실제 선택한 후보의 일치도입니다.\n"
-    "같은 슬롯에 중복 사진이 많을 경우 절대값보다는 모델 간 비교용으로 보세요."
-)
-
 # ── 로딩/진행 ──────────────────────────────────────────────────────────────
 LOAD_THUMBNAIL_FMT = "썸네일 생성 중… {done} / {total}"
-LOAD_THRESHOLD_ANALYSIS = (
-    "임계치 추천 분석 중…\n"
-    "샘플 사진들의 유사도 분포를 측정해 권장 임계치를 계산합니다."
-)
 LOAD_STAGE_PREP = "다음 단계 준비 중…"
 LOAD_FEATURE_FMT = "검증 장비 특징 추출 중… {done} / {total}"
 LOAD_FEATURE_DONE = "검증 장비 특징 추출 완료 — 이후 매칭은 즉시 처리됩니다"
@@ -392,29 +321,53 @@ LOAD_SCORING_FMT = "유사도 계산 중… {done} / {total}"
 LOAD_PHASE_FMT = "{phase} 중… {done} / {total}"
 PHASE_FEATURE = "이미지 특징 분석"
 PHASE_SCORING = "유사도 계산"
+PHASE_EMBED = "후보 생성 (GPU 임베딩)"      # 고효율 모드 1단계 — 유사도 계산 직전
+PHASE_COORD = "좌표 매칭 중"                # 좌표 기반 매칭 v2
 LOAD_PRECOMPUTE_FMT = (
     "유사도 계산 중… {done} / {total}"
 )
 # 수동 모드: 첫 슬롯만 기다리고 나머지는 백그라운드 (#streaming).
+# 선행 단계(특징 분석/임베딩) 동안에도 '유사도 계산' 으로 오인되지 않도록 중립 문구.
 LOAD_PRECOMPUTE_FIRST_SLOT = (
-    "첫 슬롯 유사도 계산 중… 잠시만 기다려 주세요."
+    "첫 슬롯 준비 중… 잠시만 기다려 주세요."
 )
 LOAD_PRECOMPUTE_WAIT_FMT = (
     "{slot} 슬롯 유사도 계산을 기다리는 중… 다음 슬롯은 백그라운드에서 준비됩니다"
 )
 PRECOMPUTE_BG_STATUS_FMT = "백그라운드 유사도 계산: {idx} / {total} 슬롯 완료"
 PRECOMPUTE_BG_DONE = "유사도 계산 완료"
+
+# ── 자동 업데이트 ─────────────────────────────────────────────────────────
+UPDATE_AVAILABLE_TITLE = "업데이트 있음"
+UPDATE_AVAILABLE_BODY = "새 버전이 있습니다. 지금 업데이트할까요?"
+UPDATE_UNKNOWN_CURRENT = "최신 버전을 받아 적용할까요?"
+UPDATE_DOWNLOADING = "업데이트 다운로드 중…"
+UPDATE_DONE_RESTART = "업데이트가 적용되었습니다.\n프로그램을 종료합니다. 다시 실행해 주세요."
+# 이번 업데이트로 필요한 패키지 목록(requirements.txt)이 바뀐 경우의 추가 안내.
+# 자동 업데이트는 앱 소스만 바꾸고 **의존성은 다시 설치하지 않는다**(번들 런타임 보존).
+UPDATE_DEPS_CHANGED = (
+    "\n\n[중요] 이번 업데이트로 필요한 패키지 목록이 바뀌었습니다. 다음 실행 전에 "
+    "의존성을 갱신해 주세요:\n"
+    " · 포터블: 앱 폴더의 python\\python.exe -m pip install -r requirements.txt 실행"
+    "(또는 최신 포터블 빌드 사용)\n"
+    " · 개발/소스: git pull 후 scripts\\run_this_before.py 를 다시 실행"
+)
+UPDATE_FAILED = "업데이트에 실패했습니다. 잠시 후 다시 시도해 주세요."
+UPDATE_CHECKING = "업데이트 확인 중…"
+UPDATE_LATEST = "최신 버전입니다."
+UPDATE_UNKNOWN = "업데이트를 확인할 수 없습니다. 인터넷 연결을 확인해 주세요."
+UPDATE_GIT_HINT = "개발(git) 환경입니다. 'git pull' 로 업데이트하세요."
+# 첫 화면 '업데이트 확인' 버튼 라벨(좌상단 도움말 메뉴 대체).
+MENU_CHECK_UPDATE = "업데이트 확인"
 LOAD_AUTO_MATCH_FMT = "자동 매치 진행 중… {done} / {total}"
 
 # ── 자동화 수준 (#3 올인원 모드) ───────────────────────────────────────────
 AUTOMATION_TITLE = "자동화 수준"
-AUTOMATION_MANUAL = "수동 — 모든 단계 직접 처리 (기존 방식)"
 AUTOMATION_USER_SELECT = "사진 직접 선택 + 매치는 자동"
-AUTOMATION_AUTO_ALL = "모든 사진 자동 — Stage 1 도 그룹화로 건너뛰기"
+AUTOMATION_AUTO_ALL = "모든 사진 자동 — Stage 1 건너뛰기"
 AUTOMATION_HINT = (
-    "자동 모드에서는 임계치 이상에서 가장 점수가 높은 후보가 자동으로 선택됩니다.\n"
-    "‘모든 사진 자동’ 은 거의 동일한 사진을 그룹화로 한 장만 남깁니다.\n"
-    "자동 매치 종료 후 결과 화면에서 [매칭 결과 검토] 로 잘못된 매치를 제거할 수 있습니다."
+    "’모든 사진 자동’은 Stage 1을 건너뛰고 모든 기준 사진을 자동으로 매치합니다.\n"
+    "자동 매치 종료 후 결과 화면에서 [매칭 결과 검토]로 잘못된 매치를 제거할 수 있습니다."
 )
 AUTO_REVIEW_HINT_FMT = (
     "자동 매치 완료 — 총 {n_match} 쌍이 자동으로 매치되었고,\n"
@@ -433,6 +386,7 @@ BTN_RESTORE_MATCH = "되돌리기 ↩"
 BTN_FINISH_REVIEW = "검토 완료 ▶"
 RUNNERUP_TOOLTIP = "클릭하면 이 사진으로 매치를 교체합니다."
 LOAD_SCAN = "폴더 스캔 중…"
+LOAD_SCAN_FMT = "폴더 스캔 중… {done} / {total} 슬롯"
 LOAD_EXPORT = "엑셀로 저장 중…"
 LOAD_PRECOMPUTE_REF = "기준 장비 특징 추출 중… {done} / {total}"
 
@@ -453,47 +407,63 @@ WARN_SLOT_MISMATCH_FMT = (
 )
 SLOT_MAP_TITLE = "Slot 수동 매핑"
 SLOT_MAP_HINT = (
-    "한쪽에만 존재하는 슬롯을 사용자가 직접 짝지어 줄 수 있습니다.\n"
-    "예) 기준 ‘Slot_01’ ↔ 검증 ‘S01’ 처럼 명명 규칙이 다를 때 사용하세요.\n"
-    "짝지어지지 않은 슬롯은 매칭에서 제외됩니다."
+    "남은 슬롯을 직접 짝지어 주세요. 양쪽에서 하나씩 골라 ‘묶기’, 다시 누르면 해제."
 )
-SLOT_MAP_REF_LABEL = "기준"
-SLOT_MAP_VAL_LABEL = "검증"
-SLOT_MAP_ADD = "추가"
+SLOT_MAP_REF_LABEL = "기준 (남은 슬롯)"
+SLOT_MAP_VAL_LABEL = "검증 (남은 슬롯)"
+SLOT_MAP_ADD = "묶기 ↔"
 SLOT_MAP_REMOVE = "선택 해제"
+SLOT_MAP_PAIRS_LABEL = "묶은 쌍"
 SLOT_MAP_OPEN = "매핑 다이얼로그 열기"
 
-# ── 임계치 자동 추천 ───────────────────────────────────────────────────────
-THRESHOLD_SUGGESTION_TITLE = "임계치 추천"
-THRESHOLD_SUGGESTION_FMT = (
-    "스캔된 데이터의 분포를 분석한 결과 임계치 {suggested:.2f} 를 추천합니다.\n"
-    "(현재 설정: {current:.2f})\n\n"
-    "같은 슬롯 점수 — 중앙값 {same_median:.2f},  최소 {same_min:.2f}\n"
-    "다른 슬롯 점수 — 중앙값 {diff_median:.2f},  최대 {diff_max:.2f}\n"
-    "분포 간 여유: {margin:+.2f}\n\n"
-    "추천 값으로 변경하시겠습니까?"
+# ── 일부 슬롯만 진행 (Setup) ───────────────────────────────────────────────
+SLOT_SELECT_BTN = "일부 슬롯만 진행…"
+SLOT_SELECT_BTN_TOOLTIP = (
+    "기준 폴더의 슬롯 중 이번 검증에서 진행할 슬롯만 선택합니다.\n"
+    "선택하지 않으면 모든 공통 슬롯을 진행합니다."
 )
+SLOT_SELECT_TITLE = "진행할 슬롯 선택"
+SLOT_SELECT_HINT = (
+    "이번 검증에서 진행할 슬롯만 체크하세요.\n"
+    "체크하지 않은 슬롯은 스캔·매칭에서 제외됩니다."
+)
+SLOT_SELECT_ALL = "전체 선택"
+SLOT_SELECT_NONE = "전체 해제"
+SLOT_SELECT_ALL_HINT = "모든 슬롯 진행 (기본)"
+SLOT_SELECT_COUNT_FMT = "선택한 슬롯: {n} / {total} 개만 진행"
+SLOT_SELECT_NEED_REF = "먼저 기준 폴더를 선택하세요."
+SLOT_SELECT_EMPTY = "기준 폴더에서 슬롯(하위 폴더)을 찾지 못했습니다."
+
+# ── 기준 사진 재사용 (#6) ──────────────────────────────────────────────────
+REF_REUSE_TITLE = "이전 기준 사진 재사용"
+REF_REUSE_BODY_FMT = (
+    "이 기준 폴더로 이전에 매치를 진행한 기록이 있습니다.\n"
+    "그때 직접 고른 기준 사진 {n} 장을 그대로 사용하시겠습니까?\n\n"
+    "예 — 해당 사진들을 자동으로 ‘검증 대상’ 으로 옮긴 상태에서 시작합니다.\n"
+    "아니오 — 처음부터 직접 고릅니다."
+)
+LOAD_OCR = "KLA WaferID 판독(OCR) 중… 잠시만 기다려 주세요."
+# KLA slot 해석 단계 — 로딩창에 현재 진행 단계(파일명/OCR)를 실시간 표시.
+LOAD_KLA_FILENAME = "KLA slot 매칭 중 — 파일명 분석…"
+LOAD_KLA_OCR_FMT = "KLA WaferID 판독 (OCR) 중… {done} / {total}"
+
+# slot 매칭 실패 시 'KLA 가 어느 쪽?' 확인 — 호기가 K-n 이면 자동, 아니면 묻는다.
+KLA_ASK_TITLE = "KLA 장비 확인"
+# 팝업 최상단에 크게·색상으로 강조되는 핵심 질문(#2).
+KLA_ASK_SIDE_HEADING = "KLA 장비가 어느 쪽인가요?"
+KLA_ASK_SIDE_BODY = "KLA(WaferID) 장비 위치를 선택하세요. 없으면 ‘KLA 아님’."
+KLA_SIDE_REF = "기준"
+KLA_SIDE_VAL = "검증"
+KLA_SIDE_NONE = "KLA 아님"
+
 INFO_RESUME_TITLE = "이전 검증 이어하기"
 INFO_RESUME_BODY = "진행 중인 검증이 있습니다. 이어서 하시겠습니까?"
 INFO_NEW_SESSION = "새로 시작"
 INFO_RESUME = "이어서 하기"
 INFO_PHASE_TRANSITION_TITLE = "단계 전환"
-INFO_PHASE_A_TO_MATCH = "Phase A 후보 선별이 끝났습니다. 매칭으로 넘어갑니다."
-INFO_PHASE_A_TO_B = "Phase A 가 끝났습니다. 이어서 Phase B (역방향) 를 시작합니다."
-INFO_PHASE_B_TO_MATCH = "Phase B 후보 선별이 끝났습니다. 매칭으로 넘어갑니다."
-INFO_ALL_DONE = "모든 검증이 끝났습니다. 결과를 저장해 주세요."
+INFO_PHASE_A_TO_MATCH = "후보 선별이 끝났습니다. 매칭으로 넘어갑니다."
 INFO_NO_MATCH_FOUND = "임계치 이상인 후보가 없습니다. 자동으로 Skip 처리됩니다."
 INFO_ALREADY_MATCHED_SECTION = "이미 매칭됨 (자동 제외)"
-
-# ── 페이즈 표시 ────────────────────────────────────────────────────────────
-PHASE_LABEL_FMT = (
-    "Phase A: {a_ref} 기준 선별 → Phase A: 매칭 → "
-    "Phase B: {b_ref} 기준 선별 → Phase B: 매칭 → 결과 저장"
-)
-PHASE_A_SELECT = "Phase A — 후보 선별"
-PHASE_A_MATCH = "Phase A — 매칭"
-PHASE_B_SELECT = "Phase B — 후보 선별 (역방향)"
-PHASE_B_MATCH = "Phase B — 매칭 (역방향)"
 
 # ── 저장/엑셀 ──────────────────────────────────────────────────────────────
 SAVE_DIALOG_TITLE = "결과 엑셀 저장 위치 선택"
@@ -503,15 +473,22 @@ SAVE_FAIL_FMT = "엑셀 저장 실패:\n{error}"
 EXPORT_TEMPLATE_NOT_FOUND = (
     "양식.xlsx 템플릿을 찾을 수 없습니다. 기본 양식으로 저장합니다."
 )
-SHEET_MISS_FAST = "미탐_빠른호기"
-SHEET_MISS_SLOW = "미탐_늦은호기"
 SLOT_MISMATCH_SHEET = "Slot 불일치 목록"
+SHEET_UNMATCHED = "미매칭 사진"
+# 결과 화면 — 전체 양식(E~H 수기 영역) 포함 옵션 (기본 해제, #3).
+EXPORT_FULL_TEMPLATE_LABEL = "전체 양식(E~H 수기 영역) 포함"
+EXPORT_FULL_TEMPLATE_TOOLTIP = (
+    "체크하면 E~H 수기 입력 영역을 포함한 ‘전체 양식’ 시트도 함께 저장합니다.\n"
+    "기본(해제)은 요약·미매칭 시트만 생성해 더 빠르고 가벼운 파일이 됩니다."
+)
 
 # ── 일반 상태 표시 ─────────────────────────────────────────────────────────
 SLOT_COUNT_FMT = "{slot}: 기준 {ref}장 / 검증 {val}장"
 COUNT_PLUS_N_FMT = "+{n}"
 PROGRESS_SLOT_FMT = "{slot}  ·  {done} / {total}"
 GROUP_HEADER_FMT = "{slot}  ·  {count} 장"
+# 후보 선별 상단의 Slot 별 전체 장수 — 참고용 (#2).
+LOT_COUNTS_PREFIX = "Slot별 장수:  "
 
 # ── 오류 ────────────────────────────────────────────────────────────────
 ERR_GENERIC = "오류가 발생했습니다: {error}"
@@ -527,9 +504,103 @@ ERROR_LOGGED = "오류가 기록되었습니다"
 MATCH_REVIEW_DELETED_SECTION = "검토에서 삭제한 사진"
 # 썸네일 우클릭 컨텍스트 메뉴 — 원본 크게 보기 (#13).
 CTX_VIEW_LARGER = "크게보기"
-# 차순위 후보 ‘후보 한 줄 더 보기’ 버튼 — 클릭마다 한 줄씩 더 보여준다 (#5).
+# 매치 검토 각 행 slot 라벨 아래 ‘크게 보기’ 버튼 — 좌우 비교 뷰어를 연다.
+BTN_VIEW_LARGER = "크게 보기"
+# 좌우 비교 뷰어에서 ‘이 후보로 매치’ 액션 버튼 (#4).
+BTN_MATCH_THIS = "이 후보로 매치"
+# 차순위 후보 ‘후보 한 줄 더 보기’ / ‘접기’ 버튼 (#5/#4).
 RUNNERUP_MORE_ROW = "후보 한 줄 더 보기 ▾"
+RUNNERUP_LESS_ROW = "접기 ▴"
 # (사용 안 함) 예전 ‘+N개 더 보기’ + 표시 개수 입력 다이얼로그 (#16).
 RUNNERUP_MORE_FMT = "+{n}개 더 보기"
 RUNNERUP_MORE_TITLE = "후보 더 보기"
 RUNNERUP_MORE_PROMPT = "후보를 몇 개까지 보시겠습니까?"
+
+# ── 개발자 벤치마크 (개발자 모드 전용) ─────────────────────────────────────
+DEV_BENCH_BUTTON = "개발자 벤치마크"
+DEV_BENCH_TITLE = "개발자 벤치마크 — 매칭 가속 조합 실험"
+DEV_BENCH_HINT = (
+    "CPU·Intel GPU·Intel NPU 조합(레시피)별로 매칭 속도·메모리·실제 정확도를 "
+    "측정합니다. 유사도 캐시를 사용하지 않고 ‘처음 매칭하는 것처럼’ 측정하며, "
+    "정확도가 떨어지는 조합은 추천하지 않습니다."
+)
+DEV_BENCH_REF_LABEL = "기준 폴더"
+DEV_BENCH_VAL_LABEL = "검증 폴더"
+DEV_BENCH_SELFTEST = "자기검증(기준 폴더를 증강해 정답 생성 — 검증 장비 불필요)"
+DEV_BENCH_RECIPES = "실험할 조합 (선택 안 하면 전체)"
+
+# 프리셋 — 항목을 적게 두는 '빠른'을 기본으로.
+DEV_BENCH_PRESET_HINT = (
+    "실험은 끝났고 옵션은 **최종 후보 TOP5** + 앵커(현행·기준선)만 보여줍니다. 'TOP5'=앵커+TOP5, "
+    "'최종'=고전 2회(워밍업→정식)+현행+TOP5. (나머지 레시피·그룹은 코드로 보존 — 나중에 다시 "
+    "보려면 CLI ``--recipes all+``.)"
+)
+DEV_BENCH_PRESET_TOP5 = "TOP5"
+DEV_BENCH_PRESET_FINAL = "최종(고전2회+TOP5)"
+DEV_BENCH_TIMEOUT_LABEL = "조합별 타임아웃(초, 0=무제한)"
+DEV_BENCH_MAXSLOTS_LABEL = "서브샘플: slot 수 상한(0=전체)"
+DEV_BENCH_MAXIMG_LABEL = "서브샘플: 측당 이미지 상한(0=전체)"
+DEV_BENCH_RUN = "실험 시작"
+DEV_BENCH_STOP = "중지"
+DEV_BENCH_NEED_FOLDER = "기준 폴더(검증 폴더 또는 자기검증)를 지정하세요."
+DEV_BENCH_NO_COMMON = "공통 slot 이 없습니다 — 폴더 구조를 확인하세요."
+DEV_BENCH_RUNNING_FMT = "실행 중: {name}  ({done}/{total})"
+DEV_BENCH_DONE_FMT = "완료 — 추천: {rec}  ·  기록: {path}"
+DEV_BENCH_SPEEDUP_FMT = "현행 대비 ×{x}"
+DEV_BENCH_CACHE_NOTE = "유사도 캐시 미사용(처음 매칭처럼 측정)"
+DEV_BENCH_COL_RECIPE = "레시피"
+DEV_BENCH_COL_TOTAL = "총시간(s)"
+DEV_BENCH_COL_EMBED = "임베딩(s)"
+DEV_BENCH_COL_SCORE = "재채점(s)"
+DEV_BENCH_COL_IPS = "img/s"
+DEV_BENCH_COL_PEAK = "피크MB"
+DEV_BENCH_COL_ACC = "정확도"
+DEV_BENCH_COL_NOTE = "비고"
+
+# 확장 그룹(개발자 벤치마크) — 체크 시 그룹 전체 포함.
+DEV_BENCH_GROUP_CENTER = "중앙-인식(defect 정중앙)"
+DEV_BENCH_GROUP_NPU_SWEEP = "NPU 사용방식 스윕"
+DEV_BENCH_GROUP_NPU_ONLY = "NPU 단독 채점"
+DEV_BENCH_GROUP_FAST_RERANK = "CPU 고속 재채점"
+
+# 불필요 스킵 해제 토글.
+DEV_BENCH_ALL_RECIPES = "모든 레시피 측정(불필요 스킵 해제)"
+DEV_BENCH_ALL_RECIPES_TIP = (
+    "평소엔 함정/대조용·장치 없어 폴백 중복·과거에 정확도가 낮았던 레시피를 "
+    "자동으로 건너뜁니다. 체크하면 그것까지 전부 측정합니다(느려질 수 있음)."
+)
+
+# ── 개발자 모드 토글 (Ctrl+Shift+D) ────────────────────────────────────────
+DEV_MODE_TOGGLE_TITLE = "개발자 모드"
+DEV_MODE_ON_FMT = (
+    "개발자 모드가 켜졌습니다.\n\n"
+    "화면 하단에 ‘{button}’ 버튼이 나타납니다.\n"
+    "(이 단축키 Ctrl+Shift+D 로 다시 끌 수 있습니다.)"
+)
+DEV_MODE_OFF = "개발자 모드가 꺼졌습니다."
+
+# ── 정답 라벨 만들기 (개발자 모드 전용) ────────────────────────────────────
+DEV_LABEL_BUTTON = "정답 라벨 만들기"
+DEV_LABEL_TITLE = "정답 라벨 만들기 — 기준 사진별 정답 검증 사진 지정"
+DEV_LABEL_HINT = (
+    "기준 사진마다 ‘정답’인 검증 사진을 클릭해 표시합니다. 정답은 여러 개일 수도, "
+    "없을 수도 있습니다. 후보는 유사도순으로 정렬해 보여줍니다(표시 순서일 뿐 "
+    "정답에는 영향 없음). 저장하면 벤치마크의 실제 정확도 측정에 사용됩니다."
+)
+DEV_LABEL_NEED_FOLDERS = "기준 폴더와 검증 폴더를 모두 지정하세요."
+DEV_LABEL_NO_COMMON = "공통 slot 이 없습니다 — 폴더 구조를 확인하세요."
+DEV_LABEL_PROGRESS_FMT = "기준 {idx}/{total}  ·  slot {slot}  ·  {name}"
+DEV_LABEL_NONE_BTN = "정답 없음"
+DEV_LABEL_PREV = "◀ 이전"
+DEV_LABEL_NEXT = "다음 ▶"
+DEV_LABEL_SAVE = "저장"
+DEV_LABEL_SAVE_AS = "다른 이름으로 저장…"
+DEV_LABEL_LOAD = "불러오기…"
+DEV_LABEL_CLOSE = "닫기"
+DEV_LABEL_SAVED_FMT = "저장됨: {path}\n라벨한 기준 {labeled}개(정답 없음 {none}개, 복수정답 {multi}개)."
+DEV_LABEL_SORT_SIM = "유사도순 정렬"
+DEV_LABEL_SORT_NAME = "파일명순 정렬"
+DEV_LABEL_SELECTED_FMT = "선택 {n}개"
+DEV_LABEL_UNREVIEWED = "미검토"
+DEV_LABEL_PATH_LABEL = "정답 라벨 파일"
+DEV_LABEL_DISCARD_CONFIRM = "저장하지 않은 변경이 있습니다. 닫을까요?"

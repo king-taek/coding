@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Optional
 
 
 # ---------------------------------------------------------------------------
@@ -13,8 +14,8 @@ class Colors:
     BG_DEEP = "#000000"
     CARD = "#111827"
     CARD_ALT = "#0E1424"
-    NEON_CYAN = "#00D4FF"
-    NEON_BLUE = "#0099FF"
+    NEON_CYAN = "#39FF14"
+    NEON_BLUE = "#00C853"
     NEON_MAGENTA = "#FF00AA"
     NEON_RED = "#FF2D55"
     NEON_GREEN = "#00FFA3"
@@ -46,8 +47,8 @@ class Fonts:
 # Image / thumbnail sizing
 # ---------------------------------------------------------------------------
 class Sizing:
-    # 좌/우/하 패널 그리드용 작은 썸네일.  실제 노출되는 타일은 120~240 px 사이
-    # (BulkSelectDialog=180, UnmatchedReviewDialog ref=380 등) 라 캐시 thumb 가
+    # 좌/우/하 패널 그리드용 작은 썸네일.  실제 노출되는 타일은 120~420 px 사이
+    # (BulkSelectDialog=180, UnmatchedReviewDialog ref=420 등) 라 캐시 thumb 가
     # 작으면 업스케일 시 흐릿해진다.  240 px / Q90 으로 한 단계 키워 화질 향상.
     THUMB_PX = 240
     MID_PX = 800            # zoom-view + Excel embed
@@ -55,6 +56,13 @@ class Sizing:
     ROI_RATIO = 0.55        # 중심 영역 비율 (0.5~0.6)
     THUMB_JPEG_Q = 90
     MID_JPEG_Q = 88
+    # 다이얼로그/패널별 타일 기본 크기 — 흩어져 있던 매직 넘버를 한 곳에 모음(D2).
+    # (값은 기존과 동일 — 동작 불변.  슬라이더가 있는 화면은 이를 시작값으로 사용.)
+    SIDE_TILE_PX = 120      # Stage1 좌/우 사이드 패널 타일 (= THUMB_PX // 2)
+    BULK_TILE_PX = 180      # '선택 모드' 다이얼로그 기본 타일
+    REVIEW_THUMB_PX = 240   # 매칭 결과 검토 썸네일
+    DIALOG_REF_PX = 420     # 미매칭 검토 좌측 기준 사진
+    DIALOG_CAND_PX = 260    # 미매칭 검토 우측 후보 / 매치 확대 타일
 
 
 @dataclass(frozen=True)
@@ -109,6 +117,10 @@ def pick_tier(total_images: int, *, speed_mode: bool = False) -> SizingTier:
 # ---------------------------------------------------------------------------
 # in-memory LRU 픽스맵 캐시 기본 한도 — 512 MB.
 PIXMAP_CACHE_MAX_BYTES = 512 * 1024 * 1024
+
+# 후보 선별(Stage 1): 측당 총 사진이 이 수 이상이면 좌/우 패널에 '현재 슬롯' 하나만
+# 표시해 위젯 수를 최소화한다(#렉).  미만이면 모든 슬롯 표시.
+SELECT_SINGLE_SLOT_THRESHOLD = 300
 # 메모리 압박 토스트 임계치 — 캐시 한도 + 1 GB 워킹셋.
 MEMORY_PRESSURE_BYTES = PIXMAP_CACHE_MAX_BYTES + 1024 * 1024 * 1024
 
@@ -119,45 +131,71 @@ MEMORY_PRESSURE_BYTES = PIXMAP_CACHE_MAX_BYTES + 1024 * 1024 * 1024
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True)
 class SimilarityConfig:
-    engine: str = "basic"          # "basic" | "fast"
-    center20_ref: bool = False     # 기준 사진 중앙 30% 영역만 사용
-    center20_val: bool = False     # 검증 사진 중앙 30% 영역만 사용
-    grayscale: bool = False        # 강화: 흑백 + 고감도
-    contrast: bool = False         # 강화: 고대비
-    kla_crop: bool = False         # KLA 상/하단 정보영역 crop
-    kla_top: float = 0.08          # 상단 잘라낼 비율
-    kla_bottom: float = 0.08       # 하단 잘라낼 비율
-    top_k: int = 50                # ANN 재정렬 깊이 (고속 모드)
+    engine: str = "basic"          # "basic" | "efficiency"
+    center_crop: bool = False      # 사진 중앙 30% 영역만 사용 (기준·검증 모두)
+    top_k: int = 50                # 후보 재정렬 깊이
+    persist_scores: bool = True    # (ref,val) 점수 디스크 영속 캐시 — 항상 기본 적용
+    # 고효율 모드 동시 추론 수(in-flight) — NPU 기준, GPU 는 절반.  높일수록
+    # NPU/GPU 메모리·throughput↑(계산 결과는 불변).  사용자 조절 노브.
+    accel_concurrency: int = 32
+    # 고효율 모드 장치 사용 토글(테스트용).  끄면 해당 유닛을 안 띄움 — 단,
+    # 전부 꺼지면 CPU 로 폴백(유닛 0개 방지).
+    use_cpu: bool = True
+    use_gpu: bool = True
+    use_npu: bool = True
+    # 정적 배치 B 재컴파일(테스트용).  1=끔(현행), >1=요청당 B장 추론.
+    embed_batch: int = 1
+    # 개발자 벤치마크 전용 — 모든 유사도 디스크 캐시(특징 .npz / 임베딩 .npy /
+    # 점수 .json.gz)를 우회해 '처음 매칭하는 것처럼' 측정한다.  결과(점수/정확도)
+    # 에는 영향이 없고 속도만 달라진다(공정한 벤치마크용).  기본 OFF.
+    bench_no_cache: bool = False
+    # 좌표 기반 매칭(v2) 허용 오차 — µm 단위.  두 좌표의 유클리드 거리가 이 이내면 매칭.
+    coord_tolerance: float = 500.0
+    # CPU 재채점 고속화 노브 — ORB 검출 특징 수(0=기본 500).  ORB(디스크립터 검출/
+    # 정합)는 고전 채점에서 가장 비싼 항이라, 특징 수를 줄이면 CPU 매치 단계가 빨라진다
+    # (정확도는 검증 필요).  개발자 벤치마크 전용으로만 0 이 아닌 값을 쓴다.
+    orb_nfeatures: int = 0
+    # 중앙-가중 ORB — defect 이 정중앙인 특성 활용.  0=끔(현행).  >0 이면 ORB 매치를
+    # 중앙 근접도로 가중해(단일 패스·추가 추출 없음) defect 판별력을 높인다.  추출이
+    # 아니라 '채점' 단계 파라미터라 특징 캐시 키는 그대로(좌표는 항상 저장).
+    orb_center_weight: float = 0.0
+    # 재채점 항 선택 — None=전체(pHash+ORB+SSIM, 기본 모드).  부분집합(예: {"orb"})이면
+    # 그 항만으로 재채점한다.  고효율 모드는 실측 최적인 rr_orb_center50(ORB 단독+중앙가중)
+    # 을 위해 {"orb"} 를 쓴다.  ``efficiency_matcher`` 가 이 값으로 ``components`` 를 넘긴다.
+    rerank_components: Optional[frozenset] = None
+    # 중앙-인식(center-aware) 채점 노브 — center_crop 이 켜졌을 때 사용할 중앙 ROI
+    # 비율(0=기본 0.3).  반도체 AOI 이미지는 defect 이 정중앙에 있으므로, 작은 중앙
+    # crop(예: 0.25)은 'defect 신호'를, 풀 ROI 는 '주변 패턴'을 본다.  벤치마크의
+    # region-fusion/cascade 가 이 값으로 중앙 변형 cfg 를 만든다.
+    center_ratio: float = 0.0
 
-    def _center20_for(self, side) -> bool:
-        """이 side(ref/val)에 중앙 영역 crop(30%)을 적용할지."""
-        if side == "ref":
-            return self.center20_ref
-        if side == "val":
-            return self.center20_val
+    def _center_crop_ratio(self) -> float:
+        """center_crop 적용 시 실제 ROI 비율(0=레거시 0.3)."""
+        r = float(self.center_ratio or 0.0)
+        return r if r > 0.0 else 0.3
+
+    def _center_crop_for(self, side) -> bool:
+        """이 side(ref/val)에 중앙 영역 crop 을 적용할지."""
+        if side in ("ref", "val"):
+            return self.center_crop
         return False               # side 미지정 → crop 안 함 (캐시 키와 일관)
 
     @property
     def has_preprocess(self) -> bool:
         """전처리가 하나라도 켜져 있으면 True — 캐시 키 분기/적용 판단용."""
-        return bool(self.center20_ref or self.center20_val or self.grayscale
-                    or self.contrast or self.kla_crop)
+        return bool(self.center_crop) or bool(self.orb_nfeatures)
 
     def cache_extra(self, side=None) -> str:
         """캐시 키 판별자.  전처리 OFF 면 빈 문자열 → 기본 캐시와 동일 키.
 
-        중앙 20% crop 은 side(ref/val)에 따라 실제 적용 여부가 달라지므로
-        side 별로 키를 분리한다 (교차검증에서 동일 파일이 ref/val 양쪽으로
-        쓰일 때 캐시 충돌 방지)."""
+        중앙 30% crop 은 side(ref/val)에 적용되므로 side 별로 키를 분리한다
+        (교차검증에서 동일 파일이 ref/val 양쪽으로 쓰일 때 캐시 충돌 방지)."""
         parts = []
-        if self._center20_for(side):
-            parts.append("c30")          # 중앙 30% — 키 변경으로 이전 캐시와 분리
-        if self.grayscale:
-            parts.append("g")
-        if self.contrast:
-            parts.append("ct")
-        if self.kla_crop:
-            parts.append(f"k{self.kla_top:.2f}-{self.kla_bottom:.2f}")
+        if self._center_crop_for(side):
+            # 중앙 crop 비율을 키에 반영 — 비율이 다르면 캐시 분리(c30/c25/…).
+            parts.append(f"c{int(round(self._center_crop_ratio() * 100))}")
+        if self.orb_nfeatures:
+            parts.append(f"orb{int(self.orb_nfeatures)}")   # 특징 수 다르면 캐시 분리
         return "-".join(parts)
 
 

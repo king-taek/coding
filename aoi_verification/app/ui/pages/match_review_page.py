@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QPoint, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QPixmap
 from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu,
                               QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
@@ -25,19 +25,18 @@ from ...models.result import MatchResult, MissEntry
 from ...models.slot import ImageItem
 from ...utils import image_io
 from ..widgets.neon_button import NeonButton
+from ..widgets.no_wheel_slider import NoWheelSlider
 from ..widgets.zoom_window import FullscreenViewer
 
 
-_THUMB_PX = 140
+_THUMB_PX = 140                             # 기준 썸네일 기본 크기 (#2)
 _RUNNERUP_PX = int(_THUMB_PX * 0.8)         # 차순위는 20% 작게
 _TILE_W = _RUNNERUP_PX + 12                 # 타일 1개 점유 폭(간격 포함)
-# 후보 열 수 — 창 너비에 따라 가변, 최소값만 보장 (#1).
-#   첫 줄(1위 매치 옆 인라인)은 최소 4 장, ‘한 줄 더 보기’ 의 아래 줄은 최소 5 장.
-#   가로로 넘치지 않도록 가용 폭 안에서만 늘린다 (큰 해상도일수록 더 많이).
-_MIN_FIRST_COLS = 4
-_MIN_GRID_COLS = 5
-# 1위 매치 옆 인라인 첫 줄이 쓰는 고정 위젯 폭 추정(슬롯+ref+화살표+val+버튼+여백).
-_FIRST_LINE_RESERVED_PX = 700
+_SIZE_MIN_PX = 100
+_SIZE_MAX_PX = 360
+# 후보 열 수는 가용 폭에 맞춰 동적으로 계산한다(가로 스크롤 방지, #3).
+# (인라인 첫 줄 예약 폭은 _MatchRow._reserved_fixed_px 에서 현재 이미지 크기 기준으로
+#  동적 계산 — 고정 상수 대신.)
 # _lookup_runners_up 가 보관하는 차순위 후보 최대 개수 (#16).
 _MAX_RUNNERS = 50
 
@@ -55,11 +54,16 @@ class _LazyThumb(QLabel):
     """첫 paint 시점에 썸네일을 지연 디코드하고, 우클릭 ‘크게보기’ 를 지원 (#6-4/#13)."""
 
     def __init__(self, path: Path, *, size: int = _THUMB_PX,
-                 subtle: bool = False, parent=None) -> None:
+                 subtle: bool = False, enable_context_menu: bool = True,
+                 on_view=None, parent=None) -> None:
         super().__init__(parent)
         self._path = Path(path)
         self._size = int(size)
         self._image_loaded = False
+        # 우클릭 ‘크게보기’ 동작 — 콜백이 주어지면 단일 확대 대신 좌우 비교를 연다 (#5).
+        self._on_view = on_view
+        # 슬라이더 리사이즈를 재디코드 없이 처리하기 위한 원본(최대크기) 픽스맵.
+        self._source_pix: QPixmap | None = None
         self.setFixedSize(self._size, self._size)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         if subtle:
@@ -70,9 +74,11 @@ class _LazyThumb(QLabel):
         ph = QPixmap(self._size, self._size)
         ph.fill(QColor(20, 28, 40))
         self.setPixmap(ph)
-        # 우클릭 컨텍스트 메뉴 (크게보기).
-        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.customContextMenuRequested.connect(self._on_context_menu)
+        # 우클릭 컨텍스트 메뉴 (크게보기). 차순위 타일 내부 썸네일은 상위
+        # _RunnerUpTile 이 좌우 비교 뷰어를 직접 열도록 비활성화한다 (#4).
+        if enable_context_menu:
+            self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            self.customContextMenuRequested.connect(self._on_context_menu)
 
     def paintEvent(self, event):  # noqa: N802
         super().paintEvent(event)
@@ -82,47 +88,102 @@ class _LazyThumb(QLabel):
 
     def _load(self) -> None:
         try:
-            self.setPixmap(image_io.load_thumb_qpixmap(self._path, self._size))
+            # mid 캐시(~800px)를 소스로 → 인라인 표시도 선명(고화질, #4). 슬라이더
+            # 변경 시엔 재디코드 없이 이 보관 픽스맵을 재스케일.
+            self._source_pix = image_io.load_thumb_qpixmap(
+                self._path, _SIZE_MAX_PX, kind="mid")
+            self._apply_scaled()
         except Exception:
             pass
+
+    def _apply_scaled(self) -> None:
+        if self._source_pix is None or self._source_pix.isNull():
+            return
+        self.setPixmap(self._source_pix.scaled(
+            self._size, self._size,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        ))
+
+    def set_size(self, size: int) -> None:
+        """슬라이더로 크기를 바꿀 때 호출 (#2) — 재디코드 없이 보관 픽스맵 재스케일.
+        아직 로드 전이면 다음 paint 에서 새 크기 기준으로 로드된다."""
+        self._size = int(size)
+        self.setFixedSize(self._size, self._size)
+        self._apply_scaled()
 
     def _on_context_menu(self, pos) -> None:
         menu = QMenu(self)
         act = menu.addAction(i18n.KO.CTX_VIEW_LARGER)
         chosen = menu.exec(self.mapToGlobal(pos))
         if chosen is act:
-            _open_fullscreen(self._path, self.window())
+            if self._on_view is not None:
+                self._on_view()
+            else:
+                _open_fullscreen(self._path, self.window())
 
 
 class _RunnerUpTile(QFrame):
-    """클릭 가능한 차순위 후보 썸네일.  클릭 시 swap_requested(item, score)."""
+    """클릭 가능한 차순위 후보 썸네일.  클릭 시 swap_requested(item, score).
+
+    더블클릭/우클릭은 좌우(기준·후보) 비교 뷰어를 연다 (#4) — view_requested.
+    """
 
     swap_requested = pyqtSignal(object, float)        # (ImageItem, score)
+    view_requested = pyqtSignal(object)               # ImageItem (크게보기)
 
-    def __init__(self, item: ImageItem, score: float, parent=None) -> None:
+    def __init__(self, item: ImageItem, score: float, parent=None,
+                 *, size: int = _RUNNERUP_PX,
+                 coord_mode: bool = False, tolerance: float = 500.0) -> None:
         super().__init__(parent)
         self.item = item
         self.score = float(score)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolTip(i18n.KO.RUNNERUP_TOOLTIP)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._on_context_menu)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(2)
 
-        # 지연 로드 + 우클릭 ‘크게보기’ 지원 (#6-4/#13).
-        self._img = _LazyThumb(item.path, size=_RUNNERUP_PX, subtle=True,
-                               parent=self)
+        # 지연 로드. 내부 썸네일의 단일 크게보기 메뉴는 끄고, 이 타일이 좌우
+        # 비교 뷰어를 직접 연다 (#4).
+        self._img = _LazyThumb(item.path, size=size, subtle=True,
+                               enable_context_menu=False, parent=self)
         lay.addWidget(self._img, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        self._score_label = QLabel(f"{self.score * 100:.1f} %", self)
+        if coord_mode:
+            tol = float(tolerance) if tolerance > 0 else 500.0
+            dist = (1.0 - score) * tol if score >= 0 else (-score) * tol
+            score_text = (i18n.KO.SCORE_DIST_FMT.format(dist=dist) if score >= 0
+                          else i18n.KO.SCORE_DIST_OVER_FMT.format(dist=dist))
+        else:
+            score_text = f"{score * 100:.1f} %"
+        self._score_label = QLabel(score_text, self)
         self._score_label.setStyleSheet("color: #7FB3D5; font-size: 11px;")
         self._score_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(self._score_label)
+
+    def set_size(self, size: int) -> None:
+        """슬라이더 변경 시 썸네일을 그 자리에서 재스케일 (#2)."""
+        self._img.set_size(size)
 
     def mousePressEvent(self, event):  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton:
             self.swap_requested.emit(self.item, self.score)
         super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.view_requested.emit(self.item)
+        super().mouseDoubleClickEvent(event)
+
+    def _on_context_menu(self, pos) -> None:
+        menu = QMenu(self)
+        act = menu.addAction(i18n.KO.CTX_VIEW_LARGER)
+        chosen = menu.exec(self.mapToGlobal(pos))
+        if chosen is act:
+            self.view_requested.emit(self.item)
 
 
 class _MatchRow(QFrame):
@@ -131,16 +192,32 @@ class _MatchRow(QFrame):
 
     toggle_requested = pyqtSignal(object)                  # MatchResult
     swap_requested = pyqtSignal(object, object, float)     # (old_match, new_val_item, new_score)
+    more_clicked = pyqtSignal(object)                      # self — ‘후보 한 줄 더 보기’ 후 스크롤 보정
+    less_clicked = pyqtSignal(object)                      # self — ‘접기’ 후 스크롤 복귀
 
     def __init__(self,
                  match: MatchResult,
                  runners_up: list[tuple] | None = None,
-                 parent=None) -> None:
+                 parent=None,
+                 *,
+                 thumb_px: int = _THUMB_PX,
+                 coord_mode: bool = False,
+                 tolerance: float = 500.0) -> None:
         super().__init__(parent)
         self.match = match
         self._is_unmatched = False
+        self._coord_mode = bool(coord_mode)
+        self._tolerance = float(tolerance) if tolerance > 0 else 500.0
+        # 썸네일 크기 (#2) — 차순위는 20% 작게 파생.
+        # ``_requested_thumb_px`` 는 슬라이더 요청값, ``_thumb_px`` 는 행 폭에 맞춰
+        # 클램프된 실제 적용값(가로 넘침 방지).  창 리사이즈 때 요청값으로 재클램프.
+        self._requested_thumb_px = int(thumb_px)
+        self._thumb_px = int(thumb_px)
+        self._runnerup_px = max(40, int(thumb_px * 0.8))
         # 전체 차순위 후보 (정렬됨) 를 보관하고, 화면에는 일부 줄만 표시 (#5).
         self._runners_up = list(runners_up or [])     # [(ImageItem, score), ...]
+        # 현재 화면에 만들어진 차순위 타일 — 슬라이더 인플레이스 재스케일용 (#2).
+        self._runner_tiles: list["_RunnerUpTile"] = []
         # ‘후보 한 줄 더 보기’ 클릭마다 1 씩 늘어나는 표시 줄 수 (#5).
         self._visible_lines = 1
         self.setProperty("role", "card-soft")
@@ -155,16 +232,25 @@ class _MatchRow(QFrame):
         top.setContentsMargins(0, 0, 0, 0)
         top.setSpacing(12)
 
-        # slot 라벨
-        self._slot_label = QLabel(match.slot, self)
+        # slot 라벨 + 그 아래 ‘크게 보기’ 버튼 (행당 1개, 좌우 비교 뷰어를 연다, #2).
+        slot_host = QWidget(self)
+        slot_lay = QVBoxLayout(slot_host)
+        slot_lay.setContentsMargins(0, 0, 0, 0)
+        slot_lay.setSpacing(4)
+        self._slot_label = QLabel(match.slot, slot_host)
         self._slot_label.setStyleSheet(
-            "color: #00D4FF; font-weight: 700; font-size: 14px;"
+            "color: #39FF14; font-weight: 700; font-size: 14px;"
         )
-        self._slot_label.setMinimumWidth(80)
-        top.addWidget(self._slot_label)
+        slot_lay.addWidget(self._slot_label)
+        self.btn_view = NeonButton(i18n.KO.BTN_VIEW_LARGER, role="ghost")
+        self.btn_view.clicked.connect(lambda: self._open_compare(0))
+        slot_lay.addWidget(self.btn_view)
+        slot_host.setMinimumWidth(110)
+        top.addWidget(slot_host)
 
-        # ref 이미지
-        self._ref_img = self._make_thumb(match.ref_path, size=_THUMB_PX)
+        # ref 이미지 — 우클릭 ‘크게보기’ 는 단일 확대 대신 좌우 비교로 (#5).
+        self._ref_img = self._make_thumb(match.ref_path, size=self._thumb_px,
+                                         on_view=lambda: self._open_compare(0))
         top.addWidget(self._ref_img)
 
         # 화살표
@@ -178,12 +264,14 @@ class _MatchRow(QFrame):
         primary_lay = QVBoxLayout(primary_host)
         primary_lay.setContentsMargins(0, 0, 0, 0)
         primary_lay.setSpacing(2)
-        self._val_img = self._make_thumb(match.val_path, size=_THUMB_PX)
+        self._val_img = self._make_thumb(match.val_path, size=self._thumb_px,
+                                         on_view=lambda: self._open_compare(0))
         primary_lay.addWidget(self._val_img,
                               alignment=Qt.AlignmentFlag.AlignCenter)
-        score_label = QLabel(f"{match.score * 100:.1f} %", primary_host)
+        score_label = QLabel(self._format_score(match.score), primary_host)
+        score_color = "#FF6B35" if (self._coord_mode and match.score < 0) else "#FFD600"
         score_label.setStyleSheet(
-            "color: #FFD600; font-weight: 700; font-size: 14px;"
+            f"color: {score_color}; font-weight: 700; font-size: 14px;"
         )
         score_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         primary_lay.addWidget(score_label)
@@ -226,22 +314,43 @@ class _MatchRow(QFrame):
             self._runner_grid.setAlignment(Qt.AlignmentFlag.AlignLeft)
             host_lay.addLayout(self._runner_grid)
 
-            # ‘후보 한 줄 더 보기’ 버튼 — 클릭마다 한 줄씩 더 표시 (#5).
+            # ‘후보 한 줄 더 보기’ / ‘접기’ 버튼 (#5/#4).
             self.btn_more = NeonButton(i18n.KO.RUNNERUP_MORE_ROW, role="ghost")
             self.btn_more.clicked.connect(self._on_more)
+            self.btn_less = NeonButton(i18n.KO.RUNNERUP_LESS_ROW, role="ghost")
+            self.btn_less.clicked.connect(self._on_less)
+            self.btn_less.setVisible(False)
             more_bar = QHBoxLayout()
             more_bar.setContentsMargins(0, 0, 0, 0)
             more_bar.addWidget(self.btn_more)
+            more_bar.addWidget(self.btn_less)
             more_bar.addStretch(1)
             host_lay.addLayout(more_bar)
 
             outer.addWidget(self._runner_host)
-            self._render_runners()
+            self._layout_runner_tiles()
         else:
             self._runner_host = None
             self._runner_grid = None
             self.btn_more = None
+            self.btn_less = None
             self._first_line_host.setVisible(False)
+
+    def _format_score(self, score: float) -> str:
+        """score 값을 표시 문자열로 변환.
+
+        좌표 모드: 거리(µm)로 역산 (score ≥ 0 → 허용 내, score < 0 → 허용 초과).
+        일반 모드: 0~100% 백분율.
+        """
+        if self._coord_mode:
+            from ... import i18n as _i18n
+            if score >= 0:
+                dist = (1.0 - score) * self._tolerance
+                return _i18n.KO.SCORE_DIST_FMT.format(dist=dist)
+            else:
+                dist = (-score) * self._tolerance
+                return _i18n.KO.SCORE_DIST_OVER_FMT.format(dist=dist)
+        return f"{score * 100:.1f} %"
 
     def _row_width(self) -> int:
         """현재 행의 가용 너비 — 아직 표시 전이면 부모/페이지 너비로 추정."""
@@ -251,88 +360,212 @@ class _MatchRow(QFrame):
             w = (p.width() if p is not None else 0) or 1280
         return w
 
+    def _tile_w(self) -> int:
+        """타일 1개 점유 폭 — 현재 차순위 썸네일 크기 + 간격 (#2)."""
+        return self._runnerup_px + 12
+
     def _first_cols(self) -> int:
-        """첫 줄(인라인) 후보 열 수 — 최소 4, 가용 폭 안에서 가변 (#1)."""
-        avail = self._row_width() - _FIRST_LINE_RESERVED_PX
-        fit = avail // _TILE_W if avail > 0 else 0
-        return max(_MIN_FIRST_COLS, int(fit))
+        """첫 줄(인라인) 후보 열 수 — 두 메인 이미지가 차지하고 남는 폭에만 채운다.
+
+        예약 폭을 현재 이미지 크기 기준으로 동적 계산해, 이미지를 키우면 인라인
+        후보가 줄거나 0 이 되어 가로 넘침이 생기지 않는다 (#3)."""
+        reserved = self._reserved_fixed_px() + 2 * self._thumb_px
+        avail = self._row_width() - reserved
+        fit = avail // self._tile_w() if avail > 0 else 0
+        return max(0, int(fit))
 
     def _grid_cols(self) -> int:
-        """아래 추가 줄 후보 열 수 — 최소 5, 전체 폭 기준 가변 (#1)."""
+        """아래 추가 줄 후보 열 수 — 가용 폭에 맞게(가로 스크롤 방지, #3)."""
         avail = self._row_width() - 60
-        fit = avail // _TILE_W if avail > 0 else 0
-        return max(_MIN_GRID_COLS, int(fit))
+        fit = avail // self._tile_w() if avail > 0 else 0
+        return max(1, int(fit))
 
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
-        # 창 크기가 바뀌어 열 수가 달라지면 후보를 다시 배치 (가로 넘침 방지/#1).
+        # 폭이 줄어 클램프 결과가 달라지면 이미지 크기를 다시 맞춘다 — 좁은 창에서도
+        # 두 이미지가 행에 들어가 '매치 없음' 버튼이 잘리지 않게 (#2/#3).
+        new_applied = max(_SIZE_MIN_PX,
+                          min(self._requested_thumb_px, self._max_thumb()))
+        if new_applied != self._thumb_px:
+            # set_thumb_size 가 재클램프 + 후보 재배치까지 수행.
+            self.set_thumb_size(self._requested_thumb_px)
+            return
+        # 창 크기가 바뀌어 열 수가 달라지면 후보를 다시 배치 (가로 넘침 방지/#3).
         if not self._runners_up:
             return
         cur = (self._first_cols(), self._grid_cols())
         if cur != getattr(self, "_last_cols", None):
             self._last_cols = cur
-            self._render_runners()
+            self._layout_runner_tiles()
 
     def _make_tile(self, item: ImageItem, score: float, parent) -> "_RunnerUpTile":
-        """후보 타일 하나를 만들고 swap 시그널을 연결한다 (#3)."""
-        tile = _RunnerUpTile(item, score, parent=parent)
+        """후보 타일 하나를 만들고 swap/크게보기 시그널을 연결한다 (#3/#4)."""
+        tile = _RunnerUpTile(item, score, parent=parent, size=self._runnerup_px,
+                             coord_mode=self._coord_mode, tolerance=self._tolerance)
         tile.swap_requested.connect(
             lambda it, s: self.swap_requested.emit(self.match, it, s)
         )
+        tile.view_requested.connect(self._open_candidate_viewer)
         return tile
 
-    def _render_runners(self) -> None:
-        """첫 줄은 인라인(_first_line_host), 추가 줄은 아래 그리드에 채운다 (#3/#5).
+    def _open_candidate_viewer(self, item: ImageItem) -> None:
+        """차순위 후보 크게보기 — 좌(기준)·우(후보) + 이전/다음 + 매치 버튼 (#4)."""
+        from ..widgets.side_by_side_viewer import SideBySideViewer
+        candidates = [(it, self._format_score(s))
+                      for it, s in self._runners_up]
+        start = 0
+        for i, (it, _s) in enumerate(self._runners_up):
+            if it.path == item.path:
+                start = i
+                break
+        viewer = SideBySideViewer(
+            self.match.ref_path, candidates, start,
+            ref_caption=f"기준 — {self.match.ref_path.name}",
+            action_label=i18n.KO.BTN_MATCH_THIS,
+            parent=self.window(),
+        )
+        viewer.action_requested.connect(
+            lambda it: self.swap_requested.emit(
+                self.match, it, self._score_for(it))
+        )
+        viewer.exec()
 
-        ``_visible_lines`` 가 보이는 총 줄 수.  1줄째는 1위 매치 옆에 인라인으로,
-        2줄째부터는 그 아래 그리드에 ``cols`` 개씩 줄바꿈으로 표시한다.
+    def _primary_val_item(self) -> ImageItem:
+        """현재 1위 매치 val 의 ImageItem — runners_up 엔 없으므로 즉석 생성 (#5)."""
+        return ImageItem(slot=self.match.slot, path=self.match.val_path,
+                         side="val")
+
+    def _open_compare(self, start: int = 0) -> None:
+        """slot 아래 ‘크게 보기’ 버튼 / 기준·1위 썸네일 우클릭 — 좌(기준)·우(후보)
+        비교 뷰어. 1위 매치를 후보 맨 앞에 포함해 실제 비교가 되도록 한다 (#2/#5)."""
+        from ..widgets.side_by_side_viewer import SideBySideViewer
+        candidates = [(self._primary_val_item(),
+                       self._format_score(self.match.score))]
+        candidates += [(it, self._format_score(s))
+                       for it, s in self._runners_up]
+        viewer = SideBySideViewer(
+            self.match.ref_path, candidates, max(0, int(start)),
+            ref_caption=f"기준 — {self.match.ref_path.name}",
+            action_label=i18n.KO.BTN_MATCH_THIS,
+            parent=self.window(),
+        )
+        viewer.action_requested.connect(
+            lambda it: self.swap_requested.emit(
+                self.match, it, self._score_for(it))
+        )
+        viewer.exec()
+
+    def _score_for(self, item: ImageItem) -> float:
+        for it, s in self._runners_up:
+            if it.path == item.path:
+                return float(s)
+        if Path(item.path) == Path(self.match.val_path):
+            return float(self.match.score)
+        return 0.0
+
+    def _reserved_fixed_px(self) -> int:
+        """행에서 두 메인 이미지를 제외한 고정 점유 폭 — slot·화살표·버튼·여백.
+
+        이 폭을 뺀 나머지를 두 이미지가 나눠 가져야 가로로 넘치지 않는다."""
+        try:
+            btn = max(140, self.btn_toggle.sizeHint().width())
+        except Exception:
+            btn = 140
+        # slot_host(min 110) + 화살표(~50) + 버튼 + 행 여백/스페이싱(~110).
+        return 110 + 50 + btn + 110
+
+    def _max_thumb(self) -> int:
+        """현재 행 폭에서 가로 넘침 없이 허용되는 메인 이미지 한 변의 최대값."""
+        avail = self._row_width() - self._reserved_fixed_px()
+        return max(_SIZE_MIN_PX, avail // 2)
+
+    def set_thumb_size(self, thumb_px: int) -> None:
+        """슬라이더로 썸네일 크기 변경 (#2) — 타일을 재생성하지 않고 보유 픽스맵을
+        그 자리에서 재스케일하고, 열 수를 다시 계산해 가로 넘침 없이 재배치 (#3).
+
+        요청 크기가 행 폭을 넘기면 두 이미지가 행에 들어가도록 클램프해, 우측
+        '매치 없음' 버튼이 잘리거나 가로 스크롤이 생기지 않게 한다."""
+        self._requested_thumb_px = int(thumb_px)
+        applied = max(_SIZE_MIN_PX, min(int(thumb_px), self._max_thumb()))
+        self._thumb_px = applied
+        self._runnerup_px = max(40, int(applied * 0.8))
+        self._ref_img.set_size(applied)
+        self._val_img.set_size(applied)
+        for tile in self._runner_tiles:
+            tile.set_size(self._runnerup_px)
+        self._layout_runner_tiles()
+
+    # ------------------------------------------------------------------
+    def _ensure_runner_tiles(self, count: int) -> None:
+        """필요한 개수만큼 차순위 타일을 (재사용 가능하게) 생성해 둔다."""
+        count = min(count, len(self._runners_up))
+        host = self._runner_host or self
+        while len(self._runner_tiles) < count:
+            item, score = self._runners_up[len(self._runner_tiles)]
+            self._runner_tiles.append(self._make_tile(item, score, host))
+
+    def _visible_runner_count(self) -> int:
+        fc = self._first_cols()
+        gc = self._grid_cols()
+        if fc == 0:
+            # 인라인 자리가 없으면(큰 이미지) 후보를 사라지게 두지 말고 아래
+            # 그리드에 첫 줄부터 배치 (#3).
+            return min(gc * max(1, self._visible_lines), len(self._runners_up))
+        extra = max(0, self._visible_lines - 1)
+        return min(fc + extra * gc, len(self._runners_up))
+
+    def _layout_runner_tiles(self) -> None:
+        """첫 줄(인라인) + 아래 그리드에 기존 타일을 재배치 (재생성 없음).
+
+        열 수는 가용 폭에 맞춰 계산해 가로 스크롤이 생기지 않게 한다 (#3).
+        ``_visible_lines`` 로 보이는 줄 수를 조절(더 보기/접기, #5).
         """
-        fc = self._first_cols()      # 첫 줄(인라인) 열 수 — 최소 4, 가변
-        gc = self._grid_cols()       # 추가 줄(그리드) 열 수 — 최소 5, 가변
-
-        # 인라인 첫 줄을 비우고 다시 채운다.
-        while self._first_line_lay.count():
-            it = self._first_line_lay.takeAt(0)
-            w = it.widget()
-            if w is not None:
-                w.deleteLater()
-        for item, score in self._runners_up[:fc]:
-            self._first_line_lay.addWidget(
-                self._make_tile(item, score, self._first_line_host)
-            )
-
-        if self._runner_grid is None:
+        if not self._runners_up:
             return
-
-        # 아래 그리드(추가 줄)를 비우고 다시 채운다.
-        while self._runner_grid.count():
-            it = self._runner_grid.takeAt(0)
-            w = it.widget()
-            if w is not None:
-                w.deleteLater()
-        # _visible_lines: 보이는 총 줄 수(첫 줄 포함).  추가 줄 = _visible_lines-1.
-        extra_lines = max(0, self._visible_lines - 1)
-        rest = self._runners_up[fc:fc + extra_lines * gc]
-        for idx, (item, score) in enumerate(rest):
-            self._runner_grid.addWidget(
-                self._make_tile(item, score, self._runner_host),
-                idx // gc, idx % gc,
-            )
-
-        # 모두 표시했으면 ‘더 보기’ 버튼을 숨긴다.
-        visible_count = fc + len(rest)
+        fc = self._first_cols()
+        gc = self._grid_cols()
+        need = self._visible_runner_count()
+        self._ensure_runner_tiles(need)
+        # 두 레이아웃에서 기존 위젯을 떼어낸다(삭제하지 않고 재사용).
+        for lay in (self._first_line_lay, self._runner_grid):
+            if lay is None:
+                continue
+            while lay.count():
+                lay.takeAt(0)
+        for i, tile in enumerate(self._runner_tiles):
+            if i >= need:
+                tile.setVisible(False)
+                continue
+            tile.setVisible(True)
+            if i < fc:
+                self._first_line_lay.addWidget(tile)
+            elif self._runner_grid is not None:
+                j = i - fc
+                self._runner_grid.addWidget(tile, j // gc, j % gc)
         if self.btn_more is not None:
-            self.btn_more.setVisible(visible_count < len(self._runners_up))
+            self.btn_more.setVisible(need < len(self._runners_up))
+        if self.btn_less is not None:
+            self.btn_less.setVisible(self._visible_lines > 1)
 
     def _on_more(self) -> None:
-        """‘후보 한 줄 더 보기’ — 표시 줄 수를 1 늘리고 재렌더 (#5)."""
+        """‘후보 한 줄 더 보기’ — 표시 줄 수를 1 늘린다 (#5).
+        높이 변화로 스크롤이 튀지 않게 페이지가 위치를 보정한다 (#6)."""
         self._visible_lines += 1
-        self._render_runners()
+        self._layout_runner_tiles()
+        self.more_clicked.emit(self)
+
+    def _on_less(self) -> None:
+        """‘접기’ — 펼친 줄을 전부 한 번에 접고(첫 줄만 남김), 페이지가 이 행을
+        최상단으로 스크롤 복귀한다 (#1/#6)."""
+        self._visible_lines = 1
+        self._layout_runner_tiles()
+        self.less_clicked.emit(self)
 
     def _make_thumb(self, path: Path, *, size: int = _THUMB_PX,
-                    subtle: bool = False) -> QLabel:
+                    subtle: bool = False, on_view=None) -> QLabel:
         # 지연 로드 + 우클릭 ‘크게보기’ 지원 (#6-4/#13).
-        return _LazyThumb(path, size=size, subtle=subtle, parent=self)
+        return _LazyThumb(path, size=size, subtle=subtle, on_view=on_view,
+                          parent=self)
 
     def set_unmatched(self, unmatched: bool) -> None:
         self._is_unmatched = unmatched
@@ -378,6 +611,14 @@ class MatchReviewPage(QWidget):
         self._score_cache = None
         self._val_pool: dict | None = None
         self._candidates_by_ref: dict | None = None
+        self._thumb_px = _THUMB_PX                  # 사진 크기 (#2)
+        self._resize_timer = QTimer(self)           # 슬라이더 드래그 디바운스
+        self._resize_timer.setSingleShot(True)
+        self._resize_timer.timeout.connect(self._apply_thumb_size)
+        # 좌표 매칭 모드 관련
+        self._coord_mode: bool = False
+        self._tolerance: float = 500.0
+        self._coord_failed_count: int = 0
         self._build()
 
     # ------------------------------------------------------------------
@@ -396,10 +637,29 @@ class MatchReviewPage(QWidget):
         hint.setStyleSheet("color: #7FB3D5;")
         root.addWidget(hint)
 
-        # 요약 라벨
+        # 요약 라벨 + 사진 크기 슬라이더 (#2)
+        summary_row = QHBoxLayout()
         self._summary_label = QLabel("", self)
         self._summary_label.setStyleSheet("color: #00FFA3; font-weight: 700;")
-        root.addWidget(self._summary_label)
+        summary_row.addWidget(self._summary_label)
+        summary_row.addStretch(1)
+        size_label = QLabel(i18n.KO.IMAGE_SIZE_LABEL, self)
+        size_label.setStyleSheet("color: #7FB3D5;")
+        summary_row.addWidget(size_label)
+        # 마우스 휠로는 조절 불가 (NoWheelSlider).
+        self.size_slider = NoWheelSlider(Qt.Orientation.Horizontal, self)
+        self.size_slider.setRange(_SIZE_MIN_PX, _SIZE_MAX_PX)
+        self.size_slider.setValue(self._thumb_px)
+        self.size_slider.setSingleStep(20)
+        self.size_slider.setPageStep(80)
+        self.size_slider.setFixedWidth(180)
+        self.size_slider.valueChanged.connect(self._on_size_changed)
+        summary_row.addWidget(self.size_slider)
+        self.size_value = QLabel(f"{self._thumb_px} px", self)
+        self.size_value.setStyleSheet("color: #7FB3D5;")
+        self.size_value.setFixedWidth(56)
+        summary_row.addWidget(self.size_value)
+        root.addLayout(summary_row)
 
         # 매치 리스트 (세로 스크롤만). 가로 스크롤은 끄고 창 너비에 맞춰
         # 후보 타일이 줄바꿈 되도록 한다 (#4).
@@ -412,10 +672,12 @@ class MatchReviewPage(QWidget):
         scroll.setStyleSheet(
             "QScrollArea { background: transparent; border: none; }"
         )
+        self._scroll = scroll                       # 더 보기/접기 스크롤 보정용 (#1/#6).
         host = QWidget()
         host.setSizePolicy(QSizePolicy.Policy.Expanding,
                            QSizePolicy.Policy.MinimumExpanding)
         scroll.setWidget(host)
+        self._scroll_host = host
         outer = QVBoxLayout(host)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(6)
@@ -446,7 +708,10 @@ class MatchReviewPage(QWidget):
                    *,
                    score_cache=None,
                    val_pool: dict | None = None,
-                   candidates_by_ref: dict | None = None) -> None:
+                   candidates_by_ref: dict | None = None,
+                   coord_mode: bool = False,
+                   tolerance: float = 500.0,
+                   coord_failed_count: int = 0) -> None:
         """매치 검토 화면 초기화.
 
         ``score_cache`` 와 ``val_pool`` 이 함께 주어지면 각 매치 행에 차순위
@@ -455,9 +720,15 @@ class MatchReviewPage(QWidget):
         ``candidates_by_ref`` 가 주어지면 (fast 모드, #7) ``(slot, ref_path.name)``
         키로 미리 점수 내림차순 정렬된 ``[(ImageItem, score), ...]`` 후보 목록을
         직접 사용한다.  score_cache 가 비어있는 fast 모드에서도 후보가 보인다.
+
+        ``coord_mode=True`` 면 score 를 µm 거리로 역산해 표시하고,
+        ``coord_failed_count`` 를 요약에 "매치 실패 N쌍" 으로 포함한다.
         """
         self._matches = list(matches)
         self._unmatched_keys.clear()
+        self._coord_mode = bool(coord_mode)
+        self._tolerance = float(tolerance) if tolerance and tolerance > 0 else 500.0
+        self._coord_failed_count = int(coord_failed_count)
         # 차순위 swap / 재계산용으로 score_cache + val_pool 참조 보관.
         self._score_cache = score_cache
         self._val_pool = val_pool
@@ -486,12 +757,48 @@ class MatchReviewPage(QWidget):
             for m in ordered:
                 self._append_row(m)
         self._update_summary()
+        # 검토 화면이 새로 열릴 때마다 스크롤을 항상 최상단으로 (이전 세션의
+        # 스크롤 위치가 남지 않도록). 레이아웃 확정 후 적용.
+        QTimer.singleShot(
+            0, lambda: self._scroll.verticalScrollBar().setValue(0))
+
+    def _on_size_changed(self, value: int) -> None:
+        self._thumb_px = int(value)
+        self.size_value.setText(f"{value} px")
+        self._resize_timer.start(150)
+
+    def _apply_thumb_size(self) -> None:
+        """슬라이더 변경 적용 (#2) — 행 상태를 보존한 채 썸네일 크기만 갱신."""
+        for row in self._rows:
+            row.set_thumb_size(self._thumb_px)
+
+    # ------------------------------------------------------------------
+    def _row_top(self, row) -> int:
+        """스크롤 콘텐츠 좌표계에서 행 상단의 y (스크롤바 값과 같은 단위)."""
+        return row.mapTo(self._scroll_host, QPoint(0, 0)).y()
+
+    def _on_row_more(self, row) -> None:
+        """‘후보 한 줄 더 보기’ 후 — 행이 화면에서 같은 자리에 있도록 스크롤 보정 (#6)."""
+        sb = self._scroll.verticalScrollBar()
+        delta = self._row_top(row) - sb.value()
+        QTimer.singleShot(
+            0, lambda: sb.setValue(max(0, self._row_top(row) - delta)))
+
+    def _on_row_less(self, row) -> None:
+        """‘접기’ 후 — 접은 행의 사진들이 최상단에 오도록 스크롤 복귀 (#1/#6)."""
+        sb = self._scroll.verticalScrollBar()
+        QTimer.singleShot(0, lambda: sb.setValue(self._row_top(row)))
 
     def _append_row(self, match: MatchResult) -> "_MatchRow":
         runners = self._lookup_runners_up(match, self._score_cache, self._val_pool)
-        row = _MatchRow(match, runners_up=runners, parent=self)
+        row = _MatchRow(match, runners_up=runners, parent=self,
+                        thumb_px=self._thumb_px,
+                        coord_mode=self._coord_mode,
+                        tolerance=self._tolerance)
         row.toggle_requested.connect(self._on_toggle)
         row.swap_requested.connect(self._on_swap)
+        row.more_clicked.connect(self._on_row_more)
+        row.less_clicked.connect(self._on_row_less)
         self._list_layout.addWidget(row)
         self._rows.append(row)
         self._rows_by_key[match.key] = row
@@ -508,7 +815,6 @@ class MatchReviewPage(QWidget):
             ref_path=old_match.ref_path,
             val_path=new_val_item.path,
             score=float(new_score),
-            direction=old_match.direction,
         )
         # matches 리스트에서 old → new 교체
         for i, m in enumerate(self._matches):
@@ -530,9 +836,14 @@ class MatchReviewPage(QWidget):
                     new_match, self._score_cache, self._val_pool,
                 ),
                 parent=self,
+                thumb_px=self._thumb_px,
+                coord_mode=self._coord_mode,
+                tolerance=self._tolerance,
             )
             new_row.toggle_requested.connect(self._on_toggle)
             new_row.swap_requested.connect(self._on_swap)
+            new_row.more_clicked.connect(self._on_row_more)
+            new_row.less_clicked.connect(self._on_row_less)
             if layout_idx >= 0:
                 self._list_layout.insertWidget(layout_idx, new_row)
             else:
@@ -593,9 +904,13 @@ class MatchReviewPage(QWidget):
         total = len(self._matches)
         unmatched = len(self._unmatched_keys)
         kept = total - unmatched
-        self._summary_label.setText(
-            f"유지: {kept} 쌍  ·  매치 없음 처리: {unmatched} 장"
-        )
+        parts = [
+            f"유지 {kept}쌍",
+            f"매치 없음처리 {unmatched}쌍",
+        ]
+        if self._coord_failed_count > 0:
+            parts.append(f"매치 실패 {self._coord_failed_count}쌍")
+        self._summary_label.setText("  ·  ".join(parts))
 
     def _on_done(self) -> None:
         kept: list[MatchResult] = []

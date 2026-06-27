@@ -16,12 +16,16 @@ class SlotSection(QWidget):
 
     tile_clicked = pyqtSignal(object)            # ThumbEntry
     plus_clicked = pyqtSignal(str)               # slot name
+    expand_requested = pyqtSignal(object)        # ThumbEntry — 더블클릭 확대 (#2)
+    inline_changed = pyqtSignal()                # 인라인 선택 변경 (#2)
 
     def __init__(self,
                  slot_name: str,
                  *,
                  columns: int = 4,
                  select_mode: bool = False,
+                 inline_select: bool = False,
+                 truncate: bool = True,
                  tile_px: Optional[int] = None,
                  parent=None) -> None:
         super().__init__(parent)
@@ -34,15 +38,18 @@ class SlotSection(QWidget):
         header = QHBoxLayout()
         self._label = QLabel(self)
         self._label.setProperty("role", "subtitle")
-        self._label.setStyleSheet("font-weight: 700; color: #00D4FF;")
+        self._label.setStyleSheet("font-weight: 700; color: #39FF14;")
         header.addWidget(self._label)
         header.addStretch(1)
         outer.addLayout(header)
 
         self.grid = ThumbGrid(columns=columns, select_mode=select_mode,
-                              truncate=True, tile_px=tile_px, parent=self)
+                              inline_select=inline_select, truncate=truncate,
+                              tile_px=tile_px, parent=self)
         self.grid.tile_clicked.connect(self.tile_clicked.emit)
         self.grid.plus_clicked.connect(lambda: self.plus_clicked.emit(self._slot))
+        self.grid.expand_requested.connect(self.expand_requested.emit)
+        self.grid.inline_changed.connect(self.inline_changed.emit)
         outer.addWidget(self.grid)
 
     # ------------------------------------------------------------------

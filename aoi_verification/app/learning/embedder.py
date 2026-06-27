@@ -360,8 +360,12 @@ def compute_embeddings(paths: Iterable[Path],
             if ov_out:
                 out.update(ov_out)
                 ov_handled = set(ov_out.keys())
-    except Exception:
-        pass
+    except Exception as exc:
+        # OpenVINO(Intel GPU/NPU) 경로 실패 — PyTorch 로 폴백하되, 원인을
+        # 로그로 남긴다(동작 불변).  GPU 가속이 조용히 꺼지는 상황 진단용.
+        from ..utils import errors as _errors
+        _errors.log_silent("embedder: OpenVINO 경로 실패 → PyTorch 폴백",
+                           exc, level=_errors.logging.WARNING)
 
     # 2) OpenVINO 가 처리하지 못한 path 들은 PyTorch 경로로 보완.
     missing = [p for p in items if p not in ov_handled]

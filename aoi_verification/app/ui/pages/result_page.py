@@ -6,8 +6,8 @@ from datetime import datetime
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import (QFileDialog, QHBoxLayout, QLabel, QMessageBox,
-                              QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import (QCheckBox, QFileDialog, QHBoxLayout, QLabel,
+                              QMessageBox, QVBoxLayout, QWidget)
 
 from ... import i18n
 from ...models.result import FinalResult
@@ -31,6 +31,10 @@ class ResultPage(QWidget):
         # 매치 실패 사진 검토(#8) 에 필요한 외부 데이터 — main_window 가 주입.
         self._val_pool: dict | None = None
         self._score_cache = None
+        # 효율 모드 선계산 top-K — 실패 검토에서 후보 풀≥300 일 때 재사용 (#1).
+        self._fast_results: dict | None = None
+        self._coord_mode: bool = False
+        self._tolerance: float = 500.0
         self._loading = LoadingOverlay(self)
         self._exporter: ExcelExporter | None = None
         self._build()
@@ -77,19 +81,42 @@ class ResultPage(QWidget):
         bar.addWidget(self.export_btn)
         root.addLayout(bar)
 
+        # 전체 양식(E~H 수기 영역) 포함 옵션 — 기본 해제(#3).  체크 시에만 무거운
+        # 전체 양식 시트를 함께 저장한다.
+        opt_row = QHBoxLayout()
+        opt_row.addStretch(1)
+        self.full_template_chk = QCheckBox(i18n.KO.EXPORT_FULL_TEMPLATE_LABEL, self)
+        self.full_template_chk.setChecked(False)
+        self.full_template_chk.setToolTip(i18n.KO.EXPORT_FULL_TEMPLATE_TOOLTIP)
+        opt_row.addWidget(self.full_template_chk)
+        opt_row.addStretch(1)
+        root.addLayout(opt_row)
+
+        # 개발자 크레딧 (마지막 화면) -----------------------------------
+        credit = QLabel(i18n.KO.CREDIT, self)
+        credit.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        credit.setStyleSheet("color: #7FB3D5; padding-top: 8px;")
+        root.addWidget(credit)
+
     # ------------------------------------------------------------------
     def show_result(self, result: FinalResult,
                     template_path: Path | None = None,
                     target_path: Path | None = None,
                     auto_mode: bool = False,
                     val_pool: dict | None = None,
-                    score_cache=None) -> None:
+                    score_cache=None,
+                    fast_results: dict | None = None,
+                    coord_mode: bool = False,
+                    tolerance: float = 500.0) -> None:
         self._result = result
         self._template_path = template_path
         self._target_path = target_path
-        # 매치 실패 검토에 사용할 후보 풀 / 점수 캐시 (#8).
+        # 매치 실패 검토에 사용할 후보 풀 / 점수 캐시 / 선계산 결과 (#8/#1).
         self._val_pool = val_pool
         self._score_cache = score_cache
+        self._fast_results = fast_results
+        self._coord_mode = bool(coord_mode)
+        self._tolerance = float(tolerance) if tolerance > 0 else 500.0
         # 검토 후 다시 그려도 ‘자동 매치 결과 검토 권장’ 라벨이 살아 있도록
         # 마지막 auto_mode 값을 기억해 재렌더링에서 재사용한다.
         self._auto_mode = bool(auto_mode)
@@ -123,13 +150,8 @@ class ResultPage(QWidget):
             )
             self._summary_layout.addWidget(hint)
 
-        mode_text = "한쪽만 검증" if result.mode == "single" else "양쪽 교차검증"
-        line(f"모드: {mode_text}")
         line(f"기준 장비: {result.ref_machine}    검증 장비: {result.val_machine}")
         line(f"매칭 성공 사진: {len(result.matches)} 장")
-        if result.mode == "cross":
-            line(f"미탐(빠른 호기): {len(result.miss_fast)} 장")
-            line(f"미탐(느린 호기): {len(result.miss_slow)} 장")
         if result.slot_only_ref or result.slot_only_val:
             line(
                 "Slot 불일치  ·  기준 전용: "
@@ -165,7 +187,9 @@ class ResultPage(QWidget):
         if self._result is None:
             return
         from ..widgets.matches_review import MatchesReviewDialog
-        dlg = MatchesReviewDialog(self._result.matches, parent=self)
+        dlg = MatchesReviewDialog(self._result.matches, parent=self,
+                                  coord_mode=self._coord_mode,
+                                  tolerance=self._tolerance)
         dlg.exec()
         removed = dlg.removed
         if not removed:
@@ -199,7 +223,10 @@ class ResultPage(QWidget):
                          target_path=self._target_path,
                          auto_mode=getattr(self, "_auto_mode", False),
                          val_pool=self._val_pool,
-                         score_cache=self._score_cache)
+                         score_cache=self._score_cache,
+                         fast_results=self._fast_results,
+                         coord_mode=self._coord_mode,
+                         tolerance=self._tolerance)
 
     # ------------------------------------------------------------------
     def _on_review_unmatched(self) -> None:
@@ -226,7 +253,10 @@ class ResultPage(QWidget):
             val_pool=self._val_pool,
             already_used_vals=already_used,
             score_cache=self._score_cache,
+            fast_results=self._fast_results,
             parent=self,
+            coord_mode=self._coord_mode,
+            tolerance=self._tolerance,
         )
         dlg.exec()
         if not dlg.new_matches:
@@ -247,7 +277,9 @@ class ResultPage(QWidget):
                          template_path=self._template_path,
                          target_path=self._target_path,
                          val_pool=self._val_pool,
-                         score_cache=self._score_cache)
+                         score_cache=self._score_cache,
+                         coord_mode=self._coord_mode,
+                         tolerance=self._tolerance)
 
     def _on_export(self) -> None:
         if self._result is None:
@@ -274,6 +306,7 @@ class ResultPage(QWidget):
         self._loading.show_overlay(i18n.KO.LOAD_EXPORT)
         self._exporter = ExcelExporter(
             self._result, self._save_path, template_path=self._template_path,
+            include_full_template=self.full_template_chk.isChecked(),
         )
         self._exporter.signals.progress.connect(
             lambda d, t, msg: self._loading.set_progress(d, t, i18n.KO.LOAD_EXPORT)
@@ -288,43 +321,6 @@ class ResultPage(QWidget):
             self, i18n.KO.APP_TITLE,
             i18n.KO.SAVE_SUCCESS_FMT.format(path=path),
         )
-        # 저장 알림 닫힌 직후 — 학습 데이터 동의 모달.
-        self._ask_training_consent()
-
-    def _ask_training_consent(self) -> None:
-        """저장 완료 후 ‘학습 자료로 사용?’ 모달을 띄우고 동의 시 누적."""
-        if self._result is None or not self._result.matches:
-            return
-        n = len(self._result.matches)
-        body = i18n.KO.CONSENT_BODY_FMT.format(n=n)
-        r = QMessageBox.question(
-            self, i18n.KO.CONSENT_TITLE, body,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes,
-        )
-        if r != QMessageBox.StandardButton.Yes:
-            return
-
-        from ...learning.dataset import TrainingDataStore
-        try:
-            store = TrainingDataStore()
-            store.append_session(
-                self._result.matches,
-                ref_machine=self._result.ref_machine,
-                val_machine=self._result.val_machine,
-            )
-        except Exception as exc:
-            # 성공 여부는 사용자에게 직접 노출하지 않고, 실패만 로그로 남긴다 (#4).
-            try:
-                from ...utils.error_log import log_error
-                log_error("training_consent_append_session", str(exc))
-            except Exception:
-                pass
-            QMessageBox.information(
-                self, i18n.KO.APP_TITLE, i18n.KO.ERROR_LOGGED,
-            )
-            return
-        # 성공 팝업 / 자동 재학습 트리거는 제거 (#4) — 조용히 누적만 한다.
 
     def _on_export_failed(self, msg: str) -> None:
         self._loading.hide_overlay()
@@ -332,3 +328,4 @@ class ResultPage(QWidget):
             self, i18n.KO.APP_TITLE,
             i18n.KO.SAVE_FAIL_FMT.format(error=msg),
         )
+

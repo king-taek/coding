@@ -31,6 +31,8 @@ COL_REF = "C"
 COL_VAL = "D"
 DATA_START_ROW = 3
 HEADER_AOI_ROW = 2
+# 시트 분리 (#사용자 요청): 1번째=요약(A~D, 파일명), 2번째=전체 양식(E~H 포함).
+SHEET_FULL_NAME = "전체 양식"
 # 슬롯 구분선이 그려지는 컬럼 — 사용자 요청 (#6): A~D 만, 두껍게.
 BORDER_COLS = ["A", "B", "C", "D"]
 
@@ -44,14 +46,19 @@ IMG_COL_WIDTH = 22
 
 
 def _machine_label(raw: str) -> str:
-    """‘1호기’ / ‘AOI-1’ / ‘1’ 같은 입력을 모두 ‘AOI-N’ 형식으로 정규화."""
+    """호기 입력을 엑셀 헤더 라벨로 정규화.
+
+    - 순수 숫자(``2``) 또는 ``N호기``(``2호기``, 공백 허용) → ``AOI-N``
+    - 그 외 문자가 포함되면(``K-2`` 등) → ``AOI(원본값)``
+    - 빈 입력 → ``""``
+    """
     s = (raw or "").strip()
     if not s:
         return ""
-    m = re.search(r"\d+", s)
-    if not m:
-        return s
-    return f"AOI-{m.group(0)}"
+    m = re.fullmatch(r"(\d+)(\s*호기)?", s)
+    if m:
+        return f"AOI-{m.group(1)}"
+    return f"AOI({s})"
 
 
 class ExporterSignals(QObject):
@@ -67,11 +74,14 @@ class ExcelExporter(QThread):
                  result: FinalResult,
                  dst_path: Path,
                  template_path: Optional[Path] = None,
+                 include_full_template: bool = False,
                  parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._result = result
         self._dst = Path(dst_path)
         self._template = Path(template_path) if template_path else None
+        # 전체 양식(E~H 수기 영역 포함) 시트 생성 여부 — 기본 off(가볍고 빠른 출력).
+        self._include_full_template = bool(include_full_template)
         self.signals = ExporterSignals()
 
     # ------------------------------------------------------------------
@@ -96,6 +106,13 @@ class ExcelExporter(QThread):
             ws = wb.active
             ws.title = "AOI 검증 결과"
             self._build_minimal_headers(ws)
+
+        # 시트는 둘로 나눈다 (#사용자 요청):
+        #   · 1번째 시트 = 결과 파일명과 같은 이름, A~D 열만(요약).
+        #   · 2번째 시트 = 기존 양식 그대로(전체 — E~H 수기 영역 포함), 이름 '전체 양식'.
+        # 구현: 템플릿(현재 ws)을 채워 '전체 양식' 으로 두고, 그 시트를 복제해 E~H 를
+        #       지운 요약 시트를 앞쪽에 만든다(이미지/서식 보존을 위해 채운 뒤 복제).
+        ws.title = SHEET_FULL_NAME
 
         # row 2 의 ‘AOI-N’ 헤더를 실제 호기 번호로 교체 (#3).
         ref_label = _machine_label(self._result.ref_machine)
@@ -128,31 +145,36 @@ class ExcelExporter(QThread):
             rows_input.append((u.slot, str(u.path.name).lower(), u))
         rows_input.sort(key=lambda x: (x[0], x[1]))
 
-        self._fill_rows(ws, rows_input)
+        # 전체 양식(E~H 포함) 시트는 옵션 — 기본 off 면 이미지 임베드를 1회만 하게
+        # 요약 시트만 채운다(더 빠르고 가벼운 파일).  켜면 전체 양식도 채운다.
+        if self._include_full_template:
+            self._fill_rows(ws, rows_input)
+            # 양식.xlsx 의 A3..A22 미리 박힌 1..20 행번호 중 안 채운 행은 비운다.
+            data_end_row = DATA_START_ROW + len(rows_input) - 1
+            for r in range(max(data_end_row + 1, DATA_START_ROW), ws.max_row + 1):
+                a = ws.cell(row=r, column=1)
+                if isinstance(a.value, (int, float)):
+                    a.value = None
 
-        # 양식.xlsx 는 A3..A22 에 1..20 행번호를 미리 박아두었다.  데이터가
-        # 그보다 적게 들어가면 ‘빈 행에 번호만 떠 있는’ 모양이 되어 혼란스러우니
-        # 우리가 채우지 않은 모든 데이터 행의 A 컬럼을 비운다.
-        data_end_row = DATA_START_ROW + len(rows_input) - 1
-        for r in range(max(data_end_row + 1, DATA_START_ROW), ws.max_row + 1):
-            a = ws.cell(row=r, column=1)
-            if isinstance(a.value, (int, float)):
-                a.value = None
-
-        # 교차 검증 미탐 시트 ----------------------------------------
-        if self._result.mode == "cross":
-            if self._result.miss_fast:
-                self._write_miss_sheet(
-                    wb, i18n.KO.SHEET_MISS_FAST, self._result.miss_fast,
-                )
-            if self._result.miss_slow:
-                self._write_miss_sheet(
-                    wb, i18n.KO.SHEET_MISS_SLOW, self._result.miss_slow,
-                )
+        # 시트 순서: 미매칭(첫 번째, 조건부) → 요약 → 전체 양식.
+        unmatched_rows = [r for r in rows_input if isinstance(r[2], MissEntry)]
+        if unmatched_rows:
+            # 미매칭 시트를 index 0(첫 번째)에 만들고, 요약은 index 1.
+            self._write_unmatched_sheet(wb, unmatched_rows)
+            self._build_summary_sheet(wb, rows_input, index=1)
+        else:
+            self._build_summary_sheet(wb, rows_input, index=0)
 
         # Slot 불일치 ---------------------------------------------------
         if self._result.slot_only_ref or self._result.slot_only_val:
             self._write_slot_mismatch_sheet(wb)
+
+        # 전체 양식 미포함이면, 헤더 복사가 끝난 지금 전체 양식 시트를 제거.
+        if not self._include_full_template:
+            try:
+                wb.remove(wb[SHEET_FULL_NAME])
+            except Exception:
+                pass
 
         self._dst.parent.mkdir(parents=True, exist_ok=True)
         wb.save(str(self._dst))
@@ -163,6 +185,69 @@ class ExcelExporter(QThread):
         except Exception:
             # 메타데이터 정리 실패는 치명적이지 않다 — 결과 파일은 이미 저장됨.
             pass
+
+    # ------------------------------------------------------------------
+    def _summary_sheet_name(self) -> str:
+        """요약 시트 이름 = 결과 파일명(확장자 제외).  엑셀 시트명 제약(31자·금지문자)
+        에 맞춰 정리하고, 비면 안전한 기본값을 쓴다."""
+        import re as _re
+        name = Path(self._dst).stem or "결과"
+        name = _re.sub(r'[:\\/?*\[\]]', "_", name)   # 엑셀 시트명 금지문자 → _
+        name = name.strip() or "결과"
+        if name == SHEET_FULL_NAME:                  # 2번째 시트와 충돌 방지
+            name = name + " "
+        return name[:31]
+
+    def _build_summary_sheet(self, wb, rows_input: list, *, index: int = 0) -> None:
+        """요약 시트 — A~D 열만, 전체 데이터."""
+        self._build_ad_sheet(wb, self._summary_sheet_name(), index, rows_input)
+
+    def _write_unmatched_sheet(self, wb, unmatched_rows: list) -> None:
+        """미매칭 사진만 모은 A~D 시트(이미지 포함) — 첫 번째 시트(index 0)."""
+        self._build_ad_sheet(wb, i18n.KO.SHEET_UNMATCHED, 0, unmatched_rows)
+
+    def _build_ad_sheet(self, wb, title: str, index: int, rows_input: list) -> None:
+        """A~D(번호·slot·기준/검증 이미지) 전용 시트를 만든다.
+
+        전체 양식 시트의 A~D 헤더/병합/폭/행높이를 복사하고 ``rows_input`` 으로
+        이미지를 임베드한다.  요약(전체)·미매칭(부분) 시트가 공유한다."""
+        full = wb[SHEET_FULL_NAME]
+        ws = wb.create_sheet(title=title, index=index)
+
+        # A~D 헤더(row 1~2) 값/서식 복사.  E~H 는 만들지 않는다(요약 시트엔 없음).
+        from copy import copy as _copy
+        for r in (1, 2):
+            for col in ("A", "B", "C", "D"):
+                src = full[f"{col}{r}"]
+                dst = ws[f"{col}{r}"]
+                dst.value = src.value
+                if src.has_style:
+                    dst.font = _copy(src.font)
+                    dst.fill = _copy(src.fill)
+                    dst.border = _copy(src.border)
+                    dst.alignment = _copy(src.alignment)
+                    dst.number_format = src.number_format
+        # 병합 헤더(A1:A2, B1:B2, C1:D1) 재현 — A~D 범위만.
+        for rng in ("A1:A2", "B1:B2", "C1:D1"):
+            try:
+                ws.merge_cells(rng)
+            except Exception:
+                pass
+        # 열 폭 — A~D 만 전체 시트와 동일하게.
+        for col in ("A", "B", "C", "D"):
+            w = full.column_dimensions[col].width
+            if w:
+                ws.column_dimensions[col].width = w
+        # 데이터 행 높이도 동일하게(이미지가 같은 크기로 들어가도록).
+        h = full.row_dimensions[DATA_START_ROW].height or ROW_HEIGHT_PT
+        ws.row_dimensions[DATA_START_ROW].height = h
+        # A~D 데이터 채우기(이미지는 mid 캐시에서 다시 임베드 — 시트 간 공유 불가).
+        self._fill_rows(ws, rows_input)
+        data_end = DATA_START_ROW + len(rows_input) - 1
+        for rr in range(max(data_end + 1, DATA_START_ROW), ws.max_row + 1):
+            a = ws.cell(row=rr, column=1)
+            if isinstance(a.value, (int, float)):
+                a.value = None
 
     # ------------------------------------------------------------------
     @staticmethod
@@ -238,6 +323,30 @@ class ExcelExporter(QThread):
         ws.row_dimensions[2].height = 19.5
 
     # ------------------------------------------------------------------
+    def _write_slot_cell(self, ws, row: int, slot: str, center) -> None:
+        """B열에 slot명을 쓴다.  KLA 장비면 slot명(WaferID) 아래 줄에 KLA 하위폴더명을
+        **회색 글씨**로 함께 표기한다 (#KLA).  rich text 미지원 시 plain 폴백."""
+        from openpyxl.styles import Alignment
+
+        cell = ws[f"{COL_SLOT}{row}"]
+        kf = (self._result.kla_folders or {}).get(slot)
+        if not kf:
+            cell.value = slot
+            cell.alignment = center
+            return
+        wrap = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        try:
+            from openpyxl.cell.rich_text import CellRichText, TextBlock
+            from openpyxl.cell.text import InlineFont
+            cell.value = CellRichText(
+                TextBlock(InlineFont(), f"{slot}\n"),
+                TextBlock(InlineFont(sz=8, color="808080"), str(kf)),
+            )
+        except Exception:
+            cell.value = f"{slot}\n{kf}"
+        cell.alignment = wrap
+
+    # ------------------------------------------------------------------
     def _fill_rows(self, ws, rows_input: list[tuple[str, str, object]]) -> None:
         from openpyxl.comments import Comment
         from openpyxl.drawing.image import Image as XLImage
@@ -288,8 +397,7 @@ class ExcelExporter(QThread):
 
             if isinstance(payload, MatchResult):
                 m = payload
-                ws[f"{COL_SLOT}{row}"] = m.slot
-                ws[f"{COL_SLOT}{row}"].alignment = center
+                self._write_slot_cell(ws, row, m.slot, center)
                 # 손상/누락 이미지 1 장 때문에 전체 export 가 abort 되지 않도록
                 # 각 사진을 개별 try 로 감싼다 (Bug #3).  실패하면 파일명 텍스트
                 # 로 대체하고 이어서 진행.
@@ -297,7 +405,8 @@ class ExcelExporter(QThread):
                     ref_mid = image_io.get_mid_path(m.ref_path)
                     xli_ref = XLImage(str(ref_mid))
                     _fit_to_cell(xli_ref, cell_w_px, cell_h_px)
-                    ws.add_image(xli_ref, f"{COL_REF}{row}")
+                    _add_image_centered(ws, xli_ref, COL_REF, row,
+                                        cell_w_px, cell_h_px)
                 except Exception:
                     ws[f"{COL_REF}{row}"] = str(Path(m.ref_path).name)
                     ws[f"{COL_REF}{row}"].alignment = center
@@ -305,21 +414,22 @@ class ExcelExporter(QThread):
                     val_mid = image_io.get_mid_path(m.val_path)
                     xli_val = XLImage(str(val_mid))
                     _fit_to_cell(xli_val, cell_w_px, cell_h_px)
-                    ws.add_image(xli_val, f"{COL_VAL}{row}")
+                    _add_image_centered(ws, xli_val, COL_VAL, row,
+                                        cell_w_px, cell_h_px)
                 except Exception:
                     ws[f"{COL_VAL}{row}"] = str(Path(m.val_path).name)
                     ws[f"{COL_VAL}{row}"].alignment = center
                 self.signals.progress.emit(idx, total, m.slot)
             else:
                 u: MissEntry = payload
-                ws[f"{COL_SLOT}{row}"] = u.slot
-                ws[f"{COL_SLOT}{row}"].alignment = center
+                self._write_slot_cell(ws, row, u.slot, center)
                 # 기준 이미지: 정상 임베드.
                 try:
                     ref_mid = image_io.get_mid_path(Path(u.path))
                     xli_ref = XLImage(str(ref_mid))
                     _fit_to_cell(xli_ref, cell_w_px, cell_h_px)
-                    ws.add_image(xli_ref, f"{COL_REF}{row}")
+                    _add_image_centered(ws, xli_ref, COL_REF, row,
+                                        cell_w_px, cell_h_px)
                 except Exception:
                     ws[f"{COL_REF}{row}"] = str(Path(u.path).name)
                 # 검증 컬럼에 파일명 텍스트 (빨강).
@@ -335,29 +445,6 @@ class ExcelExporter(QThread):
             row += 1
 
     # ------------------------------------------------------------------
-    def _write_miss_sheet(self, wb, title: str, entries) -> None:
-        from openpyxl.drawing.image import Image as XLImage
-        ws = wb.create_sheet(title=title)
-        ws["B1"] = "Slot"
-        ws["C1"] = "이미지"
-        ws["D1"] = "비고"
-        ws.column_dimensions["B"].width = 14
-        ws.column_dimensions["C"].width = IMG_COL_WIDTH
-        ws.column_dimensions["D"].width = 30
-        cell_w_px = _col_width_to_px(IMG_COL_WIDTH)
-        cell_h_px = _row_height_to_px(ROW_HEIGHT_PT)
-        for i, e in enumerate(entries, start=2):
-            ws.row_dimensions[i].height = ROW_HEIGHT_PT
-            ws[f"B{i}"] = e.slot
-            ws[f"D{i}"] = e.note or ""
-            try:
-                mid = image_io.get_mid_path(Path(e.path))
-                xli = XLImage(str(mid))
-                _fit_to_cell(xli, cell_w_px, cell_h_px)
-                ws.add_image(xli, f"C{i}")
-            except Exception:
-                ws[f"C{i}"] = str(e.path)
-
     def _write_slot_mismatch_sheet(self, wb) -> None:
         ws = wb.create_sheet(title=i18n.KO.SLOT_MISMATCH_SHEET)
         ws["A1"] = "구분"
@@ -406,6 +493,35 @@ def _fit_to_cell(xli, cell_w_px: int, cell_h_px: int) -> None:
         return
     xli.width = max(1, int(round(w * scale)))
     xli.height = max(1, int(round(h * scale)))
+
+
+def _add_image_centered(ws, xli, col_letter: str, row: int,
+                        cell_w_px: int, cell_h_px: int) -> None:
+    """``_fit_to_cell`` 로 맞춘 이미지를 셀 안에 **중앙 정렬**로 삽입.
+
+    openpyxl 기본 동작은 셀 좌상단 고정이라 비율상 남는 여백이 한쪽(우/하)에
+    몰려 사진이 작아 보인다.  ``OneCellAnchor`` + 오프셋으로 남는 여백을 양쪽에
+    균등 분배해 시각적으로 ‘셀에 가득’ 차도록 한다 (크롭/왜곡 없음).
+    """
+    from openpyxl.drawing.spreadsheet_drawing import (AnchorMarker,
+                                                      OneCellAnchor)
+    from openpyxl.drawing.xdr import XDRPositiveSize2D
+    from openpyxl.utils import column_index_from_string
+    from openpyxl.utils.units import pixels_to_EMU
+
+    img_w = int(xli.width)
+    img_h = int(xli.height)
+    x_off = max(0, (cell_w_px - img_w) // 2)
+    y_off = max(0, (cell_h_px - img_h) // 2)
+    marker = AnchorMarker(
+        col=column_index_from_string(col_letter) - 1,
+        colOff=pixels_to_EMU(x_off),
+        row=int(row) - 1,
+        rowOff=pixels_to_EMU(y_off),
+    )
+    ext = XDRPositiveSize2D(pixels_to_EMU(img_w), pixels_to_EMU(img_h))
+    xli.anchor = OneCellAnchor(_from=marker, ext=ext)
+    ws.add_image(xli)
 
 
 # ---------------------------------------------------------------------------

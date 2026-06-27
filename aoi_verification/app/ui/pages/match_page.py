@@ -28,7 +28,8 @@ from ...utils import prefs as _prefs
 from ...similarity.slot_features import (SlotFeatureCache, SlotPrecomputeWorker,
                                             SlotScoreCache)
 from ...workers.matcher import Candidate, MatcherWorker
-from ...workers import fast_matcher as _fast
+from ...workers import efficiency_matcher as _eff
+from ...workers import coord_matcher as _coord
 from ...utils.prefs import EngineMode
 from ..widgets.loading_overlay import LoadingOverlay
 from ..widgets.match_expand_view import MatchExpandView
@@ -57,6 +58,7 @@ class MatchPage(QWidget):
     """Stage 2 의 메인 페이지."""
 
     match_confirmed = pyqtSignal(object)        # MatchResult
+    match_undone = pyqtSignal(object)           # MatchResult — 되돌리기(#C1)
     skipped_changed = pyqtSignal()              # 외부 자동 저장 트리거
     finished = pyqtSignal()                     # 모든 큐 처리 완료
     cancelled = pyqtSignal()                    # #8 사용자가 중지 버튼 누름
@@ -70,7 +72,9 @@ class MatchPage(QWidget):
         self._state: Stage2State | None = None
         self._current: Optional[ImageItem] = None
         self._threshold = config.CONFIG.default_threshold
-        self._mode_direction = "A→B"
+        # 되돌리기 히스토리 (#C1) — 세션 직렬화에 영향 없도록 인메모리 전용.
+        # 각 항목: (action, ref_item, match_or_None), action ∈ {match,no_match,skip}.
+        self._match_history: list[tuple[str, ImageItem, object]] = []
         self._build()
         self._loading = LoadingOverlay(self)
         self._loading.cancel_requested.connect(self._on_cancel_requested)
@@ -92,15 +96,21 @@ class MatchPage(QWidget):
         # 자동 매치 모드 (#3): True 면 사용자 클릭 없이 임계치 이상 최고 점수 후보를
         # 자동으로 매치 / 후보 없으면 ‘매치 없음’ 으로 자동 처리.
         self._auto_mode: bool = False
-        # 유사도 엔진 설정 (기본/고속 + 강화/KLA 토글).  기본값 = 현행 동작.
+        # 유사도 엔진 설정 (기본/고효율 + 중앙 crop 토글).  기본값 = 현행 동작.
         self._engine_cfg = config.DEFAULT_SIM_CONFIG
-        # 고속 모드(임베딩+ANN) 활성 여부 + 슬롯 인덱스 캐시.
+        # 고효율 모드 활성 여부 — 결과를 _fast_results 에 선계산해 즉시 응답.
         self._fast_mode: bool = False
-        self._index_cache = _fast.SlotIndexCache()
-        # 자동 모드 고속 선계산 결과: {(slot, ref_path): [(val_path, score), ...]}.
+        self._efficiency_mode: bool = False
+        self._coord_mode: bool = False
+        # 고효율 선계산 결과: {(slot, ref_path): [(val_path, score), ...]}.
         self._fast_results: dict = {}
         # 현재 사전 계산 단계 라벨 (#8).
         self._precompute_phase: str = ""
+        # 마지막으로 받은 사전 계산 진행도(라벨만 바뀔 때 진행 바 유지용).
+        self._precompute_done: int = 0
+        self._precompute_total: int = 0
+        # 좌표 매칭 실패 목록 — 검토 화면으로 전달용
+        self._coord_failed_set: set = set()
 
     # ------------------------------------------------------------------
     def _build(self) -> None:
@@ -109,6 +119,10 @@ class MatchPage(QWidget):
         root.setSpacing(10)
 
         top = QHBoxLayout()
+        self.btn_back_to_setup = NeonButton(i18n.KO.BTN_BACK_TO_SETUP, role="ghost")
+        self.btn_back_to_setup.clicked.connect(self._on_cancel_requested)
+        top.addWidget(self.btn_back_to_setup)
+        top.addSpacing(12)
         self.title = QLabel(i18n.KO.STAGE2_TITLE, self)
         self.title.setProperty("role", "title")
         top.addWidget(self.title)
@@ -153,7 +167,7 @@ class MatchPage(QWidget):
         cl = center.body()
         title = QLabel(i18n.KO.PANEL_MATCH_REF, center)
         title.setProperty("role", "subtitle")
-        title.setStyleSheet("font-weight:700; color:#00D4FF;")
+        title.setStyleSheet("font-weight:700; color:#39FF14;")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         cl.addWidget(title)
 
@@ -205,6 +219,13 @@ class MatchPage(QWidget):
 
         bar = QHBoxLayout()
         bar.setContentsMargins(0, 6, 0, 0)
+        # 되돌리기 (#C1) — 직전 매칭/매칭없음 결정을 취소하고 그 기준 사진을 다시
+        # 큐 맨 앞으로 복귀.  Stage 1 은 Z 를 쓰므로 충돌을 피해 Ctrl+Z 사용.
+        self.undo_btn = NeonButton(i18n.KO.BTN_MATCH_UNDO, role="ghost")
+        self.undo_btn.setToolTip(i18n.KO.MATCH_UNDO_TOOLTIP)
+        self.undo_btn.clicked.connect(self._undo_match)
+        self.undo_btn.setEnabled(False)
+        bar.addWidget(self.undo_btn)
         # ‘잠시 보류’ 버튼 제거 (#3 — 사용자 요청).  ‘매칭 없음’ 만 남김.
         self.no_match_btn = NeonButton(i18n.KO.BTN_NO_MATCH, role="danger")
         self.no_match_btn.setToolTip(i18n.KO.SHORTCUT_STAGE2_TOOLTIP)
@@ -225,7 +246,7 @@ class MatchPage(QWidget):
         rl.setSpacing(8)
         rt = QLabel(i18n.KO.PANEL_MATCH_CANDIDATES, right)
         rt.setProperty("role", "subtitle")
-        rt.setStyleSheet("font-weight:700; color:#00D4FF;")
+        rt.setStyleSheet("font-weight:700; color:#39FF14;")
         rl.addWidget(rt)
 
         # 후보 패널 내부 스택: page 0 = 썸네일 그리드, page 1 = 확대 보기
@@ -275,6 +296,8 @@ class MatchPage(QWidget):
 
         # ‘S’ (skip) 단축키 — 잠시 보류 버튼 제거와 함께 비활성 (#3).
         QShortcut(QKeySequence("N"), self, activated=self._confirm_no_match)
+        # 되돌리기 (#C1) — Stage 1 의 Z 와 충돌하지 않도록 Ctrl+Z.
+        QShortcut(QKeySequence("Ctrl+Z"), self, activated=self._undo_match)
 
     # ------------------------------------------------------------------
     def resizeEvent(self, event):                       # noqa: N802
@@ -316,7 +339,6 @@ class MatchPage(QWidget):
                    matches: list[MatchResult] | None = None,
                    skipped: dict[str, list[ImageItem]] | None = None,
                    phase_label: str = "",
-                   direction: str = "A→B",
                    session_id: str = "",
                    model_name: str = "basic",
                    auto_mode: bool = False,
@@ -328,13 +350,13 @@ class MatchPage(QWidget):
             val_pool={k: list(v) for k, v in val_pool_by_slot.items()},
         )
         self._threshold = threshold
-        self._mode_direction = direction
         self._session_id = session_id or ""
         self._model_name = model_name or "basic"
         self._auto_mode = bool(auto_mode)
         self._engine_cfg = engine_cfg or config.DEFAULT_SIM_CONFIG
-        self._index_cache.clear()
         self._fast_results.clear()
+        self._match_history.clear()        # 되돌리기 히스토리 초기화 (#C1)
+        self._update_undo_button()
         self.phase_label.setText(phase_label)
         self._refresh_skipped_panel()
         # 모든 (ref, val) 쌍 점수를 미리 계산 → 이후 매칭은 캐시 조회만.
@@ -353,6 +375,10 @@ class MatchPage(QWidget):
         """
         if self._state is None:
             return
+        # 매칭(사전 계산) 소요시간 측정 시작 — run_log 통계용.
+        import time as _t
+        self._precompute_t0 = _t.perf_counter()
+        self._precompute_elapsed = 0.0
         # 사전 계산은 항상 첫 매칭(_advance)보다 앞선다 — 진행 바 갱신 가드
         # (_current is None) 가 직전 세션의 잔여 상태에 흔들리지 않도록 초기화.
         self._current = None
@@ -379,13 +405,22 @@ class MatchPage(QWidget):
         # 않도록 (MatcherWorker 의 동일 패턴 참고).
         self._stop_precompute_worker()
 
-        # 고속 모드 — 임베딩+ANN.  hnswlib/embedder 가용 시에만, 아니면 기본 폴백.
-        self._fast_mode = (EngineMode.is_fast(self._engine_cfg.engine)
-                           and _fast.is_available())
-        if EngineMode.is_fast(self._engine_cfg.engine) and not self._fast_mode:
-            # 고속 모드 요청했으나 의존성 없음 → 기본 모드로 조용히 폴백(로그만).
+        # 엔진 모드 판별
+        _engine = self._engine_cfg.engine
+        eff_mode = EngineMode.is_efficiency(_engine)
+        coord_mode = EngineMode.is_coordinate(_engine)
+        self._efficiency_mode = eff_mode
+        self._coord_mode = coord_mode
+        self._fast_mode = eff_mode or coord_mode
+        # 좌표 모드에서는 하드웨어 가속 라벨 숨김
+        if coord_mode:
+            self.bg_status_label.setVisible(False)
+        else:
+            self.bg_status_label.setVisible(True)
+        if eff_mode and not _eff.has_accel_units():
+            # 가속 장치 없음 → CPU 단독으로 고효율 모드 실행 (안내 로그).
             import logging
-            logging.getLogger("aoi.match").info(i18n.KO.ENGINE_FAST_UNAVAILABLE)
+            logging.getLogger("aoi.match").info(i18n.KO.ENGINE_EFFICIENCY_CPU_ONLY)
 
         # 수동 = 스트리밍(첫 슬롯 후 곧장 검토 + 나머지 백그라운드).
         # 자동 = 전체 선계산(한 번의 진행 바) → 끝난 뒤 자동 매칭, 백그라운드 없음
@@ -409,13 +444,19 @@ class MatchPage(QWidget):
             )
             self.bg_status_label.setText("")
 
-        if self._fast_mode:
-            # FastIndexWorker — SlotPrecomputeWorker 와 동일 시그널.  자동 모드면
-            # 모든 ref 를 미리 재정렬해 _fast_results 에 저장(매칭 즉시 응답).
-            self._precompute_worker = _fast.FastIndexWorker(
-                tasks, self._index_cache, cfg=self._engine_cfg,
-                auto=self._auto_mode, top_k=self._engine_cfg.top_k,
-                results=self._fast_results, parent=self,
+        if coord_mode:
+            # 좌표 매칭 모드(v2) — 유사도 계산 없이 좌표로 직접 매칭.
+            self.bg_status_label.setText(i18n.KO.PHASE_COORD)
+            self._precompute_worker = _coord.CoordScheduler(
+                tasks, cfg=self._engine_cfg, threshold=self._threshold,
+                auto=self._auto_mode, results=self._fast_results, parent=self,
+            )
+        elif eff_mode:
+            # 고효율 모드 — CPU+GPU 가 협업해 ref 를 처리, 결과를 _fast_results 에 저장.
+            self.bg_status_label.setText(_eff.describe_active_units())
+            self._precompute_worker = _eff.EfficiencyScheduler(
+                tasks, cfg=self._engine_cfg, threshold=self._threshold,
+                auto=self._auto_mode, results=self._fast_results, parent=self,
             )
         else:
             self._precompute_worker = SlotPrecomputeWorker(
@@ -441,22 +482,51 @@ class MatchPage(QWidget):
             pass
         self._precompute_worker.start()
 
+    def _precompute_signal_is_current(self) -> bool:
+        """이 시그널이 **현재 활성** precompute 워커에서 온 것인지 (#B2).
+
+        정지된 구 워커가 disconnect 직전 이벤트 루프에 이미 쌓아둔 늦은 시그널이
+        새 워커의 상태를 건드리는 race 를 차단한다.  단, 판별이 불확실하면(sender
+        없음/워커 참조 없음) 막지 않아 정상 시그널은 절대 누락되지 않게 한다.
+        """
+        w = self._precompute_worker
+        if w is None:
+            return True
+        s = self.sender()
+        if s is None:
+            return True
+        return s is w.signals
+
     def _on_precompute_phase(self, phase: str) -> None:
-        """현재 작업 단계 라벨 갱신 (#8) — '이미지 특징 분석'/'유사도 계산' 등."""
+        """현재 작업 단계 라벨 갱신 (#8) — '이미지 특징 분석'/'유사도 계산' 등.
+
+        선행 단계(특징 분석/임베딩)에서 progress emit 이 늦어도 라벨은 **즉시**
+        오버레이에 반영해, '유사도 계산 0' 처럼 보이던 문제를 없앤다.
+        """
+        if not self._precompute_signal_is_current():
+            return
         self._precompute_phase = phase or i18n.KO.PHASE_SCORING
+        if self._current is None:
+            # 마지막으로 받은 진행도를 유지하며 라벨만 바꾼다(아직 없으면 busy 표시).
+            self._loading.set_progress(
+                self._precompute_done, self._precompute_total,
+                self._precompute_phase,
+            )
 
     def _on_precompute_progress(self, done: int, total: int) -> None:
+        if not self._precompute_signal_is_current():
+            return
         # 첫 슬롯이 끝나 매칭이 시작되기 전(차단 오버레이 표시 중)에는 진행 바를
         # 갱신해 "0% 에서 멈춘 것처럼" 보이지 않게 한다.  매칭이 시작되면
         # (_current 설정) 백그라운드 슬롯의 progress 는 매칭 오버레이를 건드리지
         # 않도록 무시 — bg_status_label 이 슬롯 단위 진행을 대신 보여준다.
         # (set_progress 는 hidden 오버레이를 다시 show 하지 않으므로 안전.)
+        self._precompute_done = done
+        self._precompute_total = total
         if self._current is None:
             phase = getattr(self, "_precompute_phase", "") or i18n.KO.PHASE_SCORING
-            self._loading.set_progress(
-                done, total,
-                i18n.KO.LOAD_PHASE_FMT.format(phase=phase, done=done, total=total),
-            )
+            # 라벨엔 현재 작업명, 진행도는 처리 갯수(done / total)로 표시.
+            self._loading.set_progress(done, total, phase)
 
     def _on_precompute_slot_finished(self,
                                       slot: str,
@@ -470,6 +540,8 @@ class MatchPage(QWidget):
           그 슬롯이 끝났을 때 자동으로 _advance 를 재시도.
         - 상단 상태 라벨 갱신 (백그라운드 진행 표시).
         """
+        if not self._precompute_signal_is_current():
+            return
         self._precompute_processed_slots.add(slot)
         self.bg_status_label.setText(
             i18n.KO.PRECOMPUTE_BG_STATUS_FMT.format(idx=idx, total=total)
@@ -494,21 +566,36 @@ class MatchPage(QWidget):
         않아, 사용자가 점수 계산 대기 중인 슬롯에 도달했을 때 워커가 죽으면
         영구히 ‘잠시만 기다려주세요’ 오버레이에 갇혔다.
         """
+        if not self._precompute_signal_is_current():
+            return
         try:
             self._loading.hide_overlay()
         except Exception:
             pass
         self._waiting_for_slot = None
-        # 스트리밍 모드 종료 표시 — 이후 _launch_matcher 가 MatcherWorker 폴백
-        # 경로로 작동.
         self._streaming_precompute = False
+        # 좌표 매칭 모드에서 좌표 없음 오류 — 사용자에게 안내 후 설정 화면 복귀.
+        if self._coord_mode and msg and "좌표 정보가 없습니다" in msg:
+            QMessageBox.warning(self, i18n.KO.APP_TITLE, msg)
+            self.cancelled.emit()
+            return
         if self.bg_status_label is not None:
             self.bg_status_label.setText(msg or "")
-        # 현재 ref 가 있으면 폴백 매칭으로 진행.
         if self._current is not None or (self._state and self._state.queue):
             self._advance()
 
     def _on_precompute_finished(self) -> None:
+        if not self._precompute_signal_is_current():
+            return
+        import time as _t
+        if getattr(self, "_precompute_t0", None):
+            self._precompute_elapsed = _t.perf_counter() - self._precompute_t0
+        # 좌표 매칭 실패 목록 수집 — 검토 화면 통계용.
+        if self._coord_mode and self._precompute_worker is not None:
+            fs = getattr(self._precompute_worker, "failed_set", set())
+            self._coord_failed_set = set(fs)
+        else:
+            self._coord_failed_set = set()
         was_streaming = self._streaming_precompute
         self.bg_status_label.setText(i18n.KO.PRECOMPUTE_BG_DONE)
         self._streaming_precompute = False
@@ -573,7 +660,6 @@ class MatchPage(QWidget):
             if self._worker.isRunning():
                 self._worker.stop()
                 self._worker.wait(500)
-        self._index_cache.clear()
         self._loading.hide_overlay()
         self.cancelled.emit()
 
@@ -690,38 +776,14 @@ class MatchPage(QWidget):
             if key in self._fast_results:
                 by_path = {v.path: v for v in val_items}
                 cands = []
+                # 좌표 모드: 음수 score(허용범위 초과 근접 1장)도 포함
+                effective_threshold = -float("inf") if self._coord_mode else self._threshold
                 for vp, s in self._fast_results[key]:
                     vitem = by_path.get(vp)
-                    if vitem is not None and s >= self._threshold:
+                    if vitem is not None and s >= effective_threshold:
                         cands.append(Candidate(item=vitem, score=float(s)))
                 cands.sort(key=lambda c: c.score, reverse=True)
                 self._on_matcher_done(cands)
-                return
-
-        # 고속 모드 (수동) — 슬롯 인덱스가 준비됐으면 임베딩 top-K + 정밀 재정렬.
-        # 인덱스가 없으면(디스크립터 실패 등) 아래 기본 경로로 자연 폴백.
-        if self._fast_mode:
-            entry = self._index_cache.get(ref.slot)
-            if entry is not None:
-                self._slot_cache.set_active(ref.slot)
-                self._loading.show_overlay(
-                    i18n.KO.LOAD_SCORING_FMT.format(done=0, total=self._engine_cfg.top_k),
-                    cancelable=True,
-                )
-                self._current_loading_fmt = i18n.KO.LOAD_SCORING_FMT
-                self._worker = _fast.FastMatchWorker(
-                    ref, entry, val_items,
-                    threshold=self._threshold,
-                    top_k=self._engine_cfg.top_k,
-                    cfg=self._engine_cfg,
-                    slot_cache=self._slot_cache,
-                )
-                self._worker.signals.progress.connect(self._on_matcher_progress)
-                self._worker.signals.done.connect(self._on_matcher_done)
-                self._worker.signals.failed.connect(
-                    lambda msg: self._loading.set_progress(0, 0, msg)
-                )
-                self._worker.start()
                 return
 
         # 점수 사전 계산이 끝나 있으면 캐시 조회만으로 즉시 응답.
@@ -840,7 +902,8 @@ class MatchPage(QWidget):
         # 후보는 가로 2 개씩 + mid 캐시 (~800px) 를 소스로 (#5).  표시 크기
         # 도 일반 썸네일보다 크게 (260 px) 잡아 시인성 ↑.
         grid = ThumbGrid(columns=2, select_mode=False, truncate=False,
-                         show_expand=True, tile_px=260, prefer_mid=True,
+                         show_expand=True, tile_px=config.Sizing.DIALOG_CAND_PX,
+                         prefer_mid=True,
                          parent=self._right_host)
         entries = [ThumbEntry(item=c.item, extra={"score": c.score}) for c in visible]
         grid.set_entries(entries)
@@ -866,13 +929,13 @@ class MatchPage(QWidget):
             ref_path=ref.path,
             val_path=val.path,
             score=score,
-            direction=self._mode_direction,    # type: ignore[arg-type]
         )
+        self._match_history.append(("match", ref, match))
         self._state.matches.append(match)
         self._state.queue.pop(0)
-        self._log_decision(decision="pick", picked_item=val)
         self.match_confirmed.emit(match)
         self.skipped_changed.emit()
+        self._update_undo_button()
         self._advance()
 
     def _open_all_candidates(self) -> None:
@@ -942,11 +1005,12 @@ class MatchPage(QWidget):
         if self._state is None or self._current is None:
             return
         item = self._current
+        self._match_history.append(("skip", item, None))
         self._state.queue.pop(0)
         self._state.skipped[item.slot].append(item)
-        self._log_decision(decision="defer")
         self._refresh_skipped_panel()
         self.skipped_changed.emit()
+        self._update_undo_button()
         self._advance()
 
     def _confirm_no_match(self) -> None:
@@ -956,48 +1020,59 @@ class MatchPage(QWidget):
         if self._state is None or self._current is None:
             return
         item = self._current
+        self._match_history.append(("no_match", item, None))
         self._state.queue.pop(0)
         self._state.no_match[item.slot].append(item)
-        self._log_decision(decision="none")
         self._refresh_skipped_panel()
         self.skipped_changed.emit()
+        self._update_undo_button()
         self._advance()
 
     # ------------------------------------------------------------------
-    def _log_decision(self, *, decision: str, picked_item=None) -> None:
-        """Evaluator 로 한 결정 로그 append (실패는 무시).
+    # 되돌리기 (#C1) — 직전 매칭/매칭없음/보류 결정을 취소
+    # ------------------------------------------------------------------
+    def _update_undo_button(self) -> None:
+        btn = getattr(self, "undo_btn", None)
+        if btn is not None:
+            btn.setEnabled(bool(self._match_history))
 
-        decision: "pick" | "defer" | "none"
+    def _undo_match(self) -> None:
+        """직전 결정을 취소하고 해당 기준 사진을 큐 맨 앞으로 복귀.
+
+        - 'match' : state.matches 에서 제거 + ``match_undone`` 으로 상위(main_window)
+                    집계까지 되돌림 (결과에 남지 않도록).
+        - 'no_match'/'skip' : 해당 풀에서 제거.
+        매칭 화면이 보이지 않을 때(이미 다음 단계로 이동)는 무시.
         """
-        if self._state is None or self._current is None:
+        if not self.isVisible():
             return
-        try:
-            from ...learning import evaluator as _ev
-        except Exception:
+        if self._state is None or not self._match_history:
             return
-        candidates = [(c.item.path, float(c.score)) for c in self._candidates]
-        if decision == "pick" and picked_item is not None:
-            picked_path = picked_item.path
-            rank = None
-            for i, (p, _) in enumerate(candidates):
-                if p == picked_item.path:
-                    rank = i
+        action, ref, match = self._match_history.pop()
+        if action == "match" and match is not None:
+            for i in range(len(self._state.matches) - 1, -1, -1):
+                if self._state.matches[i].key == match.key:
+                    del self._state.matches[i]
                     break
-        else:
-            picked_path = None
-            rank = None
-        _ev.log_decision(
-            model_name=self._model_name or "basic",
-            session_id=self._session_id or "",
-            slot=self._current.slot,
-            ref_path=self._current.path,
-            threshold=self._threshold,
-            candidates=candidates,
-            picked_path=picked_path,
-            picked_rank=rank,
-            decision=decision,
-        )
+            self.match_undone.emit(match)
+        elif action == "no_match":
+            lst = self._state.no_match.get(ref.slot)
+            if lst and ref in lst:
+                lst.remove(ref)
+            self._refresh_skipped_panel()
+        elif action == "skip":
+            lst = self._state.skipped.get(ref.slot)
+            if lst and ref in lst:
+                lst.remove(ref)
+            self._refresh_skipped_panel()
+        # 기준 사진을 큐 맨 앞으로 되돌리고 현재 항목 재설정 → _advance 가 다시 표시.
+        self._state.queue.insert(0, ref)
+        self._current = None
+        self.skipped_changed.emit()
+        self._update_undo_button()
+        self._advance()
 
+    # ------------------------------------------------------------------
     def _refresh_skipped_panel(self) -> None:
         """상단 [보류된 사진 보기 (n)] / [보류 재시도] 버튼 활성/카운트 갱신.
 

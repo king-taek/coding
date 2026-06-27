@@ -23,7 +23,7 @@ class NeonCard(QFrame):
             eff = QGraphicsDropShadowEffect(self)
             eff.setOffset(0, 0)
             eff.setBlurRadius(24)
-            eff.setColor(QColor("#00D4FF"))
+            eff.setColor(QColor("#39FF14"))
             self.setGraphicsEffect(eff)
 
     def body(self) -> QVBoxLayout:

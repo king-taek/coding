@@ -2,8 +2,8 @@
 
 다음 페이지를 StackedWidget 로 갈아끼우며 흐름을 관리한다.
 1) SetupPage           → 입력
-2) SelectPage          → Stage 1 (Phase A / Phase B 양쪽 모두에서 재사용)
-3) MatchPage           → Stage 2 (방향만 바꿔 재사용)
+2) SelectPage          → Stage 1 (후보 선별)
+3) MatchPage           → Stage 2 (유사도 매칭)
 4) ResultPage          → 결과 + 엑셀 저장
 
 세션 자동 저장 / 이어하기, 단계 전환 모달, 진행 상태 라벨도 여기서 처리한다.
@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Optional
 
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QMainWindow,
                               QMessageBox, QStackedWidget, QStatusBar,
@@ -26,8 +26,9 @@ from PyQt6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QMainWindow,
 from .. import config, i18n
 from ..models import session as session_mod
 from ..models.result import FinalResult, MatchResult, MissEntry
-from ..models.slot import ImageItem, ScanResult, Slot, scan
-from ..utils import paths
+from ..models.slot import (ImageItem, ScanResult, Slot, drop_empty_unmatched,
+                           scan)
+from ..utils import paths, wafer_id
 from ..utils import prefs as _prefs
 from ..utils.prefs import AutomationLevel
 from ..workers.thumbnailer import (PRIORITY_ACTIVE_SLOT, PRIORITY_BACKGROUND,
@@ -45,8 +46,6 @@ from .widgets.loading_overlay import LoadingOverlay
 PHASE_NONE = "none"
 PHASE_A_SELECT = "A_select"
 PHASE_A_MATCH = "A_match"
-PHASE_B_SELECT = "B_select"
-PHASE_B_MATCH = "B_match"
 
 
 class MainWindow(QMainWindow):
@@ -56,6 +55,13 @@ class MainWindow(QMainWindow):
     # 폭이 좁아지면 H-splitter 가 V-splitter 로 자동 전환되어 reflow.
     _MIN_W = 800
     _MIN_H = 600
+
+    # 자동 업데이트 — 백그라운드 스레드에서 메인 스레드로 결과를 넘기는 시그널.
+    _update_found = pyqtSignal(dict)
+    _update_applied = pyqtSignal(bool, dict)
+    _update_progress = pyqtSignal(int, int, str)   # 다운로드/적용 진행(로딩바)
+    _update_none = pyqtSignal(str)          # 수동 확인: 최신/확인불가 안내
+    _startup_proceed = pyqtSignal()         # 업데이트 흐름 종료 → 나머지 시작 팝업
 
     def __init__(self) -> None:
         super().__init__()
@@ -74,6 +80,12 @@ class MainWindow(QMainWindow):
         # 상태 바 + 메모리 표시 (psutil 가용 시) + 가속 디바이스 표시 (#5).
         self._status_bar = QStatusBar(self)
         self.setStatusBar(self._status_bar)
+        # 개발자 크레딧 — 모든 화면 공통(상태바 좌측).
+        self._credit_label = QLabel(i18n.KO.CREDIT, self._status_bar)
+        self._credit_label.setStyleSheet(
+            "color: #7FB3D5; padding: 0 8px; font-weight: 600;"
+        )
+        self._status_bar.addWidget(self._credit_label)
         # 디바이스 표시 — 'GPU 가속 (...)' / 'CPU N 코어'.
         self._device_label = QLabel("", self._status_bar)
         self._device_label.setStyleSheet(
@@ -82,22 +94,57 @@ class MainWindow(QMainWindow):
         try:
             from ..learning import embedder as _emb
             self._device_label.setText(_emb.device_label())
-        except Exception:
+        except Exception as exc:
             self._device_label.setText("")
+            from ..utils import errors as _errors
+            _errors.log_silent("main_window: 디바이스 라벨 조회 실패", exc)
         self._status_bar.addPermanentWidget(self._device_label)
+        # CPU/GPU/NPU 사용량 — CPU 실제 %, GPU/NPU 가동/대기.
+        self._usage_label = QLabel("", self._status_bar)
+        self._usage_label.setStyleSheet(
+            "color: #39FF14; padding: 0 8px; font-weight: 600;"
+        )
+        self._status_bar.addPermanentWidget(self._usage_label)
+        # 가속 장치(Intel GPU/NPU) 존재 여부 — 세션 중 불변이라 1회만 조회.
+        # torch 설치와 무관하게 OpenVINO 만으로 존재 여부를 본다(상태바 표시용).
+        self._accel_present = {"GPU": False}
+        # 세션 불변인 ‘감지’ 부분 툴팁 — 동적 컴파일 진단은 매 틱 덧붙인다.
+        self._accel_tip_base = ""
+        try:
+            from ..learning import embedder_openvino as _ovw
+            info = _ovw.accelerator_presence()
+            self._accel_present = {"GPU": bool(info.get("GPU"))}
+            # 자가 진단 — 마우스오버로 감지 디바이스/원인을 확인.
+            devs = info.get("devices") or []
+            reason = info.get("reason") or ""
+            self._accel_tip_base = (
+                "OpenVINO 감지: " + (", ".join(devs) if devs else "(없음)")
+            )
+            if reason:
+                self._accel_tip_base += f"\n사유: {reason}"
+        except Exception:
+            self._accel_tip_base = "가속 장치 조회 실패"
+        self._usage_label.setToolTip(self._accel_tip_base)
+        self._proc = None
         self._mem_label = QLabel("", self._status_bar)
         self._mem_label.setProperty("role", "muted")
         self._status_bar.addPermanentWidget(self._mem_label)
         self._mem_timer = QTimer(self)
         self._mem_timer.setInterval(2000)
         self._mem_timer.timeout.connect(self._update_memory_label)
+        self._mem_timer.timeout.connect(self._update_usage_label)
         self._mem_pressure_shown = False
         try:
-            import psutil  # noqa: F401
-            self._mem_timer.start()
-            self._update_memory_label()
+            import psutil
+            self._proc = psutil.Process()
+            self._proc.cpu_percent(None)        # prime — 첫 호출은 0.0 반환
         except Exception:
-            pass
+            self._proc = None
+        # 타이머는 psutil 유무와 무관하게 구동 — 콜백이 각자 안전 가드한다
+        # (메모리/CPU 는 psutil 가용 시, GPU/NPU 가동표시는 항상).
+        self._mem_timer.start()
+        self._update_memory_label()
+        self._update_usage_label()
 
         # 페이지 ---------------------------------------------------------
         self._setup_page = SetupPage()
@@ -115,9 +162,11 @@ class MainWindow(QMainWindow):
 
         # 시그널 ---------------------------------------------------------
         self._setup_page.start_requested.connect(self._on_start)
+        self._setup_page.update_check_requested.connect(self._manual_update_check)
         self._select_page.finished.connect(self._on_select_finished)
         self._select_page.state_changed.connect(self._schedule_autosave)
         self._match_page.match_confirmed.connect(self._on_match_confirmed)
+        self._match_page.match_undone.connect(self._on_match_undone)
         self._match_page.skipped_changed.connect(self._schedule_autosave)
         self._match_page.finished.connect(self._on_match_finished)
         self._match_page.cancelled.connect(self._on_match_cancelled)
@@ -139,6 +188,11 @@ class MainWindow(QMainWindow):
 
         # 상태 -----------------------------------------------------------
         self._loading = LoadingOverlay(self)
+        # 썸네일 사전생성 단계 취소(#C2) — 풀을 멈추고 곧바로 다음 단계로.
+        self._loading.cancel_requested.connect(self._on_loading_cancel)
+        # 썸네일 완료 처리 one-shot 가드 — finished 시그널/취소가 이중 진입해
+        # Stage 1 에 두 번 들어가는 것을 방지.
+        self._thumbs_handled = False
         self._thumb_worker: Optional[ThumbnailWorker] = None
         self._thumb_pool: Optional[ThumbnailPool] = None
         self._sizing_tier: Optional[config.SizingTier] = None
@@ -146,25 +200,192 @@ class MainWindow(QMainWindow):
         self._input: Optional[SetupInput] = None
         self._phase: str = PHASE_NONE
         self._matches_a: list[MatchResult] = []
-        self._matches_b: list[MatchResult] = []
         self._skipped_a: dict[str, list[ImageItem]] = defaultdict(list)
-        self._skipped_b: dict[str, list[ImageItem]] = defaultdict(list)
         # 올인원/사진 직접 선택 모드의 매치 검토 결과 (#3).
         # 비어있지 않으면 _finish_session 이 _matches_a/_b 대신 이걸 사용한다.
         self._reviewed_matches: list[MatchResult] = []
         self._reviewed_unmatched: list[MissEntry] = []
         self._stage1_a_snapshot: dict | None = None
-        self._stage1_b_snapshot: dict | None = None
-        self._matched_val_keys_in_a: set[str] = set()
         self._working_xlsx: Optional[Path] = None
         self._template_used: Optional[Path] = None
         self._session_id: str = ""
 
         # 이어하기 ------------------------------------------------------
-        QTimer.singleShot(50, self._maybe_resume)
-        # Intel GPU/NPU 가속(OpenVINO) 설치 안내 — 첫 모달(이어하기) 이후 표시.
-        # 모달 exec() 가 이벤트 루프를 막으므로 두 모달이 겹치지 않는다.
-        QTimer.singleShot(300, self._maybe_offer_openvino)
+        # 1일 지난 썸네일/중간이미지 캐시 정리 — 백그라운드 데몬으로 UI 비차단.
+        self._prune_old_cache_async()
+        # GPU 임베딩 모델을 미리 컴파일/워밍업 — 첫 슬롯의 커널 JIT 지연 제거(#3).
+        self._warmup_accel_async()
+        # 시작 팝업 순서: ① 자동 업데이트 확인 → (업데이트 처리 후) ② 이어하기 →
+        # ③ OpenVINO 안내.  팝업이 겹치지 않도록 ②③ 은 업데이트 흐름이 끝난 뒤에만 띄운다.
+        self._startup_done = False
+        self._update_found.connect(self._on_update_found)
+        self._update_applied.connect(self._on_update_applied)
+        self._update_progress.connect(self._on_update_progress)
+        self._update_none.connect(self._on_update_none)
+        self._startup_proceed.connect(self._run_startup_popups)
+        QTimer.singleShot(400, self._check_for_update_async)
+
+    def _run_startup_popups(self) -> None:
+        """업데이트 흐름이 끝난 뒤(없음/거절/실패) 나머지 시작 팝업을 순서대로 1회만."""
+        if self._startup_done:
+            return
+        self._startup_done = True
+        self._maybe_resume()                 # 모달(exec) — 닫힌 뒤 OpenVINO 안내.
+        QTimer.singleShot(0, self._maybe_offer_openvino)
+
+    @staticmethod
+    def _prune_old_cache_async() -> None:
+        """1일 지난 썸네일/중간이미지 캐시를 백그라운드 스레드에서 1회 정리."""
+        import threading
+
+        from ..utils import cache as _cache
+
+        def _work() -> None:
+            try:
+                _cache.prune_old_cache(max_age_days=1.0)
+            except Exception:
+                pass
+
+        threading.Thread(target=_work, name="cache-prune", daemon=True).start()
+
+    @staticmethod
+    def _warmup_accel_async() -> None:
+        """가속(GPU)이 있으면 임베딩 모델을 백그라운드에서 미리 컴파일/워밍업한다."""
+        import threading
+
+        def _work() -> None:
+            try:
+                from ..workers import efficiency_matcher as _eff
+                if _eff.has_accel_units():
+                    _eff.warmup()
+            except Exception:
+                pass
+
+        threading.Thread(target=_work, name="accel-warmup", daemon=True).start()
+
+    # ==================================================================
+    # 자동 업데이트 (GitHub 공개 저장소의 현재 브랜치)
+    # ==================================================================
+    def _check_for_update_async(self) -> None:
+        """백그라운드로 업데이트 확인 → 있으면 _update_found 시그널로 UI 에 알림."""
+        import threading
+
+        def _work() -> None:
+            info = None
+            try:
+                from ..utils import updater
+                info = updater.check_for_update()
+            except Exception:
+                info = None
+            if info:
+                self._update_found.emit(info)
+            else:
+                self._startup_proceed.emit()   # 업데이트 없음 → 나머지 시작 팝업 진행
+
+        threading.Thread(target=_work, name="update-check", daemon=True).start()
+
+    def _manual_update_check(self) -> None:
+        """도움말 > '업데이트 확인' — 소스/포터블 모두에서 결과를 명시적으로 안내."""
+        import threading
+        self._status_bar.showMessage(i18n.KO.UPDATE_CHECKING, 3000)
+
+        def _work() -> None:
+            status, info = "unknown", {}
+            try:
+                from ..utils import updater
+                status, info = updater.manual_check()
+            except Exception:
+                status, info = "unknown", {}
+            if status == "update":
+                self._update_found.emit(info)
+            elif status == "latest":
+                self._update_none.emit(i18n.KO.UPDATE_LATEST)
+            else:
+                reason = (info or {}).get("error", "")
+                msg = i18n.KO.UPDATE_UNKNOWN
+                if reason:
+                    msg = f"{msg}\n\n[원인] {reason}"
+                self._update_none.emit(msg)
+
+        threading.Thread(target=_work, name="update-check-manual",
+                         daemon=True).start()
+
+    def _on_update_none(self, msg: str) -> None:
+        QMessageBox.information(self, i18n.KO.UPDATE_AVAILABLE_TITLE, msg)
+
+    def _on_update_found(self, info: dict) -> None:
+        """'업데이트 있음' 안내 → 동의하면 백그라운드로 다운로드/교체."""
+        # 사용자에겐 개발자용 커밋 메시지/SSL 멘트 대신 간단한 안내만.
+        body = (i18n.KO.UPDATE_UNKNOWN_CURRENT if (info or {}).get("current_unknown")
+                else i18n.KO.UPDATE_AVAILABLE_BODY)
+        ans = QMessageBox.question(
+            self, i18n.KO.UPDATE_AVAILABLE_TITLE, body,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if ans != QMessageBox.StandardButton.Yes:
+            self._run_startup_popups()       # 거절 → 나머지 시작 팝업 진행
+            return
+        # 개발(git) 작업트리에서는 자동 덮어쓰기로 로컬 변경을 날릴 수 있어 막는다.
+        try:
+            from ..utils import updater
+            if updater.is_git_checkout():
+                QMessageBox.information(
+                    self, i18n.KO.UPDATE_AVAILABLE_TITLE, i18n.KO.UPDATE_GIT_HINT)
+                self._run_startup_popups()
+                return
+        except Exception:
+            pass
+        self._loading.show_overlay(i18n.KO.UPDATE_DOWNLOADING)
+        self._loading.set_progress(0, 0, i18n.KO.UPDATE_DOWNLOADING)   # busy → 0 에서 안 멈춤
+
+        import threading
+
+        def _report(done: int, total: int, phase: str) -> None:
+            # 백그라운드 스레드 → 메인 스레드로 시그널 전달(큐).  로딩바가 단계별로 움직인다.
+            self._update_progress.emit(int(done), int(total), str(phase))
+
+        def _work() -> None:
+            ok = False
+            try:
+                from ..utils import updater
+                ok = updater.download_and_apply(
+                    info["repo"], info["branch"], info["sha"], progress=_report)
+            except Exception:
+                ok = False
+            self._update_applied.emit(bool(ok), info or {})
+
+        threading.Thread(target=_work, name="update-apply", daemon=True).start()
+
+    def _on_update_progress(self, done: int, total: int, phase: str) -> None:
+        """업데이트 진행(다운로드/압축해제/적용) → 로딩바 갱신(메인 스레드)."""
+        self._loading.set_progress(done, total, phase)
+
+    def _on_update_applied(self, ok: bool, info: dict) -> None:
+        """다운로드/교체 결과 — 성공 시 안내 후 **프로그램 자동 종료**(재시작은 사용자가)."""
+        self._loading.hide_overlay()
+        if not ok:
+            msg = i18n.KO.UPDATE_FAILED
+            try:
+                from ..utils import updater
+                if updater.last_error():
+                    msg = f"{msg}\n\n[원인] {updater.last_error()}"
+            except Exception:
+                pass
+            QMessageBox.warning(self, i18n.KO.UPDATE_AVAILABLE_TITLE, msg)
+            self._run_startup_popups()       # 실패 → 나머지 시작 팝업 진행
+            return
+        # 안내 후 프로그램을 자동 종료한다(자동 재실행은 하지 않음 — 사용자가 다시 실행).
+        msg = i18n.KO.UPDATE_DONE_RESTART
+        try:
+            from ..utils import updater
+            if updater.deps_changed():       # 필요한 패키지 목록이 바뀐 경우 갱신 안내 추가
+                msg = msg + i18n.KO.UPDATE_DEPS_CHANGED
+        except Exception:
+            pass
+        QMessageBox.information(
+            self, i18n.KO.UPDATE_AVAILABLE_TITLE, msg)
+        QApplication.quit()
 
     # ==================================================================
     # 메모리 사용량 표시
@@ -187,6 +408,48 @@ class MainWindow(QMainWindow):
         elif rss < int(config.MEMORY_PRESSURE_BYTES * 0.9):
             # 압박이 해제되면 다시 알릴 수 있도록 플래그 재설정.
             self._mem_pressure_shown = False
+
+    def _update_usage_label(self) -> None:
+        """상태바 CPU/GPU 표시 갱신.
+
+        CPU 는 프로세스 실제 사용률(코어 수로 정규화한 0~100%), GPU 는
+        OpenVINO 추론 활동 기준 '가동/대기'(없으면 '없음')."""
+        parts: list[str] = []
+        # CPU — 프로그램 프로세스 사용률을 코어 수로 나눠 0~100% 로 표시.
+        try:
+            import psutil
+            ncpu = psutil.cpu_count() or 1
+            if self._proc is not None:
+                pct = self._proc.cpu_percent(None) / ncpu
+            else:
+                pct = psutil.cpu_percent(None)
+            parts.append(i18n.KO.USAGE_CPU_FMT.format(pct=int(round(pct))))
+        except Exception:
+            pass
+        # GPU — 존재하면 가동/대기, 없으면 '없음'. (NPU 표시는 제거됨.)
+        try:
+            from ..learning import embedder_openvino as _ovw
+            if not self._accel_present.get("GPU"):
+                state = i18n.KO.USAGE_STATE_NONE
+            elif _ovw.unit_busy("GPU"):
+                state = i18n.KO.USAGE_STATE_BUSY
+            else:
+                state = i18n.KO.USAGE_STATE_IDLE
+            parts.append(i18n.KO.USAGE_GPU_FMT.format(state=state))
+            # 툴팁에 컴파일 진단을 덧붙임 — 매칭을 한 번 돌린 뒤 GPU 가 '가동'
+            # 으로 안 바뀌면, 여기에 실제 컴파일 에러가 떠서 원인을 알 수 있다.
+            diag = _ovw.compile_diagnostics()
+            tip = self._accel_tip_base
+            compiled = diag.get("compiled") or []
+            if compiled:
+                tip += "\n추론 컴파일 성공: " + ", ".join(compiled)
+            for dev, msg in (diag.get("errors") or {}).items():
+                tip += f"\n{dev} 컴파일 실패: {msg}"
+            self._usage_label.setToolTip(tip)
+        except Exception:
+            pass
+        if parts:
+            self._usage_label.setText(i18n.KO.USAGE_SEP.join(parts))
 
     # ==================================================================
     # 창 크기 — 사용자 선택값 복원 / 모달
@@ -265,9 +528,6 @@ class MainWindow(QMainWindow):
     # Entry / resume
     # ==================================================================
     def _maybe_resume(self) -> None:
-        # 셋업 진입 시 항상 정확도 최신화 + 모델 카드 갱신
-        self._refresh_models_safe()
-
         # 이미 다른 페이지 (e.g. _on_start 가 먼저 GroupReviewPage 로 전환)
         # 로 넘어간 경우엔 setup 으로 되돌리지 않는다.
         if self._stack.currentWidget() is not self._setup_page:
@@ -372,31 +632,14 @@ class MainWindow(QMainWindow):
                 i18n.KO.OPENVINO_INSTALL_FAILED_FMT.format(error=message),
             )
 
-    def _refresh_models_safe(self) -> None:
-        """학습 모듈 import / 평가 집계 실패가 셋업 화면을 막지 않도록 wrap."""
-        # 사용자 요청 (#4) — ‘기본 탐지 모드’ 가 기본 선택이 되도록 latest 의
-        # 자동 활성 로직을 적용하지 않는다.  학습 모델은 사용자가 명시적으로
-        # 라디오 버튼을 클릭해야만 활성화.
-        try:
-            from ..learning import evaluator as _ev
-            _ev.refresh_accuracy()
-        except Exception:
-            pass
-        try:
-            self._setup_page.refresh_models()
-        except Exception:
-            pass
-
     def _active_model_name(self) -> str:
-        """현재 active 모델 이름 (없으면 ``basic``)."""
-        try:
-            from ..learning import registry as _reg
-            return _reg.get_active()
-        except Exception:
-            return "basic"
+        """학습 모델 기능 제거됨 — 항상 기본(``basic``)."""
+        return "basic"
 
     def _resolve_slot_mismatch(self, sr: ScanResult) -> None:
-        """ref/val 한쪽에만 있는 슬롯이 있을 때 사용자에게 매핑을 묻는다 (#23)."""
+        """ref/val 한쪽에만 있는 슬롯이 있을 때 사용자에게 수동 매핑을 묻는다 (#23)."""
+        from PyQt6.QtWidgets import QDialog
+
         from .widgets.slot_mapping_dialog import SlotMappingDialog
         # 안내 → 다이얼로그 열기 여부 묻기
         r = QMessageBox.question(
@@ -411,35 +654,210 @@ class MainWindow(QMainWindow):
         if r != QMessageBox.StandardButton.Yes:
             return
 
-        from PyQt6.QtWidgets import QDialog
-        dlg = SlotMappingDialog(sr.ref_only, sr.val_only, parent=self)
+        dlg = SlotMappingDialog(
+            sr.ref_only, sr.val_only,
+            ref_meta=getattr(self, "_slot_meta_ref", None),
+            val_meta=getattr(self, "_slot_meta_val", None),
+            parent=self,
+        )
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
-        mapping = dlg.mapping
-        if not mapping.pairs:
+        if dlg.mapping.pairs:
+            self._apply_slot_pairs(sr, dlg.mapping.pairs)
+
+    @staticmethod
+    def _kla_machine_side(inp) -> Optional[str]:
+        """호기 번호가 'K-n' 또는 'KLA-n'(예: K-6, KLA-1, 대소문자 무관)이면 그 쪽을
+        KLA 로 자동 판정.
+
+        반환 "ref"/"val"/"both" 또는 None(둘 다 아님 → 사용자에게 물어봐야 함)."""
+        import re
+
+        def is_kla(label) -> bool:
+            return bool(re.fullmatch(r"(?:KLA|K)\s*-\s*\d+",
+                                     str(label or "").strip(), re.IGNORECASE))
+
+        ref_k = is_kla(getattr(inp, "ref_machine", ""))
+        val_k = is_kla(getattr(inp, "val_machine", ""))
+        if ref_k and val_k:
+            return "both"
+        if ref_k:
+            return "ref"
+        if val_k:
+            return "val"
+        return None
+
+    def _ask_kla_side(self) -> Optional[str]:
+        """매칭 실패 폴더가 있을 때 'KLA 가 어느 쪽인가?' 를 묻는다.
+
+        반환 "ref"/"val" 또는 None(KLA 아님 → 파일명/OCR 자동 매칭 건너뜀)."""
+        box = QMessageBox(self)
+        box.setWindowTitle(i18n.KO.KLA_ASK_TITLE)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setTextFormat(Qt.TextFormat.RichText)
+        box.setText(
+            "<div style='font-size:18pt; font-weight:800; color:#F39C12;'>"
+            f"{i18n.KO.KLA_ASK_SIDE_HEADING}</div>"
+        )
+        box.setInformativeText(
+            "<div style='font-size:11pt; color:#E8E8E8;'>"
+            + i18n.KO.KLA_ASK_SIDE_BODY.replace("\n", "<br>") + "</div>"
+        )
+        ref_btn = box.addButton(i18n.KO.KLA_SIDE_REF,
+                                QMessageBox.ButtonRole.YesRole)
+        val_btn = box.addButton(i18n.KO.KLA_SIDE_VAL,
+                                QMessageBox.ButtonRole.NoRole)
+        box.addButton(i18n.KO.KLA_SIDE_NONE, QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(ref_btn)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is ref_btn:
+            return "ref"
+        if clicked is val_btn:
+            return "val"
+        return None
+
+    def _resolve_and_merge_kla(self, sr: ScanResult, kla_side: str,
+                               on_done) -> None:
+        """KLA(``kla_side``) 미매칭 폴더의 slot명(WaferID)을 **파일명 우선·OCR 폴백**
+        으로 해석해 ref↔val 을 자동 병합한다.
+
+        OCR 은 **메인 스레드를 막지 않도록 백그라운드 워커**에서 돌리므로, 이 메서드는
+        OCR 이 끝난 뒤(또는 OCR 불필요 시 즉시) ``on_done()`` 콜백으로 다음 단계를
+        잇는다.  OCR 은 **파일명에서 WaferID 를 못 읽은 폴더에만** 돈다(불필요한 OCR 방지)."""
+        try:
+            self._kla_resolve_impl(sr, kla_side, on_done)
+        except Exception:
+            on_done()
+
+    def _kla_resolve_impl(self, sr: ScanResult, kla_side: str, on_done) -> None:
+        do_ref = kla_side in ("ref", "both")
+        do_val = kla_side in ("val", "both")
+
+        def imgs_of(name: str, is_ref: bool) -> list:
+            slot = sr.slots.get(name)
+            if slot is None:
+                return []
+            return slot.ref_images if is_ref else slot.val_images
+
+        # 1) [파일명] KLA 쪽 폴더의 사진 파일명 prefix(첫 '_' 이전 전체)를 slot명
+        #    후보로 읽어 먼저 매치(형식 검증 없음).  비-KLA 쪽은 폴더명이 곧 slot명.
+        self._loading.show_overlay(i18n.KO.LOAD_KLA_FILENAME)
+        QApplication.processEvents()
+        fn_ref: dict[str, str] = {}
+        fn_val: dict[str, str] = {}
+        img0_ref: dict[str, Path] = {}
+        img0_val: dict[str, Path] = {}
+        for n in list(sr.ref_only):
+            ii = imgs_of(n, True)
+            if ii:
+                img0_ref[n] = ii[0].path
+                if do_ref:
+                    w = wafer_id.folder_wafer_id_from_filenames(ii)
+                    if w:
+                        fn_ref[n] = w
+        for n in list(sr.val_only):
+            ii = imgs_of(n, False)
+            if ii:
+                img0_val[n] = ii[0].path
+                if do_val:
+                    w = wafer_id.folder_wafer_id_from_filenames(ii)
+                    if w:
+                        fn_val[n] = w
+        wafer_id.merge_unmatched_by_wafer_id(sr, fn_ref, fn_val)
+
+        # 메타 작성 + 다음 단계 — OCR 결과(있으면)를 반영해 최종 메타를 만든다.
+        def build_meta(names, is_kla, fn, ocr, img0) -> dict:
+            meta: dict[str, dict] = {}
+            for n in names:
+                if n not in img0:
+                    meta[n] = {"slot": None, "method": "none", "image": None}
+                elif is_kla and n in ocr:
+                    meta[n] = {"slot": ocr[n], "method": "ocr", "image": img0[n]}
+                elif is_kla and n in fn:
+                    meta[n] = {"slot": fn[n], "method": "filename", "image": img0[n]}
+                elif is_kla:
+                    meta[n] = {"slot": None, "method": "unread", "image": img0[n]}
+                else:
+                    meta[n] = {"slot": None, "method": "plain", "image": img0[n]}
+            return meta
+
+        def finalize(ocr_ref=None, ocr_val=None) -> None:
+            ocr_ref = ocr_ref or {}
+            ocr_val = ocr_val or {}
+            # 병합된 slot명(WaferID) → KLA 하위폴더명 매핑(엑셀 B열 회색 표기용).
+            kla: dict[str, str] = {}
+            if do_ref:
+                for n, w in {**fn_ref, **ocr_ref}.items():
+                    if w:
+                        kla[str(w).upper()] = n
+            if do_val:
+                for n, w in {**fn_val, **ocr_val}.items():
+                    if w:
+                        kla[str(w).upper()] = n
+            self._kla_folders = kla
+            self._slot_meta_ref = build_meta(list(sr.ref_only), do_ref, fn_ref,
+                                             ocr_ref, img0_ref)
+            self._slot_meta_val = build_meta(list(sr.val_only), do_val, fn_val,
+                                             ocr_val, img0_val)
+            self._ocr_worker = None
+            on_done()
+
+        # 2) [OCR] **파일명에서 WaferID 를 못 읽은(형식이 아닌) 폴더에만** 헤더 OCR.
+        #    파일명이 WaferID 형식이면 그 값을 신뢰하고 OCR 을 건너뛴다(불필요한 OCR·
+        #    응답없음 방지).  OCR 은 백그라운드 워커에서 → UI 비차단.
+        jobs: list = []
+        if do_ref:
+            for n in list(sr.ref_only):
+                if n in img0_ref and not wafer_id.looks_like_wafer_id(fn_ref.get(n)):
+                    jobs.append(("ref", n, [it.path for it in imgs_of(n, True)]))
+        if do_val:
+            for n in list(sr.val_only):
+                if n in img0_val and not wafer_id.looks_like_wafer_id(fn_val.get(n)):
+                    jobs.append(("val", n, [it.path for it in imgs_of(n, False)]))
+
+        if jobs and wafer_id.ocr_available():
+            from ..workers.wafer_id_ocr import WaferIdOcrWorker
+            self._loading.show_overlay(
+                i18n.KO.LOAD_KLA_OCR_FMT.format(done=0, total=len(jobs)))
+            worker = WaferIdOcrWorker(jobs, parent=self)
+            self._ocr_worker = worker          # GC 방지 참조 보관
+
+            def _on_progress(d: int, t: int) -> None:
+                self._loading.set_progress(
+                    d, t, i18n.KO.LOAD_KLA_OCR_FMT.format(done=d, total=t))
+
+            def _on_ocr_done(ocr_ref: dict, ocr_val: dict) -> None:
+                try:
+                    wafer_id.merge_unmatched_by_wafer_id(sr, ocr_ref, ocr_val)
+                finally:
+                    finalize(ocr_ref, ocr_val)
+
+            worker.signals.progress.connect(_on_progress)
+            worker.signals.done.connect(_on_ocr_done)
+            worker.signals.failed.connect(lambda _msg: finalize())
+            worker.start()
             return
 
-        # 매핑된 슬롯 쌍을 ScanResult.slots 에 통합 (val 측을 ref 측 이름으로 합침)
-        for ref_name, val_name in mapping.pairs:
+        finalize()
+
+    def _apply_slot_pairs(self, sr: ScanResult, pairs) -> None:
+        """(ref폴더명, val폴더명) 쌍을 통합 — val 사진을 ref slot명으로 합치고 제거."""
+        from ..models.slot import ImageItem
+        ref_used = {a for a, _ in pairs}
+        val_used = {b for _, b in pairs}
+        for ref_name, val_name in pairs:
             ref_slot = sr.slots.get(ref_name)
             val_slot = sr.slots.get(val_name)
             if ref_slot is None or val_slot is None:
                 continue
-            # val 사진을 ref 슬롯에 결합 — side 는 유지하되 slot 명만 일치시킴.
-            from ..models.slot import ImageItem
-            rebuilt_val_imgs = [
+            ref_slot.val_images = [
                 ImageItem(slot=ref_name, path=it.path, side="val")
                 for it in val_slot.val_images
             ]
-            ref_slot.val_images = rebuilt_val_imgs
-            # 매핑 적용된 val 슬롯은 제거
             sr.slots.pop(val_name, None)
-
-        # ref_only / val_only 목록 갱신
-        sr.ref_only = [s for s in sr.ref_only
-                       if s not in {a for a, _ in mapping.pairs}]
-        sr.val_only = [s for s in sr.val_only
-                       if s not in {b for _, b in mapping.pairs}]
+        sr.ref_only = [s for s in sr.ref_only if s not in ref_used]
+        sr.val_only = [s for s in sr.val_only if s not in val_used]
 
     # ==================================================================
     # Setup → Stage 1
@@ -449,14 +867,31 @@ class MainWindow(QMainWindow):
         inp = self._input
         if inp is None:
             return config.DEFAULT_SIM_CONFIG
+        engine = getattr(inp, "engine_mode", "basic")
+        # 실측 최적 프로파일 적용:
+        #   기본 모드  = rr_parallel  → 전수 고전(pHash+ORB+SSIM)·CPU 멀티코어 병렬(현행 동작).
+        #   고효율 모드 = rr_orb_center50 → GPU 임베딩 추림 + 상위 후보를 ORB 단독·중앙(defect)
+        #                가중으로 재채점.  defect 가 정중앙인 특성을 활용한 최속·정확도 보존 조합.
+        if engine == "efficiency":
+            rerank_components = frozenset({"orb"})
+            orb_center_weight = 0.5
+        else:
+            rerank_components = None       # 전체 항(전수 고전)
+            orb_center_weight = 0.0
         return config.SimilarityConfig(
-            engine=getattr(inp, "engine_mode", "basic"),
-            center20_ref=bool(getattr(inp, "center20_ref", False)),
-            center20_val=bool(getattr(inp, "center20_val", False)),
-            grayscale=bool(getattr(inp, "pre_grayscale", False)),
-            contrast=bool(getattr(inp, "pre_contrast", False)),
-            kla_crop=bool(getattr(inp, "kla_crop", False)),
+            engine=engine,
+            center_crop=False,
+            persist_scores=bool(getattr(inp, "persist_scores", False)),
+            accel_concurrency=int(getattr(inp, "accel_concurrency", 32)),
+            use_cpu=bool(getattr(inp, "use_cpu", True)),
+            use_gpu=bool(getattr(inp, "use_gpu", True)),
+            use_npu=bool(getattr(inp, "use_npu", True)),
+            embed_batch=int(getattr(inp, "embed_batch", 1)),
+            rerank_components=rerank_components,
+            orb_center_weight=orb_center_weight,
+            coord_tolerance=float(getattr(inp, "coord_tolerance", 500.0)),
         )
+
 
     def _on_start(self, inp: SetupInput) -> None:
         self._input = inp
@@ -467,50 +902,100 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         self._matches_a.clear()
-        self._matches_b.clear()
         self._skipped_a.clear()
-        self._skipped_b.clear()
-        self._matched_val_keys_in_a.clear()
         self._reviewed_matches.clear()
         self._reviewed_unmatched.clear()
+        self._thumbs_handled = False        # 썸네일 완료 one-shot 가드 리셋(#C2)
+        # 타일 픽스맵 캐시 비우기 — 폴더가 바뀌어도 stale 픽스맵이 남지 않게(#렉).
+        try:
+            from ..utils import image_io as _io
+            _io.clear_tile_cache()
+        except Exception:
+            pass
         self._session_id = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
 
         # 양식 폴더의 양식.xlsx 를 결과 폴더로 복사 → 작업 파일 준비 ----
         self._prepare_working_file(inp)
 
+        # 원본 mtime 메모이즈 초기화 — 이번 세션 동안 캐시 키용 stat() 을 경로당 1회로(#5).
+        from ..utils import cache as _cache
+        _cache.reset_mtime_cache()
+        self._kla_folders: dict[str, str] = {}      # KLA slot명→폴더명(엑셀 회색 표기)
+
         self._loading.show_overlay(i18n.KO.LOAD_SCAN)
         QApplication.processEvents()
 
-        # 폴더 스캔 (저비용 — 메인 스레드에서 진행)
-        sr = scan(inp.ref_root, inp.val_root)
-        self._scan = sr
+        # 폴더 스캔 — NAS 처럼 폴더가 많아도 진행 개수를 실시간 표시(#6).
+        def _scan_progress(done: int, total: int) -> None:
+            self._loading.set_progress(
+                done, total, i18n.KO.LOAD_SCAN_FMT.format(done=done, total=total))
+            QApplication.processEvents()
 
+        sr = scan(inp.ref_root, inp.val_root, progress=_scan_progress)
+
+        # '일부 슬롯만 진행' 옵션 — 선택된 슬롯만 남긴다.  slots dict 만 줄이면
+        # common_slot_names / ref_only / val_only 가 모두 이를 기반으로 계산되어
+        # 다운스트림 전체가 자연히 선택 슬롯으로 제한된다.
+        sel = getattr(inp, "selected_slots", None)
+        if sel:
+            sr.slots = {n: s for n, s in sr.slots.items() if n in sel}
+            sr.ref_only = [n for n in sr.ref_only if n in sel]
+            sr.val_only = [n for n in sr.val_only if n in sel]
+
+        self._scan = sr
+        # 사진이 한 장도 없는 한쪽 전용 폴더는 매칭 대상에서 제외(그냥 넘어감).
+        drop_empty_unmatched(sr)
+
+        # slot(폴더)명이 ref/val 간 일치하지 않으면, KLA 장비의 위치(기준/검증)를
+        # 정한다 — 호기가 'K-n' 이면 그 쪽이 KLA(묻지 않음), 아니면 사용자에게 묻는다.
+        # KLA 쪽은 파일명(첫 '_' 이전)→OCR 순으로 WaferID 를 읽어 자동 매칭하고,
+        # 나머지는 수동 매핑.  '공통 slot 없음' 검사는 매칭 확정 이후로 미룬다.
+        if sr.ref_only or sr.val_only:
+            side = self._kla_machine_side(inp)
+            if side is None:
+                side = self._ask_kla_side()
+            if side:
+                # OCR 은 백그라운드 워커에서 → 끝나면 on_done 으로 다음 단계 진행.
+                self._resolve_and_merge_kla(
+                    sr, side, on_done=lambda: self._after_slot_resolved(sr))
+                return
+        self._after_slot_resolved(sr)
+
+    def _after_slot_resolved(self, sr: ScanResult) -> None:
+        """slot 매칭 확정 후 — 남은 미매칭은 수동 매핑, 그 다음 썸네일 단계."""
+        if sr.ref_only or sr.val_only:
+            self._resolve_slot_mismatch(sr)
         common = sr.common_slot_names
         if not common:
             self._loading.hide_overlay()
             QMessageBox.warning(self, i18n.KO.APP_TITLE, i18n.KO.WARN_NO_SLOTS)
             return
+        self._continue_start_after_scan(common)
 
-        # 한쪽 전용 Slot 이 있으면 사용자에게 수동 매핑을 물어본다 (#23) ------
-        if sr.ref_only or sr.val_only:
-            self._resolve_slot_mismatch(sr)
-
-        # 썸네일 캐시 사전 생성 (백그라운드) -----------------------------
+    def _continue_start_after_scan(self, common: list[str]) -> None:
+        """slot 확정 후 썸네일 캐시 사전 생성(백그라운드) → 다음 단계."""
+        sr = self._scan
+        if sr is None:
+            return
+        # 매핑/OCR 단계에서 오버레이가 숨겨졌을 수 있으므로 **반드시 다시 띄운다** —
+        # 그렇지 않으면 썸네일 생성 동안 메인 창이 클릭 가능 상태로 남아 버그 유발.
+        # (set_progress 는 숨겨진 오버레이를 다시 띄우지 않으므로 show_overlay 필수.)
+        # 썸네일 단계는 가장 오래 걸리므로 [중지] 로 건너뛸 수 있게 한다(#C2).
+        self._loading.show_overlay(
+            i18n.KO.LOAD_THUMBNAIL_FMT.format(done=0, total=0), cancelable=True)
+        QApplication.processEvents()
         all_items: list[ImageItem] = []
         for name in common:
             slot = sr.slots[name]
             all_items.extend(slot.ref_images)
             all_items.extend(slot.val_images)
 
-        # 이미지 수에 따라 화질 티어 자동 선택 (사용자 강제 빠른 모드 우선).
-        _ui = _prefs.load()
+        # 이미지 수에 따라 화질 티어 자동 선택 — 빠른 모드(썸네일 화질↓)는 상시 적용.
         per_side_total = max(
             sum(len(sr.slots[n].ref_images) for n in common),
             sum(len(sr.slots[n].val_images) for n in common),
         )
-        self._sizing_tier = config.pick_tier(
-            per_side_total, speed_mode=bool(_ui.speed_mode)
-        )
+        self._sizing_tier = config.pick_tier(per_side_total, speed_mode=True)
         # UI 가 무인자로 호출하는 get_thumb_path / get_mid_path 가 백그라운드
         # 풀과 같은 캐시 파일을 가리키도록 세션 티어 등록 (Bug #1 fix).
         from ..utils import image_io as _io
@@ -563,17 +1048,37 @@ class MainWindow(QMainWindow):
         어져 워커의 stale 시그널이 재진입할 수 있다 (Bug #2).  여기서는 오버
         레이 메시지만 갱신하고, 실제 진행은 ``QTimer.singleShot(0, ...)`` 로
         다음 이벤트 루프 틱에 넘긴다.
+
+        one-shot 가드(#C2): finished 시그널과 취소(_on_loading_cancel) 가 모두
+        이 함수를 부를 수 있으므로, 단 한 번만 다음 단계로 진행하게 한다.
         """
         if self._input is None:
             return
-        self._loading.set_progress(0, 0, i18n.KO.LOAD_THRESHOLD_ANALYSIS)
+        if self._thumbs_handled:
+            return
+        self._thumbs_handled = True
+        self._loading.set_progress(0, 0, i18n.KO.LOAD_STAGE_PREP)
         QTimer.singleShot(0, self._continue_after_thumbs)
+
+    def _on_loading_cancel(self) -> None:
+        """로딩 오버레이의 [중지] — 썸네일 사전생성만 취소 대상.
+
+        썸네일은 비필수(이후 UI 가 필요 시 생성)이므로, 풀을 멈추고 곧바로
+        다음 단계로 진행한다.  다른 단계의 오버레이는 cancelable=False 라 이
+        핸들러가 호출되지 않는다(버튼 자체가 없음).
+
+        ``ThumbnailPool`` 은 QObject(워커만 QThread)라 ``isRunning()`` 이 없다.
+        이미 다음 단계로 넘어갔는지는 one-shot 플래그로 판별하고, ``stop()`` 은
+        이미 끝난 풀에 호출해도 무해하므로 그 조합으로 가드한다."""
+        pool = self._thumb_pool
+        if pool is not None and not self._thumbs_handled:
+            pool.stop()                 # 이미 완료된 풀이어도 무해(플래그만 set)
+            self._on_thumbs_ready()     # one-shot 가드로 1회만 진행
 
     def _continue_after_thumbs(self) -> None:
         """``_on_thumbs_ready`` 의 안전한 후속 — 모달/페이지 전환 OK."""
         if self._input is None:
             return
-        self._maybe_offer_threshold_suggestion()
         self._loading.set_progress(0, 0, i18n.KO.LOAD_STAGE_PREP)
         if self._input.automation_level == AutomationLevel.AUTO_ALL:
             self._loading.hide_overlay()
@@ -586,6 +1091,16 @@ class MainWindow(QMainWindow):
     # ==================================================================
     # 올인원 자동 모드 (auto_all): Stage 1 건너뛰고 모든 ref 자동 매치.
     # ==================================================================
+    def _build_val_pool_by_slot(self) -> dict[str, list[ImageItem]]:
+        """공통 슬롯의 검증(val) 후보 풀 — Stage 2 매칭 대상 (중복 제거 #D1).
+
+        ``_enter_stage2_auto_all`` / ``_enter_stage2_phase_a`` 가 동일하게 만들던
+        풀 구성을 한 곳으로 모은다.  값은 동일(공통 슬롯의 val_images 복사본).
+        """
+        assert self._scan is not None
+        return {name: list(self._scan.slots[name].val_images)
+                for name in self._scan.common_slot_names}
+
     def _enter_stage2_auto_all(self) -> None:
         assert self._scan is not None and self._input is not None
         slots = [self._scan.slots[n] for n in self._scan.common_slot_names]
@@ -595,21 +1110,26 @@ class MainWindow(QMainWindow):
         if not queue:
             QMessageBox.warning(self, i18n.KO.APP_TITLE, i18n.KO.WARN_NO_IMAGES)
             return
-        pool: dict[str, list[ImageItem]] = {}
-        for name in self._scan.common_slot_names:
-            slot = self._scan.slots[name]
-            pool[name] = list(slot.val_images)
+        pool = self._build_val_pool_by_slot()
+        _sim_cfg = self._make_sim_cfg()
+        try:
+            from ..utils.prefs import EngineMode
+            _is_coord = EngineMode.is_coordinate(getattr(_sim_cfg, "engine", ""))
+        except Exception:
+            _is_coord = False
         self._match_page.load_state(
             queue=queue,
             val_pool_by_slot=pool,
             threshold=self._input.threshold,
-            phase_label=i18n.KO.STAGE2_TITLE,
-            direction="A→B",
+            phase_label=(i18n.KO.STAGE2_TITLE_COORD if _is_coord
+                         else i18n.KO.STAGE2_TITLE),
             session_id=self._session_id,
             model_name=self._active_model_name(),
             auto_mode=True,
-            engine_cfg=self._make_sim_cfg(),
+            engine_cfg=_sim_cfg,
         )
+        self._device_label.setVisible(not _is_coord)
+        self._usage_label.setVisible(not _is_coord)
         self._show_page(self._match_page)
         self._phase = PHASE_A_MATCH
         self._autosave()
@@ -622,76 +1142,23 @@ class MainWindow(QMainWindow):
         self._reviewed_unmatched = list(unmatched_refs)
         self._finish_session()
 
-    def _maybe_offer_threshold_suggestion(self) -> None:
-        """스캔 데이터의 점수 분포를 분석해 임계치를 추천."""
-        if self._scan is None or self._input is None:
-            return
-        try:
-            from ..similarity import threshold as _thr
-            sug = _thr.suggest_threshold(self._scan)
-        except Exception:
-            return
-        if sug is None:
-            return
-        # 현재 임계치와 5%p 이상 차이날 때만 물어본다.
-        if abs(sug.suggested - self._input.threshold) < 0.05:
-            return
-        r = QMessageBox.question(
-            self, i18n.KO.THRESHOLD_SUGGESTION_TITLE,
-            i18n.KO.THRESHOLD_SUGGESTION_FMT.format(
-                suggested=sug.suggested, current=self._input.threshold,
-                same_median=sug.same_median, same_min=sug.same_min,
-                diff_median=sug.diff_median, diff_max=sug.diff_max,
-                margin=sug.margin,
-            ),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes,
-        )
-        if r == QMessageBox.StandardButton.Yes:
-            self._input.threshold = float(sug.suggested)
-            try:
-                from ..utils import prefs as _prefs
-                _prefs.patch(threshold=float(sug.suggested))
-            except Exception:
-                pass
-
     # ==================================================================
-    # Phase 식별 helpers
-    # ==================================================================
-    def _is_cross(self) -> bool:
-        return self._input is not None and self._input.mode == "cross"
-
-    def _lower_machine_side(self) -> str:
-        """교차검증에서 '낮은 호기' 가 ref 인지 val 인지 추정 ('ref'/'val')."""
-        if self._input is None:
-            return "ref"
-        # 호기명에서 숫자만 뽑아서 비교 → 실패하면 ref 우선
-        def num(s: str) -> int:
-            digits = "".join(ch for ch in s if ch.isdigit())
-            return int(digits) if digits else 9999
-        return "ref" if num(self._input.ref_machine) <= num(self._input.val_machine) else "val"
-
-    # ==================================================================
-    # Stage 1 — Phase A
+    # Stage 1
     # ==================================================================
     def _enter_stage1_phase_a(self) -> None:
         assert self._scan is not None and self._input is not None
-        # 낮은 호기 쪽이 Phase A 의 기준
-        lower = self._lower_machine_side() if self._is_cross() else "ref"
         slots = [self._scan.slots[n] for n in self._scan.common_slot_names]
-        # Phase A 의 queue: 낮은 호기 쪽 사진 전부 (Slot 명 / 파일명 오름차순)
+        # queue: 기준(ref) 사진 전부 (Slot 명 / 파일명 오름차순)
         queue: list[ImageItem] = []
         for slot in sorted(slots, key=lambda s: s.name):
-            queue.extend(slot.ref_images if lower == "ref" else slot.val_images)
+            queue.extend(slot.ref_images)
 
-        phase_lab = (
-            i18n.KO.PHASE_A_SELECT if self._is_cross()
-            else i18n.KO.STAGE1_TITLE
-        )
+        # 이전에 이 기준 폴더로 고른 기준 사진이 있으면 재사용할지 물어본다 (#6).
+        restored = self._maybe_restore_ref_selection(queue)
         self._select_page.load_state(
             queue=queue,
-            targets={}, excluded={}, history=[],
-            phase_label=phase_lab,
+            targets=restored, excluded={}, history=[],
+            phase_label=i18n.KO.STAGE1_TITLE,
         )
         self._show_page(self._select_page)
         self._phase = PHASE_A_SELECT
@@ -703,21 +1170,71 @@ class MainWindow(QMainWindow):
                 "targets": self._collect_panel(self._select_page.get_state().targets),
                 "excluded": self._collect_panel(self._select_page.get_state().excluded),
             }
+            # 기준 폴더로 직접 고른 기준 사진을 기록 (다음에 재사용 질의용, #6).
+            self._save_ref_selection(self._stage1_a_snapshot["targets"])
             QMessageBox.information(
                 self, i18n.KO.INFO_PHASE_TRANSITION_TITLE,
                 i18n.KO.INFO_PHASE_A_TO_MATCH,
             )
             self._enter_stage2_phase_a()
-        elif self._phase == PHASE_B_SELECT:
-            self._stage1_b_snapshot = {
-                "targets": self._collect_panel(self._select_page.get_state().targets),
-                "excluded": self._collect_panel(self._select_page.get_state().excluded),
+
+    # ------------------------------------------------------------------
+    # 기준 사진 재사용 기록 (#6)
+    # ------------------------------------------------------------------
+    def _save_ref_selection(
+        self, targets: dict[str, list[ImageItem]]
+    ) -> None:
+        """직접 고른 기준 사진(검증 대상)을 기준 폴더 절대경로로 영속화."""
+        if self._input is None:
+            return
+        try:
+            from ..utils import ref_history
+            slots_to_names = {
+                slot: [it.filename for it in items]
+                for slot, items in (targets or {}).items() if items
             }
-            QMessageBox.information(
-                self, i18n.KO.INFO_PHASE_TRANSITION_TITLE,
-                i18n.KO.INFO_PHASE_B_TO_MATCH,
-            )
-            self._enter_stage2_phase_b()
+            ref_history.save_chosen(self._input.ref_root, slots_to_names)
+        except Exception:
+            pass
+
+    def _maybe_restore_ref_selection(
+        self, queue: list[ImageItem]
+    ) -> dict[str, list[ImageItem]]:
+        """기록이 있으면 사용자에게 재사용 여부를 묻고, 예이면 해당 사진을
+        queue 에서 빼서 targets(검증 대상) 로 옮긴 매핑을 반환한다.
+
+        반환된 항목은 ``queue`` 에서 제거된다 (in-place).  아니오/기록 없음이면
+        빈 dict 반환(현행대로 빈 targets).
+        """
+        if self._input is None:
+            return {}
+        try:
+            from ..utils import ref_history
+            if not ref_history.has_history(self._input.ref_root):
+                return {}
+            chosen = ref_history.get_chosen(self._input.ref_root)
+        except Exception:
+            return {}
+        if not chosen:
+            return {}
+        wanted = {(slot, name) for slot, names in chosen.items() for name in names}
+        matched = [it for it in queue if (it.slot, it.filename) in wanted]
+        if not matched:
+            return {}
+        r = QMessageBox.question(
+            self, i18n.KO.REF_REUSE_TITLE,
+            i18n.KO.REF_REUSE_BODY_FMT.format(n=len(matched)),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if r != QMessageBox.StandardButton.Yes:
+            return {}
+        restored: dict[str, list[ImageItem]] = {}
+        matched_set = set(matched)
+        for it in matched:
+            restored.setdefault(it.slot, []).append(it)
+        queue[:] = [it for it in queue if it not in matched_set]
+        return restored
 
     @staticmethod
     def _collect_panel(
@@ -726,38 +1243,39 @@ class MainWindow(QMainWindow):
         return {k: list(v) for k, v in panel.items() if v}
 
     # ==================================================================
-    # Stage 2 — Phase A
+    # Stage 2
     # ==================================================================
     def _enter_stage2_phase_a(self) -> None:
         assert self._scan is not None and self._input is not None
-        # Phase A 의 기준 큐 = Stage 1 에서 verify 로 분류된 낮은 호기 사진들
-        lower = self._lower_machine_side() if self._is_cross() else "ref"
+        # 기준 큐 = Stage 1 에서 verify 로 분류된 기준 사진들
         targets = self._stage1_a_snapshot["targets"] if self._stage1_a_snapshot else {}
         queue: list[ImageItem] = []
         for slot in sorted(targets.keys()):
             queue.extend(targets[slot])
 
-        # 매칭 대상 풀 = 같은 Slot 의 높은 호기 쪽 모든 사진
-        higher = "val" if lower == "ref" else "ref"
-        pool: dict[str, list[ImageItem]] = {}
-        for name in self._scan.common_slot_names:
-            slot = self._scan.slots[name]
-            pool[name] = slot.val_images if higher == "val" else slot.ref_images
+        # 매칭 대상 풀 = 같은 Slot 의 검증(val) 쪽 모든 사진
+        pool = self._build_val_pool_by_slot()
 
-        direction = "A→B"
-        phase_lab = i18n.KO.PHASE_A_MATCH if self._is_cross() else i18n.KO.STAGE2_TITLE
+        _sim_cfg = self._make_sim_cfg()
         auto_mode = AutomationLevel.is_auto(self._input.automation_level)
+        try:
+            from ..utils.prefs import EngineMode
+            _is_coord = EngineMode.is_coordinate(getattr(_sim_cfg, "engine", ""))
+        except Exception:
+            _is_coord = False
         self._match_page.load_state(
             queue=queue,
             val_pool_by_slot=pool,
             threshold=self._input.threshold,
-            phase_label=phase_lab,
-            direction=direction,
+            phase_label=(i18n.KO.STAGE2_TITLE_COORD if _is_coord
+                         else i18n.KO.STAGE2_TITLE),
             session_id=self._session_id,
             model_name=self._active_model_name(),
             auto_mode=auto_mode,
-            engine_cfg=self._make_sim_cfg(),
+            engine_cfg=_sim_cfg,
         )
+        self._device_label.setVisible(not _is_coord)
+        self._usage_label.setVisible(not _is_coord)
         self._show_page(self._match_page)
         self._phase = PHASE_A_MATCH
         self._autosave()
@@ -765,52 +1283,33 @@ class MainWindow(QMainWindow):
     def _on_match_confirmed(self, match: MatchResult) -> None:
         if self._phase == PHASE_A_MATCH:
             self._matches_a.append(match)
-            # Phase A 에서 매칭된 검증 쪽 파일을 기록 (Phase B 에서 자동 제외)
-            self._matched_val_keys_in_a.add(self._val_key(match))
-        elif self._phase == PHASE_B_MATCH:
-            self._matches_b.append(match)
         self._schedule_autosave()
 
-    @staticmethod
-    def _val_key(match: MatchResult) -> str:
-        return f"{match.slot}::{match.val_path.name}"
+    def _on_match_undone(self, match: MatchResult) -> None:
+        """Stage 2 되돌리기(#C1) — 집계된 매칭에서도 해당 항목을 제거.
+
+        같은 ``key``(slot/ref명/val명) 의 마지막 항목을 제거한다.
+        """
+        if self._phase == PHASE_A_MATCH:
+            for i in range(len(self._matches_a) - 1, -1, -1):
+                if self._matches_a[i].key == match.key:
+                    del self._matches_a[i]
+                    break
+        self._schedule_autosave()
 
     def _on_match_finished(self) -> None:
         if self._phase == PHASE_A_MATCH:
             st = self._match_page.get_state()
             if st is not None:
-                # 미탐(=상대 호기가 놓침) 으로 기록할 것은 ‘매칭 없음 확정’ 만.
-                # ‘잠시 보류’ 는 사용자 결정 미정 → 미탐 시트에 넣지 않는다.
+                # 미탐으로 기록할 것은 ‘매칭 없음 확정’ 만. ‘잠시 보류’ 는 사용자
+                # 결정 미정 → 미탐 시트에 넣지 않는다.
                 for slot, items in st.no_match.items():
                     self._skipped_a[slot].extend(items)
-            # auto_all 모드는 single 흐름 강제 — Phase B 로 진입하지 않는다.
-            auto_all = (
-                self._input is not None
-                and self._input.automation_level == AutomationLevel.AUTO_ALL
-            )
-            if self._is_cross() and not auto_all:
-                QMessageBox.information(
-                    self, i18n.KO.INFO_PHASE_TRANSITION_TITLE,
-                    i18n.KO.INFO_PHASE_A_TO_B,
-                )
-                self._enter_stage1_phase_b()
-            else:
-                self._proceed_to_review_or_finish()
-        elif self._phase == PHASE_B_MATCH:
-            st = self._match_page.get_state()
-            if st is not None:
-                for slot, items in st.no_match.items():
-                    self._skipped_b[slot].extend(items)
             self._proceed_to_review_or_finish()
 
     def _proceed_to_review_or_finish(self) -> None:
-        """자동 모드(user_select / auto_all)면 MatchReviewPage 로,
-        수동 모드면 곧장 결과 페이지로."""
+        """자동 매치 결과를 MatchReviewPage 로 넘겨 검토하게 한다."""
         if self._input is None:
-            self._finish_session()
-            return
-        auto_mode = AutomationLevel.is_auto(self._input.automation_level)
-        if not auto_mode:
             self._finish_session()
             return
         merged = self._merge_matches()
@@ -819,84 +1318,33 @@ class MainWindow(QMainWindow):
         score_cache = getattr(self._match_page, "_score_cache", None)
         match_state = self._match_page.get_state()
         val_pool = match_state.val_pool if match_state is not None else None
-        # 고속 모드는 score_cache 가 비어 있으므로 후보를 별도 산출해 전달 (#7).
+        # 효율 모드는 score_cache 가 비어 있으므로 후보를 별도 산출해 전달 (#7).
         candidates_by_ref = None
         try:
             candidates_by_ref = self._match_page.build_candidates_by_ref(merged)
         except Exception:
             candidates_by_ref = None
+        # 좌표 매칭 모드 정보 전달 — 검토 화면에서 거리(µm) 표시 + 통계 3분류.
+        _engine_cfg = getattr(self._match_page, "_engine_cfg", None)
+        _coord_mode = False
+        _tolerance = 500.0
+        _coord_failed_count = 0
+        if _engine_cfg is not None:
+            from ..utils.prefs import EngineMode
+            _coord_mode = EngineMode.is_coordinate(getattr(_engine_cfg, "engine", ""))
+            _tolerance = float(getattr(_engine_cfg, "coord_tolerance", 500.0))
+        if _coord_mode:
+            _coord_failed_count = len(
+                getattr(self._match_page, "_coord_failed_set", set())
+            )
         self._match_review_page.load_state(
             merged, score_cache=score_cache, val_pool=val_pool,
             candidates_by_ref=candidates_by_ref,
+            coord_mode=_coord_mode,
+            tolerance=_tolerance,
+            coord_failed_count=_coord_failed_count,
         )
         self._show_page(self._match_review_page)
-
-    # ==================================================================
-    # Stage 1 — Phase B (reverse direction)
-    # ==================================================================
-    def _enter_stage1_phase_b(self) -> None:
-        assert self._scan is not None and self._input is not None
-        lower = self._lower_machine_side()
-        higher = "val" if lower == "ref" else "ref"
-
-        # 큐 = 높은 호기의 모든 사진, 단 이미 Phase A 에서 매칭된 항목은 제외
-        # 그리고 Phase 1 화면에는 "이미 매칭됨" 섹션으로 표시 가능하도록 전달.
-        queue: list[ImageItem] = []
-        already_by_slot: dict[str, list[ImageItem]] = defaultdict(list)
-        for name in self._scan.common_slot_names:
-            slot = self._scan.slots[name]
-            higher_imgs = slot.val_images if higher == "val" else slot.ref_images
-            for it in higher_imgs:
-                if f"{name}::{it.path.name}" in self._matched_val_keys_in_a:
-                    already_by_slot[name].append(it)
-                else:
-                    queue.append(it)
-
-        self._select_page.load_state(
-            queue=queue,
-            targets={}, excluded={}, history=[],
-            phase_label=i18n.KO.PHASE_B_SELECT,
-            phase_b_already_matched=dict(already_by_slot),
-        )
-        self._show_page(self._select_page)
-        self._phase = PHASE_B_SELECT
-        self._autosave()
-
-    # ==================================================================
-    # Stage 2 — Phase B
-    # ==================================================================
-    def _enter_stage2_phase_b(self) -> None:
-        assert self._scan is not None and self._input is not None
-        lower = self._lower_machine_side()
-        higher = "val" if lower == "ref" else "ref"
-        targets = self._stage1_b_snapshot["targets"] if self._stage1_b_snapshot else {}
-
-        queue: list[ImageItem] = []
-        for slot in sorted(targets.keys()):
-            queue.extend(targets[slot])
-
-        # 매칭 대상 풀 = 같은 Slot 의 낮은 호기 사진들 (반대 방향)
-        pool: dict[str, list[ImageItem]] = {}
-        for name in self._scan.common_slot_names:
-            slot = self._scan.slots[name]
-            pool[name] = slot.ref_images if lower == "ref" else slot.val_images
-
-        direction = "B→A"
-        auto_mode = AutomationLevel.is_auto(self._input.automation_level)
-        self._match_page.load_state(
-            queue=queue,
-            val_pool_by_slot=pool,
-            threshold=self._input.threshold,
-            phase_label=i18n.KO.PHASE_B_MATCH,
-            direction=direction,
-            session_id=self._session_id,
-            model_name=self._active_model_name(),
-            auto_mode=auto_mode,
-            engine_cfg=self._make_sim_cfg(),
-        )
-        self._show_page(self._match_page)
-        self._phase = PHASE_B_MATCH
-        self._autosave()
 
     # ==================================================================
     # Result
@@ -908,7 +1356,6 @@ class MainWindow(QMainWindow):
             merged = list(self._reviewed_matches)
         else:
             merged = self._merge_matches()
-        miss_fast, miss_slow = self._compute_miss_lists()
         unmatched_refs = self._compute_unmatched_refs()
         # 사용자가 매치 검토에서 ‘매치 없음’ 으로 표시한 ref 들 합치기.
         if self._reviewed_unmatched:
@@ -919,29 +1366,35 @@ class MainWindow(QMainWindow):
             ref_machine=self._input.ref_machine,
             val_machine=self._input.val_machine,
             matches=merged,
-            miss_fast=miss_fast,
-            miss_slow=miss_slow,
+            miss_fast=[],
+            miss_slow=[],
             slot_only_ref=list(self._scan.ref_only),
             slot_only_val=list(self._scan.val_only),
             unmatched_refs=unmatched_refs,
+            kla_folders=dict(getattr(self, "_kla_folders", {})),
         )
         # 결과 페이지에는 ‘이미 복사해둔 작업 파일’ 과 ‘템플릿 원본’ 둘 다 전달.
         auto_mode = (
             self._input is not None
             and AutomationLevel.is_auto(self._input.automation_level)
         )
-        # 매치 실패 사진 검토(#8) 용 후보 풀 + 점수 캐시.
-        # cross 모드는 Phase A/B 에서 ref/val 양쪽 모두 미매칭이 생길 수 있어
-        # ‘unmatched.side 기준의 반대편 사진들’ 을 슬롯별로 만든다:
-        #   side == "ref"  → 후보 = 같은 슬롯의 val_images
-        #   side == "val"  → 후보 = 같은 슬롯의 ref_images
-        # 단일 모드는 unmatched.side 가 항상 "ref" 라 val_images 만 쓰인다.
+        # 매치 실패 사진 검토(#8) 용 후보 풀 + 점수 캐시.  단일 모드는
+        # unmatched.side 가 항상 "ref" 라 val_images 가 후보가 된다.
         review_pool: dict[tuple[str, str], list] = {}
         for slot_name in self._scan.common_slot_names:
             slot = self._scan.slots[slot_name]
             review_pool[(slot_name, "ref")] = list(slot.val_images)
             review_pool[(slot_name, "val")] = list(slot.ref_images)
         review_score_cache = getattr(self._match_page, "_score_cache", None)
+        review_fast_results = getattr(self._match_page, "_fast_results", None)
+        _engine_cfg = getattr(self._match_page, "_engine_cfg", None)
+        _coord_mode = False
+        _tolerance = 500.0
+        if _engine_cfg is not None:
+            from ..utils.prefs import EngineMode
+            _coord_mode = EngineMode.is_coordinate(
+                getattr(_engine_cfg, "engine", ""))
+            _tolerance = float(getattr(_engine_cfg, "coord_tolerance", 500.0))
         self._result_page.show_result(
             result,
             template_path=self._template_used,
@@ -949,10 +1402,46 @@ class MainWindow(QMainWindow):
             auto_mode=auto_mode,
             val_pool=review_pool,
             score_cache=review_score_cache,
+            fast_results=review_fast_results,
+            coord_mode=_coord_mode,
+            tolerance=_tolerance,
         )
-        QMessageBox.information(self, i18n.KO.APP_TITLE, i18n.KO.INFO_ALL_DONE)
         self._show_page(self._result_page)
         self._phase = PHASE_NONE
+        self._write_run_log()
+
+    def _write_run_log(self) -> None:
+        """검증 1회의 사용 통계를 컴퓨터별 폴더에 기록(캐시 빠른 매치는 제외)."""
+        try:
+            from ..utils import run_log
+            sr, inp = self._scan, self._input
+            if sr is None or inp is None:
+                return
+            common = sr.common_slot_names
+            ref_photos = sum(len(sr.slots[n].ref_images) for n in common)
+            val_photos = sum(len(sr.slots[n].val_images) for n in common)
+            elapsed = float(getattr(self._match_page, "_precompute_elapsed", 0.0))
+            options = {
+                "mode": getattr(inp, "mode", ""),
+                "automation": getattr(inp, "automation_level", ""),
+                "engine": getattr(inp, "engine_mode", ""),
+                "threshold": getattr(inp, "threshold", None),
+                "center_crop": False,
+                "use_gpu": bool(getattr(inp, "use_gpu", True)),
+                "use_npu": bool(getattr(inp, "use_npu", True)),
+            }
+            kla_used = bool(getattr(self, "_slot_meta_ref", None)
+                            or getattr(self, "_slot_meta_val", None))
+            ocr_used = any((m or {}).get("method") == "ocr"
+                           for m in {**getattr(self, "_slot_meta_ref", {}),
+                                     **getattr(self, "_slot_meta_val", {})}.values())
+            rec = run_log.build_record(
+                options=options, ref_root=inp.ref_root, val_root=inp.val_root,
+                slot_count=len(common), ref_photos=ref_photos, val_photos=val_photos,
+                elapsed_s=elapsed, kla_used=kla_used, ocr_used=ocr_used)
+            run_log.record(rec, elapsed_s=elapsed, uploader=None)
+        except Exception:
+            pass
         session_mod.clear()
 
     # ------------------------------------------------------------------
@@ -994,67 +1483,11 @@ class MainWindow(QMainWindow):
         self._working_xlsx = dst
 
     def _merge_matches(self) -> list[MatchResult]:
-        if not self._is_cross():
-            return list(self._matches_a)
-
-        # 키 = (Slot, 낮은호기 파일명, 높은호기 파일명).
-        # Phase A: ref_path = 낮은호기 / val_path = 높은호기
-        # Phase B: ref_path = 높은호기 / val_path = 낮은호기  ← 이걸 정규화한다.
-        lower = self._lower_machine_side()
-        higher = "val" if lower == "ref" else "ref"
-
-        def _norm(m: MatchResult) -> tuple[str, str, str, MatchResult]:
-            # Phase A 는 그대로, Phase B 는 ref/val 을 뒤집어 정규화
-            if m.direction == "A→B":
-                low_path = m.ref_path
-                high_path = m.val_path
-            else:
-                low_path = m.val_path
-                high_path = m.ref_path
-            norm = MatchResult(
-                slot=m.slot,
-                ref_path=low_path,
-                val_path=high_path,
-                score=m.score,
-                direction=m.direction,
-            )
-            return (m.slot, low_path.name, high_path.name, norm)
-
-        bag: dict[tuple[str, str, str], MatchResult] = {}
-        for m in self._matches_a + self._matches_b:
-            k0, k1, k2, norm = _norm(m)
-            key = (k0, k1, k2)
-            if key in bag:
-                bag[key].direction = "양방향"
-            else:
-                bag[key] = norm
-        return sorted(bag.values(), key=lambda x: (x.slot, x.ref_path.name.lower()))
-
-    def _compute_miss_lists(self) -> tuple[list[MissEntry], list[MissEntry]]:
-        if not self._is_cross():
-            return [], []
-        # 빠른(낮은) 호기 미탐 = Phase A 에서 skip 된 사진들
-        miss_fast: list[MissEntry] = []
-        for slot, items in self._skipped_a.items():
-            for it in items:
-                miss_fast.append(MissEntry(
-                    slot=slot, side="ref", path=it.path,
-                    note="Phase A 매칭 실패",
-                ))
-        # 느린(높은) 호기 미탐 = Phase B 에서 skip 된 사진들
-        miss_slow: list[MissEntry] = []
-        for slot, items in self._skipped_b.items():
-            for it in items:
-                miss_slow.append(MissEntry(
-                    slot=slot, side="val", path=it.path,
-                    note="Phase B 매칭 실패",
-                ))
-        return miss_fast, miss_slow
+        return list(self._matches_a)
 
     def _compute_unmatched_refs(self) -> list[MissEntry]:
         """Stage 2 에서 매칭 못 찾은 기준 사진들 (Skip + No-match).
 
-        교차 검증 모드에서는 Phase A 와 Phase B 양쪽에서 수집된다.
         엑셀에 ‘기준 이미지 + 빨간 파일명’ 행으로 표기되는 정보.
         """
         out: list[MissEntry] = []
@@ -1062,11 +1495,6 @@ class MainWindow(QMainWindow):
             for it in items:
                 out.append(MissEntry(
                     slot=slot, side="ref", path=it.path, note="미매칭",
-                ))
-        for slot, items in self._skipped_b.items():
-            for it in items:
-                out.append(MissEntry(
-                    slot=slot, side="val", path=it.path, note="미매칭",
                 ))
         return out
 
@@ -1079,17 +1507,11 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         self._matches_a.clear()
-        self._matches_b.clear()
         self._skipped_a.clear()
-        self._skipped_b.clear()
-        self._matched_val_keys_in_a.clear()
         self._stage1_a_snapshot = None
-        self._stage1_b_snapshot = None
         self._reviewed_matches.clear()
         self._reviewed_unmatched.clear()
         self._phase = PHASE_NONE
-        # 세션 종료 직후 평가 집계를 갱신해서 모델 카드의 정확도를 새로 반영.
-        self._refresh_models_safe()
         self._show_page(self._setup_page)
 
     # ==================================================================
@@ -1129,7 +1551,6 @@ class MainWindow(QMainWindow):
                     "ref_path": str(m.ref_path),
                     "val_path": str(m.val_path),
                     "score": float(m.score),
-                    "direction": str(m.direction),
                 })
             for slot, items in st2.skipped.items():
                 for it in items:
@@ -1147,18 +1568,17 @@ class MainWindow(QMainWindow):
             threshold=self._input.threshold,
             session_id=self._session_id,
             stage=self._phase or "setup",
-            phase=("B" if self._phase in (PHASE_B_SELECT, PHASE_B_MATCH) else "A"),
+            phase="A",
             decisions=decisions,
             matches=matches_dump,
             skipped=skipped_keys,
             no_match=no_match_keys,
-            phase_a_matched_val_keys=sorted(self._matched_val_keys_in_a),
+            phase_a_matched_val_keys=[],
             phase_a_matches=[{
                 "slot": m.slot,
                 "ref_path": str(m.ref_path),
                 "val_path": str(m.val_path),
                 "score": float(m.score),
-                "direction": str(m.direction),
             } for m in self._matches_a],
         )
         try:
@@ -1190,20 +1610,6 @@ class MainWindow(QMainWindow):
             if pre is not None and pre.isRunning():
                 pre.stop()
                 pre.wait(500)
-        except Exception:
-            pass
-        # 학습 워커도 안전 종료 (#17)
-        try:
-            self._setup_page.stop_training()
-        except Exception:
-            pass
-        # ResultPage 의 자동 재학습 워커도 함께 종료 — 사용자가 검증 도중
-        # 자동 학습이 백그라운드로 시작됐을 수 있음.
-        try:
-            auto = getattr(self._result_page, "_auto_retrain_worker", None)
-            if auto is not None and auto.isRunning():
-                auto.stop()
-                auto.wait(500)
         except Exception:
             pass
         # OpenVINO 설치 워커 정리.
