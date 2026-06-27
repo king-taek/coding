@@ -10,7 +10,8 @@
 import struct
 from pathlib import Path
 
-from aoi_verification.app.coords import abs_coord, camtek_ini, geometry, surface_flt
+from aoi_verification.app.coords import (abs_coord, camtek_ini, geometry,
+                                         pixel_size, surface_flt)
 
 
 # 합성 레코드 레이아웃: 32바이트. geometry 는 float32, zone/recipe 는 uint8.
@@ -118,11 +119,41 @@ def test_geometry_ok(monkeypatch, tmp_path):
     res = geometry.resolve(img)
     assert res.status == "ok"
     g = res.geometry
-    assert round(g.area_um2, 1) == round(55.0 * 0.5929, 1)
+    # 픽셀크기 파일이 없으면 0.77 폴백.
+    assert abs(g.pixel_um - 0.77) < 1e-9
+    assert round(g.area_um2, 1) == round(55.0 * 0.77 * 0.77, 1)
     assert round(g.width_um, 3) == round(2.1823 * 0.77, 3)
     assert round(g.length_um, 3) == round(11.3868 * 0.77, 3)
     assert round(g.contrast) == 108
     assert g.zone == 1 and g.recipe == 2
+
+
+def test_geometry_dynamic_pixel_size(monkeypatch, tmp_path):
+    """결과 폴더에 Params_WaferInfo.ini 가 있으면 그 RefPixelSizeX 로 환산(0.77 아님)."""
+    _install_schema(monkeypatch)
+    pixel_size.scan_pixel_size.cache_clear()
+    _write_flt(tmp_path, _pack_record(
+        actual_x=100.0, actual_y=200.0, area=55.0,
+        blob_breadth=2.0, blob_feret_max=11.0, contrast=5.0, zone=1, recipe=2))
+    (tmp_path / "Params_WaferInfo.ini").write_text(
+        "[Wafer]\nRefPixelSizeX=0.8452004\nRefPixelSizeY=0.8452004\n", encoding="utf-8")
+    img = _write_ini(tmp_path, "x.100.200", 100.0, 200.0)
+    g = geometry.resolve(img).geometry
+    assert abs(g.pixel_um - 0.8452004) < 1e-9
+    assert abs(g.width_um - 2.0 * 0.8452004) < 1e-6
+    assert abs(g.area_um2 - 55.0 * 0.8452004 ** 2) < 1e-4
+
+
+def test_pixel_size_priority(tmp_path):
+    """우선순위: Params_WaferInfo.ini(RefPixelSizeX) > ProductInfo.ini(Scan2DPixelSize)."""
+    pixel_size.scan_pixel_size.cache_clear()
+    (tmp_path / "ProductInfo.ini").write_text("Scan2DPixelSize=0.7708\n", encoding="utf-8")
+    assert abs(pixel_size.scan_pixel_size(tmp_path) - 0.7708) < 1e-9
+    pixel_size.scan_pixel_size.cache_clear()
+    (tmp_path / "Params_WaferInfo.ini").write_text("RefPixelSizeX=0.7707764\n", encoding="utf-8")
+    assert abs(pixel_size.scan_pixel_size(tmp_path) - 0.7707764) < 1e-9  # 우선
+    pixel_size.scan_pixel_size.cache_clear()
+    assert pixel_size.scan_pixel_size(tmp_path / "none") is None  # 없으면 None
 
 
 def test_geometry_no_flt_marker(monkeypatch, tmp_path):

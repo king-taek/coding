@@ -22,8 +22,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from . import abs_coord, surface_flt
-from .models import DefectGeometry, SURFACE_AREA_FACTOR, SURFACE_LEN_FACTOR
+from . import abs_coord, pixel_size, surface_flt
+from .models import DefectGeometry, SURFACE_LEN_FACTOR
 from .surface_flt import RawRecord
 
 __all__ = ["resolve", "GeometryResult", "GEOMETRY_MATCH_TOL"]
@@ -66,13 +66,18 @@ def resolve(image_path: Path) -> GeometryResult:
         rec = _nearest(records, xy, GEOMETRY_MATCH_TOL) if (records and xy) else None
         if rec is None:
             return GeometryResult("no_data", None)
+        # 2D 스캔 픽셀 크기를 결과 폴더에서 읽는다(자재/웨이퍼별로 다름). 없으면 0.77.
+        px = pixel_size.scan_pixel_size(folder)
+        if px is None:
+            px = SURFACE_LEN_FACTOR
         geom = DefectGeometry(
-            area_um2=rec.area * SURFACE_AREA_FACTOR,
-            width_um=rec.blob_breadth * SURFACE_LEN_FACTOR,
-            length_um=rec.blob_feret_max * SURFACE_LEN_FACTOR,
+            area_um2=rec.area * px * px,
+            width_um=rec.blob_breadth * px,
+            length_um=rec.blob_feret_max * px,
             contrast=rec.contrast,
             zone=int(rec.zone),
             recipe=int(rec.recipe),
+            pixel_um=px,
         )
         return GeometryResult("ok", geom)
     except Exception:

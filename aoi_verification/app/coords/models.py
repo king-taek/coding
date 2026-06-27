@@ -25,12 +25,13 @@ class DefectGeometry:
     """Surface.flt 레코드에서 뽑은 결함 핵심 정보(예시 기준 6개 항목).
 
     area/width/length 는 µm 환산값, contrast 는 원값, zone/recipe 는 분류 코드."""
-    area_um2: float     # area(px²) × SURFACE_AREA_FACTOR
-    width_um: float     # BlobBreadth(px) × SURFACE_LEN_FACTOR
-    length_um: float    # BlobFeretMax(px) × SURFACE_LEN_FACTOR
+    area_um2: float     # area(px²) × pixel_um²
+    width_um: float     # BlobBreadth(px) × pixel_um
+    length_um: float    # BlobFeretMax(px) × pixel_um
     contrast: float     # Surface.flt Contrast (그대로)
     zone: int           # Surface.flt zone 코드 (예: 1=PI Opening, 63=Scan Area)
     recipe: int         # Surface.flt recipe 코드
+    pixel_um: float     # 환산에 쓴 2D 스캔 픽셀 크기(µm/px). 결과 폴더에서 읽음(없으면 0.77)
 
 
 # ── TB500 Camtek INI 변환 상수 ────────────────────────────────────────────
