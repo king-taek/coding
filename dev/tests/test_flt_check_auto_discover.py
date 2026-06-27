@@ -107,15 +107,21 @@ def test_crosstab_and_shortlist(tmp_path):
     assert all(s["UI_contrast"] == "" for s in sl)  # UI 칸은 빈칸
 
 
-def test_excel_output(tmp_path):
-    pytest.importorskip("openpyxl")
+def test_markdown_output(tmp_path):
+    """결과물은 단일 .md — 핵심 섹션과 UI 빈칸이 들어있다."""
     wafer = _build_tree(tmp_path)
     rows, schema = [], []
     ad.process_folder(wafer, 5.0, rows, schema, lambda m: None)
-    out = tmp_path / "out.xlsx"
-    ad.write_excel(str(out), [wafer], schema, rows, ["log1"])
-    from openpyxl import load_workbook
-    wb = load_workbook(str(out))
-    for name in ["자동탐색_대상폴더", "폴더_스키마_정합성", "검증결과_전체",
-                 "zone별_contrast", "UI수기확인_shortlist", "요약_결론", "실행로그"]:
-        assert name in wb.sheetnames
+    out = tmp_path / "결과.md"
+
+    class _Args:
+        roots = []
+    ad.write_markdown(str(out), [wafer], schema, rows, ["log1"], _Args())
+    text = out.read_text(encoding="utf-8")
+    for section in ["## 1. 요약", "## 2. zone × recipe", "## 3. UI 수기확인 shortlist",
+                    "## 4. 폴더 스키마 정합성", "## 5. 검증결과", "## 6. 실행 로그"]:
+        assert section in text
+    # zone1(비0)·zone63(0) 둘 다 표에 등장, 매칭 성공/실패 카운트 노출.
+    assert "123.667" in text and "좌표 매칭 성공" in text
+    # UI 칸은 빈칸 — shortlist 헤더에 UI_contrast 가 있고 값은 자동 채우지 않음.
+    assert "UI_contrast" in text

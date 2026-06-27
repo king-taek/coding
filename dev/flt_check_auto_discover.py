@@ -29,12 +29,9 @@
 from __future__ import annotations
 
 import argparse
-import csv
 import math
-import os
 import re
 import struct
-import sys
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -288,64 +285,79 @@ def ui_shortlist(rows, per_bucket=3):
     return out
 
 
-# ── 출력 ──────────────────────────────────────────────────────────────────
-RESULT_COLS = ["folder", "folder_path", "image_stem", "record_index", "recipe",
-               "ini_recipe", "recipe_match", "zone", "col", "row", "match_dist_um",
-               "area_raw_px2", "width_raw_px", "length_raw_px",
-               "area_um2", "width_um", "length_um", "contrast", "note",
-               "ui_area", "ui_width", "ui_length", "ui_contrast",
-               "ui_zone", "ui_recipe", "ui_match", "ui_note"]
+# ── 출력 — 단일 마크다운(.md) ─────────────────────────────────────────────
+RESULT_COLS = ["folder", "image_stem", "record_index", "recipe", "ini_recipe",
+               "recipe_match", "zone", "match_dist_um", "area_um2", "width_um",
+               "length_um", "contrast", "note"]
+_FULL_LIMIT = 300   # 검증결과_전체 표에 적을 최대 행(초과분은 건수만 안내)
 
 
-def write_excel(out, found, schema_rows, rows, logs):
-    from openpyxl import Workbook
-    wb = Workbook()
-    wb.remove(wb.active)
+def _md_table(headers, dict_rows, limit=None):
+    out = ["| " + " | ".join(str(h) for h in headers) + " |",
+           "| " + " | ".join("---" for _ in headers) + " |"]
+    shown = dict_rows if limit is None else dict_rows[:limit]
+    for d in shown:
+        out.append("| " + " | ".join(str(d.get(h, "")) for h in headers) + " |")
+    if limit is not None and len(dict_rows) > limit:
+        out.append(f"| … | 총 {len(dict_rows)}행 중 상위 {limit}행만 표시 |"
+                   + " |" * (len(headers) - 2))
+    return "\n".join(out)
 
-    def sheet(name, headers, dicts):
-        ws = wb.create_sheet(title=name[:31])
-        ws.append(headers)
-        for d in dicts:
-            ws.append([d.get(h, "") for h in headers])
 
-    sheet("자동탐색_대상폴더", ["folder_path"], [{"folder_path": str(f)} for f in found])
-    sheet("폴더_스키마_정합성",
-          ["folder_path", "surface_flt_size", "size_mod_152", "framed_ok",
-           "records", "ini_entries", "ini_exists", "판단"], schema_rows)
-    sheet("검증결과_전체", RESULT_COLS, rows)
-    sheet("zone별_contrast",
-          ["zone", "recipe", "총개수", "contrast==0", "contrast!=0", "0비율%"],
-          zone_recipe_crosstab(rows))
-    sheet("UI수기확인_shortlist",
-          ["버킷", "folder", "image_stem", "추출_area", "추출_width", "추출_length",
-           "추출_contrast", "추출_zone", "추출_recipe", "UI_area", "UI_width",
-           "UI_length", "UI_contrast", "UI_zone명", "일치?"], ui_shortlist(rows))
+def write_markdown(out, found, schema_rows, rows, logs, args):
     matched = [r for r in rows if r["record_index"] != ""]
     failed = [r for r in rows if r["record_index"] == "" and "매칭실패" in r["note"]]
     aux = [r for r in failed if "aux" in r["note"]]
-    summary = [
+    framed_ok = sum(1 for s in schema_rows if s["framed_ok"])
+    dists = [r["match_dist_um"] for r in matched if r["match_dist_um"] != ""]
+
+    L = []
+    L.append("# AOI Surface.flt geometry vs UI — 자동탐색 검증 결과\n")
+    L.append("> 이 파일은 `flt_check_auto_discover.py` 가 생성한 단일 보고서입니다. "
+             "아래 **UI수기확인 shortlist** 의 `UI_*` 칸을 AOI UI 보고 채운 뒤, 이 .md 를 "
+             "그대로 복사해 전달하세요.\n")
+
+    L.append("## 1. 요약")
+    L.append(_md_table(["항목", "값"], [
+        {"항목": "탐색 root 수", "값": len(args.roots) or len(DEFAULT_ROOTS)},
         {"항목": "Surface.flt 폴더 수", "값": len(found)},
+        {"항목": "스키마 정합(framed_ok)", "값": f"{framed_ok}/{len(schema_rows)}"},
         {"항목": "전체 결과 row", "값": len(rows)},
         {"항목": "좌표 매칭 성공", "값": len(matched)},
         {"항목": "매칭 실패(합계)", "값": len(failed)},
         {"항목": "  └ aux/revisit 후보(ini>records)", "값": len(aux)},
         {"항목": "  └ 타 die(nearest>tol)", "값": len(failed) - len(aux)},
-        {"항목": "주의", "값": "ui_* 는 빈칸 — 사람이 AOI UI 보고 직접 채울 것"},
-    ]
-    sheet("요약_결론", ["항목", "값"], summary)
-    sheet("실행로그", ["log"], [{"log": l} for l in logs])
-    wb.save(out)
+        {"항목": "매칭거리 min/max µm",
+         "값": (f"{min(dists):.1f} / {max(dists):.1f}" if dists else "-")},
+    ]))
+    L.append("\n> 주의: `UI_*` 열은 비어 있습니다(자동 채움 금지). 사람이 AOI UI 를 보고 직접 입력하세요.\n")
+
+    L.append("## 2. zone × recipe 별 contrast 분포")
+    L.append("contrast=0 이 zone 때문인지 recipe/제품 때문인지 본다.\n")
+    L.append(_md_table(["zone", "recipe", "총개수", "contrast==0", "contrast!=0", "0비율%"],
+                       zone_recipe_crosstab(rows)))
+
+    L.append("\n## 3. UI 수기확인 shortlist  ← 여기 UI 칸을 채우세요")
+    L.append("각 결함을 AOI UI 에서 열어 UI 값을 적는다. 특히 **추출 contrast=0 인 결함을 "
+             "UI 도 0/공란으로 보여주는지** 확인.\n")
+    L.append(_md_table(
+        ["버킷", "image_stem", "추출_area", "추출_width", "추출_length", "추출_contrast",
+         "추출_zone", "추출_recipe", "UI_area", "UI_width", "UI_length", "UI_contrast",
+         "UI_zone명", "일치?"], ui_shortlist(rows)))
+
+    L.append("\n## 4. 폴더 스키마 정합성")
+    L.append(_md_table(
+        ["folder_path", "surface_flt_size", "size_mod_152", "framed_ok",
+         "records", "ini_entries", "판단"], schema_rows, limit=100))
+
+    L.append("\n## 5. 검증결과 (전체 일부)")
+    L.append(_md_table(RESULT_COLS, rows, limit=_FULL_LIMIT))
+
+    L.append("\n## 6. 실행 로그")
+    L.append("```\n" + "\n".join(logs) + "\n```")
+
+    Path(out).write_text("\n".join(L) + "\n", encoding="utf-8")
     return out
-
-
-def write_csv(out_base, rows, logs):
-    csv_path = out_base + ".csv"
-    with open(csv_path, "w", newline="", encoding="utf-8-sig") as f:
-        w = csv.DictWriter(f, fieldnames=RESULT_COLS)
-        w.writeheader()
-        for r in rows:
-            w.writerow({k: r.get(k, "") for k in RESULT_COLS})
-    return csv_path
 
 
 # ── main ──────────────────────────────────────────────────────────────────
@@ -360,7 +372,7 @@ def main(argv=None):
     ap.add_argument("--deep", action="store_true", help="레벨·breadth 제한 해제")
     ap.add_argument("--timeout", type=float, default=1200.0)
     ap.add_argument("--tol", type=float, default=5.0)
-    ap.add_argument("--out", default="AOI_Surface_UI_검증.xlsx")
+    ap.add_argument("--out", default="AOI_검증결과.md", help="단일 마크다운 출력 경로")
     args = ap.parse_args(argv)
 
     logs = []
@@ -397,14 +409,9 @@ def main(argv=None):
         except Exception as e:  # noqa: BLE001
             log(f"[ERROR] {folder}: {e}")
 
-    try:
-        import openpyxl  # noqa: F401
-        path = write_excel(args.out, found, schema_rows, rows, logs)
-        print(f"\n[OUT] Excel 저장: {path}")
-    except ImportError:
-        path = write_csv(os.path.splitext(args.out)[0], rows, logs)
-        print(f"\n[OUT] openpyxl 없음 → CSV 저장: {path}")
-        print("      (전체 시트가 필요하면 pip install openpyxl 후 재실행)")
+    out = args.out if args.out.lower().endswith(".md") else args.out + ".md"
+    path = write_markdown(out, found, schema_rows, rows, logs, args)
+    print(f"\n[OUT] 단일 마크다운 저장: {path}")
 
     # 콘솔 요약
     matched = sum(1 for r in rows if r["record_index"] != "")
