@@ -477,11 +477,15 @@ class ExcelExporter(QThread):
             grey = InlineFont(sz=8, color="FF808080")
             if res.status == "ok" and res.geometry is not None:
                 g = res.geometry
+                # contrast 는 일부 자재(예: PI)만 측정 — 대부분 0 이다. 0 이면 '측정
+                # 안 함'을 뜻하므로 '—' 로 표기(0.00 으로 오해 방지).
+                contrast_txt = ("contrast —" if g.contrast == 0
+                                else f"contrast {g.contrast:.2f}")
                 return [
                     TextBlock(grey, f"\narea {g.area_um2:.1f} ㎛²"),
                     TextBlock(grey, f"\nwidth {g.width_um:.2f} ㎛"),
                     TextBlock(grey, f"\nlength {g.length_um:.2f} ㎛"),
-                    TextBlock(grey, f"\ncontrast {g.contrast:.2f}"),
+                    TextBlock(grey, f"\n{contrast_txt}"),
                     TextBlock(grey, f"\nzone {g.zone} / recipe {g.recipe}"),
                 ]
             if res.status == "no_flt":

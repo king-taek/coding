@@ -227,6 +227,34 @@ def test_unmatched_geometry_rendered(qapp, isolated_cache, tmp_path, monkeypatch
     assert "z_miss.jpeg" in d3
     assert "area" in d3 and "contrast" in d3
     assert "zone" in d3 and "recipe" in d3
+    # contrast 108 (비0) → 값이 그대로, '—' 아님.
+    assert "108" in d3 and "contrast —" not in d3
+
+
+def test_unmatched_geometry_contrast_zero_dash(qapp, isolated_cache, tmp_path,
+                                               monkeypatch):
+    """contrast=0(대부분 자재) → 'contrast —' 로 표기(0.00 아님)."""
+    _install_flt_schema(monkeypatch)
+    src = tmp_path / "src"
+    src.mkdir()
+    ref = _make_image(src, "a_ref.jpeg")
+    val = _make_image(src, "a_val.jpeg")
+    miss = _make_image(src, "z_miss.jpeg")
+    _write_flt_record(src, 1000.0, 2000.0, 55.0, 2.0, 11.0, 0.0, zone=63)
+    (src / "ColorImageGrabingInfo.ini").write_text(
+        "[z_miss.jpeg]\nX=1000.0\nY=2000.0\nCol=3\nRow=5\n", encoding="utf-8")
+    result = FinalResult(
+        mode="single", ref_machine="1호기", val_machine="2호기",
+        matches=[MatchResult(slot="S1", ref_path=ref, val_path=val, score=0.9)],
+        unmatched_refs=[MissEntry(slot="S1", side="ref", path=miss, note="미매칭")],
+    )
+    dst = tmp_path / "out.xlsx"
+    ExcelExporter(result, dst_path=dst,
+                  template_path=tmp_path / "no_template.xlsx").run()
+    from aoi_verification.app import i18n
+    from openpyxl import load_workbook
+    d3 = str(load_workbook(str(dst), rich_text=True)[i18n.KO.SHEET_UNMATCHED]["D3"].value)
+    assert "contrast —" in d3 and "contrast 0.00" not in d3
 
 
 def test_unmatched_no_flt_marker(qapp, isolated_cache, tmp_path, monkeypatch):
