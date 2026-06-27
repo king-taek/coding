@@ -537,20 +537,29 @@ def write_markdown(out, found, schema_rows, rows, logs, args, ctx=None):
              "0.17/0.46)와 다르므로 별도(검사) 픽셀일 가능성. 폴더 트리의 텍스트·바이너리에서 "
              "`0.77`/`0.5929`/INI PixelSize 와 일치하는 값을 찾은 결과:\n")
     hits = ctx.get("pixel_hits", [])
-    if hits:
-        agg = defaultdict(lambda: [0, None])
+
+    def _agg(sel):
+        agg = defaultdict(int)
         for h in hits:
-            k = (h["file"], h["where"], h["match"], h["value"])
-            agg[k][0] += 1
-        rows_h = [{"file": f, "where": w, "match": m, "value": v, "건수": c}
-                  for (f, w, m, v), (c, _) in
-                  sorted(agg.items(), key=lambda kv: -kv[1][0])]
-        L.append(_md_table(["file", "where", "match", "value", "건수"], rows_h, limit=60))
-        L.append("\n> 위에서 `match=len_factor_0.77` 이 특정 파일/필드에 일관되게(건수 多) 있으면 "
-                 "그게 0.77 의 출처다. 앱이 거기서 동적으로 읽도록 후속 작업.")
+            if sel(h["match"]):
+                agg[(h["file"], h["where"], h["match"], h["value"])] += 1
+        return [{"file": f, "where": w, "match": m, "value": v, "건수": c}
+                for (f, w, m, v), c in sorted(agg.items(), key=lambda kv: -kv[1])]
+
+    factor_rows = _agg(lambda m: m in ("len_factor_0.77", "area_factor_0.5929"))
+    px_rows = _agg(lambda m: m.startswith("ini_pixelsize"))
+
+    L.append("**(1) 0.77 / 0.5929 직접 일치** — 이게 비어 있으면 그 값이 폴더 트리에 그대로는 없음:")
+    if factor_rows:
+        L.append(_md_table(["file", "where", "match", "value", "건수"], factor_rows))
+        L.append("\n> ★ 위 파일/필드가 0.77 의 출처다. 앱이 거기서 동적으로 읽도록 후속 작업.")
     else:
-        L.append("> (스캔 범위에서 0.77/0.5929 와 일치하는 값을 못 찾음 — `--deep` 또는 상위 "
-                 "recipe/setup 폴더까지 확대 필요. 0.77 은 색상 INI 가 아닌 검사 recipe 에 있을 것.)")
+        L.append("> **없음.** 0.77 은 (a) 검사 recipe 가 색다른 확장자/바이너리라 이 스캔이 못 봤거나, "
+                 "(b) 반올림 전 비슷한 값(0.7698 등)이거나, (c) 계산값이다. → **`dump_lot_files.py` 를 "
+                 "인자 없이 실행**해 PI LOT 의 모든 파일을 통째로 덤프하고 `LOT_파일덤프.md` 의 "
+                 "'0.77 근처 값 요약' 을 확인할 것.")
+    L.append("\n**(2) 참고: INI PixelSize 일치(0.46류)** — 0.77 아님:")
+    L.append(_md_table(["file", "where", "match", "value", "건수"], px_rows, limit=20))
 
     # ── 5. 확장 필드 덤프 ────────────────────────────────────────────────
     L.append(f"\n## 5. Surface.flt 레코드 전체 필드 덤프 (샘플: "
