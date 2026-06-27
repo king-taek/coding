@@ -479,8 +479,9 @@ class ExcelExporter(QThread):
                 g = res.geometry
                 return [
                     TextBlock(grey, f"\narea {g.area_um2:.1f} ㎛²"),
-                    TextBlock(grey, f"\nW {g.width_um:.2f} / L {g.length_um:.2f} ㎛"),
-                    TextBlock(grey, f"\ncontrast {g.contrast:.0f}"),
+                    TextBlock(grey, f"\nwidth {g.width_um:.2f} ㎛"),
+                    TextBlock(grey, f"\nlength {g.length_um:.2f} ㎛"),
+                    TextBlock(grey, f"\ncontrast {g.contrast:.2f}"),
                 ]
             if res.status == "no_flt":
                 return [TextBlock(grey, f"\n{i18n.KO.GEOM_NOT_SUPPORTED}")]
