@@ -112,6 +112,45 @@ def test_manual_check_unknown_on_network_fail(tmp_path, monkeypatch):
     assert status == "unknown" and "error" in info
 
 
+# ---------------------------------------------------------------------------
+# 레거시 브랜치 정규화 — 옛 빌드(VERSION branch=claude/…)도 main 으로 합류
+# ---------------------------------------------------------------------------
+def test_resolve_branch_normalizes_legacy_to_main():
+    assert updater._resolve_branch("claude/matching-npu-gpu-modes-GwTRB") == "main"
+    assert updater._resolve_branch("") == "main"
+    assert updater._resolve_branch(None) == "main"
+    assert updater._resolve_branch("main") == "main"
+    assert updater._resolve_branch("release") == "release"
+    assert updater.DEFAULT_BRANCH == "main"
+
+
+def test_check_migrates_legacy_version_branch_to_main(tmp_path, monkeypatch):
+    # 과거 포터블 빌드(VERSION 에 작업 브랜치 스탬프) 는 main 을 추적해야 한다.
+    _write_version(tmp_path, monkeypatch,
+                   {"sha": "OLD", "branch": "claude/matching-npu-gpu-modes-GwTRB",
+                    "repo": "o/r"})
+    seen = {}
+
+    def _latest(repo, branch):
+        seen["branch"] = branch
+        return {"sha": "NEW", "message": "fix"}
+
+    monkeypatch.setattr(updater, "latest_commit", _latest)
+    info = updater.check_for_update()
+    assert info and info["sha"] == "NEW"
+    assert info["branch"] == "main"          # 반환값도 main 으로 정규화
+    assert seen["branch"] == "main"          # 원격 조회도 main 으로 수행
+
+
+def test_manual_check_migrates_legacy_version_branch_to_main(tmp_path, monkeypatch):
+    _write_version(tmp_path, monkeypatch,
+                   {"sha": "OLD", "branch": "claude/anything", "repo": "o/r"})
+    monkeypatch.setattr(updater, "latest_commit",
+                        lambda r, b: {"sha": "NEW", "message": "fix"})
+    status, info = updater.manual_check()
+    assert status == "update" and info["branch"] == "main"
+
+
 def test_latest_commit_atom_fallback(monkeypatch):
     """api.github.com 실패 시 github.com Atom 피드로 SHA 를 읽어 폴백."""
     sha = "a" * 40
