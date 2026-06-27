@@ -417,28 +417,38 @@ def zone_recipe_crosstab(rows):
     return out
 
 
-def ui_shortlist(rows, per_bucket=3):
-    """recipe2-zone1 / recipe(기타)-zone1 / zone63 버킷에서 2~3건씩 선별."""
-    buckets = {"recipe2 zone1": [], "기타recipe zone1": [], "zone63": []}
-    for r in rows:
-        if r["record_index"] == "" or r["zone"] == "":
-            continue
-        z, rc = str(r["zone"]), str(r["recipe"])
-        if z == "1" and rc == "2":
-            b = "recipe2 zone1"
-        elif z == "1":
-            b = "기타recipe zone1"
-        elif z == "63":
-            b = "zone63"
-        else:
-            continue
-        if len(buckets[b]) < per_bucket:
-            buckets[b].append(r)
+def ui_shortlist(rows, per_group=5):
+    """UI 교차확인용 선별 — 두 그룹으로 나눠 **비0/0 둘 다** 포함한다.
+
+      ① contrast≠0 (값검증): UI 의 contrast 가 추출값과 같은지 확인.
+      ② contrast=0 (공란검증): UI 도 contrast 를 0/공란으로 보여주는지 확인.
+    각 그룹은 (zone,recipe) 가 겹치지 않게 다양화해 N개씩 뽑는다."""
+    def pick(pred):
+        seen, out = set(), []
+        for r in rows:
+            if r["record_index"] == "" or r["zone"] == "":
+                continue
+            try:
+                c = float(r["contrast"] or 0)
+            except (TypeError, ValueError):
+                continue
+            if not pred(c):
+                continue
+            key = (r["zone"], r["recipe"])
+            if key in seen:
+                continue          # (zone,recipe) 다양화 우선
+            seen.add(key)
+            out.append(r)
+            if len(out) >= per_group:
+                break
+        return out
+
     out = []
-    for b, items in buckets.items():
+    for label, items in (("contrast≠0 (값검증)", pick(lambda c: c != 0)),
+                         ("contrast=0 (공란검증)", pick(lambda c: c == 0))):
         for r in items:
             out.append({
-                "버킷": b, "folder": r["folder"], "image_stem": r["image_stem"],
+                "그룹": label, "folder": r["folder"], "image_stem": r["image_stem"],
                 "추출_area": r["area_um2"], "추출_width": r["width_um"],
                 "추출_length": r["length_um"], "추출_contrast": r["contrast"],
                 "추출_zone": r["zone"], "추출_recipe": r["recipe"],
@@ -517,7 +527,7 @@ def write_markdown(out, found, schema_rows, rows, logs, args, ctx=None):
     L.append("각 결함을 AOI UI 에서 열어 UI 값을 적는다. 특히 **추출 contrast=0 인 결함을 "
              "UI 도 0/공란으로 보여주는지** 확인.\n")
     L.append(_md_table(
-        ["버킷", "image_stem", "추출_area", "추출_width", "추출_length", "추출_contrast",
+        ["그룹", "image_stem", "추출_area", "추출_width", "추출_length", "추출_contrast",
          "추출_zone", "추출_recipe", "UI_area", "UI_width", "UI_length", "UI_contrast",
          "UI_zone명", "일치?"], ui_shortlist(rows)))
 

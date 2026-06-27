@@ -103,8 +103,12 @@ def test_crosstab_and_shortlist(tmp_path):
     keys = {(c["zone"], c["recipe"]) for c in ct}
     assert (1, 2) in keys and (63, 2) in keys
     sl = ad.ui_shortlist(rows)
-    assert any(s["추출_zone"] == 1 for s in sl)
     assert all(s["UI_contrast"] == "" for s in sl)  # UI 칸은 빈칸
+    groups = {s["그룹"] for s in sl}
+    # 합성 트리: zone1(contrast 123.667) + zone63(contrast 0) → 두 그룹 다 등장.
+    assert "contrast≠0 (값검증)" in groups and "contrast=0 (공란검증)" in groups
+    nz = next(s for s in sl if s["그룹"] == "contrast≠0 (값검증)")
+    assert float(nz["추출_contrast"]) != 0
 
 
 def test_markdown_output(tmp_path):
