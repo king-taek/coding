@@ -432,10 +432,22 @@ class ExcelExporter(QThread):
                                         cell_w_px, cell_h_px)
                 except Exception:
                     ws[f"{COL_REF}{row}"] = str(Path(u.path).name)
-                # 검증 컬럼에 파일명 텍스트 (빨강).
+                # 검증 컬럼에 파일명 텍스트 (빨강).  결함 geometry(area/width/
+                # length/contrast) 또는 명시적 마커를 파일명 아래 회색으로 덧붙인다
+                # (#geometry).  geometry 비활성(스키마 미충전) 이면 기존과 동일.
                 cell_val = ws[f"{COL_VAL}{row}"]
-                cell_val.value = Path(u.path).name
-                cell_val.font = red_font
+                name = Path(u.path).name
+                blocks = self._geometry_blocks(u.path)
+                if blocks:
+                    from openpyxl.cell.rich_text import CellRichText, TextBlock
+                    from openpyxl.cell.text import InlineFont
+                    red_inline = InlineFont(b=True, color="FFFF2D55")
+                    cell_val.value = CellRichText(
+                        TextBlock(red_inline, name), *blocks,
+                    )
+                else:
+                    cell_val.value = name
+                    cell_val.font = red_font
                 cell_val.alignment = Alignment(
                     horizontal="center", vertical="center", wrap_text=True,
                 )
@@ -443,6 +455,40 @@ class ExcelExporter(QThread):
                 self.signals.progress.emit(idx, total, u.slot)
 
             row += 1
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _geometry_blocks(path) -> list:
+        """미매칭 행 D열 파일명 아래에 덧붙일 회색 TextBlock 목록.
+
+        Surface.flt 에서 결함 geometry 를 환산해 area/width/length/contrast 를
+        표기하고, 값을 못 얻으면 '명시적 마커'(미지원 자재 / 데이터 없음)를 넣는다.
+        geometry 비활성(스키마 미충전, status="disabled") 이면 빈 목록 → 호출부가
+        기존과 동일하게 plain 파일명을 쓴다.  best-effort — 절대 raise 안 함.
+        """
+        try:
+            from ..coords import geometry
+            from openpyxl.cell.rich_text import TextBlock
+            from openpyxl.cell.text import InlineFont
+
+            res = geometry.resolve(Path(path))
+            if res.status == "disabled":
+                return []
+            grey = InlineFont(sz=8, color="FF808080")
+            if res.status == "ok" and res.geometry is not None:
+                g = res.geometry
+                return [
+                    TextBlock(grey, f"\narea {g.area_um2:.1f} ㎛²"),
+                    TextBlock(grey, f"\nW {g.width_um:.2f} / L {g.length_um:.2f} ㎛"),
+                    TextBlock(grey, f"\ncontrast {g.contrast:.0f}"),
+                ]
+            if res.status == "no_flt":
+                return [TextBlock(grey, f"\n{i18n.KO.GEOM_NOT_SUPPORTED}")]
+            # "no_data" (Surface.flt 는 있으나 매칭 실패)
+            return [TextBlock(grey, f"\n{i18n.KO.GEOM_NO_DATA}")]
+        except Exception:
+            # rich_text 미지원 openpyxl 등 — 마커 없이 기존 동작으로 폴백.
+            return []
 
     # ------------------------------------------------------------------
     def _write_slot_mismatch_sheet(self, wb) -> None:

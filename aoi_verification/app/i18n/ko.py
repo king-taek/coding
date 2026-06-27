@@ -475,6 +475,10 @@ EXPORT_TEMPLATE_NOT_FOUND = (
 )
 SLOT_MISMATCH_SHEET = "Slot 불일치 목록"
 SHEET_UNMATCHED = "미매칭 사진"
+# 미매칭 행 D열 — 결함 geometry(area/width/length/contrast) 표기.  Surface.flt 에서
+# 환산해 파일명 아래 회색 글씨로 덧붙인다.  값을 못 얻을 때의 명시적 마커:
+GEOM_NOT_SUPPORTED = "측정정보 미지원 자재"   # Surface.flt 자체가 없는 자재(예: KLA)
+GEOM_NO_DATA = "측정정보 없음"               # Surface.flt 는 있으나 매칭 실패
 # 결과 화면 — 전체 양식(E~H 수기 영역) 포함 옵션 (기본 해제, #3).
 EXPORT_FULL_TEMPLATE_LABEL = "전체 양식(E~H 수기 영역) 포함"
 EXPORT_FULL_TEMPLATE_TOOLTIP = (

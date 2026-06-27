@@ -17,7 +17,7 @@ from typing import Optional
 from .models import (DefectCoord, CAMTEK_COL_OFFSET, CAMTEK_ROW_TOTAL,
                      CAMTEK_PITCH_X, CAMTEK_PITCH_Y)
 
-__all__ = ["resolve", "load_folder"]
+__all__ = ["resolve", "load_folder", "load_abs_folder"]
 
 # INI 파일 이름 후보 — 대소문자 두 가지
 _INI_CANDIDATES = ("ColorImageGrabingInfo.ini", "ColorImageGrabinginfo.ini")
@@ -99,3 +99,49 @@ def resolve(image_path: Path) -> Optional[DefectCoord]:
     """이미지 1장 → DefectCoord. INI 가 없거나 섹션이 없으면 None."""
     coords = load_folder(image_path.parent)
     return coords.get(image_path.stem.lower())
+
+
+# ── 절대 좌표(원시 X/Y) — Surface.flt 매칭용 ──────────────────────────────
+# 변환된 DefectCoord 와 달리, Surface.flt 의 ActualX/ActualY 와 직접 비교할
+# **원시 절대 wafer 좌표** 를 그대로 보존한다.  기존 resolve/_parse_ini 경로는
+# 손대지 않고, 같은 섹션 분리를 재사용해 X/Y(또는 FaultX/FaultY)만 뽑아 캐시한다.
+
+@lru_cache(maxsize=256)
+def load_abs_folder(folder: Path) -> dict[str, tuple[float, float]]:
+    """폴더의 INI → {stem(소문자) → (절대 X, 절대 Y)}.  없으면 빈 dict."""
+    ini = _find_ini(folder)
+    if ini is None:
+        return {}
+    try:
+        text = ini.read_text(encoding="utf-8", errors="replace")
+        parts = _SECTION_PAT.split(text)
+        result: dict[str, tuple[float, float]] = {}
+        it = iter(parts[1:])
+        for name, content in zip(it, it):
+            stem = Path(name.strip()).stem
+            xy = _extract_abs(content)
+            if xy is not None:
+                result[stem.lower()] = xy
+        return result
+    except Exception:
+        return {}
+
+
+def _extract_abs(content: str) -> Optional[tuple[float, float]]:
+    """INI 섹션 내용 → (절대 X, 절대 Y).  X/Y(또는 FaultX/FaultY) 없으면 None."""
+    kv: dict[str, str] = {}
+    for m in _KEY_PAT.finditer(content):
+        kv[m.group(1).upper()] = m.group(2).strip()
+
+    def fget(key: str) -> Optional[float]:
+        v = kv.get(key)
+        try:
+            return float(v) if v is not None else None
+        except ValueError:
+            return None
+
+    X = fget("X") if fget("X") is not None else fget("FAULTX")
+    Y = fget("Y") if fget("Y") is not None else fget("FAULTY")
+    if X is None or Y is None:
+        return None
+    return (X, Y)

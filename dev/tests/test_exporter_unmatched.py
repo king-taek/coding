@@ -172,6 +172,85 @@ def test_export_unmatched_sheet(qapp, isolated_cache, tmp_path):
     assert um["D3"].value == "miss.jpeg"
 
 
+def _install_flt_schema(monkeypatch):
+    """exporter 테스트용 — surface_flt 에 합성 스키마(32B float32) 설치."""
+    from aoi_verification.app.coords import surface_flt, camtek_ini
+    fields = {"actual_x": (0, "f"), "actual_y": (4, "f"), "area": (8, "f"),
+              "blob_breadth": (12, "f"), "blob_feret_max": (16, "f"),
+              "contrast": (20, "f")}
+    monkeypatch.setattr(surface_flt, "_FIELDS", dict(fields))
+    monkeypatch.setattr(surface_flt, "_RECORD_SIZE", 32)
+    monkeypatch.setattr(surface_flt, "_HEADER_BYTES", 0)
+    monkeypatch.setattr(surface_flt, "_SCHEMA_READY", True)
+    surface_flt.load_folder.cache_clear()
+    camtek_ini.load_abs_folder.cache_clear()
+
+
+def _write_flt_record(folder: Path, x, y, area, breadth, feret, contrast):
+    import struct
+    buf = bytearray(32)
+    for off, v in ((0, x), (4, y), (8, area), (12, breadth),
+                   (16, feret), (20, contrast)):
+        struct.pack_into("<f", buf, off, float(v))
+    (folder / "Surface.flt").write_bytes(bytes(buf))
+
+
+def test_unmatched_geometry_rendered(qapp, isolated_cache, tmp_path, monkeypatch):
+    """Surface.flt + 좌표 일치 → 미매칭 D셀에 geometry(area/contrast) 표기."""
+    _install_flt_schema(monkeypatch)
+    src = tmp_path / "src"
+    src.mkdir()
+    ref = _make_image(src, "a_ref.jpeg")
+    val = _make_image(src, "a_val.jpeg")
+    miss = _make_image(src, "z_miss.jpeg")
+    _write_flt_record(src, 1000.0, 2000.0, 55.0, 2.0, 11.0, 108.0)
+    (src / "ColorImageGrabingInfo.ini").write_text(
+        "[z_miss.jpeg]\nX=1000.0\nY=2000.0\nCol=3\nRow=5\n", encoding="utf-8")
+
+    result = FinalResult(
+        mode="single", ref_machine="1호기", val_machine="2호기",
+        matches=[MatchResult(slot="S1", ref_path=ref, val_path=val, score=0.9)],
+        unmatched_refs=[MissEntry(slot="S1", side="ref", path=miss, note="미매칭")],
+    )
+    dst = tmp_path / "out.xlsx"
+    no_tpl = tmp_path / "no_template.xlsx"
+    ExcelExporter(result, dst_path=dst, template_path=no_tpl).run()
+
+    from aoi_verification.app import i18n
+    from openpyxl import load_workbook
+    # 미매칭 사진 시트에는 미매칭 행만 — z_miss 가 첫 데이터 행(row3).
+    ws = load_workbook(str(dst), rich_text=True)[i18n.KO.SHEET_UNMATCHED]
+    d3 = str(ws["D3"].value)
+    assert "z_miss.jpeg" in d3
+    assert "area" in d3 and "contrast" in d3
+
+
+def test_unmatched_no_flt_marker(qapp, isolated_cache, tmp_path, monkeypatch):
+    """스키마는 켜졌지만 Surface.flt 가 없으면 '미지원 자재' 마커가 붙는다."""
+    from aoi_verification.app import i18n
+    _install_flt_schema(monkeypatch)
+    src = tmp_path / "src"
+    src.mkdir()
+    ref = _make_image(src, "a_ref.jpeg")
+    val = _make_image(src, "a_val.jpeg")
+    miss = _make_image(src, "z_miss.jpeg")  # Surface.flt 없음
+
+    result = FinalResult(
+        mode="single", ref_machine="1호기", val_machine="2호기",
+        matches=[MatchResult(slot="S1", ref_path=ref, val_path=val, score=0.9)],
+        unmatched_refs=[MissEntry(slot="S1", side="ref", path=miss, note="미매칭")],
+    )
+    dst = tmp_path / "out.xlsx"
+    no_tpl = tmp_path / "no_template.xlsx"
+    ExcelExporter(result, dst_path=dst, template_path=no_tpl).run()
+
+    from openpyxl import load_workbook
+    ws = load_workbook(str(dst), rich_text=True)[i18n.KO.SHEET_UNMATCHED]
+    d3 = str(ws["D3"].value)
+    assert "z_miss.jpeg" in d3
+    assert i18n.KO.GEOM_NOT_SUPPORTED in d3
+
+
 def test_machine_label_rule():
     """호기 라벨 규칙: 숫자/N호기 → AOI-N, 그 외 문자 포함 → AOI(원본)."""
     from aoi_verification.app.workers.exporter import _machine_label
