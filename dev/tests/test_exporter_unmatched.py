@@ -173,11 +173,11 @@ def test_export_unmatched_sheet(qapp, isolated_cache, tmp_path):
 
 
 def _install_flt_schema(monkeypatch):
-    """exporter 테스트용 — surface_flt 에 합성 스키마(32B float32) 설치."""
+    """exporter 테스트용 — surface_flt 에 합성 스키마(32B) 설치(zone/recipe 포함)."""
     from aoi_verification.app.coords import surface_flt, camtek_ini
     fields = {"actual_x": (0, "f"), "actual_y": (4, "f"), "area": (8, "f"),
               "blob_breadth": (12, "f"), "blob_feret_max": (16, "f"),
-              "contrast": (20, "f")}
+              "contrast": (20, "f"), "zone": (24, "B"), "recipe": (25, "B")}
     monkeypatch.setattr(surface_flt, "_FIELDS", dict(fields))
     monkeypatch.setattr(surface_flt, "_RECORD_SIZE", 32)
     monkeypatch.setattr(surface_flt, "_HEADER_BYTES", 0)
@@ -186,12 +186,15 @@ def _install_flt_schema(monkeypatch):
     camtek_ini.load_abs_folder.cache_clear()
 
 
-def _write_flt_record(folder: Path, x, y, area, breadth, feret, contrast):
+def _write_flt_record(folder: Path, x, y, area, breadth, feret, contrast,
+                      zone=1, recipe=2):
     import struct
     buf = bytearray(32)
     for off, v in ((0, x), (4, y), (8, area), (12, breadth),
                    (16, feret), (20, contrast)):
         struct.pack_into("<f", buf, off, float(v))
+    struct.pack_into("<B", buf, 24, int(zone))
+    struct.pack_into("<B", buf, 25, int(recipe))
     (folder / "Surface.flt").write_bytes(bytes(buf))
 
 

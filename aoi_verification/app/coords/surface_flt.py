@@ -9,12 +9,14 @@ Contrast)를 읽어 :class:`geometry.resolve` 가 이미지 좌표와 nearest-ma
 HEX + 디코딩 정답값 동봉)을 brute-force 해 확정했다.  레이아웃은 ``_FIELDS`` 한 곳에
 격리한다 — 장비/포맷이 바뀌면 여기만 고치면 된다.
 
-확정 결과(레코드 시작 0, 152byte 보폭, 헤더 없음, little-endian float64 ``<d``):
-    actual_x=24, actual_y=32, area=80, blob_breadth=88, blob_feret_max=104,
-    contrast=136
+확정 결과(레코드 시작 0, 152byte 보폭, 헤더 없음):
+    float64(``<d``): actual_x=24, actual_y=32, area=80, blob_breadth=88,
+                     blob_feret_max=104, contrast=136
+    uint8 (``<B``): zone=61, recipe=62
   · actual_x 는 offset 8 에도 거의 같은 값이 있으나 84건 중 1건에서 어긋나므로 24 가
     정본(문서 "Surface ActualX" 와 84/84 일치).  contrast 는 비0 값들이 offset 136 을
-    유일하게 고정.  record_index×152 == byte_offset (84건 불일치 0) 로 보폭/헤더 확인.
+    유일하게 고정.  zone/recipe 는 82건 전수 일치(zone 1=PI Opening, 63=Scan Area 등).
+    record_index×152 == byte_offset (84건 불일치 0) 로 보폭/헤더 확인.
   · 모든 오프셋이 채워져 있으면 _SCHEMA_READY=True → 기능 활성.  (혹시 None 으로 비우면
     파서가 빈 결과를 돌려주는 안전 폴백은 유지.)
 ──────────────────────────────────────────────────────────────────────────
@@ -46,6 +48,8 @@ _FIELDS: dict[str, tuple[Optional[int], str]] = {
     "blob_breadth":   (88,  "d"),
     "blob_feret_max": (104, "d"),
     "contrast":       (136, "d"),
+    "zone":           (61,  "B"),
+    "recipe":         (62,  "B"),
 }
 
 # 모든 오프셋이 채워졌는지 — 하나라도 None 이면 파서는 비활성(빈 결과).
@@ -56,7 +60,8 @@ _FLT_CANDIDATES = ("Surface.flt", "surface.flt")
 
 RawRecord = namedtuple(
     "RawRecord",
-    ["actual_x", "actual_y", "area", "blob_breadth", "blob_feret_max", "contrast"],
+    ["actual_x", "actual_y", "area", "blob_breadth", "blob_feret_max", "contrast",
+     "zone", "recipe"],
 )
 
 

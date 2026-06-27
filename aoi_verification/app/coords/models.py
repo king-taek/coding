@@ -22,11 +22,15 @@ class DefectCoord:
 
 @dataclass(frozen=True)
 class DefectGeometry:
-    """Surface.flt 레코드에서 환산한 결함 측정값(µm 단위)."""
+    """Surface.flt 레코드에서 뽑은 결함 핵심 정보(예시 기준 6개 항목).
+
+    area/width/length 는 µm 환산값, contrast 는 원값, zone/recipe 는 분류 코드."""
     area_um2: float     # area(px²) × SURFACE_AREA_FACTOR
     width_um: float     # BlobBreadth(px) × SURFACE_LEN_FACTOR
     length_um: float    # BlobFeretMax(px) × SURFACE_LEN_FACTOR
     contrast: float     # Surface.flt Contrast (그대로)
+    zone: int           # Surface.flt zone 코드 (예: 1=PI Opening, 63=Scan Area)
+    recipe: int         # Surface.flt recipe 코드
 
 
 # ── TB500 Camtek INI 변환 상수 ────────────────────────────────────────────

@@ -71,6 +71,8 @@ def resolve(image_path: Path) -> GeometryResult:
             width_um=rec.blob_breadth * SURFACE_LEN_FACTOR,
             length_um=rec.blob_feret_max * SURFACE_LEN_FACTOR,
             contrast=rec.contrast,
+            zone=int(rec.zone),
+            recipe=int(rec.recipe),
         )
         return GeometryResult("ok", geom)
     except Exception:

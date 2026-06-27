@@ -13,7 +13,7 @@ from pathlib import Path
 from aoi_verification.app.coords import abs_coord, camtek_ini, geometry, surface_flt
 
 
-# 합성 레코드 레이아웃: 32바이트, 모두 little-endian float32.
+# 합성 레코드 레이아웃: 32바이트. geometry 는 float32, zone/recipe 는 uint8.
 _SYN_FIELDS = {
     "actual_x":       (0, "f"),
     "actual_y":       (4, "f"),
@@ -21,9 +21,12 @@ _SYN_FIELDS = {
     "blob_breadth":   (12, "f"),
     "blob_feret_max": (16, "f"),
     "contrast":       (20, "f"),
+    "zone":           (24, "B"),
+    "recipe":         (25, "B"),
 }
 _SYN_SIZE = 32
 _SYN_HEADER = 0
+_INT_FMTS = ("B", "b", "h", "H", "i", "I")
 
 
 def _install_schema(monkeypatch):
@@ -40,7 +43,9 @@ def _install_schema(monkeypatch):
 def _pack_record(**vals) -> bytes:
     buf = bytearray(_SYN_SIZE)
     for name, (off, fmt) in _SYN_FIELDS.items():
-        struct.pack_into("<" + fmt, buf, _SYN_HEADER + off, float(vals[name]))
+        v = vals.get(name, 0)
+        v = int(v) if fmt in _INT_FMTS else float(v)
+        struct.pack_into("<" + fmt, buf, _SYN_HEADER + off, v)
     return bytes(buf)
 
 
@@ -106,7 +111,8 @@ def test_geometry_ok(monkeypatch, tmp_path):
     _install_schema(monkeypatch)
     _write_flt(tmp_path, _pack_record(
         actual_x=147203.82, actual_y=243724.57, area=55.0,
-        blob_breadth=2.1823, blob_feret_max=11.3868, contrast=108.18))
+        blob_breadth=2.1823, blob_feret_max=11.3868, contrast=108.18,
+        zone=1, recipe=2))
     img = _write_ini(tmp_path, "147206.243725.c.2104939970.2",
                      147203.82, 243724.57)
     res = geometry.resolve(img)
@@ -116,6 +122,7 @@ def test_geometry_ok(monkeypatch, tmp_path):
     assert round(g.width_um, 3) == round(2.1823 * 0.77, 3)
     assert round(g.length_um, 3) == round(11.3868 * 0.77, 3)
     assert round(g.contrast) == 108
+    assert g.zone == 1 and g.recipe == 2
 
 
 def test_geometry_no_flt_marker(monkeypatch, tmp_path):
@@ -148,21 +155,21 @@ def test_geometry_disabled_when_schema_off(monkeypatch, tmp_path):
 
 
 # ── 실데이터 회귀 — 예시에서 추출한 실제 152byte record(확정 오프셋 가드) ────
-# (hex, area, blob_breadth, blob_feret_max, contrast, actual_x, actual_y)
+# (hex, area, blob_breadth, blob_feret_max, contrast, actual_x, actual_y, zone, recipe)
 _REAL_RECORDS = [
     ("00001d0000000020906dab41602b134138fb1269788e0e41906dab41602b134138fb1269788e0e41010000006900000000000000000000000000000000010200000000000000144000000000000018400000000000003840000000e089dc09400000008059b21d40000000c0ff8919400000000000e0504000000000000014400000000000000000000000a0aaea5e400000000000000000",
-     24.0, 3.232685, 6.384765, 123.666664, 314072.064131, 250319.051306),
+     24.0, 3.232685, 6.384765, 123.666664, 314072.064131, 250319.051306, 1, 2),
     ("1d00000000040000a6756ba85096134148d30a475e9b0f41a6756ba85096134148d30a475e9b0f41ffffffff0f0000083613000000a0404400a01344003f0200000000000000284000000000000024400000000000804740000000c00f3f0a4000000080d0a62c40000000c0d3ae2b400000000000803640000000c076f81440000000000000000000000000000000000000000000000000",
-     47.0, 3.280792, 13.841459, 0.0, 320916.164472, 258923.784689),
+     47.0, 3.280792, 13.841459, 0.0, 320916.164472, 258923.784689, 63, 2),
 ]
 
 
 def test_real_record_decodes(tmp_path):
     """실측 Surface.flt record 가 확정 오프셋으로 정확히 디코딩된다(스키마 가드).
 
-    오프셋/타입/엔디안이 어긋나면 즉시 실패한다.
+    area/width/length/contrast/zone/recipe 6개 — 오프셋/타입/엔디안이 어긋나면 실패.
     """
-    for hx, area, breadth, feret, contrast, ax, ay in _REAL_RECORDS:
+    for hx, area, breadth, feret, contrast, ax, ay, zone, recipe in _REAL_RECORDS:
         raw = bytes.fromhex(hx)
         assert len(raw) == 152
         surface_flt.load_folder.cache_clear()
@@ -176,6 +183,7 @@ def test_real_record_decodes(tmp_path):
         assert abs(r.blob_breadth - breadth) < 1e-5
         assert abs(r.blob_feret_max - feret) < 1e-5
         assert abs(r.contrast - contrast) < 1e-4
+        assert r.zone == zone and r.recipe == recipe
 
 
 def test_dotted_filename_abs_coord(tmp_path):

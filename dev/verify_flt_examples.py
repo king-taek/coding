@@ -83,6 +83,8 @@ def parse_examples(paths):
                 'ini': ini.group(1).strip() if ini else None,
                 'coord_source': _meta(block, 'coord_source'),
                 'match_status': _meta(block, 'match_status'),
+                'doc_zone': _meta(block, 'Surface zone'),
+                'doc_recipe': _meta(block, 'Surface recipe'),
                 'raw': {}, 'conv': {},
             }
             for fld, rx in _ROW_RE.items():
@@ -131,8 +133,10 @@ def main():
     raw_mismatch = []     # (title, field, expected, got, diff)
     conv_mismatch = []    # PASS 인데 값/상태가 틀림
     neg_mismatch = []     # 문서 FAIL 인데 앱이 잘못 매칭(ok)
+    zr_mismatch = []      # zone/recipe 불일치
     raw_maxerr = {}
     conv_maxerr = {}
+    zr_n = {}
     n_raw = n_conv = 0
     n_neg = n_neg_ok = 0
     n_with_record = 0
@@ -193,6 +197,19 @@ def main():
                             conv_maxerr[fld] = max(conv_maxerr.get(fld, 0.0), d)
                             if not close(got, exp, args.abs_tol, args.rel_tol):
                                 conv_mismatch.append((ex['title'], fld, exp, got, d))
+                        # zone/recipe — 정수 일치 검증.
+                        for fld, attr in (('zone', 'zone'), ('recipe', 'recipe')):
+                            doc = ex['doc_' + fld]
+                            if doc is None:
+                                continue
+                            try:
+                                exp = int(doc)
+                            except ValueError:
+                                continue
+                            got = getattr(res.geometry, attr)
+                            zr_n[fld] = zr_n.get(fld, 0) + 1
+                            if got != exp:
+                                zr_mismatch.append((ex['title'], fld, exp, got, abs(got - exp)))
                 else:
                     # 문서가 FAIL 로 판정한 케이스 — 앱도 거부(no_data/no_flt)해야 정상.
                     n_neg += 1
@@ -219,7 +236,11 @@ def main():
             print(f'    {_GEOM_ATTR[fld][1]:8s}({fld:14s}) max|err|={conv_maxerr[fld]:.6g}')
     print(f'    불일치 {len(conv_mismatch)}건')
 
-    print(f'\n[C] 음성 검증 — 문서가 FAIL 로 판정한 케이스 (총 {n_neg}건)')
+    print(f'\n[C] zone / recipe 정수 일치  '
+          f'(zone {zr_n.get("zone", 0)}건, recipe {zr_n.get("recipe", 0)}건)')
+    print(f'    불일치 {len(zr_mismatch)}건')
+
+    print(f'\n[D] 음성 검증 — 문서가 FAIL 로 판정한 케이스 (총 {n_neg}건)')
     print(f'    앱도 올바로 거부(no_data/no_flt): {n_neg_ok}건')
     print(f'    앱이 잘못 매칭(ok): {len(neg_mismatch)}건')
 
@@ -235,10 +256,11 @@ def main():
 
     dump('[A] raw 불일치', raw_mismatch)
     dump('[B] 환산 불일치', conv_mismatch)
-    dump('[C] 음성 검증 실패(잘못 매칭)', neg_mismatch)
+    dump('[C] zone/recipe 불일치', zr_mismatch)
+    dump('[D] 음성 검증 실패(잘못 매칭)', neg_mismatch)
 
-    ok = not raw_mismatch and not conv_mismatch and not neg_mismatch
-    print('\n' + ('✅ 전부 일치 (PASS 값 일치 + FAIL 정상 거부)'
+    ok = not (raw_mismatch or conv_mismatch or zr_mismatch or neg_mismatch)
+    print('\n' + ('✅ 전부 일치 (area/width/length/contrast/zone/recipe + FAIL 정상 거부)'
                   if ok else '❌ 불일치 존재 — 위 목록 확인'))
     return 0 if ok else 1
 
