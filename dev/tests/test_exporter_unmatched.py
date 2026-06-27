@@ -226,6 +226,7 @@ def test_unmatched_geometry_rendered(qapp, isolated_cache, tmp_path, monkeypatch
     d3 = str(ws["D3"].value)
     assert "z_miss.jpeg" in d3
     assert "area" in d3 and "contrast" in d3
+    assert "zone" in d3 and "recipe" in d3
 
 
 def test_unmatched_no_flt_marker(qapp, isolated_cache, tmp_path, monkeypatch):

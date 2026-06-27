@@ -482,6 +482,7 @@ class ExcelExporter(QThread):
                     TextBlock(grey, f"\nwidth {g.width_um:.2f} ㎛"),
                     TextBlock(grey, f"\nlength {g.length_um:.2f} ㎛"),
                     TextBlock(grey, f"\ncontrast {g.contrast:.2f}"),
+                    TextBlock(grey, f"\nzone {g.zone} / recipe {g.recipe}"),
                 ]
             if res.status == "no_flt":
                 return [TextBlock(grey, f"\n{i18n.KO.GEOM_NOT_SUPPORTED}")]
