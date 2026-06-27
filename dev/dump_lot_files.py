@@ -22,7 +22,94 @@ from __future__ import annotations
 import argparse
 import re
 import struct
+import time
 from pathlib import Path
+
+# ── 무옵션 자동: PI 계열 LOT 자동 탐색 ────────────────────────────────────
+# 0.77 은 PI 검사 자재에서 살아있으므로 PI 제품 폴더를 고른다.  검증 예시가 있는
+# 대표 PI4 폴더를 우선 포함.
+PI4_REP = (r"P:\AOI-22\Scanresult\R_TB500_LIVE_PI4 AOI-21 Copy_0614"
+           r"\Setup1\PXU-PI4-ENGINEER-TEST\00RMF041XYC7")
+DEFAULT_ROOTS = [
+    r"X:\AOI-3\Scanresult", r"V:\AOI-13\Scanresult", r"V:\AOI-14\Scanresult",
+    r"V:\AOI-15\Scanresult", r"V:\AOI-16\Scanresult", r"P:\AOI-17\Scanresult",
+    r"P:\AOI-18\Scanresult", r"P:\AOI-19\Scanresult", r"P:\AOI-20\Scanresult",
+    r"P:\AOI-21\Scanresult", r"P:\AOI-22\Scanresult", r"P:\AOI-23\Scanresult",
+    r"Y:\AOI-24\Scanresult", r"Y:\AOI-25\Scanresult",
+]
+_TB500 = re.compile(r"TB500", re.I)
+_PI = re.compile(r"PI", re.I)
+
+
+def _subdirs(d):
+    try:
+        return [c for c in d.iterdir() if c.is_dir()]
+    except Exception:
+        return []
+
+
+def _find_pi_wafer(root, deadline):
+    """root 아래 PI 제품 폴더에서 Surface.flt 보유 폴더 1개를 찾는다(최신 우선)."""
+    root = Path(root)
+    if not root.exists():
+        return None
+    for prod in _subdirs(root):
+        if not (_TB500.search(prod.name) and _PI.search(prod.name)):
+            continue
+        stack = [(prod, 0)]
+        while stack:
+            if time.time() > deadline:
+                return None
+            d, depth = stack.pop(0)
+            if (d / "Surface.flt").exists():
+                return d
+            if depth >= 5:
+                continue
+            subs = _subdirs(d)
+            try:
+                subs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+            except Exception:
+                pass
+            for s in subs[:3]:
+                stack.append((s, depth + 1))
+    return None
+
+
+def auto_targets(max_lots, deadline):
+    """무옵션: PI wafer 폴더 몇 개 + 그 상위(Setup/제품) 폴더를 (folder, recursive) 로.
+
+    0.77 은 wafer 폴더엔 없으니 상위 폴더(recipe/setup 위치)를 **비재귀**로 함께 덤프한다."""
+    wafers = []
+    pi4 = Path(PI4_REP)
+    try:
+        if (pi4 / "Surface.flt").exists():
+            wafers.append(pi4)
+    except Exception:
+        pass
+    for root in DEFAULT_ROOTS:
+        if len(wafers) >= max_lots or time.time() > deadline:
+            break
+        w = _find_pi_wafer(root, deadline)
+        if w is not None and w not in wafers:
+            wafers.append(w)
+
+    targets, seen = [], set()
+
+    def add(folder, recursive):
+        if folder not in seen:
+            seen.add(folder)
+            targets.append((folder, recursive))
+
+    for w in wafers:
+        add(w, True)                       # wafer 자체는 재귀(작음)
+        p = w
+        for _ in range(4):                 # 상위 LOT/Setup/제품은 비재귀
+            p = p.parent
+            if p == p.parent or p.name.lower() == "scanresult":
+                break
+            add(p, False)
+    return targets, wafers
+
 
 # 내용 덤프 제외(이미지/대용량 바이너리) — 이름·크기만 표기.
 _SKIP_CONTENT_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tif", ".tiff",
@@ -134,23 +221,41 @@ def dump_file(path: Path, rel: str, max_kb: int, near_hits: list):
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("folders", nargs="+", help="LOT/result 폴더(적게)")
+    ap.add_argument("folders", nargs="*",
+                    help="LOT/result 폴더(적게). 생략 시 PI LOT 자동 선택")
     ap.add_argument("--out", default="LOT_파일덤프.md")
     ap.add_argument("--max-file-kb", type=int, default=48)
     ap.add_argument("--max-files", type=int, default=300)
+    ap.add_argument("--max-lots", type=int, default=2, help="자동 모드에서 고를 PI LOT 수")
+    ap.add_argument("--timeout", type=float, default=600.0)
     ap.add_argument("--no-recursive", action="store_true")
     args = ap.parse_args(argv)
+
+    deadline = time.time() + args.timeout
+    if args.folders:
+        targets = [(Path(f), not args.no_recursive) for f in args.folders]
+        picked_note = None
+    else:
+        # 무옵션: PI wafer + 상위(Setup/제품) 폴더 자동 선택.
+        targets, wafers = auto_targets(args.max_lots, deadline)
+        picked_note = wafers
+        print(f"[AUTO] PI LOT {len(wafers)}개 자동 선택, 덤프 대상 {len(targets)}개 폴더")
+        if not targets:
+            print("[AUTO] PI LOT 을 못 찾음 — 폴더를 직접 지정하세요(드라이브 접근 확인).")
 
     near_hits: list = []
     body: list = []
     total_files = 0
-    for folder in args.folders:
-        fp = Path(folder)
-        body.append(f"\n## 폴더: `{fp}`")
+    for fp, recursive in targets:
+        if time.time() > deadline:
+            body.append("\n> [TIMEOUT] 시간 초과 — 남은 폴더 중단")
+            break
+        scope = "재귀" if recursive else "이 폴더만"
+        body.append(f"\n## 폴더: `{fp}`  ({scope})")
         if not fp.exists():
             body.append("> 존재하지 않음")
             continue
-        files = sorted(fp.rglob("*") if not args.no_recursive else fp.glob("*"))
+        files = sorted(fp.rglob("*") if recursive else fp.glob("*"))
         files = [f for f in files if f.is_file()][: args.max_files]
         body.append(f"> 파일 {len(files)}개 (상한 {args.max_files})")
         for f in files:
@@ -165,6 +270,14 @@ def main(argv=None):
          "> `dump_lot_files.py` 가 고른 폴더의 모든 파일(이미지 제외)을 그대로 담았다. "
          "0.77 은 정확히 안 적혀 있고 반올림 전 비슷한 값(0.74~0.80)일 수 있으니, 아래 "
          "**0.77 근처 값 요약**에서 그 값이 어느 파일에 있는지 찾는다.\n"]
+    if picked_note is not None:
+        L.append("## 0. 자동 선택된 PI LOT")
+        if picked_note:
+            for w in picked_note:
+                L.append(f"- `{w}`")
+        else:
+            L.append("> PI LOT 자동 탐색 실패 — 폴더를 직접 인자로 지정하세요.")
+        L.append("> (각 wafer 폴더는 재귀, 상위 Setup/제품 폴더는 이 폴더만 덤프.)\n")
     L.append("## ★ 0.77 근처 값 요약 (0.74~0.80)")
     only077 = [h for h in near_hits if h["band"] == "★0.77후보"]
     if only077:

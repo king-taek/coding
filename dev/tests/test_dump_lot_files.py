@@ -42,6 +42,25 @@ def test_dump_finds_near_077_text_and_binary(tmp_path):
     assert "PixelSizeX=0.4668" in text  # 내용엔 있음
 
 
+def test_auto_targets_picks_pi_wafer_and_parents(tmp_path, monkeypatch):
+    """무옵션: PI 제품 폴더의 wafer + 상위 폴더를 자동 선택."""
+    root = tmp_path / "Scanresult"
+    wafer = root / "R_TB500_LIVE_PI4" / "Setup1" / "PXU-PI4" / "00RMF041XYC7"
+    wafer.mkdir(parents=True)
+    (wafer / "Surface.flt").write_bytes(b"\x00" * 152)
+    monkeypatch.setattr(dl, "DEFAULT_ROOTS", [str(root)])
+    monkeypatch.setattr(dl, "PI4_REP", str(tmp_path / "none"))  # 없는 경로
+    import time
+    targets, wafers = dl.auto_targets(max_lots=2, deadline=time.time() + 30)
+    folders = {str(f) for f, _r in targets}
+    assert wafer in wafers
+    assert str(wafer) in folders                      # wafer 재귀
+    assert str(wafer.parent) in folders               # 상위 Setup/LOT 비재귀
+    # wafer 는 재귀, 상위는 비재귀.
+    rec = dict((str(f), r) for f, r in targets)
+    assert rec[str(wafer)] is True and rec[str(wafer.parent)] is False
+
+
 def test_is_text_and_scan_floats():
     assert dl.is_text(b"hello=1.23\n") is True
     assert dl.is_text(b"\x00\x01\x02\x03") is False
