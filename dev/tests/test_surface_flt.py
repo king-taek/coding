@@ -80,11 +80,16 @@ def test_truncated_bytes_no_raise(monkeypatch, tmp_path):
     assert len(recs) == 1
 
 
-def test_disabled_when_schema_unfilled(tmp_path):
-    """기본 상태(스키마 미충전): 파일이 있어도 파서는 빈 결과(비활성)."""
+def test_schema_live_by_default():
+    """확정 스키마가 채워져 기본 활성(_SCHEMA_READY=True)."""
+    assert surface_flt._SCHEMA_READY is True
+
+
+def test_disabled_fallback_when_schema_off(monkeypatch, tmp_path):
+    """스키마를 끄면(_SCHEMA_READY=False) 파일이 있어도 빈 결과(안전 폴백)."""
+    monkeypatch.setattr(surface_flt, "_SCHEMA_READY", False)
     (tmp_path / "Surface.flt").write_bytes(b"\x00" * 304)
     surface_flt.load_folder.cache_clear()
-    assert surface_flt._SCHEMA_READY is False
     assert surface_flt.load_folder(tmp_path) == ()
 
 
@@ -132,13 +137,45 @@ def test_geometry_no_data_when_coord_far(monkeypatch, tmp_path):
     assert res.status == "no_data" and res.geometry is None
 
 
-def test_geometry_disabled_default(tmp_path):
-    """스키마 미충전이면 status='disabled' — 엑셀이 기존과 동일하게 렌더."""
+def test_geometry_disabled_when_schema_off(monkeypatch, tmp_path):
+    """스키마를 끄면 status='disabled' — 엑셀이 기존과 동일하게 렌더."""
+    monkeypatch.setattr(surface_flt, "_SCHEMA_READY", False)
     surface_flt.load_folder.cache_clear()
     img = tmp_path / "x.1.2.3.jpeg"
     img.write_bytes(b"")
     res = geometry.resolve(img)
     assert res.status == "disabled"
+
+
+# ── 실데이터 회귀 — 예시에서 추출한 실제 152byte record(확정 오프셋 가드) ────
+# (hex, area, blob_breadth, blob_feret_max, contrast, actual_x, actual_y)
+_REAL_RECORDS = [
+    ("00001d0000000020906dab41602b134138fb1269788e0e41906dab41602b134138fb1269788e0e41010000006900000000000000000000000000000000010200000000000000144000000000000018400000000000003840000000e089dc09400000008059b21d40000000c0ff8919400000000000e0504000000000000014400000000000000000000000a0aaea5e400000000000000000",
+     24.0, 3.232685, 6.384765, 123.666664, 314072.064131, 250319.051306),
+    ("1d00000000040000a6756ba85096134148d30a475e9b0f41a6756ba85096134148d30a475e9b0f41ffffffff0f0000083613000000a0404400a01344003f0200000000000000284000000000000024400000000000804740000000c00f3f0a4000000080d0a62c40000000c0d3ae2b400000000000803640000000c076f81440000000000000000000000000000000000000000000000000",
+     47.0, 3.280792, 13.841459, 0.0, 320916.164472, 258923.784689),
+]
+
+
+def test_real_record_decodes(tmp_path):
+    """실측 Surface.flt record 가 확정 오프셋으로 정확히 디코딩된다(스키마 가드).
+
+    오프셋/타입/엔디안이 어긋나면 즉시 실패한다.
+    """
+    for hx, area, breadth, feret, contrast, ax, ay in _REAL_RECORDS:
+        raw = bytes.fromhex(hx)
+        assert len(raw) == 152
+        surface_flt.load_folder.cache_clear()
+        (tmp_path / "Surface.flt").write_bytes(raw)
+        recs = surface_flt.load_folder(tmp_path)
+        assert len(recs) == 1
+        r = recs[0]
+        assert abs(r.actual_x - ax) < 1e-3
+        assert abs(r.actual_y - ay) < 1e-3
+        assert abs(r.area - area) < 1e-3
+        assert abs(r.blob_breadth - breadth) < 1e-5
+        assert abs(r.blob_feret_max - feret) < 1e-5
+        assert abs(r.contrast - contrast) < 1e-4
 
 
 def test_dotted_filename_abs_coord(tmp_path):

@@ -5,17 +5,18 @@
 Contrast)를 읽어 :class:`geometry.resolve` 가 이미지 좌표와 nearest-match 하는 데 쓴다.
 
 ──────────────────────────────────────────────────────────────────────────
-스키마(바이트 오프셋)는 외부 ``Surface.flt.md`` 에만 있고 저장소엔 없다.  실제 값
-추출에 필요한 **유일한 미정 조각**이라, 아래 ``_FIELDS`` 한 곳에 격리한다.
+스키마(바이트 오프셋)는 TB500 실측 예시 84건(각 예시에 매칭 record 의 raw 152byte
+HEX + 디코딩 정답값 동봉)을 brute-force 해 확정했다.  레이아웃은 ``_FIELDS`` 한 곳에
+격리한다 — 장비/포맷이 바뀌면 여기만 고치면 된다.
 
-  · 오프셋이 채워지기 전(_SCHEMA_READY=False): 파서는 항상 빈 결과를 돌려준다.
-    → 보고서(엑셀)는 기존과 100% 동일하게 렌더되고, 합성 바이트로 단위 테스트만 가능.
-  · ``Surface.flt.md`` 에서 각 필드의 (offset, struct 포맷)을 채우면 즉시 동작한다.
-
-채울 값(전부 little-endian ``<`` 가정 — 다르면 _BYTE_ORDER 수정):
-    actual_x, actual_y : 절대 wafer 좌표 (보통 float32 'f' 또는 float64 'd')
-    area, blob_breadth, blob_feret_max, contrast : geometry (보통 'f')
-레코드 앞에 헤더가 있으면 _HEADER_BYTES 에 그 바이트 수를 넣는다.
+확정 결과(레코드 시작 0, 152byte 보폭, 헤더 없음, little-endian float64 ``<d``):
+    actual_x=24, actual_y=32, area=80, blob_breadth=88, blob_feret_max=104,
+    contrast=136
+  · actual_x 는 offset 8 에도 거의 같은 값이 있으나 84건 중 1건에서 어긋나므로 24 가
+    정본(문서 "Surface ActualX" 와 84/84 일치).  contrast 는 비0 값들이 offset 136 을
+    유일하게 고정.  record_index×152 == byte_offset (84건 불일치 0) 로 보폭/헤더 확인.
+  · 모든 오프셋이 채워져 있으면 _SCHEMA_READY=True → 기능 활성.  (혹시 None 으로 비우면
+    파서가 빈 결과를 돌려주는 안전 폴백은 유지.)
 ──────────────────────────────────────────────────────────────────────────
 
 기존 coords 파서(camtek_ini/kla_info)와 동일한 관습: 폴더 단위 ``lru_cache``,
@@ -32,19 +33,19 @@ from typing import Optional
 
 __all__ = ["load_folder", "has_flt", "RawRecord"]
 
-# ── 스키마(사용자가 Surface.flt.md 로 채울 유일한 곳) ──────────────────────
-_BYTE_ORDER = "<"        # little-endian (다르면 ">" 로)
-_RECORD_SIZE = 152       # 한 레코드 바이트 수 (확인 필요)
-_HEADER_BYTES = 0        # 레코드 0 앞 헤더 바이트 수 (없으면 0)
+# ── 스키마(TB500 실측 84건 brute-force 로 확정 — 위 docstring 참조) ─────────
+_BYTE_ORDER = "<"        # little-endian
+_RECORD_SIZE = 152       # 한 레코드 바이트 수
+_HEADER_BYTES = 0        # 레코드 0 앞 헤더 바이트 수 (없음)
 
 # field → (record 내부 byte offset, struct 포맷 문자).  offset 이 None 이면 미정.
 _FIELDS: dict[str, tuple[Optional[int], str]] = {
-    "actual_x":       (None, "f"),
-    "actual_y":       (None, "f"),
-    "area":           (None, "f"),
-    "blob_breadth":   (None, "f"),
-    "blob_feret_max": (None, "f"),
-    "contrast":       (None, "f"),
+    "actual_x":       (24,  "d"),
+    "actual_y":       (32,  "d"),
+    "area":           (80,  "d"),
+    "blob_breadth":   (88,  "d"),
+    "blob_feret_max": (104, "d"),
+    "contrast":       (136, "d"),
 }
 
 # 모든 오프셋이 채워졌는지 — 하나라도 None 이면 파서는 비활성(빈 결과).

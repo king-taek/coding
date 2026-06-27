@@ -55,24 +55,22 @@ def test_export_writes_matches_and_unmatched(qapp, isolated_cache, tmp_path):
     exp.run()  # QThread.run() 을 동기 실행
     assert dst.exists()
 
+    from aoi_verification.app import i18n
     from openpyxl import load_workbook
-    wb = load_workbook(str(dst))
-    ws = wb.active
-    # 헤더는 row 1~2 (양식.xlsx 형식), 데이터는 row 3 부터 시작.
-    # 정렬: a_ref.jpeg, b_ref.jpeg → 매칭이 먼저, 미매칭이 그 다음 행.
-    # row 3: a → 매칭 (D 셀 비어있고 이미지 임베드만)
-    # row 4: b → 미매칭 (D 셀에 파일명 텍스트)
-    d3 = ws["D3"].value
+    from openpyxl.cell.rich_text import CellRichText
+    wb = load_workbook(str(dst), rich_text=True)
+    # 요약 시트(파일명 stem)를 이름으로 직접 읽는다 — .active 는 openpyxl 버전에
+    # 따라 미매칭 시트를 가리킬 수 있어 의존하지 않는다.
+    ws = wb["out"]
+    # 헤더는 row 1~2, 데이터는 row 3 부터. 정렬: a_ref(매칭)=row3, b_ref(미매칭)=row4.
+    assert ws["D3"].value is None, "매칭 행의 D 셀은 비어있어야 (이미지만 임베드)"
     d4 = ws["D4"].value
-    assert d3 is None, f"매칭 행의 D 셀은 비어있어야 (이미지만 임베드): {d3}"
-    assert d4 == "b_ref.jpeg", f"미매칭 행의 D 셀에 파일명: {d4}"
-
-    # 빨간 폰트 확인
-    font = ws["D4"].font
-    assert font.color is not None
-    # openpyxl 의 color 는 ARGB hex 또는 indexed.
-    color_str = str(font.color.rgb or font.color.value or "")
-    assert "FF2D55" in color_str.upper()
+    # geometry 기능 활성 + Surface.flt 없음 → 파일명 + '미지원 자재' 마커(rich-text).
+    assert "b_ref.jpeg" in str(d4)
+    assert i18n.KO.GEOM_NOT_SUPPORTED in str(d4)
+    # 파일명 블록은 여전히 빨강.
+    assert isinstance(d4, CellRichText)
+    assert "FF2D55" in str(d4[0].font.color.rgb).upper()
 
     # 코멘트 ‘미매칭’ 확인
     assert ws["D4"].comment is not None
@@ -160,16 +158,18 @@ def test_export_unmatched_sheet(qapp, isolated_cache, tmp_path):
         matches=[MatchResult(slot="S1", ref_path=ref, val_path=val, score=0.9)],
         unmatched_refs=[MissEntry(slot="S2", side="ref", path=miss, note="미매칭")],
     )
+    from aoi_verification.app import i18n
     from openpyxl import load_workbook
     no_tpl = tmp_path / "no_template.xlsx"
     dst = tmp_path / "out.xlsx"
     ExcelExporter(result, dst_path=dst, template_path=no_tpl).run()
-    wb = load_workbook(str(dst))
-    assert "미매칭 사진" in wb.sheetnames
-    um = wb["미매칭 사진"]
-    # 미매칭 시트엔 미매칭 행만 — 첫 데이터 행 slot=S2, D열에 빨강 파일명.
+    wb = load_workbook(str(dst), rich_text=True)
+    assert i18n.KO.SHEET_UNMATCHED in wb.sheetnames
+    um = wb[i18n.KO.SHEET_UNMATCHED]
+    # 미매칭 시트엔 미매칭 행만 — 첫 데이터 행 slot=S2, D열에 파일명(+미지원 마커).
     assert um["B3"].value == "S2"
-    assert um["D3"].value == "miss.jpeg"
+    assert "miss.jpeg" in str(um["D3"].value)
+    assert i18n.KO.GEOM_NOT_SUPPORTED in str(um["D3"].value)
 
 
 def _install_flt_schema(monkeypatch):
