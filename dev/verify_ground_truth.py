@@ -45,11 +45,12 @@ F = {
     "BlobFeretMaxAngle": (112, "<d"), "BlobFeretMin": (120, "<d"),
     "Contrast": (136, "<d"),
 }
-# 픽셀크기 출처 우선순위.
-_PX_SOURCES = (("Params_WaferInfo.ini", "RefPixelSizeX"),
-               ("TrainData/Die.ini", "PixelSize_X"),
-               ("ProductInfo.ini", "Scan2DPixelSize"),
-               ("RecipesInfo.ini", "Scan2DPixelSize"))
+# 픽셀크기 출처 우선순위 (파일, X키, Y키).  Y키 None 이면 단일값(X=Y).
+# 면적은 px_x × px_y(이방성)로 환산해야 정확하다(실측: PI3-KMY 는 X≠Y 미세차).
+_PX_SOURCES = (("Params_WaferInfo.ini", "RefPixelSizeX", "RefPixelSizeY"),
+               ("TrainData/Die.ini", "PixelSize_X", "PixelSize_Y"),
+               ("ProductInfo.ini", "Scan2DPixelSize", None),
+               ("RecipesInfo.ini", "Scan2DPixelSize", None))
 _INI_NAMES = ("ColorImageGrabingInfo.ini", "ColorImageGrabinginfo.ini")
 _SEC = re.compile(r"\[[^\]]*\]")
 
@@ -83,26 +84,41 @@ def read_key(path, key):
 
 
 def scan_px(folder):
-    for rel, key in _PX_SOURCES:
-        v = read_key(folder / rel, key)
-        if v is not None and 0.05 <= v <= 5.0:
-            return v, f"{rel}:{key}"
-    return None, None
+    """2D 스캔 픽셀크기 (px_x, px_y, 출처).  못 찾으면 (None, None, None)."""
+    for rel, kx, ky in _PX_SOURCES:
+        x = read_key(folder / rel, kx)
+        if x is not None and 0.05 <= x <= 5.0:
+            y = read_key(folder / rel, ky) if ky else None
+            if y is None or not (0.05 <= y <= 5.0):
+                y = x
+            return x, y, f"{rel}:{kx}"
+    return None, None, None
 
 
 def pairs(folder, name_key, id_key, files=("ProductInfo.ini", "RecipesInfo.ini")):
-    """recipe 파일들에서 [section] 안의 (id_key, name_key) 쌍 → {id:name}."""
-    out = {}
-    for fn in files:
+    """recipe 파일들에서 [section] 안의 (id_key, name_key) 쌍 → {id:name}.
+
+    우선 대표 ini 를 보고, 비면 폴더 안 모든 *.ini 로 확대(실측 '(매핑없음)' 대비)."""
+    def scan(names):
+        out = {}
+        for fn in names:
+            try:
+                txt = (folder / fn).read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for body in _SEC.split(txt):
+                nm = re.search(r"(?im)^\s*" + name_key + r"\s*=\s*(.+?)\s*$", body)
+                i = re.search(r"(?im)^\s*" + id_key + r"\s*=\s*(\d+)", body)
+                if nm and i:
+                    out.setdefault(int(i.group(1)), nm.group(1).strip())
+        return out
+
+    out = scan(files)
+    if not out:
         try:
-            txt = (folder / fn).read_text(encoding="utf-8", errors="replace")
+            out = scan(sorted(p.name for p in folder.glob("*.ini")))
         except OSError:
-            continue
-        for body in _SEC.split(txt):
-            nm = re.search(r"(?im)^\s*" + name_key + r"\s*=\s*(.+?)\s*$", body)
-            i = re.search(r"(?im)^\s*" + id_key + r"\s*=\s*(\d+)", body)
-            if nm and i:
-                out.setdefault(int(i.group(1)), nm.group(1).strip())
+            pass
     return out
 
 
@@ -177,12 +193,13 @@ def main(argv=None):
         if not recs:
             L.append("> ❌ Surface.flt 없음/파싱 실패 — 경로/드라이브 확인")
             continue
-        px, px_src = scan_px(folder)
+        px, px_y, px_src = scan_px(folder)
         L.append(f"- Surface.flt 레코드 {len(recs)}개, 픽셀크기 px = "
                  f"**{px if px is not None else '못찾음(0.77 폴백)'}** "
-                 f"(출처: {px_src or '-'})")
+                 f"(출처: {px_src or '-'})"
+                 + (f" / px_y={px_y}" if px_y is not None and px_y != px else ""))
         if px is None:
-            px = 0.77
+            px = px_y = 0.77
         # 좌표 매칭
         x, y, col, row = ini_fault(folder, stem)
         src = "INI FaultX/Y"
@@ -200,7 +217,7 @@ def main(argv=None):
         rname = pairs(folder, "RecipeName", "RecipeNumber").get(rec["recipe"])
 
         rows = [
-            ("Area (㎛²)", rec["area"] * px * px, ex["area"]),
+            ("Area (㎛²)", rec["area"] * px * px_y, ex["area"]),
             ("Width (㎛)", rec["BlobBreadth"] * px, ex["width"]),
             ("Length (㎛)", rec["BlobFeretMax"] * px, ex["length"]),
             ("Contrast", rec["Contrast"], ex["contrast"]),

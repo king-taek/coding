@@ -16,29 +16,43 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
-_FILES = ("ProductInfo.ini", "RecipesInfo.ini", "Recipe2-ProductInfo.ini")
 _SECTION = re.compile(r"\[[^\]]*\]")
 _NAME = re.compile(r"(?im)^\s*ZoneName\s*=\s*(.+?)\s*$")
 _ID = re.compile(r"(?im)^\s*ZoneID\s*=\s*(\d+)")
+# 우선 탐색 파일(빠른 경로). 못 찾으면 폴더 안 모든 *.ini 로 확대.
+_PREFERRED = ("ProductInfo.ini", "RecipesInfo.ini", "Recipe2-ProductInfo.ini")
+
+
+def _scan(paths) -> dict:
+    """주어진 ini 파일들에서 (ZoneName, ZoneID) 쌍 → {id: name}."""
+    out: dict = {}
+    for p in paths:
+        try:
+            txt = p.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        # 각 zone 섹션에 ZoneName + ZoneID 가 함께 있다.
+        for body in _SECTION.split(txt):
+            nm = _NAME.search(body)
+            zid = _ID.search(body)
+            if nm and zid:
+                out.setdefault(int(zid.group(1)), nm.group(1).strip())
+    return out
 
 
 @lru_cache(maxsize=256)
 def zone_map(folder: Path) -> tuple:
-    """{zone_id: zone_name} 을 (id, name) 튜플들로 반환(캐시용 hashable).  fail-safe."""
-    out: dict = {}
+    """{zone_id: zone_name} 을 (id, name) 튜플들로 반환(캐시용 hashable).  fail-safe.
+
+    우선 대표 ini 를 보고, 비면 폴더 안 모든 *.ini 로 확대(이름이 LOT/제품별로
+    다른 파일에 들어 있는 경우 대비 — 실측 '(매핑없음)' 사례)."""
     try:
-        for fn in _FILES:
-            p = folder / fn
+        out = _scan(folder / fn for fn in _PREFERRED)
+        if not out:
             try:
-                txt = p.read_text(encoding="utf-8", errors="replace")
+                out = _scan(sorted(folder.glob("*.ini")))
             except OSError:
-                continue
-            # 각 zone 섹션에 ZoneName + ZoneID 가 함께 있다.
-            for body in _SECTION.split(txt):
-                nm = _NAME.search(body)
-                zid = _ID.search(body)
-                if nm and zid:
-                    out.setdefault(int(zid.group(1)), nm.group(1).strip())
+                pass
     except Exception:
         return ()
     return tuple(sorted(out.items()))

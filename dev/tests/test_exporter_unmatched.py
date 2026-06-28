@@ -206,9 +206,14 @@ def test_unmatched_geometry_rendered(qapp, isolated_cache, tmp_path, monkeypatch
     ref = _make_image(src, "a_ref.jpeg")
     val = _make_image(src, "a_val.jpeg")
     miss = _make_image(src, "z_miss.jpeg")
-    _write_flt_record(src, 1000.0, 2000.0, 55.0, 2.0, 11.0, 108.0)
+    _write_flt_record(src, 1000.0, 2000.0, 55.0, 2.0, 11.0, 108.0,
+                      zone=1, recipe=2)
     (src / "ColorImageGrabingInfo.ini").write_text(
         "[z_miss.jpeg]\nX=1000.0\nY=2000.0\nCol=3\nRow=5\n", encoding="utf-8")
+    # zone/recipe 이름 매핑(자재별)을 결과 폴더 ini 에서 읽어 표기하는지 검증.
+    (src / "ProductInfo.ini").write_text(
+        "[Z]\nZoneName=PI_Opening\nZoneID=1\n"
+        "[R]\nRecipeName=PI\nRecipeNumber=2\n", encoding="utf-8")
 
     result = FinalResult(
         mode="single", ref_machine="1호기", val_machine="2호기",
@@ -227,6 +232,8 @@ def test_unmatched_geometry_rendered(qapp, isolated_cache, tmp_path, monkeypatch
     assert "z_miss.jpeg" in d3
     assert "area" in d3 and "contrast" in d3
     assert "zone" in d3 and "recipe" in d3
+    # zone/recipe 이름이 코드 옆에 함께 표기된다.
+    assert "PI_Opening" in d3 and "PI" in d3
     # contrast 108 (비0) → 값이 그대로, '—' 아님.
     assert "108" in d3 and "contrast —" not in d3
 

@@ -32,7 +32,8 @@ class DefectGeometry:
     zone: int           # Surface.flt zone 코드 (예: 1=PI Opening, 63=Scan Area)
     recipe: int         # Surface.flt recipe 코드
     pixel_um: float     # 환산에 쓴 2D 스캔 픽셀 크기(µm/px). 결과 폴더에서 읽음(없으면 0.77)
-    zone_name: str = ""  # recipe 파일의 ZoneName(자재별). 없으면 빈 문자열(코드만 표시)
+    zone_name: str = ""    # recipe 파일의 ZoneName(자재별). 없으면 빈 문자열(코드만 표시)
+    recipe_name: str = ""  # recipe 파일의 RecipeName(자재별). 없으면 빈 문자열(코드만 표시)
 
 
 # ── TB500 Camtek INI 변환 상수 ────────────────────────────────────────────

@@ -488,7 +488,8 @@ class ExcelExporter(QThread):
                     TextBlock(grey, f"\n{contrast_txt}"),
                     TextBlock(grey, f"\nzone {g.zone}"
                                     + (f" ({g.zone_name})" if g.zone_name else "")
-                                    + f" / recipe {g.recipe}"),
+                                    + f" / recipe {g.recipe}"
+                                    + (f" ({g.recipe_name})" if g.recipe_name else "")),
                     TextBlock(grey, f"\npx {g.pixel_um:.4f}㎛"),
                 ]
             if res.status == "no_flt":

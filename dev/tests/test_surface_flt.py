@@ -11,7 +11,8 @@ import struct
 from pathlib import Path
 
 from aoi_verification.app.coords import (abs_coord, camtek_ini, geometry,
-                                         pixel_size, surface_flt, zone_name)
+                                         pixel_size, recipe_name, surface_flt,
+                                         zone_name)
 
 
 # 합성 레코드 레이아웃: 32바이트. geometry 는 float32, zone/recipe 는 uint8.
@@ -131,7 +132,7 @@ def test_geometry_ok(monkeypatch, tmp_path):
 def test_geometry_dynamic_pixel_size(monkeypatch, tmp_path):
     """결과 폴더에 Params_WaferInfo.ini 가 있으면 그 RefPixelSizeX 로 환산(0.77 아님)."""
     _install_schema(monkeypatch)
-    pixel_size.scan_pixel_size.cache_clear()
+    pixel_size.scan_pixel_size_xy.cache_clear()
     _write_flt(tmp_path, _pack_record(
         actual_x=100.0, actual_y=200.0, area=55.0,
         blob_breadth=2.0, blob_feret_max=11.0, contrast=5.0, zone=1, recipe=2))
@@ -148,7 +149,7 @@ def test_zone_name_dynamic(monkeypatch, tmp_path):
     """결과 폴더 recipe 파일의 ZoneName/ZoneID 로 zone 이름을 읽는다(자재별)."""
     _install_schema(monkeypatch)
     zone_name.zone_map.cache_clear()
-    pixel_size.scan_pixel_size.cache_clear()
+    pixel_size.scan_pixel_size_xy.cache_clear()
     _write_flt(tmp_path, _pack_record(
         actual_x=100.0, actual_y=200.0, area=10.0, blob_breadth=1.0,
         blob_feret_max=2.0, contrast=5.0, zone=1, recipe=2))
@@ -158,6 +159,60 @@ def test_zone_name_dynamic(monkeypatch, tmp_path):
     img = _write_ini(tmp_path, "x.100.200", 100.0, 200.0)
     g = geometry.resolve(img).geometry
     assert g.zone == 1 and g.zone_name == "PI_Opening"
+
+
+def test_recipe_name_dynamic(monkeypatch, tmp_path):
+    """결과 폴더 recipe 파일의 RecipeName/RecipeNumber 로 recipe 이름을 읽는다(자재별)."""
+    _install_schema(monkeypatch)
+    recipe_name.recipe_map.cache_clear()
+    pixel_size.scan_pixel_size_xy.cache_clear()
+    _write_flt(tmp_path, _pack_record(
+        actual_x=100.0, actual_y=200.0, area=10.0, blob_breadth=1.0,
+        blob_feret_max=2.0, contrast=5.0, zone=1, recipe=2))
+    (tmp_path / "ProductInfo.ini").write_text(
+        "[R0]\nRecipeName=PI_Bubble\nRecipeNumber=1\n"
+        "[R1]\nRecipeName=PI\nRecipeNumber=2\n", encoding="utf-8")
+    img = _write_ini(tmp_path, "x.100.200", 100.0, 200.0)
+    g = geometry.resolve(img).geometry
+    assert g.recipe == 2 and g.recipe_name == "PI"
+
+
+def test_recipe_name_scans_all_ini(tmp_path):
+    """대표 ini 에 없으면 폴더 안 임의 *.ini 까지 확대 검색('(매핑없음)' 대비)."""
+    recipe_name.recipe_map.cache_clear()
+    # 대표 파일(ProductInfo/RecipesInfo)이 아닌 다른 이름의 ini 에 매핑이 있다.
+    (tmp_path / "Recipe_Custom.ini").write_text(
+        "[A]\nRecipeName=PI\nRecipeNumber=2\n", encoding="utf-8")
+    assert recipe_name.name_for(tmp_path, 2) == "PI"
+    assert recipe_name.name_for(tmp_path, 99) is None
+
+
+def test_zone_name_scans_all_ini(tmp_path):
+    """zone 도 대표 ini 에 없으면 임의 *.ini 까지 확대('(매핑없음)' 대비)."""
+    zone_name.zone_map.cache_clear()
+    (tmp_path / "Zones_Custom.ini").write_text(
+        "[A]\nZoneName=RDL\nZoneID=2\n", encoding="utf-8")
+    assert zone_name.name_for(tmp_path, 2) == "RDL"
+
+
+def test_geometry_anisotropic_area(monkeypatch, tmp_path):
+    """면적은 px_x × px_y(이방성)로 환산 — X≠Y 면 px² 와 다른 값이 나온다."""
+    _install_schema(monkeypatch)
+    pixel_size.scan_pixel_size_xy.cache_clear()
+    _write_flt(tmp_path, _pack_record(
+        actual_x=100.0, actual_y=200.0, area=250.0,
+        blob_breadth=2.0, blob_feret_max=11.0, contrast=5.0, zone=1, recipe=2))
+    (tmp_path / "Params_WaferInfo.ini").write_text(
+        "[Wafer]\nRefPixelSizeX=0.7696441\nRefPixelSizeY=0.769460\n",
+        encoding="utf-8")
+    img = _write_ini(tmp_path, "x.100.200", 100.0, 200.0)
+    g = geometry.resolve(img).geometry
+    # 선형(width/length)·pixel_um 은 px_x 를 쓴다.
+    assert abs(g.pixel_um - 0.7696441) < 1e-9
+    assert abs(g.width_um - 2.0 * 0.7696441) < 1e-6
+    # 면적은 px_x × px_y — px_x² 보다 작다(px_y < px_x).
+    assert abs(g.area_um2 - 250.0 * 0.7696441 * 0.769460) < 1e-4
+    assert g.area_um2 < 250.0 * 0.7696441 ** 2
 
 
 def test_zone_name_map_and_missing(tmp_path):
@@ -174,13 +229,13 @@ def test_zone_name_map_and_missing(tmp_path):
 
 def test_pixel_size_priority(tmp_path):
     """우선순위: Params_WaferInfo.ini(RefPixelSizeX) > ProductInfo.ini(Scan2DPixelSize)."""
-    pixel_size.scan_pixel_size.cache_clear()
+    pixel_size.scan_pixel_size_xy.cache_clear()
     (tmp_path / "ProductInfo.ini").write_text("Scan2DPixelSize=0.7708\n", encoding="utf-8")
     assert abs(pixel_size.scan_pixel_size(tmp_path) - 0.7708) < 1e-9
-    pixel_size.scan_pixel_size.cache_clear()
+    pixel_size.scan_pixel_size_xy.cache_clear()
     (tmp_path / "Params_WaferInfo.ini").write_text("RefPixelSizeX=0.7707764\n", encoding="utf-8")
     assert abs(pixel_size.scan_pixel_size(tmp_path) - 0.7707764) < 1e-9  # 우선
-    pixel_size.scan_pixel_size.cache_clear()
+    pixel_size.scan_pixel_size_xy.cache_clear()
     assert pixel_size.scan_pixel_size(tmp_path / "none") is None  # 없으면 None
 
 

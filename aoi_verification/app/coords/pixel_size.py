@@ -20,12 +20,13 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
-# (파일 상대경로, 키) 우선순위.
+# (파일 상대경로, X키, Y키) 우선순위.  Y키 None 이면 단일값(X=Y).
+# 면적은 px_x × px_y(이방성)로 환산해야 정확하다(실측: PI3-KMY 는 X≠Y 미세차).
 _SOURCES = (
-    ("Params_WaferInfo.ini", "RefPixelSizeX"),
-    ("TrainData/Die.ini", "PixelSize_X"),
-    ("ProductInfo.ini", "Scan2DPixelSize"),
-    ("RecipesInfo.ini", "Scan2DPixelSize"),
+    ("Params_WaferInfo.ini", "RefPixelSizeX", "RefPixelSizeY"),
+    ("TrainData/Die.ini", "PixelSize_X", "PixelSize_Y"),
+    ("ProductInfo.ini", "Scan2DPixelSize", None),
+    ("RecipesInfo.ini", "Scan2DPixelSize", None),
 )
 # 합리적 픽셀 크기 범위(µm/px) — 엉뚱한 값 채택 방지.
 _MIN, _MAX = 0.05, 5.0
@@ -47,13 +48,21 @@ def _read_key(path: Path, key: str) -> Optional[float]:
 
 
 @lru_cache(maxsize=256)
-def scan_pixel_size(folder: Path) -> Optional[float]:
-    """결과 폴더의 2D 스캔 픽셀 크기(µm/px).  못 찾으면 None.  fail-safe."""
+def scan_pixel_size_xy(folder: Path):
+    """결과 폴더의 2D 스캔 픽셀 크기 (px_x, px_y).  못 찾으면 None.  fail-safe."""
     try:
-        for rel, key in _SOURCES:
-            v = _read_key(folder / rel, key)
-            if v is not None:
-                return v
+        for rel, kx, ky in _SOURCES:
+            x = _read_key(folder / rel, kx)
+            if x is None:
+                continue
+            y = _read_key(folder / rel, ky) if ky else None
+            return (x, y if y is not None else x)
     except Exception:
         return None
     return None
+
+
+def scan_pixel_size(folder: Path) -> Optional[float]:
+    """선형 환산용 px_x(µm/px).  못 찾으면 None."""
+    xy = scan_pixel_size_xy(folder)
+    return xy[0] if xy else None

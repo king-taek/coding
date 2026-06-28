@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from . import abs_coord, pixel_size, surface_flt, zone_name
+from . import abs_coord, pixel_size, recipe_name, surface_flt, zone_name
 from .models import DefectGeometry, SURFACE_LEN_FACTOR
 from .surface_flt import RawRecord
 
@@ -67,18 +67,23 @@ def resolve(image_path: Path) -> GeometryResult:
         if rec is None:
             return GeometryResult("no_data", None)
         # 2D 스캔 픽셀 크기를 결과 폴더에서 읽는다(자재/웨이퍼별로 다름). 없으면 0.77.
-        px = pixel_size.scan_pixel_size(folder)
-        if px is None:
-            px = SURFACE_LEN_FACTOR
+        # 면적은 px_x × px_y(이방성)로 환산해야 정확하다(실측: PI3-KMY 는 X≠Y 미세차로
+        # 단일 px² 면 0.02~0.03 ㎛² 어긋난다). 선형(width/length)은 px_x 를 쓴다.
+        xy = pixel_size.scan_pixel_size_xy(folder)
+        if xy is None:
+            px_x = px_y = SURFACE_LEN_FACTOR
+        else:
+            px_x, px_y = xy
         geom = DefectGeometry(
-            area_um2=rec.area * px * px,
-            width_um=rec.blob_breadth * px,
-            length_um=rec.blob_feret_max * px,
+            area_um2=rec.area * px_x * px_y,
+            width_um=rec.blob_breadth * px_x,
+            length_um=rec.blob_feret_max * px_x,
             contrast=rec.contrast,
             zone=int(rec.zone),
             recipe=int(rec.recipe),
-            pixel_um=px,
+            pixel_um=px_x,
             zone_name=zone_name.name_for(folder, int(rec.zone)) or "",
+            recipe_name=recipe_name.name_for(folder, int(rec.recipe)) or "",
         )
         return GeometryResult("ok", geom)
     except Exception:
