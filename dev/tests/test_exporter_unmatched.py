@@ -234,6 +234,9 @@ def test_unmatched_geometry_rendered(qapp, isolated_cache, tmp_path, monkeypatch
     assert "zone" in d3 and "recipe" in d3
     # zone/recipe 이름이 코드 옆에 함께 표기된다.
     assert "PI_Opening" in d3 and "PI" in d3
+    # 매칭단계 메커니즘으로 col/row/x/y 도 함께 표기(Col=3,Row=5 → col1/row2).
+    assert "col 1 / row 2" in d3
+    assert "x " in d3 and "y " in d3
     # contrast 108 (비0) → 값이 그대로, '—' 아님.
     assert "108" in d3 and "contrast —" not in d3
 
@@ -288,6 +291,38 @@ def test_unmatched_no_flt_marker(qapp, isolated_cache, tmp_path, monkeypatch):
     d3 = str(ws["D3"].value)
     assert "z_miss.jpeg" in d3
     assert i18n.KO.GEOM_NOT_SUPPORTED in d3
+
+
+def test_unmatched_coords_without_flt(qapp, isolated_cache, tmp_path, monkeypatch):
+    """Surface.flt 가 없어도(미지원 자재) col/row/x/y 는 매칭단계 메커니즘으로 표기."""
+    from aoi_verification.app import i18n
+    _install_flt_schema(monkeypatch)
+    src = tmp_path / "src"
+    src.mkdir()
+    ref = _make_image(src, "a_ref.jpeg")
+    val = _make_image(src, "a_val.jpeg")
+    miss = _make_image(src, "z_miss.jpeg")  # Surface.flt 없음 → 미지원 자재
+    # INI 는 있으니 좌표는 나온다(Col=4,Row=4 → col2/row3).
+    (src / "ColorImageGrabingInfo.ini").write_text(
+        "[z_miss.jpeg]\nX=150000\nY=220000\nCol=4\nRow=4\n", encoding="utf-8")
+
+    result = FinalResult(
+        mode="single", ref_machine="1호기", val_machine="2호기",
+        matches=[MatchResult(slot="S1", ref_path=ref, val_path=val, score=0.9)],
+        unmatched_refs=[MissEntry(slot="S1", side="ref", path=miss, note="미매칭")],
+    )
+    dst = tmp_path / "out.xlsx"
+    ExcelExporter(result, dst_path=dst,
+                  template_path=tmp_path / "no_template.xlsx").run()
+
+    from openpyxl import load_workbook
+    ws = load_workbook(str(dst), rich_text=True)[i18n.KO.SHEET_UNMATCHED]
+    d3 = str(ws["D3"].value)
+    assert "z_miss.jpeg" in d3
+    # Surface.flt 없음 마커 + 좌표가 함께.
+    assert i18n.KO.GEOM_NOT_SUPPORTED in d3
+    assert "col 2 / row 3" in d3
+    assert "x " in d3 and "y " in d3
 
 
 def test_machine_label_rule():

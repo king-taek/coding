@@ -437,7 +437,9 @@ class ExcelExporter(QThread):
                 # (#geometry).  geometry 비활성(스키마 미충전) 이면 기존과 동일.
                 cell_val = ws[f"{COL_VAL}{row}"]
                 name = Path(u.path).name
-                blocks = self._geometry_blocks(u.path)
+                # geometry(Surface.flt) + 좌표(col/row/x/y, 매칭단계 메커니즘 재사용).
+                # 좌표는 Surface.flt 유무와 무관하므로 미지원 자재 행에도 붙는다.
+                blocks = self._geometry_blocks(u.path) + self._coord_blocks(u.path)
                 if blocks:
                     from openpyxl.cell.rich_text import CellRichText, TextBlock
                     from openpyxl.cell.text import InlineFont
@@ -498,6 +500,32 @@ class ExcelExporter(QThread):
             return [TextBlock(grey, f"\n{i18n.KO.GEOM_NO_DATA}")]
         except Exception:
             # rich_text 미지원 openpyxl 등 — 마커 없이 기존 동작으로 폴백.
+            return []
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _coord_blocks(path) -> list:
+        """미매칭 행 D열에 덧붙일 좌표(col/row/x/y) 회색 TextBlock 목록.
+
+        매칭 단계와 **동일한 메커니즘**(:func:`coords.resolve`)을 그대로 써서
+        die col/row 와 die 내부 local x/y(µm)를 얻는다 — col/row/x/y 모두
+        DefectCoord 에 이미 함께 들어 있다.  Surface.flt 유무와 무관하므로
+        측정정보 미지원 자재 행에도 위치 식별용으로 붙는다.  best-effort.
+        """
+        try:
+            from ..coords import resolve as resolve_coord
+            from openpyxl.cell.rich_text import TextBlock
+            from openpyxl.cell.text import InlineFont
+
+            c = resolve_coord(Path(path))
+            if c is None:
+                return []
+            grey = InlineFont(sz=8, color="FF808080")
+            return [
+                TextBlock(grey, f"\ncol {c.col} / row {c.row}"),
+                TextBlock(grey, f"\nx {c.x:.0f} / y {c.y:.0f} ㎛"),
+            ]
+        except Exception:
             return []
 
     # ------------------------------------------------------------------
