@@ -30,7 +30,10 @@ def main() -> int:
 
     frozen = bool(getattr(sys, "frozen", False))
     root = bootstrap.data_root()
-    repo, branch = updater.DEFAULT_REPO, updater.DEFAULT_BRANCH
+    # 최초 설치(클론)도 자동 업데이트와 동일하게 **저장소 GitHub 기본 브랜치**를 받는다.
+    # (api.github.com 차단 시 updater.DEFAULT_BRANCH 폴백 — _default_branch 내부 처리.)
+    repo = updater.DEFAULT_REPO
+    branch = updater._default_branch(repo)
 
     # 앱·패키지·캐시를 모두 설치 폴더("AOI Recipe Verification") 안에 담기 위해, 앱이
     # 캐시를 이 폴더 아래에 두도록 환경변수로 지정한다(paths.cache_root 가 읽음).

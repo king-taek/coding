@@ -28,9 +28,12 @@ from typing import Optional
 from . import paths
 
 DEFAULT_REPO = "king-taek/coding"
-# VERSION·git 이 모두 없을 때(일반 사용자 PC) 도 업데이트를 받을 수 있도록, 추적
-# 대상 저장소/브랜치를 코드에 내장한다.  자동 업데이트의 단일 기준은 ``main`` 이다.
-DEFAULT_BRANCH = "main"
+# 자동 업데이트의 단일 기준은 **저장소의 GitHub 기본(default) 브랜치**다(과거엔 main 이었으나
+# main 은 삭제됨).  기본 브랜치 이름은 api.github.com 에서 동적으로 조회하고(_default_branch),
+# 조회 실패(사내망에서 api.github.com 차단 등) 시 아래 상수를 폴백으로 쓴다.  VERSION·git 이
+# 모두 없는 일반 사용자 PC 도 이 폴백으로 업데이트를 받을 수 있다.
+DEFAULT_BRANCH = "claude/aoi-verification-app-LAXpX"
+_API_REPO = "https://api.github.com/repos/{repo}"
 _API = "https://api.github.com/repos/{repo}/commits/{branch}"
 # 사내망이 api.github.com 만 막고 github.com(웹)은 허용하는 경우의 폴백 — 공개
 # 저장소의 커밋 Atom 피드(github.com 호스트)에서 최신 커밋 SHA 를 읽는다.
@@ -241,16 +244,39 @@ def latest_commit(repo: str, branch: str, timeout: float = 15.0) -> Optional[dic
     return _latest_via_atom(repo, branch, timeout)
 
 
-def _resolve_branch(branch: Optional[str]) -> str:
-    """VERSION 에 박힌 추적 브랜치를 자동 업데이트 기준(``main``)으로 정규화한다.
+_default_branch_cache: dict = {}
+
+
+def _default_branch(repo: str, timeout: float = 10.0) -> str:
+    """저장소의 GitHub 기본(default) 브랜치 이름.  조회 실패 시 ``DEFAULT_BRANCH`` 폴백.
+
+    ``GET /repos/{repo}`` 의 ``default_branch`` 를 읽는다.  api.github.com 이 막힌 사내망에선
+    조회가 불가하므로 폴백 상수를 쓴다.  한 번 성공하면 프로세스 동안 캐시(repo 별)."""
+    if repo in _default_branch_cache:
+        return _default_branch_cache[repo]
+    try:
+        raw = _http_get(_API_REPO.format(repo=repo),
+                        {**_UA, "Accept": "application/vnd.github+json"}, timeout)
+        b = (json.loads(raw.decode("utf-8")).get("default_branch") or "").strip()
+        if b:
+            _default_branch_cache[repo] = b
+            return b
+    except Exception:
+        pass
+    return DEFAULT_BRANCH
+
+
+def _resolve_branch(branch: Optional[str], repo: str = DEFAULT_REPO) -> str:
+    """VERSION 에 박힌 추적 브랜치를 자동 업데이트 기준(**저장소 기본 브랜치**)으로 정규화한다.
 
     과거 포터블 빌드는 VERSION 에 작업 브랜치(``claude/…``)를 스탬프했으므로, 그대로 두면
-    상수만 바꿔도 옛 빌드는 계속 옛 브랜치를 본다.  비었거나 ``claude/`` 로 시작하는(=과거
-    작업 브랜치) 값은 ``DEFAULT_BRANCH`` 로 치환해 **모든 배포본이 main 으로 합류**하게 한다.
-    그 외 명시적 브랜치(예: ``release``)는 존중한다.  ※ 개발/클론(git HEAD) 경로엔 적용 안 함."""
+    옛 빌드는 계속 옛(삭제됐을 수 있는) 브랜치를 본다.  비었거나 ``claude/`` 로 시작하는(=과거
+    작업 브랜치) 값은 저장소의 GitHub 기본 브랜치로 치환해 **모든 배포본이 기본 브랜치로
+    합류**하게 한다.  그 외 명시적 브랜치(예: ``release``)는 존중한다.
+    ※ 개발/클론(git HEAD) 경로엔 적용 안 함."""
     b = (branch or "").strip()
     if not b or b.startswith("claude/"):
-        return DEFAULT_BRANCH
+        return _default_branch(repo)
     return b
 
 
@@ -262,7 +288,7 @@ def check_for_update() -> Optional[dict]:
     if not cur or not cur.get("sha"):
         return None
     repo = cur.get("repo") or DEFAULT_REPO
-    branch = _resolve_branch(cur.get("branch"))
+    branch = _resolve_branch(cur.get("branch"), repo)
     if not branch:
         return None
     latest = latest_commit(repo, branch)
@@ -307,12 +333,12 @@ def _identity() -> tuple:
     기본값으로 알 수 있으므로 **최신 버전을 받아 적용하는 것은 가능**하다."""
     cur = current_version()
     if cur and cur.get("branch"):
-        return (cur.get("repo") or DEFAULT_REPO,
-                _resolve_branch(cur["branch"]), str(cur.get("sha") or ""))
+        repo = cur.get("repo") or DEFAULT_REPO
+        return (repo, _resolve_branch(cur["branch"], repo), str(cur.get("sha") or ""))
     gh = _git_head()
     if gh and gh.get("branch"):
         return (gh.get("repo") or DEFAULT_REPO, gh["branch"], str(gh.get("sha") or ""))
-    return (DEFAULT_REPO, DEFAULT_BRANCH, "")
+    return (DEFAULT_REPO, _default_branch(DEFAULT_REPO), "")
 
 
 def manual_check() -> tuple:

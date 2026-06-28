@@ -4,7 +4,21 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from aoi_verification.app.utils import updater
+
+# 테스트에서 가정하는 '저장소 기본 브랜치'(실제 조회는 네트워크라 스텁).  입력 브랜치와
+# 구분되는 값을 써서 '리졸버가 기본 브랜치로 치환했음' 을 명확히 단정한다.
+_STUB_DEFAULT = "default-branch"
+
+
+@pytest.fixture(autouse=True)
+def _stub_default_branch(monkeypatch):
+    """모든 테스트에서 GitHub 기본 브랜치 조회를 네트워크 없이 결정적으로 만든다."""
+    updater._default_branch_cache.clear()
+    monkeypatch.setattr(updater, "_default_branch",
+                        lambda repo, timeout=10.0: _STUB_DEFAULT)
 
 
 def _write_version(tmp_path, monkeypatch, data: dict | None):
@@ -100,7 +114,7 @@ def test_manual_check_offers_latest_when_current_unknown(tmp_path, monkeypatch):
     status, info = updater.manual_check()
     assert status == "update"
     assert info["current_unknown"] is True
-    assert info["branch"] == updater.DEFAULT_BRANCH
+    assert info["branch"] == _STUB_DEFAULT      # 기본 브랜치(동적 조회)로 추적
     assert info["repo"] == updater.DEFAULT_REPO
 
 
@@ -113,19 +127,45 @@ def test_manual_check_unknown_on_network_fail(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# 레거시 브랜치 정규화 — 옛 빌드(VERSION branch=claude/…)도 main 으로 합류
+# 레거시 브랜치 정규화 — 옛 빌드(VERSION branch=claude/…)도 저장소 기본 브랜치로 합류
 # ---------------------------------------------------------------------------
-def test_resolve_branch_normalizes_legacy_to_main():
-    assert updater._resolve_branch("claude/matching-npu-gpu-modes-GwTRB") == "main"
-    assert updater._resolve_branch("") == "main"
-    assert updater._resolve_branch(None) == "main"
-    assert updater._resolve_branch("main") == "main"
+def test_resolve_branch_normalizes_legacy_to_default():
+    # 비었거나 claude/ 로 시작하면 → 저장소 기본 브랜치(스텁)로 치환.
+    assert updater._resolve_branch("claude/matching-npu-gpu-modes-GwTRB") == _STUB_DEFAULT
+    assert updater._resolve_branch("claude/aoi-verification-app-LAXpX") == _STUB_DEFAULT
+    assert updater._resolve_branch("") == _STUB_DEFAULT
+    assert updater._resolve_branch(None) == _STUB_DEFAULT
+    # 명시적(비-claude) 브랜치는 그대로 존중.
     assert updater._resolve_branch("release") == "release"
-    assert updater.DEFAULT_BRANCH == "main"
+    assert updater._resolve_branch("dev") == "dev"
+    # 폴백 상수는 더 이상 main 이 아니다(main 삭제됨).
+    assert updater.DEFAULT_BRANCH != "main"
 
 
-def test_check_migrates_legacy_version_branch_to_main(tmp_path, monkeypatch):
-    # 과거 포터블 빌드(VERSION 에 작업 브랜치 스탬프) 는 main 을 추적해야 한다.
+def test_default_branch_resolves_from_api(monkeypatch):
+    # 실제 _default_branch 는 GET /repos/{repo} 의 default_branch 를 읽는다.
+    monkeypatch.undo()  # autouse 스텁 해제하고 진짜 함수 검증
+    updater._default_branch_cache.clear()
+    monkeypatch.setattr(updater, "_http_get",
+                        lambda url, headers, timeout: json.dumps(
+                            {"default_branch": "the-default"}).encode("utf-8"))
+    assert updater._default_branch("o/r") == "the-default"
+    # 캐시: 두 번째 호출은 네트워크 없이 같은 값.
+    monkeypatch.setattr(updater, "_http_get",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("blocked")))
+    assert updater._default_branch("o/r") == "the-default"
+
+
+def test_default_branch_falls_back_when_api_blocked(monkeypatch):
+    monkeypatch.undo()
+    updater._default_branch_cache.clear()
+    monkeypatch.setattr(updater, "_http_get",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("blocked")))
+    assert updater._default_branch("o/r") == updater.DEFAULT_BRANCH
+
+
+def test_check_migrates_legacy_version_branch_to_default(tmp_path, monkeypatch):
+    # 과거 포터블 빌드(VERSION 에 작업 브랜치 스탬프) 는 기본 브랜치를 추적해야 한다.
     _write_version(tmp_path, monkeypatch,
                    {"sha": "OLD", "branch": "claude/matching-npu-gpu-modes-GwTRB",
                     "repo": "o/r"})
@@ -138,17 +178,17 @@ def test_check_migrates_legacy_version_branch_to_main(tmp_path, monkeypatch):
     monkeypatch.setattr(updater, "latest_commit", _latest)
     info = updater.check_for_update()
     assert info and info["sha"] == "NEW"
-    assert info["branch"] == "main"          # 반환값도 main 으로 정규화
-    assert seen["branch"] == "main"          # 원격 조회도 main 으로 수행
+    assert info["branch"] == _STUB_DEFAULT       # 반환값도 기본 브랜치로 정규화
+    assert seen["branch"] == _STUB_DEFAULT       # 원격 조회도 기본 브랜치로 수행
 
 
-def test_manual_check_migrates_legacy_version_branch_to_main(tmp_path, monkeypatch):
+def test_manual_check_migrates_legacy_version_branch_to_default(tmp_path, monkeypatch):
     _write_version(tmp_path, monkeypatch,
                    {"sha": "OLD", "branch": "claude/anything", "repo": "o/r"})
     monkeypatch.setattr(updater, "latest_commit",
                         lambda r, b: {"sha": "NEW", "message": "fix"})
     status, info = updater.manual_check()
-    assert status == "update" and info["branch"] == "main"
+    assert status == "update" and info["branch"] == _STUB_DEFAULT
 
 
 def test_latest_commit_atom_fallback(monkeypatch):
