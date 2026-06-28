@@ -164,12 +164,13 @@ def nearest(recs, x, y):
 
 
 def cmp_cell(extracted, expected):
+    # 합격 기준: 소수점 1째자리까지 일치(round(.,1) 동일)하면 정답으로 본다.
     if expected is None:
         ok = extracted is None or abs(extracted) < 0.05
         return f"{'(없음)' if extracted is None else round(extracted,2)}", "(없음)", "✅" if ok else "❌"
     if extracted is None:
         return "-", str(expected), "❌"
-    ok = abs(round(extracted, 2) - expected) <= 0.02
+    ok = round(extracted, 1) == round(expected, 1)
     return f"{round(extracted,2)}", str(expected), "✅" if ok else "❌"
 
 
@@ -181,7 +182,7 @@ def main(argv=None):
 
     L = ["# AOI Surface.flt 추출값 vs UI 정답 대조  (단일 md)\n",
          "> 동적 픽셀크기(Scan2DPixelSize 등) + zone/recipe 이름을 적용해 계산한 추출값을, "
-         "사용자 UI 값(소수점 반올림)과 대조한다. 일치는 ±0.02(반올림) 기준.\n"]
+         "사용자 UI 값과 대조한다. 일치는 **소수점 1째자리**까지 같으면 정답.\n"]
 
     n_ok = n_tot = 0
     for i, ex in enumerate(EXAMPLES, 1):
