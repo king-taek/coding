@@ -482,7 +482,7 @@ class ExcelExporter(QThread):
                 contrast_txt = ("contrast —" if g.contrast == 0
                                 else f"contrast {g.contrast:.2f}")
                 return [
-                    TextBlock(grey, f"\narea {g.area_um2:.1f} ㎛²"),
+                    TextBlock(grey, f"\narea {g.area_um2:.2f} ㎛²"),
                     TextBlock(grey, f"\nwidth {g.width_um:.2f} ㎛"),
                     TextBlock(grey, f"\nlength {g.length_um:.2f} ㎛"),
                     TextBlock(grey, f"\n{contrast_txt}"),
