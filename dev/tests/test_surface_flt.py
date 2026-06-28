@@ -177,6 +177,33 @@ def test_recipe_name_dynamic(monkeypatch, tmp_path):
     assert g.recipe == 2 and g.recipe_name == "PI"
 
 
+def test_recipe_name_from_recipesinfo_sections(tmp_path):
+    """RecipesInfo.ini 의 [Recipe-<N>] Name= (실측 주 형식)."""
+    recipe_name.recipe_map.cache_clear()
+    (tmp_path / "RecipesInfo.ini").write_text(
+        "[Recipe-1]\nName=PI_Bubble\nScan2DPixelSize=0.7708\n"
+        "[Recipe-2]\nName=PI\n[Recipes]\nCount=2\n", encoding="utf-8")
+    assert recipe_name.name_for(tmp_path, 1) == "PI_Bubble"
+    assert recipe_name.name_for(tmp_path, 2) == "PI"
+    assert recipe_name.name_for(tmp_path, 9) is None
+
+
+def test_zone_name_from_zones_subfolder(tmp_path):
+    """Zones\\<name>.ini 서브폴더의 [General] ZoneName/ZoneID (실측 주 형식).
+
+    ZoneID 가 Surface.flt 코드와 일치한다(Scan Area=63 등)."""
+    zone_name.zone_map.cache_clear()
+    zdir = tmp_path / "Zones"
+    zdir.mkdir()
+    (zdir / "RDL.ini").write_text(
+        "[General]\nZoneName=RDL\nZoneID=2\nTypeName=Surface\n", encoding="utf-8")
+    (zdir / "Scan Area.ini").write_text(
+        "[General]\nZoneName=Scan Area\nZoneID=63\n", encoding="utf-8")
+    assert zone_name.name_for(tmp_path, 2) == "RDL"
+    assert zone_name.name_for(tmp_path, 63) == "Scan Area"
+    assert zone_name.name_for(tmp_path, 99) is None
+
+
 def test_recipe_name_scans_all_ini(tmp_path):
     """대표 ini 에 없으면 폴더 안 임의 *.ini 까지 확대 검색('(매핑없음)' 대비)."""
     recipe_name.recipe_map.cache_clear()

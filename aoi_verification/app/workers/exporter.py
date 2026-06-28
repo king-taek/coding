@@ -483,16 +483,17 @@ class ExcelExporter(QThread):
                 # 안 함'을 뜻하므로 '—' 로 표기(0.00 으로 오해 방지).
                 contrast_txt = ("contrast —" if g.contrast == 0
                                 else f"contrast {g.contrast:.2f}")
+                # 표기 순서: recipe/zone → area → width → length → contrast
+                # (이어서 _coord_blocks 가 col/row → x/y 를 덧붙인다).
                 return [
+                    TextBlock(grey, f"\nrecipe {g.recipe}"
+                                    + (f" ({g.recipe_name})" if g.recipe_name else "")
+                                    + f" / zone {g.zone}"
+                                    + (f" ({g.zone_name})" if g.zone_name else "")),
                     TextBlock(grey, f"\narea {g.area_um2:.2f} ㎛²"),
                     TextBlock(grey, f"\nwidth {g.width_um:.2f} ㎛"),
                     TextBlock(grey, f"\nlength {g.length_um:.2f} ㎛"),
                     TextBlock(grey, f"\n{contrast_txt}"),
-                    TextBlock(grey, f"\nzone {g.zone}"
-                                    + (f" ({g.zone_name})" if g.zone_name else "")
-                                    + f" / recipe {g.recipe}"
-                                    + (f" ({g.recipe_name})" if g.recipe_name else "")),
-                    TextBlock(grey, f"\npx {g.pixel_um:.4f}㎛"),
                 ]
             if res.status == "no_flt":
                 return [TextBlock(grey, f"\n{i18n.KO.GEOM_NOT_SUPPORTED}")]

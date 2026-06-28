@@ -239,6 +239,13 @@ def test_unmatched_geometry_rendered(qapp, isolated_cache, tmp_path, monkeypatch
     assert "x " in d3 and "y " in d3
     # contrast 108 (비0) → 값이 그대로, '—' 아님.
     assert "108" in d3 and "contrast —" not in d3
+    # 표기 순서: recipe/zone → area → width → length → contrast → col/row → x/y.
+    order = ["recipe", "\narea", "\nwidth", "\nlength", "contrast",
+             "\ncol ", "\nx "]
+    idx = [d3.index(tok) for tok in order]
+    assert idx == sorted(idx), f"표기 순서 어긋남: {idx}"
+    # px 줄은 더 이상 표기하지 않는다.
+    assert "px " not in d3 and "㎛/px" not in d3
 
 
 def test_unmatched_geometry_contrast_zero_dash(qapp, isolated_cache, tmp_path,
