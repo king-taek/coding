@@ -485,11 +485,11 @@ class ExcelExporter(QThread):
                                 else f"contrast {g.contrast:.2f}")
                 # 표기 순서: recipe/zone → area → width → length → contrast
                 # (이어서 _coord_blocks 가 col/row → x/y 를 덧붙인다).
+                # 이름만 표기(코드 숫자 없이). 이름을 못 찾은 자재만 코드로 폴백(빈칸 방지).
+                recipe_disp = g.recipe_name or str(g.recipe)
+                zone_disp = g.zone_name or str(g.zone)
                 return [
-                    TextBlock(grey, f"\nrecipe {g.recipe}"
-                                    + (f" ({g.recipe_name})" if g.recipe_name else "")
-                                    + f" / zone {g.zone}"
-                                    + (f" ({g.zone_name})" if g.zone_name else "")),
+                    TextBlock(grey, f"\nrecipe {recipe_disp} / zone {zone_disp}"),
                     TextBlock(grey, f"\narea {g.area_um2:.2f} ㎛²"),
                     TextBlock(grey, f"\nwidth {g.width_um:.2f} ㎛"),
                     TextBlock(grey, f"\nlength {g.length_um:.2f} ㎛"),

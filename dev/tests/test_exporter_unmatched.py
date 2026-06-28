@@ -232,8 +232,9 @@ def test_unmatched_geometry_rendered(qapp, isolated_cache, tmp_path, monkeypatch
     assert "z_miss.jpeg" in d3
     assert "area" in d3 and "contrast" in d3
     assert "zone" in d3 and "recipe" in d3
-    # zone/recipe 이름이 코드 옆에 함께 표기된다.
-    assert "PI_Opening" in d3 and "PI" in d3
+    # zone/recipe 는 이름만 표기(코드 숫자 없이).
+    assert "recipe PI / zone PI_Opening" in d3
+    assert "recipe 2" not in d3 and "zone 1" not in d3
     # 매칭단계 메커니즘으로 col/row/x/y 도 함께 표기(Col=3,Row=5 → col1/row2).
     assert "col 1 / row 2" in d3
     assert "x " in d3 and "y " in d3
