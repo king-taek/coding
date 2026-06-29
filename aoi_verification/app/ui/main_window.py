@@ -690,7 +690,7 @@ class MainWindow(QMainWindow):
     def _ask_kla_side(self) -> Optional[str]:
         """매칭 실패 폴더가 있을 때 'KLA 가 어느 쪽인가?' 를 묻는다.
 
-        반환 "ref"/"val" 또는 None(KLA 아님 → 파일명/OCR 자동 매칭 건너뜀)."""
+        반환 "ref"/"val"/"both" 또는 None(KLA 아님 → 파일명/OCR 자동 매칭 건너뜀)."""
         box = QMessageBox(self)
         box.setWindowTitle(i18n.KO.KLA_ASK_TITLE)
         box.setIcon(QMessageBox.Icon.Question)
@@ -707,6 +707,8 @@ class MainWindow(QMainWindow):
                                 QMessageBox.ButtonRole.YesRole)
         val_btn = box.addButton(i18n.KO.KLA_SIDE_VAL,
                                 QMessageBox.ButtonRole.NoRole)
+        both_btn = box.addButton(i18n.KO.KLA_SIDE_BOTH,
+                                 QMessageBox.ButtonRole.ActionRole)
         box.addButton(i18n.KO.KLA_SIDE_NONE, QMessageBox.ButtonRole.RejectRole)
         box.setDefaultButton(ref_btn)
         box.exec()
@@ -715,6 +717,8 @@ class MainWindow(QMainWindow):
             return "ref"
         if clicked is val_btn:
             return "val"
+        if clicked is both_btn:
+            return "both"
         return None
 
     def _resolve_and_merge_kla(self, sr: ScanResult, kla_side: str,

@@ -6,8 +6,10 @@
     1. col/row 가 완전히 일치해야 후보로 인정 (정수 게이트).
     2. dist = sqrt((x1-x2)²+(y1-y2)²)
        · dist ≤ tol              → 양수 score = 1 - dist/tol  (허용 오차 내)
-       · tol < dist ≤ tol×3     → 음수 score = -(dist/tol)   (근접 1장만)
+       · tol < dist ≤ tol×3     → 음수 score = -(dist/tol)   (허용범위 초과)
        · dist > tol×3           → 매치 실패 (_failed_set 에 추가, 결과 빈 목록)
+       표시 규칙(검토 화면): 최소 거리 ≤ CONFIDENT_DIST 면 '거의 정확히 일치'로
+       보고 후보 1장만, 그렇지 않으면 tol×3 이내 후보를 모두 차순위로 보여준다.
     3. 좌표가 없는 ref 는 score_ref_classical 으로 폴백(기본 모드 동작 보존).
     4. 모든 이미지 좌표를 시작 전 일괄 프리패치해 INI/KLA 반복 파싱을 방지.
 
@@ -44,6 +46,36 @@ try:
     _HAS_NUMPY = True
 except ImportError:
     _HAS_NUMPY = False
+
+
+# 좌표 차이가 이 값(좌표 단위, µm) 이하이면 '거의 정확히 일치'로 보고 후보 1장만
+# 보여준다. 초과 시 tol×3 이내 후보를 모두 차순위로 노출해 사용자가 직접 고른다.
+CONFIDENT_DIST = 20.0
+
+
+def _select_coord_candidates(
+    within3: List[Tuple[Path, float]], tol: float
+) -> List[Tuple[Path, float]]:
+    """tol×3 이내 후보 ``(path, dist)`` 목록에서 검토 화면에 보여줄 후보를
+    ``(path, score)`` 로 환산해 반환한다(거리 오름차순 = 점수 내림차순).
+
+    · 최소 거리 ≤ :data:`CONFIDENT_DIST`  → 가장 가까운 1장만 (확정에 가까움).
+    · 그 외                                → 전부 노출(사용자가 직접 고름).
+
+    score 인코딩은 ``_RunnerUpTile`` 역산과 round-trip 되게 유지한다:
+    dist ≤ tol 은 양수(1-dist/tol), tol < dist ≤ tol×3 은 음수(-dist/tol).
+    """
+    def score_of(dist: float) -> float:
+        if dist <= tol:
+            return max(0.0, 1.0 - dist / tol) if tol > 0 else 1.0
+        return -(dist / tol) if tol > 0 else -1.0
+
+    ordered = sorted(within3, key=lambda x: x[1])
+    if not ordered:
+        return []
+    if ordered[0][1] <= CONFIDENT_DIST:
+        ordered = ordered[:1]
+    return [(p, score_of(d)) for p, d in ordered]
 
 
 # ---------------------------------------------------------------------------
@@ -169,8 +201,8 @@ class CoordScheduler(QThread):
                     self.failed_set.add((slot, ref.path))
                     self._results[(slot, ref.path)] = []
                 else:
-                    scored_in_tol: List[Tuple[Path, float]] = []
-                    near_candidates: List[Tuple[Path, float]] = []
+                    # tol×3 이내 후보를 (path, dist) 로 모은다(numpy·비numpy 동일).
+                    within3: List[Tuple[Path, float]] = []
 
                     # ── 거리 계산 ──────────────────────────────────────
                     if _HAS_NUMPY and (key := (ref_coord.col, ref_coord.row)) in val_np:
@@ -181,30 +213,19 @@ class CoordScheduler(QThread):
                         )
                         for i, (v_item, _vx, _vy) in enumerate(candidates):
                             dist = float(dists[i])
-                            if dist <= tol:
-                                s = max(0.0, 1.0 - dist / tol) if tol > 0 else 1.0
-                                scored_in_tol.append((v_item.path, s))
-                            elif dist <= tol3:
-                                near_candidates.append((v_item.path, dist))
+                            if dist <= tol3:
+                                within3.append((v_item.path, dist))
                     else:
                         for v_item, vx, vy in candidates:
                             dist = math.sqrt(
                                 (ref_coord.x - vx) ** 2 + (ref_coord.y - vy) ** 2
                             )
-                            if dist <= tol:
-                                s = max(0.0, 1.0 - dist / tol) if tol > 0 else 1.0
-                                scored_in_tol.append((v_item.path, s))
-                            elif dist <= tol3:
-                                near_candidates.append((v_item.path, dist))
+                            if dist <= tol3:
+                                within3.append((v_item.path, dist))
 
-                    if scored_in_tol:
-                        scored_in_tol.sort(key=lambda x: -x[1])
-                        self._results[(slot, ref.path)] = scored_in_tol
-                    elif near_candidates:
-                        # 가장 가까운 1장, 음수 score 로 "허용범위 초과" 표식
-                        best_path, best_dist = min(near_candidates, key=lambda x: x[1])
-                        neg_score = -(best_dist / tol) if tol > 0 else -1.0
-                        self._results[(slot, ref.path)] = [(best_path, neg_score)]
+                    if within3:
+                        self._results[(slot, ref.path)] = \
+                            _select_coord_candidates(within3, tol)
                     else:
                         # 3배 초과 — 매치 실패
                         self.failed_set.add((slot, ref.path))
