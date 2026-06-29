@@ -424,13 +424,15 @@ SLOT_SELECT_BTN_TOOLTIP = (
 )
 SLOT_SELECT_TITLE = "진행할 슬롯 선택"
 SLOT_SELECT_HINT = (
-    "이번 검증에서 진행할 슬롯만 체크하세요.\n"
-    "체크하지 않은 슬롯은 스캔·매칭에서 제외됩니다."
+    "이번 검증에서 진행할 슬롯 카드를 눌러 선택하세요.\n"
+    "선택하지 않은 슬롯은 스캔·매칭에서 제외됩니다."
 )
 SLOT_SELECT_ALL = "전체 선택"
 SLOT_SELECT_NONE = "전체 해제"
 SLOT_SELECT_ALL_HINT = "모든 슬롯 진행 (기본)"
 SLOT_SELECT_COUNT_FMT = "선택한 슬롯: {n} / {total} 개만 진행"
+# 다이얼로그 상단의 짧은 선택 수 표시.
+SLOT_SELECT_DIALOG_COUNT_FMT = "선택 {n} / {total}"
 SLOT_SELECT_NEED_REF = "먼저 기준 폴더를 선택하세요."
 SLOT_SELECT_EMPTY = "기준 폴더에서 슬롯(하위 폴더)을 찾지 못했습니다."
 
