@@ -244,6 +244,24 @@ def latest_commit(repo: str, branch: str, timeout: float = 15.0) -> Optional[dic
     return _latest_via_atom(repo, branch, timeout)
 
 
+def _latest_self_healing(repo: str, branch: str) -> Tuple[Optional[dict], str]:
+    """``latest_commit`` 을 시도하되, 추적 브랜치가 삭제/이름변경(404)돼 실패하면
+    저장소의 **실제 기본 브랜치**로 한 번 더 시도한다.
+
+    ``(info, 실제_사용_브랜치)`` 를 돌려준다 — 다운로드(``download_and_apply``)도 살아있는
+    브랜치로 가야 하므로 호출부가 교정된 브랜치를 그대로 쓸 수 있게 한다.  둘 다 실패하면
+    ``(None, branch)`` (사유는 ``last_error()``)."""
+    info = latest_commit(repo, branch)
+    if info:
+        return info, branch
+    db = _default_branch(repo)
+    if db and db != branch:
+        info = latest_commit(repo, db)
+        if info:
+            return info, db
+    return None, branch
+
+
 _default_branch_cache: dict = {}
 
 
@@ -272,10 +290,11 @@ def _resolve_branch(branch: Optional[str], repo: str = DEFAULT_REPO) -> str:
     과거 포터블 빌드는 VERSION 에 작업 브랜치(``claude/…``)를 스탬프했으므로, 그대로 두면
     옛 빌드는 계속 옛(삭제됐을 수 있는) 브랜치를 본다.  비었거나 ``claude/`` 로 시작하는(=과거
     작업 브랜치) 값은 저장소의 GitHub 기본 브랜치로 치환해 **모든 배포본이 기본 브랜치로
-    합류**하게 한다.  그 외 명시적 브랜치(예: ``release``)는 존중한다.
+    합류**하게 한다.  옛 기본 브랜치(``main``/``master``)는 이미 삭제됐으므로 이들도 함께
+    교정한다(그대로 두면 404).  그 외 명시적 브랜치(예: ``release``)는 존중한다.
     ※ 개발/클론(git HEAD) 경로엔 적용 안 함."""
     b = (branch or "").strip()
-    if not b or b.startswith("claude/"):
+    if not b or b.startswith("claude/") or b in ("main", "master"):
         return _default_branch(repo)
     return b
 
@@ -291,7 +310,7 @@ def check_for_update() -> Optional[dict]:
     branch = _resolve_branch(cur.get("branch"), repo)
     if not branch:
         return None
-    latest = latest_commit(repo, branch)
+    latest, branch = _latest_self_healing(repo, branch)
     if not latest or not latest.get("sha"):
         return None
     if str(latest["sha"]) != str(cur["sha"]):
@@ -354,7 +373,7 @@ def manual_check() -> tuple:
     global _last_error
     _last_error = ""
     repo, branch, cur_sha = _identity()
-    latest = latest_commit(repo, branch)
+    latest, branch = _latest_self_healing(repo, branch)
     if not latest or not latest.get("sha"):
         return ("unknown", {"error": _last_error or "GitHub 연결 실패"})
     if cur_sha and str(latest["sha"]) == str(cur_sha):
