@@ -135,11 +135,46 @@ def test_resolve_branch_normalizes_legacy_to_default():
     assert updater._resolve_branch("claude/aoi-verification-app-LAXpX") == _STUB_DEFAULT
     assert updater._resolve_branch("") == _STUB_DEFAULT
     assert updater._resolve_branch(None) == _STUB_DEFAULT
-    # 명시적(비-claude) 브랜치는 그대로 존중.
+    # 옛 기본 브랜치(main/master)는 삭제됐으므로 → 기본 브랜치로 교정(404 방지).
+    assert updater._resolve_branch("main") == _STUB_DEFAULT
+    assert updater._resolve_branch("master") == _STUB_DEFAULT
+    # 그 외 명시적 브랜치는 그대로 존중.
     assert updater._resolve_branch("release") == "release"
     assert updater._resolve_branch("dev") == "dev"
     # 폴백 상수는 더 이상 main 이 아니다(main 삭제됨).
     assert updater.DEFAULT_BRANCH != "main"
+
+
+def test_latest_self_healing_retries_default_branch(monkeypatch):
+    # 추적 브랜치엔 None(삭제됨), 기본 브랜치엔 커밋 → 기본 브랜치로 자기교정.
+    def _latest(repo, branch):
+        return {"sha": "NEW"} if branch == _STUB_DEFAULT else None
+
+    monkeypatch.setattr(updater, "latest_commit", _latest)
+    info, used = updater._latest_self_healing("o/r", "release")
+    assert info == {"sha": "NEW"}
+    assert used == _STUB_DEFAULT          # 다운로드도 살아있는 브랜치로 가도록 교정
+
+
+def test_latest_self_healing_returns_none_when_both_fail(monkeypatch):
+    monkeypatch.setattr(updater, "latest_commit", lambda r, b: None)
+    info, used = updater._latest_self_healing("o/r", "release")
+    assert info is None and used == "release"
+
+
+def test_manual_check_recovers_from_dead_branch(tmp_path, monkeypatch):
+    # 명시적이지만 삭제된 브랜치(release)를 스탬프한 설치본 → 기본 브랜치로 복구.
+    _write_version(tmp_path, monkeypatch,
+                   {"sha": "OLD", "branch": "release", "repo": "o/r"})
+
+    def _latest(repo, branch):
+        return {"sha": "NEW", "message": "fix"} if branch == _STUB_DEFAULT else None
+
+    monkeypatch.setattr(updater, "latest_commit", _latest)
+    status, info = updater.manual_check()
+    assert status == "update"
+    assert info["sha"] == "NEW"
+    assert info["branch"] == _STUB_DEFAULT     # 교정된 브랜치가 다운로드 대상
 
 
 def test_default_branch_resolves_from_api(monkeypatch):
