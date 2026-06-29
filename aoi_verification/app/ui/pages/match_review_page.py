@@ -750,10 +750,16 @@ class MatchReviewPage(QWidget):
             empty.setStyleSheet("color: #7FB3D5; padding: 20px;")
             self._list_layout.addWidget(empty)
         else:
-            ordered = sorted(
-                self._matches,
-                key=lambda m: (m.slot, m.ref_path.name.lower()),
-            )
+            if self._coord_mode:
+                ordered = sorted(
+                    self._matches,
+                    key=lambda m: (m.score, m.slot),
+                )
+            else:
+                ordered = sorted(
+                    self._matches,
+                    key=lambda m: (m.slot, m.ref_path.name.lower()),
+                )
             for m in ordered:
                 self._append_row(m)
         self._update_summary()

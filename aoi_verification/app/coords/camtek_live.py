@@ -44,10 +44,8 @@ def _extract(m) -> Optional[DefectCoord]:
 def resolve(image_path: Path) -> Optional[DefectCoord]:
     """LIVE 형식 파일명에서 DefectCoord 추출. 형식이 맞지 않으면 None."""
     stem = image_path.stem
-    m = _PAT_A.search(stem)
-    if m:
-        return _extract(m)
-    m = _PAT_B.search(stem)
-    if m:
-        return _extract(m)
+    for pat in (_PAT_A, _PAT_B):
+        m = pat.search(stem)
+        if m and '_' in stem[:m.start()]:
+            return _extract(m)
     return None

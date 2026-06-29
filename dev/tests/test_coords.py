@@ -145,6 +145,15 @@ class TestCamtekLive:
         assert c.col == 2
         assert c.row == 3
 
+    @pytest.mark.parametrize("name", [
+        "W6459076XYG1_2_0_23_2.jpg",
+        "W6459081XYE1_1_2_14_2.jpg",
+        "W6460162XYF4_2_1_7_1.jpg",
+    ])
+    def test_kla_filename_rejected(self, name):
+        """KLA 이미지 파일명은 LIVE 로 파싱되지 않아야 한다."""
+        assert live_resolve(Path(name)) is None
+
 
 # ---------------------------------------------------------------------------
 # 통합: coords.__init__.resolve 우선순위
@@ -169,3 +178,26 @@ class TestCoordResolve:
         assert c.source == "camtek_live"
         assert c.col == 4
         assert c.row == 5
+
+    def test_kla_filename_falls_through_to_kla_resolver(self, tmp_path):
+        """KLA 파일명은 camtek_live 를 건너뛰고 kla_info 로 해석돼야 한다."""
+        from aoi_verification.app.coords import resolve
+        from aoi_verification.app.coords import kla_info
+
+        kla_info.load_folder.cache_clear()
+        kla_info.load_folder_raw.cache_clear()
+        info = tmp_path / "INFO.001"
+        info.write_text(
+            'DiePitch 3.7247930000e+004 4.4905340000e+004;\n'
+            'TiffFileName W6459076XYG1_2_0_23_2.jpg;\n'
+            'DefectList\n'
+            ' 2 67855.280 14093.720 11819.421 13870.779 2 0 '
+            '2.600 3.900 10.16 3.9 23 3 0 0 1 1 0 2671 0 1 1 1 0;\n',
+            encoding="utf-8",
+        )
+        img = tmp_path / "W6459076XYG1_2_0_23_2.jpg"
+        c = resolve(img)
+        assert c is not None
+        assert c.source == "kla"
+        assert c.col == 5
+        assert c.row == 3
