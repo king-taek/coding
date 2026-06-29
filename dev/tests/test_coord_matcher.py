@@ -63,3 +63,46 @@ def test_boundary_exactly_confident_dist():
     out = _select(within3, TOL)
     assert len(out) == 1
     assert out[0][0] == _p("a")
+
+
+# ---------------------------------------------------------------------------
+# _match_neighbors — (col,row) ±1 이웃 게이트 (정답 도구 Module_Compare 기준)
+# ---------------------------------------------------------------------------
+_match = cm._match_neighbors
+
+
+def test_match_neighbors_allows_off_by_one_row():
+    """dev/좌표 확인 실측: KLA(col1,row3,x8653,y39318) ↔ Camtek(col1,row4,x8722,y39216).
+    row 가 1 어긋나지만 ±1 게이트로 매칭돼야 한다(과거 정확 일치 게이트는 전멸했음)."""
+    cam = _p("camtek")
+    vmap = {(1, 4): [(cam, 8722.0, 39216.0)]}
+    out = _match(8653.0, 39318.0, 1, 3, vmap, TOL)
+    assert len(out) == 1 and out[0][0] == cam
+    # 거리 ≈ hypot(69,102) ≈ 123 ≤ tol(500) → 양수 score.
+    assert out[0][1] > 0
+
+
+def test_match_neighbors_same_die():
+    cam = _p("same")
+    out = _match(100.0, 100.0, 2, 2, {(2, 2): [(cam, 110.0, 90.0)]}, TOL)
+    assert len(out) == 1 and out[0][0] == cam
+
+
+def test_match_neighbors_excludes_far_die():
+    """col/row 가 2 이상 어긋난 die 후보는 모이지 않는다(±1 초과)."""
+    far = _p("far")
+    out = _match(8653.0, 39318.0, 1, 3, {(3, 3): [(far, 8653.0, 39318.0)]}, TOL)
+    assert out == []
+
+
+def test_match_neighbors_diagonal_neighbor_included():
+    cam = _p("diag")
+    out = _match(100.0, 100.0, 1, 1, {(2, 2): [(cam, 105.0, 95.0)]}, TOL)
+    assert len(out) == 1 and out[0][0] == cam
+
+
+def test_match_neighbors_distance_beyond_3tol_fails():
+    far = _p("toofar")
+    # 같은 die 지만 die-내부 거리 > 3×tol → 매치 실패.
+    out = _match(0.0, 0.0, 1, 1, {(1, 1): [(far, 9000.0, 0.0)]}, TOL)
+    assert out == []
