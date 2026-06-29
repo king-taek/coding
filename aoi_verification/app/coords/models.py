@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Optional
 
 __all__ = ["DefectCoord", "DefectGeometry", "CAMTEK_PITCH_X", "CAMTEK_PITCH_Y",
            "CAMTEK_COL_OFFSET", "CAMTEK_ROW_TOTAL",
@@ -18,6 +19,10 @@ class DefectCoord:
     x: float       # die 내부 local X (µm)
     y: float       # die 내부 local Y (µm)
     source: str    # "camtek_ini" | "camtek_live" | "kla"
+    # KLA 원본 die-내부 좌표(XREL/YREL, µm) — source="kla" 일 때만 채운다.
+    # 엑셀에 'Camtek 좌표계 변환값'과 'KLA 자체 좌표값'을 함께 표기하기 위함.
+    native_x: Optional[float] = None
+    native_y: Optional[float] = None
 
 
 @dataclass(frozen=True)

@@ -3,7 +3,10 @@
 이미지 유사도를 계산하지 않고 defect 좌표(col/row + x/y µm)로 직접 매칭한다.
 
 매칭 규칙:
-    1. col/row 가 완전히 일치해야 후보로 인정 (정수 게이트).
+    1. col/row 가 **±1 이내**면 후보로 인정 (정답 도구 AOI Data Viewer VBA
+       ``Module_Compare.AOIMapCompare`` 와 동일: ``Abs(col차)<=1 And Abs(row차)<=1``).
+       KLA↔Camtek 처럼 두 장비의 die 인덱스가 1 어긋날 수 있어, 정확 일치만 하면
+       매칭이 전멸한다(근거: ``dev/좌표 확인`` 샘플).
     2. dist = sqrt((x1-x2)²+(y1-y2)²)
        · dist ≤ tol              → 양수 score = 1 - dist/tol  (허용 오차 내)
        · tol < dist ≤ tol×3     → 음수 score = -(dist/tol)   (허용범위 초과)
@@ -41,12 +44,6 @@ from ..coords import resolve_batch as _resolve_batch
 from ..models.slot import ImageItem
 from .matcher import score_ref_classical
 
-try:
-    import numpy as _np
-    _HAS_NUMPY = True
-except ImportError:
-    _HAS_NUMPY = False
-
 
 # 좌표 차이가 이 값(좌표 단위, µm) 이하이면 '거의 정확히 일치'로 보고 후보 1장만
 # 보여준다. 초과 시 tol×3 이내 후보를 모두 차순위로 노출해 사용자가 직접 고른다.
@@ -76,6 +73,29 @@ def _select_coord_candidates(
     if ordered[0][1] <= CONFIDENT_DIST:
         ordered = ordered[:1]
     return [(p, score_of(d)) for p, d in ordered]
+
+
+def _match_neighbors(
+    ref_x: float, ref_y: float, ref_col: int, ref_row: int,
+    val_coord_map: Dict[Tuple[int, int], List[Tuple[Path, float, float]]],
+    tol: float,
+) -> List[Tuple[Path, float]]:
+    """ref 결함 1개에 대해 **(col,row) ±1 이웃 9칸**의 val 후보를 모아 die-내부 (x,y)
+    거리로 매칭, ``(path, score)`` 목록을 반환한다(비었으면 매치 실패).
+
+    정답 도구(AOI Data Viewer VBA ``Module_Compare.AOIMapCompare``)가 die 인덱스를
+    ``Abs(col차)<=1 And Abs(row차)<=1`` 로 ±1 허용하므로 그대로 따른다(정확 일치만 하면
+    KLA↔Camtek 처럼 한쪽 인덱스가 1 어긋날 때 매칭이 전멸한다).  거리 tol·후보 선택은
+    기존 :func:`_select_coord_candidates` 를 재사용한다."""
+    tol3 = tol * 3.0 if tol > 0 else 0.0
+    within3: List[Tuple[Path, float]] = []
+    for dc in (-1, 0, 1):
+        for dr in (-1, 0, 1):
+            for vpath, vx, vy in val_coord_map.get((ref_col + dc, ref_row + dr), ()):
+                dist = math.hypot(ref_x - vx, ref_y - vy)
+                if dist <= tol3:
+                    within3.append((vpath, dist))
+    return _select_coord_candidates(within3, tol)
 
 
 # ---------------------------------------------------------------------------
@@ -155,30 +175,19 @@ class CoordScheduler(QThread):
         total_pairs = sum(len(r) * len(v) for _, r, v in self._tasks)
         done_pairs = 0
         tol = self._tolerance
-        tol3 = tol * 3.0
         self.signals.phase.emit("좌표 매칭 중")
 
         for slot_idx, (slot, refs, vals) in enumerate(self._tasks):
             if self._stop.is_set():
                 break
 
-            # val 좌표 캐시 — (col, row) → [(item, x, y), ...]
-            val_coord_map: Dict[Tuple[int, int], List[Tuple[ImageItem, float, float]]] = {}
+            # val 좌표 캐시 — (col, row) → [(path, x, y), ...]
+            val_coord_map: Dict[Tuple[int, int], List[Tuple[Path, float, float]]] = {}
             for v in vals:
                 coord = coord_cache.get(v.path)
                 if coord is not None:
                     key = (coord.col, coord.row)
-                    val_coord_map.setdefault(key, []).append((v, coord.x, coord.y))
-
-            # (col,row) 그룹별 numpy 배열 미리 구성 (벡터화 최적화)
-            if _HAS_NUMPY:
-                val_np: Dict[Tuple[int, int], object] = {}
-                for key, entries in val_coord_map.items():
-                    val_np[key] = _np.array(
-                        [(vx, vy) for _, vx, vy in entries], dtype=_np.float64
-                    )
-            else:
-                val_np = {}
+                    val_coord_map.setdefault(key, []).append((v.path, coord.x, coord.y))
 
             fallback_refs: List[ImageItem] = []
 
@@ -194,42 +203,14 @@ class CoordScheduler(QThread):
                     self.signals.progress.emit(done_pairs, total_pairs)
                     continue
 
-                candidates = val_coord_map.get((ref_coord.col, ref_coord.row), [])
-
-                if not candidates:
-                    # 같은 col/row 자체가 없으면 매치 실패
+                # (col,row) ±1 이웃 후보를 모아 die-내부 거리로 매칭.
+                result = _match_neighbors(
+                    ref_coord.x, ref_coord.y, ref_coord.col, ref_coord.row,
+                    val_coord_map, tol,
+                )
+                self._results[(slot, ref.path)] = result
+                if not result:
                     self.failed_set.add((slot, ref.path))
-                    self._results[(slot, ref.path)] = []
-                else:
-                    # tol×3 이내 후보를 (path, dist) 로 모은다(numpy·비numpy 동일).
-                    within3: List[Tuple[Path, float]] = []
-
-                    # ── 거리 계산 ──────────────────────────────────────
-                    if _HAS_NUMPY and (key := (ref_coord.col, ref_coord.row)) in val_np:
-                        arr = val_np[key]
-                        dists = _np.hypot(
-                            arr[:, 0] - ref_coord.x,
-                            arr[:, 1] - ref_coord.y,
-                        )
-                        for i, (v_item, _vx, _vy) in enumerate(candidates):
-                            dist = float(dists[i])
-                            if dist <= tol3:
-                                within3.append((v_item.path, dist))
-                    else:
-                        for v_item, vx, vy in candidates:
-                            dist = math.sqrt(
-                                (ref_coord.x - vx) ** 2 + (ref_coord.y - vy) ** 2
-                            )
-                            if dist <= tol3:
-                                within3.append((v_item.path, dist))
-
-                    if within3:
-                        self._results[(slot, ref.path)] = \
-                            _select_coord_candidates(within3, tol)
-                    else:
-                        # 3배 초과 — 매치 실패
-                        self.failed_set.add((slot, ref.path))
-                        self._results[(slot, ref.path)] = []
 
                 done_pairs += len(vals)
                 self.signals.progress.emit(done_pairs, total_pairs)
