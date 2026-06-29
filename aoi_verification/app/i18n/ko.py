@@ -454,6 +454,7 @@ KLA_ASK_SIDE_HEADING = "KLA 장비가 어느 쪽인가요?"
 KLA_ASK_SIDE_BODY = "KLA(WaferID) 장비 위치를 선택하세요. 없으면 ‘KLA 아님’."
 KLA_SIDE_REF = "기준"
 KLA_SIDE_VAL = "검증"
+KLA_SIDE_BOTH = "둘다"
 KLA_SIDE_NONE = "KLA 아님"
 
 INFO_RESUME_TITLE = "이전 검증 이어하기"
