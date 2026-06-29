@@ -522,10 +522,16 @@ class ExcelExporter(QThread):
             if c is None:
                 return []
             grey = InlineFont(sz=8, color="FF808080")
-            return [
+            blocks = [
                 TextBlock(grey, f"\ncol {c.col} / row {c.row}"),
                 TextBlock(grey, f"\nx {c.x:.0f} / y {c.y:.0f} ㎛"),
             ]
+            # KLA 결함은 위 변환값(Camtek 좌표계)에 더해 자체 원본 좌표(XREL/YREL)도 표기.
+            if (c.source == "kla" and c.native_x is not None
+                    and c.native_y is not None):
+                blocks.append(TextBlock(grey, i18n.KO.EXPORT_KLA_NATIVE_FMT.format(
+                    x=c.native_x, y=c.native_y)))
+            return blocks
         except Exception:
             return []
 

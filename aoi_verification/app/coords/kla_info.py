@@ -21,7 +21,7 @@ from typing import Optional
 
 from .models import DefectCoord, KLA_ZERO_X, KLA_ZERO_Y
 
-__all__ = ["resolve", "load_folder"]
+__all__ = ["resolve", "load_folder", "load_folder_raw"]
 
 # DefectList 행: 공백/탭 구분 숫자 필드
 # 필드 순서(0-based): 0=ID, 1=X, 2=Y, 3=XREL, 4=YREL, 5=XINDEX, 6=YINDEX, ...
@@ -60,18 +60,40 @@ def _find_info_file(folder: Path) -> Optional[Path]:
 
 
 @lru_cache(maxsize=256)
-def load_folder(folder: Path) -> dict[str, DefectCoord]:
-    """폴더의 KLA 정보 파일을 파싱해 {stem(소문자) → DefectCoord} 맵 반환."""
+def load_folder_raw(folder: Path) -> dict[str, dict]:
+    """폴더의 KLA 정보 파일을 파싱해 {stem(소문자) → raw 필드} 맵 반환.
+
+    raw 필드: ``{xrel, yrel, xindex, yindex, die_pitch_y}`` (원본값 그대로).
+    변환(load_folder)과 진단 도구가 같은 파싱을 공유하도록 분리한다."""
     info = _find_info_file(folder)
     if info is None:
         return {}
     try:
-        return _parse_info(info)
+        return _parse_info_raw(info)
     except Exception:
         return {}
 
 
-def _parse_info(path: Path) -> dict[str, DefectCoord]:
+@lru_cache(maxsize=256)
+def load_folder(folder: Path) -> dict[str, DefectCoord]:
+    """폴더의 KLA 정보 파일을 파싱해 {stem(소문자) → DefectCoord} 맵 반환.
+
+    변환식: col=XINDEX+KLA_ZERO_X, row=YINDEX+KLA_ZERO_Y, x=round(XREL),
+    y=round(DiePitchY−YREL).  원본 XREL/YREL 은 native_x/native_y 로 함께 보존한다."""
+    result: dict[str, DefectCoord] = {}
+    for stem, r in load_folder_raw(folder).items():
+        col = r["xindex"] + KLA_ZERO_X
+        row = r["yindex"] + KLA_ZERO_Y
+        x = round(r["xrel"])
+        y = round(r["die_pitch_y"] - r["yrel"])
+        result[stem] = DefectCoord(
+            col=col, row=row, x=float(x), y=float(y), source="kla",
+            native_x=float(r["xrel"]), native_y=float(r["yrel"]),
+        )
+    return result
+
+
+def _parse_info_raw(path: Path) -> dict[str, dict]:
     text = path.read_text(encoding="utf-8", errors="replace")
     lines = text.splitlines()
 
@@ -87,7 +109,7 @@ def _parse_info(path: Path) -> dict[str, DefectCoord]:
     if die_pitch_y is None:
         return {}
 
-    result: dict[str, DefectCoord] = {}
+    result: dict[str, dict] = {}
     current_stem: Optional[str] = None
 
     for line in lines:
@@ -109,13 +131,11 @@ def _parse_info(path: Path) -> dict[str, DefectCoord]:
                     yindex = int(dm.group(7))
                 except ValueError:
                     continue
-                col = xindex + KLA_ZERO_X
-                row = yindex + KLA_ZERO_Y
-                x = round(xrel)
-                y = round(die_pitch_y - yrel)
-                result[current_stem] = DefectCoord(
-                    col=col, row=row, x=float(x), y=float(y), source="kla"
-                )
+                result[current_stem] = {
+                    "xrel": xrel, "yrel": yrel,
+                    "xindex": xindex, "yindex": yindex,
+                    "die_pitch_y": die_pitch_y,
+                }
                 current_stem = None  # 한 TiffFileName 당 하나의 DefectList 행
 
     return result
