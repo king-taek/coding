@@ -1,0 +1,84 @@
+FileVersion 1 2;
+FileTimestamp 05-19-26 23:04:28;
+InspectionStationID "KLA" "LDS CIRCL" "K3";
+SampleType WAFER;
+ResultTimestamp 05-18-26 11:24:27;
+LotID "TB500INT.271@6324";
+SampleSize 1 300;
+DeviceID "4DT-TB500-H-M1";
+SetupID "ROOT-HVM-4DT-TB500-H-M1-RDL2_NEW(MULTI)" 04-22-26 16:17:00;
+StepID "RDL2_NEW(MULTI)";
+SampleOrientationMarkType NOTCH;
+OrientationMarkLocation DOWN;
+DiePitch 3.7247930000e+004 4.4905340000e+004;
+DieOrigin 0.0000000000e+000 0.0000000000e+000;
+WaferID "W6459076XYG1";
+Slot 10;
+SampleCenterLocation 1.8460000000e+004 -2.2294100000e+002;
+ClassLookup 12
+  0 "	Unclassified"
+  3 "Metal Residue	"
+  1 "Undersized Bump	"
+  2 "Missing bump	"
+  4 "Bridged Bumps	"
+  7 "Irregular Bump	"
+  9 "Oversized Bump	"
+  14 "RDL defect	"
+  22 "Scratch	"
+  23 "re-passivation defect	"
+  31 "Foreign Material	"
+  94 "Other	"  ;
+OrientationInstructions "Front";
+CoordinatesMirrored NO;
+InspectionTest 3;
+SampleTestPlan 30
+  -3 -1 
+  -3 0 
+  -2 -2 
+  -2 -1 
+  -2 0 
+  -2 1 
+  -1 -3 
+  -1 -2 
+  -1 -1 
+  -1 0 
+  -1 1 
+  -1 2 
+  0 -3 
+  0 -2 
+  0 -1 
+  0 0 
+  0 1 
+  0 2 
+  1 -3 
+  1 -2 
+  1 -1 
+  1 0 
+  1 1 
+  1 2 
+  2 -2 
+  2 -1 
+  2 0 
+  2 1 
+  3 -1 
+  3 0 ;
+AreaPerTest 1.0035800000e+011;
+DefectRecordSpec 22 DEFECTID X Y XREL YREL XINDEX YINDEX XSIZE YSIZE DEFECTAREA DSIZE CLASSNUMBER TEST CLUSTERNUMBER ROUGHBINNUMBER FINEBINNUMBER CHANNELID MACROSIGCLASS INTENSITY MACROSIGID IMAGECOUNT IMAGELIST ;
+DefectList;
+TiffFileName W6459076XYG1_2_0_23_1.jpg;
+DefectList
+ 1 70567.720 37204.350 14531.861 36981.409 2 0 1.300 1.300 1.690000 1.300 23 3 0 0 1 1 0 2515 0 1 1 1 0;
+TiffFileName W6459076XYG1_2_0_23_2.jpg;
+DefectList
+ 2 67855.280 14093.720 11819.421 13870.779 2 0 2.600 3.900 10.160000 3.900 23 3 0 0 1 1 0 2671 0 1 1 1 0;
+TiffFileName W6459076XYG1_1_-2_7_3.jpg;
+DefectList
+ 3 41850.190 -51480.578 23062.260 38107.159 1 -2 1.300 1.300 1.690000 1.300 7 3 0 0 2 2 0 1429 0 1 1 1 0;
+TiffFileName W6459076XYG1_0_-3_7_4.jpg;
+DefectList
+ 4 -13169.208 -103721.788 5290.790 30771.289 0 -3 0.980 0.650 0.640000 0.980 7 3 0 0 2 2 0 3449 0 1 1 1 0;
+SummarySpec 5
+  TESTNO    NDEFECT    DEFDENSITY    NDIE    NDEFDIE  ;
+SummaryList 
+  3    4    3.9857369865e-003    30    21  ;
+EndOfFile;

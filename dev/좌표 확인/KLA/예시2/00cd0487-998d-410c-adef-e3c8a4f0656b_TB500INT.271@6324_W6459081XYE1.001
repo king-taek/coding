@@ -1,0 +1,78 @@
+FileVersion 1 2;
+FileTimestamp 05-19-26 22:59:44;
+InspectionStationID "KLA" "LDS CIRCL" "K3";
+SampleType WAFER;
+ResultTimestamp 05-18-26 11:24:27;
+LotID "TB500INT.271@6324";
+SampleSize 1 300;
+DeviceID "4DT-TB500-H-M1";
+SetupID "ROOT-HVM-4DT-TB500-H-M1-RDL2_NEW(MULTI)" 04-22-26 16:17:00;
+StepID "RDL2_NEW(MULTI)";
+SampleOrientationMarkType NOTCH;
+OrientationMarkLocation DOWN;
+DiePitch 3.7247930000e+004 4.4905340000e+004;
+DieOrigin 0.0000000000e+000 0.0000000000e+000;
+WaferID "W6459081XYE1";
+Slot 5;
+SampleCenterLocation 1.8460000000e+004 -2.2294100000e+002;
+ClassLookup 12
+  0 "	Unclassified"
+  3 "Metal Residue	"
+  1 "Undersized Bump	"
+  2 "Missing bump	"
+  4 "Bridged Bumps	"
+  7 "Irregular Bump	"
+  9 "Oversized Bump	"
+  14 "RDL defect	"
+  22 "Scratch	"
+  23 "re-passivation defect	"
+  31 "Foreign Material	"
+  94 "Other	"  ;
+OrientationInstructions "Front";
+CoordinatesMirrored NO;
+InspectionTest 3;
+SampleTestPlan 30
+  -3 -1 
+  -3 0 
+  -2 -2 
+  -2 -1 
+  -2 0 
+  -2 1 
+  -1 -3 
+  -1 -2 
+  -1 -1 
+  -1 0 
+  -1 1 
+  -1 2 
+  0 -3 
+  0 -2 
+  0 -1 
+  0 0 
+  0 1 
+  0 2 
+  1 -3 
+  1 -2 
+  1 -1 
+  1 0 
+  1 1 
+  1 2 
+  2 -2 
+  2 -1 
+  2 0 
+  2 1 
+  3 -1 
+  3 0 ;
+AreaPerTest 1.0035800000e+011;
+DefectRecordSpec 22 DEFECTID X Y XREL YREL XINDEX YINDEX XSIZE YSIZE DEFECTAREA DSIZE CLASSNUMBER TEST CLUSTERNUMBER ROUGHBINNUMBER FINEBINNUMBER CHANNELID MACROSIGCLASS INTENSITY MACROSIGID IMAGECOUNT IMAGELIST ;
+DefectList;
+TiffFileName W6459081XYE1_2_-1_23_1.jpg;
+DefectList
+ 1 83641.850 -19804.308 27605.991 24878.089 2 -1 7.810 5.210 40.660000 7.810 23 3 0 0 3 3 0 2826 0 1 1 1 0;
+TiffFileName W6459081XYE1_1_2_14_2.jpg;
+DefectList
+ 2 49475.930 105843.290 30688.000 15809.670 1 2 0.650 0.330 0.210000 0.650 14 3 0 0 1 1 0 1821 0 1 1 1 0;
+SummarySpec 5
+  TESTNO    NDEFECT    DEFDENSITY    NDIE    NDEFDIE  ;
+SummaryList 
+  3    2    1.9928684932e-003    30    17  ;
+EndOfFile;
