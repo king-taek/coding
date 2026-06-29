@@ -242,7 +242,9 @@ class UnmatchedReviewDialog(QDialog):
         # 효율 모드 선계산 top-K {(slot, ref_path): [(val_path, score)]} — 후보 풀이
         # 300장 이상이면 CPU 재계산 대신 이걸 재사용한다 (#1).
         self._fast_results = fast_results or {}
-        self._coord_mode = bool(coord_mode)
+        # 이 다이얼로그는 항상 이미지 유사도(pipeline.score)로 후보를 채점하므로
+        # 좌표 거리가 아닌 유사도 백분율로 표시한다.
+        self._coord_mode = False
         self._tolerance = float(tolerance) if tolerance > 0 else 500.0
         self._idx = 0
         # 사진 크기 (#1) — 슬라이더로 조절. 후보 타일은 비율로 파생.
