@@ -136,10 +136,7 @@ def bootstrap(root: Path, *,
     if not app_is_present(root):
         log("앱을 내려받는 중…")
         if not fetch_app(root) or not app_is_present(root):
-            log("앱 다운로드 실패 — GitHub(github.com) 접속 불가")
-            log("확인: 방화벽·프록시가 github.com 을 차단하고 있지 않은지 확인하세요.")
-            log("대안: portable 빌드는 인터넷 없이 실행 가능합니다"
-                " (python scripts/build.py portable)")
+            log("앱 다운로드 실패 — 인터넷 연결을 확인하세요.")
             return 3
 
     py = target_python(root, frozen=frozen, sys_executable=sys_executable)
@@ -149,10 +146,7 @@ def bootstrap(root: Path, *,
         log("필요한 패키지를 설치하는 중… (처음 1회, 인터넷 필요)")
         rc = run(pip_install_cmd(py, req))
         if rc != 0:
-            log("패키지 설치 실패 — pypi.org 접속 불가 또는 프록시 차단")
-            log("확인: pip 가 인터넷(pypi.org)에 접근 가능한지 확인하세요.")
-            log("대안: portable 빌드는 의존성이 포함되어 인터넷 없이 실행 가능합니다"
-                " (python scripts/build.py portable)")
+            log("패키지 설치 실패 — 인터넷/프록시 설정을 확인하세요.")
             return 4
         write_deps_marker(root, req_text)
 
