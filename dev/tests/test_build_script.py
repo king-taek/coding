@@ -55,7 +55,9 @@ def test_prompt_kind_selection():
     assert build._prompt_kind(input_fn=lambda _: "1") == "online"
     assert build._prompt_kind(input_fn=lambda _: "2") == "portable"
     assert build._prompt_kind(input_fn=lambda _: "3") == "windows"
+    assert build._prompt_kind(input_fn=lambda _: "4") == "verify"
     assert build._prompt_kind(input_fn=lambda _: "windows") == "windows"
+    assert build._prompt_kind(input_fn=lambda _: "verify") == "verify"
     assert build._prompt_kind(input_fn=lambda _: "") is None       # Enter=취소
     assert build._prompt_kind(input_fn=lambda _: "9") is None      # 범위 밖
 
@@ -78,6 +80,33 @@ def test_build_windows_uses_full_spec_and_requirements():
     joined = "\n".join(calls)
     assert "aoi_verification.spec" in joined         # 전부 동봉 spec
     assert "requirements.txt" in joined              # 의존성 설치
+
+
+# ── verify_windows 검증 로직 ────────────────────────────────────────────────
+def test_verify_windows_pass(tmp_path):
+    """정상적인 빌드 산출물이 있으면 검증 통과."""
+    dist = tmp_path / "dist" / "AOI_Verify"
+    internal = dist / "_internal"
+    (internal / "aoi_verification" / "app" / "ui").mkdir(parents=True)
+    (internal / "aoi_verification" / "app" / "ui" / "style.qss").write_text("x")
+    (internal / "양식.xlsx").write_bytes(b"x" * 200_000)
+    (dist / "AOI_Verify.exe").write_bytes(b"x" * 1_000_000)
+    for pkg in ("PyQt6", "cv2", "numpy", "PIL", "openpyxl"):
+        (internal / pkg).mkdir()
+    # 총 용량을 100MB 넘기기 위해 더미 파일 추가
+    (internal / "big.bin").write_bytes(b"\x00" * (105 * 1024 * 1024))
+    logs = []
+    rc = build.verify_windows(tmp_path, log=logs.append)
+    assert rc == 0
+    assert any("빌드 정상" in m for m in logs)
+
+
+def test_verify_windows_fail_missing_exe(tmp_path):
+    """exe 가 없으면 검증 실패."""
+    logs = []
+    rc = build.verify_windows(tmp_path, log=logs.append)
+    assert rc != 0
+    assert any("[!!]" in m for m in logs)
 
 
 # ── portable_build.py 순수 로직 ─────────────────────────────────────────────
