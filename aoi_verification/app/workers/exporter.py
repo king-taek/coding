@@ -75,6 +75,7 @@ class ExcelExporter(QThread):
                  dst_path: Path,
                  template_path: Optional[Path] = None,
                  include_full_template: bool = False,
+                 original_quality: bool = False,
                  parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._result = result
@@ -82,6 +83,8 @@ class ExcelExporter(QThread):
         self._template = Path(template_path) if template_path else None
         # 전체 양식(E~H 수기 영역 포함) 시트 생성 여부 — 기본 off(가볍고 빠른 출력).
         self._include_full_template = bool(include_full_template)
+        # 사진을 원본 화질로 임베드할지 — 기본 off(중간 화질 캐시로 가볍게).
+        self._original_quality = bool(original_quality)
         self.signals = ExporterSignals()
 
     # ------------------------------------------------------------------
@@ -347,6 +350,19 @@ class ExcelExporter(QThread):
         cell.alignment = wrap
 
     # ------------------------------------------------------------------
+    def _embed_image_path(self, src: Path) -> Path:
+        """셀에 임베드할 이미지 경로를 고른다.
+
+        원본 화질 옵션이 켜져 있으면 원본 파일을 그대로 쓰고(축소 없음),
+        꺼져 있으면 중간 화질 캐시(`get_mid_path`)를 쓴다 — 기본은 가볍고 빠름.
+        표시 크기는 어느 쪽이든 ``_fit_to_cell`` 이 셀에 맞게 줄이므로, 차이는
+        '저장되는 픽셀 데이터의 해상도'(=화질)뿐이다.
+        """
+        if self._original_quality:
+            return Path(src)
+        return image_io.get_mid_path(Path(src))
+
+    # ------------------------------------------------------------------
     def _fill_rows(self, ws, rows_input: list[tuple[str, str, object]]) -> None:
         from openpyxl.comments import Comment
         from openpyxl.drawing.image import Image as XLImage
@@ -402,7 +418,7 @@ class ExcelExporter(QThread):
                 # 각 사진을 개별 try 로 감싼다 (Bug #3).  실패하면 파일명 텍스트
                 # 로 대체하고 이어서 진행.
                 try:
-                    ref_mid = image_io.get_mid_path(m.ref_path)
+                    ref_mid = self._embed_image_path(m.ref_path)
                     xli_ref = XLImage(str(ref_mid))
                     _fit_to_cell(xli_ref, cell_w_px, cell_h_px)
                     _add_image_centered(ws, xli_ref, COL_REF, row,
@@ -411,7 +427,7 @@ class ExcelExporter(QThread):
                     ws[f"{COL_REF}{row}"] = str(Path(m.ref_path).name)
                     ws[f"{COL_REF}{row}"].alignment = center
                 try:
-                    val_mid = image_io.get_mid_path(m.val_path)
+                    val_mid = self._embed_image_path(m.val_path)
                     xli_val = XLImage(str(val_mid))
                     _fit_to_cell(xli_val, cell_w_px, cell_h_px)
                     _add_image_centered(ws, xli_val, COL_VAL, row,
@@ -425,7 +441,7 @@ class ExcelExporter(QThread):
                 self._write_slot_cell(ws, row, u.slot, center)
                 # 기준 이미지: 정상 임베드.
                 try:
-                    ref_mid = image_io.get_mid_path(Path(u.path))
+                    ref_mid = self._embed_image_path(Path(u.path))
                     xli_ref = XLImage(str(ref_mid))
                     _fit_to_cell(xli_ref, cell_w_px, cell_h_px)
                     _add_image_centered(ws, xli_ref, COL_REF, row,
