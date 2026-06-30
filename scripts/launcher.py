@@ -45,7 +45,17 @@ def main() -> int:
         updater._app_root = lambda: dest          # type: ignore[attr-defined]
         info = updater.latest_commit(repo, branch)   # VERSION 기록용 최신 SHA(조회 실패 시 빈값)
         sha = str(info.get("sha") or "") if isinstance(info, dict) else ""
-        return updater.download_and_apply(repo, branch, sha or "online")
+        ok = updater.download_and_apply(repo, branch, sha or "online")
+        if not ok:
+            err = updater.last_error()
+            if err:
+                print(f"[AOI] 원인: {err}", flush=True)
+            if updater.insecure_fallback_used():
+                print("[AOI] (회사 SSL 프록시 감지됨)", flush=True)
+            print("[AOI] 회사 네트워크에서 GitHub 접속이 차단된 경우:", flush=True)
+            print("[AOI]   portable 빌드를 사용하세요 (인터넷 불필요)", flush=True)
+            print("[AOI]   빌드 방법: python scripts/build.py portable", flush=True)
+        return ok
 
     def run(cmd):
         return subprocess.call(cmd)
