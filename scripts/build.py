@@ -120,6 +120,11 @@ def build_windows(run: Callable = _default_run, log: Callable = print) -> int:
     if rc == 0:
         log("[done] " + str(output_path("windows", REPO_ROOT)))
         log("       Ship the whole dist\\AOI_Verify folder (zip).")
+        log("")
+        vrc = verify_windows(REPO_ROOT, log)
+        if vrc != 0:
+            log("[주의] 빌드는 완료됐지만 검증에서 누락 항목이 발견되었습니다.")
+            return vrc
     return rc
 
 
@@ -140,25 +145,102 @@ def build_portable(run: Callable = _default_run, log: Callable = print) -> int:
     return impl.run_build(REPO_ROOT, PY_STANDALONE_URL, run=run, log=log)
 
 
+def verify_windows(repo_root: Path = REPO_ROOT, log: Callable = print) -> int:
+    """windows 빌드 산출물(dist/AOI_Verify/)이 정상인지 검증한다.
+
+    빌드 직후 자동 실행되며, ``python scripts/build.py verify`` 로도 수동 호출 가능."""
+    dist = repo_root / "dist" / "AOI_Verify"
+    exe = dist / "AOI_Verify.exe"
+    internal = dist / "_internal"
+
+    ok = True
+    total = 0
+    passed = 0
+
+    def _check(condition: bool, label: str):
+        nonlocal ok, total, passed
+        total += 1
+        if condition:
+            passed += 1
+            log(f"  [OK] {label}")
+        else:
+            ok = False
+            log(f"  [!!] {label}")
+
+    log("[verify] windows 빌드 산출물 검증 ...")
+
+    # 1) exe 존재
+    _check(exe.is_file(), f"AOI_Verify.exe 존재 ({exe})")
+
+    # _internal 폴더 (PyInstaller onedir 의 번들 루트)
+    bundle = internal if internal.is_dir() else dist
+    _check(internal.is_dir(), "_internal/ 폴더 존재")
+
+    # 2) 리소스 파일
+    qss = bundle / "aoi_verification" / "app" / "ui" / "style.qss"
+    _check(qss.is_file(), "style.qss (스타일시트)")
+    xlsx = bundle / "양식.xlsx"
+    _check(xlsx.is_file(), "양식.xlsx (엑셀 템플릿)")
+
+    # 3) 앱 패키지
+    app_pkg = bundle / "aoi_verification"
+    _check(app_pkg.is_dir(), "aoi_verification/ 패키지")
+
+    # 4) 핵심 의존성 — PyInstaller 가 수집한 패키지 폴더/pyd/dll 존재 확인
+    _core_deps = {
+        "PyQt6": ["PyQt6"],
+        "cv2 (OpenCV)": ["cv2"],
+        "numpy": ["numpy"],
+        "PIL (Pillow)": ["PIL"],
+        "openpyxl": ["openpyxl"],
+    }
+    _optional_deps = {
+        "torch": ["torch"],
+        "openvino": ["openvino"],
+    }
+    for label, candidates in _core_deps.items():
+        found = any((bundle / c).is_dir() for c in candidates)
+        _check(found, f"{label} (필수)")
+
+    for label, candidates in _optional_deps.items():
+        found = any((bundle / c).is_dir() for c in candidates)
+        if found:
+            log(f"  [OK] {label} (고효율 모드)")
+        else:
+            log(f"  [--] {label} (미포함 — INCLUDE_EFFICIENCY=False 이면 정상)")
+
+    # 5) 용량 확인 (너무 작으면 빌드 불완전)
+    if dist.is_dir():
+        size_mb = sum(f.stat().st_size for f in dist.rglob("*") if f.is_file()) / (1024 * 1024)
+        _check(size_mb > 100, f"총 용량 {size_mb:.0f} MB (100 MB 이상이어야 정상)")
+
+    log(f"[verify] 결과: {passed}/{total} 통과" +
+        (" — 빌드 정상!" if ok else " — 위 [!!] 항목을 확인하세요."))
+    return 0 if ok else 1
+
+
 _ACTIONS = {
     "online": build_online,
     "windows": build_windows,
     "portable": build_portable,
+    "verify": lambda run=_default_run, log=print: verify_windows(REPO_ROOT, log),
 }
 
 
 def _usage() -> str:
     return (
-        "사용법: python scripts/build.py <online|portable|windows>\n"
+        "사용법: python scripts/build.py <online|portable|windows|verify>\n"
         "  online    작은 온라인 launcher exe (권장) — 첫 실행 시 인터넷으로 앱/패키지 설치\n"
         "  portable  자체 포함 CPython 폴더 (인터넷 없는 PC)\n"
         "  windows   단독 exe (PyInstaller, 전부 동봉)\n"
+        "  verify    windows 빌드 산출물 검증 (빌드 후 자동 실행됨)\n"
         "예) python scripts/build.py online")
 
 
 _MENU = [("online", "작은 온라인 launcher exe (권장)"),
          ("portable", "자체 포함 CPython 폴더 (인터넷 없는 PC)"),
-         ("windows", "단독 exe (전부 동봉)")]
+         ("windows", "단독 exe (전부 동봉)"),
+         ("verify", "windows 빌드 산출물 검증")]
 
 
 def _prompt_kind(input_fn=input) -> Optional[str]:
