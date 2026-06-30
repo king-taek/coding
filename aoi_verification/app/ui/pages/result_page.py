@@ -56,6 +56,21 @@ class ResultPage(QWidget):
 
         root.addStretch(1)
 
+        # 사진을 원본 화질로 넣을지 옵션 — 결과 출력 버튼 바로 위에 둔다. 기본
+        # 해제(중간 화질 캐시로 가볍고 빠른 출력). 체크하면 원본 그대로 임베드.
+        orig_row = QHBoxLayout()
+        orig_row.addStretch(1)
+        self.original_quality_chk = QCheckBox(
+            i18n.KO.EXPORT_ORIGINAL_QUALITY_LABEL, self,
+        )
+        self.original_quality_chk.setChecked(False)
+        self.original_quality_chk.setToolTip(
+            i18n.KO.EXPORT_ORIGINAL_QUALITY_TOOLTIP
+        )
+        orig_row.addWidget(self.original_quality_chk)
+        orig_row.addStretch(1)
+        root.addLayout(orig_row)
+
         bar = QHBoxLayout()
         bar.addStretch(1)
         self.new_btn = NeonButton(i18n.KO.BTN_NEW_SESSION, role="ghost")
@@ -307,6 +322,7 @@ class ResultPage(QWidget):
         self._exporter = ExcelExporter(
             self._result, self._save_path, template_path=self._template_path,
             include_full_template=self.full_template_chk.isChecked(),
+            original_quality=self.original_quality_chk.isChecked(),
         )
         self._exporter.signals.progress.connect(
             lambda d, t, msg: self._loading.set_progress(d, t, i18n.KO.LOAD_EXPORT)

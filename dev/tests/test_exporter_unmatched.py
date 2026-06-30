@@ -333,6 +333,55 @@ def test_unmatched_coords_without_flt(qapp, isolated_cache, tmp_path, monkeypatc
     assert "x " in d3 and "y " in d3
 
 
+def _embedded_media_sizes(xlsx_path: Path) -> list:
+    """저장된 xlsx 안 xl/media/* 이미지들의 (w,h) 픽셀 크기 목록."""
+    import io as _io
+    import zipfile as _zip
+    from PIL import Image as _Image
+    sizes = []
+    with _zip.ZipFile(str(xlsx_path)) as z:
+        for name in z.namelist():
+            if name.startswith("xl/media/"):
+                with _Image.open(_io.BytesIO(z.read(name))) as im:
+                    sizes.append(im.size)
+    return sizes
+
+
+def test_export_original_quality_embeds_full_resolution(qapp, isolated_cache,
+                                                        tmp_path):
+    """원본 화질 옵션: 저장된 미디어가 원본 해상도(축소 안 됨)여야 한다(#원본화질)."""
+    src = tmp_path / "src"
+    src.mkdir()
+    # MID_PX(800)보다 큰 원본 — 중간 캐시는 800px 로 줄지만 원본은 그대로.
+    big = src / "big_ref.jpeg"
+    Image.new("RGB", (1600, 1200), color=(50, 90, 160)).save(str(big), "JPEG")
+    val = src / "big_val.jpeg"
+    Image.new("RGB", (1600, 1200), color=(60, 100, 170)).save(str(val), "JPEG")
+
+    result = FinalResult(
+        mode="single", ref_machine="1호기", val_machine="2호기",
+        matches=[MatchResult(slot="S1", ref_path=big, val_path=val, score=0.9)],
+    )
+    no_tpl = tmp_path / "no_template.xlsx"
+
+    # 기본(off) — 중간 화질 캐시(800px 로 다운스케일) 가 임베드된다.
+    dst_mid = tmp_path / "mid.xlsx"
+    ExcelExporter(result, dst_path=dst_mid, template_path=no_tpl).run()
+    mid_sizes = _embedded_media_sizes(dst_mid)
+    assert mid_sizes, "이미지가 임베드되어야 한다"
+    assert all(max(w, h) <= 800 for (w, h) in mid_sizes), (
+        f"기본은 중간 화질(≤800px)이어야: {mid_sizes}")
+
+    # 옵션 on — 원본(1600px) 그대로 임베드된다.
+    dst_orig = tmp_path / "orig.xlsx"
+    ExcelExporter(result, dst_path=dst_orig, template_path=no_tpl,
+                  original_quality=True).run()
+    orig_sizes = _embedded_media_sizes(dst_orig)
+    assert orig_sizes, "이미지가 임베드되어야 한다"
+    assert any(max(w, h) == 1600 for (w, h) in orig_sizes), (
+        f"원본 화질은 원본 해상도(1600px)여야: {orig_sizes}")
+
+
 def test_machine_label_rule():
     """호기 라벨 규칙: 숫자/N호기 → AOI-N, 그 외 문자 포함 → AOI(원본)."""
     from aoi_verification.app.workers.exporter import _machine_label
