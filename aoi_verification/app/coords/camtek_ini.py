@@ -2,7 +2,7 @@
 
 변환식 (TB500 기준):
     col = Col - 2
-    row = 7 - Row
+    row = 6 - Row
     x   = X - Col × 37247.7
     y   = Y - Row × 44905.4
 """

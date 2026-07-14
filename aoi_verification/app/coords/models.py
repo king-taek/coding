@@ -14,8 +14,8 @@ __all__ = ["DefectCoord", "DefectGeometry", "CAMTEK_PITCH_X", "CAMTEK_PITCH_Y",
 @dataclass(frozen=True)
 class DefectCoord:
     """변환 완료된 defect 좌표 — 세 소스(Camtek INI / LIVE 파일명 / KLA .001) 공통 표현."""
-    col: int       # Camtek 표시용 die column
-    row: int       # Camtek 표시용 die row
+    col: int       # 0-based 표준 die column (Camtek/KLA 통일)
+    row: int       # 0-based 표준 die row (아래에서 위, Camtek/KLA·현물 웨이퍼 맵 정렬)
     x: float       # die 내부 local X (µm)
     y: float       # die 내부 local Y (µm)
     source: str    # "camtek_ini" | "camtek_live" | "kla"
@@ -49,7 +49,10 @@ class DefectGeometry:
 CAMTEK_PITCH_X: float = 37247.7   # µm/die (TB500)
 CAMTEK_PITCH_Y: float = 44905.4   # µm/die (TB500)
 CAMTEK_COL_OFFSET: int = 2        # TB500
-CAMTEK_ROW_TOTAL: int = 7         # TB500
+# TB500: Y die 수 6, INI 원본 Row 는 1-based 1..6 (dev/좌표 확인 실측 분포).
+# 1-based 위→아래를 0-based 아래→위(row 0..5)로 뒤집는 값 — 7 이면 전 구간 +1 로 어긋난다
+# (현물 웨이퍼 맵·KLA 변환과 1 차이 나던 버그의 원인).
+CAMTEK_ROW_TOTAL: int = 6         # TB500
 
 # ── TB500 KLA .001 변환 상수 ─────────────────────────────────────────────
 # col = XINDEX + KLA_ZERO_X

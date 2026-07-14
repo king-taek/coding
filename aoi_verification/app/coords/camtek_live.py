@@ -7,6 +7,9 @@
      예) R_TB500_LIVE_PI4_VLP-PDIS3_W6317098XYB5_4_5_Over Sized Bump_30229.803_1987.994
 
 col/row 는 정수, x/y 는 정수 또는 소수점 실수(µm). 형식 A 를 먼저 시도한다.
+
+파일명의 row 토큰은 Camtek 표시 규약(1..6, = INI 의 구 7−Row 값)이라 0-based 표준
+(row 0..5, 현물 웨이퍼 맵·KLA 정렬)으로 맞추기 위해 −1 정규화한다.
 """
 
 from __future__ import annotations
@@ -33,7 +36,7 @@ _PAT_B = re.compile(
 def _extract(m) -> Optional[DefectCoord]:
     try:
         col = int(m.group(1))
-        row = int(m.group(2))
+        row = int(m.group(2)) - 1   # 표시 규약(1..6) → 0-based 표준(0..5)
         x = float(m.group(3))
         y = float(m.group(4))
     except (ValueError, IndexError):
