@@ -73,7 +73,9 @@ _match = cm._match_neighbors
 
 def test_match_neighbors_allows_off_by_one_row():
     """dev/좌표 확인 실측: KLA(col1,row3,x8653,y39318) ↔ Camtek(col1,row4,x8722,y39216).
-    row 가 1 어긋나지만 ±1 게이트로 매칭돼야 한다(과거 정확 일치 게이트는 전멸했음)."""
+    row 가 1 어긋나지만 ±1 게이트로 매칭돼야 한다(과거 정확 일치 게이트는 전멸했음).
+    ※ 파서의 row 정규화(6−Row) 이후 정상 데이터는 정확 일치하지만, 장비 간 ±1
+    어긋남 방어용으로 게이트는 정답 도구(Module_Compare) 규약대로 ±1 을 유지한다."""
     cam = _p("camtek")
     vmap = {(1, 4): [(cam, 8722.0, 39216.0)]}
     out = _match(8653.0, 39318.0, 1, 3, vmap, TOL)

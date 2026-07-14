@@ -31,58 +31,62 @@ def _approx(a: float, b: float, tol: float = 1e-3) -> bool:
 # ---------------------------------------------------------------------------
 class TestCamtekIni:
     def test_example1(self):
-        """보고서 예시 1: X=253716.003307344 Y=91798.7938704543 Col=6 Row=2 → col=4 row=5"""
+        """보고서 예시 1: X=253716.003307344 Y=91798.7938704543 Col=6 Row=2 → col=4 row=4
+
+        (보고서의 구 정답 row=5 는 7−Row 규약으로 현물 웨이퍼 맵보다 +1 — 6−Row 로 교정)"""
         content = _make_ini_section(X="253716.003307344", Y="91798.7938704543",
                                      Col="6", Row="2")
         c = _extract_coord(content)
         assert c is not None
         assert c.col == 4
-        assert c.row == 5
+        assert c.row == 4
         assert _approx(c.x, 30229.803307344)
         assert _approx(c.y, 1987.9938704543)
         assert c.source == "camtek_ini"
 
     def test_example2(self):
-        """보고서 예시 2: Col=7 Row=5 → col=5 row=2"""
+        """보고서 예시 2: Col=7 Row=5 → col=5 row=1"""
         content = _make_ini_section(X="285837.569021826", Y="241931.965714178",
                                      Col="7", Row="5")
         c = _extract_coord(content)
         assert c is not None
         assert c.col == 5
-        assert c.row == 2
+        assert c.row == 1
         assert _approx(c.x, 25103.669021826)
         assert _approx(c.y, 17404.965714178)
 
     def test_example3(self):
-        """보고서 예시 3: Col=4 Row=7 → col=2 row=0"""
+        """경계 예시: Col=4 Row=6 → col=2 row=0
+
+        (구 보고서 예시의 Row=7 은 실측 원본 범위 1..6 밖의 합성값 — 최하단 경계 Row=6 으로 교체)"""
         content = _make_ini_section(X="183424.006310378", Y="337589.125854985",
-                                     Col="4", Row="7")
+                                     Col="4", Row="6")
         c = _extract_coord(content)
         assert c is not None
         assert c.col == 2
         assert c.row == 0
         assert _approx(c.x, 34433.206310378)
-        assert _approx(c.y, 23251.325854985)
+        assert _approx(c.y, 337589.125854985 - 6 * 44905.4)
 
     def test_example4(self):
-        """보고서 예시 4: Col=4 Row=3 → col=2 row=4"""
+        """보고서 예시 4: Col=4 Row=3 → col=2 row=3"""
         content = _make_ini_section(X="182587.539096461", Y="149593.522482771",
                                      Col="4", Row="3")
         c = _extract_coord(content)
         assert c is not None
         assert c.col == 2
-        assert c.row == 4
+        assert c.row == 3
         assert _approx(c.x, 33596.739096461)
         assert _approx(c.y, 14877.322482771)
 
     def test_example5(self):
-        """보고서 예시 5: Col=4 Row=2 → col=2 row=5"""
+        """보고서 예시 5: Col=4 Row=2 → col=2 row=4"""
         content = _make_ini_section(X="180377.576920526", Y="100976.81821231",
                                      Col="4", Row="2")
         c = _extract_coord(content)
         assert c is not None
         assert c.col == 2
-        assert c.row == 5
+        assert c.row == 4
         assert _approx(c.x, 31386.776920526)
         assert _approx(c.y, 11166.01821231)
 
@@ -93,7 +97,7 @@ class TestCamtekIni:
         c = _extract_coord(content)
         assert c is not None
         assert c.col == 4
-        assert c.row == 5
+        assert c.row == 4
 
     def test_missing_keys_returns_none(self):
         """필수 키 누락 시 None 반환."""
@@ -109,7 +113,7 @@ class TestCamtekIni:
 # ---------------------------------------------------------------------------
 class TestCamtekLive:
     def test_standard_filename(self):
-        """보고서 예시 1과 대응하는 LIVE 파일명."""
+        """보고서 예시 1과 대응하는 LIVE 파일명 — row 토큰 5(표시 규약)는 −1 정규화돼 4."""
         p = Path(
             "R_TB500_LIVE_PI4_VLP-PDIS3_W6317098XYB5_4_5_Over Sized Bump"
             "_30229.803_1987.994.jpg"
@@ -117,7 +121,7 @@ class TestCamtekLive:
         c = live_resolve(p)
         assert c is not None
         assert c.col == 4
-        assert c.row == 5
+        assert c.row == 4
         assert _approx(c.x, 30229.803)
         assert _approx(c.y, 1987.994)
         assert c.source == "camtek_live"
@@ -128,7 +132,7 @@ class TestCamtekLive:
         c = live_resolve(p)
         assert c is not None
         assert c.col == 3
-        assert c.row == 2
+        assert c.row == 1
         assert c.x == 12345.0
         assert c.y == 6789.0
 
@@ -143,7 +147,7 @@ class TestCamtekLive:
         c = live_resolve(p)
         assert c is not None
         assert c.col == 2
-        assert c.row == 3
+        assert c.row == 2
 
     @pytest.mark.parametrize("name", [
         "W6459076XYG1_2_0_23_2.jpg",
@@ -177,7 +181,7 @@ class TestCoordResolve:
         assert c is not None
         assert c.source == "camtek_live"
         assert c.col == 4
-        assert c.row == 5
+        assert c.row == 4
 
     def test_kla_filename_falls_through_to_kla_resolver(self, tmp_path):
         """KLA 파일명은 camtek_live 를 건너뛰고 kla_info 로 해석돼야 한다."""
@@ -201,3 +205,30 @@ class TestCoordResolve:
         assert c.source == "kla"
         assert c.col == 5
         assert c.row == 3
+
+
+# ---------------------------------------------------------------------------
+# 회귀: 실측 데이터에서 KLA ↔ Camtek 의 같은 결함이 같은 (col,row) 로 정렬
+# ---------------------------------------------------------------------------
+_COORD_DATA = Path(__file__).resolve().parents[2] / "dev" / "좌표 확인"
+
+
+@pytest.mark.skipif(not _COORD_DATA.exists(), reason="실측 데이터 폴더 없음")
+def test_real_pair_kla_camtek_rows_align():
+    """dev/좌표 확인 실측 쌍: Camtek 예시1(Col=7,Row=3) ↔ KLA 예시1(XINDEX=2,YINDEX=0).
+
+    같은 물리적 결함이므로 두 변환 모두 (col,row)=(5,3) 이어야 한다.
+    구 변환(7−Row)은 Camtek 만 row=4 로 +1 어긋났다(현물 웨이퍼 맵 기준 오표기)."""
+    from aoi_verification.app.coords import camtek_ini, kla_info
+
+    camtek_ini.load_folder.cache_clear()
+    kla_info.load_folder.cache_clear()
+    kla_info.load_folder_raw.cache_clear()
+
+    cam = camtek_ini.resolve(
+        _COORD_DATA / "Camtek" / "예시1" / "272646.165679.c.1000203959.2.jpeg")
+    kla = kla_info.resolve(
+        _COORD_DATA / "KLA" / "예시1" / "W6459076XYG1_2_0_23_2.jpg")
+    assert cam is not None and kla is not None
+    assert (cam.col, cam.row) == (5, 3)
+    assert (kla.col, kla.row) == (5, 3)
