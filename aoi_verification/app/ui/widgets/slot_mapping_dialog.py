@@ -26,6 +26,7 @@ from PyQt6.QtWidgets import (QAbstractItemView, QDialog, QHBoxLayout, QLabel,
                              QListWidget, QListWidgetItem, QVBoxLayout, QWidget)
 
 from ... import i18n
+from .. import theme
 from .neon_button import NeonButton
 from .window_controls import add_fullscreen_shortcut, enable_window_controls
 
@@ -41,9 +42,9 @@ _GAP = 26                                   # 묶은 쌍 두 사진 사이 간�
 _LIST_SEL_QSS = (
     "QListWidget::item { border: 2px solid transparent; border-radius: 4px;"
     " padding: 2px; margin: 1px; }"
-    "QListWidget::item:selected { border: 2px solid #3DA5FF;"
-    " background: rgba(61,165,255,0.22); color: #FFFFFF; }"
-    "QListWidget::item:selected:active { border: 2px solid #3DA5FF; }"
+    f"QListWidget::item:selected {{ border: 2px solid {theme.FOCUS};"
+    f" background: rgba(106,166,255,0.20); color: {theme.INK}; }}"
+    f"QListWidget::item:selected:active {{ border: 2px solid {theme.FOCUS}; }}"
 )
 
 _METHOD_LABEL = {
@@ -278,7 +279,7 @@ class SlotMappingDialog(QDialog):
         if pa is not None:
             p.drawPixmap(max(0, (_CROP_W - pa.width()) // 2),
                          (_CROP_H - pa.height()) // 2, pa)
-        p.setPen(QColor("#3DA5FF"))
+        p.setPen(QColor(theme.FOCUS))
         p.drawText(_CROP_W, 0, _GAP, _CROP_H,
                    Qt.AlignmentFlag.AlignCenter, "↔")
         if pb is not None:

@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout,
                               QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
 
 from ... import config, i18n
+from .. import theme
 from ...models.result import MatchResult, MissEntry
 from ...models.slot import ImageItem
 from ...utils import image_io
@@ -60,7 +61,7 @@ def _load_full_pixmap_scaled(path: Path, size: int) -> QPixmap:
     스코프 안에서만 살아 있다가 GC 되므로 메모리는 축소된 사본만 유지.
     """
     fallback = QPixmap(size, size)
-    fallback.fill(QColor(20, 28, 40))
+    fallback.fill(QColor(theme.PANEL))
     try:
         full = QPixmap(str(path))
         if full.isNull():
@@ -88,7 +89,7 @@ class _CandidateTile(QFrame):
 
     # objectName 스코프 셀렉터 — 최외곽 프레임에만 테두리. (QLabel 이 QFrame
     # 서브클래스라 ``QFrame {…}`` 는 내부 이미지/점수/캡션 라벨까지 번진다.)
-    _SEL_STYLE = ("#candTile { border: 3px solid #39FF14; border-radius: 8px;"
+    _SEL_STYLE = (f"#candTile {{ border: 2px solid {theme.ACCENT}; border-radius: 8px;"
                   " background: rgba(57, 255, 20, 0.06); }")
 
     def __init__(self, item: ImageItem, score: float, parent=None,
@@ -120,7 +121,7 @@ class _CandidateTile(QFrame):
         self._img_label.setFixedSize(self._size, self._size)
         self._img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         ph = QPixmap(self._size, self._size)
-        ph.fill(QColor(20, 28, 40))
+        ph.fill(QColor(theme.PANEL))
         self._img_label.setPixmap(ph)
         lay.addWidget(self._img_label, alignment=Qt.AlignmentFlag.AlignCenter)
 
@@ -128,7 +129,7 @@ class _CandidateTile(QFrame):
             _fmt_score(self.score, self._coord_mode, self._tolerance), self)
         self._score_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._score_label.setStyleSheet(
-            "color: #00FFA3; font-weight: 700; padding: 2px;"
+            f"color: {theme.PASS}; font-weight: 700; padding: 2px;"
         )
         lay.addWidget(self._score_label)
 
@@ -301,7 +302,7 @@ class UnmatchedReviewDialog(QDialog):
         head = QHBoxLayout()
         self.progress_label = QLabel("", self)
         self.progress_label.setStyleSheet(
-            "color: #39FF14; font-weight: 700; font-size: 15px;"
+            f"color: {theme.INK}; font-weight: 700; font-size: 15px;"
         )
         head.addWidget(self.progress_label)
         head.addStretch(1)
@@ -323,7 +324,7 @@ class UnmatchedReviewDialog(QDialog):
 
         hint = QLabel(i18n.KO.UNMATCHED_REVIEW_HINT, self)
         hint.setWordWrap(True)
-        hint.setStyleSheet("color: #7FB3D5; padding: 4px;")
+        hint.setStyleSheet(f"color: {theme.MUTE}; padding: 4px;")
         root.addWidget(hint)
 
         # 본문: 좌(실패 목록) + 중(기준 사진) + 우(후보 그리드)
@@ -337,15 +338,15 @@ class UnmatchedReviewDialog(QDialog):
         lpl.setContentsMargins(12, 12, 12, 12)
         lpl.setSpacing(6)
         list_title = QLabel("실패 목록", list_panel)   # 인라인 한글 (#12).
-        list_title.setStyleSheet("color: #39FF14; font-weight: 700;")
+        list_title.setStyleSheet(f"color: {theme.INK}; font-weight: 700;")
         lpl.addWidget(list_title)
         self.fail_list = QListWidget(list_panel)
         self.fail_list.setIconSize(QSize(_LIST_THUMB_PX, _LIST_THUMB_PX))
         self.fail_list.setStyleSheet(
-            "QListWidget { background: #0A0F1C; border: 1px solid #1F2A3F; "
-            "border-radius: 6px; color: #C8D6E5; }"
+            f"QListWidget {{ background: {theme.PANEL}; border: 1px solid {theme.LINE}; "
+            f"border-radius: 6px; color: {theme.INK2}; }}"
             "QListWidget::item { padding: 4px 6px; }"
-            "QListWidget::item:selected { background: #123047; color: #00FFA3; }"
+            f"QListWidget::item:selected {{ background: {theme.ELEV}; color: {theme.ACCENT}; }}"
         )
         self.fail_list.itemClicked.connect(self._on_list_item_clicked)
         lpl.addWidget(self.fail_list, stretch=1)
@@ -363,19 +364,19 @@ class UnmatchedReviewDialog(QDialog):
         ll.setContentsMargins(12, 12, 12, 12)
         ll.setSpacing(6)
         ref_title = QLabel(i18n.KO.PANEL_MATCH_REF, left)
-        ref_title.setStyleSheet("color: #39FF14; font-weight: 700;")
+        ref_title.setStyleSheet(f"color: {theme.INK}; font-weight: 700;")
         ref_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         ll.addWidget(ref_title)
         self.ref_filename = QLabel("", left)
         self.ref_filename.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.ref_filename.setStyleSheet("color: #7FB3D5; padding: 2px;")
+        self.ref_filename.setStyleSheet(f"color: {theme.MUTE}; padding: 2px;")
         self.ref_filename.setWordWrap(True)
         ll.addWidget(self.ref_filename)
         self.ref_img = QLabel(left)
         self.ref_img.setFixedSize(self._ref_px, self._ref_px)
         self.ref_img.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.ref_img.setStyleSheet(
-            "background: #050810; border: 1px solid #1F2A3F; border-radius: 6px;"
+            f"background: {theme.BG}; border: 1px solid {theme.LINE}; border-radius: 6px;"
         )
         # 우클릭/더블클릭 ‘크게보기’ — 후보와 동일한 좌우 비교 창을 열되,
         # 기준 사진은 가장 유사도가 높은 후보부터(start=0) 보여준다 (#13).
@@ -399,7 +400,7 @@ class UnmatchedReviewDialog(QDialog):
         rl.setSpacing(6)
         cand_head = QHBoxLayout()
         cand_title = QLabel(i18n.KO.PANEL_MATCH_CANDIDATES, right)
-        cand_title.setStyleSheet("color: #39FF14; font-weight: 700;")
+        cand_title.setStyleSheet(f"color: {theme.INK}; font-weight: 700;")
         cand_head.addWidget(cand_title)
         # '검증 장비 후보' 옆 '크게 보기' — 선택 후보(없으면 1순위)부터 좌우 비교.
         self.btn_zoom_cand = NeonButton(i18n.KO.BTN_VIEW_LARGER, role="ghost")
@@ -408,7 +409,7 @@ class UnmatchedReviewDialog(QDialog):
         cand_head.addStretch(1)
         rl.addLayout(cand_head)
         self.candidates_summary = QLabel("", right)
-        self.candidates_summary.setStyleSheet("color: #7FB3D5; padding: 2px;")
+        self.candidates_summary.setStyleSheet(f"color: {theme.MUTE}; padding: 2px;")
         rl.addWidget(self.candidates_summary)
         self._scroll = QScrollArea(right)
         self._scroll.setWidgetResizable(True)
@@ -495,7 +496,7 @@ class UnmatchedReviewDialog(QDialog):
             # 구분선/헤더 — 선택 불가, 클릭해도 점프하지 않음.
             sep = QListWidgetItem("── 매칭 취소 목록 ──")
             sep.setFlags(Qt.ItemFlag.NoItemFlags)
-            sep.setForeground(QColor("#FF8A65"))
+            sep.setForeground(QColor(theme.DANGER))
             self.fail_list.addItem(sep)
             for idx in cancelled:
                 _add_entry_row(idx)
@@ -531,9 +532,9 @@ class UnmatchedReviewDialog(QDialog):
                 continue                              # 구분선 행.
             item = self.fail_list.item(row)
             if idx in self._pending:
-                item.setForeground(QColor("#39FF14"))
+                item.setForeground(QColor(theme.PASS))
             else:
-                item.setForeground(QColor("#C8D6E5"))
+                item.setForeground(QColor(theme.INK2))
 
     def _on_list_item_clicked(self, item: QListWidgetItem) -> None:
         row = self.fail_list.row(item)
@@ -626,7 +627,7 @@ class UnmatchedReviewDialog(QDialog):
             self._cand_tiles = []
             self._last_cand_key = None
             empty = QLabel(i18n.KO.UNMATCHED_REVIEW_NO_CANDIDATES, self._host)
-            empty.setStyleSheet("color: #7FB3D5; padding: 20px;")
+            empty.setStyleSheet(f"color: {theme.MUTE}; padding: 20px;")
             self._grid.addWidget(empty, 0, 0)
             self.candidates_summary.setText("후보 0 장")
             return

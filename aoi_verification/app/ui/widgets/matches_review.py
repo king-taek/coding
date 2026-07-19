@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (QDialog, QGridLayout, QHBoxLayout, QLabel,
                               QScrollArea, QVBoxLayout, QWidget)
 
 from ... import config, i18n
+from .. import theme
 from ...models.result import MatchResult
 from ...utils import image_io
 from .neon_button import NeonButton
@@ -41,11 +42,11 @@ class _Row(QWidget):
     delete_requested = pyqtSignal(object)        # MatchResult
 
     _STYLE_NORMAL = (
-        "QWidget#matchRow { background: #0E1424; border: 1px solid #1F2A3F; "
+        f"QWidget#matchRow {{ background: {theme.PANEL}; border: 1px solid {theme.LINE}; "
         "border-radius: 8px; }"
     )
     _STYLE_PENDING = (
-        "QWidget#matchRow { background: #2A0E16; border: 3px solid #FF2D55; "
+        f"QWidget#matchRow {{ background: rgba(229,96,90,0.10); border: 2px solid {theme.DANGER}; "
         "border-radius: 8px; }"
     )
 
@@ -73,7 +74,7 @@ class _Row(QWidget):
             f"{m.slot}\n{_fmt_score(m.score, coord_mode, tolerance)}", self,
         )
         meta.setStyleSheet(
-            "color: #39FF14; font-weight: 700; border: none; padding: 4px;"
+            f"color: {theme.INK}; font-weight: 700; border: none; padding: 4px;"
         )
         meta.setFixedWidth(120)
         meta.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
@@ -82,7 +83,7 @@ class _Row(QWidget):
         lay.addWidget(self._make_thumb(m.ref_path, self._size))
         arrow = QLabel("→", self)
         arrow.setStyleSheet(
-            "color: #7FB3D5; font-size: 24px; border: none;"
+            f"color: {theme.MUTE}; font-size: 24px; border: none;"
         )
         arrow.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(arrow)
@@ -134,10 +135,10 @@ class _Row(QWidget):
             pix = QPixmap(str(mid))
         except Exception:
             pix = QPixmap(size, size)
-            pix.fill(QColor(20, 28, 40))
+            pix.fill(QColor(theme.PANEL))
         if pix.isNull():
             pix = QPixmap(size, size)
-            pix.fill(QColor(20, 28, 40))
+            pix.fill(QColor(theme.PANEL))
         # source 픽스맵은 최대 슬라이더 크기로 한 번만 다운스케일해 보관 →
         # 슬라이더 리사이즈 시 재디코드 없이 또렷하게 재스케일, 메모리도 상한.
         source = pix.scaled(
@@ -155,7 +156,7 @@ class _Row(QWidget):
 
         cap = QLabel(Path(p).name, host)
         cap.setProperty("role", "muted")
-        cap.setStyleSheet("color: #7FB3D5; font-size: 11px; border: none;")
+        cap.setStyleSheet(f"color: {theme.MUTE}; font-size: 11px; border: none;")
         cap.setAlignment(Qt.AlignmentFlag.AlignCenter)
         cap.setWordWrap(True)
         v.addWidget(cap)

@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (QApplication, QDialog, QHBoxLayout, QLabel,
                              QSizePolicy, QVBoxLayout, QWidget)
 
 from ...models.slot import ImageItem
+from .. import theme
 from .neon_button import NeonButton
 from .window_controls import add_fullscreen_shortcut, enable_window_controls
 
@@ -25,7 +26,7 @@ def _decode_original(path: Path) -> QPixmap:
     pix = QPixmap(str(path))
     if pix.isNull():
         pix = QPixmap(800, 600)
-        pix.fill(QColor(20, 28, 40))
+        pix.fill(QColor(theme.PANEL))
     return pix
 
 
@@ -42,11 +43,11 @@ class _Pane(QWidget):
         lay.setSpacing(4)
         self._title = QLabel(title, self)
         self._title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._title.setStyleSheet("color: #39FF14; font-weight: 700;")
+        self._title.setStyleSheet(f"color: {theme.INK}; font-weight: 700;")
         lay.addWidget(self._title)
         self._img = QLabel(self)
         self._img.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._img.setStyleSheet("background: #000; border: 1px solid #1F2A3F;")
+        self._img.setStyleSheet(f"background: #000; border: 1px solid {theme.LINE};")
         # 크기 제약 없는 QLabel 에 라벨 크기로 스케일한 pixmap 을 넣으면
         # minimumSizeHint 이 그 pixmap 크기로 커져 리사이즈마다 창이 계속 커진다.
         # Ignored 정책 + 1×1 최소크기로 레이아웃 성장 피드백을 끊는다.
@@ -111,7 +112,7 @@ class SideBySideViewer(QDialog):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.setModal(True)
-        self.setStyleSheet("background-color: #050810;")
+        self.setStyleSheet(f"background-color: {theme.BG};")
         self._ref_path = Path(ref_path)
         self._candidates = list(candidates)
         self._idx = max(0, min(int(start_index), len(self._candidates) - 1)) \
@@ -145,11 +146,11 @@ class SideBySideViewer(QDialog):
         # 이전 버튼을 다음 버튼 바로 옆으로 모으고, 방향키 조작 가능을 표기한다.
         bar = QHBoxLayout()
         self.pos_label = QLabel("", self)
-        self.pos_label.setStyleSheet("color: #7FB3D5; font-weight: 700;")
+        self.pos_label.setStyleSheet(f"color: {theme.MUTE}; font-weight: 700;")
         bar.addWidget(self.pos_label)
         bar.addStretch(1)
         key_hint = QLabel("← → 방향키로 이동", self)
-        key_hint.setStyleSheet("color: #5A6B82; font-size: 12px;")
+        key_hint.setStyleSheet(f"color: {theme.MUTE}; font-size: 12px;")
         bar.addWidget(key_hint)
         self.btn_prev = NeonButton("◀ 이전", role="ghost")
         self.btn_prev.clicked.connect(self._prev)

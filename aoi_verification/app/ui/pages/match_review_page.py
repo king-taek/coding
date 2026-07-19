@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu,
                               QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
 
 from ... import i18n
+from .. import theme
 from ...models.result import MatchResult, MissEntry
 from ...models.slot import ImageItem
 from ...utils import image_io
@@ -67,12 +68,12 @@ class _LazyThumb(QLabel):
         self.setFixedSize(self._size, self._size)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         if subtle:
-            self.setStyleSheet("border: 1px dashed #1F2A3F; border-radius: 6px;")
+            self.setStyleSheet(f"border: 1px dashed {theme.LINE}; border-radius: 6px;")
         else:
-            self.setStyleSheet("border: 1px solid #1F2A3F; border-radius: 6px;")
+            self.setStyleSheet(f"border: 1px solid {theme.LINE}; border-radius: 6px;")
         # placeholder — 첫 paint 후 실제 이미지로 교체.
         ph = QPixmap(self._size, self._size)
-        ph.fill(QColor(20, 28, 40))
+        ph.fill(QColor(theme.PANEL))
         self.setPixmap(ph)
         # 우클릭 컨텍스트 메뉴 (크게보기). 차순위 타일 내부 썸네일은 상위
         # _RunnerUpTile 이 좌우 비교 뷰어를 직접 열도록 비활성화한다 (#4).
@@ -160,7 +161,7 @@ class _RunnerUpTile(QFrame):
         else:
             score_text = f"{score * 100:.1f} %"
         self._score_label = QLabel(score_text, self)
-        self._score_label.setStyleSheet("color: #7FB3D5; font-size: 11px;")
+        self._score_label.setStyleSheet(f"color: {theme.MUTE}; font-size: 11px;")
         self._score_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(self._score_label)
 
@@ -239,7 +240,7 @@ class _MatchRow(QFrame):
         slot_lay.setSpacing(4)
         self._slot_label = QLabel(match.slot, slot_host)
         self._slot_label.setStyleSheet(
-            "color: #39FF14; font-weight: 700; font-size: 14px;"
+            f"color: {theme.INK}; font-weight: 700; font-size: 14px;"
         )
         slot_lay.addWidget(self._slot_label)
         self.btn_view = NeonButton(i18n.KO.BTN_VIEW_LARGER, role="ghost")
@@ -255,7 +256,7 @@ class _MatchRow(QFrame):
 
         # 화살표
         arrow = QLabel("→", self)
-        arrow.setStyleSheet("color: #7FB3D5; font-size: 28px;")
+        arrow.setStyleSheet(f"color: {theme.MUTE}; font-size: 28px;")
         arrow.setAlignment(Qt.AlignmentFlag.AlignCenter)
         top.addWidget(arrow)
 
@@ -269,7 +270,7 @@ class _MatchRow(QFrame):
         primary_lay.addWidget(self._val_img,
                               alignment=Qt.AlignmentFlag.AlignCenter)
         score_label = QLabel(self._format_score(match.score), primary_host)
-        score_color = "#FF6B35" if (self._coord_mode and match.score < 0) else "#FFD600"
+        score_color = theme.DANGER if (self._coord_mode and match.score < 0) else theme.WARN
         score_label.setStyleSheet(
             f"color: {score_color}; font-weight: 700; font-size: 14px;"
         )
@@ -573,7 +574,7 @@ class _MatchRow(QFrame):
             # 빨간 강조는 가장 바깥 프레임 테두리에만 둔다 (배경 틴트/내부 위젯
             # 테두리 없음) (#1). 자식 위젯에 번지지 않도록 셀렉터를 self 로 한정.
             self.setStyleSheet(
-                "_MatchRow { border: 2px solid #FF2D55; border-radius: 6px; }"
+                f"_MatchRow {{ border: 2px solid {theme.DANGER}; border-radius: 6px; }}"
             )
             self.btn_toggle.setText(i18n.KO.BTN_RESTORE_MATCH)
             self.btn_toggle.setRole("ghost")
@@ -634,17 +635,17 @@ class MatchReviewPage(QWidget):
         hint = QLabel(i18n.KO.MATCH_REVIEW_HINT, self)
         hint.setProperty("role", "subtitle")
         hint.setWordWrap(True)
-        hint.setStyleSheet("color: #7FB3D5;")
+        hint.setStyleSheet(f"color: {theme.MUTE};")
         root.addWidget(hint)
 
         # 요약 라벨 + 사진 크기 슬라이더 (#2)
         summary_row = QHBoxLayout()
         self._summary_label = QLabel("", self)
-        self._summary_label.setStyleSheet("color: #00FFA3; font-weight: 700;")
+        self._summary_label.setStyleSheet(f"color: {theme.PASS}; font-weight: 700;")
         summary_row.addWidget(self._summary_label)
         summary_row.addStretch(1)
         size_label = QLabel(i18n.KO.IMAGE_SIZE_LABEL, self)
-        size_label.setStyleSheet("color: #7FB3D5;")
+        size_label.setStyleSheet(f"color: {theme.MUTE};")
         summary_row.addWidget(size_label)
         # 마우스 휠로는 조절 불가 (NoWheelSlider).
         self.size_slider = NoWheelSlider(Qt.Orientation.Horizontal, self)
@@ -656,7 +657,7 @@ class MatchReviewPage(QWidget):
         self.size_slider.valueChanged.connect(self._on_size_changed)
         summary_row.addWidget(self.size_slider)
         self.size_value = QLabel(f"{self._thumb_px} px", self)
-        self.size_value.setStyleSheet("color: #7FB3D5;")
+        self.size_value.setStyleSheet(f"color: {theme.MUTE};")
         self.size_value.setFixedWidth(56)
         summary_row.addWidget(self.size_value)
         root.addLayout(summary_row)
@@ -747,7 +748,7 @@ class MatchReviewPage(QWidget):
             empty = QLabel(
                 "자동 매치된 항목이 없습니다.  [완료] 를 누르면 결과 화면으로 이동합니다.",
             )
-            empty.setStyleSheet("color: #7FB3D5; padding: 20px;")
+            empty.setStyleSheet(f"color: {theme.MUTE}; padding: 20px;")
             self._list_layout.addWidget(empty)
         else:
             if self._coord_mode:

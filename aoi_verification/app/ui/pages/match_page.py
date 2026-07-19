@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel,
                               QSplitter, QStackedWidget, QVBoxLayout, QWidget)
 
 from ... import config, i18n
+from .. import theme
 from ...models.result import MatchResult
 from ...models.slot import ImageItem, Slot
 from ...utils import image_io
@@ -152,7 +153,7 @@ class MatchPage(QWidget):
         # 열려 있는 동안에도 ‘나머지 슬롯이 X / Y 완료’ 임을 알려준다.
         self.bg_status_label = QLabel("", self)
         self.bg_status_label.setStyleSheet(
-            "color: #00FFA3; padding: 2px 8px;"
+            f"color: {theme.PASS}; padding: 2px 8px;"
         )
         top.addWidget(self.bg_status_label)
         root.addLayout(top)
@@ -167,7 +168,7 @@ class MatchPage(QWidget):
         cl = center.body()
         title = QLabel(i18n.KO.PANEL_MATCH_REF, center)
         title.setProperty("role", "subtitle")
-        title.setStyleSheet("font-weight:700; color:#39FF14;")
+        title.setStyleSheet(f"font-weight:700; color:{theme.INK};")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         cl.addWidget(title)
 
@@ -175,7 +176,7 @@ class MatchPage(QWidget):
         self.slot_label = QLabel("", center)
         self.slot_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.slot_label.setStyleSheet(
-            "color: #7FB3D5; font-size: 14px; font-weight: 600; padding: 2px;"
+            f"color: {theme.MUTE}; font-size: 14px; font-weight: 600; padding: 2px;"
         )
         cl.addWidget(self.slot_label)
 
@@ -209,7 +210,7 @@ class MatchPage(QWidget):
         self._img_scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._img_scroll.setWidget(self.center_img)
         self._img_scroll.setStyleSheet(
-            "QScrollArea { background: #050810; border: 1px solid #1F2A3F; "
+            f"QScrollArea {{ background: {theme.BG}; border: 1px solid {theme.LINE}; "
             "border-radius: 8px; }"
         )
         self._img_scroll.setMinimumHeight(300)
@@ -246,7 +247,7 @@ class MatchPage(QWidget):
         rl.setSpacing(8)
         rt = QLabel(i18n.KO.PANEL_MATCH_CANDIDATES, right)
         rt.setProperty("role", "subtitle")
-        rt.setStyleSheet("font-weight:700; color:#39FF14;")
+        rt.setStyleSheet(f"font-weight:700; color:{theme.INK};")
         rl.addWidget(rt)
 
         # 후보 패널 내부 스택: page 0 = 썸네일 그리드, page 1 = 확대 보기
@@ -1141,7 +1142,7 @@ class MatchPage(QWidget):
                     i18n.KO.SKIPPED_SECTION_DEFER_FMT.format(n=n), host,
                 )
                 hdr.setStyleSheet(
-                    "color: #FFD600; font-weight: 700; padding: 6px 2px;"
+                    f"color: {theme.WARN}; font-weight: 700; padding: 6px 2px;"
                 )
                 hl.addWidget(hdr)
                 for slot in defer_slots:
@@ -1158,7 +1159,7 @@ class MatchPage(QWidget):
                     i18n.KO.SKIPPED_SECTION_NO_MATCH_FMT.format(n=n), host,
                 )
                 hdr.setStyleSheet(
-                    "color: #FF2D55; font-weight: 700; padding: 6px 2px;"
+                    f"color: {theme.DANGER}; font-weight: 700; padding: 6px 2px;"
                 )
                 hl.addWidget(hdr)
                 for slot in none_slots:

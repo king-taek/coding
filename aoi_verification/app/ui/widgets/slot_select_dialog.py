@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel,
                              QScrollArea, QVBoxLayout, QWidget)
 
 from ... import i18n
+from .. import theme
 from .neon_button import NeonButton
 from .window_controls import add_fullscreen_shortcut, enable_window_controls
 
@@ -94,7 +95,7 @@ class _SlotTile(QFrame):
         self._label.setText(prefix + text)
         if self._selected:
             self.setStyleSheet(
-                "#slotTile { border: 3px solid #39FF14; border-radius: 8px;"
+                f"#slotTile {{ border: 2px solid {theme.ACCENT}; border-radius: 8px;"
                 " background: rgba(57, 255, 20, 0.10); }"
             )
         else:

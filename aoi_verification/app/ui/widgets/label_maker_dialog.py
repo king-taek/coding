@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (QApplication, QCheckBox, QDialog, QFileDialog,
                               QToolButton, QVBoxLayout, QWidget)
 
 from ... import i18n
+from .. import theme
 from ...utils import image_io as _io
 
 _REF_PX = 360
@@ -45,7 +46,7 @@ class LabelMakerDialog(QDialog):
 
         hint = QLabel(i18n.KO.DEV_LABEL_HINT, self)
         hint.setWordWrap(True)
-        hint.setStyleSheet("color: #7FB3D5;")
+        hint.setStyleSheet(f"color: {theme.MUTE};")
         root.addWidget(hint)
 
         # 폴더 입력 + 시작 -------------------------------------------------
@@ -71,16 +72,16 @@ class LabelMakerDialog(QDialog):
         body = QHBoxLayout()
         left = QVBoxLayout()
         self.progress_lbl = QLabel("", self)
-        self.progress_lbl.setStyleSheet("color: #39FF14; font-weight: 700;")
+        self.progress_lbl.setStyleSheet(f"color: {theme.PASS}; font-weight: 700;")
         self.progress_lbl.setWordWrap(True)
         left.addWidget(self.progress_lbl)
         self.ref_img = QLabel(self)
         self.ref_img.setFixedSize(_REF_PX, _REF_PX)
         self.ref_img.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.ref_img.setStyleSheet("background:#0E1424; border:1px solid #1F2A3F;")
+        self.ref_img.setStyleSheet(f"background:{theme.PANEL}; border:1px solid {theme.LINE};")
         left.addWidget(self.ref_img)
         self.sel_lbl = QLabel("", self)
-        self.sel_lbl.setStyleSheet("color: #00FFA3; font-weight: 600;")
+        self.sel_lbl.setStyleSheet(f"color: {theme.PASS}; font-weight: 600;")
         left.addWidget(self.sel_lbl)
         left.addStretch(1)
         body.addLayout(left)
@@ -182,8 +183,8 @@ class LabelMakerDialog(QDialog):
             btn.setChecked(self._model.is_selected(str(vi.path)))
             btn.setToolTip(str(vi.path))
             btn.setStyleSheet(
-                "QToolButton{border:2px solid #1F2A3F; padding:4px; color:#7FB3D5;}"
-                "QToolButton:checked{border:2px solid #00FFA3; color:#00FFA3;}")
+                f"QToolButton{{border:2px solid {theme.LINE}; padding:4px; color:{theme.MUTE};}}"
+                f"QToolButton:checked{{border:2px solid {theme.ACCENT}; color:{theme.ACCENT};}}")
             vp = str(vi.path)
             btn.clicked.connect(lambda _c=False, p=vp: self._on_toggle(p))
             self.grid.addWidget(btn, i // cols, i % cols)

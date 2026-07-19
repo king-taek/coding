@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout,
                              QSizePolicy, QSlider, QVBoxLayout, QWidget)
 
 from ... import config, i18n
+from .. import theme
 from ...models.slot import ImageItem
 from ...utils import image_io
 from .neon_button import NeonButton
@@ -108,7 +109,7 @@ class _SelectTile(QFrame):
     def _refresh_visual(self) -> None:
         if self._selected:
             self.setStyleSheet(
-                "#selTile { border: 3px solid #39FF14; border-radius: 8px;"
+                f"#selTile {{ border: 2px solid {theme.ACCENT}; border-radius: 8px;"
                 " background: rgba(57, 255, 20, 0.06); }"
             )
         else:
@@ -194,14 +195,14 @@ class BulkSelectDialog(QDialog):
         # 헤더 / 안내
         head = QLabel(title, self)
         head.setStyleSheet(
-            "color: #39FF14; font-weight: 700; font-size: 16px;"
+            f"color: {theme.INK}; font-weight: 700; font-size: 16px;"
         )
         root.addWidget(head)
 
         hint = QLabel(i18n.KO.BULK_SELECT_HINT, self)
         hint.setProperty("role", "subtitle")
         hint.setWordWrap(True)
-        hint.setStyleSheet("color: #7FB3D5;")
+        hint.setStyleSheet(f"color: {theme.MUTE};")
         root.addWidget(hint)
 
         # 상단 바: 선택 요약 + 사진 크기 슬라이더 -----------------------
@@ -210,7 +211,7 @@ class BulkSelectDialog(QDialog):
         self._summary_label = QLabel(
             i18n.KO.BULK_SELECT_SUMMARY_FMT.format(n=0), self,
         )
-        self._summary_label.setStyleSheet("color: #00FFA3; font-weight: 700;")
+        self._summary_label.setStyleSheet(f"color: {theme.PASS}; font-weight: 700;")
         top.addWidget(self._summary_label)
         top.addStretch(1)
         size_label = QLabel(i18n.KO.BULK_SIZE_LABEL, self)
@@ -247,7 +248,7 @@ class BulkSelectDialog(QDialog):
 
         if self._total_items == 0:
             empty = QLabel(i18n.KO.BULK_SELECT_EMPTY, self)
-            empty.setStyleSheet("color: #7FB3D5; padding: 20px;")
+            empty.setStyleSheet(f"color: {theme.MUTE}; padding: 20px;")
             root.addWidget(empty)
 
         # 페이지네이션 바 (대량일 때만 노출) ----------------------------
@@ -259,7 +260,7 @@ class BulkSelectDialog(QDialog):
             self._btn_next = NeonButton(i18n.KO.BULK_PAGE_NEXT, role="default")
             self._btn_next.clicked.connect(lambda: self._go_page(self._page + 1))
             self._page_label = QLabel("", self)
-            self._page_label.setStyleSheet("color: #7FB3D5; font-weight: 700;")
+            self._page_label.setStyleSheet(f"color: {theme.MUTE}; font-weight: 700;")
             page_bar.addStretch(1)
             page_bar.addWidget(self._btn_prev)
             page_bar.addWidget(self._page_label)
@@ -323,7 +324,7 @@ class BulkSelectDialog(QDialog):
                 host,
             )
             slot_label.setStyleSheet(
-                "color: #39FF14; font-weight: 700; padding-top: 4px;"
+                f"color: {theme.PASS}; font-weight: 700; padding-top: 4px;"
             )
             host_layout.addWidget(slot_label)
 

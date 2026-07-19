@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (QCheckBox, QFileDialog, QHBoxLayout, QLabel,
                               QMessageBox, QVBoxLayout, QWidget)
 
 from ... import i18n
+from .. import theme
 from ...models.result import FinalResult
 from ...workers.exporter import ExcelExporter
 from ..widgets.loading_overlay import LoadingOverlay
@@ -110,7 +111,7 @@ class ResultPage(QWidget):
         # 개발자 크레딧 (마지막 화면) -----------------------------------
         credit = QLabel(i18n.KO.CREDIT, self)
         credit.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        credit.setStyleSheet("color: #7FB3D5; padding-top: 8px;")
+        credit.setStyleSheet(f"color: {theme.MUTE}; padding-top: 8px;")
         root.addWidget(credit)
 
     # ------------------------------------------------------------------
@@ -161,7 +162,7 @@ class ResultPage(QWidget):
             )
             hint.setWordWrap(True)
             hint.setStyleSheet(
-                "color: #FFD600; font-weight: 700; padding: 4px;"
+                f"color: {theme.WARN}; font-weight: 700; padding: 4px;"
             )
             self._summary_layout.addWidget(hint)
 

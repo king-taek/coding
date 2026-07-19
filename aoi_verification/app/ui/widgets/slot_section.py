@@ -8,6 +8,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from ... import i18n
+from .. import theme
 from .thumb_grid import ThumbEntry, ThumbGrid
 
 
@@ -38,7 +39,7 @@ class SlotSection(QWidget):
         header = QHBoxLayout()
         self._label = QLabel(self)
         self._label.setProperty("role", "subtitle")
-        self._label.setStyleSheet("font-weight: 700; color: #39FF14;")
+        self._label.setStyleSheet(f"font-weight: 700; color: {theme.INK};")
         header.addWidget(self._label)
         header.addStretch(1)
         outer.addLayout(header)

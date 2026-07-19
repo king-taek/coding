@@ -26,6 +26,7 @@ from PyQt6.QtWidgets import (QCheckBox, QDialog, QFileDialog, QFormLayout,
                               QWidget)
 
 from ... import i18n
+from .. import theme
 from ...dev import benchmark as _bm
 from ...dev import recipes as _rx
 from ...utils import paths as _paths
@@ -283,7 +284,7 @@ class DevBenchmarkDialog(QDialog):
 
         hint = QLabel(i18n.KO.DEV_BENCH_HINT, self)
         hint.setWordWrap(True)
-        hint.setStyleSheet("color: #7FB3D5;")
+        hint.setStyleSheet(f"color: {theme.MUTE};")
         root.addWidget(hint)
 
         form = QFormLayout()
@@ -378,7 +379,7 @@ class DevBenchmarkDialog(QDialog):
         root.addLayout(bar)
 
         self.status = QLabel(i18n.KO.DEV_BENCH_CACHE_NOTE, self)
-        self.status.setStyleSheet("color: #39FF14; font-weight: 600;")
+        self.status.setStyleSheet(f"color: {theme.PASS}; font-weight: 600;")
         root.addWidget(self.status)
 
         cols = [i18n.KO.DEV_BENCH_COL_RECIPE, i18n.KO.DEV_BENCH_COL_TOTAL,

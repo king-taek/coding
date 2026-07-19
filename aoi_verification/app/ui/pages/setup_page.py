@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (QButtonGroup, QDoubleSpinBox,
                               QSizePolicy, QToolButton, QVBoxLayout, QWidget)
 
 from ... import config, i18n
+from .. import theme
 from ...utils import prefs as _prefs
 from ...utils.prefs import AutomationLevel
 from ..widgets.collapsible_section import CollapsibleSection
@@ -109,13 +110,13 @@ class SetupPage(QWidget):
         howto_card = NeonCard(role="card-soft", parent=self._howto_section)
         howto_title = QLabel(i18n.KO.SETUP_HOW_TO_USE_TITLE, howto_card)
         howto_title.setStyleSheet(
-            "color: #39FF14; font-weight: 700; letter-spacing: 1px;"
+            f"color: {theme.INK}; font-weight: 700; letter-spacing: 1px;"
         )
         howto_card.body().addWidget(howto_title)
         howto_body = QLabel(i18n.KO.SETUP_HOW_TO_USE_BODY, howto_card)
         howto_body.setWordWrap(True)
         howto_body.setStyleSheet(
-            "color: #E5F4FF; line-height: 160%; padding-top: 4px;"
+            f"color: {theme.INK}; line-height: 160%; padding-top: 4px;"
         )
         howto_card.body().addWidget(howto_body)
         self._howto_section.add_content_widget(howto_card)
@@ -132,7 +133,7 @@ class SetupPage(QWidget):
         auto_title_row.setContentsMargins(0, 0, 0, 0)
         auto_title = QLabel(i18n.KO.AUTOMATION_TITLE, auto_card)
         auto_title.setStyleSheet(
-            "color: #39FF14; font-weight: 700; letter-spacing: 1px;"
+            f"color: {theme.INK}; font-weight: 700; letter-spacing: 1px;"
         )
         self._auto_help_btn = QToolButton(auto_card)
         self._auto_help_btn.setText("?")
@@ -193,7 +194,7 @@ class SetupPage(QWidget):
         engine_card = NeonCard(role="card-soft", parent=self)
         eng_title = QLabel(i18n.KO.ENGINE_CARD_TITLE, engine_card)
         eng_title.setStyleSheet(
-            "color: #39FF14; font-weight: 700; letter-spacing: 1px;"
+            f"color: {theme.INK}; font-weight: 700; letter-spacing: 1px;"
         )
         engine_card.body().addWidget(eng_title)
 
@@ -232,7 +233,7 @@ class SetupPage(QWidget):
 
         _legacy_hint = QLabel(i18n.KO.LEGACY_MODE_HINT, legacy_inner)
         _legacy_hint.setWordWrap(True)
-        _legacy_hint.setStyleSheet("color: #7FB3D5; font-size: 12px;")
+        _legacy_hint.setStyleSheet(f"color: {theme.MUTE}; font-size: 12px;")
         legacy_lay.addWidget(_legacy_hint)
 
         self.radio_engine_basic = QRadioButton(i18n.KO.ENGINE_MODE_BASIC, legacy_inner)
@@ -257,7 +258,7 @@ class SetupPage(QWidget):
         _last_prefs = _prefs.load()
         self.slider.setValue(int(round(_last_prefs.threshold * 100)))
         self.threshold_label = QLabel(f"{self.slider.value()} %", legacy_inner)
-        self.threshold_label.setStyleSheet("color: #39FF14; font-weight: 700;")
+        self.threshold_label.setStyleSheet(f"color: {theme.INK}; font-weight: 700;")
         self.threshold_label.setFixedWidth(60)
         self.slider.valueChanged.connect(self._on_threshold_changed)
         sl_row.addWidget(self.slider, stretch=1)
@@ -301,7 +302,7 @@ class SetupPage(QWidget):
         # 개발자 크레딧 (메인 화면) -------------------------------------
         credit = QLabel(i18n.KO.CREDIT, self)
         credit.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        credit.setStyleSheet("color: #7FB3D5; padding-top: 10px;")
+        credit.setStyleSheet(f"color: {theme.MUTE}; padding-top: 10px;")
         root.addWidget(credit)
 
     # ------------------------------------------------------------------

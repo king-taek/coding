@@ -43,5 +43,12 @@ def test_qss_template_has_no_old_palette():
     assert not hits, f"style.qss 에 구팔레트 잔존: {hits}"
 
 
-# NOTE: ui/ 파이썬 인라인 hex 가드는 인라인 색 일괄 치환 커밋에서 추가된다
-# (그 전까지는 기존 페이지들이 구팔레트를 여전히 들고 있어 의도적으로 보류).
+def test_ui_python_has_no_old_palette():
+    """ui/ 파이썬 코드의 인라인 구팔레트 hex 를 전면 차단(토큰 강제)."""
+    hits: list[str] = []
+    for p in _UI_DIR.rglob("*.py"):
+        text = p.read_text(encoding="utf-8")
+        for h in _OLD_HEXES:
+            if re.search(re.escape(h), text, re.IGNORECASE):
+                hits.append(f"{p.relative_to(_REPO)}: {h}")
+    assert not hits, "구팔레트 hex 잔존 — theme 토큰으로 치환하세요:\n" + "\n".join(hits)

@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QMainWindow,
                               QVBoxLayout, QWidget)
 
 from .. import config, i18n
+from . import theme
 from ..models import session as session_mod
 from ..models.result import FinalResult, MatchResult, MissEntry
 from ..models.slot import (ImageItem, ScanResult, Slot, drop_empty_unmatched,
@@ -83,13 +84,13 @@ class MainWindow(QMainWindow):
         # 개발자 크레딧 — 모든 화면 공통(상태바 좌측).
         self._credit_label = QLabel(i18n.KO.CREDIT, self._status_bar)
         self._credit_label.setStyleSheet(
-            "color: #7FB3D5; padding: 0 8px; font-weight: 600;"
+            f"color: {theme.MUTE}; padding: 0 8px; font-weight: 600;"
         )
         self._status_bar.addWidget(self._credit_label)
         # 디바이스 표시 — 'GPU 가속 (...)' / 'CPU N 코어'.
         self._device_label = QLabel("", self._status_bar)
         self._device_label.setStyleSheet(
-            "color: #00FFA3; padding: 0 8px; font-weight: 600;"
+            f"color: {theme.PASS}; padding: 0 8px; font-weight: 600;"
         )
         try:
             from ..learning import embedder as _emb
@@ -102,7 +103,7 @@ class MainWindow(QMainWindow):
         # CPU/GPU/NPU 사용량 — CPU 실제 %, GPU/NPU 가동/대기.
         self._usage_label = QLabel("", self._status_bar)
         self._usage_label.setStyleSheet(
-            "color: #39FF14; padding: 0 8px; font-weight: 600;"
+            f"color: {theme.PASS}; padding: 0 8px; font-weight: 600;"
         )
         self._status_bar.addPermanentWidget(self._usage_label)
         # 가속 장치(Intel GPU/NPU) 존재 여부 — 세션 중 불변이라 1회만 조회.
@@ -696,11 +697,11 @@ class MainWindow(QMainWindow):
         box.setIcon(QMessageBox.Icon.Question)
         box.setTextFormat(Qt.TextFormat.RichText)
         box.setText(
-            "<div style='font-size:18pt; font-weight:800; color:#F39C12;'>"
+            f"<div style='font-size:18pt; font-weight:800; color:{theme.WARN};'>"
             f"{i18n.KO.KLA_ASK_SIDE_HEADING}</div>"
         )
         box.setInformativeText(
-            "<div style='font-size:11pt; color:#E8E8E8;'>"
+            f"<div style='font-size:11pt; color:{theme.INK};'>"
             + i18n.KO.KLA_ASK_SIDE_BODY.replace("\n", "<br>") + "</div>"
         )
         ref_btn = box.addButton(i18n.KO.KLA_SIDE_REF,

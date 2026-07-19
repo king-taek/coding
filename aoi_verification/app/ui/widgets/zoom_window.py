@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (QApplication, QDialog, QGridLayout, QHBoxLayout,
                               QWidget)
 
 from ... import i18n
+from .. import theme
 from ...models.slot import ImageItem
 from ...utils import image_io
 from .neon_button import NeonButton
@@ -47,7 +48,7 @@ class _MidTile(QWidget):
         self._selected = False
         self.setFixedSize(self.TILE_W, self.TILE_H + 30)
         self.setStyleSheet(
-            "QWidget { background: #0E1424; border: 1px solid #1F2A3F; "
+            f"QWidget {{ background: {theme.PANEL}; border: 1px solid {theme.LINE}; "
             "border-radius: 8px; }"
         )
 
@@ -75,10 +76,10 @@ class _MidTile(QWidget):
             pix = QPixmap(str(mid))
         except Exception:
             pix = QPixmap(self.TILE_W, self.TILE_H)
-            pix.fill(QColor(20, 28, 40))
+            pix.fill(QColor(theme.PANEL))
         if pix.isNull():
             pix = QPixmap(self.TILE_W, self.TILE_H)
-            pix.fill(QColor(20, 28, 40))
+            pix.fill(QColor(theme.PANEL))
         pix = pix.scaled(
             self.TILE_W - 12, self.TILE_H - 18,
             Qt.AspectRatioMode.KeepAspectRatio,
@@ -98,12 +99,12 @@ class _MidTile(QWidget):
         self._selected = on
         if on:
             self.setStyleSheet(
-                "QWidget { background: #0E1424; border: 2px solid #39FF14; "
+                f"QWidget {{ background: {theme.PANEL}; border: 2px solid {theme.ACCENT}; "
                 "border-radius: 8px; }"
             )
         else:
             self.setStyleSheet(
-                "QWidget { background: #0E1424; border: 1px solid #1F2A3F; "
+                f"QWidget {{ background: {theme.PANEL}; border: 1px solid {theme.LINE}; "
                 "border-radius: 8px; }"
             )
         self.toggled.emit(self.item, on)
@@ -345,7 +346,7 @@ class ZoomWindow(QDialog):
             col = 0
             sep = QLabel(i18n.KO.INFO_ALREADY_MATCHED_SECTION, host)
             sep.setProperty("role", "muted")
-            sep.setStyleSheet("color: #586378; padding: 12px 0;")
+            sep.setStyleSheet(f"color: {theme.MUTE}; padding: 12px 0;")
             grid.addWidget(sep, row, 0, 1, cols)
             row += 1
             for item in self._already_matched:
