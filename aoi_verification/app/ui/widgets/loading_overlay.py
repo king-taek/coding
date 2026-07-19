@@ -10,6 +10,8 @@ from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import (QLabel, QProgressBar, QPushButton, QVBoxLayout,
                              QWidget)
 
+from .. import theme
+
 
 class _SpinnerDot(QWidget):
     """회전 링 아이콘 (paintEvent 로 직접 렌더링)."""
@@ -34,13 +36,13 @@ class _SpinnerDot(QWidget):
         rect = QRect(4, 4, self._diameter - 8, self._diameter - 8)
 
         # 배경 링
-        pen = QPen(QColor(31, 42, 63))
+        pen = QPen(QColor(theme.LINE))
         pen.setWidth(4)
         p.setPen(pen)
         p.drawArc(rect, 0, 360 * 16)
 
         # 회전 호
-        pen2 = QPen(QColor(0, 212, 255))
+        pen2 = QPen(QColor(theme.ACCENT))
         pen2.setWidth(4)
         pen2.setCapStyle(Qt.PenCapStyle.RoundCap)
         p.setPen(pen2)
@@ -85,7 +87,7 @@ class _Sparkline(QWidget):
         rng = max(1e-6, hi - lo)
 
         # 가이드 라인
-        pen_grid = QPen(QColor(31, 42, 63))
+        pen_grid = QPen(QColor(theme.LINE))
         pen_grid.setWidth(1)
         p.setPen(pen_grid)
         p.drawLine(0, h - 1, w, h - 1)
@@ -100,7 +102,7 @@ class _Sparkline(QWidget):
                 path.moveTo(x, y)
             else:
                 path.lineTo(x, y)
-        pen = QPen(QColor(0, 212, 255))
+        pen = QPen(QColor(theme.ACCENT))
         pen.setWidth(2)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         p.setPen(pen)
@@ -147,10 +149,11 @@ class LoadingOverlay(QWidget):
         self._cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._cancel_btn.setFixedWidth(160)
         self._cancel_btn.setStyleSheet(
-            "QPushButton { color: #FFD6D6; background: rgba(255,45,85,0.18);"
-            " border: 1px solid #FF2D55; border-radius: 8px; padding: 8px 14px;"
-            " font-weight: 700; }"
-            "QPushButton:hover { background: rgba(255,45,85,0.30); }"
+            "QPushButton {{ color: {d}; background: rgba(229,96,90,0.15);"
+            " border: 1px solid {d}; border-radius: 8px; padding: 8px 14px;"
+            " font-weight: 700; }}"
+            "QPushButton:hover {{ background: rgba(229,96,90,0.30); }}".format(
+                d=theme.DANGER)
         )
         self._cancel_btn.clicked.connect(self.cancel_requested.emit)
         self._cancel_btn.hide()
@@ -232,4 +235,4 @@ class LoadingOverlay(QWidget):
     def paintEvent(self, event):  # noqa: N802
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.fillRect(self.rect(), QColor(5, 10, 24, 200))
+        p.fillRect(self.rect(), QColor(12, 13, 16, 200))

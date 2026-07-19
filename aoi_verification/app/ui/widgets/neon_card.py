@@ -1,4 +1,4 @@
-"""네온 외곽선이 들어간 카드 컨테이너."""
+"""카드 컨테이너 — role 속성으로 QSS 가 면/보더를 칠한다."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import QFrame, QGraphicsDropShadowEffect, QVBoxLayout
 
 
 class NeonCard(QFrame):
-    """역할(role) 별로 다른 외곽선 색을 갖는 카드."""
+    """역할(role) 별로 다른 외곽선을 갖는 카드."""
 
     def __init__(self, *, role: str = "card", parent=None) -> None:
         super().__init__(parent)
@@ -20,10 +20,11 @@ class NeonCard(QFrame):
         self._layout.setSpacing(8)
 
         if role == "card":
+            # 네온 글로우 대신 은은한 검정 elevation 그림자 (깊이만 유지).
             eff = QGraphicsDropShadowEffect(self)
-            eff.setOffset(0, 0)
-            eff.setBlurRadius(24)
-            eff.setColor(QColor("#39FF14"))
+            eff.setOffset(0, 2)
+            eff.setBlurRadius(20)
+            eff.setColor(QColor(0, 0, 0, 140))
             self.setGraphicsEffect(eff)
 
     def body(self) -> QVBoxLayout:

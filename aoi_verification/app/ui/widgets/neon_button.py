@@ -1,4 +1,4 @@
-"""네온 글로우 효과가 적용된 버튼."""
+"""공용 버튼 — role 속성으로 QSS 가 스타일링, 글로우는 primary 전용."""
 
 from __future__ import annotations
 
@@ -6,9 +6,11 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QGraphicsDropShadowEffect, QPushButton
 
+from .. import theme
+
 
 class NeonButton(QPushButton):
-    """기본 사이언 글로우 + role 속성 기반 색상 분기."""
+    """role 속성 기반 색상 분기.  주요 액션(primary)만 은은한 앰버 글로우."""
 
     def __init__(self,
                  text: str = "",
@@ -22,17 +24,15 @@ class NeonButton(QPushButton):
 
     # ------------------------------------------------------------------
     def _apply_glow(self, role: str) -> None:
-        color_map = {
-            "primary": "#39FF14",
-            "danger": "#FF2D55",
-            "warn": "#FFD600",
-            "ghost": "#1F2A3F",
-            "default": "#39FF14",
-        }
-        color = QColor(color_map.get(role, "#39FF14"))
+        # 절제 원칙: 화면의 강조는 primary 하나 — 나머지는 글로우 없음.
+        if role != "primary":
+            self.setGraphicsEffect(None)
+            return
+        color = QColor(theme.ACCENT)
+        color.setAlpha(120)
         eff = QGraphicsDropShadowEffect(self)
         eff.setOffset(0, 0)
-        eff.setBlurRadius(18)
+        eff.setBlurRadius(14)
         eff.setColor(color)
         self.setGraphicsEffect(eff)
 
