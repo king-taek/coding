@@ -681,6 +681,9 @@ class MatchReviewPage(QWidget):
         self._coord_mode: bool = False
         self._tolerance: float = 500.0
         self._coord_failed_count: int = 0
+        # 키보드 탐색 — 현재 행 (↑↓ 로 이동, R 토글). 표시 전용 상태.
+        self._current_row: "_MatchRow | None" = None
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._build()
 
     # ------------------------------------------------------------------
@@ -696,6 +699,11 @@ class MatchReviewPage(QWidget):
         self._tally_label.setTextFormat(Qt.TextFormat.RichText)
         bar.addWidget(self._tally_label)
         bar.addStretch(1)
+        # '확인 필요만' 표시 필터 — 행 setVisible 만 바꾼다 (완료 동작 불변).
+        self.btn_filter = NeonButton(i18n.KO.BTN_FILTER_NEEDS_CHECK, role="ghost")
+        self.btn_filter.setCheckable(True)
+        self.btn_filter.toggled.connect(lambda _c: self._apply_filter())
+        bar.addWidget(self.btn_filter)
         size_label = QLabel(i18n.KO.IMAGE_SIZE_LABEL, self)
         size_label.setStyleSheet(f"color: {theme.MUTE};")
         bar.addWidget(size_label)
@@ -796,6 +804,11 @@ class MatchReviewPage(QWidget):
                 w.deleteLater()
         self._rows.clear()
         self._rows_by_key.clear()
+        # 표시 필터/현재 행 초기화 (새 검토 세션마다 전체 보기에서 시작).
+        self._current_row = None
+        self.btn_filter.blockSignals(True)
+        self.btn_filter.setChecked(False)
+        self.btn_filter.blockSignals(False)
 
         if not self._matches:
             empty = QLabel(i18n.KO.REVIEW_EMPTY_HINT)
@@ -846,6 +859,74 @@ class MatchReviewPage(QWidget):
         """‘접기’ 후 — 접은 행의 사진들이 최상단에 오도록 스크롤 복귀 (#1/#6)."""
         sb = self._scroll.verticalScrollBar()
         QTimer.singleShot(0, lambda: sb.setValue(self._row_top(row)))
+
+    # ── 표시 필터 / 키보드 탐색 (표시·입력 계층 — 흐름/데이터 불변) ─────────
+    def _apply_filter(self) -> None:
+        """'확인 필요만' — 일치(ok) 행만 숨긴다.  ``_on_done`` 은 ``_matches``
+        를 순회하므로 완료 결과는 표시 여부와 무관하다."""
+        checked = self.btn_filter.isChecked()
+        for row in self._rows:
+            row.setVisible((not checked) or row.state() != "ok")
+        # 현재 행이 숨겨졌으면 가장 가까운 보이는 행으로 이동.
+        if (self._current_row is not None
+                and self._current_row.isHidden()):
+            rows = self._visible_rows()
+            self._set_current(rows[0] if rows else None)
+
+    def _visible_rows(self) -> list["_MatchRow"]:
+        """레이아웃 순서 기준 보이는 행 목록 (스왑 후 append 순서와 무관)."""
+        rows = [r for r in self._rows if not r.isHidden()]
+        rows.sort(key=lambda r: self._list_layout.indexOf(r))
+        return rows
+
+    def _set_current(self, row: "_MatchRow | None") -> None:
+        old = self._current_row
+        if old is not None and old is not row:
+            old.setProperty("current", "")
+            old.style().unpolish(old)
+            old.style().polish(old)
+        self._current_row = row
+        if row is not None:
+            row.setProperty("current", "true")
+            row.style().unpolish(row)
+            row.style().polish(row)
+            self._scroll.ensureWidgetVisible(row, 0, 40)
+
+    def _move_current(self, delta: int) -> None:
+        rows = self._visible_rows()
+        if not rows:
+            return
+        if self._current_row not in rows:
+            self._set_current(rows[0] if delta >= 0 else rows[-1])
+            return
+        idx = rows.index(self._current_row) + delta
+        idx = max(0, min(idx, len(rows) - 1))
+        self._set_current(rows[idx])
+
+    def keyPressEvent(self, event):  # noqa: N802
+        """↑↓ 행 이동 · R 매치 없음 토글 · Enter 검토 완료.
+
+        QShortcut 을 쓰지 않아 포커스된 버튼의 Enter 등 기존 Qt 규칙이
+        그대로 우선한다 (페이지가 포커스를 가질 때만 동작)."""
+        key = event.key()
+        if key == Qt.Key.Key_Down:
+            self._move_current(+1)
+        elif key == Qt.Key.Key_Up:
+            self._move_current(-1)
+        elif key == Qt.Key.Key_R:
+            if self._current_row is not None:
+                self._on_toggle(self._current_row.match)
+        elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self._on_done()
+        else:
+            super().keyPressEvent(event)
+            return
+        event.accept()
+
+    def showEvent(self, event):  # noqa: N802
+        super().showEvent(event)
+        # 페이지 진입 즉시 키보드 탐색 가능하게.
+        self.setFocus()
 
     def _append_row(self, match: MatchResult) -> "_MatchRow":
         runners = self._lookup_runners_up(match, self._score_cache, self._val_pool)
@@ -908,7 +989,12 @@ class MatchReviewPage(QWidget):
                 self._list_layout.addWidget(new_row)
             self._rows.append(new_row)
             self._rows_by_key[new_match.key] = new_row
+            # 교체된 행이 현재 행이었으면 새 행으로 이어받는다.
+            if self._current_row is old_row:
+                self._current_row = None
+                self._set_current(new_row)
         self._update_summary()
+        self._apply_filter()
 
     def _lookup_runners_up(self, match: MatchResult, score_cache, val_pool) -> list:
         """주어진 매치의 ref 와 같은 slot 내 다른 val 들을 점수 내림차순으로 (자기 자신 제외).
@@ -957,6 +1043,8 @@ class MatchReviewPage(QWidget):
             # 행은 제자리에 두고 빨간 테두리 강조만 토글한다 (#1).
             row.set_unmatched(now_unmatched)
         self._update_summary()
+        # 필터가 켜져 있으면 상태 변화에 따라 표시 여부 재적용.
+        self._apply_filter()
 
     def _update_summary(self) -> None:
         """상단 탤리 갱신 — 일치/허용 초과/매치 없음 (+ 좌표 매치 실패)."""

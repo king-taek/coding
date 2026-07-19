@@ -52,3 +52,97 @@ def test_tally_counts():
     assert tally(ms, unmatched, True) == (2, 1, 1)
     # 유사도 모드에선 음수도 ok.
     assert tally(ms, unmatched, False) == (3, 0, 1)
+
+
+# ── 페이지 통합 — 필터/키보드/완료 페이로드 ────────────────────────────────
+def _page(qapp, coord=True):
+    from aoi_verification.app.ui.pages.match_review_page import MatchReviewPage
+    page = MatchReviewPage()
+    ms = [_m("S1", 0.9), _m("S2", -0.4), _m("S3", 0.8)]
+    page.load_state(ms, coord_mode=coord, tolerance=20.0)
+    return page, ms
+
+
+def test_filter_hides_only_ok_rows_and_done_unaffected(qapp):
+    page, ms = _page(qapp)
+    # S1 을 '매치 없음' 처리 → ok(S3) 1 / over(S2) 1 / unmatched(S1) 1
+    # (좌표 모드 정렬은 score 오름차순이라 _rows[0] 은 S1 이 아님 — slot 으로 찾는다.)
+    s1 = next(r for r in page._rows if r.match.slot == "S1")
+    page._on_toggle(s1.match)
+    page.btn_filter.setChecked(True)
+    hidden = {r.match.slot: r.isHidden() for r in page._rows}
+    # over(S2)·unmatched(S1) 는 보이고, ok(S3) 만 숨는다.
+    assert hidden["S3"] and not hidden["S2"] and not hidden["S1"]
+    # 완료 결과는 표시 여부와 무관 — 전체 3쌍이 kept/unmatched 로 모두 나온다.
+    got = []
+    page.finished.connect(lambda k, u: got.append((k, u)))
+    page._on_done()
+    kept, unmatched = got[0]
+    assert len(kept) + len(unmatched) == 3
+    assert len(unmatched) == 1 and unmatched[0].note == "미매칭 (사용자 검토)"
+    page.deleteLater()
+
+
+def test_keyboard_down_r_enter(qapp):
+    from PyQt6.QtTest import QTest
+    from PyQt6.QtCore import Qt
+    page, ms = _page(qapp)
+    QTest.keyClick(page, Qt.Key.Key_Down)
+    QTest.keyClick(page, Qt.Key.Key_Down)
+    rows = page._visible_rows()
+    assert page._current_row is rows[1]
+    # R → 현재 행 '매치 없음' 토글
+    QTest.keyClick(page, Qt.Key.Key_R)
+    assert page._current_row.match.key in page._unmatched_keys
+    # Enter → 검토 완료 (finished 1회, 페이로드 유형 검증)
+    got = []
+    page.finished.connect(lambda k, u: got.append((k, u)))
+    QTest.keyClick(page, Qt.Key.Key_Return)
+    assert len(got) == 1
+    kept, unmatched = got[0]
+    assert len(kept) == 2 and len(unmatched) == 1
+    page.deleteLater()
+
+
+def test_swap_keeps_layout_index_and_current(qapp):
+    from aoi_verification.app.models.slot import ImageItem
+    page, ms = _page(qapp)
+    target = page._visible_rows()[1]
+    page._set_current(target)
+    old_match = target.match
+    layout_idx = page._list_layout.indexOf(target)
+    new_item = ImageItem(slot=old_match.slot, path=Path("/tmp/new_v.jpg"),
+                         side="val")
+    page._on_swap(old_match, new_item, 0.95)
+    new_row = page._rows_by_key[(old_match.slot, old_match.ref_path.name,
+                                 "new_v.jpg")]
+    assert page._list_layout.indexOf(new_row) == layout_idx   # 같은 자리
+    assert page._current_row is new_row                       # 현재 행 승계
+    page.deleteLater()
+
+
+def test_row_clamp_at_800_window(qapp):
+    """800×600 창(행 폭 ~750)에서 가로 넘침 없음 — 최소 썸네일도 수용."""
+    from aoi_verification.app.ui.pages.match_review_page import (
+        _MatchRow, _SIZE_MIN_PX)
+    row = _MatchRow(_m("S1", 0.9), runners_up=[], thumb_px=140)
+    row._row_width = lambda: 750
+    row.set_thumb_size(360)
+    assert 2 * row._thumb_px + row._reserved_fixed_px() <= 750
+    assert row._reserved_fixed_px() + 2 * _SIZE_MIN_PX <= 750
+    row.deleteLater()
+
+
+def test_neon_button_glow_only_primary(qapp):
+    from aoi_verification.app.ui.widgets.neon_button import NeonButton
+    b1 = NeonButton("x", role="primary")
+    b2 = NeonButton("y", role="ghost")
+    b3 = NeonButton("z", role="danger")
+    assert b1.graphicsEffect() is not None
+    assert b2.graphicsEffect() is None and b3.graphicsEffect() is None
+    assert b1.minimumHeight() >= 34
+    # setRole 로 primary → ghost 전환 시 글로우 제거.
+    b1.setRole("ghost")
+    assert b1.graphicsEffect() is None
+    for b in (b1, b2, b3):
+        b.deleteLater()
