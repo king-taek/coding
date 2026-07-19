@@ -51,6 +51,34 @@ def _open_fullscreen(path: Path, parent=None) -> None:
         pass
 
 
+def classify_row(score: float, coord_mode: bool, unmatched: bool) -> str:
+    """행 상태 분류 — **기존 데이터만** 사용, 새 판정 로직 없음 (A2 표시용).
+
+    - ``unmatched`` (사용자가 '매치 없음' 표시) 가 항상 우선 → ``"unmatched"``
+    - 좌표 모드에서 ``score < 0`` (허용범위 초과 인코딩) → ``"over"``
+    - 그 외 → ``"ok"``
+    """
+    if unmatched:
+        return "unmatched"
+    if coord_mode and score < 0:
+        return "over"
+    return "ok"
+
+
+def tally(matches, unmatched_keys, coord_mode: bool) -> tuple[int, int, int]:
+    """(일치, 허용 초과, 매치 없음) 개수 — 상단 집계 바 표시용 순수 함수."""
+    ok = over = none = 0
+    for m in matches:
+        state = classify_row(m.score, coord_mode, m.key in unmatched_keys)
+        if state == "ok":
+            ok += 1
+        elif state == "over":
+            over += 1
+        else:
+            none += 1
+    return ok, over, none
+
+
 class _LazyThumb(QLabel):
     """첫 paint 시점에 썸네일을 지연 디코드하고, 우클릭 ‘크게보기’ 를 지원 (#6-4/#13)."""
 
