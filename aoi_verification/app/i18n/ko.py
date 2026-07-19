@@ -395,7 +395,7 @@ BTN_FINISH_REVIEW_KEPT_FMT = "검토 완료 · 유지 {n} ⏎"
 CHIP_OK = "일치"
 CHIP_OVER = "허용 초과"
 CHIP_NO_MATCH = "매치 없음"
-BTN_NO_MATCH_COMPACT = "✕"
+BTN_NO_MATCH_COMPACT = "×"
 BTN_RESTORE_COMPACT = "↩"
 REVIEW_EMPTY_HINT = (
     "자동 매치된 항목이 없습니다.  [완료] 를 누르면 결과 화면으로 이동합니다."

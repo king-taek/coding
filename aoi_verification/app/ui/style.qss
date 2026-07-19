@@ -195,6 +195,17 @@ QPushButton:checked {
     border-color: $accent;
 }
 
+/* 컴팩트 버튼 (A2 행 토글 등 아이콘성) — 좁은 고정폭에서도 글자가 보이게. */
+QPushButton[compact="true"] {
+    padding: 4px 6px;
+    font-size: 16px;
+    font-weight: 700;
+}
+QPushButton[compact="true"]:focus {
+    border: 2px solid $focus;
+    padding: 3px 5px;
+}
+
 /* ── 입력 위젯 ──────────────────────────────────────────────────────── */
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
     background-color: $elev;
