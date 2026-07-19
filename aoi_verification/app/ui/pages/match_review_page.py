@@ -387,7 +387,20 @@ class _MatchRow(QFrame):
         return f"{score * 100:.1f} %"
 
     def _row_width(self) -> int:
-        """현재 행의 가용 너비 — 아직 표시 전이면 부모/페이지 너비로 추정."""
+        """현재 행의 가용 너비.
+
+        스크롤 영역 안에서는 **뷰포트 폭**이 진실이다 — 큰 썸네일이 행의
+        최소폭을 키우면 self.width() 는 뷰포트보다 넓게 남아(가로 스크롤),
+        그 값을 믿으면 재클램프가 영영 안 일어난다.  조상에서 QScrollArea
+        를 찾아 뷰포트 폭을 쓰고, 없으면(단독 생성/테스트) 기존 추정 폭."""
+        p = self.parentWidget()
+        while p is not None:
+            if isinstance(p, QScrollArea):
+                vw = p.viewport().width()
+                if vw > 1:
+                    return vw
+                break
+            p = p.parentWidget()
         w = self.width()
         if w <= 1:
             p = self.parentWidget()
@@ -927,6 +940,15 @@ class MatchReviewPage(QWidget):
         super().showEvent(event)
         # 페이지 진입 즉시 키보드 탐색 가능하게.
         self.setFocus()
+
+    def resizeEvent(self, event):  # noqa: N802
+        """창 크기 변경 시 각 행을 뷰포트 기준으로 재클램프 (가로 넘침 방지).
+
+        큰 썸네일 상태에서 창을 줄이면 행 최소폭이 뷰포트보다 커져 행
+        resizeEvent 만으로는 재클램프가 안 걸린다 — 페이지가 직접 구동한다.
+        드래그 중 과호출은 슬라이더와 같은 debounce 타이머로 흡수."""
+        super().resizeEvent(event)
+        self._resize_timer.start(80)
 
     def _append_row(self, match: MatchResult) -> "_MatchRow":
         runners = self._lookup_runners_up(match, self._score_cache, self._val_pool)

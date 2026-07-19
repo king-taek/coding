@@ -133,6 +133,29 @@ def test_row_clamp_at_800_window(qapp):
     row.deleteLater()
 
 
+def test_shrink_after_big_thumbs_reclamps_no_hscroll(qapp):
+    """큰 썸네일(360) 상태에서 창을 1512→800 으로 줄여도 가로 스크롤 0.
+
+    행이 자기 width() 대신 스크롤 뷰포트 폭으로 재클램프해야 한다 (회귀:
+    행 최소폭이 뷰포트보다 커지면 행 resizeEvent 만으로는 복구 불가)."""
+    page, ms = _page(qapp)
+    page.resize(1512, 982)
+    page.show()
+    qapp.processEvents()
+    page.size_slider.setValue(360)
+    page._apply_thumb_size()
+    qapp.processEvents()
+    page.resize(800, 600)
+    qapp.processEvents()
+    page._apply_thumb_size()          # debounce 타이머 대신 직접 재클램프
+    qapp.processEvents()
+    assert page._scroll.horizontalScrollBar().maximum() == 0
+    for row in page._rows:
+        assert 2 * row._thumb_px + row._reserved_fixed_px() <= \
+            page._scroll.viewport().width()
+    page.deleteLater()
+
+
 def test_neon_button_glow_only_primary(qapp):
     from aoi_verification.app.ui.widgets.neon_button import NeonButton
     b1 = NeonButton("x", role="primary")
