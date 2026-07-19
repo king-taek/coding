@@ -33,11 +33,11 @@ class Colors:
 # ---------------------------------------------------------------------------
 class Fonts:
     TITLE = (
-        '"Orbitron", "Pretendard", "Noto Sans KR", "Malgun Gothic", '
+        '"Pretendard", "Noto Sans KR", "Malgun Gothic", '
         '"Segoe UI", sans-serif'
     )
     BODY = (
-        '"Rajdhani", "Pretendard", "Noto Sans KR", "Malgun Gothic", '
+        '"Pretendard", "Noto Sans KR", "Malgun Gothic", '
         '"Segoe UI", sans-serif'
     )
     MONO = '"JetBrains Mono", "Consolas", monospace'

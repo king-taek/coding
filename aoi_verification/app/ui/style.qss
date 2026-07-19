@@ -1,187 +1,292 @@
-/* AOI 검증 — 네온/사이파이 다크 테마 스타일시트 */
+/* AOI 검증 — 절제된 다크 계측기 테마.
+   이 파일은 템플릿: 달러 토큰을 theme.render_qss 가 theme.TOKENS 값으로 치환한다.
+   원칙: 앰버(accent)는 주요 액션·선택 전용, 상태는 pass/danger/warn,
+   키보드 포커스는 focus 링. 글로우 없음(NeonButton primary 만 예외). */
 
 QWidget {
-    background-color: #0A0E1A;
-    color: #E5F4FF;
-    font-family: "Rajdhani", "Pretendard", "Noto Sans KR",
-                 "Malgun Gothic", "Segoe UI", sans-serif;
+    background-color: $bg;
+    color: $ink;
+    font-family: $font_body;
     font-size: 14px;
 }
 
 QMainWindow, QDialog {
-    background-color: #0A0E1A;
+    background-color: $bg;
 }
 
 QLabel {
-    color: #E5F4FF;
+    color: $ink;
+    background: transparent;
 }
 
 QLabel[role="title"] {
-    font-family: "Orbitron", "Pretendard", "Noto Sans KR",
-                 "Malgun Gothic", "Segoe UI", sans-serif;
-    font-size: 22px;
+    font-family: $font_title;
+    font-size: 20px;
     font-weight: 700;
-    color: #39FF14;
-    letter-spacing: 2px;
+    color: $ink;
+    letter-spacing: 0px;
 }
 
 QLabel[role="subtitle"] {
     font-size: 15px;
-    color: #9CC5E8;
+    color: $ink2;
 }
 
 QLabel[role="muted"] {
-    color: #7FB3D5;
+    color: $mute;
+}
+
+QLabel[role="mono"] {
+    font-family: $font_mono;
+}
+
+/* ── 판정 칩 (매치 검토 A2) ──────────────────────────────────────────── */
+QLabel[chip="ok"] {
+    color: $pass;
+    background-color: $pass_tint;
+    border: 1px solid transparent;
+    border-radius: 9px;
+    padding: 2px 8px;
+    font-family: $font_mono;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+QLabel[chip="over"] {
+    color: $danger;
+    background-color: $danger_tint;
+    border: 1px solid transparent;
+    border-radius: 9px;
+    padding: 2px 8px;
+    font-family: $font_mono;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+QLabel[chip="none"] {
+    color: $mute;
+    background-color: transparent;
+    border: 1px solid $line2;
+    border-radius: 9px;
+    padding: 2px 8px;
+    font-family: $font_mono;
+    font-size: 11px;
+    font-weight: 700;
 }
 
 /* ── 카드 ───────────────────────────────────────────────────────────── */
 QFrame[role="card"] {
-    background-color: #111827;
-    border: 1px solid #39FF14;
+    background-color: $panel;
+    border: 1px solid $line2;
     border-radius: 10px;
 }
 
 QFrame[role="card-soft"] {
-    background-color: #0E1424;
-    border: 1px solid #2A3A5A;
+    background-color: $panel;
+    border: 1px solid $line;
     border-radius: 10px;
 }
 
 QFrame[role="section"] {
-    background-color: #0E1424;
-    border: 1px solid #2A3A5A;
+    background-color: $panel;
+    border: 1px solid $line;
     border-radius: 8px;
+}
+
+/* 매치 검토 행 상태 — 인라인 스타일 대신 동적 프로퍼티로 칠한다. */
+QFrame[rowState="over"] {
+    background-color: $danger_tint_soft;
+    border: 1px solid $danger;
+    border-radius: 10px;
+}
+
+QFrame[rowState="unmatched"] {
+    background-color: $panel;
+    border: 2px solid $danger;
+    border-radius: 10px;
+}
+
+QFrame[current="true"] {
+    border: 2px solid $accent;
 }
 
 /* ── 버튼 ───────────────────────────────────────────────────────────── */
 QPushButton {
     background-color: transparent;
-    color: #39FF14;
-    border: 1px solid #39FF14;
+    color: $ink2;
+    border: 1px solid $line2;
     border-radius: 6px;
-    padding: 9px 20px;
+    padding: 8px 19px;
     font-size: 14px;
     font-weight: 600;
-    letter-spacing: 1px;
+    letter-spacing: 0px;
 }
 
 QPushButton:hover {
-    background-color: rgba(57, 255, 20, 32);
-    color: #E5F4FF;
+    background-color: $elev;
+    color: $ink;
+    border-color: $mute;
 }
 
 QPushButton:pressed {
-    background-color: rgba(57, 255, 20, 60);
+    background-color: $line;
+}
+
+QPushButton:focus {
+    border: 2px solid $focus;
+    padding: 7px 18px;
 }
 
 QPushButton:disabled {
-    color: #2A2F3A;
-    border-color: #2A2F3A;
+    color: $mute;
+    border-color: $line;
+    background-color: transparent;
 }
 
 QPushButton[role="primary"] {
-    background-color: rgba(57, 255, 20, 24);
-    color: #E5F4FF;
-    border: 1px solid #39FF14;
+    background-color: $accent;
+    color: $on_accent;
+    border: 1px solid $accent;
+    font-weight: 700;
+}
+QPushButton[role="primary"]:hover {
+    background-color: $accent_hover;
+    border-color: $accent_hover;
+    color: $on_accent;
+}
+QPushButton[role="primary"]:pressed {
+    background-color: $accent_pressed;
+}
+QPushButton[role="primary"]:focus {
+    border: 2px solid $focus;
+    padding: 7px 18px;
 }
 
 QPushButton[role="danger"] {
-    color: #FF2D55;
-    border-color: #FF2D55;
+    color: $danger;
+    border-color: $danger;
 }
 QPushButton[role="danger"]:hover {
-    background-color: rgba(255, 45, 85, 32);
+    background-color: $danger_tint;
+    color: $danger;
 }
 
 QPushButton[role="warn"] {
-    color: #FFD600;
-    border-color: #FFD600;
+    color: $warn;
+    border-color: $warn;
+}
+QPushButton[role="warn"]:hover {
+    background-color: $warn_tint;
 }
 
 QPushButton[role="ghost"] {
-    color: #7FB3D5;
-    border-color: #1F2A3F;
+    color: $mute;
+    border-color: $line;
 }
 QPushButton[role="ghost"]:hover {
-    color: #39FF14;
-    border-color: #39FF14;
+    color: $ink;
+    border-color: $line2;
+    background-color: $elev;
+}
+
+QPushButton:checked {
+    background-color: $accent_tint;
+    color: $accent;
+    border-color: $accent;
 }
 
 /* ── 입력 위젯 ──────────────────────────────────────────────────────── */
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
-    background-color: #0E1424;
-    border: 1px solid #2A3A5A;
+    background-color: $elev;
+    border: 1px solid $line2;
     border-radius: 6px;
     padding: 7px 12px;
-    color: #E5F4FF;
+    color: $ink;
 }
 
 QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {
-    border-color: #39FF14;
-    border-width: 2px;
+    border: 2px solid $focus;
+    padding: 6px 11px;
 }
 
 QSlider::groove:horizontal {
     height: 6px;
-    background: #1F2A3F;
+    background: $line;
     border-radius: 3px;
 }
 QSlider::handle:horizontal {
-    background: #39FF14;
+    background: $ink2;
     width: 16px;
     margin: -6px 0;
     border-radius: 8px;
 }
+QSlider::handle:horizontal:hover {
+    background: $ink;
+}
 QSlider::sub-page:horizontal {
-    background: #00C853;
+    background: $accent;
     border-radius: 3px;
 }
 
 QCheckBox {
-    color: #E5F4FF;
+    color: $ink;
     spacing: 8px;
 }
 QCheckBox::indicator {
     width: 18px;
     height: 18px;
-    border: 2px solid #39FF14;
+    border: 2px solid $line2;
     border-radius: 4px;
     background: transparent;
 }
+QCheckBox::indicator:hover {
+    border-color: $mute;
+}
 QCheckBox::indicator:checked {
-    background: #39FF14;
+    background: $accent;
+    border-color: $accent;
+}
+QCheckBox:focus {
+    color: $focus;
 }
 
 QRadioButton {
-    color: #E5F4FF;
+    color: $ink;
     spacing: 8px;
 }
 QRadioButton::indicator {
     width: 16px;
     height: 16px;
-    border: 2px solid #39FF14;
+    border: 2px solid $line2;
     border-radius: 8px;
     background: transparent;
 }
+QRadioButton::indicator:hover {
+    border-color: $mute;
+}
 QRadioButton::indicator:checked {
-    background: #39FF14;
+    background: $accent;
+    border-color: $accent;
+}
+QRadioButton:focus {
+    color: $focus;
 }
 
 /* ── 스크롤 ────────────────────────────────────────────────────────── */
 QScrollBar:vertical, QScrollBar:horizontal {
-    background: #0A0E1A;
+    background: $bg;
     border: none;
     width: 10px;
     height: 10px;
 }
 QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
-    background: #1F2A3F;
+    background: $line2;
     border-radius: 4px;
     min-height: 24px;
     min-width: 24px;
 }
 QScrollBar::handle:vertical:hover, QScrollBar::handle:horizontal:hover {
-    background: #39FF14;
+    background: $mute;
 }
 QScrollBar::add-line, QScrollBar::sub-line {
     width: 0; height: 0; background: transparent;
@@ -189,47 +294,48 @@ QScrollBar::add-line, QScrollBar::sub-line {
 
 /* ── 진행 바 ────────────────────────────────────────────────────────── */
 QProgressBar {
-    background: #0E1424;
-    border: 1px solid #1F2A3F;
+    background: $panel;
+    border: 1px solid $line;
     border-radius: 6px;
     text-align: center;
-    color: #E5F4FF;
+    color: $ink;
+    font-family: $font_mono;
 }
 QProgressBar::chunk {
-    background: #39FF14;
+    background: $accent;
     border-radius: 5px;
 }
 
 /* ── 그룹박스 ───────────────────────────────────────────────────────── */
 QGroupBox {
-    border: 1px solid #2A3A5A;
+    border: 1px solid $line;
     border-radius: 8px;
     margin-top: 14px;
     padding: 10px 8px 8px 8px;
-    color: #9CC5E8;
+    color: $ink2;
 }
 QGroupBox::title {
     subcontrol-origin: margin;
     left: 14px;
     padding: 0 6px;
-    color: #39FF14;
+    color: $ink;
     font-weight: 700;
-    letter-spacing: 1px;
+    letter-spacing: 0px;
 }
 
 /* ── 툴팁/메시지 ─────────────────────────────────────────────────────── */
 QToolTip {
-    background-color: #111827;
-    color: #E5F4FF;
-    border: 1px solid #39FF14;
+    background-color: $elev;
+    color: $ink;
+    border: 1px solid $line2;
     padding: 8px;
     border-radius: 4px;
 }
 
 /* ── 도움말 토글 버튼 (? 버튼) ───────────────────────────────────────────── */
 QToolButton[objectName="helpToggle"] {
-    color: #39FF14;
-    border: 1px solid #39FF14;
+    color: $mute;
+    border: 1px solid $line2;
     border-radius: 11px;
     min-width: 22px;
     min-height: 22px;
@@ -241,9 +347,14 @@ QToolButton[objectName="helpToggle"] {
     padding: 0;
 }
 QToolButton[objectName="helpToggle"]:hover {
-    background: rgba(57, 255, 20, 24);
+    background: $elev;
+    color: $ink;
 }
 QToolButton[objectName="helpToggle"]:checked {
-    background: rgba(57, 255, 20, 48);
-    color: #E5F4FF;
+    background: $accent_tint;
+    color: $accent;
+    border-color: $accent;
+}
+QToolButton[objectName="helpToggle"]:focus {
+    border: 2px solid $focus;
 }

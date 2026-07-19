@@ -24,10 +24,12 @@ def _ensure_package_on_path() -> None:
 
 def _load_stylesheet(app) -> None:
     from aoi_verification.app.utils import paths
+    from aoi_verification.app.ui import theme
     qss_path = paths.resource_path("aoi_verification/app/ui/style.qss")
     try:
         text = Path(qss_path).read_text(encoding="utf-8")
-        app.setStyleSheet(text)
+        # style.qss 는 $token 템플릿 — 테마 토큰으로 치환해 적용 (단일 출처).
+        app.setStyleSheet(theme.render_qss(text))
     except Exception:
         pass
 
@@ -68,7 +70,7 @@ def main() -> int:
         created_here = True
 
     # 기본 폰트 — 한글 폴백 우선
-    app.setFont(QFont("Rajdhani, Pretendard, Noto Sans KR, Malgun Gothic"))
+    app.setFont(QFont("Pretendard, Noto Sans KR, Malgun Gothic, Segoe UI"))
     _load_stylesheet(app)
 
     # 윈도우 생성 ---------------------------------------------------------
