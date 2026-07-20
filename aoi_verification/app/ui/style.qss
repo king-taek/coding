@@ -195,15 +195,60 @@ QPushButton:checked {
     border-color: $accent;
 }
 
-/* 컴팩트 버튼 (A2 행 토글 등 아이콘성) — 좁은 고정폭에서도 글자가 보이게. */
+/* 컴팩트 아이콘 토글 (A2 행 ×/↩) — 평소엔 중립(mute), 상호작용 시에만 의미색.
+   비활성 상태에 풀채도 강조를 두지 않는다(리스트에 빨간 박스 8개 방지). */
 QPushButton[compact="true"] {
     padding: 4px 6px;
-    font-size: 16px;
+    font-size: 17px;
     font-weight: 700;
+    color: $mute;
+    border: 1px solid $line2;
+    background: transparent;
+}
+QPushButton[compact="true"]:hover {
+    color: $ink;
+    border-color: $mute;
+    background: $elev;
+}
+/* '매치 없음(reject)' 의도일 때만 hover 에서 위험색을 드러낸다. */
+QPushButton[compact="true"][intent="reject"]:hover {
+    color: $danger;
+    border-color: $danger;
+    background: $danger_tint;
 }
 QPushButton[compact="true"]:focus {
     border: 2px solid $focus;
     padding: 3px 5px;
+}
+
+/* 키캡(kbd) 칩 — 단축키를 본문 텍스트가 아니라 '키'로 읽히게. */
+QLabel[role="kbd"] {
+    background: $elev;
+    border: 1px solid $line2;
+    border-radius: 4px;
+    color: $ink2;
+    font-family: $font_mono;
+    font-size: 11px;
+    padding: 1px 7px;
+}
+
+/* 링크형 버튼 — 반복되는 2차 액션(크게 보기·더 보기·접기)용. 테두리 없이 조용히. */
+QPushButton[role="link"] {
+    background: transparent;
+    border: 1px solid transparent;
+    color: $mute;
+    padding: 3px 4px;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: left;
+}
+QPushButton[role="link"]:hover {
+    color: $ink;
+    background: $elev;
+}
+QPushButton[role="link"]:focus {
+    border: 1px solid $focus;
+    padding: 2px 3px;
 }
 
 /* ── 입력 위젯 ──────────────────────────────────────────────────────── */

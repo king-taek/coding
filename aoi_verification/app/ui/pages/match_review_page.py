@@ -181,16 +181,22 @@ class _RunnerUpTile(QFrame):
                                enable_context_menu=False, parent=self)
         lay.addWidget(self._img, alignment=Qt.AlignmentFlag.AlignCenter)
 
+        # 타일 아래 점수는 간결하게 — '허용범위 초과' 같은 긴 접미어는 빼고
+        # 거리만, 초과 여부는 색으로 신호한다(허용 내=밝게, 초과=주의색).
+        over = coord_mode and score < 0
         if coord_mode:
             tol = float(tolerance) if tolerance > 0 else 500.0
             dist = (1.0 - score) * tol if score >= 0 else (-score) * tol
-            score_text = (i18n.KO.SCORE_DIST_FMT.format(dist=dist) if score >= 0
-                          else i18n.KO.SCORE_DIST_OVER_FMT.format(dist=dist))
+            score_text = i18n.KO.SCORE_DIST_FMT.format(dist=dist)
         else:
             score_text = f"{score * 100:.1f} %"
         self._score_label = QLabel(score_text, self)
-        self._score_label.setStyleSheet(f"color: {theme.MUTE}; font-size: 11px;")
+        color = theme.WARN if over else theme.INK2
+        self._score_label.setStyleSheet(
+            f"color: {color}; font-size: 12px; font-family: {theme.FONT_MONO};")
         self._score_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        if over:
+            self._score_label.setToolTip(i18n.KO.SCORE_DIST_OVER_FMT.format(dist=dist))
         lay.addWidget(self._score_label)
 
     def set_size(self, size: int) -> None:
@@ -271,10 +277,12 @@ class _MatchRow(QFrame):
             f"color: {theme.INK}; font-weight: 700; font-size: 14px;"
         )
         slot_lay.addWidget(self._slot_label)
-        self.btn_view = NeonButton(i18n.KO.BTN_VIEW_LARGER, role="ghost")
+        # 2차 액션은 조용한 링크형으로 (반복 8행에 테두리 버튼이 쌓이지 않게).
+        self.btn_view = NeonButton(i18n.KO.BTN_VIEW_LARGER, role="link")
         self.btn_view.clicked.connect(lambda: self._open_compare(0))
         slot_lay.addWidget(self.btn_view)
-        slot_host.setMinimumWidth(110)
+        slot_lay.addStretch(1)              # 라벨+링크를 상단에 묶어 행 ID 로 읽히게.
+        slot_host.setFixedWidth(96)
         top.addWidget(slot_host)
 
         # ref 이미지 — 우클릭 ‘크게보기’ 는 단일 확대 대신 좌우 비교로 (#5).
@@ -305,23 +313,26 @@ class _MatchRow(QFrame):
         top.addStretch(1)
 
         # ── 우측 고정 컬럼: 거리·점수(mono) → 판정 칩 → 컴팩트 토글 (A2). ──
-        self._metric_label = QLabel(self._format_score(match.score), self)
+        # metric 은 한 줄 — '허용범위 초과' 반복은 칩이 전담(삼중 중복 제거).
+        self._metric_label = QLabel(self._format_score(match.score, verbose=False), self)
         self._metric_label.setProperty("role", "mono")
-        self._metric_label.setFixedWidth(110)
-        self._metric_label.setWordWrap(True)
+        self._metric_label.setFixedWidth(96)
         self._metric_label.setAlignment(Qt.AlignmentFlag.AlignRight
                                         | Qt.AlignmentFlag.AlignVCenter)
         top.addWidget(self._metric_label)
 
+        # 판정 칩 — 정상(일치)은 배지 없이 조용히, 예외(초과/매치 없음)만 표시해
+        # 시선이 예외로 가게 한다. 폭은 유지해 토글 열이 정렬되도록.
         self._chip = QLabel("", self)
         self._chip.setFixedSize(74, 24)
         self._chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
         top.addWidget(self._chip)
 
-        # ✕ 매치 없음 / ↩ 되돌리기 — 컴팩트 토글 (기존 문구는 툴팁으로).
-        self.btn_toggle = NeonButton(i18n.KO.BTN_NO_MATCH_COMPACT, role="danger")
+        # ✕ 매치 없음 / ↩ 되돌리기 — 컴팩트 토글. 평소 중립, hover 에서만 위험색.
+        self.btn_toggle = NeonButton(i18n.KO.BTN_NO_MATCH_COMPACT, role="ghost")
         self.btn_toggle.setProperty("compact", True)
-        self.btn_toggle.setFixedWidth(40)
+        self.btn_toggle.setProperty("intent", "reject")
+        self.btn_toggle.setFixedSize(44, 40)        # 44px — 터치 타깃 최소 충족.
         self.btn_toggle.setToolTip(i18n.KO.BTN_MARK_NO_MATCH)
         self.btn_toggle.clicked.connect(
             lambda: self.toggle_requested.emit(self.match)
@@ -349,9 +360,9 @@ class _MatchRow(QFrame):
             host_lay.addLayout(self._runner_grid)
 
             # ‘후보 한 줄 더 보기’ / ‘접기’ 버튼 (#5/#4).
-            self.btn_more = NeonButton(i18n.KO.RUNNERUP_MORE_ROW, role="ghost")
+            self.btn_more = NeonButton(i18n.KO.RUNNERUP_MORE_ROW, role="link")
             self.btn_more.clicked.connect(self._on_more)
-            self.btn_less = NeonButton(i18n.KO.RUNNERUP_LESS_ROW, role="ghost")
+            self.btn_less = NeonButton(i18n.KO.RUNNERUP_LESS_ROW, role="link")
             self.btn_less.clicked.connect(self._on_less)
             self.btn_less.setVisible(False)
             more_bar = QHBoxLayout()
@@ -370,11 +381,13 @@ class _MatchRow(QFrame):
             self.btn_less = None
             self._first_line_host.setVisible(False)
 
-    def _format_score(self, score: float) -> str:
+    def _format_score(self, score: float, *, verbose: bool = True) -> str:
         """score 값을 표시 문자열로 변환.
 
         좌표 모드: 거리(µm)로 역산 (score ≥ 0 → 허용 내, score < 0 → 허용 초과).
         일반 모드: 0~100% 백분율.
+        ``verbose=False`` 면 '허용범위 초과' 접미어를 빼고 거리만 (metric 컬럼용 —
+        초과 여부는 옆 칩이 전담).
         """
         if self._coord_mode:
             from ... import i18n as _i18n
@@ -383,7 +396,9 @@ class _MatchRow(QFrame):
                 return _i18n.KO.SCORE_DIST_FMT.format(dist=dist)
             else:
                 dist = (-score) * self._tolerance
-                return _i18n.KO.SCORE_DIST_OVER_FMT.format(dist=dist)
+                fmt = (_i18n.KO.SCORE_DIST_OVER_FMT if verbose
+                       else _i18n.KO.SCORE_DIST_FMT)
+                return fmt.format(dist=dist)
         return f"{score * 100:.1f} %"
 
     def _row_width(self) -> int:
@@ -630,11 +645,14 @@ class _MatchRow(QFrame):
         (rowState="over"/"unmatched", chip="ok"/"over"/"none").
         """
         st = self.state()
-        chip_text = {"ok": i18n.KO.CHIP_OK, "over": i18n.KO.CHIP_OVER,
-                     "unmatched": i18n.KO.CHIP_NO_MATCH}[st]
-        chip_kind = {"ok": "ok", "over": "over", "unmatched": "none"}[st]
-        self._chip.setText(chip_text)
-        self._chip.setProperty("chip", chip_kind)
+        # 정상(일치)은 배지 없이 — 예외(초과/매치 없음)만 칩을 띄워 시선을 모은다.
+        if st == "ok":
+            self._chip.setText("")
+            self._chip.setProperty("chip", "")
+        else:
+            self._chip.setText(i18n.KO.CHIP_OVER if st == "over"
+                               else i18n.KO.CHIP_NO_MATCH)
+            self._chip.setProperty("chip", "over" if st == "over" else "none")
         self.setProperty("rowState", st if st != "ok" else "")
         metric_color = theme.DANGER if st == "over" else theme.INK
         self._metric_label.setStyleSheet(
@@ -647,17 +665,20 @@ class _MatchRow(QFrame):
     def set_unmatched(self, unmatched: bool) -> None:
         self._is_unmatched = unmatched
         if unmatched:
+            # 되돌리기(↩) 상태 — reject 의도 해제(호버에서 위험색 안 뜨게).
             self.btn_toggle.setText(i18n.KO.BTN_RESTORE_COMPACT)
             self.btn_toggle.setToolTip(i18n.KO.BTN_RESTORE_MATCH)
-            self.btn_toggle.setRole("ghost")
+            self.btn_toggle.setProperty("intent", "")
             # 후보 영역(인라인 첫 줄 + 아래 그리드/‘더 보기’)을 모두 숨긴다 (#1/#3).
             self._set_candidates_visible(False)
         else:
             self.btn_toggle.setText(i18n.KO.BTN_NO_MATCH_COMPACT)
             self.btn_toggle.setToolTip(i18n.KO.BTN_MARK_NO_MATCH)
-            self.btn_toggle.setRole("danger")
+            self.btn_toggle.setProperty("intent", "reject")
             # 후보 영역을 이전 표시 상태로 복원한다 (#1).
             self._set_candidates_visible(True)
+        self.btn_toggle.style().unpolish(self.btn_toggle)
+        self.btn_toggle.style().polish(self.btn_toggle)
         # 빨간 테두리 등 상태 스타일은 rowState 프로퍼티로 일괄 적용 (#1).
         self._apply_state()
 
@@ -741,10 +762,8 @@ class MatchReviewPage(QWidget):
         bar.addWidget(self.btn_done)
         root.addLayout(bar)
 
-        # 키보드 힌트 (얇은 캡션 한 줄).
-        key_hint = QLabel(i18n.KO.REVIEW_KEY_HINT, self)
-        key_hint.setStyleSheet(f"color: {theme.MUTE}; font-size: 11px;")
-        root.addWidget(key_hint)
+        # 키보드 힌트 — 단축키를 kbd 칩으로 (프로즈 대신 '키'로 읽히게).
+        root.addWidget(self._build_key_hint())
 
         # 매치 리스트 (세로 스크롤만). 가로 스크롤은 끄고 창 너비에 맞춰
         # 후보 타일이 줄바꿈 되도록 한다 (#4).
@@ -776,6 +795,27 @@ class MatchReviewPage(QWidget):
 
         outer.addStretch(1)
         root.addWidget(scroll, stretch=1)
+
+    def _build_key_hint(self) -> QWidget:
+        """단축키 힌트 줄 — 각 키를 kbd 칩으로, 설명은 흐린 텍스트로."""
+        host = QWidget(self)
+        lay = QHBoxLayout(host)
+        lay.setContentsMargins(2, 0, 0, 0)
+        lay.setSpacing(6)
+        pairs = [("↑ ↓", i18n.KO.KEY_HINT_MOVE),
+                 ("R", i18n.KO.KEY_HINT_REJECT),
+                 ("Enter", i18n.KO.KEY_HINT_DONE)]
+        for i, (key, desc) in enumerate(pairs):
+            if i:
+                lay.addSpacing(8)
+            cap = QLabel(key, host)
+            cap.setProperty("role", "kbd")
+            lay.addWidget(cap)
+            lbl = QLabel(desc, host)
+            lbl.setStyleSheet(f"color: {theme.MUTE}; font-size: 11px;")
+            lay.addWidget(lbl)
+        lay.addStretch(1)
+        return host
 
     # ------------------------------------------------------------------
     def load_state(self,
@@ -1069,26 +1109,27 @@ class MatchReviewPage(QWidget):
         self._apply_filter()
 
     def _update_summary(self) -> None:
-        """상단 탤리 갱신 — 일치/허용 초과/매치 없음 (+ 좌표 매치 실패)."""
+        """상단 탤리 갱신 — 일치는 기준선으로 항상, 예외(초과/매치 없음/실패)는
+        0 이 아닐 때만 노출해 시선을 예외로 모은다. 숫자는 mono·tabular."""
         ok, over, none = tally(self._matches, self._unmatched_keys,
                                self._coord_mode)
-        sep = f"<span style='color:{theme.MUTE}'>&nbsp;·&nbsp;</span>"
-        parts = [
-            f"<span style='color:{theme.PASS}; font-weight:700'>"
-            f"{i18n.KO.TALLY_OK_FMT.format(n=ok)}</span>",
-        ]
-        if self._coord_mode or over:
-            parts.append(
-                f"<span style='color:{theme.DANGER}; font-weight:700'>"
-                f"{i18n.KO.TALLY_OVER_FMT.format(n=over)}</span>")
-        parts.append(
-            f"<span style='color:{theme.MUTE}; font-weight:700'>"
-            f"{i18n.KO.TALLY_NO_MATCH_FMT.format(n=none)}</span>")
+
+        def seg(label_fmt, n, color):
+            # 라벨은 색, 숫자는 mono tabular 로 자릿수 흔들림 없이.
+            txt = label_fmt.format(n="")  # '일치 ' 처럼 숫자 자리 비움
+            return (f"<span style='color:{color}'>{txt.strip()} "
+                    f"<span style='font-family:{theme.FONT_MONO}'>{n}</span></span>")
+
+        sep = f"<span style='color:{theme.LINE2}'>&nbsp;&nbsp;</span>"
+        parts = [seg(i18n.KO.TALLY_OK_FMT, ok, theme.PASS)]
+        if over > 0:
+            parts.append(seg(i18n.KO.TALLY_OVER_FMT, over, theme.DANGER))
+        if none > 0:
+            parts.append(seg(i18n.KO.TALLY_NO_MATCH_FMT, none, theme.INK2))
         if self._coord_failed_count > 0:
-            parts.append(
-                f"<span style='color:{theme.DANGER}'>"
-                f"{i18n.KO.TALLY_COORD_FAILED_FMT.format(n=self._coord_failed_count)}"
-                "</span>")
+            # 매치 실패(좌표 미검출)는 이 화면에서 조치 불가 → 정보성 mute.
+            parts.append(seg(i18n.KO.TALLY_COORD_FAILED_FMT,
+                             self._coord_failed_count, theme.MUTE))
         self._tally_label.setText(sep.join(parts))
         kept = len(self._matches) - len(self._unmatched_keys)
         self.btn_done.setText(i18n.KO.BTN_FINISH_REVIEW_KEPT_FMT.format(n=kept))

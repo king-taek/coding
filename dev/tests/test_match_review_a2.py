@@ -156,6 +156,54 @@ def test_shrink_after_big_thumbs_reclamps_no_hscroll(qapp):
     page.deleteLater()
 
 
+def test_chip_only_on_exceptions(qapp):
+    """정상(일치) 행엔 배지 없음, 예외(초과/매치 없음)만 칩 텍스트."""
+    from aoi_verification.app.ui.pages.match_review_page import _MatchRow
+    ok = _MatchRow(_m("S1", 0.9), runners_up=[], thumb_px=140, coord_mode=True,
+                   tolerance=20.0)
+    assert ok._chip.text() == ""                       # 일치 → 배지 없음
+    over = _MatchRow(_m("S2", -0.5), runners_up=[], thumb_px=140,
+                     coord_mode=True, tolerance=20.0)
+    assert over._chip.text() != ""                     # 초과 → 칩 표시
+    over.set_unmatched(True)
+    assert over._chip.text() != ""                     # 매치 없음 → 칩 표시
+    ok.deleteLater(); over.deleteLater()
+
+
+def test_metric_one_line_no_over_suffix(qapp):
+    """metric 컬럼은 '허용범위 초과' 접미어 없이 거리만 (칩이 전담)."""
+    from aoi_verification.app.ui.pages.match_review_page import _MatchRow
+    over = _MatchRow(_m("S1", -0.5), runners_up=[], thumb_px=140,
+                     coord_mode=True, tolerance=20.0)
+    assert "초과" not in over._metric_label.text()
+    assert "µm" in over._metric_label.text()
+    over.deleteLater()
+
+
+def test_compact_toggle_touch_target_and_intent(qapp):
+    """토글은 44px 터치 타깃 + reject 의도 프로퍼티(hover 위험색 트리거)."""
+    from aoi_verification.app.ui.pages.match_review_page import _MatchRow
+    row = _MatchRow(_m("S1", 0.9), runners_up=[], thumb_px=140)
+    assert row.btn_toggle.width() >= 44
+    assert row.btn_toggle.property("compact") is True
+    assert row.btn_toggle.property("intent") == "reject"
+    row.set_unmatched(True)                             # 되돌리기 → 의도 해제
+    assert row.btn_toggle.property("intent") == ""
+    row.deleteLater()
+
+
+def test_secondary_actions_are_links(qapp):
+    """반복 2차 액션(크게 보기·더 보기)은 링크형 role."""
+    from aoi_verification.app.ui.pages.match_review_page import _MatchRow
+    from aoi_verification.app.models.slot import ImageItem
+    runners = [(ImageItem(slot="S1", path=Path(f"/tmp/c{i}.jpg"), side="val"),
+                0.6 - i * 0.1) for i in range(6)]
+    row = _MatchRow(_m("S1", 0.9), runners_up=runners, thumb_px=140)
+    assert row.btn_view.property("role") == "link"
+    assert row.btn_more is not None and row.btn_more.property("role") == "link"
+    row.deleteLater()
+
+
 def test_neon_button_glow_only_primary(qapp):
     from aoi_verification.app.ui.widgets.neon_button import NeonButton
     b1 = NeonButton("x", role="primary")

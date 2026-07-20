@@ -402,6 +402,10 @@ REVIEW_EMPTY_HINT = (
 )
 COMPARE_REF_CAPTION_FMT = "기준 — {name}"
 REVIEW_KEY_HINT = "↑↓ 줄 이동 · R 매치 없음 · Enter 검토 완료"
+# 키보드 힌트 kbd 칩 (키, 설명) 쌍
+KEY_HINT_MOVE = "줄 이동"
+KEY_HINT_REJECT = "매치 없음"
+KEY_HINT_DONE = "검토 완료"
 LOAD_SCAN = "폴더 스캔 중…"
 LOAD_SCAN_FMT = "폴더 스캔 중… {done} / {total} 슬롯"
 LOAD_EXPORT = "엑셀로 저장 중…"
