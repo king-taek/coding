@@ -7,7 +7,7 @@ QWidget {
     background-color: $bg;
     color: $ink;
     font-family: $font_body;
-    font-size: 14px;
+    font-size: $font_base_sz;
 }
 
 QMainWindow, QDialog {
@@ -21,14 +21,14 @@ QLabel {
 
 QLabel[role="title"] {
     font-family: $font_title;
-    font-size: 20px;
-    font-weight: 700;
+    font-size: $font_title_sz;
+    font-weight: $title_weight;
     color: $ink;
-    letter-spacing: 0px;
+    letter-spacing: $title_tracking;
 }
 
 QLabel[role="subtitle"] {
-    font-size: 15px;
+    font-size: $font_sub_sz;
     color: $ink2;
 }
 
@@ -43,34 +43,37 @@ QLabel[role="mono"] {
 /* ── 판정 칩 (매치 검토 A2) ──────────────────────────────────────────── */
 QLabel[chip="ok"] {
     color: $pass;
-    background-color: $pass_tint;
+    background-color: $chip_bg_ok;
     border: 1px solid transparent;
-    border-radius: 9px;
-    padding: 2px 8px;
+    border-radius: $chip_radius;
+    padding: $chip_pad;
+    letter-spacing: $chip_ls;
     font-family: $font_mono;
-    font-size: 11px;
+    font-size: $font_caption_sz;
     font-weight: 700;
 }
 
 QLabel[chip="over"] {
     color: $danger;
-    background-color: $danger_tint;
+    background-color: $chip_bg_over;
     border: 1px solid transparent;
-    border-radius: 9px;
-    padding: 2px 8px;
+    border-radius: $chip_radius;
+    padding: $chip_pad;
+    letter-spacing: $chip_ls;
     font-family: $font_mono;
-    font-size: 11px;
+    font-size: $font_caption_sz;
     font-weight: 700;
 }
 
 QLabel[chip="none"] {
     color: $mute;
     background-color: transparent;
-    border: 1px solid $line2;
-    border-radius: 9px;
-    padding: 2px 8px;
+    border: 1px solid $chip_border_none;
+    border-radius: $chip_radius;
+    padding: $chip_pad;
+    letter-spacing: $chip_ls;
     font-family: $font_mono;
-    font-size: 11px;
+    font-size: $font_caption_sz;
     font-weight: 700;
 }
 
@@ -78,13 +81,13 @@ QLabel[chip="none"] {
 QFrame[role="card"] {
     background-color: $panel;
     border: 1px solid $line2;
-    border-radius: 10px;
+    border-radius: $radius;
 }
 
 QFrame[role="card-soft"] {
     background-color: $panel;
     border: 1px solid $line;
-    border-radius: 10px;
+    border-radius: $radius;
 }
 
 QFrame[role="section"] {
@@ -93,21 +96,29 @@ QFrame[role="section"] {
     border-radius: 8px;
 }
 
+/* 매치 검토 행 — 변형별 card / hairline 지원. */
+QFrame[role="row"] {
+    background-color: $row_bg;
+    border: 1px solid $row_border;
+    border-bottom: 1px solid $row_divider;
+    border-radius: $row_radius;
+}
+
 /* 매치 검토 행 상태 — 인라인 스타일 대신 동적 프로퍼티로 칠한다. */
 QFrame[rowState="over"] {
     background-color: $danger_tint_soft;
     border: 1px solid $danger;
-    border-radius: 10px;
+    border-radius: $row_radius;
 }
 
 QFrame[rowState="unmatched"] {
     background-color: $panel;
     border: 2px solid $danger;
-    border-radius: 10px;
+    border-radius: $row_radius;
 }
 
 QFrame[current="true"] {
-    border: 2px solid $accent;
+    border: $focus_w solid $accent;
 }
 
 /* ── 버튼 ───────────────────────────────────────────────────────────── */
@@ -115,9 +126,9 @@ QPushButton {
     background-color: transparent;
     color: $ink2;
     border: 1px solid $line2;
-    border-radius: 6px;
-    padding: 8px 19px;
-    font-size: 14px;
+    border-radius: $radius_sm;
+    padding: $pad_control;
+    font-size: $font_base_sz;
     font-weight: 600;
     letter-spacing: 0px;
 }
@@ -133,8 +144,8 @@ QPushButton:pressed {
 }
 
 QPushButton:focus {
-    border: 2px solid $focus;
-    padding: 7px 18px;
+    border: $focus_w solid $focus;
+    padding: $pad_control_focus;
 }
 
 QPushButton:disabled {
@@ -158,8 +169,8 @@ QPushButton[role="primary"]:pressed {
     background-color: $accent_pressed;
 }
 QPushButton[role="primary"]:focus {
-    border: 2px solid $focus;
-    padding: 7px 18px;
+    border: $focus_w solid $focus;
+    padding: $pad_control_focus;
 }
 
 QPushButton[role="danger"] {
@@ -217,7 +228,7 @@ QPushButton[compact="true"][intent="reject"]:hover {
     background: $danger_tint;
 }
 QPushButton[compact="true"]:focus {
-    border: 2px solid $focus;
+    border: $focus_w solid $focus;
     padding: 3px 5px;
 }
 
@@ -255,14 +266,14 @@ QPushButton[role="link"]:focus {
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
     background-color: $elev;
     border: 1px solid $line2;
-    border-radius: 6px;
-    padding: 7px 12px;
+    border-radius: $radius_sm;
+    padding: $pad_input;
     color: $ink;
 }
 
 QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {
-    border: 2px solid $focus;
-    padding: 6px 11px;
+    border: $focus_w solid $focus;
+    padding: $pad_input_focus;
 }
 
 QSlider::groove:horizontal {
@@ -289,8 +300,8 @@ QCheckBox {
     spacing: 8px;
 }
 QCheckBox::indicator {
-    width: 18px;
-    height: 18px;
+    width: $check_sz;
+    height: $check_sz;
     border: 2px solid $line2;
     border-radius: 4px;
     background: transparent;
@@ -311,8 +322,8 @@ QRadioButton {
     spacing: 8px;
 }
 QRadioButton::indicator {
-    width: 16px;
-    height: 16px;
+    width: $radio_sz;
+    height: $radio_sz;
     border: 2px solid $line2;
     border-radius: 8px;
     background: transparent;
