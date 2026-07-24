@@ -73,7 +73,7 @@ class Variant:
 _COLOR_KEYS = (
     "bg", "panel", "elev", "line", "line2", "ink", "ink2", "mute",
     "accent", "accent_hover", "accent_pressed", "on_accent",
-    "pass", "danger", "warn", "focus",
+    "pass", "danger", "warn", "focus", "thumb_frame",
 )
 
 
@@ -101,7 +101,7 @@ VARIANTS: dict[str, "Variant"] = {
             "accent": "#E0A657", "accent_hover": "#EBB570",
             "accent_pressed": "#C68F41", "on_accent": "#0C0D10",
             "pass": "#52B76E", "danger": "#E8665F", "warn": "#D4A82C",
-            "focus": "#74A9FF",
+            "focus": "#74A9FF", "thumb_frame": "#4C5563",
         },
         profile=Profile(
             radius=8, radius_sm=5, chip_radius=7, row_radius=8,
@@ -116,17 +116,17 @@ VARIANTS: dict[str, "Variant"] = {
         colors={
             "bg": "#EBEEF3", "panel": "#FFFFFF", "elev": "#F4F6F9",
             "line": "#CBD3DD", "line2": "#E4E8EE",
-            "ink": "#12161C", "ink2": "#45505E", "mute": "#626D7D",
+            "ink": "#12161C", "ink2": "#45505E", "mute": "#566070",
             "accent": "#1F63D6", "accent_hover": "#1A55BC",
             "accent_pressed": "#164AA3", "on_accent": "#FFFFFF",
             "pass": "#12784D", "danger": "#C62839", "warn": "#9E6600",
-            "focus": "#0B76C4",
+            "focus": "#0A66AC", "thumb_frame": "#AFB9C6",
         },
         profile=Profile(
             font_base=13, font_title=22, font_subtitle=15, font_caption=11,
             title_weight=600, radius=6, radius_sm=4, chip_radius=10,
             row_radius=3, page_margin=24, section_gap=16, card_pad=18,
-            row_pad_v=8, row_gap=0, control_h=32, control_h_lg=40,
+            row_pad_v=14, row_gap=0, control_h=32, control_h_lg=40,
             control_pad_v=7, control_pad_h=14,
             chip_style="pill", row_style="hairline",
             card_shadow=True, primary_glow=False,
@@ -141,12 +141,12 @@ VARIANTS: dict[str, "Variant"] = {
         key="datum", label="도면",
         colors={
             "bg": "#ECE9E2", "panel": "#F5F3ED", "elev": "#FBFAF7",
-            "line": "#C7C3B9", "line2": "#DCD8CE",
-            "ink": "#1B1A17", "ink2": "#3D3B35", "mute": "#6B6860",
-            "accent": "#201E1A", "accent_hover": "#37342E",
-            "accent_pressed": "#100F0C", "on_accent": "#F5F3ED",
-            "pass": "#565349", "danger": "#A5271E", "warn": "#1B1A17",
-            "focus": "#2B4C6F",
+            "line": "#948E80", "line2": "#B7B2A6",
+            "ink": "#1B1A17", "ink2": "#3D3B35", "mute": "#5A574E",
+            "accent": "#2C5A86", "accent_hover": "#356B9C",
+            "accent_pressed": "#244B70", "on_accent": "#F5F3ED",
+            "pass": "#3B6438", "danger": "#A5271E", "warn": "#1B1A17",
+            "focus": "#2B4C6F", "thumb_frame": "#A39D8F",
         },
         profile=Profile(
             font_base=14, font_title=26, font_subtitle=15, font_caption=12,
@@ -154,7 +154,7 @@ VARIANTS: dict[str, "Variant"] = {
             chip_radius=0, row_radius=0, page_margin=32, section_gap=28,
             card_pad=20, row_pad_v=8, row_gap=0, control_h=32, control_h_lg=40,
             control_pad_v=6, control_pad_h=14, check_sz=16,
-            chip_style="text", row_style="hairline",
+            chip_style="pill", row_style="hairline",
             card_shadow=False, primary_glow=False,
             chip_w=88, chip_h=20, toggle_w=52, toggle_h=30,
             thumb_default_px=118, focus_ring_px=2, motion_scale=0.8,
@@ -172,7 +172,7 @@ VARIANTS: dict[str, "Variant"] = {
             "accent": "#0F6B78", "accent_hover": "#0C5A66",
             "accent_pressed": "#094A54", "on_accent": "#FFFFFF",
             "pass": "#1A6E37", "danger": "#B4231F", "warn": "#8A5A00",
-            "focus": "#1558D6",
+            "focus": "#1558D6", "thumb_frame": "#B4BBC3",
         },
         profile=Profile(
             font_base=16, font_title=24, font_subtitle=17, font_caption=13,
@@ -183,7 +183,9 @@ VARIANTS: dict[str, "Variant"] = {
             chip_style="pill", row_style="card",
             card_shadow=True, primary_glow=False,
             chip_w=88, chip_h=30, toggle_w=48, toggle_h=48,
-            thumb_default_px=128, focus_ring_px=3, motion_scale=0.6,
+            # 접근성 대형 변형은 '차분한' 모션이 어울린다 — 가장 빠른(0.6) 대신
+            # 넉넉하게(1.1) 하여 전환/로딩이 급하지 않게(모션 디렉터 지적).
+            thumb_default_px=128, focus_ring_px=3, motion_scale=1.1,
         ),
         scrim=(20, 22, 26, 120),
         shadow=(28, 32, 38, 38),
@@ -194,11 +196,11 @@ VARIANTS: dict[str, "Variant"] = {
         colors={
             "bg": "#123A38", "panel": "#184843", "elev": "#1F534B",
             "line": "#2C5B54", "line2": "#3E706A",
-            "ink": "#F4EDE2", "ink2": "#D9CFC0", "mute": "#BBB0A0",
-            "accent": "#CE7A3C", "accent_hover": "#DB884A",
-            "accent_pressed": "#B4652E", "on_accent": "#2A160B",
-            "pass": "#5FCB8E", "danger": "#FF8F80", "warn": "#F2B24A",
-            "focus": "#FFCF7A",
+            "ink": "#F4EDE2", "ink2": "#D9CFC0", "mute": "#CFC5B6",
+            "accent": "#EAAC70", "accent_hover": "#F2BA82",
+            "accent_pressed": "#D0965A", "on_accent": "#2A160B",
+            "pass": "#6EDB9C", "danger": "#FF98A2", "warn": "#F2B24A",
+            "focus": "#FFCF7A", "thumb_frame": "#7C9A92",
         },
         profile=Profile(
             font_base=14, font_title=26, font_subtitle=18, font_caption=11,
@@ -229,6 +231,7 @@ BG = PANEL = ELEV = LINE = LINE2 = ""
 INK = INK2 = MUTE = ""
 ACCENT = ACCENT_HOVER = ACCENT_PRESSED = ON_ACCENT = ""
 PASS = DANGER = WARN = FOCUS = ""
+THUMB_FRAME = ""
 ACCENT_TINT = ACCENT_TINT_SOFT = PASS_TINT = ""
 DANGER_TINT = DANGER_TINT_SOFT = WARN_TINT = ""
 PROFILE = Profile()
@@ -300,7 +303,7 @@ def set_variant(name: str) -> None:
     global CURRENT_VARIANT, PROFILE, SCRIM_RGBA, SHADOW_RGBA
     global BG, PANEL, ELEV, LINE, LINE2, INK, INK2, MUTE
     global ACCENT, ACCENT_HOVER, ACCENT_PRESSED, ON_ACCENT
-    global PASS, DANGER, WARN, FOCUS
+    global PASS, DANGER, WARN, FOCUS, THUMB_FRAME
     global ACCENT_TINT, ACCENT_TINT_SOFT, PASS_TINT
     global DANGER_TINT, DANGER_TINT_SOFT, WARN_TINT
 
@@ -317,6 +320,7 @@ def set_variant(name: str) -> None:
     ACCENT, ACCENT_HOVER = c["accent"], c["accent_hover"]
     ACCENT_PRESSED, ON_ACCENT = c["accent_pressed"], c["on_accent"]
     PASS, DANGER, WARN, FOCUS = c["pass"], c["danger"], c["warn"], c["focus"]
+    THUMB_FRAME = c["thumb_frame"]
 
     ACCENT_TINT = _tint(ACCENT, 36)
     ACCENT_TINT_SOFT = _tint(ACCENT, 20)

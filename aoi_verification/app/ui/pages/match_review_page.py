@@ -95,13 +95,17 @@ class _LazyThumb(QLabel):
         self._source_pix: QPixmap | None = None
         self.setFixedSize(self._size, self._size)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # 프레임을 패널보다 밝은 thumb_frame 으로 — 어두운 다이가 어두운 패널에
+        # 묻히지 않게 경계를 분명히(C1). 차순위는 점선으로 '후보' 성격 유지.
         if subtle:
-            self.setStyleSheet(f"border: 1px dashed {theme.LINE}; border-radius: 6px;")
+            self.setStyleSheet(
+                f"border: 1px dashed {theme.THUMB_FRAME}; border-radius: 6px;")
         else:
-            self.setStyleSheet(f"border: 1px solid {theme.LINE}; border-radius: 6px;")
-        # placeholder — 첫 paint 후 실제 이미지로 교체.
+            self.setStyleSheet(
+                f"border: 1px solid {theme.THUMB_FRAME}; border-radius: 6px;")
+        # placeholder — 첫 paint 후 실제 이미지로 교체(패널보다 살짝 밝은 elev 바탕).
         ph = QPixmap(self._size, self._size)
-        ph.fill(QColor(theme.PANEL))
+        ph.fill(QColor(theme.ELEV))
         self.setPixmap(ph)
         # 우클릭 컨텍스트 메뉴 (크게보기). 차순위 타일 내부 썸네일은 상위
         # _RunnerUpTile 이 좌우 비교 뷰어를 직접 열도록 비활성화한다 (#4).
