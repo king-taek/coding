@@ -241,6 +241,8 @@ class _MatchRow(QFrame):
         super().__init__(parent)
         self.match = match
         self._is_unmatched = False
+        self._pulse = 0.0                # 상태 전환 펄스(0=없음) — paintEvent 가 읽음
+        self._prev_state = None          # 초기 로드 시 펄스 억제용
         self._coord_mode = bool(coord_mode)
         self._tolerance = float(tolerance) if tolerance > 0 else 500.0
         # 썸네일 크기 (#2) — 차순위는 20% 작게 파생.
@@ -658,6 +660,27 @@ class _MatchRow(QFrame):
         for w in (self._chip, self):
             w.style().unpolish(w)
             w.style().polish(w)
+        # 예외 상태로 '전환'될 때만 한 번 배경 틴트 펄스(초기 로드엔 안 함).
+        if (self._prev_state is not None and st != self._prev_state
+                and st in ("over", "unmatched")):
+            from .. import motion
+            motion.pulse(self)
+        self._prev_state = st
+
+    def paintEvent(self, event):  # noqa: N802
+        super().paintEvent(event)
+        pulse = getattr(self, "_pulse", 0.0)
+        if pulse <= 0.0:
+            return
+        from PyQt6.QtGui import QPainter
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        c = QColor(theme.DANGER)
+        c.setAlpha(int(64 * pulse))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(c)
+        r = theme.PROFILE.row_radius
+        p.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), r, r)
 
     def set_unmatched(self, unmatched: bool) -> None:
         self._is_unmatched = unmatched

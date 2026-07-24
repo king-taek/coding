@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QPropertyAnimation, Qt
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QGraphicsDropShadowEffect, QPushButton
 
@@ -19,6 +19,8 @@ class NeonButton(QPushButton):
         super().__init__(text, parent)
         self.setProperty("role", role)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._glow_eff = None
+        self._press_anim = None
         self._apply_glow(role)
         self.setMinimumHeight(theme.PROFILE.control_h)
 
@@ -27,6 +29,7 @@ class NeonButton(QPushButton):
         # 절제 원칙: 화면의 강조는 primary 하나 — 나머지는 글로우 없음.
         # 변형이 글로우를 끄면(밝은/무광 테마) primary 도 글로우 없음.
         if role != "primary" or not theme.PROFILE.primary_glow:
+            self._glow_eff = None
             self.setGraphicsEffect(None)
             return
         color = QColor(theme.ACCENT)
@@ -36,6 +39,30 @@ class NeonButton(QPushButton):
         eff.setBlurRadius(14)
         eff.setColor(color)
         self.setGraphicsEffect(eff)
+        self._glow_eff = eff
+
+    def _tween_glow(self, target: int) -> None:
+        """primary 프레스/릴리즈 시 글로우 blurRadius 를 부드럽게(레이아웃 불변)."""
+        from .. import motion
+        if self._glow_eff is None or not motion.enabled():
+            return
+        if self._press_anim is not None:
+            self._press_anim.stop()
+        anim = QPropertyAnimation(self._glow_eff, b"blurRadius", self)
+        anim.setEndValue(target)
+        anim.setDuration(motion.dur(120))
+        from PyQt6.QtCore import QEasingCurve
+        anim.setEasingCurve(QEasingCurve.Type.OutQuart)
+        anim.start()
+        self._press_anim = anim
+
+    def mousePressEvent(self, e):  # noqa: N802
+        self._tween_glow(6)
+        super().mousePressEvent(e)
+
+    def mouseReleaseEvent(self, e):  # noqa: N802
+        self._tween_glow(14)
+        super().mouseReleaseEvent(e)
 
     # role 변경 시 글로우 색상 재적용 -----------------------------------
     def setRole(self, role: str) -> None:
