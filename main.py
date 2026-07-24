@@ -23,8 +23,19 @@ def _ensure_package_on_path() -> None:
 
 
 def _load_stylesheet(app) -> None:
-    from aoi_verification.app.utils import paths
+    from aoi_verification.app.utils import paths, prefs as _prefs
     from aoi_verification.app.ui import theme
+    # 저장된 화면 스타일 변형·모션 설정을 스타일시트 적용 전에 확정.
+    try:
+        p = _prefs.load()
+        theme.set_variant(getattr(p, "ui_variant", theme.DEFAULT_VARIANT))
+    except Exception:
+        pass
+    try:
+        from aoi_verification.app.ui import motion
+        motion.set_reduce_motion(bool(getattr(p, "reduce_motion", False)))
+    except Exception:
+        pass
     qss_path = paths.resource_path("aoi_verification/app/ui/style.qss")
     try:
         text = Path(qss_path).read_text(encoding="utf-8")

@@ -7,6 +7,24 @@ def test_defaults():
     p = prefs.UiPrefs()
     assert 0.0 <= p.threshold <= 1.0
     assert p.image_long_edge_select >= 300
+    # 화면 스타일 변형·모션 신필드 기본값.
+    assert p.ui_variant == "instrument"
+    assert p.reduce_motion is False
+
+
+def test_ui_variant_round_trip(isolated_cache):
+    prefs.save(prefs.UiPrefs(ui_variant="daylight", reduce_motion=True))
+    loaded = prefs.load()
+    assert loaded.ui_variant == "daylight"
+    assert loaded.reduce_motion is True
+
+
+def test_legacy_json_without_new_fields_loads(isolated_cache):
+    """신필드 없는 옛 JSON 도 하위호환으로 로드(기본값 채움)."""
+    p = prefs.UiPrefs.from_dict({"threshold": 0.6})   # ui_variant 키 없음
+    assert p.threshold == 0.6
+    assert p.ui_variant == "instrument"
+    assert p.reduce_motion is False
 
 
 def test_round_trip(tmp_path, isolated_cache):
