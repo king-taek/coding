@@ -90,20 +90,129 @@ def _tint(hexv: str, alpha: int) -> str:
 # ---------------------------------------------------------------------------
 # 변형 정의.  ①instrument(현재) 가 기준선.  신규 4종은 이후 커밋에서 추가.
 VARIANTS: dict[str, "Variant"] = {
+    # ① 계측기 — 어두운 검사 부스, 앰버 단일광. (개선 전담 에이전트 정제:
+    #    면 대비 확대·MUTE 강화·WARN/ACCENT 색상 분리)
     "instrument": Variant(
         key="instrument", label="계측기",
         colors={
-            "bg": "#0C0D10", "panel": "#131519", "elev": "#1A1D23",
-            "line": "#282C34", "line2": "#333844",
-            "ink": "#EAECEF", "ink2": "#B7BCC6", "mute": "#7E858F",
-            "accent": "#E0A34A", "accent_hover": "#EBB668",
-            "accent_pressed": "#C98F3D", "on_accent": "#14161A",
-            "pass": "#4FB06A", "danger": "#E5605A", "warn": "#D6A430",
-            "focus": "#6AA6FF",
+            "bg": "#0C0D10", "panel": "#14161C", "elev": "#1E212A",
+            "line": "#2A2E37", "line2": "#363B47",
+            "ink": "#EAECEF", "ink2": "#B7BCC6", "mute": "#8A909B",
+            "accent": "#E0A657", "accent_hover": "#EBB570",
+            "accent_pressed": "#C68F41", "on_accent": "#0C0D10",
+            "pass": "#52B76E", "danger": "#E8665F", "warn": "#D4A82C",
+            "focus": "#74A9FF",
         },
-        profile=Profile(),
+        profile=Profile(
+            radius=8, radius_sm=5, chip_radius=7, row_radius=8,
+            card_pad=18, control_pad_h=14, font_caption=12,
+        ),
         scrim=(12, 13, 16, 200),
         shadow=(0, 0, 0, 140),
+    ),
+    # ② 명실 — 밝은 클린룸 스틸 워크톱, 코발트. 하이라인 데이터테이블 + 색 알약.
+    "cleanroom": Variant(
+        key="cleanroom", label="명실",
+        colors={
+            "bg": "#EBEEF3", "panel": "#FFFFFF", "elev": "#F4F6F9",
+            "line": "#CBD3DD", "line2": "#E4E8EE",
+            "ink": "#12161C", "ink2": "#45505E", "mute": "#626D7D",
+            "accent": "#1F63D6", "accent_hover": "#1A55BC",
+            "accent_pressed": "#164AA3", "on_accent": "#FFFFFF",
+            "pass": "#12784D", "danger": "#C62839", "warn": "#9E6600",
+            "focus": "#0B76C4",
+        },
+        profile=Profile(
+            font_base=13, font_title=22, font_subtitle=15, font_caption=11,
+            title_weight=600, radius=6, radius_sm=4, chip_radius=10,
+            row_radius=3, page_margin=24, section_gap=16, card_pad=18,
+            row_pad_v=8, row_gap=0, control_h=32, control_h_lg=40,
+            control_pad_v=7, control_pad_h=14,
+            chip_style="pill", row_style="hairline",
+            card_shadow=True, primary_glow=False,
+            chip_w=82, chip_h=22, toggle_w=44, toggle_h=36,
+            thumb_default_px=120, focus_ring_px=2, motion_scale=0.85,
+        ),
+        scrim=(231, 236, 243, 200),
+        shadow=(18, 28, 45, 38),
+    ),
+    # ③ 도면 — 따뜻한 벨럼 제도 시트, 그래파이트 모노. 하이라인 + 타입 상태.
+    "datum": Variant(
+        key="datum", label="도면",
+        colors={
+            "bg": "#ECE9E2", "panel": "#F5F3ED", "elev": "#FBFAF7",
+            "line": "#C7C3B9", "line2": "#DCD8CE",
+            "ink": "#1B1A17", "ink2": "#3D3B35", "mute": "#6B6860",
+            "accent": "#201E1A", "accent_hover": "#37342E",
+            "accent_pressed": "#100F0C", "on_accent": "#F5F3ED",
+            "pass": "#565349", "danger": "#A5271E", "warn": "#1B1A17",
+            "focus": "#2B4C6F",
+        },
+        profile=Profile(
+            font_base=14, font_title=26, font_subtitle=15, font_caption=12,
+            title_weight=300, title_tracking=-1, radius=2, radius_sm=1,
+            chip_radius=0, row_radius=0, page_margin=32, section_gap=28,
+            card_pad=20, row_pad_v=8, row_gap=0, control_h=32, control_h_lg=40,
+            control_pad_v=6, control_pad_h=14, check_sz=16,
+            chip_style="text", row_style="hairline",
+            card_shadow=False, primary_glow=False,
+            chip_w=88, chip_h=20, toggle_w=52, toggle_h=30,
+            thumb_default_px=118, focus_ring_px=2, motion_scale=0.8,
+        ),
+        scrim=(27, 26, 23, 138),
+        shadow=(0, 0, 0, 0),
+    ),
+    # ④ 맑음 — 접근성 대형, 따뜻한 페이퍼-화이트, 티일. 16px·48px·3px 링.
+    "clarity": Variant(
+        key="clarity", label="큰 글씨",
+        colors={
+            "bg": "#E7E4DC", "panel": "#F7F5EF", "elev": "#FFFFFF",
+            "line": "#C7C3B8", "line2": "#D8D4CA",
+            "ink": "#17191C", "ink2": "#3E4247", "mute": "#5A5F66",
+            "accent": "#0F6B78", "accent_hover": "#0C5A66",
+            "accent_pressed": "#094A54", "on_accent": "#FFFFFF",
+            "pass": "#1A6E37", "danger": "#B4231F", "warn": "#8A5A00",
+            "focus": "#1558D6",
+        },
+        profile=Profile(
+            font_base=16, font_title=24, font_subtitle=17, font_caption=13,
+            title_weight=800, radius=14, radius_sm=9, chip_radius=15,
+            row_radius=16, page_margin=32, section_gap=24, card_pad=18,
+            row_pad_v=12, row_gap=10, control_h=48, control_h_lg=52,
+            control_pad_v=12, control_pad_h=22, check_sz=22,
+            chip_style="pill", row_style="card",
+            card_shadow=True, primary_glow=False,
+            chip_w=88, chip_h=30, toggle_w=48, toggle_h=48,
+            thumb_default_px=128, focus_ring_px=3, motion_scale=0.6,
+        ),
+        scrim=(20, 22, 26, 120),
+        shadow=(28, 32, 38, 38),
+    ),
+    # ⑤ 청동 — 딥 버디그리스 그라운드 + 구리 액센트, 둥근 물성. 헤리티지 계측기.
+    "patina": Variant(
+        key="patina", label="청동",
+        colors={
+            "bg": "#123A38", "panel": "#184843", "elev": "#1F534B",
+            "line": "#2C5B54", "line2": "#3E706A",
+            "ink": "#F4EDE2", "ink2": "#D9CFC0", "mute": "#BBB0A0",
+            "accent": "#CE7A3C", "accent_hover": "#DB884A",
+            "accent_pressed": "#B4652E", "on_accent": "#2A160B",
+            "pass": "#5FCB8E", "danger": "#FF8F80", "warn": "#F2B24A",
+            "focus": "#FFCF7A",
+        },
+        profile=Profile(
+            font_base=14, font_title=26, font_subtitle=18, font_caption=11,
+            title_weight=700, radius=14, radius_sm=9, chip_radius=999,
+            row_radius=14, page_margin=24, section_gap=28, card_pad=20,
+            row_pad_v=12, row_gap=8, control_h=38, control_h_lg=50,
+            control_pad_v=10, control_pad_h=18, check_sz=22,
+            chip_style="pill", row_style="card",
+            card_shadow=True, primary_glow=False,
+            chip_w=96, chip_h=30, toggle_w=52, toggle_h=40,
+            thumb_default_px=130, focus_ring_px=3, motion_scale=1.15,
+        ),
+        scrim=(9, 24, 22, 168),
+        shadow=(6, 17, 16, 122),
     ),
 }
 

@@ -255,11 +255,11 @@ class _MatchRow(QFrame):
         self._runner_tiles: list["_RunnerUpTile"] = []
         # ‘후보 한 줄 더 보기’ 클릭마다 1 씩 늘어나는 표시 줄 수 (#5).
         self._visible_lines = 1
-        self.setProperty("role", "card-soft")
+        self.setProperty("role", "row")   # 변형별 card/hairline (QSS role=row)
 
         # 행 전체를 세로로 쌓는다: [상단 한 줄] → [차순위 후보 영역] (#4).
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(10, 8, 10, 8)
+        outer.setContentsMargins(10, theme.PROFILE.row_pad_v, 10, theme.PROFILE.row_pad_v)
         outer.setSpacing(8)
 
         # ── 상단 한 줄 — slot · ref · → · 1위 매치 + 점수 · (stretch) · 토글 ──
@@ -324,7 +324,7 @@ class _MatchRow(QFrame):
         # 판정 칩 — 정상(일치)은 배지 없이 조용히, 예외(초과/매치 없음)만 표시해
         # 시선이 예외로 가게 한다. 폭은 유지해 토글 열이 정렬되도록.
         self._chip = QLabel("", self)
-        self._chip.setFixedSize(74, 24)
+        self._chip.setFixedSize(theme.PROFILE.chip_w, theme.PROFILE.chip_h)
         self._chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
         top.addWidget(self._chip)
 
@@ -332,7 +332,7 @@ class _MatchRow(QFrame):
         self.btn_toggle = NeonButton(i18n.KO.BTN_NO_MATCH_COMPACT, role="ghost")
         self.btn_toggle.setProperty("compact", True)
         self.btn_toggle.setProperty("intent", "reject")
-        self.btn_toggle.setFixedSize(44, 40)        # 44px — 터치 타깃 최소 충족.
+        self.btn_toggle.setFixedSize(theme.PROFILE.toggle_w, theme.PROFILE.toggle_h)
         self.btn_toggle.setToolTip(i18n.KO.BTN_MARK_NO_MATCH)
         self.btn_toggle.clicked.connect(
             lambda: self.toggle_requested.emit(self.match)
@@ -532,13 +532,10 @@ class _MatchRow(QFrame):
 
         slot·화살표·metric·칩·컴팩트 토글·여백/스페이싱.  이 폭을 뺀 나머지를
         두 이미지가 나눠 가져야 가로로 넘치지 않는다 (800×600 창 기준 검증)."""
-        try:
-            btn = max(40, self.btn_toggle.sizeHint().width())
-        except Exception:
-            btn = 40
-        # slot_host(min 110) + 화살표(~30) + metric(110) + 칩(70) + 토글
-        # + 행 여백/스페이싱(~116 = 바깥 20 + top 스페이싱 12×8).
-        return 110 + 30 + 110 + 70 + btn + 116
+        p = theme.PROFILE
+        # slot_host(96) + 화살표(30) + metric(96) + 칩(chip_w) + 토글(toggle_w)
+        # + 행 여백/스페이싱(96).  변형이 커져도 두 이미지가 클램프되어 안 넘침.
+        return 96 + 30 + 96 + p.chip_w + p.toggle_w + 96
 
     def _max_thumb(self) -> int:
         """현재 행 폭에서 가로 넘침 없이 허용되는 메인 이미지 한 변의 최대값."""
@@ -707,7 +704,7 @@ class MatchReviewPage(QWidget):
         self._score_cache = None
         self._val_pool: dict | None = None
         self._candidates_by_ref: dict | None = None
-        self._thumb_px = _THUMB_PX                  # 사진 크기 (#2)
+        self._thumb_px = theme.PROFILE.thumb_default_px   # 사진 크기 (#2) — 변형별
         self._resize_timer = QTimer(self)           # 슬라이더 드래그 디바운스
         self._resize_timer.setSingleShot(True)
         self._resize_timer.timeout.connect(self._apply_thumb_size)
@@ -790,7 +787,7 @@ class MatchReviewPage(QWidget):
         # 테두리로만 표시한다 (#1).
         self._list_layout = QVBoxLayout()
         self._list_layout.setContentsMargins(0, 0, 0, 0)
-        self._list_layout.setSpacing(6)
+        self._list_layout.setSpacing(theme.PROFILE.row_gap)
         outer.addLayout(self._list_layout)
 
         outer.addStretch(1)

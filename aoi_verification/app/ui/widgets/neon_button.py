@@ -20,12 +20,13 @@ class NeonButton(QPushButton):
         self.setProperty("role", role)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._apply_glow(role)
-        self.setMinimumHeight(34)
+        self.setMinimumHeight(theme.PROFILE.control_h)
 
     # ------------------------------------------------------------------
     def _apply_glow(self, role: str) -> None:
         # 절제 원칙: 화면의 강조는 primary 하나 — 나머지는 글로우 없음.
-        if role != "primary":
+        # 변형이 글로우를 끄면(밝은/무광 테마) primary 도 글로우 없음.
+        if role != "primary" or not theme.PROFILE.primary_glow:
             self.setGraphicsEffect(None)
             return
         color = QColor(theme.ACCENT)

@@ -15,16 +15,18 @@ class NeonCard(QFrame):
         self.setProperty("role", role)
         self.setFrameShape(QFrame.Shape.NoFrame)
 
+        from .. import theme
+        pad = theme.PROFILE.card_pad
         self._layout = QVBoxLayout(self)
-        self._layout.setContentsMargins(14, 14, 14, 14)
+        self._layout.setContentsMargins(pad, pad, pad, pad)
         self._layout.setSpacing(8)
 
-        if role == "card":
-            # 네온 글로우 대신 은은한 검정 elevation 그림자 (깊이만 유지).
+        if role == "card" and theme.PROFILE.card_shadow:
+            # 변형별 elevation 그림자(밝은 테마는 회색, 다크는 검정) — 글로우 대체.
             eff = QGraphicsDropShadowEffect(self)
             eff.setOffset(0, 2)
             eff.setBlurRadius(20)
-            eff.setColor(QColor(0, 0, 0, 140))
+            eff.setColor(QColor(*theme.SHADOW_RGBA))
             self.setGraphicsEffect(eff)
 
     def body(self) -> QVBoxLayout:
