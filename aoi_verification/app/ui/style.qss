@@ -104,6 +104,14 @@ QFrame[role="row"] {
     border-radius: $row_radius;
 }
 
+/* 점수 컬럼 눈금 — 이미지 영역과 우측 점수를 가르는 1px 헤어라인(C7). */
+QFrame[role="vrule"] {
+    background: $row_divider;
+    border: none;
+    min-width: 1px;
+    max-width: 1px;
+}
+
 /* 매치 검토 행 상태 — 인라인 스타일 대신 동적 프로퍼티로 칠한다. */
 QFrame[rowState="over"] {
     background-color: $danger_tint_soft;

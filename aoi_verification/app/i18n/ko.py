@@ -400,6 +400,9 @@ BTN_RESTORE_COMPACT = "↩"
 REVIEW_EMPTY_HINT = (
     "자동 매치된 항목이 없습니다.  [완료] 를 누르면 결과 화면으로 이동합니다."
 )
+REVIEW_FILTER_EMPTY = (
+    "확인 필요한 항목이 없습니다.  ‘확인 필요만’ 을 다시 눌러 전체를 볼 수 있습니다."
+)
 COMPARE_REF_CAPTION_FMT = "기준 — {name}"
 REVIEW_KEY_HINT = "↑↓ 줄 이동 · R 매치 없음 · Enter 검토 완료"
 # 키보드 힌트 kbd 칩 (키, 설명) 쌍

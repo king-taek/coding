@@ -191,7 +191,8 @@ class _RunnerUpTile(QFrame):
         else:
             score_text = f"{score * 100:.1f} %"
         self._score_label = QLabel(score_text, self)
-        color = theme.WARN if over else theme.INK2
+        # µm 신호 통일(C21): '허용 초과'는 어디서나 위험색(빨강), 정상은 중립 보조색.
+        color = theme.DANGER if over else theme.INK2
         self._score_label.setStyleSheet(
             f"color: {color}; font-size: 12px; font-family: {theme.FONT_MONO};")
         self._score_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -274,16 +275,19 @@ class _MatchRow(QFrame):
         slot_lay = QVBoxLayout(slot_host)
         slot_lay.setContentsMargins(0, 0, 0, 0)
         slot_lay.setSpacing(4)
+        slot_lay.addStretch(1)             # 라벨+링크를 세로 중앙에 — 우측 점수와
         self._slot_label = QLabel(match.slot, slot_host)
+        # 슬롯 라벨은 행 ID(보조) — 최중량은 결정값(점수)이 전담(C4 위계).
         self._slot_label.setStyleSheet(
-            f"color: {theme.INK}; font-weight: 700; font-size: 14px;"
+            f"color: {theme.INK}; font-weight: 600; font-size: 14px;"
         )
         slot_lay.addWidget(self._slot_label)
         # 2차 액션은 조용한 링크형으로 (반복 8행에 테두리 버튼이 쌓이지 않게).
         self.btn_view = NeonButton(i18n.KO.BTN_VIEW_LARGER, role="link")
+        self.btn_view.setMinimumHeight(36)   # ≥편안한 터치 타깃(C19)
         self.btn_view.clicked.connect(lambda: self._open_compare(0))
         slot_lay.addWidget(self.btn_view)
-        slot_lay.addStretch(1)              # 라벨+링크를 상단에 묶어 행 ID 로 읽히게.
+        slot_lay.addStretch(1)             # 같은 베이스라인(점수는 우측 VCenter)으로.
         slot_host.setFixedWidth(96)
         top.addWidget(slot_host)
 
@@ -314,6 +318,13 @@ class _MatchRow(QFrame):
 
         top.addStretch(1)
 
+        # 이미지 영역과 우측 점수 컬럼을 1px 헤어라인으로 분리 — 점수가 '떠 있지'
+        # 않고 눈금 컬럼으로 읽히게(C7). 변형별 색은 $row_divider.
+        rule = QFrame(self)
+        rule.setProperty("role", "vrule")
+        rule.setFixedWidth(1)
+        top.addWidget(rule)
+
         # ── 우측 고정 컬럼: 거리·점수(mono) → 판정 칩 → 컴팩트 토글 (A2). ──
         # metric 은 한 줄 — '허용범위 초과' 반복은 칩이 전담(삼중 중복 제거).
         self._metric_label = QLabel(self._format_score(match.score, verbose=False), self)
@@ -334,7 +345,9 @@ class _MatchRow(QFrame):
         self.btn_toggle = NeonButton(i18n.KO.BTN_NO_MATCH_COMPACT, role="ghost")
         self.btn_toggle.setProperty("compact", True)
         self.btn_toggle.setProperty("intent", "reject")
-        self.btn_toggle.setFixedSize(theme.PROFILE.toggle_w, theme.PROFILE.toggle_h)
+        # 오탭=오검증 — 세로 히트영역은 최소 44px 보장(행 높이가 썸네일이라 여유).
+        self.btn_toggle.setFixedSize(theme.PROFILE.toggle_w,
+                                     max(44, theme.PROFILE.toggle_h))
         self.btn_toggle.setToolTip(i18n.KO.BTN_MARK_NO_MATCH)
         self.btn_toggle.clicked.connect(
             lambda: self.toggle_requested.emit(self.match)
@@ -813,6 +826,14 @@ class MatchReviewPage(QWidget):
         self._list_layout.setSpacing(theme.PROFILE.row_gap)
         outer.addLayout(self._list_layout)
 
+        # '확인 필요만' 필터가 0건일 때의 빈 상태 — '멈춘 건지 다 끝난 건지'
+        # 헷갈리지 않게 명시(A3/C23).  전체 보기로 돌아가는 안내를 함께.
+        self._filter_empty = QLabel(i18n.KO.REVIEW_FILTER_EMPTY, host)
+        self._filter_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._filter_empty.setStyleSheet(f"color: {theme.MUTE}; padding: 36px;")
+        self._filter_empty.setVisible(False)
+        outer.addWidget(self._filter_empty)
+
         outer.addStretch(1)
         root.addWidget(scroll, stretch=1)
 
@@ -941,6 +962,11 @@ class MatchReviewPage(QWidget):
         checked = self.btn_filter.isChecked()
         for row in self._rows:
             row.setVisible((not checked) or row.state() != "ok")
+        # 필터가 켜졌는데 확인 필요 행이 0건이면 빈 상태를 노출(A3/C23).
+        visible = [r for r in self._rows if not r.isHidden()]
+        if hasattr(self, "_filter_empty"):
+            self._filter_empty.setVisible(checked and not visible and
+                                          bool(self._matches))
         # 현재 행이 숨겨졌으면 가장 가까운 보이는 행으로 이동.
         if (self._current_row is not None
                 and self._current_row.isHidden()):
