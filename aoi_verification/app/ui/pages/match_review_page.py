@@ -115,9 +115,27 @@ class _LazyThumb(QLabel):
 
     def paintEvent(self, event):  # noqa: N802
         super().paintEvent(event)
+        # 계측기 변형 — 모서리 레티클 틱(검사 부스 성격, C22 차별성). 절제된 강조.
+        if theme.PROFILE.thumb_reticle:
+            self._paint_reticle()
         if not self._image_loaded:
             self._image_loaded = True
             QTimer.singleShot(0, self._load)
+
+    def _paint_reticle(self) -> None:
+        from PyQt6.QtGui import QPainter, QPen
+        w, h = self.width(), self.height()
+        m, ln = 5, max(7, self._size // 12)     # 여백·틱 길이(크기 비례)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        pen = QPen(QColor(theme.ACCENT))
+        pen.setWidth(1)
+        p.setPen(pen)
+        for cx, sx in ((m, 1), (w - m, -1)):
+            for cy, sy in ((m, 1), (h - m, -1)):
+                p.drawLine(cx, cy, cx + sx * ln, cy)
+                p.drawLine(cx, cy, cx, cy + sy * ln)
+        p.end()
 
     def _load(self) -> None:
         try:
@@ -393,6 +411,12 @@ class _MatchRow(QFrame):
 
             outer.addWidget(self._runner_host)
             self._layout_runner_tiles()
+            # 허용 초과(실패) 행은 대안 후보를 처음부터 모두 펼친다 — 정밀 확인이
+            # 필요한 행에서 후보를 '더 보기' 뒤로 숨기지 않는다(현장 지적, C4).
+            # 일치(ok) 행은 그대로 첫 줄만 → 빠른 배치 확인 흐름 유지.
+            if self.state() == "over":
+                self._visible_lines = 99
+                self._layout_runner_tiles()
         else:
             self._runner_host = None
             self._runner_grid = None
@@ -802,6 +826,11 @@ class MatchReviewPage(QWidget):
         # 키보드 힌트 — 단축키를 kbd 칩으로 (프로즈 대신 '키'로 읽히게).
         root.addWidget(self._build_key_hint())
 
+        # 표/제도 시트 성격 변형(cleanroom·datum)만 상단 고정 컬럼 헤더를 얹어
+        # 행이 '떠 있는 카드' 가 아니라 '눈금 잡힌 표/시트' 로 읽히게 한다(C22 차별성).
+        if theme.PROFILE.list_header:
+            root.addWidget(self._build_list_header())
+
         # 매치 리스트 (세로 스크롤만). 가로 스크롤은 끄고 창 너비에 맞춰
         # 후보 타일이 줄바꿈 되도록 한다 (#4).
         scroll = QScrollArea(self)
@@ -860,6 +889,40 @@ class MatchReviewPage(QWidget):
             lbl.setStyleSheet(f"color: {theme.MUTE}; font-size: 11px;")
             lay.addWidget(lbl)
         lay.addStretch(1)
+        return host
+
+    def _build_list_header(self) -> QWidget:
+        """검토 리스트 컬럼 헤더 — 행의 고정 컬럼(슬롯·거리·판정)에 정렬해 표/시트로
+        읽히게(cleanroom 데이터테이블 / datum 제도 타이틀블록). 우측 클러스터는 행과
+        동일한 고정 폭(metric 96 · 칩 · 토글)으로 맞춰 헤더가 그 위에 정확히 얹힌다."""
+        p = theme.PROFILE
+        host = QFrame(self)
+        host.setProperty("role", "listHeader")
+        lay = QHBoxLayout(host)
+        lay.setContentsMargins(10, 5, 10, 5)
+        lay.setSpacing(12)
+
+        def head(text, *, width=None, align=Qt.AlignmentFlag.AlignLeft):
+            lb = QLabel(text, host)
+            lb.setProperty("role", "colHead")
+            if width is not None:
+                lb.setFixedWidth(width)
+            lb.setAlignment(align | Qt.AlignmentFlag.AlignVCenter)
+            return lb
+
+        lay.addWidget(head(i18n.KO.COL_SLOT, width=96))
+        lay.addWidget(head(i18n.KO.COL_IMAGES), 1)         # 이미지·후보 영역(가변)
+        rule = QFrame(host)
+        rule.setProperty("role", "vrule")
+        rule.setFixedWidth(1)
+        lay.addWidget(rule)
+        lay.addWidget(head(i18n.KO.COL_DISTANCE, width=96,
+                           align=Qt.AlignmentFlag.AlignRight))
+        lay.addWidget(head(i18n.KO.COL_VERDICT, width=p.chip_w,
+                           align=Qt.AlignmentFlag.AlignCenter))
+        spacer = QWidget(host)                             # 토글 열 위 빈 칸
+        spacer.setFixedWidth(p.toggle_w)
+        lay.addWidget(spacer)
         return host
 
     # ------------------------------------------------------------------

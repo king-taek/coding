@@ -51,6 +51,8 @@ class Profile:
     row_style: str = "card"         # "card" | "hairline"
     card_shadow: bool = True
     primary_glow: bool = True
+    list_header: bool = False       # 검토 리스트 상단 컬럼 헤더(표/제도 시트 성격)
+    thumb_reticle: bool = False     # 썸네일 모서리 레티클 틱(계측기 성격)
     chip_w: int = 74
     chip_h: int = 24
     toggle_w: int = 44
@@ -106,6 +108,7 @@ VARIANTS: dict[str, "Variant"] = {
         profile=Profile(
             radius=8, radius_sm=5, chip_radius=7, row_radius=8,
             card_pad=18, control_pad_h=14, font_caption=12,
+            thumb_reticle=True,          # 계측기 — 레티클 틱으로 '검사 부스' 성격
         ),
         scrim=(12, 13, 16, 200),
         shadow=(0, 0, 0, 140),
@@ -129,7 +132,7 @@ VARIANTS: dict[str, "Variant"] = {
             row_pad_v=14, row_gap=0, control_h=32, control_h_lg=40,
             control_pad_v=7, control_pad_h=14,
             chip_style="pill", row_style="hairline",
-            card_shadow=True, primary_glow=False,
+            card_shadow=True, primary_glow=False, list_header=True,
             chip_w=82, chip_h=22, toggle_w=44, toggle_h=36,
             thumb_default_px=120, focus_ring_px=2, motion_scale=0.85,
         ),
@@ -155,7 +158,7 @@ VARIANTS: dict[str, "Variant"] = {
             card_pad=20, row_pad_v=8, row_gap=0, control_h=32, control_h_lg=40,
             control_pad_v=6, control_pad_h=14, check_sz=16,
             chip_style="pill", row_style="hairline",
-            card_shadow=False, primary_glow=False,
+            card_shadow=False, primary_glow=False, list_header=True,
             chip_w=88, chip_h=20, toggle_w=52, toggle_h=30,
             thumb_default_px=118, focus_ring_px=2, motion_scale=0.8,
         ),

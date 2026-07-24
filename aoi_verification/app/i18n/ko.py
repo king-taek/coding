@@ -403,6 +403,11 @@ REVIEW_EMPTY_HINT = (
 REVIEW_FILTER_EMPTY = (
     "확인 필요한 항목이 없습니다.  ‘확인 필요만’ 을 다시 눌러 전체를 볼 수 있습니다."
 )
+# 검토 리스트 컬럼 헤더 (표/제도 시트 성격 변형에서만 노출).
+COL_SLOT = "슬롯"
+COL_IMAGES = "기준 · 검증 · 후보"
+COL_DISTANCE = "거리(µm)"
+COL_VERDICT = "판정"
 COMPARE_REF_CAPTION_FMT = "기준 — {name}"
 REVIEW_KEY_HINT = "↑↓ 줄 이동 · R 매치 없음 · Enter 검토 완료"
 # 키보드 힌트 kbd 칩 (키, 설명) 쌍
