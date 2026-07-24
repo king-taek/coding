@@ -8,7 +8,7 @@ from typing import Optional
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
-from PyQt6.QtWidgets import (QButtonGroup, QDoubleSpinBox,
+from PyQt6.QtWidgets import (QButtonGroup, QCheckBox, QDoubleSpinBox,
                               QFileDialog, QFormLayout,
                               QGroupBox, QHBoxLayout, QLabel, QLineEdit,
                               QMessageBox, QRadioButton, QScrollArea,
@@ -52,6 +52,7 @@ class SetupPage(QWidget):
 
     start_requested = pyqtSignal(object)             # SetupInput
     update_check_requested = pyqtSignal()            # '업데이트 확인' 버튼
+    variant_selected = pyqtSignal(str)               # 화면 스타일 변형 키
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -93,6 +94,9 @@ class SetupPage(QWidget):
         title = QLabel(i18n.KO.SETUP_TITLE, self)
         title.setProperty("role", "title")
         root.addWidget(title)
+
+        # 화면 스타일 스위처 (상단) — 누르면 그 디자인으로 즉시 전환.
+        root.addWidget(self._build_variant_switcher())
 
         subtitle = QLabel(i18n.KO.SETUP_HINT, self)
         subtitle.setProperty("role", "subtitle")
@@ -469,6 +473,49 @@ class SetupPage(QWidget):
     def _on_threshold_changed(self, v: int) -> None:
         self.threshold_label.setText(f"{v} %")
         _prefs.patch(threshold=v / 100.0)
+
+    # ------------------------------------------------------------------
+    def _build_variant_switcher(self) -> QWidget:
+        """상단 화면 스타일 스위처 — 변형 칩 + '모션 줄이기' 토글."""
+        host = QWidget(self)
+        row = QHBoxLayout(host)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(8)
+        lbl = QLabel(i18n.KO.VARIANT_SWITCH_LABEL, host)
+        lbl.setProperty("role", "muted")
+        row.addWidget(lbl)
+
+        self._variant_group = QButtonGroup(host)
+        self._variant_group.setExclusive(True)
+        self._variant_btns: dict[str, NeonButton] = {}
+        for key in theme.variant_keys():
+            b = NeonButton(theme.VARIANTS[key].label, role="ghost")
+            b.setProperty("variantChip", True)
+            b.setCheckable(True)
+            b.setMinimumHeight(30)
+            b.setToolTip(i18n.KO.VARIANT_SWITCH_TOOLTIP)
+            if key == theme.CURRENT_VARIANT:
+                b.setChecked(True)
+            b.clicked.connect(lambda _c, k=key: self.variant_selected.emit(k))
+            self._variant_group.addButton(b)
+            self._variant_btns[key] = b
+            row.addWidget(b)
+
+        row.addStretch(1)
+        self._reduce_chk = QCheckBox(i18n.KO.REDUCE_MOTION_LABEL, host)
+        self._reduce_chk.setToolTip(i18n.KO.REDUCE_MOTION_TOOLTIP)
+        try:
+            self._reduce_chk.setChecked(bool(_prefs.load().reduce_motion))
+        except Exception:
+            pass
+        self._reduce_chk.toggled.connect(self._on_reduce_motion)
+        row.addWidget(self._reduce_chk)
+        return host
+
+    def _on_reduce_motion(self, on: bool) -> None:
+        from .. import motion
+        _prefs.patch(reduce_motion=bool(on))
+        motion.set_reduce_motion(bool(on))
 
     # ------------------------------------------------------------------
     def _on_start(self) -> None:

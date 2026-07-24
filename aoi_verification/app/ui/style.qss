@@ -232,6 +232,14 @@ QPushButton[compact="true"]:focus {
     padding: 3px 5px;
 }
 
+/* 화면 스타일 스위처 칩 — 컴팩트, 선택 시 :checked 규칙(앰버 틴트) 상속. */
+QPushButton[variantChip="true"] {
+    padding: 4px 12px;
+    font-size: $font_caption_sz;
+    border-radius: $chip_radius;
+    font-weight: 600;
+}
+
 /* 키캡(kbd) 칩 — 단축키를 본문 텍스트가 아니라 '키'로 읽히게. */
 QLabel[role="kbd"] {
     background: $elev;
