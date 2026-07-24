@@ -1522,8 +1522,18 @@ class MainWindow(QMainWindow):
     # ==================================================================
     # Page switching
     # ==================================================================
-    def _show_page(self, w: QWidget) -> None:
+    def _show_page(self, w: QWidget, *, animate: bool = True) -> None:
+        """페이지 전환 — 나가는 화면 스냅샷 크로스페이드(ease-out)로 부드럽게.
+
+        offscreen/모션 줄이기·최초 표시·동일 페이지면 즉시 스왑."""
+        from . import motion
+        old = self._stack.currentWidget()
+        if old is w or old is None or not animate or not motion.enabled():
+            self._stack.setCurrentWidget(w)
+            return
+        pix = old.grab()                       # 스왑 전 스냅샷
         self._stack.setCurrentWidget(w)
+        motion.fade_out_snapshot(self._stack, pix)
 
     # ==================================================================
     # Auto-save

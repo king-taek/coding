@@ -909,9 +909,10 @@ class MatchReviewPage(QWidget):
             0, lambda: sb.setValue(max(0, self._row_top(row) - delta)))
 
     def _on_row_less(self, row) -> None:
-        """‘접기’ 후 — 접은 행의 사진들이 최상단에 오도록 스크롤 복귀 (#1/#6)."""
+        """‘접기’ 후 — 접은 행의 사진들이 최상단에 오도록 부드럽게 복귀 (#1/#6)."""
+        from .. import motion
         sb = self._scroll.verticalScrollBar()
-        QTimer.singleShot(0, lambda: sb.setValue(self._row_top(row)))
+        QTimer.singleShot(0, lambda: motion.animate_scroll(sb, self._row_top(row)))
 
     # ── 표시 필터 / 키보드 탐색 (표시·입력 계층 — 흐름/데이터 불변) ─────────
     def _apply_filter(self) -> None:
@@ -943,7 +944,9 @@ class MatchReviewPage(QWidget):
             row.setProperty("current", "true")
             row.style().unpolish(row)
             row.style().polish(row)
-            self._scroll.ensureWidgetVisible(row, 0, 40)
+            from .. import motion
+            motion.ensure_visible_animated(self._scroll, self._scroll_host, row,
+                                           margin=40)
 
     def _move_current(self, delta: int) -> None:
         rows = self._visible_rows()
