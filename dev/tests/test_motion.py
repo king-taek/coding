@@ -52,6 +52,25 @@ def test_dur_scales_with_profile(qapp):
     assert motion.dur(200) == 200       # instrument motion_scale 1.0
 
 
+def test_os_reduce_motion_returns_bool(qapp):
+    # 비 Windows(컨테이너)에선 OS 감지 실패 → False(앱 토글만). 예외 없이 bool.
+    assert isinstance(motion.os_reduce_motion(), bool)
+
+
+def test_transition_in_commits_immediately_when_disabled(qapp):
+    """헤드리스면 진입 애니 없이 즉시 on_commit(스택 전환) — 결정론."""
+    from PyQt6.QtWidgets import QWidget
+    from PyQt6.QtGui import QPixmap
+    container = QWidget()
+    pix = QPixmap(10, 10)
+    pix.fill()
+    done = {"v": False}
+    motion.transition_in(container, pix,
+                         on_commit=lambda: done.__setitem__("v", True))
+    assert done["v"] is True
+    container.deleteLater()
+
+
 def test_loading_overlay_instant_when_disabled(qapp):
     from aoi_verification.app.ui.widgets.loading_overlay import LoadingOverlay
     from PyQt6.QtWidgets import QWidget

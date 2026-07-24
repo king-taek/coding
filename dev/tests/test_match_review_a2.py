@@ -217,3 +217,58 @@ def test_neon_button_glow_only_primary(qapp):
     assert b1.graphicsEffect() is None
     for b in (b1, b2, b3):
         b.deleteLater()
+
+
+# ── 라운드1 개선 회귀 방지 ───────────────────────────────────────────────────
+def test_filter_empty_state_when_no_needs_check(qapp):
+    """'확인 필요만' 이 0건이면 빈 상태 안내가 노출된다(A3/C23)."""
+    from aoi_verification.app.ui.pages.match_review_page import MatchReviewPage
+    page = MatchReviewPage()
+    # 전부 일치(ok) — 필터를 켜면 남는 행이 없다.
+    ms = [_m("S1", 0.9), _m("S2", 0.8), _m("S3", 0.85)]
+    page.load_state(ms, coord_mode=True, tolerance=20.0)
+    assert page._filter_empty.isHidden()               # 평소엔 숨김
+    page.btn_filter.setChecked(True)
+    assert not page._filter_empty.isHidden()            # 0건 → 빈 상태 노출
+    page.btn_filter.setChecked(False)
+    assert page._filter_empty.isHidden()                # 해제 → 다시 숨김
+    page.deleteLater()
+
+
+def test_list_header_only_for_table_variants(qapp):
+    """cleanroom·datum(표/제도) 만 상단 컬럼 헤더, 카드 변형엔 없음(C22)."""
+    from PyQt6.QtWidgets import QFrame
+    from aoi_verification.app.ui import theme
+    from aoi_verification.app.ui.pages.match_review_page import MatchReviewPage
+
+    def has_header(page):
+        return any(f.property("role") == "listHeader"
+                   for f in page.findChildren(QFrame))
+    try:
+        for key in ("cleanroom", "datum"):
+            theme.set_variant(key)
+            p = MatchReviewPage()
+            assert has_header(p), f"{key}: 컬럼 헤더 없음"
+            p.deleteLater()
+        for key in ("instrument", "clarity", "patina"):
+            theme.set_variant(key)
+            p = MatchReviewPage()
+            assert not has_header(p), f"{key}: 카드 변형에 헤더 있음"
+            p.deleteLater()
+    finally:
+        theme.set_variant("instrument")
+
+
+def test_over_row_auto_expands_candidates(qapp):
+    """허용 초과(실패) 행은 대안 후보를 처음부터 모두 펼친다(현장 C4)."""
+    from aoi_verification.app.models.slot import ImageItem
+    from aoi_verification.app.ui.pages.match_review_page import _MatchRow
+    runners = [(ImageItem(slot="S1", path=Path(f"/tmp/c{i}.jpg"), side="val"),
+                0.5 - i * 0.05) for i in range(6)]
+    over = _MatchRow(_m("S1", -0.5), runners_up=runners, thumb_px=140,
+                     coord_mode=True, tolerance=20.0)
+    ok = _MatchRow(_m("S2", 0.9), runners_up=runners, thumb_px=140,
+                   coord_mode=True, tolerance=20.0)
+    assert over._visible_lines > 1          # 실패 행은 펼침
+    assert ok._visible_lines == 1           # 일치 행은 첫 줄만(빠른 확인)
+    over.deleteLater(); ok.deleteLater()

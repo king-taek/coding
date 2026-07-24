@@ -135,3 +135,37 @@ def test_instrument_profile_pins_baseline():
     assert (p.chip_w, p.chip_h, p.toggle_w, p.toggle_h) == (74, 24, 44, 40)
     assert (p.page_margin, p.section_gap) == (40, 20)
     assert p.chip_style == "pill" and p.row_style == "card"
+
+
+def test_thumb_frame_token_present_every_variant():
+    """썸네일 프레임 색(C1 dark-on-dark 보완)이 전 변형 토큰/전역에 존재."""
+    for key in theme.variant_keys():
+        theme.set_variant(key)
+        assert theme.TOKENS.get("thumb_frame"), f"{key}: thumb_frame 토큰 없음"
+        assert theme.THUMB_FRAME, f"{key}: THUMB_FRAME 전역 없음"
+
+
+def test_structural_signature_flags_present():
+    """차별성 구조(C22): 표/제도 변형은 컬럼 헤더, 계측기는 레티클 틱 — 색만
+    바꾼 게 아니라는 구조 플래그가 실제로 켜져 있어야 한다."""
+    headers = {k for k in theme.variant_keys()
+               if theme.VARIANTS[k].profile.list_header}
+    reticle = {k for k in theme.variant_keys()
+               if theme.VARIANTS[k].profile.thumb_reticle}
+    assert {"cleanroom", "datum"} <= headers
+    assert "instrument" in reticle
+
+
+def test_all_functional_pairs_have_headroom():
+    """라운드1 목표 — 전 기능 색상쌍이 AA 여유(≥5.0)로 상향됐는지(포커스는 ≥4.5)."""
+    fails = []
+    for key in theme.variant_keys():
+        theme.set_variant(key)
+        c = theme.VARIANTS[key].colors
+        for name, fg, mn in (("mute", c["mute"], 5.0), ("accent", c["accent"], 5.0),
+                             ("pass", c["pass"], 5.0), ("danger", c["danger"], 5.0),
+                             ("focus", c["focus"], 4.5)):
+            r = _ratio(fg, c["panel"])
+            if r < mn:
+                fails.append(f"{key} {name}/panel {r:.2f} < {mn}")
+    assert not fails, "여유 미달:\n" + "\n".join(fails)
