@@ -53,6 +53,9 @@ class Profile:
     primary_glow: bool = True
     list_header: bool = False       # 검토 리스트 상단 컬럼 헤더(표/제도 시트 성격)
     thumb_reticle: bool = False     # 썸네일 모서리 레티클 틱(계측기 성격)
+    zebra_rows: bool = False        # 홀수 행 지브라 띠(계측 데이터테이블 성격)
+    score_hero: bool = False        # 거리 수치를 크게 — '판독 우선' 대형 변형 성격
+    compact_narrow_px: int = 0      # 좁은 창(<900)에서 썸네일 상한(0=미적용)
     chip_w: int = 74
     chip_h: int = 24
     toggle_w: int = 44
@@ -133,6 +136,7 @@ VARIANTS: dict[str, "Variant"] = {
             control_pad_v=7, control_pad_h=14,
             chip_style="pill", row_style="hairline",
             card_shadow=True, primary_glow=False, list_header=True,
+            zebra_rows=True,             # 계측 벤치 — 지브라 띠로 표 판독 강화
             chip_w=82, chip_h=22, toggle_w=44, toggle_h=36,
             thumb_default_px=120, focus_ring_px=2, motion_scale=0.85,
         ),
@@ -185,6 +189,8 @@ VARIANTS: dict[str, "Variant"] = {
             control_pad_v=12, control_pad_h=22, check_sz=22,
             chip_style="pill", row_style="card",
             card_shadow=True, primary_glow=False,
+            score_hero=True,             # 판독 우선 — 거리 수치를 크게(고유 문양)
+            compact_narrow_px=96,        # 800px 라인PC 에서 썸네일 상한(밀도 확보)
             chip_w=88, chip_h=30, toggle_w=48, toggle_h=48,
             # 접근성 대형 변형은 '차분한' 모션이 어울린다 — 가장 빠른(0.6) 대신
             # 넉넉하게(1.1) 하여 전환/로딩이 급하지 않게(모션 디렉터 지적).
@@ -200,9 +206,9 @@ VARIANTS: dict[str, "Variant"] = {
             "bg": "#123A38", "panel": "#184843", "elev": "#1F534B",
             "line": "#2C5B54", "line2": "#3E706A",
             "ink": "#F4EDE2", "ink2": "#D9CFC0", "mute": "#CFC5B6",
-            "accent": "#EAAC70", "accent_hover": "#F2BA82",
-            "accent_pressed": "#D0965A", "on_accent": "#2A160B",
-            "pass": "#6EDB9C", "danger": "#FF98A2", "warn": "#F2B24A",
+            "accent": "#F2BC84", "accent_hover": "#F7C994",
+            "accent_pressed": "#DCA466", "on_accent": "#2A160B",
+            "pass": "#6EDB9C", "danger": "#FFB0B4", "warn": "#F2B24A",
             "focus": "#FFCF7A", "thumb_frame": "#7C9A92",
         },
         profile=Profile(
@@ -298,6 +304,11 @@ def _derive_tokens(v: "Variant") -> dict:
     else:
         tok.update({"row_bg": c["panel"], "row_border": c["line"],
                     "row_divider": c["line"]})
+    # 점수 컬럼 눈금 — ink 반투명이라 밝은/어두운 패널 어디서나 또렷(자기적응). 헤더 없는
+    # 카드 변형(instrument 등)에서도 점수가 '떠 있지' 않고 눈금 컬럼으로 읽히게(C7).
+    tok["score_rule"] = _tint(c["ink"], 55)
+    # 지브라(계측 벤치 성격) 행 배경 — cleanroom 전용, 아주 옅게.
+    tok["zebra_bg"] = _tint(c["ink"], 8)
     return tok
 
 

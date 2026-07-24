@@ -695,8 +695,11 @@ class _MatchRow(QFrame):
             self._chip.setProperty("chip", "over" if st == "over" else "none")
         self.setProperty("rowState", st if st != "ok" else "")
         metric_color = theme.DANGER if st == "over" else theme.INK
+        # 판독 우선(clarity) 변형은 거리 수치를 크게 — 각 행의 '헤드라인' 이 되게(고유 문양).
+        hero = theme.PROFILE.score_hero
         self._metric_label.setStyleSheet(
-            f"color: {metric_color}; font-weight: 700; font-size: 13px;"
+            f"color: {metric_color}; font-weight: {'800' if hero else '700'}; "
+            f"font-size: {'20' if hero else '13'}px;"
         )
         for w in (self._chip, self):
             w.style().unpolish(w)
@@ -988,6 +991,7 @@ class MatchReviewPage(QWidget):
                 )
             for m in ordered:
                 self._append_row(m)
+        self._apply_zebra()
         self._update_summary()
         # 검토 화면이 새로 열릴 때마다 스크롤을 항상 최상단으로 (이전 세션의
         # 스크롤 위치가 남지 않도록). 레이아웃 확정 후 적용.
@@ -1000,9 +1004,30 @@ class MatchReviewPage(QWidget):
         self._resize_timer.start(150)
 
     def _apply_thumb_size(self) -> None:
-        """슬라이더 변경 적용 (#2) — 행 상태를 보존한 채 썸네일 크기만 갱신."""
+        """슬라이더 변경 적용 (#2) — 행 상태를 보존한 채 썸네일 크기만 갱신.
+
+        좁은 창(<900, 라인PC 800×600)에서 대형 변형은 썸네일을 상한으로 낮춰
+        화면당 행 수를 확보한다(현장 C15). 창을 넓히면 원래 크기로 복귀."""
+        target = self._thumb_px
+        cap = theme.PROFILE.compact_narrow_px
+        if cap and self._scroll.viewport().width() < 900:
+            target = min(target, cap)
         for row in self._rows:
-            row.set_thumb_size(self._thumb_px)
+            row.set_thumb_size(target)
+
+    # ------------------------------------------------------------------
+    def _apply_zebra(self) -> None:
+        """계측 벤치(cleanroom) 지브라 띠 — 레이아웃 순서 홀수 행에 옅은 배경.
+
+        예외(초과/매치 없음) 행은 자체 상태 배경을 유지하도록 지브라를 걸지 않는다."""
+        if not theme.PROFILE.zebra_rows:
+            return
+        ordered = sorted(self._rows, key=lambda r: self._list_layout.indexOf(r))
+        for i, r in enumerate(ordered):
+            stripe = (i % 2 == 1) and r.state() == "ok"
+            r.setProperty("zebra", "on" if stripe else "")
+            r.style().unpolish(r)
+            r.style().polish(r)
 
     # ------------------------------------------------------------------
     def _row_top(self, row) -> int:
@@ -1171,6 +1196,7 @@ class MatchReviewPage(QWidget):
             if self._current_row is old_row:
                 self._current_row = None
                 self._set_current(new_row)
+        self._apply_zebra()
         self._update_summary()
         self._apply_filter()
 
@@ -1220,6 +1246,7 @@ class MatchReviewPage(QWidget):
         if row is not None:
             # 행은 제자리에 두고 빨간 테두리 강조만 토글한다 (#1).
             row.set_unmatched(now_unmatched)
+        self._apply_zebra()             # 상태 변화 → 지브라 재적용(예외 행 제외)
         self._update_summary()
         # 필터가 켜져 있으면 상태 변화에 따라 표시 여부 재적용.
         self._apply_filter()

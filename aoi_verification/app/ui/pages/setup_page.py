@@ -73,10 +73,13 @@ class SetupPage(QWidget):
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         # QScrollArea 자체의 배경/보더가 페이지 배경 위에 겹쳐 보이지 않게.
+        # ★ 뷰포트 배경은 '맨 선언(bare)' 스타일시트로 주면 안 된다 — 자식으로 캐스케이드돼
+        #   내부 스위처 칩의 :checked 배경(채움)을 덮어써 '빈 박스'로 렌더된다. 뷰포트를
+        #   objectName 으로 스코프해 자식에 새지 않게 한다(스위처 채움 버그 방지).
         scroll.setStyleSheet(
             "QScrollArea { background: transparent; border: none; }"
+            "QScrollArea > QWidget#qt_scrollarea_viewport { background: transparent; }"
         )
-        scroll.viewport().setStyleSheet("background: transparent;")
         outer.addWidget(scroll)
 
         host = QWidget()
