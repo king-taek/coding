@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QPropertyAnimation, Qt
+from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, Qt
 from PyQt6.QtGui import QColor
-from PyQt6.QtWidgets import QGraphicsDropShadowEffect, QPushButton
+from PyQt6.QtWidgets import (QGraphicsDropShadowEffect, QGraphicsOpacityEffect,
+                             QPushButton)
 
 from .. import theme
 
@@ -21,6 +22,7 @@ class NeonButton(QPushButton):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._glow_eff = None
         self._press_anim = None
+        self._press_opacity_eff = None
         self._apply_glow(role)
         self.setMinimumHeight(theme.PROFILE.control_h)
 
@@ -51,17 +53,38 @@ class NeonButton(QPushButton):
         anim = QPropertyAnimation(self._glow_eff, b"blurRadius", self)
         anim.setEndValue(target)
         anim.setDuration(motion.dur(120))
-        from PyQt6.QtCore import QEasingCurve
+        anim.setEasingCurve(QEasingCurve.Type.OutQuart)
+        anim.start()
+        self._press_anim = anim
+
+    def _press_feedback(self, pressed: bool) -> None:
+        """프레스 촉각 피드백 — 글로우 변형은 blur 트윈, 그 외는 미세 불투명도 딥(C13)."""
+        from .. import motion
+        if not motion.enabled():
+            return
+        if self._glow_eff is not None:
+            self._tween_glow(6 if pressed else 14)
+            return
+        # 글로우 없는 변형: opacity 1.0↔0.92 딥(레이아웃 불변, QSS 색은 유지).
+        if self._press_opacity_eff is None:
+            self._press_opacity_eff = QGraphicsOpacityEffect(self)
+            self._press_opacity_eff.setOpacity(1.0)
+            self.setGraphicsEffect(self._press_opacity_eff)
+        if self._press_anim is not None:
+            self._press_anim.stop()
+        anim = QPropertyAnimation(self._press_opacity_eff, b"opacity", self)
+        anim.setEndValue(0.92 if pressed else 1.0)
+        anim.setDuration(motion.dur(90))
         anim.setEasingCurve(QEasingCurve.Type.OutQuart)
         anim.start()
         self._press_anim = anim
 
     def mousePressEvent(self, e):  # noqa: N802
-        self._tween_glow(6)
+        self._press_feedback(True)
         super().mousePressEvent(e)
 
     def mouseReleaseEvent(self, e):  # noqa: N802
-        self._tween_glow(14)
+        self._press_feedback(False)
         super().mouseReleaseEvent(e)
 
     # role 변경 시 글로우 색상 재적용 -----------------------------------

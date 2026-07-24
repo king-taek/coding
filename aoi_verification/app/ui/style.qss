@@ -232,12 +232,18 @@ QPushButton[compact="true"]:focus {
     padding: 3px 5px;
 }
 
-/* 화면 스타일 스위처 칩 — 컴팩트, 선택 시 :checked 규칙(앰버 틴트) 상속. */
+/* 화면 스타일 스위처 칩 — 편안한 타깃, 선택 시 '채운' 강조로 현재 스타일이 한눈에(C24). */
 QPushButton[variantChip="true"] {
-    padding: 4px 12px;
+    padding: 7px 14px;
     font-size: $font_caption_sz;
     border-radius: $chip_radius;
     font-weight: 600;
+}
+QPushButton[variantChip="true"]:checked {
+    background-color: $accent;
+    color: $on_accent;
+    border-color: $accent;
+    font-weight: 700;
 }
 
 /* 키캡(kbd) 칩 — 단축키를 본문 텍스트가 아니라 '키'로 읽히게. */

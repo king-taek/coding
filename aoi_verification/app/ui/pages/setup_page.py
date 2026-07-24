@@ -492,7 +492,7 @@ class SetupPage(QWidget):
             b = NeonButton(theme.VARIANTS[key].label, role="ghost")
             b.setProperty("variantChip", True)
             b.setCheckable(True)
-            b.setMinimumHeight(30)
+            b.setMinimumHeight(38)             # ≥편안한 터치 타깃(C24)
             b.setToolTip(i18n.KO.VARIANT_SWITCH_TOOLTIP)
             if key == theme.CURRENT_VARIANT:
                 b.setChecked(True)

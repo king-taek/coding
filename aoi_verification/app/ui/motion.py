@@ -27,6 +27,7 @@ EASE_LARGE = QEasingCurve.Type.OutExpo        # 큰 이동
 EASE_LEGACY = QEasingCurve.Type.InOutCubic    # 접기류(기존)
 
 _reduce_motion = False
+_os_reduce_cache: bool | None = None
 
 
 def set_reduce_motion(flag: bool) -> None:
@@ -38,11 +39,36 @@ def reduce_motion() -> bool:
     return _reduce_motion
 
 
+def os_reduce_motion() -> bool:
+    """OS 의 '동작 줄이기/애니메이션 표시 끄기' 설정을 최선 노력으로 감지(1회 캐시).
+
+    Windows: SPI_GETCLIENTAREAANIMATION(=False 면 애니메이션 끔). 그 외/실패 시 False
+    (앱 토글에만 의존). 접근성 포워드 — 사용자가 OS 에서 끄면 앱도 자동으로 따른다."""
+    global _os_reduce_cache
+    if _os_reduce_cache is not None:
+        return _os_reduce_cache
+    result = False
+    try:
+        import ctypes
+        SPI_GETCLIENTAREAANIMATION = 0x1042
+        enabled_flag = ctypes.c_int(1)
+        ok = ctypes.windll.user32.SystemParametersInfoW(  # type: ignore[attr-defined]
+            SPI_GETCLIENTAREAANIMATION, 0, ctypes.byref(enabled_flag), 0)
+        if ok:
+            result = (enabled_flag.value == 0)     # 애니메이션 꺼짐 → 줄이기 True
+    except Exception:
+        result = False                             # 비 Windows·실패 → 앱 토글만
+    _os_reduce_cache = result
+    return result
+
+
 def enabled() -> bool:
-    """헤드리스(offscreen)·모션 줄이기 면 False → 모든 헬퍼가 즉시 적용."""
+    """헤드리스(offscreen)·모션 줄이기·OS 동작 줄이기 면 False → 헬퍼 즉시 적용."""
     if os.environ.get("QT_QPA_PLATFORM", "") == "offscreen":
         return False
-    return not _reduce_motion
+    if _reduce_motion:
+        return False
+    return not os_reduce_motion()
 
 
 def dur(ms: int) -> int:
@@ -94,6 +120,65 @@ def fade_out_snapshot(container, pixmap, *, duration: int = DUR_BASE,
 
     anim.valueChanged.connect(_step)
     anim.finished.connect(overlay.deleteLater)
+    anim.start(QVariantAnimation.DeletionPolicy.DeleteWhenStopped)
+
+
+def transition_in(container, new_pixmap, *, forward: bool = True,
+                  duration: int = DUR_BASE, slide_px: int = 20,
+                  on_commit=None) -> None:
+    """들어오는 화면 스냅샷을 방향성(앞=우→, 뒤=좌→) 슬라이드+페이드로 진입시킨다.
+
+    현재(나가는) 라이브 화면은 아래에 그대로 두고, 새 화면 스냅샷을 위에서
+    불투명도 0→1 + 오프셋→0 으로 안착시킨다(들어오는 안무 = C8 지적 보완).  안착
+    끝에 ``on_commit`` 으로 스택을 실제 새 화면으로 전환하고 오버레이 제거(무플래시).
+    offscreen/reduced 면 즉시 ``on_commit`` 만."""
+    from PyQt6.QtCore import Qt
+    committed = {"done": False}
+
+    def _commit():
+        if not committed["done"]:
+            committed["done"] = True
+            if on_commit is not None:
+                on_commit()
+
+    if not enabled() or new_pixmap is None or new_pixmap.isNull():
+        _commit()
+        return
+    prev = container.findChild(QLabel, "_pageFadeOverlay")
+    if prev is not None:
+        prev.deleteLater()
+
+    overlay = QLabel(container)
+    overlay.setObjectName("_pageFadeOverlay")
+    overlay.setPixmap(new_pixmap)
+    overlay.setScaledContents(False)
+    overlay.setGeometry(container.rect())
+    overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+    eff = QGraphicsOpacityEffect(overlay)
+    eff.setOpacity(0.0)
+    overlay.setGraphicsEffect(eff)
+    dx = slide_px if forward else -slide_px
+    overlay.move(dx, 0)
+    overlay.show()
+    overlay.raise_()
+
+    anim = QVariantAnimation(overlay)
+    anim.setStartValue(0.0)
+    anim.setEndValue(1.0)
+    anim.setDuration(dur(duration))
+    anim.setEasingCurve(EASE_PRIMARY)
+
+    def _step(t):
+        t = float(t)
+        eff.setOpacity(t)
+        overlay.move(int(dx * (1.0 - t)), 0)
+
+    def _finish():
+        _commit()                          # 라이브 새 화면으로 전환 후
+        overlay.deleteLater()              # 동일 프레임 스냅샷 제거(무플래시)
+
+    anim.valueChanged.connect(_step)
+    anim.finished.connect(_finish)
     anim.start(QVariantAnimation.DeletionPolicy.DeleteWhenStopped)
 
 

@@ -8,8 +8,8 @@ CLAUDE.md 로딩 계약 유지: set_progress(done,total,msg), total>0 결정형(
 
 from __future__ import annotations
 
-from PyQt6.QtCore import (QEasingCurve, QEvent, QRect, QSize, Qt, QTimer,
-                          QVariantAnimation, pyqtSignal)
+from PyQt6.QtCore import (QEasingCurve, QElapsedTimer, QEvent, QRect, QSize, Qt,
+                          QTimer, QVariantAnimation, pyqtSignal)
 from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import (QGraphicsOpacityEffect, QLabel, QProgressBar,
                              QPushButton, QVBoxLayout, QWidget)
@@ -33,8 +33,13 @@ class _SpinnerDot(QWidget):
             self._timer.start(16)                       # ~60fps
 
     def _tick(self) -> None:
-        self._angle = (self._angle + 4.2) % 360
-        self._phase = (self._phase + 0.02) % 1.0
+        # 회전 속도를 변형 모션 강도로 스케일(높을수록 느리고 웅장) — C12 보완.
+        try:
+            scale = max(0.3, float(theme.PROFILE.motion_scale))
+        except Exception:
+            scale = 1.0
+        self._angle = (self._angle + 4.2 / scale) % 360
+        self._phase = (self._phase + 0.02 / scale) % 1.0
         self.update()
 
     def paintEvent(self, event) -> None:  # noqa: N802
@@ -79,8 +84,8 @@ class _BusyStripe(QWidget):
         self._anim = QVariantAnimation(self)
         self._anim.setStartValue(0.0)
         self._anim.setEndValue(1.0)
-        self._anim.setDuration(1100)
-        self._anim.setEasingCurve(QEasingCurve.Type.InOutQuart)
+        # 연속 스윕(등속) — 트랙 양끝에서 감속하는 '숨쉬기' 대신 일정 속도(C11).
+        self._anim.setEasingCurve(QEasingCurve.Type.Linear)
         self._anim.setLoopCount(-1)
         self._anim.valueChanged.connect(self._on_phase)
 
@@ -90,6 +95,8 @@ class _BusyStripe(QWidget):
 
     def start(self) -> None:
         if motion.enabled():
+            self._anim.stop()
+            self._anim.setDuration(motion.dur(1100))   # 변형 모션 강도 반영
             self._anim.start()
         self.update()
 
@@ -240,6 +247,11 @@ class LoadingOverlay(QWidget):
         self._fade_anim.valueChanged.connect(self._on_fade)
         self._fade_anim.finished.connect(self._on_fade_done)
 
+        # 최소 표시 시간 가드 — 초단타 작업이 '깜빡'하지 않게(C9).
+        self._shown_elapsed = QElapsedTimer()
+        self._show_token = 0
+        self._hide_pending = False
+
         self.hide()
         parent.installEventFilter(self)
 
@@ -262,28 +274,49 @@ class LoadingOverlay(QWidget):
         self.raise_()
         self.show()
         self._hiding = False
+        self._hide_pending = False
+        self._show_token += 1
+        self._shown_elapsed.restart()
         self._fade_anim.stop()
         if motion.enabled():
             self._fade_anim.setStartValue(self._fade)
             self._fade_anim.setEndValue(1.0)
-            self._fade_anim.setDuration(motion.dur(160))   # 등장: 부드럽게
+            # 등장: 부드럽게 — 빠른 변형도 하한 130ms 로 '컷' 방지(C9).
+            self._fade_anim.setDuration(max(130, motion.dur(160)))
             self._fade_anim.start()
         else:
             self._on_fade(1.0)
+
+    MIN_DISPLAY_MS = 350
 
     def hide_overlay(self) -> None:
         if not self.isVisible():
             self._finish_hide()
             return
-        if motion.enabled():
-            self._hiding = True
-            self._fade_anim.stop()
-            self._fade_anim.setStartValue(self._fade)
-            self._fade_anim.setEndValue(0.0)
-            self._fade_anim.setDuration(motion.dur(120))   # 퇴장: 더 짧게
-            self._fade_anim.start()
-        else:
+        if not motion.enabled():
             self._finish_hide()
+            return
+        remaining = self.MIN_DISPLAY_MS - self._shown_elapsed.elapsed()
+        token = self._show_token
+        if remaining > 0:                      # 아직 최소 표시 시간 전 → 지연 퇴장
+            if not self._hide_pending:
+                self._hide_pending = True
+                QTimer.singleShot(int(remaining),
+                                  lambda t=token: self._begin_fade_out(t))
+            return
+        self._begin_fade_out(token)
+
+    def _begin_fade_out(self, token: int) -> None:
+        self._hide_pending = False
+        if token != self._show_token or not self.isVisible():
+            return                             # 그 사이 새 표시가 시작됨 → 무시
+        self._hiding = True
+        self._fade_anim.stop()
+        self._fade_anim.setStartValue(self._fade)
+        self._fade_anim.setEndValue(0.0)
+        # 퇴장: 입장보다 짧게, 단 하한 110ms 로 '컷' 방지.
+        self._fade_anim.setDuration(max(110, motion.dur(120)))
+        self._fade_anim.start()
 
     def _finish_hide(self) -> None:
         self.hide()

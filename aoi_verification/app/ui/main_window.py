@@ -1536,18 +1536,26 @@ class MainWindow(QMainWindow):
             f"color: {theme.PASS}; padding: 0 8px; font-weight: 600;")
 
     def _on_variant_selected(self, name: str) -> None:
-        """셋업 상단 스위처 — 화면 스타일 즉시 전환(세션 시작 전에만 허용)."""
+        """셋업 상단 스위처 — 화면 스타일 즉시 전환(세션 시작 전에만 허용).
+
+        전체 정체성이 바뀌는 만큼 하드컷 대신 이전 화면 스냅샷을 위에 얹어
+        페이드아웃하는 크로스페이드로(=C24 지적 보완)."""
         from . import theme as _theme
+        from . import motion
         if name == _theme.CURRENT_VARIANT or name not in _theme.VARIANTS:
             return
         if self._phase != PHASE_NONE:          # 이중 가드 — 스위처는 셋업에만 있음
             return
+        old_pix = self._stack.grab() if motion.enabled() else None
         _prefs.patch(ui_variant=name)
         _theme.set_variant(name)
         app = QApplication.instance()
         if app is not None:
             _theme.apply_to_app(app)           # QSS 먼저 — 새 위젯 1회 polish
         self._rebuild_pages()
+        if old_pix is not None:                # 새 정체성 위로 옛 화면 페이드아웃
+            motion.fade_out_snapshot(self._stack, old_pix,
+                                     duration=motion.DUR_SLOW, slide_px=0)
 
     def _rebuild_pages(self) -> None:
         """페이지 5개를 파괴 후 재구축(인라인 f-string 색이 생성 시점에 박히므로).
@@ -1568,18 +1576,32 @@ class MainWindow(QMainWindow):
         self._show_page(self._setup_page, animate=False)
 
     # ==================================================================
-    def _show_page(self, w: QWidget, *, animate: bool = True) -> None:
-        """페이지 전환 — 나가는 화면 스냅샷 크로스페이드(ease-out)로 부드럽게.
+    def _page_order(self, w: QWidget) -> int:
+        """흐름 순서(셋업→선별→매칭→검토→결과) — 전환 방향 결정용."""
+        order = (self._setup_page, self._select_page, self._match_page,
+                 self._match_review_page, self._result_page)
+        try:
+            return order.index(w)
+        except ValueError:
+            return 0
 
+    def _show_page(self, w: QWidget, *, animate: bool = True) -> None:
+        """페이지 전환 — 들어오는 화면이 흐름 방향으로 슬라이드+페이드 진입(ease-out).
+
+        나가는 화면은 아래에 두고 새 화면 스냅샷을 안착시킨 뒤 실제 전환(무플래시).
         offscreen/모션 줄이기·최초 표시·동일 페이지면 즉시 스왑."""
         from . import motion
         old = self._stack.currentWidget()
         if old is w or old is None or not animate or not motion.enabled():
             self._stack.setCurrentWidget(w)
             return
-        pix = old.grab()                       # 스왑 전 스냅샷
-        self._stack.setCurrentWidget(w)
-        motion.fade_out_snapshot(self._stack, pix)
+        forward = self._page_order(w) >= self._page_order(old)
+        self._stack.setCurrentWidget(w)        # 레이아웃 확정 후 스냅샷
+        new_pix = w.grab()
+        self._stack.setCurrentWidget(old)      # 리페인트 전 원복(사용자엔 불가시)
+        motion.transition_in(
+            self._stack, new_pix, forward=forward,
+            on_commit=lambda: self._stack.setCurrentWidget(w))
 
     # ==================================================================
     # Auto-save
