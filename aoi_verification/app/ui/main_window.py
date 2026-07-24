@@ -147,33 +147,8 @@ class MainWindow(QMainWindow):
         self._update_memory_label()
         self._update_usage_label()
 
-        # 페이지 ---------------------------------------------------------
-        self._setup_page = SetupPage()
-        self._select_page = SelectPage()
-        self._match_page = MatchPage()
-        self._result_page = ResultPage()
-        # 자동 매치 결과 검토 페이지 (auto_all / user_select 모드 공용).
-        from .pages.match_review_page import MatchReviewPage
-        self._match_review_page = MatchReviewPage()
-
-        for w in (self._setup_page, self._select_page,
-                  self._match_page, self._result_page,
-                  self._match_review_page):
-            self._stack.addWidget(w)
-
-        # 시그널 ---------------------------------------------------------
-        self._setup_page.start_requested.connect(self._on_start)
-        self._setup_page.update_check_requested.connect(self._manual_update_check)
-        self._select_page.finished.connect(self._on_select_finished)
-        self._select_page.state_changed.connect(self._schedule_autosave)
-        self._match_page.match_confirmed.connect(self._on_match_confirmed)
-        self._match_page.match_undone.connect(self._on_match_undone)
-        self._match_page.skipped_changed.connect(self._schedule_autosave)
-        self._match_page.finished.connect(self._on_match_finished)
-        self._match_page.cancelled.connect(self._on_match_cancelled)
-        self._result_page.new_session_requested.connect(self._new_session)
-        # 매치 검토 → 결과 페이지
-        self._match_review_page.finished.connect(self._on_match_review_done)
+        # 페이지 — 생성+스택추가+시그널 배선을 _build_pages 단일 출처로 (재구축용).
+        self._build_pages()
 
         # 자동 저장 타이머 -----------------------------------------------
         self._autosave_timer = QTimer(self)
@@ -1521,6 +1496,77 @@ class MainWindow(QMainWindow):
 
     # ==================================================================
     # Page switching
+    # ==================================================================
+    def _build_pages(self) -> None:
+        """5개 페이지 생성 + 스택 추가 + 시그널 배선 (단일 출처 — 재구축 재사용)."""
+        from .pages.match_review_page import MatchReviewPage
+        self._setup_page = SetupPage()
+        self._select_page = SelectPage()
+        self._match_page = MatchPage()
+        self._result_page = ResultPage()
+        self._match_review_page = MatchReviewPage()
+
+        for w in (self._setup_page, self._select_page,
+                  self._match_page, self._result_page,
+                  self._match_review_page):
+            self._stack.addWidget(w)
+
+        self._setup_page.start_requested.connect(self._on_start)
+        self._setup_page.update_check_requested.connect(self._manual_update_check)
+        # 화면 스타일 스위처(셋업 상단) → 라이브 전환.
+        if hasattr(self._setup_page, "variant_selected"):
+            self._setup_page.variant_selected.connect(self._on_variant_selected)
+        self._select_page.finished.connect(self._on_select_finished)
+        self._select_page.state_changed.connect(self._schedule_autosave)
+        self._match_page.match_confirmed.connect(self._on_match_confirmed)
+        self._match_page.match_undone.connect(self._on_match_undone)
+        self._match_page.skipped_changed.connect(self._schedule_autosave)
+        self._match_page.finished.connect(self._on_match_finished)
+        self._match_page.cancelled.connect(self._on_match_cancelled)
+        self._result_page.new_session_requested.connect(self._new_session)
+        self._match_review_page.finished.connect(self._on_match_review_done)
+
+    def _apply_statusbar_theme(self) -> None:
+        """상태바 라벨 색을 현재 변형 토큰으로 재적용(전환 시 페이지 밖 위젯)."""
+        self._credit_label.setStyleSheet(
+            f"color: {theme.MUTE}; padding: 0 8px; font-weight: 600;")
+        self._device_label.setStyleSheet(
+            f"color: {theme.PASS}; padding: 0 8px; font-weight: 600;")
+        self._usage_label.setStyleSheet(
+            f"color: {theme.PASS}; padding: 0 8px; font-weight: 600;")
+
+    def _on_variant_selected(self, name: str) -> None:
+        """셋업 상단 스위처 — 화면 스타일 즉시 전환(세션 시작 전에만 허용)."""
+        from . import theme as _theme
+        if name == _theme.CURRENT_VARIANT or name not in _theme.VARIANTS:
+            return
+        if self._phase != PHASE_NONE:          # 이중 가드 — 스위처는 셋업에만 있음
+            return
+        _prefs.patch(ui_variant=name)
+        _theme.set_variant(name)
+        app = QApplication.instance()
+        if app is not None:
+            _theme.apply_to_app(app)           # QSS 먼저 — 새 위젯 1회 polish
+        self._rebuild_pages()
+
+    def _rebuild_pages(self) -> None:
+        """페이지 5개를 파괴 후 재구축(인라인 f-string 색이 생성 시점에 박히므로).
+
+        세션 시작 전(셋업)에서만 호출되므로 상태 손실 없음."""
+        for w in (self._setup_page, self._select_page, self._match_page,
+                  self._result_page, self._match_review_page):
+            self._stack.removeWidget(w)
+            w.hide()
+            w.setParent(None)
+            w.deleteLater()
+        self._build_pages()
+        self._apply_statusbar_theme()
+        try:
+            self._loading.raise_()             # 오버레이 z-order 유지
+        except Exception:
+            pass
+        self._show_page(self._setup_page, animate=False)
+
     # ==================================================================
     def _show_page(self, w: QWidget, *, animate: bool = True) -> None:
         """페이지 전환 — 나가는 화면 스냅샷 크로스페이드(ease-out)로 부드럽게.

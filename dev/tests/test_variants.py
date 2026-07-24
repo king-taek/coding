@@ -97,6 +97,37 @@ def test_contrast_all_variants_aa():
     assert not fails, "대비 미달:\n" + "\n".join(fails)
 
 
+def test_mainwindow_has_rebuild_machinery():
+    """전환/재구축 기계가 배선돼 있는지(메서드 존재) — 실제 재구축 왕복은
+    라이브 스모크로 검증(전체 MainWindow 를 pytest 에서 생성하면 백그라운드
+    워커 스레드 teardown 이 러너를 죽여 CI 를 불안정하게 함)."""
+    import inspect
+    from aoi_verification.app.ui import main_window as mw
+    src = inspect.getsource(mw.MainWindow)
+    for name in ("_build_pages", "_rebuild_pages", "_on_variant_selected",
+                 "_apply_statusbar_theme"):
+        assert f"def {name}" in src, f"{name} 누락"
+    # 전환 핵심 순서: prefs 저장 → set_variant → apply_to_app → 재구축.
+    assert "set_variant(name)" in src and "apply_to_app" in src
+
+
+def test_apply_to_app_renders_for_temp_variant():
+    """apply_to_app 렌더 경로가 임의 변형에서도 예외 없이 도는지(QSS 완전 치환)."""
+    theme.VARIANTS["_t"] = theme.Variant(
+        key="_t", label="X", colors=theme.VARIANTS["instrument"].colors,
+        profile=theme.Profile(font_base=16, radius=14, chip_style="text",
+                              row_style="hairline"),
+        scrim=(0, 0, 0, 180), shadow=(0, 0, 0, 120))
+    try:
+        theme.set_variant("_t")
+        out = theme.render_qss(_QSS)
+        assert "$" not in out
+        assert "16px" in out and "14px" in out          # 프로필 반영
+    finally:
+        theme.VARIANTS.pop("_t", None)
+        theme.set_variant("instrument")
+
+
 def test_instrument_profile_pins_baseline():
     """instrument 프로필 = 현행 리터럴 — 기존 클램프·a2 테스트 무수정 통과 보장."""
     p = theme.VARIANTS["instrument"].profile
