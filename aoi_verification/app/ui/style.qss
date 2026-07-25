@@ -228,6 +228,66 @@ QPushButton:checked {
     border-color: $accent;
 }
 
+/* 옵션 타일 (OptionGroup) — 작은 라디오 대신 '타일 전체가 클릭영역'인 배타 선택.
+   ★ 선택 상태를 여기서만 칠한다 — 위젯 쪽 인라인 스타일시트 금지(죽은 팔레트 하드코딩
+   재발 방지 + 라이트/다크 자동 대응).  아래 :checked 는 위의 일반 QPushButton:checked 보다
+   특이도가 높고 뒤에 선언돼 있어 특이도·순서가 모두 일치한다 — 재정렬 주의. */
+QPushButton[role="option"] {
+    background: transparent;
+    color: $ink2;
+    border: 1px solid $line2;
+    border-radius: $radius_sm;
+    padding: $pad_control;
+    font-weight: 600;
+    text-align: left;
+}
+QPushButton[role="option"]:hover {
+    background-color: $elev;
+    color: $ink;
+    border-color: $mute;
+}
+QPushButton[role="option"]:checked {
+    background-color: $accent_tint;
+    color: $accent;
+    border: 1px solid $accent;
+    font-weight: 700;
+}
+QPushButton[role="option"]:focus {
+    border: $focus_w solid $focus;
+    padding: $pad_control_focus;
+}
+QPushButton[role="option"]:disabled {
+    background: transparent;
+    color: $mute;
+    border-color: $line;
+}
+QPushButton[role="option"]:checked:disabled {
+    background-color: $accent_tint_soft;
+    color: $mute;
+    border-color: $line2;
+}
+
+/* 입력 오류 — 왜 [검증 시작] 을 누를 수 없는지 툴팁이 아니라 눈에 보이게. */
+QLineEdit[state="invalid"] {
+    border: 1px solid $danger;
+    background-color: $danger_tint_soft;
+}
+QLineEdit[state="invalid"]:focus {
+    border: $focus_w solid $danger;
+    padding: $pad_input_focus;
+}
+QLabel[role="error"] {
+    color: $danger;
+    font-size: $font_caption_sz;
+}
+
+/* 카드 제목 — 인라인 f-string 스타일 3중복을 대체. */
+QLabel[role="cardTitle"] {
+    color: $ink;
+    font-weight: 700;
+    letter-spacing: 1px;
+}
+
 /* 컴팩트 아이콘 토글 (A2 행 ×/↩) — 평소엔 중립(mute), 상호작용 시에만 의미색.
    비활성 상태에 풀채도 강조를 두지 않는다(리스트에 빨간 박스 8개 방지). */
 QPushButton[compact="true"] {
