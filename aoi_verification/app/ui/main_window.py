@@ -1136,6 +1136,13 @@ class MainWindow(QMainWindow):
         queue: list[ImageItem] = []
         for slot in sorted(targets.keys()):
             queue.extend(targets[slot])
+        # ★ 빈 큐로 Stage 2 에 들어가지 않는다(`_enter_stage2_auto_all` 과 같은 가드).
+        #   들어가면 `load_state` 안에서 `_advance()` 가 **동기로** finished 를 내
+        #   검토 화면으로 갔다가, 돌아와서 아래 `_show_page(self._match_page)` 가
+        #   그걸 덮어써 **텅 빈 Stage 2** 에 사용자를 세워 둔다.
+        if not queue:
+            sheets.warn(self, i18n.KO.APP_TITLE, i18n.KO.WARN_NO_IMAGES)
+            return
 
         # 매칭 대상 풀 = 같은 Slot 의 검증(val) 쪽 모든 사진
         pool = self._build_val_pool_by_slot()

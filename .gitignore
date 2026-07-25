@@ -14,6 +14,9 @@ venv/
 .idea/
 *.swp
 
+# 에이전트 임시 작업트리 — 도구가 만들고 지우는 자리다(산출물 아님).
+.claude/worktrees/
+
 # OS
 .DS_Store
 Thumbs.db
@@ -24,3 +27,10 @@ Thumbs.db
 
 # 결과 엑셀 — 테스트/실행 산출물은 repo 에 포함하지 않는다.
 결과/
+
+# 자동 업데이트 식별자 — 포터블 빌드가 만들거나 앱이 런타임에 생성한다
+# (updater.ensure_version_file). 저장소에 커밋하면 업데이트마다 덮어써져 무의미하다.
+/VERSION
+
+# 후보안 전환 도구가 남기는 상태 파일 — 커밋 대상 아님
+dev/layout_variants/.applied

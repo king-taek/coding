@@ -471,7 +471,8 @@ class SetupPage(QWidget):
         eng_title.setProperty("role", "cardTitle")
         engine_card.body().addWidget(eng_title)
 
-        # 좌표 매칭 허용 오차 스핀박스 (항상 표시 — 기본 모드)
+        # 좌표 매칭 허용 오차 — **항상 이 자리에 있다.**  구형 모드일 땐 비활성으로만
+        # 보인다(숨기면 아래 구형 스위치가 위로 튄다 — `_sync_engine_controls` 참조).
         self._tol_row = QWidget(engine_card)
         # 맨 QWidget 은 전역 `QWidget { background: $bg }` 를 물려받아 카드 면($panel)
         # 위에 색이 다른 띠로 보인다 — 투명으로 못 박는다(로딩 패널과 같은 함정).
@@ -605,25 +606,32 @@ class SetupPage(QWidget):
             else EngineMode.BASIC
 
     def _sync_engine_controls(self) -> None:
-        """**지금 쓰는 파라미터만 보인다** — 무효한 쪽은 숨긴다(사용자 결정).
+        """무효한 파라미터를 정리한다 — **다만 토글은 절대 움직이지 않게.**
 
-        | 구형 스위치 | 보이는 것 | 숨는 것 |
+        | 구형 스위치 | 허용 오차(µm) | 구형 하위 선택 · 유사도 임계치 |
         |---|---|---|
-        | OFF (좌표 매칭) | 허용 오차(µm) | 구형 하위 선택 · 유사도 임계치 |
-        | ON (구형)       | 구형 하위 선택 · 유사도 임계치 | 허용 오차(µm) |
+        | OFF (좌표 매칭) | 보임 · 사용 가능 | **숨김** |
+        | ON (구형)       | 보임 · **비활성(회색)** | 보임 |
 
-        ★ 이 함수는 한때 **반대 결정**을 근거와 함께 담고 있었다: "숨기지 않는 이유 —
-        스크롤 안에서 show/hide 는 내용이 튀고, 무엇보다 '허용 오차는 좌표 매칭에,
-        임계치는 구형 모드에 속한다'는 사실을 눈으로 가르쳐 준다."  사용자가 숨기기로
-        결정했으므로 근거도 함께 갱신한다 — 코드와 어긋난 주석을 남기지 않는다.
+        ★ 숨기기와 비활성을 **위치로 나눈다.**  이 카드의 위젯 순서는
+        `제목 → 허용 오차 → [구형 스위치] → 구형 하위선택 → 임계치` 다.
 
-        '가르쳐 주는' 역할의 손실은 두 곳이 메운다: (a) 카드가 이미 작아져('실행 옵션'
-        병합) 내용 튐이 줄었고, (b) 상단 모드 배지가 **판정 기준 수치까지** 항상 말한다.
-        그리고 `_engine_inert_hint` 가 지금 어느 엔진이 도는지 한 줄로 남는다."""
+        - 스위치 **아래**에 있는 것(하위 선택·임계치)은 숨겨도 스위치가 안 움직인다
+          → 안 쓸 때 숨긴다(사용자 결정 유지).
+        - 스위치 **위**에 있는 허용 오차를 숨기면 스위치가 그 높이+간격만큼 위로
+          튄다 — 사용자가 "구형 모드 켜면 박스 안 객체들이 움직이면서 토글 위치가
+          변한다" 고 신고한 그 현상이다.  그래서 **자리는 지키고 비활성**으로만 보인다.
+
+        비활성 회색은 이미 있는 QSS 가 칠한다(`QDoubleSpinBox:disabled` ·
+        `QLabel:disabled` · `QPushButton[role="stepper"]:disabled`) — 새 스타일 불필요.
+        `setEnabled(False)` 는 자식에 전파되므로 행 전체가 한 번에 회색이 된다.
+
+        지금 어느 엔진이 도는지는 `_engine_inert_hint` 한 줄과 상단 모드 배지가 말한다."""
         legacy_on = self.legacy_switch.is_on()
         self.legacy_group.setVisible(legacy_on)
         self._threshold_row.setVisible(legacy_on)
-        self._tol_row.setVisible(not legacy_on)
+        self._tol_row.setVisible(True)
+        self._tol_row.setEnabled(not legacy_on)
         if legacy_on:
             short = (i18n.KO.ENGINE_MODE_EFFICIENCY_SHORT
                      if self.legacy_group.current_key() == EngineMode.EFFICIENCY

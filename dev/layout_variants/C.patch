@@ -1,0 +1,291 @@
+diff --git a/aoi_verification/app/ui/pages/setup_page.py b/aoi_verification/app/ui/pages/setup_page.py
+index 51c43b6..a300461 100644
+--- a/aoi_verification/app/ui/pages/setup_page.py
++++ b/aoi_verification/app/ui/pages/setup_page.py
+@@ -11,7 +11,7 @@ from PyQt6.QtGui import QKeySequence, QShortcut
+ from PyQt6.QtWidgets import (QCheckBox, QDoubleSpinBox, QFileDialog,
+                               QGridLayout, QHBoxLayout, QLabel, QLineEdit,
+                               QMessageBox, QScrollArea, QSizePolicy,
+-                              QToolButton, QVBoxLayout, QWidget)
++                              QSpacerItem, QToolButton, QVBoxLayout, QWidget)
+ 
+ from ... import config, i18n
+ from .. import motion, theme
+@@ -90,12 +90,23 @@ class SetupPage(QWidget):
+             "QScrollArea { background: transparent; border: none; }"
+             "QScrollArea > QWidget#qt_scrollarea_viewport { background: transparent; }"
+         )
++        # 본문은 **읽기 좋은 컬럼**이다 — 넓은 창에서 컬럼이 늘어나는 대신 가운데
++        # 서고, 남는 폭은 시트 바탕으로 남긴다(`_column_w` 주석 참조).
++        scroll.setAlignment(Qt.AlignmentFlag.AlignHCenter
++                            | Qt.AlignmentFlag.AlignTop)
+         outer.addWidget(scroll)
+ 
+         host = QWidget()
+         host.setSizePolicy(QSizePolicy.Policy.Expanding,
+                            QSizePolicy.Policy.MinimumExpanding)
++        # ★ 컬럼 상한.  QScrollArea 는 widgetResizable 이어도 위젯의 maximumSize 를
++        #   지키고(qSmartMaxSize), 뷰포트보다 좁으면 setAlignment 로 정렬한다.
++        host.setMaximumWidth(self._column_w())
+         scroll.setWidget(host)
++        self._body_scroll = scroll
++        # 세로 스크롤바가 뜨고 지면 뷰포트 폭이 바뀌어 컬럼이 좌우로 움직인다 —
++        # 스크롤 **밖**의 액션바가 같이 따라가야 축이 하나로 남는다(`_sync_bar_gutter`).
++        scroll.viewport().installEventFilter(self)
+ 
+         # 원본과 동일한 외곽 마진/스페이싱 유지.
+         root = QVBoxLayout(host)
+@@ -114,11 +125,34 @@ class SetupPage(QWidget):
+             # 스크롤 안 본문과 같은 좌우 마진 + 상단 눈금으로 '고정된 바닥'임을 말한다.
+             bar.setContentsMargins(theme.PROFILE.page_margin, 12,
+                                    theme.PROFILE.page_margin, 16)
++            # ★ 본문과 **같은 컬럼**에 세운다.  바만 창 폭을 다 쓰면 [검증 시작]의
++            #   오른쪽 변이 카드 오른쪽 변에서 떨어져 축이 둘로 갈린다.
++            bar.setMaximumWidth(self._column_w())
+             rule = QWidget(self)
+             rule.setFixedHeight(1)
+             rule.setStyleSheet(f"background: {theme.LINE};")
+             outer.addWidget(rule)
+-            outer.addWidget(bar)
++            # 눈금은 전체폭(고정된 바닥임을 말한다), 바 자체는 컬럼에 맞춰 가운데로.
++            bar_host = QWidget(self)
++            bar_row = QHBoxLayout(bar_host)
++            bar_row.setContentsMargins(0, 0, 0, 0)
++            # ★ 좌우 여백은 stretch **0**, 바가 stretch 1 이다.  셋 다 1 을 주면 폭을
++            #   1/3 씩 나눠 가져 바가 상한에 못 미치고(1512px 창에서 572px 실측)
++            #   [검증 시작]의 오른쪽 변이 카드 변에서 19px 어긋난다.  0 이면 바가 먼저
++            #   상한까지 자라고 **남는 폭만** 좌우로 흘러 가운데 정렬이 된다.  여백이
++            #   고정 spacing 이 아니라 stretch 라서 창을 줄일 때 하한을 밀지도 않는다.
++            bar_row.addStretch()
++            bar_row.addWidget(bar, 1)
++            bar_row.addStretch()
++            # 세로 스크롤바가 먹은 폭 — 맨 오른쪽에 같은 폭을 비워 두면 가운데 정렬의
++            # 기준이 본문 뷰포트와 같아진다(`_sync_bar_gutter`).
++            self._bar_gutter = QSpacerItem(0, 0, QSizePolicy.Policy.Fixed,
++                                           QSizePolicy.Policy.Minimum)
++            self._bar_gutter_w = 0
++            self._bar_row = bar_row
++            bar_row.addItem(self._bar_gutter)
++            outer.addWidget(bar_host)
++            self._sync_bar_gutter()
+ 
+         # ★ 첫 포커스를 첫 입력란에 둔다.  이전엔 탭 체인 첫 정지가 보기 옵션이라,
+         #   키보드 사용자가 폴더를 입력하려면 화면을 다시 만드는 컨트롤(다크 모드)을
+@@ -131,6 +165,43 @@ class SetupPage(QWidget):
+         self._dev_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+         self._dev_shortcut.activated.connect(self._toggle_dev_mode)
+ 
++    @staticmethod
++    def _column_w() -> int:
++        """본문 컬럼의 **바깥** 폭 = 내용 상한 + 좌우 페이지 마진.
++
++        카드에 size policy 가 없어 이 화면의 모든 면이 창 폭까지 늘어났고, 1512px 창의
++        '실행 옵션'·'매칭 설정' 카드는 1434px 인데 내용은 377px 에서 끝났다(빈 면 75%).
++        폭은 **내용이 요구하는 만큼**만 주고(`PROFILE.content_max_w`, 측정 근거는 그
++        토큰 주석), 남는 폭은 카드 안이 아니라 시트 바탕으로 흘린다.
++
++        컬럼은 카드 하나가 아니라 **본문 전체**(제목·폴더·두 카드·안내·액션바)에 걸린다 —
++        한 카드만 좁히면 나머지와 축이 어긋나 오히려 나빠 보인다.
++        """
++        p = theme.PROFILE
++        return p.content_max_w + 2 * p.page_margin
++
++    def _sync_bar_gutter(self) -> None:
++        """액션바를 본문 컬럼과 **같은 축**에 맞춘다(세로 스크롤바 보정).
++
++        본문 컬럼은 스크롤 **뷰포트** 안에서 가운데 서고, 고정 액션바는 **페이지** 안에서
++        가운데 선다.  세로 스크롤바가 뜨면 뷰포트가 그만큼 좁아져 컬럼만 왼쪽으로
++        밀리고, [검증 시작]의 오른쪽 변이 카드 오른쪽 변에서 7px 어긋난다(실측).
++        바 오른쪽에 스크롤바와 같은 폭을 비워 두 기준을 같게 만든다."""
++        spacer = getattr(self, "_bar_gutter", None)
++        scroll = getattr(self, "_body_scroll", None)
++        if spacer is None or scroll is None:
++            return
++        # 실제 기하에서 읽는다 — 스크롤바의 `isVisible()` 은 레이아웃보다 한 박자 늦다.
++        gutter = max(0, scroll.width() - scroll.viewport().width())
++        if gutter == self._bar_gutter_w:
++            return
++        self._bar_gutter_w = gutter
++        spacer.changeSize(gutter, 0, QSizePolicy.Policy.Fixed,
++                          QSizePolicy.Policy.Minimum)
++        row = getattr(self, "_bar_row", None)
++        if row is not None:
++            row.invalidate()
++
+     def _focus_first_field(self) -> None:
+         """탭 체인의 출발점을 첫 입력란으로 — 파괴적 컨트롤을 먼저 지나지 않게."""
+         edit = getattr(self, "ref_path_edit", None)
+@@ -328,9 +399,13 @@ class SetupPage(QWidget):
+ 
+     def eventFilter(self, obj, event):  # noqa: N802
+         from PyQt6.QtCore import QEvent
+-        if (event.type() == QEvent.Type.Resize
+-                and obj is getattr(self, "_device_host", None)):
+-            self._reflow_device_row()
++        if event.type() == QEvent.Type.Resize:
++            if obj is getattr(self, "_device_host", None):
++                self._reflow_device_row()
++            # 뷰포트 폭이 바뀌었다 = 스크롤바가 뜨거나 졌다 → 액션바 축 재정렬.
++            scroll = getattr(self, "_body_scroll", None)
++            if scroll is not None and obj is scroll.viewport():
++                self._sync_bar_gutter()
+         return super().eventFilter(obj, event)
+ 
+     def _reflow_device_row(self) -> None:
+@@ -346,6 +421,11 @@ class SetupPage(QWidget):
+         if avail <= 1:
+             p = self.parentWidget()
+             avail = p.width() if p is not None else 0
++        # ★ 컬럼 상한을 넘겨 잡지 않는다.  넘기면 (a) 위젯 폭이 아직 없는 생성 시점에
++        #   페이지 폭(1512)을 보고 2열로 펼쳤다가 컬럼 안에서 넘치고, (b) 창을
++        #   줄일 때 이 행이 stale 한 자기 폭으로 2열을 유지해 그리드 하한이 908px 로
++        #   굳는다 — 800px 창에서 908px 카드가 나던 **가로 넘침의 실제 원인**이다.
++        avail = min(avail, theme.PROFILE.content_max_w)
+         # 한 열로 접을지 두 열로 둘지 — 카드 자신의 하한을 넘긴다(reflow 가 열 수 계산).
+         need = max((c.minimumSizeHint().width() for c in self._device_cards),
+                    default=self._PATH_MIN_W)
+diff --git a/aoi_verification/app/ui/theme.py b/aoi_verification/app/ui/theme.py
+index ffdb954..bdd961e 100644
+--- a/aoi_verification/app/ui/theme.py
++++ b/aoi_verification/app/ui/theme.py
+@@ -43,6 +43,17 @@ class Profile:
+     page_margin: int = 32
+     section_gap: int = 28
+     card_pad: int = 20
++    # 본문 컬럼 상한 — '읽는 폼' 화면(설정)의 카드가 창 폭만큼 늘어나 **빈 판때기**가
++    # 되는 것을 막는다.  카드에는 size policy 가 없어 페이지 폭을 그대로 먹었고, 1512px
++    # 창에서 카드 1434px 에 내용은 377px 에서 끝나 75% 가 빈 면이었다(실측).
++    #
++    # 값의 근거는 각 섹션의 **자연 폭 실측**이다 — 반드시 `apply_to_app` 으로 QSS 를
++    # 건 상태에서 재야 한다(맨 위젯은 패딩·서체가 달라 20~25% 좁게 나온다).
++    #   액션바 568(페이지 마진 제외) · 폴더 카드 482 · 매칭 설정 409(구형 ON) ·
++    #   실행 옵션 368.
++    # 가장 넓은 **액션바 568** 이 하한이다(그보다 좁으면 [검증 시작]이 컬럼을 삐져나가
++    # 축이 갈린다).  거기에 8px 여유를 둔 값.
++    content_max_w: int = 576
+     row_pad_v: int = 8
+     row_gap: int = 0                # 하이라인 눈금이 행을 가른다(간격 0)
+     control_h: int = 32
+diff --git a/dev/tests/test_setup_controls.py b/dev/tests/test_setup_controls.py
+index 688d484..6cd841a 100644
+--- a/dev/tests/test_setup_controls.py
++++ b/dev/tests/test_setup_controls.py
+@@ -526,3 +526,118 @@ def test_switch_hot_zone_is_not_the_whole_row(qapp):
+         assert "mousePressEvent" not in SwitchRow.__dict__
+     finally:
+         row.deleteLater()
++
++
++# ── 본문 컬럼 — 카드가 창 폭만큼 늘어나지 않는다 ────────────────────────────
++@pytest.fixture
++def styled(qapp):
++    """실제 QSS 를 건 상태 — 폭 계약은 **반드시** 여기서 재야 한다.
++
++    맨 위젯의 sizeHint 는 QSS 패딩·서체를 모르니 20~25% 좁게 나온다(액션바 508 vs
++    실측 632).  스타일 없이 재면 컬럼 상한이 실제보다 작게 잡혀, 앱에서는
++    [검증 시작]이 컬럼을 삐져나간다.  앱 전역 스타일시트는 되돌려 준다."""
++    before = qapp.styleSheet()
++    sp.theme.apply_to_app(qapp)
++    yield qapp
++    qapp.setStyleSheet(before)
++
++
++def _settle(styled, page, w, h):
++    page.resize(w, h)
++    for _ in range(14):
++        styled.processEvents()
++
++
++def _edges(page, w):
++    left = w.mapTo(page, w.rect().topLeft()).x()
++    return left, left + w.width()
++
++
++def _option_cards(page):
++    """'실행 옵션'·'매칭 설정' 두 카드."""
++    return (page.auto_group.parentWidget().parentWidget(),
++            page._tol_row.parentWidget())
++
++
++def test_cards_hug_content_instead_of_window(styled):
++    """★ 카드는 **내용 폭**만 갖는다 — 창 폭까지 늘어나면 빈 판때기가 된다.
++
++    실측(수정 전): 1512px 창에서 '실행 옵션'·'매칭 설정' 카드가 1434px 인데 내용은
++    377px 에서 끝나 면의 75% 가 비었다.  상한은 `PROFILE.content_max_w`."""
++    page = sp.SetupPage()
++    try:
++        page.show()
++        cap = sp.theme.PROFILE.content_max_w
++        for w in (1512, 1280, 1024):
++            _settle(styled, page, w, 950)
++            for card in _option_cards(page):
++                assert card.width() <= cap, \
++                    f"{w}px 창에서 카드가 {card.width()}px — 상한 {cap} 초과"
++            # 창을 넓혀도 카드가 따라 넓어지면 안 된다.
++            assert page.width() == w
++    finally:
++        page.deleteLater()
++
++
++def test_no_horizontal_overflow_at_800(styled):
++    """800px 창에서 가로 스크롤/넘침이 없어야 한다.
++
++    ★ 예전엔 폴더 행이 stale 한 자기 폭으로 2열을 유지해 그리드 하한이 908px 로 굳었고,
++    800px 창에서 908px 카드가 났다.  `_reflow_device_row` 가 컬럼 상한으로 자른다."""
++    from PyQt6.QtWidgets import QScrollArea
++    page = sp.SetupPage()
++    try:
++        page.show()
++        # 넓은 창 → 좁은 창 **순서**로 줄여야 재현된다(폭이 굳는 버그였다).
++        for w in (1512, 1280, 1024, 800):
++            _settle(styled, page, w, 950)
++        scroll = page.findChildren(QScrollArea)[0]
++        assert scroll.horizontalScrollBar().maximum() == 0, "가로 스크롤이 생겼다"
++        assert scroll.widget().width() <= scroll.viewport().width(), \
++            f"본문 {scroll.widget().width()} > 뷰포트 {scroll.viewport().width()}"
++        for card in _option_cards(page):
++            assert card.width() <= page.width(), \
++                f"카드 {card.width()}px > 창 {page.width()}px"
++    finally:
++        page.deleteLater()
++
++
++def test_body_and_pinned_action_bar_share_one_axis(styled):
++    """카드·폴더·액션바가 **한 축**에 선다.
++
++    한 카드만 좁아지고 나머지가 전체 폭이면 축이 갈려 오히려 나빠 보인다.  고정
++    액션바는 스크롤 **밖**이라 세로 스크롤바 폭만큼 어긋나기 쉽다(`_sync_bar_gutter`)."""
++    page = sp.SetupPage()
++    try:
++        page.show()
++        # 스크롤바가 있는 창(950)과 없는 창(1400) 둘 다.
++        for w, h in ((1512, 950), (1024, 950), (800, 950), (1512, 1400)):
++            _settle(styled, page, w, h)
++            left, right = _edges(page, page.ref_group)
++            for card in _option_cards(page):
++                assert _edges(page, card) == (left, right), \
++                    f"{w}x{h}: 카드 축이 폴더 카드와 다르다"
++            assert _edges(page, page.update_btn)[0] == left, \
++                f"{w}x{h}: 액션바 왼쪽 축이 카드와 다르다"
++            assert _edges(page, page.start_btn)[1] == right, \
++                f"{w}x{h}: [검증 시작] 오른쪽 축이 카드와 다르다"
++    finally:
++        page.deleteLater()
++
++
++def test_legacy_toggle_does_not_move_itself_in_narrow_column(styled):
++    """구형 모드를 켜고 꺼도 토글의 y 가 변하면 안 된다(컬럼이 좁아져도 유지)."""
++    page = sp.SetupPage()
++    try:
++        page.show()
++        _settle(styled, page, 1512, 950)
++        ys = set()
++        for state in (False, True, False, True):
++            page.legacy_switch.set_on(state, emit=True)
++            for _ in range(10):
++                styled.processEvents()
++            ys.add(page.legacy_switch.mapTo(
++                page, page.legacy_switch.rect().topLeft()).y())
++        assert len(ys) == 1, f"토글 y 가 움직였다: {sorted(ys)}"
++    finally:
++        page.deleteLater()

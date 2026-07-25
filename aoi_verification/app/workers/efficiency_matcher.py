@@ -494,34 +494,53 @@ class EfficiencyScheduler(QThread):
                 embed_q: "queue.Queue" = queue.Queue(maxsize=3)
                 embed_seen = 0          # 지금까지 임베딩 대상이 된 사진 누계(예상치)
 
+                # ★ 종료 신호는 **finally 에서** 넣는다.  예전엔 루프 정상 종료 뒤에만
+                #   넣어서, `_embed_slot` **바깥**(진행 보고·락 구간·put)에서 예외가 나면
+                #   생산자가 센티널 없이 죽었다.  그러면 아래 소비자가 타임아웃 없는
+                #   `get()` 에 영원히 갇혀 `finished`·`failed` **어느 것도 안 나오고**
+                #   차단 오버레이가 영구히 남았다(`stop()` 으로도 못 깬다).
+                #   `slot_features._run_pipelined` 가 이미 쓰는 패턴을 따른다.
                 def producer() -> None:
                     nonlocal embed_seen
-                    for slot, refs, vals in tasks:
-                        if self._stop.is_set():
-                            break
-                        # per-image 콜백(_on_embed_image)이 임베딩 중 _embed_done 을
-                        # 실시간으로 올린다.  여기선 슬롯 경계에서 누락분(디코드 실패
-                        # 등 콜백이 안 온 사진)만 보정해 100% 도달을 보장한다.
+                    try:
+                        for slot, refs, vals in tasks:
+                            if self._stop.is_set():
+                                break
+                            # per-image 콜백(_on_embed_image)이 임베딩 중 _embed_done 을
+                            # 실시간으로 올린다.  여기선 슬롯 경계에서 누락분(디코드 실패
+                            # 등 콜백이 안 온 사진)만 보정해 100% 도달을 보장한다.
+                            try:
+                                built, ref_emb = (self._embed_slot(backend, refs, vals)
+                                                  if vals else (None, {}))
+                            except Exception:
+                                built, ref_emb = None, {}
+                            embed_seen += len(refs) + len(vals)
+                            with self._plock:
+                                if self._embed_done < embed_seen:
+                                    self._embed_done = embed_seen
+                                pre_scoring = not self._scoring_started
+                            if pre_scoring:                # 재채점 전엔 임베딩 라벨 유지
+                                self.signals.phase.emit(i18n.KO.PHASE_EMBED)
+                            self._emit_progress()
+                            embed_q.put((slot, refs, vals, built, ref_emb))
+                    finally:
+                        # 종료 신호(예외 경로 포함).  큐가 가득 찬 채 소비자가 이미
+                        # 떠났으면(중지) 무한 대기가 되므로 시간을 건다.
                         try:
-                            built, ref_emb = (self._embed_slot(backend, refs, vals)
-                                              if vals else (None, {}))
+                            embed_q.put(None, timeout=1.0)
                         except Exception:
-                            built, ref_emb = None, {}
-                        embed_seen += len(refs) + len(vals)
-                        with self._plock:
-                            if self._embed_done < embed_seen:
-                                self._embed_done = embed_seen
-                            pre_scoring = not self._scoring_started
-                        if pre_scoring:                    # 재채점 전엔 임베딩 라벨 유지
-                            self.signals.phase.emit(i18n.KO.PHASE_EMBED)
-                        self._emit_progress()
-                        embed_q.put((slot, refs, vals, built, ref_emb))
-                    embed_q.put(None)                      # 종료 신호
+                            pass
 
                 pt = threading.Thread(target=producer, daemon=True)
                 pt.start()
                 while not self._stop.is_set():
-                    item = embed_q.get()
+                    # ★ 타임아웃을 둔다 — 무한 대기면 중지 버튼도 소비자를 못 깨운다.
+                    try:
+                        item = embed_q.get(timeout=0.2)
+                    except queue.Empty:
+                        if not pt.is_alive():
+                            break          # 생산자가 죽었는데 센티널도 없다 → 탈출
+                        continue
                     if item is None:
                         break
                     slot, refs, vals, built, ref_emb = item

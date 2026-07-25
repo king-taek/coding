@@ -1,0 +1,385 @@
+diff --git a/aoi_verification/app/ui/pages/setup_page.py b/aoi_verification/app/ui/pages/setup_page.py
+index 51c43b6..d85f5dd 100644
+--- a/aoi_verification/app/ui/pages/setup_page.py
++++ b/aoi_verification/app/ui/pages/setup_page.py
+@@ -91,6 +91,8 @@ class SetupPage(QWidget):
+             "QScrollArea > QWidget#qt_scrollarea_viewport { background: transparent; }"
+         )
+         outer.addWidget(scroll)
++        # 본문이 쓸 수 있는 폭의 **출처** — `_available_content_w` 주석 참조.
++        self._scroll = scroll
+ 
+         host = QWidget()
+         host.setSizePolicy(QSizePolicy.Policy.Expanding,
+@@ -333,19 +335,29 @@ class SetupPage(QWidget):
+             self._reflow_device_row()
+         return super().eventFilter(obj, event)
+ 
+-    def _reflow_device_row(self) -> None:
+-        grid = getattr(self, "_device_grid", None)
+-        if grid is None:
+-            return
+-        # ★ **자기 호스트의 폭**을 쓴다 — 페이지 폭을 쓰면 좁은 그리드 칸(B안) 안에서도
+-        #   1512px 인 줄 알고 두 카드를 나란히 둬 입력란이 104px 이 된다.
+-        host = getattr(self, "_device_host", None)
+-        avail = (host.width() if host is not None else 0) or 0
++    def _available_content_w(self) -> int:
++        """본문이 실제로 쓸 수 있는 폭 — **창**이 정하는 값(스크롤 뷰포트 − 페이지 마진).
++
++        ★ 흘려 넣을 폭을 **자기 호스트의 width()** 에서 읽으면 안 된다.  2열 그리드가
++        호스트의 최소폭을 972px 로 밀어 올리면, 창을 800 으로 줄여도 호스트는 972 아래로
++        내려가지 못하고(가로 스크롤이 생긴다) 그 972 를 다시 읽어 "2열이 들어간다"고
++        판단한다 — **자기가 만든 폭을 자기가 다시 읽는 되먹임**이라 한 번 벌어진 2열은
++        영원히 접히지 않았다(800px 창에서 가로 스크롤 + 카드 908px, 실측).  뷰포트 폭은
++        창이 정하므로 이 되먹임이 없다."""
++        scroll = getattr(self, "_scroll", None)
++        avail = (scroll.viewport().width() if scroll is not None else 0) or 0
+         if avail <= 1:
+             avail = self.width() or 0
+         if avail <= 1:
+             p = self.parentWidget()
+             avail = p.width() if p is not None else 0
++        return max(0, avail - 2 * theme.PROFILE.page_margin)
++
++    def _reflow_device_row(self) -> None:
++        grid = getattr(self, "_device_grid", None)
++        if grid is None:
++            return
++        avail = self._available_content_w()
+         # 한 열로 접을지 두 열로 둘지 — 카드 자신의 하한을 넘긴다(reflow 가 열 수 계산).
+         need = max((c.minimumSizeHint().width() for c in self._device_cards),
+                    default=self._PATH_MIN_W)
+@@ -364,15 +376,16 @@ class SetupPage(QWidget):
+         **그 선택의 무게**를 따라야 한다 — 그래서 34px 세그먼트로 강등하고 카드를 합쳤다
+         (카드 2장 → 1장, 세로 ~200px 절약).
+ 
+-        각 줄은 `라벨 — 세그먼트 — (남는 폭)` 이다.  라벨을 왼쪽에 고정해 두 줄의 세그먼트
+-        왼쪽 변이 한 축에 정렬된다.
++        각 줄은 `라벨 — (남는 폭) — 세그먼트` 다(`_axis_row`).  남는 폭이 라벨과 값
++        **사이**로 가므로 두 줄의 세그먼트 **오른쪽** 변이 한 축에 정렬된다.
+         """
+         _prefs_now = _prefs.load()
+         self._selected_slots: Optional[set] = None
+         card = NeonCard(role="card", parent=self)
+         col = card.body()
+ 
+-        title_row = QHBoxLayout()
++        title_host = QWidget(card)
++        title_row = QHBoxLayout(title_host)
+         title_row.setContentsMargins(0, 0, 0, 0)
+         title = QLabel(i18n.KO.RUN_OPTIONS_TITLE, card)
+         title.setProperty("role", "cardTitle")
+@@ -385,7 +398,8 @@ class SetupPage(QWidget):
+         title_row.addWidget(title)
+         title_row.addStretch()
+         title_row.addWidget(self._auto_help_btn)
+-        col.addLayout(title_row)
++        # '?' 도 값과 같은 축에서 끝난다 — 이것만 카드 끝에 두면 축이 다시 둘이 된다.
++        col.addWidget(self._axis_host(card, title_host))
+ 
+         # ── 자동화 수준 — 키가 곧 AutomationLevel 값이라 분기 없이 읽는다.
+         _last_auto = getattr(_prefs_now, "automation_level",
+@@ -418,8 +432,9 @@ class SetupPage(QWidget):
+         self.scope_group.set_option_tooltip("subset",
+                                             i18n.KO.SLOT_SELECT_BTN_TOOLTIP)
+         self.scope_group.selection_changed.connect(self._on_scope_changed)
++        # 카드의 마지막 행에는 눈금을 긋지 않는다(밑줄이 허공을 가른다).
+         col.addWidget(self._labeled_segment_row(card, i18n.KO.SCOPE_TITLE,
+-                                                self.scope_group))
++                                                self.scope_group, divider=False))
+ 
+         # 도움말 본문 — 두 설정을 한 번에 설명한다(기본 접힘).
+         self._auto_hint = QLabel(i18n.KO.RUN_OPTIONS_HINT, card)
+@@ -436,26 +451,72 @@ class SetupPage(QWidget):
+     # 손가락에 너무 좁아지지 않게 하는 것.  둘이 나란히 서도 800px 창에서 넘치지 않는다
+     # (110×2 + 간격 4 + 라벨 92 + 카드 패딩 40 ≈ 356 < 800 - 마진 80).
+     _SEGMENT_MIN_W = 110
+-    _SEGMENT_LABEL_W = 92        # 두 줄의 세그먼트 왼쪽 변을 한 축에 맞춘다
+-
+-    def _labeled_segment_row(self, parent: QWidget, label: str,
+-                             group: OptionGroup) -> QWidget:
+-        """`라벨 — 세그먼트 — 남는 폭` 한 줄.  두 설정이 같은 격자에 앉게 한다."""
+-        row = QWidget(parent)
++    _SEGMENT_LABEL_W = 92        # 라벨 열의 하한 — 축의 **왼쪽** 변을 한 줄에 맞춘다
++
++    # ── 라벨 왼쪽 · 값 오른쪽 한 축 ──────────────────────────────────────────
++    # 설정 화면의 표준 축(macOS 시스템 설정·iOS 설정): 라벨은 왼쪽 세로선, 값은 오른쪽
++    # 세로선에 모인다.  ★ 예전에는 값 **뒤**에 `addStretch(1)` 를 둬서 남는 폭이 전부
++    # 오른쪽에 고였다 — 1512px 창에서 카드(1434)의 오른쪽 1135px(75%)이 빈 띠였고,
++    # 같은 카드 안의 `SwitchRow` 만 토글을 오른쪽 끝에 붙여 **축이 둘로 갈라져** 있었다.
++    # 남는 폭을 라벨과 값 **사이**로 보내면 그 축이 하나로 합쳐진다.
++    def _axis_host(self, parent: QWidget, row: QWidget, *,
++                   divider: bool = False) -> QWidget:
++        """`row` 를 축 안에 앉힌다 — 스스로 값을 오른쪽 끝에 붙이는 위젯이면 무엇이든.
++
++        축 폭은 `PROFILE.axis_max_w` 에서 멈춘다.  상한이 없으면 초광폭 창에서 라벨과
++        값이 화면 양 끝으로 갈라져 한 줄로 읽히지 않는다.  상한을 **행**에 걸고 남는
++        폭만 오른쪽에 흘리므로 카드는 그대로 전체폭이다(카드 폭은 건드리지 않는다).
++
++        ★ 상한을 거는 방법이 중요하다: `maximumWidth` 만 걸고 카드의 세로 레이아웃에
++        넣으면 Qt 가 행을 **가운데**로 놓아 카드 제목과 왼쪽 변이 어긋난다.  가로
++        껍데기 안에서 행에 stretch 를 주고 꼬리에 stretch 0 스페이서를 둬야 행이
++        상한까지 자란 뒤 남는 폭만 오른쪽에 남는다(네 조합을 실측해 고른 것).
++        """
+         # 맨 QWidget 은 전역 `QWidget { background: $bg }` 를 물려받아 카드 면 위에 색이
+         # 다른 띠로 보인다 — 투명으로 못 박는다(로딩 패널·행 호스트와 같은 함정).
+-        row.setProperty("role", "rowHost")
++        host = QWidget(parent)
++        host.setProperty("role", "rowHost")
++        outer = QHBoxLayout(host)
++        outer.setContentsMargins(0, 0, 0, 0)
++        outer.setSpacing(0)
++        row.setParent(host)
++        row.setProperty("role", "axisRow" if divider else "rowHost")
++        row.setSizePolicy(QSizePolicy.Policy.Expanding,
++                          QSizePolicy.Policy.Preferred)
++        row.setMaximumWidth(theme.PROFILE.axis_max_w)
++        outer.addWidget(row, 1)
++        outer.addStretch(0)
++        return host
++
++    def _axis_row(self, parent: QWidget, label: str, *, tooltip: str = "",
++                  divider: bool = True) -> tuple[QWidget, QHBoxLayout]:
++        """`라벨 — (남는 폭) — 값` 한 줄.  (호스트, 값 레이아웃) 을 돌려준다.
++
++        호출부는 돌려받은 레이아웃에 값 위젯만 덧붙이면 오른쪽 축에 정렬된다.
++        ``divider`` 는 다음 행과의 사이에 눈금을 긋는다 — 축이 넓어질수록 멀어진 라벨과
++        값을 한 줄로 묶어 주는 것은 이 밑줄이다(리스트 행의 관습, QSS `$row_divider`).
++        """
++        row = QWidget(parent)
+         lay = QHBoxLayout(row)
+-        lay.setContentsMargins(0, 0, 0, 0)
+-        lay.setSpacing(10)
++        lay.setContentsMargins(0, 0, 0, theme.PROFILE.row_pad_v if divider else 0)
+         lbl = QLabel(label, row)
+-        lbl.setFixedWidth(self._SEGMENT_LABEL_W)
++        lbl.setMinimumWidth(self._SEGMENT_LABEL_W)
++        if tooltip:
++            lbl.setToolTip(tooltip)
+         lay.addWidget(lbl)
++        lay.addStretch(1)                    # 남는 폭은 라벨과 값 **사이**로
++        return self._axis_host(parent, row, divider=divider), lay
++
++    def _labeled_segment_row(self, parent: QWidget, label: str,
++                             group: OptionGroup, *,
++                             divider: bool = True) -> QWidget:
++        """`라벨 — (남는 폭) — 세그먼트` 한 줄.  두 설정이 같은 축에 앉게 한다."""
++        host, lay = self._axis_row(parent, label, divider=divider)
++        lay.setSpacing(10)
++        # 세그먼트는 자기 폭만 차지한다(그룹 안에서 균등) — 카드 폭만큼 늘어나면
++        # '작게'라는 의도가 무너진다.  늘어나는 것은 라벨과의 **사이**뿐이다.
+         lay.addWidget(group)
+-        # ★ 남는 폭을 흡수하는 stretch — 없으면 세그먼트가 카드 폭만큼 늘어나 '작게'라는
+-        #   의도가 무너진다(그리드가 열마다 stretch 1 을 주기 때문).
+-        lay.addStretch(1)
+-        return row
++        return host
+ 
+     def _on_scope_changed(self, key: str) -> None:
+         if key == "subset":
+@@ -473,15 +534,10 @@ class SetupPage(QWidget):
+ 
+         # 좌표 매칭 허용 오차 — **항상 이 자리에 있다.**  구형 모드일 땐 비활성으로만
+         # 보인다(숨기면 아래 구형 스위치가 위로 튄다 — `_sync_engine_controls` 참조).
+-        self._tol_row = QWidget(engine_card)
+-        # 맨 QWidget 은 전역 `QWidget { background: $bg }` 를 물려받아 카드 면($panel)
+-        # 위에 색이 다른 띠로 보인다 — 투명으로 못 박는다(로딩 패널과 같은 함정).
+-        self._tol_row.setProperty("role", "rowHost")
+-        _tol_layout = QHBoxLayout(self._tol_row)
+-        _tol_layout.setContentsMargins(0, 0, 0, 0)
++        self._tol_row, _tol_layout = self._axis_row(
++            engine_card, i18n.KO.COORD_TOLERANCE_LABEL,
++            tooltip=i18n.KO.COORD_TOLERANCE_TOOLTIP)
+         _tol_layout.setSpacing(6)
+-        _tol_label = QLabel(i18n.KO.COORD_TOLERANCE_LABEL, self._tol_row)
+-        _tol_label.setToolTip(i18n.KO.COORD_TOLERANCE_TOOLTIP)
+         self.coord_tol_spin = NoWheelDoubleSpinBox(self._tol_row)
+         self.coord_tol_spin.setRange(10.0, 5000.0)
+         self.coord_tol_spin.setSingleStep(50.0)
+@@ -506,11 +562,9 @@ class SetupPage(QWidget):
+         self.coord_tol_spin.setMinimumWidth(120)
+         self.tol_minus_btn = self._stepper_button("−", -1)
+         self.tol_plus_btn = self._stepper_button("+", +1)
+-        _tol_layout.addWidget(_tol_label)
+         _tol_layout.addWidget(self.coord_tol_spin)
+         _tol_layout.addWidget(self.tol_minus_btn)
+         _tol_layout.addWidget(self.tol_plus_btn)
+-        _tol_layout.addStretch()
+         engine_card.body().addWidget(self._tol_row)
+ 
+         # ── 구형(유사도) 모드 — 명시적 스위치 ─────────────────────────────
+@@ -528,7 +582,10 @@ class SetupPage(QWidget):
+         # 언제 이 모드를 쓰는지는 툴팁으로 — 화면을 조용하게 유지한다.
+         self.legacy_switch.setToolTip(i18n.KO.LEGACY_MODE_HINT)
+         self.legacy_switch.toggled.connect(self._on_legacy_toggled)
+-        engine_card.body().addWidget(self.legacy_switch)
++        # ★ `SwitchRow` 는 이미 '텍스트 왼쪽 — 토글 오른쪽 끝'이다.  그대로 두면 이 카드
++        #   안에 축이 둘(다른 값은 축, 토글만 카드 끝) 생긴다 — 같은 축에 앉힌다.
++        engine_card.body().addWidget(
++            self._axis_host(engine_card, self.legacy_switch))
+ 
+         # 구형 하위 선택 — 스위치가 켜졌을 때만 활성.
+         self.legacy_group = OptionGroup(
+@@ -539,14 +596,13 @@ class SetupPage(QWidget):
+             activate_on_arrow=True, parent=engine_card,
+         )
+         self.legacy_group.selection_changed.connect(self._on_legacy_sub_changed)
+-        engine_card.body().addWidget(self.legacy_group)
++        # 하위 선택도 축 안에서 끝난다 — 이 한 줄만 카드 끝까지 뻗으면 오른쪽 축이 깨진다.
++        self._legacy_group_row = self._axis_host(engine_card, self.legacy_group)
++        engine_card.body().addWidget(self._legacy_group_row)
+ 
+         # 임계치 슬라이더 (구형 모드 전용 파라미터)
+-        self._threshold_row = QWidget(engine_card)
+-        self._threshold_row.setProperty("role", "rowHost")
+-        sl_row = QHBoxLayout(self._threshold_row)
+-        sl_row.setContentsMargins(0, 0, 0, 0)
+-        sl_row.addWidget(QLabel(i18n.KO.SETUP_THRESHOLD_LABEL, self._threshold_row))
++        self._threshold_row, sl_row = self._axis_row(
++            engine_card, i18n.KO.SETUP_THRESHOLD_LABEL, divider=False)
+         self.slider = NoWheelSlider(Qt.Orientation.Horizontal, self._threshold_row)
+         self.slider.setRange(0, 100)
+         self.slider.setValue(int(round(_prefs_now.threshold * 100)))
+@@ -560,9 +616,10 @@ class SetupPage(QWidget):
+                                           | Qt.AlignmentFlag.AlignVCenter)
+         self.threshold_label.setFixedWidth(56)
+         self.slider.valueChanged.connect(self._on_threshold_changed)
++        # 슬라이더도 stretch 를 갖는다 — 라벨과의 사이(stretch 1)와 반씩 나눠 가지다가
++        # `_SLIDER_MAX_W` 에서 멈추고, 그 뒤 남는 폭은 전부 '사이'로 간다.
+         sl_row.addWidget(self.slider, stretch=1)
+         sl_row.addWidget(self.threshold_label)
+-        sl_row.addStretch(1)          # 상한 폭을 넘는 여백은 오른쪽으로
+         engine_card.body().addWidget(self._threshold_row)
+ 
+         # 지금 어느 파라미터가 유효한지 문장으로 — 비활성 컨트롤의 이유를 말해준다.
+@@ -628,7 +685,8 @@ class SetupPage(QWidget):
+ 
+         지금 어느 엔진이 도는지는 `_engine_inert_hint` 한 줄과 상단 모드 배지가 말한다."""
+         legacy_on = self.legacy_switch.is_on()
+-        self.legacy_group.setVisible(legacy_on)
++        # 축 껍데기째 숨긴다 — 안쪽만 숨기면 빈 껍데기가 카드 간격 한 칸을 남긴다.
++        self._legacy_group_row.setVisible(legacy_on)
+         self._threshold_row.setVisible(legacy_on)
+         self._tol_row.setVisible(True)
+         self._tol_row.setEnabled(not legacy_on)
+diff --git a/aoi_verification/app/ui/style.qss b/aoi_verification/app/ui/style.qss
+index df14a02..ab6aea6 100644
+--- a/aoi_verification/app/ui/style.qss
++++ b/aoi_verification/app/ui/style.qss
+@@ -391,9 +391,17 @@ QWidget[role="loadingPanel"] {
+    띠로 보인다.  투명으로 못 박는다. */
+ QWidget[role="loadingBarHost"],
+ QWidget[role="rowHost"],
++QWidget[role="axisRow"],
+ QWidget[role="switchRowText"] {
+     background: transparent;
+ }
++/* 설정 행(라벨 왼쪽 — 값 오른쪽) 사이의 눈금.  축이 넓어질수록 멀리 떨어진 라벨과 값을
++   한 줄로 묶어 주는 것은 이 밑줄이다(리스트 행의 관습).  카드 폭이 아니라 **축 폭**만큼
++   그어져, 값이 어디서 끝나는지를 선이 먼저 말해 준다. */
++QWidget[role="axisRow"] {
++    border: none;
++    border-bottom: 1px solid $row_divider;
++}
+ /* 진행바 트랙 — 기본 $panel 은 **패널 면과 같은 색**이라 트랙이 보이지 않고 채움만
+    공중에 떠 보인다(실측 지적).  패널 안에서는 한 단계 어두운 면을 쓴다. */
+ QWidget[role="loadingPanel"] QProgressBar {
+diff --git a/aoi_verification/app/ui/theme.py b/aoi_verification/app/ui/theme.py
+index ffdb954..b3ad6cc 100644
+--- a/aoi_verification/app/ui/theme.py
++++ b/aoi_verification/app/ui/theme.py
+@@ -44,6 +44,10 @@ class Profile:
+     section_gap: int = 28
+     card_pad: int = 20
+     row_pad_v: int = 8
++    # 설정 행의 '라벨 왼쪽 — 값 오른쪽' 축이 가질 수 있는 **최대 폭**.  카드는 그대로
++    # 전체폭이지만 축은 여기서 멈춘다 — 상한이 없으면 2560px 창에서 라벨과 값이 2천 px
++    # 떨어져 한 줄로 읽히지 않는다(눈이 가로로 멀리 이동하는 것도 실패다).
++    axis_max_w: int = 1120
+     row_gap: int = 0                # 하이라인 눈금이 행을 가른다(간격 0)
+     control_h: int = 32
+     control_h_lg: int = 44          # 타일·액션바 — 터치 패널(WCAG 2.5.5 AAA 44px)
+diff --git a/dev/tests/test_setup_controls.py b/dev/tests/test_setup_controls.py
+index 688d484..2d11640 100644
+--- a/dev/tests/test_setup_controls.py
++++ b/dev/tests/test_setup_controls.py
+@@ -526,3 +526,79 @@ def test_switch_hot_zone_is_not_the_whole_row(qapp):
+         assert "mousePressEvent" not in SwitchRow.__dict__
+     finally:
+         row.deleteLater()
++
++
++# ── 설정 카드의 '라벨 왼쪽 — 값 오른쪽' 축 ────────────────────────────────────
++def _right_x(page, w) -> int:
++    """페이지 좌표계에서 위젯의 오른쪽 변."""
++    return w.mapTo(page, w.rect().topRight()).x()
++
++
++def test_setting_values_share_one_right_axis(qapp):
++    """★ 실행 옵션·매칭 설정의 **값들이 한 축에서 끝난다**(macOS/iOS 설정 관습).
++
++    예전에는 값 **뒤**에 `addStretch(1)` 가 있어 남는 폭이 전부 오른쪽에 고였다 —
++    1512px 창에서 카드(1434)의 오른쪽 1135px(75%)이 빈 띠였고, 같은 카드 안에서
++    `SwitchRow` 만 토글을 오른쪽 끝에 붙여 **축이 둘로 갈라져** 있었다."""
++    page = sp.SetupPage()
++    try:
++        page.show()
++        page.resize(1512, 1000)
++        page.legacy_switch.set_on(True, emit=True)     # 구형 컨트롤까지 모두 보이게
++        for _ in range(12):
++            qapp.processEvents()
++        axis = {
++            "자동화 수준": _right_x(page, page.auto_group),
++            "진행 범위": _right_x(page, page.scope_group),
++            "허용 오차": _right_x(page, page.tol_plus_btn),
++            "구형 토글": _right_x(page, page.legacy_switch.switch),
++            "구형 하위선택": _right_x(page, page.legacy_group),
++            "임계치": _right_x(page, page.threshold_label),
++        }
++        assert len(set(axis.values())) == 1, f"축이 갈라졌다: {axis}"
++    finally:
++        page.deleteLater()
++
++
++def test_axis_is_capped_on_ultra_wide(qapp):
++    """축에는 **상한**이 있다 — 2560px 창에서 라벨과 값이 화면 양 끝으로 갈라지면
++    한 줄로 읽히지 않는다(눈이 가로로 멀리 이동하는 것도 실패다)."""
++    from aoi_verification.app.ui import theme
++    page = sp.SetupPage()
++    try:
++        page.show()
++        page.resize(1512, 1000)
++        for _ in range(12):
++            qapp.processEvents()
++        at_1512 = _right_x(page, page.auto_group)
++        page.resize(2560, 1000)
++        for _ in range(12):
++            qapp.processEvents()
++        at_2560 = _right_x(page, page.auto_group)
++        assert at_2560 == at_1512, "초광폭에서 값이 계속 오른쪽으로 달아났다"
++        # 상한은 토큰이 정한다 — 축 폭이 `axis_max_w` 를 넘지 않는다.
++        assert at_2560 <= theme.PROFILE.axis_max_w + 2 * theme.PROFILE.page_margin
++    finally:
++        page.deleteLater()
++
++
++def test_no_horizontal_overflow_at_800(qapp):
++    """★ 800px 창에서 가로 스크롤이 없어야 한다.
++
++    장비 카드 2열이 호스트의 **최소폭**을 972px 로 밀어 올리는데, 흘려 넣을 폭을
++    그 호스트의 `width()` 에서 읽고 있었다 — 자기가 만든 폭을 자기가 다시 읽는
++    되먹임이라 창을 줄여도 1열로 접히지 않았다(카드 908px, 가로 스크롤 실측)."""
++    from PyQt6.QtWidgets import QScrollArea
++    page = sp.SetupPage()
++    try:
++        page.show()
++        for w in (1512, 1024, 800):        # 넓은 쪽에서 줄여 와야 재현된다
++            page.resize(w, 900)
++            for _ in range(12):
++                qapp.processEvents()
++        scroll = page.findChild(QScrollArea)
++        assert scroll is not None
++        assert not scroll.horizontalScrollBar().isVisible(), "가로 스크롤이 생겼다"
++        assert scroll.widget().minimumSizeHint().width() <= scroll.viewport().width()
++    finally:
++        page.deleteLater()

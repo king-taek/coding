@@ -12,6 +12,7 @@ import pytest
 
 pytest.importorskip("PyQt6.QtWidgets")
 
+from PyQt6.QtCore import QPoint                                 # noqa: E402
 from PyQt6.QtWidgets import QApplication                        # noqa: E402
 
 from aoi_verification.app.ui.pages import setup_page as sp      # noqa: E402
@@ -165,38 +166,72 @@ def test_switch_and_sub_choice_drive_engine_mode(qapp):
 
 
 def test_only_the_active_engine_params_are_visible(qapp):
-    """**지금 쓰는 파라미터만 보인다** — 무효한 쪽은 숨긴다.
+    """무효한 파라미터는 정리하되, **토글 위에 있는 것은 숨기지 않는다.**
 
-    ★ 이 테스트는 한때 **반대 계약**을 고정하고 있었다
-    (`test_inert_params_disabled_but_never_hidden`: 비활성이되 `isVisibleTo` 는 True).
-    그 근거는 "어느 파라미터가 어느 엔진에 속하는지 눈으로 가르쳐 준다" 였다.
-    사용자가 숨기기로 결정했으므로 계약을 뒤집는다 — 지우지 않고 뒤집는 이유는, 다음
-    사람이 '왜 안 보이지?'라고 물을 때 여기서 답을 찾게 하려는 것이다.
+    이 계약은 두 번 뒤집혔고 두 번 다 이유가 있다:
+    1. 처음엔 '비활성이되 항상 보임' 이었다(어느 파라미터가 어느 엔진에 속하는지
+       눈으로 가르쳐 준다).
+    2. 사용자 요청으로 '안 쓰면 숨김' 이 됐다.
+    3. 그런데 허용 오차는 **구형 스위치보다 위**에 있어서, 숨기는 순간 스위치가
+       위로 튀었다("박스 안 객체들이 움직이면서 토글 위치가 변한다").
 
-    '가르쳐 주는' 역할은 상단 모드 배지(판정 기준 **수치**까지 표시)와
-    `_engine_inert_hint` 한 줄이 대신한다."""
+    그래서 지금은 **위치로 나눈다** — 스위치 아래(하위 선택·임계치)는 숨기고,
+    스위치 위(허용 오차)는 자리를 지킨 채 비활성으로만 보인다."""
     page = sp.SetupPage()
     try:
         page.show()
         for _ in range(6):
             qapp.processEvents()
-        # 좌표 모드(기본): 허용 오차만 보인다.
+        # 좌표 모드(기본): 허용 오차는 보이고 쓸 수 있다.
         assert page._tol_row.isVisibleTo(page) is True
+        assert page._tol_row.isEnabled() is True
         assert page._threshold_row.isVisibleTo(page) is False
         assert page.legacy_group.isVisibleTo(page) is False
-        # 구형 모드: 정확히 반대.
+        # 구형 모드: 허용 오차는 **자리를 지키되 비활성**, 나머지가 나타난다.
         page.legacy_switch.set_on(True, emit=True)
         for _ in range(6):
             qapp.processEvents()
-        assert page._tol_row.isVisibleTo(page) is False
+        assert page._tol_row.isVisibleTo(page) is True, "숨기면 토글이 튄다"
+        assert page._tol_row.isEnabled() is False
+        assert page.coord_tol_spin.isEnabled() is False, "자식까지 회색이어야 한다"
         assert page._threshold_row.isVisibleTo(page) is True
         assert page.legacy_group.isVisibleTo(page) is True
         # 되돌리면 원래대로 — 한쪽만 바뀌고 굳지 않는다.
         page.legacy_switch.set_on(False, emit=True)
         for _ in range(6):
             qapp.processEvents()
-        assert page._tol_row.isVisibleTo(page) is True
+        assert page._tol_row.isEnabled() is True
         assert page._threshold_row.isVisibleTo(page) is False
+    finally:
+        page.deleteLater()
+
+
+def test_legacy_toggle_does_not_move_when_switched(qapp):
+    """★ 사용자가 신고한 증상 그대로 — 구형 모드를 켜도 **토글이 제자리에 있다.**
+
+    켜고 끄는 컨트롤이 눌리는 순간 움직이면 연속으로 누를 수 없고, 방금 무엇을
+    눌렀는지도 흐려진다."""
+    page = sp.SetupPage()
+    try:
+        page.show()
+        page.resize(1280, 900)
+        for _ in range(8):
+            qapp.processEvents()
+
+        def _toggle_y() -> int:
+            return page.legacy_switch.mapTo(page, QPoint(0, 0)).y()
+
+        before = _toggle_y()
+        page.legacy_switch.set_on(True, emit=True)
+        for _ in range(8):
+            qapp.processEvents()
+        assert _toggle_y() == before, \
+            f"구형 모드를 켜자 토글이 {before}px → {_toggle_y()}px 로 움직였다"
+
+        page.legacy_switch.set_on(False, emit=True)
+        for _ in range(8):
+            qapp.processEvents()
+        assert _toggle_y() == before
     finally:
         page.deleteLater()
 

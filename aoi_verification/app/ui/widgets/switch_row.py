@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PyQt6.QtCore import (QEasingCurve, QEvent, QRectF, QSize, Qt,
+from PyQt6.QtCore import (QEvent, QRectF, QSize, Qt,
                           QVariantAnimation, pyqtSignal)
 from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import (QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout,
@@ -45,8 +45,9 @@ class ToggleSwitch(QWidget):
         #   PyQt6 는 슬롯(mouseReleaseEvent) 안의 미처리 예외를 qFatal() 로 처리하므로
         #   앱이 그대로 죽었다 — 사용자가 겪은 '구형 모드 켜고 끄면 강제종료'다.
         #   LoadingOverlay._fade_anim/_rise_anim 이 쓰는 방식으로 통일한다.
+        from .. import motion
         self._anim = QVariantAnimation(self)
-        self._anim.setEasingCurve(QEasingCurve.Type.OutQuart)
+        self._anim.setEasingCurve(motion.EASE_PRIMARY)
         self._anim.valueChanged.connect(self._on_tween)
         self.setFixedSize(QSize(_TRACK_W, _TRACK_H))
         self.setCursor(Qt.CursorShape.PointingHandCursor)

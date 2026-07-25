@@ -332,7 +332,7 @@ class LoadingOverlay(QWidget):
         #   "wrapped C/C++ object ... has been deleted" 를 내고, PyQt6 가 슬롯 안의
         #   미처리 예외를 qFatal() 로 처리해 앱이 죽었다(실패목록 두 번째 클릭 크래시).
         self._bar_anim = QVariantAnimation(self)
-        self._bar_anim.setEasingCurve(QEasingCurve.Type.OutQuart)
+        self._bar_anim.setEasingCurve(motion.EASE_PRIMARY)
         self._bar_anim.setStartValue(0.0)
         self._bar_anim.setEndValue(1.0)
         self._bar_anim.valueChanged.connect(self._on_bar_tick)   # 위와 같은 이유로 바인드 메서드

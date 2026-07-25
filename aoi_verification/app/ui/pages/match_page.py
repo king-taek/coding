@@ -297,6 +297,11 @@ class MatchPage(QWidget):
         self._h_splitter.splitterMoved.connect(self._save_splitter_state)
 
         # ‘S’ (skip) 단축키 — 잠시 보류 버튼 제거와 함께 비활성 (#3).
+        # ★ 컨텍스트는 기본값(WindowShortcut)을 유지한다.  WidgetWithChildren 으로
+        #   좁히면 '포커스가 이 위젯 트리 안에 있을 때만' 발화하는데, 이 화면은
+        #   사용자가 아무것도 클릭하지 않으면 포커스 위젯이 없어 단축키가 조용히
+        #   죽는다.  대신 화면이 안 보일 때의 오작동은 핸들러의 `user=True` 가드가
+        #   막는다(`_confirm_no_match` 주석 참조).
         QShortcut(QKeySequence("N"), self, activated=self._confirm_no_match)
         # 되돌리기 (#C1) — Stage 1 의 Z 와 충돌하지 않도록 Ctrl+Z.
         QShortcut(QKeySequence("Ctrl+Z"), self, activated=self._undo_match)
@@ -585,6 +590,11 @@ class MatchPage(QWidget):
             self.bg_status_label.setText(msg or "")
         if self._current is not None or (self._state and self._state.queue):
             self._advance()
+            return
+        # 큐도 비었고 현재 ref 도 없다 — 여기서 그냥 반환하면 main_window 는 아무
+        # 신호도 못 받아 Stage 2 에 갇힌다.  빈 큐는 '끝'과 같으므로 그렇게 알린다.
+        if self._state is not None:
+            self._advance()             # queue 가 비어 있으므로 finished 를 낸다
 
     def _on_precompute_finished(self) -> None:
         if not self._precompute_signal_is_current():
@@ -611,6 +621,14 @@ class MatchPage(QWidget):
         # 수동 스트리밍 — 첫 슬롯에서 이미 _advance 됨.  대기 슬롯만 해제.
         if self._waiting_for_slot is not None:
             self._waiting_for_slot = None
+            self._loading.hide_overlay()
+            self._advance()
+            return
+        # ★ 안전망 — 스트리밍인데 대기 슬롯도 없고 아직 아무 ref 도 잡지 못했다면
+        #   (첫 `slot_finished` 가 끝내 오지 않은 경우: 워커가 중단·예외로 슬롯
+        #   루프를 빠져나가면 `finished` 만 온다) 여기서 진행을 열어 준다.
+        #   이게 없으면 '잠시만 기다려주세요' 오버레이가 영구히 남는다.
+        if self._current is None and self._state is not None and self._state.queue:
             self._loading.hide_overlay()
             self._advance()
 
@@ -662,6 +680,15 @@ class MatchPage(QWidget):
             if self._worker.isRunning():
                 self._worker.stop()
                 self._worker.wait(500)
+            self._worker = None
+        # ★ 다음 실행이 **처음처럼** 시작되게 계산 결과를 전부 버린다.
+        #   특히 `_score_cache` 를 남기면 2회차의 `has_all_pairs` 가 True 가 되어
+        #   `_launch_matcher` 가 **1회차 후보를 그대로 재사용**한다 — 설정(허용 오차·
+        #   엔진)을 바꿔 다시 돌려도 옛 결과가 나오는 정확도 사고다.
+        self._score_cache.clear()
+        self._slot_cache.clear()
+        self._candidates = []
+        self._coord_failed_set = set()
         self._loading.hide_overlay()
         self.cancelled.emit()
 
@@ -679,8 +706,11 @@ class MatchPage(QWidget):
         """
         w = self._precompute_worker
         if w is not None:
+            # ★ `phase` 도 포함한다 — 빠져 있어서 죽은 워커가 계속 `_on_precompute_phase`
+            #   에 연결된 채 남았다(지금은 `_precompute_signal_is_current` 가 막아 주지만,
+            #   '끊는다'고 적어 놓고 하나만 안 끊는 건 다음 사람을 오도한다).
             for sig in (w.signals.progress, w.signals.slot_finished,
-                        w.signals.finished, w.signals.failed):
+                        w.signals.finished, w.signals.failed, w.signals.phase):
                 try:
                     sig.disconnect()
                 except (TypeError, RuntimeError):
@@ -688,6 +718,9 @@ class MatchPage(QWidget):
             if w.isRunning():
                 w.stop()
                 w.wait(500)
+            # 죽은 워커 핸들을 남기지 않는다 — `_advance` 의 slot_pending 판정과
+            # `_on_precompute_finished` 의 failed_set 조회가 이걸 그대로 읽는다.
+            self._precompute_worker = None
         self._streaming_precompute = False
         self._waiting_for_slot = None
         self._precompute_processed_slots.clear()
@@ -726,7 +759,7 @@ class MatchPage(QWidget):
             if not self._auto_mode:
                 sheets.info(self, i18n.KO.APP_TITLE,
                                         i18n.KO.INFO_NO_MATCH_FOUND)
-            self._confirm_no_match()
+            self._confirm_no_match(user=False)
             return
 
         # 스트리밍 모드에서 사용자가 ‘아직 점수 계산 중인 슬롯’ 에 도착하면
@@ -827,10 +860,25 @@ class MatchPage(QWidget):
         )
         self._worker.signals.progress.connect(self._on_matcher_progress)
         self._worker.signals.done.connect(self._on_matcher_done)
-        self._worker.signals.failed.connect(
-            lambda msg: self._loading.set_progress(0, 0, msg)
-        )
+        self._worker.signals.failed.connect(self._on_matcher_failed)
         self._worker.start()
+
+    def _on_matcher_failed(self, msg: str) -> None:
+        """매칭 워커 실패 — **오버레이를 풀고 다음 ref 로 넘어간다.**
+
+        ``MatcherWorker.run`` 은 ``done`` 또는 ``failed`` 중 하나만 낸다.  예전엔
+        여기서 오버레이 문구만 갈아 끼워서, ref 하나의 특징 추출이 실패하면
+        차단 오버레이가 뜬 채 **영구히 멈췄다**.  ``_on_precompute_failed`` 가
+        같은 함정(Bug #6)을 이미 고쳤는데 이쪽만 남아 있었다 — 같은 규칙을 쓴다:
+        **실패도 하나의 결과다.  후보 0개로 취급하고 진행을 계속한다.**"""
+        try:
+            self._loading.hide_overlay()
+        except Exception:
+            pass
+        if self.bg_status_label is not None and msg:
+            self.bg_status_label.setText(msg)
+        # 후보 0개와 동일 경로 — 자동이면 '매칭 없음' 확정, 수동이면 안내.
+        self._on_matcher_done([])
 
     def _on_matcher_progress(self, done: int, total: int) -> None:
         fmt = getattr(self, "_current_loading_fmt", i18n.KO.LOAD_FEATURE_FMT)
@@ -845,12 +893,15 @@ class MatchPage(QWidget):
             # 한 번 양보해 진행 라벨이 보이도록 QTimer.singleShot 으로 defer).
             if self._auto_mode:
                 self._update_auto_progress()
-                QTimer.singleShot(0, self._confirm_no_match)
+                # ★ user=False — 페이지 전환 애니메이션 중에는 isVisible() 이
+                #   False 라, 사람이 부른 것처럼 다루면 사슬이 끊긴다.
+                QTimer.singleShot(
+                    0, lambda: self._confirm_no_match(user=False))
             else:
                 self._loading.hide_overlay()
                 sheets.info(self, i18n.KO.APP_TITLE,
                                         i18n.KO.INFO_NO_MATCH_FOUND)
-                self._confirm_no_match()           # ‘잠시 보류’ 제거 (#3)
+                self._confirm_no_match(user=False)  # ‘잠시 보류’ 제거 (#3)
             return
 
         # 자동 매치 모드: 최고 점수 후보를 즉시 확정하고 다음 ref 로.
@@ -998,11 +1049,12 @@ class MatchPage(QWidget):
         self._on_pick(ThumbEntry(item=picked, extra={"score": score}))
 
     # ------------------------------------------------------------------
-    def _skip_current(self) -> None:
-        """잠시 보류 — Skip 재시도 풀로 들어감. 미탐 시트엔 들어가지 않음."""
-        # QShortcut("S") 는 WindowShortcut 컨텍스트라 SelectPage 가 보일 때도
-        # 이 핸들러로 전달된다. 보이지 않을 땐 조용히 무시.
-        if not self.isVisible():
+    def _skip_current(self, *, user: bool = True) -> None:
+        """잠시 보류 — Skip 재시도 풀로 들어감. 미탐 시트엔 들어가지 않음.
+
+        ``user`` 의 의미는 :meth:`_confirm_no_match` 와 같다 — 단축키/버튼처럼
+        **사람이 눌렀을 때만** 가시성을 검사한다."""
+        if user and not self.isVisible():
             return
         if self._state is None or self._current is None:
             return
@@ -1015,9 +1067,26 @@ class MatchPage(QWidget):
         self._update_undo_button()
         self._advance()
 
-    def _confirm_no_match(self) -> None:
-        """매칭 없음 확정 — 미탐 시트에 들어가고, Skip 재시도 대상이 아님."""
-        if not self.isVisible():
+    def _confirm_no_match(self, *, user: bool = True) -> None:
+        """매칭 없음 확정 — 미탐 시트에 들어가고, Skip 재시도 대상이 아님.
+
+        ★ ``user`` 는 **누가 불렀는가**다.  가시성 검사를 사람이 누른 경로에만 건다.
+
+        예전엔 무조건 ``if not self.isVisible(): return`` 이었고, 그 한 줄이
+        '가끔 Stage 2 에 들어가도 자동 매칭이 진행되지 않는' 버그의 원인이었다:
+        ``main_window._show_page`` 는 전환 애니메이션(≈160ms) 동안 스냅샷만 띄우고
+        **실제 위젯을 비-current 로 되돌린다** — 그 사이 ``isVisible()`` 은 False 다.
+        두 진입점(`_enter_stage2_*`)이 ``load_state`` 를 먼저 부르므로 워커는 그
+        '보이지 않는 창' 안에서 돌고, 후보가 0개인 ref 를 만나는 순간 자동 사슬이
+        여기서 조용히 끊겼다(매칭되는 ref 를 처리하는 ``_on_pick`` 엔 같은 가드가
+        없어 더 눈에 안 띄었다).  좌표 모드는 계산이 즉시 끝나고 허용 오차를 넘는
+        ref 가 정상적으로 빈 후보를 남기므로 특히 잘 터졌다.
+
+        가드 자체는 필요하다 — 'N' 단축키가 ``WidgetWithChildrenShortcut`` 로
+        좁혀졌어도, 버튼/단축키 경로가 엉뚱한 화면에서 큐를 소비하는 일은 막아야
+        한다.  그래서 지우는 대신 **사람 경로와 프로그램 경로를 나눈다.**
+        """
+        if user and not self.isVisible():
             return
         if self._state is None or self._current is None:
             return

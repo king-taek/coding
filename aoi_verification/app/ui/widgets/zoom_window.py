@@ -11,8 +11,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable, Iterable, Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QPainter, QPixmap, QShortcut, QKeySequence
+from PyQt6.QtCore import QObject, QThread, Qt, pyqtSignal
+from PyQt6.QtGui import (QColor, QImage, QPainter, QPixmap, QShortcut,
+                         QKeySequence)
 from PyQt6.QtWidgets import (QApplication, QDialog, QGridLayout, QHBoxLayout,
                               QLabel, QMenu, QPushButton, QScrollArea,
                               QVBoxLayout, QWidget)
@@ -136,8 +137,76 @@ class _MidTile(QWidget):
 
 
 # ---------------------------------------------------------------------------
+def fit_scale(pix_w: int, pix_h: int, view_w: int, view_h: int) -> float:
+    """이미지를 뷰에 **꽉 채우는** 배율(비율 유지).  순수 함수 — 헤드리스 테스트용.
+
+    ★ 1.0 을 상한으로 두지 않는다.  '크게 보기'가 요구받는 것은 원본 픽셀 크기가
+    아니라 **화면을 채우는 것**이다.  mid 캐시(긴 변 ≤800px)를 창 전체(≈1400px)
+    한가운데 1:1 로 그리던 것이 정확히 '크게 보기인데 작다'는 버그였다."""
+    if pix_w <= 0 or pix_h <= 0 or view_w <= 0 or view_h <= 0:
+        return 1.0
+    return min(view_w / float(pix_w), view_h / float(pix_h))
+
+
+# 살아 있는 로더를 여기에 붙잡아 둔다 — **뷰어의 자식으로 두지 않는다.**
+#
+# ★ 이유: 실행 중인 QThread 가 파괴되면 Qt 는 "QThread: Destroyed while thread is
+#   still running" 으로 프로세스를 죽인다.  로더를 다이얼로그의 자식으로 두면
+#   사용자가 디코드가 끝나기 전에 창을 닫는 순간 정확히 그 일이 벌어진다.
+#   부모를 떼고 여기서 참조를 쥐고 있다가 `finished` 에서 놓아 주면, 창이 언제
+#   닫히든 스레드는 자기 수명을 다 살고 조용히 사라진다(`motion.py` 가 애니메이션
+#   자기삭제를 금지한 것과 같은 원칙: 가드를 덧대지 말고 원인을 없앤다).
+_LIVE_LOADERS: set = set()
+
+
+class _OriginalLoader(QThread):
+    """원본 이미지를 **워커 스레드에서** 디코드한다(UI 가 멈추지 않게).
+
+    ★ 여기서 ``QPixmap`` 을 만들면 안 된다 — GUI 스레드 전용이다.  ``QImage`` 로
+    받아 시그널로 넘기고, 변환은 메인 스레드에서 한다.  ``signals`` 는 메인
+    스레드에서 만들어지므로 emit 은 큐 연결이 된다."""
+
+    class _Signals(QObject):
+        loaded = pyqtSignal(QImage)
+
+    def __init__(self, path: Path) -> None:
+        super().__init__()                  # 부모 없음(위 주석)
+        self._path = path
+        self.signals = self._Signals()
+
+    def run(self) -> None:      # type: ignore[override]
+        try:
+            img = QImage(str(self._path))
+        except Exception:
+            return
+        if not img.isNull():
+            self.signals.loaded.emit(img)
+
+
+def _spawn_original_loader(path: Path) -> "_OriginalLoader":
+    ld = _OriginalLoader(path)
+    _LIVE_LOADERS.add(ld)
+    ld.finished.connect(lambda: _LIVE_LOADERS.discard(ld))
+    ld.start()
+    return ld
+
+
 class FullscreenViewer(QDialog):
-    """우클릭 '크게 보기' 로 열리는 풀스크린 뷰어 (휠 줌 + 드래그 팬)."""
+    """우클릭 '크게 보기' 로 열리는 풀스크린 뷰어 (휠 줌 + 드래그 팬).
+
+    두 가지를 지킨다:
+
+    1. **처음부터 창에 꽉 찬다.**  배율은 첫 표시 때 ``fit_scale`` 로 한 번만
+       정한다(그 뒤 리사이즈는 사용자의 휠 줌을 덮지 않는다).
+    2. **원본 화질로 올라온다.**  즉시 mid 캐시로 그려 대기시간을 없애고,
+       원본은 백그라운드에서 디코드해 도착하면 갈아 끼운다 — 이때 화면상
+       크기가 튀지 않게 배율을 픽셀 비율로 재보정한다.
+    """
+
+    # 원본이 뷰포트보다 이 배 이상 크면 그만큼만 남기고 한 번 줄인다.
+    # 휠 틱마다 5000px 스무스 스케일을 돌리지 않기 위한 상한(그래도 mid 의
+    # 800px 보다 훨씬 선명하다).
+    _WORK_OVERSAMPLE = 2
 
     def __init__(self, image_path: Path, parent=None) -> None:
         super().__init__(parent)
@@ -145,7 +214,7 @@ class FullscreenViewer(QDialog):
         self.setModal(True)
         self.setStyleSheet("background-color: #000;")
         # 작은 모니터에서 1280×800 이 화면을 넘어가지 않도록 화면 가용 영역의
-        # 90% 안으로 제한.
+        # 90% 안으로 제한.  (실제 크기는 시트 호스트가 full_bleed 로 덮어쓴다.)
         scr = QApplication.primaryScreen()
         if scr is not None:
             g = scr.availableGeometry()
@@ -154,12 +223,15 @@ class FullscreenViewer(QDialog):
         else:
             self.resize(1280, 800)
 
+        self._path = image_path
         self._scale = 1.0
+        self._fitted = False              # 맞춤은 첫 표시 때 한 번만
         self._offset_x = 0
         self._offset_y = 0
         self._last_drag = None
+        self._loader: Optional[_OriginalLoader] = None
 
-        # 풀 사이즈 이미지는 너무 클 수 있어 우선 mid 를 사용한다.
+        # 풀 사이즈 이미지는 디코드가 느릴 수 있어 우선 mid 로 즉시 그린다.
         self._pix = QPixmap(str(image_io.get_mid_path(image_path)))
         if self._pix.isNull():
             self._pix = QPixmap(800, 600)
@@ -174,6 +246,60 @@ class FullscreenViewer(QDialog):
         lay.addWidget(self._label)
 
         QShortcut(QKeySequence("Esc"), self, activated=self.close)
+        self._start_original_load()
+
+    # -- 원본 화질로 교체 ------------------------------------------------
+    def _start_original_load(self) -> None:
+        """원본을 백그라운드에서 디코드.  헤드리스면 건너뛴다(테스트 결정성)."""
+        import os
+        if os.environ.get("QT_QPA_PLATFORM", "") == "offscreen":
+            return
+        self._loader = _spawn_original_loader(self._path)
+        self._loader.signals.loaded.connect(self._on_original_loaded)
+
+    def closeEvent(self, e):  # noqa: N802
+        """닫힐 때 로더 연결을 끊는다 — 죽어 가는 위젯으로 tick 이 들어가지 않게.
+
+        스레드 자체는 기다리지 않는다(`_LIVE_LOADERS` 가 수명을 책임진다) —
+        디코드가 끝날 때까지 닫기를 붙잡아 두면 그게 곧 UI 멈춤이다."""
+        ld = self._loader
+        if ld is not None:
+            try:
+                ld.signals.loaded.disconnect(self._on_original_loaded)
+            except (TypeError, RuntimeError):
+                pass
+            self._loader = None
+        super().closeEvent(e)
+
+    def _on_original_loaded(self, img: "QImage") -> None:
+        """워커가 준 QImage → (메인 스레드에서) QPixmap 으로 교체.
+
+        ★ 배율을 픽셀 비율로 나눠 준다 — 안 그러면 화질이 좋아지는 순간 사진이
+        갑자기 몇 배로 커진다.  사용자가 이미 줌/팬 했더라도 화면은 그대로다."""
+        if img.isNull():
+            return
+        # 지나치게 큰 원본은 뷰포트의 몇 배 선까지만 — 휠 줌 응답을 지키기 위해.
+        cap = self._WORK_OVERSAMPLE * max(1, self.width(), self.height())
+        if max(img.width(), img.height()) > cap:
+            img = img.scaled(cap, cap, Qt.AspectRatioMode.KeepAspectRatio,
+                             Qt.TransformationMode.SmoothTransformation)
+        pix = QPixmap.fromImage(img)
+        if pix.isNull() or self._pix.width() <= 0:
+            return
+        self._scale *= self._pix.width() / float(pix.width())
+        self._pix = pix
+        self._redraw()
+
+    # -- 배율 ------------------------------------------------------------
+    def _fit_to_view(self) -> None:
+        self._scale = fit_scale(self._pix.width(), self._pix.height(),
+                                self.width(), self.height())
+        self._offset_x = 0
+        self._offset_y = 0
+
+    def showEvent(self, e):  # noqa: N802
+        super().showEvent(e)
+        self._redraw()
 
     def resizeEvent(self, e):  # noqa: N802
         self._redraw()
@@ -181,7 +307,7 @@ class FullscreenViewer(QDialog):
 
     def wheelEvent(self, e):  # noqa: N802
         step = 1.1 if e.angleDelta().y() > 0 else (1.0 / 1.1)
-        self._scale = max(0.1, min(8.0, self._scale * step))
+        self._scale = max(0.02, min(8.0, self._scale * step))
         self._redraw()
 
     def mousePressEvent(self, e):  # noqa: N802
@@ -200,6 +326,14 @@ class FullscreenViewer(QDialog):
         self._last_drag = None
 
     def _redraw(self) -> None:
+        # ★ 맞춤은 **그리기 직전에, 딱 한 번** 한다.  showEvent/resizeEvent 어느
+        #   쪽이 먼저 오는지는 이 뷰어가 어떻게 띄워지느냐에 달려 있고(시트 호스트는
+        #   setGeometry 로 자식에 동기 리사이즈를, 독립 창은 표시 후 리사이즈를 준다),
+        #   둘 중 하나에만 걸어 두면 나머지 경로에서 배율 1.0 인 채로 첫 프레임이
+        #   그려진다 — 바로 그게 '크게 보기인데 작다' 였다.
+        if not self._fitted and self.width() > 0 and self.height() > 0:
+            self._fitted = True
+            self._fit_to_view()
         w = int(self._pix.width() * self._scale)
         h = int(self._pix.height() * self._scale)
         scaled = self._pix.scaled(

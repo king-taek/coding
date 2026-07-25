@@ -1,9 +1,12 @@
 """공용 모션 시스템 — 애플급 절제된 전환/스크롤/페이드.
 
 원칙(사용자 지정):
-- **ease-out**: 빠르게 시작해 끝에서 감속.  기본 ``EASE_PRIMARY``(OutQuart).
-  단 **로딩 오버레이는 두 축을 분리**한다 — 불투명도는 Linear(스크림 디밍이 슬램하지
-  않게), 위치는 OutQuad(끝에서 감속하며 안착).  이유는 ``widgets/loading_overlay.py``
+- **ease-out**: 빠르게 시작해 끝에서 **오래** 감속.  기본 ``EASE_PRIMARY``
+  (`cubic-bezier(.16,1,.3,1)` — 근거·실측표는 아래 ``_ease_out_long_tail`` 참조).
+  단 **끝없이 도는 표시는 등속**이다(회전 스피너·로딩 줄무늬·결정형 바 채움) —
+  반복 구간마다 가감속이 붙으면 맥박처럼 보인다.
+  그리고 **로딩 오버레이는 두 축을 분리**한다 — 불투명도는 Linear(스크림 디밍이 슬램하지
+  않게), 위치는 OutQuad(잔여 **이동량**이 눈에 보이게).  이유는 ``widgets/loading_overlay.py``
   주석과 ``docs/화면_디자인_도면.md`` 참조.
 - 퇴장은 입장보다 짧게.  장식이 아니라 상태·공간 연속성을 전달.
 - **결정론**: 헤드리스(offscreen) 면 모든 헬퍼가 즉시 적용(테스트/캡처가 흔들리지
@@ -15,7 +18,7 @@ from __future__ import annotations
 
 import os
 
-from PyQt6.QtCore import (QEasingCurve, QPoint, QPropertyAnimation,
+from PyQt6.QtCore import (QEasingCurve, QPoint, QPointF, QPropertyAnimation,
                           QVariantAnimation)
 from PyQt6.QtWidgets import QGraphicsOpacityEffect, QLabel
 
@@ -39,11 +42,44 @@ from . import theme
 #   (2) 위 (1)을 막으려고 `destroyed.connect(anim.stop)` 을 걸었다가, 애니메이션이 먼저
 #       자기 삭제된 뒤 대상이 파괴되면서 그 연결이 발화 → 세그폴트.
 #   가드를 덧붙이는 대신 **원인(자기 삭제)을 없앤다.**
-DUR_BASE = 200
-DUR_SLOW = 280
-DUR_SWITCH = 140         # 토글 손잡이 이동 — `switch_row.ToggleSwitch` 가 쓰는 값
+# ★ 지속시간은 '감속이 눈에 보일 만큼' 이어야 한다.  아래 EASE_PRIMARY 는 마지막
+#   10%를 **전체 시간의 67%**에 걸쳐 놓는데, 총 160ms 였을 땐 그 안착이 107ms 라
+#   사실상 안 보였다("마지막에 뚝 끊긴다").  곡선만 바꾸고 시간을 그대로 두면
+#   체감이 거의 안 달라진다 — 둘은 함께 정해야 한다.
+DUR_BASE = 300           # 실제 240ms(motion_scale 0.8) — 안착 ≈161ms
+DUR_SLOW = 400
+DUR_SWITCH = 200         # 토글 손잡이 이동 — `switch_row.ToggleSwitch` 가 쓰는 값
 
-EASE_PRIMARY = QEasingCurve.Type.OutQuart     # 빠르게→끝에서 감속
+
+def _ease_out_long_tail() -> QEasingCurve:
+    """빠르게 출발해 **오래 감속하며** 안착하는 곡선 (CSS `cubic-bezier(.16,1,.3,1)`).
+
+    ★ 왜 표준 ``OutQuart`` 가 아닌가 — 두 지표를 함께 봐야 한다(실측):
+
+    | 곡선 | t=0.1 진행률(출발 속도) | 마지막 10%에 쓰는 **시간** |
+    |---|---|---|
+    | OutQuad            | 0.190 | 31.6% |
+    | OutCubic           | 0.271 | 46.4% |
+    | OutQuart (이전 기본) | 0.344 | 56.2% |
+    | **이 곡선**          | **0.494** | **67.1%** |
+
+    사용자 요구는 "처음엔 빠르게, 나중엔 천천히 끝나게" 였다.  이 곡선은 출발이
+    가장 빠르면서 감속 구간이 **시간상** 가장 길다 — 두 요구를 동시에 만족하는
+    유일한 후보다.
+
+    ※ 반대로 '남은 **거리**'는 OutQuart 보다 작다.  그래서 잔여 이동량을 눈으로
+    확인해야 하는 자리(로딩 패널의 32px 상승)는 여전히 OutQuad 를 쓴다 —
+    ``widgets/loading_overlay.py`` 주석과 ``dev/tests/test_loading_panel.py`` 참조.
+    """
+    c = QEasingCurve(QEasingCurve.Type.BezierSpline)
+    c.addCubicBezierSegment(QPointF(0.16, 1.0), QPointF(0.30, 1.0),
+                            QPointF(1.0, 1.0))
+    return c
+
+
+# QEasingCurve 는 값 타입이라 ``setEasingCurve()`` 가 복사한다 — 하나를 공유해도
+# 안전하고, 호출부는 예전처럼 이 이름만 넘기면 된다.
+EASE_PRIMARY = _ease_out_long_tail()          # 빠르게→끝에서 오래 감속
 
 
 def enabled() -> bool:

@@ -495,8 +495,9 @@ QLabel[role="warn"] {
    지금 어느 팔레트에도 없는 죽은 네온 초록을 인라인으로 하드코딩해, 다크에서 배경만
    초록으로 뜨고 라벨 대비도 측정된 적이 없었다.  토큰으로 칠하면 두 모드가 자동이다.
 
-   ★ `:focus` 를 따로 쓴다 — 이전 타일은 `StrongFocus` 를 켜 두고 포커스를 **그리지
-   않아서**, 키보드로 이동해도 지금 어디인지 알 수 없었다(2.4.7 실패). */
+   ★ `:focus` 규칙은 없다 — 타일이 `NoFocus` 라 절대 발화하지 않는다(사용자 결정으로
+   타일 키보드 조작 제거).  '그릴 수 없는 상태'의 스타일을 남겨 두면 다음 사람이
+   키보드 이동이 있는 줄 안다. */
 QPushButton[role="slotTile"] {
     background: transparent;
     color: $ink2;
@@ -517,10 +518,6 @@ QPushButton[role="slotTile"]:checked {
     color: $accent;
     border: 1px solid $accent;
     font-weight: 700;
-}
-QPushButton[role="slotTile"]:focus {
-    border: $focus_w solid $focus;
-    padding: 5px 9px;           /* 보더가 굵어진 만큼 패딩을 줄여 높이 고정 */
 }
 QPushButton[role="slotTile"]:disabled {
     background: transparent;
