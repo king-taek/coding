@@ -48,6 +48,42 @@ class SetupInput:
     selected_slots: Optional[set] = None
 
 
+# ---------------------------------------------------------------------------
+# 설정 화면 배치안 — '실행 옵션'·'매칭 설정' 카드의 **가로 여백이 너무 많다**는
+# 지적에 대한 후보들.  기존엔 `dev/layout_variants/*.patch` 를 갈아끼워 봐야 했지만,
+# 이제 첫 화면의 '배치안' 버튼으로 **즉시** 바꿔 보고 고른다.
+#
+# ★ 최종안을 고른 뒤에는 그 안의 `_layout_*` 하나만 남기고 이 표·전환 버튼·나머지
+#   구현을 지우면 된다(설계상 서로 독립이라 다른 코드에 흔적이 남지 않는다).
+# ---------------------------------------------------------------------------
+LAYOUT_DEFAULT = "base"
+LAYOUT_VARIANTS: list[tuple[str, str, str]] = [
+    ("base", "원본", "지금 쓰는 배치 — 한 열, 카드가 전체 폭"),
+    ("A", "A 나란히", "두 카드를 가로로 나란히 — 빈 폭을 카드가 나눠 갖는다"),
+    ("B", "B 2열", "카드 **안**을 반응형 2열로 — 채점 1위(8.28)"),
+    ("C", "C 단일컬럼", "본문을 읽기 좋은 폭(576px)으로 좁혀 가운데"),
+    ("D", "D 축정렬", "라벨 왼쪽 / 값 오른쪽으로 축을 맞춘 2열"),
+    ("E", "E 보조레일", "본론 열 + 오른쪽 264px 보조 레일"),
+]
+_RAIL_W = 264
+_COLUMN_W = 576
+
+
+def _discard_layout(layout) -> None:
+    """레이아웃과 그 안의 위젯을 재귀적으로 정리(배치안 전환 시 본문 비우기)."""
+    while layout.count():
+        item = layout.takeAt(0)
+        w = item.widget()
+        if w is not None:
+            w.setParent(None)
+            w.deleteLater()
+            continue
+        child = item.layout()
+        if child is not None:
+            _discard_layout(child)
+    layout.deleteLater()
+
+
 class SetupPage(QWidget):
     """검증 시작 화면."""
 
@@ -65,6 +101,9 @@ class SetupPage(QWidget):
         self._appearance_timer = QTimer(self)
         self._appearance_timer.setSingleShot(True)
         self._appearance_timer.timeout.connect(self._emit_appearance_changed)
+        # '실행 옵션 / 매칭 설정' 두 카드의 가로 여백을 줄이는 후보 배치안.
+        # 최종안을 고르면 이 전환기와 나머지 안을 지우면 된다(LAYOUT_VARIANTS 주석).
+        self._layout_variant = LAYOUT_DEFAULT
         self._build()
 
     # ------------------------------------------------------------------
@@ -104,7 +143,9 @@ class SetupPage(QWidget):
         root.setContentsMargins(m, m, m, m)
         root.setSpacing(theme.PROFILE.section_gap)
 
-        # 본문 구성 — 배치안(서브클래스)이 이 메서드만 오버라이드하면 배치가 바뀐다.
+        # 본문 구성 — 배치안이 이 메서드만 바꾸면 배치가 바뀐다.
+        # root 를 들고 있어야 배치안을 고를 때 본문만 다시 그릴 수 있다.
+        self._root_layout = root
         self._build_body(root)
 
         # 액션바는 스크롤 **밖**에 고정한다(주요 액션이 항상 손에 닿게).
@@ -149,21 +190,202 @@ class SetupPage(QWidget):
         return True
 
     def _build_body(self, root: QVBoxLayout) -> None:
-        """「진행 순서형」 — 한 열, 위에서 아래로(폴더 → 옵션 → 시작).  유일한 배치다.
+        """「진행 순서형」 — 한 열, 위에서 아래로(폴더 → 옵션 → 시작).
 
         폴더가 먼저다: 매번 바뀌는 값이고, 자동화 수준·진행 범위는 대체로 그대로 쓴다.
         그 둘은 전체폭 카드 두 장을 차지하다가 **'실행 옵션' 카드 하나**로 합쳐졌다
-        (아래 `_build_run_options_card` 주석 참조)."""
+        (아래 `_build_run_options_card` 주석 참조).
+
+        두 설정 카드의 **가로 여백**을 줄이는 후보 배치안은 `_layout_variant` 로 고르며,
+        아래 ``_place_setting_cards`` 만 갈라진다 — 나머지 순서는 모든 안이 공유한다."""
         root.addWidget(self._build_top_bar())
+        root.addWidget(self._build_variant_bar())
         root.addWidget(self._build_subtitle())
         root.addWidget(self._build_device_row())
-        root.addWidget(self._build_run_options_card())
-        root.addWidget(self._build_engine_card())
+        self._place_setting_cards(root)
         root.addWidget(self._build_howto())
         root.addStretch(1)
         if not self._pinned_action_bar():
             root.addWidget(self._build_action_bar())
         root.addWidget(self._build_credit())
+
+    # ------------------------------------------------------------------
+    # 배치안 — 두 설정 카드를 어떻게 놓을지만 갈라진다
+    # ------------------------------------------------------------------
+    def _place_setting_cards(self, root: QVBoxLayout) -> None:
+        run_card = self._build_run_options_card()
+        eng_card = self._build_engine_card()
+        key = self._layout_variant
+        if key == "A":
+            self._layout_a_side_by_side(root, run_card, eng_card)
+        elif key == "B":
+            self._layout_b_two_columns(root, run_card, eng_card)
+        elif key == "C":
+            self._layout_c_single_column(root, run_card, eng_card)
+        elif key == "D":
+            self._layout_d_axis_aligned(root, run_card, eng_card)
+        elif key == "E":
+            self._layout_e_side_rail(root, run_card, eng_card)
+        else:
+            root.addWidget(run_card)
+            root.addWidget(eng_card)
+
+    def _layout_a_side_by_side(self, root, run_card, eng_card) -> None:
+        """A — 두 카드를 가로로 나란히.  남는 폭을 카드가 나눠 갖는다."""
+        row = QWidget(self)
+        row.setProperty("role", "rowHost")
+        h = QHBoxLayout(row)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(theme.PROFILE.section_gap)
+        h.addWidget(run_card, 1)
+        h.addWidget(eng_card, 1)
+        root.addWidget(row)
+
+    def _layout_b_two_columns(self, root, run_card, eng_card) -> None:
+        """B — 카드 **안**을 2열로 흘린다(채점 1위).  카드는 전체 폭 그대로."""
+        for card in (run_card, eng_card):
+            self._reflow_card_body(card, columns=2)
+        root.addWidget(run_card)
+        root.addWidget(eng_card)
+
+    def _layout_c_single_column(self, root, run_card, eng_card) -> None:
+        """C — 본문을 읽기 좋은 폭으로 좁혀 가운데.  빈 폭은 시트 바탕으로 남긴다."""
+        for card in (run_card, eng_card):
+            card.setMaximumWidth(_COLUMN_W)
+            root.addWidget(card, alignment=Qt.AlignmentFlag.AlignHCenter)
+
+    def _layout_d_axis_aligned(self, root, run_card, eng_card) -> None:
+        """D — 라벨 왼쪽 / 값 오른쪽.  라벨 열을 고정폭으로 묶어 축을 맞춘다."""
+        for card in (run_card, eng_card):
+            self._reflow_card_body(card, columns=2, label_column=True)
+        root.addWidget(run_card)
+        root.addWidget(eng_card)
+
+    def _layout_e_side_rail(self, root, run_card, eng_card) -> None:
+        """E — 본론(실행 옵션)은 남는 폭을 갖고, 매칭 설정은 오른쪽 좁은 레일로."""
+        row = QWidget(self)
+        row.setProperty("role", "rowHost")
+        h = QHBoxLayout(row)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(theme.PROFILE.section_gap)
+        eng_card.setFixedWidth(_RAIL_W)
+        h.addWidget(run_card, 1)
+        h.addWidget(eng_card, 0, Qt.AlignmentFlag.AlignTop)
+        root.addWidget(row)
+
+    def _reflow_card_body(self, card: QWidget, *, columns: int,
+                          label_column: bool = False) -> None:
+        """카드 본문(세로 한 줄씩)을 ``columns`` 열 그리드로 다시 흘린다.
+
+        카드 제목(첫 줄)은 항상 전체 폭을 차지하게 두고, 나머지 줄만 재배치한다.
+        ``label_column`` 이면 홀수 칸을 라벨 열로 보고 폭을 고정해 축을 맞춘다.
+        행 위젯을 새로 만들지 않고 **옮기기만** 하므로 시그널·상태가 그대로 산다."""
+        body = card.body()
+        items = []
+        while body.count():
+            items.append(body.takeAt(0))
+        grid = QGridLayout()
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(theme.PROFILE.section_gap)
+        grid.setVerticalSpacing(8)
+        row = col = 0
+        for idx, item in enumerate(items):
+            widget = item.widget()
+            layout = item.layout()
+            if idx == 0:                       # 제목 줄은 전체 폭
+                if widget is not None:
+                    grid.addWidget(widget, 0, 0, 1, columns)
+                elif layout is not None:
+                    grid.addLayout(layout, 0, 0, 1, columns)
+                row = 1
+                continue
+            if widget is not None:
+                grid.addWidget(widget, row, col)
+            elif layout is not None:
+                grid.addLayout(layout, row, col)
+            else:
+                continue
+            col += 1
+            if col >= columns:
+                col = 0
+                row += 1
+        for c in range(columns):
+            grid.setColumnStretch(c, 0 if (label_column and c == 0) else 1)
+        if label_column:
+            grid.setColumnMinimumWidth(0, 180)
+        body.addLayout(grid)
+
+    def _build_variant_bar(self) -> QWidget:
+        """배치안 고르개 — 누르면 **그 자리에서** 본문이 다시 그려진다.
+
+        최종안을 고르면 이 바와 안 구현들을 지운다(모듈 상단 LAYOUT_VARIANTS 주석)."""
+        host = QWidget(self)
+        host.setProperty("role", "rowHost")
+        row = QHBoxLayout(host)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(6)
+        cap = QLabel(i18n.KO.LAYOUT_VARIANT_LABEL, host)
+        cap.setProperty("role", "muted")
+        row.addWidget(cap)
+        self._variant_buttons = {}
+        for key, label, tip in LAYOUT_VARIANTS:
+            btn = NeonButton(label, role="ghost", parent=host)
+            btn.setToolTip(tip)
+            btn.setCheckable(True)
+            btn.setChecked(key == self._layout_variant)
+            btn.clicked.connect(lambda _c=False, k=key: self._apply_layout_variant(k))
+            self._variant_buttons[key] = btn
+            row.addWidget(btn)
+        row.addStretch(1)
+        return host
+
+    def _apply_layout_variant(self, key: str) -> None:
+        """배치안 전환 — 입력값을 지키면서 본문만 다시 그린다."""
+        if key == self._layout_variant:
+            self._variant_buttons[key].setChecked(True)
+            return
+        state = self._snapshot_inputs()
+        self._layout_variant = key
+        root = self._root_layout
+        while root.count():                    # 본문 비우기(위젯은 즉시 부모에서 뗀다)
+            item = root.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.setParent(None)
+                w.deleteLater()
+            else:
+                lay = item.layout()
+                if lay is not None:
+                    _discard_layout(lay)
+        self._build_body(root)
+        self._restore_inputs(state)
+
+    def _snapshot_inputs(self) -> dict:
+        """재구축 전에 지켜야 할 화면 입력값(아직 prefs 에 안 들어간 것)."""
+        def _text(name: str) -> str:
+            w = getattr(self, name, None)
+            try:
+                return w.text() if w is not None else ""
+            except RuntimeError:
+                return ""
+        return {
+            "ref_path": _text("ref_path_edit"),
+            "val_path": _text("val_path_edit"),
+            "ref_machine": _text("ref_machine_edit"),
+            "val_machine": _text("val_machine_edit"),
+            "selected_slots": getattr(self, "_selected_slots", None),
+        }
+
+    def _restore_inputs(self, state: dict) -> None:
+        for name, key in (("ref_path_edit", "ref_path"),
+                          ("val_path_edit", "val_path"),
+                          ("ref_machine_edit", "ref_machine"),
+                          ("val_machine_edit", "val_machine")):
+            w = getattr(self, name, None)
+            if w is not None and state.get(key):
+                w.setText(state[key])
+        if state.get("selected_slots") is not None:
+            self._selected_slots = state["selected_slots"]
 
     def _build_top_bar(self) -> QWidget:
         """상단 툴바(보기 옵션) + 제목 + 모드 배지.

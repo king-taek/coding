@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PyQt6.QtCore import (QEvent, QEventLoop, QPropertyAnimation, Qt,
+from PyQt6.QtCore import (QEvent, QEventLoop, QPropertyAnimation, QSize, Qt,
                           pyqtSignal)
 from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import (QApplication, QDialog, QGraphicsOpacityEffect,
@@ -102,6 +102,33 @@ class _SheetFrame(QWidget):
         w.setParent(self)
         w.setWindowFlags(Qt.WindowType.Widget)
         self._body.addWidget(w)
+        self._content = w
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        """제목줄 + **내용이 원하는 크기**.
+
+        ★ 이걸 안 주면 시트가 내용보다 작게 열린다.  ``_place`` 는 root(=이 프레임)의
+        ``sizeHint`` 만 보는데, 기본 구현은 레이아웃이 계산한 값을 쓰고 그 값은 내용
+        위젯이 ``sizeHint()`` 를 오버라이드해 요구한 높이를 그대로 반영하지 못했다
+        (슬롯 선택 창 실측: 내용은 624px 를 원하는데 프레임은 392px 를 보고했고, 그
+        결과 그리드가 두어 줄만 보였다).  내용의 요구를 직접 얹어 전달한다."""
+        base = super().sizeHint()
+        content = getattr(self, "_content", None)
+        if content is None:
+            return base
+        try:
+            ch = content.sizeHint()
+        except RuntimeError:
+            return base
+        if not ch.isValid():
+            return base
+        bar_h = self.layout().itemAt(0).widget().sizeHint().height()
+        margins = self.layout().contentsMargins()
+        return QSize(
+            max(base.width(), ch.width() + margins.left() + margins.right()),
+            max(base.height(),
+                ch.height() + bar_h + margins.top() + margins.bottom()),
+        )
 
 
 class SheetHost(QWidget):
@@ -114,6 +141,8 @@ class SheetHost(QWidget):
         super().__init__(parent)
         self._scrim = _Scrim(self)
         self._stack: list[dict] = []          # [{widget, loop, prev_parent, prev_flags}]
+        # 퇴장 중인 시트의 스냅샷(QLabel) — 원본 위젯과 생명주기를 분리해 둔다.
+        self._ghosts: list[QLabel] = []
         self._app_filter_on = False
         self.hide()
         parent.installEventFilter(self)
@@ -230,6 +259,7 @@ class SheetHost(QWidget):
                 lambda _code, e=entry: self._close(e))
         self._set_app_filter(True)
 
+        self._drop_ghosts()          # 직전 시트의 퇴장 잔상과 겹치지 않게
         self._cover_parent()
         self.show()
         self.raise_()
@@ -265,10 +295,77 @@ class SheetHost(QWidget):
         anim.finished.connect(lambda: w.setGraphicsEffect(None))
         anim.start()
 
+    def _make_ghost(self, entry: dict) -> Optional[QLabel]:
+        """닫기 직전 시트의 **스냅샷**을 호스트 소유 QLabel 로 떠서 돌려준다.
+
+        퇴장 모션을 시트 위젯 자체에 걸면 안 된다 — ``WA_DeleteOnClose`` 다이얼로그는
+        닫히는 즉시 파괴될 수 있고, 그러면 tick 이 죽은 C++ 객체로 들어가 세그폴트가
+        난다(모듈 주석 5번의 전례).  그림만 남기고 원본은 곧바로 정리하면 생명주기가
+        얽히지 않는다.  실패하면 None — 호출부가 애니메이션 없이 진행한다."""
+        if not motion.enabled():
+            return None
+        root = entry.get("root")
+        try:
+            if root is None or not root.isVisible():
+                return None
+            pm = root.grab()
+            if pm.isNull():
+                return None
+            ghost = QLabel(self)
+            ghost.setPixmap(pm)
+            ghost.setGeometry(root.geometry())
+            ghost.show()
+            ghost.raise_()
+            return ghost
+        except RuntimeError:
+            return None
+
+    def _fade_out_ghost(self, ghost: QLabel, *, then_hide_host: bool) -> None:
+        """스냅샷을 페이드아웃하고, 마지막 시트였으면 끝난 뒤 호스트를 숨긴다.
+
+        퇴장은 입장보다 짧게(모션 원칙).  애니메이션은 ghost 를 부모로 가져
+        ``DeleteWhenStopped`` 없이도 ghost 와 함께 정리된다."""
+        eff = QGraphicsOpacityEffect(ghost)
+        eff.setOpacity(1.0)
+        ghost.setGraphicsEffect(eff)
+        anim = QPropertyAnimation(eff, b"opacity", ghost)
+        anim.setStartValue(1.0)
+        anim.setEndValue(0.0)
+        anim.setDuration(motion.dur(motion.DUR_BASE // 2))
+        anim.setEasingCurve(motion.EASE_PRIMARY)
+
+        def _done() -> None:
+            try:
+                if ghost in self._ghosts:
+                    self._ghosts.remove(ghost)
+                ghost.hide()
+                ghost.deleteLater()
+            except RuntimeError:
+                pass
+            # 애니메이션 도중 새 시트가 열렸으면 호스트를 숨기면 안 된다.
+            if then_hide_host and not self._stack:
+                self._scrim.hide()
+                self.hide()
+
+        anim.finished.connect(_done)
+        self._ghosts.append(ghost)
+        anim.start()
+
+    def _drop_ghosts(self) -> None:
+        """남아 있는 퇴장 스냅샷을 즉시 치운다(새 시트가 열릴 때)."""
+        for g in list(self._ghosts):
+            try:
+                g.hide()
+                g.deleteLater()
+            except RuntimeError:
+                pass
+        self._ghosts.clear()
+
     def _close(self, entry: dict) -> None:
         if entry not in self._stack:
             return
         self._stack.remove(entry)
+        ghost = self._make_ghost(entry)
         w = entry["widget"]
         try:
             w.hide()
@@ -285,9 +382,16 @@ class SheetHost(QWidget):
                 pass
         if not self._stack:
             self._set_app_filter(False)
-            self._scrim.hide()
-            self.hide()
+            if ghost is not None:
+                # 스크림·호스트는 스냅샷이 다 사라진 뒤에 내린다 — 먼저 내리면
+                # 그림이 얹힐 바닥이 없어져 '툭' 끊긴다.
+                self._fade_out_ghost(ghost, then_hide_host=True)
+            else:
+                self._scrim.hide()
+                self.hide()
         else:
+            if ghost is not None:
+                self._fade_out_ghost(ghost, then_hide_host=False)
             top = self._stack[-1]["root"]
             top.raise_()
             self._stack[-1]["widget"].setFocus(Qt.FocusReason.PopupFocusReason)

@@ -4,17 +4,23 @@
 서로 다른 5가지 접근을 각각 구현하고, 성격이 다른 채점자 3명이 13개 기준으로 채점했다.
 **어느 안도 미리 적용해 두지 않았다** — 직접 써 보고 고르면 된다.
 
-## 써 보는 법
+## 써 보는 법 — **앱 안에서 바로 전환**
+
+다섯 안은 이제 코드에 함께 들어가 있다.  앱을 띄우고 첫 화면(설정) 위쪽
+**'배치안'** 줄에서 `원본 · A · B · C · D · E` 를 누르면 그 자리에서 본문이 다시
+그려진다(입력해 둔 폴더 경로는 유지된다).  patch 를 적용하고 앱을 재시작할 필요가
+없다.
 
 ```bash
-python scripts/try_layout.py          # 지금 무엇이 적용됐는지 + 목록
-python scripts/try_layout.py B        # B 안 적용 → python main.py 로 확인
-python scripts/try_layout.py D        # 바로 다른 안으로 (off 안 거쳐도 됨)
-python scripts/try_layout.py off      # 원상 복구
+python main.py        # 띄운 뒤 첫 화면의 '배치안' 버튼으로 비교
 ```
 
-채택할 안을 정하면 그 patch 를 정식 커밋으로 옮기고 이 폴더와
-`scripts/try_layout.py` 는 지우면 된다.
+구현은 `ui/pages/setup_page.py` 의 `_layout_*` 메서드 여섯 개이고 서로 독립이다.
+**채택할 안을 정하면** 그 `_layout_*` 하나만 남기고 나머지 구현·`LAYOUT_VARIANTS`
+표·'배치안' 버튼(`_build_variant_bar`)·이 폴더·`scripts/try_layout.py` 를 지우면 된다.
+
+아래 patch 들은 각 안을 처음 구현했을 때의 diff 로, 실측·채점 근거를 남기기 위해
+보존한다(적용해서 쓰는 용도는 아니다).
 
 ---
 
