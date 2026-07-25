@@ -31,3 +31,6 @@ Thumbs.db
 # 자동 업데이트 식별자 — 포터블 빌드가 만들거나 앱이 런타임에 생성한다
 # (updater.ensure_version_file). 저장소에 커밋하면 업데이트마다 덮어써져 무의미하다.
 /VERSION
+
+# 후보안 전환 도구가 남기는 상태 파일 — 커밋 대상 아님
+dev/layout_variants/.applied
