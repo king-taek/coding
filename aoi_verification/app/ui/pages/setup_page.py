@@ -919,37 +919,24 @@ class SetupPage(QWidget):
 
     # ------------------------------------------------------------------
     def _build_view_options(self) -> QWidget:
-        """상단 보기 옵션 줄 — 색 모드 3택 · '모션 줄이기'.
+        """상단 보기 옵션 줄 — '다크 모드' · '모션 줄이기'.
 
-        ★ 색 모드가 on/off 스위치가 아니라 **3택**이다(벨럼 · 청사진 · 흑연).  어두운
-        모드가 둘이라 boolean 으로 표현할 수 없고, 애초에 '어두운 화면 켜기'보다
-        '어느 시트를 쓸지'가 정확한 모형이다.
-
-        ★ 두 컨트롤의 **어휘를 통일**한다: 이전엔 나란한 두 설정이 48×28 스위치와
-        18px 체크박스로 서로 달랐고, 하필 시각적으로 약한 쪽이 모션 설정이었다."""
+        ★ 두 컨트롤의 **어휘가 같다**(48×28 스위치 두 개).  한때 색 모드가 3택이라
+        3칩 선택기였는데(벨럼 · 청사진 · 흑연), 청사진을 지우고 어두운 모드가 하나가
+        되면서 '어두운 화면 켜기'라는 boolean 이 정확한 모형이 됐다."""
         host = QWidget(self)
         row = QHBoxLayout(host)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(14)
         row.addStretch(1)
 
-        mode_lbl = QLabel(i18n.KO.COLOR_MODE_LABEL, host)
-        mode_lbl.setProperty("role", "muted")
-        row.addWidget(mode_lbl)
-        keys = theme.color_mode_keys()
-        self.color_mode_group = OptionGroup(
-            [(k, theme.COLOR_MODE_LABELS[k]) for k in keys],
-            current=theme.COLOR_MODE, min_tile_w=64,
-            fixed_cols=len(keys), role="chip",
-            # 색 모드 전환도 페이지 **재생성**이다 — 방향키 즉시 커밋 금지.
-            activate_on_arrow=False, parent=host,
+        self._dark_switch = SwitchRow(
+            i18n.KO.DARK_MODE_LABEL, parent=host,
+            checked=theme.is_dark_mode(),
         )
-        for k in keys:
-            self.color_mode_group.set_option_tooltip(
-                k, i18n.KO.COLOR_MODE_TOOLTIP_FMT.format(
-                    name=theme.COLOR_MODE_LABELS[k]))
-        self.color_mode_group.selection_changed.connect(self._on_color_mode_chosen)
-        row.addWidget(self.color_mode_group)
+        self._dark_switch.setToolTip(i18n.KO.DARK_MODE_TOOLTIP)
+        self._dark_switch.toggled.connect(self._on_dark_mode_toggled)
+        row.addWidget(self._dark_switch)
 
         self._reduce_switch = SwitchRow(
             i18n.KO.REDUCE_MOTION_LABEL, parent=host,
@@ -972,8 +959,9 @@ class SetupPage(QWidget):
         _prefs.patch(reduce_motion=bool(on))
         motion.set_reduce_motion(bool(on))
 
-    def _on_color_mode_chosen(self, key: str) -> None:
-        """색 모드 전환 요청 — 실제 적용(페이지 재생성)은 main_window 가 한다."""
+    def _on_dark_mode_toggled(self, on: bool) -> None:
+        """다크 모드 전환 요청 — 실제 적용(페이지 재생성)은 main_window 가 한다."""
+        key = "dark" if on else "light"
         if key == theme.COLOR_MODE:
             return
         _prefs.patch(color_mode=key)

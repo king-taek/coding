@@ -29,48 +29,62 @@ def _restore_light():
     theme.set_color_mode("light")
 
 
-def test_three_modes_available():
-    """벨럼(라이트) + 어두운 모드 **둘**(청사진·흑연)."""
-    assert set(theme.color_mode_keys()) == {"light", "dark", "graphite"}
-    # 사용자에게 보이는 이름이 모든 모드에 있어야 한다(스위처가 이걸 읽는다).
+def test_two_modes_available():
+    """벨럼(라이트) + 흑연(다크) — 어두운 모드는 **하나**다(토글로 켜고 끈다)."""
+    assert set(theme.color_mode_keys()) == {"light", "dark"}
+    # 사용자에게 보이는 이름이 모든 모드에 있어야 한다.
     assert set(theme.COLOR_MODE_LABELS) == set(theme.PALETTES)
 
 
 def test_dark_key_stays_dark_for_prefs_compat():
-    """★ 청사진의 키는 `"dark"` 로 유지한다 — 기존 prefs 가 마이그레이션 없이 동작."""
+    """★ 다크의 키는 `"dark"` 다 — 기존 prefs 가 마이그레이션 없이 동작."""
     assert "dark" in theme.PALETTES
     theme.set_color_mode("dark")
     assert theme.COLORS["bg"] == theme.PALETTES["dark"]["bg"]
+    assert theme.is_dark_mode() is True
+    theme.set_color_mode("light")
+    assert theme.is_dark_mode() is False
 
 
-def test_two_dark_modes_are_opposite_in_temperature_and_chroma():
-    """두 어두운 모드가 서로의 **변주가 아니라 다른 판단**이어야 한다.
+def test_removed_mode_keys_migrate_instead_of_falling_back():
+    """★ 삭제한 모드의 저장값을 **폴백으로 떨구지 않는다.**
 
-    청사진 = 유채·차가움(청색 감광지) / 흑연 = 무채·따뜻함(불 끈 제도지)."""
+    흑연이 다크가 되면서 `color_mode:"graphite"` 는 미지 값이 됐다.  그대로 두면
+    `set_color_mode` 의 기본 폴백(라이트)으로 튀어, 흑연을 쓰던 사용자에게는 설정이
+    조용히 초기화된 것으로 보인다.  '가장 가까운 후신'으로 접어 준다."""
+    assert theme.normalize_color_mode("graphite") == "dark"
+    assert theme.normalize_color_mode("cyanotype") == "dark"
+    # 대소문자·공백에 흔들리지 않는다(사람이 손으로 고친 prefs 파일도 있다).
+    assert theme.normalize_color_mode("  DARK ") == "dark"
+    # 진짜 미지 값은 여전히 기본으로.
+    assert theme.normalize_color_mode("chartreuse") == theme.DEFAULT_COLOR_MODE
+    assert theme.normalize_color_mode("") == theme.DEFAULT_COLOR_MODE
+
+    theme.set_color_mode("graphite")
+    assert theme.COLOR_MODE == "dark", "저장된 흑연이 라이트로 튀었다"
+    assert theme.BG == theme.PALETTES["dark"]["bg"]
+
+
+def test_dark_mode_is_warm_neutral_not_chromatic():
+    """다크는 '불 끈 제도지' — 무채·따뜻함.  (한때 유채·차가운 청사진이었다.)"""
     def chroma(hexv: str) -> float:
         h = hexv.lstrip("#")
         ch = [int(h[i:i + 2], 16) for i in (0, 2, 4)]
         return (max(ch) - min(ch)) / 255.0
 
-    blue = theme.PALETTES["dark"]["bg"]
-    graph = theme.PALETTES["graphite"]["bg"]
-    assert chroma(blue) > 0.15, f"청사진 bg 채도가 낮다 ({chroma(blue):.3f})"
-    assert chroma(graph) < 0.08, f"흑연 bg 가 무채가 아니다 ({chroma(graph):.3f})"
-    # 색 온도가 반대: 청사진은 파랑 우세, 흑연은 빨강 우세.
     def rgb(h):
         h = h.lstrip("#")
         return [int(h[i:i + 2], 16) for i in (0, 2, 4)]
-    br, _, bb = rgb(blue)
-    gr, _, gb = rgb(graph)
-    assert bb > br, "청사진 바탕이 파랑 쪽이어야 한다"
-    assert gr > gb, "흑연 바탕이 따뜻한 쪽이어야 한다"
+
+    bg = theme.PALETTES["dark"]["bg"]
+    assert chroma(bg) < 0.08, f"다크 bg 가 무채가 아니다 ({chroma(bg):.3f})"
+    r, _, b = rgb(bg)
+    assert r > b, "다크 바탕이 따뜻한 쪽이어야 한다"
 
 
-def test_both_dark_modes_are_actually_dark():
-    for key in ("dark", "graphite"):
-        h = theme.PALETTES[key]["bg"].lstrip("#")
-        assert sum(int(h[i:i + 2], 16) for i in (0, 2, 4)) / 3 < 90, \
-            f"{key} 바탕이 어둡지 않다"
+def test_dark_mode_is_actually_dark():
+    h = theme.PALETTES["dark"]["bg"].lstrip("#")
+    assert sum(int(h[i:i + 2], 16) for i in (0, 2, 4)) / 3 < 90, "다크 바탕이 어둡지 않다"
 
 
 @pytest.mark.parametrize("mode", _MODES)
@@ -110,7 +124,7 @@ def test_unknown_mode_falls_back():
     assert theme.COLOR_MODE == theme.DEFAULT_COLOR_MODE
 
 
-@pytest.mark.parametrize("key", ["dark", "graphite"])
+@pytest.mark.parametrize("key", ["dark"])
 def test_dark_is_not_a_naive_inversion(key):
     """어두운 모드는 라이트를 뒤집은 값이 아니어야 한다."""
     light, dark = theme.PALETTES["light"], theme.PALETTES[key]
@@ -164,7 +178,7 @@ def _hsv(hexv: str) -> tuple[float, float, float]:
 def test_accent_is_distinguishable_from_its_own_paper(mode):
     """★ 강조색이 바탕과 **색상각**으로도 구분되어야 한다.
 
-    청사진 다크의 accent 가 한때 bg 와 색상각 차이 **0.8°** · 채도비 0.54 였다 —
+    삭제된 청사진 다크의 accent 가 한때 bg 와 색상각 차이 **0.8°** · 채도비 0.54 였다 —
     '강조 하나' 원칙을 명도만으로 버티는 셈이고, 화면 전체가 한 색상이 된다.
     (벨럼 167° / 흑연 166° 와 대조적이었다.)  대비만 재면 이 결함이 안 보인다."""
     theme.set_color_mode(mode)
@@ -183,3 +197,58 @@ def test_accent_is_distinguishable_from_its_own_paper(mode):
 #    이고, 상태색은 문제가 생겼을 때 눈을 끄는 것이 제 역할이다.  실제로 라이트의
 #    warn(0.893)·danger(0.819)는 accent(0.672)보다 채도가 높고 그게 의도다.
 #    통과하지 않는 규칙을 테스트로 박으면 다음 사람이 잘못된 방향으로 팔레트를 고친다.
+
+
+# ── 화면의 컨트롤: 3칩 선택기 → on/off 스위치 ────────────────────────────────
+def test_setup_page_uses_a_dark_mode_switch_not_a_chip_picker():
+    """어두운 모드가 하나가 됐으므로 컨트롤도 boolean 어휘여야 한다.
+
+    ★ 3칩 선택기를 뒀던 유일한 이유는 '어두운 모드가 둘'이었다는 것이다.  그 이유가
+    사라졌으면 컨트롤도 따라가야 한다 — 옆의 '모션 줄이기'와 같은 스위치로 통일한다."""
+    pytest.importorskip("PyQt6.QtWidgets")
+    from PyQt6.QtWidgets import QApplication
+    from aoi_verification.app.ui.pages.setup_page import SetupPage
+    from aoi_verification.app.ui.widgets.switch_row import SwitchRow
+
+    app = QApplication.instance() or QApplication([])
+    theme.set_color_mode("light")
+    page = SetupPage()
+    try:
+        assert isinstance(page._dark_switch, SwitchRow)
+        assert page._dark_switch.is_on() is False, "라이트인데 스위치가 켜져 있다"
+        # 옛 3칩 선택기는 흔적도 없어야 한다.
+        assert not hasattr(page, "color_mode_group"), "3칩 색 모드 선택기 부활"
+
+        seen: list = []
+        page.appearance_changed.connect(lambda: seen.append(True))
+        page._on_dark_mode_toggled(True)
+        assert seen, "다크 켜기가 appearance_changed 를 내지 않았다"
+        from aoi_verification.app.utils import prefs as _p
+        assert _p.load().color_mode == "dark"
+
+        # 같은 값으로 다시 눌러도 페이지를 다시 만들지 않는다(불필요한 재생성 방지).
+        seen.clear()
+        theme.set_color_mode("dark")
+        page._on_dark_mode_toggled(True)
+        assert not seen
+    finally:
+        page.deleteLater()
+        app.processEvents()
+        theme.set_color_mode("light")
+
+
+def test_dark_switch_reflects_saved_mode():
+    """다크로 저장된 상태에서 페이지를 만들면 스위치가 켜져 있어야 한다."""
+    pytest.importorskip("PyQt6.QtWidgets")
+    from PyQt6.QtWidgets import QApplication
+    from aoi_verification.app.ui.pages.setup_page import SetupPage
+
+    app = QApplication.instance() or QApplication([])
+    theme.set_color_mode("dark")
+    page = SetupPage()
+    try:
+        assert page._dark_switch.is_on() is True
+    finally:
+        page.deleteLater()
+        app.processEvents()
+        theme.set_color_mode("light")

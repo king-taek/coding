@@ -376,7 +376,7 @@ QWidget[role="loadingPanel"] QProgressBar {
 }
 
 /* 배지 캡션 — ★ `role="colHead"`($mute) 를 쓰면 구형 상태의 warn_tint 면 위에서
-   4.52(청사진)/4.66(흑연)로 게이트(5.0)를 깬다.  캡션이지만 한 단계 진한 잉크를 쓴다
+   4.66(다크)로 게이트(5.0)를 깬다.  캡션이지만 한 단계 진한 잉크를 쓴다
    (대비표가 **실제로 쓰는 토큰**을 재도록 전용 역할로 분리). */
 QLabel[role="badgeCaption"] {
     color: $ink2;

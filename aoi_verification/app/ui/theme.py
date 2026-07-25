@@ -65,9 +65,9 @@ class Profile:
 
 # ── 색 — 라이트/다크 두 팔레트.  구조(PROFILE)는 공유하고 색만 교체한다. ────────
 #
-# 다크는 라이트의 단순 반전이 아니다.  '도면' 의 야간판은 **청사진(cyanotype)** —
-# 역사적으로 청사진은 짙은 청색 종이에 흰 선을 앉힌 것이다.  그래서 어두운 모드가
-# 컨셉을 배신하지 않고 오히려 더 정통이 된다: 짙은 청색 바탕 + 밝은 잉크 + 밝힌 블루.
+# 다크는 라이트의 단순 반전이 아니다.  '도면' 의 야간판은 **불 끈 제도실**이다 —
+# 같은 벨럼 시트를 어둡게 한 무채·따뜻한 바탕에, 청사진 블루는 잉크로만 남는다.
+# 웜-무채 바탕 위에서는 같은 블루가 더 유채로 읽혀 '강조 하나' 원칙이 오히려 또렷해진다.
 _LIGHT: dict[str, str] = {
     "bg": "#ECE9E2",        # 벨럼 바탕
     "panel": "#F5F3ED",     # 시트 면
@@ -94,43 +94,17 @@ _LIGHT: dict[str, str] = {
     "thumb_frame": "#A39D8F",   # 어두운 다이가 시트에 묻히지 않게
 }
 
-# ★ 채도 실측 지적 반영: 이전 bg(#0E1620)는 채도지표 0.071 로, 실제 청사진 원지의
-#   1/3 밖에 안 됐다 — 이름만 청사진이고 눈에는 '어두운 슬레이트'였다.  0.22 대로
-#   올려 진짜 청색 종이가 되게 한다(잉크·경계 대비는 전부 재측정해 게이트 통과).
-_DARK: dict[str, str] = {
-    "bg": "#12304C",        # 청사진 원지 — 채도지표 0.228
-    "panel": "#1A3A59",     # 시트 면
-    "elev": "#204465",
-    "line": "#698DB0",      # 제도 눈금 — panel 3.37 / bg 3.89(구분선은 elev 를 지나지 않는다)
-    "line2": "#33557A",     # 장식용 옅은 눈금(비-상호작용 전용)
-    "line_strong": "#7EA2C4",   # 상호작용 경계 — elev 에서도 3.78:1
-    "ink": "#EAF0F6",       # 백선(白線)
-    "ink2": "#C3D0DC",
-    "mute": "#A9BCCB",
-    # ★ 강조색은 **자기 종이와 색상각이 달라야** 한다.  이전 #8EC2F0 은 bg 와 색상각
-    #   차이가 0.8° · 채도비 0.54 라, 화면 전체가 한 색상이 되고 '강조 하나' 원칙을
-    #   명도만으로 버텼다(벨럼 167° / 흑연 166° 와 대조적).  시안 쪽 195° 로 돌려
-    #   Δh 14° 를 확보한다 — 청사진의 감광 색역 안이라 컨셉을 벗어나지 않는다.
-    "accent": "#74C8E4",    # 청사진 잉크(h 195°) — 원지(h 209°)와 구분된다
-    "accent_hover": "#A6E2F6",
-    "accent_pressed": "#74C4DF",
-    "on_accent": "#0B1F33",
-    "pass": "#7FD79E",
-    "danger": "#FFA9A1",
-    "warn": "#F0D8A2",      # 라이트에선 정정색이지만 어두운 바탕에선 밝은 톤이어야 한다
-    "focus": "#B4D6FF",
-    "thumb_frame": "#6B8CAB",
-}
-
-# ── 두 번째 어두운 모드: **흑연(graphite)** ─────────────────────────────────────
+# ── 어두운 모드: **흑연(graphite)** ────────────────────────────────────────────
 #
-# 청사진 다크가 '짙은 청색 종이 + 백선'(유채·차가움)이라면, 흑연 다크는 **같은 벨럼
-# 시트의 불을 끈 것**(무채·따뜻함)이다.  둘은 색 온도와 채도가 반대라 서로의 변주가
-# 아니라 다른 판단이고, 그러면서 둘 다 '도면' 안에 있다:
-#   · 청사진 — 청색 감광지에 흰 선 (bg 채도지표 0.228)
-#   · 흑연  — 어두운 제도지에 흑연 선, 청사진 블루는 잉크로만 (bg 채도지표 0.028)
-# 웜-무채 바탕 위에서는 같은 블루 강조가 훨씬 유채로 읽혀, 강조 하나 원칙이 더 또렷해진다.
-_GRAPHITE: dict[str, str] = {
+# 라이트가 '벨럼 시트'(밝은 제도지)라면 다크는 **같은 시트의 불을 끈 것**이다 —
+# 무채·따뜻한 어두운 제도지에 흑연 선, 청사진 블루는 잉크로만 쓴다.
+# 웜-무채 바탕 위에서는 같은 블루 강조가 훨씬 유채로 읽혀 '강조 하나'가 또렷해진다.
+#
+# ※ 한때 세 번째 모드로 '청사진'(짙은 청색 감광지 + 백선, bg 채도지표 0.228)이 있었다.
+#   컨셉으로는 성립했지만 (a) 모드가 셋이라 '어두운 화면 켜기'를 boolean 으로 못 쓰고
+#   3칩 선택기가 필요했고 (b) 유지비가 두 배였다.  사용자 결정으로 흑연 하나만 남겨
+#   **다크 모드 토글**로 단순화했다.  키는 `"dark"` 라 기존 prefs 가 그대로 동작한다.
+_DARK: dict[str, str] = {
     "bg": "#1C1A15",        # 불 끈 제도지
     "panel": "#26231C",
     "elev": "#302C24",
@@ -153,24 +127,25 @@ _GRAPHITE: dict[str, str] = {
     "thumb_frame": "#6F6859",
 }
 
-# ★ 키 `"dark"` 는 청사진에 그대로 둔다 — 기존 prefs(`color_mode:"dark"`)가 마이그레이션
-#   없이 계속 동작한다.  새 모드만 새 키를 받는다.
-PALETTES: dict[str, dict[str, str]] = {
-    "light": _LIGHT, "dark": _DARK, "graphite": _GRAPHITE,
-}
-# 사용자에게 보이는 이름 — 스위처 순서 = 이 dict 순서(밝음 → 어두움).
-COLOR_MODE_LABELS: dict[str, str] = {
-    "light": "벨럼", "dark": "청사진", "graphite": "흑연",
-}
+PALETTES: dict[str, dict[str, str]] = {"light": _LIGHT, "dark": _DARK}
+# 사용자에게 보이는 이름 — dict 순서 = 밝음 → 어두움.
+COLOR_MODE_LABELS: dict[str, str] = {"light": "벨럼", "dark": "흑연"}
 DEFAULT_COLOR_MODE = "light"
 COLOR_MODE = DEFAULT_COLOR_MODE
+# 사라진 모드 키 → 지금의 모드.  ★ 이게 없으면 흑연을 쓰던 사용자의 저장값
+# (`color_mode:"graphite"`)이 미지 값이 되어 `set_color_mode` 의 폴백으로 **라이트로
+# 튄다**.  삭제한 모드는 '가장 가까운 후신'으로 접어 주는 것이 사용자 입장의 정답이다.
+_COLOR_MODE_ALIASES: dict[str, str] = {
+    "graphite": "dark",      # 흑연이 곧 다크가 됐다
+    "cyanotype": "dark",     # 청사진(삭제) → 남은 어두운 모드로
+}
 
 # LoadingOverlay 스크림 — 뒤 화면이 보이도록 옅게(모드별).
 # ★ 이전 값(96/120)은 (a) 다크의 뒤 텍스트 대비를 4.43 으로 떨궈 자체 게이트 5.0 을
 #   깼고 (b) 여유가 **적은** 다크에 오히려 더 두꺼운 디밍을 줘 거꾸로였다.
 #   실측: light 84 → 7.07 · dark 96 → 5.67 (둘 다 게이트 통과).
-_SCRIMS = {"light": (27, 26, 23, 84), "dark": (5, 16, 28, 96),
-           "graphite": (11, 10, 8, 96)}     # 실측 뒤 텍스트 6.48 (게이트 5.0)
+_SCRIMS = {"light": (27, 26, 23, 84),
+           "dark": (11, 10, 8, 96)}         # 실측 뒤 텍스트 6.48 (게이트 5.0)
 
 COLORS: dict[str, str] = dict(_LIGHT)   # 현재 모드의 색(set_color_mode 가 갱신)
 SCRIM_RGBA = _SCRIMS[DEFAULT_COLOR_MODE]
@@ -267,7 +242,7 @@ def set_color_mode(name: str) -> None:
     global ACCENT_TINT, ACCENT_TINT_SOFT, PASS_TINT
     global DANGER_TINT, DANGER_TINT_SOFT, WARN_TINT
 
-    mode = name if name in PALETTES else DEFAULT_COLOR_MODE
+    mode = normalize_color_mode(name)
     COLOR_MODE = mode
     c = PALETTES[mode]
     COLORS = dict(c)
@@ -298,6 +273,23 @@ def set_color_mode(name: str) -> None:
 
 def color_mode_keys() -> tuple[str, ...]:
     return tuple(PALETTES.keys())
+
+
+def normalize_color_mode(name: str) -> str:
+    """저장된 색 모드 값 → 지금 존재하는 모드 키.  **순수 함수**(헤드리스 테스트 가능).
+
+    삭제된 모드는 폴백(기본=라이트)으로 떨구지 않고 ``_COLOR_MODE_ALIASES`` 로 '가장
+    가까운 후신'에 접는다.  흑연을 쓰던 사용자의 저장값 ``"graphite"`` 가 라이트로
+    튀면, 사용자 입장에서는 설정이 조용히 초기화된 것으로 보인다.
+    """
+    key = str(name or "").strip().lower()
+    key = _COLOR_MODE_ALIASES.get(key, key)
+    return key if key in PALETTES else DEFAULT_COLOR_MODE
+
+
+def is_dark_mode() -> bool:
+    """다크 모드 토글의 단일 출처 — 화면·prefs 가 같은 판단을 쓰게."""
+    return COLOR_MODE == "dark"
 
 
 def render_qss(template_text: str) -> str:
