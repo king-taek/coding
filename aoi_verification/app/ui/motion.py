@@ -161,6 +161,11 @@ def animate_scroll(bar, target: int, *, duration: int = DUR_BASE) -> None:
     anim.setDuration(dur(duration))
     anim.setEasingCurve(EASE_PRIMARY)
     anim.valueChanged.connect(lambda v: bar.setValue(int(v)))
+    # ★ 대상이 파괴되면 애니메이션을 **멈춘다.**  람다 슬롯은 receiver 를 식별할 수 없어
+    #   PyQt 가 자동으로 끊어 주지 못하고, tick 이 죽은 C++ 객체로 들어가면 파이썬 예외가
+    #   아니라 세그폴트가 난다(로딩 오버레이에서 실측).  `anim.stop` 은 QObject 의 바인드
+    #   메서드라 이 연결은 안전하게 자동 해제된다.
+    bar.destroyed.connect(anim.stop)
     bar.setProperty("_motionAnim", anim)
     anim.start(QVariantAnimation.DeletionPolicy.DeleteWhenStopped)
 
@@ -198,4 +203,5 @@ def pulse(widget, *, attr: str = "_pulse", duration: int = DUR_SLOW) -> None:
     anim.setEasingCurve(EASE_PRIMARY)
     anim.valueChanged.connect(lambda v: (setattr(widget, attr, float(v)),
                                          widget.update()))
+    widget.destroyed.connect(anim.stop)      # 위와 같은 이유 — 파괴 시 tick 차단
     anim.start(QVariantAnimation.DeletionPolicy.DeleteWhenStopped)

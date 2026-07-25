@@ -496,9 +496,19 @@ SLOT_SELECT_BTN_TOOLTIP = (
     "선택하지 않으면 모든 공통 슬롯을 진행합니다."
 )
 SLOT_SELECT_TITLE = "진행할 슬롯 선택"
+# 다이얼로그 상단 — 지금 무엇이 진행되는지 **큰 글자로** 말한다(이전엔 '선택 3 / 24' 뿐).
+SLOT_SELECT_COUNT_HEAD_FMT = "{total}개 중 {n}개 진행"
+SLOT_SELECT_COUNT_HEAD_ALL = "모든 슬롯 진행 ({total}개)"
+SLOT_SELECT_SEARCH_PLACEHOLDER = "슬롯 이름으로 찾기"
+SLOT_SELECT_FILTER_HIT_FMT = "‘{q}’ 검색 결과 {n}개"
+SLOT_SELECT_FILTER_NONE_FMT = "‘{q}’ 와 맞는 슬롯이 없습니다"
+SLOT_SELECT_PICK_VISIBLE = "검색 결과 선택"
+# 0개로 확인하면 호출부가 '전체 진행'으로 정규화한다 — 의도와 정반대라 막고 이유를 말한다.
+SLOT_SELECT_NEED_ONE = "최소 한 개는 선택해야 합니다."
+SLOT_SELECT_KEY_HINT = "↑↓←→ 이동 · Space 선택 · Ctrl+A 전체 · Enter 확인"
 SLOT_SELECT_HINT = (
-    "이번 검증에서 진행할 슬롯 카드를 눌러 선택하세요.\n"
-    "선택하지 않은 슬롯은 스캔·매칭에서 제외됩니다."
+    "이번 검증에서 진행할 슬롯을 눌러 고르세요. 이름을 알면 위에서 바로 찾을 수 있습니다.\n"
+    "고르지 않은 슬롯은 스캔·매칭에서 제외됩니다."
 )
 SLOT_SELECT_ALL = "전체 선택"
 SLOT_SELECT_NONE = "전체 해제"

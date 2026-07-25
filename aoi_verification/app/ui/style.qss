@@ -454,6 +454,55 @@ QPushButton[role="segment"]:checked:disabled {
     border: 1px dashed $line;
 }
 
+/* 차단 이유 문구 — '왜 지금 확인할 수 없는가'.  ★ `role="warn"` 은 QPushButton 에만
+   있었어서 라벨에 붙이면 조용히 기본 잉크로 렌더된다(선언했으니 될 것이라 믿으면 안 되는
+   그 함정).  라벨 등급을 따로 둔다.  면 대비 실측: 라이트 6.10/5.58 · 다크 9.52/10.55. */
+QLabel[role="warn"] {
+    color: $warn;
+    font-weight: 600;
+}
+
+/* 슬롯 타일 — '진행할 슬롯' 다중 선택.  `option`(배타 44px)·`segment`(이진 34px)에 이어
+   **다중 선택** 등급이다.  높이 36px: 24슬롯을 한 화면에 담을 밀도와 손가락 타깃의 타협
+   (WCAG 2.5.8 AA 24px 상회).
+
+   ★ 선택 상태를 **여기서만** 칠한다.  이전 `_SlotTile` 은 `rgba(57,255,20,0.10)` —
+   지금 어느 팔레트에도 없는 죽은 네온 초록을 인라인으로 하드코딩해, 다크에서 배경만
+   초록으로 뜨고 라벨 대비도 측정된 적이 없었다.  토큰으로 칠하면 두 모드가 자동이다.
+
+   ★ `:focus` 를 따로 쓴다 — 이전 타일은 `StrongFocus` 를 켜 두고 포커스를 **그리지
+   않아서**, 키보드로 이동해도 지금 어디인지 알 수 없었다(2.4.7 실패). */
+QPushButton[role="slotTile"] {
+    background: transparent;
+    color: $ink2;
+    border: 1px solid $line_strong;
+    border-radius: $radius_sm;
+    padding: 6px 10px;
+    font-weight: 600;
+    text-align: left;
+    min-height: 22px;
+}
+QPushButton[role="slotTile"]:hover {
+    background-color: $elev;
+    color: $ink;
+    border-color: $mute;
+}
+QPushButton[role="slotTile"]:checked {
+    background-color: $accent_tint;
+    color: $accent;
+    border: 1px solid $accent;
+    font-weight: 700;
+}
+QPushButton[role="slotTile"]:focus {
+    border: $focus_w solid $focus;
+    padding: 5px 9px;           /* 보더가 굵어진 만큼 패딩을 줄여 높이 고정 */
+}
+QPushButton[role="slotTile"]:disabled {
+    background: transparent;
+    color: $mute;
+    border: 1px dashed $line;
+}
+
 /* 카드 제목 — 인라인 f-string 스타일 3중복을 대체. */
 QLabel[role="cardTitle"] {
     color: $ink;

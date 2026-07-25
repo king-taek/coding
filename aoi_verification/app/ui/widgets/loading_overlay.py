@@ -241,8 +241,12 @@ class LoadingOverlay(QWidget):
         #   연속 갱신되는 결정형 바는 **등속**이 맞다(전체 곡선은 작업 속도가 만든다).
         self._val_anim = QVariantAnimation(self)
         self._val_anim.setEasingCurve(QEasingCurve.Type.Linear)
-        self._val_anim.valueChanged.connect(
-            lambda x: self._progress.setValue(int(x)))
+        # ★ **람다로 연결하지 않는다.**  PyQt 는 슬롯이 QObject 의 **바인드 메서드**일 때
+        #   그 객체가 파괴되면 연결을 자동으로 끊는다.  람다는 `self` 를 클로저에 담아
+        #   receiver 를 식별할 수 없으므로 연결이 살아남고, 오버레이가 파괴된 뒤에도
+        #   애니메이션 tick 이 **죽은 C++ 객체로** 들어간다 — 파이썬 예외가 아니라
+        #   세그폴트다(전체 테스트에서 실측: 애니메이션이 도는 중 오버레이를 지우면 죽었다).
+        self._val_anim.valueChanged.connect(self._on_val_tick)
 
         self._busy = _BusyStripe(self._content)
         self._busy.hide()
@@ -317,8 +321,18 @@ class LoadingOverlay(QWidget):
         self._bar_anim.setEasingCurve(QEasingCurve.Type.OutQuart)
         self._bar_anim.setStartValue(0.0)
         self._bar_anim.setEndValue(1.0)
-        self._bar_anim.valueChanged.connect(
-            lambda v: self._set_bar_slide(float(v)))
+        self._bar_anim.valueChanged.connect(self._on_bar_tick)   # 위와 같은 이유로 바인드 메서드
+        # ★ 지연 실행은 `QTimer.singleShot` **정적 호출로 하지 않는다.**  정적 타이머는
+        #   위젯의 자식이 아니라서, 오버레이가 지연 시간 안에 파괴되면 **죽은 위젯으로**
+        #   콜백이 들어간다 — 파이썬 예외가 아니라 세그폴트가 난다(실측: 로딩을 띄운
+        #   다이얼로그를 210ms 안에 닫으면 프로세스가 죽었다).  `self` 를 부모로 둔
+        #   QTimer 는 위젯과 함께 파괴되므로 그 뒤 발화 자체가 불가능하다.
+        self._bar_timer = QTimer(self)
+        self._bar_timer.setSingleShot(True)
+        self._bar_timer.timeout.connect(self._run_bar_slide)
+        self._hide_timer = QTimer(self)          # 최소 표시 래치 — 같은 이유로 부모 있음
+        self._hide_timer.setSingleShot(True)
+        self._hide_timer.timeout.connect(self._on_hide_latch)
 
         # 최소 표시 시간 가드 — 초단타 작업이 '깜빡'하지 않게(C9).
         self._shown_elapsed = QElapsedTimer()
@@ -338,6 +352,12 @@ class LoadingOverlay(QWidget):
     def _on_rise(self, v) -> None:
         self._rise = float(v)
         self._place_panel()
+
+    def _on_val_tick(self, v) -> None:
+        self._progress.setValue(int(v))
+
+    def _on_bar_tick(self, v) -> None:
+        self._set_bar_slide(float(v))
 
     def _on_fade_done(self) -> None:
         if self._hiding:
@@ -441,16 +461,16 @@ class LoadingOverlay(QWidget):
         """진행바는 패널이 안착한 뒤 살짝 늦게 들어온다 — 계층이 순서대로 읽히게."""
         self._bar_anim.stop()
         self._set_bar_slide(0.0)
-        token = self._show_token
+        self._bar_token = self._show_token
+        self._bar_timer.start(max(1, motion.dur(self.BAR_STAGGER_MS)))
 
-        def _run(t=token):
-            if t != self._show_token or self._hiding:
-                return
-            self._bar_anim.stop()
-            self._bar_anim.setDuration(max(120, motion.dur(self.BAR_SLIDE_MS)))
-            self._bar_anim.start()
-
-        QTimer.singleShot(max(1, motion.dur(self.BAR_STAGGER_MS)), _run)
+    def _run_bar_slide(self) -> None:
+        """스태거 타이머 발화 — 그 사이 새 표시/퇴장이 있었으면 무시한다."""
+        if getattr(self, "_bar_token", -1) != self._show_token or self._hiding:
+            return
+        self._bar_anim.stop()
+        self._bar_anim.setDuration(max(120, motion.dur(self.BAR_SLIDE_MS)))
+        self._bar_anim.start()
 
     def hide_overlay(self) -> None:
         if not self.isVisible():
@@ -464,10 +484,13 @@ class LoadingOverlay(QWidget):
         if remaining > 0:                      # 아직 최소 표시 시간 전 → 지연 퇴장
             if not self._hide_pending:
                 self._hide_pending = True
-                QTimer.singleShot(int(remaining),
-                                  lambda t=token: self._begin_fade_out(t))
+                self._hide_token = token
+                self._hide_timer.start(int(remaining))
             return
         self._begin_fade_out(token)
+
+    def _on_hide_latch(self) -> None:
+        self._begin_fade_out(getattr(self, "_hide_token", self._show_token))
 
     def _begin_fade_out(self, token: int) -> None:
         self._hide_pending = False
@@ -498,6 +521,7 @@ class LoadingOverlay(QWidget):
         self.hide()
         self._val_anim.stop()
         self._bar_anim.stop()          # 숨은 뒤 tick 이 남아 여백을 흔들지 않게
+        self._bar_timer.stop()         # 대기 중인 스태거도 취소(숨은 뒤 들어오지 않게)
         self._busy.stop()
         self._busy.hide()
         self._spinner.stop()
@@ -553,6 +577,18 @@ class LoadingOverlay(QWidget):
             self._cover_parent()
 
     # ------------------------------------------------------------------
+    def hideEvent(self, event):  # noqa: N802
+        """숨으면 돌던 것을 전부 멈춘다 — 보이지 않는 오버레이가 tick 할 이유가 없다."""
+        self._fade_anim.stop()
+        self._rise_anim.stop()
+        self._val_anim.stop()
+        self._bar_anim.stop()
+        self._bar_timer.stop()
+        self._hide_timer.stop()
+        self._spinner.stop()
+        self._busy.stop()
+        super().hideEvent(event)
+
     def eventFilter(self, obj, event) -> bool:  # noqa: N802
         if obj is self.parent() and event.type() == QEvent.Type.Resize:
             self._cover_parent()

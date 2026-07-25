@@ -138,3 +138,58 @@ def test_no_stored_handle_to_self_deleting_animation():
         "stop() 이 RuntimeError 를 내고 PyQt6 가 프로세스를 종료시킨다. "
         "__init__ 에서 만든 애니메이션을 재사용하라: " + ", ".join(offenders)
     )
+
+
+# ── 두 번째 수명 함정: 람다로 연결한 애니메이션 슬롯 ────────────────────────
+def test_animation_slots_are_bound_methods_not_lambdas():
+    """★ 애니메이션 ``valueChanged`` 를 **람다로 연결하지 않는다.**
+
+    PyQt 는 슬롯이 QObject 의 **바인드 메서드**일 때 그 객체가 파괴되면 연결을 자동으로
+    끊는다.  람다는 ``self`` 를 클로저에 담아 receiver 를 식별할 수 없으므로 연결이
+    살아남고, 위젯이 파괴된 뒤에도 tick 이 **죽은 C++ 객체로** 들어간다 — 파이썬 예외가
+    아니라 **세그폴트**다.
+
+    실측 경로: 전체 테스트를 돌리면 애니메이션이 도는 중 오버레이가 `deleteLater()` 로
+    파괴되고, 다음 테스트의 `processEvents()` 에서 그 tick 이 발화해 프로세스가 죽었다
+    (exit 139).  RuntimeError 로 잡히지 않으므로 try/except 로는 막을 수 없다.
+    """
+    offenders: list[str] = []
+    for path in sorted(_UI_DIR.rglob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        lines = text.splitlines()
+        for i, line in enumerate(lines):
+            # 애니메이션의 tick 만 본다 — 사용자가 조작해서 나는 시그널(스핀박스
+            # valueChanged 등)은 타이머가 아니라 위젯이 살아 있을 때만 발화하므로
+            # 람다여도 이 함정에 걸리지 않는다.  **타이머로 도는 것**이 위험하다.
+            if not re.search(r"_anim\w*\.(valueChanged|finished)\.connect\(", line):
+                continue
+            window = " ".join(lines[i:i + 3])
+            if "lambda" not in window:
+                continue
+            # 예외: 같은 함수에서 `destroyed.connect(...stop)` 로 창을 닫아 두면 안전하다.
+            guard = " ".join(lines[max(0, i - 6):i + 8])
+            if re.search(r"destroyed\.connect\(\s*\w+\.stop\s*\)", guard):
+                continue
+            rel = path.relative_to(_UI_DIR.parents[2])
+            offenders.append(f"{rel}:{i + 1}")
+    assert not offenders, (
+        "애니메이션 tick 을 람다로 연결하고 파괴 시 차단도 하지 않았다 — 위젯이 파괴돼도 "
+        "연결이 살아남아 죽은 객체로 tick 이 들어가 세그폴트가 난다.  바인드 메서드를 쓰거나 "
+        "`대상.destroyed.connect(anim.stop)` 을 걸어라: " + ", ".join(offenders)
+    )
+
+
+def test_static_singleshot_is_not_used_for_widget_callbacks():
+    """★ ``QTimer.singleShot`` 정적 호출로 위젯 콜백을 예약하지 않는다.
+
+    정적 타이머는 위젯의 자식이 아니라서, 지연 시간 안에 위젯이 파괴되면 콜백이 죽은
+    위젯으로 들어간다.  ``QTimer(self)`` 는 위젯과 함께 파괴되므로 발화 자체가 불가능하다.
+
+    ※ 예외적으로 '레이아웃이 확정된 뒤 한 번' 같은 **자기 파괴와 무관한** 용도는 허용
+    범위가 넓지만, 애니메이션/오버레이처럼 **수명이 짧은** 것에는 쓰지 않는다.  그래서
+    이 가드는 로딩 오버레이에만 적용한다(실제로 여기서 세그폴트가 났다)."""
+    src = (_UI_DIR / "widgets" / "loading_overlay.py").read_text(encoding="utf-8")
+    code = "\n".join(ln for ln in src.splitlines()
+                     if not ln.strip().startswith("#"))
+    assert "QTimer.singleShot" not in code, \
+        "loading_overlay 가 정적 singleShot 으로 자기 콜백을 예약한다"
