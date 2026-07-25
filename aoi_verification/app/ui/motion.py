@@ -41,6 +41,7 @@ from . import theme
 #   가드를 덧붙이는 대신 **원인(자기 삭제)을 없앤다.**
 DUR_BASE = 200
 DUR_SLOW = 280
+DUR_SWITCH = 140         # 토글 손잡이 이동 — `switch_row.ToggleSwitch` 가 쓰는 값
 
 EASE_PRIMARY = QEasingCurve.Type.OutQuart     # 빠르게→끝에서 감속
 
@@ -129,7 +130,7 @@ def transition_in(container, new_pixmap, *, forward: bool = True,
     slide.start()
 
 
-DUR_RECOLOR = 220        # 색 모드 전환 — 짧게, 끝에서 감속
+DUR_RECOLOR = 420        # 색 모드 전환 — 사용자 요청으로 느리게(220 → 420), 끝에서 감속
 
 
 def crossfade_from(container, old_pixmap, *, duration: int = DUR_RECOLOR,

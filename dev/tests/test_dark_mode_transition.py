@@ -169,7 +169,7 @@ def test_lock_is_released_even_when_recreate_fails(qapp, window, motion_on,
     """예외 경로에서도 잠금이 풀린다 — 잠긴 채 남는 것이 원래 버그보다 나쁘다."""
     w = window
 
-    def _boom(self):
+    def _boom(self, *a, **k):          # 호출부가 apply_qss=… 를 넘긴다
         raise RuntimeError("의도된 실패")
 
     monkeypatch.setattr(mw.MainWindow, "_recreate_pages", _boom)
@@ -177,6 +177,74 @@ def test_lock_is_released_even_when_recreate_fails(qapp, window, motion_on,
     with pytest.raises(RuntimeError):
         w._on_appearance_changed()
     assert w._appearance_busy is False, "예외 뒤 잠금이 남았다"
+
+
+def test_toggle_lets_the_knob_move_before_the_heavy_work(qapp, window, motion_on):
+    """★ 토글 슬롯 안에서 **곧바로** 전환을 시작하지 않는다.
+
+    사용자 보고: "누르자마자 전환이 시작되어야 하는데 반응시간이 느림".  전환 작업은
+    메인 스레드를 ~140ms 잡는다(실측: apply_to_app 55~83 + 페이지 재생성 45~85 + 스냅샷
+    5~8).  그 일을 `toggled` 슬롯 안에서 동기로 하면, 방금 시작한 손잡이 이동
+    애니메이션이 **한 프레임도 그려지지 못하고** 얼어 누름이 씹힌 것처럼 보인다.
+
+    그래서 손잡이 이동(DUR_SWITCH)이 끝난 뒤에 emit 한다 — 이 테스트는 '즉시 emit 하지
+    않는다'와 '조금 뒤 반드시 emit 한다'를 함께 고정한다(뒤쪽이 없으면 전환이 아예
+    안 되는 것도 통과한다)."""
+    page = window._setup_page
+    seen: list[str] = []
+    page.appearance_changed.connect(seen.append)
+    page._dark_switch.switch._toggle()          # 실제 클릭과 같은 경로
+    assert seen == [], "토글 슬롯에서 즉시 emit 했다(손잡이가 얼어붙는다)"
+    _spin(qapp, max(60, motion.dur(motion.DUR_SWITCH) + 120))
+    assert seen == ["dark"], f"지연 emit 이 오지 않았다: {seen}"
+    _spin(qapp, 900)
+
+
+def test_rapid_double_toggle_coalesces_into_one_transition(qapp, window, motion_on):
+    """지연 구간의 연타는 **하나로 합쳐진다** — prefs 와 화면이 어긋나지 않게.
+
+    옛 동작에서는 두 번째 누름이 prefs 만 바꾸고 `_appearance_busy` 에 막혀 화면은 그대로
+    였다(저장된 색 ≠ 보이는 색).  지연 타이머가 재시작되므로 emit 은 한 번, 값은 마지막
+    누름의 것이 된다."""
+    page = window._setup_page
+    seen: list[str] = []
+    page.appearance_changed.connect(seen.append)
+    sw = page._dark_switch.switch
+    sw._toggle()                                 # light → dark
+    sw._toggle()                                 # 곧바로 되돌림 → dark → light
+    _spin(qapp, max(80, motion.dur(motion.DUR_SWITCH) + 150))
+    assert seen == [], "제자리로 돌아온 연타인데 전환을 요청했다"
+    assert theme.COLOR_MODE == "light"
+    assert _prefs.load().color_mode == "light", "prefs 가 보이는 색과 어긋났다"
+
+
+def test_transition_does_not_read_prefs_from_disk(qapp, window, motion_on):
+    """색 모드는 **시그널로 실려 온다** — 전환 경로에서 prefs 를 다시 읽지 않는다.
+
+    누름 → 저장 → 다시 읽기는 디스크 왕복 2회다.  회사 환경에서 prefs 가 네트워크 홈에
+    있으면 그 한 번이 전환 지연에 그대로 더해진다.
+
+    ※ 재는 것은 '전환 중 prefs 를 한 번도 안 읽는가'가 **아니다** — 새 페이지들은 원래
+    자기 상태를 prefs 에서 복원한다(그건 이 전환의 비용이 아니라 페이지 생성 비용이다).
+    재는 것은 **색 모드의 출처**다: 인자가 곧 진실이어야 하고, 없을 때만 prefs 를 본다."""
+    # 디스크가 반대 값을 말해도 **인자**가 이긴다 = 색 모드를 위해 디스크를 읽지 않는다.
+    _prefs.patch(color_mode="light")
+    window._on_appearance_changed("dark")
+    assert theme.COLOR_MODE == "dark", "인자로 실어 보낸 색 모드가 무시됐다"
+    _spin(qapp, 900)
+
+    # 인자가 없으면(옛 연결·직접 호출) 예전처럼 prefs 에서 읽는 폴백이 살아 있어야 한다.
+    _prefs.patch(color_mode="light")
+    window._on_appearance_changed()
+    assert theme.COLOR_MODE == "light", "인자 없는 호출의 prefs 폴백이 사라졌다"
+    _spin(qapp, 900)
+
+
+def test_recolor_is_slow_enough_to_read(qapp):
+    """사용자 요청: 색 전환을 **더 느리게**.  220ms 는 '튀는' 쪽에 가까웠다."""
+    assert motion.DUR_RECOLOR >= 400, f"DUR_RECOLOR={motion.DUR_RECOLOR} — 너무 빠르다"
+    # 손잡이 이동보다 충분히 길어야 두 모션이 '하나의 흐름'으로 읽힌다.
+    assert motion.DUR_RECOLOR > motion.DUR_SWITCH * 2
 
 
 def test_recolor_does_not_slide(qapp):

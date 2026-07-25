@@ -75,7 +75,7 @@ class ToggleSwitch(QWidget):
             return
         self._anim.setStartValue(float(self._pos))
         self._anim.setEndValue(float(target))
-        self._anim.setDuration(motion.dur(140))
+        self._anim.setDuration(motion.dur(motion.DUR_SWITCH))
         self._anim.start()
 
     def _on_tween(self, v) -> None:

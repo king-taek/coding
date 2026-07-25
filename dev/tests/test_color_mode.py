@@ -219,9 +219,20 @@ def test_setup_page_uses_a_dark_mode_switch_not_a_chip_picker():
         # 옛 3칩 선택기는 흔적도 없어야 한다.
         assert not hasattr(page, "color_mode_group"), "3칩 색 모드 선택기 부활"
 
+        # ★ 요청은 **지연 emit** 이다 — 손잡이 이동이 끝난 뒤에 색을 갈아 끼운다(누름이
+        #   씹혀 보이지 않게).  그래서 여기서도 이벤트 루프를 돌려 줘야 신호가 온다
+        #   (자세한 이유는 setup_page._on_dark_mode_toggled 주석).
+        from PyQt6.QtCore import QEventLoop, QTimer
+
+        def _spin(ms: int) -> None:
+            loop = QEventLoop()
+            QTimer.singleShot(ms, loop.quit)
+            loop.exec()
+
         seen: list = []
-        page.appearance_changed.connect(lambda: seen.append(True))
+        page.appearance_changed.connect(lambda *a: seen.append(True))
         page._on_dark_mode_toggled(True)
+        _spin(400)
         assert seen, "다크 켜기가 appearance_changed 를 내지 않았다"
         from aoi_verification.app.utils import prefs as _p
         assert _p.load().color_mode == "dark"
@@ -230,6 +241,7 @@ def test_setup_page_uses_a_dark_mode_switch_not_a_chip_picker():
         seen.clear()
         theme.set_color_mode("dark")
         page._on_dark_mode_toggled(True)
+        _spin(400)
         assert not seen
     finally:
         page.deleteLater()

@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (QCheckBox, QDoubleSpinBox, QFileDialog,
                               QToolButton, QVBoxLayout, QWidget)
 
 from ... import config, i18n
-from .. import theme
+from .. import motion, theme
 from ...utils import prefs as _prefs
 from ...utils.prefs import AutomationLevel, EngineMode
 from ..widgets.collapsible_section import CollapsibleSection
@@ -53,10 +53,18 @@ class SetupPage(QWidget):
 
     start_requested = pyqtSignal(object)             # SetupInput
     update_check_requested = pyqtSignal()            # '업데이트 확인' 버튼
-    appearance_changed = pyqtSignal()                # 색 모드 변경 → 페이지 재생성 요청
+    # 색 모드 변경 → 페이지 재생성 요청.  ★ 새 색 모드를 **인자로 싣는다** — 받는 쪽이
+    # prefs 를 다시 읽지 않아도 되게(전환 경로에서 디스크 왕복을 한 번 줄인다).
+    appearance_changed = pyqtSignal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        # 손잡이 이동이 끝난 뒤 색을 갈아 끼우기 위한 지연 타이머(연타 합치기 겸용).
+        # ★ 부모 있는 타이머여야 페이지가 파괴될 때 함께 죽는다(_on_dark_mode_toggled 주석).
+        self._pending_color_mode: Optional[str] = None
+        self._appearance_timer = QTimer(self)
+        self._appearance_timer.setSingleShot(True)
+        self._appearance_timer.timeout.connect(self._emit_appearance_changed)
         self._build()
 
     # ------------------------------------------------------------------
@@ -941,12 +949,34 @@ class SetupPage(QWidget):
         return host
 
     def _on_dark_mode_toggled(self, on: bool) -> None:
-        """다크 모드 전환 요청 — 실제 적용(페이지 재생성)은 main_window 가 한다."""
+        """다크 모드 전환 요청 — 실제 적용(페이지 재생성)은 main_window 가 한다.
+
+        ★ **여기서 바로 emit 하지 않는다.**  emit 하면 같은 슬롯 안에서 main_window 가
+        시트 재적용 + 페이지 5개 재생성을 **동기로** 돌아 메인 스레드가 ~140ms 멈춘다
+        (실측: apply_to_app 55~80 + 재생성 45~85).  그 사이 방금 시작한 손잡이 이동
+        애니메이션(DUR_SWITCH)도 얼어붙어 **누른 순간 아무 일도 안 일어난 것처럼** 보였다
+        (사용자 보고: "누르자마자 전환이 시작되어야 하는데 반응시간이 느림").
+
+        손잡이가 다 움직인 **뒤에** 무거운 일을 시작한다 → 누름은 즉시 확인되고, 정지
+        구간은 두 모션(손잡이 → 색 크로스페이드) 사이에 숨는다.  연타는 타이머가 재시작
+        되며 **합쳐지므로**(prefs 는 마지막 값, emit 은 한 번) 상태가 어긋나지 않는다.
+        ★ 정적 `QTimer.singleShot` 금지 — 부모 있는 타이머여야 페이지가 파괴될 때 함께
+        죽는다(죽은 위젯으로 콜백이 들어가면 세그폴트다, 전례 있음).
+        """
         key = "dark" if on else "light"
+        self._pending_color_mode = key
+        _prefs.patch(color_mode=key)       # 재생성된 페이지가 prefs 에서 상태를 복원한다
+        self._appearance_timer.start(max(1, motion.dur(motion.DUR_SWITCH)))
+
+    def _emit_appearance_changed(self) -> None:
+        """손잡이 이동이 끝났다 — 이제 색을 갈아 끼운다(연타는 여기서 한 번으로 합쳐진다)."""
+        key = self._pending_color_mode or theme.COLOR_MODE
+        self._pending_color_mode = None
         if key == theme.COLOR_MODE:
-            return
-        _prefs.patch(color_mode=key)
-        self.appearance_changed.emit()
+            return                         # 연타로 제자리 → 재생성할 이유가 없다
+        # ★ 색 모드를 **인자로 실어 보낸다** — 받는 쪽이 prefs 를 다시 읽지 않게(디스크
+        #   왕복 2회 → 1회.  회사 환경에서 prefs 가 네트워크 홈에 있으면 이 한 번이 크다).
+        self.appearance_changed.emit(key)
 
     # ------------------------------------------------------------------
     def _on_start(self) -> None:
