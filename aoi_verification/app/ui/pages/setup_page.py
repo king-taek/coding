@@ -91,21 +91,47 @@ class SetupPage(QWidget):
         root.setContentsMargins(40, 40, 40, 40)
         root.setSpacing(20)
 
-        # 제목 — 화면 크기 컨트롤은 별도 버튼 없이 OS 의 표준 창 조작
+        # 본문 구성 — 배치안(서브클래스)이 이 메서드만 오버라이드하면 배치가 바뀐다.
+        self._build_body(root)
+
+        # 개발자 모드 토글 단축키 — 일반 사용자에게는 보이지 않는 진입점.
+        self._dev_shortcut = QShortcut(QKeySequence("Ctrl+Shift+D"), self)
+        self._dev_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self._dev_shortcut.activated.connect(self._toggle_dev_mode)
+
+    # ==================================================================
+    # 본문 빌더 — 각 조각은 위젯 하나를 만들어 돌려준다.  배치안은 ``_build_body``
+    # (순서·열 구성) 또는 개별 빌더(컨트롤 디자인)만 갈아끼우면 된다.
+    # ==================================================================
+    def _build_body(self, root: QVBoxLayout) -> None:
+        """기본 배치 — 한 열, 위에서 아래로(현행 순서 그대로)."""
+        root.addWidget(self._build_title())
+        root.addWidget(self._build_view_options())
+        root.addWidget(self._build_subtitle())
+        root.addWidget(self._build_howto())
+        root.addWidget(self._build_automation_card())
+        root.addWidget(self._build_device_row())
+        root.addWidget(self._build_scope_row())
+        root.addWidget(self._build_engine_card())
+        root.addStretch(1)
+        root.addWidget(self._build_action_bar())
+        root.addWidget(self._build_credit())
+
+    def _build_title(self) -> QWidget:
+        # 화면 크기 컨트롤은 별도 버튼 없이 OS 의 표준 창 조작
         # (드래그, 최대화/복원, 모서리 리사이즈) 으로만 처리.
         title = QLabel(i18n.KO.SETUP_TITLE, self)
         title.setProperty("role", "title")
-        root.addWidget(title)
+        return title
 
-        # 보기 옵션 (상단) — 모션 줄이기.
-        root.addWidget(self._build_view_options())
-
+    def _build_subtitle(self) -> QWidget:
         subtitle = QLabel(i18n.KO.SETUP_HINT, self)
         subtitle.setProperty("role", "subtitle")
         subtitle.setWordWrap(True)
-        root.addWidget(subtitle)
+        return subtitle
 
-        # 사용 방법 안내 — 접을 수 있는 섹션 (기본 접힘) ----------------
+    def _build_howto(self) -> QWidget:
+        """사용 방법 안내 — 접을 수 있는 섹션 (기본 접힘)."""
         _prefs_now = _prefs.load()
         self._howto_section = CollapsibleSection(
             open_label=i18n.KO.HOWTO_TOGGLE_OPEN,
@@ -115,9 +141,7 @@ class SetupPage(QWidget):
         )
         howto_card = NeonCard(role="card-soft", parent=self._howto_section)
         howto_title = QLabel(i18n.KO.SETUP_HOW_TO_USE_TITLE, howto_card)
-        howto_title.setStyleSheet(
-            f"color: {theme.INK}; font-weight: 700; letter-spacing: 1px;"
-        )
+        howto_title.setProperty("role", "cardTitle")
         howto_card.body().addWidget(howto_title)
         howto_body = QLabel(i18n.KO.SETUP_HOW_TO_USE_BODY, howto_card)
         howto_body.setWordWrap(True)
@@ -129,23 +153,22 @@ class SetupPage(QWidget):
         self._howto_section.toggled.connect(
             lambda expanded: _prefs.patch(howto_expanded=bool(expanded))
         )
-        root.addWidget(self._howto_section)
+        return self._howto_section
 
-        # 자동화 수준 — 올인원 모드 (#3) ---------------------------------
+    def _build_automation_card(self) -> QWidget:
+        """자동화 수준 — 올인원 모드 (#3)."""
+        _prefs_now = _prefs.load()
         auto_card = NeonCard(role="card-soft", parent=self)
 
-        # 제목 행: "자동화 수준" + "?" 토글 버튼
         auto_title_row = QHBoxLayout()
         auto_title_row.setContentsMargins(0, 0, 0, 0)
         auto_title = QLabel(i18n.KO.AUTOMATION_TITLE, auto_card)
-        auto_title.setStyleSheet(
-            f"color: {theme.INK}; font-weight: 700; letter-spacing: 1px;"
-        )
+        auto_title.setProperty("role", "cardTitle")
         self._auto_help_btn = QToolButton(auto_card)
         self._auto_help_btn.setText("?")
         self._auto_help_btn.setObjectName("helpToggle")
         self._auto_help_btn.setCheckable(True)
-        self._auto_help_btn.setToolTip("설명 보기/숨기기")
+        self._auto_help_btn.setToolTip(i18n.KO.HELP_TOGGLE_TOOLTIP)
         auto_title_row.addWidget(auto_title)
         auto_title_row.addStretch()
         auto_title_row.addWidget(self._auto_help_btn)
@@ -168,10 +191,13 @@ class SetupPage(QWidget):
         self._auto_hint.setVisible(False)
         auto_card.body().addWidget(self._auto_hint)
         self._auto_help_btn.toggled.connect(self._auto_hint.setVisible)
-        root.addWidget(auto_card)
+        return auto_card
 
-        # 폴더/호기 2칸 ---------------------------------------------------
-        row = QHBoxLayout()
+    def _build_device_row(self) -> QWidget:
+        """기준/검증 장비 폴더·호기 2칸."""
+        host = QWidget(self)
+        row = QHBoxLayout(host)
+        row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(20)
         self.ref_group, self.ref_path_edit, self.ref_machine_edit = \
             self._make_machine_group(i18n.KO.SETUP_REF_GROUP)
@@ -179,12 +205,14 @@ class SetupPage(QWidget):
             self._make_machine_group(i18n.KO.SETUP_VAL_GROUP)
         row.addWidget(self.ref_group)
         row.addWidget(self.val_group)
-        root.addLayout(row)
+        return host
 
-        # 일부 슬롯만 진행 옵션 ------------------------------------------
-        # None = 전체 진행.  버튼으로 기준 폴더의 슬롯을 스캔해 부분 선택.
+    def _build_scope_row(self) -> QWidget:
+        """일부 슬롯만 진행 옵션.  None = 전체 진행."""
         self._selected_slots: Optional[set] = None
-        slot_row = QHBoxLayout()
+        host = QWidget(self)
+        slot_row = QHBoxLayout(host)
+        slot_row.setContentsMargins(0, 0, 0, 0)
         self.btn_select_slots = NeonButton(
             i18n.KO.SLOT_SELECT_BTN, role="ghost",
         )
@@ -194,24 +222,24 @@ class SetupPage(QWidget):
         self.slot_select_label.setProperty("role", "muted")
         slot_row.addWidget(self.btn_select_slots)
         slot_row.addWidget(self.slot_select_label, stretch=1)
-        root.addLayout(slot_row)
+        return host
 
-        # 매칭 설정 카드 ------------------------------------------------
+    def _build_engine_card(self) -> QWidget:
+        """매칭 설정 — 허용 오차(좌표) + 구형(유사도) 모드."""
+        _prefs_now = _prefs.load()
         engine_card = NeonCard(role="card-soft", parent=self)
         eng_title = QLabel(i18n.KO.ENGINE_CARD_TITLE, engine_card)
-        eng_title.setStyleSheet(
-            f"color: {theme.INK}; font-weight: 700; letter-spacing: 1px;"
-        )
+        eng_title.setProperty("role", "cardTitle")
         engine_card.body().addWidget(eng_title)
 
         # 좌표 매칭 허용 오차 스핀박스 (항상 표시 — 기본 모드)
-        _tol_row = QWidget(engine_card)
-        _tol_layout = QHBoxLayout(_tol_row)
+        self._tol_row = QWidget(engine_card)
+        _tol_layout = QHBoxLayout(self._tol_row)
         _tol_layout.setContentsMargins(0, 0, 0, 0)
         _tol_layout.setSpacing(6)
-        _tol_label = QLabel(i18n.KO.COORD_TOLERANCE_LABEL, _tol_row)
+        _tol_label = QLabel(i18n.KO.COORD_TOLERANCE_LABEL, self._tol_row)
         _tol_label.setToolTip(i18n.KO.COORD_TOLERANCE_TOOLTIP)
-        self.coord_tol_spin = QDoubleSpinBox(_tol_row)
+        self.coord_tol_spin = QDoubleSpinBox(self._tol_row)
         self.coord_tol_spin.setRange(10.0, 5000.0)
         self.coord_tol_spin.setSingleStep(50.0)
         self.coord_tol_spin.setDecimals(1)
@@ -221,10 +249,10 @@ class SetupPage(QWidget):
         _tol_layout.addWidget(_tol_label)
         _tol_layout.addWidget(self.coord_tol_spin)
         _tol_layout.addStretch()
-        engine_card.body().addWidget(_tol_row)
+        engine_card.body().addWidget(self._tol_row)
 
-        # 구형 모드 (유사도 엔진) — 접힌 상태로 기본 비활성 -----------------
-        _last_engine = getattr(_prefs_now, "engine_mode", "coordinate")
+        # 구형 모드 (유사도 엔진) — 접힌 상태로 기본 비활성
+        _last_engine = getattr(_prefs_now, "engine_mode", EngineMode.COORDINATE)
         _legacy_expanded = _last_engine in ("basic", "efficiency")
         self._legacy_section = CollapsibleSection(
             open_label=i18n.KO.LEGACY_MODE_OPEN,
@@ -257,28 +285,31 @@ class SetupPage(QWidget):
         legacy_lay.addWidget(self.radio_engine_efficiency)
 
         # 임계치 슬라이더 (구형 모드 전용)
-        sl_row = QHBoxLayout()
-        sl_row.addWidget(QLabel(i18n.KO.SETUP_THRESHOLD_LABEL, legacy_inner))
-        self.slider = NoWheelSlider(Qt.Orientation.Horizontal, legacy_inner)
+        self._threshold_row = QWidget(legacy_inner)
+        sl_row = QHBoxLayout(self._threshold_row)
+        sl_row.setContentsMargins(0, 0, 0, 0)
+        sl_row.addWidget(QLabel(i18n.KO.SETUP_THRESHOLD_LABEL, self._threshold_row))
+        self.slider = NoWheelSlider(Qt.Orientation.Horizontal, self._threshold_row)
         self.slider.setRange(0, 100)
         _last_prefs = _prefs.load()
         self.slider.setValue(int(round(_last_prefs.threshold * 100)))
-        self.threshold_label = QLabel(f"{self.slider.value()} %", legacy_inner)
+        self.threshold_label = QLabel(f"{self.slider.value()} %", self._threshold_row)
         self.threshold_label.setStyleSheet(f"color: {theme.INK}; font-weight: 700;")
         self.threshold_label.setFixedWidth(60)
         self.slider.valueChanged.connect(self._on_threshold_changed)
         sl_row.addWidget(self.slider, stretch=1)
         sl_row.addWidget(self.threshold_label)
-        legacy_lay.addLayout(sl_row)
+        legacy_lay.addWidget(self._threshold_row)
 
         self._legacy_section.add_content_widget(legacy_inner)
         engine_card.body().addWidget(self._legacy_section)
-        root.addWidget(engine_card)
+        return engine_card
 
-        root.addStretch(1)
-
-        # 시작 / 업데이트 확인 버튼 -------------------------------------
-        bar = QHBoxLayout()
+    def _build_action_bar(self) -> QWidget:
+        """시작 / 업데이트 확인 (+ 개발자 모드 버튼)."""
+        host = QWidget(self)
+        bar = QHBoxLayout(host)
+        bar.setContentsMargins(0, 0, 0, 0)
         # 업데이트 확인은 좌측(보조), 검증 시작은 우측(주). 좌상단 도움말 메뉴 대체.
         self.update_btn = NeonButton(i18n.KO.MENU_CHECK_UPDATE, role="ghost")
         self.update_btn.setMinimumHeight(46)
@@ -288,6 +319,8 @@ class SetupPage(QWidget):
         # ‘개발자 벤치마크 / 정답 라벨’ 버튼 — 일반 사용자 화면에는 나타나지 않는다.
         # 앱 안에서 Ctrl+Shift+D 로 켜고 끌 수 있으며, 토글 시 버튼이 즉시
         # 나타나거나 사라진다(아래 _refresh_dev_buttons).
+        # ★ 인덱스 계약: [0]=update_btn, [1..2]=개발자 버튼, 그 뒤 stretch.
+        #   신규 위젯은 반드시 stretch **뒤**에 붙인다(_refresh_dev_buttons 가정 보존).
         self._action_bar = bar
         self.dev_bench_btn: NeonButton | None = None
         self.dev_label_btn: NeonButton | None = None
@@ -297,19 +330,15 @@ class SetupPage(QWidget):
         self.start_btn.setMinimumHeight(46)
         self.start_btn.clicked.connect(self._on_start)
         bar.addWidget(self.start_btn)
-        root.addLayout(bar)
         self._refresh_dev_buttons()
+        return host
 
-        # 개발자 모드 토글 단축키 — 일반 사용자에게는 보이지 않는 진입점.
-        self._dev_shortcut = QShortcut(QKeySequence("Ctrl+Shift+D"), self)
-        self._dev_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
-        self._dev_shortcut.activated.connect(self._toggle_dev_mode)
-
-        # 개발자 크레딧 (메인 화면) -------------------------------------
+    def _build_credit(self) -> QWidget:
+        """개발자 크레딧 (메인 화면)."""
         credit = QLabel(i18n.KO.CREDIT, self)
         credit.setAlignment(Qt.AlignmentFlag.AlignCenter)
         credit.setStyleSheet(f"color: {theme.MUTE}; padding-top: 10px;")
-        root.addWidget(credit)
+        return credit
 
     # ------------------------------------------------------------------
     def _make_machine_group(self, title: str) -> tuple[QGroupBox, QLineEdit, QLineEdit]:

@@ -414,6 +414,9 @@ REVIEW_KEY_HINT = "↑↓ 줄 이동 · R 매치 없음 · Enter 검토 완료"
 KEY_HINT_MOVE = "줄 이동"
 KEY_HINT_REJECT = "매치 없음"
 KEY_HINT_DONE = "검토 완료"
+# 카드 제목 옆 '?' 도움말 토글 (하드코딩 금지 — 사용자 노출 문자열은 여기 모은다)
+HELP_TOGGLE_TOOLTIP = "설명 보기/숨기기"
+
 # 보기 옵션 (셋업 상단)
 REDUCE_MOTION_LABEL = "모션 줄이기"
 REDUCE_MOTION_TOOLTIP = "화면 전환·스크롤 애니메이션을 끕니다."
