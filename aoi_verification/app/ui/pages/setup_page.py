@@ -94,8 +94,11 @@ class SetupPage(QWidget):
 
         # 원본과 동일한 외곽 마진/스페이싱 유지.
         root = QVBoxLayout(host)
-        root.setContentsMargins(40, 40, 40, 40)
-        root.setSpacing(20)
+        # ★ 하드코딩 40/20 이 `PROFILE.page_margin`·`section_gap` 을 죽은 토큰으로
+        #   만들고 있었다 — 밀도를 한 곳에서 조절할 수 있게 토큰을 쓴다.
+        m = theme.PROFILE.page_margin
+        root.setContentsMargins(m, m, m, m)
+        root.setSpacing(theme.PROFILE.section_gap)
 
         # 본문 구성 — 배치안(서브클래스)이 이 메서드만 오버라이드하면 배치가 바뀐다.
         self._build_body(root)
@@ -104,7 +107,8 @@ class SetupPage(QWidget):
         if self._pinned_action_bar():
             bar = self._build_action_bar()
             # 스크롤 안 본문과 같은 좌우 마진 + 상단 눈금으로 '고정된 바닥'임을 말한다.
-            bar.setContentsMargins(40, 12, 40, 16)
+            bar.setContentsMargins(theme.PROFILE.page_margin, 12,
+                                   theme.PROFILE.page_margin, 16)
             rule = QWidget(self)
             rule.setFixedHeight(1)
             rule.setStyleSheet(f"background: {theme.LINE};")
@@ -274,6 +278,8 @@ class SetupPage(QWidget):
     # 두 카드를 나란히 두려면 이 폭이 필요하다.  밑돌면 세로로 쌓는다 — 800×600 에서
     # 나란히 두면 경로 입력란이 ~85px 로 짜부라져 폴더 이름을 읽을 수 없었다(실측).
     _DEVICE_SIDE_BY_SIDE_W = 900
+    # 101단계 슬라이더를 1200px 에 펼치면 단계당 12px — 넓을수록 정밀해지지 않는다.
+    _SLIDER_MAX_W = 320
 
     def _build_device_row(self) -> QWidget:
         """기준/검증 장비 폴더·호기 — 넓으면 2열, 좁으면 세로로 쌓는다."""
@@ -344,6 +350,9 @@ class SetupPage(QWidget):
 
         # 좌표 매칭 허용 오차 스핀박스 (항상 표시 — 기본 모드)
         self._tol_row = QWidget(engine_card)
+        # 맨 QWidget 은 전역 `QWidget { background: $bg }` 를 물려받아 카드 면($panel)
+        # 위에 색이 다른 띠로 보인다 — 투명으로 못 박는다(로딩 패널과 같은 함정).
+        self._tol_row.setProperty("role", "rowHost")
         _tol_layout = QHBoxLayout(self._tol_row)
         _tol_layout.setContentsMargins(0, 0, 0, 0)
         _tol_layout.setSpacing(6)
@@ -356,6 +365,10 @@ class SetupPage(QWidget):
         self.coord_tol_spin.setSuffix(" µm")
         self.coord_tol_spin.setValue(getattr(_prefs_now, "coord_tolerance", 500.0))
         self.coord_tol_spin.setToolTip(i18n.KO.COORD_TOLERANCE_TOOLTIP)
+        # 수치는 모노 — '도면' 컨셉의 핵심인데 이 화면엔 모노가 한 글자도 없었다.
+        self.coord_tol_spin.setProperty("role", "mono")
+        self.coord_tol_spin.setAlignment(Qt.AlignmentFlag.AlignRight
+                                        | Qt.AlignmentFlag.AlignVCenter)
         # ★ Qt 기본 up/down 버튼을 쓰지 않는다.  스타일시트로는 삼각형 화살표를 그릴 수
         #   없어(이미지 리소스 필요) 납작한 막대로 잘려 렌더되고, 폭도 ~10px 이라
         #   WCAG 2.5.8(24px)에 한참 못 미쳤다(4가지 방식 실측 비교 후 결론).
@@ -401,18 +414,25 @@ class SetupPage(QWidget):
 
         # 임계치 슬라이더 (구형 모드 전용 파라미터)
         self._threshold_row = QWidget(engine_card)
+        self._threshold_row.setProperty("role", "rowHost")
         sl_row = QHBoxLayout(self._threshold_row)
         sl_row.setContentsMargins(0, 0, 0, 0)
         sl_row.addWidget(QLabel(i18n.KO.SETUP_THRESHOLD_LABEL, self._threshold_row))
         self.slider = NoWheelSlider(Qt.Orientation.Horizontal, self._threshold_row)
         self.slider.setRange(0, 100)
         self.slider.setValue(int(round(_prefs_now.threshold * 100)))
+        # 101단계를 1219px 에 펼치면 단계당 12px 이라 정밀 조절이 오히려 어렵다.
+        self.slider.setMaximumWidth(self._SLIDER_MAX_W)
         self.threshold_label = QLabel(f"{self.slider.value()} %", self._threshold_row)
-        self.threshold_label.setStyleSheet(f"color: {theme.INK}; font-weight: 700;")
-        self.threshold_label.setFixedWidth(60)
+        # 값은 모노 + 우측 정렬 — 자릿수가 바뀌어도 좌우로 춤추지 않는다.
+        self.threshold_label.setProperty("role", "mono")
+        self.threshold_label.setAlignment(Qt.AlignmentFlag.AlignRight
+                                          | Qt.AlignmentFlag.AlignVCenter)
+        self.threshold_label.setFixedWidth(56)
         self.slider.valueChanged.connect(self._on_threshold_changed)
         sl_row.addWidget(self.slider, stretch=1)
         sl_row.addWidget(self.threshold_label)
+        sl_row.addStretch(1)          # 상한 폭을 넘는 여백은 오른쪽으로
         engine_card.body().addWidget(self._threshold_row)
 
         # 지금 어느 파라미터가 유효한지 문장으로 — 비활성 컨트롤의 이유를 말해준다.
@@ -881,6 +901,51 @@ class SetupPage(QWidget):
             selected_slots=(set(self._selected_slots)
                             if self._selected_slots is not None else None),
         )
+
+    # ── 작성 중 입력 이관 (색 모드/배치 전환 시) ─────────────────────────────
+    # 색 모드·배치를 바꾸면 페이지를 파괴하고 다시 만든다(구운 색 교체).  '세션 시작
+    # 전'은 **아무것도 입력하지 않았다는 뜻이 아니다** — 폴더·호기·진행 범위·손으로 고른
+    # 슬롯·허용 오차는 [검증 시작] 전까지 prefs 에 없다.  그대로 파괴하면 조용히 사라지고,
+    # 특히 '일부 슬롯 12/40' 이 '모든 슬롯'으로 되돌아가면 40슬롯을 통째로 돌리게 된다.
+    # 그래서 재생성 전에 여기서 걷어 두고, 새 페이지에 다시 심는다.
+    def capture_draft(self) -> dict:
+        """재생성을 넘어 살려야 하는 입력값."""
+        scope = self.scope_group.current_key()
+        subset_btn = self.scope_group.button("subset")
+        return {
+            "ref_root": self.ref_path_edit.text(),
+            "val_root": self.val_path_edit.text(),
+            "ref_machine": self.ref_machine_edit.text(),
+            "val_machine": self.val_machine_edit.text(),
+            "coord_tolerance": float(self.coord_tol_spin.value()),
+            "scope": scope,
+            "subset_label": subset_btn.text() if subset_btn is not None else "",
+            "selected_slots": (set(self._selected_slots)
+                              if self._selected_slots is not None else None),
+        }
+
+    def restore_draft(self, draft: dict) -> None:
+        """``capture_draft`` 로 걷은 값을 되돌린다(시그널 없이 — 저장 루프 방지)."""
+        if not draft:
+            return
+        self.ref_path_edit.setText(draft.get("ref_root", "") or "")
+        self.val_path_edit.setText(draft.get("val_root", "") or "")
+        self.ref_machine_edit.setText(draft.get("ref_machine", "") or "")
+        self.val_machine_edit.setText(draft.get("val_machine", "") or "")
+        tol = draft.get("coord_tolerance")
+        if tol:
+            self.coord_tol_spin.setValue(float(tol))
+        slots = draft.get("selected_slots")
+        self._selected_slots = set(slots) if slots else None
+        label = draft.get("subset_label") or ""
+        if label:
+            self.scope_group.set_option_label("subset", label)
+        scope = draft.get("scope") or "all"
+        if scope in self.scope_group.keys():
+            # ★ emit=False — 'subset' 을 emit 하면 슬롯 선택 다이얼로그가 다시 뜬다.
+            self.scope_group.set_current_key(scope)
+        self._sync_engine_controls()
+        self._validate()
 
     # ------------------------------------------------------------------
     def apply_state(self, ref_root: str, val_root: str,

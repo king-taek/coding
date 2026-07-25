@@ -41,25 +41,68 @@ def _overlay(qapp, w=900, h=600):
 
 
 def test_panel_settles_at_center_and_starts_below(qapp):
-    """t=1 이면 중앙, t<1 이면 중앙보다 **아래** — '아래에서 올라와 안착'."""
+    """위치 진행도 1 이면 중앙, <1 이면 중앙보다 **아래** — '아래에서 올라와 안착'.
+
+    ★ 위치는 `_on_rise`(불투명도와 분리된 축)가 몰기 때문에 여기서 그것으로 검증한다."""
     host, ov = _overlay(qapp)
     try:
         ov.show_overlay("작업 중")
         for _ in range(6):
             qapp.processEvents()
+
         def dy():
             g = ov._panel.geometry()
             return g.y() + g.height() // 2 - ov.height() // 2
-        ov._on_fade(1.0)
+
+        ov._on_rise(1.0)
         assert abs(dy()) <= 2, f"안착 위치가 중앙이 아니다: dy={dy()}"
-        ov._on_fade(0.0)
+        ov._on_rise(0.0)
         assert dy() > 0, "시작 위치가 중앙보다 아래여야 한다"
         assert dy() <= ov.RISE_IN_PX + 2
-        ov._on_fade(0.5)
+        ov._on_rise(0.5)
         mid = dy()
         assert 0 < mid < ov.RISE_IN_PX, f"중간 프레임이 사이에 없다: {mid}"
     finally:
         host.deleteLater()
+
+
+def test_position_settles_slower_than_opacity(qapp):
+    """★ 사용자 요구는 두 개의 속도다 — "빠르게 나타나고 마지막에 천천히 도착".
+
+    불투명도와 위치를 같은 t 로 몰면 24px 이동이 페이드가 끝나기 전에 소진돼 '안착'이
+    사라진다.  위치 지속시간이 페이드보다 길어야 그 문장이 성립한다."""
+    assert LoadingOverlay.RISE_IN_MS > LoadingOverlay.FADE_IN_MS
+    # 페이드는 등속(스크림 디밍이 슬램하지 않게), 위치는 끝에서 감속.
+    host, ov = _overlay(qapp)
+    try:
+        from PyQt6.QtCore import QEasingCurve
+        assert ov._fade_anim.easingCurve().type() == QEasingCurve.Type.Linear
+        assert ov._rise_anim.easingCurve().type() == QEasingCurve.Type.OutQuart
+    finally:
+        host.deleteLater()
+
+
+def test_bar_stagger_lands_after_the_panel(qapp):
+    """진행바는 패널이 안착한 **뒤에** 들어와야 계층이 순서대로 읽힌다.
+
+    이전 60ms 지연은 진행바가 패널보다 먼저 도착해 순서가 뒤집혀 있었다."""
+    assert LoadingOverlay.BAR_STAGGER_MS >= LoadingOverlay.FADE_IN_MS * 0.5
+
+
+def test_busy_comet_head_leads(qapp):
+    """혜성의 **머리**(진행 방향 앞쪽)가 가장 진해야 한다 — 거꾸로 나면 안 된다."""
+    import inspect
+
+    from aoi_verification.app.ui.widgets import loading_overlay as lo
+    import re
+    src = inspect.getsource(lo._BusyStripe.paintEvent)
+    m = re.search(r"enumerate\(\(([^)]*)\)\)", src)
+    assert m, "혜성 알파 튜플을 찾지 못했다"
+    alphas = [float(x) for x in m.group(1).split(",")]
+    # enumerate 순서 = 왼(꼬리) → 오른(머리) 이므로 알파는 **증가**해야 한다.
+    assert alphas == sorted(alphas), f"혜성 꼬리 알파가 감소 순서(거꾸로)다: {alphas}"
+    # 꼬리도 트랙에서 보여야 한다 — 0.25 는 묻혔다.
+    assert alphas[0] >= 0.4, f"꼬리 최저 알파 {alphas[0]} 가 트랙에 묻힌다"
 
 
 def test_exit_travels_less_than_entry(qapp):
@@ -92,8 +135,25 @@ def test_no_nested_graphics_effect(qapp):
     """패널 이펙트 안에 또 이펙트를 겹치면 QPainter 충돌 경고가 난다 — 금지."""
     host, ov = _overlay(qapp)
     try:
-        assert ov._panel.graphicsEffect() is not None
         assert ov._bar_host.graphicsEffect() is None
+    finally:
+        host.deleteLater()
+
+
+def test_effect_is_detached_when_not_fading(qapp):
+    """★ 이펙트가 걸려 있는 동안 스피너 1프레임마다 패널 **전체**가 오프스크린으로 다시
+    렌더된다.  페이드가 끝나면(또는 모션이 꺼져 있으면) 떼어 낸다 — 불투명도 1.0 이라
+    시각적으로 달라지는 것은 없다."""
+    host, ov = _overlay(qapp)
+    try:
+        ov.show_overlay("작업 중")            # 헤드리스 → 즉시 최종 상태
+        assert ov._panel.graphicsEffect() is None
+        assert ov._content_eff is None
+        # 페이드를 걸 때만 다시 설치된다.
+        ov._attach_effect()
+        assert ov._panel.graphicsEffect() is not None
+        ov._detach_effect()
+        assert ov._panel.graphicsEffect() is None
     finally:
         host.deleteLater()
 
@@ -118,10 +178,41 @@ def test_headless_snaps_to_final_state(qapp):
     try:
         ov.show_overlay("작업 중")
         assert ov._fade == 1.0
+        assert ov._rise == 1.0
         m = ov._bar_lay.contentsMargins()
         assert m.top() == 0                  # 슬라이드가 끝난 상태
+        # 래치 이내에 감추라고 하면 아직 살아 있어야 한다(깜빡임 방지).
         ov.hide_overlay()
-        assert ov.isHidden()
+        assert not ov.isHidden()
+        # 래치를 지난 것으로 만들면 모션이 꺼져 있으니 페이드 없이 즉시 종료.
+        ov._hide_pending = False
+        ov._begin_fade_out(ov._show_token)
+        assert ov.isHidden(), "모션이 꺼져 있으면 페이드 없이 즉시 종료해야 한다"
+    finally:
+        host.deleteLater()
+
+
+def test_min_display_latch_applies_without_motion(qapp):
+    """★ 최소 표시 래치는 모션이 아니라 **타이밍 위생**이다.
+
+    `motion.enabled()` 안쪽에 두면 '모션 줄이기'를 켠 사용자만 깜빡임을 그대로 받는다 —
+    모션에 민감해서 끈 사람에게 정확히 깜빡임을 주는 셈이다."""
+    import inspect
+
+    from aoi_verification.app.ui.widgets import loading_overlay as lo
+    src = inspect.getsource(lo.LoadingOverlay.hide_overlay)
+    # 주석은 제외하고 **코드 줄**만 본다(주석에 토큰 이름이 설명으로 등장한다).
+    code = "\n".join(ln for ln in src.splitlines()
+                     if not ln.strip().startswith("#"))
+    assert "motion.enabled" not in code, "래치가 모션 게이트 안에 들어갔다"
+    assert "MIN_DISPLAY_MS" in code
+
+    host, ov = _overlay(qapp)
+    try:
+        ov.show_overlay("초단타")
+        ov.hide_overlay()               # 래치 이내 → 아직 감추지 않는다
+        assert not ov.isHidden(), "래치가 동작하지 않았다(깜빡임)"
+        assert ov._hide_pending is True
     finally:
         host.deleteLater()
 

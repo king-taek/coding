@@ -1,7 +1,11 @@
-/* AOI 검증 — 절제된 다크 계측기 테마.
+/* AOI 검증 — '도면(Datum)' 디자인: 벨럼 제도 시트 위의 청사진 잉크.
    이 파일은 템플릿: 달러 토큰을 theme.render_qss 가 theme.TOKENS 값으로 치환한다.
-   원칙: 앰버(accent)는 주요 액션·선택 전용, 상태는 pass/danger/warn,
-   키보드 포커스는 focus 링. 글로우 없음(NeonButton primary 만 예외). */
+   원칙: accent(청사진 블루)는 주요 액션·현재 선택 전용, 상태는 pass/danger/warn,
+   키보드 포커스는 focus 링. 무광 — 글로우·그림자 없음.
+
+   ★ 서브컨트롤 선택자는 `위젯::서브컨트롤:상태` 순서만 유효하다.
+     `위젯:상태::서브컨트롤` 로 쓰면 무시되거나 상태와 무관하게 항상 적용된다
+     (둘 다 실제로 버그를 냈다 — 아래 QSlider·QCheckBox 주석 참조). */
 
 QWidget {
     background-color: $bg;
@@ -78,23 +82,16 @@ QLabel[chip="none"] {
 }
 
 /* ── 카드 ───────────────────────────────────────────────────────────── */
-/* 카드 외곽 — 면 구분(구조)을 담당하므로 눈금 등급($line)을 쓴다. */
-QFrame[role="card"] {
-    background-color: $panel;
-    border: 1px solid $line;
-    border-radius: $radius;
-}
-
-QFrame[role="card-soft"] {
-    background-color: $panel;
-    border: 1px solid $line;
-    border-radius: $radius;
-}
-
+/* 카드 외곽 — 면 구분(구조)을 담당하므로 눈금 등급($line)을 쓴다.
+   ★ card / card-soft / section 은 한때 서로 달랐지만 지금은 규칙이 동일하다.
+     세 이름을 남겨 둔 이유는 호출부 호환뿐이므로, **한 선택자에 묶어** 값이 갈라지지
+     않게 한다(죽은 추상이 다시 갈라지면 카드가 두 종류로 보인다). */
+QFrame[role="card"],
+QFrame[role="card-soft"],
 QFrame[role="section"] {
     background-color: $panel;
     border: 1px solid $line;
-    border-radius: 8px;
+    border-radius: $radius;
 }
 
 /* 매치 검토 행 — 변형별 card / hairline 지원. */
@@ -181,6 +178,14 @@ QPushButton:disabled {
     background-color: transparent;
 }
 
+/* ★ QSS `min-height` 는 `setMinimumHeight()` 를 **덮어쓴다** — 일반 QPushButton 의
+   min-height($target_min=26)가 액션바의 setMinimumHeight(46)를 이겨 [검증 시작]이
+   실측 40px 로 렌더됐다(옵션 타일 58px 보다 작았다).  액션 등급은 QSS 에서 올린다:
+   30 + 패딩 12 + 보더 2 = 44(2.5.5 AAA). */
+QPushButton[role="primary"],
+QPushButton[role="ghost"] {
+    min-height: 30px;
+}
 QPushButton[role="primary"] {
     background-color: $accent;
     color: $on_accent;
@@ -253,6 +258,17 @@ QPushButton[role="warn"]:focus {
     padding: $pad_control_focus;
 }
 
+/* ★ :disabled 도 마찬가지다 — `[role="ghost"] { color: $ink2 }` 가 일반
+   `:disabled { color: $mute }` 를 특이도 동급·후순위로 덮어, 비활성 ± 버튼의 글리프가
+   활성과 **픽셀 동일**(#3D3B35)하게 렌더됐다(실측).  :focus 에서 한 것과 같은 처방. */
+QPushButton[role="ghost"]:disabled,
+QPushButton[role="danger"]:disabled,
+QPushButton[role="warn"]:disabled {
+    color: $mute;
+    border: 1px dashed $line;
+    background: transparent;
+}
+
 QPushButton:checked {
     background-color: $accent_tint;
     color: $accent;
@@ -322,8 +338,15 @@ QWidget[role="loadingPanel"] {
 }
 /* 패널 안 컨테이너 — 맨 QWidget 은 전역 규칙의 $bg 를 물려받아 패널 면 위에 색이 다른
    띠로 보인다.  투명으로 못 박는다. */
-QWidget[role="loadingBarHost"] {
+QWidget[role="loadingBarHost"],
+QWidget[role="rowHost"],
+QWidget[role="switchRowText"] {
     background: transparent;
+}
+/* 진행바 트랙 — 기본 $panel 은 **패널 면과 같은 색**이라 트랙이 보이지 않고 채움만
+   공중에 떠 보인다(실측 지적).  패널 안에서는 한 단계 어두운 면을 쓴다. */
+QWidget[role="loadingPanel"] QProgressBar {
+    background: $bg;
 }
 
 /* C안 요약 값 — 상세를 접어 둔 채 시작하는 배치의 **안전 장치**.  가장 중요한 정보가
@@ -425,15 +448,18 @@ QSpinBox::up-button, QDoubleSpinBox::up-button,
 QSpinBox::down-button, QDoubleSpinBox::down-button {
     width: 18px;
 }
-QSlider:disabled::groove:horizontal {
-    background: $line;
-}
-QSlider:disabled::sub-page:horizontal {
+/* ★ 순서 주의 — Qt 는 `위젯::서브컨트롤:상태` 만 인식한다.
+   `QSlider:disabled::sub-page` 처럼 상태를 앞에 쓰면 규칙이 **무시**돼, 무효해진
+   임계치 슬라이더가 풀 accent 로 칠해진 채 화면에서 가장 강한 요소로 남았다(실측). */
+QSlider::groove:horizontal:disabled {
     background: $line2;
 }
-QSlider:disabled::handle:horizontal {
+QSlider::sub-page:horizontal:disabled {
     background: $line2;
-    border-color: $line;
+}
+QSlider::handle:horizontal:disabled {
+    background: transparent;
+    border: 2px dashed $line;
 }
 QLabel:disabled {
     color: $mute;
@@ -493,8 +519,10 @@ QCheckBox::indicator:checked {
     background: $accent;
     border-color: $accent;
 }
-/* 텍스트 색만 바꾸는 포커스 표시는 약하다 — 표시기에 링을 그린다. */
-QCheckBox:focus::indicator {
+/* 텍스트 색만 바꾸는 포커스 표시는 약하다 — 표시기에 링을 그린다.
+   ★ `QCheckBox:focus::indicator` 로 쓰면 **포커스와 무관하게 항상** 그려져, 모든
+   캡처의 '모션 줄이기'에 가짜 포커스 링이 상시 렌더됐다(실측). 순서를 지켜야 한다. */
+QCheckBox::indicator:focus {
     border: $focus_w solid $focus;
 }
 QCheckBox::indicator:disabled {
@@ -521,7 +549,7 @@ QRadioButton::indicator:checked {
     background: $accent;
     border-color: $accent;
 }
-QRadioButton:focus::indicator {
+QRadioButton::indicator:focus {
     border: $focus_w solid $focus;
 }
 

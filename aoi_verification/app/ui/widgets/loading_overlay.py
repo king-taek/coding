@@ -47,8 +47,10 @@ class _SpinnerDot(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         rect = QRect(4, 4, self._diameter - 8, self._diameter - 8)
-        # 배경 링
-        pen = QPen(QColor(theme.LINE))
+        # 배경 링 — ★ LINE 을 쓰면 진행 호(accent)와 1.90:1(라이트)/1.84(다크)라
+        # '어디가 진행분인지' 구분이 안 된다.  '모션 줄이기'+busy 면 이게 유일한
+        # 신호라 특히 치명적이다.  LINE2 로 3.41/4.09 확보(실측).
+        pen = QPen(QColor(theme.LINE2))
         pen.setWidth(4)
         p.setPen(pen)
         p.drawArc(rect, 0, 360 * 16)
@@ -73,9 +75,10 @@ class _SpinnerDot(QWidget):
 
 
 class _BusyStripe(QWidget):
-    """무한(busy) 진행 — 폭 24% 세그먼트가 OutQuart 로 가속·감속하며 순환.
+    """무한(busy) 진행 — 폭 24% 세그먼트가 **등속**으로 순환하는 '혜성 스윕'.
 
-    Qt 기본 블록 왕복 대신 꼬리 알파 그라데이션의 '혜성 스윕'."""
+    Qt 기본 블록 왕복 대신 꼬리 알파 그라데이션.  이징은 의도적으로 ``Linear`` 다 —
+    끝에서 감속하는 '숨쉬기'는 총량을 모르는 작업에 '거의 끝났다'는 거짓 신호를 준다."""
 
     def __init__(self, parent=None, width: int = 360, height: int = 6) -> None:
         super().__init__(parent)
@@ -108,17 +111,20 @@ class _BusyStripe(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         w, h = self.width(), self.height()
         r = h / 2
-        # 트랙
+        # 트랙 — 스피너 링과 같은 이유로 LINE2(혜성 머리와 3.41/4.09).
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(theme.LINE))
+        p.setBrush(QColor(theme.LINE2))
         p.drawRoundedRect(0, 0, w, h, r, r)
         # 세그먼트(혜성) — 정지 시 25% 지점의 짧은 표시.
         seg = int(w * 0.24)
         travel = w + seg
         x = int(self._phase * travel) - seg if motion.enabled() else int(w * 0.25)
         base = QColor(theme.ACCENT)
-        # 꼬리 페이드: 3구간 알파.
-        for i, frac in enumerate((1.0, 0.55, 0.25)):
+        # 꼬리 페이드: 3구간 알파.  ★ 진행 방향(왼→오른)에서 **오른쪽이 머리**다 —
+        # 알파를 (1.0, 0.55, 0.25) 순으로 두면 머리가 흐리고 꼬리가 진해져 혜성이
+        # 거꾸로 난다(실측 지적).  왼쪽(꼬리)부터 옅게 시작해 오른쪽(머리)에서 진해진다.
+        # 꼬리 최저 알파를 0.45 로 — 0.25 는 트랙에 묻혀 꼬리가 사라졌다.
+        for i, frac in enumerate((0.45, 0.7, 1.0)):
             c = QColor(base)
             c.setAlpha(int(255 * frac))
             p.setBrush(c)
@@ -180,8 +186,14 @@ class LoadingOverlay(QWidget):
     cancel_requested = pyqtSignal()        # #8 중지 버튼 클릭
 
     MIN_DISPLAY_MS = 350                   # 초단타 작업의 '깜빡임' 방지 래치
-    RISE_IN_PX = 24                        # 등장: 중앙보다 이만큼 아래에서 시작
+    RISE_IN_PX = 32                        # 등장: 중앙보다 이만큼 아래에서 시작
     RISE_OUT_PX = 12                       # 퇴장: 살짝만 내려가며 사라진다
+    # 불투명도는 짧게(빠르게 나타난다) · 위치는 길게(끝에서 감속하며 안착한다).
+    # 두 값이 같으면 '안착'이 페이드에 흡수돼 사용자가 요청한 두 속도가 사라진다.
+    FADE_IN_MS = 180
+    RISE_IN_MS = 300
+    FADE_OUT_MS = 140
+    PANEL_W = 424                          # 메시지 길이로 패널 폭이 뛰지 않게 고정
 
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
@@ -207,6 +219,9 @@ class LoadingOverlay(QWidget):
         self._label = QLabel("", self._content)
         self._label.setProperty("role", "subtitle")
         self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # 긴 메시지가 패널을 옆으로 늘리지 않게 — 폭을 정하고 줄바꿈한다.
+        self._label.setWordWrap(True)
+        self._label.setFixedWidth(360)
 
         self._progress = QProgressBar(self._content)
         self._progress.setFixedWidth(360)
@@ -221,8 +236,10 @@ class LoadingOverlay(QWidget):
         self._count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._target_val = 0
         # 결정형 부드러운 채움 — QVariantAnimation(OutQuart) 로 프레임 균일.
+        # ★ tick 마다 OutQuart 를 걸면 매 갱신이 끝에서 감속해 채움이 절뚝인다.
+        #   연속 갱신되는 결정형 바는 **등속**이 맞다(전체 곡선은 작업 속도가 만든다).
         self._val_anim = QVariantAnimation(self)
-        self._val_anim.setEasingCurve(QEasingCurve.Type.OutQuart)
+        self._val_anim.setEasingCurve(QEasingCurve.Type.Linear)
         self._val_anim.valueChanged.connect(
             lambda x: self._progress.setValue(int(x)))
 
@@ -268,15 +285,23 @@ class LoadingOverlay(QWidget):
         v.addWidget(self._sparkline, alignment=Qt.AlignmentFlag.AlignCenter)
         v.addWidget(self._cancel_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        # 페이드 + 상승 상태.  하나의 t(0..1)가 스크림 알파·패널 불투명도·오프셋을 함께
-        # 구동한다: t=0 → 중앙보다 RISE 만큼 아래 + 투명, t=1 → 중앙 + 불투명.
-        self._fade = 0.0
+        # ★ 불투명도와 **위치를 분리한다.**  하나의 t 로 둘을 함께 몰면 사용자가 요청한
+        #   "빠르게 나타나고 마지막에 천천히 도착"이 성립하지 않는다 — 24px 이동의 대부분이
+        #   페이드가 끝나기 전에 소진돼 '안착'이 사라진다(실측 지적).  그래서:
+        #     · 불투명도 FADE_IN_MS  — 빠르게 나타난다
+        #     · 위치     RISE_IN_MS  — 더 길게, 끝에서 감속하며 중앙에 **안착**한다
+        #     · 스크림   Linear      — 디밍이 슬램하지 않게 등속
+        self._fade = 0.0                   # 패널 불투명도 + 스크림(0..1)
+        self._rise = 0.0                   # 위치 진행(0=아래, 1=중앙)
         self._rise_span = self.RISE_IN_PX
         self._hiding = False
         self._fade_anim = QVariantAnimation(self)
-        self._fade_anim.setEasingCurve(QEasingCurve.Type.OutQuart)
+        self._fade_anim.setEasingCurve(QEasingCurve.Type.Linear)
         self._fade_anim.valueChanged.connect(self._on_fade)
         self._fade_anim.finished.connect(self._on_fade_done)
+        self._rise_anim = QVariantAnimation(self)
+        self._rise_anim.setEasingCurve(QEasingCurve.Type.OutQuart)
+        self._rise_anim.valueChanged.connect(self._on_rise)
 
         # 최소 표시 시간 가드 — 초단타 작업이 '깜빡'하지 않게(C9).
         self._shown_elapsed = QElapsedTimer()
@@ -289,14 +314,38 @@ class LoadingOverlay(QWidget):
     # ------------------------------------------------------------------
     def _on_fade(self, v) -> None:
         self._fade = float(v)
-        self._content_eff.setOpacity(self._fade)
-        self._place_panel()               # 같은 t 가 위치도 움직인다(아래→중앙)
-        self.update()
+        if self._content_eff is not None:
+            self._content_eff.setOpacity(self._fade)
+        self.update()                     # 스크림 알파
+
+    def _on_rise(self, v) -> None:
+        self._rise = float(v)
+        self._place_panel()
 
     def _on_fade_done(self) -> None:
         if self._hiding:
             self._hiding = False
             self._finish_hide()
+            return
+        # ★ 등장이 끝나면 그래픽 이펙트를 뗀다 — 이펙트가 걸려 있는 동안 스피너가
+        #   1프레임 돌 때마다 패널 **전체**가 오프스크린으로 다시 렌더된다(실측 지적).
+        #   불투명도가 1.0 이라 시각적으로 달라지는 것은 없다.
+        self._detach_effect()
+
+    def _detach_effect(self) -> None:
+        if self._content_eff is None:
+            return
+        self._panel.setGraphicsEffect(None)
+        self._content_eff = None
+
+    def _attach_effect(self) -> None:
+        """페이드를 걸기 직전에만 이펙트를 설치한다."""
+        if self._content_eff is not None:
+            return
+        eff = QGraphicsOpacityEffect(self._panel)
+        eff.setOpacity(self._fade)
+        self._panel.setGraphicsEffect(eff)
+        self._content_eff = eff
 
     def show_overlay(self, message: str = "", *, cancelable: bool = False) -> None:
         self._label.setText(message)
@@ -309,21 +358,35 @@ class LoadingOverlay(QWidget):
         self._show_token += 1
         self._shown_elapsed.restart()
         self._fade_anim.stop()
+        self._rise_anim.stop()
         self._rise_span = self.RISE_IN_PX
         if motion.enabled():
-            # 중앙보다 조금 아래 + 투명에서 시작해 중앙에 안착(ease-out).
+            # 중앙보다 조금 아래 + 투명에서 시작해 중앙에 안착.
+            self._attach_effect()
             self._on_fade(0.0)
+            self._on_rise(0.0)
             self._fade_anim.setStartValue(0.0)
             self._fade_anim.setEndValue(1.0)
-            self._fade_anim.setDuration(max(180, motion.dur(220)))
+            self._fade_anim.setDuration(motion.dur(self.FADE_IN_MS))
             self._fade_anim.start()
+            # 위치는 더 길게 — 페이드가 끝난 뒤에도 남은 거리를 감속하며 좁힌다.
+            self._rise_anim.setStartValue(0.0)
+            self._rise_anim.setEndValue(1.0)
+            self._rise_anim.setDuration(motion.dur(self.RISE_IN_MS))
+            self._rise_anim.setEasingCurve(QEasingCurve.Type.OutQuart)
+            self._rise_anim.start()
             self._stagger_bar()
         else:
+            self._detach_effect()
             self._on_fade(1.0)
+            self._on_rise(1.0)
             self._set_bar_slide(1.0)
         self._cover_parent()
 
     _BAR_SLIDE_PX = 8
+    # 패널이 안착한 **뒤에** 들어와야 계층이 순서대로 읽힌다.  이전 60ms 는 진행바가
+    # 패널보다 4ms 먼저 도착해(60+128 vs 180) 순서가 뒤집혀 있었다(실측 지적).
+    BAR_STAGGER_MS = 110
 
     def _set_bar_slide(self, t: float) -> None:
         """t=0 → 아래로 _BAR_SLIDE_PX 밀린 상태, t=1 → 제자리.
@@ -356,15 +419,15 @@ class LoadingOverlay(QWidget):
             a.start(QVariantAnimation.DeletionPolicy.DeleteWhenStopped)
             self._bar_anim = a
 
-        QTimer.singleShot(max(1, motion.dur(60)), _run)
+        QTimer.singleShot(max(1, motion.dur(self.BAR_STAGGER_MS)), _run)
 
     def hide_overlay(self) -> None:
         if not self.isVisible():
             self._finish_hide()
             return
-        if not motion.enabled():
-            self._finish_hide()
-            return
+        # ★ 최소 표시 래치는 **모션이 아니라 타이밍 위생**이다 — 이 검사를
+        #   `motion.enabled()` 안쪽에 두면 '모션 줄이기' 사용자만 깜빡임을 그대로 받는다
+        #   (모션에 민감해서 끈 사람에게 정확히 깜빡임을 주는 셈).  게이트 밖에 둔다.
         remaining = self.MIN_DISPLAY_MS - self._shown_elapsed.elapsed()
         token = self._show_token
         if remaining > 0:                      # 아직 최소 표시 시간 전 → 지연 퇴장
@@ -379,14 +442,26 @@ class LoadingOverlay(QWidget):
         self._hide_pending = False
         if token != self._show_token or not self.isVisible():
             return                             # 그 사이 새 표시가 시작됨 → 무시
+        if not motion.enabled():
+            self._finish_hide()                # 래치는 지켰으니 이제 즉시 종료
+            return
         self._hiding = True
         self._rise_span = self.RISE_OUT_PX     # 퇴장은 살짝만 내려간다
+        self._attach_effect()
+        dur = max(110, motion.dur(self.FADE_OUT_MS))
         self._fade_anim.stop()
         self._fade_anim.setStartValue(self._fade)
         self._fade_anim.setEndValue(0.0)
         # 퇴장: 입장보다 짧게, 단 하한 110ms 로 '컷' 방지.
-        self._fade_anim.setDuration(max(110, motion.dur(140)))
+        self._fade_anim.setDuration(dur)
         self._fade_anim.start()
+        # 퇴장은 위치·불투명도를 같이 몰아도 된다(짧고 얕아 '안착'이 없다).
+        self._rise_anim.stop()
+        self._rise_anim.setStartValue(self._rise)
+        self._rise_anim.setEndValue(0.0)
+        self._rise_anim.setDuration(dur)
+        self._rise_anim.setEasingCurve(QEasingCurve.Type.InQuad)
+        self._rise_anim.start()
 
     def _finish_hide(self) -> None:
         self.hide()
@@ -455,14 +530,17 @@ class LoadingOverlay(QWidget):
         self._place_panel()
 
     def _place_panel(self) -> None:
-        """패널을 화면 중앙에 두고, 진행도 t 만큼 아래에서 끌어올린다."""
+        """패널을 화면 중앙에 두고, 위치 진행도만큼 아래에서 끌어올린다.
+
+        폭은 :data:`PANEL_W` 로 고정한다 — sizeHint 를 쓰면 메시지 길이나 busy↔결정형
+        전환마다 패널 폭·높이가 튀어 '같은 자리에 있는 하나의 패널'로 읽히지 않는다."""
         w, h = self.width(), self.height()
         if w <= 0 or h <= 0:
             return
         hint = self._panel.sizeHint()
-        pw = min(hint.width(), max(1, w - 48))
+        pw = min(max(self.PANEL_W, hint.width()), max(1, w - 48))
         ph = min(hint.height(), max(1, h - 48))
-        offset = int(self._rise_span * (1.0 - self._fade))
+        offset = int(round(self._rise_span * (1.0 - self._rise)))
         self._panel.setGeometry((w - pw) // 2, (h - ph) // 2 + offset, pw, ph)
 
     def paintEvent(self, event):  # noqa: N802

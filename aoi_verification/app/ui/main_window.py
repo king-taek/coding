@@ -1552,7 +1552,15 @@ class MainWindow(QMainWindow):
     def _recreate_pages(self) -> None:
         """페이지 5개를 파괴 후 다시 만든다(구운 색을 새 팔레트로 교체).
 
-        세션 시작 전에만 호출되므로 상태 손실이 없다."""
+        ★ '세션 시작 전'은 **아무것도 입력하지 않았다는 뜻이 아니다.**  폴더·호기·진행
+        범위·손으로 고른 슬롯·허용 오차는 [검증 시작] 전까지 prefs 에 없어서, 그냥
+        파괴하면 어두운 화면 토글 한 번에 조용히 사라진다(특히 '일부 슬롯 12/40' 이
+        '모든 슬롯'으로 되돌아가면 40슬롯을 통째로 돌리게 된다).  걷어 두고 다시 심는다."""
+        draft = None
+        try:
+            draft = self._setup_page.capture_draft()
+        except Exception:
+            draft = None
         old = (self._setup_page, self._select_page, self._match_page,
                self._result_page, self._match_review_page)
         for w in old:
@@ -1561,6 +1569,11 @@ class MainWindow(QMainWindow):
             w.setParent(None)
             w.deleteLater()
         self._build_pages()
+        if draft:
+            try:
+                self._setup_page.restore_draft(draft)
+            except Exception:
+                pass
         self._apply_statusbar_theme()
         try:
             self._loading.raise_()           # 오버레이 z-order 유지

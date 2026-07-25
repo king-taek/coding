@@ -293,3 +293,122 @@ def test_no_horizontal_scroll_at_800x600(qapp):
         assert scroll.horizontalScrollBar().maximum() == 0
     finally:
         page.deleteLater()
+
+
+# ── 색 모드/배치 전환이 작성 중 입력을 날리지 않아야 한다 ──────────────────────
+def test_capture_and_restore_draft_round_trip(qapp, tmp_path):
+    """★ '세션 시작 전'은 아무것도 입력하지 않았다는 뜻이 아니다.
+
+    폴더·호기·진행 범위·손으로 고른 슬롯·허용 오차는 [검증 시작] 전까지 prefs 에 없어서,
+    어두운 화면 토글 한 번(페이지 재생성)에 조용히 사라졌다.  특히 '일부 슬롯 12/40' 이
+    '모든 슬롯'으로 되돌아가면 40슬롯을 통째로 돌리게 된다."""
+    src = sp.SetupPage()
+    dst = sp.SetupPage()
+    try:
+        src.ref_path_edit.setText(str(tmp_path))
+        src.val_path_edit.setText(str(tmp_path))
+        src.ref_machine_edit.setText("3호기")
+        src.val_machine_edit.setText("7호기")
+        src.coord_tol_spin.setValue(750.0)
+        src._selected_slots = {f"슬롯 {i:02d}" for i in range(12)}
+        src.scope_group.set_option_label("subset", "일부 슬롯 (12/40)")
+        src.scope_group.set_current_key("subset")
+
+        draft = src.capture_draft()
+        dst.restore_draft(draft)
+
+        assert dst.ref_path_edit.text() == str(tmp_path)
+        assert dst.val_path_edit.text() == str(tmp_path)
+        assert dst.ref_machine_edit.text() == "3호기"
+        assert dst.val_machine_edit.text() == "7호기"
+        assert dst.coord_tol_spin.value() == 750.0
+        assert dst._selected_slots == {f"슬롯 {i:02d}" for i in range(12)}
+        assert dst.scope_group.current_key() == "subset"
+        assert "12/40" in dst.scope_group.button("subset").text()
+        # 유효한 폴더가 복원됐으니 시작 버튼도 다시 활성.
+        assert dst.start_btn.isEnabled() is True
+    finally:
+        src.deleteLater()
+        dst.deleteLater()
+
+
+def test_restore_draft_does_not_reopen_slot_dialog(qapp, tmp_path, monkeypatch):
+    """'subset' 복원 시 emit 하면 슬롯 선택 모달이 다시 뜬다 — emit 하지 않는다."""
+    page = sp.SetupPage()
+    opened = []
+    monkeypatch.setattr(page, "_open_slot_select", lambda: opened.append(1))
+    try:
+        page.restore_draft({"scope": "subset", "subset_label": "일부 슬롯 (5/9)",
+                            "selected_slots": {"a", "b", "c", "d", "e"}})
+        assert not opened, "복원이 슬롯 선택 다이얼로그를 열었다"
+        assert page.scope_group.current_key() == "subset"
+    finally:
+        page.deleteLater()
+
+
+def test_recreate_pages_carries_the_draft():
+    """main_window 가 재생성 전에 걷고 후에 심는지 — 주석이 아니라 코드로 확인."""
+    import inspect
+
+    from aoi_verification.app.ui import main_window as mw
+    src = inspect.getsource(mw.MainWindow._recreate_pages)
+    assert "capture_draft" in src
+    assert "restore_draft" in src
+    # 걷는 것이 파괴보다 **먼저**여야 한다.
+    assert src.index("capture_draft") < src.index("deleteLater")
+
+
+# ── 스위치는 press 가 아니라 release 에서 실행한다(스크롤 제스처 방어) ──────────
+def test_switch_does_not_toggle_on_press_alone(qapp):
+    """★ press 즉시 토글하면 터치 패널의 스크롤 제스처가 판정 엔진을 바꾼다."""
+    from PyQt6.QtCore import QPointF, Qt as _Qt
+    from PyQt6.QtGui import QMouseEvent
+
+    from aoi_verification.app.ui.widgets.switch_row import SwitchRow
+    row = SwitchRow("구형 모드", checked=False)
+    try:
+        row.resize(300, 40)
+        sw = row.switch
+        center = QPointF(sw.width() / 2, sw.height() / 2)
+        press = QMouseEvent(QMouseEvent.Type.MouseButtonPress, center,
+                            _Qt.MouseButton.LeftButton, _Qt.MouseButton.LeftButton,
+                            _Qt.KeyboardModifier.NoModifier)
+        sw.mousePressEvent(press)
+        assert sw.is_on() is False, "press 만으로 토글됐다"
+
+        # 위젯 **밖**에서 release → 취소(드래그로 빠져나간 경우)
+        outside = QPointF(sw.width() + 40, sw.height() + 40)
+        rel_out = QMouseEvent(QMouseEvent.Type.MouseButtonRelease, outside,
+                              _Qt.MouseButton.LeftButton, _Qt.MouseButton.LeftButton,
+                              _Qt.KeyboardModifier.NoModifier)
+        sw.mouseReleaseEvent(rel_out)
+        assert sw.is_on() is False, "밖에서 release 했는데 토글됐다"
+
+        # 안에서 press→release → 실행
+        sw.mousePressEvent(press)
+        rel_in = QMouseEvent(QMouseEvent.Type.MouseButtonRelease, center,
+                             _Qt.MouseButton.LeftButton, _Qt.MouseButton.LeftButton,
+                             _Qt.KeyboardModifier.NoModifier)
+        sw.mouseReleaseEvent(rel_in)
+        assert sw.is_on() is True, "정상 클릭이 토글되지 않았다"
+    finally:
+        row.deleteLater()
+
+
+def test_switch_hot_zone_is_not_the_whole_row(qapp):
+    """넓은 카드 안에서 행 전체가 핫존이면 보이지 않는 1300px 클릭영역이 생긴다."""
+    from aoi_verification.app.ui.widgets.switch_row import SwitchRow
+    row = SwitchRow("유사도 엔진(구형) 사용",
+                    description="끄면 좌표 매칭을 씁니다 — 권장 기본값.")
+    try:
+        row.resize(1300, 60)
+        row.show()
+        for _ in range(8):
+            qapp.processEvents()
+        # 제목은 자기 글자 폭만 차지해야 한다(여백까지 늘어나면 다시 넓은 핫존).
+        assert row._title.width() < row.width() * 0.5, \
+            f"제목 폭 {row._title.width()} / 행 폭 {row.width()}"
+        # 행 자신은 mousePressEvent 를 재정의하지 않는다(빈 여백 클릭 = 무반응).
+        assert "mousePressEvent" not in SwitchRow.__dict__
+    finally:
+        row.deleteLater()

@@ -86,30 +86,36 @@ _LIGHT: dict[str, str] = {
     "on_accent": "#F5F3ED",
     "pass": "#3B6438",      # 제도 녹색
     "danger": "#A5271E",    # 정정 적색
-    "warn": "#1B1A17",
+    # ★ 이전 값 #1B1A17 은 ink 와 **바이트 단위로 같았다** — 경고 채널의 신호가
+    #   0 이었고, 대비표는 그 쌍을 15.68 로 적어 표에서 가장 좋아 보이게 했다.
+    #   제도 정정색(번트 시에나 계열)으로 분리한다: 면 대비 6.10/5.58, ink 와 2.57.
+    "warn": "#8C4A0F",
     "focus": "#2B4C6F",
     "thumb_frame": "#A39D8F",   # 어두운 다이가 시트에 묻히지 않게
 }
 
+# ★ 채도 실측 지적 반영: 이전 bg(#0E1620)는 채도지표 0.071 로, 실제 청사진 원지의
+#   1/3 밖에 안 됐다 — 이름만 청사진이고 눈에는 '어두운 슬레이트'였다.  0.22 대로
+#   올려 진짜 청색 종이가 되게 한다(잉크·경계 대비는 전부 재측정해 게이트 통과).
 _DARK: dict[str, str] = {
-    "bg": "#0E1620",        # 청사진 원지
-    "panel": "#16202B",     # 시트 면
-    "elev": "#1F2C3A",
-    "line": "#567590",      # 제도 눈금 — panel·bg 에서 3:1 이상(구분선은 elev 를 지나지 않는다)
-    "line2": "#2C3E4F",     # 장식용 옅은 눈금(비-상호작용 전용)
-    "line_strong": "#5C81A3",   # 상호작용 경계 — elev 에서도 3.46:1
+    "bg": "#12304C",        # 청사진 원지 — 채도지표 0.228
+    "panel": "#1A3A59",     # 시트 면
+    "elev": "#204465",
+    "line": "#698DB0",      # 제도 눈금 — panel 3.37 / bg 3.89(구분선은 elev 를 지나지 않는다)
+    "line2": "#33557A",     # 장식용 옅은 눈금(비-상호작용 전용)
+    "line_strong": "#7EA2C4",   # 상호작용 경계 — elev 에서도 3.78:1
     "ink": "#EAF0F6",       # 백선(白線)
     "ink2": "#C3D0DC",
-    "mute": "#9AAAB9",
-    "accent": "#86B6EA",    # 밝힌 청사진 블루
-    "accent_hover": "#9CC6F2",
-    "accent_pressed": "#6FA2D8",
-    "on_accent": "#0E1620",
-    "pass": "#74CE94",
-    "danger": "#FF9E96",
-    "warn": "#EBD9AE",      # 라이트에선 잉크였지만 어두운 바탕에선 밝은 톤이어야 한다
-    "focus": "#A6CEFF",
-    "thumb_frame": "#546C82",
+    "mute": "#A9BCCB",
+    "accent": "#8EC2F0",    # 밝힌 청사진 블루(짙어진 원지 위에서 다시 띄운다)
+    "accent_hover": "#A6D0F6",
+    "accent_pressed": "#74AEDF",
+    "on_accent": "#0B1F33",
+    "pass": "#7FD79E",
+    "danger": "#FFA9A1",
+    "warn": "#F0D8A2",      # 라이트에선 정정색이지만 어두운 바탕에선 밝은 톤이어야 한다
+    "focus": "#B4D6FF",
+    "thumb_frame": "#6B8CAB",
 }
 
 PALETTES: dict[str, dict[str, str]] = {"light": _LIGHT, "dark": _DARK}
@@ -117,7 +123,10 @@ DEFAULT_COLOR_MODE = "light"
 COLOR_MODE = DEFAULT_COLOR_MODE
 
 # LoadingOverlay 스크림 — 뒤 화면이 보이도록 옅게(모드별).
-_SCRIMS = {"light": (27, 26, 23, 96), "dark": (4, 9, 14, 120)}
+# ★ 이전 값(96/120)은 (a) 다크의 뒤 텍스트 대비를 4.43 으로 떨궈 자체 게이트 5.0 을
+#   깼고 (b) 여유가 **적은** 다크에 오히려 더 두꺼운 디밍을 줘 거꾸로였다.
+#   실측: light 84 → 7.07 · dark 96 → 5.67 (둘 다 게이트 통과).
+_SCRIMS = {"light": (27, 26, 23, 84), "dark": (5, 16, 28, 96)}
 
 COLORS: dict[str, str] = dict(_LIGHT)   # 현재 모드의 색(set_color_mode 가 갱신)
 SCRIM_RGBA = _SCRIMS[DEFAULT_COLOR_MODE]
@@ -229,7 +238,10 @@ def set_color_mode(name: str) -> None:
     WARN, FOCUS = c["warn"], c["focus"]
     THUMB_FRAME = c["thumb_frame"]
 
-    ACCENT_TINT = _tint(ACCENT, 36)
+    # ★ 알파 36 이면 선택 타일 **라벨**(accent)이 자기 틴트 위에서 4.66~4.87 로
+    #   프로젝트 게이트(5.0)를 깬다 — 이전 대비표는 라벨-대-면만 재고 이 합성면
+    #   쌍을 빼놨다.  24 로 낮추면 최악 5.11(라이트·다크 전부 통과).
+    ACCENT_TINT = _tint(ACCENT, 24)
     ACCENT_TINT_SOFT = _tint(ACCENT, 20)
     PASS_TINT = _tint(PASS, 30)
     DANGER_TINT = _tint(DANGER, 28)
