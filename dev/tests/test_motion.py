@@ -34,27 +34,23 @@ def test_animate_scroll_instant_when_disabled(qapp):
     assert bar.value() == 1000
 
 
-def test_reduce_motion_flag(qapp, monkeypatch):
-    # offscreen 이 아닌 척해도 reduce_motion 이면 꺼짐.
+def test_motion_is_always_on_except_headless(qapp, monkeypatch):
+    """★ 모션은 **항상 켜진다**(사용자 결정) — 유일한 예외가 헤드리스다.
+
+    한때 '모션 줄이기' 토글과 OS '동작 줄이기' 감지가 `enabled()` 를 껐다.  둘 다
+    제거했지만 **offscreen 게이트는 남긴다**: 사용자 설정이 아니라 테스트·캡처의
+    결정성이고, 크래시 회귀 테스트(`test_anim_lifetime`)가 이 게이트를 뒤집어
+    애니메이션 경로를 재현한다."""
     monkeypatch.setenv("QT_QPA_PLATFORM", "xcb")
-    motion.set_reduce_motion(True)
-    try:
-        assert motion.enabled() is False
-        motion.set_reduce_motion(False)
-        assert motion.enabled() is True
-    finally:
-        motion.set_reduce_motion(False)
+    assert motion.enabled() is True
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    assert motion.enabled() is False
 
 
 def test_dur_scales_with_profile(qapp):
     from aoi_verification.app.ui import theme
     # '도면' 은 담백한 모션(scale 0.8) — 지속시간이 그만큼 짧아진다.
     assert motion.dur(200) == int(200 * theme.PROFILE.motion_scale)
-
-
-def test_os_reduce_motion_returns_bool(qapp):
-    # 비 Windows(컨테이너)에선 OS 감지 실패 → False(앱 토글만). 예외 없이 bool.
-    assert isinstance(motion.os_reduce_motion(), bool)
 
 
 def test_transition_in_commits_immediately_when_disabled(qapp):

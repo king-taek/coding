@@ -596,14 +596,25 @@ class SetupPage(QWidget):
             else EngineMode.BASIC
 
     def _sync_engine_controls(self) -> None:
-        """모드에 따라 무효한 파라미터를 **비활성**(숨기지 않음).
+        """**지금 쓰는 파라미터만 보인다** — 무효한 쪽은 숨긴다(사용자 결정).
 
-        숨기지 않는 이유: 스크롤 안에서 show/hide 는 내용이 튀고, 무엇보다 '허용 오차는
-        좌표 매칭에, 임계치는 구형 모드에 속한다'는 사실을 눈으로 가르쳐 준다."""
+        | 구형 스위치 | 보이는 것 | 숨는 것 |
+        |---|---|---|
+        | OFF (좌표 매칭) | 허용 오차(µm) | 구형 하위 선택 · 유사도 임계치 |
+        | ON (구형)       | 구형 하위 선택 · 유사도 임계치 | 허용 오차(µm) |
+
+        ★ 이 함수는 한때 **반대 결정**을 근거와 함께 담고 있었다: "숨기지 않는 이유 —
+        스크롤 안에서 show/hide 는 내용이 튀고, 무엇보다 '허용 오차는 좌표 매칭에,
+        임계치는 구형 모드에 속한다'는 사실을 눈으로 가르쳐 준다."  사용자가 숨기기로
+        결정했으므로 근거도 함께 갱신한다 — 코드와 어긋난 주석을 남기지 않는다.
+
+        '가르쳐 주는' 역할의 손실은 두 곳이 메운다: (a) 카드가 이미 작아져('실행 옵션'
+        병합) 내용 튐이 줄었고, (b) 상단 모드 배지가 **판정 기준 수치까지** 항상 말한다.
+        그리고 `_engine_inert_hint` 가 지금 어느 엔진이 도는지 한 줄로 남는다."""
         legacy_on = self.legacy_switch.is_on()
-        self.legacy_group.setEnabled(legacy_on)
-        self._threshold_row.setEnabled(legacy_on)
-        self._tol_row.setEnabled(not legacy_on)
+        self.legacy_group.setVisible(legacy_on)
+        self._threshold_row.setVisible(legacy_on)
+        self._tol_row.setVisible(not legacy_on)
         if legacy_on:
             short = (i18n.KO.ENGINE_MODE_EFFICIENCY_SHORT
                      if self.legacy_group.current_key() == EngineMode.EFFICIENCY
@@ -910,11 +921,10 @@ class SetupPage(QWidget):
 
     # ------------------------------------------------------------------
     def _build_view_options(self) -> QWidget:
-        """상단 보기 옵션 줄 — '다크 모드' · '모션 줄이기'.
+        """상단 보기 옵션 줄 — '다크 모드' 하나.
 
-        ★ 두 컨트롤의 **어휘가 같다**(48×28 스위치 두 개).  한때 색 모드가 3택이라
-        3칩 선택기였는데(벨럼 · 청사진 · 흑연), 청사진을 지우고 어두운 모드가 하나가
-        되면서 '어두운 화면 켜기'라는 boolean 이 정확한 모형이 됐다."""
+        ※ 옆에 '모션 줄이기' 스위치가 있었으나 사용자 결정으로 제거했다(모션은 항상
+        켜진다).  화면에 남는 보기 옵션은 색 모드 하나뿐이다."""
         host = QWidget(self)
         row = QHBoxLayout(host)
         row.setContentsMargins(0, 0, 0, 0)
@@ -928,27 +938,7 @@ class SetupPage(QWidget):
         self._dark_switch.setToolTip(i18n.KO.DARK_MODE_TOOLTIP)
         self._dark_switch.toggled.connect(self._on_dark_mode_toggled)
         row.addWidget(self._dark_switch)
-
-        self._reduce_switch = SwitchRow(
-            i18n.KO.REDUCE_MOTION_LABEL, parent=host,
-            checked=self._saved_reduce_motion(),
-        )
-        self._reduce_switch.setToolTip(i18n.KO.REDUCE_MOTION_TOOLTIP)
-        self._reduce_switch.toggled.connect(self._on_reduce_motion)
-        row.addWidget(self._reduce_switch)
         return host
-
-    @staticmethod
-    def _saved_reduce_motion() -> bool:
-        try:
-            return bool(_prefs.load().reduce_motion)
-        except Exception:
-            return False
-
-    def _on_reduce_motion(self, on: bool) -> None:
-        from .. import motion
-        _prefs.patch(reduce_motion=bool(on))
-        motion.set_reduce_motion(bool(on))
 
     def _on_dark_mode_toggled(self, on: bool) -> None:
         """다크 모드 전환 요청 — 실제 적용(페이지 재생성)은 main_window 가 한다."""

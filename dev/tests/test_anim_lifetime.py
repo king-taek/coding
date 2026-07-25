@@ -107,75 +107,64 @@ def test_loading_overlay_survives_second_show(qapp, motion_on):
         _spin(qapp, 200)
         assert ov.isVisible()
     finally:
+        # ★ 지우기 전에 **숨긴다.**  `hideEvent` 가 돌던 애니메이션(특히 busy 스트라이프의
+        #   무한 루프)을 전부 멈춘다.  visible 인 채로 deleteLater 하면 파괴 도중에도
+        #   tick 이 남아 다음 테스트의 processEvents 에서 죽은 객체를 건드린다.
+        ov.hide()
+        qapp.processEvents()
         ov.deleteLater()
         host.deleteLater()
+        qapp.processEvents()
 
 
-# ── 패턴 가드: 삭제를 Qt 에 맡긴 애니메이션의 핸들을 보관하지 않는다 ──────
-def test_no_stored_handle_to_self_deleting_animation():
-    """``DeleteWhenStopped`` 로 시작하면서 그 객체를 ``self.…`` 에 보관하는 코드 금지.
+# ── 패턴 가드: **자기 삭제 애니메이션을 아예 쓰지 않는다** ────────────────────
+def test_no_self_deleting_animations_in_ui():
+    """★ ``DeletionPolicy.DeleteWhenStopped`` 를 UI 전체에서 금지한다.
 
-    QSS 선택자 순서 가드와 같은 종류의 소스 테스트다 — 이 조합이 위 두 크래시의
-    **유일한** 원인이었으므로, 문장 하나로 재발을 막는다.
+    이 저장소의 애니메이션은 모두 대상 위젯(또는 자신이 만든 오버레이)을 부모로 갖는다 —
+    부모가 죽으면 함께 죽으므로 **자기 삭제로 얻는 것이 없다.**  반면 잃는 것이 크다:
+    자연 종료 시점에 C++ 객체가 사라지므로 그 객체를 가리키는 참조가 전부 dangling 이
+    되고, 그 뒤 쓰이면 파이썬 예외가 아니라 **세그폴트**다.
+
+    이 규칙은 사고 **세 건**을 하나로 덮는다:
+      1. `self._anim` 에 핸들 보관 → 두 번째 호출의 `stop()` 이 RuntimeError → qFatal
+         (구형 모드 토글·실패목록 두 번째 클릭 강제종료)
+      2. 람다로 연결한 tick 이 파괴된 위젯으로 들어감 → 세그폴트
+      3. 위 1·2 를 막으려 넣은 `destroyed.connect(anim.stop)` 이, 애니메이션이 먼저
+         자기 삭제된 뒤 발화 → **또** 세그폴트
+
+    3번이 교훈이다: 가드를 덧붙이는 것으로는 부족했고, **원인(자기 삭제)을 없애야** 했다.
     """
     offenders: list[str] = []
     for path in sorted(_UI_DIR.rglob("*.py")):
-        lines = path.read_text(encoding="utf-8").splitlines()
-        for i, line in enumerate(lines):
-            m = re.search(r"(\w+)\.start\(\s*[\w.]*DeletionPolicy\.DeleteWhenStopped",
-                          line)
-            if not m:
-                continue
-            var = m.group(1)
-            # 같은 함수 안에서 그 지역 변수를 self 멤버로 붙들어 두는지 — 앞뒤로 본다.
-            window = lines[max(0, i - 12):i + 6]
-            if any(re.search(rf"self\.\w+\s*=\s*{re.escape(var)}\s*$", w)
-                   for w in window):
-                rel = path.relative_to(_UI_DIR.parents[2])
-                offenders.append(f"{rel}:{i + 1}")
+        for i, line in enumerate(path.read_text(encoding="utf-8").splitlines()):
+            if line.strip().startswith("#"):
+                continue                      # 주석의 설명은 위반이 아니다
+            if "DeleteWhenStopped" in line:
+                offenders.append(f"{path.relative_to(_UI_DIR.parents[2])}:{i + 1}")
     assert not offenders, (
-        "DeleteWhenStopped 로 시작한 애니메이션을 self 에 보관했다 — 자연 종료 후 "
-        "stop() 이 RuntimeError 를 내고 PyQt6 가 프로세스를 종료시킨다. "
-        "__init__ 에서 만든 애니메이션을 재사용하라: " + ", ".join(offenders)
+        "자기 삭제 애니메이션(DeleteWhenStopped)을 썼다 — 부모가 이미 소유하므로 얻는 것이 "
+        "없고, 남은 참조가 dangling 이 되어 세그폴트를 낸다.  그냥 start() 를 쓰라: "
+        + ", ".join(offenders)
     )
 
 
-# ── 두 번째 수명 함정: 람다로 연결한 애니메이션 슬롯 ────────────────────────
-def test_animation_slots_are_bound_methods_not_lambdas():
-    """★ 애니메이션 ``valueChanged`` 를 **람다로 연결하지 않는다.**
+def test_animation_ticks_do_not_outlive_their_widget():
+    """애니메이션 tick 의 receiver 는 애니메이션과 **함께 죽어야** 한다.
 
-    PyQt 는 슬롯이 QObject 의 **바인드 메서드**일 때 그 객체가 파괴되면 연결을 자동으로
-    끊는다.  람다는 ``self`` 를 클로저에 담아 receiver 를 식별할 수 없으므로 연결이
-    살아남고, 위젯이 파괴된 뒤에도 tick 이 **죽은 C++ 객체로** 들어간다 — 파이썬 예외가
-    아니라 **세그폴트**다.
-
-    실측 경로: 전체 테스트를 돌리면 애니메이션이 도는 중 오버레이가 `deleteLater()` 로
-    파괴되고, 다음 테스트의 `processEvents()` 에서 그 tick 이 발화해 프로세스가 죽었다
-    (exit 139).  RuntimeError 로 잡히지 않으므로 try/except 로는 막을 수 없다.
-    """
+    람다 슬롯이어도, 애니메이션이 대상의 자식이면 대상과 함께 파괴돼 tick 자체가 불가능
+    하다.  그래서 검사할 것은 '람다인가'가 아니라 **애니메이션의 부모가 있는가**다 —
+    `QVariantAnimation()` 을 부모 없이 만들면 아무도 소유하지 않아 위젯보다 오래 산다."""
     offenders: list[str] = []
     for path in sorted(_UI_DIR.rglob("*.py")):
-        text = path.read_text(encoding="utf-8")
-        lines = text.splitlines()
-        for i, line in enumerate(lines):
-            # 애니메이션의 tick 만 본다 — 사용자가 조작해서 나는 시그널(스핀박스
-            # valueChanged 등)은 타이머가 아니라 위젯이 살아 있을 때만 발화하므로
-            # 람다여도 이 함정에 걸리지 않는다.  **타이머로 도는 것**이 위험하다.
-            if not re.search(r"_anim\w*\.(valueChanged|finished)\.connect\(", line):
+        for i, line in enumerate(path.read_text(encoding="utf-8").splitlines()):
+            if line.strip().startswith("#"):
                 continue
-            window = " ".join(lines[i:i + 3])
-            if "lambda" not in window:
-                continue
-            # 예외: 같은 함수에서 `destroyed.connect(...stop)` 로 창을 닫아 두면 안전하다.
-            guard = " ".join(lines[max(0, i - 6):i + 8])
-            if re.search(r"destroyed\.connect\(\s*\w+\.stop\s*\)", guard):
-                continue
-            rel = path.relative_to(_UI_DIR.parents[2])
-            offenders.append(f"{rel}:{i + 1}")
+            if re.search(r"Q(?:Variant|Property)Animation\(\s*\)", line):
+                offenders.append(f"{path.relative_to(_UI_DIR.parents[2])}:{i + 1}")
     assert not offenders, (
-        "애니메이션 tick 을 람다로 연결하고 파괴 시 차단도 하지 않았다 — 위젯이 파괴돼도 "
-        "연결이 살아남아 죽은 객체로 tick 이 들어가 세그폴트가 난다.  바인드 메서드를 쓰거나 "
-        "`대상.destroyed.connect(anim.stop)` 을 걸어라: " + ", ".join(offenders)
+        "부모 없는 애니메이션 — 위젯이 죽어도 살아남아 죽은 객체로 tick 한다.  "
+        "대상(또는 오버레이)을 부모로 주라: " + ", ".join(offenders)
     )
 
 

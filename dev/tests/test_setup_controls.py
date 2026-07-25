@@ -164,27 +164,67 @@ def test_switch_and_sub_choice_drive_engine_mode(qapp):
         page.deleteLater()
 
 
-def test_inert_params_disabled_but_never_hidden(qapp):
-    """무효한 파라미터는 비활성으로 '왜 못 쓰는지' 보여준다 — 숨기지 않는다."""
+def test_only_the_active_engine_params_are_visible(qapp):
+    """**지금 쓰는 파라미터만 보인다** — 무효한 쪽은 숨긴다.
+
+    ★ 이 테스트는 한때 **반대 계약**을 고정하고 있었다
+    (`test_inert_params_disabled_but_never_hidden`: 비활성이되 `isVisibleTo` 는 True).
+    그 근거는 "어느 파라미터가 어느 엔진에 속하는지 눈으로 가르쳐 준다" 였다.
+    사용자가 숨기기로 결정했으므로 계약을 뒤집는다 — 지우지 않고 뒤집는 이유는, 다음
+    사람이 '왜 안 보이지?'라고 물을 때 여기서 답을 찾게 하려는 것이다.
+
+    '가르쳐 주는' 역할은 상단 모드 배지(판정 기준 **수치**까지 표시)와
+    `_engine_inert_hint` 한 줄이 대신한다."""
     page = sp.SetupPage()
     try:
         page.show()
-        for _ in range(4):
+        for _ in range(6):
             qapp.processEvents()
-        # 좌표 모드: 허용 오차 활성, 임계치·하위선택 비활성
-        assert page._tol_row.isEnabled() is True
-        assert page._threshold_row.isEnabled() is False
-        assert page.legacy_group.isEnabled() is False
-        # 구형 모드: 반대
-        page.legacy_switch.set_on(True, emit=True)
-        assert page._tol_row.isEnabled() is False
-        assert page._threshold_row.isEnabled() is True
-        assert page.legacy_group.isEnabled() is True
-        # 어느 모드에서도 숨기지 않는다.
+        # 좌표 모드(기본): 허용 오차만 보인다.
         assert page._tol_row.isVisibleTo(page) is True
+        assert page._threshold_row.isVisibleTo(page) is False
+        assert page.legacy_group.isVisibleTo(page) is False
+        # 구형 모드: 정확히 반대.
+        page.legacy_switch.set_on(True, emit=True)
+        for _ in range(6):
+            qapp.processEvents()
+        assert page._tol_row.isVisibleTo(page) is False
         assert page._threshold_row.isVisibleTo(page) is True
+        assert page.legacy_group.isVisibleTo(page) is True
+        # 되돌리면 원래대로 — 한쪽만 바뀌고 굳지 않는다.
+        page.legacy_switch.set_on(False, emit=True)
+        for _ in range(6):
+            qapp.processEvents()
+        assert page._tol_row.isVisibleTo(page) is True
+        assert page._threshold_row.isVisibleTo(page) is False
     finally:
         page.deleteLater()
+
+
+def test_view_options_has_only_the_dark_mode_switch(qapp):
+    """'모션 줄이기' 토글은 제거했다 — 모션은 항상 켜진다(사용자 결정)."""
+    page = sp.SetupPage()
+    try:
+        assert hasattr(page, "_dark_switch")
+        assert not hasattr(page, "_reduce_switch"), "'모션 줄이기' 스위치가 되살아났다"
+        assert not hasattr(page, "_on_reduce_motion")
+    finally:
+        page.deleteLater()
+
+
+def test_motion_module_has_no_reduce_knobs():
+    """모션 줄이기 손잡이는 모듈에서도 사라졌다.
+
+    ★ 단 `enabled()` 의 offscreen 게이트는 남아 있어야 한다 — 사용자 설정이 아니라
+    테스트·캡처 **결정성**이고, 크래시 회귀 테스트가 이걸 켜서 애니메이션 경로를
+    재현한다."""
+    from aoi_verification.app.ui import motion
+    for gone in ("set_reduce_motion", "reduce_motion", "os_reduce_motion"):
+        assert not hasattr(motion, gone), f"motion.{gone} 잔존"
+    from aoi_verification.app.utils import prefs
+    assert not hasattr(prefs.UiPrefs(), "reduce_motion"), "prefs.reduce_motion 잔존"
+    import inspect
+    assert "offscreen" in inspect.getsource(motion.enabled)
 
 
 def test_active_mode_is_stated_in_words(qapp):

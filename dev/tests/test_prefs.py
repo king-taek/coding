@@ -7,7 +7,6 @@ def test_defaults():
     p = prefs.UiPrefs()
     assert 0.0 <= p.threshold <= 1.0
     assert p.image_long_edge_select >= 300
-    assert p.reduce_motion is False
     # 신규 사용자는 좌표 매칭으로 시작한다(구형 모드로 떠밀리던 버그 고정).
     assert p.engine_mode == prefs.EngineMode.COORDINATE
     assert p.legacy_enabled is None            # '아직 설정 안 됨'
@@ -73,17 +72,14 @@ def test_prefs_json_without_switch_keys_yields_unset(isolated_cache):
     assert prefs.resolve_legacy_state(p)[0] is False
 
 
-def test_reduce_motion_round_trip(isolated_cache):
-    prefs.save(prefs.UiPrefs(reduce_motion=True))
-    assert prefs.load().reduce_motion is True
-
-
 def test_legacy_json_with_removed_field_loads(isolated_cache):
     """제거된 옛 키(ui_variant)가 남은 JSON 도 무시하고 로드(하위호환)."""
-    p = prefs.UiPrefs.from_dict({"threshold": 0.6, "ui_variant": "instrument"})
+    # reduce_motion 도 같은 이유로 제거된 키다(모션은 항상 켜진다).
+    p = prefs.UiPrefs.from_dict({"threshold": 0.6, "ui_variant": "instrument",
+                                 "reduce_motion": True})
     assert p.threshold == 0.6
     assert not hasattr(p, "ui_variant")
-    assert p.reduce_motion is False
+    assert not hasattr(p, "reduce_motion")
 
 
 def test_round_trip(tmp_path, isolated_cache):

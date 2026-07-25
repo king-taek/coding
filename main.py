@@ -31,11 +31,6 @@ def _load_stylesheet(app) -> None:
         theme.set_color_mode(getattr(_p, "color_mode", theme.DEFAULT_COLOR_MODE))
     except Exception:
         pass
-    try:
-        from aoi_verification.app.ui import motion
-        motion.set_reduce_motion(bool(_prefs.load().reduce_motion))
-    except Exception:
-        pass
     qss_path = paths.resource_path("aoi_verification/app/ui/style.qss")
     try:
         text = Path(qss_path).read_text(encoding="utf-8")

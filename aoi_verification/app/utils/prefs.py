@@ -105,8 +105,6 @@ class UiPrefs:
     dev_mode: bool = False
     # 좌표 기반 매칭(v2) 허용 오차 — µm 단위.  두 좌표가 이 거리 이내면 매칭.
     coord_tolerance: float = 500.0
-    # 모션 줄이기 — 화면 전환·스크롤 애니메이션을 즉시 적용(끔).
-    reduce_motion: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
 
     # ------------------------------------------------------------------

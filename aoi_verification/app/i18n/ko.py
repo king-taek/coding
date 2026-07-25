@@ -454,8 +454,7 @@ DARK_MODE_TOOLTIP = (
     "끄면 밝은 벨럼 시트로 돌아갑니다.\n"
     "검증을 시작하기 전에만 바꿀 수 있습니다(진행 중 상태 보호)."
 )
-REDUCE_MOTION_LABEL = "모션 줄이기"
-REDUCE_MOTION_TOOLTIP = "화면 전환·스크롤 애니메이션을 끕니다."
+# ※ '모션 줄이기' 토글은 제거했다 — 모션은 항상 켜진다(사용자 결정).
 LOAD_SCAN = "폴더 스캔 중…"
 LOAD_SCAN_FMT = "폴더 스캔 중… {done} / {total} 슬롯"
 LOAD_EXPORT = "엑셀로 저장 중…"
