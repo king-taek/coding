@@ -355,6 +355,11 @@ def _make_branch_zip(tmp_path):
         "coding-x/dev/tests/test_x.py": "def test(): pass\n",
         "coding-x/dev/bench결과/result.json": "{}",
         "coding-x/pytest.ini": "[pytest]\n",                   # 제외 대상(루트 앵커)
+        # ★ Claude Code 스킬 모음 — 이 저장소에서 **작업할 때** 쓰는 도구이고 앱 구동과
+        #   무관하다(실제로 198개 파일·4.8 MB).  기본 브랜치는 자동 업데이트가 추적하는
+        #   브랜치이므로, 제외하지 않으면 모든 포터블 설치가 이것을 내려받는다.
+        "coding-x/.claude/skills/impeccable/SKILL.md": "skill\n",
+        "coding-x/.claude/skills/impeccable/reference/audit.md": "ref\n",
     }
     with zipfile.ZipFile(buf, "w") as z:
         for name, content in files.items():
@@ -406,6 +411,11 @@ def test_download_and_apply_mirrors_needed_and_skips_dev_data(tmp_path, monkeypa
     # 개발 전용 모음(dev/)·루트 앵커 설정은 제외된다.
     assert not (app / "dev").exists()
     assert not (app / "pytest.ini").exists()
+    # ★ Claude Code 스킬 모음도 제외된다 — **결과로** 판정한다(목록에 이름이 있는지가
+    #   아니라 파일이 앱 폴더에 안 생기는지가 계약이다).  이걸 빼먹으면 업데이트마다
+    #   4.8 MB 개발 도구가 사용자 앱 폴더로 따라간다.
+    assert not (app / ".claude").exists(), \
+        "개발 전용 스킬 모음이 앱 폴더로 미러링됐다"
     # VERSION 기록 + 진행 보고(단계 메시지)가 있었다.
     import json as _json
     ver = _json.loads((app / "VERSION").read_text())
