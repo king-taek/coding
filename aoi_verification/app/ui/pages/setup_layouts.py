@@ -218,12 +218,10 @@ class SetupPageC(SetupPage):
     def _refresh_summary(self) -> None:
         # ★ 요약은 이 배치의 **안전 장치**다 — 엔진 이름만으론 부족하고 판정에 쓰이는
         #   **수치**(허용 오차 µm / 임계치 %)까지 있어야 오조작이 눈에 걸린다.
-        if self.legacy_switch.is_on():
-            engine = i18n.KO.SUMMARY_ENGINE_LEGACY_FMT.format(
-                th=float(self.slider.value()))
-        else:
-            engine = i18n.KO.SUMMARY_ENGINE_COORD_FMT.format(
-                tol=float(self.coord_tol_spin.value()))
+        # ★ 배지와 **같은 함수**에서 문장을 받는다 — 이전엔 각자 만들어 같은 사실을
+        #   서로 다른 말로 했다(판정 기준이 두 문장이면 어느 쪽을 믿어야 하나).
+        name, value = self.judgement_text()
+        engine = f"{name} {value}"
         scope = (self.scope_group.button(self.scope_group.current_key()).text()
                  if self.scope_group.button(self.scope_group.current_key())
                  else "")

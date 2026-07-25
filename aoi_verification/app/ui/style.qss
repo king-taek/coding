@@ -186,6 +186,32 @@ QPushButton[role="primary"],
 QPushButton[role="ghost"] {
     min-height: 30px;
 }
+/* 허용 오차 ± — 입력란과 **같은 높이**여야 중심이 맞는다.  ghost 의 min-height 30
+   (+패딩 = 44)이 `setFixedSize(38,38)` 을 이겨 38×44 로 렌더돼 3px 어긋났다(실측).
+   38px 은 WCAG 2.5.8(AA 24)을 넘으므로 액션 등급 44 를 강제하지 않는다. */
+QPushButton[role="stepper"] {
+    background: transparent;
+    color: $ink2;
+    border: 1px solid $line_strong;
+    border-radius: $radius_sm;
+    padding: 0;
+    font-size: 17px;
+    font-weight: 700;
+    min-height: $input_h;
+    max-height: $input_h;
+}
+QPushButton[role="stepper"]:hover {
+    color: $ink;
+    background: $elev;
+    border-color: $accent;
+}
+QPushButton[role="stepper"]:focus {
+    border: $focus_w solid $focus;
+}
+QPushButton[role="stepper"]:disabled {
+    color: $mute;
+    border: 1px dashed $line;
+}
 QPushButton[role="primary"] {
     background-color: $accent;
     color: $on_accent;
@@ -359,11 +385,19 @@ QLabel[role="badgeCaption"] {
     letter-spacing: 1px;
 }
 
-/* 상단 모드 배지 — 판정 기준(엔진 + 수치)을 첫 시선에.  수치는 모노. */
+/* 상단 모드 배지 — 판정 기준(엔진 + 수치)을 첫 시선에.
+   ★ 한 라벨에 `$font_mono` 를 걸면 안 된다: 문장이 한국어인데 모노 서체(JetBrains
+   Mono·Consolas)에는 한글 글리프가 없어 **한 문장 안에서 서체가 갈린다**(폰트 폴백).
+   그래서 두 라벨로 쪼갠다 — 이름은 본문 서체, **수치만** 모노. */
 QLabel[role="modeBadge"] {
-    font-family: $font_mono;
     font-size: $font_sub_sz;
     font-weight: 600;
+    color: $ink;
+}
+QLabel[role="modeBadgeValue"] {
+    font-family: $font_mono;
+    font-size: $font_sub_sz;
+    font-weight: 700;
     color: $ink;
 }
 /* 구형은 예외 경로 — 배지가 색으로도 말한다(모르고 켜둔 채 실행 방지). */
@@ -445,7 +479,7 @@ QPushButton[compact="true"]:focus {
 QLabel[role="kbd"] {
     background: $elev;
     border: 1px solid $line2;
-    border-radius: 4px;
+    border-radius: $radius_sm;
     color: $ink2;
     font-family: $font_mono;
     font-size: 11px;
@@ -529,7 +563,7 @@ QSlider:horizontal {
 QSlider::groove:horizontal {
     height: 8px;
     background: $line;
-    border-radius: 4px;
+    border-radius: $radius_sm;
 }
 QSlider::handle:horizontal {
     background: $ink2;
@@ -537,7 +571,7 @@ QSlider::handle:horizontal {
     width: 20px;
     height: 20px;
     margin: -7px 0;
-    border-radius: 10px;
+    border-radius: $radius;
 }
 QSlider::handle:horizontal:hover {
     background: $ink;
@@ -548,7 +582,7 @@ QSlider::handle:horizontal:hover {
    (실측).  `widgets/no_wheel_slider.py` 의 paintEvent 가 직접 그린다. */
 QSlider::sub-page:horizontal {
     background: $accent;
-    border-radius: 4px;
+    border-radius: $radius_sm;
 }
 
 QCheckBox {
@@ -560,7 +594,7 @@ QCheckBox::indicator {
     width: $check_sz;
     height: $check_sz;
     border: 2px solid $line_strong;
-    border-radius: 4px;
+    border-radius: $radius_sm;
     background: $elev;
 }
 QCheckBox::indicator:hover {
@@ -590,7 +624,7 @@ QRadioButton::indicator {
     width: $radio_sz;
     height: $radio_sz;
     border: 2px solid $line_strong;
-    border-radius: 8px;
+    border-radius: $radius;
     background: $elev;
 }
 QRadioButton::indicator:hover {
@@ -613,7 +647,7 @@ QScrollBar:vertical, QScrollBar:horizontal {
 }
 QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
     background: $line_strong;
-    border-radius: 4px;
+    border-radius: $radius_sm;
     min-height: 24px;
     min-width: 24px;
 }
@@ -631,11 +665,11 @@ QScrollBar::add-line, QScrollBar::sub-line {
 QProgressBar {
     background: $panel;
     border: 1px solid $line;
-    border-radius: 6px;
+    border-radius: $radius_sm;
 }
 QProgressBar::chunk {
     background: $accent;
-    border-radius: 5px;
+    border-radius: $radius_sm;
 }
 /* 진행 수치 — 바 밖에서 모노로. 시트 면 위라 대비가 흔들리지 않는다. */
 QLabel[role="progressCount"] {
@@ -647,7 +681,7 @@ QLabel[role="progressCount"] {
 /* ── 그룹박스 ───────────────────────────────────────────────────────── */
 QGroupBox {
     border: 1px solid $line;
-    border-radius: 8px;
+    border-radius: $radius;
     margin-top: 14px;
     padding: 10px 8px 8px 8px;
     color: $ink2;
@@ -667,7 +701,7 @@ QToolTip {
     color: $ink;
     border: 1px solid $line2;
     padding: 8px;
-    border-radius: 4px;
+    border-radius: $radius_sm;
 }
 
 /* 접이식 섹션 헤더 (사용 방법 ▾ / 설정 자세히 ▾) — ★ `:focus` 규칙이 아예 없어서
@@ -698,7 +732,7 @@ QToolButton[role="disclosure"]:focus {
 QToolButton[objectName="helpToggle"] {
     color: $ink2;
     border: 1px solid $line_strong;
-    border-radius: 13px;
+    border-radius: 13px;   /* = 26/2, 원형(pill) — 반경 토큰이 아니라 크기의 절반이다 */
     min-width: 26px;
     min-height: 26px;
     max-width: 26px;

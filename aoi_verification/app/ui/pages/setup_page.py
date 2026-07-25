@@ -210,26 +210,48 @@ class SetupPage(QWidget):
         cap = QLabel(i18n.KO.MODE_BADGE_CAPTION, card)
         cap.setProperty("role", "badgeCaption")
         card.body().addWidget(cap)
-        self._mode_badge = QLabel("", card)
+        # 이름(한국어, 본문 서체) + 수치(모노) — 한 라벨에 모노를 걸면 한글 글리프가
+        # 없어 문장 안에서 서체가 갈린다.
+        badge_row = QWidget(card)
+        badge_row.setProperty("role", "rowHost")
+        brow = QHBoxLayout(badge_row)
+        brow.setContentsMargins(0, 0, 0, 0)
+        brow.setSpacing(8)
+        self._mode_badge = QLabel("", badge_row)
         self._mode_badge.setProperty("role", "modeBadge")
-        card.body().addWidget(self._mode_badge)
+        self._mode_badge_value = QLabel("", badge_row)
+        self._mode_badge_value.setProperty("role", "modeBadgeValue")
+        brow.addWidget(self._mode_badge)
+        brow.addWidget(self._mode_badge_value)
+        brow.addStretch(1)
+        card.body().addWidget(badge_row)
         self._mode_badge_card = card
         return card
+
+    def judgement_text(self) -> tuple[str, str]:
+        """판정 기준을 (이름, 수치) 로 — **단일 출처**.
+
+        ★ 배지와 C안 요약이 각자 문장을 만들어 같은 사실을 서로 다른 말로 했다
+        (배지 '구형 고효율 · 유사도 임계치 55 %' vs 요약 '구형 유사도 엔진 (임계치 55 %)').
+        판정 기준은 하나이므로 문장도 하나에서 나와야 한다."""
+        if self.legacy_switch.is_on():
+            sub = (i18n.KO.ENGINE_MODE_EFFICIENCY_SHORT
+                   if self.legacy_group.current_key() == EngineMode.EFFICIENCY
+                   else i18n.KO.ENGINE_MODE_BASIC_SHORT)
+            return (i18n.KO.JUDGE_NAME_LEGACY_FMT.format(sub=sub),
+                    i18n.KO.JUDGE_VALUE_LEGACY_FMT.format(
+                        th=float(self.slider.value())))
+        return (i18n.KO.JUDGE_NAME_COORD,
+                i18n.KO.JUDGE_VALUE_COORD_FMT.format(
+                    tol=float(self.coord_tol_spin.value())))
 
     def _refresh_mode_badge(self) -> None:
         badge = getattr(self, "_mode_badge", None)
         if badge is None or not hasattr(self, "legacy_switch"):
             return
-        if self.legacy_switch.is_on():
-            sub = (i18n.KO.ENGINE_MODE_EFFICIENCY_SHORT
-                   if self.legacy_group.current_key() == EngineMode.EFFICIENCY
-                   else i18n.KO.ENGINE_MODE_BASIC_SHORT)
-            text = i18n.KO.MODE_BADGE_LEGACY_FMT.format(
-                sub=sub, th=float(self.slider.value()))
-        else:
-            text = i18n.KO.MODE_BADGE_COORD_FMT.format(
-                tol=float(self.coord_tol_spin.value()))
-        badge.setText(text)
+        name, value = self.judgement_text()
+        badge.setText(name)
+        self._mode_badge_value.setText(value)
         # 구형은 예외 경로 — 배지가 색으로도 말하게 한다(모르고 켜둔 채 실행 방지).
         card = getattr(self, "_mode_badge_card", None)
         if card is not None:
@@ -462,7 +484,8 @@ class SetupPage(QWidget):
         self.coord_tol_spin = NoWheelDoubleSpinBox(self._tol_row)
         self.coord_tol_spin.setRange(10.0, 5000.0)
         self.coord_tol_spin.setSingleStep(50.0)
-        self.coord_tol_spin.setDecimals(1)
+        # 배지와 표기를 일치시킨다 — 같은 값을 500 / 500.0 두 가지로 쓰지 않는다.
+        self.coord_tol_spin.setDecimals(0)
         self.coord_tol_spin.setSuffix(" µm")
         self.coord_tol_spin.setValue(getattr(_prefs_now, "coord_tolerance", 500.0))
         self.coord_tol_spin.setToolTip(i18n.KO.COORD_TOLERANCE_TOOLTIP)
@@ -552,9 +575,9 @@ class SetupPage(QWidget):
 
     def _stepper_button(self, glyph: str, step: int) -> NeonButton:
         """허용 오차 ±  — 정사각 버튼.  Qt 스핀 버튼 대신 쓴다(위 주석 참조)."""
-        btn = NeonButton(glyph, role="ghost")
+        btn = NeonButton(glyph, role="stepper")
         side = theme.PROFILE.input_h
-        btn.setFixedSize(side, side)
+        btn.setFixedWidth(side)     # 높이는 QSS 가 input_h 로 고정한다(중심 정렬)
         btn.setAccessibleName(i18n.KO.TOL_STEP_UP if step > 0
                               else i18n.KO.TOL_STEP_DOWN)
         btn.setToolTip(btn.accessibleName())
