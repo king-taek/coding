@@ -31,7 +31,7 @@ from ..models.slot import (ImageItem, ScanResult, Slot, drop_empty_unmatched,
                            scan)
 from ..utils import paths, wafer_id
 from ..utils import prefs as _prefs
-from ..utils.prefs import AutomationLevel
+from ..utils.prefs import AutomationLevel, EngineMode
 from ..workers.thumbnailer import (PRIORITY_ACTIVE_SLOT, PRIORITY_BACKGROUND,
                                      ThumbnailPool, ThumbnailWorker)
 from .pages.match_page import MatchPage
@@ -847,7 +847,7 @@ class MainWindow(QMainWindow):
         inp = self._input
         if inp is None:
             return config.DEFAULT_SIM_CONFIG
-        engine = getattr(inp, "engine_mode", "basic")
+        engine = getattr(inp, "engine_mode", EngineMode.COORDINATE)
         # 실측 최적 프로파일 적용:
         #   기본 모드  = rr_parallel  → 전수 고전(pHash+ORB+SSIM)·CPU 멀티코어 병렬(현행 동작).
         #   고효율 모드 = rr_orb_center50 → GPU 임베딩 추림 + 상위 후보를 ORB 단독·중앙(defect)

@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (QButtonGroup, QCheckBox, QDoubleSpinBox,
 from ... import config, i18n
 from .. import theme
 from ...utils import prefs as _prefs
-from ...utils.prefs import AutomationLevel
+from ...utils.prefs import AutomationLevel, EngineMode
 from ..widgets.collapsible_section import CollapsibleSection
 from ..widgets.neon_button import NeonButton
 from ..widgets.neon_card import NeonCard
@@ -34,7 +34,7 @@ class SetupInput:
     threshold: float
     automation_level: str = AutomationLevel.USER_SELECT
     # 유사도 엔진 + 기타 설정 (계산 전용).
-    engine_mode: str = "basic"       # EngineMode.{BASIC,EFFICIENCY,COORDINATE}
+    engine_mode: str = EngineMode.COORDINATE   # EngineMode.{BASIC,EFFICIENCY,COORDINATE}
     persist_scores: bool = True      # 유사도 점수 디스크 캐시 — 항상 기본 적용
     accel_concurrency: int = 32      # 고효율 모드 동시 추론 수(in-flight)
     use_cpu: bool = True             # 고효율 장치 토글(테스트용)

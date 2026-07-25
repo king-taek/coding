@@ -8,6 +8,69 @@ def test_defaults():
     assert 0.0 <= p.threshold <= 1.0
     assert p.image_long_edge_select >= 300
     assert p.reduce_motion is False
+    # 신규 사용자는 좌표 매칭으로 시작한다(구형 모드로 떠밀리던 버그 고정).
+    assert p.engine_mode == prefs.EngineMode.COORDINATE
+    assert p.legacy_enabled is None            # '아직 설정 안 됨'
+    assert p.legacy_engine == ""
+    assert p.color_mode == "light"
+
+
+# ── 구형 모드 상태 유도 (순수 함수 — Qt 불필요) ─────────────────────────────
+def test_resolve_legacy_fresh_prefs_is_off():
+    on, sub = prefs.resolve_legacy_state(prefs.UiPrefs())
+    assert on is False and sub == prefs.EngineMode.BASIC
+
+
+def test_resolve_legacy_old_basic_falls_back_to_coordinate():
+    """옛 기본값 'basic' 은 '직접 고름'과 구분 불가 → 좌표로 되돌린다(하위 선택은 기억)."""
+    p = prefs.UiPrefs(engine_mode=prefs.EngineMode.BASIC)   # legacy_enabled 미설정
+    on, sub = prefs.resolve_legacy_state(p)
+    assert on is False
+    assert sub == prefs.EngineMode.BASIC
+
+
+def test_resolve_legacy_old_efficiency_is_deliberate():
+    """'efficiency' 는 라디오를 직접 골라야 저장된다 → 의도적 선택으로 인정."""
+    p = prefs.UiPrefs(engine_mode=prefs.EngineMode.EFFICIENCY)
+    on, sub = prefs.resolve_legacy_state(p)
+    assert on is True
+    assert sub == prefs.EngineMode.EFFICIENCY
+
+
+def test_resolve_legacy_explicit_flag_wins():
+    """스위치가 한 번 설정되면 그 값이 engine_mode 보다 우선한다."""
+    off = prefs.UiPrefs(legacy_enabled=False,
+                        engine_mode=prefs.EngineMode.EFFICIENCY)
+    assert prefs.resolve_legacy_state(off)[0] is False
+    on = prefs.UiPrefs(legacy_enabled=True, legacy_engine=prefs.EngineMode.BASIC,
+                       engine_mode=prefs.EngineMode.COORDINATE)
+    assert prefs.resolve_legacy_state(on) == (True, prefs.EngineMode.BASIC)
+
+
+def test_resolve_legacy_engine_remembers_sub_choice():
+    """engine_mode 가 coordinate 여도 legacy_engine 이 하위 선택을 기억한다."""
+    p = prefs.UiPrefs(legacy_enabled=False,
+                      legacy_engine=prefs.EngineMode.EFFICIENCY,
+                      engine_mode=prefs.EngineMode.COORDINATE)
+    on, sub = prefs.resolve_legacy_state(p)
+    assert on is False and sub == prefs.EngineMode.EFFICIENCY
+
+
+def test_new_fields_round_trip(isolated_cache):
+    prefs.save(prefs.UiPrefs(legacy_enabled=True,
+                             legacy_engine=prefs.EngineMode.EFFICIENCY,
+                             color_mode="dark"))
+    loaded = prefs.load()
+    assert loaded.legacy_enabled is True          # None 과 구분되어 왕복
+    assert loaded.legacy_engine == prefs.EngineMode.EFFICIENCY
+    assert loaded.color_mode == "dark"
+
+
+def test_prefs_json_without_switch_keys_yields_unset(isolated_cache):
+    """스위치 도입 전 JSON 은 legacy_enabled 가 None 으로 로드되어 유도 대상이 된다."""
+    p = prefs.UiPrefs.from_dict({"engine_mode": "basic", "threshold": 0.6})
+    assert p.legacy_enabled is None
+    assert prefs.resolve_legacy_state(p)[0] is False
 
 
 def test_reduce_motion_round_trip(isolated_cache):
