@@ -1,6 +1,6 @@
 ---
 name: test-driven-development
-description: Use when implementing any feature or bugfix, before writing implementation code
+description: Consider when implementing a feature or bugfix where a test-first loop would add real value, before writing implementation code. Before applying, you MUST first ask the user whether to use this skill and proceed only if they approve. Never auto-apply without asking.
 ---
 
 # Test-Driven Development (TDD)

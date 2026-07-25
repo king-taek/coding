@@ -1,6 +1,6 @@
 ---
 name: verification-before-completion
-description: Use when about to claim work is complete, fixed, or passing, before committing or creating PRs - requires running verification commands and confirming output before making any success claims; evidence before assertions always
+description: Consider before claiming work is complete, fixed, or passing on a substantial change - lays out a full verification protocol before success claims. Before applying, you MUST first ask the user whether to use this skill and proceed only if they approve. Never auto-apply without asking.
 ---
 
 # Verification Before Completion

@@ -1,6 +1,6 @@
 ---
 name: systematic-debugging
-description: Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes
+description: Consider when a bug, test failure, or unexpected behavior resists a straightforward fix and needs a structured investigation. Before applying, you MUST first ask the user whether to use this skill and proceed only if they approve. Never auto-apply without asking.
 ---
 
 # Systematic Debugging

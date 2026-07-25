@@ -1,6 +1,6 @@
 ---
 name: using-superpowers
-description: Use when starting any conversation - establishes how to find and use skills, requiring skill invocation before ANY response including clarifying questions
+description: Consider when a request looks like it may be covered by an installed skill - explains how to find and choose skills. Before applying any skill it points to, you MUST first ask the user whether to use that skill and proceed only if they approve. Never auto-apply a skill without asking, and never run a skill search on routine requests.
 ---
 
 <SUBAGENT-STOP>
@@ -8,27 +8,29 @@ If you were dispatched as a subagent to execute a specific task, ignore this ski
 </SUBAGENT-STOP>
 
 <EXTREMELY-IMPORTANT>
-If you think there is even a 1% chance a skill might apply to what you are doing, you ABSOLUTELY MUST invoke the skill.
+Judge for yourself whether a skill genuinely fits the task — then ASK the user before using it.
 
-IF A SKILL APPLIES TO YOUR TASK, YOU DO NOT HAVE A CHOICE. YOU MUST USE IT.
+NEVER invoke a skill workflow without the user's approval for that specific task. Their answer decides it; a "no" means do the work directly.
 
-This is not negotiable. You cannot rationalize your way out of this.
+This is not negotiable. You cannot rationalize your way out of asking first.
 </EXTREMELY-IMPORTANT>
 
 ## The Rule
 
-**Invoke relevant or requested skills BEFORE any response or action** — including clarifying questions, exploring the codebase, or checking files. If it turns out wrong for the situation, you don't have to use it.
+**When you judge that a skill fits, ask the user first**: name the skill, say in one line what it would add and what it costs (extra steps, extra tokens/time), and let them choose. Do the work directly unless they approve.
 
-**Before entering plan mode:** if you haven't already brainstormed, invoke the brainstorming skill first.
+Routine requests — small edits, direct questions, quick lookups — need no skill and no question. Do them directly.
 
-Then announce "Using [skill] to [purpose]" and follow the skill exactly. If it has a checklist, create a todo per item.
+Once approved, announce "Using [skill] to [purpose]" and follow the skill exactly. If it has a checklist, create a todo per item.
 
 ## Skill Priority
 
 When multiple skills apply, process skills come first — they set the approach, then implementation skills (frontend-design, etc.) carry it out. Brainstorming and systematic-debugging are Superpowers' most common process skills, but the rule holds for any of them.
 
-- "Let's build X" → superpowers:brainstorming first, then implementation skills.
-- "Fix this bug" → superpowers:systematic-debugging first, then domain skills.
+- "Let's build X" → propose superpowers:brainstorming, then implementation skills.
+- "Fix this bug" → propose superpowers:systematic-debugging, then domain skills.
+
+Propose the whole chain in one question rather than asking again at each stage.
 
 ## Red Flags
 
@@ -36,18 +38,11 @@ These thoughts mean STOP—you're rationalizing:
 
 | Thought | Reality |
 |---------|---------|
-| "This is just a simple question" | Questions are tasks. Check for skills. |
-| "I need more context first" | Skill check comes BEFORE clarifying questions. |
-| "Let me explore the codebase first" | Skills tell you HOW to explore. Check first. |
-| "I can check git/files quickly" | Files lack conversation context. Check for skills. |
-| "Let me gather information first" | Skills tell you HOW to gather information. |
-| "This doesn't need a formal skill" | If a skill exists, use it. |
+| "I'll invoke it, they'd probably say yes" | Probably isn't approval. Ask. |
+| "Asking costs a turn, just run it" | An unwanted workflow costs far more. Ask. |
+| "They approved this skill last time" | Approval is per task, not standing. Ask again. |
 | "I remember this skill" | Skills evolve. Read current version. |
-| "This doesn't count as a task" | Action = task. Check for skills. |
-| "The skill is overkill" | Simple things become complex. Use it. |
-| "I'll just do this one thing first" | Check BEFORE doing anything. |
-| "This feels productive" | Undisciplined action wastes time. Skills prevent this. |
-| "I know what that means" | Knowing the concept ≠ using the skill. Invoke it. |
+| "The user said no, but the skill knows better" | Their no is final. Do the work directly. |
 
 ## Platform Adaptation
 
