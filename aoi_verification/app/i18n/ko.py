@@ -144,7 +144,7 @@ UNMATCHED_REVIEW_PROGRESS_FMT = "{idx} / {total} — {slot}"
 UNMATCHED_REVIEW_HINT = (
     "매치 실패한 기준 사진을 하나씩 검토합니다. 같은 슬롯의 검증 장비 후보를"
     " 유사도 순으로 보여줍니다. 맞는 사진을 클릭해 선택(파란 테두리)한 뒤"
-    " [매치 확정] 을 누르세요. 후보를 더블클릭/우클릭하면 크게 비교할 수 있습니다."
+    " [매치 확정] 을 누르세요. 후보를 우클릭하면 크게 비교할 수 있습니다."
 )
 UNMATCHED_REVIEW_NO_CANDIDATES = "이 슬롯에는 검증 장비 후보가 없습니다."
 UNMATCHED_REVIEW_DONE_FMT = "{n} 건의 신규 매칭을 확정했습니다."

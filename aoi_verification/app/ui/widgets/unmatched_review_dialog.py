@@ -79,7 +79,7 @@ class _CandidateTile(QFrame):
     """후보 사진 타일.
 
     - 클릭 = 선택(파란 테두리)만, 즉시 매칭하지 않는다 (#1a).
-    - 더블클릭 / 우클릭 = 좌우(기준·후보) 비교 크게보기 (#1e).
+    - 우클릭 '크게 보기' = 좌우(기준·후보) 비교 크게보기 (#1e).
     - 이미지는 사전 생성된 mid 캐시를 소스로 빠르게 로드하고(#1c), 슬라이더로
       재디코드 없이 인플레이스 재스케일한다.
     """
@@ -200,11 +200,8 @@ class _CandidateTile(QFrame):
             self.selected.emit(self.item)
         super().mousePressEvent(event)
 
-    def mouseDoubleClickEvent(self, event):  # noqa: N802
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.view_requested.emit(self.item)
-        super().mouseDoubleClickEvent(event)
-
+    # ★ 더블클릭 확대는 제거했다 — 후보를 연달아 누르다 보면 두 번째 클릭이 더블클릭으로
+    #   붙어 원하지 않는 비교 창이 떴다(사용자 지적).  확대는 우클릭 메뉴로만 연다.
     def _on_context_menu(self, pos) -> None:
         menu = QMenu(self)
         act = menu.addAction(i18n.KO.CTX_VIEW_LARGER)
@@ -378,14 +375,13 @@ class UnmatchedReviewDialog(QDialog):
         self.ref_img.setStyleSheet(
             f"background: {theme.BG}; border: 1px solid {theme.LINE}; border-radius: 6px;"
         )
-        # 우클릭/더블클릭 ‘크게보기’ — 후보와 동일한 좌우 비교 창을 열되,
-        # 기준 사진은 가장 유사도가 높은 후보부터(start=0) 보여준다 (#13).
+        # 우클릭 ‘크게보기’ — 후보와 동일한 좌우 비교 창을 열되, 기준 사진은 가장
+        # 유사도가 높은 후보부터(start=0) 보여준다 (#13).
+        # ★ 더블클릭 확대는 제거했다(사용자 지적).  여기에 걸려 있던 것은 인스턴스 메서드
+        #   몽키패치라 더 나빴다 — QLabel 의 이벤트 핸들러를 람다로 갈아끼우면 위젯이
+        #   자기 클래스 계약 밖에서 동작해 다음 사람이 찾을 수 없다.
         self.ref_img.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.ref_img.customContextMenuRequested.connect(self._on_ref_context_menu)
-        self.ref_img.mouseDoubleClickEvent = (  # type: ignore[assignment]
-            lambda ev: self._open_compare(0)
-            if ev.button() == Qt.MouseButton.LeftButton else None
-        )
         ll.addWidget(self.ref_img, alignment=Qt.AlignmentFlag.AlignCenter)
         ll.addStretch(1)
         self._left_panel = left
@@ -801,7 +797,7 @@ class UnmatchedReviewDialog(QDialog):
         self._open_compare(start)
 
     def _open_compare(self, start_index: int) -> None:
-        """좌(기준)·우(후보) 비교 크게보기 — 후보 더블클릭/우클릭 및 기준 우클릭
+        """좌(기준)·우(후보) 비교 크게보기 — 후보 우클릭 및 기준 우클릭
         공용.  ``self._cand_tiles`` 는 이미 유사도 내림차순이므로 start_index=0
         이면 가장 유사한 후보부터 보인다 (기준 우클릭용)."""
         from .side_by_side_viewer import SideBySideViewer

@@ -17,7 +17,7 @@ class SlotSection(QWidget):
 
     tile_clicked = pyqtSignal(object)            # ThumbEntry
     plus_clicked = pyqtSignal(str)               # slot name
-    expand_requested = pyqtSignal(object)        # ThumbEntry — 더블클릭 확대 (#2)
+    expand_requested = pyqtSignal(object)        # ThumbEntry — 타일 우상단 확대 버튼
     inline_changed = pyqtSignal()                # 인라인 선택 변경 (#2)
 
     def __init__(self,

@@ -159,7 +159,7 @@ class _LazyThumb(QLabel):
 class _RunnerUpTile(QFrame):
     """클릭 가능한 차순위 후보 썸네일.  클릭 시 swap_requested(item, score).
 
-    더블클릭/우클릭은 좌우(기준·후보) 비교 뷰어를 연다 (#4) — view_requested.
+    우클릭 '크게 보기' 가 좌우(기준·후보) 비교 뷰어를 연다 (#4) — view_requested.
     """
 
     swap_requested = pyqtSignal(object, float)        # (ImageItem, score)
@@ -213,11 +213,10 @@ class _RunnerUpTile(QFrame):
             self.swap_requested.emit(self.item, self.score)
         super().mousePressEvent(event)
 
-    def mouseDoubleClickEvent(self, event):  # noqa: N802
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.view_requested.emit(self.item)
-        super().mouseDoubleClickEvent(event)
-
+    # ★ 더블클릭 확대는 제거했다 — 후보를 연달아 눌러 교체하다 보면 두 번째 클릭이
+    #   더블클릭으로 붙어 원하지 않는 비교 창이 떴다(사용자 지적).  프레스는 '교체'라는
+    #   잦은 동작이고 확대는 드문 동작이라, 같은 버튼의 연타에 둘을 겹치면 잦은 쪽이
+    #   드문 쪽을 오발한다.  확대는 아래 우클릭 메뉴로만 연다.
     def _on_context_menu(self, pos) -> None:
         menu = QMenu(self)
         act = menu.addAction(i18n.KO.CTX_VIEW_LARGER)
