@@ -55,6 +55,10 @@ class SetupPage(QWidget):
     update_check_requested = pyqtSignal()            # '업데이트 확인' 버튼
     appearance_changed = pyqtSignal()                # 색 모드/배치 변경 → 페이지 재생성 요청
 
+    # 이 페이지가 어떤 배치안인지 — 스위처가 prefs 대신 **자기 자신**을 보고 표시한다
+    # (prefs 와 실제 화면이 어긋나는 일이 없게).  배치안 서브클래스가 덮어쓴다.
+    LAYOUT_KEY = "a"
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._build()
@@ -96,6 +100,10 @@ class SetupPage(QWidget):
         # 본문 구성 — 배치안(서브클래스)이 이 메서드만 오버라이드하면 배치가 바뀐다.
         self._build_body(root)
 
+        # 배치안이 원하면 액션바를 스크롤 **밖**에 고정한다(항상 손에 닿게).
+        if self._pinned_action_bar():
+            outer.addWidget(self._build_action_bar())
+
         # 개발자 모드 토글 단축키 — 일반 사용자에게는 보이지 않는 진입점.
         self._dev_shortcut = QShortcut(QKeySequence("Ctrl+Shift+D"), self)
         self._dev_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
@@ -105,10 +113,13 @@ class SetupPage(QWidget):
     # 본문 빌더 — 각 조각은 위젯 하나를 만들어 돌려준다.  배치안은 ``_build_body``
     # (순서·열 구성) 또는 개별 빌더(컨트롤 디자인)만 갈아끼우면 된다.
     # ==================================================================
+    def _pinned_action_bar(self) -> bool:
+        """액션바를 스크롤 밖에 고정할지 — 배치안이 결정한다."""
+        return False
+
     def _build_body(self, root: QVBoxLayout) -> None:
-        """기본 배치 — 한 열, 위에서 아래로(현행 순서 그대로)."""
-        root.addWidget(self._build_title())
-        root.addWidget(self._build_view_options())
+        """A안 「진행 순서형」 — 한 열, 위에서 아래로(폴더 → 옵션 → 시작)."""
+        root.addWidget(self._build_top_bar())
         root.addWidget(self._build_subtitle())
         root.addWidget(self._build_howto())
         root.addWidget(self._build_automation_card())
@@ -116,8 +127,61 @@ class SetupPage(QWidget):
         root.addWidget(self._build_scope_row())
         root.addWidget(self._build_engine_card())
         root.addStretch(1)
-        root.addWidget(self._build_action_bar())
+        if not self._pinned_action_bar():
+            root.addWidget(self._build_action_bar())
         root.addWidget(self._build_credit())
+
+    def _build_top_bar(self) -> QWidget:
+        """상단 툴바(배치 스위처 + 보기 옵션) + 제목 — 배치안 공통 상단.
+
+        한 줄에 몰아넣지 않는다: 800×600 에서 제목까지 같은 줄에 두면 폭이 넘쳐
+        가로 스크롤이 생긴다(실측 확인).  컨트롤 줄과 제목 줄을 분리해 좁은 창에서도
+        안전하게 한다."""
+        host = QWidget(self)
+        col = QVBoxLayout(host)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(10)
+
+        tools = QWidget(host)
+        trow = QHBoxLayout(tools)
+        trow.setContentsMargins(0, 0, 0, 0)
+        trow.setSpacing(12)
+        trow.addWidget(self._build_layout_switcher())
+        trow.addStretch(1)
+        trow.addWidget(self._build_view_options())
+        col.addWidget(tools)
+        col.addWidget(self._build_title())
+        return host
+
+    def _build_layout_switcher(self) -> QWidget:
+        """상단 배치 전환 버튼 — 3개 안을 눌러 보며 비교한다(비교용 임시 컨트롤).
+
+        안이 확정되면 이 스위처와 미선택 배치안을 함께 제거한다."""
+        from .setup_layouts import LAYOUT_LABELS, layout_keys
+        host = QWidget(self)
+        row = QHBoxLayout(host)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(6)
+        lbl = QLabel(i18n.KO.LAYOUT_SWITCH_LABEL, host)
+        lbl.setProperty("role", "muted")
+        row.addWidget(lbl)
+        keys = layout_keys()
+        self.layout_group = OptionGroup(
+            [(k, LAYOUT_LABELS[k]) for k in keys],
+            current=self.LAYOUT_KEY, min_tile_w=84,
+            fixed_cols=len(keys), parent=host,
+        )
+        for k in keys:
+            self.layout_group.set_option_tooltip(k, i18n.KO.LAYOUT_SWITCH_TOOLTIP)
+        self.layout_group.selection_changed.connect(self._on_layout_chosen)
+        row.addWidget(self.layout_group)
+        return host
+
+    def _on_layout_chosen(self, key: str) -> None:
+        if key == self.LAYOUT_KEY:
+            return
+        _prefs.patch(setup_layout=key)
+        self.appearance_changed.emit()      # main_window 가 페이지를 다시 만든다
 
     def _build_title(self) -> QWidget:
         # 화면 크기 컨트롤은 별도 버튼 없이 OS 의 표준 창 조작
@@ -228,6 +292,8 @@ class SetupPage(QWidget):
         self.scope_group.set_option_tooltip("subset", i18n.KO.SLOT_SELECT_BTN_TOOLTIP)
         self.scope_group.selection_changed.connect(self._on_scope_changed)
         col.addWidget(self.scope_group)
+        # 남는 세로 공간은 아래로 — 그리드 배치(B안)에서 제목과 타일이 벌어지지 않게.
+        col.addStretch(1)
         return host
 
     def _on_scope_changed(self, key: str) -> None:

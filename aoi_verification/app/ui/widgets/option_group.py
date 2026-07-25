@@ -64,11 +64,14 @@ class OptionGroup(QWidget):
     def __init__(self, options: Sequence[tuple[str, str]], *,
                  current: str = "",
                  min_tile_w: int = DEFAULT_MIN_TILE_W,
+                 fixed_cols: int = 0,
                  parent: Optional[QWidget] = None) -> None:
+        """``fixed_cols`` 를 주면 폭에 상관없이 그 열 수로 고정한다(한 줄 칩 그룹 등)."""
         super().__init__(parent)
         self._keys: list[str] = []
         self._buttons: dict[str, QPushButton] = {}
         self._min_tile_w = int(min_tile_w)
+        self._fixed_cols = int(fixed_cols)
         self._last_cols = 0
 
         self._grid = QGridLayout(self)
@@ -143,6 +146,12 @@ class OptionGroup(QWidget):
 
     def _reflow(self) -> None:
         widgets = [self._buttons[k] for k in self._keys]
+        if self._fixed_cols > 0:
+            # 폭 계산 없이 고정 열 — 한 줄 칩 그룹이 좁은 부모에서 세로로 접히지 않게.
+            big = self._fixed_cols * (self._min_tile_w + self._grid.spacing()) + 1
+            self._last_cols = reflow_into_grid(self._grid, widgets, big,
+                                               self._min_tile_w)
+            return
         avail = self.width() if self.width() > 1 else 0
         if not avail:
             p = self.parentWidget()

@@ -425,6 +425,22 @@ KEY_HINT_DONE = "검토 완료"
 # 카드 제목 옆 '?' 도움말 토글 (하드코딩 금지 — 사용자 노출 문자열은 여기 모은다)
 HELP_TOGGLE_TOOLTIP = "설명 보기/숨기기"
 
+# 배치안 스위처 (셋업 상단) — 비교용 임시 컨트롤. 안이 확정되면 함께 제거한다.
+LAYOUT_SWITCH_LABEL = "배치"
+LAYOUT_SWITCH_TOOLTIP = (
+    "첫 화면 배치를 바꿔 봅니다. 기능·흐름은 세 배치가 모두 같습니다.\n"
+    "검증을 시작하기 전에만 바꿀 수 있습니다."
+)
+LAYOUT_A_LABEL = "A 순서형"
+LAYOUT_B_LABEL = "B 2열"
+LAYOUT_C_LABEL = "C 요약형"
+# C안 — 요약 + 점진적 공개
+SETUP_DETAIL_OPEN = "설정 자세히 ▾"
+SETUP_DETAIL_CLOSE = "설정 자세히 ▴"
+SUMMARY_FMT = "{engine} · {scope} · {auto}"
+SUMMARY_ENGINE_COORD = "좌표 매칭"
+SUMMARY_ENGINE_LEGACY = "구형 유사도 엔진"
+
 # 보기 옵션 (셋업 상단)
 DARK_MODE_LABEL = "어두운 화면"
 DARK_MODE_TOOLTIP = (
