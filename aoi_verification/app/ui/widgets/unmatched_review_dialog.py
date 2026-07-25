@@ -89,8 +89,13 @@ class _CandidateTile(QFrame):
 
     # objectName 스코프 셀렉터 — 최외곽 프레임에만 테두리. (QLabel 이 QFrame
     # 서브클래스라 ``QFrame {…}`` 는 내부 이미지/점수/캡션 라벨까지 번진다.)
-    _SEL_STYLE = (f"#candTile {{ border: 2px solid {theme.ACCENT}; border-radius: 8px;"
-                  " background: rgba(57, 255, 20, 0.06); }")
+    # ★ 색을 **클래스 본문에서 굽지 않는다** — 클래스 본문은 import 시점에 한 번만
+    #   평가돼 그때의 팔레트(항상 라이트)가 영구히 박힌다(다크 모드가 안 먹는다).
+    #   배경 틴트도 옛 네온 초록 리터럴 대신 팔레트의 강조 틴트를 쓴다.
+    @staticmethod
+    def _sel_style() -> str:
+        return (f"#candTile {{ border: 2px solid {theme.ACCENT}; border-radius: 8px; "
+                f"background: {theme.ACCENT_TINT}; }}")
 
     def __init__(self, item: ImageItem, score: float, parent=None,
                  *, size: int = _CAND_PX,
@@ -193,7 +198,7 @@ class _CandidateTile(QFrame):
         if selected == self._is_selected:
             return
         self._is_selected = bool(selected)
-        self.setStyleSheet(self._SEL_STYLE if self._is_selected else "")
+        self.setStyleSheet(self._sel_style() if self._is_selected else "")
 
     def mousePressEvent(self, event):  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton:

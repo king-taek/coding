@@ -40,14 +40,19 @@ def _fmt_score(score: float, coord_mode: bool, tolerance: float) -> str:
 class _Row(QWidget):
     delete_requested = pyqtSignal(object)        # MatchResult
 
-    _STYLE_NORMAL = (
-        f"QWidget#matchRow {{ background: {theme.PANEL}; border: 1px solid {theme.LINE}; "
-        "border-radius: 8px; }"
-    )
-    _STYLE_PENDING = (
-        f"QWidget#matchRow {{ background: rgba(229,96,90,0.10); border: 2px solid {theme.DANGER}; "
-        "border-radius: 8px; }"
-    )
+    # ★ 색을 **클래스 본문에서 굽지 않는다.**  클래스 본문은 import 시점에 한 번만
+    #   평가되므로, 그때의 팔레트(항상 라이트)가 영구히 박힌다 — 다크 모드로 바꿔도
+    #   행 카드만 흰색으로 남았다(캡처로 발견).  페이지 재생성으로도 못 고친다:
+    #   클래스 속성은 다시 평가되지 않기 때문이다.  인스턴스마다 읽는다.
+    @staticmethod
+    def _style_normal() -> str:
+        return (f"QWidget#matchRow {{ background: {theme.PANEL}; "
+                f"border: 1px solid {theme.LINE}; border-radius: 8px; }}")
+
+    @staticmethod
+    def _style_pending() -> str:
+        return (f"QWidget#matchRow {{ background: {theme.DANGER_TINT}; "
+                f"border: 2px solid {theme.DANGER}; border-radius: 8px; }}")
 
     def __init__(self, m: MatchResult, parent=None, *,
                  size: int = _THUMB,
@@ -63,7 +68,7 @@ class _Row(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setMinimumHeight(self._size + 40)
         # objectName 선택자로 한정 — 자식 위젯에 빨간 테두리가 번지지 않게.
-        self.setStyleSheet(self._STYLE_NORMAL)
+        self.setStyleSheet(self._style_normal())
         lay = QHBoxLayout(self)
         lay.setContentsMargins(8, 8, 8, 8)
         lay.setSpacing(10)
@@ -110,7 +115,8 @@ class _Row(QWidget):
     def set_pending_delete(self, pending: bool) -> None:
         """삭제 예정 표시 — 빨간 테두리 + 버튼 토글 (확인 전까지 실제 삭제 안 함)."""
         self._pending = bool(pending)
-        self.setStyleSheet(self._STYLE_PENDING if pending else self._STYLE_NORMAL)
+        self.setStyleSheet(self._style_pending() if pending
+                           else self._style_normal())
         if pending:
             self.btn.setText(i18n.KO.REVIEW_BTN_UNDELETE)
             self.btn.setRole("ghost")
