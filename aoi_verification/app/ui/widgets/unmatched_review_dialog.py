@@ -31,6 +31,7 @@ from ...utils import image_io
 from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
 from .window_controls import add_fullscreen_shortcut, enable_window_controls
+from . import sheet_host as sheets
 
 
 _LIST_THUMB_PX = 56     # 좌측 ‘실패 목록’ 항목 썸네일 한 변(px).
@@ -871,7 +872,7 @@ class UnmatchedReviewDialog(QDialog):
         prev_row = self._idx_to_row.get(self._idx, 0)
         n = self._finalize_pending()
         if n:
-            QMessageBox.information(
+            sheets.info(
                 self, i18n.KO.APP_TITLE,
                 i18n.KO.UNMATCHED_REVIEW_DONE_FMT.format(n=n),
             )
@@ -902,7 +903,7 @@ class UnmatchedReviewDialog(QDialog):
         if self._close_prompted or not self._pending:
             return
         self._close_prompted = True
-        r = QMessageBox.question(
+        r = sheets.ask(
             self, i18n.KO.APP_TITLE, i18n.KO.UNMATCHED_CONFIRM_ON_CLOSE,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes,
@@ -946,6 +947,6 @@ class UnmatchedReviewDialog(QDialog):
     # ------------------------------------------------------------------
     @staticmethod
     def show_empty_message(parent) -> None:
-        QMessageBox.information(
+        sheets.info(
             parent, i18n.KO.APP_TITLE, i18n.KO.UNMATCHED_REVIEW_EMPTY,
         )

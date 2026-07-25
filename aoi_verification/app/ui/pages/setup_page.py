@@ -23,6 +23,7 @@ from ..widgets.neon_card import NeonCard
 from ..widgets.no_wheel_slider import NoWheelDoubleSpinBox, NoWheelSlider
 from ..widgets.option_group import OptionGroup, reflow_into_grid
 from ..widgets.switch_row import SwitchRow
+from ..widgets import sheet_host as sheets
 
 
 @dataclass
@@ -808,14 +809,14 @@ class SetupPage(QWidget):
         ref_text = self.ref_path_edit.text().strip()
         ref_root = Path(ref_text) if ref_text else None
         if ref_root is None or not ref_root.is_dir():
-            QMessageBox.warning(
+            sheets.warn(
                 self, i18n.KO.APP_TITLE, i18n.KO.SLOT_SELECT_NEED_REF,
             )
             self._reset_slot_selection()       # 고를 수 없으면 전체 진행으로 복귀
             return
         slot_names = sorted(list_slot_dirs(ref_root).keys())
         if not slot_names:
-            QMessageBox.information(
+            sheets.info(
                 self, i18n.KO.APP_TITLE, i18n.KO.SLOT_SELECT_EMPTY,
             )
             self._reset_slot_selection()
@@ -882,11 +883,11 @@ class SetupPage(QWidget):
         _prefs.patch(dev_mode=new)
         self._refresh_dev_buttons()
         if self._dev_mode_enabled():
-            QMessageBox.information(
+            sheets.info(
                 self, i18n.KO.DEV_MODE_TOGGLE_TITLE,
                 i18n.KO.DEV_MODE_ON_FMT.format(button=i18n.KO.DEV_BENCH_BUTTON))
         else:
-            QMessageBox.information(
+            sheets.info(
                 self, i18n.KO.DEV_MODE_TOGGLE_TITLE, i18n.KO.DEV_MODE_OFF)
 
     def _default_dev_roots(self) -> tuple[str, str]:
@@ -992,11 +993,11 @@ class SetupPage(QWidget):
         val_machine = self.val_machine_edit.text().strip()
 
         if not ref_root.exists() or not ref_root.is_dir():
-            QMessageBox.warning(self, i18n.KO.APP_TITLE,
+            sheets.warn(self, i18n.KO.APP_TITLE,
                                 i18n.KO.WARN_PATH_NOT_EXIST.format(path=ref_root))
             return
         if not val_root.exists() or not val_root.is_dir():
-            QMessageBox.warning(self, i18n.KO.APP_TITLE,
+            sheets.warn(self, i18n.KO.APP_TITLE,
                                 i18n.KO.WARN_PATH_NOT_EXIST.format(path=val_root))
             return
         if not ref_machine:
@@ -1005,7 +1006,7 @@ class SetupPage(QWidget):
             val_machine = "검증호기"
 
         if ref_root.resolve() == val_root.resolve():
-            r = QMessageBox.question(
+            r = sheets.ask(
                 self, i18n.KO.WARN_SAME_PATH_TITLE, i18n.KO.WARN_SAME_PATH_BODY,
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,

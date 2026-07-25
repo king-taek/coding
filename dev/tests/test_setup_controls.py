@@ -295,18 +295,21 @@ def test_invalid_folder_shows_inline_reason(qapp):
 
 
 def test_messagebox_validation_path_preserved(qapp, monkeypatch):
-    """비활성화는 '추가 레이어' — 기존 QMessageBox 경로가 살아 있어야 한다.
+    """비활성화는 '추가 레이어' — 기존 **경고 팝업** 경로가 살아 있어야 한다.
 
-    (검증 통과 후 폴더가 삭제된 경우처럼 늦게 드러나는 실패를 계속 잡아준다.)"""
+    (검증 통과 후 폴더가 삭제된 경우처럼 늦게 드러나는 실패를 계속 잡아준다.)
+
+    ※ 팝업은 이제 별도 OS 창(QMessageBox)이 아니라 **앱 내 시트**(`sheet_host`)로 뜬다 —
+    가로채는 지점만 바뀌었고 '경고가 뜨고 진행이 중단된다'는 계약은 그대로다."""
     page = sp.SetupPage()
     try:
         calls = []
-        monkeypatch.setattr(sp.QMessageBox, "warning",
+        monkeypatch.setattr(sp.sheets, "warn",
                             lambda *a, **k: calls.append(a))
         page.ref_path_edit.setText("/definitely/not/here")
         page.val_path_edit.setText("/also/not/here")
         assert page._collect_input() is None      # 중단
-        assert calls, "경로 경고 QMessageBox 가 사라졌다"
+        assert calls, "경로 경고 팝업이 사라졌다"
     finally:
         page.deleteLater()
 

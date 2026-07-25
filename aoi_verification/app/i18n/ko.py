@@ -721,3 +721,12 @@ DEV_LABEL_SELECTED_FMT = "선택 {n}개"
 DEV_LABEL_UNREVIEWED = "미검토"
 DEV_LABEL_PATH_LABEL = "정답 라벨 파일"
 DEV_LABEL_DISCARD_CONFIRM = "저장하지 않은 변경이 있습니다. 닫을까요?"
+
+# ── 앱 내 메시지 시트 버튼 (widgets/sheet_host.py) ─────────────────────────
+# 별도 OS 창(QMessageBox)을 대체하므로 표준 버튼 라벨도 여기서 관리한다.
+# ※ 확인/취소는 이미 있는 공통 버튼을 그대로 쓴다(같은 말을 두 번 정의하지 않는다).
+MSG_BTN_OK = BTN_OK
+MSG_BTN_CANCEL = BTN_CANCEL
+MSG_BTN_YES = "예"
+MSG_BTN_NO = "아니오"
+MSG_BTN_CLOSE = "닫기"

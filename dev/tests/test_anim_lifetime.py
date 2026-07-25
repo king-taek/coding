@@ -45,6 +45,30 @@ from aoi_verification.app.ui.widgets.switch_row import (       # noqa: E402
 _UI_DIR = (Path(__file__).resolve().parents[2] / "aoi_verification" / "app" / "ui")
 
 
+def _code_lines(path: Path) -> list[tuple[int, str]]:
+    """주석과 **문자열/독스트링을 지운** 코드 줄만 (번호, 내용) 으로 돌려준다.
+
+    ★ 이 헬퍼가 필요한 이유: 이 가드들은 '이 패턴을 쓰지 마라'를 검사하는데, 그 금지를
+    **설명하는 독스트링**이 같은 단어를 담는다(실제로 `sheet_host.py` 의 설계 규칙 주석이
+    걸렸다).  설명을 위반으로 세면 옳은 문서를 지우게 되므로, 코드만 본다."""
+    import io
+    import tokenize
+    src = path.read_text(encoding="utf-8")
+    kept: dict[int, list[str]] = {}
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(src).readline):
+            if tok.type in (tokenize.COMMENT, tokenize.STRING,
+                            tokenize.NL, tokenize.NEWLINE, tokenize.INDENT,
+                            tokenize.DEDENT, tokenize.ENDMARKER):
+                continue
+            kept.setdefault(tok.start[0], []).append(tok.string)
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        # 토큰화가 안 되면 원문으로 폴백한다(가드를 조용히 끄지 않는다).
+        return [(i + 1, ln) for i, ln in enumerate(src.splitlines())
+                if not ln.strip().startswith("#")]
+    return [(no, " ".join(parts)) for no, parts in sorted(kept.items())]
+
+
 @pytest.fixture(scope="module")
 def qapp():
     return QApplication.instance() or QApplication([])
@@ -137,11 +161,9 @@ def test_no_self_deleting_animations_in_ui():
     """
     offenders: list[str] = []
     for path in sorted(_UI_DIR.rglob("*.py")):
-        for i, line in enumerate(path.read_text(encoding="utf-8").splitlines()):
-            if line.strip().startswith("#"):
-                continue                      # 주석의 설명은 위반이 아니다
+        for no, line in _code_lines(path):     # 주석·독스트링의 설명은 위반이 아니다
             if "DeleteWhenStopped" in line:
-                offenders.append(f"{path.relative_to(_UI_DIR.parents[2])}:{i + 1}")
+                offenders.append(f"{path.relative_to(_UI_DIR.parents[2])}:{no}")
     assert not offenders, (
         "자기 삭제 애니메이션(DeleteWhenStopped)을 썼다 — 부모가 이미 소유하므로 얻는 것이 "
         "없고, 남은 참조가 dangling 이 되어 세그폴트를 낸다.  그냥 start() 를 쓰라: "
@@ -157,11 +179,9 @@ def test_animation_ticks_do_not_outlive_their_widget():
     `QVariantAnimation()` 을 부모 없이 만들면 아무도 소유하지 않아 위젯보다 오래 산다."""
     offenders: list[str] = []
     for path in sorted(_UI_DIR.rglob("*.py")):
-        for i, line in enumerate(path.read_text(encoding="utf-8").splitlines()):
-            if line.strip().startswith("#"):
-                continue
-            if re.search(r"Q(?:Variant|Property)Animation\(\s*\)", line):
-                offenders.append(f"{path.relative_to(_UI_DIR.parents[2])}:{i + 1}")
+        for no, line in _code_lines(path):
+            if re.search(r"Q(?:Variant|Property)Animation\s*\(\s*\)", line):
+                offenders.append(f"{path.relative_to(_UI_DIR.parents[2])}:{no}")
     assert not offenders, (
         "부모 없는 애니메이션 — 위젯이 죽어도 살아남아 죽은 객체로 tick 한다.  "
         "대상(또는 오버레이)을 부모로 주라: " + ", ".join(offenders)
@@ -177,8 +197,7 @@ def test_static_singleshot_is_not_used_for_widget_callbacks():
     ※ 예외적으로 '레이아웃이 확정된 뒤 한 번' 같은 **자기 파괴와 무관한** 용도는 허용
     범위가 넓지만, 애니메이션/오버레이처럼 **수명이 짧은** 것에는 쓰지 않는다.  그래서
     이 가드는 로딩 오버레이에만 적용한다(실제로 여기서 세그폴트가 났다)."""
-    src = (_UI_DIR / "widgets" / "loading_overlay.py").read_text(encoding="utf-8")
-    code = "\n".join(ln for ln in src.splitlines()
-                     if not ln.strip().startswith("#"))
+    code = "\n".join(ln for _no, ln in
+                     _code_lines(_UI_DIR / "widgets" / "loading_overlay.py"))
     assert "QTimer.singleShot" not in code, \
         "loading_overlay 가 정적 singleShot 으로 자기 콜백을 예약한다"

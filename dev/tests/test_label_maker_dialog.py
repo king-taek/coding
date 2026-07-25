@@ -64,8 +64,7 @@ def test_setup_page_dev_toggle(app, monkeypatch):
         monkeypatch.setattr(sp._prefs, "patch",
                             lambda **kw: state.update(dev=kw.get("dev_mode", state["dev"])))
         monkeypatch.setattr(dbd, "dev_mode_enabled", lambda: state["dev"])
-        monkeypatch.setattr(sp.QMessageBox, "information",
-                            staticmethod(lambda *a, **k: None))
+        monkeypatch.setattr(sp.sheets, "info", lambda *a, **k: None)
 
         page._toggle_dev_mode()                      # 켜기
         assert state["dev"] is True

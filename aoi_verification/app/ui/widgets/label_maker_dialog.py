@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (QApplication, QCheckBox, QDialog, QFileDialog,
 from ... import i18n
 from .. import theme
 from ...utils import image_io as _io
+from . import sheet_host as sheets
 
 _REF_PX = 360
 _CAND_PX = 150
@@ -136,7 +137,7 @@ class LabelMakerDialog(QDialog):
         ref = self.ref_edit.text().strip()
         val = self.val_edit.text().strip()
         if not ref or not val or not Path(ref).is_dir() or not Path(val).is_dir():
-            QMessageBox.warning(self, i18n.KO.DEV_LABEL_TITLE,
+            sheets.warn(self, i18n.KO.DEV_LABEL_TITLE,
                                 i18n.KO.DEV_LABEL_NEED_FOLDERS)
             return
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
@@ -146,7 +147,7 @@ class LabelMakerDialog(QDialog):
             ds = _bm.build_dataset(ref, val)
             if not ds.tasks:
                 QApplication.restoreOverrideCursor()
-                QMessageBox.warning(self, i18n.KO.DEV_LABEL_TITLE,
+                sheets.warn(self, i18n.KO.DEV_LABEL_TITLE,
                                     i18n.KO.DEV_LABEL_NO_COMMON)
                 return
             self._model = _lab.LabelMakerModel(ds.tasks)
@@ -272,7 +273,7 @@ class LabelMakerDialog(QDialog):
         saved = _lab.save(path, self._model.to_labels())
         self._model.dirty = False
         st = self._model.stats()
-        QMessageBox.information(
+        sheets.info(
             self, i18n.KO.DEV_LABEL_TITLE,
             i18n.KO.DEV_LABEL_SAVED_FMT.format(
                 path=str(saved), labeled=st["labeled"], none=st["none"],
@@ -285,7 +286,7 @@ class LabelMakerDialog(QDialog):
     # ------------------------------------------------------------------
     def closeEvent(self, event):        # noqa: N802
         if self._model is not None and getattr(self._model, "dirty", False):
-            r = QMessageBox.question(
+            r = sheets.ask(
                 self, i18n.KO.DEV_LABEL_TITLE, i18n.KO.DEV_LABEL_DISCARD_CONFIRM,
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No)

@@ -21,7 +21,7 @@ from typing import List, Optional
 from PyQt6.QtCore import QObject, Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (QCheckBox, QDialog, QFileDialog, QFormLayout,
                               QHBoxLayout, QHeaderView, QLabel, QLineEdit,
-                              QMessageBox, QPushButton, QScrollArea, QSpinBox,
+                              QPushButton, QScrollArea, QSpinBox,
                               QTableWidget, QTableWidgetItem, QVBoxLayout,
                               QWidget)
 
@@ -31,6 +31,7 @@ from ...dev import benchmark as _bm
 from ...dev import recipes as _rx
 from ...utils import paths as _paths
 from ...utils import prefs as _prefs
+from . import sheet_host as sheets
 
 
 def dev_mode_enabled() -> bool:
@@ -457,7 +458,7 @@ class DevBenchmarkDialog(QDialog):
         self_test = self.self_test.isChecked()
         val = self.val_edit.text().strip()
         if not ref or (not self_test and not val) or not Path(ref).is_dir():
-            QMessageBox.warning(self, i18n.KO.DEV_BENCH_TITLE,
+            sheets.warn(self, i18n.KO.DEV_BENCH_TITLE,
                                 i18n.KO.DEV_BENCH_NEED_FOLDER)
             return
         self.table.setRowCount(0)
@@ -492,7 +493,7 @@ class DevBenchmarkDialog(QDialog):
     def _on_failed(self, msg: str) -> None:
         self.run_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
-        QMessageBox.warning(self, i18n.KO.DEV_BENCH_TITLE, msg)
+        sheets.warn(self, i18n.KO.DEV_BENCH_TITLE, msg)
 
     def _on_finished(self, suite, ds, run_dir: str) -> None:
         self.run_btn.setEnabled(True)

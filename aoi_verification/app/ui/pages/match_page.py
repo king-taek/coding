@@ -17,7 +17,7 @@ from typing import Optional
 from PyQt6.QtCore import QByteArray, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QKeySequence, QPixmap, QShortcut
 from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel,
-                              QMessageBox, QScrollArea, QSizePolicy, QSlider,
+                              QScrollArea, QSizePolicy, QSlider,
                               QSplitter, QStackedWidget, QVBoxLayout, QWidget)
 
 from ... import config, i18n
@@ -40,6 +40,7 @@ from ..widgets.scalable_image import ScalableImage
 from ..widgets.slot_section import SlotSection
 from ..widgets.thumb_grid import ThumbEntry, ThumbGrid
 from ..widgets.zoom_window import (ZoomWindow, SOURCE_TARGET, SOURCE_CANDIDATES)
+from ..widgets import sheet_host as sheets
 
 
 # ---------------------------------------------------------------------------
@@ -577,7 +578,7 @@ class MatchPage(QWidget):
         self._streaming_precompute = False
         # 좌표 매칭 모드에서 좌표 없음 오류 — 사용자에게 안내 후 설정 화면 복귀.
         if self._coord_mode and msg and "좌표 정보가 없습니다" in msg:
-            QMessageBox.warning(self, i18n.KO.APP_TITLE, msg)
+            sheets.warn(self, i18n.KO.APP_TITLE, msg)
             self.cancelled.emit()
             return
         if self.bg_status_label is not None:
@@ -723,7 +724,7 @@ class MatchPage(QWidget):
             # 자동 모드는 매 ref 마다 모달이 뜨는 ‘모달 폭격’ 을 피하려고
             # 모달 없이 조용히 ‘매칭 없음’ 처리 (Bug #4).  수동 모드만 안내.
             if not self._auto_mode:
-                QMessageBox.information(self, i18n.KO.APP_TITLE,
+                sheets.info(self, i18n.KO.APP_TITLE,
                                         i18n.KO.INFO_NO_MATCH_FOUND)
             self._confirm_no_match()
             return
@@ -847,7 +848,7 @@ class MatchPage(QWidget):
                 QTimer.singleShot(0, self._confirm_no_match)
             else:
                 self._loading.hide_overlay()
-                QMessageBox.information(self, i18n.KO.APP_TITLE,
+                sheets.info(self, i18n.KO.APP_TITLE,
                                         i18n.KO.INFO_NO_MATCH_FOUND)
                 self._confirm_no_match()           # ‘잠시 보류’ 제거 (#3)
             return

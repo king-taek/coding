@@ -39,6 +39,8 @@ from .pages.result_page import ResultPage
 from .pages.select_page import SelectPage
 from .pages.setup_page import SetupInput, SetupPage
 from .widgets.loading_overlay import LoadingOverlay
+from .widgets import sheet_host as sheets
+from .widgets.sheet_host import SheetHost
 
 
 # ---------------------------------------------------------------------------
@@ -121,6 +123,13 @@ class MainWindow(QMainWindow):
         # OpenVINO 자동 설치 안내 — 사용자 요청으로 rollback (시작 시 팝업
         # 띄우지 않음).  설치 도우미 모듈은 남겨두어 향후 수동 호출 가능.
         self._openvino_worker: Optional[QThread] = None
+
+        # 앱 내 창(시트) 호스트 — 모든 팝업이 이 창 안에서 뜬다(별도 OS 창 금지).
+        # ★ 이름 `_sheets` 는 `sheet_host.host_for` 가 찾는 **약속된 속성**이다.
+        #   못 찾으면 네이티브 QMessageBox 로 폴백하므로 앱이 멈추지는 않지만, 팝업이
+        #   다시 창으로 뜬다.  로딩 오버레이보다 **먼저** 만들어 z-order 상 로딩이 위에
+        #   오게 한다(작업 진행 표시가 시트에 가리면 안 된다).
+        self._sheets = SheetHost(self)
 
         # 상태 -----------------------------------------------------------
         self._loading = LoadingOverlay(self)
@@ -247,14 +256,14 @@ class MainWindow(QMainWindow):
                          daemon=True).start()
 
     def _on_update_none(self, msg: str) -> None:
-        QMessageBox.information(self, i18n.KO.UPDATE_AVAILABLE_TITLE, msg)
+        sheets.info(self, i18n.KO.UPDATE_AVAILABLE_TITLE, msg)
 
     def _on_update_found(self, info: dict) -> None:
         """'업데이트 있음' 안내 → 동의하면 백그라운드로 다운로드/교체."""
         # 사용자에겐 개발자용 커밋 메시지/SSL 멘트 대신 간단한 안내만.
         body = (i18n.KO.UPDATE_UNKNOWN_CURRENT if (info or {}).get("current_unknown")
                 else i18n.KO.UPDATE_AVAILABLE_BODY)
-        ans = QMessageBox.question(
+        ans = sheets.ask(
             self, i18n.KO.UPDATE_AVAILABLE_TITLE, body,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes,
@@ -266,7 +275,7 @@ class MainWindow(QMainWindow):
         try:
             from ..utils import updater
             if updater.is_git_checkout():
-                QMessageBox.information(
+                sheets.info(
                     self, i18n.KO.UPDATE_AVAILABLE_TITLE, i18n.KO.UPDATE_GIT_HINT)
                 self._run_startup_popups()
                 return
@@ -308,7 +317,7 @@ class MainWindow(QMainWindow):
                     msg = f"{msg}\n\n[원인] {updater.last_error()}"
             except Exception:
                 pass
-            QMessageBox.warning(self, i18n.KO.UPDATE_AVAILABLE_TITLE, msg)
+            sheets.warn(self, i18n.KO.UPDATE_AVAILABLE_TITLE, msg)
             self._run_startup_popups()       # 실패 → 나머지 시작 팝업 진행
             return
         # 안내 후 프로그램을 자동 종료한다(자동 재실행은 하지 않음 — 사용자가 다시 실행).
@@ -319,7 +328,7 @@ class MainWindow(QMainWindow):
                 msg = msg + i18n.KO.UPDATE_DEPS_CHANGED
         except Exception:
             pass
-        QMessageBox.information(
+        sheets.info(
             self, i18n.KO.UPDATE_AVAILABLE_TITLE, msg)
         QApplication.quit()
 
@@ -431,7 +440,7 @@ class MainWindow(QMainWindow):
         if state is None or state.stage in ("setup", "result"):
             self._show_page(self._setup_page)
             return
-        r = QMessageBox.question(
+        r = sheets.ask(
             self, i18n.KO.INFO_RESUME_TITLE, i18n.KO.INFO_RESUME_BODY,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes,
@@ -476,22 +485,19 @@ class MainWindow(QMainWindow):
         declined = bool(getattr(_prefs.load(), "openvino_install_declined", False))
         if not _ovi.should_offer_install(declined):
             return
-        box = QMessageBox(self)
-        box.setWindowTitle(i18n.KO.OPENVINO_OFFER_TITLE)
-        box.setText(i18n.KO.OPENVINO_OFFER_BODY)
-        btn_install = box.addButton(i18n.KO.OPENVINO_OFFER_BTN_INSTALL,
-                                    QMessageBox.ButtonRole.AcceptRole)
-        box.addButton(i18n.KO.OPENVINO_OFFER_BTN_LATER,
-                      QMessageBox.ButtonRole.RejectRole)
-        btn_never = box.addButton(i18n.KO.OPENVINO_OFFER_BTN_NEVER,
-                                  QMessageBox.ButtonRole.DestructiveRole)
-        box.exec()
-        clicked = box.clickedButton()
-        if clicked is btn_never:
+        # 선택지 3개 — 앱 내 선택 시트(옛 QMessageBox.addButton).
+        picked = sheets.choose(
+            self, i18n.KO.OPENVINO_OFFER_TITLE, i18n.KO.OPENVINO_OFFER_BODY,
+            [("never", i18n.KO.OPENVINO_OFFER_BTN_NEVER, "danger"),
+             ("later", i18n.KO.OPENVINO_OFFER_BTN_LATER, "ghost"),
+             ("install", i18n.KO.OPENVINO_OFFER_BTN_INSTALL, "primary")],
+            default="install",
+        )
+        if picked == "never":
             _prefs.patch(openvino_install_declined=True)
-        elif clicked is btn_install:
+        elif picked == "install":
             self._start_openvino_install()
-        # '다음에' → 아무것도 하지 않음 (다음 실행 때 다시 안내).
+        # '다음에'/닫기 → 아무것도 하지 않음 (다음 실행 때 다시 안내).
 
     def _start_openvino_install(self) -> None:
         from ..learning.openvino_installer import OpenVinoInstallWorker
@@ -512,10 +518,10 @@ class MainWindow(QMainWindow):
         importlib.invalidate_caches()
         self._loading.hide_overlay()
         if ok:
-            QMessageBox.information(self, i18n.KO.OPENVINO_OFFER_TITLE,
-                                    i18n.KO.OPENVINO_INSTALL_DONE)
+            sheets.info(self, i18n.KO.OPENVINO_OFFER_TITLE,
+                        i18n.KO.OPENVINO_INSTALL_DONE)
         else:
-            QMessageBox.warning(
+            sheets.warn(
                 self, i18n.KO.OPENVINO_OFFER_TITLE,
                 i18n.KO.OPENVINO_INSTALL_FAILED_FMT.format(error=message),
             )
@@ -530,7 +536,7 @@ class MainWindow(QMainWindow):
 
         from .widgets.slot_mapping_dialog import SlotMappingDialog
         # 안내 → 다이얼로그 열기 여부 묻기
-        r = QMessageBox.question(
+        r = sheets.ask(
             self, i18n.KO.WARN_SLOT_MISMATCH_TITLE,
             i18n.KO.WARN_SLOT_MISMATCH_FMT.format(
                 ref_only=", ".join(sr.ref_only) or "없음",
@@ -579,35 +585,17 @@ class MainWindow(QMainWindow):
         """매칭 실패 폴더가 있을 때 'KLA 가 어느 쪽인가?' 를 묻는다.
 
         반환 "ref"/"val"/"both" 또는 None(KLA 아님 → 파일명/OCR 자동 매칭 건너뜀)."""
-        box = QMessageBox(self)
-        box.setWindowTitle(i18n.KO.KLA_ASK_TITLE)
-        box.setIcon(QMessageBox.Icon.Question)
-        box.setTextFormat(Qt.TextFormat.RichText)
-        box.setText(
-            f"<div style='font-size:18pt; font-weight:800; color:{theme.WARN};'>"
-            f"{i18n.KO.KLA_ASK_SIDE_HEADING}</div>"
+        # ★ 네 경우(기준/검증/둘다/KLA 아님)를 모두 유지한다 — 한쪽만 추가하지 말 것
+        #   (CLAUDE.md 규칙).  강조 문장은 인라인 HTML 대신 시트의 warn 라벨이 담당한다
+        #   (색을 f-string 으로 굽지 않으므로 다크 모드 전환에도 따라온다).
+        return sheets.choose(
+            self, i18n.KO.KLA_ASK_TITLE, i18n.KO.KLA_ASK_SIDE_BODY,
+            [(None, i18n.KO.KLA_SIDE_NONE, "ghost"),
+             ("both", i18n.KO.KLA_SIDE_BOTH, "ghost"),
+             ("val", i18n.KO.KLA_SIDE_VAL, "ghost"),
+             ("ref", i18n.KO.KLA_SIDE_REF, "primary")],
+            default="ref", heading=i18n.KO.KLA_ASK_SIDE_HEADING,
         )
-        box.setInformativeText(
-            f"<div style='font-size:11pt; color:{theme.INK};'>"
-            + i18n.KO.KLA_ASK_SIDE_BODY.replace("\n", "<br>") + "</div>"
-        )
-        ref_btn = box.addButton(i18n.KO.KLA_SIDE_REF,
-                                QMessageBox.ButtonRole.YesRole)
-        val_btn = box.addButton(i18n.KO.KLA_SIDE_VAL,
-                                QMessageBox.ButtonRole.NoRole)
-        both_btn = box.addButton(i18n.KO.KLA_SIDE_BOTH,
-                                 QMessageBox.ButtonRole.ActionRole)
-        box.addButton(i18n.KO.KLA_SIDE_NONE, QMessageBox.ButtonRole.RejectRole)
-        box.setDefaultButton(ref_btn)
-        box.exec()
-        clicked = box.clickedButton()
-        if clicked is ref_btn:
-            return "ref"
-        if clicked is val_btn:
-            return "val"
-        if clicked is both_btn:
-            return "both"
-        return None
 
     def _resolve_and_merge_kla(self, sr: ScanResult, kla_side: str,
                                on_done) -> None:
@@ -860,7 +848,7 @@ class MainWindow(QMainWindow):
         common = sr.common_slot_names
         if not common:
             self._loading.hide_overlay()
-            QMessageBox.warning(self, i18n.KO.APP_TITLE, i18n.KO.WARN_NO_SLOTS)
+            sheets.warn(self, i18n.KO.APP_TITLE, i18n.KO.WARN_NO_SLOTS)
             return
         self._continue_start_after_scan(common)
 
@@ -1000,7 +988,7 @@ class MainWindow(QMainWindow):
         for slot in sorted(slots, key=lambda s: s.name):
             queue.extend(slot.ref_images)
         if not queue:
-            QMessageBox.warning(self, i18n.KO.APP_TITLE, i18n.KO.WARN_NO_IMAGES)
+            sheets.warn(self, i18n.KO.APP_TITLE, i18n.KO.WARN_NO_IMAGES)
             return
         pool = self._build_val_pool_by_slot()
         _sim_cfg = self._make_sim_cfg()
@@ -1062,7 +1050,7 @@ class MainWindow(QMainWindow):
             }
             # 기준 폴더로 직접 고른 기준 사진을 기록 (다음에 재사용 질의용, #6).
             self._save_ref_selection(self._stage1_a_snapshot["targets"])
-            QMessageBox.information(
+            sheets.info(
                 self, i18n.KO.INFO_PHASE_TRANSITION_TITLE,
                 i18n.KO.INFO_PHASE_A_TO_MATCH,
             )
@@ -1111,7 +1099,7 @@ class MainWindow(QMainWindow):
         matched = [it for it in queue if (it.slot, it.filename) in wanted]
         if not matched:
             return {}
-        r = QMessageBox.question(
+        r = sheets.ask(
             self, i18n.KO.REF_REUSE_TITLE,
             i18n.KO.REF_REUSE_BODY_FMT.format(n=len(matched)),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -1343,7 +1331,7 @@ class MainWindow(QMainWindow):
         """
         template = paths.template_path()
         if not template.exists():
-            QMessageBox.information(
+            sheets.info(
                 self, i18n.KO.TEMPLATE_NOT_FOUND_TITLE,
                 i18n.KO.TEMPLATE_NOT_FOUND_BODY.format(path=str(template)),
             )

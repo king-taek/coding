@@ -18,6 +18,25 @@ QMainWindow, QDialog {
     background-color: $bg;
 }
 
+/* ── 앱 내 창(시트) ─────────────────────────────────────────────────────
+   별도 OS 창이던 팝업을 프로그램 안에서 띄운다(widgets/sheet_host.py).
+   ★ 시트는 **자기 면과 테두리를 가져야** 한다 — 반투명 스크림 위에 배경 없이 얹으면
+   뒤 화면의 글자와 겹쳐 읽을 수 없다(로딩 오버레이 패널이 면을 갖는 것과 같은 이유). */
+QDialog[role="sheet"], QWidget[role="sheet"] {
+    background-color: $panel;
+    border: 1px solid $line_strong;
+    border-radius: $radius;
+}
+QLabel[role="sheetTitle"] {
+    font-size: $font_sub_sz;
+    font-weight: 700;
+    color: $ink;
+}
+QLabel[role="sheetBody"] {
+    font-size: $font_base_sz;
+    color: $ink2;
+}
+
 QLabel {
     color: $ink;
     background: transparent;

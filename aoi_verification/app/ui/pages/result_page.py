@@ -7,7 +7,7 @@ from pathlib import Path
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (QCheckBox, QFileDialog, QHBoxLayout, QLabel,
-                              QMessageBox, QVBoxLayout, QWidget)
+                              QVBoxLayout, QWidget)
 
 from ... import i18n
 from .. import theme
@@ -16,6 +16,7 @@ from ...workers.exporter import ExcelExporter
 from ..widgets.loading_overlay import LoadingOverlay
 from ..widgets.neon_button import NeonButton
 from ..widgets.neon_card import NeonCard
+from ..widgets import sheet_host as sheets
 
 
 class ResultPage(QWidget):
@@ -229,7 +230,7 @@ class ResultPage(QWidget):
                 slot=m.slot, side="ref", path=m.ref_path,
                 note="매칭 취소 (검토에서 삭제)",
             ))
-        QMessageBox.information(
+        sheets.info(
             self, i18n.KO.APP_TITLE,
             i18n.KO.REVIEW_REMOVED_FMT.format(n=len(removed)),
         )
@@ -254,7 +255,7 @@ class ResultPage(QWidget):
             UnmatchedReviewDialog.show_empty_message(self)
             return
         if self._val_pool is None:
-            QMessageBox.information(
+            sheets.info(
                 self, i18n.KO.APP_TITLE, i18n.KO.UNMATCHED_REVIEW_EMPTY,
             )
             return
@@ -284,7 +285,7 @@ class ResultPage(QWidget):
             u for u in self._result.unmatched_refs
             if Path(u.path) not in resolved_paths
         ]
-        QMessageBox.information(
+        sheets.info(
             self, i18n.KO.APP_TITLE,
             i18n.KO.UNMATCHED_REVIEW_DONE_FMT.format(n=len(dlg.new_matches)),
         )
@@ -334,14 +335,14 @@ class ResultPage(QWidget):
 
     def _on_export_done(self, path: str) -> None:
         self._loading.hide_overlay()
-        QMessageBox.information(
+        sheets.info(
             self, i18n.KO.APP_TITLE,
             i18n.KO.SAVE_SUCCESS_FMT.format(path=path),
         )
 
     def _on_export_failed(self, msg: str) -> None:
         self._loading.hide_overlay()
-        QMessageBox.warning(
+        sheets.warn(
             self, i18n.KO.APP_TITLE,
             i18n.KO.SAVE_FAIL_FMT.format(error=msg),
         )

@@ -35,7 +35,8 @@ from ..widgets.scalable_image import ScalableImage
 from ..widgets.slot_section import SlotSection
 from ..widgets.thumb_grid import ThumbEntry
 from ..widgets.zoom_window import (ZoomWindow, SOURCE_TARGET, SOURCE_EXCLUDED,
-                                    SOURCE_CANDIDATES)
+                                   SOURCE_CANDIDATES)
+from ..widgets import sheet_host as sheets
 
 
 # ---------------------------------------------------------------------------
@@ -876,7 +877,7 @@ class SelectPage(QWidget):
         if n_remaining == 0:
             return
         from PyQt6.QtWidgets import QMessageBox
-        ret = QMessageBox.question(
+        ret = sheets.ask(
             self, i18n.KO.END_SELECTION_CONFIRM_TITLE,
             i18n.KO.END_SELECTION_CONFIRM_FMT.format(n=n_remaining),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
