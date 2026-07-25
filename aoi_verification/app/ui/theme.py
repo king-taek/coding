@@ -34,10 +34,12 @@ class Profile:
     font_caption: int = 12
     title_weight: int = 300         # 얇은 표제(제도 시트 성격)
     title_tracking: int = -1
-    radius: int = 2                 # 샤프 — 제도 시트
-    radius_sm: int = 1
-    chip_radius: int = 0            # 판정 칩 = 사각 '스탬프'
-    row_radius: int = 0
+    # 모서리 — '너무 각지다'는 지적에 따라 중간 라운드(8~10px)로. 계측기의 정밀함은
+    # 얇은 표제·하이라인 눈금·모노 수치가 계속 담당한다.
+    radius: int = 9
+    radius_sm: int = 6
+    chip_radius: int = 8            # 판정 칩도 각을 덜어낸다
+    row_radius: int = 0             # 하이라인 행은 면이 없어 라운드가 보이지 않는다
     page_margin: int = 32
     section_gap: int = 28
     card_pad: int = 20
@@ -57,8 +59,12 @@ class Profile:
     motion_scale: float = 0.8       # 제도 시트답게 담백한 모션
 
 
-# ── 색 ('도면' 팔레트 — 전 기능 쌍 WCAG AA 여유) ────────────────────────────
-COLORS: dict[str, str] = {
+# ── 색 — 라이트/다크 두 팔레트.  구조(PROFILE)는 공유하고 색만 교체한다. ────────
+#
+# 다크는 라이트의 단순 반전이 아니다.  '도면' 의 야간판은 **청사진(cyanotype)** —
+# 역사적으로 청사진은 짙은 청색 종이에 흰 선을 앉힌 것이다.  그래서 어두운 모드가
+# 컨셉을 배신하지 않고 오히려 더 정통이 된다: 짙은 청색 바탕 + 밝은 잉크 + 밝힌 블루.
+_LIGHT: dict[str, str] = {
     "bg": "#ECE9E2",        # 벨럼 바탕
     "panel": "#F5F3ED",     # 시트 면
     "elev": "#FBFAF7",
@@ -78,7 +84,35 @@ COLORS: dict[str, str] = {
     "thumb_frame": "#A39D8F",   # 어두운 다이가 시트에 묻히지 않게
 }
 
-SCRIM_RGBA = (27, 26, 23, 138)      # LoadingOverlay 스크림
+_DARK: dict[str, str] = {
+    "bg": "#0E1620",        # 청사진 원지
+    "panel": "#16202B",     # 시트 면
+    "elev": "#1F2C3A",
+    "line": "#41586E",      # 제도 눈금(어두운 바탕에서도 보이게)
+    "line2": "#2C3E4F",
+    "ink": "#EAF0F6",       # 백선(白線)
+    "ink2": "#C3D0DC",
+    "mute": "#9AAAB9",
+    "accent": "#86B6EA",    # 밝힌 청사진 블루
+    "accent_hover": "#9CC6F2",
+    "accent_pressed": "#6FA2D8",
+    "on_accent": "#0E1620",
+    "pass": "#74CE94",
+    "danger": "#FF9E96",
+    "warn": "#EBD9AE",      # 라이트에선 잉크였지만 어두운 바탕에선 밝은 톤이어야 한다
+    "focus": "#A6CEFF",
+    "thumb_frame": "#546C82",
+}
+
+PALETTES: dict[str, dict[str, str]] = {"light": _LIGHT, "dark": _DARK}
+DEFAULT_COLOR_MODE = "light"
+COLOR_MODE = DEFAULT_COLOR_MODE
+
+# LoadingOverlay 스크림 — 뒤 화면이 보이도록 옅게(모드별).
+_SCRIMS = {"light": (27, 26, 23, 96), "dark": (4, 9, 14, 120)}
+
+COLORS: dict[str, str] = dict(_LIGHT)   # 현재 모드의 색(set_color_mode 가 갱신)
+SCRIM_RGBA = _SCRIMS[DEFAULT_COLOR_MODE]
 
 
 def _rgb(hexv: str) -> tuple:
@@ -98,22 +132,13 @@ FONT_MONO = Fonts.MONO
 
 PROFILE = Profile()
 
-# 인라인 f-string 스타일이 쓰는 색 상수.
-BG, PANEL, ELEV = COLORS["bg"], COLORS["panel"], COLORS["elev"]
-LINE, LINE2 = COLORS["line"], COLORS["line2"]
-INK, INK2, MUTE = COLORS["ink"], COLORS["ink2"], COLORS["mute"]
-ACCENT, ACCENT_HOVER = COLORS["accent"], COLORS["accent_hover"]
-ACCENT_PRESSED, ON_ACCENT = COLORS["accent_pressed"], COLORS["on_accent"]
-PASS, DANGER = COLORS["pass"], COLORS["danger"]
-WARN, FOCUS = COLORS["warn"], COLORS["focus"]
-THUMB_FRAME = COLORS["thumb_frame"]
-
-ACCENT_TINT = _tint(ACCENT, 36)
-ACCENT_TINT_SOFT = _tint(ACCENT, 20)
-PASS_TINT = _tint(PASS, 30)
-DANGER_TINT = _tint(DANGER, 28)
-DANGER_TINT_SOFT = _tint(DANGER, 15)
-WARN_TINT = _tint(WARN, 30)
+# 인라인 f-string 스타일이 쓰는 색 상수 — set_color_mode() 가 일괄 갱신한다.
+BG = PANEL = ELEV = LINE = LINE2 = ""
+INK = INK2 = MUTE = ""
+ACCENT = ACCENT_HOVER = ACCENT_PRESSED = ON_ACCENT = ""
+PASS = DANGER = WARN = FOCUS = THUMB_FRAME = ""
+ACCENT_TINT = ACCENT_TINT_SOFT = PASS_TINT = ""
+DANGER_TINT = DANGER_TINT_SOFT = WARN_TINT = ""
 
 
 def _derive_tokens() -> dict:
@@ -158,7 +183,53 @@ def _derive_tokens() -> dict:
     }
 
 
-TOKENS: dict[str, str] = _derive_tokens()
+TOKENS: dict[str, str] = {}
+
+
+def set_color_mode(name: str) -> None:
+    """색 모드를 ``"light"``/``"dark"`` 로 전환(미지 값은 기본 모드).
+
+    모듈 전역과 ``TOKENS`` 를 일괄 갱신한다.  ``TOKENS`` 는 **in-place** 로 바꿔
+    이미 참조를 들고 있는 쪽이 끊기지 않게 한다.
+
+    주의: 위젯이 생성 시점에 ``theme.INK`` 같은 값을 f-string 으로 굽기 때문에, 이미
+    만들어진 화면에 즉시 반영하려면 호출부가 **페이지를 다시 만들어야** 한다
+    (``main_window`` 가 세션 시작 전에만 그렇게 한다)."""
+    global COLOR_MODE, COLORS, SCRIM_RGBA
+    global BG, PANEL, ELEV, LINE, LINE2, INK, INK2, MUTE
+    global ACCENT, ACCENT_HOVER, ACCENT_PRESSED, ON_ACCENT
+    global PASS, DANGER, WARN, FOCUS, THUMB_FRAME
+    global ACCENT_TINT, ACCENT_TINT_SOFT, PASS_TINT
+    global DANGER_TINT, DANGER_TINT_SOFT, WARN_TINT
+
+    mode = name if name in PALETTES else DEFAULT_COLOR_MODE
+    COLOR_MODE = mode
+    c = PALETTES[mode]
+    COLORS = dict(c)
+    SCRIM_RGBA = _SCRIMS[mode]
+
+    BG, PANEL, ELEV = c["bg"], c["panel"], c["elev"]
+    LINE, LINE2 = c["line"], c["line2"]
+    INK, INK2, MUTE = c["ink"], c["ink2"], c["mute"]
+    ACCENT, ACCENT_HOVER = c["accent"], c["accent_hover"]
+    ACCENT_PRESSED, ON_ACCENT = c["accent_pressed"], c["on_accent"]
+    PASS, DANGER = c["pass"], c["danger"]
+    WARN, FOCUS = c["warn"], c["focus"]
+    THUMB_FRAME = c["thumb_frame"]
+
+    ACCENT_TINT = _tint(ACCENT, 36)
+    ACCENT_TINT_SOFT = _tint(ACCENT, 20)
+    PASS_TINT = _tint(PASS, 30)
+    DANGER_TINT = _tint(DANGER, 28)
+    DANGER_TINT_SOFT = _tint(DANGER, 15)
+    WARN_TINT = _tint(WARN, 30)
+
+    TOKENS.clear()
+    TOKENS.update(_derive_tokens())
+
+
+def color_mode_keys() -> tuple[str, ...]:
+    return tuple(PALETTES.keys())
 
 
 def render_qss(template_text: str) -> str:
@@ -176,3 +247,7 @@ def apply_to_app(app) -> None:
     qss_path = paths.resource_path("aoi_verification/app/ui/style.qss")
     text = Path(qss_path).read_text(encoding="utf-8")
     app.setStyleSheet(render_qss(text))
+
+
+# 모듈 로드 시 기본 모드 확정 — import 만 해도 전역·TOKENS 가 채워져 있다.
+set_color_mode(DEFAULT_COLOR_MODE)

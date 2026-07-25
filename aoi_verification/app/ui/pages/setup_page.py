@@ -53,6 +53,7 @@ class SetupPage(QWidget):
 
     start_requested = pyqtSignal(object)             # SetupInput
     update_check_requested = pyqtSignal()            # '업데이트 확인' 버튼
+    appearance_changed = pyqtSignal()                # 색 모드/배치 변경 → 페이지 재생성 요청
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -638,12 +639,20 @@ class SetupPage(QWidget):
 
     # ------------------------------------------------------------------
     def _build_view_options(self) -> QWidget:
-        """상단 보기 옵션 줄 — '모션 줄이기' 접근성 토글."""
+        """상단 보기 옵션 줄 — 어두운 화면 · '모션 줄이기' 토글."""
         host = QWidget(self)
         row = QHBoxLayout(host)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(8)
         row.addStretch(1)
+        # 어두운 화면 — 수동 토글(OS 자동 감지는 하지 않는다).
+        self.dark_switch = SwitchRow(
+            i18n.KO.DARK_MODE_LABEL,
+            checked=(theme.COLOR_MODE == "dark"), parent=host,
+        )
+        self.dark_switch.setToolTip(i18n.KO.DARK_MODE_TOOLTIP)
+        self.dark_switch.toggled.connect(self._on_dark_toggled)
+        row.addWidget(self.dark_switch)
         self._reduce_chk = QCheckBox(i18n.KO.REDUCE_MOTION_LABEL, host)
         self._reduce_chk.setToolTip(i18n.KO.REDUCE_MOTION_TOOLTIP)
         try:
@@ -658,6 +667,11 @@ class SetupPage(QWidget):
         from .. import motion
         _prefs.patch(reduce_motion=bool(on))
         motion.set_reduce_motion(bool(on))
+
+    def _on_dark_toggled(self, on: bool) -> None:
+        """색 모드 전환 요청 — 실제 적용(페이지 재생성)은 main_window 가 한다."""
+        _prefs.patch(color_mode="dark" if on else "light")
+        self.appearance_changed.emit()
 
     # ------------------------------------------------------------------
     def _on_start(self) -> None:

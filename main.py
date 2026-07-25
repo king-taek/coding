@@ -25,7 +25,12 @@ def _ensure_package_on_path() -> None:
 def _load_stylesheet(app) -> None:
     from aoi_verification.app.utils import paths, prefs as _prefs
     from aoi_verification.app.ui import theme
-    # 저장된 모션 설정을 스타일시트 적용 전에 확정.
+    # 저장된 색 모드·모션 설정을 스타일시트 적용 전에 확정.
+    try:
+        _p = _prefs.load()
+        theme.set_color_mode(getattr(_p, "color_mode", theme.DEFAULT_COLOR_MODE))
+    except Exception:
+        pass
     try:
         from aoi_verification.app.ui import motion
         motion.set_reduce_motion(bool(_prefs.load().reduce_motion))

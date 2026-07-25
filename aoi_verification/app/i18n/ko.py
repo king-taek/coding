@@ -426,6 +426,11 @@ KEY_HINT_DONE = "검토 완료"
 HELP_TOGGLE_TOOLTIP = "설명 보기/숨기기"
 
 # 보기 옵션 (셋업 상단)
+DARK_MODE_LABEL = "어두운 화면"
+DARK_MODE_TOOLTIP = (
+    "화면을 어두운 청사진 톤으로 바꿉니다.\n"
+    "검증을 시작하기 전에만 바꿀 수 있습니다(진행 중 상태 보호)."
+)
 REDUCE_MOTION_LABEL = "모션 줄이기"
 REDUCE_MOTION_TOOLTIP = "화면 전환·스크롤 애니메이션을 끕니다."
 LOAD_SCAN = "폴더 스캔 중…"

@@ -1513,6 +1513,9 @@ class MainWindow(QMainWindow):
 
         self._setup_page.start_requested.connect(self._on_start)
         self._setup_page.update_check_requested.connect(self._manual_update_check)
+        # 색 모드/배치 변경 → 페이지 재생성(세션 시작 전에만).
+        if hasattr(self._setup_page, "appearance_changed"):
+            self._setup_page.appearance_changed.connect(self._on_appearance_changed)
         self._select_page.finished.connect(self._on_select_finished)
         self._select_page.state_changed.connect(self._schedule_autosave)
         self._match_page.match_confirmed.connect(self._on_match_confirmed)
@@ -1522,6 +1525,43 @@ class MainWindow(QMainWindow):
         self._match_page.cancelled.connect(self._on_match_cancelled)
         self._result_page.new_session_requested.connect(self._new_session)
         self._match_review_page.finished.connect(self._on_match_review_done)
+
+    def _on_appearance_changed(self) -> None:
+        """색 모드(어두운 화면) 변경을 화면에 반영한다.
+
+        위젯이 생성 시점에 ``theme.INK`` 같은 색을 f-string 으로 굽기 때문에 QSS 재적용만
+        으로는 부족하다 → 페이지를 다시 만든다.  **세션 시작 전(PHASE_NONE)에만** 허용해
+        진행 중 상태가 사라지지 않게 이중으로 막는다."""
+        if self._phase != PHASE_NONE:
+            return
+        try:
+            p = _prefs.load()
+            theme.set_color_mode(getattr(p, "color_mode", theme.DEFAULT_COLOR_MODE))
+        except Exception:
+            return
+        app = QApplication.instance()
+        if app is not None:
+            theme.apply_to_app(app)          # QSS 먼저 — 새 위젯이 1회 polish 되게
+        self._recreate_pages()
+
+    def _recreate_pages(self) -> None:
+        """페이지 5개를 파괴 후 다시 만든다(구운 색을 새 팔레트로 교체).
+
+        세션 시작 전에만 호출되므로 상태 손실이 없다."""
+        old = (self._setup_page, self._select_page, self._match_page,
+               self._result_page, self._match_review_page)
+        for w in old:
+            self._stack.removeWidget(w)
+            w.hide()
+            w.setParent(None)
+            w.deleteLater()
+        self._build_pages()
+        self._apply_statusbar_theme()
+        try:
+            self._loading.raise_()           # 오버레이 z-order 유지
+        except Exception:
+            pass
+        self._show_page(self._setup_page, animate=False)
 
     def _apply_statusbar_theme(self) -> None:
         """상태바 라벨 색을 테마 토큰으로 적용(페이지 밖 위젯)."""

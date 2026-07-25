@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from aoi_verification.app.ui import theme
 
 _REPO = Path(__file__).resolve().parents[2]
@@ -51,13 +53,15 @@ def test_tokens_cover_colors_and_structure():
 
 
 def test_no_old_palette():
-    for name, hexv in theme.COLORS.items():
-        assert hexv.upper() not in _OLD_HEXES, f"{name} = 구팔레트 {hexv}"
+    for mode, palette in theme.PALETTES.items():
+        for name, hexv in palette.items():
+            assert hexv.upper() not in _OLD_HEXES, f"{mode}.{name} = 구팔레트 {hexv}"
 
 
-def test_contrast_has_aa_headroom():
-    """전 기능 색상쌍이 AA 여유(≥5.0)로 유지되는지 — 포커스 링은 ≥4.5."""
-    c = theme.COLORS
+@pytest.mark.parametrize("mode", ["light", "dark"])
+def test_contrast_has_aa_headroom_both_modes(mode):
+    """라이트·다크 **양쪽** 전 기능 색상쌍이 AA 여유(≥5.0) — 포커스 링은 ≥4.5."""
+    c = theme.PALETTES[mode]
     fails = []
     checks = [
         ("ink/bg", c["ink"], c["bg"], 7.0),
@@ -89,7 +93,9 @@ def test_profile_pins_datum_baseline():
     assert (p.thumb_default_px, p.control_h, p.control_h_lg) == (118, 32, 40)
     assert (p.chip_w, p.chip_h, p.toggle_w, p.toggle_h) == (88, 20, 52, 30)
     assert (p.page_margin, p.section_gap) == (32, 28)
-    assert (p.radius, p.chip_radius, p.row_radius) == (2, 0, 0)   # 샤프
+    # 모서리는 중간 라운드(8~10px) — '너무 각지다'는 지적 반영.
+    assert (p.radius, p.radius_sm, p.chip_radius) == (9, 6, 8)
+    assert p.row_radius == 0                       # 하이라인 행은 면이 없어 무의미
     assert (p.title_weight, p.title_tracking) == (300, -1)        # 얇은 표제
     assert p.row_gap == 0                                          # 하이라인 눈금
 
