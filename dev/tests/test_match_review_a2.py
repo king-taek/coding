@@ -19,6 +19,10 @@ from aoi_verification.app.ui.pages.match_review_page import (       # noqa: E402
     classify_row, tally)
 
 
+_QSS = (Path(__file__).resolve().parents[2] / "aoi_verification" / "app" / "ui"
+        / "style.qss").read_text(encoding="utf-8")
+
+
 @pytest.fixture(scope="module")
 def qapp():
     return QApplication.instance() or QApplication([])
@@ -63,17 +67,18 @@ def _page(qapp, coord=True):
     return page, ms
 
 
-def test_filter_hides_only_ok_rows_and_done_unaffected(qapp):
+def test_all_rows_stay_visible_and_done_passes_everything(qapp):
+    """'확인 필요만' 필터를 지운 뒤 — **모든 행이 항상 보인다.**
+
+    필터는 상단 탤리(일치·허용 초과·매치 없음) 위에 상태를 하나 더 얹고, '지금 보이는
+    게 전부인가'를 매번 되묻게 만들었다.  탤리가 이미 무엇을 확인해야 하는지 말한다."""
     page, ms = _page(qapp)
-    # S1 을 '매치 없음' 처리 → ok(S3) 1 / over(S2) 1 / unmatched(S1) 1
-    # (좌표 모드 정렬은 score 오름차순이라 _rows[0] 은 S1 이 아님 — slot 으로 찾는다.)
+    assert not hasattr(page, "btn_filter"), "'확인 필요만' 버튼이 되살아났다"
+    assert not hasattr(page, "_apply_filter"), "필터 로직이 되살아났다"
     s1 = next(r for r in page._rows if r.match.slot == "S1")
     page._on_toggle(s1.match)
-    page.btn_filter.setChecked(True)
-    hidden = {r.match.slot: r.isHidden() for r in page._rows}
-    # over(S2)·unmatched(S1) 는 보이고, ok(S3) 만 숨는다.
-    assert hidden["S3"] and not hidden["S2"] and not hidden["S1"]
-    # 완료 결과는 표시 여부와 무관 — 전체 3쌍이 kept/unmatched 로 모두 나온다.
+    assert all(not r.isHidden() for r in page._rows), "행이 숨겨졌다"
+    # 완료 결과는 전체 3쌍이 kept/unmatched 로 모두 나온다(불변).
     got = []
     page.finished.connect(lambda k, u: got.append((k, u)))
     page._on_done()
@@ -83,24 +88,33 @@ def test_filter_hides_only_ok_rows_and_done_unaffected(qapp):
     page.deleteLater()
 
 
-def test_keyboard_down_r_enter(qapp):
-    from PyQt6.QtTest import QTest
+def test_keyboard_shortcuts_are_gone(qapp):
+    """★ ↑↓ · R · Enter 는 **아무 일도 하지 않아야** 한다.
+
+    Enter 가 특히 위험했다 — 포커스가 페이지에 있는 동안 무심코 누른 한 번이 검토 전체를
+    끝냈다.  기능 손실은 없다: '매치 없음'은 행마다 있는 ✕ 토글, '검토 완료'는 상단 버튼.
+    """
     from PyQt6.QtCore import Qt
+    from PyQt6.QtTest import QTest
     page, ms = _page(qapp)
-    QTest.keyClick(page, Qt.Key.Key_Down)
-    QTest.keyClick(page, Qt.Key.Key_Down)
-    rows = page._visible_rows()
-    assert page._current_row is rows[1]
-    # R → 현재 행 '매치 없음' 토글
-    QTest.keyClick(page, Qt.Key.Key_R)
-    assert page._current_row.match.key in page._unmatched_keys
-    # Enter → 검토 완료 (finished 1회, 페이로드 유형 검증)
-    got = []
+    page.setFocus()
+    for _ in range(4):
+        qapp.processEvents()
+    before_current = page._current_row
+    before_unmatched = set(page._unmatched_keys)
+    got: list = []
     page.finished.connect(lambda k, u: got.append((k, u)))
-    QTest.keyClick(page, Qt.Key.Key_Return)
-    assert len(got) == 1
-    kept, unmatched = got[0]
-    assert len(kept) == 2 and len(unmatched) == 1
+
+    for key in (Qt.Key.Key_Down, Qt.Key.Key_Up, Qt.Key.Key_R,
+                Qt.Key.Key_Return, Qt.Key.Key_Enter):
+        QTest.keyClick(page, key)
+        qapp.processEvents()
+
+    assert page._current_row is before_current, "방향키가 현재 행을 옮겼다"
+    assert set(page._unmatched_keys) == before_unmatched, "R 이 매치 없음을 토글했다"
+    assert got == [], "Enter 가 검토를 끝냈다"
+    # 키를 가르치는 힌트 줄도 함께 사라졌다(없는 조작을 안내하지 않는다).
+    assert not hasattr(page, "_build_key_hint")
     page.deleteLater()
 
 
@@ -222,21 +236,6 @@ def test_neon_button_is_matte_and_role_driven(qapp):
 
 
 # ── 라운드1 개선 회귀 방지 ───────────────────────────────────────────────────
-def test_filter_empty_state_when_no_needs_check(qapp):
-    """'확인 필요만' 이 0건이면 빈 상태 안내가 노출된다(A3/C23)."""
-    from aoi_verification.app.ui.pages.match_review_page import MatchReviewPage
-    page = MatchReviewPage()
-    # 전부 일치(ok) — 필터를 켜면 남는 행이 없다.
-    ms = [_m("S1", 0.9), _m("S2", 0.8), _m("S3", 0.85)]
-    page.load_state(ms, coord_mode=True, tolerance=20.0)
-    assert page._filter_empty.isHidden()               # 평소엔 숨김
-    page.btn_filter.setChecked(True)
-    assert not page._filter_empty.isHidden()            # 0건 → 빈 상태 노출
-    page.btn_filter.setChecked(False)
-    assert page._filter_empty.isHidden()                # 해제 → 다시 숨김
-    page.deleteLater()
-
-
 def test_list_header_and_score_rule_present(qapp):
     """제도 시트 성격 — 상단 컬럼 헤더(타이틀블록) + 점수 컬럼 눈금이 있어야 한다."""
     from PyQt6.QtWidgets import QFrame
@@ -248,6 +247,43 @@ def test_list_header_and_score_rule_present(qapp):
     roles = {f.property("role") for f in page.findChildren(QFrame)}
     assert "vrule" in roles, "점수 컬럼 눈금 누락"
     page.deleteLater()
+
+
+def test_header_labels_sit_over_their_own_photos(qapp):
+    """★ '기준'·'검증' 라벨이 **자기 사진 위**에 있어야 한다 — 좌표로 잰다.
+
+    이전엔 'COL_IMAGES = 기준 · 검증 · 후보' 한 라벨을 이미지 영역 전체에 얹어, 셋 중
+    어느 것도 자기 사진 위에 없었다.  '라벨이 존재한다'로는 증명이 안 되므로 중심
+    좌표를 비교한다.
+
+    ★ 썸네일 크기는 슬라이더로 100~360px 사이에서 바뀐다.  헤더가 따라가지 않으면
+    크기를 바꾼 순간 정렬이 깨지므로 **여러 크기에서** 확인한다."""
+    from aoi_verification.app.ui.pages.match_review_page import MatchReviewPage
+    from aoi_verification.app.ui import theme
+    qapp.setStyleSheet(theme.render_qss(_QSS))
+    page = MatchReviewPage()
+    page.load_state([_m("S1", 0.9), _m("S2", 0.8)], coord_mode=True, tolerance=20.0)
+    page.resize(1400, 900)
+    page.show()
+    for _ in range(25):
+        qapp.processEvents()
+
+    def center_x(w):
+        return w.mapTo(page, w.rect().topLeft()).x() + w.width() / 2
+
+    try:
+        for size in (100, 140, 240, 360):
+            page.size_slider.setValue(size)
+            page._apply_thumb_size()
+            for _ in range(18):
+                qapp.processEvents()
+            row = page._rows[0]
+            for label, hdr, img in (("기준", page._hdr_ref, row._ref_img),
+                                    ("검증", page._hdr_val, row._val_img)):
+                d = abs(center_x(hdr) - center_x(img))
+                assert d <= 2.0, f"thumb={size}: '{label}' 헤더가 사진에서 {d:.1f}px 어긋남"
+    finally:
+        page.deleteLater()
 
 
 def test_over_row_auto_expands_candidates(qapp):

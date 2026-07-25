@@ -536,17 +536,6 @@ QPushButton[compact="true"]:focus {
     padding: 3px 5px;
 }
 
-/* 키캡(kbd) 칩 — 단축키를 본문 텍스트가 아니라 '키'로 읽히게. */
-QLabel[role="kbd"] {
-    background: $elev;
-    border: 1px solid $line2;
-    border-radius: $radius_sm;
-    color: $ink2;
-    font-family: $font_mono;
-    font-size: 11px;
-    padding: 1px 7px;
-}
-
 /* 링크형 버튼 — 반복되는 2차 액션(크게 보기·더 보기·접기)용. 테두리 없이 조용히. */
 QPushButton[role="link"] {
     background: transparent;

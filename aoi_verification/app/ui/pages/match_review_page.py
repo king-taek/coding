@@ -40,6 +40,12 @@ _SIZE_MAX_PX = 360
 #  동적 계산 — 고정 상수 대신.)
 # _lookup_runners_up 가 보관하는 차순위 후보 최대 개수 (#16).
 _MAX_RUNNERS = 50
+# 기준→검증 화살표 열 폭.  **행과 헤더가 공유**하는 상수다(둘이 다르면 헤더가 밀린다).
+_ARROW_W = 24
+# 행(`QFrame[role="row"]`)의 QSS 좌측 보더 두께.  행은 보더 안쪽에서 내용을 시작하므로
+# 헤더(보더 없음)보다 내용이 이만큼 오른쪽으로 밀린다 — 실측 1.0px 어긋남의 정체다.
+# 헤더 좌측 마진에 더해 상쇄한다.  style.qss 의 `QFrame[role="row"]` 보더와 같은 값이다.
+_ROW_BORDER_W = 1
 
 
 def _open_fullscreen(path: Path, parent=None) -> None:
@@ -299,10 +305,13 @@ class _MatchRow(QFrame):
                                          on_view=lambda: self._open_compare(0))
         top.addWidget(self._ref_img)
 
-        # 화살표
+        # 화살표 — ★ 폭을 **상수로 못 박는다**.  sizeHint 에 맡기면 서체·DPI 에 따라
+        #   흔들리고, 상단 헤더는 그 값을 알 방법이 없어 '기준/검증' 라벨 정렬이 어긋난다.
+        #   행과 헤더가 같은 `_ARROW_W` 를 쓰게 해 정렬이 우연이 아니게 한다.
         arrow = QLabel("→", self)
         arrow.setStyleSheet(f"color: {theme.MUTE}; font-size: 20px;")
         arrow.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        arrow.setFixedWidth(_ARROW_W)
         top.addWidget(arrow)
 
         # 1위 매치 이미지 — 점수는 우측 metric 컬럼으로 분리 (A2 밀집 리스트).
@@ -775,11 +784,9 @@ class MatchReviewPage(QWidget):
         self._tally_label.setTextFormat(Qt.TextFormat.RichText)
         bar.addWidget(self._tally_label)
         bar.addStretch(1)
-        # '확인 필요만' 표시 필터 — 행 setVisible 만 바꾼다 (완료 동작 불변).
-        self.btn_filter = NeonButton(i18n.KO.BTN_FILTER_NEEDS_CHECK, role="ghost")
-        self.btn_filter.setCheckable(True)
-        self.btn_filter.toggled.connect(lambda _c: self._apply_filter())
-        bar.addWidget(self.btn_filter)
+        # ※ '확인 필요만' 필터는 제거했다 — 상단 탤리(일치·허용 초과·매치 없음)가 이미
+        #   '무엇을 확인해야 하는지'를 말한다.  행을 숨기는 필터는 그 위에 상태를 하나
+        #   더 얹고, '지금 보이는 게 전부인가'를 매번 되묻게 만들었다.
         size_label = QLabel(i18n.KO.IMAGE_SIZE_LABEL, self)
         size_label.setStyleSheet(f"color: {theme.MUTE};")
         bar.addWidget(size_label)
@@ -803,9 +810,6 @@ class MatchReviewPage(QWidget):
         self.btn_done.clicked.connect(self._on_done)
         bar.addWidget(self.btn_done)
         root.addLayout(bar)
-
-        # 키보드 힌트 — 단축키를 kbd 칩으로 (프로즈 대신 '키'로 읽히게).
-        root.addWidget(self._build_key_hint())
 
         # 상단 고정 컬럼 헤더(타이틀블록) — 행이 '떠 있는 카드' 가 아니라
         # '눈금 잡힌 제도 시트' 로 읽히게 한다.
@@ -839,47 +843,30 @@ class MatchReviewPage(QWidget):
         self._list_layout.setSpacing(theme.PROFILE.row_gap)
         outer.addLayout(self._list_layout)
 
-        # '확인 필요만' 필터가 0건일 때의 빈 상태 — '멈춘 건지 다 끝난 건지'
-        # 헷갈리지 않게 명시(A3/C23).  전체 보기로 돌아가는 안내를 함께.
-        self._filter_empty = QLabel(i18n.KO.REVIEW_FILTER_EMPTY, host)
-        self._filter_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._filter_empty.setStyleSheet(f"color: {theme.MUTE}; padding: 36px;")
-        self._filter_empty.setVisible(False)
-        outer.addWidget(self._filter_empty)
-
         outer.addStretch(1)
         root.addWidget(scroll, stretch=1)
 
-    def _build_key_hint(self) -> QWidget:
-        """단축키 힌트 줄 — 각 키를 kbd 칩으로, 설명은 흐린 텍스트로."""
-        host = QWidget(self)
-        lay = QHBoxLayout(host)
-        lay.setContentsMargins(2, 0, 0, 0)
-        lay.setSpacing(6)
-        pairs = [("↑ ↓", i18n.KO.KEY_HINT_MOVE),
-                 ("R", i18n.KO.KEY_HINT_REJECT),
-                 ("Enter", i18n.KO.KEY_HINT_DONE)]
-        for i, (key, desc) in enumerate(pairs):
-            if i:
-                lay.addSpacing(8)
-            cap = QLabel(key, host)
-            cap.setProperty("role", "kbd")
-            lay.addWidget(cap)
-            lbl = QLabel(desc, host)
-            lbl.setStyleSheet(f"color: {theme.MUTE}; font-size: 11px;")
-            lay.addWidget(lbl)
-        lay.addStretch(1)
-        return host
-
     def _build_list_header(self) -> QWidget:
-        """검토 리스트 컬럼 헤더 — 행의 고정 컬럼(슬롯·거리·판정)에 정렬해 표/시트로
-        읽히게(cleanroom 데이터테이블 / datum 제도 타이틀블록). 우측 클러스터는 행과
-        동일한 고정 폭(metric 96 · 칩 · 토글)으로 맞춰 헤더가 그 위에 정확히 얹힌다."""
+        """검토 리스트 컬럼 헤더 — 행의 **모든** 컬럼에 정렬해 표/시트로 읽히게.
+
+        ★ '기준 · 검증 · 후보' 를 **한 라벨**로 이미지 영역 전체에 얹어 두었더니 셋 중
+        어느 것도 자기 사진 위에 없었다.  셋으로 쪼개 각각 대응 썸네일과 **같은 폭**을
+        갖게 하고, 그 사이에 행의 화살표와 같은 폭의 빈 칸을 둔다.
+
+        행의 상단 줄 구성과 **한 글자씩 대응**한다(간격·마진도 같아야 얹힌다):
+          슬롯(96) │ 기준(thumb) │ →(_ARROW_W) │ 검증(thumb) │ 후보(가변)
+                   │ 눈금 │ 거리(96) │ 판정(chip_w) │ 토글(toggle_w)
+
+        ★ 썸네일 폭은 슬라이더로 100~360px 사이에서 바뀐다 — `_sync_header_widths` 가
+        `_apply_thumb_size` 에서 헤더를 함께 다시 잡는다.  이걸 빼면 크기를 바꾼 순간
+        정렬이 깨진다."""
         p = theme.PROFILE
         host = QFrame(self)
         host.setProperty("role", "listHeader")
+        # 행과 **같은** 좌우 마진·간격 — 다르면 한 칸씩 밀린다.
+        # 좌측만 행의 보더 두께를 더한다(위 `_ROW_BORDER_W` 주석 참조).
         lay = QHBoxLayout(host)
-        lay.setContentsMargins(10, 5, 10, 5)
+        lay.setContentsMargins(10 + _ROW_BORDER_W, 5, 10 + _ROW_BORDER_W, 5)
         lay.setSpacing(12)
 
         def head(text, *, width=None, align=Qt.AlignmentFlag.AlignLeft):
@@ -891,7 +878,17 @@ class MatchReviewPage(QWidget):
             return lb
 
         lay.addWidget(head(i18n.KO.COL_SLOT, width=96))
-        lay.addWidget(head(i18n.KO.COL_IMAGES), 1)         # 이미지·후보 영역(가변)
+        # 기준·검증은 사진 위 **가운데**, 후보는 후보 스트립 위 **좌측**.
+        self._hdr_ref = head(i18n.KO.COL_REF, width=self._thumb_px,
+                             align=Qt.AlignmentFlag.AlignHCenter)
+        lay.addWidget(self._hdr_ref)
+        self._hdr_arrow_gap = QWidget(host)            # 행의 '→' 자리
+        self._hdr_arrow_gap.setFixedWidth(_ARROW_W)
+        lay.addWidget(self._hdr_arrow_gap)
+        self._hdr_val = head(i18n.KO.COL_VAL, width=self._thumb_px,
+                             align=Qt.AlignmentFlag.AlignHCenter)
+        lay.addWidget(self._hdr_val)
+        lay.addWidget(head(i18n.KO.COL_CANDIDATES), 1)  # 후보 영역(가변)
         rule = QFrame(host)
         rule.setProperty("role", "vrule")
         rule.setFixedWidth(1)
@@ -904,6 +901,12 @@ class MatchReviewPage(QWidget):
         spacer.setFixedWidth(p.toggle_w)
         lay.addWidget(spacer)
         return host
+
+    def _sync_header_widths(self) -> None:
+        """썸네일 크기가 바뀌면 헤더 컬럼 폭도 따라간다(정렬 유지)."""
+        for lbl in (getattr(self, "_hdr_ref", None), getattr(self, "_hdr_val", None)):
+            if lbl is not None:
+                lbl.setFixedWidth(self._thumb_px)
 
     # ------------------------------------------------------------------
     def load_state(self,
@@ -945,11 +948,7 @@ class MatchReviewPage(QWidget):
                 w.deleteLater()
         self._rows.clear()
         self._rows_by_key.clear()
-        # 표시 필터/현재 행 초기화 (새 검토 세션마다 전체 보기에서 시작).
         self._current_row = None
-        self.btn_filter.blockSignals(True)
-        self.btn_filter.setChecked(False)
-        self.btn_filter.blockSignals(False)
 
         if not self._matches:
             empty = QLabel(i18n.KO.REVIEW_EMPTY_HINT)
@@ -983,6 +982,7 @@ class MatchReviewPage(QWidget):
         """슬라이더 변경 적용 (#2) — 행 상태를 보존한 채 썸네일 크기만 갱신."""
         for row in self._rows:
             row.set_thumb_size(self._thumb_px)
+        self._sync_header_widths()      # 헤더가 따라가지 않으면 정렬이 깨진다
 
     # ------------------------------------------------------------------
     def _row_top(self, row) -> int:
@@ -1002,26 +1002,13 @@ class MatchReviewPage(QWidget):
         sb = self._scroll.verticalScrollBar()
         QTimer.singleShot(0, lambda: motion.animate_scroll(sb, self._row_top(row)))
 
-    # ── 표시 필터 / 키보드 탐색 (표시·입력 계층 — 흐름/데이터 불변) ─────────
-    def _apply_filter(self) -> None:
-        """'확인 필요만' — 일치(ok) 행만 숨긴다.  ``_on_done`` 은 ``_matches``
-        를 순회하므로 완료 결과는 표시 여부와 무관하다."""
-        checked = self.btn_filter.isChecked()
-        for row in self._rows:
-            row.setVisible((not checked) or row.state() != "ok")
-        # 필터가 켜졌는데 확인 필요 행이 0건이면 빈 상태를 노출(A3/C23).
-        visible = [r for r in self._rows if not r.isHidden()]
-        if hasattr(self, "_filter_empty"):
-            self._filter_empty.setVisible(checked and not visible and
-                                          bool(self._matches))
-        # 현재 행이 숨겨졌으면 가장 가까운 보이는 행으로 이동.
-        if (self._current_row is not None
-                and self._current_row.isHidden()):
-            rows = self._visible_rows()
-            self._set_current(rows[0] if rows else None)
-
+    # ── 현재 행 표시 (스왑 뒤 그 행을 보이게 스크롤하는 용도) ────────────────
     def _visible_rows(self) -> list["_MatchRow"]:
-        """레이아웃 순서 기준 보이는 행 목록 (스왑 후 append 순서와 무관)."""
+        """레이아웃 순서 기준 행 목록.
+
+        ※ '확인 필요만' 필터를 지운 뒤로 모든 행이 항상 보이므로 사실상 ``_rows`` 와
+        같다.  그래도 레이아웃 순서로 정렬해 주는 역할이 남아 있다(스왑은 행을 새로
+        만들어 append 하므로 `_rows` 순서가 화면 순서와 어긋난다)."""
         rows = [r for r in self._rows if not r.isHidden()]
         rows.sort(key=lambda r: self._list_layout.indexOf(r))
         return rows
@@ -1041,41 +1028,10 @@ class MatchReviewPage(QWidget):
             motion.ensure_visible_animated(self._scroll, self._scroll_host, row,
                                            margin=40)
 
-    def _move_current(self, delta: int) -> None:
-        rows = self._visible_rows()
-        if not rows:
-            return
-        if self._current_row not in rows:
-            self._set_current(rows[0] if delta >= 0 else rows[-1])
-            return
-        idx = rows.index(self._current_row) + delta
-        idx = max(0, min(idx, len(rows) - 1))
-        self._set_current(rows[idx])
-
-    def keyPressEvent(self, event):  # noqa: N802
-        """↑↓ 행 이동 · R 매치 없음 토글 · Enter 검토 완료.
-
-        QShortcut 을 쓰지 않아 포커스된 버튼의 Enter 등 기존 Qt 규칙이
-        그대로 우선한다 (페이지가 포커스를 가질 때만 동작)."""
-        key = event.key()
-        if key == Qt.Key.Key_Down:
-            self._move_current(+1)
-        elif key == Qt.Key.Key_Up:
-            self._move_current(-1)
-        elif key == Qt.Key.Key_R:
-            if self._current_row is not None:
-                self._on_toggle(self._current_row.match)
-        elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            self._on_done()
-        else:
-            super().keyPressEvent(event)
-            return
-        event.accept()
-
-    def showEvent(self, event):  # noqa: N802
-        super().showEvent(event)
-        # 페이지 진입 즉시 키보드 탐색 가능하게.
-        self.setFocus()
+    # ※ 키보드 상호작용(↑↓ 행 이동 · R 매치 없음 · Enter 검토 완료)은 제거했다.
+    #   기능 손실은 없다 — '매치 없음'은 행마다 있는 ✕ 토글, '검토 완료'는 상단
+    #   [검토 완료] 버튼이 한다.  Enter 가 페이지 전체를 완료시키던 것은 특히 위험했다:
+    #   포커스가 페이지에 있는 동안 무심코 누른 Enter 한 번이 검토를 끝냈다.
 
     def resizeEvent(self, event):  # noqa: N802
         """창 크기 변경 시 각 행을 뷰포트 기준으로 재클램프 (가로 넘침 방지).
@@ -1152,7 +1108,6 @@ class MatchReviewPage(QWidget):
                 self._current_row = None
                 self._set_current(new_row)
         self._update_summary()
-        self._apply_filter()
 
     def _lookup_runners_up(self, match: MatchResult, score_cache, val_pool) -> list:
         """주어진 매치의 ref 와 같은 slot 내 다른 val 들을 점수 내림차순으로 (자기 자신 제외).
@@ -1201,8 +1156,6 @@ class MatchReviewPage(QWidget):
             # 행은 제자리에 두고 빨간 테두리 강조만 토글한다 (#1).
             row.set_unmatched(now_unmatched)
         self._update_summary()
-        # 필터가 켜져 있으면 상태 변화에 따라 표시 여부 재적용.
-        self._apply_filter()
 
     def _update_summary(self) -> None:
         """상단 탤리 갱신 — 일치는 기준선으로 항상, 예외(초과/매치 없음/실패)는

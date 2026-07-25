@@ -415,8 +415,7 @@ TALLY_OK_FMT = "일치 {n}"
 TALLY_OVER_FMT = "허용 초과 {n}"
 TALLY_NO_MATCH_FMT = "매치 없음 {n}"
 TALLY_COORD_FAILED_FMT = "매치 실패 {n}"
-BTN_FILTER_NEEDS_CHECK = "확인 필요만"
-BTN_FINISH_REVIEW_KEPT_FMT = "검토 완료 · 유지 {n} ⏎"
+BTN_FINISH_REVIEW_KEPT_FMT = "검토 완료 · 유지 {n}"   # ⏎ 제거 — Enter 단축키가 없어졌다
 CHIP_OK = "일치"
 CHIP_OVER = "허용 초과"
 CHIP_NO_MATCH = "매치 없음"
@@ -425,20 +424,19 @@ BTN_RESTORE_COMPACT = "↩"
 REVIEW_EMPTY_HINT = (
     "자동 매치된 항목이 없습니다.  [완료] 를 누르면 결과 화면으로 이동합니다."
 )
-REVIEW_FILTER_EMPTY = (
-    "확인 필요한 항목이 없습니다.  ‘확인 필요만’ 을 다시 눌러 전체를 볼 수 있습니다."
-)
-# 검토 리스트 컬럼 헤더 (표/제도 시트 성격 변형에서만 노출).
+# 검토 리스트 컬럼 헤더 — ★ 이미지 세 종류를 **각자 자기 사진 위**에 놓기 위해
+# 하나였던 'COL_IMAGES = 기준 · 검증 · 후보' 를 셋으로 쪼갰다(한 라벨이면 어느 것도
+# 자기 사진 위에 없다).  폭 정렬은 match_review_page._sync_header_widths 가 맞춘다.
 COL_SLOT = "슬롯"
-COL_IMAGES = "기준 · 검증 · 후보"
+COL_REF = "기준"
+COL_VAL = "검증"
+COL_CANDIDATES = "후보"
 COL_DISTANCE = "거리(µm)"
 COL_VERDICT = "판정"
 COMPARE_REF_CAPTION_FMT = "기준 — {name}"
-REVIEW_KEY_HINT = "↑↓ 줄 이동 · R 매치 없음 · Enter 검토 완료"
-# 키보드 힌트 kbd 칩 (키, 설명) 쌍
-KEY_HINT_MOVE = "줄 이동"
-KEY_HINT_REJECT = "매치 없음"
-KEY_HINT_DONE = "검토 완료"
+# ※ 검토 화면의 키보드 상호작용(↑↓ 줄 이동 · R 매치 없음 · Enter 검토 완료)과 키캡 힌트
+#   줄, '확인 필요만' 필터는 제거했다.  '매치 없음'은 행마다 있는 ✕ 토글, '검토 완료'는
+#   상단 버튼이 한다.  Enter 가 검토 전체를 끝내던 것은 특히 위험했다.
 # 카드 제목 옆 '?' 도움말 토글 (하드코딩 금지 — 사용자 노출 문자열은 여기 모은다)
 HELP_TOGGLE_TOOLTIP = "설명 보기/숨기기"
 
