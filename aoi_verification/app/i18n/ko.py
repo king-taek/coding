@@ -227,6 +227,9 @@ ENGINE_MODE_TOOLTIP = (
     "  좌표가 없는 이미지는 기본 모드로 폴백하여 처리합니다."
 )
 COORD_TOLERANCE_LABEL = "허용 오차 (µm)"
+# 허용 오차 ± 버튼 — Qt 기본 스핀 버튼(잘린 막대·10px 타깃) 대체.
+TOL_STEP_UP = "허용 오차 50 µm 늘리기"
+TOL_STEP_DOWN = "허용 오차 50 µm 줄이기"
 COORD_TOLERANCE_TOOLTIP = (
     "좌표 매칭 모드에서 두 defect 좌표의 최대 허용 거리 (µm).\n"
     "이 값 이하면 동일 defect 으로 간주합니다.\n"
@@ -439,6 +442,7 @@ LAYOUT_C_LABEL = "C 요약형"
 # C안 — 요약 + 점진적 공개
 SETUP_DETAIL_OPEN = "설정 자세히 ▾"
 SETUP_DETAIL_CLOSE = "설정 자세히 ▴"
+SUMMARY_CAPTION = "이 설정으로 시작합니다"
 SUMMARY_FMT = "{engine} · {scope} · {auto}"
 SUMMARY_ENGINE_COORD = "좌표 매칭"
 SUMMARY_ENGINE_LEGACY = "구형 유사도 엔진"

@@ -250,6 +250,9 @@ class LoadingOverlay(QWidget):
         v.addWidget(self._label)
         # 진행 표시(결정형 바 / busy 스트라이프)를 한 호스트에 묶어 스태거 페이드를 건다.
         self._bar_host = QWidget(self._panel)
+        # ★ 맨 QWidget 은 전역 `QWidget { background-color: $bg }` 를 물려받아 패널 면
+        #   ($panel) 위에 색이 다른 띠로 보인다(실측).  투명으로 못 박는다.
+        self._bar_host.setProperty("role", "loadingBarHost")
         _bar_lay = QVBoxLayout(self._bar_host)
         _bar_lay.setContentsMargins(0, 0, 0, 0)
         _bar_lay.setSpacing(6)

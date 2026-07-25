@@ -316,6 +316,19 @@ QWidget[role="loadingPanel"] {
     border: 1px solid $line;
     border-radius: $radius;
 }
+/* 패널 안 컨테이너 — 맨 QWidget 은 전역 규칙의 $bg 를 물려받아 패널 면 위에 색이 다른
+   띠로 보인다.  투명으로 못 박는다. */
+QWidget[role="loadingBarHost"] {
+    background: transparent;
+}
+
+/* C안 요약 값 — 상세를 접어 둔 채 시작하는 배치의 **안전 장치**.  가장 중요한 정보가
+   가장 작고 옅은 글자였던 문제를 고친다(부제 등급 + 굵기 + 본문색). */
+QLabel[role="summaryValue"] {
+    font-size: $font_sub_sz;
+    font-weight: 600;
+    color: $ink;
+}
 
 /* 카드 제목 — 인라인 f-string 스타일 3중복을 대체. */
 QLabel[role="cardTitle"] {
@@ -400,46 +413,13 @@ QSpinBox:disabled, QDoubleSpinBox:disabled {
     border: 1px dashed $line;
     color: $mute;
 }
-/* 스핀 버튼 — 폭을 주지 않으면 글리프가 잘려 '깨진 조각'으로 렌더되고 필드 프레임을
-   깨뜨린다(실측).  넓게 잡고 눈금으로 필드에서 분리한다. */
+/* 스핀 버튼 — QSS 로는 삼각형 화살표를 그릴 수 없어(이미지 리소스 필요) 좁은 폭에서
+   납작한 막대로 잘려 렌더된다.  사용자 화면(허용 오차)은 NoButtons + 진짜 ±  버튼으로
+   대체했고(setup_page._stepper_button), 남은 스핀박스는 개발자 벤치마크 다이얼로그 전용
+   이므로 Qt 네이티브 버튼을 **건드리지 않고** 폭만 넉넉히 준다. */
 QSpinBox::up-button, QDoubleSpinBox::up-button,
 QSpinBox::down-button, QDoubleSpinBox::down-button {
-    subcontrol-origin: border;
-    width: 20px;
-    background: transparent;
-    border-left: 1px solid $line_strong;
-}
-QSpinBox::up-button, QDoubleSpinBox::up-button {
-    subcontrol-position: top right;
-    height: 18px;
-    border-top-right-radius: $radius_sm;
-}
-QSpinBox::down-button, QDoubleSpinBox::down-button {
-    subcontrol-position: bottom right;
-    height: 18px;
-    border-bottom-right-radius: $radius_sm;
-}
-QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
-QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {
-    background: $accent_tint_soft;
-}
-QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {
-    width: 8px; height: 8px;
-    border-left: 4px solid transparent;
-    border-right: 4px solid transparent;
-    border-bottom: 5px solid $ink2;
-}
-QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {
-    width: 8px; height: 8px;
-    border-left: 4px solid transparent;
-    border-right: 4px solid transparent;
-    border-top: 5px solid $ink2;
-}
-QSpinBox::up-arrow:disabled, QDoubleSpinBox::up-arrow:disabled {
-    border-bottom-color: $line;
-}
-QSpinBox::down-arrow:disabled, QDoubleSpinBox::down-arrow:disabled {
-    border-top-color: $line;
+    width: 18px;
 }
 QSlider:disabled::groove:horizontal {
     background: $line;

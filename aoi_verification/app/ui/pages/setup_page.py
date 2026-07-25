@@ -21,7 +21,7 @@ from ..widgets.collapsible_section import CollapsibleSection
 from ..widgets.neon_button import NeonButton
 from ..widgets.neon_card import NeonCard
 from ..widgets.no_wheel_slider import NoWheelSlider
-from ..widgets.option_group import OptionGroup
+from ..widgets.option_group import OptionGroup, reflow_into_grid
 from ..widgets.switch_row import SwitchRow
 
 
@@ -100,9 +100,16 @@ class SetupPage(QWidget):
         # 본문 구성 — 배치안(서브클래스)이 이 메서드만 오버라이드하면 배치가 바뀐다.
         self._build_body(root)
 
-        # 배치안이 원하면 액션바를 스크롤 **밖**에 고정한다(항상 손에 닿게).
+        # 액션바는 스크롤 **밖**에 고정한다(주요 액션이 항상 손에 닿게).
         if self._pinned_action_bar():
-            outer.addWidget(self._build_action_bar())
+            bar = self._build_action_bar()
+            # 스크롤 안 본문과 같은 좌우 마진 + 상단 눈금으로 '고정된 바닥'임을 말한다.
+            bar.setContentsMargins(40, 12, 40, 16)
+            rule = QWidget(self)
+            rule.setFixedHeight(1)
+            rule.setStyleSheet(f"background: {theme.LINE};")
+            outer.addWidget(rule)
+            outer.addWidget(bar)
 
         # 개발자 모드 토글 단축키 — 일반 사용자에게는 보이지 않는 진입점.
         self._dev_shortcut = QShortcut(QKeySequence("Ctrl+Shift+D"), self)
@@ -114,8 +121,13 @@ class SetupPage(QWidget):
     # (순서·열 구성) 또는 개별 빌더(컨트롤 디자인)만 갈아끼우면 된다.
     # ==================================================================
     def _pinned_action_bar(self) -> bool:
-        """액션바를 스크롤 밖에 고정할지 — 배치안이 결정한다."""
-        return False
+        """액션바를 스크롤 밖에 고정할지.
+
+        ★ 기본이 True 다.  이전엔 A/C 안이 액션바를 스크롤 **안**에 뒀는데, 800×600 에서
+        내용이 뷰포트를 넘겨 [검증 시작]이 화면 밖으로 밀려났다(실측).  '주요 액션을
+        찾으려면 스크롤해야 한다'는 어느 배치에서도 결함이므로 배치안의 차이로 두지
+        않는다 — B 안의 차별점은 그리드 흐름이다."""
+        return True
 
     def _build_body(self, root: QVBoxLayout) -> None:
         """A안 「진행 순서형」 — 한 열, 위에서 아래로(폴더 → 옵션 → 시작)."""
@@ -259,19 +271,39 @@ class SetupPage(QWidget):
         self._auto_help_btn.toggled.connect(self._auto_hint.setVisible)
         return auto_card
 
+    # 두 카드를 나란히 두려면 이 폭이 필요하다.  밑돌면 세로로 쌓는다 — 800×600 에서
+    # 나란히 두면 경로 입력란이 ~85px 로 짜부라져 폴더 이름을 읽을 수 없었다(실측).
+    _DEVICE_SIDE_BY_SIDE_W = 900
+
     def _build_device_row(self) -> QWidget:
-        """기준/검증 장비 폴더·호기 2칸."""
+        """기준/검증 장비 폴더·호기 — 넓으면 2열, 좁으면 세로로 쌓는다."""
         host = QWidget(self)
-        row = QHBoxLayout(host)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(20)
+        self._device_grid = QGridLayout(host)
+        self._device_grid.setContentsMargins(0, 0, 0, 0)
+        self._device_grid.setSpacing(20)
         self.ref_group, self.ref_path_edit, self.ref_machine_edit = \
             self._make_machine_group(i18n.KO.SETUP_REF_GROUP)
         self.val_group, self.val_path_edit, self.val_machine_edit = \
             self._make_machine_group(i18n.KO.SETUP_VAL_GROUP)
-        row.addWidget(self.ref_group)
-        row.addWidget(self.val_group)
+        self._device_cards = [self.ref_group, self.val_group]
+        self._reflow_device_row()
         return host
+
+    def _reflow_device_row(self) -> None:
+        grid = getattr(self, "_device_grid", None)
+        if grid is None:
+            return
+        avail = self.width() or 0
+        if not avail:
+            p = self.parentWidget()
+            avail = p.width() if p is not None else 0
+        # 한 열로 접을지 두 열로 둘지 — reflow_into_grid 에 '최소 카드 폭'을 넘긴다.
+        min_w = self._DEVICE_SIDE_BY_SIDE_W // 2
+        reflow_into_grid(grid, self._device_cards, avail, min_w)
+
+    def resizeEvent(self, event):  # noqa: N802
+        super().resizeEvent(event)
+        self._reflow_device_row()
 
     def _build_scope_row(self) -> QWidget:
         """진행 범위 — 상태가 **타일 자신**에 산다(옆 라벨에 두지 않는다).
@@ -324,8 +356,20 @@ class SetupPage(QWidget):
         self.coord_tol_spin.setSuffix(" µm")
         self.coord_tol_spin.setValue(getattr(_prefs_now, "coord_tolerance", 500.0))
         self.coord_tol_spin.setToolTip(i18n.KO.COORD_TOLERANCE_TOOLTIP)
+        # ★ Qt 기본 up/down 버튼을 쓰지 않는다.  스타일시트로는 삼각형 화살표를 그릴 수
+        #   없어(이미지 리소스 필요) 납작한 막대로 잘려 렌더되고, 폭도 ~10px 이라
+        #   WCAG 2.5.8(24px)에 한참 못 미쳤다(4가지 방식 실측 비교 후 결론).
+        #   대신 진짜 QPushButton −/+ 를 옆에 둔다 — 경계·포커스 링·타깃 규칙을 전부
+        #   공유하고 새 리소스가 필요 없다.
+        self.coord_tol_spin.setButtonSymbols(
+            QDoubleSpinBox.ButtonSymbols.NoButtons)
+        self.coord_tol_spin.setMinimumWidth(120)
+        self.tol_minus_btn = self._stepper_button("−", -1)
+        self.tol_plus_btn = self._stepper_button("+", +1)
         _tol_layout.addWidget(_tol_label)
         _tol_layout.addWidget(self.coord_tol_spin)
+        _tol_layout.addWidget(self.tol_minus_btn)
+        _tol_layout.addWidget(self.tol_plus_btn)
         _tol_layout.addStretch()
         engine_card.body().addWidget(self._tol_row)
 
@@ -379,6 +423,17 @@ class SetupPage(QWidget):
 
         self._sync_engine_controls()
         return engine_card
+
+    def _stepper_button(self, glyph: str, step: int) -> NeonButton:
+        """허용 오차 ±  — 정사각 버튼.  Qt 스핀 버튼 대신 쓴다(위 주석 참조)."""
+        btn = NeonButton(glyph, role="ghost")
+        side = theme.PROFILE.input_h
+        btn.setFixedSize(side, side)
+        btn.setAccessibleName(i18n.KO.TOL_STEP_UP if step > 0
+                              else i18n.KO.TOL_STEP_DOWN)
+        btn.setToolTip(btn.accessibleName())
+        btn.clicked.connect(lambda: self.coord_tol_spin.stepBy(step))
+        return btn
 
     # ------------------------------------------------------------------
     @staticmethod

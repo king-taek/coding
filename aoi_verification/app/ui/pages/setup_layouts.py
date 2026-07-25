@@ -58,9 +58,6 @@ class SetupPageB(SetupPage):
     LAYOUT_KEY = "b"
     _MIN_SECTION_W = 430           # 이 폭을 밑돌면 열을 줄인다(가로 스크롤 방지)
 
-    def _pinned_action_bar(self) -> bool:
-        return True
-
     def _build_body(self, root: QVBoxLayout) -> None:
         root.addWidget(self._build_top_bar())
         root.addWidget(self._build_subtitle())
@@ -87,8 +84,10 @@ class SetupPageB(SetupPage):
         ]
         self._reflow_sections()
         root.addWidget(self._grid_host)
-        root.addStretch(1)
+        # ★ 큰 addStretch 를 두지 않는다 — 넓은 창에서 화면 아래 절반이 비고 크레딧이
+        #   그 빈 공간에 홀로 떠 있었다.  그리드 바로 아래에 붙여 '문서 끝'으로 읽히게.
         root.addWidget(self._build_credit())
+        root.addStretch(1)
 
     def _reflow_sections(self) -> None:
         avail = self.width() or 0
@@ -114,15 +113,20 @@ class SetupPageC(SetupPage):
         # 폴더는 늘 보인다(매번 바꾸는 값).
         root.addWidget(self._build_device_row())
         # 요약 — 지금 무엇으로 돌아갈지 한 줄로.
-        self._summary = QWidget(self)
-        _sum_lay = QVBoxLayout(self._summary)
-        _sum_lay.setContentsMargins(0, 0, 0, 0)
-        _sum_lay.setSpacing(4)
+        # ★ 이 줄은 C안의 **안전 장치**다: 상세를 접어 둔 채 시작하는 배치이므로, 어떤
+        #   엔진·범위로 돌아가는지를 여기서만 알 수 있다.  그런데 이전엔 화면에서 가장
+        #   작고(12px) 가장 옅은(muted) 글자였다 — 가장 중요한 정보가 가장 안 보였다.
+        #   카드에 담고 본문 등급 이상으로 올린다.
         from PyQt6.QtWidgets import QLabel
+        from ..widgets.neon_card import NeonCard
+        self._summary = NeonCard(role="card", parent=self)
+        cap = QLabel(i18n.KO.SUMMARY_CAPTION, self._summary)
+        cap.setProperty("role", "colHead")
+        self._summary.body().addWidget(cap)
         self._summary_label = QLabel("", self._summary)
-        self._summary_label.setProperty("role", "muted")
+        self._summary_label.setProperty("role", "summaryValue")
         self._summary_label.setWordWrap(True)
-        _sum_lay.addWidget(self._summary_label)
+        self._summary.body().addWidget(self._summary_label)
         root.addWidget(self._summary)
 
         # 상세 — 필요할 때만.

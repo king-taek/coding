@@ -112,20 +112,68 @@ def test_make_setup_page_uses_saved_layout(qapp, isolated_cache):
         page.deleteLater()
 
 
-def test_b_pins_action_bar_outside_scroll(qapp):
-    """B안은 액션바를 스크롤 밖에 고정한다 — 긴 창에서도 시작 버튼이 손에 닿게."""
-    a = sl.LAYOUTS["a"]()
-    b = sl.LAYOUTS["b"]()
+@pytest.mark.parametrize("key", ["a", "b", "c"])
+def test_action_bar_pinned_outside_scroll(qapp, key):
+    """★ 세 배치 **모두** 액션바를 스크롤 밖에 고정한다.
+
+    이전엔 A/C 가 스크롤 안에 뒀는데 800×600 에서 [검증 시작]이 화면 밖으로 밀려났다
+    (실측).  '주요 액션을 찾으려면 스크롤해야 한다'는 어느 배치에서도 결함이므로
+    배치안의 차이로 남기지 않는다."""
+    page = sl.LAYOUTS[key]()
     try:
-        assert a._pinned_action_bar() is False
-        assert b._pinned_action_bar() is True
-        scroll = b.findChild(QScrollArea)
-        # 고정된 액션바는 스크롤 위젯의 자손이 아니어야 한다.
-        assert not b.start_btn.isAncestorOf(scroll)
-        assert scroll is not None and not scroll.isAncestorOf(b.start_btn)
+        assert page._pinned_action_bar() is True
+        scroll = page.findChild(QScrollArea)
+        assert scroll is not None
+        assert not scroll.isAncestorOf(page.start_btn), \
+            f"{key}: 시작 버튼이 스크롤 안에 있다"
     finally:
-        a.deleteLater()
-        b.deleteLater()
+        page.deleteLater()
+
+
+@pytest.mark.parametrize("key", ["a", "b", "c"])
+@pytest.mark.parametrize("size", [(1512, 982), (800, 600)])
+def test_start_button_visible_without_scrolling(qapp, key, size):
+    """어떤 크기에서도 [검증 시작]이 페이지 안에 실제로 보여야 한다."""
+    page = sl.LAYOUTS[key]()
+    try:
+        page.resize(*size)
+        page.show()
+        for _ in range(12):
+            qapp.processEvents()
+        top_left = page.start_btn.mapTo(page, page.start_btn.rect().topLeft())
+        bottom = top_left.y() + page.start_btn.height()
+        assert page.start_btn.isVisible(), f"{key}@{size}: 시작 버튼 비가시"
+        assert bottom <= page.height(), \
+            f"{key}@{size}: 시작 버튼 하단 {bottom} > 페이지 높이 {page.height()}"
+    finally:
+        page.deleteLater()
+
+
+@pytest.mark.parametrize("key", ["a", "c"])
+def test_path_fields_stay_readable_at_800(qapp, key):
+    """800×600 에서 경로 입력란이 폴더 이름을 읽을 수 없을 만큼 짜부라지지 않아야 한다.
+
+    이전엔 두 장비 카드를 늘 나란히 둬서 입력란이 ~85px 로 줄었다.  좁으면 세로로 쌓는다."""
+    page = sl.LAYOUTS[key]()
+    try:
+        page.resize(800, 600)
+        page.show()
+        for _ in range(12):
+            qapp.processEvents()
+        assert page.ref_path_edit.width() >= 240, \
+            f"{key}: 경로 입력란 {page.ref_path_edit.width()}px"
+    finally:
+        page.deleteLater()
+
+
+def test_c_summary_is_not_the_faintest_text(qapp):
+    """C안 요약은 **안전 장치**다 — 가장 작고 옅은 글자여선 안 된다."""
+    page = sl.LAYOUTS["c"]()
+    try:
+        assert page._summary_label.property("role") == "summaryValue"
+        assert page._summary_label.property("role") != "muted"
+    finally:
+        page.deleteLater()
 
 
 def test_c_summary_tracks_settings(qapp):
