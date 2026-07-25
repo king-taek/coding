@@ -87,6 +87,35 @@ def test_focus_ring_meets_contrast(mode):
         assert r >= 3.0, f"{mode}: focus on {surface} = {r:.2f}"
 
 
+@pytest.mark.parametrize("mode", ["light", "dark"])
+def test_filled_button_focus_ring_contrasts_with_its_own_fill(mode):
+    """★ 채운 버튼의 링은 **자기 채움**과 대비해야 한다 — 페이지 배경이 아니다.
+
+    이 검사가 없어서 실제로 구멍이 났다: `$focus` 는 `$accent` 와 1.23:1 이라
+    [검증 시작]에 링을 그려도 자기 색에 묻혀 보이지 않았다(캡처 실측).  픽셀 검사만으로는
+    잡히지 않는다 — 링 색 픽셀이 '존재'하기는 했으니까.  그래서 색 관계로 못 박는다."""
+    theme.set_color_mode(mode)
+    c = theme.COLORS
+    ring = _ring_color_for_primary()
+    r = _ratio(ring, c["accent"])
+    assert r >= 3.0, f"{mode}: primary 링({ring}) vs 채움({c['accent']}) = {r:.2f}"
+
+
+def _ring_color_for_primary() -> str:
+    """style.qss 의 `QPushButton[role="primary"]:focus` 가 실제로 쓰는 토큰 값을 읽는다.
+
+    상수를 테스트에 복제하면 QSS 를 바꿔도 테스트가 계속 통과한다 — 렌더된 QSS 에서
+    직접 뽑아 그 함정을 막는다."""
+    rendered = theme.render_qss(_QSS)
+    marker = 'QPushButton[role="primary"]:focus {'
+    block = rendered[rendered.index(marker) + len(marker):]
+    block = block[:block.index("}")]
+    for line in block.splitlines():
+        if "border:" in line:
+            return line.strip().rstrip(";").split()[-1]
+    raise AssertionError("primary:focus 에 border 선언이 없다")
+
+
 def test_weak_token_is_not_used_for_interactive_borders():
     """$line2 는 장식 전용 — 상호작용 컨트롤의 **평상시** 경계에 쓰면 회귀다.
 
@@ -181,12 +210,16 @@ def test_switch_row_target(qapp):
 
 
 # ── 2.4.7 포커스 가시성 — 선언이 아니라 **렌더된 픽셀**로 증명 ─────────────
-def _focus_pixels(qapp, mode: str, make, pick=None) -> bool:
+def _focus_pixels(qapp, mode: str, make, pick=None, ring: str = "focus") -> bool:
     """포커스 색 픽셀이 실제로 그려졌는지 — QSS 에 링을 '선언'한 것만으로는 증명이 안 된다.
 
     ★ 자식 위젯을 단독으로 show() 하면 창이 활성화되지 않아 포커스가 실제로 들어가지
     않는다(그래서 링이 없는 것처럼 보인다).  반드시 최상위 창 안에 넣고 활성화한 뒤,
-    포커스를 옮길 상대 위젯까지 둬서 진짜 탭 포커스 상태를 만든다."""
+    포커스를 옮길 상대 위젯까지 둬서 진짜 탭 포커스 상태를 만든다.
+
+    ``ring`` — 기대 링 색 토큰.  채운 primary 는 자기 채움과 대비해야 하므로
+    ``on_accent`` 를 쓴다(위 test_filled_button_focus_ring_contrasts_with_its_own_fill).
+    """
     theme.set_color_mode(mode)
     qapp.setStyleSheet(theme.render_qss(_QSS))
     host = QWidget()
@@ -205,7 +238,7 @@ def _focus_pixels(qapp, mode: str, make, pick=None) -> bool:
         qapp.processEvents()
     assert target.hasFocus(), "하네스 문제: 포커스가 들어가지 않았다"
     img = target.grab().toImage()
-    fh = theme.COLORS["focus"].lstrip("#")
+    fh = theme.COLORS[ring].lstrip("#")
     fr, fg, fb = (int(fh[i:i + 2], 16) for i in (0, 2, 4))
     hit = any(
         abs(c.red() - fr) <= 12 and abs(c.green() - fg) <= 12
@@ -221,20 +254,22 @@ from PyQt6.QtWidgets import QVBoxLayout as _QVBox        # noqa: E402
 
 
 @pytest.mark.parametrize("mode", ["light", "dark"])
-@pytest.mark.parametrize("make,label", [
-    (lambda p: QLineEdit(p), "입력란"),
-    (lambda p: NeonButton("버튼", role="ghost", parent=p), "ghost 버튼"),
-    (lambda p: NeonButton("시작", role="primary", parent=p), "primary 버튼"),
-    (lambda p: NeonButton("삭제", role="danger", parent=p), "danger 버튼"),
-    (lambda p: QDoubleSpinBox(p), "스핀박스"),
-    (lambda p: QCheckBox("모션 줄이기", p), "체크박스"),
+@pytest.mark.parametrize("make,label,ring", [
+    (lambda p: QLineEdit(p), "입력란", "focus"),
+    (lambda p: NeonButton("버튼", role="ghost", parent=p), "ghost 버튼", "focus"),
+    # 채운 primary 는 링을 자기 채움과 대비되는 색으로 그린다.
+    (lambda p: NeonButton("시작", role="primary", parent=p), "primary 버튼",
+     "on_accent"),
+    (lambda p: NeonButton("삭제", role="danger", parent=p), "danger 버튼", "focus"),
+    (lambda p: QDoubleSpinBox(p), "스핀박스", "focus"),
+    (lambda p: QCheckBox("모션 줄이기", p), "체크박스", "focus"),
 ])
-def test_focus_ring_actually_renders(qapp, mode, make, label):
+def test_focus_ring_actually_renders(qapp, mode, make, label, ring):
     """★ 이 테스트가 ghost/danger 버튼의 링이 **아예 없던** 버그를 잡아냈다:
     `QPushButton[role="ghost"]` 의 border-color 가 특이도 동급·후순위로 일반
     `QPushButton:focus` 를 덮어쓰고 있었다."""
-    assert _focus_pixels(qapp, mode, make), \
-        f"{mode}/{label}: 포커스 링이 실제로 렌더되지 않았다"
+    assert _focus_pixels(qapp, mode, make, ring=ring), \
+        f"{mode}/{label}: 포커스 링({ring})이 실제로 렌더되지 않았다"
 
 
 @pytest.mark.parametrize("mode", ["light", "dark"])
@@ -245,6 +280,22 @@ def test_toggle_switch_focus_ring_renders(qapp, mode):
         lambda p: SwitchRow("구형 모드", checked=False, parent=p),
         pick=lambda row: row.switch,
     ), f"{mode}: 스위치 포커스 링 미렌더"
+
+
+@pytest.mark.parametrize("mode", ["light", "dark"])
+def test_slider_focus_ring_renders(qapp, mode):
+    """★ QSS 로는 불가능한 케이스 — Qt 는 서브컨트롤에 :focus 를 지원하지 않고, 위젯
+    border 도 서브컨트롤이 스타일링된 슬라이더에선 렌더되지 않는다.  그래서
+    `NoWheelSlider.paintEvent` 가 직접 그린다.  이 테스트가 그 계약을 지킨다."""
+    from aoi_verification.app.ui.widgets.no_wheel_slider import NoWheelSlider
+
+    def make(p):
+        sl = NoWheelSlider(Qt.Orientation.Horizontal, p)
+        sl.setRange(0, 100)
+        sl.setValue(55)
+        return sl
+
+    assert _focus_pixels(qapp, mode, make), f"{mode}: 슬라이더 포커스 링 미렌더"
 
 
 @pytest.mark.parametrize("mode", ["light", "dark"])
