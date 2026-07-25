@@ -24,7 +24,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Set
 
 # 임베딩 백본 식별자(embedder_openvino 와 동일 문자열) — torch/openvino 미설치

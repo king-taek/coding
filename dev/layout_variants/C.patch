@@ -3,13 +3,13 @@ index 51c43b6..a300461 100644
 --- a/aoi_verification/app/ui/pages/setup_page.py
 +++ b/aoi_verification/app/ui/pages/setup_page.py
 @@ -11,7 +11,7 @@ from PyQt6.QtGui import QKeySequence, QShortcut
- from PyQt6.QtWidgets import (QCheckBox, QDoubleSpinBox, QFileDialog,
+ from PyQt6.QtWidgets import (QDoubleSpinBox, QFileDialog,
                                QGridLayout, QHBoxLayout, QLabel, QLineEdit,
                                QMessageBox, QScrollArea, QSizePolicy,
 -                              QToolButton, QVBoxLayout, QWidget)
 +                              QSpacerItem, QToolButton, QVBoxLayout, QWidget)
  
- from ... import config, i18n
+ from ... import i18n
  from .. import motion, theme
 @@ -90,12 +90,23 @@ class SetupPage(QWidget):
              "QScrollArea { background: transparent; border: none; }"

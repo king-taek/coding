@@ -7,27 +7,6 @@ from typing import Optional
 
 
 # ---------------------------------------------------------------------------
-# Color palette (neon-dark sci-fi)
-# ---------------------------------------------------------------------------
-class Colors:
-    BG = "#0A0E1A"
-    BG_DEEP = "#000000"
-    CARD = "#111827"
-    CARD_ALT = "#0E1424"
-    NEON_CYAN = "#39FF14"
-    NEON_BLUE = "#00C853"
-    NEON_MAGENTA = "#FF00AA"
-    NEON_RED = "#FF2D55"
-    NEON_GREEN = "#00FFA3"
-    NEON_YELLOW = "#FFD600"
-    DISABLED = "#2A2F3A"
-    TEXT_PRIMARY = "#E5F4FF"
-    TEXT_SECONDARY = "#7FB3D5"
-    TEXT_MUTED = "#586378"
-    BORDER = "#1F2A3F"
-
-
-# ---------------------------------------------------------------------------
 # Font stacks. The fallback list MUST include a Korean-capable font so 한글
 # is rendered cleanly on every platform (특히 Windows).
 # ---------------------------------------------------------------------------

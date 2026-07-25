@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import json
 
 from aoi_verification.app.dev import benchmark as bm
 from aoi_verification.app.dev import recipes as rx
-from aoi_verification.app.models.slot import ImageItem
 
 
 # ---------------------------------------------------------------------------

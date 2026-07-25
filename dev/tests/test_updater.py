@@ -327,8 +327,6 @@ def test_ssl_context_insecure_disables_verify():
 
 
 def test_urlopen_falls_back_to_insecure_on_cert_error(monkeypatch):
-    import ssl
-
     class _Resp:
         def __enter__(self): return self
         def __exit__(self, *a): return False

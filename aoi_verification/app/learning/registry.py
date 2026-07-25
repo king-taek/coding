@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Optional
 
 from ..utils import paths
 
@@ -276,36 +276,6 @@ def rename_with_accuracy(info: ModelInfo, hit_at_5_pct: int) -> ModelInfo:
 
     target.meta = meta
     return target
-
-
-# ---------------------------------------------------------------------------
-# Delete
-# ---------------------------------------------------------------------------
-def delete_model(name: str) -> None:
-    info = find(name)
-    if info is None:
-        return
-    for p in (info.weights_path, info.meta_path, info.eval_path):
-        try:
-            if p.exists():
-                p.unlink()
-        except OSError:
-            pass
-    if get_active() == name:
-        set_active(BASIC)
-
-
-# ---------------------------------------------------------------------------
-# Meta helpers
-# ---------------------------------------------------------------------------
-def write_meta(info: ModelInfo, meta: dict) -> None:
-    meta = dict(meta)
-    meta.setdefault("name", info.name)
-    info.meta_path.write_text(
-        json.dumps(meta, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    info.meta = meta
 
 
 # ---------------------------------------------------------------------------

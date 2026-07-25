@@ -2,7 +2,6 @@
 
 from datetime import datetime
 
-import pytest
 
 from aoi_verification.app.learning import registry
 

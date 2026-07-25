@@ -15,11 +15,10 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtCore import QByteArray, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QKeySequence, QPixmap, QShortcut
+from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QScrollArea,
                               QSizePolicy, QSlider, QSplitter, QVBoxLayout,
                               QWidget)
@@ -27,7 +26,6 @@ from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QScrollArea,
 from ... import config, i18n
 from .. import theme
 from ...models.slot import ImageItem
-from ...utils import image_io
 from ...utils import prefs as _prefs
 from ..widgets.neon_button import NeonButton
 from ..widgets.neon_card import NeonCard

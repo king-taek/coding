@@ -8,12 +8,12 @@ from typing import Optional
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
-from PyQt6.QtWidgets import (QCheckBox, QDoubleSpinBox, QFileDialog,
+from PyQt6.QtWidgets import (QDoubleSpinBox, QFileDialog,
                               QGridLayout, QHBoxLayout, QLabel, QLineEdit,
                               QMessageBox, QScrollArea, QSizePolicy,
                               QToolButton, QVBoxLayout, QWidget)
 
-from ... import config, i18n
+from ... import i18n
 from .. import motion, theme
 from ...utils import prefs as _prefs
 from ...utils.prefs import AutomationLevel, EngineMode

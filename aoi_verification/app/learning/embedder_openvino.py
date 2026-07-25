@@ -238,11 +238,6 @@ def _log_compiled_device(core, cand: str) -> None:  # pragma: no cover - 환경 
     )
 
 
-def last_compiled_device() -> tuple:  # pragma: no cover - 환경 의존
-    """(target, full_name) — 컴파일이 실제로 어디서 됐는지 (UI/디버그용)."""
-    return (_last_compiled_target, _last_compiled_name)
-
-
 def _optimal_streams(compiled) -> int:  # pragma: no cover — 환경 의존
     """디바이스가 권장하는 동시 추론 스트림 수 — AsyncInferQueue jobs.
 

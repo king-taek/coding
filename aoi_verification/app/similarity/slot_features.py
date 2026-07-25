@@ -217,12 +217,6 @@ class SlotFeatureCache:
         return dict(existing)
 
     # ------------------------------------------------------------------
-    def clear(self) -> None:
-        with self._lock:
-            self._slots.clear()
-            self._active = None
-            self._lookahead = None
-
     def release(self, slot: str) -> None:
         """슬롯의 RAM features 를 즉시 폐기.
 

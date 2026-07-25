@@ -145,11 +145,6 @@ def get_active_mode() -> str:
     return registry.get_active()
 
 
-def set_active_mode(name: str) -> None:
-    registry.set_active(name)
-    _load_head_for.cache_clear()
-
-
 # ---------------------------------------------------------------------------
 # Backbone (lru_cache singleton)
 # ---------------------------------------------------------------------------
@@ -168,11 +163,6 @@ def _load_backbone():  # pragma: no cover — heavy
     if _DEVICE is not None and _DEVICE.type != "cpu":
         backbone = backbone.to(_DEVICE)
     return backbone
-
-
-def load_backbone():  # pragma: no cover — heavy
-    """학습 워커가 backbone 인스턴스를 공유하기 위한 공개 진입점."""
-    return _load_backbone()
 
 
 @lru_cache(maxsize=8)
@@ -394,7 +384,3 @@ def invalidate_caches() -> None:
         _ov.invalidate_caches()
     except Exception:
         pass
-
-
-def make_input_tensor(path: Path):  # pragma: no cover — 외부 노출(트레이너용)
-    return _make_input_tensor(path)

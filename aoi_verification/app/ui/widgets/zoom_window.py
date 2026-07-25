@@ -9,13 +9,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Iterable, Optional
+from typing import Iterable, Optional
 
 from PyQt6.QtCore import QObject, QThread, Qt, pyqtSignal
 from PyQt6.QtGui import (QColor, QImage, QPainter, QPixmap, QShortcut,
                          QKeySequence)
 from PyQt6.QtWidgets import (QApplication, QDialog, QGridLayout, QHBoxLayout,
-                              QLabel, QMenu, QPushButton, QScrollArea,
+                              QLabel, QMenu, QScrollArea,
                               QVBoxLayout, QWidget)
 
 from ... import i18n

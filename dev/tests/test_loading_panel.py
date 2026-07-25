@@ -75,7 +75,7 @@ def test_position_settles_slower_than_opacity(qapp):
     # 페이드는 등속(스크림 디밍이 슬램하지 않게), 위치는 끝에서 감속.
     host, ov = _overlay(qapp)
     try:
-        from PyQt6.QtCore import QEasingCurve, QEasingCurve as _EC
+        from PyQt6.QtCore import QEasingCurve
         assert ov._fade_anim.easingCurve().type() == QEasingCurve.Type.Linear
         rise = ov._rise_anim.easingCurve()
         # ★ 곡선 **이름**을 고정하지 않는다 — 중요한 건 "페이드가 끝나는 시점에 위치

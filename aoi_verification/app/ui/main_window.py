@@ -15,19 +15,18 @@ import shutil
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Optional
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QMainWindow,
+from PyQt6.QtCore import QThread, QTimer, pyqtSignal
+from PyQt6.QtWidgets import (QApplication, QLabel, QMainWindow,
                               QMessageBox, QStackedWidget, QStatusBar,
-                              QVBoxLayout, QWidget)
+                              QWidget)
 
 from .. import config, i18n
 from . import theme
 from ..models import session as session_mod
 from ..models.result import FinalResult, MatchResult, MissEntry
-from ..models.slot import (ImageItem, ScanResult, Slot, drop_empty_unmatched,
+from ..models.slot import (ImageItem, ScanResult, drop_empty_unmatched,
                            scan)
 from ..utils import paths, wafer_id
 from ..utils import prefs as _prefs

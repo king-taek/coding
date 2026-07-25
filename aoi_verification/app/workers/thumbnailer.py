@@ -17,7 +17,6 @@ import heapq
 import os
 import threading
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Iterable, Optional
 
 from PyQt6.QtCore import QObject, QThread, pyqtSignal

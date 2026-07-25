@@ -12,7 +12,6 @@ import pytest
 
 from aoi_verification.app.coords.camtek_ini import _extract_coord
 from aoi_verification.app.coords.camtek_live import resolve as live_resolve
-from aoi_verification.app.coords.models import DefectCoord
 
 
 # ---------------------------------------------------------------------------

@@ -4,9 +4,7 @@
 - 테스트는 PyQt6/torch/cv2 같은 무거운 의존성을 거의 쓰지 않도록 설계.
 """
 
-import os
 import sys
-import tempfile
 from pathlib import Path
 
 # 패키지 import 가능하도록 저장소 루트를 path 에 추가.

@@ -11,11 +11,10 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtCore import QByteArray, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QKeySequence, QPixmap, QShortcut
+from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel,
                               QScrollArea, QSizePolicy, QSlider,
                               QSplitter, QStackedWidget, QVBoxLayout, QWidget)
@@ -23,8 +22,7 @@ from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel,
 from ... import config, i18n
 from .. import theme
 from ...models.result import MatchResult
-from ...models.slot import ImageItem, Slot
-from ...utils import image_io
+from ...models.slot import ImageItem
 from ...utils import prefs as _prefs
 from ...similarity.slot_features import (SlotFeatureCache, SlotPrecomputeWorker,
                                             SlotScoreCache)
@@ -39,7 +37,7 @@ from ..widgets.neon_card import NeonCard
 from ..widgets.scalable_image import ScalableImage
 from ..widgets.slot_section import SlotSection
 from ..widgets.thumb_grid import ThumbEntry, ThumbGrid
-from ..widgets.zoom_window import (ZoomWindow, SOURCE_TARGET, SOURCE_CANDIDATES)
+from ..widgets.zoom_window import ZoomWindow, SOURCE_CANDIDATES
 from ..widgets import sheet_host as sheets
 
 

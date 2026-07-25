@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable
 
 from .. import config
 
@@ -165,12 +164,3 @@ def drop_empty_unmatched(sr: ScanResult) -> None:
                    if n in sr.slots and sr.slots[n].ref_images]
     sr.val_only = [n for n in sr.val_only
                    if n in sr.slots and sr.slots[n].val_images]
-
-
-def iter_in_order(slots: Iterable[Slot], side: str = "ref") -> list[ImageItem]:
-    """Slot 명 오름차순 → 파일명 오름차순으로 펼친 ImageItem 리스트."""
-    items: list[ImageItem] = []
-    for slot in sorted(slots, key=lambda s: s.name):
-        src = slot.ref_images if side == "ref" else slot.val_images
-        items.extend(src)
-    return items
