@@ -824,7 +824,7 @@ class SetupPage(QWidget):
         dlg = SlotSelectDialog(
             slot_names, preselected=self._selected_slots, parent=self,
         )
-        if dlg.exec() and dlg.accepted_ok:
+        if sheets.run(dlg) and dlg.accepted_ok:
             chosen = dlg.selected
             # 전체 선택과 동일하면 '전체 진행'(None)으로 정규화.
             if not chosen or chosen == set(slot_names):
@@ -911,8 +911,7 @@ class SetupPage(QWidget):
         default_ref, default_val = self._default_dev_roots()
         dlg = DevBenchmarkDialog(self, default_ref=default_ref,
                                  default_val=default_val)
-        dlg.showMaximized()
-        dlg.exec()
+        sheets.run(dlg, full_bleed=True)
 
     def _open_label_maker(self) -> None:
         """정답 라벨 만들기 다이얼로그 — 기준 사진별 정답 검증 사진 지정(개발자 모드 전용)."""
@@ -920,8 +919,7 @@ class SetupPage(QWidget):
         default_ref, default_val = self._default_dev_roots()
         dlg = LabelMakerDialog(self, default_ref=default_ref,
                                default_val=default_val)
-        dlg.showMaximized()
-        dlg.exec()
+        sheets.run(dlg, full_bleed=True)
 
     def _on_threshold_changed(self, v: int) -> None:
         self.threshold_label.setText(f"{v} %")

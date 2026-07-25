@@ -29,7 +29,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PyQt6.QtCore import QEvent, QEventLoop, QPropertyAnimation, Qt
+from PyQt6.QtCore import (QEvent, QEventLoop, QPropertyAnimation, Qt,
+                          pyqtSignal)
 from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import (QApplication, QDialog, QGraphicsOpacityEffect,
                              QHBoxLayout, QLabel, QMessageBox, QVBoxLayout,
@@ -60,6 +61,47 @@ class _Scrim(QWidget):
         p = QPainter(self)
         r, g, b, a = theme.SCRIM_RGBA
         p.fillRect(self.rect(), QColor(r, g, b, a))
+
+
+class _SheetFrame(QWidget):
+    """시트 껍데기 — **제목줄(제목 + ✕)** 과 테두리.
+
+    창 안으로 들어오면 OS 타이틀바가 없다.  그것이 하던 두 가지(무슨 팝업인지 알려주기,
+    닫기)를 대신하지 않으면 '정체를 모르고 닫을 수도 없는' 시트가 된다 — 특히 자체 닫기
+    버튼이 없는 뷰어에서 치명적이다."""
+
+    close_requested = pyqtSignal()
+
+    def __init__(self, parent: QWidget, title: str) -> None:
+        super().__init__(parent)
+        self.setProperty("role", "sheet")
+        v = QVBoxLayout(self)
+        v.setContentsMargins(1, 1, 1, 1)     # 테두리 1px 만 남기고 내용은 꽉
+        v.setSpacing(0)
+
+        bar = QWidget(self)
+        bar.setProperty("role", "sheetBar")
+        h = QHBoxLayout(bar)
+        h.setContentsMargins(14, 8, 8, 8)
+        h.setSpacing(8)
+        lbl = QLabel(title, bar)
+        lbl.setProperty("role", "sheetTitle")
+        h.addWidget(lbl)
+        h.addStretch(1)
+        btn = NeonButton(i18n.KO.MSG_BTN_CLOSE, role="rowAction", parent=bar)
+        btn.setToolTip(i18n.KO.MSG_BTN_CLOSE)
+        btn.clicked.connect(self.close_requested.emit)
+        h.addWidget(btn)
+        v.addWidget(bar)
+
+        self._body = QVBoxLayout()
+        self._body.setContentsMargins(0, 0, 0, 0)
+        v.addLayout(self._body, 1)
+
+    def set_content(self, w: QWidget) -> None:
+        w.setParent(self)
+        w.setWindowFlags(Qt.WindowType.Widget)
+        self._body.addWidget(w)
 
 
 class SheetHost(QWidget):
@@ -97,7 +139,7 @@ class SheetHost(QWidget):
                        QEvent.Type.ShortcutOverride):
             # ★ 맨 위 시트(또는 그 자손)가 아닌 수신자의 키는 버린다 — Tab 이 뒤 페이지로
             #   새 나가면 '보이지 않는 곳'에 포커스가 생겨 Enter 가 엉뚱한 것을 누른다.
-            top = self._stack[-1]["widget"]
+            top = self._stack[-1]["root"]
             if isinstance(obj, QWidget) and not self._is_within(obj, top):
                 return True
         return super().eventFilter(obj, event)
@@ -134,7 +176,7 @@ class SheetHost(QWidget):
         self.setGeometry(0, 0, p.width(), p.height())
         self._scrim.setGeometry(0, 0, self.width(), self.height())
         for entry in self._stack:
-            self._place(entry["widget"], entry["full_bleed"])
+            self._place(entry["root"], entry["full_bleed"])
 
     def _place(self, w: QWidget, full_bleed: bool) -> None:
         m = _VIEWER_MARGIN_PX if full_bleed else _MARGIN_PX
@@ -152,17 +194,34 @@ class SheetHost(QWidget):
         w.setGeometry((self.width() - ww) // 2, (self.height() - wh) // 2, ww, wh)
 
     # -- 시트 열기/닫기 ------------------------------------------------
-    def run(self, widget: QWidget, *, full_bleed: bool = False) -> int:
+    def run(self, widget: QWidget, *, full_bleed: bool = False,
+            chrome: Optional[bool] = None) -> int:
         """``widget`` 을 시트로 띄우고 닫힐 때까지 기다린다 — ``exec()`` 대체.
 
-        ``QDialog`` 면 ``result()`` 를, 아니면 0 을 돌려준다."""
+        ``QDialog`` 면 ``result()`` 를, 아니면 0 을 돌려준다.
+
+        ★ ``chrome`` — 제목줄(제목 + ✕)을 씌운다.  창 안으로 들어오면 **OS 타이틀바가
+        사라진다**: 창 제목(무슨 팝업인지)과 닫기 버튼을 그것이 제공했으므로, 그대로
+        두면 '이게 뭔지 모르고 닫을 수도 없는' 시트가 생긴다.  기본값은 '창 제목이
+        있으면 씌운다' — 스스로 제목을 그리는 메시지/선택 시트는 ``False`` 로 끈다."""
+        if chrome is None:
+            chrome = bool(widget.windowTitle())
         prev_parent = widget.parentWidget()
         prev_flags = widget.windowFlags()
-        widget.setParent(self)
-        widget.setWindowFlags(Qt.WindowType.Widget)
+        frame: Optional[_SheetFrame] = None
+        if chrome:
+            frame = _SheetFrame(self, widget.windowTitle())
+            frame.set_content(widget)
+            frame.close_requested.connect(widget.close)
+            root: QWidget = frame
+        else:
+            widget.setParent(self)
+            widget.setWindowFlags(Qt.WindowType.Widget)
+            root = widget
         loop = QEventLoop()
-        entry = {"widget": widget, "loop": loop, "prev_parent": prev_parent,
-                 "prev_flags": prev_flags, "full_bleed": full_bleed}
+        entry = {"widget": widget, "root": root, "frame": frame, "loop": loop,
+                 "prev_parent": prev_parent, "prev_flags": prev_flags,
+                 "full_bleed": full_bleed}
         self._stack.append(entry)
 
         finished_conn = None
@@ -175,11 +234,12 @@ class SheetHost(QWidget):
         self.show()
         self.raise_()
         self._scrim.show()
+        root.show()
+        root.raise_()
         widget.show()
-        widget.raise_()
-        self._place(widget, full_bleed)
+        self._place(root, full_bleed)
         widget.setFocus(Qt.FocusReason.PopupFocusReason)
-        self._fade_in(widget)
+        self._fade_in(root)
         try:
             loop.exec()                      # ★ exec() 과 같은 동기 의미
         finally:
@@ -216,14 +276,21 @@ class SheetHost(QWidget):
             w.setWindowFlags(entry["prev_flags"])
         except RuntimeError:
             pass                             # 이미 파괴됐다 — 되돌릴 것이 없다
+        frame = entry.get("frame")
+        if frame is not None:
+            try:
+                frame.hide()
+                frame.deleteLater()
+            except RuntimeError:
+                pass
         if not self._stack:
             self._set_app_filter(False)
             self._scrim.hide()
             self.hide()
         else:
-            top = self._stack[-1]["widget"]
+            top = self._stack[-1]["root"]
             top.raise_()
-            top.setFocus(Qt.FocusReason.PopupFocusReason)
+            self._stack[-1]["widget"].setFocus(Qt.FocusReason.PopupFocusReason)
         loop = entry["loop"]
         if loop.isRunning():
             loop.quit()
@@ -260,8 +327,14 @@ def host_for(widget: Optional[QWidget]) -> Optional[SheetHost]:
     return None
 
 
-def run(dialog: QWidget, *, full_bleed: bool = False) -> int:
-    """``dialog.exec()`` 대체 — 앱 안 시트로 띄운다.  호스트가 없으면 네이티브 exec."""
+def run(dialog, *, full_bleed: bool = False) -> int:
+    """``dialog.exec()`` 대체 — 앱 안 시트로 띄운다.
+
+    ★ 호스팅할 수 없는 것(호스트를 못 찾음, 애초에 위젯이 아님)은 **그대로 ``exec()``**
+    한다.  이 함수는 59개 호출부의 유일한 통로이므로, 예상 밖의 입력에 예외를 던지면
+    그 기능이 통째로 죽는다 — 폴백이 곧 안전판이다."""
+    if not isinstance(dialog, QWidget):
+        return dialog.exec() if hasattr(dialog, "exec") else 0
     host = host_for(dialog.parentWidget()) or host_for(dialog)
     if host is None:
         return dialog.exec() if isinstance(dialog, QDialog) else 0
@@ -368,7 +441,7 @@ def _message(parent: Optional[QWidget], title: str, text: str, *,
         return fn(parent, title, text, buttons, default)
     sheet = _MessageSheet(None, title, text, buttons, default, kind)
     try:
-        host.run(sheet)
+        host.run(sheet, chrome=False)
         return sheet.answer()
     finally:
         sheet.deleteLater()
@@ -496,7 +569,7 @@ def choose(parent, title: str, text: str, options, *, default=None,
         return None
     sheet = _ChoiceSheet(title, text, options, default=default, heading=heading)
     try:
-        host.run(sheet)
+        host.run(sheet, chrome=False)
         return sheet.picked()
     finally:
         sheet.deleteLater()

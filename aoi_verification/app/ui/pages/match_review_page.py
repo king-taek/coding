@@ -28,6 +28,7 @@ from ...utils import image_io
 from ..widgets.neon_button import NeonButton
 from ..widgets.no_wheel_slider import NoWheelSlider
 from ..widgets.zoom_window import FullscreenViewer
+from ..widgets import sheet_host as sheets
 
 
 _THUMB_PX = 140                             # 기준 썸네일 기본 크기 (#2)
@@ -52,7 +53,7 @@ def _open_fullscreen(path: Path, parent=None) -> None:
     """기존 풀스크린 뷰어로 원본 이미지를 크게 보여준다 (#13)."""
     try:
         viewer = FullscreenViewer(Path(path), parent)
-        viewer.exec()
+        sheets.run(viewer, full_bleed=True)
     except Exception:
         pass
 
@@ -532,7 +533,7 @@ class _MatchRow(QFrame):
             lambda it: self.swap_requested.emit(
                 self.match, it, self._score_for(it))
         )
-        viewer.exec()
+        sheets.run(viewer, full_bleed=True)
 
     def _primary_val_item(self) -> ImageItem:
         """현재 1위 매치 val 의 ImageItem — runners_up 엔 없으므로 즉석 생성 (#5)."""
@@ -558,7 +559,7 @@ class _MatchRow(QFrame):
             lambda it: self.swap_requested.emit(
                 self.match, it, self._score_for(it))
         )
-        viewer.exec()
+        sheets.run(viewer, full_bleed=True)
 
     def _score_for(self, item: ImageItem) -> float:
         for it, s in self._runners_up:

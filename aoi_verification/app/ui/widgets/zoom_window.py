@@ -22,7 +22,7 @@ from .. import theme
 from ...models.slot import ImageItem
 from ...utils import image_io
 from .neon_button import NeonButton
-from .window_controls import add_fullscreen_shortcut, enable_window_controls
+from . import sheet_host as sheets
 
 # source 종류 ----------------------------------------------------------------
 SOURCE_TARGET = "target"        # 검증 대상 (Right)
@@ -254,8 +254,9 @@ class ZoomWindow(QDialog):
         self._resize_within_screen(1280, 800)
 
         # 창에 최소화/최대화 버튼 + F11 전체화면 토글 (#9). 첫 show 이전에 설정.
-        enable_window_controls(self)
-        add_fullscreen_shortcut(self)
+        # ★ 창 제어(최소화/최대화/F11) 헬퍼를 부르지 않는다 — 이 다이얼로그는
+        #   별도 OS 창이 아니라 **메인 창 안의 시트**로 뜬다(widgets/sheet_host.py).
+        #   최대화·전체화면은 메인 창이 담당한다.
 
         self._build()
 
@@ -396,4 +397,4 @@ class ZoomWindow(QDialog):
 
     def _open_fullscreen(self, item: ImageItem) -> None:
         viewer = FullscreenViewer(item.path, self)
-        viewer.exec()
+        sheets.run(viewer, full_bleed=True)

@@ -26,7 +26,7 @@ from .. import theme
 from ...models.slot import ImageItem
 from ...utils import image_io
 from .neon_button import NeonButton
-from .window_controls import add_fullscreen_shortcut, enable_window_controls
+from . import sheet_host as sheets
 
 
 _TILE_PX = config.Sizing.BULK_TILE_PX   # 다중 선택 그리드 기본 타일 (= 180)
@@ -148,8 +148,9 @@ class BulkSelectDialog(QDialog):
             want_h = min(want_h, int(g.height() * 0.88))
         self.resize(want_w, want_h)
         # 창에 최소화/최대화 버튼 + F11 전체화면 토글 (#9). 첫 show 이전에 설정.
-        enable_window_controls(self)
-        add_fullscreen_shortcut(self)
+        # ★ 창 제어(최소화/최대화/F11) 헬퍼를 부르지 않는다 — 이 다이얼로그는
+        #   별도 OS 창이 아니라 **메인 창 안의 시트**로 뜬다(widgets/sheet_host.py).
+        #   최대화·전체화면은 메인 창이 담당한다.
 
         # 전체 선택 상태 (페이지 전환에도 유지) — key 기반.
         self._selected_keys: set[str] = set()
@@ -375,7 +376,7 @@ class BulkSelectDialog(QDialog):
         """우클릭 → 풀스크린 확대 뷰 (휠 줌 + 드래그 팬)."""
         from .zoom_window import FullscreenViewer
         viewer = FullscreenViewer(item.path, self)
-        viewer.exec()
+        sheets.run(viewer, full_bleed=True)
 
     # ------------------------------------------------------------------
     def _relayout_grids(self) -> None:

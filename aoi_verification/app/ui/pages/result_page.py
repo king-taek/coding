@@ -207,7 +207,7 @@ class ResultPage(QWidget):
         dlg = MatchesReviewDialog(self._result.matches, parent=self,
                                   coord_mode=self._coord_mode,
                                   tolerance=self._tolerance)
-        dlg.exec()
+        sheets.run(dlg, full_bleed=True)
         removed = dlg.removed
         if not removed:
             return
@@ -275,7 +275,7 @@ class ResultPage(QWidget):
             coord_mode=self._coord_mode,
             tolerance=self._tolerance,
         )
-        dlg.exec()
+        sheets.run(dlg, full_bleed=True)
         if not dlg.new_matches:
             return
         # 신규 매칭을 결과에 합치고 미매칭 리스트에서 해당 ref 들을 제거.

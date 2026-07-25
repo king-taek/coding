@@ -418,8 +418,7 @@ class DevBenchmarkDialog(QDialog):
         from .label_maker_dialog import LabelMakerDialog
         dlg = LabelMakerDialog(self, default_ref=self.ref_edit.text().strip(),
                                default_val=self.val_edit.text().strip())
-        dlg.showMaximized()
-        dlg.exec()
+        sheets.run(dlg, full_bleed=True)
         if dlg.labels_path():
             self.labels_edit.setText(dlg.labels_path())
             self.self_test.setChecked(False)

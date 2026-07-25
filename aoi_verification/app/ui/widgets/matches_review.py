@@ -21,7 +21,6 @@ from ...models.result import MatchResult
 from ...utils import image_io
 from .neon_button import NeonButton
 from .no_wheel_slider import NoWheelSlider
-from .window_controls import add_fullscreen_shortcut, enable_window_controls
 
 
 _THUMB = config.Sizing.REVIEW_THUMB_PX  # 썸네일 기본 크기 (= 240), 슬라이더로 조절(#2).
@@ -183,8 +182,9 @@ class MatchesReviewDialog(QDialog):
             matches, key=lambda m: (m.slot, m.ref_path.name.lower()),
         )
         # 창에 최소화/최대화 버튼 + F11 전체화면 토글 (#9). 첫 show 이전에 설정.
-        enable_window_controls(self)
-        add_fullscreen_shortcut(self)
+        # ★ 창 제어(최소화/최대화/F11) 헬퍼를 부르지 않는다 — 이 다이얼로그는
+        #   별도 OS 창이 아니라 **메인 창 안의 시트**로 뜬다(widgets/sheet_host.py).
+        #   최대화·전체화면은 메인 창이 담당한다.
         self._build()
 
     @property

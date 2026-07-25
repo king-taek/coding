@@ -235,7 +235,7 @@ class _SidePanel(QFrame):
                 self._name, action_id, items,
             )
         )
-        dlg.exec()
+        sheets.run(dlg, full_bleed=True)
 
 
 # ---------------------------------------------------------------------------
@@ -841,7 +841,7 @@ class SelectPage(QWidget):
         win.action_requested.connect(
             lambda act, sel: self._apply_zoom_action(panel, act, sel)
         )
-        win.exec()
+        sheets.run(win, full_bleed=True)
 
     def _apply_zoom_action(self, panel: str, action: str,
                             items: list[ImageItem]) -> None:
@@ -923,4 +923,4 @@ class SelectPage(QWidget):
                 self.PANEL_BOTTOM, action_id, items,
             )
         )
-        dlg.exec()
+        sheets.run(dlg, full_bleed=True)

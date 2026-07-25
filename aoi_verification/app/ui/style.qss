@@ -27,6 +27,12 @@ QDialog[role="sheet"], QWidget[role="sheet"] {
     border: 1px solid $line_strong;
     border-radius: $radius;
 }
+/* 시트 제목줄 — OS 타이틀바가 없어진 자리를 대신한다(제목 + 닫기).
+   면을 한 단 올려($elev) 내용 영역과 구분되게. */
+QWidget[role="sheetBar"] {
+    background-color: $elev;
+    border-bottom: 1px solid $line;
+}
 QLabel[role="sheetTitle"] {
     font-size: $font_sub_sz;
     font-weight: 700;

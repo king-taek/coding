@@ -297,6 +297,89 @@ def test_host_for_finds_the_host_through_parents(qapp, host):
 
 
 # ── 전역 이벤트 필터는 열려 있을 때만 ───────────────────────────────────────
+def test_titled_dialog_gets_a_title_bar_and_a_close_button(qapp, host):
+    """★ 창 안으로 들어오면 **OS 타이틀바가 없다** — 제목과 닫기를 시트가 대신해야 한다.
+
+    그러지 않으면 '무슨 팝업인지 모르고, 닫을 수도 없는' 시트가 생긴다(자체 닫기 버튼이
+    없는 뷰어에서 특히 치명적이다).  창 제목이 있으면 제목줄을 자동으로 씌운다."""
+    from aoi_verification.app.ui.widgets.sheet_host import _SheetFrame
+    win, h = host
+    dlg = QDialog(win)
+    dlg.setWindowTitle("슬롯 짝짓기")
+    got = {}
+
+    def check():
+        entry = h._stack[-1]
+        frame = entry["frame"]
+        got["framed"] = isinstance(frame, _SheetFrame)
+        got["titles"] = [lb.text() for lb in frame.findChildren(QLabel)
+                         if lb.property("role") == "sheetTitle"]
+        got["hosted"] = dlg.parentWidget() is frame
+        # ✕(닫기) 버튼을 누르면 시트가 닫혀야 한다.
+        btns = [b for b in frame.findChildren(sheet_host.NeonButton)]
+        got["has_close"] = bool(btns)
+        btns[0].click()
+
+    _later(40, check)
+    sheet_host.run(dlg)
+    assert got["framed"], "제목줄이 씌워지지 않았다"
+    assert got["titles"] == ["슬롯 짝짓기"], f"제목이 없다: {got['titles']}"
+    assert got["hosted"], "다이얼로그가 제목줄 안으로 들어가지 않았다"
+    assert got["has_close"], "닫기 버튼이 없다 — 닫을 방법이 사라졌다"
+    assert h._stack == [], "닫기 버튼을 눌렀는데 시트가 남았다"
+
+
+def test_message_sheet_is_not_double_titled(qapp, host):
+    """메시지/선택 시트는 스스로 제목을 그린다 — 제목줄을 겹쳐 씌우지 않는다."""
+    win, h = host
+    got = {}
+
+    def check():
+        got["frame"] = h._stack[-1]["frame"]
+        h._stack[-1]["widget"]._buttons[_SB.Ok].click()
+
+    _later(30, check)
+    sheet_host.info(win, "알림", "본문")
+    assert got["frame"] is None, "메시지 시트에 제목줄이 한 겹 더 씌워졌다"
+
+
+def test_no_popup_escapes_to_a_separate_window(qapp):
+    """★ 앱 코드에 **네이티브 팝업 호출이 남아 있지 않아야** 한다.
+
+    사용자 요청은 "켜지는 모든 팝업"이다 — 한 곳만 남아도 그 경로에서 창이 다시 뜬다.
+    금지: ``QMessageBox.information/warning/critical/question/about`` 정적 호출과
+    ``.exec()``.  둘 다 ``sheet_host`` 를 통과해야 한다(그 안의 폴백 구현은 예외).
+
+    ※ ``QFileDialog`` 는 검사하지 않는다 — OS 파일 브라우저는 앱 팝업이 아니고, 앱 안에
+    다시 만들면 네트워크 경로·경로 직접 입력·최근 위치를 잃는다(사용자 결정)."""
+    import io
+    import tokenize
+    ui_dir = (Path(__file__).resolve().parents[2] / "aoi_verification" / "app" / "ui")
+    bad_msg = ("QMessageBox.information", "QMessageBox.warning",
+               "QMessageBox.critical", "QMessageBox.question",
+               "QMessageBox.about")
+    offenders: list[str] = []
+    for path in sorted(ui_dir.rglob("*.py")):
+        if path.name == "sheet_host.py":
+            continue                       # 폴백 구현체 — 유일하게 허용된 곳
+        src = path.read_text(encoding="utf-8")
+        # 주석·문자열(설명)은 위반이 아니다 — 코드만 본다.
+        try:
+            code = " ".join(
+                t.string for t in tokenize.generate_tokens(io.StringIO(src).readline)
+                if t.type not in (tokenize.COMMENT, tokenize.STRING))
+        except Exception:
+            code = src
+        rel = path.relative_to(ui_dir.parents[2])
+        for pat in bad_msg:
+            if pat.replace(".", " . ") in code or pat in code:
+                offenders.append(f"{rel}: {pat}")
+        if ". exec ( )" in code or ".exec()" in code:
+            offenders.append(f"{rel}: .exec()")
+    assert not offenders, (
+        "별도 OS 창으로 뜨는 팝업이 남았다 — sheet_host 를 쓰라: " + ", ".join(offenders))
+
+
 def test_app_filter_is_installed_only_while_a_sheet_is_open(qapp, host):
     """전역 필터는 마우스 이동까지 전부 받는다 — 평소엔 걸어 두지 않는다."""
     win, h = host

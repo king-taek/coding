@@ -946,7 +946,7 @@ class MatchPage(QWidget):
         items = [c.item for c in self._candidates]
         win = ZoomWindow(self._current.slot, items, SOURCE_CANDIDATES, parent=self)
         win.action_requested.connect(self._on_zoom_candidates_action)
-        win.exec()
+        sheets.run(win, full_bleed=True)
 
     # ------------------------------------------------------------------
     # ‘더 크게 보기’ 모드
@@ -1181,7 +1181,7 @@ class MatchPage(QWidget):
         close.clicked.connect(dlg.accept)
         bar.addWidget(close)
         layout.addLayout(bar)
-        dlg.exec()
+        sheets.run(dlg, full_bleed=True)
 
     def _retry_skipped(self) -> None:
         """Skip 된 항목들을 큐 앞으로 다시 밀어넣고, 임계치를 낮춰 재시도."""

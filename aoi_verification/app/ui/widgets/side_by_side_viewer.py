@@ -19,7 +19,6 @@ from PyQt6.QtWidgets import (QApplication, QDialog, QHBoxLayout, QLabel,
 from ...models.slot import ImageItem
 from .. import theme
 from .neon_button import NeonButton
-from .window_controls import add_fullscreen_shortcut, enable_window_controls
 
 
 def _decode_original(path: Path) -> QPixmap:
@@ -126,8 +125,9 @@ class SideBySideViewer(QDialog):
             self.setMaximumSize(g.size())      # 화면 초과 성장 차단(#방어)
         else:
             self.resize(1400, 850)
-        enable_window_controls(self)
-        add_fullscreen_shortcut(self)
+        # ★ 창 제어(최소화/최대화/F11) 헬퍼를 부르지 않는다 — 이 다이얼로그는
+        #   별도 OS 창이 아니라 **메인 창 안의 시트**로 뜬다(widgets/sheet_host.py).
+        #   최대화·전체화면은 메인 창이 담당한다.
         self._build(action_label)
         QShortcut(QKeySequence("Esc"), self, activated=self.close)
         QShortcut(QKeySequence(Qt.Key.Key_Left), self, activated=self._prev)

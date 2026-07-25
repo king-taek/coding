@@ -554,7 +554,7 @@ class MainWindow(QMainWindow):
             val_meta=getattr(self, "_slot_meta_val", None),
             parent=self,
         )
-        if dlg.exec() != QDialog.DialogCode.Accepted:
+        if sheets.run(dlg, full_bleed=True) != QDialog.DialogCode.Accepted:
             return
         if dlg.mapping.pairs:
             self._apply_slot_pairs(sr, dlg.mapping.pairs)

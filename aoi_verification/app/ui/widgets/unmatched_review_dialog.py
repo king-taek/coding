@@ -30,7 +30,6 @@ from ...models.slot import ImageItem
 from ...utils import image_io
 from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
-from .window_controls import add_fullscreen_shortcut, enable_window_controls
 from . import sheet_host as sheets
 
 
@@ -282,8 +281,9 @@ class UnmatchedReviewDialog(QDialog):
             self.resize(1400, 900)
         # 다이얼로그 창에 최소화/최대화 버튼 + F11 전체화면 토글 (#9).
         # 반드시 첫 show 이전에 플래그를 설정해야 창이 사라지지 않는다.
-        enable_window_controls(self)
-        add_fullscreen_shortcut(self)
+        # ★ 창 제어(최소화/최대화/F11) 헬퍼를 부르지 않는다 — 이 다이얼로그는
+        #   별도 OS 창이 아니라 **메인 창 안의 시트**로 뜬다(widgets/sheet_host.py).
+        #   최대화·전체화면은 메인 창이 담당한다.
         self._build()
         # 후보 풀이 작아(<300) 캐시 miss 를 그 자리에서 CPU 재계산할 때 띄우는 로딩 오버레이.
         # 다이얼로그 전체를 덮어 '계산 중'을 알린다(부모 위젯 size 추적).
@@ -819,7 +819,7 @@ class UnmatchedReviewDialog(QDialog):
             parent=self,
         )
         viewer.action_requested.connect(self._on_tile_selected)
-        viewer.exec()
+        sheets.run(viewer, full_bleed=True)
 
     def _on_tile_view(self, val_item: ImageItem) -> None:
         """후보 크게보기 — 클릭한 후보 위치부터."""
