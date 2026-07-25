@@ -171,6 +171,18 @@ class SlotFeatureCache:
                 if k not in keep:
                     del self._slots[k]
 
+    def clear(self) -> None:
+        """전부 비운다 — 세션이 끝났을 때(검증 중단 후 재실행) 쓴다.
+
+        ``set_active`` 는 **활성 슬롯 하나는 남기므로** 세션 초기화에 못 쓴다.
+        특징은 전처리 설정(cfg)에 따라 달라지는데 메모리 캐시엔 그 시그니처가
+        박혀 있지 않다 — 설정을 바꿔 다시 돌릴 때 옛 특징이 남아 있으면 안 된다
+        (디스크 캐시는 ``_score_signature`` 로 분리돼 있어 안전하다)."""
+        with self._lock:
+            self._slots.clear()
+            self._active = None
+            self._lookahead = None
+
     # ------------------------------------------------------------------
     def build(self, slot: str, items: Iterable[ImageItem],
               *, cfg=None) -> Dict[Path, Feature]:
