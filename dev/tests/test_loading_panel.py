@@ -75,9 +75,17 @@ def test_position_settles_slower_than_opacity(qapp):
     # 페이드는 등속(스크림 디밍이 슬램하지 않게), 위치는 끝에서 감속.
     host, ov = _overlay(qapp)
     try:
-        from PyQt6.QtCore import QEasingCurve
+        from PyQt6.QtCore import QEasingCurve, QEasingCurve as _EC
         assert ov._fade_anim.easingCurve().type() == QEasingCurve.Type.Linear
-        assert ov._rise_anim.easingCurve().type() == QEasingCurve.Type.OutQuart
+        rise = ov._rise_anim.easingCurve()
+        # ★ 곡선 **이름**을 고정하지 않는다 — 중요한 건 "페이드가 끝나는 시점에 위치
+        #   이동이 눈에 보일 만큼 남아 있는가"다.  OutQuart 는 이 검사를 통과하지
+        #   못했다(잔여 0.8px) — 두 속도가 숫자로만 존재했다.
+        t_at_fade_end = LoadingOverlay.FADE_IN_MS / LoadingOverlay.RISE_IN_MS
+        remaining = LoadingOverlay.RISE_IN_PX * (1.0 - rise.valueForProgress(
+            t_at_fade_end))
+        assert remaining >= 4.0, (
+            f"페이드 종료 시점 잔여 이동 {remaining:.1f}px — 안착이 눈에 보이지 않는다")
     finally:
         host.deleteLater()
 

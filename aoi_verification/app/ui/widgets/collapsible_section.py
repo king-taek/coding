@@ -46,10 +46,13 @@ class CollapsibleSection(QWidget):
         self._toggle.setText(self._close_label if self._expanded else self._open_label)
         self._toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         self._toggle.setAutoRaise(True)
-        self._toggle.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        # ★ 폭을 자기 글자만큼만 — 이전엔 1448px 로 늘어난 중앙 정렬 헤더라 클릭영역이
+        #   보이는 면적의 17배였고 좌측 정렬 축을 깨뜨렸다.
+        self._toggle.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self._toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._toggle.setProperty("role", "disclosure")   # QSS 포커스 링·타깃 하한
         self._toggle.clicked.connect(self._on_clicked)
-        root.addWidget(self._toggle)
+        root.addWidget(self._toggle, alignment=Qt.AlignmentFlag.AlignLeft)
 
         # 본문 컨테이너 ------------------------------------------------------
         self._content = QFrame(self)
@@ -99,7 +102,12 @@ class CollapsibleSection(QWidget):
             animate = False
         if animate:
             self._anim.setDuration(motion.dur(_ANIM_DURATION_MS))
-            current = self._content.maximumHeight()
+            # ★ 시작값을 **실제 높이로 클램프**한다.  펼침이 끝나면 상한을 16777215 로
+            #   풀어 두는데(나중에 커지는 내용이 잘리지 않게), 그 값을 그대로 접기
+            #   시작값으로 쓰면 OutQuart 곡선의 앞 90%가 화면 밖 구간에서 소진돼
+            #   "135ms 무변화 + 8.5ms 스냅" 이 된다(실측).  두 수정이 서로를 깼다.
+            current = min(self._content.maximumHeight(),
+                          self._content.sizeHint().height())
             self._anim.stop()
             self._anim.setStartValue(int(current))
             self._anim.setEndValue(int(target))

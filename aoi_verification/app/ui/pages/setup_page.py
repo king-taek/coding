@@ -20,7 +20,7 @@ from ...utils.prefs import AutomationLevel, EngineMode
 from ..widgets.collapsible_section import CollapsibleSection
 from ..widgets.neon_button import NeonButton
 from ..widgets.neon_card import NeonCard
-from ..widgets.no_wheel_slider import NoWheelSlider
+from ..widgets.no_wheel_slider import NoWheelDoubleSpinBox, NoWheelSlider
 from ..widgets.option_group import OptionGroup, reflow_into_grid
 from ..widgets.switch_row import SwitchRow
 
@@ -208,7 +208,7 @@ class SetupPage(QWidget):
         card = NeonCard(role="card", parent=self)
         card.setToolTip(i18n.KO.MODE_BADGE_TOOLTIP)
         cap = QLabel(i18n.KO.MODE_BADGE_CAPTION, card)
-        cap.setProperty("role", "colHead")
+        cap.setProperty("role", "badgeCaption")
         card.body().addWidget(cap)
         self._mode_badge = QLabel("", card)
         self._mode_badge.setProperty("role", "modeBadge")
@@ -336,7 +336,9 @@ class SetupPage(QWidget):
         self.auto_group = OptionGroup(
             [(AutomationLevel.USER_SELECT, i18n.KO.AUTOMATION_USER_SELECT),
              (AutomationLevel.AUTO_ALL, i18n.KO.AUTOMATION_AUTO_ALL)],
-            current=_last_auto, parent=auto_card,
+            current=_last_auto,
+            # 부수효과 없음(prefs 저장뿐) → 방향키로 바로 고를 수 있다(라디오 감각).
+            activate_on_arrow=True, parent=auto_card,
         )
         self.auto_group.selection_changed.connect(
             lambda key: _prefs.patch(automation_level=key))
@@ -350,11 +352,14 @@ class SetupPage(QWidget):
         self._auto_help_btn.toggled.connect(self._auto_hint.setVisible)
         return auto_card
 
-    # 두 카드를 나란히 두려면 이 폭이 필요하다.  밑돌면 세로로 쌓는다 — 800×600 에서
-    # 나란히 두면 경로 입력란이 ~85px 로 짜부라져 폴더 이름을 읽을 수 없었다(실측).
-    _DEVICE_SIDE_BY_SIDE_W = 900
+    # ★ 나란히 둘지는 **카드가 요구하는 폭**으로 판단한다 — '900px' 같은 매직 넘버는
+    #   맞출 수 없다.  실제로 900 으로 두었더니 1000px 창에서 두 카드가 나란히 서고
+    #   가로 스크롤 58px 이 났다(경로 입력란 하한 240 + 라벨 + [폴더 선택…] × 2).
+    #   `minimumSizeHint()` 는 카드 패딩·라벨·버튼을 모두 포함한 진짜 하한이다.
     # 101단계 슬라이더를 1200px 에 펼치면 단계당 12px — 넓을수록 정밀해지지 않는다.
     _SLIDER_MAX_W = 320
+    _SLIDER_MIN_W = 200      # 101단계를 74px 에 펼치면 조절이 불가능하다(실측)
+    _PATH_MIN_W = 240        # 폴더 이름이 읽히는 하한
 
     def _build_device_row(self) -> QWidget:
         """기준/검증 장비 폴더·호기 — 넓으면 2열, 좁으면 세로로 쌓는다."""
@@ -367,20 +372,38 @@ class SetupPage(QWidget):
         self.val_group, self.val_path_edit, self.val_machine_edit = \
             self._make_machine_group(i18n.KO.SETUP_VAL_GROUP)
         self._device_cards = [self.ref_group, self.val_group]
+        self._device_host = host
+        # ★ 자기 폭이 정해진 뒤 다시 흘려야 한다 — B안에서는 이 행이 좁은 그리드 칸
+        #   안에 들어가는데, 페이지 폭(1512)을 보고 나란히 두면 입력란이 104px 로
+        #   짜부라진다(실측).  호스트의 resize 를 직접 듣는다.
+        host.installEventFilter(self)
         self._reflow_device_row()
         return host
+
+    def eventFilter(self, obj, event):  # noqa: N802
+        from PyQt6.QtCore import QEvent
+        if (event.type() == QEvent.Type.Resize
+                and obj is getattr(self, "_device_host", None)):
+            self._reflow_device_row()
+        return super().eventFilter(obj, event)
 
     def _reflow_device_row(self) -> None:
         grid = getattr(self, "_device_grid", None)
         if grid is None:
             return
-        avail = self.width() or 0
-        if not avail:
+        # ★ **자기 호스트의 폭**을 쓴다 — 페이지 폭을 쓰면 좁은 그리드 칸(B안) 안에서도
+        #   1512px 인 줄 알고 두 카드를 나란히 둬 입력란이 104px 이 된다.
+        host = getattr(self, "_device_host", None)
+        avail = (host.width() if host is not None else 0) or 0
+        if avail <= 1:
+            avail = self.width() or 0
+        if avail <= 1:
             p = self.parentWidget()
             avail = p.width() if p is not None else 0
-        # 한 열로 접을지 두 열로 둘지 — reflow_into_grid 에 '최소 카드 폭'을 넘긴다.
-        min_w = self._DEVICE_SIDE_BY_SIDE_W // 2
-        reflow_into_grid(grid, self._device_cards, avail, min_w)
+        # 한 열로 접을지 두 열로 둘지 — 카드 자신의 하한을 넘긴다(reflow 가 열 수 계산).
+        need = max((c.minimumSizeHint().width() for c in self._device_cards),
+                   default=self._PATH_MIN_W)
+        reflow_into_grid(grid, self._device_cards, avail, need)
 
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
@@ -399,6 +422,8 @@ class SetupPage(QWidget):
         title = QLabel(i18n.KO.SCOPE_TITLE, host)
         title.setProperty("role", "cardTitle")
         col.addWidget(title)
+        # ★ activate_on_arrow 를 켜지 않는다(기본 False) — 'subset' 선택은 슬롯 선택
+        #   **모달**을 띄운다.  방향키 한 번에 경고창이 떠 하네스가 블로킹된 적이 있다.
         self.scope_group = OptionGroup(
             [("all", i18n.KO.SCOPE_ALL), ("subset", i18n.KO.SCOPE_SUBSET)],
             current="all", parent=host,
@@ -434,7 +459,7 @@ class SetupPage(QWidget):
         _tol_layout.setSpacing(6)
         _tol_label = QLabel(i18n.KO.COORD_TOLERANCE_LABEL, self._tol_row)
         _tol_label.setToolTip(i18n.KO.COORD_TOLERANCE_TOOLTIP)
-        self.coord_tol_spin = QDoubleSpinBox(self._tol_row)
+        self.coord_tol_spin = NoWheelDoubleSpinBox(self._tol_row)
         self.coord_tol_spin.setRange(10.0, 5000.0)
         self.coord_tol_spin.setSingleStep(50.0)
         self.coord_tol_spin.setDecimals(1)
@@ -485,7 +510,9 @@ class SetupPage(QWidget):
         self.legacy_group = OptionGroup(
             [(EngineMode.BASIC, i18n.KO.ENGINE_MODE_BASIC),
              (EngineMode.EFFICIENCY, i18n.KO.ENGINE_MODE_EFFICIENCY)],
-            current=_legacy_sub, parent=engine_card,
+            current=_legacy_sub,
+            # 부수효과 없음 → 방향키 즉시 커밋 허용.
+            activate_on_arrow=True, parent=engine_card,
         )
         self.legacy_group.selection_changed.connect(self._on_legacy_sub_changed)
         engine_card.body().addWidget(self.legacy_group)
@@ -501,6 +528,7 @@ class SetupPage(QWidget):
         self.slider.setValue(int(round(_prefs_now.threshold * 100)))
         # 101단계를 1219px 에 펼치면 단계당 12px 이라 정밀 조절이 오히려 어렵다.
         self.slider.setMaximumWidth(self._SLIDER_MAX_W)
+        self.slider.setMinimumWidth(self._SLIDER_MIN_W)
         self.threshold_label = QLabel(f"{self.slider.value()} %", self._threshold_row)
         # 값은 모노 + 우측 정렬 — 자릿수가 바뀌어도 좌우로 춤추지 않는다.
         self.threshold_label.setProperty("role", "mono")
@@ -639,6 +667,9 @@ class SetupPage(QWidget):
         grid.setColumnStretch(1, 1)          # 입력란이 늘어난다
 
         path_edit = QLineEdit(card)
+        # 폴더 경로는 읽혀야 의미가 있다 — 컨테이너 계산이 어긋나도 이 하한은 남는다
+        # (B안 그리드 칸에서 104px 까지 짜부라진 적이 있다).
+        path_edit.setMinimumWidth(self._PATH_MIN_W)
         path_edit.setPlaceholderText(i18n.KO.SETUP_FOLDER_PLACEHOLDER)
         path_edit.setReadOnly(False)
         browse = NeonButton(i18n.KO.BTN_BROWSE, role="ghost")

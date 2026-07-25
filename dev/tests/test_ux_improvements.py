@@ -34,9 +34,11 @@ def test_loading_overlay_shows_counts(qapp):
     ov.set_progress(0, 40, "후보 생성")
     assert ov._progress.maximum() == 40
     assert ov._count_label.text() == "0 / 40"
-    # busy(총량 미지)에서는 숫자를 감춘다 — 없는 총량을 만들어 보이지 않게.
+    # busy(총량 미지)에서는 숫자를 **비운다**(감추지 않는다) — hide 하면 패널 높이가
+    # 36px 뛰고 중앙 정렬이라 상단이 18px 즉시 점프했다(실측).  자리를 예약한다.
     ov.set_progress(0, 0, "스캔 중")
-    assert ov._count_label.isHidden() is True
+    assert ov._count_label.text() == ""
+    assert ov._count_label.isHidden() is False
 
 
 # ── 크게보기 뷰어: 이전/다음 인접 + 공통 박스 ─────────────────────────────

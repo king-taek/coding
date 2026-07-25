@@ -29,8 +29,9 @@ class _SpinnerDot(QWidget):
         self.setFixedSize(QSize(diameter, diameter))
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
-        if motion.enabled():
-            self._timer.start(16)                       # ~60fps
+        # ★ 생성자에서 켜지 않는다.  오버레이는 앱 시작 시 1회 생성돼 대부분의 시간을
+        #   숨어 있는데, 이전엔 16ms(62.5Hz) 타이머가 그동안 계속 돌았다.
+        #   `start()`(= show_overlay)에서만 켠다.
 
     def _tick(self) -> None:
         # 회전 속도를 변형 모션 강도로 스케일(높을수록 느리고 웅장) — C12 보완.
@@ -300,7 +301,11 @@ class LoadingOverlay(QWidget):
         self._fade_anim.valueChanged.connect(self._on_fade)
         self._fade_anim.finished.connect(self._on_fade_done)
         self._rise_anim = QVariantAnimation(self)
-        self._rise_anim.setEasingCurve(QEasingCurve.Type.OutQuart)
+        # ★ OutQuart 는 너무 앞에서 소진된다: 32px 이동의 잔여가 t=0.5 에 2.0px,
+        #   t=0.6 에 0.8px — 페이드(180ms)가 끝나는 시점에 이미 사실상 도착해 있어
+        #   사용자가 말한 **두 번째 속도('마지막에 천천히 도착')가 화면에 없다**(실측).
+        #   OutQuad 로 낮추면 페이드 종료 시점에 5~6px 이 남아 안착이 눈에 보인다.
+        self._rise_anim.setEasingCurve(QEasingCurve.Type.OutQuad)
         self._rise_anim.valueChanged.connect(self._on_rise)
 
         # 최소 표시 시간 가드 — 초단타 작업이 '깜빡'하지 않게(C9).
@@ -373,7 +378,7 @@ class LoadingOverlay(QWidget):
             self._rise_anim.setStartValue(0.0)
             self._rise_anim.setEndValue(1.0)
             self._rise_anim.setDuration(motion.dur(self.RISE_IN_MS))
-            self._rise_anim.setEasingCurve(QEasingCurve.Type.OutQuart)
+            self._rise_anim.setEasingCurve(QEasingCurve.Type.OutQuad)
             self._rise_anim.start()
             self._stagger_bar()
         else:
@@ -384,9 +389,13 @@ class LoadingOverlay(QWidget):
         self._cover_parent()
 
     _BAR_SLIDE_PX = 8
-    # 패널이 안착한 **뒤에** 들어와야 계층이 순서대로 읽힌다.  이전 60ms 는 진행바가
-    # 패널보다 4ms 먼저 도착해(60+128 vs 180) 순서가 뒤집혀 있었다(실측 지적).
-    BAR_STAGGER_MS = 110
+    # 패널이 안착한 **뒤에** 들어와야 계층이 순서대로 읽힌다.
+    # ★ 비교 대상은 페이드(FADE_IN_MS)가 아니라 **위치 안착**(RISE_IN_MS)이다.  60→110 으로
+    #   올렸을 때도 여전히 먼저 도착했다(88+128=216 vs 안착 240) — 페이드와 비교한
+    #   계산이 두 축 분리를 반영하지 못했기 때문.  지연 + 자기 지속시간이 안착보다
+    #   뒤가 되도록 잡는다(test_loading_panel 이 이 부등식을 고정한다).
+    BAR_STAGGER_MS = 210
+    BAR_SLIDE_MS = 160
 
     def _set_bar_slide(self, t: float) -> None:
         """t=0 → 아래로 _BAR_SLIDE_PX 밀린 상태, t=1 → 제자리.
@@ -413,7 +422,7 @@ class LoadingOverlay(QWidget):
             a = QVariantAnimation(self)
             a.setStartValue(0.0)
             a.setEndValue(1.0)
-            a.setDuration(max(120, motion.dur(160)))
+            a.setDuration(max(120, motion.dur(self.BAR_SLIDE_MS)))
             a.setEasingCurve(QEasingCurve.Type.OutQuart)
             a.valueChanged.connect(lambda v: self._set_bar_slide(float(v)))
             a.start(QVariantAnimation.DeletionPolicy.DeleteWhenStopped)
@@ -483,14 +492,17 @@ class LoadingOverlay(QWidget):
     def set_progress(self, done: int, total: int, message: str = "") -> None:
         if message:
             self._label.setText(message)
+        was_busy = not self._busy.isHidden()
+        mode_changed = (total > 0) == was_busy
         if total > 0:
             self._busy.stop()
             self._busy.hide()
             self._progress.show()
             done = max(0, min(int(done), int(total)))
             self._target_val = done
+            # ★ hide 하지 않는다 — 자리를 예약해 두면 busy↔결정형 전환에 패널 높이가
+            #   뛰지 않는다(이전 36px 점프 → 중앙 정렬이라 상단이 18px 즉시 튀었다).
             self._count_label.setText(f"{done} / {int(total)}")
-            self._count_label.show()
             if self._progress.maximum() != total:      # 단계 전환/총량 변경 → 스냅
                 self._val_anim.stop()
                 self._progress.setRange(0, total)
@@ -511,10 +523,15 @@ class LoadingOverlay(QWidget):
         else:
             self._val_anim.stop()
             self._progress.hide()                       # busy: 혜성 스윕으로 교체
-            self._count_label.hide()                    # 총량을 모르니 숫자도 없다
+            self._count_label.setText("")               # 총량을 모르니 숫자는 비운다
             self._busy.show()
             self._busy.start()
-        self._cover_parent()
+        # ★ 매 tick 마다 _cover_parent() 를 부르지 않는다 — sizeHint + setGeometry 가
+        #   진행 갱신 횟수만큼 돌았다(200 tick = 200회).  크기는 부모 리사이즈
+        #   (eventFilter)와 표시 시점에만 바뀐다.  단, busy↔결정형 전환은 내용이
+        #   바뀌므로 그때만 다시 배치한다.
+        if mode_changed:
+            self._cover_parent()
 
     # ------------------------------------------------------------------
     def eventFilter(self, obj, event) -> bool:  # noqa: N802

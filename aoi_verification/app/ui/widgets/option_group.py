@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Optional, Sequence
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, Qt, pyqtSignal
 from PyQt6.QtWidgets import (QButtonGroup, QGridLayout, QPushButton, QSizePolicy,
                              QWidget)
 
@@ -41,9 +41,12 @@ def reflow_into_grid(grid: QGridLayout, widgets: Sequence[QWidget],
     if not widgets:
         return 0
     spacing = max(0, grid.spacing())
-    item_w = max(1, int(min_item_w) + spacing)
-    avail = int(available_w) if available_w and available_w > 1 else item_w
-    cols = max(1, min(len(widgets), avail // item_w))
+    min_w = max(1, int(min_item_w))
+    avail = int(available_w) if available_w and available_w > 1 else min_w
+    # ★ n 열에 필요한 폭은 n*min_w + (n-1)*spacing 이다 — `avail // (min_w + spacing)` 은
+    #   **마지막 열에도** 간격을 물려 열을 하나 덜 준다(예: 736px / 360px 최소 → 2열이
+    #   들어가는데 1열로 계산).  간격 하나를 더해 보정한다.
+    cols = max(1, min(len(widgets), (avail + spacing) // (min_w + spacing)))
     # 이미 그 열 수로 그 위젯들이 배치돼 있으면 그대로 둔다.
     if grid.count() == len(widgets) and _grid_cols(grid) == cols:
         return cols
@@ -81,15 +84,20 @@ class OptionGroup(QWidget):
                  min_tile_w: int = DEFAULT_MIN_TILE_W,
                  fixed_cols: int = 0,
                  role: str = "option",
-                 activate_on_arrow: bool = True,
+                 activate_on_arrow: bool = False,
                  parent: Optional[QWidget] = None) -> None:
         """``fixed_cols`` 를 주면 폭에 상관없이 그 열 수로 고정한다(한 줄 칩 그룹 등).
 
         ``role`` — QSS 등급.  ``"option"``(기본, 44px 타일) 또는 ``"chip"``(작은 칩).
 
-        ``activate_on_arrow`` — ★ ``False`` 면 방향키가 **포커스만** 옮기고 선택은
-        Space/Enter 로 확정한다.  파괴적 액션(배치 전환 = 페이지 재생성)에 방향키 즉시
-        커밋을 두면 키보드로 훑기만 해도 화면이 날아가고 포커스를 잃는다.
+        ``activate_on_arrow`` — 방향키로 선택까지 확정할지.  **기본이 ``False``** 다:
+        방향키는 **포커스만** 옮기고 확정은 Space/Enter 로 한다.
+
+        왜 기본이 False 인가 — 이 위젯의 선택은 **부수효과를 가진다**.  배치·색 모드는
+        페이지 재생성(입력 이관·포커스 소실)이고, 진행 범위 'subset' 은 **모달 다이얼로그**
+        를 띄운다.  실측: 진행 범위 타일에 → 키 한 번으로 "먼저 기준 폴더를 선택하세요"
+        경고창이 떠 테스트 하네스가 블로킹됐다.  방향키로 목록을 훑는 것은 탐색이지
+        실행이 아니므로, 부수효과가 **없는** 그룹에서만 ``True`` 를 켜라.
         """
         super().__init__(parent)
         self._keys: list[str] = []
@@ -118,6 +126,12 @@ class OptionGroup(QWidget):
             btn.setSizePolicy(QSizePolicy.Policy.Expanding,
                               QSizePolicy.Policy.Fixed)
             btn.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+            # ★ 방향키를 **타일에서** 가로챈다.  `QAbstractButton` 은 autoExclusive 일 때
+            #   방향키를 스스로 처리해 `click()` 까지 호출하므로, 컨테이너의
+            #   keyPressEvent 만 믿으면 Qt 버전·배타 설정에 따라 우회될 수 있다.
+            #   여기서 먼저 소비하면 어떤 경우에도 계약이 지켜진다.
+            btn.setAutoExclusive(False)      # 배타는 QButtonGroup 이 담당한다
+            btn.installEventFilter(self)
             btn.clicked.connect(lambda _c=False, k=key: self._on_clicked(k))
             self._group.addButton(btn)
             self._keys.append(key)
@@ -190,8 +204,20 @@ class OptionGroup(QWidget):
         super().resizeEvent(event)
         self._reflow()
 
+    _ARROWS = (Qt.Key.Key_Right, Qt.Key.Key_Down, Qt.Key.Key_Left, Qt.Key.Key_Up)
+
+    def eventFilter(self, obj, event):  # noqa: N802
+        """타일에 온 방향키를 **Qt 버튼 처리보다 먼저** 소비한다(위 주석 참조)."""
+        if (event.type() == QEvent.Type.KeyPress
+                and obj in self._buttons.values()
+                and event.key() in self._ARROWS):
+            self._move(+1 if event.key() in (Qt.Key.Key_Right, Qt.Key.Key_Down)
+                       else -1)
+            return True
+        return super().eventFilter(obj, event)
+
     def keyPressEvent(self, event):  # noqa: N802
-        """←→↑↓ 로 선택+포커스 이동 — 라디오 그룹과 같은 감각."""
+        """←→↑↓ — 포커스 이동(+``activate_on_arrow`` 면 선택까지)."""
         key = event.key()
         step = 0
         if key in (Qt.Key.Key_Right, Qt.Key.Key_Down):
@@ -199,19 +225,25 @@ class OptionGroup(QWidget):
         elif key in (Qt.Key.Key_Left, Qt.Key.Key_Up):
             step = -1
         if step and self._keys:
-            # 기준점은 '지금 포커스가 있는 타일' — 없으면 선택된 타일.
-            focused = next((k for k, b in self._buttons.items() if b.hasFocus()), "")
-            base = focused or self.current_key()
-            idx = self._keys.index(base) if base in self._keys else 0
-            idx = max(0, min(idx + step, len(self._keys) - 1))
-            new_key = self._keys[idx]
-            # ★ activate_on_arrow=False 면 **포커스만** 옮긴다.  파괴적 액션(배치 전환 =
-            #   페이지 재생성)에 즉시 커밋을 두면 방향키로 훑기만 해도 화면이 날아간다.
-            if self._activate_on_arrow and new_key != base:
-                self.set_current_key(new_key, emit=True)
-            btn = self._buttons.get(new_key)
-            if btn is not None:
-                btn.setFocus(Qt.FocusReason.TabFocusReason)
+            self._move(step)
             event.accept()
             return
         super().keyPressEvent(event)
+
+    def _move(self, step: int) -> None:
+        """방향키 이동의 유일한 구현 — 컨테이너와 타일 필터가 공유한다."""
+        if not self._keys:
+            return
+        # 기준점은 '지금 포커스가 있는 타일' — 없으면 선택된 타일.
+        focused = next((k for k, b in self._buttons.items() if b.hasFocus()), "")
+        base = focused or self.current_key()
+        idx = self._keys.index(base) if base in self._keys else 0
+        idx = max(0, min(idx + step, len(self._keys) - 1))
+        new_key = self._keys[idx]
+        # ★ activate_on_arrow=False(기본) 면 **포커스만** 옮긴다.  이 위젯의 선택은
+        #   부수효과를 가진다(페이지 재생성·모달) — 훑는 것이 실행이 되어선 안 된다.
+        if self._activate_on_arrow and new_key != base:
+            self.set_current_key(new_key, emit=True)
+        btn = self._buttons.get(new_key)
+        if btn is not None:
+            btn.setFocus(Qt.FocusReason.TabFocusReason)

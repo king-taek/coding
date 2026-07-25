@@ -60,18 +60,58 @@ def test_click_emits_key(qapp):
     g.deleteLater()
 
 
-def test_arrow_keys_move_selection(qapp):
+def test_arrow_keys_move_selection_when_opted_in(qapp):
+    """부수효과가 없는 그룹에서만 방향키가 선택까지 확정한다(라디오 감각)."""
     from PyQt6.QtTest import QTest
-    g = OptionGroup(OPTS)
+    g = OptionGroup(OPTS, activate_on_arrow=True)
     g.show()
-    QTest.keyClick(g, Qt.Key.Key_Right)
+    for _ in range(6):
+        qapp.processEvents()
+    # ★ 키는 **포커스된 타일**에 보낸다 — 프로덕션에서 키가 실제로 도착하는 곳이다.
+    #   컨테이너에 보내면 프로덕션에서 실행되지 않는 경로를 검증하게 된다.
+    g.button("a").setFocus(Qt.FocusReason.TabFocusReason)
+    for _ in range(4):
+        qapp.processEvents()
+    QTest.keyClick(g.button("a"), Qt.Key.Key_Right)
     assert g.current_key() == "b"
-    QTest.keyClick(g, Qt.Key.Key_Down)             # ↓ 도 다음 항목
+    QTest.keyClick(g.button("b"), Qt.Key.Key_Down)     # ↓ 도 다음 항목
     assert g.current_key() == "c"
-    QTest.keyClick(g, Qt.Key.Key_Right)            # 끝에서 넘어가지 않음(클램프)
+    QTest.keyClick(g.button("c"), Qt.Key.Key_Right)    # 끝에서 넘어가지 않음(클램프)
     assert g.current_key() == "c"
-    QTest.keyClick(g, Qt.Key.Key_Left)
+    QTest.keyClick(g.button("c"), Qt.Key.Key_Left)
     assert g.current_key() == "b"
+    g.deleteLater()
+
+
+def test_arrow_keys_do_not_commit_by_default(qapp):
+    """★ 기본은 '포커스만 이동'이다 — 이 위젯의 선택은 부수효과를 가진다.
+
+    배치·색 모드는 페이지 재생성이고 진행 범위 'subset' 은 **모달**을 띄운다.
+    실측으로 방향키 한 번에 경고창이 떠 하네스가 블로킹된 적이 있다.
+    ★ 키는 포커스된 타일에 보낸다 — `QAbstractButton` 이 방향키를 스스로 처리해
+    `click()` 까지 호출할 수 있어서, 컨테이너 경로만 검증하면 구멍이 남는다."""
+    from PyQt6.QtTest import QTest
+    fired = []
+    g = OptionGroup(OPTS)                       # activate_on_arrow 기본 False
+    g.selection_changed.connect(fired.append)
+    g.show()
+    for _ in range(6):
+        qapp.processEvents()
+    g.button("a").setFocus(Qt.FocusReason.TabFocusReason)
+    for _ in range(4):
+        qapp.processEvents()
+    QTest.keyClick(g.button("a"), Qt.Key.Key_Right)
+    for _ in range(4):
+        qapp.processEvents()
+    assert g.current_key() == "a", "방향키가 선택을 커밋했다"
+    assert not fired, f"방향키가 selection_changed 를 발화했다: {fired}"
+    # 포커스는 다음 타일로 옮겨져 있어야 한다(탐색은 되어야 한다).
+    assert g.button("b").hasFocus(), "포커스가 이동하지 않았다"
+    # Space 로 확정.
+    QTest.keyClick(g.button("b"), Qt.Key.Key_Space)
+    for _ in range(4):
+        qapp.processEvents()
+    assert g.current_key() == "b", "Space 로 확정되지 않았다"
     g.deleteLater()
 
 

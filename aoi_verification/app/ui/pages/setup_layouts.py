@@ -19,6 +19,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QGridLayout, QVBoxLayout, QWidget
 
 from ... import i18n
+from .. import theme
 from ...utils import prefs as _prefs
 from ..widgets.collapsible_section import CollapsibleSection
 from ..widgets.option_group import reflow_into_grid
@@ -56,10 +57,17 @@ class SetupPageB(SetupPage):
     """B안 — 섹션을 2열로 흘리고 액션바를 하단에 고정."""
 
     LAYOUT_KEY = "b"
-    # ★ 430 이면 800px 창에서 그리드가 **1열로 붕괴**해 세로 스크롤이 세 안 중 최악
-    #   이었다(실측 vbar 1119) — B안의 존재 이유가 사라진다.  360 이면 800px 에서도
-    #   2열을 유지한다(360*2 + spacing 16 + 마진 64 = 800).
-    _MIN_SECTION_W = 360
+    # ★ 이 값은 **내용의 실제 하한**이다 — 임의로 낮추면 안 된다.
+    #   한 칸에는 장비 카드(라벨 + 경로 입력란 ≥240 + [폴더 선택…])가 들어가므로
+    #   440px 밑으로 내려가면 입력란이 짜부라지거나 가로 스크롤이 생긴다(360 으로
+    #   낮췄더니 1100px 에서 실제로 hscroll 2px 이 났다).
+    #   결과: B안이 2열이 되려면 약 950px 이상이 필요하고, 800×600 에서는 1열이다 —
+    #   이건 버그가 아니라 **내용이 정하는 성질**이다(억지로 2열로 만들면 읽을 수 없는
+    #   입력란이 나온다).  좁은 창에서 세로 스크롤이 길어지는 것은 B안의 트레이드오프다.
+    _MIN_SECTION_W = 440
+    # ★ 이름이 'B 2열' 인데 실측 4/4/3/3/3열 이었다 — 2열이 되는 폭이 아예 없었다.
+    #   상한을 2로 못 박아 이름과 화면을 일치시킨다(넓으면 열이 넓어질 뿐).
+    _MAX_COLS = 2
 
     def _build_body(self, root: QVBoxLayout) -> None:
         root.addWidget(self._build_top_bar())
@@ -74,13 +82,12 @@ class SetupPageB(SetupPage):
         self._section_grid.setSpacing(16)
         self._section_grid.setAlignment(Qt.AlignmentFlag.AlignTop)  # 카드 높이 자연스럽게
         self._selected_slots = None
-        self.ref_group, self.ref_path_edit, self.ref_machine_edit = \
-            self._make_machine_group(i18n.KO.SETUP_REF_GROUP)
-        self.val_group, self.val_path_edit, self.val_machine_edit = \
-            self._make_machine_group(i18n.KO.SETUP_VAL_GROUP)
+        # ★ 장비 카드를 **직접 만들지 않는다** — `_build_device_row()` 를 쓴다.
+        #   B안만 자기 손으로 만들어서 공유 레이어의 수정(폭 기준 세로 스택, 입력란
+        #   최소 폭)이 B안에는 하나도 적용되지 않았다: 경로 입력란이 106px 로
+        #   짜부라져 폴더 이름이 잘렸다(실측).  '배치만 다르다'는 약속을 지킨다.
         self._sections = [
-            self.ref_group,
-            self.val_group,
+            self._build_device_row(),
             self._build_automation_card(),
             self._build_engine_card(),
             self._build_scope_row(),
@@ -92,13 +99,52 @@ class SetupPageB(SetupPage):
         root.addWidget(self._build_credit())
         root.addStretch(1)
 
+    def _viewport(self):
+        from PyQt6.QtWidgets import QScrollArea
+        scroll = self.findChild(QScrollArea)
+        return scroll.viewport() if scroll is not None else None
+
     def _reflow_sections(self) -> None:
-        avail = self.width() or 0
-        if not avail:
-            p = self.parentWidget()
-            avail = p.width() if p is not None else 0
-        reflow_into_grid(self._section_grid, self._sections, avail,
-                         self._MIN_SECTION_W)
+        # ★ 페이지 폭이 아니라 **뷰포트 폭**을 써야 한다 — 세로 스크롤바·마진을 빼지
+        #   않으면 그리드가 페이지를 넘겨 열이 과하게 늘어난다(1512 에서 4열).
+        vp = self._viewport()
+        avail = vp.width() if vp is not None else 0
+        if avail <= 1:
+            avail = self.width() or 0
+        avail = max(0, avail - 2 * theme.PROFILE.page_margin)
+        # ★ 최소 폭을 **숫자로 추측하지 않는다** — 하한을 가진 섹션에게 직접 묻는다.
+        #   440 이라 적어 뒀을 때 1100px 에서 hscroll 2px 이 났다: 실제 하한은 카드
+        #   패딩·라벨·[폴더 선택…]까지 합친 값이라 손으로 맞출 수 있는 종류가 아니다.
+        #   단 **장비 행만** 본다 — 나머지 카드는 글이 감기므로 minimumSizeHint 가
+        #   과대하게 나와(설명 2줄) 전부 물어보면 어느 폭에서도 1열이 된다.
+        dev = self._sections[0]
+        need = max(dev.minimumSizeHint().width(), self._MIN_SECTION_W)
+        sp = self._section_grid.spacing()
+        n = self._MAX_COLS
+        # 상한 n 열: 그 열 수에 딱 맞는 폭으로 올려 더 쪼개지지 않게 한다.
+        # 단 내용 하한(need)을 못 맞추면 열을 줄인다(reflow 가 알아서 1열로 떨어진다).
+        fit = (avail - (n - 1) * sp) // n if avail > 1 else need
+        reflow_into_grid(self._section_grid, self._sections, avail, max(need, fit))
+
+    # ★ 페이지의 resizeEvent 만으로는 부족하다 — 그때 뷰포트는 아직 100px 이고, 그 뒤
+    #   뷰포트가 실제 폭을 갖는 순간에는 페이지 resize 가 다시 오지 않는다(실측: 열이
+    #   영구히 1로 남았다).  **뷰포트의 resize** 를 직접 듣는다.
+    def eventFilter(self, obj, event):  # noqa: N802
+        from PyQt6.QtCore import QEvent
+        if (event.type() == QEvent.Type.Resize
+                and obj is self._viewport()
+                and hasattr(self, "_section_grid")):
+            self._reflow_sections()
+        return super().eventFilter(obj, event)
+
+    def showEvent(self, event):  # noqa: N802
+        super().showEvent(event)
+        vp = self._viewport()
+        if vp is not None and not getattr(self, "_vp_hooked", False):
+            vp.installEventFilter(self)
+            self._vp_hooked = True
+        if hasattr(self, "_section_grid"):
+            self._reflow_sections()
 
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)

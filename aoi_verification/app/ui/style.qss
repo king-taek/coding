@@ -349,6 +349,16 @@ QWidget[role="loadingPanel"] QProgressBar {
     background: $bg;
 }
 
+/* 배지 캡션 — ★ `role="colHead"`($mute) 를 쓰면 구형 상태의 warn_tint 면 위에서
+   4.52(청사진)/4.66(흑연)로 게이트(5.0)를 깬다.  캡션이지만 한 단계 진한 잉크를 쓴다
+   (대비표가 **실제로 쓰는 토큰**을 재도록 전용 역할로 분리). */
+QLabel[role="badgeCaption"] {
+    color: $ink2;
+    font-size: $font_caption_sz;
+    font-weight: 700;
+    letter-spacing: 1px;
+}
+
 /* 상단 모드 배지 — 판정 기준(엔진 + 수치)을 첫 시선에.  수치는 모노. */
 QLabel[role="modeBadge"] {
     font-family: $font_mono;
@@ -658,6 +668,29 @@ QToolTip {
     border: 1px solid $line2;
     padding: 8px;
     border-radius: 4px;
+}
+
+/* 접이식 섹션 헤더 (사용 방법 ▾ / 설정 자세히 ▾) — ★ `:focus` 규칙이 아예 없어서
+   탭으로 이동해도 링이 **0픽셀**이었다(QPushButton 역할만 고치고 QToolButton 을
+   빼먹었다).  좌측 정렬 + 타깃 하한도 함께 준다(이전 25px, 폭 1448px 중앙 정렬). */
+QToolButton[role="disclosure"] {
+    color: $ink2;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: $radius_sm;
+    padding: 4px 10px;
+    font-weight: 600;
+    min-height: $target_min;
+    text-align: left;
+}
+QToolButton[role="disclosure"]:hover {
+    color: $ink;
+    background: $elev;
+    border-color: $line_strong;
+}
+QToolButton[role="disclosure"]:focus {
+    border: $focus_w solid $focus;
+    padding: 3px 9px;
 }
 
 /* ── 도움말 토글 버튼 (? 버튼) ───────────────────────────────────────────── */

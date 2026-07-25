@@ -1,4 +1,4 @@
-"""마우스 휠로 값이 바뀌지 않는 슬라이더 + 실제로 보이는 포커스 링.
+"""마우스 휠로 값이 바뀌지 않는 **슬라이더·스핀박스** + 실제로 보이는 포커스 링.
 
 드래그/클릭/키보드 입력은 정상 동작하고, 휠 이벤트만 무시한다.  스크롤 영역
 안에 두어도 휠은 슬라이더가 아니라 스크롤로 전달된다.
@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from PyQt6.QtCore import QRectF, Qt
 from PyQt6.QtGui import QColor, QPainter, QPen
-from PyQt6.QtWidgets import QSlider
+from PyQt6.QtWidgets import QDoubleSpinBox, QSlider
 
 from .. import theme
 
@@ -50,3 +50,18 @@ class NoWheelSlider(QSlider):
         p.drawRoundedRect(
             QRectF(half, half, self.width() - w, self.height() - w), r, r)
         p.end()
+
+
+class NoWheelDoubleSpinBox(QDoubleSpinBox):
+    """휠로 값이 바뀌지 않는 ``QDoubleSpinBox``.
+
+    ★ 왜 필요한가: 기본 스핀박스는 **포커스가 없어도** 커서가 위에 있으면 휠로 값이
+    바뀐다.  허용 오차는 판정 기준이라, 스크롤 영역 안에서 화면을 훑으려고 굴린 휠
+    3노치가 500 → 350 µm 로 바꾸고 그것이 배지·prefs·실제 검증 런까지 따라갔다(실측).
+    `SwitchRow` 의 스크롤 제스처 문제와 같은 계열 — 훑는 동작이 설정을 바꿔선 안 된다.
+
+    키보드 ↑↓ · 타이핑 · ±  버튼은 그대로 동작한다.
+    """
+
+    def wheelEvent(self, event):  # noqa: N802
+        event.ignore()
