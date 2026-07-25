@@ -81,6 +81,113 @@ def test_help_tooltip_comes_from_i18n():
     assert "HELP_TOGGLE_TOOLTIP" in src
 
 
+# ── 구형 모드: 명시 스위치만이 모드를 바꾼다 (핵심 회귀) ─────────────────────
+def test_fresh_prefs_starts_in_coordinate(qapp):
+    from aoi_verification.app.utils.prefs import EngineMode
+    page = sp.SetupPage()
+    try:
+        assert page.legacy_switch.is_on() is False
+        assert page._current_engine_mode() == EngineMode.COORDINATE
+    finally:
+        page.deleteLater()
+
+
+def test_reading_the_explanation_does_not_change_engine(qapp):
+    """★ 회귀 핵심: 설명을 열어봐도 엔진은 그대로다.
+
+    예전에는 접이식 섹션의 펼침 상태가 곧 엔진 모드였기 때문에, 설명을 읽으려고
+    펼치기만 해도 좌표 → 유사도로 조용히 바뀌었다."""
+    from aoi_verification.app.utils.prefs import EngineMode
+    page = sp.SetupPage()
+    try:
+        before = page._current_engine_mode()
+        page._auto_help_btn.setChecked(True)          # 도움말 펼치기
+        page._auto_help_btn.setChecked(False)
+        if hasattr(page, "_howto_section"):           # 사용 방법 섹션도 펼쳐 본다
+            page._howto_section.set_expanded(True, animate=False)
+            page._howto_section.set_expanded(False, animate=False)
+        assert page._current_engine_mode() == before == EngineMode.COORDINATE
+        # 접이식 상태를 모드 판단에 쓰는 코드가 남아 있지 않아야 한다.
+        src = inspect.getsource(sp.SetupPage._current_engine_mode)
+        assert "is_expanded" not in src.split('"""')[-1]
+    finally:
+        page.deleteLater()
+
+
+def test_switch_and_sub_choice_drive_engine_mode(qapp):
+    from aoi_verification.app.utils.prefs import EngineMode
+    page = sp.SetupPage()
+    try:
+        page.legacy_switch.set_on(True, emit=True)
+        assert page._current_engine_mode() == EngineMode.BASIC
+        page.legacy_group.set_current_key(EngineMode.EFFICIENCY, emit=True)
+        assert page._current_engine_mode() == EngineMode.EFFICIENCY
+        page.legacy_switch.set_on(False, emit=True)
+        assert page._current_engine_mode() == EngineMode.COORDINATE
+    finally:
+        page.deleteLater()
+
+
+def test_inert_params_disabled_but_never_hidden(qapp):
+    """무효한 파라미터는 비활성으로 '왜 못 쓰는지' 보여준다 — 숨기지 않는다."""
+    page = sp.SetupPage()
+    try:
+        page.show()
+        for _ in range(4):
+            qapp.processEvents()
+        # 좌표 모드: 허용 오차 활성, 임계치·하위선택 비활성
+        assert page._tol_row.isEnabled() is True
+        assert page._threshold_row.isEnabled() is False
+        assert page.legacy_group.isEnabled() is False
+        # 구형 모드: 반대
+        page.legacy_switch.set_on(True, emit=True)
+        assert page._tol_row.isEnabled() is False
+        assert page._threshold_row.isEnabled() is True
+        assert page.legacy_group.isEnabled() is True
+        # 어느 모드에서도 숨기지 않는다.
+        assert page._tol_row.isVisibleTo(page) is True
+        assert page._threshold_row.isVisibleTo(page) is True
+    finally:
+        page.deleteLater()
+
+
+def test_active_mode_is_stated_in_words(qapp):
+    page = sp.SetupPage()
+    try:
+        assert "좌표" in page._engine_inert_hint.text()
+        page.legacy_switch.set_on(True, emit=True)
+        assert "구형" in page._engine_inert_hint.text()
+    finally:
+        page.deleteLater()
+
+
+def test_collect_input_uses_explicit_switch(qapp, monkeypatch, tmp_path):
+    """_collect_input 의 engine_mode 가 스위치 상태를 따른다."""
+    from aoi_verification.app.utils.prefs import EngineMode
+    page = sp.SetupPage()
+    try:
+        ref = tmp_path / "ref"; ref.mkdir()
+        val = tmp_path / "val"; val.mkdir()
+        page.ref_path_edit.setText(str(ref))
+        page.val_path_edit.setText(str(val))
+        inp = page._collect_input()
+        assert inp is not None and inp.engine_mode == EngineMode.COORDINATE
+        page.legacy_switch.set_on(True, emit=True)
+        page.legacy_group.set_current_key(EngineMode.EFFICIENCY, emit=True)
+        inp2 = page._collect_input()
+        assert inp2 is not None and inp2.engine_mode == EngineMode.EFFICIENCY
+    finally:
+        page.deleteLater()
+
+
+def test_legacy_hint_no_longer_claims_expanding_switches(qapp):
+    """거짓 설명 제거 — '펼치면 전환됩니다' 는 더 이상 사실이 아니다."""
+    from aoi_verification.app import i18n
+    assert "펼치면" not in i18n.KO.LEGACY_MODE_HINT
+    # 좌표 데이터 없음 안내는 켤 컨트롤을 지목해야 한다.
+    assert "유사도 엔진(구형) 사용" in i18n.KO.COORD_NO_DATA_MSG
+
+
 def test_no_horizontal_scroll_at_800x600(qapp):
     from PyQt6.QtWidgets import QScrollArea
     page = sp.SetupPage()

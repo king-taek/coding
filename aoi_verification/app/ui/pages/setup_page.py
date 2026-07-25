@@ -22,6 +22,8 @@ from ..widgets.collapsible_section import CollapsibleSection
 from ..widgets.neon_button import NeonButton
 from ..widgets.neon_card import NeonCard
 from ..widgets.no_wheel_slider import NoWheelSlider
+from ..widgets.option_group import OptionGroup
+from ..widgets.switch_row import SwitchRow
 
 
 @dataclass
@@ -251,59 +253,103 @@ class SetupPage(QWidget):
         _tol_layout.addStretch()
         engine_card.body().addWidget(self._tol_row)
 
-        # 구형 모드 (유사도 엔진) — 접힌 상태로 기본 비활성
-        _last_engine = getattr(_prefs_now, "engine_mode", EngineMode.COORDINATE)
-        _legacy_expanded = _last_engine in ("basic", "efficiency")
-        self._legacy_section = CollapsibleSection(
-            open_label=i18n.KO.LEGACY_MODE_OPEN,
-            close_label=i18n.KO.LEGACY_MODE_CLOSE,
-            expanded=_legacy_expanded,
+        # ── 구형(유사도) 모드 — 명시적 스위치 ─────────────────────────────
+        # ★ 접이식 섹션을 쓰지 않는다.  예전에는 '섹션이 펼쳐졌는가'가 곧 엔진 모드였고,
+        #   설명을 읽으려고 펼치기만 해도 좌표 → 유사도로 조용히 바뀌었다.  읽을 대상
+        #   자체를 없애 같은 실수가 재발할 수 없게 한다.
+        _legacy_on, _legacy_sub = self._resolved_legacy_state(_prefs_now)
+
+        self.legacy_switch = SwitchRow(
+            i18n.KO.LEGACY_SWITCH_TITLE,
+            description=i18n.KO.LEGACY_SWITCH_DESC,
+            checked=_legacy_on,
             parent=engine_card,
         )
-        legacy_inner = QWidget(self._legacy_section)
-        legacy_lay = QVBoxLayout(legacy_inner)
-        legacy_lay.setContentsMargins(8, 6, 8, 6)
-        legacy_lay.setSpacing(6)
+        # 언제 이 모드를 쓰는지는 툴팁으로 — 화면을 조용하게 유지한다.
+        self.legacy_switch.setToolTip(i18n.KO.LEGACY_MODE_HINT)
+        self.legacy_switch.toggled.connect(self._on_legacy_toggled)
+        engine_card.body().addWidget(self.legacy_switch)
 
-        _legacy_hint = QLabel(i18n.KO.LEGACY_MODE_HINT, legacy_inner)
-        _legacy_hint.setWordWrap(True)
-        _legacy_hint.setStyleSheet(f"color: {theme.MUTE}; font-size: 12px;")
-        legacy_lay.addWidget(_legacy_hint)
+        # 구형 하위 선택 — 스위치가 켜졌을 때만 활성.
+        self.legacy_group = OptionGroup(
+            [(EngineMode.BASIC, i18n.KO.ENGINE_MODE_BASIC),
+             (EngineMode.EFFICIENCY, i18n.KO.ENGINE_MODE_EFFICIENCY)],
+            current=_legacy_sub, parent=engine_card,
+        )
+        self.legacy_group.selection_changed.connect(self._on_legacy_sub_changed)
+        engine_card.body().addWidget(self.legacy_group)
 
-        self.radio_engine_basic = QRadioButton(i18n.KO.ENGINE_MODE_BASIC, legacy_inner)
-        self.radio_engine_efficiency = QRadioButton(
-            i18n.KO.ENGINE_MODE_EFFICIENCY, legacy_inner)
-        if _last_engine == "efficiency":
-            self.radio_engine_efficiency.setChecked(True)
-        else:
-            self.radio_engine_basic.setChecked(True)
-        self._engine_group = QButtonGroup(legacy_inner)
-        self._engine_group.setExclusive(True)
-        self._engine_group.addButton(self.radio_engine_basic)
-        self._engine_group.addButton(self.radio_engine_efficiency)
-        legacy_lay.addWidget(self.radio_engine_basic)
-        legacy_lay.addWidget(self.radio_engine_efficiency)
-
-        # 임계치 슬라이더 (구형 모드 전용)
-        self._threshold_row = QWidget(legacy_inner)
+        # 임계치 슬라이더 (구형 모드 전용 파라미터)
+        self._threshold_row = QWidget(engine_card)
         sl_row = QHBoxLayout(self._threshold_row)
         sl_row.setContentsMargins(0, 0, 0, 0)
         sl_row.addWidget(QLabel(i18n.KO.SETUP_THRESHOLD_LABEL, self._threshold_row))
         self.slider = NoWheelSlider(Qt.Orientation.Horizontal, self._threshold_row)
         self.slider.setRange(0, 100)
-        _last_prefs = _prefs.load()
-        self.slider.setValue(int(round(_last_prefs.threshold * 100)))
+        self.slider.setValue(int(round(_prefs_now.threshold * 100)))
         self.threshold_label = QLabel(f"{self.slider.value()} %", self._threshold_row)
         self.threshold_label.setStyleSheet(f"color: {theme.INK}; font-weight: 700;")
         self.threshold_label.setFixedWidth(60)
         self.slider.valueChanged.connect(self._on_threshold_changed)
         sl_row.addWidget(self.slider, stretch=1)
         sl_row.addWidget(self.threshold_label)
-        legacy_lay.addWidget(self._threshold_row)
+        engine_card.body().addWidget(self._threshold_row)
 
-        self._legacy_section.add_content_widget(legacy_inner)
-        engine_card.body().addWidget(self._legacy_section)
+        # 지금 어느 파라미터가 유효한지 문장으로 — 비활성 컨트롤의 이유를 말해준다.
+        self._engine_inert_hint = QLabel("", engine_card)
+        self._engine_inert_hint.setProperty("role", "muted")
+        self._engine_inert_hint.setWordWrap(True)
+        engine_card.body().addWidget(self._engine_inert_hint)
+
+        self._sync_engine_controls()
         return engine_card
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _resolved_legacy_state(p) -> tuple[bool, str]:
+        """prefs → (구형 on?, 하위 엔진).  실제 prefs 로 생성되므로 방어적으로."""
+        try:
+            return _prefs.resolve_legacy_state(p)
+        except Exception:
+            return (False, EngineMode.BASIC)
+
+    def _current_engine_mode(self) -> str:
+        """엔진 모드는 **명시 컨트롤 상태**에서만 유도한다.
+
+        ★ 접이식 펼침 상태(is_expanded 등)를 절대 읽지 않는다 — 설명을 읽는 행위가
+        엔진을 바꾸던 버그의 재발 방지."""
+        if not self.legacy_switch.is_on():
+            return EngineMode.COORDINATE
+        sub = self.legacy_group.current_key()
+        return sub if sub in (EngineMode.BASIC, EngineMode.EFFICIENCY) \
+            else EngineMode.BASIC
+
+    def _sync_engine_controls(self) -> None:
+        """모드에 따라 무효한 파라미터를 **비활성**(숨기지 않음).
+
+        숨기지 않는 이유: 스크롤 안에서 show/hide 는 내용이 튀고, 무엇보다 '허용 오차는
+        좌표 매칭에, 임계치는 구형 모드에 속한다'는 사실을 눈으로 가르쳐 준다."""
+        legacy_on = self.legacy_switch.is_on()
+        self.legacy_group.setEnabled(legacy_on)
+        self._threshold_row.setEnabled(legacy_on)
+        self._tol_row.setEnabled(not legacy_on)
+        if legacy_on:
+            short = (i18n.KO.ENGINE_MODE_EFFICIENCY_SHORT
+                     if self.legacy_group.current_key() == EngineMode.EFFICIENCY
+                     else i18n.KO.ENGINE_MODE_BASIC_SHORT)
+            text = i18n.KO.ENGINE_ACTIVE_LEGACY_FMT.format(sub=short)
+        else:
+            text = i18n.KO.ENGINE_ACTIVE_COORD
+        self._engine_inert_hint.setText(text)
+
+    def _on_legacy_toggled(self, on: bool) -> None:
+        self._sync_engine_controls()
+        _prefs.patch(legacy_enabled=bool(on),
+                     engine_mode=self._current_engine_mode())
+
+    def _on_legacy_sub_changed(self, key: str) -> None:
+        self._sync_engine_controls()
+        _prefs.patch(legacy_engine=key, engine_mode=self._current_engine_mode())
 
     def _build_action_bar(self) -> QWidget:
         """시작 / 업데이트 확인 (+ 개발자 모드 버튼)."""
@@ -569,14 +615,8 @@ class SetupPage(QWidget):
             automation = AutomationLevel.AUTO_ALL
         else:
             automation = AutomationLevel.USER_SELECT
-        # 구형 섹션이 펼쳐진 상태에서만 유사도 엔진 모드 사용
-        if self._legacy_section.is_expanded():
-            if self.radio_engine_efficiency.isChecked():
-                engine_mode = "efficiency"
-            else:
-                engine_mode = "basic"
-        else:
-            engine_mode = "coordinate"
+        # 엔진 모드는 명시 스위치에서만 유도한다(펼침 상태를 읽지 않는다).
+        engine_mode = self._current_engine_mode()
         coord_tolerance = float(self.coord_tol_spin.value())
         persist_scores = True   # 디스크 점수 캐시 항상 기본 적용(토글 제거).
         accel_concurrency = 32      # 자동 산정 상한(슬라이더 제거) — 워크로드 기반 유동.
