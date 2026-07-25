@@ -1,6 +1,6 @@
 ---
 name: subagent-driven-development
-description: Use when executing implementation plans with independent tasks in the current session
+description: Consider when executing a large implementation plan whose tasks are independent enough to hand to fresh subagents. Costly - each subagent re-reads context from scratch. Before applying, you MUST first ask the user whether to use this skill and proceed only if they approve. Never auto-apply without asking.
 ---
 
 # Subagent-Driven Development

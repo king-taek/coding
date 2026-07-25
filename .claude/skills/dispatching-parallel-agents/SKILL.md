@@ -1,6 +1,6 @@
 ---
 name: dispatching-parallel-agents
-description: Use when facing 2+ independent tasks that can be worked on without shared state or sequential dependencies
+description: Consider when facing several independent tasks with no shared state or sequential dependencies. Costly - each agent re-reads context from scratch. Before applying, you MUST first ask the user whether to use this skill and proceed only if they approve. Never auto-apply without asking.
 ---
 
 # Dispatching Parallel Agents
