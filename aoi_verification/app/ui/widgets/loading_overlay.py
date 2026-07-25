@@ -307,6 +307,18 @@ class LoadingOverlay(QWidget):
         #   OutQuad 로 낮추면 페이드 종료 시점에 5~6px 이 남아 안착이 눈에 보인다.
         self._rise_anim.setEasingCurve(QEasingCurve.Type.OutQuad)
         self._rise_anim.valueChanged.connect(self._on_rise)
+        # 진행바 스태거 — ★ 위 두 애니메이션과 **같은 방식**으로 여기서 한 번만 만든다.
+        #   이전엔 `_stagger_bar` 가 표시마다 새로 만들면서 `start(DeleteWhenStopped)` 로
+        #   Qt 에 삭제를 맡기고도 `self._bar_anim` 에 핸들을 남겼다.  370ms 뒤 C++ 객체가
+        #   삭제되면 **두 번째** show_overlay 의 `anim.stop()` 이
+        #   "wrapped C/C++ object ... has been deleted" 를 내고, PyQt6 가 슬롯 안의
+        #   미처리 예외를 qFatal() 로 처리해 앱이 죽었다(실패목록 두 번째 클릭 크래시).
+        self._bar_anim = QVariantAnimation(self)
+        self._bar_anim.setEasingCurve(QEasingCurve.Type.OutQuart)
+        self._bar_anim.setStartValue(0.0)
+        self._bar_anim.setEndValue(1.0)
+        self._bar_anim.valueChanged.connect(
+            lambda v: self._set_bar_slide(float(v)))
 
         # 최소 표시 시간 가드 — 초단타 작업이 '깜빡'하지 않게(C9).
         self._shown_elapsed = QElapsedTimer()
@@ -352,9 +364,26 @@ class LoadingOverlay(QWidget):
         self._panel.setGraphicsEffect(eff)
         self._content_eff = eff
 
+    def _enter_busy(self) -> None:
+        """총량을 모르는 상태 — 결정형 바를 치우고 혜성 스윕을 돌린다.
+
+        ★ 결정형 바를 **0 에 세워 두지 않는다.**  이전에는 ``show_overlay`` 가
+        `_progress`(range 0..100, value 0) 를 보이는 채로 두고 `_busy` 를 숨겼는데,
+        `set_progress` 를 부르지 않는 호출부(OpenVINO 설치·KLA 파일명 읽기·선계산 대기
+        등)에서는 **스피너만 돌고 바는 영원히 0** 이었다 — 사용자가 본 "동그라미만
+        돌고 바가 채워지지 않는" 그 증상이고, CLAUDE.md 로딩 계약("진행량을 모를 때도
+        0 에 멈추지 말고 busy 를 띄운다")을 정면으로 어긴다."""
+        self._val_anim.stop()
+        self._progress.hide()
+        self._count_label.setText("")      # 총량을 모르니 숫자는 비운다
+        self._busy.show()
+        self._busy.start()
+
     def show_overlay(self, message: str = "", *, cancelable: bool = False) -> None:
         self._label.setText(message)
         self._cancel_btn.setVisible(bool(cancelable))
+        # busy 로 시작한다 — 첫 set_progress(done, total>0) 이 결정형으로 승격시킨다.
+        self._enter_busy()
         self._spinner.start()
         self.raise_()
         self.show()
@@ -410,23 +439,16 @@ class LoadingOverlay(QWidget):
 
     def _stagger_bar(self) -> None:
         """진행바는 패널이 안착한 뒤 살짝 늦게 들어온다 — 계층이 순서대로 읽히게."""
-        anim = getattr(self, "_bar_anim", None)
-        if anim is not None:
-            anim.stop()
+        self._bar_anim.stop()
         self._set_bar_slide(0.0)
         token = self._show_token
 
         def _run(t=token):
             if t != self._show_token or self._hiding:
                 return
-            a = QVariantAnimation(self)
-            a.setStartValue(0.0)
-            a.setEndValue(1.0)
-            a.setDuration(max(120, motion.dur(self.BAR_SLIDE_MS)))
-            a.setEasingCurve(QEasingCurve.Type.OutQuart)
-            a.valueChanged.connect(lambda v: self._set_bar_slide(float(v)))
-            a.start(QVariantAnimation.DeletionPolicy.DeleteWhenStopped)
-            self._bar_anim = a
+            self._bar_anim.stop()
+            self._bar_anim.setDuration(max(120, motion.dur(self.BAR_SLIDE_MS)))
+            self._bar_anim.start()
 
         QTimer.singleShot(max(1, motion.dur(self.BAR_STAGGER_MS)), _run)
 
@@ -475,6 +497,7 @@ class LoadingOverlay(QWidget):
     def _finish_hide(self) -> None:
         self.hide()
         self._val_anim.stop()
+        self._bar_anim.stop()          # 숨은 뒤 tick 이 남아 여백을 흔들지 않게
         self._busy.stop()
         self._busy.hide()
         self._spinner.stop()
@@ -521,11 +544,7 @@ class LoadingOverlay(QWidget):
                 else:
                     self._progress.setValue(done)
         else:
-            self._val_anim.stop()
-            self._progress.hide()                       # busy: 혜성 스윕으로 교체
-            self._count_label.setText("")               # 총량을 모르니 숫자는 비운다
-            self._busy.show()
-            self._busy.start()
+            self._enter_busy()                          # busy: 혜성 스윕으로 교체
         # ★ 매 tick 마다 _cover_parent() 를 부르지 않는다 — sizeHint + setGeometry 가
         #   진행 갱신 횟수만큼 돌았다(200 tick = 200회).  크기는 부모 리사이즈
         #   (eventFilter)와 표시 시점에만 바뀐다.  단, busy↔결정형 전환은 내용이

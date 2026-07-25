@@ -241,3 +241,36 @@ def test_loading_contract_preserved(qapp):
         assert ov._progress.maximum() == 40 and ov._progress.value() == 2
     finally:
         host.deleteLater()
+
+
+def test_show_overlay_starts_busy_not_a_frozen_zero_bar(qapp):
+    """★ ``show_overlay`` 만 부르는 호출부에서 **바가 0 에 얼어 있으면 안 된다.**
+
+    이전에는 `_progress`(range 0..100, value 0) 가 보이는 채로 `_busy` 가 숨어 있었다.
+    그래서 총량을 모르는 작업(OpenVINO 설치 · KLA 파일명 읽기 · 선계산 대기)에서는
+    **스피너만 돌고 바는 영원히 0** 이었다 — 사용자가 보고한 "동그라미만 돌고 바가
+    채워지지 않는" 버그이고, CLAUDE.md 로딩 계약 위반이다.
+    """
+    host, ov = _overlay(qapp)
+    try:
+        ov.show_overlay("설치 중")             # set_progress 를 부르지 않는 호출부
+        assert not ov._busy.isHidden(), "busy 표시가 없다 — 바가 0 에 얼어 있다"
+        assert ov._progress.isHidden(), "결정형 바가 0 으로 보이고 있다"
+        assert ov._count_label.text() == "", "총량을 모르는데 숫자를 적었다"
+
+        # 총량이 알려지면 결정형으로 **승격**된다.
+        ov.set_progress(3, 10, "처리")
+        assert not ov._progress.isHidden() and ov._busy.isHidden()
+        assert ov._progress.maximum() == 10 and ov._count_label.text() == "3 / 10"
+
+        # 다시 총량을 잃으면 busy 로 되돌아온다(왕복).
+        ov.set_progress(0, 0, "마무리")
+        assert not ov._busy.isHidden() and ov._progress.isHidden()
+
+        # 감췄다 다시 띄워도 busy 로 시작한다(이전 결정형 상태가 새지 않게).
+        ov.set_progress(7, 10)
+        ov._finish_hide()
+        ov.show_overlay("다시 시작")
+        assert not ov._busy.isHidden() and ov._progress.isHidden()
+    finally:
+        host.deleteLater()

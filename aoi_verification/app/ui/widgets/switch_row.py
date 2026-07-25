@@ -38,7 +38,16 @@ class ToggleSwitch(QWidget):
         self._checked = bool(checked)
         self._pos = 1.0 if self._checked else 0.0     # 0=off, 1=on (노브 위치)
         self._pressed = False
-        self._anim: Optional[QVariantAnimation] = None
+        # ★ 애니메이션은 **한 번만** 만들어 재사용한다.  이전엔 토글마다 새로 만들면서
+        #   `start(DeleteWhenStopped)` 로 Qt 에 삭제를 맡기고도 `self._anim` 에 핸들을
+        #   보관했다.  140ms 뒤 C++ 객체가 삭제되면 껍데기만 남고, **두 번째** 토글의
+        #   `self._anim.stop()` 이 "wrapped C/C++ object ... has been deleted" 를 낸다.
+        #   PyQt6 는 슬롯(mouseReleaseEvent) 안의 미처리 예외를 qFatal() 로 처리하므로
+        #   앱이 그대로 죽었다 — 사용자가 겪은 '구형 모드 켜고 끄면 강제종료'다.
+        #   LoadingOverlay._fade_anim/_rise_anim 이 쓰는 방식으로 통일한다.
+        self._anim = QVariantAnimation(self)
+        self._anim.setEasingCurve(QEasingCurve.Type.OutQuart)
+        self._anim.valueChanged.connect(self._on_tween)
         self.setFixedSize(QSize(_TRACK_W, _TRACK_H))
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -59,21 +68,15 @@ class ToggleSwitch(QWidget):
 
     def _animate_to(self, target: float, *, animate: bool = True) -> None:
         from .. import motion
-        if self._anim is not None:
-            self._anim.stop()
-            self._anim = None
+        self._anim.stop()
         if not animate or not motion.enabled():
             self._pos = target
             self.update()
             return
-        anim = QVariantAnimation(self)
-        anim.setStartValue(float(self._pos))
-        anim.setEndValue(float(target))
-        anim.setDuration(motion.dur(140))
-        anim.setEasingCurve(QEasingCurve.Type.OutQuart)
-        anim.valueChanged.connect(self._on_tween)
-        anim.start(QVariantAnimation.DeletionPolicy.DeleteWhenStopped)
-        self._anim = anim
+        self._anim.setStartValue(float(self._pos))
+        self._anim.setEndValue(float(target))
+        self._anim.setDuration(motion.dur(140))
+        self._anim.start()
 
     def _on_tween(self, v) -> None:
         self._pos = float(v)
