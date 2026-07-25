@@ -23,9 +23,8 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 from . import recipes as _rx
-from .recipes import (RECALL_CPU, RECALL_GPU, RECALL_GPU_NPU, RECALL_NONE,
-                      RECALL_NPU, SCORE_CLASSICAL, SCORE_EMBED_ONLY,
-                      SCORE_FUSION, Recipe)
+from .recipes import (RECALL_CPU, RECALL_GPU, RECALL_NONE,
+                      SCORE_CLASSICAL, SCORE_EMBED_ONLY, Recipe)
 
 # 외부 ThreadPool 로 ref 를 병렬 재채점하므로 cv2 내부 스레드는 끈다(과도구독 방지).
 try:
@@ -189,7 +188,7 @@ def _labels_to_gt(labels: dict) -> Dict[Tuple[str, str], set]:
 # 임베딩 추출 — 레시피의 recall 장치에 따라 (폴백/분담/앙상블)
 # ---------------------------------------------------------------------------
 def _device_for(recall: str) -> str:
-    return {RECALL_CPU: "CPU", RECALL_GPU: "GPU", RECALL_NPU: "NPU"}.get(recall, "GPU")
+    return {RECALL_CPU: "CPU", RECALL_GPU: "GPU"}.get(recall, "GPU")
 
 
 def _embed_paths(paths: List[Path], recipe: Recipe, cfg, devices: set,
@@ -204,41 +203,13 @@ def _embed_paths(paths: List[Path], recipe: Recipe, cfg, devices: set,
     model = recipe.embed_model or _rx.MODEL_MOBILENET_V3
     cap = safe_concurrency(len(paths), recipe.concurrency)
     batch = max(1, int(recipe.embed_batch))
-    # NPU 사용 방식 노브 — perf_hint/streams/멀티스레드/해상도(레시피에서).
+    # 가속 사용 방식 노브 — perf_hint/streams/멀티스레드/해상도(레시피에서).
     knobs = dict(perf_hint=getattr(recipe, "perf_hint", "THROUGHPUT"),
                  streams=int(getattr(recipe, "streams", 0) or 0),
                  preprocess_threads=int(getattr(recipe, "preprocess_threads", 0) or 0),
                  input_px=int(getattr(recipe, "input_px", 0) or 0))
 
-    # GPU+NPU '분담' — 절반씩 두 장치에서 동시에 뽑아 처리량을 올린다.
-    if (recipe.recall == RECALL_GPU_NPU and not recipe.ensemble
-            and {"GPU", "NPU"} <= devices):
-        half = len(paths) // 2 or len(paths)
-        chunks = [(paths[:half], "GPU"), (paths[half:], "NPU")]
-        out: Dict[Path, object] = {}
-        lock = threading.Lock()
-
-        def _go(ps, dev):
-            if not ps:
-                return
-            try:
-                part = _ov.device_embed(ps, model_kind=model, device=dev, cfg=cfg,
-                                        jobs=cap, batch=batch, progress_cb=progress,
-                                        **knobs)
-            except Exception:
-                part = {}
-            with lock:
-                out.update(part)
-
-        th = [threading.Thread(target=_go, args=c, daemon=True) for c in chunks]
-        for t in th:
-            t.start()
-        for t in th:
-            t.join()
-        return out
-
-    # 단일 장치(또는 앙상블의 GPU 측 — 앙상블 처리는 호출부에서).
-    dev = _device_for(recipe.recall if recipe.recall != RECALL_GPU_NPU else RECALL_GPU)
+    dev = _device_for(recipe.recall)
     try:
         return _ov.device_embed(paths, model_kind=model, device=dev, cfg=cfg,
                                 jobs=cap, batch=batch, progress_cb=progress, **knobs)
@@ -270,21 +241,13 @@ class RecipeRun:
     recall1: Optional[float] = None
     recall5: Optional[float] = None
     agree1: Optional[float] = None
-    # 임베딩 후보 recall — GPU/NPU 가 추린 순위에서 정답이 몇 위에 있나(CPU 재채점 전).
+    # 임베딩 후보 recall — GPU 가 추린 순위에서 정답이 몇 위에 있나(CPU 재채점 전).
     #   topk 재채점이 안전한지(정답이 잘려나가지 않는지) 판단용.  embed_recall[K]=정답이
     #   top-K 안에 든 쿼리 비율.  worst_correct_rank=정답의 최악 순위(=100% 잡으려면
     #   필요한 최소 topk).  cand_n=평가된 쿼리 수.
     embed_recall: Optional[dict] = None
     worst_correct_rank: Optional[int] = None
     cand_n: int = 0
-    # NPU 사용량(프록시) — 진짜 HW 가동률 % 는 플랫폼 의존이라, 드라이브 설정과 실제 NPU
-    # 추론 시간/처리량으로 '얼마나 바쁘게 굴렸나'를 기록한다(사용자 요청).
-    npu_used: bool = False
-    npu_sec: float = 0.0            # NPU 추론에 쓴 시간(임베딩 분담분)
-    npu_infer: int = 0             # NPU 로 임베딩한 이미지 수(추론 횟수 프록시)
-    npu_throughput: float = 0.0    # NPU img/s
-    npu_busy_frac: Optional[float] = None  # npu_sec / total_sec (가동률 프록시)
-    npu_drive: str = ""            # 드라이브 설정: jobs/streams/batch/hint
     desc: str = ""
 
 
@@ -293,7 +256,7 @@ def skip_reason(recipe: Recipe, devices: set) -> str:
 
     '불필요한 테스트는 하지 않는다' — 다음은 실행해도 새 정보가 없거나 같은 CPU
     고전 결과만 반복하므로 기본 스위트에서 건너뛴다(명시 선택하면 그래도 실행):
-      · 필요한 가속 장치(GPU/NPU)가 없어 어차피 CPU 고전으로 폴백 → 중복 결과.
+      · 필요한 가속 장치(GPU)가 없어 어차피 CPU 고전으로 폴백 → 중복 결과.
     함정/대조용(diagnostic)은 여기서 막지 않고 호출부에서 기본 제외한다."""
     need = recipe.required_devices()
     if need and not (need <= set(devices or set())):
@@ -325,8 +288,7 @@ def cascade_survivors(center_map: Dict[str, float], keep: int) -> List[str]:
 def fuse_zscore_signals(signals: List[List[float]]) -> List[float]:
     """N개 신호를 각각 z-정규화해 합산 — efficiency_matcher.zfuse 의 일반화.
 
-    임베딩 코사인 + CPU 고전 + NPU defect 임베딩 등 **스케일이 다른 여러 신호**를
-    동등 융합한다(NPU 병렬 보조기의 3신호 융합용).  순수 함수(헤드리스 테스트)."""
+    스케일이 다른 여러 신호를 동등 융합한다.  순수 함수(헤드리스 테스트)."""
     from ..workers.efficiency_matcher import _zscores
     usable = [s for s in signals if s]
     if not usable:
@@ -349,7 +311,7 @@ def run_recipe(ds: Dataset, recipe: Recipe, *,
     if devices is None:
         devices = detect_devices()
     cfg = recipe.to_cfg()
-    # 임베딩(GPU/NPU) 후보 순위 — 쿼리별 (CPU 재채점 전) 전체 코사인 정렬.  GT 와 대조해
+    # 임베딩(GPU) 후보 순위 — 쿼리별 (CPU 재채점 전) 전체 코사인 정렬.  GT 와 대조해
     # '정답이 몇 위에 있나'(후보 recall)를 계산한다.
     embed_order: Dict[Tuple[str, str], List[str]] = {}
     comp = _rerank_components(recipe)        # 고속 재채점 컴포넌트(None=전체 고전)
@@ -439,14 +401,9 @@ def run_recipe(ds: Dataset, recipe: Recipe, *,
 
         # ── 임베딩 recall ────────────────────────────────────────────
         t0 = time.perf_counter()
-        if recipe.recall == RECALL_GPU_NPU and recipe.ensemble:
-            built_a, built_b = _embed_ensemble(refs, vals, recipe, cfg, devices, progress)
-            built = built_a            # 코사인 평균은 아래 분기에서
-        else:
-            val_emb = _embed_paths([Path(v.path) for v in vals], recipe, cfg,
-                                   devices, progress)
-            built = _ann.build_from(val_emb) if val_emb else None
-            built_b = None
+        val_emb = _embed_paths([Path(v.path) for v in vals], recipe, cfg,
+                               devices, progress)
+        built = _ann.build_from(val_emb) if val_emb else None
         embed_t += time.perf_counter() - t0
 
         if built is None:
@@ -466,27 +423,6 @@ def run_recipe(ds: Dataset, recipe: Recipe, *,
 
         comp = _rerank_components(recipe)        # 고속 재채점 컴포넌트(None=전체)
 
-        def _npu_defect_signal(r, top):
-            """NPU 병렬 보조기 — 상위 후보의 중앙(defect) 임베딩을 NPU(batch=1)로 뽑아
-            ref 대비 코사인을 돌려준다(top 순서).  NPU 없음/실패/미설정이면 None."""
-            if not getattr(recipe, "npu_defect_assist", False) or "NPU" not in devices:
-                return None
-            try:
-                from ..learning import embedder_openvino as _ov
-                ratio = float(getattr(recipe, "center_ratio", 0.0) or 0.25)
-                model = recipe.embed_model or _rx.MODEL_MOBILENET_V3
-                cfg_c = _dc_replace(cfg, center_crop=True, center_ratio=ratio, use_npu=True)
-                paths = [Path(r.path)] + [Path(vp) for vp, _ in top]
-                emb = _ov.device_embed(paths, model_kind=model, device="NPU",
-                                       cfg=cfg_c, jobs=8, batch=1)
-                rv = emb.get(Path(r.path))
-                if rv is None:
-                    return None
-                return [(_cosine(rv, emb[Path(vp)]) if emb.get(Path(vp)) is not None
-                         else 0.0) for vp, _ in top]
-            except Exception:
-                return None
-
         def _fuse_one(r):
             """ref 1장 → 저장할 ranked 리스트.  병렬 워커에서도 안전(읽기 전용 공유)."""
             remb = ref_emb.get(Path(r.path))
@@ -497,8 +433,6 @@ def run_recipe(ds: Dataset, recipe: Recipe, *,
             hits = index.query(remb, len(val_paths))          # [(label, cos)] desc
             ordered = [(val_paths[lab], float(cos)) for lab, cos in hits
                        if 0 <= lab < len(val_paths)]
-            if built_b is not None:                            # 앙상블: 두 코사인 평균
-                ordered = _ensemble_merge(ordered, built_b, ref_emb_b_get(r))
             # 후보 recall 계산용 — CPU 재채점 전 임베딩 순위(정답이 몇 위에 있나).
             embed_order[(slot, str(r.path))] = [str(vp) for vp, _ in ordered]
             if recipe.scoring == SCORE_EMBED_ONLY:
@@ -511,11 +445,7 @@ def run_recipe(ds: Dataset, recipe: Recipe, *,
             cls_map = _rerank_score_map(r, valid, comp)     # center-aware 면 영역 조합
             emb_scores = [c for _, c in top]
             cls_scores = [cls_map.get(str(vp), 0.0) for vp, _ in top]
-            npu_sig = _npu_defect_signal(r, top)            # NPU 병렬 보조기(3신호) or None
-            if npu_sig is not None:
-                mapped = map_score(fuse_zscore_signals([emb_scores, cls_scores, npu_sig]))
-            else:
-                mapped = map_score(zfuse(emb_scores, cls_scores))
+            mapped = map_score(zfuse(emb_scores, cls_scores))
             head = list(zip([vp for vp, _ in top], mapped))
             tail = [(vp, _cos_to_unit(c)) for vp, c in ordered[topk:]]
             return head + tail
@@ -547,29 +477,12 @@ def run_recipe(ds: Dataset, recipe: Recipe, *,
     run.timed_out = stopped()
     n = run.n_images
     run.img_per_sec = round(n / run.total_sec, 1) if run.total_sec > 1e-6 else 0.0
-    # 임베딩 후보 recall — 정답이 GPU/NPU 순위에서 몇 위에 있나(topk 안전성 판단).
+    # 임베딩 후보 recall — 정답이 GPU 순위에서 몇 위에 있나(topk 안전성 판단).
     if embed_order and ds.gt:
         rec_k, worst, cn = candidate_recall(embed_order, ds.gt)
         run.embed_recall = {str(k): v for k, v in rec_k.items()}
         run.worst_correct_rank = worst
         run.cand_n = cn
-    # NPU 사용량(프록시) — 드라이브 설정 + 추정 NPU 시간/처리량/가동률.
-    uses_npu = (recipe.recall in (RECALL_NPU, RECALL_GPU_NPU)
-                or bool(getattr(recipe, "npu_defect_assist", False)))
-    run.npu_used = bool(uses_npu and "NPU" in (devices or set()))
-    _assist = " assist" if getattr(recipe, "npu_defect_assist", False) else ""
-    run.npu_drive = (f"jobs={recipe.concurrency} streams={getattr(recipe,'streams',0)} "
-                     f"batch={recipe.embed_batch} hint={getattr(recipe,'perf_hint','')}{_assist}")
-    if run.npu_used:
-        # NPU 분담분 — NPU 단독=전체, GPU+NPU 분담=절반, defect 보조=별도 추정 어려워 0 처리.
-        frac = (1.0 if recipe.recall == RECALL_NPU
-                else 0.5 if recipe.recall == RECALL_GPU_NPU else 0.0)
-        run.npu_sec = round(embed_t * frac, 3)
-        run.npu_infer = int(run.n_images * frac)
-        if run.npu_sec > 1e-6:
-            run.npu_throughput = round(run.npu_infer / run.npu_sec, 1)
-            run.npu_busy_frac = (round(run.npu_sec / run.total_sec, 3)
-                                 if run.total_sec > 1e-6 else None)
     if run.fell_back_classical and recipe.uses_embedding():
         run.note = "가속/모델 미가용 → CPU 고전 폴백(속도는 CPU 기준)"
         need = str(getattr(recipe, "needs", "") or "")
@@ -578,58 +491,11 @@ def run_recipe(ds: Dataset, recipe: Recipe, *,
     return results, run
 
 
-# 앙상블 보조(거의 쓰이지 않는 대조군 — 두 장치 임베딩의 코사인 평균).
-_ENSEMBLE_REF_B: Dict[str, object] = {}
-
-
-def _embed_ensemble(refs, vals, recipe, cfg, devices, progress):
-    """GPU(MobileNet) 전체 + NPU(ResNet18) 전체를 각각 임베딩(시간 2배 — 안티패턴)."""
-    from ..similarity import embedding_index as _ann
-    val_paths = [Path(v.path) for v in vals]
-    ref_paths = [Path(r.path) for r in refs]
-    # GPU 측(MobileNet)
-    rec_g = Recipe(key="_g", name="g", recall=RECALL_GPU, scoring=recipe.scoring,
-                   embed_model=_rx.MODEL_MOBILENET_V3, embed_batch=recipe.embed_batch,
-                   concurrency=recipe.concurrency)
-    rec_n = Recipe(key="_n", name="n", recall=RECALL_NPU, scoring=recipe.scoring,
-                   embed_model=_rx.MODEL_RESNET18, embed_batch=1,
-                   concurrency=recipe.concurrency)
-    val_g = _embed_paths(val_paths, rec_g, cfg, devices, progress)
-    val_n = _embed_paths(val_paths, rec_n, cfg, devices, progress)
-    _ENSEMBLE_REF_B.clear()
-    if val_n:
-        ref_n = _embed_paths(ref_paths, rec_n, cfg, devices)
-        for p, v in ref_n.items():
-            _ENSEMBLE_REF_B[str(p)] = v
-        _ENSEMBLE_REF_B["__index__"] = _ann.build_from(val_n)
-    built_a = _ann.build_from(val_g) if val_g else None
-    built_b = _ENSEMBLE_REF_B.get("__index__") if val_n else None
-    return built_a, built_b
-
-
-def ref_emb_b_get(r):
-    return _ENSEMBLE_REF_B.get(str(Path(r.path)))
-
-
-def _ensemble_merge(ordered_a, built_b, remb_b):
-    """A 의 (val_path,cosA) 에 B 인덱스의 cosB 를 합쳐 평균 코사인으로 재정렬."""
-    if built_b is None or remb_b is None:
-        return ordered_a
-    index_b, vpaths_b = built_b
-    hits = dict()
-    for lab, cos in index_b.query(remb_b, len(vpaths_b)):
-        if 0 <= lab < len(vpaths_b):
-            hits[str(vpaths_b[lab])] = float(cos)
-    merged = [(vp, (cosA + hits.get(str(vp), cosA)) / 2.0) for vp, cosA in ordered_a]
-    merged.sort(key=lambda x: -x[1])
-    return merged
-
-
 # ---------------------------------------------------------------------------
 # 장치 감지
 # ---------------------------------------------------------------------------
 def detect_devices() -> set:
-    """가용 Intel 가속 장치 집합 — ``{"GPU","NPU"}`` 중 실제 존재분."""
+    """가용 Intel 가속 장치 집합 — ``{"GPU"}`` 중 실제 존재분."""
     try:
         from ..learning import embedder_openvino as _ov
         return set(_ov.available_units())
@@ -647,71 +513,6 @@ def _cosine(a, b) -> float:
     return float(np.dot(a, b) / (na * nb))
 
 
-def diagnose_npu_embedding(paths: List[Path], *, model: str = "",
-                           max_images: int = 24) -> dict:
-    """NPU 배치 정확도 붕괴 **원인 규명** — 같은 이미지에서 GPU vs NPU(batch1) vs
-    NPU(batch16) 임베딩이 수치적으로 같은지 측정한다.
-
-    실측(bench결과)에서 NPU 는 batch=1 만 정확(97.6%)하고 batch≥4 는 78~85% 로
-    떨어졌다.  배치 추론이 임베딩 벡터 자체를 바꾸면(코사인<1·L2>0) 후보 선정이
-    틀어져 정확도가 깨지는 것이므로, 이 진단이 그 직접 증거를 제공한다.
-
-    반환: {'rows': [...per-image...], 'summary': {pair: {cos_mean,cos_min,l2_mean}}}.
-    openvino 미가용이면 {'error': ...}.  GUI/CLI 양쪽에서 호출 가능."""
-    try:
-        from ..learning import embedder_openvino as _ov
-    except Exception as exc:
-        return {"error": f"openvino 미가용: {exc}"}
-    import numpy as np
-    model = model or _rx.MODEL_MOBILENET_V3
-    paths = [Path(p) for p in paths][:max_images]
-    if not paths:
-        return {"error": "이미지 경로가 없습니다"}
-    cfg = Recipe(key="diag", name="diag", recall=RECALL_NPU,
-                 scoring=SCORE_FUSION, embed_model=model).to_cfg()
-
-    def _emb(device, batch):
-        return _ov.device_embed(paths, model_kind=model, device=device,
-                                cfg=cfg, jobs=8, batch=int(batch))
-
-    configs = {"gpu_b1": ("GPU", 1), "npu_b1": ("NPU", 1), "npu_b16": ("NPU", 16)}
-    embs: dict = {}
-    errors: dict = {}
-    for name, (dev, b) in configs.items():
-        try:
-            embs[name] = _emb(dev, b)
-        except Exception as exc:                 # 장치 없음/실패 — 그 설정만 건너뜀
-            errors[name] = str(exc)
-
-    # 비교 대상 쌍 — 핵심은 npu_b1 vs npu_b16(배치 효과)과 npu_* vs gpu_b1(장치 효과).
-    pairs = [("npu_b1", "npu_b16"), ("gpu_b1", "npu_b1"), ("gpu_b1", "npu_b16")]
-    rows = []
-    summary = {}
-    for x, y in pairs:
-        if x not in embs or y not in embs:
-            continue
-        coss, l2s = [], []
-        for p in paths:
-            ax, ay = embs[x].get(p), embs[y].get(p)
-            if ax is None or ay is None:
-                continue
-            c = _cosine(ax, ay)
-            l2 = float(np.linalg.norm(np.asarray(ax, "float64").ravel()
-                                      - np.asarray(ay, "float64").ravel()))
-            coss.append(c)
-            l2s.append(l2)
-            rows.append({"image": p.name, "pair": f"{x}|{y}", "cosine": c, "l2": l2})
-        if coss:
-            summary[f"{x}|{y}"] = {
-                "cos_mean": float(np.mean(coss)), "cos_min": float(np.min(coss)),
-                "l2_mean": float(np.mean(l2s)), "n": len(coss)}
-    return {"model": model, "n_images": len(paths), "errors": errors,
-            "summary": summary, "rows": rows}
-
-
-# ---------------------------------------------------------------------------
-# 정확도 평가 — recall@K(GT) + 기준선 대비 일치율
-# ---------------------------------------------------------------------------
 def evaluate(results: Results, gt: Dict[Tuple[str, str], set]) -> Tuple[Optional[float], Optional[float], int]:
     """GT 대비 recall@1, recall@5 와 평가 ref 수.  GT 없으면 (None,None,0)."""
     if not gt:
@@ -740,7 +541,7 @@ CAND_RECALL_KS = (5, 10, 20, 40, 100)
 def candidate_recall(embed_order: Dict[Tuple[str, str], List[str]],
                      gt: Dict[Tuple[str, str], set],
                      ks=CAND_RECALL_KS):
-    """임베딩(GPU/NPU) 후보 순위에서 **정답이 몇 위에 있나**를 집계.
+    """임베딩(GPU) 후보 순위에서 **정답이 몇 위에 있나**를 집계.
 
     반환 ``({K: recall@K}, worst_correct_rank, n)``.  ``embed_order`` 는 쿼리별
     임베딩 코사인 내림차순 val 경로 리스트(=CPU 재채점 전 후보 순서).
@@ -1095,7 +896,7 @@ def low_performers(history: Optional[List[dict]] = None, *,
     for rec in history:
         runs = rec.get("runs") or []
         # 가속기 없는 CPU 폴백 기록은 모든 임베딩 레시피가 동일 CPU 결과로 폴백돼
-        # 변별력이 없다 — 저성능 판정에서 제외(실제 GPU/NPU 측정만 신뢰).
+        # 변별력이 없다 — 저성능 판정에서 제외(실제 GPU 측정만 신뢰).
         if not (rec.get("devices") or []):
             continue
         prod_key = rec.get("production_key") or _rx.PRODUCTION_SPEED_KEY
@@ -1198,11 +999,11 @@ def render_markdown(suite: SuiteResult, ds: Dataset) -> str:
                  f"{r.score_sec:.2f} | {r.img_per_sec:.1f} | {peak} | "
                  f"{acc_str(r)} | {note} |")
 
-    # 임베딩 후보 recall — GPU/NPU 가 추린 순위에서 정답이 몇 위에 있나.  검증셋이 커질수록
+    # 임베딩 후보 recall — GPU 가 추린 순위에서 정답이 몇 위에 있나.  검증셋이 커질수록
     # (수백 장) 정답이 밀릴 수 있어, topk 재채점이 정답을 자르지 않는지 판단하는 핵심 표.
     cand = [r for r in measured if r.embed_recall and r.cand_n]
     if cand:
-        L.append("\n### 임베딩 후보 recall — 정답이 GPU/NPU 순위 몇 위에 있나(CPU 재채점 전)")
+        L.append("\n### 임베딩 후보 recall — 정답이 GPU 순위 몇 위에 있나(CPU 재채점 전)")
         L.append("> `worst순위`=정답의 최악 순위(=**놓치지 않을 최소 topk**).  검증셋이 크면 "
                  "이 값이 커질 수 있으니, 운영 topk(=후보의 최소 절반·최소 40)가 이보다 큰지 본다.")
         ks = sorted(int(k) for k in (cand[0].embed_recall or {}).keys())
@@ -1223,12 +1024,12 @@ def render_markdown(suite: SuiteResult, ds: Dataset) -> str:
         for r in sorted(skipped, key=lambda x: x.name):
             L.append(f"| {r.name} (`{r.key}`) | {r.note} |")
 
-    # 임베딩 후보 recall — 정답이 GPU/NPU 순위 몇 위에 있나(CPU 재채점 전).  검증셋이
+    # 임베딩 후보 recall — 정답이 GPU 순위 몇 위에 있나(CPU 재채점 전).  검증셋이
     # 커지면(수백 장) 정답이 밀릴 수 있어, topk 재채점이 정답을 자르지 않는지 판단하는 표.
     cand = [r for r in measured if r.embed_recall and r.cand_n]
     if cand:
         ks = sorted(int(k) for k in (cand[0].embed_recall or {}).keys())
-        L.append("\n### 임베딩 후보 recall — 정답이 GPU/NPU 순위 몇 위에(CPU 재채점 전)")
+        L.append("\n### 임베딩 후보 recall — 정답이 GPU 순위 몇 위에(CPU 재채점 전)")
         L.append("> `worst순위`=정답의 최악 순위(=**놓치지 않을 최소 topk**). 운영 재채점은 "
                  "후보의 최소 절반(≥40)이라, 이 값이 그보다 작으면 안전.")
         L.append("| 레시피 | " + " | ".join(f"@{k}" for k in ks) + " | worst순위 | 쿼리수 |")
@@ -1237,18 +1038,6 @@ def render_markdown(suite: SuiteResult, ds: Dataset) -> str:
             cells = " | ".join(f"{(r.embed_recall.get(str(k)) or 0)*100:.0f}%" for k in ks)
             L.append(f"| {r.name} | {cells} | "
                      f"{r.worst_correct_rank if r.worst_correct_rank else '-'} | {r.cand_n} |")
-
-    # NPU 사용량 — 'NPU 를 얼마나 바쁘게 굴렸나'(드라이브 설정 + 추론시간/처리량/가동률).
-    npu = [r for r in measured if r.npu_used]
-    if npu:
-        L.append("\n### NPU 사용량(가동률 프록시)")
-        L.append("> 진짜 HW% 는 플랫폼 의존이라, 드라이브 설정과 NPU 추론 시간/처리량/가동률로 본다.")
-        L.append("| 레시피 | NPU시간(s) | NPU img/s | 가동률 | 드라이브 설정 |")
-        L.append("|---|--:|--:|--:|---|")
-        for r in npu:
-            bf = f"{r.npu_busy_frac*100:.0f}%" if r.npu_busy_frac is not None else "-"
-            L.append(f"| {r.name} | {r.npu_sec:.2f} | {r.npu_throughput:.1f} | {bf} | "
-                     f"{r.npu_drive} |")
 
     L.append("")
     rec = next((r for r in suite.runs if r.key == suite.recommended_key), None)
@@ -1455,7 +1244,7 @@ def main(argv=None) -> int:
     import argparse
     import tempfile
     ap = argparse.ArgumentParser(
-        description="매칭 가속 조합(CPU/GPU/NPU) 벤치마크 — 캐시 우회, 정확도 보존")
+        description="매칭 가속 조합(CPU/GPU) 벤치마크 — 캐시 우회, 정확도 보존")
     ap.add_argument("--ref", help="기준(reference) 최상위 폴더")
     ap.add_argument("--val", help="검증(validation) 최상위 폴더")
     ap.add_argument("--labels", help="정답 라벨 JSON 경로(없으면 기준선 일치율 사용)")
@@ -1477,9 +1266,6 @@ def main(argv=None) -> int:
                     help="스킵 면제(개별 명시) 키 콤마목록 — 미지정 시 --recipes 에서 추론"
                          "(GUI 가 '개별 체크' 와 '그룹 펼침' 을 구분해 넘길 때 사용)")
     ap.add_argument("--list", action="store_true", help="레시피 목록만 출력")
-    ap.add_argument("--npu-embed-diag", action="store_true",
-                    help="NPU 배치 정확도 붕괴 원인 규명 — GPU vs NPU(b1) vs NPU(b16) "
-                         "임베딩 일치도(코사인/L2) 측정.  --ref 사진 사용.")
     ap.add_argument("--miss-report", action="store_true",
                     help="recall@1 이 놓친 '그 쿼리'를 짚어낸다 — gold(전수)는 맞히고 "
                          "--recipes 가 놓치는 쿼리를 슬롯·파일명·정답순위로 출력(--labels 필요).")
@@ -1495,25 +1281,6 @@ def main(argv=None) -> int:
     if args.list:
         for r in _rx.REGISTRY:
             print(f"{r.key:24s} {r.name}\n    {r.desc}")
-        return 0
-
-    if args.npu_embed_diag:
-        if not args.ref:
-            ap.error("--npu-embed-diag 는 --ref 가 필요합니다")
-        exts = {".png", ".jpg", ".jpeg", ".bmp"}
-        imgs = sorted(p for p in Path(args.ref).rglob("*") if p.suffix.lower() in exts)
-        rep = diagnose_npu_embedding(imgs, max_images=args.max_images or 24)
-        if rep.get("error"):
-            print("진단 불가:", rep["error"])
-            return 2
-        print(f"NPU 임베딩 진단 — model={rep['model']} · 이미지 {rep['n_images']}장")
-        if rep.get("errors"):
-            print("  (건너뜀)", rep["errors"])
-        print(f"  {'비교(설정쌍)':22} {'코사인평균':>9} {'코사인최소':>9} {'L2평균':>9}")
-        for pair, s in rep["summary"].items():
-            print(f"  {pair:22} {s['cos_mean']:9.4f} {s['cos_min']:9.4f} {s['l2_mean']:9.4f}")
-        print("해석: npu_b1|npu_b16 코사인이 1.0 에서 멀수록 '배치가 임베딩을 바꿔' "
-              "정확도가 깨지는 직접 증거(배치=후보선정 손상).")
         return 0
 
     from . import labels as _lab

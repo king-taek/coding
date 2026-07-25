@@ -2,7 +2,6 @@
 
 - `device_embed(batch=B)` 가 batch=1 과 **path별 동일한 임베딩**을 돌려주는지
   (배치는 throughput 용 — 결과 불변).  OpenVINO 없이 컴파일/추론을 mock.
-- `build_units` 가 use_cpu/use_gpu/use_npu 토글을 따르고, 전부 끄면 CPU 폴백.
 """
 
 from __future__ import annotations
@@ -44,7 +43,7 @@ def _fake_infer(compiled, inputs, n_streams, progress_cb=None):
 def test_progress_cb_counts_all_images(_mock_ov):
     paths = [Path(f"x{i}.png") for i in range(5)]
     seen = {"n": 0}
-    ov.device_embed(paths, model_kind=ov.MODEL_RESNET18, device="NPU",
+    ov.device_embed(paths, model_kind=ov.MODEL_RESNET18, device="GPU",
                     jobs=4, batch=1, progress_cb=lambda n: seen.__setitem__("n", seen["n"] + n))
     assert seen["n"] == 5            # 모든 사진이 진행률에 반영(per-image)
 
@@ -60,7 +59,7 @@ def _mock_ov(monkeypatch):
 
 
 def _embed(paths, batch):
-    return ov.device_embed(paths, model_kind=ov.MODEL_RESNET18, device="NPU",
+    return ov.device_embed(paths, model_kind=ov.MODEL_RESNET18, device="GPU",
                            jobs=4, batch=batch)
 
 
@@ -87,30 +86,3 @@ def test_batch_padding_ignored(_mock_ov):
                            1)[(Path("x3.png"),)][0]
     expected = expected / (np.linalg.norm(expected) + 1e-9)
     assert np.allclose(out[Path("x3.png")], expected.astype(np.float32))
-
-
-# ---------------------------------------------------------------------------
-# build_units 장치 토글
-# ---------------------------------------------------------------------------
-class _Cfg:
-    def __init__(self, **kw):
-        self.use_cpu = kw.get("use_cpu", True)
-        self.use_gpu = kw.get("use_gpu", True)
-        self.use_npu = kw.get("use_npu", True)
-        self.accel_concurrency = 16
-        self.embed_batch = kw.get("embed_batch", 1)
-
-
-def _tags(units):
-    return [getattr(u, "tag", "?") for u in units]
-
-
-def test_build_units_cpu_gpu(monkeypatch):
-    # build_units(보존용): CPU 항상 + GPU(use_gpu 기본 True). NPU 는 use_npu=True 일 때만.
-    monkeypatch.setattr(eff._ov, "available_units", lambda: ["GPU", "NPU"])
-    monkeypatch.setattr(eff._ov, "compile_model_on",
-                        lambda mk, dev, batch=1, **kw: (object(), "dev"))
-    units = eff.build_units(_Cfg(use_npu=False), 0.5)
-    assert _tags(units) == ["cpu", "gpu"]               # 기본 = CPU+GPU
-    units = eff.build_units(_Cfg(use_npu=True), 0.5)
-    assert _tags(units) == ["cpu", "gpu", "npu"]        # NPU 재활성 경로 보존

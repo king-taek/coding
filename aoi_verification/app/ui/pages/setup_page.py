@@ -41,7 +41,6 @@ class SetupInput:
     accel_concurrency: int = 32      # 고효율 모드 동시 추론 수(in-flight)
     use_cpu: bool = True             # 고효율 장치 토글(테스트용)
     use_gpu: bool = True
-    use_npu: bool = False            # 효율 모드 = CPU+GPU. NPU 비활성(코드만 보존).
     embed_batch: int = 1             # 정적 배치 B (1=끔)
     # 좌표 기반 매칭(v2) 허용 오차 — µm 단위.
     coord_tolerance: float = 500.0
@@ -1029,10 +1028,9 @@ class SetupPage(QWidget):
         coord_tolerance = float(self.coord_tol_spin.value())
         persist_scores = True   # 디스크 점수 캐시 항상 기본 적용(토글 제거).
         accel_concurrency = 32      # 자동 산정 상한(슬라이더 제거) — 워크로드 기반 유동.
-        # 효율 모드 = CPU+GPU fusion-zscore 고정.  NPU 는 비활성(코드만 보존).
+        # 효율 모드 = CPU+GPU fusion-zscore 고정.
         use_cpu = True
         use_gpu = True
-        use_npu = False
         embed_batch = 1
 
         # 마지막 입력 값을 영속화 (#14)
@@ -1049,7 +1047,6 @@ class SetupPage(QWidget):
             accel_concurrency=accel_concurrency,
             use_cpu=use_cpu,
             use_gpu=use_gpu,
-            use_npu=use_npu,
             embed_batch=embed_batch,
             coord_tolerance=coord_tolerance,
         )
@@ -1066,7 +1063,6 @@ class SetupPage(QWidget):
             accel_concurrency=accel_concurrency,
             use_cpu=use_cpu,
             use_gpu=use_gpu,
-            use_npu=use_npu,
             embed_batch=embed_batch,
             coord_tolerance=coord_tolerance,
             selected_slots=(set(self._selected_slots)

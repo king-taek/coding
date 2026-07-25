@@ -40,10 +40,10 @@ BACKBONE_OUT_DIM = 576
 
 # ---------------------------------------------------------------------------
 # Device 감지 — CUDA / Intel XPU / Apple MPS / DirectML / CPU 순서.
-# Intel 노트북 (Iris Xe / Arc GPU, AI Boost NPU) 도 자동 인식:
+# Intel 노트북 (Iris Xe / Arc GPU) 도 자동 인식:
 #   · torch.xpu  — PyTorch 2.5+ 의 native Intel GPU 백엔드 (IPEX 불필요).
 #   · torch_directml — Windows DirectML fallback (선택 설치).
-#   · OpenVINO + NPU — embedder_openvino.py 별도 모듈에서 처리 (선택).
+#   · OpenVINO + Intel GPU — embedder_openvino.py 별도 모듈에서 처리 (선택).
 # ---------------------------------------------------------------------------
 def _detect_device():  # pragma: no cover — 환경 의존
     if not _HAS_TORCH:
@@ -104,11 +104,10 @@ def device_label() -> str:
       'GPU 가속 (NVIDIA GeForce RTX 4060)'
       'Intel GPU 가속 (xpu)'
       'Apple GPU 가속 (mps)'
-      'NPU 가속 (Intel AI Boost — OpenVINO)'
       'CPU 7 코어'
     """
     import os
-    # OpenVINO NPU/GPU 가 별도로 인식되면 그것을 우선 표시.
+    # OpenVINO GPU 가 별도로 인식되면 그것을 우선 표시.
     ov = _ov_device_label()
     if ov:
         return ov
@@ -224,7 +223,7 @@ def _make_input_tensor(path: Path, cfg=None):  # pragma: no cover
 # Public — single image
 # ---------------------------------------------------------------------------
 def has_accelerator() -> bool:
-    """OpenVINO NPU/GPU 또는 PyTorch CUDA/XPU/MPS 가 가용한지.
+    """OpenVINO GPU 또는 PyTorch CUDA/XPU/MPS 가 가용한지.
 
     True 면 basic 모드에서도 CNN 임베딩 (raw ImageNet backbone) 을 활용해
     가속기 활용도를 높인다 — CPU only 환경에선 비활성 (오버헤드 회피).
@@ -319,7 +318,7 @@ def compute_embeddings(paths: Iterable[Path],
                        ) -> dict[Path, np.ndarray]:
     """여러 이미지의 임베딩을 배치로 계산.
 
-    OpenVINO + NPU/Intel GPU 가용 시 그 경로를 우선 사용 (Intel 노트북
+    OpenVINO + Intel GPU 가용 시 그 경로를 우선 사용 (Intel 노트북
     호환).  OpenVINO 가 일부 path 만 처리한 경우 누락된 path 는 PyTorch
     경로로 보완해서 합친다.
 
@@ -338,7 +337,7 @@ def compute_embeddings(paths: Iterable[Path],
     if not items:
         return out
 
-    # 1) OpenVINO NPU/GPU 우선 — Intel AI Boost NPU / Iris Xe / Arc.
+    # 1) OpenVINO GPU 우선 — Iris Xe / Arc.
     ov_handled: set[Path] = set()
     try:
         from . import embedder_openvino as _ov
@@ -351,7 +350,7 @@ def compute_embeddings(paths: Iterable[Path],
                 out.update(ov_out)
                 ov_handled = set(ov_out.keys())
     except Exception as exc:
-        # OpenVINO(Intel GPU/NPU) 경로 실패 — PyTorch 로 폴백하되, 원인을
+        # OpenVINO(Intel GPU) 경로 실패 — PyTorch 로 폴백하되, 원인을
         # 로그로 남긴다(동작 불변).  GPU 가속이 조용히 꺼지는 상황 진단용.
         from ..utils import errors as _errors
         _errors.log_silent("embedder: OpenVINO 경로 실패 → PyTorch 폴백",

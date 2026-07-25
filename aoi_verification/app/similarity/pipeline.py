@@ -218,7 +218,7 @@ def _active_model_name() -> str:
 def _resolve_weights(base: config.SimilarityWeights) -> config.SimilarityWeights:
     """active 모델이 학습 모델이면 use_cnn 을 자동 활성, basic 이면 비활성.
 
-    가속기 (NPU/GPU) 가 있어도 basic 모드에서는 CNN 활성하지 않음 —
+    가속기 (GPU) 가 있어도 basic 모드에서는 CNN 활성하지 않음 —
     이전 동작으로 롤백 (가중치 변경 없음).
     """
     from ..learning import embedder as _emb

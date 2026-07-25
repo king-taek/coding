@@ -78,7 +78,7 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 > 아래 규칙과 충돌하는 변경은 하지 마세요. (Claude Code 가 세션 시작 시 자동으로 읽습니다.)
 
 ## 프로젝트 한 줄 요약
-Intel CPU·GPU·NPU 를 쓰는 AOI(반도체 광학검사) 이미지 **매칭 검증** 데스크톱 앱
+Intel CPU·GPU 를 쓰는 AOI(반도체 광학검사) 이미지 **매칭 검증** 데스크톱 앱
 (Python/PyQt6, OpenVINO). 흐름: **스캔 → Setup → (후보 선별) → 매칭 → 검토 → 결과(엑셀)**.
 표준 작업 영역: 매칭 속도/정확도, 좌표 기반 매칭·검토, KLA(WaferID) OCR, 자동 업데이트,
 UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않는다.**
@@ -139,12 +139,12 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   모두 지원한다(`main_window._ask_kla_side`·`_kla_resolve_impl`). 한쪽만 추가하지 말 것.
 
 ## 개발자 벤치마크(매칭 속도 실험) 규칙
-- 레시피 **실행은 자식 프로세스로 격리**한다(`benchmark.drive_isolated_suite`). OpenVINO/NPU
+- 레시피 **실행은 자식 프로세스로 격리**한다(`benchmark.drive_isolated_suite`). OpenVINO
   네이티브 크래시·멈춤이 GUI 를 죽이지 않게 — 파이썬 예외/타임아웃으론 못 막는다. 자식이
   죽으면 범인 레시피를 기록하고 살아남은 것만 이어서 측정(부분 `result.json` 으로 복구).
 - 측정은 항상 **유사도 캐시 우회**(`bench_no_cache`)로 '처음 매칭처럼'.
-- 실측 결론(`docs/진행상황_매칭속도개선.md`): 병목은 **CPU 재채점(~57s)**, 임베딩 장치
-  교체는 속도 이득 거의 없음(×1.02). 3배의 레버는 **CPU 재채점 축소**(`fast-rerank`/`cpu_rr_*`).
+- 실측 결론: 병목은 **CPU 재채점(~57s)**, 임베딩 장치 교체는 속도 이득 거의 없음(×1.02).
+  3배의 레버는 **CPU 재채점 축소**(`fast-rerank`/`cpu_rr_*`). NPU 는 이득이 없어 제거됐다.
 - 새 레시피는 **실제 채점 경로에 배선**해 동작하게 한다(스캐폴드면 그 사실을 desc/문서에 명시).
 
 ## UI 사용성 관습

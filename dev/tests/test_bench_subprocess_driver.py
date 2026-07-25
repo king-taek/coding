@@ -1,6 +1,6 @@
 """프로세스 격리 드라이버 — 자식 크래시 복원/합본 로직(순수, cv2 불필요).
 
-레시피 '실행'을 자식 프로세스로 돌리는 이유는 OpenVINO/NPU 네이티브 크래시(segfault)가
+레시피 '실행'을 자식 프로세스로 돌리는 이유는 OpenVINO 네이티브 크래시(segfault)가
 파이썬 예외/타임아웃으로 안 막혀 앱 전체를 죽이기 때문이다.  여기서는 자식 spawn 을
 가짜로 주입해, 드라이버가 (a) 정상 완료, (b) 중간 크래시 → 범인 제외 후 이어서 측정,
 (c) 첫 키 즉사 무한루프 방지, (d) 합본 추천 재계산을 올바로 하는지 검증한다.
@@ -20,7 +20,7 @@ def _payload(*run_specs, **meta):
                      "total_sec": total, "recall1": rec})
     base = {"baseline_key": rx.BASELINE_ACCURACY_KEY,
             "production_key": rx.PRODUCTION_SPEED_KEY,
-            "has_ground_truth": True, "devices": ["NPU"], "runs": runs}
+            "has_ground_truth": True, "devices": ["GPU"], "runs": runs}
     base.update(meta)
     return base
 

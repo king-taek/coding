@@ -480,7 +480,7 @@ class MainWindow(QMainWindow):
     def _maybe_offer_openvino(self) -> None:
         """Intel 하드웨어인데 OpenVINO 가 없으면 설치를 한 번 안내.
 
-        OpenVINO 를 설치하면 임베딩(고속 모드)이 Intel GPU/NPU 에서 가속된다.
+        OpenVINO 를 설치하면 임베딩(고속 모드)이 Intel GPU 에서 가속된다.
         '다시 보지 않기' 를 고르면 prefs 에 기록해 다음부터 묻지 않는다.
         """
         try:
@@ -770,7 +770,6 @@ class MainWindow(QMainWindow):
             accel_concurrency=int(getattr(inp, "accel_concurrency", 32)),
             use_cpu=bool(getattr(inp, "use_cpu", True)),
             use_gpu=bool(getattr(inp, "use_gpu", True)),
-            use_npu=bool(getattr(inp, "use_npu", True)),
             embed_batch=int(getattr(inp, "embed_batch", 1)),
             rerank_components=rerank_components,
             orb_center_weight=orb_center_weight,
@@ -1316,7 +1315,6 @@ class MainWindow(QMainWindow):
                 "threshold": getattr(inp, "threshold", None),
                 "center_crop": False,
                 "use_gpu": bool(getattr(inp, "use_gpu", True)),
-                "use_npu": bool(getattr(inp, "use_npu", True)),
             }
             kla_used = bool(getattr(self, "_slot_meta_ref", None)
                             or getattr(self, "_slot_meta_val", None))

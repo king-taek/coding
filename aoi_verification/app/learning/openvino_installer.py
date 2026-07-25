@@ -1,6 +1,6 @@
 """OpenVINO 자동 감지 + 백그라운드 설치 도우미.
 
-목적: Intel CPU 사용자가 NPU / Iris Xe GPU 가속을 ‘별도 설명 없이도’
+목적: Intel CPU 사용자가 Iris Xe GPU 가속을 ‘별도 설명 없이도’
 받을 수 있게, ``openvino`` 패키지가 없으면 첫 실행 시 한 번 안내해서
 바로 설치할 수 있게 한다.
 
@@ -38,7 +38,7 @@ def is_openvino_installed() -> bool:
 def is_intel_cpu() -> bool:
     """Intel CPU 여부 — OpenVINO 설치 권유 대상.
 
-    Intel CPU 가 아니면 OpenVINO 의 NPU/GPU 가속도 의미 없으므로 권유하지
+    Intel CPU 가 아니면 OpenVINO 의 GPU 가속도 의미 없으므로 권유하지
     않는다.  ``platform.processor()`` 가 비어있을 수 있어 OS 별 보강.
     """
     info = ""
@@ -69,7 +69,7 @@ def should_offer_install(declined: bool) -> bool:
     """설치 권유 다이얼로그를 띄울지 결정.
 
     - 이미 설치돼 있으면 권유 불필요.
-    - Intel CPU 가 아니면 NPU/Intel GPU 가속이 무의미 → 권유 안 함.
+    - Intel CPU 가 아니면 Intel GPU 가속이 무의미 → 권유 안 함.
     - 사용자가 한 번 거절한 적 있으면 안 함 (다시 묻지 않기).
     """
     if declined:

@@ -1,4 +1,4 @@
-"""중앙-인식(center-aware) 채점 + 린 프리셋 정리 + NPU 진단 — 헤드리스 단위 테스트.
+"""중앙-인식(center-aware) 채점 + 린 프리셋 정리 — 헤드리스 단위 테스트.
 
 defect 이 정중앙인 AOI 이미지 특성을 활용하는 신규 레시피(영역융합 A·캐스케이드 B)와,
 개발자 모드 테스트 목록 정리(린 기본 + faceoff), 영역 점수 융합/캐스케이드 순수 로직,
@@ -83,8 +83,8 @@ def test_main_options_are_anchors_plus_top5():
     assert rx.BASELINE_ACCURACY_KEY in main and rx.PRODUCTION_SPEED_KEY in main
     assert set(rx.TOP5_KEYS) <= set(main)
     # 옵션에서 내린 레시피(사패·신규 실험)는 메인엔 없지만 코드(all+)엔 보존.
-    for archived in ("npu_mbnet_cpu_fuse", "gpu_fusion_topk20", "cpu_rr_phash",
-                     "center_fusion_r25_w60", "rr_npu_phash_parallel", "npu_hi_conc96"):
+    for archived in ("gpu_fusion_topk20", "cpu_rr_phash",
+                     "center_fusion_r25_w60"):
         assert archived not in main
         assert archived in set(rx.all_extended_keys())   # 기록은 보존(all+)
 
@@ -94,12 +94,6 @@ def test_center_group_selectable_and_in_all_extended():
     assert "center_cascade_r25_k8_par" in cen
     allx = set(rx.all_extended_keys())
     assert cen <= allx                              # 아카이브/전체에 포함
-
-
-# ── NPU 배치 정확도 진단 — openvino 미가용 환경에서 안전 동작 ────────────────
-def test_npu_diag_returns_error_without_openvino():
-    rep = bm.diagnose_npu_embedding([], max_images=4)
-    assert "error" in rep                            # 빈 입력/미가용 → 에러 메시지(크래시 X)
 
 
 def test_cosine_helper():
@@ -162,7 +156,7 @@ def test_production_rerank_is_parallel():
     assert "_pool.submit" in src and "_rerank_one" in src
 
 
-# ── NPU 병렬 보조기 — N신호 z-융합(순수) + 레시피 배선 ──────────────────────
+# ── N신호 z-융합(순수) ─────────────────────────────────────────────────────
 def test_fuse_zscore_signals_combines_and_ignores_bad():
     f = bm.fuse_zscore_signals([[0.9, 0.1, 0.5], [0.2, 0.8, 0.5], [0.7, 0.3, 0.5]])
     assert len(f) == 3 and abs(sum(f)) < 1e-9        # z-합산은 평균 0
@@ -174,19 +168,7 @@ def test_fuse_zscore_signals_combines_and_ignores_bad():
     assert abs(g[1]) < 1e-9 and g[0] == -g[2]        # 대칭(반대 신호) → 가운데 0
 
 
-def test_npu_assist_recipes_registered_and_wired():
-    g = {r.key: r for r in rx.group("npu-assist")}
-    assert set(rx.NPU_ASSIST_KEYS) == set(g)
-    for r in g.values():
-        assert r.npu_defect_assist is True
-        assert r.recall == rx.RECALL_GPU             # GPU 임베딩 recall 은 현행 그대로
-        assert r.center_ratio > 0 and r.rerank_workers >= 2
-    # 실험 종료로 옵션(MAIN)에선 내렸지만 코드(all+)엔 보존.
-    assert set(rx.NPU_ASSIST_KEYS) & set(rx.MAIN_KEYS) == set()
-    assert set(rx.NPU_ASSIST_KEYS) <= set(rx.all_extended_keys())
-
-
-# ── 임베딩 후보 recall: 정답이 GPU/NPU 순위 몇 위에 있나(topk 안전성) ─────────
+# ── 임베딩 후보 recall: 정답이 GPU 순위 몇 위에 있나(topk 안전성) ────────────
 def test_candidate_recall_ranks_and_worst():
     order = {("A", "r1"): ["v1", "v2", "v3"],
              ("A", "r2"): ["x", "y", "vc", "z"],     # 정답 vc = 3위
@@ -205,7 +187,7 @@ def test_gpu_models_preset_compares_mobilenet_and_resnet18():
     assert gm == rx.GPU_MODEL_KEYS
     assert "gpu_fusion_b16" in gm and "gpu_fusion_resnet18" in gm   # 두 모델 비교
     assert rx.by_key("gpu_embed_resnet18").embed_model == "resnet18"
-    assert rx.by_key("gpu_fusion_resnet18").recall == rx.RECALL_GPU  # NPU 없이 GPU
+    assert rx.by_key("gpu_fusion_resnet18").recall == rx.RECALL_GPU
     assert set(rx.GPU_MODEL_KEYS) <= rx.explicit_keys("gpu-models")
 
 
@@ -230,7 +212,7 @@ def test_query_failures_identifies_missed_query_and_rank():
     assert len(bm.query_failures(res, {("A", "r1.jpg"): {"v1"}})) == 1
 
 
-# ── 최종 벤치 프리셋(top5 / final) + 고전 워밍업 2회 + NPU 고가동 5종 ──────────
+# ── 최종 벤치 프리셋(top5 / final) + 고전 워밍업 2회 ───────────────────────
 def test_top5_preset_is_five_stable_survivors():
     top5 = [r.key for r in rx.select("top5")]
     assert len(top5) == 5
@@ -248,29 +230,8 @@ def test_final_preset_runs_classical_first_and_second():
     w = rx.by_key("cpu_classical_warmup")
     g = rx.by_key(rx.BASELINE_ACCURACY_KEY)
     assert w.scoring == g.scoring and w.recall == g.recall and w.key != g.key
-    # TOP5 가 뒤따른다(실험 종료로 NPU 고가동은 final 에서 제외).
+    # TOP5 가 뒤따른다.
     assert set(rx.TOP5_KEYS) <= set(final)
-    assert not (set(rx.NPU_HI_KEYS) & set(final))
     # 워밍업·TOP5 는 '개별 명시'로 스킵 면제(대상 장비에서 그대로 측정).
     ek = rx.explicit_keys("final")
     assert "cpu_classical_warmup" in ek and set(rx.TOP5_KEYS) <= ek
-
-
-def test_npu_hi_recipes_drive_npu_hard_batch1():
-    g = {r.key: r for r in rx.group("npu-hi")}
-    assert len(g) == 5
-    for r in g.values():
-        assert r.embed_batch == 1          # 배치 정확도 버그 회피
-        assert (r.concurrency >= 64 or r.streams >= 4 or r.npu_defect_assist)
-    assert g["npu_hi_split"].recall == rx.RECALL_GPU_NPU
-    assert g["npu_hi_throughput"].perf_hint == "THROUGHPUT"
-
-
-def test_recipe_run_records_npu_usage_fields():
-    from dataclasses import asdict
-    rr = bm.RecipeRun(key="x", name="x", npu_used=True, npu_sec=4.2,
-                      npu_infer=809, npu_throughput=192.6, npu_busy_frac=0.2,
-                      npu_drive="jobs=96 streams=0 batch=1 hint=THROUGHPUT")
-    d = asdict(rr)
-    assert d["npu_used"] is True and d["npu_busy_frac"] == 0.2
-    assert "jobs=96" in d["npu_drive"]

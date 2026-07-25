@@ -114,14 +114,13 @@ class SimilarityConfig:
     center_crop: bool = False      # 사진 중앙 30% 영역만 사용 (기준·검증 모두)
     top_k: int = 50                # 후보 재정렬 깊이
     persist_scores: bool = True    # (ref,val) 점수 디스크 영속 캐시 — 항상 기본 적용
-    # 고효율 모드 동시 추론 수(in-flight) — NPU 기준, GPU 는 절반.  높일수록
-    # NPU/GPU 메모리·throughput↑(계산 결과는 불변).  사용자 조절 노브.
+    # 고효율 모드 동시 추론 수(in-flight).  높일수록 GPU 메모리·throughput↑
+    # (계산 결과는 불변).  사용자 조절 노브.
     accel_concurrency: int = 32
     # 고효율 모드 장치 사용 토글(테스트용).  끄면 해당 유닛을 안 띄움 — 단,
     # 전부 꺼지면 CPU 로 폴백(유닛 0개 방지).
     use_cpu: bool = True
     use_gpu: bool = True
-    use_npu: bool = True
     # 정적 배치 B 재컴파일(테스트용).  1=끔(현행), >1=요청당 B장 추론.
     embed_batch: int = 1
     # 개발자 벤치마크 전용 — 모든 유사도 디스크 캐시(특징 .npz / 임베딩 .npy /
