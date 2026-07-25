@@ -143,6 +143,69 @@ def transition_in(container, new_pixmap, *, forward: bool = True,
     anim.start(QVariantAnimation.DeletionPolicy.DeleteWhenStopped)
 
 
+DUR_RECOLOR = 220        # 색 모드 전환 — 짧게, 끝에서 감속
+
+
+def crossfade_from(container, old_pixmap, *, duration: int = DUR_RECOLOR,
+                   on_done=None) -> None:
+    """**옛 화면 스냅샷**을 위에 얹어 빼면서 새 화면을 드러낸다(색만 바뀌는 전환).
+
+    :func:`transition_in` 과 방향이 반대다 — 저쪽은 들어오는 화면을 얹어 넣고, 이쪽은
+    **나가는 화면을 걷어낸다.**  다크 모드 전환처럼 레이아웃은 그대로이고 색만 바뀔 때는
+    이게 맞다: 위치 이동을 섞으면 '화면이 옮겨졌다'는 거짓 신호가 된다(슬라이드 없음).
+
+    호출부는 **먼저** 새 색으로 화면을 갈아 끼운 뒤(즉시 교체) 이 함수에 옛 스냅샷을
+    넘긴다.  ``on_done`` 은 성공·즉시완료·비활성 어느 경로에서도 **정확히 한 번** 불린다 —
+    호출부가 여기서 전환 잠금을 풀기 때문에, 안 불리면 토글이 영구히 잠긴다.
+    """
+    from PyQt6.QtCore import Qt
+    done_once = {"v": False}
+
+    def _done():
+        if not done_once["v"]:
+            done_once["v"] = True
+            if on_done is not None:
+                on_done()
+
+    if not enabled() or old_pixmap is None or old_pixmap.isNull():
+        _done()
+        return
+
+    prev = container.findChild(QLabel, "_pageRecolorOverlay")
+    if prev is not None:
+        prev.deleteLater()
+
+    overlay = QLabel(container)
+    overlay.setObjectName("_pageRecolorOverlay")
+    overlay.setPixmap(old_pixmap)
+    overlay.setScaledContents(False)
+    overlay.setGeometry(container.rect())
+    overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+    eff = QGraphicsOpacityEffect(overlay)
+    eff.setOpacity(1.0)
+    overlay.setGraphicsEffect(eff)
+    overlay.show()
+    overlay.raise_()
+
+    anim = QVariantAnimation(overlay)
+    anim.setStartValue(1.0)
+    anim.setEndValue(0.0)
+    anim.setDuration(dur(duration))
+    anim.setEasingCurve(EASE_PRIMARY)
+    anim.valueChanged.connect(lambda v: eff.setOpacity(float(v)))
+    # ★ 오버레이가 파괴되면 애니메이션을 멈춘다 — 람다 슬롯은 receiver 를 식별할 수 없어
+    #   PyQt 가 연결을 자동으로 끊어 주지 못하고, tick 이 죽은 객체로 들어가면 파이썬
+    #   예외가 아니라 세그폴트가 난다(로딩 오버레이에서 실측한 함정).
+    overlay.destroyed.connect(anim.stop)
+
+    def _finish():
+        overlay.deleteLater()
+        _done()
+
+    anim.finished.connect(_finish)
+    anim.start(QVariantAnimation.DeletionPolicy.DeleteWhenStopped)
+
+
 def animate_scroll(bar, target: int, *, duration: int = DUR_BASE) -> None:
     """스크롤바 값을 target 으로 부드럽게(OutQuart). reduced/headless 면 즉시."""
     target = max(bar.minimum(), min(int(target), bar.maximum()))

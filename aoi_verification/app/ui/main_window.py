@@ -100,6 +100,9 @@ class MainWindow(QMainWindow):
         self._mem_timer.setInterval(2000)
         self._mem_timer.timeout.connect(self._update_memory_label)
         self._mem_pressure_shown = False
+        # 색 모드 전환 중 재진입 차단 — 연타로 페이지 재생성이 겹치면 스냅샷·페이지가
+        # 어긋나고, 최악에는 잠금이 풀리지 않는다.
+        self._appearance_busy = False
         # 타이머는 psutil 유무와 무관하게 구동 — 콜백이 안전 가드한다.
         self._mem_timer.start()
         self._update_memory_label()
@@ -1434,22 +1437,55 @@ class MainWindow(QMainWindow):
         self._match_review_page.finished.connect(self._on_match_review_done)
 
     def _on_appearance_changed(self) -> None:
-        """색 모드(어두운 화면) 변경을 화면에 반영한다.
+        """색 모드(어두운 화면) 변경을 화면에 반영한다 — **옛 화면을 걷어내는 크로스페이드**.
 
         위젯이 생성 시점에 ``theme.INK`` 같은 색을 f-string 으로 굽기 때문에 QSS 재적용만
         으로는 부족하다 → 페이지를 다시 만든다.  **세션 시작 전(PHASE_NONE)에만** 허용해
-        진행 중 상태가 사라지지 않게 이중으로 막는다."""
-        if self._phase != PHASE_NONE:
+        진행 중 상태가 사라지지 않게 이중으로 막는다.
+
+        전환이 한 프레임에 튀지 않도록: 옛 색 화면을 스냅샷으로 떠 두고, 아래에서 새 색
+        페이지로 즉시 갈아 끼운 뒤 스냅샷을 220ms(OutQuart)로 빼낸다.
+
+        ★ 전환 중에는 토글이 **눌리지 않아야 한다.**  두 겹으로 막는다:
+        (a) ``_appearance_busy`` 로 재진입 자체를 차단하고,
+        (b) 새로 만든 페이지의 스위치를 비활성해 눌리지 않는 것이 **눈에 보이게** 한다.
+        (a) 만 있으면 눌러도 아무 일이 없는 '먹은 클릭'이 되고, (b) 만 있으면 페이지
+        재생성 사이의 틈으로 두 번째 요청이 새어 든다."""
+        if self._phase != PHASE_NONE or self._appearance_busy:
             return
+        from . import motion
+        self._appearance_busy = True
         try:
-            p = _prefs.load()
-            theme.set_color_mode(getattr(p, "color_mode", theme.DEFAULT_COLOR_MODE))
+            snapshot = self._stack.grab() if motion.enabled() else None
+            try:
+                p = _prefs.load()
+                theme.set_color_mode(
+                    getattr(p, "color_mode", theme.DEFAULT_COLOR_MODE))
+            except Exception:
+                self._appearance_busy = False
+                return
+            app = QApplication.instance()
+            if app is not None:
+                theme.apply_to_app(app)      # QSS 먼저 — 새 위젯이 1회 polish 되게
+            self._recreate_pages()
+            self._set_appearance_controls_enabled(False)
+            motion.crossfade_from(self._stack, snapshot,
+                                  on_done=self._end_appearance_transition)
         except Exception:
-            return
-        app = QApplication.instance()
-        if app is not None:
-            theme.apply_to_app(app)          # QSS 먼저 — 새 위젯이 1회 polish 되게
-        self._recreate_pages()
+            # ★ 어떤 경로로 실패해도 잠금은 반드시 풀린다 — 잠긴 채 남으면 다크 모드를
+            #   **영구히** 못 바꾼다(원래 버그보다 나쁘다).
+            self._end_appearance_transition()
+            raise
+
+    def _set_appearance_controls_enabled(self, on: bool) -> None:
+        """색 모드 토글의 활성 상태 — 페이지가 재생성되므로 **새** 위젯에 걸어야 한다."""
+        sw = getattr(self._setup_page, "_dark_switch", None)
+        if sw is not None:
+            sw.setEnabled(bool(on))
+
+    def _end_appearance_transition(self) -> None:
+        self._appearance_busy = False
+        self._set_appearance_controls_enabled(True)
 
     def _recreate_pages(self) -> None:
         """페이지 5개를 파괴 후 다시 만든다(구운 색을 새 팔레트로 교체).
