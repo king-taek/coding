@@ -536,7 +536,50 @@ QPushButton[compact="true"]:focus {
     padding: 3px 5px;
 }
 
-/* 링크형 버튼 — 반복되는 2차 액션(크게 보기·더 보기·접기)용. 테두리 없이 조용히. */
+/* 행 안의 액션 버튼 — **반복돼도 무겁지 않은** 테두리 버튼.
+   ★ `role="link"`(테두리 없음·$mute·12px)로 두었던 '크게 보기'가 버튼으로 읽히지 않았다.
+   사진 더블클릭 확대를 없앤 뒤로는 이것이 좌우 비교 뷰어로 가는 **유일하게 눈에 보이는
+   경로**다 — 안 보이는 유일 경로는 기능이 없는 것과 같다.
+   ★ `role="ghost"` 를 쓰지 않는 이유: ghost 는 min-height 30 + 액션 등급 패딩이라 8행에
+   반복되면 리스트가 무거워진다(원래 링크로 둔 이유가 그것이었다).  '조용한 테두리'로
+   중간 등급을 만든다: 라벨은 $ink2, 테두리는 $line_strong(면 대비 ≥3:1, WCAG 1.4.11).
+   높이 하한은 프로젝트 터치 하한 $target_min(26px). */
+QPushButton[role="rowAction"] {
+    background: transparent;
+    color: $ink2;
+    border: 1px solid $line_strong;
+    border-radius: $radius_sm;
+    padding: 3px 8px;
+    font-size: $font_caption_sz;
+    font-weight: 600;
+    min-height: $target_min;
+    text-align: center;
+}
+QPushButton[role="rowAction"]:hover {
+    color: $ink;
+    border-color: $accent;
+    background-color: $elev;
+}
+QPushButton[role="rowAction"]:pressed {
+    background-color: $accent_tint;
+    color: $accent;
+}
+/* ★ :focus·:disabled 를 **역할별로 따로** 선언한다.  속성 선택자는 일반
+   `QPushButton:focus` 와 특이도가 같고 뒤에 선언돼 있어, 전용 규칙이 없으면 위 border-color
+   가 포커스 링 색을 그대로 덮는다 — ghost/danger 에서 실제로 링이 전혀 그려지지 않았다
+   (픽셀 실측).  보더가 굵어진 만큼 패딩을 줄여 **높이를 고정**한다. */
+QPushButton[role="rowAction"]:focus {
+    border: $focus_w solid $focus;
+    padding: 2px 7px;
+}
+QPushButton[role="rowAction"]:disabled {
+    background: transparent;
+    color: $mute;
+    border: 1px dashed $line;
+}
+
+/* 링크형 버튼 — 반복되는 2차 액션(더 보기 ▾·접기 ▴)용. 테두리 없이 조용히.
+   '펼치기/접기'는 이동이 아니라 제자리 펼침이므로 등급이 낮은 것이 맞다(캐럿이 말한다). */
 QPushButton[role="link"] {
     background: transparent;
     border: 1px solid transparent;

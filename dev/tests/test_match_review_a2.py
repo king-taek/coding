@@ -206,16 +206,47 @@ def test_compact_toggle_touch_target_and_intent(qapp):
     row.deleteLater()
 
 
-def test_secondary_actions_are_links(qapp):
-    """반복 2차 액션(크게 보기·더 보기)은 링크형 role."""
+def test_view_larger_reads_as_a_button(qapp):
+    """★ '크게 보기'는 **버튼으로 보여야** 한다 — 사용자 보고: "버튼처럼 안 보임".
+
+    사진 더블클릭 확대를 없앤 뒤로 이것이 좌우 비교 뷰어로 가는 **유일하게 눈에 보이는
+    경로**다(썸네일 우클릭 메뉴는 발견되지 않는다).  링크형(테두리 없음·$mute·12px)은
+    '눌러도 되는 것'으로 읽히지 않아 기능이 없는 것과 같았다.
+
+    '펼치기/접기'는 이동이 아니라 제자리 펼침이므로 링크로 남는다(캐럿 ▾/▴ 이 말한다) —
+    등급 차이가 의도라는 것을 여기서 고정한다."""
+    from aoi_verification.app.ui import theme
     from aoi_verification.app.ui.pages.match_review_page import _MatchRow
     from aoi_verification.app.models.slot import ImageItem
     runners = [(ImageItem(slot="S1", path=Path(f"/tmp/c{i}.jpg"), side="val"),
                 0.6 - i * 0.1) for i in range(6)]
+    qapp.setStyleSheet(theme.render_qss(_QSS))
     row = _MatchRow(_m("S1", 0.9), runners_up=runners, thumb_px=140)
-    assert row.btn_view.property("role") == "link"
-    assert row.btn_more is not None and row.btn_more.property("role") == "link"
-    row.deleteLater()
+    row.show()
+    for _ in range(12):
+        qapp.processEvents()
+    try:
+        assert row.btn_view.property("role") == "rowAction", \
+            "'크게 보기'가 아직 링크형이다"
+        # QSS 등급이 실제로 선언돼 있고, :focus·:disabled 가 **역할별로** 따로 있다
+        # (없으면 role 의 border-color 가 포커스 링을 덮어 링이 안 그려진다 — 실측 전례).
+        assert 'QPushButton[role="rowAction"]' in _QSS
+        assert 'QPushButton[role="rowAction"]:focus' in _QSS
+        assert 'QPushButton[role="rowAction"]:disabled' in _QSS
+        # 렌더된 크기가 터치 하한을 넘는가(WCAG 2.5.8 AA 24 · 프로젝트 하한 26).
+        assert row.btn_view.height() >= theme.PROFILE.target_min, \
+            f"렌더 높이 {row.btn_view.height()}px < {theme.PROFILE.target_min}"
+        assert row.btn_view.width() >= 24
+        # 슬롯 컬럼(96px) 밖으로 나가지 않는다 — 나가면 가로 스크롤이 생긴다.
+        assert row.btn_view.width() <= 96
+        # 펼치기/접기는 링크 유지 + 캐럿으로 성격을 말한다.
+        assert row.btn_more is not None and row.btn_more.property("role") == "link"
+        assert "▾" in row.btn_more.text() and "▴" in row.btn_less.text()
+    finally:
+        row.hide()
+        qapp.processEvents()
+        row.deleteLater()
+        qapp.processEvents()
 
 
 def test_neon_button_is_matte_and_role_driven(qapp):

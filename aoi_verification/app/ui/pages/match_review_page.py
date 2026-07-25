@@ -291,9 +291,17 @@ class _MatchRow(QFrame):
             f"color: {theme.INK}; font-weight: 600; font-size: 14px;"
         )
         slot_lay.addWidget(self._slot_label)
-        # 2차 액션은 조용한 링크형으로 (반복 8행에 테두리 버튼이 쌓이지 않게).
-        self.btn_view = NeonButton(i18n.KO.BTN_VIEW_LARGER, role="link")
+        # ★ 조용한 **테두리 버튼**이다(옛 결정: 링크형 — 반복 8행에 테두리가 쌓이지
+        #   않게).  결정을 바꾼 근거: 사진 더블클릭 확대를 없앤 뒤로 이것이 좌우 비교
+        #   뷰어로 가는 **유일하게 눈에 보이는 경로**가 됐다(썸네일 우클릭 메뉴는 발견되지
+        #   않는다).  링크는 '눌러도 되는 것'으로 읽히지 않아 기능이 없는 것과 같았다.
+        #   무게는 role="rowAction"(액션 등급이 아닌 중간 등급)으로 눌러 둔다.
+        self.btn_view = NeonButton(i18n.KO.BTN_VIEW_LARGER, role="rowAction")
         self.btn_view.setMinimumHeight(36)   # ≥편안한 터치 타깃(C19)
+        # 96px 슬롯 컬럼을 가로로 꽉 채워 클릭 면적을 키운다(컬럼 밖으로 나가지 않으므로
+        # 가로 스크롤 위험 없음).
+        self.btn_view.setSizePolicy(QSizePolicy.Policy.Expanding,
+                                    QSizePolicy.Policy.Fixed)
         self.btn_view.clicked.connect(lambda: self._open_compare(0))
         slot_lay.addWidget(self.btn_view)
         slot_lay.addStretch(1)             # 같은 베이스라인(점수는 우측 VCenter)으로.
