@@ -6,9 +6,13 @@ CLAUDE.md 로딩 계약 유지: set_progress(done,total,msg), total>0 결정형,
 백그라운드 스레드+시그널로 갱신.  결정형 채움 규칙:
 
 - 감소/총량 변경 → **즉시 스냅**
-- **드문** 증가 → 부드럽게 tween
-- **촘촘한** 증가(간격 < VAL_TWEEN_MS) → **즉시 스냅**.  tween 을 재시작하면 표시값이
-  목표를 영원히 따라가지 못해 '바가 채워지지 않는' 버그가 된다(set_progress 주석 참조).
+- **완료**(done ≥ total) → **즉시 스냅**.  마지막 증가를 tween 하면 오버레이가 내려가며
+  잘려 끝까지 찬 적이 없게 된다.
+- **돌고 있는 tween** → 재시작하지 않고 **즉시 스냅**(재시작이 '따라가지 못함'의 기계다).
+- **촘촘한** 증가(간격 < VAL_TWEEN_MS) → **즉시 스냅**.
+- 그 밖의 **드문** 증가 → 부드럽게 tween.
+- 퇴장/숨김 직전에는 `_settle_progress()` 로 **목표값을 확정**한 뒤 멈춘다 — 멈춘 tween 의
+  중간값이 마지막 프레임으로 남지 않게(set_progress 주석에 실측값과 이유가 있다).
 """
 
 from __future__ import annotations
@@ -394,6 +398,17 @@ class LoadingOverlay(QWidget):
         self._panel.setGraphicsEffect(eff)
         self._content_eff = eff
 
+    def _settle_progress(self) -> None:
+        """돌던 채움 tween 을 **목표값으로 확정한 뒤** 멈춘다 — 퇴장/숨김 직전에 부른다.
+
+        그냥 ``stop()`` 하면 tween 의 **중간값**이 마지막으로 보이는 프레임이 된다.
+        퇴장 페이드가 110~160ms 이라 그 사이 바가 목표에 못 닿은 채 사라진다 — 사용자가
+        본 "가끔 바가 안 채워짐"의 나머지 절반이다.  마지막으로 보고된 값(`_target_val`)
+        이 곧 진실이므로 그것으로 맞춘 뒤 멈춘다."""
+        self._val_anim.stop()
+        if not self._progress.isHidden():
+            self._progress.setValue(int(self._target_val))
+
     def _enter_busy(self) -> None:
         """총량을 모르는 상태 — 결정형 바를 치우고 혜성 스윕을 돌린다.
 
@@ -511,6 +526,8 @@ class LoadingOverlay(QWidget):
             self._finish_hide()                # 래치는 지켰으니 이제 즉시 종료
             return
         self._hiding = True
+        # 페이드아웃 동안 보이는 바는 **마지막으로 보고된 값**이어야 한다.
+        self._settle_progress()
         self._rise_span = self.RISE_OUT_PX     # 퇴장은 살짝만 내려간다
         self._attach_effect()
         dur = max(110, motion.dur(self.FADE_OUT_MS))
@@ -529,8 +546,8 @@ class LoadingOverlay(QWidget):
         self._rise_anim.start()
 
     def _finish_hide(self) -> None:
+        self._settle_progress()        # 멈춘 tween 의 중간값이 남지 않게(모션 off 경로 포함)
         self.hide()
-        self._val_anim.stop()
         self._bar_anim.stop()          # 숨은 뒤 tick 이 남아 여백을 흔들지 않게
         self._bar_timer.stop()         # 대기 중인 스태거도 취소(숨은 뒤 들어오지 않게)
         self._busy.stop()
@@ -568,31 +585,38 @@ class LoadingOverlay(QWidget):
                 self._val_gap.start()                  # 이 시점부터 간격을 잰다
             else:
                 cur = self._progress.value()
-                # ★ 갱신이 **촘촘하면 tween 을 걸지 않는다.**
+                # ★ tween 은 **예외**다 — 기본은 정확한 위치(스냅)이고, 아래 세 조건을
+                #   모두 피한 '드문 증가'만 부드럽게 채운다.  진행률은 장식이 아니라
+                #   정보이므로, 부드러움과 정확함이 부딪히면 정확함이 이긴다.
                 #
-                #   증가마다 VAL_TWEEN_MS tween 을 재시작하는데 갱신이 그보다 빨리 오면,
-                #   tween 은 매번 몇 프레임만 돌고 처음부터 다시 시작한다 → 표시값이 목표를
-                #   영원히 따라가지 못하고, 작업이 끝나면 오버레이가 내려가 **끝까지 찬 적이
-                #   없다**.  실측(고치기 전): 30ms 간격 50회 루프에서 done 5/50 에 표시 0% ·
-                #   15/50 에 20% · 50/50 에 88%.  "로딩바 틀은 있는데 채워지지 않는다"가 이것이다.
-                #
-                #   '부드러움'은 갱신이 **드물 때만** 성립하는 성질이다.  촘촘할 때는 정확한
-                #   위치가 부드러움보다 중요하다 — 진행률은 장식이 아니라 정보다.
-                #   그래서 판정 기준을 tween 지속시간 그 자체로 둔다(값이 하나여야 어긋나지 않는다).
+                #   (1) 완료(`done >= total`)는 항상 스냅.  마지막 증가를 tween 으로 걸면
+                #       작업이 끝나 오버레이가 내려가면서 `_finish_hide` 의 stop() 에 잘려
+                #       **끝까지 찬 적이 없다**(실측: 400ms 간격 5칸 작업에서 4/5 로 종료).
+                #       완료 뒤에는 부드러워야 할 것이 없다.
+                #   (2) **돌고 있는 tween 은 재시작하지 않는다.**  재시작이 곧 '따라가지
+                #       못함'의 기계다 — 매번 몇 프레임만 돌고 처음으로 밀린다(실측,
+                #       고치기 전: 30ms 간격 50회에서 5/50→0% · 15/50→20% · 50/50→88%).
+                #       간격 측정과 달리 이 조건은 **타이밍에 의존하지 않는 불변식**이라
+                #       불규칙한 갱신에서도, `processEvents()` 로 도는 호출부(실패 사진
+                #       재계산 — tween 이 이벤트 루프를 거의 못 받는다)에서도 성립한다.
+                #   (3) 촘촘한 갱신(간격 < tween 지속시간)도 스냅.  판정 기준을 지속시간
+                #       그 자체로 둔다(값이 하나여야 어긋나지 않는다).
                 gap = self._val_gap.restart() if self._val_gap.isValid() else None
                 dense = gap is not None and gap < motion.dur(self.VAL_TWEEN_MS)
-                if done <= cur:                        # 리셋/감소 → 즉시 스냅
+                running = self._val_anim.state() != self._val_anim.State.Stopped
+                if (done <= cur                        # 리셋/감소
+                        or done >= int(total)          # (1) 완료
+                        or running                     # (2) 진행 중 tween
+                        or dense                       # (3) 촘촘
+                        or not motion.enabled()):
                     self._val_anim.stop()
                     self._progress.setValue(done)
-                elif motion.enabled() and not dense:   # 드문 증가 → 부드럽게 tween
+                else:                                  # 드문 증가 → 부드럽게 tween
                     self._val_anim.stop()
                     self._val_anim.setStartValue(int(cur))
                     self._val_anim.setEndValue(done)
                     self._val_anim.setDuration(motion.dur(self.VAL_TWEEN_MS))
                     self._val_anim.start()
-                else:                                  # 촘촘한 증가 → 정확한 위치로
-                    self._val_anim.stop()
-                    self._progress.setValue(done)
         else:
             self._enter_busy()                          # busy: 혜성 스윕으로 교체
         # ★ 매 tick 마다 _cover_parent() 를 부르지 않는다 — sizeHint + setGeometry 가
@@ -607,7 +631,7 @@ class LoadingOverlay(QWidget):
         """숨으면 돌던 것을 전부 멈춘다 — 보이지 않는 오버레이가 tick 할 이유가 없다."""
         self._fade_anim.stop()
         self._rise_anim.stop()
-        self._val_anim.stop()
+        self._settle_progress()        # 값 확정 후 정지 — 중간값으로 얼지 않게
         self._bar_anim.stop()
         self._bar_timer.stop()
         self._hide_timer.stop()

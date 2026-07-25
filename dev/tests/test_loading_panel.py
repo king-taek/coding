@@ -315,6 +315,120 @@ def test_dense_updates_track_the_real_progress(qapp, monkeypatch):
         host.deleteLater()
 
 
+def test_last_update_is_not_left_mid_tween(qapp, monkeypatch):
+    """★ **완료는 tween 하지 않는다** — 마지막 증가가 tween 이면 바가 못 채워진다.
+
+    '촘촘한 갱신' 수정이 못 막은 잔여 버그다(사용자: "개선됐지만 여전히 가끔").
+    갱신이 드물면(예: 400ms 간격) 증가마다 tween 이 걸리는데, **마지막** 증가의 tween 은
+    작업이 끝나 오버레이가 내려가면서 `_finish_hide` 의 `stop()` 에 잘린다.  실측(수정 전,
+    5칸 작업):
+
+        루프 종료 직후 bar = 4 / 5   (100% 여야 한다)
+        숨긴 뒤        bar = 4 / 5
+
+    완료는 **정보**이고 뒤에 부드러워야 할 것이 없다 → `done >= total` 은 항상 스냅한다.
+    그리고 퇴장 경로는 tween 을 멈추기 전에 목표값으로 확정해, 페이드아웃 동안 보이는
+    마지막 프레임이 '멈춘 tween 의 중간값'이 되지 않게 한다."""
+    from PyQt6.QtCore import QElapsedTimer
+
+    from aoi_verification.app.ui import motion
+    monkeypatch.setattr(motion, "enabled", lambda: True)
+    host, ov = _overlay(qapp)
+    try:
+        need = 5
+        ov.show_overlay("점수 계산 중")
+        ov.set_progress(0, need, "점수 계산 중")
+        for i in range(1, need + 1):
+            t = QElapsedTimer()                 # 한 칸당 400ms — tween 보다 드물다
+            t.start()
+            while t.elapsed() < 400:
+                qapp.processEvents()
+            ov.set_progress(i, need, f"{i}/{need}")
+            qapp.processEvents()
+        assert ov._progress.value() == need, (
+            f"작업이 끝났는데 바가 {ov._progress.value()}/{need} 에서 멈췄다 "
+            "(마지막 증가가 tween 으로 걸렸다)")
+        ov.hide_overlay()
+        qapp.processEvents()
+        assert ov._progress.value() == need, \
+            "퇴장 페이드 동안 바가 목표값 아래로 남았다"
+    finally:
+        host.hide()
+        qapp.processEvents()
+        host.deleteLater()
+        qapp.processEvents()
+
+
+def test_running_tween_is_never_restarted(qapp, monkeypatch):
+    """★ **돌고 있는 tween 을 재시작하지 않는다** — 재시작이 '따라가지 못함'의 기계다.
+
+    간격 측정만으로는 부족하다: 갱신이 불규칙하면(빠름·빠름·느림) 판정이 틀리고, tween 은
+    이벤트 루프가 돌 때만 진행하므로 `processEvents()` 로 도는 호출부(실패 사진 재계산)
+    에서는 몇 프레임만 돌고 계속 처음으로 밀린다.  '재시작 금지'는 간격과 달리
+    **타이밍에 의존하지 않는 불변식**이라 어느 호출부에서도 성립한다."""
+    from PyQt6.QtCore import QElapsedTimer
+
+    from aoi_verification.app.ui import motion
+    monkeypatch.setattr(motion, "enabled", lambda: True)
+    host, ov = _overlay(qapp)
+    try:
+        ov.show_overlay("작업 중")
+        ov.set_progress(0, 100, "시작")
+        t = QElapsedTimer()
+        t.start()
+        while t.elapsed() < 600:                # 드문 갱신 → tween 이 걸린다
+            qapp.processEvents()
+        ov.set_progress(40, 100, "도약")
+        qapp.processEvents()
+        assert ov._val_anim.state() != ov._val_anim.State.Stopped, "tween 이 안 걸렸다"
+        started_at = ov._progress.value()
+        # tween 이 도는 **중에** 다음 값이 온다 → 재시작이 아니라 즉시 스냅.
+        ov.set_progress(60, 100, "다음")
+        assert ov._progress.value() == 60, (
+            f"돌고 있는 tween 을 재시작했다(값 {ov._progress.value()}, "
+            f"tween 시작값 {started_at}) — 이 재시작이 반복되면 목표를 영원히 못 따라간다")
+        assert ov._val_anim.state() == ov._val_anim.State.Stopped
+    finally:
+        host.hide()
+        qapp.processEvents()
+        host.deleteLater()
+        qapp.processEvents()
+
+
+def test_irregular_updates_stay_monotonic_and_finish(qapp, monkeypatch):
+    """불규칙한 갱신(빠름·빠름·느림 혼합)에서도 표시값은 **단조 증가**하고 끝은 정확하다.
+
+    실제 재계산 루프는 캐시 hit(즉시)과 miss(수십~수백 ms)가 섞여 간격이 튄다."""
+    from PyQt6.QtCore import QElapsedTimer
+
+    from aoi_verification.app.ui import motion
+    monkeypatch.setattr(motion, "enabled", lambda: True)
+    host, ov = _overlay(qapp)
+    try:
+        need = 30
+        ov.show_overlay("점수 계산 중")
+        ov.set_progress(0, need, "점수 계산 중")
+        prev = 0
+        for i in range(1, need + 1):
+            wait = 5 if i % 3 else 300          # 두 번 빠르고 한 번 느리게
+            t = QElapsedTimer()
+            t.start()
+            while t.elapsed() < wait:
+                qapp.processEvents()
+            ov.set_progress(i, need, f"{i}/{need}")
+            qapp.processEvents()
+            cur = ov._progress.value()
+            assert cur >= prev, f"표시값이 뒤로 갔다: {prev} → {cur}"
+            assert cur <= i, f"표시값이 실제 진행({i})을 앞질렀다: {cur}"
+            prev = cur
+        assert ov._progress.value() == need
+    finally:
+        host.hide()
+        qapp.processEvents()
+        host.deleteLater()
+        qapp.processEvents()
+
+
 def test_sparse_updates_still_tween(qapp, monkeypatch):
     """반대쪽도 지킨다 — 갱신이 **드물면** 부드럽게 채운다(스냅으로 퇴화 금지).
 
