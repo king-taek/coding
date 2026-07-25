@@ -26,6 +26,7 @@ from aoi_verification.app.ui import theme                       # noqa: E402
 from aoi_verification.app.ui.widgets.neon_button import NeonButton  # noqa: E402
 from aoi_verification.app.ui.widgets.option_group import OptionGroup  # noqa: E402
 from aoi_verification.app.ui.widgets.switch_row import SwitchRow      # noqa: E402
+from aoi_verification.app.ui.pages.setup_page import SetupPage        # noqa: E402
 
 _QSS = (Path(__file__).resolve().parents[2] / "aoi_verification" / "app" / "ui"
         / "style.qss").read_text(encoding="utf-8")
@@ -439,8 +440,7 @@ def test_action_grade_controls_actually_render_at_44(qapp):
     일반 QPushButton 의 min-height(26)가 액션바의 setMinimumHeight(46)를 이겨
     [검증 시작]이 실측 40px 로 렌더됐다 — 옵션 타일(58px)보다 작았다.
     '주장 44' 가 아니라 **렌더 44** 를 검사한다."""
-    from aoi_verification.app.ui.pages import setup_layouts as sl
-    page = sl.LAYOUTS["a"]()
+    page = SetupPage()
     try:
         qapp.setStyleSheet(theme.render_qss(_QSS))
         page.resize(1512, 982)
@@ -473,3 +473,41 @@ def test_subcontrol_selectors_use_the_valid_order():
     import re
     bad = re.findall(r"^[A-Za-z]+:[a-z-]+::[a-z-]+", _QSS, re.MULTILINE)
     assert not bad, f"의사상태가 서브컨트롤 앞에 온 선택자: {bad}"
+
+
+def test_segment_role_meets_min_target(qapp):
+    """세그먼트(이진 선택 축소판)도 타깃 하한을 넘겨야 한다.
+
+    ★ 44px 타일에서 34px 로 **내리는** 변경이라, 어디까지 내려도 되는지를 못 박는다:
+    WCAG 2.5.8 AA(24px)와 이 프로젝트 하한(`target_min` 26) 둘 다.
+    높이는 QSS 가 정한다(min-height 24 + 패딩 8 + 보더 2 = 34) — 위젯이
+    setMinimumHeight 로 따로 주장하지 않는다(둘이 갈리면 '주장 44 / 렌더 40' 이 된다)."""
+    g = OptionGroup([("a", "모든 슬롯"), ("b", "일부 슬롯만…")], role="segment")
+    try:
+        qapp.setStyleSheet(theme.render_qss(_QSS))
+        g.show()
+        for _ in range(8):
+            qapp.processEvents()
+        for key in g.keys():
+            btn = g.button(key)
+            h = btn.height()
+            assert h >= MIN_TARGET, f"세그먼트 {h}px < {MIN_TARGET}px"
+            assert h >= theme.PROFILE.target_min, \
+                f"세그먼트 {h}px < target_min {theme.PROFILE.target_min}px"
+        # 짝이 하나의 컨트롤로 읽히도록 폭이 균등해야 한다.
+        widths = {g.button(k).width() for k in g.keys()}
+        assert len(widths) == 1, f"세그먼트 폭이 들쭉날쭉하다: {widths}"
+    finally:
+        g.deleteLater()
+        qapp.processEvents()
+
+
+def test_segment_has_its_own_focus_and_disabled_rules():
+    """★ 속성 선택자 특이도 함정 — role 별 `:focus`/`:disabled` 를 반드시 따로 쓴다.
+
+    `[role="…"]` 는 `QPushButton:focus` 와 특이도가 같고 뒤에 오면 조용히 이긴다.
+    ghost/danger/warn 이 이 함정 때문에 포커스 링을 아예 못 그린 적이 있다 —
+    '선언했으니 될 것'이라 믿지 않고 규칙의 존재를 검사한다."""
+    for state in (":focus", ":disabled", ":checked", ":hover"):
+        sel = f'QPushButton[role="segment"]{state}'
+        assert sel in _QSS, f"{sel} 규칙이 없다"

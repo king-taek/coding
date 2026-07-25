@@ -53,11 +53,7 @@ class SetupPage(QWidget):
 
     start_requested = pyqtSignal(object)             # SetupInput
     update_check_requested = pyqtSignal()            # '업데이트 확인' 버튼
-    appearance_changed = pyqtSignal()                # 색 모드/배치 변경 → 페이지 재생성 요청
-
-    # 이 페이지가 어떤 배치안인지 — 스위처가 prefs 대신 **자기 자신**을 보고 표시한다
-    # (prefs 와 실제 화면이 어긋나는 일이 없게).  배치안 서브클래스가 덮어쓴다.
-    LAYOUT_KEY = "a"
+    appearance_changed = pyqtSignal()                # 색 모드 변경 → 페이지 재생성 요청
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -79,8 +75,8 @@ class SetupPage(QWidget):
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         # QScrollArea 자체의 배경/보더가 페이지 배경 위에 겹쳐 보이지 않게.
         # ★ 뷰포트 배경은 '맨 선언(bare)' 스타일시트로 주면 안 된다 — 자식으로 캐스케이드돼
-        #   내부 스위처 칩의 :checked 배경(채움)을 덮어써 '빈 박스'로 렌더된다. 뷰포트를
-        #   objectName 으로 스코프해 자식에 새지 않게 한다(스위처 채움 버그 방지).
+        #   선택된 세그먼트/타일의 :checked 배경(채움)을 덮어써 '빈 박스'로 렌더된다.
+        #   뷰포트를 objectName 으로 스코프해 자식에 새지 않게 한다.
         scroll.setStyleSheet(
             "QScrollArea { background: transparent; border: none; }"
             "QScrollArea > QWidget#qt_scrollarea_viewport { background: transparent; }"
@@ -115,10 +111,10 @@ class SetupPage(QWidget):
             outer.addWidget(rule)
             outer.addWidget(bar)
 
-        # ★ 첫 포커스를 첫 입력란에 둔다.  이전엔 탭 체인 첫 정지가 보기 옵션(모션
-        #   줄이기)이라, 키보드 사용자가 폴더를 입력하려면 파괴적 컨트롤(색 모드·배치
-        #   스위처)을 먼저 지나야 했다.  QTimer 로 미루는 이유는 show() 이후에야
-        #   포커스가 실제로 들어가기 때문.
+        # ★ 첫 포커스를 첫 입력란에 둔다.  이전엔 탭 체인 첫 정지가 보기 옵션이라,
+        #   키보드 사용자가 폴더를 입력하려면 화면을 다시 만드는 컨트롤(다크 모드)을
+        #   먼저 지나야 했다.  QTimer 로 미루는 이유는 show() 이후에야 포커스가 실제로
+        #   들어가기 때문.
         QTimer.singleShot(0, self._focus_first_field)
 
         # 개발자 모드 토글 단축키 — 일반 사용자에게는 보이지 않는 진입점.
@@ -133,29 +129,27 @@ class SetupPage(QWidget):
             edit.setFocus(Qt.FocusReason.OtherFocusReason)
 
     # ==================================================================
-    # 본문 빌더 — 각 조각은 위젯 하나를 만들어 돌려준다.  배치안은 ``_build_body``
-    # (순서·열 구성) 또는 개별 빌더(컨트롤 디자인)만 갈아끼우면 된다.
+    # 본문 빌더 — 각 조각은 위젯 하나를 만들어 돌려준다.  순서·열 구성은
+    # ``_build_body``, 컨트롤 디자인은 개별 빌더에서 바꾼다.
     # ==================================================================
     def _pinned_action_bar(self) -> bool:
         """액션바를 스크롤 밖에 고정할지.
 
-        ★ 기본이 True 다.  이전엔 A/C 안이 액션바를 스크롤 **안**에 뒀는데, 800×600 에서
-        내용이 뷰포트를 넘겨 [검증 시작]이 화면 밖으로 밀려났다(실측).  '주요 액션을
-        찾으려면 스크롤해야 한다'는 어느 배치에서도 결함이므로 배치안의 차이로 두지
-        않는다 — B 안의 차별점은 그리드 흐름이다."""
+        ★ 항상 True 다.  한때 액션바를 스크롤 **안**에 둔 배치안이 있었는데, 800×600
+        에서 내용이 뷰포트를 넘겨 [검증 시작]이 화면 밖으로 밀려났다(실측).  '주요
+        액션을 찾으려면 스크롤해야 한다'는 어떤 배치에서도 결함이다."""
         return True
 
     def _build_body(self, root: QVBoxLayout) -> None:
-        """A안 「진행 순서형」 — 한 열, 위에서 아래로(폴더 → 옵션 → 시작).
+        """「진행 순서형」 — 한 열, 위에서 아래로(폴더 → 옵션 → 시작).  유일한 배치다.
 
-        ★ 순서가 이 docstring 과 **반대**였다: 자동화 수준 카드가 첫 카드고 폴더가
-        두 번째였다.  폴더는 매번 바뀌는 값이고 자동화 수준은 거의 그대로 쓰는 값이라,
-        선언한 '진행 순서'대로 폴더를 먼저 둔다."""
+        폴더가 먼저다: 매번 바뀌는 값이고, 자동화 수준·진행 범위는 대체로 그대로 쓴다.
+        그 둘은 전체폭 카드 두 장을 차지하다가 **'실행 옵션' 카드 하나**로 합쳐졌다
+        (아래 `_build_run_options_card` 주석 참조)."""
         root.addWidget(self._build_top_bar())
         root.addWidget(self._build_subtitle())
         root.addWidget(self._build_device_row())
-        root.addWidget(self._build_automation_card())
-        root.addWidget(self._build_scope_row())
+        root.addWidget(self._build_run_options_card())
         root.addWidget(self._build_engine_card())
         root.addWidget(self._build_howto())
         root.addStretch(1)
@@ -164,7 +158,7 @@ class SetupPage(QWidget):
         root.addWidget(self._build_credit())
 
     def _build_top_bar(self) -> QWidget:
-        """상단 툴바(배치 스위처 + 보기 옵션) + 제목 — 배치안 공통 상단.
+        """상단 툴바(보기 옵션) + 제목 + 모드 배지.
 
         한 줄에 몰아넣지 않는다: 800×600 에서 제목까지 같은 줄에 두면 폭이 넘쳐
         가로 스크롤이 생긴다(실측 확인).  컨트롤 줄과 제목 줄을 분리해 좁은 창에서도
@@ -194,9 +188,6 @@ class SetupPage(QWidget):
                      alignment=Qt.AlignmentFlag.AlignVCenter)
         col.addWidget(title_row)
 
-        # ★ 배치 스위처는 **제목보다 아래·작게**.  이전엔 58px 칩이 33px 표제 위에
-        #   있어 '삭제 예정 임시 컨트롤'이 화면에서 가장 큰 요소였다(채점자 3인 지적).
-        col.addWidget(self._build_layout_switcher())
         return host
 
     def _build_mode_badge(self) -> QWidget:
@@ -260,42 +251,6 @@ class SetupPage(QWidget):
             card.style().unpolish(card)
             card.style().polish(card)
 
-    def _build_layout_switcher(self) -> QWidget:
-        """상단 배치 전환 버튼 — 3개 안을 눌러 보며 비교한다(비교용 임시 컨트롤).
-
-        안이 확정되면 이 스위처와 미선택 배치안을 함께 제거한다."""
-        from .setup_layouts import LAYOUT_LABELS, layout_keys
-        host = QWidget(self)
-        row = QHBoxLayout(host)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(6)
-        lbl = QLabel(i18n.KO.LAYOUT_SWITCH_LABEL, host)
-        lbl.setProperty("role", "muted")
-        row.addWidget(lbl)
-        keys = layout_keys()
-        self.layout_group = OptionGroup(
-            [(k, LAYOUT_LABELS[k]) for k in keys],
-            current=self.LAYOUT_KEY, min_tile_w=84,
-            fixed_cols=len(keys), role="chip",
-            # ★ 배치 전환은 페이지 **재생성**이다 — 방향키로 훑기만 해도 화면이 날아가고
-            #   포커스를 잃으면 안 된다.  포커스만 옮기고 Space/Enter 로 확정한다.
-            activate_on_arrow=False, parent=host,
-        )
-        for k in keys:
-            self.layout_group.set_option_tooltip(k, i18n.KO.LAYOUT_SWITCH_TOOLTIP)
-        self.layout_group.selection_changed.connect(self._on_layout_chosen)
-        row.addWidget(self.layout_group)
-        # ★ 남는 폭을 흡수하는 stretch — 없으면 칩이 화면 폭만큼 늘어나 '작게'라는
-        #   의도가 무너진다(그리드가 열마다 stretch 1 을 주기 때문).
-        row.addStretch(1)
-        return host
-
-    def _on_layout_chosen(self, key: str) -> None:
-        if key == self.LAYOUT_KEY:
-            return
-        _prefs.patch(setup_layout=key)
-        self.appearance_changed.emit()      # main_window 가 페이지를 다시 만든다
-
     def _build_title(self) -> QWidget:
         # 화면 크기 컨트롤은 별도 버튼 없이 OS 의 표준 창 조작
         # (드래그, 최대화/복원, 모서리 리사이즈) 으로만 처리.
@@ -333,46 +288,6 @@ class SetupPage(QWidget):
             lambda expanded: _prefs.patch(howto_expanded=bool(expanded))
         )
         return self._howto_section
-
-    def _build_automation_card(self) -> QWidget:
-        """자동화 수준 — 올인원 모드 (#3)."""
-        _prefs_now = _prefs.load()
-        auto_card = NeonCard(role="card-soft", parent=self)
-
-        auto_title_row = QHBoxLayout()
-        auto_title_row.setContentsMargins(0, 0, 0, 0)
-        auto_title = QLabel(i18n.KO.AUTOMATION_TITLE, auto_card)
-        auto_title.setProperty("role", "cardTitle")
-        self._auto_help_btn = QToolButton(auto_card)
-        self._auto_help_btn.setText("?")
-        self._auto_help_btn.setObjectName("helpToggle")
-        self._auto_help_btn.setCheckable(True)
-        self._auto_help_btn.setToolTip(i18n.KO.HELP_TOGGLE_TOOLTIP)
-        auto_title_row.addWidget(auto_title)
-        auto_title_row.addStretch()
-        auto_title_row.addWidget(self._auto_help_btn)
-        auto_card.body().addLayout(auto_title_row)
-
-        # 작은 라디오 대신 타일 — 키가 곧 AutomationLevel 값이라 분기 없이 읽는다.
-        _last_auto = getattr(_prefs_now, "automation_level", AutomationLevel.USER_SELECT)
-        self.auto_group = OptionGroup(
-            [(AutomationLevel.USER_SELECT, i18n.KO.AUTOMATION_USER_SELECT),
-             (AutomationLevel.AUTO_ALL, i18n.KO.AUTOMATION_AUTO_ALL)],
-            current=_last_auto,
-            # 부수효과 없음(prefs 저장뿐) → 방향키로 바로 고를 수 있다(라디오 감각).
-            activate_on_arrow=True, parent=auto_card,
-        )
-        self.auto_group.selection_changed.connect(
-            lambda key: _prefs.patch(automation_level=key))
-        auto_card.body().addWidget(self.auto_group)
-        self._auto_hint = QLabel(i18n.KO.AUTOMATION_HINT, auto_card)
-        self._auto_hint.setProperty("role", "muted")
-        self._auto_hint.setWordWrap(True)
-        self._auto_hint.setStyleSheet("padding-top: 4px;")
-        self._auto_hint.setVisible(False)
-        auto_card.body().addWidget(self._auto_hint)
-        self._auto_help_btn.toggled.connect(self._auto_hint.setVisible)
-        return auto_card
 
     # ★ 나란히 둘지는 **카드가 요구하는 폭**으로 판단한다 — '900px' 같은 매직 넘버는
     #   맞출 수 없다.  실제로 900 으로 두었더니 1000px 창에서 두 카드가 나란히 서고
@@ -431,31 +346,107 @@ class SetupPage(QWidget):
         super().resizeEvent(event)
         self._reflow_device_row()
 
-    def _build_scope_row(self) -> QWidget:
-        """진행 범위 — 상태가 **타일 자신**에 산다(옆 라벨에 두지 않는다).
+    def _build_run_options_card(self) -> QWidget:
+        """실행 옵션 — '자동화 수준' 과 '진행 범위' 를 **한 카드**에 작은 세그먼트로.
 
-        None = 전체 진행."""
-        # ★ 이전엔 이것만 카드 없는 '맨몸 제목' 이라 (a) 제목 축이 다른 카드보다 21px
-        #   왼쪽으로 어긋났고 (b) 선택 타일이 카드 면이 아니라 페이지 바탕 위에 앉아
-        #   라벨 대비가 4.87 로 게이트를 깼다.  카드로 감싸 둘을 함께 해결한다.
+        ★ 전에는 각각 전체폭 카드 한 장 + 694×58 타일 두 장이었다.  둘 다 값이 **둘뿐인**
+        설정이고 매번 바꾸는 값도 아닌데, 화면의 두 덩어리를 차지해 '폴더를 고르고 시작
+        한다'는 이 화면의 본론을 아래로 밀어냈다.  타일 크기는 고르는 값의 수가 아니라
+        **그 선택의 무게**를 따라야 한다 — 그래서 34px 세그먼트로 강등하고 카드를 합쳤다
+        (카드 2장 → 1장, 세로 ~200px 절약).
+
+        각 줄은 `라벨 — 세그먼트 — (남는 폭)` 이다.  라벨을 왼쪽에 고정해 두 줄의 세그먼트
+        왼쪽 변이 한 축에 정렬된다.
+        """
+        _prefs_now = _prefs.load()
         self._selected_slots: Optional[set] = None
-        host = NeonCard(role="card", parent=self)
-        col = host.body()
-        title = QLabel(i18n.KO.SCOPE_TITLE, host)
+        card = NeonCard(role="card", parent=self)
+        col = card.body()
+
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title = QLabel(i18n.KO.RUN_OPTIONS_TITLE, card)
         title.setProperty("role", "cardTitle")
-        col.addWidget(title)
-        # ★ activate_on_arrow 를 켜지 않는다(기본 False) — 'subset' 선택은 슬롯 선택
-        #   **모달**을 띄운다.  방향키 한 번에 경고창이 떠 하네스가 블로킹된 적이 있다.
+        # 도움말은 카드 하나에 하나로 — 두 카드에 각자 '?' 를 두면 같은 어포던스가 둘이 된다.
+        self._auto_help_btn = QToolButton(card)
+        self._auto_help_btn.setText("?")
+        self._auto_help_btn.setObjectName("helpToggle")
+        self._auto_help_btn.setCheckable(True)
+        self._auto_help_btn.setToolTip(i18n.KO.HELP_TOGGLE_TOOLTIP)
+        title_row.addWidget(title)
+        title_row.addStretch()
+        title_row.addWidget(self._auto_help_btn)
+        col.addLayout(title_row)
+
+        # ── 자동화 수준 — 키가 곧 AutomationLevel 값이라 분기 없이 읽는다.
+        _last_auto = getattr(_prefs_now, "automation_level",
+                             AutomationLevel.USER_SELECT)
+        self.auto_group = OptionGroup(
+            [(AutomationLevel.USER_SELECT, i18n.KO.AUTOMATION_USER_SELECT_SHORT),
+             (AutomationLevel.AUTO_ALL, i18n.KO.AUTOMATION_AUTO_ALL_SHORT)],
+            current=_last_auto, role="segment",
+            min_tile_w=self._SEGMENT_MIN_W, fixed_cols=2,
+            # 부수효과 없음(prefs 저장뿐) → 방향키로 바로 고를 수 있다(라디오 감각).
+            activate_on_arrow=True, parent=card,
+        )
+        self.auto_group.set_option_tooltip(AutomationLevel.USER_SELECT,
+                                           i18n.KO.AUTOMATION_USER_SELECT)
+        self.auto_group.set_option_tooltip(AutomationLevel.AUTO_ALL,
+                                           i18n.KO.AUTOMATION_AUTO_ALL)
+        self.auto_group.selection_changed.connect(
+            lambda key: _prefs.patch(automation_level=key))
+        col.addWidget(self._labeled_segment_row(card, i18n.KO.AUTOMATION_TITLE,
+                                                self.auto_group))
+
+        # ── 진행 범위 — 상태가 **세그먼트 자신**에 산다(옆 라벨에 두지 않는다).
+        #    ★ activate_on_arrow 를 켜지 않는다(기본 False) — 'subset' 선택은 슬롯 선택
+        #      **모달**을 띄운다.  방향키로 훑는 것만으로 창이 떠선 안 된다.
         self.scope_group = OptionGroup(
             [("all", i18n.KO.SCOPE_ALL), ("subset", i18n.KO.SCOPE_SUBSET)],
-            current="all", parent=host,
+            current="all", role="segment",
+            min_tile_w=self._SEGMENT_MIN_W, fixed_cols=2, parent=card,
         )
-        self.scope_group.set_option_tooltip("subset", i18n.KO.SLOT_SELECT_BTN_TOOLTIP)
+        self.scope_group.set_option_tooltip("subset",
+                                            i18n.KO.SLOT_SELECT_BTN_TOOLTIP)
         self.scope_group.selection_changed.connect(self._on_scope_changed)
-        col.addWidget(self.scope_group)
-        # 남는 세로 공간은 아래로 — 그리드 배치(B안)에서 제목과 타일이 벌어지지 않게.
-        col.addStretch(1)
-        return host
+        col.addWidget(self._labeled_segment_row(card, i18n.KO.SCOPE_TITLE,
+                                                self.scope_group))
+
+        # 도움말 본문 — 두 설정을 한 번에 설명한다(기본 접힘).
+        self._auto_hint = QLabel(i18n.KO.RUN_OPTIONS_HINT, card)
+        self._auto_hint.setProperty("role", "muted")
+        self._auto_hint.setWordWrap(True)
+        self._auto_hint.setStyleSheet("padding-top: 4px;")
+        self._auto_hint.setVisible(False)
+        col.addWidget(self._auto_hint)
+        self._auto_help_btn.toggled.connect(self._auto_hint.setVisible)
+        return card
+
+    # 세그먼트 하나의 **하한** 폭.  실제 폭은 그룹 안 가장 넓은 라벨에 맞춰 균등해진다
+    # (OptionGroup._equalize_segments).  하한을 두는 이유는 '모든 슬롯'처럼 짧은 라벨이
+    # 손가락에 너무 좁아지지 않게 하는 것.  둘이 나란히 서도 800px 창에서 넘치지 않는다
+    # (110×2 + 간격 4 + 라벨 92 + 카드 패딩 40 ≈ 356 < 800 - 마진 80).
+    _SEGMENT_MIN_W = 110
+    _SEGMENT_LABEL_W = 92        # 두 줄의 세그먼트 왼쪽 변을 한 축에 맞춘다
+
+    def _labeled_segment_row(self, parent: QWidget, label: str,
+                             group: OptionGroup) -> QWidget:
+        """`라벨 — 세그먼트 — 남는 폭` 한 줄.  두 설정이 같은 격자에 앉게 한다."""
+        row = QWidget(parent)
+        # 맨 QWidget 은 전역 `QWidget { background: $bg }` 를 물려받아 카드 면 위에 색이
+        # 다른 띠로 보인다 — 투명으로 못 박는다(로딩 패널·행 호스트와 같은 함정).
+        row.setProperty("role", "rowHost")
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(10)
+        lbl = QLabel(label, row)
+        lbl.setFixedWidth(self._SEGMENT_LABEL_W)
+        lay.addWidget(lbl)
+        lay.addWidget(group)
+        # ★ 남는 폭을 흡수하는 stretch — 없으면 세그먼트가 카드 폭만큼 늘어나 '작게'라는
+        #   의도가 무너진다(그리드가 열마다 stretch 1 을 주기 때문).
+        lay.addStretch(1)
+        return row
 
     def _on_scope_changed(self, key: str) -> None:
         if key == "subset":

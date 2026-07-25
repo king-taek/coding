@@ -406,40 +406,52 @@ QFrame[role="card"][badgeState="legacy"] {
     background-color: $warn_tint;
 }
 
-/* 배치 스위처 칩 — **삭제 예정 임시 컨트롤**이므로 화면에서 가장 작아야 한다.
-   이전엔 58px 칩이 33px 표제보다 커서 임시물이 시각 위계 1위였다(채점자 3인 지적). */
-QPushButton[role="chip"] {
+/* 세그먼트 — **이진 선택**을 위한 작은 등급.  `role="option"`(44px 타일)의 축소판이다.
+
+   왜 별 등급인가: '자동화 수준'·'진행 범위' 는 각각 값이 둘뿐인데 694×58 타일 두 장씩
+   전체폭 카드를 차지했다.  타일 크기는 **고르는 값의 수**가 아니라 그 선택의 무게를
+   따라야 한다 — 매번 바꾸지 않는 이진 설정에 화면의 한 덩어리씩 줄 이유가 없다.
+   높이 34px = min-height 24 + 세로 패딩 8 + 보더 2.  WCAG 2.5.8 AA(24px)와 이 프로젝트
+   하한(`target_min` 26)을 모두 넘긴다.
+
+   ★ `:focus`·`:disabled` 를 **role 별로 따로 쓴다.**  `[role="…"]` 속성 선택자는
+   `QPushButton:focus` 와 특이도가 같고 뒤에 오면 조용히 이긴다 — ghost/danger/warn 이
+   이 함정 때문에 포커스 링을 아예 못 그린 적이 있다. */
+QPushButton[role="segment"] {
     background: transparent;
-    color: $mute;
+    color: $ink2;
     border: 1px solid $line_strong;
     border-radius: $radius_sm;
-    padding: 3px 10px;
+    padding: 4px 14px;
     font-size: $font_caption_sz;
     font-weight: 600;
-    min-height: 26px;
-    max-height: 28px;
+    min-height: 24px;
     text-align: center;
 }
-QPushButton[role="chip"]:hover {
+QPushButton[role="segment"]:hover {
     color: $ink;
-    background: $elev;
+    background-color: $elev;
+    border-color: $mute;
 }
-QPushButton[role="chip"]:checked {
+QPushButton[role="segment"]:checked {
     background-color: $accent_tint;
     color: $accent;
     border: 1px solid $accent;
+    font-weight: 700;
 }
-QPushButton[role="chip"]:focus {
+QPushButton[role="segment"]:focus {
     border: $focus_w solid $focus;
-    padding: 2px 9px;
+    padding: 3px 13px;          /* 보더가 굵어진 만큼 패딩을 줄여 높이 고정 */
 }
-
-/* C안 요약 값 — 상세를 접어 둔 채 시작하는 배치의 **안전 장치**.  가장 중요한 정보가
-   가장 작고 옅은 글자였던 문제를 고친다(부제 등급 + 굵기 + 본문색). */
-QLabel[role="summaryValue"] {
-    font-size: $font_sub_sz;
-    font-weight: 600;
-    color: $ink;
+QPushButton[role="segment"]:disabled {
+    background: transparent;
+    color: $mute;
+    border: 1px dashed $line;
+}
+QPushButton[role="segment"]:checked:disabled {
+    background-color: $accent_tint_soft;
+    color: $mute;
+    border: 1px dashed $line;
 }
 
 /* 카드 제목 — 인라인 f-string 스타일 3중복을 대체. */

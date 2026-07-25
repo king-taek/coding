@@ -1405,12 +1405,9 @@ class MainWindow(QMainWindow):
     def _build_pages(self) -> None:
         """5개 페이지 생성 + 스택 추가 + 시그널 배선 (단일 출처 — 재구축 재사용)."""
         from .pages.match_review_page import MatchReviewPage
-        # 셋업은 저장된 배치안으로 만든다(상단 스위처로 비교 — 확정 후 단일화).
-        try:
-            from .pages.setup_layouts import make_setup_page
-            self._setup_page = make_setup_page()
-        except Exception:
-            self._setup_page = SetupPage()
+        # 셋업 배치는 **하나**다(순서형).  한때 A/B/C 3안을 상단 스위처로 비교했는데,
+        # 사용자가 순서형을 고르면서 나머지 2안과 스위처·setup_layouts 를 제거했다.
+        self._setup_page = SetupPage()
         self._select_page = SelectPage()
         self._match_page = MatchPage()
         self._result_page = ResultPage()

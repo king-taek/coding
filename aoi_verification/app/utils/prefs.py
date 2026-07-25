@@ -91,8 +91,6 @@ class UiPrefs:
     legacy_engine: str = ""                  # "" = 미설정
     # 화면 색 모드 — 수동 토글(라이트/다크). OS 자동 감지는 하지 않는다.
     color_mode: str = "light"                # "light" | "dark"
-    # 셋업 화면 배치안 — 비교용(상단 스위처).  안이 확정되면 스위처와 함께 제거한다.
-    setup_layout: str = "a"                  # "a" | "b" | "c"
     persist_scores: bool = False             # 유사도 점수 디스크 캐시 (#5B)
     # 고효율 모드 동시 추론 수(in-flight, NPU 기준; GPU 절반).  높일수록 NPU/GPU
     # 메모리·throughput↑ (계산 결과 불변).  setup_page 슬라이더로 조절.

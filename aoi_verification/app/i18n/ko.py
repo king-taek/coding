@@ -390,10 +390,10 @@ LOAD_AUTO_MATCH_FMT = "자동 매치 진행 중… {done} / {total}"
 AUTOMATION_TITLE = "자동화 수준"
 AUTOMATION_USER_SELECT = "사진 직접 선택 + 매치는 자동"
 AUTOMATION_AUTO_ALL = "모든 사진 자동 — 후보 선별 건너뛰기"
-AUTOMATION_HINT = (
-    "‘모든 사진 자동’은 후보 선별(Stage 1)을 건너뛰고 모든 기준 사진을 자동으로 매치합니다.\n"
-    "자동 매치 종료 후 결과 화면에서 [매칭 결과 검토]로 잘못된 매치를 제거할 수 있습니다."
-)
+# 세그먼트에 들어가는 짧은 라벨.  긴 설명은 위 두 문구가 툴팁으로 맡는다 —
+# 34px 세그먼트에 문장을 넣으면 '작게'라는 의도가 폭으로 되돌아온다.
+AUTOMATION_USER_SELECT_SHORT = "사진 직접 선택"
+AUTOMATION_AUTO_ALL_SHORT = "모든 사진 자동"
 AUTO_REVIEW_HINT_FMT = (
     "자동 매치 완료 — 총 {n_match} 쌍이 자동으로 매치되었고,\n"
     "{n_miss} 장은 임계치 미달로 ‘매칭 없음’ 처리되었습니다.\n"
@@ -442,26 +442,9 @@ KEY_HINT_DONE = "검토 완료"
 # 카드 제목 옆 '?' 도움말 토글 (하드코딩 금지 — 사용자 노출 문자열은 여기 모은다)
 HELP_TOGGLE_TOOLTIP = "설명 보기/숨기기"
 
-# 배치안 스위처 (셋업 상단) — 비교용 임시 컨트롤. 안이 확정되면 함께 제거한다.
-LAYOUT_SWITCH_LABEL = "배치"
-LAYOUT_SWITCH_TOOLTIP = (
-    "첫 화면 배치를 바꿔 봅니다. 기능·흐름은 세 배치가 모두 같습니다.\n"
-    "검증을 시작하기 전에만 바꿀 수 있습니다."
-)
-LAYOUT_A_LABEL = "A 순서형"
-LAYOUT_B_LABEL = "B 2열"
-LAYOUT_C_LABEL = "C 요약형"
-# C안 — 요약 + 점진적 공개
-SETUP_DETAIL_OPEN = "설정 자세히 ▾"
-SETUP_DETAIL_CLOSE = "설정 자세히 ▴"
-SUMMARY_CAPTION = "이 설정으로 시작합니다"
-SUMMARY_FMT = "{engine} · {scope} · {auto}"
-# ★ 요약은 C안의 안전 장치라 판정 **수치**까지 담아야 한다 — 이름만으론 오조작을
-#   못 막는다(채점자 3인 지적).  이전 이름 상수는 호환용으로 남긴다.
-SUMMARY_ENGINE_COORD = "좌표 매칭"
-SUMMARY_ENGINE_LEGACY = "구형 유사도 엔진"
-SUMMARY_ENGINE_COORD_FMT = "좌표 매칭 (허용 오차 {tol:.0f} µm)"
-SUMMARY_ENGINE_LEGACY_FMT = "구형 유사도 엔진 (임계치 {th:.0f} %)"
+# ※ 배치안 스위처(LAYOUT_*)와 C안 요약(SETUP_DETAIL_*·SUMMARY_*) 문구는 제거했다 —
+#   사용자가 '순서형' 배치를 확정하면서 비교용 스위처와 미선택 2안이 함께 사라졌다.
+#   지금 판정 기준을 말하는 것은 상단 모드 배지(judgement_text) 하나다.
 
 # 보기 옵션 (셋업 상단)
 # ★ 어두운 모드가 하나로 정리돼 **on/off 스위치**가 됐다.  한때 '벨럼 · 청사진 · 흑연'
@@ -522,9 +505,18 @@ SLOT_SELECT_NONE = "전체 해제"
 SLOT_SELECT_ALL_HINT = "모든 슬롯 진행 (기본)"
 SLOT_SELECT_COUNT_FMT = "선택한 슬롯: {n} / {total} 개만 진행"
 # 진행 범위 타일 — 상태를 옆 라벨이 아니라 타일 자신이 말한다.
+# ── 실행 옵션 카드 — '자동화 수준' + '진행 범위' 를 한 카드에 담는다.
+RUN_OPTIONS_TITLE = "실행 옵션"
+RUN_OPTIONS_HINT = (
+    "· 자동화 수준 — ‘모든 사진 자동’은 후보 선별(Stage 1)을 건너뛰고 모든 기준 사진을"
+    " 자동으로 매치합니다. 종료 후 결과 화면에서 [매칭 결과 검토]로 잘못된 매치를"
+    " 제거할 수 있습니다.\n"
+    "· 진행 범위 — 기본은 기준 폴더의 모든 슬롯입니다. ‘일부 슬롯만’ 을 고르면 이번"
+    " 검증에서 진행할 슬롯을 직접 선택합니다(급한 슬롯만 먼저 돌릴 때)."
+)
 SCOPE_TITLE = "진행 범위"
-SCOPE_ALL = "모든 슬롯 (기본)"
-SCOPE_SUBSET = "일부 슬롯만 선택…"
+SCOPE_ALL = "모든 슬롯"
+SCOPE_SUBSET = "일부 슬롯만…"
 SCOPE_SUBSET_COUNT_FMT = "일부 슬롯 ({n}/{total})"
 # 입력 유효성 — 왜 [검증 시작] 을 누를 수 없는지 눈에 보이게.
 SETUP_INVALID_FOLDER = "폴더를 찾을 수 없습니다."

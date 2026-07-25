@@ -86,9 +86,12 @@ class OptionGroup(QWidget):
                  role: str = "option",
                  activate_on_arrow: bool = False,
                  parent: Optional[QWidget] = None) -> None:
-        """``fixed_cols`` 를 주면 폭에 상관없이 그 열 수로 고정한다(한 줄 칩 그룹 등).
+        """``fixed_cols`` 를 주면 폭에 상관없이 그 열 수로 고정한다(한 줄 세그먼트 등).
 
-        ``role`` — QSS 등급.  ``"option"``(기본, 44px 타일) 또는 ``"chip"``(작은 칩).
+        ``role`` — QSS 등급.  ``"option"``(기본, 44px 타일) 또는 ``"segment"``(34px
+        축소판).  세그먼트는 **이진 선택**용이다: 값이 둘뿐인 설정에 전체폭 타일 두 장을
+        쓰면 화면의 한 덩어리를 매번 바꾸지도 않는 값에 내주게 된다.  타일 크기는 고르는
+        값의 수가 아니라 그 선택의 무게를 따른다.
 
         ``activate_on_arrow`` — 방향키로 선택까지 확정할지.  **기본이 ``False``** 다:
         방향키는 **포커스만** 옮기고 확정은 Space/Enter 로 한다.
@@ -110,7 +113,8 @@ class OptionGroup(QWidget):
 
         self._grid = QGridLayout(self)
         self._grid.setContentsMargins(0, 0, 0, 0)
-        self._grid.setSpacing(8)
+        # 세그먼트는 '한 컨트롤'로 읽혀야 하므로 간격을 좁힌다(타일은 별개 카드처럼 넓게).
+        self._grid.setSpacing(4 if role == "segment" else 8)
 
         # 명시적 배타 그룹 — 부모를 공유해 '우연히' 배타가 되는 상태에 의존하지 않는다.
         self._group = QButtonGroup(self)
@@ -123,6 +127,10 @@ class OptionGroup(QWidget):
             btn.setAccessibleName(label)
             if role == "option":
                 btn.setMinimumHeight(theme.PROFILE.control_h_lg)
+            # ★ 세그먼트 높이는 **QSS 가 정한다**(min-height 24 + 패딩/보더 = 34).
+            #   여기서 setMinimumHeight 를 부르지 않는 이유: QSS `min-height` 가
+            #   `setMinimumHeight()` 를 덮어써 '주장한 높이'와 '렌더된 높이'가 갈린다
+            #   ([검증 시작]이 46 을 주장하고 40 으로 렌더된 적이 있다).  출처를 하나로.
             btn.setSizePolicy(QSizePolicy.Policy.Expanding,
                               QSizePolicy.Policy.Fixed)
             btn.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -140,6 +148,7 @@ class OptionGroup(QWidget):
         if self._keys:
             self.set_current_key(current if current in self._buttons
                                  else self._keys[0])
+        self._equalize_segments()
         self._reflow()
 
     # ------------------------------------------------------------------
@@ -175,6 +184,22 @@ class OptionGroup(QWidget):
         if btn is not None:
             btn.setText(text)
             btn.setAccessibleName(text)
+            # 라벨이 길어지면 균등 폭을 다시 잡는다('일부 슬롯만…' → '일부 슬롯 (3/12)').
+            self._equalize_segments()
+
+    def _equalize_segments(self) -> None:
+        """세그먼트를 **서로 같은 폭**으로 — 짝이 하나의 컨트롤로 읽히게.
+
+        내용 폭에 맡기면 '모든 슬롯'(82px)과 '일부 슬롯만…'(106px)처럼 들쭉날쭉해져
+        두 조각이 각자 다른 버튼처럼 보인다.  가장 넓은 조각에 맞추고 ``min_tile_w``
+        를 하한으로 둔다(짧은 라벨이 손가락에 너무 좁아지지 않게).
+        """
+        if self._role != "segment" or not self._buttons:
+            return
+        need = max(b.sizeHint().width() for b in self._buttons.values())
+        need = max(need, self._min_tile_w)
+        for b in self._buttons.values():
+            b.setMinimumWidth(need)
 
     def set_option_tooltip(self, key: str, text: str) -> None:
         btn = self._buttons.get(key)

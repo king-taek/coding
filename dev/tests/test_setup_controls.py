@@ -22,24 +22,60 @@ def qapp():
     return QApplication.instance() or QApplication([])
 
 
-# 배치안(서브클래스)이 갈아끼워도 공유 로직이 동작하려면 이 속성들이 있어야 한다.
+# 페이지를 다시 만들거나 조각을 옮겨도 공유 로직이 동작하려면 이 속성들이 있어야 한다.
 CONTRACT_ATTRS = (
     "ref_path_edit", "val_path_edit", "ref_machine_edit", "val_machine_edit",
     "coord_tol_spin", "slider", "threshold_label",
     "update_btn", "start_btn", "_action_bar",
     "_tol_row", "_threshold_row",
+    "auto_group", "scope_group",
     "dev_bench_btn", "dev_label_btn",
 )
 
 
 def test_builder_seam_exists():
-    """본문이 작은 빌더로 쪼개져 있어야 배치안을 값싸게 만들 수 있다."""
+    """본문이 작은 빌더로 쪼개져 있어야 조각을 값싸게 옮길 수 있다.
+
+    ※ `_build_automation_card` + `_build_scope_row` 는 **`_build_run_options_card`
+    하나로 합쳐졌다** — 값이 둘뿐인 두 설정이 전체폭 카드 두 장을 쓰고 있었다."""
     src = inspect.getsource(sp.SetupPage)
     for name in ("_build_body", "_build_title", "_build_view_options",
-                 "_build_howto", "_build_automation_card", "_build_device_row",
-                 "_build_scope_row", "_build_engine_card", "_build_action_bar",
-                 "_build_credit"):
+                 "_build_howto", "_build_run_options_card", "_build_device_row",
+                 "_build_engine_card", "_build_action_bar", "_build_credit"):
         assert f"def {name}" in src, f"{name} 빌더 누락"
+    # 합쳐진 두 빌더는 되살아나지 말아야 한다(같은 선택을 두 카드가 다시 나누지 않게).
+    for gone in ("_build_automation_card", "_build_scope_row"):
+        assert f"def {gone}" not in src, f"{gone} 부활 — 카드가 다시 갈라졌다"
+
+
+def test_binary_settings_use_compact_segments(qapp):
+    """★ 이진 선택은 44px 전체폭 타일이 아니라 34px 세그먼트다.
+
+    타일 크기는 고르는 값의 수가 아니라 **그 선택의 무게**를 따른다 — 자동화 수준·진행
+    범위는 값이 둘뿐이고 매번 바꾸지도 않는데 화면의 두 덩어리를 차지하고 있었다."""
+    page = sp.SetupPage()
+    try:
+        for name in ("auto_group", "scope_group"):
+            g = getattr(page, name)
+            assert len(g.keys()) == 2, f"{name} 이 이진 선택이 아니다"
+            for k in g.keys():
+                role = g.button(k).property("role")
+                assert role == "segment", f"{name}[{k}] role={role!r}"
+    finally:
+        page.deleteLater()
+
+
+def test_scope_segment_does_not_open_modal_on_arrow_keys(qapp):
+    """'일부 슬롯만' 은 **모달**을 띄운다 — 방향키로 훑다 열려선 안 된다.
+
+    실측: 이 그룹에 → 키 한 번으로 경고창이 떠 테스트 하네스가 2분간 블로킹됐다."""
+    page = sp.SetupPage()
+    try:
+        assert page.scope_group._activate_on_arrow is False
+        # 부수효과가 없는 자동화 수준은 반대로 방향키 즉시 커밋이 맞다(라디오 감각).
+        assert page.auto_group._activate_on_arrow is True
+    finally:
+        page.deleteLater()
 
 
 def test_page_satisfies_attr_contract(qapp):
