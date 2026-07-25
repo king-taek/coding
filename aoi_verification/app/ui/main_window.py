@@ -1042,8 +1042,14 @@ class MainWindow(QMainWindow):
             targets=restored, excluded={}, history=[],
             phase_label=i18n.KO.STAGE1_TITLE,
         )
-        self._show_page(self._select_page)
         self._phase = PHASE_A_SELECT
+        # 판단할 후보가 하나도 없으면(예: 기준 사진 재사용으로 큐가 전부 비워짐)
+        # 빈 선별 화면에 사용자를 세워두지 않고 곧장 매칭으로 넘어간다.  큐가
+        # 비면 왼쪽(대기)·중앙(현재 사진)이 모두 비어 할 수 있는 조작이 없다.
+        if not queue:
+            self._on_select_finished()
+            return
+        self._show_page(self._select_page)
         self._autosave()
 
     def _on_select_finished(self) -> None:
