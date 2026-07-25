@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PyQt6.QtCore import (QEasingCurve, QPropertyAnimation, Qt, pyqtSignal)
+from PyQt6.QtCore import QPropertyAnimation, Qt, pyqtSignal
 from PyQt6.QtWidgets import (QFrame, QSizePolicy, QToolButton, QVBoxLayout,
                               QWidget)
 
@@ -63,9 +63,10 @@ class CollapsibleSection(QWidget):
         self._content.setMaximumHeight(0 if not self._expanded else 16777215)
         root.addWidget(self._content)
 
+        from .. import motion
         self._anim = QPropertyAnimation(self._content, b"maximumHeight", self)
         self._anim.setDuration(_ANIM_DURATION_MS)
-        self._anim.setEasingCurve(QEasingCurve.Type.OutQuart)
+        self._anim.setEasingCurve(motion.EASE_PRIMARY)
         # ★ 애니메이션이 끝나면 상한을 **풀어야** 한다.  안 풀면 펼친 시점의 sizeHint 에
         #   높이가 고정돼, 뒤에 커지는 내용(중첩 접이식·'?' 도움말 등)이 조용히 잘린다 —
         #   눌러도 아무 일이 없는 것처럼 보였다(C안 상세에서 실제로 발생).

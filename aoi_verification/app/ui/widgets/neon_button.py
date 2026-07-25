@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, Qt
+from PyQt6.QtCore import QPropertyAnimation, Qt
 from PyQt6.QtWidgets import QGraphicsOpacityEffect, QPushButton
 
 from .. import theme
@@ -41,7 +41,7 @@ class NeonButton(QPushButton):
         anim = QPropertyAnimation(self._press_eff, b"opacity", self)
         anim.setEndValue(0.92 if pressed else 1.0)
         anim.setDuration(motion.dur(90))
-        anim.setEasingCurve(QEasingCurve.Type.OutQuart)
+        anim.setEasingCurve(motion.EASE_PRIMARY)
         anim.start()
         self._press_anim = anim
 
