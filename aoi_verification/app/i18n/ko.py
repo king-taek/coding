@@ -291,15 +291,9 @@ SIZE_TIER_NOTICE_FMT = (
 MEMORY_USAGE_FMT = "메모리 사용량: {mb} MB"
 MEMORY_PRESSURE_TOAST = "메모리 사용량이 높아 캐시를 정리했습니다"
 
-# ── 상태 바: CPU/GPU 사용량 ──────────────────────────────────────────────
-# CPU 는 실제 사용률(%), GPU 는 가동/대기(추론 중 여부) — Intel GPU 의 실제
-# 점유율(%)은 이식성 있게 얻을 수 없어 '가동/대기'로 표시한다.
-USAGE_CPU_FMT = "CPU {pct}%"
-USAGE_GPU_FMT = "GPU {state}"
-USAGE_STATE_BUSY = "가동"
-USAGE_STATE_IDLE = "대기"
-USAGE_STATE_NONE = "없음"
-USAGE_SEP = "   "
+# ※ 상태 바의 CPU/GPU 사용량 문구(USAGE_*)와 'Intel GPU 가속' 디바이스 표시는 제거했다.
+#   상태바는 사용자가 행동을 바꿀 수 있는 정보만 담는다 — 메모리 압박은 '슬롯을 나눠
+#   돌리라'는 행동으로 이어지지만, GPU 가동 여부로 사용자가 할 수 있는 일은 없었다.
 
 # ── Stage 2 더 크게 보기 ───────────────────────────────────────────────────
 BTN_EXPAND_VIEW = "더 크게 보기"

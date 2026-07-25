@@ -78,7 +78,13 @@ class MainWindow(QMainWindow):
         self._stack = QStackedWidget(self)
         self.setCentralWidget(self._stack)
 
-        # 상태 바 + 메모리 표시 (psutil 가용 시) + 가속 디바이스 표시 (#5).
+        # 상태 바 — 개발자 크레딧 + 메모리 사용량(psutil 가용 시).
+        # ★ 'Intel GPU 가속' 디바이스 표시와 'CPU n% · GPU 가동' 사용량 표시는 제거했다.
+        #   상태바는 사용자가 **행동을 바꿀 수 있는** 정보만 담아야 한다: 가속 장치는
+        #   세션 중 바뀌지 않고, CPU/GPU 가동 여부로 사용자가 할 수 있는 일이 없다.
+        #   메모리는 다르다 — 압박 토스트가 '슬롯을 나눠 돌리라'는 행동을 유발한다.
+        #   진단이 필요할 때 쓰는 embedder.device_label()·accelerator_presence()·
+        #   unit_busy()·compile_diagnostics() 자체는 그대로 남아 있다(개발자 벤치마크용).
         self._status_bar = QStatusBar(self)
         self.setStatusBar(self._status_bar)
         # 개발자 크레딧 — 모든 화면 공통(상태바 좌측).
@@ -87,65 +93,16 @@ class MainWindow(QMainWindow):
             f"color: {theme.MUTE}; padding: 0 8px; font-weight: 600;"
         )
         self._status_bar.addWidget(self._credit_label)
-        # 디바이스 표시 — 'GPU 가속 (...)' / 'CPU N 코어'.
-        self._device_label = QLabel("", self._status_bar)
-        self._device_label.setStyleSheet(
-            f"color: {theme.PASS}; padding: 0 8px; font-weight: 600;"
-        )
-        try:
-            from ..learning import embedder as _emb
-            self._device_label.setText(_emb.device_label())
-        except Exception as exc:
-            self._device_label.setText("")
-            from ..utils import errors as _errors
-            _errors.log_silent("main_window: 디바이스 라벨 조회 실패", exc)
-        self._status_bar.addPermanentWidget(self._device_label)
-        # CPU/GPU/NPU 사용량 — CPU 실제 %, GPU/NPU 가동/대기.
-        self._usage_label = QLabel("", self._status_bar)
-        self._usage_label.setStyleSheet(
-            f"color: {theme.PASS}; padding: 0 8px; font-weight: 600;"
-        )
-        self._status_bar.addPermanentWidget(self._usage_label)
-        # 가속 장치(Intel GPU/NPU) 존재 여부 — 세션 중 불변이라 1회만 조회.
-        # torch 설치와 무관하게 OpenVINO 만으로 존재 여부를 본다(상태바 표시용).
-        self._accel_present = {"GPU": False}
-        # 세션 불변인 ‘감지’ 부분 툴팁 — 동적 컴파일 진단은 매 틱 덧붙인다.
-        self._accel_tip_base = ""
-        try:
-            from ..learning import embedder_openvino as _ovw
-            info = _ovw.accelerator_presence()
-            self._accel_present = {"GPU": bool(info.get("GPU"))}
-            # 자가 진단 — 마우스오버로 감지 디바이스/원인을 확인.
-            devs = info.get("devices") or []
-            reason = info.get("reason") or ""
-            self._accel_tip_base = (
-                "OpenVINO 감지: " + (", ".join(devs) if devs else "(없음)")
-            )
-            if reason:
-                self._accel_tip_base += f"\n사유: {reason}"
-        except Exception:
-            self._accel_tip_base = "가속 장치 조회 실패"
-        self._usage_label.setToolTip(self._accel_tip_base)
-        self._proc = None
         self._mem_label = QLabel("", self._status_bar)
         self._mem_label.setProperty("role", "muted")
         self._status_bar.addPermanentWidget(self._mem_label)
         self._mem_timer = QTimer(self)
         self._mem_timer.setInterval(2000)
         self._mem_timer.timeout.connect(self._update_memory_label)
-        self._mem_timer.timeout.connect(self._update_usage_label)
         self._mem_pressure_shown = False
-        try:
-            import psutil
-            self._proc = psutil.Process()
-            self._proc.cpu_percent(None)        # prime — 첫 호출은 0.0 반환
-        except Exception:
-            self._proc = None
-        # 타이머는 psutil 유무와 무관하게 구동 — 콜백이 각자 안전 가드한다
-        # (메모리/CPU 는 psutil 가용 시, GPU/NPU 가동표시는 항상).
+        # 타이머는 psutil 유무와 무관하게 구동 — 콜백이 안전 가드한다.
         self._mem_timer.start()
         self._update_memory_label()
-        self._update_usage_label()
 
         # 페이지 — 생성+스택추가+시그널 배선을 _build_pages 단일 출처로 (재구축용).
         self._build_pages()
@@ -385,48 +342,6 @@ class MainWindow(QMainWindow):
             # 압박이 해제되면 다시 알릴 수 있도록 플래그 재설정.
             self._mem_pressure_shown = False
 
-    def _update_usage_label(self) -> None:
-        """상태바 CPU/GPU 표시 갱신.
-
-        CPU 는 프로세스 실제 사용률(코어 수로 정규화한 0~100%), GPU 는
-        OpenVINO 추론 활동 기준 '가동/대기'(없으면 '없음')."""
-        parts: list[str] = []
-        # CPU — 프로그램 프로세스 사용률을 코어 수로 나눠 0~100% 로 표시.
-        try:
-            import psutil
-            ncpu = psutil.cpu_count() or 1
-            if self._proc is not None:
-                pct = self._proc.cpu_percent(None) / ncpu
-            else:
-                pct = psutil.cpu_percent(None)
-            parts.append(i18n.KO.USAGE_CPU_FMT.format(pct=int(round(pct))))
-        except Exception:
-            pass
-        # GPU — 존재하면 가동/대기, 없으면 '없음'. (NPU 표시는 제거됨.)
-        try:
-            from ..learning import embedder_openvino as _ovw
-            if not self._accel_present.get("GPU"):
-                state = i18n.KO.USAGE_STATE_NONE
-            elif _ovw.unit_busy("GPU"):
-                state = i18n.KO.USAGE_STATE_BUSY
-            else:
-                state = i18n.KO.USAGE_STATE_IDLE
-            parts.append(i18n.KO.USAGE_GPU_FMT.format(state=state))
-            # 툴팁에 컴파일 진단을 덧붙임 — 매칭을 한 번 돌린 뒤 GPU 가 '가동'
-            # 으로 안 바뀌면, 여기에 실제 컴파일 에러가 떠서 원인을 알 수 있다.
-            diag = _ovw.compile_diagnostics()
-            tip = self._accel_tip_base
-            compiled = diag.get("compiled") or []
-            if compiled:
-                tip += "\n추론 컴파일 성공: " + ", ".join(compiled)
-            for dev, msg in (diag.get("errors") or {}).items():
-                tip += f"\n{dev} 컴파일 실패: {msg}"
-            self._usage_label.setToolTip(tip)
-        except Exception:
-            pass
-        if parts:
-            self._usage_label.setText(i18n.KO.USAGE_SEP.join(parts))
-
     # ==================================================================
     # 창 크기 — 사용자 선택값 복원 / 모달
     # ==================================================================
@@ -594,12 +509,6 @@ class MainWindow(QMainWindow):
         importlib.invalidate_caches()
         self._loading.hide_overlay()
         if ok:
-            # 상태바 가속 표시 갱신 — OpenVINO 는 런타임 호출 시점에 적용된다.
-            try:
-                from ..learning import embedder as _emb
-                self._device_label.setText(_emb.device_label())
-            except Exception:
-                pass
             QMessageBox.information(self, i18n.KO.OPENVINO_OFFER_TITLE,
                                     i18n.KO.OPENVINO_INSTALL_DONE)
         else:
@@ -1108,8 +1017,6 @@ class MainWindow(QMainWindow):
             auto_mode=True,
             engine_cfg=_sim_cfg,
         )
-        self._device_label.setVisible(not _is_coord)
-        self._usage_label.setVisible(not _is_coord)
         self._show_page(self._match_page)
         self._phase = PHASE_A_MATCH
         self._autosave()
@@ -1254,8 +1161,6 @@ class MainWindow(QMainWindow):
             auto_mode=auto_mode,
             engine_cfg=_sim_cfg,
         )
-        self._device_label.setVisible(not _is_coord)
-        self._usage_label.setVisible(not _is_coord)
         self._show_page(self._match_page)
         self._phase = PHASE_A_MATCH
         self._autosave()
@@ -1585,10 +1490,6 @@ class MainWindow(QMainWindow):
         """상태바 라벨 색을 테마 토큰으로 적용(페이지 밖 위젯)."""
         self._credit_label.setStyleSheet(
             f"color: {theme.MUTE}; padding: 0 8px; font-weight: 600;")
-        self._device_label.setStyleSheet(
-            f"color: {theme.PASS}; padding: 0 8px; font-weight: 600;")
-        self._usage_label.setStyleSheet(
-            f"color: {theme.PASS}; padding: 0 8px; font-weight: 600;")
 
     # ==================================================================
     def _page_order(self, w: QWidget) -> int:
