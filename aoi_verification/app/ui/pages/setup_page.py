@@ -6,13 +6,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
-from PyQt6.QtWidgets import (QButtonGroup, QCheckBox, QDoubleSpinBox,
-                              QFileDialog, QFormLayout,
-                              QGroupBox, QHBoxLayout, QLabel, QLineEdit,
-                              QMessageBox, QRadioButton, QScrollArea,
-                              QSizePolicy, QToolButton, QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import (QCheckBox, QDoubleSpinBox, QFileDialog,
+                              QGridLayout, QHBoxLayout, QLabel, QLineEdit,
+                              QMessageBox, QScrollArea, QSizePolicy,
+                              QToolButton, QVBoxLayout, QWidget)
 
 from ... import config, i18n
 from .. import theme
@@ -176,16 +175,16 @@ class SetupPage(QWidget):
         auto_title_row.addWidget(self._auto_help_btn)
         auto_card.body().addLayout(auto_title_row)
 
-        self.radio_auto_user = QRadioButton(i18n.KO.AUTOMATION_USER_SELECT, auto_card)
-        self.radio_auto_all = QRadioButton(i18n.KO.AUTOMATION_AUTO_ALL, auto_card)
-        # 마지막 선택 복원 (기본: 사진 직접 선택).
+        # 작은 라디오 대신 타일 — 키가 곧 AutomationLevel 값이라 분기 없이 읽는다.
         _last_auto = getattr(_prefs_now, "automation_level", AutomationLevel.USER_SELECT)
-        if _last_auto == AutomationLevel.AUTO_ALL:
-            self.radio_auto_all.setChecked(True)
-        else:
-            self.radio_auto_user.setChecked(True)
-        for rb in (self.radio_auto_user, self.radio_auto_all):
-            auto_card.body().addWidget(rb)
+        self.auto_group = OptionGroup(
+            [(AutomationLevel.USER_SELECT, i18n.KO.AUTOMATION_USER_SELECT),
+             (AutomationLevel.AUTO_ALL, i18n.KO.AUTOMATION_AUTO_ALL)],
+            current=_last_auto, parent=auto_card,
+        )
+        self.auto_group.selection_changed.connect(
+            lambda key: _prefs.patch(automation_level=key))
+        auto_card.body().addWidget(self.auto_group)
         self._auto_hint = QLabel(i18n.KO.AUTOMATION_HINT, auto_card)
         self._auto_hint.setProperty("role", "muted")
         self._auto_hint.setWordWrap(True)
@@ -210,21 +209,31 @@ class SetupPage(QWidget):
         return host
 
     def _build_scope_row(self) -> QWidget:
-        """일부 슬롯만 진행 옵션.  None = 전체 진행."""
+        """진행 범위 — 상태가 **타일 자신**에 산다(옆 라벨에 두지 않는다).
+
+        None = 전체 진행."""
         self._selected_slots: Optional[set] = None
         host = QWidget(self)
-        slot_row = QHBoxLayout(host)
-        slot_row.setContentsMargins(0, 0, 0, 0)
-        self.btn_select_slots = NeonButton(
-            i18n.KO.SLOT_SELECT_BTN, role="ghost",
+        col = QVBoxLayout(host)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(6)
+        title = QLabel(i18n.KO.SCOPE_TITLE, host)
+        title.setProperty("role", "cardTitle")
+        col.addWidget(title)
+        self.scope_group = OptionGroup(
+            [("all", i18n.KO.SCOPE_ALL), ("subset", i18n.KO.SCOPE_SUBSET)],
+            current="all", parent=host,
         )
-        self.btn_select_slots.setToolTip(i18n.KO.SLOT_SELECT_BTN_TOOLTIP)
-        self.btn_select_slots.clicked.connect(self._open_slot_select)
-        self.slot_select_label = QLabel(i18n.KO.SLOT_SELECT_ALL_HINT, self)
-        self.slot_select_label.setProperty("role", "muted")
-        slot_row.addWidget(self.btn_select_slots)
-        slot_row.addWidget(self.slot_select_label, stretch=1)
+        self.scope_group.set_option_tooltip("subset", i18n.KO.SLOT_SELECT_BTN_TOOLTIP)
+        self.scope_group.selection_changed.connect(self._on_scope_changed)
+        col.addWidget(self.scope_group)
         return host
+
+    def _on_scope_changed(self, key: str) -> None:
+        if key == "subset":
+            self._open_slot_select()          # 취소/전체선택이면 내부에서 'all' 로 복귀
+        else:
+            self._reset_slot_selection()
 
     def _build_engine_card(self) -> QWidget:
         """매칭 설정 — 허용 오차(좌표) + 구형(유사도) 모드."""
@@ -371,12 +380,17 @@ class SetupPage(QWidget):
         self.dev_bench_btn: NeonButton | None = None
         self.dev_label_btn: NeonButton | None = None
         bar.addStretch(1)
+        # 왜 시작할 수 없는지 — 툴팁이 아니라 버튼 옆에 보이게.
+        self._start_hint = QLabel("", host)
+        self._start_hint.setProperty("role", "muted")
+        bar.addWidget(self._start_hint)
         self.start_btn = NeonButton(i18n.KO.BTN_START, role="primary")
         self.start_btn.setMinimumWidth(220)
-        self.start_btn.setMinimumHeight(46)
+        self.start_btn.setMinimumHeight(46)   # 유일한 primary — 가장 크게
         self.start_btn.clicked.connect(self._on_start)
         bar.addWidget(self.start_btn)
         self._refresh_dev_buttons()
+        self._validate()                      # 초기 상태(폴더 미지정) 반영
         return host
 
     def _build_credit(self) -> QWidget:
@@ -387,34 +401,99 @@ class SetupPage(QWidget):
         return credit
 
     # ------------------------------------------------------------------
-    def _make_machine_group(self, title: str) -> tuple[QGroupBox, QLineEdit, QLineEdit]:
-        box = QGroupBox(title, self)
-        form = QFormLayout(box)
-        form.setContentsMargins(14, 18, 14, 14)
-        form.setSpacing(10)
+    def _make_machine_group(self, title: str) -> tuple[QWidget, QLineEdit, QLineEdit]:
+        """기준/검증 장비 입력 카드.
 
-        # 경로 + 버튼
-        row = QHBoxLayout()
-        path_edit = QLineEdit(box)
+        QGroupBox(라디우스 8px + margin-top) 대신 카드 + 그리드로 — 시트의 형태 언어와
+        일치하고, 두 카드의 필드가 같은 열에 정렬된다."""
+        card = NeonCard(role="card", parent=self)
+        head = QLabel(title, card)
+        head.setProperty("role", "cardTitle")
+        card.body().addWidget(head)
+
+        grid = QGridLayout()
+        grid.setContentsMargins(0, 4, 0, 0)
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(8)
+        grid.setColumnStretch(1, 1)          # 입력란이 늘어난다
+
+        path_edit = QLineEdit(card)
         path_edit.setPlaceholderText(i18n.KO.SETUP_FOLDER_PLACEHOLDER)
         path_edit.setReadOnly(False)
         browse = NeonButton(i18n.KO.BTN_BROWSE, role="ghost")
         browse.clicked.connect(lambda: self._browse(path_edit))
-        row.addWidget(path_edit, stretch=1)
-        row.addWidget(browse)
-        form.addRow(QLabel(i18n.KO.SETUP_FOLDER_LABEL, box), self._wrap(row))
+        grid.addWidget(QLabel(i18n.KO.SETUP_FOLDER_LABEL, card), 0, 0)
+        grid.addWidget(path_edit, 0, 1)
+        grid.addWidget(browse, 0, 2)
 
-        machine_edit = QLineEdit(box)
+        # 이유를 말하는 인라인 오류 줄 — 비어 있으면 자리를 차지하지 않는다.
+        err = QLabel("", card)
+        err.setProperty("role", "error")
+        err.setVisible(False)
+        grid.addWidget(err, 1, 1, 1, 2)
+
+        machine_edit = QLineEdit(card)
         machine_edit.setPlaceholderText(i18n.KO.SETUP_MACHINE_PLACEHOLDER)
-        form.addRow(QLabel(i18n.KO.SETUP_MACHINE_LABEL, box), machine_edit)
+        grid.addWidget(QLabel(i18n.KO.SETUP_MACHINE_LABEL, card), 2, 0)
+        grid.addWidget(machine_edit, 2, 1, 1, 2)
 
-        return box, path_edit, machine_edit
+        card.body().addLayout(grid)
+        # 유효성 표시를 위해 오류 라벨을 입력란에 붙여 둔다.
+        path_edit.setProperty("_errLabel", err)
+        path_edit.textChanged.connect(self._schedule_validate)
+        return card, path_edit, machine_edit
+
+    # ── 입력 유효성 — 비활성 버튼이 이유를 말하게 ─────────────────────────────
+    def _schedule_validate(self) -> None:
+        """타이핑마다 stat 하지 않도록 디바운스(죽은 네트워크 드라이브 대비)."""
+        timer = getattr(self, "_validate_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self._validate)
+            self._validate_timer = timer
+        timer.start(250)
 
     @staticmethod
-    def _wrap(lay):
-        host = QWidget()
-        host.setLayout(lay)
-        return host
+    def _dir_state(text: str) -> str:
+        """'' | 'empty' | 'missing' — 경로 문자열의 유효성."""
+        t = (text or "").strip()
+        if not t:
+            return "empty"
+        try:
+            return "" if Path(t).is_dir() else "missing"
+        except OSError:
+            return "missing"                 # 접근 불가한 경로도 '없음' 취급
+
+    def _set_field_state(self, edit: QLineEdit, state: str) -> None:
+        """동적 프로퍼티 + repolish(안 하면 QSS 가 다시 그려지지 않는다)."""
+        edit.setProperty("state", "invalid" if state else "")
+        edit.style().unpolish(edit)
+        edit.style().polish(edit)
+        err = edit.property("_errLabel")
+        if err is not None:
+            if state == "empty":
+                err.setText(i18n.KO.SETUP_NEED_FOLDER)
+            elif state == "missing":
+                err.setText(i18n.KO.SETUP_INVALID_FOLDER)
+            else:
+                err.setText("")
+            err.setVisible(bool(state))
+
+    def _validate(self) -> bool:
+        """두 폴더가 모두 유효할 때만 [검증 시작] 을 활성화하고, 아니면 이유를 표시."""
+        ref_state = self._dir_state(self.ref_path_edit.text())
+        val_state = self._dir_state(self.val_path_edit.text())
+        # 비어 있는 초기 상태에서 빨간 테두리로 겁주지 않는다 — 문구만 조용히.
+        self._set_field_state(self.ref_path_edit,
+                              ref_state if ref_state == "missing" else "")
+        self._set_field_state(self.val_path_edit,
+                              val_state if val_state == "missing" else "")
+        ok = not ref_state and not val_state
+        self.start_btn.setEnabled(ok)
+        if hasattr(self, "_start_hint"):
+            self._start_hint.setText("" if ok else i18n.KO.START_BLOCKED_HINT)
+        return ok
 
     def _browse(self, target: QLineEdit) -> None:
         path = QFileDialog.getExistingDirectory(self, i18n.KO.SETUP_FOLDER_LABEL)
@@ -426,8 +505,10 @@ class SetupPage(QWidget):
 
     # ------------------------------------------------------------------
     def _reset_slot_selection(self) -> None:
+        """전체 진행으로 되돌린다 — 타일 라벨·선택까지 원복."""
         self._selected_slots = None
-        self.slot_select_label.setText(i18n.KO.SLOT_SELECT_ALL_HINT)
+        self.scope_group.set_option_label("subset", i18n.KO.SCOPE_SUBSET)
+        self.scope_group.set_current_key("all")        # emit 없음(재귀 방지)
 
     def _open_slot_select(self) -> None:
         """'일부 슬롯만 진행' — 기준 폴더의 슬롯을 스캔해 부분 선택."""
@@ -440,12 +521,14 @@ class SetupPage(QWidget):
             QMessageBox.warning(
                 self, i18n.KO.APP_TITLE, i18n.KO.SLOT_SELECT_NEED_REF,
             )
+            self._reset_slot_selection()       # 고를 수 없으면 전체 진행으로 복귀
             return
         slot_names = sorted(list_slot_dirs(ref_root).keys())
         if not slot_names:
             QMessageBox.information(
                 self, i18n.KO.APP_TITLE, i18n.KO.SLOT_SELECT_EMPTY,
             )
+            self._reset_slot_selection()
             return
         dlg = SlotSelectDialog(
             slot_names, preselected=self._selected_slots, parent=self,
@@ -457,11 +540,13 @@ class SetupPage(QWidget):
                 self._reset_slot_selection()
             else:
                 self._selected_slots = set(chosen)
-                self.slot_select_label.setText(
-                    i18n.KO.SLOT_SELECT_COUNT_FMT.format(
-                        n=len(chosen), total=len(slot_names),
-                    )
-                )
+                # 상태를 타일 라벨에 — 옆 라벨을 보러 갈 필요가 없다.
+                self.scope_group.set_option_label(
+                    "subset", i18n.KO.SCOPE_SUBSET_COUNT_FMT.format(
+                        n=len(chosen), total=len(slot_names)))
+                self.scope_group.set_current_key("subset")
+        else:
+            self._reset_slot_selection()        # 취소 → 전체 진행 유지
 
     # ------------------------------------------------------------------
     # 개발자 모드 — 앱 내 토글 + 버튼 갱신
@@ -611,10 +696,8 @@ class SetupPage(QWidget):
 
         mode = "single"             # 양쪽 교차검증 제거 — 항상 한쪽만 검증.
         threshold = self.slider.value() / 100.0
-        if self.radio_auto_all.isChecked():
-            automation = AutomationLevel.AUTO_ALL
-        else:
-            automation = AutomationLevel.USER_SELECT
+        # 타일 키가 곧 AutomationLevel 값 — 분기 없이 읽는다.
+        automation = self.auto_group.current_key() or AutomationLevel.USER_SELECT
         # 엔진 모드는 명시 스위치에서만 유도한다(펼침 상태를 읽지 않는다).
         engine_mode = self._current_engine_mode()
         coord_tolerance = float(self.coord_tol_spin.value())

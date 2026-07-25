@@ -188,6 +188,98 @@ def test_legacy_hint_no_longer_claims_expanding_switches(qapp):
     assert "유사도 엔진(구형) 사용" in i18n.KO.COORD_NO_DATA_MSG
 
 
+# ── 유효성 게이트 · 상태를 컨트롤 안에 ──────────────────────────────────────
+def test_start_disabled_until_folders_valid(qapp, tmp_path):
+    page = sp.SetupPage()
+    try:
+        assert page.start_btn.isEnabled() is False       # 초기: 폴더 미지정
+        assert page._start_hint.text() != ""             # 이유가 보인다
+        (tmp_path / "r").mkdir()
+        (tmp_path / "v").mkdir()
+        page.ref_path_edit.setText(str(tmp_path / "r"))
+        page.val_path_edit.setText(str(tmp_path / "v"))
+        page._validate()
+        assert page.start_btn.isEnabled() is True
+        assert page._start_hint.text() == ""
+    finally:
+        page.deleteLater()
+
+
+def test_invalid_folder_shows_inline_reason(qapp):
+    page = sp.SetupPage()
+    try:
+        page.ref_path_edit.setText("/definitely/not/here")
+        page._validate()
+        assert page.ref_path_edit.property("state") == "invalid"
+        err = page.ref_path_edit.property("_errLabel")
+        assert err is not None and err.text() != "" and err.isVisibleTo(page)
+        assert page.start_btn.isEnabled() is False
+    finally:
+        page.deleteLater()
+
+
+def test_messagebox_validation_path_preserved(qapp, monkeypatch):
+    """비활성화는 '추가 레이어' — 기존 QMessageBox 경로가 살아 있어야 한다.
+
+    (검증 통과 후 폴더가 삭제된 경우처럼 늦게 드러나는 실패를 계속 잡아준다.)"""
+    page = sp.SetupPage()
+    try:
+        calls = []
+        monkeypatch.setattr(sp.QMessageBox, "warning",
+                            lambda *a, **k: calls.append(a))
+        page.ref_path_edit.setText("/definitely/not/here")
+        page.val_path_edit.setText("/also/not/here")
+        assert page._collect_input() is None      # 중단
+        assert calls, "경로 경고 QMessageBox 가 사라졌다"
+    finally:
+        page.deleteLater()
+
+
+def test_scope_state_lives_in_the_tile(qapp):
+    """부분 선택 상태가 옆 라벨이 아니라 타일 라벨에 나타난다."""
+    from aoi_verification.app import i18n
+    page = sp.SetupPage()
+    try:
+        assert page.scope_group.current_key() == "all"
+        assert page._selected_slots is None
+        page.scope_group.set_option_label(
+            "subset", i18n.KO.SCOPE_SUBSET_COUNT_FMT.format(n=12, total=40))
+        page.scope_group.set_current_key("subset")
+        assert "12/40" in page.scope_group.button("subset").text()
+        page._reset_slot_selection()
+        assert page.scope_group.current_key() == "all"
+        assert page.scope_group.button("subset").text() == i18n.KO.SCOPE_SUBSET
+        # 상태가 옆 라벨에 사는 옛 구조는 사라졌다.
+        assert not hasattr(page, "slot_select_label")
+    finally:
+        page.deleteLater()
+
+
+def test_automation_tiles_replace_radios(qapp):
+    from aoi_verification.app.utils.prefs import AutomationLevel
+    page = sp.SetupPage()
+    try:
+        assert not hasattr(page, "radio_auto_user")
+        assert page.auto_group.current_key() == AutomationLevel.USER_SELECT
+        page.auto_group.set_current_key(AutomationLevel.AUTO_ALL, emit=True)
+        assert page.auto_group.current_key() == AutomationLevel.AUTO_ALL
+    finally:
+        page.deleteLater()
+
+
+def test_disabled_primary_is_visually_distinct():
+    """비활성 primary 가 꽉 찬 채로 남으면 '누를 수 있어 보이는 못 누르는 버튼'이 된다.
+
+    속성 선택자가 일반 :disabled 보다 특이도가 높아 전용 규칙이 필요하다."""
+    from pathlib import Path as _P
+    from aoi_verification.app.ui import theme
+    qss = (_P(__file__).resolve().parents[2] / "aoi_verification" / "app" / "ui"
+           / "style.qss").read_text(encoding="utf-8")
+    assert 'QPushButton[role="primary"]:disabled' in qss
+    out = theme.render_qss(qss)
+    assert "$" not in out
+
+
 def test_no_horizontal_scroll_at_800x600(qapp):
     from PyQt6.QtWidgets import QScrollArea
     page = sp.SetupPage()

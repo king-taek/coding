@@ -190,6 +190,13 @@ QPushButton[role="primary"]:hover {
 QPushButton[role="primary"]:pressed {
     background-color: $accent_pressed;
 }
+/* ★ 속성 선택자가 일반 QPushButton:disabled 보다 특이도가 높아, 이 규칙이 없으면
+   primary 는 비활성이어도 꽉 찬 채로 남아 '누를 수 있어 보이는 못 누르는 버튼'이 된다. */
+QPushButton[role="primary"]:disabled {
+    background-color: $line2;
+    color: $mute;
+    border-color: $line2;
+}
 QPushButton[role="primary"]:focus {
     border: $focus_w solid $focus;
     padding: $pad_control_focus;
@@ -351,6 +358,27 @@ QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
     border-radius: $radius_sm;
     padding: $pad_input;
     color: $ink;
+}
+/* 모드에 따라 무효해진 파라미터는 비활성으로 보여 준다(숨기지 않는다) — 그러니
+   비활성 모습이 실제로 달라야 한다. */
+QLineEdit:disabled, QComboBox:disabled,
+QSpinBox:disabled, QDoubleSpinBox:disabled {
+    background-color: transparent;
+    border-color: $line;
+    color: $mute;
+}
+QSlider:disabled::groove:horizontal {
+    background: $line;
+}
+QSlider:disabled::sub-page:horizontal {
+    background: $line2;
+}
+QSlider:disabled::handle:horizontal {
+    background: $line2;
+    border-color: $line;
+}
+QLabel:disabled {
+    color: $mute;
 }
 
 QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {
