@@ -20,9 +20,12 @@ from PyQt6.QtWidgets import (QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout,
 
 from .. import theme
 
-_TRACK_W = 46
-_TRACK_H = 26
+_TRACK_W = 48
+_TRACK_H = 28
 _KNOB_M = 3                      # 트랙 안쪽 여백
+# 행 전체가 클릭영역이므로 **행 높이**가 실제 타깃이다 — 설명 없는 스위치(어두운 화면)
+# 에서도 WCAG 2.5.8(AA, 24px)을 넉넉히 넘기게 하한을 둔다.
+_ROW_MIN_H = 34
 
 
 class ToggleSwitch(QWidget):
@@ -103,8 +106,10 @@ class ToggleSwitch(QWidget):
 
         enabled = self.isEnabled()
         # 트랙 — off 는 중립 면, on 은 강조색. 비활성은 채도를 뺀다.
+        # ★ off 트랙을 LINE2 로 칠하면 시트 면에서 1.5~1.7:1 밖에 안 돼 '꺼진 스위치가
+        #   안 보인다'(WCAG 1.4.11 실패, 실측).  LINE_STRONG 으로 3:1 을 확보한다.
         if enabled:
-            off_c = QColor(theme.LINE2)
+            off_c = QColor(theme.LINE_STRONG)
             on_c = QColor(theme.ACCENT)
         else:
             off_c = QColor(theme.LINE)
@@ -148,6 +153,7 @@ class SwitchRow(QWidget):
                  parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setMinimumHeight(_ROW_MIN_H)
 
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 0, 0, 0)

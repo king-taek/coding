@@ -25,11 +25,18 @@ def test_loading_overlay_shows_counts(qapp):
     host = QWidget()
     ov = LoadingOverlay(host)
     ov.set_progress(150, 300, "유사도 계산")
-    assert ov._progress.format() == "%v / %m"
+    # ★ 갯수는 바 **밖**의 모노 라벨이 표시한다 — 바 안의 글자는 채움(accent)이 아래를
+    #   지나는 순간 대비가 2.41(라이트)/1.85(다크)로 붕괴한다(실측).
+    assert ov._progress.isTextVisible() is False
+    assert ov._count_label.text() == "150 / 300"
     assert ov._progress.maximum() == 300
     # 총량이 바뀌면(단계 전환) 새 최대값으로 스냅.
     ov.set_progress(0, 40, "후보 생성")
     assert ov._progress.maximum() == 40
+    assert ov._count_label.text() == "0 / 40"
+    # busy(총량 미지)에서는 숫자를 감춘다 — 없는 총량을 만들어 보이지 않게.
+    ov.set_progress(0, 0, "스캔 중")
+    assert ov._count_label.isHidden() is True
 
 
 # ── 크게보기 뷰어: 이전/다음 인접 + 공통 박스 ─────────────────────────────

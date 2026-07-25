@@ -100,7 +100,9 @@ REVIEW_BTN_UNDELETE = "삭제 취소 ↩"
 REVIEW_REMOVED_FMT = "{n} 개의 매칭이 결과에서 제외되었습니다."
 
 # ── 셋업 페이지 ────────────────────────────────────────────────────────────
-SETUP_TITLE = "AOI Recipe Verificator"
+# 이전 값 "AOI Recipe Verificator" 는 (a) 오타(verificator → verifier) 이고
+# (b) 나머지가 전부 한국어인 화면에 영어만 남아 있었다.
+SETUP_TITLE = "AOI 레시피 검증"
 SETUP_REF_GROUP = "기준 장비"
 SETUP_VAL_GROUP = "검증 장비"
 SETUP_FOLDER_LABEL = "최상위 폴더"

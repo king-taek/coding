@@ -46,10 +46,14 @@ class Profile:
     row_pad_v: int = 8
     row_gap: int = 0                # 하이라인 눈금이 행을 가른다(간격 0)
     control_h: int = 32
-    control_h_lg: int = 40
+    control_h_lg: int = 44          # 타일·액션바 — 터치 패널(WCAG 2.5.5 AAA 44px)
     control_pad_v: int = 6
     control_pad_h: int = 14
-    check_sz: int = 16
+    # 클릭 타깃 하한 — WCAG 2.5.8(AA) 24px 을 **모든** 컨트롤이 넘어야 한다.
+    # 밀집 컨트롤(체크박스 행·? 버튼·슬라이더)의 min-height 로 쓴다.
+    target_min: int = 26
+    input_h: int = 38               # 입력란 — 34px 이었고 필드가 눌리기에 얕았다
+    check_sz: int = 18
     chip_w: int = 88
     chip_h: int = 20
     toggle_w: int = 52
@@ -68,8 +72,11 @@ _LIGHT: dict[str, str] = {
     "bg": "#ECE9E2",        # 벨럼 바탕
     "panel": "#F5F3ED",     # 시트 면
     "elev": "#FBFAF7",
-    "line": "#948E80",      # 제도 눈금(가시)
-    "line2": "#B7B2A6",
+    "line": "#89836F",      # 제도 눈금 — 가장 옅은 면(elev)에서도 3:1 이상
+    "line2": "#B7B2A6",     # 장식용 옅은 눈금(비-상호작용 전용)
+    # 상호작용 컨트롤의 **평상시 경계** — WCAG 1.4.11(비-텍스트 3:1) 전용 토큰.
+    # line2 로는 elev/panel/bg 어디에서도 2.0 을 못 넘겨 '보이지 않는 입력란'이 됐다.
+    "line_strong": "#847F75",
     "ink": "#1B1A17",
     "ink2": "#3D3B35",
     "mute": "#5A574E",
@@ -88,8 +95,9 @@ _DARK: dict[str, str] = {
     "bg": "#0E1620",        # 청사진 원지
     "panel": "#16202B",     # 시트 면
     "elev": "#1F2C3A",
-    "line": "#41586E",      # 제도 눈금(어두운 바탕에서도 보이게)
-    "line2": "#2C3E4F",
+    "line": "#567590",      # 제도 눈금 — panel·bg 에서 3:1 이상(구분선은 elev 를 지나지 않는다)
+    "line2": "#2C3E4F",     # 장식용 옅은 눈금(비-상호작용 전용)
+    "line_strong": "#5C81A3",   # 상호작용 경계 — elev 에서도 3.46:1
     "ink": "#EAF0F6",       # 백선(白線)
     "ink2": "#C3D0DC",
     "mute": "#9AAAB9",
@@ -133,7 +141,7 @@ FONT_MONO = Fonts.MONO
 PROFILE = Profile()
 
 # 인라인 f-string 스타일이 쓰는 색 상수 — set_color_mode() 가 일괄 갱신한다.
-BG = PANEL = ELEV = LINE = LINE2 = ""
+BG = PANEL = ELEV = LINE = LINE2 = LINE_STRONG = ""
 INK = INK2 = MUTE = ""
 ACCENT = ACCENT_HOVER = ACCENT_PRESSED = ON_ACCENT = ""
 PASS = DANGER = WARN = FOCUS = THUMB_FRAME = ""
@@ -172,6 +180,10 @@ def _derive_tokens() -> dict:
         "pad_input_focus": f"{7 - comp}px {12 - comp}px",
         "focus_w": f"{ring}px",
         "check_sz": f"{p.check_sz}px", "radio_sz": f"{p.check_sz - 2}px",
+        # 클릭 타깃 — 밀집 컨트롤도 WCAG 2.5.8(AA, 24px)을 넘게.
+        "target_min": f"{p.target_min}px",
+        "input_h": f"{p.input_h}px",
+        "control_h_lg": f"{p.control_h_lg}px",
         # 판정 칩 — 채운 '스탬프'(사각). 예외가 한눈에 띄게.
         "chip_bg_ok": PASS_TINT, "chip_bg_over": DANGER_TINT,
         "chip_border_none": c["line2"], "chip_pad": "2px 8px", "chip_ls": "0px",
@@ -196,7 +208,7 @@ def set_color_mode(name: str) -> None:
     만들어진 화면에 즉시 반영하려면 호출부가 **페이지를 다시 만들어야** 한다
     (``main_window`` 가 세션 시작 전에만 그렇게 한다)."""
     global COLOR_MODE, COLORS, SCRIM_RGBA
-    global BG, PANEL, ELEV, LINE, LINE2, INK, INK2, MUTE
+    global BG, PANEL, ELEV, LINE, LINE2, LINE_STRONG, INK, INK2, MUTE
     global ACCENT, ACCENT_HOVER, ACCENT_PRESSED, ON_ACCENT
     global PASS, DANGER, WARN, FOCUS, THUMB_FRAME
     global ACCENT_TINT, ACCENT_TINT_SOFT, PASS_TINT
@@ -209,7 +221,7 @@ def set_color_mode(name: str) -> None:
     SCRIM_RGBA = _SCRIMS[mode]
 
     BG, PANEL, ELEV = c["bg"], c["panel"], c["elev"]
-    LINE, LINE2 = c["line"], c["line2"]
+    LINE, LINE2, LINE_STRONG = c["line"], c["line2"], c["line_strong"]
     INK, INK2, MUTE = c["ink"], c["ink2"], c["mute"]
     ACCENT, ACCENT_HOVER = c["accent"], c["accent_hover"]
     ACCENT_PRESSED, ON_ACCENT = c["accent_pressed"], c["on_accent"]

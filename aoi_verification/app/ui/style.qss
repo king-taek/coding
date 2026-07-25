@@ -78,9 +78,10 @@ QLabel[chip="none"] {
 }
 
 /* ── 카드 ───────────────────────────────────────────────────────────── */
+/* 카드 외곽 — 면 구분(구조)을 담당하므로 눈금 등급($line)을 쓴다. */
 QFrame[role="card"] {
     background-color: $panel;
-    border: 1px solid $line2;
+    border: 1px solid $line;
     border-radius: $radius;
 }
 
@@ -144,15 +145,19 @@ QFrame[current="true"] {
 }
 
 /* ── 버튼 ───────────────────────────────────────────────────────────── */
+/* ★ 상호작용 컨트롤의 평상시 경계는 $line_strong 을 쓴다 — WCAG 1.4.11(비-텍스트
+   3:1).  $line2 는 어떤 면에서도 2.0 을 못 넘겨 '보이지 않는 버튼'이 됐다(실측).
+   $line2 는 이제 장식용(카드 외곽·칩 없음 보더)에만 남긴다. */
 QPushButton {
     background-color: transparent;
     color: $ink2;
-    border: 1px solid $line2;
+    border: 1px solid $line_strong;
     border-radius: $radius_sm;
     padding: $pad_control;
     font-size: $font_base_sz;
     font-weight: 600;
     letter-spacing: 0px;
+    min-height: $target_min;
 }
 
 QPushButton:hover {
@@ -172,7 +177,7 @@ QPushButton:focus {
 
 QPushButton:disabled {
     color: $mute;
-    border-color: $line;
+    border: 1px dashed $line;
     background-color: transparent;
 }
 
@@ -191,11 +196,14 @@ QPushButton[role="primary"]:pressed {
     background-color: $accent_pressed;
 }
 /* ★ 속성 선택자가 일반 QPushButton:disabled 보다 특이도가 높아, 이 규칙이 없으면
-   primary 는 비활성이어도 꽉 찬 채로 남아 '누를 수 있어 보이는 못 누르는 버튼'이 된다. */
+   primary 는 비활성이어도 꽉 찬 채로 남아 '누를 수 있어 보이는 못 누르는 버튼'이 된다.
+   ★ 면을 $line2 로 채우면 라벨($mute)이 그 위에서 3.42:1 로 떨어진다(실측) — 비워
+   두면 라벨이 시트 면 위에 앉아 6.5:1 을 유지하면서도 '비어 있다 = 못 누른다'로 읽힌다. */
 QPushButton[role="primary"]:disabled {
-    background-color: $line2;
+    background-color: transparent;
     color: $mute;
-    border-color: $line2;
+    border: 1px dashed $line;
+    font-weight: 600;
 }
 QPushButton[role="primary"]:focus {
     border: $focus_w solid $focus;
@@ -220,13 +228,25 @@ QPushButton[role="warn"]:hover {
 }
 
 QPushButton[role="ghost"] {
-    color: $mute;
-    border-color: $line;
+    color: $ink2;
+    border-color: $line_strong;
 }
 QPushButton[role="ghost"]:hover {
     color: $ink;
-    border-color: $line2;
+    border-color: $accent;
     background-color: $elev;
+}
+
+/* ★ 역할별 :focus 를 반드시 따로 선언한다.  `QPushButton[role="ghost"]` 의
+   border-color 는 위의 일반 `QPushButton:focus` 와 특이도가 같고 **뒤에** 선언돼 있어,
+   전용 규칙이 없으면 포커스 링 색을 그대로 덮어쓴다 — 실제로 ghost/danger/warn 버튼은
+   탭으로 이동해도 링이 전혀 그려지지 않았다(픽셀 실측으로 확인).
+   `role="primary"` 는 이미 전용 규칙이 있어 살아 있었다. */
+QPushButton[role="ghost"]:focus,
+QPushButton[role="danger"]:focus,
+QPushButton[role="warn"]:focus {
+    border: $focus_w solid $focus;
+    padding: $pad_control_focus;
 }
 
 QPushButton:checked {
@@ -242,11 +262,12 @@ QPushButton:checked {
 QPushButton[role="option"] {
     background: transparent;
     color: $ink2;
-    border: 1px solid $line2;
+    border: 1px solid $line_strong;
     border-radius: $radius_sm;
     padding: $pad_control;
     font-weight: 600;
     text-align: left;
+    min-height: $control_h_lg;
 }
 QPushButton[role="option"]:hover {
     background-color: $elev;
@@ -266,12 +287,12 @@ QPushButton[role="option"]:focus {
 QPushButton[role="option"]:disabled {
     background: transparent;
     color: $mute;
-    border-color: $line;
+    border: 1px dashed $line;
 }
 QPushButton[role="option"]:checked:disabled {
     background-color: $accent_tint_soft;
     color: $mute;
-    border-color: $line2;
+    border: 1px dashed $line;
 }
 
 /* 입력 오류 — 왜 [검증 시작] 을 누를 수 없는지 툴팁이 아니라 눈에 보이게. */
@@ -292,7 +313,7 @@ QLabel[role="error"] {
    "화면이 전부 가려진다"는 느낌 대신 초점만 남는다. */
 QWidget[role="loadingPanel"] {
     background-color: $panel;
-    border: 1px solid $line2;
+    border: 1px solid $line;
     border-radius: $radius;
 }
 
@@ -309,8 +330,8 @@ QPushButton[compact="true"] {
     padding: 4px 6px;
     font-size: 17px;
     font-weight: 700;
-    color: $mute;
-    border: 1px solid $line2;
+    color: $ink2;
+    border: 1px solid $line_strong;
     background: transparent;
 }
 QPushButton[compact="true"]:hover {
@@ -362,18 +383,63 @@ QPushButton[role="link"]:focus {
 /* ── 입력 위젯 ──────────────────────────────────────────────────────── */
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
     background-color: $elev;
-    border: 1px solid $line2;
+    border: 1px solid $line_strong;
     border-radius: $radius_sm;
     padding: $pad_input;
     color: $ink;
+    min-height: $input_h;
+    /* 플레이스홀더는 Qt 기본(본문색 ~50% 알파)이면 3.31:1 로 떨어진다 — 본문과
+       같은 등급의 보조색으로 고정한다. */
+    placeholder-text-color: $mute;
 }
 /* 모드에 따라 무효해진 파라미터는 비활성으로 보여 준다(숨기지 않는다) — 그러니
    비활성 모습이 실제로 달라야 한다. */
 QLineEdit:disabled, QComboBox:disabled,
 QSpinBox:disabled, QDoubleSpinBox:disabled {
     background-color: transparent;
-    border-color: $line;
+    border: 1px dashed $line;
     color: $mute;
+}
+/* 스핀 버튼 — 폭을 주지 않으면 글리프가 잘려 '깨진 조각'으로 렌더되고 필드 프레임을
+   깨뜨린다(실측).  넓게 잡고 눈금으로 필드에서 분리한다. */
+QSpinBox::up-button, QDoubleSpinBox::up-button,
+QSpinBox::down-button, QDoubleSpinBox::down-button {
+    subcontrol-origin: border;
+    width: 20px;
+    background: transparent;
+    border-left: 1px solid $line_strong;
+}
+QSpinBox::up-button, QDoubleSpinBox::up-button {
+    subcontrol-position: top right;
+    height: 18px;
+    border-top-right-radius: $radius_sm;
+}
+QSpinBox::down-button, QDoubleSpinBox::down-button {
+    subcontrol-position: bottom right;
+    height: 18px;
+    border-bottom-right-radius: $radius_sm;
+}
+QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
+QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {
+    background: $accent_tint_soft;
+}
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {
+    width: 8px; height: 8px;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-bottom: 5px solid $ink2;
+}
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {
+    width: 8px; height: 8px;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid $ink2;
+}
+QSpinBox::up-arrow:disabled, QDoubleSpinBox::up-arrow:disabled {
+    border-bottom-color: $line;
+}
+QSpinBox::down-arrow:disabled, QDoubleSpinBox::down-arrow:disabled {
+    border-top-color: $line;
 }
 QSlider:disabled::groove:horizontal {
     background: $line;
@@ -394,67 +460,87 @@ QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {
     padding: $pad_input_focus;
 }
 
+/* 슬라이더 — 트랙만으로는 핸들 클릭 타깃이 15px 밖에 안 됐다.  위젯 자체에 세로
+   여유를 줘 WCAG 2.5.8(24px)을 넘기고, 핸들도 20px 로 키운다. */
+QSlider:horizontal {
+    min-height: $target_min;
+}
 QSlider::groove:horizontal {
-    height: 6px;
+    height: 8px;
     background: $line;
-    border-radius: 3px;
+    border-radius: 4px;
 }
 QSlider::handle:horizontal {
     background: $ink2;
-    width: 16px;
-    margin: -6px 0;
-    border-radius: 8px;
+    border: 1px solid $ink2;
+    width: 20px;
+    height: 20px;
+    margin: -7px 0;
+    border-radius: 10px;
 }
 QSlider::handle:horizontal:hover {
     background: $ink;
+    border-color: $ink;
+}
+/* 포커스 링 — 키보드로 임계치를 조절할 때 어디에 있는지 보여야 한다. */
+QSlider:focus::handle:horizontal {
+    background: $accent;
+    border: $focus_w solid $focus;
 }
 QSlider::sub-page:horizontal {
     background: $accent;
-    border-radius: 3px;
+    border-radius: 4px;
 }
 
 QCheckBox {
     color: $ink;
     spacing: 8px;
+    min-height: $target_min;       /* 라벨까지가 클릭영역 — 행 높이로 타깃을 확보 */
 }
 QCheckBox::indicator {
     width: $check_sz;
     height: $check_sz;
-    border: 2px solid $line2;
+    border: 2px solid $line_strong;
     border-radius: 4px;
-    background: transparent;
+    background: $elev;
 }
 QCheckBox::indicator:hover {
-    border-color: $mute;
+    border-color: $accent;
 }
 QCheckBox::indicator:checked {
     background: $accent;
     border-color: $accent;
 }
-QCheckBox:focus {
-    color: $focus;
+/* 텍스트 색만 바꾸는 포커스 표시는 약하다 — 표시기에 링을 그린다. */
+QCheckBox:focus::indicator {
+    border: $focus_w solid $focus;
+}
+QCheckBox::indicator:disabled {
+    border: 2px dashed $line;
+    background: transparent;
 }
 
 QRadioButton {
     color: $ink;
     spacing: 8px;
+    min-height: $target_min;
 }
 QRadioButton::indicator {
     width: $radio_sz;
     height: $radio_sz;
-    border: 2px solid $line2;
+    border: 2px solid $line_strong;
     border-radius: 8px;
-    background: transparent;
+    background: $elev;
 }
 QRadioButton::indicator:hover {
-    border-color: $mute;
+    border-color: $accent;
 }
 QRadioButton::indicator:checked {
     background: $accent;
     border-color: $accent;
 }
-QRadioButton:focus {
-    color: $focus;
+QRadioButton:focus::indicator {
+    border: $focus_w solid $focus;
 }
 
 /* ── 스크롤 ────────────────────────────────────────────────────────── */
@@ -465,7 +551,7 @@ QScrollBar:vertical, QScrollBar:horizontal {
     height: 10px;
 }
 QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
-    background: $line2;
+    background: $line_strong;
     border-radius: 4px;
     min-height: 24px;
     min-width: 24px;
@@ -478,17 +564,23 @@ QScrollBar::add-line, QScrollBar::sub-line {
 }
 
 /* ── 진행 바 ────────────────────────────────────────────────────────── */
+/* ★ 바 안에 숫자를 넣지 않는다 — 채움이 글자 아래를 지나가는 순간 대비가 2.41(라이트)
+   /1.85(다크) 로 붕괴한다(실측).  숫자는 바 **밖**의 모노 라벨이 담당한다
+   (loading_overlay._count_label).  그래서 text-align/color 규칙도 없다. */
 QProgressBar {
     background: $panel;
     border: 1px solid $line;
     border-radius: 6px;
-    text-align: center;
-    color: $ink;
-    font-family: $font_mono;
 }
 QProgressBar::chunk {
     background: $accent;
     border-radius: 5px;
+}
+/* 진행 수치 — 바 밖에서 모노로. 시트 면 위라 대비가 흔들리지 않는다. */
+QLabel[role="progressCount"] {
+    font-family: $font_mono;
+    font-size: $font_caption_sz;
+    color: $ink2;
 }
 
 /* ── 그룹박스 ───────────────────────────────────────────────────────── */
@@ -518,16 +610,17 @@ QToolTip {
 }
 
 /* ── 도움말 토글 버튼 (? 버튼) ───────────────────────────────────────────── */
+/* 26px — WCAG 2.5.8(AA) 24px 하한을 넘긴다(이전 22px 은 미달). */
 QToolButton[objectName="helpToggle"] {
-    color: $mute;
-    border: 1px solid $line2;
-    border-radius: 11px;
-    min-width: 22px;
-    min-height: 22px;
-    max-width: 22px;
-    max-height: 22px;
+    color: $ink2;
+    border: 1px solid $line_strong;
+    border-radius: 13px;
+    min-width: 26px;
+    min-height: 26px;
+    max-width: 26px;
+    max-height: 26px;
     font-weight: 700;
-    font-size: 13px;
+    font-size: 14px;
     background: transparent;
     padding: 0;
 }

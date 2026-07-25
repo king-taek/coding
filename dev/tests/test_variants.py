@@ -90,7 +90,10 @@ def test_thumb_frame_separates_from_panel():
 def test_profile_pins_datum_baseline():
     """'도면' 프로필 리터럴 고정 — 클램프·a2 테스트의 전제(폭 예약 등)를 지킨다."""
     p = theme.PROFILE
-    assert (p.thumb_default_px, p.control_h, p.control_h_lg) == (118, 32, 40)
+    # control_h_lg 44 = 타일·액션바의 클릭 타깃(WCAG 2.5.5 AAA) — 낮추지 말 것.
+    assert (p.thumb_default_px, p.control_h, p.control_h_lg) == (118, 32, 44)
+    # 밀집 컨트롤(체크박스 행·? 버튼·슬라이더)도 WCAG 2.5.8(AA, 24px)을 넘는다.
+    assert (p.target_min, p.input_h, p.check_sz) == (26, 38, 18)
     assert (p.chip_w, p.chip_h, p.toggle_w, p.toggle_h) == (88, 20, 52, 30)
     assert (p.page_margin, p.section_gap) == (32, 28)
     # 모서리는 중간 라운드(8~10px) — '너무 각지다'는 지적 반영.

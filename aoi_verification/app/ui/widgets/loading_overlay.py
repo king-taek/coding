@@ -212,8 +212,13 @@ class LoadingOverlay(QWidget):
         self._progress.setFixedWidth(360)
         self._progress.setRange(0, 100)
         self._progress.setValue(0)
-        self._progress.setTextVisible(True)
-        self._progress.setFormat("%v / %m")           # 처리 갯수(done / total)
+        # ★ 숫자를 바 **안**에 두지 않는다 — 채움(accent)이 글자 아래를 지나는 순간
+        #   대비가 2.41(라이트)/1.85(다크)로 붕괴한다(실측).  바 밖 모노 라벨로 옮겨
+        #   어떤 진행률에서도 같은 대비를 유지한다.
+        self._progress.setTextVisible(False)
+        self._count_label = QLabel("", self._content)
+        self._count_label.setProperty("role", "progressCount")
+        self._count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._target_val = 0
         # 결정형 부드러운 채움 — QVariantAnimation(OutQuart) 로 프레임 균일.
         self._val_anim = QVariantAnimation(self)
@@ -249,6 +254,7 @@ class LoadingOverlay(QWidget):
         _bar_lay.setContentsMargins(0, 0, 0, 0)
         _bar_lay.setSpacing(6)
         _bar_lay.addWidget(self._progress, alignment=Qt.AlignmentFlag.AlignCenter)
+        _bar_lay.addWidget(self._count_label, alignment=Qt.AlignmentFlag.AlignCenter)
         _bar_lay.addWidget(self._busy, alignment=Qt.AlignmentFlag.AlignCenter)
         # ★ 여기에 두 번째 QGraphicsOpacityEffect 를 걸지 않는다 — 패널이 이미 이펙트로
         #   렌더되는 중이라 이펙트를 겹치면 "A paint device can only be painted by one
@@ -405,6 +411,8 @@ class LoadingOverlay(QWidget):
             self._progress.show()
             done = max(0, min(int(done), int(total)))
             self._target_val = done
+            self._count_label.setText(f"{done} / {int(total)}")
+            self._count_label.show()
             if self._progress.maximum() != total:      # 단계 전환/총량 변경 → 스냅
                 self._val_anim.stop()
                 self._progress.setRange(0, total)
@@ -425,6 +433,7 @@ class LoadingOverlay(QWidget):
         else:
             self._val_anim.stop()
             self._progress.hide()                       # busy: 혜성 스윕으로 교체
+            self._count_label.hide()                    # 총량을 모르니 숫자도 없다
             self._busy.show()
             self._busy.start()
         self._cover_parent()
