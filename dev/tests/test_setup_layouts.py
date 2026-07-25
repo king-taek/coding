@@ -131,6 +131,39 @@ def test_action_bar_pinned_outside_scroll(qapp, key):
 
 
 @pytest.mark.parametrize("key", ["a", "b", "c"])
+def test_action_bar_built_exactly_once(qapp, key):
+    """★ 액션바를 두 번 만들면 `start_btn` 이 두 번째 것으로 덮이고, 첫 번째는 유효성
+    갱신을 못 받는 **유령 버튼**으로 화면에 남는다(C안에서 실제로 그렇게 렌더됐다).
+
+    `_build()` 가 고정 액션바를 붙이는데 `_build_body` 가 또 붙이면 생기는 사고라
+    '시작 버튼이 화면에 몇 개인가'로 잡는다."""
+    from pathlib import Path as _P
+
+    from aoi_verification.app import i18n
+    from aoi_verification.app.ui.widgets.neon_button import NeonButton
+
+    page = sl.LAYOUTS[key]()
+    try:
+        page.resize(1512, 982)
+        page.show()
+        for _ in range(12):
+            qapp.processEvents()
+        starts = [w for w in page.findChildren(NeonButton)
+                  if w.text() == i18n.KO.BTN_START]
+        assert len(starts) == 1, f"{key}: [검증 시작]이 {len(starts)}개"
+        assert starts[0] is page.start_btn, f"{key}: start_btn 이 화면의 버튼과 다르다"
+        # 유효성 게이트가 그 버튼에 실제로 걸려 있는지(유령이 아닌지) 확인.
+        assert page.start_btn.isEnabled() is False        # 폴더 미지정
+        here = str(_P(__file__).parent)
+        page.ref_path_edit.setText(here)
+        page.val_path_edit.setText(here)
+        page._validate()
+        assert page.start_btn.isEnabled() is True
+    finally:
+        page.deleteLater()
+
+
+@pytest.mark.parametrize("key", ["a", "b", "c"])
 @pytest.mark.parametrize("size", [(1512, 982), (800, 600)])
 def test_start_button_visible_without_scrolling(qapp, key, size):
     """어떤 크기에서도 [검증 시작]이 페이지 안에 실제로 보여야 한다."""

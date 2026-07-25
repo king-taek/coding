@@ -146,9 +146,14 @@ class SetupPageC(SetupPage):
         self._detail_section.add_content_widget(detail)
         root.addWidget(self._detail_section)
 
-        root.addStretch(1)
-        root.addWidget(self._build_action_bar())
+        # ★ 액션바를 여기서 다시 만들면 안 된다 — `_build()` 가 이미 스크롤 밖에 고정한다.
+        #   두 번 만들면 `self.start_btn` 이 두 번째 것으로 덮여, 스크롤 안의 첫 번째는
+        #   유효성 갱신을 못 받는 유령 버튼으로 남는다(실제로 그렇게 렌더됐다).
+        if not self._pinned_action_bar():
+            root.addWidget(self._build_action_bar())
+        # 크레딧은 내용 바로 아래 — 남는 공간은 그 **뒤**로 밀어 문서 끝처럼 읽히게.
         root.addWidget(self._build_credit())
+        root.addStretch(1)
         self._refresh_summary()
 
         # 설정이 바뀌면 요약도 따라간다.
