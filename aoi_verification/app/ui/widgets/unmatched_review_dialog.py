@@ -731,11 +731,15 @@ class UnmatchedReviewDialog(QDialog):
                       self._score_cache.get_pair(
                           cur.slot, Path(cur.path), Path(v.path)) is not None)
             s = self._lookup_or_compute_score(cur, v, allow_compute=allow_compute)
+            # ★ 진행 보고를 **점수 성공 여부와 분리한다.**  이전에는 `s is None` 이면
+            #   `continue` 로 빠져 보고도 건너뛰었다 — 건너뛴 후보가 하나라도 있으면
+            #   done 이 need 에 **영원히 못 닿아** 바가 98% 에서 멈춘 채 창이 내려간다.
+            #   need 는 '캐시에 없던 개수'이므로, 계산을 시도했으면 결과와 무관하게 센다.
+            if on_computed is not None and not cached:
+                on_computed()
             if s is None:
                 continue                     # ≥300 & 캐시 miss → 재계산 없이 제외.
             out.append((float(s), v))
-            if on_computed is not None and not cached:
-                on_computed()                # 실제 재계산한 후보만 진행 보고.
         return out
 
     # ------------------------------------------------------------------

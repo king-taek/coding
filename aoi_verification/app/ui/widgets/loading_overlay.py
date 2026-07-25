@@ -2,8 +2,13 @@
 
 부모 위젯 위에 반투명 스크림 + 회전 링 + 메시지 + 진행 바를 표시.
 모션(사용자 1순위): 등장은 빠르게→끝에서 감속(ease-out), 퇴장은 더 짧게.
-CLAUDE.md 로딩 계약 유지: set_progress(done,total,msg), total>0 결정형(증가 tween·
-감소/범위변경 스냅), total≤0 busy, 백그라운드 스레드+시그널로 갱신.
+CLAUDE.md 로딩 계약 유지: set_progress(done,total,msg), total>0 결정형, total≤0 busy,
+백그라운드 스레드+시그널로 갱신.  결정형 채움 규칙:
+
+- 감소/총량 변경 → **즉시 스냅**
+- **드문** 증가 → 부드럽게 tween
+- **촘촘한** 증가(간격 < VAL_TWEEN_MS) → **즉시 스냅**.  tween 을 재시작하면 표시값이
+  목표를 영원히 따라가지 못해 '바가 채워지지 않는' 버그가 된다(set_progress 주석 참조).
 """
 
 from __future__ import annotations
@@ -195,6 +200,9 @@ class LoadingOverlay(QWidget):
     RISE_IN_MS = 300
     FADE_OUT_MS = 140
     PANEL_W = 424                          # 메시지 길이로 패널 폭이 뛰지 않게 고정
+    # 결정형 바의 부드러운 채움 지속시간 **이자** '촘촘한 갱신' 판정 기준.
+    # 두 값을 따로 두면 어긋난다 — 하나로 묶어 둔다(set_progress 주석 참조).
+    VAL_TWEEN_MS = 240
 
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
@@ -236,6 +244,8 @@ class LoadingOverlay(QWidget):
         self._count_label.setProperty("role", "progressCount")
         self._count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._target_val = 0
+        # 결정형 갱신 **간격** 측정 — 촘촘하면 tween 을 건너뛴다.
+        self._val_gap = QElapsedTimer()
         # 결정형 부드러운 채움 — QVariantAnimation(OutQuart) 로 프레임 균일.
         # ★ tick 마다 OutQuart 를 걸면 매 갱신이 끝에서 감속해 채움이 절뚝인다.
         #   연속 갱신되는 결정형 바는 **등속**이 맞다(전체 곡선은 작업 속도가 만든다).
@@ -394,6 +404,7 @@ class LoadingOverlay(QWidget):
         돌고 바가 채워지지 않는" 그 증상이고, CLAUDE.md 로딩 계약("진행량을 모를 때도
         0 에 멈추지 말고 busy 를 띄운다")을 정면으로 어긴다."""
         self._val_anim.stop()
+        self._val_gap.invalidate()         # 다음 결정형의 첫 갱신은 '드문 것'으로 본다
         self._progress.hide()
         self._count_label.setText("")      # 총량을 모르니 숫자는 비운다
         self._busy.show()
@@ -554,18 +565,33 @@ class LoadingOverlay(QWidget):
                 self._val_anim.stop()
                 self._progress.setRange(0, total)
                 self._progress.setValue(done)
+                self._val_gap.start()                  # 이 시점부터 간격을 잰다
             else:
                 cur = self._progress.value()
+                # ★ 갱신이 **촘촘하면 tween 을 걸지 않는다.**
+                #
+                #   증가마다 VAL_TWEEN_MS tween 을 재시작하는데 갱신이 그보다 빨리 오면,
+                #   tween 은 매번 몇 프레임만 돌고 처음부터 다시 시작한다 → 표시값이 목표를
+                #   영원히 따라가지 못하고, 작업이 끝나면 오버레이가 내려가 **끝까지 찬 적이
+                #   없다**.  실측(고치기 전): 30ms 간격 50회 루프에서 done 5/50 에 표시 0% ·
+                #   15/50 에 20% · 50/50 에 88%.  "로딩바 틀은 있는데 채워지지 않는다"가 이것이다.
+                #
+                #   '부드러움'은 갱신이 **드물 때만** 성립하는 성질이다.  촘촘할 때는 정확한
+                #   위치가 부드러움보다 중요하다 — 진행률은 장식이 아니라 정보다.
+                #   그래서 판정 기준을 tween 지속시간 그 자체로 둔다(값이 하나여야 어긋나지 않는다).
+                gap = self._val_gap.restart() if self._val_gap.isValid() else None
+                dense = gap is not None and gap < motion.dur(self.VAL_TWEEN_MS)
                 if done <= cur:                        # 리셋/감소 → 즉시 스냅
                     self._val_anim.stop()
                     self._progress.setValue(done)
-                elif motion.enabled():                 # 증가 → 부드럽게 tween
+                elif motion.enabled() and not dense:   # 드문 증가 → 부드럽게 tween
                     self._val_anim.stop()
                     self._val_anim.setStartValue(int(cur))
                     self._val_anim.setEndValue(done)
-                    self._val_anim.setDuration(motion.dur(240))
+                    self._val_anim.setDuration(motion.dur(self.VAL_TWEEN_MS))
                     self._val_anim.start()
-                else:
+                else:                                  # 촘촘한 증가 → 정확한 위치로
+                    self._val_anim.stop()
                     self._progress.setValue(done)
         else:
             self._enter_busy()                          # busy: 혜성 스윕으로 교체

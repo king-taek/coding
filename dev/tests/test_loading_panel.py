@@ -274,3 +274,67 @@ def test_show_overlay_starts_busy_not_a_frozen_zero_bar(qapp):
         assert not ov._busy.isHidden() and ov._progress.isHidden()
     finally:
         host.deleteLater()
+
+
+def test_dense_updates_track_the_real_progress(qapp, monkeypatch):
+    """★ 촘촘한 갱신에서 바가 **실제 진행을 따라가야** 한다.
+
+    실사용 버그: '매치 실패 사진 검토'의 유사도 재계산에서 로딩바 틀은 보이는데 채워지지
+    않았다.  원인은 그 다이얼로그가 아니라 여기다 — 증가마다 240ms tween 을 **재시작**
+    하는데 갱신이 30ms 마다 오므로 tween 이 몇 프레임만 돌고 처음부터 다시 시작한다.
+    표시값이 목표를 영원히 못 따라가고, 작업이 끝나면 오버레이가 내려가 **끝까지 찬 적이
+    없다**.  실측(수정 전): done 5/50 에 표시 0% · 15/50 에 20% · 50/50 에 88%.
+
+    '부드러움'은 갱신이 **드물 때만** 성립하는 성질이다.  촘촘할 때는 정확한 위치가
+    부드러움보다 중요하다 — 진행률은 장식이 아니라 정보다.
+
+    ★ 모션을 켜야 재현된다(offscreen 은 tween 을 안 탄다).
+    """
+    from aoi_verification.app.ui import motion
+    monkeypatch.setattr(motion, "enabled", lambda: True)
+    host, ov = _overlay(qapp)
+    try:
+        need = 50
+        ov.show_overlay("점수 계산 중")
+        ov.set_progress(0, need, "점수 계산 중")
+        from PyQt6.QtCore import QElapsedTimer
+        worst = 0.0
+        for i in range(1, need + 1):
+            t = QElapsedTimer()                 # 후보 1장 재계산 ≈ 30ms
+            t.start()
+            while t.elapsed() < 30:
+                qapp.processEvents()
+            ov.set_progress(i, need, f"{i}/{need}")
+            qapp.processEvents()
+            lag = abs(ov._progress.value() - i) / need
+            worst = max(worst, lag)
+        assert worst <= 0.10, f"표시값이 실제 진행에서 최대 {worst * 100:.1f}% 벗어났다"
+        assert ov._progress.value() == need, \
+            f"작업이 끝났는데 바가 {ov._progress.value()}/{need} 에서 멈췄다"
+    finally:
+        host.deleteLater()
+
+
+def test_sparse_updates_still_tween(qapp, monkeypatch):
+    """반대쪽도 지킨다 — 갱신이 **드물면** 부드럽게 채운다(스냅으로 퇴화 금지).
+
+    tween 자체를 지워 버리면 단계 전환처럼 큰 도약이 딱딱하게 튄다.  고칠 것은
+    '언제 tween 하는가'이지 tween 의 존재가 아니다."""
+    from aoi_verification.app.ui import motion
+    monkeypatch.setattr(motion, "enabled", lambda: True)
+    host, ov = _overlay(qapp)
+    try:
+        ov.show_overlay("작업 중")
+        ov.set_progress(0, 100, "시작")
+        from PyQt6.QtCore import QElapsedTimer
+        t = QElapsedTimer()
+        t.start()
+        while t.elapsed() < 600:                # tween 지속시간보다 충분히 김
+            qapp.processEvents()
+        ov.set_progress(80, 100, "도약")
+        qapp.processEvents()
+        # 방금 걸었으므로 아직 80 에 닿지 않았어야 한다(= tween 이 걸렸다).
+        assert ov._progress.value() < 80, "드문 갱신인데 tween 없이 스냅했다"
+        assert ov._val_anim.state() != ov._val_anim.State.Stopped
+    finally:
+        host.deleteLater()
