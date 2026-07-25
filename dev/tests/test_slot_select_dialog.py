@@ -3,8 +3,10 @@
 이 파일이 지키는 계약은 재설계에서 실제로 고친 결함들이다(자세한 배경은 위젯 docstring):
 
 - 선택 상태는 **QSS 가 칠한다** — 죽은 네온 팔레트 인라인 하드코딩 금지.
-- 포커스가 **렌더된다** — StrongFocus 만 켜고 안 그리면 2.4.7 실패다.
+- 타일은 **마우스 전용**(사용자 결정) — 포커스를 받지 않으므로 방향키·Space·
+  포커스 링이 전부 없다.  가로채는 코드가 아니라 ``NoFocus`` 로 없앤다.
 - 토글은 **release-inside** 에서 — 터치 스크롤이 선택을 바꾸지 않게.
+- 크기는 ``sizeHint`` 로 알린다 — 시트 호스트가 읽는 값이 그것뿐이다.
 - 열 수는 ``reflow_into_grid`` 가 계산한다 — off-by-one 을 두 곳에 복제하지 않는다.
 - **0개 선택으로 확인 불가** — 호출부가 빈 집합을 '전체 진행'으로 정규화하므로,
   전부 해제하고 확인하면 의도와 정반대로 모든 슬롯이 돌아간다.
@@ -27,6 +29,7 @@ pytest.importorskip("PyQt6.QtWidgets")
 from PyQt6.QtCore import Qt                            # noqa: E402
 from PyQt6.QtWidgets import QApplication               # noqa: E402
 
+from aoi_verification.app import i18n                  # noqa: E402
 from aoi_verification.app.ui import theme              # noqa: E402
 from aoi_verification.app.ui.widgets import slot_select_dialog as ssd  # noqa: E402
 from aoi_verification.app.ui.widgets.slot_select_dialog import (  # noqa: E402
@@ -190,6 +193,32 @@ def test_no_horizontal_scroll_and_columns_adapt(qapp):
     assert cols[0] > cols[-1], f"좁혀도 열이 줄지 않았다: {seen}"
 
 
+def test_size_hint_is_what_the_sheet_host_reads(qapp):
+    """★ 시트 호스트는 ``resize()`` 가 아니라 ``sizeHint()``/``minimumSize`` 를 본다.
+
+    이 창은 앱에서 유일하게 ``full_bleed`` 없이 뜨는 시트다.  ``sizeHint`` 를
+    오버라이드하지 않았던 탓에 `_size_to_content` 의 계산이 통째로 버려지고
+    시트가 하한(280×140)/최소값 근처로 쪼그라들어 그리드가 두어 줄만 보였다."""
+    from PyQt6.QtWidgets import QApplication as _QA
+    dlg = SlotSelectDialog(_MANY)
+    hint = dlg.sizeHint()
+    # 4열이 들어가는 폭을 알린다.
+    want_w = (SlotSelectDialog._WANT_COLS * ssd._TILE_MIN_W
+              + (SlotSelectDialog._WANT_COLS - 1) * ssd._GRID_SPACING
+              + theme.PROFILE.page_margin + 24)
+    g = (dlg.screen() or _QA.primaryScreen()).availableGeometry()
+    assert hint.width() == min(want_w, int(g.width() * 0.95))
+    assert hint.height() >= 560, f"높이 {hint.height()}px — 리스트가 안 보인다"
+    # 호스트가 실제로 계산하는 값 = max(hint, minimum, 하한) → 이 크기가 나온다.
+    _SHEET_MIN_W, _SHEET_MIN_H = 280, 140
+    assert max(hint.width(), dlg.minimumWidth(), _SHEET_MIN_W) == hint.width()
+    assert max(hint.height(), dlg.minimumHeight(), _SHEET_MIN_H) == hint.height()
+    # 최소값은 목표까지 올리지 않는다 — 좁은 창에서 열 수가 폭을 따라가야 한다.
+    assert dlg.minimumWidth() < hint.width()
+    # 그래도 화면은 넘지 않는다.
+    assert hint.width() <= g.width() and hint.height() <= g.height()
+
+
 def test_dialog_fits_a_small_screen(qapp):
     """★ 창이 화면 가용 영역을 넘지 않는다.
 
@@ -229,57 +258,56 @@ def test_long_name_stays_readable(qapp):
             f"가운데 생략이 아니다: {text!r}"
 
 
-# ── 포커스 · 키보드 ─────────────────────────────────────────────────────
-def test_focus_ring_actually_renders(qapp):
-    """★ 포커스를 **렌더된 픽셀**로 증명한다.
+# ── 키보드 — 타일은 마우스 전용(사용자 결정) ────────────────────────────
+def test_tiles_take_no_focus(qapp):
+    """★ 타일은 포커스를 받지 않는다 — 방향키·Space·포커스 링이 모두 사라진다.
 
-    이전 타일은 StrongFocus 를 켜 두고 링을 그리지 않아, 키보드로 이동해도 지금 어디
-    인지 알 수 없었다.  QSS 에 선언만 하는 것으로는 증명이 안 된다."""
-    for mode in theme.color_mode_keys():
-        theme.set_color_mode(mode)
-        dlg = _shown(qapp, _NAMES)
-        dlg.activateWindow()
-        tile = dlg._tiles["S01"]
-        tile.setFocus(Qt.FocusReason.TabFocusReason)
-        for _ in range(10):
-            qapp.processEvents()
-        img = tile.grab().toImage()
-        want = theme.COLORS["focus"].lstrip("#")
-        wr, wg, wb = (int(want[i:i + 2], 16) for i in (0, 2, 4))
-        hit = any(
-            abs(img.pixelColor(x, y).red() - wr)
-            + abs(img.pixelColor(x, y).green() - wg)
-            + abs(img.pixelColor(x, y).blue() - wb) <= 24
-            for y in range(img.height()) for x in range(img.width()))
-        assert hit, f"{mode}: 포커스 링 픽셀이 렌더되지 않았다"
-    theme.set_color_mode("light")
-
-
-def test_arrow_keys_move_focus_without_toggling(qapp):
-    """방향키는 **이동만** 한다 — 훑는 것이 선택이 되면 안 된다."""
+    'NoFocus' 하나가 세 동작을 동시에 없앤다.  가로채는 코드로 막으면 Qt 버전에
+    따라 우회로가 생기지만, 받지 않으면 우회로 자체가 없다."""
     dlg = _shown(qapp, _MANY)
-    dlg._set_all(False)
-    first = dlg._tiles[dlg._visible[0]]
-    first.setFocus(Qt.FocusReason.TabFocusReason)
-    dlg._move_focus(first, Qt.Key.Key_Right)
-    for _ in range(4):
-        qapp.processEvents()
-    assert dlg._tiles[dlg._visible[1]].hasFocus()
-    assert dlg.selected == set(), "방향키가 선택을 바꿨다"
+    for tile in dlg._tiles.values():
+        assert tile.focusPolicy() == Qt.FocusPolicy.NoFocus
 
-
-def test_down_from_search_enters_grid(qapp):
-    """검색란에서 ↓ → 첫 타일.  타이핑 → 고르기가 끊기지 않는다."""
-    from PyQt6.QtGui import QKeyEvent
-    dlg = _shown(qapp, _MANY)
+    # 탭 순회가 타일에 걸리지 않는다(창을 열면 검색란에 포커스가 있고, 탭을
+    # 아무리 돌려도 타일에는 오지 않는다).  ※ `setFocus()` 는 정책을 우회하므로
+    # 그것으로는 증명이 안 된다 — 실제 이동 수단인 탭으로 확인한다.
     dlg._search.setFocus()
     for _ in range(4):
         qapp.processEvents()
-    dlg.keyPressEvent(QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Down,
-                                Qt.KeyboardModifier.NoModifier))
+    for _ in range(len(dlg._tiles) + 8):
+        dlg.focusNextChild()
+        assert not any(t.hasFocus() for t in dlg._tiles.values()), \
+            "탭으로 타일에 포커스가 들어갔다"
+
+
+def test_arrow_keys_do_nothing(qapp):
+    """방향키는 포커스도 선택도 바꾸지 않는다(이동 기능 자체를 제거했다)."""
+    from PyQt6.QtGui import QKeyEvent
+    dlg = _shown(qapp, _MANY)
+    dlg._set_all(False)
+    before = dlg.selected
+    for key in (Qt.Key.Key_Right, Qt.Key.Key_Left,
+                Qt.Key.Key_Down, Qt.Key.Key_Up):
+        qapp.sendEvent(dlg, QKeyEvent(QKeyEvent.Type.KeyPress, key,
+                                      Qt.KeyboardModifier.NoModifier))
     for _ in range(4):
         qapp.processEvents()
-    assert dlg._tiles[dlg._visible[0]].hasFocus()
+    assert dlg.selected == before, "방향키가 선택을 바꿨다"
+    assert not any(t.hasFocus() for t in dlg._tiles.values()), \
+        "방향키가 타일로 포커스를 옮겼다"
+
+
+def test_no_tile_keyboard_machinery_left(qapp):
+    """이동 코드가 '조용히' 남아 있지 않은지 — 죽은 경로는 다음 사람을 오도한다.
+
+    ``eventFilter``/``keyPressEvent`` 는 Qt 기반 클래스에도 있으므로 ``hasattr``
+    로는 판정할 수 없다.  **이 모듈이 재정의했는지**를 소스에서 본다."""
+    code = _code_only()
+    for gone in ("def _move_focus", "def eventFilter", "def keyPressEvent",
+                 "_ARROWS", "QShortcut", "installEventFilter"):
+        assert gone not in code, f"{gone} 가 아직 남아 있다"
+    # 화면에 남은 키 안내 문구도 없어야 한다.
+    assert not hasattr(i18n.KO, "SLOT_SELECT_KEY_HINT")
 
 
 # ── 구현 규율 ───────────────────────────────────────────────────────────
@@ -324,7 +352,11 @@ def test_column_math_is_reused_not_duplicated():
 
 
 def test_qss_paints_the_selected_state():
-    for state in (":checked", ":focus", ":hover", ":disabled"):
+    # ★ `:focus` 는 빠졌다 — 타일이 NoFocus 라 절대 발화하지 않는다.  그릴 수 없는
+    #   상태의 스타일을 남겨 두면 키보드 이동이 있는 줄 오해한다.
+    for state in (":checked", ":hover", ":disabled"):
         assert f'QPushButton[role="slotTile"]{state}' in _QSS, f"slotTile{state} 없음"
+    assert 'QPushButton[role="slotTile"]:focus' not in _QSS, \
+        "발화할 수 없는 :focus 규칙이 남아 있다"
     # 차단 이유 라벨도 등급이 있어야 한다(QPushButton 전용 role="warn" 만 있던 함정).
     assert 'QLabel[role="warn"]' in _QSS

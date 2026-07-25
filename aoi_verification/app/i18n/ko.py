@@ -502,7 +502,8 @@ SLOT_SELECT_FILTER_NONE_FMT = "‘{q}’ 와 맞는 슬롯이 없습니다"
 SLOT_SELECT_PICK_VISIBLE = "검색 결과 선택"
 # 0개로 확인하면 호출부가 '전체 진행'으로 정규화한다 — 의도와 정반대라 막고 이유를 말한다.
 SLOT_SELECT_NEED_ONE = "최소 한 개는 선택해야 합니다."
-SLOT_SELECT_KEY_HINT = "↑↓←→ 이동 · Space 선택 · Ctrl+A 전체 · Enter 확인"
+# ※ SLOT_SELECT_KEY_HINT 는 제거했다 — 타일 키보드 조작을 없앴으므로(사용자 결정)
+#   안내할 키가 남지 않았다.  화면에 지키지 못할 약속을 적어 두지 않는다.
 SLOT_SELECT_HINT = (
     "이번 검증에서 진행할 슬롯을 눌러 고르세요. 이름을 알면 위에서 바로 찾을 수 있습니다.\n"
     "고르지 않은 슬롯은 스캔·매칭에서 제외됩니다."

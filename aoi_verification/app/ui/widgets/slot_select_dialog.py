@@ -5,7 +5,12 @@
 
 실제 작업 장면이 설계를 결정했다: 24개 슬롯 중 **급한 3개만** 먼저 돌리려는 사용자다.
 그래서 (a) 이름을 알고 있으니 **검색**이 가장 빠른 길이고, (b) 한 화면에 최대한 많이
-보여야 하고, (c) 손이 마우스와 키보드를 오가므로 두 경로가 모두 온전해야 한다.
+보여야 한다.
+
+(c) 타일은 **마우스로만** 고른다 — 사용자 결정.  방향키 이동·Space 토글·Ctrl+A/D 를
+모두 없앴고, 남은 키보드는 검색란 타이핑·Enter(확인)·Esc(닫기)뿐이다.  구현은
+``_SlotTile`` 의 ``NoFocus`` 하나로 끝난다(받지 않게 하는 쪽이 가로채는 쪽보다
+우회로가 없다).
 
 이전 구현에서 실제로 있었던 결함 — 이 파일이 왜 다시 쓰였는지:
 
@@ -14,7 +19,8 @@
    없었다.  ``option_group`` 모듈 docstring 이 **이 타일을 이름까지 대며** "반복하지 말
    것"으로 적어 뒀던 그 실수다.  이제 선택 상태는 QSS(`role="slotTile"`)가 칠한다.
 2. **포커스를 그리지 않았다** — ``StrongFocus`` 를 켜 두고 링을 그리지 않아, 키보드로
-   이동해도 지금 어디인지 알 수 없었다(WCAG 2.4.7 실패).
+   이동해도 지금 어디인지 알 수 없었다(WCAG 2.4.7 실패).  이후 링을 그려 고쳤고,
+   지금은 타일 키보드 자체가 없어져(``NoFocus``) 이 상태가 존재하지 않는다.
 3. **press 에서 토글** — 터치 패널에서 타일에 손가락을 얹고 미는 **스크롤 제스처**가
    선택을 바꿨다.  ``ToggleSwitch`` 에서 이미 release 기준으로 고친 것과 같은 버그다.
    지금은 ``QPushButton`` 이라 release-inside 만 ``clicked`` 를 낸다(공짜로 해결).
@@ -31,8 +37,8 @@ from __future__ import annotations
 
 from typing import Iterable, Optional
 
-from PyQt6.QtCore import QEvent, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QFontMetrics, QKeySequence, QShortcut
+from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QFontMetrics
 from PyQt6.QtWidgets import (QApplication, QDialog, QGridLayout, QHBoxLayout,
                              QLabel, QLineEdit, QScrollArea, QSizePolicy,
                              QVBoxLayout, QWidget)
@@ -51,9 +57,14 @@ _GRID_SPACING = 8
 class _SlotTile(NeonButton):
     """토글 가능한 슬롯 타일.  **선택 상태는 QSS 가 칠한다**(인라인 스타일시트 금지).
 
-    ``QPushButton`` 을 쓰는 이유가 셋 있다: (a) ``clicked`` 가 **release-inside** 에서만
-    나므로 터치 스크롤이 선택을 바꾸지 않는다, (b) ``:checked``/``:focus``/``:hover``/
-    ``:disabled`` 를 QSS 가 전부 칠해 준다, (c) Space 토글이 기본 동작이다.
+    ``QPushButton`` 을 쓰는 이유: (a) ``clicked`` 가 **release-inside** 에서만 나므로
+    터치 스크롤이 선택을 바꾸지 않는다, (b) ``:checked``/``:hover``/``:disabled`` 를
+    QSS 가 전부 칠해 준다.
+
+    ★ 포커스는 ``NoFocus`` 다 — **이 창의 타일은 마우스로만 고른다**(사용자 결정).
+    그래서 방향키 이동·Space 토글·포커스 링이 전부 사라진다.  Space 토글은
+    ``QAbstractButton`` 의 기본 동작인데, 포커스를 받지 않으면 발생 자체가
+    불가능하므로 따로 막을 코드가 필요 없다.
     """
 
     def __init__(self, name: str, *, selected: bool = False, parent=None) -> None:
@@ -67,7 +78,7 @@ class _SlotTile(NeonButton):
         self.setObjectName(f"slot_{name}")
         self.setAccessibleName(name)
         self.setToolTip(name)
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._elide()
 
@@ -191,7 +202,6 @@ class SlotSelectDialog(QDialog):
         for name in self._slot_names:
             tile = _SlotTile(name, selected=name in self._preselected, parent=host)
             tile.clicked.connect(self._on_tile_clicked)
-            tile.installEventFilter(self)
             self._tiles[name] = tile
         self._scroll.setWidget(host)
         root.addWidget(self._scroll, stretch=1)
@@ -214,12 +224,11 @@ class SlotSelectDialog(QDialog):
         self._blocked.setFixedHeight(self._blocked.sizeHint().height())
         root.addWidget(self._blocked)
 
-        # ── 바닥: 키 안내(좌) + 취소·확인(우).
+        # ── 바닥: 취소·확인(우).
+        # ★ 키 안내 문구는 없앴다 — 타일 키보드 이동을 없앴으므로 안내할 키가
+        #   남지 않았다.  지키지 못할 약속을 화면에 적어 두지 않는다.
         bar = QHBoxLayout()
         bar.setSpacing(8)
-        keys = QLabel(i18n.KO.SLOT_SELECT_KEY_HINT, self)
-        keys.setProperty("role", "muted")
-        bar.addWidget(keys)
         bar.addStretch(1)
         cancel = NeonButton(i18n.KO.BTN_CANCEL, role="ghost")
         cancel.setMinimumHeight(theme.PROFILE.control_h_lg)
@@ -231,11 +240,8 @@ class SlotSelectDialog(QDialog):
         bar.addWidget(self._ok)
         root.addLayout(bar)
 
-        # 단축키 — 마우스 없이 끝까지 갈 수 있게.
-        QShortcut(QKeySequence("Ctrl+A"), self,
-                  activated=lambda: self._set_all(True))
-        QShortcut(QKeySequence("Ctrl+D"), self,
-                  activated=lambda: self._set_all(False))
+        # ★ Ctrl+A / Ctrl+D 단축키는 없앴다(사용자 결정) — [전체]/[해제] 버튼이
+        #   같은 일을 하고 화면에 보인다.  숨은 키는 남기지 않는다.
         # ★ Enter 를 QPushButton 의 autoDefault 에 맡기지 않는다 — 검색란에서 Enter 를
         #   누르면 '확인' 이 아니라 마지막으로 눌린 버튼이 다시 실행될 수 있다.
         self._ok.setDefault(True)
@@ -247,28 +253,49 @@ class SlotSelectDialog(QDialog):
         QTimer.singleShot(0, self._search.setFocus)
         QTimer.singleShot(0, self._relayout)
 
-    # 3열이 들어가는 폭 + 바닥/머리 여백.  슬롯이 적으면 더 좁혀도 되지만, 열 수가
-    # 창 폭에 따라 바뀌므로 '3열은 보장한다'는 하한만 정하고 나머지는 화면에 맡긴다.
-    _WANT_COLS = 3
-    _WANT_H = 560
+    # 4열이 들어가는 폭 + 바닥/머리 여백.  열 수는 창 폭에 따라 바뀌므로
+    # '4열은 보장한다'는 하한만 정하고 나머지는 화면에 맡긴다.
+    _WANT_COLS = 4
+    # 화면 높이의 이만큼(상한 _WANT_H_MAX)을 쓴다.  슬롯 24~40개를 고르는 창이
+    # 560px 이면 한 번에 대여섯 줄뿐이라 '리스트가 거의 안 보인다'는 말이 나온다.
+    _WANT_H_RATIO = 0.78
+    _WANT_H_MAX = 760
 
     def _size_to_content(self) -> None:
         """내용에 맞는 크기로 열되, **화면 가용 영역 안으로 클램프**한다.
 
-        800×600 노트북에서 창이 화면을 넘으면 [확인]이 화면 밖으로 나간다 — 큰 화면
-        기준으로 정한 크기를 작은 화면에 그대로 쓰면 정확히 그렇게 된다."""
+        ★ 계산 결과를 ``sizeHint`` 로도 내보내는 것이 핵심이다.  이 창은 별도 OS
+        창이 아니라 메인 창 안의 **시트**로 뜨는데(`widgets/sheet_host.py`),
+        시트 호스트는 ``full_bleed`` 가 아닐 때 위젯의 ``resize()`` 를 **무시하고**
+        ``sizeHint()``/``minimumSize``/하한(280×140)만 본다.  ``sizeHint`` 를
+        오버라이드하지 않았던 탓에 여기서 계산한 크기가 통째로 버려지고 시트가
+        380×340 근처로 쪼그라들어, 그리드가 두어 줄만 보였다.
+
+        800×600 노트북에서 창이 화면을 넘으면 [확인]이 화면 밖으로 나가므로
+        가용 영역 클램프는 그대로 유지한다."""
         want_w = (self._WANT_COLS * _TILE_MIN_W
                   + (self._WANT_COLS - 1) * _GRID_SPACING
                   + theme.PROFILE.page_margin + 24)      # 마진 + 스크롤바 여유
-        want_h = self._WANT_H
+        want_h = self._WANT_H_MAX
         scr = self.screen() or QApplication.primaryScreen()
         if scr is not None:
             g = scr.availableGeometry()
+            want_h = min(want_h, int(g.height() * self._WANT_H_RATIO))
             want_w = min(want_w, int(g.width() * 0.95))
             want_h = min(want_h, int(g.height() * 0.95))
-        # 최소값은 '2열 + 바닥 버튼' 이 들어가는 선까지만 — 그 이하로는 못 줄인다.
-        self.setMinimumSize(min(380, want_w), min(340, want_h))
-        self.resize(want_w, want_h)
+        self._want_w = int(want_w)
+        self._want_h = int(want_h)
+        # ★ 최소값은 목표까지 올리지 **않는다**.  시트 호스트는
+        #   `max(hint, minimumWidth, 하한)` 을 쓰므로 `sizeHint` 만으로 목표 크기가
+        #   나온다.  최소값까지 목표로 올리면 좁은 화면에서 창을 줄일 수 없고
+        #   열 수가 폭을 못 따라간다(가로 스크롤).  '2열 + 바닥 버튼' 선까지만.
+        self.setMinimumSize(min(380, self._want_w), min(340, self._want_h))
+        self.resize(self._want_w, self._want_h)
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        """시트 호스트가 **실제로 읽는** 크기.  `_size_to_content` 결과를 돌려준다."""
+        return QSize(getattr(self, "_want_w", 640),
+                     getattr(self, "_want_h", 560))
 
     # ── 검색(필터) ────────────────────────────────────────────────────
     def _on_search(self, text: str) -> None:
@@ -316,59 +343,20 @@ class SlotSelectDialog(QDialog):
         super().resizeEvent(event)
         QTimer.singleShot(0, self._relayout)
 
-    # ── 키보드 이동 — 타일 사이를 방향키로 ─────────────────────────────
-    _ARROWS = (Qt.Key.Key_Right, Qt.Key.Key_Left, Qt.Key.Key_Down, Qt.Key.Key_Up)
-
-    def eventFilter(self, obj, event):  # noqa: N802
-        """방향키를 **타일에서** 가로챈다.
-
-        ``QAbstractButton`` 은 방향키를 스스로 처리해 포커스를 옮기거나 ``click()`` 까지
-        부를 수 있어, 컨테이너의 keyPressEvent 만 믿으면 Qt 버전에 따라 우회된다
-        (``OptionGroup`` 에서 실측한 함정).  여기서 먼저 소비해 계약을 지킨다."""
-        if (event.type() == QEvent.Type.KeyPress
-                and isinstance(obj, _SlotTile)
-                and event.key() in self._ARROWS):
-            self._move_focus(obj, event.key())
-            return True
-        return super().eventFilter(obj, event)
-
-    def _move_focus(self, tile: _SlotTile, key) -> None:
-        """그리드 좌표로 이동 — 좌우는 한 칸, 위아래는 한 행(열 수만큼)."""
-        if tile.name not in self._visible:
-            return
-        idx = self._visible.index(tile.name)
-        cols = max(1, self._grid_cols())
-        if key == Qt.Key.Key_Right:
-            idx += 1
-        elif key == Qt.Key.Key_Left:
-            idx -= 1
-        elif key == Qt.Key.Key_Down:
-            idx += cols
-        else:
-            idx -= cols
-        idx = max(0, min(idx, len(self._visible) - 1))
-        nxt = self._tiles.get(self._visible[idx])
-        if nxt is not None:
-            nxt.setFocus(Qt.FocusReason.TabFocusReason)
-            self._scroll.ensureWidgetVisible(nxt, 0, 40)
+    # ★ 타일 키보드 조작(방향키 이동·Space 토글·검색란 ↓ 로 그리드 진입)은 전부
+    #   제거했다 — **사용자 결정**.  타일은 마우스로만 고른다.  남아 있는 키보드는
+    #   검색란 타이핑 · Enter(확인) · Esc(닫기) 뿐이다.
+    #   구현은 `_SlotTile` 의 ``NoFocus`` 하나로 끝난다: 포커스를 못 받으면
+    #   방향키도 Space 도 애초에 이 위젯으로 오지 않는다.  가로채는 코드를
+    #   남겨 두는 것보다 **받지 않게 하는 쪽**이 우회로가 없다.
 
     def _grid_cols(self) -> int:
+        """현재 열 수 — 레이아웃 검증(가로 스크롤 없음)용."""
         cols = 0
         for i in range(self._grid.count()):
             _r, c, _rs, _cs = self._grid.getItemPosition(i)
             cols = max(cols, c + 1)
         return cols
-
-    def keyPressEvent(self, event):  # noqa: N802
-        """검색란에서 ↓ 를 누르면 그리드로 들어간다(타이핑 → 고르기 흐름)."""
-        if (event.key() == Qt.Key.Key_Down
-                and self._search.hasFocus() and self._visible):
-            first = self._tiles.get(self._visible[0])
-            if first is not None:
-                first.setFocus(Qt.FocusReason.TabFocusReason)
-                event.accept()
-                return
-        super().keyPressEvent(event)
 
     # ── 선택 상태 ─────────────────────────────────────────────────────
     def _on_tile_clicked(self) -> None:
