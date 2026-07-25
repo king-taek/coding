@@ -179,18 +179,27 @@ class LoadingOverlay(QWidget):
 
     cancel_requested = pyqtSignal()        # #8 중지 버튼 클릭
 
+    MIN_DISPLAY_MS = 350                   # 초단타 작업의 '깜빡임' 방지 래치
+    RISE_IN_PX = 24                        # 등장: 중앙보다 이만큼 아래에서 시작
+    RISE_OUT_PX = 12                       # 퇴장: 살짝만 내려가며 사라진다
+
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
         self.setAutoFillBackground(False)
 
-        # 콘텐츠를 한 컨테이너에 묶어 페이드 시 불투명도를 한 번에 조절.
-        self._content = QWidget(self)
-        self._content_eff = QGraphicsOpacityEffect(self._content)
+        # 콘텐츠는 **패널** 안에 모은다 — 스크림을 옅게 해도 읽히고, "화면이 전부
+        # 가려진다"는 느낌 대신 초점만 남는다.  패널은 레이아웃이 아니라 직접 배치해
+        # (중앙 기준 오프셋) 아래에서 올라오는 모션을 값싸게 만든다.
+        self._panel = QWidget(self)
+        self._panel.setProperty("role", "loadingPanel")
+        self._content = self._panel                    # 이전 이름 유지(내부 참조 호환)
+        self._content_eff = QGraphicsOpacityEffect(self._panel)
         self._content_eff.setOpacity(1.0)
-        self._content.setGraphicsEffect(self._content_eff)
+        self._panel.setGraphicsEffect(self._content_eff)
 
-        v = QVBoxLayout(self._content)
+        v = QVBoxLayout(self._panel)
+        v.setContentsMargins(28, 24, 28, 24)
         v.setAlignment(Qt.AlignmentFlag.AlignCenter)
         v.setSpacing(12)
 
@@ -234,13 +243,26 @@ class LoadingOverlay(QWidget):
 
         v.addWidget(self._spinner, alignment=Qt.AlignmentFlag.AlignCenter)
         v.addWidget(self._label)
-        v.addWidget(self._progress, alignment=Qt.AlignmentFlag.AlignCenter)
-        v.addWidget(self._busy, alignment=Qt.AlignmentFlag.AlignCenter)
+        # 진행 표시(결정형 바 / busy 스트라이프)를 한 호스트에 묶어 스태거 페이드를 건다.
+        self._bar_host = QWidget(self._panel)
+        _bar_lay = QVBoxLayout(self._bar_host)
+        _bar_lay.setContentsMargins(0, 0, 0, 0)
+        _bar_lay.setSpacing(6)
+        _bar_lay.addWidget(self._progress, alignment=Qt.AlignmentFlag.AlignCenter)
+        _bar_lay.addWidget(self._busy, alignment=Qt.AlignmentFlag.AlignCenter)
+        # ★ 여기에 두 번째 QGraphicsOpacityEffect 를 걸지 않는다 — 패널이 이미 이펙트로
+        #   렌더되는 중이라 이펙트를 겹치면 "A paint device can only be painted by one
+        #   painter at a time" 경고가 난다.  대신 위/아래 여백을 맞바꿔(합은 일정)
+        #   패널 크기를 흔들지 않고 살짝 밀려 들어오게 한다.
+        self._bar_lay = _bar_lay
+        v.addWidget(self._bar_host, alignment=Qt.AlignmentFlag.AlignCenter)
         v.addWidget(self._sparkline, alignment=Qt.AlignmentFlag.AlignCenter)
         v.addWidget(self._cancel_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        # 페이드 상태.
+        # 페이드 + 상승 상태.  하나의 t(0..1)가 스크림 알파·패널 불투명도·오프셋을 함께
+        # 구동한다: t=0 → 중앙보다 RISE 만큼 아래 + 투명, t=1 → 중앙 + 불투명.
         self._fade = 0.0
+        self._rise_span = self.RISE_IN_PX
         self._hiding = False
         self._fade_anim = QVariantAnimation(self)
         self._fade_anim.setEasingCurve(QEasingCurve.Type.OutQuart)
@@ -259,6 +281,7 @@ class LoadingOverlay(QWidget):
     def _on_fade(self, v) -> None:
         self._fade = float(v)
         self._content_eff.setOpacity(self._fade)
+        self._place_panel()               # 같은 t 가 위치도 움직인다(아래→중앙)
         self.update()
 
     def _on_fade_done(self) -> None:
@@ -269,7 +292,6 @@ class LoadingOverlay(QWidget):
     def show_overlay(self, message: str = "", *, cancelable: bool = False) -> None:
         self._label.setText(message)
         self._cancel_btn.setVisible(bool(cancelable))
-        self._cover_parent()
         self._spinner.start()
         self.raise_()
         self.show()
@@ -278,16 +300,54 @@ class LoadingOverlay(QWidget):
         self._show_token += 1
         self._shown_elapsed.restart()
         self._fade_anim.stop()
+        self._rise_span = self.RISE_IN_PX
         if motion.enabled():
-            self._fade_anim.setStartValue(self._fade)
+            # 중앙보다 조금 아래 + 투명에서 시작해 중앙에 안착(ease-out).
+            self._on_fade(0.0)
+            self._fade_anim.setStartValue(0.0)
             self._fade_anim.setEndValue(1.0)
-            # 등장: 부드럽게 — 빠른 변형도 하한 130ms 로 '컷' 방지(C9).
-            self._fade_anim.setDuration(max(130, motion.dur(160)))
+            self._fade_anim.setDuration(max(180, motion.dur(220)))
             self._fade_anim.start()
+            self._stagger_bar()
         else:
             self._on_fade(1.0)
+            self._set_bar_slide(1.0)
+        self._cover_parent()
 
-    MIN_DISPLAY_MS = 350
+    _BAR_SLIDE_PX = 8
+
+    def _set_bar_slide(self, t: float) -> None:
+        """t=0 → 아래로 _BAR_SLIDE_PX 밀린 상태, t=1 → 제자리.
+
+        위/아래 여백의 **합을 일정하게** 유지하므로 패널 크기가 흔들리지 않는다."""
+        lay = getattr(self, "_bar_lay", None)
+        if lay is None:
+            return
+        t = max(0.0, min(1.0, float(t)))
+        top = int(round(self._BAR_SLIDE_PX * (1.0 - t)))
+        lay.setContentsMargins(0, top, 0, self._BAR_SLIDE_PX - top)
+
+    def _stagger_bar(self) -> None:
+        """진행바는 패널이 안착한 뒤 살짝 늦게 들어온다 — 계층이 순서대로 읽히게."""
+        anim = getattr(self, "_bar_anim", None)
+        if anim is not None:
+            anim.stop()
+        self._set_bar_slide(0.0)
+        token = self._show_token
+
+        def _run(t=token):
+            if t != self._show_token or self._hiding:
+                return
+            a = QVariantAnimation(self)
+            a.setStartValue(0.0)
+            a.setEndValue(1.0)
+            a.setDuration(max(120, motion.dur(160)))
+            a.setEasingCurve(QEasingCurve.Type.OutQuart)
+            a.valueChanged.connect(lambda v: self._set_bar_slide(float(v)))
+            a.start(QVariantAnimation.DeletionPolicy.DeleteWhenStopped)
+            self._bar_anim = a
+
+        QTimer.singleShot(max(1, motion.dur(60)), _run)
 
     def hide_overlay(self) -> None:
         if not self.isVisible():
@@ -311,11 +371,12 @@ class LoadingOverlay(QWidget):
         if token != self._show_token or not self.isVisible():
             return                             # 그 사이 새 표시가 시작됨 → 무시
         self._hiding = True
+        self._rise_span = self.RISE_OUT_PX     # 퇴장은 살짝만 내려간다
         self._fade_anim.stop()
         self._fade_anim.setStartValue(self._fade)
         self._fade_anim.setEndValue(0.0)
         # 퇴장: 입장보다 짧게, 단 하한 110ms 로 '컷' 방지.
-        self._fade_anim.setDuration(max(110, motion.dur(120)))
+        self._fade_anim.setDuration(max(110, motion.dur(140)))
         self._fade_anim.start()
 
     def _finish_hide(self) -> None:
@@ -328,6 +389,8 @@ class LoadingOverlay(QWidget):
         self._sparkline.clear()
         self._cancel_btn.hide()
         self._fade = 0.0
+        self._rise_span = self.RISE_IN_PX      # 다음 등장을 위해 초기화
+        self._set_bar_slide(1.0)
 
     def push_sparkline(self, value: float) -> None:
         self._sparkline.append_value(value)
@@ -377,7 +440,18 @@ class LoadingOverlay(QWidget):
             return
         p = self.parent()
         self.setGeometry(0, 0, p.width(), p.height())
-        self._content.setGeometry(0, 0, p.width(), p.height())
+        self._place_panel()
+
+    def _place_panel(self) -> None:
+        """패널을 화면 중앙에 두고, 진행도 t 만큼 아래에서 끌어올린다."""
+        w, h = self.width(), self.height()
+        if w <= 0 or h <= 0:
+            return
+        hint = self._panel.sizeHint()
+        pw = min(hint.width(), max(1, w - 48))
+        ph = min(hint.height(), max(1, h - 48))
+        offset = int(self._rise_span * (1.0 - self._fade))
+        self._panel.setGeometry((w - pw) // 2, (h - ph) // 2 + offset, pw, ph)
 
     def paintEvent(self, event):  # noqa: N802
         p = QPainter(self)

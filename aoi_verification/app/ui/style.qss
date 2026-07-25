@@ -288,6 +288,14 @@ QLabel[role="error"] {
     font-size: $font_caption_sz;
 }
 
+/* 로딩 패널 — 스크림을 옅게 해도 내용이 읽히도록 불투명 면 + 보더.
+   "화면이 전부 가려진다"는 느낌 대신 초점만 남는다. */
+QWidget[role="loadingPanel"] {
+    background-color: $panel;
+    border: 1px solid $line2;
+    border-radius: $radius;
+}
+
 /* 카드 제목 — 인라인 f-string 스타일 3중복을 대체. */
 QLabel[role="cardTitle"] {
     color: $ink;
