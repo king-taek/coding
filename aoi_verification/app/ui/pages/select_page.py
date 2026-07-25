@@ -25,6 +25,7 @@ from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QScrollArea,
                               QWidget)
 
 from ... import config, i18n
+from .. import theme
 from ...models.slot import ImageItem
 from ...utils import image_io
 from ...utils import prefs as _prefs
@@ -34,7 +35,8 @@ from ..widgets.scalable_image import ScalableImage
 from ..widgets.slot_section import SlotSection
 from ..widgets.thumb_grid import ThumbEntry
 from ..widgets.zoom_window import (ZoomWindow, SOURCE_TARGET, SOURCE_EXCLUDED,
-                                    SOURCE_CANDIDATES)
+                                   SOURCE_CANDIDATES)
+from ..widgets import sheet_host as sheets
 
 
 # ---------------------------------------------------------------------------
@@ -87,7 +89,7 @@ class _SidePanel(QFrame):
         head = QHBoxLayout()
         ttl = QLabel(title, self)
         ttl.setProperty("role", "subtitle")
-        ttl.setStyleSheet("font-weight: 700; color: #39FF14;")
+        ttl.setStyleSheet(f"font-weight: 700; color: {theme.INK};")
         head.addWidget(ttl)
         head.addStretch(1)
 
@@ -233,7 +235,7 @@ class _SidePanel(QFrame):
                 self._name, action_id, items,
             )
         )
-        dlg.exec()
+        sheets.run(dlg, full_bleed=True)
 
 
 # ---------------------------------------------------------------------------
@@ -307,7 +309,7 @@ class SelectPage(QWidget):
         # load_state 에서 1회만 채운다.  슬롯이 많으면 elide + 전체는 툴팁.
         self.lot_counts_label = QLabel("", self)
         self.lot_counts_label.setProperty("role", "muted")
-        self.lot_counts_label.setStyleSheet("color: #586378; font-size: 11px;")
+        self.lot_counts_label.setStyleSheet(f"color: {theme.MUTE}; font-size: 11px;")
         self.lot_counts_label.setWordWrap(False)
         root.addWidget(self.lot_counts_label)
 
@@ -345,7 +347,7 @@ class SelectPage(QWidget):
         cl = center_card.body()
         center_title = QLabel(i18n.KO.PANEL_CENTER_DECIDE, center_card)
         center_title.setProperty("role", "subtitle")
-        center_title.setStyleSheet("font-weight: 700; color: #39FF14;")
+        center_title.setStyleSheet(f"font-weight: 700; color: {theme.INK};")
         center_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         cl.addWidget(center_title)
 
@@ -353,7 +355,7 @@ class SelectPage(QWidget):
         self.slot_label = QLabel("", center_card)
         self.slot_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.slot_label.setStyleSheet(
-            "color: #7FB3D5; font-size: 14px; font-weight: 600; padding: 2px;"
+            f"color: {theme.MUTE}; font-size: 14px; font-weight: 600; padding: 2px;"
         )
         cl.addWidget(self.slot_label)
 
@@ -388,7 +390,7 @@ class SelectPage(QWidget):
         self._img_scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._img_scroll.setWidget(self.center_img)
         self._img_scroll.setStyleSheet(
-            "QScrollArea { background: #050810; border: 1px solid #1F2A3F; "
+            f"QScrollArea {{ background: {theme.BG}; border: 1px solid {theme.LINE}; "
             "border-radius: 8px; }"
         )
         self._img_scroll.setMinimumHeight(300)
@@ -839,7 +841,7 @@ class SelectPage(QWidget):
         win.action_requested.connect(
             lambda act, sel: self._apply_zoom_action(panel, act, sel)
         )
-        win.exec()
+        sheets.run(win, full_bleed=True)
 
     def _apply_zoom_action(self, panel: str, action: str,
                             items: list[ImageItem]) -> None:
@@ -875,7 +877,7 @@ class SelectPage(QWidget):
         if n_remaining == 0:
             return
         from PyQt6.QtWidgets import QMessageBox
-        ret = QMessageBox.question(
+        ret = sheets.ask(
             self, i18n.KO.END_SELECTION_CONFIRM_TITLE,
             i18n.KO.END_SELECTION_CONFIRM_FMT.format(n=n_remaining),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -921,4 +923,4 @@ class SelectPage(QWidget):
                 self.PANEL_BOTTOM, action_id, items,
             )
         )
-        dlg.exec()
+        sheets.run(dlg, full_bleed=True)

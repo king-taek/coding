@@ -1,7 +1,8 @@
 """Slot 의 모든 사진을 중간(800px) 크기로 보여주는 줌-뷰 윈도우.
 
 - 패널 종류(source) 별로 타이틀과 액션 버튼이 달라진다.
-- 단일 클릭 → 액션 버튼 활성화 / 더블 클릭 → 풀스크린 뷰어.
+- 단일 클릭 → 선택 토글(액션 버튼 활성화) / **우클릭 '크게 보기'** → 풀스크린 뷰어.
+  (더블클릭 확대는 제거했다 — 사진을 연달아 고를 때 오발했다.)
 - 다중 선택 + 일괄 액션 지원.
 """
 
@@ -13,14 +14,15 @@ from typing import Callable, Iterable, Optional
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter, QPixmap, QShortcut, QKeySequence
 from PyQt6.QtWidgets import (QApplication, QDialog, QGridLayout, QHBoxLayout,
-                              QLabel, QPushButton, QScrollArea, QVBoxLayout,
-                              QWidget)
+                              QLabel, QMenu, QPushButton, QScrollArea,
+                              QVBoxLayout, QWidget)
 
 from ... import i18n
+from .. import theme
 from ...models.slot import ImageItem
 from ...utils import image_io
 from .neon_button import NeonButton
-from .window_controls import add_fullscreen_shortcut, enable_window_controls
+from . import sheet_host as sheets
 
 # source 종류 ----------------------------------------------------------------
 SOURCE_TARGET = "target"        # 검증 대상 (Right)
@@ -33,7 +35,11 @@ class _MidTile(QWidget):
     """800px 중간 이미지 + 파일명 + 선택 상태."""
 
     clicked = pyqtSignal(object)         # ImageItem
-    double_clicked = pyqtSignal(object)  # ImageItem
+    # ★ 확대는 **우클릭 '크게 보기'** 로만 연다.  더블클릭 확대를 없앤 이유: 사진을
+    #   빠르게 연달아 고르다 보면 두 번째 클릭이 더블클릭으로 붙어 원하지 않는 풀스크린
+    #   창이 떠 버린다(사용자 지적).  선택은 프레스마다 토글되는 잦은 동작이고 확대는
+    #   드문 동작이라, 같은 버튼의 연타에 둘을 겹쳐 두면 잦은 쪽이 드문 쪽을 오발한다.
+    view_requested = pyqtSignal(object)  # ImageItem (크게 보기)
     toggled = pyqtSignal(object, bool)   # (ImageItem, on)
 
     TILE_W = 360
@@ -47,7 +53,7 @@ class _MidTile(QWidget):
         self._selected = False
         self.setFixedSize(self.TILE_W, self.TILE_H + 30)
         self.setStyleSheet(
-            "QWidget { background: #0E1424; border: 1px solid #1F2A3F; "
+            f"QWidget {{ background: {theme.PANEL}; border: 1px solid {theme.LINE}; "
             "border-radius: 8px; }"
         )
 
@@ -68,6 +74,8 @@ class _MidTile(QWidget):
         lay.addWidget(cap)
 
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._on_context_menu)
 
     def _load_pix(self) -> None:
         try:
@@ -75,10 +83,10 @@ class _MidTile(QWidget):
             pix = QPixmap(str(mid))
         except Exception:
             pix = QPixmap(self.TILE_W, self.TILE_H)
-            pix.fill(QColor(20, 28, 40))
+            pix.fill(QColor(theme.PANEL))
         if pix.isNull():
             pix = QPixmap(self.TILE_W, self.TILE_H)
-            pix.fill(QColor(20, 28, 40))
+            pix.fill(QColor(theme.PANEL))
         pix = pix.scaled(
             self.TILE_W - 12, self.TILE_H - 18,
             Qt.AspectRatioMode.KeepAspectRatio,
@@ -98,12 +106,12 @@ class _MidTile(QWidget):
         self._selected = on
         if on:
             self.setStyleSheet(
-                "QWidget { background: #0E1424; border: 2px solid #39FF14; "
+                f"QWidget {{ background: {theme.PANEL}; border: 2px solid {theme.ACCENT}; "
                 "border-radius: 8px; }"
             )
         else:
             self.setStyleSheet(
-                "QWidget { background: #0E1424; border: 1px solid #1F2A3F; "
+                f"QWidget {{ background: {theme.PANEL}; border: 1px solid {theme.LINE}; "
                 "border-radius: 8px; }"
             )
         self.toggled.emit(self.item, on)
@@ -114,15 +122,22 @@ class _MidTile(QWidget):
             self.clicked.emit(self.item)
         super().mousePressEvent(e)
 
-    def mouseDoubleClickEvent(self, e):  # noqa: N802
-        if e.button() == Qt.MouseButton.LeftButton:
-            self.double_clicked.emit(self.item)
-        super().mouseDoubleClickEvent(e)
+    def _on_context_menu(self, pos) -> None:
+        """우클릭 '크게 보기' — 이 타일의 유일한 확대 경로.
+
+        ★ 더블클릭을 없애면서 이 메뉴를 **새로 붙였다.**  다른 타일들은 원래 더블클릭과
+        우클릭 두 경로가 있었지만 이 타일만 더블클릭 하나였다 — 그대로 지우면 확대
+        기능이 사라졌을 것이다.  제스처를 없애는 것과 기능을 없애는 것은 다르다."""
+        menu = QMenu(self)
+        act = menu.addAction(i18n.KO.CTX_VIEW_LARGER)
+        chosen = menu.exec(self.mapToGlobal(pos))
+        if chosen is act:
+            self.view_requested.emit(self.item)
 
 
 # ---------------------------------------------------------------------------
 class FullscreenViewer(QDialog):
-    """더블 클릭 시 열리는 풀스크린 뷰어 (휠 줌 + 드래그 팬)."""
+    """우클릭 '크게 보기' 로 열리는 풀스크린 뷰어 (휠 줌 + 드래그 팬)."""
 
     def __init__(self, image_path: Path, parent=None) -> None:
         super().__init__(parent)
@@ -238,9 +253,9 @@ class ZoomWindow(QDialog):
         self.setWindowTitle(title_fmt.format(slot=slot_name))
         self._resize_within_screen(1280, 800)
 
-        # 창에 최소화/최대화 버튼 + F11 전체화면 토글 (#9). 첫 show 이전에 설정.
-        enable_window_controls(self)
-        add_fullscreen_shortcut(self)
+        # ★ 창 제어(최소화/최대화/F11) 헬퍼를 부르지 않는다 — 이 다이얼로그는
+        #   별도 OS 창이 아니라 **메인 창 안의 시트**로 뜬다(widgets/sheet_host.py).
+        #   최대화·전체화면은 메인 창이 담당한다.
 
         self._build()
 
@@ -331,7 +346,7 @@ class ZoomWindow(QDialog):
         for item in self._items:
             tile = _MidTile(item, dim=False, parent=host)
             tile.toggled.connect(self._on_toggle)
-            tile.double_clicked.connect(self._open_fullscreen)
+            tile.view_requested.connect(self._open_fullscreen)
             grid.addWidget(tile, row, col)
             self._tiles.append(tile)
             col += 1
@@ -345,7 +360,7 @@ class ZoomWindow(QDialog):
             col = 0
             sep = QLabel(i18n.KO.INFO_ALREADY_MATCHED_SECTION, host)
             sep.setProperty("role", "muted")
-            sep.setStyleSheet("color: #586378; padding: 12px 0;")
+            sep.setStyleSheet(f"color: {theme.MUTE}; padding: 12px 0;")
             grid.addWidget(sep, row, 0, 1, cols)
             row += 1
             for item in self._already_matched:
@@ -381,4 +396,4 @@ class ZoomWindow(QDialog):
 
     def _open_fullscreen(self, item: ImageItem) -> None:
         viewer = FullscreenViewer(item.path, self)
-        viewer.exec()
+        sheets.run(viewer, full_bleed=True)

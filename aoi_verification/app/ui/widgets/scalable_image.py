@@ -14,6 +14,7 @@ from PyQt6.QtGui import QColor, QPixmap
 from PyQt6.QtWidgets import QLabel
 
 from ...utils import image_io
+from .. import theme
 
 
 class ScalableImage(QLabel):
@@ -45,7 +46,7 @@ class ScalableImage(QLabel):
         self._target_long_edge = self.DEFAULT_LONG_EDGE
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setStyleSheet(
-            "background: #050810; border: 1px solid #1F2A3F; border-radius: 8px;"
+            f"background: {theme.BG}; border: 1px solid {theme.LINE}; border-radius: 8px;"
         )
         self.setMinimumSize(QSize(self.MIN_LONG_EDGE, self.MIN_LONG_EDGE))
 

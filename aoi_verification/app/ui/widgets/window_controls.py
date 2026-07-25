@@ -1,11 +1,17 @@
-"""다이얼로그 창 제어(window control) 헬퍼 (#9).
+"""창 제어(window control) 헬퍼 (#9).
 
-일부 플랫폼에서 ``QDialog`` 는 닫기 버튼만 보이고 최소화/최대화 버튼이 없다.
-``enable_window_controls`` 가 창 플래그에 최소화/최대화/닫기 힌트를 추가한다.
-또한 ``add_fullscreen_shortcut`` 으로 F11 전체화면 토글을 붙일 수 있다.
+★ **적용 대상은 이제 메인 창 하나다.**  모든 팝업이 별도 OS 창이 아니라 창 안의
+시트로 뜨므로(``widgets/sheet_host.py``), 다이얼로그에 이 헬퍼를 붙이면 안 된다 —
+자식 위젯에는 타이틀바가 없어 최소화/최대화 힌트가 아무 일도 하지 않고, F11 은
+'전체화면'을 약속하면서 실제로는 아무 변화도 만들지 못한다(실측: 자식 위젯에
+``showFullScreen()`` 을 걸면 ``isFullScreen()`` 만 True 가 되고 기하는 그대로다).
+지키지 못할 약속을 하는 단축키는 없는 것이 낫다.
 
-주의: ``setWindowFlags`` 를 show 이후에 호출하면 창이 숨겨질 수 있으므로,
-반드시 위젯의 ``__init__`` 안 (첫 show 이전) 에서 호출해야 한다.
+- ``enable_window_controls`` — 창 플래그에 최소화/최대화/닫기 힌트를 추가한다.
+  ``setWindowFlags`` 를 show 이후에 호출하면 창이 숨겨질 수 있으므로 **첫 show 이전**
+  (보통 ``__init__``)에 호출할 것.
+- ``add_fullscreen_shortcut`` — F11 전체화면 토글.  뷰어가 창 안 시트가 된 뒤로는
+  **이것이 '사진을 화면 가득 보는' 유일한 경로**다(옛 뷰어별 F11 의 대체).
 """
 
 from __future__ import annotations
@@ -35,13 +41,22 @@ def enable_window_controls(w, *, maximized: bool = True) -> None:
 
 
 def add_fullscreen_shortcut(widget) -> QShortcut:
-    """F11 로 전체화면/일반화면을 토글하는 단축키를 위젯에 붙인다."""
+    """F11 로 전체화면/일반화면을 토글하는 단축키를 위젯에 붙인다(**창에만**).
+
+    ★ 되돌릴 때 **들어올 때의 상태로** 돌아간다.  그냥 ``showNormal()`` 하면 최대화로
+    쓰던 사람이 F11 을 두 번 눌렀을 때 작은 창으로 떨어진다 — 토글은 원래 자리로
+    돌아와야 토글이다."""
+    state = {"maximized": False}
 
     def _toggle() -> None:
         try:
             if widget.isFullScreen():
-                widget.showNormal()
+                if state["maximized"]:
+                    widget.showMaximized()
+                else:
+                    widget.showNormal()
             else:
+                state["maximized"] = bool(widget.isMaximized())
                 widget.showFullScreen()
         except Exception:
             pass

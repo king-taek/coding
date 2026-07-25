@@ -100,7 +100,9 @@ REVIEW_BTN_UNDELETE = "삭제 취소 ↩"
 REVIEW_REMOVED_FMT = "{n} 개의 매칭이 결과에서 제외되었습니다."
 
 # ── 셋업 페이지 ────────────────────────────────────────────────────────────
-SETUP_TITLE = "AOI Recipe Verificator"
+# 이전 값 "AOI Recipe Verificator" 는 (a) 오타(verificator → verifier) 이고
+# (b) 나머지가 전부 한국어인 화면에 영어만 남아 있었다.
+SETUP_TITLE = "AOI 레시피 검증"
 SETUP_REF_GROUP = "기준 장비"
 SETUP_VAL_GROUP = "검증 장비"
 SETUP_FOLDER_LABEL = "최상위 폴더"
@@ -142,7 +144,7 @@ UNMATCHED_REVIEW_PROGRESS_FMT = "{idx} / {total} — {slot}"
 UNMATCHED_REVIEW_HINT = (
     "매치 실패한 기준 사진을 하나씩 검토합니다. 같은 슬롯의 검증 장비 후보를"
     " 유사도 순으로 보여줍니다. 맞는 사진을 클릭해 선택(파란 테두리)한 뒤"
-    " [매치 확정] 을 누르세요. 후보를 더블클릭/우클릭하면 크게 비교할 수 있습니다."
+    " [매치 확정] 을 누르세요. 후보를 우클릭하면 크게 비교할 수 있습니다."
 )
 UNMATCHED_REVIEW_NO_CANDIDATES = "이 슬롯에는 검증 장비 후보가 없습니다."
 UNMATCHED_REVIEW_DONE_FMT = "{n} 건의 신규 매칭을 확정했습니다."
@@ -184,19 +186,44 @@ HOWTO_TOGGLE_CLOSE = "사용 방법 ▴"
 
 # ── 유사도 엔진 모드 + 중앙 전처리 ────────────────────────────────────────
 ENGINE_CARD_TITLE = "매칭 설정"
-LEGACY_MODE_OPEN = "▼ 구형 모드 (유사도 엔진)"
-LEGACY_MODE_CLOSE = "▲ 구형 모드 (유사도 엔진)"
+# 구형(유사도) 모드 — 명시적 스위치.  '펼치기 = 켜기' 였던 옛 동작을 없앴다.
+LEGACY_SWITCH_TITLE = "유사도 엔진(구형) 사용"
+LEGACY_SWITCH_DESC = (
+    "끄면 좌표 매칭(파일명/INI/KLA 좌표 데이터)을 씁니다 — 권장 기본값.\n"
+    "켜면 유사도 점수가 임계치 이상인 가장 가까운 후보를 자동 선택합니다."
+)
 LEGACY_MODE_HINT = (
-    "이 섹션을 펼치면 유사도 엔진·임계치 기반 구형 모드로 전환됩니다.\n"
-    "기본 동작은 좌표 매칭 모드(파일명/INI/KLA 좌표 데이터 활용)입니다.\n"
-    "유사도 점수가 임계치 이상인 가장 가까운 후보를 자동 선택합니다.\n"
+    "좌표 데이터가 없는 예전 자료에 쓰는 대체 경로입니다.\n"
     "기본 모드 — CPU 정밀 비교 / 고효율 모드 — CPU+GPU 임베딩."
+)
+# 지금 어떤 파라미터가 유효한지 문장으로 알려준다(비활성 컨트롤의 이유).
+ENGINE_ACTIVE_COORD = "좌표 매칭 사용 중 — 허용 오차가 판정 기준입니다."
+ENGINE_ACTIVE_LEGACY_FMT = "구형 {sub} 모드 사용 중 — 유사도 임계치가 판정 기준입니다."
+# 문장 안에 넣을 짧은 이름(타일 라벨의 괄호까지 넣으면 괄호가 겹친다).
+ENGINE_MODE_BASIC_SHORT = "기본"
+ENGINE_MODE_EFFICIENCY_SHORT = "고효율"
+# ── 상단 모드 배지 — "지금 무슨 모드야?"를 스크롤 없이 2초 안에 ───────────────────
+# 채점자 5인이 전부 같은 지적을 했다: 판정 기준 문장이 엔진 카드 안(A안은 화면 밖,
+# C안은 접힘 아래)에 있어, 무슨 엔진·무슨 수치로 도는지 알려면 찾아 내려가야 했다.
+# 배지는 **판정 기준 값까지** 담는다 — 모드 이름만으로는 오조작을 못 막는다.
+MODE_BADGE_CAPTION = "판정 기준"
+# ★ (이름, 수치) 로 나눈다 — 이름은 한국어(본문 서체), 수치만 모노.  한 라벨에 모노를
+#   걸면 모노 서체에 한글 글리프가 없어 문장 안에서 서체가 갈린다.
+#   배지·C안 요약이 **같은 함수**(`SetupPage.judgement_text`)에서 문장을 받는다.
+JUDGE_NAME_COORD = "좌표 매칭 · 허용 오차"
+JUDGE_VALUE_COORD_FMT = "{tol:.0f} µm"
+JUDGE_NAME_LEGACY_FMT = "구형 {sub} · 유사도 임계치"
+JUDGE_VALUE_LEGACY_FMT = "{th:.0f} %"
+# ★ 배치에 종속된 안내를 하지 않는다 — "아래 '매칭 설정' 카드" 라고 쓰면 C안처럼
+#   상세를 접어 두는 배치에서는 화면에 없는 것을 가리킨다.
+MODE_BADGE_TOOLTIP = (
+    "지금 이 설정으로 매칭합니다.  ‘매칭 설정’ 에서 바꿀 수 있습니다."
 )
 COORD_NO_DATA_MSG = (
     "좌표 정보가 없습니다.\n\n"
     "이미지 파일명 또는 폴더에 좌표 데이터(Camtek LIVE / INI / KLA .001)가\n"
     "없어 좌표 매칭을 진행할 수 없습니다.\n\n"
-    "구형 모드(유사도 엔진)로 다시 시작하세요."
+    "매칭 설정에서 ‘유사도 엔진(구형) 사용’ 을 켠 뒤 다시 시작하세요."
 )
 NEAR_MATCH_BADGE = "허용범위 초과"
 SCORE_DIST_FMT = "{dist:.0f} µm"
@@ -216,7 +243,10 @@ ENGINE_MODE_TOOLTIP = (
     "  Camtek INI / LIVE 파일명 / KLA .001 파일에서 자동 추출합니다.\n"
     "  좌표가 없는 이미지는 기본 모드로 폴백하여 처리합니다."
 )
-COORD_TOLERANCE_LABEL = "허용 오차 (µm)"
+COORD_TOLERANCE_LABEL = "허용 오차"
+# 허용 오차 ± 버튼 — Qt 기본 스핀 버튼(잘린 막대·10px 타깃) 대체.
+TOL_STEP_UP = "허용 오차 50 µm 늘리기"
+TOL_STEP_DOWN = "허용 오차 50 µm 줄이기"
 COORD_TOLERANCE_TOOLTIP = (
     "좌표 매칭 모드에서 두 defect 좌표의 최대 허용 거리 (µm).\n"
     "이 값 이하면 동일 defect 으로 간주합니다.\n"
@@ -261,15 +291,9 @@ SIZE_TIER_NOTICE_FMT = (
 MEMORY_USAGE_FMT = "메모리 사용량: {mb} MB"
 MEMORY_PRESSURE_TOAST = "메모리 사용량이 높아 캐시를 정리했습니다"
 
-# ── 상태 바: CPU/GPU 사용량 ──────────────────────────────────────────────
-# CPU 는 실제 사용률(%), GPU 는 가동/대기(추론 중 여부) — Intel GPU 의 실제
-# 점유율(%)은 이식성 있게 얻을 수 없어 '가동/대기'로 표시한다.
-USAGE_CPU_FMT = "CPU {pct}%"
-USAGE_GPU_FMT = "GPU {state}"
-USAGE_STATE_BUSY = "가동"
-USAGE_STATE_IDLE = "대기"
-USAGE_STATE_NONE = "없음"
-USAGE_SEP = "   "
+# ※ 상태 바의 CPU/GPU 사용량 문구(USAGE_*)와 'Intel GPU 가속' 디바이스 표시는 제거했다.
+#   상태바는 사용자가 행동을 바꿀 수 있는 정보만 담는다 — 메모리 압박은 '슬롯을 나눠
+#   돌리라'는 행동으로 이어지지만, GPU 가동 여부로 사용자가 할 수 있는 일은 없었다.
 
 # ── Stage 2 더 크게 보기 ───────────────────────────────────────────────────
 BTN_EXPAND_VIEW = "더 크게 보기"
@@ -283,14 +307,15 @@ EXPAND_POSITION_FMT = "{cur} / {total}"
 # ── 셋업 화면 사용 설명 ────────────────────────────────────────────────────
 SETUP_HOW_TO_USE_TITLE = "사용 방법"
 SETUP_HOW_TO_USE_BODY = (
-    "① 자동화 수준을 선택합니다  ·  사진 직접 선택 / 모두 자동\n"
-    "② 기준·검증 장비의 폴더와 호기 번호를 입력합니다\n"
-    "③ 허용 오차(µm)를 설정합니다  (기본 500 µm)\n"
-    "      ※ ‘구형 모드’ 섹션을 펼치면 유사도 엔진·임계치 기반으로 전환됩니다\n"
+    "① 기준·검증 장비의 폴더와 호기 번호를 입력합니다\n"
+    "② 자동화 수준을 선택합니다  ·  사진 직접 선택 / 모두 자동\n"
+    "③ 허용 오차를 설정합니다  (기본 500 µm)\n"
+    "      ※ 좌표 데이터가 없을 때만 ‘유사도 엔진(구형) 사용’ 스위치를 켭니다\n"
+    "          (켜면 판정 기준이 허용 오차에서 유사도 임계치로 바뀝니다)\n"
     "④ [검증 시작] 을 누르면 다음 순서로 진행됩니다\n"
     "      ㄱ. 후보 선별 — 사진 직접 선택 시 기준 사진을 한 장씩 [✓ 검증] / [✕ 제외]\n"
     "          (‘모두 자동’ 은 이 단계를 건너뜁니다)\n"
-    "      ㄴ. 좌표 매칭 — 허용 오차 내 자동 매치 후 ‘매치 검토’에서 확인·교체\n"
+    "      ㄴ. 매칭 — 상단 ‘판정 기준’ 배지의 기준으로 자동 매치 후 ‘매치 검토’에서 확인·교체\n"
     "      ㄷ. 결과 저장 — 양식 폴더의 양식.xlsx 를 복사하여 자동 저장\n"
     "매치 검토에서 ‘크게 보기’로 기준·후보를 나란히 비교(←/→ 이동)\n"
     "단축키 — 후보 선별: ← / 1 = 검증,  → / 2 = 제외,  Z = 되돌리기\n"
@@ -364,11 +389,11 @@ LOAD_AUTO_MATCH_FMT = "자동 매치 진행 중… {done} / {total}"
 # ── 자동화 수준 (#3 올인원 모드) ───────────────────────────────────────────
 AUTOMATION_TITLE = "자동화 수준"
 AUTOMATION_USER_SELECT = "사진 직접 선택 + 매치는 자동"
-AUTOMATION_AUTO_ALL = "모든 사진 자동 — Stage 1 건너뛰기"
-AUTOMATION_HINT = (
-    "’모든 사진 자동’은 Stage 1을 건너뛰고 모든 기준 사진을 자동으로 매치합니다.\n"
-    "자동 매치 종료 후 결과 화면에서 [매칭 결과 검토]로 잘못된 매치를 제거할 수 있습니다."
-)
+AUTOMATION_AUTO_ALL = "모든 사진 자동 — 후보 선별 건너뛰기"
+# 세그먼트에 들어가는 짧은 라벨.  긴 설명은 위 두 문구가 툴팁으로 맡는다 —
+# 34px 세그먼트에 문장을 넣으면 '작게'라는 의도가 폭으로 되돌아온다.
+AUTOMATION_USER_SELECT_SHORT = "사진 직접 선택"
+AUTOMATION_AUTO_ALL_SHORT = "모든 사진 자동"
 AUTO_REVIEW_HINT_FMT = (
     "자동 매치 완료 — 총 {n_match} 쌍이 자동으로 매치되었고,\n"
     "{n_miss} 장은 임계치 미달로 ‘매칭 없음’ 처리되었습니다.\n"
@@ -385,6 +410,51 @@ BTN_MARK_NO_MATCH = "매치 없음 ✕"
 BTN_RESTORE_MATCH = "되돌리기 ↩"
 BTN_FINISH_REVIEW = "검토 완료 ▶"
 RUNNERUP_TOOLTIP = "클릭하면 이 사진으로 매치를 교체합니다."
+# A2 밀집 리스트 — 상단 집계 바 / 판정 칩 / 컴팩트 토글 (#A2)
+TALLY_OK_FMT = "일치 {n}"
+TALLY_OVER_FMT = "허용 초과 {n}"
+TALLY_NO_MATCH_FMT = "매치 없음 {n}"
+TALLY_COORD_FAILED_FMT = "매치 실패 {n}"
+BTN_FINISH_REVIEW_KEPT_FMT = "검토 완료 · 유지 {n}"   # ⏎ 제거 — Enter 단축키가 없어졌다
+CHIP_OK = "일치"
+CHIP_OVER = "허용 초과"
+CHIP_NO_MATCH = "매치 없음"
+BTN_NO_MATCH_COMPACT = "×"
+BTN_RESTORE_COMPACT = "↩"
+REVIEW_EMPTY_HINT = (
+    "자동 매치된 항목이 없습니다.  [완료] 를 누르면 결과 화면으로 이동합니다."
+)
+# 검토 리스트 컬럼 헤더 — ★ 이미지 세 종류를 **각자 자기 사진 위**에 놓기 위해
+# 하나였던 'COL_IMAGES = 기준 · 검증 · 후보' 를 셋으로 쪼갰다(한 라벨이면 어느 것도
+# 자기 사진 위에 없다).  폭 정렬은 match_review_page._sync_header_widths 가 맞춘다.
+COL_SLOT = "슬롯"
+COL_REF = "기준"
+COL_VAL = "검증"
+COL_CANDIDATES = "후보"
+COL_DISTANCE = "거리(µm)"
+COL_VERDICT = "판정"
+COMPARE_REF_CAPTION_FMT = "기준 — {name}"
+# ※ 검토 화면의 키보드 상호작용(↑↓ 줄 이동 · R 매치 없음 · Enter 검토 완료)과 키캡 힌트
+#   줄, '확인 필요만' 필터는 제거했다.  '매치 없음'은 행마다 있는 ✕ 토글, '검토 완료'는
+#   상단 버튼이 한다.  Enter 가 검토 전체를 끝내던 것은 특히 위험했다.
+# 카드 제목 옆 '?' 도움말 토글 (하드코딩 금지 — 사용자 노출 문자열은 여기 모은다)
+HELP_TOGGLE_TOOLTIP = "설명 보기/숨기기"
+
+# ※ 배치안 스위처(LAYOUT_*)와 C안 요약(SETUP_DETAIL_*·SUMMARY_*) 문구는 제거했다 —
+#   사용자가 '순서형' 배치를 확정하면서 비교용 스위처와 미선택 2안이 함께 사라졌다.
+#   지금 판정 기준을 말하는 것은 상단 모드 배지(judgement_text) 하나다.
+
+# 보기 옵션 (셋업 상단)
+# ★ 어두운 모드가 하나로 정리돼 **on/off 스위치**가 됐다.  한때 '벨럼 · 청사진 · 흑연'
+#   3택이었고, 모드가 둘이라 boolean 으로 못 쓴다는 이유로 3칩 선택기를 뒀다.  청사진을
+#   지우면서 그 이유가 사라졌으므로 '모션 줄이기' 와 같은 어휘(스위치)로 통일한다.
+DARK_MODE_LABEL = "다크 모드"
+DARK_MODE_TOOLTIP = (
+    "불 끈 제도지에 흑연 선 — 무채·눈부심 최소(야간·어두운 작업장).\n"
+    "끄면 밝은 벨럼 시트로 돌아갑니다.\n"
+    "검증을 시작하기 전에만 바꿀 수 있습니다(진행 중 상태 보호)."
+)
+# ※ '모션 줄이기' 토글은 제거했다 — 모션은 항상 켜진다(사용자 결정).
 LOAD_SCAN = "폴더 스캔 중…"
 LOAD_SCAN_FMT = "폴더 스캔 중… {done} / {total} 슬롯"
 LOAD_EXPORT = "엑셀로 저장 중…"
@@ -423,14 +493,41 @@ SLOT_SELECT_BTN_TOOLTIP = (
     "선택하지 않으면 모든 공통 슬롯을 진행합니다."
 )
 SLOT_SELECT_TITLE = "진행할 슬롯 선택"
+# 다이얼로그 상단 — 지금 무엇이 진행되는지 **큰 글자로** 말한다(이전엔 '선택 3 / 24' 뿐).
+SLOT_SELECT_COUNT_HEAD_FMT = "{total}개 중 {n}개 진행"
+SLOT_SELECT_COUNT_HEAD_ALL = "모든 슬롯 진행 ({total}개)"
+SLOT_SELECT_SEARCH_PLACEHOLDER = "슬롯 이름으로 찾기"
+SLOT_SELECT_FILTER_HIT_FMT = "‘{q}’ 검색 결과 {n}개"
+SLOT_SELECT_FILTER_NONE_FMT = "‘{q}’ 와 맞는 슬롯이 없습니다"
+SLOT_SELECT_PICK_VISIBLE = "검색 결과 선택"
+# 0개로 확인하면 호출부가 '전체 진행'으로 정규화한다 — 의도와 정반대라 막고 이유를 말한다.
+SLOT_SELECT_NEED_ONE = "최소 한 개는 선택해야 합니다."
+SLOT_SELECT_KEY_HINT = "↑↓←→ 이동 · Space 선택 · Ctrl+A 전체 · Enter 확인"
 SLOT_SELECT_HINT = (
-    "이번 검증에서 진행할 슬롯 카드를 눌러 선택하세요.\n"
-    "선택하지 않은 슬롯은 스캔·매칭에서 제외됩니다."
+    "이번 검증에서 진행할 슬롯을 눌러 고르세요. 이름을 알면 위에서 바로 찾을 수 있습니다.\n"
+    "고르지 않은 슬롯은 스캔·매칭에서 제외됩니다."
 )
 SLOT_SELECT_ALL = "전체 선택"
 SLOT_SELECT_NONE = "전체 해제"
 SLOT_SELECT_ALL_HINT = "모든 슬롯 진행 (기본)"
 SLOT_SELECT_COUNT_FMT = "선택한 슬롯: {n} / {total} 개만 진행"
+# 진행 범위 타일 — 상태를 옆 라벨이 아니라 타일 자신이 말한다.
+# ── 실행 옵션 카드 — '자동화 수준' + '진행 범위' 를 한 카드에 담는다.
+RUN_OPTIONS_TITLE = "실행 옵션"
+RUN_OPTIONS_HINT = (
+    "· 자동화 수준 — ‘모든 사진 자동’은 후보 선별(Stage 1)을 건너뛰고 모든 기준 사진을"
+    " 자동으로 매치합니다. 종료 후 결과 화면에서 [매칭 결과 검토]로 잘못된 매치를"
+    " 제거할 수 있습니다.\n"
+    "· 진행 범위 — 기본은 기준 폴더의 모든 슬롯입니다. ‘일부 슬롯만’ 을 고르면 이번"
+    " 검증에서 진행할 슬롯을 직접 선택합니다(급한 슬롯만 먼저 돌릴 때)."
+)
+SCOPE_TITLE = "진행 범위"
+SCOPE_ALL = "모든 슬롯"
+SCOPE_SUBSET = "일부 슬롯만…"
+SCOPE_SUBSET_COUNT_FMT = "일부 슬롯 ({n}/{total})"
+# 입력 유효성 — 왜 [검증 시작] 을 누를 수 없는지 눈에 보이게.
+SETUP_INVALID_FOLDER = "폴더를 찾을 수 없습니다."
+START_BLOCKED_HINT = "기준·검증 폴더를 먼저 지정하세요."
 # 다이얼로그 상단의 짧은 선택 수 표시.
 SLOT_SELECT_DIALOG_COUNT_FMT = "선택 {n} / {total}"
 SLOT_SELECT_NEED_REF = "먼저 기준 폴더를 선택하세요."
@@ -521,6 +618,10 @@ MATCH_REVIEW_DELETED_SECTION = "검토에서 삭제한 사진"
 # 썸네일 우클릭 컨텍스트 메뉴 — 원본 크게 보기 (#13).
 CTX_VIEW_LARGER = "크게보기"
 # 매치 검토 각 행 slot 라벨 아래 ‘크게 보기’ 버튼 — 좌우 비교 뷰어를 연다.
+# ★ 확대 글리프(⤢/⧉ 등)를 **붙이지 않는다.**  이 글자들은 폰트 폴백이 플랫폼마다 달라
+#   컬러 이모지로 렌더되는 경우가 있다(실측: 이 리눅스 캡처 박스에서 주황·파랑 화살표로
+#   나왔다) — 무채색 도면 팔레트를 깨고, 대비 측정까지 오염시킨다.  버튼임은 테두리와
+#   라운드가 말한다(role="rowAction").
 BTN_VIEW_LARGER = "크게 보기"
 # 좌우 비교 뷰어에서 ‘이 후보로 매치’ 액션 버튼 (#4).
 BTN_MATCH_THIS = "이 후보로 매치"
@@ -620,3 +721,12 @@ DEV_LABEL_SELECTED_FMT = "선택 {n}개"
 DEV_LABEL_UNREVIEWED = "미검토"
 DEV_LABEL_PATH_LABEL = "정답 라벨 파일"
 DEV_LABEL_DISCARD_CONFIRM = "저장하지 않은 변경이 있습니다. 닫을까요?"
+
+# ── 앱 내 메시지 시트 버튼 (widgets/sheet_host.py) ─────────────────────────
+# 별도 OS 창(QMessageBox)을 대체하므로 표준 버튼 라벨도 여기서 관리한다.
+# ※ 확인/취소는 이미 있는 공통 버튼을 그대로 쓴다(같은 말을 두 번 정의하지 않는다).
+MSG_BTN_OK = BTN_OK
+MSG_BTN_CANCEL = BTN_CANCEL
+MSG_BTN_YES = "예"
+MSG_BTN_NO = "아니오"
+MSG_BTN_CLOSE = "닫기"

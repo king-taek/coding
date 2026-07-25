@@ -46,10 +46,13 @@ class CollapsibleSection(QWidget):
         self._toggle.setText(self._close_label if self._expanded else self._open_label)
         self._toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         self._toggle.setAutoRaise(True)
-        self._toggle.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        # ★ 폭을 자기 글자만큼만 — 이전엔 1448px 로 늘어난 중앙 정렬 헤더라 클릭영역이
+        #   보이는 면적의 17배였고 좌측 정렬 축을 깨뜨렸다.
+        self._toggle.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self._toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._toggle.setProperty("role", "disclosure")   # QSS 포커스 링·타깃 하한
         self._toggle.clicked.connect(self._on_clicked)
-        root.addWidget(self._toggle)
+        root.addWidget(self._toggle, alignment=Qt.AlignmentFlag.AlignLeft)
 
         # 본문 컨테이너 ------------------------------------------------------
         self._content = QFrame(self)
@@ -62,7 +65,15 @@ class CollapsibleSection(QWidget):
 
         self._anim = QPropertyAnimation(self._content, b"maximumHeight", self)
         self._anim.setDuration(_ANIM_DURATION_MS)
-        self._anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self._anim.setEasingCurve(QEasingCurve.Type.OutQuart)
+        # ★ 애니메이션이 끝나면 상한을 **풀어야** 한다.  안 풀면 펼친 시점의 sizeHint 에
+        #   높이가 고정돼, 뒤에 커지는 내용(중첩 접이식·'?' 도움말 등)이 조용히 잘린다 —
+        #   눌러도 아무 일이 없는 것처럼 보였다(C안 상세에서 실제로 발생).
+        self._anim.finished.connect(self._on_anim_finished)
+
+    def _on_anim_finished(self) -> None:
+        if self._expanded:
+            self._content.setMaximumHeight(16777215)
 
     # ------------------------------------------------------------------
     def add_content_widget(self, widget: QWidget) -> None:
@@ -84,8 +95,19 @@ class CollapsibleSection(QWidget):
         self._toggle.setText(self._close_label if self._expanded else self._open_label)
 
         target = self._content.sizeHint().height() if self._expanded else 0
+        # ★ 앱 유일하게 motion 게이트를 무시하던 위젯이었다 — '모션 줄이기'·헤드리스에서도
+        #   혼자 애니메이션을 돌렸다.  전역 규칙을 따른다.
+        from .. import motion
+        if animate and not motion.enabled():
+            animate = False
         if animate:
-            current = self._content.maximumHeight()
+            self._anim.setDuration(motion.dur(_ANIM_DURATION_MS))
+            # ★ 시작값을 **실제 높이로 클램프**한다.  펼침이 끝나면 상한을 16777215 로
+            #   풀어 두는데(나중에 커지는 내용이 잘리지 않게), 그 값을 그대로 접기
+            #   시작값으로 쓰면 OutQuart 곡선의 앞 90%가 화면 밖 구간에서 소진돼
+            #   "135ms 무변화 + 8.5ms 스냅" 이 된다(실측).  두 수정이 서로를 깼다.
+            current = min(self._content.maximumHeight(),
+                          self._content.sizeHint().height())
             self._anim.stop()
             self._anim.setStartValue(int(current))
             self._anim.setEndValue(int(target))

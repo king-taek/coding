@@ -16,11 +16,11 @@ from PyQt6.QtWidgets import (QDialog, QGridLayout, QHBoxLayout, QLabel,
                               QScrollArea, QVBoxLayout, QWidget)
 
 from ... import config, i18n
+from .. import theme
 from ...models.result import MatchResult
 from ...utils import image_io
 from .neon_button import NeonButton
 from .no_wheel_slider import NoWheelSlider
-from .window_controls import add_fullscreen_shortcut, enable_window_controls
 
 
 _THUMB = config.Sizing.REVIEW_THUMB_PX  # 썸네일 기본 크기 (= 240), 슬라이더로 조절(#2).
@@ -40,14 +40,19 @@ def _fmt_score(score: float, coord_mode: bool, tolerance: float) -> str:
 class _Row(QWidget):
     delete_requested = pyqtSignal(object)        # MatchResult
 
-    _STYLE_NORMAL = (
-        "QWidget#matchRow { background: #0E1424; border: 1px solid #1F2A3F; "
-        "border-radius: 8px; }"
-    )
-    _STYLE_PENDING = (
-        "QWidget#matchRow { background: #2A0E16; border: 3px solid #FF2D55; "
-        "border-radius: 8px; }"
-    )
+    # ★ 색을 **클래스 본문에서 굽지 않는다.**  클래스 본문은 import 시점에 한 번만
+    #   평가되므로, 그때의 팔레트(항상 라이트)가 영구히 박힌다 — 다크 모드로 바꿔도
+    #   행 카드만 흰색으로 남았다(캡처로 발견).  페이지 재생성으로도 못 고친다:
+    #   클래스 속성은 다시 평가되지 않기 때문이다.  인스턴스마다 읽는다.
+    @staticmethod
+    def _style_normal() -> str:
+        return (f"QWidget#matchRow {{ background: {theme.PANEL}; "
+                f"border: 1px solid {theme.LINE}; border-radius: 8px; }}")
+
+    @staticmethod
+    def _style_pending() -> str:
+        return (f"QWidget#matchRow {{ background: {theme.DANGER_TINT}; "
+                f"border: 2px solid {theme.DANGER}; border-radius: 8px; }}")
 
     def __init__(self, m: MatchResult, parent=None, *,
                  size: int = _THUMB,
@@ -63,7 +68,7 @@ class _Row(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setMinimumHeight(self._size + 40)
         # objectName 선택자로 한정 — 자식 위젯에 빨간 테두리가 번지지 않게.
-        self.setStyleSheet(self._STYLE_NORMAL)
+        self.setStyleSheet(self._style_normal())
         lay = QHBoxLayout(self)
         lay.setContentsMargins(8, 8, 8, 8)
         lay.setSpacing(10)
@@ -73,7 +78,7 @@ class _Row(QWidget):
             f"{m.slot}\n{_fmt_score(m.score, coord_mode, tolerance)}", self,
         )
         meta.setStyleSheet(
-            "color: #39FF14; font-weight: 700; border: none; padding: 4px;"
+            f"color: {theme.INK}; font-weight: 700; border: none; padding: 4px;"
         )
         meta.setFixedWidth(120)
         meta.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
@@ -82,7 +87,7 @@ class _Row(QWidget):
         lay.addWidget(self._make_thumb(m.ref_path, self._size))
         arrow = QLabel("→", self)
         arrow.setStyleSheet(
-            "color: #7FB3D5; font-size: 24px; border: none;"
+            f"color: {theme.MUTE}; font-size: 24px; border: none;"
         )
         arrow.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(arrow)
@@ -110,7 +115,8 @@ class _Row(QWidget):
     def set_pending_delete(self, pending: bool) -> None:
         """삭제 예정 표시 — 빨간 테두리 + 버튼 토글 (확인 전까지 실제 삭제 안 함)."""
         self._pending = bool(pending)
-        self.setStyleSheet(self._STYLE_PENDING if pending else self._STYLE_NORMAL)
+        self.setStyleSheet(self._style_pending() if pending
+                           else self._style_normal())
         if pending:
             self.btn.setText(i18n.KO.REVIEW_BTN_UNDELETE)
             self.btn.setRole("ghost")
@@ -134,10 +140,10 @@ class _Row(QWidget):
             pix = QPixmap(str(mid))
         except Exception:
             pix = QPixmap(size, size)
-            pix.fill(QColor(20, 28, 40))
+            pix.fill(QColor(theme.PANEL))
         if pix.isNull():
             pix = QPixmap(size, size)
-            pix.fill(QColor(20, 28, 40))
+            pix.fill(QColor(theme.PANEL))
         # source 픽스맵은 최대 슬라이더 크기로 한 번만 다운스케일해 보관 →
         # 슬라이더 리사이즈 시 재디코드 없이 또렷하게 재스케일, 메모리도 상한.
         source = pix.scaled(
@@ -155,7 +161,7 @@ class _Row(QWidget):
 
         cap = QLabel(Path(p).name, host)
         cap.setProperty("role", "muted")
-        cap.setStyleSheet("color: #7FB3D5; font-size: 11px; border: none;")
+        cap.setStyleSheet(f"color: {theme.MUTE}; font-size: 11px; border: none;")
         cap.setAlignment(Qt.AlignmentFlag.AlignCenter)
         cap.setWordWrap(True)
         v.addWidget(cap)
@@ -181,9 +187,9 @@ class MatchesReviewDialog(QDialog):
         self._matches: list[MatchResult] = sorted(
             matches, key=lambda m: (m.slot, m.ref_path.name.lower()),
         )
-        # 창에 최소화/최대화 버튼 + F11 전체화면 토글 (#9). 첫 show 이전에 설정.
-        enable_window_controls(self)
-        add_fullscreen_shortcut(self)
+        # ★ 창 제어(최소화/최대화/F11) 헬퍼를 부르지 않는다 — 이 다이얼로그는
+        #   별도 OS 창이 아니라 **메인 창 안의 시트**로 뜬다(widgets/sheet_host.py).
+        #   최대화·전체화면은 메인 창이 담당한다.
         self._build()
 
     @property

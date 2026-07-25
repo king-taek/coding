@@ -134,8 +134,7 @@ def _make_review_dialog():
 
 def test_confirm_removes_entry_and_advances(qapp, monkeypatch):
     import aoi_verification.app.ui.widgets.unmatched_review_dialog as M
-    monkeypatch.setattr(M.QMessageBox, "information",
-                        staticmethod(lambda *a, **k: None))
+    monkeypatch.setattr(M.sheets, "info", lambda *a, **k: None)
     dlg, val_pool = _make_review_dialog()
     dlg.resize(1000, 700)
     dlg.show()

@@ -17,6 +17,9 @@ pytest.importorskip("PyQt6.QtWidgets")
 
 from PyQt6.QtWidgets import QApplication, QMessageBox          # noqa: E402
 
+# 팝업은 별도 OS 창이 아니라 앱 내 시트로 뜬다 — 가로챌 지점이 여기다.
+import aoi_verification.app.ui.pages.select_page as _sp_mod   # noqa: E402
+
 from aoi_verification.app.models.slot import ImageItem          # noqa: E402
 
 
@@ -39,8 +42,8 @@ def test_end_selection_moves_queue_to_excluded(qapp, isolated_cache, monkeypatch
     # 첫 사진이 _current 로 빠지므로 큐엔 4 개만 남는 게 정상.
     initial_remaining = len(sp._state.queue)
     # 모달은 자동 Yes.
-    monkeypatch.setattr(QMessageBox, "question",
-                         lambda *a, **kw: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(_sp_mod.sheets, "ask",
+                        lambda *a, **kw: QMessageBox.StandardButton.Yes)
 
     finished_emits = []
     sp.finished.connect(lambda: finished_emits.append(True))
@@ -67,9 +70,9 @@ def test_end_selection_no_op_when_queue_empty(qapp, isolated_cache, monkeypatch)
 
     # 모달이 뜨면 안 됨 (큐 비었음 가드).
     called = []
-    monkeypatch.setattr(QMessageBox, "question",
-                         lambda *a, **kw: called.append(True) or
-                                          QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(_sp_mod.sheets, "ask",
+                        lambda *a, **kw: called.append(True) or
+                        QMessageBox.StandardButton.Yes)
 
     sp._end_selection_now()
     assert called == [], "큐 비었으면 확인 모달도 띄우지 않아야 함"
@@ -84,8 +87,8 @@ def test_end_selection_cancel_does_nothing(qapp, isolated_cache, monkeypatch):
     pre_queue_len = len(sp._state.queue)
     pre_excluded = sum(len(v) for v in sp._state.excluded.values())
 
-    monkeypatch.setattr(QMessageBox, "question",
-                         lambda *a, **kw: QMessageBox.StandardButton.No)
+    monkeypatch.setattr(_sp_mod.sheets, "ask",
+                        lambda *a, **kw: QMessageBox.StandardButton.No)
     sp._end_selection_now()
 
     assert len(sp._state.queue) == pre_queue_len, "취소 시 큐 변경 없어야"

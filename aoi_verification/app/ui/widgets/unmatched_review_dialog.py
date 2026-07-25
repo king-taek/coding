@@ -24,12 +24,13 @@ from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout,
                               QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
 
 from ... import config, i18n
+from .. import theme
 from ...models.result import MatchResult, MissEntry
 from ...models.slot import ImageItem
 from ...utils import image_io
 from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
-from .window_controls import add_fullscreen_shortcut, enable_window_controls
+from . import sheet_host as sheets
 
 
 _LIST_THUMB_PX = 56     # 좌측 ‘실패 목록’ 항목 썸네일 한 변(px).
@@ -60,7 +61,7 @@ def _load_full_pixmap_scaled(path: Path, size: int) -> QPixmap:
     스코프 안에서만 살아 있다가 GC 되므로 메모리는 축소된 사본만 유지.
     """
     fallback = QPixmap(size, size)
-    fallback.fill(QColor(20, 28, 40))
+    fallback.fill(QColor(theme.PANEL))
     try:
         full = QPixmap(str(path))
         if full.isNull():
@@ -78,7 +79,7 @@ class _CandidateTile(QFrame):
     """후보 사진 타일.
 
     - 클릭 = 선택(파란 테두리)만, 즉시 매칭하지 않는다 (#1a).
-    - 더블클릭 / 우클릭 = 좌우(기준·후보) 비교 크게보기 (#1e).
+    - 우클릭 '크게 보기' = 좌우(기준·후보) 비교 크게보기 (#1e).
     - 이미지는 사전 생성된 mid 캐시를 소스로 빠르게 로드하고(#1c), 슬라이더로
       재디코드 없이 인플레이스 재스케일한다.
     """
@@ -88,8 +89,13 @@ class _CandidateTile(QFrame):
 
     # objectName 스코프 셀렉터 — 최외곽 프레임에만 테두리. (QLabel 이 QFrame
     # 서브클래스라 ``QFrame {…}`` 는 내부 이미지/점수/캡션 라벨까지 번진다.)
-    _SEL_STYLE = ("#candTile { border: 3px solid #39FF14; border-radius: 8px;"
-                  " background: rgba(57, 255, 20, 0.06); }")
+    # ★ 색을 **클래스 본문에서 굽지 않는다** — 클래스 본문은 import 시점에 한 번만
+    #   평가돼 그때의 팔레트(항상 라이트)가 영구히 박힌다(다크 모드가 안 먹는다).
+    #   배경 틴트도 옛 네온 초록 리터럴 대신 팔레트의 강조 틴트를 쓴다.
+    @staticmethod
+    def _sel_style() -> str:
+        return (f"#candTile {{ border: 2px solid {theme.ACCENT}; border-radius: 8px; "
+                f"background: {theme.ACCENT_TINT}; }}")
 
     def __init__(self, item: ImageItem, score: float, parent=None,
                  *, size: int = _CAND_PX,
@@ -120,7 +126,7 @@ class _CandidateTile(QFrame):
         self._img_label.setFixedSize(self._size, self._size)
         self._img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         ph = QPixmap(self._size, self._size)
-        ph.fill(QColor(20, 28, 40))
+        ph.fill(QColor(theme.PANEL))
         self._img_label.setPixmap(ph)
         lay.addWidget(self._img_label, alignment=Qt.AlignmentFlag.AlignCenter)
 
@@ -128,7 +134,7 @@ class _CandidateTile(QFrame):
             _fmt_score(self.score, self._coord_mode, self._tolerance), self)
         self._score_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._score_label.setStyleSheet(
-            "color: #00FFA3; font-weight: 700; padding: 2px;"
+            f"color: {theme.PASS}; font-weight: 700; padding: 2px;"
         )
         lay.addWidget(self._score_label)
 
@@ -192,18 +198,15 @@ class _CandidateTile(QFrame):
         if selected == self._is_selected:
             return
         self._is_selected = bool(selected)
-        self.setStyleSheet(self._SEL_STYLE if self._is_selected else "")
+        self.setStyleSheet(self._sel_style() if self._is_selected else "")
 
     def mousePressEvent(self, event):  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton:
             self.selected.emit(self.item)
         super().mousePressEvent(event)
 
-    def mouseDoubleClickEvent(self, event):  # noqa: N802
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.view_requested.emit(self.item)
-        super().mouseDoubleClickEvent(event)
-
+    # ★ 더블클릭 확대는 제거했다 — 후보를 연달아 누르다 보면 두 번째 클릭이 더블클릭으로
+    #   붙어 원하지 않는 비교 창이 떴다(사용자 지적).  확대는 우클릭 메뉴로만 연다.
     def _on_context_menu(self, pos) -> None:
         menu = QMenu(self)
         act = menu.addAction(i18n.KO.CTX_VIEW_LARGER)
@@ -281,10 +284,9 @@ class UnmatchedReviewDialog(QDialog):
                         min(900, int(g.height() * 0.88)))
         else:
             self.resize(1400, 900)
-        # 다이얼로그 창에 최소화/최대화 버튼 + F11 전체화면 토글 (#9).
-        # 반드시 첫 show 이전에 플래그를 설정해야 창이 사라지지 않는다.
-        enable_window_controls(self)
-        add_fullscreen_shortcut(self)
+        # ★ 창 제어(최소화/최대화/F11) 헬퍼를 부르지 않는다 — 이 다이얼로그는
+        #   별도 OS 창이 아니라 **메인 창 안의 시트**로 뜬다(widgets/sheet_host.py).
+        #   최대화·전체화면은 메인 창이 담당한다.
         self._build()
         # 후보 풀이 작아(<300) 캐시 miss 를 그 자리에서 CPU 재계산할 때 띄우는 로딩 오버레이.
         # 다이얼로그 전체를 덮어 '계산 중'을 알린다(부모 위젯 size 추적).
@@ -301,7 +303,7 @@ class UnmatchedReviewDialog(QDialog):
         head = QHBoxLayout()
         self.progress_label = QLabel("", self)
         self.progress_label.setStyleSheet(
-            "color: #39FF14; font-weight: 700; font-size: 15px;"
+            f"color: {theme.INK}; font-weight: 700; font-size: 15px;"
         )
         head.addWidget(self.progress_label)
         head.addStretch(1)
@@ -323,7 +325,7 @@ class UnmatchedReviewDialog(QDialog):
 
         hint = QLabel(i18n.KO.UNMATCHED_REVIEW_HINT, self)
         hint.setWordWrap(True)
-        hint.setStyleSheet("color: #7FB3D5; padding: 4px;")
+        hint.setStyleSheet(f"color: {theme.MUTE}; padding: 4px;")
         root.addWidget(hint)
 
         # 본문: 좌(실패 목록) + 중(기준 사진) + 우(후보 그리드)
@@ -337,15 +339,15 @@ class UnmatchedReviewDialog(QDialog):
         lpl.setContentsMargins(12, 12, 12, 12)
         lpl.setSpacing(6)
         list_title = QLabel("실패 목록", list_panel)   # 인라인 한글 (#12).
-        list_title.setStyleSheet("color: #39FF14; font-weight: 700;")
+        list_title.setStyleSheet(f"color: {theme.INK}; font-weight: 700;")
         lpl.addWidget(list_title)
         self.fail_list = QListWidget(list_panel)
         self.fail_list.setIconSize(QSize(_LIST_THUMB_PX, _LIST_THUMB_PX))
         self.fail_list.setStyleSheet(
-            "QListWidget { background: #0A0F1C; border: 1px solid #1F2A3F; "
-            "border-radius: 6px; color: #C8D6E5; }"
+            f"QListWidget {{ background: {theme.PANEL}; border: 1px solid {theme.LINE}; "
+            f"border-radius: 6px; color: {theme.INK2}; }}"
             "QListWidget::item { padding: 4px 6px; }"
-            "QListWidget::item:selected { background: #123047; color: #00FFA3; }"
+            f"QListWidget::item:selected {{ background: {theme.ELEV}; color: {theme.ACCENT}; }}"
         )
         self.fail_list.itemClicked.connect(self._on_list_item_clicked)
         lpl.addWidget(self.fail_list, stretch=1)
@@ -363,28 +365,27 @@ class UnmatchedReviewDialog(QDialog):
         ll.setContentsMargins(12, 12, 12, 12)
         ll.setSpacing(6)
         ref_title = QLabel(i18n.KO.PANEL_MATCH_REF, left)
-        ref_title.setStyleSheet("color: #39FF14; font-weight: 700;")
+        ref_title.setStyleSheet(f"color: {theme.INK}; font-weight: 700;")
         ref_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         ll.addWidget(ref_title)
         self.ref_filename = QLabel("", left)
         self.ref_filename.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.ref_filename.setStyleSheet("color: #7FB3D5; padding: 2px;")
+        self.ref_filename.setStyleSheet(f"color: {theme.MUTE}; padding: 2px;")
         self.ref_filename.setWordWrap(True)
         ll.addWidget(self.ref_filename)
         self.ref_img = QLabel(left)
         self.ref_img.setFixedSize(self._ref_px, self._ref_px)
         self.ref_img.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.ref_img.setStyleSheet(
-            "background: #050810; border: 1px solid #1F2A3F; border-radius: 6px;"
+            f"background: {theme.BG}; border: 1px solid {theme.LINE}; border-radius: 6px;"
         )
-        # 우클릭/더블클릭 ‘크게보기’ — 후보와 동일한 좌우 비교 창을 열되,
-        # 기준 사진은 가장 유사도가 높은 후보부터(start=0) 보여준다 (#13).
+        # 우클릭 ‘크게보기’ — 후보와 동일한 좌우 비교 창을 열되, 기준 사진은 가장
+        # 유사도가 높은 후보부터(start=0) 보여준다 (#13).
+        # ★ 더블클릭 확대는 제거했다(사용자 지적).  여기에 걸려 있던 것은 인스턴스 메서드
+        #   몽키패치라 더 나빴다 — QLabel 의 이벤트 핸들러를 람다로 갈아끼우면 위젯이
+        #   자기 클래스 계약 밖에서 동작해 다음 사람이 찾을 수 없다.
         self.ref_img.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.ref_img.customContextMenuRequested.connect(self._on_ref_context_menu)
-        self.ref_img.mouseDoubleClickEvent = (  # type: ignore[assignment]
-            lambda ev: self._open_compare(0)
-            if ev.button() == Qt.MouseButton.LeftButton else None
-        )
         ll.addWidget(self.ref_img, alignment=Qt.AlignmentFlag.AlignCenter)
         ll.addStretch(1)
         self._left_panel = left
@@ -399,7 +400,7 @@ class UnmatchedReviewDialog(QDialog):
         rl.setSpacing(6)
         cand_head = QHBoxLayout()
         cand_title = QLabel(i18n.KO.PANEL_MATCH_CANDIDATES, right)
-        cand_title.setStyleSheet("color: #39FF14; font-weight: 700;")
+        cand_title.setStyleSheet(f"color: {theme.INK}; font-weight: 700;")
         cand_head.addWidget(cand_title)
         # '검증 장비 후보' 옆 '크게 보기' — 선택 후보(없으면 1순위)부터 좌우 비교.
         self.btn_zoom_cand = NeonButton(i18n.KO.BTN_VIEW_LARGER, role="ghost")
@@ -408,7 +409,7 @@ class UnmatchedReviewDialog(QDialog):
         cand_head.addStretch(1)
         rl.addLayout(cand_head)
         self.candidates_summary = QLabel("", right)
-        self.candidates_summary.setStyleSheet("color: #7FB3D5; padding: 2px;")
+        self.candidates_summary.setStyleSheet(f"color: {theme.MUTE}; padding: 2px;")
         rl.addWidget(self.candidates_summary)
         self._scroll = QScrollArea(right)
         self._scroll.setWidgetResizable(True)
@@ -495,7 +496,7 @@ class UnmatchedReviewDialog(QDialog):
             # 구분선/헤더 — 선택 불가, 클릭해도 점프하지 않음.
             sep = QListWidgetItem("── 매칭 취소 목록 ──")
             sep.setFlags(Qt.ItemFlag.NoItemFlags)
-            sep.setForeground(QColor("#FF8A65"))
+            sep.setForeground(QColor(theme.DANGER))
             self.fail_list.addItem(sep)
             for idx in cancelled:
                 _add_entry_row(idx)
@@ -531,9 +532,9 @@ class UnmatchedReviewDialog(QDialog):
                 continue                              # 구분선 행.
             item = self.fail_list.item(row)
             if idx in self._pending:
-                item.setForeground(QColor("#39FF14"))
+                item.setForeground(QColor(theme.PASS))
             else:
-                item.setForeground(QColor("#C8D6E5"))
+                item.setForeground(QColor(theme.INK2))
 
     def _on_list_item_clicked(self, item: QListWidgetItem) -> None:
         row = self.fail_list.row(item)
@@ -626,7 +627,7 @@ class UnmatchedReviewDialog(QDialog):
             self._cand_tiles = []
             self._last_cand_key = None
             empty = QLabel(i18n.KO.UNMATCHED_REVIEW_NO_CANDIDATES, self._host)
-            empty.setStyleSheet("color: #7FB3D5; padding: 20px;")
+            empty.setStyleSheet(f"color: {theme.MUTE}; padding: 20px;")
             self._grid.addWidget(empty, 0, 0)
             self.candidates_summary.setText("후보 0 장")
             return
@@ -734,11 +735,15 @@ class UnmatchedReviewDialog(QDialog):
                       self._score_cache.get_pair(
                           cur.slot, Path(cur.path), Path(v.path)) is not None)
             s = self._lookup_or_compute_score(cur, v, allow_compute=allow_compute)
+            # ★ 진행 보고를 **점수 성공 여부와 분리한다.**  이전에는 `s is None` 이면
+            #   `continue` 로 빠져 보고도 건너뛰었다 — 건너뛴 후보가 하나라도 있으면
+            #   done 이 need 에 **영원히 못 닿아** 바가 98% 에서 멈춘 채 창이 내려간다.
+            #   need 는 '캐시에 없던 개수'이므로, 계산을 시도했으면 결과와 무관하게 센다.
+            if on_computed is not None and not cached:
+                on_computed()
             if s is None:
                 continue                     # ≥300 & 캐시 miss → 재계산 없이 제외.
             out.append((float(s), v))
-            if on_computed is not None and not cached:
-                on_computed()                # 실제 재계산한 후보만 진행 보고.
         return out
 
     # ------------------------------------------------------------------
@@ -800,7 +805,7 @@ class UnmatchedReviewDialog(QDialog):
         self._open_compare(start)
 
     def _open_compare(self, start_index: int) -> None:
-        """좌(기준)·우(후보) 비교 크게보기 — 후보 더블클릭/우클릭 및 기준 우클릭
+        """좌(기준)·우(후보) 비교 크게보기 — 후보 우클릭 및 기준 우클릭
         공용.  ``self._cand_tiles`` 는 이미 유사도 내림차순이므로 start_index=0
         이면 가장 유사한 후보부터 보인다 (기준 우클릭용)."""
         from .side_by_side_viewer import SideBySideViewer
@@ -817,7 +822,7 @@ class UnmatchedReviewDialog(QDialog):
             parent=self,
         )
         viewer.action_requested.connect(self._on_tile_selected)
-        viewer.exec()
+        sheets.run(viewer, full_bleed=True)
 
     def _on_tile_view(self, val_item: ImageItem) -> None:
         """후보 크게보기 — 클릭한 후보 위치부터."""
@@ -870,7 +875,7 @@ class UnmatchedReviewDialog(QDialog):
         prev_row = self._idx_to_row.get(self._idx, 0)
         n = self._finalize_pending()
         if n:
-            QMessageBox.information(
+            sheets.info(
                 self, i18n.KO.APP_TITLE,
                 i18n.KO.UNMATCHED_REVIEW_DONE_FMT.format(n=n),
             )
@@ -901,7 +906,7 @@ class UnmatchedReviewDialog(QDialog):
         if self._close_prompted or not self._pending:
             return
         self._close_prompted = True
-        r = QMessageBox.question(
+        r = sheets.ask(
             self, i18n.KO.APP_TITLE, i18n.KO.UNMATCHED_CONFIRM_ON_CLOSE,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes,
@@ -945,6 +950,6 @@ class UnmatchedReviewDialog(QDialog):
     # ------------------------------------------------------------------
     @staticmethod
     def show_empty_message(parent) -> None:
-        QMessageBox.information(
+        sheets.info(
             parent, i18n.KO.APP_TITLE, i18n.KO.UNMATCHED_REVIEW_EMPTY,
         )

@@ -391,7 +391,9 @@ _UPDATE_SKIP_TOP = {
     ".git", ".github", "__pycache__", ".pytest_cache", ".idea", ".vscode",
     "dev",            # 개발 전용 모음(tests·bench결과·양식.xlsx) — 구동에 불필요.
     "pytest.ini",     #   ※ 양식.xlsx 는 포터블 빌드 시 app\ 루트로 따로 복사되므로
-}                     #     dev/ 를 통째로 건너뛰어도 구동에 지장 없음.
+                      #     dev/ 를 통째로 건너뛰어도 구동에 지장 없음.
+    ".claude",        # 이 저장소에서 Claude Code 로 작업할 때 쓰는 스킬 모음 —
+}                     #   앱 구동과 무관한데 198개 파일·4.8 MB 다(사용자에게 보낼 이유 없음).
 
 
 def download_and_apply(repo: str, branch: str, target_sha: str,

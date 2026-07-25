@@ -24,13 +24,14 @@ from PyQt6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QMainWindow,
                               QVBoxLayout, QWidget)
 
 from .. import config, i18n
+from . import theme
 from ..models import session as session_mod
 from ..models.result import FinalResult, MatchResult, MissEntry
 from ..models.slot import (ImageItem, ScanResult, Slot, drop_empty_unmatched,
                            scan)
 from ..utils import paths, wafer_id
 from ..utils import prefs as _prefs
-from ..utils.prefs import AutomationLevel
+from ..utils.prefs import AutomationLevel, EngineMode
 from ..workers.thumbnailer import (PRIORITY_ACTIVE_SLOT, PRIORITY_BACKGROUND,
                                      ThumbnailPool, ThumbnailWorker)
 from .pages.match_page import MatchPage
@@ -38,6 +39,9 @@ from .pages.result_page import ResultPage
 from .pages.select_page import SelectPage
 from .pages.setup_page import SetupInput, SetupPage
 from .widgets.loading_overlay import LoadingOverlay
+from .widgets import sheet_host as sheets
+from .widgets.sheet_host import SheetHost
+from .widgets.window_controls import add_fullscreen_shortcut
 
 
 # ---------------------------------------------------------------------------
@@ -77,102 +81,37 @@ class MainWindow(QMainWindow):
         self._stack = QStackedWidget(self)
         self.setCentralWidget(self._stack)
 
-        # 상태 바 + 메모리 표시 (psutil 가용 시) + 가속 디바이스 표시 (#5).
+        # 상태 바 — 개발자 크레딧 + 메모리 사용량(psutil 가용 시).
+        # ★ 'Intel GPU 가속' 디바이스 표시와 'CPU n% · GPU 가동' 사용량 표시는 제거했다.
+        #   상태바는 사용자가 **행동을 바꿀 수 있는** 정보만 담아야 한다: 가속 장치는
+        #   세션 중 바뀌지 않고, CPU/GPU 가동 여부로 사용자가 할 수 있는 일이 없다.
+        #   메모리는 다르다 — 압박 토스트가 '슬롯을 나눠 돌리라'는 행동을 유발한다.
+        #   진단이 필요할 때 쓰는 embedder.device_label()·accelerator_presence()·
+        #   unit_busy()·compile_diagnostics() 자체는 그대로 남아 있다(개발자 벤치마크용).
         self._status_bar = QStatusBar(self)
         self.setStatusBar(self._status_bar)
         # 개발자 크레딧 — 모든 화면 공통(상태바 좌측).
         self._credit_label = QLabel(i18n.KO.CREDIT, self._status_bar)
         self._credit_label.setStyleSheet(
-            "color: #7FB3D5; padding: 0 8px; font-weight: 600;"
+            f"color: {theme.MUTE}; padding: 0 8px; font-weight: 600;"
         )
         self._status_bar.addWidget(self._credit_label)
-        # 디바이스 표시 — 'GPU 가속 (...)' / 'CPU N 코어'.
-        self._device_label = QLabel("", self._status_bar)
-        self._device_label.setStyleSheet(
-            "color: #00FFA3; padding: 0 8px; font-weight: 600;"
-        )
-        try:
-            from ..learning import embedder as _emb
-            self._device_label.setText(_emb.device_label())
-        except Exception as exc:
-            self._device_label.setText("")
-            from ..utils import errors as _errors
-            _errors.log_silent("main_window: 디바이스 라벨 조회 실패", exc)
-        self._status_bar.addPermanentWidget(self._device_label)
-        # CPU/GPU/NPU 사용량 — CPU 실제 %, GPU/NPU 가동/대기.
-        self._usage_label = QLabel("", self._status_bar)
-        self._usage_label.setStyleSheet(
-            "color: #39FF14; padding: 0 8px; font-weight: 600;"
-        )
-        self._status_bar.addPermanentWidget(self._usage_label)
-        # 가속 장치(Intel GPU/NPU) 존재 여부 — 세션 중 불변이라 1회만 조회.
-        # torch 설치와 무관하게 OpenVINO 만으로 존재 여부를 본다(상태바 표시용).
-        self._accel_present = {"GPU": False}
-        # 세션 불변인 ‘감지’ 부분 툴팁 — 동적 컴파일 진단은 매 틱 덧붙인다.
-        self._accel_tip_base = ""
-        try:
-            from ..learning import embedder_openvino as _ovw
-            info = _ovw.accelerator_presence()
-            self._accel_present = {"GPU": bool(info.get("GPU"))}
-            # 자가 진단 — 마우스오버로 감지 디바이스/원인을 확인.
-            devs = info.get("devices") or []
-            reason = info.get("reason") or ""
-            self._accel_tip_base = (
-                "OpenVINO 감지: " + (", ".join(devs) if devs else "(없음)")
-            )
-            if reason:
-                self._accel_tip_base += f"\n사유: {reason}"
-        except Exception:
-            self._accel_tip_base = "가속 장치 조회 실패"
-        self._usage_label.setToolTip(self._accel_tip_base)
-        self._proc = None
         self._mem_label = QLabel("", self._status_bar)
         self._mem_label.setProperty("role", "muted")
         self._status_bar.addPermanentWidget(self._mem_label)
         self._mem_timer = QTimer(self)
         self._mem_timer.setInterval(2000)
         self._mem_timer.timeout.connect(self._update_memory_label)
-        self._mem_timer.timeout.connect(self._update_usage_label)
         self._mem_pressure_shown = False
-        try:
-            import psutil
-            self._proc = psutil.Process()
-            self._proc.cpu_percent(None)        # prime — 첫 호출은 0.0 반환
-        except Exception:
-            self._proc = None
-        # 타이머는 psutil 유무와 무관하게 구동 — 콜백이 각자 안전 가드한다
-        # (메모리/CPU 는 psutil 가용 시, GPU/NPU 가동표시는 항상).
+        # 색 모드 전환 중 재진입 차단 — 연타로 페이지 재생성이 겹치면 스냅샷·페이지가
+        # 어긋나고, 최악에는 잠금이 풀리지 않는다.
+        self._appearance_busy = False
+        # 타이머는 psutil 유무와 무관하게 구동 — 콜백이 안전 가드한다.
         self._mem_timer.start()
         self._update_memory_label()
-        self._update_usage_label()
 
-        # 페이지 ---------------------------------------------------------
-        self._setup_page = SetupPage()
-        self._select_page = SelectPage()
-        self._match_page = MatchPage()
-        self._result_page = ResultPage()
-        # 자동 매치 결과 검토 페이지 (auto_all / user_select 모드 공용).
-        from .pages.match_review_page import MatchReviewPage
-        self._match_review_page = MatchReviewPage()
-
-        for w in (self._setup_page, self._select_page,
-                  self._match_page, self._result_page,
-                  self._match_review_page):
-            self._stack.addWidget(w)
-
-        # 시그널 ---------------------------------------------------------
-        self._setup_page.start_requested.connect(self._on_start)
-        self._setup_page.update_check_requested.connect(self._manual_update_check)
-        self._select_page.finished.connect(self._on_select_finished)
-        self._select_page.state_changed.connect(self._schedule_autosave)
-        self._match_page.match_confirmed.connect(self._on_match_confirmed)
-        self._match_page.match_undone.connect(self._on_match_undone)
-        self._match_page.skipped_changed.connect(self._schedule_autosave)
-        self._match_page.finished.connect(self._on_match_finished)
-        self._match_page.cancelled.connect(self._on_match_cancelled)
-        self._result_page.new_session_requested.connect(self._new_session)
-        # 매치 검토 → 결과 페이지
-        self._match_review_page.finished.connect(self._on_match_review_done)
+        # 페이지 — 생성+스택추가+시그널 배선을 _build_pages 단일 출처로 (재구축용).
+        self._build_pages()
 
         # 자동 저장 타이머 -----------------------------------------------
         self._autosave_timer = QTimer(self)
@@ -185,6 +124,18 @@ class MainWindow(QMainWindow):
         # OpenVINO 자동 설치 안내 — 사용자 요청으로 rollback (시작 시 팝업
         # 띄우지 않음).  설치 도우미 모듈은 남겨두어 향후 수동 호출 가능.
         self._openvino_worker: Optional[QThread] = None
+
+        # ★ F11 전체화면 — 뷰어·검토 팝업이 **창 안 시트**가 된 뒤로 '사진을 화면 가득
+        #   보는' 유일한 경로다(옛 뷰어별 F11 의 대체).  되돌리면 들어올 때의 상태
+        #   (최대화/보통)로 돌아간다.
+        self._fullscreen_shortcut = add_fullscreen_shortcut(self)
+
+        # 앱 내 창(시트) 호스트 — 모든 팝업이 이 창 안에서 뜬다(별도 OS 창 금지).
+        # ★ 이름 `_sheets` 는 `sheet_host.host_for` 가 찾는 **약속된 속성**이다.
+        #   못 찾으면 네이티브 QMessageBox 로 폴백하므로 앱이 멈추지는 않지만, 팝업이
+        #   다시 창으로 뜬다.  로딩 오버레이보다 **먼저** 만들어 z-order 상 로딩이 위에
+        #   오게 한다(작업 진행 표시가 시트에 가리면 안 된다).
+        self._sheets = SheetHost(self)
 
         # 상태 -----------------------------------------------------------
         self._loading = LoadingOverlay(self)
@@ -311,14 +262,14 @@ class MainWindow(QMainWindow):
                          daemon=True).start()
 
     def _on_update_none(self, msg: str) -> None:
-        QMessageBox.information(self, i18n.KO.UPDATE_AVAILABLE_TITLE, msg)
+        sheets.info(self, i18n.KO.UPDATE_AVAILABLE_TITLE, msg)
 
     def _on_update_found(self, info: dict) -> None:
         """'업데이트 있음' 안내 → 동의하면 백그라운드로 다운로드/교체."""
         # 사용자에겐 개발자용 커밋 메시지/SSL 멘트 대신 간단한 안내만.
         body = (i18n.KO.UPDATE_UNKNOWN_CURRENT if (info or {}).get("current_unknown")
                 else i18n.KO.UPDATE_AVAILABLE_BODY)
-        ans = QMessageBox.question(
+        ans = sheets.ask(
             self, i18n.KO.UPDATE_AVAILABLE_TITLE, body,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes,
@@ -330,7 +281,7 @@ class MainWindow(QMainWindow):
         try:
             from ..utils import updater
             if updater.is_git_checkout():
-                QMessageBox.information(
+                sheets.info(
                     self, i18n.KO.UPDATE_AVAILABLE_TITLE, i18n.KO.UPDATE_GIT_HINT)
                 self._run_startup_popups()
                 return
@@ -372,7 +323,7 @@ class MainWindow(QMainWindow):
                     msg = f"{msg}\n\n[원인] {updater.last_error()}"
             except Exception:
                 pass
-            QMessageBox.warning(self, i18n.KO.UPDATE_AVAILABLE_TITLE, msg)
+            sheets.warn(self, i18n.KO.UPDATE_AVAILABLE_TITLE, msg)
             self._run_startup_popups()       # 실패 → 나머지 시작 팝업 진행
             return
         # 안내 후 프로그램을 자동 종료한다(자동 재실행은 하지 않음 — 사용자가 다시 실행).
@@ -383,7 +334,7 @@ class MainWindow(QMainWindow):
                 msg = msg + i18n.KO.UPDATE_DEPS_CHANGED
         except Exception:
             pass
-        QMessageBox.information(
+        sheets.info(
             self, i18n.KO.UPDATE_AVAILABLE_TITLE, msg)
         QApplication.quit()
 
@@ -408,48 +359,6 @@ class MainWindow(QMainWindow):
         elif rss < int(config.MEMORY_PRESSURE_BYTES * 0.9):
             # 압박이 해제되면 다시 알릴 수 있도록 플래그 재설정.
             self._mem_pressure_shown = False
-
-    def _update_usage_label(self) -> None:
-        """상태바 CPU/GPU 표시 갱신.
-
-        CPU 는 프로세스 실제 사용률(코어 수로 정규화한 0~100%), GPU 는
-        OpenVINO 추론 활동 기준 '가동/대기'(없으면 '없음')."""
-        parts: list[str] = []
-        # CPU — 프로그램 프로세스 사용률을 코어 수로 나눠 0~100% 로 표시.
-        try:
-            import psutil
-            ncpu = psutil.cpu_count() or 1
-            if self._proc is not None:
-                pct = self._proc.cpu_percent(None) / ncpu
-            else:
-                pct = psutil.cpu_percent(None)
-            parts.append(i18n.KO.USAGE_CPU_FMT.format(pct=int(round(pct))))
-        except Exception:
-            pass
-        # GPU — 존재하면 가동/대기, 없으면 '없음'. (NPU 표시는 제거됨.)
-        try:
-            from ..learning import embedder_openvino as _ovw
-            if not self._accel_present.get("GPU"):
-                state = i18n.KO.USAGE_STATE_NONE
-            elif _ovw.unit_busy("GPU"):
-                state = i18n.KO.USAGE_STATE_BUSY
-            else:
-                state = i18n.KO.USAGE_STATE_IDLE
-            parts.append(i18n.KO.USAGE_GPU_FMT.format(state=state))
-            # 툴팁에 컴파일 진단을 덧붙임 — 매칭을 한 번 돌린 뒤 GPU 가 '가동'
-            # 으로 안 바뀌면, 여기에 실제 컴파일 에러가 떠서 원인을 알 수 있다.
-            diag = _ovw.compile_diagnostics()
-            tip = self._accel_tip_base
-            compiled = diag.get("compiled") or []
-            if compiled:
-                tip += "\n추론 컴파일 성공: " + ", ".join(compiled)
-            for dev, msg in (diag.get("errors") or {}).items():
-                tip += f"\n{dev} 컴파일 실패: {msg}"
-            self._usage_label.setToolTip(tip)
-        except Exception:
-            pass
-        if parts:
-            self._usage_label.setText(i18n.KO.USAGE_SEP.join(parts))
 
     # ==================================================================
     # 창 크기 — 사용자 선택값 복원 / 모달
@@ -537,7 +446,7 @@ class MainWindow(QMainWindow):
         if state is None or state.stage in ("setup", "result"):
             self._show_page(self._setup_page)
             return
-        r = QMessageBox.question(
+        r = sheets.ask(
             self, i18n.KO.INFO_RESUME_TITLE, i18n.KO.INFO_RESUME_BODY,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes,
@@ -582,22 +491,19 @@ class MainWindow(QMainWindow):
         declined = bool(getattr(_prefs.load(), "openvino_install_declined", False))
         if not _ovi.should_offer_install(declined):
             return
-        box = QMessageBox(self)
-        box.setWindowTitle(i18n.KO.OPENVINO_OFFER_TITLE)
-        box.setText(i18n.KO.OPENVINO_OFFER_BODY)
-        btn_install = box.addButton(i18n.KO.OPENVINO_OFFER_BTN_INSTALL,
-                                    QMessageBox.ButtonRole.AcceptRole)
-        box.addButton(i18n.KO.OPENVINO_OFFER_BTN_LATER,
-                      QMessageBox.ButtonRole.RejectRole)
-        btn_never = box.addButton(i18n.KO.OPENVINO_OFFER_BTN_NEVER,
-                                  QMessageBox.ButtonRole.DestructiveRole)
-        box.exec()
-        clicked = box.clickedButton()
-        if clicked is btn_never:
+        # 선택지 3개 — 앱 내 선택 시트(옛 QMessageBox.addButton).
+        picked = sheets.choose(
+            self, i18n.KO.OPENVINO_OFFER_TITLE, i18n.KO.OPENVINO_OFFER_BODY,
+            [("never", i18n.KO.OPENVINO_OFFER_BTN_NEVER, "danger"),
+             ("later", i18n.KO.OPENVINO_OFFER_BTN_LATER, "ghost"),
+             ("install", i18n.KO.OPENVINO_OFFER_BTN_INSTALL, "primary")],
+            default="install",
+        )
+        if picked == "never":
             _prefs.patch(openvino_install_declined=True)
-        elif clicked is btn_install:
+        elif picked == "install":
             self._start_openvino_install()
-        # '다음에' → 아무것도 하지 않음 (다음 실행 때 다시 안내).
+        # '다음에'/닫기 → 아무것도 하지 않음 (다음 실행 때 다시 안내).
 
     def _start_openvino_install(self) -> None:
         from ..learning.openvino_installer import OpenVinoInstallWorker
@@ -618,16 +524,10 @@ class MainWindow(QMainWindow):
         importlib.invalidate_caches()
         self._loading.hide_overlay()
         if ok:
-            # 상태바 가속 표시 갱신 — OpenVINO 는 런타임 호출 시점에 적용된다.
-            try:
-                from ..learning import embedder as _emb
-                self._device_label.setText(_emb.device_label())
-            except Exception:
-                pass
-            QMessageBox.information(self, i18n.KO.OPENVINO_OFFER_TITLE,
-                                    i18n.KO.OPENVINO_INSTALL_DONE)
+            sheets.info(self, i18n.KO.OPENVINO_OFFER_TITLE,
+                        i18n.KO.OPENVINO_INSTALL_DONE)
         else:
-            QMessageBox.warning(
+            sheets.warn(
                 self, i18n.KO.OPENVINO_OFFER_TITLE,
                 i18n.KO.OPENVINO_INSTALL_FAILED_FMT.format(error=message),
             )
@@ -642,7 +542,7 @@ class MainWindow(QMainWindow):
 
         from .widgets.slot_mapping_dialog import SlotMappingDialog
         # 안내 → 다이얼로그 열기 여부 묻기
-        r = QMessageBox.question(
+        r = sheets.ask(
             self, i18n.KO.WARN_SLOT_MISMATCH_TITLE,
             i18n.KO.WARN_SLOT_MISMATCH_FMT.format(
                 ref_only=", ".join(sr.ref_only) or "없음",
@@ -660,7 +560,7 @@ class MainWindow(QMainWindow):
             val_meta=getattr(self, "_slot_meta_val", None),
             parent=self,
         )
-        if dlg.exec() != QDialog.DialogCode.Accepted:
+        if sheets.run(dlg, full_bleed=True) != QDialog.DialogCode.Accepted:
             return
         if dlg.mapping.pairs:
             self._apply_slot_pairs(sr, dlg.mapping.pairs)
@@ -691,35 +591,17 @@ class MainWindow(QMainWindow):
         """매칭 실패 폴더가 있을 때 'KLA 가 어느 쪽인가?' 를 묻는다.
 
         반환 "ref"/"val"/"both" 또는 None(KLA 아님 → 파일명/OCR 자동 매칭 건너뜀)."""
-        box = QMessageBox(self)
-        box.setWindowTitle(i18n.KO.KLA_ASK_TITLE)
-        box.setIcon(QMessageBox.Icon.Question)
-        box.setTextFormat(Qt.TextFormat.RichText)
-        box.setText(
-            "<div style='font-size:18pt; font-weight:800; color:#F39C12;'>"
-            f"{i18n.KO.KLA_ASK_SIDE_HEADING}</div>"
+        # ★ 네 경우(기준/검증/둘다/KLA 아님)를 모두 유지한다 — 한쪽만 추가하지 말 것
+        #   (CLAUDE.md 규칙).  강조 문장은 인라인 HTML 대신 시트의 warn 라벨이 담당한다
+        #   (색을 f-string 으로 굽지 않으므로 다크 모드 전환에도 따라온다).
+        return sheets.choose(
+            self, i18n.KO.KLA_ASK_TITLE, i18n.KO.KLA_ASK_SIDE_BODY,
+            [(None, i18n.KO.KLA_SIDE_NONE, "ghost"),
+             ("both", i18n.KO.KLA_SIDE_BOTH, "ghost"),
+             ("val", i18n.KO.KLA_SIDE_VAL, "ghost"),
+             ("ref", i18n.KO.KLA_SIDE_REF, "primary")],
+            default="ref", heading=i18n.KO.KLA_ASK_SIDE_HEADING,
         )
-        box.setInformativeText(
-            "<div style='font-size:11pt; color:#E8E8E8;'>"
-            + i18n.KO.KLA_ASK_SIDE_BODY.replace("\n", "<br>") + "</div>"
-        )
-        ref_btn = box.addButton(i18n.KO.KLA_SIDE_REF,
-                                QMessageBox.ButtonRole.YesRole)
-        val_btn = box.addButton(i18n.KO.KLA_SIDE_VAL,
-                                QMessageBox.ButtonRole.NoRole)
-        both_btn = box.addButton(i18n.KO.KLA_SIDE_BOTH,
-                                 QMessageBox.ButtonRole.ActionRole)
-        box.addButton(i18n.KO.KLA_SIDE_NONE, QMessageBox.ButtonRole.RejectRole)
-        box.setDefaultButton(ref_btn)
-        box.exec()
-        clicked = box.clickedButton()
-        if clicked is ref_btn:
-            return "ref"
-        if clicked is val_btn:
-            return "val"
-        if clicked is both_btn:
-            return "both"
-        return None
 
     def _resolve_and_merge_kla(self, sr: ScanResult, kla_side: str,
                                on_done) -> None:
@@ -871,7 +753,7 @@ class MainWindow(QMainWindow):
         inp = self._input
         if inp is None:
             return config.DEFAULT_SIM_CONFIG
-        engine = getattr(inp, "engine_mode", "basic")
+        engine = getattr(inp, "engine_mode", EngineMode.COORDINATE)
         # 실측 최적 프로파일 적용:
         #   기본 모드  = rr_parallel  → 전수 고전(pHash+ORB+SSIM)·CPU 멀티코어 병렬(현행 동작).
         #   고효율 모드 = rr_orb_center50 → GPU 임베딩 추림 + 상위 후보를 ORB 단독·중앙(defect)
@@ -972,7 +854,7 @@ class MainWindow(QMainWindow):
         common = sr.common_slot_names
         if not common:
             self._loading.hide_overlay()
-            QMessageBox.warning(self, i18n.KO.APP_TITLE, i18n.KO.WARN_NO_SLOTS)
+            sheets.warn(self, i18n.KO.APP_TITLE, i18n.KO.WARN_NO_SLOTS)
             return
         self._continue_start_after_scan(common)
 
@@ -1112,7 +994,7 @@ class MainWindow(QMainWindow):
         for slot in sorted(slots, key=lambda s: s.name):
             queue.extend(slot.ref_images)
         if not queue:
-            QMessageBox.warning(self, i18n.KO.APP_TITLE, i18n.KO.WARN_NO_IMAGES)
+            sheets.warn(self, i18n.KO.APP_TITLE, i18n.KO.WARN_NO_IMAGES)
             return
         pool = self._build_val_pool_by_slot()
         _sim_cfg = self._make_sim_cfg()
@@ -1132,8 +1014,6 @@ class MainWindow(QMainWindow):
             auto_mode=True,
             engine_cfg=_sim_cfg,
         )
-        self._device_label.setVisible(not _is_coord)
-        self._usage_label.setVisible(not _is_coord)
         self._show_page(self._match_page)
         self._phase = PHASE_A_MATCH
         self._autosave()
@@ -1176,7 +1056,7 @@ class MainWindow(QMainWindow):
             }
             # 기준 폴더로 직접 고른 기준 사진을 기록 (다음에 재사용 질의용, #6).
             self._save_ref_selection(self._stage1_a_snapshot["targets"])
-            QMessageBox.information(
+            sheets.info(
                 self, i18n.KO.INFO_PHASE_TRANSITION_TITLE,
                 i18n.KO.INFO_PHASE_A_TO_MATCH,
             )
@@ -1225,7 +1105,7 @@ class MainWindow(QMainWindow):
         matched = [it for it in queue if (it.slot, it.filename) in wanted]
         if not matched:
             return {}
-        r = QMessageBox.question(
+        r = sheets.ask(
             self, i18n.KO.REF_REUSE_TITLE,
             i18n.KO.REF_REUSE_BODY_FMT.format(n=len(matched)),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -1278,8 +1158,6 @@ class MainWindow(QMainWindow):
             auto_mode=auto_mode,
             engine_cfg=_sim_cfg,
         )
-        self._device_label.setVisible(not _is_coord)
-        self._usage_label.setVisible(not _is_coord)
         self._show_page(self._match_page)
         self._phase = PHASE_A_MATCH
         self._autosave()
@@ -1459,7 +1337,7 @@ class MainWindow(QMainWindow):
         """
         template = paths.template_path()
         if not template.exists():
-            QMessageBox.information(
+            sheets.info(
                 self, i18n.KO.TEMPLATE_NOT_FOUND_TITLE,
                 i18n.KO.TEMPLATE_NOT_FOUND_BODY.format(path=str(template)),
             )
@@ -1521,8 +1399,166 @@ class MainWindow(QMainWindow):
     # ==================================================================
     # Page switching
     # ==================================================================
-    def _show_page(self, w: QWidget) -> None:
-        self._stack.setCurrentWidget(w)
+    def _build_pages(self) -> None:
+        """5개 페이지 생성 + 스택 추가 + 시그널 배선 (단일 출처 — 재구축 재사용)."""
+        from .pages.match_review_page import MatchReviewPage
+        # 셋업 배치는 **하나**다(순서형).  한때 A/B/C 3안을 상단 스위처로 비교했는데,
+        # 사용자가 순서형을 고르면서 나머지 2안과 스위처·setup_layouts 를 제거했다.
+        self._setup_page = SetupPage()
+        self._select_page = SelectPage()
+        self._match_page = MatchPage()
+        self._result_page = ResultPage()
+        self._match_review_page = MatchReviewPage()
+
+        for w in (self._setup_page, self._select_page,
+                  self._match_page, self._result_page,
+                  self._match_review_page):
+            self._stack.addWidget(w)
+
+        self._setup_page.start_requested.connect(self._on_start)
+        self._setup_page.update_check_requested.connect(self._manual_update_check)
+        # 색 모드/배치 변경 → 페이지 재생성(세션 시작 전에만).
+        if hasattr(self._setup_page, "appearance_changed"):
+            self._setup_page.appearance_changed.connect(self._on_appearance_changed)
+        self._select_page.finished.connect(self._on_select_finished)
+        self._select_page.state_changed.connect(self._schedule_autosave)
+        self._match_page.match_confirmed.connect(self._on_match_confirmed)
+        self._match_page.match_undone.connect(self._on_match_undone)
+        self._match_page.skipped_changed.connect(self._schedule_autosave)
+        self._match_page.finished.connect(self._on_match_finished)
+        self._match_page.cancelled.connect(self._on_match_cancelled)
+        self._result_page.new_session_requested.connect(self._new_session)
+        self._match_review_page.finished.connect(self._on_match_review_done)
+
+    def _on_appearance_changed(self, mode: str = "") -> None:
+        """색 모드(어두운 화면) 변경을 화면에 반영한다 — **옛 화면을 걷어내는 크로스페이드**.
+
+        위젯이 생성 시점에 ``theme.INK`` 같은 색을 f-string 으로 굽기 때문에 QSS 재적용만
+        으로는 부족하다 → 페이지를 다시 만든다.  **세션 시작 전(PHASE_NONE)에만** 허용해
+        진행 중 상태가 사라지지 않게 이중으로 막는다.
+
+        전환이 한 프레임에 튀지 않도록: 옛 색 화면을 스냅샷으로 떠 두고, 아래에서 새 색
+        페이지로 즉시 갈아 끼운 뒤 스냅샷을 ``motion.DUR_RECOLOR``(OutQuart)로 빼낸다.
+
+        ★ ``mode`` 는 셋업 페이지가 실어 보낸 새 색 모드다.  **prefs 를 다시 읽지 않는다**
+        (전환 경로의 디스크 왕복을 2회 → 1회로).  빈 문자열이면(옛 연결·직접 호출)
+        prefs 에서 읽어 오는 예전 경로로 폴백한다.
+
+        ★ 전환 중에는 토글이 **눌리지 않아야 한다.**  두 겹으로 막는다:
+        (a) ``_appearance_busy`` 로 재진입 자체를 차단하고,
+        (b) 새로 만든 페이지의 스위치를 비활성해 눌리지 않는 것이 **눈에 보이게** 한다.
+        (a) 만 있으면 눌러도 아무 일이 없는 '먹은 클릭'이 되고, (b) 만 있으면 페이지
+        재생성 사이의 틈으로 두 번째 요청이 새어 든다."""
+        if self._phase != PHASE_NONE or self._appearance_busy:
+            return
+        from . import motion
+        self._appearance_busy = True
+        try:
+            snapshot = self._stack.grab() if motion.enabled() else None
+            try:
+                if not mode:
+                    p = _prefs.load()
+                    mode = getattr(p, "color_mode", theme.DEFAULT_COLOR_MODE)
+                theme.set_color_mode(mode)
+            except Exception:
+                self._appearance_busy = False
+                return
+            # ★ 순서: **옛 페이지를 먼저 걷어낸 뒤** 시트를 적용한다.  반대로 하면
+            #   `apply_to_app` 이 곧 파괴할 페이지 5개를 통째로 repolish 한다(낭비).
+            #   실측: 걷어내고 적용하면 합계 137~164ms → 125~142ms.
+            self._recreate_pages(apply_qss=True)
+            self._set_appearance_controls_enabled(False)
+            motion.crossfade_from(self._stack, snapshot,
+                                  on_done=self._end_appearance_transition)
+        except Exception:
+            # ★ 어떤 경로로 실패해도 잠금은 반드시 풀린다 — 잠긴 채 남으면 다크 모드를
+            #   **영구히** 못 바꾼다(원래 버그보다 나쁘다).
+            self._end_appearance_transition()
+            raise
+
+    def _set_appearance_controls_enabled(self, on: bool) -> None:
+        """색 모드 토글의 활성 상태 — 페이지가 재생성되므로 **새** 위젯에 걸어야 한다."""
+        sw = getattr(self._setup_page, "_dark_switch", None)
+        if sw is not None:
+            sw.setEnabled(bool(on))
+
+    def _end_appearance_transition(self) -> None:
+        self._appearance_busy = False
+        self._set_appearance_controls_enabled(True)
+
+    def _recreate_pages(self, *, apply_qss: bool = False) -> None:
+        """페이지 5개를 파괴 후 다시 만든다(구운 색을 새 팔레트로 교체).
+
+        ★ '세션 시작 전'은 **아무것도 입력하지 않았다는 뜻이 아니다.**  폴더·호기·진행
+        범위·손으로 고른 슬롯·허용 오차는 [검증 시작] 전까지 prefs 에 없어서, 그냥
+        파괴하면 어두운 화면 토글 한 번에 조용히 사라진다(특히 '일부 슬롯 12/40' 이
+        '모든 슬롯'으로 되돌아가면 40슬롯을 통째로 돌리게 된다).  걷어 두고 다시 심는다.
+
+        ``apply_qss=True`` 면 **옛 페이지를 걷어낸 직후·새 페이지를 만들기 전에**
+        ``theme.apply_to_app`` 을 부른다.  순서가 성능이다: 먼저 적용하면 곧 파괴할
+        페이지 5개를 통째로 repolish 하고(낭비), 나중에 적용하면 새 페이지가 두 번
+        polish 된다.  가운데가 가장 싸다(실측 137~164ms → 125~142ms)."""
+        draft = None
+        try:
+            draft = self._setup_page.capture_draft()
+        except Exception:
+            draft = None
+        old = (self._setup_page, self._select_page, self._match_page,
+               self._result_page, self._match_review_page)
+        for w in old:
+            self._stack.removeWidget(w)
+            w.hide()
+            w.setParent(None)
+            w.deleteLater()
+        if apply_qss:
+            app = QApplication.instance()
+            if app is not None:
+                theme.apply_to_app(app)
+        self._build_pages()
+        if draft:
+            try:
+                self._setup_page.restore_draft(draft)
+            except Exception:
+                pass
+        self._apply_statusbar_theme()
+        try:
+            self._loading.raise_()           # 오버레이 z-order 유지
+        except Exception:
+            pass
+        self._show_page(self._setup_page, animate=False)
+
+    def _apply_statusbar_theme(self) -> None:
+        """상태바 라벨 색을 테마 토큰으로 적용(페이지 밖 위젯)."""
+        self._credit_label.setStyleSheet(
+            f"color: {theme.MUTE}; padding: 0 8px; font-weight: 600;")
+
+    # ==================================================================
+    def _page_order(self, w: QWidget) -> int:
+        """흐름 순서(셋업→선별→매칭→검토→결과) — 전환 방향 결정용."""
+        order = (self._setup_page, self._select_page, self._match_page,
+                 self._match_review_page, self._result_page)
+        try:
+            return order.index(w)
+        except ValueError:
+            return 0
+
+    def _show_page(self, w: QWidget, *, animate: bool = True) -> None:
+        """페이지 전환 — 들어오는 화면이 흐름 방향으로 슬라이드+페이드 진입(ease-out).
+
+        나가는 화면은 아래에 두고 새 화면 스냅샷을 안착시킨 뒤 실제 전환(무플래시).
+        offscreen/모션 줄이기·최초 표시·동일 페이지면 즉시 스왑."""
+        from . import motion
+        old = self._stack.currentWidget()
+        if old is w or old is None or not animate or not motion.enabled():
+            self._stack.setCurrentWidget(w)
+            return
+        forward = self._page_order(w) >= self._page_order(old)
+        self._stack.setCurrentWidget(w)        # 레이아웃 확정 후 스냅샷
+        new_pix = w.grab()
+        self._stack.setCurrentWidget(old)      # 리페인트 전 원복(사용자엔 불가시)
+        motion.transition_in(
+            self._stack, new_pix, forward=forward,
+            on_commit=lambda: self._stack.setCurrentWidget(w))
 
     # ==================================================================
     # Auto-save

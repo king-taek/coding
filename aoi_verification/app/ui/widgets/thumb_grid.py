@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (QCheckBox, QFrame, QGridLayout, QLabel,
                               QToolButton, QVBoxLayout, QWidget)
 
 from ... import config, i18n
+from .. import theme
 from ...models.slot import ImageItem
 from ...utils import image_io
 
@@ -34,8 +35,8 @@ class _ThumbTile(QFrame):
     expand_requested = pyqtSignal(object)     # ThumbEntry — ‘더 크게 보기’
     sel_toggled = pyqtSignal(object, bool)    # (ThumbEntry, selected) — 인라인 선택
 
-    _SEL_STYLE = ("QFrame { border: 3px solid #39FF14; border-radius: 8px;"
-                  " background: rgba(57, 255, 20, 0.06); }")
+    _SEL_STYLE = ("QFrame {{ border: 2px solid {a}; border-radius: 8px;"
+                  " background: rgba(224, 163, 74, 0.08); }}").format(a=theme.ACCENT)
 
     def __init__(self,
                  entry: ThumbEntry,
@@ -89,10 +90,11 @@ class _ThumbTile(QFrame):
             btn.setAutoRaise(True)
             btn.setFixedSize(QSize(24, 24))
             btn.setStyleSheet(
-                "QToolButton { background: rgba(0,212,255,0.18);"
-                "  color: #39FF14; border: 1px solid #39FF14;"
-                "  border-radius: 4px; font-size: 14px; }"
-                "QToolButton:hover { background: rgba(0,212,255,0.35); }"
+                "QToolButton {{ background: rgba(26,29,35,0.85);"
+                "  color: {ink}; border: 1px solid {line};"
+                "  border-radius: 4px; font-size: 14px; }}"
+                "QToolButton:hover {{ border-color: {mute}; }}".format(
+                    ink=theme.INK, line=theme.LINE2, mute=theme.MUTE)
             )
             btn.move(self.width() - 28, 4)
             btn.show()
@@ -178,10 +180,10 @@ class _PlusTile(QFrame):
         lab = QLabel(i18n.KO.COUNT_PLUS_N_FMT.format(n=n), self)
         lab.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lab.setStyleSheet(
-            "color: #39FF14;"
+            f"color: {theme.MUTE};"
             "font-size: 28px;"
             "font-weight: 700;"
-            "border: 2px dashed #39FF14;"
+            f"border: 2px dashed {theme.LINE2};"
             "border-radius: 8px;"
         )
         lab.setMinimumHeight(size)

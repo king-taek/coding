@@ -22,10 +22,11 @@ from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout,
                              QSizePolicy, QSlider, QVBoxLayout, QWidget)
 
 from ... import config, i18n
+from .. import theme
 from ...models.slot import ImageItem
 from ...utils import image_io
 from .neon_button import NeonButton
-from .window_controls import add_fullscreen_shortcut, enable_window_controls
+from . import sheet_host as sheets
 
 
 _TILE_PX = config.Sizing.BULK_TILE_PX   # 다중 선택 그리드 기본 타일 (= 180)
@@ -108,7 +109,7 @@ class _SelectTile(QFrame):
     def _refresh_visual(self) -> None:
         if self._selected:
             self.setStyleSheet(
-                "#selTile { border: 3px solid #39FF14; border-radius: 8px;"
+                f"#selTile {{ border: 2px solid {theme.ACCENT}; border-radius: 8px;"
                 " background: rgba(57, 255, 20, 0.06); }"
             )
         else:
@@ -146,9 +147,9 @@ class BulkSelectDialog(QDialog):
             want_w = min(want_w, int(g.width() * 0.92))
             want_h = min(want_h, int(g.height() * 0.88))
         self.resize(want_w, want_h)
-        # 창에 최소화/최대화 버튼 + F11 전체화면 토글 (#9). 첫 show 이전에 설정.
-        enable_window_controls(self)
-        add_fullscreen_shortcut(self)
+        # ★ 창 제어(최소화/최대화/F11) 헬퍼를 부르지 않는다 — 이 다이얼로그는
+        #   별도 OS 창이 아니라 **메인 창 안의 시트**로 뜬다(widgets/sheet_host.py).
+        #   최대화·전체화면은 메인 창이 담당한다.
 
         # 전체 선택 상태 (페이지 전환에도 유지) — key 기반.
         self._selected_keys: set[str] = set()
@@ -194,14 +195,14 @@ class BulkSelectDialog(QDialog):
         # 헤더 / 안내
         head = QLabel(title, self)
         head.setStyleSheet(
-            "color: #39FF14; font-weight: 700; font-size: 16px;"
+            f"color: {theme.INK}; font-weight: 700; font-size: 16px;"
         )
         root.addWidget(head)
 
         hint = QLabel(i18n.KO.BULK_SELECT_HINT, self)
         hint.setProperty("role", "subtitle")
         hint.setWordWrap(True)
-        hint.setStyleSheet("color: #7FB3D5;")
+        hint.setStyleSheet(f"color: {theme.MUTE};")
         root.addWidget(hint)
 
         # 상단 바: 선택 요약 + 사진 크기 슬라이더 -----------------------
@@ -210,7 +211,7 @@ class BulkSelectDialog(QDialog):
         self._summary_label = QLabel(
             i18n.KO.BULK_SELECT_SUMMARY_FMT.format(n=0), self,
         )
-        self._summary_label.setStyleSheet("color: #00FFA3; font-weight: 700;")
+        self._summary_label.setStyleSheet(f"color: {theme.PASS}; font-weight: 700;")
         top.addWidget(self._summary_label)
         top.addStretch(1)
         size_label = QLabel(i18n.KO.BULK_SIZE_LABEL, self)
@@ -247,7 +248,7 @@ class BulkSelectDialog(QDialog):
 
         if self._total_items == 0:
             empty = QLabel(i18n.KO.BULK_SELECT_EMPTY, self)
-            empty.setStyleSheet("color: #7FB3D5; padding: 20px;")
+            empty.setStyleSheet(f"color: {theme.MUTE}; padding: 20px;")
             root.addWidget(empty)
 
         # 페이지네이션 바 (대량일 때만 노출) ----------------------------
@@ -259,7 +260,7 @@ class BulkSelectDialog(QDialog):
             self._btn_next = NeonButton(i18n.KO.BULK_PAGE_NEXT, role="default")
             self._btn_next.clicked.connect(lambda: self._go_page(self._page + 1))
             self._page_label = QLabel("", self)
-            self._page_label.setStyleSheet("color: #7FB3D5; font-weight: 700;")
+            self._page_label.setStyleSheet(f"color: {theme.MUTE}; font-weight: 700;")
             page_bar.addStretch(1)
             page_bar.addWidget(self._btn_prev)
             page_bar.addWidget(self._page_label)
@@ -323,7 +324,7 @@ class BulkSelectDialog(QDialog):
                 host,
             )
             slot_label.setStyleSheet(
-                "color: #39FF14; font-weight: 700; padding-top: 4px;"
+                f"color: {theme.PASS}; font-weight: 700; padding-top: 4px;"
             )
             host_layout.addWidget(slot_label)
 
@@ -374,7 +375,7 @@ class BulkSelectDialog(QDialog):
         """우클릭 → 풀스크린 확대 뷰 (휠 줌 + 드래그 팬)."""
         from .zoom_window import FullscreenViewer
         viewer = FullscreenViewer(item.path, self)
-        viewer.exec()
+        sheets.run(viewer, full_bleed=True)
 
     # ------------------------------------------------------------------
     def _relayout_grids(self) -> None:

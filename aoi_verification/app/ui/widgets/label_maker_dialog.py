@@ -19,7 +19,9 @@ from PyQt6.QtWidgets import (QApplication, QCheckBox, QDialog, QFileDialog,
                               QToolButton, QVBoxLayout, QWidget)
 
 from ... import i18n
+from .. import theme
 from ...utils import image_io as _io
+from . import sheet_host as sheets
 
 _REF_PX = 360
 _CAND_PX = 150
@@ -45,7 +47,7 @@ class LabelMakerDialog(QDialog):
 
         hint = QLabel(i18n.KO.DEV_LABEL_HINT, self)
         hint.setWordWrap(True)
-        hint.setStyleSheet("color: #7FB3D5;")
+        hint.setStyleSheet(f"color: {theme.MUTE};")
         root.addWidget(hint)
 
         # 폴더 입력 + 시작 -------------------------------------------------
@@ -71,16 +73,16 @@ class LabelMakerDialog(QDialog):
         body = QHBoxLayout()
         left = QVBoxLayout()
         self.progress_lbl = QLabel("", self)
-        self.progress_lbl.setStyleSheet("color: #39FF14; font-weight: 700;")
+        self.progress_lbl.setStyleSheet(f"color: {theme.PASS}; font-weight: 700;")
         self.progress_lbl.setWordWrap(True)
         left.addWidget(self.progress_lbl)
         self.ref_img = QLabel(self)
         self.ref_img.setFixedSize(_REF_PX, _REF_PX)
         self.ref_img.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.ref_img.setStyleSheet("background:#0E1424; border:1px solid #1F2A3F;")
+        self.ref_img.setStyleSheet(f"background:{theme.PANEL}; border:1px solid {theme.LINE};")
         left.addWidget(self.ref_img)
         self.sel_lbl = QLabel("", self)
-        self.sel_lbl.setStyleSheet("color: #00FFA3; font-weight: 600;")
+        self.sel_lbl.setStyleSheet(f"color: {theme.PASS}; font-weight: 600;")
         left.addWidget(self.sel_lbl)
         left.addStretch(1)
         body.addLayout(left)
@@ -135,7 +137,7 @@ class LabelMakerDialog(QDialog):
         ref = self.ref_edit.text().strip()
         val = self.val_edit.text().strip()
         if not ref or not val or not Path(ref).is_dir() or not Path(val).is_dir():
-            QMessageBox.warning(self, i18n.KO.DEV_LABEL_TITLE,
+            sheets.warn(self, i18n.KO.DEV_LABEL_TITLE,
                                 i18n.KO.DEV_LABEL_NEED_FOLDERS)
             return
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
@@ -145,7 +147,7 @@ class LabelMakerDialog(QDialog):
             ds = _bm.build_dataset(ref, val)
             if not ds.tasks:
                 QApplication.restoreOverrideCursor()
-                QMessageBox.warning(self, i18n.KO.DEV_LABEL_TITLE,
+                sheets.warn(self, i18n.KO.DEV_LABEL_TITLE,
                                     i18n.KO.DEV_LABEL_NO_COMMON)
                 return
             self._model = _lab.LabelMakerModel(ds.tasks)
@@ -182,8 +184,8 @@ class LabelMakerDialog(QDialog):
             btn.setChecked(self._model.is_selected(str(vi.path)))
             btn.setToolTip(str(vi.path))
             btn.setStyleSheet(
-                "QToolButton{border:2px solid #1F2A3F; padding:4px; color:#7FB3D5;}"
-                "QToolButton:checked{border:2px solid #00FFA3; color:#00FFA3;}")
+                f"QToolButton{{border:2px solid {theme.LINE}; padding:4px; color:{theme.MUTE};}}"
+                f"QToolButton:checked{{border:2px solid {theme.ACCENT}; color:{theme.ACCENT};}}")
             vp = str(vi.path)
             btn.clicked.connect(lambda _c=False, p=vp: self._on_toggle(p))
             self.grid.addWidget(btn, i // cols, i % cols)
@@ -271,7 +273,7 @@ class LabelMakerDialog(QDialog):
         saved = _lab.save(path, self._model.to_labels())
         self._model.dirty = False
         st = self._model.stats()
-        QMessageBox.information(
+        sheets.info(
             self, i18n.KO.DEV_LABEL_TITLE,
             i18n.KO.DEV_LABEL_SAVED_FMT.format(
                 path=str(saved), labeled=st["labeled"], none=st["none"],
@@ -284,7 +286,7 @@ class LabelMakerDialog(QDialog):
     # ------------------------------------------------------------------
     def closeEvent(self, event):        # noqa: N802
         if self._model is not None and getattr(self._model, "dirty", False):
-            r = QMessageBox.question(
+            r = sheets.ask(
                 self, i18n.KO.DEV_LABEL_TITLE, i18n.KO.DEV_LABEL_DISCARD_CONFIRM,
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No)

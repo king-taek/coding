@@ -26,8 +26,8 @@ from PyQt6.QtWidgets import (QAbstractItemView, QDialog, QHBoxLayout, QLabel,
                              QListWidget, QListWidgetItem, QVBoxLayout, QWidget)
 
 from ... import i18n
+from .. import theme
 from .neon_button import NeonButton
-from .window_controls import add_fullscreen_shortcut, enable_window_controls
 
 # KLA 헤더(OCR 구간) 미리보기 — 좁게(가로·세로 축소).
 _CROP_W = 180
@@ -41,9 +41,9 @@ _GAP = 26                                   # 묶은 쌍 두 사진 사이 간�
 _LIST_SEL_QSS = (
     "QListWidget::item { border: 2px solid transparent; border-radius: 4px;"
     " padding: 2px; margin: 1px; }"
-    "QListWidget::item:selected { border: 2px solid #3DA5FF;"
-    " background: rgba(61,165,255,0.22); color: #FFFFFF; }"
-    "QListWidget::item:selected:active { border: 2px solid #3DA5FF; }"
+    f"QListWidget::item:selected {{ border: 2px solid {theme.FOCUS};"
+    f" background: rgba(106,166,255,0.20); color: {theme.INK}; }}"
+    f"QListWidget::item:selected:active {{ border: 2px solid {theme.FOCUS}; }}"
 )
 
 _METHOD_LABEL = {
@@ -90,8 +90,9 @@ class SlotMappingDialog(QDialog):
         self._pairs: list[tuple[str, str]] = []
         self._ref_sel: Optional[str] = None
         self._val_sel: Optional[str] = None
-        enable_window_controls(self)
-        add_fullscreen_shortcut(self)
+        # ★ 창 제어(최소화/최대화/F11) 헬퍼를 부르지 않는다 — 이 다이얼로그는
+        #   별도 OS 창이 아니라 **메인 창 안의 시트**로 뜬다(widgets/sheet_host.py).
+        #   최대화·전체화면은 메인 창이 담당한다.
         self._build()
 
     @property
@@ -278,7 +279,7 @@ class SlotMappingDialog(QDialog):
         if pa is not None:
             p.drawPixmap(max(0, (_CROP_W - pa.width()) // 2),
                          (_CROP_H - pa.height()) // 2, pa)
-        p.setPen(QColor("#3DA5FF"))
+        p.setPen(QColor(theme.FOCUS))
         p.drawText(_CROP_W, 0, _GAP, _CROP_H,
                    Qt.AlignmentFlag.AlignCenter, "↔")
         if pb is not None:

@@ -21,15 +21,17 @@ from typing import List, Optional
 from PyQt6.QtCore import QObject, Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (QCheckBox, QDialog, QFileDialog, QFormLayout,
                               QHBoxLayout, QHeaderView, QLabel, QLineEdit,
-                              QMessageBox, QPushButton, QScrollArea, QSpinBox,
+                              QPushButton, QScrollArea, QSpinBox,
                               QTableWidget, QTableWidgetItem, QVBoxLayout,
                               QWidget)
 
 from ... import i18n
+from .. import theme
 from ...dev import benchmark as _bm
 from ...dev import recipes as _rx
 from ...utils import paths as _paths
 from ...utils import prefs as _prefs
+from . import sheet_host as sheets
 
 
 def dev_mode_enabled() -> bool:
@@ -283,7 +285,7 @@ class DevBenchmarkDialog(QDialog):
 
         hint = QLabel(i18n.KO.DEV_BENCH_HINT, self)
         hint.setWordWrap(True)
-        hint.setStyleSheet("color: #7FB3D5;")
+        hint.setStyleSheet(f"color: {theme.MUTE};")
         root.addWidget(hint)
 
         form = QFormLayout()
@@ -378,7 +380,7 @@ class DevBenchmarkDialog(QDialog):
         root.addLayout(bar)
 
         self.status = QLabel(i18n.KO.DEV_BENCH_CACHE_NOTE, self)
-        self.status.setStyleSheet("color: #39FF14; font-weight: 600;")
+        self.status.setStyleSheet(f"color: {theme.PASS}; font-weight: 600;")
         root.addWidget(self.status)
 
         cols = [i18n.KO.DEV_BENCH_COL_RECIPE, i18n.KO.DEV_BENCH_COL_TOTAL,
@@ -416,8 +418,7 @@ class DevBenchmarkDialog(QDialog):
         from .label_maker_dialog import LabelMakerDialog
         dlg = LabelMakerDialog(self, default_ref=self.ref_edit.text().strip(),
                                default_val=self.val_edit.text().strip())
-        dlg.showMaximized()
-        dlg.exec()
+        sheets.run(dlg, full_bleed=True)
         if dlg.labels_path():
             self.labels_edit.setText(dlg.labels_path())
             self.self_test.setChecked(False)
@@ -456,7 +457,7 @@ class DevBenchmarkDialog(QDialog):
         self_test = self.self_test.isChecked()
         val = self.val_edit.text().strip()
         if not ref or (not self_test and not val) or not Path(ref).is_dir():
-            QMessageBox.warning(self, i18n.KO.DEV_BENCH_TITLE,
+            sheets.warn(self, i18n.KO.DEV_BENCH_TITLE,
                                 i18n.KO.DEV_BENCH_NEED_FOLDER)
             return
         self.table.setRowCount(0)
@@ -491,7 +492,7 @@ class DevBenchmarkDialog(QDialog):
     def _on_failed(self, msg: str) -> None:
         self.run_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
-        QMessageBox.warning(self, i18n.KO.DEV_BENCH_TITLE, msg)
+        sheets.warn(self, i18n.KO.DEV_BENCH_TITLE, msg)
 
     def _on_finished(self, suite, ds, run_dir: str) -> None:
         self.run_btn.setEnabled(True)

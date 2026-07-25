@@ -17,10 +17,11 @@ from typing import Optional
 from PyQt6.QtCore import QByteArray, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QKeySequence, QPixmap, QShortcut
 from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel,
-                              QMessageBox, QScrollArea, QSizePolicy, QSlider,
+                              QScrollArea, QSizePolicy, QSlider,
                               QSplitter, QStackedWidget, QVBoxLayout, QWidget)
 
 from ... import config, i18n
+from .. import theme
 from ...models.result import MatchResult
 from ...models.slot import ImageItem, Slot
 from ...utils import image_io
@@ -39,6 +40,7 @@ from ..widgets.scalable_image import ScalableImage
 from ..widgets.slot_section import SlotSection
 from ..widgets.thumb_grid import ThumbEntry, ThumbGrid
 from ..widgets.zoom_window import (ZoomWindow, SOURCE_TARGET, SOURCE_CANDIDATES)
+from ..widgets import sheet_host as sheets
 
 
 # ---------------------------------------------------------------------------
@@ -152,7 +154,7 @@ class MatchPage(QWidget):
         # 열려 있는 동안에도 ‘나머지 슬롯이 X / Y 완료’ 임을 알려준다.
         self.bg_status_label = QLabel("", self)
         self.bg_status_label.setStyleSheet(
-            "color: #00FFA3; padding: 2px 8px;"
+            f"color: {theme.PASS}; padding: 2px 8px;"
         )
         top.addWidget(self.bg_status_label)
         root.addLayout(top)
@@ -167,7 +169,7 @@ class MatchPage(QWidget):
         cl = center.body()
         title = QLabel(i18n.KO.PANEL_MATCH_REF, center)
         title.setProperty("role", "subtitle")
-        title.setStyleSheet("font-weight:700; color:#39FF14;")
+        title.setStyleSheet(f"font-weight:700; color:{theme.INK};")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         cl.addWidget(title)
 
@@ -175,7 +177,7 @@ class MatchPage(QWidget):
         self.slot_label = QLabel("", center)
         self.slot_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.slot_label.setStyleSheet(
-            "color: #7FB3D5; font-size: 14px; font-weight: 600; padding: 2px;"
+            f"color: {theme.MUTE}; font-size: 14px; font-weight: 600; padding: 2px;"
         )
         cl.addWidget(self.slot_label)
 
@@ -209,7 +211,7 @@ class MatchPage(QWidget):
         self._img_scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._img_scroll.setWidget(self.center_img)
         self._img_scroll.setStyleSheet(
-            "QScrollArea { background: #050810; border: 1px solid #1F2A3F; "
+            f"QScrollArea {{ background: {theme.BG}; border: 1px solid {theme.LINE}; "
             "border-radius: 8px; }"
         )
         self._img_scroll.setMinimumHeight(300)
@@ -246,7 +248,7 @@ class MatchPage(QWidget):
         rl.setSpacing(8)
         rt = QLabel(i18n.KO.PANEL_MATCH_CANDIDATES, right)
         rt.setProperty("role", "subtitle")
-        rt.setStyleSheet("font-weight:700; color:#39FF14;")
+        rt.setStyleSheet(f"font-weight:700; color:{theme.INK};")
         rl.addWidget(rt)
 
         # 후보 패널 내부 스택: page 0 = 썸네일 그리드, page 1 = 확대 보기
@@ -576,7 +578,7 @@ class MatchPage(QWidget):
         self._streaming_precompute = False
         # 좌표 매칭 모드에서 좌표 없음 오류 — 사용자에게 안내 후 설정 화면 복귀.
         if self._coord_mode and msg and "좌표 정보가 없습니다" in msg:
-            QMessageBox.warning(self, i18n.KO.APP_TITLE, msg)
+            sheets.warn(self, i18n.KO.APP_TITLE, msg)
             self.cancelled.emit()
             return
         if self.bg_status_label is not None:
@@ -722,7 +724,7 @@ class MatchPage(QWidget):
             # 자동 모드는 매 ref 마다 모달이 뜨는 ‘모달 폭격’ 을 피하려고
             # 모달 없이 조용히 ‘매칭 없음’ 처리 (Bug #4).  수동 모드만 안내.
             if not self._auto_mode:
-                QMessageBox.information(self, i18n.KO.APP_TITLE,
+                sheets.info(self, i18n.KO.APP_TITLE,
                                         i18n.KO.INFO_NO_MATCH_FOUND)
             self._confirm_no_match()
             return
@@ -846,7 +848,7 @@ class MatchPage(QWidget):
                 QTimer.singleShot(0, self._confirm_no_match)
             else:
                 self._loading.hide_overlay()
-                QMessageBox.information(self, i18n.KO.APP_TITLE,
+                sheets.info(self, i18n.KO.APP_TITLE,
                                         i18n.KO.INFO_NO_MATCH_FOUND)
                 self._confirm_no_match()           # ‘잠시 보류’ 제거 (#3)
             return
@@ -944,7 +946,7 @@ class MatchPage(QWidget):
         items = [c.item for c in self._candidates]
         win = ZoomWindow(self._current.slot, items, SOURCE_CANDIDATES, parent=self)
         win.action_requested.connect(self._on_zoom_candidates_action)
-        win.exec()
+        sheets.run(win, full_bleed=True)
 
     # ------------------------------------------------------------------
     # ‘더 크게 보기’ 모드
@@ -1141,7 +1143,7 @@ class MatchPage(QWidget):
                     i18n.KO.SKIPPED_SECTION_DEFER_FMT.format(n=n), host,
                 )
                 hdr.setStyleSheet(
-                    "color: #FFD600; font-weight: 700; padding: 6px 2px;"
+                    f"color: {theme.WARN}; font-weight: 700; padding: 6px 2px;"
                 )
                 hl.addWidget(hdr)
                 for slot in defer_slots:
@@ -1158,7 +1160,7 @@ class MatchPage(QWidget):
                     i18n.KO.SKIPPED_SECTION_NO_MATCH_FMT.format(n=n), host,
                 )
                 hdr.setStyleSheet(
-                    "color: #FF2D55; font-weight: 700; padding: 6px 2px;"
+                    f"color: {theme.DANGER}; font-weight: 700; padding: 6px 2px;"
                 )
                 hl.addWidget(hdr)
                 for slot in none_slots:
@@ -1179,7 +1181,7 @@ class MatchPage(QWidget):
         close.clicked.connect(dlg.accept)
         bar.addWidget(close)
         layout.addLayout(bar)
-        dlg.exec()
+        sheets.run(dlg, full_bleed=True)
 
     def _retry_skipped(self) -> None:
         """Skip 된 항목들을 큐 앞으로 다시 밀어넣고, 임계치를 낮춰 재시도."""
