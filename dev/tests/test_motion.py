@@ -48,8 +48,8 @@ def test_reduce_motion_flag(qapp, monkeypatch):
 
 def test_dur_scales_with_profile(qapp):
     from aoi_verification.app.ui import theme
-    theme.set_variant("instrument")
-    assert motion.dur(200) == 200       # instrument motion_scale 1.0
+    # '도면' 은 담백한 모션(scale 0.8) — 지속시간이 그만큼 짧아진다.
+    assert motion.dur(200) == int(200 * theme.PROFILE.motion_scale)
 
 
 def test_os_reduce_motion_returns_bool(qapp):

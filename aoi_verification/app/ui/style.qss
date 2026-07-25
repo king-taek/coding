@@ -104,8 +104,8 @@ QFrame[role="row"] {
     border-radius: $row_radius;
 }
 
-/* 점수 컬럼 눈금 — 이미지 영역과 우측 점수를 가르는 1px 눈금(C7).
-   score_rule = ink 반투명이라 어두운 패널에서도 또렷(자기적응). */
+/* 점수 컬럼 눈금 — 이미지 영역과 우측 거리 컬럼을 가르는 1px 눈금.
+   score_rule = ink 반투명이라 시트 위에서 또렷. */
 QFrame[role="vrule"] {
     background: $score_rule;
     border: none;
@@ -113,12 +113,7 @@ QFrame[role="vrule"] {
     max-width: 1px;
 }
 
-/* 지브라 행(계측 벤치 성격) — cleanroom 전용. 홀수 행에 아주 옅은 띠. */
-QFrame[role="row"][zebra="on"] {
-    background-color: $zebra_bg;
-}
-
-/* 검토 리스트 컬럼 헤더 — 표/제도 시트 성격 변형에서만. 하단 눈금으로 표 헤더처럼. */
+/* 검토 리스트 컬럼 헤더(타이틀블록) — 하단 눈금으로 제도 시트의 표 헤더처럼. */
 QFrame[role="listHeader"] {
     background: transparent;
     border: none;
@@ -257,30 +252,6 @@ QPushButton[compact="true"][intent="reject"]:hover {
 QPushButton[compact="true"]:focus {
     border: $focus_w solid $focus;
     padding: 3px 5px;
-}
-
-/* 화면 스타일 스위처 칩 — 편안한 타깃, 선택 시 '채운' 강조로 현재 스타일이 한눈에(C24).
-   ★ 완전한 박스 모델(배경·보더)을 base 에 둬야 :checked 배경이 확실히 칠해진다
-   (부분 QSS 만 주면 Qt 가 배경을 네이티브로 폴백 → 채움이 안 보이는 버그). */
-QPushButton[variantChip="true"] {
-    padding: 7px 14px;
-    font-size: $font_caption_sz;
-    border: 1px solid $line;
-    border-radius: $chip_radius;
-    background: transparent;
-    color: $mute;
-    font-weight: 600;
-}
-QPushButton[variantChip="true"]:hover {
-    color: $ink;
-    border-color: $line2;
-    background: $elev;
-}
-QPushButton[variantChip="true"]:checked {
-    background: $accent;
-    color: $on_accent;
-    border-color: $accent;
-    font-weight: 700;
 }
 
 /* 키캡(kbd) 칩 — 단축키를 본문 텍스트가 아니라 '키'로 읽히게. */

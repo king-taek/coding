@@ -204,16 +204,18 @@ def test_secondary_actions_are_links(qapp):
     row.deleteLater()
 
 
-def test_neon_button_glow_only_primary(qapp):
+def test_neon_button_is_matte_and_role_driven(qapp):
+    """'도면' 은 무광 — 어떤 role 도 글로우/그림자 이펙트를 달지 않는다(색은 QSS)."""
+    from aoi_verification.app.ui import theme
     from aoi_verification.app.ui.widgets.neon_button import NeonButton
     b1 = NeonButton("x", role="primary")
     b2 = NeonButton("y", role="ghost")
     b3 = NeonButton("z", role="danger")
-    assert b1.graphicsEffect() is not None
-    assert b2.graphicsEffect() is None and b3.graphicsEffect() is None
-    assert b1.minimumHeight() >= 34
-    # setRole 로 primary → ghost 전환 시 글로우 제거.
-    b1.setRole("ghost")
+    for b in (b1, b2, b3):
+        assert b.graphicsEffect() is None          # 무광 — 이펙트 없음
+        assert b.minimumHeight() >= theme.PROFILE.control_h
+    b1.setRole("ghost")                             # role 은 QSS 프로퍼티로만
+    assert b1.property("role") == "ghost"
     assert b1.graphicsEffect() is None
     for b in (b1, b2, b3):
         b.deleteLater()
@@ -235,28 +237,17 @@ def test_filter_empty_state_when_no_needs_check(qapp):
     page.deleteLater()
 
 
-def test_list_header_only_for_table_variants(qapp):
-    """cleanroom·datum(표/제도) 만 상단 컬럼 헤더, 카드 변형엔 없음(C22)."""
+def test_list_header_and_score_rule_present(qapp):
+    """제도 시트 성격 — 상단 컬럼 헤더(타이틀블록) + 점수 컬럼 눈금이 있어야 한다."""
     from PyQt6.QtWidgets import QFrame
-    from aoi_verification.app.ui import theme
     from aoi_verification.app.ui.pages.match_review_page import MatchReviewPage
-
-    def has_header(page):
-        return any(f.property("role") == "listHeader"
-                   for f in page.findChildren(QFrame))
-    try:
-        for key in ("cleanroom", "datum"):
-            theme.set_variant(key)
-            p = MatchReviewPage()
-            assert has_header(p), f"{key}: 컬럼 헤더 없음"
-            p.deleteLater()
-        for key in ("instrument", "clarity", "patina"):
-            theme.set_variant(key)
-            p = MatchReviewPage()
-            assert not has_header(p), f"{key}: 카드 변형에 헤더 있음"
-            p.deleteLater()
-    finally:
-        theme.set_variant("instrument")
+    page = MatchReviewPage()
+    roles = {f.property("role") for f in page.findChildren(QFrame)}
+    assert "listHeader" in roles, "컬럼 헤더 누락"
+    page.load_state([_m("S1", 0.9)], coord_mode=True, tolerance=20.0)
+    roles = {f.property("role") for f in page.findChildren(QFrame)}
+    assert "vrule" in roles, "점수 컬럼 눈금 누락"
+    page.deleteLater()
 
 
 def test_over_row_auto_expands_candidates(qapp):

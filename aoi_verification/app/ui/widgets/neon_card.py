@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor
-from PyQt6.QtWidgets import QFrame, QGraphicsDropShadowEffect, QVBoxLayout
+from PyQt6.QtWidgets import QFrame, QVBoxLayout
 
 
 class NeonCard(QFrame):
-    """역할(role) 별로 다른 외곽선을 갖는 카드."""
+    """역할(role) 별로 다른 외곽선을 갖는 카드.
+
+    '도면' 은 무광 제도 시트라 그림자/글로우를 쓰지 않는다 — 면과 눈금(QSS)만."""
 
     def __init__(self, *, role: str = "card", parent=None) -> None:
         super().__init__(parent)
@@ -20,14 +20,6 @@ class NeonCard(QFrame):
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(pad, pad, pad, pad)
         self._layout.setSpacing(8)
-
-        if role == "card" and theme.PROFILE.card_shadow:
-            # 변형별 elevation 그림자(밝은 테마는 회색, 다크는 검정) — 글로우 대체.
-            eff = QGraphicsDropShadowEffect(self)
-            eff.setOffset(0, 2)
-            eff.setBlurRadius(20)
-            eff.setColor(QColor(*theme.SHADOW_RGBA))
-            self.setGraphicsEffect(eff)
 
     def body(self) -> QVBoxLayout:
         return self._layout

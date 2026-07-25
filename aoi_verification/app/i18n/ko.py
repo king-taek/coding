@@ -414,9 +414,7 @@ REVIEW_KEY_HINT = "↑↓ 줄 이동 · R 매치 없음 · Enter 검토 완료"
 KEY_HINT_MOVE = "줄 이동"
 KEY_HINT_REJECT = "매치 없음"
 KEY_HINT_DONE = "검토 완료"
-# 화면 스타일 스위처 (셋업 상단)
-VARIANT_SWITCH_LABEL = "화면 스타일"
-VARIANT_SWITCH_TOOLTIP = "화면 스타일을 즉시 바꿉니다. 검증 흐름과 데이터에는 영향이 없습니다."
+# 보기 옵션 (셋업 상단)
 REDUCE_MOTION_LABEL = "모션 줄이기"
 REDUCE_MOTION_TOOLTIP = "화면 전환·스크롤 애니메이션을 끕니다."
 LOAD_SCAN = "폴더 스캔 중…"

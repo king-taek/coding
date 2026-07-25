@@ -1513,9 +1513,6 @@ class MainWindow(QMainWindow):
 
         self._setup_page.start_requested.connect(self._on_start)
         self._setup_page.update_check_requested.connect(self._manual_update_check)
-        # 화면 스타일 스위처(셋업 상단) → 라이브 전환.
-        if hasattr(self._setup_page, "variant_selected"):
-            self._setup_page.variant_selected.connect(self._on_variant_selected)
         self._select_page.finished.connect(self._on_select_finished)
         self._select_page.state_changed.connect(self._schedule_autosave)
         self._match_page.match_confirmed.connect(self._on_match_confirmed)
@@ -1527,53 +1524,13 @@ class MainWindow(QMainWindow):
         self._match_review_page.finished.connect(self._on_match_review_done)
 
     def _apply_statusbar_theme(self) -> None:
-        """상태바 라벨 색을 현재 변형 토큰으로 재적용(전환 시 페이지 밖 위젯)."""
+        """상태바 라벨 색을 테마 토큰으로 적용(페이지 밖 위젯)."""
         self._credit_label.setStyleSheet(
             f"color: {theme.MUTE}; padding: 0 8px; font-weight: 600;")
         self._device_label.setStyleSheet(
             f"color: {theme.PASS}; padding: 0 8px; font-weight: 600;")
         self._usage_label.setStyleSheet(
             f"color: {theme.PASS}; padding: 0 8px; font-weight: 600;")
-
-    def _on_variant_selected(self, name: str) -> None:
-        """셋업 상단 스위처 — 화면 스타일 즉시 전환(세션 시작 전에만 허용).
-
-        전체 정체성이 바뀌는 만큼 하드컷 대신 이전 화면 스냅샷을 위에 얹어
-        페이드아웃하는 크로스페이드로(=C24 지적 보완)."""
-        from . import theme as _theme
-        from . import motion
-        if name == _theme.CURRENT_VARIANT or name not in _theme.VARIANTS:
-            return
-        if self._phase != PHASE_NONE:          # 이중 가드 — 스위처는 셋업에만 있음
-            return
-        old_pix = self._stack.grab() if motion.enabled() else None
-        _prefs.patch(ui_variant=name)
-        _theme.set_variant(name)
-        app = QApplication.instance()
-        if app is not None:
-            _theme.apply_to_app(app)           # QSS 먼저 — 새 위젯 1회 polish
-        self._rebuild_pages()
-        if old_pix is not None:                # 새 정체성 위로 옛 화면 페이드아웃
-            motion.fade_out_snapshot(self._stack, old_pix,
-                                     duration=motion.DUR_SLOW, slide_px=0)
-
-    def _rebuild_pages(self) -> None:
-        """페이지 5개를 파괴 후 재구축(인라인 f-string 색이 생성 시점에 박히므로).
-
-        세션 시작 전(셋업)에서만 호출되므로 상태 손실 없음."""
-        for w in (self._setup_page, self._select_page, self._match_page,
-                  self._result_page, self._match_review_page):
-            self._stack.removeWidget(w)
-            w.hide()
-            w.setParent(None)
-            w.deleteLater()
-        self._build_pages()
-        self._apply_statusbar_theme()
-        try:
-            self._loading.raise_()             # 오버레이 z-order 유지
-        except Exception:
-            pass
-        self._show_page(self._setup_page, animate=False)
 
     # ==================================================================
     def _page_order(self, w: QWidget) -> int:

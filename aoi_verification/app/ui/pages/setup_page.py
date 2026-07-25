@@ -52,7 +52,6 @@ class SetupPage(QWidget):
 
     start_requested = pyqtSignal(object)             # SetupInput
     update_check_requested = pyqtSignal()            # '업데이트 확인' 버튼
-    variant_selected = pyqtSignal(str)               # 화면 스타일 변형 키
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -98,8 +97,8 @@ class SetupPage(QWidget):
         title.setProperty("role", "title")
         root.addWidget(title)
 
-        # 화면 스타일 스위처 (상단) — 누르면 그 디자인으로 즉시 전환.
-        root.addWidget(self._build_variant_switcher())
+        # 보기 옵션 (상단) — 모션 줄이기.
+        root.addWidget(self._build_view_options())
 
         subtitle = QLabel(i18n.KO.SETUP_HINT, self)
         subtitle.setProperty("role", "subtitle")
@@ -478,32 +477,12 @@ class SetupPage(QWidget):
         _prefs.patch(threshold=v / 100.0)
 
     # ------------------------------------------------------------------
-    def _build_variant_switcher(self) -> QWidget:
-        """상단 화면 스타일 스위처 — 변형 칩 + '모션 줄이기' 토글."""
+    def _build_view_options(self) -> QWidget:
+        """상단 보기 옵션 줄 — '모션 줄이기' 접근성 토글."""
         host = QWidget(self)
         row = QHBoxLayout(host)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(8)
-        lbl = QLabel(i18n.KO.VARIANT_SWITCH_LABEL, host)
-        lbl.setProperty("role", "muted")
-        row.addWidget(lbl)
-
-        self._variant_group = QButtonGroup(host)
-        self._variant_group.setExclusive(True)
-        self._variant_btns: dict[str, NeonButton] = {}
-        for key in theme.variant_keys():
-            b = NeonButton(theme.VARIANTS[key].label, role="ghost")
-            b.setProperty("variantChip", True)
-            b.setCheckable(True)
-            b.setMinimumHeight(38)             # ≥편안한 터치 타깃(C24)
-            b.setToolTip(i18n.KO.VARIANT_SWITCH_TOOLTIP)
-            if key == theme.CURRENT_VARIANT:
-                b.setChecked(True)
-            b.clicked.connect(lambda _c, k=key: self.variant_selected.emit(k))
-            self._variant_group.addButton(b)
-            self._variant_btns[key] = b
-            row.addWidget(b)
-
         row.addStretch(1)
         self._reduce_chk = QCheckBox(i18n.KO.REDUCE_MOTION_LABEL, host)
         self._reduce_chk.setToolTip(i18n.KO.REDUCE_MOTION_TOOLTIP)
