@@ -107,9 +107,13 @@ _DARK: dict[str, str] = {
     "ink": "#EAF0F6",       # 백선(白線)
     "ink2": "#C3D0DC",
     "mute": "#A9BCCB",
-    "accent": "#8EC2F0",    # 밝힌 청사진 블루(짙어진 원지 위에서 다시 띄운다)
-    "accent_hover": "#A6D0F6",
-    "accent_pressed": "#74AEDF",
+    # ★ 강조색은 **자기 종이와 색상각이 달라야** 한다.  이전 #8EC2F0 은 bg 와 색상각
+    #   차이가 0.8° · 채도비 0.54 라, 화면 전체가 한 색상이 되고 '강조 하나' 원칙을
+    #   명도만으로 버텼다(벨럼 167° / 흑연 166° 와 대조적).  시안 쪽 195° 로 돌려
+    #   Δh 14° 를 확보한다 — 청사진의 감광 색역 안이라 컨셉을 벗어나지 않는다.
+    "accent": "#74C8E4",    # 청사진 잉크(h 195°) — 원지(h 209°)와 구분된다
+    "accent_hover": "#A6E2F6",
+    "accent_pressed": "#74C4DF",
     "on_accent": "#0B1F33",
     "pass": "#7FD79E",
     "danger": "#FFA9A1",
@@ -142,7 +146,9 @@ _GRAPHITE: dict[str, str] = {
     "on_accent": "#16140F",
     "pass": "#8ACB8E",
     "danger": "#FFA398",
-    "warn": "#E9C478",
+    # ★ 채도 0.485 로 accent(0.389)를 이기고 있었다 — 경고가 강조보다 튀면 '강조 하나'가
+    #   깨진다.  0.327 로 낮춘다(면 대비 9.52/10.55 로 게이트는 여유).
+    "warn": "#DFC796",
     "focus": "#ABCEF6",
     "thumb_frame": "#6F6859",
 }

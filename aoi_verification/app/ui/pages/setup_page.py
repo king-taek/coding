@@ -750,9 +750,11 @@ class SetupPage(QWidget):
         edit.style().polish(edit)
         err = edit.property("_errLabel")
         if err is not None:
-            if state == "empty":
-                err.setText(i18n.KO.SETUP_NEED_FOLDER)
-            elif state == "missing":
+            # ★ 'empty' 분기는 두지 않는다.  `_validate()` 가 빈 필드에는 state 를 주지
+            #   않기 때문에(빈 상태에서 빨간 테두리로 겁주지 않으려는 의도) 도달할 수
+            #   없고, 같은 말은 이미 버튼 옆 `_start_hint`(START_BLOCKED_HINT)가 한다.
+            #   도달 불가 분기는 '처리되고 있다'는 착각만 남긴다.
+            if state == "missing":
                 err.setText(i18n.KO.SETUP_INVALID_FOLDER)
             else:
                 err.setText("")

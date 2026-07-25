@@ -214,8 +214,10 @@ JUDGE_NAME_COORD = "좌표 매칭 · 허용 오차"
 JUDGE_VALUE_COORD_FMT = "{tol:.0f} µm"
 JUDGE_NAME_LEGACY_FMT = "구형 {sub} · 유사도 임계치"
 JUDGE_VALUE_LEGACY_FMT = "{th:.0f} %"
+# ★ 배치에 종속된 안내를 하지 않는다 — "아래 '매칭 설정' 카드" 라고 쓰면 C안처럼
+#   상세를 접어 두는 배치에서는 화면에 없는 것을 가리킨다.
 MODE_BADGE_TOOLTIP = (
-    "지금 이 설정으로 매칭합니다.  바꾸려면 아래 ‘매칭 설정’ 카드를 쓰세요."
+    "지금 이 설정으로 매칭합니다.  ‘매칭 설정’ 에서 바꿀 수 있습니다."
 )
 COORD_NO_DATA_MSG = (
     "좌표 정보가 없습니다.\n\n"
@@ -532,7 +534,6 @@ SCOPE_ALL = "모든 슬롯 (기본)"
 SCOPE_SUBSET = "일부 슬롯만 선택…"
 SCOPE_SUBSET_COUNT_FMT = "일부 슬롯 ({n}/{total})"
 # 입력 유효성 — 왜 [검증 시작] 을 누를 수 없는지 눈에 보이게.
-SETUP_NEED_FOLDER = "폴더를 선택해 주세요."
 SETUP_INVALID_FOLDER = "폴더를 찾을 수 없습니다."
 START_BLOCKED_HINT = "기준·검증 폴더를 먼저 지정하세요."
 # 다이얼로그 상단의 짧은 선택 수 표시.

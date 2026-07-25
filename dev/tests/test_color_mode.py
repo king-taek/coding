@@ -149,3 +149,37 @@ def test_no_design_variant_machinery_resurrected():
     for gone in ("VARIANTS", "set_variant", "variant_keys", "CURRENT_VARIANT",
                  "DEFAULT_VARIANT", "Variant"):
         assert not hasattr(theme, gone), f"theme.{gone} 부활"
+
+
+# ── 강조는 '자기 종이'와 구분되어야 한다 ─────────────────────────────────────
+def _hsv(hexv: str) -> tuple[float, float, float]:
+    import colorsys
+    h = hexv.lstrip("#")
+    r, g, b = (int(h[i:i + 2], 16) / 255.0 for i in (0, 2, 4))
+    hh, s, v = colorsys.rgb_to_hsv(r, g, b)
+    return hh * 360.0, s, v
+
+
+@pytest.mark.parametrize("mode", _MODES)
+def test_accent_is_distinguishable_from_its_own_paper(mode):
+    """★ 강조색이 바탕과 **색상각**으로도 구분되어야 한다.
+
+    청사진 다크의 accent 가 한때 bg 와 색상각 차이 **0.8°** · 채도비 0.54 였다 —
+    '강조 하나' 원칙을 명도만으로 버티는 셈이고, 화면 전체가 한 색상이 된다.
+    (벨럼 167° / 흑연 166° 와 대조적이었다.)  대비만 재면 이 결함이 안 보인다."""
+    theme.set_color_mode(mode)
+    c = theme.COLORS
+    ah, a_s, _ = _hsv(c["accent"])
+    bh, b_s, _ = _hsv(c["bg"])
+    dh = abs(ah - bh)
+    dh = min(dh, 360.0 - dh)
+    assert dh >= 10.0, f"{mode}: accent 와 bg 의 색상각 차 {dh:.1f}° — 같은 색상이다"
+
+
+# ※ '경고는 강조보다 채도가 낮아야 한다'는 테스트를 넣으려다 **뺐다.**
+#    흑연 모드에서 warn(0.485)이 accent(0.389)를 이긴다는 지적 자체는 타당해 그 값은
+#    낮췄지만(#E9C478 → #DFC796), 이를 **불변식으로 만들면 거짓**이 된다:
+#    이 프로젝트의 규칙은 "ACCENT 는 주요 액션·현재 선택 전용, **상태는 PASS/DANGER/WARN**"
+#    이고, 상태색은 문제가 생겼을 때 눈을 끄는 것이 제 역할이다.  실제로 라이트의
+#    warn(0.893)·danger(0.819)는 accent(0.672)보다 채도가 높고 그게 의도다.
+#    통과하지 않는 규칙을 테스트로 박으면 다음 사람이 잘못된 방향으로 팔레트를 고친다.
