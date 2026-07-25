@@ -187,7 +187,6 @@ class MatchesReviewDialog(QDialog):
         self._matches: list[MatchResult] = sorted(
             matches, key=lambda m: (m.slot, m.ref_path.name.lower()),
         )
-        # 창에 최소화/최대화 버튼 + F11 전체화면 토글 (#9). 첫 show 이전에 설정.
         # ★ 창 제어(최소화/최대화/F11) 헬퍼를 부르지 않는다 — 이 다이얼로그는
         #   별도 OS 창이 아니라 **메인 창 안의 시트**로 뜬다(widgets/sheet_host.py).
         #   최대화·전체화면은 메인 창이 담당한다.

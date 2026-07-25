@@ -380,6 +380,90 @@ def test_no_popup_escapes_to_a_separate_window(qapp):
         "별도 OS 창으로 뜨는 팝업이 남았다 — sheet_host 를 쓰라: " + ", ".join(offenders))
 
 
+def test_dialogs_do_not_claim_window_powers(qapp):
+    """★ 시트로 뜨는 다이얼로그는 **창 제어를 요구하지 않는다.**
+
+    자식 위젯에는 타이틀바가 없어 최소화/최대화 힌트가 아무 일도 하지 않고, F11 은
+    '전체화면'을 약속하면서 실제로는 아무 변화도 만들지 못한다(실측: 자식에
+    `showFullScreen()` 을 걸면 `isFullScreen()` 만 True 가 되고 기하는 그대로다).
+    지키지 못할 약속을 하는 단축키는 없는 것이 낫다.
+
+    전체화면은 **메인 창**이 담당한다 — 뷰어가 창 안 시트가 된 뒤로는 그것이 '사진을
+    화면 가득 보는' 유일한 경로이므로, 사라지지 않았는지 함께 고정한다."""
+    import io
+    import tokenize
+    ui_dir = (Path(__file__).resolve().parents[2] / "aoi_verification" / "app" / "ui")
+    offenders: list[str] = []
+    for path in sorted(ui_dir.rglob("*.py")):
+        if path.name in ("window_controls.py", "main_window.py"):
+            continue                       # 헬퍼 자신과 **메인 창**은 허용
+        src = path.read_text(encoding="utf-8")
+        try:
+            code = " ".join(
+                t.string for t in tokenize.generate_tokens(io.StringIO(src).readline)
+                if t.type not in (tokenize.COMMENT, tokenize.STRING))
+        except Exception:
+            code = src
+        for pat in ("enable_window_controls", "add_fullscreen_shortcut",
+                    "showMaximized", "showFullScreen"):
+            if pat in code:
+                offenders.append(f"{path.relative_to(ui_dir.parents[2])}: {pat}")
+    assert not offenders, (
+        "시트로 뜨는 위젯이 창 제어를 부른다 — 자식 위젯에는 효과가 없다: "
+        + ", ".join(offenders))
+
+    # 메인 창에는 F11 이 살아 있어야 한다(옛 뷰어별 F11 의 대체).
+    from PyQt6.QtGui import QKeySequence, QShortcut
+    from aoi_verification.app.ui import main_window as mw
+    src = (ui_dir / "main_window.py").read_text(encoding="utf-8")
+    assert "add_fullscreen_shortcut(self)" in src, \
+        "메인 창의 F11 전체화면이 사라졌다 — 사진을 화면 가득 보는 경로가 없어진다"
+    assert QKeySequence("F11") and QShortcut and mw is not None
+
+
+def test_f11_still_reaches_the_window_while_a_sheet_is_open(qapp):
+    """★ 시트가 열린 동안에도 F11 이 **메인 창**에 닿아야 한다.
+
+    뷰어가 창 안 시트가 된 뒤로 '사진을 화면 가득 보는' 유일한 경로가 이것이다.  시트가
+    열린 동안 키를 가로채는 필터가 이 경로를 막으면 검사 면적을 넓히는 수단이 사라진다.
+    (시트는 메인 창의 자손이므로 `WidgetWithChildrenShortcut` 로 닿는다.)"""
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtTest import QTest
+    from aoi_verification.app.ui.widgets.window_controls import (
+        add_fullscreen_shortcut)
+    win = QWidget()
+    win.resize(900, 700)
+    h = sheet_host.SheetHost(win)
+    win._sheets = h
+    add_fullscreen_shortcut(win)           # 메인 창과 같은 배선
+    win.show()
+    for _ in range(8):
+        qapp.processEvents()
+    dlg = QDialog(win)
+    got = {}
+
+    def check():
+        QTest.keyClick(dlg, Qt.Key.Key_F11)
+        for _ in range(10):
+            qapp.processEvents()
+        got["full"] = win.isFullScreen()
+        got["sheet_alive"] = h._stack != []
+        dlg.accept()
+
+    _later(40, check)
+    sheet_host.run(dlg)
+    try:
+        assert got["full"] is True, "시트가 열린 동안 F11 이 창에 닿지 않았다"
+        assert got["sheet_alive"] is True, "F11 이 시트를 닫아 버렸다"
+    finally:
+        win.showNormal()
+        h.close_all()
+        win.hide()
+        qapp.processEvents()
+        win.deleteLater()
+        qapp.processEvents()
+
+
 def test_app_filter_is_installed_only_while_a_sheet_is_open(qapp, host):
     """전역 필터는 마우스 이동까지 전부 받는다 — 평소엔 걸어 두지 않는다."""
     win, h = host

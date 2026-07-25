@@ -41,7 +41,6 @@ from ... import i18n
 from .. import theme
 from .neon_button import NeonButton
 from .option_group import reflow_into_grid
-from .window_controls import add_fullscreen_shortcut, enable_window_controls
 
 # 타일 최소 폭 — 실제 폭은 열 수 계산이 늘려 준다.  슬롯명은 'PI_Opening_A1' 처럼
 # 길 수 있어 가운데 생략(…)으로 줄이고 전체 이름은 툴팁에 둔다.
@@ -103,13 +102,15 @@ class SlotSelectDialog(QDialog):
         self._accepted = False
         self._tiles: dict[str, _SlotTile] = {}
         self._visible: list[str] = list(self._slot_names)
-        # ★ `maximized=False` 다.  기본값(True)은 다음 이벤트 tick 에 showMaximized() 를
-        #   걸어 창을 화면 전체로 키운다 — 그래서 이전 구현의 `resize(560, 600)` 은
-        #   **죽은 코드**였다(요청해도 항상 최대화됐다).  사진을 다루는 다이얼로그
-        #   (일괄 선택·실패 검토)는 그 공간이 필요하지만, 짧은 이름 24개를 고르는 창이
-        #   27인치를 채우면 여백만 늘고 눈이 멀리 이동한다.  크기를 진짜로 정한다.
-        enable_window_controls(self, maximized=False)
-        add_fullscreen_shortcut(self)
+        # ★ 창 제어(최소화/최대화/F11) 헬퍼를 부르지 않는다 — 이 다이얼로그는 별도 OS
+        #   창이 아니라 **메인 창 안의 시트**로 뜬다(widgets/sheet_host.py).  자식 위젯에는
+        #   타이틀바가 없어 힌트가 무의미하고, F11 은 '전체화면'을 약속하면서 실제로는
+        #   아무 변화도 만들지 못한다(실측: isFullScreen 만 True 가 되고 기하는 그대로).
+        #   지키지 못할 약속을 하는 단축키는 없는 것이 낫다 — 전체화면은 메인 창의 F11.
+        #
+        #   ★ 크기는 **내용만큼**이다(아래 `_size_to_content`).  짧은 이름 24개를 고르는
+        #   창이 27인치를 채우면 여백만 늘고 눈이 멀리 이동한다.  사진을 다루는 시트
+        #   (일괄 선택·실패 검토)만 창 전체를 쓴다(`full_bleed=True`).
         self._build()
         self._size_to_content()
 

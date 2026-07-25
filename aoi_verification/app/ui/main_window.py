@@ -41,6 +41,7 @@ from .pages.setup_page import SetupInput, SetupPage
 from .widgets.loading_overlay import LoadingOverlay
 from .widgets import sheet_host as sheets
 from .widgets.sheet_host import SheetHost
+from .widgets.window_controls import add_fullscreen_shortcut
 
 
 # ---------------------------------------------------------------------------
@@ -123,6 +124,11 @@ class MainWindow(QMainWindow):
         # OpenVINO 자동 설치 안내 — 사용자 요청으로 rollback (시작 시 팝업
         # 띄우지 않음).  설치 도우미 모듈은 남겨두어 향후 수동 호출 가능.
         self._openvino_worker: Optional[QThread] = None
+
+        # ★ F11 전체화면 — 뷰어·검토 팝업이 **창 안 시트**가 된 뒤로 '사진을 화면 가득
+        #   보는' 유일한 경로다(옛 뷰어별 F11 의 대체).  되돌리면 들어올 때의 상태
+        #   (최대화/보통)로 돌아간다.
+        self._fullscreen_shortcut = add_fullscreen_shortcut(self)
 
         # 앱 내 창(시트) 호스트 — 모든 팝업이 이 창 안에서 뜬다(별도 OS 창 금지).
         # ★ 이름 `_sheets` 는 `sheet_host.host_for` 가 찾는 **약속된 속성**이다.
