@@ -56,7 +56,10 @@ class SetupPageB(SetupPage):
     """B안 — 섹션을 2열로 흘리고 액션바를 하단에 고정."""
 
     LAYOUT_KEY = "b"
-    _MIN_SECTION_W = 430           # 이 폭을 밑돌면 열을 줄인다(가로 스크롤 방지)
+    # ★ 430 이면 800px 창에서 그리드가 **1열로 붕괴**해 세로 스크롤이 세 안 중 최악
+    #   이었다(실측 vbar 1119) — B안의 존재 이유가 사라진다.  360 이면 800px 에서도
+    #   2열을 유지한다(360*2 + spacing 16 + 마진 64 = 800).
+    _MIN_SECTION_W = 360
 
     def _build_body(self, root: QVBoxLayout) -> None:
         root.addWidget(self._build_top_bar())
@@ -110,6 +113,8 @@ class SetupPageC(SetupPage):
 
     def _build_body(self, root: QVBoxLayout) -> None:
         root.addWidget(self._build_top_bar())
+        # ★ 부제를 빠뜨리고 있었다 — 첫 방문자가 '기준/검증이 뭔지' 알 방법이 없었다.
+        root.addWidget(self._build_subtitle())
         # 폴더는 늘 보인다(매번 바꾸는 값).
         root.addWidget(self._build_device_row())
         # 요약 — 지금 무엇으로 돌아갈지 한 줄로.
@@ -161,10 +166,18 @@ class SetupPageC(SetupPage):
         self.scope_group.selection_changed.connect(lambda _k: self._refresh_summary())
         self.legacy_switch.toggled.connect(lambda _o: self._refresh_summary())
         self.legacy_group.selection_changed.connect(lambda _k: self._refresh_summary())
+        self.coord_tol_spin.valueChanged.connect(lambda _v: self._refresh_summary())
+        self.slider.valueChanged.connect(lambda _v: self._refresh_summary())
 
     def _refresh_summary(self) -> None:
-        engine = (i18n.KO.SUMMARY_ENGINE_LEGACY if self.legacy_switch.is_on()
-                  else i18n.KO.SUMMARY_ENGINE_COORD)
+        # ★ 요약은 이 배치의 **안전 장치**다 — 엔진 이름만으론 부족하고 판정에 쓰이는
+        #   **수치**(허용 오차 µm / 임계치 %)까지 있어야 오조작이 눈에 걸린다.
+        if self.legacy_switch.is_on():
+            engine = i18n.KO.SUMMARY_ENGINE_LEGACY_FMT.format(
+                th=float(self.slider.value()))
+        else:
+            engine = i18n.KO.SUMMARY_ENGINE_COORD_FMT.format(
+                tol=float(self.coord_tol_spin.value()))
         scope = (self.scope_group.button(self.scope_group.current_key()).text()
                  if self.scope_group.button(self.scope_group.current_key())
                  else "")

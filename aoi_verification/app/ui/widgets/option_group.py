@@ -34,6 +34,9 @@ def reflow_into_grid(grid: QGridLayout, widgets: Sequence[QWidget],
     """가로 스크롤이 나지 않는 열 수를 계산해 재배치하고 열 수를 반환.
 
     순수 계산 + 레이아웃 조작만 하는 헬퍼(위젯 재생성 없음) — 헤드리스 테스트 가능.
+
+    ★ 열 수가 그대로면 **아무것도 하지 않는다**.  이전엔 리사이즈마다 전부 떼고 다시
+    붙여서, 60px 드래그 한 번에 재조립이 119회 일어났다(실측 지적).
     """
     if not widgets:
         return 0
@@ -41,6 +44,9 @@ def reflow_into_grid(grid: QGridLayout, widgets: Sequence[QWidget],
     item_w = max(1, int(min_item_w) + spacing)
     avail = int(available_w) if available_w and available_w > 1 else item_w
     cols = max(1, min(len(widgets), avail // item_w))
+    # 이미 그 열 수로 그 위젯들이 배치돼 있으면 그대로 둔다.
+    if grid.count() == len(widgets) and _grid_cols(grid) == cols:
+        return cols
     # 기존 배치를 떼어낸다(삭제하지 않고 재사용 — 상태·연결 보존).
     while grid.count():
         grid.takeAt(0)
@@ -49,6 +55,15 @@ def reflow_into_grid(grid: QGridLayout, widgets: Sequence[QWidget],
     for c in range(cols):
         grid.setColumnStretch(c, 1)
     grid.setColumnStretch(cols, 0)
+    return cols
+
+
+def _grid_cols(grid: QGridLayout) -> int:
+    """현재 그리드에 실제로 쓰인 열 수(재조립이 필요한지 판단용)."""
+    cols = 0
+    for i in range(grid.count()):
+        r, c, rs, cs = grid.getItemPosition(i)
+        cols = max(cols, c + 1)
     return cols
 
 
@@ -65,13 +80,24 @@ class OptionGroup(QWidget):
                  current: str = "",
                  min_tile_w: int = DEFAULT_MIN_TILE_W,
                  fixed_cols: int = 0,
+                 role: str = "option",
+                 activate_on_arrow: bool = True,
                  parent: Optional[QWidget] = None) -> None:
-        """``fixed_cols`` 를 주면 폭에 상관없이 그 열 수로 고정한다(한 줄 칩 그룹 등)."""
+        """``fixed_cols`` 를 주면 폭에 상관없이 그 열 수로 고정한다(한 줄 칩 그룹 등).
+
+        ``role`` — QSS 등급.  ``"option"``(기본, 44px 타일) 또는 ``"chip"``(작은 칩).
+
+        ``activate_on_arrow`` — ★ ``False`` 면 방향키가 **포커스만** 옮기고 선택은
+        Space/Enter 로 확정한다.  파괴적 액션(배치 전환 = 페이지 재생성)에 방향키 즉시
+        커밋을 두면 키보드로 훑기만 해도 화면이 날아가고 포커스를 잃는다.
+        """
         super().__init__(parent)
         self._keys: list[str] = []
         self._buttons: dict[str, QPushButton] = {}
         self._min_tile_w = int(min_tile_w)
         self._fixed_cols = int(fixed_cols)
+        self._role = role
+        self._activate_on_arrow = bool(activate_on_arrow)
         self._last_cols = 0
 
         self._grid = QGridLayout(self)
@@ -83,11 +109,12 @@ class OptionGroup(QWidget):
         self._group.setExclusive(True)
 
         for key, label in options:
-            btn = NeonButton(label, role="option", parent=self)
+            btn = NeonButton(label, role=role, parent=self)
             btn.setCheckable(True)
             btn.setObjectName(f"opt_{key}")
             btn.setAccessibleName(label)
-            btn.setMinimumHeight(theme.PROFILE.control_h_lg)
+            if role == "option":
+                btn.setMinimumHeight(theme.PROFILE.control_h_lg)
             btn.setSizePolicy(QSizePolicy.Policy.Expanding,
                               QSizePolicy.Policy.Fixed)
             btn.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -172,11 +199,15 @@ class OptionGroup(QWidget):
         elif key in (Qt.Key.Key_Left, Qt.Key.Key_Up):
             step = -1
         if step and self._keys:
-            cur = self.current_key()
-            idx = self._keys.index(cur) if cur in self._keys else 0
+            # 기준점은 '지금 포커스가 있는 타일' — 없으면 선택된 타일.
+            focused = next((k for k, b in self._buttons.items() if b.hasFocus()), "")
+            base = focused or self.current_key()
+            idx = self._keys.index(base) if base in self._keys else 0
             idx = max(0, min(idx + step, len(self._keys) - 1))
             new_key = self._keys[idx]
-            if new_key != cur:
+            # ★ activate_on_arrow=False 면 **포커스만** 옮긴다.  파괴적 액션(배치 전환 =
+            #   페이지 재생성)에 즉시 커밋을 두면 방향키로 훑기만 해도 화면이 날아간다.
+            if self._activate_on_arrow and new_key != base:
                 self.set_current_key(new_key, emit=True)
             btn = self._buttons.get(new_key)
             if btn is not None:

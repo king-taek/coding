@@ -18,17 +18,62 @@ _QSS = (Path(__file__).resolve().parents[2] / "aoi_verification" / "app" / "ui"
         / "style.qss").read_text(encoding="utf-8")
 
 
+# ★ 모드 목록을 복제하지 않는다 — theme 에서 읽어야 새 색 모드가
+#   추가되는 순간 모든 대비·포커스 계약이 자동으로 걸린다.
+_MODES = list(theme.color_mode_keys())
+
+
 @pytest.fixture(autouse=True)
 def _restore_light():
     yield
     theme.set_color_mode("light")
 
 
-def test_two_modes_available():
-    assert set(theme.color_mode_keys()) == {"light", "dark"}
+def test_three_modes_available():
+    """벨럼(라이트) + 어두운 모드 **둘**(청사진·흑연)."""
+    assert set(theme.color_mode_keys()) == {"light", "dark", "graphite"}
+    # 사용자에게 보이는 이름이 모든 모드에 있어야 한다(스위처가 이걸 읽는다).
+    assert set(theme.COLOR_MODE_LABELS) == set(theme.PALETTES)
 
 
-@pytest.mark.parametrize("mode", ["light", "dark"])
+def test_dark_key_stays_dark_for_prefs_compat():
+    """★ 청사진의 키는 `"dark"` 로 유지한다 — 기존 prefs 가 마이그레이션 없이 동작."""
+    assert "dark" in theme.PALETTES
+    theme.set_color_mode("dark")
+    assert theme.COLORS["bg"] == theme.PALETTES["dark"]["bg"]
+
+
+def test_two_dark_modes_are_opposite_in_temperature_and_chroma():
+    """두 어두운 모드가 서로의 **변주가 아니라 다른 판단**이어야 한다.
+
+    청사진 = 유채·차가움(청색 감광지) / 흑연 = 무채·따뜻함(불 끈 제도지)."""
+    def chroma(hexv: str) -> float:
+        h = hexv.lstrip("#")
+        ch = [int(h[i:i + 2], 16) for i in (0, 2, 4)]
+        return (max(ch) - min(ch)) / 255.0
+
+    blue = theme.PALETTES["dark"]["bg"]
+    graph = theme.PALETTES["graphite"]["bg"]
+    assert chroma(blue) > 0.15, f"청사진 bg 채도가 낮다 ({chroma(blue):.3f})"
+    assert chroma(graph) < 0.08, f"흑연 bg 가 무채가 아니다 ({chroma(graph):.3f})"
+    # 색 온도가 반대: 청사진은 파랑 우세, 흑연은 빨강 우세.
+    def rgb(h):
+        h = h.lstrip("#")
+        return [int(h[i:i + 2], 16) for i in (0, 2, 4)]
+    br, _, bb = rgb(blue)
+    gr, _, gb = rgb(graph)
+    assert bb > br, "청사진 바탕이 파랑 쪽이어야 한다"
+    assert gr > gb, "흑연 바탕이 따뜻한 쪽이어야 한다"
+
+
+def test_both_dark_modes_are_actually_dark():
+    for key in ("dark", "graphite"):
+        h = theme.PALETTES[key]["bg"].lstrip("#")
+        assert sum(int(h[i:i + 2], 16) for i in (0, 2, 4)) / 3 < 90, \
+            f"{key} 바탕이 어둡지 않다"
+
+
+@pytest.mark.parametrize("mode", _MODES)
 def test_qss_renders_fully_in_both_modes(mode):
     theme.set_color_mode(mode)
     out = theme.render_qss(_QSS)
@@ -65,25 +110,22 @@ def test_unknown_mode_falls_back():
     assert theme.COLOR_MODE == theme.DEFAULT_COLOR_MODE
 
 
-def test_dark_is_not_a_naive_inversion():
-    """다크는 라이트를 뒤집은 값이 아니어야 한다(청사진 컨셉의 야간판)."""
-    light, dark = theme.PALETTES["light"], theme.PALETTES["dark"]
+@pytest.mark.parametrize("key", ["dark", "graphite"])
+def test_dark_is_not_a_naive_inversion(key):
+    """어두운 모드는 라이트를 뒤집은 값이 아니어야 한다."""
+    light, dark = theme.PALETTES["light"], theme.PALETTES[key]
 
     def inv(hexv: str) -> str:
         h = hexv.lstrip("#")
         return "#%02X%02X%02X" % tuple(255 - int(h[i:i + 2], 16) for i in (0, 2, 4))
 
     same_as_inverse = [k for k in light if dark[k].upper() == inv(light[k])]
-    assert not same_as_inverse, f"단순 반전 값: {same_as_inverse}"
-    # 다크 바탕은 라이트 바탕보다 확실히 어둡고, 파랑 쪽으로 기울어 있다(청사진).
-    dh = dark["bg"].lstrip("#")
-    r, g, b = (int(dh[i:i + 2], 16) for i in (0, 2, 4))
-    assert b > r, "청사진 야간판이라면 바탕이 파랑 쪽이어야 한다"
+    assert not same_as_inverse, f"{key}: 단순 반전 값: {same_as_inverse}"
 
 
 def test_scrim_is_translucent_enough_to_see_through():
     """로딩 스크림이 화면을 '전부 가리지' 않아야 한다(사용자 요청)."""
-    for mode in theme.color_mode_keys():
+    for mode in _MODES:
         theme.set_color_mode(mode)
         alpha = theme.SCRIM_RGBA[3]
         assert 60 <= alpha <= 130, f"{mode}: 스크림 알파 {alpha}"

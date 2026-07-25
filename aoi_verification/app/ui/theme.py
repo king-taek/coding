@@ -118,7 +118,44 @@ _DARK: dict[str, str] = {
     "thumb_frame": "#6B8CAB",
 }
 
-PALETTES: dict[str, dict[str, str]] = {"light": _LIGHT, "dark": _DARK}
+# ── 두 번째 어두운 모드: **흑연(graphite)** ─────────────────────────────────────
+#
+# 청사진 다크가 '짙은 청색 종이 + 백선'(유채·차가움)이라면, 흑연 다크는 **같은 벨럼
+# 시트의 불을 끈 것**(무채·따뜻함)이다.  둘은 색 온도와 채도가 반대라 서로의 변주가
+# 아니라 다른 판단이고, 그러면서 둘 다 '도면' 안에 있다:
+#   · 청사진 — 청색 감광지에 흰 선 (bg 채도지표 0.228)
+#   · 흑연  — 어두운 제도지에 흑연 선, 청사진 블루는 잉크로만 (bg 채도지표 0.028)
+# 웜-무채 바탕 위에서는 같은 블루 강조가 훨씬 유채로 읽혀, 강조 하나 원칙이 더 또렷해진다.
+_GRAPHITE: dict[str, str] = {
+    "bg": "#1C1A15",        # 불 끈 제도지
+    "panel": "#26231C",
+    "elev": "#302C24",
+    "line": "#7C7565",      # 흑연 눈금 — panel 3.43 / bg 3.80
+    "line2": "#3F3A31",     # 장식 전용
+    "line_strong": "#8E8675",   # 상호작용 경계 — elev 에서도 3.85
+    "ink": "#F3F0E8",       # 흑연 선(밝게)
+    "ink2": "#D4CEC0",
+    "mute": "#A8A192",
+    "accent": "#8FBEEA",    # 청사진 블루 — 웜 무채 바탕에서 유일한 유채
+    "accent_hover": "#A6CDF1",
+    "accent_pressed": "#76A9DC",
+    "on_accent": "#16140F",
+    "pass": "#8ACB8E",
+    "danger": "#FFA398",
+    "warn": "#E9C478",
+    "focus": "#ABCEF6",
+    "thumb_frame": "#6F6859",
+}
+
+# ★ 키 `"dark"` 는 청사진에 그대로 둔다 — 기존 prefs(`color_mode:"dark"`)가 마이그레이션
+#   없이 계속 동작한다.  새 모드만 새 키를 받는다.
+PALETTES: dict[str, dict[str, str]] = {
+    "light": _LIGHT, "dark": _DARK, "graphite": _GRAPHITE,
+}
+# 사용자에게 보이는 이름 — 스위처 순서 = 이 dict 순서(밝음 → 어두움).
+COLOR_MODE_LABELS: dict[str, str] = {
+    "light": "벨럼", "dark": "청사진", "graphite": "흑연",
+}
 DEFAULT_COLOR_MODE = "light"
 COLOR_MODE = DEFAULT_COLOR_MODE
 
@@ -126,7 +163,8 @@ COLOR_MODE = DEFAULT_COLOR_MODE
 # ★ 이전 값(96/120)은 (a) 다크의 뒤 텍스트 대비를 4.43 으로 떨궈 자체 게이트 5.0 을
 #   깼고 (b) 여유가 **적은** 다크에 오히려 더 두꺼운 디밍을 줘 거꾸로였다.
 #   실측: light 84 → 7.07 · dark 96 → 5.67 (둘 다 게이트 통과).
-_SCRIMS = {"light": (27, 26, 23, 84), "dark": (5, 16, 28, 96)}
+_SCRIMS = {"light": (27, 26, 23, 84), "dark": (5, 16, 28, 96),
+           "graphite": (11, 10, 8, 96)}     # 실측 뒤 텍스트 6.48 (게이트 5.0)
 
 COLORS: dict[str, str] = dict(_LIGHT)   # 현재 모드의 색(set_color_mode 가 갱신)
 SCRIM_RGBA = _SCRIMS[DEFAULT_COLOR_MODE]

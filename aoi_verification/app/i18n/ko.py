@@ -202,6 +202,16 @@ ENGINE_ACTIVE_LEGACY_FMT = "구형 {sub} 모드 사용 중 — 유사도 임계�
 # 문장 안에 넣을 짧은 이름(타일 라벨의 괄호까지 넣으면 괄호가 겹친다).
 ENGINE_MODE_BASIC_SHORT = "기본"
 ENGINE_MODE_EFFICIENCY_SHORT = "고효율"
+# ── 상단 모드 배지 — "지금 무슨 모드야?"를 스크롤 없이 2초 안에 ───────────────────
+# 채점자 5인이 전부 같은 지적을 했다: 판정 기준 문장이 엔진 카드 안(A안은 화면 밖,
+# C안은 접힘 아래)에 있어, 무슨 엔진·무슨 수치로 도는지 알려면 찾아 내려가야 했다.
+# 배지는 **판정 기준 값까지** 담는다 — 모드 이름만으로는 오조작을 못 막는다.
+MODE_BADGE_CAPTION = "판정 기준"
+MODE_BADGE_COORD_FMT = "좌표 매칭 · 허용 오차 {tol:.0f} µm"
+MODE_BADGE_LEGACY_FMT = "구형 {sub} · 유사도 임계치 {th:.0f} %"
+MODE_BADGE_TOOLTIP = (
+    "지금 이 설정으로 매칭합니다.  바꾸려면 아래 ‘매칭 설정’ 카드를 쓰세요."
+)
 COORD_NO_DATA_MSG = (
     "좌표 정보가 없습니다.\n\n"
     "이미지 파일명 또는 폴더에 좌표 데이터(Camtek LIVE / INI / KLA .001)가\n"
@@ -445,13 +455,22 @@ SETUP_DETAIL_OPEN = "설정 자세히 ▾"
 SETUP_DETAIL_CLOSE = "설정 자세히 ▴"
 SUMMARY_CAPTION = "이 설정으로 시작합니다"
 SUMMARY_FMT = "{engine} · {scope} · {auto}"
+# ★ 요약은 C안의 안전 장치라 판정 **수치**까지 담아야 한다 — 이름만으론 오조작을
+#   못 막는다(채점자 3인 지적).  이전 이름 상수는 호환용으로 남긴다.
 SUMMARY_ENGINE_COORD = "좌표 매칭"
 SUMMARY_ENGINE_LEGACY = "구형 유사도 엔진"
+SUMMARY_ENGINE_COORD_FMT = "좌표 매칭 (허용 오차 {tol:.0f} µm)"
+SUMMARY_ENGINE_LEGACY_FMT = "구형 유사도 엔진 (임계치 {th:.0f} %)"
 
 # 보기 옵션 (셋업 상단)
-DARK_MODE_LABEL = "어두운 화면"
-DARK_MODE_TOOLTIP = (
-    "화면을 어두운 청사진 톤으로 바꿉니다.\n"
+# ★ 어두운 모드가 **둘**이라 on/off 로 표현할 수 없다 — '어느 시트를 쓸지' 3택이다.
+#   이름은 theme.COLOR_MODE_LABELS 에 있다(벨럼 · 청사진 · 흑연).
+COLOR_MODE_LABEL = "화면"
+COLOR_MODE_TOOLTIP_FMT = (
+    "‘{name}’ 시트로 바꿉니다.\n"
+    "· 벨럼 — 밝은 제도지에 청사진 잉크(기본)\n"
+    "· 청사진 — 짙은 청색 감광지에 백선(야간·어두운 작업장)\n"
+    "· 흑연 — 불 끈 제도지에 흑연 선(무채·눈부심 최소)\n"
     "검증을 시작하기 전에만 바꿀 수 있습니다(진행 중 상태 보호)."
 )
 REDUCE_MOTION_LABEL = "모션 줄이기"

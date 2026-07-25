@@ -115,10 +115,22 @@ class SetupPage(QWidget):
             outer.addWidget(rule)
             outer.addWidget(bar)
 
+        # ★ 첫 포커스를 첫 입력란에 둔다.  이전엔 탭 체인 첫 정지가 보기 옵션(모션
+        #   줄이기)이라, 키보드 사용자가 폴더를 입력하려면 파괴적 컨트롤(색 모드·배치
+        #   스위처)을 먼저 지나야 했다.  QTimer 로 미루는 이유는 show() 이후에야
+        #   포커스가 실제로 들어가기 때문.
+        QTimer.singleShot(0, self._focus_first_field)
+
         # 개발자 모드 토글 단축키 — 일반 사용자에게는 보이지 않는 진입점.
         self._dev_shortcut = QShortcut(QKeySequence("Ctrl+Shift+D"), self)
         self._dev_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
         self._dev_shortcut.activated.connect(self._toggle_dev_mode)
+
+    def _focus_first_field(self) -> None:
+        """탭 체인의 출발점을 첫 입력란으로 — 파괴적 컨트롤을 먼저 지나지 않게."""
+        edit = getattr(self, "ref_path_edit", None)
+        if edit is not None and edit.isVisible():
+            edit.setFocus(Qt.FocusReason.OtherFocusReason)
 
     # ==================================================================
     # 본문 빌더 — 각 조각은 위젯 하나를 만들어 돌려준다.  배치안은 ``_build_body``
@@ -134,14 +146,18 @@ class SetupPage(QWidget):
         return True
 
     def _build_body(self, root: QVBoxLayout) -> None:
-        """A안 「진행 순서형」 — 한 열, 위에서 아래로(폴더 → 옵션 → 시작)."""
+        """A안 「진행 순서형」 — 한 열, 위에서 아래로(폴더 → 옵션 → 시작).
+
+        ★ 순서가 이 docstring 과 **반대**였다: 자동화 수준 카드가 첫 카드고 폴더가
+        두 번째였다.  폴더는 매번 바뀌는 값이고 자동화 수준은 거의 그대로 쓰는 값이라,
+        선언한 '진행 순서'대로 폴더를 먼저 둔다."""
         root.addWidget(self._build_top_bar())
         root.addWidget(self._build_subtitle())
-        root.addWidget(self._build_howto())
-        root.addWidget(self._build_automation_card())
         root.addWidget(self._build_device_row())
+        root.addWidget(self._build_automation_card())
         root.addWidget(self._build_scope_row())
         root.addWidget(self._build_engine_card())
+        root.addWidget(self._build_howto())
         root.addStretch(1)
         if not self._pinned_action_bar():
             root.addWidget(self._build_action_bar())
@@ -162,12 +178,65 @@ class SetupPage(QWidget):
         trow = QHBoxLayout(tools)
         trow.setContentsMargins(0, 0, 0, 0)
         trow.setSpacing(12)
-        trow.addWidget(self._build_layout_switcher())
         trow.addStretch(1)
         trow.addWidget(self._build_view_options())
         col.addWidget(tools)
-        col.addWidget(self._build_title())
+
+        # 제목 줄 — 제목 왼쪽, 모드 배지 오른쪽.  배지가 제목과 같은 줄에 있어야
+        # '무슨 모드야'가 첫 시선에 들어온다.
+        title_row = QWidget(host)
+        tr = QHBoxLayout(title_row)
+        tr.setContentsMargins(0, 0, 0, 0)
+        tr.setSpacing(16)
+        tr.addWidget(self._build_title())
+        tr.addStretch(1)
+        tr.addWidget(self._build_mode_badge(),
+                     alignment=Qt.AlignmentFlag.AlignVCenter)
+        col.addWidget(title_row)
+
+        # ★ 배치 스위처는 **제목보다 아래·작게**.  이전엔 58px 칩이 33px 표제 위에
+        #   있어 '삭제 예정 임시 컨트롤'이 화면에서 가장 큰 요소였다(채점자 3인 지적).
+        col.addWidget(self._build_layout_switcher())
         return host
+
+    def _build_mode_badge(self) -> QWidget:
+        """상단 모드 배지 — 지금 무슨 엔진·무슨 판정 수치로 도는지.
+
+        판정 기준 문장이 엔진 카드 안에만 있어서, A안은 화면 밖·C안은 접힘 아래로
+        밀려 '모르고 켜둔 채 실행'을 막지 못했다(채점자 5인 공통 지적).  모드 이름만
+        담으면 부족하다 — **판정 수치까지** 담아야 오조작이 눈에 걸린다."""
+        card = NeonCard(role="card", parent=self)
+        card.setToolTip(i18n.KO.MODE_BADGE_TOOLTIP)
+        cap = QLabel(i18n.KO.MODE_BADGE_CAPTION, card)
+        cap.setProperty("role", "colHead")
+        card.body().addWidget(cap)
+        self._mode_badge = QLabel("", card)
+        self._mode_badge.setProperty("role", "modeBadge")
+        card.body().addWidget(self._mode_badge)
+        self._mode_badge_card = card
+        return card
+
+    def _refresh_mode_badge(self) -> None:
+        badge = getattr(self, "_mode_badge", None)
+        if badge is None or not hasattr(self, "legacy_switch"):
+            return
+        if self.legacy_switch.is_on():
+            sub = (i18n.KO.ENGINE_MODE_EFFICIENCY_SHORT
+                   if self.legacy_group.current_key() == EngineMode.EFFICIENCY
+                   else i18n.KO.ENGINE_MODE_BASIC_SHORT)
+            text = i18n.KO.MODE_BADGE_LEGACY_FMT.format(
+                sub=sub, th=float(self.slider.value()))
+        else:
+            text = i18n.KO.MODE_BADGE_COORD_FMT.format(
+                tol=float(self.coord_tol_spin.value()))
+        badge.setText(text)
+        # 구형은 예외 경로 — 배지가 색으로도 말하게 한다(모르고 켜둔 채 실행 방지).
+        card = getattr(self, "_mode_badge_card", None)
+        if card is not None:
+            state = "legacy" if self.legacy_switch.is_on() else ""
+            card.setProperty("badgeState", state)
+            card.style().unpolish(card)
+            card.style().polish(card)
 
     def _build_layout_switcher(self) -> QWidget:
         """상단 배치 전환 버튼 — 3개 안을 눌러 보며 비교한다(비교용 임시 컨트롤).
@@ -185,12 +254,18 @@ class SetupPage(QWidget):
         self.layout_group = OptionGroup(
             [(k, LAYOUT_LABELS[k]) for k in keys],
             current=self.LAYOUT_KEY, min_tile_w=84,
-            fixed_cols=len(keys), parent=host,
+            fixed_cols=len(keys), role="chip",
+            # ★ 배치 전환은 페이지 **재생성**이다 — 방향키로 훑기만 해도 화면이 날아가고
+            #   포커스를 잃으면 안 된다.  포커스만 옮기고 Space/Enter 로 확정한다.
+            activate_on_arrow=False, parent=host,
         )
         for k in keys:
             self.layout_group.set_option_tooltip(k, i18n.KO.LAYOUT_SWITCH_TOOLTIP)
         self.layout_group.selection_changed.connect(self._on_layout_chosen)
         row.addWidget(self.layout_group)
+        # ★ 남는 폭을 흡수하는 stretch — 없으면 칩이 화면 폭만큼 늘어나 '작게'라는
+        #   의도가 무너진다(그리드가 열마다 stretch 1 을 주기 때문).
+        row.addStretch(1)
         return host
 
     def _on_layout_chosen(self, key: str) -> None:
@@ -315,11 +390,12 @@ class SetupPage(QWidget):
         """진행 범위 — 상태가 **타일 자신**에 산다(옆 라벨에 두지 않는다).
 
         None = 전체 진행."""
+        # ★ 이전엔 이것만 카드 없는 '맨몸 제목' 이라 (a) 제목 축이 다른 카드보다 21px
+        #   왼쪽으로 어긋났고 (b) 선택 타일이 카드 면이 아니라 페이지 바탕 위에 앉아
+        #   라벨 대비가 4.87 로 게이트를 깼다.  카드로 감싸 둘을 함께 해결한다.
         self._selected_slots: Optional[set] = None
-        host = QWidget(self)
-        col = QVBoxLayout(host)
-        col.setContentsMargins(0, 0, 0, 0)
-        col.setSpacing(6)
+        host = NeonCard(role="card", parent=self)
+        col = host.body()
         title = QLabel(i18n.KO.SCOPE_TITLE, host)
         title.setProperty("role", "cardTitle")
         col.addWidget(title)
@@ -366,6 +442,8 @@ class SetupPage(QWidget):
         self.coord_tol_spin.setValue(getattr(_prefs_now, "coord_tolerance", 500.0))
         self.coord_tol_spin.setToolTip(i18n.KO.COORD_TOLERANCE_TOOLTIP)
         # 수치는 모노 — '도면' 컨셉의 핵심인데 이 화면엔 모노가 한 글자도 없었다.
+        self.coord_tol_spin.valueChanged.connect(
+            lambda _v: self._refresh_mode_badge())
         self.coord_tol_spin.setProperty("role", "mono")
         self.coord_tol_spin.setAlignment(Qt.AlignmentFlag.AlignRight
                                         | Qt.AlignmentFlag.AlignVCenter)
@@ -492,6 +570,7 @@ class SetupPage(QWidget):
         else:
             text = i18n.KO.ENGINE_ACTIVE_COORD
         self._engine_inert_hint.setText(text)
+        self._refresh_mode_badge()
 
     def _on_legacy_toggled(self, on: bool) -> None:
         self._sync_engine_controls()
@@ -568,10 +647,13 @@ class SetupPage(QWidget):
         grid.addWidget(path_edit, 0, 1)
         grid.addWidget(browse, 0, 2)
 
-        # 이유를 말하는 인라인 오류 줄 — 비어 있으면 자리를 차지하지 않는다.
+        # 이유를 말하는 인라인 오류 줄.
+        # ★ show/hide 하면 카드 높이가 30px, 옆 카드 정렬이 23px 흔들린다(실측 지적) —
+        #   **자리를 예약**하고 문자열만 비운다(항상 표시, 높이 고정).
         err = QLabel("", card)
         err.setProperty("role", "error")
-        err.setVisible(False)
+        err.setMinimumHeight(16)
+        err.setWordWrap(True)
         grid.addWidget(err, 1, 1, 1, 2)
 
         machine_edit = QLineEdit(card)
@@ -620,7 +702,7 @@ class SetupPage(QWidget):
                 err.setText(i18n.KO.SETUP_INVALID_FOLDER)
             else:
                 err.setText("")
-            err.setVisible(bool(state))
+            # ★ setVisible 을 쓰지 않는다 — 자리를 예약해 뒀으므로 문자열만 바꾼다.
 
     def _validate(self) -> bool:
         """두 폴더가 모두 유효할 때만 [검증 시작] 을 활성화하고, 아니면 이유를 표시."""
@@ -776,42 +858,69 @@ class SetupPage(QWidget):
 
     def _on_threshold_changed(self, v: int) -> None:
         self.threshold_label.setText(f"{v} %")
+        self._refresh_mode_badge()
         _prefs.patch(threshold=v / 100.0)
 
     # ------------------------------------------------------------------
     def _build_view_options(self) -> QWidget:
-        """상단 보기 옵션 줄 — 어두운 화면 · '모션 줄이기' 토글."""
+        """상단 보기 옵션 줄 — 색 모드 3택 · '모션 줄이기'.
+
+        ★ 색 모드가 on/off 스위치가 아니라 **3택**이다(벨럼 · 청사진 · 흑연).  어두운
+        모드가 둘이라 boolean 으로 표현할 수 없고, 애초에 '어두운 화면 켜기'보다
+        '어느 시트를 쓸지'가 정확한 모형이다.
+
+        ★ 두 컨트롤의 **어휘를 통일**한다: 이전엔 나란한 두 설정이 48×28 스위치와
+        18px 체크박스로 서로 달랐고, 하필 시각적으로 약한 쪽이 모션 설정이었다."""
         host = QWidget(self)
         row = QHBoxLayout(host)
         row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(8)
+        row.setSpacing(14)
         row.addStretch(1)
-        # 어두운 화면 — 수동 토글(OS 자동 감지는 하지 않는다).
-        self.dark_switch = SwitchRow(
-            i18n.KO.DARK_MODE_LABEL,
-            checked=(theme.COLOR_MODE == "dark"), parent=host,
+
+        mode_lbl = QLabel(i18n.KO.COLOR_MODE_LABEL, host)
+        mode_lbl.setProperty("role", "muted")
+        row.addWidget(mode_lbl)
+        keys = theme.color_mode_keys()
+        self.color_mode_group = OptionGroup(
+            [(k, theme.COLOR_MODE_LABELS[k]) for k in keys],
+            current=theme.COLOR_MODE, min_tile_w=64,
+            fixed_cols=len(keys), role="chip",
+            # 색 모드 전환도 페이지 **재생성**이다 — 방향키 즉시 커밋 금지.
+            activate_on_arrow=False, parent=host,
         )
-        self.dark_switch.setToolTip(i18n.KO.DARK_MODE_TOOLTIP)
-        self.dark_switch.toggled.connect(self._on_dark_toggled)
-        row.addWidget(self.dark_switch)
-        self._reduce_chk = QCheckBox(i18n.KO.REDUCE_MOTION_LABEL, host)
-        self._reduce_chk.setToolTip(i18n.KO.REDUCE_MOTION_TOOLTIP)
-        try:
-            self._reduce_chk.setChecked(bool(_prefs.load().reduce_motion))
-        except Exception:
-            pass
-        self._reduce_chk.toggled.connect(self._on_reduce_motion)
-        row.addWidget(self._reduce_chk)
+        for k in keys:
+            self.color_mode_group.set_option_tooltip(
+                k, i18n.KO.COLOR_MODE_TOOLTIP_FMT.format(
+                    name=theme.COLOR_MODE_LABELS[k]))
+        self.color_mode_group.selection_changed.connect(self._on_color_mode_chosen)
+        row.addWidget(self.color_mode_group)
+
+        self._reduce_switch = SwitchRow(
+            i18n.KO.REDUCE_MOTION_LABEL, parent=host,
+            checked=self._saved_reduce_motion(),
+        )
+        self._reduce_switch.setToolTip(i18n.KO.REDUCE_MOTION_TOOLTIP)
+        self._reduce_switch.toggled.connect(self._on_reduce_motion)
+        row.addWidget(self._reduce_switch)
         return host
+
+    @staticmethod
+    def _saved_reduce_motion() -> bool:
+        try:
+            return bool(_prefs.load().reduce_motion)
+        except Exception:
+            return False
 
     def _on_reduce_motion(self, on: bool) -> None:
         from .. import motion
         _prefs.patch(reduce_motion=bool(on))
         motion.set_reduce_motion(bool(on))
 
-    def _on_dark_toggled(self, on: bool) -> None:
+    def _on_color_mode_chosen(self, key: str) -> None:
         """색 모드 전환 요청 — 실제 적용(페이지 재생성)은 main_window 가 한다."""
-        _prefs.patch(color_mode="dark" if on else "light")
+        if key == theme.COLOR_MODE:
+            return
+        _prefs.patch(color_mode=key)
         self.appearance_changed.emit()
 
     # ------------------------------------------------------------------

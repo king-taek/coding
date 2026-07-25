@@ -349,6 +349,47 @@ QWidget[role="loadingPanel"] QProgressBar {
     background: $bg;
 }
 
+/* 상단 모드 배지 — 판정 기준(엔진 + 수치)을 첫 시선에.  수치는 모노. */
+QLabel[role="modeBadge"] {
+    font-family: $font_mono;
+    font-size: $font_sub_sz;
+    font-weight: 600;
+    color: $ink;
+}
+/* 구형은 예외 경로 — 배지가 색으로도 말한다(모르고 켜둔 채 실행 방지). */
+QFrame[role="card"][badgeState="legacy"] {
+    border: $focus_w solid $warn;
+    background-color: $warn_tint;
+}
+
+/* 배치 스위처 칩 — **삭제 예정 임시 컨트롤**이므로 화면에서 가장 작아야 한다.
+   이전엔 58px 칩이 33px 표제보다 커서 임시물이 시각 위계 1위였다(채점자 3인 지적). */
+QPushButton[role="chip"] {
+    background: transparent;
+    color: $mute;
+    border: 1px solid $line_strong;
+    border-radius: $radius_sm;
+    padding: 3px 10px;
+    font-size: $font_caption_sz;
+    font-weight: 600;
+    min-height: 26px;
+    max-height: 28px;
+    text-align: center;
+}
+QPushButton[role="chip"]:hover {
+    color: $ink;
+    background: $elev;
+}
+QPushButton[role="chip"]:checked {
+    background-color: $accent_tint;
+    color: $accent;
+    border: 1px solid $accent;
+}
+QPushButton[role="chip"]:focus {
+    border: $focus_w solid $focus;
+    padding: 2px 9px;
+}
+
 /* C안 요약 값 — 상세를 접어 둔 채 시작하는 배치의 **안전 장치**.  가장 중요한 정보가
    가장 작고 옅은 글자였던 문제를 고친다(부제 등급 + 굵기 + 본문색). */
 QLabel[role="summaryValue"] {

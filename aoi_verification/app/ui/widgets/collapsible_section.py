@@ -62,7 +62,15 @@ class CollapsibleSection(QWidget):
 
         self._anim = QPropertyAnimation(self._content, b"maximumHeight", self)
         self._anim.setDuration(_ANIM_DURATION_MS)
-        self._anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self._anim.setEasingCurve(QEasingCurve.Type.OutQuart)
+        # ★ 애니메이션이 끝나면 상한을 **풀어야** 한다.  안 풀면 펼친 시점의 sizeHint 에
+        #   높이가 고정돼, 뒤에 커지는 내용(중첩 접이식·'?' 도움말 등)이 조용히 잘린다 —
+        #   눌러도 아무 일이 없는 것처럼 보였다(C안 상세에서 실제로 발생).
+        self._anim.finished.connect(self._on_anim_finished)
+
+    def _on_anim_finished(self) -> None:
+        if self._expanded:
+            self._content.setMaximumHeight(16777215)
 
     # ------------------------------------------------------------------
     def add_content_widget(self, widget: QWidget) -> None:
@@ -84,7 +92,13 @@ class CollapsibleSection(QWidget):
         self._toggle.setText(self._close_label if self._expanded else self._open_label)
 
         target = self._content.sizeHint().height() if self._expanded else 0
+        # ★ 앱 유일하게 motion 게이트를 무시하던 위젯이었다 — '모션 줄이기'·헤드리스에서도
+        #   혼자 애니메이션을 돌렸다.  전역 규칙을 따른다.
+        from .. import motion
+        if animate and not motion.enabled():
+            animate = False
         if animate:
+            self._anim.setDuration(motion.dur(_ANIM_DURATION_MS))
             current = self._content.maximumHeight()
             self._anim.stop()
             self._anim.setStartValue(int(current))
