@@ -22,6 +22,23 @@ OUT_DIRNAME = "dist_portable"
 REPO_SLUG = "king-taek/coding"
 
 
+def _default_branch_name() -> str:
+    """git 정보를 못 얻었을 때 VERSION 에 적을 브랜치.
+
+    ``updater.DEFAULT_BRANCH`` 를 **그대로 재사용**한다 — 같은 상수를 두 곳에 적으면
+    기본 브랜치를 바꿀 때 한쪽만 고쳐져 어긋난다(CLAUDE.md 의 자동 업데이트 불변식).
+    빌드 스크립트에서 앱 패키지를 못 읽는 상황도 있으므로 방어적으로 감싼다."""
+    try:
+        import sys
+        root = Path(__file__).resolve().parents[2]
+        if str(root) not in sys.path:
+            sys.path.insert(0, str(root))
+        from aoi_verification.app.utils.updater import DEFAULT_BRANCH
+        return DEFAULT_BRANCH
+    except Exception:
+        return ""
+
+
 def portable_python(out_dir: Path) -> Path:
     """포터블 폴더 안 CPython 실행 파일 경로."""
     if os.name == "nt":
@@ -110,10 +127,16 @@ def run_build(repo_root: Path, py_url: str,
             shutil.copy2(src, out / bat)
 
     # 4) VERSION 스탬프(자동 업데이트용).
+    # ★ git 정보를 못 얻어도 **반드시 쓴다.**  예전엔 `if sha and branch:` 라
+    #   git 아닌 소스(zip 다운로드 등)에서 만든 빌드엔 VERSION 이 아예 없었고,
+    #   그런 배포본은 업데이트가 있다는 사실 자체를 모른 채로 남았다.
+    #   SHA 가 비면 '미상' 이라는 뜻이고, 앱이 최신을 받아 적용한 뒤 진짜 SHA 를
+    #   기록한다(`updater._write_version`).  브랜치는 updater 가 확인 시점에
+    #   저장소 기본 브랜치로 정규화한다(`updater._resolve_branch`).
     sha, branch = _git_head(repo_root)
-    if sha and branch:
-        (app / "VERSION").write_text(version_stamp(sha, branch), encoding="utf-8")
-        log(f"       VERSION: {branch} @ {sha}")
+    branch = branch or _default_branch_name()
+    (app / "VERSION").write_text(version_stamp(sha, branch), encoding="utf-8")
+    log(f"       VERSION: {branch or '(기본)'} @ {sha or '(미상)'}")
     log("[4/4] done. Zip the whole dist_portable/ folder; on target PC unzip "
         "and double-click run_aoi.bat (no Python needed).")
     return 0

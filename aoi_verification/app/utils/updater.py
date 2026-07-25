@@ -10,7 +10,10 @@ VCS/캐시는 제외하고, 무거운 ``python/`` 런타임도 건드리지 않�
 다시 설치하지 않으며, ``requirements.txt`` 변경은 감지해 사용자에게 안내만 한다.
 
 - 공개 저장소라 토큰 불필요.  모든 네트워크 오류는 **조용히 무시**(부가 기능).
-- ``VERSION`` 이 없으면(소스 체크아웃/개발 모드) 업데이트 확인을 하지 않는다.
+- ``VERSION`` 이 없으면 ``ensure_version_file`` 이 **초기 파일을 만든다**(SHA 는 '미상').
+  그래야 VERSION 없이 만들어진 포터블 빌드도 업데이트를 받을 수 있다 — 예전엔 이
+  경우 시작 시 자동 확인이 통째로 꺼져 있었다.  단 **git 작업트리에는 만들지 않는다**
+  (개발 실행은 자동 적용 자체가 차단된다).
 - 표준 라이브러리(urllib)만 사용 — 추가 의존성 없음.
 """
 
@@ -199,6 +202,40 @@ def _write_version(sha: str, branch: str, repo: str) -> None:
         pass
 
 
+def ensure_version_file() -> Optional[dict]:
+    """VERSION 이 없으면 **초기 VERSION 을 만들어** 자동 업데이트가 늘 동작하게 한다.
+
+    왜 필요했나: 시작 시 자동 확인(`check_for_update`)이 VERSION 이 없으면 네트워크
+    호출조차 하지 않고 조용히 꺼졌다.  그런데 포터블 빌드는 git 이 아닌 소스에서
+    만들면 애초에 VERSION 이 없다(`portable_build.py`).  결과적으로 그런 배포본은
+    **업데이트가 있다는 사실 자체를 영영 모른다.**
+
+    - 이미 있으면 건드리지 않는다(실제 SHA 를 덮어쓰면 안 된다).
+    - **git 작업트리에는 만들지 않는다** — 개발 실행은 어차피 자동 적용이 차단되고
+      (`main_window` 의 `is_git_checkout` 가드), 저장소에 산출물을 남기지 않는다.
+    - 네트워크를 부르지 않는다.  브랜치는 `DEFAULT_BRANCH` 로 적어 두면
+      `_resolve_branch` 가 확인 시점에 저장소의 실제 기본 브랜치로 정규화한다
+      (CLAUDE.md 의 자기교정 불변식을 그대로 탄다).
+
+    SHA 는 빈 문자열('미상')이다 — 비교할 대상이 없다는 뜻이고, 호출부는 이때
+    ``current_unknown`` 으로 안내한 뒤 최신을 받게 한다.  한 번 적용하면
+    ``_write_version`` 이 진짜 SHA 를 남겨 이후엔 정상 비교로 돌아간다.
+
+    돌려주는 값은 (기존이든 새로 만든 것이든) 현재 VERSION dict, 만들지 않았고
+    읽을 것도 없으면 ``None``."""
+    cur = current_version()
+    if cur is not None:
+        return cur
+    if is_git_checkout():
+        return None
+    seed = _git_head() or {"sha": "", "branch": DEFAULT_BRANCH,
+                           "repo": DEFAULT_REPO}
+    _write_version(str(seed.get("sha") or ""),
+                   str(seed.get("branch") or DEFAULT_BRANCH),
+                   str(seed.get("repo") or DEFAULT_REPO))
+    return current_version()
+
+
 def _latest_via_api(repo: str, branch: str, timeout: float) -> Optional[dict]:
     global _last_error
     url = _API.format(repo=repo, branch=branch)
@@ -300,23 +337,34 @@ def _resolve_branch(branch: Optional[str], repo: str = DEFAULT_REPO) -> str:
 
 
 def check_for_update() -> Optional[dict]:
-    """업데이트가 있으면 ``{"repo","branch","sha","message","date"}``, 없으면 None.
+    """업데이트가 있으면 ``{"repo","branch","sha","message","date"[,"current_unknown"]}``,
+    없으면 None.
 
-    VERSION 이 없거나(개발 모드) 네트워크 실패면 None(=확인 안 함/조용히 무시)."""
-    cur = current_version()
-    if not cur or not cur.get("sha"):
-        return None
-    repo = cur.get("repo") or DEFAULT_REPO
-    branch = _resolve_branch(cur.get("branch"), repo)
+    ★ ``manual_check`` 과 **같은 근거**(``_identity``)로 판단한다.  예전엔 이 함수만
+    "VERSION 에 sha 가 없으면 즉시 None" 이었고, 그래서 VERSION 이 없는 배포본은
+    시작 시 자동 확인이 통째로 꺼져 있었다 — 같은 앱에서 [업데이트 확인] 버튼은
+    잘 동작하는데 자동 확인만 안 되는, 근거가 어긋난 상태였다.
+
+    현재 SHA 를 모르면 비교를 건너뛰고 최신을 제안하되 ``current_unknown`` 을 실어
+    호출부가 그렇게 안내하게 한다(``manual_check`` 과 동일).
+
+    git 작업트리(개발 실행)와 네트워크 실패는 None — 조용히 무시한다."""
+    if is_git_checkout():
+        return None                     # 개발 실행에선 자동 팝업을 띄우지 않는다
+    ensure_version_file()
+    repo, branch, cur_sha = _identity()
     if not branch:
         return None
     latest, branch = _latest_self_healing(repo, branch)
     if not latest or not latest.get("sha"):
         return None
-    if str(latest["sha"]) != str(cur["sha"]):
-        return {"repo": repo, "branch": branch, "sha": latest["sha"],
-                "message": latest.get("message", ""), "date": latest.get("date", "")}
-    return None
+    if cur_sha and str(latest["sha"]) == str(cur_sha):
+        return None
+    info = {"repo": repo, "branch": branch, "sha": latest["sha"],
+            "message": latest.get("message", ""), "date": latest.get("date", "")}
+    if not cur_sha:
+        info["current_unknown"] = True
+    return info
 
 
 def is_git_checkout() -> bool:

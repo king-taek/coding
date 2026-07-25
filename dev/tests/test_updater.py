@@ -57,9 +57,15 @@ def test_check_none_when_up_to_date(tmp_path, monkeypatch):
     assert updater.check_for_update() is None
 
 
-def test_check_none_in_dev_mode(tmp_path, monkeypatch):
-    # VERSION 없음(개발 모드) → 네트워크도 안 건드리고 None.
+def test_check_none_in_git_checkout(tmp_path, monkeypatch):
+    """개발(git 작업트리) 실행에선 자동 확인을 하지 않는다 — 네트워크도 안 건드린다.
+
+    ★ 이 계약은 한때 'VERSION 이 없으면' 이었다(`test_check_none_in_dev_mode`).
+    그런데 VERSION 이 없는 건 개발 실행만이 아니다 — git 아닌 소스로 만든 포터블
+    빌드도 그렇고, 그런 배포본은 업데이트가 있다는 사실 자체를 영영 몰랐다.
+    이제 기준은 '**VERSION 이 없다**' 가 아니라 '**git 작업트리다**' 이다."""
     _write_version(tmp_path, monkeypatch, None)
+    (tmp_path / ".git").mkdir()
     called = {"n": 0}
 
     def _boom(repo, branch):
@@ -69,6 +75,60 @@ def test_check_none_in_dev_mode(tmp_path, monkeypatch):
     monkeypatch.setattr(updater, "latest_commit", _boom)
     assert updater.check_for_update() is None
     assert called["n"] == 0
+    assert not (tmp_path / "VERSION").exists(), "작업트리에 산출물을 남기면 안 된다"
+
+
+def test_check_creates_version_and_offers_update_when_missing(tmp_path,
+                                                              monkeypatch):
+    """★ 핵심 — VERSION 이 없는 포터블 빌드도 자동 업데이트를 받는다.
+
+    예전엔 여기서 즉시 None 이라, 사용자는 업데이트가 있다는 것조차 몰랐다."""
+    _write_version(tmp_path, monkeypatch, None)
+    monkeypatch.setattr(updater, "_git_head", lambda: None)
+    monkeypatch.setattr(updater, "latest_commit",
+                        lambda r, b: {"sha": "NEW", "message": "fix"})
+
+    info = updater.check_for_update()
+
+    assert info is not None, "VERSION 이 없다고 자동 확인이 꺼지면 안 된다"
+    assert info["sha"] == "NEW"
+    assert info["current_unknown"] is True     # 현재 버전 미상 → 그렇게 안내한다
+    assert info["branch"] == _STUB_DEFAULT
+    assert info["repo"] == updater.DEFAULT_REPO
+    # 초기 VERSION 이 실제로 만들어졌다.
+    assert json.loads((tmp_path / "VERSION").read_text(encoding="utf-8")) == {
+        "sha": "", "branch": updater.DEFAULT_BRANCH, "repo": updater.DEFAULT_REPO}
+
+
+def test_ensure_version_file_never_overwrites_an_existing_stamp(tmp_path,
+                                                                monkeypatch):
+    """실제 SHA 를 덮어쓰면 '항상 업데이트 있음' 이 된다 — 절대 건드리지 않는다."""
+    _write_version(tmp_path, monkeypatch,
+                   {"sha": "REAL", "branch": "feat", "repo": "o/r"})
+    assert updater.ensure_version_file()["sha"] == "REAL"
+    assert json.loads((tmp_path / "VERSION").read_text(
+        encoding="utf-8"))["sha"] == "REAL"
+
+
+def test_ensure_version_file_seeds_from_git_head_when_available(tmp_path,
+                                                                monkeypatch):
+    """git 은 있는데 VERSION 만 없는 경우(클론 배포) — HEAD 를 그대로 심는다."""
+    _write_version(tmp_path, monkeypatch, None)
+    monkeypatch.setattr(updater, "_git_head",
+                        lambda: {"sha": "G", "branch": "dev", "repo": "o/r"})
+    cur = updater.ensure_version_file()
+    assert cur == {"sha": "G", "branch": "dev", "repo": "o/r"}
+
+
+def test_check_none_when_already_latest_with_seeded_version(tmp_path,
+                                                            monkeypatch):
+    """초기 VERSION 을 만든 뒤 한 번 적용하면, 다음부터는 정상 비교로 돌아간다."""
+    _write_version(tmp_path, monkeypatch, None)
+    monkeypatch.setattr(updater, "_git_head", lambda: None)
+    monkeypatch.setattr(updater, "latest_commit", lambda r, b: {"sha": "NEW"})
+    assert updater.check_for_update() is not None       # 1회차: 미상 → 제안
+    updater._write_version("NEW", _STUB_DEFAULT, updater.DEFAULT_REPO)
+    assert updater.check_for_update() is None           # 2회차: 최신 → 조용
 
 
 def test_check_none_when_network_fails(tmp_path, monkeypatch):
