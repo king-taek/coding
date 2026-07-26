@@ -178,14 +178,10 @@ class EfficiencyScheduler(QThread):
         self._auto = bool(auto)
         self._results = results if results is not None else {}
         self._stop = threading.Event()
-        self._active_units: List[str] = []
         self.signals = _SchedSignals()
 
     def stop(self) -> None:
         self._stop.set()
-
-    def active_units(self) -> List[str]:
-        return list(self._active_units)
 
     def run(self) -> None:        # type: ignore[override]
         try:
@@ -373,7 +369,6 @@ class EfficiencyScheduler(QThread):
         self._feat_done = 0
         self._emit_feat = backend is None
         self._PHASE_SCORING = i18n.KO.PHASE_SCORING
-        self._active_units = ["cpu"] + ([backend[1].lower()] if backend else [])
         # ① 재채점 멀티코어 풀 — val 특징 추출 + ref별 재채점을 병렬로(결과 동일).
         self._pool = ThreadPoolExecutor(max_workers=_rerank_workers())
         try:

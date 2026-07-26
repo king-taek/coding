@@ -345,7 +345,6 @@ class MatchPage(QWidget):
                    skipped: dict[str, list[ImageItem]] | None = None,
                    phase_label: str = "",
                    session_id: str = "",
-                   model_name: str = "basic",
                    auto_mode: bool = False,
                    engine_cfg=None) -> None:
         self._state = Stage2State(
@@ -356,7 +355,6 @@ class MatchPage(QWidget):
         )
         self._threshold = threshold
         self._session_id = session_id or ""
-        self._model_name = model_name or "basic"
         self._auto_mode = bool(auto_mode)
         self._engine_cfg = engine_cfg or config.DEFAULT_SIM_CONFIG
         self._fast_results.clear()
@@ -698,17 +696,8 @@ class MatchPage(QWidget):
     def _on_cancel_requested(self) -> None:
         """#8 중지 — 진행 중인 사전계산/매칭 워커를 안전하게 멈추고 세션 중단."""
         self._stop_precompute_worker()
-        if self._worker is not None:
-            try:
-                self._worker.signals.progress.disconnect()
-                self._worker.signals.done.disconnect()
-                self._worker.signals.failed.disconnect()
-            except (TypeError, RuntimeError):
-                pass
-            if self._worker.isRunning():
-                self._worker.stop()
-                self._worker.wait(500)
-            self._worker = None
+        self._detach_worker()
+        self._worker = None
         # ★ 다음 실행이 **처음처럼** 시작되게 계산 결과를 전부 버린다.
         #   특히 `_score_cache` 를 남기면 2회차의 `has_all_pairs` 가 True 가 되어
         #   `_launch_matcher` 가 **1회차 후보를 그대로 재사용**한다 — 설정(허용 오차·
@@ -721,6 +710,24 @@ class MatchPage(QWidget):
         self.cancelled.emit()
 
     # ------------------------------------------------------------------
+    def _detach_worker(self) -> None:
+        """살아있는 매칭 워커의 시그널을 끊고 중단 + 대기.
+
+        wait() 가 timeout 으로 끝나도 ‘늦게 도착한 done’ 이 새 후보 리스트를
+        덮어쓰지 않게 시그널부터 끊는다.  참조는 호출자가 정리한다."""
+        w = self._worker
+        if w is None:
+            return
+        try:
+            w.signals.progress.disconnect()
+            w.signals.done.disconnect()
+            w.signals.failed.disconnect()
+        except (TypeError, RuntimeError):
+            pass
+        if w.isRunning():
+            w.stop()
+            w.wait(500)
+
     def _stop_precompute_worker(self) -> None:
         """현재 precompute 워커의 시그널을 모두 끊고 중단 + 대기.
 
@@ -819,18 +826,7 @@ class MatchPage(QWidget):
                         ref: ImageItem,
                         val_items: list[ImageItem]) -> None:
         self._clear_right_grid()
-        # 이전 워커가 살아있으면 시그널부터 끊는다. wait() 가 timeout 으로
-        # 끝나도 ‘늦게 도착한 done’ 이 새 후보 리스트를 덮어쓰지 않게.
-        if self._worker is not None:
-            try:
-                self._worker.signals.progress.disconnect()
-                self._worker.signals.done.disconnect()
-                self._worker.signals.failed.disconnect()
-            except (TypeError, RuntimeError):
-                pass
-            if self._worker.isRunning():
-                self._worker.stop()
-                self._worker.wait(500)
+        self._detach_worker()
 
         # 고속 모드 자동 — 선계산된 결과(_fast_results)가 있으면 즉시 응답
         # (사진 한 장씩 백그라운드 계산 없이 바로 매칭, #2/#3).

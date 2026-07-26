@@ -98,8 +98,6 @@ class _SidePanel(QFrame):
             self._select_btn = NeonButton(i18n.KO.BTN_SELECT_MODE, role="ghost")
             self._select_btn.clicked.connect(self._open_bulk_select)
             head.addWidget(self._select_btn)
-        # 외부에서 추가 헤더 버튼을 꽂을 수 있도록 head 레이아웃을 노출.
-        self._head_layout = head
         outer.addLayout(head)
 
         # 스크롤 영역 ---------------------------------------------------

@@ -78,9 +78,6 @@ class ScalableImage(QLabel):
         self._target_long_edge = long_edge
         self._rescale()
 
-    def target_size(self) -> int:
-        return self._target_long_edge
-
     # ------------------------------------------------------------------
     def _rescale(self) -> None:
         if self._pix_orig is None or self._pix_orig.isNull():

@@ -88,11 +88,10 @@ class Recipe:
     def uses_embedding(self) -> bool:
         return self.recall in (RECALL_CPU, RECALL_GPU)
 
-    def to_cfg(self, base_cfg=None, *, bench_no_cache: bool = True):
+    def to_cfg(self, *, bench_no_cache: bool = True):
         """이 레시피에 대응하는 ``SimilarityConfig`` 생성.
 
         벤치마크는 항상 ``bench_no_cache=True`` 로 '처음 매칭처럼' 측정한다.
-        ``base_cfg`` 가 주어지면 그 값(예: 임계치 무관 필드)을 출발점으로 삼는다.
         """
         from .. import config as _config
         engine = "basic" if self.scoring == SCORE_CLASSICAL else "efficiency"
@@ -191,23 +190,6 @@ REGISTRY: List[Recipe] = [
 # 추천/대조의 기준이 되는 레시피 키.
 BASELINE_ACCURACY_KEY = "cpu_classical_full"   # 정확도의 정답 기준선
 PRODUCTION_SPEED_KEY = "gpu_fusion_b16"        # 현행(속도 3배 목표의 분모)
-
-# 실측으로 **정확도 보존(97.6%, 현행 동률) 확인된 '생존자'** 재채점 레시피.  3배 달성은
-# `rr_parallel`(×3.95)로 확정됐고, 이 묶음만 추가 실험 대상으로 남긴다.  나머지(임베딩 장치
-# 교체 ×1.02·ORB 제거 시 정확도 붕괴·center-aware 비효율)는
-# 옵션에서 내리고 아카이브(`all+`/그룹)로만 둔다.
-SURVIVOR_KEYS: List[str] = [
-    "rr_parallel",            # 재채점 항 동일·16스레드 병렬 — ×3.95 @97.6% (추천)
-    "cpu_rr_orb_only",        # ORB 단독 — 97.6%
-    "cpu_rr_phash_orb",       # pHash+ORB(SSIM 뺌) — 97.6%
-    "cpu_rr_parallel8",       # 병렬8 — 97.6%
-    "cpu_rr_parallel16",      # 병렬16 — 97.6%
-    "cpu_rr_parallel32",      # 병렬32 — 97.6%
-    "cpu_rr_orb128",          # ORB 특징 128 — 97.6%
-    "cpu_rr_orb256",          # ORB 특징 256 — 97.6%
-    "rr_orb_ssim",            # ORB+SSIM — 97.6%
-    "cpu_rr_orb256_parallel", # ORB256+병렬 — 95.1%(1장 차·빠름)
-]
 
 # 중앙-가중 ORB 신규 실험(단일 패스) — defect 정중앙 활용.  옵션에 노출해 측정한다.
 CENTER_ORB_KEYS: List[str] = ["rr_orb_center50", "rr_orb_center70", "rr_fusion_center50"]

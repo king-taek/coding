@@ -234,8 +234,8 @@ def test_unmatched_geometry_rendered(qapp, isolated_cache, tmp_path, monkeypatch
     # zone/recipe 는 이름만 표기(코드 숫자 없이).
     assert "recipe PI / zone PI_Opening" in d3
     assert "recipe 2" not in d3 and "zone 1" not in d3
-    # 매칭단계 메커니즘으로 col/row/x/y 도 함께 표기(Col=3,Row=5 → col1/row2).
-    assert "col 1 / row 2" in d3
+    # 매칭단계 메커니즘으로 col/row/x/y 도 함께 표기(Col=3,Row=5 → col1/row1).
+    assert "col 1 / row 1" in d3
     assert "x " in d3 and "y " in d3
     # contrast 108 (비0) → 값이 그대로, '—' 아님.
     assert "108" in d3 and "contrast —" not in d3
@@ -309,7 +309,7 @@ def test_unmatched_coords_without_flt(qapp, isolated_cache, tmp_path, monkeypatc
     ref = _make_image(src, "a_ref.jpeg")
     val = _make_image(src, "a_val.jpeg")
     miss = _make_image(src, "z_miss.jpeg")  # Surface.flt 없음 → 미지원 자재
-    # INI 는 있으니 좌표는 나온다(Col=4,Row=4 → col2/row3).
+    # INI 는 있으니 좌표는 나온다(Col=4,Row=4 → col2/row2).
     (src / "ColorImageGrabingInfo.ini").write_text(
         "[z_miss.jpeg]\nX=150000\nY=220000\nCol=4\nRow=4\n", encoding="utf-8")
 
@@ -328,7 +328,7 @@ def test_unmatched_coords_without_flt(qapp, isolated_cache, tmp_path, monkeypatc
     assert "z_miss.jpeg" in d3
     # Surface.flt 없음 마커 + 좌표가 함께.
     assert i18n.KO.GEOM_NOT_SUPPORTED in d3
-    assert "col 2 / row 3" in d3
+    assert "col 2 / row 2" in d3
     assert "x " in d3 and "y " in d3
 
 

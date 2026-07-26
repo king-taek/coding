@@ -179,9 +179,6 @@ class ThumbnailPool(QObject):
     def total(self) -> int:
         return self._total
 
-    def done_count(self) -> int:
-        return self._done
-
     # ------------------------------------------------------------------
     def start(self) -> None:
         if self._workers:

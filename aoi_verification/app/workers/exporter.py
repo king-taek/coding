@@ -363,9 +363,21 @@ class ExcelExporter(QThread):
         return image_io.get_mid_path(Path(src))
 
     # ------------------------------------------------------------------
+    def _place_image(self, ws, src, col: str, row: int,
+                     cell_w_px: float, cell_h_px: float) -> bool:
+        """사진을 셀 중앙에 배치.  실패 시 False — 손상/누락 이미지 1 장 때문에
+        export 전체가 abort 되지 않도록 호출자가 파일명 텍스트로 대체한다 (Bug #3)."""
+        from openpyxl.drawing.image import Image as XLImage
+        try:
+            xli = XLImage(str(self._embed_image_path(Path(src))))
+            _fit_to_cell(xli, cell_w_px, cell_h_px)
+            _add_image_centered(ws, xli, col, row, cell_w_px, cell_h_px)
+            return True
+        except Exception:
+            return False
+
     def _fill_rows(self, ws, rows_input: list[tuple[str, str, object]]) -> None:
         from openpyxl.comments import Comment
-        from openpyxl.drawing.image import Image as XLImage
         from openpyxl.styles import Alignment, Border, Font, Side
 
         total = len(rows_input)
@@ -417,36 +429,18 @@ class ExcelExporter(QThread):
                 # 손상/누락 이미지 1 장 때문에 전체 export 가 abort 되지 않도록
                 # 각 사진을 개별 try 로 감싼다 (Bug #3).  실패하면 파일명 텍스트
                 # 로 대체하고 이어서 진행.
-                try:
-                    ref_mid = self._embed_image_path(m.ref_path)
-                    xli_ref = XLImage(str(ref_mid))
-                    _fit_to_cell(xli_ref, cell_w_px, cell_h_px)
-                    _add_image_centered(ws, xli_ref, COL_REF, row,
-                                        cell_w_px, cell_h_px)
-                except Exception:
-                    ws[f"{COL_REF}{row}"] = str(Path(m.ref_path).name)
-                    ws[f"{COL_REF}{row}"].alignment = center
-                try:
-                    val_mid = self._embed_image_path(m.val_path)
-                    xli_val = XLImage(str(val_mid))
-                    _fit_to_cell(xli_val, cell_w_px, cell_h_px)
-                    _add_image_centered(ws, xli_val, COL_VAL, row,
-                                        cell_w_px, cell_h_px)
-                except Exception:
-                    ws[f"{COL_VAL}{row}"] = str(Path(m.val_path).name)
-                    ws[f"{COL_VAL}{row}"].alignment = center
+                for src, col in ((m.ref_path, COL_REF), (m.val_path, COL_VAL)):
+                    if not self._place_image(ws, src, col, row,
+                                             cell_w_px, cell_h_px):
+                        ws[f"{col}{row}"] = str(Path(src).name)
+                        ws[f"{col}{row}"].alignment = center
                 self.signals.progress.emit(idx, total, m.slot)
             else:
                 u: MissEntry = payload
                 self._write_slot_cell(ws, row, u.slot, center)
                 # 기준 이미지: 정상 임베드.
-                try:
-                    ref_mid = self._embed_image_path(Path(u.path))
-                    xli_ref = XLImage(str(ref_mid))
-                    _fit_to_cell(xli_ref, cell_w_px, cell_h_px)
-                    _add_image_centered(ws, xli_ref, COL_REF, row,
-                                        cell_w_px, cell_h_px)
-                except Exception:
+                if not self._place_image(ws, u.path, COL_REF, row,
+                                         cell_w_px, cell_h_px):
                     ws[f"{COL_REF}{row}"] = str(Path(u.path).name)
                 # 검증 컬럼에 파일명 텍스트 (빨강).  결함 geometry(area/width/
                 # length/contrast) 또는 명시적 마커를 파일명 아래 회색으로 덧붙인다

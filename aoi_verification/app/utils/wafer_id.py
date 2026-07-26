@@ -174,12 +174,6 @@ def _read_one(path):
     return None
 
 
-def read_wafer_id(path) -> Optional[str]:
-    """이미지 헤더를 OCR 해 WaferID 반환(실패 시 None).  항상 원본 해상도."""
-    r = _read_one(path)
-    return r[0] if r else None
-
-
 def read_folder_wafer_id(paths, limit: int = _MAX_IMAGES_PER_FOLDER) -> Optional[str]:
     """폴더 여러 이미지를 OCR 해 다수결로 WaferID 결정(정확도↑)."""
     paths = list(paths)

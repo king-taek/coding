@@ -102,18 +102,11 @@ def session_cache_dir() -> Path:
 
 
 # ---------------------------------------------------------------------------
-# 학습 / 모델 / 평가 디렉토리
+# 모델 디렉토리
 # ---------------------------------------------------------------------------
 def models_dir() -> Path:
-    """학습된 projection_head 가중치 + 메타 JSON 보관 폴더."""
+    """projection_head 가중치(.pt) 보관 폴더."""
     d = cache_root() / "models"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
-
-
-def evaluations_dir() -> Path:
-    """모델별 매칭 결정 로그(.jsonl) 보관 폴더."""
-    d = cache_root() / "evaluations"
     d.mkdir(parents=True, exist_ok=True)
     return d
 

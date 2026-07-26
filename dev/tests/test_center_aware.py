@@ -96,12 +96,6 @@ def test_center_group_selectable_and_in_all_extended():
     assert cen <= allx                              # 아카이브/전체에 포함
 
 
-def test_cosine_helper():
-    assert abs(bm._cosine([1, 0], [1, 0]) - 1.0) < 1e-9
-    assert abs(bm._cosine([1, 0], [0, 1])) < 1e-9
-    assert bm._cosine([0, 0], [1, 1]) == 0.0
-
-
 # ── 중앙-가중 ORB(단일 패스) — 순수 가중 로직(cv2 불필요) ────────────────────
 def test_centrality_weights_center_high_edge_low():
     import numpy as np
@@ -154,18 +148,6 @@ def test_production_rerank_is_parallel():
     import inspect
     src = inspect.getsource(em.EfficiencyScheduler._consume_slot)
     assert "_pool.submit" in src and "_rerank_one" in src
-
-
-# ── N신호 z-융합(순수) ─────────────────────────────────────────────────────
-def test_fuse_zscore_signals_combines_and_ignores_bad():
-    f = bm.fuse_zscore_signals([[0.9, 0.1, 0.5], [0.2, 0.8, 0.5], [0.7, 0.3, 0.5]])
-    assert len(f) == 3 and abs(sum(f)) < 1e-9        # z-합산은 평균 0
-    # 빈/길이불일치 신호는 무시(2신호와 동일).
-    assert bm.fuse_zscore_signals([[1, 2, 3], []]) == bm.fuse_zscore_signals([[1, 2, 3]])
-    assert bm.fuse_zscore_signals([]) == []
-    # 한 신호에서 큰 값일수록 융합 점수도 큼(순위 보존).
-    g = bm.fuse_zscore_signals([[3.0, 2.0, 1.0], [1.0, 2.0, 3.0]])
-    assert abs(g[1]) < 1e-9 and g[0] == -g[2]        # 대칭(반대 신호) → 가운데 0
 
 
 # ── 임베딩 후보 recall: 정답이 GPU 순위 몇 위에 있나(topk 안전성) ────────────

@@ -54,7 +54,6 @@ _IMAGENET_STD = (0.229, 0.224, 0.225)
 # 고효율 모드(다중 유닛) 용 백본 종류 — 유닛별로 서로 다른 모델을 고정한다.
 MODEL_MOBILENET_V3 = "mobilenet_v3_small"   # GPU 유닛 (현행 CNN)
 MODEL_RESNET18 = "resnet18"                 # 대조 유닛 (다른 추론 모델)
-EMBED_DIM = {MODEL_MOBILENET_V3: 576, MODEL_RESNET18: 512}  # 문서용 (인덱스는 dim 무관)
 
 
 # ---------------------------------------------------------------------------
