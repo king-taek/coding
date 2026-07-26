@@ -42,6 +42,17 @@ def resource_path(relative: str | os.PathLike[str]) -> Path:
 
 
 # ---------------------------------------------------------------------------
+# 로고 리소스
+# ---------------------------------------------------------------------------
+def logo_path(name: str) -> Path:
+    """로고 파일(``logo.ico``·``logo_big.png``·``logo_clear.png``) 의 절대 경로.
+
+    앱 폴더 안(`ui/assets/`)에 두어 포터블 빌드 복사·자동 업데이트 미러에
+    자동으로 따라오게 한다."""
+    return resource_path(f"aoi_verification/app/ui/assets/{name}")
+
+
+# ---------------------------------------------------------------------------
 # Shared cache directory — always in the user's home, never inside source data
 # ---------------------------------------------------------------------------
 _CACHE_DIRNAME = ".aoi_verification_cache"

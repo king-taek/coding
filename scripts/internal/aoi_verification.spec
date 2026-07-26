@@ -21,12 +21,16 @@ INCLUDE_EFFICIENCY = True   # torch+torchvision+openvino 포함(고효율 모드
 _ROOT = os.path.abspath(os.path.join(SPECPATH, "..", ".."))
 _MAIN = os.path.join(_ROOT, "main.py")
 
-# 동봉 리소스 — 스타일시트 + 엑셀 템플릿(양식.xlsx, dev/ 에 위치 → 번들 루트로).
+# 동봉 리소스 — 스타일시트 + 로고(아이콘/스플래시/상단) + 엑셀 템플릿
+# (양식.xlsx 는 dev/ 에 위치 → 번들 루트로).
+_ASSETS = os.path.join(_ROOT, "aoi_verification", "app", "ui", "assets")
 datas = [
     (os.path.join(_ROOT, "aoi_verification", "app", "ui", "style.qss"),
      "aoi_verification/app/ui"),
+    (_ASSETS, "aoi_verification/app/ui/assets"),
     (os.path.join(_ROOT, "dev", "양식.xlsx"), "."),
 ]
+_ICON = os.path.join(_ASSETS, "logo.ico")
 binaries = []
 hiddenimports = []
 
@@ -81,6 +85,7 @@ exe = EXE(
     strip=False,
     upx=False,
     console=False,          # GUI 앱 — 콘솔 창 숨김
+    icon=_ICON,             # 탐색기/작업표시줄 아이콘
 )
 
 coll = COLLECT(

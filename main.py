@@ -22,6 +22,25 @@ def _ensure_package_on_path() -> None:
         sys.path.insert(0, str(here))
 
 
+def _apply_app_icon(app) -> None:
+    """앱 아이콘 — 모든 창(메인/시트/작업표시줄) 이 이 아이콘을 물려받는다."""
+    from PyQt6.QtGui import QIcon
+    from aoi_verification.app.utils import paths
+
+    app.setWindowIcon(QIcon(str(paths.logo_path("logo.ico"))))
+    # Windows 작업표시줄은 프로세스의 AppUserModelID 로 아이콘을 고른다 — 지정하지
+    # 않으면 파이썬 실행 파일 아이콘이 뜬다(개발 실행·포터블 런처 모두).
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                "AOI.Verification.App"
+            )
+        except Exception:
+            pass
+
+
 def _load_stylesheet(app) -> None:
     from aoi_verification.app.utils import paths, prefs as _prefs
     from aoi_verification.app.ui import theme
@@ -40,10 +59,60 @@ def _load_stylesheet(app) -> None:
         pass
 
 
+def _show_splash(app):
+    """로고 스플래시를 **가장 먼저** 띄운다 — 무거운 것을 불러오기 전에."""
+    from PyQt6.QtGui import QPixmap
+    from aoi_verification.app import i18n
+    from aoi_verification.app.ui.widgets.startup_splash import StartupSplash
+    from aoi_verification.app.utils import paths
+
+    splash = StartupSplash(QPixmap(str(paths.logo_path("logo_big.png"))))
+    splash.show()
+    # 총량을 모르는 구간 → busy(무한 진행).  0 에 멈춰 있으면 안 된다(CLAUDE.md).
+    splash.set_progress(0, 0, i18n.KO.SPLASH_MODULES)
+    app.processEvents()
+    return splash
+
+
+def _preload_heavy_module():
+    """화면 모듈(torch/cv2/openvino 를 끌고 온다) 을 백그라운드에서 import.
+
+    시작 시간의 대부분이 여기다.  메인 스레드에서 하면 스플래시가 그대로 얼어붙으니
+    (CLAUDE.md 로딩 규칙) 스레드로 돌리고 메인 스레드는 이벤트 루프를 계속 굴린다.
+    실패는 여기서 삼킨다 — 이어서 메인 스레드가 같은 import 를 하며 원래 오류를 낸다."""
+    import importlib
+    import threading
+
+    done = threading.Event()
+
+    def _work() -> None:
+        try:
+            importlib.import_module("aoi_verification.app.ui.main_window")
+        except Exception:
+            pass
+        finally:
+            done.set()
+
+    threading.Thread(target=_work, name="preload", daemon=True).start()
+    return done
+
+
+def _open_main_window(splash):
+    """메인 창 생성(페이지 진행을 스플래시에 보고) → 표시 → 스플래시 걷기."""
+    from aoi_verification.app import i18n
+    from aoi_verification.app.ui.main_window import MainWindow
+
+    window = MainWindow(progress=splash.set_progress)
+    window.show()
+    splash.set_progress(1, 1, i18n.KO.SPLASH_READY)
+    splash.finish(window)
+    return window
+
+
 def main() -> int:
     _ensure_package_on_path()
 
-    from PyQt6.QtCore import Qt
+    from PyQt6.QtCore import Qt, QTimer
     from PyQt6.QtGui import QFont, QGuiApplication
     from PyQt6.QtWidgets import QApplication
 
@@ -77,20 +146,35 @@ def main() -> int:
 
     # 기본 폰트 — 한글 폴백 우선
     app.setFont(QFont("Pretendard, Noto Sans KR, Malgun Gothic, Segoe UI"))
+    _apply_app_icon(app)
     _load_stylesheet(app)
 
-    # 윈도우 생성 ---------------------------------------------------------
-    from aoi_verification.app.ui.main_window import MainWindow
+    # 스플래시(로고) → 로딩 → 윈도우 -------------------------------------
+    splash = _show_splash(app)
 
-    # 좀비 윈도우 방지를 위해 함수 로컬에 둔다.
-    window = MainWindow()
-    window.show()
+    # 좀비 윈도우 방지를 위해 함수 로컬에 둔다(콜백 경로도 여기 담아 살려 둔다).
+    window_ref = []
 
-    # 우리가 QApplication 을 만든 경우에만 이벤트 루프 진입.
-    # 외부에서 만든 app 을 재사용한 경우엔 그쪽이 루프를 굴리므로 생략.
-    if created_here:
-        return app.exec()
-    return 0
+    # 외부에서 만든 app 을 재사용한 경우엔 우리가 루프를 굴리지 않으므로
+    # 스레드 완료를 기다릴 방법이 없다 — 그때는 동기로 연다(스플래시는 정지).
+    if not created_here:
+        window_ref.append(_open_main_window(splash))
+        return 0
+
+    loaded = _preload_heavy_module()
+
+    def _tick() -> None:
+        if not loaded.is_set():
+            return
+        timer.stop()
+        window_ref.append(_open_main_window(splash))
+
+    timer = QTimer()
+    timer.setInterval(30)
+    timer.timeout.connect(_tick)
+    timer.start()
+
+    return app.exec()
 
 
 if __name__ == "__main__":
