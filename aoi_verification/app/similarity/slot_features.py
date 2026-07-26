@@ -185,21 +185,39 @@ class SlotFeatureCache:
 
     # ------------------------------------------------------------------
     def build(self, slot: str, items: Iterable[ImageItem],
-              *, cfg=None) -> Dict[Path, Feature]:
+              *, cfg=None, progress=None) -> Dict[Path, Feature]:
         """슬롯의 ``Feature`` 들을 추출(또는 캐시 로드) 해서 dict 로 반환·저장.
 
         이미 빌드된 슬롯은 그대로 반환한다 (idempotent). 항목이 추가됐다면
         새 path 만 추가 추출한다.  ``cfg`` 는 강화/KLA 전처리를 extract 에 전달.
+
+        ``progress(done, total)`` 콜백이 주어지면 **사진 1장을 처리할 때마다**
+        호출한다.  이 함수는 슬롯의 val 특징을 전부 뽑는 구간이라 콜드 캐시·NAS
+        에서 가장 오래 걸리는데, 그동안 호출자가 진행을 보고할 방법이 없어
+        로딩 바가 0 에 멈춰 있다가 튀었다(CLAUDE.md 로딩 계약 위반).
+        캐시 hit 로 건너뛴 항목도 세어 done 이 단조 증가하게 한다.
         """
         items_list = list(items)
         existing: Dict[Path, Feature] = {}
         with self._lock:
             existing = dict(self._slots.get(slot, {}))
 
+        total = len(items_list)
+
+        def _tick(done: int) -> None:
+            if progress is None:
+                return
+            try:
+                progress(done, total)
+            except Exception:
+                # 진행 보고 실패가 추출을 막으면 안 된다 — 보조 기능이다.
+                pass
+
         # 누락된 항목만 새로 추출 (디스크 캐시가 있다면 거의 무비용).
         # 검증측 특징 캐시이므로 side='val' (중앙 30% crop 의 side 별 적용).
-        for it in items_list:
+        for idx, it in enumerate(items_list, start=1):
             if it.path in existing:
+                _tick(idx)
                 continue
             try:
                 existing[it.path] = _pipeline.extract(
@@ -208,6 +226,7 @@ class SlotFeatureCache:
             except Exception:
                 # 단일 이미지 실패는 무시 — 호출자가 빈 dict 로 처리.
                 pass
+            _tick(idx)
 
         with self._lock:
             self._slots[slot] = existing
@@ -485,8 +504,14 @@ class SlotPrecomputeWorker(QThread):
                 self.signals.phase.emit(i18n.KO.PHASE_FEATURE)
                 feat_total = len(refs) + len(vals)
                 self.signals.progress.emit(0, feat_total)
-                val_feats = self._slot_cache.build(slot, vals, cfg=self._cfg)
-                self.signals.progress.emit(len(vals), feat_total)
+                # ★ val 특징 추출은 이 슬롯에서 가장 오래 걸리는 구간이다.  콜백
+                #   없이 build() 를 통째로 기다리면 바가 0 에 얼어붙어 있다가
+                #   len(vals) 로 튄다 — 사진 1장마다 중계해 계속 움직이게 한다.
+                val_feats = self._slot_cache.build(
+                    slot, vals, cfg=self._cfg,
+                    progress=lambda done, _t: self.signals.progress.emit(
+                        done, feat_total),
+                )
                 # 2) ref features (sim.extract 가 디스크 캐시 자동 사용)
                 ref_feats: Dict[Path, Feature] = {}
                 for ri, r in enumerate(refs, start=1):
