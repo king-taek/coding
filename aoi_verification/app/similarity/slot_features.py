@@ -217,12 +217,6 @@ class SlotFeatureCache:
         return dict(existing)
 
     # ------------------------------------------------------------------
-    def clear(self) -> None:
-        with self._lock:
-            self._slots.clear()
-            self._active = None
-            self._lookahead = None
-
     def release(self, slot: str) -> None:
         """슬롯의 RAM features 를 즉시 폐기.
 
@@ -408,7 +402,7 @@ class SlotPrecomputeWorker(QThread):
     def _should_pipeline(self) -> bool:
         """GPU 임베딩 ↔ CPU 스코어링을 겹칠 이득이 있을 때만 파이프라인 사용.
 
-        가속기(Intel GPU/NPU·CUDA 등)가 있고 학습 모델(CNN 임베딩)이 활성일
+        가속기(Intel GPU·CUDA 등)가 있고 학습 모델(CNN 임베딩)이 활성일
         때만 겹칠 GPU 작업이 존재한다.  CPU-only/BASIC 모드는 producer 의 작업이
         CPU 라 스코어링과 경합만 하므로 기존 순차 경로가 안전·동등하다.
         """

@@ -7,8 +7,9 @@ import pytest
 from aoi_verification.app.dev import recipes as rx
 
 
-def test_registry_has_at_least_ten_unique_recipes():
-    assert len(rx.REGISTRY) >= 10
+def test_registry_has_enough_unique_recipes():
+    # NPU 지원을 걷어낸 뒤 코어 레지스트리는 CPU/GPU 조합 8종 이상.
+    assert len(rx.REGISTRY) >= 8
     keys = [r.key for r in rx.REGISTRY]
     assert len(keys) == len(set(keys)), "레시피 키 중복"
 
@@ -16,8 +17,7 @@ def test_registry_has_at_least_ten_unique_recipes():
 def test_every_recipe_documents_its_operations():
     for r in rx.REGISTRY:
         assert r.desc and len(r.desc) > 10, f"{r.key} 설명 누락"
-        assert r.recall in (rx.RECALL_NONE, rx.RECALL_CPU, rx.RECALL_GPU,
-                            rx.RECALL_NPU, rx.RECALL_GPU_NPU)
+        assert r.recall in (rx.RECALL_NONE, rx.RECALL_CPU, rx.RECALL_GPU)
         assert r.scoring in (rx.SCORE_CLASSICAL, rx.SCORE_EMBED_ONLY,
                              rx.SCORE_FUSION)
 
@@ -50,25 +50,15 @@ def test_explicit_keys_expands_quick_for_skip_exemption():
     assert rx.explicit_keys("quick") == set(rx.QUICK_KEYS)
 
 
-def test_user_npu_extract_cpu_compute_recipe_exists():
-    """'NPU 로 데이터 뽑고 CPU 로 계산' 사용자 아이디어가 레시피에 있어야 한다."""
-    r = rx.by_key("npu_extract_cpu_fuse")
-    assert r.recall == rx.RECALL_NPU
-    assert r.scoring == rx.SCORE_FUSION
-    assert r.required_devices() == {"NPU"}
-
-
 def test_device_combos_covered():
     recalls = {r.recall for r in rx.REGISTRY}
-    # CPU·GPU·NPU 단독 + GPU+NPU 조합 + 임베딩 없음(전수) 모두 다룬다.
-    assert {rx.RECALL_NONE, rx.RECALL_CPU, rx.RECALL_GPU, rx.RECALL_NPU,
-            rx.RECALL_GPU_NPU} <= recalls
+    # CPU·GPU 단독 + 임베딩 없음(전수) 모두 다룬다.
+    assert {rx.RECALL_NONE, rx.RECALL_CPU, rx.RECALL_GPU} <= recalls
 
 
-def test_split_recipe_requires_both_devices():
-    r = rx.by_key("gpu_npu_split_fusion")
-    assert r.required_devices() == {"GPU", "NPU"}
-    assert r.ensemble is False
+def test_gpu_recipe_requires_gpu():
+    r = rx.by_key("gpu_fusion_b16")
+    assert r.required_devices() == {"GPU"}
 
 
 def test_to_cfg_always_bypasses_cache_and_sets_engine():
@@ -81,8 +71,7 @@ def test_to_cfg_always_bypasses_cache_and_sets_engine():
         else:
             assert cfg.engine == "efficiency"
         # 장치 토글이 recall 과 일치
-        assert cfg.use_gpu == (r.recall in (rx.RECALL_GPU, rx.RECALL_GPU_NPU))
-        assert cfg.use_npu == (r.recall in (rx.RECALL_NPU, rx.RECALL_GPU_NPU))
+        assert cfg.use_gpu == (r.recall == rx.RECALL_GPU)
 
 
 def test_select_and_by_key():

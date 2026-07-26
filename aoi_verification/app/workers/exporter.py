@@ -282,7 +282,7 @@ class ExcelExporter(QThread):
         """병합된 헤더 (예: C1:D1) 의 오른쪽 컬럼이 width 미지정인 경우 왼쪽
         컬럼의 width 를 그대로 복사한다.  양식.xlsx 처럼 ‘왼쪽만 폭 지정’ 한
         템플릿에서 오른쪽 셀이 좁아 사진이 작게 임베드되는 문제 해결."""
-        from openpyxl.utils import column_index_from_string, get_column_letter
+        from openpyxl.utils import get_column_letter
         for rng in list(ws.merged_cells.ranges):
             # 헤더 행에 걸친 가로 병합만 대상 (단일 행, 가로 폭 ≥ 2)
             if rng.min_row != rng.max_row:

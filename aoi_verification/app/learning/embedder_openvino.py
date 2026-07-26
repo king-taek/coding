@@ -1,22 +1,18 @@
-"""OpenVINO 기반 추론 가속 — Intel NPU / Intel GPU 자동 활용.
+"""OpenVINO 기반 추론 가속 — Intel GPU 자동 활용.
 
-PyTorch native 디바이스 (torch.xpu) 가 Iris Xe / Arc GPU 까진 잡지만,
-Intel AI Boost **NPU** (Meteor Lake+ 노트북 SoC) 는 PyTorch 가 직접
-지원하지 않는다.  OpenVINO 가 NPU 플러그인을 통해 가속하므로, ``openvino``
-패키지가 설치되어 있고 NPU/GPU 가 인식되면 이 모듈을 우선 사용한다.
+PyTorch native 디바이스 (torch.xpu) 로도 Iris Xe / Arc GPU 를 잡을 수 있지만,
+OpenVINO 경로가 컴파일/스트림 제어가 명확해 ``openvino`` 패키지가 설치되어
+있고 Intel GPU 가 인식되면 이 모듈을 우선 사용한다.
 
 설계:
-- ``is_available()`` — openvino import + NPU/GPU 디바이스 존재 확인.
+- ``is_available()`` — openvino import + GPU 디바이스 존재 확인.
 - ``_compile_backbone()`` — MobileNetV3-Small backbone 을 OpenVINO IR 로
-  변환 + 선택된 디바이스 (NPU > GPU > 미사용) 에 컴파일 (lazy, 1 회).
+  변환 + GPU 에 컴파일 (lazy, 1 회).
 - ``compute_embeddings(paths)`` — 배치 단위로 OpenVINO 컴파일 모델 추론
   → 결과를 PyTorch head (작은 Linear) 에 통과시켜 최종 임베딩.
-- 디바이스 우선 순위 — NPU 가 있으면 NPU, 없으면 GPU, 둘 다 없으면
-  ``is_available()`` 가 False 를 반환해 PyTorch 경로로 폴백.
+- GPU 가 없으면 ``is_available()`` 가 False 를 반환해 PyTorch 경로로 폴백.
 
-설치: ``pip install openvino`` (대략 200MB).  Intel 노트북에선
-NPU 플러그인 (``openvino-tokenizers`` 는 불필요) 이 함께 설치되어 NPU 가
-``core.available_devices`` 에 노출된다.
+설치: ``pip install openvino`` (대략 200MB).
 """
 
 from __future__ import annotations
@@ -57,14 +53,14 @@ _IMAGENET_STD = (0.229, 0.224, 0.225)
 
 # 고효율 모드(다중 유닛) 용 백본 종류 — 유닛별로 서로 다른 모델을 고정한다.
 MODEL_MOBILENET_V3 = "mobilenet_v3_small"   # GPU 유닛 (현행 CNN)
-MODEL_RESNET18 = "resnet18"                 # NPU 유닛 (다른 추론 모델)
+MODEL_RESNET18 = "resnet18"                 # 대조 유닛 (다른 추론 모델)
 EMBED_DIM = {MODEL_MOBILENET_V3: 576, MODEL_RESNET18: 512}  # 문서용 (인덱스는 dim 무관)
 
 
 # ---------------------------------------------------------------------------
-# 가속 유닛 활동 추적 — 상태바의 GPU/NPU '가동/대기' 표시용.
+# 가속 유닛 활동 추적 — 상태바의 GPU '가동/대기' 표시용.
 # OpenVINO 추론이 돌 때마다 디바이스별 timestamp 를 찍고, GUI 가 최근 활동
-# 여부(window 초 이내)를 폴링한다.  Intel GPU/NPU 의 실제 점유율(%)은 이식성
+# 여부(window 초 이내)를 폴링한다.  Intel GPU 의 실제 점유율(%)은 이식성
 # 있게 얻을 수 없으므로, '우리가 그 장치로 추론 중인지'를 대신 보여준다.
 # ---------------------------------------------------------------------------
 _unit_activity: Dict[str, float] = {}
@@ -73,15 +69,13 @@ _unit_activity_lock = threading.Lock()
 
 def _unit_tag(device: str) -> str:
     d = str(device).upper()
-    if d.startswith("NPU"):
-        return "NPU"
     if d.startswith("GPU"):
         return "GPU"
     return d
 
 
 def mark_unit_active(device: str) -> None:
-    """``device`` ("GPU"/"NPU"/"GPU.0" 등) 에서 추론이 발생했음을 기록."""
+    """``device`` ("GPU"/"GPU.0" 등) 에서 추론이 발생했음을 기록."""
     with _unit_activity_lock:
         _unit_activity[_unit_tag(device)] = time.monotonic()
 
@@ -101,7 +95,7 @@ def _list_ov_devices() -> List[str]:  # pragma: no cover — 환경 의존
     import logging
     log = logging.getLogger("aoi.openvino")
     if not _HAS_OPENVINO:
-        log.warning("OpenVINO 미설치 — GPU/NPU 가속 불가 (requirements 의 "
+        log.warning("OpenVINO 미설치 — GPU 가속 불가 (requirements 의 "
                     "openvino 설치 필요). torch=%s", _HAS_TORCH)
         return []
     try:
@@ -114,17 +108,17 @@ def _list_ov_devices() -> List[str]:  # pragma: no cover — 환경 의존
 
 
 def _pick_target() -> Optional[str]:  # pragma: no cover — 환경 의존
-    """OpenVINO 디바이스 우선 순위: NPU > GPU.  CPU 는 PyTorch 와 차이가
+    """OpenVINO 디바이스 선택: GPU.  CPU 는 PyTorch 와 차이가
     크지 않으므로 OpenVINO 경로를 강제 사용하지 않는다."""
     devs = _list_ov_devices()
-    for cand in ("NPU", "GPU"):
+    for cand in ("GPU",):
         if any(d == cand or d.startswith(cand + ".") for d in devs):
             return cand
     return None
 
 
 def is_available() -> bool:
-    """OpenVINO + (NPU 또는 GPU) + torch 모두 있을 때만 사용 가능."""
+    """OpenVINO + GPU + torch 모두 있을 때만 사용 가능."""
     return _HAS_TORCH and _HAS_OPENVINO and _pick_target() is not None
 
 
@@ -135,9 +129,8 @@ def target_device() -> Optional[str]:
 def device_label() -> str:  # pragma: no cover — 환경 의존
     """상태바 표시용 — 사용 가능할 때만 비어있지 않은 문자열 반환.
 
-    NPU 가속 문구는 표시하지 않는다(사용자 요청).  Intel GPU 가 있으면 그것만
-    표시하고, NPU 전용 환경에서는 빈 문자열을 반환해 embedder 가 torch/CPU
-    라벨로 폴백하도록 둔다.
+    Intel GPU 가 있으면 그것만 표시하고, 없으면 빈 문자열을 반환해 embedder 가
+    torch/CPU 라벨로 폴백하도록 둔다.
     """
     if not is_available():
         return ""
@@ -150,17 +143,15 @@ def device_label() -> str:  # pragma: no cover — 환경 의존
 # ---------------------------------------------------------------------------
 # Backbone 컴파일 (lazy) + 디바이스별 최적 처리량 hint
 # ---------------------------------------------------------------------------
-# NPU/GPU 활용도를 끌어올리려면 ‘여러 추론을 동시 in-flight’ 하게 해야 한다
+# GPU 활용도를 끌어올리려면 ‘여러 추론을 동시 in-flight’ 하게 해야 한다
 # (AsyncInferQueue).  OpenVINO 에 PERFORMANCE_HINT=THROUGHPUT 을 주면
 # 디바이스에 맞는 최적 스트림 수가 자동 설정됨.
-# Batch 는 1 로 고정 — NPU 는 dynamic shape 미지원이 잦아 단순/호환성 우선.
 def _force_static_shape(ov_model, batch: int = 1,
                         px: Optional[int] = None) -> None:  # pragma: no cover
     """입력을 정적 ``[batch,3,P,P]`` 으로 고정 (P=``px`` 또는 ``_INPUT_PX``).
 
-    ``ov.convert_model`` 은 배치 차원을 동적(-1)으로 남기는 경우가 있는데,
-    Intel **NPU 플러그인은 동적 shape 컴파일을 거부**한다(GPU 는 허용).  정적화
-    하지 않으면 NPU 컴파일이 조용히 실패해 NPU 가 영영 '대기' 로 남는다.
+    ``ov.convert_model`` 은 배치 차원을 동적(-1)으로 남기는 경우가 있어 정적
+    shape 으로 고정한다(플러그인 호환성).
     ``batch>1`` 이면 요청당 B장을 한 번에 추론.  ``px`` 는 입력 해상도 스윕용.
     실패해도 무시."""
     P = int(px) if px else _INPUT_PX
@@ -175,7 +166,7 @@ def _force_static_shape(ov_model, batch: int = 1,
 
 @lru_cache(maxsize=1)
 def _compile_backbone():  # pragma: no cover — 환경 의존
-    """MobileNetV3-Small backbone 을 OpenVINO 로 변환 후 NPU/GPU 컴파일.
+    """MobileNetV3-Small backbone 을 OpenVINO 로 변환 후 GPU 컴파일.
 
     Thread-safe: ``functools.lru_cache`` 는 CPython 에서 내부 락으로 보호.
     반환 — (compiled_model, target_device_str) 튜플.
@@ -191,13 +182,13 @@ def _compile_backbone():  # pragma: no cover — 환경 의존
     _force_static_shape(ov_model)
     core = ov.Core()
     primary = target_device()
-    # NPU 가 실패하면 GPU → CPU 로 자동 fallback (op 미지원 등).
+    # GPU 가 실패하면 CPU 로 자동 fallback (op 미지원 등).
     for cand in (primary, "GPU", "CPU"):
         if cand is None:
             continue
         try:
             # THROUGHPUT 힌트 — 디바이스에 따라 적정 stream/infer-request 수
-            # 를 OpenVINO 가 알아서 설정 → AsyncInferQueue 와 함께 NPU 최대 활용.
+            # 를 OpenVINO 가 알아서 설정 → AsyncInferQueue 와 함께 GPU 최대 활용.
             compiled = core.compile_model(
                 ov_model, cand,
                 config={"PERFORMANCE_HINT": "THROUGHPUT"},
@@ -217,7 +208,7 @@ def _compile_backbone():  # pragma: no cover — 환경 의존
     return None
 
 
-# 마지막으로 컴파일에 성공한 OpenVINO 디바이스 ("GPU"/"NPU"/"CPU") — UI 표시용.
+# 마지막으로 컴파일에 성공한 OpenVINO 디바이스 ("GPU"/"CPU") — UI 표시용.
 _last_compiled_target: Optional[str] = None
 _last_compiled_name: str = ""
 
@@ -238,16 +229,11 @@ def _log_compiled_device(core, cand: str) -> None:  # pragma: no cover - 환경 
     )
 
 
-def last_compiled_device() -> tuple:  # pragma: no cover - 환경 의존
-    """(target, full_name) — 컴파일이 실제로 어디서 됐는지 (UI/디버그용)."""
-    return (_last_compiled_target, _last_compiled_name)
-
-
 def _optimal_streams(compiled) -> int:  # pragma: no cover — 환경 의존
     """디바이스가 권장하는 동시 추론 스트림 수 — AsyncInferQueue jobs.
 
     환경변수 ``AOI_OV_STREAMS`` 가 양수면 그 값으로 강제한다 — 임베딩이 느린
-    대용량 배치에서 in-flight 추론을 더 늘려 Intel GPU/NPU 사용률을 끌어올리는
+    대용량 배치에서 in-flight 추론을 더 늘려 Intel GPU 사용률을 끌어올리는
     노브.  값은 처리량 힌트일 뿐이라 임베딩 결과는 스트림 수와 무관하게 동일.
     """
     env = os.environ.get("AOI_OV_STREAMS")
@@ -262,7 +248,7 @@ def _optimal_streams(compiled) -> int:  # pragma: no cover — 환경 의존
         n = compiled.get_property("OPTIMAL_NUMBER_OF_INFER_REQUESTS")
         return max(1, int(n))
     except Exception:
-        return 4    # 합리적 기본값 (NPU 2~4 / GPU 4~8 사이).
+        return 4    # 합리적 기본값 (GPU 4~8 사이).
 
 
 def invalidate_caches() -> None:
@@ -362,16 +348,16 @@ def _preprocess_parallel(items, cfg=None, side=None, *,
 # ---------------------------------------------------------------------------
 def compute_embeddings(paths: Iterable[Path],
                        *,
-                       batch_size: int = 1,        # NPU 호환을 위해 사실상 1
+                       batch_size: int = 1,        # 플러그인 호환을 위해 사실상 1
                        head=None,
                        cfg=None
                        ) -> Dict[Path, np.ndarray]:  # pragma: no cover
     """OpenVINO 백본 + (선택) PyTorch head 로 임베딩을 ``AsyncInferQueue``
-    로 병렬 계산 — NPU/GPU 활용도 최대화.
+    로 병렬 계산 — GPU 활용도 최대화.
 
-    NPU 플러그인의 dynamic shape 제약을 우회하기 위해 **batch=1** 고정.
+    플러그인의 dynamic shape 제약을 우회하기 위해 **batch=1** 고정.
     대신 ``AsyncInferQueue(jobs=N)`` 으로 N 개 추론을 동시 in-flight 시켜
-    파이프라인을 채우면 NPU 가 idle 없이 일한다 (THROUGHPUT 힌트와 함께).
+    파이프라인을 채우면 GPU 가 idle 없이 일한다 (THROUGHPUT 힌트와 함께).
 
     실패 path 는 결과 dict 에 누락 — 호출자(``embedder.compute_embeddings``)
     가 PyTorch 로 보완.
@@ -389,7 +375,7 @@ def compute_embeddings(paths: Iterable[Path],
     if not items:
         return out
 
-    # 전처리(멀티스레드)와 추론(GPU/NPU)을 파이프라인으로 겹쳐 가동(#3) — 준비되는
+    # 전처리(멀티스레드)와 추론(GPU)을 파이프라인으로 겹쳐 가동(#3) — 준비되는
     # 텐서를 즉시 AsyncInferQueue 로 흘려보내 장치가 놀지 않게 한다.
     inputs = ((p, arr[np.newaxis]) for p, arr in _preprocess_parallel(items, cfg))
     raw = _infer_raw(compiled, inputs, _optimal_streams(compiled))
@@ -408,7 +394,7 @@ def compute_embeddings(paths: Iterable[Path],
 
 
 # ---------------------------------------------------------------------------
-# 공용 비동기 추론 — AsyncInferQueue 로 N 개 동시 in-flight (NPU/GPU saturate)
+# 공용 비동기 추론 — AsyncInferQueue 로 N 개 동시 in-flight (GPU saturate)
 # ---------------------------------------------------------------------------
 def _udata_count(userdata) -> int:
     """userdata 가 path 면 1, (real_paths) 튜플(정적 배치)이면 그 길이."""
@@ -476,7 +462,7 @@ def _infer_raw(compiled, inputs, n_streams: int, progress_cb=None) -> Dict[Path,
 # 고효율 모드 — 장치 고정 컴파일/추론 (유닛별 서로 다른 모델 동시 가동)
 # ---------------------------------------------------------------------------
 def available_units() -> List[str]:
-    """OpenVINO 로 가속 가능한 Intel 유닛 — ``["GPU","NPU"]`` 중 실제 존재분.
+    """OpenVINO 로 가속 가능한 Intel 유닛 — ``["GPU"]`` 중 실제 존재분.
 
     torch/openvino 가 없으면 빈 리스트.  스케줄러가 이 결과로 어떤 워커를
     띄울지 결정한다 (CPU 는 항상 별도로 가동)."""
@@ -484,45 +470,40 @@ def available_units() -> List[str]:
         return []
     devs = _list_ov_devices()
     out: List[str] = []
-    for cand in ("GPU", "NPU"):
+    for cand in ("GPU",):
         if any(d == cand or d.startswith(cand + ".") for d in devs):
             out.append(cand)
     return out
 
 
 def accelerator_presence() -> Dict[str, object]:
-    """상태바 표시용 — 인텔 GPU/NPU **존재 여부**를 OpenVINO 만으로 조사.
+    """상태바 표시용 — 인텔 GPU **존재 여부**를 OpenVINO 만으로 조사.
 
     스케줄러용 ``available_units()`` 와 달리 torch 설치 여부에 의존하지 않는다
     (장치 존재는 추론 백엔드와 무관).  반환::
 
-        {"GPU": bool, "NPU": bool, "devices": [...], "reason": str}
+        {"GPU": bool, "devices": [...], "reason": str}
 
-    ``reason`` 은 GPU/NPU 가 안 잡힐 때의 진단 문자열(미설치/조회실패/디바이스
+    ``reason`` 은 GPU 가 안 잡힐 때의 진단 문자열(미설치/조회실패/디바이스
     없음) — GUI 툴팁으로 노출해 사용자가 원인을 바로 알 수 있게 한다."""
     if not _HAS_OPENVINO:
-        return {"GPU": False, "NPU": False, "devices": [],
-                "reason": "OpenVINO 미설치"}
+        return {"GPU": False, "devices": [], "reason": "OpenVINO 미설치"}
     devs = _list_ov_devices()
-    present = {
-        cand: any(d == cand or d.startswith(cand + ".") for d in devs)
-        for cand in ("GPU", "NPU")
-    }
+    gpu = any(d == "GPU" or d.startswith("GPU.") for d in devs)
     if not devs:
         reason = "OpenVINO 디바이스 조회 실패"
-    elif not (present["GPU"] or present["NPU"]):
-        reason = "GPU/NPU 미감지 (드라이버/플러그인 확인)"
+    elif not gpu:
+        reason = "GPU 미감지 (드라이버/플러그인 확인)"
     else:
         reason = ""
-    return {"GPU": present["GPU"], "NPU": present["NPU"],
-            "devices": devs, "reason": reason}
+    return {"GPU": gpu, "devices": devs, "reason": reason}
 
 
 def _build_ov_model(model_kind: str, batch: int = 1,
                     input_px: Optional[int] = None):  # pragma: no cover - 환경 의존
     """torchvision 백본 → OpenVINO 모델 (raw 임베딩 — classifier/fc 제거).
 
-    ``.eval()`` 로 BatchNorm 을 폴딩한 뒤 변환해야 NPU/GPU 에서 정확하다.
+    ``.eval()`` 로 BatchNorm 을 폴딩한 뒤 변환해야 GPU 에서 정확하다.
     ``batch`` 로 정적 배치 크기를, ``input_px`` 로 입력 해상도를 지정.  지원 백본은
     MobileNetV3-Small / ResNet18 두 가지로, 그 외 모델은 ``None`` 을 돌려
     호출부가 CPU 고전으로 폴백한다."""
@@ -555,14 +536,14 @@ _compile_errors: Dict[tuple, str] = {}
 def compile_model_on(model_kind: str, device: str, batch: int = 1, *,
                      perf_hint: str = "THROUGHPUT", streams: int = 0,
                      input_px: int = 0):  # pragma: no cover
-    """``model_kind`` 백본을 ``device`` ("GPU"/"NPU") 에 정적 배치 ``batch`` 로 컴파일.
+    """``model_kind`` 백본을 ``device`` ("GPU") 에 정적 배치 ``batch`` 로 컴파일.
 
     반환 ``(compiled, full_name)`` 또는 실패 시 ``None``.  **다른 디바이스로
     silent fallback 하지 않는다** — 폴백은 스케줄러가 유닛 단위로 결정하므로,
     GPU 컴파일 실패는 단지 그 유닛을 띄우지 않는다는 뜻이다.  lru_cache 가
     ``(model_kind, device, batch, perf_hint, streams, input_px)`` 별로 보관한다.
 
-    개발자 벤치마크의 NPU 사용 방식 스윕용 노브:
+    개발자 벤치마크의 가속 사용 방식 스윕용 노브:
     - ``perf_hint`` — OpenVINO PERFORMANCE_HINT (THROUGHPUT/LATENCY/CUMULATIVE_THROUGHPUT).
     - ``streams``   — NUM_STREAMS(다중 동시 추론 스트림, 0=자동).
     - ``input_px``  — 입력 해상도(0=기본 256).  전처리도 같은 px 를 써야 한다.
@@ -583,7 +564,7 @@ def compile_model_on(model_kind: str, device: str, batch: int = 1, *,
         core = ov.Core()
         compiled = core.compile_model(ov_model, device, config=cfg_compile)
     except Exception as e:
-        # 조용히 None 만 반환하면 NPU 가 왜 '대기' 인지 알 수 없으므로
+        # 조용히 None 만 반환하면 가속이 왜 '대기' 인지 알 수 없으므로
         # 에러를 보존(상태바 툴팁용) + 로그.
         _compile_errors[(model_kind, device)] = repr(e)
         log.warning("OpenVINO %s 컴파일 실패 on %s (batch=%d) — 해당 유닛 비활성",
@@ -612,7 +593,7 @@ def compile_diagnostics() -> Dict[str, object]:
     반환::
 
         {"compiled": ["GPU", ...],            # 컴파일 성공 디바이스
-         "errors": {"NPU": "<에러 문자열>"}}  # 디바이스별 마지막 실패 사유
+         "errors": {"GPU": "<에러 문자열>"}}  # 디바이스별 마지막 실패 사유
 
     추론 컴파일은 lazy(첫 매칭 시) 이므로, 매칭을 한 번 돌린 뒤에 값이 채워진다.
     """
@@ -711,12 +692,12 @@ def device_embed(paths: Iterable[Path],
     ``side`` ('ref'/'val') 가 주어지고 cfg.center_crop 이 켜져 있으면 중앙 30%
     crop 입력으로 임베딩한다(개발자 벤치마크의 center-crop 변형용).
 
-    ``jobs`` 로 동시 in-flight 추론 수를 지정 — NPU(8GB)는 크게 주어 메모리/
+    ``jobs`` 로 동시 in-flight 추론 수를 지정 — 크게 주어 메모리/
     파이프라인을 적극 활용한다.  ``batch>1`` 이면 요청당 B장을 한 번에 추론
     (정적 배치 B, 테스트용).  실패 path 는 결과에서 누락.  배치 결과는 batch=1
     과 동일(임베딩은 배치 무관).
 
-    개발자 벤치마크 NPU 사용 방식 노브 — ``perf_hint``(성능 힌트), ``streams``
+    개발자 벤치마크 가속 사용 방식 노브 — ``perf_hint``(성능 힌트), ``streams``
     (NUM_STREAMS, 다중 동시 작업), ``preprocess_threads``(전처리 멀티스레드),
     ``input_px``(입력 해상도).  모두 0/기본이면 현행과 동일하게 동작한다.
     """
@@ -764,7 +745,7 @@ def device_embed(paths: Iterable[Path],
     mark_unit_active(device)
     n_streams = _optimal_streams(compiled) if jobs is None else max(1, int(jobs))
     # 전처리를 멀티스레드로 돌려 준비되는 텐서를 즉시 추론 큐로 흘려보낸다(#3) —
-    # 전처리(CPU)와 추론(GPU/NPU)이 동시에 돌아 장치 유휴를 줄인다.
+    # 전처리(CPU)와 추론(GPU)이 동시에 돌아 장치 유휴를 줄인다.
     _t0 = _time.perf_counter()
     prepped = _preprocess_parallel(items, cfg, side,
                                    workers=preprocess_threads or None,

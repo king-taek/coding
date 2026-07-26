@@ -6,7 +6,6 @@ Pillow 기반으로 안전한 리사이즈를 수행하고, 캐시가 있으면 
 
 from __future__ import annotations
 
-import io
 from pathlib import Path
 from typing import Optional
 
@@ -127,10 +126,6 @@ def set_active_tier(tier: Optional["config.SizingTier"]) -> None:
     _active_tier = tier
 
 
-def get_active_tier() -> Optional["config.SizingTier"]:
-    return _active_tier
-
-
 def _ensure_resized(src: Path, *, size_option: str,
                     long_edge: int, jpeg_q: int,
                     extra: str = "") -> Path:
@@ -149,10 +144,6 @@ def _ensure_resized(src: Path, *, size_option: str,
     out.parent.mkdir(parents=True, exist_ok=True)
     img.save(str(out), format="JPEG", quality=jpeg_q, optimize=True)
     return out
-
-
-def load_bytes(path: Path) -> bytes:
-    return Path(path).read_bytes()
 
 
 # ---------------------------------------------------------------------------
@@ -217,17 +208,6 @@ def preprocessed_roi_gray(src: Path,
     except Exception:
         pass
     return gray
-
-
-def to_pil_thumb(src: Path) -> Image.Image:
-    """캐시된 썸네일을 Pillow Image 로 즉시 로드."""
-    return Image.open(str(get_thumb_path(src)))
-
-
-def encode_jpeg(img: Image.Image, quality: int = 85) -> bytes:
-    buf = io.BytesIO()
-    _to_rgb(img).save(buf, format="JPEG", quality=quality, optimize=True)
-    return buf.getvalue()
 
 
 # ---------------------------------------------------------------------------

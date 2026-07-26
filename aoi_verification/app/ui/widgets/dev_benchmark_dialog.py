@@ -57,7 +57,7 @@ class _BenchSignals(QObject):
 class _BenchWorker(QThread):
     """레시피 실행을 **자식 프로세스로 격리**해 스위트를 돌리는 워커.
 
-    레시피 실행은 OpenVINO/NPU 등 네이티브 호출이라 드라이버 버그로 **프로세스가
+    레시피 실행은 OpenVINO 등 네이티브 호출이라 드라이버 버그로 **프로세스가
     통째로 죽을(segfault)** 수 있다.  파이썬 예외/스레드 타임아웃으로는 못 막으므로,
     실행을 자식으로 분리한다.  자식이 죽어도 (a) 이 GUI 프로세스는 안 죽고, (b) 어느
     레시피가 죽였는지 기록하며, (c) 살아남은 레시피는 이어서 측정한다(``drive_isolated_suite``).
@@ -332,7 +332,7 @@ class DevBenchmarkDialog(QDialog):
         root.addWidget(QLabel(i18n.KO.DEV_BENCH_RECIPES, self))
 
         # 프리셋 — 옵션은 **생존자(정확도 97.6% 보존 확인)** + 앵커(현행·기준선)만 노출한다.
-        # 입증된 사패(임베딩 장치 교체·ORB 제거 붕괴·NPU 배치·center-aware·모델주머니)는
+        # 입증된 사패(임베딩 장치 교체·ORB 제거 붕괴·center-aware·모델주머니)는
         # 옵션에서 내렸다(필요 시 CLI `--recipes all+` 로만).  '빠른'=핵심 소수, '대결'=현행 vs
         # 생존자, '생존자 전체'=모든 생존자.
         preset_hint = QLabel(i18n.KO.DEV_BENCH_PRESET_HINT, self)

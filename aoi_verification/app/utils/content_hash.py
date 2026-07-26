@@ -17,7 +17,6 @@ from __future__ import annotations
 import hashlib
 import os
 from pathlib import Path
-from typing import Optional
 
 
 _CHUNK = 64 * 1024     # 64 KB
@@ -45,12 +44,3 @@ def content_hash(path: os.PathLike[str] | str) -> str:
     except OSError:
         return ""
     return h.hexdigest()
-
-
-def safe_content_hash(path: os.PathLike[str] | str) -> Optional[str]:
-    """예외 안전 wrapper — 실패 시 ``None``."""
-    try:
-        h = content_hash(path)
-        return h if h else None
-    except Exception:
-        return None

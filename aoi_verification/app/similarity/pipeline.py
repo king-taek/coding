@@ -218,7 +218,7 @@ def _active_model_name() -> str:
 def _resolve_weights(base: config.SimilarityWeights) -> config.SimilarityWeights:
     """active 모델이 학습 모델이면 use_cnn 을 자동 활성, basic 이면 비활성.
 
-    가속기 (NPU/GPU) 가 있어도 basic 모드에서는 CNN 활성하지 않음 —
+    가속기 (GPU) 가 있어도 basic 모드에서는 CNN 활성하지 않음 —
     이전 동작으로 롤백 (가중치 변경 없음).
     """
     from ..learning import embedder as _emb
@@ -236,16 +236,3 @@ def _resolve_weights(base: config.SimilarityWeights) -> config.SimilarityWeights
             cnn=base.cnn, use_cnn=True,
         )
     return base
-
-
-def invalidate_cnn_cache(model_name: str = "") -> None:
-    """디스크 feature 캐시의 .npz 들에서 cnn 필드만 제거(또는 파일 삭제).
-
-    모델 학습/삭제/모드 전환 후 호출. 가장 단순한 구현은 npz 전체 삭제.
-    """
-    from ..utils import paths as _paths
-    for npz in _paths.feature_cache_dir().glob("*.npz"):
-        try:
-            npz.unlink()
-        except OSError:
-            pass

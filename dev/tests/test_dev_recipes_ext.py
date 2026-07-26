@@ -1,48 +1,9 @@
-"""개발자 벤치마크 확장 — NPU 스윕·NPU 단독·고속 재채점 테스트(헤드리스)."""
+"""개발자 벤치마크 확장 — 고속 재채점·중앙인식 그룹 테스트(헤드리스)."""
 
 from __future__ import annotations
 
 from aoi_verification.app.dev import benchmark as bm
 from aoi_verification.app.dev import recipes as rx
-
-
-# ---------------------------------------------------------------------------
-# (A) NPU 사용 방식 스윕 — ≥20가지, 전부 NPU recall, 설정 유효
-# ---------------------------------------------------------------------------
-def test_npu_sweep_at_least_20_and_npu_recall():
-    assert len(rx.NPU_SWEEP) >= 20
-    for r in rx.NPU_SWEEP:
-        assert r.recall == rx.RECALL_NPU
-        assert r.tag == "npu_sweep"
-        r.to_cfg()                       # 설정 생성이 예외 없이 동작
-
-
-def test_npu_sweep_covers_all_knob_axes():
-    keys = {r.key for r in rx.NPU_SWEEP}
-    # 배치/동시추론/힌트/스트림/전처리스레드/해상도/모델 축이 모두 존재.
-    assert any(k.startswith("npu_b") for k in keys)
-    assert any(k.startswith("npu_c") for k in keys)
-    assert any(k.startswith("npu_hint_") for k in keys)
-    assert any(k.startswith("npu_streams") for k in keys)
-    assert any(k.startswith("npu_prep") for k in keys)
-    assert any(k.startswith("npu_px") for k in keys)
-    assert any(k.startswith("npu_model_") for k in keys)
-    # 노브가 실제로 서로 다른 값을 갖는지(예: 힌트 3종).
-    hints = {r.perf_hint for r in rx.NPU_SWEEP}
-    assert {"THROUGHPUT", "LATENCY", "CUMULATIVE_THROUGHPUT"} <= hints
-
-
-# ---------------------------------------------------------------------------
-# (C) NPU 단독 채점 — CPU 재채점 없이 임베딩만
-# ---------------------------------------------------------------------------
-def test_npu_only_group_uses_npu_without_cpu_rerank():
-    assert rx.NPU_ONLY
-    embed_only = [r for r in rx.NPU_ONLY if r.scoring == rx.SCORE_EMBED_ONLY]
-    assert embed_only                       # 순수 NPU 단독(코사인만)이 존재
-    for r in embed_only:
-        assert r.recall == rx.RECALL_NPU
-        cfg = r.to_cfg()
-        assert cfg.use_npu and not cfg.use_gpu   # NPU 만 사용
 
 
 # ---------------------------------------------------------------------------
@@ -104,16 +65,16 @@ def test_orb_nfeatures_flows_into_cfg():
 
 
 # ---------------------------------------------------------------------------
-# select() 그룹 — core / npu-sweep / npu-only / fast-rerank / all+
+# select() 그룹 — core / center / orb-center / fast-rerank / all+
 # ---------------------------------------------------------------------------
 def test_select_groups_and_all_extended():
     assert len(rx.select("all")) == len(rx.REGISTRY)
-    assert len(rx.select("npu-sweep")) == len(rx.NPU_SWEEP)
+    assert len(rx.select("fast-rerank")) == len(rx.FAST_RERANK)
     assert len(rx.select("all+")) == len(rx.ALL_EXTENDED)
-    mixed = rx.select("npu-only,fast-rerank")
-    assert len(mixed) == len(rx.NPU_ONLY) + len(rx.FAST_RERANK)
+    mixed = rx.select("center,fast-rerank")
+    assert len(mixed) == len(rx.CENTER_AWARE) + len(rx.FAST_RERANK)
     # 개별 키 + 그룹 혼합도 중복 없이.
-    one = rx.select("gpu_fusion_b16,npu-only")
+    one = rx.select("gpu_fusion_b16,fast-rerank")
     keys = [r.key for r in one]
     assert len(keys) == len(set(keys))
 
@@ -121,4 +82,5 @@ def test_select_groups_and_all_extended():
 def test_all_extended_keys_unique():
     keys = [r.key for r in rx.ALL_EXTENDED]
     assert len(keys) == len(set(keys))
-    assert len(rx.ALL_EXTENDED) >= 50
+    # NPU 그룹을 걷어낸 뒤의 확장 레지스트리 규모.
+    assert len(rx.ALL_EXTENDED) >= 40

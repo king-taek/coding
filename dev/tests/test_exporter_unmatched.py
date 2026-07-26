@@ -1,7 +1,6 @@
 """Excel exporter — 매칭 + 미매칭 reference 통합 출력 검증."""
 
 import os
-import tempfile
 from pathlib import Path
 
 import pytest

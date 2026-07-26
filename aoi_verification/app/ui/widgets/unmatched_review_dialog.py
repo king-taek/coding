@@ -16,12 +16,11 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import (QColor, QCursor, QIcon, QKeySequence, QPixmap,
-                         QShortcut)
+from PyQt6.QtGui import QColor, QCursor, QIcon, QPixmap
 from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout,
                               QHBoxLayout, QLabel, QListWidget,
                               QListWidgetItem, QMenu, QMessageBox,
-                              QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
+                              QScrollArea, QVBoxLayout, QWidget)
 
 from ... import config, i18n
 from .. import theme

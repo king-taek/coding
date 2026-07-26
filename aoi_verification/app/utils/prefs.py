@@ -77,7 +77,7 @@ class UiPrefs:
     #   "user_select" : Stage 1 만 직접, Stage 2 자동 매치 + 검토.  (기본)
     #   "auto_all"    : Stage 1 건너뜀 (모든 ref 사용), Stage 2 자동 매치 + 검토.
     automation_level: str = "user_select"
-    # OpenVINO (Intel GPU/NPU 가속) 자동 설치 안내를 거절한 경우 — 다시 묻지
+    # OpenVINO (Intel GPU 가속) 자동 설치 안내를 거절한 경우 — 다시 묻지
     # 않음.  사용자가 ‘다시 보지 않기’ 를 선택했거나 설치 시도 후 실패하면 True.
     openvino_install_declined: bool = False
     # 유사도 엔진 모드 — 마지막으로 '실제 실행된' 모드(파생값).
@@ -92,13 +92,12 @@ class UiPrefs:
     # 화면 색 모드 — 수동 토글(라이트/다크). OS 자동 감지는 하지 않는다.
     color_mode: str = "light"                # "light" | "dark"
     persist_scores: bool = False             # 유사도 점수 디스크 캐시 (#5B)
-    # 고효율 모드 동시 추론 수(in-flight, NPU 기준; GPU 절반).  높일수록 NPU/GPU
+    # 고효율 모드 동시 추론 수(in-flight).  높일수록 GPU
     # 메모리·throughput↑ (계산 결과 불변).  setup_page 슬라이더로 조절.
     accel_concurrency: int = 32
     # 고효율 모드 장치 사용 토글 + 정적 배치 B (테스트용).
     use_cpu: bool = True
     use_gpu: bool = True
-    use_npu: bool = False        # 효율 모드는 CPU+GPU fusion. NPU 비활성(코드만 보존).
     embed_batch: int = 1
     # 개발자 모드 — 켜면 셋업 화면에 ‘개발자 벤치마크’ 진입 버튼이 보인다.
     # (환경변수 AOI_DEV_MODE 로도 켤 수 있다.)  일반 사용자에겐 영향 없음.

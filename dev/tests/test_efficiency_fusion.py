@@ -52,10 +52,10 @@ def test_dynamic_concurrency():
 def test_select_backend_cpu_gpu_only(monkeypatch):
     monkeypatch.setattr(eff._ov, "available_units", lambda: [])
     assert eff._select_backend(None) is None                     # GPU 없음 → CPU 폴백
-    monkeypatch.setattr(eff._ov, "available_units", lambda: ["GPU", "NPU"])
+    monkeypatch.setattr(eff._ov, "available_units", lambda: ["GPU"])
     monkeypatch.setattr(eff._ov, "compile_model_on", lambda mk, dev, batch=1: object())
     b = eff._select_backend(None)
-    assert b is not None and b[1] == "GPU" and b[2] == eff.GPU_BATCH   # NPU 무시·GPU 선택·batch16
+    assert b is not None and b[1] == "GPU" and b[2] == eff.GPU_BATCH   # GPU 선택·batch16
     monkeypatch.setattr(eff._ov, "compile_model_on", lambda mk, dev, batch=1: None)
     assert eff._select_backend(None) is None                     # 컴파일 실패 → CPU 폴백
 

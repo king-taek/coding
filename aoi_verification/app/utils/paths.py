@@ -41,11 +41,6 @@ def resource_path(relative: str | os.PathLike[str]) -> Path:
     return candidate
 
 
-def package_root() -> Path:
-    """`aoi_verification` 패키지 루트 (코드 디렉토리)."""
-    return Path(__file__).resolve().parents[2]
-
-
 # ---------------------------------------------------------------------------
 # Shared cache directory — always in the user's home, never inside source data
 # ---------------------------------------------------------------------------
@@ -109,13 +104,6 @@ def session_cache_dir() -> Path:
 # ---------------------------------------------------------------------------
 # 학습 / 모델 / 평가 디렉토리
 # ---------------------------------------------------------------------------
-def training_data_dir() -> Path:
-    """매칭 쌍이 누적되는 폴더 (pairs.jsonl 보관)."""
-    d = cache_root() / "training_data"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
-
-
 def models_dir() -> Path:
     """학습된 projection_head 가중치 + 메타 JSON 보관 폴더."""
     d = cache_root() / "models"
@@ -128,18 +116,6 @@ def evaluations_dir() -> Path:
     d = cache_root() / "evaluations"
     d.mkdir(parents=True, exist_ok=True)
     return d
-
-
-def models_archive_dir() -> Path:
-    """모델 export/import 용 임시 작업 폴더."""
-    d = cache_root() / "models_archive"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
-
-
-def slot_mapping_path() -> Path:
-    """수동 슬롯 매핑 룰(JSON) 저장 경로 — 사용자 결정을 영속화."""
-    return cache_root() / "slot_mapping.json"
 
 
 # ---------------------------------------------------------------------------
@@ -161,11 +137,6 @@ def template_path() -> Path:
             return c
     # 존재하지 않으면 첫 후보 경로를 그대로 돌려준다 (호출자가 존재 여부 검사)
     return candidates[0]
-
-
-def template_dir() -> Path:
-    """‘양식’ 폴더의 경로 (없을 수 있음 — 호출자가 mkdir 등을 결정)."""
-    return _project_root() / "양식"
 
 
 def results_dir() -> Path:

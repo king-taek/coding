@@ -281,7 +281,7 @@ def latest_commit(repo: str, branch: str, timeout: float = 15.0) -> Optional[dic
     return _latest_via_atom(repo, branch, timeout)
 
 
-def _latest_self_healing(repo: str, branch: str) -> Tuple[Optional[dict], str]:
+def _latest_self_healing(repo: str, branch: str) -> tuple[Optional[dict], str]:
     """``latest_commit`` 을 시도하되, 추적 브랜치가 삭제/이름변경(404)돼 실패하면
     저장소의 **실제 기본 브랜치**로 한 번 더 시도한다.
 

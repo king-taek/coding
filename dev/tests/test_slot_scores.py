@@ -5,8 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List
 
-import pytest
-
 from aoi_verification.app.models.slot import ImageItem
 from aoi_verification.app.similarity.slot_features import (
     SlotFeatureCache, SlotPrecomputeWorker, SlotScoreCache,

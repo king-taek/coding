@@ -7,37 +7,32 @@
         none      : 임베딩 없음(고전 전수 비교)
         cpu       : CPU(OpenVINO)로 임베딩 추출
         gpu       : Intel GPU로 임베딩 추출
-        npu       : Intel NPU로 임베딩 추출  ← '데이터를 NPU로 뽑아낸다'
-        gpu+npu   : 임베딩 작업을 두 장치에 분담(또는 앙상블)
 
   (2) **정밀 재채점/계산(scoring)** — pHash+ORB+SSIM 고전 점수로 후보를 다시
-      매기고 임베딩 코사인과 z-융합하는 단계.  **항상 CPU** 가 담당한다
-      ('NPU 로 뽑고 CPU 로 계산' 이 곧 ``recall=npu, scoring=fusion``).
+      매기고 임베딩 코사인과 z-융합하는 단계.  **항상 CPU** 가 담당한다.
         classical : 모든 후보를 CPU 고전 전수 비교(임베딩 미사용)
         embed_only: 임베딩 코사인 순위만 사용(재채점 없음 — 최속/정확도↓)
         fusion    : 임베딩 recall + CPU 고전 재채점 + z-융합(정확도 최상)
 
-정확도는 백본(임베딩 모델) 종류가 아니라 **CPU 고전 융합**이 좌우한다
-(docs/NPU 효율성 분석 보고서).  그래서 대부분의 실전 레시피는 ``fusion`` 이고,
+정확도는 백본(임베딩 모델) 종류가 아니라 **CPU 고전 융합**이 좌우한다.
+그래서 대부분의 실전 레시피는 ``fusion`` 이고,
 장치 조합은 주로 '임베딩을 누가/어떻게 더 빨리 뽑느냐'의 속도 문제다.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Set
 
 # 임베딩 백본 식별자(embedder_openvino 와 동일 문자열) — torch/openvino 미설치
 # 환경에서도 이 모듈을 import 할 수 있도록 문자열 상수로 직접 정의한다.
 MODEL_MOBILENET_V3 = "mobilenet_v3_small"   # GPU 기본(576-d)
-MODEL_RESNET18 = "resnet18"                 # NPU 대조 모델(512-d)
+MODEL_RESNET18 = "resnet18"                 # GPU 대조 모델(512-d)
 
 # 연산 단계 라벨(상수) — 오타 방지.
 RECALL_NONE = "none"
 RECALL_CPU = "cpu"
 RECALL_GPU = "gpu"
-RECALL_NPU = "npu"
-RECALL_GPU_NPU = "gpu+npu"
 
 SCORE_CLASSICAL = "classical"
 SCORE_EMBED_ONLY = "embed_only"
@@ -57,8 +52,7 @@ class Recipe:
     fusion_topk: int = 40          # 고전 재채점 깊이(fusion 일 때)
     center_crop: bool = False      # 고전 재채점 시 중앙 30% crop
     concurrency: int = 32          # 동시 in-flight 추론 상한(병렬 수준)
-    ensemble: bool = False         # gpu+npu 를 '분담' 대신 '앙상블'로(대조군)
-    # ── NPU 사용 방식 노브(병렬 수준/멀티스레드/다중 동시 작업) ─────────────
+    # ── 가속 사용 방식 노브(병렬 수준/멀티스레드/다중 동시 작업) ─────────────
     perf_hint: str = "THROUGHPUT"  # OpenVINO PERFORMANCE_HINT (THROUGHPUT/LATENCY/CUMULATIVE_THROUGHPUT)
     streams: int = 0               # NUM_STREAMS (0=자동) — 다중 동시 추론 스트림
     preprocess_threads: int = 0    # 전처리(디코드/리사이즈) 멀티스레드 수(0=자동)
@@ -68,7 +62,6 @@ class Recipe:
     rerank_workers: int = 0        # 재채점 병렬 워커 수(0=직렬) — CPU 멀티코어 활용
     orb_nfeatures: int = 0         # ORB 검출 특징 수(0=기본 500) — 줄이면 ORB 비용↓
     orb_center_weight: float = 0.0 # 중앙-가중 ORB(0=끔) — defect 정중앙 매치에 가중
-    npu_defect_assist: bool = False # NPU 병렬 보조기 — 중앙(defect) 임베딩을 3번째 융합 신호로
     # ── 중앙-인식(center-aware) 재채점 — defect 이 정중앙인 특성 활용 ──────────
     #   region_fusion: 중앙(defect) crop 점수 + 풀 ROI(주변 패턴) 점수를 가중 융합.
     #   cascade: 중앙 점수로 거칠게 추려(coarse) 풀 ROI 로 정밀 재채점(fine)만 — 속도↑.
@@ -77,10 +70,10 @@ class Recipe:
     center_ratio: float = 0.0      # 중앙 crop 비율(0=0.3) — defect 신호 영역 크기
     center_weight: float = 0.0     # region_fusion 시 중앙(defect) 가중(0=0.6)
     cascade_keep: int = 0          # cascade 시 coarse 후 남길 후보 수(0=8)
-    # ── 전용 채점기 라우팅(현재 미사용 — npu 레시피 호환용 빈 필드) ───────────
+    # ── 전용 채점기 라우팅(현재 미사용 — 호환용 빈 필드) ─────────────────────
     method: str = ""               # "" (전용 채점기 family — 현재 미사용)
     needs: str = ""                # 대상 장비에 필요한 추가 패키지/가중치(폴백 안내용)
-    tag: str = "core"              # 그룹(core / npu_sweep / npu_only / fast_rerank)
+    tag: str = "core"              # 그룹(core / fast_rerank)
     diagnostic: bool = False       # 함정/대조용(평소엔 불필요) — 기본 실험에서 제외
     desc: str = ""                 # 각 연산을 어느 장치에서 어떻게 하는지
 
@@ -88,14 +81,12 @@ class Recipe:
     def required_devices(self) -> Set[str]:
         """이 레시피가 실제 측정되려면 있어야 하는 가속 장치 집합(없으면 폴백)."""
         req: Set[str] = set()
-        if self.recall in (RECALL_GPU, RECALL_GPU_NPU):
+        if self.recall == RECALL_GPU:
             req.add("GPU")
-        if self.recall in (RECALL_NPU, RECALL_GPU_NPU):
-            req.add("NPU")
         return req
 
     def uses_embedding(self) -> bool:
-        return self.recall in (RECALL_CPU, RECALL_GPU, RECALL_NPU, RECALL_GPU_NPU)
+        return self.recall in (RECALL_CPU, RECALL_GPU)
 
     def to_cfg(self, base_cfg=None, *, bench_no_cache: bool = True):
         """이 레시피에 대응하는 ``SimilarityConfig`` 생성.
@@ -113,8 +104,7 @@ class Recipe:
             persist_scores=False,            # 벤치마크는 점수 영속 캐시도 끔
             accel_concurrency=int(self.concurrency),
             use_cpu=True,
-            use_gpu=self.recall in (RECALL_GPU, RECALL_GPU_NPU),
-            use_npu=self.recall in (RECALL_NPU, RECALL_GPU_NPU),
+            use_gpu=self.recall == RECALL_GPU,
             embed_batch=int(self.embed_batch),
             bench_no_cache=bool(bench_no_cache),
             orb_nfeatures=int(self.orb_nfeatures),
@@ -141,27 +131,12 @@ REGISTRY: List[Recipe] = [
         desc=("Intel GPU(MobileNetV3)가 임베딩을 batch16 으로 뽑아 코사인 후보를 "
               "추리고, 상위 40개를 CPU 고전으로 재채점해 z-융합한다. 현행 고효율 모드."),
     ),
-    # ── 사용자 아이디어: NPU 로 뽑고 CPU 로 계산 ───────────────────────
-    Recipe(
-        key="npu_extract_cpu_fuse", name="NPU 추출+CPU 계산(ResNet18)",
-        recall=RECALL_NPU, scoring=SCORE_FUSION,
-        embed_model=MODEL_RESNET18, embed_batch=1, fusion_topk=40,
-        desc=("Intel NPU(ResNet18)가 이미지 임베딩을 '뽑아내고', CPU 가 고전 점수 "
-              "계산 + z-융합을 맡는다. 사용자 제안 조합(데이터=NPU, 계산=CPU)."),
-    ),
-    Recipe(
-        key="npu_mbnet_cpu_fuse", name="NPU 추출+CPU 계산(MobileNet)",
-        recall=RECALL_NPU, scoring=SCORE_FUSION,
-        embed_model=MODEL_MOBILENET_V3, embed_batch=1, fusion_topk=40,
-        desc=("NPU 가 GPU 와 동일 백본(MobileNetV3)으로 임베딩을 뽑고 CPU 가 융합. "
-              "GPU 와 같은 모델이라 분담/대조에 적합."),
-    ),
     # ── 가속기 없는 PC 대비책 ──────────────────────────────────────────
     Recipe(
         key="cpu_embed_fusion", name="CPU 임베딩+CPU 융합",
         recall=RECALL_CPU, scoring=SCORE_FUSION,
         embed_model=MODEL_MOBILENET_V3, embed_batch=8, fusion_topk=40,
-        desc=("GPU/NPU 가 없을 때 CPU(OpenVINO)로 임베딩 추출 후 같은 CPU 가 고전 "
+        desc=("GPU 가 없을 때 CPU(OpenVINO)로 임베딩 추출 후 같은 CPU 가 고전 "
               "융합. 가속기 부재 환경의 폴백 성능 측정용."),
     ),
     # ── 임베딩 단독(최속/정확도 한계 확인) ─────────────────────────────
@@ -171,15 +146,6 @@ REGISTRY: List[Recipe] = [
         embed_model=MODEL_MOBILENET_V3, embed_batch=16, diagnostic=True,
         desc=("GPU 임베딩 코사인 순위만으로 매칭(CPU 재채점 생략). 가장 빠르지만 "
               "정확도가 낮아 '왜 융합이 필요한가'를 보여주는 대조군."),
-    ),
-    # ── 3장치 '분담'(속도 핵심 시도) ───────────────────────────────────
-    Recipe(
-        key="gpu_npu_split_fusion", name="GPU+NPU 분담 임베딩+CPU 융합",
-        recall=RECALL_GPU_NPU, scoring=SCORE_FUSION,
-        embed_model=MODEL_MOBILENET_V3, embed_batch=16, fusion_topk=40,
-        ensemble=False,
-        desc=("임베딩 작업을 GPU 와 NPU 에 '절반씩 분담'해 동시에 뽑아 추출 처리량을 "
-              "올리고(중복 아님), CPU 가 융합. 3장치를 속도에 활용하는 핵심 조합."),
     ),
     # ── 재채점 깊이 스윕(속도↔정확도) ──────────────────────────────────
     Recipe(
@@ -220,15 +186,6 @@ REGISTRY: List[Recipe] = [
         embed_model=MODEL_MOBILENET_V3, embed_batch=4, fusion_topk=40,
         desc=("GPU batch=4 — 처리량이 정상화되기 시작하는 지점. batch16 과 속도 비교용."),
     ),
-    # ── 3장치 '앙상블'(보고서 안티패턴 대조) ───────────────────────────
-    Recipe(
-        key="gpu_npu_ensemble_fusion", name="GPU+NPU 앙상블+CPU 융합(대조)",
-        recall=RECALL_GPU_NPU, scoring=SCORE_FUSION,
-        embed_model=MODEL_MOBILENET_V3, embed_batch=16, fusion_topk=40,
-        ensemble=True, diagnostic=True,
-        desc=("GPU 와 NPU 가 '각각 전체'를 임베딩해 두 코사인을 평균(앙상블). "
-              "보고서상 정확도 이득 0 · 시간 약 2배인 안티패턴 — 분담과 대조."),
-    ),
 ]
 
 # 추천/대조의 기준이 되는 레시피 키.
@@ -237,7 +194,7 @@ PRODUCTION_SPEED_KEY = "gpu_fusion_b16"        # 현행(속도 3배 목표의 �
 
 # 실측으로 **정확도 보존(97.6%, 현행 동률) 확인된 '생존자'** 재채점 레시피.  3배 달성은
 # `rr_parallel`(×3.95)로 확정됐고, 이 묶음만 추가 실험 대상으로 남긴다.  나머지(임베딩 장치
-# 교체 ×1.02·ORB 제거 시 정확도 붕괴·NPU 배치 손상·center-aware 비효율)는
+# 교체 ×1.02·ORB 제거 시 정확도 붕괴·center-aware 비효율)는
 # 옵션에서 내리고 아카이브(`all+`/그룹)로만 둔다.
 SURVIVOR_KEYS: List[str] = [
     "rr_parallel",            # 재채점 항 동일·16스레드 병렬 — ×3.95 @97.6% (추천)
@@ -254,8 +211,6 @@ SURVIVOR_KEYS: List[str] = [
 
 # 중앙-가중 ORB 신규 실험(단일 패스) — defect 정중앙 활용.  옵션에 노출해 측정한다.
 CENTER_ORB_KEYS: List[str] = ["rr_orb_center50", "rr_orb_center70", "rr_fusion_center50"]
-# NPU 병렬 보조기 신규 실험(3신호 융합).
-NPU_ASSIST_KEYS: List[str] = ["npu_assist_r25", "npu_assist_r20"]
 
 # ── 최종 후보 TOP5 — 실측 97.6%(현행 동률)·런 간 안정적인 5가지(성능+안정성) ─────
 # 실험은 끝났고 개발자 모드 옵션은 이 TOP5 비교만 남긴다(나머지 레시피·그룹은 코드로
@@ -282,91 +237,6 @@ MAIN_KEYS: List[str] = [BASELINE_ACCURACY_KEY, PRODUCTION_SPEED_KEY] + TOP5_KEYS
 
 # 기본 선택(빠른) = 메인 전체(앵커+TOP5).  현행을 항상 포함해 추천 엔진이 speedup 을 계산.
 QUICK_KEYS: List[str] = list(MAIN_KEYS)
-
-
-# ===========================================================================
-# (A) NPU 사용 방식 스윕 — 모델/배치/병렬수준/스트림/멀티스레드/해상도 ≥20가지.
-#     추천(NPU MobileNet) 주변에서 한 축씩만 바꿔 원인 귀속을 명확히 한다.
-#     모든 항목 recall=NPU, scoring=fusion(정확도 보존).  대상 장비의 NPU 에서 측정.
-# ===========================================================================
-def _npu(key, name, desc, **kw) -> Recipe:
-    base = dict(recall=RECALL_NPU, scoring=SCORE_FUSION,
-                embed_model=MODEL_MOBILENET_V3, embed_batch=8, fusion_topk=40,
-                concurrency=32, tag="npu_sweep")
-    base.update(kw)
-    return Recipe(key=key, name=name, desc=desc, **base)
-
-
-def _build_npu_sweep() -> List[Recipe]:
-    out: List[Recipe] = []
-    # 1) 정적 배치 B 스윕 — NPU 처리량에 배치가 주는 영향.
-    for b in (1, 4, 8, 16, 32):
-        out.append(_npu(f"npu_b{b}", f"NPU 배치{b}",
-                        f"NPU(MobileNet) 임베딩 배치={b}. 정적 배치가 NPU 처리량에 "
-                        f"주는 영향 측정(NPU 는 보고서상 배치 이득이 작음).",
-                        embed_batch=b))
-    # 2) 동시 추론 수(병렬 수준) 스윕 — AsyncInferQueue in-flight 요청 수.
-    for c in (1, 2, 4, 8, 16, 32, 64, 96):
-        out.append(_npu(f"npu_c{c}", f"NPU 동시추론{c}",
-                        f"NPU 동시 in-flight 추론 {c}개(병렬 수준). 다중 동시 작업으로 "
-                        f"NPU 파이프라인을 채워 유휴를 줄이는 효과 측정.",
-                        concurrency=c))
-    # 3) 성능 힌트 — 처리량 vs 지연 vs 누적 처리량.
-    for h in ("THROUGHPUT", "LATENCY", "CUMULATIVE_THROUGHPUT"):
-        out.append(_npu(f"npu_hint_{h.lower()}", f"NPU 힌트 {h}",
-                        f"OpenVINO PERFORMANCE_HINT={h}. 처리량/지연 트레이드오프를 "
-                        f"NPU 에서 비교.",
-                        perf_hint=h))
-    # 4) 스트림 수 — NUM_STREAMS(다중 동시 작업 스트림).
-    for s in (1, 2, 4):
-        out.append(_npu(f"npu_streams{s}", f"NPU 스트림{s}",
-                        f"NPU NUM_STREAMS={s}. 여러 추론 스트림을 동시에 돌려 처리량을 "
-                        f"올리는 효과(메모리 여유 필요).",
-                        streams=s))
-    # 5) 전처리 멀티스레드 — 디코드/리사이즈 CPU 병렬이 NPU 공급을 따라가는지.
-    for t in (2, 4, 8):
-        out.append(_npu(f"npu_prep{t}", f"NPU 전처리{t}스레드",
-                        f"전처리(디코드/리사이즈)를 {t}스레드로 — NPU 가 굶지 않게 텐서 "
-                        f"공급을 멀티스레드로 채운다.",
-                        preprocess_threads=t))
-    # 6) 입력 해상도 — 처리량↔표현력.
-    for px in (224, 256):
-        out.append(_npu(f"npu_px{px}", f"NPU 입력{px}px",
-                        f"입력 해상도 {px}px. 작을수록 NPU 처리량↑(표현력 약간↓).",
-                        input_px=px))
-    # 7) NPU 위 모델 변형 — 같은 NPU 에서 백본만 교체.
-    for m in ("mobilenet_v3_small", "resnet18", "mobilenet_v2",
-              "squeezenet1_1", "efficientnet_b0"):
-        out.append(_npu(f"npu_model_{m}", f"NPU 모델 {m}",
-                        f"NPU 에서 {m} 백본으로 임베딩 추출(추출비용↔표현력 비교).",
-                        embed_model=m, needs=""))
-    return out
-
-
-# ===========================================================================
-# (C) NPU 단독 채점 — CPU 재채점 없이 NPU 임베딩 코사인만으로 매칭.
-#     'NPU 단독이 빠르고 정확하면 CPU 불필요'를 직접 검증.  scoring=embed_only.
-# ===========================================================================
-def _build_npu_only() -> List[Recipe]:
-    out: List[Recipe] = []
-    for m, b in (("mobilenet_v3_small", 8), ("resnet18", 8),
-                 ("mobilevit_s", 8), ("efficientnet_b0", 8)):
-        out.append(Recipe(
-            key=f"npu_only_{m}", name=f"NPU 단독 {m}",
-            recall=RECALL_NPU, scoring=SCORE_EMBED_ONLY,
-            embed_model=m, embed_batch=b, concurrency=32, tag="npu_only",
-            needs="",
-            desc=(f"NPU 가 {m} 임베딩을 뽑아 코사인 순위만으로 매칭한다(CPU 재채점 "
-                  f"없음). NPU 단독으로 충분히 빠르고 정확하면 CPU 가 불필요함을 검증.")))
-    # NPU 단독 + 가벼운 pHash 보정(임베딩은 NPU, 최소 CPU 한 항목만) — 단독에 근접.
-    out.append(Recipe(
-        key="npu_only_mbnet_phash", name="NPU 단독+pHash 보정",
-        recall=RECALL_NPU, scoring=SCORE_FUSION, embed_model=MODEL_MOBILENET_V3,
-        embed_batch=8, fusion_topk=10, rerank="phash", rerank_workers=8,
-        concurrency=32, tag="npu_only",
-        desc=("거의 NPU 단독 — 상위 10개만 CPU pHash(가장 싼 1개 항목)로 살짝 보정. "
-              "완전 단독과 전수 융합의 중간(CPU 부하 최소).")))
-    return out
 
 
 # ===========================================================================
@@ -400,12 +270,6 @@ def _build_fast_rerank() -> List[Recipe]:
                embed_model=MODEL_MOBILENET_V3, embed_batch=16, tag="fast_rerank",
                desc=("싼 pHash 재채점 + 상위 20개만 — 깊이와 비용을 동시에 줄인 최속 "
                      "융합 후보. 정확도 검증 필수.")),
-        Recipe(key="rr_npu_phash_parallel", name="NPU추출+pHash병렬재채점",
-               recall=RECALL_NPU, scoring=SCORE_FUSION,
-               embed_model=MODEL_MOBILENET_V3, embed_batch=8, fusion_topk=40,
-               rerank="phash_ssim", rerank_workers=16, tag="fast_rerank",
-               desc=("NPU 가 임베딩을 뽑고, CPU 는 ORB 를 뺀 pHash+SSIM 을 16스레드 "
-                     "병렬로 재채점 — 추출=NPU·계산=경량/병렬 CPU 의 결합 최적 후보.")),
     ] + _build_cpu_rerank()
 
 
@@ -571,32 +435,7 @@ CENTER_ORB: List[Recipe] = _build_center_orb()
 
 
 # ===========================================================================
-# (C3) NPU 병렬 보조기 — 재채점(CPU) 동안 노는 NPU 에 '진짜 일'을 준다: 상위 후보의
-#      **중앙(defect) crop 임베딩을 NPU(batch=1, 배치 정확도 버그 회피)** 로 인코딩해
-#      (임베딩 코사인 + CPU 고전 + NPU defect) **3신호 z-융합**.  GPU 임베딩 recall 은
-#      그대로(=현행)고, NPU 는 defect 신호만 더한다.  NPU 없으면 2신호로 자동 폴백.
-# ===========================================================================
-def _build_npu_assist() -> List[Recipe]:
-    base = dict(recall=RECALL_GPU, scoring=SCORE_FUSION,
-                embed_model=MODEL_MOBILENET_V3, embed_batch=16,
-                fusion_topk=40, rerank_workers=16, npu_defect_assist=True,
-                tag="npu_assist")
-    return [
-        Recipe(key="npu_assist_r25", name="NPU보조 defect임베딩 r0.25(3신호)",
-               center_ratio=0.25, **base,
-               desc=("CPU 재채점과 병행해 NPU 가 상위 후보의 중앙 25%(defect) 임베딩을 "
-                     "batch=1 로 뽑아 3번째 신호로 융합 — 3장치(GPU·CPU·NPU) 동시 활용.")),
-        Recipe(key="npu_assist_r20", name="NPU보조 defect임베딩 r0.20(3신호)",
-               center_ratio=0.20, **base,
-               desc="NPU defect 임베딩 영역을 더 좁혀(20%) defect 에 집중한 변형."),
-    ]
-
-
-NPU_ASSIST: List[Recipe] = _build_npu_assist()
-
-
-# ===========================================================================
-# (D2) GPU 임베딩 모델 선택 — NPU 없는 PC 는 GPU 로 임베딩한다.  어떤 백본이 정답을
+# (D2) GPU 임베딩 모델 선택 — 어떤 백본이 정답을
 #      후보 상위에 잘 올리는지(후보 recall) 비교해 고르기 위한 묶음.  embed_only 는
 #      순수 임베딩 순위(=후보 recall)를, fusion 은 재채점 포함 최종 정확도를 본다.
 # ===========================================================================
@@ -621,66 +460,26 @@ GPU_MODEL_KEYS: List[str] = ["gpu_embed_only", "gpu_fusion_b16",
                              "gpu_embed_resnet18", "gpu_fusion_resnet18"]
 
 
-# ===========================================================================
-# (E) NPU 사용량을 '높인' 5가지 — 가설: NPU 를 더 바쁘게(동시추론/스트림/분담) 굴리면
-#     속도·정확도가 개선될 수도.  배치 정확도 버그를 피해 **batch=1 고정**하고, in-flight
-#     작업(jobs)·스트림·GPU+NPU 분담으로 가동률을 끌어올린다.  벤치가 NPU 사용량(시간·
-#     처리량·드라이브 설정)을 함께 기록한다.
-# ===========================================================================
-def _build_npu_hi() -> List[Recipe]:
-    base = dict(scoring=SCORE_FUSION, embed_model=MODEL_MOBILENET_V3,
-                embed_batch=1, fusion_topk=40, rerank_workers=16, tag="npu_hi")
-    return [
-        Recipe(key="npu_hi_conc96", name="NPU고가동 동시추론96",
-               recall=RECALL_NPU, concurrency=96, **base,
-               desc="NPU 동시 in-flight 추론 96개로 가동률↑(batch=1 정확도 보존). 추출=NPU·재채점=CPU병렬."),
-        Recipe(key="npu_hi_streams4", name="NPU고가동 스트림4",
-               recall=RECALL_NPU, concurrency=64, streams=4, **base,
-               desc="NPU 실행 스트림 4개로 병렬 실행 단위↑(batch=1). 동시추론과 결합해 가동률을 끌어올림."),
-        Recipe(key="npu_hi_throughput", name="NPU고가동 THROUGHPUT힌트",
-               recall=RECALL_NPU, concurrency=96, perf_hint="THROUGHPUT", **base,
-               desc="OpenVINO THROUGHPUT 힌트 + 동시추론96 — 처리량 우선으로 NPU 를 최대한 바쁘게."),
-        Recipe(key="npu_hi_split", name="NPU고가동 GPU+NPU분담",
-               recall=RECALL_GPU_NPU, concurrency=64, **base,
-               desc="임베딩을 GPU·NPU 에 절반씩 동시 분담(batch=1) — 두 장치를 동시에 가동해 추출 처리량↑."),
-        Recipe(key="npu_hi_assist_conc", name="NPU고가동 defect보조+동시96",
-               recall=RECALL_GPU, npu_defect_assist=True, center_ratio=0.25,
-               concurrency=96, **base,
-               desc="GPU 임베딩 + NPU 가 중앙 defect 임베딩(batch=1·동시96)을 3신호로 — NPU 를 재채점과 겹쳐 바쁘게."),
-    ]
-
-
-NPU_HI: List[Recipe] = _build_npu_hi()
-NPU_HI_KEYS: List[str] = [r.key for r in NPU_HI]
-
 # 최종 벤치 순서 — ①고전 워밍업 → ②고전(정식 기준선) → ③현행 → TOP5.
-# (NPU 고가동 등은 실험 종료로 제외 — 아카이브는 `--recipes all+` 로.)
 FINAL_KEYS: List[str] = (["cpu_classical_warmup", BASELINE_ACCURACY_KEY,
                           PRODUCTION_SPEED_KEY] + TOP5_KEYS)
 
 
-NPU_SWEEP: List[Recipe] = _build_npu_sweep()
-NPU_ONLY: List[Recipe] = _build_npu_only()
 FAST_RERANK: List[Recipe] = _build_fast_rerank()
 
 # 확장 그룹(이름 → 레시피 리스트).  'core' = 기본 레지스트리.
 #   center      = 중앙-인식(사용자 제안) 신규 실험군.
-#   npu-sweep/npu-only/fast-rerank = opt-in 아카이브(대부분 사패 입증) —
+#   fast-rerank = opt-in 아카이브 —
 #     기본 프리셋에는 없고, 필요할 때만 그룹/`all+` 로 펼쳐 측정한다.
 GROUPS = {
     "core": REGISTRY,
     "center": CENTER_AWARE,
     "orb-center": CENTER_ORB,
-    "npu-assist": NPU_ASSIST,
-    "npu-hi": NPU_HI,
-    "npu-sweep": NPU_SWEEP,
-    "npu-only": NPU_ONLY,
     "fast-rerank": FAST_RERANK,
 }
 # 'gpu-models'·'top5'·'final' 은 그룹이 아니라 **비교/최종 프리셋** — select() 에서 처리.
 ALL_EXTENDED: List[Recipe] = (REGISTRY + [WARMUP_CLASSICAL] + CENTER_AWARE
-                              + CENTER_ORB + NPU_ASSIST + NPU_HI + GPU_MODELS
-                              + NPU_SWEEP + NPU_ONLY + FAST_RERANK)
+                              + CENTER_ORB + GPU_MODELS + FAST_RERANK)
 _BY_KEY = {r.key: r for r in ALL_EXTENDED}
 
 
@@ -748,7 +547,7 @@ def select(keys=None) -> List[Recipe]:
     - ``None`` / ``"all"`` → 핵심 13가지(``REGISTRY``).
     - ``"quick"`` → '빠른' 프리셋(``QUICK_KEYS``) — 3배 판단에 필요한 핵심 소수.
     - ``"all+"`` / ``"everything"`` → 확장 포함 전부(``ALL_EXTENDED``).
-    - 그룹명(``"npu-sweep"`` / ``"npu-only"`` / ``"fast-rerank"`` / ``"core"``)
+    - 그룹명(``"fast-rerank"`` / ``"core"``)
       → 그 그룹.  여러 그룹/키를 콤마로 섞을 수 있다.
     - 그 외 → 개별 레시피 키.
     """

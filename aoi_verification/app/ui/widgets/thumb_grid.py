@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Callable, Iterable, Optional
+from typing import Iterable, Optional
 
 from PyQt6.QtCore import QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (QCheckBox, QFrame, QGridLayout, QLabel,
                               QToolButton, QVBoxLayout, QWidget)
 

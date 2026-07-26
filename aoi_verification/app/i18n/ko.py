@@ -10,11 +10,11 @@ APP_TITLE = "AOI 검증"
 CREDIT = "Developed by 임현택"
 
 # ── OpenVINO 자동 설치 안내 ───────────────────────────────────────────────
-OPENVINO_OFFER_TITLE = "Intel GPU / NPU 가속 활성화"
+OPENVINO_OFFER_TITLE = "Intel GPU 가속 활성화"
 OPENVINO_OFFER_BODY = (
     "Intel CPU 가 감지되었습니다.\n"
-    "OpenVINO 를 설치하면 Intel GPU (Iris Xe / Arc) 와 NPU (AI Boost) "
-    "가속이 자동으로 활성화되어 유사도 계산이 빨라집니다.\n\n"
+    "OpenVINO 를 설치하면 Intel GPU (Iris Xe / Arc) 가속이 자동으로 "
+    "활성화되어 유사도 계산이 빨라집니다.\n\n"
     "지금 설치할까요? (약 200 MB)"
 )
 OPENVINO_OFFER_BTN_INSTALL = "지금 설치"
@@ -22,7 +22,7 @@ OPENVINO_OFFER_BTN_LATER = "다음에"
 OPENVINO_OFFER_BTN_NEVER = "다시 보지 않기"
 OPENVINO_INSTALL_PROGRESS = "OpenVINO 설치 중…"
 OPENVINO_INSTALL_DONE = (
-    "OpenVINO 설치 완료!\n프로그램을 다시 시작하면 Intel GPU / NPU 가속이 적용됩니다."
+    "OpenVINO 설치 완료!\n프로그램을 다시 시작하면 Intel GPU 가속이 적용됩니다."
 )
 OPENVINO_INSTALL_FAILED_FMT = (
     "OpenVINO 설치에 실패했습니다 — {error}\n\n"
@@ -254,16 +254,15 @@ COORD_TOLERANCE_TOOLTIP = (
 )
 ACCEL_CONCURRENCY_LABEL = "동시 추론 수"
 ACCEL_CONCURRENCY_TOOLTIP = (
-    "고효율 모드에서 GPU/NPU 가 동시에 처리할 추론 개수(in-flight) 입니다.\n"
-    "값을 높일수록 NPU/GPU 메모리 사용량과 시간당 처리량(throughput)이 함께\n"
+    "고효율 모드에서 GPU 가 동시에 처리할 추론 개수(in-flight) 입니다.\n"
+    "값을 높일수록 GPU 메모리 사용량과 시간당 처리량(throughput)이 함께\n"
     "올라갑니다 — 계산(모델·점수) 자체는 동일합니다.\n"
-    "NPU 기준 값이며 GPU 는 그 절반을 사용합니다.  작업 관리자/상태바로 메모리를\n"
-    "보면서 ~80% 정도까지 올려도 됩니다(정확한 상한이 아니라 강도 조절)."
+    "작업 관리자/상태바로 메모리를 보면서 ~80% 정도까지 올려도 됩니다\n"
+    "(정확한 상한이 아니라 강도 조절)."
 )
 # 고효율 모드 장치 토글 + 정적 배치 B (단기 테스트용).
 DEVICE_CPU_LABEL = "CPU"
 DEVICE_GPU_LABEL = "GPU"
-DEVICE_NPU_LABEL = "NPU"
 DEVICE_TOGGLE_TOOLTIP = (
     "고효율 모드에서 사용할 연산 장치 (테스트용).  끄면 그 장치 유닛을 띄우지\n"
     "않습니다.  전부 끄면 안전하게 CPU 로 폴백합니다.  계산 결과는 동일."
@@ -271,11 +270,11 @@ DEVICE_TOGGLE_TOOLTIP = (
 EMBED_BATCH_LABEL = "배치 B"
 EMBED_BATCH_TOOLTIP = (
     "정적 배치 B 재컴파일 (테스트용).  1=끔(현행).  >1 이면 요청당 B장을 한 번에\n"
-    "추론해 NPU/GPU 점유율을 더 높일 수 있습니다.  단, NPU 가 정적 배치를 지원\n"
+    "추론해 GPU 점유율을 더 높일 수 있습니다.  단, 장치가 정적 배치를 지원\n"
     "해야 하며 실패 시 해당 유닛은 비활성(상태바 툴팁의 에러 참고).  계산 결과는 동일."
 )
 ENGINE_EFFICIENCY_CPU_ONLY = (
-    "가속 장치(Intel GPU/NPU)가 없어 CPU만으로 고효율 모드를 실행합니다."
+    "가속 장치(Intel GPU)가 없어 CPU만으로 고효율 모드를 실행합니다."
 )
 ACCEL_UNITS_FMT = "가속: {units}"
 PRE_GROUP_TITLE = "강화 전처리 (계산 전용 — 화면 표시는 원본 유지)"
@@ -515,6 +514,8 @@ SLOT_SELECT_COUNT_FMT = "선택한 슬롯: {n} / {total} 개만 진행"
 # 진행 범위 타일 — 상태를 옆 라벨이 아니라 타일 자신이 말한다.
 # ── 실행 옵션 카드 — '자동화 수준' + '진행 범위' 를 한 카드에 담는다.
 RUN_OPTIONS_TITLE = "실행 옵션"
+# 설정 화면 배치안 고르개 — 최종안을 정하면 이 라벨과 전환기를 함께 지운다.
+LAYOUT_VARIANT_LABEL = "배치안"
 RUN_OPTIONS_HINT = (
     "· 자동화 수준 — ‘모든 사진 자동’은 후보 선별(Stage 1)을 건너뛰고 모든 기준 사진을"
     " 자동으로 매치합니다. 종료 후 결과 화면에서 [매칭 결과 검토]로 잘못된 매치를"
@@ -638,7 +639,7 @@ RUNNERUP_MORE_PROMPT = "후보를 몇 개까지 보시겠습니까?"
 DEV_BENCH_BUTTON = "개발자 벤치마크"
 DEV_BENCH_TITLE = "개발자 벤치마크 — 매칭 가속 조합 실험"
 DEV_BENCH_HINT = (
-    "CPU·Intel GPU·Intel NPU 조합(레시피)별로 매칭 속도·메모리·실제 정확도를 "
+    "CPU·Intel GPU 조합(레시피)별로 매칭 속도·메모리·실제 정확도를 "
     "측정합니다. 유사도 캐시를 사용하지 않고 ‘처음 매칭하는 것처럼’ 측정하며, "
     "정확도가 떨어지는 조합은 추천하지 않습니다."
 )
@@ -677,8 +678,6 @@ DEV_BENCH_COL_NOTE = "비고"
 
 # 확장 그룹(개발자 벤치마크) — 체크 시 그룹 전체 포함.
 DEV_BENCH_GROUP_CENTER = "중앙-인식(defect 정중앙)"
-DEV_BENCH_GROUP_NPU_SWEEP = "NPU 사용방식 스윕"
-DEV_BENCH_GROUP_NPU_ONLY = "NPU 단독 채점"
 DEV_BENCH_GROUP_FAST_RERANK = "CPU 고속 재채점"
 
 # 불필요 스킵 해제 토글.

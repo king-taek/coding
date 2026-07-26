@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from PyQt6.QtCore import QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QKeySequence, QPixmap, QShortcut
 from PyQt6.QtWidgets import (QApplication, QDialog, QHBoxLayout, QLabel,
                              QSizePolicy, QVBoxLayout, QWidget)
@@ -111,7 +111,11 @@ class SideBySideViewer(QDialog):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.setModal(True)
-        self.setStyleSheet(f"background-color: {theme.BG};")
+        # ★ 여기서 `setStyleSheet("background-color: …")` 를 부르면 **자식 전체**가
+        #   그 배경을 물려받아, 채운 버튼(role=primary)의 면이 시트 색으로 덮이고
+        #   글자만 on_accent 로 남아 글씨가 배경에 묻힌다(상단 액션 버튼 실측).
+        #   면은 QSS 의 `QDialog[role="sheet"]` 가 칠한다 — 인라인 금지.
+        self.setProperty("role", "sheet")
         self._ref_path = Path(ref_path)
         self._candidates = list(candidates)
         self._idx = max(0, min(int(start_index), len(self._candidates) - 1)) \
@@ -193,6 +197,25 @@ class SideBySideViewer(QDialog):
     def resizeEvent(self, e):  # noqa: N802
         super().resizeEvent(e)
         self._sync_panes()
+
+    def showEvent(self, e):  # noqa: N802
+        """첫 표시 시점에 공통 박스를 **다시** 계산한다.
+
+        ``__init__`` 의 ``_render_candidate`` 는 아직 레이아웃이 돌지 않은 상태라
+        이미지 라벨이 기본 최소크기(≈100×30)로 잡혀 있다.  그때 계산한 박스를
+        그대로 두면 ``_redraw`` 가 박스를 우선하므로, 창이 아무리 커도 사진이
+        40×30 같은 크기로 시작한다(실측).  표시 직후 한 틱 뒤 — 레이아웃이 실제
+        크기를 배분한 다음 — 다시 맞춘다.  타이머는 **이 위젯이 소유**해 창이
+        먼저 닫히면 함께 파괴된다(WA_DeleteOnClose 상태에서 죽은 객체 호출 방지)."""
+        super().showEvent(e)
+        self._sync_panes()
+        QTimer.singleShot(0, self._sync_panes_if_alive)
+
+    def _sync_panes_if_alive(self) -> None:
+        try:
+            self._sync_panes()
+        except RuntimeError:          # 이미 파괴된 C++ 객체 — 무시
+            pass
 
     # ------------------------------------------------------------------
     def _current_item(self) -> Optional[ImageItem]:

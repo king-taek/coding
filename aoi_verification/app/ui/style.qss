@@ -22,9 +22,13 @@ QMainWindow, QDialog {
    별도 OS 창이던 팝업을 프로그램 안에서 띄운다(widgets/sheet_host.py).
    ★ 시트는 **자기 면과 테두리를 가져야** 한다 — 반투명 스크림 위에 배경 없이 얹으면
    뒤 화면의 글자와 겹쳐 읽을 수 없다(로딩 오버레이 패널이 면을 갖는 것과 같은 이유). */
+/* ★ 면을 $panel 로 두면 뒷화면($bg)과 대비가 1.09:1 — 사실상 같은 색이라 '팝업이
+   어디서 시작하는지' 가 안 보였다(사용자 지적).  면을 한 단 올리고($elev) 테두리를
+   2px 로 세워 경계를 만든다.  스크림만으로는 부족하다 — 스크림은 뒤를 어둡게 할 뿐
+   시트 자신의 윤곽을 그리지 않는다. */
 QDialog[role="sheet"], QWidget[role="sheet"] {
-    background-color: $panel;
-    border: 1px solid $line_strong;
+    background-color: $elev;
+    border: 2px solid $line_strong;
     border-radius: $radius;
 }
 /* 시트 제목줄 — OS 타이틀바가 없어진 자리를 대신한다(제목 + 닫기).

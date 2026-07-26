@@ -5,7 +5,7 @@
 - 선택 모드 팝업: 드래그(러버밴드) 다중선택.
 - 매치 실패 검토: 확정 시 목록에서 제거 + 다음으로 이동, 후보 테두리 셀렉터
   스코프, 목록 썸네일.
-- GPU/NPU 미감지 시 진단 사유.
+- GPU 미감지 시 진단 사유.
 """
 
 from __future__ import annotations
@@ -244,12 +244,12 @@ def test_ref_right_click_opens_compare_in_score_order(qapp, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# GPU/NPU 감지 진단
+# GPU 감지 진단
 # ---------------------------------------------------------------------------
 def test_accelerator_presence_reports_reason():
     from aoi_verification.app.learning import embedder_openvino as ov
     info = ov.accelerator_presence()
-    assert set(info) >= {"GPU", "NPU", "devices", "reason"}
+    assert set(info) >= {"GPU", "devices", "reason"}
     # 가속 장치가 안 잡히면 사유 문자열이 채워져야(툴팁 진단용).
-    if not (info["GPU"] or info["NPU"]):
+    if not info["GPU"]:
         assert info["reason"]

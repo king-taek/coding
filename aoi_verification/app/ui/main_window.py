@@ -15,19 +15,18 @@ import shutil
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Optional
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QMainWindow,
+from PyQt6.QtCore import QThread, QTimer, pyqtSignal
+from PyQt6.QtWidgets import (QApplication, QLabel, QMainWindow,
                               QMessageBox, QStackedWidget, QStatusBar,
-                              QVBoxLayout, QWidget)
+                              QWidget)
 
 from .. import config, i18n
 from . import theme
 from ..models import session as session_mod
 from ..models.result import FinalResult, MatchResult, MissEntry
-from ..models.slot import (ImageItem, ScanResult, Slot, drop_empty_unmatched,
+from ..models.slot import (ImageItem, ScanResult, drop_empty_unmatched,
                            scan)
 from ..utils import paths, wafer_id
 from ..utils import prefs as _prefs
@@ -481,7 +480,7 @@ class MainWindow(QMainWindow):
     def _maybe_offer_openvino(self) -> None:
         """Intel 하드웨어인데 OpenVINO 가 없으면 설치를 한 번 안내.
 
-        OpenVINO 를 설치하면 임베딩(고속 모드)이 Intel GPU/NPU 에서 가속된다.
+        OpenVINO 를 설치하면 임베딩(고속 모드)이 Intel GPU 에서 가속된다.
         '다시 보지 않기' 를 고르면 prefs 에 기록해 다음부터 묻지 않는다.
         """
         try:
@@ -771,7 +770,6 @@ class MainWindow(QMainWindow):
             accel_concurrency=int(getattr(inp, "accel_concurrency", 32)),
             use_cpu=bool(getattr(inp, "use_cpu", True)),
             use_gpu=bool(getattr(inp, "use_gpu", True)),
-            use_npu=bool(getattr(inp, "use_npu", True)),
             embed_batch=int(getattr(inp, "embed_batch", 1)),
             rerank_components=rerank_components,
             orb_center_weight=orb_center_weight,
@@ -1044,8 +1042,14 @@ class MainWindow(QMainWindow):
             targets=restored, excluded={}, history=[],
             phase_label=i18n.KO.STAGE1_TITLE,
         )
-        self._show_page(self._select_page)
         self._phase = PHASE_A_SELECT
+        # 판단할 후보가 하나도 없으면(예: 기준 사진 재사용으로 큐가 전부 비워짐)
+        # 빈 선별 화면에 사용자를 세워두지 않고 곧장 매칭으로 넘어간다.  큐가
+        # 비면 왼쪽(대기)·중앙(현재 사진)이 모두 비어 할 수 있는 조작이 없다.
+        if not queue:
+            self._on_select_finished()
+            return
+        self._show_page(self._select_page)
         self._autosave()
 
     def _on_select_finished(self) -> None:
@@ -1317,7 +1321,6 @@ class MainWindow(QMainWindow):
                 "threshold": getattr(inp, "threshold", None),
                 "center_crop": False,
                 "use_gpu": bool(getattr(inp, "use_gpu", True)),
-                "use_npu": bool(getattr(inp, "use_npu", True)),
             }
             kla_used = bool(getattr(self, "_slot_meta_ref", None)
                             or getattr(self, "_slot_meta_val", None))

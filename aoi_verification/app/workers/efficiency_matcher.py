@@ -7,11 +7,6 @@
 
 GPU/OpenVINO 가 없으면 CPU 고전 단독으로 폴백한다(절대 크래시 없음).
 
-**NPU 관련 코드는 보존**하되(``_EmbedUnit`` 의 NPU 지원, ``build_units``,
-``embedder_openvino`` 의 ResNet18 경로) 효율 모드에서 **선택하지 않는다** — NPU 는
-GPU 대비 정확도 이득이 없고 느려서 비활성화했다(docs/NPU 효율성 분석 보고서 참조).
-추후 재활성화는 ``_select_backend`` 에 NPU 분기를 추가하면 된다.
-
 결과는 ``results[(slot, ref_path)] = [(val_path, score), ...]`` (내림차순) 으로
 저장되어 ``match_page`` 가 무수정 소비한다.
 """
@@ -31,7 +26,7 @@ from ..learning import embedder_openvino as _ov
 from ..models.slot import ImageItem
 from ..similarity import embedding_index as _ann
 from ..similarity import pipeline as _pipeline
-from .matcher import Candidate, score_ref_classical
+from .matcher import score_ref_classical
 
 
 def _rerank_workers() -> int:
@@ -83,81 +78,6 @@ def map_score(fused: List[float]) -> List[float]:
     return [0.80 + 0.18 * (f - lo) / span for f in fused]
 
 
-# ---------------------------------------------------------------------------
-# 유닛 — CPU 고전 + (보존용) OpenVINO 임베딩 유닛
-# ---------------------------------------------------------------------------
-class _CpuUnit:
-    """CPU 고전 파이프라인.  ``pipeline.extract`` 의 디스크 캐시로 재추출은 저렴."""
-
-    tag = "cpu"
-
-    def __init__(self, cfg, threshold: float) -> None:
-        self._cfg = cfg
-        self._threshold = float(threshold)
-
-    def match(self, ref: ImageItem, vals: List[ImageItem]) -> List[Candidate]:
-        return score_ref_classical(ref, vals, threshold=self._threshold, cfg=self._cfg)
-
-    def match_batch(self, refs: List[ImageItem],
-                    vals: List[ImageItem]) -> Dict[Path, List[Candidate]]:
-        return {Path(r.path): self.match(r, vals) for r in refs}
-
-
-class _EmbedUnit:
-    """OpenVINO 임베딩 유닛 (GPU=MobileNetV3 / NPU=ResNet18) — NPU 재활성용 보존.
-
-    효율 모드 fusion 경로는 이 클래스를 직접 쓰지 않고 ``device_embed`` +
-    ``embedding_index`` 를 직접 사용하지만, NPU 지원 코드를 보존하기 위해 유지한다.
-    """
-
-    def __init__(self, tag: str, model_kind: str, device: str,
-                 cfg, threshold: float, *, jobs: Optional[int] = None,
-                 batch: int = 1) -> None:
-        self.tag = tag
-        self._model_kind = model_kind
-        self._device = device
-        self._cfg = cfg
-        self._threshold = float(threshold)
-        self._jobs = jobs
-        self._batch = max(1, int(batch))
-        self._slot: Optional[str] = None
-        self._built: Optional[Tuple[object, list]] = None
-
-    def _embed(self, paths: List[Path]) -> Dict[Path, "object"]:
-        return _ov.device_embed(paths, model_kind=self._model_kind,
-                                device=self._device, cfg=self._cfg,
-                                jobs=self._jobs, batch=self._batch)
-
-    def _slot_index(self, slot: str, vals: List[ImageItem]):
-        if self._slot == slot:
-            return self._built
-        self._slot = slot
-        emb = self._embed([Path(v.path) for v in vals])
-        self._built = _ann.build_from(emb) if emb else None
-        return self._built
-
-    def match(self, ref: ImageItem, vals: List[ImageItem]) -> List[Candidate]:
-        built = self._slot_index(ref.slot, vals)
-        if built is None:
-            return score_ref_classical(ref, vals, threshold=self._threshold, cfg=self._cfg)
-        index, val_paths = built
-        embs = self._embed([Path(ref.path)])
-        remb = embs.get(Path(ref.path))
-        if remb is None:
-            return score_ref_classical(ref, vals, threshold=self._threshold, cfg=self._cfg)
-        by_path = {Path(v.path): v for v in vals}
-        out: List[Candidate] = []
-        for label, cos in index.query(remb, len(val_paths)):
-            if 0 <= label < len(val_paths):
-                s = _cos_to_unit(cos)
-                if s >= self._threshold:
-                    vi = by_path.get(Path(val_paths[label]))
-                    if vi is not None:
-                        out.append(Candidate(item=vi, score=s))
-        out.sort(key=lambda c: c.score, reverse=True)
-        return out
-
-
 DEFAULT_ACCEL_CONCURRENCY = 32
 
 
@@ -180,25 +100,8 @@ def dynamic_concurrency(n_items: int, batch: int, cap: int = DEFAULT_ACCEL_CONCU
     return max(8, min(int(cap), reqs)) if cap >= 8 else max(1, min(int(cap), reqs))
 
 
-def build_units(cfg, threshold: float) -> List[object]:
-    """(보존용) 과거 work-stealing 유닛 빌더 — NPU 재활성 경로 문서화용.  효율
-    모드 fusion 경로는 사용하지 않는다."""
-    units: List[object] = [_CpuUnit(cfg, threshold)]
-    avail = _ov.available_units()
-    jobs = accel_concurrency(cfg)
-    if bool(getattr(cfg, "use_gpu", True)) and "GPU" in avail:
-        if _ov.compile_model_on(_ov.MODEL_MOBILENET_V3, "GPU", GPU_BATCH) is not None:
-            units.append(_EmbedUnit("gpu", _ov.MODEL_MOBILENET_V3, "GPU", cfg,
-                                    threshold, jobs=jobs, batch=GPU_BATCH))
-    if bool(getattr(cfg, "use_npu", False)) and "NPU" in avail:  # 보존: NPU 경로
-        if _ov.compile_model_on(_ov.MODEL_RESNET18, "NPU", 1) is not None:
-            units.append(_EmbedUnit("npu", _ov.MODEL_RESNET18, "NPU", cfg,
-                                    threshold, jobs=jobs, batch=1))
-    return units
-
-
 def describe_active_units() -> str:
-    """상태바용 라벨 — CPU + (가용) GPU.  NPU 는 효율 모드에서 비활성."""
+    """상태바용 라벨 — CPU + (가용) GPU."""
     from .. import i18n
     avail = [d for d in _ov.available_units() if d == "GPU"]
     units = ["CPU"] + avail
@@ -239,10 +142,7 @@ def warmup(cfg=None) -> bool:
 
 def _select_backend(cfg):
     """효율 모드 임베딩 백엔드 선택 — **CPU+GPU만**.  GPU 가용·컴파일 OK 면
-    (MobileNetV3, "GPU", batch=16), 아니면 None(=CPU 고전 단독 폴백).
-
-    NPU 는 의도적으로 선택하지 않는다(코드는 보존).  재활성화하려면 아래에
-    NPU 분기를 추가하면 된다."""
+    (MobileNetV3, "GPU", batch=16), 아니면 None(=CPU 고전 단독 폴백)."""
     if bool(getattr(cfg, "use_gpu", True)) and "GPU" in _ov.available_units():
         if _ov.compile_model_on(_ov.MODEL_MOBILENET_V3, "GPU", GPU_BATCH) is not None:
             return (_ov.MODEL_MOBILENET_V3, "GPU", GPU_BATCH)
