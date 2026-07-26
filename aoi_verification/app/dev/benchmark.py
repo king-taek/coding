@@ -344,31 +344,33 @@ def run_recipe(ds: Dataset, recipe: Recipe, *,
         ranked = sorted(ranked, key=lambda x: -x[1])[:RESULT_KEEP]
         results[(slot, str(ref_path))] = [(str(p), float(s)) for p, s in ranked]
 
-    def _classical_refs(slot, refs, vals):
-        """refs 전부를 vals 와 고전(또는 고속 부분) 채점해 저장.  ``rerank_workers``>1
-        이면 ref 들을 멀티코어로 병렬 채점(결과 동일, 시간만↓)."""
+    def _score_refs(slot, refs, score_one):
+        """refs 를 ``score_one(ref)`` 로 채점해 저장.  ``rerank_workers``>1 이면
+        멀티코어로 병렬(결과는 직렬과 동일, 시간만↓)."""
         workers = int(getattr(recipe, "rerank_workers", 0) or 0)
-
-        def one(r):
-            m = _rerank_score_map(r, vals, comp)            # center-aware 면 영역 조합
-            return [(Path(p), s) for p, s in m.items()]
-
         if workers > 1 and len(refs) > 1:
             from concurrent.futures import ThreadPoolExecutor
             with ThreadPoolExecutor(max_workers=min(workers, len(refs))) as pool:
-                futs = {pool.submit(one, r): r for r in refs}
+                futs = {pool.submit(score_one, r): r for r in refs}
                 for fut in futs:
-                    r = futs[fut]
                     try:
                         ranked = fut.result()
                     except Exception:
                         ranked = []
-                    _store(slot, r.path, ranked)
+                    _store(slot, futs[fut].path, ranked)
         else:
             for r in refs:
                 if stopped():
                     break
-                _store(slot, r.path, one(r))
+                _store(slot, r.path, score_one(r))
+
+    def _classical_refs(slot, refs, vals):
+        """refs 전부를 vals 와 고전(또는 고속 부분) 채점해 저장."""
+        def one(r):
+            m = _rerank_score_map(r, vals, comp)            # center-aware 면 영역 조합
+            return [(Path(p), s) for p, s in m.items()]
+
+        _score_refs(slot, refs, one)
 
     classical_recall = (recipe.scoring == SCORE_CLASSICAL
                         or recipe.recall == RECALL_NONE)
@@ -438,24 +440,7 @@ def run_recipe(ds: Dataset, recipe: Recipe, *,
             return head + tail
 
         t0 = time.perf_counter()
-        workers = int(getattr(recipe, "rerank_workers", 0) or 0)
-        if workers > 1 and len(refs) > 1:
-            # CPU 멀티코어로 ref 들을 병렬 재채점 — 결과는 직렬과 동일, 시간만↓.
-            from concurrent.futures import ThreadPoolExecutor
-            with ThreadPoolExecutor(max_workers=min(workers, len(refs))) as pool:
-                futs = {pool.submit(_fuse_one, r): r for r in refs}
-                for fut in futs:
-                    r = futs[fut]
-                    try:
-                        ranked = fut.result()
-                    except Exception:
-                        ranked = []
-                    _store(slot, r.path, ranked)
-        else:
-            for r in refs:
-                if stopped():
-                    break
-                _store(slot, r.path, _fuse_one(r))
+        _score_refs(slot, refs, _fuse_one)
         score_t += time.perf_counter() - t0
 
     run.total_sec = round(time.perf_counter() - t_total, 3)

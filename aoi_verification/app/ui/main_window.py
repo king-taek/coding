@@ -28,7 +28,7 @@ from ..models import session as session_mod
 from ..models.result import FinalResult, MatchResult, MissEntry
 from ..models.slot import (ImageItem, ScanResult, drop_empty_unmatched,
                            scan)
-from ..utils import paths, wafer_id
+from ..utils import paths, wafer_id, wakelock
 from ..utils import prefs as _prefs
 from ..utils.prefs import AutomationLevel, EngineMode
 from ..workers.thumbnailer import (PRIORITY_ACTIVE_SLOT, PRIORITY_BACKGROUND,
@@ -49,6 +49,13 @@ from .widgets.window_controls import add_fullscreen_shortcut
 PHASE_NONE = "none"
 PHASE_A_SELECT = "A_select"
 PHASE_A_MATCH = "A_match"
+
+
+def _stage2_title(sim_cfg) -> str:
+    """Stage 2 진행 문구 — 좌표 매칭 모드면 전용 제목."""
+    if EngineMode.is_coordinate(getattr(sim_cfg, "engine", "")):
+        return i18n.KO.STAGE2_TITLE_COORD
+    return i18n.KO.STAGE2_TITLE
 
 
 class MainWindow(QMainWindow):
@@ -469,11 +476,7 @@ class MainWindow(QMainWindow):
 
     def _on_match_cancelled(self) -> None:
         """#8 매치 페이지에서 중지 — 진행 중 작업을 멈추고 셋업 화면으로 복귀."""
-        try:
-            from ..utils import wakelock as _wl
-            _wl.release()
-        except Exception:
-            pass
+        wakelock.release()
         self._show_page(self._setup_page)
 
     # ------------------------------------------------------------------
@@ -776,11 +779,7 @@ class MainWindow(QMainWindow):
     def _on_start(self, inp: SetupInput) -> None:
         self._input = inp
         # #14 세션 동안 OS 절전/화면보호기 억제.
-        try:
-            from ..utils import wakelock as _wl
-            _wl.acquire()
-        except Exception:
-            pass
+        wakelock.acquire()
         self._matches_a.clear()
         self._skipped_a.clear()
         self._reviewed_matches.clear()
@@ -992,17 +991,11 @@ class MainWindow(QMainWindow):
             return
         pool = self._build_val_pool_by_slot()
         _sim_cfg = self._make_sim_cfg()
-        try:
-            from ..utils.prefs import EngineMode
-            _is_coord = EngineMode.is_coordinate(getattr(_sim_cfg, "engine", ""))
-        except Exception:
-            _is_coord = False
         self._match_page.load_state(
             queue=queue,
             val_pool_by_slot=pool,
             threshold=self._input.threshold,
-            phase_label=(i18n.KO.STAGE2_TITLE_COORD if _is_coord
-                         else i18n.KO.STAGE2_TITLE),
+            phase_label=_stage2_title(_sim_cfg),
             session_id=self._session_id,
             auto_mode=True,
             engine_cfg=_sim_cfg,
@@ -1148,17 +1141,11 @@ class MainWindow(QMainWindow):
 
         _sim_cfg = self._make_sim_cfg()
         auto_mode = AutomationLevel.is_auto(self._input.automation_level)
-        try:
-            from ..utils.prefs import EngineMode
-            _is_coord = EngineMode.is_coordinate(getattr(_sim_cfg, "engine", ""))
-        except Exception:
-            _is_coord = False
         self._match_page.load_state(
             queue=queue,
             val_pool_by_slot=pool,
             threshold=self._input.threshold,
-            phase_label=(i18n.KO.STAGE2_TITLE_COORD if _is_coord
-                         else i18n.KO.STAGE2_TITLE),
+            phase_label=_stage2_title(_sim_cfg),
             session_id=self._session_id,
             auto_mode=auto_mode,
             engine_cfg=_sim_cfg,
@@ -1387,11 +1374,7 @@ class MainWindow(QMainWindow):
     def _new_session(self) -> None:
         session_mod.clear()
         # #14 세션 종료 — 절전 억제 해제.
-        try:
-            from ..utils import wakelock as _wl
-            _wl.release()
-        except Exception:
-            pass
+        wakelock.release()
         self._matches_a.clear()
         self._skipped_a.clear()
         self._stage1_a_snapshot = None
@@ -1637,11 +1620,7 @@ class MainWindow(QMainWindow):
         # 종료 직전 마지막 크기/최대화 상태 저장 → 다음 실행에서 그대로 복원.
         self._persist_geometry()
         # #14 절전 억제 해제 (남아 있을 경우).
-        try:
-            from ..utils import wakelock as _wl
-            _wl.release()
-        except Exception:
-            pass
+        wakelock.release()
         if self._thumb_worker is not None and self._thumb_worker.isRunning():
             self._thumb_worker.stop()
             self._thumb_worker.wait(1000)
