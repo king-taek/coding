@@ -163,7 +163,6 @@ class SetupPage(QWidget):
 
         두 설정 카드는 ``_place_setting_cards`` 가 창 폭에 따라 나란히/위아래로 놓는다."""
         root.addWidget(self._build_top_bar())
-        root.addWidget(self._build_subtitle())
         root.addWidget(self._build_device_row())
         self._place_setting_cards(root)
         root.addWidget(self._build_howto())
@@ -229,36 +228,26 @@ class SetupPage(QWidget):
                              else Qt.AlignmentFlag(0))
 
     def _build_top_bar(self) -> QWidget:
-        """상단 툴바(보기 옵션) + 제목 + 모드 배지.
+        """제목 + 모드 배지 + 보기 옵션 — **한 줄**.
 
-        한 줄에 몰아넣지 않는다: 800×600 에서 제목까지 같은 줄에 두면 폭이 넘쳐
-        가로 스크롤이 생긴다(실측 확인).  컨트롤 줄과 제목 줄을 분리해 좁은 창에서도
-        안전하게 한다."""
+        ★ 예전엔 보기 옵션이 제목 **위**의 별도 줄이었다.  '모션 줄이기' 까지 있던
+        시절엔 한 줄에 몰면 800×600 에서 가로가 넘쳤지만, 지금 보기 옵션은 다크 모드
+        스위치 하나뿐이라 같은 줄에 들어간다.  줄을 하나로 합치면 제목 위의 빈 띠
+        (툴바 높이 + 줄 간격) 가 통째로 사라져 제목이 화면 맨 위로 올라온다
+        (사용자 요청: '상단 여백이 너무 많다').  좁은 창 안전은
+        `test_setup_top_spacing` 이 800px 가로 넘침 없음으로 지킨다."""
         host = QWidget(self)
-        col = QVBoxLayout(host)
-        col.setContentsMargins(0, 0, 0, 0)
-        col.setSpacing(10)
-
-        tools = QWidget(host)
-        trow = QHBoxLayout(tools)
-        trow.setContentsMargins(0, 0, 0, 0)
-        trow.setSpacing(12)
-        trow.addStretch(1)
-        trow.addWidget(self._build_view_options())
-        col.addWidget(tools)
-
-        # 제목 줄 — 제목 왼쪽, 모드 배지 오른쪽.  배지가 제목과 같은 줄에 있어야
-        # '무슨 모드야'가 첫 시선에 들어온다.
-        title_row = QWidget(host)
-        tr = QHBoxLayout(title_row)
+        # 제목 왼쪽, 모드 배지 오른쪽.  배지가 제목과 같은 줄에 있어야 '무슨 모드야'가
+        # 첫 시선에 들어온다.  보기 옵션은 그 오른쪽 끝.
+        tr = QHBoxLayout(host)
         tr.setContentsMargins(0, 0, 0, 0)
         tr.setSpacing(16)
         tr.addWidget(self._build_title())
         tr.addStretch(1)
         tr.addWidget(self._build_mode_badge(),
                      alignment=Qt.AlignmentFlag.AlignVCenter)
-        col.addWidget(title_row)
-
+        tr.addWidget(self._build_view_options(),
+                     alignment=Qt.AlignmentFlag.AlignVCenter)
         return host
 
     def _build_mode_badge(self) -> QWidget:
@@ -328,12 +317,6 @@ class SetupPage(QWidget):
         title = QLabel(i18n.KO.SETUP_TITLE, self)
         title.setProperty("role", "title")
         return title
-
-    def _build_subtitle(self) -> QWidget:
-        subtitle = QLabel(i18n.KO.SETUP_HINT, self)
-        subtitle.setProperty("role", "subtitle")
-        subtitle.setWordWrap(True)
-        return subtitle
 
     def _build_howto(self) -> QWidget:
         """사용 방법 안내 — 접을 수 있는 섹션 (기본 접힘)."""
