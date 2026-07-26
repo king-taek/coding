@@ -259,7 +259,6 @@ class UnmatchedReviewDialog(QDialog):
         # 결과: 호출자가 다이얼로그가 끝난 뒤 가져갈 데이터.
         self.new_matches: list[MatchResult] = []
         self.resolved_refs: list[MissEntry] = []     # 매칭 찾음
-        self.skipped_refs: list[MissEntry] = []      # 사용자가 종료한 것
         # 선택(파란 테두리) 보류 상태 — ref 인덱스 → 선택한 후보 (확정 전, #1a).
         self._pending: dict[int, ImageItem] = {}
         # 현재 후보 타일들 + 후보 집합 키(같은 슬롯 재사용 판단, #1b).

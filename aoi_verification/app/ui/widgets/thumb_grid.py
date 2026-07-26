@@ -344,23 +344,7 @@ class ThumbGrid(QWidget):
     def _on_sel_toggle(self, entry: ThumbEntry, selected: bool) -> None:
         self.inline_changed.emit()
 
-    def tiles(self) -> list[_ThumbTile]:
-        return list(self._tiles)
-
-    def inline_selected_items(self) -> list[ImageItem]:
-        return [t.entry.item for t in self._tiles if t.is_inline_selected()]
-
     def set_all_inline_selected(self, selected: bool) -> None:
         for t in self._tiles:
             t.set_inline_selected(selected)
         self.inline_changed.emit()
-
-    def set_inline_selected_for(self, items: set, selected: bool) -> None:
-        """``items`` (ImageItem.key 집합) 에 해당하는 타일만 선택/해제."""
-        changed = False
-        for t in self._tiles:
-            if t.entry.item.key in items:
-                t.set_inline_selected(selected)
-                changed = True
-        if changed:
-            self.inline_changed.emit()

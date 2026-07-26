@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from PyQt6.QtCore import (QEasingCurve, QElapsedTimer, QEvent, QRect, QSize, Qt,
                           QTimer, QVariantAnimation, pyqtSignal)
-from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen
+from PyQt6.QtGui import QColor, QPainter, QPen
 from PyQt6.QtWidgets import (QGraphicsOpacityEffect, QLabel, QProgressBar,
                              QPushButton, QVBoxLayout, QWidget)
 
@@ -143,53 +143,6 @@ class _BusyStripe(QWidget):
             p.drawRoundedRect(max(0, sx), 0, min(sw, w - max(0, sx)), h, r, r)
 
 
-class _Sparkline(QWidget):
-    """학습 loss 추이 라인 그래프 (#16)."""
-
-    def __init__(self, parent=None, width: int = 360, height: int = 48) -> None:
-        super().__init__(parent)
-        self.setFixedSize(width, height)
-        self._values: list[float] = []
-
-    def set_values(self, values: list[float]) -> None:
-        self._values = list(values)
-        self.update()
-
-    def append_value(self, value: float, *, max_keep: int = 64) -> None:
-        self._values.append(float(value))
-        if len(self._values) > max_keep:
-            del self._values[: len(self._values) - max_keep]
-        self.update()
-
-    def clear(self) -> None:
-        self._values.clear()
-        self.update()
-
-    def paintEvent(self, event):  # noqa: N802
-        if not self._values:
-            return
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        w, h = self.width(), self.height()
-        lo, hi = min(self._values), max(self._values)
-        rng = max(1e-6, hi - lo)
-        pen_grid = QPen(QColor(theme.LINE))
-        pen_grid.setWidth(1)
-        p.setPen(pen_grid)
-        p.drawLine(0, h - 1, w, h - 1)
-        path = QPainterPath()
-        n = len(self._values)
-        for i, val in enumerate(self._values):
-            x = int(i / max(1, n - 1) * (w - 4)) + 2
-            y = h - 4 - int((val - lo) / rng * (h - 10))
-            path.moveTo(x, y) if i == 0 else path.lineTo(x, y)
-        pen = QPen(QColor(theme.ACCENT))
-        pen.setWidth(2)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        p.setPen(pen)
-        p.drawPath(path)
-
-
 class LoadingOverlay(QWidget):
     """부모 위젯 size 를 따라가는 풀-커버 오버레이 (페이드 인/아웃)."""
 
@@ -265,9 +218,6 @@ class LoadingOverlay(QWidget):
         self._busy = _BusyStripe(self._content)
         self._busy.hide()
 
-        self._sparkline = _Sparkline(self._content)
-        self._sparkline.hide()
-
         # #8 중지 버튼 — cancelable=True 로 보여진 작업에서만.
         self._cancel_btn = QPushButton("중지", self._content)
         self._cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -301,7 +251,6 @@ class LoadingOverlay(QWidget):
         #   패널 크기를 흔들지 않고 살짝 밀려 들어오게 한다.
         self._bar_lay = _bar_lay
         v.addWidget(self._bar_host, alignment=Qt.AlignmentFlag.AlignCenter)
-        v.addWidget(self._sparkline, alignment=Qt.AlignmentFlag.AlignCenter)
         v.addWidget(self._cancel_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
         # ★ 불투명도와 **위치를 분리한다.**  하나의 t 로 둘을 함께 몰면 사용자가 요청한
@@ -553,16 +502,10 @@ class LoadingOverlay(QWidget):
         self._busy.stop()
         self._busy.hide()
         self._spinner.stop()
-        self._sparkline.hide()
-        self._sparkline.clear()
         self._cancel_btn.hide()
         self._fade = 0.0
         self._rise_span = self.RISE_IN_PX      # 다음 등장을 위해 초기화
         self._set_bar_slide(1.0)
-
-    def push_sparkline(self, value: float) -> None:
-        self._sparkline.append_value(value)
-        self._sparkline.show()
 
     def set_progress(self, done: int, total: int, message: str = "") -> None:
         if message:

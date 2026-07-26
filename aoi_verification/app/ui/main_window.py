@@ -531,10 +531,6 @@ class MainWindow(QMainWindow):
                 i18n.KO.OPENVINO_INSTALL_FAILED_FMT.format(error=message),
             )
 
-    def _active_model_name(self) -> str:
-        """학습 모델 기능 제거됨 — 항상 기본(``basic``)."""
-        return "basic"
-
     def _resolve_slot_mismatch(self, sr: ScanResult) -> None:
         """ref/val 한쪽에만 있는 슬롯이 있을 때 사용자에게 수동 매핑을 묻는다 (#23)."""
         from PyQt6.QtWidgets import QDialog
@@ -1008,7 +1004,6 @@ class MainWindow(QMainWindow):
             phase_label=(i18n.KO.STAGE2_TITLE_COORD if _is_coord
                          else i18n.KO.STAGE2_TITLE),
             session_id=self._session_id,
-            model_name=self._active_model_name(),
             auto_mode=True,
             engine_cfg=_sim_cfg,
         )
@@ -1165,7 +1160,6 @@ class MainWindow(QMainWindow):
             phase_label=(i18n.KO.STAGE2_TITLE_COORD if _is_coord
                          else i18n.KO.STAGE2_TITLE),
             session_id=self._session_id,
-            model_name=self._active_model_name(),
             auto_mode=auto_mode,
             engine_cfg=_sim_cfg,
         )

@@ -44,12 +44,6 @@ if _HAS_TORCH:
             return self.fc2(self.act(self.fc1(x)))
 
     # -------------------------------------------------------------------
-    def save_head(head: "ProjectionHead", dst: Path) -> None:
-        dst = Path(dst)
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"state_dict": head.state_dict(), "dims": list(head.dims)}
-        torch.save(payload, str(dst))
-
     def load_head(src: Path) -> "ProjectionHead":
         """기존 가중치 파일에서 ProjectionHead 를 복원."""
         payload = torch.load(str(src), map_location="cpu")
@@ -74,9 +68,6 @@ else:
 
         def __call__(self, x):
             return x
-
-    def save_head(*_args, **_kwargs) -> None:  # type: ignore[no-redef]
-        raise RuntimeError("torch 가 설치되어 있지 않아 모델 저장 불가")
 
     def load_head(*_args, **_kwargs):  # type: ignore[no-redef]
         raise RuntimeError("torch 가 설치되어 있지 않아 모델 로드 불가")

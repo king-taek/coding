@@ -40,7 +40,7 @@ REQ_FILE = REPO_ROOT / "requirements.txt"
 CACHE_ROOT = Path.home() / ".aoi_verification_cache"
 CACHE_SUBDIRS = (
     "thumbs", "mid", "features", "embeddings", "scores", "session",
-    "models", "training_data", "evaluations", "dev_bench",
+    "models", "dev_bench",
 )
 
 

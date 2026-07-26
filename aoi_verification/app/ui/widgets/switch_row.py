@@ -230,10 +230,6 @@ class SwitchRow(QWidget):
     def set_on(self, on: bool, *, emit: bool = False) -> None:
         self.switch.set_on(on, emit=emit)
 
-    def set_description(self, text: str) -> None:
-        if self._desc is not None:
-            self._desc.setText(text)
-
     def eventFilter(self, obj, event):  # noqa: N802
         """제목 라벨 클릭 = 토글(release 기준, 라벨 밖으로 끌면 취소)."""
         if obj is self._title and self.isEnabled():

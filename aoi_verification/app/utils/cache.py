@@ -8,7 +8,6 @@ from __future__ import annotations
 import hashlib
 import os
 import time
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -71,19 +70,6 @@ def cache_path(src: Path, size_option: SizeOption, *,
     if size_option == "mid":
         return paths.mid_cache_dir() / f"{key}.jpg"
     return paths.feature_cache_dir() / f"{key}.npz"
-
-
-@dataclass(frozen=True)
-class CacheKey:
-    """디버그·로그용으로 캐시 키 정보를 모아 보관."""
-    src: Path
-    size_option: SizeOption
-    cache_file: Path
-
-    @classmethod
-    def for_(cls, src: Path, size_option: SizeOption) -> "CacheKey":
-        return cls(src=src, size_option=size_option,
-                   cache_file=cache_path(src, size_option))
 
 
 # ---------------------------------------------------------------------------

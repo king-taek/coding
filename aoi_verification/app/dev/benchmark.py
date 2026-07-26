@@ -285,19 +285,6 @@ def cascade_survivors(center_map: Dict[str, float], keep: int) -> List[str]:
     return [p for p, _ in sorted(center_map.items(), key=lambda kv: -kv[1])[:keep]]
 
 
-def fuse_zscore_signals(signals: List[List[float]]) -> List[float]:
-    """N개 신호를 각각 z-정규화해 합산 — efficiency_matcher.zfuse 의 일반화.
-
-    스케일이 다른 여러 신호를 동등 융합한다.  순수 함수(헤드리스 테스트)."""
-    from ..workers.efficiency_matcher import _zscores
-    usable = [s for s in signals if s]
-    if not usable:
-        return []
-    n = len(usable[0])
-    zs = [_zscores(s) for s in usable if len(s) == n]
-    return [sum(z[i] for z in zs) for i in range(n)]
-
-
 def run_recipe(ds: Dataset, recipe: Recipe, *,
                threshold: float = 0.0,
                devices: Optional[set] = None,
@@ -501,16 +488,6 @@ def detect_devices() -> set:
         return set(_ov.available_units())
     except Exception:
         return set()
-
-
-def _cosine(a, b) -> float:
-    import numpy as np
-    a = np.asarray(a, dtype="float64").ravel()
-    b = np.asarray(b, dtype="float64").ravel()
-    na, nb = np.linalg.norm(a), np.linalg.norm(b)
-    if na == 0 or nb == 0:
-        return 0.0
-    return float(np.dot(a, b) / (na * nb))
 
 
 def evaluate(results: Results, gt: Dict[Tuple[str, str], set]) -> Tuple[Optional[float], Optional[float], int]:

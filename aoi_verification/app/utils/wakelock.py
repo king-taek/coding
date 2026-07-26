@@ -73,7 +73,3 @@ def release() -> None:
         pass
     finally:
         _active = False
-
-
-def is_active() -> bool:
-    return _active

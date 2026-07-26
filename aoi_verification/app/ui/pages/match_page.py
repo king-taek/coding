@@ -345,7 +345,6 @@ class MatchPage(QWidget):
                    skipped: dict[str, list[ImageItem]] | None = None,
                    phase_label: str = "",
                    session_id: str = "",
-                   model_name: str = "basic",
                    auto_mode: bool = False,
                    engine_cfg=None) -> None:
         self._state = Stage2State(
@@ -356,7 +355,6 @@ class MatchPage(QWidget):
         )
         self._threshold = threshold
         self._session_id = session_id or ""
-        self._model_name = model_name or "basic"
         self._auto_mode = bool(auto_mode)
         self._engine_cfg = engine_cfg or config.DEFAULT_SIM_CONFIG
         self._fast_results.clear()
