@@ -18,6 +18,12 @@ QMainWindow, QDialog {
     background-color: $bg;
 }
 
+/* 상단 앱 로고 — 페이지 스택 밖의 머리글이라 모든 단계에서 같은 자리에 보인다. */
+QLabel[role="appLogo"] {
+    padding: 10px 0 6px 0;
+    border-bottom: 1px solid $line2;
+}
+
 /* ── 앱 내 창(시트) ─────────────────────────────────────────────────────
    별도 OS 창이던 팝업을 프로그램 안에서 띄운다(widgets/sheet_host.py).
    ★ 시트는 **자기 면과 테두리를 가져야** 한다 — 반투명 스크림 위에 배경 없이 얹으면

@@ -18,6 +18,7 @@ import os
 # 작업 디렉토리에서 돌리든(상대경로 오해석 없이) 동일하게 동작하게 한다.
 _ROOT = os.path.abspath(os.path.join(SPECPATH, "..", ".."))
 _LAUNCHER = os.path.join(_ROOT, "scripts", "launcher.py")
+_ICON = os.path.join(_ROOT, "aoi_verification", "app", "ui", "assets", "logo.ico")
 
 # launcher 가 실제로 import 하는 최소 모듈만 동봉(작게 유지).
 hiddenimports = [
@@ -53,4 +54,5 @@ exe = EXE(
     name="AOI_Verify_Online",
     debug=False, bootloader_ignore_signals=False, strip=False, upx=True,
     runtime_tmpdir=None, console=True,         # 첫 실행 다운로드/설치 진행·오류를 보이게
+    icon=_ICON,                                # 탐색기/작업표시줄 아이콘
 )

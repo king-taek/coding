@@ -9,6 +9,11 @@ APP_TITLE = "AOI 검증"
 # 개발자 크레딧 — 주요 화면/상태바 공통 표시.
 CREDIT = "Developed by 임현택"
 
+# ── 시작 스플래시(로고 + 로딩) ────────────────────────────────────────────
+SPLASH_MODULES = "구성 요소를 불러오는 중…"
+SPLASH_PAGES = "화면을 준비하는 중…"
+SPLASH_READY = "준비 완료"
+
 # ── OpenVINO 자동 설치 안내 ───────────────────────────────────────────────
 OPENVINO_OFFER_TITLE = "Intel GPU 가속 활성화"
 OPENVINO_OFFER_BODY = (

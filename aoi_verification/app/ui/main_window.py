@@ -17,10 +17,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import QThread, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import (QApplication, QLabel, QMainWindow,
                               QMessageBox, QStackedWidget, QStatusBar,
-                              QWidget)
+                              QVBoxLayout, QWidget)
 
 from .. import config, i18n
 from . import theme
@@ -66,6 +67,9 @@ class MainWindow(QMainWindow):
     _MIN_W = 800
     _MIN_H = 600
 
+    # 상단 로고 표시 높이(논리 px).
+    _LOGO_H = 44
+
     # 자동 업데이트 — 백그라운드 스레드에서 메인 스레드로 결과를 넘기는 시그널.
     _update_found = pyqtSignal(dict)
     _update_applied = pyqtSignal(bool, dict)
@@ -73,7 +77,10 @@ class MainWindow(QMainWindow):
     _update_none = pyqtSignal(str)          # 수동 확인: 최신/확인불가 안내
     _startup_proceed = pyqtSignal()         # 업데이트 흐름 종료 → 나머지 시작 팝업
 
-    def __init__(self) -> None:
+    def __init__(self, progress=None) -> None:
+        """``progress(done, total, message)`` 를 주면 페이지 생성 진행을 보고한다
+        (시작 스플래시의 로딩 표시).  창 생성은 메인 스레드를 막으므로, 진행을
+        보고하지 않으면 로딩 표시가 그 구간 내내 멈춰 보인다."""
         super().__init__()
         self.setWindowTitle(i18n.KO.APP_TITLE)
         self.setMinimumSize(self._MIN_W, self._MIN_H)
@@ -84,8 +91,19 @@ class MainWindow(QMainWindow):
         self._save_geom_timer.setInterval(400)
         self._save_geom_timer.timeout.connect(self._persist_geometry)
 
-        self._stack = QStackedWidget(self)
-        self.setCentralWidget(self._stack)
+        # 상단 로고 + 페이지 스택.  로고는 스택 밖에 두어 어느 단계에서도 보인다.
+        central = QWidget(self)
+        col = QVBoxLayout(central)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(0)
+        self._logo_label = QLabel(central)
+        self._logo_label.setProperty("role", "appLogo")
+        self._logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        col.addWidget(self._logo_label)
+        self._stack = QStackedWidget(central)
+        col.addWidget(self._stack, 1)
+        self.setCentralWidget(central)
+        self._apply_header_logo()
 
         # 상태 바 — 개발자 크레딧 + 메모리 사용량(psutil 가용 시).
         # ★ 'Intel GPU 가속' 디바이스 표시와 'CPU n% · GPU 가동' 사용량 표시는 제거했다.
@@ -117,7 +135,7 @@ class MainWindow(QMainWindow):
         self._update_memory_label()
 
         # 페이지 — 생성+스택추가+시그널 배선을 _build_pages 단일 출처로 (재구축용).
-        self._build_pages()
+        self._build_pages(progress)
 
         # 자동 저장 타이머 -----------------------------------------------
         self._autosave_timer = QTimer(self)
@@ -1386,16 +1404,27 @@ class MainWindow(QMainWindow):
     # ==================================================================
     # Page switching
     # ==================================================================
-    def _build_pages(self) -> None:
-        """5개 페이지 생성 + 스택 추가 + 시그널 배선 (단일 출처 — 재구축 재사용)."""
+    def _build_pages(self, progress=None) -> None:
+        """5개 페이지 생성 + 스택 추가 + 시그널 배선 (단일 출처 — 재구축 재사용).
+
+        ``progress(done, total, message)`` 를 주면 페이지 하나를 만들 때마다 보고한다
+        (시작 스플래시).  색 모드 전환의 재구축 때는 주지 않는다 — 그때는 로딩 표시가
+        없고, 크로스페이드가 전환을 대신 알린다."""
         from .pages.match_review_page import MatchReviewPage
+        report = progress or (lambda *_: None)
         # 셋업 배치는 **하나**다(순서형).  한때 A/B/C 3안을 상단 스위처로 비교했는데,
         # 사용자가 순서형을 고르면서 나머지 2안과 스위처·setup_layouts 를 제거했다.
+        report(0, 5, i18n.KO.SPLASH_PAGES)
         self._setup_page = SetupPage()
+        report(1, 5)
         self._select_page = SelectPage()
+        report(2, 5)
         self._match_page = MatchPage()
+        report(3, 5)
         self._result_page = ResultPage()
+        report(4, 5)
         self._match_review_page = MatchReviewPage()
+        report(5, 5)
 
         for w in (self._setup_page, self._select_page,
                   self._match_page, self._result_page,
@@ -1508,6 +1537,7 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
         self._apply_statusbar_theme()
+        self._apply_header_logo()
         try:
             self._loading.raise_()           # 오버레이 z-order 유지
         except Exception:
@@ -1518,6 +1548,27 @@ class MainWindow(QMainWindow):
         """상태바 라벨 색을 테마 토큰으로 적용(페이지 밖 위젯)."""
         self._credit_label.setStyleSheet(
             f"color: {theme.MUTE}; padding: 0 8px; font-weight: 600;")
+
+    def _apply_header_logo(self) -> None:
+        """상단 로고(배경을 지운 ``logo_clear``) 를 그린다 — 페이지 밖 위젯이라
+        색 모드 전환 때 여기서 다시 만들어야 한다.
+
+        로고 마크가 거의 검정이라 어두운 화면에서는 그대로 두면 배경에 묻힌다.
+        알파는 건드리지 않고 RGB 만 반전해 밝은 마크로 뒤집는다."""
+        pm = QPixmap(str(paths.logo_path("logo_clear.png")))
+        if pm.isNull():
+            self._logo_label.hide()
+            return
+        if theme.COLOR_MODE == "dark":
+            img = pm.toImage().convertToFormat(QImage.Format.Format_ARGB32)
+            img.invertPixels(QImage.InvertMode.InvertRgb)
+            pm = QPixmap.fromImage(img)
+        dpr = self.devicePixelRatioF() or 1.0
+        pm = pm.scaledToHeight(int(self._LOGO_H * dpr),
+                               Qt.TransformationMode.SmoothTransformation)
+        pm.setDevicePixelRatio(dpr)
+        self._logo_label.setPixmap(pm)
+        self._logo_label.show()
 
     # ==================================================================
     def _page_order(self, w: QWidget) -> int:
