@@ -106,10 +106,6 @@ SETUP_MACHINE_LABEL = "호기 번호"
 SETUP_THRESHOLD_LABEL = "유사도 임계치"
 SETUP_FOLDER_PLACEHOLDER = "폴더를 선택해 주세요"
 SETUP_MACHINE_PLACEHOLDER = "예) 1호기"
-SETUP_HINT = (
-    "기준 장비와 검증 장비는 서로 다른 호기의 폴더입니다.\n"
-    "두 폴더의 하위 Slot 폴더 이름이 같을 때 매칭됩니다."
-)
 
 # ── 검증 단계 헤더 ─────────────────────────────────────────────────────────
 STAGE1_TITLE = "Stage 1 — 후보 선별"
