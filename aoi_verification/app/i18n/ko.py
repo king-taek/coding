@@ -192,10 +192,7 @@ LEGACY_SWITCH_DESC = (
     "끄면 좌표 매칭(파일명/INI/KLA 좌표 데이터)을 씁니다 — 권장 기본값.\n"
     "켜면 유사도 점수가 임계치 이상인 가장 가까운 후보를 자동 선택합니다."
 )
-LEGACY_MODE_HINT = (
-    "좌표 데이터가 없는 예전 자료에 쓰는 대체 경로입니다.\n"
-    "기본 모드 — CPU 정밀 비교 / 고효율 모드 — CPU+GPU 임베딩."
-)
+LEGACY_MODE_HINT = "좌표 데이터가 없는 예전 자료에 쓰는 대체 경로입니다."
 # 지금 어떤 파라미터가 유효한지 문장으로 알려준다(비활성 컨트롤의 이유).
 ENGINE_ACTIVE_COORD = "좌표 매칭 사용 중 — 허용 오차가 판정 기준입니다."
 ENGINE_ACTIVE_LEGACY_FMT = "구형 {sub} 모드 사용 중 — 유사도 임계치가 판정 기준입니다."
@@ -228,9 +225,12 @@ COORD_NO_DATA_MSG = (
 NEAR_MATCH_BADGE = "허용범위 초과"
 SCORE_DIST_FMT = "{dist:.0f} µm"
 SCORE_DIST_OVER_FMT = "{dist:.0f} µm (허용범위 초과)"
+# 구형(유사도) 엔진의 점수 표기 — 좌표 모드의 µm 거리에 대응.  같은 포맷이 네 곳
+# (매치 검토 행·차순위 타일·매칭 목록·실패 검토)에 흩어져 갈라져 있었다.
+SCORE_SIMILARITY_FMT = "{pct:.1f} %"
 ENGINE_CARD_LEGACY_TITLE = "유사도 엔진"
-ENGINE_MODE_BASIC = "기본 모드 (정밀 비교)"
-ENGINE_MODE_EFFICIENCY = "고효율 모드 (CPU+GPU)"
+ENGINE_MODE_BASIC = "기본 모드"
+ENGINE_MODE_EFFICIENCY = "고효율 모드 (사진이 많을 때 권장)"
 ENGINE_MODE_COORDINATE = "좌표 매칭 모드 (v2)"
 ENGINE_MODE_TOOLTIP = (
     "기본 모드: 모든 후보를 CPU 고전(pHash+ORB+SSIM)으로 정밀 전수 비교\n"
@@ -431,6 +431,8 @@ COL_REF = "기준"
 COL_VAL = "검증"
 COL_CANDIDATES = "후보"
 COL_DISTANCE = "거리(µm)"
+# 구형(유사도) 엔진에서는 같은 열이 거리가 아니라 유사도를 보여준다.
+COL_SIMILARITY = "유사도(%)"
 COL_VERDICT = "판정"
 COMPARE_REF_CAPTION_FMT = "기준 — {name}"
 # ※ 검토 화면의 키보드 상호작용(↑↓ 줄 이동 · R 매치 없음 · Enter 검토 완료)과 키캡 힌트
@@ -514,8 +516,6 @@ SLOT_SELECT_COUNT_FMT = "선택한 슬롯: {n} / {total} 개만 진행"
 # 진행 범위 타일 — 상태를 옆 라벨이 아니라 타일 자신이 말한다.
 # ── 실행 옵션 카드 — '자동화 수준' + '진행 범위' 를 한 카드에 담는다.
 RUN_OPTIONS_TITLE = "실행 옵션"
-# 설정 화면 배치안 고르개 — 최종안을 정하면 이 라벨과 전환기를 함께 지운다.
-LAYOUT_VARIANT_LABEL = "배치안"
 RUN_OPTIONS_HINT = (
     "· 자동화 수준 — ‘모든 사진 자동’은 후보 선별(Stage 1)을 건너뛰고 모든 기준 사진을"
     " 자동으로 매치합니다. 종료 후 결과 화면에서 [매칭 결과 검토]로 잘못된 매치를"
