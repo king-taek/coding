@@ -49,7 +49,7 @@ def _fmt_score(score: float, coord_mode: bool, tolerance: float) -> str:
         dist = (1.0 - score) * tol if score >= 0 else (-score) * tol
         return (i18n.KO.SCORE_DIST_FMT.format(dist=dist) if score >= 0
                 else i18n.KO.SCORE_DIST_OVER_FMT.format(dist=dist))
-    return f"유사도 {score * 100:.1f}%"
+    return i18n.KO.SCORE_SIMILARITY_FMT.format(pct=score * 100)
 
 
 def _load_full_pixmap_scaled(path: Path, size: int) -> QPixmap:
@@ -290,7 +290,13 @@ class UnmatchedReviewDialog(QDialog):
         # 후보 풀이 작아(<300) 캐시 miss 를 그 자리에서 CPU 재계산할 때 띄우는 로딩 오버레이.
         # 다이얼로그 전체를 덮어 '계산 중'을 알린다(부모 위젯 size 추적).
         self._loading = LoadingOverlay(self)
-        self._render_current()
+        # ★ 첫 렌더를 여기서 부르지 **않는다.**  `_render_current` 는 원본 풀 디코드 +
+        #   후보 점수 계산(캐시 miss 면 최대 299쌍의 extract+score)을 GUI 스레드에서
+        #   동기로 수행하는데, 이 생성자는 `sheets.run(dlg)` 이 위젯을 show() 하기
+        #   **전에** 끝나야 한다.  그래서 팝업이 뜨지도 않은 채 앱이 멈춘 것처럼
+        #   보였고, 안에서 부르는 `show_overlay` 도 그려질 화면이 없어 무용지물이었다.
+        #   표시 직후 한 틱 뒤로 미루면 시트가 먼저 뜨고 그 위에서 로딩이 보인다.
+        self._first_render_done = False
 
     # ------------------------------------------------------------------
     def _build(self) -> None:
@@ -696,6 +702,28 @@ class UnmatchedReviewDialog(QDialog):
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
         self._relayout_candidates()
+
+    def showEvent(self, event):  # noqa: N802
+        """시트가 **뜬 뒤에** 첫 사진을 렌더한다(생성자에서 하지 않는다).
+
+        첫 렌더는 후보 점수 계산까지 포함해 수 초가 걸릴 수 있다.  생성자에서 하면
+        `sheets.run` 이 show() 하기 전이라 팝업 없이 앱이 멈춘 것처럼 보였다.
+        한 틱 뒤로 미뤄 시트를 먼저 그리고, 그 위에서 기존 LoadingOverlay 가
+        정상적으로 보이게 한다."""
+        super().showEvent(event)
+        if self._first_render_done:
+            return
+        self._first_render_done = True
+        QTimer.singleShot(0, self._render_first_if_alive)
+
+    def _render_first_if_alive(self) -> None:
+        """지연 첫 렌더 — 그 사이 창이 닫혔으면 조용히 포기한다."""
+        try:
+            if not self.isVisible():
+                return
+            self._render_current()
+        except RuntimeError:
+            pass                      # 이미 파괴된 C++ 객체
 
     # ------------------------------------------------------------------
     def _count_recompute(self, cur: MissEntry, candidates: list) -> int:

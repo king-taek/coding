@@ -18,7 +18,7 @@ import pytest
 
 pytest.importorskip("PyQt6.QtWidgets")
 
-from PyQt6.QtCore import QElapsedTimer, Qt              # noqa: E402
+from PyQt6.QtCore import QPropertyAnimation, Qt         # noqa: E402
 from PyQt6.QtWidgets import (QApplication, QDialog, QLabel,  # noqa: E402
                              QMainWindow, QWidget)
 
@@ -37,11 +37,27 @@ def motion_on(monkeypatch):
     yield
 
 
-def _spin(qapp, ms: int) -> None:
-    t = QElapsedTimer()
-    t.start()
-    while t.elapsed() < ms:
-        qapp.processEvents()
+def _running_ghost_animations(host) -> list:
+    """퇴장 스냅샷에 걸린 opacity 애니메이션들."""
+    out = []
+    for ghost in host._ghosts:
+        out.extend(ghost.findChildren(QPropertyAnimation))
+    return out
+
+
+def _finish_ghost_animations(host) -> None:
+    """퇴장 애니메이션을 **끝으로 밀어** finished 를 발화시킨다.
+
+    ★ 벽시계로 기다리지 않는다.  헤드리스 전체 스위트에서는 Qt 전역 애니메이션
+    드라이버가 틱을 주지 않아(실측: state=Running 인데 currentTime 이 4초 뒤에도 0)
+    시간 기반 대기가 통째로 불안정해진다.  여기서 검증하려는 것은 '시간이 흐르면
+    Qt 가 값을 보간한다'가 아니라 **끝났을 때 우리 정리 코드가 도는가** 이므로,
+    애니메이션을 종료 시점으로 직접 이동시켜 그 경로만 확인한다.
+    """
+    anims = _running_ghost_animations(host)
+    assert anims, "퇴장 애니메이션이 걸리지 않았다 — 닫기 모션이 없다"
+    for a in anims:
+        a.setCurrentTime(a.duration())
 
 
 @pytest.fixture
@@ -90,7 +106,8 @@ def test_close_leaves_fading_ghost(host, qapp, motion_on):
     ghost = host._ghosts[0]
     assert isinstance(ghost, QLabel) and ghost.isVisible()
 
-    _spin(qapp, 400)                      # dur(150) 을 넉넉히 넘긴다
+    _finish_ghost_animations(host)
+    qapp.processEvents()
     assert not host._ghosts, "스냅샷이 정리되지 않았다"
     assert not host.isVisible(), "마지막 시트가 닫혔으면 호스트도 내려가야 한다"
 
@@ -110,7 +127,8 @@ def test_close_with_delete_on_close_does_not_crash(host, qapp, motion_on):
 
     host._close(entry)
     d.deleteLater()                       # 원본을 곧바로 파괴 예약
-    _spin(qapp, 400)                      # 여기서 죽으면 회귀
+    _finish_ghost_animations(host)        # 여기서 죽으면 회귀
+    qapp.processEvents()
     assert not host._ghosts
 
 

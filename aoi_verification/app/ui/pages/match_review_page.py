@@ -200,7 +200,7 @@ class _RunnerUpTile(QFrame):
             dist = (1.0 - score) * tol if score >= 0 else (-score) * tol
             score_text = i18n.KO.SCORE_DIST_FMT.format(dist=dist)
         else:
-            score_text = f"{score * 100:.1f} %"
+            score_text = i18n.KO.SCORE_SIMILARITY_FMT.format(pct=score * 100)
         self._score_label = QLabel(score_text, self)
         # µm 신호 통일(C21): '허용 초과'는 어디서나 위험색(빨강), 정상은 중립 보조색.
         color = theme.DANGER if over else theme.INK2
@@ -323,10 +323,25 @@ class _MatchRow(QFrame):
         arrow.setFixedWidth(_ARROW_W)
         top.addWidget(arrow)
 
-        # 1위 매치 이미지 — 점수는 우측 metric 컬럼으로 분리 (A2 밀집 리스트).
+        # 1위 매치 이미지 + **사진 바로 밑 점수**.  차순위 타일(_RunnerUpTile)은
+        # 처음부터 사진 밑에 점수를 달았는데 1위만 우측 metric 컬럼에 있어, 같은
+        # 종류의 값을 두 군데서 다르게 읽어야 했다(사용자 지적).  우측 컬럼은
+        # 목록 훑기용으로 그대로 두고, 사진 옆에도 같은 값을 붙여 짝을 맞춘다.
+        self._val_host = QWidget(self)
+        self._val_host.setProperty("role", "rowHost")
+        self._val_host.setFixedWidth(self._thumb_px)
+        _val_col = QVBoxLayout(self._val_host)
+        _val_col.setContentsMargins(0, 0, 0, 0)
+        _val_col.setSpacing(2)
         self._val_img = self._make_thumb(match.val_path, size=self._thumb_px,
                                          on_view=lambda: self._open_compare(0))
-        top.addWidget(self._val_img)
+        _val_col.addWidget(self._val_img, alignment=Qt.AlignmentFlag.AlignCenter)
+        self._val_score_label = QLabel(
+            self._format_score(match.score, verbose=False), self._val_host)
+        self._val_score_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        _val_col.addWidget(self._val_score_label)
+        self._style_val_score(match.score)
+        top.addWidget(self._val_host)
 
         # ── 첫 줄 차순위 후보 — 1위 매치 바로 옆(인라인)에 붙는다 (#3). ──
         # 이 컨테이너 안의 가로 레이아웃에 _first_cols() 개까지 채운다.
@@ -423,6 +438,18 @@ class _MatchRow(QFrame):
             self.btn_less = None
             self._first_line_host.setVisible(False)
 
+    def _style_val_score(self, score: float) -> None:
+        """사진 밑 점수의 색 — 차순위 타일과 같은 규칙(초과=위험색, 정상=보조색).
+
+        µm 신호 통일(C21): '허용 초과'는 어디서나 위험색으로 읽힌다.
+        """
+        over = self._coord_mode and score < 0
+        color = theme.DANGER if over else theme.INK2
+        self._val_score_label.setStyleSheet(
+            f"color: {color}; font-size: 12px; font-family: {theme.FONT_MONO};")
+        self._val_score_label.setToolTip(
+            self._format_score(score, verbose=True) if over else "")
+
     def _format_score(self, score: float, *, verbose: bool = True) -> str:
         """score 값을 표시 문자열로 변환.
 
@@ -441,7 +468,7 @@ class _MatchRow(QFrame):
                 fmt = (_i18n.KO.SCORE_DIST_OVER_FMT if verbose
                        else _i18n.KO.SCORE_DIST_FMT)
                 return fmt.format(dist=dist)
-        return f"{score * 100:.1f} %"
+        return i18n.KO.SCORE_SIMILARITY_FMT.format(pct=score * 100)
 
     def _row_width(self) -> int:
         """현재 행의 가용 너비.
@@ -596,6 +623,8 @@ class _MatchRow(QFrame):
         self._runnerup_px = max(40, int(applied * 0.8))
         self._ref_img.set_size(applied)
         self._val_img.set_size(applied)
+        # 사진 밑 점수를 담은 컨테이너도 같은 폭이어야 헤더 정렬이 유지된다.
+        self._val_host.setFixedWidth(applied)
         for tile in self._runner_tiles:
             tile.set_size(self._runnerup_px)
         self._layout_runner_tiles()
@@ -902,8 +931,12 @@ class MatchReviewPage(QWidget):
         rule.setProperty("role", "vrule")
         rule.setFixedWidth(1)
         lay.addWidget(rule)
-        lay.addWidget(head(i18n.KO.COL_DISTANCE, width=96,
-                           align=Qt.AlignmentFlag.AlignRight))
+        # ★ 이 열의 이름은 엔진에 따라 다르다 — 좌표는 '거리(µm)', 구형(유사도)은
+        #   '유사도(%)'.  모드는 `load_state` 에서야 정해지므로 핸들을 들고 있다가
+        #   그때 갈아 끼운다(헤더는 생성자에서 만들어진다).
+        self._hdr_metric = head(i18n.KO.COL_DISTANCE, width=96,
+                                align=Qt.AlignmentFlag.AlignRight)
+        lay.addWidget(self._hdr_metric)
         lay.addWidget(head(i18n.KO.COL_VERDICT, width=p.chip_w,
                            align=Qt.AlignmentFlag.AlignCenter))
         spacer = QWidget(host)                             # 토글 열 위 빈 칸
@@ -943,6 +976,11 @@ class MatchReviewPage(QWidget):
         self._unmatched_keys.clear()
         self._coord_mode = bool(coord_mode)
         self._tolerance = float(tolerance) if tolerance and tolerance > 0 else 500.0
+        # 점수 열 이름을 엔진에 맞춘다 — 구형(유사도)에서 '거리(µm)' 로 보이던 오표기.
+        hdr = getattr(self, "_hdr_metric", None)
+        if hdr is not None:
+            hdr.setText(i18n.KO.COL_DISTANCE if self._coord_mode
+                        else i18n.KO.COL_SIMILARITY)
         self._coord_failed_count = int(coord_failed_count)
         # 차순위 swap / 재계산용으로 score_cache + val_pool 참조 보관.
         self._score_cache = score_cache

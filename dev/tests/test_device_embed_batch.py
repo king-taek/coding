@@ -12,7 +12,6 @@ import numpy as np
 import pytest
 
 from aoi_verification.app.learning import embedder_openvino as ov
-from aoi_verification.app.workers import efficiency_matcher as eff
 
 
 # ---------------------------------------------------------------------------

@@ -34,7 +34,7 @@ def _fmt_score(score: float, coord_mode: bool, tolerance: float) -> str:
         dist = (1.0 - score) * tol if score >= 0 else (-score) * tol
         return (i18n.KO.SCORE_DIST_FMT.format(dist=dist) if score >= 0
                 else i18n.KO.SCORE_DIST_OVER_FMT.format(dist=dist))
-    return f"유사도 {score * 100:.1f}%"
+    return i18n.KO.SCORE_SIMILARITY_FMT.format(pct=score * 100)
 
 
 class _Row(QWidget):

@@ -387,6 +387,12 @@ class MatchPage(QWidget):
         # 사전 계산은 항상 첫 매칭(_advance)보다 앞선다 — 진행 바 갱신 가드
         # (_current is None) 가 직전 세션의 잔여 상태에 흔들리지 않도록 초기화.
         self._current = None
+        # ★ 진행도도 함께 리셋한다.  이 둘은 어디서도 초기화되지 않아, 2회차
+        #   실행에서 `_on_precompute_phase` 가 **직전 세션의 done/total** 로
+        #   set_progress 를 불러 바가 엉뚱한 위치에서 시작했다.
+        self._precompute_done = 0
+        self._precompute_total = 0
+        self._precompute_phase = ""
         # 슬롯별 ref 수집 — queue 순서를 따라 사용자가 마주칠 순서대로 처리.
         refs_by_slot: dict[str, list[ImageItem]] = defaultdict(list)
         for r in self._state.queue:
@@ -486,6 +492,30 @@ class MatchPage(QWidget):
         except (AttributeError, TypeError):
             pass
         self._precompute_worker.start()
+
+    def showEvent(self, e):  # noqa: N802
+        """페이지가 실제로 보이는 순간, 사전 계산 중이면 오버레이를 다시 세운다.
+
+        ★ ``main_window`` 는 ``load_state``(→ ``show_overlay``) 를 부른 **뒤에**
+        ``_show_page`` 로 전환하는데, 그 전환은 ``w.grab()`` 스냅샷으로 ≈240ms
+        진행된다.  스냅샷을 뜨는 시점의 오버레이는 페이드 0 이라 **그림에 안
+        찍히고**, 사전 계산이 그 사이에 끝나버리면 사용자는 로딩을 한 번도 못
+        본다.  전환 순서를 바꾸면 '보이지 않는 동안에도 자동 진행'(
+        test_stage2_autostart) 계약을 건드리므로, 여기서 한 번 더 세우기만 한다.
+        이미 떠 있으면 ``show_overlay`` 는 무해하고, 끝났으면 워커가 None 이라
+        아무 일도 하지 않는다."""
+        super().showEvent(e)
+        if self._precompute_worker is None or self._current is not None:
+            return
+        self._loading.show_overlay(
+            getattr(self, "_precompute_phase", "") or i18n.KO.PHASE_SCORING,
+            cancelable=True,
+        )
+        if self._precompute_total > 0:
+            self._loading.set_progress(
+                self._precompute_done, self._precompute_total,
+                getattr(self, "_precompute_phase", "") or i18n.KO.PHASE_SCORING,
+            )
 
     def _precompute_signal_is_current(self) -> bool:
         """이 시그널이 **현재 활성** precompute 워커에서 온 것인지 (#B2).
