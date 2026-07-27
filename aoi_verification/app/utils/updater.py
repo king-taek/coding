@@ -36,6 +36,7 @@ import json
 import os
 import socket
 import ssl
+import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -86,11 +87,12 @@ def deps_changed() -> bool:
 
 
 def deps_blocked() -> bool:
-    """직전 ``download_and_apply`` 가 **새 패키지가 필요해서** 적용을 포기했는지(exe 모드).
+    """직전 ``download_and_apply`` 가 **패키지 설치에 실패해서** 적용을 포기했는지(exe 모드).
 
-    사내망은 PyPI 가 막혀 있어 사용자 PC 에서 패키지를 설치할 수 없다.  코드만 새것으로
-    바꾸면 앱이 깨지므로, 이 경우 업데이트를 적용하지 않고 구버전을 유지한 채 UI 가
-    '새 배포본 전체를 받으라'고 안내한다."""
+    exe 배포는 새 패키지가 필요하면 동봉된 파이썬에 직접 설치한다(``_ensure_deps``).
+    그게 실패하면 — 인터넷이 끊겼거나 회사 프록시가 막았거나 — 코드만 새것으로 바꾸면
+    앱이 깨지므로 업데이트를 적용하지 않고 구버전을 유지한 채 '새 배포본 전체를 받으라'고
+    안내한다."""
     return _deps_blocked
 
 
@@ -615,20 +617,43 @@ def _promote_in_place(staging: Path, app_root: Path, emit) -> None:
             _discard(aside)
 
 
-def _deps_mismatch(root: Path, staging: Path) -> bool:
-    """새 requirements 가 **동봉된 python\\ 런타임이 만들어질 때의 것과 다른지**.
+def _ensure_deps(root: Path, staging: Path, emit) -> bool:
+    """새 requirements 를 **동봉된 파이썬에 설치**한다.  성공해야 업데이트를 적용한다.
 
-    사내망은 PyPI 가 막혀 있어 사용자 PC 에서 패키지 설치가 불가능하다.  그래서 패키지가
-    바뀌는 업데이트는 **적용하면 안 된다** — 코드만 새것이고 패키지가 옛것이면 그게 바로
-    '반쪽 업데이트'다.  판단 근거가 없으면(빌드가 표식을 안 남긴 옛 배포본) 막지 않는다."""
+    코드만 새것이고 패키지가 옛것이면 앱이 ``ImportError`` 로 안 켜진다 — 그게 바로
+    없애려는 '반쪽 업데이트'다.  그래서 설치가 실패하면 **업데이트를 적용하지 않고**
+    구버전을 그대로 둔다(사용자는 계속 쓸 수 있고, UI 가 새 배포본을 받으라고 안내한다).
+
+    이미 같은 목록으로 설치돼 있으면(표식 비교) 아무것도 하지 않는다 — 매 업데이트마다
+    2 GB 재설치가 돌지 않게 하는 장치다.  주석·빈 줄 변경은 표식이 무시한다."""
     from . import bootstrap
 
-    new = _file_text(staging / "requirements.txt")
-    if new is None:
+    req = staging / "requirements.txt"
+    text = _file_text(req)
+    if text is None:
+        return True                        # 비교할 것이 없다
+    if bootstrap.deps_installed(root, text):
+        return True                        # 이 목록으로 이미 설치돼 있다
+
+    py = bootstrap.target_python(root, frozen=False,
+                                 sys_executable=sys.executable)
+    emit(0, 0, "필요한 패키지 설치 중…")     # total<=0 → busy(진행량 미상, 0 에서 안 멈춤)
+    import subprocess
+
+    kwargs = {}
+    if os.name == "nt":
+        kwargs["creationflags"] = 0x08000000      # CREATE_NO_WINDOW — 콘솔이 튀지 않게
+    try:
+        rc = subprocess.call(
+            bootstrap.pip_install_cmd(py, req, upgrade=False), **kwargs)
+    except Exception as exc:
+        globals()["_last_error"] = f"패키지 설치를 시작하지 못했습니다 ({exc})"
         return False
-    if not bootstrap.deps_marker(root).exists():
-        return False                       # 비교할 기준이 없다 — 섣불리 막지 않는다
-    return not bootstrap.deps_installed(root, new)
+    if rc != 0:
+        globals()["_last_error"] = f"패키지 설치 실패 (pip 종료코드 {rc})"
+        return False
+    bootstrap.write_deps_marker(root, text)
+    return True
 
 
 def download_and_apply(repo: str, branch: str, target_sha: str,
@@ -715,9 +740,9 @@ def download_and_apply(repo: str, branch: str, target_sha: str,
 
         # 5) 적용
         if install_root is not None:                 # exe 모드 — 교체는 런처에 위임
-            if _deps_mismatch(install_root, staging):
+            # 패키지가 바뀌었으면 먼저 설치한다 — 성공해야 코드를 적용한다.
+            if not _ensure_deps(install_root, staging, _emit):
                 _deps_blocked = True     # UI 가 '새 배포본을 받으라' 고 안내한다
-                _last_error = "이번 변경은 새 패키지를 필요로 합니다"
                 return False
             pending = _pending_dir(install_root)
             shutil.rmtree(pending, ignore_errors=True)

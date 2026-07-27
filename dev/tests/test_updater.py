@@ -21,6 +21,23 @@ def _stub_default_branch(monkeypatch):
                         lambda repo, timeout=10.0: _STUB_DEFAULT)
 
 
+@pytest.fixture(autouse=True)
+def _no_real_subprocess(monkeypatch):
+    """테스트가 **실제 pip 을 돌려 네트워크를 타는 것**을 막는다.
+
+    업데이트 경로가 패키지를 설치하게 되면서, 모킹을 빠뜨린 테스트가 조용히 진짜 pip 을
+    실행하는 사고가 실제로 났다(느리고, 오프라인에서 깨지고, 결과가 환경에 따라 달라진다).
+    의도적으로 pip 을 검증하는 테스트는 ``_fake_pip`` 로 이 가드를 덮어쓴다."""
+    import subprocess
+
+    def _blocked(cmd, **kw):
+        raise AssertionError(
+            "테스트가 실제 프로세스를 실행하려 했다(모킹 누락): "
+            + " ".join(str(c) for c in cmd))
+
+    monkeypatch.setattr(subprocess, "call", _blocked)
+
+
 def _write_version(tmp_path, monkeypatch, data: dict | None):
     monkeypatch.setattr(updater, "_app_root", lambda: tmp_path)
     if data is not None:
@@ -539,7 +556,11 @@ def test_verification_rejects_incomplete_tree_and_keeps_old_version(tmp_path, mo
 
 # ── exe 모드(런처가 교체) — 스테이징만 하고 살아있는 app/ 은 건드리지 않는다 ──
 def _exe_install(tmp_path, monkeypatch):
-    """'exe + app 폴더' 설치를 흉내낸다."""
+    """'exe + app 폴더' 설치를 흉내낸다.
+
+    빌드가 남기는 의존성 표식(`.deps_installed`)도 함께 만든다 — 실제 빌드가 그렇고,
+    이게 없으면 요구사항이 그대로여도 설치를 한 번 돌게 된다."""
+    from aoi_verification.app.utils import bootstrap
     root = tmp_path / "AOI_Verify"
     app = root / "app"
     app.mkdir(parents=True)
@@ -547,6 +568,7 @@ def _exe_install(tmp_path, monkeypatch):
     (app / "VERSION").write_text('{"sha": "OLDSHA", "branch": "b", "repo": "r"}',
                                  encoding="utf-8")
     (app / "requirements.txt").write_text("numpy==1\n", encoding="utf-8")
+    bootstrap.write_deps_marker(root, "numpy==1\n")
     monkeypatch.setenv("AOI_APP_HOME", str(root))
     monkeypatch.setattr(updater, "_app_root", lambda: app)
     return root, app
@@ -605,44 +627,79 @@ def test_incomplete_staging_never_becomes_a_ready_signal(tmp_path, monkeypatch):
     assert (app / "main.py").read_text() == "OLD"
 
 
-def test_new_packages_block_the_update_instead_of_half_applying(tmp_path, monkeypatch):
-    """사내망은 PyPI 가 막혀 패키지를 못 깐다 — 코드만 새것이 되는 상태를 막는다."""
+def _fake_pip(monkeypatch, rc: int, calls: list):
+    """pip 호출을 가로챈다 — 실제 설치 없이 '무엇을 어떻게 부르는지' 를 검증한다."""
+    import subprocess
+
+    def _call(cmd, **kw):
+        calls.append([str(c) for c in cmd])
+        return rc
+
+    monkeypatch.setattr(subprocess, "call", _call)
+
+
+def test_new_packages_are_installed_then_the_update_applies(tmp_path, monkeypatch):
+    """패키지가 바뀌면 동봉 파이썬에 설치하고, **성공해야** 코드를 적용한다."""
     from aoi_verification.app.utils import bootstrap
-    root, app = _exe_install(tmp_path, monkeypatch)
-    bootstrap.write_deps_marker(root, "numpy==1\n")      # 번들은 이 목록으로 만들어졌다
+    root, _app = _exe_install(tmp_path, monkeypatch)
+    (root / "python").mkdir(exist_ok=True)
+    (root / "python" / "python.exe").write_bytes(b"x")   # 번들 파이썬
     zip_bytes = _make_branch_zip(
         tmp_path, extra={"coding-x/requirements.txt": "numpy==1\n새패키지==2\n"})
     monkeypatch.setattr(updater, "_urlopen",
                         lambda url, headers, timeout: _FakeResp(zip_bytes))
+    calls = []
+    _fake_pip(monkeypatch, 0, calls)
+
+    seen = []
+    ok = updater.download_and_apply("o/r", "x", "NEWSHA",
+                                    progress=lambda d, t, p: seen.append((d, t, p)))
+    assert ok is True
+    assert (root / "app.new").is_dir()
+    assert updater.deps_blocked() is False
+    # 번들 파이썬으로, --upgrade 없이(=빠진 것만) 설치했다.
+    assert len(calls) == 1
+    cmd = calls[0]
+    assert cmd[0].endswith("python.exe") and "python" in cmd[0]
+    assert cmd[1:4] == ["-m", "pip", "install"]
+    assert "--upgrade" not in cmd, "이미 잘 돌던 torch 까지 최신으로 끌어올리면 안 된다"
+    # 설치 단계는 진행량을 모르므로 busy(total<=0) 로 보고한다 — 0 에서 멈추지 않게.
+    assert any(t <= 0 and "설치" in p for _d, t, p in seen)
+    # 표식이 새 목록으로 갱신돼, 다음 업데이트 때 재설치가 돌지 않는다.
+    assert bootstrap.deps_installed(root, "numpy==1\n새패키지==2\n")
+
+
+def test_failed_package_install_leaves_the_old_version_running(tmp_path, monkeypatch):
+    """설치가 실패하면 코드를 적용하지 않는다 — 앱이 ImportError 로 죽는 것을 막는다."""
+    from aoi_verification.app.utils import bootstrap
+    root, app = _exe_install(tmp_path, monkeypatch)
+    (root / "python").mkdir(exist_ok=True)
+    (root / "python" / "python.exe").write_bytes(b"x")
+    zip_bytes = _make_branch_zip(
+        tmp_path, extra={"coding-x/requirements.txt": "numpy==1\n새패키지==2\n"})
+    monkeypatch.setattr(updater, "_urlopen",
+                        lambda url, headers, timeout: _FakeResp(zip_bytes))
+    _fake_pip(monkeypatch, 1, [])                        # pip 실패
 
     assert updater.download_and_apply("o/r", "x", "NEWSHA") is False
     assert updater.deps_blocked() is True
     assert not (root / "app.new").exists()               # 적용하지 않는다
     assert (app / "main.py").read_text() == "OLD"        # 앱은 계속 쓸 수 있다
+    # 표식도 갱신되지 않아 다음 실행에 다시 설치를 시도한다.
+    assert not bootstrap.deps_installed(root, "numpy==1\n새패키지==2\n")
 
 
-def test_comment_only_requirements_change_does_not_block(tmp_path, monkeypatch):
-    """주석·빈 줄만 바뀐 것을 '패키지 변경' 으로 오인하면 업데이트가 통째로 막힌다."""
+def test_unchanged_requirements_never_run_pip(tmp_path, monkeypatch):
+    """주석·빈 줄만 바뀐 것으로 2 GB 재설치가 돌면 안 된다."""
     from aoi_verification.app.utils import bootstrap
     root, _app = _exe_install(tmp_path, monkeypatch)
-    bootstrap.write_deps_marker(root, "numpy==1\n")
     zip_bytes = _make_branch_zip(
         tmp_path, extra={"coding-x/requirements.txt": "# 설명 추가\nnumpy==1\n\n"})
     monkeypatch.setattr(updater, "_urlopen",
                         lambda url, headers, timeout: _FakeResp(zip_bytes))
+    calls = []
+    _fake_pip(monkeypatch, 0, calls)
 
     assert updater.download_and_apply("o/r", "x", "NEWSHA") is True
-    assert updater.deps_blocked() is False
+    assert calls == [], "요구사항이 그대로인데 pip 을 돌렸다"
     assert (root / "app.new").is_dir()
-
-
-def test_missing_deps_marker_does_not_block(tmp_path, monkeypatch):
-    """표식이 없는 옛 배포본은 판단 근거가 없다 — 섣불리 막지 않는다."""
-    root, _app = _exe_install(tmp_path, monkeypatch)
-    zip_bytes = _make_branch_zip(
-        tmp_path, extra={"coding-x/requirements.txt": "numpy==1\n다른것==3\n"})
-    monkeypatch.setattr(updater, "_urlopen",
-                        lambda url, headers, timeout: _FakeResp(zip_bytes))
-
-    assert updater.download_and_apply("o/r", "x", "NEWSHA") is True
-    assert updater.deps_blocked() is False
