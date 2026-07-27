@@ -21,10 +21,25 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Tuple
+
+# ---------------------------------------------------------------------------
+# 한글 출력이 깨지지 않도록 stdout/stderr 를 UTF-8 로. (Windows cp949 대비)
+# ★ 콘솔에 직접 찍을 때는 Windows 가 WriteConsoleW 를 써서 무사하지만, 로그 파일로
+#   리다이렉트하는 순간 인코딩이 cp949 로 떨어져 UnicodeEncodeError 로 **빌드가 죽는다**
+#   (출력 문구의 '—' 같은 문자). 30분짜리 빌드에서 로그를 남기려다 실패하면 원인 파악이
+#   더 어려워지므로, 안내를 하기 전에 이걸 먼저 보장한다. (run_this_before.py 와 동일 패턴)
+# ---------------------------------------------------------------------------
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 # 이 스크립트는 scripts/ 안에 있다 → 저장소 루트는 부모.
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -79,12 +94,142 @@ def output_path(kind: str, repo_root: Path) -> Path:
 # 'exe + app 폴더' 산출물 폴더 이름(저장소 루트 기준) — portable_build 에 넘긴다.
 EXE_OUT_DIRNAME = "dist/AOI_Verify"
 
+# 다시 빌드할 때 **반드시 지워야 할** 것들.  PyInstaller 는 onefile 이라 exe 파일 하나만
+# 교체하고 distpath 폴더를 비우지 않고, portable_build 도 app/aoi_verification 아래만
+# 지운다.  그래서 옛 방식(단독 exe) 산출물의 `_internal/` 이 남으면 검증이 **영원히**
+# 실패하고, 사용자는 '다시 빌드하세요' 안내를 따라도 상태를 바꿀 수 없다.
+_STALE_ON_REBUILD = ("_internal", "app.new", "app.new.part", "app.old",
+                     "AOI_Verify.exe")
+# 반대로 **남겨야** 하는 것: python\ 과 runtime\ 은 다시 만들면 30분이 걸리고,
+# portable_build 의 증분 재사용이 이걸 전제로 한다.  결과\ 는 사용자 산출물이다.
+
+
+def stale_paths(out: Path) -> List[Path]:
+    """다시 빌드하기 전에 지울 경로들(존재하는 것만).  순수 — 테스트 대상."""
+    return [out / name for name in _STALE_ON_REBUILD if (out / name).exists()]
+
+
+def clean_stale_output(out: Path, log: Callable = print) -> int:
+    """옛 산출물을 지운다.  못 지우면 **중단**한다(조용히 진행하면 같은 함정에 다시 빠진다)."""
+    targets = stale_paths(out)
+    if not targets:
+        return 0
+    log("[clean] 옛 빌드 산출물 정리 ...")
+    for p in targets:
+        log(f"  - {p}")
+        if p.is_dir():
+            shutil.rmtree(p, ignore_errors=True)
+        else:
+            try:
+                p.unlink()
+            except OSError:
+                pass
+    left = [p for p in targets if p.exists()]
+    if left:
+        log("[실패] 다음을 지우지 못했습니다(프로그램이 실행 중이거나 탐색기가 열고 "
+            "있을 수 있습니다):")
+        for p in left:
+            log(f"  {p}")
+        log("       해당 프로그램·창을 닫고 다시 실행하세요.")
+        return 1
+    return 0
+
+
+# 산출물 상태 진단 — portable_build.run_build 의 **기록 순서가 그대로 단계 사다리**라
+# 별도 마커 없이 '어디까지 갔는지' 를 알 수 있다(마지막 기록이 app/VERSION).
+def diagnose(out: Path) -> Tuple[str, List[str]]:
+    """``(상태, [사용자가 할 일 …])``.  순수 — 테스트 대상.
+
+    검증이 '무엇이 없다' 를 나열하는 것만으로는 사용자가 다음에 뭘 해야 할지 알 수 없다.
+    특히 '빌드를 안 돌린 것' 과 '옛 산출물이 남은 것' 과 '중간에 실패한 것' 은 대응이 전혀
+    다른데 화면에는 똑같이 빨간 줄로만 보인다."""
+    if not out.is_dir():
+        return "not_built", ["빌드를 아직 실행하지 않았습니다.",
+                             "  python scripts\\build.py exe"]
+    if (out / "_internal").is_dir():
+        return "stale_onedir", [
+            f"옛 방식(단독 exe) 산출물이 남아 있습니다: {out / '_internal'}",
+            "지금 빌드는 이것을 자동으로 지웁니다. 그래도 남아 있다면 수동으로 지우세요:",
+            f"  rmdir /s /q {out}",
+            "그 다음:  python scripts\\build.py exe"]
+    if not (out / "AOI_Verify.exe").is_file() and not (out / "python").is_dir():
+        return "not_built", ["폴더는 있으나 빌드 산출물이 없습니다.",
+                             "  python scripts\\build.py exe"]
+    if not (out / "python" / "python.exe").is_file():
+        return "partial:runtime", [
+            "CPython 런타임을 받아 푸는 단계에서 멈췄습니다.",
+            "네트워크(github.com 다운로드)를 확인하고 다시 실행하세요."]
+    if not (out / ".deps_installed").is_file():
+        return "partial:deps", [
+            "의존성 설치(pip — torch/openvino) 단계에서 멈췄습니다.",
+            "네트워크와 디스크 여유 공간을 확인하고 다시 실행하세요.",
+            "  (python\\ 은 재사용되므로 런타임을 다시 받지는 않습니다.)"]
+    ck = out / "runtime" / "torch" / "hub" / "checkpoints"
+    n_ckpt = len(list(ck.glob("*.pth"))) if ck.is_dir() else 0
+    if n_ckpt < 2:
+        return "partial:weights", [
+            "모델 가중치를 받는 단계에서 멈췄습니다.",
+            "download.pytorch.org 접속을 확인하고 다시 실행하세요."]
+    if not (out / "app" / "VERSION").is_file():
+        return "partial:appcopy", [
+            "앱 소스 복사 / VERSION 스탬프 단계에서 멈췄습니다.",
+            "  python scripts\\build.py exe"]
+    return "complete", []
+
+
+def report_diagnosis(out: Path, log: Callable = print) -> str:
+    """진단을 사람이 읽을 형태로 출력하고 상태를 돌려준다."""
+    state, todo = diagnose(out)
+    if state == "complete":
+        return state
+    log("")
+    log("[진단] " + todo[0])
+    for line in todo[1:]:
+        log("       " + line)
+    return state
+
+
+def preflight(repo_root: Path, log: Callable = print,
+              free_bytes: Optional[int] = None,
+              dirty: Optional[bool] = None) -> int:
+    """빌드 시작 전 점검.  0=계속.  ``free_bytes``/``dirty`` 는 테스트 주입용."""
+    if free_bytes is None:
+        try:
+            free_bytes = shutil.disk_usage(str(repo_root)).free
+        except OSError:
+            free_bytes = None
+    if free_bytes is not None and free_bytes < 10 * 1024 ** 3:
+        log(f"[실패] 디스크 여유 공간이 부족합니다 "
+            f"({free_bytes / 1024 ** 3:.1f} GB). 10 GB 이상 확보하세요.")
+        log("       산출물만 ~1.5 GB 이고 pip 캐시·휠이 더 필요합니다. 공간이 모자라면 "
+            "30분 뒤 pip 한복판에서 실패합니다.")
+        return 1
+
+    # 커밋 안 한 변경이 있으면 VERSION 이 거짓말을 한다 — 스탬프는 HEAD 의 sha 인데
+    # 복사되는 소스는 작업트리다.  그러면 사용자 앱은 원격 HEAD 와 비교해 '최신입니다'
+    # 라며 **공개되지 않은 코드를 영원히 실행**한다(자동 업데이트 불변식 위반).
+    if dirty is None:
+        try:
+            outp = subprocess.check_output(
+                ["git", "-C", str(repo_root), "status", "--porcelain"],
+                stderr=subprocess.DEVNULL, timeout=10).decode("utf-8", "replace")
+            dirty = bool(outp.strip())
+        except Exception:
+            dirty = False
+    if dirty:
+        log("[주의] 커밋하지 않은 변경이 있습니다.")
+        log("       배포본의 VERSION 에는 HEAD 의 커밋이 박히지만 실제 복사되는 소스는")
+        log("       작업트리입니다. 그러면 사용자 앱이 '최신입니다' 라며 공개되지 않은")
+        log("       코드를 계속 실행합니다. 커밋·푸시 후 빌드하는 것을 권합니다.")
+    return 0
+
 
 # ---------------------------------------------------------------------------
 # 실행 헬퍼 — run 은 주입 가능(테스트는 가짜로 대체)
 # ---------------------------------------------------------------------------
 def _default_run(cmd: List[str], cwd: Optional[Path] = None) -> int:
-    print(">>", " ".join(str(c) for c in cmd), flush=True)
+    # 시각을 찍는다 — 30분짜리 빌드에서 '어디서 멈췄나' 는 결국 '언제 멈췄나' 로 판단한다.
+    print(f">> [{time.strftime('%H:%M:%S')}]", " ".join(str(c) for c in cmd), flush=True)
     return subprocess.call([str(c) for c in cmd], cwd=str(cwd) if cwd else None)
 
 
@@ -95,7 +240,8 @@ def _ensure_venv(run: Callable, log: Callable) -> str:
         log("[venv] creating .venv ...")
         if run([sys.executable, "-m", "venv", str(REPO_ROOT / ".venv")]) != 0:
             raise SystemExit("venv creation failed")
-    run(pip_install_cmd(str(vpy), "--upgrade", "pip"))
+    if run(pip_install_cmd(str(vpy), "--upgrade", "pip")) != 0:
+        raise SystemExit("pip upgrade failed")     # 아래 단계들과 동일하게 확인한다
     return str(vpy)
 
 
@@ -125,6 +271,12 @@ def build_exe(run: Callable = _default_run, log: Callable = print) -> int:
     옛 단독 exe(onedir) 는 앱을 exe 안 PYZ 에 넣어서 업데이트가 조용히 무시됐다 —
     그 구조를 되풀이하지 않기 위한 형태다."""
     out = REPO_ROOT / EXE_OUT_DIRNAME
+    # ⓪ 30분을 버리기 전에 점검하고, 옛 산출물을 정리한다.
+    if preflight(REPO_ROOT, log) != 0:
+        return 1
+    if clean_stale_output(out, log) != 0:
+        return 1
+
     # ① 런처 exe 먼저 — 여기서 실패하면 무거운 런타임 다운로드 전에 빨리 끝난다.
     vpy = _ensure_venv(run, log)
     if run(pip_install_cmd(vpy, "pyinstaller>=6")) != 0:
@@ -134,6 +286,17 @@ def build_exe(run: Callable = _default_run, log: Callable = print) -> int:
     log("[build] thin launcher exe (no app code inside) ...")
     if run(pyinstaller_cmd(vpy, INTERNAL / "exe_launcher.spec", out), REPO_ROOT) != 0:
         raise SystemExit("launcher build failed")
+    # 런처가 제대로 얇게 나왔는지 **여기서** 본다 — 2~3 GB 를 받기 전에 멈추기 위해.
+    exe = out / "AOI_Verify.exe"
+    if not exe.is_file():
+        raise SystemExit(f"launcher exe not produced: {exe}")
+    exe_mb = exe.stat().st_size / (1024 ** 2)
+    if (out / "_internal").exists() or exe_mb >= 30:
+        raise SystemExit(
+            f"launcher looks wrong (exe {exe_mb:.1f} MB, _internal "
+            f"{'있음' if (out / '_internal').exists() else '없음'}) — "
+            "앱이 exe 안에 얼려 들어갔을 수 있습니다. exe_launcher.spec 을 확인하세요.")
+    log(f"       launcher OK ({exe_mb:.1f} MB)")
 
     # ② 번들 런타임 + 앱 소스 — 포터블 빌드와 레이아웃이 같으므로 그대로 재사용한다.
     impl = _load_portable_impl()
@@ -142,6 +305,8 @@ def build_exe(run: Callable = _default_run, log: Callable = print) -> int:
                         bats=("run_aoi.bat", "run_aoi_debug.bat"),
                         torch_home=True)
     if rc != 0:
+        log("[실패] 런타임/앱 배치 단계에서 실패했습니다.")
+        report_diagnosis(out, log)      # 어느 단계에서 멈췄는지 한 줄로 알려준다
         return rc
     log("[done] " + str(output_path("exe", REPO_ROOT)))
     log("       Ship the whole dist\\AOI_Verify folder (zip).")
@@ -281,6 +446,8 @@ def verify_exe(repo_root: Path = REPO_ROOT, log: Callable = print,
     ok = passed == len(checks)
     log(f"[verify] 결과: {passed}/{len(checks)} 통과" +
         (" — 빌드 정상!" if ok else " — 위 [!!] 항목을 확인하세요."))
+    if not ok:
+        report_diagnosis(out, log)      # make_release_zip 과 같은 말을 하게 한다
     return 0 if ok else 1
 
 

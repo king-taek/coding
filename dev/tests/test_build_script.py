@@ -8,6 +8,8 @@ from __future__ import annotations
 import importlib.util as _u
 from pathlib import Path
 
+import pytest
+
 _ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -91,8 +93,31 @@ def test_build_online_injected_flow():
     assert "pyinstaller>=6" in joined
 
 
-def test_build_exe_builds_launcher_then_reuses_portable(monkeypatch):
+def _sandbox_build(monkeypatch, tmp_path):
+    """``build_exe`` 를 임시 폴더에서 돌리게 한다.
+
+    ★ 이걸 안 하면 테스트가 **실제 저장소의 dist\\AOI_Verify 를 지운다** — 개발자가
+    빌드해 둔 산출물이 pytest 한 번에 날아간다."""
+    monkeypatch.setattr(build, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(build, "preflight", lambda *a, **k: 0)   # 디스크/git 검사 제외
+    return tmp_path / build.EXE_OUT_DIRNAME
+
+
+def _fake_run(calls, out: Path, exe_mb: float = 3.0):
+    """PyInstaller 호출을 보면 얇은 런처 exe 를 만들어 주는 가짜 실행기."""
+    def _run(cmd, cwd=None):
+        joined = " ".join(str(x) for x in cmd)
+        calls.append(joined)
+        if "PyInstaller" in joined:
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "AOI_Verify.exe").write_bytes(b"x" * int(exe_mb * 1024 * 1024))
+        return 0
+    return _run
+
+
+def test_build_exe_builds_launcher_then_reuses_portable(monkeypatch, tmp_path):
     """exe 빌드는 ① 런처 spec 을 얼리고 ② 포터블 빌더로 런타임·앱을 배치한다."""
+    out = _sandbox_build(monkeypatch, tmp_path)
     calls = []
     seen = {}
 
@@ -104,8 +129,7 @@ def test_build_exe_builds_launcher_then_reuses_portable(monkeypatch):
 
     monkeypatch.setattr(build, "_load_portable_impl", lambda: _FakeImpl)
     monkeypatch.setattr(build, "verify_exe", lambda *a, **k: 0)
-    rc = build.build_exe(run=lambda c, cwd=None: calls.append(
-        " ".join(str(x) for x in c)) or 0, log=lambda *a: None)
+    rc = build.build_exe(run=_fake_run(calls, out), log=lambda *a: None)
     assert rc == 0
     joined = "\n".join(calls)
     assert "exe_launcher.spec" in joined             # 얇은 런처 spec
@@ -115,6 +139,60 @@ def test_build_exe_builds_launcher_then_reuses_portable(monkeypatch):
     assert seen["out_dirname"] == build.EXE_OUT_DIRNAME
     assert "update_app.bat" not in seen["bats"]
     assert seen["torch_home"] is True
+
+
+def test_rebuild_removes_stale_onedir_output(monkeypatch, tmp_path):
+    """★ 회귀 가드 — 옛 단독 exe 산출물을 지우지 않으면 검증이 영원히 실패한다.
+
+    PyInstaller 는 onefile 이라 exe 파일 하나만 교체하고 distpath 를 비우지 않으므로,
+    빌드가 직접 지워야 한다. 안 지우면 사용자는 '다시 빌드하세요' 안내를 아무리 따라도
+    상태를 바꿀 수 없다(무한 루프)."""
+    out = _sandbox_build(monkeypatch, tmp_path)
+    (out / "_internal").mkdir(parents=True)
+    (out / "_internal" / "torch").mkdir()
+    (out / "app.old").mkdir()
+    (out / "AOI_Verify.exe").write_bytes(b"x" * 63 * 1024 * 1024)   # 옛 63MB exe
+    # 비싸게 만든 것들은 남아야 한다(다시 만들면 30분).
+    (out / "python").mkdir()
+    (out / "python" / "python.exe").write_bytes(b"x")
+    (out / "runtime").mkdir()
+    (out / "결과").mkdir()
+    (out / "결과" / "사용자결과.xlsx").write_text("지키자", encoding="utf-8")
+
+    monkeypatch.setattr(build, "_load_portable_impl",
+                        lambda: type("I", (), {"run_build": staticmethod(
+                            lambda *a, **k: 0)}))
+    monkeypatch.setattr(build, "verify_exe", lambda *a, **k: 0)
+    assert build.build_exe(run=_fake_run([], out), log=lambda *a: None) == 0
+
+    assert not (out / "_internal").exists(), "옛 onedir 잔재가 남았다"
+    assert not (out / "app.old").exists()
+    assert (out / "python" / "python.exe").is_file(), "번들 런타임을 지우면 30분을 버린다"
+    assert (out / "runtime").is_dir()
+    assert (out / "결과" / "사용자결과.xlsx").is_file(), "사용자 산출물을 지웠다"
+
+
+def test_build_exe_stops_when_launcher_came_out_fat(monkeypatch, tmp_path):
+    """런처에 앱이 딸려 들어갔으면 2~3 GB 를 받기 **전에** 멈춰야 한다."""
+    out = _sandbox_build(monkeypatch, tmp_path)
+    monkeypatch.setattr(build, "_load_portable_impl",
+                        lambda: (_ for _ in ()).throw(
+                            AssertionError("무거운 단계로 넘어가면 안 된다")))
+    with pytest.raises(SystemExit):
+        build.build_exe(run=_fake_run([], out, exe_mb=63.0), log=lambda *a: None)
+
+
+def test_build_exe_reports_why_when_stage_fails(monkeypatch, tmp_path):
+    """30분 돌리고 실패했는데 '실패했다' 는 말조차 없으면 원인을 알 수 없다."""
+    out = _sandbox_build(monkeypatch, tmp_path)
+    monkeypatch.setattr(build, "_load_portable_impl",
+                        lambda: type("I", (), {"run_build": staticmethod(
+                            lambda *a, **k: 1)}))
+    logs = []
+    rc = build.build_exe(run=_fake_run([], out), log=logs.append)
+    assert rc != 0
+    assert any("실패" in m for m in logs), "실패 사실을 알리지 않았다"
+    assert any("진단" in m for m in logs), "어느 단계에서 멈췄는지 알리지 않았다"
 
 
 # ── verify_exe 검증 로직 ────────────────────────────────────────────────────
@@ -212,3 +290,109 @@ def test_portable_run_build_aborts_without_runtime(tmp_path, monkeypatch):
     rc = portable.run_build(tmp_path, "http://example/none.tar.gz",
                             run=lambda c, cwd=None: 0, log=lambda *a: None)
     assert rc == 1                                   # 런타임 없음 → 실패
+
+
+# ── 산출물 상태 진단 — '무엇이 없다' 가 아니라 '무엇을 하라' ──────────────────
+def _stage(tmp_path, *, stage: str) -> Path:
+    """지정한 단계까지 진행된 산출물 폴더를 만든다(run_build 의 기록 순서 그대로)."""
+    out = tmp_path / build.EXE_OUT_DIRNAME
+    if stage == "missing":
+        return out
+    out.mkdir(parents=True)
+    if stage == "empty":
+        return out
+    if stage == "stale":
+        (out / "_internal").mkdir()
+        (out / "AOI_Verify.exe").write_bytes(b"x")
+        return out
+    (out / "AOI_Verify.exe").write_bytes(b"x")
+    if stage == "launcher":
+        return out
+    (out / "python").mkdir()
+    (out / "python" / "python.exe").write_bytes(b"x")
+    if stage == "runtime":
+        return out
+    (out / ".deps_installed").write_text("fp", encoding="utf-8")
+    if stage == "deps":
+        return out
+    ck = out / "runtime" / "torch" / "hub" / "checkpoints"
+    ck.mkdir(parents=True)
+    (ck / "a.pth").write_bytes(b"x")
+    (ck / "b.pth").write_bytes(b"x")
+    if stage == "weights":
+        return out
+    (out / "app").mkdir()
+    (out / "app" / "VERSION").write_text("{}", encoding="utf-8")
+    return out
+
+
+@pytest.mark.parametrize("stage,expected", [
+    ("missing", "not_built"),
+    ("empty", "not_built"),
+    ("stale", "stale_onedir"),
+    ("launcher", "partial:runtime"),
+    ("runtime", "partial:deps"),
+    ("deps", "partial:weights"),
+    ("weights", "partial:appcopy"),
+    ("done", "complete"),
+])
+def test_diagnose_distinguishes_states(tmp_path, stage, expected):
+    out = _stage(tmp_path, stage=stage)
+    state, todo = build.diagnose(out)
+    assert state == expected
+    if expected == "complete":
+        assert todo == []
+    else:
+        assert todo and todo[0], "무엇을 하라는 안내가 비어 있다"
+
+
+def test_diagnose_tells_stale_users_to_delete_the_folder(tmp_path):
+    """옛 산출물은 '다시 빌드하세요' 로는 절대 해결되지 않는다 — 지우라고 해야 한다."""
+    out = _stage(tmp_path, stage="stale")
+    _state, todo = build.diagnose(out)
+    joined = "\n".join(todo)
+    assert "지우" in joined or "rmdir" in joined
+
+
+# ── 사전 점검 ──────────────────────────────────────────────────────────────
+def test_preflight_stops_on_low_disk(tmp_path):
+    logs = []
+    assert build.preflight(tmp_path, log=logs.append,
+                           free_bytes=2 * 1024 ** 3, dirty=False) != 0
+    assert any("디스크" in m for m in logs)
+
+
+def test_preflight_warns_but_continues_on_dirty_tree(tmp_path):
+    """커밋 안 한 변경이 있으면 VERSION 이 거짓말을 한다 — 경고하되 막지는 않는다."""
+    logs = []
+    assert build.preflight(tmp_path, log=logs.append,
+                           free_bytes=500 * 1024 ** 3, dirty=True) == 0
+    assert any("커밋" in m for m in logs)
+
+
+# ── 옛 산출물 판별 ─────────────────────────────────────────────────────────
+def test_stale_paths_keeps_the_expensive_parts(tmp_path):
+    out = tmp_path / "dist" / "AOI_Verify"
+    for name in ("_internal", "app.new", "app.old", "python", "runtime", "결과"):
+        (out / name).mkdir(parents=True)
+    (out / "AOI_Verify.exe").write_bytes(b"x")
+    names = {p.name for p in build.stale_paths(out)}
+    assert names == {"_internal", "app.new", "app.old", "AOI_Verify.exe"}
+    # 다시 만들면 30분 걸리는 것과 사용자 산출물은 건드리지 않는다.
+    assert "python" not in names and "runtime" not in names and "결과" not in names
+
+
+# ── cp949 리다이렉트 ───────────────────────────────────────────────────────
+@pytest.mark.parametrize("rel", [
+    "scripts/build.py",
+    "scripts/internal/portable_build.py",
+    "scripts/make_release_zip.py",
+])
+def test_build_scripts_survive_cp949_redirect(rel):
+    """빌드 로그를 파일로 남기는 순간 UnicodeEncodeError 로 죽으면 안 된다.
+
+    한국어 Windows 에서 stdout 을 리다이렉트하면 인코딩이 cp949 로 떨어진다.
+    출력 문구의 '—' 같은 문자가 그대로 있으면 30분짜리 빌드가 로그를 남기려다 죽는다."""
+    text = (_ROOT / rel).read_text(encoding="utf-8")
+    assert "reconfigure(encoding=\"utf-8\"" in text, \
+        f"{rel} 에 stdout UTF-8 가드가 없다"
