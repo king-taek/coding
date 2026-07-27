@@ -1,8 +1,9 @@
 """Slot 불일치 수동 매핑 다이얼로그.
 
 한쪽에만 있는 슬롯(폴더)을 사용자가 직접 짝지어 준다.  KLA 경우엔 각 폴더의
-**판독된 slot명(파일명/OCR)** 과 **WaferID 헤더 크롭**을 함께 보여줘, 어떤 폴더인지
-눈으로 확인하며 짝지을 수 있다.  사진이 없는 폴더는 ‘사진파일 없음’ 으로 표시(선택 불가).
+**판독된 slot명(정보파일/OCR)** 과 **WaferID 헤더 크롭**을 함께 보여줘, 어떤 폴더인지
+눈으로 확인하며 짝지을 수 있다.  사진도 없고 판독도 안 된 폴더는 ‘사진파일 없음’ 으로
+표시(선택 불가) — 사진이 없어도 정보파일로 판독됐으면 미리보기만 없고 선택은 가능하다.
 
 상호작용:
   · 기준/검증에서 **각각 최대 1개** 선택(파란 테두리).  이미 선택한 걸 다시 누르면 해제.
@@ -11,7 +12,7 @@
   · 묶은 쌍을 더블클릭 → 다시 풀어 원래 리스트로 되돌림.
 
 ``ref_meta``/``val_meta`` (선택): ``{폴더명: {"slot","method","image"}}``.
-  method: ``filename``/``ocr``/``none``(사진없음)/``unread``(판독실패)/``plain``(일반)
+  method: ``info``(정보파일)/``ocr``/``none``(사진없음)/``unread``(판독실패)/``plain``(일반)
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ from .neon_button import NeonButton
 _CROP_W = 180
 _CROP_H = 60
 _THUMB_PX = 60
-_KLA_METHODS = ("ocr", "unread", "filename")
+_KLA_METHODS = ("ocr", "unread", "info")
 _GAP = 26                                   # 묶은 쌍 두 사진 사이 간격
 
 # 선택(클릭) 시 파란 테두리가 또렷하게.  미선택 항목에도 투명 테두리를 미리 둬서
@@ -47,7 +48,7 @@ _LIST_SEL_QSS = (
 )
 
 _METHOD_LABEL = {
-    "filename": "파일명",
+    "info": "정보파일",
     "ocr": "OCR",
     "none": "사진파일 없음",
     "unread": "판독 실패",

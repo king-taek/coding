@@ -25,10 +25,11 @@ from PyQt6.QtWidgets import (QApplication, QLabel, QMainWindow,
 
 from .. import config, i18n
 from . import theme
+from ..coords import kla_info
 from ..models import session as session_mod
 from ..models.result import FinalResult, MatchResult, MissEntry
 from ..models.slot import (ImageItem, ScanResult, drop_empty_unmatched,
-                           scan)
+                           push_one_sided_to_unmatched, scan)
 from ..utils import paths, wafer_id, wakelock
 from ..utils import prefs as _prefs
 from ..utils.prefs import AutomationLevel, EngineMode
@@ -621,12 +622,12 @@ class MainWindow(QMainWindow):
 
     def _resolve_and_merge_kla(self, sr: ScanResult, kla_side: str,
                                on_done) -> None:
-        """KLA(``kla_side``) 미매칭 폴더의 slot명(WaferID)을 **파일명 우선·OCR 폴백**
+        """KLA(``kla_side``) 미매칭 폴더의 slot명(WaferID)을 **정보파일 우선·OCR 폴백**
         으로 해석해 ref↔val 을 자동 병합한다.
 
         OCR 은 **메인 스레드를 막지 않도록 백그라운드 워커**에서 돌리므로, 이 메서드는
         OCR 이 끝난 뒤(또는 OCR 불필요 시 즉시) ``on_done()`` 콜백으로 다음 단계를
-        잇는다.  OCR 은 **파일명에서 WaferID 를 못 읽은 폴더에만** 돈다(불필요한 OCR 방지)."""
+        잇는다.  OCR 은 **정보파일에서 WaferID 를 못 읽은 폴더에만** 돈다(불필요한 OCR 방지)."""
         try:
             self._kla_resolve_impl(sr, kla_side, on_done)
         except Exception:
@@ -642,80 +643,100 @@ class MainWindow(QMainWindow):
                 return []
             return slot.ref_images if is_ref else slot.val_images
 
-        # 1) [파일명] KLA 쪽 폴더의 사진 파일명 prefix(첫 '_' 이전 전체)를 slot명
-        #    후보로 읽어 먼저 매치(형식 검증 없음).  비-KLA 쪽은 폴더명이 곧 slot명.
-        self._loading.show_overlay(i18n.KO.LOAD_KLA_FILENAME)
+        def dir_of(name: str, is_ref: bool):
+            slot = sr.slots.get(name)
+            if slot is None:
+                return None
+            return slot.ref_dir if is_ref else slot.val_dir
+
+        # 1) [정보파일] KLA 쪽 폴더의 정보파일 헤더에 있는 `WaferID "XXXX";` 를 읽어
+        #    slot명으로 쓴다.  사진과 무관하게 읽히므로 **사진 0장 폴더도 식별**된다.
+        #    비-KLA 쪽은 폴더명이 곧 slot명.
+        self._loading.show_overlay(i18n.KO.LOAD_KLA_INFO)
         QApplication.processEvents()
-        fn_ref: dict[str, str] = {}
-        fn_val: dict[str, str] = {}
+        info_ref: dict[str, str] = {}
+        info_val: dict[str, str] = {}
         img0_ref: dict[str, Path] = {}
         img0_val: dict[str, Path] = {}
         for n in list(sr.ref_only):
             ii = imgs_of(n, True)
             if ii:
                 img0_ref[n] = ii[0].path
-                if do_ref:
-                    w = wafer_id.folder_wafer_id_from_filenames(ii)
-                    if w:
-                        fn_ref[n] = w
+            if do_ref:
+                d = dir_of(n, True)
+                w = kla_info.read_wafer_id(d) if d else None
+                if w:
+                    info_ref[n] = w
         for n in list(sr.val_only):
             ii = imgs_of(n, False)
             if ii:
                 img0_val[n] = ii[0].path
-                if do_val:
-                    w = wafer_id.folder_wafer_id_from_filenames(ii)
-                    if w:
-                        fn_val[n] = w
-        wafer_id.merge_unmatched_by_wafer_id(sr, fn_ref, fn_val)
+            if do_val:
+                d = dir_of(n, False)
+                w = kla_info.read_wafer_id(d) if d else None
+                if w:
+                    info_val[n] = w
+        wafer_id.merge_unmatched_by_wafer_id(sr, info_ref, info_val)
 
         # 메타 작성 + 다음 단계 — OCR 결과(있으면)를 반영해 최종 메타를 만든다.
-        def build_meta(names, is_kla, fn, ocr, img0) -> dict:
+        # 판독에 성공한 폴더는 **사진이 없어도**(image=None) slot명을 갖는다 → 수동
+        # 매핑에서 미리보기만 없고 선택은 가능하다.
+        def build_meta(names, is_kla, info, ocr, img0) -> dict:
             meta: dict[str, dict] = {}
             for n in names:
-                if n not in img0:
-                    meta[n] = {"slot": None, "method": "none", "image": None}
+                img = img0.get(n)
+                if is_kla and n in info:
+                    meta[n] = {"slot": info[n], "method": "info", "image": img}
                 elif is_kla and n in ocr:
-                    meta[n] = {"slot": ocr[n], "method": "ocr", "image": img0[n]}
-                elif is_kla and n in fn:
-                    meta[n] = {"slot": fn[n], "method": "filename", "image": img0[n]}
+                    meta[n] = {"slot": ocr[n], "method": "ocr", "image": img}
+                elif img is None:
+                    meta[n] = {"slot": None, "method": "none", "image": None}
                 elif is_kla:
-                    meta[n] = {"slot": None, "method": "unread", "image": img0[n]}
+                    meta[n] = {"slot": None, "method": "unread", "image": img}
                 else:
-                    meta[n] = {"slot": None, "method": "plain", "image": img0[n]}
+                    meta[n] = {"slot": None, "method": "plain", "image": img}
             return meta
 
         def finalize(ocr_ref=None, ocr_val=None) -> None:
             ocr_ref = ocr_ref or {}
             ocr_val = ocr_val or {}
             # 병합된 slot명(WaferID) → KLA 하위폴더명 매핑(엑셀 B열 회색 표기용).
+            # 둘 다 KLA 면 같은 WaferID 에 ref/val 두 폴더명이 걸리므로 **병기**한다
+            # (덮어쓰면 검증 쪽만 남아 어느 폴더인지 알 수 없다).
             kla: dict[str, str] = {}
+
+            def add(wid, folder: str) -> None:
+                key = str(wid).upper()
+                prev = kla.get(key)
+                kla[key] = f"{prev} / {folder}" if prev and prev != folder else folder
+
             if do_ref:
-                for n, w in {**fn_ref, **ocr_ref}.items():
+                for n, w in {**info_ref, **ocr_ref}.items():
                     if w:
-                        kla[str(w).upper()] = n
+                        add(w, n)
             if do_val:
-                for n, w in {**fn_val, **ocr_val}.items():
+                for n, w in {**info_val, **ocr_val}.items():
                     if w:
-                        kla[str(w).upper()] = n
+                        add(w, n)
             self._kla_folders = kla
-            self._slot_meta_ref = build_meta(list(sr.ref_only), do_ref, fn_ref,
+            self._slot_meta_ref = build_meta(list(sr.ref_only), do_ref, info_ref,
                                              ocr_ref, img0_ref)
-            self._slot_meta_val = build_meta(list(sr.val_only), do_val, fn_val,
+            self._slot_meta_val = build_meta(list(sr.val_only), do_val, info_val,
                                              ocr_val, img0_val)
             self._ocr_worker = None
             on_done()
 
-        # 2) [OCR] **파일명에서 WaferID 를 못 읽은(형식이 아닌) 폴더에만** 헤더 OCR.
-        #    파일명이 WaferID 형식이면 그 값을 신뢰하고 OCR 을 건너뛴다(불필요한 OCR·
-        #    응답없음 방지).  OCR 은 백그라운드 워커에서 → UI 비차단.
+        # 2) [OCR] **정보파일에서 WaferID 를 못 읽은 폴더에만** 헤더 OCR (사진이 있어야
+        #    가능).  정보파일에서 읽혔으면 그 값을 신뢰하고 OCR 을 건너뛴다(불필요한
+        #    OCR·응답없음 방지).  OCR 은 백그라운드 워커에서 → UI 비차단.
         jobs: list = []
         if do_ref:
             for n in list(sr.ref_only):
-                if n in img0_ref and not wafer_id.looks_like_wafer_id(fn_ref.get(n)):
+                if n in img0_ref and n not in info_ref:
                     jobs.append(("ref", n, [it.path for it in imgs_of(n, True)]))
         if do_val:
             for n in list(sr.val_only):
-                if n in img0_val and not wafer_id.looks_like_wafer_id(fn_val.get(n)):
+                if n in img0_val and n not in info_val:
                     jobs.append(("val", n, [it.path for it in imgs_of(n, False)]))
 
         if jobs and wafer_id.ocr_available():
@@ -731,7 +752,10 @@ class MainWindow(QMainWindow):
 
             def _on_ocr_done(ocr_ref: dict, ocr_val: dict) -> None:
                 try:
-                    wafer_id.merge_unmatched_by_wafer_id(sr, ocr_ref, ocr_val)
+                    # 1차(정보파일) 결과도 **함께** 넘긴다 — OCR dict 만 넘기면 정보파일로
+                    # 읽은 쪽의 WaferID 키가 사라져 같은 WaferID 인데도 병합에 실패한다.
+                    wafer_id.merge_unmatched_by_wafer_id(
+                        sr, {**info_ref, **ocr_ref}, {**info_val, **ocr_val})
                 finally:
                     finalize(ocr_ref, ocr_val)
 
@@ -840,12 +864,13 @@ class MainWindow(QMainWindow):
             sr.val_only = [n for n in sr.val_only if n in sel]
 
         self._scan = sr
-        # 사진이 한 장도 없는 한쪽 전용 폴더는 매칭 대상에서 제외(그냥 넘어감).
-        drop_empty_unmatched(sr)
+        # ※ 사진 0장 폴더 정리(drop_empty_unmatched)는 **KLA 해석 뒤**(_after_slot_resolved)
+        #   로 미룬다 — 정보파일은 사진이 없어도 WaferID 를 주므로, 여기서 미리 버리면
+        #   짝지을 수 있는 폴더를 놓친다.
 
         # slot(폴더)명이 ref/val 간 일치하지 않으면, KLA 장비의 위치(기준/검증)를
         # 정한다 — 호기가 'K-n' 이면 그 쪽이 KLA(묻지 않음), 아니면 사용자에게 묻는다.
-        # KLA 쪽은 파일명(첫 '_' 이전)→OCR 순으로 WaferID 를 읽어 자동 매칭하고,
+        # KLA 쪽은 정보파일→OCR 순으로 WaferID 를 읽어 자동 매칭하고,
         # 나머지는 수동 매핑.  '공통 slot 없음' 검사는 매칭 확정 이후로 미룬다.
         if sr.ref_only or sr.val_only:
             side = self._kla_machine_side(inp)
@@ -860,8 +885,13 @@ class MainWindow(QMainWindow):
 
     def _after_slot_resolved(self, sr: ScanResult) -> None:
         """slot 매칭 확정 후 — 남은 미매칭은 수동 매핑, 그 다음 썸네일 단계."""
+        # 사진이 한 장도 없는데 짝도 못 찾은 폴더는 손댈 게 없으므로 제외(그냥 넘어감).
+        drop_empty_unmatched(sr)
         if sr.ref_only or sr.val_only:
             self._resolve_slot_mismatch(sr)
+        # 짝은 찾았지만 한쪽 사진이 0장인 슬롯을 '기준/검증 전용' 으로 되돌려 결과에 남긴다
+        # (그대로 두면 common 에도 *_only 에도 없어 결과에서 통째로 사라진다).
+        push_one_sided_to_unmatched(sr)
         common = sr.common_slot_names
         if not common:
             self._loading.hide_overlay()

@@ -27,10 +27,16 @@ class ImageItem:
 
 @dataclass
 class Slot:
-    """한 슬롯에 대응하는 기준/검증 이미지 목록."""
+    """한 슬롯에 대응하는 기준/검증 이미지 목록.
+
+    ``ref_dir``/``val_dir`` 는 원본 폴더 경로다 — **사진이 한 장도 없는 폴더**는 이미지
+    경로에서 폴더를 역산할 수 없으므로, KLA 정보파일에서 WaferID 를 읽으려면 이 경로가 필요하다.
+    """
     name: str
     ref_images: list[ImageItem] = field(default_factory=list)
     val_images: list[ImageItem] = field(default_factory=list)
+    ref_dir: Path | None = None
+    val_dir: Path | None = None
 
     @property
     def has_both(self) -> bool:
@@ -144,7 +150,8 @@ def scan(ref_root: Path, val_root: Path, progress=None) -> ScanResult:
             ref_only.append(name)
         elif val_d and not ref_d:
             val_only.append(name)
-        slots[name] = Slot(name=name, ref_images=ref_imgs, val_images=val_imgs)
+        slots[name] = Slot(name=name, ref_images=ref_imgs, val_images=val_imgs,
+                           ref_dir=ref_d, val_dir=val_d)
         if progress is not None:
             try:
                 progress(idx, total)
@@ -164,3 +171,23 @@ def drop_empty_unmatched(sr: ScanResult) -> None:
                    if n in sr.slots and sr.slots[n].ref_images]
     sr.val_only = [n for n in sr.val_only
                    if n in sr.slots and sr.slots[n].val_images]
+
+
+def push_one_sided_to_unmatched(sr: ScanResult) -> None:
+    """사진이 **한쪽에만** 있는 슬롯을 ``ref_only``/``val_only`` 로 옮겨 결과에 남긴다.
+
+    KLA 정보파일로 짝은 찾았지만 한쪽 폴더에 사진이 0장이면 ``has_both`` 가 False 라
+    ``common_slot_names`` 에도, ``ref_only``/``val_only`` 에도 없어 **결과에서 통째로
+    사라진다**.  이를 ‘기준 전용/검증 전용’ 으로 되돌려 (병합된) slot명으로 보고되게 한다.
+
+    양쪽 다 사진이 없는 슬롯은 검증할 것이 없으므로 그대로 둔다.
+    ``ScanResult`` 를 직접 수정한다.
+    """
+    known = set(sr.ref_only) | set(sr.val_only)
+    for name, slot in sr.slots.items():
+        if name in known or slot.has_both:
+            continue
+        if slot.ref_images:
+            sr.ref_only.append(name)
+        elif slot.val_images:
+            sr.val_only.append(name)
