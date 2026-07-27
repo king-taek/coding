@@ -74,9 +74,23 @@ def deps_installed(root: Path, req_text: Optional[str]) -> bool:
         return False
 
 
+def req_lines(req_text: Optional[str]) -> List[str]:
+    """requirements 에서 **실제 요구사항 줄만** 뽑는다(주석·빈 줄 제거).
+
+    주석이나 빈 줄만 바뀐 것을 '의존성이 바뀌었다'고 오인하면, exe 배포에서는 업데이트가
+    통째로 막히고(설치 불가 판정) 온라인 배포에서는 불필요한 재설치가 돈다."""
+    out: List[str] = []
+    for line in (req_text or "").splitlines():
+        s = line.split("#", 1)[0].strip()
+        if s:
+            out.append(s)
+    return out
+
+
 def _req_fingerprint(req_text: str) -> str:
     import hashlib
-    return hashlib.sha1(req_text.strip().encode("utf-8")).hexdigest()
+    norm = "\n".join(req_lines(req_text))
+    return hashlib.sha1(norm.encode("utf-8")).hexdigest()
 
 
 def write_deps_marker(root: Path, req_text: Optional[str]) -> None:

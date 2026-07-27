@@ -307,6 +307,11 @@ UPDATE_AVAILABLE_BODY = "새 버전이 있습니다. 지금 업데이트할까�
 UPDATE_UNKNOWN_CURRENT = "최신 버전을 받아 적용할까요?"
 UPDATE_DOWNLOADING = "업데이트 다운로드 중…"
 UPDATE_DONE_RESTART = "업데이트가 적용되었습니다.\n프로그램을 종료합니다. 다시 실행해 주세요."
+# exe 배포본은 실행 중인 app 폴더를 바꿀 수 없어 새 버전을 받아두기만 하고, 다음 실행 때
+# 런처가 교체한다.  '적용되었다' 고 하면 사실과 다르므로 문구를 나눈다.
+UPDATE_DONE_RESTART_STAGED = (
+    "새 버전을 받았습니다.\n프로그램을 종료합니다. 다시 실행하면 적용됩니다."
+)
 # 이번 업데이트로 필요한 패키지 목록(requirements.txt)이 바뀐 경우의 추가 안내.
 # 자동 업데이트는 앱 소스만 바꾸고 **의존성은 다시 설치하지 않는다**(번들 런타임 보존).
 UPDATE_DEPS_CHANGED = (
@@ -315,6 +320,15 @@ UPDATE_DEPS_CHANGED = (
     " · 포터블: 앱 폴더의 python\\python.exe -m pip install -r requirements.txt 실행"
     "(또는 최신 포터블 빌드 사용)\n"
     " · 개발/소스: git pull 후 scripts\\run_this_before.py 를 다시 실행"
+)
+# exe 배포본에서 이번 업데이트가 **새 패키지를 요구해** 적용을 포기한 경우.
+# 사내망은 PyPI 가 막혀 있어 앱이 패키지를 설치할 수 없다 — 코드만 바꾸면 앱이 깨지므로
+# 구버전을 그대로 유지하고, 전달자에게 무엇을 받아야 하는지 정확히 알려준다.
+UPDATE_NEEDS_NEW_BUNDLE = (
+    "이번 업데이트는 새 패키지가 필요해 적용하지 않았습니다.\n"
+    "지금 버전은 그대로 사용하실 수 있습니다.\n\n"
+    "[받아야 할 것] 관리자에게 새 배포본 'AOI_Verify' 폴더 전체(zip)를 요청하세요.\n"
+    "app 폴더만 바꾸면 앱이 실행되지 않습니다."
 )
 UPDATE_FAILED = "업데이트에 실패했습니다. 잠시 후 다시 시도해 주세요."
 UPDATE_CHECKING = "업데이트 확인 중…"

@@ -64,15 +64,23 @@ def _git_head(repo_root: Path) -> tuple[str, str]:
 
 
 def run_build(repo_root: Path, py_url: str,
-              run: Callable = None, log: Callable = print) -> int:
-    """포터블 빌드 수행.  ``run`` 은 명령 실행기(주입 가능).  반환: 0=성공."""
+              run: Callable = None, log: Callable = print,
+              out_dirname: str = OUT_DIRNAME,
+              bats: tuple = ("run_aoi.bat", "run_aoi_debug.bat", "update_app.bat"),
+              torch_home: bool = False) -> int:
+    """포터블 빌드 수행.  ``run`` 은 명령 실행기(주입 가능).  반환: 0=성공.
+
+    ``out_dirname``/``bats``/``torch_home`` 은 'exe + app 폴더' 빌드가 이 함수를 그대로
+    재사용하기 위한 것이다(레이아웃이 같다 — ``python\\`` + ``app\\``).  exe 빌드는
+    산출물 폴더가 ``dist/AOI_Verify`` 이고, 병합식 ``update_app.bat`` 은 동봉하지 않으며
+    (하는 일이 옛 미러링 버그 그 자체다), 모델 가중치를 함께 받아 둔다."""
     if run is None:
         def run(cmd, cwd=None):
             log(">> " + " ".join(str(c) for c in cmd))
             return subprocess.call([str(c) for c in cmd],
                                    cwd=str(cwd) if cwd else None)
 
-    out = repo_root / OUT_DIRNAME
+    out = repo_root / out_dirname
     out.mkdir(parents=True, exist_ok=True)
     ppy = portable_python(out)
 
@@ -111,17 +119,35 @@ def run_build(repo_root: Path, py_url: str,
                           / "verify_no_forbidden.py")]) != 0:
         return 1
 
+    # 이 번들이 **어떤 requirements 로 만들어졌는지** 표식을 남긴다.  자동 업데이트가
+    # 새 requirements 를 받았을 때 '동봉된 python\ 으로 감당되는가' 를 이걸로 판단한다
+    # (사내망은 PyPI 가 막혀 사용자 PC 에서 설치가 불가능하다).  표식이 없으면 판단
+    # 근거가 없어 업데이트를 막지 못한 채 반쪽 상태가 된다.
+    _write_deps_marker(repo_root, out)
+
+    # 모델 가중치 동봉(exe 배포용) — 첫 매칭 때 download.pytorch.org 에서 받게 돼 있는데
+    # 사내망은 막혀 있을 수 있다.  app\ 바깥(runtime\torch)에 둬 업데이트 교체에 안 쓸린다.
+    if torch_home:
+        log("       fetching torchvision weights (bundled, ~55 MB) ...")
+        if run([str(ppy), "-c", _TORCH_FETCH_SRC, str(out / "runtime" / "torch")]) != 0:
+            log("[FAILED] could not fetch model weights — 사내망 PC 에서 매칭이 "
+                "동작하지 않을 수 있습니다.")
+            return 1
+
     # 3) 앱 소스 + 리소스 + 런처 스크립트 복사.
     log("[3/4] copying app source ...")
     app = out / "app"
     app.mkdir(parents=True, exist_ok=True)
     _copytree(repo_root / "aoi_verification", app / "aoi_verification")
     shutil.copy2(repo_root / "main.py", app / "main.py")
+    # requirements.txt 도 함께 둔다 — 업데이트가 새 것과 비교할 대상이자, 수동 갱신
+    # 안내(python\python.exe -m pip install -r requirements.txt)가 실제로 동작하게 한다.
+    shutil.copy2(repo_root / "requirements.txt", app / "requirements.txt")
     # 엑셀 템플릿(dev/*.xlsx)을 app 루트로 — template_path 가 찾는다.
     for xlsx in (repo_root / "dev").glob("*.xlsx"):
         shutil.copy2(xlsx, app / xlsx.name)
     scripts = repo_root / "scripts"
-    for bat in ("run_aoi.bat", "run_aoi_debug.bat", "update_app.bat"):
+    for bat in bats:
         src = scripts / bat
         if src.exists():
             shutil.copy2(src, out / bat)
@@ -137,8 +163,8 @@ def run_build(repo_root: Path, py_url: str,
     branch = branch or _default_branch_name()
     (app / "VERSION").write_text(version_stamp(sha, branch), encoding="utf-8")
     log(f"       VERSION: {branch or '(기본)'} @ {sha or '(미상)'}")
-    log("[4/4] done. Zip the whole dist_portable/ folder; on target PC unzip "
-        "and double-click run_aoi.bat (no Python needed).")
+    log(f"[4/4] done. Zip the whole {out_dirname}/ folder; on target PC unzip "
+        "and run it (no Python needed).")
     return 0
 
 
@@ -146,3 +172,33 @@ def _copytree(src: Path, dst: Path) -> None:
     if dst.exists():
         shutil.rmtree(dst, ignore_errors=True)
     shutil.copytree(src, dst)
+
+
+def _write_deps_marker(repo_root: Path, out: Path) -> None:
+    """설치 루트에 '이 requirements 로 패키지를 깔았다' 표식을 남긴다.
+
+    앱의 ``bootstrap`` 과 **같은 함수**를 쓴다 — 지문 계산이 두 곳에 있으면 어긋난다."""
+    try:
+        import sys
+        root = Path(__file__).resolve().parents[2]
+        if str(root) not in sys.path:
+            sys.path.insert(0, str(root))
+        from aoi_verification.app.utils import bootstrap
+        req = (repo_root / "requirements.txt").read_text(encoding="utf-8")
+        bootstrap.write_deps_marker(out, req)
+    except Exception:
+        pass
+
+
+# 번들 파이썬 안에서 실행되는 코드 — torchvision 가중치를 지정 폴더로 미리 받아 둔다.
+# (앱의 embedder 가 쓰는 것과 **같은** 가중치: MobileNetV3-Small · ResNet18)
+_TORCH_FETCH_SRC = (
+    "import os, sys\n"
+    "d = sys.argv[1]\n"
+    "os.makedirs(d, exist_ok=True)\n"
+    "os.environ['TORCH_HOME'] = d\n"
+    "from torchvision import models as m\n"
+    "m.mobilenet_v3_small(weights=m.MobileNet_V3_Small_Weights.IMAGENET1K_V1)\n"
+    "m.resnet18(weights=m.ResNet18_Weights.IMAGENET1K_V1)\n"
+    "print('weights cached in', d)\n"
+)

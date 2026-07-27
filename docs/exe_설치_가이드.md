@@ -8,12 +8,20 @@
 
 | 방식 | 산출물 | 용량 | 인터넷 | 추천 상황 |
 |---|---|---|---|---|
-| **A. 온라인 launcher exe** | `AOI_Verify_Online.exe` 1개 | 수십 MB | **첫 실행 시 필요** | 기본 권장 — 전달이 가장 간단 |
-| **B. 포터블 폴더** | `dist_portable\` 폴더 | ~1.3~2.0GB | 불필요 | 폐쇄망(인터넷 차단) PC |
-| **C. 단독 exe(PyInstaller)** | `dist\AOI_Verify\` 폴더 | ~1.5GB | 불필요 | 폐쇄망 + 단일 exe 형태가 꼭 필요할 때 |
+| **C. exe + app 폴더** | `dist\AOI_Verify\` 폴더 | ~1.5GB | 불필요 | **기본 권장** — 파이썬 미설치 PC, 자동 업데이트 완전 동작 |
+| **B. 포터블 폴더** | `dist_portable\` 폴더 | ~1.3~2.0GB | 불필요 | exe 가 회사 백신에 막힐 때(`.bat` 로 실행) |
+| **A. 온라인 launcher exe** | `AOI_Verify_Online.exe` 1개 | 수십 MB | **첫 실행 시 필요** | ⚠️ **사내망에서는 사용 불가** — 첫 실행에 PyPI 접속이 필요한데 막혀 있다 |
 
 - **공통 전제(빌드하는 PC)**: Windows + 파이썬 3.9+ 설치 + 인터넷. 빌드는 저장소 루트에서 실행.
-- **세 방식 모두 자동 업데이트가 동작**한다(앱이 쓰기 가능한 폴더에 설치되므로). 상세는 4절.
+- **자동 업데이트는 B·C 에서 동작**한다. 상세는 4절.
+- **설치 경로는 짧게** 잡는 것을 권한다(예: `C:\AOI_Verify`). 한글 이름이 섞인 깊은 경로는
+  Windows 의 260자 제한에 걸릴 수 있다.
+
+> **왜 '앱 코드를 exe 안에 넣지 않는가'** — 예전 단독 exe 는 앱 전체를 exe 안에 얼려서 넣었다.
+> 그러면 자동 업데이트가 새 `.py` 를 디스크에 잘 써 넣어도 **실행 중인 파이썬은 exe 안의 옛
+> 코드를 읽는다**. 그래서 "업데이트가 적용되었습니다" 라고 하고도 바뀌지 않거나, 새로 추가된
+> 모듈만 반영돼 **새 코드가 옛 코드를 호출**하는 상태가 됐다. 지금 구조는 exe 에 앱 코드가
+> 한 줄도 없고, 바뀌는 것은 전부 `app\` 폴더에 파일로 놓여 있다.
 
 ---
 
@@ -78,39 +86,70 @@ REM 또는: scripts\internal\make_portable.bat
 
 ---
 
-## C. 단독 exe — PyInstaller(전부 동봉)
+## C. exe + app 폴더 (권장)
 
-의존성까지 모두 포함한 단독 실행형이 꼭 필요할 때(폐쇄망 + 단일 exe 형태 요구 등).
+얇은 런처 exe 하나와, 업데이트되는 것들을 담은 `app\` 폴더를 함께 전달한다.
+**exe 에는 앱 코드가 들어 있지 않다** — 그래서 자동 업데이트가 온전히 동작한다.
 
 ### C-1. 빌드 (전달하는 사람, 1회)
 ```powershell
-python scripts\build.py windows
-REM 또는: scripts\internal\build_windows.bat
+python scripts\build.py exe
+REM 또는: scripts\internal\build_exe.bat
 ```
-- 산출물: **`dist\AOI_Verify\`** 폴더(통째로 zip 배포, ~1.5GB). 진입 exe 는 `AOI_Verify.exe`.
-- 설정 스펙: `scripts\internal\aoi_verification.spec`(스타일시트 · `dev\양식.xlsx` 자동 동봉).
+- 산출물: **`dist\AOI_Verify\`** 폴더(통째로 zip 배포, ~1.5GB).
+  ```
+  AOI_Verify\
+    AOI_Verify.exe     ← 얇은 런처(수 MB). 앱 코드 0줄, 업데이트되지 않는다.
+    python\            ← 번들 CPython + 모든 의존성 (무겁고 거의 안 바뀜)
+    runtime\torch\     ← 모델 가중치(동봉) — 사내망에서 다운로드가 막혀도 매칭이 된다
+    app\               ← ★ 자동 업데이트가 바꾸는 전부 (앱 코드·리소스·양식.xlsx·VERSION)
+    결과\               ← 엑셀 출력 (app\ 바깥이라 업데이트에 안 쓸린다)
+    run_aoi.bat        ← exe 가 백신에 막힐 때의 대체 실행
+    run_aoi_debug.bat  ← 오류 진단용(콘솔 + traceback)
+  ```
+- 빌드가 하는 일: 런처 exe 를 얼리고(`scripts\internal\exe_launcher.spec`) → 번들 CPython 에
+  의존성 설치 → 모델 가중치 동봉 → 앱 소스 복사 → `VERSION` 스탬프 → **산출물 검증**.
+- 검증은 특히 **`_internal\` 폴더가 없는지**(=앱이 exe 안에 얼려지지 않았는지)와, 번들
+  파이썬으로 **실제 앱 import 가 되는지**를 확인한다.
 
 ### C-2. 설치/실행 (받는 사람)
-1. 받은 zip 을 압축 해제.
-2. `AOI_Verify\AOI_Verify.exe` **더블클릭**.
+1. 받은 zip 을 **짧은 경로**에 압축 해제(예: `C:\AOI_Verify`).
+2. `AOI_Verify\AOI_Verify.exe` **더블클릭**(파이썬 설치 불필요).
 3. 첫 실행 경고(미서명) 시 *추가 정보 → 실행*.
+4. 앱이 안 켜지면 `run_aoi_debug.bat` 로 콘솔의 오류 메시지를 확인.
 
-> 참고: PyInstaller 부트로더가 회사 백신/보안 정책에 막혀 빌드·실행이 안 되는 경우가 있다.
-> 그럴 땐 **A(온라인)** 또는 **B(포터블)** 를 쓴다.
+> 참고: PyInstaller 부트로더가 회사 백신/보안 정책에 막히는 경우가 있다. 그럴 땐 **B(포터블)**
+> 를 쓴다(같은 폴더 구조에서 `run_aoi.bat` 으로 실행). 참고로 이 exe 는 **작고 다시 빌드해도
+> 잘 바뀌지 않으므로**, 백신 예외 등록이 업데이트마다 무효화되지 않는다.
+
+### C-3. 기존 '단독 exe' 사용자 이관
+옛 배포본은 앱이 exe 안에 얼려 있어 **제자리 이관이 불가능하다.** 새 zip 을 받아야 한다.
+
+1. 새 zip 을 **다른 폴더**에 압축 해제(예: `C:\AOI_Verify`).
+2. **옛 결과 파일 회수** — 옛 결과는 `…\AOI_Verify\_internal\결과\` 에 있다.
+   이 폴더 내용을 새 폴더의 `결과\` 로 옮긴다. ← 안 옮기면 잃는다.
+3. 설정·캐시는 옮길 것이 없다(`%USERPROFILE%\.aoi_verification_cache` 에 그대로 있어 이어진다).
+4. 옛 `AOI_Verify\` 폴더를 삭제한다.
 
 ---
 
-## 4. 자동 업데이트 (세 방식 공통)
+## 4. 자동 업데이트
 
-- 앱은 **쓰기 가능한 폴더**에 설치된다(A: `%LOCALAPPDATA%\AOI Recipe Verification`, B/C: 배포 폴더의 `app\`).
-  그래서 **앱 내 자동 업데이트가 그 폴더를 갱신**한다 — exe/폴더를 **다시 배포할 필요가 없다**.
+- 바뀌는 것은 전부 **`app\` 폴더**에 파일로 있다(C·B 공통). exe/런타임/가중치는 그대로 두고
+  이 폴더만 갱신하므로 — **평소에는 폴더를 다시 배포할 필요가 없다.**
 - 동작: 앱 시작 시 GitHub 브랜치 HEAD 와 동봉된 `VERSION` 을 비교해 새 버전이 있으면 받아
-  앱 폴더에 미러링하고 재시작을 안내한다(개발 전용 `dev/` 는 제외, `dev\양식.xlsx` 만 앱 루트로 복사).
-  `VERSION` 이 없는 배포본이라도 앱이 초기 파일을 만들어 **자동 업데이트가 항상 동작**한다
+  **새 트리를 통째로 만들고, 검증을 통과해야만 적용**한다(개발 전용 `dev/` 는 제외,
+  `dev\양식.xlsx` 만 앱 루트로 복사). 상류에서 지운 파일은 사용자 폴더에서도 사라진다.
+- **C(exe)**: 실행 중인 `app\` 을 건드리지 않고 `app.new\` 로 받아두기만 하며, **다음 실행 때
+  런처가 교체**한다. 교체가 중간에 끊겨도 런처가 복구하고, **어떤 실패든 구버전이 살아남는다.**
+- **B(포터블)**: 런처가 없으므로 제자리에 항목 단위로 적용한다(중간 실패 시 전부 되돌림).
+- 실패하면 `VERSION` 도 바뀌지 않아 다음 실행에 다시 시도한다.
+- `VERSION` 이 없는 배포본이라도 앱이 초기 파일을 만들어 **자동 업데이트가 항상 동작**한다
   (첫 회는 '현재 버전 미상' 안내 후 최신을 받고, 그 뒤로는 정상 비교).
-- **의존성(requirements.txt) 변경**은 자동 재설치하지 않고 안내만 한다.
-  - A(온라인): 다음 실행 때 launcher 가 바뀐 requirements 를 감지해 자동으로 pip 재설치한다.
-  - B/C(동봉): 무거운 런타임은 그대로라, 패키지 추가가 필요하면 새 빌드를 한 번 더 배포한다.
+- **의존성(requirements.txt) 변경**은 자동 재설치하지 않는다. 사내망은 PyPI 가 막혀 있다.
+  - **C(exe)**: 새 패키지가 필요하면 **업데이트를 적용하지 않고** 구버전을 유지한 채,
+    '새 배포본 `AOI_Verify` 폴더 **전체**를 받으라' 고 안내한다. `app\` 만 바꾸면 앱이 깨진다.
+  - **B(포터블)**: 안내만 한다 — 새 빌드를 한 번 더 배포해야 한다.
 - 자세한 규칙·제외 목록은 `docs/업데이트_동작.md`.
 
 ---
@@ -119,12 +158,14 @@ REM 또는: scripts\internal\build_windows.bat
 
 | 파일 | 역할 |
 |---|---|
-| `scripts\build.py` | 빌드 진입점(파이썬) — `online`/`portable`/`windows` |
+| `scripts\build.py` | 빌드 진입점(파이썬) — `exe`/`portable`/`online`/`verify` |
+| `scripts\exe_launcher.py` | **C. 런처 진입점** — 대기 중 업데이트 교체 + 앱 실행. 앱 코드 0줄 |
+| `scripts\internal\build_exe.bat` · `exe_launcher.spec` | C. exe + app 폴더 빌드 |
+| `scripts\internal\portable_build.py` · `make_portable.bat` | B·C. 런타임·앱 배치(C 가 재사용) |
 | `scripts\internal\build_online.bat` · `online.spec` | A. 온라인 launcher exe 빌드(.bat 은 build.py 래퍼) |
 | `scripts\launcher.py` | A. exe 진입점(앱 다운로드+pip 설치+실행) |
-| `scripts\internal\portable_build.py` · `make_portable.bat` | B. 포터블 폴더 빌드 |
-| `scripts\internal\build_windows.bat` · `aoi_verification.spec` | C. 단독 exe 빌드 |
 | `aoi_verification\app\utils\bootstrap.py` | A. 부트스트랩 핵심 로직(데이터 폴더·의존성 판단) |
-| `scripts\run_aoi.bat` · `update_app.bat` | B/C. 사용자 실행·수동 갱신 |
+| `scripts\run_aoi.bat` · `run_aoi_debug.bat` | B/C. 사용자 실행·진단 |
+| `scripts\update_app.bat` | B. 수동 갱신(병합식이라 C 에는 동봉하지 않는다) |
 
 > 빌드·내부 도구는 `scripts\internal\` 에, 사용자가 직접 실행하는 것은 `scripts\` 에 둔다.

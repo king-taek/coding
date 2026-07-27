@@ -145,20 +145,39 @@ python scripts\build.py online
 - 사용자 경험: 더블클릭 → 첫 실행은 다운로드/설치로 시간이 걸리고(수백 MB), 이후는 빠릅니다.
 - **자동 업데이트 그대로 동작:** 앱이 쓰기 가능한 `%LOCALAPPDATA%\AOI Recipe Verification` 에 설치되므로,
   앱 내 자동 업데이트가 그 폴더를 갱신합니다(exe 재배포 불필요).
-- **주의:** 인터넷이 막힌 폐쇄망이면 이 방식은 첫 설치가 불가합니다 → 아래 포터블/단독 exe 를 쓰세요.
+- **⚠️ 사내망에서는 사용할 수 없습니다.** 첫 실행에 PyPI(pip) 접속이 필요한데 막혀 있습니다.
+  → 아래 **3.9 (exe + app 폴더)** 를 쓰세요.
 
-### 3.9 (선택) 단독 .exe — PyInstaller(전부 동봉)
+### 3.9 (권장) exe + app 폴더 — 파이썬 없는 PC, 자동 업데이트 완전 동작
 
-인터넷이 막힌 환경 등에서 의존성까지 모두 포함한 단독 실행형이 필요할 때.  **Windows(파이썬 설치) PC 에서**:
+**얇은 런처 exe** 하나와, 업데이트되는 것들을 담은 **`app\` 폴더**를 함께 전달합니다.
+**Windows(파이썬 설치 + 인터넷) PC 에서**:
 
 ```powershell
-python scripts\build.py windows
+python scripts\build.py exe
 ```
 
-- 산출물: `dist\AOI_Verify\AOI_Verify.exe` (폴더 통째로 zip 배포, ~1.5GB). 설정은
-  `scripts\internal\aoi_verification.spec`(스타일시트·`dev\양식.xlsx` 자동 동봉).
+- 산출물 `dist\AOI_Verify\` 구조(폴더 통째로 zip 배포, ~1.5GB):
+  ```
+  AOI_Verify\
+    AOI_Verify.exe   ← 얇은 런처(수 MB). 앱 코드 0줄, 업데이트되지 않음
+    python\          ← 번들 CPython + 의존성 [무거움, 거의 불변]
+    runtime\torch\   ← 모델 가중치 동봉(사내망에서 다운로드가 막혀도 매칭 가능)
+    app\             ← ★ 자동 업데이트가 바꾸는 전부
+    결과\             ← 엑셀 출력 (app\ 바깥 — 업데이트에 안 쓸림)
+    run_aoi.bat / run_aoi_debug.bat  ← exe 가 백신에 막힐 때 대체 실행·진단
+  ```
+- **왜 앱을 exe 에 안 넣나:** 예전 단독 exe 는 앱을 exe 안에 얼려 넣어서, 자동 업데이트가
+  새 파일을 디스크에 써도 **실행 중인 파이썬이 exe 안의 옛 코드를 읽었습니다.** "업데이트
+  되었습니다" 라고 하고도 안 바뀌거나, 새 모듈만 반영돼 **새 코드가 옛 코드를 호출**하는
+  상태가 됐습니다. 지금은 바뀌는 것이 전부 `app\` 에 파일로 있습니다.
+- **업데이트 적용 시점:** 실행 중에는 `app.new\` 로 받아만 두고, **다음 실행 때 런처가 교체**
+  합니다. 교체가 중간에 끊겨도 복구하며, 어떤 실패든 **구버전이 살아남습니다.**
+- **설치 경로는 짧게**(예: `C:\AOI_Verify`) — 깊은 한글 경로는 260자 제한에 걸릴 수 있습니다.
 - **첫 실행 경고:** 미서명 exe 는 SmartScreen/Defender 가 “알 수 없는 게시자” 로
   경고할 수 있습니다 — *추가 정보 → 실행*.  경고 제거가 필요하면 코드 서명(EV 권장).
+- 빌드 후 `verify` 가 자동 실행돼 **`_internal\` 부재**(=앱이 exe 안에 안 들어갔는지)와
+  번들 파이썬의 **실제 앱 import** 를 확인합니다: `python scripts\build.py verify`.
 
 ## 4. 폴더 구조 가정
 

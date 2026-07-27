@@ -113,15 +113,42 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   - `updater._resolve_branch` 는 빈 값·`claude/` 접두·옛 기본(`main`/`master`)을 기본 브랜치로
     정규화한다. `updater._latest_self_healing` 은 추적 브랜치가 404 면 기본 브랜치로 한 번 더
     시도하고 '실제 사용한 브랜치'를 반환한다(다운로드도 그 브랜치로 가게). 이 자기교정을 깨지 마라.
-- 업데이트는 **앱 구동에 필요한 것을 전부** 받아 앱 폴더로 **미러링**한다(새 모듈/리소스 누락 방지).
+- 업데이트는 **앱 구동에 필요한 것을 전부** 받아 **새 트리를 통째로 만들어 교체**한다
+  (덮어쓰기 미러링이 아니다 — 그래야 상류에서 지운 파일이 실제로 사라진다).
   - 제외: 개발 전용·대용량 데이터(`dev/` 등), VCS/캐시(`.git`·`.pytest_cache`·`__pycache__`),
     무거운 `python/` 런타임. 목록은 `updater._UPDATE_SKIP_TOP` 에서 관리한다.
   - 새 최상위 폴더/파일이 **구동에 필요하면 자동 포함**된다(별도 작업 불필요). 구동에 불필요한
     대용량/개발 전용이면 `_UPDATE_SKIP_TOP` 에 추가한다.
-- **의존성 패키지는 자동 재설치하지 않는다.** `requirements.txt` 변경은 감지(`deps_changed()`)
-  해 사용자에게 '수동 갱신' 안내만 한다(`run_this_before.py` 재실행 / 번들 python 에 pip).
-  자세한 동작은 `docs/업데이트_동작.md`.
-- 자동 적용은 **포터블 빌드에서만**(개발/git 작업트리는 `is_git_checkout` 으로 차단).
+- **깨지 않아야 할 불변식 3개** (이걸 어겨서 '업데이트했다는데 안 바뀌는' 사고가 났다):
+  - **런처 exe(`scripts/exe_launcher.py`)에는 앱 코드를 한 줄도 넣지 않는다.** PyInstaller 의
+    `FrozenImporter` 가 exe 안 PYZ 사본으로 디스크의 최신 사본을 **가린다**. `exe_launcher.spec` 의
+    `hiddenimports` 는 비어 있어야 하고, `aoi_verification` 은 `excludes` 에 있어야 하며,
+    `Analysis(pathex=[])` 로 저장소 루트를 주지 않는다. `build.py` 의 verify 가 `_internal/`
+    부재와 exe 용량으로 이를 재확인한다.
+  - **`app.new` 는 완성된 트리일 때만 존재한다.** 만드는 중에는 `app.new.part` 이고, 검증을
+    통과한 뒤 rename 한다 — 그 rename 이 곧 '준비 완료' 신호다(별도 marker 파일을 쓰지 마라).
+  - **`_write_version` 은 스테이징 트리에 쓴다**(`_write_version_to`). 살아있는 `app/VERSION` 에
+    미리 쓰면 교체가 보류·실패했을 때 앱이 '최신입니다' 라며 구버전을 영원히 실행한다.
+- **의존성 패키지는 자동 재설치하지 않는다.** 모드별로 동작이 다르다:
+  - 포터블/온라인: `requirements.txt` 변경을 감지(`deps_changed()`)해 '수동 갱신' 안내만 한다.
+  - **exe 배포**: 사내망은 PyPI 가 막혀 있어 설치 자체가 불가능하다. 새 패키지가 필요하면
+    **업데이트를 적용하지 않고**(`deps_blocked()`) 구버전을 유지한 채 안내한다 — 코드만 새것이
+    되면 앱이 깨지기 때문이다. 판단 근거는 빌드 때 남기는 `.deps_installed` 표식이다.
+  - 자세한 동작은 `docs/업데이트_동작.md`.
+- 자동 적용은 **포터블·exe 빌드에서만**(개발/git 작업트리는 `is_git_checkout` 으로 차단).
+  exe 빌드에서는 앱이 스테이징만 하고, **다음 실행 때 런처가 교체**한다(실행 중인 앱은 자기가
+  돌아가는 폴더를 안전하게 바꿀 수 없다). 런처의 모든 실패 경로는 '구버전 그대로 실행' 이다.
+
+### ⚠️ `requirements.txt` 를 바꿀 때 — 반드시 강조해서 알릴 것
+사내망은 **PyPI 가 막혀 있어** 자동 업데이트로 패키지가 전달되지 않는다. 그래서
+`requirements.txt` 를 조금이라도 바꿨다면(패키지 추가·제거·버전 변경) 작업 요약에 **반드시**
+아래를 눈에 띄게 적는다. 이걸 빠뜨리면 사용자는 앱이 깨진 뒤에야 알게 된다.
+
+> **[중요] 이번 변경은 새 패키지가 필요합니다.**
+> **전달할 파일: `dist/AOI_Verify` 폴더 전체를 다시 빌드해 zip 으로 전달**해야 합니다
+> (`python scripts/build.py exe`). **`app` 폴더만 전달하면 앱이 실행되지 않습니다.**
+
+주석·빈 줄만 바꾼 경우는 해당 없다(`bootstrap.req_lines` 가 정규화해 무시한다).
 
 ## 매칭 / 좌표 검토 규칙
 - **정확도 우선**: 운영 기본(`gpu_fusion_b16`)보다 정확도가 낮으면 더 빨라도 채택/추천하지 않는다.
@@ -158,8 +185,8 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
 
 ## 파일 구성 관습
 - 문서는 `docs/`. 사용자가 실행하는 스크립트는 `scripts/`(`run_aoi*.bat`·`run_this_before.py`·
-  `update_app.bat`·`build.py`·`launcher.py`). 빌드/내부 도구는 `scripts/internal/`
-  (`*.spec`·`build_windows.bat`·`build_online.bat`·`make_portable.bat`·`portable_build.py`·
+  `update_app.bat`·`build.py`·`launcher.py`·`exe_launcher.py`). 빌드/내부 도구는 `scripts/internal/`
+  (`*.spec`·`build_exe.bat`·`build_online.bat`·`make_portable.bat`·`portable_build.py`·
   `verify_no_forbidden.py`). 경로를 바꾸면 이를 호출하는 곳(run_this_before·빌드 bat·README·문서)도
   함께 고친다.
 - **`aoi_verification/app/`** 가 앱 본체: `ui/`(pages·widgets), `workers/`(매칭·OCR·내보내기 등

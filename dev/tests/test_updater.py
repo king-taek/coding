@@ -396,13 +396,20 @@ def test_apply_requirements_first_time_does_not_falsely_flag(tmp_path):
 
 
 # ── download_and_apply — 미러링(필요한 것 전부) + 진행 보고 + dev 데이터 제외 ──
-def _make_branch_zip(tmp_path):
-    """가짜 브랜치 zip 을 만든다 — 'coding-x/' 최상위 폴더 아래 앱 트리."""
+def _make_branch_zip(tmp_path, extra=None, drop=()):
+    """가짜 브랜치 zip 을 만든다 — 'coding-x/' 최상위 폴더 아래 앱 트리.
+
+    ``_verify_staged`` 가 요구하는 필수 파일을 모두 담는다(실제 저장소와 같은 모양).
+    ``extra`` 로 파일을 더하고 ``drop`` 으로 뺄 수 있다(검증 실패 경로 테스트용)."""
     import io
     import zipfile
     buf = io.BytesIO()
     files = {
         "coding-x/aoi_verification/app/__init__.py": "x = 1\n",
+        # 아래 셋은 '앱으로 쓸 수 있는 트리인가' 를 판정하는 필수 항목이다.
+        "coding-x/aoi_verification/app/ui/main_window.py": "class MainWindow: pass\n",
+        "coding-x/aoi_verification/app/ui/style.qss": "QWidget {}\n",
+        "coding-x/aoi_verification/app/utils/updater.py": "DEFAULT_BRANCH = 'b'\n",
         "coding-x/main.py": "print('hi')\n",
         "coding-x/requirements.txt": "numpy==1\n",
         "coding-x/docs/새문서.md": "doc\n",
@@ -419,6 +426,9 @@ def _make_branch_zip(tmp_path):
         "coding-x/.claude/skills/impeccable/SKILL.md": "skill\n",
         "coding-x/.claude/skills/impeccable/reference/audit.md": "ref\n",
     }
+    files.update(extra or {})
+    for name in drop:
+        files.pop(name, None)
     with zipfile.ZipFile(buf, "w") as z:
         for name, content in files.items():
             z.writestr(name, content)
@@ -482,3 +492,157 @@ def test_download_and_apply_mirrors_needed_and_skips_dev_data(tmp_path, monkeypa
     assert any("다운로드" in p for p in phases)
     assert any("적용" in p for p in phases)
     assert updater.deps_changed() is False               # requirements 동일
+    assert not (app / ".update.part").exists()           # 스테이징 흔적을 남기지 않는다
+
+
+def test_in_place_apply_propagates_upstream_deletions(tmp_path, monkeypatch):
+    """상류에서 지운 모듈이 사용자 디스크에서도 사라져야 한다.
+
+    옛 방식(copytree 덮어쓰기)은 지우지 않아, 삭제된 모듈이 영원히 남아 계속 import 됐다."""
+    app = tmp_path / "app"
+    (app / "aoi_verification" / "app").mkdir(parents=True)
+    (app / "aoi_verification" / "app" / "지워진모듈.py").write_text("old", encoding="utf-8")
+    (app / "aoi_verification" / "app" / "__pycache__").mkdir()
+    (app / "aoi_verification" / "app" / "__pycache__" / "x.pyc").write_bytes(b"stale")
+    zip_bytes = _make_branch_zip(tmp_path)
+    monkeypatch.setattr(updater, "_app_root", lambda: app)
+    monkeypatch.setattr(updater, "_urlopen",
+                        lambda url, headers, timeout: _FakeResp(zip_bytes))
+
+    assert updater.download_and_apply("o/r", "x", "SHA") is True
+    assert (app / "aoi_verification" / "app" / "__init__.py").exists()
+    assert not (app / "aoi_verification" / "app" / "지워진모듈.py").exists()
+    assert not (app / "aoi_verification" / "app" / "__pycache__").exists()
+
+
+def test_verification_rejects_incomplete_tree_and_keeps_old_version(tmp_path, monkeypatch):
+    """필수 파일이 빠진 zip 은 적용하지 않는다 — 구버전과 VERSION 이 그대로 남는다.
+
+    옛 코드는 '예외가 안 났으면 성공' 이라, 반쪽 트리도 성공으로 보고했다."""
+    app = tmp_path / "app"
+    app.mkdir()
+    (app / "main.py").write_text("OLD", encoding="utf-8")
+    (app / "VERSION").write_text('{"sha": "OLDSHA", "branch": "b", "repo": "r"}',
+                                 encoding="utf-8")
+    zip_bytes = _make_branch_zip(tmp_path, drop=("coding-x/dev/양식.xlsx",))
+    monkeypatch.setattr(updater, "_app_root", lambda: app)
+    monkeypatch.setattr(updater, "_urlopen",
+                        lambda url, headers, timeout: _FakeResp(zip_bytes))
+
+    assert updater.download_and_apply("o/r", "x", "NEWSHA") is False
+    assert "양식.xlsx" in updater.last_error()           # 왜 안 됐는지 알려준다
+    assert (app / "main.py").read_text() == "OLD"        # 구버전 그대로
+    import json as _json
+    assert _json.loads((app / "VERSION").read_text())["sha"] == "OLDSHA"
+    assert not (app / ".update.part").exists()
+
+
+# ── exe 모드(런처가 교체) — 스테이징만 하고 살아있는 app/ 은 건드리지 않는다 ──
+def _exe_install(tmp_path, monkeypatch):
+    """'exe + app 폴더' 설치를 흉내낸다."""
+    root = tmp_path / "AOI_Verify"
+    app = root / "app"
+    app.mkdir(parents=True)
+    (app / "main.py").write_text("OLD", encoding="utf-8")
+    (app / "VERSION").write_text('{"sha": "OLDSHA", "branch": "b", "repo": "r"}',
+                                 encoding="utf-8")
+    (app / "requirements.txt").write_text("numpy==1\n", encoding="utf-8")
+    monkeypatch.setenv("AOI_APP_HOME", str(root))
+    monkeypatch.setattr(updater, "_app_root", lambda: app)
+    return root, app
+
+
+def test_staged_update_leaves_the_running_app_untouched(tmp_path, monkeypatch):
+    """★ 핵심 계약 — 실행 중인 app/ 도 app/VERSION 도 바뀌지 않는다.
+
+    VERSION 을 미리 쓰면 교체가 보류·실패했을 때 앱이 '최신입니다' 라며 구버전을
+    영원히 실행한다."""
+    root, app = _exe_install(tmp_path, monkeypatch)
+    zip_bytes = _make_branch_zip(tmp_path)
+    monkeypatch.setattr(updater, "_urlopen",
+                        lambda url, headers, timeout: _FakeResp(zip_bytes))
+
+    assert updater.download_and_apply("o/r", "x", "NEWSHA") is True
+
+    assert (app / "main.py").read_text() == "OLD"        # 살아있는 앱은 그대로
+    import json as _json
+    assert _json.loads((app / "VERSION").read_text())["sha"] == "OLDSHA"
+    # 새 버전은 app.new 에 완성된 채로 대기한다.
+    new = root / "app.new"
+    assert new.is_dir()
+    assert (new / "main.py").read_text() == "print('hi')\n"
+    assert _json.loads((new / "VERSION").read_text())["sha"] == "NEWSHA"
+    assert not (root / "app.new.part").exists()          # 미완성 이름은 남지 않는다
+    assert updater.update_pending() is True
+
+
+def test_pending_update_suppresses_further_checks(tmp_path, monkeypatch):
+    """이미 받아뒀으면 재시작만 하면 된다 — 매번 다시 받지 않는다."""
+    root, _app = _exe_install(tmp_path, monkeypatch)
+    (root / "app.new").mkdir()
+    monkeypatch.setattr(updater, "_latest_self_healing",
+                        lambda repo, branch: (_ for _ in ()).throw(
+                            AssertionError("네트워크를 부르면 안 된다")))
+    assert updater.check_for_update() is None
+
+
+def test_incomplete_staging_never_becomes_a_ready_signal(tmp_path, monkeypatch):
+    """준비 중 실패하면 app.new 가 만들어지지 않는다(존재 자체가 '완료' 신호이므로)."""
+    root, app = _exe_install(tmp_path, monkeypatch)
+    zip_bytes = _make_branch_zip(tmp_path)
+    monkeypatch.setattr(updater, "_urlopen",
+                        lambda url, headers, timeout: _FakeResp(zip_bytes))
+
+    def _boom(src_root, staging, emit):
+        staging.mkdir(parents=True, exist_ok=True)
+        (staging / "half.py").write_text("x", encoding="utf-8")
+        raise OSError("disk full")
+
+    monkeypatch.setattr(updater, "_stage_tree", _boom)
+    assert updater.download_and_apply("o/r", "x", "NEWSHA") is False
+    assert not (root / "app.new").exists()
+    assert not (root / "app.new.part").exists()
+    assert (app / "main.py").read_text() == "OLD"
+
+
+def test_new_packages_block_the_update_instead_of_half_applying(tmp_path, monkeypatch):
+    """사내망은 PyPI 가 막혀 패키지를 못 깐다 — 코드만 새것이 되는 상태를 막는다."""
+    from aoi_verification.app.utils import bootstrap
+    root, app = _exe_install(tmp_path, monkeypatch)
+    bootstrap.write_deps_marker(root, "numpy==1\n")      # 번들은 이 목록으로 만들어졌다
+    zip_bytes = _make_branch_zip(
+        tmp_path, extra={"coding-x/requirements.txt": "numpy==1\n새패키지==2\n"})
+    monkeypatch.setattr(updater, "_urlopen",
+                        lambda url, headers, timeout: _FakeResp(zip_bytes))
+
+    assert updater.download_and_apply("o/r", "x", "NEWSHA") is False
+    assert updater.deps_blocked() is True
+    assert not (root / "app.new").exists()               # 적용하지 않는다
+    assert (app / "main.py").read_text() == "OLD"        # 앱은 계속 쓸 수 있다
+
+
+def test_comment_only_requirements_change_does_not_block(tmp_path, monkeypatch):
+    """주석·빈 줄만 바뀐 것을 '패키지 변경' 으로 오인하면 업데이트가 통째로 막힌다."""
+    from aoi_verification.app.utils import bootstrap
+    root, _app = _exe_install(tmp_path, monkeypatch)
+    bootstrap.write_deps_marker(root, "numpy==1\n")
+    zip_bytes = _make_branch_zip(
+        tmp_path, extra={"coding-x/requirements.txt": "# 설명 추가\nnumpy==1\n\n"})
+    monkeypatch.setattr(updater, "_urlopen",
+                        lambda url, headers, timeout: _FakeResp(zip_bytes))
+
+    assert updater.download_and_apply("o/r", "x", "NEWSHA") is True
+    assert updater.deps_blocked() is False
+    assert (root / "app.new").is_dir()
+
+
+def test_missing_deps_marker_does_not_block(tmp_path, monkeypatch):
+    """표식이 없는 옛 배포본은 판단 근거가 없다 — 섣불리 막지 않는다."""
+    root, _app = _exe_install(tmp_path, monkeypatch)
+    zip_bytes = _make_branch_zip(
+        tmp_path, extra={"coding-x/requirements.txt": "numpy==1\n다른것==3\n"})
+    monkeypatch.setattr(updater, "_urlopen",
+                        lambda url, headers, timeout: _FakeResp(zip_bytes))
+
+    assert updater.download_and_apply("o/r", "x", "NEWSHA") is True
+    assert updater.deps_blocked() is False
