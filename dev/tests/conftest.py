@@ -20,6 +20,9 @@ def isolated_cache(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     # exe launcher 가 설정하는 캐시 위치 override 가 테스트에 새지 않도록 제거.
     monkeypatch.delenv("AOI_DATA_HOME", raising=False)
+    # 'exe + app 폴더' 설치 신호도 마찬가지 — 새면 updater 가 스테이징 모드로 빠지고
+    # results_dir() 이 엉뚱한 곳을 가리킨다.
+    monkeypatch.delenv("AOI_APP_HOME", raising=False)
     # paths.cache_root() 는 Path.home() 으로 시작하니, HOME 만 바꿔도 동작.
     # 세션 간 mtime 메모이즈가 새지 않도록 테스트마다 초기화(#5).
     try:

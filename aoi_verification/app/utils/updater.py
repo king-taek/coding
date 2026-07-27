@@ -3,11 +3,24 @@
 배포(포터블) 빌드는 ``app/VERSION`` (JSON: ``{"sha","branch"}``) 을 동봉한다.
 실행 시 백그라운드로 브랜치 최신 커밋 SHA 를 GitHub API 로 받아 현재 SHA 와
 비교하고, 다르면 UI 가 '업데이트 있음' 팝업을 띄운다.  사용자가 동의하면 브랜치
-zip 을 받아 **앱 구동에 필요한 것을 전부** 앱 폴더로 미러링한다(``aoi_verification/`` ·
+zip 을 받아 **앱 구동에 필요한 것을 전부** 담은 새 트리를 만든다(``aoi_verification/`` ·
 ``main.py`` · ``양식.xlsx`` · ``requirements.txt`` · ``docs/`` · ``scripts/`` 등 — 새
 모듈/리소스 누락 방지).  개발 전용·대용량 데이터(``tests/`` · ``기준/`` · ``bench결과/``)와
-VCS/캐시는 제외하고, 무거운 ``python/`` 런타임도 건드리지 않는다.  의존성 패키지는
-다시 설치하지 않으며, ``requirements.txt`` 변경은 감지해 사용자에게 안내만 한다.
+VCS/캐시는 제외하고, 무거운 ``python/`` 런타임도 건드리지 않는다.
+
+**적용은 "완성·검증된 트리만" 한다.**  기존 트리에 덮어쓰는 미러링이 아니라 새 트리를
+통째로 만들어 바꾼다 — 그래서 상류에서 **삭제된 파일이 실제로 사라지고**(옛 방식은 영원히
+남았다), 중간에 실패해도 구버전과 ``VERSION`` 이 그대로 남아 다시 시도할 수 있다.
+적용 경로는 두 가지다:
+
+- **exe 모드**(런처가 ``AOI_APP_HOME`` 을 넘겨준 경우) — ``app.new`` 로 스테이징만 하고
+  끝낸다.  실제 교체는 다음 실행 때 런처(``scripts/exe_launcher.py``)가 한다.  실행 중인
+  앱은 자기가 돌아가는 폴더를 안전하게 바꿀 수 없기 때문이다.
+- **포터블/온라인** — 교체해 줄 런처가 없으므로 제자리에 항목 단위로 적용한다(실패 시 롤백).
+
+의존성 패키지는 다시 설치하지 않는다.  포터블/온라인은 ``requirements.txt`` 변경을 감지해
+안내만 하고(``deps_changed``), exe 모드는 사내망에서 설치 자체가 불가능하므로 **적용을
+포기하고**(``deps_blocked``) '새 배포본 전체를 받으라'고 안내한다.
 
 - 공개 저장소라 토큰 불필요.  모든 네트워크 오류는 **조용히 무시**(부가 기능).
 - ``VERSION`` 이 없으면 ``ensure_version_file`` 이 **초기 파일을 만든다**(SHA 는 '미상').
@@ -23,6 +36,7 @@ import json
 import os
 import socket
 import ssl
+import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -52,6 +66,8 @@ _OPENER_INSECURE = None
 _insecure_used: bool = False
 # 직전 업데이트로 필요한 패키지 목록(requirements.txt)이 바뀌었는지 — 의존성 재설치 안내용.
 _deps_changed: bool = False
+# 직전 업데이트가 '새 패키지가 필요해서' 적용되지 않았는지(exe 모드) — UI 안내 분기용.
+_deps_blocked: bool = False
 
 
 def last_error() -> str:
@@ -68,6 +84,16 @@ def deps_changed() -> bool:
     자동 업데이트는 앱 소스만 바꾸고 **의존성 패키지는 다시 설치하지 않는다**(번들 런타임
     보존).  목록이 바뀌었으면 UI 가 사용자에게 '의존성을 갱신하라'고 안내하는 데 쓴다."""
     return _deps_changed
+
+
+def deps_blocked() -> bool:
+    """직전 ``download_and_apply`` 가 **패키지 설치에 실패해서** 적용을 포기했는지(exe 모드).
+
+    exe 배포는 새 패키지가 필요하면 동봉된 파이썬에 직접 설치한다(``_ensure_deps``).
+    그게 실패하면 — 인터넷이 끊겼거나 회사 프록시가 막았거나 — 코드만 새것으로 바꾸면
+    앱이 깨지므로 업데이트를 적용하지 않고 구버전을 유지한 채 '새 배포본 전체를 받으라'고
+    안내한다."""
+    return _deps_blocked
 
 
 def _ssl_context(insecure: bool = False):
@@ -175,6 +201,42 @@ def _app_root() -> Path:
     return paths._project_root()
 
 
+# 'exe + app 폴더' 배포에서 런처(``scripts/exe_launcher.py``)가 설치 루트를 넘겨준다.
+# 이 값이 있다는 것은 **교체를 대신 해 줄 런처가 있다**는 뜻이므로, 업데이트는 실행 중인
+# ``app/`` 을 건드리지 않고 ``app.new`` 로 스테이징만 한다.  없으면(포터블/온라인/개발)
+# 예전처럼 제자리에 적용한다.
+_APP_HOME_ENV = "AOI_APP_HOME"
+
+
+def _install_root() -> Optional[Path]:
+    """설치 루트(런처가 알려줌).  None 이면 교체해 줄 런처가 없다 → 제자리 적용."""
+    v = os.environ.get(_APP_HOME_ENV)
+    return Path(v) if v else None
+
+
+def _pending_dir(root: Path) -> Path:
+    """적용 대기 중인 새 앱 폴더 — **존재 자체가 '준비 완료' 신호**다."""
+    return root / "app.new"
+
+
+def update_pending() -> bool:
+    """이미 받아둔 업데이트가 재시작을 기다리고 있는지(exe 모드).
+
+    UI 는 이 값으로 안내 문구를 고른다 — 스테이징만 된 상태이므로 '적용되었다' 가 아니라
+    '다시 실행하면 적용된다' 가 사실이다."""
+    root = _install_root()
+    return bool(root and _pending_dir(root).exists())
+
+
+def _staging_dir(root: Optional[Path], app_root: Path) -> Path:
+    """새 트리를 만들 자리.
+
+    반드시 **최종 위치와 같은 볼륨**이어야 한다 — ``%TEMP%`` 를 쓰면 rename 이 복사로
+    바뀌어 원자성이 사라진다.  미완성 트리에는 ``.part`` 이름을 주고, 완성된 뒤에만
+    ``app.new`` 로 rename 한다(그 rename 이 곧 준비 완료 신호다)."""
+    return (root / "app.new.part") if root else (app_root / ".update.part")
+
+
 def _version_file() -> Path:
     return _app_root() / "VERSION"
 
@@ -192,14 +254,22 @@ def current_version() -> Optional[dict]:
     return None
 
 
-def _write_version(sha: str, branch: str, repo: str) -> None:
+def _write_version_to(root: Path, sha: str, branch: str, repo: str) -> None:
+    """``root/VERSION`` 에 업데이트 식별자를 쓴다.
+
+    스테이징 트리에 쓰기 위해 위치를 인자로 받는다 — 살아있는 ``app/VERSION`` 에 미리
+    쓰면 교체가 보류·실패했을 때 앱이 "최신입니다"라고 하면서 **구버전을 영원히 실행**한다."""
     try:
-        _version_file().write_text(
+        (Path(root) / "VERSION").write_text(
             json.dumps({"sha": sha, "branch": branch, "repo": repo}),
             encoding="utf-8",
         )
     except Exception:
         pass
+
+
+def _write_version(sha: str, branch: str, repo: str) -> None:
+    _write_version_to(_app_root(), sha, branch, repo)
 
 
 def ensure_version_file() -> Optional[dict]:
@@ -351,6 +421,8 @@ def check_for_update() -> Optional[dict]:
     git 작업트리(개발 실행)와 네트워크 실패는 None — 조용히 무시한다."""
     if is_git_checkout():
         return None                     # 개발 실행에선 자동 팝업을 띄우지 않는다
+    if update_pending():
+        return None                     # 이미 받아뒀다 — 재시작만 하면 된다(재다운로드 금지)
     ensure_version_file()
     repo, branch, cur_sha = _identity()
     if not branch:
@@ -444,19 +516,169 @@ _UPDATE_SKIP_TOP = {
 }                     #   앱 구동과 무관한데 198개 파일·4.8 MB 다(사용자에게 보낼 이유 없음).
 
 
+# 스테이징 트리가 '앱으로 쓸 수 있는 것' 인지 확인할 최소 항목.  하나라도 없으면 적용하지
+# 않는다 — 예전엔 복사 도중 실패해도 '예외가 안 났으면 성공' 이라 반쪽 트리가 적용됐다.
+_REQUIRED_IN_STAGING = (
+    "main.py",
+    "requirements.txt",
+    "양식.xlsx",
+    "aoi_verification/app/ui/main_window.py",
+    "aoi_verification/app/ui/style.qss",
+    "aoi_verification/app/utils/updater.py",
+    "VERSION",
+)
+
+
+def _stage_tree(src_root: Path, staging: Path, emit) -> None:
+    """새 앱 트리를 **통째로** 만든다(기존 트리에 병합하지 않는다).
+
+    통째로 만들기 때문에 상류에서 **삭제된 파일이 자동으로 사라지고**(옛 미러링 방식은
+    덮어쓰기만 해서 지운 모듈이 사용자 디스크에 영원히 남았다), ``__pycache__`` 의 낡은
+    바이트코드도 따라오지 않는다."""
+    import shutil
+
+    staging.mkdir(parents=True, exist_ok=True)
+    items = [p for p in sorted(src_root.iterdir(), key=lambda p: p.name)
+             if p.name not in _UPDATE_SKIP_TOP]
+    m = len(items)
+    for i, item in enumerate(items, start=1):
+        dst = staging / item.name
+        if item.is_dir():
+            shutil.copytree(item, dst)
+        else:
+            shutil.copy2(item, dst)
+        emit(i, m, "준비 중…")
+
+    # dev/ 는 통째로 건너뛰지만 그 안의 엑셀 템플릿은 구동에 필요하다 → 앱 루트로 옮긴다.
+    # (실패를 삼키지 않는다 — _verify_staged 가 잡아서 업데이트를 중단시킨다.)
+    tmpl = src_root / "dev" / "양식.xlsx"
+    if tmpl.exists():
+        shutil.copy2(tmpl, staging / "양식.xlsx")
+
+
+def _verify_staged(staging: Path) -> str:
+    """스테이징 트리 검증.  문제가 없으면 빈 문자열, 있으면 **사용자에게 보일 사유**.
+
+    ``return True`` 가 '예외가 안 났다' 이상을 뜻하게 만드는 관문이다."""
+    for rel in _REQUIRED_IN_STAGING:
+        p = staging / rel
+        if not p.is_file():
+            return f"필수 파일 누락: {rel}"
+        try:
+            if p.stat().st_size <= 0:
+                return f"파일이 비어 있음: {rel}"
+        except OSError as exc:
+            return f"파일 확인 실패: {rel} ({exc})"
+    return ""
+
+
+def _promote_in_place(staging: Path, app_root: Path, emit) -> None:
+    """제자리 적용(포터블/온라인) — 항목 단위로 '옆으로 치우고 → 새것을 넣고 → 지운다'.
+
+    실행 중인 앱이라 폴더 전체를 통째로 바꿀 수는 없지만, 최상위 항목마다 rename 을 써서
+    중간 실패 시 **전부 되돌린다**(옛 방식은 되돌리지 않아 트리가 섞였다)."""
+    import shutil
+
+    def _discard(p: Path) -> None:
+        if p.is_dir():
+            shutil.rmtree(p, ignore_errors=True)
+        elif p.exists():
+            try:
+                p.unlink()
+            except OSError:
+                pass
+
+    items = [p for p in sorted(staging.iterdir(), key=lambda p: p.name)]
+    m = len(items)
+    done: list = []                       # [(dst, aside)] — 롤백용
+    try:
+        for i, item in enumerate(items, start=1):
+            dst = app_root / item.name
+            aside = app_root / (item.name + ".old-update")
+            _discard(aside)
+            moved_aside = False
+            if dst.exists():
+                dst.rename(aside)         # 실패하면 예외 → 아래 롤백
+                moved_aside = True
+            shutil.move(str(item), str(dst))
+            done.append((dst, aside if moved_aside else None))
+            emit(i, m, "적용 중…")
+    except Exception:
+        for dst, aside in reversed(done):  # 되돌리기 — 구버전 트리를 복원한다
+            _discard(dst)
+            if aside is not None:
+                try:
+                    aside.rename(dst)
+                except OSError:
+                    pass
+        raise
+    for _dst, aside in done:               # 성공 — 백업 정리
+        if aside is not None:
+            _discard(aside)
+
+
+def _ensure_deps(root: Path, staging: Path, emit) -> bool:
+    """새 requirements 를 **동봉된 파이썬에 설치**한다.  성공해야 업데이트를 적용한다.
+
+    코드만 새것이고 패키지가 옛것이면 앱이 ``ImportError`` 로 안 켜진다 — 그게 바로
+    없애려는 '반쪽 업데이트'다.  그래서 설치가 실패하면 **업데이트를 적용하지 않고**
+    구버전을 그대로 둔다(사용자는 계속 쓸 수 있고, UI 가 새 배포본을 받으라고 안내한다).
+
+    이미 같은 목록으로 설치돼 있으면(표식 비교) 아무것도 하지 않는다 — 매 업데이트마다
+    2 GB 재설치가 돌지 않게 하는 장치다.  주석·빈 줄 변경은 표식이 무시한다."""
+    from . import bootstrap
+
+    req = staging / "requirements.txt"
+    text = _file_text(req)
+    if text is None:
+        return True                        # 비교할 것이 없다
+    if bootstrap.deps_installed(root, text):
+        return True                        # 이 목록으로 이미 설치돼 있다
+
+    py = bootstrap.target_python(root, frozen=False,
+                                 sys_executable=sys.executable)
+    emit(0, 0, "필요한 패키지 설치 중…")     # total<=0 → busy(진행량 미상, 0 에서 안 멈춤)
+    import subprocess
+
+    kwargs = {}
+    if os.name == "nt":
+        kwargs["creationflags"] = 0x08000000      # CREATE_NO_WINDOW — 콘솔이 튀지 않게
+    try:
+        rc = subprocess.call(
+            bootstrap.pip_install_cmd(py, req, upgrade=False), **kwargs)
+    except Exception as exc:
+        globals()["_last_error"] = f"패키지 설치를 시작하지 못했습니다 ({exc})"
+        return False
+    if rc != 0:
+        globals()["_last_error"] = f"패키지 설치 실패 (pip 종료코드 {rc})"
+        return False
+    bootstrap.write_deps_marker(root, text)
+    return True
+
+
 def download_and_apply(repo: str, branch: str, target_sha: str,
                        timeout: float = 60.0,
                        progress: Optional[callable] = None) -> bool:
-    """브랜치 zip 을 받아 **앱 구동에 필요한 것을 전부** 덮어쓴다(미러링).  성공 시 True.
+    """브랜치 zip 을 받아 **앱 구동에 필요한 것을 전부** 담은 새 트리를 만들어 적용한다.
 
-    ``progress(done, total, phase)`` 가 주어지면 다운로드/압축해제/적용 단계의 진행을
+    적용 방식은 두 가지다:
+      · **exe 모드**(``AOI_APP_HOME`` 있음) — ``app.new`` 로 스테이징만 하고 끝낸다.
+        실제 교체는 다음 실행 때 런처가 한다(실행 중인 앱은 자기 폴더를 못 바꾼다).
+      · **포터블/온라인** — 교체해 줄 런처가 없으므로 제자리에 항목 단위로 적용한다.
+
+    어느 쪽이든 **완성·검증된 트리만** 적용되고, 실패하면 구버전과 ``VERSION`` 이 그대로
+    남아 다음 실행에 다시 시도할 수 있다.
+
+    ``progress(done, total, phase)`` 가 주어지면 다운로드/압축해제/준비/적용 단계의 진행을
     보고한다(로딩바가 0 에서 멈추지 않도록).  total<=0 이면 진행량 미상(busy) 의미."""
     import shutil
     import tempfile
     import zipfile
 
-    global _last_error, _deps_changed
+    global _last_error, _deps_changed, _deps_blocked
     _deps_changed = False
+    _deps_blocked = False
+    staging: Optional[Path] = None
 
     def _emit(done, total, phase):
         if progress:
@@ -499,37 +721,45 @@ def download_and_apply(repo: str, branch: str, target_sha: str,
         if not (src_root / "aoi_verification").exists():
             return False
 
-        # 의존성 변경은 덮어쓰기 **전에** 비교한다(자동 재설치는 안 함 — UI 가 안내).
+        # 의존성 변경은 적용 **전에** 비교한다(자동 재설치는 안 함 — UI 가 안내).
         _deps_changed = _apply_requirements(src_root, app_root)
 
-        # 3) 적용(미러링) — skip 목록 외 최상위 항목을 전부 앱 폴더로 복사.
-        items = [p for p in src_root.iterdir() if p.name not in _UPDATE_SKIP_TOP]
-        m = len(items)
-        for i, item in enumerate(items, start=1):
-            dst = app_root / item.name
-            if item.is_dir():
-                shutil.copytree(item, dst, dirs_exist_ok=True)
-            else:
-                shutil.copy2(item, dst)
-            _emit(i, m, "적용 중…")
+        # 3) 준비 — 새 트리를 통째로 만들고(삭제 전파·__pycache__ 정리가 여기서 공짜),
+        #    VERSION 도 **스테이징 트리에** 써서 적용이 성공해야만 유효해지게 한다.
+        install_root = _install_root()
+        staging = _staging_dir(install_root, app_root)
+        shutil.rmtree(staging, ignore_errors=True)
+        _stage_tree(src_root, staging, _emit)
+        _write_version_to(staging, target_sha, branch, repo)
 
-        # dev/ 는 통째로 건너뛰지만, 그 안의 엑셀 템플릿(양식.xlsx)은 구동에 필요하므로
-        # 앱 루트로 따로 복사한다(포터블 레이아웃: app\양식.xlsx → template_path 가 찾음).
-        tmpl = src_root / "dev" / "양식.xlsx"
-        if tmpl.exists():
-            try:
-                shutil.copy2(tmpl, app_root / "양식.xlsx")
-            except Exception:
-                pass
+        # 4) 검증 — 여기를 통과해야만 적용한다.
+        reason = _verify_staged(staging)
+        if reason:
+            _last_error = f"업데이트 준비 검증 실패 — {reason}"
+            return False
 
-        _write_version(target_sha, branch, repo)
-        _emit(m, m, "완료")
+        # 5) 적용
+        if install_root is not None:                 # exe 모드 — 교체는 런처에 위임
+            # 패키지가 바뀌었으면 먼저 설치한다 — 성공해야 코드를 적용한다.
+            if not _ensure_deps(install_root, staging, _emit):
+                _deps_blocked = True     # UI 가 '새 배포본을 받으라' 고 안내한다
+                return False
+            pending = _pending_dir(install_root)
+            shutil.rmtree(pending, ignore_errors=True)
+            staging.rename(pending)                  # ★ 이 rename 이 '준비 완료' 신호
+            staging = None                           # finally 가 지우지 않도록
+        else:                                        # 포터블/온라인 — 제자리 적용
+            _promote_in_place(staging, app_root, _emit)
+            _write_version(target_sha, branch, repo)
+        _emit(1, 1, "완료")
         return True
     except Exception as exc:
         _last_error = _describe_err(exc, url)
         return False
     finally:
         shutil.rmtree(tmpd, ignore_errors=True)
+        if staging is not None:      # 남아 있으면 = 실패했다는 뜻 → 흔적 없이 정리
+            shutil.rmtree(staging, ignore_errors=True)
 
 
 def _file_text(path: Path) -> Optional[str]:

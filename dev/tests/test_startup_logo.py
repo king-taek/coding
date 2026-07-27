@@ -32,16 +32,15 @@ def test_logo_assets_live_inside_the_app_package(name):
     assert p.parent == _ROOT / "aoi_verification" / "app" / "ui" / "assets"
 
 
-def test_specs_wire_icon_and_bundle_assets():
-    """빌드 산출물(exe)의 아이콘과 리소스 동봉 — 빠지면 아이콘이 파이썬 것으로 돌아간다."""
-    full = (_ROOT / "scripts" / "internal" / "aoi_verification.spec").read_text(
-        encoding="utf-8")
-    online = (_ROOT / "scripts" / "internal" / "online.spec").read_text(
-        encoding="utf-8")
-    for text in (full, online):
-        assert "icon=_ICON" in text
-        assert "logo.ico" in text
-    assert "_ASSETS" in full, "assets 폴더를 datas 에 넣어야 스플래시/상단 로고가 뜬다"
+def test_specs_wire_icon():
+    """빌드 산출물(exe)의 아이콘 — 빠지면 아이콘이 파이썬 것으로 돌아간다.
+
+    리소스(로고·style.qss)는 exe 안에 넣지 않는다.  'exe + app 폴더' 배포에서는
+    ``app/aoi_verification/…`` 에 loose 로 있어야 자동 업데이트로 갱신된다."""
+    for spec in ("exe_launcher.spec", "online.spec"):
+        text = (_ROOT / "scripts" / "internal" / spec).read_text(encoding="utf-8")
+        assert "icon=_ICON" in text, spec
+        assert "logo.ico" in text, spec
 
 
 # ── 스플래시 (헤드리스) ───────────────────────────────────────────────────

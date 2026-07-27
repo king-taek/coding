@@ -101,3 +101,37 @@ def test_bootstrap_fetch_failure_returns_error(tmp_path):
     rc = bs.bootstrap(tmp_path / "x", repo="o/r", branch="b",
                       fetch_app=lambda d: False, run=lambda c: 0, frozen=True)
     assert rc == 3                                    # 다운로드 실패 코드
+
+
+def test_req_lines_ignores_comments_and_blanks():
+    """주석/빈 줄 변경을 '의존성 변경' 으로 오인하면 exe 배포에서 업데이트가 통째로 막힌다."""
+    assert bs.req_lines("# 설명\nnumpy==1\n\n  \ntorch>=2  # 왜\n") == [
+        "numpy==1", "torch>=2"]
+    # 같은 요구사항이면 주석이 달라도 같은 지문 → '안 바뀜' 으로 판정된다.
+    assert bs.deps_installed.__doc__ is not None
+    a, b = "numpy==1\n", "# 새 주석\nnumpy==1\n\n"
+    assert bs._req_fingerprint(a) == bs._req_fingerprint(b)
+    assert bs._req_fingerprint(a) != bs._req_fingerprint("numpy==2\n")
+
+
+def test_results_dir_moves_out_of_app_folder_for_exe_installs(tmp_path, monkeypatch):
+    """exe 설치에서 결과 엑셀은 app\\ 바깥에 저장돼야 한다.
+
+    자동 업데이트가 app\\ 을 통째로 새 트리로 교체하므로, 안에 두면 결과가 사라진다."""
+    from aoi_verification.app.utils import paths
+    monkeypatch.setenv("AOI_APP_HOME", str(tmp_path))
+    d = paths.results_dir()
+    assert d == tmp_path / "결과"
+    assert d.is_dir()
+    assert "app" not in d.parts[:-1] or d.parent == tmp_path
+
+
+def test_bundled_torch_home_only_when_present(tmp_path, monkeypatch):
+    """동봉 가중치가 있을 때만 TORCH_HOME 을 돌린다(개발/포터블은 기존 동작 유지)."""
+    from aoi_verification.app.utils import paths
+    monkeypatch.delenv("AOI_APP_HOME", raising=False)
+    assert paths.bundled_torch_home() is None
+    monkeypatch.setenv("AOI_APP_HOME", str(tmp_path))
+    assert paths.bundled_torch_home() is None          # 폴더가 아직 없다
+    (tmp_path / "runtime" / "torch").mkdir(parents=True)
+    assert paths.bundled_torch_home() == tmp_path / "runtime" / "torch"

@@ -40,26 +40,44 @@ def test_command_builders():
 
 def test_output_paths():
     assert build.output_path("online", Path("/r")).name == "AOI_Verify_Online.exe"
-    assert build.output_path("windows", Path("/r")).name == "AOI_Verify.exe"
+    assert build.output_path("exe", Path("/r")).name == "AOI_Verify"
     assert build.output_path("portable", Path("/r")).name == "dist_portable"
 
 
 def test_main_usage_and_unknown(capsys):
     assert build.main([]) == 0                      # 비대화형 → 사용법 출력
-    assert "online" in capsys.readouterr().out
+    assert "exe" in capsys.readouterr().out
     assert build.main(["nope"]) == 2                # 알 수 없는 종류
 
 
 def test_prompt_kind_selection():
     # VS Code ▶ 처럼 인자 없이 실행 시 번호/이름으로 빌드 종류 선택.
-    assert build._prompt_kind(input_fn=lambda _: "1") == "online"
+    assert build._prompt_kind(input_fn=lambda _: "1") == "exe"
     assert build._prompt_kind(input_fn=lambda _: "2") == "portable"
-    assert build._prompt_kind(input_fn=lambda _: "3") == "windows"
+    assert build._prompt_kind(input_fn=lambda _: "3") == "online"
     assert build._prompt_kind(input_fn=lambda _: "4") == "verify"
-    assert build._prompt_kind(input_fn=lambda _: "windows") == "windows"
+    assert build._prompt_kind(input_fn=lambda _: "exe") == "exe"
     assert build._prompt_kind(input_fn=lambda _: "verify") == "verify"
     assert build._prompt_kind(input_fn=lambda _: "") is None       # Enter=취소
     assert build._prompt_kind(input_fn=lambda _: "9") is None      # 범위 밖
+
+
+def test_removed_onedir_mode_is_gone():
+    """앱을 exe 안에 얼리던 옛 모드는 자동 업데이트와 양립 불가라 제거했다.
+
+    되살아나면 '업데이트했다는데 안 바뀐다' 사고가 그대로 재발한다."""
+    assert "windows" not in build._ACTIONS
+    assert not (_ROOT / "scripts" / "internal" / "aoi_verification.spec").exists()
+    assert not (_ROOT / "scripts" / "internal" / "build_windows.bat").exists()
+
+
+def test_launcher_spec_cannot_swallow_the_app():
+    """런처 spec 이 앱을 동봉할 통로를 갖지 않는지 — 이 사고의 기계적 재발 방지."""
+    text = (_ROOT / "scripts" / "internal" / "exe_launcher.spec").read_text(
+        encoding="utf-8")
+    assert "hiddenimports = []" in text          # 앱 모듈을 끌어들일 통로 없음
+    assert '"aoi_verification",' in text         # excludes 에 명시
+    assert "pathex=[]" in text                   # 저장소 루트를 Analysis 에 안 준다
 
 
 def test_build_online_injected_flow():
@@ -73,40 +91,103 @@ def test_build_online_injected_flow():
     assert "pyinstaller>=6" in joined
 
 
-def test_build_windows_uses_full_spec_and_requirements():
+def test_build_exe_builds_launcher_then_reuses_portable(monkeypatch):
+    """exe 빌드는 ① 런처 spec 을 얼리고 ② 포터블 빌더로 런타임·앱을 배치한다."""
     calls = []
-    build.build_windows(run=lambda c, cwd=None: calls.append(
+    seen = {}
+
+    class _FakeImpl:
+        @staticmethod
+        def run_build(repo_root, py_url, run=None, log=None, **kw):
+            seen.update(kw)
+            return 0
+
+    monkeypatch.setattr(build, "_load_portable_impl", lambda: _FakeImpl)
+    monkeypatch.setattr(build, "verify_exe", lambda *a, **k: 0)
+    rc = build.build_exe(run=lambda c, cwd=None: calls.append(
         " ".join(str(x) for x in c)) or 0, log=lambda *a: None)
-    joined = "\n".join(calls)
-    assert "aoi_verification.spec" in joined         # 전부 동봉 spec
-    assert "requirements.txt" in joined              # 의존성 설치
-
-
-# ── verify_windows 검증 로직 ────────────────────────────────────────────────
-def test_verify_windows_pass(tmp_path):
-    """정상적인 빌드 산출물이 있으면 검증 통과."""
-    dist = tmp_path / "dist" / "AOI_Verify"
-    internal = dist / "_internal"
-    (internal / "aoi_verification" / "app" / "ui").mkdir(parents=True)
-    (internal / "aoi_verification" / "app" / "ui" / "style.qss").write_text("x")
-    (internal / "양식.xlsx").write_bytes(b"x" * 200_000)
-    (dist / "AOI_Verify.exe").write_bytes(b"x" * 1_000_000)
-    for pkg in ("PyQt6", "cv2", "numpy", "PIL", "openpyxl"):
-        (internal / pkg).mkdir()
-    # 총 용량을 100MB 넘기기 위해 더미 파일 추가
-    (internal / "big.bin").write_bytes(b"\x00" * (105 * 1024 * 1024))
-    logs = []
-    rc = build.verify_windows(tmp_path, log=logs.append)
     assert rc == 0
+    joined = "\n".join(calls)
+    assert "exe_launcher.spec" in joined             # 얇은 런처 spec
+    assert "verify_no_forbidden.py" in joined        # 보안 가드
+    assert "--distpath" in joined                    # 산출물 위치 지정
+    # 포터블 빌더에 넘긴 옵션 — 병합식 update_app.bat 은 빼고, 가중치는 동봉한다.
+    assert seen["out_dirname"] == build.EXE_OUT_DIRNAME
+    assert "update_app.bat" not in seen["bats"]
+    assert seen["torch_home"] is True
+
+
+# ── verify_exe 검증 로직 ────────────────────────────────────────────────────
+def _make_good_bundle(tmp_path) -> Path:
+    """검증을 통과하는 최소 산출물을 만든다."""
+    out = tmp_path / build.EXE_OUT_DIRNAME
+    app = out / "app"
+    pkg = app / "aoi_verification"
+    (pkg / "app" / "ui" / "assets").mkdir(parents=True)
+    (pkg / "app" / "ui" / "style.qss").write_text("x", encoding="utf-8")
+    (pkg / "app" / "ui" / "assets" / "logo.ico").write_bytes(b"x")
+    for i in range(55):                          # 실제 코드 트리처럼 모듈이 많아야 한다
+        (pkg / f"m{i}.py").write_text("x", encoding="utf-8")
+    (app / "main.py").write_text("x", encoding="utf-8")
+    (app / "requirements.txt").write_text("numpy\n", encoding="utf-8")
+    (app / "양식.xlsx").write_bytes(b"x" * 1000)
+    (app / "VERSION").write_text('{"sha": "a", "branch": "b", "repo": "r"}',
+                                 encoding="utf-8")
+    (out / "AOI_Verify.exe").write_bytes(b"x" * 3_000_000)
+    (out / "python").mkdir()
+    (out / "python" / "python.exe").write_bytes(b"x")
+    (out / "python" / "pythonw.exe").write_bytes(b"x")
+    (out / ".deps_installed").write_text("fp", encoding="utf-8")
+    ckpt = out / "runtime" / "torch" / "hub" / "checkpoints"
+    ckpt.mkdir(parents=True)
+    (ckpt / "mobilenet.pth").write_bytes(b"x")
+    (ckpt / "resnet18.pth").write_bytes(b"x")
+    (out / "python" / "big.bin").write_bytes(b"\x00" * (810 * 1024 * 1024))
+    return out
+
+
+def test_verify_exe_pass(tmp_path):
+    _make_good_bundle(tmp_path)
+    logs = []
+    assert build.verify_exe(tmp_path, log=logs.append) == 0
     assert any("빌드 정상" in m for m in logs)
 
 
-def test_verify_windows_fail_missing_exe(tmp_path):
-    """exe 가 없으면 검증 실패."""
+def test_verify_exe_fails_when_app_is_frozen_into_the_exe(tmp_path):
+    """★ 핵심 회귀 가드 — _internal/ 이 생기면 앱을 다시 exe 안에 얼린 것이다."""
+    out = _make_good_bundle(tmp_path)
+    (out / "_internal").mkdir()
     logs = []
-    rc = build.verify_windows(tmp_path, log=logs.append)
-    assert rc != 0
+    assert build.verify_exe(tmp_path, log=logs.append) != 0
+    assert any("_internal" in m and "[!!]" in m for m in logs)
+
+
+def test_verify_exe_fails_on_empty_app_package(tmp_path):
+    """폴더만 있고 코드가 없는 상태로는 통과하지 못한다(옛 검증의 빈틈)."""
+    out = _make_good_bundle(tmp_path)
+    for p in (out / "app" / "aoi_verification").glob("m*.py"):
+        p.unlink()
+    assert build.verify_exe(tmp_path, log=lambda *a: None) != 0
+
+
+def test_verify_exe_fails_without_bundled_weights(tmp_path):
+    """가중치가 없으면 사내망에서 매칭이 안 된다 — 빌드 실패로 잡는다."""
+    out = _make_good_bundle(tmp_path)
+    import shutil
+    shutil.rmtree(out / "runtime")
+    assert build.verify_exe(tmp_path, log=lambda *a: None) != 0
+
+
+def test_verify_exe_fail_missing_exe(tmp_path):
+    logs = []
+    assert build.verify_exe(tmp_path, log=logs.append) != 0
     assert any("[!!]" in m for m in logs)
+
+
+def test_import_probe_uses_bundled_python_and_app_dir(tmp_path):
+    cmd = build.import_probe_cmd(tmp_path / "out")
+    assert cmd[0].endswith("python.exe")
+    assert "aoi_verification" in cmd[-1] and "PyQt6" in cmd[-1]
 
 
 # ── portable_build.py 순수 로직 ─────────────────────────────────────────────

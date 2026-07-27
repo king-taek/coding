@@ -3,9 +3,13 @@
 한국어 Windows(cp949) 콘솔에서 ``.bat`` 의 한글이 깨지는 문제를 피하려고, 빌드를
 **파이썬으로** 한다(Python 은 UTF-8 안전).  세 가지 배포 방식을 한 스크립트로 제공:
 
-    python scripts/build.py online      # 작은 온라인 launcher exe (권장)
-    python scripts/build.py portable    # 자체 포함 CPython 폴더(인터넷 없는 PC)
-    python scripts/build.py windows     # 단독 exe(PyInstaller, 전부 동봉)
+    python scripts/build.py exe         # exe + app 폴더 (권장)
+    python scripts/build.py portable    # 자체 포함 CPython 폴더(.bat 실행)
+    python scripts/build.py online      # 작은 온라인 launcher exe (PyPI 접속 필요)
+
+``exe`` 는 **얇은 런처 exe + loose 한 app\\ 폴더** 다.  앱 코드를 exe 안에 넣지 않는 것이
+핵심 — 옛 단독 exe(onedir) 는 앱을 exe 안 PYZ 에 넣어서, 자동 업데이트가 디스크에 새
+파일을 써도 실행 중인 파이썬이 그걸 읽지 않아 '성공했다는데 안 바뀌는' 상태가 됐다.
 
 어디서 실행하든(더블클릭/터미널) 저장소 루트로 자동 이동한다.  VS Code 에서 이 파일을
 열고 ‘Run Python File’ 을 눌러도 된다(인자 없으면 사용법 안내).
@@ -45,9 +49,13 @@ def venv_python(repo_root: Path) -> Path:
     return repo_root / ".venv" / "bin" / "python"
 
 
-def pyinstaller_cmd(python_exe: str, spec: Path) -> List[str]:
-    """PyInstaller 빌드 명령(spec 사용)."""
-    return [str(python_exe), "-m", "PyInstaller", "--noconfirm", str(spec)]
+def pyinstaller_cmd(python_exe: str, spec: Path,
+                    distpath: Optional[Path] = None) -> List[str]:
+    """PyInstaller 빌드 명령(spec 사용).  ``distpath`` 를 주면 산출물 위치를 지정한다."""
+    cmd = [str(python_exe), "-m", "PyInstaller", "--noconfirm"]
+    if distpath is not None:
+        cmd += ["--distpath", str(distpath)]
+    return cmd + [str(spec)]
 
 
 def pip_install_cmd(python_exe: str, *args: str) -> List[str]:
@@ -63,9 +71,13 @@ def output_path(kind: str, repo_root: Path) -> Path:
     """빌드 종류별 산출물 경로(안내·테스트용)."""
     return {
         "online": repo_root / "dist" / "AOI_Verify_Online.exe",
-        "windows": repo_root / "dist" / "AOI_Verify" / "AOI_Verify.exe",
+        "exe": repo_root / "dist" / "AOI_Verify",
         "portable": repo_root / "dist_portable",
     }[kind]
+
+
+# 'exe + app 폴더' 산출물 폴더 이름(저장소 루트 기준) — portable_build 에 넘긴다.
+EXE_OUT_DIRNAME = "dist/AOI_Verify"
 
 
 # ---------------------------------------------------------------------------
@@ -106,26 +118,41 @@ def build_online(run: Callable = _default_run, log: Callable = print) -> int:
     return rc
 
 
-def build_windows(run: Callable = _default_run, log: Callable = print) -> int:
-    """단독 exe(PyInstaller, 전부 동봉)."""
+def build_exe(run: Callable = _default_run, log: Callable = print) -> int:
+    """exe + app 폴더 — 파이썬 미설치 PC 용이고 **자동 업데이트가 완전히 동작**한다.
+
+    얇은 런처 exe 하나만 얼리고(앱 코드 0줄), 앱 소스·리소스는 ``app\\`` 에 loose 로 둔다.
+    옛 단독 exe(onedir) 는 앱을 exe 안 PYZ 에 넣어서 업데이트가 조용히 무시됐다 —
+    그 구조를 되풀이하지 않기 위한 형태다."""
+    out = REPO_ROOT / EXE_OUT_DIRNAME
+    # ① 런처 exe 먼저 — 여기서 실패하면 무거운 런타임 다운로드 전에 빨리 끝난다.
     vpy = _ensure_venv(run, log)
-    if run(pip_install_cmd(vpy, "-r", str(REPO_ROOT / "requirements.txt"))) != 0:
-        raise SystemExit("requirements install failed")
     if run(pip_install_cmd(vpy, "pyinstaller>=6")) != 0:
         raise SystemExit("pyinstaller install failed")
     if run(guard_cmd(vpy)) != 0:
         raise SystemExit("security guard failed")
-    log("[build] standalone exe (onedir, everything bundled) ...")
-    rc = run(pyinstaller_cmd(vpy, INTERNAL / "aoi_verification.spec"), REPO_ROOT)
-    if rc == 0:
-        log("[done] " + str(output_path("windows", REPO_ROOT)))
-        log("       Ship the whole dist\\AOI_Verify folder (zip).")
-        log("")
-        vrc = verify_windows(REPO_ROOT, log)
-        if vrc != 0:
-            log("[주의] 빌드는 완료됐지만 검증에서 누락 항목이 발견되었습니다.")
-            return vrc
-    return rc
+    log("[build] thin launcher exe (no app code inside) ...")
+    if run(pyinstaller_cmd(vpy, INTERNAL / "exe_launcher.spec", out), REPO_ROOT) != 0:
+        raise SystemExit("launcher build failed")
+
+    # ② 번들 런타임 + 앱 소스 — 포터블 빌드와 레이아웃이 같으므로 그대로 재사용한다.
+    impl = _load_portable_impl()
+    rc = impl.run_build(REPO_ROOT, PY_STANDALONE_URL, run=run, log=log,
+                        out_dirname=EXE_OUT_DIRNAME,
+                        bats=("run_aoi.bat", "run_aoi_debug.bat"),
+                        torch_home=True)
+    if rc != 0:
+        return rc
+    log("[done] " + str(output_path("exe", REPO_ROOT)))
+    log("       Ship the whole dist\\AOI_Verify folder (zip).")
+    log("")
+    vrc = verify_exe(REPO_ROOT, log, run=run)
+    if vrc != 0:
+        log("[주의] 빌드는 완료됐지만 검증에서 누락 항목이 발견되었습니다.")
+        return vrc
+    log("")
+    log("[다음] 배포용 zip 만들기:  python scripts\\make_release_zip.py")
+    return vrc
 
 
 def _load_portable_impl():
@@ -145,102 +172,141 @@ def build_portable(run: Callable = _default_run, log: Callable = print) -> int:
     return impl.run_build(REPO_ROOT, PY_STANDALONE_URL, run=run, log=log)
 
 
-def verify_windows(repo_root: Path = REPO_ROOT, log: Callable = print) -> int:
-    """windows 빌드 산출물(dist/AOI_Verify/)이 정상인지 검증한다.
+def _dir_size_mb(d: Path) -> float:
+    if not d.is_dir():
+        return 0.0
+    return sum(f.stat().st_size for f in d.rglob("*") if f.is_file()) / (1024 * 1024)
 
-    빌드 직후 자동 실행되며, ``python scripts/build.py verify`` 로도 수동 호출 가능."""
-    dist = repo_root / "dist" / "AOI_Verify"
-    exe = dist / "AOI_Verify.exe"
-    internal = dist / "_internal"
 
-    ok = True
-    total = 0
+def verify_checks(out: Path) -> List[tuple]:
+    """'exe + app 폴더' 산출물 검사 목록 ``[(통과여부, 라벨), …]`` — 순수(테스트 대상).
+
+    옛 검증은 ``_internal/aoi_verification`` 이 '폴더로 존재하는가' 만 봤는데, 그 폴더는
+    리소스 파일(style.qss·assets) 때문에 **앱 코드가 하나도 없어도 만들어진다** — 즉
+    공허하게 통과했다.  여기서는 '통과했다면 실제로 그렇다' 가 성립하는 것만 본다."""
+    exe = out / "AOI_Verify.exe"
+    app = out / "app"
+    pkg = app / "aoi_verification"
+    checks: List[tuple] = []
+
+    checks.append((exe.is_file(), f"AOI_Verify.exe 존재 ({exe})"))
+    # ★ 핵심 회귀 가드 — _internal/ 이 있으면 앱을 다시 exe 안에 얼렸다는 지문이다.
+    #   (그게 자동 업데이트가 조용히 무시되던 옛 사고의 원인)
+    checks.append((not (out / "_internal").exists(),
+                   "_internal/ 없음 (앱이 exe 안에 얼려지지 않았다는 증거)"))
+    exe_mb = (exe.stat().st_size / (1024 * 1024)) if exe.is_file() else 0.0
+    checks.append((0 < exe_mb < 30,
+                   f"런처 exe 용량 {exe_mb:.1f} MB (30 MB 미만 — 앱/PyQt6 미포함)"))
+
+    checks.append(((out / "python" / "python.exe").is_file(),
+                   "python/python.exe (번들 런타임)"))
+    checks.append(((out / "python" / "pythonw.exe").is_file(),
+                   "python/pythonw.exe (런처가 실행하는 파일)"))
+
+    for rel in ("main.py", "requirements.txt", "양식.xlsx"):
+        checks.append(((app / rel).is_file(), f"app/{rel}"))
+    checks.append(((pkg / "app" / "ui" / "style.qss").is_file(),
+                   "app/aoi_verification/app/ui/style.qss"))
+    checks.append(((pkg / "app" / "ui" / "assets" / "logo.ico").is_file(),
+                   "app/aoi_verification/app/ui/assets/logo.ico"))
+    # 앱 패키지가 '폴더만' 이 아니라 실제 코드 트리인지 — 모듈 수로 확인.
+    py_count = len(list(pkg.rglob("*.py"))) if pkg.is_dir() else 0
+    checks.append((py_count >= 50,
+                   f"app/aoi_verification 파이썬 모듈 {py_count}개 (50개 이상)"))
+
+    # VERSION — 자동 업데이트 식별자가 유효한 JSON 인지.
+    vf = app / "VERSION"
+    ver_ok = False
+    if vf.is_file():
+        try:
+            import json
+            data = json.loads(vf.read_text(encoding="utf-8"))
+            ver_ok = isinstance(data, dict) and "sha" in data and "branch" in data
+        except Exception:
+            ver_ok = False
+    checks.append((ver_ok, "app/VERSION (sha·branch 를 가진 JSON)"))
+
+    checks.append((not (app / ".git").exists(), "app/.git 없음 (체크아웃 동봉 방지)"))
+    checks.append((not (out / "app.new").exists(), "app.new 없음 (업데이트 찌꺼기 방지)"))
+
+    # 의존성 표식 — 없으면 '새 패키지가 필요한 업데이트' 를 감지하지 못한다.
+    checks.append(((out / ".deps_installed").is_file(),
+                   ".deps_installed (의존성 표식 — 업데이트 감지의 전제)"))
+
+    # 모델 가중치 — 사내망에선 런타임 다운로드가 막힐 수 있어 동봉이 필수.
+    ckpt = out / "runtime" / "torch" / "hub" / "checkpoints"
+    n_ckpt = len(list(ckpt.glob("*.pth"))) if ckpt.is_dir() else 0
+    checks.append((n_ckpt >= 2, f"runtime/torch 가중치 {n_ckpt}개 (2개 이상)"))
+
+    size_mb = _dir_size_mb(out)
+    checks.append((size_mb > 800, f"총 용량 {size_mb:.0f} MB (800 MB 이상이어야 정상)"))
+    return checks
+
+
+def import_probe_cmd(out: Path) -> List[str]:
+    """번들 파이썬이 **실제로 앱을 import 할 수 있는지** 확인하는 명령.
+
+    폴더가 있다는 것만으로는 증명되지 않는 것을 증명한다(옛 검증의 빈틈)."""
+    app = out / "app"
+    src = (
+        "import sys; sys.path.insert(0, r'%s');"
+        "import PyQt6.QtWidgets, cv2, numpy, PIL, openpyxl;"
+        "from aoi_verification.app.utils import updater, paths;"
+        "assert updater.DEFAULT_BRANCH" % str(app)
+    )
+    return [str(out / "python" / "python.exe"), "-c", src]
+
+
+def verify_exe(repo_root: Path = REPO_ROOT, log: Callable = print,
+               run: Optional[Callable] = None) -> int:
+    """'exe + app 폴더' 산출물 검증.  빌드 직후 자동 실행되며 수동 호출도 가능:
+    ``python scripts/build.py verify``."""
+    out = repo_root / EXE_OUT_DIRNAME
+    log("[verify] exe + app 폴더 산출물 검증 ...")
+    checks = verify_checks(out)
     passed = 0
+    for good, label in checks:
+        log(("  [OK] " if good else "  [!!] ") + label)
+        passed += 1 if good else 0
 
-    def _check(condition: bool, label: str):
-        nonlocal ok, total, passed
-        total += 1
-        if condition:
-            passed += 1
-            log(f"  [OK] {label}")
-        else:
-            ok = False
-            log(f"  [!!] {label}")
+    # import 프로브 — Windows 빌드 머신에서만 의미가 있다(번들 런타임이 windows 바이너리).
+    probe_ok = True
+    if run is not None and (out / "python" / "python.exe").is_file():
+        probe_ok = run(import_probe_cmd(out)) == 0
+        log(("  [OK] " if probe_ok else "  [!!] ")
+            + "번들 파이썬으로 앱 import 성공 (폴더 존재로는 증명 못 하는 것)")
+        passed += 1 if probe_ok else 0
+        checks.append((probe_ok, "import probe"))
 
-    log("[verify] windows 빌드 산출물 검증 ...")
-
-    # 1) exe 존재
-    _check(exe.is_file(), f"AOI_Verify.exe 존재 ({exe})")
-
-    # _internal 폴더 (PyInstaller onedir 의 번들 루트)
-    bundle = internal if internal.is_dir() else dist
-    _check(internal.is_dir(), "_internal/ 폴더 존재")
-
-    # 2) 리소스 파일
-    qss = bundle / "aoi_verification" / "app" / "ui" / "style.qss"
-    _check(qss.is_file(), "style.qss (스타일시트)")
-    xlsx = bundle / "양식.xlsx"
-    _check(xlsx.is_file(), "양식.xlsx (엑셀 템플릿)")
-
-    # 3) 앱 패키지
-    app_pkg = bundle / "aoi_verification"
-    _check(app_pkg.is_dir(), "aoi_verification/ 패키지")
-
-    # 4) 핵심 의존성 — PyInstaller 가 수집한 패키지 폴더/pyd/dll 존재 확인
-    _core_deps = {
-        "PyQt6": ["PyQt6"],
-        "cv2 (OpenCV)": ["cv2"],
-        "numpy": ["numpy"],
-        "PIL (Pillow)": ["PIL"],
-        "openpyxl": ["openpyxl"],
-    }
-    _optional_deps = {
-        "torch": ["torch"],
-        "openvino": ["openvino"],
-    }
-    for label, candidates in _core_deps.items():
-        found = any((bundle / c).is_dir() for c in candidates)
-        _check(found, f"{label} (필수)")
-
-    for label, candidates in _optional_deps.items():
-        found = any((bundle / c).is_dir() for c in candidates)
-        if found:
-            log(f"  [OK] {label} (고효율 모드)")
-        else:
-            log(f"  [--] {label} (미포함 — INCLUDE_EFFICIENCY=False 이면 정상)")
-
-    # 5) 용량 확인 (너무 작으면 빌드 불완전)
-    if dist.is_dir():
-        size_mb = sum(f.stat().st_size for f in dist.rglob("*") if f.is_file()) / (1024 * 1024)
-        _check(size_mb > 100, f"총 용량 {size_mb:.0f} MB (100 MB 이상이어야 정상)")
-
-    log(f"[verify] 결과: {passed}/{total} 통과" +
+    ok = passed == len(checks)
+    log(f"[verify] 결과: {passed}/{len(checks)} 통과" +
         (" — 빌드 정상!" if ok else " — 위 [!!] 항목을 확인하세요."))
     return 0 if ok else 1
 
 
 _ACTIONS = {
     "online": build_online,
-    "windows": build_windows,
+    "exe": build_exe,
     "portable": build_portable,
-    "verify": lambda run=_default_run, log=print: verify_windows(REPO_ROOT, log),
+    "verify": lambda run=_default_run, log=print: verify_exe(REPO_ROOT, log, run=run),
 }
 
 
 def _usage() -> str:
     return (
-        "사용법: python scripts/build.py <online|portable|windows|verify>\n"
-        "  online    작은 온라인 launcher exe (권장) — 첫 실행 시 인터넷으로 앱/패키지 설치\n"
-        "  portable  자체 포함 CPython 폴더 (인터넷 없는 PC)\n"
-        "  windows   단독 exe (PyInstaller, 전부 동봉)\n"
-        "  verify    windows 빌드 산출물 검증 (빌드 후 자동 실행됨)\n"
-        "예) python scripts/build.py online")
+        "사용법: python scripts/build.py <exe|portable|online|verify>\n"
+        "  exe       exe + app 폴더 (권장) — 파이썬 미설치 PC, 자동 업데이트 완전 동작\n"
+        "  portable  자체 포함 CPython 폴더 (.bat 실행 — exe 가 백신에 막힐 때)\n"
+        "  online    작은 온라인 launcher exe — 첫 실행 시 인터넷으로 앱/패키지 설치\n"
+        "            ※ 사내망처럼 PyPI 가 막힌 곳에서는 쓸 수 없다\n"
+        "  verify    exe 빌드 산출물 검증 (빌드 후 자동 실행됨)\n"
+        "예) python scripts/build.py exe")
 
 
-_MENU = [("online", "작은 온라인 launcher exe (권장)"),
-         ("portable", "자체 포함 CPython 폴더 (인터넷 없는 PC)"),
-         ("windows", "단독 exe (전부 동봉)"),
-         ("verify", "windows 빌드 산출물 검증")]
+_MENU = [("exe", "exe + app 폴더 (권장, 자동 업데이트 완전 동작)"),
+         ("portable", "자체 포함 CPython 폴더 (.bat 실행)"),
+         ("online", "작은 온라인 launcher exe (PyPI 접속 필요)"),
+         ("verify", "exe 빌드 산출물 검증")]
 
 
 def _prompt_kind(input_fn=input) -> Optional[str]:

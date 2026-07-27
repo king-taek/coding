@@ -344,7 +344,10 @@ class MainWindow(QMainWindow):
             msg = i18n.KO.UPDATE_FAILED
             try:
                 from ..utils import updater
-                if updater.last_error():
+                if updater.deps_blocked():
+                    # 실패가 아니라 '의도적 보류' 다 — 무엇을 받아야 하는지 정확히 알린다.
+                    msg = i18n.KO.UPDATE_NEEDS_NEW_BUNDLE
+                elif updater.last_error():
                     msg = f"{msg}\n\n[원인] {updater.last_error()}"
             except Exception:
                 pass
@@ -355,7 +358,9 @@ class MainWindow(QMainWindow):
         msg = i18n.KO.UPDATE_DONE_RESTART
         try:
             from ..utils import updater
-            if updater.deps_changed():       # 필요한 패키지 목록이 바뀐 경우 갱신 안내 추가
+            if updater.update_pending():     # exe 모드 — 교체는 다음 실행 때 런처가 한다
+                msg = i18n.KO.UPDATE_DONE_RESTART_STAGED
+            elif updater.deps_changed():     # 필요한 패키지 목록이 바뀐 경우 갱신 안내 추가
                 msg = msg + i18n.KO.UPDATE_DEPS_CHANGED
         except Exception:
             pass
