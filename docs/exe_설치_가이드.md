@@ -112,6 +112,19 @@ REM 또는: scripts\internal\build_exe.bat
 - 검증은 특히 **`_internal\` 폴더가 없는지**(=앱이 exe 안에 얼려지지 않았는지)와, 번들
   파이썬으로 **실제 앱 import 가 되는지**를 확인한다.
 
+### C-1-b. 배포용 zip 만들기
+```powershell
+python scripts\make_release_zip.py
+```
+- 산출물: **`dist\AOI_Verify_<날짜>_<커밋7자리>.zip`** — **이 파일 하나만 전달**하면 된다.
+  (이름에 날짜·커밋이 박혀 있어 누구에게 어느 버전을 줬는지 나중에 추적할 수 있다.)
+- 하는 일: 산출물을 **다시 검증** → `설치방법.txt` 작성 → zip.
+  **검증을 통과하지 못하면 zip 을 만들지 않는다** — 깨진 배포본(특히 앱이 exe 안에 얼려
+  들어간 것)을 사용자에게 보내는 사고를 여기서 막는다.
+- 제외되는 것: 업데이트 찌꺼기(`app.new`·`app.old`), 빌드 머신에서 시험 실행한 `결과\`,
+  `app\` 안의 `__pycache__`.
+- 압축을 풀면 `AOI_Verify\` 폴더 하나가 생기고, 그 안에 `설치방법.txt` 가 들어 있다.
+
 ### C-2. 설치/실행 (받는 사람)
 1. 받은 zip 을 **짧은 경로**에 압축 해제(예: `C:\AOI_Verify`).
 2. `AOI_Verify\AOI_Verify.exe` **더블클릭**(파이썬 설치 불필요).
@@ -160,6 +173,7 @@ REM 또는: scripts\internal\build_exe.bat
 | 파일 | 역할 |
 |---|---|
 | `scripts\build.py` | 빌드 진입점(파이썬) — `exe`/`portable`/`online`/`verify` |
+| `scripts\make_release_zip.py` | **C. 배포용 zip 생성** — 검증 + `설치방법.txt` 동봉 |
 | `scripts\exe_launcher.py` | **C. 런처 진입점** — 대기 중 업데이트 교체 + 앱 실행. 앱 코드 0줄 |
 | `scripts\internal\build_exe.bat` · `exe_launcher.spec` | C. exe + app 폴더 빌드 |
 | `scripts\internal\portable_build.py` · `make_portable.bat` | B·C. 런타임·앱 배치(C 가 재사용) |

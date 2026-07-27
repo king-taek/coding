@@ -149,6 +149,9 @@ def build_exe(run: Callable = _default_run, log: Callable = print) -> int:
     vrc = verify_exe(REPO_ROOT, log, run=run)
     if vrc != 0:
         log("[주의] 빌드는 완료됐지만 검증에서 누락 항목이 발견되었습니다.")
+        return vrc
+    log("")
+    log("[다음] 배포용 zip 만들기:  python scripts\\make_release_zip.py")
     return vrc
 
 

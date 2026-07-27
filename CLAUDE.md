@@ -197,7 +197,8 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
 
 ## 파일 구성 관습
 - 문서는 `docs/`. 사용자가 실행하는 스크립트는 `scripts/`(`run_aoi*.bat`·`run_this_before.py`·
-  `update_app.bat`·`build.py`·`launcher.py`·`exe_launcher.py`). 빌드/내부 도구는 `scripts/internal/`
+  `update_app.bat`·`build.py`·`make_release_zip.py`·`launcher.py`·`exe_launcher.py`).
+  빌드/내부 도구는 `scripts/internal/`
   (`*.spec`·`build_exe.bat`·`build_online.bat`·`make_portable.bat`·`portable_build.py`·
   `verify_no_forbidden.py`). 경로를 바꾸면 이를 호출하는 곳(run_this_before·빌드 bat·README·문서)도
   함께 고친다.
