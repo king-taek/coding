@@ -1,13 +1,15 @@
-"""KLA 폴더의 slot명(WaferID) 해석 — **파일명 우선, OCR 폴백**.
+"""KLA 폴더의 slot명(WaferID) 해석 — **정보파일 우선, OCR 폴백**.
 
-KLA 장비 사진의 slot명(WaferID)은 보통 **파일명 앞부분**에 들어 있다.
-  예) ``W6459153XYF5_3_0_23_1.jpg`` → ``W6459153XYF5``
-파일명이 WaferID 형식이 아닌 경우(예) ``FrontSideADRImg_544131.jpg``) 에는
-이미지 좌상단 헤더의 ``WaferID : XXXX`` 텍스트를 **OCR**(RapidOCR) 로 읽는다.
-사진이 한 장도 없는 폴더는 매칭하지 않고 ‘사진파일 없음’ 으로 둔다.
+KLA 결과 폴더에는 사진 외에 정보파일이 1~2개 있고, 그 헤더에 slot명(WaferID)이
+``WaferID "W6459076XYG1";`` 형태로 **명시돼 있다**.  이 값을 1순위로 쓴다
+(파서: :func:`..coords.kla_info.read_wafer_id`).  정보파일이 없거나 WaferID 줄이
+없으면 이미지 좌상단 헤더의 ``WaferID : XXXX`` 텍스트를 **OCR**(RapidOCR) 로 읽는다.
+
+정보파일은 사진과 무관하게 읽히므로 **사진이 한 장도 없는 폴더도 식별**된다 —
+사진 파일명 추측이나 OCR 로는 불가능했던 경우다.
 
 해석된 WaferID 는 **매칭 키로만** 쓰고 어디에도 영속 저장하지 않는다(병합 시
-일시 사용).  매칭 이후(검토/엑셀)는 원본 폴더명을 그대로 쓴다.
+일시 사용).  매칭 이후(검토/엑셀)는 병합된 slot명을 쓴다.
 
 OCR 엔진은 RapidOCR(``rapidocr-onnxruntime``) — 인식 모델(ONNX)이 패키지에 내장돼
 런타임 다운로드가 없다(오프라인/폐쇄망 안전).  미설치면 ``ocr_available()`` 이
@@ -21,54 +23,7 @@ from pathlib import Path
 from typing import Optional
 
 # ---------------------------------------------------------------------------
-# 1) 파일명에서 slot명(WaferID) 파싱 — 형식 검증 없이 'prefix 그대로' 읽는다.
-#    (먼저 이 값으로 매칭을 시도하고, 매칭이 안 되면 호출부가 OCR 로 폴백)
-# ---------------------------------------------------------------------------
-def parse_wafer_id_from_filename(name) -> Optional[str]:
-    """파일명 첫 ``_`` 앞 토큰을 slot명 후보로 그대로 반환(대문자).
-
-    **형식 검증을 하지 않는다** — 일단 파일명에서 읽은 값으로 매칭을 시도하고,
-    매칭이 안 되면 호출부가 OCR 로 폴백한다(사용자 요청).
-    예) ``W6459153XYF5_3_0_23_1.jpg`` → ``W6459153XYF5``,
-        ``FrontSideADRImg_544131.jpg`` → ``FRONTSIDEADRIMG`` (매칭 실패 시 OCR)."""
-    stem = Path(str(name)).stem
-    token = stem.split("_", 1)[0].strip()
-    return token.upper() if token else None
-
-
-def looks_like_wafer_id(token) -> bool:
-    """토큰이 WaferID 처럼 보이는지 — **OCR 필요 여부 판단에만** 사용(매칭엔 미사용).
-
-    파일명 prefix 가 WaferID 형식이면(영숫자 8~20, 숫자≥3·영문≥2) 그 값을 신뢰하고
-    OCR 을 건너뛴다.  ``FrontSideADRImg`` 처럼 숫자 없는 라벨이면 False → OCR 로
-    이미지 헤더의 실제 WaferID 를 읽는다."""
-    if not token:
-        return False
-    t = str(token)
-    if not t.isalnum() or not (8 <= len(t) <= 20):
-        return False
-    n_dig = sum(c.isdigit() for c in t)
-    n_alpha = sum(c.isalpha() for c in t)
-    return n_dig >= 3 and n_alpha >= 2
-
-
-def folder_wafer_id_from_filenames(paths) -> Optional[str]:
-    """폴더 이미지 파일명들의 prefix 토큰을 다수결로 골라 slot명 후보로 반환.
-
-    같은 폴더 사진은 보통 동일 prefix 이므로 다수결로 안정화한다.  이미지가
-    없으면 None."""
-    votes: dict[str, int] = {}
-    for p in paths:
-        wid = parse_wafer_id_from_filename(getattr(p, "name", None) or Path(str(p)).name)
-        if wid:
-            votes[wid] = votes.get(wid, 0) + 1
-    if not votes:
-        return None
-    return max(votes.items(), key=lambda kv: kv[1])[0]
-
-
-# ---------------------------------------------------------------------------
-# 2) OCR 폴백 (RapidOCR) — 이미지 좌상단 헤더의 'WaferID : XXXX' 판독
+# 1) OCR 폴백 (RapidOCR) — 이미지 좌상단 헤더의 'WaferID : XXXX' 판독
 # ---------------------------------------------------------------------------
 _DET_LIMIT_SIDE_LEN = 640          # 검출 입력 한 변 — 헤더 글자 검출 정확도↑(과거 320)
 # KLA 사진 **왼쪽 최상단** 헤더(Lot:/WaferID:/Gain:) 영역만 좁게 크롭(가로·세로를
@@ -206,7 +161,7 @@ def header_crop_image(path, top_frac: float = 0.09, left_frac: float = 0.25):
 
 
 # ---------------------------------------------------------------------------
-# 3) WaferID/폴더명 키로 ref_only ↔ val_only 병합
+# 2) WaferID/폴더명 키로 ref_only ↔ val_only 병합
 # ---------------------------------------------------------------------------
 def _norm_key(s) -> str:
     return str(s).strip().upper()
@@ -256,11 +211,20 @@ def merge_unmatched_by_wafer_id(sr, wid_by_ref: dict, wid_by_val: dict):
         vs = sr.slots.get(match_val)
         if ref_slot is None or vs is None:
             continue
-        merged = sr.slots.get(slot_name) or Slot(name=slot_name)
+        # slot명이 **무관한 기존 슬롯**과 겹치면 병합하지 않는다 — 겹친 채로 진행하면
+        # 그 슬롯의 사진을 덮어써 웨이퍼가 조용히 사라진다.  두 폴더는 ref_only/val_only
+        # 에 남아 수동 매핑으로 넘어간다(정확도 우선).
+        existing = sr.slots.get(slot_name)
+        if existing is not None and slot_name not in (ref_name, match_val):
+            continue
+        merged = existing or Slot(name=slot_name)
         merged.ref_images = [ImageItem(slot=slot_name, path=it.path, side="ref")
                              for it in ref_slot.ref_images]
         merged.val_images = [ImageItem(slot=slot_name, path=it.path, side="val")
                              for it in vs.val_images]
+        # 원본 폴더 경로를 옮겨 둔다 — 사진 0장 폴더의 정보파일을 나중에도 찾을 수 있게.
+        merged.ref_dir = ref_slot.ref_dir
+        merged.val_dir = vs.val_dir
         if ref_name != slot_name:
             sr.slots.pop(ref_name, None)
         if match_val != slot_name:

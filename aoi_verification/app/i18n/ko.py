@@ -470,8 +470,8 @@ REF_REUSE_BODY_FMT = (
     "예 — 해당 사진들을 자동으로 ‘검증 대상’ 으로 옮긴 상태에서 시작합니다.\n"
     "아니오 — 처음부터 직접 고릅니다."
 )
-# KLA slot 해석 단계 — 로딩창에 현재 진행 단계(파일명/OCR)를 실시간 표시.
-LOAD_KLA_FILENAME = "KLA slot 매칭 중 — 파일명 분석…"
+# KLA slot 해석 단계 — 로딩창에 현재 진행 단계(정보파일/OCR)를 실시간 표시.
+LOAD_KLA_INFO = "KLA slot 매칭 중 — 정보파일 분석…"
 LOAD_KLA_OCR_FMT = "KLA WaferID 판독 (OCR) 중… {done} / {total}"
 
 # slot 매칭 실패 시 'KLA 가 어느 쪽?' 확인 — 호기가 K-n 이면 자동, 아니면 묻는다.
