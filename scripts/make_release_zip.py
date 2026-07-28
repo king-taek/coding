@@ -22,14 +22,22 @@ from datetime import date
 from pathlib import Path, PurePosixPath
 from typing import Callable, List, Optional
 
+# 한글 출력이 깨지지 않도록 stdout/stderr 를 UTF-8 로(Windows cp949 대비).
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 # 이 스크립트는 scripts/ 안에 있다 → 저장소 루트는 부모.
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 INSTRUCTIONS_NAME = "설치방법.txt"
 
-# 빌드 폴더에 남아 있으면 안 되는 것 — 업데이트 찌꺼기와 개발 중 만들어진 산출물.
-# (`결과` 는 사용자 산출물 폴더라 빌드 머신에서 시험 실행한 엑셀이 딸려가면 안 된다.)
-_SKIP_TOP = {"app.new", "app.old", "app.new.part", "결과"}
+# 빌드 폴더에 남아 있으면 안 되는 것 — 업데이트 찌꺼기와 빌드 중 만들어진 산출물.
+# (`결과` 는 사용자 산출물 폴더라 빌드 머신에서 시험 실행한 엑셀이 딸려가면 안 된다.
+#  `python.tar.gz` 는 런타임 다운로드가 실패했을 때 남는 부분 파일이다.)
+_SKIP_TOP = {"app.new", "app.old", "app.new.part", "결과", "python.tar.gz"}
 
 
 # ---------------------------------------------------------------------------
@@ -196,25 +204,26 @@ def make_zip(repo_root: Path = REPO_ROOT, log: Callable = print,
     build = _load_build_module()
     out = repo_root / build.EXE_OUT_DIRNAME
 
-    if not out.is_dir():
-        log(f"[실패] 빌드 산출물이 없습니다: {out}")
-        log("       먼저 실행하세요:  python scripts\\build.py exe")
-        return 1
-
     # 1) 검증 — 깨진 배포본을 사용자에게 보내지 않기 위한 관문.
     log("[1/3] 배포본 검증 ...")
     bad = [label for good, label in build.verify_checks(out) if not good]
     if bad:
-        for label in bad:
-            log(f"  [!!] {label}")
+        # ★ 실패 항목만 나열하면 사용자는 '무엇이 없다' 만 알고 '무엇을 하라' 는 모른다.
+        #   빌드를 안 돌린 것 / 옛 산출물이 남은 것 / 중간에 실패한 것은 대응이 전혀 다르다.
         log("[실패] 검증을 통과하지 못했습니다 — zip 을 만들지 않습니다.")
-        log("       다시 빌드하세요:  python scripts\\build.py exe")
+        build.report_diagnosis(out, log)
+        log("")
+        log("       [참고] 확인되지 않은 항목:")
+        for label in bad:
+            log(f"         - {label}")
         return 1
     log("  [OK] 전 항목 통과")
 
     # 2) 설치법 — 폴더에도 남긴다(폴더째 복사해 주는 경우에도 보이도록).
     log("[2/3] 설치법 작성 ...")
-    (out / INSTRUCTIONS_NAME).write_text(instructions_text(), encoding="utf-8")
+    # BOM 있는 UTF-8 — 없으면 구버전 메모장이 cp949 로 읽어 한글이 깨진다.
+    # 사용자에게 나가는 유일한 안내 문서라 이게 깨지면 안 된다.
+    (out / INSTRUCTIONS_NAME).write_text(instructions_text(), encoding="utf-8-sig")
 
     # 3) zip — 최상위에 AOI_Verify\ 폴더가 오게 담는다(풀면 폴더 하나가 생긴다).
     version = read_version(out)

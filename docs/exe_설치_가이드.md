@@ -96,6 +96,17 @@ REM 또는: scripts\internal\make_portable.bat
 python scripts\build.py exe
 REM 또는: scripts\internal\build_exe.bat
 ```
+
+> **빌드는 30분 이상 걸린다**(torch·openvino 설치 + CPython 런타임 다운로드).
+> 화면 버퍼를 넘겨 원인을 놓치기 쉬우니 **로그를 파일로 남기는 것을 권한다**:
+> ```powershell
+> python scripts\build.py exe 2>&1 | Tee-Object -FilePath dist\build.log
+> ```
+> 실패하면 이 파일만 보내면 어느 단계에서 멈췄는지 알 수 있다.
+> (로그를 `dist\AOI_Verify\` **안에는 두지 말 것** — 배포 zip 에 딸려 들어간다.)
+>
+> 옛 방식(단독 exe)으로 빌드한 적이 있어도 괜찮다 — 빌드가 시작할 때 옛 산출물
+> (`_internal\` 등)을 자동으로 정리한다. 무거운 `python\`·`runtime\` 은 재사용한다.
 - 산출물: **`dist\AOI_Verify\`** 폴더(통째로 zip 배포, ~1.5GB).
   ```
   AOI_Verify\
