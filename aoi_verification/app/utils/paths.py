@@ -112,17 +112,38 @@ def session_cache_dir() -> Path:
     return d
 
 
+def _exe_install_root() -> Path | None:
+    """'exe + app 폴더' 설치 루트.  개발/포터블이면 None.
+
+    런처가 넘겨주는 ``AOI_APP_HOME`` 이 1순위지만, **백신이 서명 없는 exe 를 막아
+    ``run_aoi.bat`` 으로 켜는 경우**에는 그 변수가 없다(설치방법.txt 가 그 방법을
+    안내한다).  그때는 레이아웃 자체로 판정한다 — 안 그러면 결과 엑셀이 ``app\\`` 안에
+    쌓이고 다음 업데이트 교체 때 통째로 사라진다.
+
+    ※ ``updater._install_root()`` 는 이 함수를 쓰면 안 된다.  거기서 판단하는 것은
+      '설치 루트가 어디냐' 가 아니라 '**교체해 줄 런처가 있느냐**' 이고, 포터블에는
+      런처가 없다.  레이아웃으로 판정하면 포터블이 ``app.new`` 에 스테이징만 하고
+      영원히 적용되지 않는다."""
+    home = os.environ.get("AOI_APP_HOME")
+    if home:
+        return Path(home)
+    root = _project_root().parent          # app/ 의 부모 = 설치 루트 후보
+    if (root / "AOI_Verify.exe").is_file() and (root / "python").is_dir():
+        return root
+    return None
+
+
 def bundled_torch_home() -> Path | None:
     """동봉된 torchvision 모델 가중치 폴더(``runtime/torch``) — exe 설치에서만.
 
     앱은 첫 매칭 때 ImageNet 가중치를 ``download.pytorch.org`` 에서 받는데, 사내망은 이
-    경로가 막혀 있을 수 있다(PyPI 도 막혀 있다).  그래서 빌드 때 미리 받아 동봉하고
-    ``TORCH_HOME`` 을 여기로 돌린다.  **``app\\`` 바깥**이라 업데이트 교체에 쓸리지 않는다.
+    경로가 막혀 있을 수 있다.  그래서 빌드 때 미리 받아 동봉하고 ``TORCH_HOME`` 을
+    여기로 돌린다.  **``app\\`` 바깥**이라 업데이트 교체에 쓸리지 않는다.
     동봉본이 없으면(개발/포터블) None — 기존 동작(사용자 홈 캐시) 그대로."""
-    home = os.environ.get("AOI_APP_HOME")
-    if not home:
+    root = _exe_install_root()
+    if root is None:
         return None
-    d = Path(home) / "runtime" / "torch"
+    d = root / "runtime" / "torch"
     return d if d.is_dir() else None
 
 
@@ -160,10 +181,11 @@ def template_path() -> Path:
 def results_dir() -> Path:
     """결과 엑셀이 저장될 기본 폴더 — 프로젝트 루트의 ‘결과’ 폴더에 자동 생성한다.
 
-    단 'exe + app 폴더' 설치(런처가 ``AOI_APP_HOME`` 을 넘겨준 경우)에서는 **설치 루트
-    바로 아래**(=``app\\`` 바깥)에 둔다.  자동 업데이트가 ``app\\`` 을 통째로 새 트리로
-    교체하므로, 안에 두면 사용자가 만든 결과 파일이 업데이트 때 사라진다."""
-    home = os.environ.get("AOI_APP_HOME")
-    d = (Path(home) if home else _project_root()) / "결과"
+    단 'exe + app 폴더' 설치에서는 **설치 루트 바로 아래**(=``app\\`` 바깥)에 둔다.
+    자동 업데이트가 ``app\\`` 을 통째로 새 트리로 교체하므로, 안에 두면 사용자가 만든
+    결과 파일이 업데이트 때 사라진다.  ``run_aoi.bat`` 으로 켜서 ``AOI_APP_HOME`` 이
+    없는 경우까지 포함해 판정해야 한다(`_exe_install_root`)."""
+    root = _exe_install_root()
+    d = (root if root is not None else _project_root()) / "결과"
     d.mkdir(parents=True, exist_ok=True)
     return d

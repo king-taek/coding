@@ -135,3 +135,59 @@ def test_bundled_torch_home_only_when_present(tmp_path, monkeypatch):
     assert paths.bundled_torch_home() is None          # 폴더가 아직 없다
     (tmp_path / "runtime" / "torch").mkdir(parents=True)
     assert paths.bundled_torch_home() == tmp_path / "runtime" / "torch"
+
+
+def test_results_stay_outside_app_even_without_the_env_var(tmp_path, monkeypatch):
+    """★ 백신 때문에 run_aoi.bat 으로 켜면 AOI_APP_HOME 이 없다.
+
+    그때 결과가 app\\결과 로 떨어지면, 다음 업데이트에서 런처가 app.old 를 지울 때
+    사용자 결과 엑셀이 통째로 사라진다. 레이아웃으로도 설치 루트를 알아내야 한다."""
+    from aoi_verification.app.utils import paths
+    monkeypatch.delenv("AOI_APP_HOME", raising=False)
+    (tmp_path / "AOI_Verify.exe").write_bytes(b"x")     # exe 배포본의 지문
+    (tmp_path / "python").mkdir()
+    monkeypatch.setattr(paths, "_project_root", lambda: tmp_path / "app")
+
+    assert paths._exe_install_root() == tmp_path
+    assert paths.results_dir() == tmp_path / "결과"      # app\ 바깥
+
+
+def test_layout_detection_does_not_fire_for_dev_or_portable(tmp_path, monkeypatch):
+    """개발·포터블에는 AOI_Verify.exe 가 없다 — 오탐하면 결과 위치가 엉뚱해진다."""
+    from aoi_verification.app.utils import paths
+    monkeypatch.delenv("AOI_APP_HOME", raising=False)
+    (tmp_path / "python").mkdir()                        # 포터블: python\ 은 있지만 exe 없음
+    monkeypatch.setattr(paths, "_project_root", lambda: tmp_path / "app")
+    assert paths._exe_install_root() is None
+    assert paths.results_dir() == tmp_path / "app" / "결과"
+
+
+def test_updater_install_root_stays_env_only():
+    """★ updater 는 레이아웃으로 판정하면 안 된다.
+
+    거기서 묻는 것은 '설치 루트가 어디냐' 가 아니라 '교체해 줄 런처가 있느냐' 다.
+    포터블에는 런처가 없으므로, 레이아웃으로 판정하면 업데이트가 app.new 에 고여
+    영원히 적용되지 않는다."""
+    from pathlib import Path as _P
+    src = (_P(__file__).resolve().parents[2] / "aoi_verification" / "app" /
+           "utils" / "updater.py").read_text(encoding="utf-8")
+    i = src.index("def _install_root(")
+    body = src[i:i + 600]
+    assert "_APP_HOME_ENV" in body
+    assert "_exe_install_root" not in body, "updater 가 레이아웃 판정을 끌어다 썼다"
+
+
+def test_run_bats_isolate_from_the_pcs_own_packages():
+    """bat 실행 경로도 번들만 쓰게 해야 한다 — 그리고 이 파일들은 app\\ 바깥이라
+    자동 업데이트로 고칠 수 없다(재빌드·재배포가 필요하다)."""
+    from pathlib import Path as _P
+    root = _P(__file__).resolve().parents[2] / "scripts"
+    for name in ("run_aoi.bat", "run_aoi_debug.bat"):
+        text = (root / name).read_text(encoding="utf-8")
+        assert "PYTHONNOUSERSITE=1" in text, name
+        # 포터블도 같은 파일을 쓴다 — AOI_APP_HOME 을 **설정하면** 포터블 업데이트가
+        # app.new 에 고여 영원히 적용되지 않는다.  (주석에 이름이 나오는 건 무방하다.)
+        sets = [ln for ln in text.splitlines()
+                if ln.strip().lower().startswith("set ")]
+        assert not any("AOI_APP_HOME" in ln for ln in sets), \
+            f"{name} 이 AOI_APP_HOME 을 설정해 포터블 업데이트를 망가뜨린다"
