@@ -453,14 +453,12 @@ def test_bundled_python_is_never_run_with_user_site(tmp_path):
     assert bundled, "동봉 파이썬을 한 번도 부르지 않았다 — 테스트가 무의미하다"
     # 개발 PC 검사용 가드 한 번만 예외다(일부러 격리를 풀어 user site 를 본다).
     # 나머지 — 특히 pip — 는 전부 격리돼야 한다.
-    unisolated = [c for c in bundled if c[1] != "-s"]
-    assert len(unisolated) == 1 and "verify_no_forbidden" in unisolated[0][1], \
-        f"user site 격리 없이 동봉 파이썬 호출: {unisolated}"
-    assert all("pip" not in c for c in unisolated[0]), "pip 이 격리 없이 돌았다"
+    for cmd in bundled:
+        assert cmd[1] == "-s", f"user site 격리 없이 동봉 파이썬 호출: {cmd}"
 
 
-def test_guard_checks_both_the_bundle_and_the_dev_machine(tmp_path):
-    """배포될 번들과 개발 PC 를 **따로** 검사한다(사용자 결정)."""
+def test_run_build_guards_only_the_bundle(tmp_path):
+    """run_build 는 배포될 번들만 검사한다 — 개발 PC 검사는 무거운 단계 **앞**에서 한다."""
     repo = _stub_repo(tmp_path)
     out = _prepared_bundle(tmp_path)
     ppy = str(portable.portable_python(out))
@@ -471,9 +469,8 @@ def test_guard_checks_both_the_bundle_and_the_dev_machine(tmp_path):
                        log=lambda *a: None)
 
     guards = [c for c in calls if any("verify_no_forbidden" in x for x in c)]
-    assert len(guards) == 2, f"가드가 {len(guards)}번 — 번들/개발PC 두 번이어야 한다"
-    isolated = [c for c in guards if "-s" in c]
-    assert len(isolated) == 1, "번들 검사(-s)와 개발 PC 검사(-s 없음)가 하나씩이어야 한다"
+    assert len(guards) == 1, "run_build 는 **번들만** 검사한다(개발 PC 검사는 앞단계)"
+    assert "-s" in guards[0], "번들 검사가 개발 PC 의 user site 를 보면 안 된다"
 
 
 def test_build_fails_when_pip_installed_nothing_into_the_bundle(tmp_path):
@@ -533,3 +530,34 @@ def test_build_exe_does_not_guess_when_run_build_already_reported(monkeypatch, t
     joined = "\n".join(logs)
     assert "[FAILED]" in joined or "확인하세요" in joined
     assert "진단" not in joined, "이미 사유가 나온 자리에서 추측 진단을 덧붙였다"
+
+
+def test_dev_machine_is_checked_before_the_expensive_steps(monkeypatch, tmp_path):
+    """★ 순서 회귀 가드 — 개발 PC 검사가 뒤에 있으면 사용자는 CPython 다운로드와
+    2~3 GB pip 설치로 30분 이상을 태운 **뒤에야** 같은 실패를 다시 본다."""
+    out = _sandbox_build(monkeypatch, tmp_path)
+    monkeypatch.setattr(build, "_load_portable_impl",
+                        lambda: (_ for _ in ()).throw(
+                            AssertionError("개발 PC 검사 전에 무거운 단계로 갔다")))
+    calls = []
+
+    def _run(cmd, cwd=None):
+        joined = " ".join(str(x) for x in cmd)
+        calls.append(joined)
+        return 1 if "verify_no_forbidden" in joined else 0
+
+    monkeypatch.setattr(build, "dev_python", lambda: __import__("sys").executable)
+    logs = []
+    assert build.build_exe(run=_run, log=logs.append) != 0
+    # 가드가 첫 명령들 중 하나여야 한다 — PyInstaller 나 pip 보다 앞.
+    assert any("verify_no_forbidden" in c for c in calls)
+    assert not any("PyInstaller" in c for c in calls), "런처 빌드까지 갔다"
+    assert any("개발 PC" in m for m in logs)
+
+
+def test_dev_python_points_at_the_venv_base(tmp_path):
+    """venv 는 user site 를 안 본다 — 개발 PC 를 보려면 그 venv 의 원본을 봐야 한다."""
+    import sys as _sys
+    p = build.dev_python()
+    assert str(_sys.base_prefix) in p
+    assert p.endswith("python.exe") or p.endswith("python3")

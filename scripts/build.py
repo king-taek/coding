@@ -230,13 +230,36 @@ def preflight(repo_root: Path, log: Callable = print,
 def _default_run(cmd: List[str], cwd: Optional[Path] = None) -> int:
     # 시각을 찍는다 — 30분짜리 빌드에서 '어디서 멈췄나' 는 결국 '언제 멈췄나' 로 판단한다.
     print(f">> [{time.strftime('%H:%M:%S')}]", " ".join(str(c) for c in cmd), flush=True)
-    # 심층 방어 — argv 의 `-s` 와 달리 **자식 프로세스까지 상속**된다(pip 이 띄우는
-    # 빌드 백엔드 등).  동봉 파이썬이 개발 PC 의 user site 를 보면 pip 이 전 패키지를
-    # 'already satisfied' 로 건너뛰어 빈 번들이 나온다.  venv 는 원래 user site 를 안
-    # 보므로 여기 일괄로 걸어도 무해하다.
-    env = dict(os.environ, PYTHONNOUSERSITE="1")
-    return subprocess.call([str(c) for c in cmd],
-                           cwd=str(cwd) if cwd else None, env=env)
+    # ※ 여기서 PYTHONNOUSERSITE 를 일괄로 걸지 않는다.  격리는 argv 의 `-s` 로 한다
+    #   (`portable_build._isolated`) — 그래야 테스트가 관찰할 수 있고, **개발 PC 환경을
+    #   일부러 검사하는 가드**(user site 를 봐야 한다)를 막지 않는다.
+    return subprocess.call([str(c) for c in cmd], cwd=str(cwd) if cwd else None)
+
+
+def dev_python() -> str:
+    """개발 PC 의 '진짜' 파이썬 — venv 의 base 인터프리터.
+
+    빌드는 보통 저장소 `.venv` 로 돌아가는데, venv 는 user site 를 보지 않는다.
+    개발 PC 에 무엇이 깔려 있는지 보려면 그 venv 가 만들어진 원본을 봐야 한다."""
+    base = Path(sys.base_prefix)
+    return str(base / "python.exe" if os.name == "nt" else base / "bin" / "python3")
+
+
+def check_dev_machine(run: Callable, log: Callable) -> int:
+    """개발 PC 환경(user site 포함)에 금지 패키지가 있는지 — **무거운 단계 전에** 본다.
+
+    ★ 순서가 핵심이다.  이 검사가 뒤에 있으면 사용자는 CPython 다운로드와 2~3 GB
+    pip 설치로 30분 이상을 태운 **뒤에야** 같은 실패를 다시 본다."""
+    py = dev_python()
+    if not Path(py).exists():
+        return 0                      # 판단 불가 — 막지 않는다
+    log("[check] 개발 PC 환경 검사 (회사 보안 정책) ...")
+    if run(guard_cmd(py)) != 0:
+        log("[실패] 개발 PC 에 금지 패키지가 있습니다.")
+        log("       배포본에는 들어가지 않지만 회사 정책상 제거해야 합니다.")
+        log("       위 [금지] 메시지가 알려주는 경로와 명령을 그대로 쓰세요.")
+        return 1
+    return 0
 
 
 def _ensure_venv(run: Callable, log: Callable) -> str:
@@ -279,6 +302,8 @@ def build_exe(run: Callable = _default_run, log: Callable = print) -> int:
     out = REPO_ROOT / EXE_OUT_DIRNAME
     # ⓪ 30분을 버리기 전에 점검하고, 옛 산출물을 정리한다.
     if preflight(REPO_ROOT, log) != 0:
+        return 1
+    if check_dev_machine(run, log) != 0:
         return 1
     if clean_stale_output(out, log) != 0:
         return 1
@@ -341,6 +366,8 @@ def _load_portable_impl():
 def build_portable(run: Callable = _default_run, log: Callable = print) -> int:
     """자체 포함 CPython 폴더 빌드(인터넷 없는 PC 용).  네이티브 다운로드/압축은
     portable_build.run_build 에 위임 — 무거워서 실제 실행은 Windows 에서만."""
+    if check_dev_machine(run, log) != 0:      # exe 모드와 같은 검사를 같은 시점에
+        return 1
     impl = _load_portable_impl()
     return impl.run_build(REPO_ROOT, PY_STANDALONE_URL, run=run, log=log)
 

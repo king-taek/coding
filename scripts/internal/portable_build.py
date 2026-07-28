@@ -242,17 +242,13 @@ def run_build(repo_root: Path, py_url: str,
         log("         (이대로 배포하면 사용자 PC 에서 앱이 아예 뜨지 않습니다.)")
         return 1
 
-    guard = repo_root / "scripts" / "internal" / "verify_no_forbidden.py"
     # 배포되는 번들 자체를 검사한다(개발 PC 의 user site 는 -s 로 배제).
+    # 개발 PC 환경 검사는 `build.check_dev_machine` 이 **무거운 단계 전에** 따로 한다 —
+    # 여기서 하면 사용자가 2~3 GB 를 받은 뒤에야 같은 실패를 다시 보게 된다.
+    guard = repo_root / "scripts" / "internal" / "verify_no_forbidden.py"
     if run(_isolated(ppy, guard)) != 0:
         log("[FAILED] 보안 가드 — **배포될 번들** 에 금지 패키지가 있습니다.")
         log("         위 [금지] 메시지의 안내를 따르세요.")
-        return 1
-    # 개발 PC 환경도 검사한다(user site 포함).  배포물에는 안 들어가지만 회사 정책 대상이다.
-    if run([str(ppy), str(guard)]) != 0:
-        log("[FAILED] 보안 가드 — **개발 PC 환경** 에 금지 패키지가 있습니다.")
-        log("         배포본에는 들어가지 않지만 회사 정책상 제거해야 합니다.")
-        log("         위 [금지] 메시지가 알려주는 경로·명령을 그대로 쓰세요.")
         return 1
 
     # 이 번들이 **어떤 requirements 로 만들어졌는지** 표식을 남긴다.  자동 업데이트가
