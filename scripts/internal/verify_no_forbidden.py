@@ -20,18 +20,27 @@ _BAD_NAMES = {
 _PATH_RE = re.compile(r"\b(?:ana|mini)?conda\b|\bspyder\b", re.IGNORECASE)
 
 
-def _installed_offenders() -> list[str]:
+def _installed_offenders() -> list[tuple[str, str]]:
+    """``[(패키지명, 설치 위치)]``.
+
+    위치를 함께 돌려주는 이유: 같은 3.11 이면 user site
+    (``%APPDATA%\\Python\\Python311\\site-packages``)가 여러 인터프리터에 동시에 붙는다.
+    어느 폴더의 것인지 모르면 사용자는 엉뚱한 인터프리터로 uninstall 을 시도해
+    "not installed" 만 보게 된다."""
     try:
         import importlib.metadata as md
     except Exception:
         return []
-    out: list[str] = []
+    out: list[tuple[str, str]] = []
     for dist in md.distributions():
         name = ((dist.metadata.get("Name") if dist.metadata else "") or "").strip().lower()
-        if not name:
+        if not name or name not in _BAD_NAMES:
             continue
-        if name in _BAD_NAMES:
-            out.append(name)
+        try:
+            loc = str(getattr(dist, "_path", "") or "")
+        except Exception:
+            loc = ""
+        out.append((name, loc))
     return sorted(set(out))
 
 
@@ -50,19 +59,24 @@ def main() -> int:
         return 0
     sys.stderr.write("[금지] 회사 보안 정책 위반 — 빌드를 중단합니다.\n")
     if pkgs:
-        sys.stderr.write(f"  · 설치된 금지 패키지: {pkgs}\n")
         sys.stderr.write(
-            f"  · 현재 Python: {sys.executable}\n"
-            "  · 조치(아래 명령을 그대로 실행):\n")
-        for name in pkgs:
-            sys.stderr.write(f"      python -m pip uninstall -y {name}\n")
+            f"  · 설치된 금지 패키지: {[n for n, _ in pkgs]}\n"
+            f"  · 현재 Python: {sys.executable}\n")
+        for name, loc in pkgs:
+            if loc:
+                sys.stderr.write(f"      {name}  ←  {loc}\n")
+        # 인터프리터를 명시해야 한다 — venv 안에서 그냥 `python` 을 치면 user site 의
+        # 패키지를 못 찾아 "not installed" 만 나온다.
+        sys.stderr.write("  · 조치(아래 명령을 그대로 복사해 실행):\n")
+        for name, _loc in pkgs:
+            sys.stderr.write(f'      & "{sys.executable}" -m pip uninstall -y {name}\n')
         sys.stderr.write(
             "  · 무엇이 끌어들였는지 확인하려면(Required-by 항목 보기):\n")
-        for name in pkgs:
-            sys.stderr.write(f"      python -m pip show {name}\n")
+        for name, _loc in pkgs:
+            sys.stderr.write(f'      & "{sys.executable}" -m pip show {name}\n')
         sys.stderr.write(
-            "  · 비어 있지 않으면 requirements.txt 의 해당 의존을 검토하세요.\n"
-            "    (보통은 과거 시스템 Python 에 남은 잔재 — 제거 후 재실행하면 통과)\n")
+            "  · 위 경로가 AppData\\Roaming 이면 시스템 Python 의 개인(user) 폴더입니다.\n"
+            "    (보통은 과거에 설치한 잔재 — 제거 후 재실행하면 통과)\n")
     if paths:
         sys.stderr.write(
             "  · Python 환경 경로에 금지 키워드 — 다른 Python(공식 설치본)으로 실행하세요:\n")

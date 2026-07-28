@@ -57,6 +57,89 @@ def portable_python(out_dir: Path) -> Path:
     return out_dir / "python" / "bin" / "python3"
 
 
+def _import_bootstrap():
+    """앱의 ``bootstrap`` 모듈 — requirements 정규화를 앱과 공유하기 위해.
+
+    같은 정규화가 두 곳에 생기면 어긋난다(그러면 빌드와 자동 업데이트의 판단이 갈린다)."""
+    root = Path(__file__).resolve().parents[2]
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    from aoi_verification.app.utils import bootstrap
+    return bootstrap
+
+
+def _isolated(python_exe: Path, *args) -> list:
+    """동봉 파이썬을 **개발 PC 로부터 격리해** 실행하는 명령.
+
+    ``-s`` 는 user site-packages(``%APPDATA%\\Python\\Python311\\site-packages``)를
+    ``sys.path`` 에서 뺀다.  이게 없으면 동봉 파이썬이 개발 PC 의 패키지를 보고,
+    pip 이 전부 'already satisfied' 로 건너뛰어 **번들이 빈 채로 남는다**(개발 PC 에서는
+    잘 돌고 사용자 PC 에서는 전부 ImportError).  덤으로 pip 이 스스로 ``--user`` 설치로
+    전환하는 것도 막는다(``site.ENABLE_USER_SITE`` 가 False 면 non-user 로 고정).
+
+    ``-I`` 를 쓰면 안 된다 — ``-E`` 를 함께 걸어 ``PYTHONUTF8``·``PYTHONIOENCODING`` 까지
+    무시하게 되고, 이 저장소는 그 인코딩 문제로 이미 두 번 데였다.
+    ``pip --isolated`` 는 설정파일만 무시하고 ``sys.path`` 는 그대로라 무효다."""
+    return [str(python_exe), "-s", *[str(a) for a in args]]
+
+
+def site_packages_dir(out: Path) -> Path:
+    """번들 파이썬의 site-packages 경로(OS 별)."""
+    if os.name == "nt":
+        return Path(out) / "python" / "Lib" / "site-packages"
+    base = Path(out) / "python" / "lib"
+    cands = sorted(base.glob("python3.*")) if base.is_dir() else []
+    return (cands[0] if cands else base / "python3") / "site-packages"
+
+
+def _normalize_dist(name: str) -> str:
+    """배포명 정규화(PEP 503) — ``opencv-python`` → ``opencv_python``."""
+    import re
+    return re.sub(r"[-_.]+", "_", name).strip().lower()
+
+
+def required_dists(req_text: str) -> list:
+    """requirements 본문에서 **배포명만** 뽑아 정규화한다.
+
+    ``.dist-info`` 폴더명이 배포명과 같은 이름공간이라, 이걸로 대조하면
+    import 명 매핑표(opencv-python→cv2, Pillow→PIL …)가 아예 필요 없다.
+    환경 마커(``; python_version >= "3.10"``)가 붙은 줄은 플랫폼별 조건부라 제외한다
+    — 없다고 실패로 치면 오탐이 난다."""
+    import re
+    bootstrap = _import_bootstrap()          # 주석·빈 줄 제거를 앱과 **같은 함수**로
+
+    out = []
+    for line in bootstrap.req_lines(req_text):
+        if ";" in line:                     # 환경 마커 — 조건부라 필수로 보지 않는다
+            continue
+        name = re.split(r"[<>=!~\[]", line, 1)[0]
+        name = _normalize_dist(name)
+        if name:
+            out.append(name)
+    return out
+
+
+def missing_packages(out: Path, req_file: Path) -> list:
+    """번들에 **실제로 설치되지 않은** 배포명 목록.  비어 있으면 정상.
+
+    pip 의 rc 는 믿을 수 없다 — 개발 PC 의 패키지를 보고 'already satisfied' 로
+    건너뛰어도 0 을 반환한다.  그래서 디스크의 ``.dist-info`` 를 직접 센다."""
+    sp = site_packages_dir(out)
+    if not sp.is_dir():
+        try:
+            req_text = Path(req_file).read_text(encoding="utf-8")
+        except OSError:
+            return ["(site-packages 없음)"]
+        return required_dists(req_text) or ["(site-packages 없음)"]
+    have = {_normalize_dist(p.name.split("-")[0])
+            for p in sp.glob("*.dist-info")}
+    try:
+        req_text = Path(req_file).read_text(encoding="utf-8")
+    except OSError:
+        return []
+    return [n for n in required_dists(req_text) if n not in have]
+
+
 def version_stamp(sha: str, branch: str, repo: str = REPO_SLUG) -> str:
     """app/VERSION 에 기록할 JSON 문자열(자동 업데이트 식별자)."""
     return json.dumps({"sha": sha, "branch": branch, "repo": repo})
@@ -135,28 +218,48 @@ def run_build(repo_root: Path, py_url: str,
     log("[2/4] installing dependencies (torch/openvino — takes a while) ...")
     # ↓ 실패해도 아무 말 없이 rc=1 만 돌려주면, 30분 돌린 사용자는 pip 출력 수백 줄
     #   끝에서 '왜 멈췄는지' 를 알 수 없다.  어느 단계인지 반드시 말한다.
-    if run([str(ppy), "-m", "pip", "install", "--upgrade", "pip"]) != 0:
+    if run(_isolated(ppy, "-m", "pip", "install", "--upgrade", "pip")) != 0:
         log("[FAILED] pip 자체 업그레이드에 실패했습니다(네트워크/프록시 확인).")
         return 1
-    if run([str(ppy), "-m", "pip", "install", "-r",
-            str(repo_root / "requirements.txt")]) != 0:
+    if run(_isolated(ppy, "-m", "pip", "install", "-r",
+                     repo_root / "requirements.txt")) != 0:
         log("[FAILED] 의존성 설치에 실패했습니다 (requirements.txt).")
         log("         위 pip 출력의 마지막 오류를 확인하세요. 네트워크·프록시·디스크 "
             "여유 공간이 흔한 원인입니다.")
         log("         python\\ 런타임은 남아 있으므로 다시 실행하면 이어서 진행합니다.")
         return 1
-    if run([str(ppy), str(repo_root / "scripts" / "internal"
-                          / "verify_no_forbidden.py")]) != 0:
-        log("[FAILED] 보안 가드에 걸렸습니다 — 위 [금지] 메시지의 안내를 따르세요.")
+
+    # ★ pip 이 rc=0 을 냈다고 설치가 된 것이 아니다.  개발 PC 의 user site 가 보이면
+    #   전 패키지가 'already satisfied' 로 넘어가고 번들은 빈 채로 남는다(-s 로 막지만,
+    #   막혔는지를 **사실로** 확인한다).  이걸 안 보면 의존성 0 개인 배포본이 나가고,
+    #   사용자 PC 에서는 창도 안 뜨고 죽는다.
+    missing = missing_packages(out, repo_root / "requirements.txt")
+    if missing:
+        log("[FAILED] 번들에 패키지가 설치되지 않았습니다: " + ", ".join(missing))
+        log(f"         확인 위치: {site_packages_dir(out)}")
+        log("         pip 이 개발 PC 의 패키지를 보고 '이미 설치됨' 으로 건너뛰었을 수 "
+            "있습니다.")
+        log("         (이대로 배포하면 사용자 PC 에서 앱이 아예 뜨지 않습니다.)")
+        return 1
+
+    guard = repo_root / "scripts" / "internal" / "verify_no_forbidden.py"
+    # 배포되는 번들 자체를 검사한다(개발 PC 의 user site 는 -s 로 배제).
+    if run(_isolated(ppy, guard)) != 0:
+        log("[FAILED] 보안 가드 — **배포될 번들** 에 금지 패키지가 있습니다.")
+        log("         위 [금지] 메시지의 안내를 따르세요.")
+        return 1
+    # 개발 PC 환경도 검사한다(user site 포함).  배포물에는 안 들어가지만 회사 정책 대상이다.
+    if run([str(ppy), str(guard)]) != 0:
+        log("[FAILED] 보안 가드 — **개발 PC 환경** 에 금지 패키지가 있습니다.")
+        log("         배포본에는 들어가지 않지만 회사 정책상 제거해야 합니다.")
+        log("         위 [금지] 메시지가 알려주는 경로·명령을 그대로 쓰세요.")
         return 1
 
     # 이 번들이 **어떤 requirements 로 만들어졌는지** 표식을 남긴다.  자동 업데이트가
-    # 새 requirements 를 받았을 때 '동봉된 python\ 으로 감당되는가' 를 이걸로 판단한다
-    # (사내망은 PyPI 가 막혀 사용자 PC 에서 설치가 불가능하다).  표식이 없으면 판단
-    # 근거가 없어 업데이트를 막지 못한 채 반쪽 상태가 된다.
+    # 새 requirements 를 받았을 때 '동봉된 python\ 으로 감당되는가' 를 이걸로 판단한다.
+    # ★ 반드시 위의 실설치 확인을 통과한 뒤에 쓴다 — 표식이 거짓이면 사용자 PC 의 자동
+    #   업데이트가 '패키지 안 바뀜' 으로 판단해 설치를 영원히 건너뛴다(자가 치유 불가).
     if not _write_deps_marker(repo_root, out):
-        # 표식이 없으면 자동 업데이트가 '새 패키지가 필요한가' 를 판단할 근거를 잃는다.
-        # 조용히 성공을 보고하면 그 사실이 배포 후에야 드러난다.
         log("[FAILED] 의존성 표식(.deps_installed)을 남기지 못했습니다.")
         log("         이대로 배포하면 자동 업데이트가 패키지 변경을 감지하지 못합니다.")
         return 1
@@ -165,7 +268,8 @@ def run_build(repo_root: Path, py_url: str,
     # 사내망은 막혀 있을 수 있다.  app\ 바깥(runtime\torch)에 둬 업데이트 교체에 안 쓸린다.
     if torch_home:
         log("       fetching torchvision weights (bundled, ~55 MB) ...")
-        if run([str(ppy), "-c", _TORCH_FETCH_SRC, str(out / "runtime" / "torch")]) != 0:
+        if run(_isolated(ppy, "-c", _TORCH_FETCH_SRC,
+                         out / "runtime" / "torch")) != 0:
             log("[FAILED] could not fetch model weights — 사내망 PC 에서 매칭이 "
                 "동작하지 않을 수 있습니다.")
             return 1
@@ -217,10 +321,7 @@ def _write_deps_marker(repo_root: Path, out: Path) -> bool:
     실패를 삼키면 안 된다: 이 표식이 없으면 자동 업데이트가 패키지 변경을 감지하지 못해,
     코드만 새것이 되는 '반쪽 업데이트' 를 막을 근거가 사라진다."""
     try:
-        root = Path(__file__).resolve().parents[2]
-        if str(root) not in sys.path:
-            sys.path.insert(0, str(root))
-        from aoi_verification.app.utils import bootstrap
+        bootstrap = _import_bootstrap()
         req = (repo_root / "requirements.txt").read_text(encoding="utf-8")
         bootstrap.write_deps_marker(out, req)      # 내부에서 예외를 삼키므로
         return bootstrap.deps_marker(out).exists()  # 결과로 확인한다

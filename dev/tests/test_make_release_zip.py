@@ -21,6 +21,7 @@ def _load(name: str, rel: str):
 
 rel = _load("make_release_zip", "scripts/make_release_zip.py")
 build = _load("build", "scripts/build.py")
+portable = _load("portable_build", "scripts/internal/portable_build.py")
 
 
 # ── 순수 로직 ──────────────────────────────────────────────────────────────
@@ -98,7 +99,13 @@ def _good_bundle(tmp_path) -> Path:
     ckpt.mkdir(parents=True)
     (ckpt / "a.pth").write_bytes(b"x")
     (ckpt / "b.pth").write_bytes(b"x")
-    (out / "python" / "big.bin").write_bytes(b"\x00" * (810 * 1024 * 1024))
+    # 번들에 패키지가 실제로 설치돼 있어야 한다(빈 번들을 배포하지 않기 위한 검사).
+    sp = portable.site_packages_dir(out)
+    sp.mkdir(parents=True, exist_ok=True)
+    for name in portable.required_dists(
+            (app / "requirements.txt").read_text(encoding="utf-8")):
+        (sp / f"{name}-1.0.0.dist-info").mkdir()
+    (sp / "big.bin").write_bytes(b"\x00" * (510 * 1024 * 1024))
     # 찌꺼기 — zip 에 들어가면 안 된다.
     # (`app.new` 는 검증 단계에서 아예 걸러지므로 여기 두지 않는다 — 그건
     #  test_make_zip_refuses_a_broken_bundle 과 should_include 단위 테스트가 다룬다.)
@@ -208,3 +215,17 @@ def test_failed_zip_leaves_no_half_written_file(tmp_path, monkeypatch):
     assert rel.make_zip(tmp_path, log=logs.append, today="20260727") != 0
     assert not list(out.parent.glob("*.zip"))
     assert not list(out.parent.glob("*.zip.part"))
+
+
+def test_empty_bundle_is_never_shipped(tmp_path):
+    """★ 회귀 가드 — 의존성이 하나도 없는 번들은 zip 되면 안 된다.
+
+    동봉 파이썬이 개발 PC 의 user site 를 보면 pip 이 전부 건너뛰어 이 상태가 된다.
+    개발 PC 에서는 잘 돌기 때문에 사람 눈으로는 절대 알아채지 못한다."""
+    out = _good_bundle(tmp_path)
+    import shutil
+    shutil.rmtree(portable.site_packages_dir(out))
+    logs = []
+    assert rel.make_zip(tmp_path, log=logs.append, today="20260727") != 0
+    assert not list(out.parent.glob("*.zip"))
+    assert any("site-packages" in m for m in logs)

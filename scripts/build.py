@@ -230,7 +230,13 @@ def preflight(repo_root: Path, log: Callable = print,
 def _default_run(cmd: List[str], cwd: Optional[Path] = None) -> int:
     # 시각을 찍는다 — 30분짜리 빌드에서 '어디서 멈췄나' 는 결국 '언제 멈췄나' 로 판단한다.
     print(f">> [{time.strftime('%H:%M:%S')}]", " ".join(str(c) for c in cmd), flush=True)
-    return subprocess.call([str(c) for c in cmd], cwd=str(cwd) if cwd else None)
+    # 심층 방어 — argv 의 `-s` 와 달리 **자식 프로세스까지 상속**된다(pip 이 띄우는
+    # 빌드 백엔드 등).  동봉 파이썬이 개발 PC 의 user site 를 보면 pip 이 전 패키지를
+    # 'already satisfied' 로 건너뛰어 빈 번들이 나온다.  venv 는 원래 user site 를 안
+    # 보므로 여기 일괄로 걸어도 무해하다.
+    env = dict(os.environ, PYTHONNOUSERSITE="1")
+    return subprocess.call([str(c) for c in cmd],
+                           cwd=str(cwd) if cwd else None, env=env)
 
 
 def _ensure_venv(run: Callable, log: Callable) -> str:
@@ -305,8 +311,10 @@ def build_exe(run: Callable = _default_run, log: Callable = print) -> int:
                         bats=("run_aoi.bat", "run_aoi_debug.bat"),
                         torch_home=True)
     if rc != 0:
-        log("[실패] 런타임/앱 배치 단계에서 실패했습니다.")
-        report_diagnosis(out, log)      # 어느 단계에서 멈췄는지 한 줄로 알려준다
+        # run_build 가 이미 정확한 [FAILED] 를 출력했다.  여기서 파일시스템으로 추측한
+        # 진단을 덧붙이면 서로 모순되는 안내가 된다(실제로 그런 일이 있었다).
+        log("[실패] 런타임/앱 배치 단계에서 실패했습니다 — 위의 [FAILED] 메시지를 "
+            "확인하세요.")
         return rc
     log("[done] " + str(output_path("exe", REPO_ROOT)))
     log("       Ship the whole dist\\AOI_Verify folder (zip).")
@@ -403,23 +411,34 @@ def verify_checks(out: Path) -> List[tuple]:
     n_ckpt = len(list(ckpt.glob("*.pth"))) if ckpt.is_dir() else 0
     checks.append((n_ckpt >= 2, f"runtime/torch 가중치 {n_ckpt}개 (2개 이상)"))
 
-    size_mb = _dir_size_mb(out)
-    checks.append((size_mb > 800, f"총 용량 {size_mb:.0f} MB (800 MB 이상이어야 정상)"))
+    # ★ 번들에 패키지가 **실제로** 들어갔는지 — 총 용량은 부분 설치를 못 잡고 사용자
+    #   `결과/` 파일까지 세어 오염된다.  site-packages 를 직접 본다.
+    impl = _load_portable_impl()
+    missing = impl.missing_packages(out, out / "app" / "requirements.txt")
+    checks.append((not missing,
+                   "번들 site-packages 에 필요한 패키지 전부 존재"
+                   + (f" (빠짐: {', '.join(missing[:5])})" if missing else "")))
+    sp_mb = _dir_size_mb(impl.site_packages_dir(out))
+    checks.append((sp_mb > 500,
+                   f"site-packages 용량 {sp_mb:.0f} MB (500 MB 이상이어야 정상)"))
     return checks
 
 
 def import_probe_cmd(out: Path) -> List[str]:
     """번들 파이썬이 **실제로 앱을 import 할 수 있는지** 확인하는 명령.
 
-    폴더가 있다는 것만으로는 증명되지 않는 것을 증명한다(옛 검증의 빈틈)."""
+    ★ ``-s`` 가 필수다.  이 파이썬은 버전이 겹치면 개발 PC 의 user site 를 보므로,
+    없으면 번들이 텅 비어 있어도 개발 PC 에서 무조건 통과한다 — 정작 증명해야 할 것을
+    증명하지 못한다."""
     app = out / "app"
     src = (
         "import sys; sys.path.insert(0, r'%s');"
         "import PyQt6.QtWidgets, cv2, numpy, PIL, openpyxl;"
+        "import torch, torchvision, openvino, skimage, imagehash, psutil;"
         "from aoi_verification.app.utils import updater, paths;"
         "assert updater.DEFAULT_BRANCH" % str(app)
     )
-    return [str(out / "python" / "python.exe"), "-c", src]
+    return [str(out / "python" / "python.exe"), "-s", "-c", src]
 
 
 def verify_exe(repo_root: Path = REPO_ROOT, log: Callable = print,

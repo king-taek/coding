@@ -192,7 +192,9 @@ def test_build_exe_reports_why_when_stage_fails(monkeypatch, tmp_path):
     rc = build.build_exe(run=_fake_run([], out), log=logs.append)
     assert rc != 0
     assert any("실패" in m for m in logs), "실패 사실을 알리지 않았다"
-    assert any("진단" in m for m in logs), "어느 단계에서 멈췄는지 알리지 않았다"
+    # run_build 가 이미 정확한 [FAILED] 를 냈으므로 그쪽을 보라고 안내한다
+    # (여기서 파일시스템으로 추측하면 서로 모순되는 안내가 된다).
+    assert any("확인하세요" in m for m in logs)
 
 
 # ── verify_exe 검증 로직 ────────────────────────────────────────────────────
@@ -220,7 +222,15 @@ def _make_good_bundle(tmp_path) -> Path:
     ckpt.mkdir(parents=True)
     (ckpt / "mobilenet.pth").write_bytes(b"x")
     (ckpt / "resnet18.pth").write_bytes(b"x")
-    (out / "python" / "big.bin").write_bytes(b"\x00" * (810 * 1024 * 1024))
+    # ★ 번들에 패키지가 실제로 설치돼 있어야 통과한다.  이 헬퍼가 예전엔 용량 더미만
+    #   채우고도 통과했다는 사실 자체가, 옛 '총 용량 800MB' 검사가 아무것도 증명하지
+    #   못했다는 증거다(의존성 0 개인 번들이 그 검사만으로는 구분되지 않았다).
+    sp = portable.site_packages_dir(out)
+    sp.mkdir(parents=True, exist_ok=True)
+    req = (out / "app" / "requirements.txt").read_text(encoding="utf-8")
+    for name in portable.required_dists(req):
+        (sp / f"{name}-1.0.0.dist-info").mkdir()
+    (sp / "big.bin").write_bytes(b"\x00" * (510 * 1024 * 1024))
     return out
 
 
@@ -396,3 +406,130 @@ def test_build_scripts_survive_cp949_redirect(rel):
     text = (_ROOT / rel).read_text(encoding="utf-8")
     assert "reconfigure(encoding=\"utf-8\"" in text, \
         f"{rel} 에 stdout UTF-8 가드가 없다"
+
+
+# ── 번들 격리 — "내 컴퓨터에선 되는데" 방지 ────────────────────────────────
+def _stub_repo(tmp_path) -> Path:
+    """run_build 가 복사할 최소 소스 트리."""
+    (tmp_path / "aoi_verification").mkdir(parents=True)
+    (tmp_path / "aoi_verification" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "main.py").write_text("x", encoding="utf-8")
+    (tmp_path / "requirements.txt").write_text("numpy>=1\nPillow>=10\n", encoding="utf-8")
+    (tmp_path / "dev").mkdir()
+    (tmp_path / "dev" / "양식.xlsx").write_bytes(b"x")
+    (tmp_path / "scripts").mkdir()
+    return tmp_path
+
+
+def _prepared_bundle(tmp_path, *, with_packages=True) -> Path:
+    """CPython 이 이미 풀린 상태(다운로드 분기를 건너뛰게) + 선택적으로 설치된 패키지."""
+    out = tmp_path / "out"
+    ppy = portable.portable_python(out)
+    ppy.parent.mkdir(parents=True, exist_ok=True)
+    ppy.write_bytes(b"x")
+    if with_packages:
+        sp = portable.site_packages_dir(out)
+        sp.mkdir(parents=True, exist_ok=True)
+        for dist in ("numpy-2.0.0", "pillow-11.0.0"):
+            (sp / f"{dist}.dist-info").mkdir()
+    return out
+
+
+def test_bundled_python_is_never_run_with_user_site(tmp_path):
+    """★ 회귀 가드 — 동봉 파이썬이 개발 PC 의 user site 를 보면 pip 이 전 패키지를
+    'already satisfied' 로 건너뛰어 **의존성 0 개인 배포본**이 나온다.
+
+    개발 PC 에서는 잘 돌고 사용자 PC 에서는 창도 안 뜨고 죽는다."""
+    repo = _stub_repo(tmp_path)
+    out = _prepared_bundle(tmp_path)
+    ppy = str(portable.portable_python(out))
+    calls = []
+
+    portable.run_build(repo, "http://unused", out_dirname="out",
+                       run=lambda c, cwd=None: calls.append([str(x) for x in c]) or 0,
+                       log=lambda *a: None)
+
+    bundled = [c for c in calls if c and c[0] == ppy]
+    assert bundled, "동봉 파이썬을 한 번도 부르지 않았다 — 테스트가 무의미하다"
+    # 개발 PC 검사용 가드 한 번만 예외다(일부러 격리를 풀어 user site 를 본다).
+    # 나머지 — 특히 pip — 는 전부 격리돼야 한다.
+    unisolated = [c for c in bundled if c[1] != "-s"]
+    assert len(unisolated) == 1 and "verify_no_forbidden" in unisolated[0][1], \
+        f"user site 격리 없이 동봉 파이썬 호출: {unisolated}"
+    assert all("pip" not in c for c in unisolated[0]), "pip 이 격리 없이 돌았다"
+
+
+def test_guard_checks_both_the_bundle_and_the_dev_machine(tmp_path):
+    """배포될 번들과 개발 PC 를 **따로** 검사한다(사용자 결정)."""
+    repo = _stub_repo(tmp_path)
+    out = _prepared_bundle(tmp_path)
+    ppy = str(portable.portable_python(out))
+    calls = []
+
+    portable.run_build(repo, "http://unused", out_dirname="out",
+                       run=lambda c, cwd=None: calls.append([str(x) for x in c]) or 0,
+                       log=lambda *a: None)
+
+    guards = [c for c in calls if any("verify_no_forbidden" in x for x in c)]
+    assert len(guards) == 2, f"가드가 {len(guards)}번 — 번들/개발PC 두 번이어야 한다"
+    isolated = [c for c in guards if "-s" in c]
+    assert len(isolated) == 1, "번들 검사(-s)와 개발 PC 검사(-s 없음)가 하나씩이어야 한다"
+
+
+def test_build_fails_when_pip_installed_nothing_into_the_bundle(tmp_path):
+    """pip 이 rc=0 을 내도 site-packages 가 비었으면 빌드를 세운다.
+
+    'already satisfied' 로 전부 건너뛴 경우가 정확히 이 상태다."""
+    repo = _stub_repo(tmp_path)
+    out = _prepared_bundle(tmp_path, with_packages=False)   # 아무것도 안 깔림
+    logs = []
+
+    rc = portable.run_build(repo, "http://unused", out_dirname="out",
+                            run=lambda c, cwd=None: 0,      # pip 은 성공했다고 거짓말
+                            log=logs.append)
+
+    assert rc != 0, "빈 번들인데 빌드가 성공했다"
+    joined = "\n".join(logs)
+    assert "numpy" in joined and "pillow" in joined          # 무엇이 빠졌는지 알려준다
+    # ★ 표식을 남기면 안 된다 — 남기면 사용자 PC 의 자동 업데이트가 '패키지 안 바뀜' 으로
+    #   판단해 설치를 영원히 건너뛴다(자가 치유 불가).
+    assert not (out / ".deps_installed").exists()
+
+
+def test_required_dists_needs_no_import_name_mapping(tmp_path):
+    """`.dist-info` 이름으로 대조하면 opencv-python→cv2 같은 매핑표가 필요 없다."""
+    req = ("# 주석\nopencv-python>=4.8\nPillow>=10.0\nscikit-image>=0.21\n"
+           "\ntruststore>=0.8 ; python_version >= \"3.10\"\n")
+    got = portable.required_dists(req)
+    assert got == ["opencv_python", "pillow", "scikit_image"]
+    # 환경 마커가 붙은 줄은 플랫폼 조건부라 '필수' 로 치지 않는다(오탐 방지).
+    assert "truststore" not in got
+
+
+def test_missing_packages_reads_the_bundle_not_the_dev_machine(tmp_path):
+    out = _prepared_bundle(tmp_path)
+    req = tmp_path / "requirements.txt"
+    req.write_text("numpy>=1\nPillow>=10\ntorch>=2\n", encoding="utf-8")
+    assert portable.missing_packages(out, req) == ["torch"]
+    (portable.site_packages_dir(out) / "torch-2.0.0.dist-info").mkdir()
+    assert portable.missing_packages(out, req) == []
+
+
+def test_import_probe_disables_user_site(tmp_path):
+    """프로브가 개발 PC 의 패키지로 거짓 통과하면 아무것도 증명하지 못한다."""
+    cmd = build.import_probe_cmd(tmp_path / "out")
+    assert cmd[1] == "-s", "프로브가 user site 를 배제하지 않는다"
+    assert "torch" in cmd[-1] and "openvino" in cmd[-1]      # 무거운 것까지 확인
+
+
+def test_build_exe_does_not_guess_when_run_build_already_reported(monkeypatch, tmp_path):
+    """run_build 가 정확한 이유를 출력했는데 그 위에 추측을 덮으면 모순 안내가 된다."""
+    out = _sandbox_build(monkeypatch, tmp_path)
+    monkeypatch.setattr(build, "_load_portable_impl",
+                        lambda: type("I", (), {"run_build": staticmethod(
+                            lambda *a, **k: 1)}))
+    logs = []
+    build.build_exe(run=_fake_run([], out), log=logs.append)
+    joined = "\n".join(logs)
+    assert "[FAILED]" in joined or "확인하세요" in joined
+    assert "진단" not in joined, "이미 사유가 나온 자리에서 추측 진단을 덧붙였다"

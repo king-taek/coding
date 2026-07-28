@@ -122,8 +122,12 @@ def main() -> int:
 
     # cwd 를 설치 루트로 둔다 — app\ 안에 CWD 핸들을 만들면 다음 교체의 rename 이 막힌다.
     # (main.py 가 자기 부모를 sys.path 에 넣으므로 cwd 는 import 에 영향이 없다.)
+    # PYTHONNOUSERSITE — 번들은 자체 완결이 설계 전제다.  버전이 겹치는 파이썬이 PC 에
+    # 있으면 개인(user) 패키지 폴더가 딸려 들어와, 번들에 빠진 것이 있어도 그 PC 에서만
+    # 잘 도는 상태가 된다.  그걸 막아 '어디서든 같은 결과' 를 보장한다.
     subprocess.Popen(launch_cmd(lay), cwd=str(lay.root),
-                     env=dict(os.environ, **{APP_HOME_ENV: str(lay.root)}))
+                     env=dict(os.environ, **{APP_HOME_ENV: str(lay.root),
+                                             "PYTHONNOUSERSITE": "1"}))
     return 0
 
 
