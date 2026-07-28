@@ -176,6 +176,15 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
     `_select_coord_candidates` 로 분리해 헤드리스 테스트한다.
 - KLA(WaferID) 장비 쪽 판정은 **기준/검증/둘다/KLA 아님**(`ref`/`val`/`both`/`None`) 네 경우를
   모두 지원한다(`main_window._ask_kla_side`·`_kla_resolve_impl`). 한쪽만 추가하지 말 것.
+- KLA 폴더의 slot명(WaferID)은 **정보파일이 1순위, OCR 이 폴백**이다. 정보파일은 폴더 안의
+  비-사진 파일(`.001` 이거나 **확장자가 아예 없을 수 있음**, 1~2개)이고 헤더에
+  `WaferID "XXXX";` 가 명시돼 있다 — `coords.kla_info.read_wafer_id` 가 후보를 전부 훑는다.
+  **사진 파일명 prefix 로 WaferID 를 추측하지 마라**(되돌린 방식). 파일명은 형식 검증이
+  불가능해, 둘 다 KLA 일 때 `FrontSideADRImg` 같은 공통 prefix 가 양쪽에 깔려 폴더가
+  순서대로 잘못 짝지어지고 슬롯이 뭉개진다. 정보파일은 사진과 무관하므로 **사진 0장 폴더도
+  식별**된다 — 그래서 `drop_empty_unmatched` 는 KLA 해석 **뒤**(`_after_slot_resolved`)에
+  돌고, 짝은 찾았지만 한쪽 사진이 0장인 슬롯은 `push_one_sided_to_unmatched` 로
+  '기준/검증 전용' 에 되돌려 결과에 남긴다(그냥 두면 결과에서 통째로 사라진다).
 
 ## 개발자 벤치마크(매칭 속도 실험) 규칙
 - 레시피 **실행은 자식 프로세스로 격리**한다(`benchmark.drive_isolated_suite`). OpenVINO

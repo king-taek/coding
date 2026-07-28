@@ -21,7 +21,10 @@ from typing import Optional
 
 from .models import DefectCoord, KLA_ZERO_X, KLA_ZERO_Y
 
-__all__ = ["resolve", "load_folder", "load_folder_raw"]
+__all__ = ["resolve", "load_folder", "load_folder_raw", "read_wafer_id"]
+
+# 정보파일 후보에서 제외할 확장자 — 사진/패스/설정/스크립트.
+_NON_INFO_SUFFIXES = ('.jpg', '.jpeg', '.pass', '.ini', '.py')
 
 # DefectList 행: 공백/탭 구분 숫자 필드
 # 필드 순서(0-based): 0=ID, 1=X, 2=Y, 3=XREL, 4=YREL, 5=XINDEX, 6=YINDEX, ...
@@ -41,6 +44,11 @@ _DIEPITCH_PAT = re.compile(r'DiePitch\s+([\d.eE+\-]+)\s+([\d.eE+\-]+)', re.IGNOR
 # TiffFileName 라인 (파일명 추출)
 _TIFF_PAT = re.compile(r'TiffFileName\s+(\S+)', re.IGNORECASE)
 
+# WaferID "W6459076XYG1";  — 정보파일 **헤더**의 slot명(WaferID) 줄.
+_WAFER_ID_PAT = re.compile(r'Wafer\s*ID\s+"([^"]*)"', re.IGNORECASE)
+# WaferID 는 헤더(파일 앞부분)에 있으므로 앞부분만 읽는다 — DefectList 가 큰 파일도 저렴하게.
+_HEAD_BYTES = 65536
+
 
 def _find_info_file(folder: Path) -> Optional[Path]:
     """폴더에서 KLA .001 정보 파일 탐색."""
@@ -51,11 +59,48 @@ def _find_info_file(folder: Path) -> Optional[Path]:
     candidates = [
         p for p in folder.iterdir()
         if p.is_file()
-        and p.suffix.lower() not in ('.jpg', '.jpeg', '.pass', '.ini', '.py')
+        and p.suffix.lower() not in _NON_INFO_SUFFIXES
         and not p.name.startswith('.')
     ]
     if len(candidates) == 1:
         return candidates[0]
+    return None
+
+
+def _info_candidates(folder: Path) -> list[Path]:
+    """폴더의 정보파일 후보 — ``.001`` 을 앞에, 그다음 나머지 비-사진 파일.
+
+    KLA 결과 폴더에는 사진 외 파일이 1~2개 있고, 확장자가 ``.001`` 이 아니라 **아예
+    없을 수도** 있다.  좌표용 :func:`_find_info_file` 은 후보가 2개면 어느 것이 정보파일인지
+    확신할 수 없어 None 을 주지만, WaferID 판독은 후보를 **전부** 훑어 첫 성공값을 쓴다."""
+    try:
+        files = [p for p in folder.iterdir()
+                 if p.is_file()
+                 and p.suffix.lower() not in _NON_INFO_SUFFIXES
+                 and not p.name.startswith('.')]
+    except OSError:
+        return []
+    files.sort(key=lambda p: (p.suffix.lower() != '.001', p.name.lower()))
+    return files
+
+
+@lru_cache(maxsize=256)
+def read_wafer_id(folder: Path) -> Optional[str]:
+    """폴더의 KLA 정보파일에서 ``WaferID "XXXX";`` 를 읽어 대문자로 반환(없으면 None).
+
+    사진과 무관하게 읽히므로 **사진이 한 장도 없는 폴더도 식별**된다 — 파일명 추측이나
+    OCR 로는 불가능했던 경우다.  후보 파일을 순서대로 시도해 첫 성공값을 쓴다."""
+    for p in _info_candidates(folder):
+        try:
+            with p.open("rb") as fh:
+                head = fh.read(_HEAD_BYTES)
+        except OSError:
+            continue
+        m = _WAFER_ID_PAT.search(head.decode("utf-8", errors="replace"))
+        if m:
+            wid = m.group(1).strip().upper()
+            if wid:
+                return wid
     return None
 
 
