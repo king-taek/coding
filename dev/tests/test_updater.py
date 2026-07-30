@@ -442,6 +442,8 @@ def _make_branch_zip(tmp_path, extra=None, drop=()):
         #   브랜치이므로, 제외하지 않으면 모든 포터블 설치가 이것을 내려받는다.
         "coding-x/.claude/skills/impeccable/SKILL.md": "skill\n",
         "coding-x/.claude/skills/impeccable/reference/audit.md": "ref\n",
+        # ★ UI 검토 스냅샷 — 개발 기록이라 앱 구동과 무관하다. 같은 이유로 제외된다.
+        "coding-x/.impeccable/critique/2026-01-01__x.md": "report\n",
     }
     files.update(extra or {})
     for name in drop:
@@ -501,6 +503,8 @@ def test_download_and_apply_mirrors_needed_and_skips_dev_data(tmp_path, monkeypa
     #   4.8 MB 개발 도구가 사용자 앱 폴더로 따라간다.
     assert not (app / ".claude").exists(), \
         "개발 전용 스킬 모음이 앱 폴더로 미러링됐다"
+    assert not (app / ".impeccable").exists(), \
+        "UI 검토 스냅샷(개발 기록)이 앱 폴더로 미러링됐다"
     # VERSION 기록 + 진행 보고(단계 메시지)가 있었다.
     import json as _json
     ver = _json.loads((app / "VERSION").read_text())
