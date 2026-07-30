@@ -37,12 +37,20 @@ def _clear_parser_caches():
     yield
 
 
-def _labels(rows) -> list[str]:
-    return [r.label for r in rows if r.label]
+def _group(groups, title):
+    """제목으로 덩이 찾기 — 없으면 None."""
+    for g in groups:
+        if g.title == title:
+            return g
+    return None
 
 
-def _values(rows) -> list[str]:
-    return [r.value for r in rows]
+def _labels(groups) -> list[str]:
+    return [r.label for g in groups for r in g.rows if r.label]
+
+
+def _values(groups) -> list[str]:
+    return [r.value for g in groups for r in g.rows]
 
 
 # ---------------------------------------------------------------------------
@@ -133,7 +141,8 @@ def test_geometry_lines_order_and_names(tmp_path, monkeypatch):
 def test_contrast_zero_is_dash_not_number(tmp_path, monkeypatch):
     """contrast 0 = '측정 안 함' — 0.00 으로 오해되지 않게 '—' 로."""
     img = _camtek_folder(tmp_path, monkeypatch, contrast=0.0)
-    assert single_info.geometry_lines(img)[4] == i18n.KO.DEFECT_CONTRAST_NONE
+    assert single_info.geometry_lines(img)[4] == (
+        f"{i18n.KO.DEFECT_CONTRAST_LABEL} {i18n.KO.DEFECT_CONTRAST_NONE_VALUE}")
 
 
 def test_no_surface_flt_gives_unsupported_marker(tmp_path, monkeypatch):
@@ -158,16 +167,29 @@ def test_defect_lines_is_geometry_then_coords(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# describe — 값 있는 항목만
+# describe — 제도 시트 표: 그룹 · 값 있는 항목만 · 계측 없으면 덩이 자체가 없다
 # ---------------------------------------------------------------------------
 def test_describe_omits_rows_it_cannot_fill(tmp_path):
-    """정보파일이 없는 폴더 — 파일명/폴더만 남고 WaferID·좌표 출처 등은 빠진다."""
+    """정보파일이 없는 폴더 — '파일' 덩이만, WaferID·좌표 출처 등은 빠진다."""
     img = tmp_path / "plain.jpeg"
     img.write_bytes(b"x")
-    rows = single_info.describe(img)
-    assert _labels(rows) == [i18n.KO.IMAGE_INFO_ROW_FILE,
-                            i18n.KO.IMAGE_INFO_ROW_FOLDER]
-    assert all(r.value for r in rows), "값이 빈 행을 남기면 안 된다"
+    groups = single_info.describe(img)
+    assert [g.title for g in groups] == [i18n.KO.IMAGE_INFO_GROUP_FILE]
+    assert _labels(groups) == [i18n.KO.IMAGE_INFO_ROW_FILE,
+                               i18n.KO.IMAGE_INFO_ROW_FOLDER]
+    assert all(v for v in _values(groups)), "값이 빈 행을 남기면 안 된다"
+
+
+def test_describe_without_any_measurement_has_no_defect_group(tmp_path):
+    """계측이 0 이면 '결함 계측' 덩이를 만들지 않는다.
+
+    스탬프만 남기면 '이 자재는 원래 측정 안 함'(정상)과 '정보파일이 없어 못 읽음'
+    (비정상)이 구별되지 않고, 화면이 복구 안내를 띄울 기회를 잃는다."""
+    img = tmp_path / "plain.jpeg"
+    img.write_bytes(b"x")
+    groups = single_info.describe(img)
+    assert single_info.has_measurements(groups) is False
+    assert _group(groups, i18n.KO.IMAGE_INFO_GROUP_DEFECT) is None
 
 
 def test_describe_kla_includes_wafer_id_and_source(tmp_path):
@@ -175,35 +197,62 @@ def test_describe_kla_includes_wafer_id_and_source(tmp_path):
     img = tmp_path / "W6459076XYG1_2_0_23_2.jpg"
     img.write_bytes(b"x")
 
-    rows = single_info.describe(img)
-    labels = _labels(rows)
-    assert i18n.KO.IMAGE_INFO_ROW_WAFER_ID in labels
-    assert i18n.KO.IMAGE_INFO_ROW_SOURCE in labels
-    by_label = {r.label: r.value for r in rows if r.label}
+    groups = single_info.describe(img)
+    files = _group(groups, i18n.KO.IMAGE_INFO_GROUP_FILE)
+    by_label = {r.label: r.value for r in files.rows if r.label}
     assert by_label[i18n.KO.IMAGE_INFO_ROW_WAFER_ID] == "W6459076XYG1"
     assert by_label[i18n.KO.IMAGE_INFO_ROW_SOURCE] == \
         i18n.KO.IMAGE_INFO_SOURCE_NAMES["kla"]
-    # WaferID 가 없는 Camtek 폴더에는 그 행이 아예 없어야 한다(위 테스트와 대비).
-    assert i18n.KO.IMAGE_INFO_ROW_PIXEL not in labels   # geometry 없음
+    # geometry 가 없으므로 픽셀 크기 행은 아예 없다.
+    assert i18n.KO.IMAGE_INFO_ROW_PIXEL not in _labels(groups)
 
 
-def test_describe_ends_with_the_same_lines_as_excel(tmp_path, monkeypatch):
-    """패널 뒤쪽 줄 = 엑셀 D열 줄 그대로 — 두 화면이 어긋나지 않음을 고정."""
+def test_describe_defect_values_match_the_excel_numbers(tmp_path, monkeypatch):
+    """표의 값 = 엑셀 줄의 수치 — 두 화면이 어긋나지 않음을 고정.
+
+    표기 모양은 다르다(표는 '5 / 3', 엑셀은 'col 5 / row 3').  같아야 하는 것은
+    **수치**이고, 그래서 Measure 하나가 세 표기를 함께 들고 있다."""
     img = _camtek_folder(tmp_path, monkeypatch)
-    rows = single_info.describe(img)
-    lines = single_info.defect_lines(img)
-    assert _values(rows)[-len(lines):] == lines
-    # 결함 줄은 라벨 없이(값만) 담긴다.
-    assert all(r.label == "" for r in rows[-len(lines):])
+    for m in single_info.measures(img):
+        # 'col / row' 처럼 라벨이 값 사이에 끼는 표기가 있어 문자열 포함은 성립하지
+        # 않는다.  성립해야 하는 것은 **값 토큰이 전부 엑셀 줄에도 있다**는 것.
+        for token in m.value.split(" / "):
+            assert token in m.line, f"{token!r} 가 {m.line!r} 안에 없다"
+    # 엑셀 줄 목록도 같은 Measure 에서 나온다.
+    assert single_info.defect_lines(img) == [
+        m.line for m in single_info.measures(img)]
 
 
-def test_describe_includes_pixel_size_when_geometry_ok(tmp_path, monkeypatch):
+def test_describe_defect_group_carries_measures_and_stamp(tmp_path, monkeypatch):
     img = _camtek_folder(tmp_path, monkeypatch)
-    assert i18n.KO.IMAGE_INFO_ROW_PIXEL in _labels(single_info.describe(img))
+    groups = single_info.describe(img)
+    assert single_info.has_measurements(groups) is True
+    defect = _group(groups, i18n.KO.IMAGE_INFO_GROUP_DEFECT)
+    labels = [r.label for r in defect.rows if r.label]
+    assert i18n.KO.DEFECT_COLROW_LABEL in labels
+    assert i18n.KO.DEFECT_AREA_LABEL in labels
+    assert i18n.KO.IMAGE_INFO_ROW_PIXEL in labels
+    # 수치 행은 모노로 찍힌다(도면 컨셉의 계측 표기).
+    assert all(r.mono for r in defect.rows if r.label)
+    # 마지막은 판정 스탬프 — 측정정보가 있으므로 'ok'.
+    assert defect.rows[-1].stamp == "ok"
+    assert defect.rows[-1].value == i18n.KO.IMAGE_INFO_STAMP_MEASURED
+
+
+def test_describe_stamps_unsupported_material(tmp_path, monkeypatch):
+    """Surface.flt 가 없어도 좌표는 있는 자재 — 덩이는 있고 스탬프는 '없음'."""
+    _install_flt_schema(monkeypatch)
+    (tmp_path / "info.001").write_text(_KLA_INFO, encoding="utf-8")
+    img = tmp_path / "W6459076XYG1_2_0_23_2.jpg"
+    img.write_bytes(b"x")
+    defect = _group(single_info.describe(img), i18n.KO.IMAGE_INFO_GROUP_DEFECT)
+    assert defect is not None
+    assert defect.rows[-1].stamp == "none"
+    assert defect.rows[-1].value == i18n.KO.GEOM_NOT_SUPPORTED
 
 
 def test_describe_survives_missing_file(tmp_path):
     """존재하지 않는 경로여도 죽지 않는다(fail-safe)."""
-    rows = single_info.describe(tmp_path / "nope.jpeg")
-    assert _labels(rows) == [i18n.KO.IMAGE_INFO_ROW_FILE,
-                            i18n.KO.IMAGE_INFO_ROW_FOLDER]
+    groups = single_info.describe(tmp_path / "nope.jpeg")
+    assert _labels(groups) == [i18n.KO.IMAGE_INFO_ROW_FILE,
+                               i18n.KO.IMAGE_INFO_ROW_FOLDER]

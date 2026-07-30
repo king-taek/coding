@@ -2,11 +2,13 @@
 
 지키는 계약:
 
-- 사진을 넣기 전에는 안내 문구를, 정보가 하나도 없으면 '읽을 수 있는 정보 없음' 을 띄운다
-  (빈 패널로 두면 고장난 화면처럼 보인다).
+- 사진을 넣기 전에는 안내 문구를, 계측을 하나도 못 읽으면 '읽을 수 있는 정보 없음' 을
+  **실제로** 띄운다(그 안내가 도달 불가였던 회귀가 있다).
+- 수치는 모노, 측정정보 유무는 판정 스탬프 — 앱의 '도면' 언어를 실제로 쓴다.
+- 공백 없는 긴 경로가 가로 스크롤을 만들지 않는다.
+- Enter 가 마지막으로 눌린 버튼을 재발동하지 않는다(autoDefault 함정).
 - 드롭은 **사진 파일만** 받는다 — 아무 파일이나 받으면 조회가 조용히 실패한다.
-- 액션바에서 이 버튼은 **항상 index 1** 이다.  개발자 버튼은 그 뒤에 삽입되므로
-  ``_refresh_dev_buttons`` 의 insertWidget 인덱스가 어긋나면 순서가 뒤집힌다.
+- 액션바 인덱스 계약은 ``test_setup_controls`` 가 지킨다.
 """
 
 from __future__ import annotations
@@ -51,10 +53,12 @@ def _clear_caches():
 
 
 def _texts(dlg) -> list[str]:
-    grid = dlg._info_grid
-    return [grid.itemAt(i).widget().text()
-            for i in range(grid.count())
-            if isinstance(grid.itemAt(i).widget(), QLabel)]
+    """계측 표 안의 모든 라벨 문자열.  값 라벨은 폭에 따라 생략되므로 원문을 본다."""
+    host = dlg._scroll.widget()
+    out = []
+    for w in host.findChildren(QLabel):
+        out.append(w.text_full() if hasattr(w, "text_full") else w.text())
+    return out
 
 
 def test_shows_hint_before_any_file(qapp, isolated_cache):
@@ -66,15 +70,69 @@ def test_shows_hint_before_any_file(qapp, isolated_cache):
 
 
 def test_shows_empty_notice_when_nothing_readable(qapp, isolated_cache, tmp_path):
+    """계측을 하나도 못 읽으면 **복구 안내가 실제로 뜬다**.
+
+    ★ 회귀 계약: 이전 구현은 '행이 하나도 없을 때'만 안내를 띄웠는데, 파일명·폴더
+      행은 경로만 있으면 항상 생겨서 이 안내가 **영원히 도달 불가**였다.  정보파일이
+      없는 폴더 — 안내가 가장 필요한 바로 그 순간 — 에 화면이 침묵했다.
+    """
     img = tmp_path / "plain.jpeg"
     img.write_bytes(b"x")
     dlg = ImageInfoDialog(image_path=str(img))
     texts = _texts(dlg)
-    # 파일명/폴더는 항상 나오므로 '정보 없음' 안내는 뜨지 않는다.
-    assert i18n.KO.IMAGE_INFO_EMPTY not in texts
+    assert i18n.KO.IMAGE_INFO_EMPTY in texts
     assert "plain.jpeg" in texts
-    # 좌표/geometry 를 못 읽었으므로 결함 줄은 없다.
-    assert not any("col " in t for t in texts)
+    # 계측이 없으므로 '결함 계측' 덩이 자체가 없다.
+    assert i18n.KO.IMAGE_INFO_GROUP_DEFECT not in texts
+    dlg.deleteLater()
+
+
+def test_numeric_rows_are_mono_and_status_is_a_stamp(qapp, isolated_cache,
+                                                     tmp_path):
+    """수치는 모노, 측정정보 유무는 판정 스탬프 — 도면 언어를 실제로 쓴다."""
+    (tmp_path / "info.001").write_text(_KLA_INFO, encoding="utf-8")
+    img = tmp_path / "W6459076XYG1_2_0_23_2.jpg"
+    img.write_bytes(b"x")
+
+    dlg = ImageInfoDialog(image_path=str(img))
+    host = dlg._scroll.widget()
+    roles = [w.property("role") for w in host.findChildren(QLabel)]
+    chips = [w.property("chip") for w in host.findChildren(QLabel)
+             if w.property("chip")]
+    assert "mono" in roles, "좌표·계측 값이 모노로 찍혀야 한다"
+    assert "colHead" in roles, "그룹마다 타이틀블록 컬럼 머리가 있어야 한다"
+    assert chips == ["none"], "측정정보 미지원은 스탬프 하나로"
+    dlg.deleteLater()
+
+
+def test_enter_does_not_refire_the_last_button(qapp, isolated_cache):
+    """Enter 를 autoDefault 에 맡기지 않는다 — slot_select_dialog 와 같은 함정.
+
+    맡기면 포커스가 '전체 복사'/'닫기' 에 있을 때 Enter 가 그 동작을 재발동한다."""
+    dlg = ImageInfoDialog()
+    assert dlg.pick_btn.isDefault() is True
+    assert dlg.copy_btn.autoDefault() is False
+    dlg.deleteLater()
+
+
+def test_long_path_never_scrolls_horizontally(qapp, isolated_cache, tmp_path):
+    """공백 없는 긴 경로가 가로 스크롤을 만들면 안 된다(CLAUDE.md UI 관습).
+
+    ``setWordWrap`` 은 끊을 곳이 없어 듣지 않는다 — 값 라벨이 가운데 생략해야 한다."""
+    deep = tmp_path / ("n_" + "a" * 60) / ("s_" + "b" * 60)
+    deep.mkdir(parents=True)
+    img = deep / ("f_" + "c" * 90 + ".jpeg")
+    img.write_bytes(b"x")
+
+    dlg = ImageInfoDialog(image_path=str(img))
+    dlg.resize(900, 560)
+    dlg.show()
+    qapp.processEvents()
+    assert dlg._scroll.horizontalScrollBar().maximum() == 0
+    assert (dlg._scroll.widget().sizeHint().width()
+            <= dlg._scroll.viewport().width())
+    # 생략해도 전체 문자열은 잃지 않는다(툴팁·복사용).
+    assert img.name in _texts(dlg)
     dlg.deleteLater()
 
 
@@ -93,9 +151,11 @@ def test_renders_kla_defect_rows(qapp, isolated_cache, tmp_path):
     assert i18n.KO.IMAGE_INFO_NO_FILE not in texts
     assert i18n.KO.IMAGE_INFO_ROW_WAFER_ID in texts
     assert "W6459076XYG1" in texts
-    assert "col 1 / row 2" in texts
-    # 복사 텍스트에도 같은 내용이 들어간다.
-    assert "col 1 / row 2" in dlg.as_text()
+    # 표는 라벨/값 2열이다 — 엑셀 한 줄("col 1 / row 2")과 모양이 다르고 수치는 같다.
+    assert i18n.KO.DEFECT_COLROW_LABEL in texts
+    assert "1 / 2" in texts
+    # 복사 텍스트는 라벨\t값 — 엑셀에 붙여넣으면 값이 한 열로 선다.
+    assert f"{i18n.KO.DEFECT_COLROW_LABEL}\t1 / 2" in dlg.as_text()
     dlg.deleteLater()
 
 
