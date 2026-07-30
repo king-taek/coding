@@ -470,80 +470,41 @@ class ExcelExporter(QThread):
 
     # ------------------------------------------------------------------
     @staticmethod
-    def _geometry_blocks(path) -> list:
-        """미매칭 행 D열 파일명 아래에 덧붙일 회색 TextBlock 목록.
+    def _grey_blocks(lines) -> list:
+        """줄 목록 → 파일명 아래에 덧붙일 회색 8pt TextBlock 목록.
 
-        Surface.flt 에서 결함 geometry 를 환산해 area/width/length/contrast 를
-        표기하고, 값을 못 얻으면 '명시적 마커'(미지원 자재 / 데이터 없음)를 넣는다.
-        geometry 비활성(스키마 미충전, status="disabled") 이면 빈 목록 → 호출부가
-        기존과 동일하게 plain 파일명을 쓴다.  best-effort — 절대 raise 안 함.
+        줄바꿈은 여기서만 붙인다 — 문자열을 만드는
+        :mod:`coords.single_info` 는 순수 텍스트만 돌려준다.
+        best-effort: rich_text 미지원 openpyxl 등에서는 빈 목록(=plain 파일명).
         """
         try:
-            from ..coords import geometry
             from openpyxl.cell.rich_text import TextBlock
             from openpyxl.cell.text import InlineFont
 
-            res = geometry.resolve(Path(path))
-            if res.status == "disabled":
-                return []
             grey = InlineFont(sz=8, color="FF808080")
-            if res.status == "ok" and res.geometry is not None:
-                g = res.geometry
-                # contrast 는 일부 자재(예: PI)만 측정 — 대부분 0 이다. 0 이면 '측정
-                # 안 함'을 뜻하므로 '—' 로 표기(0.00 으로 오해 방지).
-                contrast_txt = ("contrast —" if g.contrast == 0
-                                else f"contrast {g.contrast:.2f}")
-                # 표기 순서: recipe/zone → area → width → length → contrast
-                # (이어서 _coord_blocks 가 col/row → x/y 를 덧붙인다).
-                # 이름만 표기(코드 숫자 없이). 이름을 못 찾은 자재만 코드로 폴백(빈칸 방지).
-                recipe_disp = g.recipe_name or str(g.recipe)
-                zone_disp = g.zone_name or str(g.zone)
-                return [
-                    TextBlock(grey, f"\nrecipe {recipe_disp} / zone {zone_disp}"),
-                    TextBlock(grey, f"\narea {g.area_um2:.2f} ㎛²"),
-                    TextBlock(grey, f"\nwidth {g.width_um:.2f} ㎛"),
-                    TextBlock(grey, f"\nlength {g.length_um:.2f} ㎛"),
-                    TextBlock(grey, f"\n{contrast_txt}"),
-                ]
-            if res.status == "no_flt":
-                return [TextBlock(grey, f"\n{i18n.KO.GEOM_NOT_SUPPORTED}")]
-            # "no_data" (Surface.flt 는 있으나 매칭 실패)
-            return [TextBlock(grey, f"\n{i18n.KO.GEOM_NO_DATA}")]
+            return [TextBlock(grey, "\n" + t) for t in lines]
         except Exception:
-            # rich_text 미지원 openpyxl 등 — 마커 없이 기존 동작으로 폴백.
             return []
+
+    @staticmethod
+    def _geometry_blocks(path) -> list:
+        """미매칭 행 D열 파일명 아래에 덧붙일 결함 measurement 블록.
+
+        표기 문자열은 :func:`coords.single_info.geometry_lines` 가 만든다 —
+        단일 사진 정보 화면과 **같은 값**이 나오도록 생산자를 하나로 둔 것이다.
+        """
+        from ..coords import single_info
+        return ExcelExporter._grey_blocks(single_info.geometry_lines(Path(path)))
 
     # ------------------------------------------------------------------
     @staticmethod
     def _coord_blocks(path) -> list:
-        """미매칭 행 D열에 덧붙일 좌표(col/row/x/y) 회색 TextBlock 목록.
+        """미매칭 행 D열에 덧붙일 좌표(col/row/x/y) 블록.
 
-        매칭 단계와 **동일한 메커니즘**(:func:`coords.resolve`)을 그대로 써서
-        die col/row 와 die 내부 local x/y(µm)를 얻는다 — col/row/x/y 모두
-        DefectCoord 에 이미 함께 들어 있다.  Surface.flt 유무와 무관하므로
-        측정정보 미지원 자재 행에도 위치 식별용으로 붙는다.  best-effort.
+        표기 문자열은 :func:`coords.single_info.coord_lines` 가 만든다.
         """
-        try:
-            from ..coords import resolve as resolve_coord
-            from openpyxl.cell.rich_text import TextBlock
-            from openpyxl.cell.text import InlineFont
-
-            c = resolve_coord(Path(path))
-            if c is None:
-                return []
-            grey = InlineFont(sz=8, color="FF808080")
-            blocks = [
-                TextBlock(grey, f"\ncol {c.col} / row {c.row}"),
-                TextBlock(grey, f"\nx {c.x:.0f} / y {c.y:.0f} ㎛"),
-            ]
-            # KLA 결함은 위 변환값(Camtek 좌표계)에 더해 자체 원본 좌표(XREL/YREL)도 표기.
-            if (c.source == "kla" and c.native_x is not None
-                    and c.native_y is not None):
-                blocks.append(TextBlock(grey, i18n.KO.EXPORT_KLA_NATIVE_FMT.format(
-                    x=c.native_x, y=c.native_y)))
-            return blocks
-        except Exception:
-            return []
+        from ..coords import single_info
+        return ExcelExporter._grey_blocks(single_info.coord_lines(Path(path)))
 
     # ------------------------------------------------------------------
     def _write_slot_mismatch_sheet(self, wb) -> None:
