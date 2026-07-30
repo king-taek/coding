@@ -8,7 +8,7 @@
 
 | 방식 | 산출물 | 용량 | 인터넷 | 추천 상황 |
 |---|---|---|---|---|
-| **C. exe + app 폴더** | `dist\AOI_Verify\` 폴더 | ~1.5GB | 불필요 | **기본 권장** — 파이썬 미설치 PC, 자동 업데이트 완전 동작 |
+| **C. exe + app 폴더** | `dist\AOI_Verify\` 폴더 | 큼 | 불필요 | **기본 권장** — 파이썬 미설치 PC, 자동 업데이트 완전 동작 |
 | **B. 포터블 폴더** | `dist_portable\` 폴더 | ~1.3~2.0GB | 불필요 | exe 가 회사 백신에 막힐 때(`.bat` 로 실행) |
 | **A. 온라인 launcher exe** | `AOI_Verify_Online.exe` 1개 | 수십 MB | **첫 실행 시 필요** | ⚠️ **사내망에서는 사용 불가** — 첫 실행에 PyPI 접속이 필요한데 막혀 있다 |
 
@@ -27,7 +27,7 @@
 
 ## A. 온라인 launcher exe (권장)
 
-작은 exe 하나만 전달하면 되는 방식. exe 에는 앱·무거운 의존성(torch·openvino)이 **없고**,
+작은 exe 하나만 전달하면 되는 방식. exe 에는 앱·무거운 의존성(PyQt6·openvino)이 **없고**,
 사용자가 처음 실행할 때 인터넷에서 앱과 패키지를 받아 `%LOCALAPPDATA%\AOI Recipe Verification` 에 설치한다.
 
 ### A-1. 빌드 (전달하는 사람, 1회)
@@ -71,7 +71,7 @@ REM 또는: scripts\internal\make_portable.bat
 - 산출물 `dist_portable\` 구조:
   ```
   dist_portable\
-    python\          ← 자체 포함 CPython + 의존성(torch/openvino 등) [무거움, 거의 불변]
+    python\          ← 자체 포함 CPython + 의존성(PyQt6/openvino 등) [무거움, 거의 불변]
     app\             ← aoi_verification 소스 + main.py + 양식.xlsx        [업데이트 대상]
     run_aoi.bat      ← 콘솔 없이 GUI 실행
     run_aoi_debug.bat← 오류 진단용(콘솔 + traceback)
@@ -97,7 +97,8 @@ python scripts\build.py exe
 REM 또는: scripts\internal\build_exe.bat
 ```
 
-> **빌드는 30분 이상 걸린다**(torch·openvino 설치 + CPython 런타임 다운로드).
+> **빌드는 30분 이상 걸린다**(의존성 설치 + CPython 런타임 다운로드 + 백본 IR 변환용
+> torch 를 임시로 받는 단계).
 > 화면 버퍼를 넘겨 원인을 놓치기 쉬우니 **로그를 파일로 남기는 것을 권한다**:
 > ```powershell
 > python scripts\build.py exe 2>&1 | Tee-Object -FilePath dist\build.log
@@ -107,19 +108,20 @@ REM 또는: scripts\internal\build_exe.bat
 >
 > 옛 방식(단독 exe)으로 빌드한 적이 있어도 괜찮다 — 빌드가 시작할 때 옛 산출물
 > (`_internal\` 등)을 자동으로 정리한다. 무거운 `python\`·`runtime\` 은 재사용한다.
-- 산출물: **`dist\AOI_Verify\`** 폴더(통째로 zip 배포, ~1.5GB).
+- 산출물: **`dist\AOI_Verify\`** 폴더(통째로 zip 배포).
   ```
   AOI_Verify\
     AOI_Verify.exe     ← 얇은 런처(수 MB). 앱 코드 0줄, 업데이트되지 않는다.
     python\            ← 번들 CPython + 모든 의존성 (무겁고 거의 안 바뀜)
-    runtime\torch\     ← 모델 가중치(동봉) — 사내망에서 다운로드가 막혀도 매칭이 된다
+    runtime\ir\        ← 백본 OpenVINO IR(동봉) — 덕분에 배포본에 torch 가 없다
     app\               ← ★ 자동 업데이트가 바꾸는 전부 (앱 코드·리소스·양식.xlsx·VERSION)
     결과\               ← 엑셀 출력 (app\ 바깥이라 업데이트에 안 쓸린다)
     run_aoi.bat        ← exe 가 백신에 막힐 때의 대체 실행
     run_aoi_debug.bat  ← 오류 진단용(콘솔 + traceback)
   ```
 - 빌드가 하는 일: 런처 exe 를 얼리고(`scripts\internal\exe_launcher.spec`) → 번들 CPython 에
-  의존성 설치 → 모델 가중치 동봉 → 앱 소스 복사 → `VERSION` 스탬프 → **산출물 검증**.
+  의존성 설치 → **백본을 OpenVINO IR 로 변환해 동봉** → 앱 소스 복사 → `VERSION` 스탬프 →
+  **산출물 검증**.
 - 검증은 특히 **`_internal\` 폴더가 없는지**(=앱이 exe 안에 얼려지지 않았는지)와, 번들
   파이썬으로 **실제 앱 import 가 되는지**를 확인한다.
 
@@ -133,7 +135,7 @@ python scripts\make_release_zip.py
   **검증을 통과하지 못하면 zip 을 만들지 않는다** — 깨진 배포본(특히 앱이 exe 안에 얼려
   들어간 것)을 사용자에게 보내는 사고를 여기서 막는다.
 - 제외되는 것: 업데이트 찌꺼기(`app.new`·`app.old`), 빌드 머신에서 시험 실행한 `결과\`,
-  `app\` 안의 `__pycache__`.
+  `app\` 안의 `__pycache__`, IR 변환용 임시 트리(`.irbuild`).
 - 압축을 풀면 `AOI_Verify\` 폴더 하나가 생기고, 그 안에 `설치방법.txt` 가 들어 있다.
 
 ### C-2. 설치/실행 (받는 사람)
@@ -159,7 +161,7 @@ python scripts\make_release_zip.py
 
 ## 4. 자동 업데이트
 
-- 바뀌는 것은 전부 **`app\` 폴더**에 파일로 있다(C·B 공통). exe/런타임/가중치는 그대로 두고
+- 바뀌는 것은 전부 **`app\` 폴더**에 파일로 있다(C·B 공통). exe/런타임/IR 은 그대로 두고
   이 폴더만 갱신하므로 — **평소에는 폴더를 다시 배포할 필요가 없다.**
 - 동작: 앱 시작 시 GitHub 브랜치 HEAD 와 동봉된 `VERSION` 을 비교해 새 버전이 있으면 받아
   **새 트리를 통째로 만들고, 검증을 통과해야만 적용**한다(개발 전용 `dev/` 는 제외,

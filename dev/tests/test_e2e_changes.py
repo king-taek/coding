@@ -68,15 +68,21 @@ def test_scan_ignores_t_and_slot_subset(qapp, isolated_cache, tmp_path):
 # ===========================================================================
 # 파이프라인 워커 강제 헬퍼
 # ===========================================================================
-def _force_pipeline(monkeypatch, *, compute=None, mode="model_x"):
-    from aoi_verification.app.learning import embedder as emb
-    monkeypatch.setattr(emb, "has_accelerator", lambda: True)
-    monkeypatch.setattr(emb, "is_available", lambda: True)
-    monkeypatch.setattr(emb, "get_active_mode", lambda: mode)
-    monkeypatch.setattr(
-        emb, "compute_embeddings",
-        compute if compute is not None else (lambda paths, **k: {}),
-    )
+def _force_pipeline(monkeypatch, *, prefetch=None):
+    """``_should_pipeline()`` 을 True 로 강제해 파이프라인 경로를 실제로 태운다.
+
+    운영에서는 CNN 임베딩 경로가 비활성이라 항상 순차로 간다
+    (``similarity/cnn_embed.py``).  그래도 ``_run_pipelined`` 는 살아 있는 코드이고
+    그 계약(슬롯 순서 · 순차와 동일한 결과 · 정지 반응성)은 지켜져야 하므로, 여기서
+    강제로 태워 검증한다.
+
+    ``prefetch`` 를 주면 생산자 측 사전 배치를 그것으로 대체한다 — 생산자를 바쁘게
+    만들어 정지 타이밍을 노출시키는 용도."""
+    from aoi_verification.app.similarity import slot_features as sf
+    monkeypatch.setattr(sf._cnn, "is_available", lambda: True)
+    if prefetch is not None:
+        monkeypatch.setattr(sf.SlotPrecomputeWorker, "_prefetch_cnn_embeddings",
+                            lambda self, ref, val: prefetch())
 
 
 def _build_tasks(tmp_path, sizes):
@@ -187,11 +193,10 @@ def test_pipeline_stop_does_not_hang(qapp, isolated_cache, monkeypatch, tmp_path
         SlotFeatureCache, SlotPrecomputeWorker, SlotScoreCache,
     )
 
-    def slow_embed(paths, **k):
+    def slow_prefetch():
         time.sleep(0.25)        # 생산자를 바쁘게 만들어 정지 타이밍을 노출
-        return {}
 
-    _force_pipeline(monkeypatch, compute=slow_embed)
+    _force_pipeline(monkeypatch, prefetch=slow_prefetch)
     tasks = _build_tasks(tmp_path, {f"S{i:02d}": (2, 2) for i in range(6)})
 
     worker = SlotPrecomputeWorker(tasks, SlotFeatureCache(keep_lookahead=False),

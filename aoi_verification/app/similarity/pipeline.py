@@ -148,8 +148,8 @@ def score(a: Feature, b: Feature,
           *, components: Optional[set] = None, center_strength: float = 0.0) -> float:
     """두 Feature 사이의 최종 가중 평균 유사도 (0.0 ~ 1.0).
 
-    active 모델이 ``basic`` 이 아니고 torch 가 사용 가능하면 CNN 항이 자동으로
-    활성화된다 (config 가 명시적으로 비활성화한 경우는 그대로 따름).
+    CNN 항은 학습 모델이 활성일 때만 쓰이는데 그 경로가 없어져 현재는 항상 비활성이다
+    (``similarity/cnn_embed.py``).  명시적으로 ``use_cnn=True`` 를 준 경우는 존중한다.
 
     ``components`` (예: ``{"phash","ssim"}``) 가 주어지면 그 항들만 사용하고 가중치를
     그 부분집합으로 재정규화한다.  비싼 ORB(디스크립터 정합)·SSIM 을 빼서 CPU 재채점
@@ -206,33 +206,17 @@ def score(a: Feature, b: Feature,
 
 
 def _active_model_name() -> str:
-    """현재 active 모델 이름 — 학습 패키지가 없거나 basic 이면 ``""``."""
-    try:
-        from ..learning import embedder as _emb
-        m = _emb.get_active_mode()
-        return "" if m == "basic" else m
-    except Exception:
-        return ""
+    """현재 active 모델 이름 — 학습 모델이 없으면 ``""``.
+
+    학습 기능이 제거돼 지금은 항상 ``""`` 다.  특징 캐시 키(`slot_features`)에 들어가는
+    값이라, 나중에 학습이 복구되면 여기만 고치면 캐시가 자동으로 갈린다."""
+    return ""
 
 
 def _resolve_weights(base: config.SimilarityWeights) -> config.SimilarityWeights:
-    """active 모델이 학습 모델이면 use_cnn 을 자동 활성, basic 이면 비활성.
+    """학습 모델이 활성이면 use_cnn 자동 활성 — 지금은 해당 없음.
 
-    가속기 (GPU) 가 있어도 basic 모드에서는 CNN 활성하지 않음 —
-    이전 동작으로 롤백 (가중치 변경 없음).
-    """
-    from ..learning import embedder as _emb
-    try:
-        active = _emb.get_active_mode()
-    except Exception:
-        return base
-
-    if base.use_cnn:
-        return base
-
-    if active != "basic" and _emb.is_available():
-        return config.SimilarityWeights(
-            phash=base.phash, orb=base.orb, ssim=base.ssim,
-            cnn=base.cnn, use_cnn=True,
-        )
+    가속기(GPU)가 있어도 basic 모드에서는 CNN 을 켜지 않는다(가중치 변경 없음).
+    학습 모델이 사라진 현재는 ``_active_model_name()`` 이 항상 ``""`` 라 원본을 그대로
+    돌려준다.  명시적으로 ``use_cnn=True`` 를 준 호출은 그대로 존중한다."""
     return base

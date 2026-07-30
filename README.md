@@ -114,7 +114,7 @@ python scripts\build.py portable
 - 산출물 `dist_portable\` 구조:
   ```
   dist_portable\
-    python\         ← 자체 포함 CPython + 의존성(torch/openvino 등) [무거움, 거의 불변]
+    python\         ← 자체 포함 CPython + 의존성(PyQt6/openvino 등) [무거움, 거의 불변]
     app\            ← aoi_verification 소스 + main.py + 양식.xlsx       [업데이트 대상]
     run_aoi.bat      ← 콘솔 없이 GUI 실행 (pythonw)
     run_aoi_debug.bat← 오류 진단용(콘솔 + traceback)
@@ -122,10 +122,10 @@ python scripts\build.py portable
   ```
 - **배포:** `dist_portable` 폴더 전체를 zip 으로 전달 → 대상 PC 에서 압축 해제 후
   **`run_aoi.bat` 더블클릭**(파이썬 불필요).
-- **용량:** 고효율 모드(torch+openvino) 포함이라 폴더가 큽니다(대략 **1.3~2.0GB**,
-  zip ≈ 0.6~1.0GB).
+- **용량:** PyQt6·openvino·opencv 를 포함해 폴더가 큽니다. (백본은 미리 변환한
+  OpenVINO IR 로 동봉하므로 torch 는 들어가지 않습니다.)
 - **쉬운 업데이트:** 무거운 `python\` 은 그대로 두고 **작은 `app\` 소스만 교체**
-  (`update_app.bat`) → 수 MB 만 갱신, 1.5GB 재배포 불필요.
+  (`update_app.bat`) → 수 MB 만 갱신, 폴더 전체 재배포 불필요.
 - **앱이 안 켜질 때:** `run_aoi_debug.bat` 로 콘솔에 뜨는 오류(traceback)를 확인하세요.
 - `scripts\internal\make_portable.bat` 의 `PY_URL` 다운로드가 404 면, python-build-standalone
   [releases](https://github.com/astral-sh/python-build-standalone/releases) 에서 최신
@@ -134,7 +134,7 @@ python scripts\build.py portable
 ### 3.8 (권장·파이썬 없는 사용자) 온라인 다운로드형 작은 .exe
 
 파이썬이 없는 사용자에게 **작은 exe 하나**(수십 MB)만 주면 되는 방식입니다. exe 는 앱·무거운
-의존성(torch·openvino)을 포함하지 않고, **처음 실행할 때 인터넷에서** 앱과 패키지를 받아
+의존성(PyQt6·openvino)을 포함하지 않고, **처음 실행할 때 인터넷에서** 앱과 패키지를 받아
 `%LOCALAPPDATA%\AOI Recipe Verification` 에 설치한 뒤 실행합니다.  **Windows(파이썬 설치) + 인터넷 PC 에서**:
 
 ```powershell
@@ -157,12 +157,12 @@ python scripts\build.py online
 python scripts\build.py exe
 ```
 
-- 산출물 `dist\AOI_Verify\` 구조(폴더 통째로 zip 배포, ~1.5GB):
+- 산출물 `dist\AOI_Verify\` 구조(폴더 통째로 zip 배포):
   ```
   AOI_Verify\
     AOI_Verify.exe   ← 얇은 런처(수 MB). 앱 코드 0줄, 업데이트되지 않음
     python\          ← 번들 CPython + 의존성 [무거움, 거의 불변]
-    runtime\torch\   ← 모델 가중치 동봉(사내망에서 다운로드가 막혀도 매칭 가능)
+    runtime\ir\      ← 백본 OpenVINO IR 동봉(덕분에 배포본에 torch 가 없다)
     app\             ← ★ 자동 업데이트가 바꾸는 전부
     결과\             ← 엑셀 출력 (app\ 바깥 — 업데이트에 안 쓸림)
     run_aoi.bat / run_aoi_debug.bat  ← exe 가 백신에 막힐 때 대체 실행·진단
@@ -339,7 +339,7 @@ C:\Users\<사용자>\.aoi_verification_cache\
 | --- | --- |
 | VS Code 가 venv 의 python 을 못 잡음 | `Ctrl+Shift+P` → `Python: Clear Cache and Reload Window` 시도 후 다시 Select Interpreter |
 | F5 실행 시 “Reach Python interpreter” 에러 | venv 활성화가 안 된 터미널에서 실행한 것. 위 3.5 단계 다시 확인 |
-| `pip install` 이 매우 느림 | `torch` 가 가장 무거움. 고효율 모드 GPU 가속을 안 쓸 거면 `requirements.txt` 에서 주석 처리 |
+| `pip install` 이 매우 느림 | `PyQt6`·`openvino` 가 가장 무거움. 프록시 환경이면 아래 줄 참고 |
 | 회사 프록시 환경 | `pip install --proxy http://프록시주소:포트 -r requirements.txt` |
 | 한글이 ▯ 로 깨짐 | `Malgun Gothic` 또는 `Pretendard` 설치 확인 |
 | `AOI 검증` 창이 안 뜨고 콘솔에 traceback | 메시지 그대로 알려주세요 — 의존성 누락이 가장 흔합니다 |
@@ -351,8 +351,8 @@ C:\Users\<사용자>\.aoi_verification_cache\
 python -m pytest -q
 ```
 
-25 개 테스트가 5 초 안에 끝납니다.  PyQt 도, torch 도 필요 없는 빠른 회귀
-테스트입니다.
+무거운 의존성(PyQt6·cv2·openvino)이 없어도 도는 빠른 회귀 테스트입니다 — 없는 것은
+`pytest.importorskip` 으로 건너뜁니다.
 
 ## 13. 라이선스 / 문의
 

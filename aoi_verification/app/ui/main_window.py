@@ -111,8 +111,9 @@ class MainWindow(QMainWindow):
         #   상태바는 사용자가 **행동을 바꿀 수 있는** 정보만 담아야 한다: 가속 장치는
         #   세션 중 바뀌지 않고, CPU/GPU 가동 여부로 사용자가 할 수 있는 일이 없다.
         #   메모리는 다르다 — 압박 토스트가 '슬롯을 나눠 돌리라'는 행동을 유발한다.
-        #   진단이 필요할 때 쓰는 embedder.device_label()·accelerator_presence()·
-        #   unit_busy()·compile_diagnostics() 자체는 그대로 남아 있다(개발자 벤치마크용).
+        #   진단이 필요할 때 쓰는 embedder_openvino 의 device_label()·
+        #   accelerator_presence()·unit_busy()·compile_diagnostics() 자체는 그대로
+        #   남아 있다(개발자 벤치마크용).
         self._status_bar = QStatusBar(self)
         self.setStatusBar(self._status_bar)
         # 개발자 크레딧 — 모든 화면 공통(상태바 좌측).

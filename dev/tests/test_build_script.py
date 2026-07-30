@@ -135,10 +135,10 @@ def test_build_exe_builds_launcher_then_reuses_portable(monkeypatch, tmp_path):
     assert "exe_launcher.spec" in joined             # 얇은 런처 spec
     assert "verify_no_forbidden.py" in joined        # 보안 가드
     assert "--distpath" in joined                    # 산출물 위치 지정
-    # 포터블 빌더에 넘긴 옵션 — 병합식 update_app.bat 은 빼고, 가중치는 동봉한다.
+    # 포터블 빌더에 넘긴 옵션 — 병합식 update_app.bat 은 빼고, 백본 IR 은 동봉한다.
     assert seen["out_dirname"] == build.EXE_OUT_DIRNAME
     assert "update_app.bat" not in seen["bats"]
-    assert seen["torch_home"] is True
+    assert seen["bundle_ir"] is True
 
 
 def test_rebuild_removes_stale_onedir_output(monkeypatch, tmp_path):
@@ -218,10 +218,11 @@ def _make_good_bundle(tmp_path) -> Path:
     (out / "python" / "python.exe").write_bytes(b"x")
     (out / "python" / "pythonw.exe").write_bytes(b"x")
     (out / ".deps_installed").write_text("fp", encoding="utf-8")
-    ckpt = out / "runtime" / "torch" / "hub" / "checkpoints"
-    ckpt.mkdir(parents=True)
-    (ckpt / "mobilenet.pth").write_bytes(b"x")
-    (ckpt / "resnet18.pth").write_bytes(b"x")
+    ir = portable.ir_dir(out)
+    ir.mkdir(parents=True)
+    for kind in portable.IR_MODELS:
+        (ir / f"{kind}.xml").write_text("<net/>", encoding="utf-8")
+        (ir / f"{kind}.bin").write_bytes(b"x")
     # ★ 번들에 패키지가 실제로 설치돼 있어야 통과한다.  이 헬퍼가 예전엔 용량 더미만
     #   채우고도 통과했다는 사실 자체가, 옛 '총 용량 800MB' 검사가 아무것도 증명하지
     #   못했다는 증거다(의존성 0 개인 번들이 그 검사만으로는 구분되지 않았다).
@@ -230,7 +231,7 @@ def _make_good_bundle(tmp_path) -> Path:
     req = (out / "app" / "requirements.txt").read_text(encoding="utf-8")
     for name in portable.required_dists(req):
         (sp / f"{name}-1.0.0.dist-info").mkdir()
-    (sp / "big.bin").write_bytes(b"\x00" * (510 * 1024 * 1024))
+    (sp / "big.bin").write_bytes(b"\x00" * (210 * 1024 * 1024))
     return out
 
 
@@ -258,8 +259,10 @@ def test_verify_exe_fails_on_empty_app_package(tmp_path):
     assert build.verify_exe(tmp_path, log=lambda *a: None) != 0
 
 
-def test_verify_exe_fails_without_bundled_weights(tmp_path):
-    """가중치가 없으면 사내망에서 매칭이 안 된다 — 빌드 실패로 잡는다."""
+def test_verify_exe_fails_without_bundled_ir(tmp_path):
+    """IR 이 없으면 GPU 가속 경로가 통째로 죽는다 — 빌드 실패로 잡는다.
+
+    배포본에 torch 가 없어 런타임 변환으로 되살릴 수도 없다."""
     out = _make_good_bundle(tmp_path)
     import shutil
     shutil.rmtree(out / "runtime")
@@ -325,11 +328,12 @@ def _stage(tmp_path, *, stage: str) -> Path:
     (out / ".deps_installed").write_text("fp", encoding="utf-8")
     if stage == "deps":
         return out
-    ck = out / "runtime" / "torch" / "hub" / "checkpoints"
-    ck.mkdir(parents=True)
-    (ck / "a.pth").write_bytes(b"x")
-    (ck / "b.pth").write_bytes(b"x")
-    if stage == "weights":
+    ir = portable.ir_dir(out)
+    ir.mkdir(parents=True)
+    for kind in portable.IR_MODELS:
+        (ir / f"{kind}.xml").write_text("<net/>", encoding="utf-8")
+        (ir / f"{kind}.bin").write_bytes(b"x")
+    if stage == "ir":
         return out
     (out / "app").mkdir()
     (out / "app" / "VERSION").write_text("{}", encoding="utf-8")
@@ -342,8 +346,8 @@ def _stage(tmp_path, *, stage: str) -> Path:
     ("stale", "stale_onedir"),
     ("launcher", "partial:runtime"),
     ("runtime", "partial:deps"),
-    ("deps", "partial:weights"),
-    ("weights", "partial:appcopy"),
+    ("deps", "partial:ir"),
+    ("ir", "partial:appcopy"),
     ("done", "complete"),
 ])
 def test_diagnose_distinguishes_states(tmp_path, stage, expected):
@@ -516,7 +520,7 @@ def test_import_probe_disables_user_site(tmp_path):
     """프로브가 개발 PC 의 패키지로 거짓 통과하면 아무것도 증명하지 못한다."""
     cmd = build.import_probe_cmd(tmp_path / "out")
     assert cmd[1] == "-s", "프로브가 user site 를 배제하지 않는다"
-    assert "torch" in cmd[-1] and "openvino" in cmd[-1]      # 무거운 것까지 확인
+    assert "openvino" in cmd[-1] and "PyQt6" in cmd[-1]      # 무거운 것까지 확인
 
 
 def test_build_exe_does_not_guess_when_run_build_already_reported(monkeypatch, tmp_path):

@@ -31,6 +31,7 @@ from typing import Dict, Iterable, List, Optional, Tuple
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
 from ..models.slot import ImageItem
+from . import cnn_embed as _cnn
 from . import pipeline as _pipeline
 from .pipeline import Feature
 
@@ -369,7 +370,7 @@ class _SlotJob:
     """생산자(GPU)→소비자(CPU) 핸드오프 단위.
 
     생산자가 한 슬롯의 Feature 빌드 + CNN 임베딩 주입까지 끝낸 뒤 큐에 올린다.
-    소비자는 이 Feature 들로 스코어링만 하므로 torch 호출이 없다(thread-safe).
+    소비자는 이 Feature 들로 스코어링만 하므로 추론 호출이 없다(thread-safe).
     """
     slot_idx: int
     slot: str
@@ -427,15 +428,10 @@ class SlotPrecomputeWorker(QThread):
         """
         if not self._pipeline_enabled or len(self._tasks) <= 1:
             return False
-        try:
-            from ..learning import embedder as _emb
-            return bool(
-                _emb.has_accelerator()
-                and _emb.is_available()
-                and _emb.get_active_mode() != _emb.registry.BASIC
-            )
-        except Exception:
-            return False
+        # 겹칠 GPU 작업은 CNN 임베딩뿐인데, 그 경로가 비활성이라 지금은 항상 False 다
+        # (`similarity/cnn_embed.py` 참고).  CPU 만 쓰는 상태에서 파이프라인을 켜면
+        # producer 가 스코어링과 코어를 두고 경합만 한다.
+        return bool(_cnn.is_available())
 
     def run(self) -> None:        # type: ignore[override]
         if self._should_pipeline():
@@ -454,7 +450,7 @@ class SlotPrecomputeWorker(QThread):
                       done: int, total: int, total_slots: int) -> int:
         """한 슬롯의 CPU 스코어링 + 디스크 캐시 + 시그널.  새 ``done`` 반환.
 
-        sequential/pipeline 양쪽이 공유하는 소비자 측 로직 (torch 호출 없음)."""
+        sequential/pipeline 양쪽이 공유하는 소비자 측 로직 (추론 호출 없음)."""
         from .. import i18n
         slot, refs, vals = job.slot, job.refs, job.vals
         self.signals.phase.emit(i18n.KO.PHASE_SCORING)
@@ -527,9 +523,8 @@ class SlotPrecomputeWorker(QThread):
 
                 # 2.5) CNN 임베딩 사전 배치 (#5 — GPU 가속 + thread-safety).
                 # score() 안에서 lazy 계산 + Feature.cnn 변형이 일어나면
-                # ThreadPoolExecutor 환경에서 race condition / torch 비-스레드
-                # 안전성에 걸린다.  슬롯 단위로 한 번에 GPU 배치 추론 → score()
-                # 는 캐시 hit 만 하게 한다.
+                # ThreadPoolExecutor 환경에서 race condition 에 걸린다.  슬롯 단위로
+                # 한 번에 배치 추론 → score() 는 캐시 hit 만 하게 한다.
                 self._prefetch_cnn_embeddings(ref_feats, val_feats)
 
                 # 3) 모든 (ref, val) 쌍 점수 — ThreadPoolExecutor 로 병렬 (#5).
@@ -623,7 +618,7 @@ class SlotPrecomputeWorker(QThread):
     def _producer(self, q: "queue.Queue[Optional[_SlotJob]]") -> None:
         """슬롯을 순서대로 Feature 빌드 + CNN 임베딩(유일한 GPU 호출)하여 큐로.
 
-        torch/OpenVINO 는 이 단일 스레드에서만 호출된다 → thread-safe.  진행률
+        OpenVINO 는 이 단일 스레드에서만 호출된다 → thread-safe.  진행률
         시그널은 첫 슬롯(차단 오버레이 표시 중)에서만 emit 해 소비자의 전역
         스코어링 진행률과 스케일이 섞이지 않게 한다.
         """
@@ -685,45 +680,15 @@ class SlotPrecomputeWorker(QThread):
     def _prefetch_cnn_embeddings(self,
                                   ref_feats: Dict[Path, Feature],
                                   val_feats: Dict[Path, Feature]) -> None:
-        """CNN 활성 모드라면 슬롯의 모든 이미지에 대한 임베딩을 한 번에 GPU
-        배치 추론으로 계산 → Feature.cnn 에 주입 (#5).  병렬 score() 단계에서
-        torch 호출 / Feature 변형을 모두 없애서 thread-safe 보장."""
-        try:
-            from ..learning import embedder as _emb
-        except Exception:
+        """CNN 활성 모드라면 슬롯 전체 임베딩을 미리 계산해 ``Feature.cnn`` 에 주입한다.
+
+        병렬 ``score()`` 단계에서 Feature 를 변형하지 않게 하려는 것(#5)이라, 주입은
+        반드시 병렬 진입 **전**(main thread)에 끝나야 한다.
+
+        지금은 CNN 경로가 비활성이라 하는 일이 없다(`similarity/cnn_embed.py` 참고) —
+        ``Feature.cnn`` 은 None 으로 남고 채점은 phash/ORB/SSIM 으로 간다."""
+        if not _cnn.is_available():
             return
-        if not _emb.is_available():
-            return
-        mode = _emb.get_active_mode()
-        if mode == _emb.registry.BASIC:
-            return
-        # 캐시에 없는 이미지만 계산.
-        paths_needed = []
-        for d in (ref_feats, val_feats):
-            for p, f in d.items():
-                if f is None:
-                    continue
-                if f.cnn is None or f.cnn_model != mode:
-                    paths_needed.append(p)
-        # 중복 제거 (ref 와 val 에 동일 path 가 있을 수 있음).
-        paths_needed = list(dict.fromkeys(paths_needed))
-        if not paths_needed:
-            return
-        try:
-            emb_map = _emb.compute_embeddings(paths_needed, batch_size=64)
-        except Exception as exc:
-            # 임베딩 사전 배치 실패 — CNN 없이 진행(동작 불변)하되 원인 로깅.
-            from ..utils import errors as _errors
-            _errors.log_silent("slot_features: CNN 임베딩 사전 배치 실패",
-                               exc, level=_errors.logging.WARNING)
-            return
-        # Feature 객체에 결과 주입 (main thread, 병렬 진입 전).
-        for d in (ref_feats, val_feats):
-            for p, f in d.items():
-                e = emb_map.get(p)
-                if e is not None and f is not None:
-                    f.cnn = e
-                    f.cnn_model = mode
 
     def _score_pairs_parallel(self,
                                slot: str,

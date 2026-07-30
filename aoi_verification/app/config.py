@@ -190,7 +190,7 @@ class SimilarityWeights:
     orb: float = 0.3
     ssim: float = 0.2
     cnn: float = 0.3
-    use_cnn: bool = False  # CNN 임베딩은 옵션 (torch 필요)
+    use_cnn: bool = False  # 고전 경로의 CNN 항 — 현재 비활성 (similarity/cnn_embed.py)
 
     def normalized(self) -> "SimilarityWeights":
         """If CNN is disabled, redistribute its weight to the others."""

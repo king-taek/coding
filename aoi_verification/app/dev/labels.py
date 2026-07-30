@@ -115,7 +115,7 @@ def order_by_similarity(ref_item, val_items, *, cfg=None) -> list:
     """후보 검증사진을 기준과의 **고전(CPU) 유사도 내림차순**으로 정렬해 돌려준다.
 
     라벨 작업을 빠르게 하기 위한 **표시 순서일 뿐** 정답 판정과는 무관하다.
-    torch/가속 장치가 없어도 동작한다(pHash+ORB+SSIM).  실패하면 파일명순 폴백."""
+    가속 장치가 없어도 동작한다(pHash+ORB+SSIM).  실패하면 파일명순 폴백."""
     vals = list(val_items)
     try:
         from ..workers.matcher import score_ref_classical

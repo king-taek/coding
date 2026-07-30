@@ -1,18 +1,18 @@
 """OpenVINO 기반 추론 가속 — Intel GPU 자동 활용.
 
-PyTorch native 디바이스 (torch.xpu) 로도 Iris Xe / Arc GPU 를 잡을 수 있지만,
-OpenVINO 경로가 컴파일/스트림 제어가 명확해 ``openvino`` 패키지가 설치되어
-있고 Intel GPU 가 인식되면 이 모듈을 우선 사용한다.
-
 설계:
 - ``is_available()`` — openvino import + GPU 디바이스 존재 확인.
-- ``_compile_backbone()`` — MobileNetV3-Small backbone 을 OpenVINO IR 로
-  변환 + GPU 에 컴파일 (lazy, 1 회).
-- ``compute_embeddings(paths)`` — 배치 단위로 OpenVINO 컴파일 모델 추론
-  → 결과를 PyTorch head (작은 Linear) 에 통과시켜 최종 임베딩.
-- GPU 가 없으면 ``is_available()`` 가 False 를 반환해 PyTorch 경로로 폴백.
+- ``compile_model_on(kind, device, batch)`` — 동봉된 IR 을 읽어 장치에 컴파일(lazy).
+- ``device_embed(paths, ...)`` — 전처리(멀티스레드) → ``AsyncInferQueue`` 추론 →
+  L2 정규화 임베딩.  디스크 캐시로 재실행 시 재추출을 생략한다.
+- GPU 가 없으면 ``is_available()`` 가 False 를 반환해 호출부가 CPU 고전으로 폴백.
 
-설치: ``pip install openvino`` (대략 200MB).
+**백본 IR 은 빌드 때 만들어 동봉한다** (``runtime/ir/*.xml``).  예전에는 런타임에
+torchvision 백본을 만들어 ``ov.convert_model`` 로 변환했는데, 그것 하나 때문에 배포본이
+torch 를 통째로 안고 다녔다(+수백 MB, 시작할 때마다 장치 프로브).  변환은 빌드 PC 에서
+한 번이면 충분하다 — ``scripts/internal/portable_build.py`` 의 ``_IR_BUILD_SRC``.
+
+설치: ``pip install openvino``.
 """
 
 from __future__ import annotations
@@ -28,17 +28,8 @@ import numpy as np
 
 
 # ---------------------------------------------------------------------------
-# Optional dependencies — torch + openvino 가 모두 있어야 의미 있음.
+# Optional dependency — openvino.  (torch 는 런타임에 필요하지 않다: 위 참고)
 # ---------------------------------------------------------------------------
-try:  # pragma: no cover — 옵션
-    import torch
-    from torchvision import models
-    _HAS_TORCH = True
-except Exception:  # pragma: no cover
-    torch = None  # type: ignore
-    models = None  # type: ignore
-    _HAS_TORCH = False
-
 try:  # pragma: no cover — 옵션
     import openvino as ov
     _HAS_OPENVINO = True
@@ -95,7 +86,7 @@ def _list_ov_devices() -> List[str]:  # pragma: no cover — 환경 의존
     log = logging.getLogger("aoi.openvino")
     if not _HAS_OPENVINO:
         log.warning("OpenVINO 미설치 — GPU 가속 불가 (requirements 의 "
-                    "openvino 설치 필요). torch=%s", _HAS_TORCH)
+                    "openvino 설치 필요).")
         return []
     try:
         devs = list(ov.Core().available_devices)
@@ -107,7 +98,7 @@ def _list_ov_devices() -> List[str]:  # pragma: no cover — 환경 의존
 
 
 def _pick_target() -> Optional[str]:  # pragma: no cover — 환경 의존
-    """OpenVINO 디바이스 선택: GPU.  CPU 는 PyTorch 와 차이가
+    """OpenVINO 디바이스 선택: GPU.  CPU 는 고전 경로와 차이가
     크지 않으므로 OpenVINO 경로를 강제 사용하지 않는다."""
     devs = _list_ov_devices()
     for cand in ("GPU",):
@@ -117,8 +108,8 @@ def _pick_target() -> Optional[str]:  # pragma: no cover — 환경 의존
 
 
 def is_available() -> bool:
-    """OpenVINO + GPU + torch 모두 있을 때만 사용 가능."""
-    return _HAS_TORCH and _HAS_OPENVINO and _pick_target() is not None
+    """OpenVINO + GPU 가 모두 있을 때만 사용 가능."""
+    return _HAS_OPENVINO and _pick_target() is not None
 
 
 def target_device() -> Optional[str]:
@@ -126,10 +117,9 @@ def target_device() -> Optional[str]:
 
 
 def device_label() -> str:  # pragma: no cover — 환경 의존
-    """상태바 표시용 — 사용 가능할 때만 비어있지 않은 문자열 반환.
+    """가속 장치 표시용 — 사용 가능할 때만 비어있지 않은 문자열 반환.
 
-    Intel GPU 가 있으면 그것만 표시하고, 없으면 빈 문자열을 반환해 embedder 가
-    torch/CPU 라벨로 폴백하도록 둔다.
+    Intel GPU 가 있으면 그것을 표시하고, 없으면 빈 문자열(=가속 없음).
     """
     if not is_available():
         return ""
@@ -163,71 +153,6 @@ def _force_static_shape(ov_model, batch: int = 1,
         )
 
 
-@lru_cache(maxsize=1)
-def _compile_backbone():  # pragma: no cover — 환경 의존
-    """MobileNetV3-Small backbone 을 OpenVINO 로 변환 후 GPU 컴파일.
-
-    Thread-safe: ``functools.lru_cache`` 는 CPython 에서 내부 락으로 보호.
-    반환 — (compiled_model, target_device_str) 튜플.
-    """
-    if not is_available():
-        return None
-    weights = models.MobileNet_V3_Small_Weights.IMAGENET1K_V1
-    backbone = models.mobilenet_v3_small(weights=weights)
-    backbone.classifier = torch.nn.Identity()
-    backbone.eval()
-    example = torch.randn(1, 3, _INPUT_PX, _INPUT_PX)
-    ov_model = ov.convert_model(backbone, example_input=example)
-    _force_static_shape(ov_model)
-    core = ov.Core()
-    primary = target_device()
-    # GPU 가 실패하면 CPU 로 자동 fallback (op 미지원 등).
-    for cand in (primary, "GPU", "CPU"):
-        if cand is None:
-            continue
-        try:
-            # THROUGHPUT 힌트 — 디바이스에 따라 적정 stream/infer-request 수
-            # 를 OpenVINO 가 알아서 설정 → AsyncInferQueue 와 함께 GPU 최대 활용.
-            compiled = core.compile_model(
-                ov_model, cand,
-                config={"PERFORMANCE_HINT": "THROUGHPUT"},
-            )
-            # 실제로 어떤 디바이스에 컴파일됐는지 로그로 검증 — Intel iGPU 가
-            # 진짜 쓰이는지 확인 (CPU 로 조용히 폴백되는 상황 탐지용).
-            _log_compiled_device(core, cand)
-            return (compiled, cand)
-        except Exception as e:
-            import logging
-            _compile_errors[("backbone", cand)] = repr(e)
-            logging.getLogger("aoi.openvino").warning(
-                "OpenVINO backbone 컴파일 실패: %s → 다음 디바이스로 폴백", cand,
-                exc_info=True,
-            )
-            continue
-    return None
-
-
-# 마지막으로 컴파일에 성공한 OpenVINO 디바이스 ("GPU"/"CPU") — UI 표시용.
-_last_compiled_target: Optional[str] = None
-_last_compiled_name: str = ""
-
-
-def _log_compiled_device(core, cand: str) -> None:  # pragma: no cover - 환경 의존
-    """컴파일된 실제 디바이스의 풀 네임을 로그로 남긴다 (iGPU 실사용 검증)."""
-    global _last_compiled_target, _last_compiled_name
-    import logging
-    name = ""
-    try:
-        name = str(core.get_property(cand, "FULL_DEVICE_NAME"))
-    except Exception:
-        name = cand
-    _last_compiled_target = cand
-    _last_compiled_name = name
-    logging.getLogger("aoi.openvino").info(
-        "OpenVINO backbone compiled on %s (%s)", cand, name,
-    )
-
-
 def _optimal_streams(compiled) -> int:  # pragma: no cover — 환경 의존
     """디바이스가 권장하는 동시 추론 스트림 수 — AsyncInferQueue jobs.
 
@@ -251,11 +176,7 @@ def _optimal_streams(compiled) -> int:  # pragma: no cover — 환경 의존
 
 
 def invalidate_caches() -> None:
-    """모델 변경 등으로 컴파일 캐시를 무효화해야 할 때 호출.
-
-    ``embedder.invalidate_caches()`` 가 학습 / 모델 교체 후 함께 호출.
-    """
-    _compile_backbone.cache_clear()
+    """모델 변경 등으로 컴파일 캐시를 무효화해야 할 때 호출."""
     compile_model_on.cache_clear()
     _compiled_units.clear()
     _compile_errors.clear()
@@ -343,56 +264,6 @@ def _preprocess_parallel(items, cfg=None, side=None, *,
 
 
 # ---------------------------------------------------------------------------
-# 공개 API — PyTorch embedder 에서 가용 시 호출
-# ---------------------------------------------------------------------------
-def compute_embeddings(paths: Iterable[Path],
-                       *,
-                       batch_size: int = 1,        # 플러그인 호환을 위해 사실상 1
-                       head=None,
-                       cfg=None
-                       ) -> Dict[Path, np.ndarray]:  # pragma: no cover
-    """OpenVINO 백본 + (선택) PyTorch head 로 임베딩을 ``AsyncInferQueue``
-    로 병렬 계산 — GPU 활용도 최대화.
-
-    플러그인의 dynamic shape 제약을 우회하기 위해 **batch=1** 고정.
-    대신 ``AsyncInferQueue(jobs=N)`` 으로 N 개 추론을 동시 in-flight 시켜
-    파이프라인을 채우면 GPU 가 idle 없이 일한다 (THROUGHPUT 힌트와 함께).
-
-    실패 path 는 결과 dict 에 누락 — 호출자(``embedder.compute_embeddings``)
-    가 PyTorch 로 보완.
-    """
-    out: Dict[Path, np.ndarray] = {}
-    if not is_available():
-        return out
-    pack = _compile_backbone()
-    if pack is None:
-        return out
-    compiled, _dev = pack
-    mark_unit_active(_dev)
-
-    items = [Path(p) for p in paths]
-    if not items:
-        return out
-
-    # 전처리(멀티스레드)와 추론(GPU)을 파이프라인으로 겹쳐 가동(#3) — 준비되는
-    # 텐서를 즉시 AsyncInferQueue 로 흘려보내 장치가 놀지 않게 한다.
-    inputs = ((p, arr[np.newaxis]) for p, arr in _preprocess_parallel(items, cfg))
-    raw = _infer_raw(compiled, inputs, _optimal_streams(compiled))
-
-    # head 통과 + L2 정규화 → PyTorch 경로와 동일 형식.
-    for p, feat in raw.items():
-        if head is not None and _HAS_TORCH:
-            try:
-                with torch.no_grad():
-                    feat = head(torch.from_numpy(feat)).cpu().numpy()
-            except Exception:
-                continue
-        norm = float(np.linalg.norm(feat[0])) + 1e-9
-        out[p] = (feat[0] / norm).astype(np.float32)
-    return out
-
-
-# ---------------------------------------------------------------------------
 # 공용 비동기 추론 — AsyncInferQueue 로 N 개 동시 in-flight (GPU saturate)
 # ---------------------------------------------------------------------------
 def _udata_count(userdata) -> int:
@@ -463,9 +334,9 @@ def _infer_raw(compiled, inputs, n_streams: int, progress_cb=None) -> Dict[Path,
 def available_units() -> List[str]:
     """OpenVINO 로 가속 가능한 Intel 유닛 — ``["GPU"]`` 중 실제 존재분.
 
-    torch/openvino 가 없으면 빈 리스트.  스케줄러가 이 결과로 어떤 워커를
+    openvino 가 없으면 빈 리스트.  스케줄러가 이 결과로 어떤 워커를
     띄울지 결정한다 (CPU 는 항상 별도로 가동)."""
-    if not (_HAS_TORCH and _HAS_OPENVINO):
+    if not _HAS_OPENVINO:
         return []
     devs = _list_ov_devices()
     out: List[str] = []
@@ -476,10 +347,10 @@ def available_units() -> List[str]:
 
 
 def accelerator_presence() -> Dict[str, object]:
-    """상태바 표시용 — 인텔 GPU **존재 여부**를 OpenVINO 만으로 조사.
+    """상태바 표시용 — 인텔 GPU **존재 여부**를 조사.
 
-    스케줄러용 ``available_units()`` 와 달리 torch 설치 여부에 의존하지 않는다
-    (장치 존재는 추론 백엔드와 무관).  반환::
+    스케줄러용 ``available_units()`` 와 달리 '쓸 수 있는가' 가 아니라 '있는가' 만
+    본다(장치 존재는 동봉 IR 유무와 무관).  반환::
 
         {"GPU": bool, "devices": [...], "reason": str}
 
@@ -498,29 +369,36 @@ def accelerator_presence() -> Dict[str, object]:
     return {"GPU": gpu, "devices": devs, "reason": reason}
 
 
+def ir_path(model_kind: str) -> Optional[Path]:
+    """동봉된 백본 IR(``<설치루트>/runtime/ir/<kind>.xml``) 경로 — 없으면 None.
+
+    빌드가 만들어 둔 것을 읽기만 한다(``portable_build._build_ir``).  개발 트리처럼
+    동봉본이 없는 환경에서는 None 이고, 호출부가 CPU 고전으로 폴백한다."""
+    if model_kind not in (MODEL_MOBILENET_V3, MODEL_RESNET18):
+        return None
+    from ..utils import paths
+    d = paths.bundled_ir_dir()
+    if d is None:
+        return None
+    xml = d / f"{model_kind}.xml"
+    # ``.bin``(가중치)이 없으면 read_model 이 조용히 0 초기화 모델을 줄 수 있다 —
+    # 그건 '느리다' 가 아니라 '틀린 임베딩' 이므로 아예 없는 것으로 취급한다.
+    return xml if xml.is_file() and xml.with_suffix(".bin").is_file() else None
+
+
 def _build_ov_model(model_kind: str, batch: int = 1,
                     input_px: Optional[int] = None):  # pragma: no cover - 환경 의존
-    """torchvision 백본 → OpenVINO 모델 (raw 임베딩 — classifier/fc 제거).
+    """동봉된 IR → OpenVINO 모델 (raw 임베딩 — classifier/fc 제거된 백본).
 
-    ``.eval()`` 로 BatchNorm 을 폴딩한 뒤 변환해야 GPU 에서 정확하다.
-    ``batch`` 로 정적 배치 크기를, ``input_px`` 로 입력 해상도를 지정.  지원 백본은
-    MobileNetV3-Small / ResNet18 두 가지로, 그 외 모델은 ``None`` 을 돌려
-    호출부가 CPU 고전으로 폴백한다."""
+    변환(torchvision 백본 → IR)은 **빌드 때 이미 끝나 있다**.  여기서는 읽어서
+    ``batch``/``input_px`` 에 맞게 reshape 만 한다 — 백본이 전부 conv/pool 이라
+    입력 크기를 바꿔도 그래프가 그대로 유효하다.
+    IR 이 없으면 ``None`` 을 돌려 호출부가 CPU 고전으로 폴백한다."""
     P = int(input_px) if input_px else _INPUT_PX
-    if model_kind == MODEL_RESNET18:
-        weights = models.ResNet18_Weights.IMAGENET1K_V1
-        backbone = models.resnet18(weights=weights)
-        backbone.fc = torch.nn.Identity()       # 512-d 임베딩
-    elif model_kind == MODEL_MOBILENET_V3:       # MobileNetV3-Small (576-d)
-        weights = models.MobileNet_V3_Small_Weights.IMAGENET1K_V1
-        backbone = models.mobilenet_v3_small(weights=weights)
-        backbone.classifier = torch.nn.Identity()
-    else:
-        # 지원하지 않는 백본 — 호출부가 CPU 고전으로 폴백한다.
+    xml = ir_path(model_kind)
+    if xml is None:
         return None
-    backbone.eval()
-    example = torch.randn(1, 3, P, P)
-    ov_model = ov.convert_model(backbone, example_input=example)
+    ov_model = ov.Core().read_model(str(xml))
     _force_static_shape(ov_model, batch, P)
     return ov_model
 
@@ -547,7 +425,7 @@ def compile_model_on(model_kind: str, device: str, batch: int = 1, *,
     - ``streams``   — NUM_STREAMS(다중 동시 추론 스트림, 0=자동).
     - ``input_px``  — 입력 해상도(0=기본 256).  전처리도 같은 px 를 써야 한다.
     """
-    if not (_HAS_TORCH and _HAS_OPENVINO):
+    if not _HAS_OPENVINO:
         return None
     import logging
     log = logging.getLogger("aoi.openvino")
@@ -557,8 +435,8 @@ def compile_model_on(model_kind: str, device: str, batch: int = 1, *,
         cfg_compile["NUM_STREAMS"] = str(int(streams))
     try:
         ov_model = _build_ov_model(model_kind, batch, input_px or None)
-        if ov_model is None:               # 모델 주머니 빌드 불가(미가용) → 폴백.
-            _compile_errors[(model_kind, device)] = "백본 빌드 불가(패키지/가중치)"
+        if ov_model is None:               # 동봉 IR 없음/미지원 백본 → 폴백.
+            _compile_errors[(model_kind, device)] = "백본 IR 없음(runtime/ir 미동봉)"
             return None
         core = ov.Core()
         compiled = core.compile_model(ov_model, device, config=cfg_compile)
@@ -612,6 +490,15 @@ def _l2(vec: np.ndarray) -> np.ndarray:  # pragma: no cover - 환경 의존
 # 키 = 원본경로 | mtime | 모델 | 입력해상도 | center-crop 여부.  device 는 키에
 # 넣지 않아 GPU/CPU 폴백이 캐시를 공유한다(같은 모델이라 매칭엔 영향 없음).
 # ---------------------------------------------------------------------------
+# ★ 임베딩을 만드는 방식이 바뀌면 반드시 올린다.
+#
+# 캐시 키에 '어떻게 만든 벡터인가' 가 없으면, 방식이 바뀐 뒤에도 옛 ``.npy`` 가 그대로
+# 적중해 **같은 슬롯 안에서 옛 벡터와 새 벡터를 코사인 비교**하게 된다.  느려지는 게
+# 아니라 **매칭 결과가 틀리는** 사고라, 파일을 지우라고 안내하는 대신 키로 분리한다.
+#   ir1 — 백본 IR 을 빌드 때 만들어 동봉(FP32).  이전: 런타임 ov.convert_model.
+_EMB_VERSION = "ir1"
+
+
 def _emb_signature(model_kind: str, cfg, side) -> str:
     cc = 0
     try:
@@ -619,7 +506,7 @@ def _emb_signature(model_kind: str, cfg, side) -> str:
             cc = 1 if cfg._center_crop_for(side) else 0
     except Exception:
         cc = 0
-    return f"{model_kind}|px{_INPUT_PX}|cc{cc}"
+    return f"{model_kind}|px{_INPUT_PX}|cc{cc}|{_EMB_VERSION}"
 
 
 def _emb_cache_file(path: Path, sig: str) -> Path:

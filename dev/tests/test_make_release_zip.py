@@ -40,7 +40,7 @@ def test_update_leftovers_and_test_results_are_excluded():
     assert inc("AOI_Verify.exe")
     assert inc("app/main.py")
     assert inc("python/python.exe")
-    assert inc("runtime/torch/hub/checkpoints/x.pth")
+    assert inc("runtime/ir/mobilenet_v3_small.xml")
     assert inc(".deps_installed")            # 의존성 표식은 반드시 들어가야 한다
     # 업데이트 찌꺼기 · 시험 실행 산출물 · 낡은 바이트코드는 제외.
     assert not inc("app.new/main.py")
@@ -48,6 +48,8 @@ def test_update_leftovers_and_test_results_are_excluded():
     assert not inc("app.new.part/main.py")
     assert not inc("결과/시험출력.xlsx")
     assert not inc("app/aoi_verification/__pycache__/x.pyc")
+    # IR 변환용 torch 임시 트리(수백 MB) — 빌드가 중간에 죽었을 때만 남는다.
+    assert not inc(".irbuild/torch/__init__.py")
     # python\ 런타임의 __pycache__ 는 건드리지 않는다(첫 실행 속도).
     assert inc("python/Lib/site-packages/numpy/__pycache__/x.pyc")
 
@@ -95,17 +97,18 @@ def _good_bundle(tmp_path) -> Path:
     (out / "python" / "python.exe").write_bytes(b"x")
     (out / "python" / "pythonw.exe").write_bytes(b"x")
     (out / ".deps_installed").write_text("fp", encoding="utf-8")
-    ckpt = out / "runtime" / "torch" / "hub" / "checkpoints"
-    ckpt.mkdir(parents=True)
-    (ckpt / "a.pth").write_bytes(b"x")
-    (ckpt / "b.pth").write_bytes(b"x")
+    ir = portable.ir_dir(out)
+    ir.mkdir(parents=True)
+    for kind in portable.IR_MODELS:
+        (ir / f"{kind}.xml").write_text("<net/>", encoding="utf-8")
+        (ir / f"{kind}.bin").write_bytes(b"x")
     # 번들에 패키지가 실제로 설치돼 있어야 한다(빈 번들을 배포하지 않기 위한 검사).
     sp = portable.site_packages_dir(out)
     sp.mkdir(parents=True, exist_ok=True)
     for name in portable.required_dists(
             (app / "requirements.txt").read_text(encoding="utf-8")):
         (sp / f"{name}-1.0.0.dist-info").mkdir()
-    (sp / "big.bin").write_bytes(b"\x00" * (510 * 1024 * 1024))
+    (sp / "big.bin").write_bytes(b"\x00" * (210 * 1024 * 1024))
     # 찌꺼기 — zip 에 들어가면 안 된다.
     # (`app.new` 는 검증 단계에서 아예 걸러지므로 여기 두지 않는다 — 그건
     #  test_make_zip_refuses_a_broken_bundle 과 should_include 단위 테스트가 다룬다.)

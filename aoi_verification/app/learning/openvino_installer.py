@@ -128,10 +128,10 @@ class OpenVinoInstallWorker(QThread):
             self.signals.finished.emit(False, f"설치 중 오류: {exc}")
             return
         if rc == 0:
-            # 설치 성공 시 embedder 캐시 무효화 (다음 호출에서 재감지).
+            # 설치 성공 시 컴파일 캐시 무효화 (다음 호출에서 재감지).
             try:
-                from . import embedder as _emb
-                _emb.invalidate_caches()
+                from . import embedder_openvino as _ov
+                _ov.invalidate_caches()
             except Exception:
                 pass
             self.signals.finished.emit(True, "설치 완료")
