@@ -442,8 +442,7 @@ class SlotPrecomputeWorker(QThread):
     # ------------------------------------------------------------------
     def _score_signature_or_blank(self) -> Tuple[bool, str]:
         """persist 여부 + 점수 시그니처 (sequential/pipeline 공용)."""
-        persist = (bool(getattr(self._cfg, "persist_scores", False))
-                   and not bool(getattr(self._cfg, "bench_no_cache", False)))
+        persist = bool(getattr(self._cfg, "persist_scores", False))
         return persist, (_score_signature(self._cfg) if persist else "")
 
     def _consume_slot(self, job: "_SlotJob", *, persist: bool, score_sig: str,
@@ -481,8 +480,7 @@ class SlotPrecomputeWorker(QThread):
                 return
             # 점수 디스크 캐시 옵션 (#5B) — active 모델은 실행 중 불변이므로
             # 시그니처는 한 번만 계산한다.
-            persist = (bool(getattr(self._cfg, "persist_scores", False))
-                       and not bool(getattr(self._cfg, "bench_no_cache", False)))
+            persist = bool(getattr(self._cfg, "persist_scores", False))
             score_sig = _score_signature(self._cfg) if persist else ""
             done = 0
             for slot_idx, (slot, refs, vals) in enumerate(self._tasks):

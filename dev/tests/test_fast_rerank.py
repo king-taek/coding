@@ -80,8 +80,9 @@ def test_orb_nfeatures_flows_through_cfg_in_extract(tmp_path):
     p = tmp_path / "x.png"
     rng = np.random.default_rng(3)
     cv2.imwrite(str(p), (rng.integers(0, 255, (160, 160, 3))).astype("uint8"))
-    cfg_full = C.SimilarityConfig(bench_no_cache=True)
-    cfg_few = C.SimilarityConfig(bench_no_cache=True, orb_nfeatures=48)
+    # 두 cfg 는 cache_extra 가 다르므로("" vs "orb48") 캐시가 서로 섞이지 않는다.
+    cfg_full = C.SimilarityConfig()
+    cfg_few = C.SimilarityConfig(orb_nfeatures=48)
     f_full = P.extract(p, cfg=cfg_full, side="ref")
     f_few = P.extract(p, cfg=cfg_few, side="ref")
     assert f_few.orb_kp <= 48

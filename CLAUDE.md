@@ -187,7 +187,10 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   지운다. `requirements.txt` 에 다시 넣지 마라 — 배포 번들에서 가장 큰 덩어리다.
 
 ## 매칭 / 좌표 검토 규칙
-- **정확도 우선**: 운영 기본(`gpu_fusion_b16`)보다 정확도가 낮으면 더 빨라도 채택/추천하지 않는다.
+- **정확도 우선**: 지금 운영 조합(고효율 모드 = GPU MobileNetV3 임베딩으로 후보 추림 +
+  CPU 고전 ORB·중앙가중 재채점)보다 정확도가 낮으면 더 빨라도 채택/추천하지 않는다.
+  실측 회귀 가드: `dev/tests/test_efficiency_contract.py` 가 (모델·장치·배치)와 임베딩
+  캐시 키를 못 박아 둔다.
 - 좌표 기반 매칭(`workers/coord_matcher.py`)의 후보 게이트는 **(col,row) ±1 이내**다(정답 도구
   AOI Data Viewer VBA `Module_Compare`: `Abs(col차)<=1 And Abs(row차)<=1`). KLA↔Camtek 처럼
   두 장비의 die 인덱스가 1 어긋날 수 있어 정확 일치만 하면 매칭이 전멸한다. 순수 헬퍼
@@ -210,15 +213,6 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   돌고, 짝은 찾았지만 한쪽 사진이 0장인 슬롯은 `push_one_sided_to_unmatched` 로
   '기준/검증 전용' 에 되돌려 결과에 남긴다(그냥 두면 결과에서 통째로 사라진다).
 
-## 개발자 벤치마크(매칭 속도 실험) 규칙
-- 레시피 **실행은 자식 프로세스로 격리**한다(`benchmark.drive_isolated_suite`). OpenVINO
-  네이티브 크래시·멈춤이 GUI 를 죽이지 않게 — 파이썬 예외/타임아웃으론 못 막는다. 자식이
-  죽으면 범인 레시피를 기록하고 살아남은 것만 이어서 측정(부분 `result.json` 으로 복구).
-- 측정은 항상 **유사도 캐시 우회**(`bench_no_cache`)로 '처음 매칭처럼'.
-- 실측 결론: 병목은 **CPU 재채점(~57s)**, 임베딩 장치 교체는 속도 이득 거의 없음(×1.02).
-  3배의 레버는 **CPU 재채점 축소**(`fast-rerank`/`cpu_rr_*`). NPU 는 이득이 없어 제거됐다.
-- 새 레시피는 **실제 채점 경로에 배선**해 동작하게 한다(스캐폴드면 그 사실을 desc/문서에 명시).
-
 ## UI 사용성 관습
 - **클릭 대상은 크고 명확하게.** 작은 기본 체크박스(예: `QListWidgetItem` 체크) 대신
   **타일/카드 전체가 클릭영역**인 토글을 쓴다. 선택 상태는 네온 보더+배경으로 강조하고
@@ -237,15 +231,14 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   함께 고친다.
 - **`aoi_verification/app/`** 가 앱 본체: `ui/`(pages·widgets), `workers/`(매칭·OCR·내보내기 등
   백그라운드), `coords/`(좌표 파서), `models/`, `similarity/`, `utils/`(`updater`·`paths`·`image_io`),
-  `i18n/`, `learning/`, `dev/`(앱 내 벤치마크).
-- **`dev/` = 사용자가 직접 건드리지 않는 개발 전용 모음.** `dev/tests/`(테스트)·`dev/bench결과/`
-  (실측 데이터)·`dev/양식.xlsx`(엑셀 출력 템플릿). 옮길 때 함께 고칠 참조:
+  `i18n/`, `learning/`.
+- **`dev/` = 사용자가 직접 건드리지 않는 개발 전용 모음.** `dev/tests/`(테스트)·
+  `dev/양식.xlsx`(엑셀 출력 템플릿). 옮길 때 함께 고칠 참조:
   - 테스트 경로: `pytest.ini` 의 `testpaths = dev/tests` (※ `pytest.ini` 는 루트 앵커라 이동 금지 —
     `python -m pytest` 가 루트에서 testpaths 로 찾는다).
   - `dev/tests/conftest.py`·`dev/tests/test_no_spyder_conda.py` 는 루트를 `parents[2]` 로 잡는다.
   - 양식 템플릿: `paths.template_path()` 가 `dev/양식.xlsx` 를 1순위로 찾는다. 포터블 빌드는
     `portable_build.py`/`*.spec`/`updater` 가 `dev/양식.xlsx` → 앱 루트 `양식.xlsx` 로 복사한다.
-  - 실측 데이터: `benchmark.iter_history` 가 `dev/bench결과` 를 본다.
   - 자동 업데이트: `updater._UPDATE_SKIP_TOP` 가 `dev/` 를 통째로 건너뛰되 `dev/양식.xlsx` 만 앱
     루트로 따로 복사한다(구동 필수). `dev/` 에 새 개발 데이터를 넣어도 자동으로 제외된다.
 - **루트 앵커(이동 금지)**: `README.md`·`main.py`·`requirements.txt`·`pytest.ini`·`.gitignore`·
@@ -264,8 +257,7 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
 - 커밋 전 전체 테스트 통과 확인: `QT_QPA_PLATFORM=offscreen python -m pytest -q`.
 - 무거운 의존성(cv2/openvino/torch/PyQt6)은 환경에 없을 수 있어 `pytest.importorskip` 으로
   게이트한다(모듈 단위 import 도 포함). **순수 로직은 무거운 의존성 없이** 단위 테스트되게 설계
-  (예: 좌표 후보 선택 `_select_coord_candidates`, 업데이트 브랜치 정규화/자기교정, 벤치마크 격리
-  드라이버의 spawn 주입 헤드리스 테스트).
+  (예: 좌표 후보 선택 `_select_coord_candidates`, 업데이트 브랜치 정규화/자기교정).
 - UI 동작은 `QT_QPA_PLATFORM=offscreen` + `pytest.importorskip("PyQt6.QtWidgets")` 로 헤드리스
   검증한다(참조: `dev/tests/test_match_review_clamp.py`·`test_slot_select_dialog.py`).
 - 동작/리소스(로딩바·자동 업데이트·매칭/좌표 규칙·레시피 배선·UI 토글)를 바꾸면 그에 대응하는

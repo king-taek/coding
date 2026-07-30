@@ -123,10 +123,6 @@ class SimilarityConfig:
     use_gpu: bool = True
     # 정적 배치 B 재컴파일(테스트용).  1=끔(현행), >1=요청당 B장 추론.
     embed_batch: int = 1
-    # 개발자 벤치마크 전용 — 모든 유사도 디스크 캐시(특징 .npz / 임베딩 .npy /
-    # 점수 .json.gz)를 우회해 '처음 매칭하는 것처럼' 측정한다.  결과(점수/정확도)
-    # 에는 영향이 없고 속도만 달라진다(공정한 벤치마크용).  기본 OFF.
-    bench_no_cache: bool = False
     # 좌표 기반 매칭(v2) 허용 오차 — µm 단위.  두 좌표의 유클리드 거리가 이 이내면 매칭.
     coord_tolerance: float = 500.0
     # CPU 재채점 고속화 노브 — ORB 검출 특징 수(0=기본 500).  ORB(디스크립터 검출/
