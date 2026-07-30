@@ -54,14 +54,15 @@ def test_main_usage_and_unknown(capsys):
 
 def test_prompt_kind_selection():
     # VS Code ▶ 처럼 인자 없이 실행 시 번호/이름으로 빌드 종류 선택.
-    assert build._prompt_kind(input_fn=lambda _: "1") == "exe"
-    assert build._prompt_kind(input_fn=lambda _: "2") == "portable"
-    assert build._prompt_kind(input_fn=lambda _: "3") == "online"
-    assert build._prompt_kind(input_fn=lambda _: "4") == "verify"
+    # 번호는 _MENU 순서를 그대로 따른다 — 항목을 추가해도 이 테스트가 따라오게 한다.
+    for i, (kind, _desc) in enumerate(build._MENU, start=1):
+        assert build._prompt_kind(input_fn=lambda _, s=str(i): s) == kind
     assert build._prompt_kind(input_fn=lambda _: "exe") == "exe"
+    assert build._prompt_kind(input_fn=lambda _: "exe-lite") == "exe-lite"
     assert build._prompt_kind(input_fn=lambda _: "verify") == "verify"
     assert build._prompt_kind(input_fn=lambda _: "") is None       # Enter=취소
-    assert build._prompt_kind(input_fn=lambda _: "9") is None      # 범위 밖
+    assert build._prompt_kind(
+        input_fn=lambda _: str(len(build._MENU) + 1)) is None      # 범위 밖
 
 
 def test_removed_onedir_mode_is_gone():
@@ -565,3 +566,101 @@ def test_dev_python_points_at_the_venv_base(tmp_path):
     p = build.dev_python()
     assert str(_sys.base_prefix) in p
     assert p.endswith("python.exe") or p.endswith("python3")
+
+
+# ── lite 배포 (라이브러리를 빼고 첫 실행 때 받는다) ────────────────────────────
+def _make_good_lite_bundle(tmp_path) -> Path:
+    """lite 산출물 — 전체 배포본과 같되 **라이브러리와 표식이 없다.**"""
+    import shutil
+    full = _make_good_bundle(tmp_path)
+    out = tmp_path / build.EXE_LITE_OUT_DIRNAME
+    out.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(full), str(out))
+    (out / ".deps_installed").unlink()               # 빌드가 일부러 안 남긴다
+    shutil.rmtree(portable.site_packages_dir(out))   # 라이브러리 없음
+    portable.site_packages_dir(out).mkdir(parents=True)
+    return out
+
+
+def test_build_exe_lite_skips_dependency_install(monkeypatch, tmp_path):
+    """exe-lite 는 포터블 빌더에 install_deps=False 와 lite 산출물 폴더를 넘긴다."""
+    monkeypatch.setattr(build, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(build, "preflight", lambda *a, **k: 0)
+    out = tmp_path / build.EXE_LITE_OUT_DIRNAME
+    seen = {}
+
+    class _FakeImpl:
+        @staticmethod
+        def run_build(repo_root, py_url, run=None, log=None, **kw):
+            seen.update(kw)
+            return 0
+
+    monkeypatch.setattr(build, "_load_portable_impl", lambda: _FakeImpl)
+    monkeypatch.setattr(build, "verify_exe", lambda *a, **k: 0)
+    assert build.build_exe(run=_fake_run([], out), log=lambda *a: None,
+                           lite=True) == 0
+    assert seen["out_dirname"] == build.EXE_LITE_OUT_DIRNAME
+    assert seen["install_deps"] is False
+    assert seen["bundle_ir"] is True          # IR 은 lite 에서도 동봉한다(가속 유지)
+
+
+def test_exe_and_lite_go_to_different_folders():
+    """같은 폴더에 쓰면 한쪽이 다른 쪽을 덮어써 뭘 전달하는지 알 수 없게 된다."""
+    assert build.exe_out_dirname(False) == build.EXE_OUT_DIRNAME
+    assert build.exe_out_dirname(True) == build.EXE_LITE_OUT_DIRNAME
+    assert build.EXE_OUT_DIRNAME != build.EXE_LITE_OUT_DIRNAME
+
+
+def test_verify_lite_pass(tmp_path):
+    _make_good_lite_bundle(tmp_path)
+    logs = []
+    assert build.verify_exe(tmp_path, log=logs.append, lite=True) == 0
+    assert any("빌드 정상" in m for m in logs)
+
+
+def test_verify_lite_fails_when_marker_was_written(tmp_path):
+    """★ 회귀 가드 — lite 에 표식이 찍혀 나가면 사용자 PC 가 설치를 **건너뛴다.**
+
+    라이브러리는 없는데 '설치됐다' 고 판단하므로 앱이 ImportError 로 죽고, 사용자는
+    되돌릴 방법이 없다.  빌드 단계에서 반드시 잡아야 한다."""
+    out = _make_good_lite_bundle(tmp_path)
+    (out / ".deps_installed").write_text("fp", encoding="utf-8")
+    logs = []
+    assert build.verify_exe(tmp_path, log=logs.append, lite=True) != 0
+    assert any(".deps_installed" in m and "[!!]" in m for m in logs)
+
+
+def test_verify_lite_fails_when_libraries_leaked_in(tmp_path):
+    """라이브러리가 딸려 들어가면 lite 가 아니다 — 커진 걸 모르고 배포하게 된다."""
+    out = _make_good_lite_bundle(tmp_path)
+    (portable.site_packages_dir(out) / "big.bin").write_bytes(
+        b"\x00" * (120 * 1024 * 1024))
+    assert build.verify_exe(tmp_path, log=lambda *a: None, lite=True) != 0
+
+
+def test_verify_lite_still_requires_the_bundled_ir(tmp_path):
+    """IR 은 저장소에 없어 나중에 받을 수 없다 — lite 에서도 반드시 동봉돼야 한다."""
+    import shutil
+    out = _make_good_lite_bundle(tmp_path)
+    shutil.rmtree(portable.ir_dir(out))
+    assert build.verify_exe(tmp_path, log=lambda *a: None, lite=True) != 0
+
+
+def test_lite_diagnose_does_not_call_missing_marker_a_failure(tmp_path):
+    """lite 는 표식이 없는 것이 정상 — '중간에 멈췄다' 로 안내하면 거짓 경보다."""
+    out = _make_good_lite_bundle(tmp_path)
+    assert build.diagnose(out, lite=True)[0] == "complete"
+    assert build.diagnose(out, lite=False)[0] == "partial:deps"
+
+
+def test_lite_verify_skips_the_import_probe(tmp_path):
+    """라이브러리가 아직 없으니 import 프로브는 반드시 실패한다 — 돌리면 안 된다."""
+    _make_good_lite_bundle(tmp_path)
+    probed = []
+
+    def _run(cmd, cwd=None):
+        probed.append(cmd)
+        return 1                      # 돌렸다면 실패했을 것이다
+    assert build.verify_exe(tmp_path, log=lambda *a: None, run=_run,
+                            lite=True) == 0
+    assert probed == [], "lite 에서 import 프로브를 돌렸다"

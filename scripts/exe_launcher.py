@@ -37,6 +37,8 @@ class Layout(NamedTuple):
     new: Path           # 적용 대기 중인 새 앱(존재 자체가 '준비 완료' 신호)
     old: Path           # 교체 중 백업
     pythonw: Path       # 번들 파이썬(콘솔 없음)
+    python: Path        # 번들 파이썬(콘솔 있음 — 첫 실행 설치 진행을 보여준다)
+    marker: Path        # 의존성 설치 표식.  없으면 '아직 설치 안 됨'
     main_py: Path
 
 
@@ -52,6 +54,8 @@ def app_paths(exe: Path) -> Layout:
         new=root / "app.new",
         old=root / "app.old",
         pythonw=root / "python" / "pythonw.exe",
+        python=root / "python" / "python.exe",
+        marker=root / ".deps_installed",
         main_py=root / "app" / "main.py",
     )
 
@@ -95,8 +99,18 @@ def swap_pending(lay: Layout) -> None:
 
 
 def launch_cmd(lay: Layout) -> List[str]:
-    """앱 실행 명령 — 번들 파이썬으로 ``app/main.py``."""
-    return [str(lay.pythonw), str(lay.main_py)]
+    """앱 실행 명령 — 번들 파이썬으로 ``app/main.py``.
+
+    표식(``.deps_installed``)이 없으면 **콘솔이 보이는 ``python.exe``** 로 띄운다.
+    lite 배포(``build.py exe-lite``)의 첫 실행은 앱이 pip 로 라이브러리를 받느라 몇 분이
+    걸리는데, ``pythonw.exe`` 로 띄우면 화면에 아무것도 없어 사용자가 '안 켜진다' 고
+    판단한다.  둘째 실행부터는 표식이 생겨 조용히(``pythonw``) 뜬다.
+
+    설치 자체는 **앱 코드**가 한다 — 이 파일은 어느 실행 파일로 띄울지만 고른다
+    (네트워크·pip 는 업데이트되지 않는 런처에 넣지 않는다는 이 파일의 계약)."""
+    first_run = not lay.marker.exists() and lay.python.exists()
+    exe = lay.python if first_run else lay.pythonw
+    return [str(exe), str(lay.main_py)]
 
 
 def _error(msg: str) -> None:

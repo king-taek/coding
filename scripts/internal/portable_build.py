@@ -161,13 +161,22 @@ def run_build(repo_root: Path, py_url: str,
               run: Callable = None, log: Callable = print,
               out_dirname: str = OUT_DIRNAME,
               bats: tuple = ("run_aoi.bat", "run_aoi_debug.bat", "update_app.bat"),
-              bundle_ir: bool = False) -> int:
+              bundle_ir: bool = False,
+              install_deps: bool = True) -> int:
     """포터블 빌드 수행.  ``run`` 은 명령 실행기(주입 가능).  반환: 0=성공.
 
     ``out_dirname``/``bats``/``bundle_ir`` 은 'exe + app 폴더' 빌드가 이 함수를 그대로
     재사용하기 위한 것이다(레이아웃이 같다 — ``python\\`` + ``app\\``).  exe 빌드는
     산출물 폴더가 ``dist/AOI_Verify`` 이고, 병합식 ``update_app.bat`` 은 동봉하지 않으며
-    (하는 일이 옛 미러링 버그 그 자체다), 모델 IR 을 함께 만들어 둔다."""
+    (하는 일이 옛 미러링 버그 그 자체다), 모델 IR 을 함께 만들어 둔다.
+
+    ``install_deps=False`` 는 **lite 배포**(``build.py exe-lite``) 용이다 — 라이브러리를
+    번들에 넣지 않고 사용자 PC 의 **첫 실행 때 pip 로 받게** 한다.  전달하는 파일이 크게
+    줄어드는 대신 각 PC 가 PyPI 에 닿아야 한다.
+
+    ★ 이때 ``.deps_installed`` 표식을 **쓰지 않는 것이 핵심**이다.  표식이 없다는 사실
+      자체가 앱에게 '아직 설치 안 됨' 을 알리는 유일한 신호다(``bootstrap.ensure_deps``).
+      여기서 미리 써 버리면 앱이 설치를 영영 건너뛰어 ImportError 로 죽는다."""
     if run is None:
         def run(cmd, cwd=None):
             log(">> " + " ".join(str(c) for c in cmd))
@@ -215,32 +224,39 @@ def run_build(repo_root: Path, py_url: str,
         return 1
 
     # 2) 의존성 설치 + 보안 가드.
-    log("[2/4] installing dependencies (PyQt6/openvino — takes a while) ...")
-    # ↓ 실패해도 아무 말 없이 rc=1 만 돌려주면, 30분 돌린 사용자는 pip 출력 수백 줄
-    #   끝에서 '왜 멈췄는지' 를 알 수 없다.  어느 단계인지 반드시 말한다.
+    # pip 자체 업그레이드는 **두 모드 모두** 한다 — lite 배포는 사용자 PC 에서 이 pip 로
+    # 설치하므로, 낡은 pip 를 그대로 내보내면 첫 실행이 그만큼 잘 깨진다.
+    log("[2/4] preparing pip ...")
     if run(_isolated(ppy, "-m", "pip", "install", "--upgrade", "pip")) != 0:
         log("[FAILED] pip 자체 업그레이드에 실패했습니다(네트워크/프록시 확인).")
         return 1
-    if run(_isolated(ppy, "-m", "pip", "install", "-r",
-                     repo_root / "requirements.txt")) != 0:
-        log("[FAILED] 의존성 설치에 실패했습니다 (requirements.txt).")
-        log("         위 pip 출력의 마지막 오류를 확인하세요. 네트워크·프록시·디스크 "
-            "여유 공간이 흔한 원인입니다.")
-        log("         python\\ 런타임은 남아 있으므로 다시 실행하면 이어서 진행합니다.")
-        return 1
 
-    # ★ pip 이 rc=0 을 냈다고 설치가 된 것이 아니다.  개발 PC 의 user site 가 보이면
-    #   전 패키지가 'already satisfied' 로 넘어가고 번들은 빈 채로 남는다(-s 로 막지만,
-    #   막혔는지를 **사실로** 확인한다).  이걸 안 보면 의존성 0 개인 배포본이 나가고,
-    #   사용자 PC 에서는 창도 안 뜨고 죽는다.
-    missing = missing_packages(out, repo_root / "requirements.txt")
-    if missing:
-        log("[FAILED] 번들에 패키지가 설치되지 않았습니다: " + ", ".join(missing))
-        log(f"         확인 위치: {site_packages_dir(out)}")
-        log("         pip 이 개발 PC 의 패키지를 보고 '이미 설치됨' 으로 건너뛰었을 수 "
-            "있습니다.")
-        log("         (이대로 배포하면 사용자 PC 에서 앱이 아예 뜨지 않습니다.)")
-        return 1
+    if install_deps:
+        log("       installing dependencies (PyQt6/openvino — takes a while) ...")
+        # ↓ 실패해도 아무 말 없이 rc=1 만 돌려주면, 30분 돌린 사용자는 pip 출력 수백 줄
+        #   끝에서 '왜 멈췄는지' 를 알 수 없다.  어느 단계인지 반드시 말한다.
+        if run(_isolated(ppy, "-m", "pip", "install", "-r",
+                         repo_root / "requirements.txt")) != 0:
+            log("[FAILED] 의존성 설치에 실패했습니다 (requirements.txt).")
+            log("         위 pip 출력의 마지막 오류를 확인하세요. 네트워크·프록시·디스크 "
+                "여유 공간이 흔한 원인입니다.")
+            log("         python\\ 런타임은 남아 있으므로 다시 실행하면 이어서 진행합니다.")
+            return 1
+
+        # ★ pip 이 rc=0 을 냈다고 설치가 된 것이 아니다.  개발 PC 의 user site 가 보이면
+        #   전 패키지가 'already satisfied' 로 넘어가고 번들은 빈 채로 남는다(-s 로 막지만,
+        #   막혔는지를 **사실로** 확인한다).  이걸 안 보면 의존성 0 개인 배포본이 나가고,
+        #   사용자 PC 에서는 창도 안 뜨고 죽는다.
+        missing = missing_packages(out, repo_root / "requirements.txt")
+        if missing:
+            log("[FAILED] 번들에 패키지가 설치되지 않았습니다: " + ", ".join(missing))
+            log(f"         확인 위치: {site_packages_dir(out)}")
+            log("         pip 이 개발 PC 의 패키지를 보고 '이미 설치됨' 으로 건너뛰었을 수 "
+                "있습니다.")
+            log("         (이대로 배포하면 사용자 PC 에서 앱이 아예 뜨지 않습니다.)")
+            return 1
+    else:
+        log("       skipping dependencies — lite 배포(첫 실행 때 사용자 PC 에서 설치)")
 
     # 배포되는 번들 자체를 검사한다(개발 PC 의 user site 는 -s 로 배제).
     # 개발 PC 환경 검사는 `build.check_dev_machine` 이 **무거운 단계 전에** 따로 한다 —
@@ -255,7 +271,8 @@ def run_build(repo_root: Path, py_url: str,
     # 새 requirements 를 받았을 때 '동봉된 python\ 으로 감당되는가' 를 이걸로 판단한다.
     # ★ 반드시 위의 실설치 확인을 통과한 뒤에 쓴다 — 표식이 거짓이면 사용자 PC 의 자동
     #   업데이트가 '패키지 안 바뀜' 으로 판단해 설치를 영원히 건너뛴다(자가 치유 불가).
-    if not _write_deps_marker(repo_root, out):
+    # ★ lite 는 **일부러 쓰지 않는다** — 표식 부재가 곧 '첫 실행 때 설치하라' 는 신호다.
+    if install_deps and not _write_deps_marker(repo_root, out):
         log("[FAILED] 의존성 표식(.deps_installed)을 남기지 못했습니다.")
         log("         이대로 배포하면 자동 업데이트가 패키지 변경을 감지하지 못합니다.")
         return 1
@@ -331,7 +348,11 @@ def _write_deps_marker(repo_root: Path, out: Path) -> bool:
 #
 # torch 는 **임시 폴더에만** 설치한다(`--target`).  번들 site-packages 에 넣었다가
 # 지우는 방식은 pip 이 고아 의존성을 남겨 반쯤 지워진 상태가 되기 쉽다.
-_BUILD_ONLY_REQS = ("torch>=2.0", "torchvision>=0.15")
+#
+# openvino 도 함께 넣는다 — lite 배포(`install_deps=False`)는 번들에 openvino 가 없어
+# 변환 스크립트가 import 조차 못 한다.  임시 트리는 `sys.path` **뒤**에 붙으므로, 번들에
+# openvino 가 있는 일반 빌드에서는 번들 것이 그대로 이긴다(한 경로로 둘 다 커버).
+_BUILD_ONLY_REQS = ("torch>=2.0", "torchvision>=0.15", "openvino>=2024.0")
 
 # 동봉할 백본 — 운영은 MobileNetV3-Small 하나만 쓰고, ResNet18 은 개발자 벤치마크의
 # 대조 유닛이다.  둘 다 넣어야 벤치 레시피가 사용자 PC 에서도 그대로 돈다.

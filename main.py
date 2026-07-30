@@ -109,8 +109,44 @@ def _open_main_window(splash):
     return window
 
 
+def _ensure_deps_installed() -> bool:
+    """lite 배포의 **첫 실행**: 라이브러리가 아직 없으면 pip 로 설치한다.  True=계속 진행.
+
+    빌드가 라이브러리를 일부러 넣지 않고 표식(``.deps_installed``)도 남기지 않으므로,
+    표식이 없다는 것이 곧 '설치하라' 는 신호다(``build.py exe-lite``).  전체 배포본은
+    빌드가 표식을 남겨 두므로 이 함수는 **아무것도 하지 않고 지나간다.**
+
+    ★ PyQt6 를 import 하기 **전에** 불러야 한다 — 없는 상태로 import 하면 그 자리에서
+      죽어서, 설치할 기회 자체가 사라진다.  그래서 GUI 가 아니라 콘솔로 안내한다
+      (런처가 첫 실행에 한해 ``python.exe`` 로 띄워 이 출력이 보이게 한다)."""
+    import subprocess
+
+    from aoi_verification.app.utils import bootstrap, paths
+
+    root = paths.install_root()
+    if root is None:
+        return True                    # 개발/포터블 — 사용자가 직접 관리한다
+    return bootstrap.ensure_deps(
+        root, sys.executable, root / "app" / "requirements.txt",
+        run=lambda cmd: subprocess.call(cmd),
+        log=lambda m: print("[AOI]", m, flush=True),
+    )
+
+
 def main() -> int:
     _ensure_package_on_path()
+    try:
+        deps_ok = _ensure_deps_installed()
+    except Exception:
+        deps_ok = True   # 의존성 판단이 잘못돼도 앱 실행 자체를 막지는 않는다
+    if not deps_ok:
+        print("\n[AOI] 설치가 끝나지 않아 앱을 시작할 수 없습니다. "
+              "이 창의 오류 메시지를 알려주세요.", flush=True)
+        try:
+            input("계속하려면 Enter 를 누르세요...")   # 창이 즉시 닫혀 못 읽는 것 방지
+        except Exception:
+            pass         # 콘솔이 없는 실행 경로(pythonw) — 대기할 수 없을 뿐이다
+        return 4
 
     from PyQt6.QtCore import Qt, QTimer
     from PyQt6.QtGui import QFont, QGuiApplication

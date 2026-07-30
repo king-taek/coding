@@ -232,3 +232,43 @@ def test_empty_bundle_is_never_shipped(tmp_path):
     assert rel.make_zip(tmp_path, log=logs.append, today="20260727") != 0
     assert not list(out.parent.glob("*.zip"))
     assert any("site-packages" in m for m in logs)
+
+
+# ── lite 배포 zip ────────────────────────────────────────────────────────────
+def test_lite_instructions_warn_about_the_first_run(tmp_path):
+    """★ 첫 실행에 검은 창이 몇 분 떠 있는다 — 미리 말해두지 않으면 사용자가 닫는다.
+
+    닫으면 설치가 반쯤 된 상태로 남고, 사용자는 '고장 났다' 고 판단한다."""
+    lite = rel.instructions_text(lite=True)
+    full = rel.instructions_text(lite=False)
+    for phrase in ("검은 창", "인터넷", "창을 닫지 마세요", "두 번째 실행"):
+        assert phrase in lite, phrase
+    assert "검은 창이 뜨고" not in full          # 전체 배포본에는 해당 없음
+    # 두 판 모두 나머지 안내는 그대로 있어야 한다.
+    for text in (lite, full):
+        for section in ("[1] 설치", "[2] 실행", "[3] 업데이트", "[7] 삭제하려면"):
+            assert section in text
+
+
+def test_lite_zip_verifies_the_lite_folder(tmp_path, monkeypatch):
+    """--lite 는 lite 산출물 폴더를 보고, 그 기준으로 검증해야 한다.
+
+    전체 배포본 기준으로 검증하면 '라이브러리가 없다' 며 멀쩡한 빌드를 거부한다."""
+    seen = {}
+    fake_build = type("B", (), {
+        "exe_out_dirname": staticmethod(lambda lite: "dist/L" if lite else "dist/F"),
+        "verify_checks": staticmethod(
+            lambda out, lite=False: seen.update(out=out, lite=lite) or [(False, "x")]),
+        "report_diagnosis": staticmethod(lambda *a, **k: None),
+    })
+    monkeypatch.setattr(rel, "_load_build_module", lambda: fake_build)
+    assert rel.make_zip(tmp_path, log=lambda *a: None, lite=True) == 1
+    assert seen["lite"] is True
+    assert seen["out"] == tmp_path / "dist" / "L"
+
+
+def test_irbuild_leftovers_never_reach_the_zip():
+    """IR 변환용 임시 트리(수백 MB)가 실리면 lite 의 의미가 사라진다."""
+    inc = lambda s: rel.should_include(PurePosixPath(s))
+    assert not inc(".irbuild/torch/lib/torch_cpu.dll")
+    assert inc("runtime/ir/mobilenet_v3_small.bin")

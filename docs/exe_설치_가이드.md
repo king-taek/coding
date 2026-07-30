@@ -1,19 +1,27 @@
 # exe 빌드·배포·설치 가이드
 
-> 파이썬이 없는 사용자에게 AOI 검증 앱을 전달하는 방법입니다. 배포 방식 3가지와,
+> 파이썬이 없는 사용자에게 AOI 검증 앱을 전달하는 방법입니다. 배포 방식 네 가지와,
 > 각 방식의 **빌드(전달하는 사람)** · **설치/실행(받는 사람)** 절차를 정리합니다.
 > (자동 업데이트 동작은 `docs/업데이트_동작.md` 참고.)
 
 ## 0. 어떤 방식을 고를까
 
-| 방식 | 산출물 | 용량 | 인터넷 | 추천 상황 |
+| 방식 | 산출물 | 용량 | 사용자 PC 인터넷 | 추천 상황 |
 |---|---|---|---|---|
 | **C. exe + app 폴더** | `dist\AOI_Verify\` 폴더 | 큼 | 불필요 | **기본 권장** — 파이썬 미설치 PC, 자동 업데이트 완전 동작 |
-| **B. 포터블 폴더** | `dist_portable\` 폴더 | ~1.3~2.0GB | 불필요 | exe 가 회사 백신에 막힐 때(`.bat` 로 실행) |
-| **A. 온라인 launcher exe** | `AOI_Verify_Online.exe` 1개 | 수십 MB | **첫 실행 시 필요** | ⚠️ **사내망에서는 사용 불가** — 첫 실행에 PyPI 접속이 필요한데 막혀 있다 |
+| **D. exe-lite** | `dist\AOI_Verify_Lite\` 폴더 | 훨씬 작음 | **첫 실행 시 필요** | 전달 파일을 줄이고 싶을 때. 내용은 C 와 같고 라이브러리만 첫 실행 때 받는다 |
+| **B. 포터블 폴더** | `dist_portable\` 폴더 | 큼 | 불필요 | exe 가 회사 백신에 막힐 때(`.bat` 로 실행) |
+| **A. 온라인 launcher exe** | `AOI_Verify_Online.exe` 1개 | 수십 MB | **첫 실행 시 필요** | ⚠️ **쓰지 말 것** — 아래 제약 참고. 대신 **D** 를 쓴다 |
+
+> **A(온라인 launcher)의 제약 두 가지** — 지금 상태로는 실사용에 맞지 않는다:
+> ① 번들 파이썬이 없어 **사용자 PC 에 파이썬이 설치돼 있어야** 한다
+> (`bootstrap.target_python` 이 시스템 `python` 에 위임한다).
+> ② GitHub 에서 받는 앱 트리에는 `runtime\ir\` 이 없다 — **백본 IR 은 빌드 산출물이라
+> 저장소에 없어서**, 받아도 GPU 가속이 조용히 CPU 로 떨어진다.
+> 둘 다 해결한 것이 **D(exe-lite)** 다.
 
 - **공통 전제(빌드하는 PC)**: Windows + 파이썬 3.9+ 설치 + 인터넷. 빌드는 저장소 루트에서 실행.
-- **자동 업데이트는 B·C 에서 동작**한다. 상세는 4절.
+- **자동 업데이트는 B·C·D 에서 동작**한다. 상세는 4절.
 - **설치 경로는 짧게** 잡는 것을 권한다(예: `C:\AOI_Verify`). 한글 이름이 섞인 깊은 경로는
   Windows 의 260자 제한에 걸릴 수 있다.
 
@@ -25,7 +33,7 @@
 
 ---
 
-## A. 온라인 launcher exe (권장)
+## A. 온라인 launcher exe — ⚠️ 쓰지 말 것 (0절의 제약 참고)
 
 작은 exe 하나만 전달하면 되는 방식. exe 에는 앱·무거운 의존성(PyQt6·openvino)이 **없고**,
 사용자가 처음 실행할 때 인터넷에서 앱과 패키지를 받아 `%LOCALAPPDATA%\AOI Recipe Verification` 에 설치한다.
@@ -37,7 +45,7 @@ python scripts\build.py online
 REM 또는: scripts\internal\build_online.bat (위 명령을 부르는 얇은 래퍼)
 ```
 > VS Code 라면 `scripts/build.py` 를 열고 **▶ Run Python File** 을 눌러도 됩니다 —
-> 인자 없이 실행되면 빌드 종류(online/portable/windows)를 번호로 고르는 메뉴가 뜹니다.
+> 인자 없이 실행되면 빌드 종류를 번호로 고르는 메뉴가 뜹니다.
 - 산출물: **`dist\AOI_Verify_Online.exe`** — 이 파일 **하나만** 배포(메일·USB·공유 폴더 등).
 - 빌드가 하는 일: 가상환경 준비 → PyInstaller 설치 → 보안 가드 통과 확인 →
   `scripts\internal\online.spec` 으로 작은 onefile exe 생성.
@@ -51,7 +59,8 @@ REM 또는: scripts\internal\build_online.bat (위 명령을 부르는 얇은 �
    지우고 싶으면 이 폴더를 삭제하면 처음 상태로 돌아간다.
 
 ### A-3. 주의
-- **첫 실행에 인터넷이 필요**하다. 인터넷이 막힌 폐쇄망이면 첫 설치가 안 되므로 **B(포터블)** 를 쓴다.
+- **첫 실행에 인터넷이 필요**하고, 게다가 **사용자 PC 에 파이썬이 설치돼 있어야** 한다.
+  백본 IR 도 없어 GPU 가속이 동작하지 않는다 — 같은 목적이라면 **D(exe-lite)** 를 쓴다.
 - 회사 SSL 검사(인터셉트) 프록시 환경이라도 앱은 OS 신뢰 인증서를 쓰도록 돼 있어 보통 동작한다
   (그래도 막히면 B/C 로 전달).
 - 미서명 exe 라 SmartScreen/Defender 가 “알 수 없는 게시자” 경고를 띄울 수 있다 →
@@ -159,9 +168,43 @@ python scripts\make_release_zip.py
 
 ---
 
+## D. exe-lite — 라이브러리를 첫 실행 때 받는다
+
+C 와 **내용도 구조도 같다.** 다른 것은 하나뿐: 번들 파이썬 안에 라이브러리(PyQt6·
+OpenVINO·OpenCV …)를 넣지 않고, 사용자 PC 가 **첫 실행 때 pip 로 받는다.** 전달하는
+파일이 크게 줄어든다.
+
+파이썬 런타임과 **백본 IR 은 그대로 동봉**하므로, 사용자 PC 에 파이썬이 필요 없고
+GPU 가속도 C 와 똑같이 동작한다.
+
+### D-1. 빌드
+```powershell
+python scripts\build.py exe-lite
+python scripts\make_release_zip.py --lite
+```
+- 산출물: **`dist\AOI_Verify_Lite\`** → zip 은 `dist\AOI_Verify_<날짜>_<커밋>.zip`
+- C 와 **다른 폴더**에 만들어지므로 둘을 함께 유지할 수 있다.
+
+### D-2. 사용자 첫 실행
+1. exe 를 더블클릭하면 **검은 창(콘솔)이 뜨고** 설치 진행이 표시된다 — 몇 분 걸린다.
+2. 끝나면 앱 창이 저절로 뜬다. **두 번째 실행부터는 콘솔 없이** 바로 켜진다.
+3. `설치방법.txt` 의 lite 판에 이 내용이 눈에 띄게 적혀 있다(창을 닫지 말라는 안내 포함).
+
+> 첫 실행에 콘솔을 띄우는 것은 런처가 **표식(`.deps_installed`) 유무**로 판단한다.
+> 설치가 끝나면 표식이 생겨 조용한 `pythonw` 로 돌아간다.
+
+### ⚠️ D 를 쓸 때 반드시 감수해야 하는 것
+- **각 PC 가 첫 실행 때 PyPI 에 닿아야 한다.** 닿지 못하면 그 PC 는 앱을 아예 못 켠다.
+- 총 전송량이 주는 게 아니라 **'들고 가는 파일' 이 작아지는 것**이다. 라이브러리는
+  각 PC 가 따로 받는다.
+- 그래서 **C(전체 배포본)를 없애지 않는다.** 인터넷이 막힌 PC, 설치가 실패한 PC 에는
+  C 를 준다.
+
+---
+
 ## 4. 자동 업데이트
 
-- 바뀌는 것은 전부 **`app\` 폴더**에 파일로 있다(C·B 공통). exe/런타임/IR 은 그대로 두고
+- 바뀌는 것은 전부 **`app\` 폴더**에 파일로 있다(C·D·B 공통). exe/런타임/IR 은 그대로 두고
   이 폴더만 갱신하므로 — **평소에는 폴더를 다시 배포할 필요가 없다.**
 - 동작: 앱 시작 시 GitHub 브랜치 HEAD 와 동봉된 `VERSION` 을 비교해 새 버전이 있으면 받아
   **새 트리를 통째로 만들고, 검증을 통과해야만 적용**한다(개발 전용 `dev/` 는 제외,
@@ -185,11 +228,11 @@ python scripts\make_release_zip.py
 
 | 파일 | 역할 |
 |---|---|
-| `scripts\build.py` | 빌드 진입점(파이썬) — `exe`/`portable`/`online`/`verify` |
-| `scripts\make_release_zip.py` | **C. 배포용 zip 생성** — 검증 + `설치방법.txt` 동봉 |
+| `scripts\build.py` | 빌드 진입점(파이썬) — `exe`/`exe-lite`/`portable`/`online`/`verify` |
+| `scripts\make_release_zip.py` | **C·D. 배포용 zip 생성** — 검증 + `설치방법.txt` 동봉 (`--lite`) |
 | `scripts\exe_launcher.py` | **C. 런처 진입점** — 대기 중 업데이트 교체 + 앱 실행. 앱 코드 0줄 |
 | `scripts\internal\build_exe.bat` · `exe_launcher.spec` | C. exe + app 폴더 빌드 |
-| `scripts\internal\portable_build.py` · `make_portable.bat` | B·C. 런타임·앱 배치(C 가 재사용) |
+| `scripts\internal\portable_build.py` · `make_portable.bat` | B·C·D. 런타임·앱 배치(`install_deps` 로 D 구분) |
 | `scripts\internal\build_online.bat` · `online.spec` | A. 온라인 launcher exe 빌드(.bat 은 build.py 래퍼) |
 | `scripts\launcher.py` | A. exe 진입점(앱 다운로드+pip 설치+실행) |
 | `aoi_verification\app\utils\bootstrap.py` | A. 부트스트랩 핵심 로직(데이터 폴더·의존성 판단) |
