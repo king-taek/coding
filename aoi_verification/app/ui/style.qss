@@ -390,6 +390,16 @@ QLabel[role="error"] {
     font-size: $font_caption_sz;
 }
 
+/* ── 스크롤 영역 포커스 ──────────────────────────────────────────────────
+   QScrollArea 는 기본 focusPolicy 가 StrongFocus 라 **Tab 체인에 들어온다**.
+   그런데 전용 규칙이 없어 포커스가 와도 화면이 아무 말도 안 했다 —
+   키보드 사용자에게는 포커스가 사라진 것과 같다(WCAG 2.4.7 Focus Visible).
+   다른 컨트롤과 같은 $focus 잉크로, 같은 두께의 링만 그린다(새 색 없음). */
+QScrollArea:focus {
+    border: $focus_w solid $focus;
+    border-radius: $radius_sm;
+}
+
 /* 로딩 패널 — 스크림을 옅게 해도 내용이 읽히도록 불투명 면 + 보더.
    "화면이 전부 가려진다"는 느낌 대신 초점만 남는다. */
 QWidget[role="loadingPanel"] {

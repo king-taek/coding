@@ -517,7 +517,8 @@ SHEET_UNMATCHED = "미매칭 사진"
 GEOM_NOT_SUPPORTED = "측정정보 미지원 자재"   # Surface.flt 자체가 없는 자재(예: KLA)
 GEOM_NO_DATA = "측정정보 없음"               # Surface.flt 는 있으나 매칭 실패
 # KLA 결함 — 변환값(Camtek 좌표계) 아래에 KLA 자체 원본 좌표(XREL/YREL)도 표기.
-EXPORT_KLA_NATIVE_FMT = "\nKLA원본 x {x:.0f} / y {y:.0f} ㎛"
+# ★ 줄바꿈은 붙이지 않는다 — 줄을 잇는 쪽(엑셀 exporter)이 "\n" 을 앞에 붙인다.
+EXPORT_KLA_NATIVE_FMT = "KLA원본 x {x:.0f} / y {y:.0f} ㎛"
 # 결과 화면 — 전체 양식(E~H 수기 영역) 포함 옵션 (기본 해제, #3).
 EXPORT_FULL_TEMPLATE_LABEL = "전체 양식(E~H 수기 영역) 포함"
 EXPORT_FULL_TEMPLATE_TOOLTIP = (
@@ -531,6 +532,75 @@ EXPORT_ORIGINAL_QUALITY_TOOLTIP = (
     "기본(해제)은 중간 화질 캐시를 사용해 더 빠르고 가벼운 파일이 됩니다.\n"
     "원본은 화질이 좋지만 파일 용량이 크게 늘고 저장이 느려질 수 있습니다."
 )
+
+# ── 단일 사진 정보 ─────────────────────────────────────────────────────────
+# 사진 한 장에서 뽑은 결함 계측.  `coords.single_info` 가 유일한 생산자이고 두 화면이
+# **같은 수치**를 쓴다 — 엑셀 미매칭 행(D열)은 `_FMT`(한 줄), 정보 화면은
+# `_LABEL`/`_VALUE_FMT`(제도 시트 표의 2열).  셋은 한 자리에서 같은 값으로 채워진다.
+DEFECT_RECIPE_ZONE_LABEL = "recipe / zone"
+DEFECT_RECIPE_ZONE_VALUE_FMT = "{recipe} / {zone}"
+DEFECT_RECIPE_ZONE_FMT = "recipe {recipe} / zone {zone}"
+DEFECT_AREA_LABEL = "area"
+DEFECT_AREA_VALUE_FMT = "{v:.2f} ㎛²"
+DEFECT_WIDTH_LABEL = "width"
+DEFECT_WIDTH_VALUE_FMT = "{v:.2f} ㎛"
+DEFECT_LENGTH_LABEL = "length"
+DEFECT_LENGTH_VALUE_FMT = "{v:.2f} ㎛"
+DEFECT_CONTRAST_LABEL = "contrast"
+DEFECT_CONTRAST_VALUE_FMT = "{v:.2f}"
+# contrast 는 일부 자재(예: PI)만 측정 — 0 은 ‘측정 안 함’이라 0.00 대신 ‘—’.
+DEFECT_CONTRAST_NONE_VALUE = "—"
+DEFECT_COLROW_LABEL = "col / row"
+DEFECT_COLROW_VALUE_FMT = "{col} / {row}"
+DEFECT_COLROW_FMT = "col {col} / row {row}"
+DEFECT_XY_LABEL = "x / y"
+DEFECT_XY_VALUE_FMT = "{x:.0f} / {y:.0f} ㎛"
+DEFECT_XY_FMT = "x {x:.0f} / y {y:.0f} ㎛"
+DEFECT_KLA_NATIVE_LABEL = "KLA원본 x / y"
+
+# 화면 전용 라벨 — 파일 하나에서만 의미 있는 항목(엑셀에는 나가지 않는다).
+IMAGE_INFO_GROUP_FILE = "파일"
+IMAGE_INFO_GROUP_DEFECT = "결함 계측"
+IMAGE_INFO_COL_ITEM = "항목"
+IMAGE_INFO_COL_VALUE = "값"
+IMAGE_INFO_ROW_FILE = "파일명"
+IMAGE_INFO_ROW_FOLDER = "폴더"
+IMAGE_INFO_ROW_WAFER_ID = "WaferID"
+IMAGE_INFO_ROW_SOURCE = "좌표 출처"
+IMAGE_INFO_ROW_ABS_XY = "절대 X / Y"
+IMAGE_INFO_ROW_PIXEL = "픽셀 크기"
+IMAGE_INFO_ABS_XY_FMT = "{x:.0f} / {y:.0f} ㎛"
+IMAGE_INFO_PIXEL_FMT = "{v:.3f} ㎛/px"
+# 판정 스탬프 — 측정정보 유무를 한눈에.  미지원/없음은 GEOM_* 를 그대로 쓴다.
+IMAGE_INFO_STAMP_MEASURED = "측정정보 있음"
+# DefectCoord.source 코드 → 사람이 읽는 이름.
+IMAGE_INFO_SOURCE_NAMES = {
+    "camtek_live": "Camtek LIVE 파일명",
+    "camtek_ini": "Camtek 정보파일(INI)",
+    "kla": "KLA 정보파일",
+}
+
+# 다이얼로그.
+IMAGE_INFO_BUTTON = "사진 정보 보기"
+IMAGE_INFO_TITLE = "단일 사진 정보"
+IMAGE_INFO_SUBTITLE = "결과 엑셀에 찍히는 것과 같은 좌표·계측값을 사진 한 장에서 바로 읽습니다"
+IMAGE_INFO_PICK = "사진 선택"
+IMAGE_INFO_PICK_ANOTHER = "다른 사진"
+IMAGE_INFO_FILE_FILTER_FMT = "사진 파일 ({patterns})"
+IMAGE_INFO_DROP_HERE = "여기에 놓으세요"
+IMAGE_INFO_NO_FILE = (
+    "사진을 이 창으로 끌어다 놓거나, ‘사진 선택’(Ctrl+O) 을 누르세요.\n\n"
+    "계측값은 사진이 든 폴더의 정보파일에서 읽습니다 — "
+    "ColorImageGrabingInfo.ini(Camtek) · KLA 정보파일 · Surface.flt.\n"
+    "사진만 따로 복사한 폴더에서는 일부 항목이 나오지 않습니다."
+)
+IMAGE_INFO_EMPTY = (
+    "이 사진에서 읽을 수 있는 결함 정보가 없습니다.\n"
+    "폴더에 정보파일(ColorImageGrabingInfo.ini / KLA 정보파일 / Surface.flt)이 "
+    "있는지 확인하세요."
+)
+IMAGE_INFO_COPY = "전체 복사"
+IMAGE_INFO_COPIED = "복사했습니다"
 
 # ── 일반 상태 표시 ─────────────────────────────────────────────────────────
 COUNT_PLUS_N_FMT = "+{n}"
