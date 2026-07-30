@@ -99,9 +99,6 @@ class UiPrefs:
     use_cpu: bool = True
     use_gpu: bool = True
     embed_batch: int = 1
-    # 개발자 모드 — 켜면 셋업 화면에 ‘개발자 벤치마크’ 진입 버튼이 보인다.
-    # (환경변수 AOI_DEV_MODE 로도 켤 수 있다.)  일반 사용자에겐 영향 없음.
-    dev_mode: bool = False
     # 좌표 기반 매칭(v2) 허용 오차 — µm 단위.  두 좌표가 이 거리 이내면 매칭.
     coord_tolerance: float = 500.0
     extra: dict[str, Any] = field(default_factory=dict)

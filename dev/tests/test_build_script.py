@@ -83,7 +83,10 @@ def test_launcher_spec_cannot_swallow_the_app():
     assert "pathex=[]" in text                   # 저장소 루트를 Analysis 에 안 준다
 
 
-def test_build_online_injected_flow():
+def test_build_online_injected_flow(monkeypatch):
+    # IR 커밋 게이트는 통과했다고 두고, 그 뒤 빌드 흐름만 본다
+    # (게이트 자체는 test_ir_bundle.test_online_build_refuses_without_committed_ir).
+    monkeypatch.setattr(build, "committed_ir_missing", lambda *a, **k: [])
     calls = []
     rc = build.build_online(run=lambda c, cwd=None: calls.append(
         " ".join(str(x) for x in c)) or 0, log=lambda *a: None)
@@ -266,7 +269,7 @@ def test_verify_exe_fails_without_bundled_ir(tmp_path):
     배포본에 torch 가 없어 런타임 변환으로 되살릴 수도 없다."""
     out = _make_good_bundle(tmp_path)
     import shutil
-    shutil.rmtree(out / "runtime")
+    shutil.rmtree(portable.ir_dir(out))
     assert build.verify_exe(tmp_path, log=lambda *a: None) != 0
 
 
@@ -336,7 +339,7 @@ def _stage(tmp_path, *, stage: str) -> Path:
         (ir / f"{kind}.bin").write_bytes(b"x")
     if stage == "ir":
         return out
-    (out / "app").mkdir()
+    (out / "app").mkdir(exist_ok=True)
     (out / "app" / "VERSION").write_text("{}", encoding="utf-8")
     return out
 

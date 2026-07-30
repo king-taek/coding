@@ -46,13 +46,18 @@ for _stream in (sys.stdout, sys.stderr):
 REPO_ROOT = Path(__file__).resolve().parent.parent
 INTERNAL = REPO_ROOT / "scripts" / "internal"
 
-# python-build-standalone 의 'install_only' Windows x86_64 (포터블 베이스 런타임).
-# 404 면 https://github.com/astral-sh/python-build-standalone/releases 에서 최신
-# install_only Windows x86_64 .tar.gz 링크로 교체.
-PY_STANDALONE_URL = (
-    "https://github.com/astral-sh/python-build-standalone/releases/download/"
-    "20250115/cpython-3.11.11+20250115-x86_64-pc-windows-msvc-install_only.tar.gz"
-)
+def _py_standalone_url() -> str:
+    """자체 포함 CPython 다운로드 주소 — **앱의 bootstrap 에서 가져온다.**
+
+    온라인 launcher 도 같은 주소로 받으므로 상수를 두 곳에 적으면 어긋난다
+    (CLAUDE.md 의 '같은 상수를 두 곳에 두지 않는다' 패턴)."""
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    from aoi_verification.app.utils.bootstrap import PY_STANDALONE_URL
+    return PY_STANDALONE_URL
+
+
+PY_STANDALONE_URL = _py_standalone_url()
 
 
 # ---------------------------------------------------------------------------
@@ -290,8 +295,32 @@ def _ensure_venv(run: Callable, log: Callable) -> str:
 # ---------------------------------------------------------------------------
 # 빌드 액션
 # ---------------------------------------------------------------------------
+def committed_ir_missing(repo_root: Path = REPO_ROOT) -> List[str]:
+    """저장소에 커밋되지 않은 백본 IR 목록.  비어 있으면 정상.  순수 — 테스트 대상."""
+    impl = _load_portable_impl()
+    src = impl.repo_ir_dir(repo_root)
+    return [k for k in impl.IR_MODELS
+            if not ((src / f"{k}.xml").is_file() and (src / f"{k}.bin").is_file())]
+
+
 def build_online(run: Callable = _default_run, log: Callable = print) -> int:
-    """작은 온라인 launcher exe (앱/무거운 의존성 미포함, 첫 실행 시 인터넷 설치)."""
+    """작은 온라인 launcher exe — 첫 실행에 파이썬·앱·라이브러리를 **전부** 받는다.
+
+    ★ 백본 IR 은 앱 트리에 실려 함께 내려온다(저장소에 커밋돼 있어야 한다).  이 배포는
+      아무것도 동봉하지 않으므로 **IR 이 저장소에 없으면 만들 수단이 없다** — 그대로
+      내보내면 사용자 PC 에서 고효율 모드의 GPU 가속이 조용히 죽는다.  여기서 막는다."""
+    missing = committed_ir_missing(REPO_ROOT)
+    if missing:
+        log("[실패] 백본 IR 이 저장소에 커밋돼 있지 않습니다: " + ", ".join(missing))
+        log("       온라인 배포는 앱을 GitHub 에서 받아 쓰므로, IR 도 저장소에 있어야 "
+            "합니다.")
+        log("       한 번만 만들어 커밋하세요 (torch 접속이 되는 PC 에서):")
+        log("         pip install torch torchvision openvino")
+        log("         python scripts\\internal\\make_ir.py")
+        log("         git add runtime/ir && git commit -m \"백본 IR 추가\" && git push")
+        log("       (exe / exe-lite 빌드는 IR 이 없어도 그 자리에서 변환하므로 동작합니다.)")
+        return 1
+
     vpy = _ensure_venv(run, log)
     if run(pip_install_cmd(vpy, "pyinstaller>=6")) != 0:
         raise SystemExit("pyinstaller install failed")

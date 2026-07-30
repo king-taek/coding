@@ -1,11 +1,16 @@
-"""온라인 다운로드형 launcher — 파이썬 없는 사용자용 **작은 exe** 의 진입점.
+"""온라인 다운로드형 launcher — **작은 exe 하나**만 전달하는 배포의 진입점.
 
-PyInstaller 로 이 파일을 얼려 작은 exe 하나(`AOI_Verify_Online.exe`)를 만든다.
-사용자가 처음 실행하면 앱 소스를 GitHub 에서 받아 쓰기 가능한 데이터 폴더에 풀고,
-requirements 를 인터넷에서 pip 로 설치한 뒤 앱을 실행한다.  이후 실행은 이미 받아둔
-것을 바로 쓰며, 앱 내 자동 업데이트가 그 폴더를 갱신한다.
+PyInstaller 로 이 파일을 얼려 작은 exe(`AOI_Verify_Online.exe`)를 만든다.  첫 실행에
+**전부 내려받는다**: 자체 포함 CPython → 앱 소스(GitHub) → 라이브러리(pip).  이후
+실행은 받아둔 것을 바로 쓰고, 앱 내 자동 업데이트가 그 폴더를 갱신한다.
 
-빌드:  scripts\internal\build_online.bat  (PyInstaller onefile)
+**파이썬이 없는 PC 에서도 동작한다** — 예전에는 번들 파이썬을 받지 않아 시스템
+``python`` 에 위임했고, 그래서 파이썬 미설치 PC 에서는 그냥 실패했다.
+
+백본 IR 은 앱 트리에 포함돼 함께 내려온다(저장소에 커밋돼 있다) — 없으면 고효율
+모드의 GPU 가속이 조용히 CPU 로 떨어진다.
+
+빌드:  python scripts\\build.py online
 """
 
 from __future__ import annotations
@@ -27,6 +32,7 @@ def _ensure_importable() -> None:
 def main() -> int:
     _ensure_importable()
     from aoi_verification.app.utils import bootstrap, updater
+    from aoi_verification.app.utils.bootstrap import PY_STANDALONE_URL
 
     frozen = bool(getattr(sys, "frozen", False))
     root = bootstrap.data_root()
@@ -53,7 +59,8 @@ def main() -> int:
     return bootstrap.bootstrap(
         root, repo=repo, branch=branch,
         fetch_app=fetch_app, run=run, log=lambda m: print("[AOI]", m, flush=True),
-        frozen=frozen, sys_executable=sys.executable)
+        frozen=frozen, sys_executable=sys.executable,
+        python_url=PY_STANDALONE_URL)
 
 
 if __name__ == "__main__":

@@ -77,7 +77,8 @@ def test_ir_temp_tree_is_cleaned_and_never_shipped(tmp_path, monkeypatch):
         tmp.mkdir(parents=True, exist_ok=True)      # pip --target 흉내
         (tmp / "torch").mkdir(exist_ok=True)
         return 1                                    # 설치 실패
-    assert p._build_ir(tmp_path, Path("py"), fake_run, lambda *a: None) != 0
+    assert p._build_ir(tmp_path / "app" / "runtime" / "ir", tmp_path,
+                       Path("py"), fake_run, lambda *a: None) != 0
     assert not tmp.exists(), "실패 경로에서 임시 트리가 남았다"
 
 
@@ -135,6 +136,74 @@ def test_reshape_after_read_model_still_works(tmp_path):
     m = ov.Core().read_model(str(xml))
     m.reshape([16, 3, 96, 96])               # 운영 배치(16) + 다른 해상도
     assert list(m.inputs[0].partial_shape.to_shape()) == [16, 3, 96, 96]
+
+
+# ---------------------------------------------------------------------------
+# 3) IR 은 앱 트리 안에 놓인다 — 네 배포가 같은 규칙으로 찾는다
+# ---------------------------------------------------------------------------
+def test_ir_lives_inside_the_app_tree():
+    """앱은 ``resource_path("runtime/ir")`` 하나로 찾는다.
+
+    설치 루트 기준으로 두면 온라인 배포(앱을 GitHub 에서 받아 푸는 형태)가 못 찾는다."""
+    p = _portable()
+    assert p.ir_dir(Path("/out")) == Path("/out/app/runtime/ir")
+    assert p.repo_ir_dir(Path("/repo")) == Path("/repo/runtime/ir")
+
+    src = (REPO_ROOT / "aoi_verification" / "app" / "utils" / "paths.py"
+           ).read_text(encoding="utf-8")
+    i = src.index("def bundled_ir_dir(")
+    body = src[i:i + 900]
+    assert 'resource_path("runtime/ir")' in body
+    assert "_exe_install_root" not in body, "설치 루트 판정을 다시 끌어다 썼다"
+
+
+def test_committed_ir_is_used_instead_of_rebuilding(tmp_path):
+    """저장소에 IR 이 있으면 복사만 한다 — 빌드가 torch 를 받지 않는다."""
+    p = _portable()
+    src = p.repo_ir_dir(tmp_path)
+    src.mkdir(parents=True)
+    for k in p.IR_MODELS:
+        (src / f"{k}.xml").write_text("<net/>", encoding="utf-8")
+        (src / f"{k}.bin").write_bytes(b"w")
+
+    app = tmp_path / "dist" / "out" / "app"
+    app.mkdir(parents=True)
+    called = []
+    assert p._place_ir(tmp_path, app, Path("py"),
+                       lambda *a, **k: called.append(a) or 0, lambda *a: None) == 0
+    assert called == [], "커밋된 IR 이 있는데 변환을 돌렸다"
+    for k in p.IR_MODELS:
+        assert (app / "runtime" / "ir" / f"{k}.bin").read_bytes() == b"w"
+
+
+def test_missing_committed_ir_falls_back_to_converting(tmp_path):
+    """아직 커밋 전이면 그 자리에서 변환한다 — exe 빌드는 계속 동작해야 한다."""
+    p = _portable()
+    app = tmp_path / "dist" / "out" / "app"
+    app.mkdir(parents=True)
+    cmds = []
+    p._place_ir(tmp_path, app, Path("py"),
+                lambda c, cwd=None: cmds.append(" ".join(map(str, c))) or 1,
+                lambda *a: None)
+    assert any("--target" in c for c in cmds), "변환 경로로 안 갔다"
+    # 임시 트리는 app\ **밖**이어야 한다 — 안에 두면 배포 zip 에 실린다.
+    assert not (app / p.IR_TMP_DIRNAME).exists()
+
+
+def test_online_build_refuses_without_committed_ir(tmp_path):
+    """온라인 배포는 아무것도 동봉하지 않는다 — IR 이 없으면 가속이 조용히 죽는다."""
+    import importlib.util as u
+    spec = u.spec_from_file_location("build", str(REPO_ROOT / "scripts" / "build.py"))
+    build = u.module_from_spec(spec)
+    spec.loader.exec_module(build)
+
+    assert build.committed_ir_missing(tmp_path)          # 빈 저장소 → 전부 빠짐
+    logs = []
+    assert build.build_online(run=lambda *a, **k: 0, log=logs.append) != 0 or \
+        not build.committed_ir_missing(REPO_ROOT)
+    joined = "\n".join(logs)
+    if build.committed_ir_missing(REPO_ROOT):
+        assert "make_ir.py" in joined, "무엇을 하라는지 알려주지 않았다"
 
 
 # ---------------------------------------------------------------------------

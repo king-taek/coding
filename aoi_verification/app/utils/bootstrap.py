@@ -31,6 +31,16 @@ from typing import Callable, List, Optional
 APP_DIRNAME = "AOI Recipe Verification"   # 사용자 데이터(설치) 폴더 이름
 _MARKER = ".deps_installed"               # 의존성 설치 완료 표식(버전별)
 
+# python-build-standalone 의 'install_only' Windows x86_64 (자체 포함 CPython).
+# ★ 여기가 **단 하나의 출처**다 — 빌드(`scripts/build.py`)와 온라인 launcher 가 같은
+#   값을 써야 한다.  두 곳에 적으면 한쪽만 고쳐져 어긋난다.
+#   404 가 나면 https://github.com/astral-sh/python-build-standalone/releases 에서
+#   최신 install_only Windows x86_64 .tar.gz 링크로 교체한다.
+PY_STANDALONE_URL = (
+    "https://github.com/astral-sh/python-build-standalone/releases/download/"
+    "20250115/cpython-3.11.11+20250115-x86_64-pc-windows-msvc-install_only.tar.gz"
+)
+
 
 # ---------------------------------------------------------------------------
 # 순수 로직 (테스트 대상) — 부수효과 없음
@@ -173,20 +183,87 @@ def target_python(root: Path, *, frozen: bool, sys_executable: str) -> str:
 # ---------------------------------------------------------------------------
 # 오케스트레이션 — 부수효과는 주입된 콜러블로 분리(테스트는 가짜 주입)
 # ---------------------------------------------------------------------------
+def python_is_present(root: Path) -> bool:
+    """설치 폴더에 자체 포함 CPython 이 이미 풀려 있는지."""
+    root = Path(root)
+    return ((root / "python" / "python.exe").exists()
+            or (root / "python" / "bin" / "python3").exists())
+
+
+def ensure_python(root: Path, url: str,
+                  log: Callable[[str], None] = lambda _m: None,
+                  fetch: Optional[Callable[[str, Path], None]] = None) -> bool:
+    """자체 포함 CPython 을 받아 ``<root>/python`` 에 푼다.  True=사용 가능.
+
+    **온라인 배포(작은 exe 하나)** 의 첫 실행이 여기로 온다 — 사용자 PC 에 파이썬이
+    없어도 되게 만드는 단계다.  이미 있으면 아무것도 하지 않는다.
+
+    ``fetch`` 는 테스트 주입용(기본은 ``urllib.request.urlretrieve``).  표준 라이브러리만
+    쓴다 — 이 함수는 앱 패키지가 아직 없는 시점에 작은 exe 안에서 돈다."""
+    root = Path(root)
+    if python_is_present(root):
+        return True
+    root.mkdir(parents=True, exist_ok=True)
+    tgz = root / "python.tar.gz"
+    log("파이썬 런타임을 내려받는 중… (처음 1회, 수십 MB)")
+    try:
+        if fetch is None:
+            import urllib.request
+            urllib.request.urlretrieve(url, str(tgz))
+        else:
+            fetch(url, tgz)
+    except Exception as exc:
+        log(f"파이썬 런타임 다운로드 실패: {exc}")
+        return False
+    # ★ 회사 프록시가 차단 페이지(HTML)를 200 으로 돌려주면 다운로드는 '성공' 으로 보인다.
+    #   크기로 걸러내지 않으면 다음 단계에서 정체불명의 압축 해제 오류만 남는다.
+    if not tgz.exists() or tgz.stat().st_size < 1_000_000:
+        size = tgz.stat().st_size if tgz.exists() else 0
+        log(f"받은 파일이 너무 작습니다({size} bytes) — 회사 프록시가 차단 페이지를 "
+            "돌려줬을 수 있습니다.")
+        tgz.unlink(missing_ok=True)
+        return False
+    log("파이썬 런타임을 푸는 중…")
+    try:
+        import tarfile
+        with tarfile.open(str(tgz)) as tf:
+            tf.extractall(str(root))
+    except Exception as exc:
+        log(f"파이썬 런타임 압축 해제 실패: {exc}")
+        return False
+    finally:
+        tgz.unlink(missing_ok=True)
+    if not python_is_present(root):
+        log("파이썬 런타임을 풀었지만 실행 파일을 찾지 못했습니다.")
+        return False
+    return True
+
+
 def bootstrap(root: Path, *,
               repo: str, branch: str,
               fetch_app: Callable[[Path], bool],
               run: Callable[[List[str]], int],
               log: Callable[[str], None] = lambda _m: None,
               frozen: bool = False,
-              sys_executable: str = sys.executable) -> int:
-    """앱을 준비(다운로드+의존성)하고 실행한다.  실제 다운로드/프로세스 실행은 주입.
+              sys_executable: str = sys.executable,
+              python_url: Optional[str] = None,
+              ensure_python_fn: Optional[Callable[..., bool]] = None) -> int:
+    """앱을 준비(파이썬+다운로드+의존성)하고 실행한다.  실제 네트워크/실행은 주입.
 
     ``fetch_app(root) -> bool`` : 앱 소스를 root 로 받아 푼다(보통 updater.download_and_apply).
     ``run(cmd) -> int``        : 프로세스 실행(보통 subprocess.call).
+    ``python_url``             : 주면 자체 포함 CPython 을 먼저 받아 푼다(온라인 배포).
+                                 안 주면 기존처럼 시스템/번들 파이썬에 맡긴다.
     반환: 앱 종료 코드(준비 실패 시 비정상 코드)."""
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)
+
+    # ① 파이썬 런타임 — 사용자 PC 에 파이썬이 없어도 되게 한다.
+    if python_url:
+        fn = ensure_python_fn or ensure_python
+        if not fn(root, python_url, log):
+            log("파이썬 런타임을 준비하지 못해 시작할 수 없습니다.")
+            return 2
 
     if not app_is_present(root):
         log("앱을 내려받는 중…")

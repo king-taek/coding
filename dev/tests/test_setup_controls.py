@@ -30,7 +30,6 @@ CONTRACT_ATTRS = (
     "update_btn", "start_btn", "_action_bar",
     "_tol_row", "_threshold_row",
     "auto_group", "scope_group",
-    "dev_bench_btn", "dev_label_btn",
 )
 
 
@@ -88,30 +87,16 @@ def test_page_satisfies_attr_contract(qapp):
         page.deleteLater()
 
 
-def test_action_bar_index_contract(qapp, monkeypatch):
-    """[0]=update_btn, [1]=image_info_btn(상시), 개발자 모드에서 [2..3]=개발자 버튼.
+def test_action_bar_index_contract(qapp):
+    """[0]=update_btn, [1]=image_info_btn, 마지막은 주 액션(start_btn).
 
-    ``_refresh_dev_buttons`` 가 insertWidget(2/3, …) 를 가정하므로, 새 위젯은 반드시
-    stretch 뒤에 붙어야 한다.  이 계약이 깨지면 개발자 버튼이 엉뚱한 자리에 들어간다."""
+    액션 바의 자리 계약 — 새 위젯을 stretch **앞**에 붙이면 주 액션이 가운데로
+    밀려 화면이 어그러진다."""
     page = sp.SetupPage()
     try:
         bar = page._action_bar
         assert bar.itemAt(0).widget() is page.update_btn
-        # 사진 정보 버튼은 개발자 모드와 무관하게 항상 index 1.
         assert bar.itemAt(1).widget() is page.image_info_btn
-        # 개발자 모드 on → 인덱스 2·3 에 개발자 버튼이 삽입된다.
-        monkeypatch.setattr(page, "_dev_mode_enabled", lambda: True)
-        page._refresh_dev_buttons()
-        assert page.dev_bench_btn is not None and page.dev_label_btn is not None
-        assert bar.itemAt(0).widget() is page.update_btn
-        assert bar.itemAt(1).widget() is page.image_info_btn
-        assert bar.itemAt(2).widget() is page.dev_bench_btn
-        assert bar.itemAt(3).widget() is page.dev_label_btn
-        # 개발자 모드를 다시 끄면 개발자 버튼만 사라지고 사진 정보 버튼은 남는다.
-        monkeypatch.setattr(page, "_dev_mode_enabled", lambda: False)
-        page._refresh_dev_buttons()
-        assert bar.itemAt(1).widget() is page.image_info_btn
-        # 마지막 위젯은 여전히 주 액션이어야 한다(stretch 뒤).
         last = bar.itemAt(bar.count() - 1).widget()
         assert last is page.start_btn
     finally:

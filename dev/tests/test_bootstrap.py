@@ -126,12 +126,12 @@ def test_results_dir_moves_out_of_app_folder_for_exe_installs(tmp_path, monkeypa
     assert "app" not in d.parts[:-1] or d.parent == tmp_path
 
 
-def test_bundled_ir_dir_only_when_present(tmp_path, monkeypatch):
-    """동봉 IR 이 있을 때만 그 폴더를 돌려준다(개발/포터블은 None → CPU 폴백)."""
+def test_bundled_ir_dir_follows_the_app_tree(tmp_path, monkeypatch):
+    """IR 은 **앱 트리 루트** 기준으로 찾는다 — 네 배포가 같은 규칙을 쓴다.
+
+    설치 루트 기준으로 두면 온라인 배포(앱을 GitHub 에서 받아 푸는 형태)가 못 찾는다."""
     from aoi_verification.app.utils import paths
-    monkeypatch.delenv("AOI_APP_HOME", raising=False)
-    assert paths.bundled_ir_dir() is None
-    monkeypatch.setenv("AOI_APP_HOME", str(tmp_path))
+    monkeypatch.setattr(paths, "_project_root", lambda: tmp_path)
     assert paths.bundled_ir_dir() is None              # 폴더가 아직 없다
     (tmp_path / "runtime" / "ir").mkdir(parents=True)
     assert paths.bundled_ir_dir() == tmp_path / "runtime" / "ir"
@@ -143,7 +143,8 @@ def test_ir_path_requires_both_xml_and_bin(tmp_path, monkeypatch):
     그건 '느리다' 가 아니라 **틀린 임베딩**이므로, 반쪽짜리 IR 은 아예 없는 것으로
     취급해 CPU 고전으로 폴백해야 한다."""
     from aoi_verification.app.learning import embedder_openvino as ov
-    monkeypatch.setenv("AOI_APP_HOME", str(tmp_path))
+    from aoi_verification.app.utils import paths
+    monkeypatch.setattr(paths, "_project_root", lambda: tmp_path)
     d = tmp_path / "runtime" / "ir"
     d.mkdir(parents=True)
     kind = ov.MODEL_MOBILENET_V3
@@ -295,3 +296,128 @@ def test_first_run_install_does_not_need_heavy_imports():
             elif isinstance(n, ast.ImportFrom) and n.level == 0 and n.module:
                 mods.add(n.module.split(".")[0])
         assert not (mods & heavy), f"{name} 이 무거운 의존성을 끌어온다: {mods & heavy}"
+
+
+# ── 완전 온라인 배포 — 파이썬까지 받아온다 ─────────────────────────────────
+def _tar_of(tmp_path, member_rel: str) -> bytes:
+    """``member_rel`` 하나가 든 tar.gz 바이트 — 받아 푸는 흐름을 흉내낸다."""
+    import io
+    import tarfile
+    import os as _os
+    stage = tmp_path / "_stage" / Path(member_rel).parent
+    stage.mkdir(parents=True, exist_ok=True)
+    f = tmp_path / "_stage" / member_rel
+    # ★ 1 MB 를 넘겨야 한다 — 그 미만은 '프록시 차단 페이지' 로 걸러진다.
+    #   압축돼도 남게 랜덤 바이트를 쓴다.
+    f.write_bytes(_os.urandom(2 * 1024 * 1024))
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+        tf.add(str(f), arcname=member_rel)
+    return buf.getvalue()
+
+
+def _member_for_this_os() -> str:
+    import os
+    return "python/python.exe" if os.name == "nt" else "python/bin/python3"
+
+
+def test_ensure_python_downloads_and_extracts(tmp_path):
+    """온라인 배포의 첫 실행 — 사용자 PC 에 파이썬이 없어도 되게 만드는 단계."""
+    blob = _tar_of(tmp_path, _member_for_this_os())
+    root = tmp_path / "install"
+    seen = []
+
+    def fetch(url, dst):
+        seen.append(url)
+        dst.write_bytes(blob)
+
+    assert bs.ensure_python(root, "http://x/py.tar.gz", fetch=fetch) is True
+    assert bs.python_is_present(root)
+    assert seen == ["http://x/py.tar.gz"]
+    assert not (root / "python.tar.gz").exists(), "받은 압축 파일을 안 지웠다"
+
+
+def test_ensure_python_is_a_no_op_when_already_there(tmp_path):
+    """두 번째 실행부터는 다시 받지 않는다(수십 MB)."""
+    root = tmp_path / "install"
+    (root / "python" / "bin").mkdir(parents=True)
+    (root / "python" / "bin" / "python3").write_text("", encoding="utf-8")
+    (root / "python" / "python.exe").write_text("", encoding="utf-8")
+    called = []
+    assert bs.ensure_python(root, "http://x", fetch=lambda u, d: called.append(u))
+    assert called == []
+
+
+def test_ensure_python_rejects_a_proxy_block_page(tmp_path):
+    """★ 회사 프록시가 차단 페이지(HTML)를 200 으로 돌려주면 '성공' 처럼 보인다.
+
+    크기로 걸러내지 않으면 다음 단계에서 정체불명의 압축 해제 오류만 남는다."""
+    root = tmp_path / "install"
+    logs = []
+    ok = bs.ensure_python(root, "http://x", log=logs.append,
+                          fetch=lambda u, d: d.write_bytes(b"<html>blocked</html>"))
+    assert ok is False
+    assert any("차단" in m or "너무 작" in m for m in logs)
+    assert not (root / "python.tar.gz").exists()       # 잔재를 남기지 않는다
+
+
+def test_ensure_python_reports_download_failure(tmp_path):
+    logs = []
+
+    def boom(url, dst):
+        raise OSError("네트워크 없음")
+
+    assert bs.ensure_python(tmp_path, "http://x", log=logs.append, fetch=boom) is False
+    assert any("다운로드 실패" in m for m in logs)
+
+
+def test_online_boot_order_python_then_app_then_deps(tmp_path):
+    """완전 온라인의 첫 실행 순서 — 파이썬 → 앱 → 라이브러리 → 실행."""
+    root = tmp_path / "install"
+    steps = []
+
+    def fake_ensure_python(r, url, log=None):
+        steps.append("python")
+        (Path(r) / "python" / "bin").mkdir(parents=True, exist_ok=True)
+        (Path(r) / "python" / "bin" / "python3").write_text("", encoding="utf-8")
+        return True
+
+    def fetch_app(dest: Path) -> bool:
+        steps.append("app")
+        (dest / "main.py").write_text("print(1)", encoding="utf-8")
+        (dest / "aoi_verification").mkdir(parents=True, exist_ok=True)
+        (dest / "requirements.txt").write_text("numpy==1\n", encoding="utf-8")
+        return True
+
+    def run(cmd):
+        steps.append("pip" if "pip" in cmd else "launch")
+        return 0
+
+    rc = bs.bootstrap(root, repo="o/r", branch="b", fetch_app=fetch_app, run=run,
+                      frozen=True, python_url="http://x/py.tar.gz",
+                      ensure_python_fn=fake_ensure_python)
+    assert rc == 0
+    assert steps == ["python", "app", "pip", "launch"]
+
+
+def test_online_boot_stops_when_python_cannot_be_prepared(tmp_path):
+    """파이썬을 못 받으면 앱을 받으러 가지 않는다 — 어차피 실행할 수 없다."""
+    steps = []
+    rc = bs.bootstrap(tmp_path, repo="o/r", branch="b",
+                      fetch_app=lambda d: steps.append("app") or True,
+                      run=lambda c: steps.append("run") or 0,
+                      frozen=True, python_url="http://x",
+                      ensure_python_fn=lambda *a, **k: False)
+    assert rc == 2 and steps == []
+
+
+def test_the_cpython_url_has_one_source_of_truth():
+    """빌드와 온라인 launcher 가 같은 주소를 써야 한다 — 두 곳에 적으면 어긋난다."""
+    import importlib.util as u
+    from pathlib import Path as _P
+    root = _P(__file__).resolve().parents[2]
+    spec = u.spec_from_file_location("build", str(root / "scripts" / "build.py"))
+    build = u.module_from_spec(spec)
+    spec.loader.exec_module(build)
+    assert build.PY_STANDALONE_URL == bs.PY_STANDALONE_URL
+    assert bs.PY_STANDALONE_URL.startswith("https://")

@@ -11,14 +11,14 @@
 | **C. exe + app 폴더** | `dist\AOI_Verify\` 폴더 | 큼 | 불필요 | **기본 권장** — 파이썬 미설치 PC, 자동 업데이트 완전 동작 |
 | **D. exe-lite** | `dist\AOI_Verify_Lite\` 폴더 | 훨씬 작음 | **첫 실행 시 필요** | 전달 파일을 줄이고 싶을 때. 내용은 C 와 같고 라이브러리만 첫 실행 때 받는다 |
 | **B. 포터블 폴더** | `dist_portable\` 폴더 | 큼 | 불필요 | exe 가 회사 백신에 막힐 때(`.bat` 로 실행) |
-| **A. 온라인 launcher exe** | `AOI_Verify_Online.exe` 1개 | 수십 MB | **첫 실행 시 필요** | ⚠️ **쓰지 말 것** — 아래 제약 참고. 대신 **D** 를 쓴다 |
+| **A. 온라인 launcher exe** | `AOI_Verify_Online.exe` 1개 | **가장 작음** | **첫 실행 시 필요** | 전달 파일을 최소로. 첫 실행에 파이썬·앱·라이브러리를 **전부** 받는다 |
 
-> **A(온라인 launcher)의 제약 두 가지** — 지금 상태로는 실사용에 맞지 않는다:
-> ① 번들 파이썬이 없어 **사용자 PC 에 파이썬이 설치돼 있어야** 한다
-> (`bootstrap.target_python` 이 시스템 `python` 에 위임한다).
-> ② GitHub 에서 받는 앱 트리에는 `runtime\ir\` 이 없다 — **백본 IR 은 빌드 산출물이라
-> 저장소에 없어서**, 받아도 GPU 가속이 조용히 CPU 로 떨어진다.
-> 둘 다 해결한 것이 **D(exe-lite)** 다.
+> **A 를 쓰기 전 전제**: 백본 IR 이 저장소에 커밋돼 있어야 한다(`runtime/ir/`).
+> 이 방식은 아무것도 동봉하지 않으므로 IR 도 앱과 함께 내려받아야 하기 때문이다.
+> 커밋돼 있지 않으면 `build.py online` 이 **빌드를 거부하고** 만드는 방법을 알려준다.
+>
+> 전달 파일 크기 순서: **A < D < C**.  사용자 PC 가 받는 양은 A·D 가 비슷하다
+> (A 가 파이썬 런타임 수십 MB 를 더 받을 뿐이다).
 
 - **공통 전제(빌드하는 PC)**: Windows + 파이썬 3.9+ 설치 + 인터넷. 빌드는 저장소 루트에서 실행.
 - **자동 업데이트는 B·C·D 에서 동작**한다. 상세는 4절.
@@ -33,10 +33,11 @@
 
 ---
 
-## A. 온라인 launcher exe — ⚠️ 쓰지 말 것 (0절의 제약 참고)
+## A. 온라인 launcher exe — exe 하나만 전달
 
-작은 exe 하나만 전달하면 되는 방식. exe 에는 앱·무거운 의존성(PyQt6·openvino)이 **없고**,
-사용자가 처음 실행할 때 인터넷에서 앱과 패키지를 받아 `%LOCALAPPDATA%\AOI Recipe Verification` 에 설치한다.
+작은 exe 하나만 전달하면 되는 방식. exe 에는 **아무것도 들어 있지 않고**, 사용자가 처음
+실행할 때 인터넷에서 **자체 포함 파이썬 · 앱 · 라이브러리 · 백본 IR 을 전부** 받아
+`%LOCALAPPDATA%\AOI Recipe Verification` 에 설치한다. **사용자 PC 에 파이썬이 필요 없다.**
 
 ### A-1. 빌드 (전달하는 사람, 1회)
 ```powershell
@@ -47,20 +48,28 @@ REM 또는: scripts\internal\build_online.bat (위 명령을 부르는 얇은 �
 > VS Code 라면 `scripts/build.py` 를 열고 **▶ Run Python File** 을 눌러도 됩니다 —
 > 인자 없이 실행되면 빌드 종류를 번호로 고르는 메뉴가 뜹니다.
 - 산출물: **`dist\AOI_Verify_Online.exe`** — 이 파일 **하나만** 배포(메일·USB·공유 폴더 등).
-- 빌드가 하는 일: 가상환경 준비 → PyInstaller 설치 → 보안 가드 통과 확인 →
+- 빌드가 하는 일: **커밋된 IR 확인** → 가상환경 준비 → PyInstaller 설치 → 보안 가드 →
   `scripts\internal\online.spec` 으로 작은 onefile exe 생성.
+- IR 이 저장소에 없으면 여기서 **중단**한다. 한 번만 만들어 커밋하면 된다:
+  ```powershell
+  pip install torch torchvision openvino
+  python scripts\internal\make_ir.py
+  git add runtime/ir && git commit -m "백본 IR 추가" && git push
+  ```
 
 ### A-2. 설치/실행 (받는 사람)
 1. 받은 `AOI_Verify_Online.exe` 를 원하는 위치에 두고 **더블클릭**.
-2. **첫 실행만** 인터넷으로 앱과 패키지를 내려받아 설치한다(수백 MB — 수 분 걸릴 수 있음).
-   진행 메시지가 표시되고, 끝나면 앱 창이 뜬다.
+2. **첫 실행만** 인터넷으로 파이썬·앱·라이브러리를 내려받아 설치한다(수백 MB — 수 분
+   걸릴 수 있음). 검은 창에 진행이 표시되고, 끝나면 앱 창이 뜬다. **창을 닫지 말 것.**
 3. 두 번째 실행부터는 이미 설치된 것을 바로 써서 빠르게 켜진다.
 4. 설치 위치: `%LOCALAPPDATA%\AOI Recipe Verification` (예: `C:\Users\<사용자>\AppData\Local\AOI Recipe Verification`).
    지우고 싶으면 이 폴더를 삭제하면 처음 상태로 돌아간다.
 
 ### A-3. 주의
-- **첫 실행에 인터넷이 필요**하고, 게다가 **사용자 PC 에 파이썬이 설치돼 있어야** 한다.
-  백본 IR 도 없어 GPU 가속이 동작하지 않는다 — 같은 목적이라면 **D(exe-lite)** 를 쓴다.
+- **첫 실행에 인터넷이 필요**하다. 닿지 못하는 PC 에는 **C(전체 배포본)** 를 준다.
+- 받는 곳은 두 군데다 — `github.com`(파이썬 런타임·앱)과 PyPI(라이브러리). 둘 다 열려
+  있어야 한다.
+- 첫 실행은 콘솔 창이 뜬 채 몇 분 걸린다(받는 양이 가장 많다). 두 번째부터는 바로 켜진다.
 - 회사 SSL 검사(인터셉트) 프록시 환경이라도 앱은 OS 신뢰 인증서를 쓰도록 돼 있어 보통 동작한다
   (그래도 막히면 B/C 로 전달).
 - 미서명 exe 라 SmartScreen/Defender 가 “알 수 없는 게시자” 경고를 띄울 수 있다 →
@@ -106,8 +115,9 @@ python scripts\build.py exe
 REM 또는: scripts\internal\build_exe.bat
 ```
 
-> **빌드는 30분 이상 걸린다**(의존성 설치 + CPython 런타임 다운로드 + 백본 IR 변환용
-> torch 를 임시로 받는 단계).
+> **빌드는 30분 이상 걸린다**(의존성 설치 + CPython 런타임 다운로드).
+> 백본 IR 이 저장소에 커밋돼 있으면 복사만 하므로 변환 단계(torch 임시 설치)는 건너뛴다 —
+> 아직이면 `python scripts\internal\make_ir.py` 로 한 번 만들어 커밋해 두는 것을 권한다.
 > 화면 버퍼를 넘겨 원인을 놓치기 쉬우니 **로그를 파일로 남기는 것을 권한다**:
 > ```powershell
 > python scripts\build.py exe 2>&1 | Tee-Object -FilePath dist\build.log
@@ -122,15 +132,16 @@ REM 또는: scripts\internal\build_exe.bat
   AOI_Verify\
     AOI_Verify.exe     ← 얇은 런처(수 MB). 앱 코드 0줄, 업데이트되지 않는다.
     python\            ← 번들 CPython + 모든 의존성 (무겁고 거의 안 바뀜)
-    runtime\ir\        ← 백본 OpenVINO IR(동봉) — 덕분에 배포본에 torch 가 없다
-    app\               ← ★ 자동 업데이트가 바꾸는 전부 (앱 코드·리소스·양식.xlsx·VERSION)
+    app\               ← ★ 자동 업데이트가 바꾸는 전부
+      runtime\ir\      ←   백본 OpenVINO IR — 덕분에 배포본에 torch 가 없다
+      (앱 코드·리소스·양식.xlsx·VERSION 도 여기)
     결과\               ← 엑셀 출력 (app\ 바깥이라 업데이트에 안 쓸린다)
     run_aoi.bat        ← exe 가 백신에 막힐 때의 대체 실행
     run_aoi_debug.bat  ← 오류 진단용(콘솔 + traceback)
   ```
 - 빌드가 하는 일: 런처 exe 를 얼리고(`scripts\internal\exe_launcher.spec`) → 번들 CPython 에
-  의존성 설치 → **백본을 OpenVINO IR 로 변환해 동봉** → 앱 소스 복사 → `VERSION` 스탬프 →
-  **산출물 검증**.
+  의존성 설치 → 앱 소스 복사 → **백본 IR 배치**(커밋된 것 복사, 없으면 변환) →
+  `VERSION` 스탬프 → **산출물 검증**.
 - 검증은 특히 **`_internal\` 폴더가 없는지**(=앱이 exe 안에 얼려지지 않았는지)와, 번들
   파이썬으로 **실제 앱 import 가 되는지**를 확인한다.
 
