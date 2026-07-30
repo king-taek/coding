@@ -133,6 +133,13 @@ def _exe_install_root() -> Path | None:
     return None
 
 
+def install_root() -> Path | None:
+    """'exe + app 폴더' 설치 루트 — 패키지 **바깥**(``main.py``)에서 쓰는 공개 이름.
+
+    개발/포터블이면 None.  판정 규칙은 `_exe_install_root` 참고."""
+    return _exe_install_root()
+
+
 def bundled_ir_dir() -> Path | None:
     """동봉된 백본 OpenVINO IR 폴더(``runtime/ir``) — exe 설치에서만.
 

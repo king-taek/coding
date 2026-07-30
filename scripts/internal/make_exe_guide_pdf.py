@@ -254,6 +254,35 @@ story += callout("검증을 통과하지 못하면 zip 을 만들지 않습니�
     "다시 실행하세요.",
 ])
 
+lite = [P("1-B. 전달 파일을 줄이고 싶다면 — exe-lite", "h1")]
+lite.append(P("라이브러리를 빼고, 사용자 PC 가 <b>첫 실행 때 인터넷으로 받게</b> 하는 "
+              "방식입니다. 나머지는 위와 완전히 같습니다 — 파이썬과 검사용 모델은 그대로 "
+              "동봉되므로 사용자 PC 에 파이썬이 필요 없고 GPU 가속도 동일합니다.", "body"))
+lite += code([
+    "python scripts\\build.py exe-lite",
+    "python scripts\\make_release_zip.py --lite",
+])
+lite.append(P("산출물은 <font face=\"Mono\">dist\\AOI_Verify_Lite\\</font> 로 "
+              "<b>따로</b> 만들어집니다. 전체 배포본과 함께 가지고 있을 수 있습니다.",
+              "note"))
+lite += callout("이 방식을 쓸 때 반드시 아셔야 하는 것", [
+    "<b>각 PC 가 첫 실행 때 인터넷(PyPI)에 닿아야 합니다.</b> 닿지 못하면 그 PC 는 "
+    "앱을 아예 켤 수 없습니다.",
+    "총 다운로드 양이 주는 것이 아니라 <b>‘들고 가는 파일’ 이 작아지는 것</b>입니다 — "
+    "라이브러리는 각 PC 가 따로 받습니다.",
+    "그래서 <b>전체 배포본을 없애지 마세요.</b> 인터넷이 막힌 PC 나 설치가 실패한 PC "
+    "에는 전체 배포본을 주면 됩니다.",
+], kind="warn")
+lite.append(P("사용자 첫 실행은 이렇게 보입니다", "h2"))
+lite += bullets([
+    "exe 를 더블클릭하면 <b>검은 창이 뜨고</b> 글자가 올라갑니다 — 설치 중이며 "
+    "몇 분 걸립니다.",
+    "끝나면 앱 창이 저절로 뜹니다. <b>두 번째 실행부터는 검은 창 없이</b> 바로 켜집니다.",
+    "zip 안의 <font face=\"Mono\">설치방법.txt</font> 에 '창을 닫지 마세요' 안내가 "
+    "들어갑니다.",
+])
+story.append(KeepTogether(lite))
+
 _N = "&nbsp;"          # HTML 은 연속 공백을 접는다 — 트리 들여쓰기는 이걸로
 tree = [P("2. 만들어진 것 — 폴더 구조", "h1")]
 tree += code([
@@ -277,8 +306,8 @@ story += callout("왜 앱을 exe 안에 넣지 않나요", [
     "놓여 있고, exe 에는 앱 코드가 한 줄도 없습니다.",
 ])
 
-story.append(P("3. 받는 사람 안내", "h1"))
-story += bullets([
+recv = [P("3. 받는 사람 안내", "h1")]
+recv += bullets([
     "받은 zip 을 <b>짧은 경로</b>에 압축 해제 (예: <font face=\"Mono\">C:\\AOI_Verify</font>). "
     "한글이 섞인 깊은 경로는 Windows 260자 제한에 걸릴 수 있습니다.",
     "<font face=\"Mono\">AOI_Verify\\AOI_Verify.exe</font> 를 더블클릭. "
@@ -288,8 +317,9 @@ story += bullets([
     "앱이 안 켜지면 <font face=\"Mono\">run_aoi_debug.bat</font> 로 콘솔에 뜨는 "
     "메시지를 확인해 알려달라고 하세요.",
 ])
-story.append(P("자세한 내용은 zip 안의 <font face=\"Mono\">설치방법.txt</font> 에 "
+recv.append(P("자세한 내용은 zip 안의 <font face=\"Mono\">설치방법.txt</font> 에 "
                "들어 있습니다.", "note"))
+story.append(KeepTogether(recv))
 
 story.append(P("4. 다음부터는 zip 을 다시 안 줘도 됩니다", "h1"))
 story.append(P("앱이 시작할 때 GitHub 를 확인해 새 버전이 있으면 "
@@ -334,7 +364,7 @@ story.append(KeepTogether(trouble))
 
 story.append(P("참고 문서 (저장소 안)", "h1"))
 story += bullets([
-    "<font face=\"Mono\">docs/exe_설치_가이드.md</font> — 배포 방식 3가지 비교, "
+    "<font face=\"Mono\">docs/exe_설치_가이드.md</font> — 배포 방식 네 가지 비교, "
     "기존 사용자 이관 방법",
     "<font face=\"Mono\">docs/업데이트_동작.md</font> — 자동 업데이트가 "
     "무엇을 바꾸고 무엇을 안 바꾸는지",

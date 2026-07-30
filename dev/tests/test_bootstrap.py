@@ -210,3 +210,88 @@ def test_run_bats_isolate_from_the_pcs_own_packages():
                 if ln.strip().lower().startswith("set ")]
         assert not any("AOI_APP_HOME" in ln for ln in sets), \
             f"{name} 이 AOI_APP_HOME 을 설정해 포터블 업데이트를 망가뜨린다"
+
+
+# ── lite 배포의 첫 실행 설치 (bootstrap.ensure_deps) ───────────────────────────
+def _req(tmp_path, text="numpy>=1\n"):
+    f = tmp_path / "requirements.txt"
+    f.write_text(text, encoding="utf-8")
+    return f
+
+
+def test_ensure_deps_installs_once_then_never_again(tmp_path):
+    """표식이 없으면 설치하고 남긴다.  두 번째부터는 pip 를 부르지 않는다.
+
+    매 실행마다 수백 MB 를 다시 받으면 사용자는 앱이 고장 났다고 생각한다."""
+    req = _req(tmp_path)
+    calls = []
+    assert bs.ensure_deps(tmp_path, "py", req, run=lambda c: calls.append(c) or 0)
+    assert len(calls) == 1 and "install" in calls[0]
+    assert bs.deps_marker(tmp_path).exists()
+
+    calls.clear()
+    assert bs.ensure_deps(tmp_path, "py", req, run=lambda c: calls.append(c) or 0)
+    assert calls == []
+
+
+def test_ensure_deps_does_not_mark_a_failed_install(tmp_path):
+    """★ 실패했는데 표식을 남기면 다음 실행이 '설치됐다' 고 보고 **영원히** 재시도하지
+    않는다.  사용자는 ImportError 만 보고, 되돌릴 방법이 없다."""
+    req = _req(tmp_path)
+    assert bs.ensure_deps(tmp_path, "py", req, run=lambda c: 1) is False
+    assert not bs.deps_marker(tmp_path).exists()
+    # 다음 실행에서 다시 시도한다.
+    calls = []
+    assert bs.ensure_deps(tmp_path, "py", req, run=lambda c: calls.append(c) or 0)
+    assert len(calls) == 1
+
+
+def test_ensure_deps_never_upgrades(tmp_path):
+    """``--upgrade`` 는 잘 돌던 무거운 패키지까지 최신으로 끌어올린다(CLAUDE.md)."""
+    req = _req(tmp_path)
+    calls = []
+    bs.ensure_deps(tmp_path, "py", req, run=lambda c: calls.append(c) or 0)
+    assert "--upgrade" not in calls[0]
+
+
+def test_ensure_deps_reinstalls_when_requirements_change(tmp_path):
+    """업데이트로 패키지가 바뀌면 다시 설치해야 한다(표식 지문이 달라진다)."""
+    req = _req(tmp_path, "numpy>=1\n")
+    assert bs.ensure_deps(tmp_path, "py", req, run=lambda c: 0)
+    req.write_text("numpy>=1\nPillow>=10\n", encoding="utf-8")
+    calls = []
+    assert bs.ensure_deps(tmp_path, "py", req, run=lambda c: calls.append(c) or 0)
+    assert len(calls) == 1
+    # 주석만 바뀐 경우는 재설치하지 않는다.
+    req.write_text("# 설명\nnumpy>=1\nPillow>=10\n", encoding="utf-8")
+    calls.clear()
+    assert bs.ensure_deps(tmp_path, "py", req, run=lambda c: calls.append(c) or 0)
+    assert calls == []
+
+
+def test_ensure_deps_is_a_no_op_without_a_requirements_file(tmp_path):
+    """개발 트리 등 판단 근거가 없으면 아무것도 하지 않고 진행한다."""
+    calls = []
+    assert bs.ensure_deps(tmp_path, "py", tmp_path / "없음.txt",
+                          run=lambda c: calls.append(c) or 0)
+    assert calls == []
+
+
+def test_first_run_install_does_not_need_heavy_imports():
+    """★ 첫 실행에는 PyQt6·numpy 가 아직 **없다.**
+
+    설치를 준비하는 코드가 그것들을 끌고 오면, 설치하기도 전에 ImportError 로 죽어
+    사용자가 영원히 앱을 못 켠다.  main.py 가 쓰는 두 모듈은 표준 라이브러리만 쓴다."""
+    import ast
+    from pathlib import Path as _P
+    root = _P(__file__).resolve().parents[2] / "aoi_verification" / "app" / "utils"
+    heavy = {"numpy", "cv2", "PyQt6", "openvino", "skimage", "PIL", "psutil"}
+    for name in ("bootstrap.py", "paths.py"):
+        tree = ast.parse((root / name).read_text(encoding="utf-8"))
+        mods = set()
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Import):
+                mods |= {a.name.split(".")[0] for a in n.names}
+            elif isinstance(n, ast.ImportFrom) and n.level == 0 and n.module:
+                mods.add(n.module.split(".")[0])
+        assert not (mods & heavy), f"{name} 이 무거운 의존성을 끌어온다: {mods & heavy}"

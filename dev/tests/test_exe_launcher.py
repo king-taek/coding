@@ -180,3 +180,59 @@ def test_swap_defers_when_stale_backup_cannot_be_purged(tmp_path, monkeypatch):
 
     assert _marker(lay.app) == "old"
     assert _marker(lay.new) == "new"                   # 다음 실행에 재시도
+
+
+# ── lite 배포의 첫 실행 (라이브러리를 받는 동안 진행이 보여야 한다) ──────────────
+def _bundle(tmp_path):
+    (tmp_path / "python").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "python" / "python.exe").write_bytes(b"x")
+    (tmp_path / "python" / "pythonw.exe").write_bytes(b"x")
+    (tmp_path / "app").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "app" / "main.py").write_text("x", encoding="utf-8")
+    return launcher.app_paths(tmp_path / "AOI_Verify.exe")
+
+
+def test_first_run_uses_the_console_python(tmp_path):
+    """표식이 없으면 = 아직 라이브러리를 안 받았다 → 콘솔이 보이는 python.exe.
+
+    pythonw 로 띄우면 화면에 아무것도 없는 채로 몇 분이 흐른다 — 사용자는 '안 켜진다'
+    고 판단해 창을 닫고, 설치가 반쯤 된 상태로 남는다."""
+    lay = _bundle(tmp_path)
+    assert not lay.marker.exists()
+    assert launcher.launch_cmd(lay)[0].endswith("python.exe")
+
+
+def test_later_runs_are_windowless(tmp_path):
+    """설치가 끝난 뒤에는 검은 창이 뜨면 안 된다(매 실행마다 보이면 고장으로 보인다)."""
+    lay = _bundle(tmp_path)
+    lay.marker.write_text("fp", encoding="utf-8")
+    assert launcher.launch_cmd(lay)[0].endswith("pythonw.exe")
+
+
+def test_full_bundle_never_shows_the_console(tmp_path):
+    """전체 배포본은 빌드가 표식을 남기므로 첫 실행부터 조용히 뜬다."""
+    lay = _bundle(tmp_path)
+    lay.marker.write_text("fp", encoding="utf-8")     # 빌드가 남긴 것
+    assert launcher.launch_cmd(lay)[0].endswith("pythonw.exe")
+
+
+def test_missing_console_python_falls_back_to_pythonw(tmp_path):
+    """python.exe 가 없는 이상한 번들에서도 실행 자체는 막지 않는다."""
+    lay = _bundle(tmp_path)
+    lay.python.unlink()
+    assert launcher.launch_cmd(lay)[0].endswith("pythonw.exe")
+
+
+def test_launcher_still_contains_no_network_or_pip_code():
+    """★ 이 파일은 업데이트되지 않는다 — 나중에 못 고치는 것을 넣으면 안 된다.
+
+    첫 실행 설치를 붙이면서 pip 를 여기로 끌어오고 싶은 유혹이 생긴다.  설치는
+    앱 코드(`bootstrap.ensure_deps`)가 하고, 런처는 **어느 exe 로 띄울지만** 고른다."""
+    from pathlib import Path as _P
+    src = (_P(__file__).resolve().parents[2] / "scripts" / "exe_launcher.py"
+           ).read_text(encoding="utf-8")
+    body = "\n".join(ln for ln in src.splitlines()
+                     if not ln.strip().startswith("#"))
+    for banned in ("urllib", "requests", "zipfile", "pip install"):
+        assert banned not in body, f"런처에 {banned} 가 들어갔다"
+    assert "import aoi_verification" not in body

@@ -121,6 +121,39 @@ def launch_cmd(python_exe: str, main_py: Path) -> List[str]:
     return [str(python_exe), str(main_py)]
 
 
+def ensure_deps(root: Path, python_exe: str, req_file: Path,
+                run: Callable[[List[str]], int],
+                log: Callable[[str], None] = lambda _m: None) -> bool:
+    """설치 폴더의 의존성이 준비돼 있는지 확인하고, 아니면 pip 로 설치한다.  True=사용 가능.
+
+    **lite 배포**(``build.py exe-lite``)의 첫 실행이 여기로 온다 — 빌드가 라이브러리를
+    일부러 넣지 않고 표식(``.deps_installed``)도 남기지 않으므로, 표식이 없다는 사실이
+    곧 '아직 설치 안 됨' 신호다.
+
+    ``upgrade=False`` — **빠진 것만 채운다**.  requirements 가 전부 ``>=`` 라
+    ``--upgrade`` 를 주면 잘 돌던 무거운 패키지까지 최신으로 끌어올린다(CLAUDE.md 규칙).
+
+    ★ 설치가 실패하면 표식을 **쓰지 않는다**.  거짓 표식이 남으면 다음 실행이 '설치됐다'
+      고 판단해 영원히 재시도하지 않고, 사용자는 ImportError 만 보게 된다."""
+    req_file = Path(req_file)
+    if not req_file.is_file():
+        return True                     # 비교할 목록이 없으면 판단하지 않는다
+    try:
+        req_text = req_file.read_text(encoding="utf-8")
+    except OSError:
+        return True
+    if deps_installed(root, req_text):
+        return True
+
+    log("필요한 패키지를 설치합니다 — 처음 1회, 인터넷이 필요하고 몇 분 걸립니다.")
+    if run(pip_install_cmd(python_exe, req_file, upgrade=False)) != 0:
+        log("패키지 설치에 실패했습니다. 인터넷·프록시 설정을 확인한 뒤 다시 실행하세요.")
+        return False
+    write_deps_marker(root, req_text)
+    log("설치가 끝났습니다.")
+    return True
+
+
 def target_python(root: Path, *, frozen: bool, sys_executable: str) -> str:
     """앱을 실행할 파이썬 인터프리터 경로.
 

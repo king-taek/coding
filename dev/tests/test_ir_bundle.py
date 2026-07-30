@@ -135,3 +135,76 @@ def test_reshape_after_read_model_still_works(tmp_path):
     m = ov.Core().read_model(str(xml))
     m.reshape([16, 3, 96, 96])               # 운영 배치(16) + 다른 해상도
     assert list(m.inputs[0].partial_shape.to_shape()) == [16, 3, 96, 96]
+
+
+# ---------------------------------------------------------------------------
+# 3) lite 배포 — 라이브러리를 빼도 IR 은 구울 수 있어야 한다
+# ---------------------------------------------------------------------------
+def test_ir_build_can_run_without_libraries_in_the_bundle():
+    """lite 는 번들에 openvino 가 없다 — 변환 스크립트가 import 조차 못 하면 안 된다.
+
+    빌드 전용 임시 트리에 openvino 를 함께 넣어 해결한다.  임시 트리는 `sys.path`
+    **뒤**에 붙으므로, 번들에 openvino 가 있는 일반 빌드에서는 번들 것이 그대로 이긴다."""
+    p = _portable()
+    assert any("openvino" in r for r in p._BUILD_ONLY_REQS)
+    assert "sys.path.append(tmp)" in p._IR_BUILD_SRC
+
+
+def test_lite_build_skips_pip_and_leaves_no_marker(tmp_path, monkeypatch):
+    """★ lite 는 표식을 남기면 안 된다 — 표식 부재가 곧 '첫 실행 때 설치하라' 신호다.
+
+    빌드가 표식을 찍어 보내면 사용자 PC 는 설치를 건너뛰고, 라이브러리가 없는 채로
+    앱을 띄우려다 ImportError 로 죽는다."""
+    p = _portable()
+    (tmp_path / "requirements.txt").write_text("numpy>=1\n", encoding="utf-8")
+    (tmp_path / "main.py").write_text("x", encoding="utf-8")
+    (tmp_path / "aoi_verification").mkdir()
+    (tmp_path / "dev").mkdir()
+
+    out = tmp_path / "dist" / "lite"
+    ppy = p.portable_python(out)
+    ppy.parent.mkdir(parents=True)
+    ppy.write_bytes(b"x")
+
+    cmds = []
+
+    def fake_run(cmd, cwd=None):
+        cmds.append(" ".join(str(c) for c in cmd))
+        return 0
+
+    monkeypatch.setattr(p, "_build_ir", lambda *a, **k: 0)
+    p.run_build(tmp_path, "http://x", run=fake_run, log=lambda *a: None,
+                out_dirname="dist/lite", bats=(), install_deps=False)
+
+    joined = "\n".join(cmds)
+    assert "install --upgrade pip" in joined, "pip 자체는 최신으로 둔다"
+    assert "-r " not in joined, "lite 인데 requirements 를 설치했다"
+    assert not p._import_bootstrap().deps_marker(out).exists(), \
+        "lite 빌드가 .deps_installed 를 남겼다 — 첫 실행이 설치를 건너뛴다"
+
+
+def test_full_build_still_installs_and_marks(tmp_path, monkeypatch):
+    """대조군 — 기존 전체 배포본 동작이 그대로인지(회귀 방지)."""
+    p = _portable()
+    (tmp_path / "requirements.txt").write_text("numpy>=1\n", encoding="utf-8")
+    (tmp_path / "main.py").write_text("x", encoding="utf-8")
+    (tmp_path / "aoi_verification").mkdir()
+    (tmp_path / "dev").mkdir()
+
+    out = tmp_path / "dist" / "full"
+    ppy = p.portable_python(out)
+    ppy.parent.mkdir(parents=True)
+    ppy.write_bytes(b"x")
+    sp = p.site_packages_dir(out)
+    sp.mkdir(parents=True)
+    (sp / "numpy-1.0.0.dist-info").mkdir()      # pip 이 실제로 깔았다고 가정
+
+    cmds = []
+    monkeypatch.setattr(p, "_build_ir", lambda *a, **k: 0)
+    p.run_build(tmp_path, "http://x",
+                run=lambda cmd, cwd=None: cmds.append(
+                    " ".join(str(c) for c in cmd)) or 0,
+                log=lambda *a: None, out_dirname="dist/full", bats=())
+
+    assert "-r " in "\n".join(cmds), "전체 빌드가 requirements 를 설치하지 않았다"
+    assert p._import_bootstrap().deps_marker(out).exists()
