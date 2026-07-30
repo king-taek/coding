@@ -171,11 +171,16 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
 > (`pip download` 성공, 인증서 오류 없음). 검증되지 않은 전언을 설계 전제로 삼지 마라.
 
 ## 백본 모델(IR) 규칙 — torch 는 배포본에 없다
-- 추론은 전부 OpenVINO 다. **백본 → IR 변환은 빌드 때 하고 결과만 동봉한다**
-  (`portable_build._IR_BUILD_SRC` → `runtime/ir/*.xml`+`.bin` → `paths.bundled_ir_dir` →
-  `embedder_openvino._build_ov_model` 이 `read_model` 로 읽음). 런타임에 변환 수단은 없다.
-- **새 백본을 추가하려면 `portable_build.IR_MODELS` 에 넣어야 한다.** 앱 코드에만 추가하면
-  사용자 PC 에는 IR 이 없어 그 유닛이 조용히 CPU 폴백으로 떨어진다.
+- 추론은 전부 OpenVINO 다. **변환 결과(IR)만 저장소 `runtime/ir/` 에 커밋해 두고** 앱은
+  읽기만 한다. 런타임에 변환 수단은 없다.
+- **조회 규칙은 하나**: `paths.bundled_ir_dir()` = `resource_path("runtime/ir")`.
+  개발·포터블·exe·온라인 네 배포가 같은 자리를 본다. 설치 루트 기반 판정
+  (`_exe_install_root`)을 여기 끌어다 쓰지 마라 — 온라인 배포가 못 찾는다.
+- **백본을 바꾸면 `python scripts/internal/make_ir.py` 를 돌려 다시 굽고 커밋한다.**
+  `portable_build.IR_MODELS` 와 이름이 같아야 한다. 앱 코드에만 추가하면 사용자 PC 에는
+  IR 이 없어 그 유닛이 조용히 CPU 폴백으로 떨어진다.
+- 빌드는 커밋된 IR 을 **복사만** 한다(`_place_ir`). 커밋 전이면 그 자리에서 변환하지만,
+  **온라인 배포(`build.py online`)는 아무것도 동봉하지 않으므로 커밋을 요구**한다.
 - `ov.save_model` 의 **`compress_to_fp16` 기본값은 True** 다. 반드시 `False` 를 준다 —
   FP16 반올림은 임베딩 값을 바꾼다("정확도는 절대 깨지 않는다"). 변환 전 `.eval()` 도 필수
   (BatchNorm 폴딩). 회귀 가드: `dev/tests/test_ir_bundle.py`.

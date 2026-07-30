@@ -184,7 +184,7 @@ story += table([
                "받는 사람에게는 필요 없습니다"],
     ["인터넷", "필요합니다. 런타임·패키지·모델 파일을 내려받습니다"],
     ["디스크", "<b>10 GB 이상</b> 여유. 모자라면 30분쯤 뒤 설치 도중에 멈춥니다"],
-    ["시간", "<b>30분 이상</b> — 처음 한 번이 가장 오래 걸립니다"],
+    ["시간", "<b>30분 이상</b> — 처음 한 번이 가장 오래 걸립니다 (모델 파일을 저장소에 커밋해 두면 더 짧아집니다)"],
 ], [30 * mm, 133 * mm])
 
 story += callout("먼저 확인하세요 — 회사 보안 정책", [
@@ -283,14 +283,42 @@ lite += bullets([
 ])
 story.append(KeepTogether(lite))
 
+web = [P("1-C. 전달 파일을 가장 작게 — 온라인 exe 하나", "h1")]
+web.append(P("exe <b>하나만</b> 전달하고, 첫 실행에 <b>파이썬까지 전부</b> 인터넷에서 "
+             "받는 방식입니다. 사용자 PC 에 파이썬이 필요 없는 것은 위와 같습니다.", "body"))
+web += code([
+    "python scripts\\build.py online",
+])
+web.append(P("산출물은 <font face=\"Mono\">dist\\AOI_Verify_Online.exe</font> 파일 "
+             "하나입니다. zip 을 따로 만들지 않습니다.", "note"))
+web += callout("전제 — 모델 파일이 저장소에 있어야 합니다", [
+    "이 방식은 아무것도 동봉하지 않으므로, 검사용 모델도 앱과 함께 내려받아야 합니다. "
+    "저장소에 없으면 빌드가 <b>중단하고</b> 만드는 방법을 알려줍니다:",
+    "<font face=\"Mono\">pip install torch torchvision openvino</font><br/>"
+    "<font face=\"Mono\">python scripts\\internal\\make_ir.py</font><br/>"
+    "<font face=\"Mono\">git add runtime/ir &amp;&amp; git commit &amp;&amp; git push</font>",
+    "<b>한 번만</b> 하면 됩니다. 그 뒤로는 빌드도 빨라집니다(변환 단계가 사라집니다).",
+])
+web.append(P("세 방식 비교", "h2"))
+web += table([
+    ["방식", "전달 파일", "사용자 PC 인터넷"],
+    ["<b>1</b> 전체 배포본", "가장 큼", "필요 없음"],
+    ["<b>1-B</b> exe-lite", "작음", "첫 실행 때 필요 (라이브러리)"],
+    ["<b>1-C</b> 온라인 exe", "가장 작음", "첫 실행 때 필요 (파이썬 + 라이브러리)"],
+], [34 * mm, 40 * mm, 89 * mm])
+web.append(P("셋 다 만들어 두고 상황에 맞게 주면 됩니다. 인터넷이 막힌 PC 에는 반드시 "
+             "<b>전체 배포본</b>을 주세요.", "note"))
+story.append(KeepTogether(web))
+
+
 _N = "&nbsp;"          # HTML 은 연속 공백을 접는다 — 트리 들여쓰기는 이걸로
 tree = [P("2. 만들어진 것 — 폴더 구조", "h1")]
 tree += code([
     "AOI_Verify\\",
     _N * 2 + "AOI_Verify.exe" + _N * 6 + "← 이것을 더블클릭 (얇은 런처, 수 MB)",
     _N * 2 + "app\\" + _N * 16 + "← ★ 자동 업데이트가 바꾸는 전부",
+    _N * 4 + "runtime\\ir\\" + _N * 7 + "← 검사용 모델 (앱과 함께 갱신됩니다)",
     _N * 2 + "python\\" + _N * 13 + "← 번들 CPython + 의존성 (무겁고 거의 안 바뀜)",
-    _N * 2 + "runtime\\ir\\" + _N * 9 + "← 검사용 모델(미리 변환해 동봉)",
     _N * 2 + "결과\\" + _N * 16 + "← 엑셀 출력이 쌓이는 곳",
     _N * 2 + "run_aoi.bat" + _N * 9 + "← exe 가 백신에 막힐 때의 대체 실행",
     _N * 2 + "run_aoi_debug.bat" + _N * 3 + "← 오류 확인용 (콘솔 + 메시지)",

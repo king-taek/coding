@@ -141,16 +141,16 @@ def install_root() -> Path | None:
 
 
 def bundled_ir_dir() -> Path | None:
-    """동봉된 백본 OpenVINO IR 폴더(``runtime/ir``) — exe 설치에서만.
+    """백본 OpenVINO IR 폴더(``runtime/ir``).  없으면 None.
 
-    백본을 IR 로 바꾸는 일에는 torch 가 필요한데, 그것 하나 때문에 배포본이 torch 를
-    통째로 안고 다녔다.  그래서 **빌드 때 변환해 동봉**하고 앱은 읽기만 한다
-    (``portable_build._build_ir``).  **``app\\`` 바깥**이라 업데이트 교체에 쓸리지 않는다.
-    동봉본이 없으면(개발/포터블) None — 호출부가 CPU 고전으로 폴백한다."""
-    root = _exe_install_root()
-    if root is None:
-        return None
-    d = root / "runtime" / "ir"
+    백본을 IR 로 바꾸는 데는 torch 가 필요한데, 그것 하나 때문에 배포본이 torch 를 통째로
+    안고 다녔다.  그래서 **변환 결과만** 들고 다니고 앱은 읽기만 한다.
+
+    ★ 조회 규칙은 ``resource_path`` **하나**다 — 개발·포터블·exe·온라인 네 배포가 모두
+      '앱 트리 루트' 기준으로 같은 자리를 본다.  설치 루트 기반 판정을 쓰면 온라인 배포
+      (앱을 GitHub 에서 받아 푸는 형태)에서 못 찾는다.
+    IR 이 없으면 호출부가 CPU 고전으로 폴백한다(앱은 정상 동작, 가속만 없음)."""
+    d = resource_path("runtime/ir")
     return d if d.is_dir() else None
 
 

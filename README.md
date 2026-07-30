@@ -131,22 +131,26 @@ python scripts\build.py portable
   [releases](https://github.com/astral-sh/python-build-standalone/releases) 에서 최신
   *install_only Windows x86_64* `.tar.gz` 링크로 `PY_URL` 을 교체 후 재실행하세요.
 
-### 3.8 (권장·파이썬 없는 사용자) 온라인 다운로드형 작은 .exe
+### 3.8 온라인 다운로드형 작은 .exe — 전달 파일이 가장 작다
 
-파이썬이 없는 사용자에게 **작은 exe 하나**(수십 MB)만 주면 되는 방식입니다. exe 는 앱·무거운
-의존성(PyQt6·openvino)을 포함하지 않고, **처음 실행할 때 인터넷에서** 앱과 패키지를 받아
-`%LOCALAPPDATA%\AOI Recipe Verification` 에 설치한 뒤 실행합니다.  **Windows(파이썬 설치) + 인터넷 PC 에서**:
+**작은 exe 하나**만 주면 되는 방식입니다. exe 에는 **아무것도 들어 있지 않고**, 처음
+실행할 때 인터넷에서 **자체 포함 파이썬 · 앱 · 라이브러리 · 백본 IR 을 전부** 받아
+`%LOCALAPPDATA%\AOI Recipe Verification` 에 설치한 뒤 실행합니다.
+**사용자 PC 에 파이썬이 필요 없습니다.**  **Windows(파이썬 설치) + 인터넷 PC 에서**:
 
 ```powershell
 python scripts\build.py online
 ```
 
 - 산출물: `dist\AOI_Verify_Online.exe` — **이 파일 하나만 배포**.
-- 사용자 경험: 더블클릭 → 첫 실행은 다운로드/설치로 시간이 걸리고(수백 MB), 이후는 빠릅니다.
+- 사용자 경험: 더블클릭 → 첫 실행은 검은 창에 진행이 뜨며 몇 분 걸리고(수백 MB),
+  이후는 빠릅니다.
 - **자동 업데이트 그대로 동작:** 앱이 쓰기 가능한 `%LOCALAPPDATA%\AOI Recipe Verification` 에 설치되므로,
   앱 내 자동 업데이트가 그 폴더를 갱신합니다(exe 재배포 불필요).
-- **⚠️ 사내망에서는 사용할 수 없습니다.** 첫 실행에 PyPI(pip) 접속이 필요한데 막혀 있습니다.
-  → 아래 **3.9 (exe + app 폴더)** 를 쓰세요.
+- **전제:** 백본 IR 이 저장소에 커밋돼 있어야 합니다(`runtime/ir/`). 없으면 빌드가
+  중단하고 만드는 방법을 알려줍니다 — `python scripts\internal\make_ir.py`.
+- **첫 실행에 인터넷이 필요**합니다(github.com + PyPI). 닿지 못하는 PC 에는
+  **3.9 (exe + app 폴더)** 를 주세요.
 
 ### 3.9 (권장) exe + app 폴더 — 파이썬 없는 PC, 자동 업데이트 완전 동작
 
@@ -162,8 +166,8 @@ python scripts\build.py exe
   AOI_Verify\
     AOI_Verify.exe   ← 얇은 런처(수 MB). 앱 코드 0줄, 업데이트되지 않음
     python\          ← 번들 CPython + 의존성 [무거움, 거의 불변]
-    runtime\ir\      ← 백본 OpenVINO IR 동봉(덕분에 배포본에 torch 가 없다)
     app\             ← ★ 자동 업데이트가 바꾸는 전부
+      runtime\ir\    ←   백본 OpenVINO IR (덕분에 배포본에 torch 가 없다)
     결과\             ← 엑셀 출력 (app\ 바깥 — 업데이트에 안 쓸림)
     run_aoi.bat / run_aoi_debug.bat  ← exe 가 백신에 막힐 때 대체 실행·진단
   ```
@@ -223,7 +227,7 @@ python scripts\build.py exe
 - **기본 모드 (정밀 비교)** — 모든 후보를 정밀 비교합니다. 정확하지만
   사진이 매우 많을 때 느립니다.
 - **고효율 모드 (CPU+GPU)** — Intel GPU(MobileNetV3) 임베딩으로 후보를 빠르게
-  추린 뒤, 상위 후보만 CPU 고전(pHash+ORB+SSIM)으로 정밀 재채점해 **z-점수로
+  추린 뒤, 상위 후보만 CPU 고전(ORB·중앙가중)으로 정밀 재채점해 **z-점수로
   융합**합니다. GPU 와 CPU 가 동시에 가동되며, Intel GPU+OpenVINO 가 없으면
   CPU 고전 단독으로 자동 폴백합니다. 사진이 많을 때 권장합니다.
 

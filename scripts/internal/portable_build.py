@@ -277,13 +277,6 @@ def run_build(repo_root: Path, py_url: str,
         log("         이대로 배포하면 자동 업데이트가 패키지 변경을 감지하지 못합니다.")
         return 1
 
-    # 모델 IR 동봉(exe 배포용) — 백본을 여기서 미리 OpenVINO IR 로 변환해 둔다.
-    # app\ 바깥(runtime\ir)에 둬 업데이트 교체에 안 쓸린다.
-    if bundle_ir:
-        rc = _build_ir(out, ppy, run, log)
-        if rc != 0:
-            return rc
-
     # 3) 앱 소스 + 리소스 + 런처 스크립트 복사.
     log("[3/4] copying app source ...")
     app = out / "app"
@@ -296,6 +289,13 @@ def run_build(repo_root: Path, py_url: str,
     # 엑셀 템플릿(dev/*.xlsx)을 app 루트로 — template_path 가 찾는다.
     for xlsx in (repo_root / "dev").glob("*.xlsx"):
         shutil.copy2(xlsx, app / xlsx.name)
+
+    # 모델 IR — 앱이 `resource_path("runtime/ir")` 로 찾으므로 **앱 트리 안**에 둔다.
+    # 저장소에 커밋돼 있으면 그대로 복사하고(빠르다), 없으면 여기서 변환한다.
+    if bundle_ir:
+        rc = _place_ir(repo_root, app, ppy, run, log)
+        if rc != 0:
+            return rc
     scripts = repo_root / "scripts"
     for bat in bats:
         src = scripts / bat
@@ -354,9 +354,9 @@ def _write_deps_marker(repo_root: Path, out: Path) -> bool:
 # openvino 가 있는 일반 빌드에서는 번들 것이 그대로 이긴다(한 경로로 둘 다 커버).
 _BUILD_ONLY_REQS = ("torch>=2.0", "torchvision>=0.15", "openvino>=2024.0")
 
-# 동봉할 백본 — 운영은 MobileNetV3-Small 하나만 쓰고, ResNet18 은 개발자 벤치마크의
-# 대조 유닛이다.  둘 다 넣어야 벤치 레시피가 사용자 PC 에서도 그대로 돈다.
-IR_MODELS = ("mobilenet_v3_small", "resnet18")
+# 동봉할 백본 — 고효율 모드가 쓰는 MobileNetV3-Small 하나.
+# (ResNet18 은 개발자 벤치마크의 대조 유닛이었는데 그 기능과 함께 제거됐다.)
+IR_MODELS = ("mobilenet_v3_small",)
 
 # 번들 파이썬 안에서 실행되는 코드 — 백본을 OpenVINO IR 로 변환해 저장한다.
 # argv: [1]=IR 출력 폴더, [2]=빌드 전용 torch 가 설치된 임시 폴더.
@@ -381,13 +381,9 @@ _IR_BUILD_SRC = (
     "from torchvision import models as m\n"
     "P = 256\n"
     "def build(kind):\n"
-    "    if kind == 'resnet18':\n"
-    "        b = m.resnet18(weights=m.ResNet18_Weights.IMAGENET1K_V1)\n"
-    "        b.fc = torch.nn.Identity()\n"
-    "    else:\n"
-    "        b = m.mobilenet_v3_small("
+    "    b = m.mobilenet_v3_small("
     "weights=m.MobileNet_V3_Small_Weights.IMAGENET1K_V1)\n"
-    "        b.classifier = torch.nn.Identity()\n"
+    "    b.classifier = torch.nn.Identity()\n"
     "    b.eval()\n"
     "    mod = ov.convert_model(b, example_input=torch.randn(1, 3, P, P))\n"
     "    ov.save_model(mod, os.path.join(out, kind + '.xml'),"
@@ -399,8 +395,15 @@ _IR_BUILD_SRC = (
 
 
 def ir_dir(out: Path) -> Path:
-    """동봉 IR 폴더 — ``app\\`` 바깥이라 자동 업데이트 교체에 쓸리지 않는다."""
-    return Path(out) / "runtime" / "ir"
+    """산출물의 IR 폴더.  앱이 ``resource_path("runtime/ir")`` 로 찾는 자리다.
+
+    ``out`` 은 배포 폴더(``dist/AOI_Verify``) — 앱 트리는 그 아래 ``app/`` 이다."""
+    return Path(out) / "app" / "runtime" / "ir"
+
+
+def repo_ir_dir(repo_root: Path) -> Path:
+    """저장소에 커밋된 IR 폴더.  있으면 빌드가 변환하지 않고 그대로 쓴다."""
+    return Path(repo_root) / "runtime" / "ir"
 
 
 def missing_ir(out: Path) -> list:
@@ -417,13 +420,39 @@ def missing_ir(out: Path) -> list:
 IR_TMP_DIRNAME = ".irbuild"
 
 
-def _build_ir(out: Path, ppy: Path, run: Callable, log: Callable) -> int:
+def _place_ir(repo_root: Path, app: Path, ppy: Path,
+              run: Callable, log: Callable) -> int:
+    """앱 트리에 백본 IR 을 놓는다.  0=성공.
+
+    **저장소에 커밋된 IR 이 있으면 그대로 복사한다** — 그게 정상 경로다(빌드가 빨라지고,
+    온라인 배포도 앱을 받을 때 IR 이 함께 온다).  아직 커밋 전이면 여기서 변환한다
+    (torch 를 임시로 받아 쓰고 지운다 — `scripts/internal/make_ir.py` 를 한 번 돌려
+    커밋해 두면 이 느린 경로를 안 탄다)."""
+    src = repo_ir_dir(repo_root)
+    dst = Path(app) / "runtime" / "ir"
+    have = [k for k in IR_MODELS
+            if (src / f"{k}.xml").is_file() and (src / f"{k}.bin").is_file()]
+    if len(have) == len(IR_MODELS):
+        log("       using committed IR (runtime/ir) ...")
+        dst.mkdir(parents=True, exist_ok=True)
+        for k in IR_MODELS:
+            shutil.copy2(src / f"{k}.xml", dst / f"{k}.xml")
+            shutil.copy2(src / f"{k}.bin", dst / f"{k}.bin")
+        return 0
+    log("       runtime/ir 이 저장소에 없어 여기서 변환합니다 "
+        "(scripts/internal/make_ir.py 로 한 번 만들어 커밋하면 생략됩니다) ...")
+    return _build_ir(dst, Path(app).parent, ppy, run, log)
+
+
+def _build_ir(dst: Path, tmp_root: Path, ppy: Path,
+              run: Callable, log: Callable) -> int:
     """백본 → OpenVINO IR 변환.  torch 는 임시 폴더에만 설치하고 끝나면 지운다.
 
     실패하면 **빌드를 중단**한다.  IR 이 없으면 사용자 PC 에서 가속 경로가 통째로
     죽는데(torch 가 배포본에 없으니 폴백도 없다), 그걸 조용히 넘기면 '느려졌다'는
     현상으로만 드러나 원인을 찾기 어렵다."""
-    tmp = Path(out) / IR_TMP_DIRNAME
+    dst = Path(dst)
+    tmp = Path(tmp_root) / IR_TMP_DIRNAME     # ★ app\ 밖 — 안에 두면 배포 zip 에 실린다
     try:
         log("       installing build-only torch (배포본에는 들어가지 않습니다) ...")
         if run(_isolated(ppy, "-m", "pip", "install", "--target", tmp,
@@ -435,16 +464,18 @@ def _build_ir(out: Path, ppy: Path, run: Callable, log: Callable) -> int:
             return 1
 
         log("       converting backbones to OpenVINO IR ...")
-        if run(_isolated(ppy, "-c", _IR_BUILD_SRC, ir_dir(out), tmp)) != 0:
+        if run(_isolated(ppy, "-c", _IR_BUILD_SRC, dst, tmp)) != 0:
             log("[FAILED] 백본 → IR 변환에 실패했습니다.")
             log("         가중치를 받지 못했을 수 있습니다(download.pytorch.org 접속).")
             return 1
 
         # 변환기가 rc=0 을 냈어도 파일이 실제로 생겼는지는 별개다 — 디스크로 확인한다.
-        missing = missing_ir(out)
+        missing = [k for k in IR_MODELS
+                   if not ((dst / f"{k}.xml").is_file()
+                           and (dst / f"{k}.bin").is_file())]
         if missing:
             log("[FAILED] IR 이 생성되지 않았습니다: " + ", ".join(missing))
-            log(f"         확인 위치: {ir_dir(out)}")
+            log(f"         확인 위치: {dst}")
             return 1
         log(f"       IR OK ({', '.join(IR_MODELS)})")
         return 0
