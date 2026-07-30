@@ -710,12 +710,18 @@ class SetupPage(QWidget):
         self.update_btn.setMinimumHeight(46)
         self.update_btn.clicked.connect(self.update_check_requested.emit)
         bar.addWidget(self.update_btn)
+        # 사진 한 장의 결함 정보를 바로 보는 도구 — 개발자 모드와 무관하게 항상 보인다.
+        self.image_info_btn = NeonButton(i18n.KO.IMAGE_INFO_BUTTON, role="ghost")
+        self.image_info_btn.setMinimumHeight(46)
+        self.image_info_btn.clicked.connect(self._open_image_info)
+        bar.addWidget(self.image_info_btn)
         # 개발자 모드(환경변수 AOI_DEV_MODE 또는 prefs.dev_mode)에서만 보이는
         # ‘개발자 벤치마크 / 정답 라벨’ 버튼 — 일반 사용자 화면에는 나타나지 않는다.
         # 앱 안에서 Ctrl+Shift+D 로 켜고 끌 수 있으며, 토글 시 버튼이 즉시
         # 나타나거나 사라진다(아래 _refresh_dev_buttons).
-        # ★ 인덱스 계약: [0]=update_btn, [1..2]=개발자 버튼, 그 뒤 stretch.
-        #   신규 위젯은 반드시 stretch **뒤**에 붙인다(_refresh_dev_buttons 가정 보존).
+        # ★ 인덱스 계약: [0]=update_btn, [1]=image_info_btn, [2..3]=개발자 버튼,
+        #   그 뒤 stretch.  신규 위젯은 반드시 stretch **뒤**에 붙인다
+        #   (_refresh_dev_buttons 의 insertWidget 인덱스 가정 보존).
         self._action_bar = bar
         self.dev_bench_btn: NeonButton | None = None
         self.dev_label_btn: NeonButton | None = None
@@ -912,18 +918,18 @@ class SetupPage(QWidget):
         if bar is None:
             return
         enabled = self._dev_mode_enabled()
-        # 켜짐 → 없으면 생성해 update_btn 다음(index 1)에 삽입.
+        # 켜짐 → 없으면 생성해 image_info_btn 다음(index 2)에 삽입.
         if enabled:
             if self.dev_bench_btn is None:
                 self.dev_bench_btn = NeonButton(i18n.KO.DEV_BENCH_BUTTON, role="ghost")
                 self.dev_bench_btn.setMinimumHeight(46)
                 self.dev_bench_btn.clicked.connect(self._open_dev_benchmark)
-                bar.insertWidget(1, self.dev_bench_btn)
+                bar.insertWidget(2, self.dev_bench_btn)
             if self.dev_label_btn is None:
                 self.dev_label_btn = NeonButton(i18n.KO.DEV_LABEL_BUTTON, role="ghost")
                 self.dev_label_btn.setMinimumHeight(46)
                 self.dev_label_btn.clicked.connect(self._open_label_maker)
-                bar.insertWidget(2, self.dev_label_btn)
+                bar.insertWidget(3, self.dev_label_btn)
         else:
             for attr in ("dev_bench_btn", "dev_label_btn"):
                 btn = getattr(self, attr, None)
@@ -976,6 +982,12 @@ class SetupPage(QWidget):
         default_ref, default_val = self._default_dev_roots()
         dlg = LabelMakerDialog(self, default_ref=default_ref,
                                default_val=default_val)
+        sheets.run(dlg, full_bleed=True)
+
+    def _open_image_info(self) -> None:
+        """단일 사진 정보 다이얼로그 — 사진 1장의 결함 좌표/measurement 확인."""
+        from ..widgets.image_info_dialog import ImageInfoDialog
+        dlg = ImageInfoDialog(self)
         sheets.run(dlg, full_bleed=True)
 
     def _on_threshold_changed(self, v: int) -> None:
