@@ -75,7 +75,7 @@ def _show_splash(app):
 
 
 def _preload_heavy_module():
-    """화면 모듈(torch/cv2/openvino 를 끌고 온다) 을 백그라운드에서 import.
+    """화면 모듈(cv2/openvino 를 끌고 온다) 을 백그라운드에서 import.
 
     시작 시간의 대부분이 여기다.  메인 스레드에서 하면 스플래시가 그대로 얼어붙으니
     (CLAUDE.md 로딩 규칙) 스레드로 돌리고 메인 스레드는 이벤트 루프를 계속 굴린다.
@@ -109,26 +109,8 @@ def _open_main_window(splash):
     return window
 
 
-def _use_bundled_torch_home() -> None:
-    """동봉된 모델 가중치를 쓰도록 ``TORCH_HOME`` 을 돌린다(torch import 전에 해야 한다).
-
-    사내망은 ``download.pytorch.org`` 가 막혀 있을 수 있어, exe 배포본은 가중치를 미리
-    받아 동봉한다.  동봉본이 없으면 아무것도 하지 않는다(기존 동작 유지)."""
-    import os
-
-    from aoi_verification.app.utils import paths
-
-    d = paths.bundled_torch_home()
-    if d is not None:
-        os.environ.setdefault("TORCH_HOME", str(d))
-
-
 def main() -> int:
     _ensure_package_on_path()
-    try:
-        _use_bundled_torch_home()
-    except Exception:
-        pass                      # 가중치 경로 문제로 앱이 안 뜨는 일은 없게 한다
 
     from PyQt6.QtCore import Qt, QTimer
     from PyQt6.QtGui import QFont, QGuiApplication

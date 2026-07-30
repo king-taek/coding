@@ -120,9 +120,9 @@ def verify_imports() -> None:
         ("psutil", "psutil"),
         ("openvino", "openvino (Intel GPU 가속 — 필수)"),
     ]
+    # 대용량 후보 검색 가속 — 없으면 NumPy 브루트포스로 폴백한다(정확도 동일).
     optional: list[tuple[str, str]] = [
-        ("torch", "torch (임베딩/학습 — 옵션)"),
-        ("torchvision", "torchvision (임베딩/학습 — 옵션)"),
+        ("hnswlib", "hnswlib (대용량 후보 검색 가속 — 옵션)"),
     ]
 
     failed: list[str] = []

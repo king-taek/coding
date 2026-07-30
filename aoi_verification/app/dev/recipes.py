@@ -24,7 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Set
 
-# 임베딩 백본 식별자(embedder_openvino 와 동일 문자열) — torch/openvino 미설치
+# 임베딩 백본 식별자(embedder_openvino 와 동일 문자열) — openvino 미설치
 # 환경에서도 이 모듈을 import 할 수 있도록 문자열 상수로 직접 정의한다.
 MODEL_MOBILENET_V3 = "mobilenet_v3_small"   # GPU 기본(576-d)
 MODEL_RESNET18 = "resnet18"                 # GPU 대조 모델(512-d)

@@ -133,17 +133,17 @@ def _exe_install_root() -> Path | None:
     return None
 
 
-def bundled_torch_home() -> Path | None:
-    """동봉된 torchvision 모델 가중치 폴더(``runtime/torch``) — exe 설치에서만.
+def bundled_ir_dir() -> Path | None:
+    """동봉된 백본 OpenVINO IR 폴더(``runtime/ir``) — exe 설치에서만.
 
-    앱은 첫 매칭 때 ImageNet 가중치를 ``download.pytorch.org`` 에서 받는데, 사내망은 이
-    경로가 막혀 있을 수 있다.  그래서 빌드 때 미리 받아 동봉하고 ``TORCH_HOME`` 을
-    여기로 돌린다.  **``app\\`` 바깥**이라 업데이트 교체에 쓸리지 않는다.
-    동봉본이 없으면(개발/포터블) None — 기존 동작(사용자 홈 캐시) 그대로."""
+    백본을 IR 로 바꾸는 일에는 torch 가 필요한데, 그것 하나 때문에 배포본이 torch 를
+    통째로 안고 다녔다.  그래서 **빌드 때 변환해 동봉**하고 앱은 읽기만 한다
+    (``portable_build._build_ir``).  **``app\\`` 바깥**이라 업데이트 교체에 쓸리지 않는다.
+    동봉본이 없으면(개발/포터블) None — 호출부가 CPU 고전으로 폴백한다."""
     root = _exe_install_root()
     if root is None:
         return None
-    d = root / "runtime" / "torch"
+    d = root / "runtime" / "ir"
     return d if d.is_dir() else None
 
 

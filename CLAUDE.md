@@ -136,7 +136,7 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
     · 재설치 폭주를 막는 장치: 빌드가 남기는 `.deps_installed` 표식과 비교해 **바뀐 경우에만**
       돌린다. 주석·빈 줄 변경은 `bootstrap.req_lines` 가 정규화해 무시한다.
     · `--upgrade` 를 주지 마라(`pip_install_cmd(..., upgrade=False)`). requirements 가 전부
-      `>=` 라 잘 돌던 torch 까지 최신으로 끌어올려 수 GB 를 받고 회귀 위험을 만든다.
+      `>=` 라 잘 돌던 무거운 패키지까지 최신으로 끌어올려 대용량을 받고 회귀 위험을 만든다.
   - 포터블/온라인: `requirements.txt` 변경을 감지(`deps_changed()`)해 '수동 갱신' 안내만 한다.
   - 자세한 동작은 `docs/업데이트_동작.md`.
 - **테스트는 절대 진짜 `pip` 을 돌리지 않는다.** `dev/tests/test_updater.py` 의
@@ -161,6 +161,22 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
 
 > 배경: '사내망은 PyPI 가 막혀 있다' 는 전언이 있었으나 **실측 결과 열려 있었다**
 > (`pip download` 성공, 인증서 오류 없음). 검증되지 않은 전언을 설계 전제로 삼지 마라.
+
+## 백본 모델(IR) 규칙 — torch 는 배포본에 없다
+- 추론은 전부 OpenVINO 다. **백본 → IR 변환은 빌드 때 하고 결과만 동봉한다**
+  (`portable_build._IR_BUILD_SRC` → `runtime/ir/*.xml`+`.bin` → `paths.bundled_ir_dir` →
+  `embedder_openvino._build_ov_model` 이 `read_model` 로 읽음). 런타임에 변환 수단은 없다.
+- **새 백본을 추가하려면 `portable_build.IR_MODELS` 에 넣어야 한다.** 앱 코드에만 추가하면
+  사용자 PC 에는 IR 이 없어 그 유닛이 조용히 CPU 폴백으로 떨어진다.
+- `ov.save_model` 의 **`compress_to_fp16` 기본값은 True** 다. 반드시 `False` 를 준다 —
+  FP16 반올림은 임베딩 값을 바꾼다("정확도는 절대 깨지 않는다"). 변환 전 `.eval()` 도 필수
+  (BatchNorm 폴딩). 회귀 가드: `dev/tests/test_ir_bundle.py`.
+- IR 은 모델당 1개면 된다. 배치·해상도는 `_force_static_shape` 의 `reshape` 로 맞춘다.
+- **임베딩 산출 방식을 바꾸면 `embedder_openvino._EMB_VERSION` 을 올린다.** 캐시 키
+  (`_emb_signature`)에 그 토큰이 없으면 옛 `.npy` 가 그대로 적중해 **같은 슬롯 안에서 옛
+  벡터와 새 벡터를 코사인 비교**한다 — 느려지는 게 아니라 매칭이 틀린다.
+- torch 는 **빌드 전용**이다(`_BUILD_ONLY_REQS`). 임시 폴더(`.irbuild`)에만 설치하고 끝나면
+  지운다. `requirements.txt` 에 다시 넣지 마라 — 배포 번들에서 가장 큰 덩어리다.
 
 ## 매칭 / 좌표 검토 규칙
 - **정확도 우선**: 운영 기본(`gpu_fusion_b16`)보다 정확도가 낮으면 더 빨라도 채택/추천하지 않는다.

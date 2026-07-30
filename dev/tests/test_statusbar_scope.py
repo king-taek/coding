@@ -5,8 +5,9 @@
 가속 장치는 세션 중 바뀌지 않고, GPU 가동 여부는 관찰용 숫자다.
 
 메모리는 다르다: 압박 토스트가 '슬롯을 나눠 돌리라'는 행동으로 이어진다.  그래서
-메모리만 남겼다.  진단용 함수 자체(embedder.device_label 등)는 개발자 벤치마크가
-쓰므로 살아 있다 — **상태바가 그것을 상시 표시하지 않는다**는 것이 이 테스트의 계약이다.
+메모리만 남겼다.  진단용 함수 자체(embedder_openvino.device_label 등)는 개발자
+벤치마크가 쓰므로 살아 있다 — **상태바가 그것을 상시 표시하지 않는다**는 것이 이
+테스트의 계약이다.
 """
 
 from __future__ import annotations
@@ -37,7 +38,7 @@ def test_usage_strings_are_gone():
 
 def test_diagnostic_helpers_still_exist():
     """상태바에서 떼는 것과 함수를 지우는 것은 다르다 — 진단 경로는 보존한다."""
-    from aoi_verification.app.learning import embedder, embedder_openvino
-    assert callable(embedder.device_label)
-    for name in ("accelerator_presence", "unit_busy", "compile_diagnostics"):
+    from aoi_verification.app.learning import embedder_openvino
+    for name in ("device_label", "accelerator_presence", "unit_busy",
+                 "compile_diagnostics"):
         assert callable(getattr(embedder_openvino, name)), name

@@ -12,7 +12,7 @@
   4) 그 폴더의 ``main.py`` 를 실행한다.
 
 이 구조의 이점:
-  - exe 자체엔 무거운 torch/openvino 를 안 넣어도 돼 **작다**(온라인 다운로드형).
+  - exe 자체엔 무거운 PyQt6/openvino 를 안 넣어도 돼 **작다**(온라인 다운로드형).
   - 앱이 쓰기 가능한 폴더에 풀려 **기존 자동 업데이트가 그대로 동작**한다
     (``updater`` 가 그 폴더를 ``_app_root`` 로 보고 덮어쓴다).
 
@@ -107,8 +107,9 @@ def pip_install_cmd(python_exe: str, req_file: Path,
     앱 런타임에서 처리하므로 여기선 표준 pip 만 쓴다.
 
     ``upgrade=False`` 는 **빠진 것만 채운다**.  requirements 가 전부 ``>=`` 라
-    ``--upgrade`` 를 주면 이미 잘 돌던 torch 까지 최신으로 끌어올려(수 GB + 회귀 위험)
-    버린다.  첫 설치(온라인 launcher)는 최신을 받는 게 맞으므로 기본값은 유지한다."""
+    ``--upgrade`` 를 주면 이미 잘 돌던 무거운 패키지(PyQt6·openvino 등)까지 최신으로
+    끌어올려(대용량 + 회귀 위험) 버린다.  첫 설치(온라인 launcher)는 최신을 받는 게
+    맞으므로 기본값은 유지한다."""
     cmd = [str(python_exe), "-m", "pip", "install"]
     if upgrade:
         cmd.append("--upgrade")

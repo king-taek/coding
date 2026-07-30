@@ -126,15 +126,34 @@ def test_results_dir_moves_out_of_app_folder_for_exe_installs(tmp_path, monkeypa
     assert "app" not in d.parts[:-1] or d.parent == tmp_path
 
 
-def test_bundled_torch_home_only_when_present(tmp_path, monkeypatch):
-    """동봉 가중치가 있을 때만 TORCH_HOME 을 돌린다(개발/포터블은 기존 동작 유지)."""
+def test_bundled_ir_dir_only_when_present(tmp_path, monkeypatch):
+    """동봉 IR 이 있을 때만 그 폴더를 돌려준다(개발/포터블은 None → CPU 폴백)."""
     from aoi_verification.app.utils import paths
     monkeypatch.delenv("AOI_APP_HOME", raising=False)
-    assert paths.bundled_torch_home() is None
+    assert paths.bundled_ir_dir() is None
     monkeypatch.setenv("AOI_APP_HOME", str(tmp_path))
-    assert paths.bundled_torch_home() is None          # 폴더가 아직 없다
-    (tmp_path / "runtime" / "torch").mkdir(parents=True)
-    assert paths.bundled_torch_home() == tmp_path / "runtime" / "torch"
+    assert paths.bundled_ir_dir() is None              # 폴더가 아직 없다
+    (tmp_path / "runtime" / "ir").mkdir(parents=True)
+    assert paths.bundled_ir_dir() == tmp_path / "runtime" / "ir"
+
+
+def test_ir_path_requires_both_xml_and_bin(tmp_path, monkeypatch):
+    """★ ``.bin``(가중치) 이 없으면 read_model 이 조용히 엉뚱한 모델을 줄 수 있다.
+
+    그건 '느리다' 가 아니라 **틀린 임베딩**이므로, 반쪽짜리 IR 은 아예 없는 것으로
+    취급해 CPU 고전으로 폴백해야 한다."""
+    from aoi_verification.app.learning import embedder_openvino as ov
+    monkeypatch.setenv("AOI_APP_HOME", str(tmp_path))
+    d = tmp_path / "runtime" / "ir"
+    d.mkdir(parents=True)
+    kind = ov.MODEL_MOBILENET_V3
+    assert ov.ir_path(kind) is None                    # 아무것도 없다
+    (d / f"{kind}.xml").write_text("<net/>", encoding="utf-8")
+    assert ov.ir_path(kind) is None, ".bin 없이 통과하면 안 된다"
+    (d / f"{kind}.bin").write_bytes(b"x")
+    assert ov.ir_path(kind) == d / f"{kind}.xml"
+    # 지원하지 않는 백본은 파일이 있어도 None (호출부가 CPU 로 폴백).
+    assert ov.ir_path("nope") is None
 
 
 def test_results_stay_outside_app_even_without_the_env_var(tmp_path, monkeypatch):

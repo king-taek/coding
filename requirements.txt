@@ -6,8 +6,9 @@ scikit-image>=0.21
 imagehash>=4.3
 openpyxl>=3.1
 psutil>=5.9
-torch>=2.0
-torchvision>=0.15
+# 추론은 전부 OpenVINO 로 한다.  백본을 IR 로 바꾸는 데만 torch 가 필요한데, 그 변환은
+# **빌드 때** 끝내고 IR 을 동봉하므로(scripts/internal/portable_build.py) 런타임에는
+# torch·torchvision 이 필요 없다 — 배포본에서 가장 큰 덩어리가 빠진다.
 openvino>=2024.0
 # KLA WaferID OCR 폴백 — 파일명이 WaferID 형식이 아닐 때 이미지 헤더를 판독.
 # 인식 모델(ONNX) 내장이라 런타임 다운로드 없이 오프라인 동작.

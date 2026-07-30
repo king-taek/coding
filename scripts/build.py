@@ -98,8 +98,10 @@ EXE_OUT_DIRNAME = "dist/AOI_Verify"
 # 교체하고 distpath 폴더를 비우지 않고, portable_build 도 app/aoi_verification 아래만
 # 지운다.  그래서 옛 방식(단독 exe) 산출물의 `_internal/` 이 남으면 검증이 **영원히**
 # 실패하고, 사용자는 '다시 빌드하세요' 안내를 따라도 상태를 바꿀 수 없다.
+# `.irbuild` 는 IR 변환용 torch 를 푸는 임시 트리다(portable_build.IR_TMP_DIRNAME).
+# 정상 종료 때는 스스로 지워지지만, 중간에 죽으면 수백 MB 가 남아 배포 zip 에 실린다.
 _STALE_ON_REBUILD = ("_internal", "app.new", "app.new.part", "app.old",
-                     "AOI_Verify.exe")
+                     "AOI_Verify.exe", ".irbuild")
 # 반대로 **남겨야** 하는 것: python\ 과 runtime\ 은 다시 만들면 30분이 걸리고,
 # portable_build 의 증분 재사용이 이걸 전제로 한다.  결과\ 는 사용자 산출물이다.
 
@@ -161,15 +163,16 @@ def diagnose(out: Path) -> Tuple[str, List[str]]:
             "네트워크(github.com 다운로드)를 확인하고 다시 실행하세요."]
     if not (out / ".deps_installed").is_file():
         return "partial:deps", [
-            "의존성 설치(pip — torch/openvino) 단계에서 멈췄습니다.",
+            "의존성 설치(pip — PyQt6/openvino) 단계에서 멈췄습니다.",
             "네트워크와 디스크 여유 공간을 확인하고 다시 실행하세요.",
             "  (python\\ 은 재사용되므로 런타임을 다시 받지는 않습니다.)"]
-    ck = out / "runtime" / "torch" / "hub" / "checkpoints"
-    n_ckpt = len(list(ck.glob("*.pth"))) if ck.is_dir() else 0
-    if n_ckpt < 2:
-        return "partial:weights", [
-            "모델 가중치를 받는 단계에서 멈췄습니다.",
-            "download.pytorch.org 접속을 확인하고 다시 실행하세요."]
+    impl = _load_portable_impl()
+    if impl.missing_ir(out):
+        return "partial:ir", [
+            "백본을 OpenVINO IR 로 변환하는 단계에서 멈췄습니다.",
+            "빌드 전용 torch 설치(PyPI)와 가중치 다운로드(download.pytorch.org)",
+            "접속을 확인하고 다시 실행하세요.",
+            "  (변환에만 쓰는 것이고 배포본에는 torch 가 들어가지 않습니다.)"]
     if not (out / "app" / "VERSION").is_file():
         return "partial:appcopy", [
             "앱 소스 복사 / VERSION 스탬프 단계에서 멈췄습니다.",
@@ -201,8 +204,8 @@ def preflight(repo_root: Path, log: Callable = print,
     if free_bytes is not None and free_bytes < 10 * 1024 ** 3:
         log(f"[실패] 디스크 여유 공간이 부족합니다 "
             f"({free_bytes / 1024 ** 3:.1f} GB). 10 GB 이상 확보하세요.")
-        log("       산출물만 ~1.5 GB 이고 pip 캐시·휠이 더 필요합니다. 공간이 모자라면 "
-            "30분 뒤 pip 한복판에서 실패합니다.")
+        log("       산출물에 더해 IR 변환용 torch 를 임시로 풀고(끝나면 삭제) pip 캐시·"
+            "휠도 필요합니다. 공간이 모자라면 30분 뒤 pip 한복판에서 실패합니다.")
         return 1
 
     # 커밋 안 한 변경이 있으면 VERSION 이 거짓말을 한다 — 스탬프는 HEAD 의 sha 인데
@@ -334,7 +337,7 @@ def build_exe(run: Callable = _default_run, log: Callable = print) -> int:
     rc = impl.run_build(REPO_ROOT, PY_STANDALONE_URL, run=run, log=log,
                         out_dirname=EXE_OUT_DIRNAME,
                         bats=("run_aoi.bat", "run_aoi_debug.bat"),
-                        torch_home=True)
+                        bundle_ir=True)
     if rc != 0:
         # run_build 가 이미 정확한 [FAILED] 를 출력했다.  여기서 파일시스템으로 추측한
         # 진단을 덧붙이면 서로 모순되는 안내가 된다(실제로 그런 일이 있었다).
@@ -433,21 +436,32 @@ def verify_checks(out: Path) -> List[tuple]:
     checks.append(((out / ".deps_installed").is_file(),
                    ".deps_installed (의존성 표식 — 업데이트 감지의 전제)"))
 
-    # 모델 가중치 — 사내망에선 런타임 다운로드가 막힐 수 있어 동봉이 필수.
-    ckpt = out / "runtime" / "torch" / "hub" / "checkpoints"
-    n_ckpt = len(list(ckpt.glob("*.pth"))) if ckpt.is_dir() else 0
-    checks.append((n_ckpt >= 2, f"runtime/torch 가중치 {n_ckpt}개 (2개 이상)"))
+    impl = _load_portable_impl()
+
+    # 백본 IR — 없으면 GPU 가속 경로가 통째로 죽는다(배포본에 torch 가 없어 폴백도 없다).
+    missing_ir = impl.missing_ir(out)
+    checks.append((not missing_ir,
+                   "runtime/ir 백본 IR(.xml+.bin) 존재"
+                   + (f" (빠짐: {', '.join(missing_ir)})" if missing_ir else "")))
+    # 빌드 전용 torch 임시 트리가 남으면 수백 MB 가 그대로 배포 zip 에 실린다.
+    checks.append((not (out / impl.IR_TMP_DIRNAME).exists(),
+                   f"{impl.IR_TMP_DIRNAME}/ 없음 (빌드 전용 torch 잔재 방지)"))
 
     # ★ 번들에 패키지가 **실제로** 들어갔는지 — 총 용량은 부분 설치를 못 잡고 사용자
     #   `결과/` 파일까지 세어 오염된다.  site-packages 를 직접 본다.
-    impl = _load_portable_impl()
     missing = impl.missing_packages(out, out / "app" / "requirements.txt")
     checks.append((not missing,
                    "번들 site-packages 에 필요한 패키지 전부 존재"
                    + (f" (빠짐: {', '.join(missing[:5])})" if missing else "")))
+    # torch 가 빠지면서 하한이 내려갔다.  '전부 건너뛰어 텅 빈' 상태만 잡으면 되므로
+    # PyQt6+openvino+opencv 만으로도 확실히 넘는 값을 쓴다.
     sp_mb = _dir_size_mb(impl.site_packages_dir(out))
-    checks.append((sp_mb > 500,
-                   f"site-packages 용량 {sp_mb:.0f} MB (500 MB 이상이어야 정상)"))
+    checks.append((sp_mb > 200,
+                   f"site-packages 용량 {sp_mb:.0f} MB (200 MB 이상이어야 정상)"))
+    # ★ torch 가 배포본에 들어가면 이 작업의 목적 자체가 무너진다 — 회귀 가드.
+    torch_dir = impl.site_packages_dir(out) / "torch"
+    checks.append((not torch_dir.exists(),
+                   "번들에 torch 없음 (IR 동봉으로 대체 — 회귀 가드)"))
     return checks
 
 
@@ -461,7 +475,7 @@ def import_probe_cmd(out: Path) -> List[str]:
     src = (
         "import sys; sys.path.insert(0, r'%s');"
         "import PyQt6.QtWidgets, cv2, numpy, PIL, openpyxl;"
-        "import torch, torchvision, openvino, skimage, imagehash, psutil;"
+        "import openvino, skimage, imagehash, psutil;"
         "from aoi_verification.app.utils import updater, paths;"
         "assert updater.DEFAULT_BRANCH" % str(app)
     )

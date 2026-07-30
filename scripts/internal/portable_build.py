@@ -161,13 +161,13 @@ def run_build(repo_root: Path, py_url: str,
               run: Callable = None, log: Callable = print,
               out_dirname: str = OUT_DIRNAME,
               bats: tuple = ("run_aoi.bat", "run_aoi_debug.bat", "update_app.bat"),
-              torch_home: bool = False) -> int:
+              bundle_ir: bool = False) -> int:
     """포터블 빌드 수행.  ``run`` 은 명령 실행기(주입 가능).  반환: 0=성공.
 
-    ``out_dirname``/``bats``/``torch_home`` 은 'exe + app 폴더' 빌드가 이 함수를 그대로
+    ``out_dirname``/``bats``/``bundle_ir`` 은 'exe + app 폴더' 빌드가 이 함수를 그대로
     재사용하기 위한 것이다(레이아웃이 같다 — ``python\\`` + ``app\\``).  exe 빌드는
     산출물 폴더가 ``dist/AOI_Verify`` 이고, 병합식 ``update_app.bat`` 은 동봉하지 않으며
-    (하는 일이 옛 미러링 버그 그 자체다), 모델 가중치를 함께 받아 둔다."""
+    (하는 일이 옛 미러링 버그 그 자체다), 모델 IR 을 함께 만들어 둔다."""
     if run is None:
         def run(cmd, cwd=None):
             log(">> " + " ".join(str(c) for c in cmd))
@@ -215,7 +215,7 @@ def run_build(repo_root: Path, py_url: str,
         return 1
 
     # 2) 의존성 설치 + 보안 가드.
-    log("[2/4] installing dependencies (torch/openvino — takes a while) ...")
+    log("[2/4] installing dependencies (PyQt6/openvino — takes a while) ...")
     # ↓ 실패해도 아무 말 없이 rc=1 만 돌려주면, 30분 돌린 사용자는 pip 출력 수백 줄
     #   끝에서 '왜 멈췄는지' 를 알 수 없다.  어느 단계인지 반드시 말한다.
     if run(_isolated(ppy, "-m", "pip", "install", "--upgrade", "pip")) != 0:
@@ -260,15 +260,12 @@ def run_build(repo_root: Path, py_url: str,
         log("         이대로 배포하면 자동 업데이트가 패키지 변경을 감지하지 못합니다.")
         return 1
 
-    # 모델 가중치 동봉(exe 배포용) — 첫 매칭 때 download.pytorch.org 에서 받게 돼 있는데
-    # 사내망은 막혀 있을 수 있다.  app\ 바깥(runtime\torch)에 둬 업데이트 교체에 안 쓸린다.
-    if torch_home:
-        log("       fetching torchvision weights (bundled, ~55 MB) ...")
-        if run(_isolated(ppy, "-c", _TORCH_FETCH_SRC,
-                         out / "runtime" / "torch")) != 0:
-            log("[FAILED] could not fetch model weights — 사내망 PC 에서 매칭이 "
-                "동작하지 않을 수 있습니다.")
-            return 1
+    # 모델 IR 동봉(exe 배포용) — 백본을 여기서 미리 OpenVINO IR 로 변환해 둔다.
+    # app\ 바깥(runtime\ir)에 둬 업데이트 교체에 안 쓸린다.
+    if bundle_ir:
+        rc = _build_ir(out, ppy, run, log)
+        if rc != 0:
+            return rc
 
     # 3) 앱 소스 + 리소스 + 런처 스크립트 복사.
     log("[3/4] copying app source ...")
@@ -325,15 +322,111 @@ def _write_deps_marker(repo_root: Path, out: Path) -> bool:
         return False
 
 
-# 번들 파이썬 안에서 실행되는 코드 — torchvision 가중치를 지정 폴더로 미리 받아 둔다.
-# (앱의 embedder 가 쓰는 것과 **같은** 가중치: MobileNetV3-Small · ResNet18)
-_TORCH_FETCH_SRC = (
+# ---------------------------------------------------------------------------
+# 모델 IR 동봉 — torch 를 배포본에서 빼기 위한 핵심 단계
+# ---------------------------------------------------------------------------
+# 앱은 추론을 전부 OpenVINO 로 하고, torch 는 **백본을 IR 로 변환할 때만** 쓴다.
+# 그 변환을 여기(빌드 PC)서 한 번 해 두면 배포본에 torch 가 필요 없다 — 번들에서
+# 가장 큰 덩어리(torch + sympy/networkx/mpmath/filelock/fsspec/jinja2)가 통째로 빠진다.
+#
+# torch 는 **임시 폴더에만** 설치한다(`--target`).  번들 site-packages 에 넣었다가
+# 지우는 방식은 pip 이 고아 의존성을 남겨 반쯤 지워진 상태가 되기 쉽다.
+_BUILD_ONLY_REQS = ("torch>=2.0", "torchvision>=0.15")
+
+# 동봉할 백본 — 운영은 MobileNetV3-Small 하나만 쓰고, ResNet18 은 개발자 벤치마크의
+# 대조 유닛이다.  둘 다 넣어야 벤치 레시피가 사용자 PC 에서도 그대로 돈다.
+IR_MODELS = ("mobilenet_v3_small", "resnet18")
+
+# 번들 파이썬 안에서 실행되는 코드 — 백본을 OpenVINO IR 로 변환해 저장한다.
+# argv: [1]=IR 출력 폴더, [2]=빌드 전용 torch 가 설치된 임시 폴더.
+# openvino 는 번들 site-packages 에서, torch 는 argv[2] 에서 온다.
+#
+# ★ 임시 폴더는 sys.path 의 **뒤에** 붙인다(insert(0) 아님).  pip --target 이 torch 의
+#   의존성(numpy 등)까지 거기 깔기 때문에, 앞에 붙이면 그 numpy 가 번들 것을 가려
+#   openvino 와 ABI 가 어긋날 수 있다.  torch/torchvision 은 임시 폴더에만 있으므로
+#   뒤에 붙여도 정상적으로 찾는다.
+#
+# ★ compress_to_fp16=False 가 필수다.  ov.save_model 의 기본값이 True 라 그냥 저장하면
+#   FP32 가중치가 FP16 으로 반올림돼 지금까지의 임베딩과 값이 달라진다("정확도는 절대
+#   깨지 않는다").
+# ★ .eval() 은 BatchNorm 을 폴딩한다 — 빼먹으면 GPU 결과가 틀어진다(기존 코드와 동일).
+_IR_BUILD_SRC = (
     "import os, sys\n"
-    "d = sys.argv[1]\n"
-    "os.makedirs(d, exist_ok=True)\n"
-    "os.environ['TORCH_HOME'] = d\n"
+    "out, tmp = sys.argv[1], sys.argv[2]\n"
+    "sys.path.append(tmp)\n"
+    "os.environ['TORCH_HOME'] = os.path.join(tmp, 'torch_home')\n"
+    "os.makedirs(out, exist_ok=True)\n"
+    "import torch, openvino as ov\n"
     "from torchvision import models as m\n"
-    "m.mobilenet_v3_small(weights=m.MobileNet_V3_Small_Weights.IMAGENET1K_V1)\n"
-    "m.resnet18(weights=m.ResNet18_Weights.IMAGENET1K_V1)\n"
-    "print('weights cached in', d)\n"
-)
+    "P = 256\n"
+    "def build(kind):\n"
+    "    if kind == 'resnet18':\n"
+    "        b = m.resnet18(weights=m.ResNet18_Weights.IMAGENET1K_V1)\n"
+    "        b.fc = torch.nn.Identity()\n"
+    "    else:\n"
+    "        b = m.mobilenet_v3_small("
+    "weights=m.MobileNet_V3_Small_Weights.IMAGENET1K_V1)\n"
+    "        b.classifier = torch.nn.Identity()\n"
+    "    b.eval()\n"
+    "    mod = ov.convert_model(b, example_input=torch.randn(1, 3, P, P))\n"
+    "    ov.save_model(mod, os.path.join(out, kind + '.xml'),"
+    " compress_to_fp16=False)\n"
+    "    print('IR saved:', kind)\n"
+    "for k in %r:\n"
+    "    build(k)\n"
+) % (IR_MODELS,)
+
+
+def ir_dir(out: Path) -> Path:
+    """동봉 IR 폴더 — ``app\\`` 바깥이라 자동 업데이트 교체에 쓸리지 않는다."""
+    return Path(out) / "runtime" / "ir"
+
+
+def missing_ir(out: Path) -> list:
+    """IR 이 빠진 백본 이름 목록.  비어 있으면 정상.
+
+    ``.xml`` 은 그래프, ``.bin`` 은 가중치다 — **둘 다** 있어야 읽힌다."""
+    d = ir_dir(out)
+    return [k for k in IR_MODELS
+            if not ((d / f"{k}.xml").is_file() and (d / f"{k}.bin").is_file())]
+
+
+# 빌드 전용 torch 를 푸는 임시 폴더 이름 — 산출물 안에 두되 **반드시 지운다**.
+# (배포 대상과 같은 드라이브라 preflight 의 여유 공간 검사가 그대로 유효하다.)
+IR_TMP_DIRNAME = ".irbuild"
+
+
+def _build_ir(out: Path, ppy: Path, run: Callable, log: Callable) -> int:
+    """백본 → OpenVINO IR 변환.  torch 는 임시 폴더에만 설치하고 끝나면 지운다.
+
+    실패하면 **빌드를 중단**한다.  IR 이 없으면 사용자 PC 에서 가속 경로가 통째로
+    죽는데(torch 가 배포본에 없으니 폴백도 없다), 그걸 조용히 넘기면 '느려졌다'는
+    현상으로만 드러나 원인을 찾기 어렵다."""
+    tmp = Path(out) / IR_TMP_DIRNAME
+    try:
+        log("       installing build-only torch (배포본에는 들어가지 않습니다) ...")
+        if run(_isolated(ppy, "-m", "pip", "install", "--target", tmp,
+                         *_BUILD_ONLY_REQS)) != 0:
+            log("[FAILED] 빌드 전용 torch 설치에 실패했습니다.")
+            log("         이 단계는 백본을 OpenVINO IR 로 바꾸기 위한 것이며, torch 는 "
+                "배포본에 포함되지 않습니다.")
+            log("         네트워크·프록시·디스크 여유 공간을 확인하고 다시 실행하세요.")
+            return 1
+
+        log("       converting backbones to OpenVINO IR ...")
+        if run(_isolated(ppy, "-c", _IR_BUILD_SRC, ir_dir(out), tmp)) != 0:
+            log("[FAILED] 백본 → IR 변환에 실패했습니다.")
+            log("         가중치를 받지 못했을 수 있습니다(download.pytorch.org 접속).")
+            return 1
+
+        # 변환기가 rc=0 을 냈어도 파일이 실제로 생겼는지는 별개다 — 디스크로 확인한다.
+        missing = missing_ir(out)
+        if missing:
+            log("[FAILED] IR 이 생성되지 않았습니다: " + ", ".join(missing))
+            log(f"         확인 위치: {ir_dir(out)}")
+            return 1
+        log(f"       IR OK ({', '.join(IR_MODELS)})")
+        return 0
+    finally:
+        # 수 백 MB 짜리 빌드 전용 트리 — 남기면 배포 zip 에 그대로 실려 나간다.
+        shutil.rmtree(tmp, ignore_errors=True)
