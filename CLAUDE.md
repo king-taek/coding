@@ -190,6 +190,12 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   벡터와 새 벡터를 코사인 비교**한다 — 느려지는 게 아니라 매칭이 틀린다.
 - torch 는 **빌드 전용**이다(`_BUILD_ONLY_REQS`). 임시 폴더(`.irbuild`)에만 설치하고 끝나면
   지운다. `requirements.txt` 에 다시 넣지 마라 — 배포 번들에서 가장 큰 덩어리다.
+- **OpenVINO 심볼은 위치가 버전마다 바뀐다 — `try: import ... except: 폴백` 을 그냥 두지 마라.**
+  `AsyncInferQueue` 를 `openvino.runtime` 에서만 찾던 코드가 그 네임스페이스 삭제(2026.2) 후
+  조용히 순차 추론으로 떨어져 한동안 느리게 돌았다(정확도는 같아 아무도 몰랐다). 규칙:
+  **최신 위치를 먼저 보고 옛 위치를 폴백**하며, 둘 다 없으면 **경고를 남긴다**
+  (`embedder_openvino._async_infer_queue_cls`). 실제로 비동기 경로를 태우는 회귀 가드:
+  `dev/tests/test_async_infer_queue.py`(torch 없이 `opset13` 으로 작은 모델을 만들어 돌린다).
 
 ## 매칭 / 좌표 검토 규칙
 - **정확도 우선**: 지금 운영 조합(고효율 모드 = GPU MobileNetV3 임베딩으로 후보 추림 +

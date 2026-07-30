@@ -265,6 +265,33 @@ def _udata_count(userdata) -> int:
     return len(userdata) if isinstance(userdata, tuple) else 1
 
 
+@lru_cache(maxsize=1)
+def _async_infer_queue_cls():
+    """``AsyncInferQueue`` 클래스를 찾아 돌려준다.  못 찾으면 None.
+
+    ★ 위치가 OpenVINO 버전마다 다르다.  옛 코드는 ``openvino.runtime`` 에서만 찾았는데
+      그 네임스페이스가 2026.2 에서 **삭제돼** import 가 조용히 실패했다 — 그러면 순차
+      추론으로 폴백해 GPU 파이프라인이 안 채워진다(정확도는 같고 **느려질 뿐**이라
+      아무도 눈치채지 못한다).  실제로 그 상태로 한동안 돌았다.
+
+    그래서 ① 최신 위치(top-level ``openvino``)를 먼저 보고 ② 옛 위치를 폴백으로 두며
+    ③ **둘 다 없으면 경고를 남긴다**(조용한 성능 저하를 다시 만들지 않기 위해).
+    ``lru_cache`` 로 한 번만 찾고 경고도 한 번만 나간다."""
+    import importlib
+    for mod in ("openvino", "openvino.runtime"):   # 최신 위치 → 옛 위치
+        try:
+            cls = getattr(importlib.import_module(mod), "AsyncInferQueue", None)
+            if cls is not None:
+                return cls
+        except Exception:
+            continue
+    import logging
+    logging.getLogger("aoi.openvino").warning(
+        "AsyncInferQueue 를 찾지 못했습니다 — 순차 추론으로 폴백합니다(결과는 같고 "
+        "느려집니다).  openvino 버전을 확인하세요.")
+    return None
+
+
 def _infer_raw(compiled, inputs, n_streams: int, progress_cb=None) -> Dict[Path, np.ndarray]:  # pragma: no cover - 환경 의존
     """``inputs=[(path, (1,3,H,W) ndarray), ...]`` → ``{path: raw_feat}``.
 
@@ -272,10 +299,7 @@ def _infer_raw(compiled, inputs, n_streams: int, progress_cb=None) -> Dict[Path,
     채운다.  큐를 못 만들면 InferRequest 단일 흐름으로 폴백.  실패 path 는 누락.
     ``progress_cb(n)`` 이 주어지면 추론 결과가 나올 때마다 처리 장수를 보고한다
     (느린 NAS 에서도 진행률이 per-image 로 즉시 올라가게 — #3)."""
-    try:
-        from openvino.runtime import AsyncInferQueue
-    except Exception:
-        AsyncInferQueue = None  # type: ignore
+    AsyncInferQueue = _async_infer_queue_cls()
     raw: Dict[Path, np.ndarray] = {}
     queue = None
     if AsyncInferQueue is not None:
