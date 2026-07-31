@@ -109,6 +109,159 @@ def test_viewer_does_not_paint_children_background(qapp, big_source):
         v.close()
 
 
+# ---------------------------------------------------------------------------
+# 3) 휠 확대 / 드래그 이동 — **마우스가 올라간 쪽만**
+# ---------------------------------------------------------------------------
+def test_zoom_applies_to_one_pane_only(qapp, big_source):
+    """사용자 결정: 확대는 패널마다 따로.  기준을 두고 후보만 파고들 수 있어야 한다."""
+    v = _viewer()
+    try:
+        v.show()
+        qapp.processEvents()
+        v._cand_pane.zoom_by(1.1)
+        assert v._cand_pane._zoom > 1.0, "후보가 확대되지 않았다"
+        assert v._ref_pane._zoom == 1.0, "반대쪽 사진까지 같이 확대됐다"
+    finally:
+        v.close()
+
+
+def test_zoom_is_clamped(qapp, big_source):
+    """유효 배율(맞춤×배수)이 상·하한 안에 머문다 — 사진이 사라지지 않게."""
+    v = _viewer()
+    try:
+        v.show()
+        qapp.processEvents()
+        pane = v._cand_pane
+        box = pane._target_box()
+        base = sbs.fit_scale(pane._pix.width(), pane._pix.height(),
+                             box.width(), box.height())
+        for _ in range(200):
+            pane.zoom_by(1.1)
+        assert base * pane._zoom <= sbs._SCALE_MAX + 1e-6
+        for _ in range(400):
+            pane.zoom_by(1 / 1.1)
+        assert base * pane._zoom >= sbs._SCALE_MIN - 1e-6
+    finally:
+        v.close()
+
+
+def test_drag_moves_the_zoomed_image(qapp, big_source):
+    from PyQt6.QtCore import QPoint, QPointF, Qt
+    from PyQt6.QtGui import QMouseEvent
+    v = _viewer()
+    try:
+        v.show()
+        qapp.processEvents()
+        pane = v._cand_pane
+        pane.zoom_by(1.1 ** 4)                 # 확대 상태에서만 이동이 의미 있다
+        start, end = QPointF(100.0, 100.0), QPointF(140.0, 130.0)
+        pane.mousePressEvent(QMouseEvent(
+            QMouseEvent.Type.MouseButtonPress, start, Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier))
+        pane.mouseMoveEvent(QMouseEvent(
+            QMouseEvent.Type.MouseMove, end, Qt.MouseButton.NoButton,
+            Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier))
+        assert (pane._off_x, pane._off_y) == (40, 30), \
+            f"드래그가 사진을 옮기지 않았다: {(pane._off_x, pane._off_y)}"
+        pane.mouseReleaseEvent(QMouseEvent(
+            QMouseEvent.Type.MouseButtonRelease, end, Qt.MouseButton.LeftButton,
+            Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier))
+        assert pane._last_drag is None
+        assert QPoint  # (import 사용 표시)
+    finally:
+        v.close()
+
+
+def test_zoom_survives_a_candidate_switch(qapp, big_source):
+    """←/→ 로 후보를 바꿔도 배율·위치가 유지된다 — 같은 자리를 같은 배율로 비교."""
+    cands = [(ImageItem("A", Path("/tmp/a.png"), "val"), "90%"),
+             (ImageItem("B", Path("/tmp/b.png"), "val"), "80%")]
+    v = sbs.SideBySideViewer(Path("/tmp/r.png"), cands, 0, ref_caption="기준")
+    try:
+        v.show()
+        qapp.processEvents()
+        v._cand_pane.zoom_by(1.1 ** 3)
+        zoom, off = v._cand_pane._zoom, (v._cand_pane._off_x, v._cand_pane._off_y)
+        v._next()
+        assert v._idx == 1
+        assert v._cand_pane._zoom == zoom, "후보를 바꾸니 배율이 풀렸다"
+        assert (v._cand_pane._off_x, v._cand_pane._off_y) == off
+    finally:
+        v.close()
+
+
+def test_returning_to_fit_clears_the_offset(qapp, big_source):
+    """맞춤(1.0)으로 돌아오면 이동도 함께 풀린다 — 사진이 화면 밖에 남지 않게."""
+    v = _viewer()
+    try:
+        v.show()
+        qapp.processEvents()
+        pane = v._cand_pane
+        pane.zoom_by(1.1)
+        pane._off_x, pane._off_y = 50, 50
+        pane.zoom_by(1 / 1.1)
+        assert pane._zoom == 1.0
+        assert (pane._off_x, pane._off_y) == (0, 0)
+        # 미확대 경로로 돌아왔으므로 두 패널은 다시 같은 박스를 공유한다.
+        assert v._ref_pane._box == v._cand_pane._box
+    finally:
+        v.close()
+
+
+# ---------------------------------------------------------------------------
+# 4) 시트로 띄우면 **창을 꽉 채운다**
+# ---------------------------------------------------------------------------
+def test_compare_viewer_fills_the_window_as_a_sheet(qapp, big_source):
+    """'크게 보기'가 작게 뜨면 안 된다 — 시트 여백(8px)만 남기고 창을 채운다.
+
+    ★ 실제로 났던 버그의 회귀 가드다: 이 뷰어가 ``setMaximumSize(주 모니터 크기)``
+    를 걸고 있었고, 창이 그보다 크면(다중 모니터에서 주 모니터가 더 작거나, 큰
+    모니터에 최대화한 경우) 시트 배치가 그 상한에 잘려 **창보다 작은 팝업**이 됐다.
+    여기서는 화면을 800×800 으로 보는 offscreen 에서 1000×720 창을 써 그 상황을
+    그대로 재현한다.
+
+    호출부 3곳이 모두 ``full_bleed=True`` 로 띄우므로 그 계약도 함께 못 박는다."""
+    from PyQt6.QtCore import QTimer
+    from PyQt6.QtWidgets import QWidget
+    from aoi_verification.app.ui.widgets import sheet_host
+
+    win = QWidget()
+    win.resize(1000, 720)
+    host = sheet_host.SheetHost(win)
+    win._sheets = host
+    win.show()
+    for _ in range(8):
+        qapp.processEvents()
+
+    cands = [(ImageItem("A", Path("/tmp/a.png"), "val"), "90%")]
+    viewer = sbs.SideBySideViewer(Path("/tmp/r.png"), cands, 0,
+                                  ref_caption="기준", parent=win)
+    got = {}
+
+    def check():
+        got["hosted"] = bool(host._stack)
+        got["geom"] = host._stack[-1]["root"].geometry() if host._stack else None
+        got["host"] = (host.width(), host.height())
+        viewer.accept()
+
+    QTimer.singleShot(40, check)
+    sheet_host.run(viewer, full_bleed=True)
+    try:
+        assert got["hosted"], "시트로 뜨지 않고 별도 창으로 폴백했다"
+        assert got["host"] == (1000, 720), \
+            f"호스트가 창을 덮지 않는다: {got['host']}"
+        g = got["geom"]
+        assert (g.x(), g.y()) == (8, 8), f"여백이 8px 이 아니다: {g}"
+        assert (g.width(), g.height()) == (1000 - 16, 720 - 16), \
+            f"창을 채우지 않는다: {g}"
+    finally:
+        host.close_all()
+        win.hide()
+        qapp.processEvents()
+        win.deleteLater()
+        qapp.processEvents()
+
+
 @pytest.mark.parametrize("mode", ["light", "dark"])
 def test_action_button_text_is_legible(qapp, big_source, mode):
     """액션 버튼(다음↔닫기 사이)의 글자/배경 대비가 WCAG AA(4.5:1) 이상."""
