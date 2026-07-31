@@ -1,8 +1,10 @@
 """KLA .001 정보 파일 파싱 → DefectCoord.
 
-변환식 (TB500 기준):
-    col = XINDEX + KLA_ZERO_X   (= XINDEX + 3)
-    row = YINDEX + KLA_ZERO_Y   (= YINDEX + 3)
+변환식 — die 인덱스 원점은 상수가 아니라 같은 파일의 ``SampleTestPlan`` 에서 읽는다
+(:mod:`~.wafer_geometry`)::
+
+    col = XINDEX + geom.zero_x   (TB500: XINDEX 범위 −3..3 → zero_x = 3)
+    row = YINDEX + geom.zero_y
     x   = round(XREL)
     y   = round(DiePitchY - YREL)
 
@@ -19,7 +21,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
-from .models import DefectCoord, KLA_ZERO_X, KLA_ZERO_Y
+from .models import DefectCoord
+from .wafer_geometry import kla_geometry
 
 __all__ = ["resolve", "load_folder", "load_folder_raw", "read_wafer_id"]
 
@@ -123,12 +126,17 @@ def load_folder_raw(folder: Path) -> dict[str, dict]:
 def load_folder(folder: Path) -> dict[str, DefectCoord]:
     """폴더의 KLA 정보 파일을 파싱해 {stem(소문자) → DefectCoord} 맵 반환.
 
-    변환식: col=XINDEX+KLA_ZERO_X, row=YINDEX+KLA_ZERO_Y, x=round(XREL),
-    y=round(DiePitchY−YREL).  원본 XREL/YREL 은 native_x/native_y 로 함께 보존한다."""
+    변환식: col=XINDEX+zero_x, row=YINDEX+zero_y, x=round(XREL),
+    y=round(DiePitchY−YREL).  원본 XREL/YREL 은 native_x/native_y 로 함께 보존한다.
+    die 인덱스 원점(zero_x/zero_y)은 같은 파일의 SampleTestPlan 에서 읽는다."""
     result: dict[str, DefectCoord] = {}
-    for stem, r in load_folder_raw(folder).items():
-        col = r["xindex"] + KLA_ZERO_X
-        row = r["yindex"] + KLA_ZERO_Y
+    raw = load_folder_raw(folder)
+    if not raw:
+        return result
+    geom = kla_geometry(folder)
+    for stem, r in raw.items():
+        col = r["xindex"] + geom.zero_x
+        row = r["yindex"] + geom.zero_y
         x = round(r["xrel"])
         y = round(r["die_pitch_y"] - r["yrel"])
         result[stem] = DefectCoord(

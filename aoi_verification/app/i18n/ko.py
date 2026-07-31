@@ -224,7 +224,8 @@ TOL_STEP_DOWN = "허용 오차 50 µm 줄이기"
 COORD_TOLERANCE_TOOLTIP = (
     "좌표 매칭 모드에서 두 defect 좌표의 최대 허용 거리 (µm).\n"
     "이 값 이하면 동일 defect 으로 간주합니다.\n"
-    "기본값 500 µm 은 TB500 한 die 크기 대비 약 1% 수준입니다."
+    "기본값 500 µm 은 한 die 크기가 40 mm 안팎일 때 약 1% 수준입니다.\n"
+    "die 가 작은 자재에서는 그에 맞춰 낮춰 주세요."
 )
 ENGINE_EFFICIENCY_CPU_ONLY = (
     "가속 장치(Intel GPU)가 없어 CPU만으로 고효율 모드를 실행합니다."

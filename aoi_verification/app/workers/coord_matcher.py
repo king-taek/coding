@@ -47,7 +47,15 @@ from .matcher import score_ref_classical
 
 # 좌표 차이가 이 값(좌표 단위, µm) 이하이면 '거의 정확히 일치'로 보고 후보 1장만
 # 보여준다. 초과 시 tol×3 이내 후보를 모두 차순위로 노출해 사용자가 직접 고른다.
+# die 가 작은 디바이스는 tol 을 20 µm 근처까지 낮춰 쓰게 되는데, 그때 이 값이 tol 을
+# 넘으면 **모든 매치가 '확정'** 이 돼 차순위가 사라진다 → tol 의 절반으로 묶는다.
+# tol=500(기본)에서는 20 그대로라 기존 동작이 바뀌지 않는다.
 CONFIDENT_DIST = 20.0
+
+
+def _confident_dist(tol: float) -> float:
+    """'거의 정확히 일치' 판정 반경 — 절대 20 µm 이되 tol 의 절반을 넘지 않는다."""
+    return min(CONFIDENT_DIST, tol * 0.5) if tol > 0 else CONFIDENT_DIST
 
 
 def _select_coord_candidates(
@@ -56,7 +64,7 @@ def _select_coord_candidates(
     """tol×3 이내 후보 ``(path, dist)`` 목록에서 검토 화면에 보여줄 후보를
     ``(path, score)`` 로 환산해 반환한다(거리 오름차순 = 점수 내림차순).
 
-    · 최소 거리 ≤ :data:`CONFIDENT_DIST`  → 가장 가까운 1장만 (확정에 가까움).
+    · 최소 거리 ≤ :func:`_confident_dist`  → 가장 가까운 1장만 (확정에 가까움).
     · 그 외                                → 전부 노출(사용자가 직접 고름).
 
     score 인코딩은 ``_RunnerUpTile`` 역산과 round-trip 되게 유지한다:
@@ -70,7 +78,7 @@ def _select_coord_candidates(
     ordered = sorted(within3, key=lambda x: x[1])
     if not ordered:
         return []
-    if ordered[0][1] <= CONFIDENT_DIST:
+    if ordered[0][1] <= _confident_dist(tol):
         ordered = ordered[:1]
     return [(p, score_of(d)) for p, d in ordered]
 

@@ -1,10 +1,12 @@
 """Camtek INI 파일(ColorImageGrabingInfo.ini) 파싱 → DefectCoord.
 
-변환식 (TB500 기준):
-    col = Col - 2
-    row = 6 - Row
-    x   = X - Col × 37247.7
-    y   = Y - Row × 44905.4
+변환식 — 상수가 아니라 폴더에서 읽은 :class:`~.wafer_geometry.CamtekGeometry` 를 쓴다
+(die 크기가 다른 디바이스 지원)::
+
+    col = Col - geom.col_origin
+    row = geom.row_total - Row
+    x   = X - Col × geom.pitch_x
+    y   = Y - Row × geom.pitch_y
 """
 
 from __future__ import annotations
@@ -14,10 +16,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
-from .models import (DefectCoord, CAMTEK_COL_OFFSET, CAMTEK_ROW_TOTAL,
-                     CAMTEK_PITCH_X, CAMTEK_PITCH_Y)
+from .models import DefectCoord
+from .wafer_geometry import CamtekGeometry, FALLBACK_CAMTEK, camtek_geometry
 
-__all__ = ["resolve", "load_folder", "load_abs_folder"]
+__all__ = ["resolve", "load_folder", "load_abs_folder", "load_raw_folder"]
 
 # INI 파일 이름 후보 — 대소문자 두 가지
 _INI_CANDIDATES = ("ColorImageGrabingInfo.ini", "ColorImageGrabinginfo.ini")
@@ -44,12 +46,13 @@ def load_folder(folder: Path) -> dict[str, DefectCoord]:
     if ini is None:
         return {}
     try:
-        return _parse_ini(ini)
+        # die 격자 기하는 폴더당 한 번만 구한다(자체 캐시).
+        return _parse_ini(ini, camtek_geometry(folder))
     except Exception:
         return {}
 
 
-def _parse_ini(path: Path) -> dict[str, DefectCoord]:
+def _parse_ini(path: Path, geom: CamtekGeometry) -> dict[str, DefectCoord]:
     text = path.read_text(encoding="utf-8", errors="replace")
 
     # 섹션 단위로 분리: [filename.jpeg] → 내용 반복
@@ -59,14 +62,30 @@ def _parse_ini(path: Path) -> dict[str, DefectCoord]:
     it = iter(parts[1:])
     for name, content in zip(it, it):
         stem = Path(name.strip()).stem   # "foo.jpeg" → "foo"
-        coord = _extract_coord(content)
+        coord = _extract_coord(content, geom)
         if coord is not None:
             result[stem.lower()] = coord
     return result
 
 
-def _extract_coord(content: str) -> Optional[DefectCoord]:
-    """INI 섹션 내용 → DefectCoord. 필수 키가 없으면 None."""
+def _extract_coord(content: str,
+                   geom: CamtekGeometry = FALLBACK_CAMTEK) -> Optional[DefectCoord]:
+    """INI 섹션 내용 → DefectCoord. 필수 키가 없으면 None.
+
+    ``geom`` 은 폴더에서 읽은 die 격자 기하 — 생략하면 TB500 폴백."""
+    raw = _extract_raw(content)
+    if raw is None:
+        return None
+    X, Y, col_i, row_i = raw
+    col = col_i - geom.col_origin
+    row = geom.row_total - row_i
+    x = X - col_i * geom.pitch_x
+    y = Y - row_i * geom.pitch_y
+    return DefectCoord(col=col, row=row, x=x, y=y, source="camtek_ini")
+
+
+def _extract_raw(content: str) -> Optional[tuple[float, float, int, int]]:
+    """INI 섹션 내용 → 원시 ``(X, Y, Col, Row)``. 필수 키가 없으면 None."""
     kv: dict[str, str] = {}
     for m in _KEY_PAT.finditer(content):
         kv[m.group(1).upper()] = m.group(2).strip()
@@ -85,14 +104,31 @@ def _extract_coord(content: str) -> Optional[DefectCoord]:
 
     if None in (X, Y, Col, Row):
         return None
+    return (X, Y, int(Col), int(Row))   # type: ignore[arg-type]
 
-    col_i = int(Col)   # type: ignore[arg-type]
-    row_i = int(Row)   # type: ignore[arg-type]
-    col = col_i - CAMTEK_COL_OFFSET
-    row = CAMTEK_ROW_TOTAL - row_i
-    x = X - col_i * CAMTEK_PITCH_X   # type: ignore[operator]
-    y = Y - row_i * CAMTEK_PITCH_Y   # type: ignore[operator]
-    return DefectCoord(col=col, row=row, x=x, y=y, source="camtek_ini")
+
+@lru_cache(maxsize=256)
+def load_raw_folder(folder: Path) -> dict[str, tuple[float, float, int, int]]:
+    """폴더의 INI → ``{stem(소문자) → (X, Y, Col, Row)}`` 원시값.
+
+    :func:`~.wafer_geometry.camtek_geometry` 가 읽은 die pitch 를 검산할 때 쓴다
+    (``Col == floor(X/pitch_x)``).  변환 상수를 안 쓰므로 geometry 와 순환하지 않는다.
+    """
+    ini = _find_ini(folder)
+    if ini is None:
+        return {}
+    try:
+        text = ini.read_text(encoding="utf-8", errors="replace")
+        parts = _SECTION_PAT.split(text)
+        result: dict[str, tuple[float, float, int, int]] = {}
+        it = iter(parts[1:])
+        for name, content in zip(it, it):
+            raw = _extract_raw(content)
+            if raw is not None:
+                result[Path(name.strip()).stem.lower()] = raw
+        return result
+    except Exception:
+        return {}
 
 
 def resolve(image_path: Path) -> Optional[DefectCoord]:
