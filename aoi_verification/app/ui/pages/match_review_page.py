@@ -25,6 +25,7 @@ from .. import theme
 from ...models.result import MatchResult, MissEntry
 from ...models.slot import ImageItem
 from ...utils import image_io
+from ..widgets.app_logo import build_logo_label
 from ..widgets.neon_button import NeonButton
 from ..widgets.no_wheel_slider import NoWheelSlider
 from ..widgets.zoom_window import FullscreenViewer
@@ -874,6 +875,10 @@ class MatchReviewPage(QWidget):
         outer = QVBoxLayout(host)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(6)
+
+        # 상단 로고 — 스크롤 **안**에 둔다.  행을 훑을 때 위로 밀려 올라가며
+        # 화면을 넓게 쓰게 한다(사용자 요청: 고정 칸이 아니게).
+        outer.addWidget(build_logo_label(host))
 
         # 매치 행 영역. ‘매치 없음’ 처리해도 이 자리에 그대로 두고 빨간
         # 테두리로만 표시한다 (#1).

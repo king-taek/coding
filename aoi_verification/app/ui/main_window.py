@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
-from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import (QApplication, QLabel, QMainWindow,
                               QMessageBox, QStackedWidget, QStatusBar,
                               QVBoxLayout, QWidget)
@@ -72,9 +71,6 @@ class MainWindow(QMainWindow):
     _MIN_W = 800
     _MIN_H = 600
 
-    # 상단 로고 표시 높이(논리 px).
-    _LOGO_H = 44
-
     # 자동 업데이트 — 백그라운드 스레드에서 메인 스레드로 결과를 넘기는 시그널.
     _update_found = pyqtSignal(dict)
     _update_applied = pyqtSignal(bool, dict)
@@ -99,19 +95,16 @@ class MainWindow(QMainWindow):
         self._save_geom_timer.setInterval(400)
         self._save_geom_timer.timeout.connect(self._persist_geometry)
 
-        # 상단 로고 + 페이지 스택.  로고는 스택 밖에 두어 어느 단계에서도 보인다.
+        # 페이지 스택만 둔다.  ★ 상단 로고는 **각 페이지가 자기 콘텐츠 맨 위에**
+        #   놓는다(widgets/app_logo.py) — 스택 밖에 고정해 두면 아래를 스크롤해도
+        #   따라오지 않고 그 칸이 영영 자리를 차지한다(사용자 지적).
         central = QWidget(self)
         col = QVBoxLayout(central)
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(0)
-        self._logo_label = QLabel(central)
-        self._logo_label.setProperty("role", "appLogo")
-        self._logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        col.addWidget(self._logo_label)
         self._stack = QStackedWidget(central)
         col.addWidget(self._stack, 1)
         self.setCentralWidget(central)
-        self._apply_header_logo()
 
         # 상태 바 — 개발자 크레딧 + 메모리 사용량(psutil 가용 시).
         # ★ 'Intel GPU 가속' 디바이스 표시와 'CPU n% · GPU 가동' 사용량 표시는 제거했다.
@@ -1664,7 +1657,8 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
         self._apply_statusbar_theme()
-        self._apply_header_logo()
+        # 로고는 페이지가 자기 안에 다시 만든다(app_logo.build_logo_label) —
+        # 여기서 따로 손댈 것이 없다.
         try:
             self._loading.raise_()           # 오버레이 z-order 유지
         except Exception:
@@ -1675,27 +1669,6 @@ class MainWindow(QMainWindow):
         """상태바 라벨 색을 테마 토큰으로 적용(페이지 밖 위젯)."""
         self._credit_label.setStyleSheet(
             f"color: {theme.MUTE}; padding: 0 8px; font-weight: 600;")
-
-    def _apply_header_logo(self) -> None:
-        """상단 로고(배경을 지운 ``logo_clear``) 를 그린다 — 페이지 밖 위젯이라
-        색 모드 전환 때 여기서 다시 만들어야 한다.
-
-        로고 마크가 거의 검정이라 어두운 화면에서는 그대로 두면 배경에 묻힌다.
-        알파는 건드리지 않고 RGB 만 반전해 밝은 마크로 뒤집는다."""
-        pm = QPixmap(str(paths.logo_path("logo_clear.png")))
-        if pm.isNull():
-            self._logo_label.hide()
-            return
-        if theme.COLOR_MODE == "dark":
-            img = pm.toImage().convertToFormat(QImage.Format.Format_ARGB32)
-            img.invertPixels(QImage.InvertMode.InvertRgb)
-            pm = QPixmap.fromImage(img)
-        dpr = self.devicePixelRatioF() or 1.0
-        pm = pm.scaledToHeight(int(self._LOGO_H * dpr),
-                               Qt.TransformationMode.SmoothTransformation)
-        pm.setDevicePixelRatio(dpr)
-        self._logo_label.setPixmap(pm)
-        self._logo_label.show()
 
     # ==================================================================
     def _page_order(self, w: QWidget) -> int:

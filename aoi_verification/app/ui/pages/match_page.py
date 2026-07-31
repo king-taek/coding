@@ -30,6 +30,7 @@ from ...workers.matcher import Candidate, MatcherWorker
 from ...workers import efficiency_matcher as _eff
 from ...workers import coord_matcher as _coord
 from ...utils.prefs import EngineMode
+from ..widgets.app_logo import build_logo_label
 from ..widgets.loading_overlay import LoadingOverlay
 from ..widgets.match_expand_view import MatchExpandView
 from ..widgets.neon_button import NeonButton
@@ -117,6 +118,10 @@ class MatchPage(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(10)
+
+        # 상단 로고 — 이 화면은 전체 스크롤이 없어 맨 위에 그대로 둔다
+        # (보이는 결과는 예전과 같다).
+        root.addWidget(build_logo_label(self))
 
         top = QHBoxLayout()
         self.btn_back_to_setup = NeonButton(i18n.KO.BTN_BACK_TO_SETUP, role="ghost")

@@ -16,6 +16,7 @@ from ... import i18n
 from .. import motion, theme
 from ...utils import prefs as _prefs
 from ...utils.prefs import AutomationLevel, EngineMode
+from ..widgets.app_logo import build_logo_label
 from ..widgets.collapsible_section import CollapsibleSection
 from ..widgets.neon_button import NeonButton
 from ..widgets.neon_card import NeonCard
@@ -113,6 +114,10 @@ class SetupPage(QWidget):
         m = theme.PROFILE.page_margin
         root.setContentsMargins(m, m, m, m)
         root.setSpacing(theme.PROFILE.section_gap)
+
+        # 상단 로고 — 스크롤 **안**에 둔다.  아래를 볼 때 위로 밀려 올라가며
+        # 화면을 넓게 쓰게 한다(사용자 요청: 고정 칸이 아니게).
+        root.addWidget(build_logo_label(host))
 
         self._build_body(root)
 

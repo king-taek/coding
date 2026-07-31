@@ -47,10 +47,11 @@ def test_specs_wire_icon():
 pytest.importorskip("PyQt6.QtWidgets")
 
 from PyQt6.QtGui import QPixmap                             # noqa: E402
-from PyQt6.QtWidgets import QApplication                    # noqa: E402
+from PyQt6.QtWidgets import QApplication, QLabel            # noqa: E402
 
 from aoi_verification.app.ui import main_window as mw       # noqa: E402
 from aoi_verification.app.ui import theme                   # noqa: E402
+from aoi_verification.app.ui.widgets import app_logo        # noqa: E402
 from aoi_verification.app.ui.widgets.startup_splash import (  # noqa: E402
     StartupSplash)
 
@@ -99,6 +100,10 @@ def window(qapp, monkeypatch, isolated_cache):
     # 시작 시 뜨는 업데이트 확인 모달을 막는다(test_dark_mode_transition 과 같은 이유).
     monkeypatch.setattr(mw.MainWindow, "_check_for_update_async", lambda self: None)
     monkeypatch.setattr(mw.MainWindow, "_maybe_offer_openvino", lambda self: None)
+    monkeypatch.setattr(mw.MainWindow, "_warmup_accel_async", lambda self: None)
+    # 백엔드 로딩은 테스트가 직접 굴린다 — 스레드 타이밍에 기대지 않는다.
+    monkeypatch.setattr(mw.MainWindow, "_start_backend_import_async",
+                        lambda self: None)
     theme.set_color_mode("light")
     w = mw.MainWindow()
     yield w
@@ -108,22 +113,66 @@ def window(qapp, monkeypatch, isolated_cache):
     theme.set_color_mode("light")
 
 
-def test_header_logo_sits_above_the_page_stack(window):
-    """로고는 스택 **밖**에 있어야 어느 단계(셋업·선별·매칭·검토·결과)에서도 보인다."""
+def _logos(widget) -> list:
+    return [lb for lb in widget.findChildren(QLabel)
+            if lb.property("role") == "appLogo"]
+
+
+def test_page_stack_owns_the_whole_central_area(window):
+    """로고는 더 이상 스택 밖 고정 칸이 아니다 — 중앙에는 스택뿐이다.
+
+    사용자 요청: "프로그램 상단에 로고 있는 칸은 스크롤 영향이 없는 고정 칸인데,
+    고정이 아니도록 바꾸고 싶음"."""
     layout = window.centralWidget().layout()
-    assert layout.indexOf(window._logo_label) == 0
-    assert layout.indexOf(window._stack) == 1
-    pm = window._logo_label.pixmap()
+    assert layout.count() == 1
+    assert layout.indexOf(window._stack) == 0
+    assert not _logos(window.centralWidget()) or all(
+        _is_inside(lb, window._stack) for lb in _logos(window.centralWidget())), \
+        "로고가 아직 스택 밖에 남아 있다"
+
+
+def _is_inside(widget, ancestor) -> bool:
+    node = widget.parentWidget()
+    for _ in range(40):
+        if node is None:
+            return False
+        if node is ancestor:
+            return True
+        node = node.parentWidget()
+    return False
+
+
+def test_setup_page_logo_scrolls_with_the_content(window):
+    """설정 화면은 전체 스크롤이 있다 — 로고가 그 **안**에 있어야 함께 밀린다."""
+    from PyQt6.QtWidgets import QScrollArea
+    page = window._setup_page
+    scroll = page.findChild(QScrollArea)
+    assert scroll is not None, "설정 화면의 스크롤 영역이 사라졌다"
+    inside = _logos(scroll.widget())
+    assert len(inside) == 1, "로고가 스크롤 host 안에 없다 — 스크롤해도 따라오지 않는다"
+    pm = inside[0].pixmap()
     assert not pm.isNull(), "logo_clear 를 못 읽었다"
-    assert pm.height() == int(window._LOGO_H * pm.devicePixelRatio())
+    assert pm.height() == int(app_logo.LOGO_H * pm.devicePixelRatio())
 
 
-def test_header_logo_inverts_for_dark_mode(window):
+def test_every_page_carries_the_logo(window, qapp):
+    """어느 단계에서도 로고가 보여야 한다 — 이제는 페이지마다 자기 것을 갖는다."""
+    window._on_backend_loaded()
+    qapp.processEvents()
+    pages = (window._setup_page, window._select_page, window._match_page,
+             window._match_review_page, window._result_page)
+    for page in pages:
+        assert len(_logos(page)) == 1, \
+            f"{type(page).__name__} 에 로고가 {len(_logos(page))}개다"
+
+
+def test_logo_inverts_for_dark_mode(qapp):
     """로고 마크가 거의 검정이라, 반전하지 않으면 어두운 화면에서 묻힌다."""
-    light = window._logo_label.pixmap().toImage()
+    theme.set_color_mode("light")
+    light = app_logo.build_logo_label().pixmap().toImage()
     theme.set_color_mode("dark")
-    window._apply_header_logo()
-    dark = window._logo_label.pixmap().toImage()
+    dark = app_logo.build_logo_label().pixmap().toImage()
+    theme.set_color_mode("light")
     assert dark != light
     # 알파는 보존한 채 RGB 만 뒤집혔는지 — 가장 진한 획이 밝아진다.
     mid = (light.width() // 2, light.height() // 2)
@@ -136,6 +185,9 @@ def test_build_pages_reports_progress_for_the_splash(qapp, monkeypatch,
     """창 생성은 메인 스레드를 막는다 — 페이지마다 진행을 보고해야 바가 움직인다."""
     monkeypatch.setattr(mw.MainWindow, "_check_for_update_async", lambda self: None)
     monkeypatch.setattr(mw.MainWindow, "_maybe_offer_openvino", lambda self: None)
+    monkeypatch.setattr(mw.MainWindow, "_warmup_accel_async", lambda self: None)
+    monkeypatch.setattr(mw.MainWindow, "_start_backend_import_async",
+                        lambda self: None)
     seen: list[tuple[int, int]] = []
     w = mw.MainWindow(progress=lambda done, total, message="": seen.append(
         (done, total)))

@@ -38,7 +38,8 @@ QMenu::item:selected {
     background-color: $accent_tint;
 }
 
-/* 상단 앱 로고 — 페이지 스택 밖의 머리글이라 모든 단계에서 같은 자리에 보인다. */
+/* 상단 앱 로고 — 각 페이지가 자기 콘텐츠 맨 위에 놓는다(widgets/app_logo.py).
+   스크롤이 있는 화면에서는 함께 밀려 올라간다(고정 칸이 아니다). */
 QLabel[role="appLogo"] {
     padding: 10px 0 6px 0;
     border-bottom: 1px solid $line2;
