@@ -4,13 +4,14 @@
 (die 크기가 다른 디바이스 지원)::
 
     col = Col - geom.col_origin
-    row = geom.row_total - Row
-    x   = X - Col × geom.pitch_x
-    y   = Y - Row × geom.pitch_y
+    row = geom.row_total - Row              # row_total = ceil(Diameter / pitch_y)
+    x   = floor(X - Col × geom.pitch_x)     # 장비 표기 = 버림 (반올림 아님 — 실측:
+    y   = floor(Y - Row × geom.pitch_y)     #   나머지 43180.809 를 장비는 43180 으로 표기)
 """
 
 from __future__ import annotations
 
+import math
 import re
 from functools import lru_cache
 from pathlib import Path
@@ -84,8 +85,10 @@ def _extract_coord(content: str,
     X, Y, col_i, row_i = raw
     col = col_i - geom.col_origin
     row = geom.row_total - row_i
-    x = X - col_i * geom.pitch_x
-    y = Y - row_i * geom.pitch_y
+    # 버림(floor) — 장비 화면·정답 데이터와 표기를 일치시킨다.  거리 계산 변화는
+    # ref/val 양쪽 동일 규칙으로 2 µm 미만이라 매칭 판정(20/500 µm)에 영향 없다.
+    x = float(math.floor(X - col_i * geom.pitch_x))
+    y = float(math.floor(Y - row_i * geom.pitch_y))
     return DefectCoord(col=col, row=row, x=x, y=y, source="camtek_ini")
 
 

@@ -200,6 +200,68 @@ class TestCamtekPitchFromFile:
 
 
 # ---------------------------------------------------------------------------
+# ★ 골든 테스트 — 사용자 도출 규칙의 실측 4개 사례 (장비 화면 정답)
+#
+#   col = floor(X/DieStep_X) − 2
+#   row = ceil(Diameter/DieStep_Y) − floor(Y/DieStep_Y)
+#   x/y = floor(나머지)
+#
+# 서로 다른 3개 device 에서 전부 성립함이 확인된 규칙이다.  특히 사례 1(pitch_y
+# 31831.4 → row 기준 10)은 row 기준을 상수 7 로 박았을 때 row=−2 가 나오던 —
+# 즉 "다른 디바이스에서 좌표 엉망" 을 재현하던 케이스다.
+# ---------------------------------------------------------------------------
+_GOLDEN = [
+    # (라벨, X, Y, step_x, step_y, 기대 col, row, die_x, die_y)
+    ("dev-A(row 기준 10)", 105192.662706218, 295526.990594525,
+     25022.9, 31831.4, 2, 1, 5101.0, 9044.0),
+    ("BNN-PIDS3 #1", 204859.860137703, 267707.809283319,
+     37247.7, 44905.4, 3, 2, 18621.0, 43180.0),
+    ("BNN-PIDS3 #2", 229010.636221118, 354559.829210790,
+     37247.7, 44905.4, 4, 0, 5524.0, 40222.0),
+    ("dev-B", 182032.376963739, 242041.055466280,
+     27474.5, 47835.5, 4, 2, 17185.0, 2863.0),
+]
+
+
+class TestGoldenEquipmentExamples:
+    @pytest.mark.parametrize("label,X,Y,sx,sy,col,row,dx,dy", _GOLDEN,
+                             ids=[g[0] for g in _GOLDEN])
+    def test_end_to_end(self, tmp_path, label, X, Y, sx, sy, col, row, dx, dy):
+        import math
+        ci, ri = math.floor(X / sx), math.floor(Y / sy)
+        folder = tmp_path / "slot"
+        folder.mkdir()
+        (folder / "Params_WaferInfo.ini").write_text(
+            f"[Geometry]\nDieStep_X={sx:.6f}\nDieStep_Y={sy:.6f}\n"
+            f"[Geometric]\nDiameter=300000.000000\n", encoding="utf-8")
+        (folder / "ColorImageGrabingInfo.ini").write_text(
+            f"[img.jpeg]\nX={X}\nY={Y}\nCol={ci}\nRow={ri}\n", encoding="utf-8")
+        c = camtek_ini.load_folder(folder)["img"]
+        assert (c.col, c.row, c.x, c.y) == (col, row, dx, dy)
+
+    def test_die_y_is_floored_not_rounded(self, tmp_path):
+        """★ 버림 가드 — 나머지 43180.809 는 43180 이다(반올림 43181 아님)."""
+        _, X, Y, sx, sy, *_ = _GOLDEN[1]
+        rem = Y - 5 * sy
+        assert rem == pytest.approx(43180.809, abs=1e-3)   # 반올림이면 43181 이 될 값
+        # 위 end_to_end 가 43180.0 을 단언하므로 이 사실이 회귀 가드로 작동한다.
+
+    def test_row_base_follows_diameter(self, tmp_path):
+        """row 기준이 ceil(Diameter/pitch_y) 로 **파일의 Diameter 를 따라간다**."""
+        folder = tmp_path / "slot"
+        folder.mkdir()
+        # pitch_y 31831.4, Diameter 200 mm → 기준 ceil(200000/31831.4) = 7 (300 mm 면 10)
+        (folder / "Params_WaferInfo.ini").write_text(
+            "[Geometry]\nDieStep_X=25022.900000\nDieStep_Y=31831.400000\n"
+            "[Geometric]\nDiameter=200000.000000\n", encoding="utf-8")
+        (folder / "ColorImageGrabingInfo.ini").write_text(
+            "[img.jpeg]\nX=105192.662706218\nY=95526.990594525\nCol=4\nRow=3\n",
+            encoding="utf-8")
+        c = camtek_ini.load_folder(folder)["img"]
+        assert c.row == 7 - 3                  # 300 mm 였다면 10 − 3 = 7
+
+
+# ---------------------------------------------------------------------------
 # KLA — DiePitch + SampleTestPlan
 # ---------------------------------------------------------------------------
 def _kla_header(plan: str | None = "  -3 -1\n  -1 -3\n  0 0\n  3 -1\n  3 2 ") -> str:
@@ -294,8 +356,7 @@ class TestRealSamples:
         c = camtek_ini.load_folder(
             _REAL / "Camtek" / "예시1")["272646.165679.c.1000203959.2"]
         assert (c.col, c.row) == (5, 4)
-        assert c.x == pytest.approx(11913.861, abs=1e-3)
-        assert c.y == pytest.approx(30959.654, abs=1e-3)
+        assert (c.x, c.y) == (11913.0, 30959.0)      # floor — 장비 표기는 버림
 
         k = kla_info.load_folder(_REAL / "KLA" / "예시1")["w6459076xyg1_2_0_23_2"]
         assert (k.col, k.row) == (5, 4)

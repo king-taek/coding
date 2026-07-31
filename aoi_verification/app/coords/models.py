@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 __all__ = ["DefectCoord", "DefectGeometry", "CAMTEK_PITCH_X", "CAMTEK_PITCH_Y",
-           "CAMTEK_COL_OFFSET", "CAMTEK_ROW_TOTAL",
+           "CAMTEK_COL_OFFSET", "DEFAULT_WAFER_DIAMETER",
            "KLA_ZERO_X", "KLA_ZERO_Y",
            "SURFACE_AREA_FACTOR", "SURFACE_LEN_FACTOR"]
 
@@ -45,26 +45,26 @@ class DefectGeometry:
     recipe_name: str = ""  # recipe 파일의 RecipeName(자재별). 없으면 빈 문자열(코드만 표시)
 
 
-# ── Camtek INI 변환 폴백 상수 (TB500 실측) ────────────────────────────────
-# col = INI_Col - CAMTEK_COL_OFFSET
-# row = CAMTEK_ROW_TOTAL - INI_Row
-# x   = X - INI_Col × CAMTEK_PITCH_X
-# y   = Y - INI_Row × CAMTEK_PITCH_Y
+# ── Camtek INI 변환 폴백 상수 ────────────────────────────────────────────
+# 변환식 (장비 화면 정답 4-device 실측으로 확정 — docs/디바이스_하드코딩_조사.md):
+#   col = INI_Col - CAMTEK_COL_OFFSET
+#   row = ceil(Diameter / pitch_y) - INI_Row      ← row 기준은 상수가 아니라 유도값
+#   x   = floor(X - INI_Col × pitch_x)            ← 장비 표기는 반올림이 아니라 버림
+#   y   = floor(Y - INI_Row × pitch_y)
 # pitch 는 평상시 Params_WaferInfo.ini `[Geometry] DieStep_X/Y` 에서 읽는다.
 CAMTEK_PITCH_X: float = 37247.7   # µm/die (TB500 폴백)
 CAMTEK_PITCH_Y: float = 44905.4   # µm/die (TB500 폴백)
-# ⚠ 아래 두 값은 die 격자 **맵 원점**이라 어떤 결과 파일에서도 읽을 수 없다.
-# 결과 파일에는 '검사한 die' 만 기록돼 맵 가장자리의 미사용 행/열을 알 방법이 없다.
-# ── 정답 기준: 장비(AOI Data Viewer) 웨이퍼 맵.  왼쪽 맨 아래가 (0,0), 오른쪽·위로 +1.
-# 실측 판독 1건: INI `Col=8, Row=5` → 장비 화면 `col=6, row=2`.
-#   col = Col − 2       → 8−2 = 6 ✓
-#   row = 7 − Row       → 7−5 = 2 ✓   (`Row−3` 은 Row 1..6 에서 음수가 나와 불가)
+# col 오프셋 2 는 pitch 가 전혀 다른 3개 device(25022.9/37247.7/27474.5)에서 모두 성립 —
+# 자재별 값이 아니라 고정 시스템 오프셋이라는 실측 증거가 있다(물리적 의미는 미확정).
+# 장비 판독: INI `Col=8, Row=5` → 화면 `col=6, row=2` (맵 왼쪽 맨 아래가 (0,0)).
 CAMTEK_COL_OFFSET: int = 2
-# ⚠ 이전 세션이 이 값을 7→6 으로 바꿨다가 전 구간 row 가 1 작아졌다.  그때 맞춘 대상은
-# '현물 웨이퍼 맵' 이 아니라 KLA 변환값이었고(Camtek 만 움직여 KLA 에 맞춤), KLA 쪽
-# 원점이 틀렸다는 걸 못 봤다.  근거는 위 장비 화면 직접 판독이다 — 되돌리지 말 것.
-# (맵 세로 눈금은 0..6 의 7칸이고 이 자재는 그중 1..6 만 쓴다 → "col 7개 / row 6개".)
-CAMTEK_ROW_TOTAL: int = 7
+# 웨이퍼 직경(µm) — row 기준 ceil(Diameter/pitch_y) 계산용.  평상시에는
+# Params_WaferInfo.ini `[Geometric] Diameter` 에서 읽고, 없을 때만 이 값을 쓴다
+# (실측 확인: 현재 모든 device 가 300 mm).
+DEFAULT_WAFER_DIAMETER: float = 300000.0
+# ⚠ row 기준을 상수(7)로 박았다가 pitch_y 가 다른 device(31831.4 → 기준 10)에서
+# row=−2 가 나온 적이 있다.  ceil(Diameter/pitch_y) 가 4개 실측 사례를 전부 설명한다
+# (TB500: ceil(300000/44905.4)=7 — 옛 상수와 동일해 회귀 없음).  상수로 되돌리지 말 것.
 
 # ── KLA .001 변환 폴백 상수 (TB500 실측) ──────────────────────────────────
 # col = XINDEX + KLA_ZERO_X

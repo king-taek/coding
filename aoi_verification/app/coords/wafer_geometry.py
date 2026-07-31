@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Optional
 
 from .models import (CAMTEK_COL_OFFSET, CAMTEK_PITCH_X, CAMTEK_PITCH_Y,
-                     CAMTEK_ROW_TOTAL, KLA_ZERO_X, KLA_ZERO_Y)
+                     DEFAULT_WAFER_DIAMETER, KLA_ZERO_X, KLA_ZERO_Y)
 
 __all__ = ["CamtekGeometry", "KlaGeometry", "camtek_geometry", "kla_geometry",
            "FALLBACK_CAMTEK", "FALLBACK_KLA"]
@@ -41,6 +41,11 @@ _LOG = logging.getLogger("aoi.coords")
 
 # 합리적 die pitch 범위(µm) — 엉뚱한 키를 읽었을 때 채택 방지.
 _MIN_PITCH, _MAX_PITCH = 100.0, 500000.0
+# 합리적 웨이퍼 직경 범위(µm) — 2인치(50 mm) ~ 450 mm.
+_MIN_DIAMETER, _MAX_DIAMETER = 50000.0, 450000.0
+
+# Diameter 를 담은 파일 후보 — pitch 후보와 같은 폴더 탐색 순서로 찾는다.
+_DIAMETER_SOURCES = ("Params_WaferInfo.ini", "ProductInfo.ini")
 
 # Camtek die pitch 후보 (상대경로, X키, Y키) 우선순위.
 # ⚠ **간격(step) 계열만** 넣는다.  die '크기' 는 pitch 가 아니다 — 스크라이브 street 이
@@ -66,7 +71,11 @@ class CamtekGeometry:
     """Camtek INI 좌표 변환에 필요한 die 격자 기하.
 
     ``col = INI_Col − col_origin``,  ``row = row_total − INI_Row``,
-    ``x = X − INI_Col × pitch_x``,  ``y = Y − INI_Row × pitch_y``
+    ``x = floor(X − INI_Col × pitch_x)``,  ``y = floor(Y − INI_Row × pitch_y)``
+
+    ``row_total`` 은 상수가 아니라 **``ceil(Diameter / pitch_y)`` 유도값**이다 —
+    장비 화면 정답이 있는 4개 사례(3개 device)에서 전부 성립함을 확인했다
+    (TB500 은 7, pitch_y 31831.4 인 device 는 10).
     """
     pitch_x: float
     pitch_y: float
@@ -88,10 +97,17 @@ class KlaGeometry:
     source: str
 
 
+def _row_total(diameter: float, pitch_y: float) -> int:
+    """row 번호 기준 = ``ceil(Diameter / pitch_y)`` (4-device 실측으로 확정된 유도식)."""
+    return math.ceil(diameter / pitch_y)
+
+
 # 데이터에서 못 읽을 때 쓰는 TB500 폴백 — 값은 models.py 가 보유한다.
 FALLBACK_CAMTEK = CamtekGeometry(
     pitch_x=CAMTEK_PITCH_X, pitch_y=CAMTEK_PITCH_Y,
-    col_origin=CAMTEK_COL_OFFSET, row_total=CAMTEK_ROW_TOTAL, source="fallback",
+    col_origin=CAMTEK_COL_OFFSET,
+    row_total=_row_total(DEFAULT_WAFER_DIAMETER, CAMTEK_PITCH_Y),   # = 7
+    source="fallback",
 )
 FALLBACK_KLA = KlaGeometry(
     pitch_x=CAMTEK_PITCH_X, pitch_y=CAMTEK_PITCH_Y,
@@ -99,8 +115,9 @@ FALLBACK_KLA = KlaGeometry(
 )
 
 
-def _read_key(path: Path, key: str) -> Optional[float]:
-    """INI 에서 ``key=값`` 을 읽어 float 로. 없거나 범위 밖이면 None."""
+def _read_key(path: Path, key: str, lo: float = _MIN_PITCH,
+              hi: float = _MAX_PITCH) -> Optional[float]:
+    """INI 에서 ``key=값`` 을 읽어 float 로. 없거나 [lo, hi] 밖이면 None."""
     try:
         txt = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
@@ -112,7 +129,7 @@ def _read_key(path: Path, key: str) -> Optional[float]:
         v = float(m.group(1))
     except ValueError:
         return None
-    return v if _MIN_PITCH <= v <= _MAX_PITCH else None
+    return v if lo <= v <= hi else None
 
 
 def _search_dirs(folder: Path) -> list[Path]:
@@ -126,6 +143,19 @@ def _search_dirs(folder: Path) -> list[Path]:
         dirs.append(parent)
         cur = parent
     return dirs
+
+
+def _read_diameter(folder: Path) -> float:
+    """웨이퍼 직경(µm) — ``[Geometric] Diameter``.  못 찾으면 기본 300 mm.
+
+    row 번호 기준 ``ceil(Diameter / pitch_y)`` 계산에 쓴다.  실측 확인상 현재 모든
+    device 가 300 mm 라 기본값이 안전하지만, 파일 값이 있으면 그쪽을 쓴다."""
+    for base in _search_dirs(folder):
+        for rel in _DIAMETER_SOURCES:
+            v = _read_key(base / rel, "Diameter", _MIN_DIAMETER, _MAX_DIAMETER)
+            if v is not None:
+                return v
+    return DEFAULT_WAFER_DIAMETER
 
 
 def _pitch_candidates(folder: Path):
@@ -182,10 +212,11 @@ def camtek_geometry(folder: Path) -> Optional[CamtekGeometry]:
                 continue
             if src == "models.py 상수" and not meaningful:
                 continue      # 검산이 pitch 를 제약하지 못했다 — 상수를 추정으로 쓰지 않는다
-            # col_origin·row_total 은 맵 원점이라 어떤 결과 파일에도 없다(models.py 참조).
+            # row 기준은 유도값(ceil(Diameter/pitch_y)) — col 오프셋만 상수로 남는다.
             return CamtekGeometry(pitch_x=px, pitch_y=py,
                                   col_origin=CAMTEK_COL_OFFSET,
-                                  row_total=CAMTEK_ROW_TOTAL, source=src)
+                                  row_total=_row_total(_read_diameter(folder), py),
+                                  source=src)
         _LOG.warning(
             "die pitch 를 확정하지 못해 이 폴더의 좌표를 만들지 않습니다 "
             "(Params_WaferInfo.ini `DieStep_X/Y` 또는 ProductInfo.ini `XDieIndex/YDieIndex` "

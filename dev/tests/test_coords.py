@@ -45,8 +45,8 @@ class TestCamtekIni:
         assert c is not None
         assert c.col == 4
         assert c.row == 5
-        assert _approx(c.x, 30229.803307344)
-        assert _approx(c.y, 1987.9938704543)
+        assert c.x == 30229.0    # floor — 장비 표기는 버림
+        assert c.y == 1987.0
         assert c.source == "camtek_ini"
 
     def test_example2(self):
@@ -57,8 +57,8 @@ class TestCamtekIni:
         assert c is not None
         assert c.col == 5
         assert c.row == 2
-        assert _approx(c.x, 25103.669021826)
-        assert _approx(c.y, 17404.965714178)
+        assert c.x == 25103.0
+        assert c.y == 17404.0
 
     def test_example3(self):
         """경계 예시: Col=4 Row=6 → col=2 row=1
@@ -71,8 +71,8 @@ class TestCamtekIni:
         assert c is not None
         assert c.col == 2
         assert c.row == 1
-        assert _approx(c.x, 34433.206310378)
-        assert _approx(c.y, 337589.125854985 - 6 * 44905.4)
+        assert c.x == 34433.0
+        assert c.y == float(int(337589.125854985 - 6 * 44905.4))   # floor
 
     def test_example4(self):
         """보고서 예시 4: Col=4 Row=3 → col=2 row=4"""
@@ -82,8 +82,8 @@ class TestCamtekIni:
         assert c is not None
         assert c.col == 2
         assert c.row == 4
-        assert _approx(c.x, 33596.739096461)
-        assert _approx(c.y, 14877.322482771)
+        assert c.x == 33596.0
+        assert c.y == 14877.0
 
     def test_example5(self):
         """보고서 예시 5: Col=4 Row=2 → col=2 row=5"""
@@ -93,8 +93,8 @@ class TestCamtekIni:
         assert c is not None
         assert c.col == 2
         assert c.row == 5
-        assert _approx(c.x, 31386.776920526)
-        assert _approx(c.y, 11166.01821231)
+        assert c.x == 31386.0
+        assert c.y == 11166.0
 
     def test_faultx_fallback(self):
         """X/Y 없으면 FaultX/FaultY 사용."""
