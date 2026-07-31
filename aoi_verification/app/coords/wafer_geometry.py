@@ -115,14 +115,37 @@ FALLBACK_KLA = KlaGeometry(
 )
 
 
+def read_ini_text(path: Path) -> Optional[str]:
+    """INI 텍스트를 읽는다.  **UTF-16 도 지원**한다(장비가 그렇게 쓰는 경우가 있다).
+
+    ``errors="replace"`` 로 UTF-8 만 시도하면 UTF-16 파일이 예외 없이 깨진 문자열이 되어
+    키를 하나도 못 찾는다 — '파일은 있는데 값이 없다' 로 조용히 실패하던 경로다.
+    BOM 으로 UTF-16 을 판별하고, 아니면 UTF-8(BOM 허용) → 그래도 안 되면 관대하게 읽는다.
+    """
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return None
+    if data[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        try:
+            return data.decode("utf-16")
+        except ValueError:
+            return None
+    try:
+        return data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return data.decode("utf-8", errors="replace")
+
+
 def _read_key(path: Path, key: str, lo: float = _MIN_PITCH,
               hi: float = _MAX_PITCH) -> Optional[float]:
     """INI 에서 ``key=값`` 을 읽어 float 로. 없거나 [lo, hi] 밖이면 None."""
-    try:
-        txt = path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
+    txt = read_ini_text(path)
+    if txt is None:
         return None
-    m = re.search(r"(?im)^\s*" + re.escape(key) + r"\s*=\s*([-\d.eE]+)", txt)
+    # 값 뒤에 다른 문자가 붙으면(예: 소수점이 ',' 인 로캘) **잘라 읽지 않고 거부**한다.
+    # `37247,700000` 을 37247.0 으로 조용히 받아들이면 검산을 통과해 버릴 수 있다.
+    m = re.search(r"(?im)^\s*" + re.escape(key) + r"\s*=\s*([-\d.eE]+)\s*$", txt)
     if not m:
         return None
     try:

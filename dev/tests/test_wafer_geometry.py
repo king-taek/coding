@@ -292,6 +292,33 @@ class TestGoldenEquipmentExamples:
 
 
 # ---------------------------------------------------------------------------
+# INI 읽기 견고성 — '파일은 있는데 값이 없다' 로 조용히 실패하던 경로
+# ---------------------------------------------------------------------------
+class TestIniReading:
+    _BODY = "[Geometry]\r\nDieStep_X=37247.700000\r\nDieStep_Y=44905.400000\r\n"
+
+    @pytest.mark.parametrize("label,encoded", [
+        ("utf-8", _BODY.encode("utf-8")),
+        ("utf-8-bom", _BODY.encode("utf-8-sig")),
+        ("utf-16-bom", _BODY.encode("utf-16")),      # ★ 장비가 이렇게 쓰는 경우가 있다
+        ("cp949", _BODY.encode("cp949")),
+    ])
+    def test_encodings(self, tmp_path, label, encoded):
+        """UTF-16 도 읽어야 한다 — UTF-8 로만 읽으면 예외 없이 키를 못 찾는다."""
+        p = tmp_path / "Params_WaferInfo.ini"
+        p.write_bytes(encoded)
+        assert wg._read_key(p, "DieStep_X") == 37247.7
+
+    def test_comma_decimal_is_rejected_not_truncated(self, tmp_path):
+        """★ `37247,700000`(쉼표 소수점)을 37247.0 으로 조용히 받지 않는다.
+
+        잘라 읽으면 검산을 통과해 버려 **틀린 pitch 로 좌표를 만들** 수 있다."""
+        p = tmp_path / "Params_WaferInfo.ini"
+        p.write_text("[Geometry]\nDieStep_X=37247,700000\n", encoding="utf-8")
+        assert wg._read_key(p, "DieStep_X") is None
+
+
+# ---------------------------------------------------------------------------
 # ★ die pitch 를 몰라도 매칭은 된다 — 절대 wafer 좌표 폴백
 #
 # ColorImageGrabingInfo.ini 의 X/Y 만으로 매칭이 성립한다.  die 로 쪼개는 건
