@@ -115,6 +115,22 @@ def coord_measures(image_path: Path) -> list[Measure]:
         c = _resolve_coord(Path(image_path))
         if c is None:
             return []
+        if c.source == "camtek_abs":
+            # die pitch 를 몰라 die 로 못 쪼갠 경우 — 있는 사실만 적는다.
+            # col 은 정확하지만 row 기준과 die-내부 좌표는 알 수 없으므로 꾸며내지 않고,
+            # 대신 **절대 wafer 좌표**를 준다(그 자체로 위치 식별에 쓸 수 있다).
+            return [
+                Measure(
+                    label=i18n.KO.DEFECT_COL_ONLY_LABEL,
+                    value=str(c.col),
+                    line=i18n.KO.DEFECT_COL_ONLY_FMT.format(col=c.col),
+                ),
+                Measure(
+                    label=i18n.KO.DEFECT_ABS_XY_LABEL,
+                    value=i18n.KO.DEFECT_XY_VALUE_FMT.format(x=c.x, y=c.y),
+                    line=i18n.KO.DEFECT_ABS_XY_FMT.format(x=c.x, y=c.y),
+                ),
+            ]
         out = [
             Measure(
                 label=i18n.KO.DEFECT_COLROW_LABEL,

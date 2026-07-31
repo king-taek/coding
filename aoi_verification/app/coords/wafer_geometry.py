@@ -235,9 +235,9 @@ def camtek_geometry(folder: Path) -> Optional[CamtekGeometry]:
         #   안 그러면 KLA 폴더마다 무의미한 경고가 쌓인다.
         if has_camtek_entries(folder):
             _LOG.warning(
-                "die pitch 를 확정하지 못해 이 폴더의 좌표를 만들지 않습니다 "
-                "(Params_WaferInfo.ini `DieStep_X/Y` 또는 ProductInfo.ini "
-                "`XDieIndex/YDieIndex` 가 필요합니다): %s", folder)
+                "die pitch 를 확정하지 못해 **절대 wafer 좌표**로 매칭합니다(매칭은 정상). "
+                "die 내부 좌표·row 표기를 보려면 Params_WaferInfo.ini `DieStep_X/Y` 또는 "
+                "ProductInfo.ini `XDieIndex/YDieIndex` 가 필요합니다: %s", folder)
         return None
     except Exception:
         return None

@@ -233,10 +233,11 @@ DIE_SIZE_DETECTED_FMT = "감지된 die: {x:,.0f} × {y:,.0f} µm  ({src})"
 DIE_SIZE_SRC_KLA = "KLA .001 DiePitch"
 # ⚠ **Camtek INI 좌표가 있는데 die pitch 를 못 정한 경우에만** 띄운다.
 # KLA 슬롯·LIVE 파일명 슬롯은 die 크기 없이도 좌표가 나오므로 경고 대상이 아니다.
+# 매칭 자체는 절대 wafer 좌표로 정상 동작한다 — 못 하는 건 die 단위 표기뿐이다.
 DIE_SIZE_NOT_FOUND = (
-    "die 크기를 찾지 못했습니다 — 좌표 매칭을 쓸 수 없습니다.\n"
-    "결과 폴더에 Params_WaferInfo.ini(DieStep_X/Y) 또는 "
-    "ProductInfo.ini(XDieIndex/YDieIndex) 가 있어야 합니다."
+    "die 크기를 찾지 못해 **절대 wafer 좌표**로 매칭합니다 (매칭은 정상).\n"
+    "die 내부 좌표·row 표기를 보려면 결과 폴더에 "
+    "Params_WaferInfo.ini(DieStep_X/Y) 또는 ProductInfo.ini(XDieIndex/YDieIndex) 가 필요합니다."
 )
 # tol 이 die 폭 대비 이 비율을 넘으면 경고한다(die 4 mm 자재에서 500 µm = 12%).
 DIE_TOL_RATIO_WARN = 0.02
@@ -574,6 +575,12 @@ DEFECT_XY_LABEL = "x / y"
 DEFECT_XY_VALUE_FMT = "{x:.0f} / {y:.0f} ㎛"
 DEFECT_XY_FMT = "x {x:.0f} / y {y:.0f} ㎛"
 DEFECT_KLA_NATIVE_LABEL = "KLA원본 x / y"
+# die pitch 를 못 찾아 die 로 쪼개지 못한 경우(source="camtek_abs") — 있는 사실만 적는다.
+# col 은 pitch 없이도 정확하지만 row 기준·die 내부 좌표는 알 수 없으므로 꾸며내지 않는다.
+DEFECT_COL_ONLY_LABEL = "col"
+DEFECT_COL_ONLY_FMT = "col {col} (row 미상 — die 크기 정보 없음)"
+DEFECT_ABS_XY_LABEL = "wafer x / y"
+DEFECT_ABS_XY_FMT = "wafer x {x:.0f} / y {y:.0f} ㎛"
 
 # 화면 전용 라벨 — 파일 하나에서만 의미 있는 항목(엑셀에는 나가지 않는다).
 IMAGE_INFO_GROUP_FILE = "파일"

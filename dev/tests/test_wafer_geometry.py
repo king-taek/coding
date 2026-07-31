@@ -113,9 +113,12 @@ class TestCamtekPitchFromFile:
         folder = _make_camtek_folder(
             tmp_path, 10000.0, 12000.0,
             [("a", 34500.0, 26400.0, 3, 2)], size_only=True)
-        # DieSize 만 있는 INI → pitch 후보 없음.  상수 후보도 검산에 걸려 좌표를 못 만든다.
+        # DieSize 만 있는 INI → pitch 후보 없음.  상수 후보도 검산에 걸린다.
         assert wg.camtek_geometry(folder) is None
-        assert camtek_ini.load_folder(folder) == {}
+        # die 로 쪼개지는 못하지만 절대좌표 폴백으로 **매칭은 된다**.
+        c = camtek_ini.load_folder(folder)["a"]
+        assert c.source == "camtek_abs"
+        assert (c.x, c.y) == (34500.0, 26400.0)      # 절대값 그대로(die-local 아님)
 
     def test_product_info_is_second_candidate(self, tmp_path):
         """Params_WaferInfo.ini 가 없으면 ProductInfo.ini 의 `XDieIndex/YDieIndex`."""
@@ -161,11 +164,14 @@ class TestCamtekPitchFromFile:
 
         예전엔 여기서 TB500 pitch 로 폴백해 x 가 −1,652,266 µm 같은 값이 됐다."""
         # PGEE48 격자(4160.9 × 5294.0), pitch 를 알려주는 파일이 하나도 없다.
-        folder = _make_bare_folder(
-            tmp_path / "pgee",
-            [("a", 50 * 4160.9 + 2000.0, 20 * 5294.0 + 2000.0, 50, 20)])
+        X, Y = 50 * 4160.9 + 2000.0, 20 * 5294.0 + 2000.0
+        folder = _make_bare_folder(tmp_path / "pgee", [("a", X, Y, 50, 20)])
         assert wg.camtek_geometry(folder) is None
-        assert camtek_ini.load_folder(folder) == {}
+        c = camtek_ini.load_folder(folder)["a"]
+        # TB500 pitch 로 계산한 쓰레기값이 아니라 **절대좌표**가 나온다.
+        assert c.source == "camtek_abs"
+        assert (c.x, c.y) == (float(int(X)), float(int(Y)))
+        assert c.x > 0 and c.y > 0                   # 옛 폴백이면 −1,652,266 같은 값이었다
 
     def test_out_of_range_pitch_rejected(self, tmp_path):
         """비상식적인 값(µm 아님)은 후보로 읽지 않는다."""
@@ -283,6 +289,70 @@ class TestGoldenEquipmentExamples:
             encoding="utf-8")
         c = camtek_ini.load_folder(folder)["img"]
         assert c.row == 7 - 3                  # 300 mm 였다면 10 − 3 = 7
+
+
+# ---------------------------------------------------------------------------
+# ★ die pitch 를 몰라도 매칭은 된다 — 절대 wafer 좌표 폴백
+#
+# ColorImageGrabingInfo.ini 의 X/Y 만으로 매칭이 성립한다.  die 로 쪼개는 건
+# (a) 화면·엑셀의 die-내부 좌표 표기와 (b) KLA 교차 매칭에만 필요하다.
+# ---------------------------------------------------------------------------
+class TestAbsoluteFallback:
+    def test_matching_works_without_die_pitch(self, tmp_path):
+        """같은 결함은 매칭되고, 옆 die 의 같은 상대위치 결함은 기각된다."""
+        from aoi_verification.app.workers import coord_matcher as cm
+
+        X, Y, P = 101023.784185837, 157436.626491902, 37247.7
+        folder = _make_bare_folder(tmp_path / "s", [
+            ("a", X, Y, 4, 4),
+            ("b", X + 0.2, Y + 0.1, 4, 4),      # 같은 결함(재스캔)
+            ("c", X + P, Y, 5, 4),              # 옆 die 의 **같은 상대위치**
+        ])
+        m = camtek_ini.load_folder(folder)
+        assert {v.source for v in m.values()} == {"camtek_abs"}
+
+        vmap = {}
+        for stem in ("b", "c"):
+            d = m[stem]
+            vmap.setdefault((d.col, d.row), []).append((Path(stem), d.x, d.y))
+        a = m["a"]
+        got = cm._match_neighbors(a.x, a.y, a.col, a.row, vmap, 500.0)
+        assert [p.name for p, _ in got] == ["b"]
+
+    def test_absolute_is_stricter_than_die_local(self, tmp_path):
+        """★ 절대좌표는 die-내부 비교보다 **엄격**하다.
+
+        die-내부로 재면 인접 die 의 같은 상대위치 결함이 거리 0 으로 보여 오매칭했다.
+        절대좌표로 재면 정확히 1 pitch 만큼 떨어져 있어 기각된다."""
+        from aoi_verification.app.workers import coord_matcher as cm
+
+        X, Y, P = 101023.8, 157436.6, 37247.7
+        folder = _make_bare_folder(tmp_path / "s",
+                                   [("a", X, Y, 4, 4), ("c", X + P, Y, 5, 4)])
+        m = camtek_ini.load_folder(folder)
+        a, c = m["a"], m["c"]
+        vmap = {(c.col, c.row): [(Path("c"), c.x, c.y)]}
+        assert cm._match_neighbors(a.x, a.y, a.col, a.row, vmap, 500.0) == []
+
+    def test_col_is_exact_row_is_not_faked(self, tmp_path):
+        """col 은 pitch 없이도 정확하다.  row 는 기준을 모르므로 꾸며내지 않는다."""
+        folder = _make_bare_folder(tmp_path / "s", [("a", 101023.8, 157436.6, 4, 4)])
+        c = camtek_ini.load_folder(folder)["a"]
+        assert c.col == 4 - 2          # Col − CAMTEK_COL_OFFSET, pitch 불필요
+        assert c.row < 0               # 음수 = 장비 화면 값이 아님이 드러난다(버킷 전용)
+
+    def test_display_shows_absolute_and_admits_unknown_row(self, tmp_path):
+        """표시 문구는 있는 사실만 적는다 — col + 절대 wafer 좌표, row 는 '미상'."""
+        from aoi_verification.app import i18n
+        from aoi_verification.app.coords import single_info
+
+        folder = _make_bare_folder(tmp_path / "s", [("a", 101023.8, 157436.6, 4, 4)])
+        (folder / "a.jpeg").write_bytes(b"")
+        lines = single_info.coord_lines(folder / "a.jpeg")
+        assert lines[0] == i18n.KO.DEFECT_COL_ONLY_FMT.format(col=2)
+        assert lines[1] == i18n.KO.DEFECT_ABS_XY_FMT.format(x=101023.0, y=157436.0)
+        # die-내부 좌표인 척하지 않는다
+        assert not any(l.startswith("x ") for l in lines)
 
 
 # ---------------------------------------------------------------------------
