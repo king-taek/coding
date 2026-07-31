@@ -133,8 +133,10 @@ class MainWindow(QMainWindow):
         # 어긋나고, 최악에는 잠금이 풀리지 않는다.
         self._appearance_busy = False
         # 타이머는 psutil 유무와 무관하게 구동 — 콜백이 안전 가드한다.
+        # ★ 여기서 첫 갱신을 직접 부르지 않는다.  콜백이 `import psutil` 을 하는데,
+        #   그것이 창이 뜨기 전 시작 경로 위에 얹힌다(사용자 체감: 시작이 느리다).
+        #   2초 뒤 첫 틱이 같은 일을 하므로 표시 내용은 달라지지 않는다.
         self._mem_timer.start()
-        self._update_memory_label()
 
         # 페이지 — 생성+스택추가+시그널 배선을 _build_pages 단일 출처로 (재구축용).
         self._build_pages(progress)

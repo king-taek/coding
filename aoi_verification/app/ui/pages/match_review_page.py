@@ -104,12 +104,13 @@ class _LazyThumb(QLabel):
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         # 프레임을 패널보다 밝은 thumb_frame 으로 — 어두운 다이가 어두운 패널에
         # 묻히지 않게 경계를 분명히(C1). 차순위는 점선으로 '후보' 성격 유지.
-        if subtle:
-            self.setStyleSheet(
-                f"border: 1px dashed {theme.THUMB_FRAME}; border-radius: 6px;")
-        else:
-            self.setStyleSheet(
-                f"border: 1px solid {theme.THUMB_FRAME}; border-radius: 6px;")
+        # ★ 인스턴스별 setStyleSheet 를 쓰지 않는다(#렉).  한 화면에 썸네일이 수백 개
+        #   생기는데, 위젯마다 자기 스타일시트를 가지면 그만큼 규칙 집합이 따로 만들어져
+        #   폴리시·재계산 비용이 개수에 비례해 커진다.  role 속성 + 전역 규칙 한 줄이면
+        #   같은 그림을 그리면서 비용은 1회다.  덤으로 색이 생성 시점에 박히지 않아
+        #   다크 모드 전환에도 자동으로 따라간다.
+        self.setProperty("role", "thumbFrame")
+        self.setProperty("subtle", "true" if subtle else "false")
         # placeholder — 첫 paint 후 실제 이미지로 교체(패널보다 살짝 밝은 elev 바탕).
         ph = QPixmap(self._size, self._size)
         ph.fill(QColor(theme.ELEV))

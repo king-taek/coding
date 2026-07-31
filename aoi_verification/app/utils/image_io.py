@@ -224,9 +224,21 @@ def load_thumb_qpixmap(path: "Path", size: int, *,
     ``get_mid_path`` 를 사용.
 
     GUI 스레드에서만 호출해야 한다 (QPixmap 은 main-thread only).
+
+    ★ 결과는 :func:`cached_tile_pixmap` 과 **같은 LRU** 에 담는다(키 앞에 종류
+    토큰을 붙여 서로 섞이지 않는다).  매치 검토는 행마다 이 함수를 부르고 크기
+    슬라이더를 움직일 때마다 다시 부르는데, 캐시가 없던 시절엔 그때마다 디스크
+    재읽기 + SmoothTransformation 이 GUI 스레드에서 반복돼 스크롤이 끊겼다.
+    세션 전환의 ``clear_tile_cache`` 가 이것도 함께 비운다(staleness 방지).
     """
     from PyQt6.QtCore import Qt
     from PyQt6.QtGui import QColor, QPixmap
+
+    key = ("thumbq", str(path), int(size), str(kind))
+    cache_obj = _get_tile_cache()
+    cached = cache_obj.get(key)
+    if cached is not None:
+        return cached
 
     fallback = QPixmap(size, size)
     fallback.fill(QColor(20, 28, 40))
@@ -235,14 +247,16 @@ def load_thumb_qpixmap(path: "Path", size: int, *,
         tp = cache_path_fn(Path(path))
         pix = QPixmap(str(tp))
         if pix.isNull():
-            return fallback
-        return pix.scaled(
+            return fallback          # 실패는 캐시하지 않는다 — 다음에 다시 시도
+        scaled = pix.scaled(
             size, size,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
     except Exception:
         return fallback
+    cache_obj.put(key, scaled)
+    return scaled
 
 
 # ---------------------------------------------------------------------------

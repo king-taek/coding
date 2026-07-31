@@ -7,15 +7,35 @@
      `위젯:상태::서브컨트롤` 로 쓰면 무시되거나 상태와 무관하게 항상 적용된다
      (둘 다 실제로 버그를 냈다 — 아래 QSlider·QCheckBox 주석 참조). */
 
+/* ★ 여기에 `background-color` 를 두지 마라(#렉).  전역 `QWidget` 이 **면을 칠하면**
+   Qt 는 앱의 모든 위젯을 스타일시트 경로로 그린다 — 네이티브 그리기 빠른 길이 꺼지고,
+   위젯 하나하나가 이 파일의 모든 규칙과 대조된다.  타일이 수백 개인 화면(썸네일 그리드·
+   매치 검토)에서 그 비용이 곱해져 스크롤이 끊겼다.  상속되는 것(글자색·서체)만 남기고,
+   **면은 창·시트·최상위 팝업만** 칠한다(바로 아래). */
 QWidget {
-    background-color: $bg;
     color: $ink;
     font-family: $font_body;
     font-size: $font_base_sz;
 }
 
+/* 면을 칠하는 곳 — 그 안의 위젯은 이 바탕이 비쳐 보인다(별도 칠 불필요). */
 QMainWindow, QDialog {
     background-color: $bg;
+}
+/* 스크롤 영역의 뷰포트는 창 바탕을 물려받지 못하는 자리라 따로 칠한다.
+   (페이지가 스스로 transparent 로 덮어쓰는 곳은 위젯 스타일시트가 이겨 그대로 둔다.) */
+QScrollArea, QScrollArea > QWidget > QWidget, QAbstractScrollArea::viewport {
+    background-color: $bg;
+}
+/* 별도 최상위 창으로 뜨는 것들 — 창 바탕이 닿지 않으므로 스스로 면을 가져야 한다.
+   빠지면 콤보 드롭다운·컨텍스트 메뉴가 네이티브 회색으로 뜬다. */
+QMenu, QComboBox QAbstractItemView {
+    background-color: $elev;
+    color: $ink;
+    border: 1px solid $line;
+}
+QMenu::item:selected {
+    background-color: $accent_tint;
 }
 
 /* 상단 앱 로고 — 페이지 스택 밖의 머리글이라 모든 단계에서 같은 자리에 보인다. */
@@ -56,6 +76,17 @@ QLabel[role="sheetBody"] {
 QLabel {
     color: $ink;
     background: transparent;
+}
+
+/* 매치 검토 썸네일 테두리 — 한 화면에 수백 개라 **인스턴스별 스타일시트를 쓰지 않는다**
+   (그러면 위젯 수만큼 규칙 집합이 생겨 폴리시·재계산이 비례해 커진다).  차순위 후보는
+   점선으로 '확정 아님' 을 유지한다. */
+QLabel[role="thumbFrame"] {
+    border: 1px solid $thumb_frame;
+    border-radius: 6px;
+}
+QLabel[role="thumbFrame"][subtle="true"] {
+    border-style: dashed;
 }
 
 QLabel[role="title"] {
