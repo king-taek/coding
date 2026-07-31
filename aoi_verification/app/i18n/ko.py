@@ -39,6 +39,9 @@ BTN_OK = "확인"
 BTN_CANCEL = "취소"
 BTN_BACK_TO_SETUP = "← 설정으로"
 BTN_START = "검증 시작"
+# 시작 직후 — 무거운 구성 요소(영상 처리·가속)를 백그라운드에서 불러오는 동안의 표기.
+# 창은 먼저 뜨고, 준비가 끝나면 원래 이름(BTN_START)으로 돌아오며 활성화된다.
+BTN_START_PREPARING = "준비 중…"
 BTN_BROWSE = "폴더 선택…"
 BTN_VERIFY = "검증"
 BTN_EXCLUDE = "제외"
@@ -494,6 +497,12 @@ SCOPE_SUBSET_COUNT_FMT = "일부 슬롯 ({n}/{total})"
 # 입력 유효성 — 왜 [검증 시작] 을 누를 수 없는지 눈에 보이게.
 SETUP_INVALID_FOLDER = "폴더를 찾을 수 없습니다."
 START_BLOCKED_HINT = "기준·검증 폴더를 먼저 지정하세요."
+# 폴더는 다 골랐는데 아직 구성 요소를 불러오는 중일 때 — 곧 저절로 풀린다.
+START_PREPARING_HINT = "구성 요소를 불러오는 중입니다. 잠시만 기다려 주세요."
+# 그 불러오기가 실패한 경우(설치 손상 등) — 시작 버튼은 잠긴 채로 둔다.
+BACKEND_LOAD_FAILED_FMT = (
+    "영상 처리 구성 요소를 불러오지 못했습니다.\n"
+    "프로그램을 다시 설치하거나 관리자에게 문의하세요.\n\n{err}")
 SLOT_SELECT_NEED_REF = "먼저 기준 폴더를 선택하세요."
 SLOT_SELECT_EMPTY = "기준 폴더에서 슬롯(하위 폴더)을 찾지 못했습니다."
 
