@@ -119,12 +119,11 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
     무거운 `python/` 런타임. 목록은 `updater._UPDATE_SKIP_TOP` 에서 관리한다.
   - 새 최상위 폴더/파일이 **구동에 필요하면 자동 포함**된다(별도 작업 불필요). 구동에 불필요한
     대용량/개발 전용이면 `_UPDATE_SKIP_TOP` 에 추가한다.
-- **깨지 않아야 할 불변식 3개** (이걸 어겨서 '업데이트했다는데 안 바뀌는' 사고가 났다):
+- **깨지 않아야 할 불변식 3개** (각각 실제 사고에서 나왔다 → `docs/규칙_배경.md`):
   - **런처 exe(`scripts/exe_launcher.py`)에는 앱 코드를 한 줄도 넣지 않는다.** PyInstaller 의
-    `FrozenImporter` 가 exe 안 PYZ 사본으로 디스크의 최신 사본을 **가린다**. `exe_launcher.spec` 의
-    `hiddenimports` 는 비어 있어야 하고, `aoi_verification` 은 `excludes` 에 있어야 하며,
-    `Analysis(pathex=[])` 로 저장소 루트를 주지 않는다. `build.py` 의 verify 가 `_internal/`
-    부재와 exe 용량으로 이를 재확인한다.
+    `FrozenImporter` 가 exe 안 사본으로 디스크의 최신 사본을 **가린다**. `exe_launcher.spec` 의
+    `hiddenimports` 는 비어 있고, `aoi_verification` 은 `excludes` 에 있고, `Analysis(pathex=[])`
+    로 저장소 루트를 주지 않는다. `build.py` 의 verify 가 재확인한다.
   - **`app.new` 는 완성된 트리일 때만 존재한다.** 만드는 중에는 `app.new.part` 이고, 검증을
     통과한 뒤 rename 한다 — 그 rename 이 곧 '준비 완료' 신호다(별도 marker 파일을 쓰지 마라).
   - **`_write_version` 은 스테이징 트리에 쓴다**(`_write_version_to`). 살아있는 `app/VERSION` 에
@@ -140,8 +139,8 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   - 포터블/온라인: `requirements.txt` 변경을 감지(`deps_changed()`)해 '수동 갱신' 안내만 한다.
   - 자세한 동작은 `docs/업데이트_동작.md`.
 - **테스트는 절대 진짜 `pip` 을 돌리지 않는다.** `dev/tests/test_updater.py` 의
-  `_no_real_subprocess` 오토유즈 픽스처가 `subprocess.call` 을 막는다(모킹을 빠뜨린 테스트가
-  조용히 네트워크를 타는 사고가 실제로 났다). pip 을 검증하는 테스트만 `_fake_pip` 로 덮어쓴다.
+  `_no_real_subprocess` 오토유즈 픽스처가 `subprocess.call` 을 막는다. pip 을 검증하는
+  테스트만 `_fake_pip` 로 덮어쓴다.
 - **lite 배포(`build.py exe-lite`)의 불변식**: 라이브러리를 번들에 넣지 않고 사용자 PC 의
   첫 실행 때 받는다. **`.deps_installed` 표식이 없다는 사실 자체가 유일한 '설치하라' 신호**다
   (`bootstrap.ensure_deps`). 빌드가 표식을 미리 찍으면 사용자 PC 가 설치를 건너뛰고
@@ -166,9 +165,10 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
 > (`python scripts/build.py exe`). **`app` 폴더만 전달하면 앱이 실행되지 않습니다.**
 
 주석·빈 줄만 바꾼 경우는 해당 없다(`bootstrap.req_lines` 가 정규화해 무시한다).
+테스트 전용 패키지는 여기가 아니라 `dev/requirements-dev.txt` 에 넣는다(배포·업데이트와 무관).
 
-> 배경: '사내망은 PyPI 가 막혀 있다' 는 전언이 있었으나 **실측 결과 열려 있었다**
-> (`pip download` 성공, 인증서 오류 없음). 검증되지 않은 전언을 설계 전제로 삼지 마라.
+> 사내망 PyPI 차단은 **전언이었고 실측은 열려 있었다** → `docs/규칙_배경.md`.
+> 검증되지 않은 전언을 설계 전제로 삼지 마라.
 
 ## 백본 모델(IR) 규칙 — torch 는 배포본에 없다
 - 추론은 전부 OpenVINO 다. **변환 결과(IR)만 저장소 `runtime/ir/` 에 커밋해 두고** 앱은
@@ -186,16 +186,15 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   (BatchNorm 폴딩). 회귀 가드: `dev/tests/test_ir_bundle.py`.
 - IR 은 모델당 1개면 된다. 배치·해상도는 `_force_static_shape` 의 `reshape` 로 맞춘다.
 - **임베딩 산출 방식을 바꾸면 `embedder_openvino._EMB_VERSION` 을 올린다.** 캐시 키
-  (`_emb_signature`)에 그 토큰이 없으면 옛 `.npy` 가 그대로 적중해 **같은 슬롯 안에서 옛
-  벡터와 새 벡터를 코사인 비교**한다 — 느려지는 게 아니라 매칭이 틀린다.
+  (`_emb_signature`)에 그 토큰이 없으면 옛 `.npy` 가 적중해 옛 벡터와 새 벡터를 비교한다 —
+  느려지는 게 아니라 **매칭이 틀린다** → `docs/규칙_배경.md`.
 - torch 는 **빌드 전용**이다(`_BUILD_ONLY_REQS`). 임시 폴더(`.irbuild`)에만 설치하고 끝나면
   지운다. `requirements.txt` 에 다시 넣지 마라 — 배포 번들에서 가장 큰 덩어리다.
 - **OpenVINO 심볼은 위치가 버전마다 바뀐다 — `try: import ... except: 폴백` 을 그냥 두지 마라.**
-  `AsyncInferQueue` 를 `openvino.runtime` 에서만 찾던 코드가 그 네임스페이스 삭제(2026.2) 후
-  조용히 순차 추론으로 떨어져 한동안 느리게 돌았다(정확도는 같아 아무도 몰랐다). 규칙:
   **최신 위치를 먼저 보고 옛 위치를 폴백**하며, 둘 다 없으면 **경고를 남긴다**
-  (`embedder_openvino._async_infer_queue_cls`). 실제로 비동기 경로를 태우는 회귀 가드:
-  `dev/tests/test_async_infer_queue.py`(torch 없이 `opset13` 으로 작은 모델을 만들어 돌린다).
+  (`embedder_openvino._async_infer_queue_cls`). 조용한 폴백이 비동기 추론을 죽인 적이 있다
+  (→ `docs/규칙_배경.md`). 회귀 가드 `dev/tests/test_async_infer_queue.py` 는 심볼 존재만
+  보지 않고 **실제로 비동기 경로를 태운다**.
 
 ## 매칭 / 좌표 검토 규칙
 - **정확도 우선**: 지금 운영 조합(고효율 모드 = GPU MobileNetV3 임베딩으로 후보 추림 +
@@ -217,12 +216,11 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
 - KLA 폴더의 slot명(WaferID)은 **정보파일이 1순위, OCR 이 폴백**이다. 정보파일은 폴더 안의
   비-사진 파일(`.001` 이거나 **확장자가 아예 없을 수 있음**, 1~2개)이고 헤더에
   `WaferID "XXXX";` 가 명시돼 있다 — `coords.kla_info.read_wafer_id` 가 후보를 전부 훑는다.
-  **사진 파일명 prefix 로 WaferID 를 추측하지 마라**(되돌린 방식). 파일명은 형식 검증이
-  불가능해, 둘 다 KLA 일 때 `FrontSideADRImg` 같은 공통 prefix 가 양쪽에 깔려 폴더가
-  순서대로 잘못 짝지어지고 슬롯이 뭉개진다. 정보파일은 사진과 무관하므로 **사진 0장 폴더도
-  식별**된다 — 그래서 `drop_empty_unmatched` 는 KLA 해석 **뒤**(`_after_slot_resolved`)에
-  돌고, 짝은 찾았지만 한쪽 사진이 0장인 슬롯은 `push_one_sided_to_unmatched` 로
-  '기준/검증 전용' 에 되돌려 결과에 남긴다(그냥 두면 결과에서 통째로 사라진다).
+  **사진 파일명 prefix 로 WaferID 를 추측하지 마라**(되돌린 방식 → `docs/규칙_배경.md`).
+  정보파일은 사진과 무관하므로 **사진 0장 폴더도 식별**된다 — 그래서 `drop_empty_unmatched` 는
+  KLA 해석 **뒤**(`_after_slot_resolved`)에 돌고, 짝은 찾았지만 한쪽 사진이 0장인 슬롯은
+  `push_one_sided_to_unmatched` 로 '기준/검증 전용' 에 되돌려 결과에 남긴다
+  (그냥 두면 결과에서 통째로 사라진다).
 
 ## UI 사용성 관습
 - **클릭 대상은 크고 명확하게.** 작은 기본 체크박스(예: `QListWidgetItem` 체크) 대신
@@ -244,7 +242,8 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   백그라운드), `coords/`(좌표 파서), `models/`, `similarity/`, `utils/`(`updater`·`paths`·`image_io`),
   `i18n/`, `learning/`.
 - **`dev/` = 사용자가 직접 건드리지 않는 개발 전용 모음.** `dev/tests/`(테스트)·
-  `dev/양식.xlsx`(엑셀 출력 템플릿). 옮길 때 함께 고칠 참조:
+  `dev/requirements-dev.txt`(테스트 도구)·`dev/양식.xlsx`(엑셀 출력 템플릿).
+  옮길 때 함께 고칠 참조:
   - 테스트 경로: `pytest.ini` 의 `testpaths = dev/tests` (※ `pytest.ini` 는 루트 앵커라 이동 금지 —
     `python -m pytest` 가 루트에서 testpaths 로 찾는다).
   - `dev/tests/conftest.py`·`dev/tests/test_no_spyder_conda.py` 는 루트를 `parents[2]` 로 잡는다.
@@ -265,7 +264,16 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
 - 커밋 전 `python scripts/internal/verify_no_forbidden.py` 가 통과해야 한다(`run_this_before.py` 도 실행).
 
 ## 테스트
-- 커밋 전 전체 테스트 통과 확인: `QT_QPA_PLATFORM=offscreen python -m pytest -q`.
+- 테스트 도구 설치(1회): `python -m pip install -r dev/requirements-dev.txt`.
+- 커밋 전 전체 통과 확인: **`QT_QPA_PLATFORM=offscreen python -m pytest -q -n auto`** (약 21초).
+  `-n auto` 는 파일 단위 병렬(pytest-xdist). 빼면 같은 스위트가 2분 가까이 걸린다.
+- 작업 중 빠른 확인: `-m "not ui"` 를 더하면 Qt 테스트를 빼고 순수 로직만 (약 10초).
+  `ui` 마커는 conftest 가 `qapp`·`styled_qapp` 사용 여부로 **자동 부여**한다(파일에 안 적는다).
+- **Qt 테마는 세션당 1회만 적용한다.** 모듈마다 `theme.apply_to_app` 을 부르는 `qapp` 픽스처를
+  새로 만들지 말고 conftest 의 **`styled_qapp`** 을 받아 쓴다 — `setStyleSheet` 은 부를수록
+  비싸져서, 21회 호출이 스위트 시간의 절반(82초)을 먹은 적이 있다(→ `docs/규칙_배경.md`).
+  QSS **문자열만** 검사하는 테스트는 `theme.render_qss` 로 렌더해 문자열을 직접 본다
+  (앱에 적용할 필요가 없다 — 참조: `test_sheet_size_and_edge`).
 - 무거운 의존성(cv2/openvino/torch/PyQt6)은 환경에 없을 수 있어 `pytest.importorskip` 으로
   게이트한다(모듈 단위 import 도 포함). **순수 로직은 무거운 의존성 없이** 단위 테스트되게 설계
   (예: 좌표 후보 선택 `_select_coord_candidates`, 업데이트 브랜치 정규화/자기교정).
