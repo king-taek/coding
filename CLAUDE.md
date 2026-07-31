@@ -201,6 +201,22 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   CPU 고전 ORB·중앙가중 재채점)보다 정확도가 낮으면 더 빨라도 채택/추천하지 않는다.
   실측 회귀 가드: `dev/tests/test_efficiency_contract.py` 가 (모델·장치·배치)와 임베딩
   캐시 키를 못 박아 둔다.
+- ⚠ **좌표 계산을 고칠 때의 절대 기준은 `test_wafer_geometry.py::TestGoldenEquipmentExamples`
+  의 골든 4사례**다(서로 다른 3개 device, **장비 화면 정답**). 합격선: **`col`·`row` 는
+  오차 0 으로 정확히 일치**, `x`·`y` 는 ±100 µm 까지 인정. `col`/`row` 가 하나라도
+  어긋나면 **그 수정은 틀린 것**이다 — die 인덱스는 장비 화면 표기이자 매칭 버킷 키라
+  1 만 어긋나도 다른 die 가 된다. **기대값을 고쳐서 통과시키지 마라.**
+- **die 인덱스는 좌표에서 유도한다** — `floor(X/DieStep_X)`, `floor(Y/DieStep_Y)`.
+  `ColorImageGrabingInfo.ini` 의 `Col`/`Row` 필드를 변환에 쓰지 마라.
+  **레시피마다 `Row` 원점이 다를 수 있다**(실측 15호기: 같은 결함을 두 레시피가 찍으면
+  `Col` 은 같은데 `Row` 만 1 어긋난다 → 그 필드를 쓰면 die 내부 y 가 −15349 같은 음수).
+  그 필드는 pitch 검산의 참조값으로만 쓴다 — 검산도 **X 는 등호, Y 는 레시피별 상수**다
+  (`wafer_geometry._grid_check`). **X 등호는 완화하지 마라** — 항목이 1건인 폴더에서
+  '상수' 는 공허하게 참이 돼 다른 자재에 TB500 상수가 채택된다(→ `docs/규칙_배경.md`).
+- **한 매칭 실행 안에서 Camtek 좌표 프레임은 하나여야 한다**(`coords.resolve_batch`).
+  pitch 검산은 웨이퍼 폴더마다 독립이라 ref 는 통과하고 val 은 실패할 수 있는데, 그러면
+  row 규약이 달라(`row_total−y_index` vs `−Row`) `(col,row) ±1` 게이트가 절대 안 맞아
+  **그 슬롯이 통째로 '매치 실패'** 가 된다. 섞이면 전부 절대좌표로 내린다.
 - 좌표 기반 매칭(`workers/coord_matcher.py`)의 후보 게이트는 **(col,row) ±1 이내**다(정답 도구
   AOI Data Viewer VBA `Module_Compare`: `Abs(col차)<=1 And Abs(row차)<=1`). KLA↔Camtek 처럼
   두 장비의 die 인덱스가 1 어긋날 수 있어 정확 일치만 하면 매칭이 전멸한다. 순수 헬퍼
