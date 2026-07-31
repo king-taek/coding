@@ -17,7 +17,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
-from .models import DefectCoord
+from .models import CAMTEK_COL_OFFSET, DefectCoord
 from .wafer_geometry import CamtekGeometry, FALLBACK_CAMTEK, camtek_geometry
 
 __all__ = ["resolve", "load_folder", "load_abs_folder", "load_raw_folder"]
@@ -48,11 +48,12 @@ def load_folder(folder: Path) -> dict[str, DefectCoord]:
         return {}
     try:
         # die 격자 기하는 폴더당 한 번만 구한다(자체 캐시).
-        # 기하를 확정하지 못하면 **좌표를 만들지 않는다** — 틀린 좌표를 내느니 낫다.
-        # 호출부는 빈 dict 를 '좌표 정보 없음' 으로 처리한다(COORD_NO_DATA_MSG).
         geom = camtek_geometry(folder)
         if geom is None:
-            return {}
+            # ★ pitch 를 몰라도 **매칭은 된다** — INI 의 절대 X/Y 를 그대로 쓰면 된다.
+            #   die 로 쪼개는 건 (a) 화면·엑셀의 die-내부 좌표 표기와 (b) KLA 교차 매칭에만
+            #   필요하다.  Camtek↔Camtek 은 ref/val 이 같은 규칙이면 그만이다.
+            return _parse_ini_abs(ini)
         return _parse_ini(ini, geom)
     except Exception:
         return {}
@@ -90,6 +91,36 @@ def _extract_coord(content: str,
     x = float(math.floor(X - col_i * geom.pitch_x))
     y = float(math.floor(Y - row_i * geom.pitch_y))
     return DefectCoord(col=col, row=row, x=x, y=y, source="camtek_ini")
+
+
+def _parse_ini_abs(path: Path) -> dict[str, DefectCoord]:
+    """die pitch 를 모를 때의 폴백 — **절대 wafer 좌표**로 DefectCoord 를 만든다.
+
+    · ``col`` 은 pitch 없이도 정확하다(``Col − CAMTEK_COL_OFFSET``).
+    · ``row`` 은 기준(``ceil(Diameter/pitch_y)``)을 모르므로 **장비 화면 값을 낼 수 없다**.
+      추측하지 않고 ``−Row`` 를 버킷 키로만 쓴다(음수 → 장비 값이 아님이 드러난다).
+      ref/val 이 같은 규칙이라 ``(col,row) ±1`` 이웃 게이트는 정상 동작한다.
+    · ``x/y`` 는 절대 좌표.  같은·이웃 die 안에서 **실제 물리 거리**로 재므로 die-내부
+      비교보다 오히려 엄격하다(인접 die 의 같은 상대위치 결함이 거리 0 으로 보이던 문제가 없다).
+
+    프레임이 다른 좌표(die-내부 x≈1만 vs 절대 x≈10만)와는 거리가 tol×3 을 한참 넘어
+    **자동으로 기각**되므로 별도 가드가 필요 없다.
+    """
+    text = path.read_text(encoding="utf-8", errors="replace")
+    parts = _SECTION_PAT.split(text)
+    result: dict[str, DefectCoord] = {}
+    it = iter(parts[1:])
+    for name, content in zip(it, it):
+        raw = _extract_raw(content)
+        if raw is None:
+            continue
+        X, Y, col_i, row_i = raw
+        result[Path(name.strip()).stem.lower()] = DefectCoord(
+            col=col_i - CAMTEK_COL_OFFSET, row=-row_i,
+            x=float(math.floor(X)), y=float(math.floor(Y)),
+            source="camtek_abs",
+        )
+    return result
 
 
 def _extract_raw(content: str) -> Optional[tuple[float, float, int, int]]:
