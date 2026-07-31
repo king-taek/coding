@@ -309,6 +309,25 @@ class TestIniReading:
         p.write_bytes(encoded)
         assert wg._read_key(p, "DieStep_X") == 37247.7
 
+    @pytest.mark.parametrize("enc", ["utf-8", "utf-8-sig", "utf-16"])
+    def test_coord_ini_encodings(self, tmp_path, enc):
+        """★ 좌표 INI 도 UTF-16 을 읽어야 한다.
+
+        UTF-8 로만 읽으면 UTF-16 파일이 예외 없이 깨져 **항목 0건**이 된다 —
+        '파일은 멀쩡히 있는데 좌표가 안 나온다' 로 조용히 실패하던 경로.
+        (UTF-16LE 의 `X=1` 은 `X\\x00=\\x001` 로 디코드되는데 `\\x00` 은 유효한 UTF-8 이라
+        치환문자조차 안 남고 `^(\\w+)\\s*=` 패턴이 빗나간다.)"""
+        folder = tmp_path / "s"
+        folder.mkdir()
+        body = ("[a.jpeg]\r\nX=272647.761085349\r\nY=165675.853620774\r\n"
+                "Col=7\r\nRow=3\r\n")
+        (folder / "ColorImageGrabingInfo.ini").write_bytes(body.encode(enc))
+        (folder / "Params_WaferInfo.ini").write_bytes(
+            "[Geometry]\r\nDieStep_X=37247.700000\r\nDieStep_Y=44905.400000\r\n".encode(enc))
+        assert len(camtek_ini.load_raw_folder(folder)) == 1
+        c = camtek_ini.load_folder(folder)["a"]
+        assert (c.col, c.row, c.source) == (5, 4, "camtek_ini")
+
     def test_comma_decimal_is_rejected_not_truncated(self, tmp_path):
         """★ `37247,700000`(쉼표 소수점)을 37247.0 으로 조용히 받지 않는다.
 

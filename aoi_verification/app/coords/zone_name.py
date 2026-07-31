@@ -17,6 +17,7 @@ import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional
+from .ini_text import read_ini_text
 
 _SECTION = re.compile(r"\[[^\]]*\]")
 _NAME = re.compile(r"(?im)^\s*ZoneName\s*=\s*(.+?)\s*$")
@@ -30,7 +31,7 @@ def _scan(paths) -> dict:
     out: dict = {}
     for p in paths:
         try:
-            txt = p.read_text(encoding="utf-8", errors="replace")
+            txt = read_ini_text(p) or ""
         except OSError:
             continue
         # 각 zone 섹션에 ZoneName + ZoneID 가 함께 있다.

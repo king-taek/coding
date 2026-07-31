@@ -31,6 +31,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
+from .ini_text import read_ini_text
 from .models import (CAMTEK_COL_OFFSET, CAMTEK_PITCH_X, CAMTEK_PITCH_Y,
                      DEFAULT_WAFER_DIAMETER, KLA_ZERO_X, KLA_ZERO_Y)
 
@@ -113,28 +114,6 @@ FALLBACK_KLA = KlaGeometry(
     pitch_x=CAMTEK_PITCH_X, pitch_y=CAMTEK_PITCH_Y,
     zero_x=KLA_ZERO_X, zero_y=KLA_ZERO_Y, source="fallback",
 )
-
-
-def read_ini_text(path: Path) -> Optional[str]:
-    """INI 텍스트를 읽는다.  **UTF-16 도 지원**한다(장비가 그렇게 쓰는 경우가 있다).
-
-    ``errors="replace"`` 로 UTF-8 만 시도하면 UTF-16 파일이 예외 없이 깨진 문자열이 되어
-    키를 하나도 못 찾는다 — '파일은 있는데 값이 없다' 로 조용히 실패하던 경로다.
-    BOM 으로 UTF-16 을 판별하고, 아니면 UTF-8(BOM 허용) → 그래도 안 되면 관대하게 읽는다.
-    """
-    try:
-        data = path.read_bytes()
-    except OSError:
-        return None
-    if data[:2] in (b"\xff\xfe", b"\xfe\xff"):
-        try:
-            return data.decode("utf-16")
-        except ValueError:
-            return None
-    try:
-        return data.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        return data.decode("utf-8", errors="replace")
 
 
 def _read_key(path: Path, key: str, lo: float = _MIN_PITCH,

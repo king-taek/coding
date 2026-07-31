@@ -19,6 +19,7 @@ import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional
+from .ini_text import read_ini_text
 
 # (파일 상대경로, X키, Y키) 우선순위.  Y키 None 이면 단일값(X=Y).
 # 면적은 px_x × px_y(이방성)로 환산해야 정확하다(실측: PI3-KMY 는 X≠Y 미세차).
@@ -33,9 +34,8 @@ _MIN, _MAX = 0.05, 5.0
 
 
 def _read_key(path: Path, key: str) -> Optional[float]:
-    try:
-        txt = path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
+    txt = read_ini_text(path)
+    if txt is None:
         return None
     m = re.search(r"(?im)^\s*" + re.escape(key) + r"\s*=\s*([-\d.eE]+)", txt)
     if not m:
