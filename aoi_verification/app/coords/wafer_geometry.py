@@ -16,6 +16,11 @@
 즉 Camtek 의 die 격자는 stage 원점(0,0)에 고정돼 있다.  읽은 pitch 로 이 식이 안 맞으면
 엉뚱한 키를 읽은 것이므로 채택하지 않는다.
 
+⚠ 다만 ``Row`` 쪽 등호는 **레시피마다 원점이 1 다를 수 있다**(실측 15호기).  그래서
+검산은 X 만 등호를 요구하고 Y 는 '레시피별로 차이가 상수' 만 본다 — :func:`_grid_check`
+와 ``docs/디바이스_하드코딩_조사.md`` §6-F 참조.  좌표 변환 자체는 이 필드를 안 쓰고
+``floor(좌표/pitch)`` 로 유도한다(:mod:`.camtek_ini`).
+
 ``pixel_size.py`` 와 같은 관습: 폴더 단위 ``@lru_cache``, 전 구간 fail-safe(절대 raise 안 함),
 합리적 범위 클램프.  못 읽으면 ``models.py`` 의 TB500 폴백을 쓰되 **경고를 남긴다**
 (조용히 옛 경로로 떨어지면 아무도 모른다).
@@ -189,7 +194,18 @@ def has_camtek_entries(folder: Path) -> bool:
 
 
 def _grid_check(folder: Path, pitch_x: float, pitch_y: float) -> tuple[bool, bool]:
-    """실측 불변식 ``Col == floor(X/pitch_x)`` 로 pitch 를 검산한다.
+    """INI 의 ``Col``/``Row`` 필드를 참조값 삼아 pitch 를 검산한다.
+
+    **두 축을 다르게 본다** — 실측 근거는 :mod:`docs.디바이스_하드코딩_조사` §6-F::
+
+        X : Col == floor(X/pitch_x)                       전 항목 **등호**
+        Y : {floor(Y/pitch_y) − Row} 가 **레시피별로 상수**  (0 일 필요 없음)
+
+    Y 를 완화하는 이유는 레시피마다 ``Row`` 필드의 원점이 1 다를 수 있어서다(같은 결함을
+    두 레시피가 찍으면 ``Col`` 은 같은데 ``Row`` 만 1 어긋난다).  **X 는 절대 완화하지
+    않는다** — 항목이 1건뿐인 폴더에서 '상수' 조건은 공허하게 참이 돼, 격자가 다른 자재에
+    TB500 상수가 채택되는 길이 열린다(``x = −1,652,266 µm`` 참사의 재현).  실제로 기존
+    거부 경로는 전부 X 축에서 걸린다.
 
     반환 ``(통과, 의미있음)``.  '의미있음' 은 검산이 실제로 pitch 를 제약했는지다 —
     모든 항목이 ``Col=0`` 이면 어떤 pitch 든 통과하므로 검산이 아무 말도 못 한 것이다.
@@ -199,16 +215,34 @@ def _grid_check(folder: Path, pitch_x: float, pitch_y: float) -> tuple[bool, boo
 
     try:
         raw = camtek_ini.load_raw_folder(folder)
+        recipes = camtek_ini.load_recipe_folder(folder)
     except Exception:
         return (False, False)
     if not raw:
         return (False, False)
-    ok = all(math.floor(X / pitch_x) == col_i
-             and math.floor(Y / pitch_y) == row_i
-             for X, Y, col_i, row_i in raw.values())
+
+    # X: 등호 그대로.
+    if not all(math.floor(X / pitch_x) == col_i for X, _, col_i, _ in raw.values()):
+        return (False, False)
+
+    # Y: 레시피별로 차이가 일정하기만 하면 된다.
+    by_recipe: dict[int, set[int]] = {}
+    for stem, (_X, Y, _col_i, row_i) in raw.items():
+        by_recipe.setdefault(recipes.get(stem, 0), set()).add(
+            math.floor(Y / pitch_y) - row_i)
+    if any(len(diffs) != 1 for diffs in by_recipe.values()):
+        return (False, False)
+
+    # 조용한 폴백 금지 — INI 필드가 die 인덱스와 어긋난 채 통과했으면 남긴다.
+    off = {r: next(iter(d)) for r, d in by_recipe.items() if next(iter(d)) != 0}
+    if off:
+        _LOG.info("INI Row 가 die 인덱스와 어긋난다(레시피별 상수라 채택). "
+                  "좌표 산출은 좌표에서 유도하므로 영향 없음 — recipe별 차이 %s: %s",
+                  off, folder)
+
     meaningful = (any(col_i >= 1 for _, _, col_i, _ in raw.values())
                   and any(row_i >= 1 for *_, row_i in raw.values()))
-    return (ok, meaningful)
+    return (True, meaningful)
 
 
 @lru_cache(maxsize=256)

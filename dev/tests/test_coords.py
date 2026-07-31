@@ -61,18 +61,25 @@ class TestCamtekIni:
         assert c.y == 17404.0
 
     def test_example3(self):
-        """경계 예시: Col=4 Row=6 → col=2 row=1
+        """경계 예시 — die 인덱스는 **좌표에서 유도**한다(INI 의 Col/Row 필드가 아니라).
 
-        Row=6 은 실측 원본 Row 범위(1..6)의 최하단.  맵 세로 눈금 0..6 중 row 0(=Row 7)은
-        이 자재가 쓰지 않으므로 최하단 결함이 row 1 로 나오는 게 정상이다."""
+        이 항목은 INI 가 ``Row=6`` 이라고 적었지만 ``floor(Y/pitch_y) = 7`` 이다.
+        옛 기대값(``row=1``, ``y=68156``)은 보고서 공식을 INI 필드에 그대로 대입한
+        메아리였다 — ``y=68156`` 은 pitch(44905.4)보다 큰 '**die 내부** 좌표' 라
+        장비 화면에 나올 수 없는 값이다.  유도 인덱스로 재면 ``y`` 가 die 안
+        (``0 ≤ y < pitch_y``)으로 돌아온다.
+
+        (INI 필드가 이렇게 어긋나는 실물은 레시피별 Row 원점 차이에서 온다 —
+        ``docs/디바이스_하드코딩_조사.md`` §6-F.)"""
         content = _make_ini_section(X="183424.006310378", Y="337589.125854985",
                                      Col="4", Row="6")
         c = _extract_coord(content)
         assert c is not None
         assert c.col == 2
-        assert c.row == 1
+        assert c.row == 0
         assert c.x == 34433.0
-        assert c.y == float(int(337589.125854985 - 6 * 44905.4))   # floor
+        assert c.y == float(int(337589.125854985 - 7 * 44905.4))   # floor, y_index=7
+        assert 0 <= c.y < 44905.4                  # die 안에 있다
 
     def test_example4(self):
         """보고서 예시 4: Col=4 Row=3 → col=2 row=4"""
