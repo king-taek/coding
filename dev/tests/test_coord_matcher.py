@@ -65,6 +65,20 @@ def test_boundary_exactly_confident_dist():
     assert out[0][0] == _p("a")
 
 
+def test_confident_dist_capped_at_half_tolerance():
+    """die 가 작은 자재는 tol 을 낮춰 쓴다 — 그때도 차순위가 살아있어야 한다.
+
+    tol 이 CONFIDENT_DIST(20 µm) 이하로 내려가면 '확정' 반경이 tol 을 덮어
+    **모든 매치가 후보 1장**이 돼 사용자가 고를 여지가 사라졌다. tol 의 절반으로 묶는다.
+    tol=500(기본)에서는 20 그대로라 기존 동작이 바뀌지 않는다."""
+    assert cm._confident_dist(TOL) == cm.CONFIDENT_DIST      # 기존 동작 불변
+    assert cm._confident_dist(20.0) == 10.0
+
+    within3 = [(_p("a"), 12.0), (_p("b"), 18.0)]
+    assert len(_select(within3, 20.0)) == 2                  # 차순위가 남는다
+    assert len(_select(within3, TOL)) == 1                   # tol 이 크면 '확정' 1장
+
+
 # ---------------------------------------------------------------------------
 # _match_neighbors — (col,row) ±1 이웃 게이트 (정답 도구 Module_Compare 기준)
 # ---------------------------------------------------------------------------

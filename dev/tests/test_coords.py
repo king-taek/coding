@@ -10,8 +10,16 @@ from pathlib import Path
 
 import pytest
 
-from aoi_verification.app.coords.camtek_ini import _extract_coord
+from aoi_verification.app.coords.camtek_ini import _extract_coord as _extract_raw_coord
 from aoi_verification.app.coords.camtek_live import resolve as live_resolve
+from aoi_verification.app.coords.wafer_geometry import FALLBACK_CAMTEK
+
+
+def _extract_coord(content):
+    """이 파일의 기대값은 전부 **TB500 격자** 기준 — 기하를 명시해 고정한다.
+
+    (die 기하는 이제 폴더에서 읽는다. 다른 디바이스는 test_wafer_geometry.py 가 본다.)"""
+    return _extract_raw_coord(content, FALLBACK_CAMTEK)
 
 
 # ---------------------------------------------------------------------------

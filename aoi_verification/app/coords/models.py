@@ -1,4 +1,8 @@
-"""좌표 데이터 모델 + TB500 장치별 변환 상수."""
+"""좌표 데이터 모델 + die 격자 변환 **폴백** 상수.
+
+아래 상수들은 TB500 한 대의 실측값이다.  **평상시에는 쓰이지 않는다** —
+:mod:`~.wafer_geometry` 가 결과 폴더의 ``Params_WaferInfo.ini`` / KLA ``.001`` 에서
+읽은 값을 쓰고, 그게 없을 때만 여기로 떨어진다(그때 경고를 남긴다)."""
 
 from __future__ import annotations
 
@@ -41,26 +45,32 @@ class DefectGeometry:
     recipe_name: str = ""  # recipe 파일의 RecipeName(자재별). 없으면 빈 문자열(코드만 표시)
 
 
-# ── TB500 Camtek INI 변환 상수 ────────────────────────────────────────────
+# ── Camtek INI 변환 폴백 상수 (TB500 실측) ────────────────────────────────
 # col = INI_Col - CAMTEK_COL_OFFSET
 # row = CAMTEK_ROW_TOTAL - INI_Row
 # x   = X - INI_Col × CAMTEK_PITCH_X
 # y   = Y - INI_Row × CAMTEK_PITCH_Y
-CAMTEK_PITCH_X: float = 37247.7   # µm/die (TB500)
-CAMTEK_PITCH_Y: float = 44905.4   # µm/die (TB500)
+# pitch 는 평상시 Params_WaferInfo.ini `[Geometry] DieStep_X/Y` 에서 읽는다.
+CAMTEK_PITCH_X: float = 37247.7   # µm/die (TB500 폴백)
+CAMTEK_PITCH_Y: float = 44905.4   # µm/die (TB500 폴백)
+# ⚠ col_origin/row_total 은 die 격자 **범위**라 아직 어떤 결과 파일에도 없다.
+# 두 값은 ref/val 양쪽에 똑같이 걸려 매칭 거리에서 상쇄되고, 표시·엑셀의 col/row 에만
+# 일정 오프셋으로 남는다.  die map 파일이 확인되면 wafer_geometry 에서 읽어 대체한다.
 CAMTEK_COL_OFFSET: int = 2        # TB500
 # TB500: Y die 수 6, INI 원본 Row 는 1-based 1..6 (dev/좌표 확인 실측 분포).
 # 1-based 위→아래를 0-based 아래→위(row 0..5)로 뒤집는 값 — 7 이면 전 구간 +1 로 어긋난다
 # (현물 웨이퍼 맵·KLA 변환과 1 차이 나던 버그의 원인).
 CAMTEK_ROW_TOTAL: int = 6         # TB500
 
-# ── TB500 KLA .001 변환 상수 ─────────────────────────────────────────────
+# ── KLA .001 변환 폴백 상수 (TB500 실측) ──────────────────────────────────
 # col = XINDEX + KLA_ZERO_X
 # row = YINDEX + KLA_ZERO_Y
 # x   = round(XREL)
 # y   = round(DiePitchY - YREL)
-KLA_ZERO_X: int = 3   # TB500: package X count 7, 7 // 2 = 3
-KLA_ZERO_Y: int = 3   # TB500: package Y count 6, 6 // 2 = 3
+# 평상시에는 .001 헤더의 SampleTestPlan die 인덱스 최솟값에서 읽는다
+# (TB500: XINDEX −3..3 → 3, YINDEX −3..2 → 3 — 아래 값과 일치).
+KLA_ZERO_X: int = 3   # TB500 폴백: package X count 7, 7 // 2 = 3
+KLA_ZERO_Y: int = 3   # TB500 폴백: package Y count 6, 6 // 2 = 3
 
 # ── Surface.flt geometry 환산 상수 (보고서: 1 px = 0.77 µm) ────────────────
 # area_um2  = area(px²)        × SURFACE_AREA_FACTOR (= 0.77²)
