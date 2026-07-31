@@ -19,6 +19,7 @@ from typing import Optional
 
 from .models import CAMTEK_COL_OFFSET, DefectCoord
 from .wafer_geometry import CamtekGeometry, FALLBACK_CAMTEK, camtek_geometry
+from .ini_text import read_ini_text
 
 __all__ = ["resolve", "load_folder", "load_abs_folder", "load_raw_folder"]
 
@@ -60,7 +61,7 @@ def load_folder(folder: Path) -> dict[str, DefectCoord]:
 
 
 def _parse_ini(path: Path, geom: CamtekGeometry) -> dict[str, DefectCoord]:
-    text = path.read_text(encoding="utf-8", errors="replace")
+    text = read_ini_text(path) or ""
 
     # 섹션 단위로 분리: [filename.jpeg] → 내용 반복
     parts = _SECTION_PAT.split(text)
@@ -106,7 +107,7 @@ def _parse_ini_abs(path: Path) -> dict[str, DefectCoord]:
     프레임이 다른 좌표(die-내부 x≈1만 vs 절대 x≈10만)와는 거리가 tol×3 을 한참 넘어
     **자동으로 기각**되므로 별도 가드가 필요 없다.
     """
-    text = path.read_text(encoding="utf-8", errors="replace")
+    text = read_ini_text(path) or ""
     parts = _SECTION_PAT.split(text)
     result: dict[str, DefectCoord] = {}
     it = iter(parts[1:])
@@ -157,7 +158,7 @@ def load_raw_folder(folder: Path) -> dict[str, tuple[float, float, int, int]]:
     if ini is None:
         return {}
     try:
-        text = ini.read_text(encoding="utf-8", errors="replace")
+        text = read_ini_text(ini) or ""
         parts = _SECTION_PAT.split(text)
         result: dict[str, tuple[float, float, int, int]] = {}
         it = iter(parts[1:])
@@ -188,7 +189,7 @@ def load_abs_folder(folder: Path) -> dict[str, tuple[float, float]]:
     if ini is None:
         return {}
     try:
-        text = ini.read_text(encoding="utf-8", errors="replace")
+        text = read_ini_text(ini) or ""
         parts = _SECTION_PAT.split(text)
         result: dict[str, tuple[float, float]] = {}
         it = iter(parts[1:])
