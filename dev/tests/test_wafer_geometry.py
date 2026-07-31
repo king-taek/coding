@@ -192,6 +192,30 @@ class TestCamtekPitchFromFile:
             _params_ini(10000.0, 12000.0), encoding="utf-8")
         assert wg.camtek_geometry(folder) is None
 
+    def test_no_warning_when_folder_has_no_camtek_ini(self, tmp_path, caplog):
+        """★ Camtek INI 가 아예 없는 폴더(KLA·LIVE 슬롯)는 **조용히** None.
+
+        경고는 '변환할 항목이 있는데 pitch 를 못 정한' 진짜 문제일 때만 낸다 —
+        안 그러면 KLA 폴더마다 무의미한 경고가 쌓인다."""
+        import logging
+        folder = tmp_path / "kla"
+        folder.mkdir()
+        (folder / "res.001").write_text("DiePitch 1.0e+004 1.0e+004;\n", encoding="utf-8")
+        assert wg.has_camtek_entries(folder) is False
+        with caplog.at_level(logging.WARNING, logger="aoi.coords"):
+            assert wg.camtek_geometry(folder) is None
+        assert caplog.records == []
+
+    def test_warns_when_camtek_entries_cannot_be_converted(self, tmp_path, caplog):
+        """반대로 Camtek INI 항목이 있는데 pitch 를 못 정하면 **경고를 남긴다**."""
+        import logging
+        folder = _make_bare_folder(tmp_path / "pgee",
+                                   [("a", 50 * 4160.9 + 2000.0, 20 * 5294.0 + 2000.0, 50, 20)])
+        assert wg.has_camtek_entries(folder) is True
+        with caplog.at_level(logging.WARNING, logger="aoi.coords"):
+            assert wg.camtek_geometry(folder) is None
+        assert any("die pitch" in r.message for r in caplog.records)
+
     def test_constants_need_a_meaningful_check(self, tmp_path):
         """모든 항목이 Col=0·Row=0 이면 어떤 pitch 든 통과한다 — 상수를 추정으로 쓰지 않는다."""
         folder = _make_bare_folder(tmp_path / "origin",

@@ -35,7 +35,7 @@ from .models import (CAMTEK_COL_OFFSET, CAMTEK_PITCH_X, CAMTEK_PITCH_Y,
                      DEFAULT_WAFER_DIAMETER, KLA_ZERO_X, KLA_ZERO_Y)
 
 __all__ = ["CamtekGeometry", "KlaGeometry", "camtek_geometry", "kla_geometry",
-           "FALLBACK_CAMTEK", "FALLBACK_KLA"]
+           "has_camtek_entries", "FALLBACK_CAMTEK", "FALLBACK_KLA"]
 
 _LOG = logging.getLogger("aoi.coords")
 
@@ -173,6 +173,19 @@ def _pitch_candidates(folder: Path):
     yield (CAMTEK_PITCH_X, CAMTEK_PITCH_Y, "models.py 상수")
 
 
+def has_camtek_entries(folder: Path) -> bool:
+    """이 폴더가 **Camtek INI 좌표를 가진 폴더**인가(변환 대상이 있는가).
+
+    KLA 슬롯이나 LIVE 파일명 슬롯은 여기서 False — die pitch 를 못 찾아도 문제가 아니다
+    (그쪽은 각자 자기 경로로 좌표를 만든다)."""
+    from . import camtek_ini
+
+    try:
+        return bool(camtek_ini.load_raw_folder(folder))
+    except Exception:
+        return False
+
+
 def _grid_check(folder: Path, pitch_x: float, pitch_y: float) -> tuple[bool, bool]:
     """실측 불변식 ``Col == floor(X/pitch_x)`` 로 pitch 를 검산한다.
 
@@ -217,10 +230,14 @@ def camtek_geometry(folder: Path) -> Optional[CamtekGeometry]:
                                   col_origin=CAMTEK_COL_OFFSET,
                                   row_total=_row_total(_read_diameter(folder), py),
                                   source=src)
-        _LOG.warning(
-            "die pitch 를 확정하지 못해 이 폴더의 좌표를 만들지 않습니다 "
-            "(Params_WaferInfo.ini `DieStep_X/Y` 또는 ProductInfo.ini `XDieIndex/YDieIndex` "
-            "가 필요합니다): %s", folder)
+        # ★ Camtek INI 자체가 없는 폴더(KLA 슬롯·LIVE 파일명 슬롯)는 **조용히** None.
+        #   경고는 '변환할 항목이 있는데 pitch 를 못 정한' 진짜 문제일 때만 낸다 —
+        #   안 그러면 KLA 폴더마다 무의미한 경고가 쌓인다.
+        if has_camtek_entries(folder):
+            _LOG.warning(
+                "die pitch 를 확정하지 못해 이 폴더의 좌표를 만들지 않습니다 "
+                "(Params_WaferInfo.ini `DieStep_X/Y` 또는 ProductInfo.ini "
+                "`XDieIndex/YDieIndex` 가 필요합니다): %s", folder)
         return None
     except Exception:
         return None

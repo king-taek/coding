@@ -856,14 +856,16 @@ class SetupPage(QWidget):
         hint = getattr(self, "_die_hint", None)
         if hint is None:
             return
-        geom = self._detect_die_geometry(ref_text) if ref_text else None
-        if geom is None:
-            hint.setText("" if not ref_text else i18n.KO.DIE_SIZE_NOT_FOUND)
-            hint.setProperty("role", "muted" if not ref_text else "warn")
+        pitch, src, broken = self._detect_die_geometry(ref_text) if ref_text \
+            else (None, "", False)
+        if pitch is None:
+            # ★ die 크기를 모른다고 곧장 경고하지 않는다.  KLA 슬롯·LIVE 파일명 슬롯은
+            #   die 크기 없이도 좌표가 나온다 — 진짜 못 쓰는 경우(`broken`)만 경고한다.
+            hint.setText(i18n.KO.DIE_SIZE_NOT_FOUND if broken else "")
+            hint.setProperty("role", "warn" if broken else "muted")
         else:
-            text = i18n.KO.DIE_SIZE_DETECTED_FMT.format(
-                x=geom.pitch_x, y=geom.pitch_y, src=geom.source)
-            ratio = float(self.coord_tol_spin.value()) / geom.pitch_x
+            text = i18n.KO.DIE_SIZE_DETECTED_FMT.format(x=pitch[0], y=pitch[1], src=src)
+            ratio = float(self.coord_tol_spin.value()) / pitch[0]
             if ratio > i18n.KO.DIE_TOL_RATIO_WARN:
                 text += "\n" + i18n.KO.DIE_TOL_TOO_LARGE_FMT.format(pct=ratio * 100.0)
                 hint.setProperty("role", "warn")
@@ -875,21 +877,36 @@ class SetupPage(QWidget):
 
     @staticmethod
     def _detect_die_geometry(ref_text: str):
-        """기준 폴더의 첫 슬롯에서 die 격자 기하를 조회.  못 찾으면 None."""
-        from ...coords.wafer_geometry import camtek_geometry
+        """기준 폴더의 슬롯들을 훑어 ``((pitch_x, pitch_y) | None, 출처, 못쓰는가)``.
+
+        · Camtek INI 슬롯 → `Params_WaferInfo.ini` 등에서 die pitch
+        · KLA 슬롯        → `.001` 의 `DiePitch`
+        · LIVE 파일명 슬롯 → die pitch 는 없지만 **좌표는 파일명에서 나온다**(경고 대상 아님)
+
+        '못쓰는가' 는 **Camtek INI 항목이 있는데 pitch 를 확정 못 한** 경우만 True 다.
+        전 구간 fail-safe — 안내가 실패해도 설정 화면이 막히면 안 된다."""
+        from ...coords import kla_info
+        from ...coords.wafer_geometry import (camtek_geometry, has_camtek_entries,
+                                              kla_geometry)
         from ...models.slot import list_slot_dirs
 
         try:
             root = Path(ref_text.strip())
             if not root.is_dir():
-                return None
+                return (None, "", False)
+            broken = False
             for _name, folder in sorted(list_slot_dirs(root).items()):
                 geom = camtek_geometry(folder)
                 if geom is not None:
-                    return geom
-            return None
+                    return ((geom.pitch_x, geom.pitch_y), geom.source, False)
+                if kla_info.load_folder(folder):          # KLA 슬롯 — DiePitch 가 있다
+                    kg = kla_geometry(folder)
+                    return ((kg.pitch_x, kg.pitch_y), i18n.KO.DIE_SIZE_SRC_KLA, False)
+                if has_camtek_entries(folder):
+                    broken = True     # 변환할 항목이 있는데 pitch 를 못 정했다 — 진짜 문제
+            return (None, "", broken)
         except Exception:
-            return None
+            return (None, "", False)
 
     def _browse(self, target: QLineEdit) -> None:
         path = QFileDialog.getExistingDirectory(self, i18n.KO.SETUP_FOLDER_LABEL)

@@ -230,8 +230,13 @@ COORD_TOLERANCE_TOOLTIP = (
 # 기준 폴더에서 읽어낸 die 크기 안내 — 허용 오차를 자재에 맞게 정하도록 돕는다.
 # 값을 대신 바꾸지는 않는다(기존 결과가 조용히 달라지면 안 된다).
 DIE_SIZE_DETECTED_FMT = "감지된 die: {x:,.0f} × {y:,.0f} µm  ({src})"
+DIE_SIZE_SRC_KLA = "KLA .001 DiePitch"
+# ⚠ **Camtek INI 좌표가 있는데 die pitch 를 못 정한 경우에만** 띄운다.
+# KLA 슬롯·LIVE 파일명 슬롯은 die 크기 없이도 좌표가 나오므로 경고 대상이 아니다.
 DIE_SIZE_NOT_FOUND = (
-    "die 크기를 찾지 못했습니다 — 좌표 매칭을 쓸 수 없습니다"
+    "die 크기를 찾지 못했습니다 — 좌표 매칭을 쓸 수 없습니다.\n"
+    "결과 폴더에 Params_WaferInfo.ini(DieStep_X/Y) 또는 "
+    "ProductInfo.ini(XDieIndex/YDieIndex) 가 있어야 합니다."
 )
 # tol 이 die 폭 대비 이 비율을 넘으면 경고한다(die 4 mm 자재에서 500 µm = 12%).
 DIE_TOL_RATIO_WARN = 0.02
