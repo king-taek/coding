@@ -38,62 +38,61 @@ def _approx(a: float, b: float, tol: float = 1e-3) -> bool:
 # ---------------------------------------------------------------------------
 class TestCamtekIni:
     def test_example1(self):
-        """보고서 예시 1: X=253716.003307344 Y=91798.7938704543 Col=6 Row=2 → col=4 row=4
-
-        (보고서의 구 정답 row=5 는 7−Row 규약으로 현물 웨이퍼 맵보다 +1 — 6−Row 로 교정)"""
+        """보고서 예시 1: X=253716.003307344 Y=91798.7938704543 Col=6 Row=2 → col=4 row=5"""
         content = _make_ini_section(X="253716.003307344", Y="91798.7938704543",
                                      Col="6", Row="2")
         c = _extract_coord(content)
         assert c is not None
         assert c.col == 4
-        assert c.row == 4
+        assert c.row == 5
         assert _approx(c.x, 30229.803307344)
         assert _approx(c.y, 1987.9938704543)
         assert c.source == "camtek_ini"
 
     def test_example2(self):
-        """보고서 예시 2: Col=7 Row=5 → col=5 row=1"""
+        """보고서 예시 2: Col=7 Row=5 → col=5 row=2"""
         content = _make_ini_section(X="285837.569021826", Y="241931.965714178",
                                      Col="7", Row="5")
         c = _extract_coord(content)
         assert c is not None
         assert c.col == 5
-        assert c.row == 1
+        assert c.row == 2
         assert _approx(c.x, 25103.669021826)
         assert _approx(c.y, 17404.965714178)
 
     def test_example3(self):
-        """경계 예시: Col=4 Row=6 → col=2 row=0
+        """경계 예시: Col=4 Row=6 → col=2 row=1
 
-        (구 보고서 예시의 Row=7 은 실측 원본 범위 1..6 밖의 합성값 — 최하단 경계 Row=6 으로 교체)"""
+        Row=6 은 실측 원본 Row 범위(1..6)의 최하단.  맵 세로 눈금 0..6 중 row 0(=Row 7)은
+        이 자재가 쓰지 않으므로 최하단 결함이 row 1 로 나오는 게 정상이다."""
         content = _make_ini_section(X="183424.006310378", Y="337589.125854985",
                                      Col="4", Row="6")
         c = _extract_coord(content)
         assert c is not None
         assert c.col == 2
-        assert c.row == 0
+        assert c.row == 1
         assert _approx(c.x, 34433.206310378)
         assert _approx(c.y, 337589.125854985 - 6 * 44905.4)
 
     def test_example4(self):
-        """보고서 예시 4: Col=4 Row=3 → col=2 row=3"""
+        """보고서 예시 4: Col=4 Row=3 → col=2 row=4"""
         content = _make_ini_section(X="182587.539096461", Y="149593.522482771",
                                      Col="4", Row="3")
         c = _extract_coord(content)
         assert c is not None
         assert c.col == 2
-        assert c.row == 3
+        assert c.row == 4
         assert _approx(c.x, 33596.739096461)
         assert _approx(c.y, 14877.322482771)
 
     def test_example5(self):
-        """보고서 예시 5: Col=4 Row=2 → col=2 row=4"""
+        """보고서 예시 5: Col=4 Row=2 → col=2 row=5"""
         content = _make_ini_section(X="180377.576920526", Y="100976.81821231",
                                      Col="4", Row="2")
         c = _extract_coord(content)
         assert c is not None
         assert c.col == 2
-        assert c.row == 4
+        assert c.row == 5
         assert _approx(c.x, 31386.776920526)
         assert _approx(c.y, 11166.01821231)
 
@@ -104,7 +103,23 @@ class TestCamtekIni:
         c = _extract_coord(content)
         assert c is not None
         assert c.col == 4
-        assert c.row == 4
+        assert c.row == 5
+
+    def test_equipment_screen_reading(self):
+        """★ 정답 기준 — 장비(AOI Data Viewer) 웨이퍼 맵 **직접 판독** 실측.
+
+        INI ``Col=8, Row=5`` → 장비 화면 ``col=6, row=2``.
+        맵 규약: 왼쪽 맨 아래가 (0,0), 오른쪽·위로 1씩 증가(col·row 둘 다 0-based).
+
+        이 한 건이 ``row = 7 − Row`` 를 확정한다 — ``row = Row − 3`` 은 실측 Row 범위
+        1..6 에서 음수가 나와 0-based 맵에 존재할 수 없다.
+        (이전 세션이 ``CAMTEK_ROW_TOTAL`` 을 7→6 으로 바꿔 전 구간 row 가 1 작아졌던
+        회귀의 재발 방지용이다.  이 값을 건드리려면 장비 화면을 다시 판독할 것.)"""
+        content = _make_ini_section(X="334789.573892829", Y="267755.638995209",
+                                     Col="8", Row="5")
+        c = _extract_coord(content)
+        assert c is not None
+        assert (c.col, c.row) == (6, 2)
 
     def test_missing_keys_returns_none(self):
         """필수 키 누락 시 None 반환."""
@@ -211,7 +226,7 @@ class TestCoordResolve:
         assert c is not None
         assert c.source == "kla"
         assert c.col == 5
-        assert c.row == 3
+        assert c.row == 4      # YINDEX 0 + KLA_ZERO_Y(4) — 장비 화면 기준
 
 
 # ---------------------------------------------------------------------------
@@ -224,8 +239,12 @@ _COORD_DATA = Path(__file__).resolve().parents[2] / "dev" / "좌표 확인"
 def test_real_pair_kla_camtek_rows_align():
     """dev/좌표 확인 실측 쌍: Camtek 예시1(Col=7,Row=3) ↔ KLA 예시1(XINDEX=2,YINDEX=0).
 
-    같은 물리적 결함이므로 두 변환 모두 (col,row)=(5,3) 이어야 한다.
-    구 변환(7−Row)은 Camtek 만 row=4 로 +1 어긋났다(현물 웨이퍼 맵 기준 오표기)."""
+    두 좌표가 121 µm 밖에 안 떨어져 있어 **같은 물리적 결함**임이 확인된 쌍이다.
+    따라서 두 변환이 같은 (col,row) 를 내야 한다 — 이 테스트의 요점은 **정렬**이다.
+
+    값은 장비 화면 기준 (5,4):  Camtek 7−3 = 4,  KLA 0 + KLA_ZERO_Y(4) = 4.
+    (Camtek 만 −1 하고 KLA 를 그대로 두면 정렬은 유지되지만 둘 다 장비 화면과 어긋난다 —
+    실제로 그렇게 어긋나 있었다.  ``TestCamtekIni.test_equipment_screen_reading`` 참조.)"""
     from aoi_verification.app.coords import camtek_ini, kla_info
 
     camtek_ini.load_folder.cache_clear()
@@ -237,5 +256,5 @@ def test_real_pair_kla_camtek_rows_align():
     kla = kla_info.resolve(
         _COORD_DATA / "KLA" / "예시1" / "W6459076XYG1_2_0_23_2.jpg")
     assert cam is not None and kla is not None
-    assert (cam.col, cam.row) == (5, 3)
-    assert (kla.col, kla.row) == (5, 3)
+    assert (cam.col, cam.row) == (kla.col, kla.row)      # 정렬 — 이게 핵심
+    assert (cam.col, cam.row) == (5, 4)                  # 장비 화면 기준 절대값

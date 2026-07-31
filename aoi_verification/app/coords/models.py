@@ -53,24 +53,33 @@ class DefectGeometry:
 # pitch 는 평상시 Params_WaferInfo.ini `[Geometry] DieStep_X/Y` 에서 읽는다.
 CAMTEK_PITCH_X: float = 37247.7   # µm/die (TB500 폴백)
 CAMTEK_PITCH_Y: float = 44905.4   # µm/die (TB500 폴백)
-# ⚠ col_origin/row_total 은 die 격자 **범위**라 아직 어떤 결과 파일에도 없다.
-# 두 값은 ref/val 양쪽에 똑같이 걸려 매칭 거리에서 상쇄되고, 표시·엑셀의 col/row 에만
-# 일정 오프셋으로 남는다.  die map 파일이 확인되면 wafer_geometry 에서 읽어 대체한다.
-CAMTEK_COL_OFFSET: int = 2        # TB500
-# TB500: Y die 수 6, INI 원본 Row 는 1-based 1..6 (dev/좌표 확인 실측 분포).
-# 1-based 위→아래를 0-based 아래→위(row 0..5)로 뒤집는 값 — 7 이면 전 구간 +1 로 어긋난다
-# (현물 웨이퍼 맵·KLA 변환과 1 차이 나던 버그의 원인).
-CAMTEK_ROW_TOTAL: int = 6         # TB500
+# ⚠ 아래 두 값은 die 격자 **맵 원점**이라 어떤 결과 파일에서도 읽을 수 없다.
+# 결과 파일에는 '검사한 die' 만 기록돼 맵 가장자리의 미사용 행/열을 알 방법이 없다.
+# ── 정답 기준: 장비(AOI Data Viewer) 웨이퍼 맵.  왼쪽 맨 아래가 (0,0), 오른쪽·위로 +1.
+# 실측 판독 1건: INI `Col=8, Row=5` → 장비 화면 `col=6, row=2`.
+#   col = Col − 2       → 8−2 = 6 ✓
+#   row = 7 − Row       → 7−5 = 2 ✓   (`Row−3` 은 Row 1..6 에서 음수가 나와 불가)
+CAMTEK_COL_OFFSET: int = 2
+# ⚠ 이전 세션이 이 값을 7→6 으로 바꿨다가 전 구간 row 가 1 작아졌다.  그때 맞춘 대상은
+# '현물 웨이퍼 맵' 이 아니라 KLA 변환값이었고(Camtek 만 움직여 KLA 에 맞춤), KLA 쪽
+# 원점이 틀렸다는 걸 못 봤다.  근거는 위 장비 화면 직접 판독이다 — 되돌리지 말 것.
+# (맵 세로 눈금은 0..6 의 7칸이고 이 자재는 그중 1..6 만 쓴다 → "col 7개 / row 6개".)
+CAMTEK_ROW_TOTAL: int = 7
 
 # ── KLA .001 변환 폴백 상수 (TB500 실측) ──────────────────────────────────
 # col = XINDEX + KLA_ZERO_X
 # row = YINDEX + KLA_ZERO_Y
 # x   = round(XREL)
 # y   = round(DiePitchY - YREL)
-# 평상시에는 .001 헤더의 SampleTestPlan die 인덱스 최솟값에서 읽는다
-# (TB500: XINDEX −3..3 → 3, YINDEX −3..2 → 3 — 아래 값과 일치).
-KLA_ZERO_X: int = 3   # TB500 폴백: package X count 7, 7 // 2 = 3
-KLA_ZERO_Y: int = 3   # TB500 폴백: package Y count 6, 6 // 2 = 3
+# ⚠ SampleTestPlan 최솟값(−min(XINDEX))으로 자동 산출할 수 있는 건 **X 뿐**이다.
+# 그 목록에는 '검사한 die' 만 있어서, 맵 가장자리 행/열이 통째로 미사용이면 최솟값이
+# 맵 원점과 어긋난다.  이 자재가 정확히 그 경우다:
+#   X: 맵 0..6 을 전부 사용 → −min(XINDEX) = 3 이 맞다        → wafer_geometry 가 자동 산출
+#   Y: 맵 0..6 중 1..6 만 사용 → −min(YINDEX) = 3 이지만 4 가 맞다 → 아래 상수를 쓴다
+# 근거: 거리 121 µm 로 동일 결함임이 확인된 쌍 Camtek(Col=7,Row=3) ↔ KLA(XINDEX=2,YINDEX=0).
+#   Camtek row = 7−3 = 4 이므로 KLA 도 0 + KLA_ZERO_Y = 4 여야 정렬이 맞는다.
+KLA_ZERO_X: int = 3   # 맵 가장자리 열을 전부 쓰므로 SampleTestPlan 산출값과 같다
+KLA_ZERO_Y: int = 4   # 맵 아래 1행이 미사용 → SampleTestPlan 산출값(3)보다 1 크다
 
 # ── Surface.flt geometry 환산 상수 (보고서: 1 px = 0.77 µm) ────────────────
 # area_um2  = area(px²)        × SURFACE_AREA_FACTOR (= 0.77²)

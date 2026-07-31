@@ -42,11 +42,15 @@ _LOG = logging.getLogger("aoi.coords")
 # 합리적 die pitch 범위(µm) — 엉뚱한 키를 읽었을 때 채택 방지.
 _MIN_PITCH, _MAX_PITCH = 100.0, 500000.0
 
-# Camtek geometry 파일 후보 (상대경로, X키, Y키) 우선순위.
-# die map 을 담은 파일이 확인되면 이 튜플 맨 앞에 한 줄 추가하면 된다.
+# Camtek die pitch 후보 (상대경로, X키, Y키) 우선순위.
+# ⚠ **간격(step) 계열만** 넣는다.  die '크기' 는 pitch 가 아니다 — 스크라이브 street 이
+# 있는 자재는 둘이 다르다(실측 PGEE48: XDieSize 4147.352 vs XDieIndex 4160.900, 13.5 µm 차).
+# 크기를 pitch 로 쓰면 col 70 에서 die 폭의 23% 가 어긋난다.  그래서 `DieSize_*`
+# `DieSelectedSize_*` `XDieSize/YDieSize` 는 후보에서 제외한다.
 _CAMTEK_SOURCES = (
     ("Params_WaferInfo.ini", "DieStep_X", "DieStep_Y"),
-    ("Params_WaferInfo.ini", "DieSize_X", "DieSize_Y"),
+    ("ProductInfo.ini", "XDieIndex", "YDieIndex"),
+    ("ProductInfo.ini", "CustomerDiePitch_X", "CustomerDiePitch_Y"),
 )
 # 사진 폴더가 웨이퍼 폴더의 하위일 수 있어 부모를 몇 단계까지 올라가 찾는다.
 _PARENT_LEVELS = 2
@@ -124,68 +128,83 @@ def _search_dirs(folder: Path) -> list[Path]:
     return dirs
 
 
-def _read_camtek_pitch(folder: Path) -> Optional[tuple[float, float, str]]:
-    """``Params_WaferInfo.ini`` 에서 (pitch_x, pitch_y, 출처). 못 찾으면 None."""
+def _pitch_candidates(folder: Path):
+    """(pitch_x, pitch_y, 출처) 후보를 우선순위대로 내놓는다.
+
+    마지막 후보는 :mod:`.models` 의 상수다 — **다른 후보와 똑같이 검산을 받는다**.
+    폴더 자신의 Col/Row 가 확인해 주면 그건 추정이 아니라 검증된 값이고, 다른 자재에서는
+    검산이 거부하므로 옛 상수가 조용히 쓰이는 경로가 없다."""
     for base in _search_dirs(folder):
         for rel, kx, ky in _CAMTEK_SOURCES:
             px = _read_key(base / rel, kx)
             py = _read_key(base / rel, ky)
             if px is not None and py is not None:
-                return (px, py, f"{rel}:{kx}/{ky}")
-    return None
+                yield (px, py, f"{rel}:{kx}/{ky}")
+    yield (CAMTEK_PITCH_X, CAMTEK_PITCH_Y, "models.py 상수")
 
 
-def _pitch_matches_grid(folder: Path, pitch_x: float, pitch_y: float) -> bool:
-    """실측 불변식 ``Col == floor(X/pitch_x)`` 로 읽은 pitch 를 검산한다.
+def _grid_check(folder: Path, pitch_x: float, pitch_y: float) -> tuple[bool, bool]:
+    """실측 불변식 ``Col == floor(X/pitch_x)`` 로 pitch 를 검산한다.
 
-    같은 폴더의 ``ColorImageGrabingInfo.ini`` 항목을 쓴다.  INI 가 없거나 항목을 못
-    읽으면 **검산을 건너뛴다**(True) — 검산 불가는 불일치가 아니다.
+    반환 ``(통과, 의미있음)``.  '의미있음' 은 검산이 실제로 pitch 를 제약했는지다 —
+    모든 항목이 ``Col=0`` 이면 어떤 pitch 든 통과하므로 검산이 아무 말도 못 한 것이다.
+    파일에서 읽은 값은 '통과' 만으로 채택하지만, 상수 후보는 '의미있음' 까지 요구한다.
     """
     from . import camtek_ini      # 순환 import 회피 — 검산 시점에만 필요
 
     try:
         raw = camtek_ini.load_raw_folder(folder)
     except Exception:
-        return True
+        return (False, False)
     if not raw:
-        return True
-    return all(math.floor(X / pitch_x) == col_i
-               and math.floor(Y / pitch_y) == row_i
-               for X, Y, col_i, row_i in raw.values())
+        return (False, False)
+    ok = all(math.floor(X / pitch_x) == col_i
+             and math.floor(Y / pitch_y) == row_i
+             for X, Y, col_i, row_i in raw.values())
+    meaningful = (any(col_i >= 1 for _, _, col_i, _ in raw.values())
+                  and any(row_i >= 1 for *_, row_i in raw.values()))
+    return (ok, meaningful)
 
 
 @lru_cache(maxsize=256)
-def camtek_geometry(folder: Path) -> CamtekGeometry:
-    """폴더의 Camtek die 격자 기하.  못 읽으면 TB500 폴백(+경고).  fail-safe."""
+def camtek_geometry(folder: Path) -> Optional[CamtekGeometry]:
+    """폴더의 Camtek die 격자 기하.
+
+    후보를 우선순위대로 돌며 **검산을 통과한 첫 값**을 채택한다.  통과한 후보가 하나도
+    없으면 ``None`` — 호출부는 좌표를 만들지 않는다.  **틀린 좌표를 내느니 안 내는 편이
+    낫다**(die 가 4 mm 인 자재에 37 mm pitch 를 쓰면 x 가 −1,652,266 µm 같은 값이 된다).
+    전 구간 fail-safe.
+    """
     try:
-        found = _read_camtek_pitch(folder)
-        if found is None:
-            _LOG.warning(
-                "Camtek die pitch 를 찾지 못해 기본값(%.1f×%.1f µm)을 씁니다 — "
-                "폴더에 Params_WaferInfo.ini 가 없습니다: %s",
-                CAMTEK_PITCH_X, CAMTEK_PITCH_Y, folder)
-            return FALLBACK_CAMTEK
-        px, py, src = found
-        if not _pitch_matches_grid(folder, px, py):
-            _LOG.warning(
-                "%s 에서 읽은 die pitch(%.3f×%.3f µm)가 INI 의 Col/Row 와 맞지 않아 "
-                "기본값을 씁니다: %s", src, px, py, folder)
-            return FALLBACK_CAMTEK
-        # col_origin·row_total 은 die 격자 **범위**라 현재 어떤 파일에도 없다.
-        # 두 값은 ref/val 양쪽에 똑같이 걸려 매칭 거리에서 상쇄되고, 표시·엑셀의
-        # col/row 에만 일정 오프셋으로 남는다.  die map 파일이 확인되면 여기서 읽는다.
-        return CamtekGeometry(pitch_x=px, pitch_y=py,
-                              col_origin=CAMTEK_COL_OFFSET,
-                              row_total=CAMTEK_ROW_TOTAL, source=src)
+        for px, py, src in _pitch_candidates(folder):
+            ok, meaningful = _grid_check(folder, px, py)
+            if not ok:
+                continue
+            if src == "models.py 상수" and not meaningful:
+                continue      # 검산이 pitch 를 제약하지 못했다 — 상수를 추정으로 쓰지 않는다
+            # col_origin·row_total 은 맵 원점이라 어떤 결과 파일에도 없다(models.py 참조).
+            return CamtekGeometry(pitch_x=px, pitch_y=py,
+                                  col_origin=CAMTEK_COL_OFFSET,
+                                  row_total=CAMTEK_ROW_TOTAL, source=src)
+        _LOG.warning(
+            "die pitch 를 확정하지 못해 이 폴더의 좌표를 만들지 않습니다 "
+            "(Params_WaferInfo.ini `DieStep_X/Y` 또는 ProductInfo.ini `XDieIndex/YDieIndex` "
+            "가 필요합니다): %s", folder)
+        return None
     except Exception:
-        return FALLBACK_CAMTEK
+        return None
 
 
 def parse_kla_header(text: str) -> Optional[KlaGeometry]:
     """KLA ``.001`` 헤더 텍스트 → KlaGeometry.  DiePitch 가 없으면 None.
 
-    ``zero_x/zero_y`` 는 ``SampleTestPlan`` 의 die 인덱스 최솟값에서 나온다
-    (TB500: XINDEX −3..3 → zero_x=3).  SampleTestPlan 이 없으면 폴백 값을 쓴다.
+    ``zero_x`` 만 ``SampleTestPlan`` 의 XINDEX 최솟값에서 산출한다(XINDEX −3..3 → 3).
+
+    ⚠ ``zero_y`` 는 산출하지 않는다.  ``SampleTestPlan`` 에는 **검사한 die 만** 있어서,
+    맵 가장자리 행이 통째로 미사용이면 최솟값이 맵 원점과 어긋난다 — 실측 자재가 정확히
+    그 경우다(세로 맵 0..6 중 1..6 만 사용 → 산출값 3, 정답 4).  가로는 0..6 을 전부 써서
+    산출값이 맞는다.  자세한 근거는 :mod:`.models` 의 ``KLA_ZERO_Y`` 주석 참조.
+
     순수 함수 — 파일 없이 헤드리스 테스트할 수 있다.
     """
     pm = _DIEPITCH_PAT.search(text)
@@ -198,16 +217,14 @@ def parse_kla_header(text: str) -> Optional[KlaGeometry]:
     if not (_MIN_PITCH <= px <= _MAX_PITCH and _MIN_PITCH <= py <= _MAX_PITCH):
         return None
 
-    zero_x, zero_y, src = KLA_ZERO_X, KLA_ZERO_Y, "DiePitch"
+    zero_x, src = KLA_ZERO_X, "DiePitch"
     tm = _TESTPLAN_PAT.search(text)
     if tm:
         pairs = _INDEX_PAIR_PAT.findall(tm.group(1))
         if pairs:
-            xs = [int(a) for a, _ in pairs]
-            ys = [int(b) for _, b in pairs]
-            zero_x, zero_y = -min(xs), -min(ys)
+            zero_x = -min(int(a) for a, _ in pairs)
             src = "DiePitch+SampleTestPlan"
-    return KlaGeometry(pitch_x=px, pitch_y=py, zero_x=zero_x, zero_y=zero_y,
+    return KlaGeometry(pitch_x=px, pitch_y=py, zero_x=zero_x, zero_y=KLA_ZERO_Y,
                        source=src)
 
 
@@ -225,8 +242,8 @@ def kla_geometry(folder: Path) -> KlaGeometry:
             if geom is not None:
                 if geom.source == "DiePitch":
                     _LOG.warning(
-                        "KLA %s 에 SampleTestPlan 이 없어 die 인덱스 원점은 "
-                        "기본값(%d,%d)을 씁니다.", info.name, KLA_ZERO_X, KLA_ZERO_Y)
+                        "KLA %s 에 SampleTestPlan 이 없어 die 인덱스 원점 X 도 "
+                        "기본값(%d)을 씁니다.", info.name, KLA_ZERO_X)
                 return geom
         _LOG.warning(
             "KLA die 격자 정보를 찾지 못해 기본값을 씁니다: %s", folder)

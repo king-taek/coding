@@ -227,6 +227,17 @@ COORD_TOLERANCE_TOOLTIP = (
     "기본값 500 µm 은 한 die 크기가 40 mm 안팎일 때 약 1% 수준입니다.\n"
     "die 가 작은 자재에서는 그에 맞춰 낮춰 주세요."
 )
+# 기준 폴더에서 읽어낸 die 크기 안내 — 허용 오차를 자재에 맞게 정하도록 돕는다.
+# 값을 대신 바꾸지는 않는다(기존 결과가 조용히 달라지면 안 된다).
+DIE_SIZE_DETECTED_FMT = "감지된 die: {x:,.0f} × {y:,.0f} µm  ({src})"
+DIE_SIZE_NOT_FOUND = (
+    "die 크기를 찾지 못했습니다 — 좌표 매칭을 쓸 수 없습니다"
+)
+# tol 이 die 폭 대비 이 비율을 넘으면 경고한다(die 4 mm 자재에서 500 µm = 12%).
+DIE_TOL_RATIO_WARN = 0.02
+DIE_TOL_TOO_LARGE_FMT = (
+    "허용 오차가 die 폭의 {pct:.0f} % 입니다 — 오매칭 위험이 있습니다"
+)
 ENGINE_EFFICIENCY_CPU_ONLY = (
     "가속 장치(Intel GPU)가 없어 CPU만으로 고효율 모드를 실행합니다."
 )

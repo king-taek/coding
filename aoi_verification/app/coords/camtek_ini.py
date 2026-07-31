@@ -47,7 +47,12 @@ def load_folder(folder: Path) -> dict[str, DefectCoord]:
         return {}
     try:
         # die 격자 기하는 폴더당 한 번만 구한다(자체 캐시).
-        return _parse_ini(ini, camtek_geometry(folder))
+        # 기하를 확정하지 못하면 **좌표를 만들지 않는다** — 틀린 좌표를 내느니 낫다.
+        # 호출부는 빈 dict 를 '좌표 정보 없음' 으로 처리한다(COORD_NO_DATA_MSG).
+        geom = camtek_geometry(folder)
+        if geom is None:
+            return {}
+        return _parse_ini(ini, geom)
     except Exception:
         return {}
 
