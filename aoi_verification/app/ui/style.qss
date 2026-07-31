@@ -208,8 +208,8 @@ QPushButton:focus {
 }
 
 QPushButton:disabled {
-    color: $mute;
-    border: 1px dashed $line;
+    color: $disabled_ink;
+    border: 1px dashed $disabled_line;
     background-color: transparent;
 }
 
@@ -244,8 +244,8 @@ QPushButton[role="stepper"]:focus {
     border: $focus_w solid $focus;
 }
 QPushButton[role="stepper"]:disabled {
-    color: $mute;
-    border: 1px dashed $line;
+    color: $disabled_ink;
+    border: 1px dashed $disabled_line;
 }
 QPushButton[role="primary"] {
     background-color: $accent;
@@ -263,12 +263,12 @@ QPushButton[role="primary"]:pressed {
 }
 /* ★ 속성 선택자가 일반 QPushButton:disabled 보다 특이도가 높아, 이 규칙이 없으면
    primary 는 비활성이어도 꽉 찬 채로 남아 '누를 수 있어 보이는 못 누르는 버튼'이 된다.
-   ★ 면을 $line2 로 채우면 라벨($mute)이 그 위에서 3.42:1 로 떨어진다(실측) — 비워
-   두면 라벨이 시트 면 위에 앉아 6.5:1 을 유지하면서도 '비어 있다 = 못 누른다'로 읽힌다. */
+   면은 비우고 글자·테두리를 비활성 토큰으로 — '비어 있다 = 못 누른다'로 읽힌다.
+   ★ 주석에도 달러 토큰을 쓰지 마라 — Template.substitute 가 주석을 구분하지 않는다. */
 QPushButton[role="primary"]:disabled {
     background-color: transparent;
-    color: $mute;
-    border: 1px dashed $line;
+    color: $disabled_ink;
+    border: 1px dashed $disabled_line;
     font-weight: 600;
 }
 /* ★ 채운 버튼의 포커스 링은 페이지 배경이 아니라 **버튼 자기 면**과 대비해야 한다.
@@ -325,8 +325,8 @@ QPushButton[role="warn"]:focus {
 QPushButton[role="ghost"]:disabled,
 QPushButton[role="danger"]:disabled,
 QPushButton[role="warn"]:disabled {
-    color: $mute;
-    border: 1px dashed $line;
+    color: $disabled_ink;
+    border: 1px dashed $disabled_line;
     background: transparent;
 }
 
@@ -367,13 +367,13 @@ QPushButton[role="option"]:focus {
 }
 QPushButton[role="option"]:disabled {
     background: transparent;
-    color: $mute;
-    border: 1px dashed $line;
+    color: $disabled_ink;
+    border: 1px dashed $disabled_line;
 }
 QPushButton[role="option"]:checked:disabled {
     background-color: $accent_tint_soft;
-    color: $mute;
-    border: 1px dashed $line;
+    color: $disabled_ink;
+    border: 1px dashed $disabled_line;
 }
 
 /* 입력 오류 — 왜 [검증 시작] 을 누를 수 없는지 툴팁이 아니라 눈에 보이게. */
@@ -490,13 +490,13 @@ QPushButton[role="segment"]:focus {
 }
 QPushButton[role="segment"]:disabled {
     background: transparent;
-    color: $mute;
-    border: 1px dashed $line;
+    color: $disabled_ink;
+    border: 1px dashed $disabled_line;
 }
 QPushButton[role="segment"]:checked:disabled {
     background-color: $accent_tint_soft;
-    color: $mute;
-    border: 1px dashed $line;
+    color: $disabled_ink;
+    border: 1px dashed $disabled_line;
 }
 
 /* 차단 이유 문구 — '왜 지금 확인할 수 없는가'.  ★ `role="warn"` 은 QPushButton 에만
@@ -541,8 +541,8 @@ QPushButton[role="slotTile"]:checked {
 }
 QPushButton[role="slotTile"]:disabled {
     background: transparent;
-    color: $mute;
-    border: 1px dashed $line;
+    color: $disabled_ink;
+    border: 1px dashed $disabled_line;
 }
 
 /* 카드 제목 — 인라인 f-string 스타일 3중복을 대체. */
@@ -616,8 +616,8 @@ QPushButton[role="rowAction"]:focus {
 }
 QPushButton[role="rowAction"]:disabled {
     background: transparent;
-    color: $mute;
-    border: 1px dashed $line;
+    color: $disabled_ink;
+    border: 1px dashed $disabled_line;
 }
 
 /* 링크형 버튼 — 반복되는 2차 액션(더 보기 ▾·접기 ▴)용. 테두리 없이 조용히.
