@@ -124,7 +124,11 @@ def test_zoom_applies_to_one_pane_only(qapp, big_source):
 
 
 def test_zoom_is_clamped(qapp, big_source):
-    """유효 배율(맞춤×배수)이 상·하한 안에 머문다 — 사진이 사라지지 않게."""
+    """유효 배율(맞춤×배수)이 상·하한 안에 머문다 — 사진이 사라지지 않게.
+
+    ※ 휠을 수백 번 굴리는 대신 **한 번에 큰 배수**를 준다.  클램프는 누적이 아니라
+    한 호출 안에서 걸리므로 검증력은 같고, 확대 렌더(SmoothTransformation)를
+    수백 번 반복하지 않아 스위트가 느려지지 않는다."""
     v = _viewer()
     try:
         v.show()
@@ -133,12 +137,10 @@ def test_zoom_is_clamped(qapp, big_source):
         box = pane._target_box()
         base = sbs.fit_scale(pane._pix.width(), pane._pix.height(),
                              box.width(), box.height())
-        for _ in range(200):
-            pane.zoom_by(1.1)
-        assert base * pane._zoom <= sbs._SCALE_MAX + 1e-6
-        for _ in range(400):
-            pane.zoom_by(1 / 1.1)
-        assert base * pane._zoom >= sbs._SCALE_MIN - 1e-6
+        pane.zoom_by(10_000)
+        assert base * pane._zoom <= sbs._SCALE_MAX + 1e-6, "상한을 넘겼다"
+        pane.zoom_by(1e-9)
+        assert base * pane._zoom >= sbs._SCALE_MIN - 1e-6, "하한 밑으로 내려갔다"
     finally:
         v.close()
 

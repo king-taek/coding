@@ -27,8 +27,7 @@ import pytest
 pytest.importorskip("PyQt6.QtWidgets")
 
 from PyQt6.QtGui import QColor                                  # noqa: E402
-from PyQt6.QtWidgets import (QApplication, QMainWindow,          # noqa: E402
-                             QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import QMainWindow, QVBoxLayout, QWidget    # noqa: E402
 
 from aoi_verification.app.ui import theme                        # noqa: E402
 
@@ -37,8 +36,9 @@ _QSS = (Path(__file__).resolve().parents[2] / "aoi_verification" / "app" / "ui"
 
 
 @pytest.fixture(scope="module")
-def qapp():
-    return QApplication.instance() or QApplication([])
+def qapp(styled_qapp):
+    """테마 적용된 앱 — conftest 가 `setStyleSheet` 을 세션당 1회만 부른다."""
+    return styled_qapp
 
 
 def _strip_comments(text: str) -> str:
@@ -84,11 +84,16 @@ def test_top_level_popups_still_carry_their_own_surface():
 
 @pytest.mark.parametrize("mode", ["light", "dark"])
 def test_page_still_renders_on_the_theme_surface(qapp, mode):
-    """설정 화면을 실제로 그려 **바탕이 테마 색**인지 본다(회색 구멍 방지)."""
+    """설정 화면을 실제로 그려 **바탕이 테마 색**인지 본다(회색 구멍 방지).
+
+    ★ 스타일시트를 **창에만** 건다(`QApplication.setStyleSheet` 금지).  앱 단위
+    호출은 Qt 내부 스타일 캐시가 프로세스 수명 동안 누적돼 부를수록 비싸진다
+    (conftest 주석: 21회 = 82초).  위젯 단위 시트는 그 위젯과 자식에 적용되므로
+    여기서 검사하려는 범위와 정확히 같다."""
     from aoi_verification.app.ui.pages.setup_page import SetupPage
     theme.set_color_mode(mode)
-    qapp.setStyleSheet(theme.render_qss(_QSS))
     win = QMainWindow()
+    win.setStyleSheet(theme.render_qss(_QSS))
     win.resize(1000, 700)
     body = QWidget(win)
     lay = QVBoxLayout(body)
@@ -116,4 +121,3 @@ def test_page_still_renders_on_the_theme_surface(qapp, mode):
         win.deleteLater()
         qapp.processEvents()
         theme.set_color_mode(theme.DEFAULT_COLOR_MODE)
-        qapp.setStyleSheet("")

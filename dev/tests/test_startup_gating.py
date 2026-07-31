@@ -25,16 +25,9 @@ import pytest
 
 pytest.importorskip("PyQt6.QtWidgets")
 
-from PyQt6.QtWidgets import QApplication                     # noqa: E402
-
 from aoi_verification.app import i18n                        # noqa: E402
 from aoi_verification.app.ui import main_window as mw        # noqa: E402
 from aoi_verification.app.ui import theme                    # noqa: E402
-
-
-@pytest.fixture(scope="module")
-def qapp():
-    return QApplication.instance() or QApplication([])
 
 
 @pytest.fixture

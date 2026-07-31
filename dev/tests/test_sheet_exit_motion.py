@@ -20,16 +20,11 @@ pytest.importorskip("PyQt6.QtWidgets")
 
 from PyQt6.QtCore import (QAbstractAnimation, QPropertyAnimation,  # noqa: E402
                           Qt, QTimer)
-from PyQt6.QtWidgets import (QApplication, QDialog, QLabel,  # noqa: E402
+from PyQt6.QtWidgets import (QDialog, QLabel,                # noqa: E402
                              QMainWindow, QWidget)
 
 from aoi_verification.app.ui import motion              # noqa: E402
 from aoi_verification.app.ui.widgets import sheet_host as sh  # noqa: E402
-
-
-@pytest.fixture(scope="module")
-def qapp():
-    return QApplication.instance() or QApplication([])
 
 
 @pytest.fixture
