@@ -23,7 +23,6 @@ import pytest
 pytest.importorskip("PyQt6.QtWidgets")
 
 from PyQt6.QtGui import QColor, QPixmap                # noqa: E402
-from PyQt6.QtWidgets import QApplication               # noqa: E402
 
 from aoi_verification.app.models.slot import ImageItem  # noqa: E402
 from aoi_verification.app.ui import theme               # noqa: E402
@@ -31,10 +30,9 @@ from aoi_verification.app.ui.widgets import side_by_side_viewer as sbs  # noqa: 
 
 
 @pytest.fixture(scope="module")
-def qapp():
-    app = QApplication.instance() or QApplication([])
-    theme.apply_to_app(app)
-    return app
+def qapp(styled_qapp):
+    """테마 적용된 앱 — conftest 가 `setStyleSheet` 을 세션당 1회만 부른다."""
+    return styled_qapp
 
 
 @pytest.fixture

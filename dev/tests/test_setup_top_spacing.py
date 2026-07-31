@@ -19,7 +19,7 @@ import pytest
 
 pytest.importorskip("PyQt6.QtWidgets")
 
-from PyQt6.QtWidgets import QApplication, QLabel, QScrollArea   # noqa: E402
+from PyQt6.QtWidgets import QLabel, QScrollArea                 # noqa: E402
 
 from aoi_verification.app import i18n                            # noqa: E402
 from aoi_verification.app.ui import theme                        # noqa: E402
@@ -27,10 +27,9 @@ from aoi_verification.app.ui.pages import setup_page as sp       # noqa: E402
 
 
 @pytest.fixture(scope="module")
-def qapp():
-    app = QApplication.instance() or QApplication([])
-    theme.apply_to_app(app)
-    return app
+def qapp(styled_qapp):
+    """테마 적용된 앱 — conftest 가 `setStyleSheet` 을 세션당 1회만 부른다."""
+    return styled_qapp
 
 
 def _page(qapp, w: int = 1280, h: int = 900) -> sp.SetupPage:

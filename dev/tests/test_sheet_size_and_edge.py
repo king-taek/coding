@@ -14,11 +14,13 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from pathlib import Path
+
 import pytest
 
 pytest.importorskip("PyQt6.QtWidgets")
 
-from PyQt6.QtWidgets import (QApplication, QLabel, QMainWindow,  # noqa: E402
+from PyQt6.QtWidgets import (QLabel, QMainWindow,               # noqa: E402
                              QVBoxLayout, QWidget)
 
 from aoi_verification.app.ui import theme                        # noqa: E402
@@ -26,12 +28,14 @@ from aoi_verification.app.ui.widgets import sheet_host as sh     # noqa: E402
 from aoi_verification.app.ui.widgets.slot_select_dialog import (  # noqa: E402
     SlotSelectDialog)
 
+_QSS_SRC = (Path(__file__).resolve().parents[2] / "aoi_verification" / "app" / "ui"
+            / "style.qss").read_text(encoding="utf-8")
+
 
 @pytest.fixture(scope="module")
-def qapp():
-    app = QApplication.instance() or QApplication([])
-    theme.apply_to_app(app)
-    return app
+def qapp(styled_qapp):
+    """테마 적용된 앱 — conftest 가 `setStyleSheet` 을 세션당 1회만 부른다."""
+    return styled_qapp
 
 
 @pytest.fixture
@@ -114,13 +118,15 @@ def test_sheet_surface_differs_from_page(qapp, mode):
 
 
 @pytest.mark.parametrize("mode", ["light", "dark"])
-def test_sheet_border_is_visible(qapp, mode):
-    """시트 테두리가 뒷화면과 3:1 이상으로 구분되고, 굵기가 2px 이다."""
+def test_sheet_border_is_visible(mode):
+    """시트 테두리가 뒷화면과 3:1 이상으로 구분되고, 굵기가 2px 이다.
+
+    ★ 검사 대상은 **렌더된 QSS 문자열**이라 앱에 적용할 필요가 없다.  `apply_to_app` 은
+    부를수록 비싸지므로(conftest 주석) 여기서는 `render_qss` 로 문자열만 얻는다."""
     theme.set_color_mode(mode)
-    theme.apply_to_app(qapp)
     try:
         assert _contrast(theme.BG, theme.LINE_STRONG) >= 3.0
-        qss = qapp.styleSheet()
+        qss = theme.render_qss(_QSS_SRC)
         i = qss.find('QDialog[role="sheet"]')
         assert i >= 0
         block = qss[i:i + 220]
@@ -128,4 +134,3 @@ def test_sheet_border_is_visible(qapp, mode):
         assert f"background-color: {theme.ELEV};" in block, block
     finally:
         theme.set_color_mode("light")
-        theme.apply_to_app(qapp)

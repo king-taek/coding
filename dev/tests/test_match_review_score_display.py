@@ -20,7 +20,6 @@ import pytest
 
 pytest.importorskip("PyQt6.QtWidgets")
 
-from PyQt6.QtWidgets import QApplication                    # noqa: E402
 
 from aoi_verification.app import i18n                       # noqa: E402
 from aoi_verification.app.models.result import MatchResult   # noqa: E402
@@ -30,10 +29,9 @@ from aoi_verification.app.ui.pages.match_review_page import (  # noqa: E402
 
 
 @pytest.fixture(scope="module")
-def qapp():
-    app = QApplication.instance() or QApplication([])
-    theme.apply_to_app(app)
-    return app
+def qapp(styled_qapp):
+    """테마 적용된 앱 — conftest 가 `setStyleSheet` 을 세션당 1회만 부른다."""
+    return styled_qapp
 
 
 def _page(qapp, *, coord_mode: bool, score: float, tolerance: float = 500.0):

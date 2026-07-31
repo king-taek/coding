@@ -1,0 +1,11 @@
+# 테스트 전용 패키지 — 앱 구동에는 필요 없다.
+#
+# ★ 여기에 두는 이유: 루트 `requirements.txt` 는 자동 업데이트가 사용자 PC 에서
+#   설치를 시도하는 유일한 목록이고, 그 설치가 실패하면 업데이트가 통째로 적용되지
+#   않는다(CLAUDE.md).  테스트 도구 때문에 그 위험을 질 이유가 없다.
+#   `dev/` 는 `updater._UPDATE_SKIP_TOP` 이 통째로 건너뛰므로 배포본에 들어가지도 않는다.
+#
+# 설치:  python -m pip install -r dev/requirements-dev.txt
+pytest>=8.0
+# 파일 단위 병렬 실행(`-n auto`) — 스위트가 파일 간 독립이라 거의 선형으로 줄어든다.
+pytest-xdist>=3.5
