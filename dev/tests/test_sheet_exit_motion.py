@@ -18,7 +18,8 @@ import pytest
 
 pytest.importorskip("PyQt6.QtWidgets")
 
-from PyQt6.QtCore import QPropertyAnimation, Qt         # noqa: E402
+from PyQt6.QtCore import (QAbstractAnimation, QPropertyAnimation,  # noqa: E402
+                          Qt, QTimer)
 from PyQt6.QtWidgets import (QApplication, QDialog, QLabel,  # noqa: E402
                              QMainWindow, QWidget)
 
@@ -105,11 +106,90 @@ def test_close_leaves_fading_ghost(host, qapp, motion_on):
     assert host._ghosts, "퇴장 스냅샷이 없다 — 닫기 모션이 걸리지 않았다"
     ghost = host._ghosts[0]
     assert isinstance(ghost, QLabel) and ghost.isVisible()
+    # ★ 어둠은 잔상을 기다리지 않는다 — 닫는 그 프레임에 내려간다.
+    assert host._scrim.isHidden(), (
+        "스크림이 잔상 페이드를 기다린다 — 팝업이 사라진 뒤 어두운 화면만 남는다")
+    assert host.isVisible(), "잔상이 얹힐 바닥(호스트)까지 먼저 내려갔다"
 
     _finish_ghost_animations(host)
     qapp.processEvents()
     assert not host._ghosts, "스냅샷이 정리되지 않았다"
     assert not host.isVisible(), "마지막 시트가 닫혔으면 호스트도 내려가야 한다"
+
+
+def test_scrim_stays_while_a_lower_sheet_remains(host, qapp, motion_on):
+    """중첩 시트에서 위쪽만 닫히면 어둠은 그대로 — 아래 시트가 아직 열려 있다."""
+    lower, upper = _dialog(delete_on_close=False), _dialog(delete_on_close=False)
+    entries = []
+    for d in (lower, upper):
+        d.setParent(host)
+        d.setWindowFlags(Qt.WindowType.Widget)
+        entry = {"widget": d, "root": d, "frame": None, "loop": _FakeLoop(),
+                 "prev_parent": None, "prev_flags": d.windowFlags(),
+                 "full_bleed": False}
+        host._stack.append(entry)
+        entries.append(entry)
+    host.show()
+    host._scrim.show()
+    lower.show()
+    upper.show()
+    qapp.processEvents()
+
+    host._close(entries[1])
+    assert not host._scrim.isHidden(), "아래 시트가 남았는데 어둠이 걷혔다"
+    assert host.isVisible()
+
+
+def test_open_fades_the_scrim_in(host, qapp, motion_on):
+    """열 때는 어둠이 0→1 로 들어온다(한 프레임에 슬램하지 않는다)."""
+    scrim = host._scrim
+    scrim.fade_in()
+    assert scrim._fade == 0.0, "페이드가 시작점(투명)에서 출발하지 않았다"
+    anim = scrim._fade_anim
+    assert anim is not None
+    anim.setCurrentTime(anim.duration())     # 벽시계 대신 끝으로 민다
+    assert scrim._fade == 1.0, "페이드가 끝에서 최대 어둠에 닿지 않았다"
+
+
+def test_open_is_instant_when_motion_is_off(host, qapp, monkeypatch):
+    """헤드리스(모션 off)에서는 트윈 없이 즉시 최대 어둠 — 결정성 유지."""
+    monkeypatch.setattr(motion, "enabled", lambda: False)
+    scrim = host._scrim
+    scrim._fade = 0.0
+    scrim.fade_in()
+    assert scrim._fade == 1.0
+    assert scrim._fade_anim is None, "모션이 꺼졌는데 애니메이션을 만들었다"
+
+
+def test_nested_open_does_not_restart_the_scrim_fade(host, qapp, motion_on):
+    """시트 위에 시트를 열 때 어둠을 다시 깜빡이지 않는다.
+
+    바깥 시트의 페이드를 끝난 상태로 만들어 둔 뒤 안쪽 시트를 연다 — 그때 어둠이
+    다시 트윈을 시작하면(애니메이션이 Running) 화면이 한 번 더 깜빡인 것이다."""
+    outer, inner = _dialog(delete_on_close=False), _dialog(delete_on_close=False)
+    seen = {}
+
+    def open_inner():
+        scrim = host._scrim
+        if scrim._fade_anim is not None:
+            scrim._fade_anim.stop()         # 바깥 시트의 페이드는 끝났다고 본다
+        scrim._set_fade(1.0)
+
+        def finish_inner():
+            anim = scrim._fade_anim
+            seen["running"] = (anim is not None
+                               and anim.state() == QAbstractAnimation.State.Running)
+            seen["fade"] = scrim._fade
+            inner.accept()
+
+        QTimer.singleShot(20, finish_inner)
+        host.run(inner)
+        outer.accept()
+
+    QTimer.singleShot(20, open_inner)
+    host.run(outer)
+    assert seen["running"] is False, "중첩 시트가 어둠을 다시 트윈했다"
+    assert seen["fade"] == 1.0, "중첩 시트가 어둠을 0 에서 다시 시작했다"
 
 
 def test_close_with_delete_on_close_does_not_crash(host, qapp, motion_on):
