@@ -13,6 +13,7 @@ from ... import i18n
 from .. import theme
 from ...models.result import FinalResult
 from ...workers.exporter import ExcelExporter
+from ..widgets.app_logo import build_logo_label
 from ..widgets.loading_overlay import LoadingOverlay
 from ..widgets.neon_button import NeonButton
 from ..widgets.neon_card import NeonCard
@@ -46,6 +47,10 @@ class ResultPage(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(40, 40, 40, 40)
         root.setSpacing(20)
+
+        # 상단 로고 — 이 화면은 전체 스크롤이 없어 맨 위에 그대로 둔다
+        # (보이는 결과는 예전과 같다).
+        root.addWidget(build_logo_label(self))
 
         self.title = QLabel(i18n.KO.RESULT_TITLE, self)
         self.title.setProperty("role", "title")

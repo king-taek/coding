@@ -42,8 +42,30 @@ class NeonButton(QPushButton):
         anim.setEndValue(0.92 if pressed else 1.0)
         anim.setDuration(motion.dur(90))
         anim.setEasingCurve(motion.EASE_PRIMARY)
+        if not pressed:
+            anim.finished.connect(self._clear_press_effect)
         anim.start()
         self._press_anim = anim
+
+    def _clear_press_effect(self) -> None:
+        """딥이 1.0 으로 돌아왔으면 이펙트를 **떼어 낸다**(#렉).
+
+        그래픽 이펙트가 붙은 위젯은 값이 1.0(무변화)이어도 다시 그릴 때마다 오프스크린
+        픽스맵을 거친다.  떼지 않으면 세션 동안 '한 번이라도 누른 모든 버튼'이 영구히
+        느린 경로로 남는다.  다음 프레스에서 lazy 로 다시 만들어지므로 딥은 그대로다.
+        (중간에 다시 눌려 값이 1.0 이 아니면 손대지 않는다 — 진행 중인 딥을 지우면
+        버튼이 깜빡인다.)"""
+        eff = self._press_eff
+        if eff is None:
+            return
+        try:
+            if eff.opacity() < 0.999:
+                return
+            self.setGraphicsEffect(None)     # 이펙트 소유권은 위젯 → 여기서 파괴된다
+        except RuntimeError:
+            pass
+        self._press_eff = None
+        self._press_anim = None
 
     def mousePressEvent(self, e):  # noqa: N802
         self._press_feedback(True)

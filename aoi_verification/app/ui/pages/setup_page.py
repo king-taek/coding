@@ -16,6 +16,7 @@ from ... import i18n
 from .. import motion, theme
 from ...utils import prefs as _prefs
 from ...utils.prefs import AutomationLevel, EngineMode
+from ..widgets.app_logo import build_logo_label
 from ..widgets.collapsible_section import CollapsibleSection
 from ..widgets.neon_button import NeonButton
 from ..widgets.neon_card import NeonCard
@@ -71,6 +72,10 @@ class SetupPage(QWidget):
         self._appearance_timer = QTimer(self)
         self._appearance_timer.setSingleShot(True)
         self._appearance_timer.timeout.connect(self._emit_appearance_changed)
+        # 무거운 구성 요소(영상 처리·가속)가 준비됐는가 — 준비 전엔 [검증 시작] 을
+        # 잠근다.  ★ 기본은 True 다: 이 페이지를 단독으로 띄우는 곳(테스트·미리보기)
+        # 에서 버튼이 영원히 잠기면 안 된다.  메인 창이 곧바로 False 로 뒤집는다.
+        self._backend_ready = True
         self._build()
 
     # ------------------------------------------------------------------
@@ -109,6 +114,10 @@ class SetupPage(QWidget):
         m = theme.PROFILE.page_margin
         root.setContentsMargins(m, m, m, m)
         root.setSpacing(theme.PROFILE.section_gap)
+
+        # 상단 로고 — 스크롤 **안**에 둔다.  아래를 볼 때 위로 밀려 올라가며
+        # 화면을 넓게 쓰게 한다(사용자 요청: 고정 칸이 아니게).
+        root.addWidget(build_logo_label(host))
 
         self._build_body(root)
 
@@ -832,8 +841,20 @@ class SetupPage(QWidget):
                 err.setText("")
             # ★ setVisible 을 쓰지 않는다 — 자리를 예약해 뒀으므로 문자열만 바꾼다.
 
+    def set_backend_ready(self, ready: bool) -> None:
+        """무거운 구성 요소가 준비됐는지 알린다 — 창을 먼저 띄우는 시작 흐름용.
+
+        준비 전에는 [검증 시작] 을 잠그고 버튼에 '준비 중' 을 표기한다.  활성 여부는
+        여전히 :meth:`_validate` 하나가 정한다 — 여기서 직접 ``setEnabled`` 를 부르면
+        다음 폴더 입력의 디바운스가 그것을 곧바로 덮어쓴다."""
+        self._backend_ready = bool(ready)
+        self.start_btn.setText(
+            i18n.KO.BTN_START if self._backend_ready
+            else i18n.KO.BTN_START_PREPARING)
+        self._validate()
+
     def _validate(self) -> bool:
-        """두 폴더가 모두 유효할 때만 [검증 시작] 을 활성화하고, 아니면 이유를 표시."""
+        """두 폴더가 모두 유효하고 **구성 요소가 준비됐을 때만** [검증 시작] 활성화."""
         ref_state = self._dir_state(self.ref_path_edit.text())
         val_state = self._dir_state(self.val_path_edit.text())
         # 비어 있는 초기 상태에서 빨간 테두리로 겁주지 않는다 — 문구만 조용히.
@@ -841,10 +862,18 @@ class SetupPage(QWidget):
                               ref_state if ref_state == "missing" else "")
         self._set_field_state(self.val_path_edit,
                               val_state if val_state == "missing" else "")
-        ok = not ref_state and not val_state
+        dirs_ok = not ref_state and not val_state
+        ok = dirs_ok and self._backend_ready
         self.start_btn.setEnabled(ok)
         if hasattr(self, "_start_hint"):
-            self._start_hint.setText("" if ok else i18n.KO.START_BLOCKED_HINT)
+            # 폴더 문제가 먼저다 — 그건 사용자가 지금 고칠 수 있는 것이고,
+            # '준비 중' 은 가만히 있으면 저절로 풀린다.
+            if not dirs_ok:
+                self._start_hint.setText(i18n.KO.START_BLOCKED_HINT)
+            elif not self._backend_ready:
+                self._start_hint.setText(i18n.KO.START_PREPARING_HINT)
+            else:
+                self._start_hint.setText("")
         self._refresh_die_hint(None if ref_state else self.ref_path_edit.text())
         return ok
 
