@@ -613,6 +613,7 @@ IMAGE_INFO_STAMP_MEASURED = "측정정보 있음"
 IMAGE_INFO_SOURCE_NAMES = {
     "camtek_live": "Camtek LIVE 파일명",
     "camtek_ini": "Camtek 정보파일(INI)",
+    "camtek_abs": "Camtek 정보파일(INI) — 절대 wafer 좌표",
     "kla": "KLA 정보파일",
 }
 

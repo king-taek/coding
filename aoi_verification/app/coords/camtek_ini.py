@@ -1,12 +1,14 @@
 """Camtek INI 파일(ColorImageGrabingInfo.ini) 파싱 → DefectCoord.
 
 변환식 — 상수가 아니라 폴더에서 읽은 :class:`~.wafer_geometry.CamtekGeometry` 를 쓴다
-(die 크기가 다른 디바이스 지원)::
+(die 크기가 다른 디바이스 지원).  **die 인덱스는 좌표에서 유도한다** — INI 의 ``Col``/
+``Row`` 필드는 레시피마다 원점이 다를 수 있어 변환에 쓰지 않는다::
 
-    col = Col - geom.col_origin
-    row = geom.row_total - Row              # row_total = ceil(Diameter / pitch_y)
-    x   = floor(X - Col × geom.pitch_x)     # 장비 표기 = 버림 (반올림 아님 — 실측:
-    y   = floor(Y - Row × geom.pitch_y)     #   나머지 43180.809 를 장비는 43180 으로 표기)
+    x_index = floor(X / geom.pitch_x)       y_index = floor(Y / geom.pitch_y)
+    col = x_index - geom.col_origin
+    row = geom.row_total - y_index          # row_total = ceil(Diameter / pitch_y)
+    x   = floor(X - x_index × pitch_x)      # 장비 표기 = 버림 (반올림 아님 — 실측:
+    y   = floor(Y - y_index × pitch_y)      #   나머지 43180.809 를 장비는 43180 으로 표기)
 """
 
 from __future__ import annotations
@@ -21,7 +23,8 @@ from .models import CAMTEK_COL_OFFSET, DefectCoord
 from .wafer_geometry import CamtekGeometry, FALLBACK_CAMTEK, camtek_geometry
 from .ini_text import read_ini_text
 
-__all__ = ["resolve", "load_folder", "load_abs_folder", "load_raw_folder"]
+__all__ = ["resolve", "load_folder", "load_abs_folder", "load_raw_folder",
+           "load_recipe_folder", "abs_coord"]
 
 # INI 파일 이름 후보 — 대소문자 두 가지
 _INI_CANDIDATES = ("ColorImageGrabingInfo.ini", "ColorImageGrabinginfo.ini")
@@ -84,14 +87,30 @@ def _extract_coord(content: str,
     raw = _extract_raw(content)
     if raw is None:
         return None
-    X, Y, col_i, row_i = raw
-    col = col_i - geom.col_origin
-    row = geom.row_total - row_i
+    X, Y, _col_i, _row_i = raw
+    # ★ die 인덱스는 **좌표에서 유도**한다 — INI 의 Col/Row 필드를 쓰지 않는다.
+    #   실측: 같은 결함을 두 레시피가 찍으면 Col 은 같은데 Row 만 1 어긋난다
+    #   (recipe1 Row=3, recipe2 Row=4).  필드를 그대로 쓰면 die 내부 y 가 −15349 같은
+    #   음수가 된다 — die 안의 위치로 불가능한 값이다.  그 필드는 pitch 검산의
+    #   참조값으로만 쓴다(`wafer_geometry._grid_check`).
+    x_index = math.floor(X / geom.pitch_x)
+    y_index = math.floor(Y / geom.pitch_y)
+    col = x_index - geom.col_origin
+    row = geom.row_total - y_index
     # 버림(floor) — 장비 화면·정답 데이터와 표기를 일치시킨다.  거리 계산 변화는
     # ref/val 양쪽 동일 규칙으로 2 µm 미만이라 매칭 판정(20/500 µm)에 영향 없다.
-    x = float(math.floor(X - col_i * geom.pitch_x))
-    y = float(math.floor(Y - row_i * geom.pitch_y))
+    x = float(math.floor(X - x_index * geom.pitch_x))
+    y = float(math.floor(Y - y_index * geom.pitch_y))
     return DefectCoord(col=col, row=row, x=x, y=y, source="camtek_ini")
+
+
+def abs_coord(X: float, Y: float, col_i: int, row_i: int) -> DefectCoord:
+    """원시 ``(X, Y, Col, Row)`` → **절대 wafer 좌표** DefectCoord (순수 함수).
+
+    :func:`_parse_ini_abs` 와 :func:`..coords.resolve_batch` 의 프레임 통일이 공유한다."""
+    return DefectCoord(col=col_i - CAMTEK_COL_OFFSET, row=-row_i,
+                       x=float(math.floor(X)), y=float(math.floor(Y)),
+                       source="camtek_abs")
 
 
 def _parse_ini_abs(path: Path) -> dict[str, DefectCoord]:
@@ -105,7 +124,9 @@ def _parse_ini_abs(path: Path) -> dict[str, DefectCoord]:
       비교보다 오히려 엄격하다(인접 die 의 같은 상대위치 결함이 거리 0 으로 보이던 문제가 없다).
 
     프레임이 다른 좌표(die-내부 x≈1만 vs 절대 x≈10만)와는 거리가 tol×3 을 한참 넘어
-    **자동으로 기각**되므로 별도 가드가 필요 없다.
+    **자동으로 기각**되므로 별도 가드가 필요 없다. 다만 그러면 그 슬롯이 통째로 '매치
+    실패' 로 보이므로, 한 실행 안에서 프레임이 섞이는 건 :func:`..coords.resolve_batch`
+    가 미리 막는다.
     """
     text = read_ini_text(path) or ""
     parts = _SECTION_PAT.split(text)
@@ -116,11 +137,7 @@ def _parse_ini_abs(path: Path) -> dict[str, DefectCoord]:
         if raw is None:
             continue
         X, Y, col_i, row_i = raw
-        result[Path(name.strip()).stem.lower()] = DefectCoord(
-            col=col_i - CAMTEK_COL_OFFSET, row=-row_i,
-            x=float(math.floor(X)), y=float(math.floor(Y)),
-            source="camtek_abs",
-        )
+        result[Path(name.strip()).stem.lower()] = abs_coord(X, Y, col_i, row_i)
     return result
 
 
@@ -166,6 +183,32 @@ def load_raw_folder(folder: Path) -> dict[str, tuple[float, float, int, int]]:
             raw = _extract_raw(content)
             if raw is not None:
                 result[Path(name.strip()).stem.lower()] = raw
+        return result
+    except Exception:
+        return {}
+
+
+@lru_cache(maxsize=256)
+def load_recipe_folder(folder: Path) -> dict[str, int]:
+    """폴더의 INI → ``{stem(소문자) → RecipeNumber}``.  키가 없으면 ``0``.
+
+    :func:`~.wafer_geometry._grid_check` 가 검산을 **레시피별로 묶을 때** 쓴다 —
+    실측상 레시피마다 ``Row`` 필드의 원점이 1 다를 수 있어, 한 폴더의 항목을
+    통째로 묶으면 정상적인 pitch 도 거부된다.
+
+    :func:`load_raw_folder` 의 4-튜플 계약을 안 건드리려고 별도 캐시로 둔다
+    (``load_abs_folder`` 와 같은 관습)."""
+    ini = _find_ini(folder)
+    if ini is None:
+        return {}
+    try:
+        text = read_ini_text(ini) or ""
+        parts = _SECTION_PAT.split(text)
+        result: dict[str, int] = {}
+        it = iter(parts[1:])
+        for name, content in zip(it, it):
+            m = re.search(r"(?im)^\s*RecipeNumber\s*=\s*(-?\d+)\s*$", content)
+            result[Path(name.strip()).stem.lower()] = int(m.group(1)) if m else 0
         return result
     except Exception:
         return {}

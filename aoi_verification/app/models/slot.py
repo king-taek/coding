@@ -58,13 +58,25 @@ class ScanResult:
 # ---------------------------------------------------------------------------
 # Scanning
 # ---------------------------------------------------------------------------
-def is_ignored_name(name: str) -> bool:
-    """파일명에 점으로 구분된 't' 토큰이 있으면 무시 대상.
+# 결함 사진이 아닌 웨이퍼 전경(매크로) 카메라 사진 — 슬롯마다 1장씩 들어 있고
+# ColorImageGrabingInfo.ini 에 항목이 없어 좌표를 만들 수 없다.
+# 예: ``CognexInSight17xx_Bottom_OnPal_Station1_Slot21.jpg``
+_NON_DEFECT_PREFIXES = ("cognexinsight",)
 
-    예: ``-86955.68631.t.1.jpg`` → 확장자 제거한 stem ``-86955.68631.t.1`` 을
-    ``.`` 으로 나눈 토큰 ``[-86955, 68631, t, 1]`` 에 정확히 ``t`` 가 있으므로
-    무시한다 (썸네일 생성·매칭 등 모든 단계에서 처음부터 배제).
+
+def is_ignored_name(name: str) -> bool:
+    """무시 대상 파일명인가 (썸네일 생성·매칭 등 모든 단계에서 처음부터 배제).
+
+    두 가지를 거른다:
+
+    1. 점으로 구분된 ``t`` 토큰 — 예: ``-86955.68631.t.1.jpg`` 는 확장자 제거한 stem
+       ``-86955.68631.t.1`` 을 ``.`` 으로 나눈 토큰 ``[-86955, 68631, t, 1]`` 에 정확히
+       ``t`` 가 있다.
+    2. 결함 사진이 아닌 웨이퍼 전경 사진(:data:`_NON_DEFECT_PREFIXES`) — 좌표가 없어
+       매칭에 쓸 수 없다.
     """
+    if name.lower().startswith(_NON_DEFECT_PREFIXES):
+        return True
     stem = name.rsplit(".", 1)[0]        # 확장자 한 단계 제거
     return "t" in stem.split(".")
 

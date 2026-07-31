@@ -27,11 +27,13 @@ def _clear_caches():
     """폴더 단위 lru_cache 가 테스트 간에 새지 않게 한다."""
     for f in (wg.camtek_geometry, wg.kla_geometry, camtek_ini.load_folder,
               camtek_ini.load_raw_folder, camtek_ini.load_abs_folder,
+              camtek_ini.load_recipe_folder,
               kla_info.load_folder, kla_info.load_folder_raw):
         f.cache_clear()
     yield
     for f in (wg.camtek_geometry, wg.kla_geometry, camtek_ini.load_folder,
               camtek_ini.load_raw_folder, camtek_ini.load_abs_folder,
+              camtek_ini.load_recipe_folder,
               kla_info.load_folder, kla_info.load_folder_raw):
         f.cache_clear()
 
@@ -65,6 +67,14 @@ def _make_camtek_folder(tmp_path: Path, pitch_x: float, pitch_y: float,
     (target / "Params_WaferInfo.ini").write_text(
         _params_ini(px, py, size_only=size_only), encoding="utf-8")
     return folder
+
+
+def _grabbing_ini_rec(entries) -> str:
+    """entries: [(stem, X, Y, Col, Row, RecipeNumber)] → INI 텍스트."""
+    return "\n".join(
+        f"[{stem}.jpeg]\nX={X}\nY={Y}\nCol={C}\nRow={R}\nRecipeNumber={N}\n"
+        for stem, X, Y, C, R, N in entries
+    )
 
 
 def _make_bare_folder(folder: Path, entries) -> Path:
@@ -335,6 +345,152 @@ class TestIniReading:
         p = tmp_path / "Params_WaferInfo.ini"
         p.write_text("[Geometry]\nDieStep_X=37247,700000\n", encoding="utf-8")
         assert wg._read_key(p, "DieStep_X") is None
+
+
+# ---------------------------------------------------------------------------
+# ★ 레시피마다 INI 의 Row 원점이 다르다 — 15호기 실측 (docs §6-F)
+#
+# 같은 결함을 두 레시피가 각각 찍은 쌍에서 Col 은 같은데 Row 만 1 어긋난다.
+# 그래서 (1) 좌표 변환은 INI 필드를 안 쓰고 floor(좌표/pitch) 로 유도하고,
+# (2) 검산은 X 만 등호를 요구하고 Y 는 레시피별 상수만 본다.
+# ---------------------------------------------------------------------------
+_PX15, _PY15 = 37248.3, 44905.3
+
+# (stem, X, Y, Col, Row, RecipeNumber) — 15호기 실측 11건 전수
+_W15 = [
+    ("e0", 233772.904192119, 163340.112966944, 6, 3, 1),
+    ("e1", 188062.270142103,  58551.454939582, 5, 2, 2),
+    ("e2", 200452.201247592,  87166.935915637, 5, 2, 2),
+    ("e3", 225291.594265483, 117680.444167723, 6, 3, 2),
+    ("e4", 261809.911748775,  91042.1416570301, 7, 3, 2),
+    ("e5", 302342.430001159, 160651.700554255, 8, 4, 2),
+    ("h0", 268193.498386342, 238680.107201584, 7, 6, 2),
+    # ↓ 같은 결함을 두 레시피가 각각 찍은 쌍 — 결정적 증거
+    ("f_r1", 177040.194847314, 164273.0968992,  4, 3, 1),
+    ("f_r2", 177039.528173140, 164272.800876176, 4, 4, 2),
+    ("a_r1", 312572.038914189, 168315.709590306, 8, 3, 1),
+    ("a_r2", 312570.607145627, 168316.092231146, 8, 4, 2),
+]
+
+
+def _make_w15_folder(tmp_path: Path) -> Path:
+    folder = tmp_path / "w15"
+    folder.mkdir(parents=True)
+    (folder / "ColorImageGrabingInfo.ini").write_text(
+        _grabbing_ini_rec(_W15), encoding="utf-8")
+    (folder / "Params_WaferInfo.ini").write_text(
+        _params_ini(_PX15, _PY15) + "[Geometric]\nDiameter=300000.000000\n",
+        encoding="utf-8")
+    return folder
+
+
+class TestRecipeRowOriginDiffers:
+    def test_diestep_is_accepted(self, tmp_path):
+        """★ 예전엔 여기서 검산이 실패해 멀쩡한 DieStep 을 거부했다."""
+        geom = wg.camtek_geometry(_make_w15_folder(tmp_path))
+        assert geom is not None
+        assert (geom.pitch_x, geom.pitch_y) == (_PX15, _PY15)
+        assert geom.source == "Params_WaferInfo.ini:DieStep_X/DieStep_Y"
+
+    def test_die_local_xy_stays_inside_the_die(self, tmp_path):
+        """die 내부 좌표는 ``0 ≤ v < pitch`` 다.
+
+        INI 의 Row 를 그대로 쓰던 예전 코드는 recipe2 에서 y = −15349 를 냈다 —
+        die 안의 위치로 불가능한 값이다."""
+        coords = camtek_ini.load_folder(_make_w15_folder(tmp_path))
+        assert len(coords) == len(_W15)
+        for stem, c in coords.items():
+            assert c.source == "camtek_ini"
+            assert 0 <= c.x < _PX15, stem
+            assert 0 <= c.y < _PY15, stem
+
+    @pytest.mark.parametrize("r1,r2", [("f_r1", "f_r2"), ("a_r1", "a_r2")])
+    def test_same_defect_two_recipes_agree(self, tmp_path, r1, r2):
+        """★ 결정적 증거 — 같은 결함이면 레시피가 달라도 같은 die·같은 좌표다.
+
+        INI 는 Row 를 3 / 4 로 다르게 적었지만 물리 위치는 1.5 µm 이내로 같다."""
+        coords = camtek_ini.load_folder(_make_w15_folder(tmp_path))
+        a, b = coords[r1], coords[r2]
+        assert (a.col, a.row) == (b.col, b.row)      # 같은 die
+        assert abs(a.x - b.x) <= 2 and abs(a.y - b.y) <= 2
+
+    def test_mixed_diffs_within_one_recipe_still_rejected(self, tmp_path):
+        """완화는 **레시피별**로만 한다 — 한 레시피 안에서 섞이면 여전히 거부."""
+        folder = tmp_path / "mixed"
+        folder.mkdir(parents=True)
+        (folder / "ColorImageGrabingInfo.ini").write_text(
+            _grabbing_ini_rec([("a", 233772.904192119, 163340.112966944, 6, 3, 1),
+                               ("b", 188062.270142103, 58551.454939582, 5, 2, 1)]),
+            encoding="utf-8")
+        (folder / "Params_WaferInfo.ini").write_text(
+            _params_ini(_PX15, _PY15), encoding="utf-8")
+        assert wg.camtek_geometry(folder) is None
+
+    def test_wrong_device_pitch_still_rejected(self, tmp_path):
+        """★ Y 완화가 안전장치를 약화시키지 않았다 — X 등호가 그대로 걸러낸다.
+
+        PGEE48 격자(4160.9 × 5294.0)를 15호기 데이터에 넣으면 Δcol 이 38..67 로
+        발산해 **그 값이 채택되지 않는다**(뒤 후보로 넘어간다)."""
+        folder = tmp_path / "w15"
+        folder.mkdir(parents=True)
+        (folder / "ColorImageGrabingInfo.ini").write_text(
+            _grabbing_ini_rec(_W15), encoding="utf-8")
+        (folder / "Params_WaferInfo.ini").write_text(
+            _params_ini(4160.9, 5294.0), encoding="utf-8")
+        assert wg._grid_check(folder, 4160.9, 5294.0)[0] is False
+        geom = wg.camtek_geometry(folder)
+        assert geom is None or (geom.pitch_x, geom.pitch_y) != (4160.9, 5294.0)
+
+    def test_offset_is_logged_not_silent(self, tmp_path, caplog):
+        """조용한 폴백 금지 — 어긋난 채로 통과했으면 기록을 남긴다."""
+        import logging
+        with caplog.at_level(logging.INFO, logger="aoi.coords"):
+            assert wg.camtek_geometry(_make_w15_folder(tmp_path)) is not None
+        assert any("INI Row" in r.message for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# ★ 한 실행 안에서 좌표 프레임을 통일한다
+#
+# die pitch 검산은 웨이퍼 폴더마다 독립이라 ref 는 통과하고 val 은 실패할 수 있다.
+# 그러면 row 규약이 달라(row_total−y_index vs −Row) (col,row)±1 게이트가 절대 안 맞고
+# 그 슬롯이 통째로 '매치 실패' 가 된다.
+# ---------------------------------------------------------------------------
+class TestFrameUnification:
+    @staticmethod
+    def _two_folders(tmp_path: Path):
+        """pitch 를 확정하는 폴더 하나 + 못 하는 폴더 하나."""
+        from aoi_verification.app.coords import resolve_batch
+        good = _make_camtek_folder(
+            tmp_path / "good", CAMTEK_PITCH_X, CAMTEK_PITCH_Y,
+            [("g", 3 * CAMTEK_PITCH_X + 500.0, 2 * CAMTEK_PITCH_Y + 500.0, 3, 2)])
+        bad = _make_bare_folder(         # pitch 를 알려주는 파일이 없는 다른 격자
+            tmp_path / "bad",
+            [("b", 50 * 4160.9 + 2000.0, 20 * 5294.0 + 2000.0, 50, 20)])
+        return resolve_batch, good / "g.jpeg", bad / "b.jpeg"
+
+    def test_mixed_frames_are_unified_to_absolute(self, tmp_path):
+        """★ 섞이면 **전부** 절대좌표로 내린다."""
+        resolve_batch, gp, bp = self._two_folders(tmp_path)
+        got = resolve_batch([gp, bp])
+        assert {c.source for c in got.values()} == {"camtek_abs"}
+        # 절대좌표라 x/y 가 원시 wafer 좌표 그대로다.
+        assert got[gp].x == float(int(3 * CAMTEK_PITCH_X + 500.0))
+
+    def test_uniform_frame_is_left_alone(self, tmp_path):
+        """섞이지 않으면 손대지 않는다 — die-내부 좌표를 유지한다."""
+        resolve_batch, gp, _bp = self._two_folders(tmp_path)
+        got = resolve_batch([gp])
+        assert got[gp].source == "camtek_ini"
+        assert got[gp].x == 500.0
+
+    def test_unification_is_announced(self, tmp_path, caplog):
+        """조용히 내리지 않는다 — 이유를 경고로 남긴다."""
+        import logging
+        resolve_batch, gp, bp = self._two_folders(tmp_path)
+        with caplog.at_level(logging.WARNING, logger="aoi.coords"):
+            resolve_batch([gp, bp])
+        assert any("절대 wafer 좌표로 통일" in r.message for r in caplog.records)
 
 
 # ---------------------------------------------------------------------------
