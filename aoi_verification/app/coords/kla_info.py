@@ -23,6 +23,7 @@ from typing import Optional
 
 from .models import DefectCoord
 from .wafer_geometry import kla_geometry
+from .ini_text import decode_ini_bytes, read_ini_text
 
 __all__ = ["resolve", "load_folder", "load_folder_raw", "read_wafer_id"]
 
@@ -99,7 +100,7 @@ def read_wafer_id(folder: Path) -> Optional[str]:
                 head = fh.read(_HEAD_BYTES)
         except OSError:
             continue
-        m = _WAFER_ID_PAT.search(head.decode("utf-8", errors="replace"))
+        m = _WAFER_ID_PAT.search(decode_ini_bytes(head))
         if m:
             wid = m.group(1).strip().upper()
             if wid:
@@ -147,7 +148,7 @@ def load_folder(folder: Path) -> dict[str, DefectCoord]:
 
 
 def _parse_info_raw(path: Path) -> dict[str, dict]:
-    text = path.read_text(encoding="utf-8", errors="replace")
+    text = read_ini_text(path) or ""
     lines = text.splitlines()
 
     # DiePitchY 추출

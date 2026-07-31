@@ -17,6 +17,7 @@ import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional
+from .ini_text import read_ini_text
 
 _SECTION = re.compile(r"\[[^\]]*\]")
 _NAME = re.compile(r"(?im)^\s*RecipeName\s*=\s*(.+?)\s*$")
@@ -32,7 +33,7 @@ def _scan_sectioned(folder: Path) -> dict:
     """RecipesInfo.ini 의 [Recipe-<N>] Name= → {N: name} (실측 주 형식)."""
     out: dict = {}
     try:
-        txt = (folder / "RecipesInfo.ini").read_text(encoding="utf-8", errors="replace")
+        txt = read_ini_text(folder / "RecipesInfo.ini") or ""
     except OSError:
         return out
     for m in _RECIPE_SEC.finditer(txt):
@@ -47,7 +48,7 @@ def _scan(paths) -> dict:
     out: dict = {}
     for p in paths:
         try:
-            txt = p.read_text(encoding="utf-8", errors="replace")
+            txt = read_ini_text(p) or ""
         except OSError:
             continue
         for body in _SECTION.split(txt):

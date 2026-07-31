@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from aoi_verification.app.coords import camtek_ini                    # noqa: E402
 from aoi_verification.app.coords import wafer_geometry as wg          # noqa: E402
+from aoi_verification.app.coords.ini_text import read_ini_text        # noqa: E402
 
 
 def _detect_encoding(path: Path) -> str:
@@ -51,7 +52,7 @@ def _report_sources(folder: Path) -> None:
             else:
                 print(f"      ✗ {rel} [{where}] — {kx}/{ky} 를 못 읽음 "
                       f"({kx}={px}, {ky}={py}),  인코딩={_detect_encoding(p)}")
-                txt = wg.read_ini_text(p) or ""
+                txt = read_ini_text(p) or ""
                 hits = [ln.strip() for ln in txt.splitlines()
                         if "die" in ln.lower() and "=" in ln]
                 if hits:
@@ -63,9 +64,20 @@ def _report_sources(folder: Path) -> None:
 
 def _report_grid(folder: Path) -> None:
     raw = camtek_ini.load_raw_folder(folder)
+    ini = camtek_ini._find_ini(folder)
     print(f"\n  [2] ColorImageGrabingInfo.ini 항목: {len(raw)} 건")
+    if ini is not None:
+        print(f"      파일: {ini.name}  (인코딩 {_detect_encoding(ini)}, "
+              f"{ini.stat().st_size:,} bytes)")
     if not raw:
-        print("      → Camtek INI 좌표가 없는 폴더(KLA·LIVE 슬롯이면 정상)")
+        if ini is None:
+            print("      → 이 폴더에 ColorImageGrabingInfo.ini 자체가 없다"
+                  "(KLA·LIVE 슬롯이면 정상)")
+        else:
+            print("      ⚠ 파일은 있는데 항목이 0건이다 — 형식/인코딩을 확인해야 한다.")
+            txt = read_ini_text(ini) or ""
+            for ln in txt.splitlines()[:8]:
+                print(f"         | {ln}")
         return
 
     print("\n  [3] 검산 Col == floor(X/pitch_x), Row == floor(Y/pitch_y)")
@@ -90,10 +102,53 @@ def _report_grid(folder: Path) -> None:
     print(f"      pitch_x ∈ ({lo_x:.1f}, {hi_x:.1f}]      pitch_y ∈ ({lo_y:.1f}, {hi_y:.1f}]")
 
 
+def _report_images(folder: Path) -> int:
+    """이 폴더에 앱이 쓸 사진이 있는지, 있다면 좌표가 어디서 나오는지."""
+    from aoi_verification.app.config import CONFIG
+    from aoi_verification.app.coords import resolve
+    from aoi_verification.app.models.slot import is_ignored_name
+
+    try:
+        imgs = [p for p in folder.iterdir()
+                if p.is_file() and CONFIG.is_image(p.name)
+                and not is_ignored_name(p.name)]
+    except OSError:
+        return 0
+    print(f"\n  [0] 앱이 쓸 사진: {len(imgs)} 장")
+    if not imgs:
+        return 0
+    c = resolve(imgs[0])
+    if c is None:
+        print(f"      ✗ 좌표를 못 만든다 (예: {imgs[0].name})")
+        print("         → 이 폴더로는 좌표 매칭이 안 된다.")
+    else:
+        print(f"      ✓ 좌표 나옴 — source={c.source}, col={c.col} row={c.row} "
+              f"x={c.x:.0f} y={c.y:.0f}  (예: {imgs[0].name})")
+    return len(imgs)
+
+
+def _scan_paths(root: Path) -> None:
+    """Params_WaferInfo.ini 가 알려주는 스캔 결과 경로를 그대로 보여준다."""
+    for base in wg._search_dirs(root):
+        p = base / "Params_WaferInfo.ini"
+        if not p.exists():
+            continue
+        txt = read_ini_text(p) or ""
+        hits = [ln.strip() for ln in txt.splitlines()
+                if ln.strip().lower().startswith(("scanresultspath", "recipepath",
+                                                  "setuppath"))]
+        if hits:
+            print(f"\n  [참고] {p} 가 가리키는 경로")
+            for h in hits:
+                print(f"      {h}")
+        break
+
+
 def diagnose(folder: Path) -> None:
     print("=" * 72)
     print(f"폴더: {folder}")
     print("=" * 72)
+    _report_images(folder)
     _report_sources(folder)
     _report_grid(folder)
 
@@ -123,15 +178,17 @@ def main(argv: list[str]) -> int:
         if not root.is_dir():
             print(f"[건너뜀] 폴더가 아님: {root}")
             continue
-        # 폴더 자신에 INI 가 있으면 그것만, 없으면 하위 폴더들을 훑는다.
-        targets = [root]
-        if not camtek_ini._find_ini(root):
+        # ★ 폴더 자신을 **항상** 먼저 본다(예전엔 하위만 보고 정작 준 폴더를 빼먹었다).
+        diagnose(root)
+        print()
+        try:
             subs = sorted(p for p in root.iterdir() if p.is_dir())
-            if subs:
-                targets = subs
-        for t in targets:
+        except OSError:
+            subs = []
+        for t in subs:
             diagnose(t)
             print()
+        _scan_paths(root)
     return 0
 
 
