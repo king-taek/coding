@@ -151,11 +151,11 @@ def test_renders_kla_defect_rows(qapp, isolated_cache, tmp_path):
     assert i18n.KO.IMAGE_INFO_NO_FILE not in texts
     assert i18n.KO.IMAGE_INFO_ROW_WAFER_ID in texts
     assert "W6459076XYG1" in texts
-    # 표는 라벨/값 2열이다 — 엑셀 한 줄("col 1 / row 2")과 모양이 다르고 수치는 같다.
+    # 표는 라벨/값 2열이다 — 엑셀 한 줄("col 1 / row 3")과 모양이 다르고 수치는 같다.
     assert i18n.KO.DEFECT_COLROW_LABEL in texts
-    assert "1 / 2" in texts
+    assert "1 / 3" in texts
     # 복사 텍스트는 라벨\t값 — 엑셀에 붙여넣으면 값이 한 열로 선다.
-    assert f"{i18n.KO.DEFECT_COLROW_LABEL}\t1 / 2" in dlg.as_text()
+    assert f"{i18n.KO.DEFECT_COLROW_LABEL}\t1 / 3" in dlg.as_text()
     dlg.deleteLater()
 
 

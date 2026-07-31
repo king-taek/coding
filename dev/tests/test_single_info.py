@@ -75,7 +75,7 @@ def test_kla_adds_native_coordinate_line(tmp_path):
 
     lines = single_info.coord_lines(img)
     assert len(lines) == 3
-    assert lines[0] == "col 1 / row 2"      # XINDEX -2 +3, YINDEX -1 +3
+    assert lines[0] == "col 1 / row 3"      # XINDEX -2 +KLA_ZERO_X, YINDEX -1 +KLA_ZERO_Y
     assert lines[2] == i18n.KO.EXPORT_KLA_NATIVE_FMT.format(x=1234.5, y=2345.6)
     # 줄바꿈은 붙이는 쪽(엑셀 exporter)이 넣는다 — 여기서는 순수 텍스트.
     assert not any(line.startswith("\n") for line in lines)
@@ -118,9 +118,10 @@ def _camtek_folder(tmp_path, monkeypatch, *, contrast=108.0):
     _install_flt_schema(monkeypatch)
     img = tmp_path / "z_miss.jpeg"
     img.write_bytes(b"x")
-    _write_flt(tmp_path, 1000.0, 2000.0, 55.0, 2.0, 11.0, contrast)
+    _write_flt(tmp_path, 112743.1, 226527.0, 55.0, 2.0, 11.0, contrast)
     (tmp_path / "ColorImageGrabingInfo.ini").write_text(
-        "[z_miss.jpeg]\nX=1000.0\nY=2000.0\nCol=3\nRow=5\n", encoding="utf-8")
+        "[z_miss.jpeg]\nX=112743.1\nY=226527.0\nCol=3\nRow=5\n",
+        encoding="utf-8")
     (tmp_path / "ProductInfo.ini").write_text(
         "[Z]\nZoneName=PI_Opening\nZoneID=1\n"
         "[R]\nRecipeName=PI\nRecipeNumber=2\n", encoding="utf-8")

@@ -536,7 +536,7 @@ class SetupPage(QWidget):
         self.coord_tol_spin.setToolTip(i18n.KO.COORD_TOLERANCE_TOOLTIP)
         # 수치는 모노 — '도면' 컨셉의 핵심인데 이 화면엔 모노가 한 글자도 없었다.
         self.coord_tol_spin.valueChanged.connect(
-            lambda _v: self._refresh_mode_badge())
+            lambda _v: (self._refresh_mode_badge(), self._schedule_validate()))
         self.coord_tol_spin.setProperty("role", "mono")
         self.coord_tol_spin.setAlignment(Qt.AlignmentFlag.AlignRight
                                         | Qt.AlignmentFlag.AlignVCenter)
@@ -556,6 +556,16 @@ class SetupPage(QWidget):
         _tol_layout.addWidget(self.tol_plus_btn)
         _tol_layout.addStretch()
         engine_card.body().addWidget(self._tol_row)
+
+        # 기준 폴더에서 읽어낸 die 크기 — 허용 오차를 자재에 맞게 정하도록 돕는다.
+        # ★ 값을 대신 바꾸지 않는다.  die 4 mm 자재에서 기본 500 µm 는 die 폭의 12% 라
+        #   오매칭 위험이 크지만, 조용히 값을 바꾸면 기존 결과가 달라진다 — 알리기만 한다.
+        # ★ `_start_hint`·`_errLabel` 과 같은 관습: 자리를 예약해 두고 **문자열만** 바꾼다
+        #   (setVisible 을 쓰면 아래 위젯이 위아래로 튄다).
+        self._die_hint = QLabel("", engine_card)
+        self._die_hint.setProperty("role", "muted")
+        self._die_hint.setWordWrap(True)
+        engine_card.body().addWidget(self._die_hint)
 
         # ── 구형(유사도) 모드 — 명시적 스위치 ─────────────────────────────
         # ★ 접이식 섹션을 쓰지 않는다.  예전에는 '섹션이 펼쳐졌는가'가 곧 엔진 모드였고,
@@ -835,7 +845,51 @@ class SetupPage(QWidget):
         self.start_btn.setEnabled(ok)
         if hasattr(self, "_start_hint"):
             self._start_hint.setText("" if ok else i18n.KO.START_BLOCKED_HINT)
+        self._refresh_die_hint(None if ref_state else self.ref_path_edit.text())
         return ok
+
+    def _refresh_die_hint(self, ref_text: Optional[str]) -> None:
+        """기준 폴더의 첫 슬롯에서 die 크기를 읽어 안내/경고 문구를 갱신한다.
+
+        폴더 단위 ``lru_cache`` 라 반복 호출이 싸고, `_validate` 는 이미 디바운스된다.
+        전 구간 fail-safe — 안내가 실패해도 설정 화면이 막히면 안 된다."""
+        hint = getattr(self, "_die_hint", None)
+        if hint is None:
+            return
+        geom = self._detect_die_geometry(ref_text) if ref_text else None
+        if geom is None:
+            hint.setText("" if not ref_text else i18n.KO.DIE_SIZE_NOT_FOUND)
+            hint.setProperty("role", "muted" if not ref_text else "warn")
+        else:
+            text = i18n.KO.DIE_SIZE_DETECTED_FMT.format(
+                x=geom.pitch_x, y=geom.pitch_y, src=geom.source)
+            ratio = float(self.coord_tol_spin.value()) / geom.pitch_x
+            if ratio > i18n.KO.DIE_TOL_RATIO_WARN:
+                text += "\n" + i18n.KO.DIE_TOL_TOO_LARGE_FMT.format(pct=ratio * 100.0)
+                hint.setProperty("role", "warn")
+            else:
+                hint.setProperty("role", "muted")
+            hint.setText(text)
+        hint.style().unpolish(hint)     # 동적 프로퍼티는 repolish 해야 반영된다
+        hint.style().polish(hint)
+
+    @staticmethod
+    def _detect_die_geometry(ref_text: str):
+        """기준 폴더의 첫 슬롯에서 die 격자 기하를 조회.  못 찾으면 None."""
+        from ...coords.wafer_geometry import camtek_geometry
+        from ...models.slot import list_slot_dirs
+
+        try:
+            root = Path(ref_text.strip())
+            if not root.is_dir():
+                return None
+            for _name, folder in sorted(list_slot_dirs(root).items()):
+                geom = camtek_geometry(folder)
+                if geom is not None:
+                    return geom
+            return None
+        except Exception:
+            return None
 
     def _browse(self, target: QLineEdit) -> None:
         path = QFileDialog.getExistingDirectory(self, i18n.KO.SETUP_FOLDER_LABEL)
