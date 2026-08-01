@@ -49,6 +49,8 @@ _LOG = logging.getLogger("aoi.coords")
 _MIN_PITCH, _MAX_PITCH = 100.0, 500000.0
 # 합리적 웨이퍼 직경 범위(µm) — 2인치(50 mm) ~ 450 mm.
 _MIN_DIAMETER, _MAX_DIAMETER = 50000.0, 450000.0
+# col 기준의 상식 범위 — 웨이퍼가 stage 원점에서 이보다 멀리 놓일 수 없다.
+_MAX_COL_ORIGIN = 200
 
 # Diameter 를 담은 파일 후보 — pitch 후보와 같은 폴더 탐색 순서로 찾는다.
 _DIAMETER_SOURCES = ("Params_WaferInfo.ini", "ProductInfo.ini")
@@ -108,6 +110,33 @@ def _row_total(diameter: float, pitch_y: float) -> int:
     return math.ceil(diameter / pitch_y)
 
 
+def _col_origin(center_x: Optional[float], diameter: float, pitch_x: float) -> int:
+    """col 번호 기준 = **웨이퍼 안에 온전히 들어오는 첫 die 열**.
+
+    ``col = x_index − col_origin`` 이 0 부터 시작하게 하는 값이다::
+
+        col_origin = ceil((Center_X − Diameter/2) / DieStep_X)
+
+    ``Center_X`` 는 웨이퍼가 stage 위 어디에 놓였는지다.  같은 자재라도 위치가 한 die
+    달라지면 ``x_index`` 가 통째로 1 밀리므로, **상수로 둘 수 없다**(실측: RDL4 는 1,
+    15호기는 2).  상수 2 를 쓰면 RDL4 에서 ``col = −1`` 이 나온다 — 0-based 웨이퍼 맵에
+    없는 값이다.  근거는 사진으로 확인한 LIVE↔Camtek 8쌍
+    (``docs/디바이스_하드코딩_조사.md`` §6-H).
+
+    ``center_x`` 가 없거나 기록되지 않았으면(``0``) :data:`CAMTEK_COL_OFFSET` 로 폴백한다 —
+    ``Center_X=0.000000`` 인 실물이 있고(같은 파일에 ``MeasuredDiameter=0`` 이 함께 온다)
+    그건 값이 0 이라는 뜻이 아니라 **정렬 정보 미기록**이다.
+    """
+    if not center_x:                       # None 또는 0.0 → 미기록
+        return CAMTEK_COL_OFFSET
+    origin = math.ceil((center_x - diameter / 2.0) / pitch_x)
+    if not (0 <= origin <= _MAX_COL_ORIGIN):
+        _LOG.warning("Center_X %.1f 로 계산한 col 기준 %d 이 비상식적이라 상수 %d 을 씁니다.",
+                     center_x, origin, CAMTEK_COL_OFFSET)
+        return CAMTEK_COL_OFFSET
+    return origin
+
+
 # 데이터에서 못 읽을 때 쓰는 TB500 폴백 — 값은 models.py 가 보유한다.
 FALLBACK_CAMTEK = CamtekGeometry(
     pitch_x=CAMTEK_PITCH_X, pitch_y=CAMTEK_PITCH_Y,
@@ -163,6 +192,19 @@ def _read_diameter(folder: Path) -> float:
             if v is not None:
                 return v
     return DEFAULT_WAFER_DIAMETER
+
+
+def _read_center_x(folder: Path) -> Optional[float]:
+    """웨이퍼 중심의 stage X(µm) — ``[Geometric] Center_X``.  미기록이면 None.
+
+    ``0.000000`` 은 **값이 아니라 '기록 안 됨'** 이다(같은 파일에 ``MeasuredDiameter=0``,
+    ``FlatNotchVal=-1`` 이 함께 온다).  :func:`_read_key` 의 하한이 그걸 걸러 준다."""
+    for base in _search_dirs(folder):
+        for rel in _DIAMETER_SOURCES:
+            v = _read_key(base / rel, "Center_X", _MIN_PITCH, _MAX_DIAMETER)
+            if v is not None:
+                return v
+    return None
 
 
 def _pitch_candidates(folder: Path):
@@ -261,10 +303,12 @@ def camtek_geometry(folder: Path) -> Optional[CamtekGeometry]:
                 continue
             if src == "models.py 상수" and not meaningful:
                 continue      # 검산이 pitch 를 제약하지 못했다 — 상수를 추정으로 쓰지 않는다
-            # row 기준은 유도값(ceil(Diameter/pitch_y)) — col 오프셋만 상수로 남는다.
+            # col·row 기준 모두 유도값이다.  col 은 웨이퍼의 stage 위치(Center_X)를,
+            # row 는 직경을 따른다 — 둘 다 못 읽으면 상수로 폴백한다(§6-H).
+            dia = _read_diameter(folder)
             return CamtekGeometry(pitch_x=px, pitch_y=py,
-                                  col_origin=CAMTEK_COL_OFFSET,
-                                  row_total=_row_total(_read_diameter(folder), py),
+                                  col_origin=_col_origin(_read_center_x(folder), dia, px),
+                                  row_total=_row_total(dia, py),
                                   source=src)
         # ★ Camtek INI 자체가 없는 폴더(KLA 슬롯·LIVE 파일명 슬롯)는 **조용히** None.
         #   경고는 '변환할 항목이 있는데 pitch 를 못 정한' 진짜 문제일 때만 낸다 —

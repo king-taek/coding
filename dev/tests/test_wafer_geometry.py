@@ -509,14 +509,44 @@ class TestLiveTokenOffsetIsSystematic:
             xi, yi = math.floor(X / 37247.9), math.floor(Y / 44905.3)
             assert abs(lc - (xi - 2)) <= 1 and abs(lr - (7 - yi)) <= 1
 
-    def test_app_col_can_go_negative_here(self):
-        """★ 현재 상수가 이 웨이퍼에서 **음수 col** 을 낸다 — 0-based 맵에 있을 수 없다.
+    def test_col_origin_is_derived_so_col_matches_live(self, tmp_path):
+        """★ ``col_origin`` 을 ``Center_X`` 에서 유도하면 col 이 LIVE 와 **정확히** 맞는다.
 
-        `col_origin`·`row_total` 이 자재마다 다르다는 증거다(§6-H).  매칭은 ref/val 이
-        같은 규칙이라 정상이지만 **화면·엑셀 표기가 틀린다.**  고치려면 §6-H 를 읽을 것."""
-        import math
-        X = _RDL4_PAIRS[0][0]
-        assert math.floor(X / 37247.9) - 2 == -1
+        상수 2 를 쓰면 이 웨이퍼에서 ``col = 1 − 2 = −1`` 이 나온다 — 0-based 웨이퍼 맵에
+        없는 값이다.  그게 상수가 틀렸다는 증거였다(§6-H)."""
+        folder = tmp_path / "rdl4"
+        folder.mkdir()
+        (folder / "ColorImageGrabingInfo.ini").write_text(_grabbing_ini_rec(
+            [(f"p{i}", X, Y, C, R, rec)
+             for i, (X, Y, C, R, rec, *_) in enumerate(_RDL4_PAIRS)]), encoding="utf-8")
+        (folder / "Params_WaferInfo.ini").write_text(
+            _params_ini(37247.9, 44905.3)
+            + "[Geometric]\nDiameter=300000.000000\nCenter_X=167448.973100\n",
+            encoding="utf-8")
+        geom = wg.camtek_geometry(folder)
+        assert geom is not None and geom.col_origin == 1     # 상수였다면 2
+        coords = camtek_ini.load_folder(folder)
+        for i, (*_rest, lc, _lr, _lx, _ly) in enumerate(_RDL4_PAIRS):
+            c = coords[f"p{i}"]
+            assert c.col == lc, "col 이 LIVE 토큰과 어긋난다"
+            assert c.col >= 0, "0-based 맵에 음수 col 은 없다"
+
+    def test_col_origin_falls_back_when_center_is_unrecorded(self, tmp_path):
+        """``Center_X=0`` 은 값이 아니라 '기록 안 됨' — 상수로 폴백한다.
+
+        실물(W6458244XYE1)이 그렇고, 같은 파일에 ``MeasuredDiameter=0`` 이 함께 온다.
+        그 웨이퍼는 KLA 가 ``col_origin=2`` 를 확인해 줬으므로 폴백이 맞다(§6-G)."""
+        folder = tmp_path / "nocenter"
+        folder.mkdir()
+        (folder / "ColorImageGrabingInfo.ini").write_text(
+            _grabbing_ini_rec([("a", 278197.718521499, 216679.594004774, 7, 4, 1)]),
+            encoding="utf-8")
+        (folder / "Params_WaferInfo.ini").write_text(
+            _params_ini(37247.9, 44905.3)
+            + "[Geometric]\nDiameter=300000.000000\nCenter_X=0.000000\n", encoding="utf-8")
+        geom = wg.camtek_geometry(folder)
+        assert geom is not None and geom.col_origin == 2
+        assert camtek_ini.load_folder(folder)["a"].col == 5   # KLA 와 맞는 값
 
 
 class TestLiveMatchesIni:
