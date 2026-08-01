@@ -112,7 +112,6 @@ MEMORY_PRESSURE_BYTES = PIXMAP_CACHE_MAX_BYTES + 1024 * 1024 * 1024
 class SimilarityConfig:
     engine: str = "basic"          # "basic" | "efficiency"
     center_crop: bool = False      # 사진 중앙 30% 영역만 사용 (기준·검증 모두)
-    top_k: int = 50                # 후보 재정렬 깊이
     persist_scores: bool = True    # (ref,val) 점수 디스크 영속 캐시 — 항상 기본 적용
     # 고효율 모드 동시 추론 수(in-flight).  높일수록 GPU 메모리·throughput↑
     # (계산 결과는 불변).  사용자 조절 노브.
@@ -153,11 +152,6 @@ class SimilarityConfig:
         if side in ("ref", "val"):
             return self.center_crop
         return False               # side 미지정 → crop 안 함 (캐시 키와 일관)
-
-    @property
-    def has_preprocess(self) -> bool:
-        """전처리가 하나라도 켜져 있으면 True — 캐시 키 분기/적용 판단용."""
-        return bool(self.center_crop) or bool(self.orb_nfeatures)
 
     def cache_extra(self, side=None) -> str:
         """캐시 키 판별자.  전처리 OFF 면 빈 문자열 → 기본 캐시와 동일 키.

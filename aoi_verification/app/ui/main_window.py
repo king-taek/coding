@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtCore import QThread, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (QApplication, QLabel, QMainWindow,
                               QMessageBox, QStackedWidget, QStatusBar,
                               QVBoxLayout, QWidget)
@@ -504,7 +504,6 @@ class MainWindow(QMainWindow):
             val_root=state.val_root,
             ref_machine=state.ref_machine,
             val_machine=state.val_machine,
-            mode=state.mode,
             threshold=state.threshold,
         )
         self._show_page(self._setup_page)
@@ -1307,8 +1306,6 @@ class MainWindow(QMainWindow):
             ref_machine=self._input.ref_machine,
             val_machine=self._input.val_machine,
             matches=merged,
-            miss_fast=[],
-            miss_slow=[],
             slot_only_ref=list(self._scan.ref_only),
             slot_only_val=list(self._scan.val_only),
             unmatched_refs=unmatched_refs,

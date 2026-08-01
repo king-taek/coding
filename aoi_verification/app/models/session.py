@@ -29,21 +29,19 @@ class SessionState:
     phase: str = "A"                           # cross 모드에서 "A" / "B"
     # ImageItem.key → "verify" | "exclude" (Stage 1 의 누적 결정)
     decisions: dict[str, str] = field(default_factory=dict)
-    decision_history: list[list[Any]] = field(default_factory=list)
-    # 직렬화 가능한 형태로 변경: [(action, key), ...]
 
     # ── Stage 2 진행 상태 ────────────────────────────────────────────────
     matches: list[dict[str, Any]] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)        # defer 풀
     no_match: list[str] = field(default_factory=list)       # 매칭 없음 확정
 
-    # ── 교차 검증 ────────────────────────────────────────────────────────
+    # ── Phase A 진행 상태 ───────────────────────────────────────────────
+    # ※ 교차 검증(양쪽을 서로 바꿔 한 번 더 도는 모드)이 제거되면서 그 전용 필드
+    #   (decision_history·phase_a_decisions·phase_a_no_match·cross_*)는 쓰는 곳도
+    #   읽는 곳도 없어져 함께 지웠다.  옛 세션 파일의 그 키들은 `from_dict` 가
+    #   미지 키를 걸러 무시하므로 이어하기는 그대로 동작한다.
     phase_a_matched_val_keys: list[str] = field(default_factory=list)
-    phase_a_decisions: dict[str, str] = field(default_factory=dict)
     phase_a_matches: list[dict[str, Any]] = field(default_factory=list)
-    phase_a_no_match: list[str] = field(default_factory=list)
-    cross_matches_b: list[dict[str, Any]] = field(default_factory=list)
-    cross_skipped_b: list[str] = field(default_factory=list)
 
     # ── 메타 ────────────────────────────────────────────────────────────
     updated_at: float = field(default_factory=lambda: time.time())

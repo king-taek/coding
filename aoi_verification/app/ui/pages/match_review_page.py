@@ -34,7 +34,6 @@ from ..widgets import sheet_host as sheets
 
 _THUMB_PX = 140                             # 기준 썸네일 기본 크기 (#2)
 _RUNNERUP_PX = int(_THUMB_PX * 0.8)         # 차순위는 20% 작게
-_TILE_W = _RUNNERUP_PX + 12                 # 타일 1개 점유 폭(간격 포함)
 _SIZE_MIN_PX = 100
 _SIZE_MAX_PX = 360
 # 후보 열 수는 가용 폭에 맞춰 동적으로 계산한다(가로 스크롤 방지, #3).
