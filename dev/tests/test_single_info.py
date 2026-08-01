@@ -62,8 +62,9 @@ def test_live_filename_gives_colrow_and_xy(tmp_path):
     # 막으려고 두는 가드(`'_' in stem[:m.start()]`).
     img = tmp_path / "cam_live_3_2_1000_2000.jpeg"
     img.write_bytes(b"x")
-    # 파일명 규약: row 는 1-based 표시값 → 0-based 로 -1.
-    assert single_info.coord_lines(img) == ["col 3 / row 1",
+    # col/row 토큰은 **보정 없이** 쓴다 — camtek_ini 와 같은 규약이다
+    # (예전의 row −1 정규화는 되돌려진 변경의 잔재였다 → 조사 문서 §6-G).
+    assert single_info.coord_lines(img) == ["col 3 / row 2",
                                             "x 1000 / y 2000 ㎛"]
 
 

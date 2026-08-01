@@ -450,6 +450,69 @@ class TestRecipeRowOriginDiffers:
 
 
 # ---------------------------------------------------------------------------
+# ★ LIVE 파일명 ↔ Camtek INI 실측 쌍 — 같은 웨이퍼(W7548303XYC2)의 같은 결함
+#
+# 1차 리뷰를 거친 사진은 LIVE 파일명을 쓰고 원본은 Camtek INI 를 쓴다.  두 소스가 같은
+# 규약이어야 (col,row) ±1 버킷 게이트에 함께 들어온다.  예전엔 LIVE row 를 −1 정규화해
+# Δrow 가 2 가 되면서 **이 쌍이 매치 실패**했다(→ docs/디바이스_하드코딩_조사.md §6-G).
+# ---------------------------------------------------------------------------
+_RDL4_PX, _RDL4_PY = 37247.9, 44905.3
+_RDL4_LIVE = ("TB500_RDL4 - Multi_FDV-RDL4_W7548303XYC2_3_0_"
+              "27582.7103387744_43144.6146330819_Foreign Material.jpg")
+# (stem, X, Y, Col, Row, RecipeNumber) — 같은 결함을 두 레시피가 각각 찍은 쌍
+_RDL4_INI = [("176573.312577.c.597332200.1",
+              176574.75988497, 312576.825126637, 4, 6, 1),
+             ("176573.312578.c.1643013205.2",
+              176573.932796436, 312574.83842825, 4, 6, 2)]
+
+
+class TestLiveMatchesIni:
+    @staticmethod
+    def _folder(tmp_path: Path) -> Path:
+        folder = tmp_path / "W7548303XYC2"
+        folder.mkdir(parents=True)
+        (folder / "ColorImageGrabingInfo.ini").write_text(
+            _grabbing_ini_rec(_RDL4_INI), encoding="utf-8")
+        (folder / "Params_WaferInfo.ini").write_text(
+            _params_ini(_RDL4_PX, _RDL4_PY) + "[Geometric]\nDiameter=300000.000000\n",
+            encoding="utf-8")
+        return folder
+
+    def test_geometry_resolves(self, tmp_path):
+        """이 로트는 두 레시피 모두 INI Col/Row 가 좌표와 일치한다 — DieStep 채택."""
+        geom = wg.camtek_geometry(self._folder(tmp_path))
+        assert geom is not None
+        assert (geom.pitch_x, geom.pitch_y) == (_RDL4_PX, _RDL4_PY)
+
+    @pytest.mark.parametrize("stem", [e[0] for e in _RDL4_INI])
+    def test_live_and_ini_land_in_the_same_bucket(self, tmp_path, stem):
+        """★ 이 버그의 회귀 가드 — (col,row) 차가 ±1 안이고 die 좌표가 1 µm 안이다."""
+        from aoi_verification.app.coords import camtek_live
+        ini = camtek_ini.load_folder(self._folder(tmp_path))[stem]
+        live = camtek_live.resolve(Path(_RDL4_LIVE))
+        assert live is not None
+        assert abs(live.col - ini.col) <= 1, "col 이 버킷 밖이다"
+        assert abs(live.row - ini.row) <= 1, "row 가 버킷 밖이다 (예전 −1 정규화의 증상)"
+        # 두 레시피가 같은 결함을 각각 찍어 원시 X/Y 가 2 µm 안에서 다르다.
+        assert abs(live.x - ini.x) <= 2 and abs(live.y - ini.y) <= 2
+
+    def test_neighbor_gate_actually_finds_it(self, tmp_path):
+        """게이트를 **실제로 태워** 후보로 잡히는지 본다(단언만 하지 않는다)."""
+        pytest.importorskip("PyQt6.QtCore")      # coord_matcher 가 모듈 수준에서 쓴다
+        from aoi_verification.app.coords import camtek_live
+        from aoi_verification.app.workers.coord_matcher import _match_neighbors
+        live = camtek_live.resolve(Path(_RDL4_LIVE))
+        coords = camtek_ini.load_folder(self._folder(tmp_path))
+        val_map: dict = {}
+        for stem, c in coords.items():
+            val_map.setdefault((c.col, c.row), []).append(
+                (Path(f"{stem}.jpeg"), c.x, c.y))
+        got = _match_neighbors(live.x, live.y, live.col, live.row, val_map, tol=500.0)
+        assert got, "LIVE 결함이 Camtek 후보를 하나도 못 찾았다 = 매치 실패"
+        assert {p.stem for p, _ in got} <= {e[0] for e in _RDL4_INI}
+
+
+# ---------------------------------------------------------------------------
 # ★ 한 실행 안에서 좌표 프레임을 통일한다
 #
 # die pitch 검산은 웨이퍼 폴더마다 독립이라 ref 는 통과하고 val 은 실패할 수 있다.
@@ -502,6 +565,7 @@ class TestFrameUnification:
 class TestAbsoluteFallback:
     def test_matching_works_without_die_pitch(self, tmp_path):
         """같은 결함은 매칭되고, 옆 die 의 같은 상대위치 결함은 기각된다."""
+        pytest.importorskip("PyQt6.QtCore")   # coord_matcher 가 모듈 수준에서 쓴다
         from aoi_verification.app.workers import coord_matcher as cm
 
         X, Y, P = 101023.784185837, 157436.626491902, 37247.7
@@ -526,6 +590,7 @@ class TestAbsoluteFallback:
 
         die-내부로 재면 인접 die 의 같은 상대위치 결함이 거리 0 으로 보여 오매칭했다.
         절대좌표로 재면 정확히 1 pitch 만큼 떨어져 있어 기각된다."""
+        pytest.importorskip("PyQt6.QtCore")   # coord_matcher 가 모듈 수준에서 쓴다
         from aoi_verification.app.workers import coord_matcher as cm
 
         X, Y, P = 101023.8, 157436.6, 37247.7

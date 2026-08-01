@@ -142,7 +142,12 @@ class TestCamtekIni:
 # ---------------------------------------------------------------------------
 class TestCamtekLive:
     def test_standard_filename(self):
-        """보고서 예시 1과 대응하는 LIVE 파일명 — row 토큰 5(표시 규약)는 −1 정규화돼 4."""
+        """보고서 예시 1과 대응하는 LIVE 파일명 — col/row 토큰을 **보정 없이** 쓴다.
+
+        이 파일명의 die 좌표(30229.803, 1987.994)는 ``test_example1`` 의 Camtek 항목과
+        같은 값이고, 그 항목이 내는 ``(col,row)`` 도 ``(4,5)`` 다 — 토큰 그대로다.
+        예전엔 row 를 −1 해서 4 를 냈고, INI↔LIVE 가 1 어긋난 채 ±1 게이트에 가려져
+        있었다(→ ``docs/디바이스_하드코딩_조사.md`` §6-G)."""
         p = Path(
             "R_TB500_LIVE_PI4_VLP-PDIS3_W6317098XYB5_4_5_Over Sized Bump"
             "_30229.803_1987.994.jpg"
@@ -150,10 +155,23 @@ class TestCamtekLive:
         c = live_resolve(p)
         assert c is not None
         assert c.col == 4
-        assert c.row == 4
+        assert c.row == 5                    # 보정 없음 — Camtek 예시1 의 row 와 같다
         assert _approx(c.x, 30229.803)
         assert _approx(c.y, 1987.994)
         assert c.source == "camtek_live"
+
+    def test_matches_camtek_ini_convention(self):
+        """★ 같은 결함을 두 소스가 **같은 (col,row)** 로 내야 한다.
+
+        보고서 예시 1 의 Camtek INI 항목과 그에 대응하는 LIVE 파일명을 나란히 넣는다.
+        여기가 어긋나면 소스 간 규약이 틀어진 것이다(게이트가 흡수해도 빚이다)."""
+        ini = _extract_coord(_make_ini_section(
+            X="253716.003307344", Y="91798.7938704543", Col="6", Row="2"))
+        live = live_resolve(Path(
+            "R_TB500_LIVE_PI4_VLP-PDIS3_W6317098XYB5_4_5_Over Sized Bump"
+            "_30229.803_1987.994.jpg"))
+        assert (live.col, live.row) == (ini.col, ini.row)
+        assert abs(live.x - ini.x) <= 1 and abs(live.y - ini.y) <= 1
 
     def test_integer_coords(self):
         """x/y 가 정수만 있어도 파싱 가능."""
@@ -161,7 +179,7 @@ class TestCamtekLive:
         c = live_resolve(p)
         assert c is not None
         assert c.col == 3
-        assert c.row == 1
+        assert c.row == 2
         assert c.x == 12345.0
         assert c.y == 6789.0
 
@@ -176,7 +194,18 @@ class TestCamtekLive:
         c = live_resolve(p)
         assert c is not None
         assert c.col == 2
-        assert c.row == 2
+        assert c.row == 3
+
+    def test_row_token_zero_is_valid(self):
+        """★ row 토큰 0 은 실물에 존재한다 — 예전 −1 정규화의 전제를 반증한다.
+
+        그 코드는 'row 토큰은 1..6 표시 규약' 을 전제로 −1 했는데, 실측 파일에 0 이 있다.
+        −1 하면 row 가 −1 이 돼 ``(col,row) ±1`` 게이트에서 die 하나를 통째로 놓친다."""
+        c = live_resolve(Path(
+            "TB500_RDL4 - Multi_FDV-RDL4_W7548303XYC2_3_0_"
+            "27582.7103387744_43144.6146330819_Foreign Material.jpg"))
+        assert c is not None
+        assert (c.col, c.row) == (3, 0)
 
     @pytest.mark.parametrize("name", [
         "W6459076XYG1_2_0_23_2.jpg",
@@ -210,7 +239,7 @@ class TestCoordResolve:
         assert c is not None
         assert c.source == "camtek_live"
         assert c.col == 4
-        assert c.row == 4
+        assert c.row == 5                    # 토큰 그대로 (보정 없음)
 
     def test_kla_filename_falls_through_to_kla_resolver(self, tmp_path):
         """KLA 파일명은 camtek_live 를 건너뛰고 kla_info 로 해석돼야 한다."""

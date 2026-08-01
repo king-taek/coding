@@ -8,8 +8,17 @@
 
 col/row 는 정수, x/y 는 정수 또는 소수점 실수(µm). 형식 A 를 먼저 시도한다.
 
-파일명의 row 토큰은 Camtek 표시 규약(1..6, = INI 의 구 7−Row 값)이라 0-based 표준
-(row 0..5, 현물 웨이퍼 맵·KLA 정렬)으로 맞추기 위해 −1 정규화한다.
+★ **col/row 토큰은 보정하지 않는다.** :mod:`.camtek_ini` 가 내는
+``row = row_total − y_index`` 와 같은 규약이다.  예전에 row 토큰을 −1 하던 코드가 있었는데,
+그건 ``CAMTEK_ROW_TOTAL`` 을 7→6 으로 바꾸던 변경과 **짝**이었다.  그 변경은 장비 화면
+판독으로 되돌려졌지만(``docs/디바이스_하드코딩_조사.md`` §1-B) −1 만 남아, INI 와 LIVE 가
+줄곧 1 어긋난 채 ``(col,row) ±1`` 게이트에 가려져 있었다.  근거 두 가지:
+
+* −1 의 전제("row 토큰은 1..6 표시 규약")를 실물이 반증한다 — row 토큰이 **0** 인 파일이 있다.
+* 같은 웨이퍼·같은 결함의 LIVE↔INI 쌍에서 die 좌표는 0.5 µm 안에 겹치는데, −1 이 있으면
+  ``Δrow`` 가 2 가 돼 **버킷 게이트에서 탈락**한다(= 매치 실패).
+
+자세한 경위는 ``docs/디바이스_하드코딩_조사.md`` §6-G.
 """
 
 from __future__ import annotations
@@ -36,7 +45,7 @@ _PAT_B = re.compile(
 def _extract(m) -> Optional[DefectCoord]:
     try:
         col = int(m.group(1))
-        row = int(m.group(2)) - 1   # 표시 규약(1..6) → 0-based 표준(0..5)
+        row = int(m.group(2))       # 보정 없음 — camtek_ini 와 같은 규약(모듈 docstring)
         x = float(m.group(3))
         y = float(m.group(4))
     except (ValueError, IndexError):
