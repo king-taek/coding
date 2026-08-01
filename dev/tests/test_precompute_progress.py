@@ -32,8 +32,6 @@ def cache_with_stub_extract(monkeypatch):
     class _Feat:
         def __init__(self, path):
             self.path = path
-            self.cnn = None
-            self.cnn_model = ""
 
     monkeypatch.setattr(sf._pipeline, "extract",
                         lambda p, **kw: _Feat(p), raising=True)
@@ -95,10 +93,9 @@ def test_worker_relays_build_progress(monkeypatch, cache_with_stub_extract):
 
     refs = [ImageItem("A", Path(f"/tmp/r{i}.png"), "ref") for i in range(2)]
     vals = _items("A", 4)
-    # pipeline=False 로 특징→점수 순차 경로(`_run`)를 태운다.
     worker = sf.SlotPrecomputeWorker(
         [("A", refs, vals)], sf.SlotFeatureCache(), sf.SlotScoreCache(),
-        cfg=None, pipeline=False,
+        cfg=None,
     )
 
     emitted: list[tuple[int, int]] = []
@@ -106,8 +103,6 @@ def test_worker_relays_build_progress(monkeypatch, cache_with_stub_extract):
     # 점수 계산 단계는 이 테스트의 관심사가 아니다 — 특징 구간만 보게 막는다.
     monkeypatch.setattr(worker, "_score_pairs_parallel",
                         lambda *a, **kw: {}, raising=True)
-    monkeypatch.setattr(worker, "_prefetch_cnn_embeddings",
-                        lambda *a, **kw: None, raising=True)
     worker._run_sequential()
 
     feat_total = len(refs) + len(vals)          # 6

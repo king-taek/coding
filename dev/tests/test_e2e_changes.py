@@ -6,8 +6,6 @@
 from __future__ import annotations
 
 import os
-import threading
-import time
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -65,26 +63,6 @@ def test_scan_ignores_t_and_slot_subset(qapp, isolated_cache, tmp_path):
     assert sr.common_slot_names == ["S01", "S03"]
 
 
-# ===========================================================================
-# 파이프라인 워커 강제 헬퍼
-# ===========================================================================
-def _force_pipeline(monkeypatch, *, prefetch=None):
-    """``_should_pipeline()`` 을 True 로 강제해 파이프라인 경로를 실제로 태운다.
-
-    운영에서는 CNN 임베딩 경로가 비활성이라 항상 순차로 간다
-    (``similarity/cnn_embed.py``).  그래도 ``_run_pipelined`` 는 살아 있는 코드이고
-    그 계약(슬롯 순서 · 순차와 동일한 결과 · 정지 반응성)은 지켜져야 하므로, 여기서
-    강제로 태워 검증한다.
-
-    ``prefetch`` 를 주면 생산자 측 사전 배치를 그것으로 대체한다 — 생산자를 바쁘게
-    만들어 정지 타이밍을 노출시키는 용도."""
-    from aoi_verification.app.similarity import slot_features as sf
-    monkeypatch.setattr(sf._cnn, "is_available", lambda: True)
-    if prefetch is not None:
-        monkeypatch.setattr(sf.SlotPrecomputeWorker, "_prefetch_cnn_embeddings",
-                            lambda self, ref, val: prefetch())
-
-
 def _build_tasks(tmp_path, sizes):
     """sizes = {slot: (n_ref, n_val)} → (tasks, real images on disk)."""
     seed = 100
@@ -113,137 +91,38 @@ def _drain(scores, tasks):
 
 
 # ===========================================================================
-# B. 파이프라인 == 순차 (실제 이미지, 요청 1·2 — 정확도 불변)
+# B. 디스크 점수 캐시(persist) 왕복 — 두 번째 실행이 재계산 없이 같은 결과를 낸다
+#
+# ※ 한때 이 자리에 '파이프라인 == 순차' 계열 테스트 4개가 있었다.  파이프라인
+#    실행 경로(`_run_pipelined`)는 CNN 임베딩이 켜져야만 선택되는데 그 기능이
+#    통째로 제거되면서 도달 불가가 되어 코드와 함께 지웠다.  다만 이 테스트만은
+#    **디스크 점수 캐시 왕복을 검증하는 유일한 곳**이라 순차 경로로 옮겨 살린다.
 # ===========================================================================
-def test_pipeline_equals_sequential_real_images(qapp, isolated_cache,
-                                                monkeypatch, tmp_path):
-    from aoi_verification.app.similarity.slot_features import (
-        SlotFeatureCache, SlotPrecomputeWorker, SlotScoreCache,
-    )
-    _force_pipeline(monkeypatch)
-    tasks = _build_tasks(tmp_path, {"S01": (3, 4), "S02": (2, 3), "S03": (4, 2)})
-
-    # 순차 (pipeline=False → run() 이 _run_sequential)
-    seq = SlotScoreCache()
-    w_seq = SlotPrecomputeWorker(tasks, SlotFeatureCache(keep_lookahead=False),
-                                 seq, release_after_slot=True, pipeline=False)
-    order_seq = []
-    w_seq.signals.slot_finished.connect(lambda s, i, t: order_seq.append((s, i)))
-    w_seq.run()
-
-    # 파이프라인 (강제) — run() 이 _run_pipelined 로 디스패치
-    pipe = SlotScoreCache()
-    w_pipe = SlotPrecomputeWorker(tasks, SlotFeatureCache(keep_lookahead=False),
-                                  pipe, release_after_slot=True, pipeline=True)
-    assert w_pipe._should_pipeline() is True
-    order_pipe = []
-    w_pipe.signals.slot_finished.connect(lambda s, i, t: order_pipe.append((s, i)))
-    w_pipe.run()
-
-    assert order_seq == order_pipe == [("S01", 1), ("S02", 2), ("S03", 3)]
-    assert _drain(pipe, tasks) == _drain(seq, tasks)
-    assert pipe.size() == seq.size() == (3 * 4 + 2 * 3 + 4 * 2)
-
-
-# ===========================================================================
-# B2. 실제 QThread 로 start() — 생산자(비-Qt 스레드)의 크로스 스레드 시그널이
-#     이벤트 루프로 정상 전달되고 종료되는지 (요청 1·2, 실 앱 경로)
-# ===========================================================================
-def test_pipeline_real_qthread_start(qapp, isolated_cache, monkeypatch, tmp_path):
-    from PyQt6.QtCore import QEventLoop, QTimer
-    from aoi_verification.app.similarity.slot_features import (
-        SlotFeatureCache, SlotPrecomputeWorker, SlotScoreCache,
-    )
-    _force_pipeline(monkeypatch)
-    tasks = _build_tasks(tmp_path, {"S01": (2, 3), "S02": (3, 2), "S03": (2, 2)})
-
-    scores = SlotScoreCache()
-    worker = SlotPrecomputeWorker(tasks, SlotFeatureCache(keep_lookahead=False),
-                                  scores, release_after_slot=True, pipeline=True)
-    got = {"order": [], "progress": 0, "phase": 0, "done": False}
-    worker.signals.slot_finished.connect(lambda s, i, t: got["order"].append((s, i)))
-    worker.signals.progress.connect(
-        lambda d, t: got.__setitem__("progress", got["progress"] + 1))
-    worker.signals.phase.connect(
-        lambda p: got.__setitem__("phase", got["phase"] + 1))
-
-    loop = QEventLoop()
-    worker.signals.finished.connect(lambda: (got.__setitem__("done", True),
-                                             loop.quit()))
-    worker.signals.failed.connect(lambda e: (got.__setitem__("err", e),
-                                             loop.quit()))
-    QTimer.singleShot(15000, loop.quit)       # 안전 타임아웃
-    worker.start()
-    loop.exec()
-    worker.wait(2000)
-
-    assert got.get("err") is None, got.get("err")
-    assert got["done"] is True, "finished 시그널 미수신(행/크래시 의심)"
-    assert got["order"] == [("S01", 1), ("S02", 2), ("S03", 3)]
-    # 생산자(비-Qt 스레드)·소비자의 progress/phase 가 크래시 없이 전달됨.
-    assert got["progress"] > 0 and got["phase"] > 0
-    assert scores.size() == (2 * 3 + 3 * 2 + 2 * 2)
-
-
-# ===========================================================================
-# C. 파이프라인 취소 — 데드락/행 없이 신속 종료 (요청 1·2 크리티컬)
-# ===========================================================================
-def test_pipeline_stop_does_not_hang(qapp, isolated_cache, monkeypatch, tmp_path):
-    from aoi_verification.app.similarity.slot_features import (
-        SlotFeatureCache, SlotPrecomputeWorker, SlotScoreCache,
-    )
-
-    def slow_prefetch():
-        time.sleep(0.25)        # 생산자를 바쁘게 만들어 정지 타이밍을 노출
-
-    _force_pipeline(monkeypatch, prefetch=slow_prefetch)
-    tasks = _build_tasks(tmp_path, {f"S{i:02d}": (2, 2) for i in range(6)})
-
-    worker = SlotPrecomputeWorker(tasks, SlotFeatureCache(keep_lookahead=False),
-                                  SlotScoreCache(), release_after_slot=True,
-                                  pipeline=True)
-    t = threading.Thread(target=worker.run)
-    t.start()
-    time.sleep(0.1)
-    worker.stop()
-    t.join(timeout=6)
-    assert not t.is_alive(), "stop() 후 워커가 종료되지 않음(행/데드락)"
-
-
-# ===========================================================================
-# D. 파이프라인 + 디스크 점수 캐시 (persist) 경로 (요청 1·2)
-# ===========================================================================
-def test_pipeline_with_persist_scores(qapp, isolated_cache, monkeypatch, tmp_path):
+def test_persist_scores_round_trip(qapp, isolated_cache, tmp_path):
     from aoi_verification.app.config import SimilarityConfig
     from aoi_verification.app.similarity.slot_features import (
         SlotFeatureCache, SlotPrecomputeWorker, SlotScoreCache,
     )
-    _force_pipeline(monkeypatch)
     cfg = SimilarityConfig(persist_scores=True)
     tasks = _build_tasks(tmp_path, {"S01": (2, 3), "S02": (3, 2)})
 
-    pipe = SlotScoreCache()
+    first = SlotScoreCache()
     w = SlotPrecomputeWorker(tasks, SlotFeatureCache(keep_lookahead=False),
-                             pipe, release_after_slot=True, cfg=cfg, pipeline=True)
-    assert w._should_pipeline() is True
+                             first, release_after_slot=True, cfg=cfg)
     fin = []
     w.signals.finished.connect(lambda: fin.append(True))
     w.run()
     assert fin == [True]
-    assert pipe.size() == (2 * 3 + 3 * 2)
+    assert first.size() == (2 * 3 + 3 * 2)
 
     # 두 번째 실행 — 디스크 캐시에서 로드(재계산 없이)해도 동일 결과.
-    pipe2 = SlotScoreCache()
+    second = SlotScoreCache()
     w2 = SlotPrecomputeWorker(tasks, SlotFeatureCache(keep_lookahead=False),
-                              pipe2, release_after_slot=True, cfg=cfg,
-                              pipeline=True)
+                              second, release_after_slot=True, cfg=cfg)
     w2.run()
-    assert _drain(pipe2, tasks) == _drain(pipe, tasks)
+    assert _drain(second, tasks) == _drain(first, tasks)
 
 
-# ===========================================================================
-# E. BulkSelectDialog — 페이지 + 드래그선택 + 우클릭확대 + 교차페이지 _fire (요청 5)
-# ===========================================================================
 def _items(slot, n):
     return [ImageItem(slot, Path(f"/tmp/{slot}_{i}.png"), "ref") for i in range(n)]
 

@@ -67,13 +67,3 @@ def test_openvino_installer_offers_when_intel_and_missing(monkeypatch):
     monkeypatch.setattr(_oi, "is_openvino_installed", lambda: False)
     monkeypatch.setattr(_oi, "is_intel_cpu", lambda: True)
     assert _oi.should_offer_install(declined=False) is True
-
-
-def test_basic_path_never_computes_cnn_embeddings():
-    """고전 채점의 CNN 항은 비활성이다 — 켜지면 채점 결과가 바뀐다.
-
-    학습 기능이 사라져 활성화 수단이 없다(`similarity/cnn_embed.py`).  여기가
-    True 로 돌아서면 phash/ORB/SSIM 만 쓰던 기존 점수와 달라지므로 회귀 가드로 둔다."""
-    from aoi_verification.app.similarity import cnn_embed
-    assert cnn_embed.is_available() is False
-    assert cnn_embed.compute_embedding(__file__) is None

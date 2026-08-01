@@ -18,7 +18,6 @@ from ..utils import cache, image_io
 from . import phash as _phash
 from . import orb as _orb
 from . import ssim as _ssim
-from . import cnn_embed as _cnn
 
 
 @dataclass
@@ -29,8 +28,6 @@ class Feature:
     orb_kp: int
     orb_desc: Optional[np.ndarray]          # (N, 32) uint8 or None
     roi_gray: np.ndarray                    # SSIM 비교용 ROI
-    cnn: Optional[np.ndarray] = None        # 옵션 (특정 모델의 임베딩)
-    cnn_model: str = ""                     # cnn 을 만든 모델 이름 ("basic" 일 경우 빈문자열)
     orb_xy: Optional[np.ndarray] = None     # (N, 2) float32 ORB 키포인트 좌표 — 중앙가중용
 
     # 디스크 직렬화 ----------------------------------------------------------
@@ -44,30 +41,20 @@ class Feature:
             payload["orb_desc"] = self.orb_desc
         if self.orb_xy is not None:
             payload["orb_xy"] = self.orb_xy
-        if self.cnn is not None:
-            payload["cnn"] = self.cnn
-            if self.cnn_model:
-                payload["cnn_model"] = np.array([self.cnn_model], dtype=object)
         dst.parent.mkdir(parents=True, exist_ok=True)
         np.savez_compressed(str(dst), **payload)
 
     @classmethod
     def load(cls, src: Path, path: Path) -> "Feature":
+        # 옛 캐시에 남은 키(cnn·cnn_model)는 읽지 않으므로 그냥 무시된다 —
+        # npz 는 요청한 항목만 꺼내므로 파일을 다시 만들 필요가 없다.
         data = np.load(str(src), allow_pickle=True)
-        cnn_model = ""
-        if "cnn_model" in data.files:
-            try:
-                cnn_model = str(data["cnn_model"][0])
-            except Exception:
-                cnn_model = ""
         return cls(
             path=path,
             phash=data["phash"],
             roi_gray=data["roi_gray"],
             orb_kp=int(data["orb_kp"][0]),
             orb_desc=data["orb_desc"] if "orb_desc" in data.files else None,
-            cnn=data["cnn"] if "cnn" in data.files else None,
-            cnn_model=cnn_model,
             orb_xy=data["orb_xy"] if "orb_xy" in data.files else None,   # 구 캐시엔 없음→None
         )
 
@@ -75,7 +62,7 @@ class Feature:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
-def extract(src: Path, *, use_cnn: Optional[bool] = None, cfg=None,
+def extract(src: Path, *, cfg=None,
             side=None, need_orb: bool = True) -> Feature:
     """디스크 캐시를 거쳐 한 이미지의 Feature 를 반환.
 
@@ -111,16 +98,12 @@ def extract(src: Path, *, use_cnn: Optional[bool] = None, cfg=None,
     od = (_orb.compute_orb(roi_gray, nfeatures=orb_nf) if need_orb
           else _orb.OrbDescriptor(0, None))
 
-    use_cnn = (config.CONFIG.similarity.use_cnn if use_cnn is None else use_cnn)
-    cnn_vec = _cnn.compute_embedding(path) if (use_cnn and _cnn.is_available()) else None
-
     feat = Feature(
         path=path,
         phash=ph,
         orb_kp=od.keypoints,
         orb_desc=od.descriptors,
         roi_gray=roi_gray,
-        cnn=cnn_vec,
         orb_xy=od.coords,                # 중앙-가중 채점용 키포인트 좌표
     )
     try:
@@ -145,16 +128,13 @@ def score(a: Feature, b: Feature,
           *, components: Optional[set] = None, center_strength: float = 0.0) -> float:
     """두 Feature 사이의 최종 가중 평균 유사도 (0.0 ~ 1.0).
 
-    CNN 항은 학습 모델이 활성일 때만 쓰이는데 그 경로가 없어져 현재는 항상 비활성이다
-    (``similarity/cnn_embed.py``).  명시적으로 ``use_cnn=True`` 를 준 경우는 존중한다.
-
     ``components`` (예: ``{"phash","ssim"}``) 가 주어지면 그 항들만 사용하고 가중치를
     그 부분집합으로 재정규화한다.  비싼 ORB(디스크립터 정합)·SSIM 을 빼서 CPU 재채점
     속도를 올리는 고속 변형(개발자 벤치마크)이 사용한다.  None=현행(전체)."""
     base = (weights or config.CONFIG.similarity)
-    w = _resolve_weights(base).normalized()
+    w = base.normalized()
 
-    use = components if components is not None else {"phash", "orb", "ssim", "cnn"}
+    use = components if components is not None else {"phash", "orb", "ssim"}
 
     s_phash = _phash.phash_similarity(a.phash, b.phash) if "phash" in use else 0.0
 
@@ -169,21 +149,6 @@ def score(a: Feature, b: Feature,
 
     s_ssim = _ssim.ssim_score(a.roi_gray, b.roi_gray) if "ssim" in use else 0.0
 
-    s_cnn = 0.0
-    if w.use_cnn:
-        # 활성 모델과 캐시된 임베딩의 모델이 다르면 재계산 (차원/공간 충돌 방지).
-        active = _active_model_name()
-        a_emb = a.cnn if (a.cnn is not None and a.cnn_model == active) else _cnn.compute_embedding(a.path)
-        b_emb = b.cnn if (b.cnn is not None and b.cnn_model == active) else _cnn.compute_embedding(b.path)
-        # 즉시 재계산된 결과를 메모리상 Feature 에도 반영 (다음 비교에서 재사용).
-        if a_emb is not None and (a.cnn is None or a.cnn_model != active):
-            a.cnn = a_emb
-            a.cnn_model = active
-        if b_emb is not None and (b.cnn is None or b.cnn_model != active):
-            b.cnn = b_emb
-            b.cnn_model = active
-        s_cnn = _cnn.cosine_similarity(a_emb, b_emb)
-
     # 사용 컴포넌트의 가중치만 모아 재정규화 — 부분집합도 [0,1] 스케일을 유지해
     # 임계치/융합이 그대로 동작하게 한다(전체일 때는 현행과 동일).
     parts = []
@@ -193,27 +158,9 @@ def score(a: Feature, b: Feature,
         parts.append((w.orb, s_orb))
     if "ssim" in use:
         parts.append((w.ssim, s_ssim))
-    if w.use_cnn and "cnn" in use:
-        parts.append((w.cnn, s_cnn))
     wsum = sum(wt for wt, _ in parts)
     if wsum <= 0:
         return 0.0
     total = sum(wt * sv for wt, sv in parts) / wsum
     return max(0.0, min(1.0, float(total)))
 
-
-def _active_model_name() -> str:
-    """현재 active 모델 이름 — 학습 모델이 없으면 ``""``.
-
-    학습 기능이 제거돼 지금은 항상 ``""`` 다.  특징 캐시 키(`slot_features`)에 들어가는
-    값이라, 나중에 학습이 복구되면 여기만 고치면 캐시가 자동으로 갈린다."""
-    return ""
-
-
-def _resolve_weights(base: config.SimilarityWeights) -> config.SimilarityWeights:
-    """학습 모델이 활성이면 use_cnn 자동 활성 — 지금은 해당 없음.
-
-    가속기(GPU)가 있어도 basic 모드에서는 CNN 을 켜지 않는다(가중치 변경 없음).
-    학습 모델이 사라진 현재는 ``_active_model_name()`` 이 항상 ``""`` 라 원본을 그대로
-    돌려준다.  명시적으로 ``use_cnn=True`` 를 준 호출은 그대로 존중한다."""
-    return base

@@ -182,16 +182,14 @@ DEFAULT_SIM_CONFIG = SimilarityConfig()
 # ---------------------------------------------------------------------------
 @dataclass
 class SimilarityWeights:
+    # ※ 한때 네 번째 항으로 CNN 임베딩 가중치가 있었으나, 그 경로를 켤 수단
+    #   (학습된 .pt · 모델 레지스트리)이 모두 제거돼 영구 비활성이라 함께 지웠다.
     phash: float = 0.2
     orb: float = 0.3
     ssim: float = 0.2
-    cnn: float = 0.3
-    use_cnn: bool = False  # 고전 경로의 CNN 항 — 현재 비활성 (similarity/cnn_embed.py)
 
     def normalized(self) -> "SimilarityWeights":
-        """If CNN is disabled, redistribute its weight to the others."""
-        if self.use_cnn:
-            return self
+        """세 항의 합이 1 이 되도록 정규화."""
         total = self.phash + self.orb + self.ssim
         if total <= 0:
             return self
@@ -199,8 +197,6 @@ class SimilarityWeights:
             phash=self.phash / total,
             orb=self.orb / total,
             ssim=self.ssim / total,
-            cnn=0.0,
-            use_cnn=False,
         )
 
 
