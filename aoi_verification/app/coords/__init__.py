@@ -49,6 +49,14 @@ def resolve_batch(paths) -> dict:
         result[p] = resolve(p)
 
     sources = {c.source for c in result.values() if c is not None}
+    if {"camtek_live", "camtek_abs"} <= sources:
+        # LIVE 파일명에는 절대 X/Y 가 없어 **통일이 불가능**하다.  경고만 남긴다 —
+        # 안 그러면 프레임이 달라(die-내부 ≈2만 vs 절대 ≈18만) 그 슬롯이 조용히 전멸한다.
+        _LOG.warning(
+            "이 실행에 LIVE 파일명 좌표(die-내부)와 절대 wafer 좌표가 섞여 있습니다. "
+            "LIVE 파일명에는 절대 좌표가 없어 통일할 수 없어 그 조합은 매칭되지 않습니다. "
+            "Camtek 폴더의 die 기하를 못 찾은 것이 원인이니 "
+            "dev/diagnose_die_geometry.py 로 확인하세요.")
     if not {"camtek_ini", "camtek_abs"} <= sources:
         return result
 
