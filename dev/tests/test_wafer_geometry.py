@@ -555,6 +555,38 @@ class TestFrameUnification:
             resolve_batch([gp, bp])
         assert any("절대 wafer 좌표로 통일" in r.message for r in caplog.records)
 
+    @pytest.mark.parametrize("src", ["camtek_live", "kla"])
+    def test_unfixable_frames_are_announced(self, tmp_path, caplog, src):
+        """★ 절대좌표로 **되돌릴 수 없는** 소스가 섞이면 조용히 전멸하지 않게 경고한다.
+
+        LIVE 파일명·KLA 는 die-내부 좌표만 갖고 있어 통일이 불가능하다.  통일 대신
+        '어디를 봐야 하는지' 를 남긴다 — 안 그러면 슬롯이 통째로 매치 실패인데 이유가
+        아무 데도 안 남는다."""
+        import logging
+        from aoi_verification.app.coords import resolve_batch
+        bad = _make_bare_folder(          # pitch 를 못 정하는 폴더 → camtek_abs
+            tmp_path / "bad",
+            [("b", 50 * 4160.9 + 2000.0, 20 * 5294.0 + 2000.0, 50, 20)])
+        good = tmp_path / "good"
+        good.mkdir()
+        if src == "camtek_live":
+            other = good / "R_DEV_W1_3_2_Defect_12345_6789.jpg"
+            other.touch()
+        else:
+            (good / "res.001").write_text(
+                'DiePitch 3.7247930000e+004 4.4905340000e+004;\n'
+                'SampleTestPlan 2\n  -3 0 \n  0 0 ;\n'
+                'DefectRecordSpec 7 DEFECTID X Y XREL YREL XINDEX YINDEX ;\n'
+                'DefectList;\nTiffFileName shot.jpg;\nDefectList\n'
+                ' 1 0.0 0.0 100.0 200.0 0 0;\nEndOfFile;\n', encoding="utf-8")
+            other = good / "shot.jpg"
+            other.touch()
+        with caplog.at_level(logging.WARNING, logger="aoi.coords"):
+            got = resolve_batch([other, bad / "b.jpeg"])
+        assert got[other] is not None and got[other].source == src
+        assert any("통일할 수 없어" in r.message and src in r.message
+                   for r in caplog.records)
+
 
 # ---------------------------------------------------------------------------
 # ★ die pitch 를 몰라도 매칭은 된다 — 절대 wafer 좌표 폴백
