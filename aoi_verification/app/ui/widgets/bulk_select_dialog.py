@@ -26,6 +26,7 @@ from .. import theme
 from ...models.slot import ImageItem
 from ...utils import image_io
 from .neon_button import NeonButton
+from .option_group import columns_for_width
 from . import sheet_host as sheets
 
 
@@ -34,6 +35,10 @@ _CAP_PX = 28            # 파일명 한 줄 — 사진을 가리지 않도록 �
 # 가로 최대 5 컬럼 + 6 번째부터 다음 행으로 wrap (사용자 요청 — 가로 스크롤
 # 발생하지 않도록).  좁은 창에선 viewport 폭 기반으로 더 적게 동적 계산.
 _COLS = 5
+# 타일 실폭 = 사진 정사각(tile_px) + 좌우 마진/보더, 타일 사이 간격은 grid spacing.
+# 열 수 계산(columns_for_width)과 창 폭 산정이 같은 값을 봐야 어긋나지 않는다.
+_TILE_CHROME_W = 14
+_GRID_SPACING = 8
 # 슬라이더로 조절 가능한 타일 크기 범위.
 _TILE_MIN = 120
 _TILE_MAX = 320
@@ -62,7 +67,8 @@ class _SelectTile(QFrame):
         self.setProperty("role", "card-soft")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         # 사진 정사각 영역(tile_px) + 캡션 한 줄(_CAP_PX) + 마진/스페이싱.
-        self.setFixedSize(self._tile_px + 14, self._tile_px + _CAP_PX + 18)
+        self.setFixedSize(self._tile_px + _TILE_CHROME_W,
+                          self._tile_px + _CAP_PX + 18)
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(6, 6, 6, 6)
@@ -138,7 +144,7 @@ class BulkSelectDialog(QDialog):
         self.setModal(True)
         # 노트북 등 작은 화면에서 하단 액션 버튼이 화면 밖으로 잘려
         # ‘버튼이 안 보인다’ 라고 느껴지지 않도록 화면 작업영역의 90% 로 클램프.
-        want_w = _COLS * (_TILE_PX + 22) + 80
+        want_w = _COLS * (_TILE_PX + _TILE_CHROME_W + _GRID_SPACING) + 80
         want_h = 800
         scr = (parent.screen() if parent is not None and hasattr(parent, "screen")
                else None) or QApplication.primaryScreen()
@@ -331,7 +337,7 @@ class BulkSelectDialog(QDialog):
             grid_host = QWidget(host)
             grid = QGridLayout(grid_host)
             grid.setContentsMargins(0, 0, 0, 0)
-            grid.setSpacing(8)
+            grid.setSpacing(_GRID_SPACING)
             for item in items:
                 tile = _SelectTile(item, tile_px=self._tile_px, parent=grid_host)
                 tile.toggled.connect(self._on_tile_toggle)
@@ -385,8 +391,10 @@ class BulkSelectDialog(QDialog):
         vp_w = self._scroll.viewport().width() if hasattr(self, "_scroll") else 0
         if vp_w <= 0:
             vp_w = self.width()
-        tile_w = self._tile_px + 22  # 타일 1 개의 폭 + spacing
-        cols = max(1, min(_COLS, max(1, vp_w // tile_w)))
+        # 타일 1 개의 폭 = _SelectTile 이 setFixedSize 로 잡는 값(tile_px + 14).
+        # 간격은 grid.setSpacing(8) — 공식은 columns_for_width 한 곳에 있다.
+        cols = min(_COLS, columns_for_width(vp_w, self._tile_px + 14,
+                                            _GRID_SPACING))
         for items, grid in self._slot_grids:
             # 현재 grid 의 위젯들을 한 번 비우고 cols 로 재배치 (위젯 자체는
             # 보존 — 선택 상태 유지).
