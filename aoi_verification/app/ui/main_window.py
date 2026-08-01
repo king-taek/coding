@@ -123,9 +123,7 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self._status_bar)
         # 개발자 크레딧 — 모든 화면 공통(상태바 좌측).
         self._credit_label = QLabel(i18n.KO.CREDIT, self._status_bar)
-        self._credit_label.setStyleSheet(
-            f"color: {theme.MUTE}; padding: 0 8px; font-weight: 600;"
-        )
+        self._apply_statusbar_theme()      # 색 모드 전환 때와 같은 코드로 칠한다
         self._status_bar.addWidget(self._credit_label)
         self._mem_label = QLabel("", self._status_bar)
         self._mem_label.setProperty("role", "muted")
@@ -1667,7 +1665,11 @@ class MainWindow(QMainWindow):
         self._show_page(self._setup_page, animate=False)
 
     def _apply_statusbar_theme(self) -> None:
-        """상태바 라벨 색을 테마 토큰으로 적용(페이지 밖 위젯)."""
+        """상태바 라벨 색을 테마 토큰으로 적용(페이지 밖 위젯).
+
+        ★ 생성자도 이 메서드를 쓴다 — 같은 f-string 을 양쪽에 두면 한쪽만 고쳤을 때
+        색 모드를 한 번 바꾼 뒤에야 크레딧 라벨 모양이 달라진다(발견이 늦다).
+        토큰(`theme.MUTE`)은 모드에 따라 바뀌므로 상수로 굳힐 수 없다."""
         self._credit_label.setStyleSheet(
             f"color: {theme.MUTE}; padding: 0 8px; font-weight: 600;")
 
