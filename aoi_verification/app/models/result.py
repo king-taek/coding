@@ -35,8 +35,6 @@ class FinalResult:
     ref_machine: str                                     # 예) "1호기"
     val_machine: str                                     # 예) "3호기"
     matches: list[MatchResult] = field(default_factory=list)
-    miss_fast: list[MissEntry] = field(default_factory=list)   # 빠른(낮은) 호기 쪽
-    miss_slow: list[MissEntry] = field(default_factory=list)   # 느린(높은) 호기 쪽
     slot_only_ref: list[str] = field(default_factory=list)
     slot_only_val: list[str] = field(default_factory=list)
     # Stage 2 에서 매칭을 찾지 못한 (Skip + No-match) 기준 사진들 — 엑셀에

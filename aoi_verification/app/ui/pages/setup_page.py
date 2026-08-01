@@ -1185,7 +1185,7 @@ class SetupPage(QWidget):
     # ------------------------------------------------------------------
     def apply_state(self, ref_root: str, val_root: str,
                     ref_machine: str, val_machine: str,
-                    mode: str, threshold: float) -> None:
+                    threshold: float) -> None:
         self.ref_path_edit.setText(ref_root)
         self.val_path_edit.setText(val_root)
         self.ref_machine_edit.setText(ref_machine)

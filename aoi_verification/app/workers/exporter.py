@@ -602,9 +602,6 @@ import re as _re
 import zipfile as _zip
 
 _STRIP_PREFIXES = ("customXml/", "docMetadata/")
-_STRIP_REL_TARGETS = _re.compile(
-    r'(?i)Target="(?:[^"]*/)?(?:customXml|docMetadata)[^"]*"'
-)
 _STRIP_CONTENT_TYPE_OVERRIDES = _re.compile(
     r'<Override[^>]*PartName="/(?:customXml|docMetadata)[^"]*"[^>]*/>'
 )

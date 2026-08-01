@@ -2,13 +2,12 @@
 
 원본 폴더 스캔이 끝난 직후 호출되어 모든 이미지의 캐시를 미리 만든다.
 
-설계:
-- ``ThumbnailWorker(QThread)`` — 호환용 단일 스레드 (기존 호출자 유지).
-- ``ThumbnailPool(QObject)`` — 다중 worker QThread 가 공유 heapq 에서 작업을
-  꺼내 처리하는 우선순위 풀. 사용자가 보고 있는 슬롯의 작업을 우선 처리해서
-  ‘첫 슬롯 준비되는 즉시 Stage 1 진입’ 을 가능하게 한다.
+설계: ``ThumbnailPool(QObject)`` — 다중 worker QThread 가 공유 heapq 에서 작업을
+꺼내 처리하는 우선순위 풀.  사용자가 보고 있는 슬롯의 작업을 우선 처리해서
+'첫 슬롯 준비되는 즉시 Stage 1 진입' 을 가능하게 한다.
 
-두 클래스 모두 같은 ``ThumbnailerSignals`` 인터페이스를 노출한다.
+※ 한때 ``ThumbnailWorker(QThread)`` 라는 단일 스레드 '호환용' 클래스가 함께 있었으나,
+  그 호환 대상이던 호출자가 모두 풀로 옮겨 간 뒤로 **생성되는 곳이 0곳**이라 제거했다.
 """
 
 from __future__ import annotations
@@ -40,53 +39,6 @@ class ThumbnailerSignals(QObject):
     finished = pyqtSignal()
     failed = pyqtSignal(str)               # error message
     item_ready = pyqtSignal(object)        # ImageItem (캐시 완료)
-
-
-# ---------------------------------------------------------------------------
-# 호환용 단일 스레드 워커 (외부 호출자는 변경 없이 사용 가능)
-# ---------------------------------------------------------------------------
-class ThumbnailWorker(QThread):
-    """모든 ImageItem 에 대해 썸네일+중간 이미지를 생성하는 QThread.
-
-    ``tier`` 가 주어지면 해당 화질 티어로 캐시. 미지정 시 기본 (200/800).
-    """
-
-    def __init__(self,
-                 items: Iterable[ImageItem],
-                 also_mid: bool = True,
-                 *,
-                 tier: Optional[config.SizingTier] = None,
-                 parent: QObject | None = None) -> None:
-        super().__init__(parent)
-        self._items: list[ImageItem] = list(items)
-        self._also_mid = also_mid
-        self._tier = tier
-        self._stop = False
-        self.signals = ThumbnailerSignals()
-
-    # ------------------------------------------------------------------
-    def stop(self) -> None:
-        self._stop = True
-
-    def run(self) -> None:        # type: ignore[override]
-        total = len(self._items)
-        if total == 0:
-            self.signals.finished.emit()
-            return
-
-        for idx, item in enumerate(self._items, start=1):
-            if self._stop:
-                break
-            try:
-                image_io.get_thumb_path(item.path, tier=self._tier)
-                if self._also_mid:
-                    image_io.get_mid_path(item.path, tier=self._tier)
-            except Exception as exc:
-                # 단일 파일 실패는 무시 (로그만 emit)
-                self.signals.failed.emit(f"{item.path}: {exc}")
-            self.signals.progress.emit(idx, total, str(item.path))
-
-        self.signals.finished.emit()
 
 
 # ---------------------------------------------------------------------------

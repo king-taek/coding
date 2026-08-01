@@ -203,7 +203,7 @@ def _derive_tokens() -> dict:
         **c,
         # 틴트(베이스 색에서 파생 — 강조/상태와 항상 일치)
         "accent_tint": ACCENT_TINT, "accent_tint_soft": ACCENT_TINT_SOFT,
-        "pass_tint": PASS_TINT, "danger_tint": DANGER_TINT,
+        "danger_tint": DANGER_TINT,
         "danger_tint_soft": DANGER_TINT_SOFT, "warn_tint": WARN_TINT,
         # 서체
         "font_body": FONT_BODY, "font_title": FONT_TITLE, "font_mono": FONT_MONO,

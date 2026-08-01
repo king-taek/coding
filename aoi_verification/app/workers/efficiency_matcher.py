@@ -394,7 +394,7 @@ class EfficiencyScheduler(QThread):
                 #   생산자가 센티널 없이 죽었다.  그러면 아래 소비자가 타임아웃 없는
                 #   `get()` 에 영원히 갇혀 `finished`·`failed` **어느 것도 안 나오고**
                 #   차단 오버레이가 영구히 남았다(`stop()` 으로도 못 깬다).
-                #   `slot_features._run_pipelined` 가 이미 쓰는 패턴을 따른다.
+                #   규칙: 생산자는 **어떤 경로로 끝나든** 센티널을 정확히 한 번 넣는다.
                 def producer() -> None:
                     nonlocal embed_seen
                     try:
