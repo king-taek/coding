@@ -175,7 +175,8 @@ class _PlusTile(QFrame):
         super().__init__(parent)
         size = int(tile_px) if tile_px else THUMB_PX
         self.setProperty("role", "card-soft")
-        self.setFixedSize(size + 14, size + 18)
+        # 같은 격자에 들어가므로 _ThumbTile 과 **같은 실폭**이어야 한다.
+        self.setFixedSize(size + _TILE_CHROME_W, size + 18)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         lay = QVBoxLayout(self)

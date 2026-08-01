@@ -391,9 +391,10 @@ class BulkSelectDialog(QDialog):
         vp_w = self._scroll.viewport().width() if hasattr(self, "_scroll") else 0
         if vp_w <= 0:
             vp_w = self.width()
-        # 타일 1 개의 폭 = _SelectTile 이 setFixedSize 로 잡는 값(tile_px + 14).
-        # 간격은 grid.setSpacing(8) — 공식은 columns_for_width 한 곳에 있다.
-        cols = min(_COLS, columns_for_width(vp_w, self._tile_px + 14,
+        # ★ 타일 실폭·간격은 _SelectTile 의 setFixedSize·grid.setSpacing 과 **같은
+        #   상수**를 봐야 한다.  여기만 옛 값을 들고 있으면 타일은 넓어졌는데 열은
+        #   그대로라 가로 스크롤이 난다.  공식 자체는 columns_for_width 한 곳에 있다.
+        cols = min(_COLS, columns_for_width(vp_w, self._tile_px + _TILE_CHROME_W,
                                             _GRID_SPACING))
         for items, grid in self._slot_grids:
             # 현재 grid 의 위젯들을 한 번 비우고 cols 로 재배치 (위젯 자체는

@@ -119,25 +119,52 @@ from aoi_verification.app.ui.widgets import (                    # noqa: E402
     bulk_select_dialog as bsd)
 
 
+def _grid_cols(grid) -> int:
+    """그리드에 **실제로** 쓰인 열 수 — 공식을 다시 계산하지 않고 배치를 읽는다."""
+    return max((grid.getItemPosition(i)[1] + 1 for i in range(grid.count())),
+               default=0)
+
+
 @pytest.mark.parametrize("width", _WIDTHS)
 def test_bulk_select_grid_never_overflows_horizontally(qapp, width):
-    """다중 선택 그리드 — 어느 뷰포트 폭에서도 타일이 가로로 넘치지 않는다.
+    """다중 선택 그리드 — 어느 폭에서도 **실제 배치**가 가로로 넘치지 않는다.
+
+    ★ 공식을 여기서 다시 계산하지 않는다.  재계산하면 위젯 실폭과 열 계산이
+    갈라져도(예: 한쪽만 옛 상수를 들고 있어도) 테스트 쪽 계산은 양쪽 다 새 값을
+    써서 조용히 통과한다 — 실제로 그런 누락이 있었다.  그래서 **운영 경로**
+    (``_relayout_grids``)를 태우고 **배치된 열 수와 타일의 실제 폭**을 읽는다.
 
     이 화면은 ``_COLS`` 상한(5)을 함께 건다 — 공식을 공유해도 그 상한은 화면
-    고유 규칙이라 여기 남아야 한다."""
+    고유 규칙이라 여기 남는다."""
     data = {"S1": [_II(slot="S1", path=Path(f"/tmp/b{i}.jpg"), side="ref")
                    for i in range(12)]}
     dlg = bsd.BulkSelectDialog("t", data, actions=[("x", "X", "primary")])
     try:
-        cols = min(bsd._COLS,
-                   columns_for_width(width, dlg._tile_px + bsd._TILE_CHROME_W,
-                                     bsd._GRID_SPACING))
+        # 스크롤 뷰포트가 실제 폭을 갖도록 한 번 띄운다(offscreen).
+        dlg.resize(width, 800)
+        dlg.show()
+        qapp.processEvents()
+        dlg._relayout_grids()                      # 운영 경로
+        qapp.processEvents()
+        avail = dlg._scroll.viewport().width()
+        assert avail > 0, "뷰포트 폭을 못 얻었다 — 가드가 헛돈다"
+
+        _items, grid = dlg._slot_grids[0]
+        cols = _grid_cols(grid)
         assert 1 <= cols <= bsd._COLS
-        tile_w = dlg._tile_px + bsd._TILE_CHROME_W
-        need = cols * tile_w + (cols - 1) * bsd._GRID_SPACING
-        assert need <= max(width, tile_w), \
-            f"{width}px 에서 {cols}열은 {need}px 를 먹는다"
+
+        # 타일 실폭은 위젯에게 직접 묻는다(setFixedSize 라 값이 확정돼 있다).
+        tile_w = max(w.width() for w in
+                     (grid.itemAt(i).widget() for i in range(grid.count()))
+                     if w is not None)
+        need = cols * tile_w + (cols - 1) * grid.spacing()
+        assert need <= avail, \
+            f"가용 {avail}px 인데 {cols}열 × {tile_w}px = {need}px 를 먹는다"
+        # 상한(_COLS)에 걸린 게 아니라면 한 열 더는 못 놓는 최대값이어야 한다.
+        if cols < bsd._COLS:
+            assert (cols + 1) * tile_w + cols * grid.spacing() > avail
     finally:
+        dlg.hide()
         dlg.deleteLater()
 
 
