@@ -29,6 +29,7 @@ from ..coords import kla_info
 from ..models import session as session_mod
 from ..models.result import FinalResult, MatchResult, MissEntry
 from ..models.slot import (ImageItem, ScanResult, drop_empty_unmatched,
+                           merge_unmatched_by_wafer_id,
                            push_one_sided_to_unmatched, scan)
 from ..utils import paths, wafer_id, wakelock
 from ..utils import prefs as _prefs
@@ -694,7 +695,7 @@ class MainWindow(QMainWindow):
                 w = kla_info.read_wafer_id(d) if d else None
                 if w:
                     info_val[n] = w
-        wafer_id.merge_unmatched_by_wafer_id(sr, info_ref, info_val)
+        merge_unmatched_by_wafer_id(sr, info_ref, info_val)
 
         # 메타 작성 + 다음 단계 — OCR 결과(있으면)를 반영해 최종 메타를 만든다.
         # 판독에 성공한 폴더는 **사진이 없어도**(image=None) slot명을 갖는다 → 수동
@@ -772,7 +773,7 @@ class MainWindow(QMainWindow):
                 try:
                     # 1차(정보파일) 결과도 **함께** 넘긴다 — OCR dict 만 넘기면 정보파일로
                     # 읽은 쪽의 WaferID 키가 사라져 같은 WaferID 인데도 병합에 실패한다.
-                    wafer_id.merge_unmatched_by_wafer_id(
+                    merge_unmatched_by_wafer_id(
                         sr, {**info_ref, **ocr_ref}, {**info_val, **ocr_val})
                 finally:
                     finalize(ocr_ref, ocr_val)

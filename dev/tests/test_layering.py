@@ -34,18 +34,22 @@ def _imported_names(node: ast.AST) -> list[str]:
     return []
 
 
-def _ui_imports() -> list[str]:
+def _imports_of(pkg: str, target: str) -> list[str]:
+    """``app/<pkg>`` 안에서 ``target`` 패키지를 import 하는 자리들."""
     hits: list[str] = []
-    for pkg in _LOWER:
-        for py in sorted((_APP / pkg).rglob("*.py")):
-            tree = ast.parse(py.read_text(encoding="utf-8"), str(py))
-            for node in ast.walk(tree):
-                for name in _imported_names(node):
-                    # 경로 **구성요소**로 비교 — gui·ui_helpers 같은 이름에 안 걸린다.
-                    if "ui" in name.split("."):
-                        hits.append(
-                            f"{py.relative_to(_ROOT)}:{node.lineno}: {name}")
+    for py in sorted((_APP / pkg).rglob("*.py")):
+        tree = ast.parse(py.read_text(encoding="utf-8"), str(py))
+        for node in ast.walk(tree):
+            for name in _imported_names(node):
+                # 경로 **구성요소**로 비교 — gui·ui_helpers 같은 이름에 안 걸린다.
+                if target in name.split("."):
+                    hits.append(
+                        f"{py.relative_to(_ROOT)}:{node.lineno}: {name}")
     return hits
+
+
+def _ui_imports() -> list[str]:
+    return [h for pkg in _LOWER for h in _imports_of(pkg, "ui")]
 
 
 def test_lower_layers_do_not_import_ui():
@@ -59,4 +63,22 @@ def test_lower_layers_do_not_import_ui():
         + "\n  ".join(hits)
         + "\n(UI 가 하위 계층을 부르는 것은 되지만 그 반대는 안 된다 — 필요한 값은"
           " 인자나 시그널로 넘기세요.)"
+    )
+
+
+def test_utils_does_not_import_models():
+    """``models`` → ``utils`` 는 되지만 그 반대는 안 된다 (순환 방지).
+
+    ``models.session`` 이 ``utils.paths`` 를 최상위에서 import 하므로, ``utils`` 가
+    ``models`` 를 부르면 곧바로 순환이다.  예전에는 ``utils.wafer_id`` 가 그것을
+    **함수 안 지연 import** 로 피해 갔다 — 동작은 했지만 '어느 쪽이 위인지' 가
+    사라져 다음 사람이 최상위에 옮겨 적으면 그 자리에서 ImportError 가 난다.
+    그 함수(``merge_unmatched_by_wafer_id``)는 ScanResult/Slot/ImageItem 만
+    다루므로 ``models.slot`` 으로 옮겼고, 여기서 그 방향을 못 박는다.
+    """
+    hits = _imports_of("utils", "models")
+    assert not hits, (
+        "순환 위험 — utils 가 models 를 import 한다:\n  " + "\n  ".join(hits)
+        + "\n(models 가 utils 를 쓰는 방향이 정방향이다. 모델 데이터를 다루는"
+          " 함수라면 models 쪽으로 옮기세요.)"
     )

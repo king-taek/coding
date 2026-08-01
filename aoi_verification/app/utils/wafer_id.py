@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Optional
 
 # ---------------------------------------------------------------------------
-# 1) OCR 폴백 (RapidOCR) — 이미지 좌상단 헤더의 'WaferID : XXXX' 판독
+# OCR 폴백 (RapidOCR) — 이미지 좌상단 헤더의 'WaferID : XXXX' 판독
 # ---------------------------------------------------------------------------
 _DET_LIMIT_SIDE_LEN = 640          # 검출 입력 한 변 — 헤더 글자 검출 정확도↑(과거 320)
 # KLA 사진 **왼쪽 최상단** 헤더(Lot:/WaferID:/Gain:) 영역만 좁게 크롭(가로·세로를
@@ -158,83 +158,3 @@ def header_crop_image(path, top_frac: float = 0.09, left_frac: float = 0.25):
         return img.crop(_crop_box(img.size, top_frac, left_frac)).convert("RGB")
     except Exception:
         return None
-
-
-# ---------------------------------------------------------------------------
-# 2) WaferID/폴더명 키로 ref_only ↔ val_only 병합
-# ---------------------------------------------------------------------------
-def _norm_key(s) -> str:
-    return str(s).strip().upper()
-
-
-def merge_unmatched_by_wafer_id(sr, wid_by_ref: dict, wid_by_val: dict):
-    """``ref_only``/``val_only`` 를 ‘폴더명 또는 WaferID’ 키 교집합으로 병합.
-
-    각 폴더 키 = {폴더명, (있으면) WaferID}.  ref·val 키가 겹치면 같은 slot.
-    병합 **slot명 = 교집합 키(WaferID 우선)** — KLA 가 기준/검증 어느 쪽이든 깔끔한
-    WaferID 가 slot명이 된다(KLA 의 임의 폴더명이 slot명이 되는 것 방지).
-    ``sr`` 를 직접 수정하고 짝지은 ``(ref, val)`` 목록 반환.  ``wid_by_*`` : {폴더명 → WaferID}."""
-    from ..models.slot import ImageItem, Slot
-
-    wid_by_ref = wid_by_ref or {}
-    wid_by_val = wid_by_val or {}
-
-    def keyset(name, wid):
-        ks = {_norm_key(name)}
-        if wid:
-            ks.add(_norm_key(wid))
-        return ks
-
-    val_keys = {v: keyset(v, wid_by_val.get(v)) for v in sr.val_only}
-    paired: list[tuple[str, str]] = []
-    used_val: set = set()
-    for ref_name in list(sr.ref_only):
-        rk = keyset(ref_name, wid_by_ref.get(ref_name))
-        match_val = None
-        slot_name = None
-        for val_name in list(sr.val_only):
-            if val_name in used_val:
-                continue
-            inter = rk & val_keys.get(val_name, set())
-            if not inter:
-                continue
-            match_val = val_name
-            # slot명 = 교집합 키 중 WaferID 우선(없으면 임의의 교집합 키).
-            wids = {_norm_key(w) for w in
-                    (wid_by_ref.get(ref_name), wid_by_val.get(val_name)) if w}
-            pref = inter & wids
-            slot_name = sorted(pref)[0] if pref else sorted(inter)[0]
-            break
-        if match_val is None:
-            continue
-        ref_slot = sr.slots.get(ref_name)
-        vs = sr.slots.get(match_val)
-        if ref_slot is None or vs is None:
-            continue
-        # slot명이 **무관한 기존 슬롯**과 겹치면 병합하지 않는다 — 겹친 채로 진행하면
-        # 그 슬롯의 사진을 덮어써 웨이퍼가 조용히 사라진다.  두 폴더는 ref_only/val_only
-        # 에 남아 수동 매핑으로 넘어간다(정확도 우선).
-        existing = sr.slots.get(slot_name)
-        if existing is not None and slot_name not in (ref_name, match_val):
-            continue
-        merged = existing or Slot(name=slot_name)
-        merged.ref_images = [ImageItem(slot=slot_name, path=it.path, side="ref")
-                             for it in ref_slot.ref_images]
-        merged.val_images = [ImageItem(slot=slot_name, path=it.path, side="val")
-                             for it in vs.val_images]
-        # 원본 폴더 경로를 옮겨 둔다 — 사진 0장 폴더의 정보파일을 나중에도 찾을 수 있게.
-        merged.ref_dir = ref_slot.ref_dir
-        merged.val_dir = vs.val_dir
-        if ref_name != slot_name:
-            sr.slots.pop(ref_name, None)
-        if match_val != slot_name:
-            sr.slots.pop(match_val, None)
-        sr.slots[slot_name] = merged
-        used_val.add(match_val)
-        for n in (ref_name, match_val, slot_name):
-            if n in sr.ref_only:
-                sr.ref_only.remove(n)
-            if n in sr.val_only:
-                sr.val_only.remove(n)
-        paired.append((ref_name, match_val))
-    return paired

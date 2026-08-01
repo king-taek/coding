@@ -10,6 +10,7 @@ from pathlib import Path
 
 from aoi_verification.app.models.slot import (ImageItem, ScanResult, Slot,
                                               drop_empty_unmatched,
+                                              merge_unmatched_by_wafer_id,
                                               push_one_sided_to_unmatched)
 from aoi_verification.app.utils import wafer_id
 
@@ -56,7 +57,7 @@ def test_merge_by_wafer_id_from_info_file():
         val_specs={"W6459080XYHX": ["81090.137592.c.1.jpg"]},
     )
     wid_ref = {"KLA_RAW_07": "W6459080XYHX"}       # 정보파일에서 읽은 값
-    paired = wafer_id.merge_unmatched_by_wafer_id(sr, wid_ref, {})
+    paired = merge_unmatched_by_wafer_id(sr, wid_ref, {})
     assert paired == [("KLA_RAW_07", "W6459080XYHX")]
     # 병합 slot명 = WaferID(교집합 키) — KLA 임의 폴더명이 아니라.
     assert sr.common_slot_names == ["W6459080XYHX"]
@@ -71,7 +72,7 @@ def test_merge_carries_folder_dirs():
     """병합 슬롯이 양쪽 원본 폴더 경로를 이어받는다(정보파일을 나중에도 찾을 수 있게)."""
     sr = _scan(ref_specs={"KLA_RAW_07": ["a.jpg"]},
                val_specs={"W6459080XYHX": ["b.jpg"]})
-    wafer_id.merge_unmatched_by_wafer_id(sr, {"KLA_RAW_07": "W6459080XYHX"}, {})
+    merge_unmatched_by_wafer_id(sr, {"KLA_RAW_07": "W6459080XYHX"}, {})
     merged = sr.slots["W6459080XYHX"]
     assert merged.ref_dir == Path("/ref/KLA_RAW_07")
     assert merged.val_dir == Path("/val/W6459080XYHX")
@@ -84,7 +85,7 @@ def test_merge_slot_named_wafer_id_when_kla_is_ref():
         val_specs={"W1234567ABCD": ["shot.jpg"]},           # 검증=WaferID 폴더명
     )
     wid_ref = {"KLA_LOT_X": "W1234567ABCD"}
-    wafer_id.merge_unmatched_by_wafer_id(sr, wid_ref, {})
+    merge_unmatched_by_wafer_id(sr, wid_ref, {})
     assert sr.common_slot_names == ["W1234567ABCD"]
     assert "KLA_LOT_X" not in sr.slots
 
@@ -95,7 +96,7 @@ def test_merge_no_match_when_wafer_id_differs():
         val_specs={"W6459080XYHX": ["b.jpg"]},
     )
     wid_ref = {"RAW_A": "ZZZZ1234XYZ9"}
-    assert wafer_id.merge_unmatched_by_wafer_id(sr, wid_ref, {}) == []
+    assert merge_unmatched_by_wafer_id(sr, wid_ref, {}) == []
     assert sr.ref_only == ["RAW_A"] and sr.val_only == ["W6459080XYHX"]
 
 
@@ -107,7 +108,7 @@ def test_merge_both_kla_pairs_by_wafer_id():
     )
     info_ref = {"RAW_A": "W1111111XYA1", "RAW_B": "W2222222XYB2"}
     info_val = {"RAW_X": "W2222222XYB2", "RAW_Y": "W1111111XYA1"}
-    wafer_id.merge_unmatched_by_wafer_id(sr, info_ref, info_val)
+    merge_unmatched_by_wafer_id(sr, info_ref, info_val)
     # 나열 순서가 아니라 WaferID 로 짝지어야 한다(A↔Y, B↔X).
     assert sr.common_slot_names == ["W1111111XYA1", "W2222222XYB2"]
     assert sr.slots["W1111111XYA1"].ref_images[0].path == Path("/ref/RAW_A/a.jpg")
@@ -124,10 +125,10 @@ def test_merge_second_pass_keeps_first_pass_ids():
     sr = _scan(ref_specs={"RAW_A": ["a.jpg"]}, val_specs={"RAW_X": ["x.jpg"]})
     info_ref = {"RAW_A": "W6459080XYHX"}        # 기준: 정보파일로 판독 → OCR 생략
     info_val: dict = {}                        # 검증: 정보파일 없음 → OCR 대상
-    assert wafer_id.merge_unmatched_by_wafer_id(sr, info_ref, info_val) == []
+    assert merge_unmatched_by_wafer_id(sr, info_ref, info_val) == []
 
     ocr_val = {"RAW_X": "W6459080XYHX"}
-    paired = wafer_id.merge_unmatched_by_wafer_id(
+    paired = merge_unmatched_by_wafer_id(
         sr, {**info_ref}, {**info_val, **ocr_val})
     assert paired == [("RAW_A", "RAW_X")]
     assert sr.common_slot_names == ["W6459080XYHX"]
@@ -143,7 +144,7 @@ def test_merge_skips_when_slot_name_collides():
     dup = "W6459080XYHX"
     info_ref = {"RAW_A": dup, "RAW_B": dup}
     info_val = {"RAW_X": dup, "RAW_Y": dup}
-    wafer_id.merge_unmatched_by_wafer_id(sr, info_ref, info_val)
+    merge_unmatched_by_wafer_id(sr, info_ref, info_val)
 
     # 첫 쌍만 병합되고, 두 번째 쌍은 덮어쓰지 않고 수동 매핑으로 남는다.
     assert sr.common_slot_names == [dup]
