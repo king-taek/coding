@@ -432,8 +432,11 @@ class UnmatchedReviewDialog(QDialog):
     # ------------------------------------------------------------------
     @staticmethod
     def _is_cancelled(entry: MissEntry) -> bool:
-        """결과 검토 화면에서 ‘매칭 취소’ 로 발생한 실패인지 (#14)."""
-        return "매칭 취소" in (getattr(entry, "note", "") or "")
+        """결과 검토 화면에서 ‘매칭 취소’ 로 발생한 실패인지 (#14).
+
+        표시는 `result_page` 가 남긴다 — 문자열은 `i18n.KO.CANCELLED_NOTE_MARK`
+        한 곳에서만 정의한다(양쪽에 하드코딩하면 조용히 갈라진다)."""
+        return i18n.KO.CANCELLED_NOTE_MARK in (getattr(entry, "note", "") or "")
 
     def _display_order(self) -> tuple[list[int], list[int]]:
         """리스트에 표시할 ``self._unmatched`` 인덱스 순서 (#14).
@@ -491,7 +494,7 @@ class UnmatchedReviewDialog(QDialog):
 
         if cancelled:
             # 구분선/헤더 — 선택 불가, 클릭해도 점프하지 않음.
-            sep = QListWidgetItem("── 매칭 취소 목록 ──")
+            sep = QListWidgetItem(i18n.KO.UNMATCHED_CANCELLED_SEPARATOR)
             sep.setFlags(Qt.ItemFlag.NoItemFlags)
             sep.setForeground(QColor(theme.DANGER))
             self.fail_list.addItem(sep)
