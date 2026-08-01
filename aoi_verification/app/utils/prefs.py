@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -142,17 +143,39 @@ def _file() -> Path:
     return paths.cache_root() / _PREFS_FILE
 
 
+# 파싱 결과 메모 — (경로, mtime_ns, 크기) → dict.
+# ★ 시작 한 번에 이 함수가 7번 불린다(메인·창 기하·설정 화면 3곳·선별·매칭).
+#   회사 환경에서 prefs 가 네트워크 홈에 있으면 그 왕복이 눈에 띈다.  파일이
+#   바뀌면 키가 달라져 저절로 무효화되고, `save` 는 mtime 을 바꾸므로 같은
+#   프로세스가 쓴 변경도 다음 load 에서 그대로 보인다.
+_cached: tuple | None = None
+
+
 def load() -> UiPrefs:
+    """저장된 설정.  **매번 새 인스턴스**를 돌려준다(호출부가 자유롭게 고친다).
+
+    ★ 메모한 dict 는 깊은 복사로 주고받는다 — ``extra`` 가 가변이라 얕게 넘기면
+    호출부가 그것을 고칠 때 캐시가 함께 오염된다."""
+    global _cached
     p = _file()
-    if not p.exists():
-        return UiPrefs()
     try:
-        return UiPrefs.from_dict(json.loads(p.read_text(encoding="utf-8")))
+        st = p.stat()
+        key = (str(p), st.st_mtime_ns, st.st_size)
+    except OSError:
+        return UiPrefs()                 # 파일 없음 — 기본값
+    if _cached is not None and _cached[0] == key:
+        return UiPrefs.from_dict(deepcopy(_cached[1]))
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        prefs = UiPrefs.from_dict(data)
     except Exception:
         return UiPrefs()
+    _cached = (key, deepcopy(data))
+    return prefs
 
 
 def save(prefs: UiPrefs) -> None:
+    global _cached
     p = _file()
     try:
         tmp = p.with_suffix(".tmp")
@@ -163,6 +186,9 @@ def save(prefs: UiPrefs) -> None:
         tmp.replace(p)
     except OSError:
         pass
+    finally:
+        # mtime 만 믿지 않는다 — 같은 나노초에 두 번 쓰는 경우까지 확실히 끊는다.
+        _cached = None
 
 
 def patch(**kwargs: Any) -> UiPrefs:

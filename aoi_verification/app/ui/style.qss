@@ -7,18 +7,39 @@
      `위젯:상태::서브컨트롤` 로 쓰면 무시되거나 상태와 무관하게 항상 적용된다
      (둘 다 실제로 버그를 냈다 — 아래 QSlider·QCheckBox 주석 참조). */
 
+/* ★ 여기에 `background-color` 를 두지 마라(#렉).  전역 `QWidget` 이 **면을 칠하면**
+   Qt 는 앱의 모든 위젯을 스타일시트 경로로 그린다 — 네이티브 그리기 빠른 길이 꺼지고,
+   위젯 하나하나가 이 파일의 모든 규칙과 대조된다.  타일이 수백 개인 화면(썸네일 그리드·
+   매치 검토)에서 그 비용이 곱해져 스크롤이 끊겼다.  상속되는 것(글자색·서체)만 남기고,
+   **면은 창·시트·최상위 팝업만** 칠한다(바로 아래). */
 QWidget {
-    background-color: $bg;
     color: $ink;
     font-family: $font_body;
     font-size: $font_base_sz;
 }
 
+/* 면을 칠하는 곳 — 그 안의 위젯은 이 바탕이 비쳐 보인다(별도 칠 불필요). */
 QMainWindow, QDialog {
     background-color: $bg;
 }
+/* 스크롤 영역의 뷰포트는 창 바탕을 물려받지 못하는 자리라 따로 칠한다.
+   (페이지가 스스로 transparent 로 덮어쓰는 곳은 위젯 스타일시트가 이겨 그대로 둔다.) */
+QScrollArea, QScrollArea > QWidget > QWidget, QAbstractScrollArea::viewport {
+    background-color: $bg;
+}
+/* 별도 최상위 창으로 뜨는 것들 — 창 바탕이 닿지 않으므로 스스로 면을 가져야 한다.
+   빠지면 콤보 드롭다운·컨텍스트 메뉴가 네이티브 회색으로 뜬다. */
+QMenu, QComboBox QAbstractItemView {
+    background-color: $elev;
+    color: $ink;
+    border: 1px solid $line;
+}
+QMenu::item:selected {
+    background-color: $accent_tint;
+}
 
-/* 상단 앱 로고 — 페이지 스택 밖의 머리글이라 모든 단계에서 같은 자리에 보인다. */
+/* 상단 앱 로고 — 각 페이지가 자기 콘텐츠 맨 위에 놓는다(widgets/app_logo.py).
+   스크롤이 있는 화면에서는 함께 밀려 올라간다(고정 칸이 아니다). */
 QLabel[role="appLogo"] {
     padding: 10px 0 6px 0;
     border-bottom: 1px solid $line2;
@@ -56,6 +77,17 @@ QLabel[role="sheetBody"] {
 QLabel {
     color: $ink;
     background: transparent;
+}
+
+/* 매치 검토 썸네일 테두리 — 한 화면에 수백 개라 **인스턴스별 스타일시트를 쓰지 않는다**
+   (그러면 위젯 수만큼 규칙 집합이 생겨 폴리시·재계산이 비례해 커진다).  차순위 후보는
+   점선으로 '확정 아님' 을 유지한다. */
+QLabel[role="thumbFrame"] {
+    border: 1px solid $thumb_frame;
+    border-radius: 6px;
+}
+QLabel[role="thumbFrame"][subtle="true"] {
+    border-style: dashed;
 }
 
 QLabel[role="title"] {
@@ -208,8 +240,8 @@ QPushButton:focus {
 }
 
 QPushButton:disabled {
-    color: $mute;
-    border: 1px dashed $line;
+    color: $disabled_ink;
+    border: 1px dashed $disabled_line;
     background-color: transparent;
 }
 
@@ -244,8 +276,8 @@ QPushButton[role="stepper"]:focus {
     border: $focus_w solid $focus;
 }
 QPushButton[role="stepper"]:disabled {
-    color: $mute;
-    border: 1px dashed $line;
+    color: $disabled_ink;
+    border: 1px dashed $disabled_line;
 }
 QPushButton[role="primary"] {
     background-color: $accent;
@@ -263,12 +295,12 @@ QPushButton[role="primary"]:pressed {
 }
 /* ★ 속성 선택자가 일반 QPushButton:disabled 보다 특이도가 높아, 이 규칙이 없으면
    primary 는 비활성이어도 꽉 찬 채로 남아 '누를 수 있어 보이는 못 누르는 버튼'이 된다.
-   ★ 면을 $line2 로 채우면 라벨($mute)이 그 위에서 3.42:1 로 떨어진다(실측) — 비워
-   두면 라벨이 시트 면 위에 앉아 6.5:1 을 유지하면서도 '비어 있다 = 못 누른다'로 읽힌다. */
+   면은 비우고 글자·테두리를 비활성 토큰으로 — '비어 있다 = 못 누른다'로 읽힌다.
+   ★ 주석에도 달러 토큰을 쓰지 마라 — Template.substitute 가 주석을 구분하지 않는다. */
 QPushButton[role="primary"]:disabled {
     background-color: transparent;
-    color: $mute;
-    border: 1px dashed $line;
+    color: $disabled_ink;
+    border: 1px dashed $disabled_line;
     font-weight: 600;
 }
 /* ★ 채운 버튼의 포커스 링은 페이지 배경이 아니라 **버튼 자기 면**과 대비해야 한다.
@@ -325,8 +357,8 @@ QPushButton[role="warn"]:focus {
 QPushButton[role="ghost"]:disabled,
 QPushButton[role="danger"]:disabled,
 QPushButton[role="warn"]:disabled {
-    color: $mute;
-    border: 1px dashed $line;
+    color: $disabled_ink;
+    border: 1px dashed $disabled_line;
     background: transparent;
 }
 
@@ -367,13 +399,13 @@ QPushButton[role="option"]:focus {
 }
 QPushButton[role="option"]:disabled {
     background: transparent;
-    color: $mute;
-    border: 1px dashed $line;
+    color: $disabled_ink;
+    border: 1px dashed $disabled_line;
 }
 QPushButton[role="option"]:checked:disabled {
     background-color: $accent_tint_soft;
-    color: $mute;
-    border: 1px dashed $line;
+    color: $disabled_ink;
+    border: 1px dashed $disabled_line;
 }
 
 /* 입력 오류 — 왜 [검증 시작] 을 누를 수 없는지 툴팁이 아니라 눈에 보이게. */
@@ -490,13 +522,13 @@ QPushButton[role="segment"]:focus {
 }
 QPushButton[role="segment"]:disabled {
     background: transparent;
-    color: $mute;
-    border: 1px dashed $line;
+    color: $disabled_ink;
+    border: 1px dashed $disabled_line;
 }
 QPushButton[role="segment"]:checked:disabled {
     background-color: $accent_tint_soft;
-    color: $mute;
-    border: 1px dashed $line;
+    color: $disabled_ink;
+    border: 1px dashed $disabled_line;
 }
 
 /* 차단 이유 문구 — '왜 지금 확인할 수 없는가'.  ★ `role="warn"` 은 QPushButton 에만
@@ -541,8 +573,8 @@ QPushButton[role="slotTile"]:checked {
 }
 QPushButton[role="slotTile"]:disabled {
     background: transparent;
-    color: $mute;
-    border: 1px dashed $line;
+    color: $disabled_ink;
+    border: 1px dashed $disabled_line;
 }
 
 /* 카드 제목 — 인라인 f-string 스타일 3중복을 대체. */
@@ -616,8 +648,8 @@ QPushButton[role="rowAction"]:focus {
 }
 QPushButton[role="rowAction"]:disabled {
     background: transparent;
-    color: $mute;
-    border: 1px dashed $line;
+    color: $disabled_ink;
+    border: 1px dashed $disabled_line;
 }
 
 /* 링크형 버튼 — 반복되는 2차 액션(더 보기 ▾·접기 ▴)용. 테두리 없이 조용히.

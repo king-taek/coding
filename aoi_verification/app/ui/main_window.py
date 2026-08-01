@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
-from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import (QApplication, QLabel, QMainWindow,
                               QMessageBox, QStackedWidget, QStatusBar,
                               QVBoxLayout, QWidget)
@@ -33,16 +32,20 @@ from ..models.slot import (ImageItem, ScanResult, drop_empty_unmatched,
 from ..utils import paths, wafer_id, wakelock
 from ..utils import prefs as _prefs
 from ..utils.prefs import AutomationLevel, EngineMode
-from ..workers.thumbnailer import (PRIORITY_ACTIVE_SLOT, PRIORITY_BACKGROUND,
-                                     ThumbnailPool, ThumbnailWorker)
-from .pages.match_page import MatchPage
-from .pages.result_page import ResultPage
-from .pages.select_page import SelectPage
 from .pages.setup_page import SetupInput, SetupPage
 from .widgets.loading_overlay import LoadingOverlay
 from .widgets import sheet_host as sheets
 from .widgets.sheet_host import SheetHost
 from .widgets.window_controls import add_fullscreen_shortcut
+
+# ★ 무거운 것은 **여기서 import 하지 않는다**(시작 속도).  나머지 네 페이지와
+#   썸네일러는 cv2·OpenVINO·numpy·PIL 을 줄줄이 끌고 오는데, 첫 화면(SetupPage)은
+#   그중 무엇도 쓰지 않는다.  최상위에 두면 그 import 가 끝날 때까지 창이 뜨지
+#   못한다 — 사용자가 지적한 '시작이 느리다' 의 대부분이 이것이었다.
+#   대신 `_start_backend_import_async` 가 창을 띄운 뒤 백그라운드에서 불러오고,
+#   끝나면 `_on_backend_loaded` 가 메인 스레드에서 나머지 페이지를 만든다.
+#   회귀 가드: dev/tests/test_startup_light_import.py
+#   ※ `from __future__ import annotations` 덕에 타입 주석은 import 없이도 유효하다.
 
 
 # ---------------------------------------------------------------------------
@@ -68,15 +71,15 @@ class MainWindow(QMainWindow):
     _MIN_W = 800
     _MIN_H = 600
 
-    # 상단 로고 표시 높이(논리 px).
-    _LOGO_H = 44
-
     # 자동 업데이트 — 백그라운드 스레드에서 메인 스레드로 결과를 넘기는 시그널.
     _update_found = pyqtSignal(dict)
     _update_applied = pyqtSignal(bool, dict)
     _update_progress = pyqtSignal(int, int, str)   # 다운로드/적용 진행(로딩바)
     _update_none = pyqtSignal(str)          # 수동 확인: 최신/확인불가 안내
     _startup_proceed = pyqtSignal()         # 업데이트 흐름 종료 → 나머지 시작 팝업
+    # 무거운 모듈(cv2·OpenVINO·numpy·PIL)을 백그라운드에서 다 불러왔다는 신호.
+    # 스레드에서 위젯을 만들 수 없으므로 시그널로 메인 스레드에 넘긴다(CLAUDE.md).
+    _backend_loaded = pyqtSignal()
 
     def __init__(self, progress=None) -> None:
         """``progress(done, total, message)`` 를 주면 페이지 생성 진행을 보고한다
@@ -92,19 +95,16 @@ class MainWindow(QMainWindow):
         self._save_geom_timer.setInterval(400)
         self._save_geom_timer.timeout.connect(self._persist_geometry)
 
-        # 상단 로고 + 페이지 스택.  로고는 스택 밖에 두어 어느 단계에서도 보인다.
+        # 페이지 스택만 둔다.  ★ 상단 로고는 **각 페이지가 자기 콘텐츠 맨 위에**
+        #   놓는다(widgets/app_logo.py) — 스택 밖에 고정해 두면 아래를 스크롤해도
+        #   따라오지 않고 그 칸이 영영 자리를 차지한다(사용자 지적).
         central = QWidget(self)
         col = QVBoxLayout(central)
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(0)
-        self._logo_label = QLabel(central)
-        self._logo_label.setProperty("role", "appLogo")
-        self._logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        col.addWidget(self._logo_label)
         self._stack = QStackedWidget(central)
         col.addWidget(self._stack, 1)
         self.setCentralWidget(central)
-        self._apply_header_logo()
 
         # 상태 바 — 개발자 크레딧 + 메모리 사용량(psutil 가용 시).
         # ★ 'Intel GPU 가속' 디바이스 표시와 'CPU n% · GPU 가동' 사용량 표시는 제거했다.
@@ -133,10 +133,19 @@ class MainWindow(QMainWindow):
         # 어긋나고, 최악에는 잠금이 풀리지 않는다.
         self._appearance_busy = False
         # 타이머는 psutil 유무와 무관하게 구동 — 콜백이 안전 가드한다.
+        # ★ 여기서 첫 갱신을 직접 부르지 않는다.  콜백이 `import psutil` 을 하는데,
+        #   그것이 창이 뜨기 전 시작 경로 위에 얹힌다(사용자 체감: 시작이 느리다).
+        #   2초 뒤 첫 틱이 같은 일을 하므로 표시 내용은 달라지지 않는다.
         self._mem_timer.start()
-        self._update_memory_label()
 
         # 페이지 — 생성+스택추가+시그널 배선을 _build_pages 단일 출처로 (재구축용).
+        # ★ 2단계로 만든다: 지금은 첫 화면(SetupPage)만, 나머지 넷은 무거운 모듈이
+        #   백그라운드에서 다 올라온 뒤에.  준비 전에는 '검증 시작' 이 비활성이다.
+        self._backend_ready = False
+        self._select_page = None
+        self._match_page = None
+        self._result_page = None
+        self._match_review_page = None
         self._build_pages(progress)
 
         # 자동 저장 타이머 -----------------------------------------------
@@ -170,8 +179,8 @@ class MainWindow(QMainWindow):
         # 썸네일 완료 처리 one-shot 가드 — finished 시그널/취소가 이중 진입해
         # Stage 1 에 두 번 들어가는 것을 방지.
         self._thumbs_handled = False
-        self._thumb_worker: Optional[ThumbnailWorker] = None
-        self._thumb_pool: Optional[ThumbnailPool] = None
+        self._thumb_worker = None            # Optional[ThumbnailWorker]
+        self._thumb_pool = None              # Optional[ThumbnailPool]
         self._sizing_tier: Optional[config.SizingTier] = None
         self._scan: Optional[ScanResult] = None
         self._input: Optional[SetupInput] = None
@@ -190,8 +199,10 @@ class MainWindow(QMainWindow):
         # 이어하기 ------------------------------------------------------
         # 1일 지난 썸네일/중간이미지 캐시 정리 — 백그라운드 데몬으로 UI 비차단.
         self._prune_old_cache_async()
-        # GPU 임베딩 모델을 미리 컴파일/워밍업 — 첫 슬롯의 커널 JIT 지연 제거(#3).
-        self._warmup_accel_async()
+        # 무거운 모듈을 백그라운드에서 불러온다 → 끝나면 나머지 페이지를 만들고
+        # '검증 시작' 을 연다.  GPU 워밍업은 그 뒤에 이어 붙인다(같은 모듈이 필요).
+        self._backend_loaded.connect(self._on_backend_loaded)
+        self._start_backend_import_async()
         # 시작 팝업 순서: ① 자동 업데이트 확인 → (업데이트 처리 후) ② 이어하기 →
         # ③ OpenVINO 안내.  팝업이 겹치지 않도록 ②③ 은 업데이트 흐름이 끝난 뒤에만 띄운다.
         self._startup_done = False
@@ -951,6 +962,9 @@ class MainWindow(QMainWindow):
 
         # 다중 스레드 + 우선순위 큐 풀 사용. 첫 슬롯 (사전식으로 가장 앞)
         # 의 작업을 ACTIVE_SLOT 우선순위로 끌어올린다.
+        # (썸네일러는 모듈 최상위가 아니라 여기서 불러온다 — 위 import 주석 참조.)
+        from ..workers.thumbnailer import (PRIORITY_ACTIVE_SLOT,
+                                           PRIORITY_BACKGROUND, ThumbnailPool)
         if self._thumb_pool is not None:
             self._thumb_pool.stop()
         self._thumb_pool = ThumbnailPool(
@@ -1441,37 +1455,55 @@ class MainWindow(QMainWindow):
     # Page switching
     # ==================================================================
     def _build_pages(self, progress=None) -> None:
-        """5개 페이지 생성 + 스택 추가 + 시그널 배선 (단일 출처 — 재구축 재사용).
+        """페이지 생성 + 스택 추가 + 시그널 배선 (단일 출처 — 재구축 재사용).
 
-        ``progress(done, total, message)`` 를 주면 페이지 하나를 만들 때마다 보고한다
-        (시작 스플래시).  색 모드 전환의 재구축 때는 주지 않는다 — 그때는 로딩 표시가
-        없고, 크로스페이드가 전환을 대신 알린다."""
-        from .pages.match_review_page import MatchReviewPage
+        ★ **첫 화면만 먼저** 만든다.  나머지 넷은 cv2·OpenVINO·numpy·PIL 을 끌고
+        오므로, 다 불러온 뒤(``_on_backend_loaded``)에 만든다.  색 모드 전환의
+        재구축은 이미 준비가 끝난 뒤이므로 그 자리에서 다섯을 모두 만든다.
+
+        ``progress(done, total, message)`` 를 주면 진행을 보고한다(시작 스플래시).
+        색 모드 전환의 재구축 때는 주지 않는다 — 그때는 로딩 표시가 없고,
+        크로스페이드가 전환을 대신 알린다."""
         report = progress or (lambda *_: None)
-        # 셋업 배치는 **하나**다(순서형).  한때 A/B/C 3안을 상단 스위처로 비교했는데,
-        # 사용자가 순서형을 고르면서 나머지 2안과 스위처·setup_layouts 를 제거했다.
-        report(0, 5, i18n.KO.SPLASH_PAGES)
+        report(0, 1, i18n.KO.SPLASH_PAGES)
+        self._build_setup_page()
+        report(1, 1)
+        if self._backend_ready:
+            self._build_remaining_pages()
+
+    def _build_setup_page(self) -> None:
+        """첫 화면 — 무거운 의존성이 전혀 없어 창을 즉시 띄울 수 있다.
+
+        셋업 배치는 **하나**다(순서형).  한때 A/B/C 3안을 상단 스위처로 비교했는데,
+        사용자가 순서형을 고르면서 나머지 2안과 스위처·setup_layouts 를 제거했다."""
         self._setup_page = SetupPage()
-        report(1, 5)
-        self._select_page = SelectPage()
-        report(2, 5)
-        self._match_page = MatchPage()
-        report(3, 5)
-        self._result_page = ResultPage()
-        report(4, 5)
-        self._match_review_page = MatchReviewPage()
-        report(5, 5)
-
-        for w in (self._setup_page, self._select_page,
-                  self._match_page, self._result_page,
-                  self._match_review_page):
-            self._stack.addWidget(w)
-
+        self._stack.addWidget(self._setup_page)
         self._setup_page.start_requested.connect(self._on_start)
         self._setup_page.update_check_requested.connect(self._manual_update_check)
         # 색 모드/배치 변경 → 페이지 재생성(세션 시작 전에만).
         if hasattr(self._setup_page, "appearance_changed"):
             self._setup_page.appearance_changed.connect(self._on_appearance_changed)
+        # 백엔드가 아직이면 '검증 시작' 을 잠그고 버튼에 준비 중을 표기한다.
+        self._setup_page.set_backend_ready(self._backend_ready)
+
+    def _build_remaining_pages(self) -> None:
+        """나머지 네 페이지 — **메인 스레드에서만** 부른다(Qt 위젯 규칙).
+
+        모듈 import 는 이 시점에 이미 끝나 있다(백그라운드 스레드가 했다).  여기서
+        하는 것은 위젯 생성뿐이다."""
+        from .pages.match_page import MatchPage
+        from .pages.match_review_page import MatchReviewPage
+        from .pages.result_page import ResultPage
+        from .pages.select_page import SelectPage
+
+        self._select_page = SelectPage()
+        self._match_page = MatchPage()
+        self._result_page = ResultPage()
+        self._match_review_page = MatchReviewPage()
+        for w in (self._select_page, self._match_page,
+                  self._result_page, self._match_review_page):
+            self._stack.addWidget(w)
+
         self._select_page.finished.connect(self._on_select_finished)
         self._select_page.state_changed.connect(self._schedule_autosave)
         self._match_page.match_confirmed.connect(self._on_match_confirmed)
@@ -1481,6 +1513,52 @@ class MainWindow(QMainWindow):
         self._match_page.cancelled.connect(self._on_match_cancelled)
         self._result_page.new_session_requested.connect(self._new_session)
         self._match_review_page.finished.connect(self._on_match_review_done)
+
+    def _start_backend_import_async(self) -> None:
+        """무거운 모듈을 **백그라운드 스레드에서 import 만** 한다.
+
+        위젯은 만들지 않는다 — Qt 위젯은 GUI 스레드 전용이다.  다 끝나면
+        ``_backend_loaded`` 를 emit 해 메인 스레드가 이어받는다(큐 연결).
+        실패는 여기서 삼키고, 메인 스레드가 같은 import 를 하며 원래 오류를 낸다."""
+        import importlib
+        import threading
+
+        def _work() -> None:
+            try:
+                for name in (
+                    "aoi_verification.app.similarity.slot_features",   # cv2
+                    "aoi_verification.app.workers.efficiency_matcher",  # openvino
+                    "aoi_verification.app.workers.thumbnailer",         # numpy/PIL
+                    "aoi_verification.app.ui.pages.select_page",
+                    "aoi_verification.app.ui.pages.match_page",
+                    "aoi_verification.app.ui.pages.result_page",
+                    "aoi_verification.app.ui.pages.match_review_page",
+                ):
+                    importlib.import_module(name)
+            except Exception:
+                pass
+            finally:
+                self._backend_loaded.emit()
+
+        threading.Thread(target=_work, name="backend-import", daemon=True).start()
+
+    def _on_backend_loaded(self) -> None:
+        """무거운 모듈이 다 올라왔다 — 나머지 페이지를 만들고 시작 버튼을 연다."""
+        if self._select_page is None:
+            try:
+                self._build_remaining_pages()
+            except Exception as exc:          # import 실패가 여기서 표면화된다
+                sheets.error(self, i18n.KO.APP_TITLE,
+                             i18n.KO.BACKEND_LOAD_FAILED_FMT.format(err=exc))
+                return                        # 시작 버튼은 '준비 중' 그대로 둔다
+        self._backend_ready = True
+        try:
+            self._setup_page.set_backend_ready(True)
+        except RuntimeError:
+            return                            # 창이 이미 닫혔다
+        # GPU 임베딩 모델을 미리 컴파일/워밍업 — 첫 슬롯의 커널 JIT 지연 제거(#3).
+        # ★ 무거운 import 뒤에 이어 붙인다(같은 모듈이 필요하고, 시작 경로를 비운다).
+        self._warmup_accel_async()
 
     def _on_appearance_changed(self, mode: str = "") -> None:
         """색 모드(어두운 화면) 변경을 화면에 반영한다 — **옛 화면을 걷어내는 크로스페이드**.
@@ -1555,13 +1633,19 @@ class MainWindow(QMainWindow):
             draft = self._setup_page.capture_draft()
         except Exception:
             draft = None
-        old = (self._setup_page, self._select_page, self._match_page,
-               self._result_page, self._match_review_page)
+        # 아직 안 만든 페이지가 있을 수 있다(백엔드 로딩 전에 색 모드를 바꾼 경우).
+        old = tuple(w for w in (self._setup_page, self._select_page,
+                                self._match_page, self._result_page,
+                                self._match_review_page) if w is not None)
         for w in old:
             self._stack.removeWidget(w)
             w.hide()
             w.setParent(None)
             w.deleteLater()
+        self._select_page = None
+        self._match_page = None
+        self._result_page = None
+        self._match_review_page = None
         if apply_qss:
             app = QApplication.instance()
             if app is not None:
@@ -1573,7 +1657,8 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
         self._apply_statusbar_theme()
-        self._apply_header_logo()
+        # 로고는 페이지가 자기 안에 다시 만든다(app_logo.build_logo_label) —
+        # 여기서 따로 손댈 것이 없다.
         try:
             self._loading.raise_()           # 오버레이 z-order 유지
         except Exception:
@@ -1585,30 +1670,12 @@ class MainWindow(QMainWindow):
         self._credit_label.setStyleSheet(
             f"color: {theme.MUTE}; padding: 0 8px; font-weight: 600;")
 
-    def _apply_header_logo(self) -> None:
-        """상단 로고(배경을 지운 ``logo_clear``) 를 그린다 — 페이지 밖 위젯이라
-        색 모드 전환 때 여기서 다시 만들어야 한다.
-
-        로고 마크가 거의 검정이라 어두운 화면에서는 그대로 두면 배경에 묻힌다.
-        알파는 건드리지 않고 RGB 만 반전해 밝은 마크로 뒤집는다."""
-        pm = QPixmap(str(paths.logo_path("logo_clear.png")))
-        if pm.isNull():
-            self._logo_label.hide()
-            return
-        if theme.COLOR_MODE == "dark":
-            img = pm.toImage().convertToFormat(QImage.Format.Format_ARGB32)
-            img.invertPixels(QImage.InvertMode.InvertRgb)
-            pm = QPixmap.fromImage(img)
-        dpr = self.devicePixelRatioF() or 1.0
-        pm = pm.scaledToHeight(int(self._LOGO_H * dpr),
-                               Qt.TransformationMode.SmoothTransformation)
-        pm.setDevicePixelRatio(dpr)
-        self._logo_label.setPixmap(pm)
-        self._logo_label.show()
-
     # ==================================================================
     def _page_order(self, w: QWidget) -> int:
-        """흐름 순서(셋업→선별→매칭→검토→결과) — 전환 방향 결정용."""
+        """흐름 순서(셋업→선별→매칭→검토→결과) — 전환 방향 결정용.
+
+        아직 만들지 않은 페이지(백엔드 로딩 전)는 자리만 비워 둔다 — ``None`` 이
+        섞여도 실제 위젯의 순번은 달라지지 않는다."""
         order = (self._setup_page, self._select_page, self._match_page,
                  self._match_review_page, self._result_page)
         try:

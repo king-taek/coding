@@ -30,7 +30,7 @@ from __future__ import annotations
 from typing import Optional
 
 from PyQt6.QtCore import (QEvent, QEventLoop, QPropertyAnimation, QSize, Qt,
-                          pyqtSignal)
+                          QVariantAnimation, pyqtSignal)
 from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import (QApplication, QDialog, QGraphicsOpacityEffect,
                              QHBoxLayout, QLabel, QMessageBox, QVBoxLayout,
@@ -50,17 +50,49 @@ _SHEET_MIN_H = 140
 
 
 class _Scrim(QWidget):
-    """시트 뒤를 덮는 반투명 막 — 로딩 오버레이와 같은 색(``theme.SCRIM_RGBA``)."""
+    """시트 뒤를 덮는 반투명 막 — 로딩 오버레이와 같은 색(``theme.SCRIM_RGBA``).
+
+    알파에 ``_fade`` 를 곱해 그린다(``widgets/loading_overlay.py`` 의 스크림과 같은
+    방식).  들어올 때는 그 값을 0→1 로 트윈해 어둠이 **슬램하지 않게** 하고, 나갈
+    때는 트윈하지 않는다 — 퇴장은 :meth:`SheetHost._close` 가 닫는 그 프레임에
+    ``hide()`` 로 끝낸다(사용자 결정: 팝업이 사라지는 순간 화면이 같이 밝아진다).
+    """
 
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
         self.setAutoFillBackground(False)
+        self._fade = 1.0
+        self._fade_anim: Optional[QVariantAnimation] = None
+
+    def fade_in(self) -> None:
+        """어둠을 0→1 로 트윈한다.  모션이 꺼져 있으면 즉시 최대 어둠."""
+        if not motion.enabled():
+            self._set_fade(1.0)
+            return
+        anim = self._fade_anim
+        if anim is None:
+            # 열 때마다 새로 만들면 자식 애니메이션이 세션 내내 쌓인다 — 하나를
+            # 재사용한다.  tick 이 건드리는 것은 자기 **부모**(이 스크림)뿐이다.
+            anim = QVariantAnimation(self)
+            anim.setStartValue(0.0)
+            anim.setEndValue(1.0)
+            anim.setEasingCurve(motion.EASE_PRIMARY)
+            anim.valueChanged.connect(self._set_fade)
+            self._fade_anim = anim
+        anim.stop()
+        anim.setDuration(motion.dur(motion.DUR_BASE // 2))
+        self._set_fade(0.0)
+        anim.start()
+
+    def _set_fade(self, value) -> None:
+        self._fade = max(0.0, min(1.0, float(value)))
+        self.update()
 
     def paintEvent(self, event):  # noqa: N802
         p = QPainter(self)
         r, g, b, a = theme.SCRIM_RGBA
-        p.fillRect(self.rect(), QColor(r, g, b, a))
+        p.fillRect(self.rect(), QColor(r, g, b, int(a * self._fade)))
 
 
 class _SheetFrame(QWidget):
@@ -260,10 +292,16 @@ class SheetHost(QWidget):
         self._set_app_filter(True)
 
         self._drop_ghosts()          # 직전 시트의 퇴장 잔상과 겹치지 않게
+        # 직전 퇴장에서 켜 둔 '마우스 통과' 를 되돌린다(아래 `_close` 참조).
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
         self._cover_parent()
         self.show()
         self.raise_()
         self._scrim.show()
+        if len(self._stack) == 1:
+            # 맨 아래 한 겹만 페이드인한다 — 시트 위에 시트를 열 때 다시 어둡게
+            # 깜빡이면 '뒤로 갔다' 는 거짓 신호가 된다.
+            self._scrim.fade_in()
         root.show()
         root.raise_()
         widget.show()
@@ -343,8 +381,10 @@ class SheetHost(QWidget):
             except RuntimeError:
                 pass
             # 애니메이션 도중 새 시트가 열렸으면 호스트를 숨기면 안 된다.
+            # (스크림은 `_close` 가 이미 내렸다 — 여기서 다시 만지지 않는다.)
             if then_hide_host and not self._stack:
-                self._scrim.hide()
+                self.setAttribute(
+                    Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
                 self.hide()
 
         anim.finished.connect(_done)
@@ -382,12 +422,17 @@ class SheetHost(QWidget):
                 pass
         if not self._stack:
             self._set_app_filter(False)
+            # ★ 스크림은 **닫는 그 프레임에** 내린다.  잔상이 다 사라질 때까지 붙잡아
+            #   두면 팝업이 이미 보이지 않는 ~80ms 동안 '아무것도 없는 어두운 화면'
+            #   이 남았다가 마지막에 한 프레임으로 뚝 밝아진다(사용자 지적).
+            self._scrim.hide()
             if ghost is not None:
-                # 스크림·호스트는 스냅샷이 다 사라진 뒤에 내린다 — 먼저 내리면
-                # 그림이 얹힐 바닥이 없어져 '툭' 끊긴다.
+                # 잔상은 계속 페이드아웃한다 — 그림이 얹힐 바닥(호스트)은 남기되,
+                # 보이지 않는 전면 위젯이 클릭을 먹지 않게 마우스를 통과시킨다.
+                self.setAttribute(
+                    Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
                 self._fade_out_ghost(ghost, then_hide_host=True)
             else:
-                self._scrim.hide()
                 self.hide()
         else:
             if ghost is not None:

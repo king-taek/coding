@@ -27,6 +27,7 @@ from ... import config, i18n
 from .. import theme
 from ...models.slot import ImageItem
 from ...utils import prefs as _prefs
+from ..widgets.app_logo import build_logo_label
 from ..widgets.neon_button import NeonButton
 from ..widgets.neon_card import NeonCard
 from ..widgets.scalable_image import ScalableImage
@@ -268,6 +269,10 @@ class SelectPage(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(10)
+
+        # 상단 로고 — 이 화면은 전체 스크롤이 없어 맨 위에 그대로 둔다
+        # (보이는 결과는 예전과 같다).
+        root.addWidget(build_logo_label(self))
 
         # 상단 바 -------------------------------------------------------
         top = QHBoxLayout()

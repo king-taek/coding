@@ -12,10 +12,11 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QKeySequence, QPixmap, QShortcut
+from PyQt6.QtGui import (QColor, QKeySequence, QPainter, QPixmap, QShortcut)
 from PyQt6.QtWidgets import (QApplication, QDialog, QHBoxLayout, QLabel,
                              QSizePolicy, QVBoxLayout, QWidget)
 
+from ... import i18n
 from ...models.slot import ImageItem
 from .. import theme
 from .neon_button import NeonButton
@@ -29,14 +30,39 @@ def _decode_original(path: Path) -> QPixmap:
     return pix
 
 
+def fit_scale(pix_w: int, pix_h: int, box_w: int, box_h: int) -> float:
+    """이미지를 박스에 꽉 채우는 배율(비율 유지).  순수 함수 — 헤드리스 테스트용.
+
+    ``zoom_window.fit_scale`` 과 같은 계산이지만 그 모듈을 import 하지 않는다 —
+    거긴 image_io(numpy·PIL) 를 끌고 온다."""
+    if pix_w <= 0 or pix_h <= 0 or box_w <= 0 or box_h <= 0:
+        return 1.0
+    return min(box_w / float(pix_w), box_h / float(pix_h))
+
+
+_ZOOM_STEP = 1.1
+_SCALE_MIN = 0.02
+_SCALE_MAX = 8.0
+
+
 class _Pane(QWidget):
-    """제목 + 비율 유지로 꽉 채우는 이미지 라벨 (원본 화질)."""
+    """제목 + 비율 유지로 꽉 채우는 이미지 라벨 (원본 화질) + 휠 확대/드래그 이동.
+
+    확대는 **패널마다 따로**다(사용자 결정: "마우스 있는 쪽만").  기준을 그대로
+    두고 후보만 파고들어 보는 비교가 가능해진다.
+    """
 
     def __init__(self, title: str, parent=None) -> None:
         super().__init__(parent)
         self._pix: Optional[QPixmap] = None
         # 기준·후보가 동일한 크기로 보이도록 두 패널이 공유하는 목표 박스 (#3).
         self._box: Optional[QSize] = None
+        # 맞춤 배율 대비 **배수**.  1.0 이면 기존과 똑같은 '박스에 꽉 맞춤' 경로를
+        # 그대로 탄다(그 경로는 기존 테스트가 고정하고 있다).
+        self._zoom = 1.0
+        self._off_x = 0
+        self._off_y = 0
+        self._last_drag = None
         lay = QVBoxLayout(self)
         lay.setContentsMargins(6, 6, 6, 6)
         lay.setSpacing(4)
@@ -74,20 +100,87 @@ class _Pane(QWidget):
         self._redraw()
         super().resizeEvent(e)
 
+    # -- 확대/이동 ------------------------------------------------------
+    def zoom_by(self, factor: float) -> None:
+        """맞춤 배율 대비 배수를 곱한다.  **유효 배율**(맞춤×배수)로 클램프한다.
+
+        휠 이벤트가 아니라 이 메서드가 확대의 단일 출구다 — 헤드리스에서 그대로
+        부를 수 있다."""
+        target = self._target_box()
+        if self._pix is None or target is None:
+            return
+        base = fit_scale(self._pix.width(), self._pix.height(),
+                         target.width(), target.height())
+        if base <= 0:
+            return
+        eff = max(_SCALE_MIN, min(_SCALE_MAX, base * self._zoom * factor))
+        self._zoom = eff / base
+        if abs(self._zoom - 1.0) < 1e-6:
+            # 맞춤으로 돌아왔으면 이동도 푼다 — 안 그러면 사진이 화면 밖에 남는다.
+            self._zoom = 1.0
+            self._off_x = self._off_y = 0
+        self._redraw()
+
+    def wheelEvent(self, e):  # noqa: N802
+        self.zoom_by(_ZOOM_STEP if e.angleDelta().y() > 0 else 1.0 / _ZOOM_STEP)
+        e.accept()
+
+    def mousePressEvent(self, e):  # noqa: N802
+        if e.button() == Qt.MouseButton.LeftButton:
+            self._last_drag = e.position().toPoint()
+
+    def mouseMoveEvent(self, e):  # noqa: N802
+        if self._last_drag is None:
+            return
+        cur = e.position().toPoint()
+        self._off_x += cur.x() - self._last_drag.x()
+        self._off_y += cur.y() - self._last_drag.y()
+        self._last_drag = cur
+        self._redraw()
+
+    def mouseReleaseEvent(self, e):  # noqa: N802
+        self._last_drag = None
+
+    # -- 그리기 ---------------------------------------------------------
+    def _target_box(self) -> Optional[QSize]:
+        """공통 박스가 있으면 그것(기준·후보 동일 크기), 없으면 라벨 크기."""
+        box = self._box if (self._box is not None
+                            and self._box.width() > 0
+                            and self._box.height() > 0) else self._img.size()
+        return box if (box.width() > 0 and box.height() > 0) else None
+
     def _redraw(self) -> None:
         if self._pix is None or self._pix.isNull():
             return
-        # 공통 박스가 있으면 그 박스에 맞춰(기준·후보 동일 크기), 없으면 라벨 크기.
-        target = self._box if (self._box is not None
-                               and self._box.width() > 0
-                               and self._box.height() > 0) else self._img.size()
-        if target.width() <= 0 or target.height() <= 0:
+        target = self._target_box()
+        if target is None:
             return
-        self._img.setPixmap(self._pix.scaled(
-            target,
+        if self._zoom == 1.0 and self._off_x == 0 and self._off_y == 0:
+            # 기본(미확대) 경로는 예전 그대로 — 박스에 맞춘 픽스맵을 그냥 얹는다.
+            self._img.setPixmap(self._pix.scaled(
+                target,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            ))
+            return
+        # 확대·이동 중에는 라벨 크기의 캔버스에 그려 넣는다(잘림 = 파고들어 보기).
+        base = fit_scale(self._pix.width(), self._pix.height(),
+                         target.width(), target.height())
+        scaled = self._pix.scaled(
+            max(1, int(self._pix.width() * base * self._zoom)),
+            max(1, int(self._pix.height() * base * self._zoom)),
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
-        ))
+        )
+        cw = max(1, self._img.width())
+        ch = max(1, self._img.height())
+        canvas = QPixmap(cw, ch)
+        canvas.fill(QColor("#000"))          # 패널 바탕과 같은 검정
+        p = QPainter(canvas)
+        p.drawPixmap((cw - scaled.width()) // 2 + self._off_x,
+                     (ch - scaled.height()) // 2 + self._off_y, scaled)
+        p.end()
+        self._img.setPixmap(canvas)
 
 
 class SideBySideViewer(QDialog):
@@ -122,11 +215,17 @@ class SideBySideViewer(QDialog):
             if self._candidates else 0
         self._ref_caption = ref_caption
 
+        # ★ `setMaximumSize(주 모니터 크기)` 를 걸지 않는다 — 그것이 '크게 보기인데
+        #   팝업이 작게 뜬다' 의 원인이었다(매치 검토 실측).  이 다이얼로그는 시트
+        #   호스트가 **창 크기 - 8px** 로 배치하는데, 최대크기가 걸려 있으면 그
+        #   배치가 잘려 창보다 작은 팝업이 된다.  주 모니터가 앱이 떠 있는 모니터보다
+        #   작거나(다중 모니터) 창이 그보다 크면 그대로 재현된다.  화면 초과 성장을
+        #   막는 일은 이미 `sheet_host._place` 가 한다 — 그것이 유일한 배치 주체다.
         scr = QApplication.primaryScreen()
         if scr is not None:
+            # 호스트를 못 찾아 별도 창으로 폴백할 때만 쓰이는 초기 크기.
             g = scr.availableGeometry()
             self.resize(int(g.width() * 0.9), int(g.height() * 0.88))
-            self.setMaximumSize(g.size())      # 화면 초과 성장 차단(#방어)
         else:
             self.resize(1400, 850)
         # ★ 창 제어(최소화/최대화/F11) 헬퍼를 부르지 않는다 — 이 다이얼로그는
@@ -153,7 +252,7 @@ class SideBySideViewer(QDialog):
         self.pos_label.setStyleSheet(f"color: {theme.MUTE}; font-weight: 700;")
         bar.addWidget(self.pos_label)
         bar.addStretch(1)
-        key_hint = QLabel("← → 방향키로 이동", self)
+        key_hint = QLabel(i18n.KO.COMPARE_HINT, self)
         key_hint.setStyleSheet(f"color: {theme.MUTE}; font-size: 12px;")
         bar.addWidget(key_hint)
         self.btn_prev = NeonButton("◀ 이전", role="ghost")
@@ -231,6 +330,8 @@ class SideBySideViewer(QDialog):
             return
         item, caption = self._candidates[self._idx]
         self._cand_pane.set_title(caption or item.filename)
+        # ★ 후보를 바꿔도 확대 배율·위치는 **유지한다**(초기화하지 않는다).  같은
+        #   자리를 같은 배율로 후보끼리 비교하는 것이 이 화면의 목적이다.
         self._cand_pane.set_pixmap(_decode_original(Path(item.path)))
         self.pos_label.setText(f"{self._idx + 1} / {len(self._candidates)}")
         self.btn_prev.setEnabled(self._idx > 0)

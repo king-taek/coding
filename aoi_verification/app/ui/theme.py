@@ -161,6 +161,20 @@ def _tint(hexv: str, alpha: int) -> str:
     return f"rgba({r}, {g}, {b}, {alpha})"
 
 
+def _mix(hex_a: str, hex_b: str, t: float) -> str:
+    """``hex_a`` 를 ``hex_b`` 쪽으로 ``t``(0~1) 만큼 섞은 불투명 색.
+
+    비활성 색을 바탕색 쪽으로 당길 때 쓴다.  ``rgba`` 반투명이 아니라 **불투명 색**을
+    돌려주는 것이 중요하다 — 버튼이 어떤 면(패널·시트·바탕) 위에 앉든 같은 정도로
+    옅어 보이고, 반투명 합성 비용도 없다."""
+    t = max(0.0, min(1.0, float(t)))
+    ar, ag, ab = _rgb(hex_a)
+    br, bg_, bb = _rgb(hex_b)
+    return "#%02X%02X%02X" % (round(ar + (br - ar) * t),
+                              round(ag + (bg_ - ag) * t),
+                              round(ab + (bb - ab) * t))
+
+
 # ── 서체 (config.Fonts 재사용 — 타이포 정체성은 PROFILE 크기/굵기로) ──────────
 FONT_BODY = Fonts.BODY
 FONT_TITLE = Fonts.TITLE
@@ -215,6 +229,12 @@ def _derive_tokens() -> dict:
         # 판정 칩 — 채운 '스탬프'(사각). 예외가 한눈에 띄게.
         "chip_bg_ok": PASS_TINT, "chip_bg_over": DANGER_TINT,
         "chip_border_none": c["line2"], "chip_pad": "2px 8px", "chip_ls": "0px",
+        # 비활성 — 바탕 쪽으로 당겨 '못 누른다'가 한눈에 보이게.
+        # ★ $mute·$line 을 그대로 쓰던 시절엔 활성과의 차이가 글자색 한 단·점선
+        #   테두리뿐이라 구분이 되지 않았다(사용자 지적).  게이트는 여기 적용되지
+        #   않는다 — WCAG 1.4.3 은 비활성 컨트롤을 대비 요건에서 제외한다.
+        "disabled_ink": _mix(c["mute"], c["bg"], 0.45),
+        "disabled_line": _mix(c["line"], c["bg"], 0.45),
         # 행 — 면 없이 하이라인 눈금만(제도 시트).
         "row_bg": "transparent", "row_border": "transparent",
         "row_divider": c["line"],

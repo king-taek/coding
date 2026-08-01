@@ -102,3 +102,51 @@ def test_estimate_bytes_uses_width_height(qapp):
     p = _make_pix(qapp, 100)
     est = _estimate_bytes(p)
     assert est == 100 * 100 * 4
+
+
+# ── load_thumb_qpixmap 도 같은 LRU 를 탄다 (#렉) ──────────────────────────
+def test_load_thumb_qpixmap_hits_the_cache(qapp, tmp_path, monkeypatch):
+    """같은 (경로·크기·종류)는 디스크를 **한 번만** 읽는다.
+
+    매치 검토는 행마다 이 함수를 부르고 크기 슬라이더를 움직일 때마다 다시 부른다 —
+    캐시가 없던 시절엔 그때마다 디스크 재읽기 + SmoothTransformation 이 GUI
+    스레드에서 반복돼 스크롤이 끊겼다."""
+    from aoi_verification.app.utils import image_io
+
+    src = tmp_path / "die.png"
+    _make_pix(qapp, 64).save(str(src))
+    image_io.clear_tile_cache()
+
+    reads: list[str] = []
+    real_path = image_io.get_thumb_path
+
+    def counting_path(p):
+        reads.append(str(p))
+        return src                       # 실제 캐시 파일 대신 준비한 이미지
+
+    monkeypatch.setattr(image_io, "get_thumb_path", counting_path)
+    try:
+        first = image_io.load_thumb_qpixmap(src, 48)
+        second = image_io.load_thumb_qpixmap(src, 48)
+        assert not first.isNull()
+        assert second is first, "같은 요청인데 픽스맵을 새로 만들었다(캐시 미스)"
+        assert len(reads) == 1, f"디스크를 {len(reads)}번 읽었다 — 캐시가 동작하지 않는다"
+
+        image_io.load_thumb_qpixmap(src, 96)          # 크기가 다르면 별개 항목
+        assert len(reads) == 2
+    finally:
+        monkeypatch.setattr(image_io, "get_thumb_path", real_path)
+        image_io.clear_tile_cache()
+
+
+def test_clear_tile_cache_also_drops_thumb_pixmaps(qapp, tmp_path, monkeypatch):
+    """세션 전환에서 함께 비워져야 한다 — 안 그러면 옛 사진이 남는다."""
+    from aoi_verification.app.utils import image_io
+
+    src = tmp_path / "die.png"
+    _make_pix(qapp, 64).save(str(src))
+    monkeypatch.setattr(image_io, "get_thumb_path", lambda p: src)
+    image_io.clear_tile_cache()
+    first = image_io.load_thumb_qpixmap(src, 48)
+    image_io.clear_tile_cache()
+    assert image_io.load_thumb_qpixmap(src, 48) is not first

@@ -421,6 +421,39 @@ def test_dialogs_do_not_claim_window_powers(qapp):
     assert QKeySequence("F11") and QShortcut and mw is not None
 
 
+def test_no_sheet_caps_itself_to_the_primary_screen(qapp):
+    """★ 시트로 뜨는 위젯은 **주 모니터 크기로 자기 최대크기를 걸지 않는다.**
+
+    실제로 났던 버그다: 좌우 비교 뷰어가 `setMaximumSize(availableGeometry().size())`
+    를 '화면 초과 성장 차단' 이라며 걸어 뒀는데, 시트 배치(`_place`)가 창 크기 -8px
+    를 주면 그 상한에 잘려 **창보다 작은 팝업**이 됐다.  다중 모니터에서 주 모니터가
+    더 작거나, 큰 모니터에 창을 최대화하면 그대로 재현된다.
+
+    화면 초과를 막는 일은 `_place` 가 이미 한다 — 배치 주체는 하나여야 한다."""
+    import io
+    import re
+    import tokenize
+    ui_dir = (Path(__file__).resolve().parents[2] / "aoi_verification" / "app" / "ui")
+    offenders: list[str] = []
+    for path in sorted(ui_dir.rglob("*.py")):
+        src = path.read_text(encoding="utf-8")
+        try:
+            code = "\n".join(
+                t.string if t.type != tokenize.STRING else '""'
+                for t in tokenize.generate_tokens(io.StringIO(src).readline)
+                if t.type != tokenize.COMMENT)
+        except Exception:
+            code = src
+        # setMaximumSize(...) 인자에 화면 기하가 흘러드는 형태만 잡는다.
+        for m in re.finditer(r"setMaximumSize\s*\(([^)]*)\)", code):
+            arg = m.group(1)
+            if "availableGeometry" in arg or re.search(r"\bg\s*\.\s*size\b", arg):
+                offenders.append(f"{path.relative_to(ui_dir.parents[2])}: {m.group(0)}")
+    assert not offenders, (
+        "시트가 주 모니터 크기로 자기 최대크기를 걸었다 — 창이 그보다 크면 팝업이 "
+        "창보다 작게 뜬다.  배치는 sheet_host._place 에 맡겨라: " + ", ".join(offenders))
+
+
 def test_f11_still_reaches_the_window_while_a_sheet_is_open(qapp):
     """★ 시트가 열린 동안에도 F11 이 **메인 창**에 닿아야 한다.
 

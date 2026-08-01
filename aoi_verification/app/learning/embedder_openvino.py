@@ -239,7 +239,7 @@ def _preprocess_parallel(items, cfg=None, side=None, *,
                 p = next(it)
             except StopIteration:
                 break
-            inflight[pool.submit(_make_input_array, p, cfg, side, px)] = p
+            inflight[pool.submit(_make_input_array, p, cfg, side)] = p
         while inflight:
             done, _pending = wait(list(inflight), return_when=FIRST_COMPLETED)
             for fut in done:
@@ -250,7 +250,7 @@ def _preprocess_parallel(items, cfg=None, side=None, *,
                     arr = None
                 try:                                   # 완료분만큼 다음 항목 보충
                     nxt = next(it)
-                    inflight[pool.submit(_make_input_array, nxt, cfg, side, px)] = nxt
+                    inflight[pool.submit(_make_input_array, nxt, cfg, side)] = nxt
                 except StopIteration:
                     pass
                 if arr is not None:

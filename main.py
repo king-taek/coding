@@ -59,42 +59,49 @@ def _load_stylesheet(app) -> None:
         pass
 
 
-def _show_splash(app):
-    """로고 스플래시를 **가장 먼저** 띄운다 — 무거운 것을 불러오기 전에."""
-    from PyQt6.QtGui import QPixmap
-    from aoi_verification.app import i18n
-    from aoi_verification.app.ui.widgets.startup_splash import StartupSplash
+def _splash_logo(target_px: int):
+    """스플래시 로고를 **필요한 크기로 디코드**해 돌려준다.
+
+    원본은 2397×1338(4.3MB) 이라 통째로 디코드하면 그 비용이 '사용자가 처음 보는
+    화면' 앞에 그대로 얹힌다.  ``QImageReader.setScaledSize`` 는 디코드 단계에서
+    줄이므로 전체 픽셀을 만들지 않는다."""
+    from PyQt6.QtCore import QSize
+    from PyQt6.QtGui import QImageReader, QPixmap
     from aoi_verification.app.utils import paths
 
-    splash = StartupSplash(QPixmap(str(paths.logo_path("logo_big.png"))))
+    path = str(paths.logo_path("logo_big.png"))
+    try:
+        reader = QImageReader(path)
+        size = reader.size()
+        if size.isValid() and size.width() > target_px:
+            h = max(1, round(size.height() * target_px / size.width()))
+            reader.setScaledSize(QSize(target_px, h))
+        img = reader.read()
+        if not img.isNull():
+            return QPixmap.fromImage(img)
+    except Exception:
+        pass
+    return QPixmap(path)
+
+
+def _show_splash(app):
+    """로고 스플래시를 **가장 먼저** 띄운다 — 무거운 것을 불러오기 전에."""
+    from aoi_verification.app import i18n
+    from aoi_verification.app.ui.widgets.startup_splash import StartupSplash
+
+    dpr = 1.0
+    try:
+        scr = app.primaryScreen()
+        if scr is not None:
+            dpr = scr.devicePixelRatio() or 1.0
+    except Exception:
+        pass
+    splash = StartupSplash(_splash_logo(int(StartupSplash.LOGO_W * dpr)))
     splash.show()
     # 총량을 모르는 구간 → busy(무한 진행).  0 에 멈춰 있으면 안 된다(CLAUDE.md).
     splash.set_progress(0, 0, i18n.KO.SPLASH_MODULES)
     app.processEvents()
     return splash
-
-
-def _preload_heavy_module():
-    """화면 모듈(cv2/openvino 를 끌고 온다) 을 백그라운드에서 import.
-
-    시작 시간의 대부분이 여기다.  메인 스레드에서 하면 스플래시가 그대로 얼어붙으니
-    (CLAUDE.md 로딩 규칙) 스레드로 돌리고 메인 스레드는 이벤트 루프를 계속 굴린다.
-    실패는 여기서 삼킨다 — 이어서 메인 스레드가 같은 import 를 하며 원래 오류를 낸다."""
-    import importlib
-    import threading
-
-    done = threading.Event()
-
-    def _work() -> None:
-        try:
-            importlib.import_module("aoi_verification.app.ui.main_window")
-        except Exception:
-            pass
-        finally:
-            done.set()
-
-    threading.Thread(target=_work, name="preload", daemon=True).start()
-    return done
 
 
 def _open_main_window(splash):
@@ -148,7 +155,7 @@ def main() -> int:
             pass         # 콘솔이 없는 실행 경로(pythonw) — 대기할 수 없을 뿐이다
         return 4
 
-    from PyQt6.QtCore import Qt, QTimer
+    from PyQt6.QtCore import Qt
     from PyQt6.QtGui import QFont, QGuiApplication
     from PyQt6.QtWidgets import QApplication
 
@@ -185,31 +192,19 @@ def main() -> int:
     _apply_app_icon(app)
     _load_stylesheet(app)
 
-    # 스플래시(로고) → 로딩 → 윈도우 -------------------------------------
+    # 스플래시(로고) → 윈도우 ---------------------------------------------
+    # ★ 여기서 무거운 모듈을 미리 불러오지 않는다.  `main_window` 는 이제 가볍고
+    #   (cv2·OpenVINO·numpy·PIL 을 끌고 오지 않는다), 창은 첫 화면만으로 곧바로
+    #   뜬다.  나머지는 창이 뜬 뒤 `MainWindow` 가 백그라운드에서 불러오고, 그동안
+    #   '검증 시작' 버튼이 '준비 중' 으로 잠긴다.
     splash = _show_splash(app)
 
-    # 좀비 윈도우 방지를 위해 함수 로컬에 둔다(콜백 경로도 여기 담아 살려 둔다).
-    window_ref = []
+    # 좀비 윈도우 방지를 위해 함수 로컬에 둔다.
+    window_ref = [_open_main_window(splash)]
 
-    # 외부에서 만든 app 을 재사용한 경우엔 우리가 루프를 굴리지 않으므로
-    # 스레드 완료를 기다릴 방법이 없다 — 그때는 동기로 연다(스플래시는 정지).
+    # 외부에서 만든 app 을 재사용한 경우엔 우리가 루프를 굴리지 않는다(IDE 콘솔).
     if not created_here:
-        window_ref.append(_open_main_window(splash))
         return 0
-
-    loaded = _preload_heavy_module()
-
-    def _tick() -> None:
-        if not loaded.is_set():
-            return
-        timer.stop()
-        window_ref.append(_open_main_window(splash))
-
-    timer = QTimer()
-    timer.setInterval(30)
-    timer.timeout.connect(_tick)
-    timer.start()
-
     return app.exec()
 
 

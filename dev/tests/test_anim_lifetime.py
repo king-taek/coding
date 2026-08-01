@@ -141,6 +141,33 @@ def test_loading_overlay_survives_second_show(qapp, motion_on):
         qapp.processEvents()
 
 
+# ── 프레스 딥 이펙트는 눌린 뒤 **떼어 낸다**(#렉) ────────────────────────────
+def test_button_drops_its_press_effect_after_release(qapp, motion_on):
+    """그래픽 이펙트가 붙은 위젯은 값이 1.0 이어도 오프스크린 픽스맵을 거친다.
+
+    떼지 않으면 '한 번이라도 누른 모든 버튼'이 세션 내내 느린 경로로 남는다.
+    딥 자체는 유지돼야 하므로 다음 프레스에서 다시 만들어지는지도 함께 본다."""
+    from aoi_verification.app.ui.widgets.neon_button import NeonButton
+    btn = NeonButton("확인", role="primary")
+    btn.resize(120, 40)
+    try:
+        btn._press_feedback(True)
+        assert btn.graphicsEffect() is not None, "프레스 딥이 걸리지 않았다"
+        btn._press_feedback(False)
+        _spin(qapp, 400)                   # dur(90) 을 충분히 넘겨 자연 종료
+        assert btn.graphicsEffect() is None, \
+            "떼었는데 이펙트가 남았다 — 이 버튼은 이후 계속 오프스크린으로 그려진다"
+
+        btn._press_feedback(True)          # 다음 프레스에서 딥이 되살아난다
+        assert btn.graphicsEffect() is not None, "두 번째 프레스에서 딥이 사라졌다"
+        btn._press_feedback(False)
+        _spin(qapp, 400)
+        assert btn.graphicsEffect() is None
+    finally:
+        btn.deleteLater()
+        qapp.processEvents()
+
+
 # ── 패턴 가드: **자기 삭제 애니메이션을 아예 쓰지 않는다** ────────────────────
 def test_no_self_deleting_animations_in_ui():
     """★ ``DeletionPolicy.DeleteWhenStopped`` 를 UI 전체에서 금지한다.

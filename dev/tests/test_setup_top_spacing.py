@@ -64,13 +64,34 @@ def test_dark_switch_shares_the_title_row(qapp):
         page.close()
 
 
-def test_title_sits_near_the_top(qapp):
-    """제목 위에는 페이지 마진 말고 다른 띠가 없어야 한다."""
+def _logo_label(page: sp.SetupPage) -> QLabel:
+    for lbl in page.findChildren(QLabel):
+        if lbl.property("role") == "appLogo":
+            return lbl
+    raise AssertionError("로고 라벨을 찾지 못했다")
+
+
+def test_title_sits_right_under_the_logo(qapp):
+    """제목 위에는 **로고 말고** 다른 띠가 없어야 한다.
+
+    ★ 옛 판정('제목이 페이지 맨 위')은 로고가 페이지 스택 **밖**에 고정돼 있던
+    시절의 좌표계다.  사용자 요청으로 로고가 스크롤되는 페이지 콘텐츠 안으로
+    들어오면서(widgets/app_logo.py) 제목의 페이지 내 y 가 로고 높이만큼 내려갔다 —
+    화면에 보이는 그림은 그대로다(예전에도 제목 위에 로고 칸이 있었다).  그래서
+    측정 기준을 '페이지 맨 위' 에서 '로고 바로 아래' 로 옮긴다: 여기서 막고 싶은
+    것은 그 사이에 안내 문단·빈 줄이 다시 끼는 것이다."""
     page = _page(qapp)
     try:
+        logo = _logo_label(page)
         title = _title_label(page)
-        top = title.mapTo(page, title.rect().topLeft()).y()
-        assert top <= theme.PROFILE.page_margin + 8, f"제목 위 여백 {top}px"
+        logo_top = logo.mapTo(page, logo.rect().topLeft()).y()
+        logo_bottom = logo.mapTo(page, logo.rect().bottomLeft()).y()
+        title_top = title.mapTo(page, title.rect().topLeft()).y()
+        assert logo_top <= theme.PROFILE.page_margin + 8, \
+            f"로고 위 여백 {logo_top}px — 로고가 페이지 맨 위가 아니다"
+        gap = title_top - logo_bottom
+        assert gap <= theme.PROFILE.section_gap + 8, \
+            f"로고와 제목 사이 여백 {gap}px — 그 사이에 무엇이 끼었다"
     finally:
         page.close()
 
