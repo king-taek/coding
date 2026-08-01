@@ -466,6 +466,59 @@ _RDL4_INI = [("176573.312577.c.597332200.1",
               176573.932796436, 312574.83842825, 4, 6, 2)]
 
 
+# 사용자가 사진으로 확인한 LIVE↔Camtek 쌍 8건 (RDL4 로트, 웨이퍼 2장).
+# (Camtek X, Y, Col, Row, recipe, LIVE col, LIVE row, LIVE x, LIVE y)
+_RDL4_PAIRS = [
+    # W7548306XYA2
+    (51210.8, 183932.3, 1, 4, 2, 0, 2, 13969.17941697, 4306.11285221326),
+    (163831.252093174, 191432.114730261, 4, 4, 2, 3, 2, 14841.5559416573, 11810.704052486),
+    (197846.319956548, 46706.4001757557, 5, 1, 2, 4, 5, 11609.3842929103, 1801.71715355555),
+    # W7548304XYG4
+    (211050.7, 214374.9, 5, 4, 2, 4, 2, 24815.9486854024, 34749.6600228519),
+    (255350.424751695, 116718.981250212, 6, 2, 1, 5, 4, 31863.2366998812, 26908.4427394723),
+    (294490.590623552, 139212.097250194, 7, 3, 1, 6, 3, 33756.2046850637, 4495.03684559136),
+    (294507.624563042, 139202.508245703, 7, 3, 1, 6, 3, 33756.2046850637, 4495.03684559136),
+]
+
+
+class TestLiveTokenOffsetIsSystematic:
+    """★ LIVE 토큰과 Camtek 이 **일정한 오프셋**을 갖는다 — 이 로트에서는 (+1, −1).
+
+    사용자가 사진으로 확인한 8쌍 전부 같은 값이다.  die 내부 좌표는 20 µm 안에서 겹친다.
+    즉 같은 결함인데 **표시 규약만 다르다**(→ ``docs/디바이스_하드코딩_조사.md`` §6-H).
+
+    ⚠ 이 오프셋은 로트마다 다르다 — 보고서 예시 쌍(다른 제품)은 0 이다.  그래서 고정
+    보정을 넣지 않고 ``(col,row) ±1`` 이웃 게이트가 흡수하게 둔다.  게이트의 여유를
+    쓰고 있다는 뜻이므로, 그 예산을 더 줄이는 변경(게이트 축소)은 하지 말 것.
+    """
+
+    @pytest.mark.parametrize("row", _RDL4_PAIRS)
+    def test_offset_is_plus1_minus1_and_die_coords_agree(self, tmp_path, row):
+        import math
+        X, Y, _C, _R, _rec, lc, lr, lx, ly = row
+        px, py, rt = 37247.9, 44905.3, 7          # 앱의 현재 규약
+        xi, yi = math.floor(X / px), math.floor(Y / py)
+        ccol, crow = xi - 2, rt - yi
+        assert (lc - ccol, lr - crow) == (1, -1)
+        assert math.hypot(lx - (X - xi * px), ly - (Y - yi * py)) <= 20
+
+    def test_gate_absorbs_the_offset(self):
+        """★ 그래서 **매칭은 된다** — ±1 이웃 안에 들어온다."""
+        for X, Y, _C, _R, _rec, lc, lr, _lx, _ly in _RDL4_PAIRS:
+            import math
+            xi, yi = math.floor(X / 37247.9), math.floor(Y / 44905.3)
+            assert abs(lc - (xi - 2)) <= 1 and abs(lr - (7 - yi)) <= 1
+
+    def test_app_col_can_go_negative_here(self):
+        """★ 현재 상수가 이 웨이퍼에서 **음수 col** 을 낸다 — 0-based 맵에 있을 수 없다.
+
+        `col_origin`·`row_total` 이 자재마다 다르다는 증거다(§6-H).  매칭은 ref/val 이
+        같은 규칙이라 정상이지만 **화면·엑셀 표기가 틀린다.**  고치려면 §6-H 를 읽을 것."""
+        import math
+        X = _RDL4_PAIRS[0][0]
+        assert math.floor(X / 37247.9) - 2 == -1
+
+
 class TestLiveMatchesIni:
     @staticmethod
     def _folder(tmp_path: Path) -> Path:
