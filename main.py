@@ -140,8 +140,42 @@ def _ensure_deps_installed() -> bool:
     )
 
 
+def _setup_logging() -> None:
+    """앱 로그를 캐시 폴더의 ``app.log`` 로 남긴다.
+
+    ★ 이게 없으면 앱의 모든 로그가 **아무 데도 안 남는다.**  핸들러가 없으면 파이썬은
+    최후 수단(stderr, WARNING 이상)으로 떨어지는데, 배포본은 콘솔 없는 ``pythonw`` 로
+    뜨므로 그 stderr 마저 사라진다.  즉 '사용자 PC 에서 왜 안 됐는지' 를 물어볼 방법이
+    없었다.  파일 하나로 기존 ``aoi.coords``·``aoi.openvino``·``aoi.match`` 로그까지
+    전부 쓸모 있게 된다.
+
+    회전(1MB × 3)으로 무한정 자라지 않게 하고, 설정 실패는 삼킨다 — 진단 보조 기능이
+    앱 실행을 막으면 안 된다."""
+    import logging
+    from logging.handlers import RotatingFileHandler
+
+    from aoi_verification.app.utils import paths
+
+    try:
+        log = logging.getLogger("aoi")
+        if log.handlers:                       # 이미 붙였다면(재진입) 그대로
+            return
+        handler = RotatingFileHandler(
+            paths.cache_root() / "app.log", maxBytes=1_000_000, backupCount=2,
+            encoding="utf-8",
+        )
+        handler.setFormatter(logging.Formatter(
+            "%(asctime)s %(levelname)s %(name)s: %(message)s"))
+        log.setLevel(logging.DEBUG)
+        log.addHandler(handler)
+        log.propagate = False                  # 루트로 새어 stderr 에 중복 출력 방지
+    except Exception:
+        pass
+
+
 def main() -> int:
     _ensure_package_on_path()
+    _setup_logging()
     try:
         deps_ok = _ensure_deps_installed()
     except Exception:
