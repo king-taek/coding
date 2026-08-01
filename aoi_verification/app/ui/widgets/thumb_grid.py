@@ -13,9 +13,13 @@ from ... import config, i18n
 from .. import theme
 from ...models.slot import ImageItem
 from ...utils import image_io
+from .option_group import columns_for_width
 
 
 THUMB_PX = config.Sizing.THUMB_PX
+# 타일 실폭 = 사진 정사각(tile_px) + 좌우 마진/보더.  열 수 계산이 같은 값을 봐야
+# 한다 — 어긋나면 가로 스크롤이 나거나 한 열을 낭비한다.
+_TILE_CHROME_W = 14
 
 
 # ---------------------------------------------------------------------------
@@ -56,7 +60,8 @@ class _ThumbTile(QFrame):
         # 후보 패널은 prefer_mid=True 로 mid 캐시 (~800px) 를 소스로 사용 →
         # 같은 표시 크기에서도 더 선명 (#5).
         self._prefer_mid = bool(prefer_mid)
-        self.setFixedSize(self._tile_px + 14, self._tile_px + (40 if footer else 18))
+        self.setFixedSize(self._tile_px + _TILE_CHROME_W,
+                          self._tile_px + (40 if footer else 18))
         self.setProperty("role", "card-soft")
 
         lay = QVBoxLayout(self)
@@ -170,7 +175,8 @@ class _PlusTile(QFrame):
         super().__init__(parent)
         size = int(tile_px) if tile_px else THUMB_PX
         self.setProperty("role", "card-soft")
-        self.setFixedSize(size + 14, size + 18)
+        # 같은 격자에 들어가므로 _ThumbTile 과 **같은 실폭**이어야 한다.
+        self.setFixedSize(size + _TILE_CHROME_W, size + 18)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         lay = QVBoxLayout(self)
@@ -302,12 +308,14 @@ class ThumbGrid(QWidget):
     # 반응형 열 수 — 패널 폭에 맞춰 가로 스크롤 없이 자동 reflow.
     # ------------------------------------------------------------------
     def _effective_columns(self) -> int:
-        spacing = self._grid.spacing()
-        tile_w = (self._tile_px or THUMB_PX) + 14 + spacing
         avail = self.width()
         if avail <= 0:
-            return self._columns
-        return max(1, min(self._columns, avail // tile_w))
+            return self._columns          # 아직 배치 전 — 설정된 열 수를 유지
+        # 타일 실폭 = 사진 정사각 + 좌우 마진/보더(_ThumbTile 의 setFixedSize 와 동일).
+        return min(self._columns,
+                   columns_for_width(avail,
+                                     (self._tile_px or THUMB_PX) + _TILE_CHROME_W,
+                                     self._grid.spacing()))
 
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)

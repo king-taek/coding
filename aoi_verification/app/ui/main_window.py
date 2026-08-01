@@ -29,6 +29,7 @@ from ..coords import kla_info
 from ..models import session as session_mod
 from ..models.result import FinalResult, MatchResult, MissEntry
 from ..models.slot import (ImageItem, ScanResult, drop_empty_unmatched,
+                           merge_unmatched_by_wafer_id,
                            push_one_sided_to_unmatched, scan)
 from ..utils import paths, wafer_id, wakelock
 from ..utils import prefs as _prefs
@@ -123,9 +124,7 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self._status_bar)
         # 개발자 크레딧 — 모든 화면 공통(상태바 좌측).
         self._credit_label = QLabel(i18n.KO.CREDIT, self._status_bar)
-        self._credit_label.setStyleSheet(
-            f"color: {theme.MUTE}; padding: 0 8px; font-weight: 600;"
-        )
+        self._apply_statusbar_theme()      # 색 모드 전환 때와 같은 코드로 칠한다
         self._status_bar.addWidget(self._credit_label)
         self._mem_label = QLabel("", self._status_bar)
         self._mem_label.setProperty("role", "muted")
@@ -696,7 +695,7 @@ class MainWindow(QMainWindow):
                 w = kla_info.read_wafer_id(d) if d else None
                 if w:
                     info_val[n] = w
-        wafer_id.merge_unmatched_by_wafer_id(sr, info_ref, info_val)
+        merge_unmatched_by_wafer_id(sr, info_ref, info_val)
 
         # 메타 작성 + 다음 단계 — OCR 결과(있으면)를 반영해 최종 메타를 만든다.
         # 판독에 성공한 폴더는 **사진이 없어도**(image=None) slot명을 갖는다 → 수동
@@ -774,7 +773,7 @@ class MainWindow(QMainWindow):
                 try:
                     # 1차(정보파일) 결과도 **함께** 넘긴다 — OCR dict 만 넘기면 정보파일로
                     # 읽은 쪽의 WaferID 키가 사라져 같은 WaferID 인데도 병합에 실패한다.
-                    wafer_id.merge_unmatched_by_wafer_id(
+                    merge_unmatched_by_wafer_id(
                         sr, {**info_ref, **ocr_ref}, {**info_val, **ocr_val})
                 finally:
                     finalize(ocr_ref, ocr_val)
@@ -1260,7 +1259,7 @@ class MainWindow(QMainWindow):
         merged = self._merge_matches()
         # MatchPage 가 들고 있는 점수 캐시 + val_pool 을 매치 검토 페이지에
         # 넘겨 차순위 후보를 행마다 표시한다 (참고용 시각 정보).
-        score_cache = getattr(self._match_page, "_score_cache", None)
+        ctx = self._match_page.review_context()
         match_state = self._match_page.get_state()
         val_pool = match_state.val_pool if match_state is not None else None
         # 효율 모드는 score_cache 가 비어 있으므로 후보를 별도 산출해 전달 (#7).
@@ -1270,24 +1269,12 @@ class MainWindow(QMainWindow):
         except Exception:
             candidates_by_ref = None
         # 좌표 매칭 모드 정보 전달 — 검토 화면에서 거리(µm) 표시 + 통계 3분류.
-        _engine_cfg = getattr(self._match_page, "_engine_cfg", None)
-        _coord_mode = False
-        _tolerance = 500.0
-        _coord_failed_count = 0
-        if _engine_cfg is not None:
-            from ..utils.prefs import EngineMode
-            _coord_mode = EngineMode.is_coordinate(getattr(_engine_cfg, "engine", ""))
-            _tolerance = float(getattr(_engine_cfg, "coord_tolerance", 500.0))
-        if _coord_mode:
-            _coord_failed_count = len(
-                getattr(self._match_page, "_coord_failed_set", set())
-            )
         self._match_review_page.load_state(
-            merged, score_cache=score_cache, val_pool=val_pool,
+            merged, score_cache=ctx.score_cache, val_pool=val_pool,
             candidates_by_ref=candidates_by_ref,
-            coord_mode=_coord_mode,
-            tolerance=_tolerance,
-            coord_failed_count=_coord_failed_count,
+            coord_mode=ctx.coord_mode,
+            tolerance=ctx.tolerance,
+            coord_failed_count=ctx.coord_failed_count,
         )
         self._show_page(self._match_review_page)
 
@@ -1328,26 +1315,17 @@ class MainWindow(QMainWindow):
             slot = self._scan.slots[slot_name]
             review_pool[(slot_name, "ref")] = list(slot.val_images)
             review_pool[(slot_name, "val")] = list(slot.ref_images)
-        review_score_cache = getattr(self._match_page, "_score_cache", None)
-        review_fast_results = getattr(self._match_page, "_fast_results", None)
-        _engine_cfg = getattr(self._match_page, "_engine_cfg", None)
-        _coord_mode = False
-        _tolerance = 500.0
-        if _engine_cfg is not None:
-            from ..utils.prefs import EngineMode
-            _coord_mode = EngineMode.is_coordinate(
-                getattr(_engine_cfg, "engine", ""))
-            _tolerance = float(getattr(_engine_cfg, "coord_tolerance", 500.0))
+        ctx = self._match_page.review_context()
         self._result_page.show_result(
             result,
             template_path=self._template_used,
             target_path=self._working_xlsx,
             auto_mode=auto_mode,
             val_pool=review_pool,
-            score_cache=review_score_cache,
-            fast_results=review_fast_results,
-            coord_mode=_coord_mode,
-            tolerance=_tolerance,
+            score_cache=ctx.score_cache,
+            fast_results=ctx.fast_results,
+            coord_mode=ctx.coord_mode,
+            tolerance=ctx.tolerance,
         )
         self._show_page(self._result_page)
         self._phase = PHASE_NONE
@@ -1363,7 +1341,7 @@ class MainWindow(QMainWindow):
             common = sr.common_slot_names
             ref_photos = sum(len(sr.slots[n].ref_images) for n in common)
             val_photos = sum(len(sr.slots[n].val_images) for n in common)
-            elapsed = float(getattr(self._match_page, "_precompute_elapsed", 0.0))
+            elapsed = self._match_page.review_context().elapsed_s
             options = {
                 "mode": getattr(inp, "mode", ""),
                 "automation": getattr(inp, "automation_level", ""),
@@ -1667,7 +1645,11 @@ class MainWindow(QMainWindow):
         self._show_page(self._setup_page, animate=False)
 
     def _apply_statusbar_theme(self) -> None:
-        """상태바 라벨 색을 테마 토큰으로 적용(페이지 밖 위젯)."""
+        """상태바 라벨 색을 테마 토큰으로 적용(페이지 밖 위젯).
+
+        ★ 생성자도 이 메서드를 쓴다 — 같은 f-string 을 양쪽에 두면 한쪽만 고쳤을 때
+        색 모드를 한 번 바꾼 뒤에야 크레딧 라벨 모양이 달라진다(발견이 늦다).
+        토큰(`theme.MUTE`)은 모드에 따라 바뀌므로 상수로 굳힐 수 없다."""
         self._credit_label.setStyleSheet(
             f"color: {theme.MUTE}; padding: 0 8px; font-weight: 600;")
 

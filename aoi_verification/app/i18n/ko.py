@@ -152,6 +152,14 @@ BTN_UNMATCHED_NEXT = "다음 사진"
 BTN_UNMATCHED_PREV = "← 이전"
 BTN_UNMATCHED_CLOSE = "검토 종료"
 
+# ‘매칭 취소’ 결합 (#14) — 결과 검토가 MissEntry.note 에 이 표시를 남기고
+# (`result_page`), 실패 검토가 그것을 보고 목록 뒤로 모은다
+# (`unmatched_review_dialog._is_cancelled`).  두 곳이 각자 문자열을 하드코딩하면
+# 한쪽만 고쳤을 때 **예외 없이 정렬만 조용히 망가진다** — 여기 한 곳에서 정한다.
+CANCELLED_NOTE_MARK = "매칭 취소"
+CANCELLED_NOTE = f"{CANCELLED_NOTE_MARK} (검토에서 삭제)"
+UNMATCHED_CANCELLED_SEPARATOR = f"── {CANCELLED_NOTE_MARK} 목록 ──"
+
 # ── 줌-뷰 윈도우 ───────────────────────────────────────────────────────────
 ZOOM_TITLE_TARGETS = "검증 대상인 사진들 — {slot}"
 ZOOM_TITLE_EXCLUDED = "검증 하지 않을 사진 — {slot}"

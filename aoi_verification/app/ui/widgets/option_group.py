@@ -29,6 +29,26 @@ from .neon_button import NeonButton
 DEFAULT_MIN_TILE_W = 200
 
 
+def columns_for_width(available_w: int, min_item_w: int, spacing: int) -> int:
+    """가로 스크롤이 나지 않는 **최대** 열 수 (순수 함수, Qt 불필요).
+
+    ★ n 열에 필요한 폭은 ``n*min_w + (n-1)*spacing`` 이다 — 흔한
+    ``avail // (min_w + spacing)`` 은 **마지막 열에도** 간격을 물려 열을 하나 덜 준다
+    (예: 736px 에 최소 360px 타일 → 2열이 들어가는데 1열로 계산).  간격 하나를 더해
+    보정한다.  이 보정을 여러 화면이 각자 적었더니 화면마다 열 수가 달라졌다 —
+    공식은 여기 한 곳에만 둔다.
+
+    상한(항목 수·화면별 최대 열)은 **호출부가** 건다.  화면마다 상한의 의미가 달라
+    여기에 섞으면 어느 쪽 규칙인지 알 수 없게 된다.
+
+    폭을 아직 모를 때(0/음수)는 1 열 — 그 상태로 배치해도 넘치지 않는다.
+    """
+    min_w = max(1, int(min_item_w))
+    gap = max(0, int(spacing))
+    avail = int(available_w) if available_w and available_w > 1 else min_w
+    return max(1, (avail + gap) // (min_w + gap))
+
+
 def reflow_into_grid(grid: QGridLayout, widgets: Sequence[QWidget],
                      available_w: int, min_item_w: int) -> int:
     """가로 스크롤이 나지 않는 열 수를 계산해 재배치하고 열 수를 반환.
@@ -40,13 +60,8 @@ def reflow_into_grid(grid: QGridLayout, widgets: Sequence[QWidget],
     """
     if not widgets:
         return 0
-    spacing = max(0, grid.spacing())
-    min_w = max(1, int(min_item_w))
-    avail = int(available_w) if available_w and available_w > 1 else min_w
-    # ★ n 열에 필요한 폭은 n*min_w + (n-1)*spacing 이다 — `avail // (min_w + spacing)` 은
-    #   **마지막 열에도** 간격을 물려 열을 하나 덜 준다(예: 736px / 360px 최소 → 2열이
-    #   들어가는데 1열로 계산).  간격 하나를 더해 보정한다.
-    cols = max(1, min(len(widgets), (avail + spacing) // (min_w + spacing)))
+    cols = min(len(widgets),
+               columns_for_width(available_w, min_item_w, grid.spacing()))
     # 이미 그 열 수로 그 위젯들이 배치돼 있으면 그대로 둔다.
     if grid.count() == len(widgets) and _grid_cols(grid) == cols:
         return cols

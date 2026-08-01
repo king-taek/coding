@@ -233,7 +233,7 @@ class ResultPage(QWidget):
             existing.add(k)
             self._result.unmatched_refs.append(MissEntry(
                 slot=m.slot, side="ref", path=m.ref_path,
-                note="매칭 취소 (검토에서 삭제)",
+                note=i18n.KO.CANCELLED_NOTE,
             ))
         sheets.info(
             self, i18n.KO.APP_TITLE,
