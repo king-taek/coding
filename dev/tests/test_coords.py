@@ -294,3 +294,89 @@ def test_real_pair_kla_camtek_rows_align():
     assert cam is not None and kla is not None
     assert (cam.col, cam.row) == (kla.col, kla.row)      # 정렬 — 이게 핵심
     assert (cam.col, cam.row) == (5, 4)                  # 장비 화면 기준 절대값
+
+
+# ---------------------------------------------------------------------------
+# ★ 실측 쌍 2 — 다른 로트·다른 KLA 장비 (W6458244XYE1, TB500_RDL1 - Multi)
+#
+# 기존 쌍(예시1~3)과 독립적이다: KLA 장비가 "K3" 가 아니라 "Tool", 제품 스텝이
+# RDL2_NEW 가 아니라 RDL1_NEW, Camtek 은 EagleG5 의 x20/x5 2레시피 스캔이다.
+# 여기서 얻는 것(→ docs/디바이스_하드코딩_조사.md §6-G):
+#
+#   · ``zero_x`` 는 KLA 파일만으로 산출된다(``−min(XINDEX)`` = 3).  Camtek 에 맞춰
+#     튜닝한 값이 아니다.  그게 Camtek ``col_origin=2`` 와 정확히 맞으므로
+#     **col_origin=2 가 독립적으로 확인**된다.
+#   · 같은 결함의 recipe1·recipe2 사진이 **둘 다** 같은 KLA 결함에 붙는다.
+# ---------------------------------------------------------------------------
+_RDL1_PX, _RDL1_PY = 37247.9, 44905.3
+
+# KLA 결함 14 (FrontSideADRImg_572445) — 20.8×16.9 µm 큰 결함이라 두 장비가 다 잡았다.
+_RDL1_KLA_HEAD = (
+    'DiePitch 3.7247930000e+004 4.4905340000e+004;\n'
+    'WaferID "W6458244XYE1";\n'
+    'SampleTestPlan 30\n'
+    '  -3 -1 \n  -3 0 \n  -2 -2 \n  -2 -1 \n  -2 0 \n  -2 1 \n  -1 -3 \n  -1 -2 \n'
+    '  -1 -1 \n  -1 0 \n  -1 1 \n  -1 2 \n  0 -3 \n  0 -2 \n  0 -1 \n  0 0 \n'
+    '  0 1 \n  0 2 \n  1 -3 \n  1 -2 \n  1 -1 \n  1 0 \n  1 1 \n  1 2 \n'
+    '  2 -2 \n  2 -1 \n  2 0 \n  2 1 \n  3 -1 \n  3 0 ;\n'
+    'DefectRecordSpec 30 DEFECTID X Y XREL YREL XINDEX YINDEX XSIZE YSIZE '
+    'DEFECTAREA DSIZE CLASSNUMBER TEST CLUSTERNUMBER ROUGHBINNUMBER FINEBINNUMBER '
+    'REVIEWSAMPLE CHANNELID MANSEMCLASS AUTOSEMCLASS MICROSIGCLASS MACROSIGCLASS '
+    'INTENSITY KILLPROB MACROSIGID ZABS EMRADIUS DWBINCODE IMAGECOUNT IMAGELIST ;\n'
+    'DefectList;\n'
+    'TiffFileName FrontSideADRImg_572445.jpg;\n'
+    'DefectList\n'
+    ' 14 73606.560 -37010.910 17371.701 7760.430 2 -1 20.800 16.900 351.360000 '
+    '20.800 0 3 0 0 4 1 4 0 0 0 0 3731 0.0000 0 0 0.000000 2 1 1 1 0;\n'
+    'EndOfFile;\n'
+)
+
+# 같은 결함을 Camtek 이 레시피별로 한 장씩 찍었다.
+_RDL1_CAMTEK = [
+    ("278197.216679.c.-189109460.1", 278197.718521499, 216679.594004774, 7, 4, 1),
+    ("278199.216685.c.-1515889540.2", 278199.842373130, 216682.837907621, 7, 4, 2),
+]
+
+
+def _make_rdl1_folders(tmp_path):
+    from aoi_verification.app.coords import camtek_ini, kla_info
+    from aoi_verification.app.coords import wafer_geometry as wg
+    for f in (wg.camtek_geometry, wg.kla_geometry, camtek_ini.load_folder,
+              camtek_ini.load_raw_folder, camtek_ini.load_recipe_folder,
+              kla_info.load_folder, kla_info.load_folder_raw):
+        f.cache_clear()
+    kla = tmp_path / "kla"
+    kla.mkdir()
+    (kla / "W6458244XYE1.001").write_text(_RDL1_KLA_HEAD, encoding="utf-8")
+    cam = tmp_path / "camtek"
+    cam.mkdir()
+    (cam / "ColorImageGrabingInfo.ini").write_text("".join(
+        f"[{s}.jpeg]\nX={X}\nY={Y}\nCol={c}\nRow={r}\nRecipeNumber={n}\n"
+        for s, X, Y, c, r, n in _RDL1_CAMTEK), encoding="utf-8")
+    (cam / "Params_WaferInfo.ini").write_text(
+        f"[Geometry]\nDieStep_X={_RDL1_PX:.6f}\nDieStep_Y={_RDL1_PY:.6f}\n"
+        f"[Geometric]\nDiameter=300000.000000\n", encoding="utf-8")
+    return kla, cam
+
+
+def test_real_pair2_zero_x_is_derived_and_confirms_col_origin(tmp_path):
+    """★ ``zero_x`` 는 KLA 파일만으로 나온다 — Camtek 에 맞춘 값이 아니다."""
+    from aoi_verification.app.coords import wafer_geometry as wg
+    kla, _cam = _make_rdl1_folders(tmp_path)
+    g = wg.kla_geometry(kla)
+    assert g.source == "DiePitch+SampleTestPlan"     # 파일에서 산출했다는 증거
+    assert g.zero_x == 3                             # −min(XINDEX) = −(−3)
+
+
+@pytest.mark.parametrize("stem", [c[0] for c in _RDL1_CAMTEK])
+def test_real_pair2_kla_camtek_align(tmp_path, stem):
+    """★ 실측 쌍 2 — 두 레시피 사진 **모두** 같은 KLA 결함과 (col,row) 가 일치한다.
+
+    거리 125 µm 로 같은 물리 결함임이 확인된 쌍이다(기존 쌍 112~121 µm 과 같은 수준)."""
+    import math
+    from aoi_verification.app.coords import camtek_ini, kla_info
+    kla, cam = _make_rdl1_folders(tmp_path)
+    k = kla_info.load_folder(kla)["frontsideadrimg_572445"]
+    c = camtek_ini.load_folder(cam)[stem]
+    assert (c.col, c.row) == (k.col, k.row) == (5, 3)
+    assert math.hypot(c.x - k.x, c.y - k.y) <= 200
