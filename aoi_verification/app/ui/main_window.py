@@ -1258,7 +1258,7 @@ class MainWindow(QMainWindow):
         merged = self._merge_matches()
         # MatchPage 가 들고 있는 점수 캐시 + val_pool 을 매치 검토 페이지에
         # 넘겨 차순위 후보를 행마다 표시한다 (참고용 시각 정보).
-        score_cache = getattr(self._match_page, "_score_cache", None)
+        ctx = self._match_page.review_context()
         match_state = self._match_page.get_state()
         val_pool = match_state.val_pool if match_state is not None else None
         # 효율 모드는 score_cache 가 비어 있으므로 후보를 별도 산출해 전달 (#7).
@@ -1268,24 +1268,12 @@ class MainWindow(QMainWindow):
         except Exception:
             candidates_by_ref = None
         # 좌표 매칭 모드 정보 전달 — 검토 화면에서 거리(µm) 표시 + 통계 3분류.
-        _engine_cfg = getattr(self._match_page, "_engine_cfg", None)
-        _coord_mode = False
-        _tolerance = 500.0
-        _coord_failed_count = 0
-        if _engine_cfg is not None:
-            from ..utils.prefs import EngineMode
-            _coord_mode = EngineMode.is_coordinate(getattr(_engine_cfg, "engine", ""))
-            _tolerance = float(getattr(_engine_cfg, "coord_tolerance", 500.0))
-        if _coord_mode:
-            _coord_failed_count = len(
-                getattr(self._match_page, "_coord_failed_set", set())
-            )
         self._match_review_page.load_state(
-            merged, score_cache=score_cache, val_pool=val_pool,
+            merged, score_cache=ctx.score_cache, val_pool=val_pool,
             candidates_by_ref=candidates_by_ref,
-            coord_mode=_coord_mode,
-            tolerance=_tolerance,
-            coord_failed_count=_coord_failed_count,
+            coord_mode=ctx.coord_mode,
+            tolerance=ctx.tolerance,
+            coord_failed_count=ctx.coord_failed_count,
         )
         self._show_page(self._match_review_page)
 
@@ -1326,26 +1314,17 @@ class MainWindow(QMainWindow):
             slot = self._scan.slots[slot_name]
             review_pool[(slot_name, "ref")] = list(slot.val_images)
             review_pool[(slot_name, "val")] = list(slot.ref_images)
-        review_score_cache = getattr(self._match_page, "_score_cache", None)
-        review_fast_results = getattr(self._match_page, "_fast_results", None)
-        _engine_cfg = getattr(self._match_page, "_engine_cfg", None)
-        _coord_mode = False
-        _tolerance = 500.0
-        if _engine_cfg is not None:
-            from ..utils.prefs import EngineMode
-            _coord_mode = EngineMode.is_coordinate(
-                getattr(_engine_cfg, "engine", ""))
-            _tolerance = float(getattr(_engine_cfg, "coord_tolerance", 500.0))
+        ctx = self._match_page.review_context()
         self._result_page.show_result(
             result,
             template_path=self._template_used,
             target_path=self._working_xlsx,
             auto_mode=auto_mode,
             val_pool=review_pool,
-            score_cache=review_score_cache,
-            fast_results=review_fast_results,
-            coord_mode=_coord_mode,
-            tolerance=_tolerance,
+            score_cache=ctx.score_cache,
+            fast_results=ctx.fast_results,
+            coord_mode=ctx.coord_mode,
+            tolerance=ctx.tolerance,
         )
         self._show_page(self._result_page)
         self._phase = PHASE_NONE
@@ -1361,7 +1340,7 @@ class MainWindow(QMainWindow):
             common = sr.common_slot_names
             ref_photos = sum(len(sr.slots[n].ref_images) for n in common)
             val_photos = sum(len(sr.slots[n].val_images) for n in common)
-            elapsed = float(getattr(self._match_page, "_precompute_elapsed", 0.0))
+            elapsed = self._match_page.review_context().elapsed_s
             options = {
                 "mode": getattr(inp, "mode", ""),
                 "automation": getattr(inp, "automation_level", ""),

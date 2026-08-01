@@ -55,6 +55,27 @@ class Stage2State:
     val_pool: dict[str, list[ImageItem]] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class ReviewContext:
+    """매칭이 끝난 뒤 **검토·결과 화면이 필요로 하는** MatchPage 상태 묶음.
+
+    이전에는 `main_window` 가 MatchPage 의 비공개 속성을 여덟 군데에서 `getattr`
+    로 찔렀고, 엔진 설정을 푸는 블록이 두 벌 복붙돼 있었다(한쪽만 좌표 실패
+    개수를 세는 등 이미 갈라져 있었다).
+
+    ★ 허용 오차 기본값을 **여기 한 곳**에서만 정한다 — 호출부마다 따로 두면 값이
+    어긋났을 때 좌표 모드 검토 후보 노출 규칙(허용 오차의 3배까지)이 조용히
+    달라진다.
+    """
+
+    score_cache: object
+    fast_results: dict
+    coord_mode: bool
+    tolerance: float
+    coord_failed_count: int
+    elapsed_s: float
+
+
 class MatchPage(QWidget):
     """Stage 2 의 메인 페이지."""
 
@@ -112,6 +133,10 @@ class MatchPage(QWidget):
         self._precompute_total: int = 0
         # 좌표 매칭 실패 목록 — 검토 화면으로 전달용
         self._coord_failed_set: set = set()
+        # 매칭(사전 계산) 소요시간 — run_log 통계용.  매칭을 한 번도 돌리지 않고
+        # 세션이 끝날 수 있으므로 여기서 만들어 둔다(읽는 쪽이 getattr 로 방어하지
+        # 않아도 되게).
+        self._precompute_elapsed: float = 0.0
 
     # ------------------------------------------------------------------
     def _build(self) -> None:
@@ -665,6 +690,21 @@ class MatchPage(QWidget):
 
     def get_state(self) -> Stage2State | None:
         return self._state
+
+    def review_context(self) -> ReviewContext:
+        """검토·결과 화면에 넘길 상태를 한 번에 (`ReviewContext` 참고)."""
+        cfg = self._engine_cfg
+        coord_mode = EngineMode.is_coordinate(getattr(cfg, "engine", ""))
+        return ReviewContext(
+            score_cache=self._score_cache,
+            fast_results=self._fast_results,
+            coord_mode=coord_mode,
+            tolerance=float(getattr(cfg, "coord_tolerance",
+                                    config.DEFAULT_SIM_CONFIG.coord_tolerance)),
+            # 좌표 모드가 아니면 실패 집합은 의미가 없다(직전 세션 잔재일 수 있다).
+            coord_failed_count=len(self._coord_failed_set) if coord_mode else 0,
+            elapsed_s=float(self._precompute_elapsed),
+        )
 
     def build_candidates_by_ref(self, matches) -> dict:
         """매치 검토 화면(#7)용 — 각 ref 의 후보 [(ImageItem, score), ...] 산출.
