@@ -11,13 +11,14 @@
 
 from __future__ import annotations
 
+import logging
 import shutil
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtCore import QThread, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (QApplication, QLabel, QMainWindow,
                               QMessageBox, QStackedWidget, QStatusBar,
                               QVBoxLayout, QWidget)
@@ -51,6 +52,10 @@ from .widgets.window_controls import add_fullscreen_shortcut
 # ---------------------------------------------------------------------------
 # Phase identifiers
 # ---------------------------------------------------------------------------
+# 조용히 삼키던 실패를 남기는 로거 — 기존 관례(`aoi.coords`·`aoi.openvino`)와 같은
+# 이름 규칙.  출력은 `main._setup_logging` 이 캐시 폴더의 app.log 로 보낸다.
+_LOG = logging.getLogger("aoi.ui")
+
 PHASE_NONE = "none"
 PHASE_A_SELECT = "A_select"
 PHASE_A_MATCH = "A_match"
@@ -179,7 +184,6 @@ class MainWindow(QMainWindow):
         # 썸네일 완료 처리 one-shot 가드 — finished 시그널/취소가 이중 진입해
         # Stage 1 에 두 번 들어가는 것을 방지.
         self._thumbs_handled = False
-        self._thumb_worker = None            # Optional[ThumbnailWorker]
         self._thumb_pool = None              # Optional[ThumbnailPool]
         self._sizing_tier: Optional[config.SizingTier] = None
         self._scan: Optional[ScanResult] = None
@@ -505,7 +509,6 @@ class MainWindow(QMainWindow):
             val_root=state.val_root,
             ref_machine=state.ref_machine,
             val_machine=state.val_machine,
-            mode=state.mode,
             threshold=state.threshold,
         )
         self._show_page(self._setup_page)
@@ -848,8 +851,8 @@ class MainWindow(QMainWindow):
         try:
             from ..utils import image_io as _io
             _io.clear_tile_cache()
-        except Exception:
-            pass
+        except Exception as exc:
+            _LOG.debug("타일 픽스맵 캐시 비우기 실패: %s", exc)
         self._session_id = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
 
         # 양식 폴더의 양식.xlsx 를 결과 폴더로 복사 → 작업 파일 준비 ----
@@ -1308,8 +1311,6 @@ class MainWindow(QMainWindow):
             ref_machine=self._input.ref_machine,
             val_machine=self._input.val_machine,
             matches=merged,
-            miss_fast=[],
-            miss_slow=[],
             slot_only_ref=list(self._scan.ref_only),
             slot_only_val=list(self._scan.val_only),
             unmatched_refs=unmatched_refs,
@@ -1381,8 +1382,8 @@ class MainWindow(QMainWindow):
                 slot_count=len(common), ref_photos=ref_photos, val_photos=val_photos,
                 elapsed_s=elapsed, kla_used=kla_used, ocr_used=ocr_used)
             run_log.record(rec, elapsed_s=elapsed, uploader=None)
-        except Exception:
-            pass
+        except Exception as exc:
+            _LOG.debug("실행 로그 기록 실패: %s", exc)
         session_mod.clear()
 
     # ------------------------------------------------------------------
@@ -1764,8 +1765,10 @@ class MainWindow(QMainWindow):
         )
         try:
             session_mod.save(state)
-        except Exception:
-            pass
+        except Exception as exc:
+            # ★ 이건 WARNING 이다 — 자동 저장이 죽으면 '이어하기' 가 조용히 사라진다.
+            _LOG.warning("세션 자동 저장 실패 — 이어하기가 동작하지 않을 수 있습니다: %s",
+                         exc)
 
     # ==================================================================
     # Cleanup
@@ -1775,9 +1778,6 @@ class MainWindow(QMainWindow):
         self._persist_geometry()
         # #14 절전 억제 해제 (남아 있을 경우).
         wakelock.release()
-        if self._thumb_worker is not None and self._thumb_worker.isRunning():
-            self._thumb_worker.stop()
-            self._thumb_worker.wait(1000)
         if self._thumb_pool is not None:
             self._thumb_pool.stop()
             self._thumb_pool.wait(1000)

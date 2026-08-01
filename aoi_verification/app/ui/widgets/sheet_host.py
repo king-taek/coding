@@ -621,11 +621,6 @@ def ask(parent, title: str, text: str, buttons=_SB.Yes | _SB.No,
                     kind="question")
 
 
-def about(parent, title: str, text: str):
-    """``QMessageBox.about`` 대체(확인 하나)."""
-    return _message(parent, title, text, buttons=_SB.Ok, kind="info")
-
-
 # ---------------------------------------------------------------------------
 # 선택지가 3~4개인 질문 — 표준 버튼으로 표현되지 않는 팝업
 # ---------------------------------------------------------------------------

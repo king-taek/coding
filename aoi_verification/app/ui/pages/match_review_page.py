@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu,
 
 from ... import i18n
 from .. import theme
+from ..score_fmt import fmt_score
 from ...models.result import MatchResult, MissEntry
 from ...models.slot import ImageItem
 from ...utils import image_io
@@ -34,7 +35,6 @@ from ..widgets import sheet_host as sheets
 
 _THUMB_PX = 140                             # 기준 썸네일 기본 크기 (#2)
 _RUNNERUP_PX = int(_THUMB_PX * 0.8)         # 차순위는 20% 작게
-_TILE_W = _RUNNERUP_PX + 12                 # 타일 1개 점유 폭(간격 포함)
 _SIZE_MIN_PX = 100
 _SIZE_MAX_PX = 360
 # 후보 열 수는 가용 폭에 맞춰 동적으로 계산한다(가로 스크롤 방지, #3).
@@ -197,20 +197,16 @@ class _RunnerUpTile(QFrame):
         # 타일 아래 점수는 간결하게 — '허용범위 초과' 같은 긴 접미어는 빼고
         # 거리만, 초과 여부는 색으로 신호한다(허용 내=밝게, 초과=주의색).
         over = coord_mode and score < 0
-        if coord_mode:
-            tol = float(tolerance) if tolerance > 0 else 500.0
-            dist = (1.0 - score) * tol if score >= 0 else (-score) * tol
-            score_text = i18n.KO.SCORE_DIST_FMT.format(dist=dist)
-        else:
-            score_text = i18n.KO.SCORE_SIMILARITY_FMT.format(pct=score * 100)
-        self._score_label = QLabel(score_text, self)
+        self._score_label = QLabel(
+            fmt_score(score, coord_mode, tolerance, verbose=False), self)
         # µm 신호 통일(C21): '허용 초과'는 어디서나 위험색(빨강), 정상은 중립 보조색.
         color = theme.DANGER if over else theme.INK2
         self._score_label.setStyleSheet(
             f"color: {color}; font-size: 12px; font-family: {theme.FONT_MONO};")
         self._score_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         if over:
-            self._score_label.setToolTip(i18n.KO.SCORE_DIST_OVER_FMT.format(dist=dist))
+            self._score_label.setToolTip(
+                fmt_score(score, coord_mode, tolerance, verbose=True))
         lay.addWidget(self._score_label)
 
     def set_size(self, size: int) -> None:
@@ -458,19 +454,11 @@ class _MatchRow(QFrame):
         좌표 모드: 거리(µm)로 역산 (score ≥ 0 → 허용 내, score < 0 → 허용 초과).
         일반 모드: 0~100% 백분율.
         ``verbose=False`` 면 '허용범위 초과' 접미어를 빼고 거리만 (metric 컬럼용 —
-        초과 여부는 옆 칩이 전담).
+        초과 여부는 옆 칩이 전담).  실제 변환은 공용 포맷터가 하고, 여기서는 이 행의
+        상태(좌표 모드·허용 오차)만 실어 보낸다.
         """
-        if self._coord_mode:
-            from ... import i18n as _i18n
-            if score >= 0:
-                dist = (1.0 - score) * self._tolerance
-                return _i18n.KO.SCORE_DIST_FMT.format(dist=dist)
-            else:
-                dist = (-score) * self._tolerance
-                fmt = (_i18n.KO.SCORE_DIST_OVER_FMT if verbose
-                       else _i18n.KO.SCORE_DIST_FMT)
-                return fmt.format(dist=dist)
-        return i18n.KO.SCORE_SIMILARITY_FMT.format(pct=score * 100)
+        return fmt_score(score, self._coord_mode, self._tolerance,
+                         verbose=verbose)
 
     def _row_width(self) -> int:
         """현재 행의 가용 너비.

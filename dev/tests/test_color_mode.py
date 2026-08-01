@@ -200,17 +200,14 @@ def test_accent_is_distinguishable_from_its_own_paper(mode):
 
 
 # ── 화면의 컨트롤: 3칩 선택기 → on/off 스위치 ────────────────────────────────
-def test_setup_page_uses_a_dark_mode_switch_not_a_chip_picker():
+def test_setup_page_uses_a_dark_mode_switch_not_a_chip_picker(qapp):
     """어두운 모드가 하나가 됐으므로 컨트롤도 boolean 어휘여야 한다.
 
     ★ 3칩 선택기를 뒀던 유일한 이유는 '어두운 모드가 둘'이었다는 것이다.  그 이유가
     사라졌으면 컨트롤도 따라가야 한다 — 옆의 '모션 줄이기'와 같은 스위치로 통일한다."""
-    pytest.importorskip("PyQt6.QtWidgets")
-    from PyQt6.QtWidgets import QApplication
     from aoi_verification.app.ui.pages.setup_page import SetupPage
     from aoi_verification.app.ui.widgets.switch_row import SwitchRow
 
-    app = QApplication.instance() or QApplication([])
     theme.set_color_mode("light")
     page = SetupPage()
     try:
@@ -245,22 +242,19 @@ def test_setup_page_uses_a_dark_mode_switch_not_a_chip_picker():
         assert not seen
     finally:
         page.deleteLater()
-        app.processEvents()
+        qapp.processEvents()
         theme.set_color_mode("light")
 
 
-def test_dark_switch_reflects_saved_mode():
+def test_dark_switch_reflects_saved_mode(qapp):
     """다크로 저장된 상태에서 페이지를 만들면 스위치가 켜져 있어야 한다."""
-    pytest.importorskip("PyQt6.QtWidgets")
-    from PyQt6.QtWidgets import QApplication
     from aoi_verification.app.ui.pages.setup_page import SetupPage
 
-    app = QApplication.instance() or QApplication([])
     theme.set_color_mode("dark")
     page = SetupPage()
     try:
         assert page._dark_switch.is_on() is True
     finally:
         page.deleteLater()
-        app.processEvents()
+        qapp.processEvents()
         theme.set_color_mode("light")

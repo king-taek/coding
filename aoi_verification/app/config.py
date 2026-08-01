@@ -112,7 +112,6 @@ MEMORY_PRESSURE_BYTES = PIXMAP_CACHE_MAX_BYTES + 1024 * 1024 * 1024
 class SimilarityConfig:
     engine: str = "basic"          # "basic" | "efficiency"
     center_crop: bool = False      # 사진 중앙 30% 영역만 사용 (기준·검증 모두)
-    top_k: int = 50                # 후보 재정렬 깊이
     persist_scores: bool = True    # (ref,val) 점수 디스크 영속 캐시 — 항상 기본 적용
     # 고효율 모드 동시 추론 수(in-flight).  높일수록 GPU 메모리·throughput↑
     # (계산 결과는 불변).  사용자 조절 노브.
@@ -154,11 +153,6 @@ class SimilarityConfig:
             return self.center_crop
         return False               # side 미지정 → crop 안 함 (캐시 키와 일관)
 
-    @property
-    def has_preprocess(self) -> bool:
-        """전처리가 하나라도 켜져 있으면 True — 캐시 키 분기/적용 판단용."""
-        return bool(self.center_crop) or bool(self.orb_nfeatures)
-
     def cache_extra(self, side=None) -> str:
         """캐시 키 판별자.  전처리 OFF 면 빈 문자열 → 기본 캐시와 동일 키.
 
@@ -182,16 +176,14 @@ DEFAULT_SIM_CONFIG = SimilarityConfig()
 # ---------------------------------------------------------------------------
 @dataclass
 class SimilarityWeights:
+    # ※ 한때 네 번째 항으로 CNN 임베딩 가중치가 있었으나, 그 경로를 켤 수단
+    #   (학습된 .pt · 모델 레지스트리)이 모두 제거돼 영구 비활성이라 함께 지웠다.
     phash: float = 0.2
     orb: float = 0.3
     ssim: float = 0.2
-    cnn: float = 0.3
-    use_cnn: bool = False  # 고전 경로의 CNN 항 — 현재 비활성 (similarity/cnn_embed.py)
 
     def normalized(self) -> "SimilarityWeights":
-        """If CNN is disabled, redistribute its weight to the others."""
-        if self.use_cnn:
-            return self
+        """세 항의 합이 1 이 되도록 정규화."""
         total = self.phash + self.orb + self.ssim
         if total <= 0:
             return self
@@ -199,8 +191,6 @@ class SimilarityWeights:
             phash=self.phash / total,
             orb=self.orb / total,
             ssim=self.ssim / total,
-            cnn=0.0,
-            use_cnn=False,
         )
 
 

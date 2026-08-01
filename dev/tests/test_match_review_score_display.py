@@ -134,8 +134,23 @@ def test_val_score_container_tracks_thumb_width(qapp):
 # 3) 유사도 문구가 한 곳에서 온다 (네 곳에 복제돼 갈라져 있었다)
 # ---------------------------------------------------------------------------
 def test_similarity_format_is_shared():
-    from aoi_verification.app.ui.widgets import matches_review as mr
-    from aoi_verification.app.ui.widgets import unmatched_review_dialog as ur
-    expected = i18n.KO.SCORE_SIMILARITY_FMT.format(pct=87.3)
-    assert mr._fmt_score(0.873, False, 500.0) == expected
-    assert ur._fmt_score(0.873, False, 500.0) == expected
+    """포맷터는 이제 한 곳(`ui/score_fmt`)뿐이다 — 네 곳에 복제돼 갈라져 있었다."""
+    from aoi_verification.app.ui.score_fmt import fmt_score
+    assert fmt_score(0.873, False, 500.0) == \
+        i18n.KO.SCORE_SIMILARITY_FMT.format(pct=87.3)
+
+
+def test_coord_score_round_trip_boundary():
+    """★ 경계값 ``dist == tol`` 은 score == 0 이고 **허용 내**다.
+
+    coord_matcher 의 인코딩(score >= 0 → 허용 내)을 그대로 역산해야 한다.
+    판정을 ``> 0`` 으로 바꾸면 그 한 점이 '초과' 로 뒤집혀 CLAUDE.md 의 좌표
+    round-trip 계약이 깨진다."""
+    from aoi_verification.app.ui.score_fmt import fmt_score
+    assert fmt_score(0.0, True, 500.0) == i18n.KO.SCORE_DIST_FMT.format(dist=500.0)
+    assert "초과" not in fmt_score(0.0, True, 500.0)
+    # 음수 = 허용범위 초과 (verbose 면 접미어까지)
+    assert "초과" in fmt_score(-1.0, True, 500.0)
+    assert "초과" not in fmt_score(-1.0, True, 500.0, verbose=False)
+    # 허용 오차가 0 이하면 500 으로 클램프 — 옛 구현과 같은 규약.
+    assert fmt_score(0.0, True, 0.0) == fmt_score(0.0, True, 500.0)

@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (QDialog, QGridLayout, QHBoxLayout, QLabel,
 
 from ... import config, i18n
 from .. import theme
+from ..score_fmt import fmt_score
 from ...models.result import MatchResult
 from ...utils import image_io
 from .neon_button import NeonButton
@@ -28,13 +29,6 @@ _SIZE_MIN_PX = 140
 _SIZE_MAX_PX = 480
 
 
-def _fmt_score(score: float, coord_mode: bool, tolerance: float) -> str:
-    if coord_mode:
-        tol = float(tolerance) if tolerance > 0 else 500.0
-        dist = (1.0 - score) * tol if score >= 0 else (-score) * tol
-        return (i18n.KO.SCORE_DIST_FMT.format(dist=dist) if score >= 0
-                else i18n.KO.SCORE_DIST_OVER_FMT.format(dist=dist))
-    return i18n.KO.SCORE_SIMILARITY_FMT.format(pct=score * 100)
 
 
 class _Row(QWidget):
@@ -75,7 +69,7 @@ class _Row(QWidget):
 
         # Slot 메타
         meta = QLabel(
-            f"{m.slot}\n{_fmt_score(m.score, coord_mode, tolerance)}", self,
+            f"{m.slot}\n{fmt_score(m.score, coord_mode, tolerance)}", self,
         )
         meta.setStyleSheet(
             f"color: {theme.INK}; font-weight: 700; border: none; padding: 4px;"

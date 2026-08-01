@@ -161,3 +161,36 @@ def test_threaded_scoring_matches_serial_result(isolated_cache, monkeypatch):
         assert abs(got - exp_val) < 1e-9, (
             f"병렬 결과가 직렬 기대값과 다름: {got} vs {exp_val}"
         )
+
+
+# ---- 점수 디스크 캐시 시그니처 -------------------------------------------
+def test_score_signature_is_pinned():
+    """★ 시그니처가 바뀌면 사용자 PC 의 점수 캐시가 통째로 무효화된다.
+
+    캐시 파일명이 이 값(앞 16자)이라, 값이 달라지면 옛 파일을 못 찾고 슬롯 전체를
+    재계산한다.  **정확도 문제는 아니다**(충돌이 아니라 miss 다) — 첫 실행이 콜드
+    캐시 속도로 도는 비용이다.  그래도 조용히 일어나면 안 되므로 여기에 못 박는다.
+
+    이 값을 바꾸는 변경(가중치 필드 추가/삭제, 시그니처 항목 변경)을 할 때는
+    **의도한 무효화인지 확인하고** 이 기대값을 함께 고쳐라."""
+    from aoi_verification.app.similarity.slot_features import _score_signature
+    assert _score_signature(None) == (
+        "f71ffa4b1e86b6da1d432c5f17d580b4b07809dd")
+
+
+def test_score_signature_tracks_the_weights():
+    """가중치가 달라지면 시그니처도 달라져야 한다 — 캐시가 의미를 따라가야 한다.
+
+    (CLAUDE.md 의 임베딩 캐시 규칙과 같은 이유: 키가 의미를 안 따라가면 옛 값과
+    새 값을 섞어 쓰게 된다.)"""
+    from aoi_verification.app import config
+    from aoi_verification.app.similarity.slot_features import _score_signature
+    before = _score_signature(None)
+    old = config.CONFIG.similarity
+    try:
+        config.CONFIG.similarity = config.SimilarityWeights(phash=0.5, orb=0.3,
+                                                            ssim=0.2)
+        assert _score_signature(None) != before
+    finally:
+        config.CONFIG.similarity = old
+    assert _score_signature(None) == before
