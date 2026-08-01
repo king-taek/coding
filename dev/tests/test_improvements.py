@@ -1,8 +1,11 @@
-"""우선순위 1~7 개선 항목 검증 (B1/B2/C1/C2/D2)."""
+"""우선순위 1~7 개선 항목 검증 (B2/C1/C2/D2).
+
+※ B1(`utils/errors.log_silent`)은 그 모듈이 프로덕션에서 한 번도 쓰이지
+   않아 죽은 코드로 제거됐다 — 함께 지운 자리다.
+"""
 
 from __future__ import annotations
 
-import logging
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -26,18 +29,6 @@ def qapp():
 def _items(slot, n, side="ref"):
     return [ImageItem(slot, Path(f"/tmp/{slot}_{side}{i}.png"), side)
             for i in range(n)]
-
-
-# ===========================================================================
-# B1 — log_silent 헬퍼는 동작을 바꾸지 않고 로그만 남긴다(예외 재전파 없음)
-# ===========================================================================
-def test_b1_log_silent_never_raises(caplog):
-    from aoi_verification.app.utils import errors
-    with caplog.at_level(logging.WARNING, logger="aoi"):
-        errors.log_silent("ctx", RuntimeError("boom"), level=logging.WARNING)
-    assert any("boom" in r.message or "ctx" in r.message for r in caplog.records)
-    # exc 없이 호출, 로깅 내부 실패에도 예외 전파 없음.
-    errors.log_silent("plain")  # 예외 없이 반환되면 통과
 
 
 # ===========================================================================

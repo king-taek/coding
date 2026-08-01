@@ -179,7 +179,6 @@ class MainWindow(QMainWindow):
         # 썸네일 완료 처리 one-shot 가드 — finished 시그널/취소가 이중 진입해
         # Stage 1 에 두 번 들어가는 것을 방지.
         self._thumbs_handled = False
-        self._thumb_worker = None            # Optional[ThumbnailWorker]
         self._thumb_pool = None              # Optional[ThumbnailPool]
         self._sizing_tier: Optional[config.SizingTier] = None
         self._scan: Optional[ScanResult] = None
@@ -1775,9 +1774,6 @@ class MainWindow(QMainWindow):
         self._persist_geometry()
         # #14 절전 억제 해제 (남아 있을 경우).
         wakelock.release()
-        if self._thumb_worker is not None and self._thumb_worker.isRunning():
-            self._thumb_worker.stop()
-            self._thumb_worker.wait(1000)
         if self._thumb_pool is not None:
             self._thumb_pool.stop()
             self._thumb_pool.wait(1000)
