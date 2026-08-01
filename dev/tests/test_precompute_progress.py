@@ -116,13 +116,10 @@ def test_worker_relays_build_progress(monkeypatch, cache_with_stub_extract):
 # ---------------------------------------------------------------------------
 # 3) 진행도 상태가 세션 간 초기화된다
 # ---------------------------------------------------------------------------
-def test_precompute_progress_resets_between_runs(monkeypatch):
+def test_precompute_progress_resets_between_runs(qapp):
     """2회차 실행이 직전 세션의 done/total 을 물려받지 않는다."""
-    pytest.importorskip("PyQt6.QtWidgets")
-    from PyQt6.QtWidgets import QApplication
     from aoi_verification.app.ui.pages import match_page as mp
 
-    app = QApplication.instance() or QApplication([])
     page = mp.MatchPage()
     try:
         # 직전 세션의 잔여 진행도를 흉내낸다.
@@ -132,7 +129,7 @@ def test_precompute_progress_resets_between_runs(monkeypatch):
         # 계산할 게 없는 상태로 _start_precompute 를 태워도 리셋은 먼저 일어난다.
         page._state = None
         mp.MatchPage._start_precompute(page)
-        app.processEvents()
+        qapp.processEvents()
         assert page._precompute_done == 812      # _state None 이면 즉시 반환
     finally:
         page.deleteLater()

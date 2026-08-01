@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import os
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
 from pathlib import Path
 
 import pytest
@@ -119,13 +123,10 @@ def test_mainwindow_has_no_variant_switching():
         assert gone not in src, f"{gone} 잔존"
 
 
-def test_apply_to_app_renders(tmp_path, monkeypatch):
-    """apply_to_app 렌더 경로가 예외 없이 도는지(QSS 완전 치환)."""
-    import pytest
-    pytest.importorskip("PyQt6.QtWidgets")
-    import os
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    from PyQt6.QtWidgets import QApplication
-    app = QApplication.instance() or QApplication([])
-    theme.apply_to_app(app)
-    assert "$" not in app.styleSheet()
+def test_apply_to_app_renders(styled_qapp):
+    """apply_to_app 렌더 경로가 예외 없이 도는지(QSS 완전 치환).
+
+    ★ 테마 적용은 conftest 의 `styled_qapp` 이 **세션당 1회**만 한다 — 여기서
+    `apply_to_app` 을 또 부르면 그 `setStyleSheet` 비용이 그대로 더해지고(부를수록
+    비싸진다), 공유 앱을 이 테스트의 색 모드로 오염시킨 채 복원하지 않는다."""
+    assert "$" not in styled_qapp.styleSheet()
