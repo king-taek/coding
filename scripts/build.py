@@ -465,6 +465,16 @@ def verify_checks(out: Path, lite: bool = False) -> List[tuple]:
                    "app/aoi_verification/app/ui/style.qss"))
     checks.append(((pkg / "app" / "ui" / "assets" / "logo.ico").is_file(),
                    "app/aoi_verification/app/ui/assets/logo.ico"))
+    # ★ 동봉 폰트 — 없으면 **조용히** 폴백 서체로 떨어진다(앱은 그대로 뜬다).
+    #   `theme.load_app_fonts` 가 실패를 삼키도록 일부러 만들었기 때문에, 빠진 것을
+    #   알아채는 자리는 여기뿐이다.  PC 마다 글꼴이 달라 보이는 것을 막으려고 동봉한
+    #   것이므로, 빠지면 그 목적이 통째로 사라진다.  앱이 실제로 읽는 목록
+    #   (`theme._FONT_FILES`)을 그대로 확인한다 — 목록이 갈라지지 않게.
+    from aoi_verification.app.ui.theme import _FONT_FILES
+    for _fname in _FONT_FILES:
+        checks.append((
+            (pkg / "app" / "ui" / "assets" / "font" / _fname).is_file(),
+            f"app/aoi_verification/app/ui/assets/font/{_fname}"))
     # 앱 패키지가 '폴더만' 이 아니라 실제 코드 트리인지 — 모듈 수로 확인.
     py_count = len(list(pkg.rglob("*.py"))) if pkg.is_dir() else 0
     checks.append((py_count >= 50,

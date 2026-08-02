@@ -210,6 +210,11 @@ def _make_good_bundle(tmp_path) -> Path:
     (pkg / "app" / "ui" / "assets").mkdir(parents=True)
     (pkg / "app" / "ui" / "style.qss").write_text("x", encoding="utf-8")
     (pkg / "app" / "ui" / "assets" / "logo.ico").write_bytes(b"x")
+    # 동봉 폰트 — 앱이 실제로 읽는 목록을 그대로 만든다(빌드 검증이 이걸 본다).
+    from aoi_verification.app.ui.theme import _FONT_FILES
+    (pkg / "app" / "ui" / "assets" / "font").mkdir(parents=True)
+    for _fname in _FONT_FILES:
+        (pkg / "app" / "ui" / "assets" / "font" / _fname).write_bytes(b"x")
     for i in range(55):                          # 실제 코드 트리처럼 모듈이 많아야 한다
         (pkg / f"m{i}.py").write_text("x", encoding="utf-8")
     (app / "main.py").write_text("x", encoding="utf-8")
@@ -244,6 +249,26 @@ def test_verify_exe_pass(tmp_path):
     logs = []
     assert build.verify_exe(tmp_path, log=logs.append) == 0
     assert any("빌드 정상" in m for m in logs)
+
+
+def test_verify_exe_fails_when_a_bundled_font_is_missing(tmp_path):
+    """★ 폰트가 빠지면 빌드 검증이 잡아야 한다.
+
+    `theme.load_app_fonts` 는 실패를 **삼킨다**(폰트가 없다고 앱이 안 뜨면 안 되므로).
+    그래서 폰트가 빠져도 앱은 멀쩡히 뜨고 **글꼴만 조용히 폴백**으로 바뀐다 — PC 마다
+    화면이 달라 보이는 것을 막으려고 동봉한 것인데 그 목적만 사라진다.  사람이
+    알아챌 수 있는 자리가 빌드 검증뿐이라, 여기서 잡지 못하면 아무도 못 잡는다.
+    """
+    from aoi_verification.app.ui.theme import _FONT_FILES
+
+    out = _make_good_bundle(tmp_path)
+    victim = (out / "app" / "aoi_verification" / "app" / "ui" / "assets"
+              / "font" / _FONT_FILES[0])
+    assert victim.is_file()
+    victim.unlink()
+    logs = []
+    assert build.verify_exe(tmp_path, log=logs.append) != 0
+    assert any(_FONT_FILES[0] in m and "[!!]" in m for m in logs)
 
 
 def test_verify_exe_fails_when_app_is_frozen_into_the_exe(tmp_path):

@@ -83,6 +83,11 @@ def _good_bundle(tmp_path) -> Path:
     (pkg / "app" / "ui" / "assets").mkdir(parents=True)
     (pkg / "app" / "ui" / "style.qss").write_text("x", encoding="utf-8")
     (pkg / "app" / "ui" / "assets" / "logo.ico").write_bytes(b"x")
+    # 동봉 폰트 — 빌드 검증이 앱의 `theme._FONT_FILES` 를 그대로 확인한다.
+    from aoi_verification.app.ui.theme import _FONT_FILES
+    (pkg / "app" / "ui" / "assets" / "font").mkdir(parents=True)
+    for _fname in _FONT_FILES:
+        (pkg / "app" / "ui" / "assets" / "font" / _fname).write_bytes(b"x")
     for i in range(55):
         (pkg / f"m{i}.py").write_text("x", encoding="utf-8")
     (pkg / "__pycache__").mkdir()
