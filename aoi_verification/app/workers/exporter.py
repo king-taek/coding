@@ -44,6 +44,34 @@ BORDER_COLS = ["A", "B", "C", "D"]
 ROW_HEIGHT_PT = 165.75
 IMG_COL_WIDTH = 22
 
+# ---------------------------------------------------------------------------
+# 양식 서식 — 치수·색의 **단일 출처**
+# ---------------------------------------------------------------------------
+# ★ 여기가 원본이고 `dev/양식.xlsx` 는 `scripts/internal/make_template.py` 가
+#   이 값들로 구워낸 산출물이다.  두 벌로 갈라지면 '빈 양식' 과 '실제 출력' 의
+#   생김새가 달라지므로, 서식을 바꿀 땐 여기를 고치고 그 스크립트를 다시 돌린다.
+TEMPLATE_FONT = "맑은 고딕"
+
+# 열 폭 — 사진 열(C·D)은 현행 유지, 수기 열(E~H)과 A·B 는 좁혔다(사용자 지정).
+#   A·B 를 좁힌 이유: 'No' 는 3자리, slot 명도 짧은데 사진 열만큼 자리를 먹어
+#   가로가 불필요하게 길었다.
+COL_WIDTHS = {"A": 4.5, "B": 9.5, "C": 31.8, "D": 31.8,
+              "E": 13, "F": 13, "G": 13, "H": 13}
+
+# 헤더 1행 — 진한 남색 띠(흰 글씨).  표 상단이 하나로 읽힌다.
+HEADER_NAVY = "FF44546A"
+# 헤더 2행 — 그룹별 색.  가로로 넓은 표에서 지금 어느 그룹 칸인지 구분된다.
+GROUP_FILLS = {"C": "FFBDD7EE", "D": "FFBDD7EE",     # Scan Defect — 파랑
+               "E": "FFC6E0B4", "F": "FFC6E0B4",     # Camtek      — 초록
+               "G": "FFFBE2D5", "H": "FFFBE2D5"}     # KLA         — 주황
+# 데이터 영역 배경 (짝수행, 홀수행) — 줄무늬로 행을 따라가기 쉽게 하고,
+# 수기 열은 그룹색을 옅게 깔아 세로로도 그룹이 이어지게 한다.
+BODY_FILLS = {"A": ("FFFFFFFF", "FFF2F5F9"), "B": ("FFFFFFFF", "FFF2F5F9"),
+              "C": ("FFFFFFFF", "FFF2F5F9"), "D": ("FFFFFFFF", "FFF2F5F9"),
+              "E": ("FFF4F9EF", "FFEDF4E5"), "F": ("FFF4F9EF", "FFEDF4E5"),
+              "G": ("FFFDF6F1", "FFFBEFE7"), "H": ("FFFDF6F1", "FFFBEFE7")}
+BODY_GRID_COLOR = "FFB0B0B0"     # 데이터 영역 얇은 격자
+
 
 def _machine_label(raw: str) -> str:
     """호기 입력을 엑셀 헤더 라벨로 정규화.
@@ -130,15 +158,16 @@ class ExcelExporter(QThread):
         # (~8) 으로 떨어져 사진이 작아 보이는 문제가 있다.  병합된 헤더 쌍의
         # 왼쪽 컬럼 width 를 오른쪽 컬럼에도 그대로 미러링한다.
         self._mirror_paired_column_widths(ws)
-        # C, D, E, F, G, H 모두 같은 폭 — 양식 C(31.83) 를 기준값으로 통일
-        # (#3 — 사용자 요청: D 도 C 와 같고, E~H 도 모두 동일).  사진이 들어가는
-        # C/D 와 사용자 수기 영역인 E~H 가 시각적으로 일관된 폭을 갖도록.
-        self._equalize_column_group(
-            ws, [COL_REF, COL_VAL, "E", "F", "G", "H"],
-            floor=IMG_COL_WIDTH,
-        )
-        self._ensure_width(ws, COL_SLOT, 14)
-        self._ensure_width(ws, COL_NO, 6)
+        # ★ 폭은 **양식이 정한 값을 그대로 쓴다** (`COL_WIDTHS`).
+        #   예전엔 C~H 를 전부 같은 폭으로 통일하고 A·B 에 하한(6·14)을 걸었는데,
+        #   그러면 좁게 잡은 수기 열(E~H=13)과 A(4.5)·B(9.5)가 매번 되돌려진다 —
+        #   양식을 아무리 고쳐도 출력이 안 바뀌는 형태였다.
+        #   사진이 들어가는 C·D 만 서로 같아야 하므로 그 둘만 맞춘다.
+        self._equalize_column_group(ws, [COL_REF, COL_VAL],
+                                    floor=IMG_COL_WIDTH)
+        for _col, _w in COL_WIDTHS.items():
+            if _col not in (COL_REF, COL_VAL):
+                ws.column_dimensions[_col].width = _w
 
         # 매칭/미매칭 통합 정렬 → Slot 오름차순, 그 안에서 기준 파일명 오름차순.
         rows_input: list[tuple[str, str, object]] = []
@@ -151,7 +180,8 @@ class ExcelExporter(QThread):
         # 전체 양식(E~H 포함) 시트는 옵션 — 기본 off 면 이미지 임베드를 1회만 하게
         # 요약 시트만 채운다(더 빠르고 가벼운 파일).  켜면 전체 양식도 채운다.
         if self._include_full_template:
-            self._fill_rows(ws, rows_input)
+            # 전체 양식만 E~H(수기 영역)가 있으므로 그 열까지 칠한다.
+            self._fill_rows(ws, rows_input, style_cols="ABCDEFGH")
             # 양식.xlsx 의 A3..A22 미리 박힌 1..20 행번호 중 안 채운 행은 비운다.
             data_end_row = DATA_START_ROW + len(rows_input) - 1
             for r in range(max(data_end_row + 1, DATA_START_ROW), ws.max_row + 1):
@@ -301,26 +331,30 @@ class ExcelExporter(QThread):
 
     # ------------------------------------------------------------------
     def _build_minimal_headers(self, ws) -> None:
-        """양식.xlsx 가 없을 때 사용할 최소 헤더 (양식의 구조를 흉내)."""
+        """양식.xlsx 가 없을 때 쓰는 최소 헤더.
+
+        ★ 양식과 **같은 서식 상수**를 쓴다.  전에는 여기만 노란 헤더로 남아 있어,
+        양식 파일이 빠진 PC 에서만 출력물 생김새가 달라졌다.
+        """
         from openpyxl.styles import Alignment, Font, PatternFill
-        yellow = PatternFill("solid", fgColor="FFFF00")
-        center = Alignment(horizontal="center", vertical="center")
+        center = Alignment(horizontal="center", vertical="center",
+                           wrap_text=True)
         ws["A1"] = "No"
         ws["B1"] = "slot#"
         ws["C1"] = "Scan Defect"
         ws.merge_cells("A1:A2")
         ws.merge_cells("B1:B2")
         ws.merge_cells("C1:D1")
-        for coord in ("A1", "B1", "C1"):
-            c = ws[coord]
-            c.font = Font(bold=True)
-            c.fill = yellow
-            c.alignment = center
+        for col in "ABCD":
+            top = ws[f"{col}1"]
+            top.font = Font(name=TEMPLATE_FONT, bold=True, color="FFFFFFFF")
+            top.fill = PatternFill("solid", fgColor=HEADER_NAVY)
+            top.alignment = center
         # row 2 의 AOI-N 자리는 _do_export 에서 채움.
         for coord in ("C2", "D2"):
             c = ws[coord]
-            c.font = Font(bold=True)
-            c.fill = yellow
+            c.font = Font(name=TEMPLATE_FONT, bold=True, color="FF1F2937")
+            c.fill = PatternFill("solid", fgColor=GROUP_FILLS[coord[0]])
             c.alignment = center
         ws.row_dimensions[1].height = 21.75
         ws.row_dimensions[2].height = 19.5
@@ -376,7 +410,27 @@ class ExcelExporter(QThread):
         except Exception:
             return False
 
-    def _fill_rows(self, ws, rows_input: list[tuple[str, str, object]]) -> None:
+    @staticmethod
+    def _style_data_row(ws, row: int, cols: str, band_index: int) -> None:
+        """데이터 행 한 줄에 그룹 배경 + 얇은 격자를 입힌다.
+
+        ★ **템플릿에 미리 칠해 둔 20행에 기대지 않는다.**  실제 결함은 그보다 훨씬
+        많아서(실측 100건 이상), 21행부터 배경·격자가 끊기면 표가 중간에서 끝난
+        것처럼 보인다.  줄무늬는 시트 행 번호가 아니라 **데이터 순번**을 따라야
+        슬롯이 몇 개든 무늬가 일정하다.
+        """
+        from openpyxl.styles import Border, PatternFill, Side
+
+        side = Side(style="thin", color=BODY_GRID_COLOR)
+        box = Border(left=side, right=side, top=side, bottom=side)
+        for col in cols:
+            cell = ws[f"{col}{row}"]
+            cell.fill = PatternFill("solid",
+                                    fgColor=BODY_FILLS[col][band_index % 2])
+            cell.border = box
+
+    def _fill_rows(self, ws, rows_input: list[tuple[str, str, object]],
+                   *, style_cols: str = "ABCD") -> None:
         from openpyxl.comments import Comment
         from openpyxl.styles import Alignment, Border, Font, Side
 
@@ -401,6 +455,10 @@ class ExcelExporter(QThread):
             cur_h = ws.row_dimensions[row].height
             if not cur_h or cur_h < template_row_h:
                 ws.row_dimensions[row].height = template_row_h
+
+            # 배경·격자를 **먼저** 입힌다 — 아래 슬롯 구분선(굵은 top)이 이 위에
+            # 덧그려져야 살아남는다(순서를 바꾸면 구분선이 지워진다).
+            self._style_data_row(ws, row, style_cols, idx - 1)
 
             # 슬롯 변경 시 A~H 전 열에 top border 적용 (기존 좌/우/하 보존).
             if prev_slot is not None and cur_slot != prev_slot:
