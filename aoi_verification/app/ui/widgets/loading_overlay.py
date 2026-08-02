@@ -153,8 +153,12 @@ class LoadingOverlay(QWidget):
     RISE_OUT_PX = 12                       # 퇴장: 살짝만 내려가며 사라진다
     # 불투명도는 짧게(빠르게 나타난다) · 위치는 길게(끝에서 감속하며 안착한다).
     # 두 값이 같으면 '안착'이 페이드에 흡수돼 사용자가 요청한 두 속도가 사라진다.
-    FADE_IN_MS = 180
-    RISE_IN_MS = 300
+    # ★ 등장 전체 길이 = RISE_IN_MS.  사용자가 **실측 500ms 로 지정**했으므로
+    #   `motion.DUR_LOADING` 을 그대로 쓰고 `motion.dur()` 스케일을 태우지 않는다
+    #   (0.8 을 곱하면 지정값 500 이 400 으로 나가 '정한 값'과 어긋난다).
+    #   페이드는 옛 비율(180/300 = 0.6)을 유지해 두 속도가 그대로 살아 있게 한다.
+    RISE_IN_MS = motion.DUR_LOADING              # 500
+    FADE_IN_MS = int(RISE_IN_MS * 0.6)           # 300
     FADE_OUT_MS = 140
     PANEL_W = 424                          # 메시지 길이로 패널 폭이 뛰지 않게 고정
     # 결정형 바의 부드러운 채움 지속시간 **이자** '촘촘한 갱신' 판정 기준.
@@ -396,12 +400,12 @@ class LoadingOverlay(QWidget):
             self._on_rise(0.0)
             self._fade_anim.setStartValue(0.0)
             self._fade_anim.setEndValue(1.0)
-            self._fade_anim.setDuration(motion.dur(self.FADE_IN_MS))
+            self._fade_anim.setDuration(self.FADE_IN_MS)
             self._fade_anim.start()
             # 위치는 더 길게 — 페이드가 끝난 뒤에도 남은 거리를 감속하며 좁힌다.
             self._rise_anim.setStartValue(0.0)
             self._rise_anim.setEndValue(1.0)
-            self._rise_anim.setDuration(motion.dur(self.RISE_IN_MS))
+            self._rise_anim.setDuration(self.RISE_IN_MS)
             self._rise_anim.setEasingCurve(QEasingCurve.Type.OutQuad)
             self._rise_anim.start()
             self._stagger_bar()

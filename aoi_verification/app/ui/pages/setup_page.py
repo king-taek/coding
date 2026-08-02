@@ -101,6 +101,9 @@ class SetupPage(QWidget):
             "QScrollArea > QWidget#qt_scrollarea_viewport { background: transparent; }"
         )
         outer.addWidget(scroll)
+        # 색 모드 전환은 이 페이지를 **버리고 다시 만든다** — 스크롤 위치를 옮겨 심으려면
+        # 스크롤 영역을 붙잡고 있어야 한다(`capture_draft`/`restore_draft`).
+        self._scroll = scroll
 
         host = QWidget()
         host.setSizePolicy(QSizePolicy.Policy.Expanding,
@@ -354,7 +357,14 @@ class SetupPage(QWidget):
     # 101단계 슬라이더를 1200px 에 펼치면 단계당 12px — 넓을수록 정밀해지지 않는다.
     _SLIDER_MAX_W = 320
     _SLIDER_MIN_W = 200      # 101단계를 74px 에 펼치면 조절이 불가능하다(실측)
-    _PATH_MIN_W = 240        # 폴더 이름이 읽히는 하한
+    # 폴더 이름이 읽히는 하한.  ★ 이건 **가독성 하한**이지 배치 상수가 아니다 —
+    #   칸이 넓으면 입력란이 알아서 늘어난다(grid 의 열 stretch).  그런데 이 값이
+    #   기준/검증 카드의 `minimumSizeHint` 를 통해 페이지 전체의 최소 폭을 결정해서,
+    #   240 으로 두면 **1024px 창에서 6px 가 넘쳤다**(동봉 폰트 NanumSquare 로 바꾼 뒤
+    #   라벨·[폴더 선택…] 버튼이 조금씩 넓어진 결과).  하한을 낮춰 여유를 준다 —
+    #   실측: 224 일 때 1024px 에서 26px 여유(회귀 가드
+    #   `test_setting_cards_layout.py::test_no_horizontal_scroll_at_any_width`).
+    _PATH_MIN_W = 224
 
     def _build_device_row(self) -> QWidget:
         """기준/검증 장비 폴더·호기 — 넓으면 2열, 좁으면 세로로 쌓는다."""
@@ -1157,6 +1167,9 @@ class SetupPage(QWidget):
             "subset_label": subset_btn.text() if subset_btn is not None else "",
             "selected_slots": (set(self._selected_slots)
                               if self._selected_slots is not None else None),
+            # 스크롤 위치 — 없으면 어두운 화면을 켤 때마다 화면이 맨 위로 튄다
+            # (보고 있던 자리를 잃는다).
+            "scroll_y": self._scroll.verticalScrollBar().value(),
         }
 
     def restore_draft(self, draft: dict) -> None:
@@ -1181,6 +1194,24 @@ class SetupPage(QWidget):
             self.scope_group.set_current_key(scope)
         self._sync_engine_controls()
         self._validate()
+        self._restore_scroll(int(draft.get("scroll_y", 0) or 0))
+
+    def _restore_scroll(self, y: int) -> None:
+        """스크롤 위치 복원 — **레이아웃이 잡힌 뒤에** 적용한다.
+
+        ★ 지금 바로 넣으면 안 된다: 페이지가 아직 스택에 붙기 전이라 스크롤바
+        범위(maximum)가 0 이고, Qt 가 값을 0 으로 잘라 버려 조용히 맨 위로 간다.
+        ★ ``QTimer.singleShot`` **정적 호출은 쓰지 않는다** — 정적 타이머는 이 위젯의
+        자식이 아니라서, 전환 도중 페이지가 다시 파괴되면 죽은 위젯으로 콜백이
+        들어간다(모듈 관습: `loading_overlay` 주석의 전례).
+        """
+        if y <= 0:
+            return
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.timeout.connect(
+            lambda: self._scroll.verticalScrollBar().setValue(y))
+        timer.start(0)
 
     # ------------------------------------------------------------------
     def apply_state(self, ref_root: str, val_root: str,

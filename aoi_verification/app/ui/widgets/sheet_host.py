@@ -29,12 +29,12 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PyQt6.QtCore import (QEvent, QEventLoop, QPropertyAnimation, QSize, Qt,
-                          QVariantAnimation, pyqtSignal)
+from PyQt6.QtCore import (QEvent, QEventLoop, QPoint, QPropertyAnimation, QSize,
+                          Qt, QVariantAnimation, pyqtSignal)
 from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import (QApplication, QDialog, QGraphicsOpacityEffect,
-                             QHBoxLayout, QLabel, QMessageBox, QVBoxLayout,
-                             QWidget)
+                             QGridLayout, QHBoxLayout, QLabel, QMessageBox,
+                             QSizePolicy, QVBoxLayout, QWidget)
 
 from ... import i18n
 from .. import motion, theme
@@ -81,7 +81,7 @@ class _Scrim(QWidget):
             anim.valueChanged.connect(self._set_fade)
             self._fade_anim = anim
         anim.stop()
-        anim.setDuration(motion.dur(motion.DUR_BASE // 2))
+        anim.setDuration(motion.DUR_SHEET // 2)
         self._set_fade(0.0)
         anim.start()
 
@@ -307,7 +307,7 @@ class SheetHost(QWidget):
         widget.show()
         self._place(root, full_bleed)
         widget.setFocus(Qt.FocusReason.PopupFocusReason)
-        self._fade_in(root)
+        self._enter(root)
         try:
             loop.exec()                      # ★ exec() 과 같은 동기 의미
         finally:
@@ -318,7 +318,13 @@ class SheetHost(QWidget):
                     pass
         return widget.result() if isinstance(widget, QDialog) else 0
 
-    def _fade_in(self, w: QWidget) -> None:
+    # 시트가 아래에서 올라오는 거리.  ★ 불투명도만 바꾸면 '나타났다'는 사실만 전할 뿐
+    # **어디서 왔는지**가 없어 툭 튀어나온 것처럼 읽힌다(사용자 지적).  위치와 불투명도를
+    # 같은 시간·같은 곡선으로 **함께** 움직여야 한 덩어리로 떠오른다.
+    ENTER_RISE_PX = 18
+
+    def _enter(self, w: QWidget) -> None:
+        """시트 등장 — 아래에서 살짝 올라오며 나타난다(불투명도 + 위치)."""
         if not motion.enabled():
             return
         eff = QGraphicsOpacityEffect(w)
@@ -328,10 +334,22 @@ class SheetHost(QWidget):
         anim = QPropertyAnimation(eff, b"opacity", w)
         anim.setStartValue(0.0)
         anim.setEndValue(1.0)
-        anim.setDuration(motion.dur(motion.DUR_BASE))
+        anim.setDuration(motion.DUR_SHEET)
         anim.setEasingCurve(motion.EASE_PRIMARY)
         anim.finished.connect(lambda: w.setGraphicsEffect(None))
         anim.start()
+
+        # ★ `_place` 가 잡아 둔 **최종 위치**가 도착점이다.  창 크기가 바뀌면
+        #   `_cover_parent` 가 다시 `_place` 를 불러 즉시 제자리로 스냅한다(그게 맞다).
+        end = w.pos()
+        start = QPoint(end.x(), end.y() + self.ENTER_RISE_PX)
+        w.move(start)
+        rise = QPropertyAnimation(w, b"pos", w)
+        rise.setStartValue(start)
+        rise.setEndValue(end)
+        rise.setDuration(motion.DUR_SHEET)
+        rise.setEasingCurve(motion.EASE_PRIMARY)
+        rise.start()
 
     def _make_ghost(self, entry: dict) -> Optional[QLabel]:
         """닫기 직전 시트의 **스냅샷**을 호스트 소유 QLabel 로 떠서 돌려준다.
@@ -369,7 +387,7 @@ class SheetHost(QWidget):
         anim = QPropertyAnimation(eff, b"opacity", ghost)
         anim.setStartValue(1.0)
         anim.setEndValue(0.0)
-        anim.setDuration(motion.dur(motion.DUR_BASE // 2))
+        anim.setDuration(motion.DUR_SHEET // 2)   # 퇴장은 입장보다 짧게
         anim.setEasingCurve(motion.EASE_PRIMARY)
 
         def _done() -> None:
@@ -631,11 +649,12 @@ class _ChoiceSheet(QDialog):
     닫거나 Esc 면 ``None`` — 옛 코드의 '그 밖의 버튼 → None' 과 같은 의미다."""
 
     def __init__(self, title: str, text: str, options, *,
-                 default=None, heading: str = "") -> None:
+                 default=None, heading: str = "", tiles: bool = False) -> None:
         super().__init__(None)
         self.setProperty("role", "sheet")
         self.setObjectName("_choiceSheet")
         self._picked = None
+        self._tiles = bool(tiles)
 
         v = QVBoxLayout(self)
         v.setContentsMargins(24, 20, 24, 20)
@@ -660,21 +679,57 @@ class _ChoiceSheet(QDialog):
         body.setMaximumWidth(_MSG_MAX_W)
         v.addWidget(body, 1)
 
+        self._buttons: dict = {}
+        if self._tiles:
+            v.addLayout(self._build_tiles(options))
+        else:
+            v.addLayout(self._build_button_row(options, default))
+        self.setMaximumWidth(_MSG_MAX_W + 48)
+
+    def _build_button_row(self, options, default):
+        """오른쪽 정렬 버튼 줄 — 하나가 주 액션인 질문(설치할까요? 등)."""
         bar = QHBoxLayout()
         bar.setContentsMargins(0, 0, 0, 0)
         bar.setSpacing(8)
         bar.addStretch(1)
-        self._buttons: dict = {}
         for key, label, role in options:
             btn = NeonButton(label, role=role, parent=self)
             btn.clicked.connect(lambda _c=False, k=key: self._pick(k))
             bar.addWidget(btn)
             self._buttons[key] = btn
-        v.addLayout(bar)
         if default in self._buttons:
             self._buttons[default].setDefault(True)
             self._buttons[default].setFocus()
-        self.setMaximumWidth(_MSG_MAX_W + 48)
+        return bar
+
+    def _build_tiles(self, options):
+        """큰 타일 격자 — 선택지가 **서로 대등할 때**.
+
+        ★ 이 모드는 ``role`` 을 무시하고 넷을 **같은 등급**으로 그린다.  KLA 질문이
+        정확히 그런 경우였다: 기준/검증/둘 다/KLA 아님 중 하나만 파란 주 버튼이라
+        "왜 저것만 강조돼 있지?" 로 읽혔다(사용자 지적).  어느 하나가 정답이 아니면
+        어느 하나만 강조해서도 안 된다.
+
+        집안 관습(CLAUDE.md): **클릭 대상은 크고 명확하게** — 타일 전체가 클릭영역이고
+        손가락 커서를 준다.  클릭 즉시 답이 확정된다(고르고 다시 [확인] 을 누르게 하면
+        한 번 물어볼 것을 두 번 묻는 셈이다)."""
+        grid = QGridLayout()
+        grid.setContentsMargins(0, 4, 0, 0)
+        grid.setSpacing(8)
+        cols = 2 if len(options) > 2 else len(options)
+        for i, (key, label, _role) in enumerate(options):
+            btn = NeonButton(label, role="option", parent=self)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setSizePolicy(QSizePolicy.Policy.Expanding,
+                              QSizePolicy.Policy.Fixed)
+            btn.setMinimumHeight(theme.PROFILE.control_h_lg)
+            btn.setAccessibleName(label)
+            btn.clicked.connect(lambda _c=False, k=key: self._pick(k))
+            grid.addWidget(btn, i // cols, i % cols)
+            self._buttons[key] = btn
+        for c in range(cols):
+            grid.setColumnStretch(c, 1)
+        return grid
 
     def _pick(self, key) -> None:
         self._picked = key
@@ -691,7 +746,7 @@ class _ChoiceSheet(QDialog):
 
 
 def choose(parent, title: str, text: str, options, *, default=None,
-           heading: str = ""):
+           heading: str = "", tiles: bool = False):
     """선택지 3~4개 질문 — 고른 ``key``(없으면 ``None``)를 돌려준다.
 
     호스트가 없으면 네이티브 ``QMessageBox`` + ``addButton`` 으로 폴백한다."""
@@ -711,7 +766,8 @@ def choose(parent, title: str, text: str, options, *, default=None,
             if btn is clicked:
                 return key
         return None
-    sheet = _ChoiceSheet(title, text, options, default=default, heading=heading)
+    sheet = _ChoiceSheet(title, text, options, default=default,
+                        heading=heading, tiles=tiles)
     try:
         host.run(sheet, chrome=False)
         return sheet.picked()

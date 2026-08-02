@@ -11,12 +11,24 @@ from typing import Optional
 # is rendered cleanly on every platform (특히 Windows).
 # ---------------------------------------------------------------------------
 class Fonts:
+    """UI 서체.
+
+    ★ 1순위 ``NanumSquare`` 는 **저장소에 동봉**돼 있고(``ui/assets/font/``) 앱이
+    시작할 때 Qt 에 등록한다(``ui/theme.load_app_fonts``).  OS 에 설치돼 있지
+    않아도 모든 PC 에서 같은 글꼴로 보인다 — 뒤의 이름들은 등록이 실패했을 때를
+    위한 폴백일 뿐이다.  이 문자열을 바꾸면 등록하는 파일 목록
+    (``theme._FONT_FILES``)도 함께 맞춰야 한다.
+    """
+
+    #: 동봉 폰트의 패밀리명 — 등록/QSS/QFont 가 모두 이 이름을 본다.
+    FAMILY = "NanumSquare"
+
     TITLE = (
-        '"Pretendard", "Noto Sans KR", "Malgun Gothic", '
+        '"NanumSquare", "Pretendard", "Noto Sans KR", "Malgun Gothic", '
         '"Segoe UI", sans-serif'
     )
     BODY = (
-        '"Pretendard", "Noto Sans KR", "Malgun Gothic", '
+        '"NanumSquare", "Pretendard", "Noto Sans KR", "Malgun Gothic", '
         '"Segoe UI", sans-serif'
     )
     MONO = '"JetBrains Mono", "Consolas", monospace'
