@@ -88,7 +88,7 @@ class _SidePanel(QFrame):
         head = QHBoxLayout()
         ttl = QLabel(title, self)
         ttl.setProperty("role", "subtitle")
-        ttl.setStyleSheet(f"font-weight: 700; color: {theme.INK};")
+        ttl.setProperty("role", "paneTitle")
         head.addWidget(ttl)
         head.addStretch(1)
 
@@ -310,7 +310,7 @@ class SelectPage(QWidget):
         # load_state 에서 1회만 채운다.  슬롯이 많으면 elide + 전체는 툴팁.
         self.lot_counts_label = QLabel("", self)
         self.lot_counts_label.setProperty("role", "muted")
-        self.lot_counts_label.setStyleSheet(f"color: {theme.MUTE}; font-size: 11px;")
+        self.lot_counts_label.setProperty("role", "mutedSmall")
         self.lot_counts_label.setWordWrap(False)
         root.addWidget(self.lot_counts_label)
 
@@ -348,16 +348,14 @@ class SelectPage(QWidget):
         cl = center_card.body()
         center_title = QLabel(i18n.KO.PANEL_CENTER_DECIDE, center_card)
         center_title.setProperty("role", "subtitle")
-        center_title.setStyleSheet(f"font-weight: 700; color: {theme.INK};")
+        center_title.setProperty("role", "paneTitle")
         center_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         cl.addWidget(center_title)
 
         # Slot 명 (파일명은 표시하지 않음) -----------------------------
         self.slot_label = QLabel("", center_card)
         self.slot_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.slot_label.setStyleSheet(
-            f"color: {theme.MUTE}; font-size: 14px; font-weight: 600; padding: 2px;"
-        )
+        self.slot_label.setProperty("role", "slotLabel")
         cl.addWidget(self.slot_label)
 
         # 사진 크기 슬라이더 -------------------------------------------
@@ -390,10 +388,8 @@ class SelectPage(QWidget):
         self._img_scroll.setWidgetResizable(False)
         self._img_scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._img_scroll.setWidget(self.center_img)
-        self._img_scroll.setStyleSheet(
-            f"QScrollArea {{ background: {theme.BG}; border: 1px solid {theme.LINE}; "
-            "border-radius: 8px; }"
-        )
+        # 색은 QSS 가 준다 — 구우면 색 모드 전환 때 이 영역만 옛 색으로 남는다.
+        self._img_scroll.setProperty("role", "imageViewport")
         self._img_scroll.setMinimumHeight(300)
         self._img_scroll.setSizePolicy(QSizePolicy.Policy.Expanding,
                                        QSizePolicy.Policy.Expanding)

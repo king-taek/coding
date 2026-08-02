@@ -11,8 +11,10 @@
   올라간다** — 스크롤할수록 화면을 넓게 쓴다.
 - 스크롤이 없는 화면(선별·매칭·결과)은 루트 맨 위에 놓아 보이는 결과가 같다.
 
-색은 만드는 시점의 ``theme.COLOR_MODE`` 를 따른다.  다크 모드 전환은 페이지를
-통째로 다시 만들므로(``MainWindow._recreate_pages``) 로고도 함께 새로 만들어진다.
+색은 ``theme.COLOR_MODE`` 를 따른다 — 마크가 거의 검정이라 어두운 화면에서는 RGB 를
+반전해 밝게 뒤집는다.  **이건 픽스맵 연산이라 QSS 로 할 수 없다.**  그래서 색 모드가
+바뀌면 :func:`refresh_all` 로 다시 만들어 줘야 한다(``MainWindow._on_appearance_changed``).
+예전엔 페이지를 통째로 다시 만들어서 저절로 해결됐지만, 지금은 그러지 않는다.
 """
 
 from __future__ import annotations
@@ -37,20 +39,42 @@ def build_logo_label(parent: QWidget | None = None) -> QLabel:
     label.setProperty("role", "appLogo")
     label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
+    if not _paint(label):
+        label.hide()
+    return label
+
+
+def _paint(label: QLabel) -> bool:
+    """현재 색 모드에 맞는 로고 픽스맵을 라벨에 넣는다.  실패하면 False."""
     pm = QPixmap(str(paths.logo_path("logo_clear.png")))
     if pm.isNull():
-        label.hide()
-        return label
+        return False
     if theme.COLOR_MODE == "dark":
         img = pm.toImage().convertToFormat(QImage.Format.Format_ARGB32)
         img.invertPixels(QImage.InvertMode.InvertRgb)
         pm = QPixmap.fromImage(img)
-    dpr = _device_pixel_ratio(parent)
+    dpr = _device_pixel_ratio(label.parentWidget() or label)
     pm = pm.scaledToHeight(int(LOGO_H * dpr),
                            Qt.TransformationMode.SmoothTransformation)
     pm.setDevicePixelRatio(dpr)
     label.setPixmap(pm)
-    return label
+    return True
+
+
+def refresh_all(root: QWidget) -> int:
+    """``root`` 아래 모든 로고를 현재 색 모드로 다시 칠한다 — 칠한 개수를 돌려준다.
+
+    ★ 로고는 **픽스맵 반전**이라 QSS 로 못 바꾼다.  색 모드를 바꿀 때 이 함수를
+    부르지 않으면 다크 화면에 어두운 마크가 그대로 남아 안 보인다.
+    """
+    n = 0
+    for label in root.findChildren(QLabel):
+        if label.property("role") != "appLogo":
+            continue
+        if _paint(label):
+            label.show()
+            n += 1
+    return n
 
 
 def _device_pixel_ratio(parent: QWidget | None) -> float:

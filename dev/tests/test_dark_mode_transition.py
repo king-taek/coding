@@ -175,15 +175,18 @@ def test_rapid_toggling_is_ignored_during_transition(qapp, window, motion_on):
     assert w._appearance_busy is False
 
 
-def test_lock_is_released_even_when_recreate_fails(qapp, window, motion_on,
-                                                   monkeypatch):
-    """예외 경로에서도 잠금이 풀린다 — 잠긴 채 남는 것이 원래 버그보다 나쁘다."""
+def test_lock_is_released_even_when_recolor_fails(qapp, window, motion_on,
+                                                  monkeypatch):
+    """예외 경로에서도 잠금이 풀린다 — 잠긴 채 남는 것이 원래 버그보다 나쁘다.
+
+    ※ 옛 이름은 `..._recreate_fails` 였다.  색 전환이 페이지 재생성을 그만두고
+      `_recolor_in_place` 로 바뀌면서 대상이 옮겨졌다."""
     w = window
 
-    def _boom(self, *a, **k):          # 호출부가 apply_qss=… 를 넘긴다
+    def _boom(self, *a, **k):
         raise RuntimeError("의도된 실패")
 
-    monkeypatch.setattr(mw.MainWindow, "_recreate_pages", _boom)
+    monkeypatch.setattr(mw.MainWindow, "_recolor_in_place", _boom)
     _prefs.patch(color_mode="dark")
     with pytest.raises(RuntimeError):
         w._on_appearance_changed()

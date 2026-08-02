@@ -183,13 +183,8 @@ class _PlusTile(QFrame):
         lay.setContentsMargins(6, 6, 6, 6)
         lab = QLabel(i18n.KO.COUNT_PLUS_N_FMT.format(n=n), self)
         lab.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lab.setStyleSheet(
-            f"color: {theme.MUTE};"
-            "font-size: 28px;"
-            "font-weight: 700;"
-            f"border: 2px dashed {theme.LINE2};"
-            "border-radius: 8px;"
-        )
+        # 색은 QSS 가 준다(role="plusTile") — 구우면 색 모드 전환 때 이 타일만 남는다.
+        lab.setProperty("role", "plusTile")
         lab.setMinimumHeight(size)
         lay.addWidget(lab)
 

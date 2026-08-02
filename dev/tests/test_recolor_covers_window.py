@@ -119,32 +119,30 @@ def test_scroll_position_survives_the_transition(styled_qapp, window,
     _spin(styled_qapp, motion.DUR_RECOLOR + 250)
 
     new_bar = w._setup_page._scroll.verticalScrollBar()
-    assert new_bar is not bar, "페이지가 다시 만들어지지 않았다(전제가 깨졌다)"
+    # ★ 전제가 바뀌었다 — 이제 색만 갈아 끼우고 **페이지를 다시 만들지 않는다**
+    #   (`_recolor_in_place`).  그래서 스크롤바는 **같은 객체**이고, 위치는 애초에
+    #   잃을 일이 없다.  옛 방식에서는 페이지를 새로 만든 뒤 draft 로 옮겨 심어야
+    #   했고 그 경로가 깨지면 최상단으로 튀었다.
+    assert new_bar is bar, "페이지가 다시 만들어졌다 — 재생성 없이 색만 바꿔야 한다"
     assert new_bar.value() == pytest.approx(target, abs=2), \
         f"스크롤이 {new_bar.value()} 로 튀었다(원래 {target})"
 
 
-def test_draft_carries_the_scroll_offset(styled_qapp, window):
-    """``capture_draft``/``restore_draft`` 계약 — 복원 경로가 여기 하나뿐이다."""
-    page = window._setup_page
-    bar = page._scroll.verticalScrollBar()
-    if bar.maximum() <= 0:
-        pytest.skip("이 창 크기에서는 셋업 페이지에 스크롤이 없다")
-    bar.setValue(bar.maximum())
-    draft = page.capture_draft()
-    assert draft["scroll_y"] == bar.maximum()
-
-
-def test_restore_uses_a_parented_timer():
+def test_appearance_timer_is_parented():
     """★ 정적 ``QTimer.singleShot`` 은 쓰지 않는다.
 
-    정적 타이머는 페이지의 자식이 아니라, 전환 도중 페이지가 다시 파괴되면 죽은
-    위젯으로 콜백이 들어간다(모듈 관습: 세그폴트 전례)."""
+    정적 타이머는 페이지의 자식이 아니라, 페이지가 파괴되면 죽은 위젯으로 콜백이
+    들어간다(모듈 관습: 세그폴트 전례).  색 전환을 예약하는 타이머가 그 자리다.
+
+    ※ 옛 대상은 `SetupPage._restore_scroll` 이었다.  색 전환이 페이지를 다시 만들지
+      않게 되면서 스크롤을 옮겨 심을 일이 없어져 그 함수가 사라졌고, 같은 규약을
+      지켜야 하는 자리는 `_appearance_timer` 하나가 됐다.
+    """
     from aoi_verification.app.ui.pages import setup_page
 
-    fn = setup_page.SetupPage._restore_scroll
-    # ★ 독스트링을 빼고 **코드만** 본다 — 그 함정을 경고하는 문장이 독스트링에 있어서
-    #   원문 전체를 검사하면 경고문 자체에 걸려 가드가 거짓 실패한다.
-    code = inspect.getsource(fn).replace(fn.__doc__ or "", "")
-    assert "QTimer(self)" in code
-    assert "QTimer.singleShot" not in code
+    code = inspect.getsource(setup_page.SetupPage.__init__)
+    assert "self._appearance_timer = QTimer(self)" in code, "부모 없는 타이머"
+
+    toggle = setup_page.SetupPage._on_dark_mode_toggled
+    body = inspect.getsource(toggle).replace(toggle.__doc__ or "", "")
+    assert "QTimer.singleShot" not in body

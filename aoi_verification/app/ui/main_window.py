@@ -1580,10 +1580,14 @@ class MainWindow(QMainWindow):
             except Exception:
                 self._appearance_busy = False
                 return
-            # ★ 순서: **옛 페이지를 먼저 걷어낸 뒤** 시트를 적용한다.  반대로 하면
-            #   `apply_to_app` 이 곧 파괴할 페이지 5개를 통째로 repolish 한다(낭비).
-            #   실측: 걷어내고 적용하면 합계 137~164ms → 125~142ms.
-            self._recreate_pages(apply_qss=True)
+            # ★ **페이지를 다시 만들지 않는다.**  위젯이 색을 f-string 으로 굽던
+            #   자리를 전부 QSS role 로 옮겨서(style.qss '인라인에서 옮겨 온 규칙'),
+            #   시트를 다시 적용하고 폴리시만 다시 태우면 살아 있는 화면이 새 색을
+            #   입는다.  재생성 124ms 가 통째로 빠진다(실측).
+            #   ※ QSS 로 못 바꾸는 것 둘은 따로 손본다 —
+            #     로고는 **픽스맵 반전**이라 다시 칠해야 하고,
+            #     상태바는 인라인 스타일이라 같은 코드로 다시 칠한다.
+            self._recolor_in_place()
             self._set_appearance_controls_enabled(False)
             motion.crossfade_from(self, snapshot,
                                   on_done=self._end_appearance_transition)
@@ -1592,6 +1596,45 @@ class MainWindow(QMainWindow):
             #   **영구히** 못 바꾼다(원래 버그보다 나쁘다).
             self._end_appearance_transition()
             raise
+
+    def _recolor_in_place(self) -> None:
+        """페이지를 다시 만들지 않고 **살아 있는 화면의 색만** 갈아 끼운다.
+
+        세 가지를 한다:
+        1. ``theme.apply_to_app`` — 새 팔레트로 렌더한 style.qss 를 앱에 적용.
+        2. **폴리시 재적용** — QSS 를 새로 적용해도 Qt 는 이미 polish 된 위젯을
+           자동으로 다시 계산하지 않는 경우가 있다.  트리를 돌며 unpolish/polish 한다.
+        3. QSS 로 **못 바꾸는 것** 두 가지:
+           · 로고는 픽스맵 RGB 반전이라 다시 칠해야 한다(``app_logo.refresh_all``).
+           · 상태바 크레딧은 인라인 스타일이라 같은 코드로 다시 칠한다.
+
+        ★ 3번을 빼먹으면 다크 화면에 어두운 로고가 그대로 남아 안 보인다 — 재생성
+        방식과 픽셀 단위로 비교해 잡아낸 자리다(회귀 가드
+        ``dev/tests/test_recolor_in_place.py``).
+        """
+        from .widgets import app_logo
+
+        app = QApplication.instance()
+        if app is not None:
+            theme.apply_to_app(app)
+        self._repolish_tree(self)
+        app_logo.refresh_all(self)
+        self._apply_statusbar_theme()
+
+    @staticmethod
+    def _repolish_tree(root) -> None:
+        """위젯 트리 전체에 스타일을 다시 태운다(자식까지).
+
+        ``setStyleSheet`` 만으로는 이미 polish 된 위젯의 속성이 갱신되지 않는 경우가
+        있어, 명시적으로 unpolish → polish 한다."""
+        style = root.style()
+        stack = [root]
+        while stack:
+            w = stack.pop()
+            style.unpolish(w)
+            style.polish(w)
+            w.update()
+            stack.extend(c for c in w.children() if isinstance(c, QWidget))
 
     def _set_appearance_controls_enabled(self, on: bool) -> None:
         """색 모드 토글의 활성 상태 — 페이지가 재생성되므로 **새** 위젯에 걸어야 한다."""
@@ -1602,55 +1645,6 @@ class MainWindow(QMainWindow):
     def _end_appearance_transition(self) -> None:
         self._appearance_busy = False
         self._set_appearance_controls_enabled(True)
-
-    def _recreate_pages(self, *, apply_qss: bool = False) -> None:
-        """페이지 5개를 파괴 후 다시 만든다(구운 색을 새 팔레트로 교체).
-
-        ★ '세션 시작 전'은 **아무것도 입력하지 않았다는 뜻이 아니다.**  폴더·호기·진행
-        범위·손으로 고른 슬롯·허용 오차는 [검증 시작] 전까지 prefs 에 없어서, 그냥
-        파괴하면 어두운 화면 토글 한 번에 조용히 사라진다(특히 '일부 슬롯 12/40' 이
-        '모든 슬롯'으로 되돌아가면 40슬롯을 통째로 돌리게 된다).  걷어 두고 다시 심는다.
-
-        ``apply_qss=True`` 면 **옛 페이지를 걷어낸 직후·새 페이지를 만들기 전에**
-        ``theme.apply_to_app`` 을 부른다.  순서가 성능이다: 먼저 적용하면 곧 파괴할
-        페이지 5개를 통째로 repolish 하고(낭비), 나중에 적용하면 새 페이지가 두 번
-        polish 된다.  가운데가 가장 싸다(실측 137~164ms → 125~142ms)."""
-        draft = None
-        try:
-            draft = self._setup_page.capture_draft()
-        except Exception:
-            draft = None
-        # 아직 안 만든 페이지가 있을 수 있다(백엔드 로딩 전에 색 모드를 바꾼 경우).
-        old = tuple(w for w in (self._setup_page, self._select_page,
-                                self._match_page, self._result_page,
-                                self._match_review_page) if w is not None)
-        for w in old:
-            self._stack.removeWidget(w)
-            w.hide()
-            w.setParent(None)
-            w.deleteLater()
-        self._select_page = None
-        self._match_page = None
-        self._result_page = None
-        self._match_review_page = None
-        if apply_qss:
-            app = QApplication.instance()
-            if app is not None:
-                theme.apply_to_app(app)
-        self._build_pages()
-        if draft:
-            try:
-                self._setup_page.restore_draft(draft)
-            except Exception:
-                pass
-        self._apply_statusbar_theme()
-        # 로고는 페이지가 자기 안에 다시 만든다(app_logo.build_logo_label) —
-        # 여기서 따로 손댈 것이 없다.
-        try:
-            self._loading.raise_()           # 오버레이 z-order 유지
-        except Exception:
-            pass
-        self._show_page(self._setup_page, animate=False)
 
     def _apply_statusbar_theme(self) -> None:
         """상태바 라벨 색을 테마 토큰으로 적용(페이지 밖 위젯).

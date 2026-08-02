@@ -163,9 +163,7 @@ class ResultPage(QWidget):
                 self._summary_card,
             )
             hint.setWordWrap(True)
-            hint.setStyleSheet(
-                f"color: {theme.WARN}; font-weight: 700; padding: 4px;"
-            )
+            hint.setProperty("role", "hintWarn")
             self._summary_layout.addWidget(hint)
 
         line(f"기준 장비: {result.ref_machine}    검증 장비: {result.val_machine}")

@@ -111,6 +111,108 @@ QLabel[role="mono"] {
     font-family: $font_mono;
 }
 
+/* ── 색 모드 전환을 위해 인라인 스타일에서 옮겨 온 규칙 ────────────────────
+   ★ 위젯이 `setStyleSheet(f"color: {theme.INK}")` 처럼 색을 **생성 시점에 구우면**
+     색 모드를 바꿔도 그 위젯만 옛 색으로 남는다.  그래서 예전에는 색을 바꿀 때
+     페이지 5개를 통째로 다시 만들어야 했다(실측 124ms).  여기로 옮기면
+     `apply_to_app` 한 번으로 살아 있는 위젯이 전부 새 색을 입는다.
+     새 화면을 만들 때도 인라인 f-string 대신 role 을 붙여라. */
+QLabel[role="paneTitle"] {
+    font-weight: 700;
+    color: $ink;
+}
+
+QLabel[role="slotLabel"] {
+    color: $mute;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 2px;
+}
+
+QLabel[role="slotHead"] {
+    color: $ink;
+    font-weight: 600;
+    font-size: 14px;
+}
+
+/* 모노 + 흐린 색 — QSS 는 role 값을 하나만 갖게 되므로 둘을 합친 역할을 둔다. */
+QLabel[role="monoMuted"] {
+    font-family: $font_mono;
+    color: $mute;
+}
+
+QLabel[role="mutedSmall"] {
+    color: $mute;
+    font-size: 11px;
+}
+
+QLabel[role="mutedArrow"] {
+    color: $mute;
+    font-size: 20px;
+}
+
+QLabel[role="mutedPad"] {
+    color: $mute;
+    padding: 20px;
+}
+
+QLabel[role="bodyText"] {
+    color: $ink;
+    padding-top: 4px;
+}
+
+QLabel[role="statusPass"] {
+    color: $pass;
+    padding: 2px 8px;
+}
+
+QLabel[role="hintWarn"] {
+    color: $warn;
+    font-weight: 700;
+    padding: 4px;
+}
+
+QLabel[role="sectionWarn"] {
+    color: $warn;
+    font-weight: 700;
+    padding: 6px 2px;
+}
+
+QLabel[role="sectionDanger"] {
+    color: $danger;
+    font-weight: 700;
+    padding: 6px 2px;
+}
+
+/* 사진 뷰포트 — 가운데 큰 이미지 영역 */
+QScrollArea[role="imageViewport"] {
+    background: $bg;
+    border: 1px solid $line;
+    border-radius: $radius;
+}
+
+/* 사진이 놓이는 판 — 뷰포트 안의 이미지 자리(widgets/scalable_image.py) */
+QLabel[role="imagePlate"] {
+    background: $bg;
+    border: 1px solid $line;
+    border-radius: $radius;
+}
+
+/* 썸네일 격자의 '+N' 타일 — 점선으로 '더 있다'를 말한다 */
+QLabel[role="plusTile"] {
+    color: $mute;
+    font-size: 28px;
+    font-weight: 700;
+    border: 2px dashed $line2;
+    border-radius: $radius;
+}
+
+/* 얇은 구분선(QFrame 을 1px 로 눕혀 쓰는 자리) */
+QFrame[role="hrule"] {
+    background: $line;
+    border: none;
+}
+
 /* ── 판정 칩 (매치 검토 A2) ──────────────────────────────────────────── */
 QLabel[chip="ok"] {
     color: $pass;

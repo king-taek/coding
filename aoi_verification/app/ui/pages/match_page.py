@@ -181,9 +181,7 @@ class MatchPage(QWidget):
         # 백그라운드 사전 계산 상태 — 수동 모드에서만 표시. 매칭 화면이 이미
         # 열려 있는 동안에도 ‘나머지 슬롯이 X / Y 완료’ 임을 알려준다.
         self.bg_status_label = QLabel("", self)
-        self.bg_status_label.setStyleSheet(
-            f"color: {theme.PASS}; padding: 2px 8px;"
-        )
+        self.bg_status_label.setProperty("role", "statusPass")
         top.addWidget(self.bg_status_label)
         root.addLayout(top)
 
@@ -197,16 +195,14 @@ class MatchPage(QWidget):
         cl = center.body()
         title = QLabel(i18n.KO.PANEL_MATCH_REF, center)
         title.setProperty("role", "subtitle")
-        title.setStyleSheet(f"font-weight:700; color:{theme.INK};")
+        title.setProperty("role", "paneTitle")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         cl.addWidget(title)
 
         # Slot 명만 표시 (파일명 미표시) -------------------------------
         self.slot_label = QLabel("", center)
         self.slot_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.slot_label.setStyleSheet(
-            f"color: {theme.MUTE}; font-size: 14px; font-weight: 600; padding: 2px;"
-        )
+        self.slot_label.setProperty("role", "slotLabel")
         cl.addWidget(self.slot_label)
 
         # 사진 크기 슬라이더 -------------------------------------------
@@ -238,10 +234,8 @@ class MatchPage(QWidget):
         self._img_scroll.setWidgetResizable(False)
         self._img_scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._img_scroll.setWidget(self.center_img)
-        self._img_scroll.setStyleSheet(
-            f"QScrollArea {{ background: {theme.BG}; border: 1px solid {theme.LINE}; "
-            "border-radius: 8px; }"
-        )
+        # 색은 QSS 가 준다 — 구우면 색 모드 전환 때 이 영역만 옛 색으로 남는다.
+        self._img_scroll.setProperty("role", "imageViewport")
         self._img_scroll.setMinimumHeight(300)
         self._img_scroll.setSizePolicy(QSizePolicy.Policy.Expanding,
                                        QSizePolicy.Policy.Expanding)
@@ -276,7 +270,7 @@ class MatchPage(QWidget):
         rl.setSpacing(8)
         rt = QLabel(i18n.KO.PANEL_MATCH_CANDIDATES, right)
         rt.setProperty("role", "subtitle")
-        rt.setStyleSheet(f"font-weight:700; color:{theme.INK};")
+        rt.setProperty("role", "paneTitle")
         rl.addWidget(rt)
 
         # 후보 패널 내부 스택: page 0 = 썸네일 그리드, page 1 = 확대 보기
@@ -1280,9 +1274,7 @@ class MatchPage(QWidget):
                 hdr = QLabel(
                     i18n.KO.SKIPPED_SECTION_DEFER_FMT.format(n=n), host,
                 )
-                hdr.setStyleSheet(
-                    f"color: {theme.WARN}; font-weight: 700; padding: 6px 2px;"
-                )
+                hdr.setProperty("role", "sectionWarn")
                 hl.addWidget(hdr)
                 for slot in defer_slots:
                     sec = SlotSection(slot, columns=4, select_mode=False,
@@ -1297,9 +1289,7 @@ class MatchPage(QWidget):
                 hdr = QLabel(
                     i18n.KO.SKIPPED_SECTION_NO_MATCH_FMT.format(n=n), host,
                 )
-                hdr.setStyleSheet(
-                    f"color: {theme.DANGER}; font-weight: 700; padding: 6px 2px;"
-                )
+                hdr.setProperty("role", "sectionDanger")
                 hl.addWidget(hdr)
                 for slot in none_slots:
                     sec = SlotSection(slot, columns=4, select_mode=False,

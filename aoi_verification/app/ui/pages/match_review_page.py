@@ -286,9 +286,7 @@ class _MatchRow(QFrame):
         slot_lay.addStretch(1)             # 라벨+링크를 세로 중앙에 — 우측 점수와
         self._slot_label = QLabel(match.slot, slot_host)
         # 슬롯 라벨은 행 ID(보조) — 최중량은 결정값(점수)이 전담(C4 위계).
-        self._slot_label.setStyleSheet(
-            f"color: {theme.INK}; font-weight: 600; font-size: 14px;"
-        )
+        self._slot_label.setProperty("role", "slotHead")
         slot_lay.addWidget(self._slot_label)
         # ★ 조용한 **테두리 버튼**이다(옛 결정: 링크형 — 반복 8행에 테두리가 쌓이지
         #   않게).  결정을 바꾼 근거: 사진 더블클릭 확대를 없앤 뒤로 이것이 좌우 비교
@@ -316,7 +314,7 @@ class _MatchRow(QFrame):
         #   흔들리고, 상단 헤더는 그 값을 알 방법이 없어 '기준/검증' 라벨 정렬이 어긋난다.
         #   행과 헤더가 같은 `_ARROW_W` 를 쓰게 해 정렬이 우연이 아니게 한다.
         arrow = QLabel("→", self)
-        arrow.setStyleSheet(f"color: {theme.MUTE}; font-size: 20px;")
+        arrow.setProperty("role", "mutedArrow")
         arrow.setAlignment(Qt.AlignmentFlag.AlignCenter)
         arrow.setFixedWidth(_ARROW_W)
         top.addWidget(arrow)
@@ -816,7 +814,7 @@ class MatchReviewPage(QWidget):
         #   '무엇을 확인해야 하는지'를 말한다.  행을 숨기는 필터는 그 위에 상태를 하나
         #   더 얹고, '지금 보이는 게 전부인가'를 매번 되묻게 만들었다.
         size_label = QLabel(i18n.KO.IMAGE_SIZE_LABEL, self)
-        size_label.setStyleSheet(f"color: {theme.MUTE};")
+        size_label.setProperty("role", "muted")
         bar.addWidget(size_label)
         # 마우스 휠로는 조절 불가 (NoWheelSlider).
         self.size_slider = NoWheelSlider(Qt.Orientation.Horizontal, self)
@@ -828,8 +826,7 @@ class MatchReviewPage(QWidget):
         self.size_slider.valueChanged.connect(self._on_size_changed)
         bar.addWidget(self.size_slider)
         self.size_value = QLabel(f"{self._thumb_px} px", self)
-        self.size_value.setProperty("role", "mono")
-        self.size_value.setStyleSheet(f"color: {theme.MUTE};")
+        self.size_value.setProperty("role", "monoMuted")
         self.size_value.setFixedWidth(56)
         bar.addWidget(self.size_value)
         # [검토 완료] — 하단에서 상단 바로 이동 (동작 동일, 유지 카운트 표시).
@@ -993,7 +990,7 @@ class MatchReviewPage(QWidget):
 
         if not self._matches:
             empty = QLabel(i18n.KO.REVIEW_EMPTY_HINT)
-            empty.setStyleSheet(f"color: {theme.MUTE}; padding: 20px;")
+            empty.setProperty("role", "mutedPad")
             self._list_layout.addWidget(empty)
         else:
             if self._coord_mode:

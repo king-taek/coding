@@ -155,7 +155,7 @@ def test_switch_is_guarded_to_pre_session():
     from aoi_verification.app.ui import main_window as mw
     src = inspect.getsource(mw.MainWindow._on_appearance_changed)
     assert "PHASE_NONE" in src
-    assert "_recreate_pages" in inspect.getsource(mw.MainWindow)
+    assert "_recolor_in_place" in inspect.getsource(mw.MainWindow)
 
 
 def test_no_design_variant_machinery_resurrected():

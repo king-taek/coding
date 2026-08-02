@@ -101,8 +101,8 @@ class SetupPage(QWidget):
             "QScrollArea > QWidget#qt_scrollarea_viewport { background: transparent; }"
         )
         outer.addWidget(scroll)
-        # 색 모드 전환은 이 페이지를 **버리고 다시 만든다** — 스크롤 위치를 옮겨 심으려면
-        # 스크롤 영역을 붙잡고 있어야 한다(`capture_draft`/`restore_draft`).
+        # 색 모드 전환은 이제 이 페이지를 **버리지 않는다**(`main_window._recolor_in_place`).
+        # 스크롤 위치·입력값이 저절로 남으므로 옮겨 심는 코드가 필요 없다.
         self._scroll = scroll
 
         host = QWidget()
@@ -132,7 +132,7 @@ class SetupPage(QWidget):
                                    theme.PROFILE.page_margin, 16)
             rule = QWidget(self)
             rule.setFixedHeight(1)
-            rule.setStyleSheet(f"background: {theme.LINE};")
+            rule.setProperty("role", "hrule")
             outer.addWidget(rule)
             outer.addWidget(bar)
 
@@ -342,9 +342,7 @@ class SetupPage(QWidget):
         howto_card.body().addWidget(howto_title)
         howto_body = QLabel(i18n.KO.SETUP_HOW_TO_USE_BODY, howto_card)
         howto_body.setWordWrap(True)
-        howto_body.setStyleSheet(
-            f"color: {theme.INK}; line-height: 160%; padding-top: 4px;"
-        )
+        howto_body.setProperty("role", "bodyText")
         howto_card.body().addWidget(howto_body)
         self._howto_section.add_content_widget(howto_card)
         self._howto_section.toggled.connect(
@@ -1150,66 +1148,6 @@ class SetupPage(QWidget):
     # 슬롯·허용 오차는 [검증 시작] 전까지 prefs 에 없다.  그대로 파괴하면 조용히 사라지고,
     # 특히 '일부 슬롯 12/40' 이 '모든 슬롯'으로 되돌아가면 40슬롯을 통째로 돌리게 된다.
     # 그래서 재생성 전에 여기서 걷어 두고, 새 페이지에 다시 심는다.
-    def capture_draft(self) -> dict:
-        """재생성을 넘어 살려야 하는 입력값."""
-        scope = self.scope_group.current_key()
-        subset_btn = self.scope_group.button("subset")
-        return {
-            "ref_root": self.ref_path_edit.text(),
-            "val_root": self.val_path_edit.text(),
-            "ref_machine": self.ref_machine_edit.text(),
-            "val_machine": self.val_machine_edit.text(),
-            "coord_tolerance": float(self.coord_tol_spin.value()),
-            "scope": scope,
-            "subset_label": subset_btn.text() if subset_btn is not None else "",
-            "selected_slots": (set(self._selected_slots)
-                              if self._selected_slots is not None else None),
-            # 스크롤 위치 — 없으면 어두운 화면을 켤 때마다 화면이 맨 위로 튄다
-            # (보고 있던 자리를 잃는다).
-            "scroll_y": self._scroll.verticalScrollBar().value(),
-        }
-
-    def restore_draft(self, draft: dict) -> None:
-        """``capture_draft`` 로 걷은 값을 되돌린다(시그널 없이 — 저장 루프 방지)."""
-        if not draft:
-            return
-        self.ref_path_edit.setText(draft.get("ref_root", "") or "")
-        self.val_path_edit.setText(draft.get("val_root", "") or "")
-        self.ref_machine_edit.setText(draft.get("ref_machine", "") or "")
-        self.val_machine_edit.setText(draft.get("val_machine", "") or "")
-        tol = draft.get("coord_tolerance")
-        if tol:
-            self.coord_tol_spin.setValue(float(tol))
-        slots = draft.get("selected_slots")
-        self._selected_slots = set(slots) if slots else None
-        label = draft.get("subset_label") or ""
-        if label:
-            self.scope_group.set_option_label("subset", label)
-        scope = draft.get("scope") or "all"
-        if scope in self.scope_group.keys():
-            # ★ emit=False — 'subset' 을 emit 하면 슬롯 선택 다이얼로그가 다시 뜬다.
-            self.scope_group.set_current_key(scope)
-        self._sync_engine_controls()
-        self._validate()
-        self._restore_scroll(int(draft.get("scroll_y", 0) or 0))
-
-    def _restore_scroll(self, y: int) -> None:
-        """스크롤 위치 복원 — **레이아웃이 잡힌 뒤에** 적용한다.
-
-        ★ 지금 바로 넣으면 안 된다: 페이지가 아직 스택에 붙기 전이라 스크롤바
-        범위(maximum)가 0 이고, Qt 가 값을 0 으로 잘라 버려 조용히 맨 위로 간다.
-        ★ ``QTimer.singleShot`` **정적 호출은 쓰지 않는다** — 정적 타이머는 이 위젯의
-        자식이 아니라서, 전환 도중 페이지가 다시 파괴되면 죽은 위젯으로 콜백이
-        들어간다(모듈 관습: `loading_overlay` 주석의 전례).
-        """
-        if y <= 0:
-            return
-        timer = QTimer(self)
-        timer.setSingleShot(True)
-        timer.timeout.connect(
-            lambda: self._scroll.verticalScrollBar().setValue(y))
-        timer.start(0)
-
     # ------------------------------------------------------------------
     def apply_state(self, ref_root: str, val_root: str,
                     ref_machine: str, val_machine: str,
