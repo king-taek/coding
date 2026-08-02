@@ -41,10 +41,13 @@ def test_builder_seam_exists():
     src = inspect.getsource(sp.SetupPage)
     for name in ("_build_body", "_build_title", "_build_view_options",
                  "_build_howto", "_build_run_options_card", "_build_device_row",
-                 "_build_engine_card", "_build_action_bar", "_build_credit"):
+                 "_build_engine_card", "_build_action_bar"):
         assert f"def {name}" in src, f"{name} 빌더 누락"
     # 합쳐진 두 빌더는 되살아나지 말아야 한다(같은 선택을 두 카드가 다시 나누지 않게).
-    for gone in ("_build_automation_card", "_build_scope_row"):
+    # `_build_credit` 도 마찬가지다 — 크레딧의 단일 출처는 상태바
+    # (`main_window._credit_label`) 이고, 페이지가 다시 넣으면 한 화면에 두 번 보인다
+    # (실측 버그 → `test_credit_not_duplicated.py`).
+    for gone in ("_build_automation_card", "_build_scope_row", "_build_credit"):
         assert f"def {gone}" not in src, f"{gone} 부활 — 카드가 다시 갈라졌다"
 
 

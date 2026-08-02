@@ -176,7 +176,9 @@ class SetupPage(QWidget):
         root.addStretch(1)
         if not self._pinned_action_bar():
             root.addWidget(self._build_action_bar())
-        root.addWidget(self._build_credit())
+        # ★ 크레딧을 여기에 두지 않는다 — `main_window` 의 **상태바**가 모든 화면에
+        #   공통으로 띄운다(`main_window._credit_label`).  둘 다 두면 한 화면에
+        #   'Developed by …' 가 두 번 보인다(실측: 가운데 + 좌하단).
 
     # ------------------------------------------------------------------
     # 설정 카드 배치 — 두 카드를 나란히(넓을 때) / 위아래로(좁을 때)
@@ -755,13 +757,6 @@ class SetupPage(QWidget):
         bar.addWidget(self.start_btn)
         self._validate()                      # 초기 상태(폴더 미지정) 반영
         return host
-
-    def _build_credit(self) -> QWidget:
-        """개발자 크레딧 (메인 화면)."""
-        credit = QLabel(i18n.KO.CREDIT, self)
-        credit.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        credit.setStyleSheet(f"color: {theme.MUTE}; padding-top: 10px;")
-        return credit
 
     # ------------------------------------------------------------------
     def _make_machine_group(self, title: str) -> tuple[QWidget, QLineEdit, QLineEdit]:
