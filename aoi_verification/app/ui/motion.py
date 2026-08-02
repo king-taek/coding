@@ -141,6 +141,39 @@ def dur(ms: int) -> int:
     return max(1, int(ms * scale))
 
 
+def snapshot(widget):
+    """위젯을 **테마 배경 위에** 찍는다 — 전환 스냅샷 전용.
+
+    ★ ``QWidget.grab()`` 을 그냥 쓰면 안 된다.  페이지는 자기 배경을 칠하지 않고
+    (투명) **창이 뒤에서** 칠해 준다.  그래서 페이지만 떼어 grab 하면 빈 자리가
+    Qt 기본 팔레트 Window 색 — 테마와 무관한 **밝은 회색 `#efefef`** — 으로 채워진다.
+
+    다크 모드에서 그 스냅샷을 페이드인하면 '밝은 화면이 먼저 보였다가 어두워지는'
+    것으로 보인다.  실측(다크, SelectPage 진입):
+
+    | 방식 | 평균 밝기 |
+    |---|---|
+    | `w.grab()` (옛 방식) | 85.7 |
+    | `stack.grab()` · `WA_StyledBackground` · repolish | 85.7 (전부 그대로) |
+    | **`theme.BG` 로 채우고 `DrawChildren` 렌더** | **30.4** |
+    | 실제 라이브 화면 | 30.4 |
+
+    배경을 먼저 칠하고 ``DrawWindowBackground`` **없이** 자식만 렌더해야 한다 —
+    그 플래그를 주면 Qt 가 다시 기본 팔레트로 덮어쓴다.
+    """
+    from PyQt6.QtCore import QPoint
+    from PyQt6.QtGui import QColor, QPixmap, QRegion
+    from PyQt6.QtWidgets import QWidget
+
+    dpr = widget.devicePixelRatioF() or 1.0
+    pm = QPixmap(max(1, int(widget.width() * dpr)),
+                 max(1, int(widget.height() * dpr)))
+    pm.setDevicePixelRatio(dpr)
+    pm.fill(QColor(theme.BG))
+    widget.render(pm, QPoint(), QRegion(), QWidget.RenderFlag.DrawChildren)
+    return pm
+
+
 def transition_in(container, new_pixmap, *, forward: bool = True,
                   duration: int = DUR_BASE, slide_px: int = 20,
                   on_commit=None) -> None:

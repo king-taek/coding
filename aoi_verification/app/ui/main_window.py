@@ -1686,7 +1686,11 @@ class MainWindow(QMainWindow):
             return
         forward = self._page_order(w) >= self._page_order(old)
         self._stack.setCurrentWidget(w)        # 레이아웃 확정 후 스냅샷
-        new_pix = w.grab()
+        # ★ `w.grab()` 을 쓰지 마라 — 페이지는 배경을 안 칠하고 창이 뒤에서 칠하므로,
+        #   떼어 찍으면 빈 자리가 Qt 기본 팔레트(#efefef, 밝은 회색)로 채워진다.
+        #   다크 모드에서 '밝은 화면이 먼저 보였다가 어두워지는' 원인이었다
+        #   (실측 밝기 85.7 vs 실제 30.4).  자세한 근거는 `motion.snapshot`.
+        new_pix = motion.snapshot(w)
         self._stack.setCurrentWidget(old)      # 리페인트 전 원복(사용자엔 불가시)
         motion.transition_in(
             self._stack, new_pix, forward=forward,

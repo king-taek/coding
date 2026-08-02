@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (QBoxLayout, QDoubleSpinBox, QFileDialog,
                               QToolButton, QVBoxLayout, QWidget)
 
 from ... import i18n
-from .. import motion, theme
+from .. import theme
 from ...utils import prefs as _prefs
 from ...utils.prefs import AutomationLevel, EngineMode
 from ..widgets.app_logo import build_logo_label
@@ -1030,22 +1030,24 @@ class SetupPage(QWidget):
     def _on_dark_mode_toggled(self, on: bool) -> None:
         """다크 모드 전환 요청 — 실제 적용(페이지 재생성)은 main_window 가 한다.
 
-        ★ **여기서 바로 emit 하지 않는다.**  emit 하면 같은 슬롯 안에서 main_window 가
-        시트 재적용 + 페이지 5개 재생성을 **동기로** 돌아 메인 스레드가 ~140ms 멈춘다
-        (실측: apply_to_app 55~80 + 재생성 45~85).  그 사이 방금 시작한 손잡이 이동
-        애니메이션(DUR_SWITCH)도 얼어붙어 **누른 순간 아무 일도 안 일어난 것처럼** 보였다
-        (사용자 보고: "누르자마자 전환이 시작되어야 하는데 반응시간이 느림").
+        ★ **지연 0** — 누르는 즉시 색 전환이 시작된다(사용자 지정).
+        전에는 손잡이 이동(DUR_SWITCH=160ms)이 끝난 **뒤에** 무거운 일을 시작했다.
+        메인 스레드가 그 일 동안 멈추므로(실측 223ms: apply_to_app 99 + 페이지
+        재생성 124) 손잡이 애니메이션이 얼어붙는 것을 피하려던 것이었는데, 결과적으로
+        **누르고 색이 움직이기까지 160+223 = 383ms** 가 걸렸다 — 그게 '선딜레이' 다.
+        이제 160ms 를 없애 ~223ms 로 줄인다.  남은 것은 계산 시간이라 타이머로는
+        더 줄일 수 없다(줄이려면 위젯이 색을 f-string 으로 굽는 구조를 바꿔야 한다).
 
-        손잡이가 다 움직인 **뒤에** 무거운 일을 시작한다 → 누름은 즉시 확인되고, 정지
-        구간은 두 모션(손잡이 → 색 크로스페이드) 사이에 숨는다.  연타는 타이머가 재시작
-        되며 **합쳐지므로**(prefs 는 마지막 값, emit 은 한 번) 상태가 어긋나지 않는다.
+        ★ 타이머 자체는 **남긴다.**  두 가지를 계속 해 준다:
+        (a) 연타를 **한 번으로 합친다**(prefs 는 마지막 값, emit 은 한 번),
+        (b) 클릭 핸들러가 **먼저 반환**되게 해 눌린 상태가 화면에 반영된다.
         ★ 정적 `QTimer.singleShot` 금지 — 부모 있는 타이머여야 페이지가 파괴될 때 함께
         죽는다(죽은 위젯으로 콜백이 들어가면 세그폴트다, 전례 있음).
         """
         key = "dark" if on else "light"
         self._pending_color_mode = key
         _prefs.patch(color_mode=key)       # 재생성된 페이지가 prefs 에서 상태를 복원한다
-        self._appearance_timer.start(max(1, motion.dur(motion.DUR_SWITCH)))
+        self._appearance_timer.start(0)    # 지연 없음 — 이벤트 루프 한 바퀴만
 
     def _emit_appearance_changed(self) -> None:
         """손잡이 이동이 끝났다 — 이제 색을 갈아 끼운다(연타는 여기서 한 번으로 합쳐진다)."""
