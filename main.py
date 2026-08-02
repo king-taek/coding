@@ -41,6 +41,25 @@ def _apply_app_icon(app) -> None:
             pass
 
 
+def _apply_app_font(app) -> None:
+    """동봉 폰트를 등록하고 앱 기본 서체로 지정한다.
+
+    ★ 스타일시트를 적용하기 **전에** 불러야 한다 — QSS 의 ``font-family`` 가
+    가리키는 패밀리가 그 시점에 등록돼 있어야 폴백으로 새지 않는다.
+    ★ ``QFont("A, B, C")`` 처럼 쉼표 문자열을 넘기지 마라.  Qt6 에서 그것은
+    **'A, B, C' 라는 이름의 패밀리 하나**를 찾는 뜻이라 폴백이 동작하지 않는다.
+    목록은 ``setFamilies`` 로 준다."""
+    from PyQt6.QtGui import QFont
+    from aoi_verification.app import config
+    from aoi_verification.app.ui import theme
+
+    theme.load_app_fonts()
+    font = QFont()
+    font.setFamilies([config.Fonts.FAMILY, "Pretendard", "Noto Sans KR",
+                      "Malgun Gothic", "Segoe UI"])
+    app.setFont(font)
+
+
 def _load_stylesheet(app) -> None:
     from aoi_verification.app.utils import paths, prefs as _prefs
     from aoi_verification.app.ui import theme
@@ -190,7 +209,7 @@ def main() -> int:
         return 4
 
     from PyQt6.QtCore import Qt
-    from PyQt6.QtGui import QFont, QGuiApplication
+    from PyQt6.QtGui import QGuiApplication
     from PyQt6.QtWidgets import QApplication
 
     # High-DPI 모니터에서 흐릿함 방지. QApplication 생성 전에 적용해야 한다.
@@ -221,8 +240,8 @@ def main() -> int:
         app = QApplication(sys.argv)
         created_here = True
 
-    # 기본 폰트 — 한글 폴백 우선
-    app.setFont(QFont("Pretendard, Noto Sans KR, Malgun Gothic, Segoe UI"))
+    # 기본 폰트 — 동봉 NanumSquare 등록 후 지정(스타일시트보다 먼저).
+    _apply_app_font(app)
     _apply_app_icon(app)
     _load_stylesheet(app)
 

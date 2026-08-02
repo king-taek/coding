@@ -180,6 +180,40 @@ FONT_BODY = Fonts.BODY
 FONT_TITLE = Fonts.TITLE
 FONT_MONO = Fonts.MONO
 
+# 저장소에 동봉된 폰트 파일 — Regular/Bold **두 굵기**를 등록한다.
+# ★ 굵기를 하나만 등록하면 Qt 가 굵은 글씨를 **합성**한다(획을 부풀린다).  한글에서
+#   합성 볼드는 획이 뭉개져 특히 나쁘다 — 진짜 Bold 파일을 함께 준다.
+# ★ TTF 를 쓴다(같은 폴더에 OTF 도 있다).  Windows 의 힌팅이 TTF 에서 더 잘 들어
+#   작은 UI 크기에서 획이 또렷하다.
+_FONT_FILES = ("NanumSquareR.ttf", "NanumSquareB.ttf")
+
+
+def load_app_fonts() -> list[str]:
+    """동봉 폰트를 Qt 에 등록하고 **실제 등록된 패밀리 목록**을 돌려준다.
+
+    ★ 왜 필요한가: ``config.Fonts`` 가 이름만 적어 두면 그 폰트가 **OS 에 설치된
+    PC 에서만** 그 글꼴로 보인다.  사내 PC 마다 설치 상태가 달라 같은 화면이 다르게
+    보이는 것을 막으려면 앱이 직접 등록해야 한다.
+
+    QApplication 이 만들어진 **뒤**, 스타일시트를 적용하기 **전**에 부른다.
+    실패는 삼킨다 — 폰트가 없다고 앱이 안 뜨면 안 된다(폴백 서체로 돌아간다).
+    """
+    from PyQt6.QtGui import QFontDatabase
+    from ..utils import paths
+
+    families: list[str] = []
+    for name in _FONT_FILES:
+        try:
+            path = paths.resource_path(
+                f"aoi_verification/app/ui/assets/font/{name}")
+            fid = QFontDatabase.addApplicationFont(str(path))
+            if fid < 0:
+                continue
+            families.extend(QFontDatabase.applicationFontFamilies(fid))
+        except Exception:
+            continue
+    return families
+
 PROFILE = Profile()
 
 # 인라인 f-string 스타일이 쓰는 색 상수 — set_color_mode() 가 일괄 갱신한다.

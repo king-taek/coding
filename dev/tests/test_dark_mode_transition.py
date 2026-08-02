@@ -73,8 +73,19 @@ def _spin(qapp, ms: int) -> None:
         qapp.processEvents()
 
 
+def _spin_recolor(qapp) -> None:
+    """색 전환이 **끝나고도 남을 만큼** 돌린다.
+
+    ★ 고정 900ms 를 쓰면 안 된다 — `DUR_RECOLOR` 를 늘리는 순간(420 → 700) 대기가
+    전환보다 짧아져 테스트가 시간에 기대 흔들린다(실제로 그렇게 깨졌다).
+    지속시간에서 유도한다."""
+    _spin(qapp, motion.DUR_RECOLOR + 250)
+
+
 def _overlay(w):
-    return w._stack.findChild(QLabel, "_pageRecolorOverlay")
+    # ★ 오버레이는 **창 전체**의 자식이다(스택이 아니다) — 상태바처럼 스택 밖에 있는
+    #   것도 함께 덮어야 전환 중 색이 갈라지지 않는다.
+    return w.findChild(QLabel, "_pageRecolorOverlay")
 
 
 # ── 크로스페이드 자체 ────────────────────────────────────────────────────
@@ -89,7 +100,7 @@ def test_crossfade_from_fires_on_done_exactly_once(qapp, motion_on):
         motion.crossfade_from(host, host.grab(), on_done=lambda: calls.append(1))
         assert host.findChild(QLabel, "_pageRecolorOverlay") is not None
         assert calls == [], "아직 끝나지 않았는데 on_done 이 불렸다"
-        _spin(qapp, 700)
+        _spin(qapp, motion.DUR_RECOLOR + 250)
         assert calls == [1], f"on_done 이 {len(calls)}회 불렸다(정확히 1회여야 한다)"
         assert host.findChild(QLabel, "_pageRecolorOverlay") is None, "오버레이 잔존"
     finally:
@@ -138,7 +149,7 @@ def test_transition_locks_then_releases(qapp, window, motion_on):
     assert _overlay(w) is not None, "크로스페이드 오버레이가 없다(색이 튄다)"
     assert w._setup_page._dark_switch.isEnabled() is False, "전환 중 토글이 살아 있다"
 
-    _spin(qapp, 900)
+    _spin_recolor(qapp)
     assert w._appearance_busy is False, "잠금이 풀리지 않았다 — 다크 모드가 영구히 잠긴다"
     assert w._setup_page._dark_switch.isEnabled() is True
     assert _overlay(w) is None, "오버레이가 정리되지 않았다"
@@ -156,11 +167,11 @@ def test_rapid_toggling_is_ignored_during_transition(qapp, window, motion_on):
     assert theme.COLOR_MODE == "dark", "전환 중 요청이 색을 또 바꿨다"
     assert w._setup_page is first_page, "전환 중 페이지가 다시 만들어졌다"
 
-    _spin(qapp, 900)
+    _spin_recolor(qapp)
     # 끝난 뒤에는 정상적으로 다시 전환된다(잠금이 일회성이어야 한다).
     w._on_appearance_changed()
     assert theme.COLOR_MODE == "light"
-    _spin(qapp, 900)
+    _spin_recolor(qapp)
     assert w._appearance_busy is False
 
 
@@ -197,7 +208,7 @@ def test_toggle_lets_the_knob_move_before_the_heavy_work(qapp, window, motion_on
     assert seen == [], "토글 슬롯에서 즉시 emit 했다(손잡이가 얼어붙는다)"
     _spin(qapp, max(60, motion.dur(motion.DUR_SWITCH) + 120))
     assert seen == ["dark"], f"지연 emit 이 오지 않았다: {seen}"
-    _spin(qapp, 900)
+    _spin_recolor(qapp)
 
 
 def test_rapid_double_toggle_coalesces_into_one_transition(qapp, window, motion_on):
@@ -231,13 +242,13 @@ def test_transition_does_not_read_prefs_from_disk(qapp, window, motion_on):
     _prefs.patch(color_mode="light")
     window._on_appearance_changed("dark")
     assert theme.COLOR_MODE == "dark", "인자로 실어 보낸 색 모드가 무시됐다"
-    _spin(qapp, 900)
+    _spin_recolor(qapp)
 
     # 인자가 없으면(옛 연결·직접 호출) 예전처럼 prefs 에서 읽는 폴백이 살아 있어야 한다.
     _prefs.patch(color_mode="light")
     window._on_appearance_changed()
     assert theme.COLOR_MODE == "light", "인자 없는 호출의 prefs 폴백이 사라졌다"
-    _spin(qapp, 900)
+    _spin_recolor(qapp)
 
 
 def test_recolor_is_slow_enough_to_read(qapp):
@@ -251,4 +262,4 @@ def test_recolor_does_not_slide(qapp):
     """색만 바뀌는 전환에 위치 이동을 섞지 않는다 — '화면이 옮겨졌다'는 거짓 신호다."""
     src = inspect.getsource(motion.crossfade_from)
     assert "move(" not in src, "크로스페이드가 슬라이드를 한다"
-    assert "EASE_PRIMARY" in src                    # 빠르게 시작해 끝에서 감속
+    assert "EASE_SOFT" in src        # 색 전환은 더 완만한 감속(사용자 지정)

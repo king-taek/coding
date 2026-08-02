@@ -52,10 +52,26 @@ def _qt_app():
     ★ 이름에 밑줄이 붙은 이유: 테스트 모듈들이 `qapp` 을 자기 스코프로 **재정의**한다.
     아래 두 픽스처가 `qapp` 에 의존하면 그 재정의를 집어 ScopeMismatch 가 난다
     (session 픽스처가 module 픽스처를 요구하는 꼴).  재정의되지 않는 이름을 따로 둔다.
+
+    ★ **동봉 폰트를 여기서 등록한다** — 앱 시작 경로(`main.py`)와 같은 순서
+    (QApplication 생성 → 폰트 등록 → `apply_to_app`)를 만든다.
+
+    왜 `styled_qapp` 이 아니라 여기인가: 폰트는 **글자 폭**을 바꾸므로 테마를 적용하지
+    않는 `qapp` 사용 테스트의 **치수 측정**에도 똑같이 영향을 준다.
+
+    왜 중요한가: 이걸 안 하면 레이아웃 회귀 테스트가 **사용자 화면과 다른 서체로**
+    측정한다.  실제로 그 탓에 가로 넘침을 놓쳤다 — 동봉 폰트(NanumSquare)가 폴백보다
+    넓어 1024px Setup 화면이 6px 넘쳤는데, `test_setting_cards_layout.py` 를 단독
+    실행하면 통과하고 폰트를 등록하는 다른 파일과 **같은 xdist 워커에 묶일 때만**
+    실패했다(`-n auto` 는 파일 단위 분배 → 실행마다 갈린다).
     """
     pytest.importorskip("PyQt6.QtWidgets")
     from PyQt6.QtWidgets import QApplication
-    return QApplication.instance() or QApplication([])
+    app = QApplication.instance() or QApplication([])
+    # 실패를 삼키는 함수라 폰트가 없는 환경에서도 안전하다(폴백 서체로 돌아간다).
+    from aoi_verification.app.ui import theme
+    theme.load_app_fonts()
+    return app
 
 
 @pytest.fixture(scope="session")

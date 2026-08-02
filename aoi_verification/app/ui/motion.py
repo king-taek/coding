@@ -46,40 +46,76 @@ from . import theme
 #   10%를 **전체 시간의 67%**에 걸쳐 놓는데, 총 160ms 였을 땐 그 안착이 107ms 라
 #   사실상 안 보였다("마지막에 뚝 끊긴다").  곡선만 바꾸고 시간을 그대로 두면
 #   체감이 거의 안 달라진다 — 둘은 함께 정해야 한다.
-DUR_BASE = 300           # 실제 240ms(motion_scale 0.8) — 안착 ≈161ms
+DUR_BASE = 300           # 실제 240ms(motion_scale 0.8)
 DUR_SLOW = 400
 DUR_SWITCH = 200         # 토글 손잡이 이동 — `switch_row.ToggleSwitch` 가 쓰는 값
 
+# ── 사용자가 **실제 밀리초로 지정한** 지속시간 ────────────────────────────────
+# ★ 이 셋은 `dur()` 스케일을 타지 않는다.  `motion_scale`(0.8)을 곱하면 400ms 지정이
+#   320ms 로 나가 '지정한 값'과 '실제 값'이 갈라진다 — 사용자가 눈으로 정한 수치이므로
+#   그대로 쓴다.  스케일이 필요한 자리는 여전히 `dur()` 를 쓴다.
+DUR_SHEET = 400          # 작은 화면 팝업(시트) 등장/퇴장
+DUR_LOADING = 500        # 로딩 화면 팝업 등장
+DUR_RECOLOR = 700        # 색 모드(어두운 화면) 전환
 
-def _ease_out_long_tail() -> QEasingCurve:
-    """빠르게 출발해 **오래 감속하며** 안착하는 곡선 (CSS `cubic-bezier(.16,1,.3,1)`).
 
-    ★ 왜 표준 ``OutQuart`` 가 아닌가 — 두 지표를 함께 봐야 한다(실측):
+def _ease_material_decelerate() -> QEasingCurve:
+    """머터리얼 '강조 감속' 곡선 (CSS `cubic-bezier(.05,.7,.1,1)`) — 앱의 기본 곡선.
 
-    | 곡선 | t=0.1 진행률(출발 속도) | 마지막 10%에 쓰는 **시간** |
+    ★ 이전 기본은 `cubic-bezier(.16,1,.3,1)` 이었는데 **곡선인데 등속처럼 보인다**는
+    지적을 받았다.  원인은 곡선이 없어서가 아니라 **감속이 안 보이는 자리에서
+    끝나기 때문**이었다(실측):
+
+    | 시점 | 옛 곡선 | 이 곡선 |
     |---|---|---|
-    | OutQuad            | 0.190 | 31.6% |
-    | OutCubic           | 0.271 | 46.4% |
-    | OutQuart (이전 기본) | 0.344 | 56.2% |
-    | **이 곡선**          | **0.494** | **67.1%** |
+    | t=0.10 | 0.494 | 0.621 |
+    | t=0.25 | 0.826 | 0.832 |
+    | t=0.50 | 0.972 | 0.950 |
+    | t=0.75 | 0.998 | 0.991 |
+    | **보이는 구간**(0.02→0.98 에 쓰는 시간) | **54%** | **65%** |
 
-    사용자 요구는 "처음엔 빠르게, 나중엔 천천히 끝나게" 였다.  이 곡선은 출발이
-    가장 빠르면서 감속 구간이 **시간상** 가장 길다 — 두 요구를 동시에 만족하는
-    유일한 후보다.
+    옛 곡선은 전체 시간의 절반 지점에서 이미 97.2% 진행돼, 남은 절반에 일어나는 변화가
+    0.03 이었다.  **불투명도 채널에서는 그 0.03 이 보이지 않는다**(위치라면 남은 거리가
+    눈에 보이지만 투명도는 0.03 이 남아도 그냥 투명이다).  그래서 사용자가 실제로 본
+    것은 '툭 바뀌고 → 아무 일 없음' 이었다.
 
-    ※ 반대로 '남은 **거리**'는 OutQuart 보다 작다.  그래서 잔여 이동량을 눈으로
-    확인해야 하는 자리(로딩 패널의 32px 상승)는 여전히 OutQuad 를 쓴다 —
-    ``widgets/loading_overlay.py`` 주석과 ``dev/tests/test_loading_panel.py`` 참조.
+    이 곡선은 죽은 꼬리가 짧아(54% → 65%) 감속이 **끝까지 보인다**.  회귀 가드는
+    ``dev/tests/test_motion_curve.py`` 가 이 표를 그대로 못 박는다 — 곡선을 바꿀 땐
+    숫자를 **계산해서** 갱신하라(눈대중으로 적으면 표가 거짓말을 한다).
+
+    ※ 예외는 하나다 — **끝없이 도는 표시는 등속**이다(회전 스피너·무한 진행 줄무늬).
+      반복 구간마다 가감속이 붙으면 맥박처럼 뛴다.  `loading_overlay` 의 Linear 는
+      의도된 것이니 곡선으로 바꾸지 마라.
     """
     c = QEasingCurve(QEasingCurve.Type.BezierSpline)
-    c.addCubicBezierSegment(QPointF(0.16, 1.0), QPointF(0.30, 1.0),
+    c.addCubicBezierSegment(QPointF(0.05, 0.70), QPointF(0.10, 1.0),
+                            QPointF(1.0, 1.0))
+    return c
+
+
+def _ease_soft_decelerate() -> QEasingCurve:
+    """더 완만한 감속 (CSS `cubic-bezier(.33,1,.68,1)`) — **색 모드 전환 전용**.
+
+    | 시점 | 기본(머티리얼) | 이 곡선 |
+    |---|---|---|
+    | t=0.10 | 0.621 | 0.272 |
+    | t=0.25 | 0.832 | 0.577 |
+    | t=0.50 | 0.950 | 0.872 |
+    | **보이는 구간** | 65% | **73%** |
+
+    색 모드 전환은 **화면 전체의 밝기가 뒤집히는** 가장 큰 변화라, 기본 곡선으로도
+    앞부분이 급했다(사용자 지정).  출발을 늦추고 변화를 더 고르게 퍼뜨린다.
+    """
+    c = QEasingCurve(QEasingCurve.Type.BezierSpline)
+    c.addCubicBezierSegment(QPointF(0.33, 1.0), QPointF(0.68, 1.0),
                             QPointF(1.0, 1.0))
     return c
 
 
 # QEasingCurve 는 값 타입이라 ``setEasingCurve()`` 가 복사한다 — 하나를 공유해도
 # 안전하고, 호출부는 예전처럼 이 이름만 넘기면 된다.
-EASE_PRIMARY = _ease_out_long_tail()          # 빠르게→끝에서 오래 감속
+EASE_PRIMARY = _ease_material_decelerate()    # 앱 기본 — 끝까지 보이는 감속
+EASE_SOFT = _ease_soft_decelerate()           # 색 모드 전환 — 더 완만하게
 
 
 def enabled() -> bool:
@@ -166,9 +202,6 @@ def transition_in(container, new_pixmap, *, forward: bool = True,
     slide.start()
 
 
-DUR_RECOLOR = 420        # 색 모드 전환 — 사용자 요청으로 느리게(220 → 420), 끝에서 감속
-
-
 def crossfade_from(container, old_pixmap, *, duration: int = DUR_RECOLOR,
                    on_done=None) -> None:
     """**옛 화면 스냅샷**을 위에 얹어 빼면서 새 화면을 드러낸다(색만 바뀌는 전환).
@@ -221,8 +254,8 @@ def crossfade_from(container, old_pixmap, *, duration: int = DUR_RECOLOR,
     anim = QPropertyAnimation(eff, b"opacity", overlay)
     anim.setStartValue(1.0)
     anim.setEndValue(0.0)
-    anim.setDuration(dur(duration))
-    anim.setEasingCurve(EASE_PRIMARY)
+    anim.setDuration(int(duration))     # 사용자 지정 실측 ms — 스케일 없음
+    anim.setEasingCurve(EASE_SOFT)      # 색 전환은 더 완만하게(사용자 지정)
 
     def _finish():
         overlay.deleteLater()

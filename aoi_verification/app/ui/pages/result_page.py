@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (QCheckBox, QFileDialog, QHBoxLayout, QLabel,
                               QVBoxLayout, QWidget)
 
@@ -114,11 +114,8 @@ class ResultPage(QWidget):
         opt_row.addStretch(1)
         root.addLayout(opt_row)
 
-        # 개발자 크레딧 (마지막 화면) -----------------------------------
-        credit = QLabel(i18n.KO.CREDIT, self)
-        credit.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        credit.setStyleSheet(f"color: {theme.MUTE}; padding-top: 8px;")
-        root.addWidget(credit)
+        # ★ 크레딧은 여기 두지 않는다 — 상태바(`main_window._credit_label`)가 모든
+        #   화면에 공통으로 띄운다.  둘 다 두면 한 화면에 두 번 보인다.
 
     # ------------------------------------------------------------------
     def show_result(self, result: FinalResult,

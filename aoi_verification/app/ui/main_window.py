@@ -630,13 +630,16 @@ class MainWindow(QMainWindow):
         # ★ 네 경우(기준/검증/둘다/KLA 아님)를 모두 유지한다 — 한쪽만 추가하지 말 것
         #   (CLAUDE.md 규칙).  강조 문장은 인라인 HTML 대신 시트의 warn 라벨이 담당한다
         #   (색을 f-string 으로 굽지 않으므로 다크 모드 전환에도 따라온다).
+        # ★ `tiles=True` — 넷은 **대등한 선택지**다.  예전엔 '기준' 만 파란 주 버튼이라
+        #   "왜 저것만 강조돼 있지?" 로 읽혔다(사용자 지적).  정답이 정해져 있지 않으면
+        #   기본값을 세우지도 않는다(`default` 없음).  순서는 읽는 순서대로.
         return sheets.choose(
             self, i18n.KO.KLA_ASK_TITLE, i18n.KO.KLA_ASK_SIDE_BODY,
-            [(None, i18n.KO.KLA_SIDE_NONE, "ghost"),
-             ("both", i18n.KO.KLA_SIDE_BOTH, "ghost"),
-             ("val", i18n.KO.KLA_SIDE_VAL, "ghost"),
-             ("ref", i18n.KO.KLA_SIDE_REF, "primary")],
-            default="ref", heading=i18n.KO.KLA_ASK_SIDE_HEADING,
+            [("ref", i18n.KO.KLA_SIDE_REF, "option"),
+             ("val", i18n.KO.KLA_SIDE_VAL, "option"),
+             ("both", i18n.KO.KLA_SIDE_BOTH, "option"),
+             (None, i18n.KO.KLA_SIDE_NONE, "option")],
+            heading=i18n.KO.KLA_ASK_SIDE_HEADING, tiles=True,
         )
 
     def _resolve_and_merge_kla(self, sr: ScanResult, kla_side: str,
@@ -1563,7 +1566,12 @@ class MainWindow(QMainWindow):
         from . import motion
         self._appearance_busy = True
         try:
-            snapshot = self._stack.grab() if motion.enabled() else None
+            # ★ 스냅샷은 **창 전체**다(옛날엔 `self._stack` 만 찍었다).  상태바는 스택
+            #   밖이라 크로스페이드에 덮이지 않았고, QSS 재적용으로 **첫 프레임에 즉시**
+            #   새 색이 됐다 — 그래서 전환 700ms 동안 하단바만 혼자 다른 모드로 보였다
+            #   (실측: 0ms 에 상태바 (28,26,21) / 본문 (236,233,226)).
+            #   `_loading`·`_sheets` 도 창의 자식으로 창 전체를 덮으므로 같은 방식이다.
+            snapshot = self.grab() if motion.enabled() else None
             try:
                 if not mode:
                     p = _prefs.load()
@@ -1577,7 +1585,7 @@ class MainWindow(QMainWindow):
             #   실측: 걷어내고 적용하면 합계 137~164ms → 125~142ms.
             self._recreate_pages(apply_qss=True)
             self._set_appearance_controls_enabled(False)
-            motion.crossfade_from(self._stack, snapshot,
+            motion.crossfade_from(self, snapshot,
                                   on_done=self._end_appearance_transition)
         except Exception:
             # ★ 어떤 경로로 실패해도 잠금은 반드시 풀린다 — 잠긴 채 남으면 다크 모드를
