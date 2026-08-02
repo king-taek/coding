@@ -63,10 +63,15 @@ class ResultPage(QWidget):
 
         root.addStretch(1)
 
-        # 사진을 원본 화질로 넣을지 옵션 — 결과 출력 버튼 바로 위에 둔다. 기본
-        # 해제(중간 화질 캐시로 가볍고 빠른 출력). 체크하면 원본 그대로 임베드.
-        orig_row = QHBoxLayout()
-        orig_row.addStretch(1)
+        # ★ 엑셀 저장 옵션 **두 개를 한 줄에** 모은다(사용자 선택 1안).
+        #   전에는 '원본 화질' 은 버튼 줄 위, '전체 양식' 은 버튼 줄 아래로 갈라져
+        #   110px 떨어져 있었다(실측).  둘 다 '엑셀로 저장' 에만 걸리는 옵션인데
+        #   버튼 줄이 사이를 가르니, 원본 화질이 저장 옵션인지 화면 보기 옵션인지
+        #   알 수 없었다.  옵션 → 실행 순서로 위에서 아래로 읽히게 한다.
+        #   기본은 둘 다 해제 — 가볍고 빠른 출력이 기본값이다.
+        opt_row = QHBoxLayout()
+        opt_row.setSpacing(22)
+        opt_row.addStretch(1)
         self.original_quality_chk = QCheckBox(
             i18n.KO.EXPORT_ORIGINAL_QUALITY_LABEL, self,
         )
@@ -74,9 +79,14 @@ class ResultPage(QWidget):
         self.original_quality_chk.setToolTip(
             i18n.KO.EXPORT_ORIGINAL_QUALITY_TOOLTIP
         )
-        orig_row.addWidget(self.original_quality_chk)
-        orig_row.addStretch(1)
-        root.addLayout(orig_row)
+        opt_row.addWidget(self.original_quality_chk)
+
+        self.full_template_chk = QCheckBox(i18n.KO.EXPORT_FULL_TEMPLATE_LABEL, self)
+        self.full_template_chk.setChecked(False)
+        self.full_template_chk.setToolTip(i18n.KO.EXPORT_FULL_TEMPLATE_TOOLTIP)
+        opt_row.addWidget(self.full_template_chk)
+        opt_row.addStretch(1)
+        root.addLayout(opt_row)
 
         bar = QHBoxLayout()
         bar.addStretch(1)
@@ -102,17 +112,6 @@ class ResultPage(QWidget):
         self.export_btn.clicked.connect(self._on_export)
         bar.addWidget(self.export_btn)
         root.addLayout(bar)
-
-        # 전체 양식(E~H 수기 영역) 포함 옵션 — 기본 해제(#3).  체크 시에만 무거운
-        # 전체 양식 시트를 함께 저장한다.
-        opt_row = QHBoxLayout()
-        opt_row.addStretch(1)
-        self.full_template_chk = QCheckBox(i18n.KO.EXPORT_FULL_TEMPLATE_LABEL, self)
-        self.full_template_chk.setChecked(False)
-        self.full_template_chk.setToolTip(i18n.KO.EXPORT_FULL_TEMPLATE_TOOLTIP)
-        opt_row.addWidget(self.full_template_chk)
-        opt_row.addStretch(1)
-        root.addLayout(opt_row)
 
         # ★ 크레딧은 여기 두지 않는다 — 상태바(`main_window._credit_label`)가 모든
         #   화면에 공통으로 띄운다.  둘 다 두면 한 화면에 두 번 보인다.
