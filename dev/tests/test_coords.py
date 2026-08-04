@@ -278,9 +278,16 @@ def test_real_pair_kla_camtek_rows_align():
     두 좌표가 121 µm 밖에 안 떨어져 있어 **같은 물리적 결함**임이 확인된 쌍이다.
     따라서 두 변환이 같은 (col,row) 를 내야 한다 — 이 테스트의 요점은 **정렬**이다.
 
-    값은 장비 화면 기준 (5,4):  Camtek 7−3 = 4,  KLA 0 + KLA_ZERO_Y(4) = 4.
-    (Camtek 만 −1 하고 KLA 를 그대로 두면 정렬은 유지되지만 둘 다 장비 화면과 어긋난다 —
-    실제로 그렇게 어긋나 있었다.  ``TestCamtekIni.test_equipment_screen_reading`` 참조.)"""
+    ★ ``col`` 은 정확히 일치한다.  ``row`` 는 **이 픽스처의 한계로 1 어긋난다**:
+
+    · KLA `(5,3)` 이 정답 규약이다 — `SampleCenterLocation` 유도값이고, 사용자가 장비로
+      확인한 KLA↔Camtek 대응 7건(2개 device)이 이 규칙을 지지한다(조사 §6-K).
+    · Camtek 쪽은 이 폴더에 ``Params_WaferInfo.ini`` 가 없어(사진만 복사된 픽스처)
+      ``Center_Y`` 를 못 읽고 옛 식으로 폴백해 1 크게 나온다.  **실물 스캔 결과 폴더에는
+      그 파일이 사진과 같은 자리에 늘 있다**(사용자 확인).
+
+    ±1 이웃 게이트 안이라 **매칭은 정상**이다.  Camtek 쪽 폴백을 고치면 이 테스트가
+    실패하므로, 그때 `== kla.row` 로 조여서 빚을 갚았다는 걸 못 박을 것."""
     from aoi_verification.app.coords import camtek_ini, kla_info
 
     camtek_ini.load_folder.cache_clear()
@@ -292,8 +299,10 @@ def test_real_pair_kla_camtek_rows_align():
     kla = kla_info.resolve(
         _COORD_DATA / "KLA" / "예시1" / "W6459076XYG1_2_0_23_2.jpg")
     assert cam is not None and kla is not None
-    assert (cam.col, cam.row) == (kla.col, kla.row)      # 정렬 — 이게 핵심
-    assert (cam.col, cam.row) == (5, 4)                  # 장비 화면 기준 절대값
+    assert cam.col == kla.col == 5                       # col 은 정렬 — 이게 핵심
+    assert (kla.col, kla.row) == (5, 3)                  # 장비 확인 규약
+    assert cam.row - kla.row == 1                        # ★ 픽스처 한계(위 설명)
+    assert abs(cam.row - kla.row) <= 1                   # ±1 게이트 안 → 매칭 정상
 
 
 # ---------------------------------------------------------------------------

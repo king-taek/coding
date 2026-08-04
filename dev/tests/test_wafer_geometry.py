@@ -918,15 +918,78 @@ class TestRdl4RealFolders:
 
 
 # ---------------------------------------------------------------------------
+# ★ KLA die 인덱스 원점을 SampleCenterLocation 에서 유도 — 사용자 장비 확인 7건 (§6-K)
+#
+# 옛 상수 KLA_ZERO_Y=4 는 **device 마다 다른 값**이었다.  T254 는 4 지만 TB500 은 3 이라,
+# TB500 자재에서 KLA row 가 전 구간 1 컸다.
+# ---------------------------------------------------------------------------
+_KLA_REAL = (Path(__file__).resolve().parents[2] / "docs"
+             / "KLA 좌표 예시(TB500, T254)")
+# {폴더: (zero_x, zero_y, {사진 stem: 장비로 확인한 (col,row)})}
+_KLA_TRUTH = {
+    "2026-08-03-20-28_2": (3, 3, {                     # TB500  08235234EWA1
+        "08235234ewa1_2_-1_7_1": (5, 2),
+        "08235234ewa1_-2_-2_31_2": (1, 1),
+        "08235234ewa1_-2_0_7_3": (1, 3)}),
+    "2026-08-02-23-09_4": (9, 4, {                     # T254   00MEU018XYG1
+        "00meu018xyg1_-1_4_23_1": (8, 8),
+        "00meu018xyg1_4_3_23_2": (13, 7),
+        "00meu018xyg1_4_-2_31_3": (13, 2),
+        "00meu018xyg1_-8_-2_23_4": (1, 2)}),
+}
+
+
+@pytest.mark.skipif(not _KLA_REAL.exists(), reason="KLA 좌표 예시 폴더 없음")
+class TestKlaZeroFromSampleCenter:
+    @pytest.mark.parametrize("name", sorted(_KLA_TRUTH))
+    def test_zero_matches_equipment(self, name):
+        zx, zy, coords = _KLA_TRUTH[name]
+        g = wg.kla_geometry(_KLA_REAL / name)
+        assert (g.zero_x, g.zero_y) == (zx, zy)
+        assert g.source == "DiePitch+SampleCenterLocation"
+        got = kla_info.load_folder(_KLA_REAL / name)
+        assert got, "실측 .001 을 못 읽었다"
+        for stem, expect in coords.items():
+            c = got[stem]
+            assert (c.col, c.row) == expect, stem
+
+    def test_zero_y_is_not_a_constant(self):
+        """★ 두 device 가 서로 다른 ``zero_y`` 를 낸다 — 상수로 되돌리면 한쪽이 틀린다."""
+        ys = {wg.kla_geometry(_KLA_REAL / n).zero_y for n in _KLA_TRUTH}
+        assert ys == {3, 4}
+
+    @pytest.mark.parametrize("name", sorted(_KLA_TRUTH))
+    def test_sample_test_plan_range_agrees(self, name):
+        """유도한 '완전히 들어오는 die' 집합이 ``SampleTestPlan`` 범위와 같다.
+
+        두 값이 독립 경로라 서로를 검산해 준다."""
+        import re
+        info = next((_KLA_REAL / name).glob("*.001"))
+        text = info.read_bytes().decode("utf-8", "replace").replace("\x00", "")
+        g = wg.parse_kla_header(text)
+        assert g is not None
+        plan = re.search(r"SampleTestPlan\s+\d+(.*?);", text, re.I | re.S)
+        pairs = [(int(a), int(b))
+                 for a, b in re.findall(r"(-?\d+)\s+(-?\d+)", plan.group(1))]
+        assert -min(x for x, _ in pairs) == g.zero_x
+        assert -min(y for _, y in pairs) == g.zero_y
+
+
+# ---------------------------------------------------------------------------
 # TB500 실측 회귀 — 값이 예전과 같아야 한다
 # ---------------------------------------------------------------------------
 @pytest.mark.skipif(not _REAL.exists(), reason="dev/좌표 확인 실측 폴더 없음")
 class TestRealSamples:
     def test_kla_geometry_from_real_file(self):
-        """실측 .001 → pitch 는 DiePitch, zero_x 는 SampleTestPlan 에서."""
+        """실측 .001 → pitch 는 DiePitch, 원점은 SampleCenterLocation 기하에서.
+
+        ``zero_y`` 는 **3** 이다.  옛 상수 ``KLA_ZERO_Y=4`` 는 TB500 자재에서 row 를
+        1 크게 냈다 — 사용자가 장비로 확인한 값이 3 임을 증명한다(§6-K)."""
         g = wg.kla_geometry(_REAL / "KLA" / "예시1")
-        assert (g.zero_x, g.zero_y) == (KLA_ZERO_X, KLA_ZERO_Y)
-        assert g.source == "DiePitch+SampleTestPlan"
+        assert (g.zero_x, g.zero_y) == (3, 3)
+        assert g.zero_x == KLA_ZERO_X            # X 는 옛 상수와 같다
+        assert g.zero_y != KLA_ZERO_Y            # Y 는 상수(4)가 아니다
+        assert g.source == "DiePitch+SampleCenterLocation"
         assert g.pitch_x == pytest.approx(37247.93)
         assert g.pitch_y == pytest.approx(44905.34)
 
@@ -943,12 +1006,17 @@ class TestRealSamples:
             assert math.floor(Y / CAMTEK_PITCH_Y) == row_i
 
     def test_real_coord_matches_equipment(self):
-        """실측 좌표 — die-내부 x/y 는 불변, col/row 는 장비 화면 기준 (5,4)."""
+        """실측 좌표 — die-내부 x/y 는 불변, KLA col/row 는 장비 확인 규약 (5,3).
+
+        ⚠ Camtek 쪽이 ``(5,4)`` 로 1 큰 것은 **이 픽스처의 한계**다 — 이 폴더에는
+        ``Params_WaferInfo.ini`` 가 없어(사진만 복사됨) ``Center_Y`` 를 못 읽고 옛 식으로
+        폴백한다.  실물 스캔 결과 폴더에는 그 파일이 사진과 같은 자리에 늘 있다.
+        자세한 건 :func:`test_coords.test_real_pair_kla_camtek_rows_align`."""
         c = camtek_ini.load_folder(
             _REAL / "Camtek" / "예시1")["272646.165679.c.1000203959.2"]
-        assert (c.col, c.row) == (5, 4)
+        assert (c.col, c.row) == (5, 4)              # 폴백값 — 아래 KLA 가 정답 규약
         assert (c.x, c.y) == (11913.0, 30959.0)      # floor — 장비 표기는 버림
 
         k = kla_info.load_folder(_REAL / "KLA" / "예시1")["w6459076xyg1_2_0_23_2"]
-        assert (k.col, k.row) == (5, 4)
+        assert (k.col, k.row) == (5, 3)
         assert (k.x, k.y) == (11819.0, 31035.0)

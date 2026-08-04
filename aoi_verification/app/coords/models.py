@@ -74,15 +74,14 @@ DEFAULT_WAFER_DIAMETER: float = 300000.0
 # row = YINDEX + KLA_ZERO_Y
 # x   = round(XREL)
 # y   = round(DiePitchY - YREL)
-# ⚠ SampleTestPlan 최솟값(−min(XINDEX))으로 자동 산출할 수 있는 건 **X 뿐**이다.
-# 그 목록에는 '검사한 die' 만 있어서, 맵 가장자리 행/열이 통째로 미사용이면 최솟값이
-# 맵 원점과 어긋난다.  이 자재가 정확히 그 경우다:
-#   X: 맵 0..6 을 전부 사용 → −min(XINDEX) = 3 이 맞다        → wafer_geometry 가 자동 산출
-#   Y: 맵 0..6 중 1..6 만 사용 → −min(YINDEX) = 3 이지만 4 가 맞다 → 아래 상수를 쓴다
-# 근거: 거리 121 µm 로 동일 결함임이 확인된 쌍 Camtek(Col=7,Row=3) ↔ KLA(XINDEX=2,YINDEX=0).
-#   Camtek row = 7−3 = 4 이므로 KLA 도 0 + KLA_ZERO_Y = 4 여야 정렬이 맞는다.
-KLA_ZERO_X: int = 3   # 맵 가장자리 열을 전부 쓰므로 SampleTestPlan 산출값과 같다
-KLA_ZERO_Y: int = 4   # 맵 아래 1행이 미사용 → SampleTestPlan 산출값(3)보다 1 크다
+# ⚠ 아래 둘은 이제 **폴백 전용**이다.  평상시에는 `.001` 헤더의 SampleCenterLocation
+# 으로 유도한다(wafer_geometry._kla_zeros_from_center) — Camtek col_origin/row_total 과
+# 같은 '웨이퍼에 온전히 들어오는 첫 die' 규칙이라 두 장비가 자동으로 정렬된다.
+# ⚠ **KLA_ZERO_Y 는 device 마다 다르다** — 상수로 되돌리지 말 것.  사용자가 장비로 확인한
+# 7건(2개 device)에서 T254 는 4, TB500 은 **3** 이었다(조사 §6-K).  상수 4 를 쓰던 동안
+# TB500 자재의 KLA row 가 전 구간 1 컸다.
+KLA_ZERO_X: int = 3   # 폴백 — SampleTestPlan 의 −min(XINDEX) 도 못 구할 때
+KLA_ZERO_Y: int = 4   # 폴백 — SampleCenterLocation 이 없을 때(TB500 실측 상수)
 
 # ── Surface.flt geometry 환산 상수 (보고서: 1 px = 0.77 µm) ────────────────
 # area_um2  = area(px²)        × SURFACE_AREA_FACTOR (= 0.77²)

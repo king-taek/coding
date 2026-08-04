@@ -72,6 +72,11 @@ _DIEPITCH_PAT = re.compile(r'DiePitch\s+([\d.eE+\-]+)\s+([\d.eE+\-]+)', re.IGNOR
 # SampleTestPlan <개수> 뒤에 (XINDEX YINDEX) 쌍이 ';' 까지 이어진다.
 _TESTPLAN_PAT = re.compile(r'SampleTestPlan\s+\d+(.*?);', re.IGNORECASE | re.DOTALL)
 _INDEX_PAIR_PAT = re.compile(r'(-?\d+)\s+(-?\d+)')
+# 웨이퍼 중심의 die 격자 좌표(µm) — Camtek `[Geometric] Center_X/Y` 에 대응한다.
+_SAMPLE_CENTER_PAT = re.compile(
+    r'SampleCenterLocation\s+([\d.eE+\-]+)\s+([\d.eE+\-]+)', re.IGNORECASE)
+# `SampleSize 1 300;` → 웨이퍼 직경 300 **mm**.
+_SAMPLE_SIZE_PAT = re.compile(r'SampleSize\s+\d+\s+([\d.eE+\-]+)', re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -349,20 +354,49 @@ def camtek_geometry(folder: Path) -> Optional[CamtekGeometry]:
         return None
 
 
+def _kla_zero(center: float, diameter: float, pitch: float) -> Optional[int]:
+    """die 인덱스 원점 = **−(웨이퍼에 온전히 들어오는 첫 인덱스)**.  비상식적이면 None.
+
+    ``col = XINDEX + zero_x`` 가 0 부터 시작하게 하는 값이다.  Camtek
+    :func:`_col_origin` 과 **같은 규칙**이고, KLA 는 Y 가 위로 커져서 두 축 모두 '첫' 을
+    쓴다(Camtek 은 Y 가 아래로 커져 row 만 '마지막' 을 쓴다 — :func:`_row_total`)."""
+    zero = -math.ceil((center - diameter / 2.0) / pitch)
+    return zero if 0 <= zero <= _MAX_DIE_INDEX else None
+
+
+def _kla_zeros_from_center(text: str, px: float, py: float
+                           ) -> Optional[tuple[int, int]]:
+    """``SampleCenterLocation`` + ``SampleSize`` 로 ``(zero_x, zero_y)`` 산출.
+
+    실측 검증(``docs/디바이스_하드코딩_조사.md`` §6-K) — 사용자가 장비로 확인한 KLA↔Camtek
+    대응 **7건이 두 device 에서 전부 일치**한다(T254 `zero=(9,4)`, TB500 `zero=(3,3)`).
+    ``SampleTestPlan`` 범위와도 5웨이퍼 × 2축 전부 맞는다."""
+    cm = _SAMPLE_CENTER_PAT.search(text)
+    sm = _SAMPLE_SIZE_PAT.search(text)
+    if cm is None or sm is None:
+        return None
+    try:
+        cx, cy = float(cm.group(1)), float(cm.group(2))
+        dia = float(sm.group(1)) * 1000.0        # SampleSize 는 mm 단위
+    except ValueError:
+        return None
+    if not (_MIN_DIAMETER <= dia <= _MAX_DIAMETER):
+        return None
+    zx, zy = _kla_zero(cx, dia, px), _kla_zero(cy, dia, py)
+    return None if zx is None or zy is None else (zx, zy)
+
+
 def parse_kla_header(text: str) -> Optional[KlaGeometry]:
     """KLA ``.001`` 헤더 텍스트 → KlaGeometry.  DiePitch 가 없으면 None.
 
-    ``zero_x`` 만 ``SampleTestPlan`` 의 XINDEX 최솟값에서 산출한다(XINDEX −3..3 → 3).
+    ``zero_x``/``zero_y`` 는 **``SampleCenterLocation`` 기하**로 구한다 — Camtek 의
+    ``col_origin``/``row_total`` 과 같은 규칙이라 두 장비가 자동으로 정렬된다.
+    ⚠ ``KLA_ZERO_Y=4`` 를 상수로 쓰던 시절엔 **TB500 자재에서 row 가 1 컸다**(실측:
+    `08235234EWA1` 은 3 이 맞다).  device 마다 다른 값이므로 상수로 되돌리지 말 것.
 
-    ⚠ ``zero_y`` 는 산출하지 않는다.  ``SampleTestPlan`` 에는 **검사한 die 만** 있어서,
-    맵 가장자리 행이 통째로 미사용이면 최솟값이 맵 원점과 어긋난다.  자세한 근거는
-    :mod:`.models` 의 ``KLA_ZERO_Y`` 주석 참조.
-
-    ★ **`SampleCenterLocation` 으로 산출할 수는 있다**(실측 3장에서 `SampleTestPlan`
-    범위와 2축 전부 일치, 값은 3).  하지만 그러면 Camtek 쪽이 ``Center_Y`` 를 못 읽어
-    폴백한 폴더와 **1 어긋난다** — 확인된 KLA↔Camtek 쌍이 정확히 그 경우다.  어느 조합이
-    맞는지는 ``Center_Y`` 가 기록된 웨이퍼의 KLA 쌍이 있어야 정해진다
-    (``docs/좌표_검증_필요자료.md`` ③).  그때까지 상수를 유지한다.
+    그게 없을 때만 옛 경로로 폴백한다: ``zero_x`` 는 ``SampleTestPlan`` 의 XINDEX
+    최솟값, ``zero_y`` 는 상수.  ⚠ 그 목록에는 **검사한 die 만** 있어서 맵 가장자리
+    행/열이 통째로 미사용이면 최솟값이 맵 원점과 어긋난다 — 그래서 폴백이다.
 
     순수 함수 — 파일 없이 헤드리스 테스트할 수 있다.
     """
@@ -375,6 +409,11 @@ def parse_kla_header(text: str) -> Optional[KlaGeometry]:
         return None
     if not (_MIN_PITCH <= px <= _MAX_PITCH and _MIN_PITCH <= py <= _MAX_PITCH):
         return None
+
+    zeros = _kla_zeros_from_center(text, px, py)
+    if zeros is not None:
+        return KlaGeometry(pitch_x=px, pitch_y=py, zero_x=zeros[0], zero_y=zeros[1],
+                           source="DiePitch+SampleCenterLocation")
 
     zero_x, src = KLA_ZERO_X, "DiePitch"
     tm = _TESTPLAN_PAT.search(text)
