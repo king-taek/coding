@@ -1,0 +1,181 @@
+FileVersion 1 2;
+FileTimestamp 08-03-26 08:40:53;
+InspectionStationID "KLA-Tencor" "KRONOS" "K2";
+SampleType WAFER;
+ResultTimestamp 08-02-26 22:51:54;
+LotID "T254.INT377@6321";
+SampleSize 1 300;
+DeviceID "4DT-T254-H-M1";
+SetupID "ROOT-HVM-4DT-T254-H-M1-RDL3_NEW" 06-17-26 10:23:00;
+StepID "RDL3_NEW";
+SampleOrientationMarkType NOTCH;
+OrientationMarkLocation DOWN;
+DiePitch 1.4406480000e+004 3.1123359000e+004;
+DieOrigin 0.0000000000e+000 0.0000000000e+000;
+WaferID "00MEU018XYG1";
+Slot 4;
+SampleCenterLocation 7.0709960000e+003 1.5443000000e+004;
+ClassLookup 12
+  0 "	Unclassified"
+  3 "Metal Residue	"
+  1 "Undersized Bump	"
+  2 "Missing bump	"
+  4 "Bridged Bumps	"
+  7 "Irregular Bump	"
+  9 "Oversized Bump	"
+  14 "RDL defect	"
+  22 "Scratch	"
+  23 "re-passivation defect	"
+  31 "Foreign Material	"
+  94 "Other	"  ;
+OrientationInstructions "Front";
+CoordinatesMirrored NO;
+InspectionTest 3;
+SampleTestPlan 127
+  -9 -1 
+  -9 0 
+  -9 1 
+  -8 -2 
+  -8 -1 
+  -8 0 
+  -8 1 
+  -8 2 
+  -7 -2 
+  -7 -1 
+  -7 0 
+  -7 1 
+  -7 2 
+  -6 -3 
+  -6 -2 
+  -6 -1 
+  -6 0 
+  -6 1 
+  -6 2 
+  -6 3 
+  -5 -3 
+  -5 -2 
+  -5 -1 
+  -5 0 
+  -5 1 
+  -5 2 
+  -5 3 
+  -4 -3 
+  -4 -2 
+  -4 -1 
+  -4 0 
+  -4 1 
+  -4 2 
+  -4 3 
+  -3 -3 
+  -3 -2 
+  -3 -1 
+  -3 0 
+  -3 1 
+  -3 2 
+  -3 3 
+  -2 -4 
+  -2 -3 
+  -2 -2 
+  -2 -1 
+  -2 0 
+  -2 1 
+  -2 2 
+  -2 3 
+  -2 4 
+  -1 -4 
+  -1 -3 
+  -1 -2 
+  -1 -1 
+  -1 0 
+  -1 1 
+  -1 2 
+  -1 3 
+  -1 4 
+  0 -4 
+  0 -3 
+  0 -2 
+  0 -1 
+  0 0 
+  0 1 
+  0 2 
+  0 3 
+  0 4 
+  1 -4 
+  1 -3 
+  1 -2 
+  1 -1 
+  1 0 
+  1 1 
+  1 2 
+  1 3 
+  1 4 
+  2 -4 
+  2 -3 
+  2 -2 
+  2 -1 
+  2 0 
+  2 1 
+  2 2 
+  2 3 
+  2 4 
+  3 -3 
+  3 -2 
+  3 -1 
+  3 0 
+  3 1 
+  3 2 
+  3 3 
+  4 -3 
+  4 -2 
+  4 -1 
+  4 0 
+  4 1 
+  4 2 
+  4 3 
+  5 -3 
+  5 -2 
+  5 -1 
+  5 0 
+  5 1 
+  5 2 
+  5 3 
+  6 -3 
+  6 -2 
+  6 -1 
+  6 0 
+  6 1 
+  6 2 
+  6 3 
+  7 -2 
+  7 -1 
+  7 0 
+  7 1 
+  7 2 
+  8 -2 
+  8 -1 
+  8 0 
+  8 1 
+  8 2 
+  9 -1 
+  9 0 
+  9 1 ;
+AreaPerTest 1.1388800000e+011;
+DefectRecordSpec 22 DEFECTID X Y XREL YREL XINDEX YINDEX XSIZE YSIZE DEFECTAREA DSIZE CLASSNUMBER TEST CLUSTERNUMBER ROUGHBINNUMBER FINEBINNUMBER CHANNELID MACROSIGCLASS INTENSITY MACROSIGID IMAGECOUNT IMAGELIST ;
+DefectList;
+TiffFileName 00MEU018XYG1_-1_4_23_1.jpg;
+DefectList
+ 1 -8188.578 132388.100 13288.897 23337.662 -1 4 7.800 11.700 91.190000 11.700 23 3 0 0 2 2 0 2507 0 1 1 1 0;
+TiffFileName 00MEU018XYG1_4_3_23_2.jpg;
+DefectList
+ 2 52250.800 80150.590 1695.874 2223.512 4 3 24.690 24.690 609.630000 24.690 23 3 0 0 2 2 0 3813 0 1 1 1 0;
+TiffFileName 00MEU018XYG1_4_-2_31_3.jpg;
+DefectList
+ 3 61940.020 -51785.628 11385.094 25904.089 4 -2 20.790 25.990 540.390000 25.990 31 3 0 0 4 4 0 3921 0 1 1 1 0;
+TiffFileName 00MEU018XYG1_-8_-2_23_4.jpg;
+DefectList
+ 4 -115337.918 -53179.978 6984.920 24509.739 -8 -2 3.900 5.200 20.260000 5.200 23 3 0 0 2 2 0 2769 0 1 1 1 0;
+SummarySpec 5
+  TESTNO    NDEFECT    DEFDENSITY    NDIE    NDEFDIE  ;
+SummaryList 
+  3    4    3.5122218246e-003    127    38  ;
+EndOfFile;
