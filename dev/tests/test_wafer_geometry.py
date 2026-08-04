@@ -20,6 +20,9 @@ from aoi_verification.app.coords.models import (CAMTEK_PITCH_X, CAMTEK_PITCH_Y,
                                                 KLA_ZERO_X, KLA_ZERO_Y)
 
 _REAL = Path(__file__).resolve().parents[1] / "좌표 확인"
+# 사용자가 올린 RDL4 실물 — 같은 장비가 같은 사진을 두 형태로 남긴 로트(§6-J).
+_RDL4_REAL = (Path(__file__).resolve().parents[2] / "docs"
+              / "RDL4 LOT files(26년 05월, FDV)")
 
 
 @pytest.fixture(autouse=True)
@@ -800,6 +803,117 @@ class TestKlaHeader:
         assert (c.col, c.row) == (2 + 1, -1 + KLA_ZERO_Y)  # zero_x=1(파일), zero_y=상수
         assert c.x == 1234                                 # round(XREL)
         assert c.y == round(44905.34 - 6789.0)             # DiePitchY − YREL
+
+
+# ---------------------------------------------------------------------------
+# ★ row 기준을 Center_Y 에서 유도 — 같은 장비가 같은 사진을 두 형태로 남긴 실측 (§6-J)
+#
+# 18호기 폴더에는 **같은 결함 사진이 두 이름으로** 들어 있다:
+#   · 점표기   `51216.183928.c.1345447384.1.jpeg`      → 절대 X/Y 를 INI 가 갖는다
+#   · col/row  `TB500_RDL4 - Multi_…_0_2_13969.17…_4306.11…_Irregular Bump.jpg`
+# 두 번째가 **장비가 스스로 계산한 col/row** 다.  옛 식 `ceil(Diameter/pitch_y)` 는
+# row 를 1 크게 냈고(사용자 신고: 단일 사진 정보가 5,5 인데 실제는 5,4), Center_Y 에서
+# 유도하면 두 형태가 오차 0 으로 맞는다.
+# ---------------------------------------------------------------------------
+_RDL4_PARAMS = (_params_ini(37247.9, 44905.3)
+                + "[Geometric]\nDiameter=300000.000000\n"
+                  "Center_X=167448.973100\nCenter_Y=179674.003400\n")
+
+
+class TestRowTotalFromCenterY:
+    """★ ``row_total`` 은 ``Center_Y`` 에서 유도한다 — 마지막 '완전히 들어오는' die 행.
+
+    ``col_origin`` 이 '첫 완전 열' 인 것과 **같은 규칙의 반대쪽 축**이다(Camtek 은 Y 가
+    아래로 커져서 마지막 행이 row 0)."""
+
+    @pytest.mark.parametrize("stem,X,Y,C,R,rec,col,row", [
+        # 18호기 실물 INI 값 ↔ **같은 사진**의 col/row 파일명 토큰
+        ("51216.183928.c.1345447384.1",
+         51217.07941697, 183927.312852213, 1, 4, 1, 0, 2),
+        ("255348.116718.c.473266639.1",
+         255350.636699881, 116719.042739472, 6, 2, 1, 5, 4),
+    ])
+    def test_matches_the_equipment_written_filename(self, tmp_path, stem, X, Y,
+                                                    C, R, rec, col, row):
+        folder = tmp_path / "rdl4"
+        folder.mkdir()
+        (folder / "ColorImageGrabingInfo.ini").write_text(
+            _grabbing_ini_rec([(stem, X, Y, C, R, rec)]), encoding="utf-8")
+        (folder / "Params_WaferInfo.ini").write_text(_RDL4_PARAMS, encoding="utf-8")
+        geom = wg.camtek_geometry(folder)
+        assert geom is not None
+        assert (geom.col_origin, geom.row_total) == (1, 6), "옛 식이면 row_total=7"
+        c = camtek_ini.load_folder(folder)[stem]
+        assert (c.col, c.row) == (col, row)
+
+    def test_unrecorded_center_y_keeps_the_old_formula(self, tmp_path):
+        """``Center_Y`` 미기록이면 옛 식 ``ceil(Diameter/pitch_y)`` 로 폴백한다.
+
+        장비 화면 정답 4사례(:class:`TestGoldenEquipmentExamples`)가 그 값이고
+        ``Center_Y`` 를 갖고 있지 않다 — 그래서 그 사례들이 안 깨진다.
+        ⚠ 두 식은 보통 1 다르다.  폴백은 '모를 때의 기존 동작 보존' 이다."""
+        folder = tmp_path / "nocenter"
+        folder.mkdir()
+        (folder / "ColorImageGrabingInfo.ini").write_text(
+            _grabbing_ini_rec([("a", 255350.6, 116719.0, 6, 2, 1)]), encoding="utf-8")
+        (folder / "Params_WaferInfo.ini").write_text(
+            _params_ini(37247.9, 44905.3)
+            + "[Geometric]\nDiameter=300000.000000\nCenter_Y=0.000000\n",
+            encoding="utf-8")
+        geom = wg.camtek_geometry(folder)
+        assert geom is not None and geom.row_total == 7      # ceil(300000/44905.3)
+
+    def test_absurd_result_falls_back_and_warns(self, caplog):
+        """비상식적 결과는 채택하지 않고 경고를 남긴다(조용한 폴백 금지).
+
+        ``_col_origin`` 의 상식 범위 검사와 같은 장치다."""
+        import logging
+        import math
+        with caplog.at_level(logging.WARNING, logger="aoi.coords"):
+            got = wg._row_total(400000.0, 300000.0, 150.0)    # 행이 3665개 → 비상식
+        assert got == math.ceil(300000.0 / 150.0)
+        assert any("row 기준" in r.message for r in caplog.records)
+
+
+@pytest.mark.skipif(not _RDL4_REAL.exists(), reason="RDL4 실물 폴더 없음")
+class TestRdl4RealFolders:
+    """★ 실물 폴더 그대로 — 17호기·18호기, 점표기·col/row 두 형태가 **같은 값**을 낸다."""
+
+    _EXPECT = {"W7548306XYA2": (0, 2), "W7548304XYG4": (5, 4)}
+
+    @pytest.mark.parametrize("machine", ["17호기", "18호기"])
+    def test_every_photo_form_agrees(self, machine):
+        from aoi_verification.app.coords import camtek_live
+        seen = 0
+        for wafer, expect in self._EXPECT.items():
+            folder = _RDL4_REAL / machine / wafer
+            if not folder.exists():
+                continue
+            for img in sorted(folder.glob("*.jp*g")):
+                coord = camtek_live.resolve(img) or camtek_ini.resolve(img)
+                assert coord is not None, img.name
+                assert (coord.col, coord.row) == expect, img.name
+                seen += 1
+        assert seen >= 2, "실물 사진을 못 읽었다"
+
+    @pytest.mark.parametrize("machine", ["17호기", "18호기"])
+    def test_die_index_range_matches_the_geometry(self, machine):
+        """유도한 '완전히 들어오는 die' 범위가 실측 결함 전수의 인덱스 범위와 같다."""
+        import math
+        for wafer in self._EXPECT:
+            folder = _RDL4_REAL / machine / wafer
+            if not folder.exists():
+                continue
+            geom = wg.camtek_geometry(folder)
+            assert geom is not None
+            raw = camtek_ini.load_raw_folder(folder)
+            assert raw
+            xi = [math.floor(X / geom.pitch_x) for X, _Y, _c, _r in raw.values()]
+            yi = [math.floor(Y / geom.pitch_y) for _X, Y, _c, _r in raw.values()]
+            assert min(xi) == geom.col_origin           # 첫 완전 열
+            assert max(yi) == geom.row_total            # 마지막 완전 행
+            assert min(c.col for c in camtek_ini.load_folder(folder).values()) == 0
+            assert min(c.row for c in camtek_ini.load_folder(folder).values()) == 0
 
 
 # ---------------------------------------------------------------------------

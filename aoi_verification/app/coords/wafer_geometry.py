@@ -49,8 +49,8 @@ _LOG = logging.getLogger("aoi.coords")
 _MIN_PITCH, _MAX_PITCH = 100.0, 500000.0
 # 합리적 웨이퍼 직경 범위(µm) — 2인치(50 mm) ~ 450 mm.
 _MIN_DIAMETER, _MAX_DIAMETER = 50000.0, 450000.0
-# col 기준의 상식 범위 — 웨이퍼가 stage 원점에서 이보다 멀리 놓일 수 없다.
-_MAX_COL_ORIGIN = 200
+# die 인덱스 기준의 상식 범위 — 웨이퍼가 stage 원점에서 이보다 멀리 놓일 수 없다.
+_MAX_DIE_INDEX = 200
 
 # Diameter 를 담은 파일 후보 — pitch 후보와 같은 폴더 탐색 순서로 찾는다.
 _DIAMETER_SOURCES = ("Params_WaferInfo.ini", "ProductInfo.ini")
@@ -78,12 +78,12 @@ _INDEX_PAIR_PAT = re.compile(r'(-?\d+)\s+(-?\d+)')
 class CamtekGeometry:
     """Camtek INI 좌표 변환에 필요한 die 격자 기하.
 
-    ``col = INI_Col − col_origin``,  ``row = row_total − INI_Row``,
-    ``x = floor(X − INI_Col × pitch_x)``,  ``y = floor(Y − INI_Row × pitch_y)``
+    ``col = x_index − col_origin``,  ``row = row_total − y_index``,
+    ``x = floor(X − x_index × pitch_x)``,  ``y = floor(Y − y_index × pitch_y)``
 
-    ``row_total`` 은 상수가 아니라 **``ceil(Diameter / pitch_y)`` 유도값**이다 —
-    장비 화면 정답이 있는 4개 사례(3개 device)에서 전부 성립함을 확인했다
-    (TB500 은 7, pitch_y 31831.4 인 device 는 10).
+    ``col_origin``·``row_total`` 은 상수가 아니라 **웨이퍼가 stage 위 어디에 놓였는지**
+    (``Center_X``/``Center_Y``)에서 유도한다 — 각각 '온전히 들어오는 첫 열' 과
+    '온전히 들어오는 마지막 행' 이다(:func:`_col_origin`·:func:`_row_total`).
     """
     pitch_x: float
     pitch_y: float
@@ -105,9 +105,33 @@ class KlaGeometry:
     source: str
 
 
-def _row_total(diameter: float, pitch_y: float) -> int:
-    """row 번호 기준 = ``ceil(Diameter / pitch_y)`` (4-device 실측으로 확정된 유도식)."""
-    return math.ceil(diameter / pitch_y)
+def _row_total(center_y: Optional[float], diameter: float, pitch_y: float) -> int:
+    """row 번호 기준 = **웨이퍼 안에 온전히 들어오는 마지막 die 행**.
+
+    ``row = row_total − y_index`` 가 0 부터 시작하게 하는 값이다(Camtek 은 Y 가 아래로
+    커져서 *마지막* 행이 화면 맨 아래 = row 0 이다 — :func:`_col_origin` 이 *첫* 열을
+    쓰는 것과 축 방향만 다르고 같은 규칙이다)::
+
+        row_total = floor((Center_Y + Diameter/2) / DieStep_Y) − 1
+
+    실측 근거(``docs/디바이스_하드코딩_조사.md`` §6-J): RDL4 로트에서 **같은 장비가 같은
+    사진을 두 형태로** 남겼는데(점표기 파일 + col/row 가 박힌 파일명), 그 파일명이 이
+    유도값과 두 축 모두 오차 0 으로 맞는다.  옛 식 ``ceil(Diameter/pitch_y)`` 는 같은
+    자재에서 7 을 내 row 가 전 구간 1 컸다.
+
+    ``center_y`` 가 없거나 기록되지 않았으면(``0``) 옛 식으로 폴백한다 — 장비 화면 정답
+    4사례(``TestGoldenEquipmentExamples``)가 그 값이고 ``Center_Y`` 를 갖고 있지 않다.
+    ⚠ **두 식은 보통 1 다르다.** 폴백은 '아는 게 없을 때의 기존 동작 보존' 이지 같은 값이
+    아니다 — 그래서 KLA 쪽 ``zero_y`` 도 같은 조건에서 함께 폴백해야 정렬이 유지된다.
+    """
+    if not center_y:                       # None 또는 0.0 → 미기록
+        return math.ceil(diameter / pitch_y)
+    total = math.floor((center_y + diameter / 2.0) / pitch_y) - 1
+    if not (0 <= total <= _MAX_DIE_INDEX):
+        _LOG.warning("Center_Y %.1f 로 계산한 row 기준 %d 이 비상식적이라 "
+                     "ceil(Diameter/pitch_y) 로 폴백합니다.", center_y, total)
+        return math.ceil(diameter / pitch_y)
+    return total
 
 
 def _col_origin(center_x: Optional[float], diameter: float, pitch_x: float) -> int:
@@ -130,7 +154,7 @@ def _col_origin(center_x: Optional[float], diameter: float, pitch_x: float) -> i
     if not center_x:                       # None 또는 0.0 → 미기록
         return CAMTEK_COL_OFFSET
     origin = math.ceil((center_x - diameter / 2.0) / pitch_x)
-    if not (0 <= origin <= _MAX_COL_ORIGIN):
+    if not (0 <= origin <= _MAX_DIE_INDEX):
         _LOG.warning("Center_X %.1f 로 계산한 col 기준 %d 이 비상식적이라 상수 %d 을 씁니다.",
                      center_x, origin, CAMTEK_COL_OFFSET)
         return CAMTEK_COL_OFFSET
@@ -141,7 +165,7 @@ def _col_origin(center_x: Optional[float], diameter: float, pitch_x: float) -> i
 FALLBACK_CAMTEK = CamtekGeometry(
     pitch_x=CAMTEK_PITCH_X, pitch_y=CAMTEK_PITCH_Y,
     col_origin=CAMTEK_COL_OFFSET,
-    row_total=_row_total(DEFAULT_WAFER_DIAMETER, CAMTEK_PITCH_Y),   # = 7
+    row_total=_row_total(None, DEFAULT_WAFER_DIAMETER, CAMTEK_PITCH_Y),   # = 7
     source="fallback",
 )
 FALLBACK_KLA = KlaGeometry(
@@ -194,14 +218,14 @@ def _read_diameter(folder: Path) -> float:
     return DEFAULT_WAFER_DIAMETER
 
 
-def _read_center_x(folder: Path) -> Optional[float]:
-    """웨이퍼 중심의 stage X(µm) — ``[Geometric] Center_X``.  미기록이면 None.
+def _read_center(folder: Path, key: str) -> Optional[float]:
+    """웨이퍼 중심의 stage 좌표(µm) — ``[Geometric] Center_X``/``Center_Y``.  미기록이면 None.
 
     ``0.000000`` 은 **값이 아니라 '기록 안 됨'** 이다(같은 파일에 ``MeasuredDiameter=0``,
     ``FlatNotchVal=-1`` 이 함께 온다).  :func:`_read_key` 의 하한이 그걸 걸러 준다."""
     for base in _search_dirs(folder):
         for rel in _DIAMETER_SOURCES:
-            v = _read_key(base / rel, "Center_X", _MIN_PITCH, _MAX_DIAMETER)
+            v = _read_key(base / rel, key, _MIN_PITCH, _MAX_DIAMETER)
             if v is not None:
                 return v
     return None
@@ -303,12 +327,14 @@ def camtek_geometry(folder: Path) -> Optional[CamtekGeometry]:
                 continue
             if src == "models.py 상수" and not meaningful:
                 continue      # 검산이 pitch 를 제약하지 못했다 — 상수를 추정으로 쓰지 않는다
-            # col·row 기준 모두 유도값이다.  col 은 웨이퍼의 stage 위치(Center_X)를,
-            # row 는 직경을 따른다 — 둘 다 못 읽으면 상수로 폴백한다(§6-H).
+            # col·row 기준 **모두** 웨이퍼의 stage 위치(Center_X/Center_Y)에서 유도한다 —
+            # 같은 규칙의 두 축이다(§6-H·§6-J).  못 읽으면 각각 상수/옛 식으로 폴백한다.
             dia = _read_diameter(folder)
             return CamtekGeometry(pitch_x=px, pitch_y=py,
-                                  col_origin=_col_origin(_read_center_x(folder), dia, px),
-                                  row_total=_row_total(dia, py),
+                                  col_origin=_col_origin(
+                                      _read_center(folder, "Center_X"), dia, px),
+                                  row_total=_row_total(
+                                      _read_center(folder, "Center_Y"), dia, py),
                                   source=src)
         # ★ Camtek INI 자체가 없는 폴더(KLA 슬롯·LIVE 파일명 슬롯)는 **조용히** None.
         #   경고는 '변환할 항목이 있는데 pitch 를 못 정한' 진짜 문제일 때만 낸다 —
@@ -329,9 +355,14 @@ def parse_kla_header(text: str) -> Optional[KlaGeometry]:
     ``zero_x`` 만 ``SampleTestPlan`` 의 XINDEX 최솟값에서 산출한다(XINDEX −3..3 → 3).
 
     ⚠ ``zero_y`` 는 산출하지 않는다.  ``SampleTestPlan`` 에는 **검사한 die 만** 있어서,
-    맵 가장자리 행이 통째로 미사용이면 최솟값이 맵 원점과 어긋난다 — 실측 자재가 정확히
-    그 경우다(세로 맵 0..6 중 1..6 만 사용 → 산출값 3, 정답 4).  가로는 0..6 을 전부 써서
-    산출값이 맞는다.  자세한 근거는 :mod:`.models` 의 ``KLA_ZERO_Y`` 주석 참조.
+    맵 가장자리 행이 통째로 미사용이면 최솟값이 맵 원점과 어긋난다.  자세한 근거는
+    :mod:`.models` 의 ``KLA_ZERO_Y`` 주석 참조.
+
+    ★ **`SampleCenterLocation` 으로 산출할 수는 있다**(실측 3장에서 `SampleTestPlan`
+    범위와 2축 전부 일치, 값은 3).  하지만 그러면 Camtek 쪽이 ``Center_Y`` 를 못 읽어
+    폴백한 폴더와 **1 어긋난다** — 확인된 KLA↔Camtek 쌍이 정확히 그 경우다.  어느 조합이
+    맞는지는 ``Center_Y`` 가 기록된 웨이퍼의 KLA 쌍이 있어야 정해진다
+    (``docs/좌표_검증_필요자료.md`` ③).  그때까지 상수를 유지한다.
 
     순수 함수 — 파일 없이 헤드리스 테스트할 수 있다.
     """

@@ -5,8 +5,8 @@
 ``Row`` 필드는 레시피마다 원점이 다를 수 있어 변환에 쓰지 않는다::
 
     x_index = floor(X / geom.pitch_x)       y_index = floor(Y / geom.pitch_y)
-    col = x_index - geom.col_origin
-    row = geom.row_total - y_index          # row_total = ceil(Diameter / pitch_y)
+    col = x_index - geom.col_origin         # col_origin  = 첫 완전 die 열
+    row = geom.row_total - y_index          # row_total   = 마지막 완전 die 행
     x   = floor(X - x_index × pitch_x)      # 장비 표기 = 버림 (반올림 아님 — 실측:
     y   = floor(Y - y_index × pitch_y)      #   나머지 43180.809 를 장비는 43180 으로 표기)
 """
