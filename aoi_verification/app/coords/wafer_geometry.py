@@ -55,6 +55,13 @@ _MAX_DIE_INDEX = 200
 # Diameter 를 담은 파일 후보 — pitch 후보와 같은 폴더 탐색 순서로 찾는다.
 _DIAMETER_SOURCES = ("Params_WaferInfo.ini", "ProductInfo.ini")
 
+# 웨이퍼 중심의 **2순위 소스** — `[Geometric] Center_X/Y` 가 0(미기록)일 때 쓴다.
+# `Wafer2Table_X/Y = a11 a12 t1` 두 줄이 어파인 변환 `wafer = M·table + t` 를 준다.
+_W2T_FILE = "Wafer2Table.ini"
+_W2T_PAT = re.compile(
+    r"(?im)^\s*Wafer2Table_([XY])\s*=\s*"
+    r"([-\d.eE]+)\s+([-\d.eE]+)\s+([-\d.eE]+)\s*$")
+
 # Camtek die pitch 후보 (상대경로, X키, Y키) 우선순위.
 # ⚠ **간격(step) 계열만** 넣는다.  die '크기' 는 pitch 가 아니다 — 스크라이브 street 이
 # 있는 자재는 둘이 다르다(실측 PGEE48: XDieSize 4147.352 vs XDieIndex 4160.900, 13.5 µm 차).
@@ -236,6 +243,61 @@ def _read_center(folder: Path, key: str) -> Optional[float]:
     return None
 
 
+def _read_wafer2table(folder: Path) -> Optional[tuple[float, float]]:
+    """``Wafer2Table.ini`` 의 정렬 변환에서 **웨이퍼 중심의 stage 좌표**를 푼다.
+
+    파일이 담은 것은 어파인 변환 ``wafer = M·table + t`` 다(실측 앵커 3점을 2.7 µm 안에
+    재현).  웨이퍼 중심은 ``wafer = (0,0)`` 인 지점이므로::
+
+        중심(stage) = M⁻¹ · (−t)
+
+    ``Params_WaferInfo.ini [Geometric] Center_X/Y`` 가 ``0.000000``(정렬 정보 미기록)인
+    스캔에도 **이 파일에는 값이 있다** — 그게 이 소스의 존재 이유다.  T254 실측에서
+    여기서 푼 중심 ``(165994, 202629)`` 이 장비 화면 정답(``col_origin=2``,
+    ``row_total=10``)을 그대로 낸다(``docs/디바이스_하드코딩_조사.md`` §6-L).
+    """
+    for base in _search_dirs(folder):
+        txt = read_ini_text(base / _W2T_FILE)
+        if txt is None:
+            continue
+        rows: dict[str, tuple[float, float, float]] = {}
+        for m in _W2T_PAT.finditer(txt):
+            try:
+                rows[m.group(1).upper()] = (float(m.group(2)), float(m.group(3)),
+                                            float(m.group(4)))
+            except ValueError:
+                return None
+        if {"X", "Y"} - rows.keys():
+            continue
+        (a11, a12, t1), (a21, a22, t2) = rows["X"], rows["Y"]
+        det = a11 * a22 - a12 * a21
+        if abs(det) < 1e-9:            # 특이행렬 — 못 푼다
+            return None
+        cx = (a22 * -t1 - a12 * -t2) / det
+        cy = (-a21 * -t1 + a11 * -t2) / det
+        if not all(_MIN_PITCH <= v <= _MAX_DIAMETER for v in (cx, cy)):
+            _LOG.warning("%s 로 푼 웨이퍼 중심 (%.1f, %.1f) 이 비상식적이라 무시합니다: %s",
+                         _W2T_FILE, cx, cy, base)
+            return None
+        return (cx, cy)
+    return None
+
+
+def _wafer_center(folder: Path) -> tuple[Optional[float], Optional[float]]:
+    """웨이퍼 중심의 stage 좌표 ``(X, Y)`` — 축마다 없으면 ``None``.
+
+    1순위 ``Params_WaferInfo.ini [Geometric] Center_X/Y``, 2순위 ``Wafer2Table.ini``.
+    ``Center_*=0.000000`` 은 값이 아니라 '기록 안 됨' 이라 2순위로 넘어간다."""
+    cx = _read_center(folder, "Center_X")
+    cy = _read_center(folder, "Center_Y")
+    if cx is not None and cy is not None:
+        return (cx, cy)
+    w2t = _read_wafer2table(folder)
+    if w2t is None:
+        return (cx, cy)
+    return (cx if cx is not None else w2t[0], cy if cy is not None else w2t[1])
+
+
 def _pitch_candidates(folder: Path):
     """(pitch_x, pitch_y, 출처) 후보를 우선순위대로 내놓는다.
 
@@ -332,14 +394,14 @@ def camtek_geometry(folder: Path) -> Optional[CamtekGeometry]:
                 continue
             if src == "models.py 상수" and not meaningful:
                 continue      # 검산이 pitch 를 제약하지 못했다 — 상수를 추정으로 쓰지 않는다
-            # col·row 기준 **모두** 웨이퍼의 stage 위치(Center_X/Center_Y)에서 유도한다 —
-            # 같은 규칙의 두 축이다(§6-H·§6-J).  못 읽으면 각각 상수/옛 식으로 폴백한다.
+            # col·row 기준 **모두** 웨이퍼의 stage 위치에서 유도한다 — 같은 규칙의 두
+            # 축이다(§6-H·§6-J).  중심은 Params 의 Center_X/Y → Wafer2Table.ini 순으로
+            # 찾고(§6-L), 그래도 없으면 각각 상수/옛 식으로 폴백한다.
             dia = _read_diameter(folder)
+            cx, cy = _wafer_center(folder)
             return CamtekGeometry(pitch_x=px, pitch_y=py,
-                                  col_origin=_col_origin(
-                                      _read_center(folder, "Center_X"), dia, px),
-                                  row_total=_row_total(
-                                      _read_center(folder, "Center_Y"), dia, py),
+                                  col_origin=_col_origin(cx, dia, px),
+                                  row_total=_row_total(cy, dia, py),
                                   source=src)
         # ★ Camtek INI 자체가 없는 폴더(KLA 슬롯·LIVE 파일명 슬롯)는 **조용히** None.
         #   경고는 '변환할 항목이 있는데 pitch 를 못 정한' 진짜 문제일 때만 낸다 —

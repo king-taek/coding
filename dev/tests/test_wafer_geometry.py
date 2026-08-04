@@ -16,7 +16,8 @@ import pytest
 
 from aoi_verification.app.coords import camtek_ini, kla_info
 from aoi_verification.app.coords import wafer_geometry as wg
-from aoi_verification.app.coords.models import (CAMTEK_PITCH_X, CAMTEK_PITCH_Y,
+from aoi_verification.app.coords.models import (CAMTEK_COL_OFFSET,
+                                                CAMTEK_PITCH_X, CAMTEK_PITCH_Y,
                                                 KLA_ZERO_X, KLA_ZERO_Y)
 
 _REAL = Path(__file__).resolve().parents[1] / "좌표 확인"
@@ -874,6 +875,95 @@ class TestRowTotalFromCenterY:
             got = wg._row_total(400000.0, 300000.0, 150.0)    # 행이 3665개 → 비상식
         assert got == math.ceil(300000.0 / 150.0)
         assert any("row 기준" in r.message for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# ★ Center_X/Y 가 미기록(0)일 때의 2순위 중심 소스 — Wafer2Table.ini (§6-L)
+#
+# 실측(T254 `GX57001305`): 이 파일의 어파인 변환에서 푼 중심이 **장비 화면 정답**
+# (col_origin=2, row_total=10)을 그대로 낸다.  `Params_WaferInfo.ini` 는 그 스캔에서
+# Center_X=Center_Y=0.000000 이라 예전에는 추측(ceil)에 의존했다.
+# ---------------------------------------------------------------------------
+_W2T_REAL = (
+    "[WAFER ALIGNMENT]\n"
+    "Wafer2Table_X=          0.9999932263         0.0012932406   -166254.5886308713\n"
+    "Wafer2Table_Y=         -0.0012932406         0.9999932263   -202412.7818198704\n"
+    "Rotate  w2t=   -0.074098\n"
+    "Offset  w2t= -166254.589  -202412.782\n"
+)
+# 파일이 담은 앵커 3점 — (table_x, table_y, wafer_x, wafer_y).  변환 방향의 증거다.
+_W2T_ANCHORS = [
+    (158331.042831, 186603.091890, -7681.375999, -16013.833047),
+    (28730.142831, 186603.091890, -137284.037356, -15850.267591),
+    (287931.942831, 186603.091890, 121915.429053, -16185.361044),
+]
+
+
+class TestWaferCenterFromWafer2Table:
+    _T254_PARAMS = (_params_ini(14400.1, 31109.8)
+                    + "[Geometric]\nDiameter=300000.000000\n"
+                      "Center_X=0.000000\nCenter_Y=0.000000\n")
+
+    @staticmethod
+    def _folder(tmp_path: Path, *, w2t: str = _W2T_REAL, params: str = None) -> Path:
+        folder = tmp_path / "t254"
+        folder.mkdir()
+        (folder / "ColorImageGrabingInfo.ini").write_text(
+            # 실물: X=29649.1 Y=164545.2 → x_index 2, y_index 5 (장비 화면 0,5)
+            _grabbing_ini_rec([("a", 29649.148148, 164545.207407, 2, 5, 1)]),
+            encoding="utf-8")
+        (folder / "Params_WaferInfo.ini").write_text(
+            params or TestWaferCenterFromWafer2Table._T254_PARAMS, encoding="utf-8")
+        if w2t:
+            (folder / "Wafer2Table.ini").write_text(w2t, encoding="utf-8")
+        return folder
+
+    def test_anchor_points_confirm_transform_direction(self):
+        """★ 파일의 변환은 ``wafer = M·table + t`` 다 — 앵커 3점이 3 µm 안에 재현된다.
+
+        방향을 반대로 읽으면 중심이 음수가 나와 전부 틀린다."""
+        import math
+        a11, a12, t1 = 0.9999932263, 0.0012932406, -166254.5886308713
+        a21, a22, t2 = -0.0012932406, 0.9999932263, -202412.7818198704
+        for tx, ty, wx, wy in _W2T_ANCHORS:
+            got = (a11 * tx + a12 * ty + t1, a21 * tx + a22 * ty + t2)
+            assert math.hypot(got[0] - wx, got[1] - wy) <= 3.0
+
+    def test_center_is_solved_from_the_transform(self, tmp_path):
+        cx, cy = wg._wafer_center(self._folder(tmp_path))
+        assert cx == pytest.approx(165993.7, abs=1.0)
+        assert cy == pytest.approx(202628.8, abs=1.0)
+
+    def test_matches_equipment_screen(self, tmp_path):
+        """★ 여기서 푼 중심이 장비 화면 정답 ``(0,5)`` 를 낸다."""
+        folder = self._folder(tmp_path)
+        geom = wg.camtek_geometry(folder)
+        assert (geom.col_origin, geom.row_total) == (2, 10)
+        assert (lambda c: (c.col, c.row))(camtek_ini.load_folder(folder)["a"]) == (0, 5)
+
+    def test_recorded_center_wins(self, tmp_path):
+        """``Center_X/Y`` 가 기록돼 있으면 그쪽이 1순위 — Wafer2Table 은 안 본다."""
+        folder = self._folder(tmp_path, params=(
+            _params_ini(14400.1, 31109.8)
+            + "[Geometric]\nDiameter=300000.000000\n"
+              "Center_X=167448.973100\nCenter_Y=179674.003400\n"))
+        assert wg._wafer_center(folder) == (167448.9731, 179674.0034)
+
+    def test_no_file_leaves_center_unknown(self, tmp_path):
+        """파일이 없으면 ``None`` — 호출부가 옛 폴백을 쓴다(동작 불변)."""
+        folder = self._folder(tmp_path, w2t="")
+        assert wg._wafer_center(folder) == (None, None)
+        geom = wg.camtek_geometry(folder)
+        assert (geom.col_origin, geom.row_total) == (CAMTEK_COL_OFFSET, 10)
+
+    @pytest.mark.parametrize("body,label", [
+        ("[WAFER ALIGNMENT]\nWafer2Table_X= 0 0 -1\nWafer2Table_Y= 0 0 -1\n", "특이행렬"),
+        ("[WAFER ALIGNMENT]\nWafer2Table_X= 1 0 -1e9\nWafer2Table_Y= 0 1 -1e9\n", "범위 밖"),
+        ("[WAFER ALIGNMENT]\nWafer2Table_X= 1 0 -166254.6\n", "Y 줄 없음"),
+    ])
+    def test_bad_transform_is_rejected(self, tmp_path, body, label):
+        """못 믿을 값은 채택하지 않는다 — 추측 좌표를 내느니 폴백이 낫다."""
+        assert wg._wafer_center(self._folder(tmp_path, w2t=body)) == (None, None)
 
 
 @pytest.mark.skipif(not _RDL4_REAL.exists(), reason="RDL4 실물 폴더 없음")
