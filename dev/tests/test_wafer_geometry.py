@@ -884,14 +884,36 @@ class TestRowTotalFromCenterY:
 # (col_origin=2, row_total=10)을 그대로 낸다.  `Params_WaferInfo.ini` 는 그 스캔에서
 # Center_X=Center_Y=0.000000 이라 예전에는 추측(ceil)에 의존했다.
 # ---------------------------------------------------------------------------
-_W2T_REAL = (
-    "[WAFER ALIGNMENT]\n"
-    "Wafer2Table_X=          0.9999932263         0.0012932406   -166254.5886308713\n"
-    "Wafer2Table_Y=         -0.0012932406         0.9999932263   -202412.7818198704\n"
-    "Rotate  w2t=   -0.074098\n"
-    "Offset  w2t= -166254.589  -202412.782\n"
-)
-# 파일이 담은 앵커 3점 — (table_x, table_y, wafer_x, wafer_y).  변환 방향의 증거다.
+# 사용자가 모아 준 실물 6건 — (a11, a12, t1, a21, a22, t2).
+# 원본: docs/Camtek 좌표 예시(T254)/_wafer2table_모음/Wafer2Table_6건.md
+_W2T_FILES = {
+    # ★ 이 웨이퍼가 장비 화면 정답(0,5)을 가진 바로 그 웨이퍼다 — 같은 웨이퍼 검증.
+    "T254 GIX5703110": (0.9999817250, 0.0009363897, -166279.6865640077,
+                        -0.0009363897, 0.9999817250, -202394.8031916906),
+    "T254 GIX5703114": (0.9999857168, 0.0017653201, -166430.4453316601,
+                        -0.0017653201, 0.9999857168, -202267.4449366639),
+    "T254 GX57001305": (0.9999932263, 0.0012932406, -166254.5886308713,
+                        -0.0012932406, 0.9999932263, -202412.7818198704),
+    "RDL4 XYB1": (0.9999776878, 0.0002402341, -167629.5246704901,
+                  -0.0002402341, 0.9999776878, -179492.1341826289),
+    "RDL4 XYA2": (0.9999820989, 0.0006289847, -167692.9855892736,
+                  -0.0006289847, 0.9999820989, -179422.3521613864),
+    "UDS-PIDS3 35115E27EWD7": (1.0000080255, 0.0008509894, -204890.6266250769,
+                               -0.0008509894, 1.0000080255, -224207.3632713843),
+}
+
+
+def _w2t_ini(key: str) -> str:
+    a11, a12, t1, a21, a22, t2 = _W2T_FILES[key]
+    return ("[WAFER ALIGNMENT]\n"
+            f"Wafer2Table_X=   {a11!r}   {a12!r}   {t1!r}\n"
+            f"Wafer2Table_Y=   {a21!r}   {a22!r}   {t2!r}\n"
+            "[LOCAL_CORRECTION]\nApply=0\n")
+
+
+_W2T_REAL = _w2t_ini("T254 GX57001305")
+# `T254 GX57001305` 파일이 담은 앵커 3점 — (table_x, table_y, wafer_x, wafer_y).
+# 변환 **방향**의 증거다: 반대로 읽으면 중심이 음수가 나온다.
 _W2T_ANCHORS = [
     (158331.042831, 186603.091890, -7681.375999, -16013.833047),
     (28730.142831, 186603.091890, -137284.037356, -15850.267591),
@@ -904,13 +926,19 @@ class TestWaferCenterFromWafer2Table:
                     + "[Geometric]\nDiameter=300000.000000\n"
                       "Center_X=0.000000\nCenter_Y=0.000000\n")
 
+    # 실물 T254 결함: X=29649.1 Y=164545.2 → x_index 2, y_index 5 (장비 화면 0,5)
+    _T254_DEFECT = [("a", 29649.148148, 164545.207407, 2, 5, 1)]
+    # 실물 RDL4 결함(§6-J): x_index 6, y_index 2 — pitch 37247.9 × 44905.3 검산용
+    _RDL4_DEFECT = [("a", 255350.636699881, 116719.042739472, 6, 2, 1)]
+
     @staticmethod
-    def _folder(tmp_path: Path, *, w2t: str = _W2T_REAL, params: str = None) -> Path:
-        folder = tmp_path / "t254"
-        folder.mkdir()
+    def _folder(tmp_path: Path, *, w2t: str = _W2T_REAL, params: str = None,
+                entries=None) -> Path:
+        folder = tmp_path / "scan"
+        folder.mkdir(parents=True, exist_ok=True)
         (folder / "ColorImageGrabingInfo.ini").write_text(
-            # 실물: X=29649.1 Y=164545.2 → x_index 2, y_index 5 (장비 화면 0,5)
-            _grabbing_ini_rec([("a", 29649.148148, 164545.207407, 2, 5, 1)]),
+            _grabbing_ini_rec(entries
+                              or TestWaferCenterFromWafer2Table._T254_DEFECT),
             encoding="utf-8")
         (folder / "Params_WaferInfo.ini").write_text(
             params or TestWaferCenterFromWafer2Table._T254_PARAMS, encoding="utf-8")
@@ -964,6 +992,67 @@ class TestWaferCenterFromWafer2Table:
     def test_bad_transform_is_rejected(self, tmp_path, body, label):
         """못 믿을 값은 채택하지 않는다 — 추측 좌표를 내느니 폴백이 낫다."""
         assert wg._wafer_center(self._folder(tmp_path, w2t=body)) == (None, None)
+
+    # ── 실물 6건으로 '웨이퍼마다 다르지 않은가' 를 검증 ────────────────────
+    def test_same_wafer_matches_equipment_screen(self, tmp_path):
+        """★ 장비 화면 정답을 가진 **바로 그 웨이퍼**(GIX5703110)의 파일이 정답을 낸다.
+
+        이전에는 다른 웨이퍼(GX57001305) 파일로 교차 검증해서 '웨이퍼마다 다를 수
+        있지 않냐' 는 지적이 남아 있었다.  같은 웨이퍼로 닫았다."""
+        folder = self._folder(tmp_path, w2t=_w2t_ini("T254 GIX5703110"))
+        geom = wg.camtek_geometry(folder)
+        assert (geom.col_origin, geom.row_total) == (2, 10)
+        c = camtek_ini.load_folder(folder)["a"]
+        assert (c.col, c.row) == (0, 5)          # 장비 화면 판독값
+
+    def test_same_lot_wafers_give_the_same_origin(self, tmp_path):
+        """같은 로트 웨이퍼 3장이 **같은 원점**을 낸다 — 중심 편차는 die 폭의 1% 미만."""
+        keys = [k for k in _W2T_FILES if k.startswith("T254")]
+        centers = []
+        for i, k in enumerate(keys):
+            folder = self._folder(tmp_path / f"w{i}", w2t=_w2t_ini(k))
+            geom = wg.camtek_geometry(folder)
+            assert (geom.col_origin, geom.row_total) == (2, 10), k
+            centers.append(wg._wafer_center(folder))
+        spread_x = max(c[0] for c in centers) - min(c[0] for c in centers)
+        spread_y = max(c[1] for c in centers) - min(c[1] for c in centers)
+        assert spread_x < 150 and spread_y < 150          # 실측 99 / 75 µm
+        # 경계까지 여유(≈1594 µm)가 편차의 10배 이상이어야 안심할 수 있다.
+        assert spread_x * 10 < 14400.1
+
+    @pytest.mark.parametrize("key", ["RDL4 XYB1", "RDL4 XYA2"])
+    def test_agrees_with_recorded_center(self, tmp_path, key):
+        """★ ``Center_*`` 가 **기록된** 자재에서 두 소스가 일치한다.
+
+        RDL4 는 `Params` 에 `(167448.97, 179674.00)` 이 박혀 있다(웨이퍼 2장·장비 2대
+        동일).  같은 제품 웨이퍼의 `Wafer2Table.ini` 로 푼 중심이 150 µm 안에 들어오고,
+        **유도한 원점이 같다** — 1순위/2순위가 어긋나지 않는다는 확인이다."""
+        folder = self._folder(tmp_path, w2t=_w2t_ini(key),
+                              entries=self._RDL4_DEFECT, params=(
+            _params_ini(37247.9, 44905.3)
+            + "[Geometric]\nDiameter=300000.000000\n"
+              "Center_X=0.000000\nCenter_Y=0.000000\n"))
+        cx, cy = wg._wafer_center(folder)
+        assert abs(cx - 167448.9731) < 150 and abs(cy - 179674.0034) < 150
+        geom = wg.camtek_geometry(folder)
+        assert (geom.col_origin, geom.row_total) == (1, 6)   # 기록값이 내는 원점과 같다
+
+    def test_row_total_follows_placement_not_grid(self, tmp_path):
+        """★ **같은 격자인데 row 기준이 갈린다** — 격자가 아니라 위치가 정한다.
+
+        RDL4 와 UDS-PIDS3 는 둘 다 TB500 격자(44905)인데 6 과 7 로 다르다.
+        옛 식 `ceil(Diameter/pitch_y)` 는 둘 다 7 을 내므로 RDL4 에서 틀린다."""
+        import math
+        got = {}
+        for i, key in enumerate(("RDL4 XYA2", "UDS-PIDS3 35115E27EWD7")):
+            folder = self._folder(tmp_path / f"g{i}", w2t=_w2t_ini(key),
+                                  entries=self._RDL4_DEFECT, params=(
+                _params_ini(37247.9, 44905.3)
+                + "[Geometric]\nDiameter=300000.000000\n"))
+            got[key] = wg.camtek_geometry(folder).row_total
+        assert got["RDL4 XYA2"] == 6
+        assert got["UDS-PIDS3 35115E27EWD7"] == 7
+        assert math.ceil(300000.0 / 44905.3) == 7      # 옛 식은 둘 다 7
 
 
 @pytest.mark.skipif(not _RDL4_REAL.exists(), reason="RDL4 실물 폴더 없음")
