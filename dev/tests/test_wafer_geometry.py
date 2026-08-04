@@ -20,7 +20,7 @@ from aoi_verification.app.coords.models import (CAMTEK_PITCH_X, CAMTEK_PITCH_Y,
                                                 KLA_ZERO_X, KLA_ZERO_Y)
 
 _REAL = Path(__file__).resolve().parents[1] / "좌표 확인"
-# 사용자가 올린 RDL4 실물 — 같은 장비가 같은 사진을 두 형태로 남긴 로트(§6-J).
+# 사용자가 올린 RDL4 실물 — 같은 결함이 두 형태로 확보된 로트(§6-J).
 _RDL4_REAL = (Path(__file__).resolve().parents[2] / "docs"
               / "RDL4 LOT files(26년 05월, FDV)")
 
@@ -806,9 +806,10 @@ class TestKlaHeader:
 
 
 # ---------------------------------------------------------------------------
-# ★ row 기준을 Center_Y 에서 유도 — 같은 장비가 같은 사진을 두 형태로 남긴 실측 (§6-J)
+# ★ row 기준을 Center_Y 에서 유도 — 같은 결함이 두 형태로 확보된 실측 (§6-J)
 #
-# 18호기 폴더에는 **같은 결함 사진이 두 이름으로** 들어 있다:
+# 18호기 폴더에 **같은 결함 사진이 두 이름으로** 있다(1차 리뷰 사진을 사용자가 직접
+# 가져다 놓은 것 — 좌표가 파일명에 박힌 형태는 실제로 드물게 쓰인다):
 #   · 점표기   `51216.183928.c.1345447384.1.jpeg`      → 절대 X/Y 를 INI 가 갖는다
 #   · col/row  `TB500_RDL4 - Multi_…_0_2_13969.17…_4306.11…_Irregular Bump.jpg`
 # 두 번째가 **장비가 스스로 계산한 col/row** 다.  옛 식 `ceil(Diameter/pitch_y)` 는
