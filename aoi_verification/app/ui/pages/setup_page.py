@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QObject, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (QBoxLayout, QDoubleSpinBox, QFileDialog,
                               QGridLayout, QHBoxLayout, QLabel, QLineEdit,
                               QMessageBox, QScrollArea, QSizePolicy,
@@ -55,6 +55,47 @@ class SetupInput:
 _SIDE_BY_SIDE_MIN_W = 900
 
 
+# 살아 있는 die 기하 스캔을 여기에 붙잡아 둔다 — **페이지의 자식으로 두지 않는다.**
+#
+# ★ 이유: 실행 중인 QThread 가 파괴되면 Qt 는 "QThread: Destroyed while thread is
+#   still running" 으로 프로세스를 죽인다.  다크 모드 전환은 이 페이지를 다시 만들 수
+#   있어(`main_window._build_setup_page`), 스캔이 끝나기 전에 페이지가 사라지면 정확히
+#   그 일이 벌어진다.  부모를 떼고 여기서 참조를 쥐고 있다가 `finished` 에서 놓아 주면
+#   페이지가 언제 죽든 스레드는 자기 수명을 다 살고 조용히 사라진다
+#   (`widgets/zoom_window.py` 의 `_LIVE_LOADERS` 와 같은 패턴).
+_LIVE_DIE_SCANS: set = set()
+
+
+class _DieGeometryScan(QThread):
+    """기준 폴더의 die 기하를 **워커 스레드에서** 읽는다(UI 가 멈추지 않게).
+
+    이 스캔은 슬롯을 하나씩 열어 INI 를 파싱하므로 자재에 따라 초 단위다 — 실측으로
+    슬롯 25개 × 결함 3,000개에서 1.4초, NAS 에서는 파일 왕복이 더해진다.  UI 스레드에서
+    돌리면 그동안 창이 통째로 멈춘다(그게 이 변경의 이유다).
+
+    ``token`` 은 **결과가 늦게 도착했을 때 버리기 위한 세대 번호**다.  사용자가 폴더를
+    연달아 바꾸면 스캔이 겹치는데, 늦게 끝난 옛 스캔이 새 폴더의 안내를 덮어쓰면 안 된다.
+    ``signals`` 는 메인 스레드에서 만들어지므로 emit 은 큐 연결이 된다."""
+
+    class _Signals(QObject):
+        done = pyqtSignal(int, object, str, bool)    # token, pitch|None, src, broken
+
+    def __init__(self, token: int, ref_text: str) -> None:
+        super().__init__()                  # 부모 없음(위 주석)
+        self._token = token
+        self._ref_text = ref_text
+        self.signals = self._Signals()
+
+    def run(self) -> None:      # type: ignore[override]
+        # `_detect_die_geometry` 는 전 구간 fail-safe 지만, 워커에서 예외가 새면
+        # 안내가 영원히 '확인 중' 으로 남는다 — 여기서도 한 번 더 막는다.
+        try:
+            pitch, src, broken = SetupPage._detect_die_geometry(self._ref_text)
+        except Exception:
+            pitch, src, broken = (None, "", False)
+        self.signals.done.emit(self._token, pitch, src, broken)
+
+
 class SetupPage(QWidget):
     """검증 시작 화면."""
 
@@ -76,6 +117,14 @@ class SetupPage(QWidget):
         # 잠근다.  ★ 기본은 True 다: 이 페이지를 단독으로 띄우는 곳(테스트·미리보기)
         # 에서 버튼이 영원히 잠기면 안 된다.  메인 창이 곧바로 False 로 뒤집는다.
         self._backend_ready = True
+        # die 기하 스캔(백그라운드) 상태.  `_die_scanned_for` 는 **이미 스캔이 끝난
+        # 경로** 다 — 같은 경로로 `_validate` 가 다시 와도(허용 오차를 건드리면 온다)
+        # 다시 훑지 않고 캐시한 결과로 문구만 다시 그린다.
+        self._die_token = 0
+        self._die_scanned_for: Optional[str] = None
+        self._die_scanning_for: Optional[str] = None
+        self._die_result: tuple = (None, "", False)
+        self._die_scan: Optional[_DieGeometryScan] = None
         self._build()
 
     # ------------------------------------------------------------------
@@ -881,31 +930,82 @@ class SetupPage(QWidget):
         return ok
 
     def _refresh_die_hint(self, ref_text: Optional[str]) -> None:
-        """기준 폴더의 첫 슬롯에서 die 크기를 읽어 안내/경고 문구를 갱신한다.
+        """기준 폴더의 die 크기 안내를 갱신한다 — **스캔은 백그라운드에서** 한다.
 
-        폴더 단위 ``lru_cache`` 라 반복 호출이 싸고, `_validate` 는 이미 디바운스된다.
-        전 구간 fail-safe — 안내가 실패해도 설정 화면이 막히면 안 된다."""
+        ★ 여기서 직접 훑지 않는다.  `_detect_die_geometry` 는 슬롯을 하나씩 열어
+        INI 를 파싱하므로 자재에 따라 초 단위고(실측: 슬롯 25 × 결함 3,000 → 1.4초),
+        UI 스레드에서 돌리면 **폴더를 고르는 순간 창이 그만큼 멈춘다**.  이게 실제
+        사용자 신고였다.  계산량은 줄이지 않는다 — pitch 검산은 정확도 가드라
+        완화하면 격자가 다른 자재에 상수가 채택된다(CLAUDE.md).  자리를 옮길 뿐이다.
+
+        같은 경로로 다시 불리면 스캔하지 않고 캐시한 결과로 문구만 다시 그린다 —
+        허용 오차를 건드릴 때마다(`coord_tol_spin.valueChanged` → `_schedule_validate`)
+        폴더를 다시 훑던 낭비가 사라진다.  전 구간 fail-safe."""
         hint = getattr(self, "_die_hint", None)
         if hint is None:
             return
-        pitch, src, broken = self._detect_die_geometry(ref_text) if ref_text \
-            else (None, "", False)
+        if not ref_text:
+            # 경로가 비었/잘못됐다 — 진행 중인 스캔 결과를 버리고 조용히 비운다.
+            self._die_token += 1
+            self._die_scanned_for = None
+            self._die_scanning_for = None
+            self._die_result = (None, "", False)
+            self._apply_die_hint(None, "", False)
+            return
+        if ref_text == self._die_scanned_for:
+            self._apply_die_hint(*self._die_result)     # 캐시 — 스캔하지 않는다
+            return
+        if ref_text == self._die_scanning_for:
+            # ★ 같은 경로를 이미 훑는 중이다 — 결과를 기다린다.  기준 폴더를 고른
+            #   직후 검증 폴더를 고르면 `_validate` 가 다시 오는데(두 입력란이 같은
+            #   디바운스를 공유한다), 그때마다 워커를 새로 띄우면 같은 폴더를 두 번
+            #   훑는다.  느린 NAS 에서 부하가 그대로 두 배가 된다.
+            return
+        self._die_token += 1
+        self._die_scanning_for = ref_text
+        self._set_die_hint_text(i18n.KO.DIE_SIZE_CHECKING, "muted")
+        scan = _DieGeometryScan(self._die_token, ref_text)
+        scan.signals.done.connect(self._on_die_scan_done)
+        _LIVE_DIE_SCANS.add(scan)
+        scan.finished.connect(lambda s=scan: _LIVE_DIE_SCANS.discard(s))
+        self._die_scan = scan
+        scan.start()
+
+    def _on_die_scan_done(self, token: int, pitch, src: str, broken: bool) -> None:
+        """워커가 끝났다 — **최신 세대의 결과만** 반영한다.
+
+        폴더를 연달아 바꾸면 스캔이 겹치고, 늦게 끝난 옛 스캔이 새 폴더의 안내를
+        덮어쓸 수 있다.  세대 번호가 다르면 그 결과는 버린다."""
+        if token != self._die_token:
+            return
+        self._die_scanned_for = self._die_scanning_for
+        self._die_scanning_for = None
+        self._die_result = (pitch, src, broken)
+        self._apply_die_hint(pitch, src, broken)
+
+    def _set_die_hint_text(self, text: str, role: str) -> None:
+        """문구 + 동적 프로퍼티 repolish(안 하면 QSS 가 다시 그려지지 않는다)."""
+        hint = self._die_hint
+        hint.setText(text)
+        hint.setProperty("role", role)
+        hint.style().unpolish(hint)
+        hint.style().polish(hint)
+
+    def _apply_die_hint(self, pitch, src: str, broken: bool) -> None:
+        """스캔 결과 → 화면 문구.  순수 렌더링(파일을 읽지 않는다)."""
         if pitch is None:
             # ★ die 크기를 모른다고 곧장 경고하지 않는다.  KLA 슬롯·LIVE 파일명 슬롯은
             #   die 크기 없이도 좌표가 나온다 — 진짜 못 쓰는 경우(`broken`)만 경고한다.
-            hint.setText(i18n.KO.DIE_SIZE_NOT_FOUND if broken else "")
-            hint.setProperty("role", "warn" if broken else "muted")
+            self._set_die_hint_text(i18n.KO.DIE_SIZE_NOT_FOUND if broken else "",
+                                    "warn" if broken else "muted")
+            return
+        text = i18n.KO.DIE_SIZE_DETECTED_FMT.format(x=pitch[0], y=pitch[1], src=src)
+        ratio = float(self.coord_tol_spin.value()) / pitch[0]
+        if ratio > i18n.KO.DIE_TOL_RATIO_WARN:
+            text += "\n" + i18n.KO.DIE_TOL_TOO_LARGE_FMT.format(pct=ratio * 100.0)
+            self._set_die_hint_text(text, "warn")
         else:
-            text = i18n.KO.DIE_SIZE_DETECTED_FMT.format(x=pitch[0], y=pitch[1], src=src)
-            ratio = float(self.coord_tol_spin.value()) / pitch[0]
-            if ratio > i18n.KO.DIE_TOL_RATIO_WARN:
-                text += "\n" + i18n.KO.DIE_TOL_TOO_LARGE_FMT.format(pct=ratio * 100.0)
-                hint.setProperty("role", "warn")
-            else:
-                hint.setProperty("role", "muted")
-            hint.setText(text)
-        hint.style().unpolish(hint)     # 동적 프로퍼티는 repolish 해야 반영된다
-        hint.style().polish(hint)
+            self._set_die_hint_text(text, "muted")
 
     @staticmethod
     def _detect_die_geometry(ref_text: str):

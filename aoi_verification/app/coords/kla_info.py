@@ -60,11 +60,15 @@ def _find_info_file(folder: Path) -> Optional[Path]:
     for p in folder.glob("*.001"):
         return p
     # 2순위: .jpg/.pass 가 아닌 파일 (확장자 없는 파일 포함), .pass 제외
+    # ★ 조건 순서를 바꾸지 마라 — `is_file()` 은 파일 하나당 stat 이라 **맨 뒤**에 둔다.
+    #   맨 앞에 두면 폴더 안 사진을 전부 stat 한다(NAS 에서 사진 수만큼 왕복).  이름만
+    #   보면 되는 확장자로 먼저 거르면 stat 대상은 정보파일 후보 1~2개뿐이다.
+    #   세 조건 모두 부작용이 없어 순서를 바꿔도 결과는 같다(`test_kla_info_file_lookup`).
     candidates = [
         p for p in folder.iterdir()
-        if p.is_file()
-        and p.suffix.lower() not in _NON_INFO_SUFFIXES
+        if p.suffix.lower() not in _NON_INFO_SUFFIXES
         and not p.name.startswith('.')
+        and p.is_file()
     ]
     if len(candidates) == 1:
         return candidates[0]
@@ -79,9 +83,9 @@ def _info_candidates(folder: Path) -> list[Path]:
     확신할 수 없어 None 을 주지만, WaferID 판독은 후보를 **전부** 훑어 첫 성공값을 쓴다."""
     try:
         files = [p for p in folder.iterdir()
-                 if p.is_file()
-                 and p.suffix.lower() not in _NON_INFO_SUFFIXES
-                 and not p.name.startswith('.')]
+                 if p.suffix.lower() not in _NON_INFO_SUFFIXES
+                 and not p.name.startswith('.')
+                 and p.is_file()]      # ★ stat 은 맨 뒤 — `_find_info_file` 주석 참조
     except OSError:
         return []
     files.sort(key=lambda p: (p.suffix.lower() != '.001', p.name.lower()))
