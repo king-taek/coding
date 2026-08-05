@@ -242,6 +242,11 @@ COORD_TOLERANCE_TOOLTIP = (
 # 값을 대신 바꾸지는 않는다(기존 결과가 조용히 달라지면 안 된다).
 DIE_SIZE_DETECTED_FMT = "감지된 die: {x:,.0f} × {y:,.0f} µm  ({src})"
 DIE_SIZE_SRC_KLA = "KLA .001 DiePitch"
+# 폴더를 훑는 동안 보여 줄 문구.  ★ 빈 줄로 두지 않는다 — 이 스캔은 자재에 따라
+# 1초를 넘고(슬롯 25 × 결함 3,000 실측 1.4초), 아무 표시도 없으면 '안내가 원래
+# 없는 폴더' 와 구분되지 않는다.  진행을 모를 때도 멈춰 보이게 두지 않는다는
+# 로딩바 규칙(CLAUDE.md)과 같은 취지다.
+DIE_SIZE_CHECKING = "die 크기 확인 중…"
 # ⚠ **Camtek INI 좌표가 있는데 die pitch 를 못 정한 경우에만** 띄운다.
 # KLA 슬롯·LIVE 파일명 슬롯은 die 크기 없이도 좌표가 나오므로 경고 대상이 아니다.
 # 매칭 자체는 절대 wafer 좌표로 정상 동작한다 — 못 하는 건 die 단위 표기뿐이다.
