@@ -162,7 +162,7 @@ footer.colophon{margin-top:2.4rem;padding-top:1rem;border-top:2px solid var(--ru
     <div><dt>브랜치</dt><dd>claude/coordinate-validation-info-3o2ds5</dd></div>
     <div><dt>장비 정답 대조</dt><dd style="color:var(--pass)">18 / 18 일치</dd></div>
     <div><dt>이번 초점</dt><dd style="color:var(--blue)">엑셀 · 단일 사진 x,y</dd></div>
-    <div><dt>코드 변경</dt><dd style="color:var(--danger)">없음 (기록 전용)</dd></div>
+    <div><dt>코드 변경</dt><dd style="color:var(--pass)">R-0 수정 (08-05)</dd></div>
   </dl>
 </div>
 
@@ -522,26 +522,40 @@ die 번호는 pitch 가 조금 틀려도 <code>floor</code> 덕에 잘 안 바�
     <td><small>장비 고유 — 조정 불가</small></td></tr>
 </tbody></table></div>
 
-<h3 id="schema">① 지금 실제로 틀리는 곳 — 파일명 스키마</h3>
+<h3 id="schema">① 파일명 스키마 <span style="color:var(--pass)">· 고쳤습니다 (R-0)</span></h3>
 <p>참고 저장소가 문서화한 Camtek 파일명 스키마 중 하나는 좌표 뒤에 <strong>결함 크기와 면적이
-더 붙습니다.</strong> 현재 앱의 파서는 “뒤에서 두 번째·마지막 숫자” 를 x·y 로 읽기 때문에,
-그 스키마에서는 <strong>크기와 면적을 좌표로 가져옵니다.</strong></p>
+더 붙습니다.</strong> 옛 파서는 정규식 <code>_(\d+)_(\d+)_.+_(수치)_(수치)$</code> 로 그 형태를
+잡았는데, greedy <code>.+</code> 와 <code>$</code> 앵커 때문에 <strong>뒤쪽 두 수치</strong>를 집었습니다.</p>
 
 <pre>파일명  …_4_5_Over Sized Bump_<b>30229.803</b>_<b>1987.994</b>_12.5_<em>18.3</em>_<em>229.1</em>.jpg
                               └─── 진짜 x, y ───┘        └ 앱이 뽑은 값 ┘
 
-현재 앱 결과   col=4  row=5  x=<em>18.3</em>        y=<em>229.1</em>
-정답           col=4  row=5  x=<b>30229.803</b>  y=<b>1987.994</b>
-오차           x 에서 <em>30,212 µm</em> — die 폭의 81 %</pre>
+옛 결과   col=4  row=5  x=<em>18.3</em>        y=<em>229.1</em>        x 오차 <em>30,212 µm</em> (die 폭의 81 %)
+지금      col=4  row=5  x=<b>30229.803</b>  y=<b>1987.994</b>  <u>✓</u></pre>
 
-<div class="note red">
-<span class="lbl">판단</span>
-<p>현재 확보한 실물 파일명(RDL4)에는 크기·면적 토큰이 <strong>없어서 지금은 문제가 없습니다.</strong>
-하지만 이 스키마는 참고 저장소가 “AOI 변환 결과” 로 문서화한 형태라
-<strong>같은 사내 환경에 실재할 가능성이 높습니다.</strong></p>
-<p style="margin-bottom:0">그리고 이 오류는 <strong>조용합니다</strong> — col/row 는 맞게 나오므로 매칭도 통과하고,
-엑셀에는 그럴듯한 숫자가 찍힙니다. 사람이 값을 봐야만 알 수 있습니다.
-<strong>해법은 <a class="ref" href="#s9">9장</a>에 있고, 지시대로 이번에는 코드를 고치지 않았습니다.</strong></p>
+<div class="note green">
+<span class="lbl">어떻게 고쳤나 — 정규식을 버리고 토큰으로</span>
+<p>배치가 셋인데 정규식으로는 서로 잡아먹습니다. <strong><code>_</code> 로 쪼개서</strong> 규칙 세 개로 덮습니다:</p>
+<pre>1. col/row = 처음 등장하는 <b>연속한 두 정수 토큰</b>
+2. 그 앞에 식별자 토큰이 <b>2개 이상</b>      ← KLA 파일명 배제 (앞이 웨이퍼ID 1개뿐)
+3. x/y  = col/row 뒤에서 <b>처음</b> 두 수치   ← ★ R-0 수정 지점
+         남는 수치는 크기·면적으로 <b>분리</b>해 둔다 (좌표로 쓰지 않음)</pre>
+<p style="margin-bottom:0">세 배치(<code>x_y_이름</code> · <code>이름_x_y</code> · <code>이름_x_y_크기_면적</code>)가
+<strong>한 경로</strong>로 처리됩니다. 저장소 실물 파일명 <strong>14건 전수</strong>에 돌려
+결과가 고치기 전과 <strong>한 줄도 다르지 않음</strong>을 확인했습니다.
+바뀐 것은 크기·면적이 붙은 형태 하나뿐입니다.</p>
+</div>
+
+<div class="note amber">
+<span class="lbl">⚠ 그래도 남는 것 — 이 스키마는 여전히 <u>실물 미확보</u>다</span>
+<p>토큰 순서 <code>x_y_DXSize_DYSize_DArea</code> 의 근거는 <strong>참고 저장소 주석 한 줄</strong>뿐입니다
+(출처 등급 <code>문서</code>, <a class="ref" href="#s11">회고 R3</a>).
+크기·면적이 x·y <strong>앞</strong>에 오는 배치라면 우리 값은 틀립니다.
+<strong>지금 표본은 두 가설을 구분하지 못합니다.</strong></p>
+<p style="margin-bottom:0">다만 어느 가설이든 <strong>옛 코드보다 나쁘지 않습니다</strong>:
+실물로 검증된 두 배치는 그대로 맞고, 문제 스키마에서 옛 코드는 <em>확실히</em> 틀렸습니다.
+“미구분” 을 코드 주석·문서·요청 목록 세 곳에 적어 뒀고, 회귀 가드에도 경쟁 가설을 명시한
+테스트가 있습니다(<code>test_competing_hypothesis_is_undetermined</code>).</p>
 </div>
 
 <h3>② 레시피별 pitch — 지금 안 쓰는 정보</h3>
@@ -1173,11 +1187,19 @@ R_TB500_LIVE_PI4 AOI-21 Copy_0614   2         (2, <b>7</b>)          224,571 ~ 2
 <thead><tr><th class="ctr" style="width:6%">등급</th><th style="width:8%">ID</th><th style="width:25%">리스크</th>
 <th style="width:32%">발생 조건 · 영향</th><th style="width:29%">현재 방어</th></tr></thead>
 <tbody>
-<tr><td class="ctr"><span class="chip h">높</span></td><td class="k">R-0</td>
-    <td>파일명 스키마 오인으로 <strong>x·y 에 크기·면적이 들어감</strong></td>
-    <td>좌표 뒤에 크기·면적 토큰이 붙는 파일명. x 오차 <strong>30,212 µm</strong>.
-        col/row 는 맞아 <strong>조용히 통과</strong></td>
-    <td><span class="v no">없음</span> — 실물 미확보라 미검출</td></tr>
+<tr><td class="ctr"><span class="chip l">해소</span></td><td class="k">R-0</td>
+    <td><s>파일명 스키마 오인으로 x·y 에 크기·면적이 들어감</s><br>
+        <strong>토큰 파싱으로 고쳤습니다</strong> (<a class="ref" href="#schema">3장 ①</a>)</td>
+    <td>고치기 전: 좌표 뒤에 크기·면적 토큰이 붙는 파일명에서 x 오차
+        <strong>30,212 µm</strong>. col/row 는 맞아 조용히 통과했습니다</td>
+    <td><span class="v ok">회귀 가드 16개</span><br>
+        <small><code>TestFilenameSchemaR0</code> + 실물 비-LIVE 전수 거부</small></td></tr>
+<tr><td class="ctr"><span class="chip m">중</span></td><td class="k">R-0b</td>
+    <td>그 스키마의 <strong>토큰 순서</strong>가 문서 근거뿐</td>
+    <td>크기·면적이 x·y <strong>앞</strong>에 오는 배치라면 여전히 틀립니다.
+        실물 1건이 없어 <strong>두 가설을 구분 못 합니다</strong></td>
+    <td>“미구분” 을 코드·문서·테스트에 명시.
+        <strong>옛 코드보다 나쁘지는 않음</strong></td></tr>
 <tr><td class="ctr"><span class="chip m">중</span></td><td class="k">R-1</td>
     <td>‘완전히 들어오는 die 부터 0번’ 규칙이 다른 자재</td>
     <td>검증된 device 2종뿐. col·row 통째로 어긋남 (매칭은 정상)</td>
@@ -1369,9 +1391,11 @@ R_TB500_LIVE_PI4 AOI-21 Copy_0614   2         (2, <b>7</b>)          224,571 ~ 2
     <td><strong>x·y 절대값 장비 정답 0건</strong> 을 메움 — 지금 초점의 유일한 공백</td>
     <td>소스 간 상호 대조로만 유지</td><td class="ctr">낮</td></tr>
 <tr><td class="k ctr">2</td>
-    <td>좌표 뒤에 <strong>크기·면적이 붙는 파일명</strong> 실물 1건</td>
-    <td><a class="ref" href="#schema">R-0</a> — 그 스키마가 실재하는지, 토큰 순서가 맞는지</td>
-    <td>참고 저장소 문서만 근거로 방어적 파싱</td><td class="ctr">낮</td></tr>
+    <td>좌표 뒤에 <strong>크기·면적이 붙는 파일명</strong> 실물 1건<br>
+      <small>여전히 필요합니다 — 방어는 넣었지만 순서 확인은 못 했습니다</small></td>
+    <td><a class="ref" href="#s7">R-0b</a> — <strong>토큰 순서</strong>가 맞는지.
+      x·y 오염 자체는 <a class="ref" href="#schema">고쳤습니다</a></td>
+    <td>문서 근거로 방어적 파싱 (완료). “미구분” 을 세 곳에 명시</td><td class="ctr">낮</td></tr>
 <tr><td class="k ctr">3</td>
     <td>레시피 2·3·4 로 찍은 사진 + 그 <strong>장비 화면 x·y</strong></td>
     <td><a class="ref" href="#s7">R-3</a> — 장비가 레시피별 pitch 를 쓰는지</td>
@@ -1468,9 +1492,11 @@ R_TB500_LIVE_PI4 AOI-21 Copy_0614   2         (2, <b>7</b>)          224,571 ~ 2
 <thead><tr><th class="ctr" style="width:6%"></th><th style="width:24%">기능</th>
 <th style="width:42%">동작</th><th style="width:28%">잡는 리스크</th></tr></thead>
 <tbody>
-<tr><td class="k ctr">a</td><td>파일명 토큰 파싱</td>
-    <td>col/row 뒤 <strong>첫</strong> 두 수치를 x/y 로. 남는 수치는 크기·면적으로 보관</td>
-    <td><span class="chip h">R-0</span> 최우선</td></tr>
+<tr><td class="k ctr">a</td><td>파일명 토큰 파싱<br>
+    <strong style="color:var(--pass)">→ 완료 (2026-08-05)</strong></td>
+    <td>col/row 뒤 <strong>첫</strong> 두 수치를 x/y 로. 남는 수치는 크기·면적으로 분리
+      (<code>LiveName.extra</code>). <small>엑셀 열 추가는 별개 작업 — 값은 준비돼 있습니다</small></td>
+    <td><span class="chip l">R-0 해소</span></td></tr>
 <tr><td class="k ctr">b</td><td>경계 여유 경고</td>
     <td>웨이퍼 끝이 die 경계에서 5 % 이내면 “원점이 흔들릴 수 있음” 안내</td>
     <td><span class="chip m">R-2</span></td></tr>
@@ -1490,8 +1516,9 @@ R_TB500_LIVE_PI4 AOI-21 Copy_0614   2         (2, <b>7</b>)          224,571 ~ 2
 <thead><tr><th class="ctr" style="width:8%">순서</th><th style="width:34%">할 일</th>
 <th style="width:22%">필요 자료</th><th style="width:36%">효과</th></tr></thead>
 <tbody>
-<tr><td class="k ctr">1</td><td>파일명 토큰 파싱 + 부가 항목 추출</td><td><span class="v ok">불필요</span></td>
-    <td>x·y 최대 오류(R-0) 차단 + 엑셀 항목 추가</td></tr>
+<tr><td class="k ctr">1</td><td><s>파일명 토큰 파싱</s> <strong style="color:var(--pass)">완료</strong><br>
+    <small>남은 것: 엑셀에 크기·면적 열 추가(별개)</small></td><td><span class="v ok">불필요</span></td>
+    <td><strong>x·y 최대 오류(R-0) 차단됨</strong></td></tr>
 <tr><td class="k ctr">2</td><td>T254 사진의 장비 화면 x·y 대조</td><td>화면 판독 2건</td>
     <td>x·y 절대값 검증 공백을 메움</td></tr>
 <tr><td class="k ctr">3</td><td>자동 방어 <strong>(c)</strong> → (b)(d)<br>
@@ -1719,6 +1746,10 @@ R1 이 요구하는 것은 <strong>“부족하다는 사실을 기록에서 지
     <td><code>Center_*</code> 미기록 스캔 대응</td></tr>
 <tr><td class="num">2026-08-05</td><td><strong>이 문서 — 코드 변경 없음</strong></td>
     <td>x·y 표기 정확도 관점 재정리 + 참고 저장소 비교</td></tr>
+<tr><td class="num">2026-08-05</td><td><strong>R-0 수정</strong> — LIVE 파일명을
+    정규식 대신 <strong>토큰</strong>으로 해석<br>
+    <small>x·y = col/row 뒤 <b>첫</b> 두 수치. 실물 14건 결과 불변</small></td>
+    <td>크기·면적이 x·y 를 오염시키던 스키마</td></tr>
 <tr><td class="num">2026-08-05</td><td><a class="ref" href="#s4">자료 G</a> 반영 —
     <strong>코드 변경 없음</strong><br>
     <small>9-1-A A·B·D 종결 · <a class="ref" href="#s7">R-4</a> 낮→중</small></td>
