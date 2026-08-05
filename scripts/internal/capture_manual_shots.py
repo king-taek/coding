@@ -27,8 +27,9 @@
   예약해 그 루프 안에서 찍고 시트를 닫는다.
 - **다크(흑연) 캡처는 창을 새로 만든다.**  위젯이 생성 시점에 색을 f-string 으로 굽기
   때문에(theme.py 주석) QSS 재적용만으로는 색이 다 바뀌지 않는다.
-- **스테이징 자료는 저장소 안의 실제 장비 사진에서 만든다**(``docs/RDL4 LOT files…``).
-  합성 그림이 아니라 실제 RDL 결함 사진이라 설명서가 현장과 같은 것을 보여준다.
+- **예시 사진은 합성한다**(`demo_images.py`).  설명서는 사외로 나갈 수 있어 실제 장비
+  사진을 넣지 않는다.  대신 화면에 적힌 거리와 **앞뒤가 맞는** 그림을 그린다 — 허용
+  오차 안이면 두 장비가 같은 결함을 찍은 것처럼, 초과면 다른 결함처럼 보인다.
   만드는 위치는 임시 폴더이고 저장소에는 남지 않는다.
 
 캡처가 하나라도 빠지면 **실패로 끝난다**(`_assert_complete`) — 옛 캡처 스크립트가
@@ -81,48 +82,62 @@ EXPECTED = [
 
 
 # ---------------------------------------------------------------------------
-# 스테이징 자료 — 저장소의 실제 장비 사진에서 스캔 트리를 만든다
+# 스테이징 자료 — 합성 결함 사진으로 스캔 트리를 만든다
 # ---------------------------------------------------------------------------
-# 실제 폴더에는 슬롯당 사진이 1~2장뿐이라 목록·격자 화면이 비어 보인다.  같은 웨이퍼의
-# 다른 위치를 잘라내 여러 결함 사진처럼 쓴다 — 픽셀은 전부 실제 장비 사진이다.
+# ★ 실제 장비 사진을 쓰지 않는다(설명서는 사외로 나갈 수 있다).  대신 `demo_images` 가
+#   RDL 배선과 결함처럼 보이는 그림을 그린다.  단, **거리에 타당한** 그림이어야 한다:
+#   허용 오차 안이면 두 장비가 *같은 결함*을 찍은 것처럼, 초과면 *다른 결함*처럼 보인다.
 _SLOTS = ["W7548304XYG4", "W7548306XYA2"]
+_TOL = 500.0
 
-# (파일명 좌표, 자르기 위치) — Camtek INI 파일명 규약 ``{x}.{y}.c.{hash}.{n}.jpeg``
-_REF_CUTS = [
-    ("255350.116718", (0, 0)), ("241902.128440", (330, 60)),
-    ("198431.141277", (660, 120)), ("176220.098355", (120, 300)),
-    ("152884.163019", (450, 280)), ("131077.087640", (680, 336)),
+# 슬롯 하나의 사진 6장 — (기준↔검증 거리 µm, 차순위 후보 거리들 µm).
+# 차순위는 **1위보다 멀어야** 한다(앱은 가까운 순서로 놓는다).
+_PLAN = [
+    (30, [145, 280]), (60, [225]), (620, [830, 1050]),
+    (105, [195, 310]), (15, []), (1025, [1285]),
 ]
-_VAL_CUTS = [
-    ("255348.116718", (8, 6)), ("241897.128444", (338, 66)),
-    ("198425.141281", (652, 126)), ("176216.098361", (128, 306)),
-    ("152878.163025", (444, 286)), ("131070.087633", (672, 330)),
-]
+# 파일명에 들어갈 좌표 — Camtek INI 규약 ``{x}.{y}.c.{hash}.{n}.jpeg``
+_REF_XY = ["255350.116718", "241902.128440", "198431.141277",
+           "176220.098355", "152884.163019", "131077.087640"]
+_VAL_XY = ["255348.116718", "241897.128444", "198425.141281",
+           "176216.098361", "152878.163025", "131070.087633"]
+
+
+def _scene(slot_idx: int, i: int, *, side: str) -> int:
+    """이 사진이 그릴 '장면'(=결함) 번호.
+
+    기준과 검증이 **같은 번호면 같은 결함**이다.  허용 오차를 넘는 쌍만 검증 쪽을 다른
+    번호로 돌려 실제로 다른 결함이 보이게 한다 — 화면의 숫자와 그림이 어긋나지 않도록.
+    """
+    base = slot_idx * 100 + i
+    if side == "ref" or _PLAN[i][0] <= _TOL:
+        return base
+    return 900 + base
 
 
 def _build_stage_tree(dst: Path) -> tuple[Path, Path]:
     """기준(17호기)·검증(18호기) 두 루트를 만든다 → ``slot.scan`` 이 읽는 모양."""
-    from PIL import Image
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from demo_images import defect_image
 
     ref_root = dst / "기준_17호기"
     val_root = dst / "검증_18호기"
-    for root, src_machine, cuts in ((ref_root, "17호기", _REF_CUTS),
-                                    (val_root, "18호기", _VAL_CUTS)):
-        for slot in _SLOTS:
-            src_dir = SAMPLE_ROOT / src_machine / slot
+    for root, src_machine, side, coords in (
+            (ref_root, "17호기", "ref", _REF_XY),
+            (val_root, "18호기", "val", _VAL_XY)):
+        for slot_idx, slot in enumerate(_SLOTS):
             out_dir = root / slot
             out_dir.mkdir(parents=True, exist_ok=True)
-            for ini in src_dir.glob("*.ini"):          # 좌표·계측 정보 파일
+            # 좌표·계측 정보 파일은 실제 폴더의 것을 그대로 쓴다(사진이 아니다) —
+            # '사진 정보 보기' 화면이 실제와 같은 항목을 보여 주게 하려는 것.
+            src_dir = SAMPLE_ROOT / src_machine / slot
+            for ini in src_dir.glob("*.ini"):
                 shutil.copy2(ini, out_dir / ini.name)
-            base = next(iter(sorted(src_dir.glob("*.jpeg"))), None)
-            if base is None:
-                continue
-            img = Image.open(base).convert("RGB")
-            for idx, (coord, (cx, cy)) in enumerate(cuts, start=1):
-                box = (cx, cy, cx + 700, cy + 700)
-                crop = img.crop(box).resize((1000, 1000), Image.LANCZOS)
-                name = f"{coord}.c.{1000000 + idx * 7919}.{idx}.jpeg"
-                crop.save(out_dir / name, quality=88)
+            for i, xy in enumerate(coords):
+                img = defect_image(_scene(slot_idx, i, side=side),
+                                   machine=0 if side == "ref" else 1, px=1000)
+                img.save(out_dir / f"{xy}.c.{1000000 + (i + 1) * 7919}.{i + 1}.jpeg",
+                         quality=88)
     return ref_root, val_root
 
 
@@ -534,24 +549,24 @@ def _review_data(sr):
     from aoi_verification.app.models.result import MatchResult
 
     matches, cands = [], {}
-    # score 규약: 0 이상 = 허용 내(dist = (1-score)*tol), 음수 = 허용 초과(dist = -score*tol)
-    # ★ 차순위 후보는 **확정된 짝보다 멀어야** 한다 — 앱은 후보를 가까운 순서로 놓으므로
-    #   1위보다 가까운 2위가 찍히면 설명서가 있을 수 없는 화면을 가르치게 된다.
-    #   (허용 초과 행의 차순위는 그래서 더 큰 음수 점수를 쓴다.)
-    plan = [(0.94, [0.71, 0.44]), (0.88, [0.55]), (-1.24, [-1.66, -2.10]),
-            (0.79, [0.61, 0.38]), (0.97, []), (-2.05, [-2.57])]
+
+    # 거리(µm) → score.  0 이상 = 허용 내(dist=(1-score)*tol), 음수 = 초과(dist=-score*tol).
+    def score_of(dist: float) -> float:
+        return 1.0 - dist / _TOL if dist <= _TOL else -(dist / _TOL)
+
     idx = 0
     for name in sr.common_slot_names:
         s = sr.slots[name]
         for ref, val in zip(s.ref_images, s.val_images):
-            if idx >= len(plan):
+            if idx >= len(_PLAN):
                 break
-            score, runner_scores = plan[idx]
+            dist, runner_dists = _PLAN[idx]
             matches.append(MatchResult(slot=name, ref_path=ref.path,
-                                       val_path=val.path, score=score))
+                                       val_path=val.path, score=score_of(dist)))
             pool = [v for v in s.val_images if v.path != val.path]
             cands[(name, ref.path.name)] = (
-                [(val, score)] + list(zip(pool, runner_scores)))
+                [(val, score_of(dist))]
+                + [(v, score_of(d)) for v, d in zip(pool, runner_dists)])
             idx += 1
     return matches, cands
 

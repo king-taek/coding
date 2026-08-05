@@ -10,8 +10,9 @@
 - **글꼴**: 저장소에 동봉된 NanumSquare 를 체험판이 실제로 쓰는 글자만 남겨 woff2 로
   서브셋한다(전체 720 KB → 수십 KB).  글꼴을 통째로 넣지 않는 이유는 용량뿐이고,
   빼면 안 되는 이유는 **앱과 같은 글꼴이어야 화면이 같아 보이기** 때문이다.
-- **사진**: 저장소의 실제 장비 사진(``docs/RDL4 LOT files…``)을 잘라 작게 줄인다.
-  가짜 그림을 그리지 않는다 — 체험판에서 보는 것이 현장에서 보는 것과 같아야 한다.
+- **사진**: `demo_images.py` 가 그린 **합성** 결함 사진을 쓴다.  체험판은 사외로 나갈 수
+  있어 실제 장비 사진을 넣지 않는다.  대신 화면에 적힌 거리와 앞뒤가 맞게 그린다 —
+  허용 오차 안이면 두 장비가 같은 결함을 찍은 것처럼, 넘으면 다른 결함처럼.
 
 결과는 체험판 문서 안의 ``<script id="assets">`` 자리에 **바로 박는다** — 중간 파일을
 두면 둘이 어긋난 채 커밋될 수 있다.
@@ -23,11 +24,11 @@ import base64
 import io
 import json
 import re
+import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 FONT_DIR = REPO / "aoi_verification" / "app" / "ui" / "assets" / "font"
-SAMPLE = REPO / "docs" / "RDL4 LOT files(26년 05월, FDV)"
 DEMO = REPO / "docs" / "체험하기.html"
 
 # 체험판에 반드시 들어가는 글자 — 문서가 아직 없을 때(최초 생성)도 글꼴이 나오게 한다.
@@ -65,10 +66,12 @@ def _subset(src: Path, text: str) -> str:
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
-def _thumb(src: Path, box: tuple[int, int, int, int], px: int, q: int) -> str:
-    from PIL import Image
+def _thumb(scene: int, machine: int, px: int, q: int) -> str:
+    """합성 결함 사진 한 장 → base64 JPEG."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from demo_images import defect_image
 
-    img = Image.open(src).convert("RGB").crop(box).resize((px, px), Image.LANCZOS)
+    img = defect_image(scene, machine=machine, px=px)
     buf = io.BytesIO()
     img.save(buf, "JPEG", quality=q, optimize=True)
     return base64.b64encode(buf.getvalue()).decode("ascii")
@@ -88,22 +91,22 @@ def main() -> int:
         "bold": _subset(FONT_DIR / "NanumSquareB.ttf", text),
     }
 
-    ref_src = SAMPLE / "17호기" / "W7548304XYG4" / "255350.116718.c.-1759125033.1.jpeg"
-    val_src = SAMPLE / "18호기" / "W7548304XYG4" / "255348.116718.c.473266639.1.jpeg"
-    alt_src = SAMPLE / "17호기" / "W7548306XYA2" / "51211.183932.c.-1479751086.2.jpeg"
-    cuts = [(0, 0), (330, 60), (660, 120), (120, 300), (450, 280), (680, 336)]
+    # 체험판 사진 6쌍 — 순서와 거리는 체험판 안의 PHOTOS 와 같아야 한다.
+    # 허용 오차(500 µm) 안이면 두 장비가 **같은 결함**을 찍은 것으로, 넘으면 **다른 결함**
+    # 으로 그린다.  숫자와 그림이 어긋나면 체험판이 잘못된 것을 가르친다.
+    dists = [105, 60, 1025, 620, 15, 30]
 
     shots: dict[str, str] = {}
-    for i, (cx, cy) in enumerate(cuts, start=1):
-        box = (cx, cy, cx + 700, cy + 700)
-        shots[f"r{i}"] = _thumb(ref_src, box, 120, 72)
-        shots[f"v{i}"] = _thumb(val_src, (cx + 8, cy + 6, cx + 708, cy + 706), 120, 72)
-        shots[f"a{i}"] = _thumb(alt_src, box, 120, 72)
+    for i, dist in enumerate(dists, start=1):
+        val_scene = i if dist <= 500 else 900 + i
+        shots[f"r{i}"] = _thumb(i, 0, 120, 72)
+        shots[f"v{i}"] = _thumb(val_scene, 1, 120, 72)
+        shots[f"a{i}"] = _thumb(300 + i, 1, 120, 72)      # 차순위 후보 = 다른 결함
         # 가운데 큰 자리용 — 작은 썸네일을 늘리면 흐려서 실제 화면과 다르게 보인다.
-        shots[f"m{i}"] = _thumb(ref_src, box, 300, 74)
-    # 크게 보는 화면용 — 두 장만 큰 것으로.
-    shots["big_ref"] = _thumb(ref_src, (0, 0, 700, 700), 460, 78)
-    shots["big_val"] = _thumb(val_src, (8, 6, 708, 706), 460, 78)
+        shots[f"m{i}"] = _thumb(i, 0, 300, 74)
+    # 좌우 비교 화면용 — 같은 결함을 두 장비가 찍은 한 쌍.
+    shots["big_ref"] = _thumb(1, 0, 460, 78)
+    shots["big_val"] = _thumb(1, 1, 460, 78)
 
     payload = json.dumps({"fonts": fonts, "shots": shots}, separators=(",", ":"))
     print(f"글꼴 R {len(fonts['regular']) / 1024:.0f} KB · B {len(fonts['bold']) / 1024:.0f} KB "

@@ -165,7 +165,8 @@ tbody tr:last-child td{border-bottom:1px solid var(--rule)}
   <div class="who">
     <b>이 문서는 프로그램을 처음 쓰는 분을 위한 것입니다.</b><br>
     설치부터 엑셀 저장까지 순서대로 따라가면 한 번의 검증을 끝낼 수 있습니다.
-    화면 그림은 모두 실제 프로그램 화면이며, 예시 사진도 실제 장비가 찍은 것입니다.
+    화면 그림은 모두 실제 프로그램을 실행해 찍은 것이고, 그 안의 결함 사진은
+    설명을 위해 만든 <b>예시 그림</b>입니다.
   </div>
 
   <p style="font-weight:700;margin-bottom:1.5mm">그림 보는 법</p>
@@ -193,6 +194,7 @@ tbody tr:last-child td{border-bottom:1px solid var(--rule)}
     <li><b>결과와 엑셀 저장</b> <span class="d">— 마무리</span></li>
     <li><b>알아두면 좋은 기능</b> <span class="d">— 다크 모드 · 사진 정보 · 업데이트</span></li>
     <li><b>주의사항</b> <span class="d">— 멈춘 것 같을 때, 되돌릴 수 없는 것</span></li>
+    <li><b>이럴 땐 이 버튼</b> <span class="d">— 상황별로 무엇을 누르면 되는지</span></li>
     <li><b>빠른 참조</b> <span class="d">— 단축키 · 판정 기준 · 문제 해결</span></li>
   </ol>
 </div>
@@ -956,7 +958,115 @@ die 가 작은 자재에서 500 µm 을 그대로 쓰면 이웃 결함과 잘못
 
 <!-- ══════════════════════════ 12 ══════════════════════════ -->
 <section>
-<h2><span class="n">12</span>빠른 참조</h2>
+<h2><span class="n">12</span>이럴 땐 이 버튼</h2>
+<p class="lede">화면에서 망설이게 되는 순간마다, <b>무엇을 보고 어느 버튼을 누르면 되는지</b>
+한 줄로 정리했습니다.</p>
+
+<h3>1단계 — 사진을 한 장씩 볼 때</h3>
+<table>
+  <thead><tr><th style="width:44%">지금 보이는 것</th><th style="width:22%">누를 것</th><th>그다음</th></tr></thead>
+  <tbody>
+    <tr><td>결함이 또렷하고, 이 사진의 짝을 찾고 싶다</td>
+        <td><span class="ui">✓ 검증</span> <span class="kbd">←</span></td>
+        <td>2단계로 넘어가 짝을 찾습니다.</td></tr>
+    <tr><td>흐리거나 결함이 아니어서 볼 필요가 없다</td>
+        <td><span class="ui">✕ 제외</span> <span class="kbd">→</span></td>
+        <td>이번 검증에서 빠집니다. 결과에도 안 나옵니다.</td></tr>
+    <tr><td>방금 잘못 눌렀다</td>
+        <td><span class="ui">되돌리기(Z)</span></td>
+        <td>직전 한 장이 가운데로 돌아옵니다.</td></tr>
+    <tr><td>비슷한 사진이 수십 장이라 한 장씩이 번거롭다</td>
+        <td><span class="ui">선택 모드</span></td>
+        <td>큰 창에서 여러 장을 골라 한 번에 처리합니다.</td></tr>
+    <tr><td>남은 사진은 다 안 봐도 된다</td>
+        <td><span class="ui">선택 종료</span></td>
+        <td>⚠ 남은 사진이 <b>모두 제외</b>됩니다. 확인 창이 한 번 뜹니다.</td></tr>
+  </tbody>
+</table>
+
+<h3>2단계 — 후보를 고를 때</h3>
+<table>
+  <thead><tr><th style="width:44%">지금 보이는 것</th><th style="width:22%">누를 것</th><th>그다음</th></tr></thead>
+  <tbody>
+    <tr><td>후보가 <b>한 장뿐</b>이고 기준과 같아 보인다<br>
+            <span class="muted small">가장 가까운 후보가 20 µm 이내일 때</span></td>
+        <td>그 <b>후보 사진</b></td>
+        <td>매칭이 확정되고 다음 기준 사진으로 넘어갑니다.</td></tr>
+    <tr><td>후보가 여러 장이고 어느 것인지 헷갈린다</td>
+        <td>후보의 <b>돋보기</b></td>
+        <td>크게 본 뒤 <span class="ui">매치</span> 로 확정합니다.</td></tr>
+    <tr><td>어느 후보도 기준과 다르다</td>
+        <td><span class="ui">매칭 없음</span> <span class="kbd">N</span></td>
+        <td>짝 없이 넘어갑니다. 결과 화면에서 다시 볼 수 있습니다.</td></tr>
+    <tr><td>방금 엉뚱한 후보를 눌렀다</td>
+        <td><span class="ui">되돌리기</span> <span class="kbd">Ctrl</span>+<span class="kbd">Z</span></td>
+        <td>직전 결정이 취소됩니다.</td></tr>
+    <tr><td>설정을 잘못해서 처음부터 다시 하고 싶다</td>
+        <td><span class="ui">← 설정으로</span></td>
+        <td>⚠ 진행 중인 매칭이 사라집니다.</td></tr>
+  </tbody>
+</table>
+
+<h3>검토 — 목록을 훑을 때</h3>
+<table>
+  <thead><tr><th style="width:44%">행에 보이는 것</th><th style="width:22%">누를 것</th><th>그다음</th></tr></thead>
+  <tbody>
+    <tr><td>판정 칸이 <b>비어 있다</b></td><td>—</td>
+        <td>이상 없음. 그냥 두시면 됩니다.</td></tr>
+    <tr><td><span class="chip over">허용 초과</span> 인데 두 사진이 <b>같은 결함</b>으로 보인다</td>
+        <td>—</td>
+        <td>그대로 두면 됩니다. 좌표 차이가 큰 것뿐입니다.</td></tr>
+    <tr><td><span class="chip over">허용 초과</span> 이고 <b>다른 결함</b>인데, 옆 후보가 맞아 보인다</td>
+        <td>그 <b>차순위 후보</b></td>
+        <td>짝이 그 사진으로 교체됩니다.</td></tr>
+    <tr><td><span class="chip over">허용 초과</span> 이고 맞는 후보가 <b>하나도 없다</b></td>
+        <td><span class="ui">×</span></td>
+        <td>이 짝이 취소되고 <span class="q">매치 없음</span> 이 됩니다.</td></tr>
+    <tr><td>작아서 판단이 안 선다</td>
+        <td><span class="ui">크게 보기</span></td>
+        <td>좌우로 나란히 놓고 비교합니다.</td></tr>
+    <tr><td>× 를 눌렀는데 다시 살리고 싶다</td>
+        <td><span class="ui">↩</span></td>
+        <td>원래 짝으로 돌아옵니다.</td></tr>
+    <tr><td>다 확인했다</td>
+        <td><span class="ui">검토 완료</span></td>
+        <td>⚠ 되돌릴 수 없습니다. 결과 화면으로 넘어갑니다.</td></tr>
+  </tbody>
+</table>
+
+<h3>결과 — 저장하기 전에</h3>
+<table>
+  <thead><tr><th style="width:44%">하고 싶은 일</th><th style="width:22%">누를 것</th><th>그다음</th></tr></thead>
+  <tbody>
+    <tr><td>잘못 짝지어진 것을 빼내고 싶다</td>
+        <td><span class="ui">매칭 결과 검토</span></td>
+        <td><span class="ui">삭제</span> 로 표시하고 <span class="ui">확인</span> 을 눌러야 실제로 빠집니다.</td></tr>
+    <tr><td>짝을 못 찾은 사진을 직접 짝지어 주고 싶다</td>
+        <td><span class="ui">매치 실패 사진 검토</span></td>
+        <td>후보를 고르고 <span class="ui">매치 확정</span>. 넘길 때마다 몇 초 멈출 수 있습니다.</td></tr>
+    <tr><td>결과를 파일로 남기고 싶다</td>
+        <td><span class="ui">엑셀로 저장</span></td>
+        <td>요약에 적힌 위치에 저장됩니다. 위치를 다시 묻지 않습니다.</td></tr>
+    <tr><td>사진을 최고 화질로 넣어야 한다</td>
+        <td><span class="q">사진을 원본 화질로 넣기</span> 체크</td>
+        <td>저장 전에 켜 두세요. 파일이 커지고 느려집니다.</td></tr>
+    <tr><td>다른 장비를 이어서 검증하고 싶다</td>
+        <td><span class="ui">새 검증 시작</span></td>
+        <td>첫 화면으로 돌아갑니다. 저장한 엑셀은 그대로 남습니다.</td></tr>
+  </tbody>
+</table>
+
+<div class="tip">
+  <span class="t">헷갈리면 이 순서로 보세요</span>
+  <p>① 판정 칸에 <b>도장이 있는가</b> → 없으면 넘어갑니다.<br>
+  ② 도장이 있으면 <b>두 사진이 같은 결함인가</b> → 같으면 그대로 둡니다.<br>
+  ③ 다르면 <b>옆 후보 중에 맞는 것이 있는가</b> → 있으면 클릭, 없으면 <span class="ui">×</span>.</p>
+</div>
+</section>
+
+<!-- ══════════════════════════ 13 ══════════════════════════ -->
+<section>
+<h2><span class="n">13</span>빠른 참조</h2>
 
 <h3>단축키</h3>
 <table>
@@ -1003,8 +1113,11 @@ die 가 작은 자재에서 500 µm 을 그대로 쓰면 이웃 결함과 잘못
 
 <div class="note">
   <span class="t">이 설명서의 화면 그림에 대하여</span>
-  <p>모든 그림은 실제 프로그램을 실행해 찍은 것이며, 강조 상자와 화살표는
-  <b>화면 부품의 실제 좌표</b>에 맞춰 그려졌습니다. 화면이 바뀌면 그림과 주석을 함께 다시 만듭니다.
-  예시 사진은 실제 장비가 촬영한 RDL 결함 사진입니다.</p>
+  <p>모든 화면 그림은 실제 프로그램을 실행해 찍은 것이며, 강조 상자와 번호는
+  <b>화면 부품의 실제 좌표</b>에 맞춰 그려졌습니다. 화면이 바뀌면 그림과 주석을 함께 다시 만듭니다.</p>
+  <p>그림 속 결함 사진은 <b>설명용으로 만든 예시</b>이며 실제 검사 자료가 아닙니다.
+  다만 화면에 적힌 거리와 앞뒤가 맞도록 그렸습니다 — 허용 오차 안이면 두 장비가 <b>같은 결함</b>을
+  찍은 모습이고, 초과면 <b>서로 다른 결함</b>이 보입니다. 그래서 그림만 봐도 왜 그 판정이 나왔는지
+  알 수 있습니다.</p>
 </div>
 </section>

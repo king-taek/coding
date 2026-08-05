@@ -151,6 +151,16 @@ async function freePlay(page, label) {
   await page.waitForSelector('[data-test="export-ok"]', { timeout: 15000 });
   await page.click('[data-test="export-ok"]');
   await page.waitForTimeout(200);
+
+  // '이럴 땐?' 안내 — 화면마다 열리고 내용이 있어야 한다.
+  for (const page_ of ["result"]) {
+    await page.click('[data-test="help"]');
+    await page.waitForSelector('[data-test="sheet"]');
+    const rows = await page.locator('[data-test="sheet"] h3').count();
+    if (rows < 3) problems.push(`[${label}] 이럴 땐? 안내가 비었습니다 (${rows}절)`);
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(300);
+  }
 }
 
 async function main() {
