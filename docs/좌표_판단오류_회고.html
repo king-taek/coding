@@ -1,0 +1,890 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>좌표 판단 오류 회고 · 왜 반복됐고 무엇을 바꾸는가</title>
+<style>
+/* ─── 동봉 폰트 — 앱·검증보고서와 같은 서체 ─────────────────── */
+@font-face{font-family:NS;src:url('../aoi_verification/app/ui/assets/font/NanumSquareR.ttf') format('truetype');font-weight:400;font-display:swap}
+@font-face{font-family:NS;src:url('../aoi_verification/app/ui/assets/font/NanumSquareB.ttf') format('truetype');font-weight:700;font-display:swap}
+
+/* ─── 제도지 팔레트 — app/ui/theme.py 라이트 프로파일 그대로 ────
+   검증보고서(좌표_계산_검증_보고서_상세.html)와 같은 재질.
+   다른 것은 색의 '분포' 다 — 이 문서는 자기비판이라 danger 가 더 많이 나온다. */
+:root{
+  --vellum:#ECE9E2; --sheet:#F5F3ED; --elev:#FBFAF7;
+  --rule:#89836F; --hair:#B7B2A6;
+  --ink:#1B1A17; --ink2:#3D3B35; --mute:#5A574E;
+  --blue:#2C5A86; --blue-w:#2C5A8620;
+  --pass:#3B6438; --danger:#A5271E; --warn:#8C4A0F;
+  --danger-w:#A5271E0F; --warn-w:#8C4A0F0F;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"DejaVu Sans Mono",monospace;
+  --ease:cubic-bezier(.22,1,.36,1);
+  --z-nav:10;
+}
+*,*::before,*::after{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:1.5rem}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+body{margin:0;background:var(--vellum);color:var(--ink);
+     font-family:NS,system-ui,sans-serif;font-size:15px;line-height:1.68;
+     -webkit-font-smoothing:antialiased}
+.sheet{max-width:1360px;margin:0 auto;padding:clamp(1rem,3vw,2.5rem)}
+
+/* ─── 표제란 — 도면이 아니라 시정조치 보고서의 머리 ─────────── */
+.titleblock{background:var(--sheet);border:2px solid var(--danger)}
+.titleblock .lede{padding:clamp(1.6rem,4vw,3rem) clamp(1.2rem,3vw,2.4rem) clamp(1.2rem,3vw,2rem)}
+.titleblock h1{margin:0;font-size:clamp(1.75rem,4.6vw,3rem);line-height:1.14;
+               letter-spacing:-.026em;text-wrap:balance;font-weight:700}
+.titleblock .sub{margin:.85rem 0 0;color:var(--ink2);font-size:clamp(.95rem,2vw,1.1rem);
+                 max-width:62ch;text-wrap:pretty}
+.tb-meta{border-top:1px solid var(--hair);display:grid;
+         grid-template-columns:repeat(auto-fit,minmax(160px,1fr))}
+.tb-meta div{padding:.7rem 1rem;border-right:1px solid var(--hair)}
+.tb-meta div:last-child{border-right:0}
+.tb-meta dt{font-size:.68rem;color:var(--mute);letter-spacing:.04em;margin:0 0 .18rem}
+.tb-meta dd{margin:0;font-family:var(--mono);font-size:.82rem;color:var(--ink);word-break:break-word}
+
+/* ─── 정문(定文) — 이 문서의 전부가 이 한 문장이다 ─────────── */
+.thesis{margin:1.6rem 0 0;background:var(--ink);color:var(--sheet);
+        padding:clamp(1.5rem,4vw,2.8rem) clamp(1.2rem,3vw,2.4rem)}
+.thesis .tag{display:block;font-family:var(--mono);font-size:.7rem;letter-spacing:.08em;
+             color:#B7B2A6;margin-bottom:.9rem}
+.thesis p{margin:0;font-size:clamp(1.05rem,2.5vw,1.45rem);line-height:1.52;
+          max-width:52ch;letter-spacing:-.012em;text-wrap:pretty}
+.thesis p + p{margin-top:.9rem;font-size:clamp(.9rem,1.8vw,1rem);line-height:1.7;
+              color:#D8D4CA;max-width:60ch;letter-spacing:0;font-weight:400}
+.thesis strong{color:#fff}
+.thesis em{font-style:normal;color:#E8A9A2}
+
+.body{display:block;margin-top:1.6rem}
+@media(min-width:1080px){
+  .body{display:grid;grid-template-columns:214px minmax(0,1fr);gap:2.6rem;align-items:start}
+}
+nav.index{position:sticky;top:1.2rem;z-index:var(--z-nav);background:var(--sheet);
+          border:1px solid var(--rule);padding:.85rem .5rem .9rem;font-size:.83rem;
+          max-height:calc(100vh - 2.4rem);overflow-y:auto}
+nav.index p{margin:0 .6rem .55rem;font-size:.68rem;color:var(--mute);letter-spacing:.05em}
+nav.index a{display:flex;gap:.55rem;padding:.3rem .6rem;color:var(--ink2);text-decoration:none;
+            transition:color .18s var(--ease),background .18s var(--ease)}
+nav.index a b{color:var(--rule);font-family:var(--mono);font-size:.75rem;min-width:1.15rem;flex:none}
+nav.index a:hover{background:var(--blue-w);color:var(--blue)}
+nav.index a:focus-visible{outline:2px solid var(--blue);outline-offset:-2px}
+nav.index a[aria-current="true"]{background:var(--blue-w);color:var(--blue);font-weight:700}
+nav.index a[aria-current="true"] b{color:var(--blue)}
+@media(max-width:1079px){nav.index{position:static;max-height:none;margin-bottom:1.4rem}}
+
+main{min-width:0}
+section{margin-bottom:3.1rem;scroll-margin-top:1.5rem}
+h2{margin:0 0 1rem;font-size:clamp(1.2rem,2.7vw,1.6rem);letter-spacing:-.014em;
+   display:flex;align-items:baseline;gap:.7rem;padding-bottom:.5rem;
+   border-bottom:2px solid var(--rule);text-wrap:balance;page-break-after:avoid}
+h2 .n{font-family:var(--mono);font-size:.78em;color:var(--blue);font-weight:400;flex:none}
+h3{margin:1.9rem 0 .6rem;font-size:1.02rem;letter-spacing:-.008em;text-wrap:balance;
+   page-break-after:avoid}
+h4{margin:1.15rem 0 .4rem;font-size:.93rem;color:var(--ink2);page-break-after:avoid}
+p{margin:0 0 .72rem;max-width:74ch;text-wrap:pretty}
+ul,ol{margin:.4rem 0 .85rem;padding-left:1.25rem;max-width:74ch}
+li{margin-bottom:.3rem}
+a.ref{color:var(--blue);text-decoration:none;border-bottom:1px solid #2C5A8655}
+a.ref:hover{border-bottom-color:var(--blue)}
+s{color:var(--mute)}
+
+code{font-family:var(--mono);font-size:.87em;background:#0000000a;
+     border:1px solid var(--hair);border-radius:2px;padding:.02em .3em;
+     overflow-wrap:anywhere}
+pre{font-family:var(--mono);font-size:.79rem;line-height:1.6;background:var(--elev);
+    border:1px solid var(--rule);padding:.85rem 1rem;margin:.75rem 0 1.05rem;overflow-x:auto}
+pre b{color:var(--blue);font-weight:700}
+pre i{color:var(--mute);font-style:normal}
+pre em{color:var(--danger);font-style:normal;font-weight:700}
+pre u{color:var(--pass);text-decoration:none;font-weight:700}
+
+.tw{overflow-x:auto;margin:.75rem 0 1.15rem;border:1px solid var(--rule);background:var(--sheet)}
+table{border-collapse:collapse;width:100%;font-size:.82rem;min-width:520px}
+caption{caption-side:top;text-align:left;padding:.5rem .8rem;font-size:.77rem;
+        color:var(--mute);border-bottom:1px solid var(--hair);background:var(--elev)}
+th{text-align:left;padding:.5rem .8rem;font-weight:700;font-size:.76rem;color:var(--ink);
+   background:var(--elev);border-bottom:1.5px solid var(--rule);vertical-align:bottom}
+td{padding:.5rem .8rem;border-bottom:1px solid var(--hair);vertical-align:top;color:var(--ink2)}
+tbody tr:last-child td{border-bottom:0}
+td.num,th.num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+td.ctr,th.ctr{text-align:center}
+td.k{color:var(--ink);font-weight:700}
+table.kv td:first-child{width:22%;color:var(--ink);font-weight:700}
+
+.v{font-family:var(--mono);font-size:.78rem;font-weight:700;white-space:nowrap}
+.v.ok{color:var(--pass)}.v.no{color:var(--danger)}.v.wa{color:var(--warn)}
+.chip{display:inline-block;padding:.06rem .45rem;border:1px solid currentColor;border-radius:2px;
+      font-size:.68rem;font-weight:700;white-space:nowrap;font-family:var(--mono)}
+.chip.h{color:var(--danger)}.chip.m{color:var(--warn)}.chip.l{color:var(--pass)}.chip.i{color:var(--mute)}
+
+.note{border:1px solid var(--rule);background:var(--sheet);padding:.9rem 1.1rem;margin:1rem 0 1.2rem}
+.note > :last-child{margin-bottom:0}
+.note .lbl{display:block;font-size:.7rem;letter-spacing:.05em;color:var(--mute);margin-bottom:.35rem}
+.note.blue{background:var(--blue-w);border-color:var(--blue)}
+.note.blue .lbl{color:var(--blue)}
+.note.red{background:var(--danger-w);border-color:var(--danger)}
+.note.red .lbl{color:var(--danger)}
+.note.amber{background:var(--warn-w);border-color:var(--warn)}
+.note.amber .lbl{color:var(--warn)}
+.note.green{background:#3B64380F;border-color:var(--pass)}
+.note.green .lbl{color:var(--pass)}
+
+/* ─── 오류 카탈로그 — 표면 원인 위, 진짜 원인 아래.
+   4열 표로 만들면 두 층이 나란히 놓여 같은 무게로 읽힌다.
+   이 문서의 논점은 '아래층' 이므로 구조로 층을 만든다. ─────── */
+.faults{border:1px solid var(--rule);background:var(--sheet);margin:1.1rem 0 1.4rem}
+.fault{display:grid;grid-template-columns:auto minmax(0,1fr);gap:0 1rem;min-width:0;
+       padding:.85rem 1.1rem;border-bottom:1px solid var(--hair)}
+.fault:last-child{border-bottom:0}
+.fault:nth-child(even){background:var(--elev)}
+.fault .id{grid-row:1 / span 3;font-family:var(--mono);font-size:.82rem;font-weight:700;
+           color:var(--danger);min-width:2.6rem;padding-top:.06rem}
+.fault .id small{display:block;color:var(--mute);font-weight:400;font-size:.66rem;margin-top:.12rem}
+.fault .what{min-width:0;color:var(--ink);font-weight:700;font-size:.87rem;margin:0}
+.fault .why{margin:.35rem 0 0;font-size:.84rem;color:var(--ink2);max-width:80ch}
+.fault .why::before{content:"진짜 원인 ";font-family:var(--mono);font-size:.68rem;
+                    color:var(--danger);letter-spacing:.04em;margin-right:.2rem}
+.fault .tags{margin:.4rem 0 0;display:flex;gap:.3rem;flex-wrap:wrap}
+@media(max-width:640px){
+  .fault{grid-template-columns:minmax(0,1fr);gap:.35rem}
+  .fault .id{grid-row:auto}
+}
+
+/* 구조 A~D 마커 */
+.st{display:inline-flex;align-items:center;justify-content:center;width:1.35rem;height:1.35rem;
+    font-family:var(--mono);font-size:.72rem;font-weight:700;border:1px solid currentColor;
+    text-decoration:none;flex:none}
+.st.a{color:var(--danger)}.st.b{color:var(--warn)}.st.c{color:var(--blue)}.st.d{color:var(--mute)}
+a.st:hover{background:currentColor}
+a.st:hover::after{content:none}
+
+/* ─── 네 구조 — 문서의 분석 척추 ────────────────────────────── */
+.structs{display:grid;gap:1rem;margin:1.1rem 0 1.4rem;grid-template-columns:minmax(0,1fr)}
+@media(min-width:820px){.structs{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.struct{min-width:0;border:1px solid var(--rule);background:var(--sheet);padding:1rem 1.15rem}
+.struct > header{display:flex;align-items:baseline;gap:.6rem;margin-bottom:.5rem}
+.struct h3{margin:0;font-size:.95rem;letter-spacing:-.004em}
+.struct .n{font-family:var(--mono);font-size:1.5rem;font-weight:700;line-height:1;flex:none}
+.struct.a .n{color:var(--danger)}.struct.b .n{color:var(--warn)}
+.struct.c .n{color:var(--blue)}.struct.d .n{color:var(--mute)}
+.struct .case{font-size:.83rem;color:var(--ink2);margin:0 0 .65rem;max-width:none}
+.struct pre{font-size:.735rem;line-height:1.62}
+.struct .ask{margin:0;padding-top:.6rem;border-top:1px solid var(--hair);
+             font-size:.85rem;color:var(--ink);font-weight:700}
+.struct .ask span{display:block;font-family:var(--mono);font-size:.66rem;font-weight:400;
+                  color:var(--mute);letter-spacing:.04em;margin-bottom:.15rem}
+.struct .hits{margin:.5rem 0 0;font-family:var(--mono);font-size:.72rem;color:var(--mute)}
+
+/* ─── 위상 산포도 — 이 문서의 핵심 그림 ─────────────────────── */
+figure{margin:1.1rem 0 1.4rem;border:1px solid var(--rule);background:var(--sheet);padding:1rem .9rem .9rem}
+figure svg{display:block;width:100%;height:auto;max-width:680px;margin:0 auto}
+figcaption{margin-top:.7rem;padding-top:.6rem;border-top:1px solid var(--hair);
+           font-size:.79rem;color:var(--mute);text-wrap:pretty;max-width:78ch}
+figcaption strong{color:var(--ink2)}
+/* 진입 모션은 '이미 보이는 것' 을 거들 뿐이어야 한다 —
+   opacity 를 건드리면 헤드리스 렌더러·인쇄·비활성 탭에서 점이 통째로 사라진다
+   (실제로 그렇게 찍혔다). transform 만 움직인다: 최악의 경우 7px 어긋날 뿐 늘 보인다. */
+@media (prefers-reduced-motion:no-preference){
+  .pt{animation:drop .55s var(--ease) backwards}
+  @keyframes drop{from{transform:translateY(-7px)}to{transform:none}}
+}
+
+/* ─── 경로 다이어그램 — 골든이 어디로 가는가 ────────────────── */
+.paths{display:grid;gap:.7rem;margin:.9rem 0 1.1rem;grid-template-columns:minmax(0,1fr)}
+@media(min-width:720px){.paths{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.path{min-width:0;border:1px solid var(--hair);background:var(--elev);padding:.75rem .9rem}
+.path.on{border-color:var(--pass);background:#3B64380D}
+.path.off{border-color:var(--danger);background:var(--danger-w)}
+.path .hd{font-family:var(--mono);font-size:.74rem;font-weight:700;margin-bottom:.35rem}
+.path.on .hd{color:var(--pass)}.path.off .hd{color:var(--danger)}
+.path p{margin:0;font-size:.82rem;color:var(--ink2);max-width:none}
+
+/* ─── 역테스트 매트릭스 ─────────────────────────────────────── */
+table.matrix{min-width:600px;font-size:.78rem}
+table.matrix th.r{text-align:center;font-family:var(--mono);font-size:.72rem;width:7.2%}
+table.matrix td.m{text-align:center;font-family:var(--mono);font-weight:700;color:var(--pass)}
+/* '해당 없음' 은 물러나야 하지만 읽히긴 해야 한다 — hair(#B7B2A6)는 sheet 위에서 1.9:1 로 안 보인다 */
+table.matrix td.m.no{color:var(--mute);font-weight:400;opacity:.75}
+table.matrix tfoot td{background:var(--elev);border-top:1.5px solid var(--rule);
+                      font-family:var(--mono);font-weight:700;text-align:center;color:var(--ink)}
+table.matrix tfoot td:first-child{text-align:left;font-family:NS}
+
+footer.colophon{margin-top:2.4rem;padding-top:1rem;border-top:2px solid var(--rule);
+                font-size:.78rem;color:var(--mute);max-width:78ch}
+
+@media print{
+  nav.index{display:none}
+  body{background:#fff;font-size:10pt}
+  .body{display:block}
+  .thesis{background:#fff;color:#000;border:2px solid #000}
+  .thesis p + p{color:#333}
+  .thesis .tag{color:#555}
+  .thesis strong{color:#000}.thesis em{color:#A5271E}
+  .note,figure,.tw,.faults,.struct,.fault{page-break-inside:avoid}
+}
+</style>
+</head>
+<body>
+<div class="sheet">
+
+<div class="titleblock">
+  <div class="lede">
+    <h1>좌표 판단 오류 회고<br>왜 반복됐고 무엇을 바꾸는가</h1>
+    <p class="sub">좌표 조사는 13차까지 왔고, 차수마다 “확정” 이라 적고 다음 차수에서 뒤집힌 일이
+      반복됐습니다. 이 문서는 <strong>개별 오류의 계산 원인이 아니라, 그 근거로 충분하다고
+      판단한 과정</strong>을 조사합니다.</p>
+  </div>
+  <dl class="tb-meta">
+    <div><dt>대상</dt><dd>aoi_verification/app/coords</dd></div>
+    <div><dt>작성일</dt><dd>2026-08-05</dd></div>
+    <div><dt>조사 범위</dt><dd>1차 ~ 13차 누적</dd></div>
+    <div><dt>오류 건수</dt><dd style="color:var(--danger)">13 + 감사 1</dd></div>
+    <div><dt>규칙 역테스트</dt><dd style="color:var(--pass)">14 / 14 포착</dd></div>
+    <div><dt>코드 변경</dt><dd>없음 (테스트·문서)</dd></div>
+  </dl>
+</div>
+
+<div class="thesis">
+  <span class="tag">한 문장으로</span>
+  <p>문제는 <em>“근거가 부족한데 결정했다”</em> 가 아닙니다.<br>
+     결정을 내린 뒤 기록에서
+     <strong>“그것이 결정이었다” 는 사실이 사라진 것</strong>입니다.</p>
+  <p>결정은 늘 해야 합니다. 문제는 부족한 근거로 채택한 값이 표의 한 칸, 테스트의 한 줄,
+     코드의 상수가 되는 순간 그것이 <strong>관측과 구별되지 않는다</strong>는 데 있습니다.
+     다음 세션의 저는 그걸 근거로 다음 결론을 쌓습니다.
+     아래 13건 중 절반이 이 경로로 생겼습니다.</p>
+</div>
+
+<div class="body">
+
+<nav class="index" aria-label="문서 차례">
+  <p>차례</p>
+  <a href="#s1"><b>1</b><span>오류 카탈로그</span></a>
+  <a href="#s2"><b>2</b><span>반복된 네 구조</span></a>
+  <a href="#s3"><b>3</b><span>표면 아래</span></a>
+  <a href="#s4"><b>4</b><span>지금 코드 감사</span></a>
+  <a href="#s5"><b>5</b><span>규칙 R1~R7</span></a>
+  <a href="#s6"><b>6</b><span>역테스트</span></a>
+  <a href="#s7"><b>7</b><span>비용과 부작용</span></a>
+</nav>
+
+<main>
+
+<!-- ══ 1 ══ -->
+<section id="s1">
+<h2><span class="n">1</span>오류 카탈로그</h2>
+<p>표면 원인(무엇이 틀렸나)과 진짜 원인(왜 충분하다고 봤나)을 분리해 적습니다.
+오른쪽 표식은 <a class="ref" href="#s2">2장의 네 구조</a> 중 어디에 해당하는지입니다.</p>
+
+<div class="faults">
+
+<div class="fault">
+  <div class="id">E1<small>~1차</small></div>
+  <p class="what"><code>CAMTEK_ROW_TOTAL</code> 을 7 → 6 으로 바꿈</p>
+  <p class="why">두 소스가 어긋날 때 <strong>어느 쪽이 정답인지 묻지 않고</strong> KLA 를 기준으로
+    가정했습니다. 그런데 KLA 원점도 틀린 상태였습니다.</p>
+  <p class="tags"><a class="st c" href="#stc" title="구조 C — 순환">C</a></p>
+</div>
+
+<div class="fault">
+  <div class="id">E2<small>1→6차</small></div>
+  <p class="what"><code>camtek_live</code> 의 <code>−1</code> 잔재</p>
+  <p class="why">짝을 이루던 변경을 되돌릴 때 한쪽만 봤습니다. 게다가 <strong>테스트가 “정규화 결과”
+    만 단언</strong>해(입력 5 → 출력 4) 그 정규화가 옳은지는 영영 묻지 않았습니다.
+    <code>±1</code> 게이트가 증상을 덮어 아무도 몰랐습니다.</p>
+  <p class="tags"><a class="st c" href="#stc" title="구조 C — 순환">C</a></p>
+</div>
+
+<div class="fault">
+  <div class="id">E3<small>3차</small></div>
+  <p class="what"><code>col = x_index − 2</code> 를 “device 불변 고정 오프셋” 으로 확정</p>
+  <p class="why">pitch 가 전혀 다른 <strong>3 device 에서 전부 2</strong> 였습니다. 그러나 그 3건은
+    웨이퍼의 stage 위치가 <strong>사실상 같았습니다.</strong> 결론은 그 위치에 관한 것이었으니
+    표본이 진짜 변수를 하나도 변화시키지 않았습니다.</p>
+  <p class="tags"><a class="st a" href="#sta" title="구조 A — 변화 없는 변수">A</a></p>
+</div>
+
+<div class="fault">
+  <div class="id">E4<small>3차</small></div>
+  <p class="what"><code>row_total = ceil(Diameter/pitch_y)</code> 채택</p>
+  <p class="why">“4예시 16항목 + 장비 판독 1건 + dev 63건 <strong>전수 일치</strong>”. 그런데 그 전부가
+    경쟁 가설 <code>floor((Cy+D/2)/py)−1</code> 과 <strong>같은 답을 내는</strong> 케이스였습니다.
+    가설을 하나만 세웠으니 구분되지 않는다는 사실을 볼 기회가 없었습니다.</p>
+  <p class="tags"><a class="st a" href="#sta" title="구조 A — 변화 없는 변수">A</a></p>
+</div>
+
+<div class="fault">
+  <div class="id">E5<small>2차</small></div>
+  <p class="what"><code>KLA_ZERO_Y = 4</code> 상수, “유도 불가” 로 결론</p>
+  <p class="why"><code>SampleTestPlan</code> 최솟값이 Y 에서 안 맞자
+    <strong>“맵 눈금은 0..6 인데 1..6 만 검사했다”</strong> 는 가정을 표의 한 칸에 숫자로 적었습니다.
+    8차에서 완전 행이 애초에 6개임이 드러났습니다.</p>
+  <p class="tags"><a class="st b" href="#stb" title="구조 B — 가정이 관측으로">B</a>
+    <a class="st d" href="#std" title="구조 D — 불가로 승격">D</a></p>
+</div>
+
+<div class="fault">
+  <div class="id">E6<small>2차</small></div>
+  <p class="what">장비 판독 1건을 <code>row_total=7</code> 의 근거로 테스트에 고정</p>
+  <p class="why">그 판독에는 결함의 <code>X·Y</code> 가 없었습니다. 테스트의
+    <code>X=334789.57 Y=267755.64</code> 는 <strong>결론(<code>Col=8/Row=5</code>)에 맞춰 제가 구성한
+    값</strong>입니다. 합성값이 골든에 들어가면 그 테스트는 결론을 <em>검증</em>하지 않고
+    <em>보존</em>합니다.</p>
+  <p class="tags"><a class="st b" href="#stb" title="구조 B — 가정이 관측으로">B</a></p>
+</div>
+
+<div class="fault">
+  <div class="id">E7<small>7차</small></div>
+  <p class="what"><code>col_origin</code> 유도식을 기각</p>
+  <p class="why"><code>Center_X=0</code> 이라 식이 <code>−4</code> 를 냈습니다. 그 <code>0</code> 은
+    값이 아니라 <strong>‘미기록’</strong> 이었습니다(같은 파일의 <code>MeasuredDiameter=0</code> ·
+    <code>FlatNotchVal=−1</code> 이 신호였습니다). <strong>반례를 검증하지 않고 반례로 썼습니다.</strong></p>
+  <p class="tags"><a class="st d" href="#std" title="구조 D — 불가로 승격">D</a></p>
+</div>
+
+<div class="fault">
+  <div class="id">E8<small>4차</small></div>
+  <p class="what"><code>InputWaferID</code> 를 쓸 수 있다고 문서화</p>
+  <p class="why">샘플 <strong>1건</strong>에서 세 후보 필드 값이 같았습니다. “어느 걸 써도 된다” 로
+    읽었지만 실제 뜻은 <strong>“아직 구분할 근거가 없다”</strong> 였습니다.
+    실물이 모이자 로트 C 에서 <em>다른 웨이퍼 ID</em> 가 나왔습니다.</p>
+  <p class="tags"><a class="st a" href="#sta" title="구조 A — 변화 없는 변수">A</a></p>
+</div>
+
+<div class="fault">
+  <div class="id">E9</div>
+  <p class="what">최근접 대조로 나온 3쌍을 실측 쌍으로 문서화</p>
+  <p class="why">거리 125 · 125 · <strong>185 µm</strong>. 확인된 쌍이 112~121 µm 였으니 “같은 범위” 로
+    봤습니다. 185 µm 짜리는 다른 결함이었습니다. 같은 die 안 200 µm 거리에 서로 다른 결함이
+    실재합니다. <strong>추론을 관측으로 승격했습니다.</strong></p>
+  <p class="tags"><a class="st b" href="#stb" title="구조 B — 가정이 관측으로">B</a></p>
+</div>
+
+<div class="fault">
+  <div class="id">E10<small>11차</small></div>
+  <p class="what"><code>Wafer2Table</code> 검증에 서로 다른 웨이퍼를 섞음</p>
+  <p class="why">장비 정답은 <code>GIX5703110</code>·<code>GIX5703111</code>, 정렬 파일은
+    <code>GX57001305</code>. <code>Wafer2Table</code> 은 <strong>웨이퍼마다 측정</strong>되는데
+    표본 단위를 레시피로 잡았습니다. 사용자가 지적했습니다.</p>
+  <p class="tags"><a class="st b" href="#stb" title="구조 B — 가정이 관측으로">B</a></p>
+</div>
+
+<div class="fault">
+  <div class="id">E11<small>5차</small></div>
+  <p class="what">pitch 검산을 두 축 모두 완화하려 함</p>
+  <p class="why">실측이 요구한 건 Y 축뿐인데 대칭이 자연스러워 보였습니다.
+    항목 1건 폴더에서 ‘차이가 상수’ 는 <strong>공허하게 참</strong>이 됩니다.
+    그러면 다른 자재에 TB500 상수가 채택되는 길이 열립니다. 구현 전 발견했습니다.</p>
+  <p class="tags"><a class="st a" href="#sta" title="구조 A — 변화 없는 변수">A</a></p>
+</div>
+
+<div class="fault">
+  <div class="id">E12<small>12차</small></div>
+  <p class="what"><code>Center_*</code> 를 “PI 계열에서 기록되지 않는다” 로 단정하려 함</p>
+  <p class="why">34장 전수가 <code>0.000000</code> 이었습니다. <strong>부재를 법칙으로</strong>
+    옮기려 했습니다. 사용자가 “발견하지 못했다” 로 정정했습니다.</p>
+  <p class="tags"><a class="st a" href="#sta" title="구조 A — 변화 없는 변수">A</a></p>
+</div>
+
+<div class="fault">
+  <div class="id">E13<small>13차</small></div>
+  <p class="what">KLA 유도를 구현했다가 되돌림</p>
+  <p class="why">확인된 쌍 테스트가 깨졌습니다. 그런데 <strong>그 픽스처 자체에 한계</strong>가
+    있었습니다(<code>row_total − zero_y</code> 가 커플링돼 두 가설이 같은 답을 냅니다).
+    틀린 기준에 맞춰 옳은 변경을 되돌렸습니다. E1 의 재판입니다.</p>
+  <p class="tags"><a class="st c" href="#stc" title="구조 C — 순환">C</a></p>
+</div>
+
+</div>
+</section>
+
+<!-- ══ 2 ══ -->
+<section id="s2">
+<h2><span class="n">2</span>반복된 네 구조</h2>
+<p>13건을 가로질러 보면 네 가지 형태가 반복됩니다. 각 블록의 마지막 줄이
+<strong>실제로 물었어야 할 질문</strong>이고, 그게 5장 규칙의 원료가 됩니다.</p>
+
+<div class="structs">
+
+<div class="struct a" id="sta">
+  <header><span class="n">A</span>
+    <h3>표본이 변화시키지 않은 변수를 “무관하다” 로 읽음</h3></header>
+  <p class="case">세 device 에서 전부 2였다. 63건이 전부 일치했다. 34장이 전부 0이었다.
+    <strong>전부 사실입니다.</strong> 묻지 않은 것은 <em>그 표본들이 무엇을 변화시켰는가</em> 였습니다.</p>
+  <pre style="margin:0 0 .7rem">E3  pitch 는 변했다 (25022/37247/27474)
+    stage 위치는 <em>안 변했다</em>  ← 결론이 묻는 변수
+    → 유효 표본 <em>N=1</em>
+E4  웨이퍼 4장. 두 가설이 갈리는 조건은 <em>안 변했다</em>
+    → 유효 표본 <em>N=0</em></pre>
+  <p class="ask"><span>물었어야 할 질문</span>“이 표본이 <u>무엇을</u> 변화시켰나?”</p>
+  <p class="hits">해당: E3 · E4 · E8 · E11 · E12</p>
+</div>
+
+<div class="struct b" id="stb">
+  <header><span class="n">B</span>
+    <h3>모르는 것을 아는 것처럼 기록</h3></header>
+  <p class="case">표의 칸, 테스트의 상수, 문서의 문장. 이 <strong>형식들이 내용에 권위를
+    부여</strong>합니다. 표의 <code>맵 눈금 0..6</code> 칸이
+    관측인지 추정인지는 표가 말해 주지 않습니다. 그건 <strong>추정이었습니다.</strong></p>
+  <p class="case">가장 나쁜 판본이 <strong>E6</strong> 입니다. 결론에서 역산한 값을 골든 테스트에
+    넣으면 그 테스트는 결론을 검증하는 게 아니라 <strong>보존</strong>합니다.
+    <a class="ref" href="#golden">그리고 그 구조가 지금도 남아 있었습니다.</a></p>
+  <p class="ask"><span>물었어야 할 질문</span>“이 숫자는 관측인가 유도인가 합성인가?”</p>
+  <p class="hits">해당: E5 · E6 · E9 · E10</p>
+</div>
+
+<div class="struct c" id="stc">
+  <header><span class="n">C</span>
+    <h3>검증 기준이 검증 대상에서 나옴 <span style="font-weight:400;color:var(--mute)">(순환)</span></h3></header>
+  <p class="case">Camtek 을 KLA 에 맞췄는데 KLA 가 틀렸습니다. 테스트가 정규화 결과를 단언했는데
+    그 정규화가 틀렸습니다. 픽스처가 한계를 가진 채 옳은 변경을 거부했습니다.</p>
+  <p class="case">공통점은 <strong>두 값이 어긋날 때 “어느 쪽이 정답인가” 를 외부에서
+    가져오지 않은 것</strong>입니다.</p>
+  <p class="ask"><span>물었어야 할 질문</span>“둘이 어긋날 때 정답은 <u>어디서</u> 오나?”</p>
+  <p class="hits">해당: E1 · E2 · E13</p>
+</div>
+
+<div class="struct d" id="std">
+  <header><span class="n">D</span>
+    <h3>“내 방법으로 안 된다” 를 “원리적으로 안 된다” 로</h3></header>
+  <p class="case"><code>SampleTestPlan</code> 으로 <code>zero_y</code> 가 안 나오자
+    “유도 불가 → 상수” 라고 적었습니다. 8차에서 <code>SampleCenterLocation</code> 으로
+    나왔습니다.</p>
+  <p class="case"><code>Center_X=0</code> 을 보고 식을 기각했습니다. 그 0 은 ‘없음’ 이었습니다.</p>
+  <p class="ask"><span>물었어야 할 질문</span>“어떤 <u>방법으로</u> 안 되는 건가?”</p>
+  <p class="hits">해당: E5 · E7</p>
+</div>
+
+</div>
+</section>
+
+<!-- ══ 3 ══ -->
+<section id="s3">
+<h2><span class="n">3</span>표면 아래 · 왜 그렇게 판단했나</h2>
+<p>위 네 구조는 증상입니다. 그것들을 만든 동인을 적습니다.</p>
+
+<h3>3-1. ‘설명이 되면 맞다’ 를 기준으로 썼다</h3>
+<p>가설이 관측을 전부 설명하면 채택했습니다. 과학적으로 물어야 할 것은
+<strong>“경쟁 가설도 똑같이 설명하는가”</strong> 인데, 대부분의 경우
+<strong>가설을 하나만 세웠습니다.</strong></p>
+<p>E4 가 정확히 이것입니다. <code>ceil(D/py)</code> 가 4사례를 전부 설명했고,
+<code>floor((Cy+D/2)/py)−1</code> 도 똑같이 설명했습니다. 두 번째를 세웠다면
+<strong>표본이 둘을 구분하지 못한다</strong>는 사실이 즉시 보였을 것이고,
+그게 3차가 아니라 9차에 가서야 닫힌 이유입니다.</p>
+
+<h3>3-2. 표본의 ‘수’ 를 근거의 ‘강도’ 로 환산했다</h3>
+<p>문서에 “63건 전수 일치”, “8쌍 전부”, “3 device 전부” 를 반복해서 썼습니다.
+숫자가 크면 강해 보입니다. 그런데 63건이 한 웨이퍼에서 나왔으면
+<strong>웨이퍼 수준 가설에 대해 N = 1</strong> 입니다.
+관측 단위와 가설 단위를 맞추지 않았습니다.</p>
+
+<h3>3-3. 사용자가 준 것과 내가 만든 것을 구분하지 않고 섞었다</h3>
+<p>E6 이 극단입니다. 문서는 “장비 판독 1건” 이라고만 적었고
+<strong>그 판독이 무엇을 담고 무엇을 안 담는지</strong>(<code>X·Y</code> 가 없다)를
+안 적었습니다. 그래서 그 위에 테스트를 얹을 때 빈칸을 제가 채웠고,
+채운 값이 근거처럼 보이게 됐습니다.</p>
+
+<h3>3-4. 결론의 ‘유효기간’ 을 안 적었다</h3>
+<p>§6-B 는 “정정한다. device 불변의 고정 오프셋이라는 <strong>실측 증거가 생겼다</strong>” 고
+확신에 찬 언어로 적혔습니다. 7차에서 뒤집혔습니다. 문제는 틀린 것 자체가 아니라
+<strong>“이 결론이 뒤집히려면 어떤 자료가 필요한가” 를 같이 안 적은 것</strong>입니다.
+그래서 RDL4 자료가 왔을 때 그게 반증이라는 걸 알아보는 데 시간이 걸렸습니다.</p>
+
+<h3>3-5. 그리고, 이게 진짜 동인이다</h3>
+<div class="note red">
+<span class="lbl">‘결론을 내는 것’ 을 진전으로 취급했다</span>
+<p>“자료가 더 필요합니다” 는 사용자에게 일을 넘기는 것이라 부담스럽고,
+“이렇게 결론냈습니다” 는 진전처럼 보입니다. 그래서
+<strong>불확실성을 표현하는 대신 결론을 냈습니다.</strong></p>
+<p>이 프로젝트에서 그 교환은 손해입니다. 틀린 결론의 비용은 “다시 하면 됨” 이 아니라
+<strong>조용히 틀린 좌표가 엑셀에 찍히는 것</strong>이고,
+사용자가 장비 화면을 직접 들여다볼 때까지 아무도 모릅니다.
+실제로 <code>row</code> 가 전 구간 1 큰 채로 여러 세션이 지났습니다.</p>
+<p style="margin-bottom:0"><strong>13차에 걸쳐 매번 “닫혔다” 고 적고 매번 다시 열린 것 자체가
+이 동인의 증거입니다.</strong></p>
+</div>
+</section>
+
+<!-- ══ 4 ══ -->
+<section id="s4">
+<h2><span class="n">4</span>지금 코드는 성급한 일반화가 아닌가</h2>
+<p>같은 잣대를 현재 상태에 들이댔습니다. 계산 근거는 <code>dev/tests/test_wafer_geometry.py</code>
+와 아래 표에 있습니다.</p>
+
+<h3>4-1. 표본이 실제로 구분해 주는 것 (이건 검증됐다)</h3>
+<p><strong>‘완전히 들어오는 die 부터 0번’ 규칙.</strong> 경쟁 가설(걸치기만 해도 세는 규칙)을
+세워 6사례에 돌리면 <strong>전 사례에서 1씩 어긋납니다.</strong> 표본이 두 가설을 구분합니다.
+이건 성급한 일반화가 아닙니다.</p>
+<div class="tw"><table>
+<caption>현재식 <code>co=ceil((Cx−D/2)/px)</code> · <code>rt=floor((Cy+D/2)/py)−1</code> vs 경쟁 가설</caption>
+<thead><tr><th style="width:26%">사례</th>
+<th class="num" style="width:11%">정답 co</th><th class="num" style="width:11%">현재식</th>
+<th class="num" style="width:12%">경쟁가설</th>
+<th class="num" style="width:11%">정답 rt</th><th class="num" style="width:11%">현재식</th>
+<th class="num" style="width:12%">경쟁가설</th></tr></thead>
+<tbody>
+<tr><td class="k">RDL4 17/18호기</td><td class="num">1</td><td class="num"><span class="v ok">1 ✓</span></td><td class="num">0</td>
+    <td class="num">6</td><td class="num"><span class="v ok">6 ✓</span></td><td class="num">7</td></tr>
+<tr><td class="k">T254 GIX5703110</td><td class="num">2</td><td class="num"><span class="v ok">2 ✓</span></td><td class="num">1</td>
+    <td class="num">10</td><td class="num"><span class="v ok">10 ✓</span></td><td class="num">11</td></tr>
+<tr><td class="k">PI4 UDS 35115E27EWD7</td><td class="num">2</td><td class="num"><span class="v ok">2 ✓</span></td><td class="num">1</td>
+    <td class="num">7</td><td class="num"><span class="v ok">7 ✓</span></td><td class="num">8</td></tr>
+<tr><td class="k">PI4 DYD 29265187EWF2</td><td class="num">2</td><td class="num"><span class="v ok">2 ✓</span></td><td class="num">1</td>
+    <td class="num">7</td><td class="num"><span class="v ok">7 ✓</span></td><td class="num">8</td></tr>
+<tr><td class="k">PI2 KMU 00RV9055XYC2</td><td class="num">2</td><td class="num"><span class="v ok">2 ✓</span></td><td class="num">1</td>
+    <td class="num">6</td><td class="num"><span class="v ok">6 ✓</span></td><td class="num">7</td></tr>
+<tr><td class="k">PI2 MTW 00RWQ258XYD1</td><td class="num">2</td><td class="num"><span class="v ok">2 ✓</span></td><td class="num">1</td>
+    <td class="num">6</td><td class="num"><span class="v ok">6 ✓</span></td><td class="num">7</td></tr>
+</tbody></table></div>
+<p><small>같은 방식으로 검증된 것: <strong>Camtek Y 축이 아래로 증가</strong>
+(DYD 의 <code>y_index=7 → row 0</code> 결함은 <code>row_total&lt;7</code> 이면 음수가 됩니다),
+<strong>die 내부 좌표는 버림</strong>(골든 1건이 <code>43180.809 → 43180</code> 으로 반올림과 갈립니다).</small></p>
+
+<h3>4-2. 표본이 구분하지 못하는데 채택한 것</h3>
+<div class="tw"><table class="kv"><tbody>
+<tr><td><code>Diameter</code> vs <code>MeasuredDiameter</code></td>
+    <td>RDL4 만 둘 다 있는데 <strong>둘 다 같은 답</strong>(여유가 커서 45 µm 차이가 안 보입니다).
+    어느 쪽이 장비의 기준인지 모릅니다</td></tr>
+<tr><td>버림 vs 반올림</td>
+    <td>13차에 확인된 4개 값의 소수부가 전부 &lt;0.5 라 <strong>두 방식이 같은 숫자</strong>를 냅니다.
+    골든 1건이 유일한 구분 사례입니다</td></tr>
+<tr><td><code>Wafer2Table</code> 이<br>레시피 값인가 웨이퍼 값인가</td>
+    <td>같은 로트 25장 편차 97 µm. “거의 같다” 는 알지만 <strong>왜 같은지</strong>는 모릅니다</td></tr>
+</tbody></table></div>
+
+<h3>4-3. 표본이 아예 없는 것</h3>
+<p><code>EBR ≠ 0</code> · 300 mm 아닌 웨이퍼 · KLA notch UP · mirrored YES.
+<strong>변화 0</strong> 이므로 이 변수들에 대해 현재 코드는 아무 근거가 없습니다.</p>
+
+<h3>4-4. 새로 발견 · ‘6 과 7’ 은 서로 독립적인 두 시험이 아니다</h3>
+<p>원점이 1 튈지는 <code>(Cy+D/2)/pitch_y</code> 의 <strong>소수부</strong>가 정합니다.
+정수부가 다르면 <code>row_total</code> 값이 다르지만, 식의 <strong>경계 거동</strong>은
+소수부만 시험합니다.</p>
+
+<figure>
+<svg viewBox="0 0 700 286" role="img"
+     aria-label="위상 산포도. 소수부 0에서 1 사이 전 구간 중 실측 여섯 사례는 0.333에서 0.345 사이, 전 구간의 1.2 퍼센트 안에만 몰려 있다. 원점이 튀는 경계인 0과 1 부근에는 표본이 없다.">
+  <defs>
+    <pattern id="hatch" width="7" height="7" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+      <rect width="7" height="7" fill="#FBFAF7"/>
+      <line x1="0" y1="0" x2="0" y2="7" stroke="#B7B2A6" stroke-width="1.5"/>
+    </pattern>
+  </defs>
+  <g font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">
+
+  <!-- ══ 전 구간 ══ -->
+  <text x="30" y="18" font-size="11" fill="#5A574E">소수부 전 구간 — 원점이 튀는 경계는 0 과 1 이다</text>
+  <text x="243" y="40" font-size="10.5" fill="#2C5A86" text-anchor="middle" font-weight="700">실측 6사례</text>
+
+  <rect x="60" y="46" width="540" height="26" fill="url(#hatch)" stroke="#89836F" stroke-width="1"/>
+  <rect class="pt" style="animation-delay:.05s" x="239.8" y="46" width="6.5" height="26" fill="#2C5A86"/>
+  <line x1="60" y1="40" x2="60" y2="78" stroke="#A5271E" stroke-width="2"/>
+  <line x1="600" y1="40" x2="600" y2="78" stroke="#A5271E" stroke-width="2"/>
+  <text x="60" y="92" font-size="11" fill="#A5271E" text-anchor="middle">0</text>
+  <text x="600" y="92" font-size="11" fill="#A5271E" text-anchor="middle">1</text>
+  <text x="140" y="92" font-size="10" fill="#5A574E" text-anchor="middle">빗금 = 표본 0건</text>
+  <text x="640" y="63" font-size="11" fill="#A5271E" font-weight="700">1.2 %</text>
+
+  <!-- 확대 연결 -->
+  <path d="M239.8 72 L150 132 M246.3 72 L590 132" stroke="#B7B2A6" stroke-width="1" stroke-dasharray="3 3" fill="none"/>
+
+  <!-- ══ 확대 0.330 ~ 0.350 ══   x = 150 + (f-0.330)/0.020*440 -->
+  <text x="30" y="126" font-size="11" fill="#5A574E">확대 — 0.330 ~ 0.350 (전 구간의 2 %)</text>
+  <line x1="150" y1="186" x2="590" y2="186" stroke="#89836F" stroke-width="1.5"/>
+  <text x="150" y="204" font-size="10" fill="#5A574E" text-anchor="middle">0.330</text>
+  <text x="590" y="204" font-size="10" fill="#5A574E" text-anchor="middle">0.350</text>
+
+  <g font-size="10.5">
+    <!-- 위쪽 라벨: T254(207) · KMU(324) · MTW(412) -->
+    <g class="pt" style="animation-delay:.14s">
+      <line x1="207" y1="181" x2="207" y2="162" stroke="#B7B2A6" stroke-width="1"/>
+      <text x="207" y="156" fill="#2C5A86" text-anchor="middle">T254 · 10</text>
+      <circle cx="207" cy="186" r="4.6" fill="#2C5A86"/>
+    </g>
+    <g class="pt" style="animation-delay:.3s">
+      <line x1="324" y1="181" x2="324" y2="147" stroke="#B7B2A6" stroke-width="1"/>
+      <text x="324" y="141" fill="#3B6438" text-anchor="middle" font-weight="700">KMU · 6</text>
+      <circle cx="324" cy="186" r="4.6" fill="#3B6438"/>
+    </g>
+    <g class="pt" style="animation-delay:.46s">
+      <line x1="412" y1="181" x2="412" y2="162" stroke="#B7B2A6" stroke-width="1"/>
+      <text x="412" y="156" fill="#3B6438" text-anchor="middle">MTW · 6</text>
+      <circle cx="412" cy="186" r="4.6" fill="#3B6438"/>
+    </g>
+
+    <!-- 아래쪽 라벨: UDS(306) · RDL4(403) · DYD(474) -->
+    <g class="pt" style="animation-delay:.22s">
+      <line x1="306" y1="191" x2="306" y2="212" stroke="#B7B2A6" stroke-width="1"/>
+      <text x="306" y="224" fill="#2C5A86" text-anchor="middle">UDS · 7</text>
+      <circle cx="306" cy="186" r="4.6" fill="#2C5A86"/>
+    </g>
+    <g class="pt" style="animation-delay:.38s">
+      <line x1="403" y1="191" x2="403" y2="230" stroke="#B7B2A6" stroke-width="1"/>
+      <text x="403" y="242" fill="#3B6438" text-anchor="middle">RDL4 · 6</text>
+      <circle cx="403" cy="186" r="4.6" fill="#3B6438"/>
+    </g>
+    <g class="pt" style="animation-delay:.54s">
+      <line x1="474" y1="191" x2="474" y2="212" stroke="#B7B2A6" stroke-width="1"/>
+      <text x="474" y="224" fill="#2C5A86" text-anchor="middle">DYD · 7</text>
+      <circle cx="474" cy="186" r="4.6" fill="#2C5A86"/>
+    </g>
+  </g>
+
+  <text x="150" y="266" font-size="10" fill="#5A574E">이름 뒤 숫자 = 그 웨이퍼의 row_total</text>
+  <text x="590" y="266" font-size="10.5" fill="#A5271E" text-anchor="end" font-weight="700">
+    여섯 사례 전부 0.333 ~ 0.345 — 폭 0.012</text>
+  </g>
+</svg>
+<figcaption><strong>초록은 <code>row_total = 6</code>, 파랑은 7·10 입니다.</strong>
+값은 갈리지만 위상은 갈리지 않습니다. 여섯 사례가 전 구간의 <strong>1.2 %</strong> 안에 몰려 있습니다.
+PI2(중심Y 179,5xx)와 PI4(224,3xx)의 차이는 <strong>44,867 µm, die 한 칸(44,905)과 39 µm 차이</strong>라,
+두 계열은 격자 대비 위상이 사실상 같고 <strong>정수부만 하나 다릅니다.</strong></figcaption>
+</figure>
+
+<div class="note amber">
+<span class="lbl">그래서 KMU 의 <code>row_total=6</code> 이 새로 증명한 것</span>
+<p style="margin-bottom:0"><strong>“식이 중심의 정수부를 따라간다”</strong> 이지
+<strong>“경계 근처에서도 옳다”</strong> 가 아닙니다. 6사례 전부 여유가 33~35 % 이므로
+<strong>경계 근접 거동은 여전히 표본 0건</strong>입니다.
+이건 구조 A 를 지금 자료에 그대로 적용해 나온 결과입니다.
+안 했으면 “이제 6도 7도 장비가 확인했으니 닫혔다” 고 적었을 것입니다.</p>
+</div>
+
+<h3 id="golden">4-5. 가장 무거운 발견 · 골든 테스트가 주경로를 안 태운다</h3>
+<p><code>CLAUDE.md</code> 는 골든 4사례를 <strong>“좌표 계산을 고칠 때의 절대 기준”</strong> 으로
+못 박고 있습니다. 그런데 그 픽스처는 <code>Params_WaferInfo.ini</code> 를 합성하면서
+<strong><code>Center_X/Y</code> 를 안 적습니다</strong>(<code>test_wafer_geometry.py:278-280</code>).
+중심이 없으면 <code>camtek_geometry</code> 는 폴백 경로로 갑니다.</p>
+
+<div class="paths">
+  <div class="path off">
+    <div class="hd">주경로 · 중심 → 원점 유도</div>
+    <p>앱이 <strong>실제로 타는</strong> 경로. 골든 픽스처에 중심이 없어
+      <strong>한 번도 실행되지 않았습니다.</strong></p>
+  </div>
+  <div class="path on">
+    <div class="hd">폴백 · ceil(D/pitch_y)</div>
+    <p>골든이 실제로 검증하던 경로. 4사례 전부 <strong>우연히 맞는 자재</strong>라
+      통과했을 뿐입니다.</p>
+  </div>
+</div>
+
+<pre>골든 사례        y_index   정답 row   폴백 ceil(D/py)   폴백 row
+dev-A               9         1            10           1   <u>✓</u>
+BNN-PIDS3 #1        5         2             7           2   <u>✓</u>
+BNN-PIDS3 #2        7         0             7           0   <u>✓</u>
+dev-B               5         2             7           2   <u>✓</u>
+
+<em>→ 4사례 전부 폴백이 우연히 맞는 자재.</em>
+  PI2 자재였다면 폴백 7 vs 장비 6 으로 어긋난다 (실측 <b>00RV9055XYC2</b>).</pre>
+
+<div class="note red">
+<span class="lbl">구조 B + C 가 프로젝트의 ‘절대 기준’ 안에 그대로 남아 있었다</span>
+<p>E6 에서 한 번 데었는데 같은 구조를 못 봤습니다. 합성 픽스처(B)가
+검증 대상 자신의 경로를 정의하고 있었고(C), 그 사실이 어디에도 적혀 있지 않았습니다.</p>
+<p style="margin-bottom:0"><strong>조치.</strong> 기존 골든은 폴백 경로 가드로 명시하고
+(<code>test_golden_actually_runs_the_fallback_path</code> 가 그 사실 자체를 단언),
+중심이 실재하는 웨이퍼 6사례로 <strong><code>TestDerivedPathGolden</code></strong> 을 새로 만들어
+주경로를 태웁니다. 경쟁 가설 배제 · 폴백이 PI2 에서 틀림 · 표본이 경계를 탐사하지 않는다는
+사실까지 함께 못 박았습니다(가드 19개). <code>CLAUDE.md</code> 도 “두 클래스 모두” 로 고쳤습니다.</p>
+</div>
+</section>
+
+<!-- ══ 5 ══ -->
+<section id="s5">
+<h2><span class="n">5</span>앞으로 · 여섯 규칙과 부칙</h2>
+<p>추상적 다짐(“더 신중히”)은 규칙이 아닙니다.
+<strong>기계적으로 수행 가능하고, 수행 여부를 나중에 확인할 수 있는 것</strong>만 적습니다.</p>
+
+<div class="tw"><table>
+<thead><tr><th class="ctr" style="width:6%"></th><th style="width:26%">규칙</th>
+<th style="width:68%">무엇을 요구하나</th></tr></thead>
+<tbody>
+<tr><td class="k ctr">R1</td><td>가설 2개 이상 + <strong>구분표</strong></td>
+    <td>값을 채택하기 전에 경쟁 가설을 하나 이상 적고, 표본이 두 가설에
+      <strong>다른 답을 내는지</strong> 표로 계산한다(<a class="ref" href="#s4">4-1</a> 이 그 형식).
+      <br>· 구분한다 → 채택. 표를 근거로 남긴다.
+      <br>· 구분 못 한다 → <strong>채택해도 된다.</strong> 다만 “미구분” 을
+      <strong>코드 주석 · 문서 · 요청 목록 세 곳에 동시에</strong> 적는다.
+      채택 자체는 죄가 아니다. 채택을 관측처럼 보이게 두는 것이 죄다</td></tr>
+<tr><td class="k ctr">R2</td><td>N 을 <strong>가설이 묻는 변수 위에서</strong> 센다</td>
+    <td>“63건” 이 아니라 “웨이퍼 1장 / 63결함”. “3 device” 가 아니라
+      “3 device / stage 위치 1종”. 문서에 쓸 때도 이 형식을 쓴다</td></tr>
+<tr><td class="k ctr">R3</td><td>모든 수치에 <strong>출처 등급</strong></td>
+    <td><code>관측</code>(장비 화면·장비가 적은 파일) / <code>파일</code>(INI 에 적힌 값) /
+      <code>유도</code>(계산) / <code>가정</code>(근거 없음) / <code>합성</code>(내가 만든 값).
+      표·테스트·문서 어디든 <strong>등급 없는 숫자를 쓰지 않는다</strong></td></tr>
+<tr><td class="k ctr">R4</td><td><strong>합성값은 골든에 넣지 않는다</strong></td>
+    <td>관측값만 골든에 들어간다. 합성 픽스처가 필요하면 별도 클래스로 분리하고 이름에 적는다.
+      <strong>그리고 골든은 반드시 앱이 실제로 타는 경로를 태워야 한다.</strong>
+      <a class="ref" href="#golden">4-5</a> 가 이걸 안 해서 생겼다</td></tr>
+<tr><td class="k ctr">R5</td><td>결론마다 <strong>반증 조건</strong></td>
+    <td>“X 를 채택한다” 옆에 “<strong>Y 같은 자료가 오면 이 결론은 무너진다</strong>” 를 적는다.
+      그러면 그 자료가 실제로 왔을 때 알아본다</td></tr>
+<tr><td class="k ctr">R6</td><td>“<strong>이 방법으로는</strong> 안 된다”</td>
+    <td>“유도 불가” 대신 “<code>SampleTestPlan</code> 으로는 유도 불가”.
+      방법을 명시하면 다른 방법이 있을 수 있다는 게 문장에 남는다</td></tr>
+<tr><td class="k ctr">R7<br><small style="font-weight:400">부칙</small></td>
+    <td>두 소스면 <strong>일치를 단언</strong></td>
+    <td><code>assert normalize(5) == 4</code> 는 정규화가 옳은지 영영 안 묻는다.
+      <code>assert camtek_ini(d) == camtek_live(d)</code> 는 묻는다.
+      적용 대상이 ‘같은 대상의 두 소스’ 로 좁아 본칙이 아니라 부칙이다</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- ══ 6 ══ -->
+<section id="s6">
+<h2><span class="n">6</span>역테스트 · 실제로 잡았을까</h2>
+<p>13건 + 이번 골든 감사 1건에 규칙을 거꾸로 적용합니다.
+<strong>잡지 못하는 게 있으면 규칙이 부족한 것</strong>입니다.</p>
+
+<div class="tw"><table class="matrix">
+<caption>각 오류를 어느 규칙이 잡았을까. ● 포착 / · 해당 없음</caption>
+<thead><tr><th style="width:30%">오류</th>
+<th class="r">R1</th><th class="r">R2</th><th class="r">R3</th><th class="r">R4</th>
+<th class="r">R5</th><th class="r">R6</th><th class="r">R7</th></tr></thead>
+<tbody>
+<tr><td class="k">E1 KLA 에 맞춤</td>
+    <td class="m">●</td><td class="m no">·</td><td class="m">●</td><td class="m no">·</td><td class="m no">·</td><td class="m no">·</td><td class="m">●</td></tr>
+<tr><td class="k">E2 <code>−1</code> 잔재</td>
+    <td class="m no">·</td><td class="m no">·</td><td class="m no">·</td><td class="m no">·</td><td class="m no">·</td><td class="m no">·</td><td class="m">●</td></tr>
+<tr><td class="k">E3 <code>col−2</code> 상수</td>
+    <td class="m">●</td><td class="m">●</td><td class="m no">·</td><td class="m no">·</td><td class="m">●</td><td class="m no">·</td><td class="m no">·</td></tr>
+<tr><td class="k">E4 <code>ceil</code> 채택</td>
+    <td class="m">●</td><td class="m">●</td><td class="m no">·</td><td class="m no">·</td><td class="m">●</td><td class="m no">·</td><td class="m no">·</td></tr>
+<tr><td class="k">E5 <code>KLA_ZERO_Y=4</code></td>
+    <td class="m no">·</td><td class="m no">·</td><td class="m">●</td><td class="m no">·</td><td class="m no">·</td><td class="m">●</td><td class="m no">·</td></tr>
+<tr><td class="k">E6 합성 X/Y</td>
+    <td class="m no">·</td><td class="m no">·</td><td class="m">●</td><td class="m">●</td><td class="m no">·</td><td class="m no">·</td><td class="m no">·</td></tr>
+<tr><td class="k">E7 <code>Center=0</code> 기각</td>
+    <td class="m no">·</td><td class="m no">·</td><td class="m">●</td><td class="m no">·</td><td class="m no">·</td><td class="m no">·</td><td class="m no">·</td></tr>
+<tr><td class="k">E8 <code>InputWaferID</code></td>
+    <td class="m">●</td><td class="m">●</td><td class="m no">·</td><td class="m no">·</td><td class="m no">·</td><td class="m no">·</td><td class="m no">·</td></tr>
+<tr><td class="k">E9 185 µm 쌍</td>
+    <td class="m no">·</td><td class="m no">·</td><td class="m">●</td><td class="m no">·</td><td class="m no">·</td><td class="m no">·</td><td class="m no">·</td></tr>
+<tr><td class="k">E10 웨이퍼 섞음</td>
+    <td class="m no">·</td><td class="m">●</td><td class="m no">·</td><td class="m no">·</td><td class="m no">·</td><td class="m no">·</td><td class="m no">·</td></tr>
+<tr><td class="k">E11 검산 완화</td>
+    <td class="m">●</td><td class="m">●</td><td class="m no">·</td><td class="m no">·</td><td class="m no">·</td><td class="m no">·</td><td class="m no">·</td></tr>
+<tr><td class="k">E12 <code>Center</code> 단정</td>
+    <td class="m">●</td><td class="m">●</td><td class="m no">·</td><td class="m no">·</td><td class="m no">·</td><td class="m">●</td><td class="m no">·</td></tr>
+<tr><td class="k">E13 되돌림</td>
+    <td class="m">●</td><td class="m no">·</td><td class="m">●</td><td class="m no">·</td><td class="m no">·</td><td class="m no">·</td><td class="m no">·</td></tr>
+<tr><td class="k" style="color:var(--danger)">§4-5 골든 결함</td>
+    <td class="m no">·</td><td class="m no">·</td><td class="m">●</td><td class="m">●</td><td class="m no">·</td><td class="m no">·</td><td class="m no">·</td></tr>
+</tbody>
+<tfoot><tr><td>포착 건수</td>
+<td>7</td><td>6</td><td>7</td><td>2</td><td>2</td><td>2</td><td>2</td></tr></tfoot>
+</table></div>
+
+<div class="note green">
+<span class="lbl">결과</span>
+<p style="margin-bottom:0"><strong>14건 모두 최소 하나의 규칙에 걸립니다.</strong>
+가장 넓게 잡는 것은 R1(7건)·R3(7건)이고, 그 둘은 <strong>서로 다른 종류</strong>를 잡습니다.
+R1 은 논리(가설을 하나만 세움), R3 은 기록(출처가 지워짐).</p>
+</div>
+
+<h3>잡지 못하는 것은?</h3>
+<ul>
+<li><strong>E2 는 R1~R6 중 어느 것에도 안 걸립니다.</strong> R7 로만 걸립니다.
+  그래서 R7 을 본칙으로 올려야 하는지 검토했으나, 적용 대상이 ‘같은 대상의 두 소스’ 로
+  좁아 본칙보다는 부칙이 맞다고 판단했습니다.</li>
+<li><strong>표본이 하나도 없는 변수</strong>(<code>EBR≠0</code> 등)는 어떤 규칙으로도 못 잡습니다.
+  이건 규칙의 한계가 아니라 자료의 한계이고,
+  R3(<code>가정</code> 등급) + R5(반증 조건)로 <strong>드러나 있게</strong> 하는 것이 최선입니다.</li>
+</ul>
+</section>
+
+<!-- ══ 7 ══ -->
+<section id="s7">
+<h2><span class="n">7</span>비용과 부작용 점검</h2>
+<p>규칙이 합리적이려면 ① 비용이 감당 가능하고 ② <strong>옳은 결정을 막지 않아야</strong> 합니다.</p>
+
+<div class="tw"><table>
+<thead><tr><th class="ctr" style="width:7%"></th><th style="width:41%">비용</th>
+<th style="width:52%">옳은 결정을 막는가</th></tr></thead>
+<tbody>
+<tr><td class="k ctr">R1</td><td>결정당 산술 10줄. <strong>기계적</strong>이라 판단이 안 들어간다</td>
+    <td><span class="v ok">아니오</span>. “구분 못 하면 채택 금지” 가 <strong>아니다.</strong>
+      채택하되 표시한다</td></tr>
+<tr><td class="k ctr">R2</td><td>0 (세는 방식만 바꾼다)</td><td><span class="v ok">아니오</span></td></tr>
+<tr><td class="k ctr">R3</td><td>문서·테스트가 길어진다</td><td><span class="v ok">아니오</span></td></tr>
+<tr><td class="k ctr">R4</td><td><strong>일회성 리팩터</strong> (4-5 수정, 완료)</td><td><span class="v ok">아니오</span></td></tr>
+<tr><td class="k ctr">R5</td><td>결론당 한 줄</td><td><span class="v ok">아니오</span></td></tr>
+<tr><td class="k ctr">R6</td><td>0 (표현)</td><td><span class="v ok">아니오</span></td></tr>
+<tr><td class="k ctr">R7</td><td>소스쌍당 테스트 1개</td><td><span class="v ok">아니오</span></td></tr>
+</tbody></table></div>
+
+<div class="note blue">
+<span class="lbl">핵심 설계</span>
+<p style="margin-bottom:0">R1 은 <strong>“근거가 부족하면 멈춰라” 가 아닙니다.</strong>
+그건 실행 불가능하고(자료는 늘 부족합니다) 이 프로젝트의 진행을 막습니다.
+R1 이 요구하는 것은 <strong>“부족하다는 사실을 기록에서 지우지 마라”</strong> 뿐입니다.
+맨 위 정문(定文)으로 돌아갑니다. 13건의 공통점은 결정이 아니라
+<strong>결정의 흔적이 사라진 것</strong>이었습니다.</p>
+</div>
+
+<h3>규칙이 방금 실제로 작동한 사례 · R-4 등급</h3>
+<div class="note">
+<span class="lbl">심각도만 보고 올릴 뻔했다</span>
+<p>13차 자료를 받고 <strong>“폴백이 장비 기준으로 틀렸으니 리스크 R-4 를 ‘높’ 으로 올리자”</strong> 고
+계획했습니다. R1 을 적용하니 틀린 판단이었습니다. 등급은 심각도 × <strong>빈도</strong>인데,
+<strong>폴백까지 내려간 폴더는 지금까지 0건</strong>입니다
+(확보한 41 웨이퍼 전부 <code>Center_*</code> 또는 <code>Wafer2Table.ini</code> 를 갖고 있었습니다).</p>
+<p style="margin-bottom:0">심각도만 보고 올리는 것은 <strong>구조 A 그 자체</strong>였습니다.
+그래서 R-4 는 ‘중’ 을 유지하고 <strong>반증 조건</strong>을 적었습니다.
+<code>Wafer2Table.ini</code> 없는 스캔이 1건이라도 나오면 그때 올립니다.</p>
+</div>
+
+<h3>이 회고 자체도 성급한 일반화인가</h3>
+<div class="tw"><table class="kv"><tbody>
+<tr><td>표본</td><td>13건 + 감사 1건. <strong>좌표 영역에 한정</strong>됩니다.
+  다른 영역(업데이트·매칭·UI)의 오류는 여기 없으므로
+  <strong>“이 프로젝트 전체의 패턴” 이라고 주장하지 않습니다</strong></td></tr>
+<tr><td>분류</td><td>네 구조는 <strong>사후 분류</strong>입니다. 다른 분류도 가능합니다.
+  그래서 분류가 아니라 <strong>규칙으로 판정</strong>되게 6장을 붙였습니다.
+  규칙이 실제 14건을 잡는지가 검증 가능한 부분입니다</td></tr>
+<tr><td style="color:var(--danger)">반증 조건<br><small style="font-weight:400">R5 를 이 문서에도 적용</small></td>
+  <td><strong>규칙을 지켰는데도 같은 구조의 오류가 또 나오면</strong>, 원인은 기록 방식이 아니라
+  다른 데 있다는 뜻입니다. 그때 이 문서를 다시 엽니다</td></tr>
+</tbody></table></div>
+</section>
+
+<footer class="colophon">
+<p>원문은 <code>docs/좌표_판단오류_회고.md</code> 입니다. 개별 사고의 경위는
+<code>docs/규칙_배경.md</code>, 조사 기록은 <code>docs/디바이스_하드코딩_조사.md</code>,
+현재 검증 상태는 <code>docs/좌표_계산_검증_보고서_상세.html</code> 에 있습니다.
+규칙 R1~R7 은 <code>CLAUDE.md</code> 의 좌표 절에서도 참조됩니다.</p>
+<p style="margin-bottom:0">서체 · 색은 앱의 제도지 테마(<code>app/ui/theme.py</code> 라이트 프로파일)를
+검증보고서와 공유합니다. 한글 서체는 저장소 동봉 <code>NanumSquare</code> 를 상대경로로
+참조하므로 <code>docs/</code> 안에서 열어야 정상 표시됩니다.</p>
+</footer>
+
+</main>
+</div>
+</div>
+
+<script>
+(function(){
+  var links = Array.prototype.slice.call(document.querySelectorAll('nav.index a'));
+  var map = {}, ids = [];
+  links.forEach(function(a){
+    var el = document.querySelector(a.getAttribute('href'));
+    if (el) { map[el.id] = a; ids.push(el.id); }
+  });
+  if (!ids.length || !('IntersectionObserver' in window)) return;
+  var vis = {};
+  var io = new IntersectionObserver(function(entries){
+    entries.forEach(function(e){ vis[e.target.id] = e.isIntersecting ? e.intersectionRatio : 0; });
+    var best = null, bv = 0;
+    ids.forEach(function(id){ if (vis[id] > bv) { bv = vis[id]; best = id; } });
+    links.forEach(function(a){ a.removeAttribute('aria-current'); });
+    if (best) map[best].setAttribute('aria-current','true');
+  }, { rootMargin: '-8% 0px -70% 0px', threshold: [0, .25, .5, 1] });
+  ids.forEach(function(id){ io.observe(document.getElementById(id)); });
+})();
+</script>
+</body>
+</html>
