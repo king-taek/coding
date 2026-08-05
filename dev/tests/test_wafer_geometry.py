@@ -1040,8 +1040,14 @@ class TestWaferCenterFromWafer2Table:
     def test_row_total_follows_placement_not_grid(self, tmp_path):
         """★ **같은 격자인데 row 기준이 갈린다** — 격자가 아니라 위치가 정한다.
 
-        RDL4 와 UDS-PIDS3 는 둘 다 TB500 격자(44905)인데 6 과 7 로 다르다.
-        옛 식 `ceil(Diameter/pitch_y)` 는 둘 다 7 을 내므로 RDL4 에서 틀린다."""
+        여기서 검증하는 것은 **유도식이 중심에 반응한다**는 사실이다: 같은 pitch 를 줘도
+        중심이 다르면 6 과 7 로 갈린다.  옛 식 `ceil(Diameter/pitch_y)` 는 둘 다 7 을 내므로
+        RDL4 에서 틀린다.
+
+        ⚠ 두 계열의 **실제** row 기준(6 / 7)에 대한 근거는 이 픽스처가 아니라 장비 쪽
+        자료다 — RDL4 는 장비가 파일명에 적은 값 4건, PI4 는 `VLP-PDIS3` LIVE 쌍과 골든
+        `BNN-PIDS3` 2건.  `UDS-PIDS3` 의 `Wafer2Table` 값은 웨이퍼 1장짜리 방증일 뿐이라
+        결론이 여기에 기대지 않는다(→ `docs/디바이스_하드코딩_조사.md` §6-L 경고 블록)."""
         import math
         got = {}
         for i, key in enumerate(("RDL4 XYA2", "UDS-PIDS3 35115E27EWD7")):

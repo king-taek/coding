@@ -300,11 +300,13 @@ footer.colophon{margin-top:2.4rem;padding-top:1rem;border-top:2px solid var(--ru
 <p>die 격자는 <strong>장비 좌표계에 고정된 바둑판</strong>입니다. 그 위에 둥근 웨이퍼를 올려놓습니다.
 웨이퍼가 <strong>온전히 덮는 칸</strong>만 실제 die 이고, 번호는 그 첫 칸 / 마지막 칸부터 셉니다.</p>
 <p>그래서 <strong>die 크기가 같아도 웨이퍼가 놓인 위치가 다르면 번호 기준이 달라집니다.</strong>
-실제로 RDL4 와 UDS-PIDS3 는 둘 다 die 세로 44,905 µm 인데 기준이 6 과 7 로 갈립니다 —
-두 웨이퍼가 격자 위에서 거의 정확히 한 칸 어긋난 자리에 놓여 있기 때문입니다.</p>
-<pre>RDL4       중심Y 179,674  →  덮는 칸 1‥6  →  맨 아래 <b>6</b>
-UDS-PIDS3  중심Y 224,380  →  덮는 칸 2‥7  →  맨 아래 <b>7</b>
-           차이 44,706 µm ≈ die 한 칸(44,905)</pre>
+실제로 <strong>RDL4 계열과 PI4 계열</strong>은 둘 다 die 세로 44,905 µm 인데 기준이 6 과 7 로 갈립니다.</p>
+<pre>RDL4 계열   row_total <b>6</b>   <i>장비가 파일명에 적은 값 4건</i>
+PI4  계열   row_total <b>7</b>   <i>장비 정답 3건 (아래 표)</i>
+            같은 격자인데 한 칸 어긋난 자리에 놓여 있다</pre>
+<p>근거는 <a class="ref" href="#pi7">3장의 PI4 표</a>에 있습니다 —
+<strong>웨이퍼 중심을 몰라도</strong> 장비가 낸 <code>col/row</code> 와 결함의 절대 좌표만으로
+기준이 역산되기 때문에, 이 결론은 중심값 추정에 기대지 않습니다.</p>
 </div>
 <figure>
 <svg viewBox="0 0 499 464" xmlns="http://www.w3.org/2000/svg" class="dgrid" role="img" aria-labelledby="gt gd">
@@ -555,7 +557,62 @@ pitch 를 쓰면 die 내부 y 가 최대 11.4 µm 더 정확</strong>해집니�
 <a class="ref" href="#s9">9장</a>의 요청 자료 3번이 이걸 닫습니다.</p>
 </div>
 
-<h3>③ 이미 확보된 정확도</h3>
+<h3 id="pi7">③ PI4 계열의 row 기준 — 근거 4건과 그 무게</h3>
+<p><code>row_total</code> 은 <strong>웨이퍼 중심을 몰라도 역산됩니다.</strong> 장비가 낸
+<code>row</code> 와 그 결함의 절대 <code>Y</code> 만 있으면
+<code>row_total = row + floor(Y / pitch_y)</code> 이기 때문입니다. PI4 계열(<code>R_TB500_LIVE_PI4</code>,
+<code>DieStep 37247.7 × 44905.4</code>)에서 확보된 근거입니다.</p>
+
+<div class="tw"><table>
+<caption>PI4 계열 row 기준 — 근거별 무게</caption>
+<thead><tr><th style="width:22%">로트 · 웨이퍼</th><th style="width:26%">근거 종류</th>
+<th class="ctr" style="width:11%">y_index</th><th class="ctr" style="width:10%">장비 row</th>
+<th class="ctr" style="width:13%">row_total</th><th style="width:18%">무게</th></tr></thead>
+<tbody>
+<tr><td>VLP-PDIS3<br><code>W6317098XYB5</code></td>
+    <td><strong>장비가 파일명에 적은 값</strong><br><small>같은 결함의 Camtek INI 와 쌍</small></td>
+    <td class="ctr">2</td><td class="ctr">5</td><td class="ctr"><strong>7</strong></td>
+    <td><span class="v ok">강</span></td></tr>
+<tr><td>BNN-PIDS3 #1</td><td><strong>장비 화면 정답</strong><br><small>골든 테스트에 고정</small></td>
+    <td class="ctr">5</td><td class="ctr">2</td><td class="ctr"><strong>7</strong></td>
+    <td><span class="v ok">강</span></td></tr>
+<tr><td>BNN-PIDS3 #2</td><td><strong>장비 화면 정답</strong><br><small>골든 테스트에 고정</small></td>
+    <td class="ctr">7</td><td class="ctr">0</td><td class="ctr"><strong>7</strong></td>
+    <td><span class="v ok">강</span></td></tr>
+<tr><td>UDS-PIDS3<br><code>35115E27EWD7</code></td>
+    <td><code>Wafer2Table.ini</code> 역산<br><small>중심 → 기준 유도</small></td>
+    <td class="ctr">—</td><td class="ctr">—</td><td class="ctr">7</td>
+    <td><span class="v wa">약 — 아래 참조</span></td></tr>
+</tbody></table></div>
+
+<p>앞의 세 건은 <strong>장비가 직접 낸 숫자</strong>라 중심 추정이 개입하지 않습니다.
+특히 VLP-PDIS3 는 같은 결함의 die 내부 좌표가 파일명과 INI 계산값 사이에서
+<strong>0.001 µm 이내</strong>로 일치해 같은 결함임이 확실합니다.
+<strong>따라서 “PI4 계열 row 기준 = 7” 은 UDS-PIDS3 자료가 없어도 성립합니다.</strong></p>
+
+<div class="note amber">
+<span class="lbl">UDS-PIDS3 중심값 224,380 의 출처 — 근거가 약한 항목</span>
+<p>이 값은 <strong>파일에 적힌 값이 아니라 계산값</strong>입니다. 출처를 그대로 적습니다.</p>
+<pre>파일  Y:\AOI-24\Scanresult\R_TB500_LIVE_PI4\Setup1\UDS-PIDS3\35115E27EWD7\Wafer2Table.ini
+      (저장소 사본: _wafer2table_모음/Wafer2Table_6건.md 127~152행 · 정렬 저장 07/04/26 01:46)
+
+적힌 값   Wafer2Table_X =  1.0000080255   0.0008509894   −204890.6266250769
+          Wafer2Table_Y = −0.0008509894   1.0000080255   −224207.3632713843
+          → 이것은 <b>웨이퍼 = M·테이블 + t</b> 변환이지 중심이 아니다
+
+1단계  같은 파일의 앵커 5점으로 변환 방향 확인 ....... 최대 오차 <b>1.55 µm</b>
+2단계  중심 = M⁻¹·(−t) = (204,698.0, <b>224,379.8</b>)   ← 224,380 의 출처
+3단계  행렬을 안 쓰고 앵커 5점만 최소제곱 적합해 재산출
+       → (204,697.8, 224,379.4)   두 경로 차이 <b>0.42 µm</b></pre>
+<p style="margin-bottom:0"><strong>남는 약점 두 가지</strong> —
+① <strong>웨이퍼 한 장</strong>의 측정값입니다. <code>Wafer2Table</code> 은 웨이퍼마다 측정되는 값이고
+(T254 에서 웨이퍼 간 99 µm 편차 관측), 이 로트에서는 표본이 1개뿐이라
+<strong>“PI 레시피의 중심” 이라고 일반화할 수 없습니다.</strong>
+② <strong>die 간격이 가정</strong>입니다 — 그 웨이퍼의 <code>Params_WaferInfo.ini</code> 가 없어
+같은 job 의 <em>다른 로트</em>(TBD-PIDS3 <code>25195007EWF6</code>, <code>PI_Bubble</code>)에서 가져왔습니다.</p>
+</div>
+
+<h3>④ 이미 확보된 정확도</h3>
 <div class="tw"><table>
 <thead><tr><th style="width:36%">비교</th><th class="num" style="width:20%">오차</th>
 <th style="width:44%">근거</th></tr></thead>
@@ -714,9 +771,11 @@ pitch 를 쓰면 die 내부 y 가 최대 11.4 µm 더 정확</strong>해집니�
 <tr><td>증명한 것</td><td>· <strong>같은 웨이퍼 검증</strong> — 그 웨이퍼 자신의 파일이 화면 정답을 냄<br>
     · <strong>웨이퍼 간 편차</strong> X 99 µm / Y 75 µm — 경계 여유(1,594 µm)의 1/16<br>
     · <strong>기록된 <code>Center_*</code> 와 140 µm 이내 일치</strong>, 유도 원점도 동일<br>
-    · 같은 TB500 격자인데 RDL4 = 6 · UDS-PIDS3 = 7 → <strong>격자가 아니라 위치가 정함</strong><br>
-    · 앵커 3점이 어파인 변환을 <strong>2.7 µm</strong> 안에 재현 → 변환 방향 확정</td></tr>
-<tr><td style="color:var(--danger)">한계</td><td>· 4개 제품군만 커버<br>
+    · 앵커 3~5점이 어파인 변환을 <strong>2.7 µm</strong> 안에 재현 → 변환 방향 확정</td></tr>
+<tr><td style="color:var(--danger)">한계</td><td>· 4개 제품군만 커버, <strong>제품군당 표본이 1~3장</strong><br>
+    · <code>Wafer2Table</code> 은 <strong>웨이퍼마다 측정되는 값</strong> — 한 장으로 레시피 값을 단정할 수 없음<br>
+    · UDS-PIDS3 · LLN 은 <strong>1장뿐</strong>이고 같은 웨이퍼의 <code>Params_WaferInfo.ini</code> 도 없음
+      → <a class="ref" href="#pi7">중심 224,380 은 근거가 약한 항목</a><br>
     · <code>Wafer2Table.ini</code> 이 <strong>없는</strong> 스캔이 있는지 미확인<br>
     · 17호기 두 건은 데스크톱 사본이라 원본 스캔 폴더 경로가 아님</td></tr>
 </tbody></table></div>
@@ -1118,6 +1177,42 @@ pitch 를 쓰면 die 내부 y 가 최대 11.4 µm 더 정확</strong>해집니�
     <td><a class="ref" href="#s7">R-5</a> — 축 방향 일반성</td>
     <td>발생 시 매칭 실패로 드러남</td><td class="ctr">낮</td></tr>
 </tbody></table></div>
+
+<h3 id="picenter">9-1-A. PI 계열 웨이퍼 중심을 확실히 하려면</h3>
+<p>“PI 레시피의 중심이 그 지점” 이라는 판단은 <strong>웨이퍼 한 장의 측정값</strong>에 기대고 있습니다
+(<a class="ref" href="#pi7">3장 ③</a>). 아래 중 <strong>하나만</strong> 있어도 크게 달라집니다.</p>
+
+<div class="tw"><table>
+<thead><tr><th class="ctr" style="width:6%">순위</th><th style="width:28%">자료</th>
+<th style="width:36%">무엇이 확실해지나</th><th style="width:30%">왜 그런가</th></tr></thead>
+<tbody>
+<tr><td class="k ctr">A</td>
+    <td><code>UDS-PIDS3\35115E27EWD7\</code> 의<br><strong><code>Params_WaferInfo.ini</code></strong></td>
+    <td>· <strong>die 간격 가정이 사라짐</strong> (지금은 다른 로트에서 빌려 씀)<br>
+        · <code>Center_Y</code> 가 기록돼 있으면 <strong>제 역산값 224,380 과 직접 대조</strong></td>
+    <td>같은 웨이퍼의 두 소스를 맞대는 것 — RDL4 에서 140 µm 이내로 일치했던 그 검증</td></tr>
+<tr><td class="k ctr">B</td>
+    <td>PI 로트 웨이퍼 <strong>2~3장</strong>의<br><code>Wafer2Table.ini</code></td>
+    <td>· 중심이 <strong>웨이퍼마다 얼마나 흔들리는지</strong> 측정<br>
+        · 편차가 작으면 “레시피 값” 이라 말할 수 있음</td>
+    <td>T254 에서 3장으로 편차 99 µm 를 재어 원점 안정성을 확인한 것과 같은 방법</td></tr>
+<tr><td class="k ctr">C</td>
+    <td>PI 웨이퍼 결함 1장 +<br><strong>장비 화면 col/row</strong></td>
+    <td>· <strong>중심을 아예 안 거치고</strong> row 기준을 직접 확인</td>
+    <td>중심은 기준을 구하는 <em>수단</em>일 뿐 — 기준 자체를 장비가 말해 주면 중심 논쟁이 불필요</td></tr>
+<tr><td class="k ctr">D</td>
+    <td><code>Center_*</code> 가 <strong>0 이 아닌</strong> PI 로트의<br><code>Params_WaferInfo.ini</code></td>
+    <td>· PI 계열 중심의 <strong>기록값</strong>을 처음으로 확보</td>
+    <td>지금 가진 PI 로트(TBD-PIDS3)는 <code>Center = 0</code> 미기록이라 비교 대상이 없음</td></tr>
+</tbody></table></div>
+
+<div class="note blue">
+<span class="lbl">다만 — 이것이 결론을 바꾸지는 않습니다</span>
+<p style="margin-bottom:0">위 자료가 하나도 없어도 <strong>“PI4 계열 row 기준 = 7” 은 이미 장비 근거 3건으로 성립</strong>합니다
+(<a class="ref" href="#pi7">3장 ③</a>). 중심값은 그 결론의 <em>설명</em>이지 <em>근거</em>가 아닙니다.
+위 자료들은 <strong>“왜 7 인가” 를 중심으로 설명할 수 있게</strong> 만들어 줄 뿐입니다.
+지금 초점인 x·y 정확도 기준으로는 <strong>A 가 가장 값집니다</strong> — die 간격이 x·y 에 직접 들어가기 때문입니다.</p>
+</div>
 
 <div class="note blue">
 <span class="lbl">가장 값싼 한 가지</span>
