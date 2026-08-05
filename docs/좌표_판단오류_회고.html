@@ -539,17 +539,50 @@ E4  웨이퍼 4장. 두 가설이 갈리는 조건은 <em>안 변했다</em>
     <td class="num">6</td><td class="num"><span class="v ok">6 ✓</span></td><td class="num">7</td></tr>
 </tbody></table></div>
 <p><small>같은 방식으로 검증된 것: <strong>Camtek Y 축이 아래로 증가</strong>
-(DYD 의 <code>y_index=7 → row 0</code> 결함은 <code>row_total&lt;7</code> 이면 음수가 됩니다),
-<strong>die 내부 좌표는 버림</strong>(골든 1건이 <code>43180.809 → 43180</code> 으로 반올림과 갈립니다).</small></p>
+(DYD 의 <code>y_index=7 → row 0</code> 결함은 <code>row_total&lt;7</code> 이면 음수가 됩니다).</small></p>
+
+<h4 id="trunc">4-1-A. 버림 vs 반올림 <span style="color:var(--pass)">· 13차 후반에 닫혔다</span></h4>
+<p>이 항목은 원래 “미구분” 이었습니다. 소수부가 0.5 미만이면 버림과 반올림이
+<strong>같은 숫자</strong>를 내므로 아무것도 증명하지 못하는데, DYD 4개 값이 전부 그랬습니다.
+그래서 <strong>“소수부 ≥ 0.5 인 결함 1건이면 닫힙니다”</strong> 라고 적어 요청했고,
+MTW 자료가 그걸 가져왔습니다.</p>
+<div class="tw"><table>
+<caption>소수부가 0.5 이상이라 두 방식이 갈리는 사례만</caption>
+<thead><tr><th style="width:34%">출처</th><th class="num" style="width:16%">나머지</th>
+<th class="num" style="width:13%">버림</th><th class="num" style="width:13%">반올림</th>
+<th class="num" style="width:13%">장비 화면</th><th class="ctr" style="width:11%">판정</th></tr></thead>
+<tbody>
+<tr><td class="k">골든 BNN-PIDS3 #1<br><small>폴백 경로</small></td><td class="num">43180.809</td>
+    <td class="num"><strong>43180</strong></td><td class="num">43181</td>
+    <td class="num"><strong>43180</strong></td><td class="ctr"><span class="v ok">버림</span></td></tr>
+<tr><td class="k">MTW #1<br><small>유도 경로</small></td><td class="num">24491.598</td>
+    <td class="num"><strong>24491</strong></td><td class="num">24492</td>
+    <td class="num"><strong>24491</strong></td><td class="ctr"><span class="v ok">버림</span></td></tr>
+<tr><td class="k">MTW #2<br><small>유도 경로</small></td><td class="num">24492.531</td>
+    <td class="num"><strong>24492</strong></td><td class="num">24493</td>
+    <td class="num"><strong>24492</strong></td><td class="ctr"><span class="v ok">버림</span></td></tr>
+<tr><td class="k">DYD 4개 값</td><td class="num">소수부 &lt;0.5</td>
+    <td class="num">·</td><td class="num">·</td><td class="num">일치</td>
+    <td class="ctr"><span class="v no">구분 못 함</span></td></tr>
+</tbody></table></div>
+<p><small><strong>2 device · 두 경로(유도·폴백) 모두에서 버림입니다.</strong> 회귀 가드:
+<code>TestDerivedPathGolden::test_die_internal_xy_is_truncated_not_rounded</code>.</small></p>
+<div class="note green">
+<span class="lbl">R1 이 실제로 작동한 사례</span>
+<p style="margin-bottom:0">“구분 못 한다” 를 기록해 뒀기 때문에 <strong>무엇을 요청해야 닫히는지</strong>가
+명확했고, 그 자료가 오자 바로 닫혔습니다. 기록하지 않았다면
+“4건이 다 맞았으니 버림이 맞다” 로 넘어갔을 것입니다. <a class="ref" href="#sta">구조 A</a> 그 자체죠.</p>
+</div>
 
 <h3>4-2. 표본이 구분하지 못하는데 채택한 것</h3>
 <div class="tw"><table class="kv"><tbody>
 <tr><td><code>Diameter</code> vs <code>MeasuredDiameter</code></td>
     <td>RDL4 만 둘 다 있는데 <strong>둘 다 같은 답</strong>(여유가 커서 45 µm 차이가 안 보입니다).
     어느 쪽이 장비의 기준인지 모릅니다</td></tr>
-<tr><td>버림 vs 반올림</td>
-    <td>13차에 확인된 4개 값의 소수부가 전부 &lt;0.5 라 <strong>두 방식이 같은 숫자</strong>를 냅니다.
-    골든 1건이 유일한 구분 사례입니다</td></tr>
+<tr><td>µm 미만 정밀도</td>
+    <td>장비 화면은 좌표를 <strong>정수로만</strong> 표시합니다(13차 확인). 장비 내부값은
+    <code>[표시값, 표시값+1)</code> 안에 있다는 것까지만 알 수 있습니다 →
+    <strong>일치는 1 µm 미만 수준까지만 확인됨.</strong> 더 정밀한 대조는 화면이 아닌 다른 출처가 필요합니다(R6)</td></tr>
 <tr><td><code>Wafer2Table</code> 이<br>레시피 값인가 웨이퍼 값인가</td>
     <td>같은 로트 25장 편차 97 µm. “거의 같다” 는 알지만 <strong>왜 같은지</strong>는 모릅니다</td></tr>
 </tbody></table></div>
@@ -575,7 +608,7 @@ E4  웨이퍼 4장. 두 가설이 갈리는 조건은 <em>안 변했다</em>
   <g font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">
 
   <!-- ══ 전 구간 ══ -->
-  <text x="30" y="18" font-size="11" fill="#5A574E">소수부 전 구간 — 원점이 튀는 경계는 0 과 1 이다</text>
+  <text x="30" y="18" font-size="11" fill="#5A574E">소수부 전 구간 (원점이 튀는 경계는 0 과 1)</text>
   <text x="243" y="40" font-size="10.5" fill="#2C5A86" text-anchor="middle" font-weight="700">실측 6사례</text>
 
   <rect x="60" y="46" width="540" height="26" fill="url(#hatch)" stroke="#89836F" stroke-width="1"/>
@@ -591,7 +624,7 @@ E4  웨이퍼 4장. 두 가설이 갈리는 조건은 <em>안 변했다</em>
   <path d="M239.8 72 L150 132 M246.3 72 L590 132" stroke="#B7B2A6" stroke-width="1" stroke-dasharray="3 3" fill="none"/>
 
   <!-- ══ 확대 0.330 ~ 0.350 ══   x = 150 + (f-0.330)/0.020*440 -->
-  <text x="30" y="126" font-size="11" fill="#5A574E">확대 — 0.330 ~ 0.350 (전 구간의 2 %)</text>
+  <text x="30" y="126" font-size="11" fill="#5A574E">확대 0.330 ~ 0.350 (전 구간의 2 %)</text>
   <line x1="150" y1="186" x2="590" y2="186" stroke="#89836F" stroke-width="1.5"/>
   <text x="150" y="204" font-size="10" fill="#5A574E" text-anchor="middle">0.330</text>
   <text x="590" y="204" font-size="10" fill="#5A574E" text-anchor="middle">0.350</text>
@@ -634,7 +667,7 @@ E4  웨이퍼 4장. 두 가설이 갈리는 조건은 <em>안 변했다</em>
 
   <text x="150" y="266" font-size="10" fill="#5A574E">이름 뒤 숫자 = 그 웨이퍼의 row_total</text>
   <text x="590" y="266" font-size="10.5" fill="#A5271E" text-anchor="end" font-weight="700">
-    여섯 사례 전부 0.333 ~ 0.345 — 폭 0.012</text>
+    여섯 사례 전부 0.333 ~ 0.345 · 폭 0.012</text>
   </g>
 </svg>
 <figcaption><strong>초록은 <code>row_total = 6</code>, 파랑은 7·10 입니다.</strong>

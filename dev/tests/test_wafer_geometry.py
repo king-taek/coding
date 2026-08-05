@@ -443,6 +443,54 @@ class TestDerivedPathGolden:
         assert yi == 7
         assert 6 - yi < 0                       # row_total=6 이면 음수 row — 불가능
 
+    @pytest.mark.parametrize("X,Y,col,row,dx,dy", [
+        (136236.198100555, 208997.335135958, 1, 2, 24491, 29375),
+        (136237.131194909, 209000.134920151, 1, 2, 24492, 29378),
+    ])
+    def test_mtw_equipment_reading(self, X, Y, col, row, dx, dy):
+        """★ AOI-22 · MTW-PIDS7 · 00RWQ258XYD1 장비 화면 (13차).
+
+        `row_total=6` 자재에서 `col,row,x,y` **네 값 모두** 장비와 일치한 사례다.
+        폴백(`ceil(300000/44905.5)=7`)이면 row 가 3 이 되어 장비값 2 와 어긋난다.
+        """
+        import math
+        px, py, co, rt = 37248.2, 44905.5, 2, 6
+        xi, yi = math.floor(X / px), math.floor(Y / py)
+        assert (xi - co, rt - yi) == (col, row)
+        assert (math.floor(X - xi * px), math.floor(Y - yi * py)) == (dx, dy)
+        assert math.ceil(300000.0 / py) - yi != row      # 폴백은 틀린다
+
+    @pytest.mark.parametrize("rem,truth", [
+        # (die 내부 나머지, 장비 화면 값)  — 소수부 ≥ 0.5 라 버림≠반올림 인 것만
+        (43180.809, 43180),          # 골든 BNN-PIDS3 #1 (폴백 경로)
+        (24491.598100555, 24491),    # MTW #1 (유도 경로) — 반올림이면 24492
+        (24492.531194909, 24492),    # MTW #2 (유도 경로) — 반올림이면 24493
+    ])
+    def test_die_internal_xy_is_truncated_not_rounded(self, rem, truth):
+        """★ die 내부 좌표는 **버림**이다 — 장비가 구분해 준 3건.
+
+        소수부가 0.5 미만이면 버림과 반올림이 같은 숫자를 내 아무것도 증명하지
+        못한다(13차 DYD 4개 값이 전부 그랬다).  여기 셋은 소수부가 0.5 이상이라
+        **두 방식이 갈리고**, 장비는 셋 다 버림 쪽을 표시했다.
+        2 device(TB500 PI2 · 골든 자재) · 두 경로(유도 · 폴백) 모두에서 성립한다.
+        """
+        import math
+        assert math.floor(rem) != round(rem)     # 이 픽스처가 실제로 구분한다는 것부터
+        assert math.floor(rem) == truth
+        assert round(rem) != truth
+
+    def test_equipment_shows_integers_only(self):
+        """장비 화면은 좌표를 **정수로만** 표시한다(사용자 확인, 13차).
+
+        그래서 우리 값과 장비 값의 일치는 **1 µm 미만** 수준까지만 확인된다 —
+        장비 내부값은 `[표시값, 표시값+1)` 안에 있다는 것만 알 수 있다.
+        더 정밀한 대조를 하려면 화면이 아닌 다른 출처가 필요하다(R6: 이 방법으로는 불가).
+        """
+        import math
+        rem = 136236.198100555 - 3 * 37248.2
+        assert 24491 <= rem < 24492              # 장비 표시 24491 과 같은 정수 구간
+        assert math.floor(rem) == 24491
+
     def test_sample_never_probes_the_boundary(self):
         """★ 회고 §4-4 — 여섯 사례가 전부 여유 33~35 % 다.
 

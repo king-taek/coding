@@ -160,7 +160,7 @@ footer.colophon{margin-top:2.4rem;padding-top:1rem;border-top:2px solid var(--ru
     <div><dt>대상</dt><dd>aoi_verification/app/coords</dd></div>
     <div><dt>작성일</dt><dd>2026-08-05</dd></div>
     <div><dt>브랜치</dt><dd>claude/coordinate-validation-info-3o2ds5</dd></div>
-    <div><dt>장비 정답 대조</dt><dd style="color:var(--pass)">13 / 13 일치</dd></div>
+    <div><dt>장비 정답 대조</dt><dd style="color:var(--pass)">18 / 18 일치</dd></div>
     <div><dt>이번 초점</dt><dd style="color:var(--blue)">엑셀 · 단일 사진 x,y</dd></div>
     <div><dt>코드 변경</dt><dd style="color:var(--danger)">없음 (기록 전용)</dd></div>
   </dl>
@@ -918,26 +918,29 @@ R_TB500_LIVE_PI4 AOI-21 Copy_0614   2         (2, <b>7</b>)          224,571 ~ 2
     <code>P:\AOI-22\…\R_TB500_LIVE_PI2 AOI-21 Copy _0614\Setup1\MTW-PIDS7\00RWQ258XYD1</code><br>
     <code>P:\AOI-17\…\R_TB500_LIVE_PI4\Setup1\DYD-PIDS3\29265187EWF2</code></td></tr>
 <tr><td>구성</td><td>· KMU — 장비 화면 <code>col=0, row=3</code> (사진 1건)<br>
-    · MTW — 대체 웨이퍼 <code>00RWQ258XYD1</code> 의 INI 3종 전문 (결함 <strong>35건</strong>),
-      장비값은 <strong>대기 중</strong><br>
+    · MTW — 대체 웨이퍼 <code>00RWQ258XYD1</code> 의 INI 3종 전문 (결함 <strong>35건</strong>)
+      + 장비 화면 <strong><code>col,row,x,y</code> 2건</strong><br>
     · DYD — 장비 화면 <strong><code>col, row, x, y</code> 2건</strong> (예측과 일치)<br>
     · UDS — 리뷰 후 사진 삭제로 제공 불가</td></tr>
 <tr><td style="color:var(--blue)">핵심 자료</td>
     <td><strong>① <code>row_total = 6</code> 쪽의 첫 장비 정답</strong> —
     그전까지 6 은 <code>Wafer2Table</code> 역산뿐이었습니다<br>
-    <strong>② die 내부 <code>x·y</code> 의 첫 장비 대조</strong> — 그전까지 0건</td></tr>
+    <strong>② die 내부 <code>x·y</code> 의 첫 장비 대조</strong> — 그전까지 0건<br>
+    <strong>③ 버림 vs 반올림을 가르는 값</strong> — MTW 의 x 두 개가 소수부 ≥0.5</td></tr>
 <tr><td>증명한 것</td><td>· 유도식이 <strong>양쪽 값(6·7)을 모두 장비 정답으로</strong> 재현<br>
     · 폴백이 <strong>장비 기준으로 틀리다</strong> — “우리 값과 다르다” 에서 한 단계 올라감<br>
     · <code>x·y</code> 표기가 소스 간 일치를 넘어 <strong>장비와도 일치</strong><br>
-    · MTW 대체 웨이퍼 35건이 격자 불변식 전수 통과, <code>row</code>·<code>col</code> 둘 다 0 에 닿음</td></tr>
+    · MTW 대체 웨이퍼 35건이 격자 불변식 전수 통과, <code>row</code>·<code>col</code> 둘 다 0 에 닿음<br>
+    · <strong>die 내부 좌표가 버림</strong>임을 장비가 확인 — 반올림이면 3건 다 1 µm 어긋남</td></tr>
 <tr><td style="color:var(--danger)">한계</td>
-    <td>· <strong>버림 vs 반올림을 구분하지 못함</strong> — DYD 네 값의 소수부가 전부 0.5 미만이라
-      두 방식이 같은 숫자. 버림 근거는 여전히 골든 1건<br>
+    <td>· <strong>µm 미만은 확인 불가</strong> — 장비 화면이 좌표를 정수로만 표시합니다.
+      장비 내부값은 <code>[표시값, 표시값+1)</code> 안이라는 것까지만 알 수 있습니다<br>
     · KMU 는 <strong>절대 X·Y 가 파일명 접두</strong>뿐 (INI 미수령) — 경계 여유가 12,000 µm 넘어
       결론엔 영향 없으나 정밀 대조는 불가<br>
     · <strong>경계 근접 자재가 아니다</strong> — 여유 34 %. 6사례 전부 같은 위상
       (<a class="ref" href="#s11">11장</a>)<br>
-    · MTW 2건은 아직 <strong>예측만 있고 장비값이 없음</strong></td></tr>
+    · <code>Diameter</code> vs <code>MeasuredDiameter</code> 는 <strong>여전히 미구분</strong>
+      (MTW 도 <code>MeasuredDiameter=0</code>)</td></tr>
 </tbody></table></div>
 </div>
 
@@ -963,7 +966,7 @@ R_TB500_LIVE_PI4 AOI-21 Copy_0614   2         (2, <b>7</b>)          224,571 ~ 2
     <td><span class="v no">0 건</span> — 유도식 <strong>입력</strong>을 넓힌 자료</td></tr>
 <tr><td class="k ctr">H</td><td>장비 확인 col·row·x·y<br><small>13차</small></td>
     <td class="num">35<br><small>MTW 대체분</small></td><td>TB500 (PI2·PI4)</td>
-    <td><strong>장비 화면 3건</strong> — 그중 <strong>2건은 x·y 포함</strong></td></tr>
+    <td><strong>장비 화면 5건</strong> — 그중 <strong>4건은 x·y 포함</strong></td></tr>
 </tbody></table></div>
 <p><small>장비 정답 13건 중 <strong>die 내부 x·y 를 담은 것은 자료 B 의 4건뿐</strong>이고,
 그것도 장비 화면이 아니라 장비가 파일명에 적은 값입니다.
@@ -987,12 +990,16 @@ R_TB500_LIVE_PI4 AOI-21 Copy_0614   2         (2, <b>7</b>)          224,571 ~ 2
     <small>★ 13차 · AOI-25 KMU-PIDS7 — 6 쪽의 첫 장비 정답</small></div><div class="val">1 / 1</div></div>
   <div class="row"><div class="lab">die 내부 <code>x·y</code> → 화면 값
     <small>★ 13차 · AOI-17 DYD-PIDS3 — 그전까지 0건이던 축</small></div><div class="val">2 / 2</div></div>
-  <div class="row tot"><div class="lab"><strong>합계</strong></div><div class="val">16 / 16</div></div>
+  <div class="row"><div class="lab"><code>col·row·x·y</code> 네 값 동시 → 화면 값
+    <small>★ 13차 · AOI-22 MTW-PIDS7 — <code>row_total=6</code> 자재에서</small></div><div class="val">2 / 2</div></div>
+  <div class="row tot"><div class="lab"><strong>합계</strong></div><div class="val">18 / 18</div></div>
 </div>
 <div class="note">
-<span class="lbl">13건 → 16건이 뜻하는 것과 뜻하지 않는 것</span>
-<p style="margin-bottom:0"><strong>뜻하는 것</strong> — 유도식이 <code>row_total</code> 의 두 값(6·7)을
-모두 장비 정답으로 재현하고, <code>x·y</code> 가 소스 간 일치를 넘어 장비와도 맞는다는 것.<br>
+<span class="lbl">13건 → 18건이 뜻하는 것과 뜻하지 않는 것</span>
+<p><strong>뜻하는 것</strong> — 유도식이 <code>row_total</code> 의 두 값(6·7)을
+모두 장비 정답으로 재현하고, <code>x·y</code> 가 소스 간 일치를 넘어 장비와도 맞는다는 것.
+그리고 <strong>die 내부 좌표가 버림</strong>이라는 것 — MTW 의 <code>24491.598 → 24491</code> ·
+<code>24492.531 → 24492</code> 가 반올림과 갈라 줍니다(2 device · 유도/폴백 두 경로).<br>
 <strong>뜻하지 않는 것</strong> — 여섯 사례 전부 경계 여유가 33~35 %라
 <strong>경계 근접 거동은 여전히 표본 0건</strong>입니다. PI2 와 PI4 의 중심은
 <strong>die 한 칸(44,905 µm)과 39 µm 차이</strong>로 떨어져 있어, 격자 대비 위상이 사실상 같습니다.
@@ -1140,8 +1147,9 @@ R_TB500_LIVE_PI4 AOI-21 Copy_0614   2         (2, <b>7</b>)          224,571 ~ 2
 <thead><tr><th style="width:24%">축</th><th style="width:38%">검증된 범위</th><th style="width:38%">미검증</th></tr></thead>
 <tbody>
 <tr><td class="k">device / die 크기</td><td>3종 (37.2×44.9 · 14.4×31.1 · 25.0×31.8)</td><td>die 4 mm 급 소형, 초대형</td></tr>
-<tr><td class="k">die 내부 x·y</td><td>소스 간 상호 대조 + <strong>장비 화면 2건</strong> (13차)</td>
-    <td><strong>버림 vs 반올림</strong> — 2건 다 소수부 &lt;0.5 라 구분 못 함 (골든 1건이 유일)</td></tr>
+<tr><td class="k">die 내부 x·y</td><td>소스 간 상호 대조 + <strong>장비 화면 4건</strong> (13차)<br>
+    <small>버림 확정 — 소수부 ≥0.5 인 구분 사례 <strong>3건</strong>, 2 device</small></td>
+    <td><strong>µm 미만</strong> — 장비 화면이 정수만 표시해 원리적으로 확인 불가</td></tr>
 <tr><td class="k">격자 대비 위상</td><td>여유 33~35 % 만 (6사례)</td>
     <td><strong>경계 근접 자재 0건</strong> — 여유가 수 % 인 웨이퍼</td></tr>
 <tr><td class="k">웨이퍼 직경</td><td>300 mm 만</td><td>200 mm 등</td></tr>
