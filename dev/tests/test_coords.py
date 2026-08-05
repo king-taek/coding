@@ -216,6 +216,120 @@ class TestCamtekLive:
         """KLA 이미지 파일명은 LIVE 로 파싱되지 않아야 한다."""
         assert live_resolve(Path(name)) is None
 
+    @pytest.mark.parametrize("name", [
+        # 실물(저장소 사본) — 음수 토큰이 섞인 KLA 계열
+        "00MEU018XYG1_-1_4_23_1.jpg",
+        "00MEU018XYG1_4_3_23_2.jpg",
+        "00MEU018XYG1_-8_-2_23_4.jpg",
+        "08235234EWA1_-2_-2_31_2.jpg",
+        "08235234EWA1_2_-1_7_1.jpg",
+        # Camtek INI 점표기 — LIVE 가 아니다
+        "255348.116718.c.473266639.1.jpeg",
+        "29648.164545.c._2_.jpeg",
+    ])
+    def test_real_non_live_filenames_rejected(self, name):
+        """★ 저장소 실물 중 LIVE 가 **아닌** 파일명 전수 — 하나도 파싱되면 안 된다.
+
+        ``00MEU018XYG1_-1_4_23_1`` 이 특히 중요하다.  `-1` 을 정수 토큰으로 보지
+        않으면 '처음 연속한 정수 쌍' 이 `4`,`23` 으로 밀려 앞 토큰이 2개가 되고
+        (KLA 배제 규칙을 통과해) **col=4, row=23 으로 오인**한다.
+        """
+        assert live_resolve(Path(name)) is None
+
+
+# ---------------------------------------------------------------------------
+# ★★ R-0 — 파일명 스키마 오인으로 x·y 에 크기·면적이 들어가던 버그
+#
+#   옛 정규식 ``_(\d+)_(\d+)_.+_(num)_(num)$`` 는 greedy ``.+`` + ``$`` 앵커라
+#   좌표 뒤에 토큰이 더 붙으면 **뒤쪽 두 수치**를 집었다.
+#
+#     ..._4_5_Over Sized Bump_30229.803_1987.994_12.5_18.3_229.1
+#     옛 결과  x=18.3  y=229.1   ← DYSize·DArea      x 오차 30,212 µm
+#
+#   col/row 는 맞아서 자체모순이 없고 ±1 게이트도 통과한다 → **조용히 틀린다.**
+#
+# ⚠ 출처 등급(`docs/좌표_판단오류_회고.md` R3): 이 스키마는 `문서` 다 — 실물 미확보.
+#   근거는 참고 저장소 `Defect_Tracking/camtek_filename.py` 주석의 토큰 순서뿐이다.
+# ---------------------------------------------------------------------------
+class TestFilenameSchemaR0:
+    _WITH_SIZES = ("R_TB500_LIVE_PI4_VLP-PDIS3_W6317098XYB5_4_5_Over Sized Bump"
+                   "_30229.803_1987.994_12.5_18.3_229.1.jpg")
+
+    def test_sizes_do_not_leak_into_xy(self):
+        """★ 좌표 뒤에 크기·면적이 붙어도 x·y 는 **앞쪽 두 수치**다."""
+        c = live_resolve(Path(self._WITH_SIZES))
+        assert c is not None
+        assert (c.col, c.row) == (4, 5)
+        assert _approx(c.x, 30229.803)
+        assert _approx(c.y, 1987.994)
+
+    def test_old_regex_behaviour_is_gone(self):
+        """옛 동작(x=18.3, y=229.1)이 되살아나면 실패한다 — 회귀 가드 본체."""
+        c = live_resolve(Path(self._WITH_SIZES))
+        assert not _approx(c.x, 18.3), "옛 정규식이 되살아났다 (DYSize 를 x 로 읽음)"
+        assert not _approx(c.y, 229.1), "옛 정규식이 되살아났다 (DArea 를 y 로 읽음)"
+
+    def test_extra_tokens_are_kept_separately(self):
+        """남는 수치는 버리지 않고 ``extra`` 로 분리해 둔다(엑셀 열 추가 시 쓸 값)."""
+        from aoi_verification.app.coords.camtek_live import parse_live_name
+        got = parse_live_name(Path(self._WITH_SIZES).stem)
+        assert (got.x, got.y) == (30229.803, 1987.994)
+        assert got.extra == (12.5, 18.3, 229.1)
+
+    def test_same_defect_two_schemas_agree(self):
+        """★ 같은 결함이 크기 토큰 유/무 두 형태로 와도 **같은 좌표**를 내야 한다.
+
+        R7(두 소스면 일치를 단언) 을 스키마 사이에 적용한 것이다.  '변환 결과' 만
+        단언하면 그 변환이 옳은지 영영 안 묻는다(→ 회고 E2).
+        """
+        base = live_resolve(Path(
+            "R_TB500_LIVE_PI4_VLP-PDIS3_W6317098XYB5_4_5_Over Sized Bump"
+            "_30229.803_1987.994.jpg"))
+        with_sizes = live_resolve(Path(self._WITH_SIZES))
+        assert (base.col, base.row) == (with_sizes.col, with_sizes.row)
+        assert _approx(base.x, with_sizes.x)
+        assert _approx(base.y, with_sizes.y)
+
+    @pytest.mark.parametrize("stem,expect", [
+        # (A) x/y 뒤에 이름            — 실물로 검증된 배치
+        ("TB500_RDL4 - Multi_FDV-RDL4_W7548304XYG4_5_4_31863.2366998812"
+         "_26908.4427394723_Irregular Bump", (5, 4, 31863.2366998812, 26908.4427394723)),
+        # (B) x/y 앞에 이름            — 실물로 검증된 배치
+        ("R_TB500_W1_4_5_Bump_30229.803_1987.994", (4, 5, 30229.803, 1987.994)),
+        # (C) 뒤에 크기·면적           — 문서 근거 (실물 미확보)
+        ("R_TB500_W1_4_5_Bump_30229.803_1987.994_12.5_18.3_229.1",
+         (4, 5, 30229.803, 1987.994)),
+        # 이름 없는 정수 배치          — 앞 토큰이 2개라 LIVE 로 본다
+        ("cam_live_3_2_1000_2000", (3, 2, 1000.0, 2000.0)),
+    ])
+    def test_three_layouts_one_path(self, stem, expect):
+        """세 배치가 **한 경로**로 처리된다 — 정규식을 갈아 끼우지 않는다."""
+        from aoi_verification.app.coords.camtek_live import parse_live_name
+        got = parse_live_name(stem)
+        assert got is not None
+        assert (got.col, got.row) == expect[:2]
+        assert _approx(got.x, expect[2]) and _approx(got.y, expect[3])
+
+    def test_competing_hypothesis_is_undetermined(self):
+        """⚠ 구분되지 않는 것을 명시한다 (회고 R1 — "미구분" 을 기록에 남긴다).
+
+        (C) 의 토큰 순서가 ``x_y_DX_DY_DArea`` 라는 근거는 **참고 저장소 문서 한 줄**
+        뿐이다.  크기·면적이 x/y **앞**에 오는 배치라면 우리 값은 틀린다.
+        지금 표본은 두 가설을 구분하지 못한다 — 실물 1건이 오면 닫힌다.
+
+        다만 어느 가설이든 **옛 코드보다 나쁘지 않다**: 옛 코드는 (C) 에서
+        마지막 두 수치를 집어 확실히 틀렸다.  이 테스트는 그 사실을 못 박는다.
+        """
+        from aoi_verification.app.coords.camtek_live import parse_live_name
+        got = parse_live_name(
+            "R_TB500_W1_4_5_Bump_30229.803_1987.994_12.5_18.3_229.1")
+        # 채택한 가설: 앞 두 개가 좌표
+        assert (got.x, got.y) == (30229.803, 1987.994)
+        # 경쟁 가설이 맞다면 좌표는 이것이었을 것 — 표본이 구분해 주지 않는다
+        assert got.extra[-2:] == (18.3, 229.1)
+        # 어느 쪽이든 옛 동작(마지막 두 개)은 아니다
+        assert (got.x, got.y) != got.extra[-2:]
+
 
 # ---------------------------------------------------------------------------
 # 통합: coords.__init__.resolve 우선순위
@@ -278,9 +392,16 @@ def test_real_pair_kla_camtek_rows_align():
     두 좌표가 121 µm 밖에 안 떨어져 있어 **같은 물리적 결함**임이 확인된 쌍이다.
     따라서 두 변환이 같은 (col,row) 를 내야 한다 — 이 테스트의 요점은 **정렬**이다.
 
-    값은 장비 화면 기준 (5,4):  Camtek 7−3 = 4,  KLA 0 + KLA_ZERO_Y(4) = 4.
-    (Camtek 만 −1 하고 KLA 를 그대로 두면 정렬은 유지되지만 둘 다 장비 화면과 어긋난다 —
-    실제로 그렇게 어긋나 있었다.  ``TestCamtekIni.test_equipment_screen_reading`` 참조.)"""
+    ★ ``col`` 은 정확히 일치한다.  ``row`` 는 **이 픽스처의 한계로 1 어긋난다**:
+
+    · KLA `(5,3)` 이 정답 규약이다 — `SampleCenterLocation` 유도값이고, 사용자가 장비로
+      확인한 KLA↔Camtek 대응 7건(2개 device)이 이 규칙을 지지한다(조사 §6-K).
+    · Camtek 쪽은 이 폴더에 ``Params_WaferInfo.ini`` 가 없어(사진만 복사된 픽스처)
+      ``Center_Y`` 를 못 읽고 옛 식으로 폴백해 1 크게 나온다.  **실물 스캔 결과 폴더에는
+      그 파일이 사진과 같은 자리에 늘 있다**(사용자 확인).
+
+    ±1 이웃 게이트 안이라 **매칭은 정상**이다.  Camtek 쪽 폴백을 고치면 이 테스트가
+    실패하므로, 그때 `== kla.row` 로 조여서 빚을 갚았다는 걸 못 박을 것."""
     from aoi_verification.app.coords import camtek_ini, kla_info
 
     camtek_ini.load_folder.cache_clear()
@@ -292,8 +413,10 @@ def test_real_pair_kla_camtek_rows_align():
     kla = kla_info.resolve(
         _COORD_DATA / "KLA" / "예시1" / "W6459076XYG1_2_0_23_2.jpg")
     assert cam is not None and kla is not None
-    assert (cam.col, cam.row) == (kla.col, kla.row)      # 정렬 — 이게 핵심
-    assert (cam.col, cam.row) == (5, 4)                  # 장비 화면 기준 절대값
+    assert cam.col == kla.col == 5                       # col 은 정렬 — 이게 핵심
+    assert (kla.col, kla.row) == (5, 3)                  # 장비 확인 규약
+    assert cam.row - kla.row == 1                        # ★ 픽스처 한계(위 설명)
+    assert abs(cam.row - kla.row) <= 1                   # ±1 게이트 안 → 매칭 정상
 
 
 # ---------------------------------------------------------------------------

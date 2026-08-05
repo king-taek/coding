@@ -1,0 +1,1794 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AOI 좌표 계산 검증 보고서 · 상세판</title>
+<style>
+/* ─── 동봉 폰트 — 앱과 같은 서체 ──────────────────────────────── */
+@font-face{font-family:NS;src:url('../aoi_verification/app/ui/assets/font/NanumSquareR.ttf') format('truetype');font-weight:400;font-display:swap}
+@font-face{font-family:NS;src:url('../aoi_verification/app/ui/assets/font/NanumSquareB.ttf') format('truetype');font-weight:700;font-display:swap}
+
+/* ─── 제도지 팔레트 — app/ui/theme.py 라이트 프로파일 그대로 ──── */
+:root{
+  --vellum:#ECE9E2; --sheet:#F5F3ED; --elev:#FBFAF7;
+  --rule:#89836F; --hair:#B7B2A6;
+  --ink:#1B1A17; --ink2:#3D3B35; --mute:#5A574E;
+  --blue:#2C5A86; --blue-w:#2C5A8620;
+  --pass:#3B6438; --danger:#A5271E; --warn:#8C4A0F;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"DejaVu Sans Mono",monospace;
+  --ease:cubic-bezier(.22,1,.36,1);
+}
+*,*::before,*::after{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:1.5rem}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+body{margin:0;background:var(--vellum);color:var(--ink);
+     font-family:NS,system-ui,sans-serif;font-size:15px;line-height:1.68;
+     -webkit-font-smoothing:antialiased}
+
+.sheet{max-width:1360px;margin:0 auto;padding:clamp(1rem,3vw,2.5rem)}
+
+/* 표제란 — 도면의 title block */
+.titleblock{background:var(--sheet);border:2px solid var(--rule)}
+.titleblock .lede{padding:clamp(1.6rem,4vw,3rem) clamp(1.2rem,3vw,2.4rem) clamp(1.2rem,3vw,2rem)}
+.titleblock h1{margin:0;font-size:clamp(1.85rem,5vw,3.3rem);line-height:1.12;
+               letter-spacing:-.028em;text-wrap:balance;font-weight:700}
+.titleblock .sub{margin:.85rem 0 0;color:var(--ink2);font-size:clamp(.95rem,2vw,1.1rem);
+                 max-width:64ch;text-wrap:pretty}
+.tb-meta{border-top:1px solid var(--hair);display:grid;
+         grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
+.tb-meta div{padding:.7rem 1rem;border-right:1px solid var(--hair)}
+.tb-meta div:last-child{border-right:0}
+.tb-meta dt{font-size:.68rem;color:var(--mute);letter-spacing:.04em;margin:0 0 .18rem}
+.tb-meta dd{margin:0;font-family:var(--mono);font-size:.82rem;color:var(--ink);word-break:break-word}
+
+.body{display:block;margin-top:1.6rem}
+@media(min-width:1080px){
+  .body{display:grid;grid-template-columns:214px minmax(0,1fr);gap:2.6rem;align-items:start}
+}
+nav.index{position:sticky;top:1.2rem;z-index:10;background:var(--sheet);
+          border:1px solid var(--rule);padding:.85rem .5rem .9rem;font-size:.83rem;
+          max-height:calc(100vh - 2.4rem);overflow-y:auto}
+nav.index p{margin:0 .6rem .55rem;font-size:.68rem;color:var(--mute);letter-spacing:.05em}
+nav.index a{display:flex;gap:.55rem;padding:.3rem .6rem;color:var(--ink2);text-decoration:none;
+            transition:color .18s var(--ease),background .18s var(--ease)}
+nav.index a b{color:var(--rule);font-family:var(--mono);font-size:.75rem;min-width:1.15rem;flex:none}
+nav.index a:hover{background:var(--blue-w);color:var(--blue)}
+nav.index a:focus-visible{outline:2px solid var(--blue);outline-offset:-2px}
+nav.index a[aria-current="true"]{background:var(--blue-w);color:var(--blue);font-weight:700}
+nav.index a[aria-current="true"] b{color:var(--blue)}
+@media(max-width:1079px){nav.index{position:static;max-height:none;margin-bottom:1.4rem}}
+
+main{min-width:0}
+section{margin-bottom:3.1rem;scroll-margin-top:1.5rem}
+h2{margin:0 0 1rem;font-size:clamp(1.2rem,2.7vw,1.6rem);letter-spacing:-.014em;
+   display:flex;align-items:baseline;gap:.7rem;padding-bottom:.5rem;
+   border-bottom:2px solid var(--rule);text-wrap:balance}
+h2 .n{font-family:var(--mono);font-size:.78em;color:var(--blue);font-weight:400;flex:none}
+h3{margin:1.9rem 0 .6rem;font-size:1.02rem;letter-spacing:-.008em;text-wrap:balance}
+h4{margin:1.15rem 0 .4rem;font-size:.93rem;color:var(--ink2)}
+p{margin:0 0 .72rem;max-width:74ch;text-wrap:pretty}
+ul,ol{margin:.4rem 0 .85rem;padding-left:1.25rem;max-width:74ch}
+li{margin-bottom:.3rem}
+a.ref{color:var(--blue);text-decoration:none;border-bottom:1px solid #2C5A8655}
+a.ref:hover{border-bottom-color:var(--blue)}
+
+code{font-family:var(--mono);font-size:.87em;background:#0000000a;
+     border:1px solid var(--hair);border-radius:2px;padding:.02em .3em;
+     overflow-wrap:anywhere}
+pre{font-family:var(--mono);font-size:.79rem;line-height:1.6;background:var(--elev);
+    border:1px solid var(--rule);padding:.85rem 1rem;margin:.75rem 0 1.05rem;overflow-x:auto}
+pre b{color:var(--blue);font-weight:700}
+pre i{color:var(--mute);font-style:normal}
+pre em{color:var(--danger);font-style:normal;font-weight:700}
+
+.tw{overflow-x:auto;margin:.75rem 0 1.15rem;border:1px solid var(--rule);background:var(--sheet)}
+table{border-collapse:collapse;width:100%;font-size:.82rem;min-width:520px}
+caption{caption-side:top;text-align:left;padding:.5rem .8rem;font-size:.77rem;
+        color:var(--mute);border-bottom:1px solid var(--hair);background:var(--elev)}
+th{text-align:left;padding:.5rem .8rem;font-weight:700;font-size:.76rem;color:var(--ink);
+   background:var(--elev);border-bottom:1.5px solid var(--rule);vertical-align:bottom}
+td{padding:.5rem .8rem;border-bottom:1px solid var(--hair);vertical-align:top;color:var(--ink2)}
+tbody tr:last-child td{border-bottom:0}
+td.num,th.num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+td.ctr,th.ctr{text-align:center}
+td.k{color:var(--ink);font-weight:700}
+table.kv td:first-child{width:22%;color:var(--ink);font-weight:700}
+
+.v{font-family:var(--mono);font-size:.78rem;font-weight:700;white-space:nowrap}
+.v.ok{color:var(--pass)}.v.no{color:var(--danger)}.v.wa{color:var(--warn)}
+.chip{display:inline-block;padding:.06rem .45rem;border:1px solid currentColor;border-radius:2px;
+      font-size:.68rem;font-weight:700;white-space:nowrap;font-family:var(--mono)}
+.chip.h{color:var(--danger)}.chip.m{color:var(--warn)}.chip.l{color:var(--pass)}.chip.i{color:var(--mute)}
+
+.note{border:1px solid var(--rule);background:var(--sheet);padding:.9rem 1.1rem;margin:1rem 0 1.2rem}
+.note > :last-child{margin-bottom:0}
+.note .lbl{display:block;font-size:.7rem;letter-spacing:.05em;color:var(--mute);margin-bottom:.35rem}
+.note.blue{background:var(--blue-w);border-color:var(--blue)}
+.note.blue .lbl{color:var(--blue)}
+.note.red{background:#A5271E0F;border-color:var(--danger)}
+.note.red .lbl{color:var(--danger)}
+.note.amber{background:#8C4A0F0F;border-color:var(--warn)}
+.note.amber .lbl{color:var(--warn)}
+
+.cert{border:1px solid var(--rule);background:var(--sheet);margin:1rem 0 1.3rem}
+.cert .row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:1rem;padding:.55rem 1rem;
+           border-bottom:1px solid var(--hair);align-items:baseline}
+.cert .row:last-child{border-bottom:0}
+.cert .row.tot{background:var(--elev);border-top:1.5px solid var(--rule)}
+.cert .lab{color:var(--ink2);font-size:.86rem}
+.cert .lab small{display:block;color:var(--mute);font-size:.74rem;line-height:1.45}
+.cert .val{font-family:var(--mono);font-size:.92rem;font-weight:700;color:var(--pass);white-space:nowrap}
+
+figure{margin:1.1rem 0 1.3rem;border:1px solid var(--rule);background:var(--sheet);padding:.9rem}
+figure svg{display:block;width:100%;height:auto;max-width:640px;margin:0 auto}
+figcaption{margin-top:.6rem;padding-top:.55rem;border-top:1px solid var(--hair);
+           font-size:.79rem;color:var(--mute);text-wrap:pretty}
+.split{display:grid;gap:1.2rem}
+@media(min-width:880px){.split{grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:start}}
+
+.src{border:1px solid var(--rule);background:var(--sheet);margin:1.1rem 0 1.4rem}
+.src > header{display:flex;flex-wrap:wrap;gap:.5rem .9rem;align-items:baseline;padding:.65rem 1rem;
+              background:var(--elev);border-bottom:1.5px solid var(--rule)}
+.src > header .id{font-family:var(--mono);font-weight:700;color:var(--blue);font-size:.86rem;flex:none}
+.src > header h3{margin:0;font-size:.98rem}
+.src > header .when{margin-left:auto;font-family:var(--mono);font-size:.75rem;color:var(--mute)}
+.src table{min-width:440px}
+
+footer.colophon{margin-top:2.4rem;padding-top:1rem;border-top:2px solid var(--rule);
+                font-size:.78rem;color:var(--mute);max-width:78ch}
+
+@media print{
+  nav.index{display:none}
+  body{background:#fff;font-size:10pt}
+  .body{display:block}
+  .src,.note,figure,.tw{page-break-inside:avoid}
+}
+</style>
+</head>
+<body>
+<div class="sheet">
+
+<div class="titleblock">
+  <div class="lede">
+    <h1>AOI 좌표 계산 검증 보고서<br>상세판</h1>
+    <p class="sub">엑셀·단일 사진 정보의 <strong>x·y 정확도</strong> 관점에서 다시 쓴 판.
+      검증에 쓰인 모든 예시의 출처·시점·수록 정보, 검증 방법이 실제로 커버하는 범위,
+      그리고 참고 저장소와의 비교를 담았습니다.</p>
+  </div>
+  <dl class="tb-meta">
+    <div><dt>대상</dt><dd>aoi_verification/app/coords</dd></div>
+    <div><dt>작성일</dt><dd>2026-08-05</dd></div>
+    <div><dt>브랜치</dt><dd>claude/coordinate-validation-info-3o2ds5</dd></div>
+    <div><dt>장비 정답 대조</dt><dd style="color:var(--pass)">18 / 18 일치</dd></div>
+    <div><dt>이번 초점</dt><dd style="color:var(--blue)">엑셀 · 단일 사진 x,y</dd></div>
+    <div><dt>코드 변경</dt><dd style="color:var(--pass)">R-0 수정 (08-05)</dd></div>
+  </dl>
+</div>
+
+<div class="body">
+
+<nav class="index" aria-label="문서 차례">
+  <p>차례</p>
+  <a href="#s0"><b>0</b><span>이 문서의 목적</span></a>
+  <a href="#s1"><b>1</b><span>좌표가 하는 일</span></a>
+  <a href="#s2"><b>2</b><span>현재 계산 방식</span></a>
+  <a href="#s3"><b>3</b><span>x, y 정확도 사슬</span></a>
+  <a href="#s4"><b>4</b><span>예시 출처 카탈로그</span></a>
+  <a href="#s5"><b>5</b><span>검증 결과</span></a>
+  <a href="#s6"><b>6</b><span>커버리지 분석</span></a>
+  <a href="#s7"><b>7</b><span>리스크</span></a>
+  <a href="#s8"><b>8</b><span>참고 저장소 비교</span></a>
+  <a href="#s9"><b>9</b><span>필요 자료·개선안</span></a>
+  <a href="#s11"><b>11</b><span>판단 오류 회고</span></a>
+  <a href="#s10"><b>10</b><span>부록</span></a>
+</nav>
+
+<main>
+
+<!-- ══ 0 ══ -->
+<section id="s0">
+<h2><span class="n">0</span>이 문서의 목적</h2>
+
+<p>좌표 조사 기록은 <code>docs/디바이스_하드코딩_조사.md</code> 에 시간순으로 쌓여 있습니다.
+그 기록만으로는 <strong>“지금 어디까지 믿을 수 있나”</strong> 를 한 번에 볼 수 없어서,
+현재 상태를 한 장으로 정리한 것이 이 문서입니다.</p>
+
+<div class="note blue">
+  <span class="lbl">이번 판의 초점</span>
+  <p>중요한 것은 <strong>매칭 단계가 아니라, 결과 엑셀과 단일 사진 정보에 찍히는 x·y 좌표의
+  정확도</strong>입니다. 매칭은 기준·검증 양쪽이 같은 규칙이면 오차가 상쇄되지만,
+  <strong>표기는 절대값이 맞아야</strong> 합니다.</p>
+  <p style="margin-bottom:0"><strong>이 문서는 조사·기록 전용입니다. 좌표 계산 코드는 이번에 변경하지 않았습니다.</strong>
+  발견한 결함(<a class="ref" href="#schema">R-0</a>)의 해법도 <a class="ref" href="#s9">9장</a>에 제안으로만 적었습니다.</p>
+</div>
+
+<h3>지금까지 무엇이 있었나</h3>
+<p>최근 며칠 사이에 <strong>실측으로 확인된 오류 세 가지</strong>가 나왔고 모두 고쳤습니다.
+전부 “상수로 박아 둔 값이 자재마다 다르다” 는 같은 원인이었습니다.</p>
+
+<div class="tw"><table>
+<caption>고친 항목과 그 근거</caption>
+<thead><tr><th style="width:19%">항목</th><th style="width:27%">잘못된 동작</th>
+<th style="width:28%">영향</th><th style="width:26%">밝혀낸 근거</th></tr></thead>
+<tbody>
+<tr><td class="k">row 기준<br><code>row_total</code></td>
+    <td><code>ceil(직경/pitch_y)</code> 로 추측 — 웨이퍼가 놓인 위치를 안 봄</td>
+    <td>RDL4 자재에서 화면·엑셀 row 가 <strong>전 구간 1 큼</strong><br>
+        <small>사용자 신고: 5,5 로 나오는데 실제는 5,4</small></td>
+    <td>장비가 파일명에 직접 적은 col/row 4건</td></tr>
+<tr><td class="k">KLA row 원점<br><code>KLA_ZERO_Y</code></td>
+    <td>상수 <code>4</code> 고정</td>
+    <td>TB500 자재에서 KLA row 가 1 큼<br><small>T254 는 우연히 맞았음</small></td>
+    <td>장비 확인 KLA↔Camtek 대응 7건 / 2 device</td></tr>
+<tr><td class="k">웨이퍼 중심<br><code>Center_X/Y</code></td>
+    <td><code>0.000000</code>(미기록)이면 추측에 의존</td>
+    <td>미기록 자재 전부가 추측값<br>
+        <small>실측: PI2 2장에서 추측값이 실제로 1 큼</small></td>
+    <td><code>Wafer2Table.ini</code> 6건 + 장비 화면 2건<br>
+        <small>+ PI 계열 전수 35장 (<a class="ref" href="#s4">자료 G</a>)</small></td></tr>
+</tbody></table></div>
+
+<h3>지금 상태 한 줄</h3>
+<p><strong>확보한 모든 장비 정답과 일치합니다.</strong> 다만 검증된 device 는 3종이고,
+그중 row 기준을 장비 정답으로 <em>직접</em> 확인한 것은 2종입니다.
+그리고 <strong>die 내부 x·y 값 자체를 장비 화면과 대조한 적은 아직 0건</strong>입니다.</p>
+</section>
+
+<!-- ══ 1 ══ -->
+<section id="s1">
+<h2><span class="n">1</span>좌표가 하는 일</h2>
+
+<p>장비가 남기는 파일에는 결함의 <strong>절대 좌표</strong>만 있습니다. 사람이 보는
+<code>col 5 / row 4</code> 같은 die 번호와 die 내부 위치는 앱이 계산합니다.
+그 결과가 두 곳에 쓰이는데 <strong>요구 수준이 다릅니다.</strong></p>
+
+<div class="tw"><table>
+<thead><tr><th style="width:17%">용도</th><th style="width:36%">필요한 것</th>
+<th style="width:26%">틀리면</th><th style="width:21%">이번 초점</th></tr></thead>
+<tbody>
+<tr><td class="k">매칭</td>
+    <td>기준·검증 양쪽이 <strong>같은 규칙</strong>이면 됨. 절대값은 달라도 무방 — 오차가 상쇄된다</td>
+    <td>같은 결함을 못 찾음</td><td>—</td></tr>
+<tr><td class="k">엑셀 · 단일 사진 정보</td>
+    <td>장비 화면과 <strong>같은 절대값</strong>이어야 함. 상쇄가 없다</td>
+    <td>사람이 장비와 대조할 때 혼선</td><td><span class="chip h">여기</span></td></tr>
+</tbody></table></div>
+
+<div class="note amber">
+<span class="lbl">중요</span>
+<p style="margin-bottom:0">지금까지 발견된 오류는 <strong>대부분 표기만 틀리고 매칭은 정상</strong>이었습니다.
+양쪽이 똑같이 틀리면 상쇄되기 때문입니다. 그래서 <strong>“매칭이 잘 된다” 는 좌표가 맞다는
+증거가 되지 않습니다.</strong> RDL4 의 row 오류가 실제로 몇 달간 매칭을 통과하며 숨어 있었습니다.</p>
+</div>
+
+<h3>입력과 출력</h3>
+<pre>[입력]  스캔 결과 폴더 — 결함 사진과 <b>같은 폴더</b>에 있다
+   ├ ColorImageGrabingInfo.ini   결함의 절대 X/Y            (Camtek)
+   ├ Params_WaferInfo.ini        die 간격 · 직경 · 웨이퍼 중심
+   ├ Wafer2Table.ini             웨이퍼 정렬 변환 (중심 2순위 소스)
+   ├ RecipesInfo.ini             레시피별 die 간격          <i>← 현재 미사용</i>
+   └ *.001                       XREL/YREL · XINDEX/YINDEX  (KLA)
+                       │
+                       ▼
+[출력]  DefectCoord(col, row, x, y)
+   col, row  웨이퍼 맵의 die 번호     → 장비 화면과 같아야 함
+   x, y      die 내부 위치 (µm)      → <b>엑셀·단일 사진 정보에 그대로 찍힘</b></pre>
+
+<h3>세 가지 좌표 소스</h3>
+<div class="tw"><table>
+<thead><tr><th style="width:17%">소스</th><th style="width:36%">형태</th>
+<th style="width:26%">담고 있는 것</th><th style="width:21%">빈도</th></tr></thead>
+<tbody>
+<tr><td class="k">Camtek INI</td>
+    <td><code>ColorImageGrabingInfo.ini</code> + 점표기 사진<br>
+        <code>51216.183928.c.1345447384.1.jpeg</code></td>
+    <td>절대 X/Y — die 번호와 내부 좌표는 앱이 계산</td><td>가장 흔함</td></tr>
+<tr><td class="k">Camtek 파일명</td><td><code>…_col_row_x_y_결함이름.jpg</code></td>
+    <td>장비가 이미 계산한 col/row/die 좌표</td><td>드묾 (1차 리뷰 사진)</td></tr>
+<tr><td class="k">KLA <code>.001</code></td><td>KLARF 형식 정보파일</td>
+    <td>die 인덱스 + die 내부 상대좌표</td><td>KLA 스캔 슬롯</td></tr>
+</tbody></table></div>
+<p>세 소스가 <strong>같은 결함에 같은 값</strong>을 내야 합니다. 어긋나면 매칭 게이트의
+여유(<code>±1</code> die)를 미리 잡아먹고, 그 여유가 정작 필요할 때 모자라게 됩니다.</p>
+</section>
+
+<!-- ══ 2 ══ -->
+<section id="s2">
+<h2><span class="n">2</span>현재 계산 방식</h2>
+
+<h3>핵심 개념 — 격자는 장비에, 웨이퍼는 그 위에</h3>
+<div class="split">
+<div>
+<p>die 격자는 <strong>장비 좌표계에 고정된 바둑판</strong>입니다. 그 위에 둥근 웨이퍼를 올려놓습니다.
+웨이퍼가 <strong>온전히 덮는 칸</strong>만 실제 die 이고, 번호는 그 첫 칸 / 마지막 칸부터 셉니다.</p>
+<p>그래서 <strong>die 크기가 같아도 웨이퍼가 놓인 위치가 다르면 번호 기준이 달라집니다.</strong>
+실제로 <strong>RDL4 계열과 PI4 계열</strong>은 둘 다 die 세로 44,905 µm 인데 기준이 6 과 7 로 갈립니다.</p>
+<pre>RDL4 계열   row_total <b>6</b>   <i>장비가 파일명에 적은 값 4건</i>
+PI4  계열   row_total <b>7</b>   <i>장비 정답 3건 (아래 표)</i>
+            같은 격자인데 한 칸 어긋난 자리에 놓여 있다</pre>
+<p>근거는 <a class="ref" href="#pi7">3장의 PI4 표</a>에 있습니다 —
+<strong>웨이퍼 중심을 몰라도</strong> 장비가 낸 <code>col/row</code> 와 결함의 절대 좌표만으로
+기준이 역산되기 때문에, 이 결론은 중심값 추정에 기대지 않습니다.</p>
+</div>
+<figure>
+<svg viewBox="0 0 499 464" xmlns="http://www.w3.org/2000/svg" class="dgrid" role="img" aria-labelledby="gt gd">
+<title id="gt">die 격자 위에 놓인 웨이퍼</title>
+<desc id="gd">장비 좌표계에 고정된 die 격자 위에 300 mm 웨이퍼가 놓여 있다. 웨이퍼가 온전히 덮는 칸만 실제 die 로 번호가 매겨지고, 첫 열이 col 0, 맨 아래 행이 row 0 이 된다.</desc>
+<g stroke="#B7B2A6" stroke-width="0.6" fill="none">
+<line x1="30.0" y1="30.0" x2="30.0" y2="430.0"/>
+<line x1="71.5" y1="30.0" x2="71.5" y2="430.0"/>
+<line x1="112.9" y1="30.0" x2="112.9" y2="430.0"/>
+<line x1="154.4" y1="30.0" x2="154.4" y2="430.0"/>
+<line x1="195.9" y1="30.0" x2="195.9" y2="430.0"/>
+<line x1="237.4" y1="30.0" x2="237.4" y2="430.0"/>
+<line x1="278.8" y1="30.0" x2="278.8" y2="430.0"/>
+<line x1="320.3" y1="30.0" x2="320.3" y2="430.0"/>
+<line x1="361.8" y1="30.0" x2="361.8" y2="430.0"/>
+<line x1="403.3" y1="30.0" x2="403.3" y2="430.0"/>
+<line x1="30.0" y1="30.0" x2="403.3" y2="30.0"/>
+<line x1="30.0" y1="80.0" x2="403.3" y2="80.0"/>
+<line x1="30.0" y1="130.0" x2="403.3" y2="130.0"/>
+<line x1="30.0" y1="180.0" x2="403.3" y2="180.0"/>
+<line x1="30.0" y1="230.0" x2="403.3" y2="230.0"/>
+<line x1="30.0" y1="280.0" x2="403.3" y2="280.0"/>
+<line x1="30.0" y1="330.0" x2="403.3" y2="330.0"/>
+<line x1="30.0" y1="380.0" x2="403.3" y2="380.0"/>
+<line x1="30.0" y1="430.0" x2="403.3" y2="430.0"/>
+</g>
+<g fill="#2C5A86" fill-opacity="0.14" stroke="#2C5A86" stroke-width="0.9">
+<rect x="71.5" y="80.0" width="41.5" height="50.0"/>
+<rect x="71.5" y="130.0" width="41.5" height="50.0"/>
+<rect x="71.5" y="180.0" width="41.5" height="50.0"/>
+<rect x="71.5" y="230.0" width="41.5" height="50.0"/>
+<rect x="71.5" y="280.0" width="41.5" height="50.0"/>
+<rect x="71.5" y="330.0" width="41.5" height="50.0"/>
+<rect x="112.9" y="80.0" width="41.5" height="50.0"/>
+<rect x="112.9" y="130.0" width="41.5" height="50.0"/>
+<rect x="112.9" y="180.0" width="41.5" height="50.0"/>
+<rect x="112.9" y="230.0" width="41.5" height="50.0"/>
+<rect x="112.9" y="280.0" width="41.5" height="50.0"/>
+<rect x="112.9" y="330.0" width="41.5" height="50.0"/>
+<rect x="154.4" y="80.0" width="41.5" height="50.0"/>
+<rect x="154.4" y="130.0" width="41.5" height="50.0"/>
+<rect x="154.4" y="180.0" width="41.5" height="50.0"/>
+<rect x="154.4" y="230.0" width="41.5" height="50.0"/>
+<rect x="154.4" y="280.0" width="41.5" height="50.0"/>
+<rect x="154.4" y="330.0" width="41.5" height="50.0"/>
+<rect x="195.9" y="80.0" width="41.5" height="50.0"/>
+<rect x="195.9" y="130.0" width="41.5" height="50.0"/>
+<rect x="195.9" y="180.0" width="41.5" height="50.0"/>
+<rect x="195.9" y="230.0" width="41.5" height="50.0"/>
+<rect x="195.9" y="280.0" width="41.5" height="50.0"/>
+<rect x="195.9" y="330.0" width="41.5" height="50.0"/>
+<rect x="237.4" y="80.0" width="41.5" height="50.0"/>
+<rect x="237.4" y="130.0" width="41.5" height="50.0"/>
+<rect x="237.4" y="180.0" width="41.5" height="50.0"/>
+<rect x="237.4" y="230.0" width="41.5" height="50.0"/>
+<rect x="237.4" y="280.0" width="41.5" height="50.0"/>
+<rect x="237.4" y="330.0" width="41.5" height="50.0"/>
+<rect x="278.8" y="80.0" width="41.5" height="50.0"/>
+<rect x="278.8" y="130.0" width="41.5" height="50.0"/>
+<rect x="278.8" y="180.0" width="41.5" height="50.0"/>
+<rect x="278.8" y="230.0" width="41.5" height="50.0"/>
+<rect x="278.8" y="280.0" width="41.5" height="50.0"/>
+<rect x="278.8" y="330.0" width="41.5" height="50.0"/>
+<rect x="320.3" y="80.0" width="41.5" height="50.0"/>
+<rect x="320.3" y="130.0" width="41.5" height="50.0"/>
+<rect x="320.3" y="180.0" width="41.5" height="50.0"/>
+<rect x="320.3" y="230.0" width="41.5" height="50.0"/>
+<rect x="320.3" y="280.0" width="41.5" height="50.0"/>
+<rect x="320.3" y="330.0" width="41.5" height="50.0"/>
+</g>
+<circle cx="216.4" cy="230.1" r="167.0" fill="none" stroke="#A5271E" stroke-width="1.8"/>
+<circle cx="216.4" cy="230.1" r="2.4" fill="#A5271E"/>
+<g font-family="ui-monospace,SFMono-Regular,monospace" font-size="9.5" fill="#3D3B35">
+<text x="92.2" y="22.0" text-anchor="middle">0</text>
+<text x="133.7" y="22.0" text-anchor="middle">1</text>
+<text x="175.2" y="22.0" text-anchor="middle">2</text>
+<text x="216.6" y="22.0" text-anchor="middle">3</text>
+<text x="258.1" y="22.0" text-anchor="middle">4</text>
+<text x="299.6" y="22.0" text-anchor="middle">5</text>
+<text x="341.1" y="22.0" text-anchor="middle">6</text>
+<text x="23.0" y="108.4" text-anchor="end">5</text>
+<text x="23.0" y="158.4" text-anchor="end">4</text>
+<text x="23.0" y="208.4" text-anchor="end">3</text>
+<text x="23.0" y="258.4" text-anchor="end">2</text>
+<text x="23.0" y="308.4" text-anchor="end">1</text>
+<text x="23.0" y="358.4" text-anchor="end">0</text>
+</g>
+<g font-family="ui-monospace,SFMono-Regular,monospace" font-size="8.5" fill="#89836F">
+<text x="216.6" y="9.0" text-anchor="middle">col</text>
+<text x="23.0" y="9.0" text-anchor="end">row</text>
+</g>
+<g font-family="ui-monospace,SFMono-Regular,monospace" font-size="9" fill="#2C5A86">
+<line x1="361.8" y1="105.0" x2="373.8" y2="105.0" stroke="#2C5A86" stroke-width="0.8"/>
+<text x="377.8" y="103.0">row 5</text>
+<text x="377.8" y="115.0" fill="#5A574E" font-size="8" font-family="NS,sans-serif">맨 위 완전 행</text>
+<line x1="361.8" y1="355.0" x2="373.8" y2="355.0" stroke="#2C5A86" stroke-width="0.8"/>
+<text x="377.8" y="353.0">row 0</text>
+<text x="377.8" y="365.0" fill="#5A574E" font-size="8" font-family="NS,sans-serif">row_total = 6</text>
+</g>
+<g font-family="ui-monospace,SFMono-Regular,monospace" font-size="8.5">
+<text x="30.0" y="452" fill="#A5271E" font-family="NS,sans-serif">웨이퍼 &#8960;300 mm · 중심 (167449, 179674) µm</text>
+<text x="491.3" y="452" fill="#89836F" text-anchor="end">die 37248 × 44905 µm</text>
+</g></svg>
+<figcaption>RDL4 웨이퍼(중심 167,449 / 179,674)를 실제 수치로 그린 것.
+파란 칸이 웨이퍼에 온전히 들어오는 die 이고, 그 바깥 칸은 번호를 받지 못한다.
+Camtek 은 Y 가 아래로 커지므로 <strong>맨 아래 완전 행</strong>이 row 0 이 된다.</figcaption>
+</figure>
+</div>
+
+<h3>변환식</h3>
+<pre><b>Camtek INI</b>
+  x_index = floor(X / pitch_x)              y_index = floor(Y / pitch_y)
+  col     = x_index − col_origin            row     = row_total − y_index
+  x       = floor(X − x_index × pitch_x)    y       = floor(Y − y_index × pitch_y)
+
+  col_origin = ceil((Center_X − 직경/2) / pitch_x)       <i>온전히 들어오는 첫 열</i>
+  row_total  = floor((Center_Y + 직경/2) / pitch_y) − 1  <i>온전히 들어오는 마지막 행</i>
+
+<b>KLA .001</b>
+  col = XINDEX + zero_x                     row = YINDEX + zero_y
+  x   = round(XREL)                         y   = round(DiePitchY − YREL)
+
+  zero_x = −ceil((SampleCenterLocation_X − 직경/2) / DiePitchX)
+  zero_y = −ceil((SampleCenterLocation_Y − 직경/2) / DiePitchY)
+
+<b>Camtek 파일명</b>  보정 없이 토큰 그대로 사용 — 장비가 이미 계산한 값</pre>
+
+<div class="note blue">
+<span class="lbl">세 소스가 같은 규칙을 쓴다</span>
+<p style="margin-bottom:0">Camtek 은 Y 가 <strong>아래로</strong> 커져서 <em>마지막</em> 완전 행이 row 0 이고,
+KLA 는 Y 가 <strong>위로</strong> 커져서 <em>첫</em> 완전 행이 row 0 입니다. 축 방향만 반대이고
+<strong>‘온전히 들어오는 die 부터 0번’</strong> 이라는 규칙은 같습니다. 그래서 두 장비가 자동으로 정렬됩니다.</p>
+</div>
+
+<h3>값을 정하는 우선순위 사슬</h3>
+<pre><b>die 간격 (pitch)</b>                      <b>웨이퍼 중심</b>
+1  Params_WaferInfo.ini                 1  Params_WaferInfo.ini
+     DieStep_X / DieStep_Y                   [Geometric] Center_X / Center_Y
+2  ProductInfo.ini                             <i>0.000000 은 '미기록' 으로 취급</i>
+     XDieIndex / YDieIndex               2  Wafer2Table.ini
+3  ProductInfo.ini                            <i>정렬 변환을 풀어서 중심 산출</i>
+     CustomerDiePitch_X / _Y             3  (없음)
+4  models.py 상수                             → col_origin = 상수 2
+     <i>모든 후보가 자체검산을 통과해야 채택</i>       → row_total  = ceil(직경/pitch_y)
+
+<b>자체검산</b>  모든 결함에서  INI Col == floor(X / pitch_x)   <i>X 축은 등호, 완화 금지</i>
+             Y 축은 레시피별로 차이가 상수이기만 하면 통과</pre>
+
+<h3>안전장치</h3>
+<div class="tw"><table>
+<thead><tr><th style="width:23%">장치</th><th style="width:42%">동작</th><th style="width:35%">막는 사고</th></tr></thead>
+<tbody>
+<tr><td class="k">pitch 자체검산</td><td>읽은 pitch 로 <code>Col==floor(X/pitch)</code> 가 전 항목에서 성립해야 채택</td>
+    <td>다른 자재의 pitch 를 잘못 채택 → <code>x = −1,652,266 µm</code></td></tr>
+<tr><td class="k">die 크기 후보 제외</td><td><code>DieSize</code> 계열은 후보에서 아예 뺌 (크기 ≠ 간격)</td>
+    <td>스크라이브 있는 자재에서 die 폭의 23 % 누적 오차</td></tr>
+<tr><td class="k">상식 범위 검사</td><td>원점이 <code>0‥200</code> 밖이면 폴백 + 경고</td><td>특이행렬 · 손상된 파일</td></tr>
+<tr><td class="k">절대좌표 폴백</td><td>pitch 를 못 정하면 die 로 안 쪼개고 절대좌표로 매칭</td>
+    <td>기하를 모른다고 매칭까지 막히는 것</td></tr>
+<tr><td class="k">프레임 통일</td><td>한 실행에 die-내부와 절대좌표가 섞이면 전부 절대좌표로 통일</td>
+    <td>슬롯 전체가 ‘매치 실패’ 로 보이는 것</td></tr>
+<tr><td class="k">조용한 폴백 금지</td><td>모든 폴백 · 거부 경로가 경고 로그를 남김</td><td>틀린 채로 아무도 모르는 상태</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- ══ 3 ══ -->
+<section id="s3">
+<h2><span class="n">3</span>x, y 정확도 사슬</h2>
+
+<p>엑셀과 단일 사진 정보에 찍히는 die 내부 좌표는 이렇게 나옵니다.</p>
+<pre>x = X − x_index × pitch_x        <i>X 는 파일에 있는 절대 좌표(정확)</i>
+                                 <i>x_index 는 floor(X / pitch_x)</i></pre>
+
+<div class="note red">
+<span class="lbl">여기서 오는 결론</span>
+<p style="margin-bottom:0"><strong>pitch 오차는 x·y 오차로 <em>index 배</em> 증폭됩니다.</strong>
+die 번호는 pitch 가 조금 틀려도 <code>floor</code> 덕에 잘 안 바뀌지만, x·y 는 그대로 어긋납니다.
+즉 <strong>x·y 정확도는 die 번호 정확도보다 pitch 에 훨씬 민감합니다.</strong>
+지금까지의 검증은 대부분 die 번호를 본 것이라, x·y 는 상대적으로 덜 지켜져 왔습니다.</p>
+</div>
+
+<h3>오차 요인별 크기 — 실측 기준</h3>
+<div class="tw"><table>
+<caption>각 요인이 die 내부 x·y 에 만드는 오차 (TB500 격자 기준)</caption>
+<thead><tr><th style="width:36%">요인</th><th class="num" style="width:15%">pitch 오차</th>
+<th class="ctr" style="width:10%">index</th><th class="num" style="width:16%">x·y 오차</th>
+<th style="width:23%">현재 상태</th></tr></thead>
+<tbody>
+<tr><td>파일명 스키마 오인 <a class="ref" href="#schema">↓</a></td><td class="num">—</td><td class="ctr">—</td>
+    <td class="num" style="color:var(--danger);font-weight:700">30,212 µm</td>
+    <td><span class="v no">현존 결함</span></td></tr>
+<tr><td>참고 저장소 DEVA 상수 <code>37170.0</code><br><small>실측 <code>37247.9</code></small></td>
+    <td class="num">77.90</td><td class="ctr">8</td><td class="num">623.2 µm</td>
+    <td><small>이 저장소는 해당 없음</small></td></tr>
+<tr><td><code>CustomerDiePitch</code> 를 골랐을 때<br>
+    <small><code>37249.0</code> vs <code>DieStep 37247.7</code></small></td>
+    <td class="num">1.30</td><td class="ctr">8</td><td class="num">10.4 µm</td>
+    <td><span class="v ok">1순위가 DieStep</span></td></tr>
+<tr><td>레시피별 pitch 차이 (Y)<br>
+    <small>Recipe-1 <code>44905.3</code> vs Recipe-2 <code>44903.4</code></small></td>
+    <td class="num">1.90</td><td class="ctr">6</td><td class="num">11.4 µm</td>
+    <td><span class="v wa">미반영</span></td></tr>
+<tr><td>레시피별 pitch 차이 (X)<br>
+    <small>Recipe-1 <code>37247.9</code> vs Recipe-2 <code>37247.7</code></small></td>
+    <td class="num">0.20</td><td class="ctr">7</td><td class="num">1.4 µm</td>
+    <td><span class="v wa">미반영</span></td></tr>
+<tr><td>KLA vs Camtek pitch (T254 X)<br>
+    <small><code>14406.5</code> vs <code>14400.1</code></small></td>
+    <td class="num">6.40</td><td class="ctr">die 끝</td><td class="num">6.4 µm</td>
+    <td><small>장비 고유 — 조정 불가</small></td></tr>
+</tbody></table></div>
+
+<h3 id="schema">① 파일명 스키마 <span style="color:var(--pass)">· 고쳤습니다 (R-0)</span></h3>
+<p>참고 저장소가 문서화한 Camtek 파일명 스키마 중 하나는 좌표 뒤에 <strong>결함 크기와 면적이
+더 붙습니다.</strong> 옛 파서는 정규식 <code>_(\d+)_(\d+)_.+_(수치)_(수치)$</code> 로 그 형태를
+잡았는데, greedy <code>.+</code> 와 <code>$</code> 앵커 때문에 <strong>뒤쪽 두 수치</strong>를 집었습니다.</p>
+
+<pre>파일명  …_4_5_Over Sized Bump_<b>30229.803</b>_<b>1987.994</b>_12.5_<em>18.3</em>_<em>229.1</em>.jpg
+                              └─── 진짜 x, y ───┘        └ 앱이 뽑은 값 ┘
+
+옛 결과   col=4  row=5  x=<em>18.3</em>        y=<em>229.1</em>        x 오차 <em>30,212 µm</em> (die 폭의 81 %)
+지금      col=4  row=5  x=<b>30229.803</b>  y=<b>1987.994</b>  <u>✓</u></pre>
+
+<div class="note green">
+<span class="lbl">어떻게 고쳤나 — 정규식을 버리고 토큰으로</span>
+<p>배치가 셋인데 정규식으로는 서로 잡아먹습니다. <strong><code>_</code> 로 쪼개서</strong> 규칙 세 개로 덮습니다:</p>
+<pre>1. col/row = 처음 등장하는 <b>연속한 두 정수 토큰</b>
+2. 그 앞에 식별자 토큰이 <b>2개 이상</b>      ← KLA 파일명 배제 (앞이 웨이퍼ID 1개뿐)
+3. x/y  = col/row 뒤에서 <b>처음</b> 두 수치   ← ★ R-0 수정 지점
+         남는 수치는 크기·면적으로 <b>분리</b>해 둔다 (좌표로 쓰지 않음)</pre>
+<p style="margin-bottom:0">세 배치(<code>x_y_이름</code> · <code>이름_x_y</code> · <code>이름_x_y_크기_면적</code>)가
+<strong>한 경로</strong>로 처리됩니다. 저장소 실물 파일명 <strong>14건 전수</strong>에 돌려
+결과가 고치기 전과 <strong>한 줄도 다르지 않음</strong>을 확인했습니다.
+바뀐 것은 크기·면적이 붙은 형태 하나뿐입니다.</p>
+</div>
+
+<div class="note amber">
+<span class="lbl">⚠ 그래도 남는 것 — 이 스키마는 여전히 <u>실물 미확보</u>다</span>
+<p>토큰 순서 <code>x_y_DXSize_DYSize_DArea</code> 의 근거는 <strong>참고 저장소 주석 한 줄</strong>뿐입니다
+(출처 등급 <code>문서</code>, <a class="ref" href="#s11">회고 R3</a>).
+크기·면적이 x·y <strong>앞</strong>에 오는 배치라면 우리 값은 틀립니다.
+<strong>지금 표본은 두 가설을 구분하지 못합니다.</strong></p>
+<p style="margin-bottom:0">다만 어느 가설이든 <strong>옛 코드보다 나쁘지 않습니다</strong>:
+실물로 검증된 두 배치는 그대로 맞고, 문제 스키마에서 옛 코드는 <em>확실히</em> 틀렸습니다.
+“미구분” 을 코드 주석·문서·요청 목록 세 곳에 적어 뒀고, 회귀 가드에도 경쟁 가설을 명시한
+테스트가 있습니다(<code>test_competing_hypothesis_is_undetermined</code>).</p>
+</div>
+
+<h3>② 레시피별 pitch — 지금 안 쓰는 정보</h3>
+<p><code>RecipesInfo.ini</code> 는 <strong>레시피마다 다른 die 간격</strong>을 갖고 있는데,
+현재는 <code>Params_WaferInfo.ini</code> 의 대표값 하나만 씁니다.</p>
+<pre>RDL4 17호기 RecipesInfo.ini
+  Recipe-1  x20   pitch = (37247.9, 44905.3)   <i>← Params 의 DieStep 과 같음</i>
+  Recipe-2  x5    pitch = (37247.7, 44903.4)   <b>← Y 가 1.9 µm 작음</b></pre>
+<p>사진마다 <code>RecipeNumber</code> 가 INI 에 적혀 있으므로, <strong>그 사진을 찍은 레시피의
+pitch 를 쓰면 die 내부 y 가 최대 11.4 µm 더 정확</strong>해집니다. 매칭에는 영향이 거의 없지만
+(양쪽이 같은 폴더 pitch 를 쓰므로 상쇄), <strong>표기에는 그대로 남는 오차</strong>입니다.</p>
+<div class="note">
+<span class="lbl">다만 확인이 필요하다</span>
+<p style="margin-bottom:0">장비가 die 내부 좌표를 표시할 때 레시피별 pitch 를 쓰는지, 대표 pitch 를
+쓰는지 <strong>모릅니다.</strong> 잘못 바꾸면 지금 맞는 값이 틀어집니다.
+<a class="ref" href="#s9">9장</a>의 요청 자료 3번이 이걸 닫습니다.</p>
+</div>
+
+<h3 id="pi7">③ PI4 계열의 row 기준 — 근거 4건과 그 무게</h3>
+<p><code>row_total</code> 은 <strong>웨이퍼 중심을 몰라도 역산됩니다.</strong> 장비가 낸
+<code>row</code> 와 그 결함의 절대 <code>Y</code> 만 있으면
+<code>row_total = row + floor(Y / pitch_y)</code> 이기 때문입니다. PI4 계열(<code>R_TB500_LIVE_PI4</code>,
+<code>DieStep 37247.7 × 44905.4</code>)에서 확보된 근거입니다.</p>
+
+<div class="tw"><table>
+<caption>PI4 계열 row 기준 — 근거별 무게</caption>
+<thead><tr><th style="width:22%">로트 · 웨이퍼</th><th style="width:26%">근거 종류</th>
+<th class="ctr" style="width:11%">y_index</th><th class="ctr" style="width:10%">장비 row</th>
+<th class="ctr" style="width:13%">row_total</th><th style="width:18%">무게</th></tr></thead>
+<tbody>
+<tr><td>VLP-PDIS3<br><code>W6317098XYB5</code></td>
+    <td><strong>장비가 파일명에 적은 값</strong><br><small>같은 결함의 Camtek INI 와 쌍</small></td>
+    <td class="ctr">2</td><td class="ctr">5</td><td class="ctr"><strong>7</strong></td>
+    <td><span class="v ok">강</span></td></tr>
+<tr><td>BNN-PIDS3 #1</td><td><strong>장비 화면 정답</strong><br><small>골든 테스트에 고정</small></td>
+    <td class="ctr">5</td><td class="ctr">2</td><td class="ctr"><strong>7</strong></td>
+    <td><span class="v ok">강</span></td></tr>
+<tr><td>BNN-PIDS3 #2</td><td><strong>장비 화면 정답</strong><br><small>골든 테스트에 고정</small></td>
+    <td class="ctr">7</td><td class="ctr">0</td><td class="ctr"><strong>7</strong></td>
+    <td><span class="v ok">강</span></td></tr>
+<tr><td>UDS-PIDS3<br><code>35115E27EWD7</code></td>
+    <td><code>Wafer2Table.ini</code> 역산<br><small>중심 → 기준 유도</small></td>
+    <td class="ctr">—</td><td class="ctr">—</td><td class="ctr">7</td>
+    <td><span class="v wa">중</span> — 유도값<br>
+        <small>장비 정답은 아니지만<br>같은 로트 25장이 같은 값</small></td></tr>
+</tbody></table></div>
+
+<p>앞의 세 건은 <strong>장비가 직접 낸 숫자</strong>라 중심 추정이 개입하지 않습니다.
+특히 VLP-PDIS3 는 같은 결함의 die 내부 좌표가 파일명과 INI 계산값 사이에서
+<strong>0.001 µm 이내</strong>로 일치해 같은 결함임이 확실합니다.
+<strong>따라서 “PI4 계열 row 기준 = 7” 은 UDS-PIDS3 자료가 없어도 성립합니다.</strong></p>
+
+<h4>UDS-PIDS3 중심값 224,380 — 출처와 그 뒤 확인</h4>
+<div class="note">
+<span class="lbl">출처 — 파일에 적힌 값이 아니라 계산값이다</span>
+<p>출처를 그대로 적습니다.</p>
+<pre>파일  Y:\AOI-24\Scanresult\R_TB500_LIVE_PI4\Setup1\UDS-PIDS3\35115E27EWD7\Wafer2Table.ini
+      (저장소 사본: _wafer2table_모음/Wafer2Table_6건.md 127~152행 · 정렬 저장 07/04/26 01:46)
+
+적힌 값   Wafer2Table_X =  1.0000080255   0.0008509894   −204890.6266250769
+          Wafer2Table_Y = −0.0008509894   1.0000080255   −224207.3632713843
+          → 이것은 <b>웨이퍼 = M·테이블 + t</b> 변환이지 중심이 아니다
+
+1단계  같은 파일의 앵커 5점으로 변환 방향 확인 ....... 최대 오차 <b>1.55 µm</b>
+2단계  중심 = M⁻¹·(−t) = (204,698.0, <b>224,379.8</b>)   ← 224,380 의 출처
+3단계  행렬을 안 쓰고 앵커 5점만 최소제곱 적합해 재산출
+       → (204,697.8, 224,379.4)   두 경로 차이 <b>0.42 µm</b></pre>
+<p style="margin-bottom:0">당시 약점은 두 가지였습니다 — ① 웨이퍼 <strong>한 장</strong>의 측정값이라 일반화 불가,
+② <strong>die 간격이 가정</strong>(그 웨이퍼의 <code>Params_WaferInfo.ini</code> 가 없어 같은 job 의
+다른 로트에서 빌려 씀). <strong>둘 다 자료 G 로 해소됐습니다</strong>(바로 아래).</p>
+</div>
+
+<div class="note blue">
+<span class="lbl">자료 G 로 해소된 것 — 35 웨이퍼 / 11 로트 / 6 job</span>
+<table style="margin:.4rem 0 .6rem"><tbody>
+<tr><td style="width:32%;color:var(--ink);font-weight:700">die 간격 가정</td>
+    <td><code>35115E27EWD7</code> 의 <code>Params_WaferInfo.ini</code> 가 들어 있고
+    <code>DieStep = 37247.7 × 44905.4</code> — <strong>빌려 온 값과 정확히 일치</strong>.
+    가정이 사라졌습니다</td></tr>
+<tr><td style="color:var(--ink);font-weight:700">표본 1장</td>
+    <td>같은 로트(<code>UDS-PIDS3</code>) <strong>25장</strong>의 중심 편차
+    <strong>X 78 µm / Y 97 µm</strong> — T254 에서 3장으로 잰 99 µm 와 같은 수준</td></tr>
+<tr><td style="color:var(--ink);font-weight:700">경계 여유</td>
+    <td>중심Y 실측 224,306~224,403 이고 <code>row_total=7</code> 유지 구간은 209,243~254,149 —
+    가장 가까운 경계까지 <strong>15,063 µm</strong>, 웨이퍼 간 편차의 <strong>155배</strong></td></tr>
+</tbody></table>
+<p style="margin-bottom:0">즉 이 값은 이제 <strong>한 장짜리 추정이 아니라 25장 통계</strong>입니다.
+다만 <strong>장비 정답이 늘어난 것은 아닙니다</strong> — 자료 G 에는 화면 판독도, 장비가 적은
+파일명도 없습니다. “PI4 계열 row 기준 = 7” 을 떠받치는 것은 여전히 위 표의 <strong>장비 근거 3건</strong>입니다.</p>
+</div>
+
+<h4 id="nocls">이 표를 “제품군별 상수표” 로 읽지 말 것</h4>
+<div class="note red">
+<span class="lbl">중요 — 앱은 제품군을 모른다</span>
+<p>자료 G 의 실물 <strong>35장</strong>에 앱의 유도식을 그대로 돌리면 아래처럼 갈립니다.
+<strong>제품군 분류표를 준 적이 없는데</strong> 폴더마다 자기
+<code>Wafer2Table.ini</code> 로 계산한 결과입니다.</p>
+<pre>job                                 n    (col_origin, row_total)   중심Y 실측
+
+R_TB500_LIVE_PI2                    1         (2, <b>6</b>)          179,513
+R_TB500_LIVE_PI2 AOI-21 Copy _0614  1         (2, <b>6</b>)          179,680
+R_TB500_LIVE_PI3                    1         (2, <b>7</b>)          224,691
+R_TB500_LIVE_PI3 - Enhanced         1         (2, <b>7</b>)          224,497
+R_TB500_LIVE_PI4                   29         (2, <b>7</b>)          224,306 ~ 224,722
+R_TB500_LIVE_PI4 AOI-21 Copy_0614   2         (2, <b>7</b>)          224,571 ~ 224,572
+
+                                              PI2 와 나머지의 중심Y 차이 ≈ 44.9 mm
+                                              = die 한 칸(44,905 µm)</pre>
+<p style="margin-bottom:0">이건 <strong>계산 결과를 사후에 관찰한 것</strong>이지 코드에 넣을 규칙이 아닙니다.
+“PI2 는 6, PI3·PI4 는 7” 같은 제품군 표를 만들면
+<strong>처음에 문제였던 TB500 하드코딩을 반복</strong>하게 됩니다 —
+그때도 “TB500 은 4” 가 실측에서는 3 이었습니다.
+값은 언제나 그 폴더의 파일에서 계산합니다.
+<strong>다음에 오는 PI 웨이퍼가 6 일지 7 일지는 그 폴더를 열어 봐야 압니다.</strong></p>
+</div>
+
+<h3>④ 이미 확보된 정확도</h3>
+<div class="tw"><table>
+<thead><tr><th style="width:36%">비교</th><th class="num" style="width:20%">오차</th>
+<th style="width:44%">근거</th></tr></thead>
+<tbody>
+<tr><td>같은 결함, 두 소스<br><small>파일명 ↔ INI 계산</small></td><td class="num">0.02 ~ 0.5 µm</td>
+    <td>RDL4 18호기 — 같은 사진의 두 이름</td></tr>
+<tr><td>같은 결함, 두 장비<br><small>17호기 ↔ 18호기</small></td><td class="num">0.2 ~ 7 µm</td>
+    <td>사진 대조로 확인된 쌍 2건</td></tr>
+<tr><td>같은 결함, Camtek ↔ KLA</td><td class="num">112 ~ 125 µm</td>
+    <td>사진 대조로 확인된 쌍 3건</td></tr>
+</tbody></table></div>
+<p><small>Camtek↔KLA 의 110 µm 대는 두 장비의 실제 정합 오차입니다 — 좌표 계산 오차가 아닙니다.
+같은 장비 안에서는 µm 이하로 재현됩니다. <strong>다만 셋 다 소스끼리 비교한 것이고,
+장비 화면의 x·y 와 대조한 것은 아닙니다.</strong></small></p>
+</section>
+
+<!-- ══ 4 ══ -->
+<section id="s4">
+<h2><span class="n">4</span>예시 출처 카탈로그</h2>
+<p>검증에 쓰인 <strong>모든</strong> 실측 자료입니다. 각각 <strong>어디서 · 언제 · 무엇이 들어 있고 ·
+무엇을 증명하며 · 무엇은 증명하지 못하는지</strong> 적었습니다.</p>
+
+<div class="src">
+<header><span class="id">자료 A</span><h3>초기 샘플 — dev/좌표 확인</h3>
+<span class="when">저장소 초기부터</span></header>
+<div class="tw"><table class="kv"><tbody>
+<tr><td>저장 위치</td><td><code>dev/좌표 확인/Camtek/예시1~3</code> · <code>dev/좌표 확인/KLA/예시1~3</code></td></tr>
+<tr><td>원본 출처</td><td>기록 없음 — 사진과 INI 만 복사된 사본</td></tr>
+<tr><td>검사 시각</td><td>KLA <code>2026-05-18 11:24</code> (예시1·2) / <code>2026-05-18 16:47</code> (예시3)</td></tr>
+<tr><td>장비 · 제품</td><td>KLA <code>"KLA" "LDS CIRCL" "K3"</code> · device <code>4DT-TB500-H-M1</code> ·
+    step <code>RDL2_NEW(MULTI)</code></td></tr>
+<tr><td>웨이퍼</td><td><code>W6459076XYG1</code> · <code>W6459081XYE1</code> · <code>W6460162XYF4</code></td></tr>
+<tr><td>구성</td><td>Camtek 3폴더 (INI + 사진 6장, 결함 <strong>63건</strong>) ·
+    KLA 3폴더 (<code>.001</code> 3개 + 사진 3장, 결함 14건)</td></tr>
+<tr><td>수록 정보</td><td><strong>Camtek</strong> 절대 X/Y · INI Col/Row · RecipeNumber · PixelSize · Mag ·
+    StageZ · IsTableCoordinate<br>
+    <strong>KLA</strong> DiePitch · DieOrigin · SampleCenterLocation · SampleTestPlan(30쌍) ·
+    XREL/YREL · XINDEX/YINDEX · XSIZE/YSIZE/DEFECTAREA · CLASSNUMBER · INTENSITY · ClassLookup(12종)</td></tr>
+<tr><td>증명한 것</td><td>· 격자 불변식 <code>Col == floor(X/DieStep)</code> <strong>63/63 성립</strong><br>
+    · KLA↔Camtek <strong>사진으로 확인된 쌍 1건</strong> (die 내부 거리 119 µm)<br>
+    · 그 쌍으로 두 장비 좌표계 관계를 역산 가능</td></tr>
+<tr><td style="color:var(--danger)">한계</td>
+    <td>· <code>Params_WaferInfo.ini</code> 가 <strong>없음</strong> — 이 폴더는 지금도 폴백 경로를 탐<br>
+    · 장비 화면 정답이 없어 절대값 검증 불가<br>
+    · 실제로 이 폴더의 Camtek row 는 현재 1 큰 상태로 추정됨</td></tr>
+</tbody></table></div>
+</div>
+
+<div class="src">
+<header><span class="id">자료 B</span><h3>RDL4 로트 — 17호기 · 18호기</h3>
+<span class="when">2026-08-04 수령</span></header>
+<div class="tw"><table class="kv"><tbody>
+<tr><td>저장 위치</td><td><code>docs/RDL4 LOT files(26년 05월, FDV)/{17호기,18호기}/{W7548304XYG4,W7548306XYA2}</code></td></tr>
+<tr><td>원본 경로</td><td>17호기 <code>c:\falcon\ScanResults\TB500_RDL4 - Multi\Setup1\20260511_FDV\…</code><br>
+    18호기 <code>c:\falcon\ScanResults\TB500_RDL4 - Multi\Setup1\FDV-RDL4\…</code></td></tr>
+<tr><td>스캔 시기</td><td>2026-05 (로트명 <code>20260511_FDV</code>)</td></tr>
+<tr><td>제품 · 격자</td><td>TB500 계열 · DieStep <code>37247.9 × 44905.3</code> µm</td></tr>
+<tr><td>웨이퍼 정렬</td><td><code>Center = (167448.9731, 179674.0034)</code> — <strong>기록됨</strong>.
+    네 폴더가 소수점까지 동일 → 레시피 값</td></tr>
+<tr><td>구성</td><td>4폴더 · 결함 <strong>328건</strong> (117 · 117 · 46 · 48)<br>
+    각 폴더: <code>ColorImageGrabingInfo.ini</code> · <code>Params_WaferInfo.ini</code> ·
+    <code>RecipesInfo.ini</code> · 결함 사진<br>
+    <strong>18호기에는 같은 결함 사진이 두 형태로</strong> — 점표기 + col/row 파일명</td></tr>
+<tr><td>수록 정보</td><td>절대 X/Y · INI Col/Row · RecipeNumber ·
+    레시피별 DiePitch(x20 / x5) · ScanMag · Scan2DPixelSize ·
+    Diameter · MeasuredDiameter(299954.78) · EBR(0) · Center_X/Y · FlatNotchVal</td></tr>
+<tr><td>증명한 것</td><td>· <strong>장비가 스스로 적은 col/row 4건</strong> — 정답 그 자체<br>
+    · <code>row_total</code> 이 <code>ceil(직경/pitch)</code> 가 아니라 중심에서 유도됨을 확정<br>
+    · 유도한 완전 die 범위가 <strong>328건 전수의 인덱스 범위와 정확히 일치</strong><br>
+    · <code>Center_*</code> 가 웨이퍼·장비가 달라도 동일 → 레시피 단위 값<br>
+    · 같은 사진의 두 이름에서 die 좌표가 <strong>0.02 µm</strong> 안에 일치</td></tr>
+<tr><td style="color:var(--danger)">한계</td><td>· KLA 스캔이 없어 KLA 정렬 교차 확인 불가<br>
+    · col/row 파일명은 사용자가 1차 리뷰 폴더에서 <strong>직접 가져다 둔 것</strong> —
+      장비가 두 파일을 함께 출력한 게 아님<br>
+    · 파일명에 결함 크기·면적 토큰이 없음 → <a class="ref" href="#schema">스키마 결함</a>을 여기서는 못 잡음</td></tr>
+</tbody></table></div>
+</div>
+
+<div class="src">
+<header><span class="id">자료 C</span><h3>T254 Camtek + 16호기 장비 화면 판독</h3>
+<span class="when">2026-08-04 수령</span></header>
+<div class="tw"><table class="kv"><tbody>
+<tr><td>저장 위치</td><td><code>docs/Camtek 좌표 예시(T254)/</code> (웨이퍼 <code>GIX5703111</code>) ·
+    <code>…/GIX5703110/</code></td></tr>
+<tr><td>원본 경로</td><td><code>c:\falcon\ScanResults\2D@R5-AS-T254-A01_0857122AY-0B\6324\DTV\{GIX5703110,GIX5703111}\</code></td></tr>
+<tr><td>제품 · 격자</td><td>T254 · DieStep <code>14400.1 × 31109.8</code> µm — <strong>TB500 의 1/2.6 크기</strong></td></tr>
+<tr><td>웨이퍼 정렬</td><td><code>Center_X = Center_Y = 0.000000</code> — <strong>미기록</strong>
+    (<code>MeasuredDiameter=0</code> · <code>FlatNotchVal=-1</code> 동반)</td></tr>
+<tr><td>구성</td><td>2폴더 · 결함 27건 (6 + 21)<br>
+    각 폴더: INI · <code>Params_WaferInfo.ini</code> · <code>Recipe.ini</code> · 사진</td></tr>
+<tr><td>수록 정보</td><td>절대 X/Y · INI Col/Row · RecipeNumber ·
+    RefPixelSize(1.688) · DieSize / DieStep · SetupPath(레시피 폴더 경로) ·
+    <code>Recipe.ini</code> 는 AutoCycle 설정만 (기하 없음)</td></tr>
+<tr><td style="color:var(--blue)">핵심 자료</td><td><strong>16호기 장비 화면 직접 판독 2건</strong><br>
+    <code>29648.164545.c._2_</code> → 화면 <code>0, 5</code> &nbsp;(웨이퍼 GIX5703110)<br>
+    <code>84722.113001.c._1_</code> → 화면 <code>3, 7</code> &nbsp;(웨이퍼 GIX5703111)</td></tr>
+<tr><td>증명한 것</td><td>· die 크기가 전혀 다른 자재에서도 규칙이 성립<br>
+    · <code>Center_*</code> 미기록 상태의 <strong>폴백 경로가 이 자재에서는 정답</strong><br>
+    · <code>col_origin = 2</code> · <code>row_total = 10</code> 을 장비가 확인</td></tr>
+<tr><td style="color:var(--danger)">한계</td><td>· 두 판독이 <strong>서로 다른 웨이퍼</strong>에서 나옴<br>
+    · <strong>col/row 만 기록됨 — die 내부 x·y 는 없음</strong><br>
+    · 결함이 한 die 에 몰려 있어 die 인덱스 범위 검증은 못 함<br>
+    · 장비 맵 화면에 <strong>축 눈금이 없어</strong> 판독을 재현할 방법이 없음 (사용자 확인)</td></tr>
+</tbody></table></div>
+</div>
+
+<div class="src">
+<header><span class="id">자료 D</span><h3>KLA T254 · TB500 + 장비 확인 대응값</h3>
+<span class="when">2026-08-04 수령</span></header>
+<div class="tw"><table class="kv"><tbody>
+<tr><td>저장 위치</td><td><code>docs/KLA 좌표 예시(TB500, T254)/{2026-08-02-23-09_4, 2026-08-03-20-28_2}</code></td></tr>
+<tr><td>검사 시각</td><td>T254 <code>2026-08-02 22:51:54</code> · TB500 <code>2026-08-03 20:12:25</code></td></tr>
+<tr><td>장비</td><td>T254 <code>"KLA-Tencor" "KRONOS" "K2"</code> ·
+    TB500 <code>"KLA-Tencor" "KRONOS" "K1"</code></td></tr>
+<tr><td>제품 · step</td><td><code>4DT-T254-H-M1</code> / <code>RDL3_NEW</code> ·
+    <code>4DT-TB500-H-M1</code> / <code>RDL1_NEW</code></td></tr>
+<tr><td>웨이퍼</td><td><code>00MEU018XYG1</code> (T254) · <code>08235234EWA1</code> (TB500)</td></tr>
+<tr><td>구성</td><td>2폴더 × (<code>.001</code> + <code>.pass</code> + 결함 사진 3~4장 + <code>Thumbs.db</code>)</td></tr>
+<tr><td>수록 정보</td><td>DiePitch · DieOrigin · SampleSize(300 mm) · SampleCenterLocation ·
+    SampleTestPlan(30쌍 / 127쌍) · OrientationMarkLocation(DOWN) · CoordinatesMirrored(NO) ·
+    ClassLookup(12종) · 결함별 X/Y · XREL/YREL · XINDEX/YINDEX ·
+    XSIZE/YSIZE/DEFECTAREA/DSIZE · CLASSNUMBER · INTENSITY · IMAGELIST</td></tr>
+<tr><td style="color:var(--blue)">핵심 자료</td><td><strong>장비로 확인한 KLA↔Camtek 대응값 7건</strong><br>
+    TB500 3건 &nbsp;<code>(2,−1)→(5,2)</code> &nbsp;<code>(−2,−2)→(1,1)</code> &nbsp;<code>(−2,0)→(1,3)</code><br>
+    T254 4건 &nbsp;<code>(−1,4)→(8,8)</code> &nbsp;<code>(4,3)→(13,7)</code> &nbsp;<code>(4,−2)→(13,2)</code> &nbsp;<code>(−8,−2)→(1,2)</code></td></tr>
+<tr><td>증명한 것</td><td>· <code>KLA_ZERO_Y</code> 가 <strong>device 마다 다름</strong> (T254 = 4 · TB500 = 3)<br>
+    · <code>SampleCenterLocation</code> 기하 유도가 <strong>7/7 재현</strong><br>
+    · <code>SampleTestPlan</code> 범위와 5웨이퍼 × 2축 전부 일치 (독립 검산)<br>
+    · <code>TotalDiceCount 127</code> 이 T254 <code>SampleTestPlan</code> 개수와 일치</td></tr>
+<tr><td style="color:var(--danger)">한계</td><td>· 같은 웨이퍼의 Camtek 스캔이 없어 <strong>직접 쌍 대조는 불가</strong><br>
+    · 대응값의 ‘Camtek 기준’ 산출 과정은 사용자 확인에 의존<br>
+    · <strong>die 내부 x·y 대응값은 없음</strong> — die 번호만</td></tr>
+</tbody></table></div>
+</div>
+
+<div class="src">
+<header><span class="id">자료 E</span><h3>Wafer2Table.ini 모음 6건</h3>
+<span class="when">2026-08-05 수령</span></header>
+<div class="tw"><table class="kv"><tbody>
+<tr><td>저장 위치</td><td><code>docs/Camtek 좌표 예시(T254)/_wafer2table_모음/Wafer2Table_6건.md</code></td></tr>
+<tr><td>원본 경로</td><td>
+  <code>V:\AOI-16\Scanresult\2D@R5-AS-T254-A01_0857122AY-0B\6324\DTV\GIX5703110</code><br>
+  <code>V:\AOI-16\…\6324\DTV\GIX5703114</code><br>
+  <code>C:\Users\304236\Desktop\PROJECTS\레시피 검증 예시\1\검증 17호기\XYB1</code><br>
+  <code>C:\Users\304236\…\검증 17호기\XYA2</code><br>
+  <code>Y:\AOI-24\Scanresult\R_TB500_LIVE_PI4\Setup1\UDS-PIDS3\35115E27EWD7</code><br>
+  <code>X:\AOI-7\Scanresult\2D@R2-$7781987B-WUP_0856808PD-0A\6321\LLN\SF57R04-A5</code></td></tr>
+<tr><td>정렬 저장 시각</td><td><code>05/11/26 17:54</code> · <code>05/11/26 20:18</code> ·
+    <code>07/07/26 20:03</code> · <code>07/07/26 20:06</code> ·
+    <code>07/04/26 01:46</code> · <code>06/12/26 00:48</code></td></tr>
+<tr><td>수록 정보</td><td>웨이퍼↔테이블 어파인 변환 행렬(2×3) · 회전 · 전단 · 신축 · 오프셋 ·
+    정합 잔차 <code>StdAffine</code> / <code>StdOrtho</code> ·
+    앵커 5~8점 (테이블 좌표 ↔ 웨이퍼 좌표 대응) · 국소 보정 사용 여부</td></tr>
+<tr><td style="color:var(--blue)">핵심 자료</td><td><strong><code>GIX5703110</code> 포함</strong> —
+    장비 화면 정답 <code>(0,5)</code> 를 가진 <strong>바로 그 웨이퍼</strong></td></tr>
+<tr><td>증명한 것</td><td>· <strong>같은 웨이퍼 검증</strong> — 그 웨이퍼 자신의 파일이 화면 정답을 냄<br>
+    · <strong>웨이퍼 간 편차</strong> X 99 µm / Y 75 µm — 경계 여유(1,594 µm)의 1/16<br>
+    · <strong>기록된 <code>Center_*</code> 와 140 µm 이내 일치</strong>, 유도 원점도 동일<br>
+    · 앵커 3~5점이 어파인 변환을 <strong>2.7 µm</strong> 안에 재현 → 변환 방향 확정</td></tr>
+<tr><td style="color:var(--danger)">한계</td><td>· 4개 제품군만 커버, <strong>제품군당 표본이 1~3장</strong><br>
+    · <code>Wafer2Table</code> 은 <strong>웨이퍼마다 측정되는 값</strong> — 한 장으로 레시피 값을 단정할 수 없음<br>
+    · LLN 은 <strong>1장뿐</strong><br>
+    · <s>UDS-PIDS3 도 1장뿐이고 같은 웨이퍼의 <code>Params_WaferInfo.ini</code> 가 없음</s>
+      → <strong>자료 G 로 해소</strong>(같은 로트 25장 + 그 웨이퍼 자신의 <code>Params_WaferInfo.ini</code>)<br>
+    · <code>Wafer2Table.ini</code> 이 <strong>없는</strong> 스캔이 있는지 미확인<br>
+    · 17호기 두 건은 데스크톱 사본이라 원본 스캔 폴더 경로가 아님</td></tr>
+</tbody></table></div>
+</div>
+
+<div class="src">
+<header><span class="id">자료 F</span><h3>스캔 결과 폴더 전체 목록 · 후보 파일 내용</h3>
+<span class="when">2026-08-05 수령</span></header>
+<div class="tw"><table class="kv"><tbody>
+<tr><td>저장 위치</td><td><code>docs/Camtek 좌표 예시(T254)/_recipe_files_GX57001305/수집파일.md</code></td></tr>
+<tr><td>원본 경로</td><td><code>V:\AOI-16\Scanresult\2D@R5-AS-T254-A01_0857122AY-0B\6324\DVG\GX57001305</code></td></tr>
+<tr><td>구성</td><td>폴더 파일 목록 <strong>약 140개</strong> (앱이 읽던 건 6개) + 후보 6개 파일 내용</td></tr>
+<tr><td>수집된 파일</td><td><code>WaferMapRecipe.ini</code> · <code>Wafer2Table.ini</code> ·
+    <code>DiceLocationStat.txt</code> · <code>DieRegPos.txt</code> ·
+    <code>ExternalCoordSystems.ini</code> · <code>FocusMapping/DieReferenceLocation.json</code></td></tr>
+<tr><td>목록에서 확인된 미읽은 파일</td>
+    <td><code>WaferAlignData.zip</code> · <code>s_DieLocation.dat</code> (+ <code>.md</code>) ·
+    <code>DieAlignment.dat</code> · <code>Params_AlignRTP.ini</code> ·
+    <code>ExtendedScanMetaData_BS_*.json</code> · <code>MachineStage2TableMatrix.ini</code> ·
+    <code>Surface.flt.md</code> · <code>ClassificationConvertTable.ini</code> 등</td></tr>
+<tr><td>증명한 것</td><td>· <code>Wafer2Table.ini</code> 이 <code>Center_*</code> 미기록 스캔의 실제 중심 소스임<br>
+    · <code>WaferMapRecipe.ini</code> 의 <code>TotalDiceCount = 127</code> 이
+      KLA <code>SampleTestPlan</code> 개수 127 과 <strong>정확히 일치</strong> (교차 확인)</td></tr>
+<tr><td style="color:var(--danger)">한계 / 배제</td>
+    <td>· <code>DiceLocationStat.txt</code> — die 위치 <em>오차 통계</em>일 뿐<br>
+    · <code>DieRegPos.txt</code> — die <em>내부</em> 정렬 기준점 4개, 격자 원점과 무관<br>
+    · <code>ExternalCoordSystems.ini</code> <code>Count=0</code> ·
+      <code>DieReferenceLocation.json</code> <code>null</code> — 비어 있음<br>
+    · 나머지 130여 개 파일 미확인 — <code>.md</code> 짝 파일이 바이너리 스키마를 설명할 가능성</td></tr>
+</tbody></table></div>
+</div>
+
+<div class="src">
+<header><span class="id">자료 G</span><h3>PI 계열 INI 전수 — 35 웨이퍼 · 6 장비</h3>
+<span class="when">2026-08-05 수령</span></header>
+<div class="tw"><table class="kv"><tbody>
+<tr><td>저장 위치</td><td><code>docs/PI 계열 INI 모음(35웨이퍼)/AOI_INI_통합본.md</code> (128 KB)</td></tr>
+<tr><td>원본 경로</td><td>6개 장비 · 6개 job 의 <code>Scanresult\…\Setup1</code> 아래 <strong>71개 경로</strong><br>
+    <code>Y:\AOI-24\…\R_TB500_LIVE_PI4</code> (52) ·
+    <code>P:\AOI-17\…\R_TB500_LIVE_PI4</code> (3) ·
+    <code>Y:\AOI-25\…\{PI2,PI3,PI4}</code> (6) ·
+    <code>P:\AOI-22\…</code> (4) · <code>P:\AOI-23\…</code> (4) ·
+    <code>P:\AOI-18\…\R_TB500_LIVE_PI4</code> (2)</td></tr>
+<tr><td>수집 시각</td><td>보고서 생성 <code>2026-08-05 19:58</code> ·
+    파일 자체의 마지막 수정은 <code>2026-04-25 07:34</code> ~ <code>2026-08-05 06:22</code></td></tr>
+<tr><td>구성</td><td><strong>웨이퍼 35장 / lot 11개 / job 6개</strong><br>
+    <code>Wafer2Table.ini</code> <strong>35</strong>장 (전수) ·
+    <code>Params_WaferInfo.ini</code> <strong>34</strong>장
+    (<code>TUM-PIDS3\30185773EWE4</code> 만 없음) ·
+    <code>ColorImageGrabingInfo.ini</code> <strong>2</strong>장
+    (<code>29265187EWF2</code> · <code>35115E27EWD7</code>)</td></tr>
+<tr><td>수록 정보</td><td>파일 전문 그대로 — 어파인 변환 행렬 · 앵커점 · 정합 잔차 ·
+    <code>DieStep_X/Y</code> · <code>Diameter</code> · <code>EBR</code> · <code>Center_X/Y</code> ·
+    2장은 결함별 절대 X/Y 와 INI <code>Col</code>/<code>Row</code> 까지</td></tr>
+<tr><td style="color:var(--blue)">핵심 자료</td><td><strong><code>35115E27EWD7</code> 의
+    <code>Params_WaferInfo.ini</code> 포함</strong> —
+    <a class="ref" href="#pi7">중심 224,380</a> 을 계산할 때 die 간격을 다른 로트에서
+    빌려 왔던 <strong>바로 그 웨이퍼</strong></td></tr>
+<tr><td>증명한 것</td><td>· <strong>die 간격 가정 소거</strong> —
+    그 웨이퍼 자신의 <code>DieStep = 37247.7 × 44905.4</code>,
+    빌려 온 값과 <strong>소수점까지 동일</strong><br>
+    · <strong>표본 1장 → 25장</strong> — 같은 로트(<code>UDS-PIDS3</code>) 중심 편차
+    <strong>X 78 µm / Y 97 µm</strong> (T254 3장에서 잰 99 µm 와 같은 수준)<br>
+    · <strong>경계 여유 15,063 µm</strong> — 웨이퍼 간 편차의 <strong>155배</strong><br>
+    · 유도식이 <strong>제품군 정보 없이</strong> job 별로 갈린 값을 냄
+      (<a class="ref" href="#nocls">아래</a>)<br>
+    · <a class="ref" href="#s7">R-4</a> 폴백이 <strong>실제로 틀리는 사례</strong> 2건 확보</td></tr>
+<tr><td>관측된 것<br><small>단정이 아니라 표본 사실</small></td>
+    <td><code>Params_WaferInfo.ini</code> 34장 전부 <code>Center_X = Center_Y = 0.000000</code> —
+    <strong>기록된 것을 한 장도 발견하지 못했습니다.</strong>
+    <span style="color:var(--danger)">우연히 이 표본에만 없는 것일 수 있으므로</span>
+    “PI 계열에는 기록되지 않는다” 고 <strong>단정하지 않습니다.</strong>
+    코드도 이 관측에 의존하지 않습니다 — <code>Center_*</code> 가 있으면 그것을 1순위로 쓰고,
+    0 일 때만 <code>Wafer2Table.ini</code> 로 내려갑니다</td></tr>
+<tr><td style="color:var(--danger)">한계</td><td>· <strong>장비 정답이 0건</strong> —
+    화면 판독도, 장비가 적은 파일명도 없음. 유도식의 <em>입력</em>을 늘렸을 뿐
+    <em>결론</em>을 새로 검증하진 못함<br>
+    · 결함 좌표가 있는 폴더가 <strong>2장뿐</strong> → 나머지 33장은
+      격자 불변식으로 교차 확인할 수 없음<br>
+    · TB500 계열 <strong>한 device</strong> 안의 표본 — <a class="ref" href="#s7">R-1</a> 은 그대로<br>
+    · <code>Center_*</code> 기록값과 대조한 건 <strong>0건</strong>
+      (전부 <code>0.000000</code>) → RDL4 에서 했던 140 µm 교차 확인은 여기서 못 함</td></tr>
+</tbody></table></div>
+</div>
+
+<div class="src">
+<header><span class="id">자료 H</span><h3>장비 확인 col·row·x·y — PI2 · PI4</h3>
+<span class="when">2026-08-05 수령 (13차)</span></header>
+<div class="tw"><table class="kv"><tbody>
+<tr><td>저장 위치</td><td><code>docs/장비 확인 좌표(PI2·PI4, 13차)/</code>
+    (<code>원본_수령분.md</code> · <code>정리.md</code>)</td></tr>
+<tr><td>원본 경로</td><td><code>Y:\AOI-25\…\R_TB500_LIVE_PI2\Setup1\KMU-PIDS7\00RV9055XYC2</code><br>
+    <code>P:\AOI-22\…\R_TB500_LIVE_PI2 AOI-21 Copy _0614\Setup1\MTW-PIDS7\00RWQ258XYD1</code><br>
+    <code>P:\AOI-17\…\R_TB500_LIVE_PI4\Setup1\DYD-PIDS3\29265187EWF2</code></td></tr>
+<tr><td>구성</td><td>· KMU — 장비 화면 <code>col=0, row=3</code> (사진 1건)<br>
+    · MTW — 대체 웨이퍼 <code>00RWQ258XYD1</code> 의 INI 3종 전문 (결함 <strong>35건</strong>)
+      + 장비 화면 <strong><code>col,row,x,y</code> 2건</strong><br>
+    · DYD — 장비 화면 <strong><code>col, row, x, y</code> 2건</strong> (예측과 일치)<br>
+    · UDS — 리뷰 후 사진 삭제로 제공 불가</td></tr>
+<tr><td style="color:var(--blue)">핵심 자료</td>
+    <td><strong>① <code>row_total = 6</code> 쪽의 첫 장비 정답</strong> —
+    그전까지 6 은 <code>Wafer2Table</code> 역산뿐이었습니다<br>
+    <strong>② die 내부 <code>x·y</code> 의 첫 장비 대조</strong> — 그전까지 0건<br>
+    <strong>③ 버림 vs 반올림을 가르는 값</strong> — MTW 의 x 두 개가 소수부 ≥0.5</td></tr>
+<tr><td>증명한 것</td><td>· 유도식이 <strong>양쪽 값(6·7)을 모두 장비 정답으로</strong> 재현<br>
+    · 폴백이 <strong>장비 기준으로 틀리다</strong> — “우리 값과 다르다” 에서 한 단계 올라감<br>
+    · <code>x·y</code> 표기가 소스 간 일치를 넘어 <strong>장비와도 일치</strong><br>
+    · MTW 대체 웨이퍼 35건이 격자 불변식 전수 통과, <code>row</code>·<code>col</code> 둘 다 0 에 닿음<br>
+    · <strong>die 내부 좌표가 버림</strong>임을 장비가 확인 — 반올림이면 3건 다 1 µm 어긋남</td></tr>
+<tr><td style="color:var(--danger)">한계</td>
+    <td>· <strong>µm 미만은 확인 불가</strong> — 장비 화면이 좌표를 정수로만 표시합니다.
+      장비 내부값은 <code>[표시값, 표시값+1)</code> 안이라는 것까지만 알 수 있습니다<br>
+    · KMU 는 <strong>절대 X·Y 가 파일명 접두</strong>뿐 (INI 미수령) — 경계 여유가 12,000 µm 넘어
+      결론엔 영향 없으나 정밀 대조는 불가<br>
+    · <strong>경계 근접 자재가 아니다</strong> — 여유 34 %. 6사례 전부 같은 위상
+      (<a class="ref" href="#s11">11장</a>)<br>
+    · <code>Diameter</code> vs <code>MeasuredDiameter</code> 는 <strong>여전히 미구분</strong>
+      (MTW 도 <code>MeasuredDiameter=0</code>)</td></tr>
+</tbody></table></div>
+</div>
+
+<h3>자료 요약</h3>
+<div class="tw"><table>
+<thead><tr><th class="ctr" style="width:8%">자료</th><th style="width:24%">무엇</th>
+<th class="num" style="width:12%">결함 수</th><th style="width:17%">device</th>
+<th style="width:39%">장비 정답 포함</th></tr></thead>
+<tbody>
+<tr><td class="k ctr">A</td><td>초기 샘플</td><td class="num">63 + 14</td><td>TB500</td>
+    <td>KLA↔Camtek 확인 쌍 1건 (die 번호)</td></tr>
+<tr><td class="k ctr">B</td><td>RDL4 로트</td><td class="num">328</td><td>TB500 격자</td>
+    <td>장비 파일명 4건 (die 번호 + x·y)</td></tr>
+<tr><td class="k ctr">C</td><td>T254 Camtek</td><td class="num">27</td><td>T254</td>
+    <td><strong>장비 화면 2건</strong> (die 번호만)</td></tr>
+<tr><td class="k ctr">D</td><td>KLA 2 device</td><td class="num">7</td><td>TB500 · T254</td>
+    <td><strong>장비 확인 대응 7건</strong> (die 번호만)</td></tr>
+<tr><td class="k ctr">E</td><td>정렬 변환</td><td class="num">—</td><td>4 제품군</td>
+    <td>C 의 정답 웨이퍼 포함</td></tr>
+<tr><td class="k ctr">F</td><td>폴더 목록</td><td class="num">—</td><td>T254</td><td>—</td></tr>
+<tr><td class="k ctr">G</td><td>PI 계열 INI 전수<br><small>35 웨이퍼 · 6 장비</small></td>
+    <td class="num">—<br><small>2장만 결함 포함</small></td><td>TB500 (PI2·PI3·PI4)</td>
+    <td><span class="v no">0 건</span> — 유도식 <strong>입력</strong>을 넓힌 자료</td></tr>
+<tr><td class="k ctr">H</td><td>장비 확인 col·row·x·y<br><small>13차</small></td>
+    <td class="num">35<br><small>MTW 대체분</small></td><td>TB500 (PI2·PI4)</td>
+    <td><strong>장비 화면 5건</strong> — 그중 <strong>4건은 x·y 포함</strong></td></tr>
+</tbody></table></div>
+<p><small>장비 정답 13건 중 <strong>die 내부 x·y 를 담은 것은 자료 B 의 4건뿐</strong>이고,
+그것도 장비 화면이 아니라 장비가 파일명에 적은 값입니다.
+<strong>자료 G 는 장비 정답을 늘리지 않습니다</strong> — 같은 유도식을 훨씬 넓은 표본에 돌려
+흔들리지 않는지 본 것이라, 13건이라는 정답 개수는 그대로입니다.</small></p>
+</section>
+
+<!-- ══ 5 ══ -->
+<section id="s5">
+<h2><span class="n">5</span>검증 결과</h2>
+
+<h3>장비 정답 대조</h3>
+<div class="cert">
+  <div class="row"><div class="lab">KLA → Camtek 기준 변환
+    <small>장비 확인 대응값 · TB500 3건 + T254 4건</small></div><div class="val">7 / 7</div></div>
+  <div class="row"><div class="lab">Camtek INI → 화면 col/row
+    <small>16호기 장비 화면 직접 판독 · T254 2웨이퍼</small></div><div class="val">2 / 2</div></div>
+  <div class="row"><div class="lab">Camtek INI → 장비가 적은 파일명
+    <small>RDL4 18호기 · 같은 사진의 두 이름</small></div><div class="val">4 / 4</div></div>
+  <div class="row"><div class="lab">유도 <code>row_total = 6</code> → 화면 col/row
+    <small>★ 13차 · AOI-25 KMU-PIDS7 — 6 쪽의 첫 장비 정답</small></div><div class="val">1 / 1</div></div>
+  <div class="row"><div class="lab">die 내부 <code>x·y</code> → 화면 값
+    <small>★ 13차 · AOI-17 DYD-PIDS3 — 그전까지 0건이던 축</small></div><div class="val">2 / 2</div></div>
+  <div class="row"><div class="lab"><code>col·row·x·y</code> 네 값 동시 → 화면 값
+    <small>★ 13차 · AOI-22 MTW-PIDS7 — <code>row_total=6</code> 자재에서</small></div><div class="val">2 / 2</div></div>
+  <div class="row tot"><div class="lab"><strong>합계</strong></div><div class="val">18 / 18</div></div>
+</div>
+<div class="note">
+<span class="lbl">13건 → 18건이 뜻하는 것과 뜻하지 않는 것</span>
+<p><strong>뜻하는 것</strong> — 유도식이 <code>row_total</code> 의 두 값(6·7)을
+모두 장비 정답으로 재현하고, <code>x·y</code> 가 소스 간 일치를 넘어 장비와도 맞는다는 것.
+그리고 <strong>die 내부 좌표가 버림</strong>이라는 것 — MTW 의 <code>24491.598 → 24491</code> ·
+<code>24492.531 → 24492</code> 가 반올림과 갈라 줍니다(2 device · 유도/폴백 두 경로).<br>
+<strong>뜻하지 않는 것</strong> — 여섯 사례 전부 경계 여유가 33~35 %라
+<strong>경계 근접 거동은 여전히 표본 0건</strong>입니다. PI2 와 PI4 의 중심은
+<strong>die 한 칸(44,905 µm)과 39 µm 차이</strong>로 떨어져 있어, 격자 대비 위상이 사실상 같습니다.
+“6도 7도 확인됐으니 닫혔다” 로 읽으면 안 됩니다 → <a class="ref" href="#s11">11장 구조 A</a>.</p>
+</div>
+
+<h3>구조적 검산 — 정답 없이도 성립해야 하는 것</h3>
+<div class="tw"><table>
+<thead><tr><th style="width:28%">검산</th><th class="ctr" style="width:16%">표본</th>
+<th class="ctr" style="width:14%">결과</th><th style="width:42%">무엇을 보장하나</th></tr></thead>
+<tbody>
+<tr><td>격자 불변식 <code>Col==floor(X/pitch)</code></td><td class="ctr">418 결함 / 9 폴더</td>
+    <td class="ctr"><span class="v ok">전수 통과</span></td><td>읽은 pitch 가 실제 격자와 일치</td></tr>
+<tr><td>유도 die 범위 == 관측 인덱스 범위</td><td class="ctr">328 결함 / 4 폴더</td>
+    <td class="ctr"><span class="v ok">정확히 일치</span></td><td>중심에서 유도한 원점이 실제와 맞음</td></tr>
+<tr><td>자체모순(음수 col/row) 검사</td><td class="ctr">418 결함 / 9 폴더</td>
+    <td class="ctr"><span class="v ok">0 건</span></td><td>원점이 확실히 틀린 경우는 없음</td></tr>
+<tr><td>KLA <code>SampleTestPlan</code> 범위 대조</td><td class="ctr">5 웨이퍼 × 2축</td>
+    <td class="ctr"><span class="v ok">전수 일치</span></td><td>두 독립 경로가 같은 원점을 지시</td></tr>
+<tr><td>웨이퍼 간 원점 안정성</td><td class="ctr">T254 3장</td>
+    <td class="ctr"><span class="v ok">전부 동일</span></td><td>원점이 웨이퍼별로 흔들리지 않음</td></tr>
+<tr><td>두 중심 소스 교차 확인</td><td class="ctr">RDL4 2장</td>
+    <td class="ctr"><span class="v ok">140 µm 이내</span></td><td>1순위·2순위가 어긋나지 않음</td></tr>
+<tr><td>die 기하 확정 성공률</td><td class="ctr">9 폴더</td>
+    <td class="ctr"><span class="v ok">9 / 9</span></td><td>실제 폴더에서 폴백 없이 결정됨</td></tr>
+<tr><td>중심 유도 성공률 <small>(자료 G)</small></td><td class="ctr">35 웨이퍼 / 11 로트</td>
+    <td class="ctr"><span class="v ok">35 / 35</span></td>
+    <td><code>Wafer2Table.ini</code> 만으로 중심·원점이 전수 결정됨</td></tr>
+<tr><td>로트 안 원점 일관성 <small>(자료 G)</small></td><td class="ctr">UDS-PIDS3 25장</td>
+    <td class="ctr"><span class="v ok">전부 <code>(2, 7)</code></span></td>
+    <td>중심이 97 µm 흔들려도 결과가 같음 — 여유 15,063 µm</td></tr>
+<tr><td>job 간 원점 분리 <small>(자료 G)</small></td><td class="ctr">6 job</td>
+    <td class="ctr"><span class="v ok">PI2 만 6</span></td>
+    <td>제품군 정보 없이도 중심 차이(die 한 칸)를 그대로 반영</td></tr>
+</tbody></table></div>
+<div class="note">
+<span class="lbl">자료 G 의 검산이 <u>아닌</u> 것</span>
+<p style="margin-bottom:0">위 세 줄은 <strong>유도식이 흔들리지 않는다</strong>는 것이지
+<strong>맞다</strong>는 것이 아닙니다 — 자료 G 에는 장비 정답이 0건이고, 결함 좌표가 있는 폴더도
+2장뿐이라 나머지 33장은 격자 불변식으로 교차 확인할 수 없습니다.
+따라서 위의 <strong>장비 정답 13 / 13 은 자료 G 로 늘어나지 않았습니다.</strong>
+자료 G 가 실제로 바꾼 것은 ① 중심 224,380 이 1장 추정 → 25장 통계가 된 것,
+② die 간격 가정이 사라진 것, ③ 폴백이 틀리는 사례가 나온 것
+(<a class="ref" href="#s7">R-4</a>) 셋입니다.</p>
+</div>
+
+<h3>경계까지의 여유 — 원점이 1 튀려면 얼마나 움직여야 하나</h3>
+<div class="tw"><table>
+<thead><tr><th style="width:22%">자재</th><th class="num" style="width:22%">die 크기 (µm)</th>
+<th class="num" style="width:17%">col 여유</th><th class="num" style="width:17%">row 여유</th>
+<th class="ctr" style="width:22%">die 대비</th></tr></thead>
+<tbody>
+<tr><td>RDL4</td><td class="num">37,248 × 44,905</td><td class="num">17,449</td><td class="num">15,337</td>
+    <td class="ctr"><span class="v ok">34 %</span></td></tr>
+<tr><td>UDS-PIDS3</td><td class="num">37,248 × 44,905</td><td class="num">17,450</td><td class="num">15,137</td>
+    <td class="ctr"><span class="v ok">34 %</span></td></tr>
+<tr><td>T254</td><td class="num">14,400 × 31,110</td><td class="num">1,693</td><td class="num">10,346</td>
+    <td class="ctr"><span class="v wa">12 %</span></td></tr>
+</tbody></table></div>
+<p>실측 웨이퍼 간 중심 편차는 <strong>99 µm</strong> — 가장 좁은 T254 의 여유와 비교해도
+<strong>17배</strong> 안전합니다. 다만 이 여유는 자재마다 다르고, 미리 알 수 있는 값이 아닙니다.</p>
+
+<h3>입력값 민감도</h3>
+<div class="tw"><table>
+<thead><tr><th style="width:52%">입력 변화 (RDL4 기준)</th><th class="ctr" style="width:24%">col_origin</th>
+<th class="ctr" style="width:24%">row_total</th></tr></thead>
+<tbody>
+<tr><td>기준 — <code>Diameter 300,000</code></td><td class="ctr">1</td><td class="ctr">6</td></tr>
+<tr><td><code>MeasuredDiameter 299,954.8</code> 사용</td><td class="ctr">1</td><td class="ctr">6</td></tr>
+<tr><td>EBR 1 mm 적용</td><td class="ctr">1</td><td class="ctr">6</td></tr>
+<tr><td>EBR 3 mm 적용</td><td class="ctr">1</td><td class="ctr">6</td></tr>
+<tr><td>EBR 5 mm 적용</td><td class="ctr">1</td><td class="ctr">6</td></tr>
+</tbody></table></div>
+<p><small>이 자재에서는 직경을 5 mm 흔들어도 결과가 안 바뀝니다.
+여유가 좁은 자재에서는 같은 결론이 성립하지 않습니다.</small></p>
+</section>
+
+<!-- ══ 6 ══ -->
+<section id="s6">
+<h2><span class="n">6</span>커버리지 분석</h2>
+<p>각 검증 방법이 <strong>무엇을 보장하고 무엇은 보장하지 못하는지</strong> 정리합니다.
+이 구분이 없으면 “검증했다” 는 말이 실제보다 크게 들립니다.</p>
+
+<div class="tw"><table>
+<thead><tr><th style="width:17%">방법</th><th style="width:25%">보장하는 것</th>
+<th style="width:35%">보장하지 <u>못</u>하는 것</th><th style="width:23%">현재 표본</th></tr></thead>
+<tbody>
+<tr><td class="k">장비 화면 직접 판독</td>
+    <td>그 자재·그 결함의 <strong>절대 정답</strong>. 가장 강한 근거</td>
+    <td>다른 자재로 일반화 불가. 사람 판독이라 오독 가능 — 과거 판독 1건이 실제로 ±1 모호했음.
+        <strong>지금까지 col/row 만 기록됨</strong></td>
+    <td><span class="v wa">T254 2건</span></td></tr>
+<tr><td class="k">장비가 적은 파일명</td>
+    <td>사람 개입 없는 <strong>장비 자신의 계산값</strong>. <strong>x·y 를 담은 유일한 정답</strong></td>
+    <td>이 형태를 쓰는 자재가 드묾. 파일명 규약이 장비 버전에 따라 다를 가능성</td>
+    <td><span class="v wa">RDL4 4건</span></td></tr>
+<tr><td class="k">KLA↔Camtek 대응</td>
+    <td>두 장비 간 <strong>정렬</strong>이 맞는지</td>
+    <td><strong>둘 다 같은 방향으로 틀리면 못 잡음.</strong> 실제로 그 상태가 몇 달 지속됐음</td>
+    <td>7건 / 2 device</td></tr>
+<tr><td class="k">격자 불변식 검산</td>
+    <td>읽은 pitch 가 실제 격자와 일치</td>
+    <td>원점을 전혀 제약하지 않음. 근사 pitch 끼리 구분 못 함 —
+        허용 구간 폭이 <strong>287 µm</strong> 라 <a class="ref" href="#s3">x·y 오차 10 µm 급은 그냥 통과</a></td>
+    <td><span class="v ok">418건 전수</span></td></tr>
+<tr><td class="k">유도 범위 == 관측 범위</td>
+    <td>결함이 가장자리 die 까지 퍼져 있으면 <strong>원점을 강하게 확인</strong></td>
+    <td>결함이 몰려 있으면 아무 말도 못 함 — T254 는 1개 die 뿐이라 무력</td>
+    <td>RDL4 328건</td></tr>
+<tr><td class="k">자체모순(음수) 검사</td>
+    <td>원점이 <strong>너무 큰</strong> 경우를 확실히 검출</td>
+    <td>원점이 <strong>작은</strong> 방향으로 틀린 건 못 잡음 (단방향)</td>
+    <td><span class="v ok">418건 전수</span></td></tr>
+<tr><td class="k">골든 테스트</td>
+    <td>과거 확정 사례의 <strong>회귀 방지</strong></td>
+    <td>그 4사례는 <code>Center_*</code> 가 없어 <strong>폴백 경로만</strong> 검증. 유도 경로는 안 탐</td>
+    <td>4사례 / 3 device</td></tr>
+<tr><td class="k">매칭 성공률</td>
+    <td>사실상 <strong>아무것도</strong> 보장 안 함</td>
+    <td>양쪽이 똑같이 틀리면 상쇄돼 정상으로 보임</td>
+    <td><span class="v no">근거로 쓰지 말 것</span></td></tr>
+</tbody></table></div>
+
+<div class="note red">
+<span class="lbl">공백 ① — 규칙 자체</span>
+<p style="margin-bottom:0"><strong>‘온전히 들어오는 die 부터 0번’ 이라는 규칙</strong>은
+<strong>2개 자재</strong>(T254 · RDL4)에서만 장비 정답으로 확인됐습니다. 나머지 검산은 전부
+<strong>그 규칙을 전제로</strong> 내부 일관성을 볼 뿐이라, 규칙이 다른 자재가 있으면
+<strong>어떤 검산도 알려주지 못합니다.</strong></p>
+</div>
+
+<div class="note">
+<span class="lbl">공백 ② — x·y 절대값 <span style="color:var(--pass)">(13차에 부분 해소)</span></span>
+<p><s>die 내부 x·y 를 장비 화면과 대조한 적이 0건입니다.</s>
+<strong>AOI-17 DYD-PIDS3 의 2건이 <code>col, row, x, y</code> 를 모두 장비 화면과 맞췄습니다</strong>
+(<a class="ref" href="#s4">자료 H</a>). 두 소스가 같은 규칙으로 같이 틀릴 가능성이 이 축에서 닫혔습니다.</p>
+<p style="margin-bottom:0"><strong>다만 남은 것</strong> — 그 네 값의 소수부가 전부 0.5 미만이라
+<strong>버림과 반올림이 같은 숫자</strong>를 냅니다. 우리가 쓰는 버림을 지지하는 관측은
+여전히 골든 1건(<code>43180.809 → 43180</code>)뿐입니다.
+소수부 ≥ 0.5 인 결함 1건이면 닫힙니다.</p>
+</div>
+
+<h3>검증 범위 요약</h3>
+<div class="tw"><table>
+<thead><tr><th style="width:24%">축</th><th style="width:38%">검증된 범위</th><th style="width:38%">미검증</th></tr></thead>
+<tbody>
+<tr><td class="k">device / die 크기</td><td>3종 (37.2×44.9 · 14.4×31.1 · 25.0×31.8)</td><td>die 4 mm 급 소형, 초대형</td></tr>
+<tr><td class="k">die 내부 x·y</td><td>소스 간 상호 대조 + <strong>장비 화면 4건</strong> (13차)<br>
+    <small>버림 확정 — 소수부 ≥0.5 인 구분 사례 <strong>3건</strong>, 2 device</small></td>
+    <td><strong>µm 미만</strong> — 장비 화면이 정수만 표시해 원리적으로 확인 불가</td></tr>
+<tr><td class="k">격자 대비 위상</td><td>여유 33~35 % 만 (6사례)</td>
+    <td><strong>경계 근접 자재 0건</strong> — 여유가 수 % 인 웨이퍼</td></tr>
+<tr><td class="k">웨이퍼 직경</td><td>300 mm 만</td><td>200 mm 등</td></tr>
+<tr><td class="k">EBR</td><td>0 만 (모의로 5 mm 까지 확인)</td><td>실제 <code>EBR≠0</code> 자재</td></tr>
+<tr><td class="k">중심 소스</td><td>3경로 전부 (<code>Center_*</code> · <code>Wafer2Table</code> · 폴백)<br>
+    <small><code>Wafer2Table</code> 경로는 41 웨이퍼 (6 + 35)</small></td>
+    <td>세 경로가 <strong>서로 어긋나는</strong> 사례<br>
+    <strong><code>Wafer2Table.ini</code> 도 없는 스캔</strong> — 실물 미확보</td></tr>
+<tr><td class="k">KLA 방향</td><td>notch DOWN · mirrored NO 만</td><td>UP · mirrored YES</td></tr>
+<tr><td class="k">파일명 스키마</td><td>결함이름만 붙는 형태</td>
+    <td><strong>크기·면적이 붙는 형태</strong> — 실물 미확보</td></tr>
+<tr><td class="k">레시피</td><td>대표 pitch 만 사용</td><td>레시피별 pitch 반영 시 정확도</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- ══ 7 ══ -->
+<section id="s7">
+<h2><span class="n">7</span>리스크</h2>
+
+<div class="tw"><table>
+<thead><tr><th class="ctr" style="width:6%">등급</th><th style="width:8%">ID</th><th style="width:25%">리스크</th>
+<th style="width:32%">발생 조건 · 영향</th><th style="width:29%">현재 방어</th></tr></thead>
+<tbody>
+<tr><td class="ctr"><span class="chip l">해소</span></td><td class="k">R-0</td>
+    <td><s>파일명 스키마 오인으로 x·y 에 크기·면적이 들어감</s><br>
+        <strong>토큰 파싱으로 고쳤습니다</strong> (<a class="ref" href="#schema">3장 ①</a>)</td>
+    <td>고치기 전: 좌표 뒤에 크기·면적 토큰이 붙는 파일명에서 x 오차
+        <strong>30,212 µm</strong>. col/row 는 맞아 조용히 통과했습니다</td>
+    <td><span class="v ok">회귀 가드 16개</span><br>
+        <small><code>TestFilenameSchemaR0</code> + 실물 비-LIVE 전수 거부</small></td></tr>
+<tr><td class="ctr"><span class="chip m">중</span></td><td class="k">R-0b</td>
+    <td>그 스키마의 <strong>토큰 순서</strong>가 문서 근거뿐</td>
+    <td>크기·면적이 x·y <strong>앞</strong>에 오는 배치라면 여전히 틀립니다.
+        실물 1건이 없어 <strong>두 가설을 구분 못 합니다</strong></td>
+    <td>“미구분” 을 코드·문서·테스트에 명시.
+        <strong>옛 코드보다 나쁘지는 않음</strong></td></tr>
+<tr><td class="ctr"><span class="chip m">중</span></td><td class="k">R-1</td>
+    <td>‘완전히 들어오는 die 부터 0번’ 규칙이 다른 자재</td>
+    <td>검증된 device 2종뿐. col·row 통째로 어긋남 (매칭은 정상)</td>
+    <td>새 자재 첫 사용 시 1장 대조</td></tr>
+<tr><td class="ctr"><span class="chip m">중</span></td><td class="k">R-2</td>
+    <td>웨이퍼 끝이 die 경계에 걸린 자재</td>
+    <td>여유가 die 의 수 % 이내면 중심 오차·EBR·직경 선택으로 원점이 1 튐</td>
+    <td><span class="v no">없음</span> — 경계 근접 경고 미구현</td></tr>
+<tr><td class="ctr"><span class="chip m">중</span></td><td class="k">R-3</td>
+    <td>레시피별 pitch 미반영</td>
+    <td>다른 배율 레시피로 찍은 사진의 die 내부 y 가 최대 <strong>11.4 µm</strong> 어긋남</td>
+    <td>장비 규약 미확인이라 의도적으로 보류</td></tr>
+<tr><td class="ctr"><span class="chip m">중</span><br><small>낮 → 중</small></td><td class="k">R-4</td>
+    <td>중심 정보가 아예 없는 스캔 →
+        <strong>폴백이 틀리는 것이 실측으로 확인됨</strong></td>
+    <td><code>Center_*</code> · <code>Wafer2Table</code> 둘 다 없으면
+        <code>ceil(직경/pitch_y)</code> 로 폴백. 자료 G 의 <strong>PI2 2장</strong>에서
+        폴백은 <strong>7</strong>, 실제 계산값은 <strong>6</strong> —
+        <strong>row 가 통째로 1 밀림</strong>. col/row 는 자체모순이 없어 조용히 통과</td>
+    <td>경고 로그만, 화면 표시 없음</td></tr>
+<tr><td class="ctr"><span class="chip l">낮</span></td><td class="k">R-5</td>
+    <td>미검증 입력 조건</td>
+    <td><code>EBR≠0</code> · 300 mm 아닌 웨이퍼 · KLA notch UP · mirrored YES</td>
+    <td>KLA 방향이 다르면 매칭 실패로 드러남</td></tr>
+<tr><td class="ctr"><span class="chip i">정보</span></td><td class="k">R-6</td>
+    <td>장비 간 die 간격 차이</td>
+    <td>T254 에서 Camtek <code>14400.1</code> vs KLA <code>14406.5</code> (0.044 %).
+        die 끝에서 13.6 µm — ‘거의 정확히 일치’ 반경 20 µm 에 근접</td>
+    <td>장비 고유값이라 조정 대상 아님</td></tr>
+</tbody></table></div>
+
+<p><small><strong>등급 기준</strong> —
+<span class="chip h">높</span> 값이 크게 틀리는데 조용히 지나감 ·
+<span class="chip m">중</span> 표기가 틀릴 수 있고 검증 근거가 얇음 ·
+<span class="chip l">낮</span> 이론적 가능성은 있으나 실측 여유가 큼</small></p>
+
+<div class="note red">
+<span class="lbl">R-4 — 심각도는 <u>장비 기준으로</u> 확인됐다. 그래도 등급은 ‘중’ 을 유지한다</span>
+<p>이전에는 폴백 <code>ceil(직경/pitch_y)</code> 가 <em>틀릴 수도 있다</em> 는 이론적
+가능성이었습니다. 지금은 두 단계가 더 올라왔습니다.</p>
+<pre>자료 G (12차)   PI2 2장에서 폴백 7 · 유도 6      → “우리 유도값과 다르다”
+장비 확인(13차)  KMU 00RV9055XYC2 장비가 <b>row 3</b>   → 유도가 맞고 <b>폴백이 틀리다</b>
+                (폴백이면 row 4)                     ← 장비 기준 오류로 확정</pre>
+<p style="margin-bottom:0"><strong>그런데 등급은 올리지 않습니다.</strong> 등급은 심각도 × 발생빈도인데,
+<strong>폴백까지 내려간 폴더는 지금까지 0건</strong>입니다(확보한 41 웨이퍼 전부
+<code>Center_*</code> 또는 <code>Wafer2Table.ini</code> 를 갖고 있었습니다).
+심각도만 보고 ‘높’ 으로 올리면 <strong>그 자체가 이 프로젝트에서 반복된
+성급한 일반화</strong>입니다 — <a class="ref" href="#s11">11장</a> 의 구조 A.
+<strong><code>Wafer2Table.ini</code> 이 없는 스캔이 1건이라도 확인되면 그때 ‘높’ 으로 올립니다.</strong>
+그 전까지는 방어책(<a class="ref" href="#s9">9-2 (c) 추정값 표시</a>)의 우선순위만 올립니다.</p>
+</div>
+</section>
+
+<!-- ══ 8 ══ -->
+<section id="s8">
+<h2><span class="n">8</span>참고 저장소 비교</h2>
+<p>비교 대상은 <code>king-taek/Defect_Tracking</code> — “기준 Layer 의 defect 위치를 기준으로
+다른 Layer 에서 같은 위치의 defect 를 찾아 비교” 하는 뷰어입니다.
+<strong>PI ↔ RDL 처럼 다른 layer 사이에서 같은 결함을 잘 찾는다</strong>는 강점이 있습니다.</p>
+
+<h3>8-1. 좌표 계산식 차이</h3>
+<div class="tw"><table>
+<thead><tr><th style="width:20%">항목</th><th style="width:40%">Defect_Tracking</th>
+<th style="width:40%">이 저장소 (현재)</th></tr></thead>
+<tbody>
+<tr><td class="k">die 간격</td>
+    <td>제품 프로파일 <strong>상수</strong> (<code>camtek_pitch_x = 37170.0</code>)
+        또는 외부 <code>AOIDeviceDB.xlsx</code></td>
+    <td><code>Params_WaferInfo.ini</code> 에서 <strong>읽고 검산</strong></td></tr>
+<tr><td class="k">die 인덱스</td><td>INI <code>Col</code>/<code>Row</code> <strong>필드 그대로</strong></td>
+    <td>좌표에서 유도 <code>floor(X/pitch)</code></td></tr>
+<tr><td class="k">col 기준</td><td>상수 <code>camtek_col_offset = 2</code></td><td>웨이퍼 위치에서 유도</td></tr>
+<tr><td class="k">row 기준</td><td>상수 <code>camtek_row_base = 7</code></td><td>웨이퍼 위치에서 유도</td></tr>
+<tr><td class="k">KLA 원점</td><td><code>SampleTestPlan</code> 최소값 (폴백 <code>Package÷2</code>)</td>
+    <td><code>SampleCenterLocation</code> 기하</td></tr>
+<tr><td class="k">파일명 파싱</td>
+    <td><strong>토큰 단위</strong> — 연속 두 정수 = col/row, 그 뒤 <strong>첫</strong> 두 수치 = x/y,
+        나머지 = 크기·면적</td>
+    <td>정규식 — 끝에서 두 번째·마지막 수치를 x/y 로</td></tr>
+<tr><td class="k">매칭</td><td>±1 die + <strong>layer 간 median offset 보정</strong></td>
+    <td>±1 die + raw 거리 (보정 없음)</td></tr>
+</tbody></table></div>
+
+<h3>8-2. 참고 저장소의 <span style="color:var(--pass)">장점</span></h3>
+<div class="tw"><table>
+<thead><tr><th style="width:22%">항목</th><th style="width:44%">내용</th>
+<th style="width:34%">이 저장소 대비</th></tr></thead>
+<tbody>
+<tr><td class="k">파일명 파서가 견고</td>
+    <td>토큰을 세어 <strong>col/row 뒤 첫 두 수치</strong>를 x/y 로 잡음.
+        뒤에 크기·면적이 더 붙어도 안전</td>
+    <td><span class="v no">이 저장소가 틀림</span> —
+        <a class="ref" href="#schema">R-0</a> 의 직접 해법</td></tr>
+<tr><td class="k">추출 항목이 많음</td>
+    <td>결함 이름 · <code>DXSize</code> · <code>DYSize</code> · <code>DArea</code> 까지 파싱</td>
+    <td>이 저장소는 결함 이름조차 버림 —
+        <strong>엑셀·단일 사진 정보에 바로 쓸 값</strong></td></tr>
+<tr><td class="k">KLA <code>zeroY</code> 산출</td>
+    <td><code>SampleTestPlan</code> 최소값에서 뽑음</td>
+    <td><span class="v ok">그쪽이 맞았음</span> — 이 저장소는 어제까지 상수 <code>4</code> 로 틀렸음.
+        실측 5웨이퍼에서 두 방식이 같은 답</td></tr>
+<tr><td class="k">진단 메시지</td>
+    <td>실패마다 <code>reason</code> 문자열 —
+        “INI 에 이미지 section 없음(section 62개)” 처럼 구체적</td>
+    <td>이 저장소는 조용히 <code>None</code>.
+        <strong>단일 사진 정보에서 특히 아쉬움</strong></td></tr>
+<tr><td class="k">layer 간 정합 보정</td>
+    <td>1:1 매칭 쌍의 <strong>중앙값 이동량</strong>을 추정해 잔차로 판정.
+        표본 ≥3 · MAD ≤ 허용오차 · 크기 상한 세 겹 안전장치</td>
+    <td>이 저장소에 없음. 다만 <strong>이번 초점(x·y 표기)과는 무관</strong></td></tr>
+<tr><td class="k">디바이스 DB 외부화</td>
+    <td>제품별 기하를 엑셀로 관리 — 코드 수정 없이 제품 추가</td>
+    <td>이 저장소는 파일 유도라 DB 자체가 불필요</td></tr>
+</tbody></table></div>
+
+<h3>8-3. 참고 저장소의 <span style="color:var(--danger)">단점</span></h3>
+<p>좌표 <strong>계산</strong> 자체는 이 저장소의 <strong>과거 방식</strong>입니다.
+네 가지 상수가 모두 이 저장소에서 실측으로 반증된 것들입니다.</p>
+<div class="tw"><table>
+<thead><tr><th style="width:24%">단점</th><th style="width:38%">문제</th>
+<th style="width:38%">이 저장소가 확인한 반증</th></tr></thead>
+<tbody>
+<tr><td class="k">pitch 가 제품 상수</td>
+    <td><strong>x·y 에 직접 오차.</strong>
+        <code>37170.0</code> vs 실측 <code>37247.9</code> → index 8 에서 <strong>623 µm</strong></td>
+    <td>die 크기가 다른 자재에서 <code>x = −1,652,266 µm</code> 참사</td></tr>
+<tr><td class="k">INI <code>Col</code>/<code>Row</code> 필드 사용</td>
+    <td>레시피마다 <code>Row</code> 원점이 1 다름 → die 내부 y 가 음수</td>
+    <td>15호기 실측 11건 전수 — die 내부 y <code>−15,349</code></td></tr>
+<tr><td class="k"><code>row_base = 7</code> 상수</td>
+    <td>자재마다 6 / 7 / 10 으로 다름</td>
+    <td>T254 정답 <strong>10</strong> — 상수와 <strong>3 차이</strong></td></tr>
+<tr><td class="k"><code>col_offset = 2</code> 상수</td>
+    <td>RDL4 는 1 이 맞음. 2 를 쓰면 <code>col = −1</code></td>
+    <td>LIVE 8쌍 + 음수 col 모순</td></tr>
+<tr><td class="k">KLA <code>zeroY</code> 폴백</td>
+    <td><code>SampleTestPlan</code> 이 없으면 <code>Package÷2</code> —
+        가장자리 행 미사용 시 어긋남</td>
+    <td>이 저장소는 <code>SampleCenterLocation</code> 기하라 검사 여부와 무관</td></tr>
+</tbody></table></div>
+
+<div class="note blue">
+<span class="lbl">설계 방향이 반대다</span>
+<p style="margin-bottom:0">참고 저장소는 <strong>계산은 단순하게 두고 매칭에서 흡수</strong>하는 설계입니다
+(median offset 보정이 필수인 이유). 이 저장소는 <strong>계산을 정확히 해서 흡수할 것을 없애는</strong>
+설계입니다. <strong>x·y 표기가 목표라면 이 저장소의 방향이 맞습니다</strong> —
+표기에는 상쇄가 없기 때문입니다. 다만 참고 저장소의 <em>파싱 · 진단 · 부가 항목</em>은
+그 설계와 무관하게 더 낫습니다.</p>
+</div>
+
+<h3>8-4. 흡수할 것 — x·y 표기 정확도 기준 우선순위</h3>
+<div class="tw"><table>
+<thead><tr><th class="ctr" style="width:6%">순위</th><th style="width:24%">흡수 항목</th>
+<th style="width:36%">효과</th><th style="width:34%">주의</th></tr></thead>
+<tbody>
+<tr><td class="k ctr">1</td><td><strong>파일명 파서를 토큰 방식으로</strong></td>
+    <td><span class="v no">R-0 제거</span> — 크기·면적을 좌표로 읽는 30,000 µm 오류를 원천 차단</td>
+    <td>현재 실물(RDL4)에서 결과가 안 바뀌는지 회귀 테스트 필수</td></tr>
+<tr><td class="k ctr">2</td><td>결함 이름 · 크기 · 면적 추출</td>
+    <td><strong>엑셀·단일 사진 정보에 항목 추가.</strong>
+        <code>Surface.flt</code> 가 없는 자재에서도 크기·면적을 얻음</td>
+    <td>기존 <code>Surface.flt</code> 값과 단위·정의가 같은지 확인 필요</td></tr>
+<tr><td class="k ctr">3</td><td>실패 사유 문자열</td>
+    <td>단일 사진 정보가 “좌표 없음” 대신 <strong>왜 없는지</strong> 설명</td>
+    <td>사용자 노출 문자열은 <code>i18n/ko.py</code> 로</td></tr>
+<tr><td class="k ctr">4</td><td>KLA 부가 필드<br>
+    <small><code>ClassLookup</code> · <code>XSIZE/YSIZE/DEFECTAREA</code></small></td>
+    <td>KLA 결함도 <strong>분류명과 계측값</strong>을 엑셀에 표기</td>
+    <td>참고 저장소도 아직 안 읽는 항목 — <code>.001</code> 에는 있음</td></tr>
+<tr><td class="k ctr">5</td><td>median offset 보정</td>
+    <td>layer 간 매칭 강건성 + 계통 이동 가시화</td>
+    <td><strong>이번 초점 아님.</strong> 이 저장소에서 큰 이동량은 보정 대상이 아니라 경고 신호</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- ══ 9 ══ -->
+<section id="s9">
+<h2><span class="n">9</span>필요 자료와 개선안</h2>
+
+<h3>9-1. 필요한 자료</h3>
+<div class="tw"><table>
+<thead><tr><th class="ctr" style="width:5%">#</th><th style="width:26%">자료</th>
+<th style="width:30%">무엇이 닫히나</th><th style="width:25%">없으면 대안</th>
+<th class="ctr" style="width:14%">난이도</th></tr></thead>
+<tbody>
+<tr><td class="k ctr">1</td>
+    <td><strong>die 내부 x·y 의 장비 화면 값 1건</strong><br>
+        <small>이미 주신 T254 사진의 x·y 만 추가로</small></td>
+    <td><strong>x·y 절대값 장비 정답 0건</strong> 을 메움 — 지금 초점의 유일한 공백</td>
+    <td>소스 간 상호 대조로만 유지</td><td class="ctr">낮</td></tr>
+<tr><td class="k ctr">2</td>
+    <td>좌표 뒤에 <strong>크기·면적이 붙는 파일명</strong> 실물 1건<br>
+      <small>여전히 필요합니다 — 방어는 넣었지만 순서 확인은 못 했습니다</small></td>
+    <td><a class="ref" href="#s7">R-0b</a> — <strong>토큰 순서</strong>가 맞는지.
+      x·y 오염 자체는 <a class="ref" href="#schema">고쳤습니다</a></td>
+    <td>문서 근거로 방어적 파싱 (완료). “미구분” 을 세 곳에 명시</td><td class="ctr">낮</td></tr>
+<tr><td class="k ctr">3</td>
+    <td>레시피 2·3·4 로 찍은 사진 + 그 <strong>장비 화면 x·y</strong></td>
+    <td><a class="ref" href="#s7">R-3</a> — 장비가 레시피별 pitch 를 쓰는지</td>
+    <td>현행 유지 (대표 pitch)</td><td class="ctr">낮</td></tr>
+<tr><td class="k ctr">4</td>
+    <td><strong>3번째 자재</strong>의 장비 화면 col/row + 그 폴더 INI 2개</td>
+    <td><a class="ref" href="#s7">R-1</a> — 규칙 자체의 일반성</td>
+    <td>새 자재마다 1장씩 대조하며 운영</td><td class="ctr">낮</td></tr>
+<tr><td class="k ctr">5</td><td><code>EBR ≠ 0</code> 자재 · 300 mm 아닌 웨이퍼</td>
+    <td><a class="ref" href="#s7">R-5</a></td><td>EBR 5 mm 까지 결과 불변 확인됨</td><td class="ctr">중</td></tr>
+<tr><td class="k ctr">6</td><td>KLA notch UP 또는 mirrored YES 인 <code>.001</code></td>
+    <td><a class="ref" href="#s7">R-5</a> — 축 방향 일반성</td>
+    <td>발생 시 매칭 실패로 드러남</td><td class="ctr">낮</td></tr>
+<tr><td class="k ctr">7<br><small>신규</small></td>
+    <td><code>Wafer2Table.ini</code> 이 <strong>없는</strong> 스캔 폴더 1건<br>
+        <small>있는지 없는지 확인만이라도</small></td>
+    <td><a class="ref" href="#s7">R-4</a> — 폴백까지 내려가는 경우가 <strong>실제로 있는지</strong>.
+        폴백이 틀리는 것은 이미 확인됨(PI2 2장)</td>
+    <td>폴백 사용 시 <code>row 7 (추정)</code> 표시로 방어<br><small>9-2 (c)</small></td>
+    <td class="ctr">낮</td></tr>
+</tbody></table></div>
+
+<h3 id="picenter">9-1-A. PI 계열 웨이퍼 중심 — <span style="color:var(--pass)">4건 중 3건 종결</span></h3>
+<p>“PI 레시피의 중심이 그 지점” 이라는 판단이 <strong>웨이퍼 한 장의 측정값</strong>에 기대고 있어
+아래 네 가지를 요청했었습니다. <strong><a class="ref" href="#s4">자료 G</a> 로 A · B · D 가 닫혔습니다.</strong></p>
+
+<div class="tw"><table>
+<thead><tr><th class="ctr" style="width:6%">순위</th><th style="width:24%">자료</th>
+<th class="ctr" style="width:9%">상태</th>
+<th style="width:34%">무엇이 확실해졌나 / 확실해지나</th><th style="width:27%">근거</th></tr></thead>
+<tbody>
+<tr><td class="k ctr">A</td>
+    <td><code>UDS-PIDS3\35115E27EWD7\</code> 의<br><strong><code>Params_WaferInfo.ini</code></strong></td>
+    <td class="ctr"><span class="v ok">종결</span></td>
+    <td>· <strong>die 간격 가정 소거</strong> — 그 웨이퍼 자신의
+        <code>DieStep = 37247.7 × 44905.4</code>, 빌려 온 값과 소수점까지 동일<br>
+        · <code>Center_Y</code> 는 <code>0.000000</code> 이라 <strong>224,380 과의 직접 대조는 못 함</strong></td>
+    <td>자료 G — 요청한 그 파일이 그대로 들어옴</td></tr>
+<tr><td class="k ctr">B</td>
+    <td>PI 로트 웨이퍼 <strong>2~3장</strong>의<br><code>Wafer2Table.ini</code></td>
+    <td class="ctr"><span class="v ok">종결</span><br><small>초과 달성</small></td>
+    <td>· 요청은 2~3장, 들어온 것은 같은 로트 <strong>25장</strong><br>
+        · 중심 편차 <strong>X 78 µm / Y 97 µm</strong> —
+          경계 여유 15,063 µm 의 <strong>1/155</strong></td>
+    <td>자료 G — T254 에서 3장으로 했던 것과 같은 방법</td></tr>
+<tr><td class="k ctr">C</td>
+    <td>PI 웨이퍼 결함 1장 +<br><strong>장비 화면 col/row</strong></td>
+    <td class="ctr"><span class="v wa">미해결</span></td>
+    <td>· <strong>중심을 아예 안 거치고</strong> row 기준을 직접 확인<br>
+        · 자료 G 에는 <strong>장비 정답이 0건</strong>이라 이건 그대로 남음</td>
+    <td>중심은 기준을 구하는 <em>수단</em>일 뿐 — 기준 자체를 장비가 말해 주면 중심 논쟁이 불필요</td></tr>
+<tr><td class="k ctr">D</td>
+    <td><code>Center_*</code> 가 <strong>0 이 아닌</strong> PI 로트의<br><code>Params_WaferInfo.ini</code></td>
+    <td class="ctr"><span class="v ok">종결</span><br><small>결과는 음성</small></td>
+    <td>· 34장을 전부 확인 — <strong>0 이 아닌 것을 한 장도 발견하지 못했습니다</strong><br>
+        · 즉 “찾으면 대조한다” 가 아니라 <strong>“이 표본에는 없다” 로 닫힙니다.</strong>
+          더 찾아 달라고 요청할 근거가 없습니다</td>
+    <td>자료 G 전수 확인</td></tr>
+</tbody></table></div>
+
+<div class="note">
+<span class="lbl">D 의 결과를 어떻게 읽어야 하나</span>
+<p style="margin-bottom:0">34장 전부 <code>Center_X = Center_Y = 0.000000</code> 이었습니다.
+이건 <strong>“PI 계열에는 기록되지 않는다” 는 뜻이 아닙니다</strong> —
+<strong>이 35장에서 기록된 것을 발견하지 못했다</strong>는 표본 사실일 뿐이고,
+우연히 이 표본에만 없었을 수 있습니다. 그래서 코드에는 이 관측을 넣지 않습니다:
+<code>Center_*</code> 가 0 이 아니면 <strong>언제나 그것을 1순위로</strong> 쓰고,
+0 일 때만 <code>Wafer2Table.ini</code> 로 내려갑니다.
+언젠가 기록된 PI 웨이퍼가 나오면 앱은 자동으로 그 값을 쓰고,
+그때 비로소 224,380 과의 직접 대조가 가능해집니다.</p>
+</div>
+
+<div class="note blue">
+<span class="lbl">다만 — 이것이 결론을 바꾸지는 않습니다</span>
+<p style="margin-bottom:0">A · B · D 가 닫히기 전에도 <strong>“PI4 계열 row 기준 = 7” 은 장비 근거 3건으로 성립</strong>했습니다
+(<a class="ref" href="#pi7">3장 ③</a>). 중심값은 그 결론의 <em>설명</em>이지 <em>근거</em>가 아닙니다.
+<strong>남은 C 는 그 3건과 같은 종류(장비 정답)</strong>라, 있으면 근거가 하나 더 늘지만
+없다고 해서 지금 결론이 흔들리지는 않습니다.
+지금 초점인 x·y 정확도 기준으로 실제로 값이 컸던 것은 <strong>A</strong> 였고
+— die 간격이 x·y 에 직접 들어가기 때문입니다 — 그건 이미 닫혔습니다.</p>
+</div>
+
+<div class="note blue">
+<span class="lbl">가장 값싼 한 가지</span>
+<p style="margin-bottom:0"><strong>이미 주신 T254 사진 2장의 die 내부 x·y 를 장비 화면에서 읽어 주시면
+1번이 바로 닫힙니다.</strong> col/row 는 이미 받았고(<code>0,5</code> / <code>3,7</code>),
+같은 화면에 x·y 도 함께 나올 가능성이 큽니다. 지금 초점에서 효율이 가장 높은 자료입니다.</p>
+</div>
+
+<h3>9-2. 자료 없이 지금 넣을 수 있는 것</h3>
+<p>모두 <strong>추측이 아니라 모순 · 근접 감지</strong>이고,
+지시대로 <strong>이번에는 구현하지 않았습니다.</strong></p>
+<div class="tw"><table>
+<thead><tr><th class="ctr" style="width:6%"></th><th style="width:24%">기능</th>
+<th style="width:42%">동작</th><th style="width:28%">잡는 리스크</th></tr></thead>
+<tbody>
+<tr><td class="k ctr">a</td><td>파일명 토큰 파싱<br>
+    <strong style="color:var(--pass)">→ 완료 (2026-08-05)</strong></td>
+    <td>col/row 뒤 <strong>첫</strong> 두 수치를 x/y 로. 남는 수치는 크기·면적으로 분리
+      (<code>LiveName.extra</code>). <small>엑셀 열 추가는 별개 작업 — 값은 준비돼 있습니다</small></td>
+    <td><span class="chip l">R-0 해소</span></td></tr>
+<tr><td class="k ctr">b</td><td>경계 여유 경고</td>
+    <td>웨이퍼 끝이 die 경계에서 5 % 이내면 “원점이 흔들릴 수 있음” 안내</td>
+    <td><span class="chip m">R-2</span></td></tr>
+<tr><td class="k ctr">c</td><td>추정값 표시</td>
+    <td>중심 정보가 없어 폴백을 탄 경우 <code>row 7 (추정)</code> 처럼 명시</td>
+    <td><span class="chip m">R-4</span></td></tr>
+<tr><td class="k ctr">d</td><td>커버리지 신호</td>
+    <td>결함이 넓게 퍼졌는데 <code>col</code>/<code>row</code> 가 0 에 한 번도 안 닿으면 안내</td>
+    <td><span class="chip m">R-1</span> · <span class="chip m">R-4</span> 조기 검출</td></tr>
+</tbody></table></div>
+<p><small><strong>(d) 의 실증</strong> — 현재 <code>dev/좌표 확인</code> 폴더가 이 신호에 걸립니다
+(row 가 1‥6 으로 0 에 안 닿음). 그 폴더는 실제로 원점이 1 큰 상태이므로 신호가 옳게 작동합니다.
+다만 결함이 적은 웨이퍼에서는 헛경고가 나므로 충분히 퍼진 경우에만 떠야 합니다.</small></p>
+
+<h3>9-3. 권장 순서</h3>
+<div class="tw"><table>
+<thead><tr><th class="ctr" style="width:8%">순서</th><th style="width:34%">할 일</th>
+<th style="width:22%">필요 자료</th><th style="width:36%">효과</th></tr></thead>
+<tbody>
+<tr><td class="k ctr">1</td><td><s>파일명 토큰 파싱</s> <strong style="color:var(--pass)">완료</strong><br>
+    <small>남은 것: 엑셀에 크기·면적 열 추가(별개)</small></td><td><span class="v ok">불필요</span></td>
+    <td><strong>x·y 최대 오류(R-0) 차단됨</strong></td></tr>
+<tr><td class="k ctr">2</td><td>T254 사진의 장비 화면 x·y 대조</td><td>화면 판독 2건</td>
+    <td>x·y 절대값 검증 공백을 메움</td></tr>
+<tr><td class="k ctr">3</td><td>자동 방어 <strong>(c)</strong> → (b)(d)<br>
+    <small>(c) 를 앞으로 — <a class="ref" href="#s7">R-4</a> 가 실측으로 확인돼 등급이 올랐음</small></td>
+    <td><span class="v ok">불필요</span></td>
+    <td>새 자재에서 조용히 틀리는 것을 차단</td></tr>
+<tr><td class="k ctr">4</td><td>레시피별 pitch 반영 여부 결정</td><td>자료 3</td>
+    <td>die 내부 y 최대 11.4 µm 개선</td></tr>
+<tr><td class="k ctr">5</td><td>median offset 보정</td><td><span class="v ok">불필요</span></td>
+    <td>layer 간 매칭 강건성 (초점 밖)</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- ══ 11 ══ -->
+<section id="s11">
+<h2><span class="n">11</span>판단 오류 회고</h2>
+<p>좌표 조사는 13차까지 왔고, 차수마다 “확정” 이라 적고 다음 차수에서 뒤집힌 일이
+반복됐습니다. 이 장은 <strong>개별 오류의 계산 원인이 아니라, 그 근거로 충분하다고
+판단한 과정</strong>을 다룹니다. 전문은 <code>docs/좌표_판단오류_회고.md</code> 입니다.</p>
+
+<div class="note red">
+<span class="lbl">한 문장으로</span>
+<p style="margin-bottom:0">문제는 <em>“근거가 부족한데 결정했다”</em> 가 아닙니다 — 결정은 늘 해야 합니다.
+문제는 <strong>결정을 내린 뒤 기록에서 “그것이 결정이었다” 는 사실이 사라진 것</strong>입니다.
+부족한 근거로 채택한 값이 표의 한 칸·테스트의 한 줄·코드의 상수가 되는 순간
+그것은 관측과 구별되지 않고, 다음 세션이 그 위에 결론을 쌓습니다.</p>
+</div>
+
+<h3>11-1. 반복된 네 가지 구조</h3>
+<div class="tw"><table>
+<thead><tr><th style="width:6%">구조</th><th style="width:28%">무엇</th>
+<th style="width:38%">대표 사례</th><th style="width:28%">놓친 질문</th></tr></thead>
+<tbody>
+<tr><td class="k ctr">A</td><td>표본이 <strong>변화시키지 않은</strong> 변수를 “무관하다” 로 읽음</td>
+    <td><code>col = x_index − 2</code> 를 “device 불변” 으로 확정 — 3 device 에서 전부 2 였지만
+        <strong>웨이퍼 stage 위치는 안 변했다</strong></td>
+    <td>“이 표본이 <strong>무엇을</strong> 변화시켰나?”</td></tr>
+<tr><td class="k ctr">B</td><td>모르는 것을 <strong>아는 것처럼 기록</strong></td>
+    <td>장비 판독 1건에 없던 <code>X·Y</code> 를 결론에서 역산해 골든 테스트에 넣음 —
+        그 테스트는 결론을 <em>검증</em>하지 않고 <em>보존</em>한다</td>
+    <td>“이 숫자는 관측인가 유도인가 합성인가?”</td></tr>
+<tr><td class="k ctr">C</td><td>검증 기준이 <strong>검증 대상에서</strong> 나옴 (순환)</td>
+    <td>Camtek row 를 KLA 에 맞췄는데 KLA 원점도 틀린 상태였다</td>
+    <td>“둘이 어긋날 때 정답은 <strong>어디서</strong> 오나?”</td></tr>
+<tr><td class="k ctr">D</td><td>“내 방법으로 안 된다” 를 <strong>“원리적으로 안 된다”</strong> 로</td>
+    <td><code>SampleTestPlan</code> 으로 안 되자 “유도 불가 → 상수” —
+        8차에 <code>SampleCenterLocation</code> 으로 유도됐다</td>
+    <td>“어떤 <strong>방법으로</strong> 안 되는 건가?”</td></tr>
+</tbody></table></div>
+<p><small>회고 문서는 13건을 이 네 구조로 분류하고, 각 건이 어느 규칙에 걸리는지 역테스트합니다.</small></p>
+
+<h3>11-2. 표면 아래 — 왜 그렇게 판단했나</h3>
+<div class="tw"><table class="kv"><tbody>
+<tr><td>‘설명되면 맞다’</td><td>가설을 <strong>하나만</strong> 세우고 그것이 관측을 설명하는지만 봤습니다.
+    <code>ceil(D/py)</code> 가 4사례를 전부 설명했지만 경쟁 가설도 똑같이 설명했습니다 —
+    <strong>표본이 둘을 구분하지 못한다</strong>는 사실을 볼 기회가 없었습니다</td></tr>
+<tr><td>수를 강도로 환산</td><td>“63건 전수 일치” 를 반복해 썼습니다. 63건이 한 웨이퍼에서 나왔으면
+    웨이퍼 수준 가설에 대해 <strong>N = 1</strong> 입니다</td></tr>
+<tr><td>자료와 분석을 섞음</td><td>“장비 판독 1건” 이라고만 적고 <strong>그 판독이 무엇을 안 담는지</strong>
+    (<code>X·Y</code> 가 없다)를 안 적었습니다. 그래서 빈칸을 내가 채웠습니다</td></tr>
+<tr><td>유효기간을 안 적음</td><td>“실측 증거가 생겼다” 고 확신에 찬 언어로 적으면서
+    <strong>“무엇이 오면 이게 무너지나” 를 같이 안 적었습니다</strong></td></tr>
+<tr><td style="color:var(--danger)">진짜 동인</td>
+    <td><strong>‘결론을 내는 것’ 을 진전으로 취급했습니다.</strong> “자료가 더 필요합니다” 는
+    사용자에게 일을 넘기는 것이라 부담스럽고, “이렇게 결론냈습니다” 는 진전처럼 보입니다.
+    이 프로젝트에서 그 교환은 손해입니다 — 틀린 결론의 비용은 “다시 하면 됨” 이 아니라
+    <strong>조용히 틀린 좌표가 엑셀에 찍히는 것</strong>이고,
+    사용자가 장비 화면을 직접 볼 때까지 아무도 모릅니다</td></tr>
+</tbody></table></div>
+
+<h3>11-3. 같은 잣대를 <u>지금</u> 코드에 — 감사 결과</h3>
+<div class="tw"><table>
+<thead><tr><th class="ctr" style="width:7%"></th><th style="width:30%">항목</th>
+<th style="width:63%">표본이 실제로 무엇을 말하나</th></tr></thead>
+<tbody>
+<tr><td class="ctr"><span class="v ok">검증</span></td><td>‘완전히 들어오는 die 부터 0번’</td>
+    <td>경쟁 가설(걸치기만 해도 셈)을 6사례에 돌리면 <strong>전 사례에서 1씩 어긋납니다</strong> —
+        표본이 두 가설을 <strong>구분합니다</strong></td></tr>
+<tr><td class="ctr"><span class="v ok">검증</span></td><td>Camtek Y 축 아래 방향</td>
+    <td>DYD 의 <code>y_index=7 → row 0</code> 결함은 <code>row_total&lt;7</code> 이면 음수가 됩니다</td></tr>
+<tr><td class="ctr"><span class="v wa">미구분</span></td><td><code>Diameter</code> vs <code>MeasuredDiameter</code></td>
+    <td>RDL4 만 둘 다 있는데 <strong>둘 다 같은 답</strong>(여유가 커서 45 µm 차이가 안 보임)</td></tr>
+<tr><td class="ctr"><span class="v wa">미구분</span></td><td>버림 vs 반올림</td>
+    <td>13차 4개 값의 소수부가 전부 &lt;0.5 — 골든 1건이 유일한 구분 사례</td></tr>
+<tr><td class="ctr"><span class="v no">표본 0</span></td><td><code>EBR≠0</code> · 300 mm 아닌 웨이퍼 · notch UP · mirrored</td>
+    <td>변화 0 — 이 변수들에 대해 현재 코드는 <strong>아무 근거가 없습니다</strong></td></tr>
+<tr><td class="ctr"><span class="v no">표본 0</span></td><td><strong>경계 근접 자재</strong></td>
+    <td>6사례 전부 여유 33~35 %. PI2·PI4 중심은 die 한 칸과 <strong>39 µm</strong> 차이라
+        격자 대비 위상이 사실상 같습니다 — 정수부만 다릅니다</td></tr>
+</tbody></table></div>
+
+<div class="note red">
+<span class="lbl">가장 무거운 발견 — 골든 테스트가 주경로를 안 태운다</span>
+<p><code>CLAUDE.md</code> 는 골든 4사례를 <strong>“좌표 계산을 고칠 때의 절대 기준”</strong> 으로
+못 박고 있습니다. 그런데 그 픽스처는 <code>Params_WaferInfo.ini</code> 를 합성하면서
+<strong><code>Center_X/Y</code> 를 안 적습니다.</strong> 중심이 없으면 <strong>폴백 경로</strong>로 갑니다.</p>
+<pre>골든 사례        y_index   정답 row   폴백 ceil(D/py)   폴백 row
+dev-A               9         1            10           1   ✓
+BNN-PIDS3 #1        5         2             7           2   ✓
+BNN-PIDS3 #2        7         0             7           0   ✓
+dev-B               5         2             7           2   ✓
+
+→ 4사례 전부 <b>폴백이 우연히 맞는 자재</b>. 앱이 실제로 타는 유도 경로는 한 번도 안 돈다.
+  PI2 자재였다면 폴백 7 vs 장비 6 으로 어긋난다(실측 00RV9055XYC2).</pre>
+<p style="margin-bottom:0">구조 B + C 가 프로젝트의 ‘절대 기준’ 안에 그대로 남아 있었던 것입니다.
+<strong>조치</strong> — 기존 골든은 폴백 경로 가드로 명시하고
+(<code>test_golden_actually_runs_the_fallback_path</code> 로 그 사실 자체를 단언),
+중심이 실재하는 웨이퍼 6사례로 <strong><code>TestDerivedPathGolden</code></strong> 을 새로 만들어
+주경로를 태웁니다. 경쟁 가설 배제·폴백 오류·경계 미탐사까지 함께 못 박았습니다.</p>
+</div>
+
+<h3>11-4. 앞으로 — 규칙과 그 검사</h3>
+<div class="tw"><table>
+<thead><tr><th class="ctr" style="width:6%"></th><th style="width:30%">규칙</th>
+<th style="width:36%">무엇을 요구하나</th><th class="ctr" style="width:12%">역테스트</th>
+<th style="width:16%">비용</th></tr></thead>
+<tbody>
+<tr><td class="k ctr">R1</td><td>가설 2개 + <strong>구분표</strong></td>
+    <td>경쟁 가설이 <strong>다른 답을 내는지</strong> 계산. 구분 못 해도 채택은 가능 —
+        단 “미구분” 을 코드·문서·요청목록 세 곳에 적는다</td>
+    <td class="ctr"><strong>7 / 14</strong></td><td>결정당 산술 10줄</td></tr>
+<tr><td class="k ctr">R2</td><td>N 을 <strong>가설의 변수 위에서</strong> 센다</td>
+    <td>“63건” 이 아니라 “웨이퍼 1장 / 63결함”</td>
+    <td class="ctr">6 / 14</td><td>0</td></tr>
+<tr><td class="k ctr">R3</td><td>모든 수치에 <strong>출처 등급</strong></td>
+    <td><code>관측</code>·<code>파일</code>·<code>유도</code>·<code>가정</code>·<code>합성</code></td>
+    <td class="ctr"><strong>7 / 14</strong></td><td>문서가 길어짐</td></tr>
+<tr><td class="k ctr">R4</td><td><strong>합성값은 골든에 안 넣는다</strong></td>
+    <td>골든은 관측값만. 그리고 <strong>앱이 실제로 타는 경로</strong>를 태워야 한다</td>
+    <td class="ctr">2 / 14</td><td>일회성 리팩터(완료)</td></tr>
+<tr><td class="k ctr">R5</td><td>결론마다 <strong>반증 조건</strong></td>
+    <td>“X 를 채택” 옆에 “Y 가 오면 무너진다”</td>
+    <td class="ctr">2 / 14</td><td>결론당 한 줄</td></tr>
+<tr><td class="k ctr">R6</td><td>“<strong>이 방법으로는</strong> 안 된다”</td>
+    <td>“유도 불가” 대신 “<code>SampleTestPlan</code> 으로는 유도 불가”</td>
+    <td class="ctr">2 / 14</td><td>0</td></tr>
+<tr><td class="k ctr">R7</td><td>두 소스면 <strong>일치를 단언</strong></td>
+    <td><code>normalize(5)==4</code> 가 아니라 <code>ini(d)==live(d)</code></td>
+    <td class="ctr">2 / 14</td><td>소스쌍당 테스트 1개</td></tr>
+</tbody></table></div>
+<p><small><strong>역테스트</strong> = 과거 오류 13건 + 이번 골든 감사 1건 중 그 규칙이 잡았을 건수.
+<strong>14건 모두 최소 하나에 걸립니다.</strong> R1(논리)과 R3(기록)이 가장 넓고 서로 다른 종류를 잡습니다.</small></p>
+
+<div class="note blue">
+<span class="lbl">이 규칙들이 옳은 설계인지 — 스스로 검사</span>
+<p>규칙이 합리적이려면 ① 비용이 감당 가능하고 ② <strong>옳은 결정을 막지 않아야</strong> 합니다.
+핵심 설계는 <strong>R1 이 “근거가 부족하면 멈춰라” 가 아니라는 점</strong>입니다.
+그건 실행 불가능하고(자료는 늘 부족합니다) 이 프로젝트의 진행을 막습니다.
+R1 이 요구하는 것은 <strong>“부족하다는 사실을 기록에서 지우지 마라”</strong> 뿐입니다.</p>
+<p style="margin-bottom:0"><strong>이 회고 자체에도 R5 를 적용합니다</strong> —
+규칙을 지켰는데도 같은 구조의 오류가 또 나오면, 원인은 기록 방식이 아니라
+다른 데 있다는 뜻입니다. 그때 이 장을 다시 엽니다.</p>
+</div>
+
+<div class="note">
+<span class="lbl">방금 이 규칙이 실제로 작동한 사례 — R-4 등급</span>
+<p style="margin-bottom:0">13차 자료를 받고 <strong>“폴백이 장비 기준으로 틀렸으니 R-4 를 높으로 올리자”</strong> 고
+계획했습니다. R1 을 적용하니 틀린 판단이었습니다 — 등급은 심각도 × <strong>빈도</strong>인데,
+폴백까지 내려간 폴더는 <strong>지금까지 0건</strong>입니다(41 웨이퍼 전부 중심 소스를 갖고 있었습니다).
+심각도만 보고 올리는 것은 <strong>구조 A 그 자체</strong>였습니다.
+그래서 <a class="ref" href="#s7">R-4 는 ‘중’ 을 유지</a>하고, 반증 조건을 적었습니다 —
+<code>Wafer2Table.ini</code> 없는 스캔이 1건이라도 나오면 그때 올립니다.</p>
+</div>
+</section>
+
+<!-- ══ 10 ══ -->
+<section id="s10">
+<h2><span class="n">10</span>부록</h2>
+
+<h3>용어</h3>
+<div class="tw"><table class="kv"><tbody>
+<tr><td><code>x_index</code><br><code>y_index</code></td>
+    <td>절대 좌표를 die 간격으로 나눈 몫. <strong>장비 좌표계에 고정된 격자 칸 번호</strong></td></tr>
+<tr><td><code>col_origin</code></td><td>웨이퍼에 <strong>온전히 들어오는 첫 열</strong>의 격자 번호.
+    <code>col = x_index − col_origin</code></td></tr>
+<tr><td><code>row_total</code></td><td>웨이퍼에 <strong>온전히 들어오는 마지막 행</strong>의 격자 번호.
+    <code>row = row_total − y_index</code></td></tr>
+<tr><td><code>zero_x</code><br><code>zero_y</code></td><td>KLA 쪽 같은 개념.
+    <code>col = XINDEX + zero_x</code></td></tr>
+<tr><td>die 내부 좌표</td><td>die 모서리 기준 위치(µm).
+    <strong>엑셀·단일 사진 정보에 찍히는 값</strong></td></tr>
+<tr><td>골든 테스트</td><td>과거 확정된 장비 정답 4사례를 회귀 방지용으로 고정해 둔 테스트</td></tr>
+</tbody></table></div>
+
+<h3>코드 · 자료 위치</h3>
+<div class="tw"><table>
+<thead><tr><th style="width:42%">경로</th><th style="width:58%">내용</th></tr></thead>
+<tbody>
+<tr><td><code>app/coords/wafer_geometry.py</code></td><td>die 격자 기하 — pitch · 중심 · 원점의 우선순위 사슬</td></tr>
+<tr><td><code>app/coords/camtek_ini.py</code></td><td>Camtek INI → 좌표 변환</td></tr>
+<tr><td><code>app/coords/camtek_live.py</code></td><td>파일명에 박힌 col/row 파싱 —
+    <span class="v no">R-0 위치</span></td></tr>
+<tr><td><code>app/coords/kla_info.py</code></td><td>KLA <code>.001</code> → 좌표 변환</td></tr>
+<tr><td><code>app/coords/single_info.py</code></td><td>단일 사진 정보 — 엑셀과 같은 항목 구성</td></tr>
+<tr><td><code>app/workers/coord_matcher.py</code></td><td>좌표 기반 매칭 (<code>±1</code> die 게이트)</td></tr>
+<tr><td><code>dev/tests/test_wafer_geometry.py</code></td><td>기하 회귀 가드 — 골든 · 실물 · 폴백 · 거부</td></tr>
+<tr><td><code>dev/tests/test_coords.py</code></td><td>변환 회귀 가드 + 실측 쌍 정렬</td></tr>
+<tr><td><code>docs/디바이스_하드코딩_조사.md</code></td><td>전체 조사 기록 (§1 ~ §6-M)</td></tr>
+<tr><td><code>docs/규칙_배경.md</code></td><td>각 규칙이 생긴 사고 기록</td></tr>
+<tr><td><code>docs/좌표_계산_검증_보고서.pdf</code></td><td>PDF 판 (16쪽) — 이 문서의 이전 판</td></tr>
+<tr><td><code>docs/RDL4 LOT files(26년 05월, FDV)/</code></td><td><a class="ref" href="#s4">자료 B</a> 원본</td></tr>
+<tr><td><code>docs/Camtek 좌표 예시(T254)/</code></td><td><a class="ref" href="#s4">자료 C · E · F</a> 원본</td></tr>
+<tr><td><code>docs/KLA 좌표 예시(TB500, T254)/</code></td><td><a class="ref" href="#s4">자료 D</a> 원본</td></tr>
+<tr><td><code>docs/PI 계열 INI 모음(35웨이퍼)/</code></td><td><a class="ref" href="#s4">자료 G</a> 원본</td></tr>
+</tbody></table></div>
+
+<h3>변경 연표 — 좌표 관련</h3>
+<div class="tw"><table>
+<thead><tr><th class="num" style="width:14%">날짜</th><th style="width:44%">변경</th><th style="width:42%">계기</th></tr></thead>
+<tbody>
+<tr><td class="num">2026-07-14</td><td>Camtek row +1 오표기 수정</td><td>사용자 신고</td></tr>
+<tr><td class="num">2026-07-31</td><td>die 격자 기하를 폴더에서 읽어 TB500 하드코딩 제거</td>
+    <td>다른 device 에서 좌표 전부 틀림</td></tr>
+<tr><td class="num">2026-07-31</td><td>row 변환 교정 + pitch 검산 도입</td><td>장비 화면 판독</td></tr>
+<tr><td class="num">2026-07-31</td><td>die 인덱스를 좌표에서 유도 — INI 필드 사용 중단</td>
+    <td>레시피마다 <code>Row</code> 원점이 다름</td></tr>
+<tr><td class="num">2026-08-01</td><td>파일명 row 의 <code>−1</code> 정규화 제거</td><td>같은 결함이 매치 실패</td></tr>
+<tr><td class="num">2026-08-01</td><td><code>col_origin</code> 을 <code>Center_X</code> 에서 유도</td>
+    <td>상수 2 가 음수 col 을 냄</td></tr>
+<tr><td class="num">2026-08-04</td><td><code>row_total</code> 을 <code>Center_Y</code> 에서 유도</td>
+    <td>사용자 신고 — 5,5 vs 5,4</td></tr>
+<tr><td class="num">2026-08-04</td><td>KLA 원점을 <code>SampleCenterLocation</code> 에서 유도</td>
+    <td>상수 4 가 TB500 에서 틀림</td></tr>
+<tr><td class="num">2026-08-05</td><td><code>Wafer2Table.ini</code> 를 중심 2순위 소스로 추가</td>
+    <td><code>Center_*</code> 미기록 스캔 대응</td></tr>
+<tr><td class="num">2026-08-05</td><td><strong>이 문서 — 코드 변경 없음</strong></td>
+    <td>x·y 표기 정확도 관점 재정리 + 참고 저장소 비교</td></tr>
+<tr><td class="num">2026-08-05</td><td><strong>R-0 수정</strong> — LIVE 파일명을
+    정규식 대신 <strong>토큰</strong>으로 해석<br>
+    <small>x·y = col/row 뒤 <b>첫</b> 두 수치. 실물 14건 결과 불변</small></td>
+    <td>크기·면적이 x·y 를 오염시키던 스키마</td></tr>
+<tr><td class="num">2026-08-05</td><td><a class="ref" href="#s4">자료 G</a> 반영 —
+    <strong>코드 변경 없음</strong><br>
+    <small>9-1-A A·B·D 종결 · <a class="ref" href="#s7">R-4</a> 낮→중</small></td>
+    <td>PI 계열 INI 전수 35장 수령</td></tr>
+</tbody></table></div>
+
+<footer class="colophon">
+<p>이 보고서는 저장소의 실측 자료와 테스트를 근거로 작성됐습니다. 모든 수치는 재현 가능하며,
+근거가 되는 원본 파일은 <code>docs/</code> 아래에 함께 보관돼 있습니다.
+검증 상태가 바뀌면 <code>docs/디바이스_하드코딩_조사.md</code> 와 이 문서를 함께 갱신하십시오.</p>
+<p style="margin-bottom:0">서체 · 색은 앱의 제도지 테마(<code>app/ui/theme.py</code> 라이트 프로파일)를 그대로 씁니다.
+한글 서체는 저장소 동봉 <code>NanumSquare</code> 를 상대경로로 참조하므로
+<code>docs/</code> 안에서 열어야 정상 표시됩니다.</p>
+</footer>
+</section>
+
+</main>
+</div>
+</div>
+
+<script>
+(function(){
+  var links = Array.prototype.slice.call(document.querySelectorAll('nav.index a'));
+  var map = {}, ids = [];
+  links.forEach(function(a){
+    var el = document.querySelector(a.getAttribute('href'));
+    if (el) { map[el.id] = a; ids.push(el.id); }
+  });
+  if (!ids.length || !('IntersectionObserver' in window)) return;
+  var vis = {};
+  var io = new IntersectionObserver(function(entries){
+    entries.forEach(function(e){ vis[e.target.id] = e.isIntersecting ? e.intersectionRatio : 0; });
+    var best = null, bv = 0;
+    ids.forEach(function(id){ if (vis[id] > bv) { bv = vis[id]; best = id; } });
+    links.forEach(function(a){ a.removeAttribute('aria-current'); });
+    if (best) map[best].setAttribute('aria-current','true');
+  }, { rootMargin: '-8% 0px -70% 0px', threshold: [0, .25, .5, 1] });
+  ids.forEach(function(id){ io.observe(document.getElementById(id)); });
+})();
+</script>
+</body>
+</html>

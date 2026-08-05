@@ -16,10 +16,14 @@ import pytest
 
 from aoi_verification.app.coords import camtek_ini, kla_info
 from aoi_verification.app.coords import wafer_geometry as wg
-from aoi_verification.app.coords.models import (CAMTEK_PITCH_X, CAMTEK_PITCH_Y,
+from aoi_verification.app.coords.models import (CAMTEK_COL_OFFSET,
+                                                CAMTEK_PITCH_X, CAMTEK_PITCH_Y,
                                                 KLA_ZERO_X, KLA_ZERO_Y)
 
 _REAL = Path(__file__).resolve().parents[1] / "좌표 확인"
+# 사용자가 올린 RDL4 실물 — 같은 결함이 두 형태로 확보된 로트(§6-J).
+_RDL4_REAL = (Path(__file__).resolve().parents[2] / "docs"
+              / "RDL4 LOT files(26년 05월, FDV)")
 
 
 @pytest.fixture(autouse=True)
@@ -249,6 +253,20 @@ class TestCamtekPitchFromFile:
 # 서로 다른 3개 device 에서 전부 성립함이 확인된 규칙이다.  특히 사례 1(pitch_y
 # 31831.4 → row 기준 10)은 row 기준을 상수 7 로 박았을 때 row=−2 가 나오던 —
 # 즉 "다른 디바이스에서 좌표 엉망" 을 재현하던 케이스다.
+#
+# ⚠⚠ 이 골든이 **검증하지 않는 것** — 오해하면 위험하다(→ `docs/좌표_판단오류_회고.md` §4-5)
+#
+#   X·Y·col·row·x·y 는 전부 **장비 화면 정답**이지만, 이 사례들에는 그 웨이퍼의
+#   `Center_X/Y` 가 **딸려 오지 않았다**.  아래 픽스처가 합성하는 INI 에도 중심이
+#   없으므로, `camtek_geometry` 는 중심을 못 찾아 **폴백 경로**(`ceil(D/pitch_y)`)로 간다.
+#   4사례 전부 우연히 폴백이 맞는 자재라 통과할 뿐이다:
+#
+#       dev-A  y_index 9 → 폴백 10−9 = 1 = 정답      BNN#1  5 → 7−5 = 2 = 정답
+#       BNN#2  y_index 7 → 폴백  7−7 = 0 = 정답      dev-B  5 → 7−5 = 2 = 정답
+#
+#   즉 **앱이 실제로 타는 유도 경로(중심 → 원점)는 여기서 한 번도 안 돌아간다.**
+#   PI2 자재였다면 폴백은 7 을 내고 장비값 6 과 어긋난다(실측: `00RV9055XYC2`).
+#   유도 경로의 골든은 아래 `TestDerivedPathGolden` 이다 — **둘 다 통과해야 한다.**
 # ---------------------------------------------------------------------------
 _GOLDEN = [
     # (라벨, X, Y, step_x, step_y, 기대 col, row, die_x, die_y)
@@ -299,6 +317,191 @@ class TestGoldenEquipmentExamples:
             encoding="utf-8")
         c = camtek_ini.load_folder(folder)["img"]
         assert c.row == 7 - 3                  # 300 mm 였다면 10 − 3 = 7
+
+    def test_golden_actually_runs_the_fallback_path(self, tmp_path):
+        """★ 위 골든이 **폴백 경로**를 타고 있다는 사실 자체를 못 박는다.
+
+        이 단언이 깨지면 골든의 의미가 바뀐 것이다 — 픽스처에 중심이 생겼거나
+        폴백 식이 바뀌었거나.  어느 쪽이든 `TestDerivedPathGolden` 과 함께
+        다시 봐야 한다(→ `docs/좌표_판단오류_회고.md` §4-5).
+        """
+        import math
+        for i, (_label, X, Y, sx, sy, _col, row, _dx, _dy) in enumerate(_GOLDEN):
+            folder = tmp_path / f"slot{i}"
+            folder.mkdir()
+            ci, ri = math.floor(X / sx), math.floor(Y / sy)
+            (folder / "Params_WaferInfo.ini").write_text(
+                f"[Geometry]\nDieStep_X={sx:.6f}\nDieStep_Y={sy:.6f}\n"
+                f"[Geometric]\nDiameter=300000.000000\n", encoding="utf-8")
+            (folder / "ColorImageGrabingInfo.ini").write_text(
+                f"[img.jpeg]\nX={X}\nY={Y}\nCol={ci}\nRow={ri}\n", encoding="utf-8")
+            # 중심이 없다 → 유도 불가 → 폴백
+            assert wg._wafer_center(folder) == (None, None)
+            assert wg.camtek_geometry(folder).row_total == math.ceil(300000.0 / sy)
+            # 그리고 이 자재들은 폴백이 정답과 일치한다(= 골든이 통과하는 이유)
+            assert math.ceil(300000.0 / sy) - ri == row
+
+
+# ---------------------------------------------------------------------------
+# ★★ 유도 경로 골든 — 중심에서 원점을 유도하는 **주경로**의 장비 정답
+#
+# 위 `TestGoldenEquipmentExamples` 는 폴백 경로만 태운다(그 클래스 주석 참조).
+# 여기는 그 공백을 메운다: 중심 정보가 실제로 있는 웨이퍼의 장비 확인값이다.
+#
+#   출처 등급(→ `docs/좌표_판단오류_회고.md` R3)
+#     col·row      = 관측 (장비 화면 / 장비가 파일명에 적은 값)
+#     Center_X/Y   = 유도 (그 웨이퍼 자신의 `Wafer2Table.ini` 역산)
+#     pitch        = 파일 (그 웨이퍼 자신의 `Params_WaferInfo.ini`)
+#
+# ⚠ 이 표가 **증명하지 않는 것**: 경계 근접 거동.  여섯 사례 전부
+#   `(Cy+D/2)/pitch_y` 의 소수부가 0.333~0.345 로 몰려 있다(여유 33~35 %).
+#   경계 여유가 수 % 인 자재는 표본 0건이다(리스크 R-2).
+# ---------------------------------------------------------------------------
+_DERIVED_GOLDEN = [
+    # (라벨, Center_X, Center_Y, pitch_x, pitch_y, 기대 col_origin, 기대 row_total)
+    ("RDL4 17/18호기",       167448.9731, 179674.0034, 37247.9, 44905.3, 1, 6),
+    ("T254 GIX5703110",      166093.0524, 202554.0327, 14400.1, 31109.8, 2, 10),
+    ("PI4 UDS 35115E27EWD7", 204698.0390, 224379.7584, 37247.7, 44905.4, 2, 7),
+    ("PI4 DYD 29265187EWF2", 204335.9344, 224721.8779, 37247.7, 44905.4, 2, 7),
+    ("PI2 KMU 00RV9055XYC2", 204755.3903, 179513.1067, 37248.2, 44905.5, 2, 6),
+    ("PI2 MTW 00RWQ258XYD1", 205028.3266, 179693.8887, 37248.2, 44905.5, 2, 6),
+]
+
+
+class TestDerivedPathGolden:
+    """★★ 중심 → 원점 유도가 장비 정답을 낸다 (폴백이 아니라 **주경로**)."""
+
+    @pytest.mark.parametrize("label,cx,cy,px,py,co,rt", _DERIVED_GOLDEN,
+                             ids=[g[0] for g in _DERIVED_GOLDEN])
+    def test_origin_from_center(self, label, cx, cy, px, py, co, rt):
+        assert wg._col_origin(cx, 300000.0, px) == co
+        assert wg._row_total(cy, 300000.0, py) == rt
+
+    @pytest.mark.parametrize("label,cx,cy,px,py,co,rt", _DERIVED_GOLDEN,
+                             ids=[g[0] for g in _DERIVED_GOLDEN])
+    def test_partial_die_hypothesis_is_excluded(self, label, cx, cy, px, py, co, rt):
+        """경쟁 가설 '걸치기만 해도 센다' 는 **전 사례에서 1 어긋난다**.
+
+        표본이 두 가설을 실제로 구분한다는 근거다 — 이게 없으면
+        "여섯 사례가 다 맞는다" 는 아무것도 말하지 않는다(회고 R1).
+        """
+        import math
+        assert math.floor((cx - 150000.0) / px) == co - 1
+        assert math.floor((cy + 150000.0) / py) == rt + 1
+
+    def test_fallback_is_wrong_for_pi2(self):
+        """★ 폴백이 **장비 기준으로** 틀린 실측 사례 (13차, `00RV9055XYC2`).
+
+        그전까지는 '우리 유도값과 다르다' 까지였다.  이제 장비가 6 이라고 했고
+        폴백은 7 을 낸다.  이 단언이 깨지면 폴백 식이 바뀐 것이다.
+        """
+        import math
+        cy, py = 179513.1067, 44905.5
+        assert wg._row_total(cy, 300000.0, py) == 6          # 유도 = 장비값
+        assert wg._row_total(None, 300000.0, py) == 7        # 폴백 = 오답
+        assert math.ceil(300000.0 / py) == 7
+
+    def test_kmu_equipment_reading(self):
+        """★ 장비 화면 `col=0, row=3` — `row_total=6` 쪽 첫 장비 정답.
+
+        `86798.148549.c.248982116.jpeg` (AOI-25 · KMU-PIDS7 · 00RV9055XYC2).
+        파일명 접두는 실제 X·Y 와 수 µm 다를 수 있으나 경계까지 12,000 µm 이상
+        남아 결과가 안 바뀐다.
+        """
+        import math
+        X, Y, px, py = 86798.0, 148549.0, 37248.2, 44905.5
+        co, rt = 2, 6
+        xi, yi = math.floor(X / px), math.floor(Y / py)
+        assert (xi - co, rt - yi) == (0, 3)
+        assert min(X - xi * px, (xi + 1) * px - X) > 10000    # 경계 여유 확인
+        assert min(Y - yi * py, (yi + 1) * py - Y) > 10000
+
+    @pytest.mark.parametrize("X,Y,col,row,dx,dy", [
+        (241598.6, 321072.3, 4, 0, 18112, 6734),
+        (146812.1, 150100.3, 1, 4, 35069, 15384),
+    ])
+    def test_dyd_equipment_reading_includes_die_internal_xy(self, X, Y, col, row, dx, dy):
+        """★ die 내부 x·y 를 **장비 화면과 대조한 첫 사례** (AOI-17 · DYD-PIDS3).
+
+        그전까지 x·y 는 소스끼리 비교만 했다(파일명 ↔ INI) — 두 소스가 같은
+        규칙으로 같이 틀릴 수 있었다.
+
+        ⚠ 이 2건은 **버림 vs 반올림을 구분하지 못한다** — 네 값의 소수부가
+        전부 0.5 미만이라 두 방식이 같은 숫자를 낸다.  버림의 근거는 여전히
+        `test_die_y_is_floored_not_rounded` 의 1건뿐이다.
+        """
+        import math
+        px, py, co, rt = 37247.7, 44905.4, 2, 7
+        xi, yi = math.floor(X / px), math.floor(Y / py)
+        assert (xi - co, rt - yi) == (col, row)
+        assert (math.floor(X - xi * px), math.floor(Y - yi * py)) == (dx, dy)
+
+    def test_row_zero_defect_proves_row_total_at_least_seven(self):
+        """DYD 의 `row 0` 결함은 그 자체로 `row_total ≥ 7` 을 증명한다(6이면 −1)."""
+        import math
+        yi = math.floor(321072.3 / 44905.4)
+        assert yi == 7
+        assert 6 - yi < 0                       # row_total=6 이면 음수 row — 불가능
+
+    @pytest.mark.parametrize("X,Y,col,row,dx,dy", [
+        (136236.198100555, 208997.335135958, 1, 2, 24491, 29375),
+        (136237.131194909, 209000.134920151, 1, 2, 24492, 29378),
+    ])
+    def test_mtw_equipment_reading(self, X, Y, col, row, dx, dy):
+        """★ AOI-22 · MTW-PIDS7 · 00RWQ258XYD1 장비 화면 (13차).
+
+        `row_total=6` 자재에서 `col,row,x,y` **네 값 모두** 장비와 일치한 사례다.
+        폴백(`ceil(300000/44905.5)=7`)이면 row 가 3 이 되어 장비값 2 와 어긋난다.
+        """
+        import math
+        px, py, co, rt = 37248.2, 44905.5, 2, 6
+        xi, yi = math.floor(X / px), math.floor(Y / py)
+        assert (xi - co, rt - yi) == (col, row)
+        assert (math.floor(X - xi * px), math.floor(Y - yi * py)) == (dx, dy)
+        assert math.ceil(300000.0 / py) - yi != row      # 폴백은 틀린다
+
+    @pytest.mark.parametrize("rem,truth", [
+        # (die 내부 나머지, 장비 화면 값)  — 소수부 ≥ 0.5 라 버림≠반올림 인 것만
+        (43180.809, 43180),          # 골든 BNN-PIDS3 #1 (폴백 경로)
+        (24491.598100555, 24491),    # MTW #1 (유도 경로) — 반올림이면 24492
+        (24492.531194909, 24492),    # MTW #2 (유도 경로) — 반올림이면 24493
+    ])
+    def test_die_internal_xy_is_truncated_not_rounded(self, rem, truth):
+        """★ die 내부 좌표는 **버림**이다 — 장비가 구분해 준 3건.
+
+        소수부가 0.5 미만이면 버림과 반올림이 같은 숫자를 내 아무것도 증명하지
+        못한다(13차 DYD 4개 값이 전부 그랬다).  여기 셋은 소수부가 0.5 이상이라
+        **두 방식이 갈리고**, 장비는 셋 다 버림 쪽을 표시했다.
+        2 device(TB500 PI2 · 골든 자재) · 두 경로(유도 · 폴백) 모두에서 성립한다.
+        """
+        import math
+        assert math.floor(rem) != round(rem)     # 이 픽스처가 실제로 구분한다는 것부터
+        assert math.floor(rem) == truth
+        assert round(rem) != truth
+
+    def test_equipment_shows_integers_only(self):
+        """장비 화면은 좌표를 **정수로만** 표시한다(사용자 확인, 13차).
+
+        그래서 우리 값과 장비 값의 일치는 **1 µm 미만** 수준까지만 확인된다 —
+        장비 내부값은 `[표시값, 표시값+1)` 안에 있다는 것만 알 수 있다.
+        더 정밀한 대조를 하려면 화면이 아닌 다른 출처가 필요하다(R6: 이 방법으로는 불가).
+        """
+        import math
+        rem = 136236.198100555 - 3 * 37248.2
+        assert 24491 <= rem < 24492              # 장비 표시 24491 과 같은 정수 구간
+        assert math.floor(rem) == 24491
+
+    def test_sample_never_probes_the_boundary(self):
+        """★ 회고 §4-4 — 여섯 사례가 전부 여유 33~35 % 다.
+
+        '6도 7도 장비가 확인했으니 닫혔다' 로 읽으면 안 된다는 것을 못 박는다.
+        경계 근접 자재가 실제로 들어오면 이 단언이 깨지고, 그때 R-2 를 다시 본다.
+        """
+        import math
+        fracs = [((cy + 150000.0) / py) % 1.0 for _l, _cx, cy, _px, py, _c, _r
+                 in _DERIVED_GOLDEN]
+        assert min(fracs) > 0.30 and max(fracs) < 0.40      # 전부 한 구간에 몰려 있다
+        assert max(fracs) - min(fracs) < 0.02               # 위상이 사실상 같다
 
 
 # ---------------------------------------------------------------------------
@@ -803,15 +1006,374 @@ class TestKlaHeader:
 
 
 # ---------------------------------------------------------------------------
+# ★ row 기준을 Center_Y 에서 유도 — 같은 결함이 두 형태로 확보된 실측 (§6-J)
+#
+# 18호기 폴더에 **같은 결함 사진이 두 이름으로** 있다(1차 리뷰 사진을 사용자가 직접
+# 가져다 놓은 것 — 좌표가 파일명에 박힌 형태는 실제로 드물게 쓰인다):
+#   · 점표기   `51216.183928.c.1345447384.1.jpeg`      → 절대 X/Y 를 INI 가 갖는다
+#   · col/row  `TB500_RDL4 - Multi_…_0_2_13969.17…_4306.11…_Irregular Bump.jpg`
+# 두 번째가 **장비가 스스로 계산한 col/row** 다.  옛 식 `ceil(Diameter/pitch_y)` 는
+# row 를 1 크게 냈고(사용자 신고: 단일 사진 정보가 5,5 인데 실제는 5,4), Center_Y 에서
+# 유도하면 두 형태가 오차 0 으로 맞는다.
+# ---------------------------------------------------------------------------
+_RDL4_PARAMS = (_params_ini(37247.9, 44905.3)
+                + "[Geometric]\nDiameter=300000.000000\n"
+                  "Center_X=167448.973100\nCenter_Y=179674.003400\n")
+
+
+class TestRowTotalFromCenterY:
+    """★ ``row_total`` 은 ``Center_Y`` 에서 유도한다 — 마지막 '완전히 들어오는' die 행.
+
+    ``col_origin`` 이 '첫 완전 열' 인 것과 **같은 규칙의 반대쪽 축**이다(Camtek 은 Y 가
+    아래로 커져서 마지막 행이 row 0)."""
+
+    @pytest.mark.parametrize("stem,X,Y,C,R,rec,col,row", [
+        # 18호기 실물 INI 값 ↔ **같은 사진**의 col/row 파일명 토큰
+        ("51216.183928.c.1345447384.1",
+         51217.07941697, 183927.312852213, 1, 4, 1, 0, 2),
+        ("255348.116718.c.473266639.1",
+         255350.636699881, 116719.042739472, 6, 2, 1, 5, 4),
+    ])
+    def test_matches_the_equipment_written_filename(self, tmp_path, stem, X, Y,
+                                                    C, R, rec, col, row):
+        folder = tmp_path / "rdl4"
+        folder.mkdir()
+        (folder / "ColorImageGrabingInfo.ini").write_text(
+            _grabbing_ini_rec([(stem, X, Y, C, R, rec)]), encoding="utf-8")
+        (folder / "Params_WaferInfo.ini").write_text(_RDL4_PARAMS, encoding="utf-8")
+        geom = wg.camtek_geometry(folder)
+        assert geom is not None
+        assert (geom.col_origin, geom.row_total) == (1, 6), "옛 식이면 row_total=7"
+        c = camtek_ini.load_folder(folder)[stem]
+        assert (c.col, c.row) == (col, row)
+
+    def test_unrecorded_center_y_keeps_the_old_formula(self, tmp_path):
+        """``Center_Y`` 미기록이면 옛 식 ``ceil(Diameter/pitch_y)`` 로 폴백한다.
+
+        장비 화면 정답 4사례(:class:`TestGoldenEquipmentExamples`)가 그 값이고
+        ``Center_Y`` 를 갖고 있지 않다 — 그래서 그 사례들이 안 깨진다.
+        ⚠ 두 식은 보통 1 다르다.  폴백은 '모를 때의 기존 동작 보존' 이다."""
+        folder = tmp_path / "nocenter"
+        folder.mkdir()
+        (folder / "ColorImageGrabingInfo.ini").write_text(
+            _grabbing_ini_rec([("a", 255350.6, 116719.0, 6, 2, 1)]), encoding="utf-8")
+        (folder / "Params_WaferInfo.ini").write_text(
+            _params_ini(37247.9, 44905.3)
+            + "[Geometric]\nDiameter=300000.000000\nCenter_Y=0.000000\n",
+            encoding="utf-8")
+        geom = wg.camtek_geometry(folder)
+        assert geom is not None and geom.row_total == 7      # ceil(300000/44905.3)
+
+    def test_absurd_result_falls_back_and_warns(self, caplog):
+        """비상식적 결과는 채택하지 않고 경고를 남긴다(조용한 폴백 금지).
+
+        ``_col_origin`` 의 상식 범위 검사와 같은 장치다."""
+        import logging
+        import math
+        with caplog.at_level(logging.WARNING, logger="aoi.coords"):
+            got = wg._row_total(400000.0, 300000.0, 150.0)    # 행이 3665개 → 비상식
+        assert got == math.ceil(300000.0 / 150.0)
+        assert any("row 기준" in r.message for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# ★ Center_X/Y 가 미기록(0)일 때의 2순위 중심 소스 — Wafer2Table.ini (§6-L)
+#
+# 실측(T254 `GX57001305`): 이 파일의 어파인 변환에서 푼 중심이 **장비 화면 정답**
+# (col_origin=2, row_total=10)을 그대로 낸다.  `Params_WaferInfo.ini` 는 그 스캔에서
+# Center_X=Center_Y=0.000000 이라 예전에는 추측(ceil)에 의존했다.
+# ---------------------------------------------------------------------------
+# 사용자가 모아 준 실물 6건 — (a11, a12, t1, a21, a22, t2).
+# 원본: docs/Camtek 좌표 예시(T254)/_wafer2table_모음/Wafer2Table_6건.md
+_W2T_FILES = {
+    # ★ 이 웨이퍼가 장비 화면 정답(0,5)을 가진 바로 그 웨이퍼다 — 같은 웨이퍼 검증.
+    "T254 GIX5703110": (0.9999817250, 0.0009363897, -166279.6865640077,
+                        -0.0009363897, 0.9999817250, -202394.8031916906),
+    "T254 GIX5703114": (0.9999857168, 0.0017653201, -166430.4453316601,
+                        -0.0017653201, 0.9999857168, -202267.4449366639),
+    "T254 GX57001305": (0.9999932263, 0.0012932406, -166254.5886308713,
+                        -0.0012932406, 0.9999932263, -202412.7818198704),
+    "RDL4 XYB1": (0.9999776878, 0.0002402341, -167629.5246704901,
+                  -0.0002402341, 0.9999776878, -179492.1341826289),
+    "RDL4 XYA2": (0.9999820989, 0.0006289847, -167692.9855892736,
+                  -0.0006289847, 0.9999820989, -179422.3521613864),
+    "UDS-PIDS3 35115E27EWD7": (1.0000080255, 0.0008509894, -204890.6266250769,
+                               -0.0008509894, 1.0000080255, -224207.3632713843),
+}
+
+
+def _w2t_ini(key: str) -> str:
+    a11, a12, t1, a21, a22, t2 = _W2T_FILES[key]
+    return ("[WAFER ALIGNMENT]\n"
+            f"Wafer2Table_X=   {a11!r}   {a12!r}   {t1!r}\n"
+            f"Wafer2Table_Y=   {a21!r}   {a22!r}   {t2!r}\n"
+            "[LOCAL_CORRECTION]\nApply=0\n")
+
+
+_W2T_REAL = _w2t_ini("T254 GX57001305")
+# `T254 GX57001305` 파일이 담은 앵커 3점 — (table_x, table_y, wafer_x, wafer_y).
+# 변환 **방향**의 증거다: 반대로 읽으면 중심이 음수가 나온다.
+_W2T_ANCHORS = [
+    (158331.042831, 186603.091890, -7681.375999, -16013.833047),
+    (28730.142831, 186603.091890, -137284.037356, -15850.267591),
+    (287931.942831, 186603.091890, 121915.429053, -16185.361044),
+]
+
+
+class TestWaferCenterFromWafer2Table:
+    _T254_PARAMS = (_params_ini(14400.1, 31109.8)
+                    + "[Geometric]\nDiameter=300000.000000\n"
+                      "Center_X=0.000000\nCenter_Y=0.000000\n")
+
+    # 실물 T254 결함: X=29649.1 Y=164545.2 → x_index 2, y_index 5 (장비 화면 0,5)
+    _T254_DEFECT = [("a", 29649.148148, 164545.207407, 2, 5, 1)]
+    # 실물 RDL4 결함(§6-J): x_index 6, y_index 2 — pitch 37247.9 × 44905.3 검산용
+    _RDL4_DEFECT = [("a", 255350.636699881, 116719.042739472, 6, 2, 1)]
+
+    @staticmethod
+    def _folder(tmp_path: Path, *, w2t: str = _W2T_REAL, params: str = None,
+                entries=None) -> Path:
+        folder = tmp_path / "scan"
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "ColorImageGrabingInfo.ini").write_text(
+            _grabbing_ini_rec(entries
+                              or TestWaferCenterFromWafer2Table._T254_DEFECT),
+            encoding="utf-8")
+        (folder / "Params_WaferInfo.ini").write_text(
+            params or TestWaferCenterFromWafer2Table._T254_PARAMS, encoding="utf-8")
+        if w2t:
+            (folder / "Wafer2Table.ini").write_text(w2t, encoding="utf-8")
+        return folder
+
+    def test_anchor_points_confirm_transform_direction(self):
+        """★ 파일의 변환은 ``wafer = M·table + t`` 다 — 앵커 3점이 3 µm 안에 재현된다.
+
+        방향을 반대로 읽으면 중심이 음수가 나와 전부 틀린다."""
+        import math
+        a11, a12, t1 = 0.9999932263, 0.0012932406, -166254.5886308713
+        a21, a22, t2 = -0.0012932406, 0.9999932263, -202412.7818198704
+        for tx, ty, wx, wy in _W2T_ANCHORS:
+            got = (a11 * tx + a12 * ty + t1, a21 * tx + a22 * ty + t2)
+            assert math.hypot(got[0] - wx, got[1] - wy) <= 3.0
+
+    def test_center_is_solved_from_the_transform(self, tmp_path):
+        cx, cy = wg._wafer_center(self._folder(tmp_path))
+        assert cx == pytest.approx(165993.7, abs=1.0)
+        assert cy == pytest.approx(202628.8, abs=1.0)
+
+    def test_matches_equipment_screen(self, tmp_path):
+        """★ 여기서 푼 중심이 장비 화면 정답 ``(0,5)`` 를 낸다."""
+        folder = self._folder(tmp_path)
+        geom = wg.camtek_geometry(folder)
+        assert (geom.col_origin, geom.row_total) == (2, 10)
+        assert (lambda c: (c.col, c.row))(camtek_ini.load_folder(folder)["a"]) == (0, 5)
+
+    def test_recorded_center_wins(self, tmp_path):
+        """``Center_X/Y`` 가 기록돼 있으면 그쪽이 1순위 — Wafer2Table 은 안 본다."""
+        folder = self._folder(tmp_path, params=(
+            _params_ini(14400.1, 31109.8)
+            + "[Geometric]\nDiameter=300000.000000\n"
+              "Center_X=167448.973100\nCenter_Y=179674.003400\n"))
+        assert wg._wafer_center(folder) == (167448.9731, 179674.0034)
+
+    def test_no_file_leaves_center_unknown(self, tmp_path):
+        """파일이 없으면 ``None`` — 호출부가 옛 폴백을 쓴다(동작 불변)."""
+        folder = self._folder(tmp_path, w2t="")
+        assert wg._wafer_center(folder) == (None, None)
+        geom = wg.camtek_geometry(folder)
+        assert (geom.col_origin, geom.row_total) == (CAMTEK_COL_OFFSET, 10)
+
+    @pytest.mark.parametrize("body,label", [
+        ("[WAFER ALIGNMENT]\nWafer2Table_X= 0 0 -1\nWafer2Table_Y= 0 0 -1\n", "특이행렬"),
+        ("[WAFER ALIGNMENT]\nWafer2Table_X= 1 0 -1e9\nWafer2Table_Y= 0 1 -1e9\n", "범위 밖"),
+        ("[WAFER ALIGNMENT]\nWafer2Table_X= 1 0 -166254.6\n", "Y 줄 없음"),
+    ])
+    def test_bad_transform_is_rejected(self, tmp_path, body, label):
+        """못 믿을 값은 채택하지 않는다 — 추측 좌표를 내느니 폴백이 낫다."""
+        assert wg._wafer_center(self._folder(tmp_path, w2t=body)) == (None, None)
+
+    # ── 실물 6건으로 '웨이퍼마다 다르지 않은가' 를 검증 ────────────────────
+    def test_same_wafer_matches_equipment_screen(self, tmp_path):
+        """★ 장비 화면 정답을 가진 **바로 그 웨이퍼**(GIX5703110)의 파일이 정답을 낸다.
+
+        이전에는 다른 웨이퍼(GX57001305) 파일로 교차 검증해서 '웨이퍼마다 다를 수
+        있지 않냐' 는 지적이 남아 있었다.  같은 웨이퍼로 닫았다."""
+        folder = self._folder(tmp_path, w2t=_w2t_ini("T254 GIX5703110"))
+        geom = wg.camtek_geometry(folder)
+        assert (geom.col_origin, geom.row_total) == (2, 10)
+        c = camtek_ini.load_folder(folder)["a"]
+        assert (c.col, c.row) == (0, 5)          # 장비 화면 판독값
+
+    def test_same_lot_wafers_give_the_same_origin(self, tmp_path):
+        """같은 로트 웨이퍼 3장이 **같은 원점**을 낸다 — 중심 편차는 die 폭의 1% 미만."""
+        keys = [k for k in _W2T_FILES if k.startswith("T254")]
+        centers = []
+        for i, k in enumerate(keys):
+            folder = self._folder(tmp_path / f"w{i}", w2t=_w2t_ini(k))
+            geom = wg.camtek_geometry(folder)
+            assert (geom.col_origin, geom.row_total) == (2, 10), k
+            centers.append(wg._wafer_center(folder))
+        spread_x = max(c[0] for c in centers) - min(c[0] for c in centers)
+        spread_y = max(c[1] for c in centers) - min(c[1] for c in centers)
+        assert spread_x < 150 and spread_y < 150          # 실측 99 / 75 µm
+        # 경계까지 여유(≈1594 µm)가 편차의 10배 이상이어야 안심할 수 있다.
+        assert spread_x * 10 < 14400.1
+
+    @pytest.mark.parametrize("key", ["RDL4 XYB1", "RDL4 XYA2"])
+    def test_agrees_with_recorded_center(self, tmp_path, key):
+        """★ ``Center_*`` 가 **기록된** 자재에서 두 소스가 일치한다.
+
+        RDL4 는 `Params` 에 `(167448.97, 179674.00)` 이 박혀 있다(웨이퍼 2장·장비 2대
+        동일).  같은 제품 웨이퍼의 `Wafer2Table.ini` 로 푼 중심이 150 µm 안에 들어오고,
+        **유도한 원점이 같다** — 1순위/2순위가 어긋나지 않는다는 확인이다."""
+        folder = self._folder(tmp_path, w2t=_w2t_ini(key),
+                              entries=self._RDL4_DEFECT, params=(
+            _params_ini(37247.9, 44905.3)
+            + "[Geometric]\nDiameter=300000.000000\n"
+              "Center_X=0.000000\nCenter_Y=0.000000\n"))
+        cx, cy = wg._wafer_center(folder)
+        assert abs(cx - 167448.9731) < 150 and abs(cy - 179674.0034) < 150
+        geom = wg.camtek_geometry(folder)
+        assert (geom.col_origin, geom.row_total) == (1, 6)   # 기록값이 내는 원점과 같다
+
+    def test_row_total_follows_placement_not_grid(self, tmp_path):
+        """★ **같은 격자인데 row 기준이 갈린다** — 격자가 아니라 위치가 정한다.
+
+        여기서 검증하는 것은 **유도식이 중심에 반응한다**는 사실이다: 같은 pitch 를 줘도
+        중심이 다르면 6 과 7 로 갈린다.  옛 식 `ceil(Diameter/pitch_y)` 는 둘 다 7 을 내므로
+        RDL4 에서 틀린다.
+
+        ⚠ 두 계열의 **실제** row 기준(6 / 7)에 대한 근거는 이 픽스처가 아니라 장비 쪽
+        자료다 — RDL4 는 장비가 파일명에 적은 값 4건, PI4 는 `VLP-PDIS3` LIVE 쌍과 골든
+        `BNN-PIDS3` 2건.  `UDS-PIDS3` 의 `Wafer2Table` 값은 웨이퍼 1장짜리 방증일 뿐이라
+        결론이 여기에 기대지 않는다(→ `docs/디바이스_하드코딩_조사.md` §6-L 경고 블록)."""
+        import math
+        got = {}
+        for i, key in enumerate(("RDL4 XYA2", "UDS-PIDS3 35115E27EWD7")):
+            folder = self._folder(tmp_path / f"g{i}", w2t=_w2t_ini(key),
+                                  entries=self._RDL4_DEFECT, params=(
+                _params_ini(37247.9, 44905.3)
+                + "[Geometric]\nDiameter=300000.000000\n"))
+            got[key] = wg.camtek_geometry(folder).row_total
+        assert got["RDL4 XYA2"] == 6
+        assert got["UDS-PIDS3 35115E27EWD7"] == 7
+        assert math.ceil(300000.0 / 44905.3) == 7      # 옛 식은 둘 다 7
+
+
+@pytest.mark.skipif(not _RDL4_REAL.exists(), reason="RDL4 실물 폴더 없음")
+class TestRdl4RealFolders:
+    """★ 실물 폴더 그대로 — 17호기·18호기, 점표기·col/row 두 형태가 **같은 값**을 낸다."""
+
+    _EXPECT = {"W7548306XYA2": (0, 2), "W7548304XYG4": (5, 4)}
+
+    @pytest.mark.parametrize("machine", ["17호기", "18호기"])
+    def test_every_photo_form_agrees(self, machine):
+        from aoi_verification.app.coords import camtek_live
+        seen = 0
+        for wafer, expect in self._EXPECT.items():
+            folder = _RDL4_REAL / machine / wafer
+            if not folder.exists():
+                continue
+            for img in sorted(folder.glob("*.jp*g")):
+                coord = camtek_live.resolve(img) or camtek_ini.resolve(img)
+                assert coord is not None, img.name
+                assert (coord.col, coord.row) == expect, img.name
+                seen += 1
+        assert seen >= 2, "실물 사진을 못 읽었다"
+
+    @pytest.mark.parametrize("machine", ["17호기", "18호기"])
+    def test_die_index_range_matches_the_geometry(self, machine):
+        """유도한 '완전히 들어오는 die' 범위가 실측 결함 전수의 인덱스 범위와 같다."""
+        import math
+        for wafer in self._EXPECT:
+            folder = _RDL4_REAL / machine / wafer
+            if not folder.exists():
+                continue
+            geom = wg.camtek_geometry(folder)
+            assert geom is not None
+            raw = camtek_ini.load_raw_folder(folder)
+            assert raw
+            xi = [math.floor(X / geom.pitch_x) for X, _Y, _c, _r in raw.values()]
+            yi = [math.floor(Y / geom.pitch_y) for _X, Y, _c, _r in raw.values()]
+            assert min(xi) == geom.col_origin           # 첫 완전 열
+            assert max(yi) == geom.row_total            # 마지막 완전 행
+            assert min(c.col for c in camtek_ini.load_folder(folder).values()) == 0
+            assert min(c.row for c in camtek_ini.load_folder(folder).values()) == 0
+
+
+# ---------------------------------------------------------------------------
+# ★ KLA die 인덱스 원점을 SampleCenterLocation 에서 유도 — 사용자 장비 확인 7건 (§6-K)
+#
+# 옛 상수 KLA_ZERO_Y=4 는 **device 마다 다른 값**이었다.  T254 는 4 지만 TB500 은 3 이라,
+# TB500 자재에서 KLA row 가 전 구간 1 컸다.
+# ---------------------------------------------------------------------------
+_KLA_REAL = (Path(__file__).resolve().parents[2] / "docs"
+             / "KLA 좌표 예시(TB500, T254)")
+# {폴더: (zero_x, zero_y, {사진 stem: 장비로 확인한 (col,row)})}
+_KLA_TRUTH = {
+    "2026-08-03-20-28_2": (3, 3, {                     # TB500  08235234EWA1
+        "08235234ewa1_2_-1_7_1": (5, 2),
+        "08235234ewa1_-2_-2_31_2": (1, 1),
+        "08235234ewa1_-2_0_7_3": (1, 3)}),
+    "2026-08-02-23-09_4": (9, 4, {                     # T254   00MEU018XYG1
+        "00meu018xyg1_-1_4_23_1": (8, 8),
+        "00meu018xyg1_4_3_23_2": (13, 7),
+        "00meu018xyg1_4_-2_31_3": (13, 2),
+        "00meu018xyg1_-8_-2_23_4": (1, 2)}),
+}
+
+
+@pytest.mark.skipif(not _KLA_REAL.exists(), reason="KLA 좌표 예시 폴더 없음")
+class TestKlaZeroFromSampleCenter:
+    @pytest.mark.parametrize("name", sorted(_KLA_TRUTH))
+    def test_zero_matches_equipment(self, name):
+        zx, zy, coords = _KLA_TRUTH[name]
+        g = wg.kla_geometry(_KLA_REAL / name)
+        assert (g.zero_x, g.zero_y) == (zx, zy)
+        assert g.source == "DiePitch+SampleCenterLocation"
+        got = kla_info.load_folder(_KLA_REAL / name)
+        assert got, "실측 .001 을 못 읽었다"
+        for stem, expect in coords.items():
+            c = got[stem]
+            assert (c.col, c.row) == expect, stem
+
+    def test_zero_y_is_not_a_constant(self):
+        """★ 두 device 가 서로 다른 ``zero_y`` 를 낸다 — 상수로 되돌리면 한쪽이 틀린다."""
+        ys = {wg.kla_geometry(_KLA_REAL / n).zero_y for n in _KLA_TRUTH}
+        assert ys == {3, 4}
+
+    @pytest.mark.parametrize("name", sorted(_KLA_TRUTH))
+    def test_sample_test_plan_range_agrees(self, name):
+        """유도한 '완전히 들어오는 die' 집합이 ``SampleTestPlan`` 범위와 같다.
+
+        두 값이 독립 경로라 서로를 검산해 준다."""
+        import re
+        info = next((_KLA_REAL / name).glob("*.001"))
+        text = info.read_bytes().decode("utf-8", "replace").replace("\x00", "")
+        g = wg.parse_kla_header(text)
+        assert g is not None
+        plan = re.search(r"SampleTestPlan\s+\d+(.*?);", text, re.I | re.S)
+        pairs = [(int(a), int(b))
+                 for a, b in re.findall(r"(-?\d+)\s+(-?\d+)", plan.group(1))]
+        assert -min(x for x, _ in pairs) == g.zero_x
+        assert -min(y for _, y in pairs) == g.zero_y
+
+
+# ---------------------------------------------------------------------------
 # TB500 실측 회귀 — 값이 예전과 같아야 한다
 # ---------------------------------------------------------------------------
 @pytest.mark.skipif(not _REAL.exists(), reason="dev/좌표 확인 실측 폴더 없음")
 class TestRealSamples:
     def test_kla_geometry_from_real_file(self):
-        """실측 .001 → pitch 는 DiePitch, zero_x 는 SampleTestPlan 에서."""
+        """실측 .001 → pitch 는 DiePitch, 원점은 SampleCenterLocation 기하에서.
+
+        ``zero_y`` 는 **3** 이다.  옛 상수 ``KLA_ZERO_Y=4`` 는 TB500 자재에서 row 를
+        1 크게 냈다 — 사용자가 장비로 확인한 값이 3 임을 증명한다(§6-K)."""
         g = wg.kla_geometry(_REAL / "KLA" / "예시1")
-        assert (g.zero_x, g.zero_y) == (KLA_ZERO_X, KLA_ZERO_Y)
-        assert g.source == "DiePitch+SampleTestPlan"
+        assert (g.zero_x, g.zero_y) == (3, 3)
+        assert g.zero_x == KLA_ZERO_X            # X 는 옛 상수와 같다
+        assert g.zero_y != KLA_ZERO_Y            # Y 는 상수(4)가 아니다
+        assert g.source == "DiePitch+SampleCenterLocation"
         assert g.pitch_x == pytest.approx(37247.93)
         assert g.pitch_y == pytest.approx(44905.34)
 
@@ -828,12 +1390,17 @@ class TestRealSamples:
             assert math.floor(Y / CAMTEK_PITCH_Y) == row_i
 
     def test_real_coord_matches_equipment(self):
-        """실측 좌표 — die-내부 x/y 는 불변, col/row 는 장비 화면 기준 (5,4)."""
+        """실측 좌표 — die-내부 x/y 는 불변, KLA col/row 는 장비 확인 규약 (5,3).
+
+        ⚠ Camtek 쪽이 ``(5,4)`` 로 1 큰 것은 **이 픽스처의 한계**다 — 이 폴더에는
+        ``Params_WaferInfo.ini`` 가 없어(사진만 복사됨) ``Center_Y`` 를 못 읽고 옛 식으로
+        폴백한다.  실물 스캔 결과 폴더에는 그 파일이 사진과 같은 자리에 늘 있다.
+        자세한 건 :func:`test_coords.test_real_pair_kla_camtek_rows_align`."""
         c = camtek_ini.load_folder(
             _REAL / "Camtek" / "예시1")["272646.165679.c.1000203959.2"]
-        assert (c.col, c.row) == (5, 4)
+        assert (c.col, c.row) == (5, 4)              # 폴백값 — 아래 KLA 가 정답 규약
         assert (c.x, c.y) == (11913.0, 30959.0)      # floor — 장비 표기는 버림
 
         k = kla_info.load_folder(_REAL / "KLA" / "예시1")["w6459076xyg1_2_0_23_2"]
-        assert (k.col, k.row) == (5, 4)
+        assert (k.col, k.row) == (5, 3)
         assert (k.x, k.y) == (11819.0, 31035.0)
