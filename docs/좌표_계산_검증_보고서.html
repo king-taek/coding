@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8">
+<title>좌표 계산 검증 보고서</title>
+<style>
+@font-face{font-family:NS;src:url('../aoi_verification/app/ui/assets/font/NanumSquareR.ttf');font-weight:400}
+@font-face{font-family:NS;src:url('../aoi_verification/app/ui/assets/font/NanumSquareB.ttf');font-weight:700}
+@page{size:A4;margin:16mm 14mm 16mm 14mm}
+*{box-sizing:border-box}
+body{font-family:NS,sans-serif;font-size:9.6pt;line-height:1.55;color:#1a1f2b;margin:0}
+h1,h2,h3,h4{font-weight:700;line-height:1.3;margin:0}
+h2{font-size:15pt;color:#0f2f5e;border-bottom:2.5px solid #0f2f5e;padding-bottom:5px;margin:0 0 12px}
+h3{font-size:11.6pt;color:#123c72;margin:16px 0 7px;page-break-after:avoid}
+h4{font-size:10pt;color:#2c3e56;margin:11px 0 5px;page-break-after:avoid}
+h2{page-break-after:avoid}
+p{margin:0 0 7px}
+section{page-break-before:always;padding-top:2px}
+section:first-of-type{page-break-before:avoid}
+table{border-collapse:collapse;width:100%;margin:7px 0 11px;font-size:8.6pt;page-break-inside:avoid}
+th{background:#0f2f5e;color:#fff;text-align:left;padding:5px 7px;font-weight:700;font-size:8.4pt}
+td{padding:4.5px 7px;border-bottom:1px solid #dde3ec;vertical-align:top}
+tr:nth-child(even) td{background:#f6f8fb}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+.ctr{text-align:center}
+code,.mono{font-family:"DejaVu Sans Mono",monospace;font-size:8.4pt;background:#eef2f7;padding:1px 4px;border-radius:3px}
+pre{font-family:"DejaVu Sans Mono",monospace;font-size:8.2pt;background:#f4f7fb;border-left:3.5px solid #4a7ab8;
+    padding:9px 12px;margin:8px 0;line-height:1.5;white-space:pre;overflow:visible;page-break-inside:avoid}
+.ok{color:#1a7a3e;font-weight:700}.bad{color:#c0392b;font-weight:700}.warn{color:#b8730a;font-weight:700}
+.box{border:1px solid #ccd6e4;border-radius:5px;padding:10px 13px;margin:9px 0;page-break-inside:avoid}
+.box.hi{background:#eef5ff;border-color:#4a7ab8}
+.box.warn{background:#fff8ec;border-color:#e0a840}
+.box.bad{background:#fdeeec;border-color:#d47a70}
+.box h4{margin-top:0}
+.cover{page-break-after:always;padding-top:52mm;text-align:center}
+.cover .t{font-size:29pt;font-weight:700;color:#0f2f5e;line-height:1.25}
+.cover .s{font-size:12.5pt;color:#456;margin-top:14px}
+.cover .m{margin-top:44px;font-size:9.6pt;color:#5a6a80;line-height:1.9}
+.cover .badge{display:inline-block;margin-top:30px;padding:11px 26px;background:#0f2f5e;color:#fff;
+    border-radius:24px;font-size:11.5pt;font-weight:700}
+.toc{margin-top:24px;font-size:10pt;line-height:2.05;text-align:left;max-width:400px;margin-left:auto;margin-right:auto}
+.toc b{display:inline-block;width:26px;color:#0f2f5e}
+.kpi{display:flex;gap:8px;margin:11px 0}
+.kpi div{flex:1;border:1px solid #ccd6e4;border-radius:5px;padding:9px 6px;text-align:center;background:#f7f9fc}
+.kpi .v{font-size:17pt;font-weight:700;color:#0f2f5e;line-height:1.15}
+.kpi .l{font-size:7.6pt;color:#5a6a80;margin-top:3px;line-height:1.3}
+.flow{font-family:"DejaVu Sans Mono",monospace;font-size:8pt;line-height:1.65;background:#f4f7fb;
+    border:1px solid #ccd6e4;border-radius:5px;padding:11px 13px;margin:9px 0;white-space:pre;page-break-inside:avoid}
+.lv{display:inline-block;padding:1.5px 8px;border-radius:9px;font-size:7.6pt;font-weight:700;color:#fff;white-space:nowrap}
+.lv.h{background:#c0392b}.lv.m{background:#d98c1a}.lv.l{background:#2a8a4e}.lv.n{background:#8795a8}
+small{color:#5a6a80;font-size:8.2pt}
+.foot{margin-top:14px;padding-top:7px;border-top:1px solid #dde3ec;font-size:8pt;color:#7a8798}
+ul{margin:5px 0 8px;padding-left:17px}li{margin-bottom:3.5px}
+</style></head><body>
+
+<div class="cover">
+  <div class="t">AOI 좌표 계산<br>검증 보고서</div>
+  <div class="s">Camtek · KLA 좌표 변환 메커니즘의<br>현재 상태 · 검증 범위 · 리스크 평가</div>
+  <div class="badge">장비 확인값 13건 전수 일치</div>
+  <div class="m">
+    대상: aoi_verification / app / coords<br>
+    작성일: 2026-08-05 &nbsp;·&nbsp; 브랜치: claude/coordinate-validation-info-3o2ds5
+  </div>
+  <div class="toc">
+    <b>1</b> 한눈에 보기<br>
+    <b>2</b> 좌표 계산이 하는 일<br>
+    <b>3</b> 현재 계산 방식<br>
+    <b>4</b> 검증 자료 카탈로그<br>
+    <b>5</b> 검증 결과<br>
+    <b>6</b> 검증 방법의 커버리지 분석<br>
+    <b>7</b> 리스크 평가<br>
+    <b>8</b> 앞으로 필요한 것과 개선안<br>
+    <b>9</b> 부록
+  </div>
+</div>
+
+<!-- ============================ 1 ============================ -->
+<section>
+<h2>1. 한눈에 보기</h2>
+
+<div class="kpi">
+  <div><div class="v">13</div><div class="l">장비 확인값<br>전수 일치</div></div>
+  <div><div class="v">3</div><div class="l">검증된<br>device 종류</div></div>
+  <div><div class="v">418</div><div class="l">Camtek 결함<br>자체검산 통과</div></div>
+  <div><div class="v">9/9</div><div class="l">폴더 die 기하<br>확정 성공</div></div>
+  <div><div class="v">0</div><div class="l">자체모순<br>검출</div></div>
+</div>
+
+<h3>1-1. 결론</h3>
+<div class="box hi">
+<p><b>현재 좌표 계산은 확보한 모든 장비 정답과 일치합니다.</b> 상수로 박혀 있던 값은 전부
+제거됐고, 이제 스캔 결과 폴더의 파일에서 유도합니다. 다만 <b>검증된 device 는 3종</b>이고,
+그중 <b>row 기준을 장비 정답으로 직접 확인한 것은 2종</b>입니다. 새 자재에서 처음 쓸 때는
+사진 1장 대조가 여전히 필요합니다.</p>
+</div>
+
+<h3>1-2. 최근 3일간 고친 것 (전부 실측으로 확인된 오류)</h3>
+<table>
+<tr><th style="width:22%">항목</th><th style="width:30%">잘못된 동작</th><th style="width:26%">영향</th><th style="width:22%">근거</th></tr>
+<tr><td><b>row 기준</b><br><small>row_total</small></td>
+    <td><code>ceil(직경/pitch_y)</code> 로 <b>추측</b> — 웨이퍼 위치를 안 봄</td>
+    <td>RDL4 자재에서 화면·엑셀 <b>row 가 전 구간 1 큼</b><br><small>(사용자 신고: 5,5 인데 실제 5,4)</small></td>
+    <td>장비가 파일명에 적은 col/row<br>같은 결함 4건</td></tr>
+<tr><td><b>KLA row 원점</b><br><small>KLA_ZERO_Y</small></td>
+    <td>상수 <code>4</code> 고정</td>
+    <td>TB500 자재에서 <b>KLA row 가 1 큼</b><br><small>(T254 는 우연히 맞았음)</small></td>
+    <td>장비 확인 KLA↔Camtek<br>대응 7건 / 2 device</td></tr>
+<tr><td><b>웨이퍼 중심</b><br><small>Center_X/Y</small></td>
+    <td><code>0.000000</code>(미기록)이면 추측에 의존</td>
+    <td>미기록 자재 전부가 추측값<br><small>(전체 자재의 상당수)</small></td>
+    <td>Wafer2Table.ini 6건<br>+ 장비 화면 2건</td></tr>
+</table>
+
+<h3>1-3. 리스크 요약</h3>
+<table>
+<tr><th style="width:6%">등급</th><th style="width:32%">리스크</th><th style="width:38%">발생 조건</th><th style="width:24%">현재 방어</th></tr>
+<tr><td><span class="lv m">중</span></td><td>'완전히 들어오는 die 부터 0번' 규칙이 다른 자재에서 다를 수 있음</td>
+    <td>검증된 device 가 2종뿐 (T254·RDL4)</td><td>새 자재 첫 사용 시 1장 대조</td></tr>
+<tr><td><span class="lv m">중</span></td><td>웨이퍼 끝이 die 경계에 아슬아슬하게 걸린 자재에서 원점이 1 튐</td>
+    <td>여유가 die 의 몇 % 이내인 자재</td><td>없음 — <b>경고 미구현</b></td></tr>
+<tr><td><span class="lv l">낮</span></td><td>중심 정보가 아예 없을 때 폴백이 틀림</td>
+    <td><code>Center_*</code>·<code>Wafer2Table</code> 둘 다 없음</td><td>3자재에서 폴백이 맞았음</td></tr>
+<tr><td><span class="lv l">낮</span></td><td>EBR·다른 직경 웨이퍼 미검증</td>
+    <td><code>EBR≠0</code> 또는 200 mm</td><td>EBR 5 mm 까지 결과 불변 확인</td></tr>
+<tr><td><span class="lv l">낮</span></td><td>두 스캔 사이 계통적 위치 이동</td>
+    <td>다른 장비·다른 layer 비교</td><td><code>±1</code> die 게이트가 흡수</td></tr>
+</table>
+
+<div class="foot">등급 기준 — <span class="lv h">높</span> 매칭 결과가 틀릴 수 있음 ·
+<span class="lv m">중</span> 표기가 틀릴 수 있고 검증 근거가 얇음 ·
+<span class="lv l">낮</span> 이론적 가능성은 있으나 실측 여유가 큼</div>
+</section>
+
+<!-- ============================ 2 ============================ -->
+<section>
+<h2>2. 좌표 계산이 하는 일</h2>
+
+<h3>2-1. 왜 필요한가</h3>
+<p>장비가 남기는 파일에는 결함의 <b>절대 좌표</b>만 있습니다. 사람이 보는 <code>col 5 / row 4</code>
+같은 die 번호와 die 내부 위치는 앱이 계산해야 합니다. 이 계산은 두 곳에 쓰입니다.</p>
+
+<table>
+<tr><th style="width:20%">용도</th><th style="width:44%">필요한 것</th><th style="width:36%">틀리면 생기는 일</th></tr>
+<tr><td><b>매칭</b></td><td>기준·검증 양쪽이 <b>같은 규칙</b>이면 됨 (절대값은 달라도 무방)</td>
+    <td>같은 결함을 못 찾음 → 검증 누락</td></tr>
+<tr><td><b>화면·엑셀 표기</b></td><td>장비 화면과 <b>같은 절대값</b>이어야 함</td>
+    <td>사람이 장비와 대조할 때 혼선</td></tr>
+</table>
+
+<div class="box warn">
+<h4>이 구분이 중요한 이유</h4>
+<p>지금까지 발견된 오류는 <b>대부분 표기만 틀리고 매칭은 정상</b>이었습니다. 양쪽이 똑같이
+틀리면 상쇄되기 때문입니다. 그래서 <b>매칭이 잘 된다는 사실이 좌표가 맞다는 증거가 되지 않습니다.</b>
+실제로 RDL4 의 row 오류는 몇 달간 매칭을 통과하며 숨어 있었습니다.</p>
+</div>
+
+<h3>2-2. 입력과 출력</h3>
+<div class="flow">
+ [입력] 스캔 결과 폴더
+    ├ ColorImageGrabingInfo.ini   결함의 절대 X/Y  (Camtek)
+    ├ Params_WaferInfo.ini        die 간격 · 웨이퍼 직경 · 웨이퍼 중심
+    ├ Wafer2Table.ini             웨이퍼 정렬 변환 (중심의 2순위 소스)
+    └ *.001                       XREL/YREL · XINDEX/YINDEX · DiePitch (KLA)
+                          │
+                          ▼
+ [출력] DefectCoord(col, row, x, y)
+    col, row : 웨이퍼 맵의 die 번호   (장비 화면과 같아야 함)
+    x, y     : die 내부 위치 (µm)     (매칭 거리 계산에 사용)
+</div>
+
+<h3>2-3. 세 가지 좌표 소스</h3>
+<table>
+<tr><th style="width:18%">소스</th><th style="width:30%">형태</th><th style="width:30%">담고 있는 것</th><th style="width:22%">빈도</th></tr>
+<tr><td><b>Camtek INI</b></td><td><code>ColorImageGrabingInfo.ini</code> + 점표기 사진</td>
+    <td>절대 X/Y (die 번호는 앱이 계산)</td><td>가장 흔함</td></tr>
+<tr><td><b>Camtek 파일명</b></td><td><code>…_col_row_x_y_결함이름.jpg</code></td>
+    <td>장비가 계산한 col/row/die 좌표</td><td>드묾 (1차 리뷰 사진)</td></tr>
+<tr><td><b>KLA .001</b></td><td>KLARF 형식 정보파일</td>
+    <td>die 인덱스 + die 내부 상대좌표</td><td>KLA 스캔 슬롯</td></tr>
+</table>
+<p><small>세 소스가 <b>같은 결함에 같은 (col,row)</b> 를 내야 합니다. 어긋나면 매칭 게이트의
+여유(<code>±1</code>)를 잡아먹고, 그 여유가 정작 필요할 때 모자라게 됩니다.</small></p>
+</section>
+
+<!-- ============================ 3 ============================ -->
+<section>
+<h2>3. 현재 계산 방식</h2>
+
+<h3>3-1. 핵심 개념 — die 격자와 웨이퍼</h3>
+<p>die 격자는 <b>장비 좌표계에 고정된 바둑판</b>입니다. 그 위에 둥근 웨이퍼를 올려놓습니다.
+웨이퍼가 <b>온전히 덮는 칸</b>들이 실제 die 이고, 번호는 그 첫 칸/마지막 칸부터 셉니다.</p>
+
+<div class="flow">
+ 격자 칸 번호(y_index)   0     1     2     3     4     5     6     7     8
+                       ──────────────────────────────────────────────────
+ RDL4 가 덮는 칸              ■     ■     ■     ■     ■     ■              맨 아래 = 6
+ UDS-PIDS3 가 덮는 칸               ■     ■     ■     ■     ■     ■        맨 아래 = 7
+
+ → die 크기가 같아도(둘 다 44905 µm) 웨이퍼가 놓인 위치가 다르면 번호 기준이 다르다
+</div>
+
+<h3>3-2. 변환식</h3>
+<pre>Camtek INI
+  x_index = floor(X / pitch_x)              y_index = floor(Y / pitch_y)
+  col     = x_index − col_origin            row     = row_total − y_index
+  x       = floor(X − x_index × pitch_x)    y       = floor(Y − y_index × pitch_y)
+
+     col_origin = ceil((Center_X − 직경/2) / pitch_x)      웨이퍼에 온전히 들어오는 첫 열
+     row_total  = floor((Center_Y + 직경/2) / pitch_y) − 1  온전히 들어오는 마지막 행
+
+KLA .001
+  col = XINDEX + zero_x                     row = YINDEX + zero_y
+  x   = round(XREL)                         y   = round(DiePitchY − YREL)
+
+     zero_x = −ceil((SampleCenterLocation_X − 직경/2) / DiePitchX)
+     zero_y = −ceil((SampleCenterLocation_Y − 직경/2) / DiePitchY)
+
+Camtek 파일명 — 보정 없이 토큰 그대로 사용 (장비가 이미 계산한 값)</pre>
+
+<div class="box hi">
+<h4>세 소스가 같은 규칙을 쓴다</h4>
+<p>Camtek 은 Y 가 <b>아래로</b> 커져서 <i>마지막</i> 완전 행이 row 0 이고, KLA 는 Y 가
+<b>위로</b> 커져서 <i>첫</i> 완전 행이 row 0 입니다. 축 방향만 반대이고 <b>'온전히 들어오는
+die 부터 0번'</b> 이라는 규칙은 같습니다. 그래서 두 장비가 자동으로 정렬됩니다.</p>
+</div>
+
+<h3>3-3. 값을 정하는 우선순위 사슬</h3>
+<div class="flow">
+ die 간격(pitch)                          웨이퍼 중심
+ ─────────────────────                   ─────────────────────
+ 1  Params_WaferInfo.ini                 1  Params_WaferInfo.ini
+      DieStep_X / DieStep_Y                   [Geometric] Center_X / Center_Y
+ 2  ProductInfo.ini                            (0.000000 은 '미기록' 으로 취급)
+      XDieIndex / YDieIndex               2  Wafer2Table.ini
+ 3  ProductInfo.ini                            정렬 변환을 풀어서 중심 산출
+      CustomerDiePitch_X / _Y             3  (없음)
+ 4  models.py 상수                             → col_origin = 상수 2
+      ↑ 모든 후보가 자체검산을 통과해야 채택        → row_total  = ceil(직경/pitch_y)
+
+ 자체검산:  모든 결함에서  INI Col == floor(X / pitch_x)   (X 축은 등호, 완화 금지)
+            Y 축은 레시피별로 차이가 상수이기만 하면 통과
+</div>
+
+<h3>3-4. 안전장치</h3>
+<table>
+<tr><th style="width:26%">장치</th><th style="width:44%">동작</th><th style="width:30%">막는 사고</th></tr>
+<tr><td>pitch 자체검산</td><td>읽은 pitch 로 <code>Col==floor(X/pitch)</code> 가 전 항목에서 성립해야 채택</td>
+    <td>다른 자재의 pitch 를 잘못 채택 → <code>x = −1,652,266 µm</code></td></tr>
+<tr><td>die 크기 후보 제외</td><td><code>DieSize</code> 계열은 후보에서 아예 뺌 (크기 ≠ 간격)</td>
+    <td>스크라이브 있는 자재에서 die 폭의 23% 누적 오차</td></tt></tr>
+<tr><td>상식 범위 검사</td><td>원점이 <code>0..200</code> 밖이면 폴백 + 경고</td><td>특이행렬·손상된 파일</td></tr>
+<tr><td>절대좌표 폴백</td><td>pitch 를 못 정하면 die 로 안 쪼개고 절대좌표로 매칭</td>
+    <td>기하를 모른다고 매칭까지 막히는 것</td></tr>
+<tr><td>프레임 통일</td><td>한 실행에 die-내부와 절대좌표가 섞이면 전부 절대좌표로 통일</td>
+    <td>슬롯 전체가 '매치 실패' 로 보이는 것</td></tr>
+<tr><td>조용한 폴백 금지</td><td>모든 폴백·거부 경로가 경고 로그를 남김</td><td>틀린 채로 아무도 모르는 상태</td></tr>
+</table>
+</section>
+
+<!-- ============================ 4 ============================ -->
+<section>
+<h2>4. 검증 자료 카탈로그</h2>
+<p>지금까지 확보한 실측 자료 전부입니다. <b>"무엇을 증명하는가"</b> 와 <b>"무엇은 증명하지 못하는가"</b>
+를 함께 적습니다.</p>
+
+<h3>자료 A — dev/좌표 확인 (최초 샘플)</h3>
+<table>
+<tr><th style="width:16%">항목</th><th>내용</th></tr>
+<tr><td>수령</td><td>2026-07 이전 (저장소 초기부터 존재)</td></tr>
+<tr><td>검사 시각</td><td>2026-05-18 (KLA)</td></tr>
+<tr><td>구성</td><td>Camtek 3폴더(결함 63건, 사진 6장) + KLA 3폴더(<code>.001</code> 3개, 사진 3장)</td></tr>
+<tr><td>device</td><td>TB500 <code>4DT-TB500-H-M1</code>, step <code>RDL2_NEW(MULTI)</code></td></tr>
+<tr><td>증명한 것</td><td>· <b>격자 불변식</b> <code>Col==floor(X/DieStep)</code> 63/63 성립<br>
+    · KLA↔Camtek <b>사진으로 확인된 쌍 1건</b> (die 내부 거리 119 µm)<br>
+    · 그 쌍으로 두 장비의 좌표계 관계를 역산 가능</td></tr>
+<tr><td class="bad">한계</td><td>· <code>Params_WaferInfo.ini</code> 가 <b>없음</b> — 사진과 INI 만 복사된 불완전 사본<br>
+    · 그래서 웨이퍼 중심을 못 읽어 이 폴더는 지금도 <b>폴백 경로</b>를 탐<br>
+    · 장비 화면 정답이 없어 절대값 검증 불가</td></tr>
+</table>
+
+<h3>자료 B — RDL4 로트 (2026-08-04 수령)</h3>
+<table>
+<tr><th style="width:16%">항목</th><th>내용</th></tr>
+<tr><td>스캔 시기</td><td>2026-05, LOT <code>FDV-RDL4</code></td></tr>
+<tr><td>구성</td><td>17호기·18호기 × 웨이퍼 2장 = 4폴더, 결함 <b>328건</b><br>
+    각 폴더: <code>ColorImageGrabingInfo.ini</code> · <code>Params_WaferInfo.ini</code> ·
+    <code>RecipesInfo.ini</code> · 결함 사진<br>
+    18호기에는 <b>같은 결함 사진이 두 형태로</b> (점표기 + col/row 파일명)</td></tr>
+<tr><td>device</td><td>TB500 격자 (37247.9 × 44905.3), <code>Center=(167448.97, 179674.00)</code> <b>기록됨</b></td></tr>
+<tr><td>증명한 것</td><td>· <b>장비가 스스로 적은 col/row</b> 4건 — 정답 그 자체<br>
+    · <code>row_total</code> 이 <code>ceil(직경/pitch)</code> 가 아니라 중심에서 유도됨을 확정<br>
+    · 유도한 완전 die 범위가 <b>328건 전수의 인덱스 범위와 정확히 일치</b><br>
+    · <code>Center_*</code> 가 웨이퍼·장비가 달라도 <b>소수점까지 동일</b> → 레시피 값임</td></tr>
+<tr><td class="bad">한계</td><td>· KLA 스캔이 없어 KLA 정렬 교차 확인 불가<br>
+    · col/row 파일명은 사용자가 1차 리뷰 폴더에서 <b>직접 가져다 둔 것</b>
+      (장비가 두 파일을 함께 출력한 게 아님)</td></tr>
+</table>
+
+<h3>자료 C — T254 Camtek + 장비 화면 판독 (2026-08-04 수령)</h3>
+<table>
+<tr><th style="width:16%">항목</th><th>내용</th></tr>
+<tr><td>구성</td><td>웨이퍼 2장(<code>GIX5703110</code>·<code>GIX5703111</code>), 결함 27건<br>
+    각 폴더: INI · <code>Params_WaferInfo.ini</code> · <code>Recipe.ini</code> · 사진</td></tr>
+<tr><td>device</td><td>T254, 격자 14400.1 × 31109.8 (<b>TB500 의 1/2.6 크기</b>)</td></tr>
+<tr><td>⭐ 핵심</td><td><b>16호기 장비 화면 직접 판독 2건</b><br>
+    <code>29648.164545.c._2_</code> → 화면 <code>0, 5</code> &nbsp;·&nbsp;
+    <code>84722.113001.c._1_</code> → 화면 <code>3, 7</code></td></tr>
+<tr><td>증명한 것</td><td>· die 크기가 전혀 다른 자재에서도 규칙이 성립<br>
+    · <code>Center_*=0</code>(미기록) 상태의 <b>폴백 경로가 이 자재에서는 정답</b><br>
+    · <code>col_origin=2</code>, <code>row_total=10</code> 을 장비가 확인</td></tr>
+<tr><td class="bad">한계</td><td>· 두 판독이 <b>서로 다른 웨이퍼</b>에서 나옴<br>
+    · 결함이 한 die 에 몰려 있어 die 인덱스 범위 검증은 못 함</td></tr>
+</table>
+
+<h3>자료 D — KLA T254·TB500 + 장비 확인 대응값 (2026-08-04 수령)</h3>
+<table>
+<tr><th style="width:16%">항목</th><th>내용</th></tr>
+<tr><td>검사 시각</td><td>2026-08-02 22:51 (T254, KRONOS K2) / 2026-08-03 20:12 (TB500, KRONOS K1)</td></tr>
+<tr><td>구성</td><td>2폴더 × (<code>.001</code> + 결함 사진 3~4장)</td></tr>
+<tr><td>⭐ 핵심</td><td><b>장비로 확인한 KLA↔Camtek 대응값 7건</b> (2 device)<br>
+    <code>08235234EWA1</code>(TB500) 3건 · <code>00MEU018XYG1</code>(T254) 4건</td></tr>
+<tr><td>증명한 것</td><td>· <code>KLA_ZERO_Y</code> 가 <b>device 마다 다름</b> (T254=4, TB500=3)<br>
+    · <code>SampleCenterLocation</code> 기하 유도가 <b>7/7 재현</b><br>
+    · <code>SampleTestPlan</code> 인덱스 범위와 5웨이퍼 × 2축 전부 일치 (독립 검산)</td></tr>
+<tr><td class="bad">한계</td><td>· 같은 웨이퍼의 Camtek 스캔이 없어 <b>직접 쌍 대조는 불가</b><br>
+    · 대응값의 'Camtek 기준' 이 어떻게 산출됐는지는 사용자 확인에 의존</td></tr>
+</table>
+
+<h3>자료 E — Wafer2Table.ini 6건 (2026-08-05 수령)</h3>
+<table>
+<tr><th style="width:16%">항목</th><th>내용</th></tr>
+<tr><td>구성</td><td>T254 3장(<code>GIX5703110</code>·<code>GIX5703114</code>·<code>GX57001305</code>)<br>
+    RDL4 계열 2장(<code>XYB1</code>·<code>XYA2</code>) · UDS-PIDS3 1장 · LLN 1장</td></tr>
+<tr><td>⭐ 핵심</td><td><b><code>GIX5703110</code> 이 포함</b> — 장비 화면 정답을 가진 <b>바로 그 웨이퍼</b></td></tr>
+<tr><td>증명한 것</td><td>· <b>같은 웨이퍼 검증</b>: 그 웨이퍼 자신의 파일이 화면 정답 <code>(0,5)</code> 를 냄<br>
+    · <b>웨이퍼 간 편차</b> X 99 µm / Y 75 µm — 경계 여유(1594 µm)의 1/16<br>
+    · <b>기록된 <code>Center_*</code> 와 140 µm 이내 일치</b>, 유도 원점도 동일<br>
+    · 같은 TB500 격자인데 RDL4=6, UDS-PIDS3=7 → <b>격자가 아니라 위치가 정함</b></td></tr>
+<tr><td class="bad">한계</td><td>· 4개 제품군만 커버<br>· <code>Wafer2Table</code> 이 없는 스캔이 있는지는 미확인</td></tr>
+</table>
+</section>
+
+<!-- ============================ 5 ============================ -->
+<section>
+<h2>5. 검증 결과</h2>
+
+<h3>5-1. 장비 정답 대조 — 13건 전수 일치</h3>
+<table>
+<tr><th style="width:26%">대상</th><th style="width:14%">건수</th><th style="width:26%">정답 출처</th><th style="width:20%">결과</th><th style="width:14%">device</th></tr>
+<tr><td>KLA → Camtek 기준 변환</td><td class="ctr">7</td><td>장비 확인 대응값</td><td class="ok">7/7 일치</td><td>TB500·T254</td></tr>
+<tr><td>Camtek INI → 화면 col/row</td><td class="ctr">2</td><td>16호기 장비 화면 직접 판독</td><td class="ok">2/2 일치</td><td>T254</td></tr>
+<tr><td>Camtek INI → 장비 파일명</td><td class="ctr">4</td><td>장비가 파일명에 적은 값</td><td class="ok">4/4 일치</td><td>TB500(RDL4)</td></tr>
+<tr><td colspan="2"><b>합계</b></td><td></td><td class="ok"><b>13/13</b></td><td></td></tr>
+</table>
+
+<h3>5-2. 구조적 검산 (정답 없이도 성립해야 하는 것)</h3>
+<table>
+<tr><th style="width:30%">검산</th><th style="width:16%">표본</th><th style="width:22%">결과</th><th style="width:32%">무엇을 보장하나</th></tr>
+<tr><td>격자 불변식 <code>Col==floor(X/pitch)</code></td><td class="ctr">418 결함 / 9 폴더</td>
+    <td class="ok">전수 통과</td><td>읽은 pitch 가 실제 격자와 일치</td></tr>
+<tr><td>유도 die 범위 == 관측 인덱스 범위</td><td class="ctr">328 결함 / 4 폴더</td>
+    <td class="ok">정확히 일치</td><td>중심에서 유도한 원점이 실제와 맞음</td></tr>
+<tr><td>자체모순(음수 col/row) 검사</td><td class="ctr">418 결함 / 9 폴더</td>
+    <td class="ok">0건</td><td>원점이 확실히 틀린 경우는 없음</td></tr>
+<tr><td>KLA <code>SampleTestPlan</code> 범위 대조</td><td class="ctr">5 웨이퍼 × 2축</td>
+    <td class="ok">전수 일치</td><td>두 독립 경로가 같은 원점을 지시</td></tr>
+<tr><td>웨이퍼 간 원점 안정성</td><td class="ctr">T254 3장</td>
+    <td class="ok">전부 동일</td><td>원점이 웨이퍼별로 흔들리지 않음</td></tr>
+<tr><td>두 중심 소스 교차 확인</td><td class="ctr">RDL4 2장</td>
+    <td class="ok">140 µm 이내</td><td>1순위·2순위가 어긋나지 않음</td></tr>
+</table>
+
+<h3>5-3. 경계까지의 여유 (원점이 1 튀려면 얼마나 움직여야 하나)</h3>
+<table>
+<tr><th style="width:24%">자재</th><th style="width:18%">die 크기 (µm)</th><th style="width:18%">col 여유</th>
+    <th style="width:18%">row 여유</th><th style="width:22%">die 대비</th></tr>
+<tr><td>RDL4</td><td class="num">37,248 × 44,905</td><td class="num">17,449 µm</td><td class="num">15,337 µm</td><td class="ok">34 %</td></tr>
+<tr><td>UDS-PIDS3</td><td class="num">37,248 × 44,905</td><td class="num">17,450 µm</td><td class="num">15,137 µm</td><td class="ok">34 %</td></tr>
+<tr><td>T254</td><td class="num">14,400 × 31,110</td><td class="num">1,693 µm</td><td class="num">10,346 µm</td><td class="warn">12 %</td></tr>
+</table>
+<p><small>실측 웨이퍼 간 중심 편차는 <b>99 µm</b> — 가장 좁은 T254 의 여유(1,693 µm)와 비교해도
+<b>17배</b> 안전합니다. 다만 이 여유는 자재마다 다르고, 미리 알 수 있는 값이 아닙니다.</small></p>
+
+<h3>5-4. 입력값 민감도</h3>
+<p>RDL4 기준으로 입력을 흔들어 결과가 바뀌는지 확인했습니다.</p>
+<table>
+<tr><th style="width:44%">입력 변화</th><th style="width:28%">col_origin</th><th style="width:28%">row_total</th></tr>
+<tr><td>기준 (Diameter 300,000)</td><td class="ctr">1</td><td class="ctr">6</td></tr>
+<tr><td>MeasuredDiameter 299,954.8 사용</td><td class="ctr">1</td><td class="ctr">6</td></tr>
+<tr><td>EBR 1 mm 적용</td><td class="ctr">1</td><td class="ctr">6</td></tr>
+<tr><td>EBR 3 mm 적용</td><td class="ctr">1</td><td class="ctr">6</td></tr>
+<tr><td>EBR 5 mm 적용</td><td class="ctr">1</td><td class="ctr">6</td></tr>
+</table>
+<p><small>→ 이 자재에서는 <b>직경을 5 mm 흔들어도 결과가 안 바뀝니다.</b> 다만 여유가 좁은
+자재에서는 같은 결론이 성립하지 않습니다.</small></p>
+</section>
+
+<!-- ============================ 6 ============================ -->
+<section>
+<h2>6. 검증 방법의 커버리지 분석</h2>
+<p>각 검증 방법이 <b>무엇을 보장하고 무엇은 보장하지 못하는지</b> 정리합니다. 이 구분이 없으면
+"검증했다" 는 말이 실제보다 크게 들립니다.</p>
+
+<h3>6-1. 방법별 커버리지</h3>
+<table>
+<tr><th style="width:20%">방법</th><th style="width:28%">보장하는 것</th><th style="width:30%">보장하지 <u>못</u>하는 것</th><th style="width:22%">현재 표본</th></tr>
+<tr><td><b>장비 화면 직접 판독</b></td>
+    <td>그 자재·그 결함의 <b>절대 정답</b>. 가장 강한 근거</td>
+    <td>다른 자재로 일반화 불가. 사람 판독이라 오독 가능<br><small>(과거 판독 1건이 ±1 모호했던 전례)</small></td>
+    <td class="warn">T254 2건뿐</td></tr>
+<tr><td><b>장비가 적은 파일명</b></td>
+    <td>사람 개입 없는 <b>장비 자신의 계산값</b></td>
+    <td>이 형태를 쓰는 자재가 드묾. 파일명 규약이 장비 버전에 따라 다를 가능성</td>
+    <td class="warn">RDL4 4건</td></tr>
+<tr><td><b>KLA↔Camtek 대응</b></td>
+    <td>두 장비 간 <b>정렬</b>이 맞는지</td>
+    <td><b>둘 다 같은 방향으로 틀린 경우는 못 잡음.</b> 실제로 그런 상태가 몇 달 지속됐음</td>
+    <td>7건 / 2 device</td></tr>
+<tr><td><b>격자 불변식 검산</b></td>
+    <td>읽은 pitch 가 실제 격자와 <b>정확히</b> 일치</td>
+    <td>원점(col_origin·row_total)은 전혀 제약하지 않음. 근사값끼리는 구분 못 함</td>
+    <td class="ok">418건 전수</td></tr>
+<tr><td><b>유도 범위 == 관측 범위</b></td>
+    <td>결함이 가장자리 die 까지 퍼져 있으면 <b>원점을 강하게 확인</b></td>
+    <td>결함이 몰려 있으면 아무 말도 못 함<br><small>(T254 는 1개 die 뿐이라 무력)</small></td>
+    <td>RDL4 328건</td></tr>
+<tr><td><b>자체모순(음수) 검사</b></td>
+    <td>원점이 <b>너무 큰</b> 경우를 확실히 검출</td>
+    <td>원점이 <b>작은</b> 방향으로 틀린 건 못 잡음 (단방향 검사)</td>
+    <td class="ok">418건 전수</td></tr>
+<tr><td><b>골든 테스트</b></td>
+    <td>과거 확정 사례의 <b>회귀 방지</b></td>
+    <td>그 4사례는 <code>Center_*</code> 가 없어 <b>폴백 경로만</b> 검증. 유도 경로는 안 탐</td>
+    <td>4사례 / 3 device</td></tr>
+<tr><td><b>매칭 성공률</b></td>
+    <td>사실상 <b>아무것도</b> 보장 안 함</td>
+    <td>양쪽이 똑같이 틀리면 상쇄돼 정상으로 보임</td>
+    <td class="bad">근거로 쓰지 말 것</td></tr>
+</table>
+
+<div class="box bad">
+<h4>가장 큰 커버리지 공백</h4>
+<p><b>'온전히 들어오는 die 부터 0번' 이라는 규칙 자체</b>는 <b>2개 자재</b>(T254·RDL4)에서만
+장비 정답으로 확인됐습니다. 나머지 검산은 전부 <b>그 규칙을 전제로</b> 내부 일관성을 볼 뿐이라,
+규칙 자체가 다른 자재가 있으면 <b>어떤 검산도 알려주지 못합니다.</b></p>
+</div>
+
+<h3>6-2. 검증 범위 요약</h3>
+<table>
+<tr><th style="width:30%">축</th><th style="width:34%">검증된 범위</th><th style="width:36%">미검증</th></tr>
+<tr><td>device / die 크기</td><td>3종 (37.2×44.9 / 14.4×31.1 / 25.0×31.8 등)</td><td>die 4 mm 급 소형, 초대형</td></tr>
+<tr><td>웨이퍼 직경</td><td>300 mm 만</td><td>200 mm 등</td></tr>
+<tr><td>EBR</td><td>0 만 (모의로 5 mm 까지 확인)</td><td>실제 <code>EBR≠0</code> 자재</td></tr>
+<tr><td>중심 소스</td><td><code>Center_*</code> 기록 / <code>Wafer2Table</code> / 폴백 3경로 전부</td><td>세 경로가 <b>서로 어긋나는</b> 사례</td></tr>
+<tr><td>KLA 방향</td><td>notch DOWN · mirrored NO 만</td><td>UP · mirrored YES</td></tr>
+<tr><td>레시피</td><td>1~2개 레시피 폴더</td><td>Recipe2/3/4 를 실제로 쓰는 스캔</td></tr>
+</table>
+
+<h3>6-3. 정확도 정량</h3>
+<table>
+<tr><th style="width:34%">항목</th><th style="width:22%">값</th><th style="width:44%">근거</th></tr>
+<tr><td>die 번호(col/row) 정확도</td><td class="ok">검증 자재 100 %</td><td>장비 정답 13건 전수 일치</td></tr>
+<tr><td>die 내부 좌표 오차</td><td>0.02 ~ 0.5 µm</td><td>같은 결함의 두 소스 대조 (파일명 ↔ INI)</td></tr>
+<tr><td>장비 간 좌표 오차</td><td>0.2 ~ 7 µm</td><td>17호기 ↔ 18호기 같은 결함</td></tr>
+<tr><td>KLA ↔ Camtek 좌표 오차</td><td>112 ~ 125 µm</td><td>사진으로 확인된 쌍 3건</td></tr>
+<tr><td>웨이퍼 간 중심 편차</td><td>99 µm (X) / 75 µm (Y)</td><td>같은 로트 3장</td></tr>
+<tr><td>KLA·Camtek die 간격 차이</td><td>TB500 0.04 µm / <b>T254 13.6 µm</b></td><td>두 장비가 보고하는 pitch 비교</td></tr>
+</table>
+<p><small>마지막 항목 주의 — T254 는 두 장비가 보고하는 die 간격이 0.044 % 다릅니다. 각자 자기
+pitch 로 die 내부 좌표를 계산하므로 die 안쪽 끝에서 <b>최대 13.6 µm</b> 어긋날 수 있습니다.
+'거의 정확히 일치' 판정 반경(20 µm)에 근접하는 값입니다.</small></p>
+</section>
+
+<!-- ============================ 7 ============================ -->
+<section>
+<h2>7. 리스크 평가</h2>
+
+<h3>R-1 <span class="lv m">중</span> 규칙 자체가 다른 자재</h3>
+<table>
+<tr><td style="width:16%"><b>조건</b></td><td>'완전히 들어오는 die 부터 0번' 이 아닌 다른 규약을 쓰는 장비/자재</td></tr>
+<tr><td><b>영향</b></td><td>col·row 가 통째로 어긋남. <b>매칭은 정상</b>(양쪽 상쇄), 표기만 틀림</td></tr>
+<tr><td><b>근거 두께</b></td><td>자재 2종에서만 장비 정답 확인</td></tr>
+<tr><td><b>현재 방어</b></td><td>없음 — 앱은 규칙이 항상 같다고 가정</td></tr>
+<tr><td><b>검출 방법</b></td><td>새 자재 첫 사용 시 사진 1장을 장비 화면과 대조</td></tr>
+</table>
+
+<h3>R-2 <span class="lv m">중</span> 경계에 걸친 자재</h3>
+<table>
+<tr><td style="width:16%"><b>조건</b></td><td>웨이퍼 끝이 die 경계에 근접 (여유가 die 의 수 % 이내)</td></tr>
+<tr><td><b>영향</b></td><td>중심 측정 오차·EBR·직경 선택에 따라 원점이 <b>1 튐</b></td></tr>
+<tr><td><b>현재 실측</b></td><td>가장 좁은 자재가 12 % (T254). 웨이퍼 간 편차 99 µm 대비 17배 여유</td></tr>
+<tr><td><b>현재 방어</b></td><td class="bad">없음 — 경계 근접을 감지·경고하지 않음</td></tr>
+<tr><td><b>제안</b></td><td>§8-2 (a) 경계 여유 경고</td></tr>
+</table>
+
+<h3>R-3 <span class="lv l">낮</span> 중심 정보가 아예 없는 스캔</h3>
+<table>
+<tr><td style="width:16%"><b>조건</b></td><td><code>Center_*</code> 미기록 <b>그리고</b> <code>Wafer2Table.ini</code> 도 없음</td></tr>
+<tr><td><b>영향</b></td><td>폴백(<code>col_origin=2</code>, <code>ceil(직경/pitch)</code>)이 자재에 따라 틀림<br>
+    실측: T254 는 맞음, RDL4 격자는 <b>1 큼</b></td></tr>
+<tr><td><b>현재 방어</b></td><td>경고 로그는 남지만 화면에는 표시 없음</td></tr>
+<tr><td><b>제안</b></td><td>§8-2 (b) 추정값임을 화면에 표시</td></tr>
+</table>
+
+<h3>R-4 <span class="lv l">낮</span> 두 스캔 사이 계통적 위치 이동</h3>
+<table>
+<tr><td style="width:16%"><b>조건</b></td><td>기준·검증이 다른 장비 또는 다른 layer(PI ↔ RDL)</td></tr>
+<tr><td><b>영향</b></td><td>계통 이동이 허용 오차를 넘으면 <b>좌표가 정확해도 매칭 실패</b></td></tr>
+<tr><td><b>현재 실측</b></td><td>17호기↔18호기 0.2~7 µm (문제 없음). layer 간은 미측정</td></tr>
+<tr><td><b>현재 방어</b></td><td><code>±1</code> die 게이트가 die 단위 어긋남만 흡수. <b>거리 보정은 없음</b></td></tr>
+<tr><td><b>제안</b></td><td>§8-3 median offset 보정 도입</td></tr>
+</table>
+
+<h3>R-5 <span class="lv l">낮</span> 미검증 입력 조건</h3>
+<table>
+<tr><td style="width:16%"><b>조건</b></td><td><code>EBR≠0</code> · 300 mm 아닌 웨이퍼 · KLA notch UP · mirrored YES</td></tr>
+<tr><td><b>영향</b></td><td>EBR·직경은 원점 이동. KLA 방향은 <b>y 축 뒤집기가 반대</b>가 되어 die 내부 좌표가 크게 틀림</td></tr>
+<tr><td><b>현재 방어</b></td><td>없음 — 해당 필드를 읽지 않음</td></tr>
+<tr><td><b>검출</b></td><td>KLA 방향이 다르면 die 내부 거리가 크게 벌어져 매칭 실패로 드러남</td></tr>
+</table>
+
+<h3>R-6 <span class="lv n">정보</span> 장비 간 die 간격 차이</h3>
+<table>
+<tr><td style="width:16%"><b>관측</b></td><td>T254 에서 Camtek <code>14400.1</code> vs KLA <code>14406.5</code> (0.044 %)</td></tr>
+<tr><td><b>영향</b></td><td>die 안쪽 끝에서 최대 13.6 µm 차이. '거의 정확히 일치' 반경 20 µm 에 근접</td></tr>
+<tr><td><b>판단</b></td><td>현재는 문제 없음. die 가 더 큰 자재에서 이 비율이 유지되면 20 µm 를 넘을 수 있음</td></tr>
+</table>
+</section>
+
+<!-- ============================ 8 ============================ -->
+<section>
+<h2>8. 앞으로 필요한 것과 개선안</h2>
+
+<h3>8-1. 필요한 자료 (우선순위)</h3>
+<table>
+<tr><th style="width:5%">#</th><th style="width:27%">자료</th><th style="width:30%">무엇이 닫히나</th>
+    <th style="width:24%">없으면 대안</th><th style="width:14%">난이도</th></tr>
+<tr><td>1</td><td><b>3번째 자재의 장비 화면 좌표 1건</b><br>
+    <small>+ 그 폴더 <code>Params_WaferInfo.ini</code> · <code>Wafer2Table.ini</code></small></td>
+    <td><b>R-1</b> — 규칙 자체의 일반성. die 크기가 많이 다를수록 강함</td>
+    <td>새 자재마다 1장씩 대조하며 운영</td><td>낮</td></tr>
+<tr><td>2</td><td><code>EBR ≠ 0</code> 인 자재 세트</td><td><b>R-5</b> — 유효 직경 처리</td>
+    <td>EBR 5 mm 까지는 결과 불변 확인됨</td><td>낮</td></tr>
+<tr><td>3</td><td>300 mm 아닌 웨이퍼</td><td><b>R-5</b> — 직경 일반성</td><td>현재 전 자재 300 mm</td><td>중</td></tr>
+<tr><td>4</td><td>PI ↔ RDL 같은 결함 쌍<br><small>(layer 간, 사진으로 확인)</small></td>
+    <td><b>R-4</b> — layer 간 계통 이동의 실제 크기</td><td>보정 기능을 넣고 로그로 관찰</td><td>중</td></tr>
+<tr><td>5</td><td>KLA notch UP 또는 mirrored YES 인 <code>.001</code></td><td><b>R-5</b> — 축 방향 일반성</td>
+    <td>발생 시 매칭 실패로 드러남</td><td>낮</td></tr>
+<tr><td>6</td><td><code>Wafer2Table.ini</code> 가 <b>없는</b> 스캔 폴더</td>
+    <td><b>R-3</b> — 폴백이 실제로 얼마나 자주 쓰이나</td><td>—</td><td>낮</td></tr>
+</table>
+
+<div class="box hi">
+<h4>가장 효율적인 방법 — "새 자재 1장 점검"</h4>
+<p>자료를 미리 다 모을 필요는 없습니다. <b>새 자재를 처음 쓸 때 한 번만</b> 결함 사진 1장을
+단일 사진 정보에 넣고 장비 화면과 대조하면 <b>1·2·3번을 한꺼번에</b> 덮습니다.
+맞으면 그 자재는 끝, 틀리면 그 폴더의 두 INI 와 함께 보고하면 즉시 교정 가능합니다.</p>
+</div>
+
+<h3>8-2. 자료 없이 지금 넣을 수 있는 방어</h3>
+<p>전부 <b>추측이 아니라 모순·근접 감지</b>입니다. 새 자재에서 조용히 틀리는 것을 막습니다.</p>
+<table>
+<tr><th style="width:6%"></th><th style="width:26%">기능</th><th style="width:38%">동작</th><th style="width:30%">잡는 리스크</th></tr>
+<tr><td><b>a</b></td><td>경계 여유 경고</td>
+    <td>웨이퍼 끝이 die 경계에서 5 % 이내면 "이 자재는 원점이 흔들릴 수 있음" 안내</td>
+    <td><b>R-2</b> — 경계 자재</td></tr>
+<tr><td><b>b</b></td><td>추정값 표시</td>
+    <td>중심 정보가 없어 폴백을 탄 경우 <code>row 7 (추정)</code> 처럼 확정값이 아님을 명시</td>
+    <td><b>R-3</b> — 폴백 오류</td></tr>
+<tr><td><b>c</b></td><td>커버리지 신호</td>
+    <td>결함이 넓게 퍼졌는데 <code>col</code>/<code>row</code> 가 0 에 한 번도 안 닿으면
+        "원점이 1 클 수 있음" 안내</td>
+    <td><b>R-1·R-3</b> 조기 검출</td></tr>
+</table>
+<p><small><b>(c) 의 실증</b> — 현재 <code>dev/좌표 확인</code> 폴더가 이 신호에 걸립니다
+(row 가 1..6 으로 0 에 안 닿음). 그 폴더는 <b>실제로 원점이 1 큰 상태</b>이므로 신호가 옳게
+작동합니다. 다만 결함이 적은 웨이퍼에서는 헛경고가 나므로 충분히 퍼진 경우에만 떠야 합니다.</small></p>
+
+<h3>8-3. 매칭 개선 — layer 간 계통 이동 보정</h3>
+<p>참고 저장소(<code>king-taek/Defect_Tracking</code>)의 <code>matcher.py</code> 에 이 저장소에
+없는 유용한 기능이 있습니다. PI ↔ RDL 처럼 <b>다른 layer 사이에서 같은 결함을 잘 찾는 이유</b>가
+이것입니다.</p>
+<pre>1. ±1 die 안에 후보가 정확히 1개인 쌍만 모은다        (모호한 건 제외)
+2. 그 쌍들의 dx, dy 의 중앙값 = 두 스캔의 계통 이동량
+3. 매칭은 그 이동량을 뺀 잔차로 판정                    (거리 보고는 보정 전 실제 거리)
+
+   안전장치:  표본 ≥ 3쌍  ·  MAD ≤ 허용오차(일관성)  ·  |이동량| ≤ 상한
+              상한을 넘으면 정합오차가 아니라 die 라벨링 불일치 → 보정하지 않음</pre>
+<table>
+<tr><th style="width:30%">항목</th><th style="width:35%">참고 저장소</th><th style="width:35%">이 저장소에 넣을 때</th></tr>
+<tr><td>도입 가치</td><td>좌표가 상수 기반이라 <b>필수</b></td>
+    <td>좌표는 이미 정확 → <b>물리적 정렬 차이</b> 대응용</td></tr>
+<tr><td>이동량 상한</td><td>1000 µm</td><td><b>더 낮게</b> (허용오차 수준). 이 저장소에서 큰
+    이동량은 보정 대상이 아니라 <b>경고 신호</b></td></tr>
+<tr><td>부수 효과</td><td>—</td><td>지금 <code>±1</code> 게이트가 조용히 흡수하던 어긋남이
+    <b>측정값으로 드러남</b></td></tr>
+</table>
+
+<div class="box warn">
+<h4>참고 저장소와의 좌표식 비교 — 방향은 반대</h4>
+<p>좌표 <b>계산</b> 자체는 참고 저장소가 이 저장소의 <b>과거 방식</b>입니다:
+제품 프로파일 상수(<code>pitch</code>·<code>col_offset=2</code>·<code>row_base=7</code>)를 쓰고,
+die 인덱스를 INI <code>Col</code>/<code>Row</code> 필드에서 가져옵니다. 이 저장소는 그 네 가지를
+전부 실측으로 반증하고 파일 유도로 바꿨습니다 (<code>row_base=7</code> 은 T254 정답 10 과 3 차이).</p>
+<p>단, <b>KLA <code>zeroY</code> 는 참고 저장소가 맞았습니다</b> — <code>SampleTestPlan</code>
+최소값에서 뽑는 방식이 실측 5웨이퍼에서 이 저장소의 기하 유도와 같은 답을 냅니다.
+이 저장소는 오늘까지 상수 <code>4</code> 를 쓰고 있었습니다.</p>
+</div>
+
+<h3>8-4. 권장 순서</h3>
+<table>
+<tr><th style="width:8%">순서</th><th style="width:36%">할 일</th><th style="width:20%">필요 자료</th><th style="width:36%">효과</th></tr>
+<tr><td class="ctr">1</td><td>자동 방어 (a)(b)(c) 구현</td><td class="ok">불필요</td>
+    <td>새 자재에서 조용히 틀리는 것을 차단</td></tr>
+<tr><td class="ctr">2</td><td>3번째 자재 장비 화면 대조</td><td>사진 1장 + INI 2개</td>
+    <td>가장 큰 커버리지 공백(R-1)을 메움</td></tr>
+<tr><td class="ctr">3</td><td>median offset 보정 도입</td><td class="ok">불필요</td>
+    <td>layer 간 매칭 강건성 + 계통 이동 가시화</td></tr>
+<tr><td class="ctr">4</td><td>나머지 조건 자료 수집</td><td>EBR·직경·notch</td><td>장기 일반성 확보</td></tr>
+</table>
+</section>
+
+<!-- ============================ 9 ============================ -->
+<section>
+<h2>9. 부록</h2>
+
+<h3>9-1. 용어</h3>
+<table>
+<tr><th style="width:22%">용어</th><th>뜻</th></tr>
+<tr><td><code>x_index</code> / <code>y_index</code></td><td>절대 좌표를 die 간격으로 나눈 몫. 장비 좌표계에 고정된 격자 칸 번호</td></tr>
+<tr><td><code>col_origin</code></td><td>웨이퍼에 <b>온전히 들어오는 첫 열</b>의 격자 번호. <code>col = x_index − col_origin</code></td></tr>
+<tr><td><code>row_total</code></td><td>웨이퍼에 <b>온전히 들어오는 마지막 행</b>의 격자 번호. <code>row = row_total − y_index</code></td></tr>
+<tr><td><code>zero_x</code> / <code>zero_y</code></td><td>KLA 쪽 같은 개념. <code>col = XINDEX + zero_x</code></td></tr>
+<tr><td>die 내부 좌표</td><td>die 왼쪽 아래 모서리 기준 위치(µm). 매칭 거리 계산에 사용</td></tr>
+<tr><td>골든 테스트</td><td>과거 확정된 장비 정답 4사례를 회귀 방지용으로 고정해 둔 테스트</td></tr>
+</table>
+
+<h3>9-2. 코드·자료 위치</h3>
+<table>
+<tr><th style="width:38%">경로</th><th>내용</th></tr>
+<tr><td><code>app/coords/wafer_geometry.py</code></td><td>die 격자 기하 결정 — pitch·중심·원점의 우선순위 사슬</td></tr>
+<tr><td><code>app/coords/camtek_ini.py</code></td><td>Camtek INI → 좌표 변환</td></tr>
+<tr><td><code>app/coords/camtek_live.py</code></td><td>파일명에 박힌 col/row 파싱</td></tr>
+<tr><td><code>app/coords/kla_info.py</code></td><td>KLA <code>.001</code> → 좌표 변환</td></tr>
+<tr><td><code>app/workers/coord_matcher.py</code></td><td>좌표 기반 매칭 (<code>±1</code> die 게이트)</td></tr>
+<tr><td><code>dev/tests/test_wafer_geometry.py</code></td><td>기하 회귀 가드 (골든·실물·폴백·거부)</td></tr>
+<tr><td><code>dev/tests/test_coords.py</code></td><td>변환 회귀 가드 + 실측 쌍 정렬</td></tr>
+<tr><td><code>docs/디바이스_하드코딩_조사.md</code></td><td>전체 조사 기록 (§1 ~ §6-L)</td></tr>
+<tr><td><code>docs/규칙_배경.md</code></td><td>각 규칙이 생긴 사고 기록</td></tr>
+<tr><td><code>docs/RDL4 LOT files…</code> / <code>Camtek 좌표 예시(T254)</code> / <code>KLA 좌표 예시…</code></td>
+    <td>실측 자료 원본</td></tr>
+</table>
+
+<h3>9-3. 변경 연표 (좌표 관련)</h3>
+<table>
+<tr><th style="width:14%">날짜</th><th style="width:38%">변경</th><th style="width:48%">계기</th></tr>
+<tr><td>2026-07-14</td><td>Camtek row +1 오표기 수정</td><td>사용자 신고</td></tr>
+<tr><td>2026-07-31</td><td>die 격자 기하를 폴더에서 읽어 TB500 하드코딩 제거</td><td>다른 device 에서 좌표 전부 틀림</td></tr>
+<tr><td>2026-07-31</td><td>row 변환 교정(<code>7−Row</code>) + pitch 검산 도입</td><td>장비 화면 판독</td></tr>
+<tr><td>2026-07-31</td><td>row 기준을 <code>ceil(직경/pitch)</code> 유도로</td><td>사용자 도출 규칙 4사례</td></tr>
+<tr><td>2026-07-31</td><td>die 인덱스를 좌표에서 유도 (INI 필드 사용 중단)</td><td>레시피마다 <code>Row</code> 원점이 다름</td></tr>
+<tr><td>2026-08-01</td><td>파일명 row 의 <code>−1</code> 정규화 제거</td><td>같은 결함이 매치 실패</td></tr>
+<tr><td>2026-08-01</td><td><code>col_origin</code> 을 <code>Center_X</code> 에서 유도</td><td>상수 2 가 음수 col 을 냄</td></tr>
+<tr><td>2026-08-04</td><td><code>row_total</code> 을 <code>Center_Y</code> 에서 유도</td><td>사용자 신고 (5,5 vs 5,4)</td></tr>
+<tr><td>2026-08-04</td><td>KLA 원점을 <code>SampleCenterLocation</code> 에서 유도</td><td>상수 4 가 TB500 에서 틀림</td></tr>
+<tr><td>2026-08-05</td><td><code>Wafer2Table.ini</code> 를 중심 2순위 소스로 추가</td><td><code>Center_*</code> 미기록 스캔 대응</td></tr>
+</table>
+
+<div class="foot" style="margin-top:22px">
+이 보고서는 저장소의 실측 자료와 테스트를 근거로 작성됐습니다. 수치는 모두 재현 가능하며,
+근거가 되는 원본 파일은 <code>docs/</code> 아래에 함께 보관돼 있습니다.<br>
+검증 상태가 바뀌면 <code>docs/디바이스_하드코딩_조사.md</code> 와 이 보고서를 함께 갱신하십시오.
+</div>
+</section>
+
+</body></html>
