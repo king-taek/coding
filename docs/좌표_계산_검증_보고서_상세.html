@@ -222,8 +222,10 @@ footer.colophon{margin-top:2.4rem;padding-top:1rem;border-top:2px solid var(--ru
     <td>장비 확인 KLA↔Camtek 대응 7건 / 2 device</td></tr>
 <tr><td class="k">웨이퍼 중심<br><code>Center_X/Y</code></td>
     <td><code>0.000000</code>(미기록)이면 추측에 의존</td>
-    <td>미기록 자재 전부가 추측값</td>
-    <td><code>Wafer2Table.ini</code> 6건 + 장비 화면 2건</td></tr>
+    <td>미기록 자재 전부가 추측값<br>
+        <small>실측: PI2 2장에서 추측값이 실제로 1 큼</small></td>
+    <td><code>Wafer2Table.ini</code> 6건 + 장비 화면 2건<br>
+        <small>+ PI 계열 전수 35장 (<a class="ref" href="#s4">자료 G</a>)</small></td></tr>
 </tbody></table></div>
 
 <h3>지금 상태 한 줄</h3>
@@ -582,7 +584,8 @@ pitch 를 쓰면 die 내부 y 가 최대 11.4 µm 더 정확</strong>해집니�
 <tr><td>UDS-PIDS3<br><code>35115E27EWD7</code></td>
     <td><code>Wafer2Table.ini</code> 역산<br><small>중심 → 기준 유도</small></td>
     <td class="ctr">—</td><td class="ctr">—</td><td class="ctr">7</td>
-    <td><span class="v wa">약 — 아래 참조</span></td></tr>
+    <td><span class="v wa">중</span> — 유도값<br>
+        <small>장비 정답은 아니지만<br>같은 로트 25장이 같은 값</small></td></tr>
 </tbody></table></div>
 
 <p>앞의 세 건은 <strong>장비가 직접 낸 숫자</strong>라 중심 추정이 개입하지 않습니다.
@@ -590,9 +593,10 @@ pitch 를 쓰면 die 내부 y 가 최대 11.4 µm 더 정확</strong>해집니�
 <strong>0.001 µm 이내</strong>로 일치해 같은 결함임이 확실합니다.
 <strong>따라서 “PI4 계열 row 기준 = 7” 은 UDS-PIDS3 자료가 없어도 성립합니다.</strong></p>
 
-<div class="note amber">
-<span class="lbl">UDS-PIDS3 중심값 224,380 의 출처 — 근거가 약한 항목</span>
-<p>이 값은 <strong>파일에 적힌 값이 아니라 계산값</strong>입니다. 출처를 그대로 적습니다.</p>
+<h4>UDS-PIDS3 중심값 224,380 — 출처와 그 뒤 확인</h4>
+<div class="note">
+<span class="lbl">출처 — 파일에 적힌 값이 아니라 계산값이다</span>
+<p>출처를 그대로 적습니다.</p>
 <pre>파일  Y:\AOI-24\Scanresult\R_TB500_LIVE_PI4\Setup1\UDS-PIDS3\35115E27EWD7\Wafer2Table.ini
       (저장소 사본: _wafer2table_모음/Wafer2Table_6건.md 127~152행 · 정렬 저장 07/04/26 01:46)
 
@@ -604,12 +608,53 @@ pitch 를 쓰면 die 내부 y 가 최대 11.4 µm 더 정확</strong>해집니�
 2단계  중심 = M⁻¹·(−t) = (204,698.0, <b>224,379.8</b>)   ← 224,380 의 출처
 3단계  행렬을 안 쓰고 앵커 5점만 최소제곱 적합해 재산출
        → (204,697.8, 224,379.4)   두 경로 차이 <b>0.42 µm</b></pre>
-<p style="margin-bottom:0"><strong>남는 약점 두 가지</strong> —
-① <strong>웨이퍼 한 장</strong>의 측정값입니다. <code>Wafer2Table</code> 은 웨이퍼마다 측정되는 값이고
-(T254 에서 웨이퍼 간 99 µm 편차 관측), 이 로트에서는 표본이 1개뿐이라
-<strong>“PI 레시피의 중심” 이라고 일반화할 수 없습니다.</strong>
-② <strong>die 간격이 가정</strong>입니다 — 그 웨이퍼의 <code>Params_WaferInfo.ini</code> 가 없어
-같은 job 의 <em>다른 로트</em>(TBD-PIDS3 <code>25195007EWF6</code>, <code>PI_Bubble</code>)에서 가져왔습니다.</p>
+<p style="margin-bottom:0">당시 약점은 두 가지였습니다 — ① 웨이퍼 <strong>한 장</strong>의 측정값이라 일반화 불가,
+② <strong>die 간격이 가정</strong>(그 웨이퍼의 <code>Params_WaferInfo.ini</code> 가 없어 같은 job 의
+다른 로트에서 빌려 씀). <strong>둘 다 자료 G 로 해소됐습니다</strong>(바로 아래).</p>
+</div>
+
+<div class="note blue">
+<span class="lbl">자료 G 로 해소된 것 — 35 웨이퍼 / 11 로트 / 6 job</span>
+<table style="margin:.4rem 0 .6rem"><tbody>
+<tr><td style="width:32%;color:var(--ink);font-weight:700">die 간격 가정</td>
+    <td><code>35115E27EWD7</code> 의 <code>Params_WaferInfo.ini</code> 가 들어 있고
+    <code>DieStep = 37247.7 × 44905.4</code> — <strong>빌려 온 값과 정확히 일치</strong>.
+    가정이 사라졌습니다</td></tr>
+<tr><td style="color:var(--ink);font-weight:700">표본 1장</td>
+    <td>같은 로트(<code>UDS-PIDS3</code>) <strong>25장</strong>의 중심 편차
+    <strong>X 78 µm / Y 97 µm</strong> — T254 에서 3장으로 잰 99 µm 와 같은 수준</td></tr>
+<tr><td style="color:var(--ink);font-weight:700">경계 여유</td>
+    <td>중심Y 실측 224,306~224,403 이고 <code>row_total=7</code> 유지 구간은 209,243~254,149 —
+    가장 가까운 경계까지 <strong>15,063 µm</strong>, 웨이퍼 간 편차의 <strong>155배</strong></td></tr>
+</tbody></table>
+<p style="margin-bottom:0">즉 이 값은 이제 <strong>한 장짜리 추정이 아니라 25장 통계</strong>입니다.
+다만 <strong>장비 정답이 늘어난 것은 아닙니다</strong> — 자료 G 에는 화면 판독도, 장비가 적은
+파일명도 없습니다. “PI4 계열 row 기준 = 7” 을 떠받치는 것은 여전히 위 표의 <strong>장비 근거 3건</strong>입니다.</p>
+</div>
+
+<h4 id="nocls">이 표를 “제품군별 상수표” 로 읽지 말 것</h4>
+<div class="note red">
+<span class="lbl">중요 — 앱은 제품군을 모른다</span>
+<p>자료 G 의 실물 <strong>35장</strong>에 앱의 유도식을 그대로 돌리면 아래처럼 갈립니다.
+<strong>제품군 분류표를 준 적이 없는데</strong> 폴더마다 자기
+<code>Wafer2Table.ini</code> 로 계산한 결과입니다.</p>
+<pre>job                                 n    (col_origin, row_total)   중심Y 실측
+
+R_TB500_LIVE_PI2                    1         (2, <b>6</b>)          179,513
+R_TB500_LIVE_PI2 AOI-21 Copy _0614  1         (2, <b>6</b>)          179,680
+R_TB500_LIVE_PI3                    1         (2, <b>7</b>)          224,691
+R_TB500_LIVE_PI3 - Enhanced         1         (2, <b>7</b>)          224,497
+R_TB500_LIVE_PI4                   29         (2, <b>7</b>)          224,306 ~ 224,722
+R_TB500_LIVE_PI4 AOI-21 Copy_0614   2         (2, <b>7</b>)          224,571 ~ 224,572
+
+                                              PI2 와 나머지의 중심Y 차이 ≈ 44.9 mm
+                                              = die 한 칸(44,905 µm)</pre>
+<p style="margin-bottom:0">이건 <strong>계산 결과를 사후에 관찰한 것</strong>이지 코드에 넣을 규칙이 아닙니다.
+“PI2 는 6, PI3·PI4 는 7” 같은 제품군 표를 만들면
+<strong>처음에 문제였던 TB500 하드코딩을 반복</strong>하게 됩니다 —
+그때도 “TB500 은 4” 가 실측에서는 3 이었습니다.
+값은 언제나 그 폴더의 파일에서 계산합니다.
+<strong>다음에 오는 PI 웨이퍼가 6 일지 7 일지는 그 폴더를 열어 봐야 압니다.</strong></p>
 </div>
 
 <h3>④ 이미 확보된 정확도</h3>
@@ -774,8 +819,9 @@ pitch 를 쓰면 die 내부 y 가 최대 11.4 µm 더 정확</strong>해집니�
     · 앵커 3~5점이 어파인 변환을 <strong>2.7 µm</strong> 안에 재현 → 변환 방향 확정</td></tr>
 <tr><td style="color:var(--danger)">한계</td><td>· 4개 제품군만 커버, <strong>제품군당 표본이 1~3장</strong><br>
     · <code>Wafer2Table</code> 은 <strong>웨이퍼마다 측정되는 값</strong> — 한 장으로 레시피 값을 단정할 수 없음<br>
-    · UDS-PIDS3 · LLN 은 <strong>1장뿐</strong>이고 같은 웨이퍼의 <code>Params_WaferInfo.ini</code> 도 없음
-      → <a class="ref" href="#pi7">중심 224,380 은 근거가 약한 항목</a><br>
+    · LLN 은 <strong>1장뿐</strong><br>
+    · <s>UDS-PIDS3 도 1장뿐이고 같은 웨이퍼의 <code>Params_WaferInfo.ini</code> 가 없음</s>
+      → <strong>자료 G 로 해소</strong>(같은 로트 25장 + 그 웨이퍼 자신의 <code>Params_WaferInfo.ini</code>)<br>
     · <code>Wafer2Table.ini</code> 이 <strong>없는</strong> 스캔이 있는지 미확인<br>
     · 17호기 두 건은 데스크톱 사본이라 원본 스캔 폴더 경로가 아님</td></tr>
 </tbody></table></div>
@@ -808,6 +854,59 @@ pitch 를 쓰면 die 내부 y 가 최대 11.4 µm 더 정확</strong>해집니�
 </tbody></table></div>
 </div>
 
+<div class="src">
+<header><span class="id">자료 G</span><h3>PI 계열 INI 전수 — 35 웨이퍼 · 6 장비</h3>
+<span class="when">2026-08-05 수령</span></header>
+<div class="tw"><table class="kv"><tbody>
+<tr><td>저장 위치</td><td><code>docs/PI 계열 INI 모음(35웨이퍼)/AOI_INI_통합본.md</code> (128 KB)</td></tr>
+<tr><td>원본 경로</td><td>6개 장비 · 6개 job 의 <code>Scanresult\…\Setup1</code> 아래 <strong>71개 경로</strong><br>
+    <code>Y:\AOI-24\…\R_TB500_LIVE_PI4</code> (52) ·
+    <code>P:\AOI-17\…\R_TB500_LIVE_PI4</code> (3) ·
+    <code>Y:\AOI-25\…\{PI2,PI3,PI4}</code> (6) ·
+    <code>P:\AOI-22\…</code> (4) · <code>P:\AOI-23\…</code> (4) ·
+    <code>P:\AOI-18\…\R_TB500_LIVE_PI4</code> (2)</td></tr>
+<tr><td>수집 시각</td><td>보고서 생성 <code>2026-08-05 19:58</code> ·
+    파일 자체의 마지막 수정은 <code>2026-04-25 07:34</code> ~ <code>2026-08-05 06:22</code></td></tr>
+<tr><td>구성</td><td><strong>웨이퍼 35장 / lot 11개 / job 6개</strong><br>
+    <code>Wafer2Table.ini</code> <strong>35</strong>장 (전수) ·
+    <code>Params_WaferInfo.ini</code> <strong>34</strong>장
+    (<code>TUM-PIDS3\30185773EWE4</code> 만 없음) ·
+    <code>ColorImageGrabingInfo.ini</code> <strong>2</strong>장
+    (<code>29265187EWF2</code> · <code>35115E27EWD7</code>)</td></tr>
+<tr><td>수록 정보</td><td>파일 전문 그대로 — 어파인 변환 행렬 · 앵커점 · 정합 잔차 ·
+    <code>DieStep_X/Y</code> · <code>Diameter</code> · <code>EBR</code> · <code>Center_X/Y</code> ·
+    2장은 결함별 절대 X/Y 와 INI <code>Col</code>/<code>Row</code> 까지</td></tr>
+<tr><td style="color:var(--blue)">핵심 자료</td><td><strong><code>35115E27EWD7</code> 의
+    <code>Params_WaferInfo.ini</code> 포함</strong> —
+    <a class="ref" href="#pi7">중심 224,380</a> 을 계산할 때 die 간격을 다른 로트에서
+    빌려 왔던 <strong>바로 그 웨이퍼</strong></td></tr>
+<tr><td>증명한 것</td><td>· <strong>die 간격 가정 소거</strong> —
+    그 웨이퍼 자신의 <code>DieStep = 37247.7 × 44905.4</code>,
+    빌려 온 값과 <strong>소수점까지 동일</strong><br>
+    · <strong>표본 1장 → 25장</strong> — 같은 로트(<code>UDS-PIDS3</code>) 중심 편차
+    <strong>X 78 µm / Y 97 µm</strong> (T254 3장에서 잰 99 µm 와 같은 수준)<br>
+    · <strong>경계 여유 15,063 µm</strong> — 웨이퍼 간 편차의 <strong>155배</strong><br>
+    · 유도식이 <strong>제품군 정보 없이</strong> job 별로 갈린 값을 냄
+      (<a class="ref" href="#nocls">아래</a>)<br>
+    · <a class="ref" href="#s7">R-4</a> 폴백이 <strong>실제로 틀리는 사례</strong> 2건 확보</td></tr>
+<tr><td>관측된 것<br><small>단정이 아니라 표본 사실</small></td>
+    <td><code>Params_WaferInfo.ini</code> 34장 전부 <code>Center_X = Center_Y = 0.000000</code> —
+    <strong>기록된 것을 한 장도 발견하지 못했습니다.</strong>
+    <span style="color:var(--danger)">우연히 이 표본에만 없는 것일 수 있으므로</span>
+    “PI 계열에는 기록되지 않는다” 고 <strong>단정하지 않습니다.</strong>
+    코드도 이 관측에 의존하지 않습니다 — <code>Center_*</code> 가 있으면 그것을 1순위로 쓰고,
+    0 일 때만 <code>Wafer2Table.ini</code> 로 내려갑니다</td></tr>
+<tr><td style="color:var(--danger)">한계</td><td>· <strong>장비 정답이 0건</strong> —
+    화면 판독도, 장비가 적은 파일명도 없음. 유도식의 <em>입력</em>을 늘렸을 뿐
+    <em>결론</em>을 새로 검증하진 못함<br>
+    · 결함 좌표가 있는 폴더가 <strong>2장뿐</strong> → 나머지 33장은
+      격자 불변식으로 교차 확인할 수 없음<br>
+    · TB500 계열 <strong>한 device</strong> 안의 표본 — <a class="ref" href="#s7">R-1</a> 은 그대로<br>
+    · <code>Center_*</code> 기록값과 대조한 건 <strong>0건</strong>
+      (전부 <code>0.000000</code>) → RDL4 에서 했던 140 µm 교차 확인은 여기서 못 함</td></tr>
+</tbody></table></div>
+</div>
+
 <h3>자료 요약</h3>
 <div class="tw"><table>
 <thead><tr><th class="ctr" style="width:8%">자료</th><th style="width:24%">무엇</th>
@@ -825,9 +924,14 @@ pitch 를 쓰면 die 내부 y 가 최대 11.4 µm 더 정확</strong>해집니�
 <tr><td class="k ctr">E</td><td>정렬 변환</td><td class="num">—</td><td>4 제품군</td>
     <td>C 의 정답 웨이퍼 포함</td></tr>
 <tr><td class="k ctr">F</td><td>폴더 목록</td><td class="num">—</td><td>T254</td><td>—</td></tr>
+<tr><td class="k ctr">G</td><td>PI 계열 INI 전수<br><small>35 웨이퍼 · 6 장비</small></td>
+    <td class="num">—<br><small>2장만 결함 포함</small></td><td>TB500 (PI2·PI3·PI4)</td>
+    <td><span class="v no">0 건</span> — 유도식 <strong>입력</strong>을 넓힌 자료</td></tr>
 </tbody></table></div>
 <p><small>장비 정답 13건 중 <strong>die 내부 x·y 를 담은 것은 자료 B 의 4건뿐</strong>이고,
-그것도 장비 화면이 아니라 장비가 파일명에 적은 값입니다.</small></p>
+그것도 장비 화면이 아니라 장비가 파일명에 적은 값입니다.
+<strong>자료 G 는 장비 정답을 늘리지 않습니다</strong> — 같은 유도식을 훨씬 넓은 표본에 돌려
+흔들리지 않는지 본 것이라, 13건이라는 정답 개수는 그대로입니다.</small></p>
 </section>
 
 <!-- ══ 5 ══ -->
@@ -864,7 +968,26 @@ pitch 를 쓰면 die 내부 y 가 최대 11.4 µm 더 정확</strong>해집니�
     <td class="ctr"><span class="v ok">140 µm 이내</span></td><td>1순위·2순위가 어긋나지 않음</td></tr>
 <tr><td>die 기하 확정 성공률</td><td class="ctr">9 폴더</td>
     <td class="ctr"><span class="v ok">9 / 9</span></td><td>실제 폴더에서 폴백 없이 결정됨</td></tr>
+<tr><td>중심 유도 성공률 <small>(자료 G)</small></td><td class="ctr">35 웨이퍼 / 11 로트</td>
+    <td class="ctr"><span class="v ok">35 / 35</span></td>
+    <td><code>Wafer2Table.ini</code> 만으로 중심·원점이 전수 결정됨</td></tr>
+<tr><td>로트 안 원점 일관성 <small>(자료 G)</small></td><td class="ctr">UDS-PIDS3 25장</td>
+    <td class="ctr"><span class="v ok">전부 <code>(2, 7)</code></span></td>
+    <td>중심이 97 µm 흔들려도 결과가 같음 — 여유 15,063 µm</td></tr>
+<tr><td>job 간 원점 분리 <small>(자료 G)</small></td><td class="ctr">6 job</td>
+    <td class="ctr"><span class="v ok">PI2 만 6</span></td>
+    <td>제품군 정보 없이도 중심 차이(die 한 칸)를 그대로 반영</td></tr>
 </tbody></table></div>
+<div class="note">
+<span class="lbl">자료 G 의 검산이 <u>아닌</u> 것</span>
+<p style="margin-bottom:0">위 세 줄은 <strong>유도식이 흔들리지 않는다</strong>는 것이지
+<strong>맞다</strong>는 것이 아닙니다 — 자료 G 에는 장비 정답이 0건이고, 결함 좌표가 있는 폴더도
+2장뿐이라 나머지 33장은 격자 불변식으로 교차 확인할 수 없습니다.
+따라서 위의 <strong>장비 정답 13 / 13 은 자료 G 로 늘어나지 않았습니다.</strong>
+자료 G 가 실제로 바꾼 것은 ① 중심 224,380 이 1장 추정 → 25장 통계가 된 것,
+② die 간격 가정이 사라진 것, ③ 폴백이 틀리는 사례가 나온 것
+(<a class="ref" href="#s7">R-4</a>) 셋입니다.</p>
+</div>
 
 <h3>경계까지의 여유 — 원점이 1 튀려면 얼마나 움직여야 하나</h3>
 <div class="tw"><table>
@@ -967,8 +1090,10 @@ pitch 를 쓰면 die 내부 y 가 최대 11.4 µm 더 정확</strong>해집니�
 <tr><td class="k">die 내부 x·y</td><td>소스 간 상호 대조만</td><td><strong>장비 정답 대조 0건</strong></td></tr>
 <tr><td class="k">웨이퍼 직경</td><td>300 mm 만</td><td>200 mm 등</td></tr>
 <tr><td class="k">EBR</td><td>0 만 (모의로 5 mm 까지 확인)</td><td>실제 <code>EBR≠0</code> 자재</td></tr>
-<tr><td class="k">중심 소스</td><td>3경로 전부 (<code>Center_*</code> · <code>Wafer2Table</code> · 폴백)</td>
-    <td>세 경로가 <strong>서로 어긋나는</strong> 사례</td></tr>
+<tr><td class="k">중심 소스</td><td>3경로 전부 (<code>Center_*</code> · <code>Wafer2Table</code> · 폴백)<br>
+    <small><code>Wafer2Table</code> 경로는 41 웨이퍼 (6 + 35)</small></td>
+    <td>세 경로가 <strong>서로 어긋나는</strong> 사례<br>
+    <strong><code>Wafer2Table.ini</code> 도 없는 스캔</strong> — 실물 미확보</td></tr>
 <tr><td class="k">KLA 방향</td><td>notch DOWN · mirrored NO 만</td><td>UP · mirrored YES</td></tr>
 <tr><td class="k">파일명 스키마</td><td>결함이름만 붙는 형태</td>
     <td><strong>크기·면적이 붙는 형태</strong> — 실물 미확보</td></tr>
@@ -1001,9 +1126,13 @@ pitch 를 쓰면 die 내부 y 가 최대 11.4 µm 더 정확</strong>해집니�
     <td>레시피별 pitch 미반영</td>
     <td>다른 배율 레시피로 찍은 사진의 die 내부 y 가 최대 <strong>11.4 µm</strong> 어긋남</td>
     <td>장비 규약 미확인이라 의도적으로 보류</td></tr>
-<tr><td class="ctr"><span class="chip l">낮</span></td><td class="k">R-4</td>
-    <td>중심 정보가 아예 없는 스캔</td>
-    <td><code>Center_*</code> · <code>Wafer2Table</code> 둘 다 없음 → 폴백이 자재에 따라 틀림</td>
+<tr><td class="ctr"><span class="chip m">중</span><br><small>낮 → 중</small></td><td class="k">R-4</td>
+    <td>중심 정보가 아예 없는 스캔 →
+        <strong>폴백이 틀리는 것이 실측으로 확인됨</strong></td>
+    <td><code>Center_*</code> · <code>Wafer2Table</code> 둘 다 없으면
+        <code>ceil(직경/pitch_y)</code> 로 폴백. 자료 G 의 <strong>PI2 2장</strong>에서
+        폴백은 <strong>7</strong>, 실제 계산값은 <strong>6</strong> —
+        <strong>row 가 통째로 1 밀림</strong>. col/row 는 자체모순이 없어 조용히 통과</td>
     <td>경고 로그만, 화면 표시 없음</td></tr>
 <tr><td class="ctr"><span class="chip l">낮</span></td><td class="k">R-5</td>
     <td>미검증 입력 조건</td>
@@ -1020,6 +1149,18 @@ pitch 를 쓰면 die 내부 y 가 최대 11.4 µm 더 정확</strong>해집니�
 <span class="chip h">높</span> 값이 크게 틀리는데 조용히 지나감 ·
 <span class="chip m">중</span> 표기가 틀릴 수 있고 검증 근거가 얇음 ·
 <span class="chip l">낮</span> 이론적 가능성은 있으나 실측 여유가 큼</small></p>
+
+<div class="note red">
+<span class="lbl">R-4 등급 조정 — 자료 G 로 “이론상” 이 “실측” 이 됐다</span>
+<p style="margin-bottom:0">이전에는 폴백 <code>ceil(직경/pitch_y)</code> 가 <em>틀릴 수도 있다</em> 는 이론적
+가능성이었고, 확보된 자재에서는 전부 우연히 맞았습니다. 자료 G 에서
+<strong>PI2 계열 2장이 실제로 틀립니다</strong>(폴백 7 · 실제 6).
+같은 자료의 PI4 <code>35115E27EWD7</code> 은 폴백도 7 이라 <strong>우연히 맞습니다</strong> —
+즉 폴백이 맞는지 여부는 자재에 달렸고, <strong>맞았는지 틀렸는지 앱이 알 방법이 없습니다.</strong>
+지금은 <code>Wafer2Table.ini</code> 가 35장 전수에 있어 폴백까지 내려간 적이 없지만,
+그 파일이 없는 스캔이 존재하는지는 <strong>아직 확인되지 않았습니다</strong>.
+→ <a class="ref" href="#s9">9-2 (c) 추정값 표시</a>의 우선순위가 올라갑니다.</p>
+</div>
 </section>
 
 <!-- ══ 8 ══ -->
@@ -1176,42 +1317,73 @@ pitch 를 쓰면 die 내부 y 가 최대 11.4 µm 더 정확</strong>해집니�
 <tr><td class="k ctr">6</td><td>KLA notch UP 또는 mirrored YES 인 <code>.001</code></td>
     <td><a class="ref" href="#s7">R-5</a> — 축 방향 일반성</td>
     <td>발생 시 매칭 실패로 드러남</td><td class="ctr">낮</td></tr>
+<tr><td class="k ctr">7<br><small>신규</small></td>
+    <td><code>Wafer2Table.ini</code> 이 <strong>없는</strong> 스캔 폴더 1건<br>
+        <small>있는지 없는지 확인만이라도</small></td>
+    <td><a class="ref" href="#s7">R-4</a> — 폴백까지 내려가는 경우가 <strong>실제로 있는지</strong>.
+        폴백이 틀리는 것은 이미 확인됨(PI2 2장)</td>
+    <td>폴백 사용 시 <code>row 7 (추정)</code> 표시로 방어<br><small>9-2 (c)</small></td>
+    <td class="ctr">낮</td></tr>
 </tbody></table></div>
 
-<h3 id="picenter">9-1-A. PI 계열 웨이퍼 중심을 확실히 하려면</h3>
-<p>“PI 레시피의 중심이 그 지점” 이라는 판단은 <strong>웨이퍼 한 장의 측정값</strong>에 기대고 있습니다
-(<a class="ref" href="#pi7">3장 ③</a>). 아래 중 <strong>하나만</strong> 있어도 크게 달라집니다.</p>
+<h3 id="picenter">9-1-A. PI 계열 웨이퍼 중심 — <span style="color:var(--pass)">4건 중 3건 종결</span></h3>
+<p>“PI 레시피의 중심이 그 지점” 이라는 판단이 <strong>웨이퍼 한 장의 측정값</strong>에 기대고 있어
+아래 네 가지를 요청했었습니다. <strong><a class="ref" href="#s4">자료 G</a> 로 A · B · D 가 닫혔습니다.</strong></p>
 
 <div class="tw"><table>
-<thead><tr><th class="ctr" style="width:6%">순위</th><th style="width:28%">자료</th>
-<th style="width:36%">무엇이 확실해지나</th><th style="width:30%">왜 그런가</th></tr></thead>
+<thead><tr><th class="ctr" style="width:6%">순위</th><th style="width:24%">자료</th>
+<th class="ctr" style="width:9%">상태</th>
+<th style="width:34%">무엇이 확실해졌나 / 확실해지나</th><th style="width:27%">근거</th></tr></thead>
 <tbody>
 <tr><td class="k ctr">A</td>
     <td><code>UDS-PIDS3\35115E27EWD7\</code> 의<br><strong><code>Params_WaferInfo.ini</code></strong></td>
-    <td>· <strong>die 간격 가정이 사라짐</strong> (지금은 다른 로트에서 빌려 씀)<br>
-        · <code>Center_Y</code> 가 기록돼 있으면 <strong>제 역산값 224,380 과 직접 대조</strong></td>
-    <td>같은 웨이퍼의 두 소스를 맞대는 것 — RDL4 에서 140 µm 이내로 일치했던 그 검증</td></tr>
+    <td class="ctr"><span class="v ok">종결</span></td>
+    <td>· <strong>die 간격 가정 소거</strong> — 그 웨이퍼 자신의
+        <code>DieStep = 37247.7 × 44905.4</code>, 빌려 온 값과 소수점까지 동일<br>
+        · <code>Center_Y</code> 는 <code>0.000000</code> 이라 <strong>224,380 과의 직접 대조는 못 함</strong></td>
+    <td>자료 G — 요청한 그 파일이 그대로 들어옴</td></tr>
 <tr><td class="k ctr">B</td>
     <td>PI 로트 웨이퍼 <strong>2~3장</strong>의<br><code>Wafer2Table.ini</code></td>
-    <td>· 중심이 <strong>웨이퍼마다 얼마나 흔들리는지</strong> 측정<br>
-        · 편차가 작으면 “레시피 값” 이라 말할 수 있음</td>
-    <td>T254 에서 3장으로 편차 99 µm 를 재어 원점 안정성을 확인한 것과 같은 방법</td></tr>
+    <td class="ctr"><span class="v ok">종결</span><br><small>초과 달성</small></td>
+    <td>· 요청은 2~3장, 들어온 것은 같은 로트 <strong>25장</strong><br>
+        · 중심 편차 <strong>X 78 µm / Y 97 µm</strong> —
+          경계 여유 15,063 µm 의 <strong>1/155</strong></td>
+    <td>자료 G — T254 에서 3장으로 했던 것과 같은 방법</td></tr>
 <tr><td class="k ctr">C</td>
     <td>PI 웨이퍼 결함 1장 +<br><strong>장비 화면 col/row</strong></td>
-    <td>· <strong>중심을 아예 안 거치고</strong> row 기준을 직접 확인</td>
+    <td class="ctr"><span class="v wa">미해결</span></td>
+    <td>· <strong>중심을 아예 안 거치고</strong> row 기준을 직접 확인<br>
+        · 자료 G 에는 <strong>장비 정답이 0건</strong>이라 이건 그대로 남음</td>
     <td>중심은 기준을 구하는 <em>수단</em>일 뿐 — 기준 자체를 장비가 말해 주면 중심 논쟁이 불필요</td></tr>
 <tr><td class="k ctr">D</td>
     <td><code>Center_*</code> 가 <strong>0 이 아닌</strong> PI 로트의<br><code>Params_WaferInfo.ini</code></td>
-    <td>· PI 계열 중심의 <strong>기록값</strong>을 처음으로 확보</td>
-    <td>지금 가진 PI 로트(TBD-PIDS3)는 <code>Center = 0</code> 미기록이라 비교 대상이 없음</td></tr>
+    <td class="ctr"><span class="v ok">종결</span><br><small>결과는 음성</small></td>
+    <td>· 34장을 전부 확인 — <strong>0 이 아닌 것을 한 장도 발견하지 못했습니다</strong><br>
+        · 즉 “찾으면 대조한다” 가 아니라 <strong>“이 표본에는 없다” 로 닫힙니다.</strong>
+          더 찾아 달라고 요청할 근거가 없습니다</td>
+    <td>자료 G 전수 확인</td></tr>
 </tbody></table></div>
+
+<div class="note">
+<span class="lbl">D 의 결과를 어떻게 읽어야 하나</span>
+<p style="margin-bottom:0">34장 전부 <code>Center_X = Center_Y = 0.000000</code> 이었습니다.
+이건 <strong>“PI 계열에는 기록되지 않는다” 는 뜻이 아닙니다</strong> —
+<strong>이 35장에서 기록된 것을 발견하지 못했다</strong>는 표본 사실일 뿐이고,
+우연히 이 표본에만 없었을 수 있습니다. 그래서 코드에는 이 관측을 넣지 않습니다:
+<code>Center_*</code> 가 0 이 아니면 <strong>언제나 그것을 1순위로</strong> 쓰고,
+0 일 때만 <code>Wafer2Table.ini</code> 로 내려갑니다.
+언젠가 기록된 PI 웨이퍼가 나오면 앱은 자동으로 그 값을 쓰고,
+그때 비로소 224,380 과의 직접 대조가 가능해집니다.</p>
+</div>
 
 <div class="note blue">
 <span class="lbl">다만 — 이것이 결론을 바꾸지는 않습니다</span>
-<p style="margin-bottom:0">위 자료가 하나도 없어도 <strong>“PI4 계열 row 기준 = 7” 은 이미 장비 근거 3건으로 성립</strong>합니다
+<p style="margin-bottom:0">A · B · D 가 닫히기 전에도 <strong>“PI4 계열 row 기준 = 7” 은 장비 근거 3건으로 성립</strong>했습니다
 (<a class="ref" href="#pi7">3장 ③</a>). 중심값은 그 결론의 <em>설명</em>이지 <em>근거</em>가 아닙니다.
-위 자료들은 <strong>“왜 7 인가” 를 중심으로 설명할 수 있게</strong> 만들어 줄 뿐입니다.
-지금 초점인 x·y 정확도 기준으로는 <strong>A 가 가장 값집니다</strong> — die 간격이 x·y 에 직접 들어가기 때문입니다.</p>
+<strong>남은 C 는 그 3건과 같은 종류(장비 정답)</strong>라, 있으면 근거가 하나 더 늘지만
+없다고 해서 지금 결론이 흔들리지는 않습니다.
+지금 초점인 x·y 정확도 기준으로 실제로 값이 컸던 것은 <strong>A</strong> 였고
+— die 간격이 x·y 에 직접 들어가기 때문입니다 — 그건 이미 닫혔습니다.</p>
 </div>
 
 <div class="note blue">
@@ -1236,10 +1408,10 @@ pitch 를 쓰면 die 내부 y 가 최대 11.4 µm 더 정확</strong>해집니�
     <td><span class="chip m">R-2</span></td></tr>
 <tr><td class="k ctr">c</td><td>추정값 표시</td>
     <td>중심 정보가 없어 폴백을 탄 경우 <code>row 7 (추정)</code> 처럼 명시</td>
-    <td><span class="chip l">R-4</span></td></tr>
+    <td><span class="chip m">R-4</span></td></tr>
 <tr><td class="k ctr">d</td><td>커버리지 신호</td>
     <td>결함이 넓게 퍼졌는데 <code>col</code>/<code>row</code> 가 0 에 한 번도 안 닿으면 안내</td>
-    <td><span class="chip m">R-1</span> · <span class="chip l">R-4</span> 조기 검출</td></tr>
+    <td><span class="chip m">R-1</span> · <span class="chip m">R-4</span> 조기 검출</td></tr>
 </tbody></table></div>
 <p><small><strong>(d) 의 실증</strong> — 현재 <code>dev/좌표 확인</code> 폴더가 이 신호에 걸립니다
 (row 가 1‥6 으로 0 에 안 닿음). 그 폴더는 실제로 원점이 1 큰 상태이므로 신호가 옳게 작동합니다.
@@ -1254,7 +1426,9 @@ pitch 를 쓰면 die 내부 y 가 최대 11.4 µm 더 정확</strong>해집니�
     <td>x·y 최대 오류(R-0) 차단 + 엑셀 항목 추가</td></tr>
 <tr><td class="k ctr">2</td><td>T254 사진의 장비 화면 x·y 대조</td><td>화면 판독 2건</td>
     <td>x·y 절대값 검증 공백을 메움</td></tr>
-<tr><td class="k ctr">3</td><td>자동 방어 (b)(c)(d)</td><td><span class="v ok">불필요</span></td>
+<tr><td class="k ctr">3</td><td>자동 방어 <strong>(c)</strong> → (b)(d)<br>
+    <small>(c) 를 앞으로 — <a class="ref" href="#s7">R-4</a> 가 실측으로 확인돼 등급이 올랐음</small></td>
+    <td><span class="v ok">불필요</span></td>
     <td>새 자재에서 조용히 틀리는 것을 차단</td></tr>
 <tr><td class="k ctr">4</td><td>레시피별 pitch 반영 여부 결정</td><td>자료 3</td>
     <td>die 내부 y 최대 11.4 µm 개선</td></tr>
@@ -1295,9 +1469,13 @@ pitch 를 쓰면 die 내부 y 가 최대 11.4 µm 더 정확</strong>해집니�
 <tr><td><code>app/workers/coord_matcher.py</code></td><td>좌표 기반 매칭 (<code>±1</code> die 게이트)</td></tr>
 <tr><td><code>dev/tests/test_wafer_geometry.py</code></td><td>기하 회귀 가드 — 골든 · 실물 · 폴백 · 거부</td></tr>
 <tr><td><code>dev/tests/test_coords.py</code></td><td>변환 회귀 가드 + 실측 쌍 정렬</td></tr>
-<tr><td><code>docs/디바이스_하드코딩_조사.md</code></td><td>전체 조사 기록 (§1 ~ §6-L)</td></tr>
+<tr><td><code>docs/디바이스_하드코딩_조사.md</code></td><td>전체 조사 기록 (§1 ~ §6-M)</td></tr>
 <tr><td><code>docs/규칙_배경.md</code></td><td>각 규칙이 생긴 사고 기록</td></tr>
 <tr><td><code>docs/좌표_계산_검증_보고서.pdf</code></td><td>PDF 판 (16쪽) — 이 문서의 이전 판</td></tr>
+<tr><td><code>docs/RDL4 LOT files(26년 05월, FDV)/</code></td><td><a class="ref" href="#s4">자료 B</a> 원본</td></tr>
+<tr><td><code>docs/Camtek 좌표 예시(T254)/</code></td><td><a class="ref" href="#s4">자료 C · E · F</a> 원본</td></tr>
+<tr><td><code>docs/KLA 좌표 예시(TB500, T254)/</code></td><td><a class="ref" href="#s4">자료 D</a> 원본</td></tr>
+<tr><td><code>docs/PI 계열 INI 모음(35웨이퍼)/</code></td><td><a class="ref" href="#s4">자료 G</a> 원본</td></tr>
 </tbody></table></div>
 
 <h3>변경 연표 — 좌표 관련</h3>
@@ -1321,6 +1499,10 @@ pitch 를 쓰면 die 내부 y 가 최대 11.4 µm 더 정확</strong>해집니�
     <td><code>Center_*</code> 미기록 스캔 대응</td></tr>
 <tr><td class="num">2026-08-05</td><td><strong>이 문서 — 코드 변경 없음</strong></td>
     <td>x·y 표기 정확도 관점 재정리 + 참고 저장소 비교</td></tr>
+<tr><td class="num">2026-08-05</td><td><a class="ref" href="#s4">자료 G</a> 반영 —
+    <strong>코드 변경 없음</strong><br>
+    <small>9-1-A A·B·D 종결 · <a class="ref" href="#s7">R-4</a> 낮→중</small></td>
+    <td>PI 계열 INI 전수 35장 수령</td></tr>
 </tbody></table></div>
 
 <footer class="colophon">
