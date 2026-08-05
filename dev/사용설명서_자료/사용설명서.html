@@ -1,0 +1,1010 @@
+<meta charset="utf-8">
+<title>AOI 검증 — 사용 설명서</title>
+<!--
+  이 파일이 docs/사용설명서.pdf 의 원본이다.  PDF 만 고칠 수 없다.
+
+      1) python scripts/internal/capture_manual_shots.py     화면 캡처 + shots.json
+      2) (이 파일 수정)
+      3) python scripts/internal/make_manual_pdf.py          PDF 생성
+
+  그림 위의 강조 상자·화살표는 shots.json 의 **위젯 실좌표**를 그대로 쓴다.  좌표계는
+  캡처 당시의 논리 크기(1280×860)이고, SVG viewBox 가 같은 좌표계라 그림을 어떤 크기로
+  넣어도 주석이 따라간다.  눈으로 맞추지 마라 — 화면이 바뀌면 1)만 다시 돌리면 된다.
+-->
+<style>
+@font-face{font-family:"NanumSquare";
+  src:url("../../aoi_verification/app/ui/assets/font/NanumSquareR.ttf") format("truetype");
+  font-weight:400;font-style:normal}
+@font-face{font-family:"NanumSquare";
+  src:url("../../aoi_verification/app/ui/assets/font/NanumSquareB.ttf") format("truetype");
+  font-weight:700;font-style:normal}
+
+:root{
+  /* 앱 테마(ui/theme.py)에서 그대로 가져온 값 — 설명서와 화면이 같은 색을 쓴다 */
+  --ink:#1B1A17; --ink2:#3D3B35; --mute:#5A574E;
+  --accent:#2C5A86; --danger:#A5271E; --warn:#8C4A0F; --pass:#3B6438;
+  --rule:#C9C4B6; --rule-soft:#E2DED3; --panel:#F7F5F0;
+  --mono:"Consolas","DejaVu Sans Mono",monospace;
+}
+@page{size:A4; margin:16mm 14mm 18mm}
+@page:first{margin:0}
+
+*{box-sizing:border-box}
+html{font-family:"NanumSquare","Malgun Gothic",sans-serif; color:var(--ink);
+     font-size:10.2pt; line-height:1.62; -webkit-font-smoothing:antialiased}
+body{margin:0}
+
+/* ── 표지 ───────────────────────────────────────────────────────── */
+.cover{height:297mm; padding:38mm 24mm 20mm; display:flex; flex-direction:column;
+       page-break-after:always; position:relative}
+.cover h1{font-size:30pt; font-weight:700; letter-spacing:-1.2px; margin:0 0 6mm;
+          line-height:1.18}
+.cover .sub{font-size:12pt; color:var(--ink2); margin:0 0 14mm; line-height:1.7}
+.cover .who{border-top:1px solid var(--rule); border-bottom:1px solid var(--rule);
+            padding:5mm 0; font-size:10pt; color:var(--ink2); margin-bottom:10mm}
+.cover .meta{margin-top:auto; font-size:9pt; color:var(--mute); font-family:var(--mono)}
+.legend{display:flex; gap:8mm; flex-wrap:wrap; font-size:9.5pt; margin-top:4mm}
+.legend .k{display:flex; align-items:center; gap:2.5mm}
+.legend .sw{width:11mm; height:5mm; border-radius:1.4mm; flex:none}
+.sw.blue{border:1.6pt solid var(--accent); background:rgba(44,90,134,.07)}
+.sw.red{border:1.6pt solid var(--danger); background:rgba(165,39,30,.06)}
+.sw.num{border:none; background:none; width:auto}
+.sw.num span{display:inline-block; width:5mm; height:5mm; border-radius:50%;
+  background:var(--accent); color:#fff; font-size:7.6pt; line-height:5mm;
+  text-align:center; font-family:var(--mono)}
+
+/* ── 차례 ───────────────────────────────────────────────────────── */
+.toc{page-break-after:always}
+.toc ol{list-style:none; padding:0; margin:0; counter-reset:c}
+.toc li{counter-increment:c; display:flex; align-items:baseline; gap:3mm;
+        padding:2.1mm 0; border-bottom:1px dotted var(--rule-soft)}
+.toc li::before{content:counter(c); font-family:var(--mono); color:var(--accent);
+                font-size:9pt; width:6mm; flex:none}
+.toc li b{font-weight:700}
+.toc li .d{color:var(--mute); font-size:9pt}
+
+/* ── 장/절 ──────────────────────────────────────────────────────── */
+section{page-break-before:always}
+section.cont{page-break-before:auto}
+h2{font-size:17pt; font-weight:700; letter-spacing:-.7px; margin:0 0 1mm;
+   padding-bottom:2.4mm; border-bottom:1.4pt solid var(--ink); page-break-after:avoid}
+h2 .n{font-family:var(--mono); color:var(--accent); font-size:12pt; margin-right:3mm}
+h2 + .lede{color:var(--ink2); margin:0 0 6mm; font-size:10.6pt}
+h3{font-size:11.6pt; font-weight:700; margin:7mm 0 2.5mm; page-break-after:avoid}
+h3::before{content:""; display:inline-block; width:2.6mm; height:2.6mm;
+  background:var(--accent); margin-right:2.4mm; vertical-align:.6mm}
+h4{font-size:10.4pt; font-weight:700; margin:5mm 0 1.5mm; color:var(--ink2);
+   page-break-after:avoid}
+p{margin:0 0 3mm; max-width:none}
+ul,ol{margin:0 0 3.5mm; padding-left:5.5mm}
+li{margin:.9mm 0}
+b,strong{font-weight:700}
+code,.mono{font-family:var(--mono); font-size:.92em}
+.ui{font-weight:700; white-space:nowrap}
+.ui::before{content:"["} .ui::after{content:"]"}
+.q{color:var(--ink2)}
+.q::before{content:"‘"} .q::after{content:"’"}
+
+/* ── 그림 ───────────────────────────────────────────────────────── */
+figure{margin:0 0 5mm; page-break-inside:avoid}
+figure.shot{position:relative; line-height:0}
+figure.shot > img{width:100%; display:block; border:1px solid var(--rule)}
+figure.shot > svg{position:absolute; left:0; top:0; width:100%; height:100%}
+figure.half{width:62%}
+figure.third{width:44%}
+figcaption{line-height:1.5; font-size:8.8pt; color:var(--mute); margin-top:1.6mm}
+.mark{fill:none; stroke-width:2.6}
+.mark.blue{stroke:var(--accent); fill:rgba(44,90,134,.06)}
+.mark.red{stroke:var(--danger); fill:rgba(165,39,30,.05)}
+.mark.plain{fill:none}
+.arrow{fill:none; stroke:var(--accent); stroke-width:2.6}
+.arrow.red{stroke:var(--danger)}
+.bub{fill:var(--accent)} .bub.red{fill:var(--danger)}
+.bubt{fill:#fff; font-family:Consolas,monospace; font-size:17px; font-weight:700;
+      text-anchor:middle; dominant-baseline:central}
+
+/* 번호 설명 목록 — 그림의 동그란 번호와 짝.
+   ★ `display:flex` 를 쓰지 마라 — <b>·<span> 같은 자식이 **각각 별개의 flex 항목**이 되어
+   한 문장이 칸칸이 벌어져 찍힌다(실제로 그렇게 나왔다).  번호는 절대 위치로 띄운다. */
+.keys{list-style:none; padding:0; margin:0 0 4mm; counter-reset:k}
+.keys li{counter-increment:k; position:relative; padding-left:7mm; margin:.9mm 0}
+.keys li::before{content:counter(k); position:absolute; left:0; top:.7mm;
+  width:4.6mm; height:4.6mm;
+  border-radius:50%; background:var(--accent); color:#fff; font-family:var(--mono);
+  font-size:7.4pt; line-height:4.6mm; text-align:center}
+.keys.red li::before{background:var(--danger)}
+
+/* ── 콜아웃 ─────────────────────────────────────────────────────── */
+.note,.warnbox,.tip{padding:3.2mm 4mm; margin:0 0 4mm; page-break-inside:avoid;
+  border:1px solid var(--rule); border-radius:1.6mm; background:var(--panel)}
+.warnbox{border-color:var(--warn); background:rgba(140,74,15,.05)}
+.tip{border-color:var(--accent); background:rgba(44,90,134,.045)}
+.note .t,.warnbox .t,.tip .t{font-weight:700; display:block; margin-bottom:1mm}
+.warnbox .t{color:var(--warn)} .tip .t{color:var(--accent)}
+.note p:last-child,.warnbox p:last-child,.tip p:last-child{margin-bottom:0}
+
+/* ── 표 ─────────────────────────────────────────────────────────── */
+table{width:100%; border-collapse:collapse; margin:0 0 4mm; font-size:9.4pt;
+      page-break-inside:avoid}
+th,td{text-align:left; padding:2.1mm 2.6mm; border-bottom:1px solid var(--rule-soft);
+      vertical-align:top}
+thead th{border-bottom:1.2pt solid var(--ink); font-size:8.6pt; letter-spacing:.4px;
+         color:var(--mute); text-transform:none}
+td.num,th.num{font-family:var(--mono); text-align:right; white-space:nowrap}
+/* 한글이 든 칸에는 모노를 쓰지 않는다 — 자간이 벌어지고 글꼴이 문장 중간에 갈린다 */
+td.dur{white-space:nowrap; color:var(--ink2)}
+tbody tr:last-child td{border-bottom:1px solid var(--rule)}
+
+/* 판정 스탬프 — 화면의 칩과 같은 어휘 */
+.chip{font-size:8.4pt; font-weight:700; padding:.4mm 2mm;
+      border-radius:1.6mm; white-space:nowrap}
+.chip.over{color:var(--danger); background:rgba(165,39,30,.11)}
+.chip.none{color:var(--mute); border:1px solid var(--rule)}
+.chip.ok{color:var(--mute); border:1px dashed var(--rule)}
+
+/* ── 부수 기능(soft) — 본문보다 한 단 낮게 ──────────────────────── */
+.soft{display:flex; gap:6mm; align-items:flex-start; margin:0 0 5mm;
+      padding-top:3mm; border-top:1px solid var(--rule-soft); page-break-inside:avoid}
+.soft figure{width:46%; flex:none; margin:0}
+.soft .body{font-size:9.4pt; color:var(--ink2)}
+.soft h4{margin-top:0}
+
+.cols{column-count:2; column-gap:7mm}
+.cols > *{break-inside:avoid}
+.flow{width:100%; height:auto; margin:0 0 5mm}
+.kbd{font-family:var(--mono); font-size:8.6pt; border:1px solid var(--rule);
+     border-radius:1.2mm; padding:.3mm 1.5mm; background:#fff; white-space:nowrap}
+/* ★ 쪽 하단 머리글에 `position:fixed` 를 쓰지 마라 — Chromium 인쇄에서 쪽마다 반복되기는
+   하지만 위치가 뷰포트 기준이라 **본문 한가운데에 겹쳐 찍힌다**(실제로 그렇게 나왔다). */
+</style>
+
+<!-- ══════════════════════════ 표지 ══════════════════════════ -->
+<div class="cover">
+  <h1>AOI 검증<br>사용 설명서</h1>
+  <p class="sub">두 장비가 같은 결함을 찾았는지 확인하고,<br>그 결과를 엑셀로 남기는 프로그램입니다.</p>
+  <div class="who">
+    <b>이 문서는 프로그램을 처음 쓰는 분을 위한 것입니다.</b><br>
+    설치부터 엑셀 저장까지 순서대로 따라가면 한 번의 검증을 끝낼 수 있습니다.
+    화면 그림은 모두 실제 프로그램 화면이며, 예시 사진도 실제 장비가 찍은 것입니다.
+  </div>
+
+  <p style="font-weight:700;margin-bottom:1.5mm">그림 보는 법</p>
+  <div class="legend">
+    <span class="k"><span class="sw blue"></span>위치 안내 — 여기를 보세요</span>
+    <span class="k"><span class="sw red"></span>주의 — 잘못 누르면 되돌리기 어렵습니다</span>
+    <span class="k"><span class="sw num"><span>1</span></span>아래 번호 설명과 짝</span>
+  </div>
+
+  <p class="meta">AOI Recipe Verification · 사내 문서</p>
+</div>
+
+<!-- ══════════════════════════ 차례 ══════════════════════════ -->
+<div class="toc">
+  <h2 style="border:none;font-size:14pt">차례</h2>
+  <ol>
+    <li><b>전체 흐름</b> <span class="d">— 무엇을 하는 프로그램인가</span></li>
+    <li><b>사진 폴더 준비</b> <span class="d">— 이것만 맞으면 나머지는 쉽습니다</span></li>
+    <li><b>첫 화면 익히기</b> <span class="d">— 어디에 무엇이 있는가</span></li>
+    <li><b>검증 시작 전 설정</b> <span class="d">— 실행 옵션과 매칭 설정</span></li>
+    <li><b>시작 직후 자동 진행</b> <span class="d">— 스캔 · KLA 확인 · 슬롯 선택</span></li>
+    <li><b>1단계 — 후보 선별</b> <span class="d">— 검증할 사진 고르기</span></li>
+    <li><b>2단계 — 매칭</b> <span class="d">— 짝을 찾는 규칙과 화면</span></li>
+    <li><b>검토 — 결과 읽는 법</b> <span class="d">— 이 화면만 익히면 끝입니다</span></li>
+    <li><b>결과와 엑셀 저장</b> <span class="d">— 마무리</span></li>
+    <li><b>알아두면 좋은 기능</b> <span class="d">— 다크 모드 · 사진 정보 · 업데이트</span></li>
+    <li><b>주의사항</b> <span class="d">— 멈춘 것 같을 때, 되돌릴 수 없는 것</span></li>
+    <li><b>빠른 참조</b> <span class="d">— 단축키 · 판정 기준 · 문제 해결</span></li>
+  </ol>
+</div>
+
+<!-- ══════════════════════════ 1 ══════════════════════════ -->
+<section>
+<h2><span class="n">1</span>전체 흐름</h2>
+<p class="lede">두 장비(기준 · 검증)가 같은 웨이퍼를 찍은 결함 사진을 짝지어,
+어느 쪽이 무엇을 놓쳤는지 확인합니다.</p>
+
+<p>예를 들어 17호기가 찾은 결함 6장과 18호기가 찾은 결함 6장이 있을 때, 프로그램은
+<b>같은 결함끼리 짝</b>을 지어 줍니다. 짝이 없는 사진은 한쪽 장비만 발견한 것이므로
+검토 대상이 됩니다. 결과는 엑셀 한 장으로 정리됩니다.</p>
+
+<svg class="flow" viewBox="0 0 1280 176" role="img" aria-label="작업 흐름">
+  <defs>
+    <marker id="fa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7"
+            orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#5A574E"/></marker>
+  </defs>
+  <g font-family="NanumSquare,sans-serif" font-size="19" fill="#1B1A17">
+    <!-- 6 단계 -->
+    <g>
+      <rect x="6" y="44" width="180" height="62" rx="8" fill="none" stroke="#C9C4B6" stroke-width="1.5"/>
+      <text x="96" y="72" text-anchor="middle" font-weight="700">셋업</text>
+      <text x="96" y="93" text-anchor="middle" font-size="15" fill="#5A574E">폴더 · 기준 정하기</text>
+    </g>
+    <path d="M192 75 h30" stroke="#5A574E" stroke-width="1.6" marker-end="url(#fa)"/>
+    <g>
+      <rect x="228" y="44" width="180" height="62" rx="8" fill="none" stroke="#C9C4B6" stroke-width="1.5"/>
+      <text x="318" y="72" text-anchor="middle" font-weight="700">스캔</text>
+      <text x="318" y="93" text-anchor="middle" font-size="15" fill="#5A574E">사진 찾아 읽기</text>
+    </g>
+    <path d="M414 75 h30" stroke="#5A574E" stroke-width="1.6" marker-end="url(#fa)"/>
+    <g>
+      <rect x="450" y="44" width="180" height="62" rx="8" fill="none" stroke="#C9C4B6" stroke-width="1.5"/>
+      <text x="540" y="72" text-anchor="middle" font-weight="700">1단계 선별</text>
+      <text x="540" y="93" text-anchor="middle" font-size="15" fill="#5A574E">검증할 사진 고르기</text>
+    </g>
+    <path d="M636 75 h30" stroke="#5A574E" stroke-width="1.6" marker-end="url(#fa)"/>
+    <!-- 주 단계 2개는 채워서 강조 -->
+    <g>
+      <rect x="672" y="40" width="180" height="70" rx="8" fill="rgba(44,90,134,.09)" stroke="#2C5A86" stroke-width="2.4"/>
+      <text x="762" y="72" text-anchor="middle" font-weight="700">2단계 매칭</text>
+      <text x="762" y="93" text-anchor="middle" font-size="15" fill="#2C5A86">짝 찾기</text>
+    </g>
+    <path d="M858 75 h30" stroke="#5A574E" stroke-width="1.6" marker-end="url(#fa)"/>
+    <g>
+      <rect x="894" y="40" width="180" height="70" rx="8" fill="rgba(44,90,134,.09)" stroke="#2C5A86" stroke-width="2.4"/>
+      <text x="984" y="72" text-anchor="middle" font-weight="700">검토</text>
+      <text x="984" y="93" text-anchor="middle" font-size="15" fill="#2C5A86">사람이 확인</text>
+    </g>
+    <path d="M1080 75 h30" stroke="#5A574E" stroke-width="1.6" marker-end="url(#fa)"/>
+    <g>
+      <rect x="1116" y="44" width="158" height="62" rx="8" fill="none" stroke="#C9C4B6" stroke-width="1.5"/>
+      <text x="1195" y="72" text-anchor="middle" font-weight="700">엑셀 저장</text>
+      <text x="1195" y="93" text-anchor="middle" font-size="15" fill="#5A574E">결과 남기기</text>
+    </g>
+    <text x="762" y="150" text-anchor="middle" font-size="15" fill="#2C5A86">
+      ↑ 이 두 화면이 이 프로그램의 본체입니다 (7 · 8장)</text>
+  </g>
+</svg>
+
+<div class="tip">
+  <span class="t">한 번의 검증에 걸리는 시간</span>
+  <p>사진 수에 따라 다르지만, 슬롯 2개·사진 12장 규모라면 몇 분이면 끝납니다.
+  사진이 수천 장이면 스캔과 첫 계산에서 수 분씩 걸릴 수 있습니다 —
+  <b>그때 화면이 잠시 반응하지 않는 것은 정상</b>입니다(11장 참고).</p>
+</div>
+
+<h3>기준 장비와 검증 장비</h3>
+<p>두 폴더를 지정하는데, 이름이 뜻하는 바는 다음과 같습니다.</p>
+<table>
+  <thead><tr><th style="width:22%">항목</th><th>의미</th></tr></thead>
+  <tbody>
+    <tr><td><b>기준 장비</b></td><td>비교의 기준이 되는 쪽입니다. 이 장비가 찍은 사진 한 장 한 장에 대해 짝을 찾습니다.</td></tr>
+    <tr><td><b>검증 장비</b></td><td>기준과 맞춰 보는 쪽입니다. 여기서 짝을 찾지 못하면 <span class="q">이 장비가 놓쳤다</span>는 기록이 남습니다.</td></tr>
+  </tbody>
+</table>
+<p>어느 쪽을 기준으로 둘지는 확인하려는 목적에 따라 정하시면 됩니다.
+보통 <b>검증하려는 장비를 <span class="q">검증 장비</span>에 두고, 믿을 수 있는 장비를 기준</b>에 둡니다.</p>
+</section>
+
+<!-- ══════════════════════════ 2 ══════════════════════════ -->
+<section>
+<h2><span class="n">2</span>사진 폴더 준비</h2>
+<p class="lede">폴더 구조만 맞으면 나머지는 프로그램이 알아서 합니다.
+반대로 여기서 어긋나면 <span class="q">공통된 Slot 이 없습니다</span> 같은 안내가 나옵니다.</p>
+
+<h3>지정해야 할 폴더</h3>
+<p>프로그램에 알려 줄 것은 <b>슬롯 폴더들이 들어 있는 상위 폴더</b>입니다.
+슬롯 폴더 자체를 지정하면 안 됩니다.</p>
+
+<svg class="flow" viewBox="0 0 1280 300" role="img" aria-label="폴더 구조">
+ <g font-family="Consolas,monospace" font-size="19" fill="#1B1A17">
+  <rect x="20" y="16" width="600" height="262" rx="8" fill="none" stroke="#C9C4B6"/>
+  <rect x="660" y="16" width="600" height="262" rx="8" fill="none" stroke="#C9C4B6"/>
+  <text x="40" y="48" font-family="NanumSquare,sans-serif" font-weight="700" font-size="20">기준 장비 폴더</text>
+  <text x="680" y="48" font-family="NanumSquare,sans-serif" font-weight="700" font-size="20">검증 장비 폴더</text>
+
+  <g fill="#3D3B35">
+   <text x="40" y="86">17호기            ← 이 폴더를 지정</text>
+   <text x="62" y="118">├ W7548304XYG4    ← 슬롯(웨이퍼) 폴더</text>
+   <text x="84" y="148">│  ├ 255350.116718.c.….jpeg</text>
+   <text x="84" y="176">│  ├ 241902.128440.c.….jpeg</text>
+   <text x="84" y="204">│  └ ColorImageGrabingInfo.ini</text>
+   <text x="62" y="234">└ W7548306XYA2</text>
+   <text x="84" y="262">   └ …</text>
+
+   <text x="680" y="86">18호기            ← 이 폴더를 지정</text>
+   <text x="702" y="118">├ W7548304XYG4    ← 슬롯 이름이 같아야 짝이 됩니다</text>
+   <text x="724" y="148">│  ├ 255348.116718.c.….jpeg</text>
+   <text x="724" y="176">│  └ ColorImageGrabingInfo.ini</text>
+   <text x="702" y="234">└ W7548306XYA2</text>
+   <text x="724" y="262">   └ …</text>
+  </g>
+ </g>
+</svg>
+<figcaption><b>슬롯 폴더 이름이 양쪽에서 같으면</b> 프로그램이 자동으로 짝을 짓습니다.
+위 예에서는 <span class="mono">W7548304XYG4</span> 와 <span class="mono">W7548306XYA2</span> 두 슬롯이 짝이 됩니다.</figcaption>
+
+<ul>
+  <li>상위 폴더 <b>바로 아래 한 단계</b>의 하위 폴더를 슬롯으로 읽습니다.</li>
+  <li>슬롯 이름이 양쪽에서 같으면 자동으로 짝이 됩니다. 이름이 다르면 5장에서 직접 짝지을 수 있습니다.</li>
+  <li>읽는 사진 형식은 <code>.jpg .jpeg .png .bmp</code> 입니다.</li>
+</ul>
+
+<div class="warnbox">
+  <span class="t">사진만 따로 복사하면 좌표 매칭을 쓸 수 없습니다</span>
+  <p>짝을 찾는 기준은 <b>결함의 좌표</b>이고, 좌표는 파일명이나 폴더 안의 정보 파일
+  (<code>ColorImageGrabingInfo.ini</code>, KLA <code>.001</code> 파일 등)에서 읽습니다.
+  사진만 골라 새 폴더에 모으면 이 정보가 빠져 매칭을 시작할 수 없습니다.
+  <b>폴더째 가져오시기 바랍니다.</b></p>
+</div>
+
+<h3>자동으로 빠지는 파일</h3>
+<p>다음 두 가지는 결함 사진이 아니므로 프로그램이 알아서 제외합니다. 지우지 않으셔도 됩니다.</p>
+<table>
+  <thead><tr><th style="width:38%">파일</th><th>이유</th></tr></thead>
+  <tbody>
+    <tr><td class="mono">-86955.68631.t.1.jpg</td><td>점으로 나뉜 이름에 <code>t</code> 가 들어간 파일</td></tr>
+    <tr><td class="mono">CognexInSight…jpg</td><td>웨이퍼 전경(매크로) 사진 — 결함 좌표가 없습니다</td></tr>
+  </tbody>
+</table>
+</section>
+
+<!-- ══════════════════════════ 3 ══════════════════════════ -->
+<section>
+<h2><span class="n">3</span>첫 화면 익히기</h2>
+<p class="lede">프로그램을 켜면 이 화면이 나옵니다. 여섯 군데만 알면 됩니다.</p>
+
+<figure class="shot half">
+  <img src="01_셋업_빈화면.png" alt="처음 켰을 때의 빈 셋업 화면">
+</figure>
+<figcaption>처음 켜면 이렇게 비어 있습니다. 오른쪽 아래 <span class="ui">검증 시작</span> 은
+아직 눌리지 않습니다.</figcaption>
+
+<figure class="shot">
+  <img src="02_셋업_입력완료.png" alt="셋업 화면 — 폴더와 호기 번호를 입력한 상태">
+  <svg viewBox="0 0 1280 860" aria-hidden="true">
+    <rect class="mark blue" x="32" y="231" width="593" height="210" rx="9"/>
+    <rect class="mark blue" x="645" y="231" width="593" height="210" rx="9"/>
+    <rect class="mark blue" x="857" y="121" width="245" height="82" rx="9"/>
+    <rect class="mark blue" x="32" y="469" width="589" height="154" rx="9"/>
+    <rect class="mark blue" x="649" y="469" width="589" height="226" rx="9"/>
+    <rect class="mark blue" x="1028" y="778" width="220" height="44" rx="9"/>
+    <g><circle class="bub" cx="44" cy="243" r="15"/><text class="bubt" x="44" y="243">1</text></g>
+    <g><circle class="bub" cx="657" cy="243" r="15"/><text class="bubt" x="657" y="243">2</text></g>
+    <g><circle class="bub" cx="869" cy="133" r="15"/><text class="bubt" x="869" y="133">3</text></g>
+    <g><circle class="bub" cx="44" cy="481" r="15"/><text class="bubt" x="44" y="481">4</text></g>
+    <g><circle class="bub" cx="661" cy="481" r="15"/><text class="bubt" x="661" y="481">5</text></g>
+    <g><circle class="bub" cx="1040" cy="790" r="15"/><text class="bubt" x="1040" y="790">6</text></g>
+  </svg>
+</figure>
+<figcaption>실제 화면입니다. 폴더 두 곳과 호기 번호를 넣으면 오른쪽 아래 <span class="ui">검증 시작</span>이 켜집니다.</figcaption>
+
+<ol class="keys">
+  <li><b>기준 장비</b> — 기준이 되는 폴더와 호기 번호를 넣습니다.</li>
+  <li><b>검증 장비</b> — 맞춰 볼 폴더와 호기 번호를 넣습니다.</li>
+  <li><b>판정 기준 배지</b> — <b>지금 어떤 기준으로 짝을 판정하는지</b> 항상 여기에 표시됩니다.
+      기본은 <span class="q">좌표 매칭 · 허용 오차 500 µm</span> 입니다.</li>
+  <li><b>실행 옵션</b> — 사진을 직접 고를지, 슬롯 일부만 돌릴지 정합니다(4장).</li>
+  <li><b>매칭 설정</b> — 허용 오차를 정합니다(4장).</li>
+  <li><span class="ui">검증 시작</span> — 두 폴더가 모두 유효해야 눌립니다.</li>
+</ol>
+
+<h3>버튼이 눌리지 않을 때</h3>
+<table>
+  <thead><tr><th style="width:34%">버튼에 보이는 글자</th><th>뜻과 할 일</th></tr></thead>
+  <tbody>
+    <tr><td><span class="ui">검증 시작</span> 흐리게 +<br><span class="q">기준·검증 폴더를 먼저 지정하세요.</span></td>
+        <td>폴더가 비었거나 존재하지 않습니다. 입력란이 빨갛다면 경로가 잘못된 것입니다.</td></tr>
+    <tr><td><span class="ui">준비 중…</span></td>
+        <td>프로그램이 아직 내부 구성 요소를 불러오는 중입니다. <b>몇 초 기다리면 저절로 켜집니다.</b></td></tr>
+  </tbody>
+</table>
+
+<figure class="shot half">
+  <img src="04_크롭_폴더카드.png" alt="기준 장비 카드 확대">
+  <svg viewBox="0 0 613 230" aria-hidden="true">
+    <rect class="mark blue" x="109" y="59" width="365" height="54" rx="7"/>
+  </svg>
+</figure>
+<figcaption>경로는 직접 입력해도 되고 <span class="ui">폴더 선택…</span> 으로 골라도 됩니다.
+네트워크 경로(<code>\\서버\공유폴더\…</code>)도 직접 붙여넣을 수 있습니다.</figcaption>
+
+<figure class="shot">
+  <img src="06_크롭_액션바.png" alt="화면 맨 아래 버튼 줄 확대">
+  <svg viewBox="0 0 1272 76" aria-hidden="true">
+    <rect class="mark blue" x="1024" y="4" width="220" height="44" rx="7"/>
+  </svg>
+</figure>
+<figcaption>버튼 줄은 <b>화면을 스크롤해도 늘 같은 자리에 붙어 있습니다.</b>
+왼쪽은 <span class="ui">업데이트 확인</span> · <span class="ui">사진 정보 보기</span>,
+오른쪽 끝이 <span class="ui">검증 시작</span> 입니다.</figcaption>
+
+<div class="tip">
+  <span class="t">호기 번호를 <span class="mono">K-6</span> 처럼 적으면 편합니다</span>
+  <p>호기 번호가 <code>K-숫자</code> 또는 <code>KLA-숫자</code> 이면 그쪽을 KLA 장비로 자동 판정해,
+  5장의 <span class="q">KLA 장비 확인</span> 질문이 아예 뜨지 않습니다.
+  호기 번호는 엑셀 표 머리글에도 그대로 쓰입니다.</p>
+</div>
+</section>
+
+<!-- ══════════════════════════ 4 ══════════════════════════ -->
+<section>
+<h2><span class="n">4</span>검증 시작 전 설정</h2>
+<p class="lede">대부분은 기본값 그대로 두시면 됩니다. 바꿀 일이 있는 것만 설명합니다.</p>
+
+<h3>실행 옵션 — 무엇을 자동으로 할지</h3>
+<table>
+  <thead><tr><th style="width:26%">항목</th><th>선택지와 뜻</th></tr></thead>
+  <tbody>
+    <tr><td><b>자동화 수준</b></td>
+        <td><span class="q">사진 직접 선택</span> — 기준 사진을 한 장씩 보고 검증할지 고릅니다(1단계 화면이 나옵니다).<br>
+            <span class="q">모든 사진 자동</span> — 1단계를 건너뛰고 기준 사진 전부를 자동으로 짝짓습니다.
+            사진이 많고 전수 확인이 필요할 때 씁니다.</td></tr>
+    <tr><td><b>진행 범위</b></td>
+        <td><span class="q">모든 슬롯</span> — 기본값.<br>
+            <span class="q">일부 슬롯만…</span> — 누르는 즉시 슬롯 선택 창이 열립니다.
+            급한 슬롯만 먼저 돌릴 때 씁니다.</td></tr>
+  </tbody>
+</table>
+
+<h3>매칭 설정 — 얼마나 가까우면 같은 결함으로 볼지</h3>
+<figure class="shot half">
+  <img src="05_크롭_판정기준배지.png" alt="판정 기준 배지 확대">
+  <svg viewBox="0 0 277 114" aria-hidden="true">
+    <rect class="mark blue" x="16" y="16" width="245" height="82" rx="9"/>
+  </svg>
+</figure>
+<figcaption>배지에 적힌 값이 <b>지금 적용 중인 판정 기준</b>입니다. 설정을 바꾸면 즉시 여기에 반영됩니다.</figcaption>
+
+<p><b>허용 오차</b>는 두 결함 좌표가 이 거리 안에 있으면 같은 결함으로 보겠다는 값입니다.
+기본 <b>500 µm</b> 이며 <span class="ui">−</span> <span class="ui">+</span> 버튼으로 50 µm 씩 조정합니다.</p>
+
+<div class="note">
+  <span class="t">마우스 휠로는 바뀌지 않습니다 — 의도된 동작입니다</span>
+  <p>허용 오차 입력란과 유사도 슬라이더는 <b>휠에 반응하지 않습니다.</b>
+  화면을 스크롤하다가 값이 바뀌어 잘못된 기준으로 검증하는 일을 막기 위한 것입니다.
+  <span class="ui">−</span> <span class="ui">+</span> 버튼을 쓰시거나 슬라이더를 직접 끌어 주세요.</p>
+</div>
+
+<p>폴더에서 die 크기를 읽으면 입력란 아래에 안내가 나옵니다.
+허용 오차가 die 폭의 2%를 넘으면 <span style="color:var(--warn);font-weight:700">주황색 경고</span>가 함께 나옵니다 —
+die 가 작은 자재에서 500 µm 을 그대로 쓰면 이웃 결함과 잘못 짝지어질 수 있기 때문입니다.</p>
+
+<div class="soft">
+  <figure class="shot" style="margin:0">
+    <img src="03_셋업_구형엔진.png" alt="유사도 엔진(구형)을 켠 상태">
+    <svg viewBox="0 0 1280 860" aria-hidden="true">
+      <rect class="mark blue" x="670" y="600" width="547" height="50" rx="7"/>
+      <rect class="mark plain" style="stroke:#8C4A0F;stroke-width:2.4" x="670" y="514" width="547" height="54" rx="7"/>
+    </svg>
+  </figure>
+  <div class="body">
+    <h4>유사도 엔진(구형)은 평소에 쓰지 않습니다</h4>
+    <p>좌표 정보가 없는 <b>예전 자료</b>를 다룰 때만 쓰는 대체 경로입니다.
+    켜면 판정 기준이 <b>거리(µm)에서 유사도(%)로 바뀌고</b>, 허용 오차 줄은
+    회색으로 비활성됩니다(주황 상자).</p>
+    <p>좌표 데이터가 없으면 매칭을 시작할 때 프로그램이 먼저 안내하므로,
+    그 안내를 본 뒤에 켜셔도 늦지 않습니다.</p>
+  </div>
+</div>
+</section>
+
+<!-- ══════════════════════════ 5 ══════════════════════════ -->
+<section>
+<h2><span class="n">5</span>시작 직후 자동 진행</h2>
+<p class="lede"><span class="ui">검증 시작</span>을 누르면 프로그램이 스스로 몇 가지를 처리합니다.
+그중 두 가지만 사람에게 묻습니다.</p>
+
+<h3>① 폴더 스캔 — 기다리는 화면</h3>
+<figure class="shot">
+  <img src="07_로딩_스캔중.png" alt="폴더 스캔 중 로딩 화면">
+  <svg viewBox="0 0 1280 860" aria-hidden="true">
+    <rect class="mark blue" x="428" y="344" width="424" height="171" rx="9"/>
+  </svg>
+</figure>
+<figcaption>진행량을 아직 모를 때는 막대가 좌우로 흐릅니다.</figcaption>
+
+<figure class="shot half">
+  <img src="08_로딩_진행률.png" alt="진행률이 표시된 로딩 화면">
+</figure>
+<figcaption>몇 개 중 몇 개인지 알게 되면 막대가 차오르고 <span class="mono">9 / 24</span> 처럼
+숫자가 함께 나옵니다.</figcaption>
+
+<p>이 화면이 떠 있는 동안에는 조작할 수 없습니다.
+사진이 아주 많거나 네트워크 폴더(NAS)를 쓰면 <b>수 초에서 수십 초</b> 걸릴 수 있습니다.</p>
+
+<h3>② KLA 장비 확인 — 물어보는 경우</h3>
+<figure class="shot">
+  <img src="09_시트_KLA확인.png" alt="KLA 장비가 어느 쪽인지 묻는 창">
+  <svg viewBox="0 0 1280 860" aria-hidden="true">
+    <rect class="mark blue" x="452" y="410" width="376" height="180" rx="9"/>
+  </svg>
+</figure>
+<figcaption>슬롯 이름이 한쪽에만 있을 때 나옵니다. 네 선택지 중 <b>정답이 정해져 있지 않아 기본값을 두지 않았습니다.</b></figcaption>
+<table>
+  <thead><tr><th style="width:20%">선택</th><th>이럴 때 고릅니다</th></tr></thead>
+  <tbody>
+    <tr><td><span class="ui">기준</span></td><td>기준 쪽이 KLA 장비입니다.</td></tr>
+    <tr><td><span class="ui">검증</span></td><td>검증 쪽이 KLA 장비입니다.</td></tr>
+    <tr><td><span class="ui">둘다</span></td><td>양쪽 모두 KLA 장비입니다.</td></tr>
+    <tr><td><span class="ui">KLA 아님</span></td><td>KLA 장비가 없습니다. 슬롯 이름을 그대로 씁니다.</td></tr>
+  </tbody>
+</table>
+<p>KLA 를 고르면 폴더 안의 정보 파일에서 <b>WaferID</b> 를 읽어 양쪽 슬롯을 자동으로 묶습니다.
+정보 파일이 없으면 사진 속 글자를 읽어(OCR) 보완합니다. 이 작업은 백그라운드에서 돌아
+화면이 멈추지 않습니다.</p>
+
+<div class="warnbox">
+  <span class="t">KLA 쪽을 반대로 고르면 슬롯이 하나도 안 묶입니다</span>
+  <p>결과에서 모든 슬롯이 <span class="q">기준 전용</span> 또는 <span class="q">검증 전용</span>으로만 나온다면
+  이 선택을 되짚어 보세요. 3장에서 설명한 대로 <b>호기 번호를 <span class="mono">K-6</span> 형태로 적어 두면</b>
+  이 질문 자체가 나오지 않습니다.</p>
+</div>
+
+<h3>③ 슬롯 선택 — <span class="q">일부 슬롯만</span> 을 골랐을 때</h3>
+<figure class="shot">
+  <img src="10_시트_슬롯선택.png" alt="진행할 슬롯 선택 창">
+</figure>
+<figcaption>타일 전체가 클릭 영역입니다. 이름으로 검색해 <span class="ui">검색 결과 선택</span> 을 쓸 수도 있습니다.
+고르지 않은 슬롯은 스캔·매칭에서 제외됩니다.</figcaption>
+</section>
+
+<!-- ══════════════════════════ 6 ══════════════════════════ -->
+<section>
+<h2><span class="n">6</span>1단계 — 후보 선별</h2>
+<p class="lede">기준 장비 사진을 한 장씩 보며 <b>검증할지 뺄지</b>만 정합니다.
+<span class="q">모든 사진 자동</span> 을 고르셨다면 이 화면은 나오지 않습니다.</p>
+
+<figure class="shot">
+  <img src="11_1단계_후보선별.jpg" alt="1단계 후보 선별 화면">
+  <svg viewBox="0 0 1280 860" aria-hidden="true">
+    <rect class="mark blue" x="16" y="164" width="263" height="658" rx="9"/>
+    <rect class="mark blue" x="411" y="307" width="400" height="400" rx="9"/>
+    <rect class="mark blue" x="944" y="164" width="320" height="658" rx="9"/>
+    <rect class="mark blue" x="757" y="757" width="75" height="44" rx="7"/>
+    <rect class="mark blue" x="842" y="759" width="75" height="40" rx="7"/>
+    <rect class="mark red"  x="823" y="89" width="85" height="40" rx="7"/>
+    <!-- 번호는 넓은 영역이면 모서리에, 작은 컨트롤이면 **바깥**에 둔다 — 버튼 글자를 덮지 않게 -->
+    <g><circle class="bub" cx="16" cy="164" r="15"/><text class="bubt" x="16" y="164">1</text></g>
+    <g><circle class="bub" cx="411" cy="307" r="15"/><text class="bubt" x="411" y="307">2</text></g>
+    <g><circle class="bub" cx="944" cy="164" r="15"/><text class="bubt" x="944" y="164">3</text></g>
+    <g><circle class="bub" cx="739" cy="739" r="15"/><text class="bubt" x="739" y="739">4</text></g>
+    <g><circle class="bub" cx="935" cy="741" r="15"/><text class="bubt" x="935" y="741">5</text></g>
+    <g><circle class="bub red" cx="805" cy="71" r="15"/><text class="bubt" x="805" y="71">6</text></g>
+  </svg>
+</figure>
+<figcaption>왼쪽에서 가운데로 한 장씩 올라오고, 결정하면 오른쪽(또는 제외 목록)으로 갑니다.</figcaption>
+
+<ol class="keys">
+  <li><b>검증 후보들</b> — 아직 결정하지 않은 사진입니다.</li>
+  <li><b>결정할 사진</b> — 지금 판단할 한 장입니다. 위 슬라이더로 크기를 키울 수 있습니다.</li>
+  <li><b>검증 대상</b> — <span class="q">검증</span> 으로 보낸 사진이 쌓입니다.</li>
+  <li><span class="ui">✓ 검증</span> — 이 사진의 짝을 2단계에서 찾습니다.</li>
+  <li><span class="ui">✕ 제외</span> — 이번 검증에서 뺍니다.</li>
+  <li><span class="ui">선택 종료</span> — <b>남은 사진을 모두 제외 처리</b>하고 다음 단계로 갑니다(확인 창이 뜹니다).</li>
+</ol>
+
+<h3>단축키를 쓰면 훨씬 빠릅니다</h3>
+<p>사진이 수백 장이면 마우스보다 키보드가 편합니다. 버튼에 마우스를 올려도 같은 안내가 나옵니다.</p>
+<table>
+  <thead><tr><th style="width:30%">키</th><th>동작</th></tr></thead>
+  <tbody>
+    <tr><td><span class="kbd">←</span> 또는 <span class="kbd">1</span></td><td>검증</td></tr>
+    <tr><td><span class="kbd">→</span> 또는 <span class="kbd">2</span></td><td>제외</td></tr>
+    <tr><td><span class="kbd">Z</span></td><td>직전 결정 되돌리기</td></tr>
+    <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">A</span></td><td>왼쪽 목록 전체 선택</td></tr>
+  </tbody>
+</table>
+
+<div class="soft">
+  <figure class="shot" style="margin:0">
+    <img src="12_시트_선택모드.jpg" alt="선택 모드 — 여러 장 한꺼번에 처리">
+  </figure>
+  <div class="body">
+    <h4>여러 장을 한꺼번에 — <span class="ui">선택 모드</span></h4>
+    <p>패널 오른쪽 위 <span class="ui">선택 모드</span> 를 누르면 큰 창이 열립니다.
+    사진을 클릭하거나 빈 곳에서 드래그해 여러 장을 고른 뒤 아래 버튼으로 한 번에 처리합니다.</p>
+    <p>사진이 1,000장을 넘으면 200장씩 페이지로 나뉩니다. 타일을 우클릭하면 크게 볼 수 있습니다.</p>
+  </div>
+</div>
+</section>
+
+<!-- ══════════════════════════ 7 ══════════════════════════ -->
+<section>
+<h2><span class="n">7</span>2단계 — 매칭</h2>
+<p class="lede">이 프로그램의 핵심입니다. <b>좌표가 가까운 것끼리</b> 짝을 짓습니다.</p>
+
+<h3>짝을 정하는 규칙</h3>
+<p>먼저 두 결함이 <b>같은 die(칸) 또는 바로 옆 die</b> 에 있는지 봅니다
+(<span class="mono">col·row</span> 차이가 각각 1 이내). 장비마다 die 번호가 1씩 어긋나는 경우가 있어
+정확히 같은 칸만 보면 매칭이 전멸하기 때문입니다.</p>
+<p>그다음 두 좌표 사이의 <b>실제 거리</b>를 재어 다음과 같이 나눕니다.</p>
+
+<table>
+  <thead><tr><th style="width:30%">두 결함 사이의 거리</th><th style="width:22%">판정</th><th>화면에서</th></tr></thead>
+  <tbody>
+    <tr><td><b>허용 오차 이내</b><br><span style="color:var(--mute)">기본값이면 500 µm 이하</span></td>
+        <td><b>일치</b></td>
+        <td>거리만 표시되고 판정 칸은 <b>비어 있습니다</b></td></tr>
+    <tr><td><b>허용 오차 초과</b><br><span style="color:var(--mute)">3배 이내까지</span></td>
+        <td><b>허용 초과</b></td>
+        <td>행이 붉어지고 <span class="chip over">허용 초과</span> 도장이 찍힙니다</td></tr>
+    <tr><td><b>허용 오차의 3배 초과</b></td>
+        <td><b>매치 실패</b></td>
+        <td>짝을 만들지 않습니다. 결과 화면에서 따로 검토합니다</td></tr>
+  </tbody>
+</table>
+
+<div class="tip">
+  <span class="t">아주 가까운 짝은 후보를 하나만 보여 줍니다</span>
+  <p>가장 가까운 후보가 <b>20 µm 이내</b>면 사실상 같은 결함이 확실하므로 후보를 한 장만 보여 줍니다.
+  그보다 멀면 <b>허용 오차의 3배 이내 후보를 모두</b> 가까운 순서로 보여 주어 직접 고르실 수 있게 합니다.</p>
+</div>
+
+<h3>매칭 화면</h3>
+<figure class="shot">
+  <img src="13_2단계_매칭.jpg" alt="2단계 매칭 화면">
+  <svg viewBox="0 0 1280 860" aria-hidden="true">
+    <rect class="mark blue" x="126" y="295" width="400" height="400" rx="9"/>
+    <rect class="mark blue" x="655" y="177" width="587" height="660" rx="9"/>
+    <rect class="mark red"  x="531" y="759" width="85" height="40" rx="7"/>
+    <g><circle class="bub" cx="126" cy="295" r="15"/><text class="bubt" x="126" y="295">1</text></g>
+    <g><circle class="bub" cx="655" cy="177" r="15"/><text class="bubt" x="655" y="177">2</text></g>
+    <g><circle class="bub red" cx="513" cy="741" r="15"/><text class="bubt" x="513" y="741">3</text></g>
+  </svg>
+</figure>
+<ol class="keys">
+  <li><b>기준 사진</b> — 지금 짝을 찾는 사진입니다.</li>
+  <li><b>검증 장비 후보</b> — <b>클릭하면 그 사진으로 매칭이 확정</b>되고 다음 장으로 넘어갑니다.
+      타일 오른쪽 위 돋보기를 누르면 크게 볼 수 있습니다.</li>
+  <li><span class="ui">매칭 없음</span> (단축키 <span class="kbd">N</span>) — 맞는 후보가 없을 때 누릅니다.
+      실수했다면 <span class="kbd">Ctrl</span>+<span class="kbd">Z</span> 로 되돌립니다.</li>
+</ol>
+<figure class="shot half">
+  <img src="14_크롭_후보그리드.jpg" alt="검증 장비 후보 격자 확대">
+</figure>
+<figcaption>후보는 가까운 순서로 놓입니다. 사진 아래 글자는 파일명이고,
+오른쪽 위 돋보기를 누르면 이 사진만 크게 볼 수 있습니다.</figcaption>
+
+<p style="color:var(--mute);font-size:9.4pt">
+화면 오른쪽 위 문구(<span class="q">Stage 2 — 좌표 기반 매칭 (v2)</span>)가
+<b>지금 실제로 쓰이는 방식</b>을 알려 줍니다. 왼쪽 큰 제목은 화면 이름으로 고정돼 있습니다.</p>
+
+<div class="warnbox">
+  <span class="t">좌표 정보가 없으면 여기서 멈추고 안내가 나옵니다</span>
+  <p><span class="q">좌표 정보가 없습니다. … 매칭 설정에서 <span class="mono">유사도 엔진(구형) 사용</span> 을 켠 뒤
+  다시 시작하세요.</span> 라는 안내가 나오면, 2장의 폴더 준비를 먼저 확인해 주세요.
+  대개 <b>정보 파일 없이 사진만 복사</b>한 경우입니다.</p>
+</div>
+
+<h3>계산을 기다리는 동안</h3>
+<p>첫 슬롯을 준비하는 동안 로딩 화면이 뜹니다. 사진이 많으면 수 분 걸릴 수 있습니다.</p>
+<div class="warnbox">
+  <span class="t"><span class="ui">중지</span>를 누르면 계산 결과가 모두 버려집니다</span>
+  <p>설정을 바꿔 다시 시작할 때 옛 결과가 섞이지 않도록 하기 위한 것입니다.
+  잠시 기다릴 수 있다면 그대로 두시는 편이 낫습니다.</p>
+</div>
+</section>
+
+<!-- ══════════════════════════ 8 ══════════════════════════ -->
+<section>
+<h2><span class="n">8</span>검토 — 결과 읽는 법</h2>
+<p class="lede">매칭이 끝나면 이 화면으로 넘어옵니다.
+<b>이 한 화면만 익히면 이 프로그램을 다 쓰신 것입니다.</b></p>
+
+<figure class="shot">
+  <img src="15_검토_시트.jpg" alt="검토 화면 — 매칭 결과 목록">
+  <svg viewBox="0 0 1280 860" aria-hidden="true">
+    <rect class="mark blue" x="20" y="12" width="258" height="44" rx="7"/>
+    <rect class="mark red"  x="20" y="170" width="1230" height="194" rx="4"/>
+    <rect class="mark blue" x="20" y="558" width="1230" height="160" rx="4"/>
+    <rect class="mark blue" x="31" y="239" width="96" height="34" rx="6"/>
+    <rect class="mark blue" x="1187" y="612" width="52" height="44" rx="6"/>
+    <rect class="mark blue" x="1125" y="12" width="135" height="44" rx="7"/>
+    <!-- 작은 컨트롤의 번호는 상자 **바깥**에 — 안에 두면 버튼 글자를 덮는다 -->
+    <g><circle class="bub" cx="306" cy="34" r="15"/><text class="bubt" x="306" y="34">1</text></g>
+    <g><circle class="bub red" cx="1250" cy="170" r="15"/><text class="bubt" x="1250" y="170">2</text></g>
+    <g><circle class="bub" cx="20" cy="558" r="15"/><text class="bubt" x="20" y="558">3</text></g>
+    <g><circle class="bub" cx="15" cy="256" r="15"/><text class="bubt" x="15" y="256">4</text></g>
+    <g><circle class="bub" cx="1170" cy="600" r="15"/><text class="bubt" x="1170" y="600">5</text></g>
+    <g><circle class="bub" cx="1109" cy="34" r="15"/><text class="bubt" x="1109" y="34">6</text></g>
+  </svg>
+</figure>
+<figcaption>가장 <b>멀리 떨어진 짝이 맨 위</b>에 옵니다 — 확인이 필요한 것부터 보게 되어 있습니다.</figcaption>
+
+<ol class="keys">
+  <li><b>집계</b> — <span style="color:var(--pass);font-weight:700">일치</span> ·
+      <span style="color:var(--danger);font-weight:700">허용 초과</span> ·
+      매치 없음 · 매치 실패 개수입니다.</li>
+  <li><b>허용 초과 행</b> — 붉은 테두리와 <span class="chip over">허용 초과</span> 도장.
+      <b>후보가 처음부터 모두 펼쳐집니다</b> — 확인이 필요한 행을 <span class="q">더 보기</span> 뒤에 숨기지 않습니다.</li>
+  <li><b>정상 행</b> — 판정 칸이 <b>비어 있습니다.</b> 이상이 없으면 아무 표시도 하지 않는 것이 이 화면의 규칙입니다.</li>
+  <li><span class="ui">크게 보기</span> — 기준과 후보를 좌우로 나란히 놓고 비교합니다.</li>
+  <li><span class="ui">×</span> — 이 짝을 취소하고 <span class="q">매치 없음</span> 으로 만듭니다.
+      다시 누르면(<span class="ui">↩</span>) 되돌아옵니다.</li>
+  <li><span class="ui">검토 완료 · 유지 N</span> — 검토를 끝내고 결과 화면으로 갑니다.</li>
+</ol>
+
+<h3>행 하나를 자세히</h3>
+<figure class="shot">
+  <img src="16_크롭_검토행.jpg" alt="검토 화면의 행 하나 확대">
+  <svg viewBox="0 0 1242 206" aria-hidden="true">
+    <rect class="mark blue" x="125" y="23" width="118" height="118" rx="5"/>
+    <rect class="mark blue" x="291" y="15" width="118" height="134" rx="5"/>
+    <rect class="mark blue" x="421" y="15" width="94" height="134" rx="5"/>
+    <rect class="mark red"  x="1073" y="72" width="88" height="20" rx="5"/>
+    <g><circle class="bub" cx="125" cy="23" r="14"/><text class="bubt" x="125" y="23">1</text></g>
+    <g><circle class="bub" cx="291" cy="15" r="14"/><text class="bubt" x="291" y="15">2</text></g>
+    <g><circle class="bub" cx="421" cy="15" r="14"/><text class="bubt" x="421" y="15">3</text></g>
+    <g><circle class="bub red" cx="1117" cy="52" r="14"/><text class="bubt" x="1117" y="52">4</text></g>
+  </svg>
+</figure>
+<figcaption>❶ 기준 사진 → ❷ 확정된 짝 → ❸ 차순위 후보 → ❹ 판정 도장.
+사진 아래 숫자가 거리(µm)이고, 차순위 후보는 <b>테두리가 점선</b>이라 아직 확정되지 않았음을 알 수 있습니다.</figcaption>
+
+<ul>
+  <li><b>차순위 후보를 클릭하면 짝이 그 사진으로 교체됩니다.</b></li>
+  <li>후보를 우클릭하면 좌우 비교 화면이 열립니다.</li>
+  <li><span class="q">후보 한 줄 더 보기 ▾</span> 로 더 많은 후보를 볼 수 있습니다.</li>
+</ul>
+
+<h3>좌우 비교로 확인하기</h3>
+<figure class="shot">
+  <img src="17_시트_좌우비교.jpg" alt="좌우 비교 화면">
+</figure>
+<figcaption>왼쪽이 기준, 오른쪽이 후보입니다. <span class="kbd">←</span> <span class="kbd">→</span> 로 후보를 넘기고,
+<span class="kbd">Esc</span> 로 닫습니다.</figcaption>
+<p><b>확대·이동은 마우스가 올라간 사진에만 적용됩니다.</b>
+기준 사진은 그대로 두고 후보만 확대해 볼 수 있어, 같은 위치를 비교하기 편합니다.
+이 화면은 원본 파일을 직접 열어 가장 좋은 화질로 보여 줍니다.</p>
+
+<div class="warnbox">
+  <span class="t"><span class="ui">검토 완료</span>는 되돌릴 수 없습니다</span>
+  <p>누르는 순간 <span class="ui">×</span> 표시한 행이 <b>미매칭으로 확정</b>되고 결과 화면으로 넘어갑니다.
+  넘어간 뒤에도 결과 화면의 <span class="ui">매칭 결과 검토</span> 와
+  <span class="ui">매치 실패 사진 검토</span> 로 손볼 수 있으니, 이 화면에서 완벽하게 하려 애쓰지 않으셔도 됩니다.</p>
+</div>
+</section>
+
+<!-- ══════════════════════════ 9 ══════════════════════════ -->
+<section>
+<h2><span class="n">9</span>결과와 엑셀 저장</h2>
+<p class="lede">마지막 화면입니다. 요약을 확인하고 엑셀로 저장합니다.</p>
+
+<figure class="shot">
+  <img src="18_결과.png" alt="검증 결과 화면">
+  <svg viewBox="0 0 1280 860" aria-hidden="true">
+    <rect class="mark blue" x="40" y="170" width="1200" height="156" rx="9"/>
+    <rect class="mark blue" x="442" y="708" width="168" height="26" rx="5"/>
+    <rect class="mark blue" x="632" y="708" width="207" height="26" rx="5"/>
+    <rect class="mark blue" x="646" y="756" width="114" height="40" rx="7"/>
+    <rect class="mark blue" x="780" y="756" width="200" height="40" rx="7"/>
+    <rect class="mark blue" x="1000" y="754" width="240" height="44" rx="7"/>
+    <!-- 번호는 상자 바깥 — 체크박스 글자와 버튼 라벨을 덮지 않게 -->
+    <g><circle class="bub" cx="40" cy="170" r="15"/><text class="bubt" x="40" y="170">1</text></g>
+    <g><circle class="bub" cx="424" cy="700" r="15"/><text class="bubt" x="424" y="700">2</text></g>
+    <g><circle class="bub" cx="646" cy="740" r="15"/><text class="bubt" x="646" y="740">3</text></g>
+    <g><circle class="bub" cx="780" cy="740" r="15"/><text class="bubt" x="780" y="740">4</text></g>
+    <g><circle class="bub" cx="1000" cy="738" r="15"/><text class="bubt" x="1000" y="738">5</text></g>
+  </svg>
+</figure>
+
+<ol class="keys">
+  <li><b>요약</b> — 두 장비 이름, 매칭 성공 장수, 한쪽에만 있던 슬롯, <b>결과 파일이 저장될 위치</b>.</li>
+  <li><b>저장 옵션</b> — 아래 표 참고. 둘 다 기본은 해제입니다.</li>
+  <li><span class="ui">매칭 결과 검토</span> — 잘못 짝지어진 것을 빼냅니다.</li>
+  <li><span class="ui">매치 실패 사진 검토</span> — 짝을 못 찾은 사진을 다시 살펴 직접 짝지어 줍니다.</li>
+  <li><span class="ui">엑셀로 저장</span> — 파일을 만듭니다. <b>위치를 다시 묻지 않습니다</b>(요약에 적힌 곳에 저장).</li>
+</ol>
+
+<table>
+  <thead><tr><th style="width:34%">저장 옵션</th><th>켜면</th></tr></thead>
+  <tbody>
+    <tr><td><span class="q">사진을 원본 화질로 넣기</span></td>
+        <td>사진을 줄이지 않고 넣습니다. 화질은 좋아지지만 <b>파일이 커지고 저장이 느려집니다.</b></td></tr>
+    <tr><td><span class="q">전체 양식(E~H 수기 영역) 포함</span></td>
+        <td>손으로 적는 칸이 있는 <span class="q">전체 양식</span> 시트를 함께 만듭니다.</td></tr>
+  </tbody>
+</table>
+
+<h3>잘못 짝지어진 것 빼내기</h3>
+<figure class="shot">
+  <img src="19_시트_매칭결과검토.jpg" alt="매칭 결과 검토 창">
+</figure>
+<figcaption><span class="ui">삭제</span>는 <b>표시만</b> 합니다. <span class="ui">확인</span> 을 눌러야 실제로 빠집니다.</figcaption>
+<p>빠진 사진은 없어지지 않고 <span class="q">매치 실패</span> 로 분류되어,
+<span class="ui">매치 실패 사진 검토</span> 의 <span class="q">── 매칭 취소 목록 ──</span> 에서 다시 살릴 수 있습니다.</p>
+
+<div class="warnbox">
+  <span class="t"><span class="ui">매치 실패 사진 검토</span>는 사진을 넘길 때마다 잠시 멈출 수 있습니다</span>
+  <p>후보가 300장 미만인 슬롯에서는 <b>후보 점수를 그 자리에서 다시 계산</b>합니다.
+  그동안 로딩 표시가 뜨고 창이 반응하지 않지만 <b>고장이 아닙니다.</b>
+  몇 초 기다리면 후보가 나타납니다 — <b>강제 종료하지 마세요.</b></p>
+</div>
+
+<h3>엑셀에 무엇이 담기나</h3>
+<ul>
+  <li>슬롯별로 <b>기준 사진과 검증 사진이 나란히</b> 들어갑니다.</li>
+  <li>짝을 찾지 못한 사진은 <b>파일명이 빨간 굵은 글씨</b>로 표시되고,
+      그 아래 회색 작은 글씨로 결함 크기·좌표가 함께 적힙니다.</li>
+  <li>한쪽에만 있던 슬롯은 <span class="q">Slot 불일치 목록</span> 시트에 따로 정리됩니다.</li>
+  <li>파일 이름은 <span class="q">AOI 18호기 검증 (17호기 기준).xlsx</span> 형식이며,
+      같은 이름이 있으면 날짜·시각이 뒤에 붙습니다.</li>
+</ul>
+<p style="color:var(--mute);font-size:9.4pt">결과 파일은 프로그램 폴더 바깥의
+<span class="mono">결과\</span> 폴더에 저장되므로, 프로그램이 업데이트되어도 지워지지 않습니다.</p>
+</section>
+
+<!-- ══════════════════════════ 10 ══════════════════════════ -->
+<section>
+<h2><span class="n">10</span>알아두면 좋은 기능</h2>
+<p class="lede">매번 쓰지는 않지만 알아두면 편한 것들입니다.</p>
+
+<div class="soft">
+  <figure class="shot" style="margin:0">
+    <img src="22_셋업_흑연.png" alt="다크 모드로 본 셋업 화면">
+    <svg viewBox="0 0 1280 860" aria-hidden="true">
+      <rect class="mark blue" x="1118" y="145" width="120" height="34" rx="7"/>
+    </svg>
+  </figure>
+  <div class="body">
+    <h4>다크 모드</h4>
+    <p>어두운 작업장에서 눈부심을 줄입니다. 첫 화면 오른쪽 위 스위치로 켭니다.</p>
+    <p><b>검증을 시작한 뒤에는 바꿀 수 없습니다.</b> 화면을 다시 그리는 작업이라
+    진행 중인 상태가 사라지지 않도록 막아 둔 것입니다. 바꾸시려면 검증을 시작하기 전에 해 주세요.</p>
+  </div>
+</div>
+
+<div class="soft">
+  <figure class="shot" style="margin:0">
+    <img src="20_시트_사진정보.jpg" alt="단일 사진 정보 창">
+  </figure>
+  <div class="body">
+    <h4>사진 정보 보기</h4>
+    <p>첫 화면 왼쪽 아래 <span class="ui">사진 정보 보기</span> 를 누르고 사진을 끌어다 놓으면,
+    <b>엑셀에 찍히는 것과 같은 좌표·계측값</b>을 사진 한 장에서 바로 확인할 수 있습니다.</p>
+    <p>좌표가 제대로 읽히는지 미리 확인할 때 유용합니다. <span class="kbd">Ctrl</span>+<span class="kbd">O</span> 로도 열립니다.</p>
+  </div>
+</div>
+
+<div class="soft">
+  <figure class="shot" style="margin:0">
+    <img src="21_시트_업데이트.png" alt="업데이트 안내 창">
+  </figure>
+  <div class="body">
+    <h4>업데이트</h4>
+    <p>프로그램을 켤 때 자동으로 확인하고, 새 버전이 있으면 물어봅니다.
+    <span class="ui">예</span> 를 누르면 내려받은 뒤 <b>프로그램이 스스로 종료</b>됩니다.
+    다시 실행하면 새 버전으로 켜집니다.</p>
+    <p><b>검증 중에는 미루시는 편이 좋습니다</b> — 진행 중이던 작업이 사라집니다.
+    업데이트가 실패해도 지금 쓰던 버전은 그대로 남습니다.</p>
+  </div>
+</div>
+
+<h3 style="margin-top:8mm">그 밖에</h3>
+<table>
+  <thead><tr><th style="width:24%">기능</th><th>설명</th></tr></thead>
+  <tbody>
+    <tr><td><b>전체화면</b></td>
+        <td><span class="kbd">F11</span> 로 창을 화면 가득 채웁니다. 사진을 크게 볼 때 유용하며,
+            다시 누르면 원래 크기로 돌아옵니다.</td></tr>
+    <tr><td><b>창 크기 기억</b></td>
+        <td>창 크기와 화면 분할 비율은 자동으로 저장되어 다음에 켤 때 그대로 복원됩니다.</td></tr>
+    <tr><td><b>좁은 화면 대응</b></td>
+        <td>창을 좁히면 좌우로 나뉜 화면이 위아래로 바뀝니다. 가로 스크롤은 생기지 않습니다.</td></tr>
+    <tr><td><b>이어하기</b></td>
+        <td>검증 도중 프로그램이 닫혔다면 다음에 켤 때 이어서 할지 물어봅니다.
+            폴더·설정만 복원되므로 <span class="ui">검증 시작</span> 을 다시 눌러 주세요.</td></tr>
+  </tbody>
+</table>
+</section>
+
+<!-- ══════════════════════════ 11 ══════════════════════════ -->
+<section>
+<h2><span class="n">11</span>주의사항</h2>
+<p class="lede">고장으로 오해하기 쉬운 것과, 되돌리기 어려운 것을 모았습니다.</p>
+
+<h3>화면이 멈춘 것처럼 보일 때</h3>
+<p>아래는 모두 <b>정상 동작</b>입니다. 계산이 끝나면 저절로 돌아옵니다.
+<b>강제 종료하지 마세요</b> — 진행 중이던 결과가 사라집니다.</p>
+<table>
+  <thead><tr><th style="width:34%">언제</th><th style="width:16%">보통 걸리는 시간</th><th>왜 그런가</th></tr></thead>
+  <tbody>
+    <tr><td><b>매치 실패 사진 검토</b>에서 사진을 넘길 때</td><td class="dur">수 초</td>
+        <td>후보 점수를 그 자리에서 다시 계산합니다. 가장 눈에 띄는 구간입니다.</td></tr>
+    <tr><td>폴더 스캔</td><td class="dur">수 초 ~ 수십 초</td>
+        <td>사진이 많거나 네트워크 폴더(NAS)면 파일을 훑는 데 시간이 걸립니다.</td></tr>
+    <tr><td>2단계 첫 계산</td><td class="dur">수십 초 ~ 수 분</td>
+        <td>후보 점수를 미리 계산합니다. <span class="ui">중지</span> 로 취소할 수 있습니다.</td></tr>
+    <tr><td>썸네일 만들기</td><td class="dur">수십 초</td>
+        <td>사진 목록을 빠르게 넘기기 위한 준비입니다. <span class="ui">중지</span> 로 건너뛸 수 있습니다.</td></tr>
+    <tr><td>엑셀로 저장</td><td class="dur">수십 초</td>
+        <td>사진을 파일에 넣습니다. <span class="q">원본 화질</span> 옵션을 켜면 더 오래 걸립니다.</td></tr>
+    <tr><td>다크 모드 전환</td><td class="dur">1초 미만</td>
+        <td>화면을 다시 그립니다. 전환 중에는 스위치가 잠깐 잠깁니다.</td></tr>
+  </tbody>
+</table>
+
+<div class="note">
+  <span class="t">메모리 안내가 뜨면</span>
+  <p>화면 아래에 <span class="q">메모리 사용량이 높아 캐시를 정리했습니다</span> 가 나오면,
+  <b>진행 범위를 <span class="q">일부 슬롯만</span> 으로 나눠 여러 번 돌리시는 것</b>을 권합니다.</p>
+</div>
+
+<h3>되돌리기 어려운 동작</h3>
+<table>
+  <thead><tr><th style="width:34%">동작</th><th>일어나는 일</th></tr></thead>
+  <tbody>
+    <tr><td><span class="ui">검토 완료</span></td>
+        <td><span class="ui">×</span> 표시한 행이 미매칭으로 확정됩니다. 결과 화면의 두 검토 버튼으로만 손볼 수 있습니다.</td></tr>
+    <tr><td><span class="ui">선택 종료</span> (1단계)</td>
+        <td>남은 미결정 사진이 <b>모두 제외</b>됩니다. 확인 창이 한 번 뜹니다.</td></tr>
+    <tr><td><span class="ui">중지</span> (계산 중)</td>
+        <td>계산 결과를 <b>모두 버리고</b> 첫 화면으로 돌아갑니다.</td></tr>
+    <tr><td>업데이트 적용</td>
+        <td>프로그램이 <b>스스로 종료</b>됩니다. 진행 중이던 검증은 사라집니다.</td></tr>
+  </tbody>
+</table>
+<p><b>원본 사진 폴더는 어떤 경우에도 수정하지 않습니다.</b> 프로그램은 읽기만 합니다.</p>
+
+<h3>자주 겪는 실수</h3>
+<table>
+  <thead><tr><th style="width:32%">증상</th><th>원인과 해결</th></tr></thead>
+  <tbody>
+    <tr><td><span class="q">두 폴더에 공통된 Slot 이 존재하지 않습니다</span></td>
+        <td>슬롯 폴더 <b>안</b>을 지정하셨을 가능성이 큽니다. <b>상위(호기) 폴더</b>를 지정해 주세요.</td></tr>
+    <tr><td><span class="q">좌표 정보가 없습니다</span></td>
+        <td>정보 파일 없이 사진만 복사한 경우입니다. 폴더째 다시 가져와 주세요(2장).</td></tr>
+    <tr><td>모든 슬롯이 <span class="q">한쪽 전용</span> 으로 나옴</td>
+        <td>KLA 장비 확인에서 반대쪽을 고르셨을 수 있습니다(5장).</td></tr>
+    <tr><td>엉뚱한 결함끼리 짝지어짐</td>
+        <td>die 가 작은 자재에 허용 오차 500 µm 을 그대로 쓴 경우입니다. 경고 문구를 확인하고 값을 낮춰 주세요.</td></tr>
+    <tr><td>허용 오차가 휠로 안 바뀜</td>
+        <td>의도된 동작입니다. <span class="ui">−</span> <span class="ui">+</span> 버튼을 쓰세요.</td></tr>
+  </tbody>
+</table>
+</section>
+
+<!-- ══════════════════════════ 12 ══════════════════════════ -->
+<section>
+<h2><span class="n">12</span>빠른 참조</h2>
+
+<h3>단축키</h3>
+<table>
+  <thead><tr><th style="width:24%">화면</th><th style="width:30%">키</th><th>동작</th></tr></thead>
+  <tbody>
+    <tr><td>어디서나</td><td><span class="kbd">F11</span></td><td>전체화면 켜기 / 끄기</td></tr>
+    <tr><td rowspan="4">1단계 선별</td><td><span class="kbd">←</span> · <span class="kbd">1</span></td><td>검증</td></tr>
+    <tr><td><span class="kbd">→</span> · <span class="kbd">2</span></td><td>제외</td></tr>
+    <tr><td><span class="kbd">Z</span></td><td>되돌리기</td></tr>
+    <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">A</span></td><td>왼쪽 목록 전체 선택</td></tr>
+    <tr><td rowspan="2">2단계 매칭</td><td><span class="kbd">N</span></td><td>매칭 없음 확정</td></tr>
+    <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">Z</span></td><td>되돌리기</td></tr>
+    <tr><td>좌우 비교 · 확대</td><td><span class="kbd">←</span> <span class="kbd">→</span> · <span class="kbd">Esc</span></td>
+        <td>후보 넘기기 · 닫기</td></tr>
+    <tr><td>사진 정보 보기</td><td><span class="kbd">Ctrl</span>+<span class="kbd">O</span></td><td>사진 선택</td></tr>
+  </tbody>
+</table>
+<p style="color:var(--mute);font-size:9.4pt">검토 화면에는 키보드 조작이 없습니다.
+<span class="kbd">Enter</span> 한 번에 검토가 끝나 버리는 사고를 막기 위해 일부러 두지 않았습니다 — 버튼으로 조작해 주세요.</p>
+
+<h3>판정 기준 한눈에</h3>
+<table>
+  <thead><tr><th style="width:26%">화면 표시</th><th style="width:24%">뜻</th><th>해야 할 일</th></tr></thead>
+  <tbody>
+    <tr><td>판정 칸이 비어 있음</td><td><b>일치</b></td><td>없습니다. 그대로 두시면 됩니다.</td></tr>
+    <tr><td><span class="chip over">허용 초과</span></td><td>허용 오차보다 멀다</td>
+        <td>사진을 확인해 맞으면 그대로, 아니면 차순위 후보를 클릭하거나 <span class="ui">×</span> 처리합니다.</td></tr>
+    <tr><td><span class="chip none">매치 없음</span></td><td>짝을 만들지 않음</td>
+        <td>결과 화면의 <span class="ui">매치 실패 사진 검토</span> 에서 다시 볼 수 있습니다.</td></tr>
+    <tr><td>집계의 <span class="q">매치 실패</span></td><td>후보가 아예 없었다</td>
+        <td>이 화면에서는 조치할 수 없습니다. 결과 화면에서 검토합니다.</td></tr>
+  </tbody>
+</table>
+
+<h3>문제가 생겼을 때</h3>
+<ol>
+  <li>프로그램이 아예 켜지지 않으면, 같은 폴더의 <span class="mono">run_aoi_debug.bat</span> 을 실행해
+      검은 창에 나오는 메시지를 담당자에게 알려 주세요.</li>
+  <li>동작이 이상하면 기록 파일을 함께 전달해 주세요:
+      <span class="mono">C:\Users\&lt;사용자&gt;\.aoi_verification_cache\app.log</span></li>
+  <li>속도가 계속 느리면 같은 폴더의 <span class="mono">.aoi_verification_cache</span> 를 통째로 지워도 됩니다.
+      다음 실행에 다시 만들어지며, <b>결과 파일에는 영향이 없습니다.</b></li>
+</ol>
+
+<div class="note">
+  <span class="t">이 설명서의 화면 그림에 대하여</span>
+  <p>모든 그림은 실제 프로그램을 실행해 찍은 것이며, 강조 상자와 화살표는
+  <b>화면 부품의 실제 좌표</b>에 맞춰 그려졌습니다. 화면이 바뀌면 그림과 주석을 함께 다시 만듭니다.
+  예시 사진은 실제 장비가 촬영한 RDL 결함 사진입니다.</p>
+</div>
+</section>
