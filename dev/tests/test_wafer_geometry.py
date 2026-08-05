@@ -253,6 +253,20 @@ class TestCamtekPitchFromFile:
 # 서로 다른 3개 device 에서 전부 성립함이 확인된 규칙이다.  특히 사례 1(pitch_y
 # 31831.4 → row 기준 10)은 row 기준을 상수 7 로 박았을 때 row=−2 가 나오던 —
 # 즉 "다른 디바이스에서 좌표 엉망" 을 재현하던 케이스다.
+#
+# ⚠⚠ 이 골든이 **검증하지 않는 것** — 오해하면 위험하다(→ `docs/좌표_판단오류_회고.md` §4-5)
+#
+#   X·Y·col·row·x·y 는 전부 **장비 화면 정답**이지만, 이 사례들에는 그 웨이퍼의
+#   `Center_X/Y` 가 **딸려 오지 않았다**.  아래 픽스처가 합성하는 INI 에도 중심이
+#   없으므로, `camtek_geometry` 는 중심을 못 찾아 **폴백 경로**(`ceil(D/pitch_y)`)로 간다.
+#   4사례 전부 우연히 폴백이 맞는 자재라 통과할 뿐이다:
+#
+#       dev-A  y_index 9 → 폴백 10−9 = 1 = 정답      BNN#1  5 → 7−5 = 2 = 정답
+#       BNN#2  y_index 7 → 폴백  7−7 = 0 = 정답      dev-B  5 → 7−5 = 2 = 정답
+#
+#   즉 **앱이 실제로 타는 유도 경로(중심 → 원점)는 여기서 한 번도 안 돌아간다.**
+#   PI2 자재였다면 폴백은 7 을 내고 장비값 6 과 어긋난다(실측: `00RV9055XYC2`).
+#   유도 경로의 골든은 아래 `TestDerivedPathGolden` 이다 — **둘 다 통과해야 한다.**
 # ---------------------------------------------------------------------------
 _GOLDEN = [
     # (라벨, X, Y, step_x, step_y, 기대 col, row, die_x, die_y)
@@ -303,6 +317,143 @@ class TestGoldenEquipmentExamples:
             encoding="utf-8")
         c = camtek_ini.load_folder(folder)["img"]
         assert c.row == 7 - 3                  # 300 mm 였다면 10 − 3 = 7
+
+    def test_golden_actually_runs_the_fallback_path(self, tmp_path):
+        """★ 위 골든이 **폴백 경로**를 타고 있다는 사실 자체를 못 박는다.
+
+        이 단언이 깨지면 골든의 의미가 바뀐 것이다 — 픽스처에 중심이 생겼거나
+        폴백 식이 바뀌었거나.  어느 쪽이든 `TestDerivedPathGolden` 과 함께
+        다시 봐야 한다(→ `docs/좌표_판단오류_회고.md` §4-5).
+        """
+        import math
+        for i, (_label, X, Y, sx, sy, _col, row, _dx, _dy) in enumerate(_GOLDEN):
+            folder = tmp_path / f"slot{i}"
+            folder.mkdir()
+            ci, ri = math.floor(X / sx), math.floor(Y / sy)
+            (folder / "Params_WaferInfo.ini").write_text(
+                f"[Geometry]\nDieStep_X={sx:.6f}\nDieStep_Y={sy:.6f}\n"
+                f"[Geometric]\nDiameter=300000.000000\n", encoding="utf-8")
+            (folder / "ColorImageGrabingInfo.ini").write_text(
+                f"[img.jpeg]\nX={X}\nY={Y}\nCol={ci}\nRow={ri}\n", encoding="utf-8")
+            # 중심이 없다 → 유도 불가 → 폴백
+            assert wg._wafer_center(folder) == (None, None)
+            assert wg.camtek_geometry(folder).row_total == math.ceil(300000.0 / sy)
+            # 그리고 이 자재들은 폴백이 정답과 일치한다(= 골든이 통과하는 이유)
+            assert math.ceil(300000.0 / sy) - ri == row
+
+
+# ---------------------------------------------------------------------------
+# ★★ 유도 경로 골든 — 중심에서 원점을 유도하는 **주경로**의 장비 정답
+#
+# 위 `TestGoldenEquipmentExamples` 는 폴백 경로만 태운다(그 클래스 주석 참조).
+# 여기는 그 공백을 메운다: 중심 정보가 실제로 있는 웨이퍼의 장비 확인값이다.
+#
+#   출처 등급(→ `docs/좌표_판단오류_회고.md` R3)
+#     col·row      = 관측 (장비 화면 / 장비가 파일명에 적은 값)
+#     Center_X/Y   = 유도 (그 웨이퍼 자신의 `Wafer2Table.ini` 역산)
+#     pitch        = 파일 (그 웨이퍼 자신의 `Params_WaferInfo.ini`)
+#
+# ⚠ 이 표가 **증명하지 않는 것**: 경계 근접 거동.  여섯 사례 전부
+#   `(Cy+D/2)/pitch_y` 의 소수부가 0.333~0.345 로 몰려 있다(여유 33~35 %).
+#   경계 여유가 수 % 인 자재는 표본 0건이다(리스크 R-2).
+# ---------------------------------------------------------------------------
+_DERIVED_GOLDEN = [
+    # (라벨, Center_X, Center_Y, pitch_x, pitch_y, 기대 col_origin, 기대 row_total)
+    ("RDL4 17/18호기",       167448.9731, 179674.0034, 37247.9, 44905.3, 1, 6),
+    ("T254 GIX5703110",      166093.0524, 202554.0327, 14400.1, 31109.8, 2, 10),
+    ("PI4 UDS 35115E27EWD7", 204698.0390, 224379.7584, 37247.7, 44905.4, 2, 7),
+    ("PI4 DYD 29265187EWF2", 204335.9344, 224721.8779, 37247.7, 44905.4, 2, 7),
+    ("PI2 KMU 00RV9055XYC2", 204755.3903, 179513.1067, 37248.2, 44905.5, 2, 6),
+    ("PI2 MTW 00RWQ258XYD1", 205028.3266, 179693.8887, 37248.2, 44905.5, 2, 6),
+]
+
+
+class TestDerivedPathGolden:
+    """★★ 중심 → 원점 유도가 장비 정답을 낸다 (폴백이 아니라 **주경로**)."""
+
+    @pytest.mark.parametrize("label,cx,cy,px,py,co,rt", _DERIVED_GOLDEN,
+                             ids=[g[0] for g in _DERIVED_GOLDEN])
+    def test_origin_from_center(self, label, cx, cy, px, py, co, rt):
+        assert wg._col_origin(cx, 300000.0, px) == co
+        assert wg._row_total(cy, 300000.0, py) == rt
+
+    @pytest.mark.parametrize("label,cx,cy,px,py,co,rt", _DERIVED_GOLDEN,
+                             ids=[g[0] for g in _DERIVED_GOLDEN])
+    def test_partial_die_hypothesis_is_excluded(self, label, cx, cy, px, py, co, rt):
+        """경쟁 가설 '걸치기만 해도 센다' 는 **전 사례에서 1 어긋난다**.
+
+        표본이 두 가설을 실제로 구분한다는 근거다 — 이게 없으면
+        "여섯 사례가 다 맞는다" 는 아무것도 말하지 않는다(회고 R1).
+        """
+        import math
+        assert math.floor((cx - 150000.0) / px) == co - 1
+        assert math.floor((cy + 150000.0) / py) == rt + 1
+
+    def test_fallback_is_wrong_for_pi2(self):
+        """★ 폴백이 **장비 기준으로** 틀린 실측 사례 (13차, `00RV9055XYC2`).
+
+        그전까지는 '우리 유도값과 다르다' 까지였다.  이제 장비가 6 이라고 했고
+        폴백은 7 을 낸다.  이 단언이 깨지면 폴백 식이 바뀐 것이다.
+        """
+        import math
+        cy, py = 179513.1067, 44905.5
+        assert wg._row_total(cy, 300000.0, py) == 6          # 유도 = 장비값
+        assert wg._row_total(None, 300000.0, py) == 7        # 폴백 = 오답
+        assert math.ceil(300000.0 / py) == 7
+
+    def test_kmu_equipment_reading(self):
+        """★ 장비 화면 `col=0, row=3` — `row_total=6` 쪽 첫 장비 정답.
+
+        `86798.148549.c.248982116.jpeg` (AOI-25 · KMU-PIDS7 · 00RV9055XYC2).
+        파일명 접두는 실제 X·Y 와 수 µm 다를 수 있으나 경계까지 12,000 µm 이상
+        남아 결과가 안 바뀐다.
+        """
+        import math
+        X, Y, px, py = 86798.0, 148549.0, 37248.2, 44905.5
+        co, rt = 2, 6
+        xi, yi = math.floor(X / px), math.floor(Y / py)
+        assert (xi - co, rt - yi) == (0, 3)
+        assert min(X - xi * px, (xi + 1) * px - X) > 10000    # 경계 여유 확인
+        assert min(Y - yi * py, (yi + 1) * py - Y) > 10000
+
+    @pytest.mark.parametrize("X,Y,col,row,dx,dy", [
+        (241598.6, 321072.3, 4, 0, 18112, 6734),
+        (146812.1, 150100.3, 1, 4, 35069, 15384),
+    ])
+    def test_dyd_equipment_reading_includes_die_internal_xy(self, X, Y, col, row, dx, dy):
+        """★ die 내부 x·y 를 **장비 화면과 대조한 첫 사례** (AOI-17 · DYD-PIDS3).
+
+        그전까지 x·y 는 소스끼리 비교만 했다(파일명 ↔ INI) — 두 소스가 같은
+        규칙으로 같이 틀릴 수 있었다.
+
+        ⚠ 이 2건은 **버림 vs 반올림을 구분하지 못한다** — 네 값의 소수부가
+        전부 0.5 미만이라 두 방식이 같은 숫자를 낸다.  버림의 근거는 여전히
+        `test_die_y_is_floored_not_rounded` 의 1건뿐이다.
+        """
+        import math
+        px, py, co, rt = 37247.7, 44905.4, 2, 7
+        xi, yi = math.floor(X / px), math.floor(Y / py)
+        assert (xi - co, rt - yi) == (col, row)
+        assert (math.floor(X - xi * px), math.floor(Y - yi * py)) == (dx, dy)
+
+    def test_row_zero_defect_proves_row_total_at_least_seven(self):
+        """DYD 의 `row 0` 결함은 그 자체로 `row_total ≥ 7` 을 증명한다(6이면 −1)."""
+        import math
+        yi = math.floor(321072.3 / 44905.4)
+        assert yi == 7
+        assert 6 - yi < 0                       # row_total=6 이면 음수 row — 불가능
+
+    def test_sample_never_probes_the_boundary(self):
+        """★ 회고 §4-4 — 여섯 사례가 전부 여유 33~35 % 다.
+
+        '6도 7도 장비가 확인했으니 닫혔다' 로 읽으면 안 된다는 것을 못 박는다.
+        경계 근접 자재가 실제로 들어오면 이 단언이 깨지고, 그때 R-2 를 다시 본다.
+        """
+        import math
+        fracs = [((cy + 150000.0) / py) % 1.0 for _l, _cx, cy, _px, py, _c, _r
+                 in _DERIVED_GOLDEN]
+        assert min(fracs) > 0.30 and max(fracs) < 0.40      # 전부 한 구간에 몰려 있다
+        assert max(fracs) - min(fracs) < 0.02               # 위상이 사실상 같다
 
 
 # ---------------------------------------------------------------------------

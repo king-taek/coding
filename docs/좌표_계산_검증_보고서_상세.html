@@ -180,6 +180,7 @@ footer.colophon{margin-top:2.4rem;padding-top:1rem;border-top:2px solid var(--ru
   <a href="#s7"><b>7</b><span>리스크</span></a>
   <a href="#s8"><b>8</b><span>참고 저장소 비교</span></a>
   <a href="#s9"><b>9</b><span>필요 자료·개선안</span></a>
+  <a href="#s11"><b>11</b><span>판단 오류 회고</span></a>
   <a href="#s10"><b>10</b><span>부록</span></a>
 </nav>
 
@@ -907,6 +908,39 @@ R_TB500_LIVE_PI4 AOI-21 Copy_0614   2         (2, <b>7</b>)          224,571 ~ 2
 </tbody></table></div>
 </div>
 
+<div class="src">
+<header><span class="id">자료 H</span><h3>장비 확인 col·row·x·y — PI2 · PI4</h3>
+<span class="when">2026-08-05 수령 (13차)</span></header>
+<div class="tw"><table class="kv"><tbody>
+<tr><td>저장 위치</td><td><code>docs/장비 확인 좌표(PI2·PI4, 13차)/</code>
+    (<code>원본_수령분.md</code> · <code>정리.md</code>)</td></tr>
+<tr><td>원본 경로</td><td><code>Y:\AOI-25\…\R_TB500_LIVE_PI2\Setup1\KMU-PIDS7\00RV9055XYC2</code><br>
+    <code>P:\AOI-22\…\R_TB500_LIVE_PI2 AOI-21 Copy _0614\Setup1\MTW-PIDS7\00RWQ258XYD1</code><br>
+    <code>P:\AOI-17\…\R_TB500_LIVE_PI4\Setup1\DYD-PIDS3\29265187EWF2</code></td></tr>
+<tr><td>구성</td><td>· KMU — 장비 화면 <code>col=0, row=3</code> (사진 1건)<br>
+    · MTW — 대체 웨이퍼 <code>00RWQ258XYD1</code> 의 INI 3종 전문 (결함 <strong>35건</strong>),
+      장비값은 <strong>대기 중</strong><br>
+    · DYD — 장비 화면 <strong><code>col, row, x, y</code> 2건</strong> (예측과 일치)<br>
+    · UDS — 리뷰 후 사진 삭제로 제공 불가</td></tr>
+<tr><td style="color:var(--blue)">핵심 자료</td>
+    <td><strong>① <code>row_total = 6</code> 쪽의 첫 장비 정답</strong> —
+    그전까지 6 은 <code>Wafer2Table</code> 역산뿐이었습니다<br>
+    <strong>② die 내부 <code>x·y</code> 의 첫 장비 대조</strong> — 그전까지 0건</td></tr>
+<tr><td>증명한 것</td><td>· 유도식이 <strong>양쪽 값(6·7)을 모두 장비 정답으로</strong> 재현<br>
+    · 폴백이 <strong>장비 기준으로 틀리다</strong> — “우리 값과 다르다” 에서 한 단계 올라감<br>
+    · <code>x·y</code> 표기가 소스 간 일치를 넘어 <strong>장비와도 일치</strong><br>
+    · MTW 대체 웨이퍼 35건이 격자 불변식 전수 통과, <code>row</code>·<code>col</code> 둘 다 0 에 닿음</td></tr>
+<tr><td style="color:var(--danger)">한계</td>
+    <td>· <strong>버림 vs 반올림을 구분하지 못함</strong> — DYD 네 값의 소수부가 전부 0.5 미만이라
+      두 방식이 같은 숫자. 버림 근거는 여전히 골든 1건<br>
+    · KMU 는 <strong>절대 X·Y 가 파일명 접두</strong>뿐 (INI 미수령) — 경계 여유가 12,000 µm 넘어
+      결론엔 영향 없으나 정밀 대조는 불가<br>
+    · <strong>경계 근접 자재가 아니다</strong> — 여유 34 %. 6사례 전부 같은 위상
+      (<a class="ref" href="#s11">11장</a>)<br>
+    · MTW 2건은 아직 <strong>예측만 있고 장비값이 없음</strong></td></tr>
+</tbody></table></div>
+</div>
+
 <h3>자료 요약</h3>
 <div class="tw"><table>
 <thead><tr><th class="ctr" style="width:8%">자료</th><th style="width:24%">무엇</th>
@@ -927,6 +961,9 @@ R_TB500_LIVE_PI4 AOI-21 Copy_0614   2         (2, <b>7</b>)          224,571 ~ 2
 <tr><td class="k ctr">G</td><td>PI 계열 INI 전수<br><small>35 웨이퍼 · 6 장비</small></td>
     <td class="num">—<br><small>2장만 결함 포함</small></td><td>TB500 (PI2·PI3·PI4)</td>
     <td><span class="v no">0 건</span> — 유도식 <strong>입력</strong>을 넓힌 자료</td></tr>
+<tr><td class="k ctr">H</td><td>장비 확인 col·row·x·y<br><small>13차</small></td>
+    <td class="num">35<br><small>MTW 대체분</small></td><td>TB500 (PI2·PI4)</td>
+    <td><strong>장비 화면 3건</strong> — 그중 <strong>2건은 x·y 포함</strong></td></tr>
 </tbody></table></div>
 <p><small>장비 정답 13건 중 <strong>die 내부 x·y 를 담은 것은 자료 B 의 4건뿐</strong>이고,
 그것도 장비 화면이 아니라 장비가 파일명에 적은 값입니다.
@@ -946,7 +983,20 @@ R_TB500_LIVE_PI4 AOI-21 Copy_0614   2         (2, <b>7</b>)          224,571 ~ 2
     <small>16호기 장비 화면 직접 판독 · T254 2웨이퍼</small></div><div class="val">2 / 2</div></div>
   <div class="row"><div class="lab">Camtek INI → 장비가 적은 파일명
     <small>RDL4 18호기 · 같은 사진의 두 이름</small></div><div class="val">4 / 4</div></div>
-  <div class="row tot"><div class="lab"><strong>합계</strong></div><div class="val">13 / 13</div></div>
+  <div class="row"><div class="lab">유도 <code>row_total = 6</code> → 화면 col/row
+    <small>★ 13차 · AOI-25 KMU-PIDS7 — 6 쪽의 첫 장비 정답</small></div><div class="val">1 / 1</div></div>
+  <div class="row"><div class="lab">die 내부 <code>x·y</code> → 화면 값
+    <small>★ 13차 · AOI-17 DYD-PIDS3 — 그전까지 0건이던 축</small></div><div class="val">2 / 2</div></div>
+  <div class="row tot"><div class="lab"><strong>합계</strong></div><div class="val">16 / 16</div></div>
+</div>
+<div class="note">
+<span class="lbl">13건 → 16건이 뜻하는 것과 뜻하지 않는 것</span>
+<p style="margin-bottom:0"><strong>뜻하는 것</strong> — 유도식이 <code>row_total</code> 의 두 값(6·7)을
+모두 장비 정답으로 재현하고, <code>x·y</code> 가 소스 간 일치를 넘어 장비와도 맞는다는 것.<br>
+<strong>뜻하지 않는 것</strong> — 여섯 사례 전부 경계 여유가 33~35 %라
+<strong>경계 근접 거동은 여전히 표본 0건</strong>입니다. PI2 와 PI4 의 중심은
+<strong>die 한 칸(44,905 µm)과 39 µm 차이</strong>로 떨어져 있어, 격자 대비 위상이 사실상 같습니다.
+“6도 7도 확인됐으니 닫혔다” 로 읽으면 안 됩니다 → <a class="ref" href="#s11">11장 구조 A</a>.</p>
 </div>
 
 <h3>구조적 검산 — 정답 없이도 성립해야 하는 것</h3>
@@ -1074,12 +1124,15 @@ R_TB500_LIVE_PI4 AOI-21 Copy_0614   2         (2, <b>7</b>)          224,571 ~ 2
 <strong>어떤 검산도 알려주지 못합니다.</strong></p>
 </div>
 
-<div class="note red">
-<span class="lbl">공백 ② — x·y 절대값 (이번 초점)</span>
-<p style="margin-bottom:0"><strong>die 내부 x·y 를 장비 화면과 대조한 적이 0건입니다.</strong>
-장비 화면 판독 2건은 <code>col, row</code> 만 기록됐고, 파일명 대조 4건은 <em>다른 소스끼리</em>
-비교한 것입니다. 두 소스가 같은 규칙으로 같이 틀릴 수 있으므로,
-<strong>x·y 는 아직 독립적으로 확인된 적이 없습니다.</strong></p>
+<div class="note">
+<span class="lbl">공백 ② — x·y 절대값 <span style="color:var(--pass)">(13차에 부분 해소)</span></span>
+<p><s>die 내부 x·y 를 장비 화면과 대조한 적이 0건입니다.</s>
+<strong>AOI-17 DYD-PIDS3 의 2건이 <code>col, row, x, y</code> 를 모두 장비 화면과 맞췄습니다</strong>
+(<a class="ref" href="#s4">자료 H</a>). 두 소스가 같은 규칙으로 같이 틀릴 가능성이 이 축에서 닫혔습니다.</p>
+<p style="margin-bottom:0"><strong>다만 남은 것</strong> — 그 네 값의 소수부가 전부 0.5 미만이라
+<strong>버림과 반올림이 같은 숫자</strong>를 냅니다. 우리가 쓰는 버림을 지지하는 관측은
+여전히 골든 1건(<code>43180.809 → 43180</code>)뿐입니다.
+소수부 ≥ 0.5 인 결함 1건이면 닫힙니다.</p>
 </div>
 
 <h3>검증 범위 요약</h3>
@@ -1087,7 +1140,10 @@ R_TB500_LIVE_PI4 AOI-21 Copy_0614   2         (2, <b>7</b>)          224,571 ~ 2
 <thead><tr><th style="width:24%">축</th><th style="width:38%">검증된 범위</th><th style="width:38%">미검증</th></tr></thead>
 <tbody>
 <tr><td class="k">device / die 크기</td><td>3종 (37.2×44.9 · 14.4×31.1 · 25.0×31.8)</td><td>die 4 mm 급 소형, 초대형</td></tr>
-<tr><td class="k">die 내부 x·y</td><td>소스 간 상호 대조만</td><td><strong>장비 정답 대조 0건</strong></td></tr>
+<tr><td class="k">die 내부 x·y</td><td>소스 간 상호 대조 + <strong>장비 화면 2건</strong> (13차)</td>
+    <td><strong>버림 vs 반올림</strong> — 2건 다 소수부 &lt;0.5 라 구분 못 함 (골든 1건이 유일)</td></tr>
+<tr><td class="k">격자 대비 위상</td><td>여유 33~35 % 만 (6사례)</td>
+    <td><strong>경계 근접 자재 0건</strong> — 여유가 수 % 인 웨이퍼</td></tr>
 <tr><td class="k">웨이퍼 직경</td><td>300 mm 만</td><td>200 mm 등</td></tr>
 <tr><td class="k">EBR</td><td>0 만 (모의로 5 mm 까지 확인)</td><td>실제 <code>EBR≠0</code> 자재</td></tr>
 <tr><td class="k">중심 소스</td><td>3경로 전부 (<code>Center_*</code> · <code>Wafer2Table</code> · 폴백)<br>
@@ -1151,15 +1207,19 @@ R_TB500_LIVE_PI4 AOI-21 Copy_0614   2         (2, <b>7</b>)          224,571 ~ 2
 <span class="chip l">낮</span> 이론적 가능성은 있으나 실측 여유가 큼</small></p>
 
 <div class="note red">
-<span class="lbl">R-4 등급 조정 — 자료 G 로 “이론상” 이 “실측” 이 됐다</span>
-<p style="margin-bottom:0">이전에는 폴백 <code>ceil(직경/pitch_y)</code> 가 <em>틀릴 수도 있다</em> 는 이론적
-가능성이었고, 확보된 자재에서는 전부 우연히 맞았습니다. 자료 G 에서
-<strong>PI2 계열 2장이 실제로 틀립니다</strong>(폴백 7 · 실제 6).
-같은 자료의 PI4 <code>35115E27EWD7</code> 은 폴백도 7 이라 <strong>우연히 맞습니다</strong> —
-즉 폴백이 맞는지 여부는 자재에 달렸고, <strong>맞았는지 틀렸는지 앱이 알 방법이 없습니다.</strong>
-지금은 <code>Wafer2Table.ini</code> 가 35장 전수에 있어 폴백까지 내려간 적이 없지만,
-그 파일이 없는 스캔이 존재하는지는 <strong>아직 확인되지 않았습니다</strong>.
-→ <a class="ref" href="#s9">9-2 (c) 추정값 표시</a>의 우선순위가 올라갑니다.</p>
+<span class="lbl">R-4 — 심각도는 <u>장비 기준으로</u> 확인됐다. 그래도 등급은 ‘중’ 을 유지한다</span>
+<p>이전에는 폴백 <code>ceil(직경/pitch_y)</code> 가 <em>틀릴 수도 있다</em> 는 이론적
+가능성이었습니다. 지금은 두 단계가 더 올라왔습니다.</p>
+<pre>자료 G (12차)   PI2 2장에서 폴백 7 · 유도 6      → “우리 유도값과 다르다”
+장비 확인(13차)  KMU 00RV9055XYC2 장비가 <b>row 3</b>   → 유도가 맞고 <b>폴백이 틀리다</b>
+                (폴백이면 row 4)                     ← 장비 기준 오류로 확정</pre>
+<p style="margin-bottom:0"><strong>그런데 등급은 올리지 않습니다.</strong> 등급은 심각도 × 발생빈도인데,
+<strong>폴백까지 내려간 폴더는 지금까지 0건</strong>입니다(확보한 41 웨이퍼 전부
+<code>Center_*</code> 또는 <code>Wafer2Table.ini</code> 를 갖고 있었습니다).
+심각도만 보고 ‘높’ 으로 올리면 <strong>그 자체가 이 프로젝트에서 반복된
+성급한 일반화</strong>입니다 — <a class="ref" href="#s11">11장</a> 의 구조 A.
+<strong><code>Wafer2Table.ini</code> 이 없는 스캔이 1건이라도 확인되면 그때 ‘높’ 으로 올립니다.</strong>
+그 전까지는 방어책(<a class="ref" href="#s9">9-2 (c) 추정값 표시</a>)의 우선순위만 올립니다.</p>
 </div>
 </section>
 
@@ -1435,6 +1495,158 @@ R_TB500_LIVE_PI4 AOI-21 Copy_0614   2         (2, <b>7</b>)          224,571 ~ 2
 <tr><td class="k ctr">5</td><td>median offset 보정</td><td><span class="v ok">불필요</span></td>
     <td>layer 간 매칭 강건성 (초점 밖)</td></tr>
 </tbody></table></div>
+</section>
+
+<!-- ══ 11 ══ -->
+<section id="s11">
+<h2><span class="n">11</span>판단 오류 회고</h2>
+<p>좌표 조사는 13차까지 왔고, 차수마다 “확정” 이라 적고 다음 차수에서 뒤집힌 일이
+반복됐습니다. 이 장은 <strong>개별 오류의 계산 원인이 아니라, 그 근거로 충분하다고
+판단한 과정</strong>을 다룹니다. 전문은 <code>docs/좌표_판단오류_회고.md</code> 입니다.</p>
+
+<div class="note red">
+<span class="lbl">한 문장으로</span>
+<p style="margin-bottom:0">문제는 <em>“근거가 부족한데 결정했다”</em> 가 아닙니다 — 결정은 늘 해야 합니다.
+문제는 <strong>결정을 내린 뒤 기록에서 “그것이 결정이었다” 는 사실이 사라진 것</strong>입니다.
+부족한 근거로 채택한 값이 표의 한 칸·테스트의 한 줄·코드의 상수가 되는 순간
+그것은 관측과 구별되지 않고, 다음 세션이 그 위에 결론을 쌓습니다.</p>
+</div>
+
+<h3>11-1. 반복된 네 가지 구조</h3>
+<div class="tw"><table>
+<thead><tr><th style="width:6%">구조</th><th style="width:28%">무엇</th>
+<th style="width:38%">대표 사례</th><th style="width:28%">놓친 질문</th></tr></thead>
+<tbody>
+<tr><td class="k ctr">A</td><td>표본이 <strong>변화시키지 않은</strong> 변수를 “무관하다” 로 읽음</td>
+    <td><code>col = x_index − 2</code> 를 “device 불변” 으로 확정 — 3 device 에서 전부 2 였지만
+        <strong>웨이퍼 stage 위치는 안 변했다</strong></td>
+    <td>“이 표본이 <strong>무엇을</strong> 변화시켰나?”</td></tr>
+<tr><td class="k ctr">B</td><td>모르는 것을 <strong>아는 것처럼 기록</strong></td>
+    <td>장비 판독 1건에 없던 <code>X·Y</code> 를 결론에서 역산해 골든 테스트에 넣음 —
+        그 테스트는 결론을 <em>검증</em>하지 않고 <em>보존</em>한다</td>
+    <td>“이 숫자는 관측인가 유도인가 합성인가?”</td></tr>
+<tr><td class="k ctr">C</td><td>검증 기준이 <strong>검증 대상에서</strong> 나옴 (순환)</td>
+    <td>Camtek row 를 KLA 에 맞췄는데 KLA 원점도 틀린 상태였다</td>
+    <td>“둘이 어긋날 때 정답은 <strong>어디서</strong> 오나?”</td></tr>
+<tr><td class="k ctr">D</td><td>“내 방법으로 안 된다” 를 <strong>“원리적으로 안 된다”</strong> 로</td>
+    <td><code>SampleTestPlan</code> 으로 안 되자 “유도 불가 → 상수” —
+        8차에 <code>SampleCenterLocation</code> 으로 유도됐다</td>
+    <td>“어떤 <strong>방법으로</strong> 안 되는 건가?”</td></tr>
+</tbody></table></div>
+<p><small>회고 문서는 13건을 이 네 구조로 분류하고, 각 건이 어느 규칙에 걸리는지 역테스트합니다.</small></p>
+
+<h3>11-2. 표면 아래 — 왜 그렇게 판단했나</h3>
+<div class="tw"><table class="kv"><tbody>
+<tr><td>‘설명되면 맞다’</td><td>가설을 <strong>하나만</strong> 세우고 그것이 관측을 설명하는지만 봤습니다.
+    <code>ceil(D/py)</code> 가 4사례를 전부 설명했지만 경쟁 가설도 똑같이 설명했습니다 —
+    <strong>표본이 둘을 구분하지 못한다</strong>는 사실을 볼 기회가 없었습니다</td></tr>
+<tr><td>수를 강도로 환산</td><td>“63건 전수 일치” 를 반복해 썼습니다. 63건이 한 웨이퍼에서 나왔으면
+    웨이퍼 수준 가설에 대해 <strong>N = 1</strong> 입니다</td></tr>
+<tr><td>자료와 분석을 섞음</td><td>“장비 판독 1건” 이라고만 적고 <strong>그 판독이 무엇을 안 담는지</strong>
+    (<code>X·Y</code> 가 없다)를 안 적었습니다. 그래서 빈칸을 내가 채웠습니다</td></tr>
+<tr><td>유효기간을 안 적음</td><td>“실측 증거가 생겼다” 고 확신에 찬 언어로 적으면서
+    <strong>“무엇이 오면 이게 무너지나” 를 같이 안 적었습니다</strong></td></tr>
+<tr><td style="color:var(--danger)">진짜 동인</td>
+    <td><strong>‘결론을 내는 것’ 을 진전으로 취급했습니다.</strong> “자료가 더 필요합니다” 는
+    사용자에게 일을 넘기는 것이라 부담스럽고, “이렇게 결론냈습니다” 는 진전처럼 보입니다.
+    이 프로젝트에서 그 교환은 손해입니다 — 틀린 결론의 비용은 “다시 하면 됨” 이 아니라
+    <strong>조용히 틀린 좌표가 엑셀에 찍히는 것</strong>이고,
+    사용자가 장비 화면을 직접 볼 때까지 아무도 모릅니다</td></tr>
+</tbody></table></div>
+
+<h3>11-3. 같은 잣대를 <u>지금</u> 코드에 — 감사 결과</h3>
+<div class="tw"><table>
+<thead><tr><th class="ctr" style="width:7%"></th><th style="width:30%">항목</th>
+<th style="width:63%">표본이 실제로 무엇을 말하나</th></tr></thead>
+<tbody>
+<tr><td class="ctr"><span class="v ok">검증</span></td><td>‘완전히 들어오는 die 부터 0번’</td>
+    <td>경쟁 가설(걸치기만 해도 셈)을 6사례에 돌리면 <strong>전 사례에서 1씩 어긋납니다</strong> —
+        표본이 두 가설을 <strong>구분합니다</strong></td></tr>
+<tr><td class="ctr"><span class="v ok">검증</span></td><td>Camtek Y 축 아래 방향</td>
+    <td>DYD 의 <code>y_index=7 → row 0</code> 결함은 <code>row_total&lt;7</code> 이면 음수가 됩니다</td></tr>
+<tr><td class="ctr"><span class="v wa">미구분</span></td><td><code>Diameter</code> vs <code>MeasuredDiameter</code></td>
+    <td>RDL4 만 둘 다 있는데 <strong>둘 다 같은 답</strong>(여유가 커서 45 µm 차이가 안 보임)</td></tr>
+<tr><td class="ctr"><span class="v wa">미구분</span></td><td>버림 vs 반올림</td>
+    <td>13차 4개 값의 소수부가 전부 &lt;0.5 — 골든 1건이 유일한 구분 사례</td></tr>
+<tr><td class="ctr"><span class="v no">표본 0</span></td><td><code>EBR≠0</code> · 300 mm 아닌 웨이퍼 · notch UP · mirrored</td>
+    <td>변화 0 — 이 변수들에 대해 현재 코드는 <strong>아무 근거가 없습니다</strong></td></tr>
+<tr><td class="ctr"><span class="v no">표본 0</span></td><td><strong>경계 근접 자재</strong></td>
+    <td>6사례 전부 여유 33~35 %. PI2·PI4 중심은 die 한 칸과 <strong>39 µm</strong> 차이라
+        격자 대비 위상이 사실상 같습니다 — 정수부만 다릅니다</td></tr>
+</tbody></table></div>
+
+<div class="note red">
+<span class="lbl">가장 무거운 발견 — 골든 테스트가 주경로를 안 태운다</span>
+<p><code>CLAUDE.md</code> 는 골든 4사례를 <strong>“좌표 계산을 고칠 때의 절대 기준”</strong> 으로
+못 박고 있습니다. 그런데 그 픽스처는 <code>Params_WaferInfo.ini</code> 를 합성하면서
+<strong><code>Center_X/Y</code> 를 안 적습니다.</strong> 중심이 없으면 <strong>폴백 경로</strong>로 갑니다.</p>
+<pre>골든 사례        y_index   정답 row   폴백 ceil(D/py)   폴백 row
+dev-A               9         1            10           1   ✓
+BNN-PIDS3 #1        5         2             7           2   ✓
+BNN-PIDS3 #2        7         0             7           0   ✓
+dev-B               5         2             7           2   ✓
+
+→ 4사례 전부 <b>폴백이 우연히 맞는 자재</b>. 앱이 실제로 타는 유도 경로는 한 번도 안 돈다.
+  PI2 자재였다면 폴백 7 vs 장비 6 으로 어긋난다(실측 00RV9055XYC2).</pre>
+<p style="margin-bottom:0">구조 B + C 가 프로젝트의 ‘절대 기준’ 안에 그대로 남아 있었던 것입니다.
+<strong>조치</strong> — 기존 골든은 폴백 경로 가드로 명시하고
+(<code>test_golden_actually_runs_the_fallback_path</code> 로 그 사실 자체를 단언),
+중심이 실재하는 웨이퍼 6사례로 <strong><code>TestDerivedPathGolden</code></strong> 을 새로 만들어
+주경로를 태웁니다. 경쟁 가설 배제·폴백 오류·경계 미탐사까지 함께 못 박았습니다.</p>
+</div>
+
+<h3>11-4. 앞으로 — 규칙과 그 검사</h3>
+<div class="tw"><table>
+<thead><tr><th class="ctr" style="width:6%"></th><th style="width:30%">규칙</th>
+<th style="width:36%">무엇을 요구하나</th><th class="ctr" style="width:12%">역테스트</th>
+<th style="width:16%">비용</th></tr></thead>
+<tbody>
+<tr><td class="k ctr">R1</td><td>가설 2개 + <strong>구분표</strong></td>
+    <td>경쟁 가설이 <strong>다른 답을 내는지</strong> 계산. 구분 못 해도 채택은 가능 —
+        단 “미구분” 을 코드·문서·요청목록 세 곳에 적는다</td>
+    <td class="ctr"><strong>7 / 14</strong></td><td>결정당 산술 10줄</td></tr>
+<tr><td class="k ctr">R2</td><td>N 을 <strong>가설의 변수 위에서</strong> 센다</td>
+    <td>“63건” 이 아니라 “웨이퍼 1장 / 63결함”</td>
+    <td class="ctr">6 / 14</td><td>0</td></tr>
+<tr><td class="k ctr">R3</td><td>모든 수치에 <strong>출처 등급</strong></td>
+    <td><code>관측</code>·<code>파일</code>·<code>유도</code>·<code>가정</code>·<code>합성</code></td>
+    <td class="ctr"><strong>7 / 14</strong></td><td>문서가 길어짐</td></tr>
+<tr><td class="k ctr">R4</td><td><strong>합성값은 골든에 안 넣는다</strong></td>
+    <td>골든은 관측값만. 그리고 <strong>앱이 실제로 타는 경로</strong>를 태워야 한다</td>
+    <td class="ctr">2 / 14</td><td>일회성 리팩터(완료)</td></tr>
+<tr><td class="k ctr">R5</td><td>결론마다 <strong>반증 조건</strong></td>
+    <td>“X 를 채택” 옆에 “Y 가 오면 무너진다”</td>
+    <td class="ctr">2 / 14</td><td>결론당 한 줄</td></tr>
+<tr><td class="k ctr">R6</td><td>“<strong>이 방법으로는</strong> 안 된다”</td>
+    <td>“유도 불가” 대신 “<code>SampleTestPlan</code> 으로는 유도 불가”</td>
+    <td class="ctr">2 / 14</td><td>0</td></tr>
+<tr><td class="k ctr">R7</td><td>두 소스면 <strong>일치를 단언</strong></td>
+    <td><code>normalize(5)==4</code> 가 아니라 <code>ini(d)==live(d)</code></td>
+    <td class="ctr">2 / 14</td><td>소스쌍당 테스트 1개</td></tr>
+</tbody></table></div>
+<p><small><strong>역테스트</strong> = 과거 오류 13건 + 이번 골든 감사 1건 중 그 규칙이 잡았을 건수.
+<strong>14건 모두 최소 하나에 걸립니다.</strong> R1(논리)과 R3(기록)이 가장 넓고 서로 다른 종류를 잡습니다.</small></p>
+
+<div class="note blue">
+<span class="lbl">이 규칙들이 옳은 설계인지 — 스스로 검사</span>
+<p>규칙이 합리적이려면 ① 비용이 감당 가능하고 ② <strong>옳은 결정을 막지 않아야</strong> 합니다.
+핵심 설계는 <strong>R1 이 “근거가 부족하면 멈춰라” 가 아니라는 점</strong>입니다.
+그건 실행 불가능하고(자료는 늘 부족합니다) 이 프로젝트의 진행을 막습니다.
+R1 이 요구하는 것은 <strong>“부족하다는 사실을 기록에서 지우지 마라”</strong> 뿐입니다.</p>
+<p style="margin-bottom:0"><strong>이 회고 자체에도 R5 를 적용합니다</strong> —
+규칙을 지켰는데도 같은 구조의 오류가 또 나오면, 원인은 기록 방식이 아니라
+다른 데 있다는 뜻입니다. 그때 이 장을 다시 엽니다.</p>
+</div>
+
+<div class="note">
+<span class="lbl">방금 이 규칙이 실제로 작동한 사례 — R-4 등급</span>
+<p style="margin-bottom:0">13차 자료를 받고 <strong>“폴백이 장비 기준으로 틀렸으니 R-4 를 높으로 올리자”</strong> 고
+계획했습니다. R1 을 적용하니 틀린 판단이었습니다 — 등급은 심각도 × <strong>빈도</strong>인데,
+폴백까지 내려간 폴더는 <strong>지금까지 0건</strong>입니다(41 웨이퍼 전부 중심 소스를 갖고 있었습니다).
+심각도만 보고 올리는 것은 <strong>구조 A 그 자체</strong>였습니다.
+그래서 <a class="ref" href="#s7">R-4 는 ‘중’ 을 유지</a>하고, 반증 조건을 적었습니다 —
+<code>Wafer2Table.ini</code> 없는 스캔이 1건이라도 나오면 그때 올립니다.</p>
+</div>
 </section>
 
 <!-- ══ 10 ══ -->
