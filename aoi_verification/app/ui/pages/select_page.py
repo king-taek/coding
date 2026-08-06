@@ -5,10 +5,14 @@
 검증에서 제외한 사진들은 화면을 차지하지 않고, 상단 버튼을 누르면 팝업으로
 모아 볼 수 있다.
 
-키보드 단축키:
-  ← 또는 1 → 검증
-  → 또는 2 → 제외
-  Z       → 되돌리기
+키보드 단축키 — **화면 배치와 같은 방향**이다:
+  →  → 검증 (오른쪽 '검증 대상' 패널로 보낸다)
+  ←  → 제외
+  Z  → 되돌리기
+
+★ 예전에는 ←가 검증이었다.  그런데 '검증 대상' 패널은 **오른쪽**이라, 왼쪽을 누르면
+  사진이 오른쪽으로 가는 모순이 있었다.  버튼도 [검증][제외] 순이라 화면과 어긋났다.
+★ 숫자 키 1·2 는 없앴다.  방향키가 배치를 그대로 따르므로 외울 것이 하나면 충분하다.
 """
 
 from __future__ import annotations
@@ -323,8 +327,10 @@ class SelectPage(QWidget):
         self.left_panel = _SidePanel(
             self.PANEL_LEFT, i18n.KO.PANEL_LEFT_CANDIDATES,
             actions=[
-                ("batch_verify", i18n.KO.BTN_BATCH_VERIFY, "primary"),
+                # 가운데 버튼 줄과 **같은 순서**(제외 왼쪽 · 검증 오른쪽)로 둔다 —
+                # 한 화면에서 두 곳의 순서가 다르면 손이 헷갈린다.
                 ("batch_exclude", i18n.KO.BTN_BATCH_EXCLUDE, "danger"),
+                ("batch_verify", i18n.KO.BTN_BATCH_VERIFY, "primary"),
             ],
             # 타일 절반 크기 → 같은 폭에 3 열 그리드 깔리도록.
             columns=3,
@@ -407,8 +413,12 @@ class SelectPage(QWidget):
         self.btn_undo.clicked.connect(self._undo)
         btn_row.addWidget(self.btn_undo)
         btn_row.addStretch(1)
-        btn_row.addWidget(self.btn_verify)
+        # ★ 순서가 곧 방향이다 — [제외]가 왼쪽, [검증]이 오른쪽.  오른쪽 패널이
+        #   '검증 대상' 이므로 "오른쪽으로 보내면 오른쪽에 쌓인다" 가 성립한다.
+        #   방향키(→ 검증 / ← 제외)도 이 배치를 그대로 따른다.
         btn_row.addWidget(self.btn_exclude)
+        btn_row.addWidget(self.btn_verify)
+        self._btn_row = btn_row          # 배치 계약 테스트가 잡을 수 있게.
         cl.addLayout(btn_row)
 
         center_card.setMinimumWidth(360)
@@ -444,13 +454,11 @@ class SelectPage(QWidget):
             )
         self._h_splitter.splitterMoved.connect(self._save_splitter_state)
 
-        # 단축키 --------------------------------------------------------
-        for key in ("Left", "1"):
-            QShortcut(QKeySequence(key), self,
-                      activated=lambda: self._decide("verify"))
-        for key in ("Right", "2"):
-            QShortcut(QKeySequence(key), self,
-                      activated=lambda: self._decide("exclude"))
+        # 단축키 — 화면 배치와 같은 방향(오른쪽 = 검증) ------------------
+        QShortcut(QKeySequence("Right"), self,
+                  activated=lambda: self._decide("verify"))
+        QShortcut(QKeySequence("Left"), self,
+                  activated=lambda: self._decide("exclude"))
         QShortcut(QKeySequence("Z"), self, activated=self._undo)
         # Ctrl+A — 좌측 후보 패널 전체 선택 (#2).
         QShortcut(QKeySequence.StandardKey.SelectAll, self,
@@ -732,7 +740,7 @@ class SelectPage(QWidget):
     # ------------------------------------------------------------------
     def _decide(self, action: str) -> None:
         # QShortcut 의 기본 context 가 WindowShortcut 이라 다른 페이지가
-        # 보이는 상태에서도 ←/→/1/2 가 여기로 전달된다. 보이지 않을 땐 무시.
+        # 보이는 상태에서도 →/← 가 여기로 전달된다. 보이지 않을 땐 무시.
         if not self.isVisible():
             return
         if self._state is None or self._current is None:
