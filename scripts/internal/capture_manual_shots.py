@@ -27,10 +27,10 @@
   예약해 그 루프 안에서 찍고 시트를 닫는다.
 - **다크(흑연) 캡처는 창을 새로 만든다.**  위젯이 생성 시점에 색을 f-string 으로 굽기
   때문에(theme.py 주석) QSS 재적용만으로는 색이 다 바뀌지 않는다.
-- **예시 사진은 합성한다**(`demo_images.py`).  설명서는 사외로 나갈 수 있어 실제 장비
-  사진을 넣지 않는다.  대신 화면에 적힌 거리와 **앞뒤가 맞는** 그림을 그린다 — 허용
-  오차 안이면 두 장비가 같은 결함을 찍은 것처럼, 초과면 다른 결함처럼 보인다.
-  만드는 위치는 임시 폴더이고 저장소에는 남지 않는다.
+- **예시 사진은 그린다**(`demo_images.py` — 직물 짜임 + 중앙 얼룩).  설명서는 사외로
+  나갈 수 있어 실제 검사 사진을 넣지 않는다.  대신 화면에 적힌 거리와 **앞뒤가 맞는**
+  그림을 그린다 — 같은 얼룩이면 두 장비가 같은 곳을 찍은 것처럼, 다른 얼룩이면 실제로
+  달라 보인다.  만드는 위치는 임시 폴더이고 저장소에는 남지 않는다.
 
 캡처가 하나라도 빠지면 **실패로 끝난다**(`_assert_complete`) — 옛 캡처 스크립트가
 조용히 0장을 남긴 사고가 있었다(docs/화면_디자인_도면.md).
@@ -84,33 +84,59 @@ EXPECTED = [
 # ---------------------------------------------------------------------------
 # 스테이징 자료 — 합성 결함 사진으로 스캔 트리를 만든다
 # ---------------------------------------------------------------------------
-# ★ 실제 장비 사진을 쓰지 않는다(설명서는 사외로 나갈 수 있다).  대신 `demo_images` 가
-#   RDL 배선과 결함처럼 보이는 그림을 그린다.  단, **거리에 타당한** 그림이어야 한다:
-#   허용 오차 안이면 두 장비가 *같은 결함*을 찍은 것처럼, 초과면 *다른 결함*처럼 보인다.
+# ★ 실제 검사 사진을 쓰지 않는다(설명서는 사외로 나갈 수 있다).  `demo_images` 가
+#   직물 짜임 위의 얼룩을 그린다 — 소재는 무관하고, 가르치려는 것은 **판정을 읽는 법**이다.
 _SLOTS = ["W7548304XYG4", "W7548306XYA2"]
-_TOL = 500.0
+_TOL = 200.0
 
-# 슬롯 하나의 사진 6장 — (기준↔검증 거리 µm, 차순위 후보 거리들 µm).
-# 차순위는 **1위보다 멀어야** 한다(앱은 가까운 순서로 놓는다).
+# 슬롯 하나의 사진 6장 — (거리 µm, 차순위 후보 거리들, 두 사진이 같은 얼룩인가).
+#
+# ★ 이 표가 설명서·체험판·캡처의 **공통 대본**이다.  세 가지를 한 화면에서 보여 준다:
+#   ① 허용 오차 안(정상) ② 넘었고 **틀린** 경우 ③ 넘었지만 **맞는** 경우.
+#   ③ 은 주로 Camtek↔KLA 조합에서 나온다 — 두 장비의 좌표 기준이 조금 달라 거리가
+#   벌어지지만 사진은 같은 얼룩이다.  그래서 '초과' 를 무조건 지우면 안 된다는 것을
+#   설명서가 그림으로 가르칠 수 있다.
+# ★ 모든 값은 3×tol(=600) 이내여야 한다 — 앱은 그보다 먼 후보를 아예 만들지 않는다.
+#   차순위는 1위보다 멀어야 한다(앱은 가까운 순으로 놓는다).
 _PLAN = [
-    (30, [145, 280]), (60, [225]), (620, [830, 1050]),
-    (105, [195, 310]), (15, []), (1025, [1285]),
+    (520, [], False),            # 초과 · 다른 얼룩 — 지워야 하는 오매칭
+    (310, [455], False),         # 초과 · 다른 얼룩 — 후보 중에도 맞는 것이 없다
+    (240, [420, 550], True),     # 초과 · **같은 얼룩** — Camtek↔KLA.  그대로 둔다
+    (140, [265], True),          # 정상
+    (65, [180, 310], True),      # 정상
+    (18, [], True),              # 20 µm 이내 — '거의 정확히 일치' 라 후보 1장만
 ]
 # 파일명에 들어갈 좌표 — Camtek INI 규약 ``{x}.{y}.c.{hash}.{n}.jpeg``
-_REF_XY = ["255350.116718", "241902.128440", "198431.141277",
-           "176220.098355", "152884.163019", "131077.087640"]
-_VAL_XY = ["255348.116718", "241897.128444", "198425.141281",
-           "176216.098361", "152878.163025", "131070.087633"]
+#
+# ★ **오름차순으로 적는다.**  `slot.scan` 이 파일명 순서로 목록을 만들고 검토 화면은
+#   ref[i] ↔ val[i] 로 짝지으므로, 이 목록의 순서가 곧 위 `_PLAN` 의 행 순서다.
+#   예전에 내림차순으로 적어 두는 바람에 '다른 얼룩' 이어야 할 520 µm 행에 같은 얼룩
+#   쌍이 들어가 설명서가 스스로를 반박했다.  아래 `_assert_plan_order` 가 고정한다.
+_REF_XY = ["131077.087640", "152884.163019", "176220.098355",
+           "198431.141277", "241902.128440", "255350.116718"]
+_VAL_XY = ["131070.087633", "152878.163025", "176216.098361",
+           "198425.141281", "241897.128444", "255348.116718"]
+
+
+def _assert_plan_order() -> None:
+    """파일명 정렬 순서가 `_PLAN` 순서와 같은지 — 어긋나면 예시가 통째로 거짓이 된다."""
+    for name, xs in (("_REF_XY", _REF_XY), ("_VAL_XY", _VAL_XY)):
+        if xs != sorted(xs):
+            raise SystemExit(
+                f"{name} 가 오름차순이 아니다 — 파일명 정렬이 _PLAN 순서와 어긋난다.")
+    if len(_REF_XY) != len(_PLAN) or len(_VAL_XY) != len(_PLAN):
+        raise SystemExit("_REF_XY/_VAL_XY 와 _PLAN 의 길이가 다르다.")
 
 
 def _scene(slot_idx: int, i: int, *, side: str) -> int:
-    """이 사진이 그릴 '장면'(=결함) 번호.
+    """이 사진이 그릴 '장면'(=얼룩) 번호.
 
-    기준과 검증이 **같은 번호면 같은 결함**이다.  허용 오차를 넘는 쌍만 검증 쪽을 다른
-    번호로 돌려 실제로 다른 결함이 보이게 한다 — 화면의 숫자와 그림이 어긋나지 않도록.
+    기준과 검증이 **같은 번호면 같은 얼룩**이다.  `_PLAN` 의 셋째 값이 False 인 행만
+    검증 쪽을 다른 번호로 돌려 실제로 다른 얼룩이 보이게 한다 — 화면의 숫자와 그림이
+    어긋나지 않도록.
     """
     base = slot_idx * 100 + i
-    if side == "ref" or _PLAN[i][0] <= _TOL:
+    if side == "ref" or _PLAN[i][2]:
         return base
     return 900 + base
 
@@ -496,8 +522,7 @@ def _stage_select(win, sr) -> dict:
         targets[name] = imgs[:2]
         excluded[name] = imgs[2:3]
         items.extend(imgs[3:])
-    page.load_state(items, targets=targets, excluded=excluded,
-                    phase_label=i18n.KO.STAGE1_TITLE)
+    page.load_state(items, targets=targets, excluded=excluded)
     win._stack.setCurrentWidget(page)
     _pump(30)
     return {
@@ -517,7 +542,8 @@ def _stage_select(win, sr) -> dict:
 
 def _stage_match(win, sr) -> dict:
     """2단계 — 기준 사진 한 장과 검증 후보 격자."""
-    from aoi_verification.app import i18n
+    from aoi_verification.app import config, i18n
+    from aoi_verification.app.utils.prefs import EngineMode
     from aoi_verification.app.workers.matcher import Candidate
 
     page = win._match_page
@@ -525,7 +551,8 @@ def _stage_match(win, sr) -> dict:
     refs = list(sr.slots[slot].ref_images)
     vals = list(sr.slots[slot].val_images)
     page.load_state(refs, {slot: vals}, 0.55,
-                    phase_label=i18n.KO.STAGE2_TITLE_COORD)
+                    engine_cfg=config.SimilarityConfig(
+                        engine=EngineMode.COORDINATE))
     page._show_center(refs[0])
     # 좌표 매칭에서 실제로 나오는 모양 — 가까운 후보 하나와 점점 먼 후보들.
     scores = [0.96, 0.62, 0.41, 0.28, 0.19]
@@ -560,7 +587,7 @@ def _review_data(sr):
         for ref, val in zip(s.ref_images, s.val_images):
             if idx >= len(_PLAN):
                 break
-            dist, runner_dists = _PLAN[idx]
+            dist, runner_dists, _same = _PLAN[idx]
             matches.append(MatchResult(slot=name, ref_path=ref.path,
                                        val_path=val.path, score=score_of(dist)))
             pool = [v for v in s.val_images if v.path != val.path]
@@ -575,7 +602,7 @@ def _stage_review(win, sr) -> dict:
     page = win._match_review_page
     matches, cands = _review_data(sr)
     page.load_state(matches, candidates_by_ref=cands, coord_mode=True,
-                    tolerance=500.0, coord_failed_count=1)
+                    tolerance=_TOL, coord_failed_count=1)
     win._stack.setCurrentWidget(page)
     _pump(40)
     # 한 줄은 '매치 없음' 으로 표시해 세 가지 판정이 한 화면에 다 보이게 한다.
@@ -632,7 +659,7 @@ def _stage_result(win, sr) -> dict:
     # (없으면 비활성 상태로 찍혀 설명서가 잘못된 화면을 가르친다).
     val_pool = {n: list(sr.slots[n].val_images) for n in sr.common_slot_names}
     page.show_result(res, target_path=Path(r"C:\AOI_Verify\결과\AOI 18호기 검증 (17호기 기준).xlsx"),
-                     val_pool=val_pool, coord_mode=True, tolerance=500.0)
+                     val_pool=val_pool, coord_mode=True, tolerance=_TOL)
     win._stack.setCurrentWidget(page)
     _pump(30)
     return {
@@ -648,6 +675,7 @@ def _stage_result(win, sr) -> dict:
 
 # ---------------------------------------------------------------------------
 def main() -> int:
+    _assert_plan_order()
     if not SAMPLE_ROOT.exists():
         raise SystemExit(f"예시 자료가 없습니다: {SAMPLE_ROOT}")
 
@@ -756,7 +784,7 @@ def main() -> int:
     from aoi_verification.app.ui.widgets.side_by_side_viewer import SideBySideViewer
     s0 = sr.slots[sr.common_slot_names[0]]
     viewer = SideBySideViewer(s0.ref_images[0].path,
-                              [(v, f"{120 + i * 90} µm") for i, v in enumerate(s0.val_images[:3])],
+                              [(v, f"{(140, 265, 420)[i % 3]} µm") for i, v in enumerate(s0.val_images[:3])],
                               parent=win)
     sh.sheet("17_시트_좌우비교", win,
              lambda: win._sheets.run(viewer, full_bleed=True))
@@ -768,7 +796,7 @@ def main() -> int:
 
     from aoi_verification.app.ui.widgets.matches_review import MatchesReviewDialog
     matches, _ = _review_data(sr)
-    mr = MatchesReviewDialog(matches, coord_mode=True, tolerance=500.0, parent=win)
+    mr = MatchesReviewDialog(matches, coord_mode=True, tolerance=_TOL, parent=win)
     sh.sheet("19_시트_매칭결과검토", win,
              lambda: win._sheets.run(mr, full_bleed=True))
 
