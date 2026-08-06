@@ -189,7 +189,7 @@ tbody tr:last-child td{border-bottom:1px solid var(--rule)}
     <li><b>검증 시작 전 설정</b> <span class="d">— 실행 옵션과 매칭 설정</span></li>
     <li><b>시작 직후 자동 진행</b> <span class="d">— 스캔 · KLA 확인 · 슬롯 선택</span></li>
     <li><b>1단계 — 후보 선별</b> <span class="d">— 검증할 사진 고르기</span></li>
-    <li><b>2단계 — 매칭</b> <span class="d">— 짝을 찾는 규칙과 화면</span></li>
+    <li><b>2단계 — 매칭 (자동)</b> <span class="d">— 짝을 짓는 규칙, 사람이 손대지 않는 이유</span></li>
     <li><b>검토 — 결과 읽는 법</b> <span class="d">— 이 화면만 익히면 끝입니다</span></li>
     <li><b>결과와 엑셀 저장</b> <span class="d">— 마무리</span></li>
     <li><b>알아두면 좋은 기능</b> <span class="d">— 다크 모드 · 사진 정보 · 업데이트</span></li>
@@ -238,7 +238,7 @@ tbody tr:last-child td{border-bottom:1px solid var(--rule)}
     <g>
       <rect x="672" y="40" width="180" height="70" rx="8" fill="rgba(44,90,134,.09)" stroke="#2C5A86" stroke-width="2.4"/>
       <text x="762" y="72" text-anchor="middle" font-weight="700">2단계 매칭</text>
-      <text x="762" y="93" text-anchor="middle" font-size="15" fill="#2C5A86">짝 찾기</text>
+      <text x="762" y="93" text-anchor="middle" font-size="15" fill="#2C5A86">프로그램이 자동으로</text>
     </g>
     <path d="M858 75 h30" stroke="#5A574E" stroke-width="1.6" marker-end="url(#fa)"/>
     <g>
@@ -429,8 +429,10 @@ tbody tr:last-child td{border-bottom:1px solid var(--rule)}
   <tbody>
     <tr><td><b>자동화 수준</b></td>
         <td><span class="q">사진 직접 선택</span> — 기준 사진을 한 장씩 보고 검증할지 고릅니다(1단계 화면이 나옵니다).<br>
-            <span class="q">모든 사진 자동</span> — 1단계를 건너뛰고 기준 사진 전부를 자동으로 짝짓습니다.
-            사진이 많고 전수 확인이 필요할 때 씁니다.</td></tr>
+            <span class="q">모든 사진 자동</span> — 1단계를 건너뛰고 기준 사진 전부를 넘깁니다.
+            사진이 많고 전수 확인이 필요할 때 씁니다.<br>
+            <span style="color:var(--mute)">※ 이 선택은 <b>1단계를 사람이 하느냐</b>만 가릅니다.
+            짝을 짓는 <b>2단계 매칭은 어느 쪽이든 자동</b>입니다.</span></td></tr>
     <tr><td><b>진행 범위</b></td>
         <td><span class="q">모든 슬롯</span> — 기본값.<br>
             <span class="q">일부 슬롯만…</span> — 누르는 즉시 슬롯 선택 창이 열립니다.
@@ -604,14 +606,24 @@ die 가 작은 자재에서 기본값을 그대로 쓰면 이웃 결함과 잘�
 
 <!-- ══════════════════════════ 7 ══════════════════════════ -->
 <section>
-<h2><span class="n">7</span>2단계 — 매칭</h2>
-<p class="lede">이 프로그램의 핵심입니다. <b>좌표가 가까운 것끼리</b> 짝을 짓습니다.</p>
+<h2><span class="n">7</span>2단계 — 매칭 (자동)</h2>
+<p class="lede">이 프로그램의 핵심입니다. <b>좌표가 가까운 것끼리</b> 짝을 짓습니다.
+<b>사람이 고르지 않습니다</b> — 프로그램이 스스로 짝을 정하고 검토 화면으로 넘어갑니다.</p>
+
+<div class="tip">
+  <span class="t">이 화면에서 누를 것은 없습니다</span>
+  <p>자동화 수준을 <span class="ui">사진 직접 선택</span> 으로 두든
+  <span class="ui">모든 사진 자동</span> 으로 두든 <b>매칭은 어느 쪽이든 자동</b>입니다.
+  두 선택지는 <b>앞 단계(후보 선별)를 사람이 하느냐</b>만 가릅니다.
+  사람이 판단하는 곳은 <b>1단계 선별</b>과 <b>검토</b> 두 곳뿐입니다.</p>
+</div>
 
 <h3>짝을 정하는 규칙</h3>
 <p>먼저 두 결함이 <b>같은 die(칸) 또는 바로 옆 die</b> 에 있는지 봅니다
 (<span class="mono">col·row</span> 차이가 각각 1 이내). 장비마다 die 번호가 1씩 어긋나는 경우가 있어
 정확히 같은 칸만 보면 매칭이 전멸하기 때문입니다.</p>
-<p>그다음 두 좌표 사이의 <b>실제 거리</b>를 재어 다음과 같이 나눕니다.</p>
+<p>그다음 두 좌표 사이의 <b>실제 거리</b>를 재어 다음과 같이 나눕니다.
+후보가 여럿이면 <b>가장 가까운 것</b>이 짝으로 확정됩니다.</p>
 
 <table>
   <thead><tr><th style="width:30%">두 결함 사이의 거리</th><th style="width:22%">판정</th><th>화면에서</th></tr></thead>
@@ -629,56 +641,41 @@ die 가 작은 자재에서 기본값을 그대로 쓰면 이웃 결함과 잘�
 </table>
 
 <div class="tip">
-  <span class="t">아주 가까운 짝은 후보를 하나만 보여 줍니다</span>
-  <p>가장 가까운 후보가 <b>20 µm 이내</b>면 사실상 같은 결함이 확실하므로 후보를 한 장만 보여 줍니다.
+  <span class="t">아주 가까운 짝은 차순위 후보를 남기지 않습니다</span>
+  <p>가장 가까운 후보가 <b>20 µm 이내</b>면 사실상 같은 결함이 확실하므로,
+  검토 화면에 <b>차순위 후보를 한 장도 놓지 않습니다</b>.
   (허용 오차를 40 µm 아래로 낮추면 이 기준도 <b>허용 오차의 절반</b>까지 함께 좁아집니다 —
   그러지 않으면 모든 짝이 '확정' 이 되어 차순위가 사라지기 때문입니다.)
-  그보다 멀면 <b>허용 오차의 3배 이내 후보를 모두</b> 가까운 순서로 보여 주어 직접 고르실 수 있게 합니다.</p>
+  그보다 멀면 <b>허용 오차의 3배 이내 후보를 모두</b> 가까운 순서로 남겨,
+  검토 화면에서 클릭 한 번으로 바꿔 끼울 수 있게 합니다.</p>
 </div>
 
-<h3>매칭 화면</h3>
-<figure class="shot">
-  <img src="13_2단계_매칭.jpg" alt="2단계 매칭 화면">
-  <svg viewBox="0 0 1280 860" aria-hidden="true">
-    <rect class="mark blue" x="126" y="295" width="400" height="400" rx="9"/>
-    <!-- 후보격자는 스크롤 안쪽까지 924px 이라 화면 밖이다 — 보이는 만큼만 감싼다(의도) -->
-    <rect class="mark blue" x="655" y="177" width="587" height="660" rx="9"/>
-    <rect class="mark red"  x="531" y="759" width="85" height="40" rx="7"/>
-    <g><circle class="bub" cx="126" cy="295" r="15"/><text class="bubt" x="126" y="295">1</text></g>
-    <g><circle class="bub" cx="655" cy="177" r="15"/><text class="bubt" x="655" y="177">2</text></g>
-    <g><circle class="bub red" cx="513" cy="741" r="15"/><text class="bubt" x="513" y="741">3</text></g>
-  </svg>
-</figure>
+<h3>진행되는 동안 보이는 것</h3>
+<p>화면이 <span class="q">Stage 2 — 좌표 기반 매칭 (v2)</span> 로 바뀌고 그 위를 로딩 화면이 덮습니다.
+모양은 <b>5장</b>에서 본 로딩 화면과 같고, 문구만 차례로 바뀝니다.</p>
 <ol class="keys">
-  <li><b>기준 사진</b> — 지금 짝을 찾는 사진입니다.</li>
-  <li><b>검증 장비 후보</b> — <b>클릭하면 그 사진으로 매칭이 확정</b>되고 다음 장으로 넘어갑니다.
-      타일 오른쪽 위 돋보기를 누르면 크게 볼 수 있습니다.</li>
-  <li><span class="ui">매칭 없음</span> (단축키 <span class="kbd">N</span>) — 맞는 후보가 없을 때 누릅니다.
-      실수했다면 <span class="kbd">Ctrl</span>+<span class="kbd">Z</span> 로 되돌립니다.</li>
+  <li><span class="q">좌표 파싱 중...</span> — 두 폴더의 좌표 정보를 읽습니다.</li>
+  <li><span class="q">좌표 매칭 중</span> — 기준 × 검증 쌍의 거리를 잽니다.
+      사진이 많으면 수 분 걸릴 수 있습니다.</li>
+  <li><span class="q">자동 매치 진행 중… 3 / 24</span> — 기준 사진마다 가장 가까운 후보를 확정합니다.
+      숫자가 끝까지 차면 <b>저절로 검토 화면으로 넘어갑니다.</b></li>
 </ol>
-<figure class="shot half">
-  <img src="14_크롭_후보그리드.jpg" alt="검증 장비 후보 격자 확대">
-</figure>
-<figcaption>후보는 가까운 순서로 놓입니다. 사진 아래 글자는 파일명이고,
-오른쪽 위 돋보기를 누르면 이 사진만 크게 볼 수 있습니다.</figcaption>
+<p>뒤에 비치는 화면에서는 <b>가운데 기준 사진이 한 장씩 넘어가고</b>,
+오른쪽 <span class="q">검증 장비 후보</span> 칸은 <b>비어 있습니다</b> — 고를 것이 없기 때문입니다.
+왼쪽 위 큰 제목이 <b>지금 실제로 쓰이는 방식</b>을 그대로 알려 줍니다(구형 엔진을 켜면
+<span class="q">Stage 2 — 유사도 기반 매칭</span> 으로 바뀝니다).</p>
 
-<p style="color:var(--mute);font-size:9.4pt">
-화면 오른쪽 위 문구(<span class="q">Stage 2 — 좌표 기반 매칭 (v2)</span>)가
-<b>지금 실제로 쓰이는 방식</b>을 알려 줍니다. 왼쪽 큰 제목은 화면 이름으로 고정돼 있습니다.</p>
+<div class="warnbox">
+  <span class="t"><span class="ui">중지</span>를 누르면 계산 결과가 모두 버려집니다</span>
+  <p>설정을 바꿔 다시 시작할 때 옛 결과가 섞이지 않도록 하기 위한 것입니다.
+  잠시 기다릴 수 있다면 그대로 두시는 편이 낫습니다.</p>
+</div>
 
 <div class="warnbox">
   <span class="t">좌표 정보가 없으면 여기서 멈추고 안내가 나옵니다</span>
   <p><span class="q">좌표 정보가 없습니다. … 매칭 설정에서 <span class="mono">유사도 엔진(구형) 사용</span> 을 켠 뒤
   다시 시작하세요.</span> 라는 안내가 나오면, 2장의 폴더 준비를 먼저 확인해 주세요.
   대개 <b>정보 파일 없이 사진만 복사</b>한 경우입니다.</p>
-</div>
-
-<h3>계산을 기다리는 동안</h3>
-<p>첫 슬롯을 준비하는 동안 로딩 화면이 뜹니다. 사진이 많으면 수 분 걸릴 수 있습니다.</p>
-<div class="warnbox">
-  <span class="t"><span class="ui">중지</span>를 누르면 계산 결과가 모두 버려집니다</span>
-  <p>설정을 바꿔 다시 시작할 때 옛 결과가 섞이지 않도록 하기 위한 것입니다.
-  잠시 기다릴 수 있다면 그대로 두시는 편이 낫습니다.</p>
 </div>
 </section>
 
@@ -951,8 +948,8 @@ die 가 작은 자재에서 기본값을 그대로 쓰면 이웃 결함과 잘�
         <td>후보 점수를 그 자리에서 다시 계산합니다. 가장 눈에 띄는 구간입니다.</td></tr>
     <tr><td>폴더 스캔</td><td class="dur">수 초 ~ 수십 초</td>
         <td>사진이 많거나 네트워크 폴더(NAS)면 파일을 훑는 데 시간이 걸립니다.</td></tr>
-    <tr><td>2단계 첫 계산</td><td class="dur">수십 초 ~ 수 분</td>
-        <td>후보 점수를 미리 계산합니다. <span class="ui">중지</span> 로 취소할 수 있습니다.</td></tr>
+    <tr><td>2단계 자동 매칭</td><td class="dur">수십 초 ~ 수 분</td>
+        <td>좌표를 읽고 모든 쌍의 거리를 잽니다. <span class="ui">중지</span> 로 취소할 수 있습니다.</td></tr>
     <tr><td>썸네일 만들기</td><td class="dur">수십 초</td>
         <td>사진 목록을 빠르게 넘기기 위한 준비입니다. <span class="ui">중지</span> 로 건너뛸 수 있습니다.</td></tr>
     <tr><td>엑셀로 저장</td><td class="dur">수십 초</td>
@@ -1030,26 +1027,22 @@ die 가 작은 자재에서 기본값을 그대로 쓰면 이웃 결함과 잘�
   </tbody>
 </table>
 
-<h3>2단계 — 후보를 고를 때</h3>
+<h3>2단계 — 매칭이 도는 동안</h3>
 <table>
   <thead><tr><th style="width:44%">지금 보이는 것</th><th style="width:22%">누를 것</th><th>그다음</th></tr></thead>
   <tbody>
-    <tr><td>후보가 <b>한 장뿐</b>이고 기준과 같아 보인다<br>
-            <span class="muted small">가장 가까운 후보가 20 µm 이내일 때</span></td>
-        <td>그 <b>후보 사진</b></td>
-        <td>매칭이 확정되고 다음 기준 사진으로 넘어갑니다.</td></tr>
-    <tr><td>후보가 여러 장이고 어느 것인지 헷갈린다</td>
-        <td>후보의 <b>돋보기</b></td>
-        <td>크게 본 뒤 <span class="ui">매치</span> 로 확정합니다.</td></tr>
-    <tr><td>어느 후보도 기준과 다르다</td>
-        <td><span class="ui">매칭 없음</span> <span class="kbd">N</span></td>
-        <td>짝 없이 넘어갑니다. 결과 화면에서 다시 볼 수 있습니다.</td></tr>
-    <tr><td>방금 엉뚱한 후보를 눌렀다</td>
-        <td><span class="ui">되돌리기</span> <span class="kbd">Ctrl</span>+<span class="kbd">Z</span></td>
-        <td>직전 결정이 취소됩니다.</td></tr>
-    <tr><td>설정을 잘못해서 처음부터 다시 하고 싶다</td>
-        <td><span class="ui">← 설정으로</span></td>
-        <td>⚠ 진행 중인 매칭이 사라집니다.</td></tr>
+    <tr><td>무엇을 눌러야 할지 모르겠다</td>
+        <td>—</td>
+        <td>누를 것이 없습니다. 짝은 프로그램이 정하고 <b>저절로 검토 화면으로 넘어갑니다.</b></td></tr>
+    <tr><td>오른쪽 <span class="q">검증 장비 후보</span> 칸이 비어 있다</td>
+        <td>—</td>
+        <td>정상입니다. 사람이 고르지 않으므로 후보를 늘어놓지 않습니다.</td></tr>
+    <tr><td>진행이 너무 오래 걸린다</td>
+        <td>—</td>
+        <td>사진이 많으면 수 분 걸립니다. <b>강제 종료하지 마세요.</b></td></tr>
+    <tr><td>짝이 잘못 지어진 것 같다</td>
+        <td>—</td>
+        <td>다음 <b>검토</b> 화면에서 바꿔 끼우거나 빼면 됩니다. 여기서 손댈 것은 없습니다.</td></tr>
   </tbody>
 </table>
 
@@ -1123,14 +1116,13 @@ die 가 작은 자재에서 기본값을 그대로 쓰면 이웃 결함과 잘�
     <tr><td><span class="kbd">←</span></td><td>제외</td></tr>
     <tr><td><span class="kbd">Z</span></td><td>되돌리기</td></tr>
     <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">A</span></td><td>왼쪽 목록 전체 선택</td></tr>
-    <tr><td rowspan="2">2단계 매칭</td><td><span class="kbd">N</span></td><td>매칭 없음 확정</td></tr>
-    <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">Z</span></td><td>되돌리기</td></tr>
+    <tr><td>2단계 매칭</td><td>—</td><td>자동이라 조작할 키가 없습니다</td></tr>
     <tr><td>좌우 비교 · 확대</td><td><span class="kbd">←</span> <span class="kbd">→</span> · <span class="kbd">Esc</span></td>
         <td>후보 넘기기 · 닫기</td></tr>
     <tr><td>사진 정보 보기</td><td><span class="kbd">Ctrl</span>+<span class="kbd">O</span></td><td>사진 선택</td></tr>
   </tbody>
 </table>
-<p style="color:var(--mute);font-size:9.4pt">검토 화면에는 키보드 조작이 없습니다.
+<p style="color:var(--mute);font-size:9.4pt">검토 화면에도 키보드 조작이 없습니다.
 <span class="kbd">Enter</span> 한 번에 검토가 끝나 버리는 사고를 막기 위해 일부러 두지 않았습니다 — 버튼으로 조작해 주세요.</p>
 
 <h3>판정 기준 한눈에</h3>

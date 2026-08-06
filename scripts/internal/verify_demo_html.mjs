@@ -50,8 +50,9 @@ async function runTour(page, label) {
   const card = page.locator('[data-test="tour-card"]');
   if (!(await card.isVisible())) await page.click('[data-test="tour-open"]');
   const total = await page.evaluate(() => STEPS.length);
+  const seenChapters = new Set();
   // 동작이 있는 단계는 [해 보기] + [다음] 두 번을 누른다 — 넉넉히 잡는다.
-  for (let i = 0; i < total * 2 + 8; i++) {
+  for (let i = 0; i < total * 2 + 12; i++) {
     if (!(await card.isVisible())) break;
     const step = await page.locator("#tour-step").textContent();
     const title = await page.locator("#tour-title").textContent();
@@ -59,18 +60,90 @@ async function runTour(page, label) {
     // 강조 대상이 있다면 실제로 화면에 있어야 한다 — 없으면 안내가 허공을 가리킨다.
     const st = await page.evaluate(() => {
       const s = STEPS[Tour.i] || {};
-      return { sel: s.sel || null, done: !!s.done };
+      return { sel: s.sel || null, done: !!s.done, ch: s.ch };
     });
+    seenChapters.add(st.ch);
     if (st.sel && !st.done) {
       const n = await page.locator(st.sel).count();
       if (n === 0) problems.push(`[${label}] ${step} 강조 대상을 찾지 못했습니다: ${st.sel}`);
     }
     const next = page.locator('[data-test="tour-next"]');
-    if (!(await next.isEnabled())) await page.waitForTimeout(400);
+    if (!(await next.isEnabled())) await page.waitForTimeout(500);
     await next.click();
     await page.waitForTimeout(260);
   }
   if (await card.isVisible()) problems.push(`[${label}] 투어가 끝나지 않았습니다`);
+  // 챕터를 하나도 빠뜨리지 않고 지나야 한다(끊긴 챕터 = 읽을 수 없는 대목).
+  const chapters = await page.evaluate(() => CHAPTERS.length);
+  if (seenChapters.size !== chapters)
+    problems.push(`[${label}] 지나간 챕터가 ${seenChapters.size}/${chapters} 개뿐입니다`);
+}
+
+/** 목차에서 아무 챕터로나 건너뛰어도 화면과 안내가 같은 곳을 봐야 한다.
+ *  (챕터마다 `seed` 가 그 대목의 시작 상태를 즉시 만든다 — 안 그러면 안내가
+ *  지나간 화면을 가리킨다.) */
+async function tourJumps(page, label) {
+  const chapters = await page.evaluate(() => CHAPTERS.length);
+  for (let ci = chapters - 1; ci >= 0; ci--) {
+    await page.click('[data-test="tour-open"]');
+    await page.waitForTimeout(200);
+    await page.click('[data-test="tour-toc"]');
+    await page.waitForSelector('[data-test="toc"]');
+    await page.click(`[data-test="toc-${ci}"]`);
+    await page.waitForTimeout(500);
+    const got = await page.evaluate(() => ({
+      ch: (STEPS[Tour.i] || {}).ch, want: (CHAPTERS[(STEPS[Tour.i] || {}).ch] || {}).page,
+      page: S.page,
+    }));
+    if (got.ch !== ci) problems.push(`[${label}] 목차 ${ci} 로 갔는데 챕터가 ${got.ch} 입니다`);
+    if (got.page !== got.want)
+      problems.push(`[${label}] 챕터 ${ci} 시작 화면이 "${got.page}" 입니다(기대: "${got.want}")`);
+    await page.click('[data-test="tour-skip"]');
+    await page.waitForTimeout(150);
+  }
+}
+
+/** 어두워진 화면(안내·로딩·시트)에서 뒤 화면이 눌리거나 키를 먹으면 안 된다.
+ *  예전엔 안내 덮개가 `pointer-events:none` 이라 클릭이 그대로 통과해, 안내가
+ *  가리키는 상태와 실제 화면이 갈라진 채 꼬였다. */
+async function lockChecks(page, label) {
+  // 1) 안내 중 — 덮개를 눌러도 뒤 화면이 반응하지 않는다.
+  await page.click('[data-test="reset"]');
+  await page.click('[data-test="tour-open"]');
+  await page.waitForTimeout(300);
+  const before = await page.evaluate(() => JSON.stringify([S.page, S.tol, S.refPath]));
+  const box = await page.locator("#app").boundingBox();
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height - 40);
+  await page.waitForTimeout(250);
+  const after = await page.evaluate(() => JSON.stringify([S.page, S.tol, S.refPath]));
+  if (before !== after) problems.push(`[${label}] 안내 중 어두운 화면 클릭이 뒤로 통과했습니다`);
+  // 상단 체험판 줄만은 살아 있어야 한다 — 꼬였을 때의 유일한 탈출구.
+  await page.click('[data-test="reset"]');
+  await page.waitForTimeout(200);
+  if (await page.locator('[data-test="tour-card"]').isVisible())
+    problems.push(`[${label}] 안내 중 [처음부터] 가 눌리지 않습니다`);
+
+  // 2) 로딩 중 — 키 입력이 뒤 화면으로 새지 않는다.
+  for (const side of ["ref", "val"]) {
+    await page.click(`[data-test="${side}-browse"]`);
+    await page.click(`[data-test="folder-${side === "ref" ? "17호기" : "18호기"}"]`);
+    await page.waitForTimeout(120);
+  }
+  await page.click('[data-test="start"]');
+  await page.waitForSelector("#loading.on");
+  const during = await page.evaluate(() => S.page);
+  for (const k of ["ArrowRight", "ArrowLeft"]) { await page.keyboard.press(k); }
+  await page.waitForTimeout(120);
+  const stillLoading = await page.locator("#loading.on").count();
+  const nowPage = await page.evaluate(() => S.page);
+  if (stillLoading && nowPage !== during)
+    problems.push(`[${label}] 로딩 중 키 입력이 뒤 화면으로 샜습니다`);
+  // [처음부터] 로 진행 중인 흐름을 끊어도 옛 흐름이 화면을 덮어쓰면 안 된다.
+  await page.click('[data-test="reset"]');
+  await page.waitForTimeout(1800);
+  const settled = await page.evaluate(() => S.page);
+  if (settled !== "setup")
+    problems.push(`[${label}] [처음부터] 뒤에 옛 흐름이 화면을 "${settled}" 로 덮었습니다`);
 }
 
 async function freePlay(page, label) {
@@ -136,18 +209,15 @@ async function freePlay(page, label) {
     if (!/좌표 기반/.test(t || "")) problems.push(`[${label}] 좌표 모드인데 제목이 "${t}"`);
   }
 
-  // 2단계 — 후보 클릭과 매칭 없음 섞기
-  for (let i = 0; i < 16; i++) {
-    if (await page.locator('[data-page="review"]').count()) break;
-    if (await page.locator("#loading.on").count()) { await page.waitForTimeout(300); continue; }
-    if (i % 3 === 2 && (await page.locator('[data-test="nomatch"]').count()))
-      await page.click('[data-test="nomatch"]');
-    else if (await page.locator('[data-test="cand"]').count())
-      await page.locator('[data-test="cand"]').first().click();
-    else { await page.waitForTimeout(200); continue; }
-    await page.waitForTimeout(150);
+  // ★ 2단계는 **자동**이다 — 실제 앱의 자동화 수준 두 가지가 둘 다 자동 매치라
+  //   (utils/prefs.py AUTO_MODES) 사람이 후보를 고르는 조작은 존재하지 않는다.
+  //   그런 어포던스가 되살아나면 없는 조작을 가르치게 되므로 여기서 막는다.
+  for (const gone of ['[data-test="cand"]', '[data-test="nomatch"]']) {
+    if (await page.locator(gone).count())
+      problems.push(`[${label}] 2단계에 사람이 매칭하는 조작이 남아 있습니다: ${gone}`);
   }
-  await page.waitForSelector('[data-page="review"]', { timeout: 25000 });
+  // 아무것도 누르지 않아도 스스로 검토 화면까지 간다.
+  await page.waitForSelector('[data-page="review"]', { timeout: 30000 });
 
   // 검토 — 차순위 교체 · 토글 · 좌우 비교
   const rows = await page.locator('[data-test="mrow"]').count();
@@ -169,15 +239,79 @@ async function freePlay(page, label) {
   await page.click('[data-test="export-ok"]');
   await page.waitForTimeout(200);
 
-  // '이럴 땐?' 안내 — 화면마다 열리고 내용이 있어야 한다.
-  for (const page_ of ["result"]) {
-    await page.click('[data-test="help"]');
-    await page.waitForSelector('[data-test="sheet"]');
-    const rows = await page.locator('[data-test="sheet"] h3').count();
-    if (rows < 3) problems.push(`[${label}] 이럴 땐? 안내가 비었습니다 (${rows}절)`);
-    await page.keyboard.press("Escape");
-    await page.waitForTimeout(300);
+  // '이럴 땐?' 안내 — 지금 화면 한 절만 펴고, 다른 화면은 탭으로 갈아 끼운다
+  // (예전엔 다섯 화면을 한꺼번에 쏟아 아무도 읽지 않았다).
+  await page.click('[data-test="help"]');
+  await page.waitForSelector('[data-test="sheet"]');
+  const tabs = await page.locator('[data-test^="help-tab-"]').count();
+  if (tabs < 5) problems.push(`[${label}] 이럴 땐? 탭이 ${tabs}개뿐입니다(화면 5개)`);
+  const firstRows = await page.locator('[data-test="help-rows"] .helprow').count();
+  if (firstRows < 3) problems.push(`[${label}] 이럴 땐? 안내가 비었습니다 (${firstRows}줄)`);
+  await page.click('[data-test="help-tab-match"]');
+  await page.waitForTimeout(150);
+  const matchHelp = await page.locator('[data-test="help-rows"]').textContent();
+  if (!/자동|프로그램이/.test(matchHelp || ""))
+    problems.push(`[${label}] 2단계 안내가 아직 사람이 고르는 것처럼 적혀 있습니다`);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+}
+
+/** 팝업 등급 — 앱의 sheet_host 와 같아야 한다.
+ *  메시지/선택 시트(chrome=False)는 제목줄도 [닫기] 도 없고, 위젯 다이얼로그는 있다. */
+async function sheetShapes(page, label) {
+  await page.click('[data-test="reset"]');
+  await page.waitForTimeout(200);
+
+  // 메시지 시트 — [업데이트 확인]
+  await page.click('[data-test="update"]');
+  await page.waitForSelector('[data-test="sheet"]');
+  if ((await page.locator('[data-test="sheet"] .sheetbar').count()) !== 0)
+    problems.push(`[${label}] 메시지 시트에 제목줄이 붙어 있습니다(앱은 chrome=False)`);
+  if ((await page.locator('[data-test="sheet"] .msg-title').count()) !== 1)
+    problems.push(`[${label}] 메시지 시트에 제목 라벨이 없습니다`);
+  for (const b of ["msg-no", "msg-yes"]) {
+    if (!(await page.locator(`[data-test="${b}"]`).count()))
+      problems.push(`[${label}] 메시지 시트에 [${b}] 가 없습니다`);
   }
+  await page.click('[data-test="msg-no"]');
+  await page.waitForTimeout(300);
+
+  // 위젯 다이얼로그 — [사진 정보 보기] 는 제목줄 + [닫기] 를 가진다
+  await page.click('[data-test="imginfo"]');
+  await page.waitForSelector('[data-test="sheet"]');
+  if ((await page.locator('[data-test="sheet"] .sheetbar').count()) !== 1)
+    problems.push(`[${label}] 위젯 시트에 제목줄이 없습니다`);
+  if (!(await page.locator('[data-test="sheet-close"]').count()))
+    problems.push(`[${label}] 위젯 시트에 [닫기] 가 없습니다`);
+  await page.click('[data-test="sheet-close"]');
+  await page.waitForTimeout(300);
+
+  // 슬롯 선택 — 앱과 같은 구성(검색 · 전체 선택/해제 · 확인)
+  await page.click('[data-test="seg-scope-sub"]');
+  await page.waitForSelector('[data-test="slot-search"]');
+  await page.fill('[data-test="slot-search"]', "XYA");
+  await page.waitForTimeout(150);
+  const hits = await page.locator('[data-test^="slot-W"]').count();
+  if (hits !== 1) problems.push(`[${label}] 슬롯 검색 결과가 ${hits}개입니다(1개여야 함)`);
+  await page.fill('[data-test="slot-search"]', "");
+  await page.waitForTimeout(150);
+  await page.click('[data-test="slot-ok"]');
+  await page.waitForTimeout(300);
+
+  // 선택지 시트(KLA) — 넷이 **대등한 타일**이고 제목줄이 없다
+  for (const side of ["ref", "val"]) {
+    await page.click(`[data-test="${side}-browse"]`);
+    await page.click(`[data-test="folder-${side === "ref" ? "17호기" : "18호기"}"]`);
+    await page.waitForTimeout(120);
+  }
+  await page.click('[data-test="start"]');
+  await page.waitForSelector('[data-test="opt-none"]', { timeout: 15000 });
+  if ((await page.locator('[data-test="sheet"] .sheetbar').count()) !== 0)
+    problems.push(`[${label}] KLA 선택 시트에 제목줄이 붙어 있습니다`);
+  const opts = await page.locator('[data-test^="opt-"]').count();
+  if (opts !== 4) problems.push(`[${label}] KLA 선택지가 ${opts}개입니다(기준/검증/둘다/아님 4개)`);
+  await page.click('[data-test="opt-none"]');
+  await page.waitForSelector('[data-page="select"]', { timeout: 15000 });
 }
 
 async function main() {
@@ -204,6 +338,9 @@ async function main() {
       problems.push(`[${label}] 자산이 비었습니다 (사진 ${assets.shots}, 글꼴 ${assets.fonts}) ` +
                     `— make_demo_assets.py 를 실행하세요`);
     await runTour(page, label);
+    await tourJumps(page, label);
+    await lockChecks(page, label);
+    await sheetShapes(page, label);
     await freePlay(page, label);
     // 가로 스크롤은 어디서도 생기면 안 된다(앱과 같은 계약)
     const overflow = await page.evaluate(() =>
