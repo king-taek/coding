@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from PyQt6.QtCore import QByteArray, Qt, pyqtSignal
-from PyQt6.QtGui import QKeySequence, QShortcut
+from PyQt6.QtGui import QFontMetrics, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QScrollArea,
                               QSizePolicy, QSlider, QSplitter, QVBoxLayout,
                               QWidget)
@@ -258,7 +258,6 @@ class SelectPage(QWidget):
         super().__init__(parent)
         self._state: Stage1State | None = None
         self._current: Optional[ImageItem] = None
-        self._phase_label_text = ""
         self._phase_b_already_matched: dict[str, list[ImageItem]] = {}
         # 스플리터 방향을 첫 showEvent 에서 한 번만 확정했는지 (#cold-start).
         self._orientation_seeded = False
@@ -297,10 +296,8 @@ class SelectPage(QWidget):
         self.btn_end_selection.setEnabled(False)
         top.addWidget(self.btn_end_selection)
         top.addSpacing(20)
-        self.phase_label = QLabel("", self)
-        self.phase_label.setProperty("role", "subtitle")
-        top.addWidget(self.phase_label)
-        top.addSpacing(20)
+        # 단계 제목은 왼쪽 표제 하나로 충분하다 — 여기에 같은 문장을 한 번 더 찍던
+        # 라벨을 없앴다(같은 줄에 같은 말이 두 번 있었다).
         self.progress_label = QLabel("", self)
         self.progress_label.setProperty("role", "muted")
         top.addWidget(self.progress_label)
@@ -529,7 +526,6 @@ class SelectPage(QWidget):
                    targets: dict[str, list[ImageItem]] | None = None,
                    excluded: dict[str, list[ImageItem]] | None = None,
                    history: list[tuple[str, ImageItem]] | None = None,
-                   phase_label: str = "",
                    phase_b_already_matched: dict[str, list[ImageItem]] | None = None,
                    ) -> None:
         self._state = Stage1State(
@@ -538,8 +534,6 @@ class SelectPage(QWidget):
             excluded=defaultdict(list, {k: list(v) for k, v in (excluded or {}).items()}),
             history=list(history or []),
         )
-        self._phase_label_text = phase_label
-        self.phase_label.setText(phase_label)
         self._phase_b_already_matched = phase_b_already_matched or {}
         self._update_lot_counts()
         self._refresh_all()
@@ -561,7 +555,12 @@ class SelectPage(QWidget):
             return
         parts = [f"{slot} {totals[slot]}" for slot in sorted(totals)]
         full = i18n.KO.LOT_COUNTS_PREFIX + "  ·  ".join(parts)
-        self.lot_counts_label.setText(full)
+        # ★ 주석이 약속한 elide 가 실제로는 빠져 있었다 — 슬롯이 많으면 말줄임 없이
+        #   그냥 잘렸다.  가운데 생략이라 앞 슬롯과 뒤 슬롯을 둘 다 볼 수 있다.
+        fm = QFontMetrics(self.lot_counts_label.font())
+        avail = max(80, self.lot_counts_label.width() or self.width() - 32)
+        self.lot_counts_label.setText(
+            fm.elidedText(full, Qt.TextElideMode.ElideMiddle, avail))
         self.lot_counts_label.setToolTip(full)
 
     def get_state(self) -> Stage1State | None:

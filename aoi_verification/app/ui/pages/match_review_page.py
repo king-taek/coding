@@ -16,7 +16,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PyQt6.QtCore import QPoint, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QPixmap
+from PyQt6.QtGui import QColor, QFontMetrics, QPixmap
 from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu,
                               QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
 
@@ -44,6 +44,9 @@ _SIZE_MAX_PX = 360
 _MAX_RUNNERS = 50
 # 기준→검증 화살표 열 폭.  **행과 헤더가 공유**하는 상수다(둘이 다르면 헤더가 밀린다).
 _ARROW_W = 24
+# 슬롯 이름 열 폭.  화살표와 같은 이유로 상수다 — 행(`slot_host`)·예약폭 계산·헤더
+# 세 곳이 **같은 값**을 봐야 한다.  예전엔 96 이 세 군데에 따로 적혀 있었다.
+_SLOT_W = 96
 # 행(`QFrame[role="row"]`)의 QSS 좌측 보더 두께.  행은 보더 안쪽에서 내용을 시작하므로
 # 헤더(보더 없음)보다 내용이 이만큼 오른쪽으로 밀린다 — 실측 1.0px 어긋남의 정체다.
 # 헤더 좌측 마진에 더해 상쇄한다.  style.qss 의 `QFrame[role="row"]` 보더와 같은 값이다.
@@ -287,6 +290,13 @@ class _MatchRow(QFrame):
         self._slot_label = QLabel(match.slot, slot_host)
         # 슬롯 라벨은 행 ID(보조) — 최중량은 결정값(점수)이 전담(C4 위계).
         self._slot_label.setProperty("role", "slotHead")
+        # ★ 좁은 열(96px)이라 웨이퍼 ID 는 대부분 넘친다.  평범한 QLabel 은 말줄임 없이
+        #   **그냥 잘라** 버려서 어느 슬롯인지 알 수 없었다(툴팁도 없었다).
+        #   **가운데** 생략인 이유: 실제 ID 는 앞이 공통이다(W75483·04XYG4 / W75483·03XYC2).
+        #   뒤를 자르면 서로 다른 웨이퍼가 똑같이 렌더된다 — `_SlotTile._elide` 와 같은 판단.
+        self._slot_label.setWordWrap(False)       # 공백 없는 ID 는 줄바꿈이 안 듣고
+        self._slot_label.setToolTip(match.slot)   # 최소 폭만 부풀린다(가로 넘침).
+        self._elide_slot()
         slot_lay.addWidget(self._slot_label)
         # ★ 조용한 **테두리 버튼**이다(옛 결정: 링크형 — 반복 8행에 테두리가 쌓이지
         #   않게).  결정을 바꾼 근거: 사진 더블클릭 확대를 없앤 뒤로 이것이 좌우 비교
@@ -302,7 +312,7 @@ class _MatchRow(QFrame):
         self.btn_view.clicked.connect(lambda: self._open_compare(0))
         slot_lay.addWidget(self.btn_view)
         slot_lay.addStretch(1)             # 같은 베이스라인(점수는 우측 VCenter)으로.
-        slot_host.setFixedWidth(96)
+        slot_host.setFixedWidth(_SLOT_W)
         top.addWidget(slot_host)
 
         # ref 이미지 — 우클릭 ‘크게보기’ 는 단일 확대 대신 좌우 비교로 (#5).
@@ -493,6 +503,17 @@ class _MatchRow(QFrame):
         fit = avail // self._tile_w() if avail > 0 else 0
         return max(0, int(fit))
 
+    def _elide_slot(self) -> None:
+        """슬롯 이름을 열 폭에 맞춰 **가운데** 생략.  전체 이름은 툴팁이 갖는다.
+
+        ``_SLOT_W`` 가 고정이라 한 번만 계산해도 되지만, 폭이 바뀔 때를 대비해
+        ``resizeEvent`` 에서도 다시 부른다(`_SlotTile._elide` 와 같은 형태).
+        """
+        avail = max(40, (self._slot_label.width() or _SLOT_W) - 4)
+        fm = QFontMetrics(self._slot_label.font())
+        self._slot_label.setText(fm.elidedText(
+            self.match.slot, Qt.TextElideMode.ElideMiddle, avail))
+
     def _grid_cols(self) -> int:
         """아래 추가 줄 후보 열 수 — 가용 폭에 맞게(가로 스크롤 방지, #3)."""
         avail = self._row_width() - 60
@@ -501,6 +522,7 @@ class _MatchRow(QFrame):
 
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
+        self._elide_slot()
         # 폭이 줄어 클램프 결과가 달라지면 이미지 크기를 다시 맞춘다 — 좁은 창에서도
         # 두 이미지가 행에 들어가 '매치 없음' 버튼이 잘리지 않게 (#2/#3).
         new_applied = max(_SIZE_MIN_PX,
@@ -590,9 +612,9 @@ class _MatchRow(QFrame):
         slot·화살표·metric·칩·컴팩트 토글·여백/스페이싱.  이 폭을 뺀 나머지를
         두 이미지가 나눠 가져야 가로로 넘치지 않는다 (800×600 창 기준 검증)."""
         p = theme.PROFILE
-        # slot_host(96) + 화살표(30) + metric(96) + 칩(chip_w) + 토글(toggle_w)
+        # slot_host + 화살표 + metric(96) + 칩(chip_w) + 토글(toggle_w)
         # + 행 여백/스페이싱(96).  변형이 커져도 두 이미지가 클램프되어 안 넘침.
-        return 96 + 30 + 96 + p.chip_w + p.toggle_w + 96
+        return _SLOT_W + _ARROW_W + 6 + 96 + p.chip_w + p.toggle_w + 96
 
     def _max_thumb(self) -> int:
         """현재 행 폭에서 가로 넘침 없이 허용되는 메인 이미지 한 변의 최대값."""
@@ -906,7 +928,7 @@ class MatchReviewPage(QWidget):
             lb.setAlignment(align | Qt.AlignmentFlag.AlignVCenter)
             return lb
 
-        lay.addWidget(head(i18n.KO.COL_SLOT, width=96))
+        lay.addWidget(head(i18n.KO.COL_SLOT, width=_SLOT_W))
         # 기준·검증은 사진 위 **가운데**, 후보는 후보 스트립 위 **좌측**.
         self._hdr_ref = head(i18n.KO.COL_REF, width=self._thumb_px,
                              align=Qt.AlignmentFlag.AlignHCenter)
