@@ -403,7 +403,7 @@ tbody tr:last-child td{border-bottom:1px solid var(--rule)}
 <figure class="shot">
   <img src="06_크롭_액션바.png" alt="화면 맨 아래 버튼 줄 확대">
   <svg viewBox="0 0 1272 76" aria-hidden="true">
-    <rect class="mark blue" x="1024" y="4" width="220" height="44" rx="7"/>
+    <rect class="mark blue" x="1024" y="16" width="220" height="44" rx="7"/>
   </svg>
 </figure>
 <figcaption>버튼 줄은 <b>화면을 스크롤해도 늘 같은 자리에 붙어 있습니다.</b>
@@ -508,7 +508,7 @@ die 가 작은 자재에서 기본값을 그대로 쓰면 이웃 결함과 잘�
 <figure class="shot">
   <img src="09_시트_KLA확인.png" alt="KLA 장비가 어느 쪽인지 묻는 창">
   <svg viewBox="0 0 1280 860" aria-hidden="true">
-    <rect class="mark blue" x="452" y="410" width="376" height="180" rx="9"/>
+    <rect class="mark blue" x="460" y="412" width="360" height="124" rx="9"/>
   </svg>
 </figure>
 <figcaption>슬롯 이름이 한쪽에만 있을 때 나옵니다. 네 선택지 중 <b>정답이 정해져 있지 않아 기본값을 두지 않았습니다.</b></figcaption>
@@ -631,6 +631,8 @@ die 가 작은 자재에서 기본값을 그대로 쓰면 이웃 결함과 잘�
 <div class="tip">
   <span class="t">아주 가까운 짝은 후보를 하나만 보여 줍니다</span>
   <p>가장 가까운 후보가 <b>20 µm 이내</b>면 사실상 같은 결함이 확실하므로 후보를 한 장만 보여 줍니다.
+  (허용 오차를 40 µm 아래로 낮추면 이 기준도 <b>허용 오차의 절반</b>까지 함께 좁아집니다 —
+  그러지 않으면 모든 짝이 '확정' 이 되어 차순위가 사라지기 때문입니다.)
   그보다 멀면 <b>허용 오차의 3배 이내 후보를 모두</b> 가까운 순서로 보여 주어 직접 고르실 수 있게 합니다.</p>
 </div>
 
@@ -639,6 +641,7 @@ die 가 작은 자재에서 기본값을 그대로 쓰면 이웃 결함과 잘�
   <img src="13_2단계_매칭.jpg" alt="2단계 매칭 화면">
   <svg viewBox="0 0 1280 860" aria-hidden="true">
     <rect class="mark blue" x="126" y="295" width="400" height="400" rx="9"/>
+    <!-- 후보격자는 스크롤 안쪽까지 924px 이라 화면 밖이다 — 보이는 만큼만 감싼다(의도) -->
     <rect class="mark blue" x="655" y="177" width="587" height="660" rx="9"/>
     <rect class="mark red"  x="531" y="759" width="85" height="40" rx="7"/>
     <g><circle class="bub" cx="126" cy="295" r="15"/><text class="bubt" x="126" y="295">1</text></g>
@@ -689,17 +692,17 @@ die 가 작은 자재에서 기본값을 그대로 쓰면 이웃 결함과 잘�
   <img src="15_검토_시트.jpg" alt="검토 화면 — 매칭 결과 목록">
   <svg viewBox="0 0 1280 860" aria-hidden="true">
     <rect class="mark blue" x="20" y="12" width="258" height="44" rx="7"/>
-    <rect class="mark red"  x="20" y="170" width="1230" height="194" rx="4"/>
-    <rect class="mark blue" x="20" y="558" width="1230" height="160" rx="4"/>
+    <rect class="mark red"  x="20" y="170" width="1230" height="152" rx="4"/>
+    <rect class="mark blue" x="20" y="710" width="1230" height="160" rx="4"/>
     <rect class="mark blue" x="31" y="239" width="96" height="34" rx="6"/>
-    <rect class="mark blue" x="1187" y="612" width="52" height="44" rx="6"/>
+    <rect class="mark blue" x="1187" y="764" width="52" height="44" rx="6"/>
     <rect class="mark blue" x="1125" y="12" width="135" height="44" rx="7"/>
     <!-- 작은 컨트롤의 번호는 상자 **바깥**에 — 안에 두면 버튼 글자를 덮는다 -->
     <g><circle class="bub" cx="306" cy="34" r="15"/><text class="bubt" x="306" y="34">1</text></g>
     <g><circle class="bub red" cx="1250" cy="170" r="15"/><text class="bubt" x="1250" y="170">2</text></g>
-    <g><circle class="bub" cx="20" cy="558" r="15"/><text class="bubt" x="20" y="558">3</text></g>
+    <g><circle class="bub" cx="20" cy="710" r="15"/><text class="bubt" x="20" y="710">3</text></g>
     <g><circle class="bub" cx="15" cy="256" r="15"/><text class="bubt" x="15" y="256">4</text></g>
-    <g><circle class="bub" cx="1170" cy="600" r="15"/><text class="bubt" x="1170" y="600">5</text></g>
+    <g><circle class="bub" cx="1170" cy="752" r="15"/><text class="bubt" x="1170" y="752">5</text></g>
     <g><circle class="bub" cx="1109" cy="34" r="15"/><text class="bubt" x="1109" y="34">6</text></g>
   </svg>
 </figure>
@@ -721,19 +724,18 @@ die 가 작은 자재에서 기본값을 그대로 쓰면 이웃 결함과 잘�
 <h3>행 하나를 자세히</h3>
 <figure class="shot">
   <img src="16_크롭_검토행.jpg" alt="검토 화면의 행 하나 확대">
-  <svg viewBox="0 0 1242 206" aria-hidden="true">
+  <svg viewBox="0 0 1242 164" aria-hidden="true">
     <rect class="mark blue" x="125" y="23" width="118" height="118" rx="5"/>
     <rect class="mark blue" x="291" y="15" width="118" height="134" rx="5"/>
-    <rect class="mark blue" x="421" y="15" width="94" height="134" rx="5"/>
     <rect class="mark red"  x="1073" y="72" width="88" height="20" rx="5"/>
     <g><circle class="bub" cx="125" cy="23" r="14"/><text class="bubt" x="125" y="23">1</text></g>
     <g><circle class="bub" cx="291" cy="15" r="14"/><text class="bubt" x="291" y="15">2</text></g>
-    <g><circle class="bub" cx="421" cy="15" r="14"/><text class="bubt" x="421" y="15">3</text></g>
-    <g><circle class="bub red" cx="1117" cy="52" r="14"/><text class="bubt" x="1117" y="52">4</text></g>
+    <g><circle class="bub red" cx="1117" cy="52" r="14"/><text class="bubt" x="1117" y="52">3</text></g>
   </svg>
 </figure>
-<figcaption>❶ 기준 사진 → ❷ 확정된 짝 → ❸ 차순위 후보 → ❹ 판정 도장.
-사진 아래 숫자가 거리(µm)이고, 차순위 후보는 <b>테두리가 점선</b>이라 아직 확정되지 않았음을 알 수 있습니다.</figcaption>
+<figcaption>❶ 기준 사진 → ❷ 확정된 짝 → ❸ 판정 도장.
+사진 아래 숫자가 거리(µm)입니다. 이 행은 후보가 하나도 맞지 않아 차순위가 비어 있습니다 —
+후보가 있을 때는 확정된 짝 오른쪽에 <b>점선 테두리</b>로 놓여 아직 확정되지 않았음을 알려 줍니다.</figcaption>
 
 <ul>
   <li><b>차순위 후보를 클릭하면 짝이 그 사진으로 교체됩니다.</b></li>
@@ -749,9 +751,9 @@ die 가 작은 자재에서 기본값을 그대로 쓰면 이웃 결함과 잘�
   <img src="15_검토_시트.jpg" alt="허용 초과 행이 세 개 있는 검토 화면">
   <svg viewBox="0 0 1280 860" aria-hidden="true">
     <rect class="mark red"  x="20" y="170" width="1230" height="152" rx="6"/>
-    <rect class="mark blue" x="20" y="500" width="1230" height="192" rx="6"/>
+    <rect class="mark blue" x="20" y="516" width="1230" height="194" rx="6"/>
     <g><circle class="bub red" cx="20" cy="170" r="14"/><text class="bubt" x="20" y="170">1</text></g>
-    <g><circle class="bub" cx="20" cy="500" r="14"/><text class="bubt" x="20" y="500">2</text></g>
+    <g><circle class="bub" cx="20" cy="516" r="14"/><text class="bubt" x="20" y="516">2</text></g>
   </svg>
 </figure>
 <figcaption>❶ 520 µm — 천도 얼룩도 다릅니다. <b>다른 결함</b>이므로 빼야 합니다.

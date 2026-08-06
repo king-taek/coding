@@ -127,6 +127,15 @@ async function freePlay(page, label) {
   }
   await page.waitForSelector('[data-page="match"]', { timeout: 25000 });
 
+  // 2단계 표제는 **하나**이고 모드를 따라야 한다 — 앱에서 고친 '제목 모순' 이
+  // 체험판에 남아 있던 적이 있다(큰 제목 '유사도 기반' + 옆에 '좌표 기반' 동시 표시).
+  {
+    const titles = await page.locator('[data-page="match"] :text("Stage 2 —")').count();
+    const t = await page.locator('[data-test="stage2-title"]').textContent().catch(() => "");
+    if (titles !== 1) problems.push(`[${label}] 2단계 제목이 ${titles}개입니다(1개여야 함)`);
+    if (!/좌표 기반/.test(t || "")) problems.push(`[${label}] 좌표 모드인데 제목이 "${t}"`);
+  }
+
   // 2단계 — 후보 클릭과 매칭 없음 섞기
   for (let i = 0; i < 16; i++) {
     if (await page.locator('[data-page="review"]').count()) break;

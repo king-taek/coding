@@ -83,13 +83,22 @@ def test_stage2_title_follows_the_engine_mode(qapp):
     assert mp._stage2_title(coord) == i18n.KO.STAGE2_TITLE_COORD
     assert mp._stage2_title(legacy) == i18n.KO.STAGE2_TITLE
 
+    # ★ 손으로 setText 하면 **정작 고친 배선을 안 태운다**(동어반복).
+    #   실제 진입점인 load_state 를 부른다 — 이것이 제목을 갱신하지 않으면 실패한다.
     page = mp.MatchPage()
+    page._start_precompute = lambda: None      # 무거운 사전 계산은 건너뛴다
     try:
-        page._engine_cfg = coord
-        page.title.setText(mp._stage2_title(page._engine_cfg))
-        assert page.title.text() == i18n.KO.STAGE2_TITLE_COORD
+        page.load_state([], {}, 0.5, engine_cfg=legacy)
+        assert page.title.text() == i18n.KO.STAGE2_TITLE
+        assert _visible_texts(page).count(i18n.KO.STAGE2_TITLE) == 1
+
+        page.load_state([], {}, 0.5, engine_cfg=coord)
+        assert page.title.text() == i18n.KO.STAGE2_TITLE_COORD, \
+            "좌표 모드로 다시 부르면 큰 표제도 따라와야 한다"
         # 그리고 그 문장은 화면에 **한 번만** 있다.
         assert _visible_texts(page).count(i18n.KO.STAGE2_TITLE_COORD) == 1
+        assert _visible_texts(page).count(i18n.KO.STAGE2_TITLE) == 0, \
+            "옛 제목이 남아 있으면 안 된다"
     finally:
         page.deleteLater()
 
@@ -153,21 +162,83 @@ def test_slot_column_width_is_a_shared_constant(qapp):
         row.deleteLater()
 
 
-def test_lot_counts_label_elides_and_keeps_the_full_text_in_the_tooltip(qapp):
-    """1단계 '슬롯별 장수' 도 같은 문제였다 — 주석은 elide 를 약속하고 코드는 안 했다."""
-    from pathlib import Path
+def test_lot_counts_label_fills_the_real_width_and_keeps_the_full_text(qapp):
+    """1단계 '슬롯별 장수' — 잘리되 **가용 폭을 실제로 채워야** 한다.
 
+    ★ 예전 테스트는 `setFixedWidth(200)` 으로 라벨에 폭을 미리 심어 줬다.  그래서 실제
+    경로의 결함(레이아웃 전 100px 로 잘라 놓고 다시 안 재는 것)을 **잡지 못했고, 오히려
+    더 심하게 잘릴수록 확실히 통과**했다.  이제 앱과 같은 순서로 태운다:
+    넓은 창에 넣고 → load_state → 화면에 올리고 → 폭을 실제로 채웠는지 잰다.
+    """
+    from pathlib import Path
+    from PyQt6.QtGui import QFontMetrics
+    from PyQt6.QtWidgets import QMainWindow, QStackedWidget
+
+    win = QMainWindow()
+    stack = QStackedWidget(win)
+    win.setCentralWidget(stack)
+    win.resize(1600, 1000)
     page = sp.SelectPage()
+    stack.addWidget(page)
+    win.show()
     try:
-        page.lot_counts_label.setFixedWidth(200)
         slots = [f"W75483{i:02d}XYG4" for i in range(12)]
         queue = [sp.ImageItem(path=Path(f"/tmp/{slot}_{k}.jpg"), slot=slot, side="ref")
                  for slot in slots for k in range(3)]
-        page.load_state(queue=queue)
-        full = page.lot_counts_label.toolTip()
+        page.load_state(queue=queue)          # 앱과 같은 순서 — 표시보다 먼저
+        stack.setCurrentWidget(page)
+        for _ in range(10):
+            qapp.processEvents()
+
+        lb = page.lot_counts_label
+        full = lb.toolTip()
         assert full.startswith(i18n.KO.LOT_COUNTS_PREFIX)
         assert all(slot in full for slot in slots), "툴팁에는 전부 있어야 한다"
-        assert len(page.lot_counts_label.text()) < len(full), "화면에서는 줄어야 한다"
-        assert "…" in page.lot_counts_label.text()
+
+        shown = lb.text()
+        assert "…" in shown and len(shown) < len(full), "이 폭에서는 줄어야 한다"
+        # ★ 핵심 단언 — 잘렸다는 것만으로는 부족하다.  **가용 폭을 채워야** 한다.
+        #   레이아웃 전 100px 로 잘라 두면 여기서 걸린다.
+        avail = lb.contentsRect().width()
+        used = QFontMetrics(lb.font()).horizontalAdvance(shown)
+        assert avail > 400, f"창이 넓으므로 라벨도 넓어야 한다 (실제 {avail}px)"
+        assert used >= avail * 0.8, \
+            f"가용 {avail}px 중 {used}px 만 씀 — 레이아웃 전 폭으로 자른 것이다"
     finally:
+        win.close()
+        page.deleteLater()
+
+
+def test_lot_counts_re_elides_when_the_window_grows(qapp):
+    """창을 키우면 다시 계산해야 한다 — 한 번 자르고 끝나면 영원히 좁은 채 남는다."""
+    from pathlib import Path
+    from PyQt6.QtGui import QFontMetrics
+    from PyQt6.QtWidgets import QMainWindow, QStackedWidget
+
+    win = QMainWindow()
+    stack = QStackedWidget(win)
+    win.setCentralWidget(stack)
+    win.resize(820, 620)
+    page = sp.SelectPage()
+    stack.addWidget(page)
+    win.show()
+    try:
+        slots = [f"W75483{i:02d}XYG4" for i in range(12)]
+        page.load_state(queue=[
+            sp.ImageItem(path=Path(f"/tmp/{s_}_{k}.jpg"), slot=s_, side="ref")
+            for s_ in slots for k in range(3)])
+        stack.setCurrentWidget(page)
+        for _ in range(10):
+            qapp.processEvents()
+        narrow = QFontMetrics(page.lot_counts_label.font()).horizontalAdvance(
+            page.lot_counts_label.text())
+
+        win.resize(1700, 1000)
+        for _ in range(10):
+            qapp.processEvents()
+        wide = QFontMetrics(page.lot_counts_label.font()).horizontalAdvance(
+            page.lot_counts_label.text())
+        assert wide > narrow, f"넓어졌는데 글자가 그대로다 ({narrow} → {wide})"
+    finally:
+        win.close()
         page.deleteLater()

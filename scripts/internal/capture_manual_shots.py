@@ -640,6 +640,16 @@ def _stage_review(win, sr) -> dict:
     if ok is not None:
         out["정상행"] = ok
         out["매치없음토글"] = getattr(ok, "btn_toggle", None)
+    # ★ '초과인데 같은 얼룩' 행 — 설명서의 새 절이 이 행을 가리킨다.  대본(_PLAN)에서
+    #   same=True 인 초과 거리를 찾아 그 점수의 행을 집는다.  눈짐작 좌표를 쓰면
+    #   캡처가 바뀔 때마다 강조 상자가 엉뚱한 행을 물게 된다(실제로 그랬다).
+    same_over = next((d for d, _r, same in _PLAN if same and d > _TOL), None)
+    if same_over is not None:
+        want = -(same_over / _TOL)
+        hit = next((r for r in rows if getattr(r, "match", None) is not None
+                    and abs(r.match.score - want) < 1e-6), None)
+        if hit is not None:
+            out["초과인데같은얼룩행"] = hit
     return out
 
 
