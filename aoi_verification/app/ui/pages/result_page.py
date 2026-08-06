@@ -18,6 +18,11 @@ from ..widgets.loading_overlay import LoadingOverlay
 from ..widgets.neon_button import NeonButton
 from ..widgets.neon_card import NeonCard
 from ..widgets import sheet_host as sheets
+from ... import config as _config
+
+# 허용 오차 폴백 — 값이 안 들어왔을 때만 쓴다.  **단일 출처는 config** 다
+# (예전엔 리터럴 500 이 곳곳에 박혀 있어 기본값을 바꿔도 옛 값이 되살아났다).
+_DFLT_TOL = _config.DEFAULT_COORD_TOLERANCE
 
 
 class ResultPage(QWidget):
@@ -37,7 +42,7 @@ class ResultPage(QWidget):
         # 효율 모드 선계산 top-K — 실패 검토에서 후보 풀≥300 일 때 재사용 (#1).
         self._fast_results: dict | None = None
         self._coord_mode: bool = False
-        self._tolerance: float = 500.0
+        self._tolerance: float = _DFLT_TOL
         self._loading = LoadingOverlay(self)
         self._exporter: ExcelExporter | None = None
         self._build()
@@ -125,7 +130,7 @@ class ResultPage(QWidget):
                     score_cache=None,
                     fast_results: dict | None = None,
                     coord_mode: bool = False,
-                    tolerance: float = 500.0) -> None:
+                    tolerance: float = _DFLT_TOL) -> None:
         self._result = result
         self._template_path = template_path
         self._target_path = target_path
@@ -134,7 +139,7 @@ class ResultPage(QWidget):
         self._score_cache = score_cache
         self._fast_results = fast_results
         self._coord_mode = bool(coord_mode)
-        self._tolerance = float(tolerance) if tolerance > 0 else 500.0
+        self._tolerance = float(tolerance) if tolerance > 0 else _DFLT_TOL
         # 검토 후 다시 그려도 ‘자동 매치 결과 검토 권장’ 라벨이 살아 있도록
         # 마지막 auto_mode 값을 기억해 재렌더링에서 재사용한다.
         self._auto_mode = bool(auto_mode)

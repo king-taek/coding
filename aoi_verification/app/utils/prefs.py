@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from . import paths
+from .. import config as _config
 
 
 _PREFS_FILE = "ui_prefs.json"
@@ -101,7 +102,10 @@ class UiPrefs:
     use_gpu: bool = True
     embed_batch: int = 1
     # 좌표 기반 매칭(v2) 허용 오차 — µm 단위.  두 좌표가 이 거리 이내면 매칭.
-    coord_tolerance: float = 500.0
+    coord_tolerance: float = _config.DEFAULT_COORD_TOLERANCE
+    # 저장 파일의 세대.  기본값을 바꿨을 때 **이미 저장된 파일**을 한 번만 손보기 위한
+    # 표식이다 — 아래 `migrate` 참조.  0 = 이 표식이 생기기 전에 저장된 파일.
+    prefs_version: int = 0
     extra: dict[str, Any] = field(default_factory=dict)
 
     # ------------------------------------------------------------------
@@ -115,6 +119,32 @@ class UiPrefs:
 
 
 # ---------------------------------------------------------------------------
+PREFS_VERSION = 1
+# 세대 1 이전의 좌표 허용 오차 기본값.  이 값을 그대로 쓰던 파일만 새 기본값으로 옮긴다.
+_TOL_DEFAULT_BEFORE_V1 = 500.0
+
+
+def migrate(p: "UiPrefs") -> "UiPrefs":
+    """저장된 설정을 현재 세대로 한 번만 옮긴다.  **순수 함수** — 파일을 건드리지 않는다.
+
+    ★ 왜 필요한가: 기본값만 바꾸면 **기존 사용자에게는 아무 일도 일어나지 않는다.**
+    `patch()` 는 dataclass 전체를 저장하고, 셋업 화면은 [검증 시작] 마다
+    `coord_tolerance` 를 patch 한다 — 한 번이라도 검증을 돌린 사람의 파일에는 옛 기본값
+    500 이 박혀 있다.  `engine_mode` 가 `resolve_legacy_state` 를 필요로 했던 것과 같은
+    구조다.
+
+    ★ 한계(알고 하는 것): 숫자만으로는 '기본값에 떠밀린 500' 과 '직접 고른 500' 을
+    구분할 수 없다.  그래서 정확히 옛 기본값이던 파일만 옮기고, 다른 값(예: 350)은
+    사용자의 의도로 보아 **손대지 않는다.**
+    """
+    if p.prefs_version >= PREFS_VERSION:
+        return p
+    if p.coord_tolerance == _TOL_DEFAULT_BEFORE_V1:
+        p.coord_tolerance = _config.DEFAULT_COORD_TOLERANCE
+    p.prefs_version = PREFS_VERSION
+    return p
+
+
 def resolve_legacy_state(p: "UiPrefs") -> tuple[bool, str]:
     """(구형 모드 on?, 구형 하위 엔진) — 명시 스위치 도입 전 prefs 도 안전하게 해석.
 
@@ -164,10 +194,10 @@ def load() -> UiPrefs:
     except OSError:
         return UiPrefs()                 # 파일 없음 — 기본값
     if _cached is not None and _cached[0] == key:
-        return UiPrefs.from_dict(deepcopy(_cached[1]))
+        return migrate(UiPrefs.from_dict(deepcopy(_cached[1])))
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
-        prefs = UiPrefs.from_dict(data)
+        prefs = migrate(UiPrefs.from_dict(data))
     except Exception:
         return UiPrefs()
     _cached = (key, deepcopy(data))

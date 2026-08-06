@@ -152,5 +152,8 @@ def test_coord_score_round_trip_boundary():
     # 음수 = 허용범위 초과 (verbose 면 접미어까지)
     assert "초과" in fmt_score(-1.0, True, 500.0)
     assert "초과" not in fmt_score(-1.0, True, 500.0, verbose=False)
-    # 허용 오차가 0 이하면 500 으로 클램프 — 옛 구현과 같은 규약.
-    assert fmt_score(0.0, True, 0.0) == fmt_score(0.0, True, 500.0)
+    # 허용 오차가 0 이하면 **기본값**으로 클램프.  리터럴로 적지 않는다 —
+    # 기본값을 바꿔도 이 테스트가 옛 값을 계속 재던 적이 있다(단일 출처를 읽는다).
+    from aoi_verification.app import config
+    assert fmt_score(0.0, True, 0.0) == \
+        fmt_score(0.0, True, config.DEFAULT_COORD_TOLERANCE)

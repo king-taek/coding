@@ -31,6 +31,11 @@ from ..widgets.neon_button import NeonButton
 from ..widgets.no_wheel_slider import NoWheelSlider
 from ..widgets.zoom_window import FullscreenViewer
 from ..widgets import sheet_host as sheets
+from ... import config as _config
+
+# 허용 오차 폴백 — 값이 안 들어왔을 때만 쓴다.  **단일 출처는 config** 다
+# (예전엔 리터럴 500 이 곳곳에 박혀 있어 기본값을 바꿔도 옛 값이 되살아났다).
+_DFLT_TOL = _config.DEFAULT_COORD_TOLERANCE
 
 
 _THUMB_PX = 140                             # 기준 썸네일 기본 크기 (#2)
@@ -179,7 +184,7 @@ class _RunnerUpTile(QFrame):
 
     def __init__(self, item: ImageItem, score: float, parent=None,
                  *, size: int = _RUNNERUP_PX,
-                 coord_mode: bool = False, tolerance: float = 500.0) -> None:
+                 coord_mode: bool = False, tolerance: float = _DFLT_TOL) -> None:
         super().__init__(parent)
         self.item = item
         self.score = float(score)
@@ -249,14 +254,14 @@ class _MatchRow(QFrame):
                  *,
                  thumb_px: int = _THUMB_PX,
                  coord_mode: bool = False,
-                 tolerance: float = 500.0) -> None:
+                 tolerance: float = _DFLT_TOL) -> None:
         super().__init__(parent)
         self.match = match
         self._is_unmatched = False
         self._pulse = 0.0                # 상태 전환 펄스(0=없음) — paintEvent 가 읽음
         self._prev_state = None          # 초기 로드 시 펄스 억제용
         self._coord_mode = bool(coord_mode)
-        self._tolerance = float(tolerance) if tolerance > 0 else 500.0
+        self._tolerance = float(tolerance) if tolerance > 0 else _DFLT_TOL
         # 썸네일 크기 (#2) — 차순위는 20% 작게 파생.
         # ``_requested_thumb_px`` 는 슬라이더 요청값, ``_thumb_px`` 는 행 폭에 맞춰
         # 클램프된 실제 적용값(가로 넘침 방지).  창 리사이즈 때 요청값으로 재클램프.
@@ -812,7 +817,7 @@ class MatchReviewPage(QWidget):
         self._resize_timer.timeout.connect(self._apply_thumb_size)
         # 좌표 매칭 모드 관련
         self._coord_mode: bool = False
-        self._tolerance: float = 500.0
+        self._tolerance: float = _DFLT_TOL
         self._coord_failed_count: int = 0
         # 키보드 탐색 — 현재 행 (↑↓ 로 이동, R 토글). 표시 전용 상태.
         self._current_row: "_MatchRow | None" = None
@@ -971,7 +976,7 @@ class MatchReviewPage(QWidget):
                    val_pool: dict | None = None,
                    candidates_by_ref: dict | None = None,
                    coord_mode: bool = False,
-                   tolerance: float = 500.0,
+                   tolerance: float = _DFLT_TOL,
                    coord_failed_count: int = 0) -> None:
         """매치 검토 화면 초기화.
 
@@ -988,7 +993,7 @@ class MatchReviewPage(QWidget):
         self._matches = list(matches)
         self._unmatched_keys.clear()
         self._coord_mode = bool(coord_mode)
-        self._tolerance = float(tolerance) if tolerance and tolerance > 0 else 500.0
+        self._tolerance = float(tolerance) if tolerance and tolerance > 0 else _DFLT_TOL
         # 점수 열 이름을 엔진에 맞춘다 — 구형(유사도)에서 '거리(µm)' 로 보이던 오표기.
         hdr = getattr(self, "_hdr_metric", None)
         if hdr is not None:

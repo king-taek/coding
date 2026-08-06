@@ -23,6 +23,10 @@ from ...utils import image_io
 from .neon_button import NeonButton
 from .no_wheel_slider import NoWheelSlider
 
+# 허용 오차 폴백 — 값이 안 들어왔을 때만 쓴다.  **단일 출처는 config** 다
+# (예전엔 리터럴 500 이 곳곳에 박혀 있어 기본값을 바꿔도 옛 값이 되살아났다).
+_DFLT_TOL = config.DEFAULT_COORD_TOLERANCE
+
 
 _THUMB = config.Sizing.REVIEW_THUMB_PX  # 썸네일 기본 크기 (= 240), 슬라이더로 조절(#2).
 _SIZE_MIN_PX = 140
@@ -50,7 +54,7 @@ class _Row(QWidget):
 
     def __init__(self, m: MatchResult, parent=None, *,
                  size: int = _THUMB,
-                 coord_mode: bool = False, tolerance: float = 500.0) -> None:
+                 coord_mode: bool = False, tolerance: float = _DFLT_TOL) -> None:
         super().__init__(parent)
         self.match = m
         self._size = int(size)
@@ -164,7 +168,7 @@ class _Row(QWidget):
 
 class MatchesReviewDialog(QDialog):
     def __init__(self, matches: Iterable[MatchResult], parent=None,
-                 *, coord_mode: bool = False, tolerance: float = 500.0) -> None:
+                 *, coord_mode: bool = False, tolerance: float = _DFLT_TOL) -> None:
         super().__init__(parent)
         # 닫는 즉시 C++ 위젯 해제 — 부모 (ResultPage) 에 dialog 가 쌓이지 않도록.
         # exec() 가 반환된 직후엔 deleteLater 가 아직 처리되지 않아 Python 측
@@ -177,7 +181,7 @@ class MatchesReviewDialog(QDialog):
         self._rows_by_key: dict = {}
         self._thumb_px = _THUMB               # 사진 크기 (#2)
         self._coord_mode = bool(coord_mode)
-        self._tolerance = float(tolerance) if tolerance > 0 else 500.0
+        self._tolerance = float(tolerance) if tolerance > 0 else _DFLT_TOL
         self._matches: list[MatchResult] = sorted(
             matches, key=lambda m: (m.slot, m.ref_path.name.lower()),
         )

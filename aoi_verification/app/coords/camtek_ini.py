@@ -98,7 +98,7 @@ def _extract_coord(content: str,
     col = x_index - geom.col_origin
     row = geom.row_total - y_index
     # 버림(floor) — 장비 화면·정답 데이터와 표기를 일치시킨다.  거리 계산 변화는
-    # ref/val 양쪽 동일 규칙으로 2 µm 미만이라 매칭 판정(20/500 µm)에 영향 없다.
+    # ref/val 양쪽 동일 규칙으로 2 µm 미만이라 매칭 판정(20/200 µm)에 영향 없다.
     x = float(math.floor(X - x_index * geom.pitch_x))
     y = float(math.floor(Y - y_index * geom.pitch_y))
     return DefectCoord(col=col, row=row, x=x, y=y, source="camtek_ini")

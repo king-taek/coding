@@ -829,7 +829,8 @@ class MainWindow(QMainWindow):
             embed_batch=int(getattr(inp, "embed_batch", 1)),
             rerank_components=rerank_components,
             orb_center_weight=orb_center_weight,
-            coord_tolerance=float(getattr(inp, "coord_tolerance", 500.0)),
+            coord_tolerance=float(getattr(inp, "coord_tolerance",
+                                          config.DEFAULT_COORD_TOLERANCE)),
         )
 
 

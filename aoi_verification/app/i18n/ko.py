@@ -235,7 +235,7 @@ TOL_STEP_DOWN = "허용 오차 50 µm 줄이기"
 COORD_TOLERANCE_TOOLTIP = (
     "좌표 매칭 모드에서 두 defect 좌표의 최대 허용 거리 (µm).\n"
     "이 값 이하면 동일 defect 으로 간주합니다.\n"
-    "기본값 500 µm 은 한 die 크기가 40 mm 안팎일 때 약 1% 수준입니다.\n"
+    "기본값 200 µm 은 한 die 크기가 40 mm 안팎일 때 약 0.5% 수준입니다.\n"
     "die 가 작은 자재에서는 그에 맞춰 낮춰 주세요."
 )
 # 기준 폴더에서 읽어낸 die 크기 안내 — 허용 오차를 자재에 맞게 정하도록 돕는다.
@@ -255,7 +255,7 @@ DIE_SIZE_NOT_FOUND = (
     "die 내부 좌표·row 표기를 보려면 결과 폴더에 "
     "Params_WaferInfo.ini(DieStep_X/Y) 또는 ProductInfo.ini(XDieIndex/YDieIndex) 가 필요합니다."
 )
-# tol 이 die 폭 대비 이 비율을 넘으면 경고한다(die 4 mm 자재에서 500 µm = 12%).
+# tol 이 die 폭 대비 이 비율을 넘으면 경고한다(die 4 mm 자재에서 200 µm = 5%).
 DIE_TOL_RATIO_WARN = 0.02
 DIE_TOL_TOO_LARGE_FMT = (
     "허용 오차가 die 폭의 {pct:.0f} % 입니다 — 오매칭 위험이 있습니다"
@@ -289,7 +289,7 @@ SETUP_HOW_TO_USE_TITLE = "사용 방법"
 SETUP_HOW_TO_USE_BODY = (
     "① 기준·검증 장비의 폴더와 호기 번호를 입력합니다\n"
     "② 자동화 수준을 선택합니다  ·  사진 직접 선택 / 모두 자동\n"
-    "③ 허용 오차를 설정합니다  (기본 500 µm)\n"
+    "③ 허용 오차를 설정합니다  (기본 200 µm)\n"
     "      ※ 좌표 데이터가 없을 때만 ‘유사도 엔진(구형) 사용’ 스위치를 켭니다\n"
     "          (켜면 판정 기준이 허용 오차에서 유사도 임계치로 바뀝니다)\n"
     "④ [검증 시작] 을 누르면 다음 순서로 진행됩니다\n"

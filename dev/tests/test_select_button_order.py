@@ -57,20 +57,21 @@ def test_bulk_actions_follow_the_same_order(qapp):
         page.deleteLater()
 
 
-def _shortcut_map(page) -> dict[str, str]:
-    """등록된 QShortcut → 어떤 동작에 묶였는지."""
+def _shortcuts(page) -> dict[str, object]:
+    """등록된 QShortcut 을 키 이름으로 찾는다.
+
+    ★ `QTest.keyClick` 을 쓰지 않는 이유: `QShortcut` 은 **창이 활성** 이어야 발화하는데,
+      한 프로세스에서 여러 테스트가 창을 만드는 병렬 실행에서는 어느 창이 활성인지가
+      흔들린다.  여기서 확인하려는 것은 Qt 의 키 배달이 아니라 **키 → 동작 배선**이므로,
+      등록된 단축키를 직접 찾아 발화시킨다(배선이 틀리면 그대로 실패한다).
+    """
     from PyQt6.QtGui import QShortcut
-    out: dict[str, str] = {}
-    seen: list[str] = []
-    for sc in page.findChildren(QShortcut):
-        seen.append(sc.key().toString())
-    return {"keys": seen}
+    return {sc.key().toString(): sc for sc in page.findChildren(QShortcut)}
 
 
 def test_arrow_keys_follow_the_layout(qapp):
-    """→ = 검증, ← = 제외.  실제로 눌러서 확인한다(등록 여부만 보지 않는다)."""
+    """→ = 검증, ← = 제외.  등록 여부가 아니라 **발화시켜 결과**로 확인한다."""
     from pathlib import Path
-    from PyQt6.QtTest import QTest
 
     page = sp.SelectPage()
     try:
@@ -80,11 +81,16 @@ def test_arrow_keys_follow_the_layout(qapp):
         page.show()
         qapp.processEvents()
 
-        QTest.keyClick(page, Qt.Key.Key_Right)
+        keys = _shortcuts(page)
+        assert {"Right", "Left", "Z"} <= set(keys), f"등록된 키: {sorted(keys)}"
+
+        keys["Right"].activated.emit()
+        qapp.processEvents()
         assert len(page._state.targets["A01"]) == 1, "→ 는 검증이어야 한다"
         assert not page._state.excluded["A01"]
 
-        QTest.keyClick(page, Qt.Key.Key_Left)
+        keys["Left"].activated.emit()
+        qapp.processEvents()
         assert len(page._state.excluded["A01"]) == 1, "← 는 제외여야 한다"
         assert len(page._state.targets["A01"]) == 1
     finally:
@@ -92,29 +98,16 @@ def test_arrow_keys_follow_the_layout(qapp):
         page.deleteLater()
 
 
-def test_number_keys_do_nothing(qapp):
+def test_number_keys_are_not_registered(qapp):
     """1·2 는 없앴다 — 방향키가 배치를 그대로 따르므로 외울 것은 하나면 된다.
 
     남아 있으면 배치와 어긋난 옛 의미(1=검증)가 조용히 살아남는다.
     """
-    from pathlib import Path
-    from PyQt6.QtTest import QTest
-
     page = sp.SelectPage()
     try:
-        queue = [sp.ImageItem(path=Path(f"/tmp/b_{i}.jpg"), slot="A01", side="ref")
-                 for i in range(4)]
-        page.load_state(queue=queue)
-        page.show()
-        qapp.processEvents()
-        before = (len(page._state.targets["A01"]), len(page._state.excluded["A01"]))
-
-        for key in (Qt.Key.Key_1, Qt.Key.Key_2):
-            QTest.keyClick(page, key)
-        after = (len(page._state.targets["A01"]), len(page._state.excluded["A01"]))
-        assert after == before, "숫자 키는 아무 일도 하지 않아야 한다"
+        keys = set(_shortcuts(page))
+        assert "1" not in keys and "2" not in keys, f"남은 키: {sorted(keys)}"
     finally:
-        page.hide()
         page.deleteLater()
 
 

@@ -43,13 +43,14 @@ from PyQt6.QtCore import QObject, QThread, pyqtSignal
 from ..coords import resolve_batch as _resolve_batch
 from ..models.slot import ImageItem
 from .matcher import score_ref_classical
+from .. import config as _config
 
 
 # 좌표 차이가 이 값(좌표 단위, µm) 이하이면 '거의 정확히 일치'로 보고 후보 1장만
 # 보여준다. 초과 시 tol×3 이내 후보를 모두 차순위로 노출해 사용자가 직접 고른다.
 # die 가 작은 디바이스는 tol 을 20 µm 근처까지 낮춰 쓰게 되는데, 그때 이 값이 tol 을
 # 넘으면 **모든 매치가 '확정'** 이 돼 차순위가 사라진다 → tol 의 절반으로 묶는다.
-# tol=500(기본)에서는 20 그대로라 기존 동작이 바뀌지 않는다.
+# 기본 tol(200)에서는 20 그대로다 — 클램프는 tol < 40 일 때만 발동한다.
 CONFIDENT_DIST = 20.0
 
 
@@ -143,8 +144,9 @@ class CoordScheduler(QThread):
         self.signals = _CoordSignals()
         self.failed_set: Set[Tuple[str, Path]] = set()
 
-        tol = getattr(cfg, "coord_tolerance", 500.0) if cfg is not None else 500.0
-        self._tolerance = float(tol) if tol and tol > 0.0 else 500.0
+        _dflt = _config.DEFAULT_COORD_TOLERANCE
+        tol = getattr(cfg, "coord_tolerance", _dflt) if cfg is not None else _dflt
+        self._tolerance = float(tol) if tol and tol > 0.0 else _dflt
 
     def stop(self) -> None:
         self._stop.set()
