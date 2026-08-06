@@ -783,9 +783,14 @@ def main() -> int:
 
     from aoi_verification.app.ui.widgets.side_by_side_viewer import SideBySideViewer
     s0 = sr.slots[sr.common_slot_names[0]]
-    viewer = SideBySideViewer(s0.ref_images[0].path,
-                              [(v, f"{(140, 265, 420)[i % 3]} µm") for i, v in enumerate(s0.val_images[:3])],
-                              parent=win)
+    # ★ 대본(_PLAN)의 **'같은 얼룩' 행**을 고른다.  아무 쌍이나 쓰면 "140 µm(일치)" 라고
+    #   적힌 화면에 서로 다른 천이 나란히 놓여, 설명서가 스스로를 반박한다(실제로 그랬다).
+    same_idx = next(i for i, (_d, _r, same) in enumerate(_PLAN) if same)
+    same_dist, runner_dists, _ = _PLAN[same_idx]
+    others = [v for j, v in enumerate(s0.val_images) if j != same_idx]
+    cands = ([(s0.val_images[same_idx], f"{same_dist} µm")]
+             + [(v, f"{d} µm") for v, d in zip(others, runner_dists)])
+    viewer = SideBySideViewer(s0.ref_images[same_idx].path, cands, parent=win)
     sh.sheet("17_시트_좌우비교", win,
              lambda: win._sheets.run(viewer, full_bleed=True))
 

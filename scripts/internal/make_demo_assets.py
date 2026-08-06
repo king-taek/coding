@@ -97,6 +97,7 @@ def main() -> int:
     # 있다는 것을 보여 주려고 240 은 같은 얼룩으로 둔다(주로 Camtek↔KLA 조합).
     plan = [(140, True), (65, True), (520, False),
             (310, False), (18, True), (240, True)]
+    #  ↑ 체험판 PHOTOS 의 dist/same 과 **같은 순서·같은 값**이어야 한다.
 
     shots: dict[str, str] = {}
     for i, (dist, same) in enumerate(plan, start=1):
