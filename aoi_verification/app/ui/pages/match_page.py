@@ -55,6 +55,18 @@ class Stage2State:
     val_pool: dict[str, list[ImageItem]] = field(default_factory=dict)
 
 
+def _stage2_title(sim_cfg) -> str:
+    """Stage 2 표제 — 좌표 매칭 모드면 전용 제목.
+
+    ★ 표제의 주인인 이 파일이 갖는다.  예전에는 `main_window` 가 이 문자열을 만들어
+    **부제 라벨**로 넘겼고, 큰 표제는 "유사도 기반" 으로 굳어 있었다 — 좌표 모드에서
+    화면이 스스로 모순됐다.  이제 `load_state` 가 이 함수로 표제를 갱신한다.
+    """
+    if EngineMode.is_coordinate(getattr(sim_cfg, "engine", "")):
+        return i18n.KO.STAGE2_TITLE_COORD
+    return i18n.KO.STAGE2_TITLE
+
+
 @dataclass(frozen=True)
 class ReviewContext:
     """매칭이 끝난 뒤 **검토·결과 화면이 필요로 하는** MatchPage 상태 묶음.
@@ -153,7 +165,7 @@ class MatchPage(QWidget):
         self.btn_back_to_setup.clicked.connect(self._on_cancel_requested)
         top.addWidget(self.btn_back_to_setup)
         top.addSpacing(12)
-        self.title = QLabel(i18n.KO.STAGE2_TITLE, self)
+        self.title = QLabel(_stage2_title(None), self)
         self.title.setProperty("role", "title")
         top.addWidget(self.title)
         top.addStretch(1)
@@ -170,10 +182,10 @@ class MatchPage(QWidget):
         self.retry_btn.clicked.connect(self._retry_skipped)
         top.addWidget(self.retry_btn)
         top.addSpacing(20)
-        self.phase_label = QLabel("", self)
-        self.phase_label.setProperty("role", "subtitle")
-        top.addWidget(self.phase_label)
-        top.addSpacing(20)
+        # ★ 단계 제목은 **왼쪽 큰 표제 하나**다.  예전에는 같은 문장을 여기 15px 로 한 번
+        #   더 찍었는데, 좌표 모드에서는 큰 표제가 "유사도 기반" 으로 굳어 있어 화면이
+        #   **스스로 모순**됐다(가장 눈에 띄는 글자가 실제 동작과 달랐다).
+        #   지금은 `load_state` 가 표제를 모드에 맞추고, 오른쪽은 진행만 말한다.
         self.progress_label = QLabel("", self)
         self.progress_label.setProperty("role", "muted")
         top.addWidget(self.progress_label)
@@ -367,7 +379,6 @@ class MatchPage(QWidget):
                    *,
                    matches: list[MatchResult] | None = None,
                    skipped: dict[str, list[ImageItem]] | None = None,
-                   phase_label: str = "",
                    session_id: str = "",
                    auto_mode: bool = False,
                    engine_cfg=None) -> None:
@@ -384,7 +395,7 @@ class MatchPage(QWidget):
         self._fast_results.clear()
         self._match_history.clear()        # 되돌리기 히스토리 초기화 (#C1)
         self._update_undo_button()
-        self.phase_label.setText(phase_label)
+        self.title.setText(_stage2_title(self._engine_cfg))
         self._refresh_skipped_panel()
         # 모든 (ref, val) 쌍 점수를 미리 계산 → 이후 매칭은 캐시 조회만.
         self._start_precompute()

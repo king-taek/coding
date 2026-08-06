@@ -62,13 +62,6 @@ PHASE_A_SELECT = "A_select"
 PHASE_A_MATCH = "A_match"
 
 
-def _stage2_title(sim_cfg) -> str:
-    """Stage 2 진행 문구 — 좌표 매칭 모드면 전용 제목."""
-    if EngineMode.is_coordinate(getattr(sim_cfg, "engine", "")):
-        return i18n.KO.STAGE2_TITLE_COORD
-    return i18n.KO.STAGE2_TITLE
-
-
 class MainWindow(QMainWindow):
 
     # 좁은 창에서도 동작하도록 충분히 작게 (#2 — 사용자 요청: 좌우 스크롤
@@ -836,7 +829,8 @@ class MainWindow(QMainWindow):
             embed_batch=int(getattr(inp, "embed_batch", 1)),
             rerank_components=rerank_components,
             orb_center_weight=orb_center_weight,
-            coord_tolerance=float(getattr(inp, "coord_tolerance", 500.0)),
+            coord_tolerance=float(getattr(inp, "coord_tolerance",
+                                          config.DEFAULT_COORD_TOLERANCE)),
         )
 
 
@@ -1068,7 +1062,6 @@ class MainWindow(QMainWindow):
             queue=queue,
             val_pool_by_slot=pool,
             threshold=self._input.threshold,
-            phase_label=_stage2_title(_sim_cfg),
             session_id=self._session_id,
             auto_mode=True,
             engine_cfg=_sim_cfg,
@@ -1101,7 +1094,6 @@ class MainWindow(QMainWindow):
         self._select_page.load_state(
             queue=queue,
             targets=restored, excluded={}, history=[],
-            phase_label=i18n.KO.STAGE1_TITLE,
         )
         self._phase = PHASE_A_SELECT
         # 판단할 후보가 하나도 없으면(예: 기준 사진 재사용으로 큐가 전부 비워짐)
@@ -1218,7 +1210,6 @@ class MainWindow(QMainWindow):
             queue=queue,
             val_pool_by_slot=pool,
             threshold=self._input.threshold,
-            phase_label=_stage2_title(_sim_cfg),
             session_id=self._session_id,
             auto_mode=auto_mode,
             engine_cfg=_sim_cfg,

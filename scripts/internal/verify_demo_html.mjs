@@ -108,7 +108,15 @@ async function freePlay(page, label) {
   // 1단계 — 키보드로 절반, 버튼으로 절반.
   // ★ 로딩 오버레이가 떠 있는 동안은 누르지 않는다 — 앱과 마찬가지로 입력을 막는 것이
   //   정상이므로, 여기서 그냥 누르면 '가려서 못 눌렀다'가 실패로 보고된다.
-  for (let i = 0; i < 3; i++) { await page.keyboard.press("ArrowLeft"); await page.waitForTimeout(120); }
+  // → = 검증(화면 배치와 같은 방향).  ← 를 누르면 제외로 가므로 이후 단언이 다른
+  // 데이터로 돌아간다 — 방향을 바꿀 때 여기를 같이 고쳐야 한다.
+  for (let i = 0; i < 3; i++) { await page.keyboard.press("ArrowRight"); await page.waitForTimeout(120); }
+  const keptByKey = await page.locator('[data-test="right-panel"] img').count().catch(() => -1);
+  // 숫자 키는 없앴다 — 눌러도 아무 일이 없어야 한다.
+  const beforeNum = await page.locator('[data-test="center-img"]').getAttribute("src").catch(() => null);
+  for (const k of ["1", "2"]) { await page.keyboard.press(k); await page.waitForTimeout(80); }
+  const afterNum = await page.locator('[data-test="center-img"]').getAttribute("src").catch(() => null);
+  if (beforeNum !== afterNum) problems.push(`[${label}] 숫자 키가 아직 동작합니다`);
   for (let i = 0; i < 14; i++) {
     if (await page.locator('[data-page="match"]').count()) break;
     if (await page.locator("#loading.on").count()) { await page.waitForTimeout(300); continue; }

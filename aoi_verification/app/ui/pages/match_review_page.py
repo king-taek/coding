@@ -16,7 +16,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PyQt6.QtCore import QPoint, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QPixmap
+from PyQt6.QtGui import QColor, QFontMetrics, QPixmap
 from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu,
                               QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
 
@@ -31,6 +31,11 @@ from ..widgets.neon_button import NeonButton
 from ..widgets.no_wheel_slider import NoWheelSlider
 from ..widgets.zoom_window import FullscreenViewer
 from ..widgets import sheet_host as sheets
+from ... import config as _config
+
+# 허용 오차 폴백 — 값이 안 들어왔을 때만 쓴다.  **단일 출처는 config** 다
+# (예전엔 리터럴 500 이 곳곳에 박혀 있어 기본값을 바꿔도 옛 값이 되살아났다).
+_DFLT_TOL = _config.DEFAULT_COORD_TOLERANCE
 
 
 _THUMB_PX = 140                             # 기준 썸네일 기본 크기 (#2)
@@ -44,6 +49,9 @@ _SIZE_MAX_PX = 360
 _MAX_RUNNERS = 50
 # 기준→검증 화살표 열 폭.  **행과 헤더가 공유**하는 상수다(둘이 다르면 헤더가 밀린다).
 _ARROW_W = 24
+# 슬롯 이름 열 폭.  화살표와 같은 이유로 상수다 — 행(`slot_host`)·예약폭 계산·헤더
+# 세 곳이 **같은 값**을 봐야 한다.  예전엔 96 이 세 군데에 따로 적혀 있었다.
+_SLOT_W = 96
 # 행(`QFrame[role="row"]`)의 QSS 좌측 보더 두께.  행은 보더 안쪽에서 내용을 시작하므로
 # 헤더(보더 없음)보다 내용이 이만큼 오른쪽으로 밀린다 — 실측 1.0px 어긋남의 정체다.
 # 헤더 좌측 마진에 더해 상쇄한다.  style.qss 의 `QFrame[role="row"]` 보더와 같은 값이다.
@@ -176,7 +184,7 @@ class _RunnerUpTile(QFrame):
 
     def __init__(self, item: ImageItem, score: float, parent=None,
                  *, size: int = _RUNNERUP_PX,
-                 coord_mode: bool = False, tolerance: float = 500.0) -> None:
+                 coord_mode: bool = False, tolerance: float = _DFLT_TOL) -> None:
         super().__init__(parent)
         self.item = item
         self.score = float(score)
@@ -246,14 +254,14 @@ class _MatchRow(QFrame):
                  *,
                  thumb_px: int = _THUMB_PX,
                  coord_mode: bool = False,
-                 tolerance: float = 500.0) -> None:
+                 tolerance: float = _DFLT_TOL) -> None:
         super().__init__(parent)
         self.match = match
         self._is_unmatched = False
         self._pulse = 0.0                # 상태 전환 펄스(0=없음) — paintEvent 가 읽음
         self._prev_state = None          # 초기 로드 시 펄스 억제용
         self._coord_mode = bool(coord_mode)
-        self._tolerance = float(tolerance) if tolerance > 0 else 500.0
+        self._tolerance = float(tolerance) if tolerance > 0 else _DFLT_TOL
         # 썸네일 크기 (#2) — 차순위는 20% 작게 파생.
         # ``_requested_thumb_px`` 는 슬라이더 요청값, ``_thumb_px`` 는 행 폭에 맞춰
         # 클램프된 실제 적용값(가로 넘침 방지).  창 리사이즈 때 요청값으로 재클램프.
@@ -287,6 +295,13 @@ class _MatchRow(QFrame):
         self._slot_label = QLabel(match.slot, slot_host)
         # 슬롯 라벨은 행 ID(보조) — 최중량은 결정값(점수)이 전담(C4 위계).
         self._slot_label.setProperty("role", "slotHead")
+        # ★ 좁은 열(96px)이라 웨이퍼 ID 는 대부분 넘친다.  평범한 QLabel 은 말줄임 없이
+        #   **그냥 잘라** 버려서 어느 슬롯인지 알 수 없었다(툴팁도 없었다).
+        #   **가운데** 생략인 이유: 실제 ID 는 앞이 공통이다(W75483·04XYG4 / W75483·03XYC2).
+        #   뒤를 자르면 서로 다른 웨이퍼가 똑같이 렌더된다 — `_SlotTile._elide` 와 같은 판단.
+        self._slot_label.setWordWrap(False)       # 공백 없는 ID 는 줄바꿈이 안 듣고
+        self._slot_label.setToolTip(match.slot)   # 최소 폭만 부풀린다(가로 넘침).
+        self._elide_slot()
         slot_lay.addWidget(self._slot_label)
         # ★ 조용한 **테두리 버튼**이다(옛 결정: 링크형 — 반복 8행에 테두리가 쌓이지
         #   않게).  결정을 바꾼 근거: 사진 더블클릭 확대를 없앤 뒤로 이것이 좌우 비교
@@ -302,7 +317,7 @@ class _MatchRow(QFrame):
         self.btn_view.clicked.connect(lambda: self._open_compare(0))
         slot_lay.addWidget(self.btn_view)
         slot_lay.addStretch(1)             # 같은 베이스라인(점수는 우측 VCenter)으로.
-        slot_host.setFixedWidth(96)
+        slot_host.setFixedWidth(_SLOT_W)
         top.addWidget(slot_host)
 
         # ref 이미지 — 우클릭 ‘크게보기’ 는 단일 확대 대신 좌우 비교로 (#5).
@@ -493,6 +508,17 @@ class _MatchRow(QFrame):
         fit = avail // self._tile_w() if avail > 0 else 0
         return max(0, int(fit))
 
+    def _elide_slot(self) -> None:
+        """슬롯 이름을 열 폭에 맞춰 **가운데** 생략.  전체 이름은 툴팁이 갖는다.
+
+        ``_SLOT_W`` 가 고정이라 한 번만 계산해도 되지만, 폭이 바뀔 때를 대비해
+        ``resizeEvent`` 에서도 다시 부른다(`_SlotTile._elide` 와 같은 형태).
+        """
+        avail = max(40, (self._slot_label.width() or _SLOT_W) - 4)
+        fm = QFontMetrics(self._slot_label.font())
+        self._slot_label.setText(fm.elidedText(
+            self.match.slot, Qt.TextElideMode.ElideMiddle, avail))
+
     def _grid_cols(self) -> int:
         """아래 추가 줄 후보 열 수 — 가용 폭에 맞게(가로 스크롤 방지, #3)."""
         avail = self._row_width() - 60
@@ -501,6 +527,7 @@ class _MatchRow(QFrame):
 
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
+        self._elide_slot()
         # 폭이 줄어 클램프 결과가 달라지면 이미지 크기를 다시 맞춘다 — 좁은 창에서도
         # 두 이미지가 행에 들어가 '매치 없음' 버튼이 잘리지 않게 (#2/#3).
         new_applied = max(_SIZE_MIN_PX,
@@ -590,9 +617,9 @@ class _MatchRow(QFrame):
         slot·화살표·metric·칩·컴팩트 토글·여백/스페이싱.  이 폭을 뺀 나머지를
         두 이미지가 나눠 가져야 가로로 넘치지 않는다 (800×600 창 기준 검증)."""
         p = theme.PROFILE
-        # slot_host(96) + 화살표(30) + metric(96) + 칩(chip_w) + 토글(toggle_w)
+        # slot_host + 화살표 + metric(96) + 칩(chip_w) + 토글(toggle_w)
         # + 행 여백/스페이싱(96).  변형이 커져도 두 이미지가 클램프되어 안 넘침.
-        return 96 + 30 + 96 + p.chip_w + p.toggle_w + 96
+        return _SLOT_W + _ARROW_W + 6 + 96 + p.chip_w + p.toggle_w + 96
 
     def _max_thumb(self) -> int:
         """현재 행 폭에서 가로 넘침 없이 허용되는 메인 이미지 한 변의 최대값."""
@@ -790,7 +817,7 @@ class MatchReviewPage(QWidget):
         self._resize_timer.timeout.connect(self._apply_thumb_size)
         # 좌표 매칭 모드 관련
         self._coord_mode: bool = False
-        self._tolerance: float = 500.0
+        self._tolerance: float = _DFLT_TOL
         self._coord_failed_count: int = 0
         # 키보드 탐색 — 현재 행 (↑↓ 로 이동, R 토글). 표시 전용 상태.
         self._current_row: "_MatchRow | None" = None
@@ -906,7 +933,7 @@ class MatchReviewPage(QWidget):
             lb.setAlignment(align | Qt.AlignmentFlag.AlignVCenter)
             return lb
 
-        lay.addWidget(head(i18n.KO.COL_SLOT, width=96))
+        lay.addWidget(head(i18n.KO.COL_SLOT, width=_SLOT_W))
         # 기준·검증은 사진 위 **가운데**, 후보는 후보 스트립 위 **좌측**.
         self._hdr_ref = head(i18n.KO.COL_REF, width=self._thumb_px,
                              align=Qt.AlignmentFlag.AlignHCenter)
@@ -949,7 +976,7 @@ class MatchReviewPage(QWidget):
                    val_pool: dict | None = None,
                    candidates_by_ref: dict | None = None,
                    coord_mode: bool = False,
-                   tolerance: float = 500.0,
+                   tolerance: float = _DFLT_TOL,
                    coord_failed_count: int = 0) -> None:
         """매치 검토 화면 초기화.
 
@@ -966,7 +993,7 @@ class MatchReviewPage(QWidget):
         self._matches = list(matches)
         self._unmatched_keys.clear()
         self._coord_mode = bool(coord_mode)
-        self._tolerance = float(tolerance) if tolerance and tolerance > 0 else 500.0
+        self._tolerance = float(tolerance) if tolerance and tolerance > 0 else _DFLT_TOL
         # 점수 열 이름을 엔진에 맞춘다 — 구형(유사도)에서 '거리(µm)' 로 보이던 오표기.
         hdr = getattr(self, "_hdr_metric", None)
         if hdr is not None:

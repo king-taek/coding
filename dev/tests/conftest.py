@@ -33,6 +33,52 @@ def isolated_cache(monkeypatch, tmp_path):
     yield tmp_path
 
 
+@pytest.fixture(autouse=True)
+def _no_startup_side_effects(monkeypatch):
+    """`MainWindow` 의 **시작 부수효과**(네트워크·모달·GPU 컴파일)를 막는다.
+
+    ★ 왜 필요한가 — 실제로 테스트가 **영구히 멈췄다.**  `MainWindow.__init__` 은 마지막에
+    ``QTimer.singleShot(400, self._check_for_update_async)`` 를 건다.  이벤트 루프를
+    400ms 넘게 돌리는 테스트(색 모드 전환은 크로스페이드 700ms 를 기다린다)에서 이 타이머가
+    발화해 업데이트 서버로 나가고, 응답이 오면 ``sheets.ask`` 가 **중첩 이벤트 루프**를 열어
+    아무도 닫지 않는다.  실측으로 375ms 지점에서 멈췄다.
+
+    ★ 왜 개별 파일이 아니라 여기인가 — 파일마다 monkeypatch 하는 방식은 **이미 두 번
+    실패했다.**  같은 네 줄이 네 곳에 복붙됐고(그중 한 곳은 넷 중 둘만 복사), 나중에 생긴
+    파일 셋은 통째로 빠뜨렸다.  `isolated_cache`(HOME 격리)와
+    `pytest_collection_modifyitems`(마커 부여)가 이미 '한 곳에서 막는다' 를 택한 것과 같은
+    판단이다.  `test_updater.py` 의 `_no_real_subprocess` 도 같은 계열이다.
+
+    ★ 조용히 지나가지 않는다 — 억제한 호출을 세어 두므로, '업데이트 흐름이 도는지' 를
+    검증하려는 테스트는 ``window._suppressed_startup_calls`` 로 확인하거나 이 픽스처를
+    자기 파일에서 덮어쓰면 된다.
+
+    ★ `_start_backend_import_async` 는 **막지 않는다.**  그것은 부수효과가 아니라 여러
+    테스트가 실제로 검증하는 경로다(`test_startup_gating` 은 백엔드를 손으로 굴린다).
+    전역으로 막으면 그 테스트들이 조용히 다른 것을 검증하게 된다 — 파일별 monkeypatch 를
+    그대로 둔다.
+    """
+    try:
+        from aoi_verification.app.ui import main_window as mw
+    except Exception:                       # PyQt6 없는 환경 — 막을 것도 없다.
+        yield
+        return
+
+    def _record(name):
+        def _blocked(self):
+            calls = getattr(self, "_suppressed_startup_calls", None)
+            if calls is None:
+                calls = []
+                self._suppressed_startup_calls = calls
+            calls.append(name)
+        return _blocked
+
+    for name in ("_check_for_update_async", "_maybe_offer_openvino",
+                 "_warmup_accel_async"):
+        monkeypatch.setattr(mw.MainWindow, name, _record(name), raising=True)
+    yield
+
+
 # ---------------------------------------------------------------------------
 # Qt — 테마 적용은 **세션당 1회**
 # ---------------------------------------------------------------------------

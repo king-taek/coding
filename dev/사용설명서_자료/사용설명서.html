@@ -165,8 +165,8 @@ tbody tr:last-child td{border-bottom:1px solid var(--rule)}
   <div class="who">
     <b>이 문서는 프로그램을 처음 쓰는 분을 위한 것입니다.</b><br>
     설치부터 엑셀 저장까지 순서대로 따라가면 한 번의 검증을 끝낼 수 있습니다.
-    화면 그림은 모두 실제 프로그램을 실행해 찍은 것이고, 그 안의 결함 사진은
-    설명을 위해 만든 <b>예시 그림</b>입니다.
+    화면 그림은 모두 실제 프로그램을 실행해 찍은 것이고, 그 안의 사진은
+    설명을 위해 그린 <b>예시 그림</b>(직물 위의 얼룩)입니다.
   </div>
 
   <p style="font-weight:700;margin-bottom:1.5mm">그림 보는 법</p>
@@ -374,7 +374,7 @@ tbody tr:last-child td{border-bottom:1px solid var(--rule)}
   <li><b>기준 장비</b> — 기준이 되는 폴더와 호기 번호를 넣습니다.</li>
   <li><b>검증 장비</b> — 맞춰 볼 폴더와 호기 번호를 넣습니다.</li>
   <li><b>판정 기준 배지</b> — <b>지금 어떤 기준으로 짝을 판정하는지</b> 항상 여기에 표시됩니다.
-      기본은 <span class="q">좌표 매칭 · 허용 오차 500 µm</span> 입니다.</li>
+      기본은 <span class="q">좌표 매칭 · 허용 오차 200 µm</span> 입니다.</li>
   <li><b>실행 옵션</b> — 사진을 직접 고를지, 슬롯 일부만 돌릴지 정합니다(4장).</li>
   <li><b>매칭 설정</b> — 허용 오차를 정합니다(4장).</li>
   <li><span class="ui">검증 시작</span> — 두 폴더가 모두 유효해야 눌립니다.</li>
@@ -448,7 +448,7 @@ tbody tr:last-child td{border-bottom:1px solid var(--rule)}
 <figcaption>배지에 적힌 값이 <b>지금 적용 중인 판정 기준</b>입니다. 설정을 바꾸면 즉시 여기에 반영됩니다.</figcaption>
 
 <p><b>허용 오차</b>는 두 결함 좌표가 이 거리 안에 있으면 같은 결함으로 보겠다는 값입니다.
-기본 <b>500 µm</b> 이며 <span class="ui">−</span> <span class="ui">+</span> 버튼으로 50 µm 씩 조정합니다.</p>
+기본 <b>200 µm</b> 이며 <span class="ui">−</span> <span class="ui">+</span> 버튼으로 50 µm 씩 조정합니다.</p>
 
 <div class="note">
   <span class="t">마우스 휠로는 바뀌지 않습니다 — 의도된 동작입니다</span>
@@ -459,7 +459,7 @@ tbody tr:last-child td{border-bottom:1px solid var(--rule)}
 
 <p>폴더에서 die 크기를 읽으면 입력란 아래에 안내가 나옵니다.
 허용 오차가 die 폭의 2%를 넘으면 <span style="color:var(--warn);font-weight:700">주황색 경고</span>가 함께 나옵니다 —
-die 가 작은 자재에서 500 µm 을 그대로 쓰면 이웃 결함과 잘못 짝지어질 수 있기 때문입니다.</p>
+die 가 작은 자재에서 기본값을 그대로 쓰면 이웃 결함과 잘못 짝지어질 수 있기 때문입니다.</p>
 
 <div class="soft">
   <figure class="shot" style="margin:0">
@@ -552,26 +552,28 @@ die 가 작은 자재에서 500 µm 을 그대로 쓰면 이웃 결함과 잘못
     <rect class="mark blue" x="16" y="164" width="263" height="658" rx="9"/>
     <rect class="mark blue" x="411" y="307" width="400" height="400" rx="9"/>
     <rect class="mark blue" x="944" y="164" width="320" height="658" rx="9"/>
-    <rect class="mark blue" x="757" y="757" width="75" height="44" rx="7"/>
-    <rect class="mark blue" x="842" y="759" width="75" height="40" rx="7"/>
-    <rect class="mark red"  x="823" y="89" width="85" height="40" rx="7"/>
+    <rect class="mark blue" x="757" y="759" width="75" height="40" rx="7"/>
+    <rect class="mark blue" x="842" y="757" width="75" height="44" rx="7"/>
+    <rect class="mark red"  x="984" y="89" width="85" height="40" rx="7"/>
     <!-- 번호는 넓은 영역이면 모서리에, 작은 컨트롤이면 **바깥**에 둔다 — 버튼 글자를 덮지 않게 -->
     <g><circle class="bub" cx="16" cy="164" r="15"/><text class="bubt" x="16" y="164">1</text></g>
     <g><circle class="bub" cx="411" cy="307" r="15"/><text class="bubt" x="411" y="307">2</text></g>
     <g><circle class="bub" cx="944" cy="164" r="15"/><text class="bubt" x="944" y="164">3</text></g>
-    <g><circle class="bub" cx="739" cy="739" r="15"/><text class="bubt" x="739" y="739">4</text></g>
-    <g><circle class="bub" cx="935" cy="741" r="15"/><text class="bubt" x="935" y="741">5</text></g>
-    <g><circle class="bub red" cx="805" cy="71" r="15"/><text class="bubt" x="805" y="71">6</text></g>
+    <g><circle class="bub" cx="739" cy="741" r="15"/><text class="bubt" x="739" y="741">4</text></g>
+    <g><circle class="bub" cx="935" cy="739" r="15"/><text class="bubt" x="935" y="739">5</text></g>
+    <g><circle class="bub red" cx="966" cy="71" r="15"/><text class="bubt" x="966" y="71">6</text></g>
   </svg>
 </figure>
-<figcaption>왼쪽에서 가운데로 한 장씩 올라오고, 결정하면 오른쪽(또는 제외 목록)으로 갑니다.</figcaption>
+<figcaption>왼쪽에서 가운데로 한 장씩 올라오고, <b>오른쪽으로 보내면</b> 오른쪽 ‘검증 대상’ 에 쌓입니다.
+버튼과 방향키가 같은 방향을 가리킵니다.</figcaption>
 
 <ol class="keys">
   <li><b>검증 후보들</b> — 아직 결정하지 않은 사진입니다.</li>
   <li><b>결정할 사진</b> — 지금 판단할 한 장입니다. 위 슬라이더로 크기를 키울 수 있습니다.</li>
   <li><b>검증 대상</b> — <span class="q">검증</span> 으로 보낸 사진이 쌓입니다.</li>
-  <li><span class="ui">✓ 검증</span> — 이 사진의 짝을 2단계에서 찾습니다.</li>
-  <li><span class="ui">✕ 제외</span> — 이번 검증에서 뺍니다.</li>
+  <li><span class="ui">✕ 제외</span> — 이번 검증에서 뺍니다. 왼쪽에 있습니다.</li>
+  <li><span class="ui">✓ 검증</span> — 이 사진의 짝을 2단계에서 찾습니다.
+      <b>오른쪽</b>에 있는 이유는 사진이 오른쪽 ‘검증 대상’ 으로 가기 때문입니다.</li>
   <li><span class="ui">선택 종료</span> — <b>남은 사진을 모두 제외 처리</b>하고 다음 단계로 갑니다(확인 창이 뜹니다).</li>
 </ol>
 
@@ -580,8 +582,8 @@ die 가 작은 자재에서 500 µm 을 그대로 쓰면 이웃 결함과 잘못
 <table>
   <thead><tr><th style="width:30%">키</th><th>동작</th></tr></thead>
   <tbody>
-    <tr><td><span class="kbd">←</span> 또는 <span class="kbd">1</span></td><td>검증</td></tr>
-    <tr><td><span class="kbd">→</span> 또는 <span class="kbd">2</span></td><td>제외</td></tr>
+    <tr><td><span class="kbd">→</span></td><td>검증 <span class="muted small">— 오른쪽 패널이 ‘검증 대상’ 입니다</span></td></tr>
+    <tr><td><span class="kbd">←</span></td><td>제외</td></tr>
     <tr><td><span class="kbd">Z</span></td><td>직전 결정 되돌리기</td></tr>
     <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">A</span></td><td>왼쪽 목록 전체 선택</td></tr>
   </tbody>
@@ -614,7 +616,7 @@ die 가 작은 자재에서 500 µm 을 그대로 쓰면 이웃 결함과 잘못
 <table>
   <thead><tr><th style="width:30%">두 결함 사이의 거리</th><th style="width:22%">판정</th><th>화면에서</th></tr></thead>
   <tbody>
-    <tr><td><b>허용 오차 이내</b><br><span style="color:var(--mute)">기본값이면 500 µm 이하</span></td>
+    <tr><td><b>허용 오차 이내</b><br><span style="color:var(--mute)">기본값이면 200 µm 이하</span></td>
         <td><b>일치</b></td>
         <td>거리만 표시되고 판정 칸은 <b>비어 있습니다</b></td></tr>
     <tr><td><b>허용 오차 초과</b><br><span style="color:var(--mute)">3배 이내까지</span></td>
@@ -739,12 +741,54 @@ die 가 작은 자재에서 500 µm 을 그대로 쓰면 이웃 결함과 잘못
   <li><span class="q">후보 한 줄 더 보기 ▾</span> 로 더 많은 후보를 볼 수 있습니다.</li>
 </ul>
 
+<h3><span class="chip over">허용 초과</span> 라고 다 틀린 것은 아닙니다</h3>
+<p class="lede">이 도장은 <b>“거리가 멀다”</b>는 사실만 말합니다. <b>“틀렸다”</b>는 뜻이 아닙니다.
+초과 행을 만나면 숫자가 아니라 <b>두 사진</b>을 보세요.</p>
+
+<figure class="shot">
+  <img src="15_검토_시트.jpg" alt="허용 초과 행이 세 개 있는 검토 화면">
+  <svg viewBox="0 0 1280 860" aria-hidden="true">
+    <rect class="mark red"  x="20" y="170" width="1230" height="152" rx="6"/>
+    <rect class="mark blue" x="20" y="500" width="1230" height="192" rx="6"/>
+    <g><circle class="bub red" cx="20" cy="170" r="14"/><text class="bubt" x="20" y="170">1</text></g>
+    <g><circle class="bub" cx="20" cy="500" r="14"/><text class="bubt" x="20" y="500">2</text></g>
+  </svg>
+</figure>
+<figcaption>❶ 520 µm — 천도 얼룩도 다릅니다. <b>다른 결함</b>이므로 빼야 합니다.
+❷ 240 µm — 천과 얼룩이 <b>같습니다</b>. 거리만 벌어졌을 뿐 <b>맞는 짝</b>입니다.</figcaption>
+
+<table>
+  <thead><tr><th style="width:34%">두 사진을 보니</th><th style="width:22%">하실 일</th><th>왜</th></tr></thead>
+  <tbody>
+    <tr><td><b>같은 결함</b>으로 보인다</td>
+        <td>그대로 둡니다</td>
+        <td>좌표만 조금 벌어진 것입니다. 결과에 그대로 남습니다.</td></tr>
+    <tr><td><b>다른 결함</b>인데 옆 후보가 맞아 보인다</td>
+        <td>그 <b>차순위 후보</b>를 클릭</td>
+        <td>짝이 그 사진으로 바뀝니다.</td></tr>
+    <tr><td><b>다른 결함</b>이고 맞는 후보도 없다</td>
+        <td><span class="ui">×</span></td>
+        <td>짝을 취소해 <span class="q">매치 없음</span> 으로 넘깁니다.</td></tr>
+  </tbody>
+</table>
+
+<div class="tip">
+  <span class="t">초과가 자주 나오는 조합 — Camtek ↔ KLA</span>
+  <p>두 장비는 좌표를 재는 기준이 미세하게 다릅니다. 그래서 <b>같은 결함인데도</b> 거리가
+  허용 오차를 조금 넘는 일이 생깁니다. 같은 장비끼리 비교할 때보다 초과 행이 많다면
+  대개 이 경우이니, 숫자만 보고 지우지 마시고 사진을 확인해 주세요.</p>
+  <p class="muted">반대로, 초과 행이 유난히 많고 사진도 죄다 다르다면 <b>허용 오차가 너무 큰</b> 것입니다.
+  첫 화면에서 값을 낮춘 뒤 다시 돌리는 편이 빠릅니다.</p>
+</div>
+
 <h3>좌우 비교로 확인하기</h3>
 <figure class="shot">
   <img src="17_시트_좌우비교.jpg" alt="좌우 비교 화면">
 </figure>
 <figcaption>왼쪽이 기준, 오른쪽이 후보입니다. <span class="kbd">←</span> <span class="kbd">→</span> 로 후보를 넘기고,
-<span class="kbd">Esc</span> 로 닫습니다.</figcaption>
+<span class="kbd">Esc</span> 로 닫습니다.<br>
+<b>바로 위에서 말한 경우가 이것입니다</b> — 240 µm 로 허용 오차를 넘었지만, 나란히 놓고 보면
+천도 얼룩도 같은 <b>맞는 짝</b>입니다. 이럴 때는 그대로 두시면 됩니다.</figcaption>
 <p><b>확대·이동은 마우스가 올라간 사진에만 적용됩니다.</b>
 기준 사진은 그대로 두고 후보만 확대해 볼 수 있어, 같은 위치를 비교하기 편합니다.
 이 화면은 원본 파일을 직접 열어 가장 좋은 화질로 보여 줍니다.</p>
@@ -848,7 +892,7 @@ die 가 작은 자재에서 500 µm 을 그대로 쓰면 이웃 결함과 잘못
 
 <div class="soft">
   <figure class="shot" style="margin:0">
-    <img src="20_시트_사진정보.jpg" alt="단일 사진 정보 창">
+    <img src="20_시트_사진정보.png" alt="단일 사진 정보 창">
   </figure>
   <div class="body">
     <h4>사진 정보 보기</h4>
@@ -949,7 +993,7 @@ die 가 작은 자재에서 500 µm 을 그대로 쓰면 이웃 결함과 잘못
     <tr><td>모든 슬롯이 <span class="q">한쪽 전용</span> 으로 나옴</td>
         <td>KLA 장비 확인에서 반대쪽을 고르셨을 수 있습니다(5장).</td></tr>
     <tr><td>엉뚱한 결함끼리 짝지어짐</td>
-        <td>die 가 작은 자재에 허용 오차 500 µm 을 그대로 쓴 경우입니다. 경고 문구를 확인하고 값을 낮춰 주세요.</td></tr>
+        <td>die 가 작은 자재에 기본 허용 오차를 그대로 쓴 경우입니다. 경고 문구를 확인하고 값을 낮춰 주세요.</td></tr>
     <tr><td>허용 오차가 휠로 안 바뀜</td>
         <td>의도된 동작입니다. <span class="ui">−</span> <span class="ui">+</span> 버튼을 쓰세요.</td></tr>
   </tbody>
@@ -967,10 +1011,10 @@ die 가 작은 자재에서 500 µm 을 그대로 쓰면 이웃 결함과 잘못
   <thead><tr><th style="width:44%">지금 보이는 것</th><th style="width:22%">누를 것</th><th>그다음</th></tr></thead>
   <tbody>
     <tr><td>결함이 또렷하고, 이 사진의 짝을 찾고 싶다</td>
-        <td><span class="ui">✓ 검증</span> <span class="kbd">←</span></td>
+        <td><span class="ui">✓ 검증</span> <span class="kbd">→</span></td>
         <td>2단계로 넘어가 짝을 찾습니다.</td></tr>
     <tr><td>흐리거나 결함이 아니어서 볼 필요가 없다</td>
-        <td><span class="ui">✕ 제외</span> <span class="kbd">→</span></td>
+        <td><span class="ui">✕ 제외</span> <span class="kbd">←</span></td>
         <td>이번 검증에서 빠집니다. 결과에도 안 나옵니다.</td></tr>
     <tr><td>방금 잘못 눌렀다</td>
         <td><span class="ui">되돌리기(Z)</span></td>
@@ -1015,7 +1059,7 @@ die 가 작은 자재에서 500 µm 을 그대로 쓰면 이웃 결함과 잘못
         <td>이상 없음. 그냥 두시면 됩니다.</td></tr>
     <tr><td><span class="chip over">허용 초과</span> 인데 두 사진이 <b>같은 결함</b>으로 보인다</td>
         <td>—</td>
-        <td>그대로 두면 됩니다. 좌표 차이가 큰 것뿐입니다.</td></tr>
+        <td>그대로 두면 됩니다. 좌표만 벌어진 것입니다(Camtek↔KLA 조합에서 흔합니다).</td></tr>
     <tr><td><span class="chip over">허용 초과</span> 이고 <b>다른 결함</b>인데, 옆 후보가 맞아 보인다</td>
         <td>그 <b>차순위 후보</b></td>
         <td>짝이 그 사진으로 교체됩니다.</td></tr>
@@ -1073,8 +1117,8 @@ die 가 작은 자재에서 500 µm 을 그대로 쓰면 이웃 결함과 잘못
   <thead><tr><th style="width:24%">화면</th><th style="width:30%">키</th><th>동작</th></tr></thead>
   <tbody>
     <tr><td>어디서나</td><td><span class="kbd">F11</span></td><td>전체화면 켜기 / 끄기</td></tr>
-    <tr><td rowspan="4">1단계 선별</td><td><span class="kbd">←</span> · <span class="kbd">1</span></td><td>검증</td></tr>
-    <tr><td><span class="kbd">→</span> · <span class="kbd">2</span></td><td>제외</td></tr>
+    <tr><td rowspan="3">1단계 선별</td><td><span class="kbd">→</span></td><td>검증</td></tr>
+    <tr><td><span class="kbd">←</span></td><td>제외</td></tr>
     <tr><td><span class="kbd">Z</span></td><td>되돌리기</td></tr>
     <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">A</span></td><td>왼쪽 목록 전체 선택</td></tr>
     <tr><td rowspan="2">2단계 매칭</td><td><span class="kbd">N</span></td><td>매칭 없음 확정</td></tr>
@@ -1116,10 +1160,11 @@ die 가 작은 자재에서 500 µm 을 그대로 쓰면 이웃 결함과 잘못
   <span class="t">이 설명서의 화면 그림에 대하여</span>
   <p>모든 화면 그림은 실제 프로그램을 실행해 찍은 것이며, 강조 상자와 번호는
   <b>화면 부품의 실제 좌표</b>에 맞춰 그려졌습니다. 화면이 바뀌면 그림과 주석을 함께 다시 만듭니다.</p>
-  <p>그림 속 결함 사진은 <b>설명용으로 만든 예시</b>이며 실제 검사 자료가 아닙니다.
-  다만 화면에 적힌 거리와 앞뒤가 맞도록 그렸습니다 — 허용 오차 안이면 두 장비가 <b>같은 결함</b>을
-  찍은 모습이고, 초과면 <b>서로 다른 결함</b>이 보입니다. 그래서 그림만 봐도 왜 그 판정이 나왔는지
-  알 수 있습니다.</p>
+  <p>그림 속 사진은 <b>설명용으로 그린 예시</b>(직물 위의 얼룩)이며 실제 검사 자료가 아닙니다.
+  실제로는 웨이퍼의 결함 사진이 들어갑니다.</p>
+  <p>다만 화면에 적힌 거리와 앞뒤가 맞도록 그렸습니다 — <b>같은 결함</b>인 짝은 천도 얼룩도 같고,
+  <b>다른 결함</b>인 짝은 실제로 달라 보입니다. 그래서 그림만 봐도 왜 그 판정이 나왔는지,
+  그리고 왜 <span class="chip over">허용 초과</span> 가 늘 오류는 아닌지 알 수 있습니다.</p>
 </div>
 </div>
 </section>

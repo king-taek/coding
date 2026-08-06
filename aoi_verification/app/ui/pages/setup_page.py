@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (QBoxLayout, QDoubleSpinBox, QFileDialog,
 from ... import i18n
 from .. import theme
 from ...utils import prefs as _prefs
+from ... import config
 from ...utils.prefs import AutomationLevel, EngineMode
 from ..widgets.app_logo import build_logo_label
 from ..widgets.collapsible_section import CollapsibleSection
@@ -43,7 +44,7 @@ class SetupInput:
     use_gpu: bool = True
     embed_batch: int = 1             # 정적 배치 B (1=끔)
     # 좌표 기반 매칭(v2) 허용 오차 — µm 단위.
-    coord_tolerance: float = 500.0
+    coord_tolerance: float = config.DEFAULT_COORD_TOLERANCE
     # 진행할 슬롯 부분집합 (None = 전체 진행). '일부 슬롯만 진행' 옵션으로 설정.
     selected_slots: Optional[set] = None
 
@@ -597,10 +598,11 @@ class SetupPage(QWidget):
         self.coord_tol_spin = NoWheelDoubleSpinBox(self._tol_row)
         self.coord_tol_spin.setRange(10.0, 5000.0)
         self.coord_tol_spin.setSingleStep(50.0)
-        # 배지와 표기를 일치시킨다 — 같은 값을 500 / 500.0 두 가지로 쓰지 않는다.
+        # 배지와 표기를 일치시킨다 — 같은 값을 200 / 200.0 두 가지로 쓰지 않는다.
         self.coord_tol_spin.setDecimals(0)
         self.coord_tol_spin.setSuffix(" µm")
-        self.coord_tol_spin.setValue(getattr(_prefs_now, "coord_tolerance", 500.0))
+        self.coord_tol_spin.setValue(getattr(_prefs_now, "coord_tolerance",
+                                     config.DEFAULT_COORD_TOLERANCE))
         self.coord_tol_spin.setToolTip(i18n.KO.COORD_TOLERANCE_TOOLTIP)
         # 수치는 모노 — '도면' 컨셉의 핵심인데 이 화면엔 모노가 한 글자도 없었다.
         self.coord_tol_spin.valueChanged.connect(
@@ -626,7 +628,7 @@ class SetupPage(QWidget):
         engine_card.body().addWidget(self._tol_row)
 
         # 기준 폴더에서 읽어낸 die 크기 — 허용 오차를 자재에 맞게 정하도록 돕는다.
-        # ★ 값을 대신 바꾸지 않는다.  die 4 mm 자재에서 기본 500 µm 는 die 폭의 12% 라
+        # ★ 값을 대신 바꾸지 않는다.  die 4 mm 자재에서 기본 200 µm 는 die 폭의 5% 라
         #   오매칭 위험이 크지만, 조용히 값을 바꾸면 기존 결과가 달라진다 — 알리기만 한다.
         # ★ `_start_hint`·`_errLabel` 과 같은 관습: 자리를 예약해 두고 **문자열만** 바꾼다
         #   (setVisible 을 쓰면 아래 위젯이 위아래로 튄다).

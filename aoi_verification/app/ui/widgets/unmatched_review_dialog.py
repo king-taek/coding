@@ -32,6 +32,10 @@ from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
 from . import sheet_host as sheets
 
+# 허용 오차 폴백 — 값이 안 들어왔을 때만 쓴다.  **단일 출처는 config** 다
+# (예전엔 리터럴 500 이 곳곳에 박혀 있어 기본값을 바꿔도 옛 값이 되살아났다).
+_DFLT_TOL = config.DEFAULT_COORD_TOLERANCE
+
 
 _LIST_THUMB_PX = 56     # 좌측 ‘실패 목록’ 항목 썸네일 한 변(px).
 _REF_PX = config.Sizing.DIALOG_REF_PX    # 좌측 기준 사진 기본 크기 (= 420)
@@ -91,12 +95,12 @@ class _CandidateTile(QFrame):
 
     def __init__(self, item: ImageItem, score: float, parent=None,
                  *, size: int = _CAND_PX,
-                 coord_mode: bool = False, tolerance: float = 500.0) -> None:
+                 coord_mode: bool = False, tolerance: float = _DFLT_TOL) -> None:
         super().__init__(parent)
         self.item = item
         self.score = float(score)
         self._coord_mode = bool(coord_mode)
-        self._tolerance = float(tolerance) if tolerance > 0 else 500.0
+        self._tolerance = float(tolerance) if tolerance > 0 else _DFLT_TOL
         self._size = int(size)
         self._image_loaded = False
         self._is_selected = False
@@ -220,7 +224,7 @@ class UnmatchedReviewDialog(QDialog):
                  parent=None,
                  *,
                  coord_mode: bool = False,
-                 tolerance: float = 500.0) -> None:
+                 tolerance: float = _DFLT_TOL) -> None:
         """``val_pool`` 키는 두 형태를 모두 지원:
 
         - ``(slot, side)`` → list[ImageItem]  : 후보 풀
@@ -240,7 +244,7 @@ class UnmatchedReviewDialog(QDialog):
         # 이 다이얼로그는 항상 이미지 유사도(pipeline.score)로 후보를 채점하므로
         # 좌표 거리가 아닌 유사도 백분율로 표시한다.
         self._coord_mode = False
-        self._tolerance = float(tolerance) if tolerance > 0 else 500.0
+        self._tolerance = float(tolerance) if tolerance > 0 else _DFLT_TOL
         self._idx = 0
         # 사진 크기 (#1) — 슬라이더로 조절. 후보 타일은 비율로 파생.
         self._ref_px = _REF_PX
