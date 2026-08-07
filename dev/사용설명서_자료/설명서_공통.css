@@ -1,0 +1,152 @@
+/* 설명서 공통 스타일 — `사용설명서.html`(핵심)과 `상세설명서.html`(완전판)이
+   **같은 파일 하나**를 나눠 쓴다.  두 문서가 같은 종이처럼 보여야 하는데 복사본을
+   두면 한쪽만 고쳐져 서서히 갈라진다.
+
+   ★ 글꼴 url() 은 이 파일 위치 기준의 상대경로다.  이 CSS 를 다른 폴더로 옮기면
+     경로도 함께 고쳐야 한다(헤드리스 인쇄는 조용히 기본 글꼴로 떨어진다).
+     `make_manual_pdf.py` 가 PDF 안에 NanumSquare 가 실제로 박혔는지 확인한다. */
+
+@font-face{font-family:"NanumSquare";
+  src:url("../../aoi_verification/app/ui/assets/font/NanumSquareR.ttf") format("truetype");
+  font-weight:400;font-style:normal}
+@font-face{font-family:"NanumSquare";
+  src:url("../../aoi_verification/app/ui/assets/font/NanumSquareB.ttf") format("truetype");
+  font-weight:700;font-style:normal}
+
+:root{
+  /* 앱 테마(ui/theme.py)에서 그대로 가져온 값 — 설명서와 화면이 같은 색을 쓴다 */
+  --ink:#1B1A17; --ink2:#3D3B35; --mute:#5A574E;
+  --accent:#2C5A86; --danger:#A5271E; --warn:#8C4A0F; --pass:#3B6438;
+  --rule:#C9C4B6; --rule-soft:#E2DED3; --panel:#F7F5F0;
+  --mono:"Consolas","DejaVu Sans Mono",monospace;
+}
+@page{size:A4; margin:16mm 14mm 18mm}
+@page:first{margin:0}
+
+*{box-sizing:border-box}
+html{font-family:"NanumSquare","Malgun Gothic",sans-serif; color:var(--ink);
+     font-size:10.2pt; line-height:1.62; -webkit-font-smoothing:antialiased}
+body{margin:0}
+
+/* ── 표지 ───────────────────────────────────────────────────────── */
+.cover{height:297mm; padding:38mm 24mm 20mm; display:flex; flex-direction:column;
+       page-break-after:always; position:relative}
+.cover h1{font-size:30pt; font-weight:700; letter-spacing:-1.2px; margin:0 0 6mm;
+          line-height:1.18}
+.cover .sub{font-size:12pt; color:var(--ink2); margin:0 0 14mm; line-height:1.7}
+.cover .who{border-top:1px solid var(--rule); border-bottom:1px solid var(--rule);
+            padding:5mm 0; font-size:10pt; color:var(--ink2); margin-bottom:10mm}
+.cover .meta{margin-top:auto; font-size:9pt; color:var(--mute); font-family:var(--mono)}
+.legend{display:flex; gap:8mm; flex-wrap:wrap; font-size:9.5pt; margin-top:4mm}
+.legend .k{display:flex; align-items:center; gap:2.5mm}
+.legend .sw{width:11mm; height:5mm; border-radius:1.4mm; flex:none}
+.sw.blue{border:1.6pt solid var(--accent); background:rgba(44,90,134,.07)}
+.sw.red{border:1.6pt solid var(--danger); background:rgba(165,39,30,.06)}
+.sw.num{border:none; background:none; width:auto}
+.sw.num span{display:inline-block; width:5mm; height:5mm; border-radius:50%;
+  background:var(--accent); color:#fff; font-size:7.6pt; line-height:5mm;
+  text-align:center; font-family:var(--mono)}
+
+/* ── 차례 ───────────────────────────────────────────────────────── */
+.toc{page-break-after:always}
+.toc ol{list-style:none; padding:0; margin:0; counter-reset:c}
+.toc li{counter-increment:c; display:flex; align-items:baseline; gap:3mm;
+        padding:2.1mm 0; border-bottom:1px dotted var(--rule-soft)}
+.toc li::before{content:counter(c); font-family:var(--mono); color:var(--accent);
+                font-size:9pt; width:6mm; flex:none}
+.toc li b{font-weight:700}
+.toc li .d{color:var(--mute); font-size:9pt}
+
+/* ── 장/절 ──────────────────────────────────────────────────────── */
+section{page-break-before:always}
+section.cont{page-break-before:auto}
+h2{font-size:17pt; font-weight:700; letter-spacing:-.7px; margin:0 0 1mm;
+   padding-bottom:2.4mm; border-bottom:1.4pt solid var(--ink); page-break-after:avoid}
+h2 .n{font-family:var(--mono); color:var(--accent); font-size:12pt; margin-right:3mm}
+h2 + .lede{color:var(--ink2); margin:0 0 6mm; font-size:10.6pt}
+h3{font-size:11.6pt; font-weight:700; margin:7mm 0 2.5mm; page-break-after:avoid}
+h3::before{content:""; display:inline-block; width:2.6mm; height:2.6mm;
+  background:var(--accent); margin-right:2.4mm; vertical-align:.6mm}
+h4{font-size:10.4pt; font-weight:700; margin:5mm 0 1.5mm; color:var(--ink2);
+   page-break-after:avoid}
+p{margin:0 0 3mm; max-width:none}
+ul,ol{margin:0 0 3.5mm; padding-left:5.5mm}
+li{margin:.9mm 0}
+b,strong{font-weight:700}
+code,.mono{font-family:var(--mono); font-size:.92em}
+.ui{font-weight:700; white-space:nowrap}
+.ui::before{content:"["} .ui::after{content:"]"}
+.q{color:var(--ink2)}
+.q::before{content:"‘"} .q::after{content:"’"}
+
+/* ── 그림 ───────────────────────────────────────────────────────── */
+figure{margin:0 0 5mm; page-break-inside:avoid}
+figure.shot{position:relative; line-height:0}
+figure.shot > img{width:100%; display:block; border:1px solid var(--rule)}
+figure.shot > svg{position:absolute; left:0; top:0; width:100%; height:100%}
+figure.half{width:62%}
+figure.third{width:44%}
+figcaption{line-height:1.5; font-size:8.8pt; color:var(--mute); margin-top:1.6mm}
+.mark{fill:none; stroke-width:2.6}
+.mark.blue{stroke:var(--accent); fill:rgba(44,90,134,.06)}
+.mark.red{stroke:var(--danger); fill:rgba(165,39,30,.05)}
+.mark.plain{fill:none}
+.arrow{fill:none; stroke:var(--accent); stroke-width:2.6}
+.arrow.red{stroke:var(--danger)}
+.bub{fill:var(--accent)} .bub.red{fill:var(--danger)}
+.bubt{fill:#fff; font-family:Consolas,monospace; font-size:17px; font-weight:700;
+      text-anchor:middle; dominant-baseline:central}
+
+/* 번호 설명 목록 — 그림의 동그란 번호와 짝.
+   ★ `display:flex` 를 쓰지 마라 — <b>·<span> 같은 자식이 **각각 별개의 flex 항목**이 되어
+   한 문장이 칸칸이 벌어져 찍힌다(실제로 그렇게 나왔다).  번호는 절대 위치로 띄운다. */
+.keys{list-style:none; padding:0; margin:0 0 4mm; counter-reset:k}
+.keys li{counter-increment:k; position:relative; padding-left:7mm; margin:.9mm 0}
+.keys li::before{content:counter(k); position:absolute; left:0; top:.7mm;
+  width:4.6mm; height:4.6mm;
+  border-radius:50%; background:var(--accent); color:#fff; font-family:var(--mono);
+  font-size:7.4pt; line-height:4.6mm; text-align:center}
+.keys.red li::before{background:var(--danger)}
+
+/* ── 콜아웃 ─────────────────────────────────────────────────────── */
+.note,.warnbox,.tip{padding:3.2mm 4mm; margin:0 0 4mm; page-break-inside:avoid;
+  border:1px solid var(--rule); border-radius:1.6mm; background:var(--panel)}
+.warnbox{border-color:var(--warn); background:rgba(140,74,15,.05)}
+.tip{border-color:var(--accent); background:rgba(44,90,134,.045)}
+.note .t,.warnbox .t,.tip .t{font-weight:700; display:block; margin-bottom:1mm}
+.warnbox .t{color:var(--warn)} .tip .t{color:var(--accent)}
+.note p:last-child,.warnbox p:last-child,.tip p:last-child{margin-bottom:0}
+
+/* ── 표 ─────────────────────────────────────────────────────────── */
+table{width:100%; border-collapse:collapse; margin:0 0 4mm; font-size:9.4pt;
+      page-break-inside:avoid}
+th,td{text-align:left; padding:2.1mm 2.6mm; border-bottom:1px solid var(--rule-soft);
+      vertical-align:top}
+thead th{border-bottom:1.2pt solid var(--ink); font-size:8.6pt; letter-spacing:.4px;
+         color:var(--mute); text-transform:none}
+td.num,th.num{font-family:var(--mono); text-align:right; white-space:nowrap}
+/* 한글이 든 칸에는 모노를 쓰지 않는다 — 자간이 벌어지고 글꼴이 문장 중간에 갈린다 */
+td.dur{white-space:nowrap; color:var(--ink2)}
+tbody tr:last-child td{border-bottom:1px solid var(--rule)}
+
+/* 판정 스탬프 — 화면의 칩과 같은 어휘 */
+.chip{font-size:8.4pt; font-weight:700; padding:.4mm 2mm;
+      border-radius:1.6mm; white-space:nowrap}
+.chip.over{color:var(--danger); background:rgba(165,39,30,.11)}
+.chip.none{color:var(--mute); border:1px solid var(--rule)}
+.chip.ok{color:var(--mute); border:1px dashed var(--rule)}
+
+/* ── 부수 기능(soft) — 본문보다 한 단 낮게 ──────────────────────── */
+.soft{display:flex; gap:6mm; align-items:flex-start; margin:0 0 5mm;
+      padding-top:3mm; border-top:1px solid var(--rule-soft); page-break-inside:avoid}
+.soft figure{width:46%; flex:none; margin:0}
+.soft .body{font-size:9.4pt; color:var(--ink2)}
+.soft h4{margin-top:0}
+
+.cols{column-count:2; column-gap:7mm}
+.cols > *{break-inside:avoid}
+.flow{width:100%; height:auto; margin:0 0 5mm}
+.kbd{font-family:var(--mono); font-size:8.6pt; border:1px solid var(--rule);
+     border-radius:1.2mm; padding:.3mm 1.5mm; background:#fff; white-space:nowrap}
+/* ★ 쪽 하단 머리글에 `position:fixed` 를 쓰지 마라 — Chromium 인쇄에서 쪽마다 반복되기는
+   하지만 위치가 뷰포트 기준이라 **본문 한가운데에 겹쳐 찍힌다**(실제로 그렇게 나왔다). */
