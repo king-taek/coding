@@ -71,7 +71,9 @@ EXPECTED = [
     "07_로딩_스캔중", "08_로딩_진행률",
     "09_시트_KLA확인", "10_시트_슬롯선택",
     "11_1단계_후보선별", "12_시트_선택모드",
-    "13_2단계_매칭", "14_크롭_후보그리드",
+    # 13 은 **자동 매치가 도는 화면**이다.  예전의 `13_2단계_매칭`·`14_크롭_후보그리드`
+    # 는 후보 격자를 손으로 채워 찍은 것이라 실제 실행에서는 나오지 않는 화면이었다.
+    "13_2단계_자동매칭",
     "15_검토_시트", "16_크롭_검토행", "17_시트_좌우비교",
     "18_결과", "19_시트_매칭결과검토",
     "20_시트_사진정보", "21_시트_업데이트",
@@ -542,34 +544,51 @@ def _stage_select(win, sr) -> dict:
 
 
 def _stage_match(win, sr) -> dict:
-    """2단계 — 기준 사진 한 장과 검증 후보 격자."""
+    """2단계 — **자동 매치가 도는 동안의 실제 화면**.
+
+    ★ 예전에는 여기서 ``_populate_right`` 를 손으로 불러 후보 격자를 채운 뒤 찍었다.
+      그러나 앱의 자동화 수준 두 가지는 **둘 다 자동 매치**라(`utils/prefs.py` 의
+      ``AUTO_MODES``) 후보 격자는 **실제 실행에서 한 번도 채워지지 않는다** —
+      ``_launch_matcher`` 가 ``_clear_right_grid()`` 로 비우고 auto 분기가 다시 채우지
+      않기 때문이다.  그렇게 찍은 그림은 '없는 화면'이고, 그걸 설명서에 실으면 사람이
+      후보를 고르는 것처럼 가르치게 된다(그래서 그 두 캡처는 설명서에서 빠졌다).
+
+      지금은 앱이 실제로 보여 주는 것을 그대로 만든다: 가운데 기준 사진 · **비어 있는
+      후보 칸** · 그 위를 덮은 '자동 매치 진행 중… n / N' 차단 오버레이.
+    """
     from aoi_verification.app import config, i18n
     from aoi_verification.app.utils.prefs import EngineMode
-    from aoi_verification.app.workers.matcher import Candidate
 
     page = win._match_page
     slot = sr.common_slot_names[0]
     refs = list(sr.slots[slot].ref_images)
     vals = list(sr.slots[slot].val_images)
-    page.load_state(refs, {slot: vals}, 0.55,
+    page.load_state(refs, {slot: vals}, 0.55, auto_mode=True,
                     engine_cfg=config.SimilarityConfig(
                         engine=EngineMode.COORDINATE))
     page._show_center(refs[0])
-    # 좌표 매칭에서 실제로 나오는 모양 — 가까운 후보 하나와 점점 먼 후보들.
-    scores = [0.96, 0.62, 0.41, 0.28, 0.19]
-    page._populate_right([Candidate(item=v, score=s)
-                          for v, s in zip(vals, scores)])
+    page.progress_label.setText(
+        i18n.KO.PROGRESS_SLOT_FMT.format(slot=slot, done=3, total=len(refs)))
     win._stack.setCurrentWidget(page)
+    # 진행 바가 도는 그 순간 — 앱의 `_update_auto_progress` 와 같은 문구·같은 값.
+    page._loading.show_overlay(cancelable=True)
+    page._loading.set_progress(
+        3, len(refs), i18n.KO.LOAD_AUTO_MATCH_FMT.format(done=3, total=len(refs)))
     _pump(30)
     return {
         "기준사진": getattr(page, "center_img", None),
-        "후보격자": getattr(page, "_right_host", None),
-        "매칭없음": getattr(page, "no_match_btn", None),
-        "되돌리기": getattr(page, "undo_btn", None),
+        "빈후보칸": getattr(page, "_right_host", None),
+        "로딩패널": page._loading.findChild(QWidget, "") or page._loading,
         "사진크기": getattr(page, "size_slider", None),
         "슬롯라벨": getattr(page, "slot_label", None),
         "진행표시": getattr(page, "progress_label", None),
     }
+
+
+def _stage_match_done(win) -> None:
+    """2단계 캡처 뒤 오버레이를 내린다 — 두면 **다음 화면들 위에 그대로 남는다.**"""
+    win._match_page._loading._finish_hide()
+    _pump(20)
 
 
 def _review_data(sr):
@@ -777,12 +796,10 @@ def main() -> int:
              lambda: win._sheets.run(bulk, full_bleed=True))
 
     # --- 2단계 --------------------------------------------------------------
-    print("2단계 매칭")
+    print("2단계 매칭 (자동)")
     rects = _stage_match(win, sr)
-    sh.shoot("13_2단계_매칭", win, rects=rects)
-    if "후보격자" in sh.manifest["13_2단계_매칭"]["rects"]:
-        sh.crop("14_크롭_후보그리드", "13_2단계_매칭",
-                sh.manifest["13_2단계_매칭"]["rects"]["후보격자"])
+    sh.shoot("13_2단계_자동매칭", win, rects=rects)
+    _stage_match_done(win)
 
     # --- 검토 ---------------------------------------------------------------
     print("검토 화면")

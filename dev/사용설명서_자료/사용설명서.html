@@ -325,13 +325,25 @@
 </table>
 
 <h3>진행되는 동안 보이는 것</h3>
-<p>로딩 화면의 문구가 차례로 바뀝니다.
-<span class="q">좌표 파싱 중...</span> → <span class="q">좌표 매칭 중</span> →
-<span class="q">자동 매치 진행 중… 3 / 24</span>.
-숫자가 끝까지 차면 <b>저절로 검토 화면으로 넘어갑니다.</b></p>
-<p>뒤에 비치는 화면에서 가운데 기준 사진이 한 장씩 넘어가고, 오른쪽
-<span class="q">검증 장비 후보</span> 칸은 <b>비어 있습니다</b> — 고를 것이 없기 때문입니다.
-사진이 많으면 수 분 걸릴 수 있습니다. <b>강제 종료하지 마세요.</b></p>
+<figure class="shot">
+  <img src="13_2단계_자동매칭.jpg" alt="2단계 — 자동 매치가 도는 화면">
+  <!-- 좌표는 shots.json 의 위젯 실좌표 — 로딩패널 · 빈후보칸 -->
+  <svg viewBox="0 0 1280 860" aria-hidden="true">
+    <rect class="mark blue" x="428" y="291" width="424" height="255" rx="9"/>
+    <rect class="mark blue" x="655" y="177" width="597" height="633" rx="9"/>
+    <g><circle class="bub" cx="428" cy="291" r="15"/><text class="bubt" x="428" y="291">1</text></g>
+    <g><circle class="bub" cx="1252" cy="177" r="15"/><text class="bubt" x="1252" y="177">2</text></g>
+  </svg>
+</figure>
+<ol class="keys">
+  <li><b>진행 바</b> — 문구가 차례로 바뀝니다.
+      <span class="q">좌표 파싱 중...</span> → <span class="q">좌표 매칭 중</span> →
+      <span class="q">자동 매치 진행 중… 3 / 6</span>.
+      숫자가 끝까지 차면 <b>저절로 검토 화면으로 넘어갑니다.</b></li>
+  <li><b>검증 장비 후보 칸이 비어 있습니다</b> — 고장이 아니라
+      <b>고를 것이 없기 때문</b>입니다. 짝은 프로그램이 정합니다.</li>
+</ol>
+<p>사진이 많으면 수 분 걸릴 수 있습니다. <b>강제 종료하지 마세요.</b></p>
 </section>
 
 <!-- ══════════════════════════ 7 ══════════════════════════ -->

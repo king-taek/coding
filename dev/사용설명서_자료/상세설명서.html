@@ -516,6 +516,22 @@ die 가 작은 자재에서 기본값을 그대로 쓰면 이웃 결함과 잘�
 </div>
 
 <h3>진행되는 동안 보이는 것</h3>
+<figure class="shot">
+  <img src="13_2단계_자동매칭.jpg" alt="2단계 — 자동 매치가 도는 화면">
+  <!-- 좌표는 shots.json 의 위젯 실좌표 — 기준사진 · 빈후보칸 · 로딩패널 -->
+  <svg viewBox="0 0 1280 860" aria-hidden="true">
+    <rect class="mark blue" x="126" y="295" width="400" height="400" rx="9"/>
+    <rect class="mark blue" x="655" y="177" width="597" height="633" rx="9"/>
+    <rect class="mark blue" x="428" y="291" width="424" height="255" rx="9"/>
+    <g><circle class="bub" cx="126" cy="295" r="15"/><text class="bubt" x="126" y="295">1</text></g>
+    <g><circle class="bub" cx="1252" cy="177" r="15"/><text class="bubt" x="1252" y="177">2</text></g>
+    <g><circle class="bub" cx="428" cy="291" r="15"/><text class="bubt" x="428" y="291">3</text></g>
+  </svg>
+</figure>
+<figcaption>❶ 기준 사진이 한 장씩 넘어갑니다. ❷ <b>후보 칸은 비어 있습니다</b> —
+사람이 고르지 않으므로 후보를 늘어놓지 않습니다. ❸ 진행 바가 덮고 있어 이 화면은
+<b>조작할 수 없습니다.</b></figcaption>
+
 <p>화면이 <span class="q">Stage 2 — 좌표 기반 매칭 (v2)</span> 로 바뀌고 그 위를 로딩 화면이 덮습니다.
 모양은 <b>5장</b>에서 본 로딩 화면과 같고, 문구만 차례로 바뀝니다.</p>
 <ol class="keys">
@@ -525,10 +541,10 @@ die 가 작은 자재에서 기본값을 그대로 쓰면 이웃 결함과 잘�
   <li><span class="q">자동 매치 진행 중… 3 / 24</span> — 기준 사진마다 가장 가까운 후보를 확정합니다.
       숫자가 끝까지 차면 <b>저절로 검토 화면으로 넘어갑니다.</b></li>
 </ol>
-<p>뒤에 비치는 화면에서는 <b>가운데 기준 사진이 한 장씩 넘어가고</b>,
-오른쪽 <span class="q">검증 장비 후보</span> 칸은 <b>비어 있습니다</b> — 고를 것이 없기 때문입니다.
-왼쪽 위 큰 제목이 <b>지금 실제로 쓰이는 방식</b>을 그대로 알려 줍니다(구형 엔진을 켜면
-<span class="q">Stage 2 — 유사도 기반 매칭</span> 으로 바뀝니다).</p>
+<p>왼쪽 위 큰 제목이 <b>지금 실제로 쓰이는 방식</b>을 그대로 알려 줍니다(구형 엔진을 켜면
+<span class="q">Stage 2 — 유사도 기반 매칭</span> 으로 바뀝니다).
+아래 <span class="ui">매칭 없음</span>·<span class="ui">되돌리기</span> 버튼은 자동 모드에서
+<b>진행 바에 가려 눌리지 않습니다</b> — 좌표 정보가 없어 구형 엔진으로 돌릴 때를 위한 것입니다.</p>
 
 <div class="warnbox">
   <span class="t"><span class="ui">중지</span>를 누르면 계산 결과가 모두 버려집니다</span>

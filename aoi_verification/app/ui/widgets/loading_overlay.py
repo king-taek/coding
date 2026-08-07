@@ -20,8 +20,8 @@ from __future__ import annotations
 from PyQt6.QtCore import (QEasingCurve, QElapsedTimer, QEvent, QRect, QSize, Qt,
                           QTimer, QVariantAnimation, pyqtSignal)
 from PyQt6.QtGui import QColor, QPainter, QPen
-from PyQt6.QtWidgets import (QGraphicsOpacityEffect, QLabel, QProgressBar,
-                             QPushButton, QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import (QApplication, QGraphicsOpacityEffect, QLabel,
+                             QProgressBar, QPushButton, QVBoxLayout, QWidget)
 
 from .. import theme
 from .. import motion
@@ -305,6 +305,7 @@ class LoadingOverlay(QWidget):
         self._shown_elapsed = QElapsedTimer()
         self._show_token = 0
         self._hide_pending = False
+        self._input_locked = False       # 떠 있는 동안만 앱 전역 키를 막는다
 
         self.hide()
         parent.installEventFilter(self)
@@ -380,6 +381,7 @@ class LoadingOverlay(QWidget):
 
     def show_overlay(self, message: str = "", *, cancelable: bool = False) -> None:
         self._label.setText(message)
+        self._set_input_lock(True)
         self._cancel_btn.setVisible(bool(cancelable))
         # busy 로 시작한다 — 첫 set_progress(done, total>0) 이 결정형으로 승격시킨다.
         self._enter_busy()
@@ -499,6 +501,11 @@ class LoadingOverlay(QWidget):
         self._rise_anim.start()
 
     def _finish_hide(self) -> None:
+        # ★ 잠금은 **화면이 실제로 밝아지는 순간** 푼다 — `hide_overlay` 에서 풀면
+        #   최소 표시 래치·페이드아웃 동안(수백 ms) 화면은 아직 어두운데 키는 이미
+        #   통하는 구간이 생긴다.  그게 바로 고치려던 그 증상이다.
+        #   `_finish_hide` 는 모든 퇴장 경로가 지나는 단 하나의 지점이다.
+        self._set_input_lock(False)
         self._settle_progress()        # 멈춘 tween 의 중간값이 남지 않게(모션 off 경로 포함)
         self.hide()
         self._bar_anim.stop()          # 숨은 뒤 tick 이 남아 여백을 흔들지 않게
@@ -586,10 +593,67 @@ class LoadingOverlay(QWidget):
         self._busy.stop()
         super().hideEvent(event)
 
+    # 오버레이가 떠 있는 동안 **버리는** 이벤트.
+    #
+    # ★ `Shortcut` 이 반드시 들어가야 한다.  `QShortcut` 은 `KeyPress` 나
+    #   `ShortcutOverride` 를 잡아먹어도 **그대로 발화한다**(실측: 셋 중 `Shortcut` 만
+    #   막힌다).  이 하나가 빠져 있어서, 어두워진 화면 위에서 N 을 누르면 자동 매치
+    #   중이던 사진이 조용히 '매치 없음' 으로 확정돼 **엑셀에 사실이 아닌 결과**가
+    #   남았다.  마우스는 위젯이 이미 막고 있었으므로 사용자는 '지금은 아무것도 안
+    #   눌린다' 고 믿고 있었다 — 그래서 틀어진 줄도 몰랐다.
+    _BLOCKED = (
+        QEvent.Type.Shortcut,          # ← QShortcut 을 실제로 멈추는 유일한 종류
+        QEvent.Type.ShortcutOverride,
+        QEvent.Type.KeyPress,
+        QEvent.Type.KeyRelease,
+    )
+
     def eventFilter(self, obj, event) -> bool:  # noqa: N802
-        if obj is self.parent() and event.type() == QEvent.Type.Resize:
+        etype = event.type()
+        if obj is self.parent() and etype == QEvent.Type.Resize:
             self._cover_parent()
+            return super().eventFilter(obj, event)
+        # 어두워진 동안 뒤 화면은 **키도 받지 않는다**(마우스는 위젯이 이미 막는다).
+        # 단 오버레이 자신(‘중지’ 버튼)으로 가는 키는 통과시킨다 — 그러지 않으면
+        # 취소가 키보드로 불가능해진다.
+        if self._input_locked and etype in self._BLOCKED:
+            if not self._is_within_overlay(obj):
+                return True
         return super().eventFilter(obj, event)
+
+    def _is_within_overlay(self, obj) -> bool:
+        node = obj if isinstance(obj, QWidget) else None
+        depth = 0
+        while node is not None and depth < 80:
+            if node is self:
+                return True
+            node = node.parentWidget()
+            depth += 1
+        return False
+
+    def hideEvent(self, event):  # noqa: N802
+        """★ 잠금을 푸는 **최후의 안전판**.
+
+        `_finish_hide` 만 믿으면 안 된다 — 오버레이가 그 경로를 거치지 않고 숨겨지는
+        길이 있다(부모 창이 닫히거나 페이지가 통째로 교체될 때).  그때 전역 필터가
+        남아 있으면 **앱 전체가 키보드를 영영 못 받는다**(테스트에서 실제로 그렇게
+        됐다).  `hide()` 는 어느 경로로든 이 이벤트를 내므로 여기서 반드시 푼다."""
+        self._set_input_lock(False)
+        super().hideEvent(event)
+
+    def _set_input_lock(self, on: bool) -> None:
+        """앱 전역 필터는 **떠 있는 동안만** 건다.
+
+        전역 필터는 마우스 이동까지 모든 이벤트를 받는다 — 평소에도 걸어 두면 앱 전체가
+        조금씩 느려진다(`sheet_host._set_app_filter` 와 같은 이유·같은 방식)."""
+        app = QApplication.instance()
+        if app is None or on == self._input_locked:
+            return
+        if on:
+            app.installEventFilter(self)
+        else:
+            app.removeEventFilter(self)
+        self._input_locked = on
 
     def _cover_parent(self) -> None:
         if self.parent() is None:
