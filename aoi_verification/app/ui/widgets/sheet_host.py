@@ -196,14 +196,39 @@ class SheetHost(QWidget):
                         event.ignore()       # 창을 파괴하지 않고 시트만 닫는다
                     self._close(entry)
                     return etype == QEvent.Type.Close
-        elif etype in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease,
-                       QEvent.Type.ShortcutOverride):
+        elif etype in (QEvent.Type.Shortcut, QEvent.Type.KeyPress,
+                       QEvent.Type.KeyRelease, QEvent.Type.ShortcutOverride):
             # ★ 맨 위 시트(또는 그 자손)가 아닌 수신자의 키는 버린다 — Tab 이 뒤 페이지로
             #   새 나가면 '보이지 않는 곳'에 포커스가 생겨 Enter 가 엉뚱한 것을 누른다.
             top = self._stack[-1]["root"]
-            if isinstance(obj, QWidget) and not self._is_within(obj, top):
+            owner = self._owner_widget(obj)
+            if owner is not None and self._is_within(owner, top):
+                return super().eventFilter(obj, event)      # 맨 위 시트의 것
+            if etype == QEvent.Type.Shortcut:
+                # ★ 창 **자신**의 단축키는 통과시킨다 — F11 전체화면이 그것이고, 시트가
+                #   열린 동안 사진을 화면 가득 보는 유일한 경로다
+                #   (`test_f11_still_reaches_the_window_while_a_sheet_is_open`).
+                #   페이지가 가진 단축키는 창이 아니므로 여기서 걸러진다.
+                if owner is not None and owner is owner.window():
+                    return super().eventFilter(obj, event)
+                return True          # 소유를 못 풀면 막는다 — 새는 쪽이 더 나쁘다
+            if owner is not None:
                 return True
         return super().eventFilter(obj, event)
+
+    @staticmethod
+    def _owner_widget(obj) -> Optional[QWidget]:
+        """이벤트 수신자가 **어느 위젯의 것인지** 돌려준다.
+
+        ★ ``Shortcut`` 이벤트의 수신자는 위젯이 아니라 **``QShortcut`` 객체**다(실측).
+          그래서 예전처럼 ``isinstance(obj, QWidget)`` 로 걸러 버리면 단축키만 **필터를
+          그냥 통과**한다 — 목록에 ``Shortcut`` 을 넣어도 소용이 없다.  실제로 시트가
+          열린 채 Stage 1 에서 →/← 를 누르면 **대화상자 뒤에서 사진이 결정됐다**
+          (실측: 남은 4장 → 1장).  소유 위젯은 ``parent()`` 로 얻는다."""
+        if isinstance(obj, QWidget):
+            return obj
+        parent = obj.parent() if hasattr(obj, "parent") else None
+        return parent if isinstance(parent, QWidget) else None
 
     def _set_app_filter(self, on: bool) -> None:
         """앱 전역 필터는 **시트가 열려 있는 동안만** 건다.

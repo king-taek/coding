@@ -622,7 +622,14 @@ class LoadingOverlay(QWidget):
         return super().eventFilter(obj, event)
 
     def _is_within_overlay(self, obj) -> bool:
+        # ★ ``Shortcut`` 이벤트의 수신자는 위젯이 아니라 ``QShortcut`` 객체다 — 소유
+        #   위젯은 ``parent()`` 로 얻는다.  지금은 오버레이가 단축키를 갖고 있지 않아
+        #   결과가 같지만, 나중에 하나라도 달면(예: Esc 로 중지) 이게 없으면 **자기
+        #   단축키를 자기가 막는다**.  같은 함정이 `sheet_host._owner_widget` 에 있다.
         node = obj if isinstance(obj, QWidget) else None
+        if node is None:
+            parent = obj.parent() if hasattr(obj, "parent") else None
+            node = parent if isinstance(parent, QWidget) else None
         depth = 0
         while node is not None and depth < 80:
             if node is self:

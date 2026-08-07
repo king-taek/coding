@@ -512,3 +512,90 @@ def test_app_filter_is_installed_only_while_a_sheet_is_open(qapp, host):
     sheet_host.run(dlg)
     assert got["on"] is True, "시트가 열렸는데 전역 필터가 없다(키가 새 나간다)"
     assert h._app_filter_on is False, "시트를 닫았는데 전역 필터가 남았다"
+
+
+# ── 단축키(QShortcut)도 막힌다 ────────────────────────────────────────────
+def test_shortcut_events_do_not_leak_behind_an_open_sheet(qapp, host):
+    """시트가 열려 있으면 **뒤 화면의 단축키가 발화하지 않는다.**
+
+    ★ 이건 실제로 결과를 틀어지게 했다.  ``QShortcut`` 은 ``KeyPress`` 나
+      ``ShortcutOverride`` 를 잡아먹어도 **그대로 발화한다** — 셋 중 ``Shortcut`` 만
+      실제로 막는다.  게다가 ``Shortcut`` 이벤트의 수신자는 위젯이 아니라 **QShortcut
+      객체**라, 예전 필터의 ``isinstance(obj, QWidget)`` 조건이 그것만 쏙 빠뜨렸다.
+
+      그래서 Stage 1 에서 [선택 모드] 를 열어 둔 채 방향키를 누르면 — 대화상자는
+      사진 격자라 방향키가 자연스러운 조작이다 — **대화상자 뒤에서 사진이 하나씩
+      '검증'/'제외' 로 결정됐다**(실측: 남은 4장 → 1장).  사용자는 뒤 화면이 바뀌는
+      것을 볼 수 없으므로 틀어진 줄도 모른다.
+    """
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtGui import QKeySequence, QShortcut
+    from PyQt6.QtTest import QTest
+    win, h = host
+
+    # ★ 단축키는 **페이지**에 단다 — 앱과 같은 배선이다(`select_page` 는
+    #   `QShortcut(..., self)`).  창에 직접 달면 '창 자신의 단축키'(F11) 예외에
+    #   걸려 이 테스트가 엉뚱한 이유로 통과/실패한다.
+    page = QWidget(win)
+    page.setGeometry(0, 0, 900, 700)
+    page.show()
+    qapp.processEvents()
+    fired: list[str] = []
+    QShortcut(QKeySequence("Right"), page, activated=lambda: fired.append("→"))
+    QShortcut(QKeySequence("Z"), page, activated=lambda: fired.append("Z"))
+
+    # 대조군 — 시트가 없으면 단축키는 정상 동작해야 한다(안 그러면 이 테스트는
+    # '배선이 안 된' 상태에서도 통과한다).
+    QTest.keyClick(win, Qt.Key.Key_Right)
+    qapp.processEvents()
+    assert fired == ["→"], "시트가 없는데도 단축키가 죽어 있다"
+
+    dlg = QDialog(win)
+    dlg.setWindowTitle("선택 모드")
+    seen: dict = {}
+
+    def inside():
+        fired.clear()
+        QTest.keyClick(win, Qt.Key.Key_Right)
+        QTest.keyClick(win, Qt.Key.Key_Z)
+        qapp.processEvents()
+        seen["fired"] = list(fired)
+        dlg.accept()
+
+    _later(30, inside)
+    sheet_host.run(dlg, full_bleed=True)
+    assert seen["fired"] == [], "시트 뒤로 단축키가 샜다"
+
+    # 닫힌 뒤에는 다시 살아난다 — 잠금이 새어 나가면 앱이 키를 영영 못 받는다.
+    fired.clear()
+    QTest.keyClick(win, Qt.Key.Key_Right)
+    qapp.processEvents()
+    assert fired == ["→"], "시트를 닫았는데 단축키가 죽은 채 남았다"
+
+
+def test_the_open_sheet_keeps_its_own_shortcuts(qapp, host):
+    """막는 것은 **뒤 화면**이지 시트 자신이 아니다.
+
+    좌우 비교 뷰어는 ``Esc``·``←``·``→`` 로 조작한다 — 함께 막아 버리면 그 화면이
+    통째로 못 쓰게 된다.  ``Shortcut`` 이벤트의 소유 위젯을 ``parent()`` 로 풀어
+    시트 안쪽인지 판정하는 이유가 이것이다."""
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtGui import QKeySequence, QShortcut
+    from PyQt6.QtTest import QTest
+    win, h = host
+
+    dlg = QDialog(win)
+    dlg.setWindowTitle("좌우 비교")
+    mine: list[str] = []
+    QShortcut(QKeySequence(Qt.Key.Key_Left), dlg, activated=lambda: mine.append("←"))
+    seen: dict = {}
+
+    def inside():
+        QTest.keyClick(win, Qt.Key.Key_Left)
+        qapp.processEvents()
+        seen["mine"] = list(mine)
+        dlg.accept()
+
+    _later(30, inside)
+    sheet_host.run(dlg, full_bleed=True)
+    assert seen["mine"] == ["←"], "시트 자신의 단축키까지 막혔다"
