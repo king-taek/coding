@@ -104,6 +104,7 @@ class ExcelExporter(QThread):
                  template_path: Optional[Path] = None,
                  include_full_template: bool = False,
                  original_quality: bool = False,
+                 unmatched_original_quality: bool = False,
                  parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._result = result
@@ -113,6 +114,8 @@ class ExcelExporter(QThread):
         self._include_full_template = bool(include_full_template)
         # 사진을 원본 화질로 임베드할지 — 기본 off(중간 화질 캐시로 가볍게).
         self._original_quality = bool(original_quality)
+        # 미매칭 사진만 원본 화질로 — 전체 원본 옵션이 켜져 있으면 어차피 전부 원본.
+        self._unmatched_original = bool(unmatched_original_quality)
         self.signals = ExporterSignals()
 
     # ------------------------------------------------------------------
@@ -384,26 +387,29 @@ class ExcelExporter(QThread):
         cell.alignment = wrap
 
     # ------------------------------------------------------------------
-    def _embed_image_path(self, src: Path) -> Path:
+    def _embed_image_path(self, src: Path, *, force_original: bool = False) -> Path:
         """셀에 임베드할 이미지 경로를 고른다.
 
-        원본 화질 옵션이 켜져 있으면 원본 파일을 그대로 쓰고(축소 없음),
-        꺼져 있으면 중간 화질 캐시(`get_mid_path`)를 쓴다 — 기본은 가볍고 빠름.
+        원본 화질 옵션이 켜져 있으면(전체 옵션 또는 호출자의 ``force_original``)
+        원본 파일을 그대로 쓰고(축소 없음), 꺼져 있으면 중간 화질 캐시
+        (`get_mid_path`)를 쓴다 — 기본은 가볍고 빠름.
         표시 크기는 어느 쪽이든 ``_fit_to_cell`` 이 셀에 맞게 줄이므로, 차이는
         '저장되는 픽셀 데이터의 해상도'(=화질)뿐이다.
         """
-        if self._original_quality:
+        if self._original_quality or force_original:
             return Path(src)
         return image_io.get_mid_path(Path(src))
 
     # ------------------------------------------------------------------
     def _place_image(self, ws, src, col: str, row: int,
-                     cell_w_px: float, cell_h_px: float) -> bool:
+                     cell_w_px: float, cell_h_px: float,
+                     original: bool = False) -> bool:
         """사진을 셀 중앙에 배치.  실패 시 False — 손상/누락 이미지 1 장 때문에
         export 전체가 abort 되지 않도록 호출자가 파일명 텍스트로 대체한다 (Bug #3)."""
         from openpyxl.drawing.image import Image as XLImage
         try:
-            xli = XLImage(str(self._embed_image_path(Path(src))))
+            xli = XLImage(str(self._embed_image_path(Path(src),
+                                                     force_original=original)))
             _fit_to_cell(xli, cell_w_px, cell_h_px)
             _add_image_centered(ws, xli, col, row, cell_w_px, cell_h_px)
             return True
@@ -496,9 +502,10 @@ class ExcelExporter(QThread):
             else:
                 u: MissEntry = payload
                 self._write_slot_cell(ws, row, u.slot, center)
-                # 기준 이미지: 정상 임베드.
+                # 기준 이미지: 정상 임베드.  '미매칭 사진만 원본 화질' 옵션은 여기만 탄다.
                 if not self._place_image(ws, u.path, COL_REF, row,
-                                         cell_w_px, cell_h_px):
+                                         cell_w_px, cell_h_px,
+                                         original=self._unmatched_original):
                     ws[f"{COL_REF}{row}"] = str(Path(u.path).name)
                 # 검증 컬럼에 파일명 텍스트 (빨강).  결함 geometry(area/width/
                 # length/contrast) 또는 명시적 마커를 파일명 아래 회색으로 덧붙인다

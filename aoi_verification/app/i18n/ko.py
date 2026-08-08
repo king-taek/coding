@@ -255,11 +255,6 @@ DIE_SIZE_NOT_FOUND = (
     "die 내부 좌표·row 표기를 보려면 결과 폴더에 "
     "Params_WaferInfo.ini(DieStep_X/Y) 또는 ProductInfo.ini(XDieIndex/YDieIndex) 가 필요합니다."
 )
-# tol 이 die 폭 대비 이 비율을 넘으면 경고한다(die 4 mm 자재에서 200 µm = 5%).
-DIE_TOL_RATIO_WARN = 0.02
-DIE_TOL_TOO_LARGE_FMT = (
-    "허용 오차가 die 폭의 {pct:.0f} % 입니다 — 오매칭 위험이 있습니다"
-)
 ENGINE_EFFICIENCY_CPU_ONLY = (
     "가속 장치(Intel GPU)가 없어 CPU만으로 고효율 모드를 실행합니다."
 )
@@ -572,6 +567,13 @@ EXPORT_FULL_TEMPLATE_LABEL = "전체 양식(E~H 수기 영역) 포함"
 EXPORT_FULL_TEMPLATE_TOOLTIP = (
     "체크하면 E~H 수기 입력 영역을 포함한 ‘전체 양식’ 시트도 함께 저장합니다.\n"
     "기본(해제)은 요약·미매칭 시트만 생성해 더 빠르고 가벼운 파일이 됩니다."
+)
+# 결과 화면 — 미매칭 사진만 원본 화질로 임베드 옵션 (기본 해제).
+EXPORT_UNMATCHED_ORIGINAL_LABEL = "미매칭 사진만 원본 화질로 넣기"
+EXPORT_UNMATCHED_ORIGINAL_TOOLTIP = (
+    "체크하면 미매칭 사진만 원본 화질 그대로 임베드합니다.\n"
+    "매칭된 사진은 중간 화질 캐시를 그대로 써서 파일이 크게 늘지 않습니다.\n"
+    "‘사진을 원본 화질로 넣기’ 를 켜면 이 옵션과 무관하게 모든 사진이 원본 화질입니다."
 )
 # 결과 화면 — 사진을 원본 화질로 임베드 옵션 (기본 해제).
 EXPORT_ORIGINAL_QUALITY_LABEL = "사진을 원본 화질로 넣기"

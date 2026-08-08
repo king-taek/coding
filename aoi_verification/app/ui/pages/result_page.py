@@ -68,15 +68,24 @@ class ResultPage(QWidget):
 
         root.addStretch(1)
 
-        # ★ 엑셀 저장 옵션 **두 개를 한 줄에** 모은다(사용자 선택 1안).
+        # ★ 엑셀 저장 옵션을 **모두 한 줄에** 모은다(사용자 선택 1안).
         #   전에는 '원본 화질' 은 버튼 줄 위, '전체 양식' 은 버튼 줄 아래로 갈라져
-        #   110px 떨어져 있었다(실측).  둘 다 '엑셀로 저장' 에만 걸리는 옵션인데
+        #   110px 떨어져 있었다(실측).  전부 '엑셀로 저장' 에만 걸리는 옵션인데
         #   버튼 줄이 사이를 가르니, 원본 화질이 저장 옵션인지 화면 보기 옵션인지
         #   알 수 없었다.  옵션 → 실행 순서로 위에서 아래로 읽히게 한다.
-        #   기본은 둘 다 해제 — 가볍고 빠른 출력이 기본값이다.
+        #   기본은 모두 해제 — 가볍고 빠른 출력이 기본값이다.
         opt_row = QHBoxLayout()
         opt_row.setSpacing(22)
         opt_row.addStretch(1)
+        self.unmatched_original_chk = QCheckBox(
+            i18n.KO.EXPORT_UNMATCHED_ORIGINAL_LABEL, self,
+        )
+        self.unmatched_original_chk.setChecked(False)
+        self.unmatched_original_chk.setToolTip(
+            i18n.KO.EXPORT_UNMATCHED_ORIGINAL_TOOLTIP
+        )
+        opt_row.addWidget(self.unmatched_original_chk)
+
         self.original_quality_chk = QCheckBox(
             i18n.KO.EXPORT_ORIGINAL_QUALITY_LABEL, self,
         )
@@ -329,6 +338,7 @@ class ResultPage(QWidget):
             self._result, self._save_path, template_path=self._template_path,
             include_full_template=self.full_template_chk.isChecked(),
             original_quality=self.original_quality_chk.isChecked(),
+            unmatched_original_quality=self.unmatched_original_chk.isChecked(),
         )
         self._exporter.signals.progress.connect(
             lambda d, t, msg: self._loading.set_progress(d, t, i18n.KO.LOAD_EXPORT)

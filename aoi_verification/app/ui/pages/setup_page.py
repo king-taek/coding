@@ -628,8 +628,7 @@ class SetupPage(QWidget):
         engine_card.body().addWidget(self._tol_row)
 
         # 기준 폴더에서 읽어낸 die 크기 — 허용 오차를 자재에 맞게 정하도록 돕는다.
-        # ★ 값을 대신 바꾸지 않는다.  die 4 mm 자재에서 기본 200 µm 는 die 폭의 5% 라
-        #   오매칭 위험이 크지만, 조용히 값을 바꾸면 기존 결과가 달라진다 — 알리기만 한다.
+        # ★ 값을 대신 바꾸지 않는다.  조용히 값을 바꾸면 기존 결과가 달라진다 — 알리기만 한다.
         # ★ `_start_hint`·`_errLabel` 과 같은 관습: 자리를 예약해 두고 **문자열만** 바꾼다
         #   (setVisible 을 쓰면 아래 위젯이 위아래로 튄다).
         self._die_hint = QLabel("", engine_card)
@@ -1002,12 +1001,7 @@ class SetupPage(QWidget):
                                     "warn" if broken else "muted")
             return
         text = i18n.KO.DIE_SIZE_DETECTED_FMT.format(x=pitch[0], y=pitch[1], src=src)
-        ratio = float(self.coord_tol_spin.value()) / pitch[0]
-        if ratio > i18n.KO.DIE_TOL_RATIO_WARN:
-            text += "\n" + i18n.KO.DIE_TOL_TOO_LARGE_FMT.format(pct=ratio * 100.0)
-            self._set_die_hint_text(text, "warn")
-        else:
-            self._set_die_hint_text(text, "muted")
+        self._set_die_hint_text(text, "muted")
 
     @staticmethod
     def _detect_die_geometry(ref_text: str):
