@@ -493,8 +493,11 @@ def test_download_and_apply_mirrors_needed_and_skips_dev_data(tmp_path, monkeypa
     assert (app / "main.py").exists()
     # dev/ 는 통째로 제외되지만, 그 안의 양식.xlsx 는 앱 루트로 따로 복사된다.
     assert (app / "양식.xlsx").read_text() == "TEMPLATE"
-    assert (app / "docs" / "새문서.md").exists()              # 새 문서도 함께
-    assert (app / "scripts" / "run_this_before.py").exists()
+    # ★ docs/·scripts/ 는 '남기는 목록'(_UPDATE_KEEP_ONLY)이라 **새 파일은 안 나간다.**
+    #   개발 기록·빌드 도구가 사용자 PC 로 흘러가던 자리다 — 자세한 계약은
+    #   dev/tests/test_update_payload.py 가 다룬다.
+    assert not (app / "docs" / "새문서.md").exists()
+    assert not (app / "scripts" / "run_this_before.py").exists()
     # 개발 전용 모음(dev/)·루트 앵커 설정은 제외된다.
     assert not (app / "dev").exists()
     assert not (app / "pytest.ini").exists()
