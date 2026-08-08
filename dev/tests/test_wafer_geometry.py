@@ -26,6 +26,18 @@ _RDL4_REAL = (Path(__file__).resolve().parents[2] / "docs"
               / "RDL4 LOT files(26년 05월, FDV)")
 
 
+def _photo_names(folder: Path) -> list[str]:
+    """실측 폴더의 결함 사진 **파일명**.  사진 자체는 저장소에서 지웠다.
+
+    좌표는 파일명(과 옆의 INI)에만 들어 있고 파서는 경로만 받으므로, 이름 목록
+    (``사진목록.txt``)이 곧 픽스처다.  주석(``#``)·빈 줄은 건너뛴다."""
+    listing = folder / "사진목록.txt"
+    if not listing.exists():
+        return []
+    return [ln.strip() for ln in listing.read_text(encoding="utf-8").splitlines()
+            if ln.strip() and not ln.startswith("#")]
+
+
 @pytest.fixture(autouse=True)
 def _clear_caches():
     """폴더 단위 lru_cache 가 테스트 간에 새지 않게 한다."""
@@ -1274,12 +1286,13 @@ class TestRdl4RealFolders:
             folder = _RDL4_REAL / machine / wafer
             if not folder.exists():
                 continue
-            for img in sorted(folder.glob("*.jp*g")):
+            for name in _photo_names(folder):
+                img = folder / name
                 coord = camtek_live.resolve(img) or camtek_ini.resolve(img)
-                assert coord is not None, img.name
-                assert (coord.col, coord.row) == expect, img.name
+                assert coord is not None, name
+                assert (coord.col, coord.row) == expect, name
                 seen += 1
-        assert seen >= 2, "실물 사진을 못 읽었다"
+        assert seen >= 2, "실물 사진 이름을 못 읽었다"
 
     @pytest.mark.parametrize("machine", ["17호기", "18호기"])
     def test_die_index_range_matches_the_geometry(self, machine):
