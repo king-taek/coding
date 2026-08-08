@@ -1417,3 +1417,130 @@ class TestRealSamples:
         k = kla_info.load_folder(_REAL / "KLA" / "예시1")["w6459076xyg1_2_0_23_2"]
         assert (k.col, k.row) == (5, 3)
         assert (k.x, k.y) == (11819.0, 31035.0)
+
+
+# ---------------------------------------------------------------------------
+# ★ die 맵을 장비가 쓴 파일에서 읽는다 — §6-N
+#
+# `s_DieLocation.dat` 은 그 웨이퍼의 die 전체 목록이다.  col/row 번호의 기준을 웨이퍼
+# 중심에서 **유도**하던 것을, 유도하지 않고 장비가 적어 둔 대로 읽는다.
+#
+# 실측 74장 / 장비 11대 / 제품군 5종에서 `col_origin` 은 74/74 가 유도값과 같고,
+# `row_total` 은 73/74 가 같다.  아래 세 폴더가 그 결론을 못 박는다 — 앞의 둘은
+# **골든이 안 깨진다**는 것, 마지막 하나는 **틀리던 것이 고쳐진다**는 것.
+# ---------------------------------------------------------------------------
+_DIE_MAP_REAL = _REAL / "die맵"
+
+# {폴더: (col_origin, row_total, 레코드크기, 이 값이 관측인 근거)}
+_DIE_MAP_TRUTH = {
+    # 장비가 사진 파일명에 col/row 를 직접 박아 둔 자재(§6-J). 유도값과 같아야 한다.
+    "XYA2(RDL4-17호기)": (1, 6, 128),
+    # 사용자가 장비 화면으로 확인한 자재(§6-L). 유도값과 같아야 한다.
+    "GX57001305(T254)": (2, 10, 128),
+    # 사용자가 장비 화면에서 "row 가 앱보다 1 작다"고 확인한 자재.
+    # 유도식은 row_total=56 을 내고 die 맵은 55 를 낸다 → 맵이 맞다.
+    "PGEE48-13C5(AOI-11)": (2, 55, 72),
+}
+
+
+@pytest.mark.skipif(not _DIE_MAP_REAL.exists(), reason="dev/좌표 확인/die맵 폴더 없음")
+class TestDieMapGolden:
+    """실물 ``s_DieLocation.dat`` 3건 — 골든 2건 보존 + 어긋나던 1건 교정."""
+
+    @pytest.mark.parametrize("name", sorted(_DIE_MAP_TRUTH))
+    def test_geometry_uses_the_die_map(self, name):
+        col_origin, row_total, _rec = _DIE_MAP_TRUTH[name]
+        geom = wg.camtek_geometry(_DIE_MAP_REAL / name)
+        assert geom is not None, name
+        assert geom.col_origin == col_origin, name
+        assert geom.row_total == row_total, name
+        assert wg._DIE_MAP_FILE in geom.source, "맵을 읽고도 출처에 안 남았다"
+
+    @pytest.mark.parametrize("name", sorted(_DIE_MAP_TRUTH))
+    def test_record_layout_comes_from_the_sidecar(self, name):
+        """★ 레코드 배치는 장비마다 다르다 — 하드코딩하면 한쪽이 깨진다.
+
+        실측: PGEE48 을 찍은 장비만 ``RecordSize=72`` 이고 나머지 10대는 128 이다."""
+        _c, _r, rec = _DIE_MAP_TRUTH[name]
+        layout = wg._dat_layout(_DIE_MAP_REAL / name / wg._DIE_MAP_FILE)
+        assert layout is not None, name
+        assert layout[0] == rec, name
+        assert layout[1]["x"][1] == wg._VT_DOUBLE
+
+    def test_pgee48_disagrees_with_the_derived_rule(self):
+        """★ 이 자재가 이 변경의 존재 이유다 — 유도식은 1 크다.
+
+        둘이 우연히 같으면 이 테스트는 아무것도 지키지 못하므로, **갈린다는 사실
+        자체**를 못 박는다(다른 둘은 같아야 한다는 것을 위에서 못 박았다)."""
+        folder = _DIE_MAP_REAL / "PGEE48-13C5(AOI-11)"
+        geom = wg.camtek_geometry(folder)
+        cx, cy = wg._wafer_center(folder)
+        dia = wg._read_diameter(folder)
+        assert cy, "Center_Y 가 있어야 유도 경로가 성립한다"
+        derived = wg._row_total(cy, dia, geom.pitch_y)
+        assert derived == 56 and geom.row_total == 55
+        assert wg._col_origin(cx, dia, geom.pitch_x) == geom.col_origin == 2
+
+        # 그 결과 row 가 0-based 로 내려온다 — col 은 이미 0 부터였다.  이 웨이퍼의
+        # 결함은 y_index 2..55 전 구간에 있어(§6-N) min/max 둘 다 의미가 있다.
+        coords = camtek_ini.load_folder(folder).values()
+        assert min(c.col for c in coords) == 0
+        assert min(c.row for c in coords) == 0
+        assert max(c.row for c in coords) == 53      # 55−2 (유도식이면 54 가 된다)
+
+    def test_falls_back_when_the_map_is_missing(self, tmp_path):
+        """맵이 없는 폴더는 **기존 유도 경로 그대로** — 이게 무회귀의 근거다."""
+        folder = _make_camtek_folder(tmp_path, 37247.9, 44905.3,
+                                     [("102450.156233.c.1.1",
+                                       102450.6, 156233.9, 2, 3)])
+        (folder / "Params_WaferInfo.ini").write_text(
+            _params_ini(37247.9, 44905.3)
+            + "\n[Geometric]\nDiameter=300000\nCenter_X=167448.9731\n"
+              "Center_Y=179674.0034\n", encoding="utf-8")
+        wg.camtek_geometry.cache_clear()
+        geom = wg.camtek_geometry(folder)
+        assert (geom.col_origin, geom.row_total) == (1, 6)
+        assert wg._DIE_MAP_FILE not in geom.source
+
+    def test_rejects_a_too_small_map(self, tmp_path):
+        """die 몇 개짜리 파일을 맵으로 받아들이면 안 된다(기준이 통째로 틀어진다)."""
+        folder = _DIE_MAP_REAL / "XYA2(RDL4-17호기)"
+        real = (folder / wg._DIE_MAP_FILE).read_bytes()
+        rec = wg._dat_layout(folder / wg._DIE_MAP_FILE)[0]
+        small = tmp_path / "s"
+        small.mkdir()
+        (small / wg._DIE_MAP_FILE).write_bytes(real[:rec * 3])
+        (small / (wg._DIE_MAP_FILE + ".md")).write_bytes(
+            (folder / (wg._DIE_MAP_FILE + ".md")).read_bytes())
+        assert wg._die_map_origins(small, 37247.9, 44905.3) is None
+
+    def test_rejects_a_map_that_disagrees_beyond_one(self, tmp_path):
+        """★ 맵은 유도값과 ±1 이내일 때만 채택한다 — 부분 맵 방어.
+
+        웨이퍼 전체가 아니라 '스캔한 영역'만 담긴 파일이 오면 min/max 가 통째로
+        좁아진다.  실측 74장의 차이는 전부 0/−1 이라, ±1 밖은 맵이 아니라 부분
+        목록이라는 신호다 — 그때는 검증된 유도 경로를 지킨다(정확도 우선)."""
+        import struct
+        folder = _make_camtek_folder(tmp_path, 37247.9, 44905.3,
+                                     [("102450.156233.c.1.1",
+                                       102450.6, 156233.9, 2, 3)])
+        (folder / "Params_WaferInfo.ini").write_text(
+            _params_ini(37247.9, 44905.3)
+            + "\n[Geometric]\nDiameter=300000\nCenter_X=167448.9731\n"
+              "Center_Y=179674.0034\n", encoding="utf-8")     # 유도값 (1, 6)
+        # 가운데 어디쯤만 담긴 '부분 맵' 합성 — 기준이 (4, 4) 로 나온다(차이 3, 2).
+        rec = 16 + 8 * 2
+        recs = b"".join(
+            b"\x00" * 16 + struct.pack("<dd", (4 + i % 2) * 37247.9 + 10.0,
+                                       (3 + i % 2) * 44905.3 + 10.0)
+            for i in range(60))
+        (folder / wg._DIE_MAP_FILE).write_bytes(recs)
+        (folder / (wg._DIE_MAP_FILE + ".md")).write_text(
+            f'<root><RecordSize Size="{rec}"/><Fields>'
+            f'<Field Name="x" Id="1" Offset="16" Vartype="5"/>'
+            f'<Field Name="y" Id="2" Offset="24" Vartype="5"/>'
+            f'</Fields></root>', encoding="utf-8")
+        wg.camtek_geometry.cache_clear()
+        geom = wg.camtek_geometry(folder)
+        assert (geom.col_origin, geom.row_total) == (1, 6)    # 유도값 그대로
+        assert wg._DIE_MAP_FILE not in geom.source

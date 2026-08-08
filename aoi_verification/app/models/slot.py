@@ -67,18 +67,14 @@ _NON_DEFECT_PREFIXES = ("cognexinsight",)
 def is_ignored_name(name: str) -> bool:
     """무시 대상 파일명인가 (썸네일 생성·매칭 등 모든 단계에서 처음부터 배제).
 
-    두 가지를 거른다:
+    거르는 것은 **결함 사진이 아닌 웨이퍼 전경 사진**(:data:`_NON_DEFECT_PREFIXES`)
+    하나뿐이다 — 좌표가 없어 매칭에 쓸 수 없다.
 
-    1. 점으로 구분된 ``t`` 토큰 — 예: ``-86955.68631.t.1.jpg`` 는 확장자 제거한 stem
-       ``-86955.68631.t.1`` 을 ``.`` 으로 나눈 토큰 ``[-86955, 68631, t, 1]`` 에 정확히
-       ``t`` 가 있다.
-    2. 결함 사진이 아닌 웨이퍼 전경 사진(:data:`_NON_DEFECT_PREFIXES`) — 좌표가 없어
-       매칭에 쓸 수 없다.
+    ⚠ 점으로 구분된 ``t`` 토큰(예: ``-86955.68631.t.1.jpg``)은 예전에 여기서 걸렀지만
+    **지금은 거르지 않는다**(사용자 요청).  그 사진도 검증해야 할 결함 사진이다.
+    좌표(INI 항목)가 없으면 매칭이 고전 유사도로 폴백하므로 열어 둬도 안전하다.
     """
-    if name.lower().startswith(_NON_DEFECT_PREFIXES):
-        return True
-    stem = name.rsplit(".", 1)[0]        # 확장자 한 단계 제거
-    return "t" in stem.split(".")
+    return name.lower().startswith(_NON_DEFECT_PREFIXES)
 
 
 def _list_images(folder: Path) -> list[Path]:
@@ -87,8 +83,8 @@ def _list_images(folder: Path) -> list[Path]:
     ``os.scandir`` 의 캐시된 ``DirEntry.is_file()`` 를 써서 파일당 별도
     ``stat()`` 시스템콜을 피한다 — 폴더에 수만 장이 있어도 빠르게 열거 (#3).
 
-    점 토큰 't' 가 포함된 파일 (예: ``*.t.1.jpg``) 은 ``is_ignored_name`` 으로
-    처음부터 건너뛴다 — 열거가 유일한 소스라 썸네일도 만들어지지 않는다.
+    웨이퍼 전경 사진은 ``is_ignored_name`` 으로 처음부터 건너뛴다 — 열거가 유일한
+    소스라 썸네일도 만들어지지 않는다.
     """
     if not folder.exists() or not folder.is_dir():
         return []
