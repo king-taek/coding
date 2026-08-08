@@ -383,6 +383,43 @@ def test_export_original_quality_embeds_full_resolution(qapp, isolated_cache,
         f"원본 화질은 원본 해상도(1600px)여야: {orig_sizes}")
 
 
+def test_unmatched_original_quality_embeds_only_unmatched_full_res(
+        qapp, isolated_cache, tmp_path):
+    """'미매칭 사진만 원본 화질' 옵션: 미매칭만 원본, 매칭 사진은 중간 화질 유지.
+
+    소스 해상도를 다르게 두어(매칭 1600 · 미매칭 1400) 저장된 미디어에서
+    어느 쪽이 원본으로 들어갔는지 구분한다 — 둘 다 MID_PX(800)보다 크다.
+    """
+    src = tmp_path / "src"
+    src.mkdir()
+    ref = src / "m_ref.jpeg"
+    Image.new("RGB", (1600, 1200), color=(50, 90, 160)).save(str(ref), "JPEG")
+    val = src / "m_val.jpeg"
+    Image.new("RGB", (1600, 1200), color=(60, 100, 170)).save(str(val), "JPEG")
+    miss = src / "u_miss.jpeg"
+    Image.new("RGB", (1400, 1050), color=(160, 60, 60)).save(str(miss), "JPEG")
+
+    result = FinalResult(
+        mode="single", ref_machine="1호기", val_machine="2호기",
+        matches=[MatchResult(slot="S1", ref_path=ref, val_path=val, score=0.9)],
+        unmatched_refs=[MissEntry(slot="S1", side="ref", path=miss,
+                                  note="미매칭")],
+    )
+    no_tpl = tmp_path / "no_template.xlsx"
+    dst = tmp_path / "out.xlsx"
+    ExcelExporter(result, dst_path=dst, template_path=no_tpl,
+                  unmatched_original_quality=True).run()
+    sizes = _embedded_media_sizes(dst)
+    assert sizes, "이미지가 임베드되어야 한다"
+    # 미매칭은 원본 그대로(1400px) — 미매칭 시트·요약 시트 양쪽에 들어간다.
+    assert any(max(w, h) == 1400 for (w, h) in sizes), (
+        f"미매칭 사진이 원본 해상도(1400px)여야: {sizes}")
+    # 매칭 사진은 여전히 중간 화질(≤800px) — 원본(1600px)이 나오면 안 된다.
+    assert all(max(w, h) <= 800 for (w, h) in sizes
+               if max(w, h) != 1400), (
+        f"매칭 사진은 중간 화질(≤800px)이어야: {sizes}")
+
+
 def test_machine_label_rule():
     """호기 라벨 규칙: 숫자/N호기 → AOI-N, 그 외 문자 포함 → AOI(원본)."""
     from aoi_verification.app.workers.exporter import _machine_label

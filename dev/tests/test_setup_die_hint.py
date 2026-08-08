@@ -1,7 +1,7 @@
 """Setup 화면의 die 크기 안내 — 허용 오차를 자재에 맞게 정하도록 돕는 문구.
 
-die 4 mm 자재에서 기본 허용 오차 500 µm 는 die 폭의 12 % 라 오매칭 위험이 크다.
-**값을 대신 바꾸지는 않고**(기존 결과가 조용히 달라지면 안 된다) 알리기만 한다.
+감지된 die 크기와 출처를 보여주기만 한다.
+**값을 대신 바꾸지는 않는다**(기존 결과가 조용히 달라지면 안 된다).
 """
 
 from __future__ import annotations
@@ -79,38 +79,6 @@ def test_detected_die_size_is_shown(qapp, tmp_path):
     text = _hint(page)
     assert "37,248" in text and "44,905" in text
     assert "Params_WaferInfo.ini" in text
-    # die 37 mm 에 기본 500 µm 는 1.3 % → 경고 없음
-    assert i18n.KO.DIE_TOL_TOO_LARGE_FMT.split("{")[0] not in text
-    assert page._die_hint.property("role") == "muted"
-    page.deleteLater()
-
-
-def test_small_die_warns_about_tolerance(qapp, tmp_path):
-    """★ die 가 작으면 기본 허용 오차가 과하다고 경고한다 (실측 PGEE48 = 4.16 mm)."""
-    _slot(tmp_path, 4160.9, 5294.0)
-    page = SetupPage()
-    page.coord_tol_spin.setValue(500.0)
-    page.ref_path_edit.setText(str(tmp_path))
-    page.val_path_edit.setText(str(tmp_path))
-    page._validate()
-    text = _hint(page)
-    assert "4,161" in text
-    assert "12 %" in text                      # 500 / 4160.9 = 12.0 %
-    assert page._die_hint.property("role") == "warn"
-    # 값 자체는 건드리지 않는다 — 알리기만 한다.
-    assert page.coord_tol_spin.value() == 500.0
-    page.deleteLater()
-
-
-def test_small_die_no_warning_when_tolerance_lowered(qapp, tmp_path):
-    """허용 오차를 자재에 맞게 낮추면 경고가 사라진다."""
-    _slot(tmp_path, 4160.9, 5294.0)
-    page = SetupPage()
-    page.coord_tol_spin.setValue(50.0)         # die 폭의 1.2 %
-    page.ref_path_edit.setText(str(tmp_path))
-    page.val_path_edit.setText(str(tmp_path))
-    page._validate()
-    assert "%" not in _hint(page)
     assert page._die_hint.property("role") == "muted"
     page.deleteLater()
 
@@ -277,11 +245,11 @@ def test_same_folder_is_not_rescanned(qapp, tmp_path, monkeypatch):
     page.coord_tol_spin.setValue(500.0)
     page.ref_path_edit.setText(str(tmp_path))
     page._validate()
-    assert "12 %" in _hint(page)               # die 4.16mm 에 500µm → 경고
+    assert "4,161" in _hint(page)
     assert len(calls) == 1
 
-    page.coord_tol_spin.setValue(50.0)         # 자재에 맞게 낮춘다
+    page.coord_tol_spin.setValue(50.0)
     page._validate()
-    assert "%" not in _hint(page)              # 경고가 사라진다(문구는 갱신됨)
+    assert "4,161" in _hint(page)              # 캐시된 결과가 다시 그려진다
     assert len(calls) == 1, "허용 오차만 바꿨는데 폴더를 다시 훑었다"
     page.deleteLater()
