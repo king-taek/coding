@@ -16,6 +16,11 @@
     2) dev/사용설명서_자료/*.html 수정 (앱 동작이 바뀌면 **둘 다**)
     3) python scripts/internal/make_manual_pdf.py        ← 이 스크립트
 
+**인쇄가 끝나면 캡처는 스스로 지운다**(`sweep_captures`).  PDF 는 자기완결적이라
+그림이 이미 안에 박혀 있고, 캡처는 1) 로 언제든 다시 찍히는 재생성물이다 — 저장소에
+6 MB 를 쌓아 둘 이유가 없다.  파일명만 ``사진목록.txt`` 로 남는다.  그래서 **1) 을
+건너뛰고 3) 만 다시 돌릴 수는 없다** — 그림이 없으면 `_check_images` 가 막는다.
+
 엔진은 저장소에 이미 선례가 있는 **헤드리스 Chromium 인쇄**다
 (``docs/좌표_계산_검증_보고서.pdf`` 가 같은 방식으로 만들어졌다).  별도 파이썬 PDF
 라이브러리를 requirements 에 넣지 않으려는 선택이기도 하다 — 설명서를 만들려고
@@ -172,7 +177,46 @@ def main() -> int:
                 f"{out.name} 에 NanumSquare 가 박히지 않았습니다 — "
                 "설명서_공통.css 의 글꼴 상대경로를 확인하세요.")
         print(f"{out}  ({size / 1e6:.1f} MB, {_pages(out)} 쪽)")
+
+    # ★ 두 PDF 가 **모두** 검증을 통과한 뒤에만 캡처를 치운다(sweep_captures 주석 참조).
+    swept = sweep_captures(ASSETS)
+    if swept:
+        print(f"캡처 {len(swept)}장 삭제 — 이름은 사진목록.txt 에 남겼습니다"
+              " (다시 인쇄하려면 capture_manual_shots.py 를 먼저 실행).")
     return 0
+
+
+def sweep_captures(assets: Path) -> list[str]:
+    """인쇄가 **끝난 뒤** 캡처(png·jpg)를 지우고 파일명만 ``사진목록.txt`` 로 남긴다.
+
+    PDF 는 자기완결적이다 — 인쇄 시점에 그림이 PDF 안으로 복사돼 들어가므로, 원본
+    캡처는 그 뒤로 아무도 참조하지 않는 중간 산출물이다.  게다가 손으로 만든 자료가
+    아니라 `capture_manual_shots.py` 가 앱을 실제로 띄워 다시 찍어내는 **재생성물**이라
+    저장소에 쌓아 둘 이유가 없다(21장 ≈ 6 MB).
+
+    ★ 반드시 **두 PDF 가 모두 검증을 통과한 뒤**에 부른다.  인쇄 전에 지우면 그림 없는
+      설명서가 나오고, 한쪽만 성공한 채 지우면 나머지 한쪽을 다시 만들 수 없다.
+    ★ ``shots.json``·HTML·CSS 는 캡처가 아니라 **원본**이므로 건드리지 않는다.
+    """
+    shots = sorted(p for p in assets.iterdir() if p.suffix in (".png", ".jpg"))
+    if not shots:
+        return []
+    names = [p.name for p in shots]
+    (assets / "사진목록.txt").write_text(
+        "# 화면 캡처 목록 — 캡처 파일은 지웠고 **파일명만** 남긴다.\n"
+        "#\n"
+        "# 이 그림들은 손으로 만든 자료가 아니라 **재생성물**이다.  실제 앱을 offscreen 으로\n"
+        "# 띄워 찍는 `python scripts/internal/capture_manual_shots.py` 가 아래 이름 그대로\n"
+        "# 다시 만들어 준다(같은 폴더의 shots.json 도 함께).\n"
+        "#\n"
+        "# 이 목록은 make_manual_pdf.py 가 인쇄를 끝낸 뒤 자동으로 갱신한다.\n"
+        "# 사용자에게 내려가는 산출물은 docs/사용설명서.pdf · docs/상세설명서.pdf 이고,\n"
+        "# 그림은 이미 그 PDF 안에 박혀 있다.  PDF 를 **다시 인쇄하려면** 위 캡처\n"
+        "# 스크립트를 먼저 돌려야 한다 — 그림이 없으면 _check_images 가 인쇄를 막는다.\n"
+        + "\n".join(names) + "\n", encoding="utf-8")
+    for p in shots:
+        p.unlink()
+    return names
 
 
 def _pages(pdf: Path) -> str:
