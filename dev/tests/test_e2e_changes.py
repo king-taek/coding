@@ -150,6 +150,7 @@ def test_bulk_dialog_e2e(qapp, monkeypatch):
     # 슬라이더 변경(재렌더)해도 선택 유지 + 타일 크기 반영
     dlg._on_size_changed(240)
     assert dlg._tile_px == 240
+    dlg._apply_tile_size()       # 크기 적용은 150ms 디바운스 — 테스트는 강제 발화
     assert any(t._tile_px == 240 for t in dlg._tiles_by_key.values())
 
     # 우클릭 확대 — FullscreenViewer 를 가짜로 대체(디스플레이/블로킹 회피)
