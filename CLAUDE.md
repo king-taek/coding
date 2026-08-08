@@ -119,6 +119,18 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
     무거운 `python/` 런타임. 목록은 `updater._UPDATE_SKIP_TOP` 에서 관리한다.
   - 새 최상위 폴더/파일이 **구동에 필요하면 자동 포함**된다(별도 작업 불필요). 구동에 불필요한
     대용량/개발 전용이면 `_UPDATE_SKIP_TOP` 에 추가한다.
+  - ⚠ **`docs/`·`scripts/` 두 폴더만은 반대다** — `_UPDATE_KEEP_ONLY` 에 적은 것만 나간다
+    (docs 는 사용자 설명서 3개, scripts 는 사용자용 bat 3개). 이 둘은 개발이 진행될수록
+    파일이 느는데 대부분이 개발 산출물이라, '빼는 목록' 으로 두면 **새로 추가한 문서·빌드
+    도구가 조용히 사용자에게 나간다**(실제로 개발 기록 14개·좌표 샘플 36개·빌드 스크립트
+    20개가 나가고 있었다). 여기에 사용자용 파일을 새로 추가했다면 `_UPDATE_KEEP_ONLY` 에도
+    적어야 전달된다 — 안 적으면 조용히 빠진다.
+  - 트리 **깊은 곳**의 개별 제외는 `_UPDATE_SKIP_PATHS`(저장소 기준 상대경로)로 한다.
+    지금은 미등록 글꼴 6개(2.8 MB)가 여기 있다 — 저장소에는 두고 배포에서만 뺀다.
+  - **설명서 PDF 는 자동 업데이트가 유일한 전달 경로다.** 빌드는 `docs/` 를 담지 않는다
+    (`portable_build` 는 `aoi_verification`·`main.py`·`requirements.txt`·`양식.xlsx`·IR 만).
+    `docs/사용설명서.pdf`·`docs/상세설명서.pdf` 를 `_UPDATE_KEEP_ONLY` 에서 빼면 사용자에게
+    설명서가 영영 가지 않는다. 회귀 가드: `dev/tests/test_update_payload.py`.
 - **깨지 않아야 할 불변식 3개** (각각 실제 사고에서 나왔다 → `docs/규칙_배경.md`):
   - **런처 exe(`scripts/exe_launcher.py`)에는 앱 코드를 한 줄도 넣지 않는다.** PyInstaller 의
     `FrozenImporter` 가 exe 안 사본으로 디스크의 최신 사본을 **가린다**. `exe_launcher.spec` 의

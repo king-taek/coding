@@ -515,7 +515,73 @@ _UPDATE_SKIP_TOP = {
     ".claude",        # 이 저장소에서 Claude Code 로 작업할 때 쓰는 스킬 모음 —
                       #   앱 구동과 무관한데 198개 파일·4.8 MB 다(사용자에게 보낼 이유 없음).
     ".impeccable",    # UI 검토 스냅샷(개발 기록) — 앱 구동과 무관하다.
+    ".coverage",      # coverage.py 가 남긴 테스트 커버리지 DB — 순수 개발 잔재.
+    ".gitignore",     # 배포본엔 .git 이 없다(위에서 건너뛴다) → 아무 역할이 없다.
+                      #   ※ 개발환경 판정은 `.git` 폴더로 한다(`is_git_checkout`).
+    "CLAUDE.md",      # 개발 지침·README — 앱이 열지 않는다(코드의 등장은 전부 주석 인용).
+    "README.md",
 }
+
+
+# 최상위는 남기되 그 **안에서 내려보낼 것만** 추린다(위와 거르는 방향이 반대다).
+#
+# ★ 왜 '빼는 목록' 이 아니라 '남기는 목록' 인가 — 이 두 폴더는 개발이 진행될수록 파일이
+#   계속 늘어나는데 그 대부분이 사용자와 무관한 산출물이다.  빼는 목록으로 관리하면
+#   **새로 추가한 문서·빌드 도구가 조용히 사용자 PC 로 나간다**(실제로 그렇게 개발 기록
+#   14개·좌표 조사 샘플 36개·빌드 스크립트 20개가 배포되고 있었다).  남기는 목록이면
+#   기본값이 '안 보냄' 이라 그런 일이 생기지 않는다.
+# ★ 최상위 폴더의 **직속 자식 이름**만 적는다(하위 경로는 지원하지 않는다).
+#   여기 적은 이름이 실제 저장소 파일과 어긋나면 사용자에게 그 파일이 안 간다 —
+#   `dev/tests/test_update_payload.py` 가 이름이 실재하는지 대조해 막는다.
+_UPDATE_KEEP_ONLY = {
+    # 사용자용 설명서.  빌드는 docs/ 를 아예 담지 않으므로(portable_build 는
+    # aoi_verification·main.py·requirements.txt·양식.xlsx·IR 만 넣는다) 사용자 PC 에
+    # 매뉴얼이 도달하는 **유일한 경로가 이 업데이트**다.  빼면 설명서가 영영 안 간다.
+    "docs": {"사용설명서.pdf", "상세설명서.pdf", "체험하기.html"},
+    # 사용자가 더블클릭하는 실행·갱신 bat.
+    # ★ 실제로 **실행되는 사본은 설치 루트**에 있다 — 빌드가 거기로 복사하고
+    #   (`portable_build.run_build` 의 bats 루프), 안내 문서도 그 자리만 가리킨다.
+    #   이 트리 안 사본은 `%~dp0` 가 ``app\scripts\`` 를 가리켜 그대로는 돌지 않는다
+    #   (``%~dp0python\pythonw.exe`` 를 찾다 [ERROR] 로 끝난다).  그래도 남기는 것은
+    #   설치 루트 사본이 지워졌을 때 되살릴 원본이 되기 때문이다(셋이 합쳐 2 KB).
+    "scripts": {"run_aoi.bat", "run_aoi_debug.bat", "update_app.bat"},
+}
+
+
+# 트리 **깊은 곳**에 있는 개별 제외 대상(저장소 기준 상대경로, POSIX).
+# 위 둘은 최상위/직속 자식 단위라 여기까지는 못 걸러 낸다.
+#
+# ★ 글꼴 — `theme._FONT_FILES` 가 Qt 에 등록하는 것은 TTF 2개뿐이다.  나머지 6개는
+#   패밀리명이 ``NanumSquareOTF``·``NanumSquare_ac`` 라 ``config.Fonts`` 폴백 스택
+#   ('NanumSquare' → Pretendard → …)에도 걸리지 않아 **아무 화면에도 쓰이지 않는데**
+#   2.8 MB 를 사용자에게 보내고 있었다.  저장소에는 남겨 두고(다른 굵기가 필요해질 때를
+#   위해) 배포에서만 뺀다.  회귀 가드: `dev/tests/test_update_payload.py`.
+_UPDATE_SKIP_PATHS = {
+    "aoi_verification/app/ui/assets/font/NanumSquareB.otf",
+    "aoi_verification/app/ui/assets/font/NanumSquareR.otf",
+    "aoi_verification/app/ui/assets/font/NanumSquareOTF_acB.otf",
+    "aoi_verification/app/ui/assets/font/NanumSquareOTF_acR.otf",
+    "aoi_verification/app/ui/assets/font/NanumSquare_acB.ttf",
+    "aoi_verification/app/ui/assets/font/NanumSquare_acR.ttf",
+}
+
+
+def _skip_filter(src_root: Path):
+    """``shutil.copytree(ignore=…)`` 용 필터 — `_UPDATE_SKIP_PATHS` 를 적용한다.
+
+    copytree 는 폴더마다 (그 폴더, 자식 이름들) 로 부르므로 저장소 기준 상대경로를
+    복원해 대조한다.  경로를 못 구하면(예상 밖의 위치) 아무것도 거르지 않는다 —
+    거르기에 실패해 조금 더 보내는 것이, 필요한 파일을 빠뜨리는 것보다 안전하다."""
+    root = src_root.resolve()
+
+    def _ignore(directory, names):
+        try:
+            base = Path(directory).resolve().relative_to(root)
+        except (ValueError, OSError):
+            return set()
+        return {n for n in names if (base / n).as_posix() in _UPDATE_SKIP_PATHS}
+
+    return _ignore
 
 
 # 스테이징 트리가 '앱으로 쓸 수 있는 것' 인지 확인할 최소 항목.  하나라도 없으면 적용하지
@@ -540,13 +606,25 @@ def _stage_tree(src_root: Path, staging: Path, emit) -> None:
     import shutil
 
     staging.mkdir(parents=True, exist_ok=True)
+    ignore = _skip_filter(src_root)
     items = [p for p in sorted(src_root.iterdir(), key=lambda p: p.name)
              if p.name not in _UPDATE_SKIP_TOP]
     m = len(items)
     for i, item in enumerate(items, start=1):
         dst = staging / item.name
-        if item.is_dir():
-            shutil.copytree(item, dst)
+        keep = _UPDATE_KEEP_ONLY.get(item.name)
+        if keep is not None and item.is_dir():
+            # 남기기로 한 것만 골라 담는다 — 없는 이름은 조용히 지나간다(상류에서
+            # 이름이 바뀌어도 업데이트 자체는 계속 돌아야 한다).
+            dst.mkdir(parents=True, exist_ok=True)
+            for name in sorted(keep):
+                src = item / name
+                if src.is_dir():
+                    shutil.copytree(src, dst / name, ignore=ignore)
+                elif src.exists():
+                    shutil.copy2(src, dst / name)
+        elif item.is_dir():
+            shutil.copytree(item, dst, ignore=ignore)
         else:
             shutil.copy2(item, dst)
         emit(i, m, "준비 중…")

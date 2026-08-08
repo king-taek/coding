@@ -183,8 +183,12 @@ FONT_MONO = Fonts.MONO
 # 저장소에 동봉된 폰트 파일 — Regular/Bold **두 굵기**를 등록한다.
 # ★ 굵기를 하나만 등록하면 Qt 가 굵은 글씨를 **합성**한다(획을 부풀린다).  한글에서
 #   합성 볼드는 획이 뭉개져 특히 나쁘다 — 진짜 Bold 파일을 함께 준다.
-# ★ TTF 를 쓴다(같은 폴더에 OTF 도 있다).  Windows 의 힌팅이 TTF 에서 더 잘 들어
-#   작은 UI 크기에서 획이 또렷하다.
+# ★ TTF 를 쓴다(같은 폴더에 OTF·``_ac`` 변종 6개도 있다).  Windows 의 힌팅이 TTF 에서
+#   더 잘 들어 작은 UI 크기에서 획이 또렷하다.
+# ★ 등록하는 것은 **아래 2개뿐**이다.  나머지 6개는 패밀리명이 ``NanumSquareOTF``·
+#   ``NanumSquare_ac`` 라 ``config.Fonts`` 폴백 스택에도 걸리지 않아 어느 화면에도 쓰이지
+#   않는다 — 그래서 저장소에는 두되 **배포에서는 뺀다**(`updater._UPDATE_SKIP_PATHS`).
+#   여기에 이름을 추가하려면 그 목록에서도 함께 빼야 사용자 PC 에 파일이 간다.
 _FONT_FILES = ("NanumSquareR.ttf", "NanumSquareB.ttf")
 
 
