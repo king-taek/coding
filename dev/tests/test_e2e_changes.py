@@ -36,24 +36,28 @@ def _mk_img(path: Path, seed: int) -> None:
 
 
 # ===========================================================================
-# A. scan + .t 무시 + 슬롯 부분집합 (요청 3·4)
+# A. scan + 웨이퍼 전경 사진 제외 + 슬롯 부분집합
 # ===========================================================================
-def test_scan_ignores_t_and_slot_subset(qapp, isolated_cache, tmp_path):
+def test_scan_keeps_dot_t_and_slot_subset(qapp, isolated_cache, tmp_path):
     ref, val = tmp_path / "ref", tmp_path / "val"
     seed = 0
+    t_names: dict[Path, str] = {}
     for s in ("S01", "S02", "S03"):
         for side_root in (ref, val):
             _mk_img(side_root / s / "good1.png", seed); seed += 1
             _mk_img(side_root / s / "good2.png", seed); seed += 1
-            # 무시되어야 하는 .t 파일
-            _mk_img(side_root / s / f"-869.{seed}.t.1.png", seed); seed += 1
+            # ★ .t 파일도 결함 사진이라 매칭에 들어간다
+            t_names[side_root / s] = f"-869.{seed}.t.1.png"
+            _mk_img(side_root / s / t_names[side_root / s], seed); seed += 1
+            # 웨이퍼 전경 사진은 좌표가 없어 여전히 빠진다
+            _mk_img(side_root / s / "CognexInSight17xx_Bottom.png", seed); seed += 1
 
     sr = slot_mod.scan(ref, val)
     assert sr.common_slot_names == ["S01", "S02", "S03"]
-    # .t 파일 제외 → 슬롯당 2장만
     for name in sr.common_slot_names:
         names = sorted(i.filename for i in sr.slots[name].ref_images)
-        assert names == ["good1.png", "good2.png"], names
+        assert names == sorted(["good1.png", "good2.png",
+                                t_names[ref / name]]), names
 
     # main_window._on_start 의 부분집합 필터와 동일 로직
     sel = {"S01", "S03"}

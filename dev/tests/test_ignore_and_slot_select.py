@@ -1,4 +1,4 @@
-"""요청 3·4 — `.t.` 토큰 파일 무시 + '일부 슬롯만 진행' 슬롯 필터."""
+"""파일 무시 규칙(웨이퍼 전경 사진만) + '일부 슬롯만 진행' 슬롯 필터."""
 
 from __future__ import annotations
 
@@ -7,14 +7,16 @@ from pathlib import Path
 from aoi_verification.app.models import slot as slot_mod
 
 
-def test_is_ignored_name_dot_t_token():
-    # 점으로 구분된 't' 토큰 → 무시
-    assert slot_mod.is_ignored_name("-86955.68631.t.1.jpg") is True
-    assert slot_mod.is_ignored_name("abc.t.png") is True
-    assert slot_mod.is_ignored_name("t.jpg") is True
-    # 't' 토큰이 아니면 통과
+def test_dot_t_token_is_no_longer_ignored():
+    """★ 점으로 구분된 't' 토큰 파일도 **검증 대상**이다(사용자 요청으로 되돌림).
+
+    예전에는 여기서 걸렀는데, 실제로는 그 사진들도 결함 사진이라 매칭에 들어가야 한다.
+    """
+    assert slot_mod.is_ignored_name("-86955.68631.t.1.jpg") is False
+    assert slot_mod.is_ignored_name("abc.t.png") is False
+    assert slot_mod.is_ignored_name("t.jpg") is False
     assert slot_mod.is_ignored_name("-86955.68631.1.jpg") is False
-    assert slot_mod.is_ignored_name("test.123.jpg") is False     # 'test' != 't'
+    assert slot_mod.is_ignored_name("test.123.jpg") is False
     assert slot_mod.is_ignored_name("photo.jpg") is False
 
 
@@ -58,13 +60,14 @@ def _touch(p: Path) -> None:
 def test_list_images_skips_ignored(tmp_path):
     folder = tmp_path / "S01"
     _touch(folder / "a.jpg")
-    _touch(folder / "b.t.1.jpg")          # 무시
+    _touch(folder / "b.t.1.jpg")          # ★ 이제 포함된다
     _touch(folder / "c.png")
-    _touch(folder / "-86955.68631.t.1.jpg")  # 무시
+    _touch(folder / "-86955.68631.t.1.jpg")  # ★ 이제 포함된다
+    _touch(folder / "CognexInSight17xx_Bottom_Slot3.jpg")   # 웨이퍼 전경 — 무시
     _touch(folder / "notes.txt")          # 이미지 아님
 
     names = sorted(p.name for p in slot_mod._list_images(folder))
-    assert names == ["a.jpg", "c.png"]
+    assert names == ["-86955.68631.t.1.jpg", "a.jpg", "b.t.1.jpg", "c.png"]
 
 
 def test_scan_then_slot_subset_filter(tmp_path):
