@@ -41,6 +41,7 @@ from typing import Dict, List, Optional, Set, Tuple
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
 from ..coords import resolve_batch as _resolve_batch
+from .. import i18n
 from ..models.slot import ImageItem
 from .matcher import score_ref_classical
 from .. import config as _config
@@ -162,7 +163,7 @@ class CoordScheduler(QThread):
         total_slots = len(self._tasks)
 
         # ── 좌표 일괄 프리패치 ──────────────────────────────────────────
-        self.signals.phase.emit("좌표 파싱 중...")
+        self.signals.phase.emit(i18n.KO.PHASE_COORD_PARSE)
         all_paths: List[Path] = []
         for _slot, refs, vals in self._tasks:
             for r in refs:
@@ -178,14 +179,13 @@ class CoordScheduler(QThread):
             for r in refs if coord_cache.get(r.path) is not None
         )
         if total_refs > 0 and coords_ok == 0:
-            from .. import i18n
             self.signals.failed.emit(i18n.KO.COORD_NO_DATA_MSG)
             return
 
         total_pairs = sum(len(r) * len(v) for _, r, v in self._tasks)
         done_pairs = 0
         tol = self._tolerance
-        self.signals.phase.emit("좌표 매칭 중")
+        self.signals.phase.emit(i18n.KO.PHASE_COORD)
 
         for slot_idx, (slot, refs, vals) in enumerate(self._tasks):
             if self._stop.is_set():
@@ -208,9 +208,11 @@ class CoordScheduler(QThread):
                 ref_coord = coord_cache.get(ref.path)
 
                 if ref_coord is None:
+                    # ★ 여기서 진행분을 **미리 빼지 않는다**.  폴백(유사도 계산)은 이
+                    #   슬롯 루프가 끝난 뒤에야 도는데, 그 몫을 앞당겨 보고하면 바가
+                    #   끝까지 차오른 채 "좌표 매칭 중" 문구로 수십 초~수 분 멈춰 보인다
+                    #   — 실제로는 가장 비싼 작업이 그 뒤에서 돌고 있었다.
                     fallback_refs.append(ref)
-                    done_pairs += len(vals)
-                    self.signals.progress.emit(done_pairs, total_pairs)
                     continue
 
                 # (col,row) ±1 이웃 후보를 모아 die-내부 거리로 매칭.
@@ -225,17 +227,34 @@ class CoordScheduler(QThread):
                 done_pairs += len(vals)
                 self.signals.progress.emit(done_pairs, total_pairs)
 
-            # 폴백 — 좌표 없는 ref 를 고전 유사도로 처리
+            # 폴백 — 좌표 없는 ref 를 고전 유사도로 처리.
+            # ★ 단계 라벨을 바꾼다.  여기서 도는 것은 좌표 매칭이 아니라 유사도 계산이고,
+            #   슬롯당 후보 수만큼 걸리므로 사용자가 '왜 안 끝나지' 를 알아야 한다.
+            if fallback_refs:
+                self.signals.phase.emit(i18n.KO.PHASE_SCORING)
             for ref in fallback_refs:
                 if self._stop.is_set():
                     break
+                base = done_pairs
+
+                def _on_pair(idx: int, _total: int, _b=base) -> None:
+                    # emit 폭주를 막는다 — 후보 수백 장이면 tick 이 그만큼 나온다.
+                    if idx % 25 == 0:
+                        self.signals.progress.emit(min(_b + idx, total_pairs),
+                                                   total_pairs)
+
                 cands = score_ref_classical(
                     ref, vals, threshold=0.0, cfg=self._cfg,
+                    progress_cb=_on_pair,
                     stop_cb=self._stop.is_set,
                 )
                 self._results[(slot, ref.path)] = [
                     (c.item.path, float(c.score)) for c in cands
                 ]
+                done_pairs += len(vals)
+                self.signals.progress.emit(min(done_pairs, total_pairs), total_pairs)
+            if fallback_refs and not self._stop.is_set():
+                self.signals.phase.emit(i18n.KO.PHASE_COORD)   # 다음 슬롯을 위해 되돌린다
 
             self.signals.slot_finished.emit(slot, slot_idx + 1, total_slots)
 

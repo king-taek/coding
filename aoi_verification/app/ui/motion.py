@@ -312,15 +312,17 @@ def animate_scroll(bar, target: int, *, duration: int = DUR_BASE) -> None:
     if not enabled():
         bar.setValue(target)
         return
-    prev = bar.property("_motionAnim")
-    if prev is not None:
-        try:
-            prev.stop()
-        except Exception:
-            pass
+    # ★ 스크롤바당 애니메이션 **하나만** 만들어 재사용한다.  예전엔 스크롤할 때마다
+    #   새로 만들어(정지만 하고 파괴는 안 해) 스크롤바 아래에 죽은 객체가 쌓였다.
     # `value` 는 QAbstractSlider 의 실제 Qt 속성이라 속성 애니메이션으로 직접 몬다
     # (람다 없음 → 대상이 죽으면 Qt 가 알아서 멈춘다).
-    anim = QPropertyAnimation(bar, b"value", bar)
+    anim = getattr(bar, "_motionScrollAnim", None)
+    if anim is None:
+        anim = QPropertyAnimation(bar, b"value", bar)
+        bar._motionScrollAnim = anim
+    anim.stop()
+    # ★ 반드시 stop() **뒤에** 현재값을 시작값으로 잡는다 — 실행 중인 애니메이션의
+    #   시작값 변경은 Qt 가 무시한다(스크롤이 옛 위치에서 튄다).
     anim.setStartValue(int(bar.value()))
     anim.setEndValue(target)
     anim.setDuration(dur(duration))
@@ -355,15 +357,28 @@ def pulse(widget, *, attr: str = "_pulse", duration: int = DUR_SLOW) -> None:
         setattr(widget, attr, 0.0)
         return
     setattr(widget, attr, 1.0)
-    anim = QVariantAnimation(widget)
-    anim.setStartValue(1.0)
-    anim.setEndValue(0.0)
+    # ★ 위젯당 하나만 만들어 재사용(호출마다 새로 만들면 상태가 바뀔 때마다 쌓인다).
+    #   시작값 1.0 은 위에서 명시적으로 되돌려 놓았다 — 중간값에서 재시작하면 펄스가
+    #   약해진다(스크롤과 달리 여기는 '이어가기' 가 아니라 '다시 치기' 다).
+    anim = getattr(widget, "_motionPulseAnim", None)
+    if anim is None:
+        anim = QVariantAnimation(widget)
+        anim.setStartValue(1.0)
+        anim.setEndValue(0.0)
+        anim.setEasingCurve(EASE_PRIMARY)
+        widget._motionPulseAnim = anim
+        _connect_pulse_tick(anim, widget, attr)
+    anim.stop()
     anim.setDuration(dur(duration))
-    anim.setEasingCurve(EASE_PRIMARY)
-    # ★ 여기만 람다가 남는다 — `attr` 은 Qt 속성이 아니라 파이썬 멤버라서
-    #   QPropertyAnimation 으로 몰 수 없다.  안전한 이유는 tick 이 건드리는 대상이
-    #   애니메이션의 **부모**(widget)이기 때문이다: Qt 는 자식을 먼저 파괴하므로 anim 이
-    #   widget 보다 먼저 죽는다.  형제를 건드리면 순서가 보장되지 않아 위험하다.
+    anim.start()
+
+
+def _connect_pulse_tick(anim, widget, attr: str) -> None:
+    """★ tick 연결은 **생성 시 한 번만** — 재사용하며 매번 연결하면 N번 발화한다.
+
+    여기만 람다가 남는다 — `attr` 은 Qt 속성이 아니라 파이썬 멤버라서
+    QPropertyAnimation 으로 몰 수 없다.  안전한 이유는 tick 이 건드리는 대상이
+    애니메이션의 **부모**(widget)이기 때문이다: Qt 는 자식을 먼저 파괴하므로 anim 이
+    widget 보다 먼저 죽는다.  형제를 건드리면 순서가 보장되지 않아 위험하다."""
     anim.valueChanged.connect(lambda v: (setattr(widget, attr, float(v)),
                                          widget.update()))
-    anim.start()

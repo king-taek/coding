@@ -144,8 +144,15 @@ class ThumbnailPool(QObject):
         self._stop = True
 
     def wait(self, msec: int = 0) -> None:
+        """★ `msec` 는 **총액**이다 — 워커마다 주면 안 된다.
+
+        예전엔 워커 수만큼 곱해져서, 12코어 PC 에서 `wait(1000)` 이 최대 11초가 됐다
+        (느린 NAS 디코드에 워커들이 붙잡혀 있으면 실제로 그만큼 창이 안 닫혔다)."""
+        import time
+        deadline = time.monotonic() + max(0, int(msec)) / 1000.0
         for w in self._workers:
-            w.wait(msec)
+            remain = int(max(0.0, deadline - time.monotonic()) * 1000)
+            w.wait(remain)
 
     # ------------------------------------------------------------------
     # 내부 사용 — 워커가 한 작업을 끝낼 때마다 호출

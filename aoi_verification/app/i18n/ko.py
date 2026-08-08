@@ -366,6 +366,7 @@ PHASE_FEATURE = "이미지 특징 분석"
 PHASE_SCORING = "유사도 계산"
 PHASE_EMBED = "후보 생성 (GPU 임베딩)"      # 고효율 모드 1단계 — 유사도 계산 직전
 PHASE_COORD = "좌표 매칭 중"                # 좌표 기반 매칭 v2
+PHASE_COORD_PARSE = "좌표 파싱 중…"         # 좌표 매칭 1단계
 # 수동 모드: 첫 슬롯만 기다리고 나머지는 백그라운드 (#streaming).
 # 선행 단계(특징 분석/임베딩) 동안에도 '유사도 계산' 으로 오인되지 않도록 중립 문구.
 LOAD_PRECOMPUTE_FIRST_SLOT = (

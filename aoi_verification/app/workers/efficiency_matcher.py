@@ -417,7 +417,17 @@ class EfficiencyScheduler(QThread):
                             if pre_scoring:                # 재채점 전엔 임베딩 라벨 유지
                                 self.signals.phase.emit(i18n.KO.PHASE_EMBED)
                             self._emit_progress()
-                            embed_q.put((slot, refs, vals, built, ref_emb))
+                            # ★ 타임아웃 없는 put 은 중지 때 새는 자리다.  소비자가
+                            #   먼저 빠져나가면(중지 버튼) 큐가 가득 찬 채로 이 스레드가
+                            #   영원히 걸려 그 슬롯의 임베딩을 세션 끝까지 붙잡고 있었다.
+                            #   센티널 put(아래)과 **같은 규칙**을 본문에도 적용한다.
+                            while not self._stop.is_set():
+                                try:
+                                    embed_q.put((slot, refs, vals, built, ref_emb),
+                                                timeout=0.2)
+                                    break
+                                except queue.Full:
+                                    continue
                     finally:
                         # 종료 신호(예외 경로 포함).  큐가 가득 찬 채 소비자가 이미
                         # 떠났으면(중지) 무한 대기가 되므로 시간을 건다.
