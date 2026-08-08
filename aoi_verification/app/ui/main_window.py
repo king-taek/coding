@@ -505,6 +505,13 @@ class MainWindow(QMainWindow):
         )
         self._show_page(self._setup_page)
 
+    def _on_select_cancelled(self) -> None:
+        """Stage 1 에서 설정 화면으로 복귀 — 진행 중이던 선별 상태를 버린다."""
+        self._phase = PHASE_NONE
+        self._stage1_a_snapshot = None
+        session_mod.clear()
+        self._show_page(self._setup_page)
+
     def _on_match_cancelled(self) -> None:
         """#8 매치 페이지에서 중지 — 진행 중 작업을 멈추고 셋업 화면으로 복귀."""
         wakelock.release()
@@ -1478,6 +1485,8 @@ class MainWindow(QMainWindow):
             self._stack.addWidget(w)
 
         self._select_page.finished.connect(self._on_select_finished)
+        # Stage 1 [← 설정으로] — Stage 2 의 취소와 같은 자리로 돌아간다.
+        self._select_page.cancelled.connect(self._on_select_cancelled)
         self._select_page.state_changed.connect(self._schedule_autosave)
         self._match_page.match_confirmed.connect(self._on_match_confirmed)
         self._match_page.match_undone.connect(self._on_match_undone)

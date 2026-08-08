@@ -24,6 +24,7 @@ from ... import i18n
 from .. import theme
 from ...models.slot import ImageItem
 from .neon_button import NeonButton
+from .no_wheel_slider import NoWheelSlider
 from .scalable_image import ScalableImage
 
 
@@ -89,7 +90,7 @@ class MatchExpandView(QWidget):
         size_row.setSpacing(8)
         size_label = QLabel(i18n.KO.IMAGE_SIZE_LABEL, self)
         size_label.setProperty("role", "muted")
-        self._size_slider = QSlider(Qt.Orientation.Horizontal, self)
+        self._size_slider = NoWheelSlider(Qt.Orientation.Horizontal, self)
         self._size_slider.setRange(ScalableImage.MIN_LONG_EDGE,
                                     ScalableImage.MAX_LONG_EDGE)
         self._size_slider.setSingleStep(20)

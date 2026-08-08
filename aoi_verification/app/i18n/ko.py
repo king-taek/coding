@@ -53,6 +53,11 @@ BTN_MATCH_UNDO = "되돌리기"
 MATCH_UNDO_TOOLTIP = "직전 매칭/매칭없음 결정을 취소합니다 (Ctrl+Z)"
 BTN_RETRY_SKIP = "보류 재시도"
 BTN_SELECT_MODE = "선택 모드"
+# Stage 1 좌측 패널 — 사진을 여러 장 고르면 헤더에 나타나는 일괄 액션.
+# ★ 예전엔 클릭 선택이 아무 데도 연결되지 않아 '테두리만 생기고 할 수 있는 게 없는'
+#   죽은 기능이었다.  라벨에 개수를 넣어 무엇에 적용되는지 분명히 한다.
+BTN_INLINE_VERIFY_FMT = "선택 {n} 장 검증"
+BTN_INLINE_EXCLUDE_FMT = "선택 {n} 장 제외"
 
 # ── 다중 선택 다이얼로그 (Stage 1 선택 모드) ─────────────────────────────
 BULK_SELECT_TITLE_FMT = "{panel} — 다중 선택"
@@ -78,6 +83,12 @@ BTN_BATCH_VERIFY = "선택 항목 검증 대상 지정"
 BTN_VIEW_EXCLUDED_FMT = "검증 제외 사진 보기 ({n})"
 # Stage 1 ‘선택 종료’ — 미결정 사진 모두 제외 처리 후 다음 단계로.
 BTN_END_SELECTION = "선택 종료"
+# Stage 1 에서 설정 화면으로 돌아갈 때 — 이미 내린 결정이 사라지므로 한 번 묻는다.
+SELECT_BACK_CONFIRM_TITLE = "설정으로 돌아가기"
+SELECT_BACK_CONFIRM_FMT = (
+    "지금까지 결정한 {n} 장이 사라지고 설정 화면으로 돌아갑니다.\n"
+    "계속할까요?"
+)
 END_SELECTION_CONFIRM_TITLE = "선택 종료"
 END_SELECTION_CONFIRM_FMT = (
     "남은 {n} 장의 미결정 사진을 모두 ‘검증 제외’ 로 처리하고 "
@@ -121,6 +132,8 @@ RESULT_TITLE = "검증 결과"
 PANEL_LEFT_CANDIDATES = "검증 후보들 (남은 사진)"
 PANEL_CENTER_DECIDE = "검증 결정할 사진"
 PANEL_RIGHT_TARGETS = "검증 대상 (검증하기로 한 사진들)"
+# 우측 패널이 비었을 때의 안내 — 처음 쓰는 사람이 이 칸의 용도를 알 수 있게.
+PANEL_RIGHT_EMPTY = "→ 또는 [✓ 검증] 으로 보낸 사진이 여기에 쌓입니다."
 
 PANEL_MATCH_REF = "기준 사진"
 PANEL_MATCH_CANDIDATES = "검증 장비 후보"

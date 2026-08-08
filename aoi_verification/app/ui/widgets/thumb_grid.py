@@ -358,3 +358,32 @@ class ThumbGrid(QWidget):
         for t in self._tiles:
             t.set_inline_selected(selected)
         self.inline_changed.emit()
+
+    def inline_selected(self) -> list[ThumbEntry]:
+        """인라인으로 고른 항목들.
+
+        ★ `selected()` 와 섞지 마라 — 그쪽은 **체크박스 모드** 전용이고 여기는
+        체크박스 없이 타일을 눌러 고르는 경로다(두 모드는 동시에 켜지지 않는다)."""
+        return [t.entry for t in self._tiles if t.is_inline_selected()]
+
+    def remove_entry(self, entry: ThumbEntry) -> bool:
+        """항목 **한 개**만 지우고 나머지는 그대로 둔다(전체 재생성 회피).
+
+        ★ `truncate`(+N 타일)가 켜진 그리드에서는 쓰지 않는다 — 한 장이 빠지면
+        숨어 있던 한 장이 올라와야 해서 단건 경로가 성립하지 않는다.
+        Stage 1 좌측 패널처럼 전량을 그리는 그리드에서만 안전하다."""
+        if self._truncate:
+            return False
+        tile = next((x for x in self._tiles if x.entry is entry), None)
+        if tile is None:
+            return False
+        self._grid.removeWidget(tile)      # ★ 먼저 레이아웃에서 떼야 재배치가 어긋나지 않는다
+        tile.setParent(None)
+        tile.deleteLater()
+        self._tiles.remove(tile)
+        if entry in self._entries:
+            self._entries.remove(entry)
+        if entry in self._selected:
+            self._selected.remove(entry)
+        self._relayout_columns(self._active_cols)
+        return True

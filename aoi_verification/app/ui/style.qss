@@ -41,7 +41,9 @@ QMenu::item:selected {
 /* 상단 앱 로고 — 각 페이지가 자기 콘텐츠 맨 위에 놓는다(widgets/app_logo.py).
    스크롤이 있는 화면에서는 함께 밀려 올라간다(고정 칸이 아니다). */
 QLabel[role="appLogo"] {
-    padding: 10px 0 6px 0;
+    /* ★ 밴드가 61px(로고 44 + 패딩 16 + 눈금 1)이라 1600px 폭에서 작은 마크 하나가
+       콘텐츠 앞의 빈 띠를 차지했다.  구분 눈금은 남기고 여백만 줄인다. */
+    padding: 4px 0 2px 0;
     border-bottom: 1px solid $line2;
 }
 
@@ -105,6 +107,13 @@ QLabel[role="subtitle"] {
 
 QLabel[role="muted"] {
     color: $mute;
+}
+
+/* 빈 칸 안내 — 아직 아무것도 없는 패널이 '고장난 회색 칸' 으로 보이지 않게,
+   이 칸이 무엇을 담는 곳인지 한 줄로 알려 준다. */
+QLabel[role="emptyHint"] {
+    color: $mute;
+    padding: 28px 12px;
 }
 
 QLabel[role="mono"] {

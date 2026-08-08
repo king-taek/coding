@@ -34,6 +34,7 @@ from ..widgets.app_logo import build_logo_label
 from ..widgets.loading_overlay import LoadingOverlay
 from ..widgets.match_expand_view import MatchExpandView
 from ..widgets.neon_button import NeonButton
+from ..widgets.no_wheel_slider import NoWheelSlider
 from ..widgets.neon_card import NeonCard
 from ..widgets.scalable_image import ScalableImage
 from ..widgets.slot_section import SlotSection
@@ -221,7 +222,7 @@ class MatchPage(QWidget):
         size_row.setSpacing(8)
         size_label = QLabel(i18n.KO.IMAGE_SIZE_LABEL, center)
         size_label.setProperty("role", "muted")
-        self.size_slider = QSlider(Qt.Orientation.Horizontal, center)
+        self.size_slider = NoWheelSlider(Qt.Orientation.Horizontal, center)
         self.size_slider.setRange(ScalableImage.MIN_LONG_EDGE,
                                    ScalableImage.MAX_LONG_EDGE)
         # 모니터 크기에 맞춰 자동 시작값 — 세션 한정 (재시작 시 다시 자동맞춤).
