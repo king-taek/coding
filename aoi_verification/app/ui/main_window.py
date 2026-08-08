@@ -187,6 +187,8 @@ class MainWindow(QMainWindow):
         # 비어있지 않으면 _finish_session 이 _matches_a/_b 대신 이걸 사용한다.
         self._reviewed_matches: list[MatchResult] = []
         self._reviewed_unmatched: list[MissEntry] = []
+        self._reviewed_unmatched_keys: set = set()
+        self._run_log_written = False
         self._stage1_a_snapshot: dict | None = None
         self._working_xlsx: Optional[Path] = None
         self._template_used: Optional[Path] = None
@@ -849,6 +851,8 @@ class MainWindow(QMainWindow):
         self._skipped_a.clear()
         self._reviewed_matches.clear()
         self._reviewed_unmatched.clear()
+        self._reviewed_unmatched_keys = set()
+        self._run_log_written = False
         self._thumbs_handled = False        # 썸네일 완료 one-shot 가드 리셋(#C2)
         # 타일 픽스맵 캐시 비우기 — 폴더가 바뀌어도 stale 픽스맵이 남지 않게(#렉).
         try:
@@ -1083,6 +1087,10 @@ class MainWindow(QMainWindow):
         """MatchReviewPage 의 [검토 완료] 시그널 → 결과 페이지 진입."""
         self._reviewed_matches = list(kept)
         self._reviewed_unmatched = list(unmatched_refs)
+        # ★ 결과 화면에서 검토로 되돌아올 때 되살리려면 '매치 없음' 표시를 키로 들고
+        #   있어야 한다 — load_state 는 진입할 때마다 그 집합을 비운다.
+        self._reviewed_unmatched_keys = set(
+            self._match_review_page.unmatched_keys())
         self._finish_session()
 
     # ==================================================================
@@ -1279,6 +1287,39 @@ class MainWindow(QMainWindow):
         )
         self._show_page(self._match_review_page)
 
+    def _on_result_edited(self, matches: list, unmatched: list) -> None:
+        """결과 화면에서 결과가 바뀌었다(실패 검토로 신규 매치 확정 등)."""
+        self._reviewed_matches = list(matches)
+        self._reviewed_unmatched = list(unmatched)
+
+    def _reenter_review(self) -> None:
+        """결과 화면 → 매치 검토 화면 복귀(U-10).
+
+        ★ `_proceed_to_review_or_finish` 를 그대로 쓰면 안 된다 — 그쪽은 원본 자동
+        매치(`_merge_matches`)로 화면을 다시 만들어 사용자가 검토에서 한 스왑·매치
+        없음 표시를 **전부 지워 버린다**.  검토 결과(`_reviewed_matches`)를 기반으로,
+        '매치 없음' 표시까지 복원해서 들어간다."""
+        if self._match_review_page is None or self._match_page is None:
+            return
+        base = list(self._reviewed_matches) if self._reviewed_matches \
+            else self._merge_matches()
+        ctx = self._match_page.review_context()
+        match_state = self._match_page.get_state()
+        val_pool = match_state.val_pool if match_state is not None else None
+        try:
+            candidates_by_ref = self._match_page.build_candidates_by_ref(base)
+        except Exception:
+            candidates_by_ref = None
+        self._match_review_page.load_state(
+            base, score_cache=ctx.score_cache, val_pool=val_pool,
+            candidates_by_ref=candidates_by_ref,
+            coord_mode=ctx.coord_mode,
+            tolerance=ctx.tolerance,
+            coord_failed_count=ctx.coord_failed_count,
+            unmatched_keys=getattr(self, "_reviewed_unmatched_keys", None),
+        )
+        self._show_page(self._match_review_page)
+
     # ==================================================================
     # Result
     # ==================================================================
@@ -1333,6 +1374,11 @@ class MainWindow(QMainWindow):
         self._write_run_log()
 
     def _write_run_log(self) -> None:
+        # ★ 결과 ↔ 검토를 오가면 `_finish_session` 이 여러 번 돈다.  사용 통계는
+        #   세션당 한 번만 남긴다(오가는 횟수가 검증 건수처럼 쌓이면 안 된다).
+        if getattr(self, "_run_log_written", False):
+            return
+        self._run_log_written = True
         """검증 1회의 사용 통계를 컴퓨터별 폴더에 기록(캐시 빠른 매치는 제외)."""
         try:
             from ..utils import run_log
@@ -1428,6 +1474,8 @@ class MainWindow(QMainWindow):
         self._stage1_a_snapshot = None
         self._reviewed_matches.clear()
         self._reviewed_unmatched.clear()
+        self._reviewed_unmatched_keys = set()
+        self._run_log_written = False
         self._phase = PHASE_NONE
         self._show_page(self._setup_page)
 
@@ -1495,6 +1543,10 @@ class MainWindow(QMainWindow):
         self._match_page.cancelled.connect(self._on_match_cancelled)
         self._result_page.new_session_requested.connect(self._new_session)
         self._match_review_page.finished.connect(self._on_match_review_done)
+        self._result_page.back_to_review_requested.connect(self._reenter_review)
+        # 실패 검토에서 새로 확정한 매치가 결과 객체에만 남아 있으면, 검토로 돌아갔다
+        # 재완료할 때 새 FinalResult 가 만들어지며 사라진다 — 여기로 되돌려 받는다.
+        self._result_page.result_edited.connect(self._on_result_edited)
 
     def _start_backend_import_async(self) -> None:
         """무거운 모듈을 **백그라운드 스레드에서 import 만** 한다.

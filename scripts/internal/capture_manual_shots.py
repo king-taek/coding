@@ -81,7 +81,7 @@ EXPECTED = [
     # 는 후보 격자를 손으로 채워 찍은 것이라 실제 실행에서는 나오지 않는 화면이었다.
     "13_2단계_자동매칭",
     "15_검토_시트", "16_크롭_검토행", "17_시트_좌우비교",
-    "18_결과", "19_시트_매칭결과검토",
+    "18_결과",
     "20_시트_사진정보", "21_시트_업데이트",
     "22_셋업_흑연",
 ]
@@ -703,7 +703,7 @@ def _stage_result(win, sr) -> dict:
         "원본화질": getattr(page, "original_quality_chk", None),
         "전체양식": getattr(page, "full_template_chk", None),
         "새검증": getattr(page, "new_btn", None),
-        "매칭결과검토": getattr(page, "review_btn", None),
+        "검토화면복귀": getattr(page, "review_btn", None),
         "실패검토": getattr(page, "review_unmatched_btn", None),
         "엑셀저장": getattr(page, "export_btn", None),
     }
@@ -820,12 +820,6 @@ def main() -> int:
     print("결과 화면")
     rects = _stage_result(win, sr)
     sh.shoot("18_결과", win, rects=rects)
-
-    from aoi_verification.app.ui.widgets.matches_review import MatchesReviewDialog
-    matches, _ = _review_data(sr)
-    mr = MatchesReviewDialog(matches, coord_mode=True, tolerance=_TOL, parent=win)
-    sh.sheet("19_시트_매칭결과검토", win,
-             lambda: win._sheets.run(mr, full_bleed=True))
 
     from aoi_verification.app.ui.widgets.image_info_dialog import ImageInfoDialog
     info_dlg = ImageInfoDialog(parent=win, image_path=str(s0.ref_images[0].path))

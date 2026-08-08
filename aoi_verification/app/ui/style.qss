@@ -216,6 +216,28 @@ QLabel[role="plusTile"] {
     border-radius: $radius;
 }
 
+/* 결과 요약 통계 타일 — 검증의 종착 화면에서 '몇 장이 맞았고 몇 장이 문제인가' 를
+   스크롤 없이 읽히게 한다.  수치는 모노(자릿수 정렬), 캡션은 본문 서체. */
+QFrame[role="statTile"] {
+    background-color: $elev;
+    border: 1px solid $line;
+    border-radius: $radius_sm;
+}
+QLabel[role="statValue"] {
+    font-family: $font_mono;
+    font-size: 26px;
+    font-weight: 700;
+    color: $ink;
+}
+/* 상태는 색으로도 말한다 — 다만 숫자가 0 이면 중립(없는 문제를 붉게 칠하지 않는다). */
+QLabel[role="statValue"][tone="ok"] { color: $pass; }
+QLabel[role="statValue"][tone="over"] { color: $danger; }
+QLabel[role="statValue"][tone="none"] { color: $ink2; }
+QLabel[role="statCaption"] {
+    color: $mute;
+    font-size: $font_caption_sz;
+}
+
 /* 얇은 구분선(QFrame 을 1px 로 눕혀 쓰는 자리) */
 QFrame[role="hrule"] {
     background: $line;

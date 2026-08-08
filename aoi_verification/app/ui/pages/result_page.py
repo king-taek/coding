@@ -5,8 +5,8 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from PyQt6.QtCore import pyqtSignal
-from PyQt6.QtWidgets import (QCheckBox, QFileDialog, QHBoxLayout, QLabel,
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtWidgets import (QCheckBox, QFileDialog, QFrame, QHBoxLayout, QLabel,
                               QVBoxLayout, QWidget)
 
 from ... import i18n
@@ -29,6 +29,12 @@ class ResultPage(QWidget):
     """검증 결과 요약 + 저장."""
 
     new_session_requested = pyqtSignal()
+    # 결과 → 검토 화면 복귀(U-10).  main_window 가 검토 결과를 보존한 채 되돌린다.
+    back_to_review_requested = pyqtSignal()
+    # 결과 화면에서 결과가 바뀌었음(실패 검토로 신규 매치 확정 등).
+    # ★ 이걸 상위로 되돌리지 않으면, 검토로 갔다 재완료할 때 새 FinalResult 가
+    #   만들어지며 여기서 만든 매치가 조용히 사라진다.
+    result_edited = pyqtSignal(list, list)      # (matches, unmatched_refs)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -45,6 +51,8 @@ class ResultPage(QWidget):
         self._tolerance: float = _DFLT_TOL
         self._loading = LoadingOverlay(self)
         self._exporter: ExcelExporter | None = None
+        # 이번 결과를 한 번이라도 저장했는가 — [새 검증 시작] 확인의 근거(U-06).
+        self._exported = False
         self._build()
 
     # ------------------------------------------------------------------
@@ -61,10 +69,13 @@ class ResultPage(QWidget):
         self.title.setProperty("role", "title")
         root.addWidget(self.title)
 
-        # 요약 카드
+        # 요약 카드 — ★ 폭을 묶는다.  1600px 창에서 카드가 화면 끝까지 늘어나면
+        #   짧은 문장 몇 줄이 가로로 흩어져 '빈 카드' 처럼 보인다.  읽기 좋은 폭으로
+        #   제한하면 남는 여백이 사고가 아니라 의도로 읽힌다.
         self._summary_card = NeonCard(role="card", parent=self)
+        self._summary_card.setMaximumWidth(820)
         self._summary_layout = self._summary_card.body()
-        root.addWidget(self._summary_card)
+        root.addWidget(self._summary_card, alignment=Qt.AlignmentFlag.AlignLeft)
 
         root.addStretch(1)
 
@@ -105,11 +116,15 @@ class ResultPage(QWidget):
         bar = QHBoxLayout()
         bar.addStretch(1)
         self.new_btn = NeonButton(i18n.KO.BTN_NEW_SESSION, role="ghost")
-        self.new_btn.clicked.connect(self.new_session_requested.emit)
+        self.new_btn.clicked.connect(self._on_new_session)
         bar.addWidget(self.new_btn)
 
-        self.review_btn = NeonButton(i18n.KO.BTN_REVIEW_MATCHES, role="ghost")
-        self.review_btn.clicked.connect(self._on_review)
+        # ★ 예전엔 여기서 별도의 '매칭 결과 검토' 다이얼로그를 열었다.  그런데 전용
+        #   검토 페이지가 이미 상위 기능(스왑·차순위·매치 없음)을 갖고 있어, 결과
+        #   화면이 기능이 더 적은 다른 검토를 또 권하는 꼴이었다('검토' 가 세 이름·세
+        #   화면으로 갈렸다).  다이얼로그를 없애고 **그 검토 화면으로 되돌아간다**.
+        self.review_btn = NeonButton(i18n.KO.BTN_BACK_TO_REVIEW, role="ghost")
+        self.review_btn.clicked.connect(self.back_to_review_requested.emit)
         bar.addWidget(self.review_btn)
 
         # 매치 실패 사진 검토 — 엑셀 저장 직전, 마지막 한 번 더 매칭 기회 (#8).
@@ -142,6 +157,10 @@ class ResultPage(QWidget):
                     fast_results: dict | None = None,
                     coord_mode: bool = False,
                     tolerance: float = _DFLT_TOL) -> None:
+        # ★ 새 결과가 들어오면 '저장했음' 은 무효다.  검토로 되돌아가 결과를 바꾼 뒤
+        #   다시 들어오는 경로도 여기를 지나므로 자연히 리셋된다.
+        if result is not self._result:
+            self._exported = False
         self._result = result
         self._template_path = template_path
         self._target_path = target_path
@@ -168,39 +187,24 @@ class ResultPage(QWidget):
             lab.setWordWrap(True)
             self._summary_layout.addWidget(lab)
 
-        # 자동 매치 모드면 검토를 권하는 안내를 가장 위에 노출.
-        if self._auto_mode:
-            n_match = len(result.matches)
-            n_miss = len(result.unmatched_refs)
-            hint = QLabel(
-                i18n.KO.AUTO_REVIEW_HINT_FMT.format(
-                    n_match=n_match, n_miss=n_miss,
-                ),
-                self._summary_card,
-            )
-            hint.setWordWrap(True)
-            hint.setProperty("role", "hintWarn")
-            self._summary_layout.addWidget(hint)
+        line(i18n.KO.RESULT_MACHINES_FMT.format(ref=result.ref_machine,
+                                                val=result.val_machine))
 
-        line(f"기준 장비: {result.ref_machine}    검증 장비: {result.val_machine}")
-        line(f"매칭 성공 사진: {len(result.matches)} 장")
+        # ★ 검증의 종착 화면인데 핵심 수치가 비슷한 크기의 문장 속에 묻혀 있었다.
+        #   '몇 장이 맞았고 몇 장이 문제인가' 를 스크롤 없이 2초 안에 읽히게 타일로 낸다.
+        self._summary_layout.addLayout(self._build_stat_tiles(result))
+
         if result.slot_only_ref or result.slot_only_val:
-            line(
-                "Slot 불일치  ·  기준 전용: "
-                f"{', '.join(result.slot_only_ref) or '없음'}",
-                role="muted",
-            )
-            line(
-                "Slot 불일치  ·  검증 전용: "
-                f"{', '.join(result.slot_only_val) or '없음'}",
-                role="muted",
-            )
+            line(i18n.KO.RESULT_SLOT_ONLY_REF_FMT.format(
+                names=", ".join(result.slot_only_ref) or i18n.KO.VALUE_NONE),
+                role="muted")
+            line(i18n.KO.RESULT_SLOT_ONLY_VAL_FMT.format(
+                names=", ".join(result.slot_only_val) or i18n.KO.VALUE_NONE),
+                role="muted")
 
         if self._target_path is not None:
-            line(
-                f"{i18n.KO.WORKING_FILE_LABEL}: {self._target_path}",
-                role="muted",
-            )
+            line(f"{i18n.KO.WORKING_FILE_LABEL}: {self._target_path}",
+                 role="monoMuted")
 
         # 검토 가능한 매치 실패 사진이 있을 때만 검토 버튼 활성.
         n_unmatched = len(result.unmatched_refs)
@@ -213,52 +217,6 @@ class ResultPage(QWidget):
             )
         else:
             self.review_unmatched_btn.setText(i18n.KO.BTN_REVIEW_UNMATCHED)
-
-    # ------------------------------------------------------------------
-    def _on_review(self) -> None:
-        if self._result is None:
-            return
-        from ..widgets.matches_review import MatchesReviewDialog
-        dlg = MatchesReviewDialog(self._result.matches, parent=self,
-                                  coord_mode=self._coord_mode,
-                                  tolerance=self._tolerance)
-        sheets.run(dlg, full_bleed=True)
-        removed = dlg.removed
-        if not removed:
-            return
-        # 결과에서 제외 + 요약 라벨 갱신
-        keys = {(m.slot, m.ref_path.name, m.val_path.name) for m in removed}
-        self._result.matches = [
-            m for m in self._result.matches
-            if (m.slot, m.ref_path.name, m.val_path.name) not in keys
-        ]
-        # 제외된 매치는 '매치 실패(매칭 취소)' 로 재분류 → 매치 실패 검토에서
-        # ‘매칭 취소 목록’ 으로 다시 검토 가능 (#14).  중복 추가 방지.
-        from ...models.result import MissEntry
-        existing = {(u.slot, Path(u.path).name) for u in self._result.unmatched_refs}
-        for m in removed:
-            k = (m.slot, m.ref_path.name)
-            if k in existing:
-                continue
-            existing.add(k)
-            self._result.unmatched_refs.append(MissEntry(
-                slot=m.slot, side="ref", path=m.ref_path,
-                note=i18n.KO.CANCELLED_NOTE,
-            ))
-        sheets.info(
-            self, i18n.KO.APP_TITLE,
-            i18n.KO.REVIEW_REMOVED_FMT.format(n=len(removed)),
-        )
-        # 요약을 다시 그린다 (auto_mode 도 보존).
-        self.show_result(self._result,
-                         template_path=self._template_path,
-                         target_path=self._target_path,
-                         auto_mode=getattr(self, "_auto_mode", False),
-                         val_pool=self._val_pool,
-                         score_cache=self._score_cache,
-                         fast_results=self._fast_results,
-                         coord_mode=self._coord_mode,
-                         tolerance=self._tolerance)
 
     # ------------------------------------------------------------------
     def _on_review_unmatched(self) -> None:
@@ -300,6 +258,10 @@ class ResultPage(QWidget):
             u for u in self._result.unmatched_refs
             if Path(u.path) not in resolved_paths
         ]
+        # ★ 상위(main_window)에 되돌려 준다 — 검토 화면으로 갔다 재완료하면
+        #   새 FinalResult 가 만들어지므로, 여기서 확정한 매치가 사라진다.
+        self.result_edited.emit(list(self._result.matches),
+                                list(self._result.unmatched_refs))
         sheets.info(
             self, i18n.KO.APP_TITLE,
             i18n.KO.UNMATCHED_REVIEW_DONE_FMT.format(n=len(dlg.new_matches)),
@@ -312,6 +274,70 @@ class ResultPage(QWidget):
                          score_cache=self._score_cache,
                          coord_mode=self._coord_mode,
                          tolerance=self._tolerance)
+
+    # ------------------------------------------------------------------
+    def _build_stat_tiles(self, result: FinalResult) -> QHBoxLayout:
+        """핵심 수치를 큰 모노 숫자 타일로.
+
+        '허용 초과' 는 결과 객체에 따로 없다 — 검토 화면과 **같은 분류 함수**를 써서
+        센다(두 화면이 다른 기준으로 세면 사용자가 숫자 불일치를 먼저 발견한다)."""
+        from .match_review_page import tally
+
+        _ok, n_over, _none = tally(result.matches, set(), self._coord_mode)
+        n_match = len(result.matches)
+        n_miss = len(result.unmatched_refs)
+        n_slot = len(result.slot_only_ref) + len(result.slot_only_val)
+
+        row = QHBoxLayout()
+        row.setSpacing(10)
+        specs = [
+            (n_match, i18n.KO.STAT_MATCHED, "ok"),
+            (n_over, i18n.KO.STAT_OVER_TOLERANCE, "over" if n_over else "none"),
+            (n_miss, i18n.KO.STAT_NO_MATCH, "over" if n_miss else "none"),
+            (n_slot, i18n.KO.STAT_SLOT_MISMATCH, "none"),
+        ]
+        if not self._coord_mode:
+            del specs[1]              # 유사도 모드엔 '허용 오차' 개념이 없다
+        for value, caption, tone in specs:
+            row.addWidget(self._stat_tile(value, caption, tone))
+        row.addStretch(1)
+        return row
+
+    def _stat_tile(self, value: int, caption: str, tone: str) -> QFrame:
+        tile = QFrame(self._summary_card)
+        tile.setProperty("role", "statTile")
+        lay = QVBoxLayout(tile)
+        lay.setContentsMargins(16, 10, 16, 10)
+        lay.setSpacing(2)
+        num = QLabel(f"{value:,}", tile)
+        num.setProperty("role", "statValue")
+        num.setProperty("tone", tone)
+        cap = QLabel(caption, tile)
+        cap.setProperty("role", "statCaption")
+        lay.addWidget(num)
+        lay.addWidget(cap)
+        return tile
+
+    def _on_new_session(self) -> None:
+        """★ 엑셀로 저장하기 전에 누르면 이번 세션 결과가 통째로 사라진다.
+
+        바로 옆이 검토 버튼이라 오클릭 소지가 크고, 같은 앱의 다른 파괴적 동작
+        ([선택 종료]·검토 닫기)은 전부 확인을 받는다 — 여기만 예외였다."""
+        if self.has_unsaved_result():
+            from PyQt6.QtWidgets import QMessageBox
+            r = sheets.ask(
+                self, i18n.KO.NEW_SESSION_CONFIRM_TITLE,
+                i18n.KO.NEW_SESSION_CONFIRM_BODY,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if r != QMessageBox.StandardButton.Yes:
+                return
+        self.new_session_requested.emit()
+
+    def has_unsaved_result(self) -> bool:
+        """보여 줄 결과가 있는데 아직 한 번도 저장하지 않았는가."""
+        return self._result is not None and not self._exported
 
     def _on_export(self) -> None:
         if self._result is None:
@@ -351,15 +377,51 @@ class ResultPage(QWidget):
 
     def _on_export_done(self, path: str) -> None:
         self._loading.hide_overlay()
-        sheets.info(
+        self._exported = True
+        # ★ 워커 시그널 슬롯에서 곧바로 모달을 열면 중첩 이벤트 루프가 생긴다 —
+        #   한 틱 미뤄 워커가 완전히 빠져나간 뒤에 띄운다.
+        self._pending_saved_path = Path(path)
+        QTimer.singleShot(0, self._offer_open_saved_file)
+
+    def _offer_open_saved_file(self) -> None:
+        """저장 다음 행동은 예외 없이 '그 파일을 여는 것' 이다 — 경로만 보여 주면
+        사용자가 긴 문자열을 외워 탐색기에서 다시 찾아가야 한다."""
+        path = getattr(self, "_pending_saved_path", None)
+        if path is None:
+            return
+        choice = sheets.choose(
             self, i18n.KO.APP_TITLE,
             i18n.KO.SAVE_SUCCESS_FMT.format(path=path),
+            [("open_file", i18n.KO.BTN_OPEN_SAVED_FILE, "primary"),
+             ("open_dir", i18n.KO.BTN_OPEN_SAVED_FOLDER, "ghost"),
+             ("close", i18n.KO.MSG_BTN_CLOSE, "ghost")],
+            default="open_file",
         )
+        if choice == "open_file":
+            self._open_in_os(path)
+        elif choice == "open_dir":
+            self._open_in_os(path.parent)
+
+    @staticmethod
+    def _open_in_os(target: Path) -> None:
+        from PyQt6.QtCore import QUrl
+        from PyQt6.QtGui import QDesktopServices
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
 
     def _on_export_failed(self, msg: str) -> None:
         self._loading.hide_overlay()
-        sheets.warn(
-            self, i18n.KO.APP_TITLE,
-            i18n.KO.SAVE_FAIL_FMT.format(error=msg),
+        # ★ 가장 흔한 실패는 '결과 파일이 엑셀에서 열려 있음'(PermissionError) 이다.
+        #   OS 원문("[Errno 13] Permission denied: C:\…")만 보여 주면 무엇을 해야
+        #   할지 알 수 없다 — 다음 행동을 먼저 말하고, 바로 다시 시도할 수 있게 한다.
+        locked = "permission" in msg.lower() or "errno 13" in msg.lower()
+        body = (i18n.KO.SAVE_FAIL_LOCKED_FMT.format(error=msg) if locked
+                else i18n.KO.SAVE_FAIL_FMT.format(error=msg))
+        choice = sheets.choose(
+            self, i18n.KO.APP_TITLE, body,
+            [("retry", i18n.KO.BTN_RETRY_SAVE, "primary"),
+             ("close", i18n.KO.MSG_BTN_CLOSE, "ghost")],
+            default="retry",
         )
+        if choice == "retry":
+            self._on_export()
 

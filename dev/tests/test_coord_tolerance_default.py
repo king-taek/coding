@@ -27,11 +27,11 @@ def test_display_fallbacks_read_the_single_source():
     pytest.importorskip("PyQt6.QtWidgets")
     from aoi_verification.app.ui import score_fmt
     from aoi_verification.app.ui.pages import match_review_page, result_page
-    from aoi_verification.app.ui.widgets import matches_review, unmatched_review_dialog
+    from aoi_verification.app.ui.widgets import unmatched_review_dialog
 
     dflt = config.DEFAULT_COORD_TOLERANCE
     for mod in (score_fmt, match_review_page, result_page,
-                matches_review, unmatched_review_dialog):
+                unmatched_review_dialog):
         assert mod._DFLT_TOL == dflt, mod.__name__
 
 

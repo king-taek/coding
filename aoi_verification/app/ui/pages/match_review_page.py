@@ -992,7 +992,8 @@ class MatchReviewPage(QWidget):
                    candidates_by_ref: dict | None = None,
                    coord_mode: bool = False,
                    tolerance: float = _DFLT_TOL,
-                   coord_failed_count: int = 0) -> None:
+                   coord_failed_count: int = 0,
+                   unmatched_keys: set | None = None) -> None:
         """매치 검토 화면 초기화.
 
         ``score_cache`` 와 ``val_pool`` 이 함께 주어지면 각 매치 행에 차순위
@@ -1012,7 +1013,12 @@ class MatchReviewPage(QWidget):
         if getattr(self, "_row_batch_timer", None) is not None:
             self._row_batch_timer.stop()
         self._matches = list(matches)
+        # ★ 결과 화면에서 되돌아올 때(U-10) 사용자가 표시한 '매치 없음' 을 되살린다.
+        #   무조건 비우면 돌아온 화면에 빨간 행이 하나도 없다 — 표시를 다시 해야 한다.
         self._unmatched_keys.clear()
+        if unmatched_keys:
+            valid = {m.key for m in self._matches}
+            self._unmatched_keys.update(k for k in unmatched_keys if k in valid)
         self._coord_mode = bool(coord_mode)
         self._tolerance = float(tolerance) if tolerance and tolerance > 0 else _DFLT_TOL
         # 점수 열 이름을 엔진에 맞춘다 — 구형(유사도)에서 '거리(µm)' 로 보이던 오표기.
@@ -1105,6 +1111,10 @@ class MatchReviewPage(QWidget):
             self._row_batch_timer.start(0)
         else:
             self._loading.hide_overlay()
+
+    def unmatched_keys(self) -> set:
+        """사용자가 '매치 없음' 으로 표시한 매치 키들(결과↔검토 왕복 보존용)."""
+        return set(self._unmatched_keys)
 
     def _on_size_changed(self, value: int) -> None:
         self._thumb_px = int(value)

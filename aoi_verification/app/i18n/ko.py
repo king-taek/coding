@@ -97,8 +97,17 @@ END_SELECTION_CONFIRM_FMT = (
 BULK_SELECT_EXCLUDED_TITLE = "검증 제외 사진"
 
 BTN_EXPORT_EXCEL = "엑셀로 저장"
+BTN_OPEN_SAVED_FILE = "파일 열기"
+BTN_OPEN_SAVED_FOLDER = "폴더 열기"
+BTN_RETRY_SAVE = "다시 시도"
 BTN_NEW_SESSION = "새 검증 시작"
-BTN_REVIEW_MATCHES = "매칭 결과 검토"
+NEW_SESSION_CONFIRM_TITLE = "새 검증 시작"
+NEW_SESSION_CONFIRM_BODY = (
+    "아직 엑셀로 저장하지 않았습니다.  지금 새 검증을 시작하면 이번 결과가 사라집니다.\n"
+    "계속할까요?"
+)
+# 결과 화면 → 전용 검토 화면으로 되돌아가기(검토 결과는 그대로 보존된다).
+BTN_BACK_TO_REVIEW = "← 검토 화면으로"
 
 # ── 매칭 결과 검토 (#18) ───────────────────────────────────────────────────
 REVIEW_DIALOG_TITLE = "매칭 결과 검토"
@@ -109,7 +118,6 @@ REVIEW_HINT = (
 )
 REVIEW_BTN_DELETE = "삭제"
 REVIEW_BTN_UNDELETE = "삭제 취소 ↩"
-REVIEW_REMOVED_FMT = "{n} 개의 매칭이 결과에서 제외되었습니다."
 
 # ── 셋업 페이지 ────────────────────────────────────────────────────────────
 # 이전 값 "AOI Recipe Verificator" 는 (a) 오타(verificator → verifier) 이고
@@ -128,6 +136,15 @@ STAGE1_TITLE = "Stage 1 — 후보 선별"
 STAGE2_TITLE = "Stage 2 — 유사도 기반 매칭"
 STAGE2_TITLE_COORD = "Stage 2 — 좌표 기반 매칭 (v2)"
 RESULT_TITLE = "검증 결과"
+# 결과 요약 — 핵심 수치는 타일로, 나머지는 문장으로.
+RESULT_MACHINES_FMT = "기준 장비: {ref}    검증 장비: {val}"
+RESULT_SLOT_ONLY_REF_FMT = "Slot 불일치  ·  기준 전용: {names}"
+RESULT_SLOT_ONLY_VAL_FMT = "Slot 불일치  ·  검증 전용: {names}"
+VALUE_NONE = "없음"
+STAT_MATCHED = "매칭 성공"
+STAT_OVER_TOLERANCE = "허용 초과"
+STAT_NO_MATCH = "매치 없음"
+STAT_SLOT_MISMATCH = "Slot 불일치"
 MATCH_REVIEW_TITLE = "매치 검토"
 
 PANEL_LEFT_CANDIDATES = "검증 후보들 (남은 사진)"
@@ -572,6 +589,14 @@ SAVE_DIALOG_TITLE = "결과 엑셀 저장 위치 선택"
 SAVE_FILENAME_FMT = "AOI검증결과_{ref}_vs_{val}_{ts}.xlsx"
 SAVE_SUCCESS_FMT = "엑셀 저장 완료:\n{path}"
 SAVE_FAIL_FMT = "엑셀 저장 실패:\n{error}"
+# ★ 가장 흔한 실패는 결과 파일이 엑셀에서 열려 있는 경우다.  OS 원문만 보여 주면
+#   무엇을 해야 할지 알 수 없으므로 **다음 행동을 먼저** 말한다.
+SAVE_FAIL_LOCKED_FMT = (
+    "결과 파일에 쓸 수 없습니다.\n\n"
+    "그 파일이 엑셀에서 열려 있으면 닫은 뒤 다시 시도해 주세요.\n"
+    "(다른 프로그램이 쓰고 있거나 폴더 권한이 없을 때도 같은 오류가 납니다.)\n\n"
+    "원문: {error}"
+)
 SLOT_MISMATCH_SHEET = "Slot 불일치 목록"
 SHEET_UNMATCHED = "미매칭 사진"
 # 미매칭 행 D열 — 결함 geometry(area/width/length/contrast) 표기.  Surface.flt 에서
