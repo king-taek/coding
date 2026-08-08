@@ -744,6 +744,8 @@ class MatchPage(QWidget):
     # ------------------------------------------------------------------
     def _on_cancel_requested(self) -> None:
         """#8 중지 — 진행 중인 사전계산/매칭 워커를 안전하게 멈추고 세션 중단."""
+        if not self._confirm_cancel():
+            return
         self._stop_precompute_worker()
         self._detach_worker()
         self._worker = None
@@ -757,6 +759,47 @@ class MatchPage(QWidget):
         self._coord_failed_set = set()
         self._loading.hide_overlay()
         self.cancelled.emit()
+
+    def _confirm_cancel(self) -> bool:
+        """진행 중이면 한 번 묻는다 — 중단은 '잠깐 멈춤' 이 아니라 계산 전부 폐기다.
+
+        ★ 로딩 오버레이는 시트보다 **위**에 있다(main_window 가 그렇게 만든다).
+        띄운 채 물으면 확인창이 어두운 화면 뒤에 가려 보이지 않으므로, 물어보는 동안만
+        내렸다가 '아니오' 면 그대로 되돌린다."""
+        done, total = self._cancel_progress()
+        if done <= 0:
+            return True                      # 아직 한 것이 없다 — 묻지 않는다
+        from PyQt6.QtWidgets import QMessageBox
+        was_visible = self._loading.isVisible()
+        msg = getattr(self._loading, "_label", None)
+        keep_msg = msg.text() if msg is not None else ""
+        if was_visible:
+            self._loading.hide()
+        r = sheets.ask(
+            self, i18n.KO.MATCH_CANCEL_CONFIRM_TITLE,
+            i18n.KO.MATCH_CANCEL_CONFIRM_FMT.format(done=done, total=total),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if r == QMessageBox.StandardButton.Yes:
+            return True
+        if was_visible:                      # 되돌린다 — 작업은 계속 돌고 있다
+            self._loading.show_overlay(keep_msg, cancelable=True)
+            if total > 0:
+                self._loading.set_progress(done, total, keep_msg)
+        return False
+
+    def _cancel_progress(self) -> tuple[int, int]:
+        """확인창에 넣을 '지금까지 얼마나 했는가' — 단계에 따라 출처가 다르다."""
+        done = int(getattr(self, "_precompute_done", 0) or 0)
+        total = int(getattr(self, "_precompute_total", 0) or 0)
+        if total > 0:
+            return done, total
+        state = self._state
+        if state is not None:
+            done = len(state.matches)
+            return done, done + len(state.queue)
+        return 0, 0
 
     # ------------------------------------------------------------------
     def _detach_worker(self) -> None:

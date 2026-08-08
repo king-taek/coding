@@ -204,7 +204,11 @@ def transition_in(container, new_pixmap, *, forward: bool = True,
     overlay.setPixmap(new_pixmap)
     overlay.setScaledContents(False)
     overlay.setGeometry(container.rect())
-    overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+    # ★ 마우스를 **흡수한다**.  전환 240ms 동안 스택이 담고 있는 것은 아직 **옛 페이지**라
+    #   (main_window._show_page 가 스냅샷을 찍고 되돌려 놓는다), 마우스를 통과시키면
+    #   눈에 보이는 새 화면이 아니라 방금 떠난 화면의 그 좌표 위젯이 눌린다.
+    #   (키·단축키는 여전히 통과한다 — 그건 각 페이지의 isVisible 가드가 막는다.)
+    overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
     eff = QGraphicsOpacityEffect(overlay)
     eff.setOpacity(0.0)
     overlay.setGraphicsEffect(eff)
@@ -269,7 +273,11 @@ def crossfade_from(container, old_pixmap, *, duration: int = DUR_RECOLOR,
     overlay.setPixmap(old_pixmap)
     overlay.setScaledContents(False)
     overlay.setGeometry(container.rect())
-    overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+    # ★ 마우스를 **흡수한다**.  전환 240ms 동안 스택이 담고 있는 것은 아직 **옛 페이지**라
+    #   (main_window._show_page 가 스냅샷을 찍고 되돌려 놓는다), 마우스를 통과시키면
+    #   눈에 보이는 새 화면이 아니라 방금 떠난 화면의 그 좌표 위젯이 눌린다.
+    #   (키·단축키는 여전히 통과한다 — 그건 각 페이지의 isVisible 가드가 막는다.)
+    overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
     eff = QGraphicsOpacityEffect(overlay)
     eff.setOpacity(1.0)
     overlay.setGraphicsEffect(eff)

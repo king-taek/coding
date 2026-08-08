@@ -189,6 +189,10 @@ class MainWindow(QMainWindow):
         self._reviewed_unmatched: list[MissEntry] = []
         self._reviewed_unmatched_keys: set = set()
         self._run_log_written = False
+        # 기준 사진 기록 저장 디바운스 — ★ self 를 부모로(정적 singleShot 금지).
+        self._ref_history_timer = QTimer(self)
+        self._ref_history_timer.setSingleShot(True)
+        self._ref_history_timer.timeout.connect(self._flush_ref_history)
         self._stage1_a_snapshot: dict | None = None
         self._working_xlsx: Optional[Path] = None
         self._template_used: Optional[Path] = None
@@ -583,9 +587,11 @@ class MainWindow(QMainWindow):
         r = sheets.ask(
             self, i18n.KO.WARN_SLOT_MISMATCH_TITLE,
             i18n.KO.WARN_SLOT_MISMATCH_FMT.format(
-                ref_only=", ".join(sr.ref_only) or "없음",
-                val_only=", ".join(sr.val_only) or "없음",
-            ) + "\n\n" + i18n.KO.SLOT_MAP_OPEN + " ?",
+                ref_only=", ".join(sr.ref_only) or i18n.KO.VALUE_NONE,
+                val_only=", ".join(sr.val_only) or i18n.KO.VALUE_NONE,
+            # ★ 버튼 라벨용 명사구에 " ?" 를 붙여 만든 비문("… 열기 ?")이었다.
+            #   완결된 질문 문장을 i18n 에 두고 그대로 쓴다.
+            ) + "\n\n" + i18n.KO.SLOT_MAP_ASK,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes,
         )
@@ -1128,10 +1134,9 @@ class MainWindow(QMainWindow):
             }
             # 기준 폴더로 직접 고른 기준 사진을 기록 (다음에 재사용 질의용, #6).
             self._save_ref_selection(self._stage1_a_snapshot["targets"])
-            sheets.info(
-                self, i18n.KO.INFO_PHASE_TRANSITION_TITLE,
-                i18n.KO.INFO_PHASE_A_TO_MATCH,
-            )
+            # ★ 여기 있던 '후보 선별이 끝났습니다' 확인창을 없앴다 — 선택지가 없는
+            #   안내인데 매 세션 클릭 1회를 강제했다.  전환 사실은 곧바로 뜨는 매칭
+            #   오버레이의 첫 문구가 말한다(큐가 비어 자동으로 건너뛴 경우 포함).
             self._enter_stage2_phase_a()
 
     # ------------------------------------------------------------------
@@ -1318,7 +1323,15 @@ class MainWindow(QMainWindow):
             coord_failed_count=ctx.coord_failed_count,
             unmatched_keys=getattr(self, "_reviewed_unmatched_keys", None),
         )
+        self._notify_ready_for_review()
         self._show_page(self._match_review_page)
+
+    def _notify_ready_for_review(self) -> None:
+        """수 분짜리 자동 매칭이 끝난 줄 모르고 다른 창을 보고 있을 수 있다.
+
+        ★ 창이 이미 활성이면 부르지 않는다 — 보고 있는데 작업표시줄이 깜빡이면 잡음이다."""
+        if not self.isActiveWindow():
+            QApplication.alert(self)
 
     # ==================================================================
     # Result
@@ -1748,6 +1761,19 @@ class MainWindow(QMainWindow):
     def _schedule_autosave(self) -> None:
         # 결정이 있을 때마다 즉시 저장한다 (가벼움)
         self._autosave()
+        # ★ Stage 1 진행 중에도 '직접 고른 기준 사진' 을 남긴다.  예전엔 선별을 **끝냈을
+        #   때만** 저장해서, 도중에 앱이 꺼지면 수백 건의 결정이 되살릴 근거조차 없었다.
+        #   이 기록이 있으면 재시작 때 '이전에 고른 n장을 재사용할까요?' 로 회수된다.
+        #   ref_history 는 매 저장이 JSON 전체 재기록이라 디바운스한다(결정마다 왕복 금지).
+        if self._phase == PHASE_A_SELECT and self._select_page is not None:
+            self._ref_history_timer.start(1200)
+
+    def _flush_ref_history(self) -> None:
+        if self._select_page is None:
+            return
+        state = self._select_page.get_state()
+        if state is not None:
+            self._save_ref_selection(state.targets)
 
     def _autosave(self) -> None:
         if self._input is None:

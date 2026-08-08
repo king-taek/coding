@@ -84,6 +84,13 @@ BTN_VIEW_EXCLUDED_FMT = "검증 제외 사진 보기 ({n})"
 # Stage 1 ‘선택 종료’ — 미결정 사진 모두 제외 처리 후 다음 단계로.
 BTN_END_SELECTION = "선택 종료"
 # Stage 1 에서 설정 화면으로 돌아갈 때 — 이미 내린 결정이 사라지므로 한 번 묻는다.
+MATCH_CANCEL_CONFIRM_TITLE = "매칭 중단"
+# ★ 중단은 '잠깐 멈춤' 이 아니다 — 정확도 사고를 막기 위해 계산 결과를 전부 버린다
+#   (남기면 설정을 바꿔 다시 돌려도 1회차 결과가 재사용된다).  그 사실을 말해 준다.
+MATCH_CANCEL_CONFIRM_FMT = (
+    "진행 중인 매칭을 중단할까요?  ({done} / {total} 까지 진행)\n\n"
+    "지금까지 계산한 결과는 저장되지 않고, 다시 시작하면 처음부터 계산합니다."
+)
 SELECT_BACK_CONFIRM_TITLE = "설정으로 돌아가기"
 SELECT_BACK_CONFIRM_FMT = (
     "지금까지 결정한 {n} 장이 사라지고 설정 화면으로 돌아갑니다.\n"
@@ -505,6 +512,8 @@ SLOT_MAP_ADD = "묶기 ↔"
 SLOT_MAP_REMOVE = "선택 해제"
 SLOT_MAP_PAIRS_LABEL = "묶은 쌍"
 SLOT_MAP_OPEN = "매핑 다이얼로그 열기"
+# 확인창 본문용 완결 문장 — 라벨에 " ?" 를 붙여 만들던 비문을 대체한다.
+SLOT_MAP_ASK = "슬롯을 직접 짝지어 주시겠습니까?"
 
 # ── 일부 슬롯만 진행 (Setup) ───────────────────────────────────────────────
 SLOT_SELECT_BTN_TOOLTIP = (
@@ -577,8 +586,16 @@ KLA_SIDE_VAL = "검증"
 KLA_SIDE_BOTH = "둘다"
 KLA_SIDE_NONE = "KLA 아님"
 
-INFO_RESUME_TITLE = "이전 검증 이어하기"
-INFO_RESUME_BODY = "진행 중인 검증이 있습니다. 이어서 하시겠습니까?"
+INFO_RESUME_TITLE = "이전 검증 설정 복원"
+# ★ 문구를 사실대로 적는다.  '이어하기' 라고 했지만 실제로 복원되는 것은 폴더·호기·
+#   임계치 같은 **입력값뿐**이고, 선별 결정은 처음부터 다시 한다.  다만 직접 고른
+#   기준 사진은 기록해 두므로 선별 화면에서 '재사용할까요?' 로 되돌려 받을 수 있다.
+INFO_RESUME_BODY = (
+    "마치지 못한 검증이 있습니다.  이전 입력값(폴더·호기·판정 기준)을 복원해 "
+    "처음부터 다시 시작할까요?\n\n"
+    "선별은 다시 하게 되지만, 직접 고르셨던 기준 사진은 선별 화면에서 "
+    "재사용할지 물어봅니다."
+)
 INFO_PHASE_TRANSITION_TITLE = "단계 전환"
 INFO_PHASE_A_TO_MATCH = "후보 선별이 끝났습니다. 매칭으로 넘어갑니다."
 INFO_NO_MATCH_FOUND = "임계치 이상인 후보가 없습니다. 자동으로 Skip 처리됩니다."
