@@ -31,6 +31,7 @@ from __future__ import annotations
 import logging
 import math
 import re
+import struct
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -74,6 +75,17 @@ _CAMTEK_SOURCES = (
 )
 # 사진 폴더가 웨이퍼 폴더의 하위일 수 있어 부모를 몇 단계까지 올라가 찾는다.
 _PARENT_LEVELS = 2
+
+# 장비가 쓴 die 맵 — 그 웨이퍼의 die 전체 목록(좌표).  col/row 번호의 기준을 유도하지
+# 않고 여기서 **읽는다**(:func:`_die_map_origins`).  레코드 배치는 장비 소프트웨어마다
+# 달라서(실측 72 / 128) 옆의 ``.md`` 사이드카가 알려 준다.
+_DIE_MAP_FILE = "s_DieLocation.dat"
+# 이보다 적으면 die 맵으로 인정하지 않는다 — 웨이퍼 한 장에 die 가 수백~수천 개다.
+# 몇 개짜리 파일을 맵으로 받아들이면 col/row 기준이 통째로 틀어진다.
+_MIN_DIE_MAP = 50
+_VT_DOUBLE = 5                      # 장비가 쓰는 VARIANT 코드 (VT_R8)
+_RECSIZE_PAT = re.compile(r'RecordSize\s+Size="(\d+)"')
+_FIELD_PAT = re.compile(r'Name="([^"]+)"[^>]*?Offset="(\d+)"[^>]*?Vartype="(\d+)"')
 
 _DIEPITCH_PAT = re.compile(r'DiePitch\s+([\d.eE+\-]+)\s+([\d.eE+\-]+)', re.IGNORECASE)
 # SampleTestPlan <개수> 뒤에 (XINDEX YINDEX) 쌍이 ';' 까지 이어진다.
@@ -394,14 +406,38 @@ def camtek_geometry(folder: Path) -> Optional[CamtekGeometry]:
                 continue
             if src == "models.py 상수" and not meaningful:
                 continue      # 검산이 pitch 를 제약하지 못했다 — 상수를 추정으로 쓰지 않는다
-            # col·row 기준 **모두** 웨이퍼의 stage 위치에서 유도한다 — 같은 규칙의 두
-            # 축이다(§6-H·§6-J).  중심은 Params 의 Center_X/Y → Wafer2Table.ini 순으로
-            # 찾고(§6-L), 그래도 없으면 각각 상수/옛 식으로 폴백한다.
+            # col·row 기준은 **장비가 쓴 die 맵이 1순위**다(§6-N) — 웨이퍼가 어디 놓였는지
+            # 로 유도하던 값을, 유도하지 않고 장비가 적어 둔 대로 읽는다.  맵이 없으면
+            # 기존 유도로 폴백한다: 중심은 Params 의 Center_X/Y → Wafer2Table.ini 순으로
+            # 찾고(§6-L), 그래도 없으면 각각 상수/옛 식으로 폴백한다(§6-H·§6-J).
             dia = _read_diameter(folder)
             cx, cy = _wafer_center(folder)
+            d_origin = _col_origin(cx, dia, px)
+            d_total = _row_total(cy, dia, py)
+            mapped = _die_map_origins(folder, px, py)
+            if mapped is not None:
+                m_origin, m_total = mapped
+                # ⚠ 맵은 유도값과 **±1 이내일 때만** 믿는다.  이 파일이 웨이퍼 전체가
+                #   아니라 '스캔한 영역'만 담은 스캔이 오면 min/max 가 통째로 좁아져
+                #   기준이 조용히 틀어진다 — 실측 74장의 차이는 전부 0 또는 −1 이라
+                #   ±1 밖은 관측된 적 없는 영역이고, 그때는 검증된 유도 경로를 지킨다.
+                if abs(m_origin - d_origin) <= 1 and abs(m_total - d_total) <= 1:
+                    # 조용히 갈리지 않게 남긴다 — 유도식이 틀리는 스캔을 나중에
+                    # 알아보려면 이 기록이 있어야 한다(실측 74장 중 1장이 그랬다).
+                    if (m_origin, m_total) != (d_origin, d_total):
+                        _LOG.info(
+                            "die 맵과 중심 유도가 다르다 — 맵을 쓴다(맵이 장비 "
+                            "표시값이다). col_origin %d→%d · row_total %d→%d: %s",
+                            d_origin, m_origin, d_total, m_total, folder)
+                    return CamtekGeometry(pitch_x=px, pitch_y=py,
+                                          col_origin=m_origin, row_total=m_total,
+                                          source=f"{src}+{_DIE_MAP_FILE}")
+                _LOG.warning(
+                    "%s 의 die 기준 (%d, %d) 이 유도값 (%d, %d) 과 1 넘게 달라 "
+                    "무시합니다(부분 맵 의심 — 웨이퍼 전체 맵이면 있을 수 없는 차이): %s",
+                    _DIE_MAP_FILE, m_origin, m_total, d_origin, d_total, folder)
             return CamtekGeometry(pitch_x=px, pitch_y=py,
-                                  col_origin=_col_origin(cx, dia, px),
-                                  row_total=_row_total(cy, dia, py),
+                                  col_origin=d_origin, row_total=d_total,
                                   source=src)
         # ★ Camtek INI 자체가 없는 폴더(KLA 슬롯·LIVE 파일명 슬롯)는 **조용히** None.
         #   경고는 '변환할 항목이 있는데 pitch 를 못 정한' 진짜 문제일 때만 낸다 —
@@ -414,6 +450,88 @@ def camtek_geometry(folder: Path) -> Optional[CamtekGeometry]:
         return None
     except Exception:
         return None
+
+
+def _die_map_origins(folder: Path, px: float, py: float
+                     ) -> Optional[tuple[int, int]]:
+    """**장비가 쓴 die 맵**에서 ``(col_origin, row_total)`` 을 그대로 읽는다.
+
+    ``s_DieLocation.dat`` 은 그 웨이퍼에 있는 die 전체 목록(좌표)이다.  거기서 나오는
+    ``x_index`` 최솟값이 col 기준, ``y_index`` 최댓값이 row 기준이다 — :func:`_col_origin`
+    ·:func:`_row_total` 이 웨이퍼 중심에서 **유도**하던 그 값을, 유도하지 않고 장비가
+    적어 둔 대로 쓴다.
+
+    실측 근거(웨이퍼 74장 / 장비 11대 / 제품군 5종, ``docs/디바이스_하드코딩_조사.md`` §6-N):
+
+    * ``col_origin`` 은 **74/74 전부** 중심 유도값과 같다.
+    * ``row_total`` 은 **73/74 가 같고**, 한 스캔(``EagleTP_108150`` 의 PGEE48)에서만
+      1 작다.  그 웨이퍼는 사용자가 장비 화면으로 확인한 값과도 1 어긋나 있었다 —
+      즉 이 파일이 맞고 유도식이 틀렸다(서로 독립인 두 소스가 같은 답을 냈다).
+    * 그 스캔은 이 파일의 **레코드 배치부터 다르다**(``RecordSize`` 72 vs 나머지 128).
+      장비마다 소프트웨어가 다르다는 뜻이라, 배치를 하드코딩하지 않고 옆에 있는
+      ``s_DieLocation.dat.md`` 를 읽어 따라간다.
+
+    ⚠ **장비별·자재별 상수를 만들지 마라.**  그 표본에서 장비와 자재는 완전히 얽혀 있어
+    (그 장비의 웨이퍼가 1장뿐) 무엇이 원인인지 구분되지 않는다.  게다가 같은 장비라도
+    값이 고정이라는 보장이 없다(사용자 확인 — 소프트웨어가 갱신될 수 있다).  그래서
+    이 함수는 **스캔 폴더마다 그 폴더의 파일을 읽는다** — 원인을 몰라도 맞는다.
+
+    ⚠ 이 함수는 **자기가 확인할 수 있는 것만** 믿는다 — ``.md`` 가 없거나, 레코드 수가
+    안 맞거나, die 가 :data:`_MIN_DIE_MAP` 개 미만이거나, 인덱스가 상식 범위를 벗어나면
+    ``None`` 을 돌려 기존 유도 경로로 넘긴다.  전 구간 fail-safe.
+    """
+    for base in _search_dirs(folder):
+        dat = base / _DIE_MAP_FILE
+        layout = _dat_layout(dat)
+        if layout is None:
+            continue
+        rec, fields = layout
+        try:
+            off_x, vt_x = fields["x"]
+            off_y, vt_y = fields["y"]
+        except KeyError:
+            continue
+        if vt_x != _VT_DOUBLE or vt_y != _VT_DOUBLE:
+            continue
+        try:
+            data = dat.read_bytes()
+        except OSError:
+            continue
+        if rec <= 0 or not data or len(data) % rec:
+            continue
+        count = len(data) // rec
+        if count < _MIN_DIE_MAP:
+            continue
+        xs: set[int] = set()
+        ys: set[int] = set()
+        for i in range(count):
+            b = i * rec
+            x = struct.unpack_from("<d", data, b + off_x)[0]
+            y = struct.unpack_from("<d", data, b + off_y)[0]
+            xs.add(math.floor(x / px))
+            ys.add(math.floor(y / py))
+        col_origin, row_total = min(xs), max(ys)
+        if not (0 <= col_origin <= _MAX_DIE_INDEX
+                and 0 <= row_total <= _MAX_DIE_INDEX):
+            continue
+        return col_origin, row_total
+    return None
+
+
+def _dat_layout(dat: Path) -> Optional[tuple[int, dict[str, tuple[int, int]]]]:
+    """``<이름>.dat.md`` 가 알려 주는 ``(레코드크기, {필드: (오프셋, vartype)})``.
+
+    장비 소프트웨어마다 레코드 배치가 달라서(실측 72 / 128) 하드코딩할 수 없다.
+    사이드카가 없거나 형식이 아니면 ``None``."""
+    txt = read_ini_text(Path(str(dat) + ".md"))
+    if not txt:
+        return None
+    m = _RECSIZE_PAT.search(txt)
+    if not m:
+        return None
+    fields = {name: (int(off), int(vt))
+              for name, off, vt in _FIELD_PAT.findall(txt)}
+    return (int(m.group(1)), fields) if fields else None
 
 
 def _kla_zero(center: float, diameter: float, pitch: float) -> Optional[int]:
