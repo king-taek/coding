@@ -610,8 +610,7 @@ class UnmatchedReviewDialog(QDialog):
                     self._recompute_done += 1
                     self._loading.set_progress(
                         self._recompute_done, need,
-                        i18n.KO.LOAD_SCORING_FMT.format(
-                            done=self._recompute_done, total=need))
+                        i18n.KO.LOAD_SCORING)
                     QApplication.processEvents()
                 progress_cb = _on_recompute
             else:

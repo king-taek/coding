@@ -483,7 +483,7 @@ class MatchPage(QWidget):
         else:
             # 자동 — 전체 진행을 하나의 차단 오버레이로 표시.
             self._loading.show_overlay(
-                i18n.KO.LOAD_PRECOMPUTE_FMT.format(done=0, total=total_pairs),
+                i18n.KO.LOAD_SCORING,
                 cancelable=True,
             )
             self.bg_status_label.setText("")
@@ -917,11 +917,11 @@ class MatchPage(QWidget):
             and all(it.path in val_features for it in val_items)
         )
         loading_fmt = (
-            i18n.KO.LOAD_SCORING_FMT if self._slot_features_ready
-            else i18n.KO.LOAD_FEATURE_FMT
+            i18n.KO.LOAD_SCORING if self._slot_features_ready
+            else i18n.KO.LOAD_FEATURE
         )
         self._loading.show_overlay(
-            loading_fmt.format(done=0, total=len(val_items)),
+            loading_fmt,
             cancelable=True,
         )
         self._current_loading_fmt = loading_fmt
@@ -955,10 +955,8 @@ class MatchPage(QWidget):
         self._on_matcher_done([])
 
     def _on_matcher_progress(self, done: int, total: int) -> None:
-        fmt = getattr(self, "_current_loading_fmt", i18n.KO.LOAD_FEATURE_FMT)
-        self._loading.set_progress(
-            done, total, fmt.format(done=done, total=total),
-        )
+        msg = getattr(self, "_current_loading_fmt", i18n.KO.LOAD_FEATURE)
+        self._loading.set_progress(done, total, msg)
 
     def _on_matcher_done(self, candidates: list) -> None:
         self._candidates = list(candidates)
@@ -1000,7 +998,7 @@ class MatchPage(QWidget):
         total = done + len(self._state.queue)
         self._loading.set_progress(
             done, total,
-            i18n.KO.LOAD_AUTO_MATCH_FMT.format(done=done, total=total),
+            i18n.KO.LOAD_AUTO_MATCH,
         )
 
     # ------------------------------------------------------------------

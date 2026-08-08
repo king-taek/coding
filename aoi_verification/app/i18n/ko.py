@@ -37,6 +37,8 @@ OPENVINO_INSTALL_FAILED_FMT = (
 # ── 공통 버튼/액션 ─────────────────────────────────────────────────────────
 BTN_OK = "확인"
 BTN_CANCEL = "취소"
+# 진행 중인 작업을 멈추는 버튼(로딩 오버레이) — '취소' 와 뜻이 다르다.
+BTN_STOP = "중지"
 BTN_BACK_TO_SETUP = "← 설정으로"
 BTN_START = "검증 시작"
 # 시작 직후 — 무거운 구성 요소(영상 처리·가속)를 백그라운드에서 불러오는 동안의 표기.
@@ -313,17 +315,17 @@ TEMPLATE_NOT_FOUND_BODY = (
 WORKING_FILE_LABEL = "결과 파일 위치"
 
 # ── 로딩/진행 ──────────────────────────────────────────────────────────────
-LOAD_THUMBNAIL_FMT = "썸네일 생성 중… {done} / {total}"
+# ★ 로딩 문구에 진행 수치({done}/{total})를 넣지 마라.  진행 수치는 진행바 **아래
+#   모노 라벨**(LoadingOverlay._count_label)이 전담한다 — 문구에도 넣으면 같은 숫자가
+#   한 화면에 두 번 보인다("썸네일 생성 중 147 / 480" + "147 / 480").  단일 출처 규칙.
+LOAD_THUMBNAIL = "썸네일 생성 중…"
 LOAD_STAGE_PREP = "다음 단계 준비 중…"
-LOAD_FEATURE_FMT = "검증 장비 특징 추출 중… {done} / {total}"
-LOAD_SCORING_FMT = "유사도 계산 중… {done} / {total}"
+LOAD_FEATURE = "검증 장비 특징 추출 중…"
+LOAD_SCORING = "유사도 계산 중…"
 PHASE_FEATURE = "이미지 특징 분석"
 PHASE_SCORING = "유사도 계산"
 PHASE_EMBED = "후보 생성 (GPU 임베딩)"      # 고효율 모드 1단계 — 유사도 계산 직전
 PHASE_COORD = "좌표 매칭 중"                # 좌표 기반 매칭 v2
-LOAD_PRECOMPUTE_FMT = (
-    "유사도 계산 중… {done} / {total}"
-)
 # 수동 모드: 첫 슬롯만 기다리고 나머지는 백그라운드 (#streaming).
 # 선행 단계(특징 분석/임베딩) 동안에도 '유사도 계산' 으로 오인되지 않도록 중립 문구.
 LOAD_PRECOMPUTE_FIRST_SLOT = (
@@ -371,7 +373,7 @@ UPDATE_UNKNOWN = "업데이트를 확인할 수 없습니다. 인터넷 연결�
 UPDATE_GIT_HINT = "개발(git) 환경입니다. 'git pull' 로 업데이트하세요."
 # 첫 화면 '업데이트 확인' 버튼 라벨(좌상단 도움말 메뉴 대체).
 MENU_CHECK_UPDATE = "업데이트 확인"
-LOAD_AUTO_MATCH_FMT = "자동 매치 진행 중… {done} / {total}"
+LOAD_AUTO_MATCH = "자동 매치 진행 중…"
 
 # ── 자동화 수준 (#3 올인원 모드) ───────────────────────────────────────────
 AUTOMATION_TITLE = "자동화 수준"
@@ -441,7 +443,6 @@ DARK_MODE_TOOLTIP = (
 )
 # ※ '모션 줄이기' 토글은 제거했다 — 모션은 항상 켜진다(사용자 결정).
 LOAD_SCAN = "폴더 스캔 중…"
-LOAD_SCAN_FMT = "폴더 스캔 중… {done} / {total} 슬롯"
 LOAD_EXPORT = "엑셀로 저장 중…"
 
 # ── 경고/안내 모달 ─────────────────────────────────────────────────────────
@@ -529,7 +530,7 @@ REF_REUSE_BODY_FMT = (
 )
 # KLA slot 해석 단계 — 로딩창에 현재 진행 단계(정보파일/OCR)를 실시간 표시.
 LOAD_KLA_INFO = "KLA slot 매칭 중 — 정보파일 분석…"
-LOAD_KLA_OCR_FMT = "KLA WaferID 판독 (OCR) 중… {done} / {total}"
+LOAD_KLA_OCR = "KLA WaferID 판독 (OCR) 중…"
 
 # slot 매칭 실패 시 'KLA 가 어느 쪽?' 확인 — 호기가 K-n 이면 자동, 아니면 묻는다.
 KLA_ASK_TITLE = "KLA 장비 확인"

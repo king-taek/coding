@@ -579,7 +579,7 @@ def _stage_match(win, sr) -> dict:
     # 진행 바가 도는 그 순간 — 앱의 `_update_auto_progress` 와 같은 문구·같은 값.
     page._loading.show_overlay(cancelable=True)
     page._loading.set_progress(
-        3, len(refs), i18n.KO.LOAD_AUTO_MATCH_FMT.format(done=3, total=len(refs)))
+        3, len(refs), i18n.KO.LOAD_AUTO_MATCH)
     _pump(30)
     return {
         "기준사진": getattr(page, "center_img", None),

@@ -757,13 +757,13 @@ class MainWindow(QMainWindow):
         if jobs and wafer_id.ocr_available():
             from ..workers.wafer_id_ocr import WaferIdOcrWorker
             self._loading.show_overlay(
-                i18n.KO.LOAD_KLA_OCR_FMT.format(done=0, total=len(jobs)))
+                i18n.KO.LOAD_KLA_OCR)
             worker = WaferIdOcrWorker(jobs, parent=self)
             self._ocr_worker = worker          # GC 방지 참조 보관
 
             def _on_progress(d: int, t: int) -> None:
                 self._loading.set_progress(
-                    d, t, i18n.KO.LOAD_KLA_OCR_FMT.format(done=d, total=t))
+                    d, t, i18n.KO.LOAD_KLA_OCR)
 
             def _on_ocr_done(ocr_ref: dict, ocr_val: dict) -> None:
                 try:
@@ -865,7 +865,7 @@ class MainWindow(QMainWindow):
         # 폴더 스캔 — NAS 처럼 폴더가 많아도 진행 개수를 실시간 표시(#6).
         def _scan_progress(done: int, total: int) -> None:
             self._loading.set_progress(
-                done, total, i18n.KO.LOAD_SCAN_FMT.format(done=done, total=total))
+                done, total, i18n.KO.LOAD_SCAN)
             QApplication.processEvents()
 
         sr = scan(inp.ref_root, inp.val_root, progress=_scan_progress)
@@ -925,7 +925,7 @@ class MainWindow(QMainWindow):
         # (set_progress 는 숨겨진 오버레이를 다시 띄우지 않으므로 show_overlay 필수.)
         # 썸네일 단계는 가장 오래 걸리므로 [중지] 로 건너뛸 수 있게 한다(#C2).
         self._loading.show_overlay(
-            i18n.KO.LOAD_THUMBNAIL_FMT.format(done=0, total=0), cancelable=True)
+            i18n.KO.LOAD_THUMBNAIL, cancelable=True)
         QApplication.processEvents()
         all_items: list[ImageItem] = []
         for name in common:
@@ -956,7 +956,7 @@ class MainWindow(QMainWindow):
 
         self._loading.set_progress(
             0, len(all_items),
-            i18n.KO.LOAD_THUMBNAIL_FMT.format(done=0, total=len(all_items)),
+            i18n.KO.LOAD_THUMBNAIL,
         )
 
         # 다중 스레드 + 우선순위 큐 풀 사용. 첫 슬롯 (사전식으로 가장 앞)
@@ -974,7 +974,7 @@ class MainWindow(QMainWindow):
             self._thumb_pool.reprioritize_slot(common[0], PRIORITY_ACTIVE_SLOT)
         self._thumb_pool.signals.progress.connect(
             lambda d, t, _p: self._loading.set_progress(
-                d, t, i18n.KO.LOAD_THUMBNAIL_FMT.format(done=d, total=t),
+                d, t, i18n.KO.LOAD_THUMBNAIL,
             )
         )
         self._thumb_pool.signals.finished.connect(self._on_thumbs_ready)

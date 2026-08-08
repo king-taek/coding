@@ -414,8 +414,11 @@ QPushButton[role="primary"]:focus {
     padding: $pad_control_focus;
 }
 
+/* 평상시에도 옅은 위험 틴트를 깐다 — 로딩 오버레이의 [중지] 처럼 어두운 패널 위에
+   홀로 놓이는 경우 테두리만으로는 면이 없어 보인다(인라인 스타일에서 옮겨 온 값). */
 QPushButton[role="danger"] {
     color: $danger;
+    background-color: $danger_tint_soft;
     border-color: $danger;
 }
 QPushButton[role="danger"]:hover {

@@ -21,10 +21,12 @@ from PyQt6.QtCore import (QEasingCurve, QElapsedTimer, QEvent, QRect, QSize, Qt,
                           QTimer, QVariantAnimation, pyqtSignal)
 from PyQt6.QtGui import QColor, QPainter, QPen
 from PyQt6.QtWidgets import (QApplication, QGraphicsOpacityEffect, QLabel,
-                             QProgressBar, QPushButton, QVBoxLayout, QWidget)
+                             QProgressBar, QVBoxLayout, QWidget)
 
+from ... import i18n
 from .. import theme
 from .. import motion
+from .neon_button import NeonButton
 
 
 class _SpinnerDot(QWidget):
@@ -223,16 +225,13 @@ class LoadingOverlay(QWidget):
         self._busy.hide()
 
         # #8 중지 버튼 — cancelable=True 로 보여진 작업에서만.
-        self._cancel_btn = QPushButton("중지", self._content)
-        self._cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        # ★ 인스턴스 스타일시트로 색을 굽지 않는다.  오버레이는 앱 시작 때 한 번 만들어지고
+        #   `_recolor_in_place` 는 인스턴스 스타일시트를 못 바꾸므로, 구운 라이트 팔레트가
+        #   다크 전환 뒤에도 그대로 남아 글자 대비가 2.19:1 로 무너졌다(실측 캡처).
+        #   role 로 옮기면 전역 QSS 가 다시 렌더되면서 두 모드를 모두 따라온다.
+        self._cancel_btn = NeonButton(i18n.KO.BTN_STOP, role="danger",
+                                      parent=self._content)
         self._cancel_btn.setFixedWidth(160)
-        self._cancel_btn.setStyleSheet(
-            "QPushButton {{ color: {d}; background: {dt};"
-            " border: 1px solid {d}; border-radius: 8px; padding: 8px 14px;"
-            " font-weight: 700; }}"
-            "QPushButton:hover {{ background: {dts}; }}".format(
-                d=theme.DANGER, dt=theme.DANGER_TINT_SOFT, dts=theme.DANGER_TINT)
-        )
         self._cancel_btn.clicked.connect(self.cancel_requested.emit)
         self._cancel_btn.hide()
 
@@ -582,13 +581,26 @@ class LoadingOverlay(QWidget):
 
     # ------------------------------------------------------------------
     def hideEvent(self, event):  # noqa: N802
-        """숨으면 돌던 것을 전부 멈춘다 — 보이지 않는 오버레이가 tick 할 이유가 없다."""
+        """숨으면 잠금을 풀고, 돌던 것을 전부 멈춘다.
+
+        ★ 이 클래스에 `hideEvent` 가 **두 번** 정의돼 있었다.  파이썬은 뒤에 정의된
+        것만 남기므로 앞의 '애니메이션 정지' 본문은 한 줄도 실행되지 않았고, 그 결과
+        `_finish_hide` 를 거치지 않는 퇴장(중지 → 페이지 전환)에서 스피너 타이머와
+        busy 무한 애니메이션이 **숨은 채로 세션 내내 계속 돌았다**.  둘을 하나로 합친다 —
+        같은 이름의 메서드를 다시 만들지 마라(회귀 가드: `test_loading_overlay_hide.py`).
+
+        ★ 순서가 중요하다: **잠금 해제가 맨 앞**이다.  전역 필터가 남으면 앱 전체가
+        키보드를 영영 못 받는데(테스트에서 실제로 그렇게 됐다), 아래 정지 중 하나라도
+        `RuntimeError`(삭제된 C++ 객체)를 내면 그 뒤 줄에 도달하지 못한다.  `_finish_hide`
+        만 믿을 수도 없다 — 부모 창이 닫히거나 페이지가 통째로 교체되면 그 경로를 거치지
+        않고 숨겨진다.  `hide()` 는 어느 경로로든 이 이벤트를 낸다."""
+        self._set_input_lock(False)
         self._fade_anim.stop()
         self._rise_anim.stop()
         self._settle_progress()        # 값 확정 후 정지 — 중간값으로 얼지 않게
         self._bar_anim.stop()
         self._bar_timer.stop()
-        self._hide_timer.stop()
+        self._hide_timer.stop()        # 대기 중인 최소표시 래치도 취소(토큰 가드의 이중화)
         self._spinner.stop()
         self._busy.stop()
         super().hideEvent(event)
@@ -637,16 +649,6 @@ class LoadingOverlay(QWidget):
             node = node.parentWidget()
             depth += 1
         return False
-
-    def hideEvent(self, event):  # noqa: N802
-        """★ 잠금을 푸는 **최후의 안전판**.
-
-        `_finish_hide` 만 믿으면 안 된다 — 오버레이가 그 경로를 거치지 않고 숨겨지는
-        길이 있다(부모 창이 닫히거나 페이지가 통째로 교체될 때).  그때 전역 필터가
-        남아 있으면 **앱 전체가 키보드를 영영 못 받는다**(테스트에서 실제로 그렇게
-        됐다).  `hide()` 는 어느 경로로든 이 이벤트를 내므로 여기서 반드시 푼다."""
-        self._set_input_lock(False)
-        super().hideEvent(event)
 
     def _set_input_lock(self, on: bool) -> None:
         """앱 전역 필터는 **떠 있는 동안만** 건다.
