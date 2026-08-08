@@ -146,6 +146,37 @@ async function lockChecks(page, label) {
     problems.push(`[${label}] [처음부터] 뒤에 옛 흐름이 화면을 "${settled}" 로 덮었습니다`);
 }
 
+/** 안내 카드는 오른쪽 위 ✕ 로도, (시트가 없을 때) Escape 로도 닫힌다.
+ *  Escape 순서는 목차 → 시트 → 투어 — 목차가 열려 있으면 목차만 닫는다. */
+async function tourCloseChecks(page, label) {
+  const card = page.locator('[data-test="tour-card"]');
+  // 1) ✕ — [건너뛰기] 와 같은 일
+  await page.click('[data-test="tour-open"]');
+  await page.waitForTimeout(250);
+  await page.click('[data-test="tour-close"]');
+  await page.waitForTimeout(200);
+  if (await card.isVisible()) problems.push(`[${label}] ✕ 를 눌렀는데 안내가 남아 있습니다`);
+  // 2) 시트가 없으면 Escape 가 투어를 닫는다
+  await page.click('[data-test="tour-open"]');
+  await page.waitForTimeout(250);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
+  if (await card.isVisible()) problems.push(`[${label}] Escape 가 안내를 닫지 못했습니다`);
+  // 3) 목차가 열려 있으면 Escape 는 목차만 닫는다 — 투어는 남는다
+  await page.click('[data-test="tour-open"]');
+  await page.waitForTimeout(250);
+  await page.click('[data-test="tour-toc"]');
+  await page.waitForTimeout(200);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
+  if (await page.locator("#tour-tocwrap.on").count())
+    problems.push(`[${label}] Escape 가 목차를 닫지 못했습니다`);
+  if (!(await card.isVisible()))
+    problems.push(`[${label}] Escape 가 목차와 함께 투어까지 닫았습니다`);
+  await page.click('[data-test="tour-close"]');
+  await page.waitForTimeout(150);
+}
+
 async function freePlay(page, label) {
   await page.click('[data-test="reset"]');
   await page.waitForTimeout(200);
@@ -339,6 +370,7 @@ async function main() {
                     `— make_demo_assets.py 를 실행하세요`);
     await runTour(page, label);
     await tourJumps(page, label);
+    await tourCloseChecks(page, label);
     await lockChecks(page, label);
     await sheetShapes(page, label);
     await freePlay(page, label);
