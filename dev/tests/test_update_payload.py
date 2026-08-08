@@ -18,6 +18,8 @@ from pathlib import Path
 from aoi_verification.app.utils import updater
 
 _REPO = Path(__file__).resolve().parents[2]
+_FONT_REL = "aoi_verification/app/ui/assets/font"
+_FONT_DIR = _REPO / _FONT_REL
 
 
 def _fake_repo(tmp_path: Path) -> Path:
@@ -27,10 +29,6 @@ def _fake_repo(tmp_path: Path) -> Path:
         "main.py", "requirements.txt", "README.md", "CLAUDE.md",
         ".gitignore", ".coverage", "pytest.ini",
         "aoi_verification/app/ui/theme.py",
-        "aoi_verification/app/ui/assets/font/NanumSquareR.ttf",
-        "aoi_verification/app/ui/assets/font/NanumSquareB.ttf",
-        "aoi_verification/app/ui/assets/font/NanumSquareR.otf",
-        "aoi_verification/app/ui/assets/font/NanumSquare_acR.ttf",
         "docs/사용설명서.pdf", "docs/상세설명서.pdf", "docs/체험하기.html",
         "docs/규칙_배경.md", "docs/좌표변환_분석_보고서.pdf",
         "docs/KLA 좌표 예시(TB500, T254)/2026-08-02/사진목록.txt",
@@ -41,6 +39,13 @@ def _fake_repo(tmp_path: Path) -> Path:
         p = root / rel
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text("x", encoding="utf-8")
+    # ★ 글꼴은 **저장소에 있는 것 전부**를 그대로 놓는다.  픽스처가 일부만 만들면
+    #   `_UPDATE_SKIP_PATHS` 의 나머지 항목이 한 번도 안 태워져, 그 항목을 지워도
+    #   스위트가 초록으로 남는다(실제로 6개 중 2개만 검증되고 있었다).
+    for src in sorted(_FONT_DIR.iterdir()):
+        dst = root / _FONT_REL / src.name
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_bytes(b"font")
     return root
 
 
@@ -108,10 +113,23 @@ def test_only_registered_fonts_are_shipped(tmp_path):
     `copytree(ignore=…)` 로 거른다."""
     staging = _stage(tmp_path)
 
-    shipped = sorted(
-        p.name for p in
-        (staging / "aoi_verification/app/ui/assets/font").iterdir())
+    shipped = sorted(p.name for p in (staging / _FONT_REL).iterdir())
     assert shipped == ["NanumSquareB.ttf", "NanumSquareR.ttf"]
+
+
+def test_every_unregistered_font_is_excluded():
+    """★ **양방향** 불변식 — 등록하지 않는 글꼴은 하나도 빠짐없이 제외 목록에 있다.
+
+    아래 `test_skip_paths_…` 는 *목록에 남아 있는* 항목만 훑으므로 **목록에서 지워진**
+    항목은 원리적으로 못 잡는다.  실제로 6개 중 4개를 지워도 스위트가 초록이었고,
+    그러면 1.7 MB 가 조용히 다시 모든 사용자에게 실려 나간다.  이 단언은 두 방향을
+    한 번에 못 박는다 — 제외 항목을 지워도, 미등록 글꼴을 새로 넣기만 해도 깨진다."""
+    from aoi_verification.app.ui import theme
+
+    unregistered = {p.name for p in _FONT_DIR.iterdir()} - set(theme._FONT_FILES)
+    excluded = {Path(rel).name for rel in updater._UPDATE_SKIP_PATHS
+                if Path(rel).parent.as_posix() == _FONT_REL}
+    assert excluded == unregistered
 
 
 def test_skip_paths_match_the_repo_and_never_hide_a_registered_font():

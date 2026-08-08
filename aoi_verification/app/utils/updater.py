@@ -538,8 +538,12 @@ _UPDATE_KEEP_ONLY = {
     # aoi_verification·main.py·requirements.txt·양식.xlsx·IR 만 넣는다) 사용자 PC 에
     # 매뉴얼이 도달하는 **유일한 경로가 이 업데이트**다.  빼면 설명서가 영영 안 간다.
     "docs": {"사용설명서.pdf", "상세설명서.pdf", "체험하기.html"},
-    # 사용자가 더블클릭하는 실행·갱신 bat.  빌드가 설치 루트(app\ 바깥)로도 복사하지만,
-    # 백신이 exe 를 막았을 때의 대체 실행 경로라 트리 안에도 남긴다.
+    # 사용자가 더블클릭하는 실행·갱신 bat.
+    # ★ 실제로 **실행되는 사본은 설치 루트**에 있다 — 빌드가 거기로 복사하고
+    #   (`portable_build.run_build` 의 bats 루프), 안내 문서도 그 자리만 가리킨다.
+    #   이 트리 안 사본은 `%~dp0` 가 ``app\scripts\`` 를 가리켜 그대로는 돌지 않는다
+    #   (``%~dp0python\pythonw.exe`` 를 찾다 [ERROR] 로 끝난다).  그래도 남기는 것은
+    #   설치 루트 사본이 지워졌을 때 되살릴 원본이 되기 때문이다(셋이 합쳐 2 KB).
     "scripts": {"run_aoi.bat", "run_aoi_debug.bat", "update_app.bat"},
 }
 
