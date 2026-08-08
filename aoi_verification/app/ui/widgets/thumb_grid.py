@@ -37,9 +37,6 @@ class _ThumbTile(QFrame):
     expand_requested = pyqtSignal(object)     # ThumbEntry — ‘더 크게 보기’
     sel_toggled = pyqtSignal(object, bool)    # (ThumbEntry, selected) — 인라인 선택
 
-    _SEL_STYLE = ("QFrame {{ border: 2px solid {a}; border-radius: 8px;"
-                  " background: rgba(224, 163, 74, 0.08); }}").format(a=theme.ACCENT)
-
     def __init__(self,
                  entry: ThumbEntry,
                  *,
@@ -88,18 +85,15 @@ class _ThumbTile(QFrame):
         self._expand_btn: Optional[QToolButton] = None
         if show_expand:
             btn = QToolButton(self)
-            btn.setText("🔍")
+            # ★ 이모지(🔍)가 아니라 텍스트 글리프를 쓴다 — 이모지는 OS·폰트에 따라
+            #   컬러/외곽선으로 갈려 앱의 다른 아이콘(✓ ✕ → ↩ ▾)과 어긋난다.
+            btn.setText("⤢")
             btn.setToolTip(i18n.KO.EXPAND_VIEW_TOOLTIP)
             btn.setAutoRaise(True)
-            btn.setFixedSize(QSize(24, 24))
-            btn.setStyleSheet(
-                "QToolButton {{ background: rgba(26,29,35,0.85);"
-                "  color: {ink}; border: 1px solid {line};"
-                "  border-radius: 4px; font-size: 14px; }}"
-                "QToolButton:hover {{ border-color: {mute}; }}".format(
-                    ink=theme.INK, line=theme.LINE2, mute=theme.MUTE)
-            )
-            btn.move(self.width() - 28, 4)
+            # 클릭 대상 하한(theme.PROFILE.target_min) 을 지킨다 — 24px 은 미달이었다.
+            btn.setProperty("role", "tileExpand")
+            btn.setFixedSize(QSize(26, 26))
+            btn.move(self.width() - 30, 4)
             btn.show()
             btn.clicked.connect(
                 lambda: self.expand_requested.emit(self.entry)
@@ -132,8 +126,21 @@ class _ThumbTile(QFrame):
 
     # 인라인 선택(체크박스 없이 클릭 토글) ---------------------------------
     def set_inline_selected(self, selected: bool) -> None:
+        """선택 표시는 **동적 프로퍼티 + QSS** 로 한다.
+
+        ★ 예전엔 클래스 상수 `_SEL_STYLE` 을 인스턴스 스타일시트로 걸었다.  세 가지가
+        동시에 틀렸다: (1) 클래스 본문에서 `theme.ACCENT` 를 `.format()` 했으므로 색이
+        **import 시점에 굳어** 다크 전환이 영영 안 먹었고, (2) 선택자가 스코프 없는
+        `QFrame {…}` 이라 자식 QLabel(파일명·이미지)까지 캐스케이드돼 타일이 3중 액자로
+        보였으며, (3) 배경이 현 팔레트에 없는 옛 네온 팔레트의 주황이었다.
+        게다가 한 화면에 수백 개인 위젯이라 인스턴스 스타일시트 자체가 렉의 원인이다.
+
+        ★ `setProperty` 만으로는 화면이 안 바뀐다 — `setStyleSheet` 과 달리 동적
+        프로퍼티는 재계산을 트리거하지 않으므로 unpolish/polish 를 반드시 함께 부른다."""
         self._inline_selected = bool(selected)
-        self.setStyleSheet(self._SEL_STYLE if self._inline_selected else "")
+        self.setProperty("inlineSelected", "true" if self._inline_selected else "false")
+        self.style().unpolish(self)
+        self.style().polish(self)
 
     def is_inline_selected(self) -> bool:
         return self._inline_selected

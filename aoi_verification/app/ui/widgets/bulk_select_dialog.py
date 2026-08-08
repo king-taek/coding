@@ -112,14 +112,16 @@ class _SelectTile(QFrame):
         self._selected = bool(selected)
         self._refresh_visual()
 
+    @staticmethod
+    def _sel_style() -> str:
+        """★ 모듈/클래스 상수로 굽지 않는다 — 호출 시점에 팔레트를 읽어야 다크 전환이
+        따라온다.  배경도 강조색 틴트를 쓴다(예전엔 현 팔레트에 없는 네온 초록이라
+        파란 강조 체계에서 이 화면만 연둣빛으로 어긋났다)."""
+        return (f"#selTile {{ border: 2px solid {theme.ACCENT}; border-radius: 8px;"
+                f" background: {theme.ACCENT_TINT_SOFT}; }}")
+
     def _refresh_visual(self) -> None:
-        if self._selected:
-            self.setStyleSheet(
-                f"#selTile {{ border: 2px solid {theme.ACCENT}; border-radius: 8px;"
-                " background: rgba(57, 255, 20, 0.06); }"
-            )
-        else:
-            self.setStyleSheet("")
+        self.setStyleSheet(self._sel_style() if self._selected else "")
 
 
 class BulkSelectDialog(QDialog):
@@ -217,7 +219,8 @@ class BulkSelectDialog(QDialog):
         self._summary_label = QLabel(
             i18n.KO.BULK_SELECT_SUMMARY_FMT.format(n=0), self,
         )
-        self._summary_label.setStyleSheet(f"color: {theme.PASS}; font-weight: 700;")
+        # ★ 선택 개수는 '합격 판정' 이 아니다 — 성공색(PASS)이 아니라 강조색을 쓴다.
+        self._summary_label.setStyleSheet(f"color: {theme.ACCENT}; font-weight: 700;")
         top.addWidget(self._summary_label)
         top.addStretch(1)
         size_label = QLabel(i18n.KO.BULK_SIZE_LABEL, self)
@@ -261,9 +264,9 @@ class BulkSelectDialog(QDialog):
         if self._paginated:
             page_bar = QHBoxLayout()
             page_bar.setSpacing(8)
-            self._btn_prev = NeonButton(i18n.KO.BULK_PAGE_PREV, role="default")
+            self._btn_prev = NeonButton(i18n.KO.BULK_PAGE_PREV, role="ghost")
             self._btn_prev.clicked.connect(lambda: self._go_page(self._page - 1))
-            self._btn_next = NeonButton(i18n.KO.BULK_PAGE_NEXT, role="default")
+            self._btn_next = NeonButton(i18n.KO.BULK_PAGE_NEXT, role="ghost")
             self._btn_next.clicked.connect(lambda: self._go_page(self._page + 1))
             self._page_label = QLabel("", self)
             self._page_label.setStyleSheet(f"color: {theme.MUTE}; font-weight: 700;")
@@ -278,10 +281,12 @@ class BulkSelectDialog(QDialog):
         bar = QHBoxLayout()
         bar.setSpacing(8)
         # 전체 선택 / 해제 보조 버튼 — 가독성 위해 대비 높은 role.
-        self.btn_select_all = NeonButton(i18n.KO.BULK_SELECT_ALL, role="primary")
+        # ★ 한 화면에 채운 강조 버튼은 하나뿐이어야 한다 — 주 액션(우측)과 시선이
+        #   갈리지 않게 보조 버튼 둘 다 ghost 로 둔다(role="default" 는 QSS 에 없는 등급).
+        self.btn_select_all = NeonButton(i18n.KO.BULK_SELECT_ALL, role="ghost")
         self.btn_select_all.clicked.connect(self._select_all)
         bar.addWidget(self.btn_select_all)
-        self.btn_clear = NeonButton(i18n.KO.BULK_DESELECT_ALL, role="default")
+        self.btn_clear = NeonButton(i18n.KO.BULK_DESELECT_ALL, role="ghost")
         self.btn_clear.clicked.connect(self._clear_selection)
         bar.addWidget(self.btn_clear)
         bar.addStretch(1)
@@ -329,9 +334,9 @@ class BulkSelectDialog(QDialog):
                 i18n.KO.GROUP_HEADER_FMT.format(slot=slot, count=len(items)),
                 host,
             )
-            slot_label.setStyleSheet(
-                f"color: {theme.PASS}; font-weight: 700; padding-top: 4px;"
-            )
+            # 슬롯 이름은 판정이 아니라 그룹 제목이다 — paneTitle 등급을 쓴다.
+            slot_label.setProperty("role", "paneTitle")
+            slot_label.setStyleSheet("padding-top: 4px;")
             host_layout.addWidget(slot_label)
 
             grid_host = QWidget(host)

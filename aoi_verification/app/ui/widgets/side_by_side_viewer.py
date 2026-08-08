@@ -72,7 +72,8 @@ class _Pane(QWidget):
         lay.addWidget(self._title)
         self._img = QLabel(self)
         self._img.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._img.setStyleSheet(f"background: #000; border: 1px solid {theme.LINE};")
+        self._img.setStyleSheet(
+            f"background: {theme.VIEWER_BG}; border: 1px solid {theme.LINE};")
         # 크기 제약 없는 QLabel 에 라벨 크기로 스케일한 pixmap 을 넣으면
         # minimumSizeHint 이 그 pixmap 크기로 커져 리사이즈마다 창이 계속 커진다.
         # Ignored 정책 + 1×1 최소크기로 레이아웃 성장 피드백을 끊는다.
@@ -175,7 +176,7 @@ class _Pane(QWidget):
         cw = max(1, self._img.width())
         ch = max(1, self._img.height())
         canvas = QPixmap(cw, ch)
-        canvas.fill(QColor("#000"))          # 패널 바탕과 같은 검정
+        canvas.fill(QColor(theme.VIEWER_BG))   # 뷰어 바탕(테마 무관 순검정)
         p = QPainter(canvas)
         p.drawPixmap((cw - scaled.width()) // 2 + self._off_x,
                      (ch - scaled.height()) // 2 + self._off_y, scaled)

@@ -108,13 +108,15 @@ class ResultPage(QWidget):
         self.new_btn.clicked.connect(self.new_session_requested.emit)
         bar.addWidget(self.new_btn)
 
-        self.review_btn = NeonButton(i18n.KO.BTN_REVIEW_MATCHES, role="warn")
+        self.review_btn = NeonButton(i18n.KO.BTN_REVIEW_MATCHES, role="ghost")
         self.review_btn.clicked.connect(self._on_review)
         bar.addWidget(self.review_btn)
 
         # 매치 실패 사진 검토 — 엑셀 저장 직전, 마지막 한 번 더 매칭 기회 (#8).
+        # ★ warn(주의색)은 예외 상태 경고 전용이다 — 권장 이동 액션에 쓰면
+        #   '위험한 동작' 처럼 읽힌다.  검토 권장은 상단 안내문이 담당한다.
         self.review_unmatched_btn = NeonButton(
-            i18n.KO.BTN_REVIEW_UNMATCHED, role="warn",
+            i18n.KO.BTN_REVIEW_UNMATCHED, role="ghost",
         )
         self.review_unmatched_btn.setMinimumWidth(200)
         self.review_unmatched_btn.clicked.connect(self._on_review_unmatched)

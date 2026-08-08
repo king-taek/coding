@@ -206,7 +206,6 @@ class MatchPage(QWidget):
         center = NeonCard(role="card", parent=self)
         cl = center.body()
         title = QLabel(i18n.KO.PANEL_MATCH_REF, center)
-        title.setProperty("role", "subtitle")
         title.setProperty("role", "paneTitle")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         cl.addWidget(title)
@@ -281,7 +280,6 @@ class MatchPage(QWidget):
         rl.setContentsMargins(10, 10, 10, 10)
         rl.setSpacing(8)
         rt = QLabel(i18n.KO.PANEL_MATCH_CANDIDATES, right)
-        rt.setProperty("role", "subtitle")
         rt.setProperty("role", "paneTitle")
         rl.addWidget(rt)
 

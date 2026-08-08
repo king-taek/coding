@@ -91,7 +91,6 @@ class _SidePanel(QFrame):
         # 헤더 — 제목 + (인라인 선택 도구) + ‘선택 모드’ 버튼
         head = QHBoxLayout()
         ttl = QLabel(title, self)
-        ttl.setProperty("role", "subtitle")
         ttl.setProperty("role", "paneTitle")
         head.addWidget(ttl)
         head.addStretch(1)
@@ -310,7 +309,6 @@ class SelectPage(QWidget):
         # LOT(slot)별 전체 장수 — 참고용으로 작게 한 줄 (#2).  세션 내 불변이라
         # load_state 에서 1회만 채운다.  슬롯이 많으면 elide + 전체는 툴팁.
         self.lot_counts_label = QLabel("", self)
-        self.lot_counts_label.setProperty("role", "muted")
         self.lot_counts_label.setProperty("role", "mutedSmall")
         self.lot_counts_label.setWordWrap(False)
         root.addWidget(self.lot_counts_label)
@@ -350,7 +348,6 @@ class SelectPage(QWidget):
         center_card = NeonCard(role="card", parent=self)
         cl = center_card.body()
         center_title = QLabel(i18n.KO.PANEL_CENTER_DECIDE, center_card)
-        center_title.setProperty("role", "subtitle")
         center_title.setProperty("role", "paneTitle")
         center_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         cl.addWidget(center_title)

@@ -39,13 +39,17 @@ _GAP = 26                                   # 묶은 쌍 두 사진 사이 간�
 
 # 선택(클릭) 시 파란 테두리가 또렷하게.  미선택 항목에도 투명 테두리를 미리 둬서
 # 선택 시 레이아웃이 흔들리지 않게 한다.
-_LIST_SEL_QSS = (
-    "QListWidget::item { border: 2px solid transparent; border-radius: 4px;"
-    " padding: 2px; margin: 1px; }"
-    f"QListWidget::item:selected {{ border: 2px solid {theme.FOCUS};"
-    f" background: rgba(106,166,255,0.20); color: {theme.INK}; }}"
-    f"QListWidget::item:selected:active {{ border: 2px solid {theme.FOCUS}; }}"
-)
+# ★ 모듈 상수로 굽지 마라 — f-string 은 **import 시점**에 팔레트를 박아 넣어서
+#   다크 전환이 영영 안 먹는다.  호출 시점에 평가하는 함수로 둔다.
+#   배경도 팔레트에 없던 파랑 리터럴 대신 강조 틴트를 쓴다.
+def _list_sel_qss() -> str:
+    return (
+        "QListWidget::item { border: 2px solid transparent; border-radius: 4px;"
+        " padding: 2px; margin: 1px; }"
+        f"QListWidget::item:selected {{ border: 2px solid {theme.FOCUS};"
+        f" background: {theme.ACCENT_TINT}; color: {theme.INK}; }}"
+        f"QListWidget::item:selected:active {{ border: 2px solid {theme.FOCUS}; }}"
+    )
 
 _METHOD_LABEL = {
     "info": "정보파일",
@@ -158,13 +162,13 @@ class SlotMappingDialog(QDialog):
             item.setIcon(ic)
         if (meta.get(name) or {}).get("method") == "none":
             # 사진 없는 폴더는 짝지을 수 없음 → 선택 불가 + 흐리게.
-            item.setForeground(Qt.GlobalColor.gray)
+            item.setForeground(QColor(theme.MUTE))   # 테마 무관 gray 대신 팔레트 토큰
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
         return item
 
     def _fill_list(self, lst: QListWidget, names: list[str], meta: dict) -> None:
         lst.setIconSize(QSize(_CROP_W, _CROP_H))
-        lst.setStyleSheet(_LIST_SEL_QSS)
+        lst.setStyleSheet(_list_sel_qss())
         lst.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         for n in names:
             lst.addItem(self._make_item(n, meta))

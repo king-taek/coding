@@ -38,7 +38,6 @@ class SlotSection(QWidget):
 
         header = QHBoxLayout()
         self._label = QLabel(self)
-        self._label.setProperty("role", "subtitle")
         self._label.setProperty("role", "paneTitle")
         header.addWidget(self._label)
         header.addStretch(1)

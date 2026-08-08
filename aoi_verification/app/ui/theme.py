@@ -32,7 +32,11 @@ class Profile:
     font_title: int = 26
     font_subtitle: int = 15
     font_caption: int = 12
-    title_weight: int = 300         # 얇은 표제(제도 시트 성격)
+    # ★ 400 이다.  한때 300(얇은 표제)이었지만 동봉 폰트는 Regular/Bold 두 굵기뿐이라
+    #   300 요청은 Qt 가 400 으로 스냅했다 — 코드의 의도와 화면이 갈라져 있었고,
+    #   NanumSquare Light 가 설치된 PC 에서만 얇게 나와 PC 마다 표제가 달라질 수 있었다.
+    #   굵기를 진짜로 바꾸려면 폰트 파일을 먼저 동봉해라(theme._FONT_FILES).
+    title_weight: int = 400
     title_tracking: int = -1
     # 모서리 — '너무 각지다'는 지적에 따라 중간 라운드(8~10px)로. 계측기의 정밀함은
     # 얇은 표제·하이라인 눈금·모노 수치가 계속 담당한다.
@@ -70,6 +74,9 @@ class Profile:
 # 웜-무채 바탕 위에서는 같은 블루가 더 유채로 읽혀 '강조 하나' 원칙이 오히려 또렷해진다.
 _LIGHT: dict[str, str] = {
     "bg": "#ECE9E2",        # 벨럼 바탕
+    # 사진 판독 전용 바탕 — 결함 사진의 명암을 왜곡하지 않게 두 모드 모두 순검정이다
+    # (의도적으로 테마를 따르지 않는다).  리터럴을 흩뿌리지 말고 이 토큰을 참조할 것.
+    "viewer_bg": "#000000",
     "panel": "#F5F3ED",     # 시트 면
     "elev": "#FBFAF7",
     "line": "#89836F",      # 제도 눈금 — 가장 옅은 면(elev)에서도 3:1 이상
@@ -106,6 +113,7 @@ _LIGHT: dict[str, str] = {
 #   **다크 모드 토글**로 단순화했다.  키는 `"dark"` 라 기존 prefs 가 그대로 동작한다.
 _DARK: dict[str, str] = {
     "bg": "#1C1A15",        # 불 끈 제도지
+    "viewer_bg": "#000000",   # 라이트와 같다 — 사진 판독 바탕은 테마를 따르지 않는다
     "panel": "#26231C",
     "elev": "#302C24",
     "line": "#7C7565",      # 흑연 눈금 — panel 3.43 / bg 3.80
@@ -217,7 +225,7 @@ def load_app_fonts() -> list[str]:
 PROFILE = Profile()
 
 # 인라인 f-string 스타일이 쓰는 색 상수 — set_color_mode() 가 일괄 갱신한다.
-BG = PANEL = ELEV = LINE = LINE2 = LINE_STRONG = ""
+BG = PANEL = ELEV = LINE = LINE2 = LINE_STRONG = VIEWER_BG = ""
 INK = INK2 = MUTE = ""
 ACCENT = ACCENT_HOVER = ACCENT_PRESSED = ON_ACCENT = ""
 PASS = DANGER = WARN = FOCUS = THUMB_FRAME = ""
@@ -269,6 +277,11 @@ def _derive_tokens() -> dict:
         #   않는다 — WCAG 1.4.3 은 비활성 컨트롤을 대비 요건에서 제외한다.
         "disabled_ink": _mix(c["mute"], c["bg"], 0.45),
         "disabled_line": _mix(c["line"], c["bg"], 0.45),
+        # 선택된 **카드**의 면 — ★ 반투명 틴트를 쓰면 안 된다.  card-soft 의 면은
+        #   불투명($panel)이라, 더 구체적인 선택자가 반투명 배경으로 덮으면 면이
+        #   통째로 사라져 뒤의 바탕이 비쳐 보인다(실측: 선택 타일만 배경이 뚫렸다).
+        #   `slotTile` 처럼 처음부터 transparent 인 컨트롤만 틴트를 쓸 수 있다.
+        "card_selected_bg": _mix(c["panel"], c["accent"], 0.10),
         # 행 — 면 없이 하이라인 눈금만(제도 시트).
         "row_bg": "transparent", "row_border": "transparent",
         "row_divider": c["line"],
@@ -290,7 +303,7 @@ def set_color_mode(name: str) -> None:
     만들어진 화면에 즉시 반영하려면 호출부가 **페이지를 다시 만들어야** 한다
     (``main_window`` 가 세션 시작 전에만 그렇게 한다)."""
     global COLOR_MODE, COLORS, SCRIM_RGBA
-    global BG, PANEL, ELEV, LINE, LINE2, LINE_STRONG, INK, INK2, MUTE
+    global BG, PANEL, ELEV, LINE, LINE2, LINE_STRONG, INK, INK2, MUTE, VIEWER_BG
     global ACCENT, ACCENT_HOVER, ACCENT_PRESSED, ON_ACCENT
     global PASS, DANGER, WARN, FOCUS, THUMB_FRAME
     global ACCENT_TINT, ACCENT_TINT_SOFT, PASS_TINT
@@ -303,6 +316,7 @@ def set_color_mode(name: str) -> None:
     SCRIM_RGBA = _SCRIMS[mode]
 
     BG, PANEL, ELEV = c["bg"], c["panel"], c["elev"]
+    VIEWER_BG = c["viewer_bg"]
     LINE, LINE2, LINE_STRONG = c["line"], c["line2"], c["line_strong"]
     INK, INK2, MUTE = c["ink"], c["ink2"], c["mute"]
     ACCENT, ACCENT_HOVER = c["accent"], c["accent_hover"]

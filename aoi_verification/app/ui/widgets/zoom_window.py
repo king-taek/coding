@@ -212,7 +212,7 @@ class FullscreenViewer(QDialog):
         super().__init__(parent)
         self.setWindowTitle(image_path.name)
         self.setModal(True)
-        self.setStyleSheet("background-color: #000;")
+        self.setStyleSheet(f"background-color: {theme.VIEWER_BG};")
         # 작은 모니터에서 1280×800 이 화면을 넘어가지 않도록 화면 가용 영역의
         # 90% 안으로 제한.  (실제 크기는 시트 호스트가 full_bleed 로 덮어쓴다.)
         scr = QApplication.primaryScreen()
@@ -235,11 +235,11 @@ class FullscreenViewer(QDialog):
         self._pix = QPixmap(str(image_io.get_mid_path(image_path)))
         if self._pix.isNull():
             self._pix = QPixmap(800, 600)
-            self._pix.fill(Qt.GlobalColor.black)
+            self._pix.fill(QColor(theme.VIEWER_BG))
 
         self._label = QLabel(self)
         self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._label.setStyleSheet("background-color: #000;")
+        self._label.setStyleSheet(f"background-color: {theme.VIEWER_BG};")
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -344,7 +344,7 @@ class FullscreenViewer(QDialog):
         cw = self.width()
         ch = self.height()
         canvas = QPixmap(cw, ch)
-        canvas.fill(Qt.GlobalColor.black)
+        canvas.fill(QColor(theme.VIEWER_BG))
         p = QPainter(canvas)
         x = (cw - scaled.width()) // 2 + self._offset_x
         y = (ch - scaled.height()) // 2 + self._offset_y

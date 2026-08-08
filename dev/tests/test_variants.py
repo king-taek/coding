@@ -103,7 +103,7 @@ def test_profile_pins_datum_baseline():
     # 모서리는 중간 라운드(8~10px) — '너무 각지다'는 지적 반영.
     assert (p.radius, p.radius_sm, p.chip_radius) == (9, 6, 8)
     assert p.row_radius == 0                       # 하이라인 행은 면이 없어 무의미
-    assert (p.title_weight, p.title_tracking) == (300, -1)        # 얇은 표제
+    assert (p.title_weight, p.title_tracking) == (400, -1)        # 표제(동봉 폰트 Regular)
     assert p.row_gap == 0                                          # 하이라인 눈금
 
 

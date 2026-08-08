@@ -129,8 +129,10 @@ class _CandidateTile(QFrame):
         self._score_label = QLabel(
             fmt_score(self.score, self._coord_mode, self._tolerance), self)
         self._score_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # ★ 후보 유사도는 '합격 판정' 이 아니다 — 매치 검토 화면과 같은 중립색을 쓴다
+        #   (성공색은 판정 칩 전용).
         self._score_label.setStyleSheet(
-            f"color: {theme.PASS}; font-weight: 700; padding: 2px;"
+            f"color: {theme.INK2}; font-weight: 700; padding: 2px;"
         )
         lay.addWidget(self._score_label)
 
@@ -527,7 +529,7 @@ class UnmatchedReviewDialog(QDialog):
         self._refresh_list_colors()
 
     def _refresh_list_colors(self) -> None:
-        """후보를 선택(보류)한 ref 는 실패 목록에서 파일명을 파란색으로 표시 (#4)."""
+        """후보를 선택(보류)한 ref 는 실패 목록에서 파일명을 강조색으로 표시 (#4)."""
         if not hasattr(self, "fail_list"):
             return
         for row in range(self.fail_list.count()):
@@ -536,7 +538,7 @@ class UnmatchedReviewDialog(QDialog):
                 continue                              # 구분선 행.
             item = self.fail_list.item(row)
             if idx in self._pending:
-                item.setForeground(QColor(theme.PASS))
+                item.setForeground(QColor(theme.ACCENT))
             else:
                 item.setForeground(QColor(theme.INK2))
 

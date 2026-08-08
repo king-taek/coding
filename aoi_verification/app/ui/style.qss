@@ -263,6 +263,16 @@ QFrame[role="section"] {
     border-radius: $radius;
 }
 
+/* Stage 1 좌측 패널의 인라인 선택(체크박스 없이 타일 클릭으로 고르는 상태).
+   ★ role 을 갈아끼우지 말고 **속성 두 개를 겹쳐** 쓴다 — 타일은 이미 card-soft 라
+     role 을 바꾸면 카드 면·라운드를 통째로 잃는다.  선택자가 둘이라 위 규칙을 이긴다.
+   ★ 예전엔 이걸 위젯의 인스턴스 스타일시트로 걸었는데, 색이 import 시점에 굳어
+     다크 전환이 영영 안 먹었고 스코프가 없어 자식 라벨까지 테두리가 번졌다. */
+QFrame[role="card-soft"][inlineSelected="true"] {
+    background-color: $card_selected_bg;
+    border: 2px solid $accent;
+}
+
 /* 매치 검토 행 — 변형별 card / hairline 지원. */
 QFrame[role="row"] {
     background-color: $row_bg;
@@ -997,6 +1007,25 @@ QToolButton[role="disclosure"]:hover {
 QToolButton[role="disclosure"]:focus {
     border: $focus_w solid $focus;
     padding: 3px 9px;
+}
+
+/* 썸네일 타일 우상단 '크게 보기' — ★ 예전엔 인라인 스타일로 옛 네온 팔레트의
+   다크 네이비(rgba(26,29,35,.85))를 깔아, 라이트 화면에 홀로 어두운 얼룩이 떠 있고
+   글자 대비가 1.63:1 이었다.  경계는 $line2(장식 전용) 가 아니라 $line_strong 을
+   쓴다 — 상호작용 컨트롤의 평상시 경계는 3:1 이상이어야 한다. */
+QToolButton[role="tileExpand"] {
+    color: $ink2;
+    background-color: $elev;
+    border: 1px solid $line_strong;
+    border-radius: $radius_sm;
+    font-size: 14px;
+}
+QToolButton[role="tileExpand"]:hover {
+    color: $ink;
+    border-color: $accent;
+}
+QToolButton[role="tileExpand"]:focus {
+    border: $focus_w solid $focus;
 }
 
 /* ── 도움말 토글 버튼 (? 버튼) ───────────────────────────────────────────── */
