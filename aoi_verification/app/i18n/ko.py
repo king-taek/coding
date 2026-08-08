@@ -128,6 +128,7 @@ STAGE1_TITLE = "Stage 1 — 후보 선별"
 STAGE2_TITLE = "Stage 2 — 유사도 기반 매칭"
 STAGE2_TITLE_COORD = "Stage 2 — 좌표 기반 매칭 (v2)"
 RESULT_TITLE = "검증 결과"
+MATCH_REVIEW_TITLE = "매치 검토"
 
 PANEL_LEFT_CANDIDATES = "검증 후보들 (남은 사진)"
 PANEL_CENTER_DECIDE = "검증 결정할 사진"
@@ -333,6 +334,8 @@ WORKING_FILE_LABEL = "결과 파일 위치"
 #   한 화면에 두 번 보인다("썸네일 생성 중 147 / 480" + "147 / 480").  단일 출처 규칙.
 LOAD_THUMBNAIL = "썸네일 생성 중…"
 LOAD_STAGE_PREP = "다음 단계 준비 중…"
+# 검토 화면 진입 — 행을 나눠 만드는 동안(수백 건이면 몇 초).
+LOAD_REVIEW_ROWS = "검토 목록 준비 중…"
 LOAD_FEATURE = "검증 장비 특징 추출 중…"
 LOAD_SCORING = "유사도 계산 중…"
 PHASE_FEATURE = "이미지 특징 분석"
@@ -417,7 +420,9 @@ CHIP_NO_MATCH = "매치 없음"
 BTN_NO_MATCH_COMPACT = "×"
 BTN_RESTORE_COMPACT = "↩"
 REVIEW_EMPTY_HINT = (
-    "자동 매치된 항목이 없습니다.  [완료] 를 누르면 결과 화면으로 이동합니다."
+    # ★ 화면의 버튼 이름과 같게 적는다 — 예전엔 [완료] 라고 안내했지만 실제 버튼은
+    #   '검토 완료 · 유지 n' 이라, 있지도 않은 버튼을 찾게 만들었다.
+    "자동 매치된 항목이 없습니다.  [검토 완료] 를 누르면 결과 화면으로 이동합니다."
 )
 # 검토 리스트 컬럼 헤더 — ★ 이미지 세 종류를 **각자 자기 사진 위**에 놓기 위해
 # 하나였던 'COL_IMAGES = 기준 · 검증 · 후보' 를 셋으로 쪼갰다(한 라벨이면 어느 것도
