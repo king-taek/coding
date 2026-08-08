@@ -1863,4 +1863,22 @@ class MainWindow(QMainWindow):
                 self._openvino_worker.wait(500)
         except Exception:
             pass
+        # ★ KLA OCR 워커 — `_ocr_worker` 는 __init__ 에 선언이 없어(그 단계를 안 거친
+        #   세션엔 속성 자체가 없다) getattr 로 방어한다.  정리하지 않으면 창을 닫을 때
+        #   "QThread: Destroyed while thread is still running" 으로 강제 종료됐다.
+        try:
+            ocr = getattr(self, "_ocr_worker", None)
+            if ocr is not None and ocr.isRunning():
+                ocr.stop()
+                ocr.wait(500)
+        except Exception:
+            pass
+        # ★ 엑셀 저장 워커 — 기다리기만 하면 반쯤 쓰인 xlsx 가 남으므로 먼저 취소한다.
+        try:
+            exporter = getattr(self._result_page, "_exporter", None)
+            if exporter is not None and exporter.isRunning():
+                exporter.stop()
+                exporter.wait(3000)
+        except Exception:
+            pass
         super().closeEvent(event)

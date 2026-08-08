@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import re
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -89,6 +90,10 @@ def _machine_label(raw: str) -> str:
     return f"AOI({s})"
 
 
+class _Cancelled(Exception):
+    """저장 취소 — 실패가 아니므로 사용자에게 오류로 보고하지 않는다."""
+
+
 class ExporterSignals(QObject):
     progress = pyqtSignal(int, int, str)
     done = pyqtSignal(str)               # 결과 파일 경로
@@ -117,14 +122,27 @@ class ExcelExporter(QThread):
         # 미매칭 사진만 원본 화질로 — 전체 원본 옵션이 켜져 있으면 어차피 전부 원본.
         self._unmatched_original = bool(unmatched_original_quality)
         self.signals = ExporterSignals()
+        # ★ 앱을 닫는데 저장이 돌고 있으면, 기다리기만 해서는 반쯤 쓰인 xlsx 가 남는다
+        #   (openpyxl 의 save 는 원자적이지 않다).  중간에 빠져나올 수 있게 한다.
+        self._stop = threading.Event()
+
+    def stop(self) -> None:
+        """진행 중인 저장을 취소한다 — 파일을 쓰기 **전에** 멈춘다."""
+        self._stop.set()
+
+    def is_cancelled(self) -> bool:
+        return self._stop.is_set()
 
     # ------------------------------------------------------------------
     def run(self) -> None:        # type: ignore[override]
         try:
             self._do_export()
-            self.signals.done.emit(str(self._dst))
+        except _Cancelled:
+            return                       # 사용자가 앱을 닫았다 — 조용히 끝낸다
         except Exception as exc:
             self.signals.failed.emit(str(exc))
+            return
+        self.signals.done.emit(str(self._dst))
 
     # ------------------------------------------------------------------
     def _do_export(self) -> None:
@@ -213,6 +231,9 @@ class ExcelExporter(QThread):
                 pass
 
         self._dst.parent.mkdir(parents=True, exist_ok=True)
+        # ★ 여기서 한 번 더 본다 — 저장을 시작한 뒤 취소되면 파일이 깨진다.
+        if self._stop.is_set():
+            raise _Cancelled
         wb.save(str(self._dst))
         # SharePoint / MIP 메타데이터 제거 — 회사 Excel 에서 ‘읽기 전용’ /
         # ‘보호 보기’ 로 열리는 것을 방지.
@@ -457,6 +478,8 @@ class ExcelExporter(QThread):
         )
         cell_h_px = _row_height_to_px(template_row_h)
         for idx, (cur_slot, _key, payload) in enumerate(rows_input, start=1):
+            if self._stop.is_set():
+                raise _Cancelled
             # 새 행은 템플릿의 데이터 행과 같은 높이로 통일 → 양식 안팎 일관성.
             cur_h = ws.row_dimensions[row].height
             if not cur_h or cur_h < template_row_h:
