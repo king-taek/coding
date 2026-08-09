@@ -621,6 +621,12 @@ class LoadingOverlay(QWidget):
     )
 
     def eventFilter(self, obj, event) -> bool:  # noqa: N802
+        # ★ ``getattr`` 로 읽는다 — 잠금이 걸린 채 오버레이가 파괴되면 앱에 걸어 둔
+        #   전역 필터가 잠시 살아남아, 파이썬 속성이 이미 사라진 객체로 이벤트가
+        #   들어온다(그때 `AttributeError` 가 콘솔을 채웠다).  이 경로에서는 아무것도
+        #   막지 않는 게 맞다 — 잠글 주체가 이미 없다.
+        if not hasattr(self, "_input_locked"):
+            return False
         etype = event.type()
         if obj is self.parent() and etype == QEvent.Type.Resize:
             self._cover_parent()
