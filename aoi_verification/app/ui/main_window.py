@@ -18,7 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import QThread, QTimer, pyqtSignal
+from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (QApplication, QLabel, QMainWindow,
                               QMessageBox, QStackedWidget, QStatusBar,
                               QVBoxLayout, QWidget)
@@ -60,6 +60,68 @@ _LOG = logging.getLogger("aoi.ui")
 PHASE_NONE = "none"
 PHASE_A_SELECT = "A_select"
 PHASE_A_MATCH = "A_match"
+
+
+# 스캔 워커가 도는 동안 파이썬 참조를 붙잡아 두는 곳 — 지역 변수로만 두면 함수가
+# 끝나는 순간 GC 가 QThread 를 파괴한다(`pages/setup_page.py` 의 `_LIVE_DIE_SCANS`).
+_LIVE_SCANS: set = set()
+
+
+class _FolderScan(QThread):
+    """기준/검증 폴더를 **워커 스레드에서** 훑는다 (U-05).
+
+    `slot.scan` 은 폴더를 하나씩 열어 사진을 열거하므로 NAS 에서는 폴더 수에
+    비례해 초 단위로 걸린다.  예전에는 이걸 GUI 스레드에서 돌리면서 진행을
+    보여 주려고 콜백마다 ``processEvents`` 를 불렀는데, 그 사이 사용자의 클릭이
+    **스캔 도중에 재진입**할 수 있었다.  이제 진행은 시그널로만 올라온다.
+
+    ``stop()`` 은 협조적 중지다 — `scan` 을 중간에 끊을 수단은 없으므로 진행
+    콜백에서 예외를 던져 빠져나온다(부분 결과는 버린다)."""
+
+    class _Stopped(BaseException):
+        """중지 신호.
+
+        ★ `Exception` 이 아니라 `BaseException` 을 상속한다 — `models/slot.py` 의
+        `scan` 은 진행 콜백을 `except Exception: pass` 로 감싸 두었기 때문에
+        (콜백이 깨져도 스캔은 끝나야 한다는 의도) 보통 예외로는 **중지가 통째로
+        삼켜진다.**  그러면 [중지] 를 눌러도 느린 NAS 스캔이 끝까지 도는데,
+        그게 바로 이 기능이 없애려던 상황이다."""
+
+    class _Signals(QObject):
+        progress = pyqtSignal(int, int, int)     # token, done, total
+        done = pyqtSignal(int, object)           # token, ScanResult
+        failed = pyqtSignal(int, str)            # token, message
+
+    def __init__(self, token: int, ref_root, val_root) -> None:
+        super().__init__()                  # 부모 없음(위 주석)
+        self._token = token
+        self._ref_root = ref_root
+        self._val_root = val_root
+        self._stop = False
+        self.signals = self._Signals()
+
+    def stop(self) -> None:
+        self._stop = True
+
+    def run(self) -> None:      # type: ignore[override]
+        def _progress(done: int, total: int) -> None:
+            if self._stop:
+                raise _FolderScan._Stopped()
+            # 25 폴더마다만 보고한다 — 매 폴더 신호는 큐만 채운다.
+            if done % 25 == 0 or done == total:
+                self.signals.progress.emit(self._token, done, total)
+
+        try:
+            sr = scan(self._ref_root, self._val_root, progress=_progress)
+        except _FolderScan._Stopped:
+            return                          # 취소 — 아무것도 보고하지 않는다
+        except Exception as exc:
+            # ★ 실패를 알려야 한다.  예전엔 예외가 나면 오버레이가 **켜진 채** 남아
+            #   앱이 잠긴 것처럼 보였다(폴더가 그 사이 사라진 경우 등).
+            self.signals.failed.emit(self._token, str(exc))
+            return
+        if not self._stop:
+            self.signals.done.emit(self._token, sr)
 
 
 class MainWindow(QMainWindow):
@@ -178,6 +240,10 @@ class MainWindow(QMainWindow):
         self._thumbs_handled = False
         self._thumb_pool = None              # Optional[ThumbnailPool]
         self._sizing_tier: Optional[config.SizingTier] = None
+        # 폴더 스캔 워커 (U-05) + [중지] 가 무엇을 멈춰야 하는지 알려 주는 현재 단계 (P-09).
+        self._scan_token = 0
+        self._scan_worker: Optional[_FolderScan] = None
+        self._stage = ""
         self._scan: Optional[ScanResult] = None
         self._input: Optional[SetupInput] = None
         self._phase: str = PHASE_NONE
@@ -187,6 +253,14 @@ class MainWindow(QMainWindow):
         # 비어있지 않으면 _finish_session 이 _matches_a/_b 대신 이걸 사용한다.
         self._reviewed_matches: list[MatchResult] = []
         self._reviewed_unmatched: list[MissEntry] = []
+        self._reviewed_unmatched_keys: set = set()
+        # 검토 대상 전체('매치 없음' 표시분 포함) — 결과↔검토 왕복의 기반.
+        self._reviewed_all_matches: list[MatchResult] = []
+        self._run_log_written = False
+        # 기준 사진 기록 저장 디바운스 — ★ self 를 부모로(정적 singleShot 금지).
+        self._ref_history_timer = QTimer(self)
+        self._ref_history_timer.setSingleShot(True)
+        self._ref_history_timer.timeout.connect(self._flush_ref_history)
         self._stage1_a_snapshot: dict | None = None
         self._working_xlsx: Optional[Path] = None
         self._template_used: Optional[Path] = None
@@ -288,7 +362,7 @@ class MainWindow(QMainWindow):
                 reason = (info or {}).get("error", "")
                 msg = i18n.KO.UPDATE_UNKNOWN
                 if reason:
-                    msg = f"{msg}\n\n[원인] {reason}"
+                    msg = f"{msg}{i18n.KO.CAUSE_PREFIX}{reason}"
                 self._update_none.emit(msg)
 
         threading.Thread(target=_work, name="update-check-manual",
@@ -356,7 +430,7 @@ class MainWindow(QMainWindow):
                     # 실패가 아니라 '의도적 보류' 다 — 무엇을 받아야 하는지 정확히 알린다.
                     msg = i18n.KO.UPDATE_NEEDS_NEW_BUNDLE
                 elif updater.last_error():
-                    msg = f"{msg}\n\n[원인] {updater.last_error()}"
+                    msg = f"{msg}{i18n.KO.CAUSE_PREFIX}{updater.last_error()}"
             except Exception:
                 pass
             sheets.warn(self, i18n.KO.UPDATE_AVAILABLE_TITLE, msg)
@@ -505,6 +579,16 @@ class MainWindow(QMainWindow):
         )
         self._show_page(self._setup_page)
 
+    def _on_select_cancelled(self) -> None:
+        """Stage 1 에서 설정 화면으로 복귀 — 진행 중이던 선별 상태를 버린다."""
+        self._phase = PHASE_NONE
+        self._stage1_a_snapshot = None
+        session_mod.clear()
+        # 설정으로 돌아가는 다른 경로들과 같게 절전 억제를 푼다 — 빠뜨리면
+        # 검증을 접었는데도 화면보호기가 세션 내내 막힌 채로 남는다.
+        wakelock.release()
+        self._show_page(self._setup_page)
+
     def _on_match_cancelled(self) -> None:
         """#8 매치 페이지에서 중지 — 진행 중 작업을 멈추고 셋업 화면으로 복귀."""
         wakelock.release()
@@ -574,9 +658,11 @@ class MainWindow(QMainWindow):
         r = sheets.ask(
             self, i18n.KO.WARN_SLOT_MISMATCH_TITLE,
             i18n.KO.WARN_SLOT_MISMATCH_FMT.format(
-                ref_only=", ".join(sr.ref_only) or "없음",
-                val_only=", ".join(sr.val_only) or "없음",
-            ) + "\n\n" + i18n.KO.SLOT_MAP_OPEN + " ?",
+                ref_only=", ".join(sr.ref_only) or i18n.KO.VALUE_NONE,
+                val_only=", ".join(sr.val_only) or i18n.KO.VALUE_NONE,
+            # ★ 버튼 라벨용 명사구에 " ?" 를 붙여 만든 비문("… 열기 ?")이었다.
+            #   완결된 질문 문장을 i18n 에 두고 그대로 쓴다.
+            ) + "\n\n" + i18n.KO.SLOT_MAP_ASK,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes,
         )
@@ -757,13 +843,13 @@ class MainWindow(QMainWindow):
         if jobs and wafer_id.ocr_available():
             from ..workers.wafer_id_ocr import WaferIdOcrWorker
             self._loading.show_overlay(
-                i18n.KO.LOAD_KLA_OCR_FMT.format(done=0, total=len(jobs)))
+                i18n.KO.LOAD_KLA_OCR)
             worker = WaferIdOcrWorker(jobs, parent=self)
             self._ocr_worker = worker          # GC 방지 참조 보관
 
             def _on_progress(d: int, t: int) -> None:
                 self._loading.set_progress(
-                    d, t, i18n.KO.LOAD_KLA_OCR_FMT.format(done=d, total=t))
+                    d, t, i18n.KO.LOAD_KLA_OCR)
 
             def _on_ocr_done(ocr_ref: dict, ocr_val: dict) -> None:
                 try:
@@ -842,6 +928,9 @@ class MainWindow(QMainWindow):
         self._skipped_a.clear()
         self._reviewed_matches.clear()
         self._reviewed_unmatched.clear()
+        self._reviewed_unmatched_keys = set()
+        self._reviewed_all_matches = []
+        self._run_log_written = False
         self._thumbs_handled = False        # 썸네일 완료 one-shot 가드 리셋(#C2)
         # 타일 픽스맵 캐시 비우기 — 폴더가 바뀌어도 stale 픽스맵이 남지 않게(#렉).
         try:
@@ -851,6 +940,12 @@ class MainWindow(QMainWindow):
             _LOG.debug("타일 픽스맵 캐시 비우기 실패: %s", exc)
         self._session_id = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
 
+        # ★ 오버레이를 **먼저** 띄운다.  아래 `_prepare_working_file` 은 결과 폴더로
+        #   양식을 복사하는데(shutil.copyfile), 그 폴더가 NAS 면 수 초가 걸린다 —
+        #   예전에는 그동안 아무 표시도 없어 [검증 시작] 이 먹지 않은 것처럼 보였다.
+        self._loading.show_overlay(i18n.KO.LOAD_SCAN, cancelable=True)
+        QApplication.processEvents()
+
         # 양식 폴더의 양식.xlsx 를 결과 폴더로 복사 → 작업 파일 준비 ----
         self._prepare_working_file(inp)
 
@@ -859,16 +954,47 @@ class MainWindow(QMainWindow):
         _cache.reset_mtime_cache()
         self._kla_folders: dict[str, str] = {}      # KLA slot명→폴더명(엑셀 회색 표기)
 
-        self._loading.show_overlay(i18n.KO.LOAD_SCAN)
-        QApplication.processEvents()
+        # 폴더 스캔 — 워커에서 (U-05).  진행은 시그널로만 올라온다.
+        self._stage = "scan"
+        self._scan_token += 1
+        worker = _FolderScan(self._scan_token, inp.ref_root, inp.val_root)
+        worker.signals.progress.connect(self._on_scan_progress)
+        worker.signals.done.connect(self._on_scan_done)
+        worker.signals.failed.connect(self._on_scan_failed)
+        _LIVE_SCANS.add(worker)
+        worker.finished.connect(lambda w=worker: _LIVE_SCANS.discard(w))
+        self._scan_worker = worker
+        worker.start()
 
-        # 폴더 스캔 — NAS 처럼 폴더가 많아도 진행 개수를 실시간 표시(#6).
-        def _scan_progress(done: int, total: int) -> None:
-            self._loading.set_progress(
-                done, total, i18n.KO.LOAD_SCAN_FMT.format(done=done, total=total))
-            QApplication.processEvents()
+    def _on_scan_progress(self, token: int, done: int, total: int) -> None:
+        if token != self._scan_token:
+            return
+        self._loading.set_progress(done, total, i18n.KO.LOAD_SCAN)
 
-        sr = scan(inp.ref_root, inp.val_root, progress=_scan_progress)
+    def _on_scan_failed(self, token: int, message: str) -> None:
+        """스캔이 실패했다 — 오버레이를 반드시 내리고 알린다.
+
+        예전에는 예외가 나면 오버레이가 켜진 채 남아 앱이 잠긴 것처럼 보였다."""
+        if token != self._scan_token:
+            return
+        self._scan_worker = None
+        self._stage = ""
+        self._loading.hide_overlay()
+        _LOG.warning("폴더 스캔 실패: %s", message)
+        sheets.warn(self, i18n.KO.APP_TITLE,
+                    i18n.KO.WARN_SCAN_FAILED_FMT.format(detail=message))
+
+    def _on_scan_done(self, token: int, sr: ScanResult) -> None:
+        """스캔이 끝났다 — 여기서부터는 예전 `_on_start` 의 나머지 그대로다.
+
+        (모달을 여는 `_ask_kla_side` 부터는 반드시 메인 스레드여야 한다.)"""
+        if token != self._scan_token:
+            return                          # 취소·재시작으로 밀려난 옛 스캔
+        self._scan_worker = None
+        self._stage = ""
+        inp = self._input
+        if inp is None:
+            return
 
         # '일부 슬롯만 진행' 옵션 — 선택된 슬롯만 남긴다.  slots dict 만 줄이면
         # common_slot_names / ref_only / val_only 가 모두 이를 기반으로 계산되어
@@ -925,7 +1051,7 @@ class MainWindow(QMainWindow):
         # (set_progress 는 숨겨진 오버레이를 다시 띄우지 않으므로 show_overlay 필수.)
         # 썸네일 단계는 가장 오래 걸리므로 [중지] 로 건너뛸 수 있게 한다(#C2).
         self._loading.show_overlay(
-            i18n.KO.LOAD_THUMBNAIL_FMT.format(done=0, total=0), cancelable=True)
+            i18n.KO.LOAD_THUMBNAIL, cancelable=True)
         QApplication.processEvents()
         all_items: list[ImageItem] = []
         for name in common:
@@ -956,7 +1082,7 @@ class MainWindow(QMainWindow):
 
         self._loading.set_progress(
             0, len(all_items),
-            i18n.KO.LOAD_THUMBNAIL_FMT.format(done=0, total=len(all_items)),
+            i18n.KO.LOAD_THUMBNAIL,
         )
 
         # 다중 스레드 + 우선순위 큐 풀 사용. 첫 슬롯 (사전식으로 가장 앞)
@@ -974,7 +1100,7 @@ class MainWindow(QMainWindow):
             self._thumb_pool.reprioritize_slot(common[0], PRIORITY_ACTIVE_SLOT)
         self._thumb_pool.signals.progress.connect(
             lambda d, t, _p: self._loading.set_progress(
-                d, t, i18n.KO.LOAD_THUMBNAIL_FMT.format(done=d, total=t),
+                d, t, i18n.KO.LOAD_THUMBNAIL,
             )
         )
         self._thumb_pool.signals.finished.connect(self._on_thumbs_ready)
@@ -1007,19 +1133,40 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._continue_after_thumbs)
 
     def _on_loading_cancel(self) -> None:
-        """로딩 오버레이의 [중지] — 썸네일 사전생성만 취소 대상.
+        """로딩 오버레이의 [중지] — **단계마다 뜻이 다르다** (P-09).
 
-        썸네일은 비필수(이후 UI 가 필요 시 생성)이므로, 풀을 멈추고 곧바로
-        다음 단계로 진행한다.  다른 단계의 오버레이는 cancelable=False 라 이
-        핸들러가 호출되지 않는다(버튼 자체가 없음).
+        - 폴더 스캔 중: 세션을 접고 설정 화면으로 돌아간다.  스캔은 이후 모든
+          단계의 입력이라 '건너뛰고 진행' 이 성립하지 않는다 — 부분 결과는 버린다.
+        - 썸네일 사전생성 중: 썸네일은 비필수(이후 UI 가 필요 시 생성)이므로
+          풀만 멈추고 곧바로 다음 단계로 진행한다.
 
         ``ThumbnailPool`` 은 QObject(워커만 QThread)라 ``isRunning()`` 이 없다.
         이미 다음 단계로 넘어갔는지는 one-shot 플래그로 판별하고, ``stop()`` 은
         이미 끝난 풀에 호출해도 무해하므로 그 조합으로 가드한다."""
+        if self._stage == "scan":
+            self._cancel_scan()
+            return
         pool = self._thumb_pool
         if pool is not None and not self._thumbs_handled:
             pool.stop()                 # 이미 완료된 풀이어도 무해(플래그만 set)
             self._on_thumbs_ready()     # one-shot 가드로 1회만 진행
+
+    def _cancel_scan(self) -> None:
+        """스캔 취소 — 워커를 멈추고 세션 상태를 깨끗이 되돌린다.
+
+        ``_scan_token`` 을 올려 두면 늦게 도착한 done/failed 가 옛 세대로 버려지므로
+        스레드가 끝나기를 기다릴 필요가 없다(기다리면 그게 곧 멈춤이다)."""
+        self._scan_token += 1
+        w = self._scan_worker
+        self._scan_worker = None
+        self._stage = ""
+        if w is not None:
+            w.stop()
+        # 부분 상태를 남기지 않는다 — 다음 [검증 시작] 이 옛 스캔 위에 얹히면 안 된다.
+        self._scan = None
+        wakelock.release()
+        self._loading.hide_overlay()
+        self._show_page(self._setup_page)
 
     def _continue_after_thumbs(self) -> None:
         """``_on_thumbs_ready`` 의 안전한 후속 — 모달/페이지 전환 OK."""
@@ -1076,6 +1223,14 @@ class MainWindow(QMainWindow):
         """MatchReviewPage 의 [검토 완료] 시그널 → 결과 페이지 진입."""
         self._reviewed_matches = list(kept)
         self._reviewed_unmatched = list(unmatched_refs)
+        # ★ 결과 화면에서 검토로 되돌아올 때 되살리려면 '매치 없음' 표시를 키로 들고
+        #   있어야 한다 — load_state 는 진입할 때마다 그 집합을 비운다.
+        self._reviewed_unmatched_keys = set(
+            self._match_review_page.unmatched_keys())
+        # ★ 그리고 **표시된 행 자체**도 들고 있어야 한다.  `kept` 에는 '매치 없음' 행이
+        #   빠져 있어서, 그걸 기반으로 되돌아가면 복원할 행이 없다 → 다음 [검토 완료]
+        #   에서 그 사진들이 매치에도 미매칭에도 없는 상태가 돼 결과에서 사라진다.
+        self._reviewed_all_matches = self._match_review_page.all_matches()
         self._finish_session()
 
     # ==================================================================
@@ -1113,10 +1268,9 @@ class MainWindow(QMainWindow):
             }
             # 기준 폴더로 직접 고른 기준 사진을 기록 (다음에 재사용 질의용, #6).
             self._save_ref_selection(self._stage1_a_snapshot["targets"])
-            sheets.info(
-                self, i18n.KO.INFO_PHASE_TRANSITION_TITLE,
-                i18n.KO.INFO_PHASE_A_TO_MATCH,
-            )
+            # ★ 여기 있던 '후보 선별이 끝났습니다' 확인창을 없앴다 — 선택지가 없는
+            #   안내인데 매 세션 클릭 1회를 강제했다.  전환 사실은 곧바로 뜨는 매칭
+            #   오버레이의 첫 문구가 말한다(큐가 비어 자동으로 건너뛴 경우 포함).
             self._enter_stage2_phase_a()
 
     # ------------------------------------------------------------------
@@ -1272,6 +1426,71 @@ class MainWindow(QMainWindow):
         )
         self._show_page(self._match_review_page)
 
+    def _on_result_edited(self, matches: list, unmatched: list) -> None:
+        """결과 화면에서 결과가 바뀌었다(실패 검토로 신규 매치 확정 등).
+
+        ★ **왕복의 기반(`_reviewed_all_matches`)까지 함께 고쳐야 한다.**  `_reenter_review`
+        는 그 목록을 먼저 보는데, 여기서 갱신하지 않으면 비어 있지 않은 **옛 목록**이
+        항상 이겨 실패 검토로 확정한 매치가 검토 화면에 실리지 않는다.  그 상태로
+        [검토 완료] 를 다시 누르면 그 쌍이 결과에서 사라지고 기준 사진이 '미매칭' 으로
+        되돌아간다 — 사용자가 눈으로 확인해 확정한 것이 조용히 없어지는 것이다.
+        """
+        self._reviewed_matches = list(matches)
+        self._reviewed_unmatched = list(unmatched)
+        # 짝을 찾은 기준 사진은 더 이상 '매치 없음' 이 아니다 — 그 표시를 걷어낸다.
+        matched_refs = {m.ref_path for m in matches}
+        # ★ `_skipped_a`(자동 매칭이 짝을 못 찾은 기록)에서도 빼야 한다.  `_finish_session`
+        #   은 미매칭을 매번 **여기서 다시 만들기** 때문에, 이걸 빼지 않으면 실패 검토로
+        #   해결한 사진이 왕복 뒤 '미매칭' 으로 되살아나 매치와 양쪽에 남는다.
+        for slot, its in list(self._skipped_a.items()):
+            kept = [it for it in its if it.path not in matched_refs]
+            if len(kept) != len(its):
+                self._skipped_a[slot] = kept
+        still_marked = [m for m in getattr(self, "_reviewed_all_matches", [])
+                        if m.ref_path not in matched_refs
+                        and m.key in self._reviewed_unmatched_keys]
+        # 매치가 있는 행은 `matches` 가, 여전히 표시된 행은 옛 목록이 가져온다.
+        self._reviewed_all_matches = list(matches) + still_marked
+        self._reviewed_unmatched_keys = {m.key for m in still_marked}
+
+    def _reenter_review(self) -> None:
+        """결과 화면 → 매치 검토 화면 복귀(U-10).
+
+        ★ `_proceed_to_review_or_finish` 를 그대로 쓰면 안 된다 — 그쪽은 원본 자동
+        매치(`_merge_matches`)로 화면을 다시 만들어 사용자가 검토에서 한 스왑·매치
+        없음 표시를 **전부 지워 버린다**.  검토 결과(`_reviewed_matches`)를 기반으로,
+        '매치 없음' 표시까지 복원해서 들어간다."""
+        if self._match_review_page is None or self._match_page is None:
+            return
+        # '매치 없음' 표시까지 되살리려면 그 행들이 있어야 하므로 **전체 목록**을
+        #   기반으로 한다(`_reviewed_matches` 는 표시된 행이 빠진 kept 다).
+        base = list(getattr(self, "_reviewed_all_matches", None)
+                    or self._reviewed_matches or self._merge_matches())
+        ctx = self._match_page.review_context()
+        match_state = self._match_page.get_state()
+        val_pool = match_state.val_pool if match_state is not None else None
+        try:
+            candidates_by_ref = self._match_page.build_candidates_by_ref(base)
+        except Exception:
+            candidates_by_ref = None
+        self._match_review_page.load_state(
+            base, score_cache=ctx.score_cache, val_pool=val_pool,
+            candidates_by_ref=candidates_by_ref,
+            coord_mode=ctx.coord_mode,
+            tolerance=ctx.tolerance,
+            coord_failed_count=ctx.coord_failed_count,
+            unmatched_keys=getattr(self, "_reviewed_unmatched_keys", None),
+        )
+        self._notify_ready_for_review()
+        self._show_page(self._match_review_page)
+
+    def _notify_ready_for_review(self) -> None:
+        """수 분짜리 자동 매칭이 끝난 줄 모르고 다른 창을 보고 있을 수 있다.
+
+        ★ 창이 이미 활성이면 부르지 않는다 — 보고 있는데 작업표시줄이 깜빡이면 잡음이다."""
+        if not self.isActiveWindow():
+            QApplication.alert(self)
+
     # ==================================================================
     # Result
     # ==================================================================
@@ -1286,6 +1505,21 @@ class MainWindow(QMainWindow):
         # 사용자가 매치 검토에서 ‘매치 없음’ 으로 표시한 ref 들 합치기.
         if self._reviewed_unmatched:
             unmatched_refs.extend(self._reviewed_unmatched)
+        # ★ 불변식: **짝을 찾은 기준 사진은 미매칭에 있을 수 없다.**  이 함수는 결과↔검토를
+        #   오갈 때마다 다시 도는데, 미매칭은 `_skipped_a`(자동 매칭 실패 기록)에서 매번
+        #   새로 만들고 매치는 편집된 목록에서 온다 — 두 출처가 어긋나면 같은 사진이
+        #   '매칭' 과 '미매칭' 양쪽에 남아 엑셀에 두 줄로 찍힌다(실제로 그랬다).
+        #   출처를 고치는 것과 별개로, 나가는 값에서 한 번 더 막는다.
+        matched_refs = {m.ref_path for m in merged}
+        seen: set = set()
+        deduped: list[MissEntry] = []
+        for u in unmatched_refs:
+            key = (u.slot, Path(u.path))
+            if Path(u.path) in matched_refs or key in seen:
+                continue
+            seen.add(key)
+            deduped.append(u)
+        unmatched_refs = deduped
 
         result = FinalResult(
             mode=self._input.mode,
@@ -1327,6 +1561,11 @@ class MainWindow(QMainWindow):
 
     def _write_run_log(self) -> None:
         """검증 1회의 사용 통계를 컴퓨터별 폴더에 기록(캐시 빠른 매치는 제외)."""
+        # ★ 결과 ↔ 검토를 오가면 `_finish_session` 이 여러 번 돈다.  사용 통계는
+        #   세션당 한 번만 남긴다(오가는 횟수가 검증 건수처럼 쌓이면 안 된다).
+        if getattr(self, "_run_log_written", False):
+            return
+        self._run_log_written = True
         try:
             from ..utils import run_log
             sr, inp = self._scan, self._input
@@ -1408,7 +1647,7 @@ class MainWindow(QMainWindow):
         for slot, items in self._skipped_a.items():
             for it in items:
                 out.append(MissEntry(
-                    slot=slot, side="ref", path=it.path, note="미매칭",
+                    slot=slot, side="ref", path=it.path, note=i18n.KO.NOTE_UNMATCHED,
                 ))
         return out
 
@@ -1421,6 +1660,9 @@ class MainWindow(QMainWindow):
         self._stage1_a_snapshot = None
         self._reviewed_matches.clear()
         self._reviewed_unmatched.clear()
+        self._reviewed_unmatched_keys = set()
+        self._reviewed_all_matches = []
+        self._run_log_written = False
         self._phase = PHASE_NONE
         self._show_page(self._setup_page)
 
@@ -1478,6 +1720,8 @@ class MainWindow(QMainWindow):
             self._stack.addWidget(w)
 
         self._select_page.finished.connect(self._on_select_finished)
+        # Stage 1 [← 설정으로] — Stage 2 의 취소와 같은 자리로 돌아간다.
+        self._select_page.cancelled.connect(self._on_select_cancelled)
         self._select_page.state_changed.connect(self._schedule_autosave)
         self._match_page.match_confirmed.connect(self._on_match_confirmed)
         self._match_page.match_undone.connect(self._on_match_undone)
@@ -1486,6 +1730,10 @@ class MainWindow(QMainWindow):
         self._match_page.cancelled.connect(self._on_match_cancelled)
         self._result_page.new_session_requested.connect(self._new_session)
         self._match_review_page.finished.connect(self._on_match_review_done)
+        self._result_page.back_to_review_requested.connect(self._reenter_review)
+        # 실패 검토에서 새로 확정한 매치가 결과 객체에만 남아 있으면, 검토로 돌아갔다
+        # 재완료할 때 새 FinalResult 가 만들어지며 사라진다 — 여기로 되돌려 받는다.
+        self._result_page.result_edited.connect(self._on_result_edited)
 
     def _start_backend_import_async(self) -> None:
         """무거운 모듈을 **백그라운드 스레드에서 import 만** 한다.
@@ -1687,6 +1935,19 @@ class MainWindow(QMainWindow):
     def _schedule_autosave(self) -> None:
         # 결정이 있을 때마다 즉시 저장한다 (가벼움)
         self._autosave()
+        # ★ Stage 1 진행 중에도 '직접 고른 기준 사진' 을 남긴다.  예전엔 선별을 **끝냈을
+        #   때만** 저장해서, 도중에 앱이 꺼지면 수백 건의 결정이 되살릴 근거조차 없었다.
+        #   이 기록이 있으면 재시작 때 '이전에 고른 n장을 재사용할까요?' 로 회수된다.
+        #   ref_history 는 매 저장이 JSON 전체 재기록이라 디바운스한다(결정마다 왕복 금지).
+        if self._phase == PHASE_A_SELECT and self._select_page is not None:
+            self._ref_history_timer.start(1200)
+
+    def _flush_ref_history(self) -> None:
+        if self._select_page is None:
+            return
+        state = self._select_page.get_state()
+        if state is not None:
+            self._save_ref_selection(state.targets)
 
     def _autosave(self) -> None:
         if self._input is None:
@@ -1760,6 +2021,14 @@ class MainWindow(QMainWindow):
         if self._thumb_pool is not None:
             self._thumb_pool.stop()
             self._thumb_pool.wait(1000)
+        # 폴더 스캔 워커 (U-05) — 토큰을 올려 늦은 결과를 무효화하고 멈추라고 알린다.
+        # 기다리지는 않는다: `scan` 은 NAS 응답을 기다리는 중일 수 있어 종료가 그만큼
+        # 늦어진다.  daemon 이 아니라 QThread 지만 `_LIVE_SCANS` 가 수명을 잡고 있고,
+        # 남은 신호는 토큰 검사에서 버려진다.
+        self._scan_token += 1
+        if self._scan_worker is not None:
+            self._scan_worker.stop()
+            self._scan_worker = None
         # MatchPage 의 점수 사전 계산 워커도 안전 종료.
         try:
             pre = getattr(self._match_page, "_precompute_worker", None)
@@ -1774,6 +2043,24 @@ class MainWindow(QMainWindow):
                     and self._openvino_worker.isRunning()):
                 self._openvino_worker.stop()
                 self._openvino_worker.wait(500)
+        except Exception:
+            pass
+        # ★ KLA OCR 워커 — `_ocr_worker` 는 __init__ 에 선언이 없어(그 단계를 안 거친
+        #   세션엔 속성 자체가 없다) getattr 로 방어한다.  정리하지 않으면 창을 닫을 때
+        #   "QThread: Destroyed while thread is still running" 으로 강제 종료됐다.
+        try:
+            ocr = getattr(self, "_ocr_worker", None)
+            if ocr is not None and ocr.isRunning():
+                ocr.stop()
+                ocr.wait(500)
+        except Exception:
+            pass
+        # ★ 엑셀 저장 워커 — 기다리기만 하면 반쯤 쓰인 xlsx 가 남으므로 먼저 취소한다.
+        try:
+            exporter = getattr(self._result_page, "_exporter", None)
+            if exporter is not None and exporter.isRunning():
+                exporter.stop()
+                exporter.wait(3000)
         except Exception:
             pass
         super().closeEvent(event)

@@ -37,6 +37,8 @@ OPENVINO_INSTALL_FAILED_FMT = (
 # ── 공통 버튼/액션 ─────────────────────────────────────────────────────────
 BTN_OK = "확인"
 BTN_CANCEL = "취소"
+# 진행 중인 작업을 멈추는 버튼(로딩 오버레이) — '취소' 와 뜻이 다르다.
+BTN_STOP = "중지"
 BTN_BACK_TO_SETUP = "← 설정으로"
 BTN_START = "검증 시작"
 # 시작 직후 — 무거운 구성 요소(영상 처리·가속)를 백그라운드에서 불러오는 동안의 표기.
@@ -51,6 +53,11 @@ BTN_MATCH_UNDO = "되돌리기"
 MATCH_UNDO_TOOLTIP = "직전 매칭/매칭없음 결정을 취소합니다 (Ctrl+Z)"
 BTN_RETRY_SKIP = "보류 재시도"
 BTN_SELECT_MODE = "선택 모드"
+# Stage 1 좌측 패널 — 사진을 여러 장 고르면 헤더에 나타나는 일괄 액션.
+# ★ 예전엔 클릭 선택이 아무 데도 연결되지 않아 '테두리만 생기고 할 수 있는 게 없는'
+#   죽은 기능이었다.  라벨에 개수를 넣어 무엇에 적용되는지 분명히 한다.
+BTN_INLINE_VERIFY_FMT = "선택 {n} 장 검증"
+BTN_INLINE_EXCLUDE_FMT = "선택 {n} 장 제외"
 
 # ── 다중 선택 다이얼로그 (Stage 1 선택 모드) ─────────────────────────────
 BULK_SELECT_TITLE_FMT = "{panel} — 다중 선택"
@@ -76,6 +83,19 @@ BTN_BATCH_VERIFY = "선택 항목 검증 대상 지정"
 BTN_VIEW_EXCLUDED_FMT = "검증 제외 사진 보기 ({n})"
 # Stage 1 ‘선택 종료’ — 미결정 사진 모두 제외 처리 후 다음 단계로.
 BTN_END_SELECTION = "선택 종료"
+# Stage 1 에서 설정 화면으로 돌아갈 때 — 이미 내린 결정이 사라지므로 한 번 묻는다.
+MATCH_CANCEL_CONFIRM_TITLE = "매칭 중단"
+# ★ 중단은 '잠깐 멈춤' 이 아니다 — 정확도 사고를 막기 위해 계산 결과를 전부 버린다
+#   (남기면 설정을 바꿔 다시 돌려도 1회차 결과가 재사용된다).  그 사실을 말해 준다.
+MATCH_CANCEL_CONFIRM_FMT = (
+    "진행 중인 매칭을 중단할까요?  ({done} / {total} 까지 진행)\n\n"
+    "지금까지 계산한 결과는 저장되지 않고, 다시 시작하면 처음부터 계산합니다."
+)
+SELECT_BACK_CONFIRM_TITLE = "설정으로 돌아가기"
+SELECT_BACK_CONFIRM_FMT = (
+    "지금까지 결정한 {n} 장이 사라지고 설정 화면으로 돌아갑니다.\n"
+    "계속할까요?"
+)
 END_SELECTION_CONFIRM_TITLE = "선택 종료"
 END_SELECTION_CONFIRM_FMT = (
     "남은 {n} 장의 미결정 사진을 모두 ‘검증 제외’ 로 처리하고 "
@@ -84,19 +104,18 @@ END_SELECTION_CONFIRM_FMT = (
 BULK_SELECT_EXCLUDED_TITLE = "검증 제외 사진"
 
 BTN_EXPORT_EXCEL = "엑셀로 저장"
+BTN_OPEN_SAVED_FILE = "파일 열기"
+BTN_OPEN_SAVED_FOLDER = "폴더 열기"
+BTN_RETRY_SAVE = "다시 시도"
 BTN_NEW_SESSION = "새 검증 시작"
-BTN_REVIEW_MATCHES = "매칭 결과 검토"
-
-# ── 매칭 결과 검토 (#18) ───────────────────────────────────────────────────
-REVIEW_DIALOG_TITLE = "매칭 결과 검토"
-REVIEW_HINT = (
-    "잘못 매칭된 행은 [삭제] 로 표시(빨간 테두리)한 뒤 [확인] 을 누르면\n"
-    "결과에서 제외됩니다.  제외된 사진은 ‘매치 실패’ 로 분류되어 매치 실패\n"
-    "사진 검토에서 ‘매칭 취소 목록’ 으로 다시 검토할 수 있습니다."
+NEW_SESSION_CONFIRM_TITLE = "새 검증 시작"
+NEW_SESSION_CONFIRM_BODY = (
+    "아직 엑셀로 저장하지 않았습니다.  지금 새 검증을 시작하면 이번 결과가 사라집니다.\n"
+    "계속할까요?"
 )
-REVIEW_BTN_DELETE = "삭제"
-REVIEW_BTN_UNDELETE = "삭제 취소 ↩"
-REVIEW_REMOVED_FMT = "{n} 개의 매칭이 결과에서 제외되었습니다."
+# 결과 화면 → 전용 검토 화면으로 되돌아가기(검토 결과는 그대로 보존된다).
+BTN_BACK_TO_REVIEW = "← 검토 화면으로"
+
 
 # ── 셋업 페이지 ────────────────────────────────────────────────────────────
 # 이전 값 "AOI Recipe Verificator" 는 (a) 오타(verificator → verifier) 이고
@@ -115,10 +134,22 @@ STAGE1_TITLE = "Stage 1 — 후보 선별"
 STAGE2_TITLE = "Stage 2 — 유사도 기반 매칭"
 STAGE2_TITLE_COORD = "Stage 2 — 좌표 기반 매칭 (v2)"
 RESULT_TITLE = "검증 결과"
+# 결과 요약 — 핵심 수치는 타일로, 나머지는 문장으로.
+RESULT_MACHINES_FMT = "기준 장비: {ref}    검증 장비: {val}"
+RESULT_SLOT_ONLY_REF_FMT = "Slot 불일치  ·  기준 전용: {names}"
+RESULT_SLOT_ONLY_VAL_FMT = "Slot 불일치  ·  검증 전용: {names}"
+VALUE_NONE = "없음"
+STAT_MATCHED = "매칭 성공"
+STAT_OVER_TOLERANCE = "허용 초과"
+STAT_NO_MATCH = "매치 없음"
+STAT_SLOT_MISMATCH = "Slot 불일치"
+MATCH_REVIEW_TITLE = "매치 검토"
 
 PANEL_LEFT_CANDIDATES = "검증 후보들 (남은 사진)"
 PANEL_CENTER_DECIDE = "검증 결정할 사진"
 PANEL_RIGHT_TARGETS = "검증 대상 (검증하기로 한 사진들)"
+# 우측 패널이 비었을 때의 안내 — 처음 쓰는 사람이 이 칸의 용도를 알 수 있게.
+PANEL_RIGHT_EMPTY = "→ 또는 [✓ 검증] 으로 보낸 사진이 여기에 쌓입니다."
 
 PANEL_MATCH_REF = "기준 사진"
 PANEL_MATCH_CANDIDATES = "검증 장비 후보"
@@ -138,6 +169,12 @@ UNMATCHED_REVIEW_HINT = (
     "매치 실패한 기준 사진을 하나씩 검토합니다. 같은 슬롯의 검증 장비 후보를"
     " 유사도 순으로 보여줍니다. 맞는 사진을 클릭해 선택(파란 테두리)한 뒤"
     " [매치 확정] 을 누르세요. 후보를 우클릭하면 크게 비교할 수 있습니다."
+)
+# 좌표로 매칭한 세션에서 이 화면만 유사도로 줄을 세운다는 사실을 알린다 (U-18).
+#   좌표 모드로 검증했는데 후보 순서가 좌표와 무관해 보여 혼란을 준 지점이다.
+UNMATCHED_REVIEW_COORD_NOTE = (
+    "이 검증은 좌표 기준으로 매칭했지만, 이 화면의 후보 순서는 좌표 거리가 아니라"
+    " 사진 유사도입니다. 좌표로 짝을 찾지 못한 사진들이라 유사도로 다시 줄을 세웁니다."
 )
 UNMATCHED_REVIEW_NO_CANDIDATES = "이 슬롯에는 검증 장비 후보가 없습니다."
 UNMATCHED_REVIEW_DONE_FMT = "{n} 건의 신규 매칭을 확정했습니다."
@@ -313,17 +350,20 @@ TEMPLATE_NOT_FOUND_BODY = (
 WORKING_FILE_LABEL = "결과 파일 위치"
 
 # ── 로딩/진행 ──────────────────────────────────────────────────────────────
-LOAD_THUMBNAIL_FMT = "썸네일 생성 중… {done} / {total}"
+# ★ 로딩 문구에 진행 수치({done}/{total})를 넣지 마라.  진행 수치는 진행바 **아래
+#   모노 라벨**(LoadingOverlay._count_label)이 전담한다 — 문구에도 넣으면 같은 숫자가
+#   한 화면에 두 번 보인다("썸네일 생성 중 147 / 480" + "147 / 480").  단일 출처 규칙.
+LOAD_THUMBNAIL = "썸네일 생성 중…"
 LOAD_STAGE_PREP = "다음 단계 준비 중…"
-LOAD_FEATURE_FMT = "검증 장비 특징 추출 중… {done} / {total}"
-LOAD_SCORING_FMT = "유사도 계산 중… {done} / {total}"
+# 검토 화면 진입 — 행을 나눠 만드는 동안(수백 건이면 몇 초).
+LOAD_REVIEW_ROWS = "검토 목록 준비 중…"
+LOAD_FEATURE = "검증 장비 특징 추출 중…"
+LOAD_SCORING = "유사도 계산 중…"
 PHASE_FEATURE = "이미지 특징 분석"
 PHASE_SCORING = "유사도 계산"
 PHASE_EMBED = "후보 생성 (GPU 임베딩)"      # 고효율 모드 1단계 — 유사도 계산 직전
 PHASE_COORD = "좌표 매칭 중"                # 좌표 기반 매칭 v2
-LOAD_PRECOMPUTE_FMT = (
-    "유사도 계산 중… {done} / {total}"
-)
+PHASE_COORD_PARSE = "좌표 파싱 중…"         # 좌표 매칭 1단계
 # 수동 모드: 첫 슬롯만 기다리고 나머지는 백그라운드 (#streaming).
 # 선행 단계(특징 분석/임베딩) 동안에도 '유사도 계산' 으로 오인되지 않도록 중립 문구.
 LOAD_PRECOMPUTE_FIRST_SLOT = (
@@ -371,7 +411,7 @@ UPDATE_UNKNOWN = "업데이트를 확인할 수 없습니다. 인터넷 연결�
 UPDATE_GIT_HINT = "개발(git) 환경입니다. 'git pull' 로 업데이트하세요."
 # 첫 화면 '업데이트 확인' 버튼 라벨(좌상단 도움말 메뉴 대체).
 MENU_CHECK_UPDATE = "업데이트 확인"
-LOAD_AUTO_MATCH_FMT = "자동 매치 진행 중… {done} / {total}"
+LOAD_AUTO_MATCH = "자동 매치 진행 중…"
 
 # ── 자동화 수준 (#3 올인원 모드) ───────────────────────────────────────────
 AUTOMATION_TITLE = "자동화 수준"
@@ -381,11 +421,6 @@ AUTOMATION_AUTO_ALL = "모든 사진 자동 — 후보 선별 건너뛰기"
 # 34px 세그먼트에 문장을 넣으면 '작게'라는 의도가 폭으로 되돌아온다.
 AUTOMATION_USER_SELECT_SHORT = "사진 직접 선택"
 AUTOMATION_AUTO_ALL_SHORT = "모든 사진 자동"
-AUTO_REVIEW_HINT_FMT = (
-    "자동 매치 완료 — 총 {n_match} 쌍이 자동으로 매치되었고,\n"
-    "{n_miss} 장은 임계치 미달로 ‘매칭 없음’ 처리되었습니다.\n"
-    "[매칭 결과 검토] 로 결과를 확인해 주세요."
-)
 # ── 매치 검토 페이지 ───────────────────────────────────────────────────────
 BTN_MARK_NO_MATCH = "매치 없음 ✕"
 BTN_RESTORE_MATCH = "되돌리기 ↩"
@@ -396,13 +431,24 @@ TALLY_OK_FMT = "일치 {n}"
 TALLY_OVER_FMT = "허용 초과 {n}"
 TALLY_NO_MATCH_FMT = "매치 없음 {n}"
 TALLY_COORD_FAILED_FMT = "매치 실패 {n}"
+# 네 낱말이 서로 어떻게 다른지 화면에서 설명한다 (U-13) — 이름만 봐서는
+# '매치 없음' 과 '매치 실패' 가 같은 말로 읽힌다.
+TALLY_TOOLTIP = (
+    "일치 — 짝을 찾았고 허용 오차 안에 든 매치입니다.\n"
+    "허용 초과 — 짝은 찾았지만 좌표 차이가 허용 오차를 넘었습니다.\n"
+    "매치 없음 — 검토에서 직접 '매치 아님' 으로 되돌린 것입니다.\n"
+    "매치 실패 — 가장 가까운 후보조차 허용 오차의 3배를 넘어 짝으로 볼 수"
+    " 없었습니다 (이 화면에서는 고칠 수 없습니다)."
+)
 BTN_FINISH_REVIEW_KEPT_FMT = "검토 완료 · 유지 {n}"   # ⏎ 제거 — Enter 단축키가 없어졌다
 CHIP_OVER = "허용 초과"
 CHIP_NO_MATCH = "매치 없음"
 BTN_NO_MATCH_COMPACT = "×"
 BTN_RESTORE_COMPACT = "↩"
 REVIEW_EMPTY_HINT = (
-    "자동 매치된 항목이 없습니다.  [완료] 를 누르면 결과 화면으로 이동합니다."
+    # ★ 화면의 버튼 이름과 같게 적는다 — 예전엔 [완료] 라고 안내했지만 실제 버튼은
+    #   '검토 완료 · 유지 n' 이라, 있지도 않은 버튼을 찾게 만들었다.
+    "자동 매치된 항목이 없습니다.  [검토 완료] 를 누르면 결과 화면으로 이동합니다."
 )
 # 검토 리스트 컬럼 헤더 — ★ 이미지 세 종류를 **각자 자기 사진 위**에 놓기 위해
 # 하나였던 'COL_IMAGES = 기준 · 검증 · 후보' 를 셋으로 쪼갰다(한 라벨이면 어느 것도
@@ -441,7 +487,6 @@ DARK_MODE_TOOLTIP = (
 )
 # ※ '모션 줄이기' 토글은 제거했다 — 모션은 항상 켜진다(사용자 결정).
 LOAD_SCAN = "폴더 스캔 중…"
-LOAD_SCAN_FMT = "폴더 스캔 중… {done} / {total} 슬롯"
 LOAD_EXPORT = "엑셀로 저장 중…"
 
 # ── 경고/안내 모달 ─────────────────────────────────────────────────────────
@@ -452,6 +497,12 @@ WARN_SAME_PATH_BODY = (
 )
 WARN_PATH_NOT_EXIST = "선택한 경로가 존재하지 않습니다:\n{path}"
 WARN_NO_SLOTS = "두 폴더에 공통된 Slot 이 존재하지 않습니다."
+# 폴더 스캔이 실패했을 때 (U-05) — 예전엔 로딩만 켜진 채 앱이 잠긴 것처럼 보였다.
+WARN_SCAN_FAILED_FMT = (
+    "폴더를 읽는 중 문제가 생겼습니다.\n"
+    "폴더가 그대로 있는지, 접근 권한이 있는지 확인한 뒤 다시 시도해 주세요.\n\n"
+    "{detail}"
+)
 WARN_NO_IMAGES = "선택된 Slot 에 이미지가 없습니다."
 WARN_SLOT_MISMATCH_TITLE = "Slot 불일치"
 WARN_SLOT_MISMATCH_FMT = (
@@ -469,6 +520,8 @@ SLOT_MAP_ADD = "묶기 ↔"
 SLOT_MAP_REMOVE = "선택 해제"
 SLOT_MAP_PAIRS_LABEL = "묶은 쌍"
 SLOT_MAP_OPEN = "매핑 다이얼로그 열기"
+# 확인창 본문용 완결 문장 — 라벨에 " ?" 를 붙여 만들던 비문을 대체한다.
+SLOT_MAP_ASK = "슬롯을 직접 짝지어 주시겠습니까?"
 
 # ── 일부 슬롯만 진행 (Setup) ───────────────────────────────────────────────
 SLOT_SELECT_BTN_TOOLTIP = (
@@ -498,8 +551,8 @@ SLOT_SELECT_NONE = "전체 해제"
 RUN_OPTIONS_TITLE = "실행 옵션"
 RUN_OPTIONS_HINT = (
     "· 자동화 수준 — ‘모든 사진 자동’은 후보 선별(Stage 1)을 건너뛰고 모든 기준 사진을"
-    " 자동으로 매치합니다. 종료 후 결과 화면에서 [매칭 결과 검토]로 잘못된 매치를"
-    " 제거할 수 있습니다.\n"
+    " 자동으로 매치합니다. 매치가 끝나면 검토 화면에서 결과를 하나씩 확인하고"
+    " 잘못된 매치를 [매치 없음] 으로 되돌릴 수 있습니다.\n"
     "· 진행 범위 — 기본은 기준 폴더의 모든 슬롯입니다. ‘일부 슬롯만’ 을 고르면 이번"
     " 검증에서 진행할 슬롯을 직접 선택합니다(급한 슬롯만 먼저 돌릴 때)."
 )
@@ -510,6 +563,8 @@ SCOPE_SUBSET_COUNT_FMT = "일부 슬롯 ({n}/{total})"
 # 입력 유효성 — 왜 [검증 시작] 을 누를 수 없는지 눈에 보이게.
 SETUP_INVALID_FOLDER = "폴더를 찾을 수 없습니다."
 START_BLOCKED_HINT = "기준·검증 폴더를 먼저 지정하세요."
+# 폴더 존재 확인이 아직 안 끝났을 때 — 네트워크 폴더는 응답이 느릴 수 있다 (P-15).
+START_CHECKING_HINT = "폴더를 확인하는 중입니다…"
 # 폴더는 다 골랐는데 아직 구성 요소를 불러오는 중일 때 — 곧 저절로 풀린다.
 START_PREPARING_HINT = "구성 요소를 불러오는 중입니다. 잠시만 기다려 주세요."
 # 그 불러오기가 실패한 경우(설치 손상 등) — 시작 버튼은 잠긴 채로 둔다.
@@ -529,7 +584,7 @@ REF_REUSE_BODY_FMT = (
 )
 # KLA slot 해석 단계 — 로딩창에 현재 진행 단계(정보파일/OCR)를 실시간 표시.
 LOAD_KLA_INFO = "KLA slot 매칭 중 — 정보파일 분석…"
-LOAD_KLA_OCR_FMT = "KLA WaferID 판독 (OCR) 중… {done} / {total}"
+LOAD_KLA_OCR = "KLA WaferID 판독 (OCR) 중…"
 
 # slot 매칭 실패 시 'KLA 가 어느 쪽?' 확인 — 호기가 K-n 이면 자동, 아니면 묻는다.
 KLA_ASK_TITLE = "KLA 장비 확인"
@@ -541,8 +596,16 @@ KLA_SIDE_VAL = "검증"
 KLA_SIDE_BOTH = "둘다"
 KLA_SIDE_NONE = "KLA 아님"
 
-INFO_RESUME_TITLE = "이전 검증 이어하기"
-INFO_RESUME_BODY = "진행 중인 검증이 있습니다. 이어서 하시겠습니까?"
+INFO_RESUME_TITLE = "이전 검증 설정 복원"
+# ★ 문구를 사실대로 적는다.  '이어하기' 라고 했지만 실제로 복원되는 것은 폴더·호기·
+#   임계치 같은 **입력값뿐**이고, 선별 결정은 처음부터 다시 한다.  다만 직접 고른
+#   기준 사진은 기록해 두므로 선별 화면에서 '재사용할까요?' 로 되돌려 받을 수 있다.
+INFO_RESUME_BODY = (
+    "마치지 못한 검증이 있습니다.  이전 입력값(폴더·호기·판정 기준)을 복원해 "
+    "처음부터 다시 시작할까요?\n\n"
+    "선별은 다시 하게 되지만, 직접 고르셨던 기준 사진은 선별 화면에서 "
+    "재사용할지 물어봅니다."
+)
 INFO_PHASE_TRANSITION_TITLE = "단계 전환"
 INFO_PHASE_A_TO_MATCH = "후보 선별이 끝났습니다. 매칭으로 넘어갑니다."
 INFO_NO_MATCH_FOUND = "임계치 이상인 후보가 없습니다. 자동으로 Skip 처리됩니다."
@@ -553,6 +616,14 @@ SAVE_DIALOG_TITLE = "결과 엑셀 저장 위치 선택"
 SAVE_FILENAME_FMT = "AOI검증결과_{ref}_vs_{val}_{ts}.xlsx"
 SAVE_SUCCESS_FMT = "엑셀 저장 완료:\n{path}"
 SAVE_FAIL_FMT = "엑셀 저장 실패:\n{error}"
+# ★ 가장 흔한 실패는 결과 파일이 엑셀에서 열려 있는 경우다.  OS 원문만 보여 주면
+#   무엇을 해야 할지 알 수 없으므로 **다음 행동을 먼저** 말한다.
+SAVE_FAIL_LOCKED_FMT = (
+    "결과 파일에 쓸 수 없습니다.\n\n"
+    "그 파일이 엑셀에서 열려 있으면 닫은 뒤 다시 시도해 주세요.\n"
+    "(다른 프로그램이 쓰고 있거나 폴더 권한이 없을 때도 같은 오류가 납니다.)\n\n"
+    "원문: {error}"
+)
 SLOT_MISMATCH_SHEET = "Slot 불일치 목록"
 SHEET_UNMATCHED = "미매칭 사진"
 # 미매칭 행 D열 — 결함 geometry(area/width/length/contrast) 표기.  Surface.flt 에서
@@ -688,3 +759,45 @@ MSG_BTN_CANCEL = BTN_CANCEL
 MSG_BTN_YES = "예"
 MSG_BTN_NO = "아니오"
 MSG_BTN_CLOSE = "닫기"
+
+
+# ---------------------------------------------------------------------------
+# 화면에 직접 박혀 있던 문구를 모아 온 것 (U-12).  위젯에 리터럴을 남기면
+# 같은 말이 화면마다 조금씩 달라지고, 고칠 때 한 곳을 빠뜨린다.
+# ---------------------------------------------------------------------------
+# 좌우 비교 뷰어
+VIEWER_BTN_PREV = "◀ 이전"
+VIEWER_BTN_NEXT = "다음 ▶"
+VIEWER_BTN_CLOSE = MSG_BTN_CLOSE
+VIEWER_NO_CANDIDATES = "후보 없음"
+
+# 매치 실패 검토
+UNMATCHED_FAIL_LIST_TITLE = "실패 목록"
+UNMATCHED_CAND_COUNT_FMT = "후보 {n} 장 (유사도 순)"
+UNMATCHED_CAND_NONE = "후보 0 장"
+UNMATCHED_REF_PREFIX = "기준 — "
+
+# 슬롯 매핑
+SLOT_MAP_METHOD_INFO = "정보파일"
+SLOT_MAP_NO_PHOTO = "사진파일 없음"
+SLOT_MAP_UNREAD = "판독 실패"
+SLOT_MAP_NO_PHOTO_LINE = "\n⚠ 사진파일 없음"
+SLOT_MAP_UNREAD_LINE = "\n→ 판독 실패 (수동 매핑)"
+
+# 좌표 매칭 — 좌표를 못 읽은 사진의 사유 표기
+COORD_MISSING = "좌표 정보가 없습니다"
+
+# 결과/검토에서 '매치 아님' 으로 되돌린 항목의 사유
+NOTE_UNMATCHED = "미매칭"
+NOTE_UNMATCHED_BY_USER = "미매칭 (사용자 검토)"
+
+# 호기 이름을 비워 두었을 때 채우는 기본값
+DEFAULT_REF_MACHINE = "기준호기"
+DEFAULT_VAL_MACHINE = "검증호기"
+
+# 예외 원인을 안내문 뒤에 덧붙일 때의 머리말
+CAUSE_PREFIX = "\n\n[원인] "
+
+# 화면 색 모드의 사용자 표시 이름 (U-12) — theme.COLOR_MODE_LABELS 가 읽어 간다.
+COLOR_MODE_LIGHT = "벨럼"
+COLOR_MODE_DARK = "흑연"

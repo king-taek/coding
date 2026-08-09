@@ -33,6 +33,7 @@ from ...models.slot import ImageItem
 from ...utils import prefs as _prefs
 from ..widgets.app_logo import build_logo_label
 from ..widgets.neon_button import NeonButton
+from ..widgets.no_wheel_slider import NoWheelSlider
 from ..widgets.neon_card import NeonCard
 from ..widgets.scalable_image import ScalableImage
 from ..widgets.slot_section import SlotSection
@@ -91,19 +92,45 @@ class _SidePanel(QFrame):
         # 헤더 — 제목 + (인라인 선택 도구) + ‘선택 모드’ 버튼
         head = QHBoxLayout()
         ttl = QLabel(title, self)
-        ttl.setProperty("role", "subtitle")
         ttl.setProperty("role", "paneTitle")
         head.addWidget(ttl)
         head.addStretch(1)
 
-        # 인라인 선택 일괄작업·전체선택 등은 ‘선택 모드’ 팝업으로 일원화 —
-        # 메인 헤더는 ‘선택 모드’ 버튼만 둔다.  타일 클릭=선택 / 더블클릭=해제는
-        # inline_select 로 계속 동작(헤더 도구 없이).
         if self._actions:
             self._select_btn = NeonButton(i18n.KO.BTN_SELECT_MODE, role="ghost")
             self._select_btn.clicked.connect(self._open_bulk_select)
             head.addWidget(self._select_btn)
         outer.addLayout(head)
+
+        # ★ 타일 클릭 선택(inline_select)은 오랫동안 **아무 데도 연결되지 않은** 죽은
+        #   기능이었다 — 테두리만 생기고 그 선택으로 할 수 있는 일이 없었다.  선택이
+        #   1장 이상일 때만 일괄 액션을 띄워, 팝업을 열지 않고도 처리하게 한다.
+        #
+        #   ★ 액션은 **제목 줄이 아니라 그 아래 제 줄**에 둔다.  이 패널은 폭이
+        #   330px 남짓이라 제목 + 액션 2개 + [선택 모드] 를 한 줄에 넣으면 서로를
+        #   밀어 라벨이 잘린다("선택 1 장 검증" → "1 장", "선택 모드" → "택 모").
+        #   실측: 필요 113px, 실제 71px.
+        #   ★ 두 액션을 **세로로 쌓는다.**  가로로 나란히 두면 1280x800(패널 263px)에서
+        #   장수가 두 자리만 돼도 다시 잘린다(실측 필요 122px / 실제 118px).  세로로
+        #   쌓으면 각 버튼이 패널 폭을 통째로 써서 세 자리 장수까지 여유가 있고,
+        #   클릭 대상도 커진다(하우스 관습: 클릭 대상은 크고 명확하게).
+        self._inline_buttons: list[NeonButton] = []
+        self._inline_row = QVBoxLayout()
+        self._inline_row.setContentsMargins(0, 0, 0, 0)
+        self._inline_row.setSpacing(6)
+        if self._inline_select and self._actions:
+            for action_id, label_fmt, role in (
+                    ("batch_exclude", i18n.KO.BTN_INLINE_EXCLUDE_FMT, "danger"),
+                    ("batch_verify", i18n.KO.BTN_INLINE_VERIFY_FMT, "primary")):
+                btn = NeonButton(label_fmt.format(n=0), role=role)
+                btn.setProperty("labelFmt", label_fmt)
+                btn.clicked.connect(
+                    lambda _c=False, a=action_id: self._fire_inline_action(a))
+                btn.hide()
+                # 줄을 통째로 나눠 갖는다 — 글자가 늘어도(세 자리 장수) 잘리지 않는다.
+                self._inline_row.addWidget(btn, 1)
+                self._inline_buttons.append(btn)
+        outer.addLayout(self._inline_row)
 
         # 스크롤 영역 ---------------------------------------------------
         self._scroll = QScrollArea(self)
@@ -158,9 +185,12 @@ class _SidePanel(QFrame):
                 lambda ent, s=slot: self.expand_requested.emit(
                     self._name, s, ent.item)
             )
+            sec.inline_changed.connect(self._refresh_inline_buttons)
             self._sections[slot] = sec
             self._host_layout.addWidget(sec)
         self._host_layout.addStretch(1)
+        self._refresh_empty_hint()
+        self._refresh_inline_buttons()
 
     # ------------------------------------------------------------------
     def set_slot(self, slot: str, items: list[ImageItem]) -> None:
@@ -177,6 +207,7 @@ class _SidePanel(QFrame):
             if sec is not None:
                 self._host_layout.removeWidget(sec)
                 sec.deleteLater()
+            self._refresh_empty_hint()
             return
 
         self._cached[slot] = items
@@ -202,14 +233,64 @@ class _SidePanel(QFrame):
             lambda ent, s=slot: self.expand_requested.emit(
                 self._name, s, ent.item)
         )
+        sec.inline_changed.connect(self._refresh_inline_buttons)
         self._sections[slot] = sec
         # 슬롯명 정렬 위치에 삽입 — 끝 stretch 보다 앞.
         ordered = sorted(self._sections.keys())
         idx = ordered.index(slot)
         self._host_layout.insertWidget(idx, sec)
+        self._refresh_empty_hint()
 
     def cached(self) -> dict[str, list[ImageItem]]:
         return {k: list(v) for k, v in self._cached.items()}
+
+    # ------------------------------------------------------------------
+    def _refresh_empty_hint(self) -> None:
+        """비어 있을 때 이 칸의 용도를 한 줄로 알려 준다.
+
+        ★ 라벨을 멤버로 들고 있으면 `update_data` 가 `_host_layout` 을 통째로 비울 때
+        함께 파괴돼 죽은 참조가 남는다 — 매번 찾아 쓰고, 없으면 새로 만든다."""
+        hint_text = getattr(i18n.KO, f"PANEL_{self._name.upper()}_EMPTY", "")
+        if not hint_text:
+            return
+        # ★ `deleteLater` 로 지운 위젯은 이벤트 루프가 돌기 전까지 `findChildren` 에
+        #   계속 잡힌다 — 안내가 두 장 겹쳐 보였다.  즉시 부모에서 떼어 낸다.
+        for w in list(self._host_layout.parentWidget().findChildren(QLabel)):
+            if w.property("role") == "emptyHint":
+                self._host_layout.removeWidget(w)
+                w.setParent(None)
+                w.deleteLater()
+        if self._sections:
+            return
+        lab = QLabel(hint_text, self._host_layout.parentWidget())
+        lab.setProperty("role", "emptyHint")
+        lab.setWordWrap(True)
+        lab.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._host_layout.insertWidget(0, lab)
+
+    def remove_item(self, slot: str, item: ImageItem) -> bool:
+        """사진 **한 장**만 패널에서 지운다 — 슬롯 전체를 다시 그리지 않는다.
+
+        ★ 결정 1건마다 슬롯 타일을 통째로 재생성하던 경로(300장 슬롯에서 49ms/건 실측)를
+        대체한다.  `+N` 트렁케이션이 켜진 패널에서는 숨은 사진이 올라와야 하므로
+        `ThumbGrid.remove_entry` 가 False 를 돌려주고, 호출부는 기존 전체 갱신으로 넘어간다."""
+        sec = self._sections.get(slot)
+        if sec is None:
+            return False
+        entry = next((e for e in sec.grid._entries if e.item is item), None)
+        if entry is None or not sec.remove_entry(entry):
+            return False
+        rest = [it for it in self._cached.get(slot, []) if it is not item]
+        if rest:
+            self._cached[slot] = rest
+        else:                      # 마지막 한 장 → 섹션째 제거
+            self._cached.pop(slot, None)
+            self._sections.pop(slot, None)
+            self._host_layout.removeWidget(sec)
+            sec.deleteLater()
+            self._refresh_empty_hint()
+        self._refresh_inline_buttons()
+        return True
 
     # ------------------------------------------------------------------
     # 인라인 선택 — 타일 클릭=선택 / 더블클릭=해제.  일괄작업·드래그는
@@ -218,6 +299,32 @@ class _SidePanel(QFrame):
     def _set_all_inline(self, selected: bool) -> None:
         for sec in self._sections.values():
             sec.grid.set_all_inline_selected(selected)
+        self._refresh_inline_buttons()
+
+    def inline_selected_items(self) -> list[ImageItem]:
+        """전 슬롯에서 인라인으로 고른 사진들(슬롯 순서 유지)."""
+        out: list[ImageItem] = []
+        for slot in sorted(self._sections.keys()):
+            out.extend(e.item for e in self._sections[slot].inline_selected())
+        return out
+
+    def clear_inline_selection(self) -> None:
+        """선택 표시를 지운다 — 액션 실행 뒤/화면을 떠날 때 스테일 테두리 방지."""
+        self._set_all_inline(False)
+
+    def _refresh_inline_buttons(self) -> None:
+        n = len(self.inline_selected_items())
+        for btn in getattr(self, "_inline_buttons", ()):
+            fmt = btn.property("labelFmt") or "{n}"
+            btn.setText(fmt.format(n=n))
+            btn.setVisible(n > 0)
+
+    def _fire_inline_action(self, action_id: str) -> None:
+        items = self.inline_selected_items()
+        if not items:
+            return
+        self.clear_inline_selection()
+        self.selection_action.emit(self._name, action_id, items)
 
     # ------------------------------------------------------------------
     def _open_bulk_select(self) -> None:
@@ -247,6 +354,9 @@ class SelectPage(QWidget):
     decision_made = pyqtSignal(str, object)            # ("verify"|"exclude", ImageItem)
     finished = pyqtSignal()                             # 큐가 모두 비었을 때
     state_changed = pyqtSignal()                        # 자동 저장 트리거
+    # ★ Stage 2 의 [← 설정으로] 와 대칭.  이게 없어서 폴더를 잘못 고르고 들어오면
+    #   되돌아갈 길이 없었다(선택 종료 → 매칭 → 검토 → 결과 → 새 검증, 5단계 우회).
+    cancelled = pyqtSignal()
 
     PANEL_LEFT = "left"
     PANEL_RIGHT = "right"
@@ -283,6 +393,10 @@ class SelectPage(QWidget):
         self.title.setProperty("role", "title")
         top.addWidget(self.title)
         top.addStretch(1)
+        # [← 설정으로] — Stage 2 와 같은 자리·같은 역할(대칭).
+        self.btn_back_to_setup = NeonButton(i18n.KO.BTN_BACK_TO_SETUP, role="ghost")
+        self.btn_back_to_setup.clicked.connect(self._on_back_to_setup)
+        top.addWidget(self.btn_back_to_setup)
         # [검증 제외 사진 보기 (n)] — 제외된 사진은 화면에서 숨기고,
         # 이 버튼으로 팝업에서 모아 본다. 0 장이면 비활성.
         self.btn_view_excluded = NeonButton(
@@ -310,7 +424,6 @@ class SelectPage(QWidget):
         # LOT(slot)별 전체 장수 — 참고용으로 작게 한 줄 (#2).  세션 내 불변이라
         # load_state 에서 1회만 채운다.  슬롯이 많으면 elide + 전체는 툴팁.
         self.lot_counts_label = QLabel("", self)
-        self.lot_counts_label.setProperty("role", "muted")
         self.lot_counts_label.setProperty("role", "mutedSmall")
         self.lot_counts_label.setWordWrap(False)
         root.addWidget(self.lot_counts_label)
@@ -350,7 +463,6 @@ class SelectPage(QWidget):
         center_card = NeonCard(role="card", parent=self)
         cl = center_card.body()
         center_title = QLabel(i18n.KO.PANEL_CENTER_DECIDE, center_card)
-        center_title.setProperty("role", "subtitle")
         center_title.setProperty("role", "paneTitle")
         center_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         cl.addWidget(center_title)
@@ -366,7 +478,7 @@ class SelectPage(QWidget):
         size_row.setSpacing(8)
         size_label = QLabel(i18n.KO.IMAGE_SIZE_LABEL, center_card)
         size_label.setProperty("role", "muted")
-        self.size_slider = QSlider(Qt.Orientation.Horizontal, center_card)
+        self.size_slider = NoWheelSlider(Qt.Orientation.Horizontal, center_card)
         self.size_slider.setRange(ScalableImage.MIN_LONG_EDGE,
                                    ScalableImage.MAX_LONG_EDGE)
         # 모니터 크기에 맞춰 자동 시작값. 사용자가 바꾸면 세션 동안만 유지되고
@@ -625,12 +737,23 @@ class SelectPage(QWidget):
             return []
         return list(self._state.targets.get(slot, []))
 
-    def _update_slots_incremental(self, slots) -> None:
-        """주어진 슬롯들만 좌·우 패널에서 증분 갱신(전체 재생성 없음, #렉)."""
+    def _update_slots_incremental(self, slots, *, dropped_left=()) -> None:
+        """주어진 슬롯들만 좌·우 패널에서 증분 갱신(전체 재생성 없음, #렉).
+
+        ``dropped_left`` 는 좌측 패널에서 **딱 그 사진만** 빠진 경우다(결정 1건 →
+        결정된 사진 + 새 현재 사진).  그때는 슬롯 전체를 다시 그리지 않고 타일 한 장만
+        떼어 낸다 — 300장 슬롯에서 결정 1건당 49ms(3프레임) 걸리던 재생성을 없앤다.
+        `+N` 트렁케이션 패널이면 `remove_item` 이 False 를 돌려주므로 그때만 전체 갱신."""
+        fast_ok = True
+        for item in dropped_left:
+            if item is None or not self.left_panel.remove_item(item.slot, item):
+                fast_ok = False
+                break
         for s in slots:
             if not s:
                 continue
-            self.left_panel.set_slot(s, self._left_items_for_slot(s))
+            if not fast_ok:
+                self.left_panel.set_slot(s, self._left_items_for_slot(s))
             self.right_panel.set_slot(s, self._right_items_for_slot(s))
 
     def _refresh_all(self) -> None:
@@ -710,6 +833,7 @@ class SelectPage(QWidget):
             self.center_img.clear_image()
             self.slot_label.setText("")
             self.progress_label.setText("")
+            # 큐가 비었다 — 좌측에서 새로 빠지는 사진은 없다(결정된 사진은 중앙에 있었다).
             self._update_slots_incremental({prev_slot})
             self._refresh_excluded_button()
             self._refresh_end_selection_button()
@@ -724,7 +848,11 @@ class SelectPage(QWidget):
                 total=self._total_count(),
             )
         )
-        self._update_slots_incremental({prev_slot, self._current.slot})
+        # ★ 좌측에서 빠지는 것은 **새로 중앙으로 올라온 사진 한 장뿐**이다 —
+        #   방금 결정한 사진은 결정 전부터 중앙에 있었으므로 좌측 패널에 없었다.
+        #   (여기를 두 장으로 잡아 두면 첫 장에서 실패해 매번 전체 재생성으로 떨어진다.)
+        self._update_slots_incremental({prev_slot, self._current.slot},
+                                       dropped_left=(self._current,))
         self._refresh_excluded_button()
         self._refresh_end_selection_button()
 
@@ -752,6 +880,30 @@ class SelectPage(QWidget):
         self.size_value.setText(f"{value} px")
         self.center_img.set_target_size(value)
         # 사용자 변경은 세션 동안만 유지 — 재시작 시 자동 맞춤으로 초기화.
+
+    # ------------------------------------------------------------------
+    def _on_back_to_setup(self) -> None:
+        """설정 화면으로 돌아간다 — 진행한 결정이 있으면 한 번 확인한다."""
+        decided = 0
+        if self._state is not None:
+            decided = sum(len(v) for v in self._state.targets.values())
+            decided += sum(len(v) for v in self._state.excluded.values())
+        if decided:
+            from PyQt6.QtWidgets import QMessageBox
+            r = sheets.ask(
+                self, i18n.KO.SELECT_BACK_CONFIRM_TITLE,
+                i18n.KO.SELECT_BACK_CONFIRM_FMT.format(n=decided),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if r != QMessageBox.StandardButton.Yes:
+                return
+        self.clear_inline_selection_all()
+        self.cancelled.emit()
+
+    def clear_inline_selection_all(self) -> None:
+        """화면을 떠날 때 선택 테두리를 지운다 — 다시 들어왔을 때 스테일 표시 방지."""
+        self.left_panel.clear_inline_selection()
 
     # ------------------------------------------------------------------
     # Decisions
@@ -818,13 +970,24 @@ class SelectPage(QWidget):
                 elif action_id == "recenter":
                     self._state.queue.insert(0, it)
         elif panel == self.PANEL_LEFT:
+            # ★ 큐에서 곧바로 내리는 이 두 액션은 가운데에서 한 장씩 내리는 결정과
+            #   **같은 일**이다 — 그러므로 `_decide` 와 똑같이 되돌리기 기록을 남긴다.
+            #   남기지 않으면 `Z` 가 이 일괄 처리를 건너뛰고 **그 이전의 한 장짜리
+            #   결정**을 대신 취소한다: 사용자는 방금 보낸 3장이 돌아올 줄 알았는데
+            #   손대지 않은 다른 사진이 조용히 큐로 되돌아온다(실측 확인).
+            #   기록 단위는 `_end_selection_now` 와 같은 **장당 1건**이다 — `Z` 는
+            #   "직전 한 장" 이라는 화면·설명서의 약속을 그대로 지킨다.
             for it in items:
                 if it in self._state.queue:
                     self._state.queue.remove(it)
                 if action_id == "batch_verify":
                     self._state.targets[it.slot].append(it)
+                    self._state.history.append(("verify", it))
+                    self.decision_made.emit("verify", it)
                 elif action_id == "batch_exclude":
                     self._state.excluded[it.slot].append(it)
+                    self._state.history.append(("exclude", it))
+                    self.decision_made.emit("exclude", it)
         self.state_changed.emit()
         self._advance_to_next()
 

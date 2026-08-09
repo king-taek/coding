@@ -41,7 +41,9 @@ QMenu::item:selected {
 /* 상단 앱 로고 — 각 페이지가 자기 콘텐츠 맨 위에 놓는다(widgets/app_logo.py).
    스크롤이 있는 화면에서는 함께 밀려 올라간다(고정 칸이 아니다). */
 QLabel[role="appLogo"] {
-    padding: 10px 0 6px 0;
+    /* ★ 밴드가 61px(로고 44 + 패딩 16 + 눈금 1)이라 1600px 폭에서 작은 마크 하나가
+       콘텐츠 앞의 빈 띠를 차지했다.  구분 눈금은 남기고 여백만 줄인다. */
+    padding: 4px 0 2px 0;
     border-bottom: 1px solid $line2;
 }
 
@@ -105,6 +107,13 @@ QLabel[role="subtitle"] {
 
 QLabel[role="muted"] {
     color: $mute;
+}
+
+/* 빈 칸 안내 — 아직 아무것도 없는 패널이 '고장난 회색 칸' 으로 보이지 않게,
+   이 칸이 무엇을 담는 곳인지 한 줄로 알려 준다. */
+QLabel[role="emptyHint"] {
+    color: $mute;
+    padding: 28px 12px;
 }
 
 QLabel[role="mono"] {
@@ -207,6 +216,28 @@ QLabel[role="plusTile"] {
     border-radius: $radius;
 }
 
+/* 결과 요약 통계 타일 — 검증의 종착 화면에서 '몇 장이 맞았고 몇 장이 문제인가' 를
+   스크롤 없이 읽히게 한다.  수치는 모노(자릿수 정렬), 캡션은 본문 서체. */
+QFrame[role="statTile"] {
+    background-color: $elev;
+    border: 1px solid $line;
+    border-radius: $radius_sm;
+}
+QLabel[role="statValue"] {
+    font-family: $font_mono;
+    font-size: 26px;
+    font-weight: 700;
+    color: $ink;
+}
+/* 상태는 색으로도 말한다 — 다만 숫자가 0 이면 중립(없는 문제를 붉게 칠하지 않는다). */
+QLabel[role="statValue"][tone="ok"] { color: $pass; }
+QLabel[role="statValue"][tone="over"] { color: $danger; }
+QLabel[role="statValue"][tone="none"] { color: $ink2; }
+QLabel[role="statCaption"] {
+    color: $mute;
+    font-size: $font_caption_sz;
+}
+
 /* 얇은 구분선(QFrame 을 1px 로 눕혀 쓰는 자리) */
 QFrame[role="hrule"] {
     background: $line;
@@ -261,6 +292,16 @@ QFrame[role="section"] {
     background-color: $panel;
     border: 1px solid $line;
     border-radius: $radius;
+}
+
+/* Stage 1 좌측 패널의 인라인 선택(체크박스 없이 타일 클릭으로 고르는 상태).
+   ★ role 을 갈아끼우지 말고 **속성 두 개를 겹쳐** 쓴다 — 타일은 이미 card-soft 라
+     role 을 바꾸면 카드 면·라운드를 통째로 잃는다.  선택자가 둘이라 위 규칙을 이긴다.
+   ★ 예전엔 이걸 위젯의 인스턴스 스타일시트로 걸었는데, 색이 import 시점에 굳어
+     다크 전환이 영영 안 먹었고 스코프가 없어 자식 라벨까지 테두리가 번졌다. */
+QFrame[role="card-soft"][inlineSelected="true"] {
+    background-color: $card_selected_bg;
+    border: 2px solid $accent;
 }
 
 /* 매치 검토 행 — 변형별 card / hairline 지원. */
@@ -414,8 +455,11 @@ QPushButton[role="primary"]:focus {
     padding: $pad_control_focus;
 }
 
+/* 평상시에도 옅은 위험 틴트를 깐다 — 로딩 오버레이의 [중지] 처럼 어두운 패널 위에
+   홀로 놓이는 경우 테두리만으로는 면이 없어 보인다(인라인 스타일에서 옮겨 온 값). */
 QPushButton[role="danger"] {
     color: $danger;
+    background-color: $danger_tint_soft;
     border-color: $danger;
 }
 QPushButton[role="danger"]:hover {
@@ -994,6 +1038,25 @@ QToolButton[role="disclosure"]:hover {
 QToolButton[role="disclosure"]:focus {
     border: $focus_w solid $focus;
     padding: 3px 9px;
+}
+
+/* 썸네일 타일 우상단 '크게 보기' — ★ 예전엔 인라인 스타일로 옛 네온 팔레트의
+   다크 네이비(rgba(26,29,35,.85))를 깔아, 라이트 화면에 홀로 어두운 얼룩이 떠 있고
+   글자 대비가 1.63:1 이었다.  경계는 $line2(장식 전용) 가 아니라 $line_strong 을
+   쓴다 — 상호작용 컨트롤의 평상시 경계는 3:1 이상이어야 한다. */
+QToolButton[role="tileExpand"] {
+    color: $ink2;
+    background-color: $elev;
+    border: 1px solid $line_strong;
+    border-radius: $radius_sm;
+    font-size: 14px;
+}
+QToolButton[role="tileExpand"]:hover {
+    color: $ink;
+    border-color: $accent;
+}
+QToolButton[role="tileExpand"]:focus {
+    border: $focus_w solid $focus;
 }
 
 /* ── 도움말 토글 버튼 (? 버튼) ───────────────────────────────────────────── */

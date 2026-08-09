@@ -81,7 +81,7 @@ EXPECTED = [
     # 는 후보 격자를 손으로 채워 찍은 것이라 실제 실행에서는 나오지 않는 화면이었다.
     "13_2단계_자동매칭",
     "15_검토_시트", "16_크롭_검토행", "17_시트_좌우비교",
-    "18_결과", "19_시트_매칭결과검토",
+    "18_결과",
     "20_시트_사진정보", "21_시트_업데이트",
     "22_셋업_흑연",
 ]
@@ -236,10 +236,26 @@ class Shooter:
         self.app.processEvents()
 
     def _rects(self, host: QWidget, spec: dict[str, QWidget]) -> dict[str, list[int]]:
-        """위젯 → host 기준 논리좌표 사각형.  설명서 주석이 여기에 앵커된다."""
+        """위젯 → host 기준 논리좌표 사각형.  설명서 주석이 여기에 앵커된다.
+
+        값이 위젯이 아니라 **여러 위젯의 리스트**면 그 합집합을 쓴다 — 한 줄로 늘어선
+        타일 묶음(결과 화면의 숫자 타일 4개)처럼 담는 위젯이 따로 없는 것을 가리킬 때.
+        눈짐작 좌표를 설명서에 적지 않기 위한 것이므로, 여기서도 **실제 위젯 위치**만
+        쓴다."""
         out: dict[str, list[int]] = {}
         for key, w in spec.items():
             if w is None:
+                continue
+            if isinstance(w, (list, tuple)):
+                boxes = [self._rects(host, {key: one}).get(key) for one in w]
+                boxes = [b for b in boxes if b]
+                if not boxes:
+                    continue
+                x0 = min(b[0] for b in boxes)
+                y0 = min(b[1] for b in boxes)
+                x1 = max(b[0] + b[2] for b in boxes)
+                y1 = max(b[1] + b[3] for b in boxes)
+                out[key] = [x0, y0, x1 - x0, y1 - y0]
                 continue
             try:
                 # 빈 라벨은 폭이 몇 px 뿐이라 강조 상자를 그릴 수 없다 — 아예 적지 않는다.
@@ -579,7 +595,7 @@ def _stage_match(win, sr) -> dict:
     # 진행 바가 도는 그 순간 — 앱의 `_update_auto_progress` 와 같은 문구·같은 값.
     page._loading.show_overlay(cancelable=True)
     page._loading.set_progress(
-        3, len(refs), i18n.KO.LOAD_AUTO_MATCH_FMT.format(done=3, total=len(refs)))
+        3, len(refs), i18n.KO.LOAD_AUTO_MATCH)
     _pump(30)
     return {
         "기준사진": getattr(page, "center_img", None),
@@ -640,6 +656,7 @@ def _stage_review(win, sr) -> dict:
     _pump(20)
     rows = list(getattr(page, "_rows", []))
     out = {
+        "표제": getattr(page, "title", None),
         "탤리": getattr(page, "_tally_label", None),
         "사진크기": getattr(page, "size_slider", None),
         "검토완료": getattr(page, "btn_done", None),
@@ -698,12 +715,18 @@ def _stage_result(win, sr) -> dict:
                      val_pool=val_pool, coord_mode=True, tolerance=_TOL)
     win._stack.setCurrentWidget(page)
     _pump(30)
+    # 숫자 타일 4개(매칭 성공·허용 초과·매치 없음·Slot 불일치)는 담는 위젯이 따로
+    # 없어 **합집합**으로 가리킨다 — 설명서가 이 네 숫자를 따로 설명하기 때문이다.
+    from PyQt6.QtWidgets import QFrame as _QFrame
+    stat_tiles = [w for w in page.findChildren(_QFrame)
+                  if w.property("role") == "statTile"]
     return {
         "요약카드": getattr(page, "_summary_card", None),
+        "통계타일": stat_tiles or None,
         "원본화질": getattr(page, "original_quality_chk", None),
         "전체양식": getattr(page, "full_template_chk", None),
         "새검증": getattr(page, "new_btn", None),
-        "매칭결과검토": getattr(page, "review_btn", None),
+        "검토화면복귀": getattr(page, "review_btn", None),
         "실패검토": getattr(page, "review_unmatched_btn", None),
         "엑셀저장": getattr(page, "export_btn", None),
     }
@@ -820,12 +843,6 @@ def main() -> int:
     print("결과 화면")
     rects = _stage_result(win, sr)
     sh.shoot("18_결과", win, rects=rects)
-
-    from aoi_verification.app.ui.widgets.matches_review import MatchesReviewDialog
-    matches, _ = _review_data(sr)
-    mr = MatchesReviewDialog(matches, coord_mode=True, tolerance=_TOL, parent=win)
-    sh.sheet("19_시트_매칭결과검토", win,
-             lambda: win._sheets.run(mr, full_bleed=True))
 
     from aoi_verification.app.ui.widgets.image_info_dialog import ImageInfoDialog
     info_dlg = ImageInfoDialog(parent=win, image_path=str(s0.ref_images[0].path))

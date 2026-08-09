@@ -592,6 +592,15 @@ class _MessageSheet(QDialog):
             self._buttons[sb] = btn
         v.addLayout(bar)
 
+        # ★ 기본값이 **부정 버튼**(아니오·취소·닫기)인 경고에서는 강조 버튼을 없앤다.
+        #   예전엔 [예] 가 언제나 채운 파란 버튼이라, "정말 같은 폴더를 비교할까요?"
+        #   처럼 기본이 '아니오' 인 경고에서도 시선은 [예] 로 가는데 Enter 는 [아니오]
+        #   를 눌렀다 — 시각 강조와 안전 기본값이 정반대를 가리켰다.
+        if default in (_SB.No, _SB.Cancel, _SB.Close):
+            for btn in self._buttons.values():
+                if btn.property("role") == "primary":
+                    btn.setRole("ghost")
+
         if default in self._buttons:
             self._buttons[default].setDefault(True)
             self._buttons[default].setFocus()

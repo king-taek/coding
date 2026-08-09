@@ -36,16 +36,32 @@ class NeonButton(QPushButton):
             self._press_eff = QGraphicsOpacityEffect(self)
             self._press_eff.setOpacity(1.0)
             self.setGraphicsEffect(self._press_eff)
-        if self._press_anim is not None:
-            self._press_anim.stop()
-        anim = QPropertyAnimation(self._press_eff, b"opacity", self)
+        # ★ 애니메이션 객체를 **하나만 만들어 재사용**한다.  예전엔 누를 때마다 새로
+        #   만들어 버튼에 붙였고(press/release 2개), 정지만 할 뿐 지우지는 않아 자주
+        #   누르는 버튼 아래에 죽은 QObject 가 세션 내내 쌓였다.
+        anim = self._press_anim
+        if anim is None:
+            anim = QPropertyAnimation(self._press_eff, b"opacity", self)
+            anim.setEasingCurve(motion.EASE_PRIMARY)
+            # ★ 연결은 생성 시 한 번만 — 재사용하며 매번 연결하면 N번 발화한다.
+            anim.finished.connect(self._on_press_anim_finished)
+            self._press_anim = anim
+        anim.stop()
+        # ★ 이펙트는 `_clear_press_effect` 가 파괴하므로, 새로 만들어졌으면 대상을
+        #   다시 물려야 한다 — 안 하면 죽은 대상을 몰아 딥이 아예 안 보인다.
+        if anim.targetObject() is not self._press_eff:
+            anim.setTargetObject(self._press_eff)
+        # ★ `setStartValue` 를 부르지 마라.  비워 두면 Qt 가 start() 시점의 **현재
+        #   opacity** 에서 출발한다 — 연타해도 딥이 튀지 않는 이유가 이것이다.
         anim.setEndValue(0.92 if pressed else 1.0)
         anim.setDuration(motion.dur(90))
-        anim.setEasingCurve(motion.EASE_PRIMARY)
-        if not pressed:
-            anim.finished.connect(self._clear_press_effect)
+        self._releasing = not pressed
         anim.start()
-        self._press_anim = anim
+
+    def _on_press_anim_finished(self) -> None:
+        # 되돌아오는 애니메이션이 끝났을 때만 이펙트를 뗀다(딥이 들어갈 때는 유지).
+        if getattr(self, "_releasing", False):
+            self._clear_press_effect()
 
     def _clear_press_effect(self) -> None:
         """딥이 1.0 으로 돌아왔으면 이펙트를 **떼어 낸다**(#렉).
@@ -65,7 +81,8 @@ class NeonButton(QPushButton):
         except RuntimeError:
             pass
         self._press_eff = None
-        self._press_anim = None
+        # ★ `_press_anim` 은 지우지 않는다 — 재사용 슬롯이다(다음 프레스에서 대상만
+        #   새 이펙트로 다시 문다).  여기서 None 으로 만들면 매번 새로 생성돼 다시 쌓인다.
 
     def mousePressEvent(self, e):  # noqa: N802
         self._press_feedback(True)

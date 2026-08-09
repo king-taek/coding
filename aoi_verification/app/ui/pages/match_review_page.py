@@ -26,8 +26,9 @@ from ..score_fmt import fmt_score
 from ...models.result import MatchResult, MissEntry
 from ...models.slot import ImageItem
 from ...utils import image_io
-from ..widgets.app_logo import build_logo_label
 from ..widgets.neon_button import NeonButton
+from ..widgets.app_logo import build_logo_label
+from ..widgets.loading_overlay import LoadingOverlay
 from ..widgets.no_wheel_slider import NoWheelSlider
 from ..widgets.zoom_window import FullscreenViewer
 from ..widgets import sheet_host as sheets
@@ -815,6 +816,13 @@ class MatchReviewPage(QWidget):
         self._resize_timer = QTimer(self)           # 슬라이더 드래그 디바운스
         self._resize_timer.setSingleShot(True)
         self._resize_timer.timeout.connect(self._apply_thumb_size)
+        # 행 배치 생성(P-01) — 세대 토큰 + 대기 목록 + 진행 오버레이.
+        self._row_batch_timer: QTimer | None = None
+        self._row_batch_gen = 0
+        self._pending_rows: list = []
+        self._row_total = 0
+        self._load_gen = 0
+        self._loading = LoadingOverlay(self)
         # 좌표 매칭 모드 관련
         self._coord_mode: bool = False
         self._tolerance: float = _DFLT_TOL
@@ -831,10 +839,24 @@ class MatchReviewPage(QWidget):
         root.setSpacing(10)
 
         # ── 상단 집계/액션 바 (A2) — 탤리 · (stretch) · 사진 크기 · 검토 완료 ──
+        # ★ 로고는 스크롤 **밖 최상단**에 둔다.  예전엔 스크롤 안 첫 위젯이라
+        #   고정 컬럼 헤더와 첫 행 사이에 밴드가 끼어 표가 머리와 몸통으로 갈라졌다.
+        root.addWidget(build_logo_label(self))
+
+        # ★ 이 화면에는 표제가 없었다 — 로고를 스크롤 안에 두고 컬럼 헤더만 있어서,
+        #   '지금 어느 단계인지' 를 화면이 말해 주지 않았다(다른 페이지는 전부 표제가 있다).
+        self.title = QLabel(i18n.KO.MATCH_REVIEW_TITLE, self)
+        self.title.setProperty("role", "title")
+        root.addWidget(self.title)
+
+
         bar = QHBoxLayout()
         bar.setSpacing(12)
         self._tally_label = QLabel("", self)
         self._tally_label.setTextFormat(Qt.TextFormat.RichText)
+        # 낱말만 봐서는 '매치 없음' 과 '매치 실패' 가 같은 말로 읽힌다 — 넷의
+        # 차이를 화면에서 바로 확인할 수 있게 한다 (U-13).
+        self._tally_label.setToolTip(i18n.KO.TALLY_TOOLTIP)
         bar.addWidget(self._tally_label)
         bar.addStretch(1)
         # ※ '확인 필요만' 필터는 제거했다 — 상단 탤리(일치·허용 초과·매치 없음)가 이미
@@ -887,10 +909,6 @@ class MatchReviewPage(QWidget):
         outer = QVBoxLayout(host)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(6)
-
-        # 상단 로고 — 스크롤 **안**에 둔다.  행을 훑을 때 위로 밀려 올라가며
-        # 화면을 넓게 쓰게 한다(사용자 요청: 고정 칸이 아니게).
-        outer.addWidget(build_logo_label(host))
 
         # 매치 행 영역. ‘매치 없음’ 처리해도 이 자리에 그대로 두고 빨간
         # 테두리로만 표시한다 (#1).
@@ -977,7 +995,8 @@ class MatchReviewPage(QWidget):
                    candidates_by_ref: dict | None = None,
                    coord_mode: bool = False,
                    tolerance: float = _DFLT_TOL,
-                   coord_failed_count: int = 0) -> None:
+                   coord_failed_count: int = 0,
+                   unmatched_keys: set | None = None) -> None:
         """매치 검토 화면 초기화.
 
         ``score_cache`` 와 ``val_pool`` 이 함께 주어지면 각 매치 행에 차순위
@@ -990,8 +1009,19 @@ class MatchReviewPage(QWidget):
         ``coord_mode=True`` 면 score 를 µm 거리로 역산해 표시하고,
         ``coord_failed_count`` 를 요약에 "매치 실패 N쌍" 으로 포함한다.
         """
+        # ★ 세대 토큰 — 배치 생성 도중 다시 들어오면(결과에서 검토로 복귀 등) 옛 배치가
+        #   새 목록에 행을 섞어 넣는다.  토큰이 바뀐 배치는 스스로 멈춘다.
+        self._load_gen = getattr(self, "_load_gen", 0) + 1
+        self._pending_rows = []
+        if getattr(self, "_row_batch_timer", None) is not None:
+            self._row_batch_timer.stop()
         self._matches = list(matches)
+        # ★ 결과 화면에서 되돌아올 때(U-10) 사용자가 표시한 '매치 없음' 을 되살린다.
+        #   무조건 비우면 돌아온 화면에 빨간 행이 하나도 없다 — 표시를 다시 해야 한다.
         self._unmatched_keys.clear()
+        if unmatched_keys:
+            valid = {m.key for m in self._matches}
+            self._unmatched_keys.update(k for k in unmatched_keys if k in valid)
         self._coord_mode = bool(coord_mode)
         self._tolerance = float(tolerance) if tolerance and tolerance > 0 else _DFLT_TOL
         # 점수 열 이름을 엔진에 맞춘다 — 구형(유사도)에서 '거리(µm)' 로 보이던 오표기.
@@ -1030,13 +1060,73 @@ class MatchReviewPage(QWidget):
                     self._matches,
                     key=lambda m: (m.slot, m.ref_path.name.lower()),
                 )
-            for m in ordered:
-                self._append_row(m)
+            self._start_row_batches(ordered)
         self._update_summary()
         # 검토 화면이 새로 열릴 때마다 스크롤을 항상 최상단으로 (이전 세션의
         # 스크롤 위치가 남지 않도록). 레이아웃 확정 후 적용.
         QTimer.singleShot(
             0, lambda: self._scroll.verticalScrollBar().setValue(0))
+
+    # ------------------------------------------------------------------
+    # 행 생성 — 한 번에 다 만들지 않는다.
+    # ------------------------------------------------------------------
+    _ROW_BATCH = 40
+
+    def _start_row_batches(self, ordered: list) -> None:
+        """행을 40개씩 나눠 만든다.
+
+        ★ 예전엔 `load_state` 가 전 행을 한 루프로 만들었다.  행 하나가 위젯 ~15개
+        (라벨·버튼·지연 썸네일 2장·차순위 타일)라 600행이면 진입에 4.0초 동안 창이
+        통째로 굳었고, 그 사이 로딩 표시조차 없어 '죽은 것처럼' 보였다(실측).
+        첫 배치만 즉시 만들어 화면을 띄우고 나머지는 이벤트 루프 틈에 채운다.
+
+        ★ 생성 중에는 오버레이가 입력을 잠근다 — 아직 만들어지지 않은 행을 두고
+        [검토 완료] 를 누르면 사용자가 보지 못한 매치가 전부 '유지' 로 확정된다."""
+        self._pending_rows = list(ordered)
+        first = self._pending_rows[:self._ROW_BATCH]
+        del self._pending_rows[:self._ROW_BATCH]
+        for m in first:
+            self._append_row(m)
+        if not self._pending_rows:
+            return
+        total = len(ordered)
+        self._row_total = total
+        self._loading.show_overlay(i18n.KO.LOAD_REVIEW_ROWS)
+        self._loading.set_progress(len(first), total, i18n.KO.LOAD_REVIEW_ROWS)
+        if self._row_batch_timer is None:
+            self._row_batch_timer = QTimer(self)
+            self._row_batch_timer.setSingleShot(True)
+            self._row_batch_timer.timeout.connect(self._make_next_rows)
+        self._row_batch_gen = self._load_gen
+        self._row_batch_timer.start(0)
+
+    def _make_next_rows(self) -> None:
+        if self._row_batch_gen != self._load_gen:
+            return                                  # 옛 세대 — 조용히 멈춘다
+        chunk = self._pending_rows[:self._ROW_BATCH]
+        del self._pending_rows[:self._ROW_BATCH]
+        for m in chunk:
+            self._append_row(m)
+        done = self._row_total - len(self._pending_rows)
+        if self._pending_rows:
+            self._loading.set_progress(done, self._row_total,
+                                       i18n.KO.LOAD_REVIEW_ROWS)
+            self._row_batch_timer.start(0)
+        else:
+            self._loading.hide_overlay()
+
+    def unmatched_keys(self) -> set:
+        """사용자가 '매치 없음' 으로 표시한 매치 키들(결과↔검토 왕복 보존용)."""
+        return set(self._unmatched_keys)
+
+    def all_matches(self) -> list:
+        """검토 대상 **전부** — '매치 없음' 으로 표시한 것까지 포함한다.
+
+        ★ `finished` 가 싣는 ``kept`` 와 다르다.  결과 화면에서 검토로 되돌아올 때
+        ``kept`` 를 기반으로 다시 들어가면 '매치 없음' 행이 애초에 없으므로 그 표시를
+        복원할 수 없고, 다음 [검토 완료] 에서 그 사진들이 매치에도 미매칭에도 없는
+        상태가 돼 **결과에서 통째로 사라진다.**  왕복의 기반은 이쪽이어야 한다."""
+        return list(self._matches)
 
     def _on_size_changed(self, value: int) -> None:
         self._thumb_px = int(value)
@@ -1255,7 +1345,7 @@ class MatchReviewPage(QWidget):
             if m.key in self._unmatched_keys:
                 unmatched_refs.append(MissEntry(
                     slot=m.slot, side="ref", path=m.ref_path,
-                    note="미매칭 (사용자 검토)",
+                    note=i18n.KO.NOTE_UNMATCHED_BY_USER,
                 ))
             else:
                 kept.append(m)

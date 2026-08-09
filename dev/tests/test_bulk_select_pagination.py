@@ -82,11 +82,52 @@ def test_select_all_covers_all_pages(qapp):
 
 
 def test_size_slider_changes_tile_px(qapp):
+    """슬라이더 값은 즉시, 타일 적용은 디바운스 뒤에.
+
+    ★ 드래그 중 tick 마다 페이지를 통째로 재생성하면 999장 화면에서 한 번 드래그에
+    수 초가 사라진다.  그래서 `_tile_px` 만 동기로 갱신하고 타일 재스케일은 150ms
+    디바운스 타이머가 맡는다 — 테스트는 그 타이머를 강제로 발화시킨다."""
     data = {"S1": _data("S1", 10)}
     dlg = BulkSelectDialog("t", data, actions=[("x", "X", "primary")])
     dlg._on_size_changed(260)
-    assert dlg._tile_px == 260
-    # 재렌더된 타일이 새 크기를 반영.
+    assert dlg._tile_px == 260                      # 값은 즉시
+    assert dlg._resize_timer.isActive()             # 적용은 예약만
+    dlg._apply_tile_size()                          # 디바운스 강제 발화
     any_tile = next(iter(dlg._tiles_by_key.values()))
     assert any_tile._tile_px == 260
+    dlg.deleteLater()
+
+
+def test_size_change_reuses_tiles_instead_of_rebuilding(qapp):
+    """크기 변경이 타일을 **재생성하지 않는다**(같은 객체를 재스케일)."""
+    data = {"S1": _data("S1", 6)}
+    dlg = BulkSelectDialog("t", data, actions=[("x", "X", "primary")])
+    before = dict(dlg._tiles_by_key)
+    dlg._on_size_changed(240)
+    dlg._apply_tile_size()
+    assert {k: id(v) for k, v in dlg._tiles_by_key.items()} == \
+           {k: id(v) for k, v in before.items()}, "타일이 재생성됐다"
+    dlg.deleteLater()
+
+
+def test_action_buttons_disabled_until_something_is_selected(qapp):
+    """0 장일 때 액션 버튼을 눌러도 조용히 아무 일도 안 일어나던 '먹은 클릭' 방지."""
+    data = {"S1": _data("S1", 4)}
+    dlg = BulkSelectDialog("t", data, actions=[("x", "X", "primary")])
+    assert all(not b.isEnabled() for b in dlg._action_buttons)
+    dlg._select_all()
+    assert all(b.isEnabled() for b in dlg._action_buttons)
+    dlg._clear_selection()
+    assert all(not b.isEnabled() for b in dlg._action_buttons)
+    dlg.deleteLater()
+
+
+def test_sheet_title_is_not_drawn_twice(qapp):
+    """시트 chrome 이 windowTitle 을 그리므로 본문에 같은 제목을 또 그리지 않는다."""
+    from PyQt6.QtWidgets import QLabel
+    title = "검증 후보들 — 다중 선택"
+    dlg = BulkSelectDialog(title, {"S1": _data("S1", 2)},
+                           actions=[("x", "X", "primary")])
+    same = [w for w in dlg.findChildren(QLabel) if w.text() == title]
+    assert same == [], "본문에 시트 제목이 중복으로 그려졌다"
     dlg.deleteLater()

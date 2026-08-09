@@ -83,7 +83,15 @@ code,.mono{font-family:var(--mono); font-size:.92em}
 figure{margin:0 0 5mm; page-break-inside:avoid}
 figure.shot{position:relative; line-height:0}
 figure.shot > img{width:100%; display:block; border:1px solid var(--rule)}
-figure.shot > svg{position:absolute; left:0; top:0; width:100%; height:100%}
+/* ★ `height:100%` 를 쓰지 마라 — 캡션이 figure **안**으로 들어온 뒤로는 SVG 가
+   캡션까지 덮어 주석 상자가 위젯에서 2.5~3.6mm 아래로 밀린다.  viewBox 가 그림과
+   같은 좌표계이므로 `height:auto` 가 정확히 그림만 덮는다. */
+figure.shot > svg{position:absolute; left:0; top:0; width:100%; height:auto}
+/* 캡션은 figure **안**에 둔다 — 밖에 있으면 `page-break-inside:avoid` 가 캡션을
+   지키지 못해 그림만 앞 쪽에 남고 캡션이 다음 쪽 맨 위에 홀로 찍힌다(실제로 그랬다:
+   사용설명서 9→10쪽, 상세설명서 16→17쪽).  `<figcaption>` 이 `<figure>` 밖에 있는
+   것은 HTML 규격 위반이기도 하다. */
+figure.shot > figcaption{line-height:1.5}
 figure.half{width:62%}
 figure.third{width:44%}
 figcaption{line-height:1.5; font-size:8.8pt; color:var(--mute); margin-top:1.6mm}
@@ -107,6 +115,19 @@ figcaption{line-height:1.5; font-size:8.8pt; color:var(--mute); margin-top:1.6mm
   border-radius:50%; background:var(--accent); color:#fff; font-family:var(--mono);
   font-size:7.4pt; line-height:4.6mm; text-align:center}
 .keys.red li::before{background:var(--danger)}
+
+/* 본문·캡션 안에서 그림 위의 번호 동그라미를 그대로 부르는 인라인 마커.
+   ★ ❶❷❸(U+2776~) 를 직접 쓰지 마라 — 동봉한 NanumSquare 는 그 코드포인트를
+     cmap 에 **갖고 있으면서 글리프가 0바이트**다.  Chromium 은 cmap 에 있으니
+     폴백하지 않고 **폭만 차지한 빈 칸**을 찍는다 — 인쇄물에서 번호가 통째로
+     사라져 그림과 아래 설명의 대응이 끊겼다(실측: 사용설명서 9쪽 220dpi 확대).
+     ①②③(U+2460~)은 같은 글꼴에서 정상이지만, 그림의 동그라미와 모양이 달라
+     여기서는 CSS 로 같은 모양을 그린다(`.keys li::before` 와 같은 방식). */
+.kn{display:inline-block; width:4.6mm; height:4.6mm; border-radius:50%;
+    background:var(--accent); color:#fff; font-family:var(--mono);
+    font-size:7.4pt; line-height:4.6mm; text-align:center;
+    vertical-align:.2mm; margin-right:.6mm}
+.kn.red{background:var(--danger)}
 
 /* ── 콜아웃 ─────────────────────────────────────────────────────── */
 .note,.warnbox,.tip{padding:3.2mm 4mm; margin:0 0 4mm; page-break-inside:avoid;

@@ -21,10 +21,12 @@ from PyQt6.QtCore import (QEasingCurve, QElapsedTimer, QEvent, QRect, QSize, Qt,
                           QTimer, QVariantAnimation, pyqtSignal)
 from PyQt6.QtGui import QColor, QPainter, QPen
 from PyQt6.QtWidgets import (QApplication, QGraphicsOpacityEffect, QLabel,
-                             QProgressBar, QPushButton, QVBoxLayout, QWidget)
+                             QProgressBar, QVBoxLayout, QWidget)
 
+from ... import i18n
 from .. import theme
 from .. import motion
+from .neon_button import NeonButton
 
 
 class _SpinnerDot(QWidget):
@@ -223,16 +225,13 @@ class LoadingOverlay(QWidget):
         self._busy.hide()
 
         # #8 중지 버튼 — cancelable=True 로 보여진 작업에서만.
-        self._cancel_btn = QPushButton("중지", self._content)
-        self._cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        # ★ 인스턴스 스타일시트로 색을 굽지 않는다.  오버레이는 앱 시작 때 한 번 만들어지고
+        #   `_recolor_in_place` 는 인스턴스 스타일시트를 못 바꾸므로, 구운 라이트 팔레트가
+        #   다크 전환 뒤에도 그대로 남아 글자 대비가 2.19:1 로 무너졌다(실측 캡처).
+        #   role 로 옮기면 전역 QSS 가 다시 렌더되면서 두 모드를 모두 따라온다.
+        self._cancel_btn = NeonButton(i18n.KO.BTN_STOP, role="danger",
+                                      parent=self._content)
         self._cancel_btn.setFixedWidth(160)
-        self._cancel_btn.setStyleSheet(
-            "QPushButton {{ color: {d}; background: {dt};"
-            " border: 1px solid {d}; border-radius: 8px; padding: 8px 14px;"
-            " font-weight: 700; }}"
-            "QPushButton:hover {{ background: {dts}; }}".format(
-                d=theme.DANGER, dt=theme.DANGER_TINT_SOFT, dts=theme.DANGER_TINT)
-        )
         self._cancel_btn.clicked.connect(self.cancel_requested.emit)
         self._cancel_btn.hide()
 
@@ -306,6 +305,12 @@ class LoadingOverlay(QWidget):
         self._show_token = 0
         self._hide_pending = False
         self._input_locked = False       # 떠 있는 동안만 앱 전역 키를 막는다
+        # ★ '아직 살아 있어야 하는 오버레이인가' — 페이지 전환처럼 **잠깐 숨었다
+        #   다시 보이는** 경우에 스스로를 되살리기 위한 표식이다(`showEvent` 참조).
+        #   `hideEvent` 는 이걸 건드리지 않는다 — 그 잠깐의 숨김이 곧 '끝났다' 는
+        #   뜻은 아니기 때문이다.  끝은 `_finish_hide` 하나뿐이다.
+        self._active = False
+        self._arming = False             # `show_overlay` 안의 재진입 방지
 
         self.hide()
         parent.installEventFilter(self)
@@ -380,6 +385,8 @@ class LoadingOverlay(QWidget):
         self._busy.start()
 
     def show_overlay(self, message: str = "", *, cancelable: bool = False) -> None:
+        self._active = True
+        self._arming = True              # 아래 `show()` 가 부를 showEvent 의 재무장 억제
         self._label.setText(message)
         self._set_input_lock(True)
         self._cancel_btn.setVisible(bool(cancelable))
@@ -417,6 +424,7 @@ class LoadingOverlay(QWidget):
             self._on_rise(1.0)
             self._set_bar_slide(1.0)
         self._cover_parent()
+        self._arming = False
 
     _BAR_SLIDE_PX = 8
     # 패널이 안착한 **뒤에** 들어와야 계층이 순서대로 읽힌다.
@@ -505,6 +513,7 @@ class LoadingOverlay(QWidget):
         #   최소 표시 래치·페이드아웃 동안(수백 ms) 화면은 아직 어두운데 키는 이미
         #   통하는 구간이 생긴다.  그게 바로 고치려던 그 증상이다.
         #   `_finish_hide` 는 모든 퇴장 경로가 지나는 단 하나의 지점이다.
+        self._active = False           # 여기가 유일한 '끝' 이다
         self._set_input_lock(False)
         self._settle_progress()        # 멈춘 tween 의 중간값이 남지 않게(모션 off 경로 포함)
         self.hide()
@@ -581,14 +590,89 @@ class LoadingOverlay(QWidget):
             self._cover_parent()
 
     # ------------------------------------------------------------------
+    def showEvent(self, event):  # noqa: N802
+        """뜨는 순간 **기하와 상태를 모두** 되살린다.
+
+        기하: `show_overlay` 도 `_cover_parent` 를 부르지만, 그때 부모가 아직 화면에
+        놓이기 전이면(스택에 담겨만 있는 페이지) 낡은 크기를 쓴다.
+
+        상태: ★ 페이지 전환은 스냅샷을 찍느라 **보였다 → 숨었다 → 다시 보인다** 를
+        한 번에 한다(`main_window._show_page`).  그 중간의 숨김이 `hideEvent` 를
+        발화시켜 페이드·스피너·입력잠금을 전부 꺼 버리는데, 그건 '작업이 끝났다' 는
+        뜻이 아니다.  되살리지 않으면 화면을 가득 덮은 **완전히 투명한 막**이 남아
+        — 스크림도 스피너도 안 보이는데 마우스는 전부 삼켜져 '앱이 죽은 것처럼'
+        보이고, 잠금은 풀려 있어 키보드로 [검토 완료] 가 눌린다(못 본 행까지 확정).
+        실측: 600행 진입에서 약 4초 동안 그 상태였다.
+
+        `match_page` 는 자기 `showEvent` 에서 `show_overlay` 를 다시 불러 우연히
+        피하고 있었지만, 그건 페이지마다 기억해야 하는 규칙이다 — 오버레이가
+        스스로 자기 상태를 지키게 한다."""
+        super().showEvent(event)
+        self._cover_parent()
+        if self._active and not self._arming and not self._hiding:
+            self._rearm()
+
+    def _rearm(self) -> None:
+        """`hideEvent` 가 꺼 놓은 것들을 되살린다 — 아직 끝나지 않은 작업이므로."""
+        self._set_input_lock(True)
+        self._spinner.start()
+        if not self._busy.isHidden():      # 총량 미상이면 혜성 스윕도 다시
+            self._busy.start()
+        # 페이드/상승 애니메이션은 이미 멈췄다 — 다시 재생하면 깜빡이므로 최종값으로.
+        self._on_fade(1.0)
+        self._on_rise(1.0)
+        # ★ 진행바 스태거도 **안착 위치로** 되돌린다.  `hideEvent` 가 `_bar_anim` 과
+        #   `_bar_timer` 를 멈추므로, 되살리지 않으면 진행바와 숫자가 시작 위치
+        #   (8px 아래)에 굳은 채 로딩 내내 남는다 — 스태거를 만든 바로 그 화면
+        #   (600행 검토 진입)에서 등장 안무가 한 번도 재생되지 않았다(실측 (8,0)).
+        self._set_bar_slide(1.0)
+        # ★ 등장 페이드가 전환에 끊기면 `finished` 가 안 나 `_on_fade_done` 의
+        #   `_detach_effect` 에 도달하지 못한다.  불투명도는 이미 1.0 이라 이펙트는
+        #   시각적 이득이 0 인데, 붙어 있는 동안 스피너가 1프레임 돌 때마다 패널
+        #   전체가 오프스크린으로 다시 렌더된다(62.5Hz) — 정작 그 시간에 돌아야 할
+        #   백그라운드 작업의 UI 스레드 여유를 갉아먹는다.  여기서 떼어 낸다.
+        self._detach_effect()
+
     def hideEvent(self, event):  # noqa: N802
-        """숨으면 돌던 것을 전부 멈춘다 — 보이지 않는 오버레이가 tick 할 이유가 없다."""
+        """숨으면 잠금을 풀고, 돌던 것을 전부 멈춘다.
+
+        ★ 이 클래스에 `hideEvent` 가 **두 번** 정의돼 있었다.  파이썬은 뒤에 정의된
+        것만 남기므로 앞의 '애니메이션 정지' 본문은 한 줄도 실행되지 않았고, 그 결과
+        `_finish_hide` 를 거치지 않는 퇴장(중지 → 페이지 전환)에서 스피너 타이머와
+        busy 무한 애니메이션이 **숨은 채로 세션 내내 계속 돌았다**.  둘을 하나로 합친다 —
+        같은 이름의 메서드를 다시 만들지 마라(회귀 가드: `test_loading_overlay_hide.py`).
+
+        ★ 순서가 중요하다: **잠금 해제가 맨 앞**이다.  전역 필터가 남으면 앱 전체가
+        키보드를 영영 못 받는데(테스트에서 실제로 그렇게 됐다), 아래 정지 중 하나라도
+        `RuntimeError`(삭제된 C++ 객체)를 내면 그 뒤 줄에 도달하지 못한다.  `_finish_hide`
+        만 믿을 수도 없다 — 부모 창이 닫히거나 페이지가 통째로 교체되면 그 경로를 거치지
+        않고 숨겨진다.  `hide()` 는 어느 경로로든 이 이벤트를 낸다.
+
+        ★ **퇴장이 진행 중이었다면 여기서 끝을 확정한다.**  아래에서 `_fade_anim` 과
+        `_hide_timer` 를 멈추는데, 그러면 `finished` 가 나지 않아
+        `_on_fade_done → _finish_hide` 가 **영영 오지 않는다.**  퇴장 페이드(112ms)나
+        최소표시 래치(350ms) 가 도는 중에 페이지가 전환되면 정확히 그렇게 된다 —
+        모든 페이지 전환이 스냅샷 스왑으로 조상에 hide→show 를 배달하기 때문이다.
+
+        그렇게 '끝' 에 닿지 못한 오버레이는 `hide()` 도 못 부른 채 부모 전체 크기로
+        마운트된 채 남는다.  그 페이지가 다시 보이는 순간 화면이 통째로 어두워지고
+        (실측 휘도 233 → 173) 클릭이 전부 삼켜지며, 래치 경로에서는 `showEvent` 의
+        재무장까지 걸려 **앱 전역 키보드가 영구히 잠긴다.**  비취소 오버레이면
+        빠져나갈 방법이 없다 — 강제 종료뿐이다.
+
+        숨은 뒤에는 그 애니메이션을 볼 사람이 없으므로, 남은 것은 '끝냈다는 사실'
+        뿐이다.  그것을 지금 확정한다."""
+        self._set_input_lock(False)
+        if self._hiding or self._hide_pending:
+            self._hiding = False
+            self._hide_pending = False
+            self._finish_hide()          # 유일한 '끝' 에 반드시 도달시킨다
         self._fade_anim.stop()
         self._rise_anim.stop()
         self._settle_progress()        # 값 확정 후 정지 — 중간값으로 얼지 않게
         self._bar_anim.stop()
         self._bar_timer.stop()
-        self._hide_timer.stop()
+        self._hide_timer.stop()        # 대기 중인 최소표시 래치도 취소(토큰 가드의 이중화)
         self._spinner.stop()
         self._busy.stop()
         super().hideEvent(event)
@@ -609,10 +693,31 @@ class LoadingOverlay(QWidget):
     )
 
     def eventFilter(self, obj, event) -> bool:  # noqa: N802
+        # ★ ``getattr`` 로 읽는다 — 잠금이 걸린 채 오버레이가 파괴되면 앱에 걸어 둔
+        #   전역 필터가 잠시 살아남아, 파이썬 속성이 이미 사라진 객체로 이벤트가
+        #   들어온다(그때 `AttributeError` 가 콘솔을 채웠다).  이 경로에서는 아무것도
+        #   막지 않는 게 맞다 — 잠글 주체가 이미 없다.
+        if not hasattr(self, "_input_locked"):
+            return False
         etype = event.type()
+        # ★ 부모 크기 추종은 **보이든 안 보이든** 한다.  이건 입력을 삼키는 일이 아니라
+        #   기하를 맞추는 일이라, 아래 가시성 가드보다 **위**에 있어야 한다.
+        #   숨어 있는 동안 부모가 커진 것을 놓치면 나중에 떴을 때 낡은 크기로 **일부만**
+        #   덮는다 — 실제로 그렇게 됐다: 검토 페이지는 스택에 담겨만 있어 첫 전환 전까지
+        #   640x480 인데, `load_state` 가 그 상태에서 오버레이를 띄우고 그 다음에 전환된다.
+        #   그 결과 1280x800 화면의 좌상단 640x480 만 어두워지고 [검토 완료] 가 밝게
+        #   노출돼, **아직 만들어지지 않은 행까지 전부 '유지' 로 확정**됐다.
         if obj is self.parent() and etype == QEvent.Type.Resize:
             self._cover_parent()
             return super().eventFilter(obj, event)
+        # ★ **보이지 않으면 입력은 막지 않는다.**  전역 필터는 잠금 플래그만 보고
+        #   키를 버렸는데, 부모 페이지가 숨겨진 채 `show_overlay` 가 불리면(전환 경쟁)
+        #   오버레이는 화면에 나타나지 못하면서 잠금만 걸린다 — 그러면 보상 해제인
+        #   `hideEvent` 도 영영 오지 않아 **앱 전체가 키보드를 못 받는 채로 남는다.**
+        #   어두운 화면도 [중지] 버튼도 없으니 사용자는 원인을 알 수 없다.
+        #   "가려서 못 누르게 한다" 가 이 잠금의 뜻이므로, 가리고 있지 않으면 권한도 없다.
+        if not self.isVisible():
+            return False
         # 어두워진 동안 뒤 화면은 **키도 받지 않는다**(마우스는 위젯이 이미 막는다).
         # 단 오버레이 자신(‘중지’ 버튼)으로 가는 키는 통과시킨다 — 그러지 않으면
         # 취소가 키보드로 불가능해진다.
@@ -637,16 +742,6 @@ class LoadingOverlay(QWidget):
             node = node.parentWidget()
             depth += 1
         return False
-
-    def hideEvent(self, event):  # noqa: N802
-        """★ 잠금을 푸는 **최후의 안전판**.
-
-        `_finish_hide` 만 믿으면 안 된다 — 오버레이가 그 경로를 거치지 않고 숨겨지는
-        길이 있다(부모 창이 닫히거나 페이지가 통째로 교체될 때).  그때 전역 필터가
-        남아 있으면 **앱 전체가 키보드를 영영 못 받는다**(테스트에서 실제로 그렇게
-        됐다).  `hide()` 는 어느 경로로든 이 이벤트를 내므로 여기서 반드시 푼다."""
-        self._set_input_lock(False)
-        super().hideEvent(event)
 
     def _set_input_lock(self, on: bool) -> None:
         """앱 전역 필터는 **떠 있는 동안만** 건다.

@@ -38,7 +38,6 @@ class SlotSection(QWidget):
 
         header = QHBoxLayout()
         self._label = QLabel(self)
-        self._label.setProperty("role", "subtitle")
         self._label.setProperty("role", "paneTitle")
         header.addWidget(self._label)
         header.addStretch(1)
@@ -63,6 +62,22 @@ class SlotSection(QWidget):
 
     def set_select_mode(self, on: bool) -> None:
         self.grid.set_select_mode(on)
+
+    def inline_selected(self) -> list[ThumbEntry]:
+        return self.grid.inline_selected()
+
+    def set_all_inline_selected(self, selected: bool) -> None:
+        self.grid.set_all_inline_selected(selected)
+
+    def remove_entry(self, entry: ThumbEntry) -> bool:
+        """한 장만 지우고 헤더 개수를 갱신한다(전체 재생성 회피)."""
+        if not self.grid.remove_entry(entry):
+            return False
+        self._label.setText(
+            i18n.KO.GROUP_HEADER_FMT.format(
+                slot=self._slot, count=len(self.grid._entries))
+        )
+        return True
 
     @property
     def slot_name(self) -> str:

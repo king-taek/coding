@@ -19,13 +19,14 @@ from typing import Optional
 from PyQt6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout,
                              QHBoxLayout, QLabel, QRubberBand, QScrollArea,
-                             QSizePolicy, QSlider, QVBoxLayout, QWidget)
+                             QSizePolicy, QVBoxLayout, QWidget)
 
 from ... import config, i18n
 from .. import theme
 from ...models.slot import ImageItem
 from ...utils import image_io
 from .neon_button import NeonButton
+from .no_wheel_slider import NoWheelSlider
 from .option_group import columns_for_width
 from . import sheet_host as sheets
 
@@ -79,22 +80,52 @@ class _SelectTile(QFrame):
         self._img = QLabel(self)
         self._img.setFixedSize(self._tile_px, self._tile_px)
         self._img.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._img.setPixmap(image_io.load_thumb_qpixmap(item.path, self._tile_px))
+        # ★ 소스는 **가장 큰 표시 크기 하나**로만 읽는다.  `load_thumb_qpixmap` 의 LRU
+        #   키에 size 가 들어가므로, 슬라이더가 움직일 때마다 새 크기로 부르면 매번
+        #   캐시 미스 → 디스크 재로드 + 스무스 스케일이었고(1 tick 당 209~247ms 실측)
+        #   크기별 엔트리가 쌓여 512MB 캐시까지 오염시켰다.  한 번 읽어 두고 재스케일한다.
+        self._source_pix = image_io.load_thumb_qpixmap(item.path, _TILE_MAX)
+        self._apply_scaled()
         lay.addWidget(self._img, alignment=Qt.AlignmentFlag.AlignCenter)
 
         # 파일명 — 한 줄 고정, 너무 길면 가운데 ‘…’ 으로 elide (사진을 가리지 않게).
-        from PyQt6.QtGui import QFontMetrics
         cap = QLabel(self)
         cap.setFixedHeight(_CAP_PX)
         cap.setAlignment(Qt.AlignmentFlag.AlignCenter)
         cap.setProperty("role", "muted")
         cap.setWordWrap(False)
-        fm = QFontMetrics(cap.font())
-        cap.setText(fm.elidedText(
-            item.filename, Qt.TextElideMode.ElideMiddle, self._tile_px - 4,
-        ))
         cap.setToolTip(i18n.KO.BULK_TILE_ZOOM_TOOLTIP + "\n" + item.filename)
+        self._cap = cap
+        self._elide_caption()
         lay.addWidget(cap)
+
+    # ------------------------------------------------------------------
+    def _apply_scaled(self) -> None:
+        if self._source_pix is None or self._source_pix.isNull():
+            return
+        self._img.setPixmap(self._source_pix.scaled(
+            self._tile_px, self._tile_px,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        ))
+
+    def _elide_caption(self) -> None:
+        from PyQt6.QtGui import QFontMetrics
+        fm = QFontMetrics(self._cap.font())
+        self._cap.setText(fm.elidedText(
+            self.item.filename, Qt.TextElideMode.ElideMiddle, self._tile_px - 4,
+        ))
+
+    def set_display_size(self, size: int) -> None:
+        """크기 슬라이더 — 타일을 **재생성하지 않고** 보관 픽스맵만 재스케일한다.
+
+        참조 구현: `unmatched_review_dialog._CandidateTile.set_display_size`."""
+        self._tile_px = int(size)
+        self.setFixedSize(self._tile_px + _TILE_CHROME_W,
+                          self._tile_px + _CAP_PX + 18)
+        self._img.setFixedSize(self._tile_px, self._tile_px)
+        self._apply_scaled()
+        self._elide_caption()
 
     def mousePressEvent(self, event):  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton:
@@ -112,14 +143,16 @@ class _SelectTile(QFrame):
         self._selected = bool(selected)
         self._refresh_visual()
 
+    @staticmethod
+    def _sel_style() -> str:
+        """★ 모듈/클래스 상수로 굽지 않는다 — 호출 시점에 팔레트를 읽어야 다크 전환이
+        따라온다.  배경도 강조색 틴트를 쓴다(예전엔 현 팔레트에 없는 네온 초록이라
+        파란 강조 체계에서 이 화면만 연둣빛으로 어긋났다)."""
+        return (f"#selTile {{ border: 2px solid {theme.ACCENT}; border-radius: 8px;"
+                f" background: {theme.ACCENT_TINT_SOFT}; }}")
+
     def _refresh_visual(self) -> None:
-        if self._selected:
-            self.setStyleSheet(
-                f"#selTile {{ border: 2px solid {theme.ACCENT}; border-radius: 8px;"
-                " background: rgba(57, 255, 20, 0.06); }"
-            )
-        else:
-            self.setStyleSheet("")
+        self.setStyleSheet(self._sel_style() if self._selected else "")
 
 
 class BulkSelectDialog(QDialog):
@@ -179,9 +212,15 @@ class BulkSelectDialog(QDialog):
         )
         self._tile_px = _TILE_PX
         self._slot_grids: list[tuple[list[ImageItem], QGridLayout]] = []
+        # 크기 슬라이더 디바운스 — ★ `self` 를 부모로 둔다.  정적 `QTimer.singleShot` 은
+        #   위젯이 지연 시간 안에 파괴되면 죽은 위젯으로 발화한다(하우스 규칙).
+        self._resize_timer = QTimer(self)
+        self._resize_timer.setSingleShot(True)
+        self._resize_timer.timeout.connect(self._apply_tile_size)
 
         self._build(title, actions)
         self._render_page()
+        self._refresh_summary()      # 초기 0 장 → 액션 버튼 비활성 반영
 
     # ------------------------------------------------------------------
     def _page_slice(self) -> list[tuple[str, ImageItem]]:
@@ -198,13 +237,9 @@ class BulkSelectDialog(QDialog):
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(10)
 
-        # 헤더 / 안내
-        head = QLabel(title, self)
-        head.setStyleSheet(
-            f"color: {theme.INK}; font-weight: 700; font-size: 16px;"
-        )
-        root.addWidget(head)
-
+        # ★ 제목을 본문에 그리지 않는다 — `setWindowTitle` 을 sheet_host 가 시트
+        #   상단 chrome 에 이미 그리므로, 여기 또 그리면 같은 문장이 상하로 두 번
+        #   보인다(image_info_dialog 가 같은 이유로 내부 표제를 안 그린다).
         hint = QLabel(i18n.KO.BULK_SELECT_HINT, self)
         hint.setProperty("role", "subtitle")
         hint.setWordWrap(True)
@@ -217,13 +252,14 @@ class BulkSelectDialog(QDialog):
         self._summary_label = QLabel(
             i18n.KO.BULK_SELECT_SUMMARY_FMT.format(n=0), self,
         )
-        self._summary_label.setStyleSheet(f"color: {theme.PASS}; font-weight: 700;")
+        # ★ 선택 개수는 '합격 판정' 이 아니다 — 성공색(PASS)이 아니라 강조색을 쓴다.
+        self._summary_label.setStyleSheet(f"color: {theme.ACCENT}; font-weight: 700;")
         top.addWidget(self._summary_label)
         top.addStretch(1)
         size_label = QLabel(i18n.KO.BULK_SIZE_LABEL, self)
         size_label.setProperty("role", "muted")
         top.addWidget(size_label)
-        self._size_slider = QSlider(Qt.Orientation.Horizontal, self)
+        self._size_slider = NoWheelSlider(Qt.Orientation.Horizontal, self)
         self._size_slider.setRange(_TILE_MIN, _TILE_MAX)
         self._size_slider.setValue(self._tile_px)
         self._size_slider.setSingleStep(10)
@@ -261,9 +297,9 @@ class BulkSelectDialog(QDialog):
         if self._paginated:
             page_bar = QHBoxLayout()
             page_bar.setSpacing(8)
-            self._btn_prev = NeonButton(i18n.KO.BULK_PAGE_PREV, role="default")
+            self._btn_prev = NeonButton(i18n.KO.BULK_PAGE_PREV, role="ghost")
             self._btn_prev.clicked.connect(lambda: self._go_page(self._page - 1))
-            self._btn_next = NeonButton(i18n.KO.BULK_PAGE_NEXT, role="default")
+            self._btn_next = NeonButton(i18n.KO.BULK_PAGE_NEXT, role="ghost")
             self._btn_next.clicked.connect(lambda: self._go_page(self._page + 1))
             self._page_label = QLabel("", self)
             self._page_label.setStyleSheet(f"color: {theme.MUTE}; font-weight: 700;")
@@ -278,10 +314,12 @@ class BulkSelectDialog(QDialog):
         bar = QHBoxLayout()
         bar.setSpacing(8)
         # 전체 선택 / 해제 보조 버튼 — 가독성 위해 대비 높은 role.
-        self.btn_select_all = NeonButton(i18n.KO.BULK_SELECT_ALL, role="primary")
+        # ★ 한 화면에 채운 강조 버튼은 하나뿐이어야 한다 — 주 액션(우측)과 시선이
+        #   갈리지 않게 보조 버튼 둘 다 ghost 로 둔다(role="default" 는 QSS 에 없는 등급).
+        self.btn_select_all = NeonButton(i18n.KO.BULK_SELECT_ALL, role="ghost")
         self.btn_select_all.clicked.connect(self._select_all)
         bar.addWidget(self.btn_select_all)
-        self.btn_clear = NeonButton(i18n.KO.BULK_DESELECT_ALL, role="default")
+        self.btn_clear = NeonButton(i18n.KO.BULK_DESELECT_ALL, role="ghost")
         self.btn_clear.clicked.connect(self._clear_selection)
         bar.addWidget(self.btn_clear)
         bar.addStretch(1)
@@ -329,9 +367,9 @@ class BulkSelectDialog(QDialog):
                 i18n.KO.GROUP_HEADER_FMT.format(slot=slot, count=len(items)),
                 host,
             )
-            slot_label.setStyleSheet(
-                f"color: {theme.PASS}; font-weight: 700; padding-top: 4px;"
-            )
+            # 슬롯 이름은 판정이 아니라 그룹 제목이다 — paneTitle 등급을 쓴다.
+            slot_label.setProperty("role", "paneTitle")
+            slot_label.setStyleSheet("padding-top: 4px;")
             host_layout.addWidget(slot_label)
 
             grid_host = QWidget(host)
@@ -369,13 +407,26 @@ class BulkSelectDialog(QDialog):
         if page == self._page:
             return
         self._page = page
+        self._resize_timer.stop()      # 새 페이지는 이미 현재 크기로 그린다(경합 방지)
         self._render_page()
 
     def _on_size_changed(self, value: int) -> None:
-        self._tile_px = int(value)
+        """드래그 중에는 라벨만 즉시 따라가고, 타일 적용은 150ms 디바운스한다.
+
+        ★ 예전엔 tick 마다 `_render_page()` 로 페이지를 통째로 다시 만들었다.  1000장
+        미만이면 페이지네이션이 없어 한 tick 에 수백~999개 위젯을 파괴·생성했고,
+        한 번 드래그에 수 초가 사라졌다.  이제 (1) 디바운스로 횟수를 줄이고
+        (2) 재생성 대신 보관 픽스맵을 재스케일한다.
+        참조 구현: `match_review_page` 의 `_resize_timer`(150ms)."""
+        self._tile_px = int(value)          # 즉시 갱신 — 다른 계산이 이 값을 본다
         self._size_value.setText(f"{value} px")
-        # 타일 크기 변경 → 현재 페이지 재렌더 (선택 상태 유지).
-        self._render_page()
+        self._resize_timer.start(150)
+
+    def _apply_tile_size(self) -> None:
+        for tile in self._tiles_by_key.values():
+            tile.set_display_size(self._tile_px)
+        # 타일이 커지면 열 수가 줄어야 가로 스크롤이 안 생긴다.
+        self._relayout_grids()
 
     def _open_zoom(self, item: ImageItem) -> None:
         """우클릭 → 풀스크린 확대 뷰 (휠 줌 + 드래그 팬)."""
@@ -472,9 +523,12 @@ class BulkSelectDialog(QDialog):
         self._refresh_summary()
 
     def _refresh_summary(self) -> None:
-        self._summary_label.setText(
-            i18n.KO.BULK_SELECT_SUMMARY_FMT.format(n=len(self._selected_keys))
-        )
+        n = len(self._selected_keys)
+        self._summary_label.setText(i18n.KO.BULK_SELECT_SUMMARY_FMT.format(n=n))
+        # ★ 0 장일 때 액션 버튼을 눌러도 조용히 아무 일도 안 일어났다(‘먹은 클릭’).
+        #   ZoomWindow 처럼 **선택 전에는 비활성**으로 두어 왜 안 되는지 보이게 한다.
+        for btn in getattr(self, "_action_buttons", ()):
+            btn.setEnabled(n > 0)
 
     def _select_all(self) -> None:
         # 전체(모든 페이지) 항목 선택.

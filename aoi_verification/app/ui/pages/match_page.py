@@ -34,6 +34,7 @@ from ..widgets.app_logo import build_logo_label
 from ..widgets.loading_overlay import LoadingOverlay
 from ..widgets.match_expand_view import MatchExpandView
 from ..widgets.neon_button import NeonButton
+from ..widgets.no_wheel_slider import NoWheelSlider
 from ..widgets.neon_card import NeonCard
 from ..widgets.scalable_image import ScalableImage
 from ..widgets.slot_section import SlotSection
@@ -206,7 +207,6 @@ class MatchPage(QWidget):
         center = NeonCard(role="card", parent=self)
         cl = center.body()
         title = QLabel(i18n.KO.PANEL_MATCH_REF, center)
-        title.setProperty("role", "subtitle")
         title.setProperty("role", "paneTitle")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         cl.addWidget(title)
@@ -222,7 +222,7 @@ class MatchPage(QWidget):
         size_row.setSpacing(8)
         size_label = QLabel(i18n.KO.IMAGE_SIZE_LABEL, center)
         size_label.setProperty("role", "muted")
-        self.size_slider = QSlider(Qt.Orientation.Horizontal, center)
+        self.size_slider = NoWheelSlider(Qt.Orientation.Horizontal, center)
         self.size_slider.setRange(ScalableImage.MIN_LONG_EDGE,
                                    ScalableImage.MAX_LONG_EDGE)
         # 모니터 크기에 맞춰 자동 시작값 — 세션 한정 (재시작 시 다시 자동맞춤).
@@ -281,7 +281,6 @@ class MatchPage(QWidget):
         rl.setContentsMargins(10, 10, 10, 10)
         rl.setSpacing(8)
         rt = QLabel(i18n.KO.PANEL_MATCH_CANDIDATES, right)
-        rt.setProperty("role", "subtitle")
         rt.setProperty("role", "paneTitle")
         rl.addWidget(rt)
 
@@ -483,7 +482,7 @@ class MatchPage(QWidget):
         else:
             # 자동 — 전체 진행을 하나의 차단 오버레이로 표시.
             self._loading.show_overlay(
-                i18n.KO.LOAD_PRECOMPUTE_FMT.format(done=0, total=total_pairs),
+                i18n.KO.LOAD_SCORING,
                 cancelable=True,
             )
             self.bg_status_label.setText("")
@@ -643,7 +642,7 @@ class MatchPage(QWidget):
         self._waiting_for_slot = None
         self._streaming_precompute = False
         # 좌표 매칭 모드에서 좌표 없음 오류 — 사용자에게 안내 후 설정 화면 복귀.
-        if self._coord_mode and msg and "좌표 정보가 없습니다" in msg:
+        if self._coord_mode and msg and i18n.KO.COORD_MISSING in msg:
             sheets.warn(self, i18n.KO.APP_TITLE, msg)
             self.cancelled.emit()
             return
@@ -745,6 +744,8 @@ class MatchPage(QWidget):
     # ------------------------------------------------------------------
     def _on_cancel_requested(self) -> None:
         """#8 중지 — 진행 중인 사전계산/매칭 워커를 안전하게 멈추고 세션 중단."""
+        if not self._confirm_cancel():
+            return
         self._stop_precompute_worker()
         self._detach_worker()
         self._worker = None
@@ -758,6 +759,53 @@ class MatchPage(QWidget):
         self._coord_failed_set = set()
         self._loading.hide_overlay()
         self.cancelled.emit()
+
+    def _confirm_cancel(self) -> bool:
+        """진행 중이면 한 번 묻는다 — 중단은 '잠깐 멈춤' 이 아니라 계산 전부 폐기다.
+
+        ★ 로딩 오버레이는 시트보다 **위**에 있다(main_window 가 그렇게 만든다).
+        띄운 채 물으면 확인창이 어두운 화면 뒤에 가려 보이지 않으므로, 물어보는 동안만
+        내렸다가 '아니오' 면 그대로 되돌린다."""
+        done, total = self._cancel_progress()
+        if done <= 0:
+            return True                      # 아직 한 것이 없다 — 묻지 않는다
+        from PyQt6.QtWidgets import QMessageBox
+        was_visible = self._loading.isVisible()
+        msg = getattr(self._loading, "_label", None)
+        keep_msg = msg.text() if msg is not None else ""
+        if was_visible:
+            self._loading.hide()
+        r = sheets.ask(
+            self, i18n.KO.MATCH_CANCEL_CONFIRM_TITLE,
+            i18n.KO.MATCH_CANCEL_CONFIRM_FMT.format(done=done, total=total),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if r == QMessageBox.StandardButton.Yes:
+            return True
+        # ★ 되돌리기 전에 **이 페이지가 아직 화면에 있는지** 확인한다.  위 `ask` 는
+        #   중첩 이벤트 루프라 그동안 워커 시그널이 계속 배달된다 — 확인창을 읽는 몇 초
+        #   사이에 매칭이 끝나 검토 화면으로 넘어가 있을 수 있다.  그때 오버레이를
+        #   되살리면 부모가 숨겨져 있어 화면에는 안 나타나면서 앱 전역 입력 잠금만
+        #   걸리고, 보상 해제인 hideEvent 도 오지 않아 **키보드가 통째로 죽는다.**
+        #   이미 다음 단계로 넘어갔다면 되돌릴 것도 없다.
+        if was_visible and self.isVisible():  # 되돌린다 — 작업은 계속 돌고 있다
+            self._loading.show_overlay(keep_msg, cancelable=True)
+            if total > 0:
+                self._loading.set_progress(done, total, keep_msg)
+        return False
+
+    def _cancel_progress(self) -> tuple[int, int]:
+        """확인창에 넣을 '지금까지 얼마나 했는가' — 단계에 따라 출처가 다르다."""
+        done = int(getattr(self, "_precompute_done", 0) or 0)
+        total = int(getattr(self, "_precompute_total", 0) or 0)
+        if total > 0:
+            return done, total
+        state = self._state
+        if state is not None:
+            done = len(state.matches)
+            return done, done + len(state.queue)
+        return 0, 0
 
     # ------------------------------------------------------------------
     def _detach_worker(self) -> None:
@@ -917,11 +965,11 @@ class MatchPage(QWidget):
             and all(it.path in val_features for it in val_items)
         )
         loading_fmt = (
-            i18n.KO.LOAD_SCORING_FMT if self._slot_features_ready
-            else i18n.KO.LOAD_FEATURE_FMT
+            i18n.KO.LOAD_SCORING if self._slot_features_ready
+            else i18n.KO.LOAD_FEATURE
         )
         self._loading.show_overlay(
-            loading_fmt.format(done=0, total=len(val_items)),
+            loading_fmt,
             cancelable=True,
         )
         self._current_loading_fmt = loading_fmt
@@ -955,10 +1003,8 @@ class MatchPage(QWidget):
         self._on_matcher_done([])
 
     def _on_matcher_progress(self, done: int, total: int) -> None:
-        fmt = getattr(self, "_current_loading_fmt", i18n.KO.LOAD_FEATURE_FMT)
-        self._loading.set_progress(
-            done, total, fmt.format(done=done, total=total),
-        )
+        msg = getattr(self, "_current_loading_fmt", i18n.KO.LOAD_FEATURE)
+        self._loading.set_progress(done, total, msg)
 
     def _on_matcher_done(self, candidates: list) -> None:
         self._candidates = list(candidates)
@@ -1000,7 +1046,7 @@ class MatchPage(QWidget):
         total = done + len(self._state.queue)
         self._loading.set_progress(
             done, total,
-            i18n.KO.LOAD_AUTO_MATCH_FMT.format(done=done, total=total),
+            i18n.KO.LOAD_AUTO_MATCH,
         )
 
     # ------------------------------------------------------------------

@@ -55,8 +55,6 @@ class UiPrefs:
     """다음 실행에도 이어갈 UI 상태."""
 
     threshold: float = 0.55                  # 0.0 ~ 1.0 (교차 호기 친화적 기본)
-    image_long_edge_select: int = 400        # Stage 1 사진 크기 (px) — 250~700
-    image_long_edge_match: int = 400         # Stage 2 사진 크기 (px) — 250~700
     last_ref_root: str = ""
     last_val_root: str = ""
     last_ref_machine: str = ""
@@ -69,12 +67,10 @@ class UiPrefs:
     window_maximized: bool = False
     # QSplitter 상태 (Select/Match 페이지). base64 인코딩 문자열.
     splitter_state_select_h: str = ""
-    splitter_state_select_v: str = ""
     splitter_state_match_h: str = ""
     # 사용 방법 패널 펼침 상태 (기본 접힘)
     howto_expanded: bool = False
     # 썸네일 빠른 모드 (사용자가 강제로 가장 낮은 품질 티어 사용)
-    speed_mode: bool = False
     # 자동화 수준 — 사용자 개입 정도 (#3 올인원 모드)
     #   "user_select" : Stage 1 만 직접, Stage 2 자동 매치 + 검토.  (기본)
     #   "auto_all"    : Stage 1 건너뜀 (모든 ref 사용), Stage 2 자동 매치 + 검토.

@@ -15,7 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable, Optional
 
-from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QObject, QSize, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QCursor, QIcon, QPixmap
 from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout,
                               QHBoxLayout, QLabel, QListWidget,
@@ -44,6 +44,62 @@ _CAND_CAP_PX = 28       # 캡션 한 줄
 # 크기 슬라이더 범위 (기준 사진 한 변, px) — 후보 타일은 비율로 파생 (#1).
 _SIZE_MIN_PX = 250
 _SIZE_MAX_PX = 700
+
+
+# 채점 워커가 살아 있는 동안 파이썬 참조를 붙잡아 두는 곳 — 지역 변수로만 두면
+# 함수가 끝나는 순간 GC 가 QThread 를 파괴해 "QThread: Destroyed while thread is
+# still running" 으로 죽는다 (`pages/setup_page.py` 의 `_LIVE_DIE_SCANS` 와 같은 패턴).
+_LIVE_SCORINGS: set = set()
+
+
+class _CandidateScoring(QThread):
+    """후보 점수를 **워커 스레드에서** 계산한다 (P-03).
+
+    이 계산은 캐시에 없는 쌍마다 특징 추출 + 채점이라 후보 299장이면 초 단위다.
+    GUI 스레드에서 돌던 때는 그동안 창이 통째로 굳었고, 진행을 보여 주려고
+    콜백마다 ``processEvents`` 를 불러 **채점 도중에 사용자 입력이 재진입**할 수
+    있었다(다른 항목을 클릭하면 렌더가 겹쳐 들어왔다).
+
+    ``fn`` 은 다이얼로그의 바인딩된 ``_score_candidates`` 다 — 순수 계산이라
+    (점수 캐시·특징 캐시는 전 메서드가 락을 들고 있고, pipeline 은 전역 가변
+    상태를 만지지 않는다) 워커에서 그대로 부를 수 있다.  Qt 위젯은 건드리지
+    않으므로 다이얼로그가 먼저 파괴돼도 안전하다.
+
+    ``token`` 은 늦게 도착한 옛 세대를 버리기 위한 번호다 — 사용자가 항목을
+    연달아 넘기면 채점이 겹치는데, 옛 결과가 새 후보 그리드를 덮으면 안 된다."""
+
+    class _Signals(QObject):
+        progress = pyqtSignal(int, int)      # token, done
+        done = pyqtSignal(int, object)       # token, list[(score, item)]
+
+    def __init__(self, token: int, fn, cur, candidates: list,
+                 allow_compute: bool) -> None:
+        super().__init__()                  # 부모 없음(위 주석)
+        self._token = token
+        self._fn = fn
+        self._cur = cur
+        self._candidates = candidates
+        self._allow_compute = allow_compute
+        self.signals = self._Signals()
+
+    def run(self) -> None:      # type: ignore[override]
+        done = 0
+
+        def _tick() -> None:
+            # 25건마다만 보고한다 — 신호를 매 건 보내면 큐가 넘쳐 오히려 느려진다
+            # (`similarity/slot_features.py` 와 같은 스로틀).
+            nonlocal done
+            done += 1
+            if done % 25 == 0:
+                self.signals.progress.emit(self._token, done)
+
+        try:
+            scored = self._fn(self._cur, self._candidates,
+                              self._allow_compute, on_computed=_tick)
+        except Exception:
+            # 워커에서 예외가 새면 오버레이가 영영 '계산 중' 으로 남는다.
+            scored = []
+        self.signals.done.emit(self._token, scored)
 
 
 # ---------------------------------------------------------------------------
@@ -129,8 +185,10 @@ class _CandidateTile(QFrame):
         self._score_label = QLabel(
             fmt_score(self.score, self._coord_mode, self._tolerance), self)
         self._score_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # ★ 후보 유사도는 '합격 판정' 이 아니다 — 매치 검토 화면과 같은 중립색을 쓴다
+        #   (성공색은 판정 칩 전용).
         self._score_label.setStyleSheet(
-            f"color: {theme.PASS}; font-weight: 700; padding: 2px;"
+            f"color: {theme.INK2}; font-weight: 700; padding: 2px;"
         )
         lay.addWidget(self._score_label)
 
@@ -244,6 +302,19 @@ class UnmatchedReviewDialog(QDialog):
         # 이 다이얼로그는 항상 이미지 유사도(pipeline.score)로 후보를 채점하므로
         # 좌표 거리가 아닌 유사도 백분율로 표시한다.
         self._coord_mode = False
+        # ★ 위와 별개로 **세션이** 좌표로 매칭했는지는 기억해 둔다 — 그 경우에만
+        #   "여기는 유사도 순" 이라고 알려 준다(U-18).  둘을 한 필드로 합치면
+        #   점수 표기가 좌표 거리 형식으로 바뀌어 버린다.
+        self._session_coord_mode = bool(coord_mode)
+        # 채점 워커 (P-03) — 세대 번호로 늦게 온 옛 결과를 버린다.
+        self._score_token = 0
+        self._scoring: _CandidateScoring | None = None
+        # 헤드리스(offscreen)에서는 동기로 채점한다 — 테스트가 `_render_current()`
+        # 직후에 후보 타일을 검사하므로 한 틱 뒤로 미루면 성립하지 않는다.
+        # (`widgets/zoom_window.py` 의 원본 로더가 쓰는 것과 같은 게이트.)
+        import os
+        self._sync_scoring = (
+            os.environ.get("QT_QPA_PLATFORM", "") == "offscreen")
         self._tolerance = float(tolerance) if tolerance > 0 else _DFLT_TOL
         self._idx = 0
         # 사진 크기 (#1) — 슬라이더로 조절. 후보 타일은 비율로 파생.
@@ -329,6 +400,13 @@ class UnmatchedReviewDialog(QDialog):
         hint.setStyleSheet(f"color: {theme.MUTE}; padding: 4px;")
         root.addWidget(hint)
 
+        # 좌표로 매칭한 세션에서만 — 후보 순서의 기준이 좌표가 아님을 밝힌다 (U-18).
+        if self._session_coord_mode:
+            self.coord_note = QLabel(i18n.KO.UNMATCHED_REVIEW_COORD_NOTE, self)
+            self.coord_note.setWordWrap(True)
+            self.coord_note.setProperty("role", "emptyHint")
+            root.addWidget(self.coord_note)
+
         # 본문: 좌(실패 목록) + 중(기준 사진) + 우(후보 그리드)
         body = QHBoxLayout()
         body.setSpacing(16)
@@ -339,7 +417,7 @@ class UnmatchedReviewDialog(QDialog):
         lpl = QVBoxLayout(list_panel)
         lpl.setContentsMargins(12, 12, 12, 12)
         lpl.setSpacing(6)
-        list_title = QLabel("실패 목록", list_panel)   # 인라인 한글 (#12).
+        list_title = QLabel(i18n.KO.UNMATCHED_FAIL_LIST_TITLE, list_panel)
         list_title.setStyleSheet(f"color: {theme.INK}; font-weight: 700;")
         lpl.addWidget(list_title)
         self.fail_list = QListWidget(list_panel)
@@ -527,7 +605,7 @@ class UnmatchedReviewDialog(QDialog):
         self._refresh_list_colors()
 
     def _refresh_list_colors(self) -> None:
-        """후보를 선택(보류)한 ref 는 실패 목록에서 파일명을 파란색으로 표시 (#4)."""
+        """후보를 선택(보류)한 ref 는 실패 목록에서 파일명을 강조색으로 표시 (#4)."""
         if not hasattr(self, "fail_list"):
             return
         for row in range(self.fail_list.count()):
@@ -536,7 +614,7 @@ class UnmatchedReviewDialog(QDialog):
                 continue                              # 구분선 행.
             item = self.fail_list.item(row)
             if idx in self._pending:
-                item.setForeground(QColor(theme.PASS))
+                item.setForeground(QColor(theme.ACCENT))
             else:
                 item.setForeground(QColor(theme.INK2))
 
@@ -593,6 +671,9 @@ class UnmatchedReviewDialog(QDialog):
             if Path(v.path) not in self._used_vals
         ]
         cand_key = (cur.slot, frozenset(Path(v.path) for v in candidates))
+        # 새 세대 — 아직 돌고 있는 옛 채점의 결과는 이 번호가 달라 버려진다.
+        self._score_token += 1
+        token = self._score_token
         scored: list[tuple[float, ImageItem]] = []
         if candidates:
             # 후보 풀이 300장 이상이면 효율 모드 선계산 점수를 재사용해 CPU 재계산을
@@ -601,30 +682,57 @@ class UnmatchedReviewDialog(QDialog):
             # 캐시에 없어 **실제로 다시 계산**해야 하는 후보 수를 먼저 센다 — 0 이면
             # 로딩을 띄우지 않고(즉시), >0 이면 로딩 오버레이로 진행을 보여준다 (#로딩).
             need = self._count_recompute(cur, candidates) if allow_compute else 0
-            if need > 0:
+            if need > 0 and not self._sync_scoring:
+                # 무거운 쪽 — 워커에 넘기고 그리기는 결과가 올 때 이어서 한다 (P-03).
                 self._loading.show_overlay(i18n.KO.PHASE_SCORING)
                 self._loading.set_progress(0, need, i18n.KO.PHASE_SCORING)
-                self._recompute_done = 0
-
-                def _on_recompute() -> None:
-                    self._recompute_done += 1
-                    self._loading.set_progress(
-                        self._recompute_done, need,
-                        i18n.KO.LOAD_SCORING_FMT.format(
-                            done=self._recompute_done, total=need))
-                    QApplication.processEvents()
-                progress_cb = _on_recompute
-            else:
-                progress_cb = None
+                self._start_scoring(token, cur, candidates, allow_compute,
+                                    need, cand_key)
+                return
             QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
             try:
-                scored = self._score_candidates(cur, candidates, allow_compute,
-                                                on_computed=progress_cb)
+                scored = self._score_candidates(cur, candidates, allow_compute)
             finally:
                 QApplication.restoreOverrideCursor()
-                if need > 0:
-                    self._loading.hide_overlay()
-            scored.sort(key=lambda x: x[0], reverse=True)
+        self._apply_scored(token, cur, cand_key, scored)
+
+    # ------------------------------------------------------------------
+    def _start_scoring(self, token: int, cur: MissEntry, candidates: list,
+                       allow_compute: bool, need: int, cand_key: tuple) -> None:
+        """채점 워커를 띄운다 — 결과가 오면 `_on_scoring_done` 이 이어서 그린다."""
+        worker = _CandidateScoring(token, self._score_candidates, cur,
+                                   candidates, allow_compute)
+        worker.signals.progress.connect(
+            lambda tk, done, n=need: self._on_scoring_progress(tk, done, n))
+        worker.signals.done.connect(
+            lambda tk, scored, c=cur, k=cand_key:
+                self._on_scoring_done(tk, c, k, scored))
+        _LIVE_SCORINGS.add(worker)
+        worker.finished.connect(lambda w=worker: _LIVE_SCORINGS.discard(w))
+        self._scoring = worker
+        worker.start()
+
+    def _on_scoring_progress(self, token: int, done: int, need: int) -> None:
+        if token != self._score_token:
+            return
+        self._loading.set_progress(done, need, i18n.KO.LOAD_SCORING)
+
+    def _on_scoring_done(self, token: int, cur: MissEntry, cand_key: tuple,
+                         scored: list) -> None:
+        """워커가 끝났다 — **최신 세대만** 그린다(옛 결과는 조용히 버린다)."""
+        if token != self._score_token:
+            return
+        self._scoring = None
+        self._loading.hide_overlay()
+        self._apply_scored(token, cur, cand_key, scored)
+
+    # ------------------------------------------------------------------
+    def _apply_scored(self, token: int, cur: MissEntry, cand_key: tuple,
+                      scored: list) -> None:
+        """점수가 나온 뒤의 그리기 — 동기·워커 두 경로가 함께 쓴다."""
+        if token != self._score_token:
+            return
+        scored = sorted(scored, key=lambda x: x[0], reverse=True)
 
         if not scored:
             self._clear_grid()
@@ -633,7 +741,7 @@ class UnmatchedReviewDialog(QDialog):
             empty = QLabel(i18n.KO.UNMATCHED_REVIEW_NO_CANDIDATES, self._host)
             empty.setStyleSheet(f"color: {theme.MUTE}; padding: 20px;")
             self._grid.addWidget(empty, 0, 0)
-            self.candidates_summary.setText("후보 0 장")
+            self.candidates_summary.setText(i18n.KO.UNMATCHED_CAND_NONE)
             return
 
         if cand_key == self._last_cand_key and self._cand_tiles:
@@ -662,7 +770,7 @@ class UnmatchedReviewDialog(QDialog):
             self._last_cand_key = cand_key
 
         self.candidates_summary.setText(
-            f"후보 {len(self._cand_tiles)} 장 (유사도 순)")
+            i18n.KO.UNMATCHED_CAND_COUNT_FMT.format(n=len(self._cand_tiles)))
         # 현재 ref 의 선택(보류) 상태를 테두리로 반영 (#1a).
         sel = self._pending.get(self._idx)
         for t in self._cand_tiles:
@@ -843,7 +951,7 @@ class UnmatchedReviewDialog(QDialog):
         start = max(0, min(int(start_index), len(candidates) - 1))
         viewer = SideBySideViewer(
             Path(cur.path), candidates, start,
-            ref_caption=f"기준 — {Path(cur.path).name}",
+            ref_caption=i18n.KO.UNMATCHED_REF_PREFIX + Path(cur.path).name,
             action_label=i18n.KO.BTN_UNMATCHED_SELECT_THIS,
             parent=self,
         )
@@ -942,11 +1050,35 @@ class UnmatchedReviewDialog(QDialog):
 
     def accept(self) -> None:  # noqa: D401
         self._maybe_prompt_pending()
+        self._detach_scoring()      # [닫기] 로 나가는 경로도 ✕ 와 똑같이 끊는다.
         super().accept()
 
     def closeEvent(self, event):  # noqa: N802
         self._maybe_prompt_pending()
+        self._detach_scoring()
         super().closeEvent(event)
+
+    def _detach_scoring(self) -> None:
+        """죽어 가는 위젯으로 채점 결과가 들어오지 않게 연결만 끊는다 (P-03).
+
+        스레드가 끝나기를 **기다리지 않는다** — 채점이 끝날 때까지 닫기를 붙잡아
+        두면 그게 곧 이 변경이 없애려던 그 멈춤이다.  수명은 `_LIVE_SCORINGS` 가
+        책임지고, 워커가 부르는 `_score_candidates` 는 Qt 를 만지지 않으므로
+        C++ 객체가 먼저 사라져도 안전하다(`widgets/zoom_window.py` 와 같은 처방).
+        ``_score_token`` 을 올려 두면 혹시 남은 연결이 있어도 옛 세대로 버려진다."""
+        self._score_token += 1
+        w = self._scoring
+        if w is None:
+            return
+        self._scoring = None
+        # 잠금이 걸린 채 오버레이가 파괴되면 앱 전역 이벤트 필터가 주인 없이 남는다
+        # — 내려 두고 나간다(LoadingOverlay.hideEvent 가 잠금을 푼다).
+        self._loading.hide()
+        try:
+            w.signals.progress.disconnect()
+            w.signals.done.disconnect()
+        except (TypeError, RuntimeError):
+            pass
 
     # ------------------------------------------------------------------
     def _skip(self) -> None:

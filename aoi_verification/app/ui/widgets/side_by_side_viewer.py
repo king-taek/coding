@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -28,6 +29,23 @@ def _decode_original(path: Path) -> QPixmap:
         pix = QPixmap(800, 600)
         pix.fill(QColor(theme.PANEL))
     return pix
+
+
+def _decode_fast(path: Path) -> QPixmap:
+    """먼저 얹을 그림 — 미리 만들어 둔 mid 캐시(~800px)가 있으면 그것을 쓴다.
+
+    ★ 예전엔 후보를 넘길 때마다 원본을 통째로 디코드해 클릭당 0.5~2초씩 멈췄다.
+    ★ 이 모듈은 의도적으로 `image_io`(numpy·PIL)를 **모듈 최상단에서 import 하지
+      않는다** — 팝업 경로가 무거워지지 않게 한 격리다.  여기서만 지역 import 하고,
+      캐시가 없거나 실패하면 곧바로 원본 디코드로 되돌아간다."""
+    try:
+        from ...utils import image_io
+        pix = QPixmap(str(image_io.get_mid_path(path)))
+        if not pix.isNull():
+            return pix
+    except Exception:
+        pass
+    return _decode_original(path)
 
 
 def fit_scale(pix_w: int, pix_h: int, box_w: int, box_h: int) -> float:
@@ -72,7 +90,8 @@ class _Pane(QWidget):
         lay.addWidget(self._title)
         self._img = QLabel(self)
         self._img.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._img.setStyleSheet(f"background: #000; border: 1px solid {theme.LINE};")
+        self._img.setStyleSheet(
+            f"background: {theme.VIEWER_BG}; border: 1px solid {theme.LINE};")
         # 크기 제약 없는 QLabel 에 라벨 크기로 스케일한 pixmap 을 넣으면
         # minimumSizeHint 이 그 pixmap 크기로 커져 리사이즈마다 창이 계속 커진다.
         # Ignored 정책 + 1×1 최소크기로 레이아웃 성장 피드백을 끊는다.
@@ -166,16 +185,26 @@ class _Pane(QWidget):
         # 확대·이동 중에는 라벨 크기의 캔버스에 그려 넣는다(잘림 = 파고들어 보기).
         base = fit_scale(self._pix.width(), self._pix.height(),
                          target.width(), target.height())
-        scaled = self._pix.scaled(
-            max(1, int(self._pix.width() * base * self._zoom)),
-            max(1, int(self._pix.height() * base * self._zoom)),
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
+        # ★ 드래그 팬은 오프셋만 바뀌는데 매 마우스 이벤트마다 **원본 해상도**를
+        #   다시 줄이고 있었다(여기가 풀스크린 뷰어보다 무겁다 — 원본을 들고 있다).
+        #   결과 배율이 같으면 만들어 둔 것을 그대로 쓴다.
+        key = (self._pix.cacheKey(), round(base * self._zoom, 6),
+               target.width(), target.height())
+        if getattr(self, "_scaled_key", None) == key:
+            scaled = self._scaled_cache
+        else:
+            scaled = self._pix.scaled(
+                max(1, int(self._pix.width() * base * self._zoom)),
+                max(1, int(self._pix.height() * base * self._zoom)),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self._scaled_key = key
+            self._scaled_cache = scaled
         cw = max(1, self._img.width())
         ch = max(1, self._img.height())
         canvas = QPixmap(cw, ch)
-        canvas.fill(QColor("#000"))          # 패널 바탕과 같은 검정
+        canvas.fill(QColor(theme.VIEWER_BG))   # 뷰어 바탕(테마 무관 순검정)
         p = QPainter(canvas)
         p.drawPixmap((cw - scaled.width()) // 2 + self._off_x,
                      (ch - scaled.height()) // 2 + self._off_y, scaled)
@@ -198,7 +227,7 @@ class SideBySideViewer(QDialog):
                  candidates: List[Tuple[ImageItem, str]],
                  start_index: int = 0,
                  *,
-                 ref_caption: str = "기준 사진",
+                 ref_caption: str = "",
                  action_label: Optional[str] = None,
                  parent=None) -> None:
         super().__init__(parent)
@@ -213,7 +242,10 @@ class SideBySideViewer(QDialog):
         self._candidates = list(candidates)
         self._idx = max(0, min(int(start_index), len(self._candidates) - 1)) \
             if self._candidates else 0
-        self._ref_caption = ref_caption
+        # 빈 문자열 기본값 → 화면 문구는 i18n 에서 (인자 기본값에 한글을 굽지 않는다).
+        self._ref_caption = ref_caption or i18n.KO.PANEL_MATCH_REF
+        # 원본 화질 교체 로더 — 닫을 때 끊으려고 (loader, slot) 로 들고 있는다.
+        self._loaders: list = []
 
         # ★ `setMaximumSize(주 모니터 크기)` 를 걸지 않는다 — 그것이 '크게 보기인데
         #   팝업이 작게 뜬다' 의 원인이었다(매치 검토 실측).  이 다이얼로그는 시트
@@ -236,7 +268,8 @@ class SideBySideViewer(QDialog):
         QShortcut(QKeySequence(Qt.Key.Key_Left), self, activated=self._prev)
         QShortcut(QKeySequence(Qt.Key.Key_Right), self, activated=self._next)
 
-        self._ref_pane.set_pixmap(_decode_original(self._ref_path))
+        self._ref_pane.set_pixmap(_decode_fast(self._ref_path))
+        self._upgrade_to_original(self._ref_pane, self._ref_path)
         self._render_candidate()
 
     # ------------------------------------------------------------------
@@ -255,17 +288,17 @@ class SideBySideViewer(QDialog):
         key_hint = QLabel(i18n.KO.COMPARE_HINT, self)
         key_hint.setStyleSheet(f"color: {theme.MUTE}; font-size: 12px;")
         bar.addWidget(key_hint)
-        self.btn_prev = NeonButton("◀ 이전", role="ghost")
+        self.btn_prev = NeonButton(i18n.KO.VIEWER_BTN_PREV, role="ghost")
         self.btn_prev.clicked.connect(self._prev)
         bar.addWidget(self.btn_prev)
-        self.btn_next = NeonButton("다음 ▶", role="ghost")
+        self.btn_next = NeonButton(i18n.KO.VIEWER_BTN_NEXT, role="ghost")
         self.btn_next.clicked.connect(self._next)
         bar.addWidget(self.btn_next)
         if action_label:
             self.btn_action = NeonButton(action_label, role="primary")
             self.btn_action.clicked.connect(self._fire_action)
             bar.addWidget(self.btn_action)
-        self.btn_close = NeonButton("닫기", role="ghost")
+        self.btn_close = NeonButton(i18n.KO.VIEWER_BTN_CLOSE, role="ghost")
         self.btn_close.clicked.connect(self.close)
         bar.addWidget(self.btn_close)
         root.addLayout(bar)
@@ -273,7 +306,7 @@ class SideBySideViewer(QDialog):
         body = QHBoxLayout()
         body.setSpacing(10)
         self._ref_pane = _Pane(self._ref_caption, self)
-        self._cand_pane = _Pane("후보", self)
+        self._cand_pane = _Pane(i18n.KO.COL_CANDIDATES, self)
         body.addWidget(self._ref_pane, stretch=1)
         body.addWidget(self._cand_pane, stretch=1)
         root.addLayout(body, stretch=1)
@@ -324,7 +357,7 @@ class SideBySideViewer(QDialog):
 
     def _render_candidate(self) -> None:
         if not self._candidates:
-            self.pos_label.setText("후보 없음")
+            self.pos_label.setText(i18n.KO.VIEWER_NO_CANDIDATES)
             self.btn_prev.setEnabled(False)
             self.btn_next.setEnabled(False)
             return
@@ -332,11 +365,60 @@ class SideBySideViewer(QDialog):
         self._cand_pane.set_title(caption or item.filename)
         # ★ 후보를 바꿔도 확대 배율·위치는 **유지한다**(초기화하지 않는다).  같은
         #   자리를 같은 배율로 후보끼리 비교하는 것이 이 화면의 목적이다.
-        self._cand_pane.set_pixmap(_decode_original(Path(item.path)))
+        self._cand_pane.set_pixmap(_decode_fast(Path(item.path)))
+        self._upgrade_to_original(self._cand_pane, Path(item.path))
         self.pos_label.setText(f"{self._idx + 1} / {len(self._candidates)}")
         self.btn_prev.setEnabled(self._idx > 0)
         self.btn_next.setEnabled(self._idx < len(self._candidates) - 1)
         self._sync_panes()
+
+    def _upgrade_to_original(self, pane, path: Path) -> None:
+        """mid 로 먼저 보여 준 뒤, 원본이 준비되면 조용히 바꿔 끼운다.
+
+        ★ 배율은 건드리지 않는다.  `_Pane` 은 그릴 때마다 `fit_scale` 로 base 를 다시
+        계산하므로(`_zoom` 은 그 base 대비 배수) 원본으로 바뀌어도 화면 배율이 같다 —
+        풀스크린 뷰어의 `_scale *= 옛폭/새폭` 보정을 여기 그대로 옮기면 오히려 틀린다."""
+        try:
+            from .zoom_window import _spawn_original_loader
+        except Exception:
+            return
+        if os.environ.get("QT_QPA_PLATFORM", "") == "offscreen":
+            return                        # 헤드리스에선 원본 교체가 의미 없다
+        # ★ 세대 번호는 **패널마다** 따로 센다.  하나를 공유하면 기준 패널의 교체를
+        #   띄운 직후 후보 패널이 토큰을 올려, 기준 패널은 원본으로 **영영 안 바뀐다**
+        #   (중간 크기 그대로 남는다).  두 패널은 서로 독립적으로 갱신된다.
+        token = getattr(pane, "_upgrade_token", 0) + 1
+        pane._upgrade_token = token
+
+        def _apply(img) -> None:
+            if getattr(pane, "_upgrade_token", 0) != token:
+                return                    # 사용자가 이미 다음 후보로 넘어갔다
+            pix = QPixmap.fromImage(img)
+            if not pix.isNull():
+                pane.set_pixmap(pix)
+                self._sync_panes()
+
+        try:
+            loader = _spawn_original_loader(path)
+            loader.signals.loaded.connect(_apply)
+            # 닫힐 때 끊기 위해 보관 — 이 창은 WA_DeleteOnClose 라, 남겨 두면
+            # 뒤늦게 도착한 원본이 이미 파괴된 `_Pane` 을 만진다.
+            self._loaders.append((loader, _apply))
+        except Exception:
+            pass
+
+    def closeEvent(self, event):  # noqa: N802
+        """죽어 가는 창으로 원본 디코드 결과가 들어오지 않게 연결을 끊는다.
+
+        스레드를 기다리지는 않는다 — 디코드가 끝날 때까지 닫기를 붙잡아 두면
+        그게 곧 멈춤이다(`widgets/zoom_window.py` 의 같은 처방)."""
+        for loader, slot in self._loaders:
+            try:
+                loader.signals.loaded.disconnect(slot)
+            except (TypeError, RuntimeError):
+                pass
+        self._loaders.clear()
+        super().closeEvent(event)
 
     def _prev(self) -> None:
         if self._idx > 0:

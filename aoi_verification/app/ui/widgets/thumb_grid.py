@@ -37,9 +37,6 @@ class _ThumbTile(QFrame):
     expand_requested = pyqtSignal(object)     # ThumbEntry — ‘더 크게 보기’
     sel_toggled = pyqtSignal(object, bool)    # (ThumbEntry, selected) — 인라인 선택
 
-    _SEL_STYLE = ("QFrame {{ border: 2px solid {a}; border-radius: 8px;"
-                  " background: rgba(224, 163, 74, 0.08); }}").format(a=theme.ACCENT)
-
     def __init__(self,
                  entry: ThumbEntry,
                  *,
@@ -88,18 +85,15 @@ class _ThumbTile(QFrame):
         self._expand_btn: Optional[QToolButton] = None
         if show_expand:
             btn = QToolButton(self)
-            btn.setText("🔍")
+            # ★ 이모지(🔍)가 아니라 텍스트 글리프를 쓴다 — 이모지는 OS·폰트에 따라
+            #   컬러/외곽선으로 갈려 앱의 다른 아이콘(✓ ✕ → ↩ ▾)과 어긋난다.
+            btn.setText("⤢")
             btn.setToolTip(i18n.KO.EXPAND_VIEW_TOOLTIP)
             btn.setAutoRaise(True)
-            btn.setFixedSize(QSize(24, 24))
-            btn.setStyleSheet(
-                "QToolButton {{ background: rgba(26,29,35,0.85);"
-                "  color: {ink}; border: 1px solid {line};"
-                "  border-radius: 4px; font-size: 14px; }}"
-                "QToolButton:hover {{ border-color: {mute}; }}".format(
-                    ink=theme.INK, line=theme.LINE2, mute=theme.MUTE)
-            )
-            btn.move(self.width() - 28, 4)
+            # 클릭 대상 하한(theme.PROFILE.target_min) 을 지킨다 — 24px 은 미달이었다.
+            btn.setProperty("role", "tileExpand")
+            btn.setFixedSize(QSize(26, 26))
+            btn.move(self.width() - 30, 4)
             btn.show()
             btn.clicked.connect(
                 lambda: self.expand_requested.emit(self.entry)
@@ -132,8 +126,21 @@ class _ThumbTile(QFrame):
 
     # 인라인 선택(체크박스 없이 클릭 토글) ---------------------------------
     def set_inline_selected(self, selected: bool) -> None:
+        """선택 표시는 **동적 프로퍼티 + QSS** 로 한다.
+
+        ★ 예전엔 클래스 상수 `_SEL_STYLE` 을 인스턴스 스타일시트로 걸었다.  세 가지가
+        동시에 틀렸다: (1) 클래스 본문에서 `theme.ACCENT` 를 `.format()` 했으므로 색이
+        **import 시점에 굳어** 다크 전환이 영영 안 먹었고, (2) 선택자가 스코프 없는
+        `QFrame {…}` 이라 자식 QLabel(파일명·이미지)까지 캐스케이드돼 타일이 3중 액자로
+        보였으며, (3) 배경이 현 팔레트에 없는 옛 네온 팔레트의 주황이었다.
+        게다가 한 화면에 수백 개인 위젯이라 인스턴스 스타일시트 자체가 렉의 원인이다.
+
+        ★ `setProperty` 만으로는 화면이 안 바뀐다 — `setStyleSheet` 과 달리 동적
+        프로퍼티는 재계산을 트리거하지 않으므로 unpolish/polish 를 반드시 함께 부른다."""
         self._inline_selected = bool(selected)
-        self.setStyleSheet(self._SEL_STYLE if self._inline_selected else "")
+        self.setProperty("inlineSelected", "true" if self._inline_selected else "false")
+        self.style().unpolish(self)
+        self.style().polish(self)
 
     def is_inline_selected(self) -> bool:
         return self._inline_selected
@@ -351,3 +358,32 @@ class ThumbGrid(QWidget):
         for t in self._tiles:
             t.set_inline_selected(selected)
         self.inline_changed.emit()
+
+    def inline_selected(self) -> list[ThumbEntry]:
+        """인라인으로 고른 항목들.
+
+        ★ `selected()` 와 섞지 마라 — 그쪽은 **체크박스 모드** 전용이고 여기는
+        체크박스 없이 타일을 눌러 고르는 경로다(두 모드는 동시에 켜지지 않는다)."""
+        return [t.entry for t in self._tiles if t.is_inline_selected()]
+
+    def remove_entry(self, entry: ThumbEntry) -> bool:
+        """항목 **한 개**만 지우고 나머지는 그대로 둔다(전체 재생성 회피).
+
+        ★ `truncate`(+N 타일)가 켜진 그리드에서는 쓰지 않는다 — 한 장이 빠지면
+        숨어 있던 한 장이 올라와야 해서 단건 경로가 성립하지 않는다.
+        Stage 1 좌측 패널처럼 전량을 그리는 그리드에서만 안전하다."""
+        if self._truncate:
+            return False
+        tile = next((x for x in self._tiles if x.entry is entry), None)
+        if tile is None:
+            return False
+        self._grid.removeWidget(tile)      # ★ 먼저 레이아웃에서 떼야 재배치가 어긋나지 않는다
+        tile.setParent(None)
+        tile.deleteLater()
+        self._tiles.remove(tile)
+        if entry in self._entries:
+            self._entries.remove(entry)
+        if entry in self._selected:
+            self._selected.remove(entry)
+        self._relayout_columns(self._active_cols)
+        return True
