@@ -10,14 +10,26 @@
 - 이미 다른 매칭에 쓰인 val 은 후보에서 자동 제외 → 중복 매칭 방지.
 
 ★ 이 창이 **직접 계산한 점수는 공유 ``SlotScoreCache`` 에 넣지 않는다** (C-1).
-  Stage 2 는 ``pipeline.extract(path, cfg=…, side=…)`` 로 특징을 뽑는데 여기는
-  cfg 없이 뽑는다 — cfg 의 전처리 토글이 켜져 있으면 특징 캐시 키부터 갈라져
-  (``config.SimilarityConfig.cache_extra``) **같은 쌍에 다른 값**이 나온다.
-  그 값이 같은 ``(slot, ref, val)`` 키로 공유 캐시에 섞이면
-  ``match_page._launch_matcher`` 의 ``has_all_pairs`` 가 True 로 뒤집혀 2회차
-  매칭이 이 창의 값을 정답으로 쓰고, 검토 화면 차순위도 두 계산이 뒤섞인 채
-  나온다.  보관처를 나누면 **표시 점수는 종전 그대로**(읽기 순서: 공유 캐시 →
-  이 창)면서 섞임만 사라진다.
+  넣으면 ``match_page._launch_matcher`` 의 ``has_all_pairs`` 가 True 로 뒤집혀,
+  같은 세션에서 매칭을 다시 돌릴 때 **Stage 2 를 건너뛰고 이 창이 남긴 값을
+  정답으로 서빙**한다.  대신 ``MatchPage._review_scores``(같은 모양의 별도
+  ``SlotScoreCache``)에 넣는다 — 읽기 순서는 공유 캐시 → 이 통이라 **표시
+  점수는 종전 그대로**다.
+
+  ※ 한때 이 자리에 "cfg 의 전처리 토글 때문에 특징 캐시 키가 갈라져 같은 쌍에
+    다른 값이 나온다" 고 적혀 있었으나 **오늘 코드에서는 재현되지 않는다**:
+    ``main_window._make_sim_cfg`` 가 만드는 두 cfg 모두 ``center_crop=False``·
+    ``orb_nfeatures=0`` 이라 ``cache_extra()`` 가 빈 문자열이고, Stage 2 의
+    ``SlotPrecomputeWorker`` 도 ``pipeline.score`` 를 cfg 없이 부른다(실측:
+    특징 byte-identical, 점수 델타 0.000000).  확인한 해악만 위에 남긴다.
+
+★ 보관처는 **창이 아니라 세션 수명**이어야 한다.  ``result_page`` 는 [실패 검토]
+  를 누를 때마다 이 창을 **새로 만든다** — 창 인스턴스에 매달면 (a) 두 번째
+  열기가 같은 쌍을 전부 다시 계산하고(실측 후보 40장 112 ms, 쌍당 2.8 ms),
+  (b) 여기서 확정한 매치의 차순위 후보가 검토 화면에서 사라진다(실측 6 → 0 —
+  좌표 모드에서 이웃을 못 찾은 ref 는 ``_fast_results`` 값이 빈 목록이라
+  ``match_page.build_candidates_by_ref`` 가 점수 캐시로 내려오는데, 그 통에는
+  아무것도 없기 때문).  그래서 ``review_scores`` 를 주입받는다.
 """
 
 from __future__ import annotations
@@ -70,10 +82,16 @@ class _CandidateScoring(QThread):
     콜백마다 ``processEvents`` 를 불러 **채점 도중에 사용자 입력이 재진입**할 수
     있었다(다른 항목을 클릭하면 렌더가 겹쳐 들어왔다).
 
-    ``fn`` 은 다이얼로그의 바인딩된 ``_score_candidates`` 다 — 순수 계산이라
-    (점수 캐시·특징 캐시는 전 메서드가 락을 들고 있고, pipeline 은 전역 가변
-    상태를 만지지 않는다) 워커에서 그대로 부를 수 있다.  Qt 위젯은 건드리지
-    않으므로 다이얼로그가 먼저 파괴돼도 안전하다.
+    ``fn`` 은 다이얼로그의 바인딩된 ``_score_candidates`` 다 — **Qt 위젯을 전혀
+    건드리지 않으므로** 워커에서 그대로 부를 수 있고, 다이얼로그가 먼저 파괴돼도
+    안전하다.  건드리는 공유 상태는 셋뿐이다:
+
+    - ``SlotScoreCache``(공유 캐시·``review_scores``) — 전 메서드가 자체 락을 든다.
+    - ``pipeline`` — 전역 가변 상태를 만지지 않는다(디스크 특징 캐시는 파일 단위).
+    - ``_pair_memo`` — **락 없는 평범한 dict** 다.  개별 get/set 이 원자적이고
+      키가 ``(slot, ref, val)`` 로 완전 한정돼 있어 어느 세대가 써도 값이 같다
+      (아래 ``_pair_memo`` 주석 참고).  락을 들었다고 적어 두었던 적이 있는데
+      사실이 아니었다 — 새 상태를 여기 추가한다면 이 목록도 함께 고쳐라.
 
     ``token`` 은 늦게 도착한 옛 세대를 버리기 위한 번호다 — 사용자가 항목을
     연달아 넘기면 채점이 겹치는데, 옛 결과가 새 후보 그리드를 덮으면 안 된다."""
@@ -116,7 +134,8 @@ class _CandidateScoring(QThread):
 
 
 def _reuses_coord_scores(session_coord_mode: bool, allow_compute: bool,
-                         fast_results, slot: str, ref_path: Path) -> bool:
+                         fast_results, slot: str, ref_path: Path,
+                         classical_refs=()) -> bool:
     """이 렌더가 **좌표 거리 점수를 그대로 재사용**하는가 (C-2).
 
     후보가 300장 이상이면 이 창은 CPU 재계산을 포기하고 선계산 결과
@@ -126,10 +145,20 @@ def _reuses_coord_scores(session_coord_mode: bool, allow_compute: bool,
     유사도 백분율로 찍으면 거짓 수치가 된다 — 실측 tol=200 µm 에서 480 µm 떨어진
     후보는 score −2.4 → 화면에 **"-240.0 %"** 로 나온다.
 
+    ★ 그런데 **좌표 세션이라고 전부 거리 점수인 것은 아니다.**  좌표가 없는 ref 는
+    ``coord_matcher`` 가 고전 유사도로 폴백 채점해 **같은** ``_fast_results`` 에
+    넣는다(그 파일의 `_run` 폴백 구간).  그 값은 진짜 유사도라 %로 보여야 하는데
+    한때 이 함수가 좌표 세션이면 무조건 True 를 내는 바람에 실측 0.83·0.61(=83%·
+    61%)이 '계산 안 함' 으로 표시되고 요약에도 "좌표 거리 순" 이라고 거짓으로
+    적혔다.  그래서 ``classical_refs``(= ``CoordScheduler.classical_refs``, 값이
+    아니라 **출처 표식**)로 그 ref 들을 걸러낸다.
+
     Qt 없이 시험할 수 있도록 순수 함수로 분리한다(``_select_coord_candidates``
     ·``_match_neighbors`` 와 같은 처방)."""
     if not session_coord_mode or allow_compute:
         return False
+    if (slot, Path(ref_path)) in (classical_refs or ()):
+        return False                      # 고전 폴백이 매긴 진짜 유사도다.
     return bool((fast_results or {}).get((slot, Path(ref_path))))
 
 
@@ -323,11 +352,20 @@ class UnmatchedReviewDialog(QDialog):
                  parent=None,
                  *,
                  coord_mode: bool = False,
-                 tolerance: float = _DFLT_TOL) -> None:
+                 tolerance: float = _DFLT_TOL,
+                 review_scores=None,
+                 coord_classical_refs=()) -> None:
         """``val_pool`` 키는 두 형태를 모두 지원:
 
         - ``(slot, side)`` → list[ImageItem]  : 후보 풀
         - ``slot``          → list[ImageItem]  : 단일 모드 호환 (side 무시)
+
+        ``review_scores`` 는 이 창이 계산한 점수를 담을 **세션 수명 보관처**
+        (``MatchPage._review_scores``).  주지 않으면 창 하나짜리 통을 만들어 쓰지만,
+        그러면 창을 다시 열 때 전부 재계산하고 확정한 매치의 차순위가 사라진다
+        (모듈 docstring 참고) — 실제 호출부(`result_page`)는 반드시 준다.
+        ``coord_classical_refs`` 는 좌표 세션에서 **고전 유사도로 폴백 채점된**
+        {(slot, ref_path)} 집합이다(C-2).
         """
         super().__init__(parent)
         self._unmatched = list(unmatched)
@@ -337,14 +375,25 @@ class UnmatchedReviewDialog(QDialog):
             self._val_pool_keyed[k] = list(v)
         self._used_vals: set[Path] = {Path(p) for p in already_used_vals}
         self._score_cache = score_cache
-        # 이 창이 직접 계산한 (slot, ref, val) → score.  공유 캐시와 **분리 보관**
-        # 한다(C-1, 모듈 docstring 참고).  읽기는 공유 캐시 → 여기 순이라 표시되는
-        # 점수는 종전과 같다.
-        self._own_scores: dict[tuple, float] = {}
+        # 이 창이 직접 계산한 (slot, ref, val) → score 의 보관처.  공유 캐시와
+        # **분리**하되 **세션 수명**이다(C-1, 모듈 docstring 참고).  읽기는 공유
+        # 캐시 → 여기 순이라 표시되는 점수는 종전과 같다.
+        if review_scores is None:
+            # 주입이 없을 때만 만든다 — 여기서만 필요한 무거운 import 라 지연시킨다
+            # (`_lookup_or_compute_score` 의 pipeline import 와 같은 처방).
+            from ...similarity.slot_features import SlotScoreCache
+            review_scores = SlotScoreCache()
+        self._review_scores = review_scores
+        # 좌표 세션에서 고전 유사도로 폴백 채점된 ref 들 — 점수 표기를 가른다 (C-2).
+        self._coord_classical_refs = frozenset(coord_classical_refs or ())
         # 쌍당 캐시 조회 1회 (C-5) — `_count_recompute`·`_score_candidates`·
         # `_lookup_or_compute_score` 가 같은 쌍을 세 번 물어 `SlotScoreCache` 의
         # 락을 후보 1장당 3번 잡았다(후보 299장이면 897회).  렌더 세대마다 **새
-        # dict 로 갈아 끼운다** — 늦게 끝난 옛 세대가 새 세대 값을 덮지 않게.
+        # dict 를 만들어** 메모가 한 화면 안에서만 살게 한다.
+        # ★ 이것이 옛 세대의 쓰기를 막아 주지는 **않는다** — 워커는 호출 시점에
+        #   `self._pair_memo` 를 다시 읽으므로 늦게 끝난 옛 세대도 새 dict 에 쓴다.
+        #   키가 `(slot, ref, val)` 로 완전 한정돼 어느 세대가 써도 값이 같아
+        #   무해하다(한때 "옛 세대가 덮지 않게" 라고 적혀 있었으나 사실이 아니다).
         self._pair_memo: dict[tuple, Optional[float]] = {}
         # 효율 모드 선계산 top-K {(slot, ref_path): [(val_path, score)]} — 후보 풀이
         # 300장 이상이면 CPU 재계산 대신 이걸 재사용한다 (#1).
@@ -735,7 +784,7 @@ class UnmatchedReviewDialog(QDialog):
             # 그 재사용이 **좌표 거리 점수**면 유사도 %로 찍지 않는다 (C-2).
             coord_reuse = _reuses_coord_scores(
                 self._session_coord_mode, allow_compute, self._fast_results,
-                cur.slot, Path(cur.path))
+                cur.slot, Path(cur.path), self._coord_classical_refs)
             # 캐시에 없어 **실제로 다시 계산**해야 하는 후보 수를 먼저 센다 — 0 이면
             # 로딩을 띄우지 않고(즉시), >0 이면 로딩 오버레이로 진행을 보여준다 (#로딩).
             need = self._count_recompute(cur, candidates) if allow_compute else 0
@@ -905,9 +954,9 @@ class UnmatchedReviewDialog(QDialog):
     def _known_score(self, slot: str, ref_path: Path, val_path: Path):
         """이 쌍에 대해 **이미 아는 점수** (없으면 None).
 
-        읽는 순서는 공유 ``SlotScoreCache``(Stage 2 가 채운 값) → 이 창이 계산해
-        둔 값 — 종전에 둘이 한 통에 들어 있던 때와 **같은 값이 나온다** (C-1).
-        조회 결과는 렌더 세대 동안 기억해 쌍당 락을 한 번만 잡는다 (C-5)."""
+        읽는 순서는 공유 ``SlotScoreCache``(Stage 2 가 채운 값) → 실패 검토가
+        계산해 둔 값 — 종전에 둘이 한 통에 들어 있던 때와 **같은 값이 나온다**
+        (C-1).  조회 결과는 렌더 세대 동안 기억해 쌍당 락을 한 번만 잡는다 (C-5)."""
         key = (slot, ref_path, val_path)
         memo = self._pair_memo
         if key in memo:
@@ -916,17 +965,19 @@ class UnmatchedReviewDialog(QDialog):
         if self._score_cache is not None:
             s = self._score_cache.get_pair(slot, ref_path, val_path)
         if s is None:
-            s = self._own_scores.get(key)
+            s = self._review_scores.get_pair(slot, ref_path, val_path)
         s = None if s is None else float(s)
         memo[key] = s
         return s
 
     def _remember_score(self, slot: str, ref_path: Path, val_path: Path,
                         score: float) -> None:
-        """이 창이 계산한 점수를 보관 — **공유 캐시에는 넣지 않는다** (C-1)."""
-        key = (slot, ref_path, val_path)
-        self._own_scores[key] = float(score)
-        self._pair_memo[key] = float(score)
+        """이 창이 계산한 점수를 보관 — **공유 캐시에는 넣지 않는다** (C-1).
+
+        대신 세션 수명 보관처(``review_scores``)에 넣어, 창을 다시 열어도 재계산이
+        없고 여기서 확정한 매치의 차순위 후보가 검토 화면에 그대로 남게 한다."""
+        self._review_scores.put(slot, ref_path, val_path, float(score))
+        self._pair_memo[(slot, ref_path, val_path)] = float(score)
 
     def _count_recompute(self, cur: MissEntry, candidates: list) -> int:
         """캐시에 없어 그 자리에서 CPU 재계산해야 하는 후보 수(로딩 표시 여부 판단).

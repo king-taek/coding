@@ -87,6 +87,12 @@ class ReviewContext:
     tolerance: float
     coord_failed_count: int
     elapsed_s: float
+    # 실패 검토 창이 계산한 점수의 **세션 수명 보관처**(`MatchPage._review_scores`).
+    # 창은 열 때마다 새로 만들어지므로 여기에 매달아야 재계산도, 차순위 소실도 없다.
+    review_scores: object = None
+    # 좌표 세션에서 **고전 유사도로 폴백 채점된** ref 집합 {(slot, ref_path)}.
+    # `fast_results` 안의 점수가 거리인지 유사도인지 가르는 유일한 근거다.
+    coord_classical_refs: frozenset = frozenset()
 
 
 class MatchPage(QWidget):
@@ -146,10 +152,29 @@ class MatchPage(QWidget):
         self._precompute_total: int = 0
         # 좌표 매칭 실패 목록 — 검토 화면으로 전달용
         self._coord_failed_set: set = set()
+        # 좌표 매칭이 **고전 유사도로 폴백 채점한** ref 들 (slot, ref_path).
+        # `_fast_results` 에는 거리 인코딩과 유사도가 섞여 들어오는데 값만으로는
+        # 구분이 안 된다 — 실패 검토 창이 점수를 %로 찍을지 정하는 데 쓴다.
+        self._coord_classical_refs: set = set()
+        # 실패 검토 창이 **그 자리에서 계산한** (ref, val) 점수의 보관처.
+        # ★ `_score_cache` 와 **다른 통**이다 — 그래야 `_launch_matcher` 의
+        #   `has_all_pairs` 가 이 값들 때문에 True 로 뒤집혀 2회차 매칭이 낡은
+        #   값을 정답으로 서빙하는 일이 없다.  그러면서 **세션 수명**이라
+        #   (창은 [실패 검토] 를 누를 때마다 새로 만들어진다) 두 번째 열기가
+        #   같은 쌍을 다시 계산하지 않고, 확정된 매치의 차순위 후보도
+        #   `build_candidates_by_ref` 가 그대로 찾아낸다.
+        self._review_scores = SlotScoreCache()
         # 매칭(사전 계산) 소요시간 — run_log 통계용.  매칭을 한 번도 돌리지 않고
         # 세션이 끝날 수 있으므로 여기서 만들어 둔다(읽는 쪽이 getattr 로 방어하지
         # 않아도 되게).
         self._precompute_elapsed: float = 0.0
+        # 사용자가 [중지] 로 이 세션을 버렸는가 — 자동 사슬을 멈추는 유일한 표식.
+        # ★ 워커를 멈추는 것만으로는 사슬이 안 멈춘다: 자동 매치는 워커가 아니라
+        #   `QTimer.singleShot(0, _on_pick)` 사슬로 돈다.  중지 시점에 이미 예약된
+        #   콜백이 남아 있어, 실측으로 150장 중 41장에서 중지했는데도 끝까지 돌아
+        #   `finished` 까지 나갔다 — 상위는 `_phase` 가 그대로라 **버린 세션의 검토
+        #   화면을 열었다.**  `load_state` 가 새 세션마다 되돌린다.
+        self._aborted: bool = False
 
     # ------------------------------------------------------------------
     def _build(self) -> None:
@@ -398,6 +423,7 @@ class MatchPage(QWidget):
         self._threshold = threshold
         self._session_id = session_id or ""
         self._auto_mode = bool(auto_mode)
+        self._aborted = False              # 새 세션 — 중지 표식 해제
         self._engine_cfg = engine_cfg or config.DEFAULT_SIM_CONFIG
         self._fast_results.clear()
         self._match_history.clear()        # 되돌리기 히스토리 초기화 (#C1)
@@ -657,6 +683,9 @@ class MatchPage(QWidget):
         if self.bg_status_label is not None:
             self.bg_status_label.setText(msg or "")
         if self._current is not None or (self._state and self._state.queue):
+            # 실패해도 **자동 사슬은 계속 돈다** — 그러면 덮개도 계속 있어야 한다.
+            # (위 `hide_overlay` 는 좌표 없음 안내 시트를 가리지 않기 위한 것이다.)
+            self._update_auto_progress()
             self._advance()
             return
         # 큐도 비었고 현재 ref 도 없다 — 여기서 그냥 반환하면 main_window 는 아무
@@ -674,8 +703,12 @@ class MatchPage(QWidget):
         if self._coord_mode and self._precompute_worker is not None:
             fs = getattr(self._precompute_worker, "failed_set", set())
             self._coord_failed_set = set(fs)
+            # 좌표가 없어 고전 유사도로 폴백 채점된 ref — 그 점수는 거리가 아니다.
+            cr = getattr(self._precompute_worker, "classical_refs", set())
+            self._coord_classical_refs = set(cr)
         else:
             self._coord_failed_set = set()
+            self._coord_classical_refs = set()
         was_streaming = self._streaming_precompute
         self.bg_status_label.setText(i18n.KO.PRECOMPUTE_BG_DONE)
         self._streaming_precompute = False
@@ -683,7 +716,13 @@ class MatchPage(QWidget):
             # 자동(전체 선계산) — 모든 계산이 끝났으니 이제 매칭 시작.
             # _current 가 아직 None 이므로 진행 바가 정상 갱신됐고, 여기서 한 번만
             # _advance → 캐시/결과 조회로 즉시 자동 매칭 (백그라운드 없음).
-            self._loading.hide_overlay()
+            #
+            # ★ **덮개를 내리지 않는다 — 이어받는다.**  선계산이 끝난 것이지 작업이
+            #   끝난 것이 아니다.  여기서 `hide_overlay()` 를 부르면 뒤이어 도는 자동
+            #   매치 사슬 전체가 무방비가 되고(실측 88.6%), 그 사이 Ctrl+Z 한 번이면
+            #   ref↔val 이 통째로 밀린다 — `_update_auto_progress` 주석 참조.
+            #   해제는 `_advance` 의 빈-큐 분기 한 곳뿐이다.
+            self._update_auto_progress()
             self._advance()
             return
         # 수동 스트리밍 — 첫 슬롯에서 이미 _advance 됨.  대기 슬롯만 해제.
@@ -716,6 +755,10 @@ class MatchPage(QWidget):
             # 좌표 모드가 아니면 실패 집합은 의미가 없다(직전 세션 잔재일 수 있다).
             coord_failed_count=len(self._coord_failed_set) if coord_mode else 0,
             elapsed_s=float(self._precompute_elapsed),
+            review_scores=self._review_scores,
+            # 실패 집합과 같은 이유로 좌표 모드에서만 의미가 있다.
+            coord_classical_refs=(frozenset(self._coord_classical_refs)
+                                  if coord_mode else frozenset()),
         )
 
     def build_candidates_by_ref(self, matches) -> dict:
@@ -743,6 +786,14 @@ class MatchPage(QWidget):
             else:
                 for vi in vitems:
                     s = self._score_cache.get_pair(m.slot, m.ref_path, vi.path)
+                    if s is None:
+                        # ★ 실패 검토 창이 계산한 점수도 본다.  좌표 모드에서
+                        #   이웃을 못 찾은 ref 는 `_fast_results` 에 **빈 목록**이
+                        #   들어가(falsy) 이쪽으로 오는데, 그 ref 를 실패 검토에서
+                        #   확정하면 유일한 점수 출처가 여기다 — 안 보면 확정한
+                        #   매치의 차순위 후보가 통째로 사라진다(실측 6 → 0).
+                        s = self._review_scores.get_pair(
+                            m.slot, m.ref_path, vi.path)
                     if s is not None:
                         scored.append((vi, float(s)))
             scored.sort(key=lambda x: x[1], reverse=True)
@@ -754,6 +805,9 @@ class MatchPage(QWidget):
         """#8 중지 — 진행 중인 사전계산/매칭 워커를 안전하게 멈추고 세션 중단."""
         if not self._confirm_cancel():
             return
+        # ★ 표식을 **워커를 멈추기 전에** 세운다 — 아래 정리 도중에도 예약된
+        #   `_on_pick` 이 배달될 수 있고, 그것까지 막아야 사슬이 진짜로 선다.
+        self._aborted = True
         self._stop_precompute_worker()
         self._detach_worker()
         self._worker = None
@@ -762,9 +816,12 @@ class MatchPage(QWidget):
         #   `_launch_matcher` 가 **1회차 후보를 그대로 재사용**한다 — 설정(허용 오차·
         #   엔진)을 바꿔 다시 돌려도 옛 결과가 나오는 정확도 사고다.
         self._score_cache.clear()
+        # 실패 검토가 계산해 둔 점수도 같은 세션의 계산 결과다 — 함께 버린다.
+        self._review_scores.clear()
         self._slot_cache.clear()
         self._candidates = []
         self._coord_failed_set = set()
+        self._coord_classical_refs = set()
         self._loading.hide_overlay()
         self.cancelled.emit()
 
@@ -804,12 +861,23 @@ class MatchPage(QWidget):
         return False
 
     def _cancel_progress(self) -> tuple[int, int]:
-        """확인창에 넣을 '지금까지 얼마나 했는가' — 단계에 따라 출처가 다르다."""
+        """확인창에 넣을 '지금까지 얼마나 했는가' — 단계에 따라 출처가 다르다.
+
+        ★ **매칭이 시작된 뒤에는 매칭 진행을 보고한다.**  선계산 총량을 그대로 쓰면
+        자동 매치 사슬이 도는 동안 [중지] 를 눌렀을 때 이미 100% 인 선계산 수치
+        ('400 / 400')가 뜬다 — 사용자가 무엇을 버리는지 알 수 없다.  덮개를 사슬
+        구간까지 이어받으면서 [중지] 가 그 구간 내내 보이게 됐으므로 함께 맞춘다.
+        """
+        state = self._state
+        if state is not None and self._current is not None:
+            done = len(state.matches) + sum(
+                len(v) for v in state.no_match.values()
+            )
+            return done, done + len(state.queue)
         done = int(getattr(self, "_precompute_done", 0) or 0)
         total = int(getattr(self, "_precompute_total", 0) or 0)
         if total > 0:
             return done, total
-        state = self._state
         if state is not None:
             done = len(state.matches)
             return done, done + len(state.queue)
@@ -869,8 +937,8 @@ class MatchPage(QWidget):
 
     # ------------------------------------------------------------------
     def _advance(self) -> None:
-        if self._state is None:
-            return
+        if self._state is None or self._aborted:
+            return                           # 중지된 세션 — 사슬을 잇지 않는다
         if not self._state.queue:
             self._current = None
             self.center_img.clear_image()
@@ -1045,13 +1113,30 @@ class MatchPage(QWidget):
         self._populate_right(self._candidates)
 
     def _update_auto_progress(self) -> None:
-        """자동 모드에서 진행 상황 표시 — done / total ref."""
-        if self._state is None:
+        """자동 모드 진행 표시 — done / total ref.  **덮개도 여기서 책임진다.**
+
+        ★ 예전엔 `set_progress` 만 불렀다.  그런데 `set_progress` 는 **숨은 오버레이를
+        다시 띄우지 않는다** — 선계산이 끝나며 오버레이를 내린 뒤로는 자동 매치 사슬이
+        끝까지 **덮개 없이** 돌았다(실측 ref 400장: 오버레이는 479ms 에 사라지고 사슬은
+        3.0초에 끝나 **88.6%** 가 무방비였다).  그 구간에 남아 있던 Ctrl+Z / [되돌리기]
+        가 한 번만 눌려도, 이미 예약돼 있던 `singleShot(0, _on_pick)` 이 바뀐 `_current`
+        에 적용돼 **ref↔val 이 한 칸씩 밀린 채 끝까지 복구되지 않는다**(실측 200쌍 중
+        157쌍이 엉뚱한 val 로 확정 — 개수·중복·누락은 정상이라 엑셀에서 티가 안 난다).
+
+        그래서 '작업 중에는 덮는다' 는 이 저장소의 로딩 계약을 그대로 지킨다: 진행을
+        보고하는 이 한 곳이 덮개도 다시 세운다.  해제는 `_advance` 의 빈-큐 분기
+        **한 곳**뿐이다(끝은 한 곳).  ``is_retiring`` 까지 보는 이유는 최소 표시 래치·
+        퇴장 페이드 중에는 `isVisible()` 이 아직 True 이기 때문이다.
+        """
+        if self._state is None or not self._auto_mode:
             return
+        if (not self._loading.isVisible()) or self._loading.is_retiring():
+            self._loading.show_overlay(i18n.KO.LOAD_AUTO_MATCH, cancelable=True)
         done = len(self._state.matches) + sum(
             len(v) for v in self._state.no_match.values()
         )
         total = done + len(self._state.queue)
+        # 총량을 모르는 경우(total<=0)엔 set_progress 가 busy 로 떨어진다 — 0 에 멈추지 않는다.
         self._loading.set_progress(
             done, total,
             i18n.KO.LOAD_AUTO_MATCH,
@@ -1100,7 +1185,8 @@ class MatchPage(QWidget):
             self._right_grid.addWidget(plus, 0, 1)
 
     def _on_pick(self, entry: ThumbEntry) -> None:
-        if self._state is None or self._current is None:
+        # 중지된 세션에는 아무것도 확정하지 않는다 — 이미 예약된 콜백이 남아 있다.
+        if self._state is None or self._current is None or self._aborted:
             return
         ref = self._current
         val = entry.item

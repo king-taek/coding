@@ -461,6 +461,17 @@ class LoadingOverlay(QWidget):
         self._bar_anim.setDuration(max(120, motion.dur(self.BAR_SLIDE_MS)))
         self._bar_anim.start()
 
+    def is_retiring(self) -> bool:
+        """퇴장이 **예약되었거나 진행 중**인가 — 보이더라도 곧 사라진다.
+
+        ``isVisible()`` 만 보고 '아직 덮고 있다' 고 판단하면 안 되는 구간이 둘 있다:
+        최소 표시 래치(``_hide_pending``, 최대 350ms)와 퇴장 페이드(``_hiding``).
+        이어지는 작업이 덮개를 **이어받을 때**(`match_page._update_auto_progress`)
+        이걸 보지 않으면 몇 백 ms 뒤 덮개가 조용히 사라진 채로 작업이 계속 돈다.
+        """
+        return bool(getattr(self, "_hiding", False)
+                    or getattr(self, "_hide_pending", False))
+
     def hide_overlay(self) -> None:
         if not self.isVisible():
             self._finish_hide()
@@ -677,7 +688,7 @@ class LoadingOverlay(QWidget):
         self._busy.stop()
         super().hideEvent(event)
 
-    # 오버레이가 떠 있는 동안 **버리는** 이벤트.
+    # 오버레이가 떠 있는 동안 **버리는** 이벤트 — 목록의 주인은 `motion` 이다.
     #
     # ★ `Shortcut` 이 반드시 들어가야 한다.  `QShortcut` 은 `KeyPress` 나
     #   `ShortcutOverride` 를 잡아먹어도 **그대로 발화한다**(실측: 셋 중 `Shortcut` 만
@@ -685,12 +696,9 @@ class LoadingOverlay(QWidget):
     #   중이던 사진이 조용히 '매치 없음' 으로 확정돼 **엑셀에 사실이 아닌 결과**가
     #   남았다.  마우스는 위젯이 이미 막고 있었으므로 사용자는 '지금은 아무것도 안
     #   눌린다' 고 믿고 있었다 — 그래서 틀어진 줄도 몰랐다.
-    _BLOCKED = (
-        QEvent.Type.Shortcut,          # ← QShortcut 을 실제로 멈추는 유일한 종류
-        QEvent.Type.ShortcutOverride,
-        QEvent.Type.KeyPress,
-        QEvent.Type.KeyRelease,
-    )
+    # ★ 같은 목록을 **페이지 전환 스냅샷도 쓴다**(`motion.transition_in`).  두 벌로
+    #   나누지 마라 — 한쪽만 갱신되면 '어떤 덮개는 단축키를 통과시킨다' 가 된다.
+    _BLOCKED = motion.BLOCKED_INPUT_EVENTS
 
     def eventFilter(self, obj, event) -> bool:  # noqa: N802
         # ★ ``getattr`` 로 읽는다 — 잠금이 걸린 채 오버레이가 파괴되면 앱에 걸어 둔

@@ -3,14 +3,19 @@
 셋 다 **화면에 보이는 점수와 그 출처**를 다루므로 한 파일에 모은다.
 
 C-1  이 창이 그 자리에서 계산한 점수가 Stage 2 의 공유 ``SlotScoreCache`` 에
-     섞여 들어갔다.  Stage 2 는 ``pipeline.extract(path, cfg=…, side=…)`` 로,
-     이 창은 ``pipeline.extract(path)`` 로 특징을 뽑는다 — cfg 의 전처리 토글이
-     켜진 세션에서는 **특징 캐시 키부터 갈라져**(``SimilarityConfig.cache_extra``)
-     같은 쌍에 다른 값이 나온다.  그런데 저장 키는 ``(slot, ref, val)`` 하나뿐이라
-     두 계산이 한 통에 섞였고, 그 통은 ``match_page._launch_matcher`` 의
-     ``has_all_pairs`` 와 검토 화면 차순위가 **정답으로 읽는 통**이다.
-     고친 방향은 (a) — 보관처를 나눈다.  읽기 순서(공유 캐시 → 이 창)를 그대로
-     두었으므로 **표시되는 점수는 종전과 같다**(아래 두 번째 테스트가 못 박는다).
+     섞여 들어갔다.  그 통은 ``match_page._launch_matcher`` 의 ``has_all_pairs``
+     가 **정답으로 읽는 통**이라, 같은 세션에서 매칭을 다시 돌리면 Stage 2 를
+     건너뛰고 이 창이 남긴 값을 서빙한다.  고친 방향은 보관처를 나누는 것 —
+     읽기 순서(공유 캐시 → 실패 검토 보관처)를 그대로 두었으므로 **표시되는
+     점수는 종전과 같다**(아래 두 번째 테스트가 못 박는다).
+
+     ※ 한때 이 자리에 "Stage 2 는 cfg 를 주고 이 창은 안 줘서 특징 캐시 키가
+       갈라진다" 고 적혀 있었으나 **오늘 코드에서는 재현되지 않는다**:
+       ``_make_sim_cfg`` 가 만드는 두 cfg 모두 ``cache_extra()`` 가 빈 문자열이고
+       ``SlotPrecomputeWorker`` 도 ``pipeline.score`` 를 cfg 없이 부른다.
+     ※ 보관처의 **수명**은 창이 아니라 세션이다 — 창에 매달았더니 차순위 후보가
+       사라지고 재계산이 매번 돌았다(반례와 회귀 가드:
+       ``test_unmatched_review_session_scores.py``).
 
 C-2  후보가 300장 이상이면 CPU 재계산을 건너뛰고 선계산 결과를 그대로 쓰는데,
      좌표 세션에서 그 값은 ``coord_matcher`` 의 거리 인코딩이다.  그걸 유사도
@@ -54,13 +59,14 @@ class _CountingCache:
 
 
 def _dialog(n_cand: int = 4, *, cache=None, coord_mode: bool = False,
-            fast_results=None):
+            fast_results=None, review_scores=None):
     unmatched = [MissEntry(slot="A1", side="ref", path=Path("/tmp/ref_A1.jpg"))]
     val_pool = {"A1": [ImageItem(slot="A1", path=Path(f"/tmp/v{i}.jpg"),
                                  side="val") for i in range(n_cand)]}
     dlg = M.UnmatchedReviewDialog(unmatched, val_pool, score_cache=cache,
                                   fast_results=fast_results,
-                                  coord_mode=coord_mode)
+                                  coord_mode=coord_mode,
+                                  review_scores=review_scores)
     return dlg, unmatched[0], val_pool["A1"]
 
 
@@ -81,15 +87,18 @@ def _fake_pipeline(monkeypatch, value: float = 0.42) -> list:
 # ---------------------------------------------------------------------------
 def test_computed_score_never_lands_in_the_shared_cache(styled_qapp, monkeypatch):
     """cfg 없이 뽑은 값이 Stage 2 의 통에 섞이면 재매칭·차순위가 오염된다."""
+    from aoi_verification.app.similarity.slot_features import SlotScoreCache
     _fake_pipeline(monkeypatch, 0.42)
     cache = _CountingCache(value=None)          # 캐시 miss → 그 자리 계산
-    dlg, cur, cands = _dialog(cache=cache)
+    store = SlotScoreCache()                    # 세션 수명 보관처(주입)
+    dlg, cur, cands = _dialog(cache=cache, review_scores=store)
 
     s = dlg._lookup_or_compute_score(cur, cands[0])
     assert s == pytest.approx(0.42)
     assert cache.puts == [], "이 창이 계산한 점수가 공유 SlotScoreCache 에 들어갔다"
-    # 그래도 재방문은 빨라야 한다 — 자기 통에서 나온다(추가 계산 없음).
-    assert dlg._own_scores, "계산한 점수를 어디에도 보관하지 않았다"
+    # 그래도 재방문은 빨라야 한다 — 주입된 보관처에서 나온다(추가 계산 없음).
+    assert store.get_pair("A1", Path(cur.path), Path(cands[0].path)) == \
+        pytest.approx(0.42), "계산한 점수를 어디에도 보관하지 않았다"
     dlg.deleteLater()
 
 

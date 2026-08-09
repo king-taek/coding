@@ -89,3 +89,28 @@ def test_new_session_drops_the_finished_session_state(qapp, monkeypatch, tmp_pat
         assert win._session_id == ""
     finally:
         win.close()
+
+
+def test_late_stage2_finish_after_new_session_does_not_blow_up(
+        qapp, monkeypatch, tmp_path):
+    """★ 위 정리가 **처음으로 도달 가능하게 만든 자기모순 가드**를 막는다.
+
+    [새 검증 시작] 뒤에 Stage 2 의 `finished` 가 뒤늦게 오면
+    `_proceed_to_review_or_finish` 의 ``_input is None`` 분기를 탄다.  그 분기는
+    `_finish_session()` 을 불렀는데, 그 함수 **첫 줄이**
+    ``assert self._scan is not None and self._input is not None`` 이라 도달하면
+    반드시 AssertionError 였다(실측).  세션이 버려진 뒤엔 검토할 것도 끝낼 것도
+    없으므로 조용히 물러나는 것이 맞다 — assert 는 그대로 둔다."""
+    win = _window(monkeypatch)
+    try:
+        monkeypatch.setattr(mw.session_mod, "save", lambda st: None)
+        win._input = _old_input(tmp_path)
+        win._scan = object()
+        win._new_session()
+
+        shown: list = []
+        monkeypatch.setattr(win, "_show_page", lambda p: shown.append(p))
+        win._proceed_to_review_or_finish()        # 뒤늦게 도착한 finished
+        assert shown == [], "버려진 세션인데 검토/결과 화면으로 넘어갔다"
+    finally:
+        win.close()

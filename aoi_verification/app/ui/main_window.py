@@ -1390,19 +1390,39 @@ class MainWindow(QMainWindow):
         self._schedule_autosave()
 
     def _on_match_finished(self) -> None:
+        """Stage 2 종료 — 미탐 기록을 넘겨받고 검토 화면으로.
+
+        ★ **두 번 불려도 결과가 같아야 한다(멱등).**  예전엔 `st.no_match` 를 중복
+        검사 없이 `extend` 했다.  `finished` 가 두 번 나오는 경로가 실제로 있었고
+        (검토 화면으로 전환하는 246ms 동안 Ctrl+Z 한 번 → `_undo_match` → `_advance`
+        → 두 번째 `finished`), 그때 **엑셀 미탐 시트가 5행 → 10행**으로 늘었다 —
+        같은 사진이 두 번 찍힌 것이다.  총 매치 수(`_matches_a`)는 정상이라 숫자로는
+        이상을 알 수 없었다.
+        `motion.transition_in` 이 그 전환 구간의 키를 막아 원인 하나는 닫혔지만,
+        신호가 두 번 오는 경로는 또 생길 수 있으므로 **받는 쪽도 멱등하게** 둔다.
+        """
         if self._phase == PHASE_A_MATCH:
             st = self._match_page.get_state()
             if st is not None:
                 # 미탐으로 기록할 것은 ‘매칭 없음 확정’ 만. ‘잠시 보류’ 는 사용자
                 # 결정 미정 → 미탐 시트에 넣지 않는다.
                 for slot, items in st.no_match.items():
-                    self._skipped_a[slot].extend(items)
+                    seen = {it.key for it in self._skipped_a[slot]}
+                    self._skipped_a[slot].extend(
+                        it for it in items if it.key not in seen
+                    )
             self._proceed_to_review_or_finish()
 
     def _proceed_to_review_or_finish(self) -> None:
         """자동 매치 결과를 MatchReviewPage 로 넘겨 검토하게 한다."""
-        if self._input is None:
-            self._finish_session()
+        # ★ 세션 입력이 없으면 **검토할 것도 끝낼 것도 없다.**  예전엔 여기서
+        #   `_finish_session()` 을 불렀는데 그 함수 첫 줄이
+        #   `assert self._scan is not None and self._input is not None` 이라
+        #   자기모순이었다(도달하면 반드시 AssertionError).  도달 경로는
+        #   [새 검증 시작] 이 세션 상태를 버린 뒤 Stage 2 의 `finished` 가 뒤늦게
+        #   오는 경우다 — 그때는 이미 `_new_session` 이 첫 화면으로 보냈으므로
+        #   조용히 물러나는 것이 맞다.
+        if self._input is None or self._scan is None:
             return
         merged = self._merge_matches()
         # MatchPage 가 들고 있는 점수 캐시 + val_pool 을 매치 검토 페이지에
@@ -1419,6 +1439,7 @@ class MainWindow(QMainWindow):
         # 좌표 매칭 모드 정보 전달 — 검토 화면에서 거리(µm) 표시 + 통계 3분류.
         self._match_review_page.load_state(
             merged, score_cache=ctx.score_cache, val_pool=val_pool,
+            review_scores=ctx.review_scores,
             candidates_by_ref=candidates_by_ref,
             coord_mode=ctx.coord_mode,
             tolerance=ctx.tolerance,
@@ -1475,6 +1496,7 @@ class MainWindow(QMainWindow):
             candidates_by_ref = None
         self._match_review_page.load_state(
             base, score_cache=ctx.score_cache, val_pool=val_pool,
+            review_scores=ctx.review_scores,
             candidates_by_ref=candidates_by_ref,
             coord_mode=ctx.coord_mode,
             tolerance=ctx.tolerance,
@@ -1554,6 +1576,8 @@ class MainWindow(QMainWindow):
             fast_results=ctx.fast_results,
             coord_mode=ctx.coord_mode,
             tolerance=ctx.tolerance,
+            review_scores=ctx.review_scores,
+            coord_classical_refs=ctx.coord_classical_refs,
         )
         self._show_page(self._result_page)
         self._phase = PHASE_NONE

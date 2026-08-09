@@ -29,6 +29,12 @@ score 인코딩 (match_review_page 역산용):
 
 결과는 ``results[(slot, ref_path)] = [(val_path, score), ...]`` (내림차순) 에 저장.
 실패 목록은 ``failed_set: frozenset[(slot, ref_path)]`` 속성으로 접근.
+
+★ ``results`` 에는 **두 종류의 점수가 섞인다** — 위 거리 인코딩(2번)과 폴백이 매긴
+진짜 유사도(3번)다.  값만 보고는 구분할 수 없다(0.83 은 '거리가 tol 의 17%' 일 수도,
+'유사도 83%' 일 수도 있다).  그래서 폴백으로 채점한 ref 를 ``classical_refs`` 에
+따로 남긴다 — 표시 쪽(실패 검토 창)이 유사도 %로 찍을지 '계산 안 함' 으로 찍을지
+고르는 데 쓴다.  **점수 값에는 영향을 주지 않는 순수 표식**이다.
 """
 
 from __future__ import annotations
@@ -124,7 +130,8 @@ class CoordScheduler(QThread):
     SlotPrecomputeWorker / EfficiencyScheduler 와 동일 시그널 계약이므로
     match_page 의 신호 연결 코드를 수정하지 않아도 된다.
 
-    완료 후 ``failed_set`` 속성으로 매치 실패(tolerance×3 초과) ref 목록 조회.
+    완료 후 ``failed_set`` 속성으로 매치 실패(tolerance×3 초과) ref 목록 조회,
+    ``classical_refs`` 속성으로 '좌표가 없어 고전 유사도로 폴백한' ref 목록 조회.
     """
 
     def __init__(self,
@@ -144,6 +151,9 @@ class CoordScheduler(QThread):
         self._stop = threading.Event()
         self.signals = _CoordSignals()
         self.failed_set: Set[Tuple[str, Path]] = set()
+        # 좌표가 없어 **고전 유사도로 폴백 채점**한 ref — 그 점수는 거리 인코딩이
+        # 아니라 진짜 유사도다(모듈 docstring 참고).  값은 건드리지 않고 출처만 남긴다.
+        self.classical_refs: Set[Tuple[str, Path]] = set()
 
         _dflt = _config.DEFAULT_COORD_TOLERANCE
         tol = getattr(cfg, "coord_tolerance", _dflt) if cfg is not None else _dflt
@@ -251,6 +261,8 @@ class CoordScheduler(QThread):
                 self._results[(slot, ref.path)] = [
                     (c.item.path, float(c.score)) for c in cands
                 ]
+                # 이 ref 의 점수는 유사도다 — 거리 인코딩과 섞이지 않게 표식을 남긴다.
+                self.classical_refs.add((slot, ref.path))
                 done_pairs += len(vals)
                 self.signals.progress.emit(min(done_pairs, total_pairs), total_pairs)
             if fallback_refs and not self._stop.is_set():

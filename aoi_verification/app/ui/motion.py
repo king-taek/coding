@@ -18,11 +18,41 @@ from __future__ import annotations
 
 import os
 
-from PyQt6.QtCore import (QEasingCurve, QPoint, QPointF, QPropertyAnimation,
-                          QVariantAnimation)
-from PyQt6.QtWidgets import QGraphicsOpacityEffect, QLabel
+from PyQt6.QtCore import (QEasingCurve, QEvent, QObject, QPoint, QPointF,
+                          QPropertyAnimation, QVariantAnimation)
+from PyQt6.QtWidgets import QApplication, QGraphicsOpacityEffect, QLabel
 
 from . import theme
+
+# ── '지금 보이는 그림이 라이브 위젯이 아니다' 동안 버리는 입력 이벤트 ──────────
+# ★ 목록은 **여기 하나뿐**이다 — `LoadingOverlay._BLOCKED` 도 이걸 그대로 쓴다.
+#   두 벌로 두면 한쪽만 갱신돼 '어떤 덮개는 단축키를 통과시킨다' 가 된다(실제로
+#   전환 스냅샷이 그랬다: 마우스만 흡수하고 `Shortcut` 은 그대로 발화했다).
+# ★ `Shortcut` 이 반드시 들어가야 한다.  `QShortcut` 은 `KeyPress`·
+#   `ShortcutOverride` 를 버려도 **그대로 발화한다**(실측: 셋 중 `Shortcut` 만 막는다).
+BLOCKED_INPUT_EVENTS = (
+    QEvent.Type.Shortcut,          # ← QShortcut 을 실제로 멈추는 유일한 종류
+    QEvent.Type.ShortcutOverride,
+    QEvent.Type.KeyPress,
+    QEvent.Type.KeyRelease,
+)
+
+
+class _InputSwallow(QObject):
+    """전환 스냅샷이 떠 있는 동안 키·단축키를 버리는 앱 전역 필터.
+
+    ★ **오버레이(QLabel)를 부모로 만든다.**  전환이 어떤 이유로든 끝을 못 봐도
+    (컨테이너 파괴·애니메이션 중단) 오버레이와 함께 죽으므로 잠금은 **열리는 쪽**
+    으로 실패한다.  앱 전역 키 필터가 살아남는 실패는 '키보드가 영영 안 먹는 앱'
+    이라 절대 만들면 안 된다(`loading_overlay.hideEvent` 주석의 실측 사고).
+    """
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802
+        try:
+            etype = event.type()
+        except RuntimeError:                    # 이미 파괴된 이벤트 — 막지 않는다
+            return False
+        return etype in BLOCKED_INPUT_EVENTS
 
 # 지속시간 토큰 (ms) — motion_scale 로 스케일.
 # ※ 한때 `DUR_FAST`·`EASE_LARGE`(OutExpo)·`EASE_LEGACY`(InOutCubic)·`fade_out_snapshot()`
@@ -207,8 +237,24 @@ def transition_in(container, new_pixmap, *, forward: bool = True,
     # ★ 마우스를 **흡수한다**.  전환 240ms 동안 스택이 담고 있는 것은 아직 **옛 페이지**라
     #   (main_window._show_page 가 스냅샷을 찍고 되돌려 놓는다), 마우스를 통과시키면
     #   눈에 보이는 새 화면이 아니라 방금 떠난 화면의 그 좌표 위젯이 눌린다.
-    #   (키·단축키는 여전히 통과한다 — 그건 각 페이지의 isVisible 가드가 막는다.)
     overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+    # ★ **키·단축키도 함께 흡수한다.**  예전엔 이걸 '각 페이지의 isVisible 가드'에
+    #   위임한다고 적어 두었는데, 그 위임은 **구조적으로 성립하지 않는다**: 여기서
+    #   문제인 것은 *나가는* 페이지이고 그쪽은 전환 246ms 내내 진짜로
+    #   `isVisible()=True`(스택의 current 이기도 하다) — 가드가 구분할 수단이 없다.
+    #   실측: 전환 중 Ctrl+Z 한 번에 MatchPage 가 마지막 결정을 되돌려 `finished` 가
+    #   **2회** 나갔고, 엑셀 미탐 시트가 5행 → 10행(같은 사진 5장 중복)이 됐다.
+    #   '보이는 그림과 라이브 위젯이 다르다'는 사실을 아는 곳은 여기뿐이므로 여기서 막는다.
+    swallow = _InputSwallow(overlay)
+    _app = QApplication.instance()
+    if _app is not None:
+        _app.installEventFilter(swallow)
+
+    def _release_input():
+        a = QApplication.instance()
+        if a is not None:
+            a.removeEventFilter(swallow)
+
     eff = QGraphicsOpacityEffect(overlay)
     eff.setOpacity(0.0)
     overlay.setGraphicsEffect(eff)
@@ -231,6 +277,7 @@ def transition_in(container, new_pixmap, *, forward: bool = True,
     slide.setEasingCurve(EASE_PRIMARY)
 
     def _finish():
+        _release_input()                   # 키 잠금부터 푼다(아래가 실패해도 열리게)
         _commit()                          # 라이브 새 화면으로 전환 후
         overlay.deleteLater()              # 동일 프레임 스냅샷 제거(무플래시)
 
