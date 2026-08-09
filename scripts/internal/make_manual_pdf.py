@@ -28,14 +28,37 @@
 
 한글 글꼴은 **저장소에 동봉된 NanumSquare** 를 HTML 의 ``@font-face`` 가 상대경로로
 불러온다(빌드 서버에 한글 글꼴이 없어도 된다).  그래서 ``file://`` 로 열어야 한다.
+
+**왜 CLI ``--print-to-pdf`` 가 아니라 CDP(``Page.printToPDF``) 인가**
+
+쪽 꼬리말은 CSS 의 ``@page`` 여백 상자가 찍는다(``설명서_공통.css`` 맨 위 주석).
+거기 들어갈 **문서명**은 두 설명서가 CSS 하나를 나눠 쓰기 때문에 CSS 에 박을 수 없고,
+인쇄하는 쪽이 넣어야 한다 — 이 스크립트가 인쇄 직전 그 문서의 ``<title>`` 을
+``--doc-title`` 로 넣는다.  CLI 인쇄에는 그 값을 넣을 통로가 없다.  덤으로 배경
+인쇄·용지·여백을 기본값에 기대지 않고 명시하게 되고, 실패가 예외로 드러난다
+(파일이 생겼는지로 짐작하지 않는다).
+
+⚠ CDP 의 ``footerTemplate`` 은 **쓰지 않는다** — 인쇄 설정 여백에 그려지는 물건이라
+  ``@page:first{margin:0}`` 을 줘도 **표지에까지 찍힌다**(여백·용지 파라미터 조합을
+  바꿔 가며 네 번 인쇄해 확인했다).  ⚠ 그렇다고 CLI 에서 ``--no-pdf-header-footer``
+  를 빼도 안 된다 — Chromium 기본 꼬리말이 날짜와 ``file:///…`` 전체 경로를 찍는다.
 """
 
 from __future__ import annotations
 
+import base64
+import json
+import os
+import re
 import shutil
+import socket
+import struct
 import subprocess
 import sys
+import tempfile
+import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 REPO = Path(__file__).resolve().parents[2]
 ASSETS = REPO / "dev" / "사용설명서_자료"
@@ -143,6 +166,190 @@ def _section_body(src: Path, number: str, title: str) -> str:
     return body[body.index("<h3>"):].strip()
 
 
+class _WS:
+    """CDP 를 나르는 최소 WebSocket 클라이언트 — 이 용도에 필요한 부분만 구현했다.
+
+    ★ 외부 패키지를 쓰지 않으려고 직접 짰다(이 파일 첫머리의 선택과 같은 이유).
+      규격상 **클라이언트가 보내는 프레임은 반드시 마스킹**해야 하고, 서버가 보내는
+      프레임은 마스킹되지 않는다.  인쇄 결과(base64)는 수 MB 라 64비트 길이와
+      이어붙인 프레임(continuation)을 둘 다 다뤄야 한다.
+    """
+
+    def __init__(self, url: str) -> None:
+        u = urlparse(url)
+        self.sock = socket.create_connection((u.hostname, u.port), timeout=600)
+        req = (f"GET {u.path} HTTP/1.1\r\nHost: {u.hostname}:{u.port}\r\n"
+               "Upgrade: websocket\r\nConnection: Upgrade\r\n"
+               f"Sec-WebSocket-Key: {base64.b64encode(os.urandom(16)).decode()}\r\n"
+               "Sec-WebSocket-Version: 13\r\n\r\n")
+        self.sock.sendall(req.encode())
+        buf = b""
+        while b"\r\n\r\n" not in buf:
+            buf += self.sock.recv(4096)
+        head, self._rest = buf.split(b"\r\n\r\n", 1)
+        if b" 101 " not in head.split(b"\r\n")[0]:
+            raise SystemExit("DevTools 연결에 실패했습니다:\n" + head.decode("latin1"))
+        self._id = 0
+
+    def _read(self, n: int) -> bytes:
+        out, self._rest = self._rest[:n], self._rest[n:]
+        while len(out) < n:
+            chunk = self.sock.recv(min(1 << 20, n - len(out)))
+            if not chunk:
+                raise SystemExit("Chromium 이 DevTools 연결을 끊었습니다.")
+            out += chunk
+        return out
+
+    def _recv(self) -> dict:
+        while True:
+            data = b""
+            while True:
+                b0, b1 = self._read(2)
+                length = b1 & 0x7F
+                if length == 126:
+                    length = struct.unpack(">H", self._read(2))[0]
+                elif length == 127:
+                    length = struct.unpack(">Q", self._read(8))[0]
+                op, payload = b0 & 0x0F, self._read(length)
+                if op == 0x8:
+                    raise SystemExit("Chromium 이 DevTools 연결을 닫았습니다.")
+                if op == 0x9:                       # ping → pong
+                    self._send(0xA, payload)
+                    continue
+                data += payload
+                if b0 & 0x80:                       # FIN
+                    break
+            if data:
+                return json.loads(data)
+
+    def _send(self, op: int, payload: bytes) -> None:
+        n = len(payload)
+        head = bytes([0x80 | op])
+        if n < 126:
+            head += bytes([0x80 | n])
+        elif n < 1 << 16:
+            head += bytes([0x80 | 126]) + struct.pack(">H", n)
+        else:
+            head += bytes([0x80 | 127]) + struct.pack(">Q", n)
+        mask = os.urandom(4)
+        self.sock.sendall(head + mask
+                          + bytes(b ^ mask[i % 4] for i, b in enumerate(payload)))
+
+    def call(self, method: str, params: dict | None = None,
+             session: str | None = None) -> dict:
+        self._id += 1
+        msg: dict = {"id": self._id, "method": method, "params": params or {}}
+        if session:
+            msg["sessionId"] = session
+        self._send(0x1, json.dumps(msg).encode())
+        while True:                                 # 오가는 이벤트는 흘려보낸다
+            m = self._recv()
+            if m.get("id") == self._id:
+                if "error" in m:
+                    raise SystemExit(f"{method} 실패: {m['error']}")
+                return m.get("result", {})
+
+
+def _launch(chrome: str, log: Path, profile: Path) -> tuple[subprocess.Popen, str]:
+    """헤드리스 Chromium 을 띄우고 DevTools 주소를 돌려준다.
+
+    ★ stderr 를 파이프로 받지 마라 — Chromium 은 인쇄 중에도 로그를 계속 뱉는데
+      우리가 읽어 주지 않으면 파이프(64KB)가 차서 **인쇄가 그 자리에서 멈춘다**.
+      파일로 받아 두면 주소도 거기서 찾고, 실패했을 때 그대로 보여 줄 수 있다.
+    """
+    with log.open("wb") as errfile:                  # 자식이 물려받은 뒤엔 닫아도 된다
+        proc = subprocess.Popen(
+            [chrome, "--headless", "--no-sandbox", "--disable-gpu",
+             # 저장소 파일을 상대경로로 읽어야 글꼴·그림·스타일시트가 붙는다.
+             "--allow-file-access-from-files",
+             "--remote-debugging-port=0", f"--user-data-dir={profile}", "about:blank"],
+            stdout=subprocess.DEVNULL, stderr=errfile)
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        found = re.search(r"ws://\S+", log.read_text(errors="replace"))
+        if found:
+            return proc, found.group(0)
+        if proc.poll() is not None:
+            raise SystemExit("Chromium 이 곧바로 종료됐습니다:\n"
+                             + log.read_text(errors="replace")[-2000:])
+        time.sleep(0.1)
+    proc.kill()
+    raise SystemExit("Chromium 이 DevTools 주소를 내놓지 않았습니다:\n"
+                     + log.read_text(errors="replace")[-2000:])
+
+
+def _print_pdf(ws: _WS, src: Path, out: Path) -> None:
+    """문서 하나를 인쇄한다 — 꼬리말 문서명을 넣고, 다 그려진 뒤에 찍는다."""
+    target = ws.call("Target.createTarget", {"url": src.as_uri()})["targetId"]
+    sid = ws.call("Target.attachToTarget",
+                  {"targetId": target, "flatten": True})["sessionId"]
+    # 로딩 완료는 **폴링으로** 본다 — 이벤트 순서에 기대면 이미 지나간 load 를
+    # 영원히 기다리게 된다.  `complete` 는 그림까지 다 받았다는 뜻이고,
+    # 동봉 글꼴은 `document.fonts.ready` 로 한 번 더 기다린다.
+    deadline = time.monotonic() + 120
+    while True:
+        state = ws.call("Runtime.evaluate",
+                        {"expression": "document.readyState",
+                         "returnByValue": True}, session=sid)
+        if state["result"]["value"] == "complete":
+            break
+        if time.monotonic() > deadline:
+            raise SystemExit(f"{src.name} 이 2분 안에 다 열리지 않았습니다.")
+        time.sleep(0.1)
+    # 꼬리말 문서명 — 이 문서의 <title> 을 그대로 CSS 변수로 넣는다.
+    title = ws.call("Runtime.evaluate", {
+        "expression": "document.fonts.ready.then(() => {"
+                      "document.documentElement.style.setProperty("
+                      "'--doc-title', JSON.stringify(document.title));"
+                      "return document.title})",
+        "awaitPromise": True, "returnByValue": True}, session=sid)
+    if not title["result"]["value"]:
+        raise SystemExit(f"{src.name} 에 <title> 이 없습니다 — 꼬리말에 넣을 "
+                         "문서명이 없습니다.")
+    data = ws.call("Page.printToPDF", {
+        # 용지·여백은 CSS `@page` 하나만 보게 한다(`@page:first` 의 표지 여백 0
+        # 까지 맞아야 한다).  여기서 따로 주면 두 곳을 늘 맞춰 둬야 한다.
+        "preferCSSPageSize": True,
+        # 콜아웃 배경·표 얼룩말이 배경이라 반드시 켠다.
+        "printBackground": True,
+        # 꼬리말은 CSS 여백 상자가 찍는다 — 첫머리 주석 참조.
+        "displayHeaderFooter": False,
+    }, session=sid)["data"]
+    out.write_bytes(base64.b64decode(data))
+    # 인쇄에 실패하면 그 자리에서 멈추므로 닫는 것은 성공한 뒤로 충분하다
+    # (실패 경로는 main 의 finally 가 브라우저를 통째로 내린다).
+    ws.call("Target.closeTarget", {"targetId": target})
+
+
+def _check_footer(pdf: Path) -> None:
+    """꼬리말이 **매 쪽에 찍히고 표지에는 없는지** 확인한다.
+
+    ``@page`` 여백 상자가 사라지거나 ``@page:first`` 규칙이 깨져도 PDF 는 멀쩡히
+    만들어진다 — 조용한 실패라 여기서 본다.  ``pdftotext`` 가 없으면 건너뛴다
+    (있으면 좋고 없어도 되는 검사다).
+    """
+    exe = shutil.which("pdftotext")
+    total = _pages(pdf)
+    if not exe or total == "?":
+        print("  (pdftotext/pdfinfo 가 없어 꼬리말 검사는 건너뜁니다)")
+        return
+
+    def text(page: str) -> str:
+        return subprocess.run([exe, "-f", page, "-l", page, str(pdf), "-"],
+                              capture_output=True, text=True).stdout
+
+    # 쪽 번호는 `12 / 28` 처럼 찍히지만 추출하면 사이 공백이 사라질 수 있다.
+    mark = re.compile(rf"\d+\s*/\s*{total}\b")
+    if not mark.search(text(total)):
+        raise SystemExit(
+            f"{pdf.name} 마지막 쪽에 쪽 번호가 없습니다 — 설명서_공통.css 의 "
+            "`@page` 여백 상자(@bottom-left/@bottom-right)를 확인하세요.")
+    if mark.search(text("1")):
+        raise SystemExit(
+            f"{pdf.name} 표지에 꼬리말이 찍혔습니다 — 설명서_공통.css 의 "
+            "`@page:first` 에서 @bottom-left/@bottom-right 를 지웠는지 확인하세요.")
+
+
 def main() -> int:
     for src, _ in DOCS:
         if not src.exists():
@@ -152,31 +359,34 @@ def main() -> int:
     _check_shared()
 
     chrome = _chromium()
-    for src, out in DOCS:
-        cmd = [
-            chrome, "--headless", "--no-sandbox", "--disable-gpu",
-            "--no-pdf-header-footer",
-            # 저장소 파일을 상대경로로 읽어야 글꼴·그림·스타일시트가 붙는다.
-            "--allow-file-access-from-files",
-            f"--print-to-pdf={out}",
-            src.as_uri(),
-        ]
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-        if not out.exists():
-            sys.stderr.write(proc.stderr[-2000:] + "\n")
-            raise SystemExit(f"PDF 생성 실패: {out.name}")
+    work = Path(tempfile.mkdtemp(prefix="manual-pdf-"))
+    proc = None
+    try:
+        proc, ws_url = _launch(chrome, work / "chrome.log", work / "profile")
+        ws = _WS(ws_url)
+        for src, out in DOCS:
+            _print_pdf(ws, src, out)
 
-        size = out.stat().st_size
-        if size < 200_000:
-            raise SystemExit(
-                f"{out.name} 이 너무 작습니다({size} bytes) — 그림이 빠졌을 수 있습니다.")
-        # ★ 글꼴이 실제로 박혔는지 — 스타일시트를 못 읽으면 Chromium 은 조용히 기본
-        #   글꼴로 인쇄한다.  '만들어졌다' 는 성공의 증거가 아니다.
-        if b"NanumSquare" not in out.read_bytes():
-            raise SystemExit(
-                f"{out.name} 에 NanumSquare 가 박히지 않았습니다 — "
-                "설명서_공통.css 의 글꼴 상대경로를 확인하세요.")
-        print(f"{out}  ({size / 1e6:.1f} MB, {_pages(out)} 쪽)")
+            size = out.stat().st_size
+            if size < 200_000:
+                raise SystemExit(
+                    f"{out.name} 이 너무 작습니다({size} bytes) — 그림이 빠졌을 수 있습니다.")
+            # ★ 글꼴이 실제로 박혔는지 — 스타일시트를 못 읽으면 Chromium 은 조용히 기본
+            #   글꼴로 인쇄한다.  '만들어졌다' 는 성공의 증거가 아니다.
+            if b"NanumSquare" not in out.read_bytes():
+                raise SystemExit(
+                    f"{out.name} 에 NanumSquare 가 박히지 않았습니다 — "
+                    "설명서_공통.css 의 글꼴 상대경로를 확인하세요.")
+            print(f"{out}  ({size / 1e6:.1f} MB, {_pages(out)} 쪽)")
+            _check_footer(out)
+    finally:
+        if proc is not None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+        shutil.rmtree(work, ignore_errors=True)
 
     # ★ 두 PDF 가 **모두** 검증을 통과한 뒤에만 캡처를 치운다(sweep_captures 주석 참조).
     swept = sweep_captures(ASSETS)
