@@ -286,6 +286,7 @@ def test_result_edit_updates_the_round_trip_base(styled_qapp, tmp_path):
     win._reviewed_unmatched_keys = {marked.key}
     win._reviewed_unmatched = [MissEntry(slot=marked.slot, side="ref",
                                          path=marked.ref_path)]
+    win._skipped_a = {}
 
     # 실패 검토가 그 표시된 기준 사진에 짝을 찾아 줬다 → 결과가 바뀐다.
     newly = MatchResult(slot=marked.slot, ref_path=marked.ref_path,
@@ -299,3 +300,79 @@ def test_result_edit_updates_the_round_trip_base(styled_qapp, tmp_path):
         "짝을 찾은 기준 사진의 옛 '매치 없음' 행이 남아 중복된다"
     assert win._reviewed_unmatched_keys == set(), \
         "짝을 찾았는데 '매치 없음' 표시가 그대로다"
+
+
+# ---------------------------------------------------------------------------
+# 9. 실패 검토로 해결한 사진이 왕복 뒤 '미매칭' 으로 되살아나던 문제
+#    (검사관 라운드 2 — A-01 / B-01)
+# ---------------------------------------------------------------------------
+def test_resolved_ref_leaves_the_never_matched_record(styled_qapp, tmp_path):
+    """미매칭은 `_skipped_a` 에서 **매번 다시 만들어진다**.
+
+    실패 검토가 짝을 찾아 줘도 그 기록을 빼지 않으면, 결과↔검토를 한 번 오간 것만으로
+    그 사진이 '미매칭' 으로 되살아나 **매치와 미매칭 양쪽에** 남는다 — 엑셀에 같은
+    기준 사진이 두 줄로 찍힌다.
+    """
+    import aoi_verification.app.ui.main_window as MW
+
+    win = MW.MainWindow.__new__(MW.MainWindow)
+    base = _matches(2, tmp_path)
+    skipped_item = ImageItem(slot="S1", path=tmp_path / "skip0.jpg", side="ref")
+    (tmp_path / "skip0.jpg").write_bytes(b"")
+    win._reviewed_matches = list(base)
+    win._reviewed_all_matches = list(base)
+    win._reviewed_unmatched_keys = set()
+    win._reviewed_unmatched = []
+    win._skipped_a = {"S1": [skipped_item]}
+
+    # 실패 검토가 skip0 에 짝을 찾아 줬다.
+    newly = MatchResult(slot="S1", ref_path=skipped_item.path,
+                        val_path=tmp_path / "spare0.jpg", score=0.7)
+    MW.MainWindow._on_result_edited(win, base + [newly], [])
+
+    left = [it.path for its in win._skipped_a.values() for it in its]
+    assert skipped_item.path not in left, \
+        "짝을 찾았는데 '자동 매칭 실패' 기록에 그대로 남아 있다 — 왕복하면 되살아난다"
+
+
+def test_a_matched_ref_can_never_be_reported_unmatched(styled_qapp, tmp_path):
+    """나가는 값에서 한 번 더 막는 불변식 — 출처가 어긋나도 결과는 모순되지 않는다."""
+    import ast
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parents[2]
+           / "aoi_verification/app/ui/main_window.py").read_text(encoding="utf-8")
+    fn = next(n for n in ast.walk(ast.parse(src))
+              if isinstance(n, ast.FunctionDef) and n.name == "_finish_session")
+    body = ast.unparse(fn)
+    assert "matched_refs" in body, \
+        "_finish_session 이 '매치된 ref 는 미매칭일 수 없다' 를 보장하지 않는다"
+
+
+# ---------------------------------------------------------------------------
+# 10. 결과를 다시 그릴 때 옛 통계 타일이 남던 문제 (검사관 라운드 2 — B-02)
+# ---------------------------------------------------------------------------
+def test_summary_rerender_does_not_accumulate_tiles(styled_qapp, tmp_path):
+    """통계 타일은 `addLayout` 으로 들어간 중첩 레이아웃 안에 있다.
+
+    비우는 쪽이 `item.widget()` 만 보면 그 타일들을 놓치고, 타일은 카드를 부모로
+    두므로 **그 자리에 그대로 남아** 새 타일 뒤로 삐져나온다(그릴 때마다 누적).
+    """
+    from PyQt6.QtWidgets import QFrame
+    from aoi_verification.app.models.result import FinalResult
+    from aoi_verification.app.ui.pages.result_page import ResultPage
+
+    page = ResultPage()
+    page.resize(1280, 800)
+    page.show()
+    for k in range(4):
+        res = FinalResult(mode="single", ref_machine="TB-15", val_machine="K-6",
+                          matches=_matches(k + 1, tmp_path),
+                          unmatched_refs=[MissEntry(slot="S1", side="ref",
+                                                    path=tmp_path / "r0.jpg")])
+        page.show_result(res)
+        styled_qapp.processEvents()
+        tiles = [f for f in page.findChildren(QFrame)
+                 if f.property("role") == "statTile" and f.parent() is not None]
+        assert len(tiles) == 3, \
+            f"{k + 1}번째 렌더에서 통계 타일이 {len(tiles)}개 — 옛 타일이 남았다"
+    page.deleteLater()

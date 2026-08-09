@@ -25,6 +25,25 @@ from ... import config as _config
 _DFLT_TOL = _config.DEFAULT_COORD_TOLERANCE
 
 
+def _clear_layout(layout) -> None:
+    """레이아웃을 비우고 **중첩 레이아웃 안의 위젯까지** 지운다.
+
+    `item.widget()` 만 보면 `addLayout` 으로 들어간 것들을 놓친다 — 그 안의 위젯은
+    부모(카드)를 그대로 두고 있어서 레이아웃에서 빠져도 화면에 남는다.
+    """
+    while layout.count():
+        item = layout.takeAt(0)
+        w = item.widget()
+        if w is not None:
+            w.setParent(None)          # 이벤트 루프를 안 돌려도 즉시 화면에서 빠지게
+            w.deleteLater()
+            continue
+        child = item.layout()
+        if child is not None:
+            _clear_layout(child)
+            child.deleteLater()
+
+
 class ResultPage(QWidget):
     """검증 결과 요약 + 저장."""
 
@@ -185,12 +204,12 @@ class ResultPage(QWidget):
         # 검토 후 다시 그려도 ‘자동 매치 결과 검토 권장’ 라벨이 살아 있도록
         # 마지막 auto_mode 값을 기억해 재렌더링에서 재사용한다.
         self._auto_mode = bool(auto_mode)
-        # 기존 요약 비우기
-        while self._summary_layout.count():
-            it = self._summary_layout.takeAt(0)
-            w = it.widget()
-            if w is not None:
-                w.deleteLater()
+        # 기존 요약 비우기 — ★ **중첩 레이아웃 안까지** 훑어야 한다.  통계 타일은
+        #   `addLayout` 으로 들어간 QHBoxLayout 안에 있어서 `item.widget()` 이 None 이고,
+        #   예전에는 그래서 지워지지 않았다.  타일은 카드를 부모로 두므로 레이아웃에서
+        #   빠져도 **그 자리에 그대로 남아** 새 타일 뒤로 삐져나왔다(결과를 다시 그릴
+        #   때마다 누적).  재귀로 위젯까지 확실히 지운다.
+        _clear_layout(self._summary_layout)
 
         # 라인 헬퍼
         def line(text: str, role: str = "subtitle"):

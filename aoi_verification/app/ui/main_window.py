@@ -1439,6 +1439,13 @@ class MainWindow(QMainWindow):
         self._reviewed_unmatched = list(unmatched)
         # 짝을 찾은 기준 사진은 더 이상 '매치 없음' 이 아니다 — 그 표시를 걷어낸다.
         matched_refs = {m.ref_path for m in matches}
+        # ★ `_skipped_a`(자동 매칭이 짝을 못 찾은 기록)에서도 빼야 한다.  `_finish_session`
+        #   은 미매칭을 매번 **여기서 다시 만들기** 때문에, 이걸 빼지 않으면 실패 검토로
+        #   해결한 사진이 왕복 뒤 '미매칭' 으로 되살아나 매치와 양쪽에 남는다.
+        for slot, its in list(self._skipped_a.items()):
+            kept = [it for it in its if it.path not in matched_refs]
+            if len(kept) != len(its):
+                self._skipped_a[slot] = kept
         still_marked = [m for m in getattr(self, "_reviewed_all_matches", [])
                         if m.ref_path not in matched_refs
                         and m.key in self._reviewed_unmatched_keys]
@@ -1498,6 +1505,21 @@ class MainWindow(QMainWindow):
         # 사용자가 매치 검토에서 ‘매치 없음’ 으로 표시한 ref 들 합치기.
         if self._reviewed_unmatched:
             unmatched_refs.extend(self._reviewed_unmatched)
+        # ★ 불변식: **짝을 찾은 기준 사진은 미매칭에 있을 수 없다.**  이 함수는 결과↔검토를
+        #   오갈 때마다 다시 도는데, 미매칭은 `_skipped_a`(자동 매칭 실패 기록)에서 매번
+        #   새로 만들고 매치는 편집된 목록에서 온다 — 두 출처가 어긋나면 같은 사진이
+        #   '매칭' 과 '미매칭' 양쪽에 남아 엑셀에 두 줄로 찍힌다(실제로 그랬다).
+        #   출처를 고치는 것과 별개로, 나가는 값에서 한 번 더 막는다.
+        matched_refs = {m.ref_path for m in merged}
+        seen: set = set()
+        deduped: list[MissEntry] = []
+        for u in unmatched_refs:
+            key = (u.slot, Path(u.path))
+            if Path(u.path) in matched_refs or key in seen:
+                continue
+            seen.add(key)
+            deduped.append(u)
+        unmatched_refs = deduped
 
         result = FinalResult(
             mode=self._input.mode,
