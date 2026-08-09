@@ -75,7 +75,19 @@ class ResultPage(QWidget):
         self._summary_card = NeonCard(role="card", parent=self)
         self._summary_card.setMaximumWidth(820)
         self._summary_layout = self._summary_card.body()
-        root.addWidget(self._summary_card, alignment=Qt.AlignmentFlag.AlignLeft)
+        # ★ `addWidget(..., alignment=AlignLeft)` 로 왼쪽에 붙이지 **않는다.**  정렬 플래그를
+        #   주면 Qt 는 위젯을 늘리지 않고 **sizeHint 크기 그대로** 놓는데(실측 폭 306px),
+        #   그러면 안쪽 줄바꿈 라벨이 좁아져 줄 수가 늘고 — 높이는 이미 정해진 뒤라 —
+        #   통계 숫자와 파일 경로가 세로로 잘린다(실측 타일 35px / 필요 69px).
+        #   대신 스트레치로 밀어 왼쪽에 두면 폭은 maximumWidth 까지 정상적으로 늘어난다.
+        card_row = QHBoxLayout()
+        card_row.setContentsMargins(0, 0, 0, 0)
+        # 카드가 먼저 늘어나 maximumWidth 에서 멈추고, **남는 폭은 오른쪽 스페이서**가
+        # 가져간다 — 그래야 카드가 왼쪽에 붙는다(스페이서가 없으면 남는 폭이 양쪽으로
+        # 갈려 카드가 가운데로 밀린다).
+        card_row.addWidget(self._summary_card, 100)
+        card_row.addStretch(1)
+        root.addLayout(card_row)
 
         root.addStretch(1)
 

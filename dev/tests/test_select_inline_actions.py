@@ -53,26 +53,37 @@ def test_inline_buttons_are_wide_enough_to_read(styled_qapp, tmp_path):
     좌측 패널은 폭이 330px 남짓이라 제목 + 액션 2개 + [선택 모드] 를 한 줄에
     넣으면 서로를 밀어낸다 — 실측 필요 113px 에 실제 71px 이 배정돼
     "선택 1 장 검증" 이 "1 장" 으로, "선택 모드" 가 "택 모" 로 잘렸다.
-    액션은 제목 줄이 아니라 **그 아래 제 줄**에 둔다.
-    """
-    page = _page(styled_qapp, tmp_path)
-    page.resize(1600, 950)
-    panel = page.left_panel
-    sec = next(iter(panel._sections.values()))
-    tile = sec.grid._tiles[0]
-    tile.set_inline_selected(True)
-    sec.grid._on_sel_toggle(tile.entry, True)
-    styled_qapp.processEvents()
+    액션은 제목 줄이 아니라 **그 아래 제 줄**에, 세로로 쌓아 둔다.
 
-    for b in panel._inline_buttons:
-        assert b.width() >= b.sizeHint().width(), (
-            f"{b.text()!r} 이 잘린다 (필요 {b.sizeHint().width()}px, "
-            f"실제 {b.width()}px)")
-    # 같은 줄을 나눠 쓰던 [선택 모드] 도 온전해야 한다.
-    sb = panel._select_btn
-    assert sb.width() >= sb.sizeHint().width(), \
-        f"[선택 모드] 가 잘린다 (필요 {sb.sizeHint().width()}px, 실제 {sb.width()}px)"
-    page.deleteLater()
+    ⚠ 창 크기와 **선택 장수**를 함께 흔들어야 한다.  1600x950·한 자리에서만 재면
+    통과하는데 1280x800·두 자리에서 다시 잘린다(실측 필요 122px / 실제 118px) —
+    실제로 그렇게 한 번 놓쳤다.
+    """
+    for w_px, h_px in ((1280, 800), (1600, 950)):
+        page = _page(styled_qapp, tmp_path, n=30)
+        page.resize(w_px, h_px)
+        panel = page.left_panel
+        sec = next(iter(panel._sections.values()))
+        styled_qapp.processEvents()
+
+        for n in (1, 12, 29):          # 한 자리 · 두 자리 · 거의 전량
+            for t in sec.grid._tiles:
+                t.set_inline_selected(False)
+            for t in sec.grid._tiles[:n]:
+                t.set_inline_selected(True)
+            sec.grid._on_sel_toggle(sec.grid._tiles[0].entry, True)
+            styled_qapp.processEvents()
+
+            for b in panel._inline_buttons:
+                assert b.width() >= b.sizeHint().width(), (
+                    f"{w_px}x{h_px} 선택 {n}장 — {b.text()!r} 이 잘린다 "
+                    f"(필요 {b.sizeHint().width()}px, 실제 {b.width()}px)")
+            # 같은 줄을 나눠 쓰던 [선택 모드] 도 온전해야 한다.
+            sb = panel._select_btn
+            assert sb.width() >= sb.sizeHint().width(), (
+                f"{w_px}x{h_px} — [선택 모드] 가 잘린다 "
+                f"(필요 {sb.sizeHint().width()}px, 실제 {sb.width()}px)")
+        page.deleteLater()
 
 
 def test_inline_row_collapses_when_nothing_is_selected(styled_qapp, tmp_path):

@@ -217,3 +217,85 @@ def test_every_return_to_setup_releases_the_wakelock() -> None:
     calls = {ast.unparse(n.func) for n in ast.walk(fn) if isinstance(n, ast.Call)}
     assert "wakelock.release" in calls, \
         "_on_select_cancelled 이 절전 억제를 풀지 않는다"
+
+
+# ---------------------------------------------------------------------------
+# 7. 결과 통계 타일이 세로로 잘려 읽을 수 없던 문제 (검사관 B, V-07)
+# ---------------------------------------------------------------------------
+def test_stat_tiles_are_not_clipped(styled_qapp, tmp_path):
+    """`addWidget(..., alignment=AlignLeft)` 는 위젯을 **sizeHint 크기 그대로** 놓는다.
+
+    그러면 카드가 maximumWidth 까지 늘지 못해(실측 폭 306px) 안쪽 줄바꿈 라벨이
+    좁아지고, 줄 수가 늘어난 만큼의 높이는 이미 정해진 뒤라 통계 숫자와 파일
+    경로가 세로로 잘렸다(실측 타일 35px / 필요 69px).
+
+    앱이 실제로 만드는 결과 파일 경로는 항상 길어서 이 경로를 늘 탄다.
+    """
+    from PyQt6.QtWidgets import QFrame, QLabel
+    from aoi_verification.app import i18n
+    from aoi_verification.app.models.result import FinalResult
+    from aoi_verification.app.ui.pages.result_page import ResultPage
+
+    target = (Path("C:/Users/hong/Desktop/AOI_Verify/결과")
+              / i18n.KO.RESULT_FILE_TITLE_FMT.format(val="K-6", ref="TB-15"))
+    res = FinalResult(mode="single", ref_machine="TB-15", val_machine="K-6",
+                      matches=_matches(1, tmp_path),
+                      slot_only_ref=["PGEE48", "PGEE49", "PGEE50"],
+                      unmatched_refs=[MissEntry(slot="S1", side="ref",
+                                                path=tmp_path / "r0.jpg")])
+    for w_px, h_px in ((1280, 800), (1600, 950)):
+        page = ResultPage()
+        page.show_result(res, target_path=target)
+        page.resize(w_px, h_px)
+        page.show()
+        styled_qapp.processEvents()
+
+        clipped = [(l.property("role"), l.text(), l.height(), l.sizeHint().height())
+                   for l in page.findChildren(QLabel)
+                   if l.property("role") in ("statValue", "statCaption")
+                   and l.height() < l.sizeHint().height()]
+        tiles = [(f.height(), f.minimumSizeHint().height())
+                 for f in page.findChildren(QFrame)
+                 if f.property("role") == "statTile"]
+        assert not clipped, \
+            f"{w_px}x{h_px} 통계 글자가 잘린다: {clipped} / 타일(h,필요)={tiles}"
+        # 카드는 여전히 **왼쪽**에 붙어 있어야 한다(가운데로 밀리면 안 된다).
+        assert page._summary_card.x() < 80, \
+            f"{w_px}x{h_px} 요약 카드가 왼쪽에 붙어 있지 않다 (x={page._summary_card.x()})"
+        page.deleteLater()
+
+
+# ---------------------------------------------------------------------------
+# 8. 실패 검토로 확정한 매치가 왕복에서 사라지던 문제 (검사관 A, U-10)
+# ---------------------------------------------------------------------------
+def test_result_edit_updates_the_round_trip_base(styled_qapp, tmp_path):
+    """`_reenter_review` 는 `_reviewed_all_matches` 를 먼저 본다.
+
+    실패 검토로 신규 매치를 확정해도 그 목록을 갱신하지 않으면 **옛 목록이 항상
+    이겨** 신규 매치가 검토 화면에 실리지 않고, 재완료 때 결과에서 사라지며 그
+    기준 사진이 '미매칭' 으로 되돌아간다 — 사용자가 눈으로 확인해 확정한 것이
+    조용히 없어지는 것이다.
+    """
+    import aoi_verification.app.ui.main_window as MW
+
+    win = MW.MainWindow.__new__(MW.MainWindow)
+    base = _matches(3, tmp_path)
+    marked = base[2]                       # 한 건은 '매치 없음' 으로 표시돼 있었다
+    win._reviewed_matches = [base[0], base[1]]
+    win._reviewed_all_matches = list(base)
+    win._reviewed_unmatched_keys = {marked.key}
+    win._reviewed_unmatched = [MissEntry(slot=marked.slot, side="ref",
+                                         path=marked.ref_path)]
+
+    # 실패 검토가 그 표시된 기준 사진에 짝을 찾아 줬다 → 결과가 바뀐다.
+    newly = MatchResult(slot=marked.slot, ref_path=marked.ref_path,
+                        val_path=tmp_path / "v_new.jpg", score=0.8)
+    MW.MainWindow._on_result_edited(win, [base[0], base[1], newly], [])
+
+    keys = {m.key for m in win._reviewed_all_matches}
+    assert newly.key in keys, "실패 검토로 확정한 매치가 왕복 기반에 없다"
+    assert marked.ref_path not in {
+        m.ref_path for m in win._reviewed_all_matches if m.key != newly.key}, \
+        "짝을 찾은 기준 사진의 옛 '매치 없음' 행이 남아 중복된다"
+    assert win._reviewed_unmatched_keys == set(), \
+        "짝을 찾았는데 '매치 없음' 표시가 그대로다"

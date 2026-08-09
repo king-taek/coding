@@ -1427,9 +1427,24 @@ class MainWindow(QMainWindow):
         self._show_page(self._match_review_page)
 
     def _on_result_edited(self, matches: list, unmatched: list) -> None:
-        """결과 화면에서 결과가 바뀌었다(실패 검토로 신규 매치 확정 등)."""
+        """결과 화면에서 결과가 바뀌었다(실패 검토로 신규 매치 확정 등).
+
+        ★ **왕복의 기반(`_reviewed_all_matches`)까지 함께 고쳐야 한다.**  `_reenter_review`
+        는 그 목록을 먼저 보는데, 여기서 갱신하지 않으면 비어 있지 않은 **옛 목록**이
+        항상 이겨 실패 검토로 확정한 매치가 검토 화면에 실리지 않는다.  그 상태로
+        [검토 완료] 를 다시 누르면 그 쌍이 결과에서 사라지고 기준 사진이 '미매칭' 으로
+        되돌아간다 — 사용자가 눈으로 확인해 확정한 것이 조용히 없어지는 것이다.
+        """
         self._reviewed_matches = list(matches)
         self._reviewed_unmatched = list(unmatched)
+        # 짝을 찾은 기준 사진은 더 이상 '매치 없음' 이 아니다 — 그 표시를 걷어낸다.
+        matched_refs = {m.ref_path for m in matches}
+        still_marked = [m for m in getattr(self, "_reviewed_all_matches", [])
+                        if m.ref_path not in matched_refs
+                        and m.key in self._reviewed_unmatched_keys]
+        # 매치가 있는 행은 `matches` 가, 여전히 표시된 행은 옛 목록이 가져온다.
+        self._reviewed_all_matches = list(matches) + still_marked
+        self._reviewed_unmatched_keys = {m.key for m in still_marked}
 
     def _reenter_review(self) -> None:
         """결과 화면 → 매치 검토 화면 복귀(U-10).

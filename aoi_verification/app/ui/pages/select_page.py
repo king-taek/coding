@@ -110,8 +110,12 @@ class _SidePanel(QFrame):
         #   330px 남짓이라 제목 + 액션 2개 + [선택 모드] 를 한 줄에 넣으면 서로를
         #   밀어 라벨이 잘린다("선택 1 장 검증" → "1 장", "선택 모드" → "택 모").
         #   실측: 필요 113px, 실제 71px.
+        #   ★ 두 액션을 **세로로 쌓는다.**  가로로 나란히 두면 1280x800(패널 263px)에서
+        #   장수가 두 자리만 돼도 다시 잘린다(실측 필요 122px / 실제 118px).  세로로
+        #   쌓으면 각 버튼이 패널 폭을 통째로 써서 세 자리 장수까지 여유가 있고,
+        #   클릭 대상도 커진다(하우스 관습: 클릭 대상은 크고 명확하게).
         self._inline_buttons: list[NeonButton] = []
-        self._inline_row = QHBoxLayout()
+        self._inline_row = QVBoxLayout()
         self._inline_row.setContentsMargins(0, 0, 0, 0)
         self._inline_row.setSpacing(6)
         if self._inline_select and self._actions:
