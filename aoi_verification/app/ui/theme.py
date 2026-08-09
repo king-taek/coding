@@ -33,6 +33,16 @@ class Profile:
     font_title: int = 26
     font_subtitle: int = 15
     font_caption: int = 12
+    # ★ **읽어야 하는** 캡션 등급(통계 타일 캡션·타일 파일명)은 12px 로는 WCAG 4.5:1 을
+    #   실측에서 못 넘겼다 — 색 문제가 아니다(토큰 조합은 라이트 5.65~16.67, 다크
+    #   5.41~15.27 로 전부 통과).  12px 에서는 획이 1px 미만이라 **렌더된 픽셀이 지정색에
+    #   도달하지 못한다**(실측 3.58~4.23:1).  가장 진한 단일 픽셀로 재도 다크 4.61 로 겨우
+    #   걸쳐, 색을 더 진하게 하는 것으로는 한계였다.  그래서 크기·굵기를 올린다.
+    #   ※ `font_caption`(12px) 은 판정 칩처럼 **폭이 고정된** 자리가 계속 쓴다 — 그 값을
+    #     올리면 칩(chip_w=88)이 넘친다.  등급을 나누는 이유가 그것이다.
+    #   회귀 가드: `dev/tests/test_caption_contrast.py`
+    font_caption_lg: int = 13
+    font_caption_lg_weight: int = 600
     # ★ 400 이다.  한때 300(얇은 표제)이었지만 동봉 폰트는 Regular/Bold 두 굵기뿐이라
     #   300 요청은 Qt 가 400 으로 스냅했다 — 코드의 의도와 화면이 갈라져 있었고,
     #   NanumSquare Light 가 설치된 PC 에서만 얇게 나와 PC 마다 표제가 달라질 수 있었다.
@@ -258,6 +268,8 @@ def _derive_tokens() -> dict:
         "font_base_sz": f"{p.font_base}px", "font_title_sz": f"{p.font_title}px",
         "font_sub_sz": f"{p.font_subtitle}px",
         "font_caption_sz": f"{p.font_caption}px",
+        "font_caption_lg_sz": f"{p.font_caption_lg}px",
+        "font_caption_lg_weight": str(p.font_caption_lg_weight),
         "title_weight": str(p.title_weight),
         "title_tracking": f"{p.title_tracking}px",
         # 형태

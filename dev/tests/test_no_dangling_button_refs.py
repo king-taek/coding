@@ -27,7 +27,27 @@ _NOT_BUTTONS = {
 }
 
 # 라벨에 붙는 장식(화살표·체크·중점 등)은 같은 버튼으로 본다.
-_ORNAMENT = re.compile(r"[←→✕✓↩▾▴·\s]")
+# ★ '↔' 는 SLOT_MAP_ADD("묶기 ↔") 때문에 들어 있다.  '…' 은 **넣지 않는다** —
+#   SCOPE_SUBSET 은 "일부 슬롯만…" 이고, 안내가 그 말줄임표를 빼고 부르면 화면과
+#   표기가 어긋난다(실제로 어긋나 있었다).  장식으로 접으면 그 어긋남을 못 잡는다.
+_ORNAMENT = re.compile(r"[←→✕✓↩▾▴·↔\s]")
+
+# 홑/겹따옴표 안에서 화면 라벨을 부르는 자리.  ★ 대괄호만 보던 옛 가드는 **8건을
+# 통째로 놓쳤다** — 이 저장소의 안내문은 버튼을 부를 때 대괄호만큼이나 ‘…’ 를 쓴다.
+# 그중 하나(SETUP_HOW_TO_USE_BODY 의 ‘모두 자동’)는 이 가드를 만들게 한 사고와
+# **같은 형태의 재발**이었다: 세그먼트 라벨은 '모든 사진 자동' 인데 안내만 옛 이름을
+# 불렀고, 같은 것을 부르는 RUN_OPTIONS_HINT 는 제대로 적고 있었다.
+_QUOTED = re.compile(r"[‘'\"]([^‘’'\"\n]{1,20})[’'\"]")
+
+# 따옴표 안이지만 **화면 라벨이 아닌** 것 — 엑셀 시트 이름·파일/폴더 이름·명령어.
+# 여기 추가하려면 "이건 정말 화면 라벨이 아닌가?" 를 먼저 물어라.
+_NOT_SCREEN_LABELS = {
+    "전체 양식",     # 엑셀 시트 이름(exporter) — 화면 라벨이 아니다
+    "양식",          # 폴더 이름
+    "양식.xlsx",     # 파일 이름
+    "AOI_Verify",    # 배포 폴더 이름
+    "git pull",      # 사용자가 칠 명령어
+}
 
 
 def _strings() -> dict[str, str]:
@@ -68,6 +88,40 @@ def test_every_bracketed_reference_names_a_real_label() -> None:
         "안내 문구가 존재하지 않는 버튼을 가리킨다 — 버튼을 지웠다면 그것을 설명하던\n"
         "문장도 함께 고쳐야 한다(사용자에게 없는 버튼을 누르라고 말하게 된다):\n  "
         + "\n  ".join(dangling))
+
+
+def test_every_quoted_reference_names_a_real_label() -> None:
+    """따옴표로 부르는 이름도 실제 화면 라벨이어야 한다."""
+    strings = _strings()
+    labels = _label_set(strings)
+    normalized = {_ORNAMENT.sub("", l) for l in labels}
+
+    dangling = []
+    for key, value in strings.items():
+        for ref in _QUOTED.findall(value):
+            text = ref.strip()
+            if not text or "{" in text:          # 포맷 자리표시자는 이름이 아니다
+                continue
+            if text in _NOT_SCREEN_LABELS or text in _NOT_BUTTONS:
+                continue
+            if text in labels or _ORNAMENT.sub("", text) in normalized:
+                continue
+            dangling.append(f"{key}: ‘{text}’")
+
+    assert dangling == [], (
+        "안내 문구가 화면에 없는 이름을 부른다 — 라벨을 바꿨다면 그것을 설명하던\n"
+        "문장도 함께 고쳐야 한다:\n  " + "\n  ".join(dangling))
+
+
+def test_the_quoted_guard_would_catch_a_renamed_label() -> None:
+    """가드가 늘 통과하는 빈 껍데기가 아님을 스스로 증명한다."""
+    strings = dict(_strings())
+    strings["_FAKE_HINT"] = "자동화 수준에서 ‘모두 자동’ 을 고르세요."   # 옛 이름
+    labels = _label_set(strings)
+    normalized = {_ORNAMENT.sub("", l) for l in labels}
+    found = [r for r in _QUOTED.findall(strings["_FAKE_HINT"])
+             if r not in labels and _ORNAMENT.sub("", r) not in normalized]
+    assert found == ["모두 자동"]
 
 
 def test_the_guard_would_catch_a_removed_button() -> None:

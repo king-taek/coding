@@ -22,6 +22,10 @@ from typing import Optional
 
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
+# 사용자 노출 문구는 i18n 에만 — 아래 사유들은 OPENVINO_INSTALL_FAILED_FMT 의 {error}
+# 자리로 그대로 화면에 나간다(로그가 아니다).
+from .. import i18n
+
 
 # ---------------------------------------------------------------------------
 # 감지 헬퍼
@@ -111,21 +115,24 @@ class OpenVinoInstallWorker(QThread):
                 text=True, bufsize=1,
             )
         except Exception as exc:
-            self.signals.finished.emit(False, f"pip 실행 실패: {exc}")
+            self.signals.finished.emit(
+                False, i18n.KO.OPENVINO_ERR_PIP_START_FMT.format(error=exc))
             return
         try:
             assert proc.stdout is not None
             for line in proc.stdout:
                 if self._stop:
                     proc.terminate()
-                    self.signals.finished.emit(False, "사용자가 취소함")
+                    self.signals.finished.emit(
+                        False, i18n.KO.OPENVINO_ERR_CANCELLED)
                     return
                 line = line.rstrip("\n")
                 if line:
                     self.signals.progress.emit(line)
             rc = proc.wait()
         except Exception as exc:
-            self.signals.finished.emit(False, f"설치 중 오류: {exc}")
+            self.signals.finished.emit(
+                False, i18n.KO.OPENVINO_ERR_DURING_FMT.format(error=exc))
             return
         if rc == 0:
             # 설치 성공 시 컴파일 캐시 무효화 (다음 호출에서 재감지).
@@ -134,6 +141,7 @@ class OpenVinoInstallWorker(QThread):
                 _ov.invalidate_caches()
             except Exception:
                 pass
-            self.signals.finished.emit(True, "설치 완료")
+            self.signals.finished.emit(True, i18n.KO.OPENVINO_INSTALL_OK)
         else:
-            self.signals.finished.emit(False, f"pip 종료 코드 {rc}")
+            self.signals.finished.emit(
+                False, i18n.KO.OPENVINO_ERR_PIP_RC_FMT.format(rc=rc))

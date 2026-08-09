@@ -66,6 +66,8 @@ class ResultPage(QWidget):
         self._score_cache = None
         # 효율 모드 선계산 top-K — 실패 검토에서 후보 풀≥300 일 때 재사용 (#1).
         self._fast_results: dict | None = None
+        self._review_scores = None
+        self._coord_classical_refs: frozenset = frozenset()
         self._coord_mode: bool = False
         self._tolerance: float = _DFLT_TOL
         self._loading = LoadingOverlay(self)
@@ -187,7 +189,9 @@ class ResultPage(QWidget):
                     score_cache=None,
                     fast_results: dict | None = None,
                     coord_mode: bool = False,
-                    tolerance: float = _DFLT_TOL) -> None:
+                    tolerance: float = _DFLT_TOL,
+                    review_scores=None,
+                    coord_classical_refs=()) -> None:
         # ★ 새 결과가 들어오면 '저장했음' 은 무효다.  검토로 되돌아가 결과를 바꾼 뒤
         #   다시 들어오는 경로도 여기를 지나므로 자연히 리셋된다.
         if result is not self._result:
@@ -199,6 +203,10 @@ class ResultPage(QWidget):
         self._val_pool = val_pool
         self._score_cache = score_cache
         self._fast_results = fast_results
+        # 실패 검토 창이 계산한 점수의 세션 보관처 + 좌표 세션의 고전 폴백 표식.
+        # ★ 둘 다 **창보다 오래 산다** — [실패 검토] 는 누를 때마다 창을 새로 만든다.
+        self._review_scores = review_scores
+        self._coord_classical_refs = frozenset(coord_classical_refs or ())
         self._coord_mode = bool(coord_mode)
         self._tolerance = float(tolerance) if tolerance > 0 else _DFLT_TOL
         # 검토 후 다시 그려도 ‘자동 매치 결과 검토 권장’ 라벨이 살아 있도록
@@ -278,6 +286,8 @@ class ResultPage(QWidget):
             parent=self,
             coord_mode=self._coord_mode,
             tolerance=self._tolerance,
+            review_scores=self._review_scores,
+            coord_classical_refs=self._coord_classical_refs,
         )
         sheets.run(dlg, full_bleed=True)
         if not dlg.new_matches:
@@ -302,13 +312,20 @@ class ResultPage(QWidget):
             i18n.KO.UNMATCHED_REVIEW_DONE_FMT.format(n=len(dlg.new_matches)),
         )
         # 요약 다시 그리기 (매칭 수 / 미매칭 수 갱신).
+        # ★ 실패 검토가 쓰는 값은 **전부** 다시 넘긴다.  `fast_results` 가 빠져 있어서
+        #   한 번 검토하고 나면 두 번째 [실패 검토] 는 후보 풀 ≥300 인 슬롯에서 후보가
+        #   0 장이 되고(재계산 금지 + 선계산 결과 없음), 좌표 세션이면 점수 분류
+        #   (C-2)도 함께 무너진다.
         self.show_result(self._result,
                          template_path=self._template_path,
                          target_path=self._target_path,
                          val_pool=self._val_pool,
                          score_cache=self._score_cache,
+                         fast_results=self._fast_results,
                          coord_mode=self._coord_mode,
-                         tolerance=self._tolerance)
+                         tolerance=self._tolerance,
+                         review_scores=self._review_scores,
+                         coord_classical_refs=self._coord_classical_refs)
 
     # ------------------------------------------------------------------
     def _build_stat_tiles(self, result: FinalResult) -> QHBoxLayout:

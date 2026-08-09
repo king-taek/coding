@@ -20,8 +20,25 @@
   --rule:#C9C4B6; --rule-soft:#E2DED3; --panel:#F7F5F0;
   --mono:"Consolas","DejaVu Sans Mono",monospace;
 }
-@page{size:A4; margin:16mm 14mm 18mm}
-@page:first{margin:0}
+/* ── 지면 · 쪽 꼬리말 ───────────────────────────────────────────── */
+/* 28쪽짜리 참조 문서에 쪽 번호가 하나도 없어, 차례에서 고른 장을 찾는 수단이
+   '전문 검색' 뿐이었다(PDF 구조에도 /Outlines·/Link 가 0개였다).
+   ★ 꼬리말은 **CSS 여백 상자**로 찍는다.  Chromium 141 은 `@bottom-left`·
+     `@bottom-right` 와 `counter(page)`/`counter(pages)` 를 지원한다(이 저장소의
+     Chromium 1194 로 실측).  CDP `Page.printToPDF` 의 `footerTemplate` 은 쓸 수
+     없다 — 그 꼬리말은 인쇄 설정 여백에 그려져 **표지에도 그대로 찍힌다**
+     (`preferCSSPageSize`·여백 파라미터 4가지 조합을 전부 인쇄해 확인했다).
+   ★ 문서명은 `--doc-title` 로 받는다.  두 설명서가 이 CSS 하나를 나눠 쓰므로
+     이름을 여기 박을 수 없다 — `make_manual_pdf.py` 가 인쇄 직전 그 문서의
+     `<title>` 을 넣어 준다.  브라우저에서 직접 인쇄하면 아래 폴백이 찍힌다. */
+@page{size:A4; margin:16mm 14mm 18mm;
+  @bottom-left {content:var(--doc-title, "AOI 레시피 검증 프로그램 설명서");
+                font-size:8pt; color:var(--mute)}
+  @bottom-right{content:counter(page) " / " counter(pages);
+                font-size:8pt; color:var(--mute)}}
+/* 표지는 여백 0(전면 재단)이라 꼬리말이 앉을 자리가 없다 — 내용도 지운다.
+   여백만 0 으로 두고 상자를 남기면 표지 그림 위에 글자가 겹쳐 찍힌다. */
+@page:first{margin:0; @bottom-left{content:none} @bottom-right{content:none}}
 
 *{box-sizing:border-box}
 html{font-family:"NanumSquare","Malgun Gothic",sans-serif; color:var(--ink);
@@ -40,8 +57,14 @@ body{margin:0}
 .legend{display:flex; gap:8mm; flex-wrap:wrap; font-size:9.5pt; margin-top:4mm}
 .legend .k{display:flex; align-items:center; gap:2.5mm}
 .legend .sw{width:11mm; height:5mm; border-radius:1.4mm; flex:none}
+/* ★ 이 설명서는 현장에서 **흑백으로 뽑는다**.  그런데 `--accent`(#2C5A86) ·
+   `--danger`(#A5271E) · `--mute`(#5A574E) 는 회색으로 환산하면 셋 다 **87** 이라
+   서로 대비 1.00:1 — 흑백에서 완전히 같은 색이 된다(`--warn` 은 91, 1.07:1).
+   그래서 뜻이 다른 것은 **색 말고도 한 가지가 더** 달라야 한다: 여기서는 선 모양이다
+   (안내 = 실선, 주의 = 파선).  같은 이유로 `.mark.red`·`.bub.red`·`.warnbox`·
+   `.chip.over` 에도 두 번째 채널을 얹었다 — 색만 남기는 쪽으로 되돌리지 마라. */
 .sw.blue{border:1.6pt solid var(--accent); background:rgba(44,90,134,.07)}
-.sw.red{border:1.6pt solid var(--danger); background:rgba(165,39,30,.06)}
+.sw.red{border:1.6pt dashed var(--danger); background:rgba(165,39,30,.06)}
 .sw.num{border:none; background:none; width:auto}
 .sw.num span{display:inline-block; width:5mm; height:5mm; border-radius:50%;
   background:var(--accent); color:#fff; font-size:7.6pt; line-height:5mm;
@@ -56,6 +79,11 @@ body{margin:0}
                 font-size:9pt; width:6mm; flex:none}
 .toc li b{font-weight:700}
 .toc li .d{color:var(--mute); font-size:9pt}
+/* 차례 항목이 `<a href="#ch1">` 으로 감싸여도 종이에서는 아무것도 달라지지 않게 한다
+   (기본 링크 서식이면 차례가 통째로 파란 밑줄이 된다).  화면에서만 눌린다 —
+   Chromium 헤드리스 인쇄는 문서 내부 링크를 PDF /Link 주석으로 내보낸다. */
+.toc li a{color:inherit; text-decoration:none; display:flex;
+          align-items:baseline; gap:3mm; flex:1}
 
 /* ── 장/절 ──────────────────────────────────────────────────────── */
 section{page-break-before:always}
@@ -64,14 +92,29 @@ h2{font-size:17pt; font-weight:700; letter-spacing:-.7px; margin:0 0 1mm;
    padding-bottom:2.4mm; border-bottom:1.4pt solid var(--ink); page-break-after:avoid}
 h2 .n{font-family:var(--mono); color:var(--accent); font-size:12pt; margin-right:3mm}
 h2 + .lede{color:var(--ink2); margin:0 0 6mm; font-size:10.6pt}
-h3{font-size:11.6pt; font-weight:700; margin:7mm 0 2.5mm; page-break-after:avoid}
+/* h2 아래 위계가 평평했다 — h3 11.6 · h4 10.4 · 본문 10.2 · 표 9.4 · 캡션 8.8 이
+   3pt 안에 몰려 전체 폭이 1.35× 뿐이었다.  크기는 h3 만 한 단 올리고(1.33× 유지),
+   나머지 단계는 **위 여백**으로 벌린다 — 크기를 더 키우면 h3 가 30개인 완전판이
+   지면을 그만큼 더 먹는다. */
+h3{font-size:12.8pt; font-weight:700; margin:9mm 0 2.5mm; page-break-after:avoid}
 h3::before{content:""; display:inline-block; width:2.6mm; height:2.6mm;
   background:var(--accent); margin-right:2.4mm; vertical-align:.6mm}
-h4{font-size:10.4pt; font-weight:700; margin:5mm 0 1.5mm; color:var(--ink2);
-   page-break-after:avoid}
-p{margin:0 0 3mm; max-width:none}
-ul,ol{margin:0 0 3.5mm; padding-left:5.5mm}
-li{margin:.9mm 0}
+h4{font-size:10.4pt; font-weight:700; margin:6mm 0 1.5mm; color:var(--ink2);
+   letter-spacing:-.1px; page-break-after:avoid}
+/* ★ 단 너비 182mm 는 그림·표에 필요하지만, 본문이 그 폭을 다 쓰면 한 줄이 50.6자
+   (≈101ch)가 되어 줄이 바뀔 때 눈이 되돌아갈 자리를 놓친다(실측: 두 문서 본문 줄의
+   44~48% 가 50자 초과, 최장 87자).  지면 여백은 그대로 두고 **글줄만** 152mm
+   (≈42자)로 묶는다 — 한글 본문에서 읽기 좋은 35~45자 안이다. */
+p, ul, ol, .lede, .note p, .warnbox p, .tip p, .keys li{max-width:152mm}
+/* 그림·표·흐름도·부수기능은 전폭이 정보다.  표지·차례는 편집된 지면이라 제외한다. */
+figure, table, .flow, .soft, .toc ol, .cover p{max-width:none}
+/* 과부·고아 방지 — Chromium 기본값(2줄)이면 문단 꼬리 한 줄만 다음 쪽에 남는다.
+   `break-inside`/`break-before` 는 `page-break-*` 의 현행 표기로 효과가 같다. */
+p{margin:0 0 3mm; text-wrap:pretty; orphans:3; widows:3}
+ul,ol{margin:0 0 3.5mm; padding-left:5.5mm; orphans:2; widows:2}
+li{margin:.9mm 0; break-inside:avoid}
+h2,h3,h4{text-wrap:balance}
+h3 + p, h4 + p{break-before:avoid}   /* 제목만 남고 본문이 다음 쪽으로 넘어가는 것 */
 b,strong{font-weight:700}
 code,.mono{font-family:var(--mono); font-size:.92em}
 .ui{font-weight:700; white-space:nowrap}
@@ -92,23 +135,36 @@ figure.shot > svg{position:absolute; left:0; top:0; width:100%; height:auto}
    사용설명서 9→10쪽, 상세설명서 16→17쪽).  `<figcaption>` 이 `<figure>` 밖에 있는
    것은 HTML 규격 위반이기도 하다. */
 figure.shot > figcaption{line-height:1.5}
+/* ★ 축소해도 되는 것은 **잘라낸 그림**뿐이다.  캡처의 논리 크기는 1280×860 이고,
+   그 안의 UI 라벨은 12px 다 — 전폭(182mm)에 실어야 겨우 4.8pt 로 읽힌다.
+   `.half`(62%)면 3.0pt, `.soft`(46%)면 2.2pt 라 **글자를 알아볼 수 없다**.
+   잘라낸 그림은 반대다: 613px 짜리 폴더 카드는 `.half` 에서도 6.3pt, 277px 짜리
+   배지는 13.9pt 로 잘 읽힌다.  그러니 규칙은 "축소 금지" 가 아니라
+   **"전체 창 캡처는 축소 금지"** 다 — 전체 창은 `figure.shot.full` 로 전폭에 싣고,
+   강조할 부품은 캡처 단계에서 잘라 온다. */
 figure.half{width:62%}
 figure.third{width:44%}
+figure.shot.full{width:100%}
 figcaption{line-height:1.5; font-size:8.8pt; color:var(--mute); margin-top:1.6mm}
 .mark{fill:none; stroke-width:2.6}
 .mark.blue{stroke:var(--accent); fill:rgba(44,90,134,.06)}
-.mark.red{stroke:var(--danger); fill:rgba(165,39,30,.05)}
+/* 파선·검은 테 = 주의.  흑백에서 파랑과 빨강이 같은 회색 87 이 되므로(위 `.sw` 주석)
+   같은 그림 안에 섞여 나오는 두 상자는 선 모양으로도 갈라 놓는다. */
+.mark.red{stroke:var(--danger); fill:rgba(165,39,30,.05); stroke-dasharray:11 7}
 .mark.plain{fill:none}
 .arrow{fill:none; stroke:var(--accent); stroke-width:2.6}
 .arrow.red{stroke:var(--danger)}
-.bub{fill:var(--accent)} .bub.red{fill:var(--danger)}
+.bub{fill:var(--accent)}
+.bub.red{fill:var(--danger); stroke:var(--ink); stroke-width:3}
 .bubt{fill:#fff; font-family:Consolas,monospace; font-size:17px; font-weight:700;
       text-anchor:middle; dominant-baseline:central}
 
 /* 번호 설명 목록 — 그림의 동그란 번호와 짝.
    ★ `display:flex` 를 쓰지 마라 — <b>·<span> 같은 자식이 **각각 별개의 flex 항목**이 되어
    한 문장이 칸칸이 벌어져 찍힌다(실제로 그렇게 나왔다).  번호는 절대 위치로 띄운다. */
-.keys{list-style:none; padding:0; margin:0 0 4mm; counter-reset:k}
+/* 번호 설명은 그림에서 떨어지면 뜻이 없다 — 실제로 ❶❷ 는 5쪽, ❸~❻ 는 6쪽으로
+   갈린 적이 있다.  그림(`figure`)·과부방지(`orphans`)와 함께 세 번째 자물쇠다. */
+.keys{list-style:none; padding:0; margin:0 0 4mm; counter-reset:k; break-inside:avoid}
 .keys li{counter-increment:k; position:relative; padding-left:7mm; margin:.9mm 0}
 .keys li::before{content:counter(k); position:absolute; left:0; top:.7mm;
   width:4.6mm; height:4.6mm;
@@ -132,28 +188,54 @@ figcaption{line-height:1.5; font-size:8.8pt; color:var(--mute); margin-top:1.6mm
 /* ── 콜아웃 ─────────────────────────────────────────────────────── */
 .note,.warnbox,.tip{padding:3.2mm 4mm; margin:0 0 4mm; page-break-inside:avoid;
   border:1px solid var(--rule); border-radius:1.6mm; background:var(--panel)}
-.warnbox{border-color:var(--warn); background:rgba(140,74,15,.05)}
-.tip{border-color:var(--accent); background:rgba(44,90,134,.045)}
+/* 세 상자의 배경은 흑백에서 회색 246 vs 248(대비 1.011:1)로 사실상 같은 종이다.
+   그래서 **테두리 굵기**로 갈라 놓는다: 참고 = 연한 가는 테, 팁 = 진한 가는 테,
+   경고 = 진한 **굵은** 테.  색만 다르게 되돌리면 완전판의 경고 5개와 팁 8개가
+   흑백에서 같은 상자가 된다. */
+.warnbox{border:1.6pt solid var(--warn); background:rgba(140,74,15,.05)}
+.tip{border:1px solid var(--accent); background:rgba(44,90,134,.045)}
 .note .t,.warnbox .t,.tip .t{font-weight:700; display:block; margin-bottom:1mm}
 .warnbox .t{color:var(--warn)} .tip .t{color:var(--accent)}
 .note p:last-child,.warnbox p:last-child,.tip p:last-child{margin-bottom:0}
 
 /* ── 표 ─────────────────────────────────────────────────────────── */
+/* ★ 표는 **행 단위**로 쪼갠다.  통째 avoid 였을 때 표 하나가 앞 쪽 꼬리를 비운 채
+   다음 쪽으로 통째로 뛰어, 지면을 9.4~22.9% 만 쓰고 넘긴 쪽이 두 문서에 네 곳
+   있었다(완전판 15·8·22쪽, 핵심판 10쪽 — 41쪽에서 약 3장 분량).  `thead` 를
+   머리글 그룹으로 두면 이어지는 쪽에 머리글이 자동으로 반복된다. */
 table{width:100%; border-collapse:collapse; margin:0 0 4mm; font-size:9.4pt;
-      page-break-inside:avoid}
+      break-inside:auto}
+thead{display:table-header-group}
+tfoot{display:table-footer-group}
+tr{break-inside:avoid}
 th,td{text-align:left; padding:2.1mm 2.6mm; border-bottom:1px solid var(--rule-soft);
       vertical-align:top}
+/* 아주 옅은 얼룩말.  행 구분선(`--rule-soft`)은 종이 대비 1.34:1 로 흐려서, 3열만
+   2~3줄로 늘어나 행 높이가 들쭉날쭉해지면 어느 문장이 어느 상황에 붙는지 눈이
+   미끄러졌다.  `--panel` 은 종이 대비 1.09:1 이라 인쇄물이 지저분해지지 않고
+   흑백에서도 회색 245 로 남는다(선을 진하게 하는 것보다 잉크도 덜 먹는다).
+   ※ 배경이므로 인쇄 시 `printBackground` 가 켜져 있어야 한다 — 콜아웃 배경과 같은 조건. */
+tbody tr:nth-child(even) td{background:var(--panel)}
 thead th{border-bottom:1.2pt solid var(--ink); font-size:8.6pt; letter-spacing:.4px;
          color:var(--mute); text-transform:none}
 td.num,th.num{font-family:var(--mono); text-align:right; white-space:nowrap}
 /* 한글이 든 칸에는 모노를 쓰지 않는다 — 자간이 벌어지고 글꼴이 문장 중간에 갈린다 */
 td.dur{white-space:nowrap; color:var(--ink2)}
 tbody tr:last-child td{border-bottom:1px solid var(--rule)}
+/* 상황별 표의 「누를 것」 열은 버튼 이름과 키가 짝으로 온다(`[✓ 검증]` `→`).
+   `.ui`·`.kbd` 는 각각 이미 nowrap 이라 여기서 막는 것은 **둘 사이**가 갈라지는
+   것이다 — 그 열이 22%→18% 로 좁아져도 한 줄로 남는다.
+   ⚠ 칸 전체(`td:nth-child(2)`)에 nowrap 을 주지 마라 — 2열이 긴 산문인 표가
+     완전판에만 여럿이다(최장 168자).  버튼과 키가 **함께 있는 칸**만 고른다. */
+table td:nth-child(2):has(.ui):has(.kbd){white-space:nowrap}
 
 /* 판정 스탬프 — 화면의 칩과 같은 어휘 */
 .chip{font-size:8.4pt; font-weight:700; padding:.4mm 2mm;
       border-radius:1.6mm; white-space:nowrap}
-.chip.over{color:var(--danger); background:rgba(165,39,30,.11)}
+/* 배경만으로는 종이 대비가 1.20:1 이라 흑백에서 거의 사라진다 — 이 문서에서 가장
+   뜻이 큰 표지인데.  윤곽선을 얹어 색이 빠져도 남게 한다(비텍스트 권고 3:1). */
+.chip.over{color:var(--danger); background:rgba(165,39,30,.11);
+           border:1px solid var(--danger)}
 .chip.none{color:var(--mute); border:1px solid var(--rule)}
 .chip.ok{color:var(--mute); border:1px dashed var(--rule)}
 
@@ -163,6 +245,12 @@ tbody tr:last-child td{border-bottom:1px solid var(--rule)}
 .soft figure{width:46%; flex:none; margin:0}
 .soft .body{font-size:9.4pt; color:var(--ink2)}
 .soft h4{margin-top:0}
+/* 좌우 배치는 그림이 **잘라낸 부품**일 때만 성립한다.  전체 창 캡처를 46% 로 줄이면
+   UI 라벨이 2.2pt 로 찍혀 못 읽는다(위 `figure.half` 주석의 실측).  그런 대목은
+   `.soft stack` 으로 좌우를 풀고 그림을 전폭으로 깐다 — 부수 기능이라는 위계는
+   위쪽 가는 선과 작은 본문이 그대로 지고 있다. */
+.soft.stack{display:block}
+.soft.stack figure{width:100%; margin:0 0 2.5mm}
 
 .cols{column-count:2; column-gap:7mm}
 .cols > *{break-inside:avoid}
@@ -170,4 +258,5 @@ tbody tr:last-child td{border-bottom:1px solid var(--rule)}
 .kbd{font-family:var(--mono); font-size:8.6pt; border:1px solid var(--rule);
      border-radius:1.2mm; padding:.3mm 1.5mm; background:#fff; white-space:nowrap}
 /* ★ 쪽 하단 머리글에 `position:fixed` 를 쓰지 마라 — Chromium 인쇄에서 쪽마다 반복되기는
-   하지만 위치가 뷰포트 기준이라 **본문 한가운데에 겹쳐 찍힌다**(실제로 그렇게 나왔다). */
+   하지만 위치가 뷰포트 기준이라 **본문 한가운데에 겹쳐 찍힌다**(실제로 그렇게 나왔다).
+   쪽 번호·문서명이 필요하면 이 파일 맨 위의 `@page` 여백 상자를 쓴다. */

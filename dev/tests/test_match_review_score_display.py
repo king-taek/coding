@@ -112,7 +112,10 @@ def test_val_score_marks_over_tolerance(qapp):
         row = page._rows[0]
         assert row._val_score_label.text() == "750 µm"      # 1.5*500
         assert theme.DANGER.lower() in row._val_score_label.styleSheet().lower()
-        assert "허용범위 초과" in row._val_score_label.toolTip()
+        # 낱말은 '허용 초과' 로 통일했다(통계 타일·판정 칩·탤리와 같은 말) —
+        # 예전엔 이 툴팁만 '허용범위 초과' 였다.  i18n 에서 읽어 대조한다.
+        assert i18n.KO.SCORE_DIST_OVER_FMT.format(dist=750) \
+            == row._val_score_label.toolTip()
     finally:
         page.close()
 

@@ -810,6 +810,8 @@ class MatchReviewPage(QWidget):
         self._rows: list[_MatchRow] = []
         self._rows_by_key: dict[tuple, _MatchRow] = {}
         self._score_cache = None
+        # 실패 검토 창이 계산한 점수의 세션 보관처 — 공유 캐시 다음으로 본다.
+        self._review_scores = None
         self._val_pool: dict | None = None
         self._candidates_by_ref: dict | None = None
         self._thumb_px = theme.PROFILE.thumb_default_px   # 사진 크기 (#2) — 변형별
@@ -991,6 +993,7 @@ class MatchReviewPage(QWidget):
                    matches: list[MatchResult],
                    *,
                    score_cache=None,
+                   review_scores=None,
                    val_pool: dict | None = None,
                    candidates_by_ref: dict | None = None,
                    coord_mode: bool = False,
@@ -1001,6 +1004,8 @@ class MatchReviewPage(QWidget):
 
         ``score_cache`` 와 ``val_pool`` 이 함께 주어지면 각 매치 행에 차순위
         후보를 클릭 가능한 형태로 보여주고, 클릭 시 그 후보로 매치를 교체한다.
+        ``review_scores`` 는 실패 검토 창이 계산한 점수의 세션 보관처로,
+        공유 캐시에 없는 쌍을 여기서 한 번 더 찾는다(없으면 종전과 같다).
 
         ``candidates_by_ref`` 가 주어지면 (fast 모드, #7) ``(slot, ref_path.name)``
         키로 미리 점수 내림차순 정렬된 ``[(ImageItem, score), ...]`` 후보 목록을
@@ -1032,6 +1037,7 @@ class MatchReviewPage(QWidget):
         self._coord_failed_count = int(coord_failed_count)
         # 차순위 swap / 재계산용으로 score_cache + val_pool 참조 보관.
         self._score_cache = score_cache
+        self._review_scores = review_scores
         self._val_pool = val_pool
         # fast 모드용 미리 계산된 후보 목록 (#7).
         self._candidates_by_ref = candidates_by_ref
@@ -1292,6 +1298,11 @@ class MatchReviewPage(QWidget):
             if v.path == match.val_path:
                 continue
             s = score_cache.get_pair(match.slot, match.ref_path, v.path)
+            if s is None and self._review_scores is not None:
+                # 실패 검토 창에서 확정한 매치는 그 창이 계산한 점수가 유일한
+                # 출처다 — 안 보면 그 행만 차순위가 통째로 비어 보인다.
+                s = self._review_scores.get_pair(
+                    match.slot, match.ref_path, v.path)
             if s is None:
                 continue
             scored.append((v, float(s)))

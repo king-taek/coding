@@ -21,9 +21,15 @@ _LAUNCHER = os.path.join(_ROOT, "scripts", "launcher.py")
 _ICON = os.path.join(_ROOT, "aoi_verification", "app", "ui", "assets", "logo.ico")
 
 # launcher 가 실제로 import 하는 최소 모듈만 동봉(작게 유지).
+# ★ i18n 은 `updater` 가 import 한다(로딩 오버레이 문구·실패 사유는 ko.py 에만 산다).
+#   modulegraph 가 정적 import 를 따라가 자동으로 담기지만, launcher 가 못 켜지는 실패는
+#   '문구가 틀림' 이 아니라 '앱이 아예 안 켜짐' 이므로 **명시**해 둔다.  ko.py 는 표준
+#   라이브러리조차 import 하지 않는 순수 상수 모듈이라 무게가 늘지 않는다.
 hiddenimports = [
     "aoi_verification",
     "aoi_verification.app",
+    "aoi_verification.app.i18n",
+    "aoi_verification.app.i18n.ko",
     "aoi_verification.app.utils",
     "aoi_verification.app.utils.bootstrap",
     "aoi_verification.app.utils.updater",
