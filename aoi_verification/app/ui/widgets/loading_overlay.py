@@ -580,6 +580,15 @@ class LoadingOverlay(QWidget):
             self._cover_parent()
 
     # ------------------------------------------------------------------
+    def showEvent(self, event):  # noqa: N802
+        """뜨는 순간 부모를 **다시 덮는다** — 그 사이 부모가 커졌을 수 있다.
+
+        `show_overlay` 도 `_cover_parent` 를 부르지만, 그때 부모가 아직 화면에
+        놓이기 전이면(스택에 담겨만 있는 페이지) 낡은 크기를 쓴다.  여기서 한 번 더
+        맞춰 두면 '일부만 덮은 오버레이' 가 화면에 나가는 일이 없다."""
+        super().showEvent(event)
+        self._cover_parent()
+
     def hideEvent(self, event):  # noqa: N802
         """숨으면 잠금을 풀고, 돌던 것을 전부 멈춘다.
 
@@ -627,7 +636,18 @@ class LoadingOverlay(QWidget):
         #   막지 않는 게 맞다 — 잠글 주체가 이미 없다.
         if not hasattr(self, "_input_locked"):
             return False
-        # ★ **보이지 않으면 아무것도 막지 않는다.**  전역 필터는 잠금 플래그만 보고
+        etype = event.type()
+        # ★ 부모 크기 추종은 **보이든 안 보이든** 한다.  이건 입력을 삼키는 일이 아니라
+        #   기하를 맞추는 일이라, 아래 가시성 가드보다 **위**에 있어야 한다.
+        #   숨어 있는 동안 부모가 커진 것을 놓치면 나중에 떴을 때 낡은 크기로 **일부만**
+        #   덮는다 — 실제로 그렇게 됐다: 검토 페이지는 스택에 담겨만 있어 첫 전환 전까지
+        #   640x480 인데, `load_state` 가 그 상태에서 오버레이를 띄우고 그 다음에 전환된다.
+        #   그 결과 1280x800 화면의 좌상단 640x480 만 어두워지고 [검토 완료] 가 밝게
+        #   노출돼, **아직 만들어지지 않은 행까지 전부 '유지' 로 확정**됐다.
+        if obj is self.parent() and etype == QEvent.Type.Resize:
+            self._cover_parent()
+            return super().eventFilter(obj, event)
+        # ★ **보이지 않으면 입력은 막지 않는다.**  전역 필터는 잠금 플래그만 보고
         #   키를 버렸는데, 부모 페이지가 숨겨진 채 `show_overlay` 가 불리면(전환 경쟁)
         #   오버레이는 화면에 나타나지 못하면서 잠금만 걸린다 — 그러면 보상 해제인
         #   `hideEvent` 도 영영 오지 않아 **앱 전체가 키보드를 못 받는 채로 남는다.**
@@ -635,10 +655,6 @@ class LoadingOverlay(QWidget):
         #   "가려서 못 누르게 한다" 가 이 잠금의 뜻이므로, 가리고 있지 않으면 권한도 없다.
         if not self.isVisible():
             return False
-        etype = event.type()
-        if obj is self.parent() and etype == QEvent.Type.Resize:
-            self._cover_parent()
-            return super().eventFilter(obj, event)
         # 어두워진 동안 뒤 화면은 **키도 받지 않는다**(마우스는 위젯이 이미 막는다).
         # 단 오버레이 자신(‘중지’ 버튼)으로 가는 키는 통과시킨다 — 그러지 않으면
         # 취소가 키보드로 불가능해진다.
