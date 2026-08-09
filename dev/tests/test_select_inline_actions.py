@@ -47,6 +47,46 @@ def test_inline_buttons_appear_only_when_something_is_selected(styled_qapp, tmp_
     page.deleteLater()
 
 
+def test_inline_buttons_are_wide_enough_to_read(styled_qapp, tmp_path):
+    """배선만 보고 **크기를 안 봤더니** 라벨이 잘렸다(실화면 검증에서 발견).
+
+    좌측 패널은 폭이 330px 남짓이라 제목 + 액션 2개 + [선택 모드] 를 한 줄에
+    넣으면 서로를 밀어낸다 — 실측 필요 113px 에 실제 71px 이 배정돼
+    "선택 1 장 검증" 이 "1 장" 으로, "선택 모드" 가 "택 모" 로 잘렸다.
+    액션은 제목 줄이 아니라 **그 아래 제 줄**에 둔다.
+    """
+    page = _page(styled_qapp, tmp_path)
+    page.resize(1600, 950)
+    panel = page.left_panel
+    sec = next(iter(panel._sections.values()))
+    tile = sec.grid._tiles[0]
+    tile.set_inline_selected(True)
+    sec.grid._on_sel_toggle(tile.entry, True)
+    styled_qapp.processEvents()
+
+    for b in panel._inline_buttons:
+        assert b.width() >= b.sizeHint().width(), (
+            f"{b.text()!r} 이 잘린다 (필요 {b.sizeHint().width()}px, "
+            f"실제 {b.width()}px)")
+    # 같은 줄을 나눠 쓰던 [선택 모드] 도 온전해야 한다.
+    sb = panel._select_btn
+    assert sb.width() >= sb.sizeHint().width(), \
+        f"[선택 모드] 가 잘린다 (필요 {sb.sizeHint().width()}px, 실제 {sb.width()}px)"
+    page.deleteLater()
+
+
+def test_inline_row_collapses_when_nothing_is_selected(styled_qapp, tmp_path):
+    """선택이 없으면 그 줄은 자리를 차지하지 않는다 — 빈 띠가 남으면 안 된다."""
+    page = _page(styled_qapp, tmp_path)
+    page.resize(1600, 950)
+    styled_qapp.processEvents()
+    panel = page.left_panel
+    assert all(not b.isVisible() for b in panel._inline_buttons)
+    assert panel._inline_row.sizeHint().height() == 0, \
+        "선택이 없는데 일괄 액션 줄이 높이를 차지한다"
+    page.deleteLater()
+
+
 def test_inline_action_routes_into_the_batch_decision_path(styled_qapp, tmp_path):
     """선택 → [선택 n장 검증] → 기존 일괄 처리로 들어가 상태가 실제로 바뀐다."""
     page = _page(styled_qapp, tmp_path)

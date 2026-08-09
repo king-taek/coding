@@ -96,10 +96,24 @@ class _SidePanel(QFrame):
         head.addWidget(ttl)
         head.addStretch(1)
 
+        if self._actions:
+            self._select_btn = NeonButton(i18n.KO.BTN_SELECT_MODE, role="ghost")
+            self._select_btn.clicked.connect(self._open_bulk_select)
+            head.addWidget(self._select_btn)
+        outer.addLayout(head)
+
         # ★ 타일 클릭 선택(inline_select)은 오랫동안 **아무 데도 연결되지 않은** 죽은
         #   기능이었다 — 테두리만 생기고 그 선택으로 할 수 있는 일이 없었다.  선택이
-        #   1장 이상일 때만 헤더에 일괄 액션을 띄워, 팝업을 열지 않고도 처리하게 한다.
+        #   1장 이상일 때만 일괄 액션을 띄워, 팝업을 열지 않고도 처리하게 한다.
+        #
+        #   ★ 액션은 **제목 줄이 아니라 그 아래 제 줄**에 둔다.  이 패널은 폭이
+        #   330px 남짓이라 제목 + 액션 2개 + [선택 모드] 를 한 줄에 넣으면 서로를
+        #   밀어 라벨이 잘린다("선택 1 장 검증" → "1 장", "선택 모드" → "택 모").
+        #   실측: 필요 113px, 실제 71px.
         self._inline_buttons: list[NeonButton] = []
+        self._inline_row = QHBoxLayout()
+        self._inline_row.setContentsMargins(0, 0, 0, 0)
+        self._inline_row.setSpacing(6)
         if self._inline_select and self._actions:
             for action_id, label_fmt, role in (
                     ("batch_exclude", i18n.KO.BTN_INLINE_EXCLUDE_FMT, "danger"),
@@ -109,14 +123,10 @@ class _SidePanel(QFrame):
                 btn.clicked.connect(
                     lambda _c=False, a=action_id: self._fire_inline_action(a))
                 btn.hide()
-                head.addWidget(btn)
+                # 줄을 통째로 나눠 갖는다 — 글자가 늘어도(세 자리 장수) 잘리지 않는다.
+                self._inline_row.addWidget(btn, 1)
                 self._inline_buttons.append(btn)
-
-        if self._actions:
-            self._select_btn = NeonButton(i18n.KO.BTN_SELECT_MODE, role="ghost")
-            self._select_btn.clicked.connect(self._open_bulk_select)
-            head.addWidget(self._select_btn)
-        outer.addLayout(head)
+        outer.addLayout(self._inline_row)
 
         # 스크롤 영역 ---------------------------------------------------
         self._scroll = QScrollArea(self)
