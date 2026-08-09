@@ -27,6 +27,11 @@ import sys
 from pathlib import Path
 from typing import Callable, List, Optional
 
+# ★ 콘솔에 찍히는 문구는 사용자가 읽는다 → i18n 에만 둔다.  ko.py 는 표준 라이브러리조차
+#   import 하지 않는 순수 상수 모듈이라, **의존성 설치 전에 도는 이 모듈에서도 안전**하다.
+#   얼린 온라인 launcher 는 `scripts/internal/online.spec` 의 hiddenimports 로 함께 담는다.
+from .. import i18n
+
 
 APP_DIRNAME = "AOI Recipe Verification"   # 사용자 데이터(설치) 폴더 이름
 _MARKER = ".deps_installed"               # 의존성 설치 완료 표식(버전별)
@@ -155,12 +160,12 @@ def ensure_deps(root: Path, python_exe: str, req_file: Path,
     if deps_installed(root, req_text):
         return True
 
-    log("필요한 패키지를 설치합니다 — 처음 1회, 인터넷이 필요하고 몇 분 걸립니다.")
+    log(i18n.KO.BOOT_DEPS_INSTALLING)
     if run(pip_install_cmd(python_exe, req_file, upgrade=False)) != 0:
-        log("패키지 설치에 실패했습니다. 인터넷·프록시 설정을 확인한 뒤 다시 실행하세요.")
+        log(i18n.KO.BOOT_DEPS_FAILED)
         return False
     write_deps_marker(root, req_text)
-    log("설치가 끝났습니다.")
+    log(i18n.KO.BOOT_DEPS_DONE)
     return True
 
 
@@ -205,7 +210,7 @@ def ensure_python(root: Path, url: str,
         return True
     root.mkdir(parents=True, exist_ok=True)
     tgz = root / "python.tar.gz"
-    log("파이썬 런타임을 내려받는 중… (처음 1회, 수십 MB)")
+    log(i18n.KO.BOOT_PY_DOWNLOADING)
     try:
         if fetch is None:
             import urllib.request
@@ -213,28 +218,27 @@ def ensure_python(root: Path, url: str,
         else:
             fetch(url, tgz)
     except Exception as exc:
-        log(f"파이썬 런타임 다운로드 실패: {exc}")
+        log(i18n.KO.BOOT_PY_DOWNLOAD_FAILED_FMT.format(error=exc))
         return False
     # ★ 회사 프록시가 차단 페이지(HTML)를 200 으로 돌려주면 다운로드는 '성공' 으로 보인다.
     #   크기로 걸러내지 않으면 다음 단계에서 정체불명의 압축 해제 오류만 남는다.
     if not tgz.exists() or tgz.stat().st_size < 1_000_000:
         size = tgz.stat().st_size if tgz.exists() else 0
-        log(f"받은 파일이 너무 작습니다({size} bytes) — 회사 프록시가 차단 페이지를 "
-            "돌려줬을 수 있습니다.")
+        log(i18n.KO.BOOT_PY_TOO_SMALL_FMT.format(n=size))
         tgz.unlink(missing_ok=True)
         return False
-    log("파이썬 런타임을 푸는 중…")
+    log(i18n.KO.BOOT_PY_EXTRACTING)
     try:
         import tarfile
         with tarfile.open(str(tgz)) as tf:
             tf.extractall(str(root))
     except Exception as exc:
-        log(f"파이썬 런타임 압축 해제 실패: {exc}")
+        log(i18n.KO.BOOT_PY_EXTRACT_FAILED_FMT.format(error=exc))
         return False
     finally:
         tgz.unlink(missing_ok=True)
     if not python_is_present(root):
-        log("파이썬 런타임을 풀었지만 실행 파일을 찾지 못했습니다.")
+        log(i18n.KO.BOOT_PY_NOT_FOUND)
         return False
     return True
 
@@ -262,25 +266,25 @@ def bootstrap(root: Path, *,
     if python_url:
         fn = ensure_python_fn or ensure_python
         if not fn(root, python_url, log):
-            log("파이썬 런타임을 준비하지 못해 시작할 수 없습니다.")
+            log(i18n.KO.BOOT_PY_UNAVAILABLE)
             return 2
 
     if not app_is_present(root):
-        log("앱을 내려받는 중…")
+        log(i18n.KO.BOOT_APP_DOWNLOADING)
         if not fetch_app(root) or not app_is_present(root):
-            log("앱 다운로드 실패 — 인터넷 연결을 확인하세요.")
+            log(i18n.KO.BOOT_APP_DOWNLOAD_FAILED)
             return 3
 
     py = target_python(root, frozen=frozen, sys_executable=sys_executable)
     req = root / "requirements.txt"
     req_text = req.read_text(encoding="utf-8") if req.exists() else None
     if req.exists() and not deps_installed(root, req_text):
-        log("필요한 패키지를 설치하는 중… (처음 1회, 인터넷 필요)")
+        log(i18n.KO.BOOT_DEPS_INSTALLING_FIRST)
         rc = run(pip_install_cmd(py, req))
         if rc != 0:
-            log("패키지 설치 실패 — 인터넷/프록시 설정을 확인하세요.")
+            log(i18n.KO.BOOT_DEPS_FAILED_SHORT)
             return 4
         write_deps_marker(root, req_text)
 
-    log("앱을 시작합니다…")
+    log(i18n.KO.BOOT_APP_STARTING)
     return run(launch_cmd(py, root / "main.py"))

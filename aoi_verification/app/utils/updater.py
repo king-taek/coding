@@ -43,6 +43,12 @@ from pathlib import Path
 from typing import Optional
 
 from . import paths
+# ★ 사용자에게 보이는 문구는 `i18n/ko.py` 에만 산다 — 이 모듈이 로딩 오버레이에 띄우는
+#   단계 문구와 실패 사유가 그렇다(로그·예외 원문은 여기 해당하지 않는다).
+#   ko.py 는 **표준 라이브러리만 쓰는 순수 상수 모듈**이라 의존성 설치 전에 도는
+#   경로(온라인 launcher)에서도 안전하게 import 된다.  그 경로가 얼린 exe 라
+#   `scripts/internal/online.spec` 의 hiddenimports 에도 i18n 을 명시해 두었다.
+from .. import i18n
 
 DEFAULT_REPO = "king-taek/coding"
 # 자동 업데이트의 단일 기준은 **저장소의 GitHub 기본(default) 브랜치**다(과거엔 main 이었으나
@@ -178,17 +184,18 @@ def _urlopen(url: str, headers: dict, timeout: float):
 def _describe_err(exc: Exception, url: str) -> str:
     host = url.split("/")[2] if "//" in url else url
     if isinstance(exc, urllib.error.HTTPError):
-        return f"HTTP {exc.code} — {host}"
+        return i18n.KO.UPDATE_ERR_HTTP_FMT.format(code=exc.code, host=host)
     if isinstance(exc, urllib.error.URLError):
         reason = getattr(exc, "reason", exc)
         if isinstance(reason, ssl.SSLError):
-            return f"SSL 인증서 오류 — {host} ({reason})"
+            return i18n.KO.UPDATE_ERR_SSL_FMT.format(host=host, reason=reason)
         if isinstance(reason, (TimeoutError, socket.timeout)):
-            return f"응답 시간 초과 — {host}"
-        return f"연결 실패 — {host} ({reason})"
+            return i18n.KO.UPDATE_ERR_TIMEOUT_FMT.format(host=host)
+        return i18n.KO.UPDATE_ERR_CONNECT_FMT.format(host=host, reason=reason)
     if isinstance(exc, (TimeoutError, socket.timeout)):
-        return f"응답 시간 초과 — {host}"
-    return f"{type(exc).__name__} — {host} ({exc})"
+        return i18n.KO.UPDATE_ERR_TIMEOUT_FMT.format(host=host)
+    return i18n.KO.UPDATE_ERR_OTHER_FMT.format(
+        kind=type(exc).__name__, host=host, detail=exc)
 
 
 def _http_get(url: str, headers: dict, timeout: float) -> bytes:
@@ -317,7 +324,7 @@ def _latest_via_api(repo: str, branch: str, timeout: float) -> Optional[dict]:
         return None
     sha = data.get("sha")
     if not sha:
-        _last_error = "GitHub API 응답에 커밋 SHA 없음"
+        _last_error = i18n.KO.UPDATE_ERR_NO_SHA_API
         return None
     commit = data.get("commit") or {}
     msg = (commit.get("message") or "").splitlines()
@@ -337,7 +344,7 @@ def _latest_via_atom(repo: str, branch: str, timeout: float) -> Optional[dict]:
         return None
     m = re.search(r"Commit/([0-9a-fA-F]{40})", text)
     if not m:
-        _last_error = "github.com Atom 피드에서 커밋 SHA 를 찾지 못함"
+        _last_error = i18n.KO.UPDATE_ERR_NO_SHA_ATOM
         return None
     return {"sha": m.group(1).lower(), "message": "", "date": ""}
 
@@ -495,7 +502,7 @@ def manual_check() -> tuple:
     repo, branch, cur_sha = _identity()
     latest, branch = _latest_self_healing(repo, branch)
     if not latest or not latest.get("sha"):
-        return ("unknown", {"error": _last_error or "GitHub 연결 실패"})
+        return ("unknown", {"error": _last_error or i18n.KO.UPDATE_ERR_GITHUB})
     if cur_sha and str(latest["sha"]) == str(cur_sha):
         return ("latest", {})
     info = {"repo": repo, "branch": branch, "sha": latest["sha"],
@@ -627,7 +634,7 @@ def _stage_tree(src_root: Path, staging: Path, emit) -> None:
             shutil.copytree(item, dst, ignore=ignore)
         else:
             shutil.copy2(item, dst)
-        emit(i, m, "준비 중…")
+        emit(i, m, i18n.KO.UPDATE_PHASE_PREPARE)
 
     # dev/ 는 통째로 건너뛰지만 그 안의 엑셀 템플릿은 구동에 필요하다 → 앱 루트로 옮긴다.
     # (실패를 삼키지 않는다 — _verify_staged 가 잡아서 업데이트를 중단시킨다.)
@@ -643,12 +650,12 @@ def _verify_staged(staging: Path) -> str:
     for rel in _REQUIRED_IN_STAGING:
         p = staging / rel
         if not p.is_file():
-            return f"필수 파일 누락: {rel}"
+            return i18n.KO.UPDATE_ERR_MISSING_FILE_FMT.format(rel=rel)
         try:
             if p.stat().st_size <= 0:
-                return f"파일이 비어 있음: {rel}"
+                return i18n.KO.UPDATE_ERR_EMPTY_FILE_FMT.format(rel=rel)
         except OSError as exc:
-            return f"파일 확인 실패: {rel} ({exc})"
+            return i18n.KO.UPDATE_ERR_STAT_FAIL_FMT.format(rel=rel, error=exc)
     return ""
 
 
@@ -682,7 +689,7 @@ def _promote_in_place(staging: Path, app_root: Path, emit) -> None:
                 moved_aside = True
             shutil.move(str(item), str(dst))
             done.append((dst, aside if moved_aside else None))
-            emit(i, m, "적용 중…")
+            emit(i, m, i18n.KO.UPDATE_PHASE_APPLY)
     except Exception:
         for dst, aside in reversed(done):  # 되돌리기 — 구버전 트리를 복원한다
             _discard(dst)
@@ -717,7 +724,8 @@ def _ensure_deps(root: Path, staging: Path, emit) -> bool:
 
     py = bootstrap.target_python(root, frozen=False,
                                  sys_executable=sys.executable)
-    emit(0, 0, "필요한 패키지 설치 중…")     # total<=0 → busy(진행량 미상, 0 에서 안 멈춤)
+    # total<=0 → busy(진행량 미상, 0 에서 안 멈춤)
+    emit(0, 0, i18n.KO.UPDATE_PHASE_DEPS)
     import subprocess
 
     kwargs = {}
@@ -727,10 +735,11 @@ def _ensure_deps(root: Path, staging: Path, emit) -> bool:
         rc = subprocess.call(
             bootstrap.pip_install_cmd(py, req, upgrade=False), **kwargs)
     except Exception as exc:
-        globals()["_last_error"] = f"패키지 설치를 시작하지 못했습니다 ({exc})"
+        globals()["_last_error"] = (
+            i18n.KO.UPDATE_ERR_PIP_START_FMT.format(error=exc))
         return False
     if rc != 0:
-        globals()["_last_error"] = f"패키지 설치 실패 (pip 종료코드 {rc})"
+        globals()["_last_error"] = i18n.KO.UPDATE_ERR_PIP_RC_FMT.format(rc=rc)
         return False
     bootstrap.write_deps_marker(root, text)
     return True
@@ -775,14 +784,14 @@ def download_and_apply(repo: str, branch: str, target_sha: str,
         with _urlopen(url, _UA, timeout) as r, open(zip_path, "wb") as f:
             total = int(getattr(r, "headers", {}).get("Content-Length", 0) or 0)
             done = 0
-            _emit(0, total, "다운로드 중…")
+            _emit(0, total, i18n.KO.UPDATE_PHASE_DOWNLOAD)
             while True:
                 chunk = r.read(64 * 1024)
                 if not chunk:
                     break
                 f.write(chunk)
                 done += len(chunk)
-                _emit(done, total, "다운로드 중…")
+                _emit(done, total, i18n.KO.UPDATE_PHASE_DOWNLOAD)
 
         # 2) 압축 해제 — 파일 수 기준 진행.
         with zipfile.ZipFile(zip_path) as z:
@@ -791,7 +800,7 @@ def download_and_apply(repo: str, branch: str, target_sha: str,
             for i, name in enumerate(names, start=1):
                 z.extract(name, tmpd)
                 if i % 20 == 0 or i == n:
-                    _emit(i, n, "압축 해제 중…")
+                    _emit(i, n, i18n.KO.UPDATE_PHASE_EXTRACT)
 
         roots = [p for p in tmpd.iterdir() if p.is_dir()]
         if not roots:
@@ -815,7 +824,7 @@ def download_and_apply(repo: str, branch: str, target_sha: str,
         # 4) 검증 — 여기를 통과해야만 적용한다.
         reason = _verify_staged(staging)
         if reason:
-            _last_error = f"업데이트 준비 검증 실패 — {reason}"
+            _last_error = i18n.KO.UPDATE_ERR_VERIFY_FMT.format(reason=reason)
             return False
 
         # 5) 적용
@@ -831,7 +840,7 @@ def download_and_apply(repo: str, branch: str, target_sha: str,
         else:                                        # 포터블/온라인 — 제자리 적용
             _promote_in_place(staging, app_root, _emit)
             _write_version(target_sha, branch, repo)
-        _emit(1, 1, "완료")
+        _emit(1, 1, i18n.KO.UPDATE_PHASE_DONE)
         return True
     except Exception as exc:
         _last_error = _describe_err(exc, url)

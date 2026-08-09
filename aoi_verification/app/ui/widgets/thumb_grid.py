@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Iterable, Optional
 
 from PyQt6.QtCore import QSize, Qt, pyqtSignal
+from PyQt6.QtGui import QFontMetrics
 from PyQt6.QtWidgets import (QCheckBox, QFrame, QGridLayout, QLabel,
                               QToolButton, QVBoxLayout, QWidget)
 
@@ -72,10 +73,20 @@ class _ThumbTile(QFrame):
         lay.addWidget(self._img, alignment=Qt.AlignmentFlag.AlignCenter)
 
         if footer:
-            cap = QLabel(footer, self)
-            cap.setProperty("role", "muted")
+            # ★ 파일명은 **앞뒤가 다 정보**다(‘255350.116718.c.1047514.6.jpeg’ — 앞은
+            #   좌표, 뒤는 인덱스·확장자).  타일 폭(120px)에 219px 이 필요해 예전에는
+            #   말줄임표 없이 하드 클립됐다 — 같은 파일명을 보여 주는 실패 검토
+            #   타일(`unmatched_review_dialog._CandidateTile`)은 처음부터 ElideMiddle 로
+            #   줄이고 있었다.  두 화면이 같은 내용을 같게 처리하게 맞춘다.
+            cap = QLabel(self)
+            cap.setProperty("role", "fileCaption")
             cap.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            cap.setWordWrap(False)
+            cap.setToolTip(footer)
+            self._cap = cap
+            self._cap_text = footer
             lay.addWidget(cap)
+            self._elide_caption()
 
         self._checkbox: Optional[QCheckBox] = None
         if select_mode:
@@ -144,6 +155,25 @@ class _ThumbTile(QFrame):
 
     def is_inline_selected(self) -> bool:
         return self._inline_selected
+
+    # ------------------------------------------------------------------
+    def _elide_caption(self) -> None:
+        """파일명 캡션을 타일 폭에 맞춰 **가운데를** 줄인다(ElideMiddle).
+
+        ★ 생성 시점과 ``showEvent`` 두 번 부른다 — QSS 의 ``font-size`` 는 polish 이후에야
+        위젯 폰트에 반영되므로, 생성 시점의 ``QFontMetrics`` 만 믿으면 캡션 등급을 키운 뒤
+        계산이 어긋난다(실제 폭보다 짧게 잡아 다시 잘린다)."""
+        cap = getattr(self, "_cap", None)
+        if cap is None:
+            return
+        fm = QFontMetrics(cap.font())
+        cap.setText(fm.elidedText(self._cap_text,
+                                  Qt.TextElideMode.ElideMiddle,
+                                  max(24, self._tile_px - 4)))
+
+    def showEvent(self, event):  # noqa: N802
+        super().showEvent(event)
+        self._elide_caption()
 
     # 마우스 클릭 → 시그널 (체크박스/확대 버튼 클릭과 분리) -----------------
     def mousePressEvent(self, event):  # noqa: N802

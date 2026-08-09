@@ -233,9 +233,22 @@ QLabel[role="statValue"] {
 QLabel[role="statValue"][tone="ok"] { color: $pass; }
 QLabel[role="statValue"][tone="over"] { color: $danger; }
 QLabel[role="statValue"][tone="none"] { color: $ink2; }
+/* ★ 통계 타일 캡션은 **읽어야 하는** 글자다 — 12px/regular 로는 실측 대비가
+   3.58~3.83:1 로 4.5 를 못 넘겼다(색이 아니라 크기 문제 — theme.Profile.font_caption_lg
+   주석 참조).  캡션 등급을 한 단 키우고 굵기를 준다. */
 QLabel[role="statCaption"] {
     color: $mute;
-    font-size: $font_caption_sz;
+    font-size: $font_caption_lg_sz;
+    font-weight: $font_caption_lg_weight;
+}
+
+/* 타일 아래 파일명 캡션 — 썸네일 그리드(thumb_grid)와 실패 검토 후보 타일
+   (unmatched_review_dialog)이 **같은 내용을 같은 등급으로** 쓴다.  둘 다 폭이 모자라
+   ElideMiddle 로 줄이고(파일명은 앞뒤가 다 정보다), 대비를 위해 캡션 등급을 쓴다. */
+QLabel[role="fileCaption"] {
+    color: $mute;
+    font-size: $font_caption_lg_sz;
+    font-weight: $font_caption_lg_weight;
 }
 
 /* 얇은 구분선(QFrame 을 1px 로 눕혀 쓰는 자리) */

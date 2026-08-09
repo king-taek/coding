@@ -49,7 +49,12 @@ BTN_VERIFY = "검증"
 BTN_EXCLUDE = "제외"
 BTN_UNDO = "되돌리기(Z)"
 BTN_MATCH_UNDO = "되돌리기"
-MATCH_UNDO_TOOLTIP = "직전 매칭/매칭없음 결정을 취소합니다 (Ctrl+Z)"
+# ★ 예전 문구는 "직전 매칭/매칭없음 결정을 취소합니다" 였다.  그 '매칭없음' 을 만들던
+#   [매칭 없음] 버튼과 `N` 단축키는 제거됐으므로(2단계는 언제나 자동 — 그 사이 눌리면
+#   처리 중이던 사진이 조용히 미탐으로 확정됐다), 사람이 만들 수 없는 결정 종류를
+#   되돌리기 툴팁이 계속 약속하고 있었다.  남은 결정은 '매치' 하나다.
+MATCH_UNDO_TOOLTIP = "직전 매치 결정을 취소합니다 (Ctrl+Z)"
+# ⚠ 도달 불가 — SKIPPED_SECTION_DEFER_FMT 주석 참조(보류 풀이 항상 비어 버튼이 숨는다).
 BTN_RETRY_SKIP = "보류 재시도"
 BTN_SELECT_MODE = "선택 모드"
 # Stage 1 좌측 패널 — 사진을 여러 장 고르면 헤더에 나타나는 일괄 액션.
@@ -97,7 +102,7 @@ SELECT_BACK_CONFIRM_FMT = (
 )
 END_SELECTION_CONFIRM_TITLE = "선택 종료"
 END_SELECTION_CONFIRM_FMT = (
-    "남은 {n} 장의 미결정 사진을 모두 ‘검증 제외’ 로 처리하고 "
+    "남은 {n} 장의 미결정 사진을 모두 ‘검증 제외 사진’ 으로 보내고 "
     "다음 단계로 진행할까요?"
 )
 BULK_SELECT_EXCLUDED_TITLE = "검증 제외 사진"
@@ -135,30 +140,49 @@ STAGE2_TITLE_COORD = "Stage 2 — 좌표 기반 매칭 (v2)"
 RESULT_TITLE = "검증 결과"
 # 결과 요약 — 핵심 수치는 타일로, 나머지는 문장으로.
 RESULT_MACHINES_FMT = "기준 장비: {ref}    검증 장비: {val}"
-RESULT_SLOT_ONLY_REF_FMT = "Slot 불일치  ·  기준 전용: {names}"
-RESULT_SLOT_ONLY_VAL_FMT = "Slot 불일치  ·  검증 전용: {names}"
+RESULT_SLOT_ONLY_REF_FMT = "슬롯 불일치  ·  기준 전용: {names}"
+RESULT_SLOT_ONLY_VAL_FMT = "슬롯 불일치  ·  검증 전용: {names}"
 VALUE_NONE = "없음"
-STAT_MATCHED = "매칭 성공"
+# ★ '매치 성공' 이다(‘매칭 성공’ 아님) — 형제 타일이 '매치 없음'·'매치 실패' 라
+#   같은 한 건을 세는 자리에서 낱말이 갈리면 다른 것을 세는 것처럼 읽힌다.
+#   낱말 규약: **매칭 = 과정/기능**(설정·중단·엔진), **매치 = 결과 한 건**(검토·확정·성공).
+STAT_MATCHED = "매치 성공"
 STAT_OVER_TOLERANCE = "허용 초과"
 STAT_NO_MATCH = "매치 없음"
-STAT_SLOT_MISMATCH = "Slot 불일치"
+STAT_SLOT_MISMATCH = "슬롯 불일치"
 MATCH_REVIEW_TITLE = "매치 검토"
 
-PANEL_LEFT_CANDIDATES = "검증 후보들 (남은 사진)"
+# ★ 패널 제목에 괄호 부연을 넣지 않는다.  이 제목은 `role=paneTitle` QLabel 이고
+#   wordWrap 도 elide 도 없어 **말줄임표 없이 하드 클립**된다 — 실측(1024 폭)에서
+#   "검증 대상 (검증하기로 한 사진들)" 은 189px 이 필요한데 자리는 135px 이라
+#   "검증 대상 (검증하기로 " 까지만 보였다(1280 에서도 여유 0~1px).  부연은 툴팁으로
+#   내리고 제목은 짧게 둔다.  회귀 가드: `dev/tests/test_pane_title_fits.py`.
+PANEL_LEFT_CANDIDATES = "검증 후보"
+PANEL_LEFT_CANDIDATES_TOOLTIP = "아직 검증/제외를 결정하지 않은 남은 사진들"
 PANEL_CENTER_DECIDE = "검증 결정할 사진"
-PANEL_RIGHT_TARGETS = "검증 대상 (검증하기로 한 사진들)"
+PANEL_RIGHT_TARGETS = "검증 대상"
+PANEL_RIGHT_TARGETS_TOOLTIP = "검증하기로 결정한 사진들"
 # 우측 패널이 비었을 때의 안내 — 처음 쓰는 사람이 이 칸의 용도를 알 수 있게.
 PANEL_RIGHT_EMPTY = "→ 또는 [✓ 검증] 으로 보낸 사진이 여기에 쌓입니다."
 
 PANEL_MATCH_REF = "기준 사진"
 PANEL_MATCH_CANDIDATES = "검증 장비 후보"
 
-# Stage 2 의 보류/매칭없음 사진 팝업
-BTN_VIEW_SKIPPED_FMT = "보류된 사진 보기 ({n})"
-SKIPPED_DIALOG_TITLE = "보류 / 매칭 없음 사진"
+# Stage 2 의 '매치 없음' 사진 팝업
+# ★ 이 팝업의 이름에서 '보류' 를 뺐다.  버튼은 오래 "보류된 사진 보기 (n)" 이었지만
+#   n = 보류(defer) + 매치 없음(no_match) 합계이고, **보류를 만드는 경로가 없다**
+#   (`match_page._skip_current` 의 프로덕션 호출부 0건 — 아래 SKIPPED_SECTION_DEFER_FMT
+#   주석 참조).  즉 내용물은 항상 '매치 없음' 뿐인데 이름은 비어 있는 절반만 불렀다.
+BTN_VIEW_SKIPPED_FMT = "매치 없음 사진 보기 ({n})"
+SKIPPED_DIALOG_TITLE = "매치 없음 사진"
+# ⚠ 아래 두 문구는 **지금 화면에 뜨지 않는다** — '잠시 보류' 절은 defer 가 1건 이상일
+#   때만 그려지는데 그 풀을 채우는 `_skip_current` 를 부르는 프로덕션 코드가 없다.
+#   기능(코드·테스트)은 그대로 두고 문구만 남긴다: 지우면 보류를 되살릴 때 다시
+#   만들어야 하고, 남겨 두어도 숨어 있어 해가 없다.  되살린다면 위 버튼 이름도
+#   함께 '보류' 를 되돌려야 한다.
 SKIPPED_SECTION_DEFER_FMT = "잠시 보류 ({n} 장)"
-SKIPPED_SECTION_NO_MATCH_FMT = "매칭 없음 확정 ({n} 장)"
-SKIPPED_DIALOG_EMPTY = "보류 / 매칭 없음 사진이 없습니다."
+SKIPPED_SECTION_NO_MATCH_FMT = "매치 없음 확정 ({n} 장)"
+SKIPPED_DIALOG_EMPTY = "매치 없음 사진이 없습니다."
 
 # 매치 실패 사진 검토 다이얼로그 (#8)
 BTN_REVIEW_UNMATCHED = "매치 실패 사진 검토"
@@ -188,10 +212,19 @@ BTN_UNMATCHED_NEXT = "다음 사진"
 BTN_UNMATCHED_PREV = "← 이전"
 BTN_UNMATCHED_CLOSE = "검토 종료"
 
-# ‘매칭 취소’ 결합 (#14) — 결과 검토가 MissEntry.note 에 이 표시를 남기고
-# (`result_page`), 실패 검토가 그것을 보고 목록 뒤로 모은다
-# (`unmatched_review_dialog._is_cancelled`).  두 곳이 각자 문자열을 하드코딩하면
-# 한쪽만 고쳤을 때 **예외 없이 정렬만 조용히 망가진다** — 여기 한 곳에서 정한다.
+# ‘매칭 취소’ 결합 (#14) — 실패 검토가 `MissEntry.note` 에서 이 표시를 보고 해당
+# 항목을 목록 뒤로 모은다(`unmatched_review_dialog._is_cancelled`).
+#
+# ⚠ **지금 이 표시를 note 에 남기는 생산자는 없다.**  예전 주석은 "결과 검토
+#    (`result_page`)가 남긴다" 고 적었지만 `result_page._on_review_matches` 는 저장소에
+#    존재하지 않고, note 를 쓰는 곳은 `main_window`(NOTE_UNMATCHED)와
+#    `match_review_page`(NOTE_UNMATCHED_BY_USER) 둘뿐이라 둘 다 이 표식을 담지 않는다.
+#    따라서 `_is_cancelled` 는 항상 False 이고 UNMATCHED_CANCELLED_SEPARATOR 도 그려지지
+#    않는다 — 소비자 쪽 코드만 살아 있는 **휴면 경로**다.
+#    남겨 두는 이유: 소비자(정렬·구분선)는 이미 있고 테스트도 있으므로, 생산자가
+#    돌아오면 문자열 하나로 다시 이어진다.  지우면 그 결합을 다시 만들어야 한다.
+#    이 사실은 `dev/tests/test_unmatched_cancelled_order.py` 가 못 박는다 —
+#    생산자를 추가하면 그 테스트가 실패하며 이 주석을 고치라고 알려 준다.
 CANCELLED_NOTE_MARK = "매칭 취소"
 CANCELLED_NOTE = f"{CANCELLED_NOTE_MARK} (검토에서 삭제)"
 UNMATCHED_CANCELLED_SEPARATOR = f"── {CANCELLED_NOTE_MARK} 목록 ──"
@@ -203,7 +236,10 @@ ZOOM_TITLE_CANDIDATES = "검증 후보 사진들 — {slot}"
 ZOOM_BTN_EXCLUDE = "검증에서 제외"
 ZOOM_BTN_TO_TARGET = "검증 대상으로 변경"
 ZOOM_BTN_TO_CENTER = "재결정으로 복귀"
-ZOOM_BTN_PICK_MATCH = "이 사진으로 매칭"
+# ★ 같은 동작(이 후보를 매치로 확정)을 하는 버튼이 세 화면에 있다 — 확대 보기
+#   (BTN_CONFIRM_AS_MATCH) · 좌우 비교(BTN_MATCH_THIS) · 줌 윈도우(여기).  한때
+#   '매치' / '이 후보로 매치' / '이 사진으로 매칭' 세 이름이었다.  **한 이름으로 둔다.**
+ZOOM_BTN_PICK_MATCH = "이 후보로 매치"
 
 # ── 단축키 ────────────────────────────────────────────────────────────────
 SHORTCUT_TOOLTIP = (
@@ -212,7 +248,7 @@ SHORTCUT_TOOLTIP = (
 
 # ── 사진 크기 슬라이더 ────────────────────────────────────────────────────
 IMAGE_SIZE_LABEL = "사진 크기"
-SLOT_LABEL_FMT = "Slot: {slot}"
+SLOT_LABEL_FMT = "슬롯: {slot}"
 
 # ── 사용 방법 토글 ────────────────────────────────────────────────────────
 HOWTO_TOGGLE_OPEN = "사용 방법 ▾"
@@ -257,7 +293,9 @@ COORD_NO_DATA_MSG = (
     "매칭 설정에서 ‘유사도 엔진(구형) 사용’ 을 켠 뒤 다시 시작하세요."
 )
 SCORE_DIST_FMT = "{dist:.0f} µm"
-SCORE_DIST_OVER_FMT = "{dist:.0f} µm (허용범위 초과)"
+# ★ 낱말은 '허용 초과' 다 — 통계 타일(STAT_OVER_TOLERANCE)·판정 칩(CHIP_OVER)·
+#   탤리(TALLY_OVER_FMT)가 전부 그렇게 부른다.  여기만 '허용범위 초과' 였다.
+SCORE_DIST_OVER_FMT = "{dist:.0f} µm (허용 초과)"
 # 구형(유사도) 엔진의 점수 표기 — 좌표 모드의 µm 거리에 대응.  같은 포맷이 네 곳
 # (매치 검토 행·차순위 타일·매칭 목록·실패 검토)에 흩어져 갈라져 있었다.
 SCORE_SIMILARITY_FMT = "{pct:.1f} %"
@@ -307,8 +345,10 @@ MEMORY_PRESSURE_TOAST = "메모리 사용량이 높아 캐시를 정리했습니
 #   돌리라'는 행동으로 이어지지만, GPU 가동 여부로 사용자가 할 수 있는 일은 없었다.
 
 # ── Stage 2 더 크게 보기 ───────────────────────────────────────────────────
-EXPAND_VIEW_TOOLTIP = "이 사진을 크게 보기 (←/→ 이전·다음, Enter 매칭, Esc 돌아가기)"
-BTN_CONFIRM_AS_MATCH = "매치"            # 확대 보기 — 단순화 (#2)
+EXPAND_VIEW_TOOLTIP = "이 사진을 크게 보기 (←/→ 이전·다음, Enter 매치, Esc 돌아가기)"
+# 확대 보기의 확정 버튼 — 좌우 비교(BTN_MATCH_THIS)·줌 윈도우(ZOOM_BTN_PICK_MATCH)와
+# **같은 동작이므로 같은 이름**을 쓴다(예전엔 여기만 '매치' 였다).
+BTN_CONFIRM_AS_MATCH = "이 후보로 매치"
 BTN_BACK_TO_GRID = "돌아가기"            # 확대 보기 — 화살표 제거 (#2)
 BTN_EXPAND_PREV = "◀ 이전"
 BTN_EXPAND_NEXT = "다음 ▶"
@@ -318,13 +358,15 @@ EXPAND_POSITION_FMT = "{cur} / {total}"
 SETUP_HOW_TO_USE_TITLE = "사용 방법"
 SETUP_HOW_TO_USE_BODY = (
     "① 기준·검증 장비의 폴더와 호기 번호를 입력합니다\n"
-    "② 자동화 수준을 선택합니다  ·  사진 직접 선택 / 모두 자동\n"
+    # ★ 세그먼트 라벨과 **같은 말**로 부른다 — 실제 라벨은
+    #   AUTOMATION_AUTO_ALL_SHORT='모든 사진 자동' 이다(예전엔 여기만 '모두 자동').
+    "② 자동화 수준을 선택합니다  ·  사진 직접 선택 / 모든 사진 자동\n"
     "③ 허용 오차를 설정합니다  (기본 200 µm)\n"
     "      ※ 좌표 데이터가 없을 때만 ‘유사도 엔진(구형) 사용’ 스위치를 켭니다\n"
     "          (켜면 판정 기준이 허용 오차에서 유사도 임계치로 바뀝니다)\n"
     "④ [검증 시작] 을 누르면 다음 순서로 진행됩니다\n"
     "      ㄱ. 후보 선별 — 사진 직접 선택 시 기준 사진을 한 장씩 [✕ 제외] / [✓ 검증]\n"
-    "          (‘모두 자동’ 은 이 단계를 건너뜁니다)\n"
+    "          (‘모든 사진 자동’ 은 이 단계를 건너뜁니다)\n"
     "      ㄴ. 매칭 — 상단 ‘판정 기준’ 배지의 기준으로 자동 매치 후 ‘매치 검토’에서 확인·교체\n"
     "      ㄷ. 결과 저장 — 양식 폴더의 양식.xlsx 를 복사하여 자동 저장\n"
     "매치 검토에서 ‘크게 보기’로 기준·후보를 나란히 비교(←/→ 이동)\n"
@@ -411,6 +453,68 @@ UPDATE_GIT_HINT = "개발(git) 환경입니다. 'git pull' 로 업데이트하�
 MENU_CHECK_UPDATE = "업데이트 확인"
 LOAD_AUTO_MATCH = "자동 매치 진행 중…"
 
+# ── 자동 업데이트 진행 단계 (utils/updater.py → LoadingOverlay) ──────────────
+# ★ 이 문구들은 `updater.download_and_apply(progress=…)` 이 단계마다 보고하는 phase 다.
+#   `main_window._update_progress`(시그널) → `_on_update_progress` →
+#   `LoadingOverlay.set_progress(done, total, message)` 로 **화면에 그대로 뜬다.**
+#   예전엔 updater 안에 한글 리터럴로 박혀 있었고, 그래서 같은 오버레이의 첫 문구
+#   (UPDATE_DOWNLOADING='업데이트 다운로드 중…')와 어긋난 채 '다운로드 중…' 으로
+#   바뀌었다.  한 화면의 문구는 한 곳에서 정한다.
+UPDATE_PHASE_DOWNLOAD = UPDATE_DOWNLOADING
+UPDATE_PHASE_EXTRACT = "업데이트 압축 해제 중…"
+UPDATE_PHASE_PREPARE = "업데이트 준비 중…"
+UPDATE_PHASE_DEPS = "필요한 패키지 설치 중…"
+UPDATE_PHASE_APPLY = "업데이트 적용 중…"
+UPDATE_PHASE_DONE = "업데이트 완료"
+
+# 업데이트 실패 사유 — `updater.last_error()` 에 담겨 main_window 가 CAUSE_PREFIX 뒤에
+# 붙여 사용자에게 보여 준다(개발자용 로그가 아니다).
+UPDATE_ERR_SSL_FMT = "SSL 인증서 오류 — {host} ({reason})"
+UPDATE_ERR_TIMEOUT_FMT = "응답 시간 초과 — {host}"
+UPDATE_ERR_CONNECT_FMT = "연결 실패 — {host} ({reason})"
+UPDATE_ERR_HTTP_FMT = "HTTP {code} — {host}"
+UPDATE_ERR_OTHER_FMT = "{kind} — {host} ({detail})"
+UPDATE_ERR_GITHUB = "GitHub 연결 실패"
+UPDATE_ERR_NO_SHA_API = "GitHub API 응답에 커밋 SHA 없음"
+UPDATE_ERR_NO_SHA_ATOM = "github.com Atom 피드에서 커밋 SHA 를 찾지 못함"
+UPDATE_ERR_MISSING_FILE_FMT = "필수 파일 누락: {rel}"
+UPDATE_ERR_EMPTY_FILE_FMT = "파일이 비어 있음: {rel}"
+UPDATE_ERR_STAT_FAIL_FMT = "파일 확인 실패: {rel} ({error})"
+UPDATE_ERR_PIP_START_FMT = "패키지 설치를 시작하지 못했습니다 ({error})"
+UPDATE_ERR_PIP_RC_FMT = "패키지 설치 실패 (pip 종료코드 {rc})"
+UPDATE_ERR_VERIFY_FMT = "업데이트 준비 검증 실패 — {reason}"
+
+# ── OpenVINO 설치 워커의 결과 사유 (learning/openvino_installer.py) ─────────
+# OPENVINO_INSTALL_FAILED_FMT 의 {error} 로 그대로 사용자에게 보인다.
+OPENVINO_ERR_PIP_START_FMT = "pip 실행 실패: {error}"
+OPENVINO_ERR_CANCELLED = "사용자가 취소함"
+OPENVINO_ERR_DURING_FMT = "설치 중 오류: {error}"
+OPENVINO_ERR_PIP_RC_FMT = "pip 종료 코드 {rc}"
+OPENVINO_INSTALL_OK = "설치 완료"
+
+# ── 첫 실행 부트스트랩 콘솔 (utils/bootstrap.py) ───────────────────────────
+# ★ 온라인/lite 배포의 **첫 실행 콘솔 창**에 그대로 찍히는 문구다 — 사용자가 읽는다.
+#   이 모듈은 의존성 설치 **전에** 도는데, ko.py 는 표준 라이브러리조차 import 하지
+#   않는 순수 상수 모듈이라 그 시점에도 안전하다(얼린 launcher 는 online.spec 의
+#   hiddenimports 로 함께 담긴다).  ※ 예외 원문을 덧붙이는 자리는 {error} 로 받는다.
+BOOT_DEPS_INSTALLING = "필요한 패키지를 설치합니다 — 처음 1회, 인터넷이 필요하고 몇 분 걸립니다."
+BOOT_DEPS_FAILED = "패키지 설치에 실패했습니다. 인터넷·프록시 설정을 확인한 뒤 다시 실행하세요."
+BOOT_DEPS_DONE = "설치가 끝났습니다."
+BOOT_PY_DOWNLOADING = "파이썬 런타임을 내려받는 중… (처음 1회, 수십 MB)"
+BOOT_PY_DOWNLOAD_FAILED_FMT = "파이썬 런타임 다운로드 실패: {error}"
+BOOT_PY_TOO_SMALL_FMT = (
+    "받은 파일이 너무 작습니다({n} bytes) — 회사 프록시가 차단 페이지를 돌려줬을 수 있습니다."
+)
+BOOT_PY_EXTRACTING = "파이썬 런타임을 푸는 중…"
+BOOT_PY_EXTRACT_FAILED_FMT = "파이썬 런타임 압축 해제 실패: {error}"
+BOOT_PY_NOT_FOUND = "파이썬 런타임을 풀었지만 실행 파일을 찾지 못했습니다."
+BOOT_PY_UNAVAILABLE = "파이썬 런타임을 준비하지 못해 시작할 수 없습니다."
+BOOT_APP_DOWNLOADING = "앱을 내려받는 중…"
+BOOT_APP_DOWNLOAD_FAILED = "앱 다운로드 실패 — 인터넷 연결을 확인하세요."
+BOOT_DEPS_INSTALLING_FIRST = "필요한 패키지를 설치하는 중… (처음 1회, 인터넷 필요)"
+BOOT_DEPS_FAILED_SHORT = "패키지 설치 실패 — 인터넷/프록시 설정을 확인하세요."
+BOOT_APP_STARTING = "앱을 시작합니다…"
+
 # ── 자동화 수준 (#3 올인원 모드) ───────────────────────────────────────────
 AUTOMATION_TITLE = "자동화 수준"
 AUTOMATION_USER_SELECT = "사진 직접 선택 + 매치는 자동"
@@ -434,9 +538,15 @@ TALLY_COORD_FAILED_FMT = "매치 실패 {n}"
 TALLY_TOOLTIP = (
     "일치 — 짝을 찾았고 허용 오차 안에 든 매치입니다.\n"
     "허용 초과 — 짝은 찾았지만 좌표 차이가 허용 오차를 넘었습니다.\n"
-    "매치 없음 — 검토에서 직접 '매치 아님' 으로 되돌린 것입니다.\n"
+    # ★ 여기서 다섯째 낱말을 만들지 않는다.  예전엔 "직접 '매치 아님' 으로 되돌린" 이라
+    #   적었는데 화면에 '매치 아님' 이라는 라벨은 없다(버튼은 BTN_MARK_NO_MATCH='매치
+    #   없음 ✕', 칩은 CHIP_NO_MATCH='매치 없음').  네 낱말의 차이를 설명하는 툴팁이
+    #   그 자리에서 없는 낱말을 새로 만들면 안 된다.
+    "매치 없음 — 검토에서 직접 ‘매치 없음’ 으로 되돌린 것입니다.\n"
     "매치 실패 — 가장 가까운 후보조차 허용 오차의 3배를 넘어 짝으로 볼 수"
-    " 없었습니다 (이 화면에서는 고칠 수 없습니다)."
+    " 없었습니다 (이 화면에서는 고칠 수 없습니다).\n"
+    # 화면('매치 없음')과 엑셀('미매칭')의 낱말이 다른 유일한 자리 — 다리를 놓아 둔다.
+    "※ 매치 없음·매치 실패는 결과 엑셀에서 ‘미매칭’ 으로 적힙니다."
 )
 BTN_FINISH_REVIEW_KEPT_FMT = "검토 완료 · 유지 {n}"   # ⏎ 제거 — Enter 단축키가 없어졌다
 CHIP_OVER = "허용 초과"
@@ -494,21 +604,21 @@ WARN_SAME_PATH_BODY = (
     "정말로 같은 폴더를 비교하시겠습니까?"
 )
 WARN_PATH_NOT_EXIST = "선택한 경로가 존재하지 않습니다:\n{path}"
-WARN_NO_SLOTS = "두 폴더에 공통된 Slot 이 존재하지 않습니다."
+WARN_NO_SLOTS = "두 폴더에 공통된 슬롯이 존재하지 않습니다."
 # 폴더 스캔이 실패했을 때 (U-05) — 예전엔 로딩만 켜진 채 앱이 잠긴 것처럼 보였다.
 WARN_SCAN_FAILED_FMT = (
     "폴더를 읽는 중 문제가 생겼습니다.\n"
     "폴더가 그대로 있는지, 접근 권한이 있는지 확인한 뒤 다시 시도해 주세요.\n\n"
     "{detail}"
 )
-WARN_NO_IMAGES = "선택된 Slot 에 이미지가 없습니다."
-WARN_SLOT_MISMATCH_TITLE = "Slot 불일치"
+WARN_NO_IMAGES = "선택된 슬롯에 이미지가 없습니다."
+WARN_SLOT_MISMATCH_TITLE = "슬롯 불일치"
 WARN_SLOT_MISMATCH_FMT = (
-    "한쪽에만 존재하는 Slot 이 있습니다.\n"
+    "한쪽에만 존재하는 슬롯이 있습니다.\n"
     "사용자가 직접 슬롯 매핑을 정해주실 수 있습니다.\n\n"
     "기준 전용: {ref_only}\n검증 전용: {val_only}"
 )
-SLOT_MAP_TITLE = "Slot 수동 매핑"
+SLOT_MAP_TITLE = "슬롯 수동 매핑"
 SLOT_MAP_HINT = (
     "남은 슬롯을 직접 짝지어 주세요. 양쪽에서 하나씩 골라 ‘묶기’, 다시 누르면 해제."
 )
@@ -517,7 +627,8 @@ SLOT_MAP_VAL_LABEL = "검증 (남은 슬롯)"
 SLOT_MAP_ADD = "묶기 ↔"
 SLOT_MAP_REMOVE = "선택 해제"
 SLOT_MAP_PAIRS_LABEL = "묶은 쌍"
-SLOT_MAP_OPEN = "매핑 다이얼로그 열기"
+# ※ SLOT_MAP_OPEN('매핑 다이얼로그 열기')은 제거했다 — 전 저장소 참조 0건.
+#   확인창은 SLOT_MAP_ASK 문장 + 표준 예/아니오 버튼을 쓴다(U-23).
 # 확인창 본문용 완결 문장 — 라벨에 " ?" 를 붙여 만들던 비문을 대체한다.
 SLOT_MAP_ASK = "슬롯을 직접 짝지어 주시겠습니까?"
 
@@ -551,7 +662,8 @@ RUN_OPTIONS_HINT = (
     "· 자동화 수준 — ‘모든 사진 자동’은 후보 선별(Stage 1)을 건너뛰고 모든 기준 사진을"
     " 자동으로 매치합니다. 매치가 끝나면 검토 화면에서 결과를 하나씩 확인하고"
     " 잘못된 매치를 [매치 없음] 으로 되돌릴 수 있습니다.\n"
-    "· 진행 범위 — 기본은 기준 폴더의 모든 슬롯입니다. ‘일부 슬롯만’ 을 고르면 이번"
+    # ★ 라벨 그대로 적는다 — SCOPE_SUBSET 은 말줄임표까지 포함해 '일부 슬롯만…' 이다.
+    "· 진행 범위 — 기본은 기준 폴더의 모든 슬롯입니다. ‘일부 슬롯만…’ 을 고르면 이번"
     " 검증에서 진행할 슬롯을 직접 선택합니다(급한 슬롯만 먼저 돌릴 때)."
 )
 SCOPE_TITLE = "진행 범위"
@@ -581,7 +693,7 @@ REF_REUSE_BODY_FMT = (
     "아니오 — 처음부터 직접 고릅니다."
 )
 # KLA slot 해석 단계 — 로딩창에 현재 진행 단계(정보파일/OCR)를 실시간 표시.
-LOAD_KLA_INFO = "KLA slot 매칭 중 — 정보파일 분석…"
+LOAD_KLA_INFO = "KLA 슬롯 매칭 중 — 정보파일 분석…"
 LOAD_KLA_OCR = "KLA WaferID 판독 (OCR) 중…"
 
 # slot 매칭 실패 시 'KLA 가 어느 쪽?' 확인 — 호기가 K-n 이면 자동, 아니면 묻는다.
@@ -604,9 +716,14 @@ INFO_RESUME_BODY = (
     "선별은 다시 하게 되지만, 직접 고르셨던 기준 사진은 선별 화면에서 "
     "재사용할지 물어봅니다."
 )
-INFO_PHASE_TRANSITION_TITLE = "단계 전환"
-INFO_PHASE_A_TO_MATCH = "후보 선별이 끝났습니다. 매칭으로 넘어갑니다."
-INFO_NO_MATCH_FOUND = "임계치 이상인 후보가 없습니다. 자동으로 Skip 처리됩니다."
+# ※ INFO_PHASE_TRANSITION_TITLE('단계 전환')·INFO_PHASE_A_TO_MATCH 는 제거했다 —
+#   U-14 로 '선택지 없는 안내 모달' 을 없앨 때 문구만 남아 참조가 0건이었다
+#   (`dev/tests/test_sheet_default_and_flow.py::test_phase_transition_modal_is_gone`).
+# ⚠ 아래 문구는 **지금 화면에 뜨지 않는다** — 호출부 두 곳이 모두 `if not self._auto_mode:`
+#   안이고, 자동화 수준 두 가지가 둘 다 `AutomationLevel.AUTO_MODES` 라 2단계는 언제나
+#   자동이다.  수동 스트리밍 경로가 되살아날 때를 대비해 문구·경로를 남기되, 화면에
+#   없는 영어 낱말('Skip')과 낱말 규약을 어긴 표기는 지금 고쳐 둔다.
+INFO_NO_MATCH_FOUND = "임계치 이상인 후보가 없습니다. 자동으로 ‘매치 없음’ 으로 처리됩니다."
 INFO_ALREADY_MATCHED_SECTION = "이미 매칭됨 (자동 제외)"
 
 # ── 저장/엑셀 ──────────────────────────────────────────────────────────────
@@ -622,6 +739,11 @@ SAVE_FAIL_LOCKED_FMT = (
     "(다른 프로그램이 쓰고 있거나 폴더 권한이 없을 때도 같은 오류가 납니다.)\n\n"
     "원문: {error}"
 )
+# ⚠ **엑셀 표기만 예외로 'Slot' 을 남긴다.**  화면 문구는 전부 '슬롯' 으로 통일했지만
+#   (STAT_SLOT_MISMATCH·WARN_SLOT_MISMATCH_*·SLOT_MAP_TITLE·SLOT_LABEL_FMT·
+#   LOT_COUNTS_PREFIX·WARN_NO_SLOTS·WARN_NO_IMAGES·LOAD_KLA_INFO), 시트 이름·헤더는
+#   현장 양식과 맞춰야 하므로 확인 전까지 건드리지 않는다(같은 이유로 `NOTE_UNMATCHED`
+#   의 '미매칭' 도 남는다 — 다리는 TALLY_TOOLTIP 이 놓는다).
 SLOT_MISMATCH_SHEET = "Slot 불일치 목록"
 SHEET_UNMATCHED = "미매칭 사진"
 # 미매칭 행 D열 — 결함 geometry(area/width/length/contrast) 표기.  Surface.flt 에서
@@ -731,8 +853,8 @@ IMAGE_INFO_COPIED = "복사했습니다"
 COUNT_PLUS_N_FMT = "+{n}"
 PROGRESS_SLOT_FMT = "{slot}  ·  {done} / {total}"
 GROUP_HEADER_FMT = "{slot}  ·  {count} 장"
-# 후보 선별 상단의 Slot 별 전체 장수 — 참고용 (#2).
-LOT_COUNTS_PREFIX = "Slot별 장수:  "
+# 후보 선별 상단의 슬롯별 전체 장수 — 참고용 (#2).  ★ 'LOT' 이 아니다.
+LOT_COUNTS_PREFIX = "슬롯별 장수:  "
 
 # ── UI 개선 (#11 / #13 / #16) ─────────────────────────────────────────────
 # 썸네일 우클릭 컨텍스트 메뉴 — 원본 크게 보기 (#13).

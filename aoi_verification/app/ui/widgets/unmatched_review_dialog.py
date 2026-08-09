@@ -256,7 +256,8 @@ class _CandidateTile(QFrame):
         cap = QLabel(self)
         cap.setFixedHeight(_CAND_CAP_PX)
         cap.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        cap.setProperty("role", "muted")
+        # 파일명 캡션 등급 — 썸네일 그리드와 같은 role 을 쓴다(대비·크기 한 자리에서).
+        cap.setProperty("role", "fileCaption")
         cap.setWordWrap(False)
         fm = QFontMetrics(cap.font())
         cap.setText(fm.elidedText(
@@ -613,10 +614,17 @@ class UnmatchedReviewDialog(QDialog):
     # ------------------------------------------------------------------
     @staticmethod
     def _is_cancelled(entry: MissEntry) -> bool:
-        """결과 검토 화면에서 ‘매칭 취소’ 로 발생한 실패인지 (#14).
+        """‘매칭 취소’ 로 발생한 실패인지 (#14).
 
-        표시는 `result_page` 가 남긴다 — 문자열은 `i18n.KO.CANCELLED_NOTE_MARK`
-        한 곳에서만 정의한다(양쪽에 하드코딩하면 조용히 갈라진다)."""
+        문자열은 `i18n.KO.CANCELLED_NOTE_MARK` 한 곳에서만 정의한다(양쪽에 하드코딩하면
+        조용히 갈라진다).
+
+        ⚠ **지금 이 표시를 note 에 남기는 생산자는 없다.**  옛 주석은 `result_page` 를
+        가리켰지만 `result_page._on_review_matches` 는 저장소에 존재하지 않고, note 를
+        쓰는 곳은 NOTE_UNMATCHED / NOTE_UNMATCHED_BY_USER 둘뿐이라 둘 다 이 표식을 담지
+        않는다 — 즉 이 판정은 항상 False 이고 아래 구분선도 그려지지 않는다.  소비자만
+        살아 있는 **휴면 경로**다(근거·판단은 `i18n/ko.py` 의 CANCELLED_NOTE_MARK 주석,
+        회귀 가드는 `dev/tests/test_unmatched_cancelled_order.py`)."""
         return i18n.KO.CANCELLED_NOTE_MARK in (getattr(entry, "note", "") or "")
 
     def _display_order(self) -> tuple[list[int], list[int]]:

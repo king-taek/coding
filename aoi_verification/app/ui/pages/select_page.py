@@ -70,6 +70,7 @@ class _SidePanel(QFrame):
 
     def __init__(self, name: str, title: str,
                  *, vertical_scroll: bool = True,
+                 title_tooltip: str = "",
                  actions: Optional[list[tuple[str, str, str]]] = None,
                  columns: int = 4,
                  tile_px: Optional[int] = None,
@@ -93,6 +94,15 @@ class _SidePanel(QFrame):
         head = QHBoxLayout()
         ttl = QLabel(title, self)
         ttl.setProperty("role", "paneTitle")
+        # ★ `role=paneTitle` 은 wordWrap 도 elide 도 없어 **말줄임표 없이 하드 클립**된다 —
+        #   1024 폭에서 옛 제목("검증 대상 (검증하기로 한 사진들)")이 189px 을 요구하는데
+        #   자리는 135px 이라 "검증 대상 (검증하기로 " 까지만 보였다.  제목을 짧게 줄이고
+        #   (i18n) 부연은 툴팁으로 내렸다.  **여기에 elide 를 넣어 덮지 않는다** — 넣으면
+        #   실측 하네스도 테스트도 '잘림 없음' 으로 읽혀 다음에 제목이 길어져도 아무도
+        #   모른다.  대신 회귀 가드가 1024·1280 에서 **온전한 제목**이 들어가는지 잰다
+        #   (`dev/tests/test_pane_title_fits.py`).
+        if title_tooltip:
+            ttl.setToolTip(title_tooltip)
         head.addWidget(ttl)
         head.addStretch(1)
 
@@ -439,6 +449,7 @@ class SelectPage(QWidget):
         side_tile = config.Sizing.SIDE_TILE_PX      # 사이드 패널 타일(=120, D2)
         self.left_panel = _SidePanel(
             self.PANEL_LEFT, i18n.KO.PANEL_LEFT_CANDIDATES,
+            title_tooltip=i18n.KO.PANEL_LEFT_CANDIDATES_TOOLTIP,
             actions=[
                 # 가운데 버튼 줄과 **같은 순서**(제외 왼쪽 · 검증 오른쪽)로 둔다 —
                 # 한 화면에서 두 곳의 순서가 다르면 손이 헷갈린다.
@@ -539,6 +550,7 @@ class SelectPage(QWidget):
         # RIGHT — 좌측과 동일한 절반 타일 크기 + 3열 그리드 (사용자 요청).
         self.right_panel = _SidePanel(
             self.PANEL_RIGHT, i18n.KO.PANEL_RIGHT_TARGETS,
+            title_tooltip=i18n.KO.PANEL_RIGHT_TARGETS_TOOLTIP,
             actions=[
                 ("to_exclude", i18n.KO.BTN_MOVE_TO_EXCLUDE, "warn"),
                 ("recenter", i18n.KO.BTN_BACK_TO_CENTER, "ghost"),

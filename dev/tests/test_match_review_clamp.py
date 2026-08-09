@@ -74,6 +74,12 @@ def test_requested_size_remembered_for_reclamp(qapp):
 
 
 def test_lot_counts_label_says_slot():
-    """#1 문구: 'LOT' 이 아니라 'Slot' 으로 표기."""
+    """#1 문구: 'LOT' 이 아니라 슬롯으로 표기.
+
+    ★ 표기는 'Slot' → '슬롯' 으로 바뀌었다 — 화면 문구는 전부 한국어 '슬롯' 으로
+    통일했고(엑셀 시트 이름·헤더만 'Slot' 을 남긴다), 이 테스트가 지키려던 것은
+    '**LOT 이 아니다**' 이므로 그대로 성립한다."""
     from aoi_verification.app import i18n
-    assert i18n.KO.LOT_COUNTS_PREFIX.startswith("Slot")
+    prefix = i18n.KO.LOT_COUNTS_PREFIX
+    assert not prefix.upper().startswith("LOT")
+    assert prefix.startswith("슬롯")
