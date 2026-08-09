@@ -97,6 +97,41 @@ class _DieGeometryScan(QThread):
         self.signals.done.emit(self._token, pitch, src, broken)
 
 
+_LIVE_DIR_PROBES: set = set()
+
+
+class _DirProbe(QThread):
+    """두 폴더가 실제로 있는지 **워커 스레드에서** 확인한다 (P-15).
+
+    ``Path.is_dir()`` 는 값싸 보이지만 네트워크 폴더(NAS)에서는 응답이 초 단위로
+    늦거나, 연결이 끊긴 경로에서는 OS 타임아웃까지 통째로 멈춘다.  이 확인은
+    입력란을 **한 글자 칠 때마다**(250ms 디바운스) 돌기 때문에, UI 스레드에서
+    하면 경로를 타이핑하는 내내 창이 끊긴다.
+
+    ``token`` 은 늦게 도착한 옛 확인을 버리기 위한 세대 번호다 — 사용자가 계속
+    타이핑하면 확인이 겹치는데, 옛 결과가 새 경로의 판정을 덮으면 안 된다."""
+
+    class _Signals(QObject):
+        done = pyqtSignal(int, str, str, str, str)   # token, ref_text, ref_state, val_text, val_state
+
+    def __init__(self, token: int, ref_text: str, val_text: str) -> None:
+        super().__init__()                  # 부모 없음(`_DieGeometryScan` 과 같은 이유)
+        self._token = token
+        self._ref_text = ref_text
+        self._val_text = val_text
+        self.signals = self._Signals()
+
+    def run(self) -> None:      # type: ignore[override]
+        try:
+            ref_state = SetupPage._dir_state(self._ref_text)
+            val_state = SetupPage._dir_state(self._val_text)
+        except Exception:
+            # 여기서 예외가 새면 안내가 영원히 '확인 중' 으로 남는다.
+            ref_state = val_state = "missing"
+        self.signals.done.emit(self._token, self._ref_text, ref_state,
+                               self._val_text, val_state)
+
+
 class SetupPage(QWidget):
     """검증 시작 화면."""
 
@@ -126,6 +161,15 @@ class SetupPage(QWidget):
         self._die_scanning_for: Optional[str] = None
         self._die_result: tuple = (None, "", False)
         self._die_scan: Optional[_DieGeometryScan] = None
+        # 폴더 존재 확인(P-15) — {경로 문자열: '' | 'missing'}.  네트워크 폴더에서
+        # `is_dir()` 이 초 단위로 걸리기 때문에 워커가 채우고 UI 는 읽기만 한다.
+        self._probe_token = 0
+        self._probed: dict[str, str] = {}
+        # 헤드리스에서는 동기로 확인한다 — 테스트가 `_validate()` 의 반환값을
+        # 호출 즉시 단언한다(`widgets/zoom_window.py` 와 같은 게이트).
+        import os
+        self._sync_probe = (
+            os.environ.get("QT_QPA_PLATFORM", "") == "offscreen")
         self._build()
 
     # ------------------------------------------------------------------
@@ -906,28 +950,79 @@ class SetupPage(QWidget):
             else i18n.KO.BTN_START_PREPARING)
         self._validate()
 
+    def _probe_state(self, text: str) -> Optional[str]:
+        """파일시스템에 **손대지 않고** 알 수 있는 것만 — 모르면 ``None``(확인 필요).
+
+        빈 칸은 디스크를 볼 필요가 없으므로 즉시 답한다.  나머지는 워커가 답을
+        채워 둔 것만 쓴다 (P-15)."""
+        t = (text or "").strip()
+        if not t:
+            return "empty"
+        return self._probed.get(t)
+
+    def _start_dir_probe(self, ref_text: str, val_text: str) -> None:
+        """폴더 존재 확인을 워커에 맡긴다 — 캐시가 있어도 **매번 다시 확인**한다.
+
+        캐시는 '멈추지 않기' 위한 것이지 '다시 안 보기' 위한 것이 아니다.  그래서
+        사용자가 그 사이에 폴더를 만들었다면 다음 확인에서 저절로 풀린다."""
+        self._probe_token += 1
+        probe = _DirProbe(self._probe_token, ref_text, val_text)
+        probe.signals.done.connect(self._on_dir_probe_done)
+        _LIVE_DIR_PROBES.add(probe)
+        probe.finished.connect(lambda p=probe: _LIVE_DIR_PROBES.discard(p))
+        probe.start()
+
+    def _on_dir_probe_done(self, token: int, ref_text: str, ref_state: str,
+                           val_text: str, val_state: str) -> None:
+        """확인이 끝났다 — **최신 세대만** 반영하고 판정을 다시 그린다."""
+        if token != self._probe_token:
+            return
+        changed = (self._probed.get(ref_text) != ref_state
+                   or self._probed.get(val_text) != val_state)
+        self._probed[ref_text] = ref_state
+        self._probed[val_text] = val_state
+        if changed:
+            self._validate()          # 새 답으로 화면을 다시 그린다(재귀는 1회).
+
     def _validate(self) -> bool:
-        """두 폴더가 모두 유효하고 **구성 요소가 준비됐을 때만** [검증 시작] 활성화."""
-        ref_state = self._dir_state(self.ref_path_edit.text())
-        val_state = self._dir_state(self.val_path_edit.text())
+        """두 폴더가 모두 유효하고 **구성 요소가 준비됐을 때만** [검증 시작] 활성화.
+
+        폴더 확인 자체는 워커가 한다 (P-15) — 아직 답이 없으면 '확인 중' 으로 두고
+        시작을 잠근다.  헤드리스에서는 동기로 확인해 호출 즉시 판정이 나오게 한다
+        (테스트가 `_validate()` 의 반환값을 그 자리에서 단언한다)."""
+        ref_text = self.ref_path_edit.text()
+        val_text = self.val_path_edit.text()
+        if self._sync_probe:
+            ref_state: Optional[str] = self._dir_state(ref_text)
+            val_state: Optional[str] = self._dir_state(val_text)
+        else:
+            self._start_dir_probe(ref_text, val_text)
+            ref_state = self._probe_state(ref_text)
+            val_state = self._probe_state(val_text)
+        checking = ref_state is None or val_state is None
         # 비어 있는 초기 상태에서 빨간 테두리로 겁주지 않는다 — 문구만 조용히.
+        # 확인 중(None)도 마찬가지다 — 아직 모르는 것을 틀렸다고 칠할 수는 없다.
         self._set_field_state(self.ref_path_edit,
-                              ref_state if ref_state == "missing" else "")
+                              "missing" if ref_state == "missing" else "")
         self._set_field_state(self.val_path_edit,
-                              val_state if val_state == "missing" else "")
-        dirs_ok = not ref_state and not val_state
+                              "missing" if val_state == "missing" else "")
+        dirs_ok = ref_state == "" and val_state == ""
         ok = dirs_ok and self._backend_ready
         self.start_btn.setEnabled(ok)
         if hasattr(self, "_start_hint"):
             # 폴더 문제가 먼저다 — 그건 사용자가 지금 고칠 수 있는 것이고,
             # '준비 중' 은 가만히 있으면 저절로 풀린다.
-            if not dirs_ok:
+            if checking:
+                self._start_hint.setText(i18n.KO.START_CHECKING_HINT)
+            elif not dirs_ok:
                 self._start_hint.setText(i18n.KO.START_BLOCKED_HINT)
             elif not self._backend_ready:
                 self._start_hint.setText(i18n.KO.START_PREPARING_HINT)
             else:
                 self._start_hint.setText("")
-        self._refresh_die_hint(None if ref_state else self.ref_path_edit.text())
+        # die 안내는 **폴더가 확실히 있을 때만** 시작한다 — 확인 중(None)에 넘기면
+        # 있는지도 모르는 경로를 훑는다.
+        self._refresh_die_hint(ref_text if ref_state == "" else None)
         return ok
 
     def _refresh_die_hint(self, ref_text: Optional[str]) -> None:

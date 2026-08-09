@@ -95,6 +95,9 @@ class SlotMappingDialog(QDialog):
         self._pairs: list[tuple[str, str]] = []
         self._ref_sel: Optional[str] = None
         self._val_sel: Optional[str] = None
+        # 슬롯당 미리보기 픽스맵 메모 (P-14) — 같은 사진을 목록과 묶은 쌍에서
+        # 여러 번 그리므로, 창이 사는 동안은 한 번만 만들어 돌려쓴다.
+        self._thumb_memo: dict[tuple[str, bool], QPixmap] = {}
         # ★ 창 제어(최소화/최대화/F11) 헬퍼를 부르지 않는다 — 이 다이얼로그는
         #   별도 OS 창이 아니라 **메인 창 안의 시트**로 뜬다(widgets/sheet_host.py).
         #   최대화·전체화면은 메인 창이 담당한다.
@@ -114,6 +117,19 @@ class SlotMappingDialog(QDialog):
     # 썸네일 / 라벨
     # ------------------------------------------------------------------
     def _thumb_pix(self, name: str, meta: dict) -> Optional[QPixmap]:
+        """슬롯 미리보기 — **원본을 통째로 디코드하지 않는다** (P-14).
+
+        예전에는 60px 아이콘 하나를 만들려고 AOI 원본(수 MB)을 전량 디코드했고,
+        같은 사진을 목록·묶은 쌍에서 여러 번 그리느라 그 디코드를 쌍당 네 번까지
+        반복했다.  이제 미리 만들어 둔 축소본을 읽고, 그 결과를 이 창이 사는 동안
+        메모해 재사용한다.
+
+        KLA(WaferID) 쪽만 썸네일(240px)로는 헤더 글자가 뭉개져 못 읽으므로
+        중간 크기(800px)에서 크롭한다 — 표시 크기가 180x60 이라 그것으로 충분하다."""
+        key = (name, meta is self._val_meta)
+        if key in self._thumb_memo:
+            return self._thumb_memo[key]
+
         info = meta.get(name) or {}
         img = info.get("image")
         if not img:
@@ -121,20 +137,27 @@ class SlotMappingDialog(QDialog):
         is_kla = info.get("method") in _KLA_METHODS
         pix: Optional[QPixmap] = None
         try:
+            from ...utils import image_io
             if is_kla:
                 from ...utils import wafer_id
-                crop = wafer_id.header_crop_image(Path(img))
+                crop = wafer_id.header_crop_image(
+                    image_io.get_mid_path(Path(img)))
                 if crop is not None:
                     pix = _pil_to_qpixmap(crop)
             if pix is None:
-                pix = QPixmap(str(img))
+                # ★ `load_thumb_qpixmap` 을 쓰지 않는다 — 그쪽은 실패 시 회색
+                #   사각형을 돌려주는데, 여기서는 실패가 '아이콘 없음' 이어야 한다
+                #   (사진 없는 폴더와 같은 모양으로 조용히 비워 둔다).
+                pix = QPixmap(str(image_io.get_thumb_path(Path(img))))
         except Exception:
             pix = None
         if pix is None or pix.isNull():
-            return None
+            return None                  # 실패는 메모하지 않는다 — 다음에 다시 시도
         w, h = (_CROP_W, _CROP_H) if is_kla else (_THUMB_PX, _THUMB_PX)
-        return pix.scaled(w, h, Qt.AspectRatioMode.KeepAspectRatio,
-                          Qt.TransformationMode.SmoothTransformation)
+        out = pix.scaled(w, h, Qt.AspectRatioMode.KeepAspectRatio,
+                         Qt.TransformationMode.SmoothTransformation)
+        self._thumb_memo[key] = out
+        return out
 
     def _icon_for(self, name: str, meta: dict) -> Optional[QIcon]:
         pix = self._thumb_pix(name, meta)
