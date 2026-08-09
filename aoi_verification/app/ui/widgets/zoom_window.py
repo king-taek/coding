@@ -553,6 +553,25 @@ class ZoomWindow(QDialog):
         super().resizeEvent(event)
         self._relayout_tiles()
 
+    def showEvent(self, event):  # noqa: N802
+        """레이아웃이 자리를 잡은 **뒤에** 열 수를 한 번 더 계산한다.
+
+        ★ 이게 없으면 창 폭과 무관하게 **1열로 굳는다.**  생성자에서 부르는
+        `_relayout_tiles` 는 스크롤 뷰포트가 아직 기본값(98px)이라 1열을 내고,
+        show 때 배달되는 (밀린) 첫 resize 도 레이아웃 활성화 **전**이라 뷰포트가
+        여전히 낡은 값이다 — 그래서 `cols == self._active_cols` 가드에 걸려
+        재배치를 건너뛴다.  그 뒤로는 resizeEvent 가 오지 않으므로 사용자가 창
+        크기를 직접 바꾸기 전까지 1열로 남는다(고정 3열이던 예전보다 나쁘다).
+        같은 함정을 `bulk_select_dialog`·`slot_select_dialog` 는 지연 재배치로
+        피하고 있는데 이 창만 빠져 있었다.
+        """
+        super().showEvent(event)
+        # ★ 부모 있는 타이머 — 창이 그 한 틱 사이에 닫혀도 함께 죽는다(정적 singleShot 금지).
+        t = QTimer(self)
+        t.setSingleShot(True)
+        t.timeout.connect(self._relayout_tiles)
+        t.start(0)
+
     # ------------------------------------------------------------------
     def _on_toggle(self, item: ImageItem, selected: bool) -> None:
         if selected:
