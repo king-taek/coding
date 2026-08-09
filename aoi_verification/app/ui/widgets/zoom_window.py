@@ -23,6 +23,7 @@ from .. import theme
 from ...models.slot import ImageItem
 from ...utils import image_io
 from .neon_button import NeonButton
+from .option_group import columns_for_width
 from . import sheet_host as sheets
 
 # source 종류 ----------------------------------------------------------------
@@ -65,7 +66,10 @@ class _MidTile(QWidget):
         self._img_label = QLabel(self)
         self._img_label.setFixedSize(self.TILE_W - 12, self.TILE_H - 18)
         self._img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._load_pix()
+        # ★ 여기서 바로 읽지 않는다.  생성자에서 mid 를 디코드하면 슬롯 사진 수만큼
+        #   창이 굳은 뒤에야 열렸다(120장 1.0초 실측, 썸네일 사전생성을 건너뛴 세션이면
+        #   원본 디코드가 겹쳐 훨씬 길다).  화면에 처음 그려질 때 채운다.
+        self._image_loaded = False
         lay.addWidget(self._img_label)
 
         cap = QLabel(item.filename, self)
@@ -78,29 +82,28 @@ class _MidTile(QWidget):
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._on_context_menu)
 
+    def paintEvent(self, event):  # noqa: N802
+        # 화면에 처음 나타날 때 한 번만 읽는다(지연 로드).
+        if not self._image_loaded:
+            self._image_loaded = True
+            QTimer.singleShot(0, self._load_pix)
+        super().paintEvent(event)
+
     def _load_pix(self) -> None:
+        # ★ 공유 RAM 캐시를 쓴다(image_io.cached_tile_pixmap) — dim 처리까지 내장이라
+        #   예전의 수동 QPainter 페이드가 필요 없고, 창을 다시 열 때 재디코드도 없다.
+        #   같은 헬퍼를 썸네일 그리드(thumb_grid._ThumbTile)도 쓴다.
         try:
-            mid = image_io.get_mid_path(self.item.path)
-            pix = QPixmap(str(mid))
+            pix = image_io.cached_tile_pixmap(
+                self.item.path, self.TILE_W - 12,
+                prefer_mid=True, dim=self._dim,
+            )
         except Exception:
             pix = QPixmap(self.TILE_W, self.TILE_H)
             pix.fill(QColor(theme.PANEL))
         if pix.isNull():
             pix = QPixmap(self.TILE_W, self.TILE_H)
             pix.fill(QColor(theme.PANEL))
-        pix = pix.scaled(
-            self.TILE_W - 12, self.TILE_H - 18,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-        if self._dim:
-            faded = QPixmap(pix.size())
-            faded.fill(Qt.GlobalColor.transparent)
-            p = QPainter(faded)
-            p.setOpacity(0.30)
-            p.drawPixmap(0, 0, pix)
-            p.end()
-            pix = faded
         self._img_label.setPixmap(pix)
 
     def set_selected(self, on: bool) -> None:
@@ -334,12 +337,22 @@ class FullscreenViewer(QDialog):
         if not self._fitted and self.width() > 0 and self.height() > 0:
             self._fitted = True
             self._fit_to_view()
-        w = int(self._pix.width() * self._scale)
-        h = int(self._pix.height() * self._scale)
-        scaled = self._pix.scaled(
-            w, h, Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
+        # ★ 스케일 결과를 한 장 캐시한다.  드래그 팬은 offset 만 바뀌는데도 매
+        #   마우스 이벤트마다 수천 px 를 SmoothTransformation 으로 다시 줄이고 있었다
+        #   — 큰 모니터에서 팬이 마우스를 따라오지 못한 이유다.  무효화 지점은
+        #   `_pix` 와 `_scale` 뿐이므로(맞춤·휠 줌·원본 교체) 그 둘을 키로 쓴다.
+        key = (self._pix.cacheKey(), round(float(self._scale), 6))
+        if getattr(self, "_scaled_key", None) == key:
+            scaled = self._scaled_cache
+        else:
+            w = int(self._pix.width() * self._scale)
+            h = int(self._pix.height() * self._scale)
+            scaled = self._pix.scaled(
+                w, h, Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self._scaled_key = key
+            self._scaled_cache = scaled
         # 단순 중앙 + offset
         cw = self.width()
         ch = self.height()
@@ -465,47 +478,74 @@ class ZoomWindow(QDialog):
         bar.addWidget(close)
         root.addLayout(bar)
 
-        # 그리드 (스크롤)
-        scroll = QScrollArea(self)
-        scroll.setWidgetResizable(True)
+        # 그리드 (스크롤) — ★ 지역 변수로 두지 않는다.  창 폭에 맞춰 열 수를 다시
+        #   계산하려면 리사이즈 때 이 셋에 닿아야 한다.
+        self._scroll = QScrollArea(self)
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         host = QWidget()
-        scroll.setWidget(host)
-        grid = QGridLayout(host)
-        grid.setContentsMargins(4, 4, 4, 4)
-        grid.setSpacing(10)
+        self._scroll.setWidget(host)
+        self._grid = QGridLayout(host)
+        self._grid.setContentsMargins(4, 4, 4, 4)
+        self._grid.setSpacing(10)
 
-        cols = 3
-        row = 0
-        col = 0
+        # 배치 대상을 순서대로 모은다 — 구분선(sep)은 한 줄을 통째로 쓰므로 따로 표시.
+        self._flow: list[tuple[QWidget, bool]] = []      # (위젯, 한 줄 전체 차지)
         for item in self._items:
             tile = _MidTile(item, dim=False, parent=host)
             tile.toggled.connect(self._on_toggle)
             tile.view_requested.connect(self._open_fullscreen)
-            grid.addWidget(tile, row, col)
             self._tiles.append(tile)
+            self._flow.append((tile, False))
+
+        # 이미 매칭된 항목들 (Phase B 시나리오) — 회색 처리 후 클릭 가능
+        if self._already_matched:
+            sep = QLabel(i18n.KO.INFO_ALREADY_MATCHED_SECTION, host)
+            sep.setProperty("role", "muted")
+            self._flow.append((sep, True))
+            for item in self._already_matched:
+                self._flow.append((_MidTile(item, dim=True, parent=host), False))
+
+        self._active_cols = 0
+        self._relayout_tiles()
+        root.addWidget(self._scroll, stretch=1)
+
+    # ------------------------------------------------------------------
+    def _effective_cols(self) -> int:
+        """★ 열 수를 3 으로 고정하면 800px 창(최소 지원 폭)에서 세 번째 열이 잘리고
+        가로 스크롤이 생겼다.  뷰포트 폭에 맞춰 줄이되 3 을 넘지는 않는다."""
+        vp = self._scroll.viewport().width() if self._scroll is not None else 0
+        if vp <= 0:
+            vp = max(self.width() - 40, 1)
+        return max(1, min(3, columns_for_width(vp, _MidTile.TILE_W,
+                                               self._grid.spacing())))
+
+    def _relayout_tiles(self) -> None:
+        cols = self._effective_cols()
+        if cols == self._active_cols:
+            return                       # ★ 열 수가 바뀔 때만 재배치(드래그마다 재조립 금지)
+        self._active_cols = cols
+        while self._grid.count():
+            self._grid.takeAt(0)
+        row = col = 0
+        for widget, full_row in self._flow:
+            if full_row:
+                if col:
+                    row += 1
+                    col = 0
+                self._grid.addWidget(widget, row, 0, 1, cols)
+                row += 1
+                continue
+            self._grid.addWidget(widget, row, col)
             col += 1
             if col >= cols:
                 col = 0
                 row += 1
 
-        # 이미 매칭된 항목들 (Phase B 시나리오) — 회색 처리 후 클릭 가능
-        if self._already_matched:
-            row += 1
-            col = 0
-            sep = QLabel(i18n.KO.INFO_ALREADY_MATCHED_SECTION, host)
-            sep.setProperty("role", "muted")
-            sep.setStyleSheet(f"color: {theme.MUTE}; padding: 12px 0;")
-            grid.addWidget(sep, row, 0, 1, cols)
-            row += 1
-            for item in self._already_matched:
-                tile = _MidTile(item, dim=True, parent=host)
-                grid.addWidget(tile, row, col)
-                col += 1
-                if col >= cols:
-                    col = 0
-                    row += 1
-
-        root.addWidget(scroll, stretch=1)
+    def resizeEvent(self, event):  # noqa: N802
+        super().resizeEvent(event)
+        self._relayout_tiles()
 
     # ------------------------------------------------------------------
     def _on_toggle(self, item: ImageItem, selected: bool) -> None:

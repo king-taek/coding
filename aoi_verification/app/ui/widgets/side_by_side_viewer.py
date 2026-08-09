@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -28,6 +29,23 @@ def _decode_original(path: Path) -> QPixmap:
         pix = QPixmap(800, 600)
         pix.fill(QColor(theme.PANEL))
     return pix
+
+
+def _decode_fast(path: Path) -> QPixmap:
+    """먼저 얹을 그림 — 미리 만들어 둔 mid 캐시(~800px)가 있으면 그것을 쓴다.
+
+    ★ 예전엔 후보를 넘길 때마다 원본을 통째로 디코드해 클릭당 0.5~2초씩 멈췄다.
+    ★ 이 모듈은 의도적으로 `image_io`(numpy·PIL)를 **모듈 최상단에서 import 하지
+      않는다** — 팝업 경로가 무거워지지 않게 한 격리다.  여기서만 지역 import 하고,
+      캐시가 없거나 실패하면 곧바로 원본 디코드로 되돌아간다."""
+    try:
+        from ...utils import image_io
+        pix = QPixmap(str(image_io.get_mid_path(path)))
+        if not pix.isNull():
+            return pix
+    except Exception:
+        pass
+    return _decode_original(path)
 
 
 def fit_scale(pix_w: int, pix_h: int, box_w: int, box_h: int) -> float:
@@ -167,12 +185,22 @@ class _Pane(QWidget):
         # 확대·이동 중에는 라벨 크기의 캔버스에 그려 넣는다(잘림 = 파고들어 보기).
         base = fit_scale(self._pix.width(), self._pix.height(),
                          target.width(), target.height())
-        scaled = self._pix.scaled(
-            max(1, int(self._pix.width() * base * self._zoom)),
-            max(1, int(self._pix.height() * base * self._zoom)),
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
+        # ★ 드래그 팬은 오프셋만 바뀌는데 매 마우스 이벤트마다 **원본 해상도**를
+        #   다시 줄이고 있었다(여기가 풀스크린 뷰어보다 무겁다 — 원본을 들고 있다).
+        #   결과 배율이 같으면 만들어 둔 것을 그대로 쓴다.
+        key = (self._pix.cacheKey(), round(base * self._zoom, 6),
+               target.width(), target.height())
+        if getattr(self, "_scaled_key", None) == key:
+            scaled = self._scaled_cache
+        else:
+            scaled = self._pix.scaled(
+                max(1, int(self._pix.width() * base * self._zoom)),
+                max(1, int(self._pix.height() * base * self._zoom)),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self._scaled_key = key
+            self._scaled_cache = scaled
         cw = max(1, self._img.width())
         ch = max(1, self._img.height())
         canvas = QPixmap(cw, ch)
@@ -237,7 +265,8 @@ class SideBySideViewer(QDialog):
         QShortcut(QKeySequence(Qt.Key.Key_Left), self, activated=self._prev)
         QShortcut(QKeySequence(Qt.Key.Key_Right), self, activated=self._next)
 
-        self._ref_pane.set_pixmap(_decode_original(self._ref_path))
+        self._ref_pane.set_pixmap(_decode_fast(self._ref_path))
+        self._upgrade_to_original(self._ref_pane, self._ref_path)
         self._render_candidate()
 
     # ------------------------------------------------------------------
@@ -333,11 +362,41 @@ class SideBySideViewer(QDialog):
         self._cand_pane.set_title(caption or item.filename)
         # ★ 후보를 바꿔도 확대 배율·위치는 **유지한다**(초기화하지 않는다).  같은
         #   자리를 같은 배율로 후보끼리 비교하는 것이 이 화면의 목적이다.
-        self._cand_pane.set_pixmap(_decode_original(Path(item.path)))
+        self._cand_pane.set_pixmap(_decode_fast(Path(item.path)))
+        self._upgrade_to_original(self._cand_pane, Path(item.path))
         self.pos_label.setText(f"{self._idx + 1} / {len(self._candidates)}")
         self.btn_prev.setEnabled(self._idx > 0)
         self.btn_next.setEnabled(self._idx < len(self._candidates) - 1)
         self._sync_panes()
+
+    def _upgrade_to_original(self, pane, path: Path) -> None:
+        """mid 로 먼저 보여 준 뒤, 원본이 준비되면 조용히 바꿔 끼운다.
+
+        ★ 배율은 건드리지 않는다.  `_Pane` 은 그릴 때마다 `fit_scale` 로 base 를 다시
+        계산하므로(`_zoom` 은 그 base 대비 배수) 원본으로 바뀌어도 화면 배율이 같다 —
+        풀스크린 뷰어의 `_scale *= 옛폭/새폭` 보정을 여기 그대로 옮기면 오히려 틀린다."""
+        try:
+            from .zoom_window import _spawn_original_loader
+        except Exception:
+            return
+        if os.environ.get("QT_QPA_PLATFORM", "") == "offscreen":
+            return                        # 헤드리스에선 원본 교체가 의미 없다
+        token = getattr(self, "_upgrade_token", 0) + 1
+        self._upgrade_token = token
+
+        def _apply(img) -> None:
+            if getattr(self, "_upgrade_token", 0) != token:
+                return                    # 사용자가 이미 다음 후보로 넘어갔다
+            pix = QPixmap.fromImage(img)
+            if not pix.isNull():
+                pane.set_pixmap(pix)
+                self._sync_panes()
+
+        try:
+            loader = _spawn_original_loader(path)
+            loader.signals.loaded.connect(_apply)
+        except Exception:
+            pass
 
     def _prev(self) -> None:
         if self._idx > 0:
