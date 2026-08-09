@@ -189,13 +189,13 @@
   <img src="02_셋업_입력완료.png" alt="셋업 화면 — 폴더와 호기 번호를 입력한 상태">
   <!-- 좌표는 shots.json 의 위젯 실좌표 — 기준장비카드 · 검증장비카드 · 판정기준배지 · 검증시작 -->
   <svg viewBox="0 0 1280 860" aria-hidden="true">
-    <rect class="mark blue" x="32" y="231" width="593" height="210" rx="9"/>
-    <rect class="mark blue" x="645" y="231" width="593" height="210" rx="9"/>
-    <rect class="mark blue" x="857" y="121" width="245" height="82" rx="9"/>
+    <rect class="mark blue" x="32" y="221" width="593" height="210" rx="9"/>
+    <rect class="mark blue" x="645" y="221" width="593" height="210" rx="9"/>
+    <rect class="mark blue" x="857" y="111" width="245" height="82" rx="9"/>
     <rect class="mark blue" x="1028" y="778" width="220" height="44" rx="7"/>
-    <g><circle class="bub" cx="32" cy="231" r="15"/><text class="bubt" x="32" y="231">1</text></g>
-    <g><circle class="bub" cx="645" cy="231" r="15"/><text class="bubt" x="645" y="231">2</text></g>
-    <g><circle class="bub" cx="857" cy="121" r="15"/><text class="bubt" x="857" y="121">3</text></g>
+    <g><circle class="bub" cx="32" cy="221" r="15"/><text class="bubt" x="32" y="221">1</text></g>
+    <g><circle class="bub" cx="645" cy="221" r="15"/><text class="bubt" x="645" y="221">2</text></g>
+    <g><circle class="bub" cx="857" cy="111" r="15"/><text class="bubt" x="857" y="111">3</text></g>
     <!-- 작은 컨트롤의 번호는 상자 **바깥**에 — 안에 두면 버튼 글자를 덮는다 -->
     <g><circle class="bub" cx="1012" cy="762" r="15"/><text class="bubt" x="1012" y="762">4</text></g>
   </svg>
@@ -267,12 +267,12 @@
   <img src="11_1단계_후보선별.jpg" alt="1단계 후보 선별 화면">
   <!-- 좌표는 shots.json 의 위젯 실좌표 — 왼쪽패널 · 중앙사진 · 오른쪽패널 -->
   <svg viewBox="0 0 1280 860" aria-hidden="true">
-    <rect class="mark blue" x="16" y="164" width="263" height="658" rx="9"/>
-    <rect class="mark blue" x="411" y="307" width="400" height="400" rx="9"/>
-    <rect class="mark blue" x="944" y="164" width="320" height="658" rx="9"/>
-    <g><circle class="bub" cx="16" cy="164" r="15"/><text class="bubt" x="16" y="164">1</text></g>
-    <g><circle class="bub" cx="411" cy="307" r="15"/><text class="bubt" x="411" y="307">2</text></g>
-    <g><circle class="bub" cx="944" cy="164" r="15"/><text class="bubt" x="944" y="164">3</text></g>
+    <rect class="mark blue" x="16" y="154" width="263" height="668" rx="9"/>
+    <rect class="mark blue" x="411" y="302" width="400" height="400" rx="9"/>
+    <rect class="mark blue" x="944" y="154" width="320" height="668" rx="9"/>
+    <g><circle class="bub" cx="16" cy="154" r="15"/><text class="bubt" x="16" y="154">1</text></g>
+    <g><circle class="bub" cx="411" cy="302" r="15"/><text class="bubt" x="411" y="302">2</text></g>
+    <g><circle class="bub" cx="944" cy="154" r="15"/><text class="bubt" x="944" y="154">3</text></g>
   </svg>
 </figure>
 <figcaption>❶ 남은 사진 → ❷ 지금 볼 사진 → ❸ 검증하기로 한 사진.
@@ -291,6 +291,13 @@
 </table>
 <p><b>키 방향이 곧 사진이 가는 방향입니다</b> — 오른쪽 패널이 <span class="q">검증 대상</span> 이라
 <span class="kbd">→</span> 가 검증입니다. 외울 것은 이것 하나뿐입니다.</p>
+
+<h3>여러 장을 한 번에 — 타일을 클릭</h3>
+<p>왼쪽 <b>검증 후보들</b> 패널의 사진을 <b>클릭</b>하면 파란 테두리로 선택됩니다.
+한 장이라도 고르면 패널 위쪽에 <span class="ui">선택 3 장 검증</span> ·
+<span class="ui">선택 3 장 제외</span> 두 버튼이 나타나고, 누르면 그 사진들이 한 번에 처리됩니다.
+같은 결함이 여러 장 찍힌 경우에 한 장씩 넘기지 않아도 됩니다.
+(<span class="kbd">Z</span> 로 되돌리는 것도 그대로 됩니다.)</p>
 
 <div class="warnbox">
   <span class="t"><span class="ui">선택 종료</span>는 남은 사진을 <b>모두 제외</b>합니다</span>
@@ -329,16 +336,17 @@
   <img src="13_2단계_자동매칭.jpg" alt="2단계 — 자동 매치가 도는 화면">
   <!-- 좌표는 shots.json 의 위젯 실좌표 — 로딩패널 · 빈후보칸 -->
   <svg viewBox="0 0 1280 860" aria-hidden="true">
-    <rect class="mark blue" x="428" y="291" width="424" height="255" rx="9"/>
-    <rect class="mark blue" x="655" y="177" width="597" height="633" rx="9"/>
-    <g><circle class="bub" cx="428" cy="291" r="15"/><text class="bubt" x="428" y="291">1</text></g>
-    <g><circle class="bub" cx="1252" cy="177" r="15"/><text class="bubt" x="1252" y="177">2</text></g>
+    <rect class="mark blue" x="428" y="293" width="424" height="251" rx="9"/>
+    <rect class="mark blue" x="655" y="167" width="597" height="643" rx="9"/>
+    <g><circle class="bub" cx="428" cy="293" r="15"/><text class="bubt" x="428" y="293">1</text></g>
+    <g><circle class="bub" cx="1252" cy="167" r="15"/><text class="bubt" x="1252" y="167">2</text></g>
   </svg>
 </figure>
 <ol class="keys">
   <li><b>진행 바</b> — 문구가 차례로 바뀝니다.
-      <span class="q">좌표 파싱 중...</span> → <span class="q">좌표 매칭 중</span> →
-      <span class="q">자동 매치 진행 중… 3 / 6</span>.
+      <span class="q">좌표 파싱 중…</span> → <span class="q">좌표 매칭 중</span> →
+      <span class="q">자동 매치 진행 중…</span>.  진행 바 <b>아래</b>에
+      <span class="mono">3 / 6</span> 처럼 숫자가 따로 표시됩니다.
       숫자가 끝까지 차면 <b>저절로 검토 화면으로 넘어갑니다.</b></li>
   <li><b>검증 장비 후보 칸이 비어 있습니다</b> — 고장이 아니라
       <b>고를 것이 없기 때문</b>입니다. 짝은 프로그램이 정합니다.</li>
@@ -355,16 +363,16 @@
 <figure class="shot">
   <img src="15_검토_시트.jpg" alt="검토 화면 — 매칭 결과 목록">
   <svg viewBox="0 0 1280 860" aria-hidden="true">
-    <rect class="mark blue" x="20" y="12" width="258" height="44" rx="7"/>
-    <rect class="mark red"  x="20" y="170" width="1230" height="152" rx="4"/>
-    <rect class="mark blue" x="20" y="710" width="1230" height="160" rx="4"/>
-    <rect class="mark blue" x="1187" y="764" width="52" height="44" rx="6"/>
-    <rect class="mark blue" x="1125" y="12" width="135" height="44" rx="7"/>
-    <g><circle class="bub" cx="306" cy="34" r="15"/><text class="bubt" x="306" y="34">1</text></g>
-    <g><circle class="bub red" cx="1250" cy="170" r="15"/><text class="bubt" x="1250" y="170">2</text></g>
-    <g><circle class="bub" cx="20" cy="710" r="15"/><text class="bubt" x="20" y="710">3</text></g>
-    <g><circle class="bub" cx="1170" cy="752" r="15"/><text class="bubt" x="1170" y="752">4</text></g>
-    <g><circle class="bub" cx="1109" cy="34" r="15"/><text class="bubt" x="1109" y="34">5</text></g>
+    <rect class="mark blue" x="20" y="112" width="258" height="44" rx="7"/>
+    <rect class="mark red"  x="20" y="203" width="1230" height="152" rx="4"/>
+    <rect class="mark blue" x="20" y="743" width="1230" height="160" rx="4"/>
+    <rect class="mark blue" x="1187" y="797" width="52" height="44" rx="6"/>
+    <rect class="mark blue" x="1125" y="112" width="135" height="44" rx="7"/>
+    <g><circle class="bub" cx="306" cy="134" r="15"/><text class="bubt" x="306" y="134">1</text></g>
+    <g><circle class="bub red" cx="1250" cy="203" r="15"/><text class="bubt" x="1250" y="203">2</text></g>
+    <g><circle class="bub" cx="20" cy="743" r="15"/><text class="bubt" x="20" y="743">3</text></g>
+    <g><circle class="bub" cx="1170" cy="785" r="15"/><text class="bubt" x="1170" y="785">4</text></g>
+    <g><circle class="bub" cx="1109" cy="134" r="15"/><text class="bubt" x="1109" y="134">5</text></g>
   </svg>
 </figure>
 <figcaption>가장 <b>멀리 떨어진 짝이 맨 위</b>에 옵니다 — 확인이 필요한 것부터 보게 되어 있습니다.</figcaption>
@@ -388,10 +396,10 @@
 <figure class="shot">
   <img src="15_검토_시트.jpg" alt="허용 초과 행이 세 개 있는 검토 화면">
   <svg viewBox="0 0 1280 860" aria-hidden="true">
-    <rect class="mark red"  x="20" y="170" width="1230" height="152" rx="6"/>
-    <rect class="mark blue" x="20" y="516" width="1230" height="194" rx="6"/>
-    <g><circle class="bub red" cx="20" cy="170" r="14"/><text class="bubt" x="20" y="170">1</text></g>
-    <g><circle class="bub" cx="20" cy="516" r="14"/><text class="bubt" x="20" y="516">2</text></g>
+    <rect class="mark red"  x="20" y="203" width="1230" height="152" rx="6"/>
+    <rect class="mark blue" x="20" y="549" width="1230" height="194" rx="6"/>
+    <g><circle class="bub red" cx="20" cy="203" r="14"/><text class="bubt" x="20" y="203">1</text></g>
+    <g><circle class="bub" cx="20" cy="549" r="14"/><text class="bubt" x="20" y="549">2</text></g>
   </svg>
 </figure>
 <figcaption>❶ 520 µm — 천도 얼룩도 다릅니다. <b>다른 결함</b>이므로 빼야 합니다.
@@ -438,10 +446,11 @@
 <span class="ui">크게 보기</span> 로는 기준과 후보를 좌우로 나란히 놓고 비교할 수 있습니다.</figcaption>
 
 <div class="warnbox">
-  <span class="t"><span class="ui">검토 완료</span>는 되돌릴 수 없습니다</span>
+  <span class="t"><span class="ui">검토 완료</span> 를 눌러도 되돌아올 수 있습니다</span>
   <p>누르는 순간 <span class="ui">×</span> 표시한 행이 <b>미매칭으로 확정</b>되고 결과 화면으로 넘어갑니다.
-  넘어간 뒤에도 결과 화면의 <span class="ui">매칭 결과 검토</span> 와
-  <span class="ui">매치 실패 사진 검토</span> 로 손볼 수 있으니, 이 화면에서 완벽하게 하려 애쓰지 않으셔도 됩니다.</p>
+  넘어간 뒤에도 결과 화면의 <span class="ui">← 검토 화면으로</span> 로 <b>이 화면에 다시 와서</b> 고칠 수 있고,
+  <span class="ui">매치 실패 사진 검토</span> 로 짝을 못 찾은 사진을 직접 짝지어 줄 수 있으니,
+  이 화면에서 완벽하게 하려 애쓰지 않으셔도 됩니다.</p>
 </div>
 </section>
 
@@ -453,26 +462,32 @@
 <figure class="shot">
   <img src="18_결과.png" alt="검증 결과 화면">
   <svg viewBox="0 0 1280 860" aria-hidden="true">
-    <rect class="mark blue" x="40" y="170" width="1200" height="156" rx="9"/>
-    <rect class="mark blue" x="646" y="756" width="114" height="40" rx="7"/>
-    <rect class="mark blue" x="780" y="756" width="200" height="40" rx="7"/>
+    <rect class="mark blue" x="40" y="160" width="820" height="210" rx="9"/>
+    <rect class="mark blue" x="61" y="206" width="365" height="69" rx="7"/>
+    <rect class="mark blue" x="633" y="754" width="127" height="44" rx="7"/>
+    <rect class="mark blue" x="780" y="754" width="200" height="44" rx="7"/>
     <rect class="mark blue" x="1000" y="754" width="240" height="44" rx="7"/>
-    <g><circle class="bub" cx="40" cy="170" r="15"/><text class="bubt" x="40" y="170">1</text></g>
-    <g><circle class="bub" cx="646" cy="740" r="15"/><text class="bubt" x="646" y="740">2</text></g>
-    <g><circle class="bub" cx="780" cy="740" r="15"/><text class="bubt" x="780" y="740">3</text></g>
-    <g><circle class="bub" cx="1000" cy="738" r="15"/><text class="bubt" x="1000" y="738">4</text></g>
+    <g><circle class="bub" cx="40" cy="160" r="15"/><text class="bubt" x="40" y="160">1</text></g>
+    <g><circle class="bub" cx="440" cy="240" r="15"/><text class="bubt" x="440" y="240">2</text></g>
+    <g><circle class="bub" cx="633" cy="738" r="15"/><text class="bubt" x="633" y="738">3</text></g>
+    <g><circle class="bub" cx="780" cy="738" r="15"/><text class="bubt" x="780" y="738">4</text></g>
+    <g><circle class="bub" cx="1000" cy="738" r="15"/><text class="bubt" x="1000" y="738">5</text></g>
   </svg>
 </figure>
 
 <ol class="keys">
-  <li><b>요약</b> — 두 장비 이름, 매칭 성공 장수, 한쪽에만 있던 슬롯,
+  <li><b>요약</b> — 두 장비 이름, 한쪽에만 있던 슬롯,
       <b>결과 파일이 저장될 위치</b>.</li>
-  <li><span class="ui">매칭 결과 검토</span> — 잘못 짝지어진 것을 빼냅니다.
-      <span class="ui">삭제</span> 는 <b>표시만</b> 하고, <span class="ui">확인</span> 을 눌러야 실제로 빠집니다.</li>
+  <li><b>숫자 네 칸</b> — <span class="q">매칭 성공</span> · <span class="q">허용 초과</span> ·
+      <span class="q">매치 없음</span> · <span class="q">Slot 불일치</span>.
+      검토 화면 왼쪽 위의 세는 칸과 <b>같은 기준으로</b> 셉니다 — 두 화면의 숫자가 어긋나지 않습니다.</li>
+  <li><span class="ui">← 검토 화면으로</span> — 검토 화면으로 <b>되돌아가</b> 잘못 짝지어진 것을 다시 손봅니다.
+      고친 뒤 <span class="ui">검토 완료 ▶</span> 를 누르면 이 화면의 숫자가 갱신됩니다.</li>
   <li><span class="ui">매치 실패 사진 검토</span> — 짝을 못 찾은 사진을 직접 짝지어 줍니다.
-      사진을 넘길 때마다 <b>몇 초 멈출 수 있지만 고장이 아닙니다.</b></li>
+      사진을 넘기면 후보 점수를 계산하는 동안 <b>진행 바가 뜹니다</b>(화면은 멈추지 않습니다).</li>
   <li><span class="ui">엑셀로 저장</span> — 파일을 만듭니다.
-      <b>위치를 다시 묻지 않습니다</b>(요약에 적힌 곳에 저장).</li>
+      <b>위치를 다시 묻지 않습니다</b>(요약에 적힌 곳에 저장).
+      저장이 끝나면 <span class="ui">파일 열기</span> · <span class="ui">폴더 열기</span> 를 바로 누를 수 있습니다.</li>
 </ol>
 
 <h3>엑셀에 무엇이 담기나</h3>
@@ -559,7 +574,7 @@
         <td>원래 짝으로 돌아옵니다.</td></tr>
     <tr><td>다 확인했다</td>
         <td><span class="ui">검토 완료</span></td>
-        <td>⚠ 되돌릴 수 없습니다. 결과 화면으로 넘어갑니다.</td></tr>
+        <td>결과 화면으로 넘어갑니다. 결과 화면의 <span class="ui">← 검토 화면으로</span> 로 다시 돌아올 수 있습니다.</td></tr>
   </tbody>
 </table>
 
@@ -568,11 +583,11 @@
   <thead><tr><th style="width:44%">하고 싶은 일</th><th style="width:22%">누를 것</th><th>그다음</th></tr></thead>
   <tbody>
     <tr><td>잘못 짝지어진 것을 빼내고 싶다</td>
-        <td><span class="ui">매칭 결과 검토</span></td>
-        <td><span class="ui">삭제</span> 로 표시하고 <span class="ui">확인</span> 을 눌러야 실제로 빠집니다.</td></tr>
+        <td><span class="ui">← 검토 화면으로</span></td>
+        <td>검토 화면으로 되돌아갑니다. 고친 뒤 <span class="ui">검토 완료 ▶</span> 를 누르면 결과가 갱신됩니다.</td></tr>
     <tr><td>짝을 못 찾은 사진을 직접 짝지어 주고 싶다</td>
         <td><span class="ui">매치 실패 사진 검토</span></td>
-        <td>후보를 고르고 <span class="ui">매치 확정</span>. 넘길 때마다 몇 초 멈출 수 있습니다.</td></tr>
+        <td>후보를 고르고 <span class="ui">매치 확정</span>. 넘기면 진행 바가 뜹니다(멈추지 않습니다).</td></tr>
     <tr><td>결과를 파일로 남기고 싶다</td>
         <td><span class="ui">엑셀로 저장</span></td>
         <td>요약에 적힌 위치에 저장됩니다. 위치를 다시 묻지 않습니다.</td></tr>
@@ -581,7 +596,7 @@
         <td>저장 전에 켜 두세요. 파일이 커지고 느려집니다.</td></tr>
     <tr><td>다른 장비를 이어서 검증하고 싶다</td>
         <td><span class="ui">새 검증 시작</span></td>
-        <td>첫 화면으로 돌아갑니다. 저장한 엑셀은 그대로 남습니다.</td></tr>
+        <td>첫 화면으로 돌아갑니다. <b>아직 저장하지 않았다면 확인 창이 한 번 뜹니다.</b> 저장한 엑셀은 그대로 남습니다.</td></tr>
   </tbody>
 </table>
 
