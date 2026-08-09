@@ -621,6 +621,17 @@ class LoadingOverlay(QWidget):
         # 페이드/상승 애니메이션은 이미 멈췄다 — 다시 재생하면 깜빡이므로 최종값으로.
         self._on_fade(1.0)
         self._on_rise(1.0)
+        # ★ 진행바 스태거도 **안착 위치로** 되돌린다.  `hideEvent` 가 `_bar_anim` 과
+        #   `_bar_timer` 를 멈추므로, 되살리지 않으면 진행바와 숫자가 시작 위치
+        #   (8px 아래)에 굳은 채 로딩 내내 남는다 — 스태거를 만든 바로 그 화면
+        #   (600행 검토 진입)에서 등장 안무가 한 번도 재생되지 않았다(실측 (8,0)).
+        self._set_bar_slide(1.0)
+        # ★ 등장 페이드가 전환에 끊기면 `finished` 가 안 나 `_on_fade_done` 의
+        #   `_detach_effect` 에 도달하지 못한다.  불투명도는 이미 1.0 이라 이펙트는
+        #   시각적 이득이 0 인데, 붙어 있는 동안 스피너가 1프레임 돌 때마다 패널
+        #   전체가 오프스크린으로 다시 렌더된다(62.5Hz) — 정작 그 시간에 돌아야 할
+        #   백그라운드 작업의 UI 스레드 여유를 갉아먹는다.  여기서 떼어 낸다.
+        self._detach_effect()
 
     def hideEvent(self, event):  # noqa: N802
         """숨으면 잠금을 풀고, 돌던 것을 전부 멈춘다.
@@ -635,8 +646,27 @@ class LoadingOverlay(QWidget):
         키보드를 영영 못 받는데(테스트에서 실제로 그렇게 됐다), 아래 정지 중 하나라도
         `RuntimeError`(삭제된 C++ 객체)를 내면 그 뒤 줄에 도달하지 못한다.  `_finish_hide`
         만 믿을 수도 없다 — 부모 창이 닫히거나 페이지가 통째로 교체되면 그 경로를 거치지
-        않고 숨겨진다.  `hide()` 는 어느 경로로든 이 이벤트를 낸다."""
+        않고 숨겨진다.  `hide()` 는 어느 경로로든 이 이벤트를 낸다.
+
+        ★ **퇴장이 진행 중이었다면 여기서 끝을 확정한다.**  아래에서 `_fade_anim` 과
+        `_hide_timer` 를 멈추는데, 그러면 `finished` 가 나지 않아
+        `_on_fade_done → _finish_hide` 가 **영영 오지 않는다.**  퇴장 페이드(112ms)나
+        최소표시 래치(350ms) 가 도는 중에 페이지가 전환되면 정확히 그렇게 된다 —
+        모든 페이지 전환이 스냅샷 스왑으로 조상에 hide→show 를 배달하기 때문이다.
+
+        그렇게 '끝' 에 닿지 못한 오버레이는 `hide()` 도 못 부른 채 부모 전체 크기로
+        마운트된 채 남는다.  그 페이지가 다시 보이는 순간 화면이 통째로 어두워지고
+        (실측 휘도 233 → 173) 클릭이 전부 삼켜지며, 래치 경로에서는 `showEvent` 의
+        재무장까지 걸려 **앱 전역 키보드가 영구히 잠긴다.**  비취소 오버레이면
+        빠져나갈 방법이 없다 — 강제 종료뿐이다.
+
+        숨은 뒤에는 그 애니메이션을 볼 사람이 없으므로, 남은 것은 '끝냈다는 사실'
+        뿐이다.  그것을 지금 확정한다."""
         self._set_input_lock(False)
+        if self._hiding or self._hide_pending:
+            self._hiding = False
+            self._hide_pending = False
+            self._finish_hide()          # 유일한 '끝' 에 반드시 도달시킨다
         self._fade_anim.stop()
         self._rise_anim.stop()
         self._settle_progress()        # 값 확정 후 정지 — 중간값으로 얼지 않게
