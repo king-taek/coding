@@ -970,13 +970,24 @@ class SelectPage(QWidget):
                 elif action_id == "recenter":
                     self._state.queue.insert(0, it)
         elif panel == self.PANEL_LEFT:
+            # ★ 큐에서 곧바로 내리는 이 두 액션은 가운데에서 한 장씩 내리는 결정과
+            #   **같은 일**이다 — 그러므로 `_decide` 와 똑같이 되돌리기 기록을 남긴다.
+            #   남기지 않으면 `Z` 가 이 일괄 처리를 건너뛰고 **그 이전의 한 장짜리
+            #   결정**을 대신 취소한다: 사용자는 방금 보낸 3장이 돌아올 줄 알았는데
+            #   손대지 않은 다른 사진이 조용히 큐로 되돌아온다(실측 확인).
+            #   기록 단위는 `_end_selection_now` 와 같은 **장당 1건**이다 — `Z` 는
+            #   "직전 한 장" 이라는 화면·설명서의 약속을 그대로 지킨다.
             for it in items:
                 if it in self._state.queue:
                     self._state.queue.remove(it)
                 if action_id == "batch_verify":
                     self._state.targets[it.slot].append(it)
+                    self._state.history.append(("verify", it))
+                    self.decision_made.emit("verify", it)
                 elif action_id == "batch_exclude":
                     self._state.excluded[it.slot].append(it)
+                    self._state.history.append(("exclude", it))
+                    self.decision_made.emit("exclude", it)
         self.state_changed.emit()
         self._advance_to_next()
 
