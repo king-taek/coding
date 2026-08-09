@@ -48,7 +48,6 @@ BTN_BROWSE = "폴더 선택…"
 BTN_VERIFY = "검증"
 BTN_EXCLUDE = "제외"
 BTN_UNDO = "되돌리기(Z)"
-BTN_NO_MATCH = "매칭 없음"
 BTN_MATCH_UNDO = "되돌리기"
 MATCH_UNDO_TOOLTIP = "직전 매칭/매칭없음 결정을 취소합니다 (Ctrl+Z)"
 BTN_RETRY_SKIP = "보류 재시도"
@@ -210,7 +209,6 @@ ZOOM_BTN_PICK_MATCH = "이 사진으로 매칭"
 SHORTCUT_TOOLTIP = (
     "단축키:  → = 검증   /   ← = 제외   /   Z = 되돌리기"
 )
-SHORTCUT_STAGE2_TOOLTIP = "단축키:  N = 매칭 없음 확정    Ctrl+Z = 되돌리기"
 
 # ── 사진 크기 슬라이더 ────────────────────────────────────────────────────
 IMAGE_SIZE_LABEL = "사진 크기"

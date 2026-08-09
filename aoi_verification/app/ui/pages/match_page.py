@@ -262,12 +262,23 @@ class MatchPage(QWidget):
         self.undo_btn.clicked.connect(self._undo_match)
         self.undo_btn.setEnabled(False)
         bar.addWidget(self.undo_btn)
-        # ‘잠시 보류’ 버튼 제거 (#3 — 사용자 요청).  ‘매칭 없음’ 만 남김.
-        self.no_match_btn = NeonButton(i18n.KO.BTN_NO_MATCH, role="danger")
-        self.no_match_btn.setToolTip(i18n.KO.SHORTCUT_STAGE2_TOOLTIP)
-        self.no_match_btn.clicked.connect(self._confirm_no_match)
+        # ★ ‘매칭 없음’ 버튼을 두지 않는다 — 이 화면에 **사용자가 누를 것이 없다.**
+        #
+        #   `AutomationLevel.AUTO_MODES` 는 `{USER_SELECT, AUTO_ALL}` 이라 `is_auto()`
+        #   가 **모든 자동화 수준에서 True** 다.  즉 2단계 매칭은 언제나 자동이고,
+        #   수동 스트리밍 경로(`streaming = not self._auto_mode`)는 실제로 도달하지
+        #   않는다.  후보 칸도 자동 모드에서는 비어 있다.
+        #
+        #   그런데 이 버튼과 `N` 단축키는 그 사이에도 눌렸다.  선계산이 끝나
+        #   오버레이가 내려간 뒤에도 자동 매치 사슬은 계속 도는데(실측: ref 400장에서
+        #   오버레이는 359ms 에 사라지고 남은 356장 = **89%** 가 덮개 없이 처리됐다),
+        #   그때 이것을 누르면 처리 중이던 사진이 조용히 ‘매칭 없음’ 으로 확정돼
+        #   **엑셀에 사실이 아닌 미탐이 남는다.**  사용자는 자기가 무엇을 바꿨는지도
+        #   모른다 — 이 저장소가 가장 비싸게 치는 오류다.
+        #
+        #   누를 이유가 없는 것을 누를 수 있게 두지 않는 것이 가장 확실한 방어다.
+        #   자동 경로가 쓰는 `_confirm_no_match(user=False)` 는 그대로 남는다.
         bar.addStretch(1)
-        bar.addWidget(self.no_match_btn)
         cl.addLayout(bar)
 
         center.setMinimumWidth(360)
@@ -329,13 +340,10 @@ class MatchPage(QWidget):
             )
         self._h_splitter.splitterMoved.connect(self._save_splitter_state)
 
-        # ‘S’ (skip) 단축키 — 잠시 보류 버튼 제거와 함께 비활성 (#3).
-        # ★ 컨텍스트는 기본값(WindowShortcut)을 유지한다.  WidgetWithChildren 으로
-        #   좁히면 '포커스가 이 위젯 트리 안에 있을 때만' 발화하는데, 이 화면은
-        #   사용자가 아무것도 클릭하지 않으면 포커스 위젯이 없어 단축키가 조용히
-        #   죽는다.  대신 화면이 안 보일 때의 오작동은 핸들러의 `user=True` 가드가
-        #   막는다(`_confirm_no_match` 주석 참조).
-        QShortcut(QKeySequence("N"), self, activated=self._confirm_no_match)
+        # ★ ‘N’(매칭 없음) 단축키도 두지 않는다 — 버튼과 같은 이유다(위 주석 참조).
+        #   버튼만 지우고 단축키를 남기면 **보이지 않는 손잡이**가 되어 더 나쁘다:
+        #   화면에 아무 것도 없는데 키 하나로 사실이 아닌 미탐이 확정된다.
+        #   ‘S’(잠시 보류) 는 이미 #3 에서 비활성화됐다.
         # 되돌리기 (#C1) — Stage 1 의 Z 와 충돌하지 않도록 Ctrl+Z.
         QShortcut(QKeySequence("Ctrl+Z"), self, activated=self._undo_match)
 
@@ -1187,8 +1195,18 @@ class MatchPage(QWidget):
         self._update_undo_button()
         self._advance()
 
-    def _confirm_no_match(self, *, user: bool = True) -> None:
+    def _confirm_no_match(self, *, user: bool = False) -> None:
         """매칭 없음 확정 — 미탐 시트에 들어가고, Skip 재시도 대상이 아님.
+
+        ★ **이제 사람 경로는 없다.**  이 화면의 [매칭 없음] 버튼과 ``N`` 단축키를
+        제거했다 — 2단계는 언제나 자동이라 사용자가 누를 것이 없는데, 자동 매치가
+        도는 동안 눌리면 처리 중이던 사진이 조용히 미탐으로 확정됐기 때문이다
+        (`_build` 의 액션 바 주석에 실측과 함께 적어 두었다).  그래서 기본값을
+        ``user=False`` 로 뒤집는다 — 남은 호출부는 전부 프로그램 경로다.
+
+        ``user`` 인자는 **지우지 않는다.**  가시성 가드를 사람 경로에만 걸어야 하는
+        이유(아래)가 그대로 유효하고, 나중에 수동 모드가 되살아나면 그때 다시
+        ``user=True`` 로 부르면 된다.
 
         ★ ``user`` 는 **누가 불렀는가**다.  가시성 검사를 사람이 누른 경로에만 건다.
 
