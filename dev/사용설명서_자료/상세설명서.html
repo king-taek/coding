@@ -50,18 +50,36 @@
   <ol>
     <li><b>전체 흐름</b> <span class="d">— 무엇을 하는 프로그램인가</span></li>
     <li><b>사진 폴더 준비</b> <span class="d">— 이것만 맞으면 나머지는 쉽습니다</span></li>
-    <li><b>첫 화면 익히기</b> <span class="d">— 어디에 무엇이 있는가</span></li>
+    <li><b>첫 화면 익히기</b> <span class="d">— 「AOI 레시피 검증」 화면</span></li>
     <li><b>검증 시작 전 설정</b> <span class="d">— 실행 옵션과 매칭 설정</span></li>
     <li><b>시작 직후 자동 진행</b> <span class="d">— 스캔 · KLA 확인 · 슬롯 선택</span></li>
-    <li><b>1단계 — 후보 선별</b> <span class="d">— 검증할 사진 고르기</span></li>
-    <li><b>2단계 — 매칭 (자동)</b> <span class="d">— 짝을 짓는 규칙, 사람이 손대지 않는 이유</span></li>
-    <li><b>검토 — 결과 읽는 법</b> <span class="d">— 이 화면만 익히면 끝입니다</span></li>
-    <li><b>결과와 엑셀 저장</b> <span class="d">— 마무리</span></li>
+    <li><b>1단계 — 후보 선별</b> <span class="d">— 「Stage 1 — 후보 선별」 화면</span></li>
+    <li><b>2단계 — 매칭 (자동)</b> <span class="d">— 「Stage 2 — 좌표 기반 매칭」 화면</span></li>
+    <li><b>검토 — 결과 읽는 법</b> <span class="d">— 「매치 검토」 화면 · 이것만 익히면 끝입니다</span></li>
+    <li><b>결과와 엑셀 저장</b> <span class="d">— 「검증 결과」 화면</span></li>
     <li><b>알아두면 좋은 기능</b> <span class="d">— 다크 모드 · 사진 정보 · 업데이트</span></li>
     <li><b>주의사항</b> <span class="d">— 멈춘 것 같을 때, 되돌릴 수 없는 것</span></li>
     <li><b>이럴 땐 이 버튼</b> <span class="d">— 상황별로 무엇을 누르면 되는지</span></li>
     <li><b>빠른 참조</b> <span class="d">— 단축키 · 판정 기준 · 문제 해결</span></li>
   </ol>
+</div>
+
+<div class="toc" style="page-break-after:always;margin-top:6mm">
+  <h3 style="margin-top:0">지금 이 화면이 안 풀릴 때</h3>
+  <p style="font-size:9.4pt;color:var(--mute);margin-bottom:2mm">
+    이 문서를 펼치는 가장 흔한 이유는 <b>“지금 이 화면에서 뭘 눌러야 하지”</b> 입니다.
+    그때 손에 있는 단서는 <b>화면 왼쪽 위의 제목</b> 하나이므로, 그것으로 찾을 수 있게 둡니다.</p>
+  <table>
+    <thead><tr><th style="width:44%">화면 왼쪽 위에 이렇게 적혀 있다면</th><th>여기를 보세요</th></tr></thead>
+    <tbody>
+      <tr><td><span class="q">AOI 레시피 검증</span></td><td>3장(어디에 무엇이 있는지) · 4장(설정)</td></tr>
+      <tr><td><span class="q">Stage 1 — 후보 선별</span></td><td>6장 · 12장</td></tr>
+      <tr><td><span class="q">Stage 2 — …</span> + 진행 바</td><td>7장 · 11장(멈춘 것처럼 보일 때)</td></tr>
+      <tr><td><span class="q">매치 검토</span></td><td>8장 · 12장 · 13장(판정 기준 한눈에)</td></tr>
+      <tr><td><span class="q">검증 결과</span></td><td>9장 · 12장</td></tr>
+      <tr><td>창이 떠서 뭘 물어본다</td><td>5장(시작 직후) · 11장(자주 겪는 실수)</td></tr>
+    </tbody>
+  </table>
 </div>
 
 <!-- ══════════════════════════ 1 ══════════════════════════ -->
@@ -352,7 +370,14 @@ die 가 작은 자재는 이 값을 보고 허용 오차를 낮춰 주세요 —
 <section>
 <h2><span class="n">5</span>시작 직후 자동 진행</h2>
 <p class="lede"><span class="ui">검증 시작</span>을 누르면 프로그램이 스스로 몇 가지를 처리합니다.
-그중 <b>최대 세 가지</b>를 사람에게 묻습니다.</p>
+그동안 사람에게 묻는 것은 <b>KLA 장비 확인</b>과, 슬롯 이름이 한쪽에만 있을 때의
+<b>슬롯 수동 매핑</b> 두 가지입니다.</p>
+<div class="note">
+  <span class="t"><span class="q">슬롯 선택</span> 창은 여기서 뜨지 않습니다</span>
+  <p>첫 화면의 <span class="q">진행 범위</span> 에서 <span class="q">일부 슬롯만…</span> 을 고르면
+  <b>그 자리에서 즉시</b> 열립니다(4장 참고). <span class="ui">검증 시작</span> 은 이미 정해진
+  슬롯 목록을 실어 보낼 뿐입니다.</p>
+</div>
 
 <h3>① 폴더 스캔 — 기다리는 화면</h3>
 <p>이 화면이 떠 있는 동안에는 뒤 화면을 조작할 수 없지만,
@@ -391,12 +416,30 @@ die 가 작은 자재는 이 값을 보고 허용 오차를 낮춰 주세요 —
   이 질문 자체가 나오지 않습니다.</p>
 </div>
 
-<h3>③ 슬롯 선택 — <span class="q">일부 슬롯만</span> 을 골랐을 때</h3>
+<h3>참고 — <span class="q">슬롯 선택</span> 창은 이렇게 생겼습니다</h3>
+<p>위에 적었듯 이 창은 <b>첫 화면에서</b> 열립니다(4장 <span class="q">진행 범위</span>).
+여기 실어 두는 것은 <b>어떤 창인지</b> 보여 드리기 위해서입니다.</p>
 <figure class="shot">
   <img src="10_시트_슬롯선택.png" alt="진행할 슬롯 선택 창">
   <figcaption>타일 전체가 클릭 영역입니다. 이름으로 검색해 <span class="ui">검색 결과 선택</span> 을 쓸 수도 있습니다.
 고르지 않은 슬롯은 스캔·매칭에서 제외됩니다.</figcaption>
 </figure>
+
+<h3>③ 슬롯 수동 매핑 — 이름이 다른 폴더를 직접 묶기</h3>
+<p>KLA 로도 묶이지 않은 슬롯이 남으면 프로그램이 묻습니다 —
+<span class="q">한쪽에만 존재하는 Slot 이 있습니다 … 슬롯을 직접 짝지어 주시겠습니까?</span></p>
+<p><b>[예]</b> 를 누르면 <span class="q">Slot 수동 매핑</span> 창이 열립니다.
+왼쪽 <b>기준(남은 슬롯)</b> 과 오른쪽 <b>검증(남은 슬롯)</b> 에서 하나씩 고른 뒤
+<span class="ui">묶기 ↔</span> 를 누르면 아래 <b>묶은 쌍</b> 에 들어갑니다.
+잘못 묶었으면 <span class="ui">선택 해제</span> 로 풉니다.
+목록에는 WaferID 를 어떻게 읽었는지(정보파일 / 판독 실패 / 사진파일 없음)도 함께 표시됩니다.</p>
+<p><b>[아니오]</b> 를 누르거나 아무것도 묶지 않고 닫으면 그 슬롯들은 결과의
+<span class="q">Slot 불일치</span> 로만 남고 <b>그 사진들은 검증되지 않습니다.</b></p>
+<div class="tip">
+  <span class="t">헷갈리면 열어 보고 그냥 닫으셔도 됩니다</span>
+  <p>창을 열어 보기만 하고 아무것도 묶지 않으면 <b>아무것도 바뀌지 않습니다.</b>
+  이름이 정말 다른 웨이퍼라면 <b>[아니오]</b> 가 맞습니다.</p>
+</div>
 </section>
 
 <!-- ══════════════════════════ 6 ══════════════════════════ -->
@@ -434,12 +477,15 @@ die 가 작은 자재는 이 값을 보고 허용 오차를 낮춰 주세요 —
   <li><span class="ui">✓ 검증</span> — 이 사진의 짝을 2단계에서 찾습니다.
       <b>오른쪽</b>에 있는 이유는 사진이 오른쪽 ‘검증 대상’ 으로 가기 때문입니다.</li>
   <li><span class="ui">선택 종료</span> — <b>남은 사진을 모두 제외 처리</b>하고 다음 단계로 갑니다(확인 창이 뜹니다).</li>
+  <li><span class="ui">검증 제외 사진 보기 (n)</span> — 지금까지 제외한 사진을 큰 창에 모아 봅니다.
+      잘못 뺀 사진은 여기서 <span class="ui">검증 대상으로 이동</span> 하거나
+      <span class="ui">중앙으로 복귀(재결정)</span> 로 <b>되살립니다.</b>  0장이면 눌리지 않습니다.</li>
 </ol>
 
 <h3>여러 장을 한 번에 — 타일을 클릭</h3>
 <p>왼쪽 <b>검증 후보들</b> 패널의 사진을 <b>클릭</b>하면 파란 테두리로 선택됩니다.
-한 장이라도 고르면 패널 제목 아래에 <span class="ui">선택 3 장 검증</span> ·
-<span class="ui">선택 3 장 제외</span> 두 버튼이 나타나고(0장이면 숨습니다),
+한 장이라도 고르면 패널 제목 아래에 <span class="ui">선택 3 장 제외</span> ·
+<span class="ui">선택 3 장 검증</span> 두 버튼이 <b>위아래로</b> 나타나고(0장이면 숨습니다),
 누르면 선택한 사진이 <b>한 번에</b> 오른쪽·제외로 갑니다.  큰 창을 따로 열 필요가 없습니다.</p>
 <p>일괄 처리도 <span class="kbd">Z</span> 로 <b>되돌릴 수 있습니다</b> — 한 장씩 결정한 것과 똑같이 기록되므로
 <b><span class="kbd">Z</span> 한 번에 한 장씩</b> 돌아옵니다(3장을 보냈으면 세 번).
@@ -553,8 +599,10 @@ die 가 작은 자재는 이 값을 보고 허용 오차를 낮춰 주세요 —
 </ol>
 <p>왼쪽 위 큰 제목이 <b>지금 실제로 쓰이는 방식</b>을 그대로 알려 줍니다(구형 엔진을 켜면
 <span class="q">Stage 2 — 유사도 기반 매칭</span> 으로 바뀝니다).
-아래 <span class="ui">매칭 없음</span>·<span class="ui">되돌리기</span> 버튼은 자동 모드에서
-<b>진행 바에 가려 눌리지 않습니다</b> — 좌표 정보가 없어 구형 엔진으로 돌릴 때를 위한 것입니다.</p>
+이 화면에서 <b>누르실 것은 없습니다</b> — 매칭은 언제나 자동이라
+<span class="q">매칭 없음</span> 버튼과 <span class="kbd">N</span> 단축키는 아예 없앴습니다.
+계산이 도는 동안 잘못 눌러 <b>사실이 아닌 미탐이 기록되는 일</b>을 막기 위해서입니다.
+잘못된 짝은 다음 <b>검토 화면</b>에서 사진을 보며 고치시면 됩니다.</p>
 
 <div class="warnbox">
   <span class="t"><span class="ui">중지</span>를 누르면 계산 결과가 모두 버려집니다</span>
@@ -599,7 +647,8 @@ die 가 작은 자재는 이 값을 보고 허용 오차를 낮춰 주세요 —
 <ol class="keys">
   <li><b>집계</b> — <span style="color:var(--pass);font-weight:700">일치</span> ·
       <span style="color:var(--danger);font-weight:700">허용 초과</span> ·
-      매치 없음 · 매치 실패 개수입니다.  화면 왼쪽 위에는
+      매치 없음 · 매치 실패 개수입니다.  <b>0 인 항목은 아예 나타나지 않습니다</b>
+      (<span class="q">일치</span> 는 언제나 보입니다).  화면 왼쪽 위에는
       <span class="q">매치 검토</span> 라는 표제가 붙어 있어 지금 어느 단계인지 바로 보입니다.
       <b>네 낱말이 헷갈리면 집계 글자 위에 마우스를 올려 보세요</b> — 넷의 차이가 그 자리에서 설명됩니다.</li>
   <li><b>허용 초과 행</b> — 붉은 테두리와 <span class="chip over">허용 초과</span> 도장.
@@ -649,12 +698,28 @@ die 가 작은 자재는 이 값을 보고 허용 오차를 낮춰 주세요 —
 <span class="kn">2</span> 240 µm — 천과 얼룩이 <b>같습니다</b>. 거리만 벌어졌을 뿐 <b>맞는 짝</b>입니다.</figcaption>
 </figure>
 
+<div class="tip">
+  <span class="t">무엇을 보고 <b>같은 결함</b>이라고 하나</span>
+  <p>그림 속 예시는 설명을 위해 그린 것이라 <b>천 = 주변 패턴</b>, <b>얼룩 = 결함</b> 으로 보시면 됩니다.
+  실제 웨이퍼에서는 이렇게 봅니다.</p>
+  <ol class="keys">
+    <li><b>결함 모양과 크기</b> — 같은 결함은 두 장비에서 윤곽이 닮게 찍힙니다.
+        한쪽은 점인데 다른 쪽은 긁힘이면 <b>다른 결함</b>입니다.</li>
+    <li><b>주변 패턴</b> — 결함 둘레의 회로 무늬가 같은 자리에 있어야 합니다.
+        무늬가 다르면 die 안의 <b>다른 위치</b>입니다.</li>
+    <li><b>거리와 결함 크기</b> — 거리가 결함 자체 크기보다 훨씬 크면 다른 결함일 가능성이 높습니다.</li>
+  </ol>
+  <p>셋 중 <b>하나라도 확실히 다르면 다른 결함</b>입니다. 셋 다 애매하면
+  <span class="ui">크게 보기</span> 로 나란히 놓고 보세요.</p>
+</div>
+
 <table>
   <thead><tr><th style="width:34%">두 사진을 보니</th><th style="width:22%">하실 일</th><th>왜</th></tr></thead>
   <tbody>
     <tr><td><b>같은 결함</b>으로 보인다</td>
         <td>그대로 둡니다</td>
-        <td>좌표만 조금 벌어진 것입니다. 결과에 그대로 남습니다.</td></tr>
+        <td>좌표만 조금 벌어진 것입니다.
+        <b>엑셀에 ‘검증 장비도 이 결함을 찾았다’ 로 기록됩니다.</b></td></tr>
     <tr><td><b>다른 결함</b>인데 옆 후보가 맞아 보인다</td>
         <td>그 <b>차순위 후보</b>를 클릭</td>
         <td>짝이 그 사진으로 바뀝니다.</td></tr>
@@ -663,6 +728,12 @@ die 가 작은 자재는 이 값을 보고 허용 오차를 낮춰 주세요 —
         <td>짝을 취소해 <span class="q">매치 없음</span> 으로 넘깁니다.</td></tr>
   </tbody>
 </table>
+
+<p><b>두 판정의 뜻</b> — 그대로 두면 <b>‘양쪽 다 찾았다’</b>,
+<span class="ui">×</span> 로 빼면 <b>‘검증 장비가 놓쳤다’</b> 가 엑셀에 남습니다.
+<b>가만히 두는 것도 판정입니다.</b> 애매하면 <span class="ui">크게 보기</span> 로 확인하고
+정하세요 — 어느 쪽이든 <span class="ui">검토 완료 · 유지 N</span> 뒤에 결과 화면의
+<span class="ui">← 검토 화면으로</span> 로 다시 고칠 수 있습니다.</p>
 
 <div class="tip">
   <span class="t">초과가 자주 나오는 조합 — Camtek ↔ KLA</span>
@@ -784,8 +855,24 @@ die 가 작은 자재는 이 값을 보고 허용 오차를 낮춰 주세요 —
 </div>
 
 <h3>엑셀에 무엇이 담기나</h3>
+<p>시트는 <b>앞에서부터 이 순서</b>로 들어갑니다. 조건부로 만들어지는 것이 둘 있어
+저번엔 있었는데 이번엔 없을 수 있습니다.</p>
+<table>
+  <thead><tr><th style="width:26%">시트</th><th>언제 만들어지나 · 무엇이 담기나</th></tr></thead>
+  <tbody>
+    <tr><td><b>미매칭 사진</b></td>
+        <td><b>짝을 못 찾은 사진이 있을 때만</b> 만들어지고, 그때는 <b>맨 앞</b>에 옵니다.
+        검증 장비가 놓친 것이 여기 모입니다 — <b>검증의 결론이 실리는 시트</b>입니다.</td></tr>
+    <tr><td><b>요약</b></td>
+        <td>언제나 만들어집니다. 시트 이름은 <b>결과 파일 이름과 같습니다</b>.</td></tr>
+    <tr><td><b>Slot 불일치 목록</b></td>
+        <td>한쪽에만 있던 슬롯이 있을 때만 만들어집니다.</td></tr>
+    <tr><td><b>전체 양식</b></td>
+        <td>결과 화면에서 <span class="q">전체 양식(E~H 수기 영역) 포함</span> 을 켰을 때만.</td></tr>
+  </tbody>
+</table>
 <ul>
-  <li>슬롯별로 <b>기준 사진과 검증 사진이 나란히</b> 들어갑니다.</li>
+  <li>요약 시트에는 슬롯별로 <b>기준 사진과 검증 사진이 나란히</b> 들어갑니다.</li>
   <li>짝을 찾지 못한 사진은 <b>파일명이 빨간 굵은 글씨</b>로 표시되고,
       그 아래 회색 작은 글씨로 결함 크기·좌표가 함께 적힙니다.</li>
   <li>한쪽에만 있던 슬롯은 <span class="q">Slot 불일치 목록</span> 시트에 따로 정리됩니다.</li>
@@ -883,7 +970,7 @@ die 가 작은 자재는 이 값을 보고 허용 오차를 낮춰 주세요 —
         <span class="ui">중지</span> 로 취소할 수 있고, 폴더를 읽지 못하면 안내가 뜨고 첫 화면으로 돌아옵니다 —
         <b>로딩 화면에 갇히지 않습니다.</b></td></tr>
     <tr><td>2단계 자동 매칭</td><td class="dur">수십 초 ~ 수 분</td>
-        <td>좌표를 읽고 모든 쌍의 거리를 잽니다. <span class="ui">중지</span> 로 취소할 수 있습니다(확인 창이 한 번 뜹니다).</td></tr>
+        <td>좌표를 읽고 모든 쌍의 거리를 잽니다. <span class="ui">중지</span> 로 취소할 수 있습니다(<b>진행분이 있으면</b> 확인 창이 한 번 뜹니다).</td></tr>
     <tr><td>썸네일 만들기</td><td class="dur">수십 초</td>
         <td>사진 목록을 빠르게 넘기기 위한 준비입니다. <span class="ui">중지</span> 로 건너뛸 수 있습니다.</td></tr>
     <tr><td>엑셀로 저장</td><td class="dur">수십 초</td>
@@ -908,7 +995,7 @@ die 가 작은 자재는 이 값을 보고 허용 오차를 낮춰 주세요 —
     <tr><td><span class="ui">선택 종료</span> (1단계)</td>
         <td>남은 미결정 사진이 <b>모두 제외</b>됩니다. 확인 창이 한 번 뜹니다.</td></tr>
     <tr><td><span class="ui">중지</span> (계산 중)</td>
-        <td>계산 결과를 <b>모두 버리고</b> 첫 화면으로 돌아갑니다.  <b>확인 창이 한 번 뜨고</b>
+        <td>계산 결과를 <b>모두 버리고</b> 첫 화면으로 돌아갑니다.  <b>진행분이 있으면 확인 창이 한 번 뜨고</b>
         <span class="q">진행 중인 매칭을 중단할까요? (3 / 24 까지 진행)</span> 처럼
         지금까지 몇 장을 처리했는지 알려 줍니다.</td></tr>
     <tr><td><span class="ui">새 검증 시작</span> (저장 전)</td>
@@ -1063,7 +1150,8 @@ die 가 작은 자재는 이 값을 보고 허용 오차를 낮춰 주세요 —
     <tr><td><span class="kbd">←</span></td><td>제외</td></tr>
     <tr><td><span class="kbd">Z</span></td><td>되돌리기(직전 한 장)</td></tr>
     <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">A</span></td><td>왼쪽 목록 전체 선택</td></tr>
-    <tr><td>2단계 매칭</td><td>—</td><td>자동이라 조작할 키가 없습니다</td></tr>
+    <tr><td>2단계 매칭</td><td><span class="kbd">Ctrl</span>+<span class="kbd">Z</span></td>
+        <td>되돌리기. 그 밖에는 <b>누를 것이 없습니다</b> — 매칭은 언제나 자동입니다.</td></tr>
     <tr><td>좌우 비교 · 확대</td><td><span class="kbd">←</span> <span class="kbd">→</span> · <span class="kbd">Esc</span></td>
         <td>후보 넘기기 · 닫기</td></tr>
     <tr><td>사진 정보 보기</td><td><span class="kbd">Ctrl</span>+<span class="kbd">O</span></td><td>사진 선택</td></tr>
@@ -1093,7 +1181,7 @@ die 가 작은 자재는 이 값을 보고 허용 오차를 낮춰 주세요 —
       검은 창에 나오는 메시지를 담당자에게 알려 주세요.</li>
   <li>동작이 이상하면 기록 파일을 함께 전달해 주세요:
       <span class="mono">C:\Users\&lt;사용자&gt;\.aoi_verification_cache\app.log</span></li>
-  <li>속도가 계속 느리면 같은 폴더의 <span class="mono">.aoi_verification_cache</span> 를 통째로 지워도 됩니다.
+  <li>속도가 계속 느리면 위 <span class="mono">C:\Users\&lt;사용자&gt;\.aoi_verification_cache</span> 폴더를 통째로 지워도 됩니다.
       다음 실행에 다시 만들어지며, <b>결과 파일에는 영향이 없습니다.</b></li>
 </ol>
 

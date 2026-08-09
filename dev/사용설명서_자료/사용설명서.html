@@ -136,11 +136,13 @@
 <!-- ══════════════════════════ 2 ══════════════════════════ -->
 <section>
 <h2><span class="n">2</span>사진 폴더 준비</h2>
-<p class="lede">폴더 구조만 맞으면 나머지는 프로그램이 알아서 합니다.
-반대로 여기서 어긋나면 <span class="q">두 폴더에 공통된 Slot 이 존재하지 않습니다</span> 안내가 나옵니다.</p>
+<p class="lede">폴더 구조만 맞으면 나머지는 프로그램이 알아서 합니다.</p>
+
+<p>이 프로그램에서 <b>슬롯 = 웨이퍼 한 장</b>입니다. 웨이퍼 하나의 사진이 모여 있는 폴더가
+슬롯 폴더이고, <b>폴더 이름이 곧 웨이퍼 이름</b>입니다.</p>
 
 <p>프로그램에 알려 줄 것은 <b>슬롯 폴더들이 들어 있는 상위 폴더</b>입니다.
-슬롯 폴더 자체를 지정하면 안 됩니다.</p>
+슬롯 폴더 자체를 지정하면 <span class="q">두 폴더에 공통된 Slot 이 존재하지 않습니다</span> 안내가 나옵니다.</p>
 
 <svg class="flow" viewBox="0 0 1280 300" role="img" aria-label="폴더 구조">
  <g font-family="Consolas,monospace" font-size="19" fill="#1B1A17">
@@ -183,7 +185,10 @@
 <!-- ══════════════════════════ 3 ══════════════════════════ -->
 <section>
 <h2><span class="n">3</span>시작하기</h2>
-<p class="lede">폴더 두 곳만 고르면 나머지는 기본값 그대로 쓰셔도 됩니다.</p>
+<p class="lede">받은 폴더 안의 <span class="mono">AOI_Verify.exe</span> 를 두 번 누르면 켜집니다
+(<span class="mono">.bat</span> 으로 받으셨다면 <span class="mono">run_aoi.bat</span>).
+처음 켤 때는 몇 초 걸리고, 아래 화면이 나오면 준비된 것입니다.<br>
+폴더 두 곳만 고르면 나머지는 기본값 그대로 쓰셔도 됩니다.</p>
 
 <figure class="shot">
   <img src="02_셋업_입력완료.png" alt="셋업 화면 — 폴더와 호기 번호를 입력한 상태">
@@ -222,6 +227,9 @@
 <span class="q">자동화 수준</span>은 <b>1단계(후보 선별)를 사람이 하느냐</b>만 가릅니다 —
 <span class="q">모든 사진 자동</span>을 고르면 1단계를 건너뛰고 기준 사진 전부를 넘깁니다.
 <b>짝을 짓는 2단계는 어느 쪽이든 자동</b>입니다.</p>
+
+<p>화면 왼쪽 아래 <span class="ui">사용 방법 ▾</span> 를 누르면 이 순서 요약이
+<b>프로그램 안에도</b> 들어 있습니다 — 설명서가 손에 없을 때 쓰세요.</p>
 </section>
 
 <!-- ══════════════════════════ 4 ══════════════════════════ -->
@@ -255,7 +263,6 @@
   나온다면 이 선택을 되짚어 보세요. <b>호기 번호를 <span class="mono">K-6</span> 형태로 적어 두면</b>
   이 질문 자체가 나오지 않습니다.</p>
 </div>
-</section>
 
 
 <div class="note">
@@ -288,9 +295,19 @@
     <g><circle class="bub" cx="16" cy="154" r="15"/><text class="bubt" x="16" y="154">1</text></g>
     <g><circle class="bub" cx="411" cy="302" r="15"/><text class="bubt" x="411" y="302">2</text></g>
     <g><circle class="bub" cx="944" cy="154" r="15"/><text class="bubt" x="944" y="154">3</text></g>
+    <!-- 아래 표가 '누르라' 고 하는 버튼들 — 상자가 없으면 '지금 안 눌러도 되는 것' 으로 읽힌다.
+         좌표는 상세판과 같은 shots.json 실좌표다(제외버튼·검증버튼·선택종료). -->
+    <rect class="mark blue" x="757" y="759" width="75" height="40" rx="7"/>
+    <rect class="mark blue" x="842" y="757" width="75" height="44" rx="7"/>
+    <rect class="mark red"  x="984" y="79" width="85" height="40" rx="7"/>
+    <g><circle class="bub" cx="739" cy="741" r="15"/><text class="bubt" x="739" y="741">4</text></g>
+    <g><circle class="bub" cx="935" cy="739" r="15"/><text class="bubt" x="935" y="739">5</text></g>
+    <g><circle class="bub red" cx="966" cy="61" r="15"/><text class="bubt" x="966" y="61">6</text></g>
   </svg>
   <figcaption><span class="kn">1</span> 남은 사진 → <span class="kn">2</span> 지금 볼 사진 → <span class="kn">3</span> 검증하기로 한 사진.
-가운데에서 정하면 사진이 왼쪽에서 빠져 오른쪽으로 갑니다.</figcaption>
+가운데에서 정하면 사진이 왼쪽에서 빠져 오른쪽으로 갑니다.
+<span class="kn">4</span> <span class="ui">✕ 제외</span> · <span class="kn">5</span> <span class="ui">✓ 검증</span> ·
+<span class="kn red">6</span> <span class="ui">선택 종료</span> — 아래 표와 짝입니다.</figcaption>
 </figure>
 
 <table>
@@ -300,17 +317,22 @@
         <td>오른쪽 <b>검증 대상</b>으로 갑니다. 2단계에서 짝을 찾습니다.</td></tr>
     <tr><td><span class="ui">✕ 제외</span></td><td><span class="kbd">←</span></td>
         <td>이번 검증에서 빠집니다. 결과에도 나오지 않습니다.</td></tr>
-    <tr><td><span class="ui">되돌리기</span></td><td><span class="kbd">Z</span></td>
+    <tr><td><span class="ui">되돌리기(Z)</span></td><td><span class="kbd">Z</span></td>
         <td>직전 한 장이 가운데로 돌아옵니다.</td></tr>
+    <tr><td><span class="ui">검증 제외 사진 보기 (n)</span></td><td>—</td>
+        <td>제외한 사진을 다시 봅니다. 골라서 <span class="ui">검증 대상으로 이동</span> 하면 되살아납니다.</td></tr>
   </tbody>
 </table>
+<p><b><span class="ui">되돌리기(Z)</span> 는 직전 한 장만 되돌립니다.</b> 그보다 앞에서 잘못 제외한
+사진은 화면 위의 <span class="ui">검증 제외 사진 보기</span> 에서 되살리세요 —
+<b>처음부터 다시 하지 않아도 됩니다.</b></p>
 <p><b>키 방향이 곧 사진이 가는 방향입니다</b> — 오른쪽 패널이 <span class="q">검증 대상</span> 이라
 <span class="kbd">→</span> 가 검증입니다. 외울 것은 이것 하나뿐입니다.</p>
 
 <h3>여러 장을 한 번에 — 타일을 클릭</h3>
 <p>왼쪽 <b>검증 후보들</b> 패널의 사진을 <b>클릭</b>하면 파란 테두리로 선택됩니다.
-한 장이라도 고르면 패널 위쪽에 <span class="ui">선택 3 장 검증</span> ·
-<span class="ui">선택 3 장 제외</span> 두 버튼이 나타나고, 누르면 그 사진들이 한 번에 처리됩니다.
+한 장이라도 고르면 패널 제목 아래에 <span class="ui">선택 3 장 제외</span> ·
+<span class="ui">선택 3 장 검증</span> 두 버튼이 <b>위아래로</b> 나타나고, 누르면 그 사진들이 한 번에 처리됩니다.
 같은 결함이 여러 장 찍힌 경우에 한 장씩 넘기지 않아도 됩니다.
 (<span class="kbd">Z</span> 로 되돌릴 수 있습니다 — <b>한 번에 한 장씩</b> 돌아옵니다.)</p>
 
@@ -328,7 +350,8 @@
 이 화면에서 누를 것은 없습니다.</p>
 
 <h3>짝을 정하는 규칙</h3>
-<p>먼저 두 결함이 <b>같은 die(칸) 또는 바로 옆 die</b> 에 있는지 봅니다.
+<p>먼저 두 결함이 <b>같은 die(칸) 또는 바로 옆 die</b> 에 있는지 봅니다 —
+<b>장비마다 die 번호를 세는 시작점이 1 씩 다를 수 있어</b>, 같은 칸만 보면 맞는 짝까지 놓치기 때문입니다.
 그다음 두 좌표 사이의 <b>실제 거리</b>를 재고, <b>가장 가까운 것</b>이 짝으로 확정됩니다.</p>
 
 <table>
@@ -366,7 +389,10 @@
   <li><b>검증 장비 후보 칸이 비어 있습니다</b> — 고장이 아니라
       <b>고를 것이 없기 때문</b>입니다. 짝은 프로그램이 정합니다.</li>
 </ol>
-<p>사진이 많으면 수 분 걸릴 수 있습니다. <b>강제 종료하지 마세요.</b></p>
+<p>사진이 많으면 수 분 걸릴 수 있습니다. <b>강제 종료하지 마세요.</b><br>
+여기서 <span class="q">좌표 정보가 없습니다…</span> 창이 뜨고 첫 화면으로 돌아온다면
+<b>고장이 아닙니다</b> — 사진에 좌표가 없어 짝을 지을 수 없다는 뜻입니다.
+<b>2장의 폴더 준비</b>를 다시 확인해 주세요(대개 사진만 복사해 온 경우입니다).</p>
 </section>
 
 <!-- ══════════════════════════ 7 ══════════════════════════ -->
@@ -388,8 +414,14 @@
     <g><circle class="bub" cx="20" cy="743" r="15"/><text class="bubt" x="20" y="743">3</text></g>
     <g><circle class="bub" cx="1170" cy="785" r="15"/><text class="bubt" x="1170" y="785">4</text></g>
     <g><circle class="bub" cx="1109" cy="134" r="15"/><text class="bubt" x="1109" y="134">5</text></g>
+    <!-- [크게 보기] — 슬롯 이름 아래 작은 회색 버튼이라 이름을 알고도 못 찾는다. -->
+    <rect class="mark blue" x="31" y="272" width="96" height="34" rx="6"/>
+    <g><circle class="bub" cx="15" cy="289" r="15"/><text class="bubt" x="15" y="289">6</text></g>
   </svg>
-  <figcaption>가장 <b>멀리 떨어진 짝이 맨 위</b>에 옵니다 — 확인이 필요한 것부터 보게 되어 있습니다.</figcaption>
+  <figcaption>가장 <b>멀리 떨어진 짝이 맨 위</b>에 옵니다 — 확인이 필요한 것부터 보게 되어 있습니다.
+행이 수백 개면 목록을 만드는 데 <b>몇 초</b> 걸립니다. 그동안
+<span class="q">검토 목록 준비 중…</span> 이 뜨고 <b><span class="ui">검토 완료 · 유지 N</span> 이
+눌리지 않습니다</b> — 못 본 행이 그냥 확정되지 않게 막아 둔 것입니다. 잠시 기다리면 저절로 켜집니다.</figcaption>
 </figure>
 
 <ol class="keys">
@@ -397,11 +429,17 @@
       <span style="color:var(--danger);font-weight:700">허용 초과</span> ·
       매치 없음 · 매치 실패 개수입니다.</li>
   <li><b>허용 초과 행</b> — 붉은 테두리와 <span class="chip over">허용 초과</span> 도장.</li>
-  <li><b>정상 행</b> — 판정 칸이 <b>비어 있습니다.</b>
-      이상이 없으면 아무 표시도 하지 않는 것이 이 화면의 규칙입니다.</li>
+  <li><b>정상 행</b> — 판정 칸이 <b>비어 있습니다.</b> 도장이 없는 행에도
+      이상이 없으면 아무 표시도 하지 않는 것이 이 화면의 규칙입니다.<br>
+      다만 도장이 없는 행에도 <b>점선 테두리 후보가 몇 장 더 붙어 있을 수 있습니다</b> —
+      짝은 이미 정해졌고 혹시 바꾸고 싶을 때를 위해 남겨 둔 것입니다.
+      <b>거리가 20 µm 이내로 확실한 짝에는 후보를 아예 놓지 않습니다.</b>
+      후보가 붙어 있다는 것이 잘못된 짝이라는 뜻은 아닙니다.</li>
   <li><span class="ui">×</span> — 이 짝을 취소하고 <span class="q">매치 없음</span> 으로 만듭니다.
       다시 누르면(<span class="ui">↩</span>) 되돌아옵니다.</li>
   <li><span class="ui">검토 완료 · 유지 N</span> — 검토를 끝내고 결과 화면으로 갑니다.</li>
+  <li><span class="ui">크게 보기</span> — 기준과 후보를 좌우로 나란히 놓고 봅니다.
+      슬롯 이름 아래 <b>작은 회색 버튼</b>이라 그림에서 위치를 확인해 두세요.</li>
 </ol>
 
 <h3><span class="chip over">허용 초과</span> 라고 다 틀린 것은 아닙니다</h3>
@@ -420,12 +458,28 @@
 <span class="kn">2</span> 240 µm — 천과 얼룩이 <b>같습니다</b>. 거리만 벌어졌을 뿐 <b>맞는 짝</b>입니다.</figcaption>
 </figure>
 
+<div class="tip">
+  <span class="t">무엇을 보고 <b>같은 결함</b>이라고 하나</span>
+  <p>그림 속 예시는 설명을 위해 그린 것이라 <b>천 = 주변 패턴</b>, <b>얼룩 = 결함</b> 으로 보시면 됩니다.
+  실제 웨이퍼에서는 이렇게 봅니다.</p>
+  <ol class="keys">
+    <li><b>결함 모양과 크기</b> — 같은 결함은 두 장비에서 윤곽이 닮게 찍힙니다.
+        한쪽은 점인데 다른 쪽은 긁힘이면 <b>다른 결함</b>입니다.</li>
+    <li><b>주변 패턴</b> — 결함 둘레의 회로 무늬가 같은 자리에 있어야 합니다.
+        무늬가 다르면 die 안의 <b>다른 위치</b>입니다.</li>
+    <li><b>거리와 결함 크기</b> — 거리가 결함 자체 크기보다 훨씬 크면 다른 결함일 가능성이 높습니다.</li>
+  </ol>
+  <p>셋 중 <b>하나라도 확실히 다르면 다른 결함</b>입니다. 셋 다 애매하면
+  <span class="ui">크게 보기</span> 로 나란히 놓고 보세요.</p>
+</div>
+
 <table>
   <thead><tr><th style="width:34%">두 사진을 보니</th><th style="width:22%">하실 일</th><th>왜</th></tr></thead>
   <tbody>
     <tr><td><b>같은 결함</b>으로 보인다</td>
         <td>그대로 둡니다</td>
-        <td>좌표만 조금 벌어진 것입니다. 결과에 그대로 남습니다.</td></tr>
+        <td>좌표만 조금 벌어진 것입니다.
+        <b>엑셀에 ‘검증 장비도 이 결함을 찾았다’ 로 기록됩니다.</b></td></tr>
     <tr><td><b>다른 결함</b>인데 옆 후보가 맞아 보인다</td>
         <td>그 <b>차순위 후보</b>를 클릭</td>
         <td>짝이 그 사진으로 바뀝니다.</td></tr>
@@ -434,6 +488,12 @@
         <td>짝을 취소해 <span class="q">매치 없음</span> 으로 넘깁니다.</td></tr>
   </tbody>
 </table>
+
+<p><b>두 판정의 뜻</b> — 그대로 두면 <b>‘양쪽 다 찾았다’</b>,
+<span class="ui">×</span> 로 빼면 <b>‘검증 장비가 놓쳤다’</b> 가 엑셀에 남습니다.
+<b>가만히 두는 것도 판정입니다.</b> 애매하면 <span class="ui">크게 보기</span> 로 확인하고
+정하세요 — 어느 쪽이든 <span class="ui">검토 완료 · 유지 N</span> 뒤에 결과 화면의
+<span class="ui">← 검토 화면으로</span> 로 다시 고칠 수 있습니다.</p>
 
 <div class="tip">
   <span class="t">초과가 자주 나오는 조합 — Camtek ↔ KLA</span>
@@ -510,10 +570,17 @@
 </ol>
 
 <h3>엑셀에 무엇이 담기나</h3>
+<p>시트는 <b>앞에서부터 이 순서</b>로 들어갑니다.</p>
 <ul>
-  <li>슬롯별로 <b>기준 사진과 검증 사진이 나란히</b> 들어갑니다.</li>
-  <li>짝을 찾지 못한 사진은 <b>파일명이 빨간 굵은 글씨</b>로 표시됩니다.</li>
-  <li>한쪽에만 있던 슬롯은 <span class="q">Slot 불일치 목록</span> 시트에 따로 정리됩니다.</li>
+  <li><b>미매칭 사진</b> — 짝을 못 찾은 사진만 모은 시트입니다.
+      <b>짝을 못 찾은 사진이 있을 때만 만들어지고, 그때는 맨 앞에 옵니다.</b>
+      검증 장비가 놓친 것이 여기 모입니다.</li>
+  <li><b>요약</b> — 슬롯별로 <b>기준 사진과 검증 사진이 나란히</b> 들어갑니다.
+      시트 이름은 결과 파일 이름과 같습니다.
+      짝을 찾지 못한 사진은 <b>파일명이 빨간 굵은 글씨</b>로 표시됩니다.</li>
+  <li><b>Slot 불일치 목록</b> — 한쪽에만 있던 슬롯이 있을 때만 만들어집니다.</li>
+  <li><b>전체 양식</b> — 결과 화면에서 <span class="q">전체 양식(E~H 수기 영역) 포함</span> 을
+      켰을 때만 만들어집니다.</li>
   <li>파일 이름은 <span class="q">AOI 18호기 검증 (17호기 기준).xlsx</span> 형식이며,
       같은 이름이 있으면 날짜·시각이 뒤에 붙습니다.</li>
 </ul>
