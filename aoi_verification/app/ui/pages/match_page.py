@@ -783,7 +783,13 @@ class MatchPage(QWidget):
         )
         if r == QMessageBox.StandardButton.Yes:
             return True
-        if was_visible:                      # 되돌린다 — 작업은 계속 돌고 있다
+        # ★ 되돌리기 전에 **이 페이지가 아직 화면에 있는지** 확인한다.  위 `ask` 는
+        #   중첩 이벤트 루프라 그동안 워커 시그널이 계속 배달된다 — 확인창을 읽는 몇 초
+        #   사이에 매칭이 끝나 검토 화면으로 넘어가 있을 수 있다.  그때 오버레이를
+        #   되살리면 부모가 숨겨져 있어 화면에는 안 나타나면서 앱 전역 입력 잠금만
+        #   걸리고, 보상 해제인 hideEvent 도 오지 않아 **키보드가 통째로 죽는다.**
+        #   이미 다음 단계로 넘어갔다면 되돌릴 것도 없다.
+        if was_visible and self.isVisible():  # 되돌린다 — 작업은 계속 돌고 있다
             self._loading.show_overlay(keep_msg, cancelable=True)
             if total > 0:
                 self._loading.set_progress(done, total, keep_msg)

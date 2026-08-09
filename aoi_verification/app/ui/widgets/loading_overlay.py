@@ -627,6 +627,14 @@ class LoadingOverlay(QWidget):
         #   막지 않는 게 맞다 — 잠글 주체가 이미 없다.
         if not hasattr(self, "_input_locked"):
             return False
+        # ★ **보이지 않으면 아무것도 막지 않는다.**  전역 필터는 잠금 플래그만 보고
+        #   키를 버렸는데, 부모 페이지가 숨겨진 채 `show_overlay` 가 불리면(전환 경쟁)
+        #   오버레이는 화면에 나타나지 못하면서 잠금만 걸린다 — 그러면 보상 해제인
+        #   `hideEvent` 도 영영 오지 않아 **앱 전체가 키보드를 못 받는 채로 남는다.**
+        #   어두운 화면도 [중지] 버튼도 없으니 사용자는 원인을 알 수 없다.
+        #   "가려서 못 누르게 한다" 가 이 잠금의 뜻이므로, 가리고 있지 않으면 권한도 없다.
+        if not self.isVisible():
+            return False
         etype = event.type()
         if obj is self.parent() and etype == QEvent.Type.Resize:
             self._cover_parent()
