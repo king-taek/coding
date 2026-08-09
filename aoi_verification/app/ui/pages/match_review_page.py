@@ -854,6 +854,9 @@ class MatchReviewPage(QWidget):
         bar.setSpacing(12)
         self._tally_label = QLabel("", self)
         self._tally_label.setTextFormat(Qt.TextFormat.RichText)
+        # 낱말만 봐서는 '매치 없음' 과 '매치 실패' 가 같은 말로 읽힌다 — 넷의
+        # 차이를 화면에서 바로 확인할 수 있게 한다 (U-13).
+        self._tally_label.setToolTip(i18n.KO.TALLY_TOOLTIP)
         bar.addWidget(self._tally_label)
         bar.addStretch(1)
         # ※ '확인 필요만' 필터는 제거했다 — 상단 탤리(일치·허용 초과·매치 없음)가 이미
@@ -1333,7 +1336,7 @@ class MatchReviewPage(QWidget):
             if m.key in self._unmatched_keys:
                 unmatched_refs.append(MissEntry(
                     slot=m.slot, side="ref", path=m.ref_path,
-                    note="미매칭 (사용자 검토)",
+                    note=i18n.KO.NOTE_UNMATCHED_BY_USER,
                 ))
             else:
                 kept.append(m)

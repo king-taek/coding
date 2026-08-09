@@ -52,10 +52,10 @@ def _list_sel_qss() -> str:
     )
 
 _METHOD_LABEL = {
-    "info": "정보파일",
+    "info": i18n.KO.SLOT_MAP_METHOD_INFO,
     "ocr": "OCR",
-    "none": "사진파일 없음",
-    "unread": "판독 실패",
+    "none": i18n.KO.SLOT_MAP_NO_PHOTO,
+    "unread": i18n.KO.SLOT_MAP_UNREAD,
 }
 
 
@@ -170,11 +170,11 @@ class SlotMappingDialog(QDialog):
         method = info.get("method", "")
         slot = info.get("slot")
         if method == "none":
-            return f"{name}\n⚠ 사진파일 없음"
+            return f"{name}{i18n.KO.SLOT_MAP_NO_PHOTO_LINE}"
         if slot:
             return f"{name}\n→ {slot}  ({_METHOD_LABEL.get(method, method)})"
         if method == "unread":
-            return f"{name}\n→ 판독 실패 (수동 매핑)"
+            return f"{name}{i18n.KO.SLOT_MAP_UNREAD_LINE}"
         return name
 
     def _make_item(self, name: str, meta: dict) -> QListWidgetItem:

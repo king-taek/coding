@@ -227,7 +227,7 @@ class SideBySideViewer(QDialog):
                  candidates: List[Tuple[ImageItem, str]],
                  start_index: int = 0,
                  *,
-                 ref_caption: str = "기준 사진",
+                 ref_caption: str = "",
                  action_label: Optional[str] = None,
                  parent=None) -> None:
         super().__init__(parent)
@@ -242,7 +242,8 @@ class SideBySideViewer(QDialog):
         self._candidates = list(candidates)
         self._idx = max(0, min(int(start_index), len(self._candidates) - 1)) \
             if self._candidates else 0
-        self._ref_caption = ref_caption
+        # 빈 문자열 기본값 → 화면 문구는 i18n 에서 (인자 기본값에 한글을 굽지 않는다).
+        self._ref_caption = ref_caption or i18n.KO.PANEL_MATCH_REF
 
         # ★ `setMaximumSize(주 모니터 크기)` 를 걸지 않는다 — 그것이 '크게 보기인데
         #   팝업이 작게 뜬다' 의 원인이었다(매치 검토 실측).  이 다이얼로그는 시트
@@ -285,17 +286,17 @@ class SideBySideViewer(QDialog):
         key_hint = QLabel(i18n.KO.COMPARE_HINT, self)
         key_hint.setStyleSheet(f"color: {theme.MUTE}; font-size: 12px;")
         bar.addWidget(key_hint)
-        self.btn_prev = NeonButton("◀ 이전", role="ghost")
+        self.btn_prev = NeonButton(i18n.KO.VIEWER_BTN_PREV, role="ghost")
         self.btn_prev.clicked.connect(self._prev)
         bar.addWidget(self.btn_prev)
-        self.btn_next = NeonButton("다음 ▶", role="ghost")
+        self.btn_next = NeonButton(i18n.KO.VIEWER_BTN_NEXT, role="ghost")
         self.btn_next.clicked.connect(self._next)
         bar.addWidget(self.btn_next)
         if action_label:
             self.btn_action = NeonButton(action_label, role="primary")
             self.btn_action.clicked.connect(self._fire_action)
             bar.addWidget(self.btn_action)
-        self.btn_close = NeonButton("닫기", role="ghost")
+        self.btn_close = NeonButton(i18n.KO.VIEWER_BTN_CLOSE, role="ghost")
         self.btn_close.clicked.connect(self.close)
         bar.addWidget(self.btn_close)
         root.addLayout(bar)
@@ -303,7 +304,7 @@ class SideBySideViewer(QDialog):
         body = QHBoxLayout()
         body.setSpacing(10)
         self._ref_pane = _Pane(self._ref_caption, self)
-        self._cand_pane = _Pane("후보", self)
+        self._cand_pane = _Pane(i18n.KO.COL_CANDIDATES, self)
         body.addWidget(self._ref_pane, stretch=1)
         body.addWidget(self._cand_pane, stretch=1)
         root.addLayout(body, stretch=1)
@@ -354,7 +355,7 @@ class SideBySideViewer(QDialog):
 
     def _render_candidate(self) -> None:
         if not self._candidates:
-            self.pos_label.setText("후보 없음")
+            self.pos_label.setText(i18n.KO.VIEWER_NO_CANDIDATES)
             self.btn_prev.setEnabled(False)
             self.btn_next.setEnabled(False)
             return

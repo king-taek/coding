@@ -445,6 +445,15 @@ TALLY_OK_FMT = "일치 {n}"
 TALLY_OVER_FMT = "허용 초과 {n}"
 TALLY_NO_MATCH_FMT = "매치 없음 {n}"
 TALLY_COORD_FAILED_FMT = "매치 실패 {n}"
+# 네 낱말이 서로 어떻게 다른지 화면에서 설명한다 (U-13) — 이름만 봐서는
+# '매치 없음' 과 '매치 실패' 가 같은 말로 읽힌다.
+TALLY_TOOLTIP = (
+    "일치 — 짝을 찾았고 허용 오차 안에 든 매치입니다.\n"
+    "허용 초과 — 짝은 찾았지만 좌표 차이가 허용 오차를 넘었습니다.\n"
+    "매치 없음 — 검토에서 직접 '매치 아님' 으로 되돌린 것입니다.\n"
+    "매치 실패 — 좌표를 읽지 못해 짝을 찾을 수 없었습니다"
+    " (이 화면에서는 고칠 수 없습니다)."
+)
 BTN_FINISH_REVIEW_KEPT_FMT = "검토 완료 · 유지 {n}"   # ⏎ 제거 — Enter 단축키가 없어졌다
 CHIP_OVER = "허용 초과"
 CHIP_NO_MATCH = "매치 없음"
@@ -764,3 +773,45 @@ MSG_BTN_CANCEL = BTN_CANCEL
 MSG_BTN_YES = "예"
 MSG_BTN_NO = "아니오"
 MSG_BTN_CLOSE = "닫기"
+
+
+# ---------------------------------------------------------------------------
+# 화면에 직접 박혀 있던 문구를 모아 온 것 (U-12).  위젯에 리터럴을 남기면
+# 같은 말이 화면마다 조금씩 달라지고, 고칠 때 한 곳을 빠뜨린다.
+# ---------------------------------------------------------------------------
+# 좌우 비교 뷰어
+VIEWER_BTN_PREV = "◀ 이전"
+VIEWER_BTN_NEXT = "다음 ▶"
+VIEWER_BTN_CLOSE = MSG_BTN_CLOSE
+VIEWER_NO_CANDIDATES = "후보 없음"
+
+# 매치 실패 검토
+UNMATCHED_FAIL_LIST_TITLE = "실패 목록"
+UNMATCHED_CAND_COUNT_FMT = "후보 {n} 장 (유사도 순)"
+UNMATCHED_CAND_NONE = "후보 0 장"
+UNMATCHED_REF_PREFIX = "기준 — "
+
+# 슬롯 매핑
+SLOT_MAP_METHOD_INFO = "정보파일"
+SLOT_MAP_NO_PHOTO = "사진파일 없음"
+SLOT_MAP_UNREAD = "판독 실패"
+SLOT_MAP_NO_PHOTO_LINE = "\n⚠ 사진파일 없음"
+SLOT_MAP_UNREAD_LINE = "\n→ 판독 실패 (수동 매핑)"
+
+# 좌표 매칭 — 좌표를 못 읽은 사진의 사유 표기
+COORD_MISSING = "좌표 정보가 없습니다"
+
+# 결과/검토에서 '매치 아님' 으로 되돌린 항목의 사유
+NOTE_UNMATCHED = "미매칭"
+NOTE_UNMATCHED_BY_USER = "미매칭 (사용자 검토)"
+
+# 호기 이름을 비워 두었을 때 채우는 기본값
+DEFAULT_REF_MACHINE = "기준호기"
+DEFAULT_VAL_MACHINE = "검증호기"
+
+# 예외 원인을 안내문 뒤에 덧붙일 때의 머리말
+CAUSE_PREFIX = "\n\n[원인] "
+
+# 화면 색 모드의 사용자 표시 이름 (U-12) — theme.COLOR_MODE_LABELS 가 읽어 간다.
+COLOR_MODE_LIGHT = "벨럼"
+COLOR_MODE_DARK = "흑연"

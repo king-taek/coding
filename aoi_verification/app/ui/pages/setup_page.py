@@ -1270,9 +1270,9 @@ class SetupPage(QWidget):
                                 i18n.KO.WARN_PATH_NOT_EXIST.format(path=val_root))
             return
         if not ref_machine:
-            ref_machine = "기준호기"
+            ref_machine = i18n.KO.DEFAULT_REF_MACHINE
         if not val_machine:
-            val_machine = "검증호기"
+            val_machine = i18n.KO.DEFAULT_VAL_MACHINE
 
         if ref_root.resolve() == val_root.resolve():
             r = sheets.ask(

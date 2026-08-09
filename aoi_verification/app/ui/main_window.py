@@ -354,7 +354,7 @@ class MainWindow(QMainWindow):
                 reason = (info or {}).get("error", "")
                 msg = i18n.KO.UPDATE_UNKNOWN
                 if reason:
-                    msg = f"{msg}\n\n[원인] {reason}"
+                    msg = f"{msg}{i18n.KO.CAUSE_PREFIX}{reason}"
                 self._update_none.emit(msg)
 
         threading.Thread(target=_work, name="update-check-manual",
@@ -422,7 +422,7 @@ class MainWindow(QMainWindow):
                     # 실패가 아니라 '의도적 보류' 다 — 무엇을 받아야 하는지 정확히 알린다.
                     msg = i18n.KO.UPDATE_NEEDS_NEW_BUNDLE
                 elif updater.last_error():
-                    msg = f"{msg}\n\n[원인] {updater.last_error()}"
+                    msg = f"{msg}{i18n.KO.CAUSE_PREFIX}{updater.last_error()}"
             except Exception:
                 pass
             sheets.warn(self, i18n.KO.UPDATE_AVAILABLE_TITLE, msg)
@@ -1505,12 +1505,12 @@ class MainWindow(QMainWindow):
         self._write_run_log()
 
     def _write_run_log(self) -> None:
+        """검증 1회의 사용 통계를 컴퓨터별 폴더에 기록(캐시 빠른 매치는 제외)."""
         # ★ 결과 ↔ 검토를 오가면 `_finish_session` 이 여러 번 돈다.  사용 통계는
         #   세션당 한 번만 남긴다(오가는 횟수가 검증 건수처럼 쌓이면 안 된다).
         if getattr(self, "_run_log_written", False):
             return
         self._run_log_written = True
-        """검증 1회의 사용 통계를 컴퓨터별 폴더에 기록(캐시 빠른 매치는 제외)."""
         try:
             from ..utils import run_log
             sr, inp = self._scan, self._input
@@ -1592,7 +1592,7 @@ class MainWindow(QMainWindow):
         for slot, items in self._skipped_a.items():
             for it in items:
                 out.append(MissEntry(
-                    slot=slot, side="ref", path=it.path, note="미매칭",
+                    slot=slot, side="ref", path=it.path, note=i18n.KO.NOTE_UNMATCHED,
                 ))
         return out
 

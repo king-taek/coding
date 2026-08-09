@@ -21,6 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from string import Template
 
+from .. import i18n as _i18n
 from ..config import Fonts
 
 
@@ -137,7 +138,8 @@ _DARK: dict[str, str] = {
 
 PALETTES: dict[str, dict[str, str]] = {"light": _LIGHT, "dark": _DARK}
 # 사용자에게 보이는 이름 — dict 순서 = 밝음 → 어두움.
-COLOR_MODE_LABELS: dict[str, str] = {"light": "벨럼", "dark": "흑연"}
+COLOR_MODE_LABELS: dict[str, str] = {"light": _i18n.KO.COLOR_MODE_LIGHT,
+                                     "dark": _i18n.KO.COLOR_MODE_DARK}
 DEFAULT_COLOR_MODE = "light"
 COLOR_MODE = DEFAULT_COLOR_MODE
 # 사라진 모드 키 → 지금의 모드.  ★ 이게 없으면 흑연을 쓰던 사용자의 저장값

@@ -417,7 +417,7 @@ class UnmatchedReviewDialog(QDialog):
         lpl = QVBoxLayout(list_panel)
         lpl.setContentsMargins(12, 12, 12, 12)
         lpl.setSpacing(6)
-        list_title = QLabel("실패 목록", list_panel)   # 인라인 한글 (#12).
+        list_title = QLabel(i18n.KO.UNMATCHED_FAIL_LIST_TITLE, list_panel)
         list_title.setStyleSheet(f"color: {theme.INK}; font-weight: 700;")
         lpl.addWidget(list_title)
         self.fail_list = QListWidget(list_panel)
@@ -741,7 +741,7 @@ class UnmatchedReviewDialog(QDialog):
             empty = QLabel(i18n.KO.UNMATCHED_REVIEW_NO_CANDIDATES, self._host)
             empty.setStyleSheet(f"color: {theme.MUTE}; padding: 20px;")
             self._grid.addWidget(empty, 0, 0)
-            self.candidates_summary.setText("후보 0 장")
+            self.candidates_summary.setText(i18n.KO.UNMATCHED_CAND_NONE)
             return
 
         if cand_key == self._last_cand_key and self._cand_tiles:
@@ -770,7 +770,7 @@ class UnmatchedReviewDialog(QDialog):
             self._last_cand_key = cand_key
 
         self.candidates_summary.setText(
-            f"후보 {len(self._cand_tiles)} 장 (유사도 순)")
+            i18n.KO.UNMATCHED_CAND_COUNT_FMT.format(n=len(self._cand_tiles)))
         # 현재 ref 의 선택(보류) 상태를 테두리로 반영 (#1a).
         sel = self._pending.get(self._idx)
         for t in self._cand_tiles:
@@ -951,7 +951,7 @@ class UnmatchedReviewDialog(QDialog):
         start = max(0, min(int(start_index), len(candidates) - 1))
         viewer = SideBySideViewer(
             Path(cur.path), candidates, start,
-            ref_caption=f"기준 — {Path(cur.path).name}",
+            ref_caption=i18n.KO.UNMATCHED_REF_PREFIX + Path(cur.path).name,
             action_label=i18n.KO.BTN_UNMATCHED_SELECT_THIS,
             parent=self,
         )
