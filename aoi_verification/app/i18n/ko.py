@@ -502,6 +502,12 @@ WARN_SAME_PATH_BODY = (
 )
 WARN_PATH_NOT_EXIST = "선택한 경로가 존재하지 않습니다:\n{path}"
 WARN_NO_SLOTS = "두 폴더에 공통된 Slot 이 존재하지 않습니다."
+# 폴더 스캔이 실패했을 때 (U-05) — 예전엔 로딩만 켜진 채 앱이 잠긴 것처럼 보였다.
+WARN_SCAN_FAILED_FMT = (
+    "폴더를 읽는 중 문제가 생겼습니다.\n"
+    "폴더가 그대로 있는지, 접근 권한이 있는지 확인한 뒤 다시 시도해 주세요.\n\n"
+    "{detail}"
+)
 WARN_NO_IMAGES = "선택된 Slot 에 이미지가 없습니다."
 WARN_SLOT_MISMATCH_TITLE = "Slot 불일치"
 WARN_SLOT_MISMATCH_FMT = (

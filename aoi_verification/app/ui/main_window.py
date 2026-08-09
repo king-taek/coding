@@ -18,7 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import QThread, QTimer, pyqtSignal
+from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (QApplication, QLabel, QMainWindow,
                               QMessageBox, QStackedWidget, QStatusBar,
                               QVBoxLayout, QWidget)
@@ -60,6 +60,62 @@ _LOG = logging.getLogger("aoi.ui")
 PHASE_NONE = "none"
 PHASE_A_SELECT = "A_select"
 PHASE_A_MATCH = "A_match"
+
+
+# 스캔 워커가 도는 동안 파이썬 참조를 붙잡아 두는 곳 — 지역 변수로만 두면 함수가
+# 끝나는 순간 GC 가 QThread 를 파괴한다(`pages/setup_page.py` 의 `_LIVE_DIE_SCANS`).
+_LIVE_SCANS: set = set()
+
+
+class _FolderScan(QThread):
+    """기준/검증 폴더를 **워커 스레드에서** 훑는다 (U-05).
+
+    `slot.scan` 은 폴더를 하나씩 열어 사진을 열거하므로 NAS 에서는 폴더 수에
+    비례해 초 단위로 걸린다.  예전에는 이걸 GUI 스레드에서 돌리면서 진행을
+    보여 주려고 콜백마다 ``processEvents`` 를 불렀는데, 그 사이 사용자의 클릭이
+    **스캔 도중에 재진입**할 수 있었다.  이제 진행은 시그널로만 올라온다.
+
+    ``stop()`` 은 협조적 중지다 — `scan` 을 중간에 끊을 수단은 없으므로 진행
+    콜백에서 예외를 던져 빠져나온다(부분 결과는 버린다)."""
+
+    class _Stopped(Exception):
+        pass
+
+    class _Signals(QObject):
+        progress = pyqtSignal(int, int, int)     # token, done, total
+        done = pyqtSignal(int, object)           # token, ScanResult
+        failed = pyqtSignal(int, str)            # token, message
+
+    def __init__(self, token: int, ref_root, val_root) -> None:
+        super().__init__()                  # 부모 없음(위 주석)
+        self._token = token
+        self._ref_root = ref_root
+        self._val_root = val_root
+        self._stop = False
+        self.signals = self._Signals()
+
+    def stop(self) -> None:
+        self._stop = True
+
+    def run(self) -> None:      # type: ignore[override]
+        def _progress(done: int, total: int) -> None:
+            if self._stop:
+                raise _FolderScan._Stopped()
+            # 25 폴더마다만 보고한다 — 매 폴더 신호는 큐만 채운다.
+            if done % 25 == 0 or done == total:
+                self.signals.progress.emit(self._token, done, total)
+
+        try:
+            sr = scan(self._ref_root, self._val_root, progress=_progress)
+        except _FolderScan._Stopped:
+            return                          # 취소 — 아무것도 보고하지 않는다
+        except Exception as exc:
+            # ★ 실패를 알려야 한다.  예전엔 예외가 나면 오버레이가 **켜진 채** 남아
+            #   앱이 잠긴 것처럼 보였다(폴더가 그 사이 사라진 경우 등).
+            self.signals.failed.emit(self._token, str(exc))
+            return
+        if not self._stop:
+            self.signals.done.emit(self._token, sr)
 
 
 class MainWindow(QMainWindow):
@@ -178,6 +234,10 @@ class MainWindow(QMainWindow):
         self._thumbs_handled = False
         self._thumb_pool = None              # Optional[ThumbnailPool]
         self._sizing_tier: Optional[config.SizingTier] = None
+        # 폴더 스캔 워커 (U-05) + [중지] 가 무엇을 멈춰야 하는지 알려 주는 현재 단계 (P-09).
+        self._scan_token = 0
+        self._scan_worker: Optional[_FolderScan] = None
+        self._stage = ""
         self._scan: Optional[ScanResult] = None
         self._input: Optional[SetupInput] = None
         self._phase: str = PHASE_NONE
@@ -868,6 +928,12 @@ class MainWindow(QMainWindow):
             _LOG.debug("타일 픽스맵 캐시 비우기 실패: %s", exc)
         self._session_id = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
 
+        # ★ 오버레이를 **먼저** 띄운다.  아래 `_prepare_working_file` 은 결과 폴더로
+        #   양식을 복사하는데(shutil.copyfile), 그 폴더가 NAS 면 수 초가 걸린다 —
+        #   예전에는 그동안 아무 표시도 없어 [검증 시작] 이 먹지 않은 것처럼 보였다.
+        self._loading.show_overlay(i18n.KO.LOAD_SCAN, cancelable=True)
+        QApplication.processEvents()
+
         # 양식 폴더의 양식.xlsx 를 결과 폴더로 복사 → 작업 파일 준비 ----
         self._prepare_working_file(inp)
 
@@ -876,16 +942,47 @@ class MainWindow(QMainWindow):
         _cache.reset_mtime_cache()
         self._kla_folders: dict[str, str] = {}      # KLA slot명→폴더명(엑셀 회색 표기)
 
-        self._loading.show_overlay(i18n.KO.LOAD_SCAN)
-        QApplication.processEvents()
+        # 폴더 스캔 — 워커에서 (U-05).  진행은 시그널로만 올라온다.
+        self._stage = "scan"
+        self._scan_token += 1
+        worker = _FolderScan(self._scan_token, inp.ref_root, inp.val_root)
+        worker.signals.progress.connect(self._on_scan_progress)
+        worker.signals.done.connect(self._on_scan_done)
+        worker.signals.failed.connect(self._on_scan_failed)
+        _LIVE_SCANS.add(worker)
+        worker.finished.connect(lambda w=worker: _LIVE_SCANS.discard(w))
+        self._scan_worker = worker
+        worker.start()
 
-        # 폴더 스캔 — NAS 처럼 폴더가 많아도 진행 개수를 실시간 표시(#6).
-        def _scan_progress(done: int, total: int) -> None:
-            self._loading.set_progress(
-                done, total, i18n.KO.LOAD_SCAN)
-            QApplication.processEvents()
+    def _on_scan_progress(self, token: int, done: int, total: int) -> None:
+        if token != self._scan_token:
+            return
+        self._loading.set_progress(done, total, i18n.KO.LOAD_SCAN)
 
-        sr = scan(inp.ref_root, inp.val_root, progress=_scan_progress)
+    def _on_scan_failed(self, token: int, message: str) -> None:
+        """스캔이 실패했다 — 오버레이를 반드시 내리고 알린다.
+
+        예전에는 예외가 나면 오버레이가 켜진 채 남아 앱이 잠긴 것처럼 보였다."""
+        if token != self._scan_token:
+            return
+        self._scan_worker = None
+        self._stage = ""
+        self._loading.hide_overlay()
+        _LOG.warning("폴더 스캔 실패: %s", message)
+        sheets.warn(self, i18n.KO.APP_TITLE,
+                    i18n.KO.WARN_SCAN_FAILED_FMT.format(detail=message))
+
+    def _on_scan_done(self, token: int, sr: ScanResult) -> None:
+        """스캔이 끝났다 — 여기서부터는 예전 `_on_start` 의 나머지 그대로다.
+
+        (모달을 여는 `_ask_kla_side` 부터는 반드시 메인 스레드여야 한다.)"""
+        if token != self._scan_token:
+            return                          # 취소·재시작으로 밀려난 옛 스캔
+        self._scan_worker = None
+        self._stage = ""
+        inp = self._input
+        if inp is None:
+            return
 
         # '일부 슬롯만 진행' 옵션 — 선택된 슬롯만 남긴다.  slots dict 만 줄이면
         # common_slot_names / ref_only / val_only 가 모두 이를 기반으로 계산되어
@@ -1024,19 +1121,40 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._continue_after_thumbs)
 
     def _on_loading_cancel(self) -> None:
-        """로딩 오버레이의 [중지] — 썸네일 사전생성만 취소 대상.
+        """로딩 오버레이의 [중지] — **단계마다 뜻이 다르다** (P-09).
 
-        썸네일은 비필수(이후 UI 가 필요 시 생성)이므로, 풀을 멈추고 곧바로
-        다음 단계로 진행한다.  다른 단계의 오버레이는 cancelable=False 라 이
-        핸들러가 호출되지 않는다(버튼 자체가 없음).
+        - 폴더 스캔 중: 세션을 접고 설정 화면으로 돌아간다.  스캔은 이후 모든
+          단계의 입력이라 '건너뛰고 진행' 이 성립하지 않는다 — 부분 결과는 버린다.
+        - 썸네일 사전생성 중: 썸네일은 비필수(이후 UI 가 필요 시 생성)이므로
+          풀만 멈추고 곧바로 다음 단계로 진행한다.
 
         ``ThumbnailPool`` 은 QObject(워커만 QThread)라 ``isRunning()`` 이 없다.
         이미 다음 단계로 넘어갔는지는 one-shot 플래그로 판별하고, ``stop()`` 은
         이미 끝난 풀에 호출해도 무해하므로 그 조합으로 가드한다."""
+        if self._stage == "scan":
+            self._cancel_scan()
+            return
         pool = self._thumb_pool
         if pool is not None and not self._thumbs_handled:
             pool.stop()                 # 이미 완료된 풀이어도 무해(플래그만 set)
             self._on_thumbs_ready()     # one-shot 가드로 1회만 진행
+
+    def _cancel_scan(self) -> None:
+        """스캔 취소 — 워커를 멈추고 세션 상태를 깨끗이 되돌린다.
+
+        ``_scan_token`` 을 올려 두면 늦게 도착한 done/failed 가 옛 세대로 버려지므로
+        스레드가 끝나기를 기다릴 필요가 없다(기다리면 그게 곧 멈춤이다)."""
+        self._scan_token += 1
+        w = self._scan_worker
+        self._scan_worker = None
+        self._stage = ""
+        if w is not None:
+            w.stop()
+        # 부분 상태를 남기지 않는다 — 다음 [검증 시작] 이 옛 스캔 위에 얹히면 안 된다.
+        self._scan = None
+        wakelock.release()
+        self._loading.hide_overlay()
+        self._show_page(self._setup_page)
 
     def _continue_after_thumbs(self) -> None:
         """``_on_thumbs_ready`` 의 안전한 후속 — 모달/페이지 전환 OK."""
@@ -1847,6 +1965,14 @@ class MainWindow(QMainWindow):
         if self._thumb_pool is not None:
             self._thumb_pool.stop()
             self._thumb_pool.wait(1000)
+        # 폴더 스캔 워커 (U-05) — 토큰을 올려 늦은 결과를 무효화하고 멈추라고 알린다.
+        # 기다리지는 않는다: `scan` 은 NAS 응답을 기다리는 중일 수 있어 종료가 그만큼
+        # 늦어진다.  daemon 이 아니라 QThread 지만 `_LIVE_SCANS` 가 수명을 잡고 있고,
+        # 남은 신호는 토큰 검사에서 버려진다.
+        self._scan_token += 1
+        if self._scan_worker is not None:
+            self._scan_worker.stop()
+            self._scan_worker = None
         # MatchPage 의 점수 사전 계산 워커도 안전 종료.
         try:
             pre = getattr(self._match_page, "_precompute_worker", None)
