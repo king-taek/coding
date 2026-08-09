@@ -71,7 +71,17 @@ def test_page_transition_overlay_absorbs_clicks(styled_qapp, monkeypatch):
     assert not overlay.testAttribute(
         Qt.WidgetAttribute.WA_TransparentForMouseEvents), \
         "전환 스냅샷이 클릭을 통과시킨다"
+    # ★ 돌고 있는 애니메이션을 **먼저 멈추고** 파괴한다.  그냥 `deleteLater` 만 걸고
+    #   나가면 fade/slide 가 계속 돌다가, 다음 테스트가 이벤트를 돌리는 순간
+    #   `motion._finish` 가 이미 죽은 오버레이를 만져 워커 프로세스가 통째로 죽는다
+    #   (실측: 이 파일 + `test_sheet_enter_motion.py` → 세그폴트).
+    from PyQt6.QtCore import QPropertyAnimation
+    for anim in overlay.findChildren(QPropertyAnimation):
+        anim.stop()
+    overlay.setParent(None)
+    overlay.deleteLater()
     container.deleteLater()
+    styled_qapp.processEvents()
 
 
 def test_resume_text_no_longer_promises_to_continue(styled_qapp):

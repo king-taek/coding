@@ -251,6 +251,10 @@ class ResultPage(QWidget):
         sheets.run(dlg, full_bleed=True)
         if not dlg.new_matches:
             return
+        # ★ 저장한 뒤에 결과를 바꿨다 — '저장했음' 은 여기서 무효가 된다.
+        #   아래 `show_result` 는 **같은 객체**를 그대로 넘기므로(제자리 수정)
+        #   그쪽의 `result is not self._result` 리셋에 걸리지 않는다.
+        self._exported = False
         # 신규 매칭을 결과에 합치고 미매칭 리스트에서 해당 ref 들을 제거.
         self._result.matches.extend(dlg.new_matches)
         resolved_paths = {Path(r.path) for r in dlg.resolved_refs}

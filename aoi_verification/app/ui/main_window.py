@@ -78,8 +78,14 @@ class _FolderScan(QThread):
     ``stop()`` 은 협조적 중지다 — `scan` 을 중간에 끊을 수단은 없으므로 진행
     콜백에서 예외를 던져 빠져나온다(부분 결과는 버린다)."""
 
-    class _Stopped(Exception):
-        pass
+    class _Stopped(BaseException):
+        """중지 신호.
+
+        ★ `Exception` 이 아니라 `BaseException` 을 상속한다 — `models/slot.py` 의
+        `scan` 은 진행 콜백을 `except Exception: pass` 로 감싸 두었기 때문에
+        (콜백이 깨져도 스캔은 끝나야 한다는 의도) 보통 예외로는 **중지가 통째로
+        삼켜진다.**  그러면 [중지] 를 눌러도 느린 NAS 스캔이 끝까지 도는데,
+        그게 바로 이 기능이 없애려던 상황이다."""
 
     class _Signals(QObject):
         progress = pyqtSignal(int, int, int)     # token, done, total
@@ -248,6 +254,8 @@ class MainWindow(QMainWindow):
         self._reviewed_matches: list[MatchResult] = []
         self._reviewed_unmatched: list[MissEntry] = []
         self._reviewed_unmatched_keys: set = set()
+        # 검토 대상 전체('매치 없음' 표시분 포함) — 결과↔검토 왕복의 기반.
+        self._reviewed_all_matches: list[MatchResult] = []
         self._run_log_written = False
         # 기준 사진 기록 저장 디바운스 — ★ self 를 부모로(정적 singleShot 금지).
         self._ref_history_timer = QTimer(self)
@@ -576,6 +584,9 @@ class MainWindow(QMainWindow):
         self._phase = PHASE_NONE
         self._stage1_a_snapshot = None
         session_mod.clear()
+        # 설정으로 돌아가는 다른 경로들과 같게 절전 억제를 푼다 — 빠뜨리면
+        # 검증을 접었는데도 화면보호기가 세션 내내 막힌 채로 남는다.
+        wakelock.release()
         self._show_page(self._setup_page)
 
     def _on_match_cancelled(self) -> None:
@@ -918,6 +929,7 @@ class MainWindow(QMainWindow):
         self._reviewed_matches.clear()
         self._reviewed_unmatched.clear()
         self._reviewed_unmatched_keys = set()
+        self._reviewed_all_matches = []
         self._run_log_written = False
         self._thumbs_handled = False        # 썸네일 완료 one-shot 가드 리셋(#C2)
         # 타일 픽스맵 캐시 비우기 — 폴더가 바뀌어도 stale 픽스맵이 남지 않게(#렉).
@@ -1215,6 +1227,10 @@ class MainWindow(QMainWindow):
         #   있어야 한다 — load_state 는 진입할 때마다 그 집합을 비운다.
         self._reviewed_unmatched_keys = set(
             self._match_review_page.unmatched_keys())
+        # ★ 그리고 **표시된 행 자체**도 들고 있어야 한다.  `kept` 에는 '매치 없음' 행이
+        #   빠져 있어서, 그걸 기반으로 되돌아가면 복원할 행이 없다 → 다음 [검토 완료]
+        #   에서 그 사진들이 매치에도 미매칭에도 없는 상태가 돼 결과에서 사라진다.
+        self._reviewed_all_matches = self._match_review_page.all_matches()
         self._finish_session()
 
     # ==================================================================
@@ -1424,8 +1440,10 @@ class MainWindow(QMainWindow):
         '매치 없음' 표시까지 복원해서 들어간다."""
         if self._match_review_page is None or self._match_page is None:
             return
-        base = list(self._reviewed_matches) if self._reviewed_matches \
-            else self._merge_matches()
+        # '매치 없음' 표시까지 되살리려면 그 행들이 있어야 하므로 **전체 목록**을
+        #   기반으로 한다(`_reviewed_matches` 는 표시된 행이 빠진 kept 다).
+        base = list(getattr(self, "_reviewed_all_matches", None)
+                    or self._reviewed_matches or self._merge_matches())
         ctx = self._match_page.review_context()
         match_state = self._match_page.get_state()
         val_pool = match_state.val_pool if match_state is not None else None
@@ -1606,6 +1624,7 @@ class MainWindow(QMainWindow):
         self._reviewed_matches.clear()
         self._reviewed_unmatched.clear()
         self._reviewed_unmatched_keys = set()
+        self._reviewed_all_matches = []
         self._run_log_written = False
         self._phase = PHASE_NONE
         self._show_page(self._setup_page)

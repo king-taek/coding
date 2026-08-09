@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable, Optional
 
-from PyQt6.QtCore import QObject, QThread, Qt, pyqtSignal
+from PyQt6.QtCore import QObject, QThread, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import (QColor, QImage, QPainter, QPixmap, QShortcut,
                          QKeySequence)
 from PyQt6.QtWidgets import (QApplication, QDialog, QGridLayout, QHBoxLayout,
@@ -86,7 +86,13 @@ class _MidTile(QWidget):
         # 화면에 처음 나타날 때 한 번만 읽는다(지연 로드).
         if not self._image_loaded:
             self._image_loaded = True
-            QTimer.singleShot(0, self._load_pix)
+            # ★ **부모 있는** 타이머로 미룬다 — 정적 `QTimer.singleShot` 은 타일이
+            #   그 한 틱 사이에 파괴돼도 계속 살아 있어 죽은 위젯의 슬롯을 부른다
+            #   (창을 열자마자 닫으면 실제로 그렇게 된다).  부모가 있으면 함께 죽는다.
+            t = QTimer(self)
+            t.setSingleShot(True)
+            t.timeout.connect(self._load_pix)
+            t.start(0)
         super().paintEvent(event)
 
     def _load_pix(self) -> None:

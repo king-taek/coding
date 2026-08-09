@@ -244,6 +244,8 @@ class SideBySideViewer(QDialog):
             if self._candidates else 0
         # 빈 문자열 기본값 → 화면 문구는 i18n 에서 (인자 기본값에 한글을 굽지 않는다).
         self._ref_caption = ref_caption or i18n.KO.PANEL_MATCH_REF
+        # 원본 화질 교체 로더 — 닫을 때 끊으려고 (loader, slot) 로 들고 있는다.
+        self._loaders: list = []
 
         # ★ `setMaximumSize(주 모니터 크기)` 를 걸지 않는다 — 그것이 '크게 보기인데
         #   팝업이 작게 뜬다' 의 원인이었다(매치 검토 실측).  이 다이얼로그는 시트
@@ -382,11 +384,14 @@ class SideBySideViewer(QDialog):
             return
         if os.environ.get("QT_QPA_PLATFORM", "") == "offscreen":
             return                        # 헤드리스에선 원본 교체가 의미 없다
-        token = getattr(self, "_upgrade_token", 0) + 1
-        self._upgrade_token = token
+        # ★ 세대 번호는 **패널마다** 따로 센다.  하나를 공유하면 기준 패널의 교체를
+        #   띄운 직후 후보 패널이 토큰을 올려, 기준 패널은 원본으로 **영영 안 바뀐다**
+        #   (중간 크기 그대로 남는다).  두 패널은 서로 독립적으로 갱신된다.
+        token = getattr(pane, "_upgrade_token", 0) + 1
+        pane._upgrade_token = token
 
         def _apply(img) -> None:
-            if getattr(self, "_upgrade_token", 0) != token:
+            if getattr(pane, "_upgrade_token", 0) != token:
                 return                    # 사용자가 이미 다음 후보로 넘어갔다
             pix = QPixmap.fromImage(img)
             if not pix.isNull():
@@ -396,8 +401,24 @@ class SideBySideViewer(QDialog):
         try:
             loader = _spawn_original_loader(path)
             loader.signals.loaded.connect(_apply)
+            # 닫힐 때 끊기 위해 보관 — 이 창은 WA_DeleteOnClose 라, 남겨 두면
+            # 뒤늦게 도착한 원본이 이미 파괴된 `_Pane` 을 만진다.
+            self._loaders.append((loader, _apply))
         except Exception:
             pass
+
+    def closeEvent(self, event):  # noqa: N802
+        """죽어 가는 창으로 원본 디코드 결과가 들어오지 않게 연결을 끊는다.
+
+        스레드를 기다리지는 않는다 — 디코드가 끝날 때까지 닫기를 붙잡아 두면
+        그게 곧 멈춤이다(`widgets/zoom_window.py` 의 같은 처방)."""
+        for loader, slot in self._loaders:
+            try:
+                loader.signals.loaded.disconnect(slot)
+            except (TypeError, RuntimeError):
+                pass
+        self._loaders.clear()
+        super().closeEvent(event)
 
     def _prev(self) -> None:
         if self._idx > 0:

@@ -1119,6 +1119,15 @@ class MatchReviewPage(QWidget):
         """사용자가 '매치 없음' 으로 표시한 매치 키들(결과↔검토 왕복 보존용)."""
         return set(self._unmatched_keys)
 
+    def all_matches(self) -> list:
+        """검토 대상 **전부** — '매치 없음' 으로 표시한 것까지 포함한다.
+
+        ★ `finished` 가 싣는 ``kept`` 와 다르다.  결과 화면에서 검토로 되돌아올 때
+        ``kept`` 를 기반으로 다시 들어가면 '매치 없음' 행이 애초에 없으므로 그 표시를
+        복원할 수 없고, 다음 [검토 완료] 에서 그 사진들이 매치에도 미매칭에도 없는
+        상태가 돼 **결과에서 통째로 사라진다.**  왕복의 기반은 이쪽이어야 한다."""
+        return list(self._matches)
+
     def _on_size_changed(self, value: int) -> None:
         self._thumb_px = int(value)
         self.size_value.setText(f"{value} px")
