@@ -88,7 +88,9 @@ def test_the_program_path_still_confirms_no_match(styled_qapp, tmp_path):
     # `_confirm_no_match` 의 계약: `_current` 는 큐의 머리다(`queue.pop(0)` 를 한다).
     page._state.queue[:] = list(items)
     page._current = items[0]
-    page._confirm_no_match()                 # 기본값이 이제 user=False 다
+    # 프로그램 경로는 `user=False` 를 **명시한다** — 기본값(`user=True`)은
+    # '모르면 사람이 누른 것으로 본다' 는 안전한 쪽에 남겨 둔다.
+    page._confirm_no_match(user=False)
     assert items[0] in page._state.no_match["S1"], (
         "프로그램 경로까지 막혔다 — 후보 0개인 기준 사진을 미탐으로 확정하지 못한다")
     page.deleteLater()

@@ -1195,18 +1195,20 @@ class MatchPage(QWidget):
         self._update_undo_button()
         self._advance()
 
-    def _confirm_no_match(self, *, user: bool = False) -> None:
+    def _confirm_no_match(self, *, user: bool = True) -> None:
         """매칭 없음 확정 — 미탐 시트에 들어가고, Skip 재시도 대상이 아님.
 
         ★ **이제 사람 경로는 없다.**  이 화면의 [매칭 없음] 버튼과 ``N`` 단축키를
         제거했다 — 2단계는 언제나 자동이라 사용자가 누를 것이 없는데, 자동 매치가
         도는 동안 눌리면 처리 중이던 사진이 조용히 미탐으로 확정됐기 때문이다
-        (`_build` 의 액션 바 주석에 실측과 함께 적어 두었다).  그래서 기본값을
-        ``user=False`` 로 뒤집는다 — 남은 호출부는 전부 프로그램 경로다.
+        (`_build` 의 액션 바 주석에 실측과 함께 적어 두었다).
 
-        ``user`` 인자는 **지우지 않는다.**  가시성 가드를 사람 경로에만 걸어야 하는
-        이유(아래)가 그대로 유효하고, 나중에 수동 모드가 되살아나면 그때 다시
-        ``user=True`` 로 부르면 된다.
+        ★ 그래도 **기본값은 ``user=True`` 로 둔다.**  한 번 `False` 로 뒤집었다가
+        되돌렸다 — 프로그램 호출부가 이미 전부 `user=False` 를 명시하고 있으므로
+        기본값을 뒤집어 얻는 것은 없는데, **잃는 것이 있다**: 나중에 누가 인자를
+        빠뜨리고 부르면 가시성 가드가 조용히 풀린 채 큐를 소비한다.  '모르면
+        사람이 누른 것으로 본다' 가 안전한 쪽이다(회귀 가드:
+        `test_stage2_autostart.py::test_user_shortcut_is_still_ignored_when_page_hidden`).
 
         ★ ``user`` 는 **누가 불렀는가**다.  가시성 검사를 사람이 누른 경로에만 건다.
 

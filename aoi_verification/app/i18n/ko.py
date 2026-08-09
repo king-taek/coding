@@ -772,6 +772,15 @@ VIEWER_NO_CANDIDATES = "후보 없음"
 # 매치 실패 검토
 UNMATCHED_FAIL_LIST_TITLE = "실패 목록"
 UNMATCHED_CAND_COUNT_FMT = "후보 {n} 장 (유사도 순)"
+# 후보가 300장 이상인 좌표 세션 — 유사도를 다시 계산하지 않고 좌표 매칭이 만든
+# 순서를 그대로 쓴다.  그때는 위 문구('유사도 순')와 백분율이 모두 거짓이 되므로
+# 순서 기준을 바로 적고, 점수 자리에는 아래 문구를 쓴다 (C-2).
+UNMATCHED_CAND_COUNT_COORD_FMT = "후보 {n} 장 (좌표 거리 순)"
+# ★ 점수 자리에 그대로 들어가므로 **백분율만큼 짧게** 유지한다 — 타일은 고정
+#   크기라(`_CandidateTile`) 길면 잘린다(실측 굵은 서체: "100.0 %"=54px,
+#   "계산 안 함"=55px, "유사도 계산 안 함"=95px).  무엇을 계산 안 했는지는 바로
+#   위 후보 수 문구가 말해 준다.
+SCORE_NOT_COMPUTED = "계산 안 함"
 UNMATCHED_CAND_NONE = "후보 0 장"
 UNMATCHED_REF_PREFIX = "기준 — "
 

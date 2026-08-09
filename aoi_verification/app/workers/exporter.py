@@ -122,6 +122,14 @@ class ExcelExporter(QThread):
         # 미매칭 사진만 원본 화질로 — 전체 원본 옵션이 켜져 있으면 어차피 전부 원본.
         self._unmatched_original = bool(unmatched_original_quality)
         self.signals = ExporterSignals()
+        # 진행률은 **저장 전체 기준**으로 단조 증가해야 한다 (CLAUDE.md 로딩 계약).
+        # `_fill_rows` 는 시트마다 불리는데 시트별로 1..N 을 새로 세면 바가 매번
+        # 0 으로 돌아간다 — LoadingOverlay 는 값이 줄면 tween 없이 즉시 스냅하므로
+        # 사용자에겐 '다 찼다가 처음부터 다시' 로 보인다(실측: 미매칭 있는 결과에
+        # 전체 양식까지 켜면 세 번 반복).  `_do_export` 가 총량을 미리 정하고
+        # `_fill_rows` 는 여기에 이어서 센다.
+        self._prog_done = 0
+        self._prog_total = 0
         # ★ 앱을 닫는데 저장이 돌고 있으면, 기다리기만 해서는 반쯤 쓰인 xlsx 가 남는다
         #   (openpyxl 의 save 는 원자적이지 않다).  중간에 빠져나올 수 있게 한다.
         self._stop = threading.Event()
@@ -198,6 +206,17 @@ class ExcelExporter(QThread):
             rows_input.append((u.slot, str(u.path.name).lower(), u))
         rows_input.sort(key=lambda x: (x[0], x[1]))
 
+        # 진행률 총량 = 이번 저장이 채울 **모든 시트의 행 수 합** (아래 채우는
+        # 순서와 같은 순서로 더한다).  시트가 몇 장이든 바는 0 → 100 을 한 번만
+        # 지난다.
+        unmatched_rows = [r for r in rows_input if isinstance(r[2], MissEntry)]
+        self._prog_done = 0
+        self._prog_total = (
+            (len(rows_input) if self._include_full_template else 0)   # 전체 양식
+            + len(unmatched_rows)                                    # 미매칭 시트
+            + len(rows_input)                                        # 요약 시트
+        )
+
         # 전체 양식(E~H 포함) 시트는 옵션 — 기본 off 면 이미지 임베드를 1회만 하게
         # 요약 시트만 채운다(더 빠르고 가벼운 파일).  켜면 전체 양식도 채운다.
         if self._include_full_template:
@@ -211,7 +230,6 @@ class ExcelExporter(QThread):
                     a.value = None
 
         # 시트 순서: 미매칭(첫 번째, 조건부) → 요약 → 전체 양식.
-        unmatched_rows = [r for r in rows_input if isinstance(r[2], MissEntry)]
         if unmatched_rows:
             # 미매칭 시트를 index 0(첫 번째)에 만들고, 요약은 index 1.
             self._write_unmatched_sheet(wb, unmatched_rows)
@@ -462,6 +480,11 @@ class ExcelExporter(QThread):
         from openpyxl.styles import Alignment, Border, Font, Side
 
         total = len(rows_input)
+        # 이 시트 이전까지 채운 행 수 — 진행률은 여기에 이어서 보고한다(단조 증가).
+        # `_prog_total` 이 0 이면(이 메서드만 단독으로 부른 경우) 예전처럼 이 시트
+        # 기준으로 센다 — 계약(총 > 0 = 결정형)은 어느 쪽이든 지켜진다.
+        base = self._prog_done
+        overall = self._prog_total or total
         row = DATA_START_ROW
         red_font = Font(color="FFFF2D55", bold=True)
         center = Alignment(horizontal="center", vertical="center")
@@ -521,7 +544,7 @@ class ExcelExporter(QThread):
                                              cell_w_px, cell_h_px):
                         ws[f"{col}{row}"] = str(Path(src).name)
                         ws[f"{col}{row}"].alignment = center
-                self.signals.progress.emit(idx, total, m.slot)
+                self.signals.progress.emit(base + idx, overall, m.slot)
             else:
                 u: MissEntry = payload
                 self._write_slot_cell(ws, row, u.slot, center)
@@ -552,9 +575,12 @@ class ExcelExporter(QThread):
                     horizontal="center", vertical="center", wrap_text=True,
                 )
                 cell_val.comment = Comment("미매칭", "AOI")
-                self.signals.progress.emit(idx, total, u.slot)
+                self.signals.progress.emit(base + idx, overall, u.slot)
 
             row += 1
+
+        # 다음 시트가 이어서 셀 수 있게 이 시트 몫을 확정한다.
+        self._prog_done = base + total
 
     # ------------------------------------------------------------------
     @staticmethod

@@ -8,6 +8,16 @@
 - 점수 캐시에 없는 (ref, val) 쌍은 그 자리에서 ``pipeline.score`` 로 계산
   (대부분 Stage 2 precompute 단계에서 이미 캐싱되어 있음).
 - 이미 다른 매칭에 쓰인 val 은 후보에서 자동 제외 → 중복 매칭 방지.
+
+★ 이 창이 **직접 계산한 점수는 공유 ``SlotScoreCache`` 에 넣지 않는다** (C-1).
+  Stage 2 는 ``pipeline.extract(path, cfg=…, side=…)`` 로 특징을 뽑는데 여기는
+  cfg 없이 뽑는다 — cfg 의 전처리 토글이 켜져 있으면 특징 캐시 키부터 갈라져
+  (``config.SimilarityConfig.cache_extra``) **같은 쌍에 다른 값**이 나온다.
+  그 값이 같은 ``(slot, ref, val)`` 키로 공유 캐시에 섞이면
+  ``match_page._launch_matcher`` 의 ``has_all_pairs`` 가 True 로 뒤집혀 2회차
+  매칭이 이 창의 값을 정답으로 쓰고, 검토 화면 차순위도 두 계산이 뒤섞인 채
+  나온다.  보관처를 나누면 **표시 점수는 종전 그대로**(읽기 순서: 공유 캐시 →
+  이 창)면서 섞임만 사라진다.
 """
 
 from __future__ import annotations
@@ -105,6 +115,24 @@ class _CandidateScoring(QThread):
 # ---------------------------------------------------------------------------
 
 
+def _reuses_coord_scores(session_coord_mode: bool, allow_compute: bool,
+                         fast_results, slot: str, ref_path: Path) -> bool:
+    """이 렌더가 **좌표 거리 점수를 그대로 재사용**하는가 (C-2).
+
+    후보가 300장 이상이면 이 창은 CPU 재계산을 포기하고 선계산 결과
+    (``_fast_results``)를 그대로 쓴다(:meth:`_score_candidates`).  좌표 매칭
+    세션에서 그 값은 ``workers/coord_matcher`` 의 **거리 인코딩**이라
+    (dist ≤ tol → 1-dist/tol, tol < dist ≤ 3tol → **음수** -(dist/tol))
+    유사도 백분율로 찍으면 거짓 수치가 된다 — 실측 tol=200 µm 에서 480 µm 떨어진
+    후보는 score −2.4 → 화면에 **"-240.0 %"** 로 나온다.
+
+    Qt 없이 시험할 수 있도록 순수 함수로 분리한다(``_select_coord_candidates``
+    ·``_match_neighbors`` 와 같은 처방)."""
+    if not session_coord_mode or allow_compute:
+        return False
+    return bool((fast_results or {}).get((slot, Path(ref_path))))
+
+
 def _load_full_pixmap_scaled(path: Path, size: int) -> QPixmap:
     """원본 파일을 그대로 디코드한 뒤 ``size`` 박스에 맞춰 축소.
 
@@ -151,10 +179,14 @@ class _CandidateTile(QFrame):
 
     def __init__(self, item: ImageItem, score: float, parent=None,
                  *, size: int = _CAND_PX,
-                 coord_mode: bool = False, tolerance: float = _DFLT_TOL) -> None:
+                 coord_mode: bool = False, tolerance: float = _DFLT_TOL,
+                 score_unknown: bool = False) -> None:
         super().__init__(parent)
         self.item = item
         self.score = float(score)
+        # 점수가 '유사도' 가 아닐 때(좌표 거리 재사용, C-2) — 수치 대신 계산 안 함을
+        # 표시한다.  정렬에는 그대로 쓴다(거리 오름차순 = 이 값 내림차순).
+        self._score_unknown = bool(score_unknown)
         self._coord_mode = bool(coord_mode)
         self._tolerance = float(tolerance) if tolerance > 0 else _DFLT_TOL
         self._size = int(size)
@@ -182,8 +214,7 @@ class _CandidateTile(QFrame):
         self._img_label.setPixmap(ph)
         lay.addWidget(self._img_label, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        self._score_label = QLabel(
-            fmt_score(self.score, self._coord_mode, self._tolerance), self)
+        self._score_label = QLabel(self.score_text(), self)
         self._score_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         # ★ 후보 유사도는 '합격 판정' 이 아니다 — 매치 검토 화면과 같은 중립색을 쓴다
         #   (성공색은 판정 칩 전용).
@@ -242,11 +273,21 @@ class _CandidateTile(QFrame):
             self.item.filename, Qt.TextElideMode.ElideMiddle, self._size - 4,
         ))
 
-    def set_score(self, score: float) -> None:
+    def score_text(self) -> str:
+        """타일·비교뷰가 함께 쓰는 점수 표기 — **한 곳에서만** 만든다.
+
+        갈라 두면 타일은 '계산 안 함' 인데 크게보기 캡션만 거짓 백분율을
+        띄우는 식으로 조용히 어긋난다 (C-2)."""
+        if self._score_unknown:
+            return i18n.KO.SCORE_NOT_COMPUTED
+        return fmt_score(self.score, self._coord_mode, self._tolerance)
+
+    def set_score(self, score: float, *, unknown: bool | None = None) -> None:
         """같은 슬롯 재사용 시 새 기준 사진 기준으로 점수만 갱신 (#1b)."""
         self.score = float(score)
-        self._score_label.setText(
-            fmt_score(self.score, self._coord_mode, self._tolerance))
+        if unknown is not None:
+            self._score_unknown = bool(unknown)
+        self._score_label.setText(self.score_text())
 
     def set_selected(self, selected: bool) -> None:
         if selected == self._is_selected:
@@ -296,6 +337,15 @@ class UnmatchedReviewDialog(QDialog):
             self._val_pool_keyed[k] = list(v)
         self._used_vals: set[Path] = {Path(p) for p in already_used_vals}
         self._score_cache = score_cache
+        # 이 창이 직접 계산한 (slot, ref, val) → score.  공유 캐시와 **분리 보관**
+        # 한다(C-1, 모듈 docstring 참고).  읽기는 공유 캐시 → 여기 순이라 표시되는
+        # 점수는 종전과 같다.
+        self._own_scores: dict[tuple, float] = {}
+        # 쌍당 캐시 조회 1회 (C-5) — `_count_recompute`·`_score_candidates`·
+        # `_lookup_or_compute_score` 가 같은 쌍을 세 번 물어 `SlotScoreCache` 의
+        # 락을 후보 1장당 3번 잡았다(후보 299장이면 897회).  렌더 세대마다 **새
+        # dict 로 갈아 끼운다** — 늦게 끝난 옛 세대가 새 세대 값을 덮지 않게.
+        self._pair_memo: dict[tuple, Optional[float]] = {}
         # 효율 모드 선계산 top-K {(slot, ref_path): [(val_path, score)]} — 후보 풀이
         # 300장 이상이면 CPU 재계산 대신 이걸 재사용한다 (#1).
         self._fast_results = fast_results or {}
@@ -674,16 +724,24 @@ class UnmatchedReviewDialog(QDialog):
         # 새 세대 — 아직 돌고 있는 옛 채점의 결과는 이 번호가 달라 버려진다.
         self._score_token += 1
         token = self._score_token
+        # 쌍당 조회 1회(C-5)의 메모는 **세대마다 새로** 시작한다.
+        self._pair_memo = {}
         scored: list[tuple[float, ImageItem]] = []
+        coord_reuse = False
         if candidates:
             # 후보 풀이 300장 이상이면 효율 모드 선계산 점수를 재사용해 CPU 재계산을
             # 건너뛴다(즉시 표시). 미만이면 기존처럼 캐시 miss 를 그 자리 계산 (#1).
             allow_compute = len(candidates) < 300
+            # 그 재사용이 **좌표 거리 점수**면 유사도 %로 찍지 않는다 (C-2).
+            coord_reuse = _reuses_coord_scores(
+                self._session_coord_mode, allow_compute, self._fast_results,
+                cur.slot, Path(cur.path))
             # 캐시에 없어 **실제로 다시 계산**해야 하는 후보 수를 먼저 센다 — 0 이면
             # 로딩을 띄우지 않고(즉시), >0 이면 로딩 오버레이로 진행을 보여준다 (#로딩).
             need = self._count_recompute(cur, candidates) if allow_compute else 0
             if need > 0 and not self._sync_scoring:
                 # 무거운 쪽 — 워커에 넘기고 그리기는 결과가 올 때 이어서 한다 (P-03).
+                # (이 경로는 allow_compute=True 뿐이라 점수는 항상 유사도다.)
                 self._loading.show_overlay(i18n.KO.PHASE_SCORING)
                 self._loading.set_progress(0, need, i18n.KO.PHASE_SCORING)
                 self._start_scoring(token, cur, candidates, allow_compute,
@@ -694,7 +752,8 @@ class UnmatchedReviewDialog(QDialog):
                 scored = self._score_candidates(cur, candidates, allow_compute)
             finally:
                 QApplication.restoreOverrideCursor()
-        self._apply_scored(token, cur, cand_key, scored)
+        self._apply_scored(token, cur, cand_key, scored,
+                           score_unknown=coord_reuse)
 
     # ------------------------------------------------------------------
     def _start_scoring(self, token: int, cur: MissEntry, candidates: list,
@@ -728,11 +787,19 @@ class UnmatchedReviewDialog(QDialog):
 
     # ------------------------------------------------------------------
     def _apply_scored(self, token: int, cur: MissEntry, cand_key: tuple,
-                      scored: list) -> None:
-        """점수가 나온 뒤의 그리기 — 동기·워커 두 경로가 함께 쓴다."""
+                      scored: list, *, score_unknown: bool = False) -> None:
+        """점수가 나온 뒤의 그리기 — 동기·워커 두 경로가 함께 쓴다.
+
+        ``score_unknown`` 이면 점수가 유사도가 아니므로(좌표 거리 재사용, C-2)
+        수치 대신 '계산 안 함' 을 보여 준다.  정렬은 그대로다."""
         if token != self._score_token:
             return
         scored = sorted(scored, key=lambda x: x[0], reverse=True)
+        # 좌표 순으로 줄을 세운 화면에서는 U-18 안내('순서 기준은 유사도')가
+        # 거짓이 된다 — 그 경우에만 감춘다.
+        note = getattr(self, "coord_note", None)
+        if note is not None:
+            note.setVisible(not score_unknown)
 
         if not scored:
             self._clear_grid()
@@ -752,7 +819,7 @@ class UnmatchedReviewDialog(QDialog):
                 t = by_path.get(v.path)
                 if t is None:
                     continue
-                t.set_score(s)
+                t.set_score(s, unknown=score_unknown)
                 ordered.append(t)
             self._cand_tiles = ordered
         else:
@@ -763,14 +830,16 @@ class UnmatchedReviewDialog(QDialog):
                 tile = _CandidateTile(v, s, parent=self._host,
                                       size=self._cand_px,
                                       coord_mode=self._coord_mode,
-                                      tolerance=self._tolerance)
+                                      tolerance=self._tolerance,
+                                      score_unknown=score_unknown)
                 tile.selected.connect(self._on_tile_selected)
                 tile.view_requested.connect(self._on_tile_view)
                 self._cand_tiles.append(tile)
             self._last_cand_key = cand_key
 
-        self.candidates_summary.setText(
-            i18n.KO.UNMATCHED_CAND_COUNT_FMT.format(n=len(self._cand_tiles)))
+        fmt = (i18n.KO.UNMATCHED_CAND_COUNT_COORD_FMT if score_unknown
+               else i18n.KO.UNMATCHED_CAND_COUNT_FMT)
+        self.candidates_summary.setText(fmt.format(n=len(self._cand_tiles)))
         # 현재 ref 의 선택(보류) 상태를 테두리로 반영 (#1a).
         sel = self._pending.get(self._idx)
         for t in self._cand_tiles:
@@ -833,14 +902,40 @@ class UnmatchedReviewDialog(QDialog):
             pass                      # 이미 파괴된 C++ 객체
 
     # ------------------------------------------------------------------
+    def _known_score(self, slot: str, ref_path: Path, val_path: Path):
+        """이 쌍에 대해 **이미 아는 점수** (없으면 None).
+
+        읽는 순서는 공유 ``SlotScoreCache``(Stage 2 가 채운 값) → 이 창이 계산해
+        둔 값 — 종전에 둘이 한 통에 들어 있던 때와 **같은 값이 나온다** (C-1).
+        조회 결과는 렌더 세대 동안 기억해 쌍당 락을 한 번만 잡는다 (C-5)."""
+        key = (slot, ref_path, val_path)
+        memo = self._pair_memo
+        if key in memo:
+            return memo[key]
+        s = None
+        if self._score_cache is not None:
+            s = self._score_cache.get_pair(slot, ref_path, val_path)
+        if s is None:
+            s = self._own_scores.get(key)
+        s = None if s is None else float(s)
+        memo[key] = s
+        return s
+
+    def _remember_score(self, slot: str, ref_path: Path, val_path: Path,
+                        score: float) -> None:
+        """이 창이 계산한 점수를 보관 — **공유 캐시에는 넣지 않는다** (C-1)."""
+        key = (slot, ref_path, val_path)
+        self._own_scores[key] = float(score)
+        self._pair_memo[key] = float(score)
+
     def _count_recompute(self, cur: MissEntry, candidates: list) -> int:
-        """캐시에 없어 그 자리에서 CPU 재계산해야 하는 후보 수(로딩 표시 여부 판단)."""
-        if self._score_cache is None:
-            return len(candidates)
+        """캐시에 없어 그 자리에서 CPU 재계산해야 하는 후보 수(로딩 표시 여부 판단).
+
+        ★ 여기서 한 조회는 `_pair_memo` 에 남아 뒤따르는 채점이 그대로 쓴다 (C-5)."""
         ref_path = Path(cur.path)
         n = 0
         for v in candidates:
-            if self._score_cache.get_pair(cur.slot, ref_path, Path(v.path)) is None:
+            if self._known_score(cur.slot, ref_path, Path(v.path)) is None:
                 n += 1
         return n
 
@@ -865,10 +960,14 @@ class UnmatchedReviewDialog(QDialog):
                 return out
         out = []
         for v in candidates:
-            cached = (self._score_cache is not None and
-                      self._score_cache.get_pair(
-                          cur.slot, Path(cur.path), Path(v.path)) is not None)
-            s = self._lookup_or_compute_score(cur, v, allow_compute=allow_compute)
+            # ★ 조회는 **쌍당 한 번**이다 (C-5).  아는 값이면 그대로 쓰고, 그때만
+            #   `_lookup_or_compute_score` 로 내려간다 — 그 함수도 첫 줄이 같은
+            #   조회라 예전엔 같은 쌍을 두 번(+`_count_recompute` 까지 세 번) 물었다.
+            known = self._known_score(cur.slot, Path(cur.path), Path(v.path))
+            cached = known is not None
+            s = (known if cached else
+                 self._lookup_or_compute_score(cur, v,
+                                               allow_compute=allow_compute))
             # ★ 진행 보고를 **점수 성공 여부와 분리한다.**  이전에는 `s is None` 이면
             #   `continue` 로 빠져 보고도 건너뛰었다 — 건너뛴 후보가 하나라도 있으면
             #   done 이 need 에 **영원히 못 닿아** 바가 98% 에서 멈춘 채 창이 내려간다.
@@ -888,13 +987,13 @@ class UnmatchedReviewDialog(QDialog):
         """캐시 우선, 없으면(``allow_compute``) 즉석 계산. 재계산 불가 시 None."""
         ref_path = Path(ref.path)
         val_path = Path(val.path)
-        if self._score_cache is not None:
-            s = self._score_cache.get_pair(ref.slot, ref_path, val_path)
-            if s is not None:
-                return float(s)
+        s = self._known_score(ref.slot, ref_path, val_path)
+        if s is not None:
+            return s
         if not allow_compute:
             return None                    # ≥300: CPU 재계산 금지.
-        # 캐시 miss — pipeline 으로 직접 계산. 캐시에 저장해서 재방문 시 빠르게.
+        # 캐시 miss — pipeline 으로 직접 계산.  재방문 시 빠르도록 보관하되,
+        # **공유 캐시가 아니라 이 창의 통**에 넣는다(C-1, 모듈 docstring 참고).
         try:
             from ...similarity import pipeline as _pipeline
             rf = _pipeline.extract(ref_path)
@@ -902,11 +1001,7 @@ class UnmatchedReviewDialog(QDialog):
             s = float(_pipeline.score(rf, vf))
         except Exception:
             s = 0.0
-        if self._score_cache is not None:
-            try:
-                self._score_cache.put(ref.slot, ref_path, val_path, s)
-            except Exception:
-                pass
+        self._remember_score(ref.slot, ref_path, val_path, s)
         return s
 
     # ------------------------------------------------------------------
@@ -946,8 +1041,7 @@ class UnmatchedReviewDialog(QDialog):
         cur = self._current()
         if cur is None or not self._cand_tiles:
             return
-        candidates = [(t.item, fmt_score(t.score, self._coord_mode, self._tolerance))
-                      for t in self._cand_tiles]
+        candidates = [(t.item, t.score_text()) for t in self._cand_tiles]
         start = max(0, min(int(start_index), len(candidates) - 1))
         viewer = SideBySideViewer(
             Path(cur.path), candidates, start,

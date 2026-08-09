@@ -1664,6 +1664,20 @@ class MainWindow(QMainWindow):
         self._reviewed_all_matches = []
         self._run_log_written = False
         self._phase = PHASE_NONE
+        # ★ **세션 입력·스캔 결과도 함께 버린다.**  `_autosave` 는 결정마다뿐 아니라
+        #   30 초 타이머(`_autosave_timer`)로도 돌기 때문에, `_input` 을 남겨 두면
+        #   맨 위에서 지운 세션 파일이 **옛 입력 그대로 다시 쓰여** 다음 실행의
+        #   '이어하기' 가 이미 끝난 검증을 되살린다.  `_autosave` 가 읽는 것은
+        #   `_input`(mode·ref_root·val_root·호기·threshold)·`_session_id`·`_phase`
+        #   ·`_matches_a` 이고 앞의 둘만 남아 있었다 — 그래서 둘 다 지운다.
+        #   `_scan`·`_working_xlsx` 는 자동 저장이 읽지는 않지만 같은 세션 상태다.
+        #   남겨 두면 다음 [검증 시작] 이 옛 스캔/옛 결과 파일 위에 얹힌다
+        #   (`_cancel_scan` 이 `_scan = None` 을 두는 것과 같은 처방).
+        #   넷 다 `_on_start`/`_on_scan_done` 이 새로 채우므로 지워도 안전하다.
+        self._input = None
+        self._scan = None
+        self._working_xlsx = None
+        self._session_id = ""
         self._show_page(self._setup_page)
 
     # ==================================================================
