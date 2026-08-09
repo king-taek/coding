@@ -430,13 +430,13 @@ die 가 작은 자재는 이 값을 보고 허용 오차를 낮춰 주세요 —
 <h3>③ 슬롯 수동 매핑 — 이름이 다른 폴더를 직접 묶기</h3>
 <p>KLA 로도 묶이지 않은 슬롯이 남으면 프로그램이 묻습니다 —
 <span class="q">한쪽에만 존재하는 Slot 이 있습니다 … 슬롯을 직접 짝지어 주시겠습니까?</span></p>
-<p><b>[예]</b> 를 누르면 <span class="q">Slot 수동 매핑</span> 창이 열립니다.
+<p><b>[예]</b> 를 누르면 <span class="q">슬롯 수동 매핑</span> 창이 열립니다.
 왼쪽 <b>기준(남은 슬롯)</b> 과 오른쪽 <b>검증(남은 슬롯)</b> 에서 하나씩 고른 뒤
 <span class="ui">묶기 ↔</span> 를 누르면 아래 <b>묶은 쌍</b> 에 들어갑니다.
 잘못 묶었으면 <span class="ui">선택 해제</span> 로 풉니다.
 목록에는 WaferID 를 어떻게 읽었는지(정보파일 / 판독 실패 / 사진파일 없음)도 함께 표시됩니다.</p>
 <p><b>[아니오]</b> 를 누르거나 아무것도 묶지 않고 닫으면 그 슬롯들은 결과의
-<span class="q">Slot 불일치</span> 로만 남고 <b>그 사진들은 검증되지 않습니다.</b></p>
+<span class="q">슬롯 불일치</span> 로만 남고 <b>그 사진들은 검증되지 않습니다.</b></p>
 <div class="tip">
   <span class="t">헷갈리면 열어 보고 그냥 닫으셔도 됩니다</span>
   <p>창을 열어 보기만 하고 아무것도 묶지 않으면 <b>아무것도 바뀌지 않습니다.</b>
@@ -795,24 +795,24 @@ die 가 작은 자재는 이 값을 보고 허용 오차를 낮춰 주세요 —
 
 <ol class="keys">
   <li><b>요약</b> — 두 장비 이름, 한쪽에만 있던 슬롯, <b>결과 파일이 저장될 위치</b>.</li>
-  <li><b>숫자 네 칸</b> — <span class="q">매칭 성공</span> · <span class="q">허용 초과</span> ·
-      <span class="q">매치 없음</span> · <span class="q">Slot 불일치</span>.
+  <li><b>숫자 네 칸</b> — <span class="q">매치 성공</span> · <span class="q">허용 초과</span> ·
+      <span class="q">매치 없음</span> · <span class="q">슬롯 불일치</span>.
       검토 화면과 <b>같은 분류 함수</b>로 세지만 <b>묶는 단위가 다릅니다</b> —
       <b>네 숫자를 더해도 전체 장수가 되지 않으니</b> 아래를 보고 검산하세요.
       <table style="margin-top:2mm">
         <thead><tr><th style="width:26%">결과 화면</th><th>무엇을 세나 (검토 화면과의 관계)</th></tr></thead>
         <tbody>
-          <tr><td><span class="q">매칭 성공</span></td>
+          <tr><td><span class="q">매치 성공</span></td>
               <td>짝이 남아 있는 사진 <b>전부</b> = 검토 화면의 <span class="q">일치</span> + <span class="q">허용 초과</span></td></tr>
           <tr><td><span class="q">허용 초과</span></td>
-              <td><b>매칭 성공 안에서</b> 거리가 허용 오차를 넘은 것을 다시 센 것 — 따로 떼어 놓은 것이 아닙니다</td></tr>
+              <td><b>매치 성공 안에서</b> 거리가 허용 오차를 넘은 것을 다시 센 것 — 따로 떼어 놓은 것이 아닙니다</td></tr>
           <tr><td><span class="q">매치 없음</span></td>
               <td>짝이 없는 사진 <b>전부</b> = 검토 화면의 <span class="q">매치 없음</span> + <span class="q">매치 실패</span></td></tr>
-          <tr><td><span class="q">Slot 불일치</span></td>
+          <tr><td><span class="q">슬롯 불일치</span></td>
               <td>한쪽 장비에만 있던 슬롯 — 사진 장수가 아니라 <b>슬롯 개수</b>입니다</td></tr>
         </tbody>
       </table>
-      <b>매칭 성공 + 매치 없음 = 기준 장비 사진 전체</b> 입니다.
+      <b>매치 성공 + 매치 없음 = 기준 장비 사진 전체</b> 입니다.
       (유사도 기준으로 검증했다면 <span class="q">허용 초과</span> 칸은 나오지 않습니다 —
       그 모드엔 허용 오차라는 개념이 없습니다.)</li>
   <li><b>저장 옵션</b> — 아래 표 참고. 모두 기본은 해제입니다.</li>

@@ -676,16 +676,16 @@ const KO = {
   BTN_FINISH_REVIEW_KEPT_FMT: (n) => `검토 완료 · 유지 ${n}`,
   RESULT_TITLE: "검증 결과",
   RESULT_MACHINES_FMT: (ref, val) => `기준 장비: ${ref}    검증 장비: ${val}`,
-  RESULT_SLOT_ONLY_REF_FMT: (names) => `Slot 불일치  ·  기준 전용: ${names}`,
-  RESULT_SLOT_ONLY_VAL_FMT: (names) => `Slot 불일치  ·  검증 전용: ${names}`,
+  RESULT_SLOT_ONLY_REF_FMT: (names) => `슬롯 불일치  ·  기준 전용: ${names}`,
+  RESULT_SLOT_ONLY_VAL_FMT: (names) => `슬롯 불일치  ·  검증 전용: ${names}`,
   VALUE_NONE: "없음",
   WORKING_FILE_LABEL: "결과 파일 위치",
-  STAT_MATCHED: "매칭 성공", STAT_OVER_TOLERANCE: "허용 초과",
-  STAT_NO_MATCH: "매치 없음", STAT_SLOT_MISMATCH: "Slot 불일치",
+  STAT_MATCHED: "매치 성공", STAT_OVER_TOLERANCE: "허용 초과",
+  STAT_NO_MATCH: "매치 없음", STAT_SLOT_MISMATCH: "슬롯 불일치",
   TALLY_TOOLTIP:
     "일치 — 짝을 찾았고 허용 오차 안에 든 매치입니다.\n" +
     "허용 초과 — 짝은 찾았지만 좌표 차이가 허용 오차를 넘었습니다.\n" +
-    "매치 없음 — 검토에서 직접 '매치 아님' 으로 되돌린 것입니다.\n" +
+    "매치 없음 — 검토에서 직접 ‘매치 없음’ 으로 되돌린 것입니다.\n" +
     "매치 실패 — 가장 가까운 후보조차 허용 오차의 3배를 넘어 짝으로 볼 수 없었습니다" +
     " (이 화면에서는 고칠 수 없습니다).",
   STAGE2_TITLE: (legacy) => legacy ? "Stage 2 — 유사도 기반 매칭" : "Stage 2 — 좌표 기반 매칭 (v2)",
@@ -707,13 +707,13 @@ const KO = {
     detail,
   SETUP_HOW_TO_USE_BODY:
     "① 기준·검증 장비의 폴더와 호기 번호를 입력합니다\n" +
-    "② 자동화 수준을 선택합니다  ·  사진 직접 선택 / 모두 자동\n" +
+    "② 자동화 수준을 선택합니다  ·  사진 직접 선택 / 모든 사진 자동\n" +
     "③ 허용 오차를 설정합니다  (기본 200 µm)\n" +
     "      ※ 좌표 데이터가 없을 때만 ‘유사도 엔진(구형) 사용’ 스위치를 켭니다\n" +
     "          (켜면 판정 기준이 허용 오차에서 유사도 임계치로 바뀝니다)\n" +
     "④ [검증 시작] 을 누르면 다음 순서로 진행됩니다\n" +
     "      ㄱ. 후보 선별 — 사진 직접 선택 시 기준 사진을 한 장씩 [✕ 제외] / [✓ 검증]\n" +
-    "          (‘모두 자동’ 은 이 단계를 건너뜁니다)\n" +
+    "          (‘모든 사진 자동’ 은 이 단계를 건너뜁니다)\n" +
     "      ㄴ. 매칭 — 상단 ‘판정 기준’ 배지의 기준으로 자동 매치 후 ‘매치 검토’에서 확인·교체\n" +
     "      ㄷ. 결과 저장 — 양식 폴더의 양식.xlsx 를 복사하여 자동 저장\n" +
     "매치 검토에서 ‘크게 보기’로 기준·후보를 나란히 비교(←/→ 이동)\n" +
@@ -1498,10 +1498,10 @@ RENDER.select = () => {
   };
 
   page.appendChild(el("div", { class: "panes" }, [
-    panel("검증 후보들 (남은 사진)", S.stage1.queue, "left", true),
+    panel("검증 후보", S.stage1.queue, "left", true),
     el("div", { class: "pane", style: "flex:4" }, [
       el("h3", { style: "text-align:center", text: "검증 결정할 사진" }),
-      el("div", { class: "muted small", style: "text-align:center", text: "Slot: W7548304XYG4" }),
+      el("div", { class: "muted small", style: "text-align:center", text: "슬롯: W7548304XYG4" }),
       sizeRow(),
       el("div", { class: "viewport" }, [cur
         ? el("img", { src: cur.mid, alt: "", "data-test": "center-img",
@@ -1519,7 +1519,7 @@ RENDER.select = () => {
           title: KO.SHORTCUT_TOOLTIP, disabled: cur ? null : true, on: { click: () => decide("keep") } }),
       ]),
     ]),
-    panel("검증 대상 (검증하기로 한 사진들)", S.stage1.keep, "right", false),
+    panel("검증 대상", S.stage1.keep, "right", false),
   ]));
   return page;
 };
@@ -1621,7 +1621,7 @@ RENDER.match = () => {
   page.appendChild(el("div", { class: "panes" }, [
     el("div", { class: "pane", style: "flex:4" }, [
       el("h3", { style: "text-align:center", text: "기준 사진" }),
-      el("div", { class: "muted small", style: "text-align:center", text: "Slot: W7548304XYG4" }),
+      el("div", { class: "muted small", style: "text-align:center", text: "슬롯: W7548304XYG4" }),
       sizeRow(),
       el("div", { class: "viewport" }, [el("img", { src: cur.mid, alt: "", "data-test": "center-img",
         width: S.imgSize, height: S.imgSize })]),
@@ -1793,12 +1793,12 @@ function compare(r) {
 /** 검토 결과를 결과 화면의 네 숫자로 옮긴다.
  *
  *  ⚠ **네 숫자를 더해도 전체가 되지 않는다** — 그렇게 '고치지' 마라:
- *    · 허용 초과는 **매칭 성공의 부분집합**이다(짝은 찾았고 거리가 멀 뿐).
+ *    · 허용 초과는 **매치 성공의 부분집합**이다(짝은 찾았고 거리가 멀 뿐).
  *      앱도 검토 화면과 **같은 분류 함수**(match_review_page.tally)로 센다 —
  *      두 화면이 다른 기준으로 세면 사용자가 숫자 불일치를 먼저 발견한다.
  *    · 매치 없음 = 검토에서 ✕ 로 되돌린 것 **+** 자동 매칭이 아예 짝을 못 지은 것
  *      (앱 `_finish_session`: `_compute_unmatched_refs()` + `_reviewed_unmatched`).
- *    · Slot 불일치는 매칭 이전의 이야기다(한쪽 폴더에만 있는 슬롯). */
+ *    · 슬롯 불일치는 매칭 이전의 이야기다(한쪽 폴더에만 있는 슬롯). */
 function finishReview() {
   const kept = S.review.filter((r) => !r.none);
   S.result = {
@@ -2101,8 +2101,8 @@ const CHAPTERS = [
     lead: "확인하고 엑셀로 저장하면 끝입니다.",
     steps: [
       { t: "숫자 넷을 먼저 봅니다", sel: '[data-test="stats"]', kind: "warn",
-        b: "매칭 성공 · 허용 초과 · 매치 없음 · Slot 불일치." +
-           "<br>⚠ <em>더해도 전체가 되지 않습니다</em> — 허용 초과는 <b>매칭 성공 안에 든 수</b>이고, " +
+        b: "매치 성공 · 허용 초과 · 매치 없음 · 슬롯 불일치." +
+           "<br>⚠ <em>더해도 전체가 되지 않습니다</em> — 허용 초과는 <b>매치 성공 안에 든 수</b>이고, " +
            "매치 없음은 <b>검토에서 ✕ 한 것 + 애초에 짝을 못 지은 것</b>입니다." },
       { t: "어디에 저장되나", sel: '[data-test="summary"]',
         b: "저장 위치가 요약 맨 아래에 그대로 적혀 있습니다 — 저장할 때 다시 묻지 않습니다." },
@@ -2343,7 +2343,7 @@ const HELP = {
   ]],
   result: ["결과", [
     ["숫자를 더해도 전체가 안 맞는다", "—",
-      "맞습니다. 허용 초과는 매칭 성공에 포함되고, 매치 없음은 ✕ 한 것 + 짝을 못 지은 것입니다."],
+      "맞습니다. 허용 초과는 매치 성공에 포함되고, 매치 없음은 ✕ 한 것 + 짝을 못 지은 것입니다."],
     ["짝을 다시 손보고 싶다", "← 검토 화면으로", "✕ 표시와 바꿔 끼운 짝이 그대로 남아 있습니다."],
     ["짝을 못 찾은 사진을 직접 짝지어 주고 싶다", "매치 실패 사진 검토", "넘길 때마다 몇 초 멈출 수 있습니다."],
     ["결과를 남기고 싶다", "엑셀로 저장", "요약에 적힌 위치에 저장됩니다."],
