@@ -305,6 +305,10 @@ def _derive_tokens() -> dict:
         "row_divider": c["line"],
         # 점수 컬럼 눈금 — ink 반투명이라 시트 위에서 또렷.
         "score_rule": _tint(c["ink"], 55),
+        # 사진 판독 뷰어의 잉크 — 바탕($viewer_bg)이 테마와 무관한 순검정이라
+        # 잉크도 테마를 따르면 안 된다(라이트의 mute 는 검정 위에서 거의 안 보인다).
+        # 그래서 활성 팔레트가 아니라 **흑연 팔레트의 mute** 를 고정으로 쓴다.
+        "viewer_ink": _DARK["mute"],
     }
 
 

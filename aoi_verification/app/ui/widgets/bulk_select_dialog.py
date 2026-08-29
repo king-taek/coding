@@ -262,14 +262,18 @@ class BulkSelectDialog(QDialog):
         self._size_slider = NoWheelSlider(Qt.Orientation.Horizontal, self)
         self._size_slider.setRange(_TILE_MIN, _TILE_MAX)
         self._size_slider.setValue(self._tile_px)
-        self._size_slider.setSingleStep(10)
-        self._size_slider.setPageStep(40)
+        # 스텝/페이지는 '사진 크기' 슬라이더 공통 규약(20/80) — 범위는 화면마다
+        # 용도가 달라(타일 vs 원본) 유지하지만, 손맛이 화면마다 달라질 이유는 없다.
+        self._size_slider.setSingleStep(20)
+        self._size_slider.setPageStep(80)
         self._size_slider.setFixedWidth(200)
         self._size_slider.valueChanged.connect(self._on_size_changed)
         top.addWidget(self._size_slider)
         self._size_value = QLabel(f"{self._tile_px} px", self)
-        self._size_value.setProperty("role", "muted")
+        self._size_value.setProperty("role", "monoMuted")
         self._size_value.setFixedWidth(64)
+        self._size_value.setAlignment(Qt.AlignmentFlag.AlignRight
+                                      | Qt.AlignmentFlag.AlignVCenter)
         top.addWidget(self._size_value)
         root.addLayout(top)
 
@@ -524,7 +528,18 @@ class BulkSelectDialog(QDialog):
 
     def _refresh_summary(self) -> None:
         n = len(self._selected_keys)
-        self._summary_label.setText(i18n.KO.BULK_SELECT_SUMMARY_FMT.format(n=n))
+        # 화면 밖(다른 페이지)에서 함께 선택돼 있는 장수 — 현재 페이지 key 와의
+        # 차집합.  페이지네이션 중이고 실제로 밖에 있을 때만 덧붙인다.
+        off = 0
+        if self._paginated:
+            here = {item.key for _slot, item in self._page_slice()}
+            off = len(self._selected_keys - here)
+        if off > 0:
+            self._summary_label.setText(
+                i18n.KO.BULK_SELECT_SUMMARY_OFFPAGE_FMT.format(n=n, m=off))
+        else:
+            self._summary_label.setText(
+                i18n.KO.BULK_SELECT_SUMMARY_FMT.format(n=n))
         # ★ 0 장일 때 액션 버튼을 눌러도 조용히 아무 일도 안 일어났다(‘먹은 클릭’).
         #   ZoomWindow 처럼 **선택 전에는 비활성**으로 두어 왜 안 되는지 보이게 한다.
         for btn in getattr(self, "_action_buttons", ()):

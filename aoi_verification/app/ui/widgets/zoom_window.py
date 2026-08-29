@@ -14,8 +14,8 @@ from typing import Iterable, Optional
 from PyQt6.QtCore import QObject, QThread, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import (QColor, QImage, QPainter, QPixmap, QShortcut,
                          QKeySequence)
-from PyQt6.QtWidgets import (QApplication, QDialog, QGridLayout, QHBoxLayout,
-                              QLabel, QMenu, QScrollArea,
+from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout,
+                              QHBoxLayout, QLabel, QMenu, QScrollArea,
                               QVBoxLayout, QWidget)
 
 from ... import i18n
@@ -33,8 +33,14 @@ SOURCE_CANDIDATES = "candidate" # 후보 (Left)
 
 
 # ---------------------------------------------------------------------------
-class _MidTile(QWidget):
-    """800px 중간 이미지 + 파일명 + 선택 상태."""
+class _MidTile(QFrame):
+    """800px 중간 이미지 + 파일명 + 선택 상태.
+
+    ★ 선택 강조는 **QSS 동적 프로퍼티**(`role="card-soft"` + `inlineSelected`)로 한다 —
+      thumb_grid._ThumbTile 과 같은 경로다.  예전엔 스코프 없는 `QWidget {…}` 인스턴스
+      스타일이었는데, 색이 생성 시점에 굳어 다크 전환이 안 먹었고 자식 라벨까지 테두리가
+      번져 캡션이 `border:none` 으로 개별 우회해야 했다(그 우회도 함께 지웠다).
+    """
 
     clicked = pyqtSignal(object)         # ImageItem
     # ★ 확대는 **우클릭 '크게 보기'** 로만 연다.  더블클릭 확대를 없앤 이유: 사진을
@@ -54,10 +60,8 @@ class _MidTile(QWidget):
         self._dim = dim
         self._selected = False
         self.setFixedSize(self.TILE_W, self.TILE_H + 30)
-        self.setStyleSheet(
-            f"QWidget {{ background: {theme.PANEL}; border: 1px solid {theme.LINE}; "
-            "border-radius: 8px; }"
-        )
+        self.setProperty("role", "card-soft")
+        self.setProperty("inlineSelected", "false")
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(6, 6, 6, 6)
@@ -75,9 +79,11 @@ class _MidTile(QWidget):
         cap = QLabel(item.filename, self)
         cap.setProperty("role", "muted")
         cap.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        cap.setStyleSheet("border: none;")
         lay.addWidget(cap)
 
+        # 확대 경로가 우클릭 메뉴뿐이라 타일만 보고는 알 수 없다 — 벌크 선택 타일과
+        # 같은 툴팁으로 그 경로를 가르친다(안 보이는 유일 경로는 없는 기능과 같다).
+        self.setToolTip(f"{i18n.KO.BULK_TILE_ZOOM_TOOLTIP}\n{item.filename}")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._on_context_menu)
@@ -114,16 +120,11 @@ class _MidTile(QWidget):
 
     def set_selected(self, on: bool) -> None:
         self._selected = on
-        if on:
-            self.setStyleSheet(
-                f"QWidget {{ background: {theme.PANEL}; border: 2px solid {theme.ACCENT}; "
-                "border-radius: 8px; }"
-            )
-        else:
-            self.setStyleSheet(
-                f"QWidget {{ background: {theme.PANEL}; border: 1px solid {theme.LINE}; "
-                "border-radius: 8px; }"
-            )
+        # ★ `setProperty` 만으로는 화면이 안 바뀐다 — 동적 프로퍼티는 재계산을
+        #   트리거하지 않으므로 unpolish/polish 를 반드시 함께 부른다.
+        self.setProperty("inlineSelected", "true" if on else "false")
+        self.style().unpolish(self)
+        self.style().polish(self)
         self.toggled.emit(self.item, on)
 
     def mousePressEvent(self, e):  # noqa: N802
@@ -221,7 +222,7 @@ class FullscreenViewer(QDialog):
         super().__init__(parent)
         self.setWindowTitle(image_path.name)
         self.setModal(True)
-        self.setStyleSheet(f"background-color: {theme.VIEWER_BG};")
+        self.setProperty("role", "viewer")
         # 작은 모니터에서 1280×800 이 화면을 넘어가지 않도록 화면 가용 영역의
         # 90% 안으로 제한.  (실제 크기는 시트 호스트가 full_bleed 로 덮어쓴다.)
         scr = QApplication.primaryScreen()
@@ -248,11 +249,19 @@ class FullscreenViewer(QDialog):
 
         self._label = QLabel(self)
         self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._label.setStyleSheet(f"background-color: {theme.VIEWER_BG};")
+        self._label.setProperty("role", "viewer")
+
+        # 조작 힌트 — 좌우 비교 뷰어에는 있는 안내가 단일 뷰어에만 없었다.  휠 확대가
+        # 되는 줄 모르면 '크게 보기' 의 절반만 쓰게 된다.
+        self._hint = QLabel(i18n.KO.VIEWER_HINT, self)
+        self._hint.setProperty("role", "viewerHint")
+        self._hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.addWidget(self._label)
+        lay.setContentsMargins(0, 0, 0, 8)
+        lay.setSpacing(6)
+        lay.addWidget(self._label, 1)
+        lay.addWidget(self._hint)
 
         QShortcut(QKeySequence("Esc"), self, activated=self.close)
         self._start_original_load()
@@ -300,9 +309,28 @@ class FullscreenViewer(QDialog):
         self._redraw()
 
     # -- 배율 ------------------------------------------------------------
+    def _view_size(self) -> tuple[int, int]:
+        """사진이 실제로 놓이는 칸의 크기.
+
+        ★ **다이얼로그 크기를 쓰면 안 된다.**  하단 조작 힌트 줄만큼 라벨이 짧아서,
+          다이얼로그 크기로 맞춘 캔버스를 그 라벨에 넣으면 중앙 정렬이 **위아래를
+          균등하게 잘라 낸다** — 사용자는 사진이 잘린 줄도 모른다.
+
+        레이아웃이 아직 안 돌아 라벨 크기를 못 믿을 때만 힌트 줄이 차지할 높이를
+        빼서 어림한다(`_redraw` 는 그 경우 맞춤을 확정하지 않고 다시 잰다)."""
+        w, h = self._label.width(), self._label.height()
+        if w > 1 and h > 1:
+            return w, h
+        lay = self.layout()
+        reserve = self._hint.sizeHint().height()
+        if lay is not None:
+            m = lay.contentsMargins()
+            reserve += lay.spacing() + m.top() + m.bottom()
+        return max(1, self.width()), max(1, self.height() - reserve)
+
     def _fit_to_view(self) -> None:
-        self._scale = fit_scale(self._pix.width(), self._pix.height(),
-                                self.width(), self.height())
+        vw, vh = self._view_size()
+        self._scale = fit_scale(self._pix.width(), self._pix.height(), vw, vh)
         self._offset_x = 0
         self._offset_y = 0
 
@@ -340,8 +368,11 @@ class FullscreenViewer(QDialog):
         #   setGeometry 로 자식에 동기 리사이즈를, 독립 창은 표시 후 리사이즈를 준다),
         #   둘 중 하나에만 걸어 두면 나머지 경로에서 배율 1.0 인 채로 첫 프레임이
         #   그려진다 — 바로 그게 '크게 보기인데 작다' 였다.
+        # ★ 맞춤은 **라벨 크기를 실제로 알게 된 뒤에** 확정한다.  레이아웃이 아직
+        #   안 돌았으면 어림값으로 한 번 그리되 `_fitted` 를 세우지 않아, 진짜 크기가
+        #   생기는 다음 그리기에서 다시 맞춘다(사용자 조작 전이라 덮어써도 안전하다).
         if not self._fitted and self.width() > 0 and self.height() > 0:
-            self._fitted = True
+            self._fitted = self._label.width() > 1 and self._label.height() > 1
             self._fit_to_view()
         # ★ 스케일 결과를 한 장 캐시한다.  드래그 팬은 offset 만 바뀌는데도 매
         #   마우스 이벤트마다 수천 px 를 SmoothTransformation 으로 다시 줄이고 있었다
@@ -359,9 +390,8 @@ class FullscreenViewer(QDialog):
             )
             self._scaled_key = key
             self._scaled_cache = scaled
-        # 단순 중앙 + offset
-        cw = self.width()
-        ch = self.height()
+        # 단순 중앙 + offset — 캔버스는 **사진이 놓이는 칸** 크기다(`_view_size`).
+        cw, ch = self._view_size()
         canvas = QPixmap(cw, ch)
         canvas.fill(QColor(theme.VIEWER_BG))
         p = QPainter(canvas)
@@ -479,7 +509,9 @@ class ZoomWindow(QDialog):
             )
             bar.addWidget(self._btn_b)
         bar.addStretch(1)
-        close = NeonButton(i18n.KO.BTN_OK, role="ghost")
+        # 하는 일은 창을 닫는 것뿐이다 — "확인" 은 선택해 둔 사진에 액션이 적용된다는
+        # 오해를 부른다.  메시지 시트의 닫기와 같은 낱말을 쓴다.
+        close = NeonButton(i18n.KO.MSG_BTN_CLOSE, role="ghost")
         close.clicked.connect(self.accept)
         bar.addWidget(close)
         root.addLayout(bar)

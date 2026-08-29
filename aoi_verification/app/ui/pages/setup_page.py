@@ -361,9 +361,13 @@ class SetupPage(QWidget):
         담으면 부족하다 — **판정 수치까지** 담아야 오조작이 눈에 걸린다."""
         card = NeonCard(role="card", parent=self)
         card.setToolTip(i18n.KO.MODE_BADGE_TOOLTIP)
+        # ★ 배지는 '항상 보이는 요약' 이지 카드 콘텐츠가 아니다 — 일반 카드 패딩(20)
+        #   에 캡션/값 2단으로 두면 실높이가 ~90px 로 26px 제목의 3배가 돼, 첫 줄의
+        #   시각 중심이 배지 쪽으로 쏠리고 폴드 위 공간(장비 카드)을 먹는다.
+        #   패딩을 줄이고 캡션과 값을 **한 줄**로 눕힌다.
+        card.body().setContentsMargins(14, 8, 14, 8)
         cap = QLabel(i18n.KO.MODE_BADGE_CAPTION, card)
         cap.setProperty("role", "badgeCaption")
-        card.body().addWidget(cap)
         # 이름(한국어, 본문 서체) + 수치(모노) — 한 라벨에 모노를 걸면 한글 글리프가
         # 없어 문장 안에서 서체가 갈린다.
         badge_row = QWidget(card)
@@ -371,6 +375,7 @@ class SetupPage(QWidget):
         brow = QHBoxLayout(badge_row)
         brow.setContentsMargins(0, 0, 0, 0)
         brow.setSpacing(8)
+        brow.addWidget(cap)
         self._mode_badge = QLabel("", badge_row)
         self._mode_badge.setProperty("role", "modeBadge")
         self._mode_badge_value = QLabel("", badge_row)
@@ -824,13 +829,15 @@ class SetupPage(QWidget):
         bar = QHBoxLayout(host)
         bar.setContentsMargins(0, 0, 0, 0)
         # 업데이트 확인은 좌측(보조), 검증 시작은 우측(주). 좌상단 도움말 메뉴 대체.
+        # ★ 보조 버튼에는 높이를 따로 주지 않는다 — 기본 ghost 등급(44px)이 이미
+        #   타깃 하한(2.5.5 AAA)을 넘는다.  셋을 다 46 으로 키우면 "유일한 primary —
+        #   가장 크게" 라는 이 화면의 위계가 색 하나로만 남는다(둘은 월 1회도 안 쓰는
+        #   유틸리티다).
         self.update_btn = NeonButton(i18n.KO.MENU_CHECK_UPDATE, role="ghost")
-        self.update_btn.setMinimumHeight(46)
         self.update_btn.clicked.connect(self.update_check_requested.emit)
         bar.addWidget(self.update_btn)
         # 사진 한 장의 결함 정보를 바로 보는 도구.
         self.image_info_btn = NeonButton(i18n.KO.IMAGE_INFO_BUTTON, role="ghost")
-        self.image_info_btn.setMinimumHeight(46)
         self.image_info_btn.clicked.connect(self._open_image_info)
         bar.addWidget(self.image_info_btn)
         # ★ 자리 계약: 왼쪽 보조 버튼들 → stretch → 힌트 → 주 액션(start_btn).

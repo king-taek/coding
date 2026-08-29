@@ -369,7 +369,9 @@ class MainWindow(QMainWindow):
                          daemon=True).start()
 
     def _on_update_none(self, msg: str) -> None:
-        sheets.info(self, i18n.KO.UPDATE_AVAILABLE_TITLE, msg)
+        # 최신이거나 확인 불가인 결과다 — 중립 제목을 쓴다('업데이트 있음' 은 실제로
+        # 새 버전이 있는 _on_update_found 전용).
+        sheets.info(self, i18n.KO.UPDATE_CHECK_TITLE, msg)
 
     def _on_update_found(self, info: dict) -> None:
         """'업데이트 있음' 안내 → 동의하면 백그라운드로 다운로드/교체."""
@@ -943,7 +945,9 @@ class MainWindow(QMainWindow):
         # ★ 오버레이를 **먼저** 띄운다.  아래 `_prepare_working_file` 은 결과 폴더로
         #   양식을 복사하는데(shutil.copyfile), 그 폴더가 NAS 면 수 초가 걸린다 —
         #   예전에는 그동안 아무 표시도 없어 [검증 시작] 이 먹지 않은 것처럼 보였다.
-        self._loading.show_overlay(i18n.KO.LOAD_SCAN, cancelable=True)
+        self._loading.show_overlay(i18n.KO.LOAD_SCAN, cancelable=True,
+                                   step=(1, 3),
+                                   steps=i18n.KO.LOAD_JOURNEY_STEPS)
         QApplication.processEvents()
 
         # 양식 폴더의 양식.xlsx 를 결과 폴더로 복사 → 작업 파일 준비 ----
@@ -1051,7 +1055,8 @@ class MainWindow(QMainWindow):
         # (set_progress 는 숨겨진 오버레이를 다시 띄우지 않으므로 show_overlay 필수.)
         # 썸네일 단계는 가장 오래 걸리므로 [중지] 로 건너뛸 수 있게 한다(#C2).
         self._loading.show_overlay(
-            i18n.KO.LOAD_THUMBNAIL, cancelable=True)
+            i18n.KO.LOAD_THUMBNAIL, cancelable=True,
+            step=(2, 3), steps=i18n.KO.LOAD_JOURNEY_STEPS)
         QApplication.processEvents()
         all_items: list[ImageItem] = []
         for name in common:
@@ -1129,6 +1134,7 @@ class MainWindow(QMainWindow):
         if self._thumbs_handled:
             return
         self._thumbs_handled = True
+        self._loading.set_stage((3, 3), i18n.KO.LOAD_JOURNEY_STEPS)
         self._loading.set_progress(0, 0, i18n.KO.LOAD_STAGE_PREP)
         QTimer.singleShot(0, self._continue_after_thumbs)
 
@@ -1172,6 +1178,7 @@ class MainWindow(QMainWindow):
         """``_on_thumbs_ready`` 의 안전한 후속 — 모달/페이지 전환 OK."""
         if self._input is None:
             return
+        self._loading.set_stage((3, 3), i18n.KO.LOAD_JOURNEY_STEPS)
         self._loading.set_progress(0, 0, i18n.KO.LOAD_STAGE_PREP)
         if self._input.automation_level == AutomationLevel.AUTO_ALL:
             self._loading.hide_overlay()

@@ -17,6 +17,7 @@ pytest.importorskip("PyQt6.QtWidgets")
 
 from PyQt6.QtWidgets import QApplication, QWidget          # noqa: E402
 
+from aoi_verification.app import i18n                        # noqa: E402
 from aoi_verification.app.ui import theme                    # noqa: E402
 from aoi_verification.app.ui.widgets.loading_overlay import (  # noqa: E402
     LoadingOverlay)
@@ -248,8 +249,8 @@ def test_show_overlay_starts_busy_not_a_frozen_zero_bar(qapp):
 
     이전에는 `_progress`(range 0..100, value 0) 가 보이는 채로 `_busy` 가 숨어 있었다.
     그래서 총량을 모르는 작업(OpenVINO 설치 · KLA 파일명 읽기 · 선계산 대기)에서는
-    **스피너만 돌고 바는 영원히 0** 이었다 — 사용자가 보고한 "동그라미만 돌고 바가
-    채워지지 않는" 버그이고, CLAUDE.md 로딩 계약 위반이다.
+    바가 영원히 0 이었다 — 사용자가 보고한 "바가 채워지지 않는" 버그이고,
+    CLAUDE.md 로딩 계약 위반이다.
     """
     host, ov = _overlay(qapp)
     try:
@@ -257,11 +258,15 @@ def test_show_overlay_starts_busy_not_a_frozen_zero_bar(qapp):
         assert not ov._busy.isHidden(), "busy 표시가 없다 — 바가 0 에 얼어 있다"
         assert ov._progress.isHidden(), "결정형 바가 0 으로 보이고 있다"
         assert ov._count_label.text() == "", "총량을 모르는데 숫자를 적었다"
+        assert ov._pct_label.text() == "", "총량을 모르는데 퍼센트를 적었다"
 
         # 총량이 알려지면 결정형으로 **승격**된다.
         ov.set_progress(3, 10, "처리")
         assert not ov._progress.isHidden() and ov._busy.isHidden()
-        assert ov._progress.maximum() == 10 and ov._count_label.text() == "3 / 10"
+        assert ov._progress.maximum() == 10
+        assert ov._count_label.text() == i18n.KO.LOADING_COUNT_FMT.format(
+            done=3, total=10)
+        assert ov._pct_label.text() == "30%"
 
         # 다시 총량을 잃으면 busy 로 되돌아온다(왕복).
         ov.set_progress(0, 0, "마무리")

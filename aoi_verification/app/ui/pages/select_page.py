@@ -23,9 +23,9 @@ from typing import Optional
 
 from PyQt6.QtCore import QByteArray, Qt, pyqtSignal
 from PyQt6.QtGui import QFontMetrics, QKeySequence, QShortcut
-from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QScrollArea,
-                              QSizePolicy, QSlider, QSplitter, QVBoxLayout,
-                              QWidget)
+from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QProgressBar,
+                              QScrollArea, QSizePolicy, QSlider, QSplitter,
+                              QVBoxLayout, QWidget)
 
 from ... import config, i18n
 from .. import theme
@@ -417,6 +417,9 @@ class SelectPage(QWidget):
         top.addWidget(self.btn_view_excluded)
         # [선택 종료] — 남은 미결정 사진을 모두 ‘검증 제외’ 로 처리하고
         # Stage 2 로 진행 (사용자 결정).  큐가 비어 있으면 자동 비활성.
+        # ★ 조회용 [검증 제외 사진 보기] 와 물리적으로 떼어 놓는다 — 8px 간격으로
+        #   붙어 있으면 한 칸 옆을 잘못 눌러 파괴 흐름의 확인창으로 들어간다.
+        top.addSpacing(24)
         self.btn_end_selection = NeonButton(
             i18n.KO.BTN_END_SELECTION, role="warn",
         )
@@ -429,7 +432,18 @@ class SelectPage(QWidget):
         self.progress_label = QLabel("", self)
         self.progress_label.setProperty("role", "muted")
         top.addWidget(self.progress_label)
+        # 수치는 한 등급 위로 — 모노 본문 잉크(자릿수가 바뀌어도 흔들리지 않는다).
+        self.progress_count = QLabel("", self)
+        self.progress_count.setProperty("role", "progressCountLg")
+        top.addWidget(self.progress_count)
         root.addLayout(top)
+
+        # 제목 줄 바로 아래 폭 전체 진행 눈금 — 표시 전용(텍스트 없음, 채움 스냅).
+        self.progress_bar = QProgressBar(self)
+        self.progress_bar.setProperty("role", "pageProgress")
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setVisible(False)
+        root.addWidget(self.progress_bar)
 
         # LOT(slot)별 전체 장수 — 참고용으로 작게 한 줄 (#2).  세션 내 불변이라
         # load_state 에서 1회만 채운다.  슬롯이 많으면 elide + 전체는 툴팁.
@@ -485,6 +499,10 @@ class SelectPage(QWidget):
         cl.addWidget(self.slot_label)
 
         # 사진 크기 슬라이더 -------------------------------------------
+        # ★ 이 줄은 **사진 아래**에 붙인다(아래 `cl.addLayout(size_row)`).  한 장씩
+        #   판단하는 카드의 시선 축은 슬롯 → 사진 → 판단 버튼인데, 세션에 한 번쯤
+        #   만지는 설정 컨트롤이 그 한가운데를 가로지르면 매 판단마다 사진 시작점이
+        #   ~34px 내려간다.  검토 화면이 이미 '크기 조절은 가장자리' 선례를 세웠다.
         size_row = QHBoxLayout()
         size_row.setSpacing(8)
         size_label = QLabel(i18n.KO.IMAGE_SIZE_LABEL, center_card)
@@ -498,7 +516,7 @@ class SelectPage(QWidget):
         self.size_slider.setSingleStep(20)
         self.size_slider.setPageStep(80)
         self.size_value = QLabel(f"{self.size_slider.value()} px", center_card)
-        self.size_value.setProperty("role", "muted")
+        self.size_value.setProperty("role", "monoMuted")
         self.size_value.setFixedWidth(64)
         self.size_value.setAlignment(Qt.AlignmentFlag.AlignRight
                                      | Qt.AlignmentFlag.AlignVCenter)
@@ -506,7 +524,6 @@ class SelectPage(QWidget):
         size_row.addWidget(size_label)
         size_row.addWidget(self.size_slider, stretch=1)
         size_row.addWidget(self.size_value)
-        cl.addLayout(size_row)
 
         # 이미지 (스크롤 영역) -----------------------------------------
         self.center_img = ScalableImage(center_card)
@@ -520,6 +537,7 @@ class SelectPage(QWidget):
         self._img_scroll.setSizePolicy(QSizePolicy.Policy.Expanding,
                                        QSizePolicy.Policy.Expanding)
         cl.addWidget(self._img_scroll, stretch=1)
+        cl.addLayout(size_row)          # 설정은 시선 축 밖(사진 아래) — 위 주석 참조
 
         # 버튼 줄 (사진 밑에 명확히 분리) -------------------------------
         btn_row = QHBoxLayout()
@@ -818,19 +836,33 @@ class SelectPage(QWidget):
             self._current = None
             self.center_img.clear_image()
             self.slot_label.setText("")
-            self.progress_label.setText("")
+            self._clear_progress()
             self.finished.emit()
             return
         self._current = self._state.queue[0]
         self._show_center(self._current)
-        self.progress_label.setText(
-            i18n.KO.PROGRESS_SLOT_FMT.format(
-                slot=self._current.slot,
-                done=self._already_decided_count(),
-                total=self._total_count(),
-            )
-        )
+        self._set_progress(self._current.slot,
+                           self._already_decided_count(), self._total_count())
         self._refresh_all()
+
+    def _set_progress(self, slot: str, done: int, total: int) -> None:
+        """진행 표시 갱신 — 슬롯명(보조) · 수치(모노 본문) · 눈금(스냅 채움).
+
+        ★ 눈금 채움에 애니메이션을 걸지 않는다.  진행률은 정보이므로 값이 곧바로
+          보여야 한다(로딩 오버레이 `set_progress` 의 스냅 원칙과 같은 판단)."""
+        self.progress_label.setText(
+            i18n.KO.PROGRESS_SLOT_ONLY_FMT.format(slot=slot))
+        self.progress_count.setText(
+            i18n.KO.PROGRESS_COUNT_FMT.format(done=done, total=total))
+        self.progress_bar.setMaximum(max(1, total))
+        self.progress_bar.setValue(max(0, min(done, total)))
+        self.progress_bar.setVisible(total > 0)
+
+    def _clear_progress(self) -> None:
+        self.progress_label.setText("")
+        self.progress_count.setText("")
+        self.progress_bar.setValue(0)
+        self.progress_bar.setVisible(False)
 
     def _advance_incremental(self, prev_slot: str) -> None:
         """결정 1건 후 — 바뀐 슬롯만 증분 갱신(전체 재생성 금지, #렉).
@@ -844,7 +876,7 @@ class SelectPage(QWidget):
             self._current = None
             self.center_img.clear_image()
             self.slot_label.setText("")
-            self.progress_label.setText("")
+            self._clear_progress()
             # 큐가 비었다 — 좌측에서 새로 빠지는 사진은 없다(결정된 사진은 중앙에 있었다).
             self._update_slots_incremental({prev_slot})
             self._refresh_excluded_button()
@@ -853,13 +885,8 @@ class SelectPage(QWidget):
             return
         self._current = self._state.queue[0]
         self._show_center(self._current)
-        self.progress_label.setText(
-            i18n.KO.PROGRESS_SLOT_FMT.format(
-                slot=self._current.slot,
-                done=self._already_decided_count(),
-                total=self._total_count(),
-            )
-        )
+        self._set_progress(self._current.slot,
+                           self._already_decided_count(), self._total_count())
         # ★ 좌측에서 빠지는 것은 **새로 중앙으로 올라온 사진 한 장뿐**이다 —
         #   방금 결정한 사진은 결정 전부터 중앙에 있었으므로 좌측 패널에 없었다.
         #   (여기를 두 장으로 잡아 두면 첫 장에서 실패해 매번 전체 재생성으로 떨어진다.)
@@ -1078,7 +1105,10 @@ class SelectPage(QWidget):
             self, i18n.KO.END_SELECTION_CONFIRM_TITLE,
             i18n.KO.END_SELECTION_CONFIRM_FMT.format(n=n_remaining),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes,
+            # ★ 기본은 '아니오' 다 — 남은 수백 장을 일괄 제외하는 파괴 흐름이라,
+            #   조회 버튼을 노리다 한 칸 옆을 누른 손이 Enter 습관으로 그대로
+            #   통과해서는 안 된다.  SELECT_BACK·NEW_SESSION 확인과 같은 규약.
+            QMessageBox.StandardButton.No,
         )
         if ret != QMessageBox.StandardButton.Yes:
             return

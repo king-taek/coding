@@ -74,6 +74,9 @@ class ResultPage(QWidget):
         self._exporter: ExcelExporter | None = None
         # 이번 결과를 한 번이라도 저장했는가 — [새 검증 시작] 확인의 근거(U-06).
         self._exported = False
+        # '저장 완료 HH:MM' 자리 — 요약 카드를 다시 그릴 때마다 새로 만들어진다
+        # (즉 새 결과가 들어오면 자연히 비워진다).
+        self._saved_label: QLabel | None = None
         self._build()
 
     # ------------------------------------------------------------------
@@ -118,9 +121,15 @@ class ResultPage(QWidget):
         #   버튼 줄이 사이를 가르니, 원본 화질이 저장 옵션인지 화면 보기 옵션인지
         #   알 수 없었다.  옵션 → 실행 순서로 위에서 아래로 읽히게 한다.
         #   기본은 모두 해제 — 가볍고 빠른 출력이 기본값이다.
+        #   ★ 정렬 축도 [엑셀로 저장](우측 끝)에 맞춘다.  옵션이 가운데, 실행이
+        #     오른쪽이면 축이 갈려 소속이 보이지 않는다 — 실제로 '화면 보기 옵션'
+        #     으로 오독됐다.  앞에 캡션을 세워 무엇에 걸리는 옵션인지 밝힌다.
         opt_row = QHBoxLayout()
         opt_row.setSpacing(22)
         opt_row.addStretch(1)
+        opt_caption = QLabel(i18n.KO.EXPORT_OPTIONS_CAPTION, self)
+        opt_caption.setProperty("role", "colHead")
+        opt_row.addWidget(opt_caption)
         self.unmatched_original_chk = QCheckBox(
             i18n.KO.EXPORT_UNMATCHED_ORIGINAL_LABEL, self,
         )
@@ -143,8 +152,6 @@ class ResultPage(QWidget):
         self.full_template_chk.setChecked(False)
         self.full_template_chk.setToolTip(i18n.KO.EXPORT_FULL_TEMPLATE_TOOLTIP)
         opt_row.addWidget(self.full_template_chk)
-        opt_row.addStretch(1)
-        root.addLayout(opt_row)
 
         bar = QHBoxLayout()
         bar.addStretch(1)
@@ -175,7 +182,14 @@ class ResultPage(QWidget):
         self.export_btn.setMinimumHeight(46)
         self.export_btn.clicked.connect(self._on_export)
         bar.addWidget(self.export_btn)
-        root.addLayout(bar)
+        # 옵션 줄과 실행 줄은 한 덩어리로 읽혀야 한다 — root 의 20px 대신 8px 로
+        # 묶어 '옵션 → 실행' 이 하나의 블록이 되게 한다.
+        tail = QVBoxLayout()
+        tail.setContentsMargins(0, 0, 0, 0)
+        tail.setSpacing(8)
+        tail.addLayout(opt_row)
+        tail.addLayout(bar)
+        root.addLayout(tail)
 
         # ★ 크레딧은 여기 두지 않는다 — 상태바(`main_window._credit_label`)가 모든
         #   화면에 공통으로 띄운다.  둘 다 두면 한 화면에 두 번 보인다.
@@ -241,9 +255,24 @@ class ResultPage(QWidget):
                 names=", ".join(result.slot_only_val) or i18n.KO.VALUE_NONE),
                 role="muted")
 
+        # 결과 파일 위치 + 저장 완료 표시.  ★ 저장 성공 시트를 닫고 나면 화면에
+        # '내가 저장을 했던가?' 에 답할 것이 아무것도 없었다(_exported 는 내부
+        # 플래그였다).  자리를 예약해 두고 문자열만 갱신한다 — show/hide 를 쓰면
+        # 저장 순간 줄이 생기며 레이아웃이 흔들린다.
+        self._saved_label = None
         if self._target_path is not None:
-            line(f"{i18n.KO.WORKING_FILE_LABEL}: {self._target_path}",
-                 role="monoMuted")
+            file_row = QHBoxLayout()
+            file_row.setContentsMargins(0, 0, 0, 0)
+            path_lab = QLabel(
+                f"{i18n.KO.WORKING_FILE_LABEL}: {self._target_path}",
+                self._summary_card)
+            path_lab.setProperty("role", "monoMuted")
+            path_lab.setWordWrap(True)
+            file_row.addWidget(path_lab, 1)
+            self._saved_label = QLabel("", self._summary_card)
+            self._saved_label.setProperty("role", "statusPass")
+            file_row.addWidget(self._saved_label)
+            self._summary_layout.addLayout(file_row)
 
         # 검토 가능한 매치 실패 사진이 있을 때만 검토 버튼 활성.
         n_unmatched = len(result.unmatched_refs)
@@ -430,6 +459,10 @@ class ResultPage(QWidget):
     def _on_export_done(self, path: str) -> None:
         self._loading.hide_overlay()
         self._exported = True
+        # 시트를 닫아도 '저장했다' 는 사실이 화면에 남는다(자리 예약 라벨).
+        if self._saved_label is not None:
+            self._saved_label.setText(i18n.KO.RESULT_SAVED_AT_FMT.format(
+                time=datetime.now().strftime("%H:%M")))
         # ★ 워커 시그널 슬롯에서 곧바로 모달을 열면 중첩 이벤트 루프가 생긴다 —
         #   한 틱 미뤄 워커가 완전히 빠져나간 뒤에 띄운다.
         self._pending_saved_path = Path(path)

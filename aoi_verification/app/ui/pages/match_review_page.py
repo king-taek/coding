@@ -53,6 +53,14 @@ _ARROW_W = 24
 # 슬롯 이름 열 폭.  화살표와 같은 이유로 상수다 — 행(`slot_host`)·예약폭 계산·헤더
 # 세 곳이 **같은 값**을 봐야 한다.  예전엔 96 이 세 군데에 따로 적혀 있었다.
 _SLOT_W = 96
+# ✕/↩ 토글 열 폭.  헤더·행·예약폭 계산 세 곳이 공유한다.
+# ★ 예전엔 `PROFILE.toggle_w`(스위치 트랙 크기 토큰)를 빌려 썼는데, 이 열은 스위치가
+#   아니라 컴팩트 버튼이라 이름과 쓰임이 어긋났다 — 토큰을 스위치에 맞게 고치면 이
+#   열 폭이 같이 흔들린다.  둘을 떼어 각자 이름을 갖게 했다.
+# ★ 값이 52 → 68 로 커진 이유: 이 열에 헤더 이름을 주면서 낱말('매치 없음', colHead
+#   12px/w700 실측 65px)이 52px 안에 안 들어가 잘렸다.  칸에 이름을 주는 것이 목적인데
+#   이름이 잘리면 목적을 잃는다 — 낱말에 폭을 맞춘다(버튼 타깃도 함께 넓어진다).
+_TOGGLE_COL_W = 68
 # 행(`QFrame[role="row"]`)의 QSS 좌측 보더 두께.  행은 보더 안쪽에서 내용을 시작하므로
 # 헤더(보더 없음)보다 내용이 이만큼 오른쪽으로 밀린다 — 실측 1.0px 어긋남의 정체다.
 # 헤더 좌측 마진에 더해 상쇄한다.  style.qss 의 `QFrame[role="row"]` 보더와 같은 값이다.
@@ -394,8 +402,7 @@ class _MatchRow(QFrame):
         self.btn_toggle.setProperty("compact", True)
         self.btn_toggle.setProperty("intent", "reject")
         # 오탭=오검증 — 세로 히트영역은 최소 44px 보장(행 높이가 썸네일이라 여유).
-        self.btn_toggle.setFixedSize(theme.PROFILE.toggle_w,
-                                     max(44, theme.PROFILE.toggle_h))
+        self.btn_toggle.setFixedSize(_TOGGLE_COL_W, 44)
         self.btn_toggle.setToolTip(i18n.KO.BTN_MARK_NO_MATCH)
         self.btn_toggle.clicked.connect(
             lambda: self.toggle_requested.emit(self.match)
@@ -423,7 +430,10 @@ class _MatchRow(QFrame):
             host_lay.addLayout(self._runner_grid)
 
             # ‘후보 한 줄 더 보기’ / ‘접기’ 버튼 (#5/#4).
-            self.btn_more = NeonButton(i18n.KO.RUNNERUP_MORE_ROW, role="link")
+            # 실제 잔여 개수는 바로 뒤 `_layout_runner_tiles` 가 채운다.
+            self.btn_more = NeonButton(
+                i18n.KO.RUNNERUP_MORE_ROW_FMT.format(n=len(self._runners_up)),
+                role="link")
             self.btn_more.clicked.connect(self._on_more)
             self.btn_less = NeonButton(i18n.KO.RUNNERUP_LESS_ROW, role="link")
             self.btn_less.clicked.connect(self._on_less)
@@ -618,9 +628,9 @@ class _MatchRow(QFrame):
         slot·화살표·metric·칩·컴팩트 토글·여백/스페이싱.  이 폭을 뺀 나머지를
         두 이미지가 나눠 가져야 가로로 넘치지 않는다 (800×600 창 기준 검증)."""
         p = theme.PROFILE
-        # slot_host + 화살표 + metric(96) + 칩(chip_w) + 토글(toggle_w)
+        # slot_host + 화살표 + metric(96) + 칩(chip_w) + 토글(_TOGGLE_COL_W)
         # + 행 여백/스페이싱(96).  변형이 커져도 두 이미지가 클램프되어 안 넘침.
-        return _SLOT_W + _ARROW_W + 6 + 96 + p.chip_w + p.toggle_w + 96
+        return _SLOT_W + _ARROW_W + 6 + 96 + p.chip_w + _TOGGLE_COL_W + 96
 
     def _max_thumb(self) -> int:
         """현재 행 폭에서 가로 넘침 없이 허용되는 메인 이미지 한 변의 최대값."""
@@ -693,7 +703,12 @@ class _MatchRow(QFrame):
                 j = i - fc
                 self._runner_grid.addWidget(tile, j // gc, j % gc)
         if self.btn_more is not None:
-            self.btn_more.setVisible(need < len(self._runners_up))
+            remaining = len(self._runners_up) - need
+            self.btn_more.setVisible(remaining > 0)
+            # 남은 개수를 라벨에 싣는다 — 3개 남았는지 40개 남았는지 모른 채
+            # 반복 클릭하지 않게.
+            self.btn_more.setText(
+                i18n.KO.RUNNERUP_MORE_ROW_FMT.format(n=remaining))
         if self.btn_less is not None:
             self.btn_less.setVisible(self._visible_lines > 1)
 
@@ -860,6 +875,14 @@ class MatchReviewPage(QWidget):
         # 차이를 화면에서 바로 확인할 수 있게 한다 (U-13).
         self._tally_label.setToolTip(i18n.KO.TALLY_TOOLTIP)
         bar.addWidget(self._tally_label)
+        # ★ 탤리는 예외를 **세기만** 하고 데려다 주지 않았다.  600행 검토에서 예외
+        #   12건을 찾는 것이 이 화면의 실제 작업인데, 유사도 모드(슬롯순 정렬)에서는
+        #   예외가 목록 곳곳에 흩어져 수동 스크롤이 유일한 길이었다.
+        #   행을 숨기거나 새 상태를 만들지 않는 **순수 탐색**이다(현재 행 표시와
+        #   스크롤 헬퍼를 그대로 재사용한다).
+        self._btn_next_issue = NeonButton(i18n.KO.BTN_NEXT_ISSUE, role="rowAction")
+        self._btn_next_issue.clicked.connect(self._goto_next_issue)
+        bar.addWidget(self._btn_next_issue)
         bar.addStretch(1)
         # ※ '확인 필요만' 필터는 제거했다 — 상단 탤리(일치·허용 초과·매치 없음)가 이미
         #   '무엇을 확인해야 하는지'를 말한다.  행을 숨기는 필터는 그 위에 상태를 하나
@@ -876,9 +899,13 @@ class MatchReviewPage(QWidget):
         self.size_slider.setFixedWidth(150)
         self.size_slider.valueChanged.connect(self._on_size_changed)
         bar.addWidget(self.size_slider)
+        # 값 라벨 규약은 '사진 크기' 슬라이더 네 곳이 공유한다 — 모노 보조색 ·
+        # 폭 64 · 우측 정렬(자릿수가 바뀌어도 숫자 끝이 흔들리지 않게).
         self.size_value = QLabel(f"{self._thumb_px} px", self)
         self.size_value.setProperty("role", "monoMuted")
-        self.size_value.setFixedWidth(56)
+        self.size_value.setFixedWidth(64)
+        self.size_value.setAlignment(Qt.AlignmentFlag.AlignRight
+                                     | Qt.AlignmentFlag.AlignVCenter)
         bar.addWidget(self.size_value)
         # [검토 완료] — 하단에서 상단 바로 이동 (동작 동일, 유지 카운트 표시).
         self.btn_done = NeonButton(i18n.KO.BTN_FINISH_REVIEW, role="primary")
@@ -977,9 +1004,11 @@ class MatchReviewPage(QWidget):
         lay.addWidget(self._hdr_metric)
         lay.addWidget(head(i18n.KO.COL_VERDICT, width=p.chip_w,
                            align=Qt.AlignmentFlag.AlignCenter))
-        spacer = QWidget(host)                             # 토글 열 위 빈 칸
-        spacer.setFixedWidth(p.toggle_w)
-        lay.addWidget(spacer)
+        # ★ 표(타이틀블록)에서 유일하게 이름 없던 칸이다 — ✕ 가 무슨 토글인지 헤더도
+        #   버튼도 말하지 않아 호버해 툴팁을 봐야 알 수 있었다.  칩·버튼과 **같은
+        #   낱말**을 쓴다(새 용어를 만들지 않는다).  폭 계약은 그대로.
+        lay.addWidget(head(i18n.KO.CHIP_NO_MATCH, width=_TOGGLE_COL_W,
+                           align=Qt.AlignmentFlag.AlignCenter))
         return host
 
     def _sync_header_widths(self) -> None:
@@ -1173,6 +1202,25 @@ class MatchReviewPage(QWidget):
         rows = [r for r in self._rows if not r.isHidden()]
         rows.sort(key=lambda r: self._list_layout.indexOf(r))
         return rows
+
+    def _goto_next_issue(self) -> None:
+        """현재 행 **다음**의 예외 행(state != "ok")으로 이동 — 없으면 처음부터.
+
+        표시/스크롤만 바꾼다: 행을 숨기지도, 상태를 만들지도 않는다.  끝에서 다시
+        앞으로 도는 것은 '한 바퀴 다 봤다' 를 사용자가 스스로 알 수 있게 하기
+        위해서다(마지막 예외에서 눌러도 버튼이 죽은 것처럼 보이지 않는다)."""
+        rows = self._visible_rows()
+        if not rows:
+            return
+        try:
+            start = rows.index(self._current_row) + 1
+        except ValueError:
+            start = 0
+        order = rows[start:] + rows[:start]
+        for row in order:
+            if row.state() != "ok":
+                self._set_current(row)
+                return
 
     def _set_current(self, row: "_MatchRow | None") -> None:
         old = self._current_row

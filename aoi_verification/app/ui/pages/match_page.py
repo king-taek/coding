@@ -16,7 +16,7 @@ from typing import Optional
 from PyQt6.QtCore import QByteArray, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel,
-                              QScrollArea, QSizePolicy, QSlider,
+                              QProgressBar, QScrollArea, QSizePolicy, QSlider,
                               QSplitter, QStackedWidget, QVBoxLayout, QWidget)
 
 from ... import config, i18n
@@ -215,13 +215,27 @@ class MatchPage(QWidget):
         self.progress_label = QLabel("", self)
         self.progress_label.setProperty("role", "muted")
         top.addWidget(self.progress_label)
+        # 수치는 한 등급 위로 — 선별 화면과 같은 규약(모노 본문 잉크).
+        self.progress_count = QLabel("", self)
+        self.progress_count.setProperty("role", "progressCountLg")
+        top.addWidget(self.progress_count)
         top.addSpacing(20)
         # 백그라운드 사전 계산 상태 — 수동 모드에서만 표시. 매칭 화면이 이미
         # 열려 있는 동안에도 ‘나머지 슬롯이 X / Y 완료’ 임을 알려준다.
+        # ★ pass(제도 녹색)는 **판정 성공 전용**이다 — 진행 중인 계산을 초록으로
+        #   띄우면 '이미 성공했다' 는 거짓 신호가 되고, '강조 하나' 원칙의 시선
+        #   경쟁자가 늘어난다.  수치가 든 상태 문구이므로 모노+보조색으로 적는다.
         self.bg_status_label = QLabel("", self)
-        self.bg_status_label.setProperty("role", "statusPass")
+        self.bg_status_label.setProperty("role", "monoMuted")
         top.addWidget(self.bg_status_label)
         root.addLayout(top)
+
+        # 제목 줄 바로 아래 폭 전체 진행 눈금 — 표시 전용(텍스트 없음, 채움 스냅).
+        self.progress_bar = QProgressBar(self)
+        self.progress_bar.setProperty("role", "pageProgress")
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setVisible(False)
+        root.addWidget(self.progress_bar)
 
         # 2 pane — QSplitter 로 사용자가 분할 비율 조절 -------------------
         self._h_splitter = QSplitter(Qt.Orientation.Horizontal, self)
@@ -243,6 +257,9 @@ class MatchPage(QWidget):
         cl.addWidget(self.slot_label)
 
         # 사진 크기 슬라이더 -------------------------------------------
+        # ★ 이 줄은 **사진 아래**에 붙인다(아래 `cl.addLayout(size_row)`) — 선별
+        #   화면과 같은 이유다.  설정 컨트롤이 슬롯명과 사진 사이에 상주하면 시선
+        #   축(슬롯 → 사진 → 판단)을 가로지르고 사진 시작점이 내려간다.
         size_row = QHBoxLayout()
         size_row.setSpacing(8)
         size_label = QLabel(i18n.KO.IMAGE_SIZE_LABEL, center)
@@ -255,7 +272,7 @@ class MatchPage(QWidget):
         self.size_slider.setSingleStep(20)
         self.size_slider.setPageStep(80)
         self.size_value = QLabel(f"{self.size_slider.value()} px", center)
-        self.size_value.setProperty("role", "muted")
+        self.size_value.setProperty("role", "monoMuted")
         self.size_value.setFixedWidth(64)
         self.size_value.setAlignment(Qt.AlignmentFlag.AlignRight
                                      | Qt.AlignmentFlag.AlignVCenter)
@@ -263,7 +280,6 @@ class MatchPage(QWidget):
         size_row.addWidget(size_label)
         size_row.addWidget(self.size_slider, stretch=1)
         size_row.addWidget(self.size_value)
-        cl.addLayout(size_row)
 
         # 이미지 (스크롤 영역) -----------------------------------------
         self.center_img = ScalableImage(center)
@@ -277,6 +293,7 @@ class MatchPage(QWidget):
         self._img_scroll.setSizePolicy(QSizePolicy.Policy.Expanding,
                                        QSizePolicy.Policy.Expanding)
         cl.addWidget(self._img_scroll, stretch=1)
+        cl.addLayout(size_row)          # 설정은 시선 축 밖(사진 아래) — 위 주석 참조
 
         bar = QHBoxLayout()
         bar.setContentsMargins(0, 6, 0, 0)
@@ -305,6 +322,15 @@ class MatchPage(QWidget):
         #   자동 경로가 쓰는 `_confirm_no_match(user=False)` 는 그대로 남는다.
         bar.addStretch(1)
         cl.addLayout(bar)
+
+        # 자동 모드에서 우측 후보 패널을 떼면 이 카드가 폭 전체를 쓴다 — 결과를
+        # 어디서 보는지 한 줄로 알려 준다(빈 칸에 용도를 말하는 emptyHint 규칙의
+        # 연장이다).  수동 폴백에서는 감춘다.
+        self._auto_note = QLabel(i18n.KO.MATCH_AUTO_RESULT_NOTE, center)
+        self._auto_note.setProperty("role", "muted")
+        self._auto_note.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._auto_note.setVisible(False)
+        cl.addWidget(self._auto_note)
 
         center.setMinimumWidth(360)
         self._h_splitter.addWidget(center)
@@ -348,6 +374,7 @@ class MatchPage(QWidget):
         # 3 col × 134(tile) + spacing 16 + 패널 padding 20 = 438 → 후보 9 장이
         # 가로 스크롤 없이 한 화면에 깔리도록.
         right.setMinimumWidth(360)
+        self._right_panel = right
         self._h_splitter.addWidget(right)
 
         # 좌측 skip 패널을 제거했으므로 splitter index 가 0/1 로 줄었다.
@@ -423,6 +450,11 @@ class MatchPage(QWidget):
         self._threshold = threshold
         self._session_id = session_id or ""
         self._auto_mode = bool(auto_mode)
+        # ★ 자동 모드에서는 우측 후보 패널을 **아예 붙이지 않는다.**  Stage 2 는 두
+        #   자동화 수준 모두에서 자동 매치라, 이 패널은 세션 내내 빈 회색 칸으로
+        #   남아 화면 절반이 '고장난 칸' 처럼 보였다.  수동 폴백(`_populate_right`)이
+        #   실제로 돌면 그때 되살린다.
+        self._set_candidate_pane_visible(not self._auto_mode)
         self._aborted = False              # 새 세션 — 중지 표식 해제
         self._engine_cfg = engine_cfg or config.DEFAULT_SIM_CONFIG
         self._fast_results.clear()
@@ -936,6 +968,26 @@ class MatchPage(QWidget):
         self.bg_status_label.setText("")
 
     # ------------------------------------------------------------------
+    def _set_progress(self, slot: str, done: int, total: int) -> None:
+        """진행 표시 갱신 — 슬롯명(보조) · 수치(모노 본문) · 눈금(스냅 채움).
+
+        선별 화면과 같은 규약이다(`select_page._set_progress`).  눈금 채움에
+        애니메이션을 걸지 않는 이유도 같다 — 진행률은 정보다."""
+        self.progress_label.setText(
+            i18n.KO.PROGRESS_SLOT_ONLY_FMT.format(slot=slot))
+        self.progress_count.setText(
+            i18n.KO.PROGRESS_COUNT_FMT.format(done=done, total=total))
+        self.progress_bar.setMaximum(max(1, total))
+        self.progress_bar.setValue(max(0, min(done, total)))
+        self.progress_bar.setVisible(total > 0)
+
+    def _clear_progress(self) -> None:
+        self.progress_label.setText("")
+        self.progress_count.setText("")
+        self.progress_bar.setValue(0)
+        self.progress_bar.setVisible(False)
+
+    # ------------------------------------------------------------------
     def _advance(self) -> None:
         if self._state is None or self._aborted:
             return                           # 중지된 세션 — 사슬을 잇지 않는다
@@ -943,6 +995,7 @@ class MatchPage(QWidget):
             self._current = None
             self.center_img.clear_image()
             self.slot_label.setText("")
+            self._clear_progress()
             self._clear_right_grid()
             self._loading.hide_overlay()
             # 백그라운드 사전 계산이 아직 돌고 있으면 즉시 중단 — 매칭이 끝났으니
@@ -953,13 +1006,8 @@ class MatchPage(QWidget):
 
         self._current = self._state.queue[0]
         self._show_center(self._current)
-        self.progress_label.setText(
-            i18n.KO.PROGRESS_SLOT_FMT.format(
-                slot=self._current.slot,
-                done=len(self._state.matches),
-                total=len(self._state.matches) + len(self._state.queue),
-            )
-        )
+        self._set_progress(self._current.slot, len(self._state.matches),
+                           len(self._state.matches) + len(self._state.queue))
 
         val_items = self._state.val_pool.get(self._current.slot, [])
         if not val_items:
@@ -1160,7 +1208,17 @@ class MatchPage(QWidget):
             if w is not None:
                 w.deleteLater()
 
+    def _set_candidate_pane_visible(self, on: bool) -> None:
+        """우측 후보 패널 표시/숨김 + 중앙 카드의 안내 한 줄을 반대로 토글.
+
+        스플리터는 숨은 자식을 자리로 치지 않으므로 남은 pane 이 폭을 전부 쓴다
+        (저장된 분할 비율은 그대로 남아 있다가 패널이 돌아오면 다시 적용된다)."""
+        self._right_panel.setVisible(bool(on))
+        self._auto_note.setVisible(not on)
+
     def _populate_right(self, candidates: list[Candidate]) -> None:
+        # 수동 폴백이 실제로 돌았다 — 자동 모드에서 떼어 뒀던 패널을 되살린다.
+        self._set_candidate_pane_visible(True)
         self._clear_right_grid()
         visible = candidates[: config.CONFIG.match_top_visible]
         extra = len(candidates) - len(visible)

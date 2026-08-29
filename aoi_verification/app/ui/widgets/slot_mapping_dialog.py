@@ -220,9 +220,13 @@ class SlotMappingDialog(QDialog):
         mid_col = QVBoxLayout()
         mid_col.addStretch(1)
         mid_col.addWidget(QLabel("↔", self), alignment=Qt.AlignmentFlag.AlignHCenter)
-        pair_btn = NeonButton(i18n.KO.SLOT_MAP_ADD, role="primary")
-        pair_btn.clicked.connect(self._on_add)
-        mid_col.addWidget(pair_btn)
+        # ★ 양쪽에서 1개씩 고르기 전에는 비활성이다.  예전엔 활성으로 보이는데 눌러도
+        #   조용히 아무 일도 안 일어났다('먹은 클릭') — 벌크 선택에서 이미 고친 결함이
+        #   이 창에만 남아 있었다.  비활성 모습(파선)은 기존 QSS 가 칠한다.
+        self._pair_btn = NeonButton(i18n.KO.SLOT_MAP_ADD, role="primary")
+        self._pair_btn.clicked.connect(self._on_add)
+        self._pair_btn.setEnabled(False)
+        mid_col.addWidget(self._pair_btn)
         clear_btn = NeonButton(i18n.KO.SLOT_MAP_REMOVE, role="ghost")
         clear_btn.clicked.connect(self._on_clear_sel)
         mid_col.addWidget(clear_btn)
@@ -265,6 +269,16 @@ class SlotMappingDialog(QDialog):
     # ------------------------------------------------------------------
     # 선택(클릭) — 단일 선택 + 재클릭 시 해제
     # ------------------------------------------------------------------
+    def _sync_pair_btn(self) -> None:
+        """[묶기 ↔] 는 양쪽이 하나씩 골라져 있을 때만 누를 수 있다.
+
+        선택을 바꾸는 모든 자리에서 부른다 — 버튼이 '눌리는데 아무 일도 없는' 상태로
+        보이지 않게 하는 것이 목적이다.  (빌드 도중 `_auto_suggest` 가 먼저 돌 수 있어
+        버튼이 아직 없을 때를 견딘다.)"""
+        btn = getattr(self, "_pair_btn", None)
+        if btn is not None:
+            btn.setEnabled(bool(self._ref_sel and self._val_sel))
+
     def _on_ref_clicked(self, item: QListWidgetItem) -> None:
         name = item.data(Qt.ItemDataRole.UserRole)
         if self._ref_sel == name:
@@ -272,6 +286,7 @@ class SlotMappingDialog(QDialog):
             self._ref_sel = None
         else:
             self._ref_sel = name
+        self._sync_pair_btn()
 
     def _on_val_clicked(self, item: QListWidgetItem) -> None:
         name = item.data(Qt.ItemDataRole.UserRole)
@@ -280,12 +295,14 @@ class SlotMappingDialog(QDialog):
             self._val_sel = None
         else:
             self._val_sel = name
+        self._sync_pair_btn()
 
     def _on_clear_sel(self) -> None:
         self._ref_list.clearSelection()
         self._val_list.clearSelection()
         self._ref_sel = None
         self._val_sel = None
+        self._sync_pair_btn()
 
     # ------------------------------------------------------------------
     # 묶기 / 풀기
@@ -327,6 +344,8 @@ class SlotMappingDialog(QDialog):
         item.setIcon(QIcon(self._combined_pixmap(a, b)))
         self._pairs_list.addItem(item)
         self._pairs.append((a, b))
+        # 자동 묶기로 리스트에서 빠진 항목이 아직 선택으로 남아 있을 수 있다.
+        self._sync_pair_btn()
 
     def _on_add(self) -> None:
         a, b = self._ref_sel, self._val_sel

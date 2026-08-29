@@ -80,10 +80,36 @@ def test_first_resize_fits_the_image_to_the_window(qapp, tmp_path,
     QApplication.processEvents()
 
     assert v._fitted is True
+    # ★ 기준은 **다이얼로그가 아니라 사진이 놓이는 칸**이다.  하단 조작 힌트 줄만큼
+    #   라벨이 짧으므로, 다이얼로그 크기로 맞추면 캔버스가 라벨보다 커져 중앙 정렬이
+    #   사진 위아래를 균등하게 잘라 낸다(사용자는 잘린 줄도 모른다).
+    vw, vh = v._view_size()
+    assert (vw, vh) == (v._label.width(), v._label.height())
+    assert vh < 900, "힌트 줄이 있는데 사진 칸이 다이얼로그와 같은 높이다"
     assert v._scale == pytest.approx(
-        fit_scale(v._pix.width(), v._pix.height(), 1400, 900))
-    # 400×300 을 1400×900 에 맞추면 확대다 — 이게 이 버그의 핵심.
+        fit_scale(v._pix.width(), v._pix.height(), vw, vh))
+    # 400×300 을 이 칸에 맞추면 확대다 — 이게 이 버그의 핵심.
     assert v._scale > 1.0
+    v.deleteLater()
+
+
+def test_the_photo_is_never_cropped_by_the_hint_row(qapp, tmp_path, monkeypatch):
+    """캔버스가 사진 칸보다 크면 라벨이 위아래를 잘라 낸다 — 그 조합을 막는다.
+
+    세로가 제약이 되는 사진(가로로 납작하지 않은 것)에서 특히 그렇다."""
+    v = _viewer(qapp, tmp_path, monkeypatch, pix_w=400, pix_h=300)
+    v.resize(1400, 900)
+    v.show()
+    QApplication.processEvents()
+
+    canvas = v._label.pixmap()
+    assert canvas is not None and not canvas.isNull()
+    assert canvas.height() <= v._label.height(), (
+        f"캔버스({canvas.height()})가 사진 칸({v._label.height()})보다 커서 잘린다")
+    assert canvas.width() <= v._label.width()
+    # 맞춤 결과가 칸 안에 온전히 들어간다(잘림 0).
+    assert int(v._pix.height() * v._scale) <= v._label.height() + 1
+    assert int(v._pix.width() * v._scale) <= v._label.width() + 1
     v.deleteLater()
 
 
