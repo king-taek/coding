@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 import os
-import time
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -91,6 +90,33 @@ def test_summary_warns_about_selection_outside_this_page(qapp):
 
 
 # ── 31. 로딩 오버레이 — 타이틀블록 ────────────────────────────────────────
+class _StepClock:
+    """제어 가능한 `QElapsedTimer` 대역 — 벽시계 대신 테스트가 ms 를 준다.
+
+    ★ `time.sleep(3ms)` 로 표본을 만들면 `-n auto` 로 부하가 걸린 워커나 sleep
+      해상도가 거친 플랫폼에서 `elapsed()` 가 0 으로 떨어져 표본이 하나도 안 쌓인다 —
+      검증하려는 코드와 무관한 이유로 깜빡이는 테스트가 된다.  시간을 주입하면 같은
+      불변식을 결정적으로 잰다(`LoadingOverlay._feed_eta` 가 쓰는 세 메서드뿐이다)."""
+
+    def __init__(self) -> None:
+        self._valid = False
+        self.ms = 0
+
+    def isValid(self) -> bool:
+        return self._valid
+
+    def start(self) -> None:
+        self._valid = True
+        self.ms = 0
+
+    def restart(self) -> int:
+        prev, self.ms = self.ms, 0
+        return prev
+
+    def elapsed(self) -> int:
+        return self.ms
+
+
 def _overlay(qapp, *, show_host: bool = False):
     """오버레이 + 그 부모.
 
@@ -148,10 +174,11 @@ def test_eta_resets_when_the_total_changes(qapp):
     host, ov = _overlay(qapp)
     try:
         ov.show_overlay("작업")
-        # ★ 실제 시간이 흘러야 처리율을 잴 수 있다 — 같은 ms 안의 연속 보고는
-        #   표본이 되지 못한다(그때 진행 델타가 유실되지 않는지는 아래 전용 테스트).
+        # ★ 시간이 흘러야 처리율을 잴 수 있다 — 같은 ms 안의 연속 보고는 표본이
+        #   되지 못한다(그때 진행 델타가 유실되지 않는지는 아래 전용 테스트).
+        ov._eta_sample_clock = clock = _StepClock()
         for i in range(1, 9):
-            time.sleep(0.003)
+            clock.ms = 3
             ov.set_progress(i, 100, "작업")
         assert ov._eta_samples > 0 and ov._eta_rate is not None
 
@@ -172,14 +199,18 @@ def test_dense_updates_do_not_lose_the_progress_delta(qapp):
     host, ov = _overlay(qapp)
     try:
         ov.show_overlay("작업")
-        ov.set_progress(0, 1000, "작업")
-        for i in range(1, 60):               # 같은 ms 안에 몰아친다
+        ov.set_progress(0, 1000, "작업")     # 총량 확정(여기서 ETA 시계가 새로 만들어진다)
+        ov._eta_sample_clock = clock = _StepClock()
+        ov.set_progress(1, 1000, "작업")     # 시계 시작 — 기준점 = 1
+        for i in range(2, 60):               # 같은 ms 안에 몰아친다(elapsed 0)
             ov.set_progress(i, 1000, "작업")
-        time.sleep(0.005)
+        assert ov._eta_samples == 0, "잴 수 없는 구간에서 표본을 지어냈다"
+        clock.ms = 5                         # 시간이 흘렀다 → 여기서 한 번에 잰다
         ov.set_progress(60, 1000, "작업")
         assert ov._eta_samples >= 1, "촘촘한 갱신에서 표본이 하나도 안 쌓였다"
-        # 기준점이 매번 밀렸다면 마지막 델타가 1 이 돼 처리율이 60배 낮게 잡힌다.
-        assert ov._eta_rate is not None and ov._eta_rate > 0
+        # 기준점이 매번 밀렸다면 마지막 델타가 59 가 아니라 1 이 돼 처리율이 59배
+        # 낮게 잡힌다(59/5ms = 11800/s vs 1/5ms = 200/s) — 그 둘을 가르는 선이다.
+        assert ov._eta_rate is not None and ov._eta_rate > 1000
     finally:
         ov.hide()
         host.deleteLater()
@@ -310,3 +341,123 @@ def test_duration_is_not_more_precise_than_the_estimate(qapp):
     assert _fmt_duration(80) == i18n.KO.DURATION_MIN_FMT.format(m=1, s=20)
     assert _fmt_duration(3700) == i18n.KO.DURATION_HOUR_FMT.format(h=1, m=1)
     assert _fmt_duration(-5) == i18n.KO.DURATION_SEC_FMT.format(s=0)
+def test_set_stage_makes_room_for_what_it_adds(qapp):
+    """`set_stage` 는 내용만 바꾸는 게 아니라 **패널을 다시 재야** 한다.
+
+    ★ 패널 크기는 `_place_panel` 의 `setGeometry` 가 sizeHint 로 정한다 — 단계 줄과
+      여정 행(≈50px)이 나중에 붙으면 옛 높이 안으로 눌려 들어가, 맨 아래 줄
+      (퍼센트 · 남은 시간 · 수치)이 잘린다.  `show_overlay` 로 이미 단계를 준 흐름은
+      `_cover_parent` 가 재 주지만, 문구만으로 띄운 뒤 여정을 붙이는 경로가 남는다."""
+    host, ov = _overlay(qapp, show_host=True)
+    try:
+        ov.show_overlay("작업")                     # 단계 없이 시작
+        qapp.processEvents()
+        before = ov._panel.height()
+        ov.set_stage((1, 3), i18n.KO.LOAD_JOURNEY_STEPS)
+        qapp.processEvents()
+        assert ov._panel.height() >= ov._panel.sizeHint().height(), (
+            "패널이 내용보다 작다 — 하단 줄이 잘린다")
+        assert ov._panel.height() > before, "여정 행이 붙었는데 높이가 그대로다"
+    finally:
+        ov.hide()
+        host.deleteLater()
+
+
+def test_confirm_toast_does_not_move_the_header_buttons(qapp):
+    """확정 토스트가 떠도 헤더 버튼은 **제자리**다.
+
+    ★ 토스트를 '늘어나는 여백' 뒤(버튼 바로 앞)에 두면 문구가 붙는 순간 그 폭만큼
+      버튼 넷이 통째로 왼쪽으로 밀린다.  연속 확정을 하는 사용자에겐 커서 아래에서
+      [확정]이 [닫기]로 바뀌는 셈이라 오클릭을 만든다(폭 예약으로는 못 막는다 —
+      확정 문구가 예약폭의 배에 가깝다)."""
+    from aoi_verification.app.models.result import MissEntry
+    from aoi_verification.app.ui.widgets.unmatched_review_dialog import (
+        UnmatchedReviewDialog)
+
+    entry = MissEntry(slot="S1", path=Path("/tmp/S1_r.jpg"), side="ref")
+    dlg = UnmatchedReviewDialog([entry], {("S1", "ref"): []}, parent=None)
+    try:
+        dlg.resize(1200, 800)
+        dlg.show()
+        qapp.processEvents()
+        before = [w.x() for w in (dlg.btn_prev, dlg.btn_skip,
+                                  dlg.btn_confirm, dlg.btn_close)]
+        text = i18n.KO.UNMATCHED_REVIEW_DONE_FMT.format(n=3)
+        dlg._show_toast(text)
+        dlg.layout().activate()
+        qapp.processEvents()
+        after = [w.x() for w in (dlg.btn_prev, dlg.btn_skip,
+                                 dlg.btn_confirm, dlg.btn_close)]
+        assert before == after, f"토스트에 버튼이 밀렸다: {before} → {after}"
+        # 문구가 잘리지도 않는다(자리를 좁게 예약해 두면 그쪽으로 망가진다).
+        assert dlg._toast.width() >= dlg._toast.sizeHint().width()
+    finally:
+        # ★ 토스트 타이머(1.8초)를 **여기서 끈다.**  창을 지운 뒤에도 살아 있으면
+        #   한참 뒤 다른 테스트의 이벤트 루프에서 발화해 이미 사라진 라벨을 만진다
+        #   (실측: 그 시점에 프로세스가 통째로 죽었다).  앱에서는 창이 닫히며 부모와
+        #   함께 죽지만, 테스트는 `deleteLater` 라 그 보장이 없다.
+        if dlg._toast_timer is not None:
+            dlg._toast_timer.stop()
+        dlg.hide()
+        dlg.deleteLater()
+        qapp.processEvents()
+
+
+def test_fullscreen_viewer_fits_even_if_it_draws_before_layout(qapp, tmp_path):
+    """'크게 보기' 는 **표시 전에 한 번 그려도** 창에 꽉 찬다.
+
+    ★ 배치되지 않은 자식 위젯의 크기는 Qt 기본값 100×30 이고 그 값도 `> 1` 을
+      통과한다 — 크기를 모르는 상태가 '안다' 로 읽혔다.  원본 디코드가 표시보다
+      먼저 끝나면(작은 원본·캐시 적중) 그 100×30 에 맞춘 배율이 굳어 전체화면
+      뷰어에 썸네일만 한 사진이 남았다."""
+    pytest.importorskip("PIL")
+    from PIL import Image
+    from aoi_verification.app.ui.widgets.zoom_window import FullscreenViewer
+
+    src = tmp_path / "probe.png"
+    Image.new("RGB", (800, 600), (200, 30, 30)).save(src)
+    view = FullscreenViewer(src)
+    try:
+        assert view._label.width() <= 100, "이 표본은 '배치 전' 이어야 의미가 있다"
+        view._redraw()                       # 표시 전에 도착한 원본 디코드와 같은 경로
+        vw, vh = view._view_size()
+        assert vw > 100 and vh > 30, f"라벨 기본 크기를 진짜 크기로 믿었다({vw}×{vh})"
+        assert view._scale > 0.5, f"썸네일 크기로 굳었다(배율 {view._scale:.3f})"
+    finally:
+        view.deleteLater()
+        qapp.processEvents()
+
+
+def test_the_two_pages_share_one_progress_contract(qapp):
+    """선별·매칭 화면의 진행 표시 갱신은 **한 구현**이어야 한다.
+
+    ★ 같은 12 줄(문구 두 개 · 클램프 · 노출 규칙)이 두 파일에 복제돼 있었고, 한쪽
+      docstring 이 다른 쪽을 "같은 규약" 이라 가리키고 있었다 — 규약이라면 코드가
+      하나여야 한다(한쪽만 고치는 사고를 막는다)."""
+    from aoi_verification.app.ui.pages.match_page import MatchPage
+    from aoi_verification.app.ui.pages.select_page import SelectPage
+    from aoi_verification.app.ui.pages.progress_row import ProgressRowMixin
+
+    for page_cls in (MatchPage, SelectPage):
+        assert issubclass(page_cls, ProgressRowMixin)
+        assert page_cls._set_progress is ProgressRowMixin._set_progress
+        assert page_cls._clear_progress is ProgressRowMixin._clear_progress
+def test_kla_steps_do_not_erase_the_journey():
+    """KLA 해석 중에도 여정 표시(단계 서수 + 점 행)가 남아 있어야 한다.
+
+    ★ `show_overlay` 를 step 없이 부르면 `_apply_stage(None, None)` 이 단계 줄과 점
+      행을 **지운다.**  KLA 정보파일 읽기·WaferID OCR 은 스캔(1단계)의 뒷부분인데
+      모달(`_ask_kla_side`) 때문에 오버레이를 다시 띄우게 되고, 그때 step 을 빠뜨리면
+      가장 오래 걸리는 구간(OCR)에서 여정이 사라졌다가 2단계에서 되살아난다 —
+      i18n `LOAD_JOURNEY_STEPS` 주석이 "단계 수를 바꾸지 않는다" 고 적어 둔 바로 그
+      구간이다.  Qt 없이도 도는 소스 계약이라 여기서 값싸게 못 박는다."""
+    import inspect
+    import re
+    from aoi_verification.app.ui import main_window as mw
+
+    src = inspect.getsource(mw.MainWindow._kla_resolve_impl)
+    calls = re.findall(r"show_overlay\((?:[^()]|\([^()]*\))*\)", src)
+    assert calls, "이 함수는 오버레이를 다시 띄운다 — 표본이 없으면 계약이 무의미하다"
+    for call in calls:
+        assert "step=" in call and "steps=" in call, (
+            f"단계 없이 오버레이를 띄운다(여정이 지워진다): {call}")

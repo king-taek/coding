@@ -81,6 +81,40 @@ def test_select_all_covers_all_pages(qapp):
     dlg.deleteLater()
 
 
+def test_offpage_warning_follows_the_page(qapp):
+    """'이 페이지 밖 m 장' 은 **페이지를 넘길 때마다** 다시 계산돼야 한다.
+
+    ★ 이 문구는 선택 집합과 현재 페이지의 차집합이라, 선택을 건드리지 않아도
+      페이지만 넘기면 값이 바뀐다.  갱신을 선택 이벤트에만 걸어 두었을 때는
+      1 페이지에서 [전체 선택] 한 뒤 다음 페이지로 가도 경고가 없는 채
+      "선택됨: 1000 장" 만 남아, 보이는 타일만 동작한다고 믿고 액션을 누를 수 있었다."""
+    from aoi_verification.app import i18n
+    off = i18n.KO.BULK_SELECT_SUMMARY_OFFPAGE_FMT.format
+    plain = i18n.KO.BULK_SELECT_SUMMARY_FMT.format
+    data = {"S1": _data("S1", 1000)}
+    dlg = BulkSelectDialog("t", data, actions=[("x", "X", "primary")])
+    try:
+        assert dlg._paginated is True
+        dlg._select_all()
+        # 1 페이지: 200 장이 이 페이지에 보이고 800 장이 밖에 있다.
+        assert dlg._summary_label.text() == off(n=1000, m=800)
+        dlg._go_page(4)                    # 마지막 페이지로 이동(선택은 그대로)
+        assert dlg._summary_label.text() == off(n=1000, m=800)
+
+        dlg._clear_selection()
+        dlg._go_page(0)
+        # 이 페이지 것만 고르면 경고가 사라진다 — 값이 정말 페이지를 따라간다는 뜻.
+        for _slot, item in dlg._page_slice():
+            dlg._selected_keys.add(item.key)
+            dlg._selected_items_by_key[item.key] = item
+        dlg._render_page()
+        assert dlg._summary_label.text() == plain(n=200)
+        dlg._go_page(1)                    # 같은 200 장이 이제 전부 페이지 밖이다
+        assert dlg._summary_label.text() == off(n=200, m=200)
+    finally:
+        dlg.deleteLater()
+
+
 def test_size_slider_changes_tile_px(qapp):
     """슬라이더 값은 즉시, 타일 적용은 디바운스 뒤에.
 

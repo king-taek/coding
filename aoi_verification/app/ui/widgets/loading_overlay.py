@@ -123,7 +123,6 @@ class _JourneySteps(QWidget):
         # 라벨 — 현재 단계만 본문 잉크(굵게), 나머지는 보조색.
         f = self.font()
         f.setPointSizeF(max(7.0, f.pointSizeF() - 1.0) if f.pointSizeF() > 0 else 8.0)
-        base_w = f.weight()
         for i, (x, text) in enumerate(zip(cx, self._labels)):
             f.setBold(i == self._index)
             p.setFont(f)
@@ -132,7 +131,6 @@ class _JourneySteps(QWidget):
                              int(cell), self.ROW_H - cy - self.DOT_R - 4),
                        int(Qt.AlignmentFlag.AlignHCenter
                            | Qt.AlignmentFlag.AlignTop), text)
-        f.setBold(bool(base_w))
 
 
 class _BusyStripe(QWidget):
@@ -624,6 +622,11 @@ class LoadingOverlay(QWidget):
         `show_overlay` 를 다시 부르면 등장 모션과 최소표시 래치가 되감기므로, 여정
         중간에 단계가 넘어갈 때는 이쪽을 쓴다(덮개는 그대로 유지된다)."""
         self._apply_stage(step, steps)
+        # ★ 단계 줄과 여정 행이 붙고 떨어지면 패널 **내용의 높이**가 달라진다.  패널
+        #   기하는 `_place_panel` 의 setGeometry 가 sizeHint 로 정하므로, 여기서 다시
+        #   재지 않으면 옛 높이에 새 내용이 눌려 들어가 하단 줄(퍼센트·남은 시간·수치)이
+        #   잘린다.  `show_overlay` 는 `_cover_parent` 로 이미 다시 잰다.
+        self._place_panel()
 
     def _apply_stage(self, step, steps) -> None:
         """단계 서수 줄과 여정 행을 세운다 — 둘 다 정보를 준 호출부에서만 보인다."""
@@ -768,7 +771,6 @@ class LoadingOverlay(QWidget):
                            i18n.KO.LOADING_COUNT_FMT.format(done=done,
                                                             total=int(total)))
             self._set_text(self._pct_label, f"{int(done * 100 / max(1, total))}%")
-            self._feed_eta(done, int(total))
             if self._progress.maximum() != total:      # 단계 전환/총량 변경 → 스냅
                 self._val_anim.stop()
                 self._progress.setRange(0, total)
@@ -777,8 +779,12 @@ class LoadingOverlay(QWidget):
                 # ★ 총량이 바뀌었다 = 다른 일이 시작됐다 — 이전 단계의 처리율을
                 #   물려받으면 추정치가 조용히 거짓말을 한다.
                 self._reset_eta()
-                self._eta_last_done = done
             else:
+                # ★ 표본은 **같은 총량이 이어질 때만** 먹인다.  총량이 바뀐 호출에서
+                #   먹이면 이전 단계의 처리율로 새 총량의 남은 시간을 한 번 계산했다가
+                #   바로 뒤 `_reset_eta` 가 버리는 꼴이었다 — 계산도 낭비지만, 무엇보다
+                #   '버리니까 괜찮다' 는 **순서**에 불변식을 기대게 된다.
+                self._feed_eta(done, int(total))
                 cur = self._progress.value()
                 # ★ tween 은 **예외**다 — 기본은 정확한 위치(스냅)이고, 아래 세 조건을
                 #   모두 피한 '드문 증가'만 부드럽게 채운다.  진행률은 장식이 아니라

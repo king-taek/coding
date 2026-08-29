@@ -219,8 +219,7 @@ class BulkSelectDialog(QDialog):
         self._resize_timer.timeout.connect(self._apply_tile_size)
 
         self._build(title, actions)
-        self._render_page()
-        self._refresh_summary()      # 초기 0 장 → 액션 버튼 비활성 반영
+        self._render_page()          # 끝에서 `_refresh_summary` — 초기 0 장 → 액션 버튼 비활성
 
     # ------------------------------------------------------------------
     def _page_slice(self) -> list[tuple[str, ImageItem]]:
@@ -394,6 +393,11 @@ class BulkSelectDialog(QDialog):
         self._scroll.setWidget(host)
         QTimer.singleShot(0, self._relayout_grids)
         self._update_page_label()
+        # ★ 요약은 페이지가 바뀌면 반드시 다시 계산해야 한다 — '이 페이지 밖 m 장' 은
+        #   현재 페이지와의 차집합이라 선택을 건드리지 않아도 **페이지만 넘기면 값이 바뀐다**.
+        #   안 불렀을 때는 전체 선택 뒤 다음 페이지로 가도 경고 없이 "선택됨: N 장" 만 남아,
+        #   보이는 타일만 동작한다고 믿고 액션을 누를 수 있었다.
+        self._refresh_summary()
 
     def _update_page_label(self) -> None:
         if not self._paginated:

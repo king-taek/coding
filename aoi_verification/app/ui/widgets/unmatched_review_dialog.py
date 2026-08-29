@@ -488,13 +488,16 @@ class UnmatchedReviewDialog(QDialog):
         self._help_btn.setToolTip(i18n.KO.HELP_TOGGLE_TOOLTIP)
         self._help_btn.toggled.connect(self._on_help_toggled)
         head.addWidget(self._help_btn)
-        head.addStretch(1)
-        # 확정 결과를 알리는 자리 — 모달 대신 여기서 잠깐 뜬다(자리는 늘 예약해
-        # 레이아웃이 흔들리지 않게).  같은 창의 사진 정보 시트가 쓰는 패턴이다.
+        # 확정 결과를 알리는 자리 — 모달 대신 여기서 잠깐 뜬다.
+        # ★ **늘어나는 여백보다 앞**에 둔다.  여백 뒤(버튼 바로 앞)에 두면 문구가
+        #   붙는 순간 그 폭만큼 오른쪽 버튼 넷이 통째로 왼쪽으로 밀린다 — 150px 예약으로
+        #   막을 수 없다(확정 문구는 250px 쯤 된다).  연속 확정을 하는 사용자에겐 커서
+        #   아래에서 [확정]이 [닫기]로 바뀌는 셈이라 오클릭을 만든다.  여백 앞에 두면
+        #   늘어나는 쪽은 여백이므로 버튼은 붙박이다(자리 예약이 따로 필요 없다).
         self._toast = QLabel("", self)
         self._toast.setProperty("role", "statusPass")
-        self._toast.setMinimumWidth(150)
         head.addWidget(self._toast)
+        head.addStretch(1)
         # 네비게이션 버튼
         self.btn_prev = NeonButton(i18n.KO.BTN_UNMATCHED_PREV, role="ghost")
         self.btn_prev.clicked.connect(self._go_prev)

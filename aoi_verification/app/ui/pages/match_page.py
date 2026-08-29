@@ -30,6 +30,7 @@ from ...workers.matcher import Candidate, MatcherWorker
 from ...workers import efficiency_matcher as _eff
 from ...workers import coord_matcher as _coord
 from ...utils.prefs import EngineMode
+from .progress_row import ProgressRowMixin
 from ..widgets.app_logo import build_logo_label
 from ..widgets.loading_overlay import LoadingOverlay
 from ..widgets.match_expand_view import MatchExpandView
@@ -95,7 +96,7 @@ class ReviewContext:
     coord_classical_refs: frozenset = frozenset()
 
 
-class MatchPage(QWidget):
+class MatchPage(ProgressRowMixin, QWidget):
     """Stage 2 의 메인 페이지."""
 
     match_confirmed = pyqtSignal(object)        # MatchResult
@@ -966,26 +967,6 @@ class MatchPage(QWidget):
         self._waiting_for_slot = None
         self._precompute_processed_slots.clear()
         self.bg_status_label.setText("")
-
-    # ------------------------------------------------------------------
-    def _set_progress(self, slot: str, done: int, total: int) -> None:
-        """진행 표시 갱신 — 슬롯명(보조) · 수치(모노 본문) · 눈금(스냅 채움).
-
-        선별 화면과 같은 규약이다(`select_page._set_progress`).  눈금 채움에
-        애니메이션을 걸지 않는 이유도 같다 — 진행률은 정보다."""
-        self.progress_label.setText(
-            i18n.KO.PROGRESS_SLOT_ONLY_FMT.format(slot=slot))
-        self.progress_count.setText(
-            i18n.KO.PROGRESS_COUNT_FMT.format(done=done, total=total))
-        self.progress_bar.setMaximum(max(1, total))
-        self.progress_bar.setValue(max(0, min(done, total)))
-        self.progress_bar.setVisible(total > 0)
-
-    def _clear_progress(self) -> None:
-        self.progress_label.setText("")
-        self.progress_count.setText("")
-        self.progress_bar.setValue(0)
-        self.progress_bar.setVisible(False)
 
     # ------------------------------------------------------------------
     def _advance(self) -> None:

@@ -755,7 +755,13 @@ class MainWindow(QMainWindow):
         # 1) [정보파일] KLA 쪽 폴더의 정보파일 헤더에 있는 `WaferID "XXXX";` 를 읽어
         #    slot명으로 쓴다.  사진과 무관하게 읽히므로 **사진 0장 폴더도 식별**된다.
         #    비-KLA 쪽은 폴더명이 곧 slot명.
-        self._loading.show_overlay(i18n.KO.LOAD_KLA_INFO)
+        # ★ 단계를 **다시 준다**.  `_ask_kla_side` 모달이 오버레이를 내렸다 올리는데,
+        #   step 없이 띄우면 `_apply_stage(None, None)` 이 서수 줄과 여정 행을 지운다 —
+        #   KLA 해석은 스캔(1단계)의 뒷부분이므로 그 자리를 그대로 유지한다
+        #   (i18n `LOAD_JOURNEY_STEPS` 주석의 '단계 수를 바꾸지 않는다' 가 이 뜻이다).
+        self._loading.show_overlay(i18n.KO.LOAD_KLA_INFO,
+                                   step=(1, 3),
+                                   steps=i18n.KO.LOAD_JOURNEY_STEPS)
         QApplication.processEvents()
         info_ref: dict[str, str] = {}
         info_val: dict[str, str] = {}
@@ -845,7 +851,8 @@ class MainWindow(QMainWindow):
         if jobs and wafer_id.ocr_available():
             from ..workers.wafer_id_ocr import WaferIdOcrWorker
             self._loading.show_overlay(
-                i18n.KO.LOAD_KLA_OCR)
+                i18n.KO.LOAD_KLA_OCR, step=(1, 3),
+                steps=i18n.KO.LOAD_JOURNEY_STEPS)
             worker = WaferIdOcrWorker(jobs, parent=self)
             self._ocr_worker = worker          # GC 방지 참조 보관
 
@@ -1175,11 +1182,13 @@ class MainWindow(QMainWindow):
         self._show_page(self._setup_page)
 
     def _continue_after_thumbs(self) -> None:
-        """``_on_thumbs_ready`` 의 안전한 후속 — 모달/페이지 전환 OK."""
+        """``_on_thumbs_ready`` 의 안전한 후속 — 모달/페이지 전환 OK.
+
+        단계 3 표시는 `_on_thumbs_ready` 가 이미 세웠다(이 함수를 부르는 유일한
+        곳이다).  여기서 또 부르면 `set_progress(0, 0, …)` 이 `_enter_busy` 를
+        한 번 더 돌려 혜성 스윕과 ETA 시계를 이유 없이 재시작한다."""
         if self._input is None:
             return
-        self._loading.set_stage((3, 3), i18n.KO.LOAD_JOURNEY_STEPS)
-        self._loading.set_progress(0, 0, i18n.KO.LOAD_STAGE_PREP)
         if self._input.automation_level == AutomationLevel.AUTO_ALL:
             self._loading.hide_overlay()
             self._enter_stage2_auto_all()

@@ -31,6 +31,7 @@ from ... import config, i18n
 from .. import theme
 from ...models.slot import ImageItem
 from ...utils import prefs as _prefs
+from .progress_row import ProgressRowMixin
 from ..widgets.app_logo import build_logo_label
 from ..widgets.neon_button import NeonButton
 from ..widgets.no_wheel_slider import NoWheelSlider
@@ -357,7 +358,7 @@ class _SidePanel(QFrame):
 
 
 # ---------------------------------------------------------------------------
-class SelectPage(QWidget):
+class SelectPage(ProgressRowMixin, QWidget):
     """Stage 1 메인 위젯."""
 
     # 외부로 전달되는 시그널
@@ -844,25 +845,6 @@ class SelectPage(QWidget):
         self._set_progress(self._current.slot,
                            self._already_decided_count(), self._total_count())
         self._refresh_all()
-
-    def _set_progress(self, slot: str, done: int, total: int) -> None:
-        """진행 표시 갱신 — 슬롯명(보조) · 수치(모노 본문) · 눈금(스냅 채움).
-
-        ★ 눈금 채움에 애니메이션을 걸지 않는다.  진행률은 정보이므로 값이 곧바로
-          보여야 한다(로딩 오버레이 `set_progress` 의 스냅 원칙과 같은 판단)."""
-        self.progress_label.setText(
-            i18n.KO.PROGRESS_SLOT_ONLY_FMT.format(slot=slot))
-        self.progress_count.setText(
-            i18n.KO.PROGRESS_COUNT_FMT.format(done=done, total=total))
-        self.progress_bar.setMaximum(max(1, total))
-        self.progress_bar.setValue(max(0, min(done, total)))
-        self.progress_bar.setVisible(total > 0)
-
-    def _clear_progress(self) -> None:
-        self.progress_label.setText("")
-        self.progress_count.setText("")
-        self.progress_bar.setValue(0)
-        self.progress_bar.setVisible(False)
 
     def _advance_incremental(self, prev_slot: str) -> None:
         """결정 1건 후 — 바뀐 슬롯만 증분 갱신(전체 재생성 금지, #렉).
