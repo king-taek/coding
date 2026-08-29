@@ -103,7 +103,9 @@ def test_populate_list_inserts_separator_between_groups(qapp, spy_render):
     dlg = _dialog(entries)
     try:
         dlg._populate_list()
-        rows = [dlg.fail_list.item(r).text()
+        # 항목 라벨은 `[슬롯]` + 파일명 2줄이다 — 이 테스트가 보는 것은 **순서**이므로
+        # 첫 줄(슬롯 태그)만 비교한다.  파일명 줄은 아래 전용 테스트가 지킨다.
+        rows = [dlg.fail_list.item(r).text().split("\n")[0]
                 for r in range(dlg.fail_list.count())]
         assert rows == ["[B]", i18n.KO.UNMATCHED_CANCELLED_SEPARATOR, "[A]"]
         # 구분선은 선택 불가 — 클릭해도 사진이 바뀌면 안 된다.
@@ -120,9 +122,28 @@ def test_no_separator_without_cancelled_entries(qapp, spy_render):
     dlg = _dialog([_entry("A", "normal1"), _entry("B", "normal2")])
     try:
         dlg._populate_list()
-        rows = [dlg.fail_list.item(r).text()
+        rows = [dlg.fail_list.item(r).text().split("\n")[0]
                 for r in range(dlg.fail_list.count())]
         assert rows == ["[A]", "[B]"]
+    finally:
+        dlg.close()
+
+
+def test_list_label_carries_the_filename(qapp, spy_render):
+    """같은 슬롯의 실패가 여러 장이면 슬롯 태그만으로는 구분되지 않는다 —
+    항목마다 파일명이 함께 적혀야 목록에서 특정 사진으로 돌아갈 수 있다."""
+    dlg = _dialog([_entry("A", "shot_one"), _entry("A", "shot_two")])
+    try:
+        dlg._populate_list()
+        rows = [dlg.fail_list.item(r).text()
+                for r in range(dlg.fail_list.count())]
+        assert [r.split("\n")[0] for r in rows] == ["[A]", "[A]"]
+        # 두 줄짜리 라벨이고, 둘째 줄이 서로 달라야 목록이 둘을 구분한다.
+        seconds = [r.split("\n")[1] for r in rows]
+        assert all(s for s in seconds)
+        assert seconds[0] != seconds[1]
+        # 전체 경로는 툴팁이 계속 보여 준다(줄임 표시로 잘려도 확인 가능).
+        assert dlg.fail_list.item(0).toolTip().endswith("shot_one.png")
     finally:
         dlg.close()
 

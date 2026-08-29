@@ -368,10 +368,14 @@ def test_scrim_is_not_heavier_in_the_mode_with_less_headroom():
 
 @pytest.mark.parametrize("mode", _MODES)
 def test_loading_indicator_reads_against_its_track(mode):
-    """스피너 호·busy 혜성이 **자기 트랙**과 3:1 이상.
+    """busy 혜성·여정 스텝이 **자기 트랙**과 3:1 이상.
 
     '모션 줄이기' + busy 조합에서는 이 대비가 '살아 있다'는 유일한 신호다.
-    트랙을 `LINE` 으로 두면 1.90/1.84 로 진행분이 보이지 않았다."""
+    트랙을 `LINE` 으로 두면 1.90/1.84 로 진행분이 보이지 않았다.
+
+    ※ 회전 링(_SpinnerDot)은 제거됐다 — 상태 정보가 없는 장식이었고, 62.5Hz 타이머가
+    상시 돌아 '로딩이 버벅인다'의 원인이었다.  지금 지시자는 상단 눈금(결정형 채움 /
+    busy 혜성)과 여정 스텝 두 가지다."""
     theme.set_color_mode(mode)
     c = theme.COLORS
     r = _ratio(c["accent"], c["line2"])
@@ -380,11 +384,38 @@ def test_loading_indicator_reads_against_its_track(mode):
     import inspect
 
     from aoi_verification.app.ui.widgets import loading_overlay as lo
-    for fn in (lo._SpinnerDot.paintEvent, lo._BusyStripe.paintEvent):
+    for fn in (lo._BusyStripe.paintEvent, lo._JourneySteps.paintEvent):
         src = inspect.getsource(fn)
         code = "\n".join(ln for ln in src.splitlines()
                          if not ln.strip().startswith("#"))
         assert "theme.LINE2" in code, f"{fn.__qualname__} 트랙이 LINE2 가 아니다"
+    # 결정형 눈금의 트랙은 QSS 가 칠한다 — ★ 스타일시트 **문자열**을 보면 안 된다.
+    # 자손 선택자(`QWidget[role="loadingPanel"] QProgressBar`)가 특이도로 이겨서 규칙이
+    # 화면에 닿지 못한 적이 있다(실측: 트랙이 $bg 로 칠해졌다).  그때도 문자열 검사는
+    # 통과했다 — 그래서 **실제로 칠해진 픽셀**을 잰다.
+    from PyQt6.QtWidgets import QApplication, QWidget
+    from aoi_verification.app.ui.widgets.loading_overlay import LoadingOverlay
+
+    app = QApplication.instance() or QApplication([])
+    theme.apply_to_app(app)
+    host = QWidget()
+    host.resize(900, 600)
+    ov = LoadingOverlay(host)
+    try:
+        ov.show_overlay("t")
+        ov.set_progress(2, 10, "t")          # 결정형 — 오른쪽 끝이 미채움(=트랙)
+        ov.show()
+        app.processEvents()
+        img = ov._progress.grab().toImage()
+        track = img.pixelColor(img.width() - 3, img.height() // 2).name().lower()
+        assert track == c["line2"].lower(), (
+            f"{mode}: 눈금 트랙이 화면에서 {track} 로 칠해졌다(기대 {c['line2']}) — "
+            "더 구체적인 선택자에 밀렸다")
+        chunk = img.pixelColor(2, img.height() // 2).name().lower()
+        assert chunk == c["accent"].lower(), f"{mode}: 채움이 accent 가 아니다({chunk})"
+    finally:
+        ov.hide()
+        host.deleteLater()
 
 
 @pytest.mark.parametrize("mode", _MODES)

@@ -20,8 +20,6 @@ from PyQt6.QtWidgets import (QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout,
 
 from .. import theme
 
-_TRACK_W = 48
-_TRACK_H = 28
 _KNOB_M = 3                      # 트랙 안쪽 여백
 # 행 전체가 클릭영역이므로 **행 높이**가 실제 타깃이다 — 설명 없는 스위치(어두운 화면)
 # 에서도 WCAG 2.5.8(AA, 24px)을 넉넉히 넘기게 하한을 둔다.
@@ -49,7 +47,11 @@ class ToggleSwitch(QWidget):
         self._anim = QVariantAnimation(self)
         self._anim.setEasingCurve(motion.EASE_PRIMARY)
         self._anim.valueChanged.connect(self._on_tween)
-        self.setFixedSize(QSize(_TRACK_W, _TRACK_H))
+        # ★ 크기는 **토큰에서, 생성 시점에** 읽는다.  예전엔 모듈 상수 48×28 이
+        #   박혀 있어 `PROFILE.toggle_w/h`(52×30)와 갈렸다 — 토큰을 고쳐도 스위치는
+        #   안 바뀌는 '스스로를 배신하는 단일 출처' 였다.  모듈 본문에서 읽으면
+        #   변형 프로파일 교체를 놓치므로(그 가드가 `test_theme_dead_palette`) 여기서 읽는다.
+        self.setFixedSize(QSize(theme.PROFILE.toggle_w, theme.PROFILE.toggle_h))
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)

@@ -42,7 +42,7 @@ from PyQt6.QtGui import QColor, QCursor, QIcon, QPixmap
 from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout,
                               QHBoxLayout, QLabel, QListWidget,
                               QListWidgetItem, QMenu, QMessageBox,
-                              QScrollArea, QVBoxLayout, QWidget)
+                              QScrollArea, QToolButton, QVBoxLayout, QWidget)
 
 from ... import config, i18n
 from .. import theme
@@ -57,6 +57,8 @@ from . import sheet_host as sheets
 # 허용 오차 폴백 — 값이 안 들어왔을 때만 쓴다.  **단일 출처는 config** 다
 # (예전엔 리터럴 500 이 곳곳에 박혀 있어 기본값을 바꿔도 옛 값이 되살아났다).
 _DFLT_TOL = config.DEFAULT_COORD_TOLERANCE
+# 확정 토스트가 떠 있는 시간.  사진 정보 시트의 복사 토스트와 같은 값이다.
+_TOAST_MS = 1800
 
 
 _LIST_THUMB_PX = 56     # 좌측 ‘실패 목록’ 항목 썸네일 한 변(px).
@@ -247,9 +249,7 @@ class _CandidateTile(QFrame):
         self._score_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         # ★ 후보 유사도는 '합격 판정' 이 아니다 — 매치 검토 화면과 같은 중립색을 쓴다
         #   (성공색은 판정 칩 전용).
-        self._score_label.setStyleSheet(
-            f"color: {theme.INK2}; font-weight: 700; padding: 2px;"
-        )
+        self._score_label.setProperty("role", "tileScore")
         lay.addWidget(self._score_label)
 
         from PyQt6.QtGui import QFontMetrics
@@ -433,6 +433,8 @@ class UnmatchedReviewDialog(QDialog):
         self._cand_tiles: list[_CandidateTile] = []
         self._last_cand_key: tuple | None = None
         self._close_prompted = False
+        # 확정 토스트를 지우는 타이머 — 첫 확정 때 만들어 재사용한다(`_show_toast`).
+        self._toast_timer: QTimer | None = None
 
         # 닫는 즉시 C++ 위젯 해제 — 매번 열 때마다 부모에 누적되지 않도록.
         # exec() 직후엔 Python 측 new_matches/resolved_refs 접근이 여전히 안전.
@@ -474,16 +476,32 @@ class UnmatchedReviewDialog(QDialog):
         # 상단 진행 + 안내
         head = QHBoxLayout()
         self.progress_label = QLabel("", self)
-        self.progress_label.setStyleSheet(
-            f"color: {theme.INK}; font-weight: 700; font-size: 15px;"
-        )
+        self.progress_label.setProperty("role", "slotHead")
         head.addWidget(self.progress_label)
+        # 사용법 4줄은 기본 접힘 — 셋업 카드와 같은 '?'(helpToggle) 패턴이다.
+        # 반복 검토하는 사용자에게 매번 세로 ~70px 를 내주면 본문(기준 사진·후보
+        # 그리드)이 그만큼 아래로 밀린다.
+        self._help_btn = QToolButton(self)
+        self._help_btn.setText("?")
+        self._help_btn.setObjectName("helpToggle")
+        self._help_btn.setCheckable(True)
+        self._help_btn.setToolTip(i18n.KO.HELP_TOGGLE_TOOLTIP)
+        self._help_btn.toggled.connect(self._on_help_toggled)
+        head.addWidget(self._help_btn)
         head.addStretch(1)
+        # 확정 결과를 알리는 자리 — 모달 대신 여기서 잠깐 뜬다(자리는 늘 예약해
+        # 레이아웃이 흔들리지 않게).  같은 창의 사진 정보 시트가 쓰는 패턴이다.
+        self._toast = QLabel("", self)
+        self._toast.setProperty("role", "statusPass")
+        self._toast.setMinimumWidth(150)
+        head.addWidget(self._toast)
         # 네비게이션 버튼
         self.btn_prev = NeonButton(i18n.KO.BTN_UNMATCHED_PREV, role="ghost")
         self.btn_prev.clicked.connect(self._go_prev)
         head.addWidget(self.btn_prev)
-        self.btn_skip = NeonButton(i18n.KO.BTN_UNMATCHED_NEXT, role="warn")
+        # warn(주의색)은 예외 상태 경고 전용이다 — 다음 항목으로 넘어가는 단순 탐색에
+        # 쓰면 '위험한 동작' 처럼 읽혀 클릭을 주저하게 한다([← 이전]과 짝을 맞춘다).
+        self.btn_skip = NeonButton(i18n.KO.BTN_UNMATCHED_NEXT, role="ghost")
         self.btn_skip.clicked.connect(self._skip)
         head.addWidget(self.btn_skip)
         # 선택한 후보들을 실제 매칭으로 확정 (#1a) — 별도 액션.
@@ -495,12 +513,16 @@ class UnmatchedReviewDialog(QDialog):
         head.addWidget(self.btn_close)
         root.addLayout(head)
 
-        hint = QLabel(i18n.KO.UNMATCHED_REVIEW_HINT, self)
-        hint.setWordWrap(True)
-        hint.setStyleSheet(f"color: {theme.MUTE}; padding: 4px;")
-        root.addWidget(hint)
+        self._hint = QLabel(i18n.KO.UNMATCHED_REVIEW_HINT, self)
+        self._hint.setWordWrap(True)
+        self._hint.setProperty("role", "muted")
+        self._hint.setContentsMargins(4, 4, 4, 4)   # 옛 인라인 padding:4px 와 동일
+        self._hint.setVisible(False)          # 기본 접힘 — '?' 로 편다
+        root.addWidget(self._hint)
 
         # 좌표로 매칭한 세션에서만 — 후보 순서의 기준이 좌표가 아님을 밝힌다 (U-18).
+        # ★ 이건 접지 않는다.  '사용법' 이 아니라 점수의 뜻을 바로잡는 고지라서,
+        #   숨기면 후보 순서를 좌표 거리로 오해한 채 판단하게 된다.
         if self._session_coord_mode:
             self.coord_note = QLabel(i18n.KO.UNMATCHED_REVIEW_COORD_NOTE, self)
             self.coord_note.setWordWrap(True)
@@ -518,16 +540,11 @@ class UnmatchedReviewDialog(QDialog):
         lpl.setContentsMargins(12, 12, 12, 12)
         lpl.setSpacing(6)
         list_title = QLabel(i18n.KO.UNMATCHED_FAIL_LIST_TITLE, list_panel)
-        list_title.setStyleSheet(f"color: {theme.INK}; font-weight: 700;")
+        list_title.setProperty("role", "paneTitle")
         lpl.addWidget(list_title)
         self.fail_list = QListWidget(list_panel)
         self.fail_list.setIconSize(QSize(_LIST_THUMB_PX, _LIST_THUMB_PX))
-        self.fail_list.setStyleSheet(
-            f"QListWidget {{ background: {theme.PANEL}; border: 1px solid {theme.LINE}; "
-            f"border-radius: 6px; color: {theme.INK2}; }}"
-            "QListWidget::item { padding: 4px 6px; }"
-            f"QListWidget::item:selected {{ background: {theme.ELEV}; color: {theme.ACCENT}; }}"
-        )
+        self.fail_list.setProperty("role", "pickList")
         self.fail_list.itemClicked.connect(self._on_list_item_clicked)
         lpl.addWidget(self.fail_list, stretch=1)
         list_panel.setFixedWidth(260)
@@ -544,20 +561,18 @@ class UnmatchedReviewDialog(QDialog):
         ll.setContentsMargins(12, 12, 12, 12)
         ll.setSpacing(6)
         ref_title = QLabel(i18n.KO.PANEL_MATCH_REF, left)
-        ref_title.setStyleSheet(f"color: {theme.INK}; font-weight: 700;")
+        ref_title.setProperty("role", "paneTitle")
         ref_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         ll.addWidget(ref_title)
         self.ref_filename = QLabel("", left)
         self.ref_filename.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.ref_filename.setStyleSheet(f"color: {theme.MUTE}; padding: 2px;")
+        self.ref_filename.setProperty("role", "mutedPad2")
         self.ref_filename.setWordWrap(True)
         ll.addWidget(self.ref_filename)
         self.ref_img = QLabel(left)
         self.ref_img.setFixedSize(self._ref_px, self._ref_px)
         self.ref_img.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.ref_img.setStyleSheet(
-            f"background: {theme.BG}; border: 1px solid {theme.LINE}; border-radius: 6px;"
-        )
+        self.ref_img.setProperty("role", "photoFrame")
         # 우클릭 ‘크게보기’ — 후보와 동일한 좌우 비교 창을 열되, 기준 사진은 가장
         # 유사도가 높은 후보부터(start=0) 보여준다 (#13).
         # ★ 더블클릭 확대는 제거했다(사용자 지적).  여기에 걸려 있던 것은 인스턴스 메서드
@@ -579,7 +594,7 @@ class UnmatchedReviewDialog(QDialog):
         rl.setSpacing(6)
         cand_head = QHBoxLayout()
         cand_title = QLabel(i18n.KO.PANEL_MATCH_CANDIDATES, right)
-        cand_title.setStyleSheet(f"color: {theme.INK}; font-weight: 700;")
+        cand_title.setProperty("role", "paneTitle")
         cand_head.addWidget(cand_title)
         # '검증 장비 후보' 옆 '크게 보기' — 선택 후보(없으면 1순위)부터 좌우 비교.
         self.btn_zoom_cand = NeonButton(i18n.KO.BTN_VIEW_LARGER, role="ghost")
@@ -588,7 +603,7 @@ class UnmatchedReviewDialog(QDialog):
         cand_head.addStretch(1)
         rl.addLayout(cand_head)
         self.candidates_summary = QLabel("", right)
-        self.candidates_summary.setStyleSheet(f"color: {theme.MUTE}; padding: 2px;")
+        self.candidates_summary.setProperty("role", "mutedPad2")
         rl.addWidget(self.candidates_summary)
         self._scroll = QScrollArea(right)
         self._scroll.setWidgetResizable(True)
@@ -653,9 +668,19 @@ class UnmatchedReviewDialog(QDialog):
         return False
 
     def _list_label(self, idx: int) -> str:
-        # 썸네일 표시이므로 파일명 대신 짧은 슬롯 태그만. (확정 항목은 목록에서
-        # 제외되므로 ✓ 진행 표시는 더 이상 필요 없다.)
-        return f"[{self._unmatched[idx].slot}]"
+        """`[슬롯]` + 파일명 2줄.  (확정 항목은 목록에서 빠지므로 ✓ 표시는 없다.)
+
+        ★ 슬롯 태그만 적던 시절엔 같은 슬롯의 실패가 여러 장일 때 항목들이 **같은
+          이름**으로 보여, 특정 사진으로 돌아가려면 썸네일을 육안 대조하거나 항목마다
+          호버해 툴팁을 봐야 했다.  파일명은 앞뒤가 다 정보라 가운데를 줄인다(전체
+          이름은 툴팁이 계속 보여 준다)."""
+        entry = self._unmatched[idx]
+        name = Path(entry.path).name
+        fm = self.fail_list.fontMetrics()
+        # 목록 고정폭(260) − 패널 마진 − 아이콘 − 항목 패딩/스크롤바 여유.
+        avail = 260 - 24 - _LIST_THUMB_PX - 28
+        short = fm.elidedText(name, Qt.TextElideMode.ElideMiddle, max(40, avail))
+        return f"[{entry.slot}]\n{short}"
 
     def _populate_list(self) -> None:
         """전체 실패 목록을 채운다 — 일반 → 구분선 → 매칭 취소 (#12/#14)."""
@@ -863,7 +888,7 @@ class UnmatchedReviewDialog(QDialog):
             self._cand_tiles = []
             self._last_cand_key = None
             empty = QLabel(i18n.KO.UNMATCHED_REVIEW_NO_CANDIDATES, self._host)
-            empty.setStyleSheet(f"color: {theme.MUTE}; padding: 20px;")
+            empty.setProperty("role", "mutedPad")
             self._grid.addWidget(empty, 0, 0)
             self.candidates_summary.setText(i18n.KO.UNMATCHED_CAND_NONE)
             return
@@ -1156,16 +1181,34 @@ class UnmatchedReviewDialog(QDialog):
         self._pending.clear()
         return n
 
+    def _on_help_toggled(self, on: bool) -> None:
+        """'?' — 사용법 문단을 제자리에서 펼치고 접는다(스냅, 애니 없음)."""
+        self._hint.setVisible(bool(on))
+
+    def _show_toast(self, text: str) -> None:
+        """확정 결과를 헤더에서 잠깐 알린다(자리는 예약돼 있어 레이아웃 불변).
+
+        ★ 정적 `QTimer.singleShot` 을 쓰지 않는다 — 그 타이머는 시트가 먼저 닫혀도
+          계속 살아 있어 죽은 위젯의 슬롯을 부른다.  **부모 있는** 타이머 하나를
+          재사용하면 창과 함께 죽고, 연속 확정 때 타이머가 쌓이지도 않는다."""
+        self._toast.setText(text)
+        t = self._toast_timer
+        if t is None:
+            t = self._toast_timer = QTimer(self)
+            t.setSingleShot(True)
+            t.timeout.connect(lambda: self._toast.setText(""))
+        t.start(_TOAST_MS)
+
     def _on_confirm(self) -> None:
         # 확정 직전 현재 항목의 표시 행 — 확정 후 그 자리로 올라온 다음
         # 미해결 항목으로 자연스럽게 이동하기 위해.
         prev_row = self._idx_to_row.get(self._idx, 0)
         n = self._finalize_pending()
         if n:
-            sheets.info(
-                self, i18n.KO.APP_TITLE,
-                i18n.KO.UNMATCHED_REVIEW_DONE_FMT.format(n=n),
-            )
+            # ★ 모달을 띄우지 않는다.  확정 결과는 이미 화면이 말한다(그 항목이
+            #   실패 목록에서 사라진다) — 반복 검토에 건당 [확인] 클릭 1회와 시선
+            #   이동을 얹지 않기 위해 자리 예약 토스트로 알린다(U-14 원칙).
+            self._show_toast(i18n.KO.UNMATCHED_REVIEW_DONE_FMT.format(n=n))
         # 확정으로 used_vals 가 바뀌어 후보 집합이 달라졌을 수 있으니 키 무효화.
         self._last_cand_key = None
         # 확정된 항목은 목록에서 사라진다(재생성) → 다음 미해결 항목으로 이동.

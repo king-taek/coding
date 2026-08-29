@@ -131,6 +131,13 @@ QLabel[role="paneTitle"] {
     color: $ink;
 }
 
+/* 한 단 큰 패널 표제 — 확대 보기처럼 패널 하나가 화면을 통째로 쓰는 자리. */
+QLabel[role="paneTitleLg"] {
+    font-weight: 700;
+    font-size: 16px;
+    color: $ink;
+}
+
 QLabel[role="slotLabel"] {
     color: $mute;
     font-size: 14px;
@@ -155,6 +162,48 @@ QLabel[role="mutedSmall"] {
     font-size: 11px;
 }
 
+/* 타일 밑 점수 — 후보 유사도는 '합격 판정' 이 아니므로 성공색을 쓰지 않는다
+   (성공색은 판정 칩 전용).  매치 검토 화면과 같은 중립 잉크. */
+QLabel[role="tileScore"] {
+    color: $ink2;
+    font-weight: 700;
+    padding: 2px;
+}
+
+/* 항목을 골라 점프하는 목록(실패 목록 등) — 면 + 경계 1px, 선택은 강조 잉크. */
+QListWidget[role="pickList"] {
+    background-color: $panel;
+    border: 1px solid $line;
+    border-radius: $radius_sm;
+    color: $ink2;
+}
+QListWidget[role="pickList"]::item {
+    padding: 4px 6px;
+}
+QListWidget[role="pickList"]::item:selected {
+    background-color: $elev;
+    color: $accent;
+}
+
+/* 사진 한 장을 담는 액자 — 바탕 위에 면 경계 1px. */
+QLabel[role="photoFrame"] {
+    background-color: $bg;
+    border: 1px solid $line;
+    border-radius: $radius_sm;
+}
+
+/* 보조색 굵은 글씨 — 비교 뷰어의 위치 표시("3 / 12") 처럼 흐리되 또렷해야 하는 자리. */
+QLabel[role="mutedStrong"] {
+    color: $mute;
+    font-weight: 700;
+}
+
+/* 보조색 캡션 등급(12px) — 조작 힌트 줄.  mutedSmall(11px)은 더 밀집한 자리용이다. */
+QLabel[role="mutedCaption"] {
+    color: $mute;
+    font-size: $font_caption_sz;
+}
+
 QLabel[role="mutedArrow"] {
     color: $mute;
     font-size: 20px;
@@ -163,6 +212,11 @@ QLabel[role="mutedArrow"] {
 QLabel[role="mutedPad"] {
     color: $mute;
     padding: 20px;
+}
+
+QLabel[role="mutedPad2"] {
+    color: $mute;
+    padding: 2px;
 }
 
 QLabel[role="bodyText"] {
@@ -611,6 +665,55 @@ QWidget[role="loadingPanel"] QProgressBar {
     background: $bg;
 }
 
+/* ── 로딩 타이틀블록 ─────────────────────────────────────────────────────
+   제도 시트의 타이틀블록 어휘로 재구성한 패널.  장식(회전 링)을 걷어 내고, 화면이
+   말해야 할 것만 남긴다 — 전체 여정의 어디쯤 · 지금 무엇을 · 얼마나 · 얼마나 더.
+   ★ 결정형일 때 이 패널에는 상시 애니메이션이 없다(예전 62.5Hz 스피너 타이머는
+     UI 스레드가 바쁠 때 가장 먼저 끊겨 '로딩이 버벅인다' 로 보이던 바로 그것이다). */
+/* 패널 상단 전폭 진행 눈금 — 4px, 각진 모서리(패널 위에 얹힌 '치수선').
+   ★ 선택자에 `QWidget[role="loadingPanel"]` 을 **반드시 함께 적는다.**  위쪽의
+     `QWidget[role="loadingPanel"] QProgressBar { background: $bg }` 는 자손 선택자라
+     특이도가 더 높아, 이걸 빼면 트랙이 $line2 가 아니라 $bg 로 칠해진다(실측:
+     라이트에서 #ECE9E2).  그러면 대비 게이트가 화면에 없는 값을 보증하게 된다. */
+QWidget[role="loadingPanel"] QProgressBar[role="loadingRule"] {
+    background: $line2;
+    border: none;
+    border-radius: 0;
+    min-height: 4px;
+    max-height: 4px;
+}
+QWidget[role="loadingPanel"] QProgressBar[role="loadingRule"]::chunk {
+    background: $accent;
+    border-radius: 0;
+}
+/* 단계 서수 — 모노 캡션. */
+QLabel[role="loadingStage"] {
+    font-family: $font_mono;
+    font-size: $font_caption_sz;
+    font-weight: 700;
+    color: $mute;
+}
+/* 단계 이름 — 얇은 표제(제목 등급의 자간 규약을 그대로 쓴다). */
+QLabel[role="loadingTitle"] {
+    font-size: 20px;
+    font-weight: $title_weight;
+    letter-spacing: $title_tracking;
+    color: $ink;
+}
+/* 큰 진행률 — 이 패널에서 가장 큰 글자.  모노라 자릿수가 바뀌어도 안 흔들린다. */
+QLabel[role="loadingPct"] {
+    font-family: $font_mono;
+    font-size: 34px;
+    font-weight: 700;
+    color: $ink;
+}
+/* 남은 시간 — 추정치이므로 보조 등급으로 적는다(단정하지 않는다). */
+QLabel[role="loadingEta"] {
+    font-family: $font_mono;
+    font-size: $font_caption_sz;
+    color: $mute;
+}
+
 /* 배지 캡션 — ★ `role="colHead"`($mute) 를 쓰면 구형 상태의 warn_tint 면 위에서
    4.66(다크)로 게이트(5.0)를 깬다.  캡션이지만 한 단계 진한 잉크를 쓴다
    (대비표가 **실제로 쓰는 토큰**을 재도록 전용 역할로 분리). */
@@ -1004,6 +1107,31 @@ QLabel[role="progressCount"] {
     color: $ink2;
 }
 
+/* 선별·매칭 화면의 '몇 장 남았나' — ★ 이 화면에서 제목 다음으로 중요한 상태다.
+   예전엔 구석의 가장 약한 잉크(mute)로 적혀 있었고, 비례 서체라 자릿수가 바뀔 때
+   숫자가 좌우로 흔들렸다.  모노 + 본문 잉크로 한 등급 올린다. */
+QLabel[role="progressCountLg"] {
+    font-family: $font_mono;
+    font-size: $font_sub_sz;
+    font-weight: 700;
+    color: $ink;
+}
+
+/* 제목 줄 아래 진행 눈금 — 제도 시트의 눈금 어휘 그대로.  1px 하이라인 등급의
+   바탕 위에 2px accent 채움.  ★ 채움은 **스냅**이다(진행률은 정보라는 규칙 —
+   로딩 오버레이 `set_progress` 와 같은 판단).  텍스트는 그리지 않는다. */
+QProgressBar[role="pageProgress"] {
+    background: $line;
+    border: none;
+    border-radius: 0;
+    min-height: 2px;
+    max-height: 2px;
+}
+QProgressBar[role="pageProgress"]::chunk {
+    background: $accent;
+    border-radius: 0;
+}
+
 /* ── 그룹박스 ───────────────────────────────────────────────────────── */
 QGroupBox {
     border: 1px solid $line;
@@ -1098,4 +1226,27 @@ QToolButton[objectName="helpToggle"]:checked {
 }
 QToolButton[objectName="helpToggle"]:focus {
     border: 2px solid $focus;
+}
+
+/* ── 사진 판독 뷰어 (풀스크린 · 좌우 비교) ─────────────────────────────── */
+/* ★ 이 계층만 테마를 따르지 않는다 — 판독 바탕은 라이트/다크 어느 쪽이든 순검정
+     이어야 사진의 계조가 눈을 속이지 않는다($viewer_bg 는 두 팔레트가 같은 값).
+     그래서 잉크도 활성 팔레트가 아니라 흑연 팔레트에서 고정으로 뽑은 $viewer_ink
+     를 쓴다(라이트의 mute 는 검정 위에서 2:1 이 안 된다).
+   ★ 인라인 f-string 으로 굽던 자리를 옮겨 온 규칙이다 — 생성 시점에 색을 구우면
+     살아 있는 위젯 재채색(_recolor_in_place) 경로에서 옛 색이 그대로 남는다. */
+QDialog[role="viewer"],
+QLabel[role="viewer"] {
+    background-color: $viewer_bg;
+}
+/* 조작 힌트 — 확대/이동/닫기가 되는 줄 모르면 '크게 보기'의 절반만 쓰게 된다. */
+QLabel[role="viewerHint"] {
+    color: $viewer_ink;
+    background: transparent;
+    font-size: $font_caption_sz;
+}
+/* 좌우 비교 뷰어의 사진 칸 — 검정 바탕 + 면 경계 1px. */
+QLabel[role="viewerPane"] {
+    background-color: $viewer_bg;
+    border: 1px solid $line;
 }

@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from PyQt6.QtWidgets import QWidget
 
+from aoi_verification.app import i18n
 from aoi_verification.app.models.result import MatchResult, MissEntry
 from aoi_verification.app.models.slot import ImageItem
 
@@ -28,12 +29,14 @@ def test_loading_overlay_shows_counts(qapp):
     # ★ 갯수는 바 **밖**의 모노 라벨이 표시한다 — 바 안의 글자는 채움(accent)이 아래를
     #   지나는 순간 대비가 2.41(라이트)/1.85(다크)로 붕괴한다(실측).
     assert ov._progress.isTextVisible() is False
-    assert ov._count_label.text() == "150 / 300"
+    assert ov._count_label.text() == i18n.KO.LOADING_COUNT_FMT.format(
+        done=150, total=300)
     assert ov._progress.maximum() == 300
     # 총량이 바뀌면(단계 전환) 새 최대값으로 스냅.
     ov.set_progress(0, 40, "후보 생성")
     assert ov._progress.maximum() == 40
-    assert ov._count_label.text() == "0 / 40"
+    assert ov._count_label.text() == i18n.KO.LOADING_COUNT_FMT.format(
+        done=0, total=40)
     # busy(총량 미지)에서는 숫자를 **비운다**(감추지 않는다) — hide 하면 패널 높이가
     # 36px 뛰고 중앙 정렬이라 상단이 18px 즉시 점프했다(실측).  자리를 예약한다.
     ov.set_progress(0, 0, "스캔 중")

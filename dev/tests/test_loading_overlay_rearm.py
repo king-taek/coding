@@ -75,7 +75,9 @@ def test_overlay_rearms_itself_after_a_transition_swap(styled_qapp, motion_on):
     assert ov._fade == pytest.approx(1.0), (
         f"오버레이가 **투명한 막**으로 남았다(_fade={ov._fade:.3f}) — 화면은 멀쩡해 "
         "보이는데 마우스가 전부 삼켜진다")
-    assert ov._spinner._timer.isActive(), "스피너가 멈춘 채 남았다 — 작업 중 신호가 없다"
+    # 총량 미상 구간의 '작업 중' 신호는 상단 눈금의 혜성 스윕이다(회전 링은 제거됐다).
+    assert ov._busy._anim.state() != ov._busy._anim.State.Stopped, (
+        "busy 스윕이 멈춘 채 남았다 — 작업 중 신호가 없다")
     assert ov._input_locked, (
         "입력잠금이 풀린 채 남았다 — 키보드로 [검토 완료] 가 눌려 못 본 행까지 확정된다")
 
@@ -133,7 +135,8 @@ def test_a_finished_overlay_does_not_come_back(styled_qapp, motion_on):
     ov.show()                               # 누군가 위젯만 다시 띄우면
     styled_qapp.processEvents()
     assert ov._input_locked is False, "끝난 오버레이가 앱 키보드를 다시 잠갔다"
-    assert ov._spinner._timer.isActive() is False, "끝난 오버레이의 스피너가 되살아났다"
+    assert ov._busy._anim.state() == ov._busy._anim.State.Stopped, (
+        "끝난 오버레이의 busy 스윕이 되살아났다")
 
     ov.hide()
     host.deleteLater()

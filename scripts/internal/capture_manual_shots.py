@@ -589,8 +589,9 @@ def _stage_match(win, sr) -> dict:
                     engine_cfg=config.SimilarityConfig(
                         engine=EngineMode.COORDINATE))
     page._show_center(refs[0])
-    page.progress_label.setText(
-        i18n.KO.PROGRESS_SLOT_FMT.format(slot=slot, done=3, total=len(refs)))
+    # 진행 표시는 두 등급으로 나뉜다 — 슬롯명(보조) + 수치(모노 본문).  앱이 쓰는
+    # 것과 같은 헬퍼를 태워야 캡처가 실제 화면과 어긋나지 않는다.
+    page._set_progress(slot, 3, len(refs))
     win._stack.setCurrentWidget(page)
     # 진행 바가 도는 그 순간 — 앱의 `_update_auto_progress` 와 같은 문구·같은 값.
     page._loading.show_overlay(cancelable=True)

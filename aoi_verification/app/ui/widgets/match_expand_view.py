@@ -21,7 +21,6 @@ from PyQt6.QtWidgets import (QHBoxLayout, QLabel, QScrollArea, QSizePolicy,
                               QSlider, QVBoxLayout, QWidget)
 
 from ... import i18n
-from .. import theme
 from ...models.slot import ImageItem
 from .neon_button import NeonButton
 from .no_wheel_slider import NoWheelSlider
@@ -53,9 +52,7 @@ class MatchExpandView(QWidget):
         bar = QHBoxLayout()
         bar.setSpacing(10)
         self.slot_label = QLabel("", self)
-        self.slot_label.setStyleSheet(
-            f"color: {theme.INK}; font-weight: 700; font-size: 16px;"
-        )
+        self.slot_label.setProperty("role", "paneTitleLg")
         bar.addWidget(self.slot_label)
         bar.addSpacing(20)
 
@@ -97,7 +94,7 @@ class MatchExpandView(QWidget):
         self._size_slider.setPageStep(80)
         self._size_slider.setValue(ScalableImage.auto_fit_long_edge())
         self._size_value = QLabel(f"{self._size_slider.value()} px", self)
-        self._size_value.setProperty("role", "muted")
+        self._size_value.setProperty("role", "monoMuted")
         self._size_value.setFixedWidth(64)
         self._size_value.setAlignment(Qt.AlignmentFlag.AlignRight
                                       | Qt.AlignmentFlag.AlignVCenter)
@@ -114,10 +111,7 @@ class MatchExpandView(QWidget):
         self._scroll.setWidgetResizable(False)
         self._scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._scroll.setWidget(self._img)
-        self._scroll.setStyleSheet(
-            f"QScrollArea {{ background: {theme.BG}; border: 1px solid {theme.LINE};"
-            " border-radius: 8px; }"
-        )
+        self._scroll.setProperty("role", "imageViewport")
         self._scroll.setSizePolicy(QSizePolicy.Policy.Expanding,
                                      QSizePolicy.Policy.Expanding)
         root.addWidget(self._scroll, stretch=1)
