@@ -112,7 +112,11 @@ class OpenVinoInstallWorker(QThread):
         try:
             proc = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, bufsize=1,
+                # 파이프에 묶인 파이썬 자식은 로케일(Windows=cp949)로 쓴다 —
+                # utf-8 을 강제하면 한글 경로가 깨지고, errors 를 안 주면
+                # pip 이 띄운 손자가 UTF-8 을 직접 쓸 때 디코드가 터져
+                # 이 스레드가 죽는다(설치 성공이 실패로 보인다).
+                text=True, errors="replace", bufsize=1,
             )
         except Exception as exc:
             self.signals.finished.emit(

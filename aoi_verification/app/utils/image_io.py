@@ -38,7 +38,11 @@ def _open(src: Path, *, draft_long_edge: Optional[int] = None) -> Image.Image:
             pass
     img.load()
     try:
-        img = ImageOps.exif_transpose(img)
+        # exif_transpose 는 돌릴 게 없어도 image.copy() 를 돌려준다 —
+        # 사진 1장마다 원본 전체를 한 벌 더 복사하는 셈이다.  회전 태그가
+        # 실제로 있을 때만 부른다(Pillow 의 판정 조건과 동일: 2~8).
+        if img.getexif().get(0x0112, 1) in (2, 3, 4, 5, 6, 7, 8):   # Orientation
+            img = ImageOps.exif_transpose(img)
     except Exception:
         pass
     return img

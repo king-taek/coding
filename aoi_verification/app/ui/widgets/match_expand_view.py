@@ -18,7 +18,7 @@ from typing import Callable, List, Optional
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (QHBoxLayout, QLabel, QScrollArea, QSizePolicy,
-                              QSlider, QVBoxLayout, QWidget)
+                              QVBoxLayout, QWidget)
 
 from ... import i18n
 from ...models.slot import ImageItem

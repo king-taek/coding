@@ -8,7 +8,6 @@ from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from ... import i18n
-from .. import theme
 from .thumb_grid import ThumbEntry, ThumbGrid
 
 
@@ -60,14 +59,8 @@ class SlotSection(QWidget):
         )
         self.grid.set_entries(entries)
 
-    def set_select_mode(self, on: bool) -> None:
-        self.grid.set_select_mode(on)
-
     def inline_selected(self) -> list[ThumbEntry]:
         return self.grid.inline_selected()
-
-    def set_all_inline_selected(self, selected: bool) -> None:
-        self.grid.set_all_inline_selected(selected)
 
     def remove_entry(self, entry: ThumbEntry) -> bool:
         """한 장만 지우고 헤더 개수를 갱신한다(전체 재생성 회피)."""
@@ -78,7 +71,3 @@ class SlotSection(QWidget):
                 slot=self._slot, count=len(self.grid._entries))
         )
         return True
-
-    @property
-    def slot_name(self) -> str:
-        return self._slot

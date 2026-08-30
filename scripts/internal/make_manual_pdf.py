@@ -258,12 +258,18 @@ def _launch(chrome: str, log: Path, profile: Path) -> tuple[subprocess.Popen, st
       파일로 받아 두면 주소도 거기서 찾고, 실패했을 때 그대로 보여 줄 수 있다.
     """
     with log.open("wb") as errfile:                  # 자식이 물려받은 뒤엔 닫아도 된다
-        proc = subprocess.Popen(
-            [chrome, "--headless", "--no-sandbox", "--disable-gpu",
-             # 저장소 파일을 상대경로로 읽어야 글꼴·그림·스타일시트가 붙는다.
-             "--allow-file-access-from-files",
-             "--remote-debugging-port=0", f"--user-data-dir={profile}", "about:blank"],
-            stdout=subprocess.DEVNULL, stderr=errfile)
+        try:
+            proc = subprocess.Popen(
+                [chrome, "--headless", "--no-sandbox", "--disable-gpu",
+                 # 저장소 파일을 상대경로로 읽어야 글꼴·그림·스타일시트가 붙는다.
+                 "--allow-file-access-from-files",
+                 "--remote-debugging-port=0", f"--user-data-dir={profile}",
+                 "about:blank"],
+                stdout=subprocess.DEVNULL, stderr=errfile)
+        except OSError as exc:       # 실행 파일이 없거나 띄울 수 없다
+            # 이 파일의 다른 실패 경로 20곳과 같은 규약으로 안내한다 —
+            # 여기만 생 트레이스백이 나가던 구멍이었다.
+            raise SystemExit(f"Chromium 을 띄우지 못했습니다: {chrome} — {exc}")
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
         found = re.search(r"ws://\S+", log.read_text(errors="replace"))
@@ -335,8 +341,10 @@ def _check_footer(pdf: Path) -> None:
         return
 
     def text(page: str) -> str:
+        # poppler 는 외부 C 프로그램이라 UTF-8 로 쓴다(로케일 cp949 로 읽으면 깨진다).
         return subprocess.run([exe, "-f", page, "-l", page, str(pdf), "-"],
-                              capture_output=True, text=True).stdout
+                              capture_output=True, text=True,
+                              encoding="utf-8", errors="replace").stdout
 
     # 쪽 번호는 `12 / 28` 처럼 찍히지만 추출하면 사이 공백이 사라질 수 있다.
     mark = re.compile(rf"\d+\s*/\s*{total}\b")
@@ -434,7 +442,8 @@ def _pages(pdf: Path) -> str:
     exe = shutil.which("pdfinfo")
     if not exe:
         return "?"
-    out = subprocess.run([exe, str(pdf)], capture_output=True, text=True).stdout
+    out = subprocess.run([exe, str(pdf)], capture_output=True, text=True,
+                         encoding="utf-8", errors="replace").stdout
     for line in out.splitlines():
         if line.startswith("Pages:"):
             return line.split(":", 1)[1].strip()

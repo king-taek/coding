@@ -12,7 +12,7 @@ GUI 스레드에서만 호출되는 것을 전제로 한다 — QPixmap 는 main
 from __future__ import annotations
 
 from collections import OrderedDict
-from typing import Hashable, Iterator, Optional, Tuple
+from typing import Hashable, Optional, Tuple
 
 from PyQt6.QtGui import QPixmap
 
@@ -52,9 +52,6 @@ class LRUPixmapCache:
 
     def __len__(self) -> int:
         return len(self._store)
-
-    def keys(self) -> Iterator[Hashable]:
-        return iter(list(self._store.keys()))
 
     def total_bytes(self) -> int:
         return self._total

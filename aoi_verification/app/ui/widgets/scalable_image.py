@@ -14,7 +14,6 @@ from PyQt6.QtGui import QColor, QPixmap
 from PyQt6.QtWidgets import QLabel
 
 from ...utils import image_io
-from .. import theme
 
 
 class ScalableImage(QLabel):

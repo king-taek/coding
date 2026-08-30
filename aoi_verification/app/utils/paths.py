@@ -57,6 +57,19 @@ def logo_path(name: str) -> Path:
 # ---------------------------------------------------------------------------
 _CACHE_DIRNAME = ".aoi_verification_cache"
 
+# 이 프로세스가 이미 만든 캐시 폴더.  경로 계산은 매번 그대로 하되(환경변수
+# AOI_DATA_HOME 변경을 계속 따른다) mkdir 만 건너뛴다 — 사진 1장을 처리할 때마다
+# 아래 헬퍼들이 여러 번 불려 잉여 syscall 이 사진 수만큼 쌓였다.
+# 폴더를 지우는 코드는 없다(prune_old_cache 는 파일만 unlink 한다).
+_MADE_DIRS: set = set()
+
+
+def _ensure_dir(d: Path) -> Path:
+    if d not in _MADE_DIRS:
+        d.mkdir(parents=True, exist_ok=True)
+        _MADE_DIRS.add(d)
+    return d
+
 
 def cache_root() -> Path:
     """캐시(썸네일/특징/임베딩/점수/세션) 폴더.
@@ -67,26 +80,19 @@ def cache_root() -> Path:
     안에 담기 위함."""
     home = os.environ.get("AOI_DATA_HOME")
     root = (Path(home) / "cache") if home else (Path.home() / _CACHE_DIRNAME)
-    root.mkdir(parents=True, exist_ok=True)
-    return root
+    return _ensure_dir(root)
 
 
 def thumb_cache_dir() -> Path:
-    d = cache_root() / "thumbs"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+    return _ensure_dir(cache_root() / "thumbs")
 
 
 def mid_cache_dir() -> Path:
-    d = cache_root() / "mid"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+    return _ensure_dir(cache_root() / "mid")
 
 
 def feature_cache_dir() -> Path:
-    d = cache_root() / "features"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+    return _ensure_dir(cache_root() / "features")
 
 
 def embedding_cache_dir() -> Path:
@@ -94,22 +100,16 @@ def embedding_cache_dir() -> Path:
 
     썸네일/중간이미지와 달리 1일 TTL 정리 대상이 아니다(재계산 비용이 크고
     원본 mtime 키라 자동 무효화됨)."""
-    d = cache_root() / "embeddings"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+    return _ensure_dir(cache_root() / "embeddings")
 
 
 def score_cache_dir() -> Path:
     """(ref, val) 유사도 점수의 슬롯 단위 영속 캐시 폴더 (#5B)."""
-    d = cache_root() / "scores"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+    return _ensure_dir(cache_root() / "scores")
 
 
 def session_cache_dir() -> Path:
-    d = cache_root() / "session"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+    return _ensure_dir(cache_root() / "session")
 
 
 def _exe_install_root() -> Path | None:

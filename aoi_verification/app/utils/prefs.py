@@ -39,8 +39,6 @@ class EngineMode:
     EFFICIENCY = "efficiency"  # CPU(고전)+GPU(MobileNetV3) fusion-zscore
     COORDINATE = "coordinate"  # 좌표 직접 매칭 (v2) — 유사도 계산 없음
 
-    ALL = frozenset({BASIC, EFFICIENCY, COORDINATE})
-
     @classmethod
     def is_efficiency(cls, mode: str) -> bool:
         return mode == cls.EFFICIENCY

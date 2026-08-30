@@ -46,7 +46,12 @@ def _nearest(records: tuple[RawRecord, ...],
     best: Optional[RawRecord] = None
     best_d = tol
     for rec in records:
-        d = math.hypot(rec.actual_x - x, rec.actual_y - y)
+        # |dx| > best_d 면 hypot 은 반드시 그보다 크다 — 계산 전에 걸러낸다.
+        # 고르는 레코드도, 동점 처리 순서도 그대로다.
+        dx = rec.actual_x - x
+        if dx > best_d or dx < -best_d:
+            continue
+        d = math.hypot(dx, rec.actual_y - y)
         if d <= best_d:
             best_d = d
             best = rec
