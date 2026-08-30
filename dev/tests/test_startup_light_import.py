@@ -43,8 +43,20 @@ def _run_probe(code: str) -> str:
     env = dict(os.environ)
     env["QT_QPA_PLATFORM"] = "offscreen"
     env["PYTHONPATH"] = str(_ROOT) + os.pathsep + env.get("PYTHONPATH", "")
+    # ★ 인코딩은 **로케일 그대로** 둔다(`text=True`).  여기 자식은 `sys.executable`,
+    #   즉 파이썬이고 파이프에 묶인 파이썬은 **로케일로 쓴다** — 이 머신 실측:
+    #   자식의 `sys.stdout.encoding` = cp949, '한글출력' 이 `b'ÇÑ±Û...'`
+    #   (cp949)로 나온다.  여기에 `encoding="utf-8"` 을 주면 실패 시 보여 주려던
+    #   한국어 트레이스백이 통째로 치환문자가 된다(실측으로 확인).
+    #   ※ git 처럼 **외부 C 프로그램**은 반대다 — UTF-8 로 쓰므로 그쪽은 utf-8 을
+    #     명시해야 한다(`test_manual_captures_never_committed` 참조).  출처마다 답이
+    #     다르니 한 벌로 통일하지 마라.
+    # ★ `errors="replace"` 만 더한다.  이게 없으면 디코드 실패가 리더 스레드를 죽여
+    #   stdout/stderr 가 None 이 되고, 아래 assert 가 진짜 원인 대신
+    #   AttributeError 를 뱉는다.
     out = subprocess.run([sys.executable, "-c", code], capture_output=True,
-                         text=True, cwd=str(_ROOT), env=env, timeout=300)
+                         text=True, errors="replace",
+                         cwd=str(_ROOT), env=env, timeout=300)
     assert out.returncode == 0, f"probe 실패:\n{out.stdout}\n{out.stderr}"
     for line in out.stdout.splitlines():
         if line.startswith("HEAVY:"):

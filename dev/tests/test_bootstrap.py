@@ -26,7 +26,11 @@ def test_cache_root_honors_data_home(tmp_path, monkeypatch):
     assert paths.cache_root() == tmp_path / "install" / "cache"
     # 미지정이면 사용자 홈의 기본 캐시.
     monkeypatch.delenv("AOI_DATA_HOME", raising=False)
+    # ★ `HOME` 만 바꾸면 Windows 에서는 `Path.home()` 이 꿈쩍도 하지 않는다
+    #   (`USERPROFILE` 을 먼저 본다) — 두 변수를 함께 옮긴다.  conftest 의
+    #   `set_home` 과 같은 이유이고, 이 테스트가 Windows 에서 늘 실패하던 원인이다.
     monkeypatch.setenv("HOME", str(tmp_path / "h"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "h"))
     assert paths.cache_root() == tmp_path / "h" / ".aoi_verification_cache"
 
 

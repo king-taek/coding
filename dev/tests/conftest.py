@@ -14,10 +14,27 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import pytest
 
 
+def set_home(monkeypatch, path) -> None:
+    """``Path.home()`` 을 실제로 옮긴다 — **HOME 만으로는 Windows 에서 안 된다.**
+
+    ★ `ntpath.expanduser` 는 `USERPROFILE` 을 먼저 보고 `HOME` 은 쳐다보지 않는다.
+      그래서 이 파일이 맨 위에 적어 둔 '실제 사용자 디렉토리를 더럽히지 않는다' 는
+      격리가 **Windows 에서만 조용히 뚫려 있었다**.  실측 증거: 테스트가 만든
+      pytest 임시 경로가 개발자의 진짜
+      `~/.aoi_verification_cache/ui_prefs.json` 안에 그대로 적혀 있었다.
+    ★ 그 구멍의 대가는 두 가지였다 — (a) 테스트가 사용자의 실제 설정을 덮어썼고,
+      (b) prefs 가 프로세스 밖에 남아 **테스트가 다음 실행을 오염**시켰다(실측:
+      `test_setup_controls.py` 단독 3회 연속 실행에서 실패가 1 → 6 → 6 으로 늘었다).
+      병렬 실행에서 실패 목록이 매번 달라지던 것도 같은 원인이다.
+    """
+    monkeypatch.setenv("HOME", str(path))
+    monkeypatch.setenv("USERPROFILE", str(path))
+
+
 @pytest.fixture(autouse=True)
 def isolated_cache(monkeypatch, tmp_path):
     """모든 테스트가 임시 HOME 의 캐시 디렉토리를 쓰도록 강제."""
-    monkeypatch.setenv("HOME", str(tmp_path))
+    set_home(monkeypatch, tmp_path)
     # exe launcher 가 설정하는 캐시 위치 override 가 테스트에 새지 않도록 제거.
     monkeypatch.delenv("AOI_DATA_HOME", raising=False)
     # 'exe + app 폴더' 설치 신호도 마찬가지 — 새면 updater 가 스테이징 모드로 빠지고

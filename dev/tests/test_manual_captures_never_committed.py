@@ -25,8 +25,14 @@ _IMG = (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp")
 def _tracked() -> list[str]:
     # ★ `core.quotepath=false` 가 없으면 한글 경로가 `"dev/\354\202\254…"` 로 이스케이프돼
     #   돌아와 어떤 이름 비교도 성립하지 않는다(이 저장소는 경로가 전부 한글이다).
+    # ★ `text=True` 만 주면 **로케일 인코딩**(한국어 Windows = cp949)으로 디코드한다.
+    #   git 은 경로를 UTF-8 로 내보내므로 한글 폴더 이름에서 리더 스레드가
+    #   UnicodeDecodeError 로 죽고, `run()` 은 그걸 삼킨 채 `stdout=None` 을 돌려준다
+    #   — 그래서 이 테스트가 Windows 에서 늘 `'NoneType' has no attribute
+    #   'splitlines'` 로 실패했다.  인코딩을 명시하면 OS 로케일과 무관해진다.
     out = subprocess.run(["git", "-c", "core.quotepath=false", "ls-files", MANUAL],
-                         cwd=ROOT, capture_output=True, text=True, check=True)
+                         cwd=ROOT, capture_output=True, check=True,
+                         encoding="utf-8", errors="replace")
     return [ln for ln in out.stdout.splitlines() if ln.strip()]
 
 

@@ -70,11 +70,19 @@ def mark_unit_active(device: str) -> None:
 
 
 def unit_busy(device: str, window: float = 2.0) -> bool:
-    """``device`` 가 최근 ``window`` 초 이내에 추론했으면 True ('가동 중')."""
+    """``device`` 가 최근 ``window`` 초 **안에** 추론했으면 True ('가동 중').
+
+    ★ 경계는 `<` 다(`<=` 아님).  `window=0` 은 '시간 폭이 없다' 이므로 항상 False
+    여야 하는데, Windows 의 `time.monotonic()` 은 눈금이 ~15.6ms 라 방금 찍은
+    표시와의 차이가 **정확히 0.0** 으로 나온다 — `0.0 <= 0.0` 이 True 가 되어
+    '폭 0인데 가동 중' 이라는 답이 나왔다(리눅스는 시계가 촘촘해 안 걸린다).
+    ★ 이 함수는 진단 전용이다 — 상태바의 CPU/GPU 표시는 제거됐고 앱 코드에서
+    부르는 곳이 없다(`main_window` 주석 참조).  그래서 이 경계 변경이 실제 화면에
+    미치는 영향은 없다."""
     tag = _unit_tag(device)
     with _unit_activity_lock:
         t = _unit_activity.get(tag)
-    return t is not None and (time.monotonic() - t) <= window
+    return t is not None and (time.monotonic() - t) < window
 
 
 # ---------------------------------------------------------------------------

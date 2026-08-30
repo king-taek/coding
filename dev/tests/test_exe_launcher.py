@@ -27,10 +27,18 @@ launcher = _load()
 
 
 # ── 경로 해석 ──────────────────────────────────────────────────────────────
-def test_app_paths_are_relative_to_the_exe():
-    """모든 경로는 exe 위치 기준이어야 한다 — 얼린 exe 안에서 __file__ 은 무의미하다."""
-    lay = launcher.app_paths(Path("/inst/AOI_Verify/AOI_Verify.exe"))
-    root = Path("/inst/AOI_Verify")
+def test_app_paths_are_relative_to_the_exe(tmp_path):
+    """모든 경로는 exe 위치 기준이어야 한다 — 얼린 exe 안에서 __file__ 은 무의미하다.
+
+    ★ **드라이브 없는 경로(`/inst/…`)를 먹이지 마라.**  `app_paths` 는
+    `Path(exe).resolve()` 로 시작하는데, 이게 옳다 — 실제 exe 경로를 확정해야
+    `app`·`app.new`·`python` 이 전부 같은 뿌리를 갖는다.  그런데 Windows 에서
+    `resolve()` 는 드라이브 없는 경로에 **현재 드라이브를 붙인다**(`/inst/x` →
+    `C:/inst/x`).  그래서 이 검사는 앱이 아니라 **입력이 비현실적이라서** 늘
+    실패했다 — 정작 이 앱이 배포되는 OS 가 Windows 인데도.
+    실제로 들어오는 모양(드라이브 있는 절대경로)을 준다."""
+    root = tmp_path / "AOI_Verify"
+    lay = launcher.app_paths(root / "AOI_Verify.exe")
     assert lay.root == root
     assert lay.app == root / "app"
     assert lay.new == root / "app.new"
