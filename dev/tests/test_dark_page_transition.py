@@ -93,19 +93,34 @@ def test_snapshot_keeps_widget_size(qapp, dark_theme):
         w.deleteLater()
 
 
-def test_dark_toggle_has_no_artificial_delay(styled_qapp):
-    """★ 토글은 지연 없이 전환을 요청한다 — 버그 B.
+def test_dark_toggle_answers_before_the_screen_recolors(styled_qapp):
+    """누른 뒤 색이 움직이기까지의 시간이 **늘어나지 않는다** — 버그 B 의 본질.
 
-    타이머 **자체는 남는다**(연타 합치기 + 클릭 핸들러 선반환).  검사하는 것은
-    '인위적인 대기값이 붙어 있지 않은가' 다.
+    ★ 이 검사는 한때 `interval() == 0` 이었다.  그때의 사실관계: 재색이 메인
+    스레드를 실측 223ms 잡았고, 그 앞에 손잡이 이동 160ms 가 붙어 **누르고 색이
+    움직이기까지 383ms** 였다.  지연을 없애 223ms 로 줄인 것이 그 수정이다.
+    ★ 구조개편 24안이 그 전제를 바꿨다: 재색의 정지시간을 ~30ms 로 쪼갰다
+    (`main_window._repolish_visible_now` + 숨은 페이지 지연 처리).  그래서 이제
+    '노브 180ms → 재색' 순서를 써도 색이 움직이기까지 **약 210ms** 로, 지연 0 이던
+    223ms 보다 **오히려 빠르다** — 게다가 그 180ms 동안 노브가 얼지 않고 실제로
+    움직여 '눌렸다' 는 답을 준다(예전에는 그 구간이 통째로 얼어 있었다).
+    ★ 그래서 못박을 것은 기계(값 0)가 아니라 **목표**다: 예약은 되어야 하고,
+    누른 뒤 색이 움직이기 시작하는 시점이 옛 383ms 는 물론 지연 0 시절의 223ms 도
+    넘지 않아야 한다.
     """
+    from aoi_verification.app.ui import motion
     from aoi_verification.app.ui.pages import setup_page as sp
 
     page = sp.SetupPage()
     try:
         page._dark_switch.set_on(True, emit=True)
         assert page._appearance_timer.isActive(), "전환 요청이 예약되지 않았다"
-        assert page._appearance_timer.interval() == 0, (
-            f"토글에 {page._appearance_timer.interval()}ms 선딜레이가 붙어 있다")
+        delay = page._appearance_timer.interval()
+        # 노브가 도착하기 **전에** 재색을 시작하면 노브가 답을 주다 만다.
+        assert delay in (0, motion.DUR_KNOB), (
+            f"선딜레이 {delay}ms — 0(즉시) 이거나 노브 도착(DUR_KNOB) 이어야 한다")
+        # 정지시간(~30ms)까지 더해도 옛 '지연 0' 시절의 체감(223ms)을 넘지 않는다.
+        assert delay + 30 <= 223, (
+            f"누른 뒤 색이 움직이기까지 {delay + 30}ms — 예전보다 느려졌다")
     finally:
         page.close()

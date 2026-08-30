@@ -122,17 +122,25 @@ _LIGHT: dict[str, str] = {
 #   컨셉으로는 성립했지만 (a) 모드가 셋이라 '어두운 화면 켜기'를 boolean 으로 못 쓰고
 #   3칩 선택기가 필요했고 (b) 유지비가 두 배였다.  사용자 결정으로 흑연 하나만 남겨
 #   **다크 모드 토글**로 단순화했다.  키는 `"dark"` 라 기존 prefs 가 그대로 동작한다.
+# ※ 2026-08 구조개편 24안 — **팔레트 ① '덜 어두운 흑연'** 채택.  면·선을 한 단씩
+#   밝혀 다크에서도 카드/행/시트의 층이 보이게 한다(예전 bg 1C1A15 는 panel 과의
+#   차이가 눈으로 거의 안 잡혔다).  면을 밝히면 그 위 잉크의 대비 **여유가 줄어들므로**
+#   ink2·mute·thumb_frame 도 같은 폭으로 한 단 밝혀 균형을 맞춘다 — 시안이 그린 값이
+#   그대로 이 값들이다.  단 `line` 만은 시안값 #8A8271 이 elev(#403B30) 위에서 2.92 로
+#   저장소 자체 게이트(비문자 3.0, `test_a11y_controls`)를 0.08 차이로 못 넘겨
+#   #8E8675 로 한 단 올렸다.
 _DARK: dict[str, str] = {
-    "bg": "#1C1A15",        # 불 끈 제도지
+    "bg": "#2B2820",        # 불 끈 제도지(팔레트 ①)
     "viewer_bg": "#000000",   # 라이트와 같다 — 사진 판독 바탕은 테마를 따르지 않는다
-    "panel": "#26231C",
-    "elev": "#302C24",
-    "line": "#7C7565",      # 흑연 눈금 — panel 3.43 / bg 3.80
-    "line2": "#3F3A31",     # 장식 전용
-    "line_strong": "#8E8675",   # 상호작용 경계 — elev 에서도 3.85
+    "panel": "#363228",
+    "elev": "#403B30",
+    "line": "#8E8675",      # 흑연 눈금 — elev 3.08 / panel 3.54 / bg 4.08
+    "line2": "#4A453B",     # 장식 전용
+    "line_strong": "#9A9280",   # 상호작용 경계 — elev 에서도 3.60
     "ink": "#F3F0E8",       # 흑연 선(밝게)
-    "ink2": "#D4CEC0",
-    "mute": "#A8A192",
+    "ink2": "#D6D0C2",
+    "mute": "#AEA798",      # panel 5.34 / elev 4.66 — 면을 밝힌 만큼 같이 올렸다
+                            # (시안값 ABA495 는 statTile(elev) 위에서 4.49 로 캡션 게이트 4.5 미달)
     "accent": "#8FBEEA",    # 청사진 블루 — 웜 무채 바탕에서 유일한 유채
     "accent_hover": "#A6CDF1",
     "accent_pressed": "#76A9DC",
@@ -143,7 +151,7 @@ _DARK: dict[str, str] = {
     #   깨진다.  0.327 로 낮춘다(면 대비 9.52/10.55 로 게이트는 여유).
     "warn": "#DFC796",
     "focus": "#ABCEF6",
-    "thumb_frame": "#6F6859",
+    "thumb_frame": "#7A7263",
 }
 
 PALETTES: dict[str, dict[str, str]] = {"light": _LIGHT, "dark": _DARK}
@@ -390,13 +398,33 @@ def render_qss(template_text: str) -> str:
     return Template(template_text).substitute(TOKENS)
 
 
+_QSS_SOURCE: str | None = None          # style.qss 원문 — 디스크는 한 번만 읽는다
+_QSS_RENDERED: dict[int, str] = {}      # TOKENS 지문 → 렌더 결과
+
+
 def apply_to_app(app) -> None:
-    """style.qss 를 렌더해 앱 전체에 적용."""
-    from pathlib import Path
-    from ..utils import paths
-    qss_path = paths.resource_path("aoi_verification/app/ui/style.qss")
-    text = Path(qss_path).read_text(encoding="utf-8")
-    app.setStyleSheet(render_qss(text))
+    """style.qss 를 렌더해 앱 전체에 적용.
+
+    ★ 원문 읽기와 렌더 결과를 **캐시**한다.  다크 모드 전환은 이 함수를 매번 부르는데
+    style.qss 는 1,200 줄이라 '디스크 읽기 + ``Template.substitute``' 만으로 실측
+    55~99 ms 를 메인 스레드에서 먹었다 — 전환이 버벅이던 몫이다.  ``setStyleSheet``
+    자체의 비용은 남지만 그건 Qt 몫이라 우리가 줄일 수 없다.
+
+    캐시 키는 :data:`TOKENS` 의 지문이다 — 모드 이름으로만 잡으면 팔레트를 흔드는
+    테스트가 옛 렌더를 받는다.  지문 계산은 62 개 짧은 문자열이라 마이크로초다.
+    """
+    global _QSS_SOURCE
+    if _QSS_SOURCE is None:
+        from pathlib import Path
+        from ..utils import paths
+        qss_path = paths.resource_path("aoi_verification/app/ui/style.qss")
+        _QSS_SOURCE = Path(qss_path).read_text(encoding="utf-8")
+    key = hash(tuple(sorted(TOKENS.items())))
+    rendered = _QSS_RENDERED.get(key)
+    if rendered is None:
+        rendered = render_qss(_QSS_SOURCE)
+        _QSS_RENDERED[key] = rendered
+    app.setStyleSheet(rendered)
 
 
 # 모듈 로드 시 기본 모드 확정 — import 만 해도 전역·TOKENS 가 채워져 있다.

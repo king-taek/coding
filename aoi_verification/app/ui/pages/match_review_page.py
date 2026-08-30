@@ -903,14 +903,6 @@ class MatchReviewPage(QWidget):
         # 차이를 화면에서 바로 확인할 수 있게 한다 (U-13).
         self._tally_label.setToolTip(i18n.KO.TALLY_TOOLTIP)
         bar.addWidget(self._tally_label)
-        # ★ 탤리는 예외를 **세기만** 하고 데려다 주지 않았다.  600행 검토에서 예외
-        #   12건을 찾는 것이 이 화면의 실제 작업인데, 유사도 모드(슬롯순 정렬)에서는
-        #   예외가 목록 곳곳에 흩어져 수동 스크롤이 유일한 길이었다.
-        #   행을 숨기거나 새 상태를 만들지 않는 **순수 탐색**이다(현재 행 표시와
-        #   스크롤 헬퍼를 그대로 재사용한다).
-        self._btn_next_issue = NeonButton(i18n.KO.BTN_NEXT_ISSUE, role="rowAction")
-        self._btn_next_issue.clicked.connect(self._goto_next_issue)
-        bar.addWidget(self._btn_next_issue)
         bar.addStretch(1)
         # ※ '확인 필요만' 필터는 제거했다 — 상단 탤리(일치·허용 초과·매치 없음)가 이미
         #   '무엇을 확인해야 하는지'를 말한다.  행을 숨기는 필터는 그 위에 상태를 하나
@@ -1151,6 +1143,7 @@ class MatchReviewPage(QWidget):
         for m in first:
             self._append_row(m)
         if not self._pending_rows:
+            self._arm_entrance()
             return
         total = len(ordered)
         self._row_total = total
@@ -1176,7 +1169,53 @@ class MatchReviewPage(QWidget):
                                        i18n.KO.LOAD_REVIEW_ROWS)
             self._row_batch_timer.start(0)
         else:
-            self._loading.hide_overlay()
+            # ★ `hide_overlay` 는 동기 종료가 아니다(최소표시 래치 + 페이드아웃).
+            #   바로 다음 줄에서 재생하면 아직 덮개 아래라 아무도 못 본다 —
+            #   덮개가 **실제로 걷힌 뒤** 를 콜백으로 받는다.
+            self._loading.hide_overlay(then=self._arm_entrance)
+
+    #: 진입 스태거를 거는 행 수 — 시안이 '화면에 보이는 첫 8행' 으로 정했다.
+    _ENTRANCE_ROWS = 8
+    #: 행 사이 지연(ms) — 8행 × 60 + 220 = 640ms 안에 전부 끝난다.
+    _ENTRANCE_STEP_MS = 60
+
+    def _arm_entrance(self) -> None:
+        """스태거를 예약한다 — 화면에 **앉은 뒤** 재생한다.
+
+        ★ 행 생성은 `load_state` 안에서 끝나는데, 창은 그 뒤에 `_show_page` 로
+        이 페이지를 올린다.  그래서 생성 직후에 재생하면 아직 스택의 current 가
+        아니라 아무도 못 본다 — 진입 모션이 '진입할 때 안 보이는' 꼴이었다.
+        창이 페이지를 실제로 앉히면 `on_shown()` 이 이걸 깨운다."""
+        self._entrance_pending = True
+        self._maybe_play_entrance()
+
+    def on_shown(self) -> None:
+        """창이 이 페이지를 화면에 앉혔다(`main_window._show_page` 의 커밋 지점)."""
+        self._maybe_play_entrance()
+
+    def _maybe_play_entrance(self) -> None:
+        if not getattr(self, "_entrance_pending", False):
+            return
+        if not self.isVisible():
+            return                      # 아직 화면 밖 — 예약만 남겨 둔다
+        self._entrance_pending = False
+        self._play_entrance()
+
+    def _play_entrance(self) -> None:
+        """목록이 준비된 순간, 위쪽 8행이 **하나씩** 자리에 안착한다 (25안).
+
+        ★ 왜 스태거인가.  매칭이 끝나면 행 수백 개가 **한 프레임에 통째로** 나타나
+        어디부터 봐야 할지 시선의 출발점이 없었다.  첫 행이 가장 먼저 안착하면
+        그 자리가 출발점이 된다.
+        ★ 왜 8행뿐인가.  보이는 만큼만이면 충분하고(스크롤로 생기는 행은 애니 없음),
+        600행 전체에 걸면 화면 밖 행까지 비용을 내고 마지막 행이 수십 초 뒤에
+        나타난다.  이 앱의 'per-item 애니 금지' 예산은 '가시 8행 1회' 로 지킨다.
+        ★ 이펙트는 재생이 끝나면 `motion.rise_in` 이 스스로 떼어 낸다 — 붙여 두면
+        Qt 가 그 행을 계속 오프스크린으로 다시 그려 스크롤이 무거워진다."""
+        from .. import motion
+        rows = [r for r in self._rows if not r.isHidden()][:self._ENTRANCE_ROWS]
+        for i, row in enumerate(rows):
+            motion.rise_in(row, delay_ms=i * self._ENTRANCE_STEP_MS)
 
     def unmatched_keys(self) -> set:
         """사용자가 '매치 없음' 으로 표시한 매치 키들(결과↔검토 왕복 보존용)."""
@@ -1230,25 +1269,6 @@ class MatchReviewPage(QWidget):
         rows = [r for r in self._rows if not r.isHidden()]
         rows.sort(key=lambda r: self._list_layout.indexOf(r))
         return rows
-
-    def _goto_next_issue(self) -> None:
-        """현재 행 **다음**의 예외 행(state != "ok")으로 이동 — 없으면 처음부터.
-
-        표시/스크롤만 바꾼다: 행을 숨기지도, 상태를 만들지도 않는다.  끝에서 다시
-        앞으로 도는 것은 '한 바퀴 다 봤다' 를 사용자가 스스로 알 수 있게 하기
-        위해서다(마지막 예외에서 눌러도 버튼이 죽은 것처럼 보이지 않는다)."""
-        rows = self._visible_rows()
-        if not rows:
-            return
-        try:
-            start = rows.index(self._current_row) + 1
-        except ValueError:
-            start = 0
-        order = rows[start:] + rows[:start]
-        for row in order:
-            if row.state() != "ok":
-                self._set_current(row)
-                return
 
     def _set_current(self, row: "_MatchRow | None") -> None:
         old = self._current_row
@@ -1344,6 +1364,13 @@ class MatchReviewPage(QWidget):
             if self._current_row is old_row:
                 self._current_row = None
                 self._set_current(new_row)
+            # ★ 22안-B — 교체 직후 **행 전체가 한 번 펄스**한다.  교체는 행을 통째로
+            #   다시 만들기 때문에 새 행의 `_prev_state` 가 None 이고, 그래서
+            #   `_apply_state` 의 상태 전환 펄스가 **터지지 않는다** — 눌렀는데
+            #   스냅으로 바뀌어 무엇이 달라졌는지 눈이 다시 찾아야 했다.
+            #   시안이 고른 안은 '기존 헬퍼 그대로' 라 신규 코드가 0 이다.
+            from .. import motion
+            motion.pulse(new_row)
         self._update_summary()
 
     def _lookup_runners_up(self, match: MatchResult, score_cache, val_pool) -> list:
@@ -1422,14 +1449,6 @@ class MatchReviewPage(QWidget):
             parts.append(seg(i18n.KO.TALLY_COORD_FAILED_FMT,
                              self._coord_failed_count, theme.MUTE))
         self._tally_label.setText(sep.join(parts))
-        # ★ 갈 곳이 없으면 잠근다.  예외가 0 건인 검토에서 이 버튼은 눌러도 아무 일이
-        #   일어나지 않았다 — 같은 시안에서 [묶기]·벌크 액션의 '먹은 클릭' 을 고쳐 놓고
-        #   여기만 남아 있었다.  판정 근거는 `_goto_next_issue` 와 같다 — 탤리도 행도
-        #   `classify_row` 하나를 보므로, 행이 배치로 늦게 만들어지는 중에도 어긋나지 않는다.
-        has_issue = (over + none) > 0
-        self._btn_next_issue.setEnabled(has_issue)
-        self._btn_next_issue.setToolTip(
-            "" if has_issue else i18n.KO.BTN_NEXT_ISSUE_NONE_TOOLTIP)
         kept = len(self._matches) - len(self._unmatched_keys)
         self.btn_done.setText(i18n.KO.BTN_FINISH_REVIEW_KEPT_FMT.format(n=kept))
 

@@ -148,10 +148,29 @@ class ResultPage(QWidget):
         )
         opt_row.addWidget(self.original_quality_chk)
 
+        # ★ 29안 — '사진을 원본 화질로' 는 '미매칭만 원본' 을 **삼킨다**
+        #   (`exporter._embed_image_path` 가 전역 옵션에서 먼저 끊는다).  지금까지는
+        #   둘 다 켤 수 있었고, 그때 앞의 체크는 **아무 일도 하지 않으면서 켜져**
+        #   있었다 — 화면이 사실과 다른 상태를 보여 준 것이다.  삼켜지는 쪽을
+        #   비활성으로 내려 '지금은 의미 없음' 을 화면이 직접 말하게 한다.
+        #   (묶음 캡션은 사용자 결정으로 삭제 — 배치·순서는 현행 그대로다.)
+        self.original_quality_chk.toggled.connect(self._sync_option_dependency)
+
         self.full_template_chk = QCheckBox(i18n.KO.EXPORT_FULL_TEMPLATE_LABEL, self)
         self.full_template_chk.setChecked(False)
         self.full_template_chk.setToolTip(i18n.KO.EXPORT_FULL_TEMPLATE_TOOLTIP)
         opt_row.addWidget(self.full_template_chk)
+        self._sync_option_dependency(self.original_quality_chk.isChecked())
+
+        # ★ 31안 — 누르기 **전에** 목적지를 말한다.  [엑셀로 저장] 을 눌러야
+        #   저장 대화상자에서 파일명을 처음 봤고, 두 번째 저장부터는 대화상자
+        #   없이 같은 경로에 **덮어쓰는데** 그 사실이 버튼에 드러나지 않았다.
+        #   덮어쓰기가 놀람이 아니라 예고가 된다.
+        target_row = QHBoxLayout()
+        target_row.addStretch(1)
+        self.save_target_label = QLabel("", self)
+        self.save_target_label.setProperty("role", "monoMuted")
+        target_row.addWidget(self.save_target_label)
 
         bar = QHBoxLayout()
         bar.addStretch(1)
@@ -188,6 +207,7 @@ class ResultPage(QWidget):
         tail.setContentsMargins(0, 0, 0, 0)
         tail.setSpacing(8)
         tail.addLayout(opt_row)
+        tail.addLayout(target_row)
         tail.addLayout(bar)
         root.addLayout(tail)
 
@@ -210,6 +230,11 @@ class ResultPage(QWidget):
         #   다시 들어오는 경로도 여기를 지나므로 자연히 리셋된다.
         if result is not self._result:
             self._exported = False
+            # ★ 저장 경로도 함께 버린다.  ResultPage 는 세션마다 새로 만들지 않고
+            #   하나를 재사용하므로, 남겨 두면 새 검증의 목적지 캡션이 **지난
+            #   세션에 저장한 파일**을 가리킨다("다시 저장: 같은 파일에 덮어씀 ·
+            #   옛 경로") — 누르기 전에 목적지를 보여주려던 것이 거짓말이 된다.
+            self._save_path = None
         self._result = result
         self._template_path = template_path
         self._target_path = target_path
@@ -285,6 +310,8 @@ class ResultPage(QWidget):
             )
         else:
             self.review_unmatched_btn.setText(i18n.KO.BTN_REVIEW_UNMATCHED)
+
+        self._refresh_save_target()      # 31안 — 누르기 전에 목적지를
 
     # ------------------------------------------------------------------
     def _on_review_unmatched(self) -> None:
@@ -449,12 +476,44 @@ class ResultPage(QWidget):
             original_quality=self.original_quality_chk.isChecked(),
             unmatched_original_quality=self.unmatched_original_chk.isChecked(),
         )
+        # ★ 30안 — 워커가 보내는 문구(어느 시트·어느 슬롯)를 **그대로 띄운다**.
+        #   예전엔 `msg` 를 버리고 고정 문구만 썼다.  행 수치는 여전히 오버레이의
+        #   진행 라벨 몫이라 문구에 숫자가 들어가지 않는다(ko.py 단일 출처 규칙).
         self._exporter.signals.progress.connect(
-            lambda d, t, msg: self._loading.set_progress(d, t, i18n.KO.LOAD_EXPORT)
+            lambda d, t, msg: self._loading.set_progress(
+                d, t, msg or i18n.KO.LOAD_EXPORT)
         )
         self._exporter.signals.done.connect(self._on_export_done)
         self._exporter.signals.failed.connect(self._on_export_failed)
         self._exporter.start()
+
+    def _sync_option_dependency(self, original_on: bool) -> None:
+        """'사진을 원본 화질로' 가 켜지면 '미매칭만 원본' 은 의미가 없다 (29안).
+
+        비활성으로 내리되 **체크 상태는 건드리지 않는다** — 전역 옵션을 껐을 때
+        사용자가 원래 두었던 선택이 그대로 돌아와야 한다(끄는 순간 값이 바뀌면
+        '내가 언제 저걸 껐지' 가 된다).  툴팁은 그대로 유지한다(시안 명시)."""
+        self.unmatched_original_chk.setEnabled(not bool(original_on))
+
+    def _refresh_save_target(self) -> None:
+        """[엑셀로 저장] 위에 **목적지**를 적는다 (31안).
+
+        두 상태다 — 저장 전에는 '무엇이 생기는가', 한 번 저장한 뒤에는 '같은
+        파일에 덮어쓴다'.  두 번째 저장이 조용히 덮어쓰던 것이 이 화면에서
+        가장 놀라운 동작이었다."""
+        lab = getattr(self, "save_target_label", None)
+        if lab is None:
+            return
+        path = self._save_path or self._target_path
+        if path is None:
+            lab.setText("")
+            lab.setToolTip("")
+            return
+        if self._exported:
+            lab.setText(i18n.KO.SAVE_TARGET_AGAIN_FMT.format(path=path))
+        else:
+            lab.setText(i18n.KO.SAVE_TARGET_FMT.format(name=path.name))
+        lab.setToolTip(str(path))
 
     def _on_export_done(self, path: str) -> None:
         self._loading.hide_overlay()
@@ -463,6 +522,8 @@ class ResultPage(QWidget):
         if self._saved_label is not None:
             self._saved_label.setText(i18n.KO.RESULT_SAVED_AT_FMT.format(
                 time=datetime.now().strftime("%H:%M")))
+        # 이제부터는 '다시 저장 = 덮어쓰기' 다 — 캡션이 그 사실로 바뀐다(31안).
+        self._refresh_save_target()
         # ★ 워커 시그널 슬롯에서 곧바로 모달을 열면 중첩 이벤트 루프가 생긴다 —
         #   한 틱 미뤄 워커가 완전히 빠져나간 뒤에 띄운다.
         self._pending_saved_path = Path(path)

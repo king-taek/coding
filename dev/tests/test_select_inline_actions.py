@@ -142,12 +142,19 @@ def test_empty_target_panel_explains_itself(styled_qapp, tmp_path):
     page.deleteLater()
 
 
-def test_back_to_setup_exists_and_is_symmetric_with_stage2(styled_qapp, tmp_path):
-    """폴더를 잘못 고르고 들어왔을 때 돌아갈 길 — Stage 2 와 같은 자리."""
+def test_back_to_setup_is_reachable_from_the_journey_rail(styled_qapp, tmp_path):
+    """폴더를 잘못 고르고 들어왔을 때 돌아갈 길.
+
+    ★ 화면 안의 [← 설정으로] 버튼은 없앴다(구조개편 1안-A) — 뒤로가기의 의미가
+    화면마다 달랐던 것이 문제였고, 이제 창 상단 여정 레일이 그 일을 통일해서
+    맡는다.  레일은 `request_back_to_setup()` 을 부르고, **무엇이 사라지는지**를
+    아는 확인은 계속 이 화면에 남아 있다."""
     page = _page(styled_qapp, tmp_path)
-    assert hasattr(page, "btn_back_to_setup")
+    assert not hasattr(page, "btn_back_to_setup"), \
+        "화면 안 뒤로가기 버튼이 되살아났다 — 복귀 경로는 여정 레일 하나다"
+    assert callable(page.request_back_to_setup)
     seen = []
     page.cancelled.connect(lambda: seen.append(True))
-    page.btn_back_to_setup.click()          # 아직 결정 0 건 → 확인창 없이 즉시
+    page.request_back_to_setup()            # 아직 결정 0 건 → 확인창 없이 즉시
     assert seen == [True]
     page.deleteLater()

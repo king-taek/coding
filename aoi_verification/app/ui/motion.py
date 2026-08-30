@@ -19,8 +19,10 @@ from __future__ import annotations
 import os
 
 from PyQt6.QtCore import (QEasingCurve, QEvent, QObject, QPoint, QPointF,
-                          QPropertyAnimation, QVariantAnimation)
-from PyQt6.QtWidgets import QApplication, QGraphicsOpacityEffect, QLabel
+                          QPropertyAnimation, QSequentialAnimationGroup,
+                          QVariantAnimation, pyqtProperty)
+from PyQt6.QtWidgets import (QApplication, QGraphicsEffect,
+                             QGraphicsOpacityEffect, QLabel)
 
 from . import theme
 
@@ -78,15 +80,26 @@ class _InputSwallow(QObject):
 #   체감이 거의 안 달라진다 — 둘은 함께 정해야 한다.
 DUR_BASE = 300           # 실제 240ms(motion_scale 0.8)
 DUR_SLOW = 400
-DUR_SWITCH = 200         # 토글 손잡이 이동 — `switch_row.ToggleSwitch` 가 쓰는 값
 
 # ── 사용자가 **실제 밀리초로 지정한** 지속시간 ────────────────────────────────
 # ★ 이 셋은 `dur()` 스케일을 타지 않는다.  `motion_scale`(0.8)을 곱하면 400ms 지정이
 #   320ms 로 나가 '지정한 값'과 '실제 값'이 갈라진다 — 사용자가 눈으로 정한 수치이므로
 #   그대로 쓴다.  스케일이 필요한 자리는 여전히 `dur()` 를 쓴다.
-DUR_SHEET = 400          # 작은 화면 팝업(시트) 등장/퇴장
+DUR_SHEET = 400          # 작은 화면 팝업(시트) 등장/퇴장 — 발원점을 모를 때의 폴백
 DUR_LOADING = 500        # 로딩 화면 팝업 등장
+# ★ 사용자 결정으로 **기존 값 유지**.  구조개편 24안은 이 페이드를 280ms 로 줄이자고
+#   했지만(긴 페이드 동안 어중간한 혼합색이 머문다는 근거), 실제로 보고 되돌렸다 —
+#   같은 안의 나머지(재색 정지시간 125→~30ms 분할, 팔레트 ①, 토글 노브)는 그대로다.
 DUR_RECOLOR = 700        # 색 모드(어두운 화면) 전환
+# 구조개편 21·23·25·26·27안이 **눈으로 정한** 지속시간 — 위 셋과 같이 dur() 를 타지
+# 않는다(시안이 밀리초로 명시한 값이라 스케일을 곱하면 지정과 실제가 갈라진다).
+DUR_RAIL_LEAD = 140      # 21안 — 여정 레일 눈금이 페이지보다 **먼저** 채워지는 시간
+DUR_FINISH_TICK = 200    # 23안 — 수 분짜리 작업이 100% 에 닿는 순간의 마침 틱
+DUR_RISE_IN = 220        # 25안 — 검토 행 페이드-라이즈
+STAGGER_RISE_MS = 60     # 25안 — 행 사이 지연
+DUR_SWIPE_OUT = 180      # 26안 — 결정한 사진이 방향으로 밀려나는 시간
+DUR_SWIPE_IN = 120       # 26안 — 다음 사진 페이드인
+DUR_KNOB = 180           # 24안 — 다크 토글 노브 슬라이드(누른 즉시의 답)
 
 
 def _ease_material_decelerate() -> QEasingCurve:
@@ -429,3 +442,151 @@ def _connect_pulse_tick(anim, widget, attr: str) -> None:
     widget 보다 먼저 죽는다.  형제를 건드리면 순서가 보장되지 않아 위험하다."""
     anim.valueChanged.connect(lambda v: (setattr(widget, attr, float(v)),
                                          widget.update()))
+
+
+# ── 등장/퇴장 — 오프셋 + 페이드를 **하나의 그래픽스 이펙트**로 ───────────────────
+#
+# ★ 왜 이펙트인가.  대상이 전부 **레이아웃이 자리를 정하는** 위젯이다(검토 행은
+#   QVBoxLayout, 선별 사진은 QScrollArea 안).  `move()` 로 밀면 다음 레이아웃 패스가
+#   즉시 되돌리고, 마진으로 밀면 sizeHint 가 바뀌어 이웃이 함께 출렁인다.
+#   `QGraphicsEffect` 는 **그리기 단계**에만 끼어들어 레이아웃을 건드리지 않는다 —
+#   시안이 26안에서 "레이아웃 불변 — 리플로 0" 으로 못박은 성질이 이것이다.
+# ★ 위젯 하나에 이펙트는 **하나뿐**이다(Qt 제약).  그래서 이동과 페이드를 각각 따로
+#   걸지 않고 한 클래스가 둘 다 한다 — 둘을 걸려다 조용히 하나가 사라지는 일을
+#   애초에 없앤다.
+class _OffsetFade(QGraphicsEffect):
+    """``progress`` 0→1 로 (오프셋, 불투명도)를 함께 보간해 그린다.
+
+    ``progress`` 는 **Qt 속성**이라 `QPropertyAnimation` 이 직접 몬다 — 람다 tick 이
+    없고, 애니메이션이 형제를 건드릴 일도 없다(이 모듈의 수명 규칙)."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._progress = 0.0
+        self._from = QPointF(0.0, 0.0)
+        self._to = QPointF(0.0, 0.0)
+        self._op_from = 0.0
+        self._op_to = 1.0
+
+    def configure(self, *, offset_from, offset_to, opacity_from, opacity_to):
+        self._from = QPointF(float(offset_from[0]), float(offset_from[1]))
+        self._to = QPointF(float(offset_to[0]), float(offset_to[1]))
+        self._op_from = float(opacity_from)
+        self._op_to = float(opacity_to)
+
+    def _get_progress(self) -> float:
+        return self._progress
+
+    def _set_progress(self, value: float) -> None:
+        self._progress = float(value)
+        # ★ update() 가 아니라 updateBoundingRect() — 오프셋만큼 위젯 **밖**을 칠하므로
+        #   갱신 영역을 넓히지 않으면 밀려난 부분이 잔상으로 남는다.
+        self.updateBoundingRect()
+
+    progress = pyqtProperty(float, _get_progress, _set_progress)
+
+    def boundingRectFor(self, rect):  # noqa: N802
+        return rect.adjusted(
+            min(0.0, self._from.x(), self._to.x()),
+            min(0.0, self._from.y(), self._to.y()),
+            max(0.0, self._from.x(), self._to.x()),
+            max(0.0, self._from.y(), self._to.y()))
+
+    def draw(self, painter):
+        t = max(0.0, min(1.0, self._progress))
+        dx = self._from.x() + (self._to.x() - self._from.x()) * t
+        dy = self._from.y() + (self._to.y() - self._from.y()) * t
+        op = self._op_from + (self._op_to - self._op_from) * t
+        painter.save()
+        painter.setOpacity(max(0.0, min(1.0, op)))
+        painter.translate(dx, dy)
+        # drawSource 는 소스를 있는 그대로 그린다 — 픽스맵으로 굽지 않아 글자가
+        # 흐려지지 않는다.
+        self.drawSource(painter)
+        painter.restore()
+
+
+def _run_offset_fade(widget, *, offset_from, offset_to, opacity_from,
+                     opacity_to, duration, delay_ms, on_done):
+    """공통 몸통 — 이펙트를 걸고 한 번 재생한 뒤 **떼어 낸다**.
+
+    ★ 끝나면 반드시 `setGraphicsEffect(None)`.  이펙트가 붙어 있는 동안 Qt 는 그
+      위젯을 오프스크린으로 다시 그린다(로딩 패널이 같은 이유로 뗀다) — 검토 행
+      수백 개에 남기면 스크롤이 무거워진다.
+    ★ 애니메이션의 부모는 **위젯**이다(이펙트가 아니다).  끝에서 이펙트를 지우는데
+      애니메이션이 이펙트의 자식이면 자기 `finished` 를 처리하는 도중 자신이
+      삭제된다.  대상은 `QPropertyAnimation` 이 QPointer 로 들고 있어 안전하다.
+    ★ 지속시간은 `dur()` 를 타지 않는다 — 시안이 밀리초로 정한 값이다.
+    """
+    if not enabled():
+        if on_done is not None:
+            on_done()
+        return None
+    eff = _OffsetFade(widget)
+    eff.configure(offset_from=offset_from, offset_to=offset_to,
+                  opacity_from=opacity_from, opacity_to=opacity_to)
+    widget.setGraphicsEffect(eff)          # 위젯이 소유권을 가져간다
+
+    anim = QPropertyAnimation(eff, b"progress", widget)
+    anim.setStartValue(0.0)
+    anim.setEndValue(1.0)
+    anim.setDuration(int(duration))
+    anim.setEasingCurve(EASE_PRIMARY)
+
+    def _finish():
+        # ★ **자기가 건 이펙트일 때만** 뗀다.  연타로 같은 위젯에 새 등장이 걸리면
+        #   Qt 가 옛 이펙트를 지우는데, 그 뒤 옛 애니메이션의 finished 가 도착해
+        #   무조건 None 을 넣으면 **방금 건 새 이펙트가 사라진다**(사진이 그대로
+        #   멈춰 보인다).  선별 화면의 →/← 연타에서 실제로 닿는 경로다.
+        try:
+            if widget.graphicsEffect() is eff:
+                widget.setGraphicsEffect(None)
+        except RuntimeError:
+            pass                            # 위젯이 이미 사라졌다
+        if on_done is not None:
+            on_done()
+
+    anim.finished.connect(_finish)
+    if delay_ms > 0:
+        group = QSequentialAnimationGroup(widget)
+        group.addPause(int(delay_ms))
+        group.addAnimation(anim)
+        group.start()
+        return group
+    anim.start()
+    return anim
+
+
+def rise_in(widget, *, delay_ms: int = 0, rise_px: int = 18,
+            duration: int = DUR_RISE_IN, on_done=None):
+    """아래에서 올라오며 나타난다 — 목록·카드의 **1회성** 등장(25안).
+
+    `delay_ms` 로 스태거를 만든다(행마다 조금씩 늦춰 하나씩 안착)."""
+    return _run_offset_fade(widget, offset_from=(0, rise_px), offset_to=(0, 0),
+                            opacity_from=0.0, opacity_to=1.0,
+                            duration=duration, delay_ms=delay_ms,
+                            on_done=on_done)
+
+
+def fade_in(widget, *, delay_ms: int = 0, duration: int = DUR_SWIPE_IN,
+            on_done=None):
+    """제자리 페이드인 — 스와이프로 떠난 자리에 들어오는 다음 장(26안).
+
+    ``delay_ms`` 동안은 투명하다(CSS 의 ``backwards`` 와 같은 뜻) — 시안이
+    `dsFadeIn .12s linear .18s backwards` 로 적은 그대로, 앞 사진이 다 빠진 **뒤**
+    들어온다.  그 동안 자리는 떠나는 고스트가 덮고 있다."""
+    return _run_offset_fade(widget, offset_from=(0, 0), offset_to=(0, 0),
+                            opacity_from=0.0, opacity_to=1.0,
+                            duration=duration, delay_ms=delay_ms,
+                            on_done=on_done)
+
+
+def swipe_out(widget, *, dx: int = 64, duration: int = DUR_SWIPE_OUT,
+              on_done=None):
+    """결정한 방향으로 밀려나며 사라진다 — 부호가 곧 방향이다(+오른쪽/−왼쪽, 26안).
+
+    ★ 살아 있는 위젯에 걸지 마라.  다음 사진이 곧바로 그 자리에 들어오므로
+      **떠나는 그림의 사본(고스트)** 에 걸어야 한다."""
+    return _run_offset_fade(widget, offset_from=(0, 0), offset_to=(dx, 0),
+                            opacity_from=1.0, opacity_to=0.0,
+                            duration=duration, delay_ms=0, on_done=on_done)

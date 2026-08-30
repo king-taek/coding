@@ -117,7 +117,7 @@ def _error(msg: str) -> None:
     """``console=False`` 라 stderr 가 보이지 않는다 — 메시지 상자로 알린다(의존성 0)."""
     try:
         import ctypes
-        ctypes.windll.user32.MessageBoxW(None, msg, "AOI 검증", 0x10)
+        ctypes.windll.user32.MessageBoxW(None, msg, "AOI 레시피 검증", 0x10)
     except Exception:
         print(msg, file=sys.stderr)
 

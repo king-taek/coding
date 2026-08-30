@@ -35,6 +35,7 @@ from ..utils import paths, wafer_id, wakelock
 from ..utils import prefs as _prefs
 from ..utils.prefs import AutomationLevel, EngineMode
 from .pages.setup_page import SetupInput, SetupPage
+from .widgets.journey_rail import JourneyRail
 from .widgets.loading_overlay import LoadingOverlay
 from .widgets import sheet_host as sheets
 from .widgets.sheet_host import SheetHost
@@ -163,6 +164,13 @@ class MainWindow(QMainWindow):
         col = QVBoxLayout(central)
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(0)
+        # 여정 레일 — 5단계 진행 지도.  ★ 스택 **밖**의 고정 칸이다.  로고와 달리
+        #   이건 스크롤을 따라 사라지면 안 된다: '지금 몇 번째인지' 는 화면을 스크롤한
+        #   순간에도 답이 있어야 하는 질문이라 상시 가시성이 이 위젯의 존재 이유다.
+        #   대신 42px 을 영구히 쓴다(구조개편 1안-A 가 명시한 대가).
+        self._rail = JourneyRail(central)
+        self._rail.step_clicked.connect(self._on_rail_step_clicked)
+        col.addWidget(self._rail)
         self._stack = QStackedWidget(central)
         col.addWidget(self._stack, 1)
         self.setCentralWidget(central)
@@ -931,6 +939,8 @@ class MainWindow(QMainWindow):
 
     def _on_start(self, inp: SetupInput) -> None:
         self._input = inp
+        # 레일 오른쪽의 판정 기준 — 이 세션의 기준은 지금 확정된다.
+        self._refresh_rail_criteria()
         # #14 세션 동안 OS 절전/화면보호기 억제.
         wakelock.acquire()
         self._matches_a.clear()
@@ -1715,6 +1725,7 @@ class MainWindow(QMainWindow):
         #   (`_cancel_scan` 이 `_scan = None` 을 두는 것과 같은 처방).
         #   넷 다 `_on_start`/`_on_scan_done` 이 새로 채우므로 지워도 안전하다.
         self._input = None
+        self._refresh_rail_criteria()      # 기준이 사라졌으니 레일도 비운다
         self._scan = None
         self._working_xlsx = None
         self._session_id = ""
@@ -1910,9 +1921,81 @@ class MainWindow(QMainWindow):
         app = QApplication.instance()
         if app is not None:
             theme.apply_to_app(app)
-        self._repolish_tree(self)
+        # ★ 트리 **전체**를 한 프레임에 다시 폴리시하면 메인 스레드가 실측 ~125ms
+        #   멈춘다(페이지 5장 × 위젯 수백 개).  그 정지가 곧 '버벅임' 이다.
+        #   지금 **보이는 페이지와 창 밖 장식(레일·상태바·시트/오버레이)** 만 즉시
+        #   처리하고, 숨은 페이지 4장은 이벤트 루프가 빈 틈에 한 장씩 나눠 맡긴다 —
+        #   숨은 페이지는 다시 보일 때까지 색이 틀려도 사용자가 볼 수 없다.
+        #   (구조개편 24안 — 정지 125 → ~30ms)
+        self._repolish_visible_now()
         app_logo.refresh_all(self)
         self._apply_statusbar_theme()
+        self._queue_hidden_page_repolish()
+
+    def _repolish_visible_now(self) -> None:
+        """보이는 페이지 + 스택 밖 창 장식만 즉시 다시 폴리시한다.
+
+        ★ **창 자신(그리고 그 척추)** 을 먼저 처리한다.  화면 본문의 바탕색은
+        페이지가 아니라 `QMainWindow { background-color: $bg }` 가 칠한다
+        (style.qss 는 전역 QWidget 에 배경을 주지 않는다 — 스크롤이 죽는다).
+        페이지만 다시 폴리시하면 **본문 바탕이 옛 색으로 남아** 하단바와 따로
+        논다(회귀 가드 `test_recolor_covers_window`)."""
+        style = self.style()
+
+        def one(w):
+            if w is None:
+                return
+            style.unpolish(w)
+            style.polish(w)
+            w.update()
+
+        one(self)                      # 창 자신 — 본문 바탕을 칠하는 주체
+        one(self.centralWidget())      # 척추: 중앙 위젯 → 스택
+        one(self._stack)
+        current = self._stack.currentWidget()
+        if current is not None:
+            self._repolish_tree(current)
+        # 스택 밖(레일·상태바·시트·로딩 오버레이)은 항상 보이므로 함께 간다.
+        for w in (getattr(self, "_rail", None), self._status_bar,
+                  getattr(self, "_sheets", None), getattr(self, "_loading", None)):
+            if w is not None:
+                self._repolish_tree(w)
+
+    def _queue_hidden_page_repolish(self) -> None:
+        """숨은 페이지들을 **한 장씩** 뒤늦게 다시 폴리시한다.
+
+        ★ 타이머는 창에 parent 를 둔다(정적 `QTimer.singleShot` 금지 — 창이 먼저
+        닫히면 죽은 위젯을 건드린다).  간격 0 이면 이벤트 루프가 한 바퀴 도는
+        사이마다 한 장씩 처리돼, 화면이 멈추는 구간이 페이지 하나 분량으로 쪼개진다.
+        ★ 다시 보이는 순간에도 안전하다 — `_show_page` 는 색을 건드리지 않지만
+          이 큐가 그 전에 끝나거나, 끝나지 않았다면 그 페이지 차례가 곧 온다."""
+        current = self._stack.currentWidget()
+        pending = [p for p in (self._setup_page, self._select_page,
+                               self._match_page, self._match_review_page,
+                               self._result_page)
+                   if p is not None and p is not current]
+        if not pending:
+            return
+        timer = getattr(self, "_repolish_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self._repolish_next_hidden)
+            self._repolish_timer = timer
+        self._repolish_queue = pending
+        timer.start(0)
+
+    def _repolish_next_hidden(self) -> None:
+        queue = getattr(self, "_repolish_queue", None)
+        if not queue:
+            return
+        page = queue.pop(0)
+        try:
+            self._repolish_tree(page)
+        except RuntimeError:
+            pass                       # 페이지가 사라졌다 — 다음 장으로
+        if queue:
+            self._repolish_timer.start(0)
 
     @staticmethod
     def _repolish_tree(root) -> None:
@@ -1961,14 +2044,107 @@ class MainWindow(QMainWindow):
         except ValueError:
             return 0
 
+    # 각 화면에서 **실제로 존재하는** 복귀 경로.  {현재 단계: 갈 수 있는 단계들}
+    # ★ '완료했으니 갈 수 있다' 가 아니다.  없는 경로를 눌리게 두면 죽은 클릭이
+    #   되고, 있는 경로를 막으면 레일이 거짓말을 한다.  여기 적힌 것만 눌린다.
+    _RAIL_ROUTES: dict[int, tuple[int, ...]] = {
+        1: (0,),        # 후보 선별 → 설정   (select_page 가 결정 폐기를 확인한다)
+        2: (0,),        # 매칭     → 설정   (match_page 가 계산 폐기를 확인한다)
+        3: (0,),        # 매치 검토 → 설정   (여기서 묻는다 — 화면에 경로가 없었다)
+        4: (3,),        # 결과     → 매치 검토 (기존 [← 검토 화면으로] 와 같은 길)
+    }
+
+    def _sync_rail(self, w: QWidget, *, animate: bool = False) -> None:
+        """레일의 현재 단계와 '눌러서 갈 수 있는 단계' 를 화면에 맞춘다.
+
+        ``animate`` 는 페이지가 실제로 슬라이드할 때만 True 다 — 그때 레일 눈금이
+        먼저 채워지고, 창은 그 뒤에 화면을 밀어 넣는다(21안-A)."""
+        idx = self._page_order(w)
+        self._rail.set_current(idx, animate=animate)
+        self._rail.set_navigable(self._RAIL_ROUTES.get(idx, ()))
+
+    def _on_rail_step_clicked(self, target: int) -> None:
+        """레일에서 지난 단계를 눌렀다 — 그 화면이 가진 복귀 흐름을 그대로 부른다.
+
+        ★ 폐기 확인을 여기서 새로 쓰지 않는다.  선별/매칭은 이미 자기 규칙(무엇이
+        사라지는지)을 알고 물어보므로 그쪽을 부르는 것이 단일 출처다."""
+        cur = self._page_order(self._stack.currentWidget())
+        if target not in self._RAIL_ROUTES.get(cur, ()):
+            return
+        if cur == 1 and self._select_page is not None:
+            self._select_page.request_back_to_setup()
+        elif cur == 2 and self._match_page is not None:
+            self._match_page.request_back_to_setup()
+        elif cur == 3:
+            if sheets.ask(self, i18n.KO.JOURNEY_BACK_TO_SETUP_TITLE,
+                          i18n.KO.JOURNEY_BACK_TO_SETUP_BODY,
+                          QMessageBox.StandardButton.Yes
+                          | QMessageBox.StandardButton.No,
+                          QMessageBox.StandardButton.No
+                          ) == QMessageBox.StandardButton.Yes:
+                self._new_session()
+        elif cur == 4:
+            self._reenter_review()
+
+    def _refresh_rail_criteria(self) -> None:
+        """레일 오른쪽의 판정 기준 한 줄.
+
+        ★ 문구를 여기서 조립하지 않는다 — `SetupPage.judgement_text()` 가 이미
+        '판정 기준은 하나이므로 문장도 하나에서 나온다' 는 단일 출처다.  레일이
+        따로 조립하면 엔진을 하나 더 만들 때 둘 중 하나가 낡는다."""
+        page = getattr(self, "_setup_page", None)
+        if page is None or self._input is None:
+            self._rail.set_criteria("")     # 아직 시작 전 — 기준이 확정되지 않았다
+            return
+        try:
+            name, value = page.judgement_text()
+        except Exception:                   # 컨트롤이 아직 없을 수 있다
+            self._rail.set_criteria("")
+            return
+        self._rail.set_criteria(f"{name} {value}")
+
     def _show_page(self, w: QWidget, *, animate: bool = True) -> None:
         """페이지 전환 — 들어오는 화면이 흐름 방향으로 슬라이드+페이드 진입(ease-out).
 
         나가는 화면은 아래에 두고 새 화면 스냅샷을 안착시킨 뒤 실제 전환(무플래시).
         offscreen/모션 줄이기·최초 표시·동일 페이지면 즉시 스왑."""
         from . import motion
+        # ★ 레일은 스택 **밖**이라 전환 애니메이션(스냅샷)에 실리지 않는다 — 새 화면이
+        #   미끄러져 들어오는 동안 레일만 먼저 새 단계를 가리키게 된다.  그게 옳다:
+        #   레일은 '어디로 가는 중인가' 를 먼저 말해 주는 표지판이지 화면의 일부가
+        #   아니다(사라졌다 나타나면 오히려 깜빡임으로 읽힌다).
         old = self._stack.currentWidget()
-        if old is w or old is None or not animate or not motion.enabled():
+        sliding = not (old is w or old is None or not animate
+                       or not motion.enabled())
+        self._sync_rail(w, animate=sliding)
+        if not sliding:
+            self._stack.setCurrentWidget(w)
+            self._notify_shown(w)
+            return
+        # ★ 21안-A '레일 선행 릴레이' — 레일 눈금이 먼저 차오르고(140ms), 그것이
+        #   끝난 **뒤** 화면이 슬라이드-인(240ms)한다.  순차라 동시 애니는 늘 1개,
+        #   총 380ms.  겹쳐 재생하면 같은 정보(어디로 가는가)를 두 모션이 동시에
+        #   말해 서로를 흐린다 — 순서가 곧 인과(레일 → 화면)를 만든다.
+        #   지연 중 새 전환이 들어오면 **마지막 것만** 산다(연타 보호).
+        self._pending_page = w
+        timer = getattr(self, "_page_lead_timer", None)
+        if timer is None:
+            # 정적 QTimer.singleShot 금지 — 창이 먼저 닫히면 죽은 위젯을 건드린다.
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self._run_pending_page_transition)
+            self._page_lead_timer = timer
+        timer.start(motion.DUR_RAIL_LEAD)
+
+    def _run_pending_page_transition(self) -> None:
+        """레일이 다 찼다 — 이제 화면을 밀어 넣는다(21안-A 의 두 번째 박자)."""
+        from . import motion
+        w = getattr(self, "_pending_page", None)
+        self._pending_page = None
+        if w is None:
+            return
+        old = self._stack.currentWidget()
+        if old is w or old is None or not motion.enabled():
             self._stack.setCurrentWidget(w)
             return
         forward = self._page_order(w) >= self._page_order(old)
@@ -1981,7 +2157,25 @@ class MainWindow(QMainWindow):
         self._stack.setCurrentWidget(old)      # 리페인트 전 원복(사용자엔 불가시)
         motion.transition_in(
             self._stack, new_pix, forward=forward,
-            on_commit=lambda: self._stack.setCurrentWidget(w))
+            on_commit=lambda: self._commit_page(w))
+
+    def _commit_page(self, w: QWidget) -> None:
+        self._stack.setCurrentWidget(w)
+        self._notify_shown(w)
+
+    @staticmethod
+    def _notify_shown(w: QWidget) -> None:
+        """'페이지가 화면에 앉았다' 를 페이지에 알린다.
+
+        ★ 진입 모션(검토 목록 스태거 등)은 이 순간을 알아야 한다.  페이지가 자기
+        `showEvent` 로는 알 수 없다 — `_show_page` 는 스냅샷을 뜨려고 스택을 잠깐
+        새 페이지로 바꿨다가 되돌리므로 showEvent 가 **보이지 않는 동안에도** 온다."""
+        hook = getattr(w, "on_shown", None)
+        if callable(hook):
+            try:
+                hook()
+            except RuntimeError:
+                pass
 
     # ==================================================================
     # Auto-save

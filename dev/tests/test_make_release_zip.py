@@ -199,7 +199,7 @@ def test_instructions_file_is_readable_by_notepad(tmp_path):
     assert rel.make_zip(tmp_path, log=lambda *a: None, today="20260727") == 0
     raw = (tmp_path / build.EXE_OUT_DIRNAME / rel.INSTRUCTIONS_NAME).read_bytes()
     assert raw.startswith(b"\xef\xbb\xbf"), "UTF-8 BOM 이 없다"
-    assert "AOI 검증" in raw.decode("utf-8-sig")
+    assert "AOI 레시피 검증" in raw.decode("utf-8-sig")
 
 
 def test_failed_runtime_download_leftover_is_not_shipped(tmp_path):

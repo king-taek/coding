@@ -330,29 +330,19 @@ def test_over_row_auto_expands_candidates(qapp):
     assert over._visible_lines > 1          # 실패 행은 펼침
     assert ok._visible_lines == 1           # 일치 행은 첫 줄만(빠른 확인)
     over.deleteLater(); ok.deleteLater()
-def test_next_issue_is_locked_when_there_is_nothing_to_visit(qapp):
-    """예외가 0 건이면 [다음 예외로] 는 **비활성**이다.
+def test_the_next_issue_shortcut_is_gone(qapp):
+    """[다음 예외로] 탐색 버튼은 **없다**(사용자 결정으로 제거).
 
-    ★ 예전엔 활성으로 보이는데 눌러도 아무 일이 없었다(순회할 예외 행이 없으면
-      루프가 그냥 끝난다) — 같은 시안에서 [묶기]·벌크 액션의 '먹은 클릭' 을 고쳐
-      놓고 이 버튼만 남아 있었다.  잠긴 이유는 툴팁이 말한다."""
+    ★ 되살아나면 상단 바에 조용히 버튼이 하나 늘어난다 — 탤리가 예외를 세고,
+    좌표 모드는 나쁜 순 정렬이 이미 예외를 위로 올린다."""
     from aoi_verification.app import i18n
     from aoi_verification.app.ui.pages.match_review_page import MatchReviewPage
+
     page = MatchReviewPage()
     try:
-        ms = [_m("S1", 0.9), _m("S2", 0.8)]        # 전부 일치
-        page.load_state(ms, coord_mode=True, tolerance=20.0)
-        assert page._btn_next_issue.isEnabled() is False, (
-            "갈 곳이 없는데 버튼이 열려 있다")
-        assert (page._btn_next_issue.toolTip()
-                == i18n.KO.BTN_NEXT_ISSUE_NONE_TOOLTIP)
-
-        page._on_toggle(ms[0])                     # '매치 없음' → 예외 1 건 생김
-        assert page._btn_next_issue.isEnabled() is True
-        assert page._btn_next_issue.toolTip() == ""
-
-        page._on_toggle(ms[0])                     # 되돌리면 다시 0 건
-        assert page._btn_next_issue.isEnabled() is False
+        assert not hasattr(page, "_btn_next_issue")
+        assert not hasattr(page, "_goto_next_issue")
+        assert not hasattr(i18n.KO, "BTN_NEXT_ISSUE")
     finally:
         page.deleteLater()
 

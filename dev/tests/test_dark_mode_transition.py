@@ -201,7 +201,7 @@ def test_toggle_lets_the_knob_move_before_the_heavy_work(qapp, window, motion_on
     5~8).  그 일을 `toggled` 슬롯 안에서 동기로 하면, 방금 시작한 손잡이 이동
     애니메이션이 **한 프레임도 그려지지 못하고** 얼어 누름이 씹힌 것처럼 보인다.
 
-    그래서 손잡이 이동(DUR_SWITCH)이 끝난 뒤에 emit 한다 — 이 테스트는 '즉시 emit 하지
+    그래서 손잡이 이동(DUR_KNOB)이 끝난 뒤에 emit 한다 — 이 테스트는 '즉시 emit 하지
     않는다'와 '조금 뒤 반드시 emit 한다'를 함께 고정한다(뒤쪽이 없으면 전환이 아예
     안 되는 것도 통과한다)."""
     page = window._setup_page
@@ -209,7 +209,7 @@ def test_toggle_lets_the_knob_move_before_the_heavy_work(qapp, window, motion_on
     page.appearance_changed.connect(seen.append)
     page._dark_switch.switch._toggle()          # 실제 클릭과 같은 경로
     assert seen == [], "토글 슬롯에서 즉시 emit 했다(손잡이가 얼어붙는다)"
-    _spin(qapp, max(60, motion.dur(motion.DUR_SWITCH) + 120))
+    _spin(qapp, max(60, motion.DUR_KNOB + 120))
     assert seen == ["dark"], f"지연 emit 이 오지 않았다: {seen}"
     _spin_recolor(qapp)
 
@@ -226,7 +226,7 @@ def test_rapid_double_toggle_coalesces_into_one_transition(qapp, window, motion_
     sw = page._dark_switch.switch
     sw._toggle()                                 # light → dark
     sw._toggle()                                 # 곧바로 되돌림 → dark → light
-    _spin(qapp, max(80, motion.dur(motion.DUR_SWITCH) + 150))
+    _spin(qapp, max(80, motion.DUR_KNOB + 150))
     assert seen == [], "제자리로 돌아온 연타인데 전환을 요청했다"
     assert theme.COLOR_MODE == "light"
     assert _prefs.load().color_mode == "light", "prefs 가 보이는 색과 어긋났다"
@@ -255,10 +255,14 @@ def test_transition_does_not_read_prefs_from_disk(qapp, window, motion_on):
 
 
 def test_recolor_is_slow_enough_to_read(qapp):
-    """사용자 요청: 색 전환을 **더 느리게**.  220ms 는 '튀는' 쪽에 가까웠다."""
+    """사용자 요청: 색 전환을 **더 느리게**.  220ms 는 '튀는' 쪽에 가까웠다.
+
+    ★ 구조개편 24안이 이 값을 280ms 로 줄이자고 했고 한 번 그렇게 갔다가, 실제로
+    보고 **되돌렸다**(사용자 결정).  같은 안의 나머지 — 재색 정지시간 분할
+    (125→~30ms), 팔레트 ①, 토글 노브 180ms + 해/달 글리프 — 는 그대로 남아 있다.
+    ★ 손잡이 이동보다 충분히 길어야 두 모션이 '하나의 흐름' 으로 읽힌다."""
     assert motion.DUR_RECOLOR >= 400, f"DUR_RECOLOR={motion.DUR_RECOLOR} — 너무 빠르다"
-    # 손잡이 이동보다 충분히 길어야 두 모션이 '하나의 흐름'으로 읽힌다.
-    assert motion.DUR_RECOLOR > motion.DUR_SWITCH * 2
+    assert motion.DUR_RECOLOR > motion.DUR_KNOB * 2
 
 
 def test_recolor_does_not_slide(qapp):

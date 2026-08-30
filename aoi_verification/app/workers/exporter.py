@@ -72,6 +72,16 @@ BODY_FILLS = {"A": ("FFFFFFFF", "FFF2F5F9"), "B": ("FFFFFFFF", "FFF2F5F9"),
               "E": ("FFF4F9EF", "FFEDF4E5"), "F": ("FFF4F9EF", "FFEDF4E5"),
               "G": ("FFFDF6F1", "FFFBEFE7"), "H": ("FFFDF6F1", "FFFBEFE7")}
 BODY_GRID_COLOR = "FFB0B0B0"     # 데이터 영역 얇은 격자
+# 미매칭 행 배경 — 줄무늬 대신 이 색으로 덮는다(구조개편 28안 ①).
+# ★ 왜 필요한가.  요약 시트는 매치와 미매칭이 **한 표에 섞여** 슬롯·파일명 순으로
+#   정렬된다.  지금까지 미매칭 표시는 D열 빨간 글씨와 셀 메모뿐이라, '총 몇 건 중
+#   몇 건이 미매칭인지' 를 사람이 한 줄씩 세어야 했다.  행이 물들면 눈으로 세어지고,
+#   **흑백 인쇄에서도** 명도 차로 구분된다(빨간 글씨는 흑백에서 사라진다).
+# ★ 기존 KLA 그룹색(FFFBE2D5) 계열의 옅은 주황 — 표에 이미 있는 색어휘를 쓴다.
+UNMATCHED_FILL = "FFFDF1EA"
+# 머리 2행은 표의 이름표다 — 스크롤하면 사라지고, 인쇄하면 첫 장에만 있었다.
+FREEZE_AT = "A3"                 # DATA_START_ROW 바로 위까지 얼린다(28안 ③)
+PRINT_TITLE_ROWS = "1:2"         # 인쇄 매 장에 머리 행 반복(28안 ④)
 
 
 def _machine_label(raw: str) -> str:
@@ -164,7 +174,7 @@ class ExcelExporter(QThread):
         else:
             wb = Workbook()
             ws = wb.active
-            ws.title = "AOI 검증 결과"
+            ws.title = "AOI 레시피 검증 결과"
             self._build_minimal_headers(ws)
 
         # 시트는 둘로 나눈다 (#사용자 요청):
@@ -197,6 +207,8 @@ class ExcelExporter(QThread):
         for _col, _w in COL_WIDTHS.items():
             if _col not in (COL_REF, COL_VAL):
                 ws.column_dimensions[_col].width = _w
+        # 머리 2행 고정·반복 — 채우든 지우든(옵션 off) 상관없이 여기서 한 번.
+        self._apply_sheet_view(ws)
 
         # 매칭/미매칭 통합 정렬 → Slot 오름차순, 그 안에서 기준 파일명 오름차순.
         rows_input: list[tuple[str, str, object]] = []
@@ -221,7 +233,8 @@ class ExcelExporter(QThread):
         # 요약 시트만 채운다(더 빠르고 가벼운 파일).  켜면 전체 양식도 채운다.
         if self._include_full_template:
             # 전체 양식만 E~H(수기 영역)가 있으므로 그 열까지 칠한다.
-            self._fill_rows(ws, rows_input, style_cols="ABCDEFGH")
+            self._fill_rows(ws, rows_input, style_cols="ABCDEFGH",
+                            sheet_label=SHEET_FULL_NAME)
             # 양식.xlsx 의 A3..A22 미리 박힌 1..20 행번호 중 안 채운 행은 비운다.
             data_end_row = DATA_START_ROW + len(rows_input) - 1
             for r in range(max(data_end_row + 1, DATA_START_ROW), ws.max_row + 1):
@@ -316,8 +329,10 @@ class ExcelExporter(QThread):
         # 데이터 행 높이도 동일하게(이미지가 같은 크기로 들어가도록).
         h = full.row_dimensions[DATA_START_ROW].height or ROW_HEIGHT_PT
         ws.row_dimensions[DATA_START_ROW].height = h
+        # 새로 만든 시트는 양식의 화면/인쇄 설정을 물려받지 않는다 — 여기서 준다.
+        self._apply_sheet_view(ws)
         # A~D 데이터 채우기(이미지는 mid 캐시에서 다시 임베드 — 시트 간 공유 불가).
-        self._fill_rows(ws, rows_input)
+        self._fill_rows(ws, rows_input, sheet_label=title)
         data_end = DATA_START_ROW + len(rows_input) - 1
         for rr in range(max(data_end + 1, DATA_START_ROW), ws.max_row + 1):
             a = ws.cell(row=rr, column=1)
@@ -330,6 +345,19 @@ class ExcelExporter(QThread):
         cur = ws.column_dimensions[col_letter].width
         if not cur or cur < min_w:
             ws.column_dimensions[col_letter].width = min_w
+
+    @staticmethod
+    def _apply_sheet_view(ws) -> None:
+        """머리 2행 고정(화면) + 반복(인쇄) — openpyxl 기본 API 두 줄 (28안 ③④).
+
+        ★ try/except 로 감싼다.  인쇄 설정이 실패해도 **파일은 저장돼야 한다** —
+        이 저장은 사용자가 몇 분을 기다린 결과물이다(깨진 사진 한 장이 저장을 못
+        막는 것과 같은 원칙)."""
+        try:
+            ws.freeze_panes = FREEZE_AT
+            ws.print_title_rows = PRINT_TITLE_ROWS
+        except Exception:
+            pass
 
     @staticmethod
     def _equalize_column_group(ws, cols: list[str], floor: float) -> None:
@@ -456,13 +484,17 @@ class ExcelExporter(QThread):
             return False
 
     @staticmethod
-    def _style_data_row(ws, row: int, cols: str, band_index: int) -> None:
+    def _style_data_row(ws, row: int, cols: str, band_index: int,
+                        *, unmatched: bool = False) -> None:
         """데이터 행 한 줄에 그룹 배경 + 얇은 격자를 입힌다.
 
         ★ **템플릿에 미리 칠해 둔 20행에 기대지 않는다.**  실제 결함은 그보다 훨씬
         많아서(실측 100건 이상), 21행부터 배경·격자가 끊기면 표가 중간에서 끝난
         것처럼 보인다.  줄무늬는 시트 행 번호가 아니라 **데이터 순번**을 따라야
         슬롯이 몇 개든 무늬가 일정하다.
+        ★ ``unmatched`` 면 줄무늬 대신 :data:`UNMATCHED_FILL` 로 행을 덮는다(28안 ①).
+        겹쳐 칠하지 않는다 — 같은 행에 두 색이 섞이면 무늬가 깨진다.  여기가
+        **행 배경을 칠하는 유일한 자리**라는 불변식은 그대로다.
         """
         from openpyxl.styles import Border, PatternFill, Side
 
@@ -470,12 +502,19 @@ class ExcelExporter(QThread):
         box = Border(left=side, right=side, top=side, bottom=side)
         for col in cols:
             cell = ws[f"{col}{row}"]
-            cell.fill = PatternFill("solid",
-                                    fgColor=BODY_FILLS[col][band_index % 2])
+            # ★ 미매칭 틴트는 **A~D 에만** 칠한다(시안 ① "미매칭 행은 A~D 배경을").
+            #   전체 양식 시트는 style_cols 가 "ABCDEFGH" 라 그대로 두면 E~H
+            #   **수기 입력 영역**까지 물든다 — 그 칸들은 사람이 직접 쓰는 자리라
+            #   그룹색(연두·주황)이 세로로 이어지는 것이 정보다.
+            tint = unmatched and col in BORDER_COLS
+            cell.fill = PatternFill(
+                "solid",
+                fgColor=(UNMATCHED_FILL if tint
+                         else BODY_FILLS[col][band_index % 2]))
             cell.border = box
 
     def _fill_rows(self, ws, rows_input: list[tuple[str, str, object]],
-                   *, style_cols: str = "ABCD") -> None:
+                   *, style_cols: str = "ABCD", sheet_label: str = "") -> None:
         from openpyxl.comments import Comment
         from openpyxl.styles import Alignment, Border, Font, Side
 
@@ -485,8 +524,19 @@ class ExcelExporter(QThread):
         # 기준으로 센다 — 계약(총 > 0 = 결정형)은 어느 쪽이든 지켜진다.
         base = self._prog_done
         overall = self._prog_total or total
+        # ★ 30안 — 진행 문구는 **어느 시트의 어느 슬롯**인지를 말한다.
+        #   exporter 는 원래 슬롯명을 실어 보냈는데 화면이 그걸 버리고 고정 문구
+        #   "엑셀로 저장 중…" 만 띄웠다.  이미지 수백 장 임베드는 수 분짜리이고,
+        #   오래 걸리는 이유는 **시트를 두세 장 쓰기 때문**(요약·미매칭·전체 양식에
+        #   사진을 각각 다시 임베드한다)인데 화면은 그 사실을 한 번도 말하지 않았다.
+        #   행 카운터는 오버레이의 진행 라벨이 이미 담당하므로 여기엔 넣지 않는다.
+        def _phase(slot: str) -> str:
+            if not sheet_label:
+                return slot
+            return i18n.KO.EXPORT_PHASE_FMT.format(sheet=sheet_label, slot=slot)
         row = DATA_START_ROW
-        red_font = Font(color="FFFF2D55", bold=True)
+        # 리치 텍스트를 못 쓰는 openpyxl 에서의 같은 등급(8pt, 본문 검정).
+        name_font = Font(color="FF000000", size=8)
         center = Alignment(horizontal="center", vertical="center")
         # 슬롯이 바뀌는 첫 행 위에 굵은 가로 구분선 (#4).  같은 슬롯끼리
         # 시각적으로 묶이도록.
@@ -510,7 +560,8 @@ class ExcelExporter(QThread):
 
             # 배경·격자를 **먼저** 입힌다 — 아래 슬롯 구분선(굵은 top)이 이 위에
             # 덧그려져야 살아남는다(순서를 바꾸면 구분선이 지워진다).
-            self._style_data_row(ws, row, style_cols, idx - 1)
+            self._style_data_row(ws, row, style_cols, idx - 1,
+                                 unmatched=isinstance(payload, MissEntry))
 
             # 슬롯 변경 시 A~H 전 열에 top border 적용 (기존 좌/우/하 보존).
             if prev_slot is not None and cur_slot != prev_slot:
@@ -544,7 +595,7 @@ class ExcelExporter(QThread):
                                              cell_w_px, cell_h_px):
                         ws[f"{col}{row}"] = str(Path(src).name)
                         ws[f"{col}{row}"].alignment = center
-                self.signals.progress.emit(base + idx, overall, m.slot)
+                self.signals.progress.emit(base + idx, overall, _phase(m.slot))
             else:
                 u: MissEntry = payload
                 self._write_slot_cell(ws, row, u.slot, center)
@@ -553,29 +604,35 @@ class ExcelExporter(QThread):
                                          cell_w_px, cell_h_px,
                                          original=self._unmatched_original):
                     ws[f"{COL_REF}{row}"] = str(Path(u.path).name)
-                # 검증 컬럼에 파일명 텍스트 (빨강).  결함 geometry(area/width/
-                # length/contrast) 또는 명시적 마커를 파일명 아래 회색으로 덧붙인다
+                # 검증 컬럼에 파일명 텍스트 (검정 8pt — 28안 ②).  결함 geometry(area/width/
+                # length/contrast) 또는 명시적 마커를 파일명 아래 같은 등급으로 덧붙인다
                 # (#geometry).  geometry 비활성(스키마 미충전) 이면 기존과 동일.
                 cell_val = ws[f"{COL_VAL}{row}"]
                 name = Path(u.path).name
                 # geometry(Surface.flt) + 좌표(col/row/x/y, 매칭단계 메커니즘 재사용).
                 # 좌표는 Surface.flt 유무와 무관하므로 미지원 자재 행에도 붙는다.
                 blocks = self._geometry_blocks(u.path) + self._coord_blocks(u.path)
+                # ★ 28안 ② — 파일명을 **빨강 굵은 글씨에서** 아래 geometry·좌표
+                #   줄과 같은 8pt 로 내린다.  '미매칭' 이라는 구분은 이제 **행
+                #   틴트**가 담당하므로 글씨가 혼자 소리칠 이유가 없어졌다.
+                #   ★ 색은 **검정**이다(사용자 결정) — 시안은 회색(#808080)이었지만
+                #   인쇄물에서 8pt 회색은 실제로 읽기 어려웠다.  크기로 등급을
+                #   낮추되 명도는 본문 그대로 둔다.
                 if blocks:
                     from openpyxl.cell.rich_text import CellRichText, TextBlock
                     from openpyxl.cell.text import InlineFont
-                    red_inline = InlineFont(b=True, color="FFFF2D55")
+                    name_inline = InlineFont(sz=8, color="FF000000")
                     cell_val.value = CellRichText(
-                        TextBlock(red_inline, name), *blocks,
+                        TextBlock(name_inline, name), *blocks,
                     )
                 else:
                     cell_val.value = name
-                    cell_val.font = red_font
+                    cell_val.font = name_font
                 cell_val.alignment = Alignment(
                     horizontal="center", vertical="center", wrap_text=True,
                 )
                 cell_val.comment = Comment("미매칭", "AOI")
-                self.signals.progress.emit(base + idx, overall, u.slot)
+                self.signals.progress.emit(base + idx, overall, _phase(u.slot))
 
             row += 1
 
@@ -584,8 +641,12 @@ class ExcelExporter(QThread):
 
     # ------------------------------------------------------------------
     @staticmethod
-    def _grey_blocks(lines) -> list:
-        """줄 목록 → 파일명 아래에 덧붙일 회색 8pt TextBlock 목록.
+    def _info_blocks(lines) -> list:
+        """줄 목록 → 파일명 아래에 덧붙일 8pt TextBlock 목록.
+
+        ★ 색은 **검정**이다(사용자 결정).  예전에는 회색(#808080)이었는데 8pt
+        회색은 인쇄물에서 실제로 읽기 어려웠다 — 등급은 크기로만 낮추고 명도는
+        본문 그대로 둔다.
 
         줄바꿈은 여기서만 붙인다 — 문자열을 만드는
         :mod:`coords.single_info` 는 순수 텍스트만 돌려준다.
@@ -595,8 +656,8 @@ class ExcelExporter(QThread):
             from openpyxl.cell.rich_text import TextBlock
             from openpyxl.cell.text import InlineFont
 
-            grey = InlineFont(sz=8, color="FF808080")
-            return [TextBlock(grey, "\n" + t) for t in lines]
+            small = InlineFont(sz=8, color="FF000000")
+            return [TextBlock(small, "\n" + t) for t in lines]
         except Exception:
             return []
 
@@ -608,7 +669,7 @@ class ExcelExporter(QThread):
         단일 사진 정보 화면과 **같은 값**이 나오도록 생산자를 하나로 둔 것이다.
         """
         from ..coords import single_info
-        return ExcelExporter._grey_blocks(single_info.geometry_lines(Path(path)))
+        return ExcelExporter._info_blocks(single_info.geometry_lines(Path(path)))
 
     # ------------------------------------------------------------------
     @staticmethod
@@ -618,7 +679,7 @@ class ExcelExporter(QThread):
         표기 문자열은 :func:`coords.single_info.coord_lines` 가 만든다.
         """
         from ..coords import single_info
-        return ExcelExporter._grey_blocks(single_info.coord_lines(Path(path)))
+        return ExcelExporter._info_blocks(single_info.coord_lines(Path(path)))
 
     # ------------------------------------------------------------------
     def _write_slot_mismatch_sheet(self, wb) -> None:

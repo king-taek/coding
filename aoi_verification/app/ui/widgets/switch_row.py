@@ -12,9 +12,9 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PyQt6.QtCore import (QEvent, QRectF, QSize, Qt,
+from PyQt6.QtCore import (QEvent, QPointF, QRectF, QSize, Qt,
                           QVariantAnimation, pyqtSignal)
-from PyQt6.QtGui import QColor, QPainter
+from PyQt6.QtGui import QColor, QPainter, QPainterPath
 from PyQt6.QtWidgets import (QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout,
                              QWidget)
 
@@ -31,9 +31,13 @@ class ToggleSwitch(QWidget):
 
     toggled = pyqtSignal(bool)
 
-    def __init__(self, checked: bool = False, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, checked: bool = False, parent: Optional[QWidget] = None,
+                 *, glyph: bool = False) -> None:
         super().__init__(parent)
         self._checked = bool(checked)
+        # 노브 위에 해/달을 그릴지 — 다크 모드 스위치 **전용**이다(구조개편 24안).
+        # 일반 스위치(구형 엔진 등)에까지 달면 '켜짐/꺼짐' 말고 다른 뜻을 암시한다.
+        self._glyph = bool(glyph)
         self._pos = 1.0 if self._checked else 0.0     # 0=off, 1=on (노브 위치)
         self._pressed = False
         # ★ 애니메이션은 **한 번만** 만들어 재사용한다.  이전엔 토글마다 새로 만들면서
@@ -78,7 +82,9 @@ class ToggleSwitch(QWidget):
             return
         self._anim.setStartValue(float(self._pos))
         self._anim.setEndValue(float(target))
-        self._anim.setDuration(motion.dur(motion.DUR_SWITCH))
+        # ★ 노브는 `dur()` 스케일을 타지 않는다 — 시안이 180ms 로 못박은 값이고,
+        #   이 이동이 곧 '눌렸다' 는 답이라 기기마다 달라지면 안 된다(24안).
+        self._anim.setDuration(motion.DUR_KNOB)
         self._anim.start()
 
     def _on_tween(self, v) -> None:
@@ -168,7 +174,51 @@ class ToggleSwitch(QWidget):
         x = _KNOB_M + on * (w - knob_d - 2 * _KNOB_M)
         p.setBrush(QColor(theme.ON_ACCENT if enabled else theme.ELEV))
         p.drawEllipse(QRectF(x, _KNOB_M, knob_d, knob_d))
+        if self._glyph:
+            self._paint_glyph(p, QRectF(x, _KNOB_M, knob_d, knob_d), on, enabled)
         p.end()
+
+    @staticmethod
+    def _paint_glyph(p, knob: QRectF, on: float, enabled: bool) -> None:
+        """노브 위 해(off) ↔ 달(on) 크로스페이드 — 이동과 같은 곡선을 탄다.
+
+        ★ 글자가 아니라 **선과 도형**으로 그린다.  시안은 '폰트 문자(신규 아이콘
+        리소스 0)' 라고 했지만, 동봉 폰트(NanumSquare)에는 ☀(U+2600)·☾(U+263E)
+        글리프가 없어 PC 마다 대체 글꼴이 달라지거나 두부(□)가 나온다 — 같은
+        저장소에서 ✓(U+2713)로 이미 확인한 함정이다.  그려도 리소스는 0 이다.
+        ★ 색은 노브 위이므로 노브색의 반대편(ACCENT/LINE)을 쓴다 — 노브가
+        ON_ACCENT 라 잉크색을 그대로 얹으면 대비가 무너진다.
+        """
+        from PyQt6.QtGui import QPen
+
+        ink = QColor(theme.ACCENT if enabled else theme.LINE)
+        c = knob.center()
+        r = knob.width() / 2.0
+        # 해 — 작은 원 + 네 방향 짧은 광선.  off(=밝은 화면)일 때 진하다.
+        sun_a = max(0.0, 1.0 - on)
+        if sun_a > 0.01:
+            ink.setAlphaF(sun_a)
+            pen = QPen(ink)
+            pen.setWidthF(1.4)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            p.setPen(pen)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawEllipse(c, r * 0.34, r * 0.34)
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                p.drawLine(QPointF(c.x() + dx * r * 0.56, c.y() + dy * r * 0.56),
+                           QPointF(c.x() + dx * r * 0.80, c.y() + dy * r * 0.80))
+        # 달 — 원에서 원을 빼 만든 초승달.  on(=어두운 화면)일 때 진하다.
+        if on > 0.01:
+            ink2 = QColor(theme.ACCENT if enabled else theme.LINE)
+            ink2.setAlphaF(min(1.0, on))
+            path = QPainterPath()
+            path.addEllipse(c, r * 0.52, r * 0.52)
+            cut = QPainterPath()
+            cut.addEllipse(QPointF(c.x() + r * 0.30, c.y() - r * 0.16),
+                           r * 0.46, r * 0.46)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(ink2)
+            p.drawPath(path.subtracted(cut))
 
 
 class SwitchRow(QWidget):
@@ -188,7 +238,7 @@ class SwitchRow(QWidget):
     toggled = pyqtSignal(bool)
 
     def __init__(self, title: str, *, description: str = "",
-                 checked: bool = False,
+                 checked: bool = False, glyph: bool = False,
                  parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setMinimumHeight(_ROW_MIN_H)
@@ -221,7 +271,7 @@ class SwitchRow(QWidget):
                                   QSizePolicy.Policy.Preferred)
         row.addWidget(text_host, stretch=1)
 
-        self.switch = ToggleSwitch(checked, parent=self)
+        self.switch = ToggleSwitch(checked, parent=self, glyph=glyph)
         self.switch.toggled.connect(self.toggled.emit)
         row.addWidget(self.switch, alignment=Qt.AlignmentFlag.AlignVCenter)
 

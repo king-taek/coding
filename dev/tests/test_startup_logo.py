@@ -119,13 +119,22 @@ def _logos(widget) -> list:
 
 
 def test_page_stack_owns_the_whole_central_area(window):
-    """로고는 더 이상 스택 밖 고정 칸이 아니다 — 중앙에는 스택뿐이다.
+    """로고는 더 이상 스택 밖 고정 칸이 아니다.
 
     사용자 요청: "프로그램 상단에 로고 있는 칸은 스크롤 영향이 없는 고정 칸인데,
-    고정이 아니도록 바꾸고 싶음"."""
+    고정이 아니도록 바꾸고 싶음".
+
+    ★ 여정 레일(구조개편 1안-A)이 스택 위 고정 칸으로 들어왔지만 **로고를 담지
+    않는다** — 위 요청이 막은 것은 '고정 칸' 자체가 아니라 거기 얹힌 로고 밴드였고,
+    레일은 스크롤해도 답이 있어야 하는 질문('지금 몇 번째인가')만 답한다.
+    그래서 검사는 '중앙에 위젯 하나' 가 아니라 **로고가 스택 밖에 없다** 로 둔다."""
+    from aoi_verification.app.ui.widgets.journey_rail import JourneyRail
     layout = window.centralWidget().layout()
-    assert layout.count() == 1
-    assert layout.indexOf(window._stack) == 0
+    # 중앙에 있는 것은 레일과 스택 둘뿐이고, 늘어나는 쪽은 스택이다.
+    assert layout.count() == 2
+    assert isinstance(layout.itemAt(0).widget(), JourneyRail)
+    assert layout.indexOf(window._stack) == 1
+    assert layout.stretch(1) == 1, "스택이 남는 높이를 전부 가져가야 한다"
     assert not _logos(window.centralWidget()) or all(
         _is_inside(lb, window._stack) for lb in _logos(window.centralWidget())), \
         "로고가 아직 스택 밖에 남아 있다"

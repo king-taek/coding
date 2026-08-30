@@ -21,11 +21,12 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Optional
 
-from PyQt6.QtCore import QByteArray, Qt, pyqtSignal
+from PyQt6.QtCore import (QByteArray, QPoint, QPropertyAnimation, QRect,
+                          Qt, pyqtSignal)
 from PyQt6.QtGui import QFontMetrics, QKeySequence, QShortcut
-from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QProgressBar,
-                              QScrollArea, QSizePolicy, QSlider, QSplitter,
-                              QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import (QFrame, QGraphicsOpacityEffect, QHBoxLayout,
+                             QLabel, QProgressBar, QScrollArea, QSizePolicy,
+                             QSlider, QSplitter, QVBoxLayout, QWidget)
 
 from ... import config, i18n
 from .. import theme
@@ -403,11 +404,21 @@ class SelectPage(ProgressRowMixin, QWidget):
         self.title = QLabel(i18n.KO.STAGE1_TITLE, self)
         self.title.setProperty("role", "title")
         top.addWidget(self.title)
+        # ── 진행 상태는 **표제 바로 옆**이다 (구조개편 2안-B) ────────────────────
+        # ★ 예전엔 이 두 라벨이 액션 버튼 **뒤**, 줄의 오른쪽 끝에 있었다.  진행률은
+        #   이 화면의 핵심 상태인데 위계가 최하위였고, 화면마다 자리가 달라 눈의
+        #   이동이 학습되지 않았다.  표제 옆으로 옮기면 '무슨 화면 · 어디까지' 가
+        #   한 시선에 읽히고, 다섯 화면이 같은 규약을 쓴다.
+        #   (하단 상태바는 그대로 둔다 — 크레딧·메모리는 계속 거기 산다.)
+        top.addSpacing(14)
+        self.progress_label = QLabel("", self)
+        self.progress_label.setProperty("role", "muted")
+        top.addWidget(self.progress_label)
+        # 수치는 한 등급 위로 — 모노 본문 잉크(자릿수가 바뀌어도 흔들리지 않는다).
+        self.progress_count = QLabel("", self)
+        self.progress_count.setProperty("role", "progressCountLg")
+        top.addWidget(self.progress_count)
         top.addStretch(1)
-        # [← 설정으로] — Stage 2 와 같은 자리·같은 역할(대칭).
-        self.btn_back_to_setup = NeonButton(i18n.KO.BTN_BACK_TO_SETUP, role="ghost")
-        self.btn_back_to_setup.clicked.connect(self._on_back_to_setup)
-        top.addWidget(self.btn_back_to_setup)
         # [검증 제외 사진 보기 (n)] — 제외된 사진은 화면에서 숨기고,
         # 이 버튼으로 팝업에서 모아 본다. 0 장이면 비활성.
         self.btn_view_excluded = NeonButton(
@@ -427,16 +438,6 @@ class SelectPage(ProgressRowMixin, QWidget):
         self.btn_end_selection.clicked.connect(self._end_selection_now)
         self.btn_end_selection.setEnabled(False)
         top.addWidget(self.btn_end_selection)
-        top.addSpacing(20)
-        # 단계 제목은 왼쪽 표제 하나로 충분하다 — 여기에 같은 문장을 한 번 더 찍던
-        # 라벨을 없앴다(같은 줄에 같은 말이 두 번 있었다).
-        self.progress_label = QLabel("", self)
-        self.progress_label.setProperty("role", "muted")
-        top.addWidget(self.progress_label)
-        # 수치는 한 등급 위로 — 모노 본문 잉크(자릿수가 바뀌어도 흔들리지 않는다).
-        self.progress_count = QLabel("", self)
-        self.progress_count.setProperty("role", "progressCountLg")
-        top.addWidget(self.progress_count)
         root.addLayout(top)
 
         # 제목 줄 바로 아래 폭 전체 진행 눈금 — 표시 전용(텍스트 없음, 채움 스냅).
@@ -903,6 +904,14 @@ class SelectPage(ProgressRowMixin, QWidget):
         # 사용자 변경은 세션 동안만 유지 — 재시작 시 자동 맞춤으로 초기화.
 
     # ------------------------------------------------------------------
+    def request_back_to_setup(self) -> None:
+        """창(여정 레일)이 부르는 복귀 진입점.
+
+        ★ 화면 안의 [← 설정으로] 버튼은 없앴다(구조개편 1안-A) — 뒤로가기의 의미가
+        화면마다 다른 것이 문제였고, 이제 레일이 '어디로' 를 통일해서 말한다.
+        하지만 **무엇이 사라지는지** 는 이 화면만 아는 사실이라 확인은 여기 남는다."""
+        self._on_back_to_setup()
+
     def _on_back_to_setup(self) -> None:
         """설정 화면으로 돌아간다 — 진행한 결정이 있으면 한 번 확인한다."""
         decided = 0
@@ -947,8 +956,112 @@ class SelectPage(ProgressRowMixin, QWidget):
         self._state.history.append((action, item))
         self.decision_made.emit(action, item)
         self.state_changed.emit()
+        # ★ 26안 — 결정한 사진이 **결정의 방향**으로 밀려나며 사라진다.
+        #   결정 자체는 위에서 이미 커밋됐다(모션은 잔상일 뿐) — 연타해도 애니를
+        #   기다리지 않는다.  떠나는 그림의 사본을 먼저 떠 둬야 하므로 아래
+        #   `_advance_incremental`(다음 사진을 같은 위젯에 넣는다)보다 **먼저**다.
+        moved = self._swipe_out_decided(action)
         # 핫 경로 — 전체 재생성 대신 영향 슬롯만 증분 갱신(#렉).
         self._advance_incremental(item.slot)
+        # 앞 사진이 다 빠진 **뒤** 다음 사진이 들어온다(총 300ms 한 동작).
+        # ★ 연타로 스와이프를 생략했으면 페이드인도 생략한다 — 짝이 맞아야
+        #   '떠나고 들어온다' 가 하나의 동작으로 읽히고, 비용도 함께 사라진다.
+        if moved:
+            self._fade_in_next()
+
+    #: 스와이프 이동 거리(px) — 시안값.  화면 밖까지 보내지 않는다: 카드 안에서
+    #: 벗어나는 정도면 방향이 읽히고, 긴 이동은 다음 사진을 기다리게 만든다.
+    _SWIPE_PX = 64
+
+    def _swipe_out_decided(self, action: str) -> bool:
+        """방금 결정한 사진이 그 결정이 향한 쪽으로 밀려나며 사라진다 (26안).
+
+        ★ 방향은 화면이 이미 정해 둔 것을 그대로 따른다: 오른쪽 패널이 '검증',
+        왼쪽이 '제외' 이고 단축키도 →/← 다.  그래서 이 모션은 새 규칙을 만들지
+        않고 **이미 있는 공간 규칙을 몸이 기억하게** 한다.
+        ★ **떠나는 그림의 사본에만** 건다(시안 명시).  바로 뒤에서
+        `_advance_incremental` 이 같은 위젯에 다음 사진을 넣으므로 살아 있는
+        `center_img` 에 걸면 새 사진이 밀려나고, 그 위젯에 그래픽스 이펙트를
+        얹으면 사진이 다시 그려질 때마다 오프스크린 렌더가 따라붙는다.
+        ★ **연타 중에는 생략한다**(시안 명시).  이게 없으면 결정마다 애니가 쌓여
+        수백 장을 넘길 때 그냥 버벅이는 것으로만 남는다 — 실측(900px 사진 39회
+        연타, 결정당 평균): 모션 OFF 28.3ms · 가드 없음 33.7ms(최악 78.7) ·
+        가드 있음 28.2ms(최악 49.8).  즉 가드가 있으면 **공짜**다.
+        ★ 이동은 `pos`, 사라짐은 불투명도다.  고스트는 레이아웃이 자리를 정하지
+        않는 뷰포트 위 절대배치라 `move` 가 되돌려지지 않는다(리플로 0).
+        """
+        from .. import motion
+        if not motion.enabled():
+            return False
+        prev = getattr(self, "_swipe_ghost", None)
+        if prev is not None:
+            # 연타 — 앞 잔상을 **즉시** 치우고 새 애니는 걸지 않는다.  남겨 두면
+            # 지지난 사진이 지금 사진 위에 떠 있게 된다(화면이 거짓말을 한다).
+            self._drop_swipe_ghost()
+            return False
+        viewport = self._img_scroll.viewport()
+        img = self.center_img
+        pm = img.pixmap()
+        if pm is None or pm.isNull():
+            return False
+        try:
+            shot = img.grab()
+        except RuntimeError:
+            return False
+        if shot.isNull():
+            return False
+        ghost = QLabel(viewport)
+        ghost.setPixmap(shot)
+        ghost.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        start = img.mapTo(viewport, QPoint(0, 0))
+        ghost.setGeometry(QRect(start, img.size()))
+        ghost.show()
+        ghost.raise_()
+        self._swipe_ghost = ghost
+
+        eff = QGraphicsOpacityEffect(ghost)
+        eff.setOpacity(1.0)
+        ghost.setGraphicsEffect(eff)
+        fade = QPropertyAnimation(eff, b"opacity", ghost)
+        fade.setStartValue(1.0)
+        fade.setEndValue(0.0)
+        fade.setDuration(motion.DUR_SWIPE_OUT)
+        fade.setEasingCurve(motion.EASE_PRIMARY)
+
+        dx = self._SWIPE_PX if action == "verify" else -self._SWIPE_PX
+        move = QPropertyAnimation(ghost, b"pos", ghost)
+        move.setStartValue(start)
+        move.setEndValue(QPoint(start.x() + dx, start.y()))
+        move.setDuration(motion.DUR_SWIPE_OUT)
+        move.setEasingCurve(motion.EASE_PRIMARY)
+        # ★ 정리는 **한쪽에서만** 건다 — 두 애니에 각각 걸면 두 번 불린다.
+        move.finished.connect(self._drop_swipe_ghost)
+        fade.start()
+        move.start()
+        return True
+
+    def _fade_in_next(self) -> None:
+        """다음 사진이 제자리에서 떠오른다 — 스와이프가 끝난 뒤 120ms (26안).
+
+        ★ 지연이 곧 순서다.  같은 틱에 겹쳐 재생하면 떠나는 사진과 들어오는
+        사진이 동시에 반투명해져 한순간 화면이 비어 보인다 — 시안이 CSS 로
+        `.12s linear .18s backwards` 라 적은 것이 이 순서다."""
+        from .. import motion
+        if self._current is None:
+            return
+        motion.fade_in(self.center_img, delay_ms=motion.DUR_SWIPE_OUT)
+
+    def _drop_swipe_ghost(self) -> None:
+        """잔상을 치운다 — 애니가 끝났을 때와 연타로 잘렸을 때 모두 여기로 온다."""
+        ghost = getattr(self, "_swipe_ghost", None)
+        self._swipe_ghost = None
+        if ghost is None:
+            return
+        try:
+            ghost.hide()
+            ghost.deleteLater()
+        except RuntimeError:
+            pass                       # 이미 사라졌다
 
     def _undo(self) -> None:
         # Z 가 MatchPage 가 보일 때도 SelectPage 로 전달되는 것을 차단.

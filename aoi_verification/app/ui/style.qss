@@ -47,6 +47,14 @@ QLabel[role="appLogo"] {
     border-bottom: 1px solid $line2;
 }
 
+/* 여정 레일 — 창 최상단의 상시 진행 지도(widgets/journey_rail.py).
+   ★ 면만 QSS 가 칠하고, 단계 표식·글자는 위젯이 paintEvent 에서 theme 토큰을 직접
+     읽어 그린다(다크 전환 때 옛 색이 남지 않게).  아래 눈금도 그쪽이 그린다 —
+     여기에 border-bottom 을 또 주면 2px 로 겹쳐 보인다. */
+QWidget[role="journeyRail"] {
+    background-color: $panel;
+}
+
 /* ── 앱 내 창(시트) ─────────────────────────────────────────────────────
    별도 OS 창이던 팝업을 프로그램 안에서 띄운다(widgets/sheet_host.py).
    ★ 시트는 **자기 면과 테두리를 가져야** 한다 — 반투명 스크림 위에 배경 없이 얹으면
@@ -701,6 +709,17 @@ QLabel[role="loadingTitle"] {
     color: $ink;
 }
 /* 큰 진행률 — 이 패널에서 가장 큰 글자.  모노라 자릿수가 바뀌어도 안 흔들린다. */
+/* 완료(100%) 상태 — 마침 신호는 색이다(구조개편 23안-B, 모션 0).
+   ★ 눈금 선택자는 반드시 자손 형태로 쓴다 — `QWidget[role="loadingPanel"]` 를
+     빼면 패널 안의 일반 QProgressBar 규칙이 특이도로 이겨 규칙이 화면에 닿지
+     못한다(이 파일 위쪽 loadingRule 주석의 그 함정). */
+QWidget[role="loadingPanel"] QProgressBar[role="loadingRule"][state="done"]::chunk {
+    background-color: $pass;
+}
+QLabel[role="loadingTitle"][state="done"] {
+    color: $pass;
+}
+
 QLabel[role="loadingPct"] {
     font-family: $font_mono;
     font-size: 34px;

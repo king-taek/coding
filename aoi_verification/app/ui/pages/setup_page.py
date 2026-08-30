@@ -1215,7 +1215,7 @@ class SetupPage(QWidget):
         row.addStretch(1)
 
         self._dark_switch = SwitchRow(
-            i18n.KO.DARK_MODE_LABEL, parent=host,
+            i18n.KO.DARK_MODE_LABEL, parent=host, glyph=True,
             checked=theme.is_dark_mode(),
         )
         self._dark_switch.setToolTip(i18n.KO.DARK_MODE_TOOLTIP)
@@ -1226,13 +1226,14 @@ class SetupPage(QWidget):
     def _on_dark_mode_toggled(self, on: bool) -> None:
         """다크 모드 전환 요청 — 실제 적용(페이지 재생성)은 main_window 가 한다.
 
-        ★ **지연 0** — 누르는 즉시 색 전환이 시작된다(사용자 지정).
-        전에는 손잡이 이동(DUR_SWITCH=160ms)이 끝난 **뒤에** 무거운 일을 시작했다.
-        메인 스레드가 그 일 동안 멈추므로(실측 223ms: apply_to_app 99 + 페이지
-        재생성 124) 손잡이 애니메이션이 얼어붙는 것을 피하려던 것이었는데, 결과적으로
-        **누르고 색이 움직이기까지 160+223 = 383ms** 가 걸렸다 — 그게 '선딜레이' 다.
-        이제 160ms 를 없애 ~223ms 로 줄인다.  남은 것은 계산 시간이라 타이머로는
-        더 줄일 수 없다(줄이려면 위젯이 색을 f-string 으로 굽는 구조를 바꿔야 한다).
+        ★ 이 지연값에는 **상반된 두 결정**이 쌓여 있다.  처음에는 손잡이 이동
+        (당시 160ms)이 끝난 뒤 무거운 일을 시작했는데, 그 일이 메인 스레드를
+        실측 223ms 잡아 **누르고 색이 움직이기까지 383ms** 였다 — 그래서 지연을
+        0 으로 내렸다.  구조개편 24안이 그 전제를 바꿨다: 재색의 정지시간을
+        ~30ms 로 쪼갰으므로(`main_window._repolish_visible_now`) 이제 노브가 얼지
+        않는다.  다시 '노브 도착(180ms) → 재색' 순서로 두면 색이 움직이기까지
+        ~210ms 로 지연 0 시절(223ms)보다 **오히려 빠르고**, 그 180ms 동안 노브가
+        실제로 움직여 '눌렸다' 는 답을 준다(예전에는 그 구간이 통째로 얼었다).
 
         ★ 타이머 자체는 **남긴다.**  두 가지를 계속 해 준다:
         (a) 연타를 **한 번으로 합친다**(prefs 는 마지막 값, emit 은 한 번),
@@ -1243,7 +1244,14 @@ class SetupPage(QWidget):
         key = "dark" if on else "light"
         self._pending_color_mode = key
         _prefs.patch(color_mode=key)       # 재생성된 페이지가 prefs 에서 상태를 복원한다
-        self._appearance_timer.start(0)    # 지연 없음 — 이벤트 루프 한 바퀴만
+        # ★ 구조개편 24안 — **노브가 도착한 뒤** 재색을 시작한다(180ms).
+        #   ⚠ 이 값은 위 주석의 '지연 0' 결정을 **되돌린 것**이다.  그때 지연을 없앤
+        #   이유는 재색이 메인 스레드를 223ms 잡아 손잡이가 얼어붙었기 때문인데,
+        #   24안이 그 정지를 ~30ms 로 쪼갰다(main_window._repolish_visible_now).
+        #   멈칫이 사라졌으므로 이제는 '노브가 먼저 답하고 화면이 뒤따르는' 순서가
+        #   성립한다 — 누른 즉시 답이 오고, 총 180+280 = 460ms 안에 끝난다.
+        from .. import motion
+        self._appearance_timer.start(motion.DUR_KNOB)
 
     def _emit_appearance_changed(self) -> None:
         """손잡이 이동이 끝났다 — 이제 색을 갈아 끼운다(연타는 여기서 한 번으로 합쳐진다)."""

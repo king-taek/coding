@@ -188,13 +188,29 @@ class MatchPage(ProgressRowMixin, QWidget):
         root.addWidget(build_logo_label(self))
 
         top = QHBoxLayout()
-        self.btn_back_to_setup = NeonButton(i18n.KO.BTN_BACK_TO_SETUP, role="ghost")
-        self.btn_back_to_setup.clicked.connect(self._on_cancel_requested)
-        top.addWidget(self.btn_back_to_setup)
-        top.addSpacing(12)
+        # ★ [← 설정으로] 는 없앴다 — 여정 레일이 복귀를 통일해서 맡는다
+        #   (구조개편 1안-A).  폐기 확인은 `_on_cancel_requested` 에 그대로 남아
+        #   있고, 레일이 `request_back_to_setup()` 으로 그것을 부른다.
         self.title = QLabel(_stage2_title(None), self)
         self.title.setProperty("role", "title")
         top.addWidget(self.title)
+        # 진행 상태는 표제 바로 옆 (구조개편 2안-B) — 다섯 화면이 같은 자리를 쓴다.
+        top.addSpacing(14)
+        self.progress_label = QLabel("", self)
+        self.progress_label.setProperty("role", "muted")
+        top.addWidget(self.progress_label)
+        self.progress_count = QLabel("", self)
+        self.progress_count.setProperty("role", "progressCountLg")
+        top.addWidget(self.progress_count)
+        top.addSpacing(16)
+        # 백그라운드 사전 계산 상태 — 수동 모드에서만 표시. 매칭 화면이 이미
+        # 열려 있는 동안에도 ‘나머지 슬롯이 X / Y 완료’ 임을 알려준다.
+        # ★ pass(제도 녹색)는 **판정 성공 전용**이다 — 진행 중인 계산을 초록으로
+        #   띄우면 '이미 성공했다' 는 거짓 신호가 되고, '강조 하나' 원칙의 시선
+        #   경쟁자가 늘어난다.  수치가 든 상태 문구이므로 모노+보조색으로 적는다.
+        self.bg_status_label = QLabel("", self)
+        self.bg_status_label.setProperty("role", "monoMuted")
+        top.addWidget(self.bg_status_label)
         top.addStretch(1)
         # [보류된 사진 보기 (n)] — 좌측 패널 대신 팝업으로 모아 보기.
         self.btn_view_skipped = NeonButton(
@@ -208,27 +224,6 @@ class MatchPage(ProgressRowMixin, QWidget):
         self.retry_btn.setVisible(False)
         self.retry_btn.clicked.connect(self._retry_skipped)
         top.addWidget(self.retry_btn)
-        top.addSpacing(20)
-        # ★ 단계 제목은 **왼쪽 큰 표제 하나**다.  예전에는 같은 문장을 여기 15px 로 한 번
-        #   더 찍었는데, 좌표 모드에서는 큰 표제가 "유사도 기반" 으로 굳어 있어 화면이
-        #   **스스로 모순**됐다(가장 눈에 띄는 글자가 실제 동작과 달랐다).
-        #   지금은 `load_state` 가 표제를 모드에 맞추고, 오른쪽은 진행만 말한다.
-        self.progress_label = QLabel("", self)
-        self.progress_label.setProperty("role", "muted")
-        top.addWidget(self.progress_label)
-        # 수치는 한 등급 위로 — 선별 화면과 같은 규약(모노 본문 잉크).
-        self.progress_count = QLabel("", self)
-        self.progress_count.setProperty("role", "progressCountLg")
-        top.addWidget(self.progress_count)
-        top.addSpacing(20)
-        # 백그라운드 사전 계산 상태 — 수동 모드에서만 표시. 매칭 화면이 이미
-        # 열려 있는 동안에도 ‘나머지 슬롯이 X / Y 완료’ 임을 알려준다.
-        # ★ pass(제도 녹색)는 **판정 성공 전용**이다 — 진행 중인 계산을 초록으로
-        #   띄우면 '이미 성공했다' 는 거짓 신호가 되고, '강조 하나' 원칙의 시선
-        #   경쟁자가 늘어난다.  수치가 든 상태 문구이므로 모노+보조색으로 적는다.
-        self.bg_status_label = QLabel("", self)
-        self.bg_status_label.setProperty("role", "monoMuted")
-        top.addWidget(self.bg_status_label)
         root.addLayout(top)
 
         # 제목 줄 바로 아래 폭 전체 진행 눈금 — 표시 전용(텍스트 없음, 채움 스냅).
@@ -834,6 +829,13 @@ class MatchPage(ProgressRowMixin, QWidget):
         return out
 
     # ------------------------------------------------------------------
+    def request_back_to_setup(self) -> None:
+        """창(여정 레일)이 부르는 복귀 진입점 — 중지와 같은 길이다.
+
+        ★ 화면 안의 [← 설정으로] 버튼은 없앴다(구조개편 1안-A).  '계산을 전부
+        폐기한다' 는 사실은 이 화면만 아는 것이라 확인은 `_confirm_cancel` 에 남는다."""
+        self._on_cancel_requested()
+
     def _on_cancel_requested(self) -> None:
         """#8 중지 — 진행 중인 사전계산/매칭 워커를 안전하게 멈추고 세션 중단."""
         if not self._confirm_cancel():
@@ -978,7 +980,11 @@ class MatchPage(ProgressRowMixin, QWidget):
             self.slot_label.setText("")
             self._clear_progress()
             self._clear_right_grid()
-            self._loading.hide_overlay()
+            # ★ 23안 — 이 앱에서 '수 분짜리 작업의 끝' 은 여기 한 곳이다(자동 매칭).
+            #   눈금이 완료색으로 200ms 머문 **뒤** 오버레이가 걷힌다 — 다른 창을
+            #   보던 사용자의 주변시에 걸리라고 둔 단 하나의 틱이다.  스캔·썸네일·
+            #   엑셀 저장 같은 짧은 작업에는 달지 않는다(시안 명시).
+            self._loading.finish_tick(then=self._loading.hide_overlay)
             # 백그라운드 사전 계산이 아직 돌고 있으면 즉시 중단 — 매칭이 끝났으니
             # 이후 슬롯 점수는 더 이상 필요 없음 (CPU/RAM 회수).
             self._stop_precompute_worker()

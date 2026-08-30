@@ -35,14 +35,15 @@ CLAUDE.md 로딩 계약 유지: set_progress(done,total,msg), total>0 결정형,
 
 from __future__ import annotations
 
-from PyQt6.QtCore import (QEasingCurve, QElapsedTimer, QEvent, QRect, Qt,
+from PyQt6.QtCore import (QEasingCurve, QElapsedTimer, QEvent, QPoint, QRect, Qt,
                           QTimer, QVariantAnimation, pyqtSignal)
-from PyQt6.QtGui import QColor, QPainter, QPen
+from PyQt6.QtGui import QColor, QPainter, QPen, QPolygon
 from PyQt6.QtWidgets import (QApplication, QGraphicsOpacityEffect, QHBoxLayout,
                              QLabel, QProgressBar, QSizePolicy, QVBoxLayout,
                              QWidget)
 
 from ... import i18n
+from ...config import Fonts as _Fonts
 from .. import theme
 from .. import motion
 from .neon_button import NeonButton
@@ -60,21 +61,38 @@ def _fmt_duration(seconds: float) -> str:
     return i18n.KO.DURATION_SEC_FMT.format(s=s)
 
 
+# QSS 의 `$font_mono` 는 CSS 문법의 폴백 목록이라 QFont(문자열)로는 못 쓴다.
+# QPainter 로 직접 그리는 수치에 같은 서체를 주려고 목록만 떼어 낸다 —
+# 여기서 목록을 새로 적으면 QSS 와 갈라지므로 config 를 단일 출처로 둔다.
+_MONO_FAMILIES = [s.strip().strip('"\'')
+                  for s in _Fonts.MONO.split(",") if s.strip()]
+
+
 class _JourneySteps(QWidget):
-    """여정 스텝 행 — 완료(채운 점) → 현재(테두리 점) → 예정(옅은 점).
+    """작업 큐 — 완료(✓) · 진행 중 · 대기를 **세로 목록**으로 보여 준다.
 
     ★ 위젯을 단계 수만큼 만들지 않고 **한 번에 그린다.**  단계는 서너 개뿐이고
       내용이 바뀔 때만 다시 그리면 되므로, 위젯 트리를 만들었다 지웠다 하는 것보다
       싸고 레이아웃이 흔들리지 않는다(패널 높이 고정에도 유리하다).
+    ★ 줄마다 **자기 수치**(``298 / 480``)를 들고 있다.  차단 오버레이는 화면을 가리는
+      대가로 '전체 중 어디쯤 · 몇 개 남았나' 를 돌려줘야 한다 — 단계가 넘어갈 때
+      진행바가 0 으로 스냅해도 지나온 단계의 수치는 **마지막 값으로 얼려** 남는다.
+      현재 단계의 수치는 :meth:`LoadingOverlay.set_progress` 가 먹인다.
+      (구조개편 11안-B: 차단은 유지하되 작업 큐로 보상한다.)
+    ★ 가로 점 행이 아니라 세로 목록인 이유: 가로로는 단계당 폭이 패널 폭 ÷ n 뿐이라
+      라벨 옆에 수치를 놓을 자리가 없다.  세로면 라벨은 왼쪽, 수치는 오른쪽 끝으로
+      고정돼 자릿수가 바뀌어도 줄이 흔들리지 않는다.
     """
 
-    DOT_R = 4
+    MARK_D = 18                 # 원형 표식 지름
     ROW_H = 30
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._labels: tuple[str, ...] = ()
         self._index = 0
+        # 단계 인덱스 → (done, total).  지나간 단계도 남는다(그게 '작업 큐'다).
+        self._counts: dict[int, tuple[int, int]] = {}
         self.setFixedHeight(self.ROW_H)
 
     def set_steps(self, labels, index: int) -> None:
@@ -82,8 +100,25 @@ class _JourneySteps(QWidget):
         index = max(0, min(int(index), len(labels) - 1)) if labels else 0
         if (labels, index) == (self._labels, self._index):
             return                      # 같은 내용 → 다시 그리지 않는다
+        if labels != self._labels:
+            self._counts = {}           # 다른 여정 → 옛 수치를 물려주지 않는다
         self._labels, self._index = labels, index
+        # 높이는 줄 수에 따라 달라진다 — 호출부(`set_stage`)가 패널을 다시 잰다.
+        self.setFixedHeight(self.ROW_H * len(labels) if labels else self.ROW_H)
         self.setVisible(bool(labels))
+        self.update()
+
+    def set_counts(self, done: int, total: int) -> None:
+        """현재 단계의 수치를 적는다.  ``total <= 0``(busy)면 그 줄의 수치를 지운다."""
+        if not self._labels:
+            return
+        new = (int(done), int(total)) if total > 0 else None
+        if self._counts.get(self._index) == new:
+            return                      # 값이 그대로면 다시 그리지 않는다
+        if new is None:
+            self._counts.pop(self._index, None)
+        else:
+            self._counts[self._index] = new
         self.update()
 
     def paintEvent(self, event):  # noqa: N802
@@ -91,46 +126,86 @@ class _JourneySteps(QWidget):
             return
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        n = len(self._labels)
-        w = self.width()
-        # 각 단계의 중심 x — 양끝을 조금 들여 라벨이 패널 밖으로 넘치지 않게.
-        cell = w / n
-        cx = [int(cell * (i + 0.5)) for i in range(n)]
-        cy = self.DOT_R + 2
-        accent, line2, ink, mute = (QColor(theme.ACCENT), QColor(theme.LINE2),
-                                    QColor(theme.INK), QColor(theme.MUTE))
-        # 연결선 — 지나온 구간만 accent.
-        for i in range(n - 1):
-            pen = QPen(accent if i < self._index else line2)
-            pen.setWidth(2)
-            p.setPen(pen)
-            p.drawLine(cx[i] + self.DOT_R + 3, cy, cx[i + 1] - self.DOT_R - 3, cy)
-        # 점 — 완료=채움 / 현재=테두리 / 예정=옅은 채움.
-        for i, x in enumerate(cx):
-            if i < self._index:
+        accent, line, line2 = (QColor(theme.ACCENT), QColor(theme.LINE),
+                               QColor(theme.LINE2))
+        ink, mute, on_accent = (QColor(theme.INK), QColor(theme.MUTE),
+                                QColor(theme.ON_ACCENT))
+        w, d = self.width(), self.MARK_D
+        last = len(self._labels) - 1
+        base_pt = self.font().pointSizeF()
+        for i, text in enumerate(self._labels):
+            top = i * self.ROW_H
+            cy = top + self.ROW_H // 2
+            done_step, current = i < self._index, i == self._index
+            # 줄 구분선 — 마지막 줄 아래에는 긋지 않는다(패널 테두리와 겹친다).
+            if i < last:
+                p.setPen(QPen(line))
+                p.setBrush(Qt.BrushStyle.NoBrush)
+                p.drawLine(0, top + self.ROW_H - 1, w, top + self.ROW_H - 1)
+            # 표식 — 완료=채운 원+✓ / 현재=2px 테두리+번호 / 대기=옅은 테두리+번호.
+            mark = QRect(0, cy - d // 2, d, d)
+            if done_step:
                 p.setPen(Qt.PenStyle.NoPen)
                 p.setBrush(accent)
-            elif i == self._index:
-                pen = QPen(accent)
-                pen.setWidth(2)
+            else:
+                pen = QPen(accent if current else line2)
+                pen.setWidth(2 if current else 1)
                 p.setPen(pen)
                 p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawEllipse(mark)
+            if done_step:
+                # ★ 체크 표시는 **글자가 아니라 선**으로 그린다.  동봉 폰트
+                #   (NanumSquare)에는 U+2713 글리프가 없어 '✓' 를 찍으면 두부(□)가
+                #   나온다 — PC 마다 설치 폰트가 달라 그때그때 다른 결과가 된다.
+                pen = QPen(on_accent)
+                pen.setWidth(2)
+                pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+                pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+                p.setPen(pen)
+                p.setBrush(Qt.BrushStyle.NoBrush)
+                cx0 = mark.center().x() + 1
+                cy0 = mark.center().y() + 1
+                p.drawPolyline(QPolygon([QPoint(cx0 - 5, cy0 - 1),
+                                         QPoint(cx0 - 2, cy0 + 2),
+                                         QPoint(cx0 + 4, cy0 - 4)]))
             else:
-                p.setPen(Qt.PenStyle.NoPen)
-                p.setBrush(line2)
-            p.drawEllipse(x - self.DOT_R, cy - self.DOT_R,
-                          self.DOT_R * 2, self.DOT_R * 2)
-        # 라벨 — 현재 단계만 본문 잉크(굵게), 나머지는 보조색.
-        f = self.font()
-        f.setPointSizeF(max(7.0, f.pointSizeF() - 1.0) if f.pointSizeF() > 0 else 8.0)
-        for i, (x, text) in enumerate(zip(cx, self._labels)):
-            f.setBold(i == self._index)
+                f = self.font()
+                f.setPointSizeF(max(7.0, base_pt - 1.0) if base_pt > 0 else 8.0)
+                f.setBold(True)
+                p.setFont(f)
+                p.setPen(accent if current else mute)
+                p.drawText(mark, int(Qt.AlignmentFlag.AlignCenter), str(i + 1))
+            # 이름(왼쪽) — 현재 단계만 본문 잉크(굵게), 나머지는 보조색.
+            f = self.font()
+            f.setBold(current)
             p.setFont(f)
-            p.setPen(ink if i == self._index else mute)
-            p.drawText(QRect(int(x - cell / 2), cy + self.DOT_R + 4,
-                             int(cell), self.ROW_H - cy - self.DOT_R - 4),
-                       int(Qt.AlignmentFlag.AlignHCenter
-                           | Qt.AlignmentFlag.AlignTop), text)
+            p.setPen(ink if current else mute)
+            name_x = d + 10
+            p.drawText(QRect(name_x, top, max(0, w - name_x - 96), self.ROW_H),
+                       int(Qt.AlignmentFlag.AlignLeft
+                           | Qt.AlignmentFlag.AlignVCenter), text)
+            # 수치(오른쪽 끝) — 아직 시작하지 않은 단계는 '대기'.
+            count = self._counts.get(i)
+            if count is not None:
+                right = i18n.KO.LOADING_STEP_COUNT_FMT.format(done=count[0],
+                                                              total=count[1])
+            elif done_step or current:
+                right = ""
+            else:
+                right = i18n.KO.LOADING_STEP_PENDING
+            if right:
+                # 수치는 모노 — 자릿수가 바뀌어도 오른쪽 끝이 흔들리지 않는다
+                # (패널의 다른 수치 라벨과 같은 규약).  ★ '대기' 같은 **한글**에는
+                #   모노를 씌우지 않는다: 동봉 모노 계열에 한글 글리프가 없어
+                #   PC 마다 대체 글꼴이 달라진다.
+                f = self.font()
+                if count is not None:
+                    f.setFamilies(_MONO_FAMILIES)
+                f.setBold(current)
+                p.setFont(f)
+                p.drawText(QRect(w - 96, top, 96, self.ROW_H),
+                           int(Qt.AlignmentFlag.AlignRight
+                               | Qt.AlignmentFlag.AlignVCenter), right)
 
 
 class _BusyStripe(QWidget):
@@ -641,7 +716,13 @@ class LoadingOverlay(QWidget):
             self._set_text(self._stage_label, "")
             self._stage_label.hide()
             self._steps.set_steps((), 0)
-        self._steps.setVisible(bool(labels and step))
+        queued = bool(labels and step)
+        self._steps.setVisible(queued)
+        # ★ 작업 큐가 뜨면 현재 단계의 수치는 **큐의 줄**이 말한다 — 바 아래 모노
+        #   라벨을 같이 켜 두면 같은 숫자가 한 패널에 두 번 적힌다(ko.py 단일 출처
+        #   규칙).  텍스트는 계속 채워 두고 **표시만** 끈다: 큐 유무는 한 번 보여
+        #   주는 동안 고정이라 이 토글이 매 틱 패널 높이를 흔들지 않는다.
+        self._count_label.setVisible(not queued)
 
     _BAR_SLIDE_PX = 8
     # 패널이 안착한 **뒤에** 들어와야 계층이 순서대로 읽힌다.
@@ -689,7 +770,11 @@ class LoadingOverlay(QWidget):
         return bool(getattr(self, "_hiding", False)
                     or getattr(self, "_hide_pending", False))
 
-    def hide_overlay(self) -> None:
+    def hide_overlay(self, then=None) -> None:
+        # ★ `hide_overlay` 는 **동기 종료가 아니다** — 최소표시 래치와 페이드아웃이
+        #   남아 있으면 타이머만 걸고 돌아온다.  '덮개가 걷힌 뒤' 에 할 일은 반드시
+        #   이 콜백으로 걸어야 한다(바로 다음 줄에서 하면 아직 덮여 있다).
+        self._hide_then = then
         if not self.isVisible():
             self._finish_hide()
             return
@@ -742,17 +827,76 @@ class LoadingOverlay(QWidget):
         #   통하는 구간이 생긴다.  그게 바로 고치려던 그 증상이다.
         #   `_finish_hide` 는 모든 퇴장 경로가 지나는 단 하나의 지점이다.
         self._active = False           # 여기가 유일한 '끝' 이다
+        after = getattr(self, "_hide_then", None)
+        self._hide_then = None
         self._set_input_lock(False)
         self._settle_progress()        # 멈춘 tween 의 중간값이 남지 않게(모션 off 경로 포함)
+        self._set_done_state(False)     # 다음 작업이 완료색으로 시작하지 않게
+        self._set_state(self._progress, "")
         self.hide()
         self._bar_anim.stop()          # 숨은 뒤 tick 이 남아 여백을 흔들지 않게
         self._bar_timer.stop()         # 대기 중인 스태거도 취소(숨은 뒤 들어오지 않게)
         self._busy.stop()
         self._busy.hide()
         self._cancel_btn.hide()
+        if after is not None:
+            after()
         self._fade = 0.0
         self._rise_span = self.RISE_IN_PX      # 다음 등장을 위해 초기화
         self._set_bar_slide(1.0)
+
+    def _set_done_state(self, done: bool) -> None:
+        """완료 표시(pass 색)를 켜고 끈다 — 값이 바뀔 때만 다시 폴리시한다.
+
+        ★ 매 tick 마다 unpolish/polish 하면 진행 갱신 횟수만큼 스타일 재계산이
+        돈다(200 tick = 200회).  이 앱이 '문구는 바뀔 때만 쓴다' 로 세운 규칙과
+        같은 이유다."""
+        done = bool(done)
+        if getattr(self, "_done_state", False) == done:
+            return
+        self._done_state = done
+        # ★ 색이 바뀌는 것은 **문구 하나**다.  23안-B 목업을 실측하면 pass 색은
+        #   "유사도 계산 완료" 스팬에만 걸려 있고, 눈금은 accent 그대로 · "100 %" 는
+        #   기본 잉크다.  셋을 다 칠하면 '한 화면에 강조 하나' 가 무너지고 완료가
+        #   경고처럼 커진다.  눈금은 아래 `finish_tick` 이 그 한 지점에서만 만진다.
+        self._set_state(self._label, "done" if done else "")
+
+    @staticmethod
+    def _set_state(widget, value: str) -> None:
+        """QSS 상태 속성을 갈아 끼우고 다시 폴리시한다(값이 바뀔 때만 부른다)."""
+        widget.setProperty("state", value)
+        widget.style().unpolish(widget)
+        widget.style().polish(widget)
+        widget.update()
+
+    def finish_tick(self, then=None) -> None:
+        """수 분짜리 작업이 끝나는 **그 한 지점**에서 눈금을 200ms 머금었다 보낸다.
+
+        ★ 23안은 B(모션 0)를 채택하면서, '수 분 작업의 끝' 단 한 지점만은 주변시에
+        걸리는 200ms 틱의 실익이 있다고 못박았다 — 스캔·저장처럼 짧은 작업에는
+        달지 않는다.  그래서 이건 자동이 아니라 **호출부가 고르는** 신호다.
+        ★ 여기서 하는 일은 완료색을 켠 뒤 그만큼 붙잡아 두는 것뿐이다(애니메이션
+        객체를 새로 만들지 않는다).  ``then`` 은 보통 ``hide_overlay`` 다."""
+        self._set_done_state(True)
+        # 눈금이 '한 번 빛나고 멈춘다' — 이 200ms 동안만 완료색이다(A안의 그 틱).
+        self._set_state(self._progress, "done")
+        if not motion.enabled():
+            if then is not None:
+                then()
+            return
+        timer = getattr(self, "_finish_timer", None)
+        if timer is None:
+            # 정적 QTimer.singleShot 금지 — 오버레이가 먼저 죽으면 세그폴트다.
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            self._finish_timer = timer
+        try:
+            timer.timeout.disconnect()
+        except TypeError:
+            pass
+        if then is not None:
+            timer.timeout.connect(then)
+        timer.start(motion.DUR_FINISH_TICK)
 
     def set_progress(self, done: int, total: int, message: str = "") -> None:
         if message:
@@ -771,6 +915,11 @@ class LoadingOverlay(QWidget):
                            i18n.KO.LOADING_COUNT_FMT.format(done=done,
                                                             total=int(total)))
             self._set_text(self._pct_label, f"{int(done * 100 / max(1, total))}%")
+            # ★ 23안-B — 100% 에 닿는 순간의 **마침 신호는 색이다**(모션 0).
+            #   수 분짜리 작업이 끝나면 오버레이는 140ms 페이드로 조용히 사라져,
+            #   다른 창을 보던 사용자는 끝을 놓쳤다.  design-v2 가 이미 세운
+            #   '진행 정보 → statusPass 전환' 규칙을 여기 그대로 적용한다.
+            self._set_done_state(done >= int(total))
             if self._progress.maximum() != total:      # 단계 전환/총량 변경 → 스냅
                 self._val_anim.stop()
                 self._progress.setRange(0, total)
@@ -819,7 +968,11 @@ class LoadingOverlay(QWidget):
                     self._val_anim.setDuration(motion.dur(self.VAL_TWEEN_MS))
                     self._val_anim.start()
         else:
+            self._set_done_state(False)                 # 다시 진행 중이다
             self._enter_busy()                          # busy: 혜성 스윕으로 교체
+        # 작업 큐의 현재 줄에 수치를 먹인다 — busy 면 그 줄의 수치를 지운다.
+        # (값이 그대로면 `set_counts` 가 다시 그리지 않는다.)
+        self._steps.set_counts(done, int(total))
         # ★ 매 tick 마다 _cover_parent() 를 부르지 않는다 — sizeHint + setGeometry 가
         #   진행 갱신 횟수만큼 돌았다(200 tick = 200회).  크기는 부모 리사이즈
         #   (eventFilter)와 표시 시점에만 바뀐다.  단, busy↔결정형 전환은 내용이

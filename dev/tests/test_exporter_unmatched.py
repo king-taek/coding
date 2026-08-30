@@ -67,9 +67,23 @@ def test_export_writes_matches_and_unmatched(qapp, isolated_cache, tmp_path):
     # geometry 기능 활성 + Surface.flt 없음 → 파일명 + '미지원 자재' 마커(rich-text).
     assert "b_ref.jpeg" in str(d4)
     assert i18n.KO.GEOM_NOT_SUPPORTED in str(d4)
-    # 파일명 블록은 여전히 빨강.
+    # ★ 파일명 블록은 **회색 8pt** 다 — 예전의 빨강 굵은 글씨가 아니다(28안 ②).
+    #   같은 셀 안에서 파일명(굵은 빨강)과 그 아래 geometry·좌표(회색 8pt)가
+    #   서로 다른 등급이라 시선이 갈렸다.  '미매칭' 이라는 구분은 이제 **행 전체
+    #   틴트**(UNMATCHED_FILL)가 담당하므로, 글씨가 혼자 소리칠 이유가 없다 —
+    #   덤으로 흑백 인쇄에서도 구분이 살아남는다(빨강은 흑백에서 사라진다).
+    #   ★ 색은 **검정**이다 — 시안은 회색(#808080)이었지만 8pt 회색이 인쇄물에서
+    #   실제로 읽히지 않아 사용자가 되돌렸다.  등급은 크기로만 낮춘다.
     assert isinstance(d4, CellRichText)
-    assert "FF2D55" in str(d4[0].font.color.rgb).upper()
+    assert "000000" in str(d4[0].font.color.rgb).upper(), (
+        "파일명이 검정이 아니다 — 8pt 회색은 인쇄물에서 읽기 어려웠다(사용자 결정)")
+    assert float(d4[0].font.sz) == 8.0, "파일명이 8pt 가 아니다"
+    # 구분을 넘겨받은 쪽 — 미매칭 행은 A~D 가 통째로 물든다.
+    for col in ("A", "B", "C", "D"):
+        assert str(ws[f"{col}4"].fill.fgColor.rgb).upper() == "FFFDF1EA", (
+            f"{col}4 미매칭 틴트가 없다")
+    # 매칭 행은 줄무늬 그대로 — 둘이 같아지면 구분이 사라진다.
+    assert str(ws["A3"].fill.fgColor.rgb).upper() != "FFFDF1EA"
 
     # 코멘트 ‘미매칭’ 확인
     assert ws["D4"].comment is not None
