@@ -367,7 +367,7 @@ def test_scrim_is_not_heavier_in_the_mode_with_less_headroom():
 
 
 @pytest.mark.parametrize("mode", _MODES)
-def test_loading_indicator_reads_against_its_track(mode):
+def test_loading_indicator_reads_against_its_track(qapp, mode):
     """busy 혜성·여정 스텝이 **자기 트랙**과 3:1 이상.
 
     '모션 줄이기' + busy 조합에서는 이 대비가 '살아 있다'는 유일한 신호다.
@@ -393,11 +393,13 @@ def test_loading_indicator_reads_against_its_track(mode):
     # 자손 선택자(`QWidget[role="loadingPanel"] QProgressBar`)가 특이도로 이겨서 규칙이
     # 화면에 닿지 못한 적이 있다(실측: 트랙이 $bg 로 칠해졌다).  그때도 문자열 검사는
     # 통과했다 — 그래서 **실제로 칠해진 픽셀**을 잰다.
-    from PyQt6.QtWidgets import QApplication, QWidget
     from aoi_verification.app.ui.widgets.loading_overlay import LoadingOverlay
 
-    app = QApplication.instance() or QApplication([])
-    theme.apply_to_app(app)
+    # ★ 테마는 이 파일의 포커스 링 테스트와 **같은 방식**으로 건다(`_focus_pixels`).
+    #   `theme.apply_to_app` 을 여기서 부르면 세션 테마를 모드마다 갈아 끼우게 되고,
+    #   무엇보다 `qapp` 픽스처를 받지 않으면 conftest 가 `ui` 마커를 못 붙인다 —
+    #   그러면 `-m "not ui"` 빠른 레인이 QApplication 을 만들고 픽셀까지 굽는다.
+    qapp.setStyleSheet(theme.render_qss(_QSS))
     host = QWidget()
     host.resize(900, 600)
     ov = LoadingOverlay(host)
@@ -405,7 +407,7 @@ def test_loading_indicator_reads_against_its_track(mode):
         ov.show_overlay("t")
         ov.set_progress(2, 10, "t")          # 결정형 — 오른쪽 끝이 미채움(=트랙)
         ov.show()
-        app.processEvents()
+        qapp.processEvents()
         img = ov._progress.grab().toImage()
         track = img.pixelColor(img.width() - 3, img.height() // 2).name().lower()
         assert track == c["line2"].lower(), (

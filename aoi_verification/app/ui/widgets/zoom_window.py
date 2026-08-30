@@ -371,7 +371,15 @@ class FullscreenViewer(QDialog):
         # ★ 맞춤은 **라벨 크기를 실제로 알게 된 뒤에** 확정한다.  레이아웃이 아직
         #   안 돌았으면 어림값으로 한 번 그리되 `_fitted` 를 세우지 않아, 진짜 크기가
         #   생기는 다음 그리기에서 다시 맞춘다(사용자 조작 전이라 덮어써도 안전하다).
+        # ★ 재기 전에 레이아웃을 **한 번 돌린다.**  배치되지 않은 자식 위젯의 기본
+        #   지오메트리는 Qt 기본값 100×30 이고, 그 값도 `> 1` 을 통과한다 — 즉 크기를
+        #   모르는 상태가 '안다' 로 읽혔다.  표시 전에 `_redraw` 가 먼저 오면
+        #   (원본 디코드가 빨리 끝난 경우) 100×30 에 맞춘 배율이 `_fitted` 로 굳어
+        #   전체화면 뷰어에 썸네일만 한 사진이 남는다 — 바로 그 증상이다.
         if not self._fitted and self.width() > 0 and self.height() > 0:
+            lay = self.layout()
+            if lay is not None:
+                lay.activate()
             self._fitted = self._label.width() > 1 and self._label.height() > 1
             self._fit_to_view()
         # ★ 스케일 결과를 한 장 캐시한다.  드래그 팬은 offset 만 바뀌는데도 매

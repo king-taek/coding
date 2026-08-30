@@ -330,3 +330,78 @@ def test_over_row_auto_expands_candidates(qapp):
     assert over._visible_lines > 1          # 실패 행은 펼침
     assert ok._visible_lines == 1           # 일치 행은 첫 줄만(빠른 확인)
     over.deleteLater(); ok.deleteLater()
+def test_next_issue_is_locked_when_there_is_nothing_to_visit(qapp):
+    """예외가 0 건이면 [다음 예외로] 는 **비활성**이다.
+
+    ★ 예전엔 활성으로 보이는데 눌러도 아무 일이 없었다(순회할 예외 행이 없으면
+      루프가 그냥 끝난다) — 같은 시안에서 [묶기]·벌크 액션의 '먹은 클릭' 을 고쳐
+      놓고 이 버튼만 남아 있었다.  잠긴 이유는 툴팁이 말한다."""
+    from aoi_verification.app import i18n
+    from aoi_verification.app.ui.pages.match_review_page import MatchReviewPage
+    page = MatchReviewPage()
+    try:
+        ms = [_m("S1", 0.9), _m("S2", 0.8)]        # 전부 일치
+        page.load_state(ms, coord_mode=True, tolerance=20.0)
+        assert page._btn_next_issue.isEnabled() is False, (
+            "갈 곳이 없는데 버튼이 열려 있다")
+        assert (page._btn_next_issue.toolTip()
+                == i18n.KO.BTN_NEXT_ISSUE_NONE_TOOLTIP)
+
+        page._on_toggle(ms[0])                     # '매치 없음' → 예외 1 건 생김
+        assert page._btn_next_issue.isEnabled() is True
+        assert page._btn_next_issue.toolTip() == ""
+
+        page._on_toggle(ms[0])                     # 되돌리면 다시 0 건
+        assert page._btn_next_issue.isEnabled() is False
+    finally:
+        page.deleteLater()
+
+
+def test_the_toggle_column_fits_its_own_header_word(qapp):
+    """토글 열은 **자기 헤더 낱말이 들어가는 폭**이어야 한다.
+
+    ★ 헤더는 `setFixedWidth` 라 넘치면 말줄임 없이 잘린다("매치 없" ) — 칸에 이름을
+      준 목적이 사라진다.  폭을 한 조합의 실측 상수로 박아 두면 폰트 프로필이나
+      서체가 달라지는 순간 조용히 잘리므로, 실제 서체로 잰 값과 비교해 못 박는다."""
+    from PyQt6.QtWidgets import QLabel, QWidget
+    from aoi_verification.app import i18n
+    from aoi_verification.app.ui import theme
+    from aoi_verification.app.ui.pages import match_review_page as mrp
+    qapp.setStyleSheet(theme.render_qss(_QSS))
+    host = QWidget()
+    host.show()
+    try:
+        lab = QLabel(i18n.KO.CHIP_NO_MATCH, host)
+        lab.setProperty("role", "colHead")          # 헤더와 같은 등급 = 같은 서체
+        lab.style().unpolish(lab)
+        lab.style().polish(lab)
+        qapp.processEvents()
+        assert lab.sizeHint().width() <= mrp._toggle_col_w(), (
+            f"헤더 낱말 {lab.sizeHint().width()}px 가 열 폭 "
+            f"{mrp._toggle_col_w()}px 를 넘는다 — 잘려서 나간다")
+    finally:
+        host.hide()
+        host.deleteLater()
+        qapp.processEvents()
+
+
+def test_the_more_candidates_button_never_offers_zero(qapp):
+    """'후보 한 줄 더 보기' 는 **남은 게 있을 때만** 개수를 적는다.
+
+    ★ 잔여가 0 이하일 때도 문구를 갈아 끼우면 '(+0)'·'(+-2)' 가 숨겨진 버튼에
+      남는다 — setVisible 한 번이면 그대로 화면에 나온다."""
+    from aoi_verification.app import i18n
+    from aoi_verification.app.models.slot import ImageItem
+    from aoi_verification.app.ui.pages.match_review_page import _MatchRow
+    runners = [(ImageItem(slot="S1", path=Path(f"/tmp/c{i}.jpg"), side="val"),
+                0.6 - i * 0.1) for i in range(6)]
+    row = _MatchRow(_m("S1", 0.9), runners_up=runners, thumb_px=140)
+    try:
+        zero = i18n.KO.RUNNERUP_MORE_ROW_FMT.format(n=0)
+        row._visible_lines = 99                     # 전부 펼친다 → 남은 후보 0
+        row._layout_runner_tiles()
+        assert row.btn_more.isVisibleTo(row) is False
+        assert row.btn_more.text() != zero, "숨긴 버튼에 '(+0)' 이 적혀 있다"
+        assert "-" not in row.btn_more.text()
+    finally:
+        row.deleteLater()

@@ -16,9 +16,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from PyQt6.QtCore import QPoint, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QFontMetrics, QPixmap
-from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu,
-                              QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
+from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPixmap
+from PyQt6.QtWidgets import (QApplication, QFrame, QGridLayout, QHBoxLayout,
+                             QLabel, QMenu, QScrollArea, QSizePolicy,
+                             QVBoxLayout, QWidget)
 
 from ... import i18n
 from .. import theme
@@ -60,7 +61,31 @@ _SLOT_W = 96
 # ★ 값이 52 → 68 로 커진 이유: 이 열에 헤더 이름을 주면서 낱말('매치 없음', colHead
 #   12px/w700 실측 65px)이 52px 안에 안 들어가 잘렸다.  칸에 이름을 주는 것이 목적인데
 #   이름이 잘리면 목적을 잃는다 — 낱말에 폭을 맞춘다(버튼 타깃도 함께 넓어진다).
-_TOGGLE_COL_W = 68
+_TOGGLE_COL_W_MIN = 68
+_toggle_col_w_px: int | None = None       # 첫 호출에서 한 번 잰다
+
+
+def _toggle_col_w() -> int:
+    """토글 열 폭 — 헤더 낱말이 잘리지 않는 값을 **실제로 재서** 정한다.
+
+    ★ 68 은 한 조합(colHead 12px/w700 + 동봉 폰트)의 실측값이다.  헤더는
+      `setFixedWidth` 라 넘치면 **말줄임 없이 잘린다** — 폰트 프로필(`font_caption`)이
+      바뀌거나 동봉 폰트가 없어 더 넓은 폴백으로 그려지면 "매치 없" 이 되어 칸에
+      이름을 준 목적이 사라진다.  그래서 QSS `role="colHead"`(캡션 크기 · 700 ·
+      자간 1px)와 같은 서체로 재고, 옛 실측값을 하한으로 둔다.
+    ★ 세 곳(헤더·행 버튼·예약폭 계산)이 **같은 값**을 봐야 하므로 한 번만 재서 기억한다.
+    """
+    global _toggle_col_w_px
+    if _toggle_col_w_px is None:
+        f = QApplication.font()
+        f.setPixelSize(theme.PROFILE.font_caption)
+        f.setWeight(QFont.Weight.Bold)                       # QSS font-weight: 700
+        f.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.0)
+        need = QFontMetrics(f).horizontalAdvance(i18n.KO.CHIP_NO_MATCH) + 6
+        _toggle_col_w_px = max(_TOGGLE_COL_W_MIN, need)
+    return _toggle_col_w_px
+
+
 # 행(`QFrame[role="row"]`)의 QSS 좌측 보더 두께.  행은 보더 안쪽에서 내용을 시작하므로
 # 헤더(보더 없음)보다 내용이 이만큼 오른쪽으로 밀린다 — 실측 1.0px 어긋남의 정체다.
 # 헤더 좌측 마진에 더해 상쇄한다.  style.qss 의 `QFrame[role="row"]` 보더와 같은 값이다.
@@ -402,7 +427,7 @@ class _MatchRow(QFrame):
         self.btn_toggle.setProperty("compact", True)
         self.btn_toggle.setProperty("intent", "reject")
         # 오탭=오검증 — 세로 히트영역은 최소 44px 보장(행 높이가 썸네일이라 여유).
-        self.btn_toggle.setFixedSize(_TOGGLE_COL_W, 44)
+        self.btn_toggle.setFixedSize(_toggle_col_w(), 44)
         self.btn_toggle.setToolTip(i18n.KO.BTN_MARK_NO_MATCH)
         self.btn_toggle.clicked.connect(
             lambda: self.toggle_requested.emit(self.match)
@@ -430,10 +455,11 @@ class _MatchRow(QFrame):
             host_lay.addLayout(self._runner_grid)
 
             # ‘후보 한 줄 더 보기’ / ‘접기’ 버튼 (#5/#4).
-            # 실제 잔여 개수는 바로 뒤 `_layout_runner_tiles` 가 채운다.
-            self.btn_more = NeonButton(
-                i18n.KO.RUNNERUP_MORE_ROW_FMT.format(n=len(self._runners_up)),
-                role="link")
+            # ★ 여기서 넣는 숫자는 **총 개수라 잔여가 아니다** — 문구가 뜻하는 값과
+            #   다르므로 자리만 잡고(빈 문구), 실제 잔여 개수는 바로 뒤
+            #   `_layout_runner_tiles` 가 채운다(보이게 만드는 것도 그쪽이다).
+            self.btn_more = NeonButton("", role="link")
+            self.btn_more.setVisible(False)
             self.btn_more.clicked.connect(self._on_more)
             self.btn_less = NeonButton(i18n.KO.RUNNERUP_LESS_ROW, role="link")
             self.btn_less.clicked.connect(self._on_less)
@@ -628,9 +654,9 @@ class _MatchRow(QFrame):
         slot·화살표·metric·칩·컴팩트 토글·여백/스페이싱.  이 폭을 뺀 나머지를
         두 이미지가 나눠 가져야 가로로 넘치지 않는다 (800×600 창 기준 검증)."""
         p = theme.PROFILE
-        # slot_host + 화살표 + metric(96) + 칩(chip_w) + 토글(_TOGGLE_COL_W)
+        # slot_host + 화살표 + metric(96) + 칩(chip_w) + 토글(_toggle_col_w())
         # + 행 여백/스페이싱(96).  변형이 커져도 두 이미지가 클램프되어 안 넘침.
-        return _SLOT_W + _ARROW_W + 6 + 96 + p.chip_w + _TOGGLE_COL_W + 96
+        return _SLOT_W + _ARROW_W + 6 + 96 + p.chip_w + _toggle_col_w() + 96
 
     def _max_thumb(self) -> int:
         """현재 행 폭에서 가로 넘침 없이 허용되는 메인 이미지 한 변의 최대값."""
@@ -706,9 +732,11 @@ class _MatchRow(QFrame):
             remaining = len(self._runners_up) - need
             self.btn_more.setVisible(remaining > 0)
             # 남은 개수를 라벨에 싣는다 — 3개 남았는지 40개 남았는지 모른 채
-            # 반복 클릭하지 않게.
-            self.btn_more.setText(
-                i18n.KO.RUNNERUP_MORE_ROW_FMT.format(n=remaining))
+            # 반복 클릭하지 않게.  ★ 남은 게 없을 때는 **적지 않는다**: '(+0)'·'(+-2)'
+            #   같은 문구가 숨겨진 버튼에 남아, setVisible 한 번이면 화면에 나온다.
+            if remaining > 0:
+                self.btn_more.setText(
+                    i18n.KO.RUNNERUP_MORE_ROW_FMT.format(n=remaining))
         if self.btn_less is not None:
             self.btn_less.setVisible(self._visible_lines > 1)
 
@@ -1007,7 +1035,7 @@ class MatchReviewPage(QWidget):
         # ★ 표(타이틀블록)에서 유일하게 이름 없던 칸이다 — ✕ 가 무슨 토글인지 헤더도
         #   버튼도 말하지 않아 호버해 툴팁을 봐야 알 수 있었다.  칩·버튼과 **같은
         #   낱말**을 쓴다(새 용어를 만들지 않는다).  폭 계약은 그대로.
-        lay.addWidget(head(i18n.KO.CHIP_NO_MATCH, width=_TOGGLE_COL_W,
+        lay.addWidget(head(i18n.KO.CHIP_NO_MATCH, width=_toggle_col_w(),
                            align=Qt.AlignmentFlag.AlignCenter))
         return host
 
@@ -1394,6 +1422,14 @@ class MatchReviewPage(QWidget):
             parts.append(seg(i18n.KO.TALLY_COORD_FAILED_FMT,
                              self._coord_failed_count, theme.MUTE))
         self._tally_label.setText(sep.join(parts))
+        # ★ 갈 곳이 없으면 잠근다.  예외가 0 건인 검토에서 이 버튼은 눌러도 아무 일이
+        #   일어나지 않았다 — 같은 시안에서 [묶기]·벌크 액션의 '먹은 클릭' 을 고쳐 놓고
+        #   여기만 남아 있었다.  판정 근거는 `_goto_next_issue` 와 같다 — 탤리도 행도
+        #   `classify_row` 하나를 보므로, 행이 배치로 늦게 만들어지는 중에도 어긋나지 않는다.
+        has_issue = (over + none) > 0
+        self._btn_next_issue.setEnabled(has_issue)
+        self._btn_next_issue.setToolTip(
+            "" if has_issue else i18n.KO.BTN_NEXT_ISSUE_NONE_TOOLTIP)
         kept = len(self._matches) - len(self._unmatched_keys)
         self.btn_done.setText(i18n.KO.BTN_FINISH_REVIEW_KEPT_FMT.format(n=kept))
 
