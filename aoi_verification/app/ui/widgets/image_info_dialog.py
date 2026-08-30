@@ -8,6 +8,9 @@
 
 - 계측은 **타이틀블록 + 하이라인 눈금 표**다 — ``role="listHeader"``/``colHead`` 로
   덮개를 씌우고, 행마다 ``QFrame[role="row"]`` 의 아래 눈금이 항목을 가른다.
+- 값은 **라벨 열(고정 폭) 바로 오른쪽에서 좌측 정렬로 시작**한다.  오른쪽 끝에 붙이면
+  창이 넓어질수록 라벨과 값 사이가 벌어져 항목마다 눈이 좌우로 왕복한다 — 시작선을
+  하나로 모으면 수치를 위아래로 훑을 수 있다.
 - **수치는 모노**(``role="mono"``)로 찍는다.  이게 이 화면의 초점이다 — 비례 서체로
   찍으면 계측기가 아니라 산문으로 읽힌다.
 - 측정정보 유무는 문장이 아니라 **판정 스탬프**(``chip="ok"``/``"none"``)로 한 번에.
@@ -43,6 +46,18 @@ _PREVIEW_MIN_W = 300
 _PREVIEW_MAX_W = 460
 # 복사 확인은 모달이 아니라 버튼 옆에서 잠깐 스쳐 지나간다.
 _TOAST_MS = 1800
+# 라벨 열 폭의 **하한** — 값이 전부 여기서부터 시작한다.  실제 폭은 시트에 실린 가장 긴
+# 라벨에 맞춰 넓힌다(`_label_col_w`).
+_LABEL_COL_MIN = 132
+
+
+def _shape_columns(grid: QGridLayout, label_w: int) -> None:
+    """라벨 열은 고정 폭, 값 열이 남은 자리를 먹는다 — 값의 시작선을 한 줄로 모은다.
+
+    타이틀블록과 행이 **같은 함수로** 열을 잡아야 컬럼 머리가 값 위에 정확히 선다.
+    """
+    grid.setColumnMinimumWidth(0, label_w)
+    grid.setColumnStretch(1, 1)
 
 
 class _ElidingValue(QLabel):
@@ -305,8 +320,9 @@ class ImageInfoDialog(QDialog):
         if self._path is None:
             col.addWidget(self._notice(host, i18n.KO.IMAGE_INFO_NO_FILE))
         else:
+            label_w = self._label_col_w(host)
             for group in self._groups:
-                col.addWidget(self._group_block(host, group))
+                col.addWidget(self._group_block(host, group, label_w))
             # ★ 계측을 하나도 못 읽었으면 복구 안내를 띄운다.  '파일' 덩이는 경로만
             #   있으면 항상 생기므로, 덩이 개수로 판정하면 이 안내가 영원히 안 뜬다.
             if not single_info.has_measurements(self._groups):
@@ -317,39 +333,75 @@ class ImageInfoDialog(QDialog):
         self.copy_btn.setEnabled(bool(self._groups))
         self._refresh_preview()
 
+    def _label_col_w(self, parent: QWidget) -> int:
+        """라벨 열 폭 — 시트에 실린 **가장 긴 라벨**에 맞춘다(하한 ``_LABEL_COL_MIN``).
+
+        ★ 상수로 못 박지 마라.  한 행이 곧 눈금을 그리는 ``QFrame`` 하나라 행마다
+          grid 가 따로고, Qt 는 서로 다른 grid 의 열 폭을 맞춰 주지 않는다.  하한을
+          넘는 라벨이 한 줄이라도 있으면 **그 행만** 값이 오른쪽으로 밀려 이 화면의
+          약속("값이 한 기준선에서 시작")이 조용히 깨진다.  라벨 폭은 서체에 따라
+          달라진다 — 동봉 글꼴을 못 읽어 폴백으로 떨어지면 같은 라벨이 두 배 가까이
+          넓어져(실측 "recipe / zone" 83px → 182px) 하한을 훌쩍 넘는다.
+        """
+        parent.ensurePolished()     # 스타일시트의 서체가 적용된 뒤에 잰다
+        fm = QFontMetrics(parent.font())
+        widest = max((fm.horizontalAdvance(row.label)
+                      for group in self._groups for row in group.rows
+                      if row.label), default=0)
+        return max(_LABEL_COL_MIN, widest)
+
     @staticmethod
     def _notice(parent: QWidget, text: str) -> QLabel:
+        """안내 문구 — 줄바꿈해서 뷰포트 폭에 맞춘다.
+
+        ★ 가로 폭 정책을 ``Ignored`` 로 낮춘다.  ``setWordWrap`` 라벨은 최소 폭을
+          0 까지 내리지 않고 '적당한 가로세로 비'를 유지하려 드는데(실측 220px),
+          그 최소치가 뷰포트보다 넓으면 **가로 스크롤이 생긴다** — 이 앱이 금지한
+          것이다(CLAUDE.md 'UI 사용성 관습').  줄바꿈할 곳이 있는 문장이라 폭을
+          낮춰도 잘리지 않고 아래로 늘어난다(``wordWrap`` 라벨은 heightForWidth 를
+          이미 갖고 있어 높이가 따라온다).  ``_ElidingValue`` 가 값 라벨에 쓰는
+          것과 같은 판단이고, 거기와 달리 생략이 아니라 줄바꿈으로 감당한다.
+        """
         notice = QLabel(text, parent)
         notice.setWordWrap(True)
         notice.setProperty("role", "muted")
         notice.setAlignment(Qt.AlignmentFlag.AlignTop)
+        policy = notice.sizePolicy()
+        policy.setHorizontalPolicy(QSizePolicy.Policy.Ignored)
+        notice.setSizePolicy(policy)
         return notice
 
-    def _group_block(self, parent: QWidget, group) -> QWidget:
+    def _group_block(self, parent: QWidget, group, label_w: int) -> QWidget:
         """타이틀블록(그룹명 + 컬럼 머리) + 하이라인 눈금 행들."""
         block = QWidget(parent)
         lay = QVBoxLayout(block)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
 
-        header = QFrame(block)
-        header.setProperty("role", "listHeader")
-        hl = QHBoxLayout(header)
-        hl.setContentsMargins(0, 0, 0, 6)
-        name = QLabel(group.title, header)
-        name.setProperty("role", "colHead")
-        hl.addWidget(name)
-        hl.addStretch(1)
-        unit = QLabel(i18n.KO.IMAGE_INFO_COL_VALUE, header)
-        unit.setProperty("role", "colHead")
-        hl.addWidget(unit)
-        lay.addWidget(header)
-
+        lay.addWidget(self._group_header(block, group.title, label_w))
         for row in group.rows:
-            lay.addWidget(self._row_widget(block, row))
+            lay.addWidget(self._row_widget(block, row, label_w))
         return block
 
-    def _row_widget(self, parent: QWidget, row) -> QWidget:
+    @staticmethod
+    def _group_header(parent: QWidget, title: str, label_w: int) -> QWidget:
+        """타이틀블록 — 컬럼 머리 "값"이 (오른쪽 끝이 아니라) 값 열 위에 선다."""
+        header = QFrame(parent)
+        header.setProperty("role", "listHeader")
+        grid = QGridLayout(header)
+        grid.setContentsMargins(0, 0, 0, 6)
+        grid.setHorizontalSpacing(theme.PROFILE.card_pad)
+        _shape_columns(grid, label_w)
+
+        name = QLabel(title, header)
+        name.setProperty("role", "colHead")
+        grid.addWidget(name, 0, 0)
+        unit = QLabel(i18n.KO.IMAGE_INFO_COL_VALUE, header)
+        unit.setProperty("role", "colHead")
+        grid.addWidget(unit, 0, 1)
+        return header
+
+    def _row_widget(self, parent: QWidget, row, label_w: int) -> QWidget:
         """한 행 — 아래 눈금이 항목을 가른다(면 없음, 제도 시트)."""
         frame = QFrame(parent)
         frame.setProperty("role", "row")
@@ -357,7 +409,7 @@ class ImageInfoDialog(QDialog):
         grid.setContentsMargins(0, theme.PROFILE.row_pad_v,
                                 0, theme.PROFILE.row_pad_v)
         grid.setHorizontalSpacing(theme.PROFILE.card_pad)
-        grid.setColumnStretch(1, 1)
+        _shape_columns(grid, label_w)
 
         if row.label:
             label = QLabel(row.label, frame)
@@ -382,7 +434,9 @@ class ImageInfoDialog(QDialog):
         value.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
             | Qt.TextInteractionFlag.TextSelectableByKeyboard)
-        value.setAlignment(Qt.AlignmentFlag.AlignRight
+        # ★ 값은 **왼쪽 정렬**이다.  오른쪽 끝에 붙이면 창이 넓어질수록 라벨과 값
+        #   사이가 벌어져 항목마다 눈이 좌우로 왕복한다.
+        value.setAlignment(Qt.AlignmentFlag.AlignLeft
                            | Qt.AlignmentFlag.AlignVCenter)
         if row.mono:
             value.setProperty("role", "mono")
