@@ -35,9 +35,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Iterable, Optional
 
-from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QObject, QSize, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QFontMetrics
 from PyQt6.QtWidgets import (QApplication, QDialog, QGridLayout, QHBoxLayout,
                              QLabel, QLineEdit, QScrollArea, QSizePolicy,
@@ -52,6 +53,51 @@ from .option_group import reflow_into_grid
 # 길 수 있어 가운데 생략(…)으로 줄이고 전체 이름은 툴팁에 둔다.
 _TILE_MIN_W = 168
 _GRID_SPACING = 8
+
+# 개수를 세는 워커가 도는 동안 파이썬 참조를 붙잡아 두는 곳 — 지역 변수로만 두면
+# 함수가 끝나는 순간 GC 가 QThread 를 파괴한다(`pages/setup_page._LIVE_DIE_SCANS`
+# 와 같은 패턴이고 같은 이유다: 실행 중인 QThread 가 파괴되면 프로세스가 죽는다).
+_LIVE_COUNT_SCANS: set = set()
+
+
+class _SlotCountScan(QThread):
+    """슬롯마다 기준·검증 폴더의 사진 수를 **워커 스레드에서** 센다.
+
+    폴더 열거는 NAS 에서 왕복이라 슬롯 25개면 50회다 — UI 스레드에서 하면 팝업이
+    뜨는 순간 그만큼 멈춘다(직전에 고친 '폴더 선택 시 멈춤' 과 같은 종류).  그래서
+    팝업을 **먼저 띄우고** 개수는 세어지는 대로 한 슬롯씩 올려 보낸다.
+
+    ``token`` 은 늦게 도착한 옛 결과를 버리기 위한 세대 번호다."""
+
+    class _Signals(QObject):
+        counted = pyqtSignal(int, str, int, int)     # token, slot, ref, val
+        # ★ `val` 이 음수면 '검증 폴더에 그 슬롯이 없다'는 뜻이다(0 장과 구분된다).
+
+    def __init__(self, token: int, ref_dirs: dict, val_root) -> None:
+        super().__init__()                  # 부모 없음(위 주석)
+        self._token = token
+        self._ref_dirs = dict(ref_dirs)
+        self._val_root = Path(val_root) if val_root else None
+        self.signals = self._Signals()
+
+    def run(self) -> None:      # type: ignore[override]
+        from ...models.slot import count_images
+
+        for name, folder in sorted(self._ref_dirs.items()):
+            if self.isInterruptionRequested():
+                return
+            try:
+                ref_n = count_images(folder)
+            except Exception:
+                ref_n = 0
+            val_n = -1
+            if self._val_root is not None:
+                try:
+                    vd = self._val_root / name
+                    val_n = count_images(vd) if vd.is_dir() else -1
+                except Exception:
+                    val_n = -1
+            self.signals.counted.emit(self._token, name, ref_n, val_n)
 
 
 class _SlotTile(NeonButton):
@@ -80,7 +126,30 @@ class _SlotTile(NeonButton):
         self.setToolTip(name)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        # ── 둘째 줄: 그 슬롯의 사진 수 ──────────────────────────────────
+        # ★ 버튼의 **텍스트에 합치지 않는다.**  `text()` 는 '가운데 생략된 슬롯명
+        #   그 자체' 라는 계약이 있고(`_elide`, `test_long_name_stays_readable` 이
+        #   첫 글자·끝 글자를 원본과 비교한다), 두 줄을 한 문자열로 만들면 그 계약이
+        #   깨진다.  게다가 한 버튼의 텍스트에는 서체를 두 가지로 줄 수 없다.
+        #   자식 라벨로 두면 QSS 가 작고 흐린 글씨를 따로 칠한다.
+        self._count = QLabel(i18n.KO.SLOT_SELECT_TILE_COUNT_PENDING, self)
+        self._count.setProperty("role", "slotTileCount")
+        self._count.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        lay = QVBoxLayout(self)
+        # 위쪽은 버튼 자기 텍스트(슬롯명)의 자리다 — 비워 두고 라벨만 아래에 앉힌다.
+        lay.setContentsMargins(10, 0, 10, 5)
+        lay.setSpacing(0)
+        lay.addStretch(1)
+        lay.addWidget(self._count)
         self._elide()
+
+    def set_count_text(self, text: str) -> None:
+        """둘째 줄 문구 교체 — 값이 바뀔 때만 적는다(리페인트를 아낀다)."""
+        if self._count.text() != text:
+            self._count.setText(text)
+
+    def count_text(self) -> str:
+        return self._count.text()
 
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
@@ -104,7 +173,13 @@ class SlotSelectDialog(QDialog):
                  slot_names: Iterable[str],
                  *,
                  preselected: Optional[Iterable[str]] = None,
+                 ref_dirs: Optional[dict] = None,
+                 val_root=None,
                  parent=None) -> None:
+        """``ref_dirs``·``val_root`` 를 주면 슬롯마다 사진 수를 **워커가** 채운다.
+
+        주지 않으면 개수 줄은 '확인 중…' 그대로 남는다 — 개수는 곁들이는 정보이지
+        이 창이 하는 일(슬롯 고르기)의 전제가 아니다."""
         super().__init__(parent)
         self.setWindowTitle(i18n.KO.SLOT_SELECT_TITLE)
         self._slot_names = sorted(set(slot_names))
@@ -122,8 +197,68 @@ class SlotSelectDialog(QDialog):
         #   ★ 크기는 **내용만큼**이다(아래 `_size_to_content`).  짧은 이름 24개를 고르는
         #   창이 27인치를 채우면 여백만 늘고 눈이 멀리 이동한다.  사진을 다루는 시트
         #   (일괄 선택·실패 검토)만 창 전체를 쓴다(`full_bleed=True`).
+        self._counts: dict[str, tuple[int, int]] = {}
+        self._count_token = 0
+        self._count_scan: Optional[_SlotCountScan] = None
         self._build()
         self._size_to_content()
+        if ref_dirs:
+            self._start_counting(ref_dirs, val_root)
+
+    # ── 슬롯별 사진 수 — 워커가 채운다 ────────────────────────────────
+    def _start_counting(self, ref_dirs: dict, val_root) -> None:
+        """개수 세기를 워커에 맡긴다 — 창은 이미 떠 있고 숫자만 나중에 들어온다."""
+        self._count_token += 1
+        scan = _SlotCountScan(self._count_token, ref_dirs, val_root)
+        scan.signals.counted.connect(self._on_counted)
+        _LIVE_COUNT_SCANS.add(scan)
+        scan.finished.connect(lambda s=scan: _LIVE_COUNT_SCANS.discard(s))
+        self._count_scan = scan
+        scan.start()
+
+    def _on_counted(self, token: int, slot: str, ref_n: int, val_n: int) -> None:
+        """한 슬롯을 다 셌다 — **최신 세대만** 반영한다."""
+        if token != self._count_token:
+            return
+        self._counts[slot] = (ref_n, val_n)
+        self._apply_count(slot)
+
+    def _apply_count(self, slot: str) -> None:
+        """센 값 → 타일 둘째 줄.  순수 렌더링(파일을 읽지 않는다)."""
+        tile = self._tiles.get(slot)
+        if tile is None:
+            return
+        got = self._counts.get(slot)
+        if got is None:
+            tile.set_count_text(i18n.KO.SLOT_SELECT_TILE_COUNT_PENDING)
+            return
+        ref_n, val_n = got
+        # 음수는 '검증 폴더에 그 슬롯이 없다' — 0 장과 구분해서 보여 준다.
+        val_txt = (i18n.KO.SLOT_SELECT_TILE_COUNT_NONE if val_n < 0
+                   else f"{val_n:,}")
+        tile.set_count_text(i18n.KO.SLOT_SELECT_TILE_COUNT_FMT.format(
+            ref=f"{ref_n:,}", val=val_txt))
+
+    def set_counts(self, counts: dict) -> None:
+        """개수를 직접 주입한다(테스트·미리 센 값이 있는 호출부용).
+
+        값은 ``{슬롯명: (기준_장수, 검증_장수)}`` — 검증 장수가 음수면 '없음'."""
+        for slot, pair in counts.items():
+            self._counts[slot] = (int(pair[0]), int(pair[1]))
+            self._apply_count(slot)
+
+    def closeEvent(self, event):  # noqa: N802
+        """창이 닫히면 세는 일도 멈춘다 — 답이 갈 곳이 없다.
+
+        ★ 기다리지 않는다.  세대 번호가 늦게 온 결과를 버리고, 스레드는
+        `_LIVE_COUNT_SCANS` 가 붙잡고 있으므로 자기 수명을 다 살고 조용히 사라진다
+        (기다리면 그게 곧 멈춤이다 — 느린 NAS 에서 창이 안 닫힌다)."""
+        self._count_token += 1
+        scan = self._count_scan
+        self._count_scan = None
+        if scan is not None and scan.isRunning():
+            scan.requestInterruption()
+        super().closeEvent(event)
 
     # ------------------------------------------------------------------
     @property

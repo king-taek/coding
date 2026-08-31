@@ -718,6 +718,14 @@ SLOT_SELECT_HINT = (
 )
 SLOT_SELECT_ALL = "전체 선택"
 SLOT_SELECT_NONE = "전체 해제"
+# 타일 둘째 줄 — 그 슬롯에 사진이 몇 장인지(사용자 요청: "slot별로 몇 개 있는지 보이게").
+# ★ 세는 것은 **결함 사진 장수**다(`models.slot.count_images`) — 웨이퍼 전경 사진은
+#   빠지므로 검증이 실제로 도는 장수와 같다.  좌표 항목 수가 아니다.
+# ★ 폴더를 열거해야 알 수 있어 워커가 채운다.  채워지기 전에는 빈칸이 아니라
+#   '확인 중…' 을 보여 준다(로딩바 계약과 같은 취지 — 모를 때도 멈춰 보이지 않게).
+SLOT_SELECT_TILE_COUNT_FMT = "기준 {ref} · 검증 {val}"
+SLOT_SELECT_TILE_COUNT_PENDING = "확인 중…"
+SLOT_SELECT_TILE_COUNT_NONE = "—"      # 검증 폴더에 그 슬롯이 없다
 # 진행 범위 타일 — 상태를 옆 라벨이 아니라 타일 자신이 말한다.
 # ── 실행 옵션 카드 — '자동화 수준' + '진행 범위' 를 한 카드에 담는다.
 RUN_OPTIONS_TITLE = "실행 옵션"

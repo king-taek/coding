@@ -1235,15 +1235,22 @@ class SetupPage(QWidget):
             )
             self._reset_slot_selection()       # 고를 수 없으면 전체 진행으로 복귀
             return
-        slot_names = sorted(list_slot_dirs(ref_root).keys())
+        ref_dirs = list_slot_dirs(ref_root)
+        slot_names = sorted(ref_dirs.keys())
         if not slot_names:
             sheets.info(
                 self, i18n.KO.APP_TITLE, i18n.KO.SLOT_SELECT_EMPTY,
             )
             self._reset_slot_selection()
             return
+        # 슬롯별 사진 수는 **창이 뜬 뒤 워커가** 채운다(폴더 열거가 슬롯 × 2회라
+        # 여기서 세면 NAS 에서 창이 뜨는 순간 그만큼 멈춘다).  검증 경로는 비어
+        # 있을 수도 있고 — 그러면 검증 칸이 '—' 로 남는다(경고하지 않는다).
+        val_text = self.val_path_edit.text().strip()
         dlg = SlotSelectDialog(
-            slot_names, preselected=self._selected_slots, parent=self,
+            slot_names, preselected=self._selected_slots,
+            ref_dirs=ref_dirs, val_root=(Path(val_text) if val_text else None),
+            parent=self,
         )
         if sheets.run(dlg) and dlg.accepted_ok:
             chosen = dlg.selected

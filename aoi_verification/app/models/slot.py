@@ -105,6 +105,19 @@ def _list_images(folder: Path) -> list[Path]:
     return out
 
 
+def count_images(folder: Path) -> int:
+    """폴더의 결함 사진 수 — **앱이 실제로 처리하는 수와 같다.**
+
+    슬롯 선택 팝업이 'slot별로 몇 장인지' 를 보여주는 데 쓴다(사용자 요청).
+    :func:`_list_images` 를 그대로 쓰므로 웨이퍼 전경 사진(:data:`_NON_DEFECT_PREFIXES`)
+    은 빠진다 — 화면의 숫자와 검증이 실제로 도는 장수가 어긋나면 안 된다.
+
+    ⚠ 이 함수는 폴더를 통째로 열거한다.  NAS 에서는 왕복이므로 **UI 스레드에서
+    부르지 마라**(호출부는 워커에서 부른다: `widgets/slot_select_dialog._SlotCountScan`).
+    """
+    return len(_list_images(Path(folder)))
+
+
 def list_slot_dirs(root: Path) -> dict[str, Path]:
     """root/*/ 들 중 폴더만 골라 슬롯명 → 경로 매핑 (공개 래퍼).
 

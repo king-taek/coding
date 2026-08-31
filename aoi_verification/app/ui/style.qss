@@ -844,15 +844,31 @@ QLabel[role="warn"] {
    ★ `:focus` 규칙은 없다 — 타일이 `NoFocus` 라 절대 발화하지 않는다(사용자 결정으로
    타일 키보드 조작 제거).  '그릴 수 없는 상태'의 스타일을 남겨 두면 다음 사람이
    키보드 이동이 있는 줄 안다. */
+/* 슬롯 타일 — 윗줄은 버튼 자기 텍스트(슬롯명), 아랫줄은 자식 라벨(사진 수).
+   ★ `padding-bottom` 이 **아랫줄의 자리를 예약**한다.  버튼 텍스트는 padding 을 뺀
+     안쪽에 세로 중앙 정렬되므로, 이 값이 없으면 슬롯명이 타일 한가운데로 내려와
+     개수 라벨과 겹친다(라벨은 레이아웃이 배치하므로 padding 을 보지 않는다). */
 QPushButton[role="slotTile"] {
     background: transparent;
     color: $ink2;
     border: 1px solid $line_strong;
     border-radius: $radius_sm;
-    padding: 6px 10px;
+    padding: 6px 10px 22px 10px;
     font-weight: 600;
     text-align: left;
     min-height: 22px;
+}
+/* 아랫줄 — 작고 흐리게.  이름이 주인공이고 개수는 곁들이는 정보다. */
+QLabel[role="slotTileCount"] {
+    background: transparent;
+    color: $mute;
+    font-size: $font_caption_sz;
+    font-weight: 400;
+}
+/* 선택된 타일 위에서도 읽혀야 한다 — 배경이 $accent_tint 로 바뀌므로 잉크도 함께.
+   ★ 후손 선택자로 쓴다(라벨은 버튼의 자식이다). */
+QPushButton[role="slotTile"]:checked QLabel[role="slotTileCount"] {
+    color: $accent;
 }
 QPushButton[role="slotTile"]:hover {
     background-color: $elev;

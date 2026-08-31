@@ -360,3 +360,170 @@ def test_qss_paints_the_selected_state():
         "발화할 수 없는 :focus 규칙이 남아 있다"
     # 차단 이유 라벨도 등급이 있어야 한다(QPushButton 전용 role="warn" 만 있던 함정).
     assert 'QLabel[role="warn"]' in _QSS
+
+
+# ---------------------------------------------------------------------------
+# ★ 타일 둘째 줄 — 그 슬롯에 사진이 몇 장인지
+#
+# 신고(UI 관련 PDF ②): "일부 슬롯 고르는 팝업에서 slot별로 defect 몇 개 있는지
+# 보이게 하기."  세는 기준은 **결함 사진 장수**이고(사용자 결정), 기준·검증 양쪽을
+# 보여 준다.  폴더 열거는 슬롯당 2회라 25슬롯이면 50회 — 직전에 고친 '폴더 선택 시
+# 멈춤' 과 같은 종류의 정지가 되므로 **UI 스레드에서 세지 않는다.**
+# ---------------------------------------------------------------------------
+def _lot(tmp_path, ref_per_slot, val_per_slot):
+    ref, val = tmp_path / "ref", tmp_path / "val"
+    for name, n in ref_per_slot.items():
+        d = ref / name
+        d.mkdir(parents=True)
+        for i in range(n):
+            (d / f"a{i}.jpg").write_bytes(b"")
+    for name, n in val_per_slot.items():
+        d = val / name
+        d.mkdir(parents=True)
+        for i in range(n):
+            (d / f"b{i}.jpg").write_bytes(b"")
+    return ref, val
+
+
+def _counted(qapp, tmp_path, ref_per_slot, val_per_slot):
+    from aoi_verification.app.models.slot import list_slot_dirs
+
+    ref, val = _lot(tmp_path, ref_per_slot, val_per_slot)
+    dirs = list_slot_dirs(ref)
+    dlg = SlotSelectDialog(sorted(dirs), ref_dirs=dirs, val_root=val)
+    dlg.show()
+    for _ in range(8):
+        qapp.processEvents()
+    assert dlg._count_scan is not None and dlg._count_scan.wait(10_000), \
+        "개수 세기가 끝나지 않았다"
+    for _ in range(8):
+        qapp.processEvents()
+    return dlg
+
+
+def test_tile_shows_photo_counts_for_both_sides(qapp, tmp_path):
+    """기준·검증 장수를 둘 다 보여 준다 — 짝이 안 맞는 슬롯을 시작 전에 알 수 있다."""
+    dlg = _counted(qapp, tmp_path, {"S1": 3, "S2": 5}, {"S1": 2, "S2": 5})
+    assert dlg._tiles["S1"].count_text() == \
+        i18n.KO.SLOT_SELECT_TILE_COUNT_FMT.format(ref="3", val="2")
+    assert dlg._tiles["S2"].count_text() == \
+        i18n.KO.SLOT_SELECT_TILE_COUNT_FMT.format(ref="5", val="5")
+    dlg.deleteLater()
+
+
+def test_a_slot_missing_on_the_val_side_says_so(qapp, tmp_path):
+    """검증 폴더에 없는 슬롯은 '—' — **0 장과 구분된다**(둘은 다른 상황이다)."""
+    dlg = _counted(qapp, tmp_path, {"S1": 3, "S9": 4}, {"S1": 0})
+    assert i18n.KO.SLOT_SELECT_TILE_COUNT_NONE in dlg._tiles["S9"].count_text()
+    assert dlg._tiles["S1"].count_text() == \
+        i18n.KO.SLOT_SELECT_TILE_COUNT_FMT.format(ref="3", val="0")
+    dlg.deleteLater()
+
+
+def test_wafer_overview_photos_are_not_counted(qapp, tmp_path):
+    """화면의 숫자는 **검증이 실제로 도는 장수**여야 한다.
+
+    웨이퍼 전경 사진(`CognexInSight*`)은 좌표가 없어 매칭에 못 쓰므로 앱이 열거에서
+    빼는데, 개수만 따로 세면 화면과 실제가 어긋난다."""
+    from aoi_verification.app.models.slot import count_images
+
+    d = tmp_path / "S1"
+    d.mkdir(parents=True)
+    for i in range(3):
+        (d / f"a{i}.jpg").write_bytes(b"")
+    (d / "CognexInSight17xx_Bottom_OnPal_Station1_Slot21.jpg").write_bytes(b"")
+    assert count_images(d) == 3
+
+
+def test_counts_say_checking_until_they_arrive(qapp):
+    """아직 모를 때 빈칸으로 두지 않는다 — 로딩바 계약과 같은 취지."""
+    dlg = _shown(qapp)                       # ref_dirs 없이 = 셀 것이 없다
+    assert dlg._tiles["S01"].count_text() == \
+        i18n.KO.SLOT_SELECT_TILE_COUNT_PENDING
+    dlg.deleteLater()
+
+
+def test_counting_does_not_touch_files_on_the_ui_thread(qapp, tmp_path):
+    """★ 창이 뜨는 순간 UI 스레드가 폴더를 열거하면 NAS 에서 그만큼 멈춘다.
+
+    타이밍이 아니라 **호출 위치**로 못 박는다(직전 세션의 폴더 선택 가드와 같은 방식).
+    """
+    import os as _os
+    import sys
+    import threading
+
+    from aoi_verification.app.models.slot import list_slot_dirs
+
+    ref, val = _lot(tmp_path, {"S1": 3, "S2": 4}, {"S1": 3})
+    dirs = list_slot_dirs(ref)               # 호출부가 미리 하는 일(스캔 1회)
+
+    ui_thread = threading.get_ident()
+    hits: list[str] = []
+
+    def guard(name, orig):
+        def patched(*a, **k):
+            if threading.get_ident() == ui_thread:
+                frame = sys._getframe(1)
+                while frame is not None:
+                    if "aoi_verification" in frame.f_code.co_filename:
+                        hits.append(f"{name} ← "
+                                    f"{Path(frame.f_code.co_filename).name}:"
+                                    f"{frame.f_lineno}")
+                        break
+                    frame = frame.f_back
+            return orig(*a, **k)
+        return patched
+
+    saved = [(_os, "scandir", _os.scandir), (_os, "stat", _os.stat),
+             (Path, "is_dir", Path.is_dir), (Path, "iterdir", Path.iterdir),
+             (Path, "exists", Path.exists)]
+    for mod, name, orig in saved:
+        setattr(mod, name, guard(name, orig))
+    try:
+        dlg = SlotSelectDialog(sorted(dirs), ref_dirs=dirs, val_root=val)
+        dlg.show()
+        for _ in range(8):
+            qapp.processEvents()
+        assert hits == [], f"UI 스레드가 폴더를 열거했다: {hits}"
+    finally:
+        for mod, name, orig in saved:
+            setattr(mod, name, orig)
+    assert dlg._count_scan.wait(10_000)
+    dlg.deleteLater()
+
+
+def test_the_tile_text_is_still_only_the_name(qapp, tmp_path):
+    """개수를 **버튼 텍스트에 합치지 않는다** — `text()` 는 생략된 슬롯명 그 자체다.
+
+    합치면 가운데 생략 계약(`test_long_name_stays_readable`)이 깨지고, 한 버튼에
+    서체를 두 가지로 줄 수도 없다."""
+    dlg = _counted(qapp, tmp_path, {"S1": 3}, {"S1": 3})
+    tile = dlg._tiles["S1"]
+    assert tile.text() == "S1", f"이름 줄에 개수가 섞였다: {tile.text()!r}"
+    assert "기준" in tile.count_text()
+    dlg.deleteLater()
+
+
+def test_the_count_line_does_not_cover_the_name(qapp, tmp_path):
+    """아랫줄이 이름을 덮으면 안 된다 — QSS `padding-bottom` 이 자리를 예약한다."""
+    dlg = _counted(qapp, tmp_path, {"S1": 3}, {"S1": 3})
+    tile = dlg._tiles["S1"]
+    label = tile._count
+    assert label.y() > 0 and label.geometry().bottom() <= tile.height(), \
+        f"라벨이 타일 밖이다: {label.geometry().getRect()} / 타일 {tile.height()}"
+    # 이름 밴드(= 타일 높이 − 아래 padding) 아래에서 시작해야 겹치지 않는다.
+    assert label.y() >= tile.height() - 23, \
+        f"라벨이 이름 밴드를 침범한다 (top={label.y()}, 타일={tile.height()})"
+    assert tile.height() >= theme.PROFILE.target_min, "타일이 클릭 타깃보다 작다"
+    dlg.deleteLater()
+
+
+def test_count_qss_is_rendered_not_hardcoded(qapp):
+    """색은 QSS 가 칠한다 — 이 파일 docstring 의 1번 결함(인라인 팔레트)을 반복하지 않는다."""
+    out = theme.render_qss(_QSS)
+    assert 'QLabel[role="slotTileCount"]' in out
+    assert 'QPushButton[role="slotTile"]:checked QLabel[role="slotTileCount"]' in out, \
+        "선택 상태에서 아랫줄 대비가 정의되지 않았다"
+    src = inspect.getsource(ssd)
+    assert "setStyleSheet" not in src.split("_SlotTile")[1].split("class SlotSelect")[0], \
+        "타일이 인라인 스타일시트로 색을 굽는다"
