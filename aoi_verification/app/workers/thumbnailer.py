@@ -15,6 +15,7 @@ from __future__ import annotations
 import heapq
 import os
 import threading
+import time
 from dataclasses import dataclass, field
 from typing import Iterable, Optional
 
@@ -32,6 +33,27 @@ PRIORITY_CENTER = 0           # 현재 활성 슬롯의 ‘결정 중인 사진�
 PRIORITY_ACTIVE_SLOT = 1      # 현재 활성 슬롯의 다른 사진들
 PRIORITY_NEXT_SLOT = 2        # 다음 슬롯 (look-ahead)
 PRIORITY_BACKGROUND = 3       # 그 외 모든 백그라운드 채우기
+
+
+# 진행 신호를 올리는 최소 간격(초).  이보다 촘촘한 보고는 화면에 남는 것이 없다.
+PROGRESS_MIN_GAP_S = 0.08
+
+
+class _EmitGate:
+    """마지막 통과로부터 ``gap`` 초가 지났을 때만 True — 여러 워커가 함께 쓴다."""
+
+    def __init__(self, gap: float) -> None:
+        self._gap = float(gap)
+        self._lock = threading.Lock()
+        self._last = 0.0
+
+    def check(self) -> bool:
+        now = time.monotonic()
+        with self._lock:
+            if now - self._last < self._gap:
+                return False
+            self._last = now
+            return True
 
 
 class ThumbnailerSignals(QObject):
@@ -86,6 +108,7 @@ class ThumbnailPool(QObject):
         # finished 시그널이 race condition 으로 두 번 emit / 한 번도 안 됨을 막기
         # 위한 단발 플래그.  _on_worker_progress 가 lock 아래서 set.
         self._finished_emitted = False
+        self._progress_gap = _EmitGate(PROGRESS_MIN_GAP_S)
 
     # ------------------------------------------------------------------
     def enqueue(self, items: Iterable[ImageItem], *,
@@ -172,7 +195,13 @@ class ThumbnailPool(QObject):
             self.signals.failed.emit(f"{item.path}: {err}")
         else:
             self.signals.item_ready.emit(item)
-        self.signals.progress.emit(done, total, str(item.path))
+        # ★ 진행은 **간격으로 솎아** 올린다.  풀은 사용자가 화면을 쓰는 동안에도
+        #   계속 도는데(첫 슬롯만 기다리고 진입한다 — main_window), 사진 1만 장이면
+        #   신호 1만 개가 GUI 스레드 큐로 들어가 그만큼 라벨 갱신과 ETA 계산이 돈다.
+        #   눈이 읽을 수 있는 것은 초당 수 회뿐이라 그 이상은 렉으로만 남는다.
+        #   마지막 한 번은 **반드시** 올린다(완료 수치가 어긋나면 안 된다).
+        if is_finished or self._progress_gap.check():
+            self.signals.progress.emit(done, total, str(item.path))
         if is_finished:
             self.signals.finished.emit()
 

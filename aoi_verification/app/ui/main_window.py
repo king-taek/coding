@@ -247,6 +247,10 @@ class MainWindow(QMainWindow):
         # Stage 1 에 두 번 들어가는 것을 방지.
         self._thumbs_handled = False
         self._thumb_pool = None              # Optional[ThumbnailPool]
+        # 오버레이가 기다리는 몫 = **첫 슬롯의 사진 수**(나머지는 뒤에서 계속 데운다).
+        self._thumb_wait_n = 0
+        self._thumb_wait_slot = ""
+        self._thumb_wait_msg = ""
         self._sizing_tier: Optional[config.SizingTier] = None
         # 폴더 스캔 워커 (U-05) + [중지] 가 무엇을 멈춰야 하는지 알려 주는 현재 단계 (P-09).
         self._scan_token = 0
@@ -1063,7 +1067,20 @@ class MainWindow(QMainWindow):
         self._continue_start_after_scan(common)
 
     def _continue_start_after_scan(self, common: list[str]) -> None:
-        """slot 확정 후 썸네일 캐시 사전 생성(백그라운드) → 다음 단계."""
+        """slot 확정 후 썸네일 캐시 사전 생성(백그라운드) → 다음 단계.
+
+        ★ 오버레이는 **첫 슬롯 몫만** 기다린다.  예전에는 공통 슬롯 전부(기준+검증)의
+        썸네일과 중간 이미지를 다 만든 **뒤에야** 화면을 내줬다 — 슬롯 25 · 사진 1만
+        장이면 사진 1장당 2개(썸네일·중간)라 2만 번의 디코드·인코드를 다 볼 때까지
+        아무것도 못 했고, 진행 수치도 1만 단위라 바가 멈춘 것처럼 보였다.  Stage 1 은
+        슬롯을 하나씩 보여 주므로(`select_page._is_single_slot_mode`) 지금 필요한 것은
+        첫 슬롯뿐이다.  나머지는 풀을 **멈추지 않고** 뒤에서 계속 데운다 — 큐를
+        슬롯 순서(`common`, 정렬됨)로 넣고 Stage 1 도 같은 순서로 진행하므로 사전
+        생성이 사용자보다 앞서 달린다.
+
+        ⚠ 사전 생성을 아예 없애면 안 된다 — 타일은 GUI 스레드에서
+        `cached_tile_pixmap` → `get_thumb_path` 로 **없으면 그 자리에서 만든다**.
+        기다리는 몫을 줄이는 것이지 일을 없애는 게 아니다."""
         sr = self._scan
         if sr is None:
             return
@@ -1075,11 +1092,14 @@ class MainWindow(QMainWindow):
             i18n.KO.LOAD_THUMBNAIL, cancelable=True,
             step=(2, 3), steps=i18n.KO.LOAD_JOURNEY_STEPS)
         QApplication.processEvents()
+        # 슬롯 순서대로 묶어 둔다 — 큐에 넣는 순서가 곧 사용자가 지나가는 순서다.
+        by_slot: list[tuple[str, list[ImageItem]]] = []
         all_items: list[ImageItem] = []
         for name in common:
             slot = sr.slots[name]
-            all_items.extend(slot.ref_images)
-            all_items.extend(slot.val_images)
+            items = list(slot.ref_images) + list(slot.val_images)
+            by_slot.append((name, items))
+            all_items.extend(items)
 
         # 이미지 수에 따라 화질 티어 자동 선택 — 빠른 모드(썸네일 화질↓)는 상시 적용.
         per_side_total = max(
@@ -1092,39 +1112,51 @@ class MainWindow(QMainWindow):
         from ..utils import image_io as _io
         _io.set_active_tier(self._sizing_tier)
 
+        # 기다리는 몫 = 첫 슬롯.  수치도 이 몫으로 보여 준다 — 1만 분모에 한 칸씩
+        # 차던 바가 '멈춘 것처럼' 보이던 원인이고, 남은 시간 추정도 여기서만 맞는다
+        # (뒤 슬롯은 사용자가 화면을 쓰는 동안 데워지므로 대기 시간이 아니다).
+        self._thumb_wait_slot = by_slot[0][0] if by_slot else ""
+        self._thumb_wait_n = len(by_slot[0][1]) if by_slot else 0
+        rest = max(0, len(common) - 1)
+        self._thumb_wait_msg = (
+            i18n.KO.LOAD_THUMBNAIL_SLOT_REST_FMT.format(
+                slot=self._thumb_wait_slot, rest=rest)
+            if rest else
+            i18n.KO.LOAD_THUMBNAIL_SLOT_FMT.format(slot=self._thumb_wait_slot)
+        )
+
         # 기본 티어보다 낮은 화질이 적용되면 한 번만 안내.
         if self._sizing_tier is not config.SIZING_TIERS[0]:
             self._loading.set_progress(
-                0, len(all_items),
+                0, self._thumb_wait_n,
                 i18n.KO.SIZE_TIER_NOTICE_FMT.format(
                     thumb=self._sizing_tier.thumb_px,
                     q=self._sizing_tier.thumb_q,
                 ),
             )
 
-        self._loading.set_progress(
-            0, len(all_items),
-            i18n.KO.LOAD_THUMBNAIL,
-        )
+        self._loading.set_progress(0, self._thumb_wait_n, self._thumb_wait_msg)
 
-        # 다중 스레드 + 우선순위 큐 풀 사용. 첫 슬롯 (사전식으로 가장 앞)
-        # 의 작업을 ACTIVE_SLOT 우선순위로 끌어올린다.
+        # 다중 스레드 + 우선순위 큐 풀 사용.  **슬롯 순서대로** 넣고 앞의 둘만
+        # 우선순위를 올린다 — 첫 슬롯(지금 보여 줄 것) · 둘째 슬롯(look-ahead).
+        # ※ 넣는 순서가 곧 Stage 1 의 진행 순서(둘 다 슬롯명 오름차순)라 이 뒤로는
+        #   재정렬할 것이 없다.  풀의 `reprioritize_slot` 은 그래서 호출부가 없지만,
+        #   '활성 슬롯이 넣은 순서를 벗어나는' 경우를 위한 수단이라 남겨 둔다.
         # (썸네일러는 모듈 최상위가 아니라 여기서 불러온다 — 위 import 주석 참조.)
         from ..workers.thumbnailer import (PRIORITY_ACTIVE_SLOT,
-                                           PRIORITY_BACKGROUND, ThumbnailPool)
+                                           PRIORITY_BACKGROUND,
+                                           PRIORITY_NEXT_SLOT, ThumbnailPool)
         if self._thumb_pool is not None:
             self._thumb_pool.stop()
         self._thumb_pool = ThumbnailPool(
             tier=self._sizing_tier, also_mid=True, parent=self,
         )
-        self._thumb_pool.enqueue(all_items, priority=PRIORITY_BACKGROUND)
-        if common:
-            self._thumb_pool.reprioritize_slot(common[0], PRIORITY_ACTIVE_SLOT)
-        self._thumb_pool.signals.progress.connect(
-            lambda d, t, _p: self._loading.set_progress(
-                d, t, i18n.KO.LOAD_THUMBNAIL,
-            )
-        )
+        for idx, (_name, items) in enumerate(by_slot):
+            self._thumb_pool.enqueue(items, priority=(
+                PRIORITY_ACTIVE_SLOT if idx == 0
+                else PRIORITY_NEXT_SLOT if idx == 1
+                else PRIORITY_BACKGROUND))
+        self._thumb_pool.signals.progress.connect(self._on_thumb_progress)
         self._thumb_pool.signals.finished.connect(self._on_thumbs_ready)
         # 빈 큐 (모든 슬롯의 양측이 0 장) 일 때 워커가 한 번도 progress 를
         # 보내지 않아 ``finished`` 가 emit 되지 않는 행 (Bug #5) 을 방지 — 풀을
@@ -1133,6 +1165,20 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, self._on_thumbs_ready)
             return
         self._thumb_pool.start()
+
+    def _on_thumb_progress(self, done: int, _total: int, _path: str) -> None:
+        """사전 생성 진행 — **첫 슬롯 몫을 채우면 그 자리에서 다음 단계로 넘어간다.**
+
+        넘어간 뒤에도 풀은 계속 돌아 진행 신호가 올라오는데, 그때는 오버레이가
+        이미 내려갔으므로 **아무것도 하지 않는다**.  (`set_progress` 는 숨겨진
+        오버레이를 되살리지 않지만, 라벨 갱신과 ETA 계산이 사용자가 화면을 쓰는
+        동안 매 신호마다 도는 것 자체가 낭비다.)"""
+        if self._thumbs_handled:
+            return
+        need = self._thumb_wait_n
+        self._loading.set_progress(min(done, need), need, self._thumb_wait_msg)
+        if done >= need:
+            self._on_thumbs_ready()
 
     def _on_thumbs_ready(self) -> None:
         """썸네일 풀 finished 시그널 슬롯 — 모달/페이지 전환은 한 틱 뒤로 defer.
