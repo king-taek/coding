@@ -47,6 +47,8 @@ _NOT_SCREEN_LABELS = {
     "양식.xlsx",     # 파일 이름
     "AOI_Verify",    # 배포 폴더 이름
     "git pull",      # 사용자가 칠 명령어
+    ".t.",           # **파일명 토큰** — `T_PHOTO_ASK_HEAD_FMT` 가 어떤 사진인지
+                     # 가리키려고 부른다(`models.slot.has_t_token`).  누를 것이 아니다.
 }
 
 

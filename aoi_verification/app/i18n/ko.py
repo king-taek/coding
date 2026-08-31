@@ -397,7 +397,13 @@ SETUP_HOW_TO_USE_BODY = (
 )
 
 # ── 양식 파일 / 저장 파일 명명 ─────────────────────────────────────────────
-RESULT_FILE_TITLE_FMT = "AOI {val} 검증 ({ref} 기준).xlsx"
+# 결과 엑셀 제목 — "장비Layer_자재검증(장비기준)" (사용자 요청).
+#   예: `4F-AOI-03 RDL4_GFW 검증(AOI-24 기준).xlsx`
+# Layer·자재는 **검증 대상 폴더**의 `WaferInfo.ini` `InputLot=자재-Layer` 에서
+# 읽는다(`models/lot_info.py`).  못 읽으면 아래 폴백 이름을 쓴다 — 그때도 저장은
+# 되어야 하고, 어차피 마지막 저장 직전에 사용자가 고칠 수 있다.
+RESULT_FILE_TITLE_FMT = "{val} {layer}_{material} 검증({ref} 기준).xlsx"
+RESULT_FILE_TITLE_FALLBACK_FMT = "AOI {val} 검증 ({ref} 기준).xlsx"
 TEMPLATE_NOT_FOUND_TITLE = "양식 파일 없음"
 TEMPLATE_NOT_FOUND_BODY = (
     "‘양식’ 폴더 안의 ‘양식.xlsx’ 를 찾을 수 없습니다.\n"
@@ -822,6 +828,18 @@ INFO_NO_MATCH_FOUND = "임계치 이상인 후보가 없습니다. 자동으로 
 INFO_ALREADY_MATCHED_SECTION = "이미 매칭됨 (자동 제외)"
 
 # ── 저장/엑셀 ──────────────────────────────────────────────────────────────
+# 마지막 저장 직전에 뜨는 제목 확인창(사용자 요청).  파일은 검증 시작 때 이미
+# 만들어져 채워지는 중이고, 여기서는 **이름만** 정한다.
+SAVE_NAME_TITLE = "저장할 파일 이름"
+SAVE_NAME_BODY = (
+    "아래 이름으로 저장합니다. 필요하면 고쳐 주세요.\n"
+    "규칙: 장비 Layer_자재 검증(기준 장비 기준)"
+)
+SAVE_NAME_FOLDER_FMT = "저장 폴더: {path}"
+SAVE_NAME_OK = "이 이름으로 저장"
+SAVE_NAME_CANCEL = "취소"
+SAVE_NAME_EMPTY = "이름을 비워 둘 수 없습니다."
+SAVE_NAME_BAD_CHARS = "파일 이름에 쓸 수 없는 문자가 있습니다:  \\ / : * ? \" < > |"
 SAVE_DIALOG_TITLE = "결과 엑셀 저장 위치 선택"
 SAVE_FILENAME_FMT = "AOI검증결과_{ref}_vs_{val}_{ts}.xlsx"
 SAVE_SUCCESS_FMT = "엑셀 저장 완료:\n{path}"

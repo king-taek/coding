@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -19,6 +21,10 @@ from ..widgets.neon_button import NeonButton
 from ..widgets.neon_card import NeonCard
 from ..widgets import sheet_host as sheets
 from ... import config as _config
+
+# 조용히 삼키던 사실을 남기는 로거 — `main._setup_logging` 이 캐시 폴더의 app.log 로
+# 보낸다(`ui/main_window.py` 와 같은 이름 규칙).
+_LOG = logging.getLogger("aoi.ui")
 
 # 허용 오차 폴백 — 값이 안 들어왔을 때만 쓴다.  **단일 출처는 config** 다
 # (예전엔 리터럴 500 이 곳곳에 박혀 있어 기본값을 바꿔도 옛 값이 되살아났다).
@@ -453,7 +459,18 @@ class ResultPage(QWidget):
         # 양식 → 작업 파일은 이미 검증 시작 시점에 복사되었으므로 그대로 채워 쓴다.
         # 그 경로가 없다면(=양식 없음 + 복사 실패) 사용자에게 위치를 물어본다.
         if self._target_path is not None:
-            self._save_path = self._target_path
+            # ★ **이름만** 확인받는다(사용자 요청).  파일은 [검증 시작] 때 이미
+            #   만들어져 있고 저장은 그 파일에 한다 — 이 창은 저장을 기다리게 하지
+            #   않고 최종 이름만 정한다.  '다시 저장'(이미 한 번 저장한 뒤)에는 묻지
+            #   않는다: 같은 파일에 덮어쓰는 것이 그때의 약속이다.
+            if self._exported:
+                self._save_path = self._target_path
+            else:
+                chosen = self._ask_save_name(self._target_path)
+                if chosen is None:
+                    return                  # 취소 — 아무것도 하지 않는다
+                self._save_path = chosen
+                self._target_path = chosen
         else:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = i18n.KO.SAVE_FILENAME_FMT.format(
@@ -514,6 +531,28 @@ class ResultPage(QWidget):
         else:
             lab.setText(i18n.KO.SAVE_TARGET_FMT.format(name=path.name))
         lab.setToolTip(str(path))
+
+    def _ask_save_name(self, target: Path):
+        """저장 직전에 이름을 확인받는다 — 취소면 ``None``.
+
+        고른 이름이 지금 파일과 다르면 **작업 파일을 그 이름으로 옮긴다.**  옮기지
+        않으면 검증 시작 때 만든 사본이 결과 폴더에 유령으로 남는다.  옮기지 못하면
+        (열려 있음·권한) 새 경로로 그냥 저장한다 — 이름 때문에 저장 자체가 막히면
+        안 된다."""
+        from ..widgets.save_name_dialog import SaveNameDialog
+
+        dlg = SaveNameDialog(target.name, target.parent, parent=self)
+        if not sheets.run(dlg) or dlg.chosen is None:
+            return None
+        dst = target.with_name(dlg.chosen)
+        if dst == target:
+            return target
+        try:
+            if target.exists():
+                os.replace(str(target), str(dst))
+        except OSError as exc:
+            _LOG.warning("작업 파일 이름 변경 실패 — 새 경로로 저장합니다: %s", exc)
+        return dst
 
     def _on_export_done(self, path: str) -> None:
         self._loading.hide_overlay()

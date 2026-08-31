@@ -1741,10 +1741,8 @@ class MainWindow(QMainWindow):
         else:
             self._template_used = template
 
-        # 파일 이름
-        dst_name = i18n.KO.RESULT_FILE_TITLE_FMT.format(
-            val=inp.val_machine, ref=inp.ref_machine,
-        )
+        # 파일 이름 — "장비Layer_자재검증(장비기준)" (사용자 요청).
+        dst_name = self._suggest_result_name(inp)
         dst = paths.results_dir() / dst_name
         if dst.exists():
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1759,6 +1757,29 @@ class MainWindow(QMainWindow):
             pass
 
         self._working_xlsx = dst
+
+    @staticmethod
+    def _suggest_result_name(inp: SetupInput) -> str:
+        """결과 엑셀의 추천 제목 — `{검증장비} {Layer}_{자재} 검증({기준장비} 기준).xlsx`.
+
+        Layer·자재는 **검증 대상 폴더**의 `WaferInfo.ini` `InputLot=자재-Layer` 에서
+        읽는다(사용자 결정).  못 읽으면 예전 이름으로 폴백한다 — 그때도 저장은 되어야
+        하고, 어차피 마지막 저장 직전에 사용자가 고칠 수 있다.
+
+        ⚠ 파일시스템 접근은 **슬롯 하나의 INI 한 번**이다(`read_lot_info`).  느린
+        NAS 라도 왕복 두어 번이라 [검증 시작] 의 오버레이 뒤에서 티가 나지 않는다 —
+        여기서 폴더를 훑기 시작하면 설정 화면 die 안내가 겪은 그 정지가 재현된다."""
+        from ..models.lot_info import read_lot_info
+
+        lot = read_lot_info(inp.val_root)
+        if lot is None:
+            _LOG.info("WaferInfo.ini 에서 자재·Layer 를 못 읽어 기본 제목을 씁니다: %s",
+                      inp.val_root)
+            return i18n.KO.RESULT_FILE_TITLE_FALLBACK_FMT.format(
+                val=inp.val_machine, ref=inp.ref_machine)
+        return i18n.KO.RESULT_FILE_TITLE_FMT.format(
+            val=inp.val_machine, ref=inp.ref_machine,
+            layer=lot.layer, material=lot.material)
 
     def _merge_matches(self) -> list[MatchResult]:
         return list(self._matches_a)

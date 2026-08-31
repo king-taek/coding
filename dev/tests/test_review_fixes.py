@@ -237,7 +237,8 @@ def test_stat_tiles_are_not_clipped(styled_qapp, tmp_path):
     from aoi_verification.app.ui.pages.result_page import ResultPage
 
     target = (Path("C:/Users/hong/Desktop/AOI_Verify/결과")
-              / i18n.KO.RESULT_FILE_TITLE_FMT.format(val="K-6", ref="TB-15"))
+              / i18n.KO.RESULT_FILE_TITLE_FMT.format(
+                  val="K-6", ref="TB-15", layer="RDL4", material="GFW"))
     res = FinalResult(mode="single", ref_machine="TB-15", val_machine="K-6",
                       matches=_matches(1, tmp_path),
                       slot_only_ref=["PGEE48", "PGEE49", "PGEE50"],
