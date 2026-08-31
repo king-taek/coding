@@ -1044,6 +1044,11 @@ class MainWindow(QMainWindow):
             sr.ref_only = [n for n in sr.ref_only if n in sel]
             sr.val_only = [n for n in sr.val_only if n in sel]
 
+        # `.t.` 사진을 이번 검증에 넣을지 **여기서** 묻는다(사용자 요청).
+        #   스캔이 끝나야 그런 사진이 있는지 알 수 있고, 썸네일 생성보다는 앞이라
+        #   제외한 사진의 썸네일을 헛되이 굽지 않는다.
+        self._ask_about_t_photos(sr)
+
         self._scan = sr
         # ※ 사진 0장 폴더 정리(drop_empty_unmatched)는 **KLA 해석 뒤**(_after_slot_resolved)
         #   로 미룬다 — 정보파일은 사진이 없어도 WaferID 를 주므로, 여기서 미리 버리면
@@ -1063,6 +1068,43 @@ class MainWindow(QMainWindow):
                     sr, side, on_done=lambda: self._after_slot_resolved(sr))
                 return
         self._after_slot_resolved(sr)
+
+    def _ask_about_t_photos(self, sr: ScanResult) -> None:
+        """이름에 ``.t.`` 가 든 사진이 있으면 **예시 한 장과 함께** 포함 여부를 묻는다.
+
+        '항상 뺀다' 와 '항상 넣는다' 를 세 번 오간 자리다(`models.slot.is_ignored_name`
+        주석) — 정답이 자재마다 다르므로 코드가 정하지 않고 그때그때 묻는다.
+        '제외' 를 고르면 스캔 결과에서 **바로 빼므로** 이후 단계(썸네일·매칭·엑셀)가
+        전부 자동으로 따라온다.  없으면 아무것도 묻지 않는다.
+
+        전 구간 fail-safe — 물음이 실패해도 검증은 계속돼야 한다(그때는 포함).
+        """
+        try:
+            from ..models.slot import has_t_token
+
+            hits = [it for slot in sr.slots.values()
+                    for it in (slot.ref_images + slot.val_images)
+                    if has_t_token(it.filename)]
+            if not hits:
+                return
+            # ★ 오버레이를 내리고 묻는다 — 입력 잠금이 걸린 채로 시트를 띄우지
+            #   않는다.  다음 단계(`_continue_start_after_scan`)가 다시 띄운다.
+            self._loading.hide_overlay()
+            from .widgets.t_photo_ask_dialog import TPhotoAskDialog
+            dlg = TPhotoAskDialog(hits[0].path, len(hits), parent=self)
+            sheets.run(dlg)
+            if dlg.include:
+                _LOG.info(".t. 사진 %d 장을 포함한다(사용자 선택)", len(hits))
+                return
+            drop = {it.key for it in hits}
+            for slot in sr.slots.values():
+                slot.ref_images = [i for i in slot.ref_images
+                                   if i.key not in drop]
+                slot.val_images = [i for i in slot.val_images
+                                   if i.key not in drop]
+            _LOG.info(".t. 사진 %d 장을 제외한다(사용자 선택)", len(hits))
+        except Exception as exc:            # 물음이 깨져도 검증은 계속된다
+            _LOG.warning(".t. 사진 확인 실패 — 포함한 채로 진행합니다: %s", exc)
 
     def _after_slot_resolved(self, sr: ScanResult) -> None:
         """slot 매칭 확정 후 — 남은 미매칭은 수동 매핑, 그 다음 썸네일 단계."""
@@ -1310,6 +1352,21 @@ class MainWindow(QMainWindow):
                 "targets": self._collect_panel(self._select_page.get_state().targets),
                 "excluded": self._collect_panel(self._select_page.get_state().excluded),
             }
+            # ★ 한 장도 안 골랐으면 **되돌릴 기회를 준다**(사용자 요청).  막지는
+            #   않는다 — '전부 제외' 도 유효한 결정일 수 있다.  다만 그대로 넘어가면
+            #   매칭할 사진이 0장이라 다음 화면이 통째로 비므로, 그 사실을 말하고
+            #   묻는다.  기록(`_save_ref_selection`)보다 **먼저** 물어야 빈 선택이
+            #   '다음에 재사용할 기준' 으로 남지 않는다.
+            if not any(self._stage1_a_snapshot["targets"].values()):
+                r = sheets.ask(
+                    self, i18n.KO.SELECT_NONE_CHOSEN_TITLE,
+                    i18n.KO.SELECT_NONE_CHOSEN_BODY,
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.Yes,
+                )
+                if r == QMessageBox.StandardButton.Yes:
+                    self._on_select_cancelled()     # 선별 상태를 버리고 설정으로
+                    return
             # 기준 폴더로 직접 고른 기준 사진을 기록 (다음에 재사용 질의용, #6).
             self._save_ref_selection(self._stage1_a_snapshot["targets"])
             # ★ 여기 있던 '후보 선별이 끝났습니다' 확인창을 없앴다 — 선택지가 없는
