@@ -165,6 +165,9 @@ class SetupPage(QWidget):
         # `is_dir()` 이 초 단위로 걸리기 때문에 워커가 채우고 UI 는 읽기만 한다.
         self._probe_token = 0
         self._probed: dict[str, str] = {}
+        # 지금 워커가 확인 중인 (기준, 검증) 경로 쌍 — 같은 쌍으로 `_validate` 가 다시
+        # 와도 스레드를 새로 띄우지 않는다(die 스캔의 `_die_scanning_for` 와 같은 뜻).
+        self._probing_for: Optional[tuple[str, str]] = None
         # 헤드리스에서는 동기로 확인한다 — 테스트가 `_validate()` 의 반환값을
         # 호출 즉시 단언한다(`widgets/zoom_window.py` 와 같은 게이트).
         import os
@@ -971,7 +974,16 @@ class SetupPage(QWidget):
         """폴더 존재 확인을 워커에 맡긴다 — 캐시가 있어도 **매번 다시 확인**한다.
 
         캐시는 '멈추지 않기' 위한 것이지 '다시 안 보기' 위한 것이 아니다.  그래서
-        사용자가 그 사이에 폴더를 만들었다면 다음 확인에서 저절로 풀린다."""
+        사용자가 그 사이에 폴더를 만들었다면 다음 확인에서 저절로 풀린다.
+
+        ★ 단, **같은 쌍을 이미 확인 중이면 새로 띄우지 않는다.**  `_validate` 는 두
+        입력란·허용 오차·디바운스가 모두 부르는 자리라 자주 오는데, 끊긴 NAS 에서
+        `is_dir()` 은 OS 타임아웃까지(수십 초) 안 돌아온다 — 그동안 부를 때마다
+        스레드를 새로 띄우면 답도 없는 확인만 쌓인다.  확인이 끝나면 풀리므로 '매번
+        다시 확인' 은 그대로다(`_on_dir_probe_done`)."""
+        if (ref_text, val_text) == self._probing_for:
+            return
+        self._probing_for = (ref_text, val_text)
         self._probe_token += 1
         probe = _DirProbe(self._probe_token, ref_text, val_text)
         probe.signals.done.connect(self._on_dir_probe_done)
@@ -984,6 +996,7 @@ class SetupPage(QWidget):
         """확인이 끝났다 — **최신 세대만** 반영하고 판정을 다시 그린다."""
         if token != self._probe_token:
             return
+        self._probing_for = None
         changed = (self._probed.get(ref_text) != ref_state
                    or self._probed.get(val_text) != val_state)
         self._probed[ref_text] = ref_state
@@ -1107,14 +1120,25 @@ class SetupPage(QWidget):
 
     @staticmethod
     def _detect_die_geometry(ref_text: str):
-        """기준 폴더의 슬롯들을 훑어 ``((pitch_x, pitch_y) | None, 출처, 못쓰는가)``.
+        """기준 폴더의 **첫 슬롯 하나**를 읽어 ``((pitch_x, pitch_y) | None, 출처, 못쓰는가)``.
 
         · Camtek INI 슬롯 → `Params_WaferInfo.ini` 등에서 die pitch
         · KLA 슬롯        → `.001` 의 `DiePitch`
         · LIVE 파일명 슬롯 → die pitch 는 없지만 **좌표는 파일명에서 나온다**(경고 대상 아님)
 
         '못쓰는가' 는 **Camtek INI 항목이 있는데 pitch 를 확정 못 한** 경우만 True 다.
-        전 구간 fail-safe — 안내가 실패해도 설정 화면이 막히면 안 된다."""
+        전 구간 fail-safe — 안내가 실패해도 설정 화면이 막히면 안 된다.
+
+        ★ **슬롯 하나만 읽는다**(사용자 결정).  예전에는 기하를 찾을 때까지 슬롯을
+        차례로 열었고, 못 찾는 자재(LIVE 파일명 등)에서는 **25개를 전부** 훑었다 —
+        슬롯마다 폴더를 통째로 열거하고 INI 후보를 열어 보므로 실측 25슬롯 기준
+        파일시스템 왕복이 750여 회, NAS 에서는 그게 통째로 대기시간이 된다
+        (25슬롯 × 결함 3,000개에서 로컬 SSD 로도 1.1초).  이 값은 화면의 안내 한 줄에만
+        쓰이고 매칭 정확도·[검증 시작] 활성화와 무관하므로, 표본은 한 슬롯이면 된다.
+
+        ⚠ 바뀌는 것: 첫 슬롯에 die 정보가 없고 뒤 슬롯에만 있으면 예전에는 뒤 슬롯의
+        값을 보여줬지만 이제 '못 찾음' 으로 안내한다.  **매칭은 영향받지 않는다** —
+        매칭은 이 안내를 쓰지 않고 슬롯 폴더마다 따로 기하를 구한다."""
         from ...coords import kla_info
         from ...coords.wafer_geometry import (camtek_geometry, has_camtek_entries,
                                               kla_geometry)
@@ -1124,17 +1148,22 @@ class SetupPage(QWidget):
             root = Path(ref_text.strip())
             if not root.is_dir():
                 return (None, "", False)
-            broken = False
-            for _name, folder in sorted(list_slot_dirs(root).items()):
-                geom = camtek_geometry(folder)
-                if geom is not None:
-                    return ((geom.pitch_x, geom.pitch_y), geom.source, False)
-                if kla_info.load_folder(folder):          # KLA 슬롯 — DiePitch 가 있다
-                    kg = kla_geometry(folder)
-                    return ((kg.pitch_x, kg.pitch_y), i18n.KO.DIE_SIZE_SRC_KLA, False)
-                if has_camtek_entries(folder):
-                    broken = True     # 변환할 항목이 있는데 pitch 를 못 정했다 — 진짜 문제
-            return (None, "", broken)
+            # 숨김 폴더는 표본에서 뺀다 — 결과 폴더 옆에 `.aoi_verification_cache`
+            # 같은 점 폴더가 있으면 이름순 첫 자리를 그것이 차지해 표본이 통째로
+            # 엉뚱해진다(`kla_info._info_candidates` 와 같은 관습).
+            slots = sorted((n, d) for n, d in list_slot_dirs(root).items()
+                           if not n.startswith("."))
+            if not slots:
+                return (None, "", False)
+            _name, folder = slots[0]          # 표본 한 슬롯 — 위 주석 참조
+            geom = camtek_geometry(folder)
+            if geom is not None:
+                return ((geom.pitch_x, geom.pitch_y), geom.source, False)
+            if kla_info.load_folder(folder):              # KLA 슬롯 — DiePitch 가 있다
+                kg = kla_geometry(folder)
+                return ((kg.pitch_x, kg.pitch_y), i18n.KO.DIE_SIZE_SRC_KLA, False)
+            # 변환할 항목이 있는데 pitch 를 못 정했다 — 진짜 문제라 경고한다.
+            return (None, "", has_camtek_entries(folder))
         except Exception:
             return (None, "", False)
 

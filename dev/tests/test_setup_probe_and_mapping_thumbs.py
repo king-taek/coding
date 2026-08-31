@@ -111,6 +111,44 @@ def test_probe_rechecks_even_when_cached(styled_qapp, tmp_path):
     page.deleteLater()
 
 
+def test_no_second_probe_while_one_is_in_flight(styled_qapp, tmp_path):
+    """같은 쌍을 확인하는 중이면 워커를 새로 띄우지 않는다.
+
+    `_validate` 는 두 입력란·허용 오차·디바운스가 모두 부르는 자리다.  끊긴 NAS 에서
+    `is_dir()` 은 OS 타임아웃까지(수십 초) 안 돌아오는데, 그동안 부를 때마다 스레드를
+    새로 띄우면 답도 없는 확인만 쌓인다.  끝나면 풀린다(아래 마지막 단언)."""
+    page = SP.SetupPage()
+    page._sync_probe = False
+    page.ref_path_edit.setText(str(tmp_path))
+    page.val_path_edit.setText(str(tmp_path))
+
+    page._validate()
+    token = page._probe_token
+    page._validate()                      # 확인이 도는 중에 다시 왔다
+    assert page._probe_token == token, "같은 쌍을 확인 중인데 워커를 또 띄웠다"
+
+    # 확인이 끝나면 다시 열린다 — '매번 다시 확인' 관습은 그대로다.
+    page._on_dir_probe_done(token, str(tmp_path), "", str(tmp_path), "")
+    page._validate()
+    assert page._probe_token > token, "확인이 끝났는데 재확인이 막혀 있다"
+    page.deleteLater()
+
+
+def test_new_path_probes_even_while_one_is_in_flight(styled_qapp, tmp_path):
+    """경로가 바뀌면 확인 중이어도 새로 띄운다 — 옛 쌍을 기다리면 안 된다."""
+    page = SP.SetupPage()
+    page._sync_probe = False
+    page.ref_path_edit.setText(str(tmp_path))
+    page.val_path_edit.setText(str(tmp_path))
+    page._validate()
+    token = page._probe_token
+
+    page.val_path_edit.setText(str(tmp_path / "다른폴더"))
+    page._validate()
+    assert page._probe_token > token, "경로가 바뀌었는데 옛 확인을 기다렸다"
+    page.deleteLater()
+
+
 # ---------------------------------------------------------------------------
 # P-14 — 슬롯 매핑 미리보기
 # ---------------------------------------------------------------------------

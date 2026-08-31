@@ -253,3 +253,92 @@ def test_same_folder_is_not_rescanned(qapp, tmp_path, monkeypatch):
     assert "4,161" in _hint(page)              # 캐시된 결과가 다시 그려진다
     assert len(calls) == 1, "허용 오차만 바꿨는데 폴더를 다시 훑었다"
     page.deleteLater()
+
+
+# ---------------------------------------------------------------------------
+# ★ 표본은 **슬롯 하나** — 25개를 전부 훑지 않는다
+#
+# 실제 신고: 슬롯 25개·사진 1만장 폴더를 고르면 로딩이 길다.  예전에는 die 기하를
+# 찾을 때까지 슬롯을 차례로 열었고, 못 찾는 자재(LIVE 파일명 등)에서는 25개를 전부
+# 훑었다 — 슬롯마다 폴더를 통째로 열거하고 INI 후보를 열어 보므로 실측 파일시스템
+# 왕복이 750여 회였다(변경 후 34회).  이 값은 안내 한 줄에만 쓰이므로 표본은 하나면
+# 된다(사용자 결정).
+# ---------------------------------------------------------------------------
+def test_only_the_first_slot_is_read(qapp, tmp_path, monkeypatch):
+    """슬롯이 25개여도 폴더를 **하나만** 연다."""
+    import aoi_verification.app.coords.wafer_geometry as wgm
+
+    for i in range(25):                       # die 정보가 없는 자재(LIVE 파일명)
+        d = tmp_path / f"slot{i + 1:02d}"
+        d.mkdir()
+        (d / f"AAA_BBB_1_2_30229.803_1987.994.jpg").write_bytes(b"")
+
+    opened: list[str] = []
+    real = wgm.camtek_geometry
+
+    def spy(folder):
+        opened.append(folder.name)
+        return real(folder)
+
+    spy.cache_clear = real.cache_clear     # `_clear_caches` 가 뒷정리에 부른다
+    monkeypatch.setattr(wgm, "camtek_geometry", spy)
+    assert SetupPage._detect_die_geometry(str(tmp_path)) == (None, "", False)
+    assert opened == ["slot01"], f"슬롯을 {len(opened)}개 열었다: {opened}"
+
+
+def test_hidden_folders_are_not_the_sample(qapp, tmp_path):
+    """점 폴더가 이름순 첫 자리를 차지해도 표본은 진짜 슬롯이어야 한다.
+
+    결과 폴더 옆에는 `.aoi_verification_cache` 같은 점 폴더가 있을 수 있고, 하나만
+    읽는 이상 표본이 그것으로 밀리면 안내가 통째로 엉뚱해진다."""
+    (tmp_path / ".aoi_verification_cache").mkdir()
+    _slot(tmp_path, 37247.7, 44905.4)
+    pitch, src, _broken = SetupPage._detect_die_geometry(str(tmp_path))
+    assert pitch == (37247.7, 44905.4), f"표본이 점 폴더로 밀렸다 ({src})"
+
+
+# ---------------------------------------------------------------------------
+# ★ 폴더를 고르는 순간 **UI 스레드는 파일시스템을 건드리지 않는다**
+#
+# 실제 신고: 폴더를 고르면 창이 멈춘다.  NAS 에서는 `is_dir()` 한 번도 초 단위라,
+# 이 경로에 남은 파일시스템 호출 하나가 그대로 정지시간이 된다.  '워커에서 돈다'
+# 를 타이밍이 아니라 **호출 위치**로 못 박는다.
+# ---------------------------------------------------------------------------
+def test_picking_a_folder_touches_no_files_on_the_ui_thread(qapp, tmp_path,
+                                                            monkeypatch):
+    import os as _os
+    import sys
+    import threading
+
+    _slot(tmp_path, 37247.7, 44905.4)
+    ui_thread = threading.get_ident()
+    hits: list[str] = []
+
+    def guard(name, orig):
+        # ★ 호출자는 `sys._getframe` 으로 훑는다 — `traceback.extract_stack` 은
+        #   `linecache` 가 소스를 stat 해서 이 감시자 자신을 다시 부른다(무한 재귀).
+        def patched(*a, **k):
+            if threading.get_ident() == ui_thread:
+                frame = sys._getframe(1)
+                while frame is not None:
+                    if "aoi_verification" in frame.f_code.co_filename:
+                        hits.append(f"{name} ← "
+                                    f"{Path(frame.f_code.co_filename).name}:"
+                                    f"{frame.f_lineno}")
+                        break
+                    frame = frame.f_back
+            return orig(*a, **k)
+        return patched
+
+    for mod, name in ((_os, "scandir"), (_os, "stat"), (_os, "listdir"),
+                      (Path, "is_dir"), (Path, "exists"), (Path, "iterdir"),
+                      (Path, "glob"), (Path, "read_bytes")):
+        monkeypatch.setattr(mod, name, guard(name, getattr(mod, name)))
+
+    page = SetupPage()
+    page._sync_probe = False              # 배포와 같은 경로(워커로 확인)
+    hits.clear()                          # 페이지를 세우는 비용은 이 신고와 무관하다
+    page.ref_path_edit.setText(str(tmp_path))   # ← `_browse` 가 하는 일
+    page._validate()
+    assert hits == [], f"UI 스레드가 파일을 건드렸다: {hits}"
+    page.deleteLater()
