@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -25,6 +26,10 @@ from ..widgets.no_wheel_slider import NoWheelDoubleSpinBox, NoWheelSlider
 from ..widgets.option_group import OptionGroup, reflow_into_grid
 from ..widgets.switch_row import SwitchRow
 from ..widgets import sheet_host as sheets
+
+# 조용히 삼키던 사실을 남기는 로거 — `main._setup_logging` 이 캐시 폴더의 app.log 로
+# 보낸다(`ui/main_window.py` 와 같은 이름 규칙).
+_LOG = logging.getLogger("aoi.ui")
 
 
 @dataclass
@@ -1168,12 +1173,47 @@ class SetupPage(QWidget):
             return (None, "", False)
 
     def _browse(self, target: QLineEdit) -> None:
+        """[폴더 선택…] — OS 파일 브라우저를 열고 고른 경로를 입력란에 넣는다.
+
+        ★ 여기서 **정지를 계측한다**(로그만).  '폴더를 고르면 몇 초 멈춘다' 는 신고를
+        세 번 고쳤는데(die 안내 스캔·폴더 확인을 워커로, 표본을 슬롯 하나로) 계측상
+        이 경로에는 UI 스레드가 건드리는 파일이 하나도 남아 있지 않다.  그래서 남은
+        후보는 우리 코드 밖이다 — OS 파일 브라우저 자신, 또는 무거운 import·GPU
+        워밍업이 GIL 을 쥐는 구간.  **어느 쪽인지 로그가 말하게 한다**: 브라우저에
+        머문 시간과, 닫힌 뒤의 UI 정지를 따로 남긴다.  정상이면 아무 말도 하지 않는다.
+        """
+        import time
+        from .. import stall_watch
+
+        t0 = time.perf_counter()
         path = QFileDialog.getExistingDirectory(self, i18n.KO.SETUP_FOLDER_LABEL)
-        if path:
-            target.setText(path)
-            # 기준 폴더가 바뀌면 이전 슬롯 선택은 더 이상 유효하지 않다.
-            if target is self.ref_path_edit:
-                self._reset_slot_selection()
+        dialog_s = time.perf_counter() - t0
+        if not path:
+            return
+        # 브라우저에 머문 시간에는 사용자가 폴더를 찾은 시간이 섞여 있다 — 정지시간이
+        # 아니다.  아래 감시자가 재는 '닫힌 뒤의 정지' 와 짝지어 봐야 의미가 있다.
+        _LOG.info("폴더 선택: 파일 브라우저가 %.2f초 열려 있었다", dialog_s)
+        stall_watch.watch(self, self._log_stall)
+        target.setText(path)
+        # 기준 폴더가 바뀌면 이전 슬롯 선택은 더 이상 유효하지 않다.
+        if target is self.ref_path_edit:
+            self._reset_slot_selection()
+
+    def _log_stall(self, seconds: float, jobs: str) -> None:
+        """폴더를 고른 뒤 UI 가 멈췄다 — 얼마나·그때 무엇이 돌았는지 남긴다.
+
+        ★ 문구를 `_LOG` 호출 안에 둔다.  화면에 나가지 않고 `app.log` 로만 가는
+        진단 문자열이므로 `i18n` 이 아니라 여기가 자리다(`test_no_hardcoded_korean`
+        이 로거 인자를 화면 문구로 세지 않는 것과 같은 기준).
+
+        QThread 는 ``threading.enumerate`` 에 안 잡혀 `stall_watch` 가 못 본다 —
+        이 페이지가 워커에 맡겨 둔 일은 여기서 덧붙인다."""
+        _LOG.warning(
+            "폴더 선택 직후 UI 가 %.2f초 멈췄다 — 그때 돌던 작업: %s"
+            " / 폴더 확인 %s · die 안내 스캔 %s",
+            seconds, jobs or "없음",
+            "진행 중" if self._probing_for is not None else "아님",
+            "진행 중" if self._die_scanning_for is not None else "아님")
 
     # ------------------------------------------------------------------
     def _reset_slot_selection(self) -> None:
