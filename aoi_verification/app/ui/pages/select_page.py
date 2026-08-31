@@ -761,11 +761,19 @@ class SelectPage(ProgressRowMixin, QWidget):
         return items
 
     def _right_items_for_slot(self, slot: str) -> list[ImageItem]:
-        """우(검증 대상) 패널에 그 슬롯이 보여줄 항목."""
+        """우(검증 대상) 패널에 그 슬롯이 보여줄 항목 — **모든 슬롯을 보여준다.**
+
+        ★ one-slot 모드(`_is_single_slot_mode`)를 여기에는 걸지 않는다.  예전에는
+        좌·우 양쪽에 걸려 있어서, 슬롯이 넘어가는 순간 이 패널의 `SlotSection` 이
+        통째로 파괴됐다 사용자가 되돌아올 때 다시 만들어졌다 — 사용자가 신고한
+        "후보 선별에서 slot별로 처리될 때 검증 대상 쪽 사진의 썸네일이 초기화된다"
+        가 그것이다.  게다가 지금까지 고른 것이 화면에서 사라져 무엇을 골랐는지
+        확인할 수도 없었다.
+
+        위젯 수가 터지는 곳은 **후보(좌) 패널**이다(큐 전체가 들어온다).  이쪽은
+        사용자가 직접 고른 것만 들어오고, `SlotSection(truncate=True)` 이라
+        (우측은 `inline_select=False`) `+N` 으로 잘려 위젯 수가 이미 묶여 있다."""
         if self._state is None:
-            return []
-        if self._is_single_slot_mode() and (
-                self._current is None or slot != self._current.slot):
             return []
         return list(self._state.targets.get(slot, []))
 
@@ -794,9 +802,11 @@ class SelectPage(ProgressRowMixin, QWidget):
         if self._is_single_slot_mode():
             cur = self._current.slot if self._current is not None else None
             left = {cur: self._left_items_for_slot(cur)} if cur else {}
-            right = {cur: self._right_items_for_slot(cur)} if cur else {}
             self.left_panel.update_data(left)
-            self.right_panel.update_data(right)
+            # ★ 우측은 슬롯을 좁히지 않는다 — 지금까지 고른 것을 계속 보여 준다
+            #   (`_right_items_for_slot` 주석 참조).
+            self.right_panel.update_data(
+                {k: list(v) for k, v in self._state.targets.items()})
         else:
             # left = 남은 큐를 Slot 별로 그룹화
             left_groups: dict[str, list[ImageItem]] = defaultdict(list)

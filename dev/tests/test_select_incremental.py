@@ -115,3 +115,56 @@ def test_single_slot_mode_switches_on_slot_change(qapp, isolated_cache):
     assert sp._current.slot == "S2"
     assert set(sp.left_panel._sections.keys()) == {"S2"}
     sp.deleteLater()
+
+
+# ===========================================================================
+# ★ 검증 대상(우) 패널은 슬롯이 넘어가도 **유지된다**
+#
+# 실제 신고: "후보 선별 단계에서 사진이 많을 때에는 slot별로 처리가 되고 있는데,
+# 이때 검증 대상 쪽 사진은 썸네일 초기화되지 않도록 처리."
+# 원인은 one-slot 모드가 좌·우 **양쪽에** 걸려 있던 것이다 — 슬롯이 넘어가면 우측
+# `SlotSection` 이 통째로 파괴됐다 되돌아올 때 다시 만들어졌고(=썸네일 재생성),
+# 그동안 지금까지 고른 것이 화면에서 사라졌다.
+# ===========================================================================
+def test_right_panel_keeps_earlier_slots_in_single_slot_mode(qapp, isolated_cache):
+    from aoi_verification.app.ui.pages.select_page import SelectPage
+    sp = SelectPage()
+    sp.show()
+    QApplication.processEvents()
+    # S1 2장 · S2 다수 → one-slot 모드.  S1 을 검증으로 보내고 S2 로 넘어간다.
+    sp.load_state(queue=_build_queue([("S1", 2), ("S2", 300)]))
+    assert sp._is_single_slot_mode() is True
+
+    sp._decide("verify")                 # S1_0 → 검증 대상
+    sp._decide("verify")                 # S1_1 → 검증 대상, 이제 S2 로 넘어간다
+    assert sp._current.slot == "S2", "슬롯이 넘어가지 않았다 — 전제가 깨졌다"
+
+    # 좌측은 그대로 현재 슬롯만(위젯 수를 묶는 최적화는 유지된다).
+    assert set(sp.left_panel._sections.keys()) == {"S2"}
+    # 우측은 앞 슬롯이 남아 있어야 한다 — 이게 '초기화되지 않게' 의 뜻이다.
+    assert "S1" in sp.right_panel._sections, \
+        f"슬롯이 넘어가자 검증 대상이 사라졌다: {set(sp.right_panel._sections)}"
+    assert len(sp._right_items_for_slot("S1")) == 2
+    sp.deleteLater()
+
+
+def test_right_panel_sections_survive_a_decision(qapp, isolated_cache):
+    """같은 슬롯 안에서 결정해도 앞 슬롯 섹션 위젯이 **다시 만들어지지 않는다**.
+
+    위젯 동일성으로 본다 — 개수만 보면 파괴 후 재생성을 놓친다(그게 곧 썸네일
+    재로딩이다)."""
+    from aoi_verification.app.ui.pages.select_page import SelectPage
+    sp = SelectPage()
+    sp.show()
+    QApplication.processEvents()
+    sp.load_state(queue=_build_queue([("S1", 2), ("S2", 300)]))
+    sp._decide("verify")
+    sp._decide("verify")                 # S2 로 전환 — 우측에 S1 이 생긴다
+    QApplication.processEvents()
+    before = sp.right_panel._sections["S1"]
+
+    sp._decide("verify")                 # S2 에서 한 건 더 결정
+    QApplication.processEvents()
+    assert sp.right_panel._sections.get("S1") is before, \
+        "결정 한 건에 앞 슬롯 섹션이 다시 만들어졌다(썸네일이 다시 로드된다)"
+    sp.deleteLater()
