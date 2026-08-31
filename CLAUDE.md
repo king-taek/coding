@@ -90,6 +90,8 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   PR 로 기본 브랜치에 머지한다. 별도 지시가 없으면 기본 브랜치 기준으로 판단한다.
 - 커밋 메시지는 **한국어로 '무엇을·왜'** 중심. PR 은 사용자가 요청할 때 생성한다.
 - **금지**: 커밋/코드/문서 등 저장소 산출물에 내부 모델 식별자(model id)나 그 추정 이름을 적지 않는다.
+- Always write Korean (and other non-ASCII) strings in tool-call parameters as literal UTF-8;
+  never as "\uXXXX" unicode escapes.
 
 ## 로딩바(LoadingOverlay) 규칙 — 오작동 방지 (중요)
 로딩 진행을 바꾸거나 새 장시간 작업을 추가할 때 **반드시** 아래를 지킨다. 안 지키면
