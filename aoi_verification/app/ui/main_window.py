@@ -18,7 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal
+from PyQt6.QtCore import QElapsedTimer, QObject, QThread, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (QApplication, QLabel, QMainWindow,
                               QMessageBox, QStackedWidget, QStatusBar,
                               QVBoxLayout, QWidget)
@@ -104,13 +104,31 @@ class _FolderScan(QThread):
     def stop(self) -> None:
         self._stop = True
 
+    # 진행 보고 최소 간격(ms) — 이보다 촘촘한 신호는 큐만 채운다.
+    _PROGRESS_MIN_MS = 50
+
     def run(self) -> None:      # type: ignore[override]
+        # ★ **개수가 아니라 경과 시간으로 조인다.**  예전에는 `done % 25 == 0` 이었는데,
+        #   `scan` 은 슬롯마다 done 을 1부터 올리므로 **슬롯이 25개인 자재에서는
+        #   done=25(=total) 한 번만 참**이 된다 — 즉 스캔이 끝나는 순간에야 처음
+        #   보고했고, 그때까지 오버레이는 busy(혜성 스윕) 그대로였다.  사용자가 본
+        #   "폴더 스캔만 도는데 얼마나 걸리는지도, 몇 개 되었는지도 모르겠다" 가
+        #   이것이다.  시간으로 조이면 슬롯이 몇 개든 첫 슬롯에서 결정형으로 승격하고,
+        #   슬롯이 수천 개여도 초당 20회를 넘지 않아 원래 걱정(큐 폭주)도 그대로 막힌다.
+        clock = QElapsedTimer()
+
         def _progress(done: int, total: int) -> None:
             if self._stop:
                 raise _FolderScan._Stopped()
-            # 25 폴더마다만 보고한다 — 매 폴더 신호는 큐만 채운다.
-            if done % 25 == 0 or done == total:
-                self.signals.progress.emit(self._token, done, total)
+            # 첫 보고와 마지막 보고는 무조건 — 시작(busy 탈출)과 완료(100%)는
+            # 놓치면 안 되는 두 프레임이다.
+            if not clock.isValid():
+                clock.start()
+            elif done < total and clock.elapsed() < self._PROGRESS_MIN_MS:
+                return
+            else:
+                clock.restart()
+            self.signals.progress.emit(self._token, done, total)
 
         try:
             sr = scan(self._ref_root, self._val_root, progress=_progress)

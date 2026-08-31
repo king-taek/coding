@@ -301,6 +301,10 @@ class LoadingOverlay(QWidget):
     FADE_IN_MS = int(RISE_IN_MS * 0.6)           # 300
     FADE_OUT_MS = 140
     PANEL_W = 424                          # 메시지 길이로 패널 폭이 뛰지 않게 고정
+    # 패널 테두리 두께 — QSS 의 `QWidget[role="loadingPanel"] { border: 1px … }` 와
+    # **같은 값이어야 한다.**  상단 진행 눈금을 그 테두리 안쪽에 앉히는 데 쓴다
+    # (회귀 가드: test_loading_panel 이 눈금 top 이 패널 top 보다 이만큼 아래인지 잰다).
+    PANEL_BORDER_PX = 1
     # 결정형 바의 부드러운 채움 지속시간 **이자** '촘촘한 갱신' 판정 기준.
     # 두 값을 따로 두면 어긋난다 — 하나로 묶어 둔다(set_progress 주석 참조).
     VAL_TWEEN_MS = 240
@@ -320,10 +324,16 @@ class LoadingOverlay(QWidget):
         self._content_eff.setOpacity(1.0)
         self._panel.setGraphicsEffect(self._content_eff)
 
-        # ★ 바깥 레이아웃은 여백 0 이다 — 상단 진행 눈금이 패널 폭을 **전부** 써야
-        #   '치수선' 으로 읽힌다.  본문 여백은 안쪽 레이아웃이 준다.
+        # ★ 바깥 레이아웃 여백은 **테두리 두께(1px)뿐**이다 — 상단 진행 눈금이 패널
+        #   폭을 거의 전부 써야 '치수선' 으로 읽히되, 패널의 `1px solid $line` 테두리
+        #   **안쪽**에 앉아야 한다.  예전에는 여백이 0 이라 눈금이 테두리를 덮었고,
+        #   눈금은 각진 모서리(`border-radius: 0`)인데 패널은 둥근 모서리라 눈금의
+        #   양 끝이 밖으로 삐져나왔다 — 사용자가 본 "파란 바가 위에 덧붙여진 느낌"이
+        #   그것이다.  QSS 쪽에서 눈금 상단 모서리를 `$radius_inner` 로 둥글린다.
+        #   본문 여백은 안쪽 레이아웃이 준다.
         v = QVBoxLayout(self._panel)
-        v.setContentsMargins(0, 0, 0, 0)
+        v.setContentsMargins(self.PANEL_BORDER_PX, self.PANEL_BORDER_PX,
+                             self.PANEL_BORDER_PX, 0)
         v.setSpacing(0)
 
         self._progress = QProgressBar(self._content)

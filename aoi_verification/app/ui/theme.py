@@ -282,6 +282,10 @@ def _derive_tokens() -> dict:
         "title_tracking": f"{p.title_tracking}px",
         # 형태
         "radius": f"{p.radius}px", "radius_sm": f"{p.radius_sm}px",
+        # 1px 테두리 **안쪽** 면의 라운드 — 테두리 안에 꽉 차는 자식(로딩 패널 상단
+        # 진행 눈금)이 바깥 모서리 밖으로 삐져나오지 않게 한다.  `radius` 에서
+        # 파생시켜 둘이 따로 놀 수 없게 한다.
+        "radius_inner": f"{max(0, p.radius - 1)}px",
         "chip_radius": f"{p.chip_radius}px", "row_radius": f"{p.row_radius}px",
         # 컨트롤 패딩(+포커스 보정)
         "pad_control": f"{p.control_pad_v}px {p.control_pad_h}px",

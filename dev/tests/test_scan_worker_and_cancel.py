@@ -13,6 +13,7 @@ P-09 배경: [중지] 는 단계와 무관하게 썸네일 풀만 멈췄다.  �
 """
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
@@ -66,6 +67,67 @@ def test_worker_reports_progress_as_two_numbers(styled_qapp, tmp_path):
     assert all(tk == 7 for tk, _, _ in seen), "세대 번호가 실려 있지 않다"
     last_done, last_total = seen[-1][1], seen[-1][2]
     assert last_done == last_total, f"마지막 보고가 완료가 아니다: {seen[-1]}"
+
+
+# ---------------------------------------------------------------------------
+# ★ 진행이 **끝나기 전에도** 흐른다
+#
+# 실제 신고: "폴더 스캔 로딩에서 진척도(몇 개 중 몇 개)가 안 보임 — 그냥 폴더 스캔만
+# 진행 중이라서 얼마나 걸리는지도 모르고 몇 개 되었는지도 확인이 안 되는 상태."
+# 원인은 `done % 25 == 0` 스로틀이었다.  `scan` 은 슬롯마다 done 을 1부터 올리므로
+# **슬롯이 25개인 자재에서는 done=25(=total) 한 번만** 참이 된다 — 스캔이 끝나는
+# 순간에야 처음 보고했고, 그때까지 오버레이는 busy 그대로였다.
+# ---------------------------------------------------------------------------
+def test_a_25_slot_lot_reports_before_it_finishes(styled_qapp, tmp_path):
+    """25슬롯에서 첫 보고가 마지막 보고여서는 안 된다(그게 바로 그 버그다)."""
+    ref = tmp_path / "ref"
+    val = tmp_path / "val"
+    for i in range(25):
+        for root in (ref, val):
+            d = root / f"Slot_{i + 1:02d}"
+            d.mkdir(parents=True)
+            (d / "a.jpg").write_bytes(b"")
+
+    seen: list = []
+    w = MW._FolderScan(1, ref, val)
+    w.signals.progress.connect(lambda _tk, d, t: seen.append((d, t)))
+    w.run()
+
+    assert len(seen) >= 2, f"보고가 {len(seen)}회뿐 — 끝날 때 한 번만 나간다: {seen}"
+    assert seen[0][0] < seen[0][1], f"첫 보고가 이미 완료다: {seen[0]}"
+    assert seen[-1] == (25, 25), f"마지막 보고가 완료가 아니다: {seen[-1]}"
+    assert all(t == 25 for _, t in seen), "total 이 흔들린다"
+    # 단조 증가 — 뒤로 가는 진행은 바를 되감는다.
+    assert [d for d, _ in seen] == sorted(d for d, _ in seen)
+
+
+def test_progress_is_throttled_by_time_not_by_count(styled_qapp, tmp_path,
+                                                    monkeypatch):
+    """느린 폴더는 슬롯마다, 빠른 폴더는 솎아서 — 개수 기준으로 되돌리면 실패한다."""
+    ref = tmp_path / "ref"
+    val = tmp_path / "val"
+    for i in range(6):
+        for root in (ref, val):
+            d = root / f"Slot_{i + 1:02d}"
+            d.mkdir(parents=True)
+            (d / "a.jpg").write_bytes(b"")
+
+    # 슬롯 하나에 최소 간격보다 오래 걸리게 만든다 → 전부 보고돼야 한다.
+    real = MW.scan
+
+    def slow(ref_root, val_root, progress=None):
+        def _slow(done, total):
+            time.sleep((MW._FolderScan._PROGRESS_MIN_MS + 10) / 1000.0)
+            if progress is not None:
+                progress(done, total)
+        return real(ref_root, val_root, progress=_slow)
+
+    monkeypatch.setattr(MW, "scan", slow)
+    seen: list = []
+    w = MW._FolderScan(1, ref, val)
+    w.signals.progress.connect(lambda _tk, d, t: seen.append(d))
+    w.run()
+    assert seen == [1, 2, 3, 4, 5, 6], f"느린 스캔인데 솎였다: {seen}"
 
 
 def test_scan_failure_is_reported_not_swallowed(styled_qapp, tmp_path,

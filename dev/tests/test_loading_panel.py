@@ -140,6 +140,56 @@ def test_panel_has_own_surface_for_readability(qapp):
         host.deleteLater()
 
 
+# ---------------------------------------------------------------------------
+# ★ 상단 진행 눈금은 **패널 테두리 안**에 앉는다
+#
+# 실제 신고: "위에 파란색 바 — 진행 로딩바의 윗부분까지 팝업박스 테두리 처리가 되어야
+# 할 듯. 지금은 뭔가 파란색 바가 위에 덧붙여진 느낌이 강함."  원인은 바깥 레이아웃
+# 여백 0(눈금이 1px 테두리를 덮음) + 눈금의 `border-radius: 0`(패널의 둥근 모서리
+# 밖으로 삐져나옴) 조합이었다.
+# ---------------------------------------------------------------------------
+def test_the_rule_sits_inside_the_panel_border(qapp):
+    """눈금의 위·좌·우가 패널 테두리만큼 안쪽에 있어야 한다."""
+    host, ov = _overlay(qapp)
+    try:
+        ov.show_overlay("테스트")
+        ov.set_progress(3, 10, "테스트")
+        for _ in range(4):
+            qapp.processEvents()
+        b = ov.PANEL_BORDER_PX
+        assert b >= 1, "테두리 두께 상수가 사라졌다"
+        rule = ov._progress.geometry()          # 패널 좌표계
+        assert rule.top() >= b, f"눈금이 테두리를 덮는다 (top={rule.top()}, 테두리={b})"
+        assert rule.left() >= b, f"눈금이 왼쪽 테두리를 덮는다 (left={rule.left()})"
+        assert rule.right() <= ov._panel.width() - 1 - b, \
+            f"눈금이 오른쪽 테두리를 덮는다 (right={rule.right()}, 폭={ov._panel.width()})"
+    finally:
+        host.deleteLater()
+
+
+def test_the_rule_is_rounded_like_the_panel(qapp):
+    """각진 모서리로 되돌리면 둥근 패널 밖으로 다시 삐져나온다 — QSS 로 못 박는다.
+
+    ⚠ Qt 는 트랙(groove)의 라운드로 채움(::chunk)을 **클립하지 않는다.**  그래서
+    두 곳 모두에 라운드가 있어야 한다."""
+    out = theme.render_qss(_QSS)
+    i = out.find('QProgressBar[role="loadingRule"] {')
+    assert i > 0, "눈금 규칙이 사라졌다"
+    groove = out[i:out.find("}", i)]
+    assert "border-top-left-radius" in groove and "border-top-right-radius" in groove, \
+        f"트랙 상단 모서리가 각졌다:\n{groove}"
+    j = out.find('QProgressBar[role="loadingRule"]::chunk {')
+    chunk = out[j:out.find("}", j)]
+    assert "border-top-left-radius" in chunk, f"채움 왼쪽 위가 각졌다:\n{chunk}"
+    k = out.find('QProgressBar[role="loadingRule"][state="done"]::chunk {')
+    done = out[k:out.find("}", k)]
+    assert "border-top-right-radius" in done, \
+        f"100% 에서 채움 오른쪽 위가 각졌다:\n{done}"
+    # 안쪽 라디우스는 패널 라디우스에서 테두리만큼 뺀 값이어야 한다(따로 놀면 안 된다).
+    assert theme.TOKENS["radius_inner"] != theme.TOKENS["radius"], \
+        "안쪽 라디우스가 바깥과 같다 — 테두리 두께가 반영되지 않았다"
+
+
 def test_no_nested_graphics_effect(qapp):
     """패널 이펙트 안에 또 이펙트를 겹치면 QPainter 충돌 경고가 난다 — 금지."""
     host, ov = _overlay(qapp)
