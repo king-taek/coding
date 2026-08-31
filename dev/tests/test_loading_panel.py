@@ -15,6 +15,7 @@ import pytest
 
 pytest.importorskip("PyQt6.QtWidgets")
 
+from PyQt6.QtGui import QColor                             # noqa: E402
 from PyQt6.QtWidgets import QApplication, QWidget          # noqa: E402
 
 from aoi_verification.app import i18n                        # noqa: E402
@@ -149,45 +150,102 @@ def test_panel_has_own_surface_for_readability(qapp):
 # 밖으로 삐져나옴) 조합이었다.
 # ---------------------------------------------------------------------------
 def test_the_rule_sits_inside_the_panel_border(qapp):
-    """눈금의 위·좌·우가 패널 테두리만큼 안쪽에 있어야 한다."""
+    """눈금의 위·좌·우가 패널 테두리·모서리 안쪽에 있어야 한다."""
     host, ov = _overlay(qapp)
     try:
         ov.show_overlay("테스트")
         ov.set_progress(3, 10, "테스트")
         for _ in range(4):
             qapp.processEvents()
-        b = ov.PANEL_BORDER_PX
+        b, inset = ov.PANEL_BORDER_PX, ov.rule_inset_px()
         assert b >= 1, "테두리 두께 상수가 사라졌다"
+        assert inset >= theme.PROFILE.radius, \
+            f"들임({inset})이 패널 라디우스({theme.PROFILE.radius})보다 작다 — 곡선에 닿는다"
         rule = ov._progress.geometry()          # 패널 좌표계
         assert rule.top() >= b, f"눈금이 테두리를 덮는다 (top={rule.top()}, 테두리={b})"
-        assert rule.left() >= b, f"눈금이 왼쪽 테두리를 덮는다 (left={rule.left()})"
-        assert rule.right() <= ov._panel.width() - 1 - b, \
-            f"눈금이 오른쪽 테두리를 덮는다 (right={rule.right()}, 폭={ov._panel.width()})"
+        assert rule.left() >= inset, f"눈금이 왼쪽 곡선에 닿는다 (left={rule.left()})"
+        assert rule.right() <= ov._panel.width() - 1 - inset, \
+            f"눈금이 오른쪽 곡선에 닿는다 (right={rule.right()}, 폭={ov._panel.width()})"
+        # busy 는 결정형과 **같은 가로 자리**를 나눠 쓴다 — 한쪽만 들이면 전환에 튄다.
+        # ★ 높이는 비교하지 않는다: 이 파일의 `qapp` 은 테마를 적용하지 않아
+        #   `max-height: 4px` 가 안 먹고 QProgressBar 가 기본 높이로 남는다(실측 22px).
+        #   가로 들임이 이 테스트의 관심사다.
+        busy = ov._busy.geometry()
+        assert (busy.left(), busy.width()) == (rule.left(), rule.width()), \
+            f"busy 스윕이 눈금과 다른 가로 자리에 있다: {busy.getRect()} vs {rule.getRect()}"
     finally:
         host.deleteLater()
 
 
-def test_the_rule_is_rounded_like_the_panel(qapp):
-    """각진 모서리로 되돌리면 둥근 패널 밖으로 다시 삐져나온다 — QSS 로 못 박는다.
+def _rounded_overflow(qapp, ov) -> float:
+    """눈금이 패널의 **둥근 실루엣 밖으로** 몇 px 나갔는가(px, 클수록 나쁨).
 
-    ⚠ Qt 는 트랙(groove)의 라운드로 채움(::chunk)을 **클립하지 않는다.**  그래서
-    두 곳 모두에 라운드가 있어야 한다."""
+    ★ 화면을 실제로 렌더해 픽셀을 본다.  이전 가드는 QSS **문자열**에 라디우스가
+    적혀 있는지만 봐서, Qt 가 그 라디우스를 무시한다는 사실을 못 봤다 — 고쳤다고
+    믿는 채로 각진 끝이 2.5px 삐져나온 상태가 남아 있었다."""
+    import math
+
+    for _ in range(6):
+        qapp.processEvents()
+    img = ov._panel.grab().toImage()
+    w, r = img.width(), theme.PROFILE.radius
+    panel = QColor(theme.PANEL).rgb() & 0xFFFFFF
+    worst = 0.0
+    for y in range(0, 6):
+        dy = r - (y + 0.5)
+        silhouette = r - math.sqrt(max(0.0, r * r - dy * dy)) if dy > 0 else 0.0
+        for xs, depth in ((range(r + 3), lambda x: x + 0.5),
+                          (range(w - 1, w - r - 4, -1), lambda x: w - x - 0.5)):
+            first = next(
+                (x for x in xs
+                 if ((img.pixel(x, y) >> 24) & 0xFF) > 20
+                 and (img.pixel(x, y) & 0xFFFFFF) != panel), None)
+            if first is not None:
+                worst = max(worst, silhouette - depth(first))
+    return worst
+
+
+# 안티에일리어싱 한 픽셀은 봐준다 — 그 이상은 각진 끝이 실제로 보인다는 뜻이다.
+_AA_TOLERANCE_PX = 1.0
+
+
+@pytest.mark.parametrize("mode", ["light", "dark"])
+@pytest.mark.parametrize("state", ["determinate", "full", "busy"])
+def test_the_rule_never_leaves_the_rounded_panel(qapp, mode, state):
+    """★ 실제 신고: "파란 바가 위에 덧붙여진 느낌이 강함."
+
+    각진 눈금이 둥근 패널 모서리 밖으로 삐져나오면 그렇게 보인다.  QSS 로 눈금을
+    둥글리는 길은 **막혀 있다** — Qt 는 `QProgressBar` 의 groove/chunk 라디우스를
+    무시한다(높이 4px·20px 실측).  그래서 레이아웃으로 반지름만큼 들인다.
+    셋 다 같은 자리를 쓰므로 세 상태를 모두 본다(busy 는 직접 페인트라 QSS 가
+    닿지도 않는다)."""
+    theme.set_color_mode(mode)
+    theme.apply_to_app(qapp)
+    host, ov = _overlay(qapp)
+    try:
+        ov.show_overlay("작업", step=(1, 3), steps=("a", "b", "c"))
+        if state == "determinate":
+            ov.set_progress(4, 25, "작업")
+        elif state == "full":
+            ov.set_progress(25, 25, "작업")
+        over = _rounded_overflow(qapp, ov)
+        assert over <= _AA_TOLERANCE_PX, (
+            f"{mode}/{state}: 눈금이 둥근 모서리 밖으로 {over:.1f}px 나갔다 "
+            f"— '위에 덧붙여진' 그 모양이다")
+    finally:
+        theme.set_color_mode("light")
+        theme.apply_to_app(qapp)
+        host.deleteLater()
+
+
+def test_no_dead_radius_is_left_in_the_qss(qapp):
+    """Qt 가 무시하는 라디우스를 QSS 에 남겨 두지 않는다 — 다음 사람이 그게 듣는 줄 안다."""
     out = theme.render_qss(_QSS)
-    i = out.find('QProgressBar[role="loadingRule"] {')
-    assert i > 0, "눈금 규칙이 사라졌다"
-    groove = out[i:out.find("}", i)]
-    assert "border-top-left-radius" in groove and "border-top-right-radius" in groove, \
-        f"트랙 상단 모서리가 각졌다:\n{groove}"
-    j = out.find('QProgressBar[role="loadingRule"]::chunk {')
-    chunk = out[j:out.find("}", j)]
-    assert "border-top-left-radius" in chunk, f"채움 왼쪽 위가 각졌다:\n{chunk}"
-    k = out.find('QProgressBar[role="loadingRule"][state="done"]::chunk {')
-    done = out[k:out.find("}", k)]
-    assert "border-top-right-radius" in done, \
-        f"100% 에서 채움 오른쪽 위가 각졌다:\n{done}"
-    # 안쪽 라디우스는 패널 라디우스에서 테두리만큼 뺀 값이어야 한다(따로 놀면 안 된다).
-    assert theme.TOKENS["radius_inner"] != theme.TOKENS["radius"], \
-        "안쪽 라디우스가 바깥과 같다 — 테두리 두께가 반영되지 않았다"
+    i = out.find('QProgressBar[role="loadingRule"]')
+    tail = out[i:i + 1200]
+    assert "border-top-left-radius" not in tail and \
+        "border-top-right-radius" not in tail, \
+        f"눈금에 죽은 라디우스가 남아 있다:\n{tail[:400]}"
 
 
 def test_no_nested_graphics_effect(qapp):

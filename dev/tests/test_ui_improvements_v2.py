@@ -385,21 +385,23 @@ def test_busy_sweep_spans_the_same_rule_as_the_determinate_fill(qapp):
     busy 폭을 상수로 고정해 두면 패널이 클램프되거나 넓어질 때 스윕이 눈금의 일부만
     덮어, 자리를 나눠 쓴다는 계약이 조용히 깨진다.
 
-    ★ 기준은 패널 폭에서 **테두리 두께를 뺀 안쪽 폭**이다 — 눈금은 패널의 1px 테두리
-      안에 앉는다(그 전에는 테두리를 덮어 둥근 모서리 밖으로 삐져나왔다)."""
+    ★ 기준은 패널 폭에서 **모서리 반지름을 뺀 폭**이다 — 눈금은 둥근 모서리의 곡선
+      구간에 들어가지 않도록 좌우로 그만큼 들어가 있다(각진 끝이 곡선 밖으로
+      삐져나오던 것을 그렇게 고쳤다: `test_loading_panel` 의 픽셀 가드 참조)."""
     host, ov = _overlay(qapp, show_host=True)
     try:
         ov.show_overlay("작업")
         ov.show()
         qapp.processEvents()
-        inner = ov._panel.width() - 2 * ov.PANEL_BORDER_PX
+        # 바깥 레이아웃의 테두리 여백 + 눈금 행의 들임을 양쪽에서 뺀 폭.
+        inner = ov._panel.width() - 2 * (ov.PANEL_BORDER_PX + ov.rule_inset_px())
         assert not ov._busy.isHidden()
         assert ov._busy.width() == inner, (
-            f"busy 스윕({ov._busy.width()})이 안쪽 폭({inner})을 다 덮지 않는다")
+            f"busy 스윕({ov._busy.width()})이 눈금 폭({inner})과 다르다")
 
         ov.set_progress(3, 10, "작업")
         qapp.processEvents()
-        assert ov._progress.width() == inner, "결정형 눈금이 안쪽 전폭이 아니다"
+        assert ov._progress.width() == inner, "결정형 눈금 폭이 들임과 안 맞는다"
         assert ov._progress.width() == ov._busy.width(), \
             "busy 와 결정형이 같은 자리를 나눠 쓰지 않는다"
         assert ov._progress.height() == 4, "눈금 높이가 4px 가 아니다"

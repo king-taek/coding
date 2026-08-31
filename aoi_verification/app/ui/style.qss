@@ -683,27 +683,20 @@ QWidget[role="loadingPanel"] QProgressBar {
      `QWidget[role="loadingPanel"] QProgressBar { background: $bg }` 는 자손 선택자라
      특이도가 더 높아, 이걸 빼면 트랙이 $line2 가 아니라 $bg 로 칠해진다(실측:
      라이트에서 #ECE9E2).  그러면 대비 게이트가 화면에 없는 값을 보증하게 된다.
-   ★ **상단 두 모서리는 둥글다**($radius_inner = 패널 라운드 − 테두리 1px).  예전에는
-     각진 모서리(`border-radius: 0`)에 바깥 레이아웃 여백까지 0 이라, 눈금이 패널
-     테두리를 덮고 둥근 모서리 밖으로 삐져나왔다 — 사용자가 본 "파란 바가 위에
-     덧붙여진 느낌"이 그것이다.  여백 1px 은 `LoadingOverlay.PANEL_BORDER_PX` 가 준다. */
+   ★ 모서리는 **각진 채로 둔다.**  Qt 는 QProgressBar 의 groove/chunk 에 준
+     `border-radius` 를 무시하므로(높이 4·20px 실측) 여기서 둥글리려는 시도는 죽은
+     코드가 된다.  둥근 패널 모서리와의 충돌은 **레이아웃**이 푼다 —
+     `LoadingOverlay.RULE_INSET_PX` 가 눈금을 반지름만큼 좌우로 들인다. */
 QWidget[role="loadingPanel"] QProgressBar[role="loadingRule"] {
     background: $line2;
     border: none;
     border-radius: 0;
-    border-top-left-radius: $radius_inner;
-    border-top-right-radius: $radius_inner;
     min-height: 4px;
     max-height: 4px;
 }
-/* 채움은 **왼쪽에서** 자란다 — 왼쪽 위만 둥글린다.  오른쪽 끝은 진행 중에는 각져야
-   '여기까지 왔다' 는 경계로 읽히고, 100% 에서는 트랙과 폭이 같아지므로 그때만 오른쪽
-   위도 둥글린다(아래 [state="done"]).  ⚠ Qt 는 트랙의 라운드로 채움을 **클립하지
-   않는다** — 그래서 채움 쪽에도 같은 라운드를 직접 줘야 한다. */
 QWidget[role="loadingPanel"] QProgressBar[role="loadingRule"]::chunk {
     background: $accent;
     border-radius: 0;
-    border-top-left-radius: $radius_inner;
 }
 /* 단계 서수 — 모노 캡션. */
 QLabel[role="loadingStage"] {
@@ -726,8 +719,6 @@ QLabel[role="loadingTitle"] {
      못한다(이 파일 위쪽 loadingRule 주석의 그 함정). */
 QWidget[role="loadingPanel"] QProgressBar[role="loadingRule"][state="done"]::chunk {
     background-color: $pass;
-    /* 100% 면 채움이 트랙을 다 덮는다 — 오른쪽 위도 트랙과 같은 라운드로. */
-    border-top-right-radius: $radius_inner;
 }
 QLabel[role="loadingTitle"][state="done"] {
     color: $pass;

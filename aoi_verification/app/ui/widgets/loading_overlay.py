@@ -305,6 +305,16 @@ class LoadingOverlay(QWidget):
     # **같은 값이어야 한다.**  상단 진행 눈금을 그 테두리 안쪽에 앉히는 데 쓴다
     # (회귀 가드: test_loading_panel 이 눈금 top 이 패널 top 보다 이만큼 아래인지 잰다).
     PANEL_BORDER_PX = 1
+
+    @staticmethod
+    def rule_inset_px() -> int:
+        """상단 진행 눈금을 좌우로 들이는 양 — **패널 라디우스와 같다.**
+
+        그래야 눈금이 둥근 모서리의 곡선 구간에 들어가지 않는다(아래 조립부 주석의
+        실측 참조).  ★ 클래스 본문의 상수로 굽지 않는다 — `theme` 값을 import 시점에
+        얼리는 것을 `test_theme_dead_palette` 가 막는다(색이 아니라 형태 값이라 지금은
+        안전하지만, 프로파일이 모드별로 갈리는 날 조용히 낡는다)."""
+        return theme.PROFILE.radius
     # 결정형 바의 부드러운 채움 지속시간 **이자** '촘촘한 갱신' 판정 기준.
     # 두 값을 따로 두면 어긋난다 — 하나로 묶어 둔다(set_progress 주석 참조).
     VAL_TWEEN_MS = 240
@@ -324,13 +334,10 @@ class LoadingOverlay(QWidget):
         self._content_eff.setOpacity(1.0)
         self._panel.setGraphicsEffect(self._content_eff)
 
-        # ★ 바깥 레이아웃 여백은 **테두리 두께(1px)뿐**이다 — 상단 진행 눈금이 패널
-        #   폭을 거의 전부 써야 '치수선' 으로 읽히되, 패널의 `1px solid $line` 테두리
-        #   **안쪽**에 앉아야 한다.  예전에는 여백이 0 이라 눈금이 테두리를 덮었고,
-        #   눈금은 각진 모서리(`border-radius: 0`)인데 패널은 둥근 모서리라 눈금의
-        #   양 끝이 밖으로 삐져나왔다 — 사용자가 본 "파란 바가 위에 덧붙여진 느낌"이
-        #   그것이다.  QSS 쪽에서 눈금 상단 모서리를 `$radius_inner` 로 둥글린다.
-        #   본문 여백은 안쪽 레이아웃이 준다.
+        # ★ 바깥 레이아웃 여백은 **테두리 두께(1px)뿐**이다 — 본문 여백은 안쪽
+        #   레이아웃이 준다.  여기를 넓히면 표제 폭과 `PANEL_W` 가 함께 흔들린다
+        #   (1px 을 줬을 때 패널이 424→426 이 돼 `_label` 폭을 같이 고쳐야 했다).
+        #   상단 눈금의 좌우 여백은 `_rule_row` 가 따로 준다(아래 조립부 주석).
         v = QVBoxLayout(self._panel)
         v.setContentsMargins(self.PANEL_BORDER_PX, self.PANEL_BORDER_PX,
                              self.PANEL_BORDER_PX, 0)
@@ -406,9 +413,25 @@ class LoadingOverlay(QWidget):
         self._cancel_btn.clicked.connect(self.cancel_requested.emit)
         self._cancel_btn.hide()
 
-        # ── 패널 조립 — 상단 눈금(전폭) → 본문(여백 안) ───────────────────
-        v.addWidget(self._progress)
-        v.addWidget(self._busy)
+        # ── 패널 조립 — 상단 눈금 → 본문(여백 안) ─────────────────────────
+        # ★ 눈금은 **모서리 반지름만큼 좌우로 들여** 놓는다 — 패널의 둥근 모서리
+        #   곡선 구간에 아예 들어가지 않게.  ⚠ QSS 로 눈금 모서리를 둥글리는 방법은
+        #   **듣지 않는다**: Qt 는 `QProgressBar` 의 groove/chunk 에 준
+        #   `border-radius` 를 무시한다(높이 4px·20px 둘 다 실측 확인).  실제로 그렇게
+        #   고쳤다고 믿었다가, 렌더 픽셀을 재 보니 각진 끝이 둥근 실루엣 밖으로
+        #   y=1 에서 2.5px · y=2 에서 1.3px 튀어나온 채였다 — 사용자가 말한
+        #   "파란 바가 위에 덧붙여진 느낌" 이 그것이다(결정형·100%·busy 모두, 두 색
+        #   모드 모두).  레이아웃으로 들이면 QSS 가 닿지 않는 busy 스윕
+        #   (`_BusyStripe` 는 직접 페인트한다)에도 똑같이 적용된다.
+        #   회귀 가드는 **문자열이 아니라 렌더 픽셀**을 본다
+        #   (`test_loading_panel.test_the_rule_never_leaves_the_rounded_panel`).
+        _rule_row = QVBoxLayout()
+        _inset = self.rule_inset_px()
+        _rule_row.setContentsMargins(_inset, 0, _inset, 0)
+        _rule_row.setSpacing(0)
+        _rule_row.addWidget(self._progress)
+        _rule_row.addWidget(self._busy)
+        v.addLayout(_rule_row)
 
         inner = QVBoxLayout()
         inner.setContentsMargins(24, 16, 24, 18)
