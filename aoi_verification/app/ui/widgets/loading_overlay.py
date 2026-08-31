@@ -381,7 +381,9 @@ class LoadingOverlay(QWidget):
         #   `main_window._start_openvino_install` 은 pip 출력 80자를 그대로 실어
         #   보내는데, 이 표제는 20px 이라 한 줄만으로도 424 를 훌쩍 넘긴다.
         #   (= PANEL_W 424 − 안쪽 좌우 여백 24×2)
-        self._label.setFixedWidth(self.PANEL_W - 48)
+        #   ★ 테두리 여백(좌우 `PANEL_BORDER_PX`)도 빼야 패널 폭이 PANEL_W 에 딱
+        #     맞는다 — 안 빼면 패널이 그만큼 넓어진다(실측 424 → 426).
+        self._label.setFixedWidth(self.PANEL_W - 48 - 2 * self.PANEL_BORDER_PX)
         self._steps = _JourneySteps(self._content)
         self._steps.hide()
         # 큰 진행률 · 남은 시간 ------------------------------------------
@@ -553,8 +555,16 @@ class LoadingOverlay(QWidget):
     # -- 남은 시간(ETA) ------------------------------------------------
     # ★ 이 추정은 **상수 시간 산술**만 한다 — 타이머를 하나도 더 만들지 않고
     #   `set_progress` 호출 안에서 계산한다(로딩이 무거워지면 안 되는 화면이다).
-    EMA_ALPHA = 0.15          # 처리 속도 지수 평활 계수(낮을수록 둔하고 안정적)
-    ETA_MIN_SAMPLES = 5       # 이보다 적으면 추정을 내놓지 않는다("—")
+    # ★ 처리율은 **단계 시작점에 고정한 누적 평균**이다 — 연속 두 신호 사이의
+    #   순간 속도가 아니다.  실제 신고: "썸네일 생성 중 로딩창에서 남은 시간 계산이
+    #   이상함. Slot별로 남은 시간을 계산해서 나온 건가..? 전체 process 의 남은
+    #   시간이 나와야 하는데 그냥 몇 초씩만 나와서 의미없는 시간이 뜸."
+    #   원인은 `ThumbnailPool` 이 워커 8개로 **사진 한 장마다** 보고한다는 것이었다 —
+    #   두 신호 사이가 1ms, 델타가 1 이면 순간 처리율이 1,000장/초가 되고, 그 값에
+    #   끌려간 추정이 몇 초로 주저앉는다.  누적 평균은 그런 스파이크에 흔들리지
+    #   않고, 캐시 적중이 많은 초반의 낙관도 시간이 지나며 스스로 교정된다.
+    ETA_SAMPLE_MS = 250       # 이 간격마다 표본 1개로 센다(신호 수와 무관하게)
+    ETA_MIN_SAMPLES = 5       # 이보다 적으면 추정을 내놓지 않는다("—") → 약 1.25초
     ETA_REFRESH_MS = 1000     # 표시 갱신은 1초에 한 번만
     ETA_MIN_DELTA = 0.10      # 직전 표시 대비 10% 미만 변동은 무시(숫자 튐 방지)
     ETA_HUSH_S = 2            # 2초 이내로 남으면 문구를 지운다(곧 사라질 값)
@@ -563,10 +573,10 @@ class LoadingOverlay(QWidget):
         """총량이 바뀌면 반드시 부른다 — **다른 일이 시작됐다**는 뜻이라, 이전
         단계의 처리율을 물려주면 추정치가 조용히 거짓말을 한다(바를 스냅하는 것과
         같은 이유다)."""
-        self._eta_rate: float | None = None      # items/sec, EMA
         self._eta_samples = 0
-        self._eta_last_done = 0
-        self._eta_sample_clock = QElapsedTimer()
+        self._eta_start_done: int | None = None   # 이 단계의 출발 지점
+        self._eta_clock = QElapsedTimer()         # 그 지점부터 흐른 시간
+        self._eta_sample_clock = QElapsedTimer()  # 표본 세는 눈금(ETA_SAMPLE_MS)
         self._eta_paint_clock = QElapsedTimer()
         self._eta_shown_s: float | None = None
         if hasattr(self, "_eta_label"):
@@ -574,29 +584,23 @@ class LoadingOverlay(QWidget):
 
     def _feed_eta(self, done: int, total: int) -> None:
         """진행 표본 하나를 먹이고, 필요하면 표시를 갱신한다."""
-        if not self._eta_sample_clock.isValid():
+        if self._eta_start_done is None:
+            self._eta_start_done = done
+            self._eta_clock.start()
             self._eta_sample_clock.start()
-            self._eta_last_done = done
-        else:
-            # ★ 잰 시간이 0ms 면 **기준점을 옮기지 않는다.**  옮겨 버리면 그 사이의
-            #   진행분이 통째로 사라져, 갱신이 촘촘한 작업에서는 표본이 영영 쌓이지
-            #   않고 남은 시간이 "—" 로 굳는다(실측: 같은 ms 안에 여러 번 보고하는
-            #   호출부에서 그렇게 됐다).  잴 수 있을 때까지 델타를 모아 둔다.
-            dt_ms = self._eta_sample_clock.elapsed()
-            delta = done - self._eta_last_done
-            if dt_ms > 0 and delta > 0:
-                rate = delta / (dt_ms / 1000.0)
-                self._eta_rate = (rate if self._eta_rate is None else
-                                  self.EMA_ALPHA * rate
-                                  + (1.0 - self.EMA_ALPHA) * self._eta_rate)
-                self._eta_samples += 1
-                self._eta_sample_clock.restart()
-                self._eta_last_done = done
+        elif self._eta_sample_clock.elapsed() >= self.ETA_SAMPLE_MS:
+            # ★ 표본은 **시간**으로 센다.  '신호 5개' 로 세던 시절에는 1ms 안에
+            #   다섯 개가 쌓여 최소 표본 조건이 아무것도 보증하지 못했다.
+            self._eta_samples += 1
+            self._eta_sample_clock.restart()
 
-        if self._eta_samples < self.ETA_MIN_SAMPLES or not self._eta_rate:
+        elapsed_s = self._eta_clock.elapsed() / 1000.0
+        moved = done - self._eta_start_done
+        rate = (moved / elapsed_s) if (elapsed_s > 0 and moved > 0) else 0.0
+        if self._eta_samples < self.ETA_MIN_SAMPLES or rate <= 0:
             self._set_text(self._eta_label, i18n.KO.LOADING_ETA_UNKNOWN)
             return
-        remain = max(0.0, (total - done) / self._eta_rate)
+        remain = max(0.0, (total - done) / rate)
         if remain <= self.ETA_HUSH_S:
             # 곧 끝난다 — '약 1초' 같은 문구는 정보가 아니라 소음이다.
             self._set_text(self._eta_label, "")

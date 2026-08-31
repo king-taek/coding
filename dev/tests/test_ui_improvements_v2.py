@@ -90,16 +90,29 @@ def test_summary_warns_about_selection_outside_this_page(qapp):
 
 
 # ── 31. 로딩 오버레이 — 타이틀블록 ────────────────────────────────────────
+class _FakeNow:
+    """테스트가 손으로 돌리는 벽시계 — 여러 `_StepClock` 이 공유한다."""
+
+    def __init__(self) -> None:
+        self.ms = 0
+
+
 class _StepClock:
     """제어 가능한 `QElapsedTimer` 대역 — 벽시계 대신 테스트가 ms 를 준다.
 
     ★ `time.sleep(3ms)` 로 표본을 만들면 `-n auto` 로 부하가 걸린 워커나 sleep
       해상도가 거친 플랫폼에서 `elapsed()` 가 0 으로 떨어져 표본이 하나도 안 쌓인다 —
       검증하려는 코드와 무관한 이유로 깜빡이는 테스트가 된다.  시간을 주입하면 같은
-      불변식을 결정적으로 잰다(`LoadingOverlay._feed_eta` 가 쓰는 세 메서드뿐이다)."""
+      불변식을 결정적으로 잰다(`LoadingOverlay._feed_eta` 가 쓰는 세 메서드뿐이다).
 
-    def __init__(self) -> None:
+    ★ ``now`` 를 주면 **진짜 타이머처럼** 자기 원점을 기억하고 그 차이를 돌려준다 —
+      한 시계를 restart 해도 다른 시계의 경과는 그대로다.  ETA 는 단계 시작점 시계와
+      표본 눈금 두 개를 **동시에** 쓰므로 이게 있어야 실제와 같은 순서로 흐른다."""
+
+    def __init__(self, now: "_FakeNow | None" = None) -> None:
         self._valid = False
+        self._now = now
+        self._origin = 0
         self.ms = 0
 
     def isValid(self) -> bool:
@@ -107,13 +120,18 @@ class _StepClock:
 
     def start(self) -> None:
         self._valid = True
+        self._origin = self._now.ms if self._now is not None else 0
         self.ms = 0
 
     def restart(self) -> int:
-        prev, self.ms = self.ms, 0
+        prev = self.elapsed()
+        self._origin = self._now.ms if self._now is not None else 0
+        self.ms = 0
         return prev
 
     def elapsed(self) -> int:
+        if self._now is not None:
+            return self._now.ms - self._origin
         return self.ms
 
 
@@ -168,22 +186,37 @@ def test_set_stage_advances_without_restarting_the_entrance(qapp):
         host.deleteLater()
 
 
+def _eta_clocks(ov):
+    """ETA 가 쓰는 두 시계를 **공유 벽시계**로 갈아 끼운다 — `now.ms` 를 돌리면 된다."""
+    now = _FakeNow()
+    ov._eta_clock = _StepClock(now)
+    ov._eta_sample_clock = _StepClock(now)
+    ov._eta_clock.start()
+    ov._eta_sample_clock.start()
+    ov._eta_start_done = 0
+    return now
+
+
+def _feed(ov, now, *, total, steps):
+    """(경과 ms, done) 목록을 먹인다 — 벽시계 대신 테스트가 시간을 준다."""
+    for ms, done in steps:
+        now.ms = ms
+        ov.set_progress(done, total, "작업")
+
+
 def test_eta_resets_when_the_total_changes(qapp):
     """총량 변경 = **다른 일이 시작됐다** — 이전 단계의 처리율을 물려주면 추정치가
     조용히 거짓말을 한다(바를 스냅하는 것과 같은 이유)."""
     host, ov = _overlay(qapp)
     try:
         ov.show_overlay("작업")
-        # ★ 시간이 흘러야 처리율을 잴 수 있다 — 같은 ms 안의 연속 보고는 표본이
-        #   되지 못한다(그때 진행 델타가 유실되지 않는지는 아래 전용 테스트).
-        ov._eta_sample_clock = clock = _StepClock()
-        for i in range(1, 9):
-            clock.ms = 3
-            ov.set_progress(i, 100, "작업")
-        assert ov._eta_samples > 0 and ov._eta_rate is not None
+        ov.set_progress(0, 100, "작업")            # 총량 확정 → ETA 시계 새로
+        now = _eta_clocks(ov)
+        _feed(ov, now, total=100, steps=[(300 * i, i * 5) for i in range(1, 9)])
+        assert ov._eta_samples > 0
 
         ov.set_progress(0, 40, "다음 단계")       # 총량 변경
-        assert ov._eta_rate is None, "총량이 바뀌었는데 옛 처리율이 남았다"
+        assert ov._eta_start_done is None, "총량이 바뀌었는데 출발점이 남았다"
         assert ov._eta_samples == 0
         assert ov._eta_label.text() == "", "총량이 바뀌었는데 옛 추정이 남았다"
     finally:
@@ -191,26 +224,62 @@ def test_eta_resets_when_the_total_changes(qapp):
         host.deleteLater()
 
 
-def test_dense_updates_do_not_lose_the_progress_delta(qapp):
-    """같은 ms 안에 여러 번 보고해도 진행분이 유실되지 않는다.
+# ---------------------------------------------------------------------------
+# ★ 남은 시간은 **전체 기준**이다 — 순간 처리율이 아니다
+#
+# 실제 신고: "썸네일 생성 중 로딩창에서 남은 시간 계산이 이상함. Slot별로 남은
+# 시간을 계산해서 나온 건가..? 전체 process 의 남은 시간이 나와야 하는데 그냥 몇
+# 초씩만 나와서 의미없는 시간이 뜸."  원인은 `ThumbnailPool` 이 워커 8개로 **사진
+# 한 장마다** 보고한다는 것이었다 — 두 신호 사이가 1ms, 델타가 1 이면 순간
+# 처리율이 1,000장/초로 잡혀 남은 시간이 몇 초로 주저앉는다.
+# ---------------------------------------------------------------------------
+def test_eta_is_not_fooled_by_a_burst_of_dense_reports(qapp):
+    """워커 8개가 **한꺼번에** 보고해도 남은 시간은 실제 속도를 따른다.
 
-    ★ 잰 시간이 0ms 일 때 기준점을 옮겨 버리면 그 사이 진행분이 통째로 사라져,
-      갱신이 촘촘한 작업에서는 표본이 영영 쌓이지 않고 남은 시간이 "—" 로 굳는다."""
+    `ThumbnailPool` 은 사진 한 장마다 보고하는데, 워커 8개가 거의 동시에 끝나면
+    1ms 안에 8건이 몰리고(순간 1,000장/초) 그다음 한참 조용하다.  순간 처리율을
+    지수평활하면 몰린 쪽이 표본 수로 압도해 추정이 몇 초로 주저앉는다 — 사용자가
+    본 "그냥 몇 초씩만 나와서 의미없는 시간" 이 그것이다.
+
+    여기서는 8건 몰이(각 1ms) + 1초 정적을 12번 반복한다.  실제 속도는
+    96장 / 12.1초 ≈ 7.9장/초 → 남은 904장은 약 1분 54초다."""
     host, ov = _overlay(qapp)
     try:
         ov.show_overlay("작업")
-        ov.set_progress(0, 1000, "작업")     # 총량 확정(여기서 ETA 시계가 새로 만들어진다)
-        ov._eta_sample_clock = clock = _StepClock()
-        ov.set_progress(1, 1000, "작업")     # 시계 시작 — 기준점 = 1
-        for i in range(2, 60):               # 같은 ms 안에 몰아친다(elapsed 0)
-            ov.set_progress(i, 1000, "작업")
+        ov.set_progress(0, 1000, "작업")
+        now = _eta_clocks(ov)
+        steps, t, done = [], 0, 0
+        for _burst in range(12):
+            for _i in range(8):              # 몰이 — 1ms 간격 8건
+                t += 1
+                done += 1
+                steps.append((t, done))
+            t += 1000                        # 정적
+        _feed(ov, now, total=1000, steps=steps)
+
+        text = ov._eta_label.text()
+        # ★ 빈 문자열도 실패다.  옛 모델은 남은 904장을 2초 이내로 추정해
+        #   `ETA_HUSH_S`("곧 끝난다") 에 걸려 **아무것도 안 적었다** — 사용자가 본
+        #   '의미없는 시간' 의 극단이다.
+        assert text and text != i18n.KO.LOADING_ETA_UNKNOWN, \
+            f"몰이 보고에 속아 추정이 무너졌다(빈칸이면 2초 이내로 봤다는 뜻): {text!r}"
+        assert "분" in text, f"몇 초짜리로 무너졌다 — 전체 기준이 아니다: {text!r}"
+    finally:
+        ov.hide()
+        host.deleteLater()
+
+
+def test_eta_samples_are_counted_by_time_not_by_signal(qapp):
+    """'신호 5개' 로 세면 1ms 안에 다섯 개가 쌓여 최소 표본이 아무것도 보증하지 못한다."""
+    host, ov = _overlay(qapp)
+    try:
+        ov.show_overlay("작업")
+        ov.set_progress(0, 1000, "작업")
+        now = _eta_clocks(ov)
+        # 같은 ms 안에 100번 — 표본은 하나도 쌓이지 않아야 한다.
+        _feed(ov, now, total=1000, steps=[(0, i) for i in range(1, 101)])
         assert ov._eta_samples == 0, "잴 수 없는 구간에서 표본을 지어냈다"
-        clock.ms = 5                         # 시간이 흘렀다 → 여기서 한 번에 잰다
-        ov.set_progress(60, 1000, "작업")
-        assert ov._eta_samples >= 1, "촘촘한 갱신에서 표본이 하나도 안 쌓였다"
-        # 기준점이 매번 밀렸다면 마지막 델타가 59 가 아니라 1 이 돼 처리율이 59배
-        # 낮게 잡힌다(59/5ms = 11800/s vs 1/5ms = 200/s) — 그 둘을 가르는 선이다.
-        assert ov._eta_rate is not None and ov._eta_rate > 1000
+        assert ov._eta_label.text() == i18n.KO.LOADING_ETA_UNKNOWN
     finally:
         ov.hide()
         host.deleteLater()
@@ -314,19 +383,25 @@ def test_busy_sweep_spans_the_same_rule_as_the_determinate_fill(qapp):
     """busy 와 결정형은 패널 상단의 **같은 자리**를 나눠 쓴다.
 
     busy 폭을 상수로 고정해 두면 패널이 클램프되거나 넓어질 때 스윕이 눈금의 일부만
-    덮어, 자리를 나눠 쓴다는 계약이 조용히 깨진다."""
+    덮어, 자리를 나눠 쓴다는 계약이 조용히 깨진다.
+
+    ★ 기준은 패널 폭에서 **테두리 두께를 뺀 안쪽 폭**이다 — 눈금은 패널의 1px 테두리
+      안에 앉는다(그 전에는 테두리를 덮어 둥근 모서리 밖으로 삐져나왔다)."""
     host, ov = _overlay(qapp, show_host=True)
     try:
         ov.show_overlay("작업")
         ov.show()
         qapp.processEvents()
+        inner = ov._panel.width() - 2 * ov.PANEL_BORDER_PX
         assert not ov._busy.isHidden()
-        assert ov._busy.width() == ov._panel.width(), (
-            f"busy 스윕({ov._busy.width()})이 패널({ov._panel.width()})을 다 덮지 않는다")
+        assert ov._busy.width() == inner, (
+            f"busy 스윕({ov._busy.width()})이 안쪽 폭({inner})을 다 덮지 않는다")
 
         ov.set_progress(3, 10, "작업")
         qapp.processEvents()
-        assert ov._progress.width() == ov._panel.width(), "결정형 눈금이 전폭이 아니다"
+        assert ov._progress.width() == inner, "결정형 눈금이 안쪽 전폭이 아니다"
+        assert ov._progress.width() == ov._busy.width(), \
+            "busy 와 결정형이 같은 자리를 나눠 쓰지 않는다"
         assert ov._progress.height() == 4, "눈금 높이가 4px 가 아니다"
     finally:
         ov.hide()
