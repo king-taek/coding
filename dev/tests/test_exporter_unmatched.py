@@ -62,7 +62,9 @@ def test_export_writes_matches_and_unmatched(qapp, isolated_cache, tmp_path):
     # 따라 미매칭 시트를 가리킬 수 있어 의존하지 않는다.
     ws = wb["out"]
     # 헤더는 row 1~2, 데이터는 row 3 부터. 정렬: a_ref(매칭)=row3, b_ref(미매칭)=row4.
-    assert ws["D3"].value is None, "매칭 행의 D 셀은 비어있어야 (이미지만 임베드)"
+    # ★ 매치 행의 C·D 는 사진 **아래에** 캡션(파일명 + 정보)을 함께 갖는다(사용자 요청).
+    assert "a_ref.jpeg" in str(ws["C3"].value)
+    assert "a_val.jpeg" in str(ws["D3"].value)
     d4 = ws["D4"].value
     # geometry 기능 활성 + Surface.flt 없음 → 파일명 + '미지원 자재' 마커(rich-text).
     assert "b_ref.jpeg" in str(d4)
@@ -117,7 +119,7 @@ def test_export_no_unmatched_unaffected(qapp, isolated_cache, tmp_path):
     ws = load_workbook(str(dst)).active
     # 헤더 2 줄 + 데이터 row 3 부터. 행 3 = 매칭, 행 4 는 데이터 없음.
     assert ws["B3"].value == "S1"
-    assert ws["D3"].value is None  # 이미지 임베드만, 텍스트 없음
+    assert "val.jpeg" in str(ws["D3"].value)   # 사진 아래 캡션(파일명)
     assert ws["B4"].value is None
 
 
@@ -346,6 +348,89 @@ def test_unmatched_coords_without_flt(qapp, isolated_cache, tmp_path, monkeypatc
     assert i18n.KO.GEOM_NOT_SUPPORTED in d3
     assert "col 2 / row 3" in d3
     assert "x " in d3 and "y " in d3
+
+
+def test_matched_rows_carry_the_same_info_as_unmatched(qapp, isolated_cache,
+                                                       tmp_path, monkeypatch):
+    """★ 매치 행의 두 사진에도 미매칭 행과 **같은 정보**가 붙는다(사용자 요청).
+
+    "엑셀 양식에 매칭된 사진들도 사진 뒤에 미매칭 된것들처럼 적는 정보들 모두 적어줘."
+    파일명 + 계측(recipe/zone·area·width·length·contrast) + 좌표(col/row·x/y) 를
+    **각 사진 아래에, 그 사진의 값으로** 적는다 — 기준·검증 장비가 각자 잰 값이라
+    둘이 다르다.  사진은 그대로 임베드되고, 캡션이 들어갈 만큼 행이 더 높다."""
+    from aoi_verification.app.coords import single_info
+    from aoi_verification.app.workers import exporter as ex
+    from openpyxl import load_workbook
+
+    _install_flt_schema(monkeypatch)
+    ref_dir, val_dir = tmp_path / "ref", tmp_path / "val"
+    ref_dir.mkdir(); val_dir.mkdir()
+    ref = _make_image(ref_dir, "a_ref.jpeg")
+    val = _make_image(val_dir, "a_val.jpeg")
+    # 기준·검증 폴더에 서로 다른 계측/좌표 — 캡션이 사진마다 자기 값인지 구분된다.
+    _write_flt_record(ref_dir, 112743.1, 226527.0, 55.0, 2.0, 11.0, 108.0,
+                      zone=1, recipe=2)
+    (ref_dir / "ColorImageGrabingInfo.ini").write_text(
+        "[a_ref.jpeg]\nX=112743.1\nY=226527.0\nCol=3\nRow=5\n", encoding="utf-8")
+    _write_flt_record(val_dir, 150000.0, 220000.0, 77.0, 3.0, 13.0, 0.0,
+                      zone=1, recipe=2)
+    (val_dir / "ColorImageGrabingInfo.ini").write_text(
+        "[a_val.jpeg]\nX=150000\nY=220000\nCol=4\nRow=4\n", encoding="utf-8")
+
+    result = FinalResult(
+        mode="single", ref_machine="1호기", val_machine="2호기",
+        matches=[MatchResult(slot="S1", ref_path=ref, val_path=val, score=0.9)],
+    )
+    dst = tmp_path / "out.xlsx"
+    ExcelExporter(result, dst_path=dst,
+                  template_path=tmp_path / "no_template.xlsx").run()
+    ws = load_workbook(str(dst), rich_text=True)["out"]
+
+    c3, d3 = str(ws["C3"].value), str(ws["D3"].value)
+    # 미매칭 D열과 **같은 생산자**의 줄이 그대로 들어간다.
+    for cell_text, path in ((c3, ref), (d3, val)):
+        assert path.name in cell_text
+        for line in single_info.defect_lines(path):
+            assert line in cell_text, f"{path.name} 캡션에 {line!r} 가 없다"
+    assert "col 1 / row 2" in c3 and "col 2 / row 3" in d3, "좌표가 사진별이 아니다"
+    area_ref = next(l for l in single_info.defect_lines(ref) if l.startswith("area"))
+    area_val = next(l for l in single_info.defect_lines(val) if l.startswith("area"))
+    assert area_ref != area_val, "표본이 계측을 구분하지 못한다"
+    assert area_ref in c3 and area_val in d3, "계측이 사진별이 아니다"
+    assert area_val not in c3 and area_ref not in d3, "두 사진의 계측이 뒤섞였다"
+    # 캡션은 파일명과 같은 8pt 검정, 사진 아래(바닥 정렬).
+    assert float(ws["C3"].value[0].font.sz) == 8.0
+    assert ws["C3"].alignment.vertical == "bottom"
+    # 사진은 여전히 둘 다 들어간다 — 캡션이 사진을 대체한 것이 아니다.
+    assert len(ws._images) == 2
+    # 행은 캡션 줄 수만큼 더 높다(사진 위에 글이 겹치지 않게).
+    lines = 1 + len(single_info.defect_lines(ref))
+    assert ws.row_dimensions[3].height == pytest.approx(
+        ex.ROW_HEIGHT_PT + (lines + 1) * ex.CAPTION_LINE_PT)
+
+
+def test_unmatched_row_height_is_unchanged(qapp, isolated_cache, tmp_path):
+    """미매칭 행은 예전 그대로다(D열 텍스트, 양식 행 높이) — 매치 행만 자란다."""
+    from aoi_verification.app.workers import exporter as ex
+    from openpyxl import load_workbook
+
+    src = tmp_path / "src"
+    src.mkdir()
+    ref = _make_image(src, "a_ref.jpeg")
+    val = _make_image(src, "a_val.jpeg")
+    miss = _make_image(src, "z_miss.jpeg")
+    result = FinalResult(
+        mode="single", ref_machine="1호기", val_machine="2호기",
+        matches=[MatchResult(slot="S1", ref_path=ref, val_path=val, score=0.9)],
+        unmatched_refs=[MissEntry(slot="S1", side="ref", path=miss, note="미매칭")],
+    )
+    dst = tmp_path / "out.xlsx"
+    ExcelExporter(result, dst_path=dst,
+                  template_path=tmp_path / "no_template.xlsx").run()
+    ws = load_workbook(str(dst))["out"]
+    assert ws.row_dimensions[3].height > ex.ROW_HEIGHT_PT      # 매치 행
+    assert ws.row_dimensions[4].height == ex.ROW_HEIGHT_PT     # 미매칭 행
+    assert ws["C4"].value is None, "미매칭 행의 기준 사진 칸에 캡션이 생겼다"
 
 
 def _embedded_media_sizes(xlsx_path: Path) -> list:

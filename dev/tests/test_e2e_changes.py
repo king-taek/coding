@@ -46,7 +46,7 @@ def test_scan_keeps_dot_t_and_slot_subset(qapp, isolated_cache, tmp_path):
         for side_root in (ref, val):
             _mk_img(side_root / s / "good1.png", seed); seed += 1
             _mk_img(side_root / s / "good2.png", seed); seed += 1
-            # ★ .t 파일도 결함 사진이라 매칭에 들어간다
+            # ★ `.t.` 사진은 열거에서 **항상** 빠진다(사용자 결정 — 네 번째 결정)
             t_names[side_root / s] = f"-869.{seed}.t.1.png"
             _mk_img(side_root / s / t_names[side_root / s], seed); seed += 1
             # 웨이퍼 전경 사진은 좌표가 없어 여전히 빠진다
@@ -56,14 +56,10 @@ def test_scan_keeps_dot_t_and_slot_subset(qapp, isolated_cache, tmp_path):
     assert sr.common_slot_names == ["S01", "S02", "S03"]
     for name in sr.common_slot_names:
         names = sorted(i.filename for i in sr.slots[name].ref_images)
-        assert names == sorted(["good1.png", "good2.png",
-                                t_names[ref / name]]), names
+        assert names == ["good1.png", "good2.png"], names
 
-    # main_window._on_start 의 부분집합 필터와 동일 로직
-    sel = {"S01", "S03"}
-    sr.slots = {n: s for n, s in sr.slots.items() if n in sel}
-    sr.ref_only = [n for n in sr.ref_only if n in sel]
-    sr.val_only = [n for n in sr.val_only if n in sel]
+    # '일부 슬롯만 진행' 은 스캔 자체가 그 폴더들만 연다(main_window._on_start).
+    sr = slot_mod.scan(ref, val, only={"S01", "S03"})
     assert sr.common_slot_names == ["S01", "S03"]
 
 

@@ -230,10 +230,86 @@ def test_cancelling_returns_nothing(styled_qapp, tmp_path, isolated_cache):
 
 
 # ---------------------------------------------------------------------------
+# 결과 파일은 [검증 시작] 때 만들지 않는다 — 저장할 때 생긴다
+#
+# 사용자 신고: "지금은 검증 시작하자마자 양식 파일 생성되는데, 마지막에 저장버튼
+# 누르면 그때 저장하도록.  안그러면 빈 파일이 너무 많아짐."  저장까지 안 간 세션
+# (도중에 접거나 그냥 닫은 경우)마다 양식 그대로인 xlsx 가 결과 폴더에 남았다.
+# ---------------------------------------------------------------------------
+def _stub_window(monkeypatch, tmp_path: Path):
+    """`MainWindow` 를 통째로 띄우지 않고 `_prepare_working_file` 만 떼어 시험한다."""
+    pytest.importorskip("PyQt6.QtWidgets")
+    from aoi_verification.app.ui import main_window as mw
+    from aoi_verification.app.utils import paths
+
+    results = tmp_path / "결과"
+    results.mkdir()
+    monkeypatch.setattr(paths, "results_dir", lambda: results)
+    win = mw.MainWindow.__new__(mw.MainWindow)
+    win._working_xlsx = None
+    win._template_used = None
+    return win, results
+
+
+def _input(tmp_path: Path):
+    from aoi_verification.app.ui.pages.setup_page import SetupInput
+
+    _lot_ini(tmp_path / "val" / "Slot_01", "InputLot=GFW-RDL4")
+    return SetupInput(mode="single", ref_root=tmp_path / "ref",
+                      val_root=tmp_path / "val", ref_machine="AOI-24",
+                      val_machine="4F-AOI-03", threshold=0.55)
+
+
+def test_starting_a_run_creates_no_file(monkeypatch, tmp_path, isolated_cache):
+    """★ [검증 시작] 뒤 결과 폴더는 **비어 있다** — 경로만 정해진다."""
+    from aoi_verification.app.ui import main_window as mw
+
+    win, results = _stub_window(monkeypatch, tmp_path)
+    mw.MainWindow._prepare_working_file(win, _input(tmp_path))
+    assert list(results.iterdir()) == [], \
+        f"검증 시작만 했는데 파일이 생겼다: {[p.name for p in results.iterdir()]}"
+    assert win._working_xlsx == \
+        results / "4F-AOI-03 RDL4_GFW 검증(AOI-24 기준).xlsx"
+    assert win._template_used is not None and win._template_used.exists(), \
+        "양식 원본은 저장 때 필요하다 — 경로를 잃으면 안 된다"
+
+
+def test_the_name_still_avoids_last_sessions_file(monkeypatch, tmp_path,
+                                                  isolated_cache):
+    """지난 세션의 결과가 같은 이름으로 있으면 덮지 않는다 — 타임스탬프를 붙인다."""
+    from aoi_verification.app.ui import main_window as mw
+
+    win, results = _stub_window(monkeypatch, tmp_path)
+    (results / "4F-AOI-03 RDL4_GFW 검증(AOI-24 기준).xlsx").write_bytes(b"old")
+    mw.MainWindow._prepare_working_file(win, _input(tmp_path))
+    assert win._working_xlsx.parent == results
+    assert win._working_xlsx.name.startswith("4F-AOI-03 RDL4_GFW 검증(AOI-24 기준)_")
+    assert not win._working_xlsx.exists(), "여전히 파일을 미리 만든다"
+
+
+def test_the_file_appears_only_when_saving(monkeypatch, tmp_path, isolated_cache):
+    """실제 저장기(exporter)가 그 경로에 파일을 **처음** 만든다 — 미리 만든 사본에
+    기대지 않는다."""
+    pytest.importorskip("openpyxl")
+    from aoi_verification.app.models.result import FinalResult
+    from aoi_verification.app.utils import paths
+    from aoi_verification.app.workers.exporter import ExcelExporter
+
+    dst = tmp_path / "결과" / "없던 파일.xlsx"
+    dst.parent.mkdir()
+    result = FinalResult(mode="single", ref_machine="1호기", val_machine="2호기")
+    assert not dst.exists()
+    ExcelExporter(result, dst_path=dst, template_path=paths.template_path()).run()
+    assert dst.exists(), "저장이 파일을 만들지 못했다(미리 복사한 사본에 기대고 있었다)"
+
+
+# ---------------------------------------------------------------------------
 # 저장 흐름 — 창은 **이름만** 정하고, 저장을 기다리게 하지 않는다
 # ---------------------------------------------------------------------------
 def _result_page(qapp, monkeypatch, target: Path, chosen):
-    """결과 페이지 + 이름 확인창 대역.  `chosen=None` 이면 취소한 것."""
+    """결과 페이지 + 이름 확인창 대역.  `chosen=None` 이면 취소한 것.
+
+    ★ `target` 에 파일을 만들지 않는다 — 검증 시작 때 파일은 없다(위 참조)."""
     from aoi_verification.app.ui.pages import result_page as rp
 
     page = rp.ResultPage()
@@ -282,7 +358,6 @@ def test_export_asks_for_the_name_first(styled_qapp, monkeypatch, tmp_path,
                                         isolated_cache):
     """저장 직전에 추천 이름을 보여주고 고칠 기회를 준다(사용자 결정: 마지막 저장 직전)."""
     target = tmp_path / "4F-AOI-03 RDL4_GFW 검증(AOI-24 기준).xlsx"
-    target.write_bytes(b"working")
     page, asked, started = _result_page(styled_qapp, monkeypatch, target,
                                         chosen="내가 고친 이름.xlsx")
     page._on_export()
@@ -294,30 +369,39 @@ def test_export_asks_for_the_name_first(styled_qapp, monkeypatch, tmp_path,
     page.deleteLater()
 
 
-def test_the_working_file_is_moved_not_left_behind(styled_qapp, monkeypatch,
-                                                   tmp_path, isolated_cache):
-    """검증 시작 때 만든 사본이 결과 폴더에 유령으로 남으면 안 된다."""
-    target = tmp_path / "추천.xlsx"
-    target.write_bytes(b"working")
-    page, _asked, _started = _result_page(styled_qapp, monkeypatch, target,
-                                          chosen="확정.xlsx")
+def test_a_new_name_is_just_a_new_path(styled_qapp, monkeypatch, tmp_path,
+                                       isolated_cache):
+    """이름을 고치면 그 이름이 곧 저장 경로다 — 옮길 파일도, 남는 파일도 없다.
+
+    (예전에는 검증 시작 때 만든 작업 파일을 새 이름으로 옮겼다.  파일을 미리 만들지
+    않으므로 그 단계 자체가 사라졌다.)"""
+    results = tmp_path / "결과"
+    results.mkdir()
+    target = results / "추천.xlsx"
+    page, _asked, started = _result_page(styled_qapp, monkeypatch, target,
+                                         chosen="확정.xlsx")
     page._on_export()
-    assert not target.exists(), "옛 이름 파일이 남았다"
-    assert (tmp_path / "확정.xlsx").read_bytes() == b"working", \
-        "작업 파일이 새 이름으로 옮겨지지 않았다"
+    assert page._save_path == results / "확정.xlsx"
+    assert page._target_path == results / "확정.xlsx", \
+        "다음 '다시 저장' 이 옛 이름으로 간다"
+    assert started[0][1] == results / "확정.xlsx", "저장기가 다른 경로로 간다"
+    assert list(results.iterdir()) == [], \
+        "저장기(대역)가 돌기 전인데 결과 폴더에 파일이 생겼다"
     page.deleteLater()
 
 
 def test_cancelling_the_name_cancels_the_save(styled_qapp, monkeypatch,
                                               tmp_path, isolated_cache):
-    """취소는 **아무것도 하지 않는다** — 파일 이름도 그대로다."""
-    target = tmp_path / "추천.xlsx"
-    target.write_bytes(b"working")
+    """취소는 **아무것도 하지 않는다** — 파일도 생기지 않는다."""
+    results = tmp_path / "결과"
+    results.mkdir()
+    target = results / "추천.xlsx"
     page, _asked, started = _result_page(styled_qapp, monkeypatch, target,
                                          chosen=None)
     page._on_export()
     assert started == [], "취소했는데 저장이 시작됐다"
-    assert target.exists(), "취소했는데 파일 이름이 바뀌었다"
+    assert list(results.iterdir()) == [], "취소했는데 파일이 생겼다"
+    assert page._target_path == target, "취소했는데 저장 경로가 바뀌었다"
     page.deleteLater()
 
 
@@ -325,7 +409,7 @@ def test_saving_again_does_not_ask_twice(styled_qapp, monkeypatch, tmp_path,
                                          isolated_cache):
     """'다시 저장' 은 같은 파일에 덮어쓰는 것이 약속이다 — 매번 묻지 않는다."""
     target = tmp_path / "확정.xlsx"
-    target.write_bytes(b"working")
+    target.write_bytes(b"saved")            # 첫 저장이 만든 파일
     page, asked, started = _result_page(styled_qapp, monkeypatch, target,
                                         chosen="다른 이름.xlsx")
     page._exported = True                   # 이미 한 번 저장했다
@@ -333,24 +417,4 @@ def test_saving_again_does_not_ask_twice(styled_qapp, monkeypatch, tmp_path,
     assert asked == [], "다시 저장인데 또 물었다"
     assert page._save_path == target
     assert started
-    page.deleteLater()
-
-
-def test_a_failed_rename_still_saves(styled_qapp, monkeypatch, tmp_path,
-                                     isolated_cache):
-    """파일이 열려 있어 못 옮겨도 저장 자체는 되어야 한다 — 이름이 저장을 막지 않는다."""
-    import aoi_verification.app.ui.pages.result_page as rp
-
-    target = tmp_path / "추천.xlsx"
-    target.write_bytes(b"working")
-    page, _asked, started = _result_page(styled_qapp, monkeypatch, target,
-                                         chosen="확정.xlsx")
-
-    def boom(*a, **k):
-        raise OSError("다른 프로그램이 사용 중입니다")
-
-    monkeypatch.setattr(rp.os, "replace", boom)
-    page._on_export()
-    assert page._save_path == tmp_path / "확정.xlsx", "새 경로로 저장하지 않았다"
-    assert started, "이름 변경이 실패했다고 저장을 포기했다"
     page.deleteLater()

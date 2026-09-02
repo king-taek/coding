@@ -25,7 +25,8 @@ from .models import DefectCoord
 from .wafer_geometry import kla_geometry
 from .ini_text import decode_ini_bytes, read_ini_text
 
-__all__ = ["resolve", "load_folder", "load_folder_raw", "read_wafer_id"]
+__all__ = ["resolve", "load_folder", "load_folder_raw", "read_wafer_id",
+           "peek_die_pitch"]
 
 # 정보파일 후보에서 제외할 확장자 — 사진/패스/설정/스크립트.
 _NON_INFO_SUFFIXES = ('.jpg', '.jpeg', '.pass', '.ini', '.py')
@@ -109,6 +110,30 @@ def read_wafer_id(folder: Path) -> Optional[str]:
             wid = m.group(1).strip().upper()
             if wid:
                 return wid
+    return None
+
+
+def peek_die_pitch(folder: Path) -> Optional[tuple[float, float]]:
+    """정보파일 **헤더**(앞 :data:`_HEAD_BYTES`)에서 ``DiePitch X Y`` 만 읽는다.
+
+    설정 화면의 die 안내용이다.  :func:`load_folder` 는 DefectList 전체(수천 줄)를
+    파싱하는데, 그 순수 파이썬 파싱이 워커 스레드에서도 GIL 을 쥐어 UI 를 굶겼다
+    (`wafer_geometry.peek_die_pitch` 주석).  ``DiePitch`` 는 :func:`read_wafer_id`
+    가 읽는 것과 같은 헤더에 있으므로 같은 방식(앞부분만)으로 충분하다.
+    KLA 정보파일이 없으면 ``None``."""
+    for p in _info_candidates(folder):
+        try:
+            with p.open("rb") as fh:
+                head = fh.read(_HEAD_BYTES)
+        except OSError:
+            continue
+        m = _DIEPITCH_PAT.search(decode_ini_bytes(head))
+        if not m:
+            continue
+        try:
+            return (float(m.group(1)), float(m.group(2)))
+        except ValueError:
+            continue
     return None
 
 

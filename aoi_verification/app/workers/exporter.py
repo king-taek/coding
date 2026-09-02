@@ -3,6 +3,8 @@
 - 양식.xlsx 를 그대로 템플릿으로 로드해서 셀 서식/병합/열폭/행높이를 보존한다.
 - 헤더(C2/D2)의 ‘AOI-N’ 만 검증 세션의 호기 번호로 교체.
 - 데이터: A=번호, B=Slot, C=기준(낮은 호기) 이미지, D=검증(높은 호기) 이미지.
+  매치 행은 두 사진 **아래에** 캡션(파일명 + 계측·좌표)을 함께 적는다 — 미매칭 행이
+  D열에 적던 것과 같은 정보다(사용자 요청).  그만큼 행이 더 높다.
 - E~H 컬럼(Escape Defect Camtek/KLA)은 사용자가 수기로 채울 영역이라 비워 둔다.
 - ‘매칭 방향’ 컬럼은 사용자 요청으로 더 이상 쓰지 않는다 (#4).
 """
@@ -44,6 +46,13 @@ BORDER_COLS = ["A", "B", "C", "D"]
 #     이미지가 셀 안에 여유 있게 들어간다.
 ROW_HEIGHT_PT = 165.75
 IMG_COL_WIDTH = 22
+# 매치 행 캡션(사진 아래 파일명 + 계측·좌표) 한 줄의 높이(pt).  8pt 글씨는 엑셀
+# 기본 줄 간격으로 약 11pt 다.  매치 행 높이 = 양식 사진 행 높이 + (줄 수 + 1) × 이 값
+# — 사진은 위쪽 양식 높이 안에 앉고 캡션은 바닥 정렬이라 둘이 겹치지 않는다.
+CAPTION_LINE_PT = 11.25
+# 이보다 긴 파일명(LIVE·KLA)은 사진 열 폭(31.8 ≈ 8pt 약 40자)에서 한 번 접힌다 —
+# 그만큼 한 줄을 더 센다.
+_CAPTION_WRAP_CHARS = 36
 
 # ---------------------------------------------------------------------------
 # 양식 서식 — 치수·색의 **단일 출처**
@@ -587,14 +596,21 @@ class ExcelExporter(QThread):
             if isinstance(payload, MatchResult):
                 m = payload
                 self._write_slot_cell(ws, row, m.slot, center)
+                # ★ 매치 행도 사진 **아래에** 미매칭 행과 같은 정보를 적는다(사용자
+                #   요청): 파일명 + 계측(Surface.flt) + 좌표(col/row · x/y).  사진은
+                #   셀 위쪽(양식 행 높이 `cell_h_px` 안)에 그대로 앉히고 캡션은 바닥
+                #   정렬로 붙이므로, 행을 캡션 줄 수만큼 더 키운다 — 사진 위에 글이
+                #   겹치면 둘 다 못 읽는다.  두 사진의 값은 서로 다르다(기준·검증
+                #   장비가 각자 잰 것) — 각 사진 아래에 **그 사진의** 값이 간다.
                 # 손상/누락 이미지 1 장 때문에 전체 export 가 abort 되지 않도록
-                # 각 사진을 개별 try 로 감싼다 (Bug #3).  실패하면 파일명 텍스트
-                # 로 대체하고 이어서 진행.
+                # 각 사진을 개별 try 로 감싼다 (Bug #3).  실패해도 캡션의 파일명이
+                # 남아 어느 사진인지 알 수 있다(예전의 파일명 대체와 같은 정보).
+                lines = 0
                 for src, col in ((m.ref_path, COL_REF), (m.val_path, COL_VAL)):
-                    if not self._place_image(ws, src, col, row,
-                                             cell_w_px, cell_h_px):
-                        ws[f"{col}{row}"] = str(Path(src).name)
-                        ws[f"{col}{row}"].alignment = center
+                    self._place_image(ws, src, col, row, cell_w_px, cell_h_px)
+                    lines = max(lines, self._write_caption(ws, col, row, src))
+                ws.row_dimensions[row].height = (
+                    template_row_h + self._caption_height_pt(lines))
                 self.signals.progress.emit(base + idx, overall, _phase(m.slot))
             else:
                 u: MissEntry = payload
@@ -638,6 +654,39 @@ class ExcelExporter(QThread):
 
         # 다음 시트가 이어서 셀 수 있게 이 시트 몫을 확정한다.
         self._prog_done = base + total
+
+    # ------------------------------------------------------------------
+    def _write_caption(self, ws, col: str, row: int, src) -> int:
+        """매치 행 사진 아래 캡션 — 파일명 + 계측·좌표 줄.  **줄 수**를 돌려준다.
+
+        줄 문자열은 :func:`coords.single_info.defect_lines` 가 만든다 — 미매칭 행
+        D열(`_geometry_blocks` + `_coord_blocks`)·단일 사진 정보 화면과 **같은 생산자**
+        라 세 곳의 수치가 같다.  글씨는 미매칭 파일명과 같은 8pt 검정(28안 ②).
+        rich text 를 못 쓰는 openpyxl 에서는 파일명만 남는다(미매칭 행과 같은 폴백)."""
+        from openpyxl.styles import Alignment, Font
+        from ..coords import single_info
+
+        name = Path(src).name
+        lines = single_info.defect_lines(Path(src))
+        blocks = self._info_blocks(lines)
+        cell = ws[f"{col}{row}"]
+        if blocks:
+            from openpyxl.cell.rich_text import CellRichText, TextBlock
+            from openpyxl.cell.text import InlineFont
+            cell.value = CellRichText(
+                TextBlock(InlineFont(sz=8, color="FF000000"), name), *blocks)
+        else:
+            cell.value = name
+            cell.font = Font(color="FF000000", size=8)
+        # 바닥 정렬 — 위쪽 양식 높이는 사진 자리다.
+        cell.alignment = Alignment(horizontal="center", vertical="bottom",
+                                   wrap_text=True)
+        return 1 + len(lines) + (1 if len(name) > _CAPTION_WRAP_CHARS else 0)
+
+    @staticmethod
+    def _caption_height_pt(lines: int) -> float:
+        """캡션 줄 수 → 양식 행 높이에 **더할** 높이(pt).  사진과 글 사이 한 줄 여유."""
+        return (int(lines) + 1) * CAPTION_LINE_PT
 
     # ------------------------------------------------------------------
     @staticmethod

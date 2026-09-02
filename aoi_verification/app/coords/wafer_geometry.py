@@ -42,7 +42,8 @@ from .models import (CAMTEK_COL_OFFSET, CAMTEK_PITCH_X, CAMTEK_PITCH_Y,
                      DEFAULT_WAFER_DIAMETER, KLA_ZERO_X, KLA_ZERO_Y)
 
 __all__ = ["CamtekGeometry", "KlaGeometry", "camtek_geometry", "kla_geometry",
-           "has_camtek_entries", "FALLBACK_CAMTEK", "FALLBACK_KLA"]
+           "has_camtek_entries", "peek_die_pitch", "FALLBACK_CAMTEK",
+           "FALLBACK_KLA"]
 
 _LOG = logging.getLogger("aoi.coords")
 
@@ -75,6 +76,10 @@ _CAMTEK_SOURCES = (
 )
 # 사진 폴더가 웨이퍼 폴더의 하위일 수 있어 부모를 몇 단계까지 올라가 찾는다.
 _PARENT_LEVELS = 2
+# 파일에서 못 읽었을 때의 마지막 후보(`models.py` 상수)의 출처 표기 — 검산이 '의미
+# 있음' 까지 확인해야만 채택된다(`camtek_geometry`).  안내용 `peek_die_pitch` 는 이
+# 후보를 내지 않는다(파일에 없는 값을 '감지됨' 이라 말하지 않는다).
+_CONST_SOURCE = "models.py 상수"
 
 # 장비가 쓴 die 맵 — 그 웨이퍼의 die 전체 목록(좌표).  col/row 번호의 기준을 유도하지
 # 않고 여기서 **읽는다**(:func:`_die_map_origins`).  레코드 배치는 장비 소프트웨어마다
@@ -322,7 +327,31 @@ def _pitch_candidates(folder: Path):
             py = _read_key(base / rel, ky)
             if px is not None and py is not None:
                 yield (px, py, f"{rel}:{kx}/{ky}")
-    yield (CAMTEK_PITCH_X, CAMTEK_PITCH_Y, "models.py 상수")
+    yield (CAMTEK_PITCH_X, CAMTEK_PITCH_Y, _CONST_SOURCE)
+
+
+def peek_die_pitch(folder: Path) -> Optional[tuple[float, float, str]]:
+    """설정 화면 안내용 — **파일에 적힌** die pitch 를 검산 없이 읽는다.
+
+    ``(pitch_x, pitch_y, 출처)``.  :func:`camtek_geometry` 와 같은 후보 파일
+    (`Params_WaferInfo.ini`·`ProductInfo.ini`, 몇 줄짜리)을 같은 순서로 보되,
+    **`ColorImageGrabingInfo.ini`(결함 수천 건)·`s_DieLocation.dat`(die 수천 개)는
+    열지 않는다.**
+
+    ★ 왜 따로 있는가.  그 파싱은 순수 파이썬이라 워커 스레드에서 돌려도 **GIL 을 쥔
+    채** UI 스레드를 굶긴다 — 설정 화면이 "폴더를 고르면 die 안내가 뜰 때까지 멈춘다"
+    고 신고된 원인이다(스레드로 옮겨도 남던 정지).  안내 한 줄에 검산은 필요 없다:
+    검산은 **매칭이** pitch 를 채택할 때의 정확도 가드이고(`camtek_geometry`), 그쪽은
+    그대로다.  상수 후보는 내지 않는다 — 파일에 없는 값을 '감지됨' 이라 말하지 않는다.
+    전 구간 fail-safe."""
+    try:
+        for px, py, src in _pitch_candidates(folder):
+            if src == _CONST_SOURCE:
+                break
+            return (px, py, src)
+    except Exception:
+        pass
+    return None
 
 
 def has_camtek_entries(folder: Path) -> bool:
@@ -404,7 +433,7 @@ def camtek_geometry(folder: Path) -> Optional[CamtekGeometry]:
             ok, meaningful = _grid_check(folder, px, py)
             if not ok:
                 continue
-            if src == "models.py 상수" and not meaningful:
+            if src == _CONST_SOURCE and not meaningful:
                 continue      # 검산이 pitch 를 제약하지 못했다 — 상수를 추정으로 쓰지 않는다
             # col·row 기준은 **장비가 쓴 die 맵이 1순위**다(§6-N) — 웨이퍼가 어디 놓였는지
             # 로 유도하던 값을, 유도하지 않고 장비가 적어 둔 대로 읽는다.  맵이 없으면

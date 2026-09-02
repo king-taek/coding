@@ -12,7 +12,6 @@
 from __future__ import annotations
 
 import logging
-import shutil
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -93,11 +92,14 @@ class _FolderScan(QThread):
         done = pyqtSignal(int, object)           # token, ScanResult
         failed = pyqtSignal(int, str)            # token, message
 
-    def __init__(self, token: int, ref_root, val_root) -> None:
+    def __init__(self, token: int, ref_root, val_root, only=None) -> None:
+        """``only`` 는 '일부 슬롯만 진행' 의 슬롯명 집합 — 스캔이 **그 폴더들만** 연다.
+        ``None`` 이면 전체.  (`models.slot.scan` 의 같은 인자로 그대로 넘어간다.)"""
         super().__init__()                  # 부모 없음(위 주석)
         self._token = token
         self._ref_root = ref_root
         self._val_root = val_root
+        self._only = set(only) if only is not None else None
         self._stop = False
         self.signals = self._Signals()
 
@@ -131,7 +133,8 @@ class _FolderScan(QThread):
             self.signals.progress.emit(self._token, done, total)
 
         try:
-            sr = scan(self._ref_root, self._val_root, progress=_progress)
+            sr = scan(self._ref_root, self._val_root, progress=_progress,
+                      only=self._only)
         except _FolderScan._Stopped:
             return                          # 취소 — 아무것도 보고하지 않는다
         except Exception as exc:
@@ -977,15 +980,16 @@ class MainWindow(QMainWindow):
             _LOG.debug("타일 픽스맵 캐시 비우기 실패: %s", exc)
         self._session_id = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
 
-        # ★ 오버레이를 **먼저** 띄운다.  아래 `_prepare_working_file` 은 결과 폴더로
-        #   양식을 복사하는데(shutil.copyfile), 그 폴더가 NAS 면 수 초가 걸린다 —
-        #   예전에는 그동안 아무 표시도 없어 [검증 시작] 이 먹지 않은 것처럼 보였다.
+        # ★ 오버레이를 **먼저** 띄운다.  아래 `_prepare_working_file` 은 결과 폴더를
+        #   만들고 검증 폴더의 INI 한 장을 읽는데, 그 폴더가 NAS 면 왕복이 초 단위일 수
+        #   있다 — 예전에는 그동안 아무 표시도 없어 [검증 시작] 이 먹지 않은 것처럼
+        #   보였다.
         self._loading.show_overlay(i18n.KO.LOAD_SCAN, cancelable=True,
                                    step=(1, 3),
                                    steps=i18n.KO.LOAD_JOURNEY_STEPS)
         QApplication.processEvents()
 
-        # 양식 폴더의 양식.xlsx 를 결과 폴더로 복사 → 작업 파일 준비 ----
+        # 결과 파일의 **이름·자리만** 정한다 — 파일 자체는 [엑셀로 저장] 때 만든다.
         self._prepare_working_file(inp)
 
         # 원본 mtime 메모이즈 초기화 — 이번 세션 동안 캐시 키용 stat() 을 경로당 1회로(#5).
@@ -994,9 +998,14 @@ class MainWindow(QMainWindow):
         self._kla_folders: dict[str, str] = {}      # KLA slot명→폴더명(엑셀 회색 표기)
 
         # 폴더 스캔 — 워커에서 (U-05).  진행은 시그널로만 올라온다.
+        # ★ '일부 슬롯만 진행' 이면 **그 슬롯 폴더만** 연다.  예전에는 전부 훑은 뒤
+        #   `_on_scan_done` 에서 결과를 줄여서, 25슬롯 중 3개만 고른 사용자도 25개의
+        #   사진 열거(NAS 왕복)를 기다렸다.  줄이는 자리는 스캔 하나뿐이다 —
+        #   결과가 이미 선택 슬롯만 담으므로 다운스트림은 손댈 것이 없다.
         self._stage = "scan"
         self._scan_token += 1
-        worker = _FolderScan(self._scan_token, inp.ref_root, inp.val_root)
+        worker = _FolderScan(self._scan_token, inp.ref_root, inp.val_root,
+                             only=getattr(inp, "selected_slots", None))
         worker.signals.progress.connect(self._on_scan_progress)
         worker.signals.done.connect(self._on_scan_done)
         worker.signals.failed.connect(self._on_scan_failed)
@@ -1035,20 +1044,11 @@ class MainWindow(QMainWindow):
         if inp is None:
             return
 
-        # '일부 슬롯만 진행' 옵션 — 선택된 슬롯만 남긴다.  slots dict 만 줄이면
-        # common_slot_names / ref_only / val_only 가 모두 이를 기반으로 계산되어
-        # 다운스트림 전체가 자연히 선택 슬롯으로 제한된다.
-        sel = getattr(inp, "selected_slots", None)
-        if sel:
-            sr.slots = {n: s for n, s in sr.slots.items() if n in sel}
-            sr.ref_only = [n for n in sr.ref_only if n in sel]
-            sr.val_only = [n for n in sr.val_only if n in sel]
-
-        # `.t.` 사진을 이번 검증에 넣을지 **여기서** 묻는다(사용자 요청).
-        #   스캔이 끝나야 그런 사진이 있는지 알 수 있고, 썸네일 생성보다는 앞이라
-        #   제외한 사진의 썸네일을 헛되이 굽지 않는다.
-        self._ask_about_t_photos(sr)
-
+        # ※ '일부 슬롯만 진행' 은 여기서 거르지 않는다 — 스캔 워커가 `only=` 로
+        #   그 폴더들만 열었으므로 `sr` 이 이미 선택 슬롯만 담고 있다(`_on_start`).
+        # ※ `.t.` 사진은 열거 단계에서 항상 빠진다(`models.slot.is_ignored_name`) —
+        #   한때 여기서 예시 사진과 함께 물었지만 사용자 결정으로 '항상 뺀다' 로
+        #   돌아갔다.
         self._scan = sr
         # ※ 사진 0장 폴더 정리(drop_empty_unmatched)는 **KLA 해석 뒤**(_after_slot_resolved)
         #   로 미룬다 — 정보파일은 사진이 없어도 WaferID 를 주므로, 여기서 미리 버리면
@@ -1068,43 +1068,6 @@ class MainWindow(QMainWindow):
                     sr, side, on_done=lambda: self._after_slot_resolved(sr))
                 return
         self._after_slot_resolved(sr)
-
-    def _ask_about_t_photos(self, sr: ScanResult) -> None:
-        """이름에 ``.t.`` 가 든 사진이 있으면 **예시 한 장과 함께** 포함 여부를 묻는다.
-
-        '항상 뺀다' 와 '항상 넣는다' 를 세 번 오간 자리다(`models.slot.is_ignored_name`
-        주석) — 정답이 자재마다 다르므로 코드가 정하지 않고 그때그때 묻는다.
-        '제외' 를 고르면 스캔 결과에서 **바로 빼므로** 이후 단계(썸네일·매칭·엑셀)가
-        전부 자동으로 따라온다.  없으면 아무것도 묻지 않는다.
-
-        전 구간 fail-safe — 물음이 실패해도 검증은 계속돼야 한다(그때는 포함).
-        """
-        try:
-            from ..models.slot import has_t_token
-
-            hits = [it for slot in sr.slots.values()
-                    for it in (slot.ref_images + slot.val_images)
-                    if has_t_token(it.filename)]
-            if not hits:
-                return
-            # ★ 오버레이를 내리고 묻는다 — 입력 잠금이 걸린 채로 시트를 띄우지
-            #   않는다.  다음 단계(`_continue_start_after_scan`)가 다시 띄운다.
-            self._loading.hide_overlay()
-            from .widgets.t_photo_ask_dialog import TPhotoAskDialog
-            dlg = TPhotoAskDialog(hits[0].path, len(hits), parent=self)
-            sheets.run(dlg)
-            if dlg.include:
-                _LOG.info(".t. 사진 %d 장을 포함한다(사용자 선택)", len(hits))
-                return
-            drop = {it.key for it in hits}
-            for slot in sr.slots.values():
-                slot.ref_images = [i for i in slot.ref_images
-                                   if i.key not in drop]
-                slot.val_images = [i for i in slot.val_images
-                                   if i.key not in drop]
-            _LOG.info(".t. 사진 %d 장을 제외한다(사용자 선택)", len(hits))
-        except Exception as exc:            # 물음이 깨져도 검증은 계속된다
-            _LOG.warning(".t. 사진 확인 실패 — 포함한 채로 진행합니다: %s", exc)
 
     def _after_slot_resolved(self, sr: ScanResult) -> None:
         """slot 매칭 확정 후 — 남은 미매칭은 수동 매핑, 그 다음 썸네일 단계."""
@@ -1654,7 +1617,8 @@ class MainWindow(QMainWindow):
             unmatched_refs=unmatched_refs,
             kla_folders=dict(getattr(self, "_kla_folders", {})),
         )
-        # 결과 페이지에는 ‘이미 복사해둔 작업 파일’ 과 ‘템플릿 원본’ 둘 다 전달.
+        # 결과 페이지에는 ‘결과 파일이 놓일 경로’ 와 ‘템플릿 원본’ 둘 다 전달
+        # (파일은 아직 없다 — [엑셀로 저장] 때 그 경로에 만들어진다).
         auto_mode = (
             self._input is not None
             and AutomationLevel.is_auto(self._input.automation_level)
@@ -1723,13 +1687,20 @@ class MainWindow(QMainWindow):
         session_mod.clear()
 
     # ------------------------------------------------------------------
-    # 양식 → 결과 파일 복사
+    # 결과 파일 — 이름과 자리만 정한다
     # ------------------------------------------------------------------
     def _prepare_working_file(self, inp: SetupInput) -> None:
-        """`양식/양식.xlsx` 를 결과 폴더로 복사해서 작업 파일을 만든다.
+        """결과 엑셀의 **경로만** 정한다 — 파일은 여기서 만들지 않는다.
 
-        결과 파일 이름: ``AOI {val} 검증 ({ref} 기준).xlsx``.
-        이미 존재하면 타임스탬프를 붙여 충돌을 피한다.
+        ★ 예전에는 [검증 시작] 때 `양식.xlsx` 를 결과 폴더로 복사해 '작업 파일' 을
+        만들어 두었다.  그런데 저장까지 가지 않은 세션(도중에 접거나, 스캔 결과가 없거나,
+        그냥 닫은 경우)마다 **양식 그대로인 빈 xlsx 가 결과 폴더에 하나씩 남았다**
+        (사용자 신고: "빈 파일이 너무 많아짐").  저장(`workers/exporter`)은 어차피
+        양식을 직접 열어 채운 뒤 목적지에 쓰므로 미리 복사할 이유가 없었다 — 파일은
+        [엑셀로 저장] 을 눌러 이름을 확정한 순간에만 생긴다.
+
+        결과 파일 이름은 :meth:`_suggest_result_name` 규칙을 따르고, 결과 폴더에 같은
+        이름이 이미 있으면 타임스탬프를 붙여 충돌을 피한다(지난 세션의 결과를 덮지 않게).
         """
         template = paths.template_path()
         if not template.exists():
@@ -1747,15 +1718,6 @@ class MainWindow(QMainWindow):
         if dst.exists():
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             dst = dst.with_name(dst.stem + f"_{ts}" + dst.suffix)
-
-        # 템플릿이 있으면 복사, 없으면 빈 파일 자리 표시만 (저장 시점에 생성)
-        try:
-            if self._template_used is not None:
-                shutil.copyfile(str(self._template_used), str(dst))
-        except Exception:
-            # 복사 실패 시에도 경로는 보존 — 저장 시점에 새 워크북 생성
-            pass
-
         self._working_xlsx = dst
 
     @staticmethod

@@ -274,16 +274,100 @@ def test_only_the_first_slot_is_read(qapp, tmp_path, monkeypatch):
         (d / f"AAA_BBB_1_2_30229.803_1987.994.jpg").write_bytes(b"")
 
     opened: list[str] = []
-    real = wgm.camtek_geometry
-
-    def spy(folder):
-        opened.append(folder.name)
-        return real(folder)
-
-    spy.cache_clear = real.cache_clear     # `_clear_caches` 가 뒷정리에 부른다
-    monkeypatch.setattr(wgm, "camtek_geometry", spy)
+    real = wgm.peek_die_pitch
+    monkeypatch.setattr(wgm, "peek_die_pitch",
+                        lambda folder: (opened.append(folder.name),
+                                        real(folder))[1])
     assert SetupPage._detect_die_geometry(str(tmp_path)) == (None, "", False)
     assert opened == ["slot01"], f"슬롯을 {len(opened)}개 열었다: {opened}"
+
+
+# ---------------------------------------------------------------------------
+# ★ 안내는 **결함 목록을 파싱하지 않는다** — 워커 스레드여도 GIL 은 하나다
+#
+# 실제 신고(네 번째): 스캔을 워커로 옮기고 표본을 슬롯 하나로 줄인 뒤에도 "기준 폴더를
+# 고르면 '감지된 die' 가 뜰 때까지 화면이 멈춰 검증 폴더 [폴더 선택…] 을 누를 수 없다".
+# 계측상 UI 스레드는 파일을 건드리지 않았다(아래 `test_picking_a_folder_touches_no_
+# files_on_the_ui_thread`).  남은 원인은 워커가 하던 일 자체다: 결함 수천 건의 INI 와
+# die 맵을 **순수 파이썬으로** 파싱하면 그 스레드가 GIL 을 쥐어 UI 스레드가 굶는다.
+# 그래서 안내는 pitch 가 적힌 몇 줄짜리 파일과 `.001` 헤더만 읽는다.  매칭의 검산은
+# 그대로다(`camtek_geometry`) — 안내가 그것을 부르지 않을 뿐이다.
+# ---------------------------------------------------------------------------
+def test_the_hint_never_parses_the_defect_list(qapp, tmp_path, monkeypatch):
+    """Camtek 슬롯: INI(결함 목록)·die 맵·매칭용 기하 함수를 **부르지 않는다**."""
+    import aoi_verification.app.coords.camtek_ini as ci
+    import aoi_verification.app.coords.kla_info as ki
+    import aoi_verification.app.coords.wafer_geometry as wgm
+
+    _slot(tmp_path, 37247.7, 44905.4)
+    heavy: list[str] = []
+
+    def forbid(mod, name):
+        def _boom(*a, **k):
+            heavy.append(name)
+            raise AssertionError(f"{name} 이 불렸다 — 결함 목록을 파싱한다")
+        # `_clear_caches` 가 뒷정리에 `cache_clear` 를 부른다 — 대역에도 달아 둔다.
+        _boom.cache_clear = getattr(getattr(mod, name), "cache_clear",
+                                    lambda: None)
+        monkeypatch.setattr(mod, name, _boom)
+
+    for mod, name in ((wgm, "camtek_geometry"), (wgm, "_grid_check"),
+                      (wgm, "_die_map_origins"), (wgm, "has_camtek_entries"),
+                      (ci, "load_raw_folder"), (ci, "load_folder"),
+                      (ci, "load_recipe_folder"), (ki, "load_folder"),
+                      (ki, "load_folder_raw"), (ki, "_parse_info_raw")):
+        forbid(mod, name)
+
+    pitch, src, broken = SetupPage._detect_die_geometry(str(tmp_path))
+    assert heavy == [], f"무거운 파싱을 불렀다: {heavy}"
+    assert pitch == (37247.7, 44905.4) and "Params_WaferInfo.ini" in src
+    assert broken is False
+
+
+def test_the_hint_reads_only_the_kla_header(qapp, tmp_path, monkeypatch):
+    """KLA 슬롯: DefectList 가 아무리 길어도 **헤더 앞부분만** 읽는다."""
+    import aoi_verification.app.coords.kla_info as ki
+
+    folder = tmp_path / "slot1"
+    folder.mkdir(parents=True)
+    body = ('DiePitch 3.7247930000e+004 4.4905340000e+004;\n'
+            'SampleTestPlan 2\n  -3 -1\n  0 0 ;\n'
+            'DefectList\n')
+    body += "".join(f" {i} 1 2 11819.4 13870.7 2 0 1.0 ;\n" for i in range(20000))
+    (folder / "res.001").write_text(body, encoding="utf-8")
+    assert (folder / "res.001").stat().st_size > ki._HEAD_BYTES * 4, \
+        "표본이 헤더 크기보다 커야 '앞부분만' 이 검증된다"
+
+    monkeypatch.setattr(ki, "read_ini_text",
+                        lambda p: (_ for _ in ()).throw(
+                            AssertionError("파일을 통째로 읽었다")))
+    pitch, src, broken = SetupPage._detect_die_geometry(str(tmp_path))
+    assert pitch == (37247.93, 44905.34)
+    assert src == i18n.KO.DIE_SIZE_SRC_KLA and broken is False
+
+
+def test_peek_never_reports_the_builtin_constant(qapp, tmp_path):
+    """pitch 파일이 없으면 '감지됨' 이 아니다 — 상수를 감지값으로 보여 주지 않는다."""
+    from aoi_verification.app.coords.wafer_geometry import peek_die_pitch
+
+    _slot(tmp_path, 37247.7, 44905.4, with_params=False)
+    assert peek_die_pitch(tmp_path / "slot1") is None
+
+
+def test_peek_prefers_params_over_product_info(qapp, tmp_path):
+    """후보 순서는 매칭(`camtek_geometry`)과 같다 — Params 가 ProductInfo 보다 먼저."""
+    from aoi_verification.app.coords.wafer_geometry import peek_die_pitch
+
+    folder = _slot(tmp_path, 37247.7, 44905.4)
+    (folder / "ProductInfo.ini").write_text(
+        "[Die]\nXDieIndex=4160.900000\nYDieIndex=5294.000000\n", encoding="utf-8")
+    got = peek_die_pitch(folder)
+    assert got is not None and got[:2] == (37247.7, 44905.4)
+    assert got[2].startswith("Params_WaferInfo.ini")
+    (folder / "Params_WaferInfo.ini").unlink()
+    got = peek_die_pitch(folder)
+    assert got is not None and got[:2] == (4160.9, 5294.0)
+    assert got[2].startswith("ProductInfo.ini")
 
 
 def test_hidden_folders_are_not_the_sample(qapp, tmp_path):

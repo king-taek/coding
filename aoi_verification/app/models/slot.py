@@ -65,18 +65,23 @@ _NON_DEFECT_PREFIXES = ("cognexinsight",)
 
 
 def is_ignored_name(name: str) -> bool:
-    """무시 대상 파일명인가 (썸네일 생성·매칭 등 모든 단계에서 처음부터 배제).
+    """무시 대상 파일명인가 (썸네일 생성·매칭·엑셀 등 모든 단계에서 처음부터 배제).
 
-    거르는 것은 **결함 사진이 아닌 웨이퍼 전경 사진**(:data:`_NON_DEFECT_PREFIXES`)
-    하나뿐이다 — 좌표가 없어 매칭에 쓸 수 없다.
+    둘을 거른다:
 
-    ⚠ 점으로 구분된 ``t`` 토큰(:func:`has_t_token`)은 **여기서 거르지 않는다.**
-    한때 무조건 걸렀다가(→ 그 결정을 사용자 요청으로 되돌렸다), 지금은 **세션마다
-    사용자에게 묻는다**(`ui/main_window._ask_about_t_photos`).  '항상 뺀다' 와
-    '항상 넣는다' 를 세 번 오간 자리라, 정답이 자재마다 다르다는 것이 결론이다 —
-    그래서 코드가 정하지 않고 그때그때 묻는다.
+    · **결함 사진이 아닌 웨이퍼 전경 사진**(:data:`_NON_DEFECT_PREFIXES`) —
+      좌표가 없어 매칭에 쓸 수 없다.
+    · 이름에 점으로 구분된 ``t`` 토큰이 있는 사진(:func:`has_t_token`,
+      예 ``-86955.68631.t.1.jpg``) — **항상 뺀다**(사용자 요청).
+
+    ⚠ ``.t.`` 자리는 네 번 바뀌었다: '항상 뺀다' → '항상 넣는다'(`0b676d1`) →
+    '세션마다 묻는다'(`79cc7f4`, 예시 사진을 보여 주는 팝업) → **'항상 뺀다'**(지금).
+    묻는 팝업은 검증을 시작할 때마다 클릭을 하나 더 요구했고, 사용자가 '늘 뺀다' 로
+    결정했다.  다시 바꾸려면 여기 한 곳만 고치면 된다 — 열거가 유일한 소스라
+    썸네일·매칭·엑셀·슬롯별 장수(`count_images`)가 전부 따라온다.
     """
-    return name.lower().startswith(_NON_DEFECT_PREFIXES)
+    return (name.lower().startswith(_NON_DEFECT_PREFIXES)
+            or has_t_token(name))
 
 
 def has_t_token(name: str) -> bool:
@@ -88,10 +93,9 @@ def has_t_token(name: str) -> bool:
     해당하지 않는다.
 
     ⚠ **부분 문자열 검사가 아니다.**  ``t`` 하나짜리 토큰만 본다 — 이름 어딘가에
-    ``t`` 가 들어 있다고 걸리면 멀쩡한 사진이 통째로 빠진다.
+    ``t`` 가 들어 있다고 걸리면 멀쩡한 사진이 통째로 빠진다(``test.jpg`` 가 그렇다).
 
-    이 판정은 열거에서 쓰지 않는다(`is_ignored_name` 주석 참조).  검증 시작 시
-    '이런 사진도 포함할까요' 를 묻는 데만 쓴다."""
+    :func:`is_ignored_name` 이 열거에서 쓴다 — 걸린 사진은 어느 단계에도 오지 않는다."""
     stem = name.rsplit(".", 1)[0]        # 확장자 한 단계 제거
     return "t" in stem.split(".")
 
@@ -102,8 +106,8 @@ def _list_images(folder: Path) -> list[Path]:
     ``os.scandir`` 의 캐시된 ``DirEntry.is_file()`` 를 써서 파일당 별도
     ``stat()`` 시스템콜을 피한다 — 폴더에 수만 장이 있어도 빠르게 열거 (#3).
 
-    웨이퍼 전경 사진은 ``is_ignored_name`` 으로 처음부터 건너뛴다 — 열거가 유일한
-    소스라 썸네일도 만들어지지 않는다.
+    웨이퍼 전경 사진과 ``.t.`` 사진은 ``is_ignored_name`` 으로 처음부터 건너뛴다 —
+    열거가 유일한 소스라 썸네일도 만들어지지 않는다.
     """
     if not folder.exists() or not folder.is_dir():
         return []
@@ -163,15 +167,25 @@ def _enum_slot_dirs(root: Path) -> dict[str, Path]:
     return out
 
 
-def scan(ref_root: Path, val_root: Path, progress=None) -> ScanResult:
+def scan(ref_root: Path, val_root: Path, progress=None,
+         only=None) -> ScanResult:
     """기준/검증 두 최상위 폴더를 스캔하여 Slot 매핑을 만든다.
 
     ``progress(done, total)`` 콜백이 주어지면 폴더(slot) 하나를 열거할 때마다 호출해,
-    NAS 처럼 느린 원격에서 폴더가 많아도 진행 개수를 실시간 표시할 수 있다."""
+    NAS 처럼 느린 원격에서 폴더가 많아도 진행 개수를 실시간 표시할 수 있다.
+
+    ``only`` 에 슬롯명 집합을 주면 **그 폴더들만 연다**('일부 슬롯만 진행').
+    최상위 두 폴더의 목록(왕복 2회)은 어차피 봐야 하지만, 사진 열거는 슬롯마다
+    왕복이라 — 예전에는 전부 훑고 나서 결과를 줄였고, 25슬롯 중 3개만 고른 사용자도
+    25개를 기다렸다.  결과의 ``slots``·``ref_only``·``val_only`` 는 전부 이 목록에서
+    나오므로, 여기서 줄이면 다운스트림이 따로 거를 것이 없다.  ``None`` 이면 전체."""
     ref_dirs = _enum_slot_dirs(Path(ref_root))
     val_dirs = _enum_slot_dirs(Path(val_root))
 
     all_names = sorted(set(ref_dirs.keys()) | set(val_dirs.keys()))
+    if only is not None:
+        wanted = set(only)
+        all_names = [n for n in all_names if n in wanted]
     total = len(all_names)
     slots: dict[str, Slot] = {}
     ref_only: list[str] = []

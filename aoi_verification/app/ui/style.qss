@@ -47,6 +47,14 @@ QLabel[role="appLogo"] {
     border-bottom: 1px solid $line2;
 }
 
+/* 설정 화면 — 로고가 밴드가 아니라 **제목 줄의 왼쪽 끝**에 앉는다(사용자 요청:
+   "메인 로고가 너무 많은 부분을 차지함").  줄 안의 항목이므로 밴드용 여백·눈금을
+   지운다(widgets/app_logo.py `inline=True`). */
+QLabel[role="appLogo"][inline="true"] {
+    padding: 0;
+    border-bottom: none;
+}
+
 /* 여정 레일 — 창 최상단의 상시 진행 지도(widgets/journey_rail.py).
    ★ 면만 QSS 가 칠하고, 단계 표식·글자는 위젯이 paintEvent 에서 theme 토큰을 직접
      읽어 그린다(다크 전환 때 옛 색이 남지 않게).  아래 눈금도 그쪽이 그린다 —

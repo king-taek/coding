@@ -10,6 +10,10 @@
 - 전체 스크롤이 있는 화면(설정·매치 검토)은 스크롤 host 안에 넣어 **위로 밀려
   올라간다** — 스크롤할수록 화면을 넓게 쓴다.
 - 스크롤이 없는 화면(선별·매칭·결과)은 루트 맨 위에 놓아 보이는 결과가 같다.
+- 설정 화면은 밴드가 아니라 **제목 줄의 왼쪽 끝**에 놓는다(``inline=True``).  사용자
+  지적: "메인 로고가 너무 많은 부분을 차지함" — 44px 마크 하나가 한 줄(로고 + 눈금 +
+  줄 간격 ≈ 89px)을 통째로 차지했다.  제목·배지·다크 스위치와 한 줄에 앉히면 그
+  높이가 본문에 돌아온다.  밴드용 여백·눈금은 QSS(``[inline="true"]``)가 지운다.
 
 색은 ``theme.COLOR_MODE`` 를 따른다 — 마크가 거의 검정이라 어두운 화면에서는 RGB 를
 반전해 밝게 뒤집는다.  **이건 픽스맵 연산이라 QSS 로 할 수 없다.**  그래서 색 모드가
@@ -30,14 +34,24 @@ from ...utils import paths
 LOGO_H = 44
 
 
-def build_logo_label(parent: QWidget | None = None) -> QLabel:
+def build_logo_label(parent: QWidget | None = None, *,
+                     inline: bool = False) -> QLabel:
     """상단 로고 라벨.  파일을 못 읽으면 **숨긴 빈 라벨**을 돌려준다.
+
+    ``inline=True`` 면 밴드가 아니라 **줄 안의 항목**이다 — 왼쪽 정렬이고, 밴드용
+    여백·눈금을 QSS 가 지운다(모듈 주석).  ``role`` 은 같으므로 :func:`refresh_all`
+    이 다크 전환 때 똑같이 다시 칠한다.
 
     로고 마크가 거의 검정이라 어두운 화면에서는 그대로 두면 배경에 묻힌다.
     알파는 건드리지 않고 RGB 만 반전해 밝은 마크로 뒤집는다."""
     label = QLabel(parent)
     label.setProperty("role", "appLogo")
-    label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    if inline:
+        label.setProperty("inline", "true")
+        label.setAlignment(Qt.AlignmentFlag.AlignLeft
+                           | Qt.AlignmentFlag.AlignVCenter)
+    else:
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
     if not _paint(label):
         label.hide()

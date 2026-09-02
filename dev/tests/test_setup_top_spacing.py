@@ -71,27 +71,33 @@ def _logo_label(page: sp.SetupPage) -> QLabel:
     raise AssertionError("로고 라벨을 찾지 못했다")
 
 
-def test_title_sits_right_under_the_logo(qapp):
-    """제목 위에는 **로고 말고** 다른 띠가 없어야 한다.
+def test_logo_shares_the_title_row(qapp):
+    """로고는 제목 **왼쪽, 같은 줄**이다 — 위에 따로 띠로 있지 않다.
 
-    ★ 옛 판정('제목이 페이지 맨 위')은 로고가 페이지 스택 **밖**에 고정돼 있던
-    시절의 좌표계다.  사용자 요청으로 로고가 스크롤되는 페이지 콘텐츠 안으로
-    들어오면서(widgets/app_logo.py) 제목의 페이지 내 y 가 로고 높이만큼 내려갔다 —
-    화면에 보이는 그림은 그대로다(예전에도 제목 위에 로고 칸이 있었다).  그래서
-    측정 기준을 '페이지 맨 위' 에서 '로고 바로 아래' 로 옮긴다: 여기서 막고 싶은
-    것은 그 사이에 안내 문단·빈 줄이 다시 끼는 것이다."""
+    사용자 지적: "메인 로고가 너무 많은 부분을 차지함 — 왼쪽으로 밀어버리고 기존에
+    로고 하단에 있던 것들을 로고와 같은 행에 두면 더 깔끔할 듯."  예전엔 44px 마크
+    하나가 제목 위 한 줄(로고 + 눈금 + 줄 간격)을 통째로 차지했다.  여기서 막는 것은
+    (a) 로고가 다시 제목 위 별도 줄로 갈라지는 것, (b) 제목 위에 무엇이 끼는 것이다."""
     page = _page(qapp)
     try:
         logo = _logo_label(page)
         title = _title_label(page)
         logo_top = logo.mapTo(page, logo.rect().topLeft()).y()
-        logo_bottom = logo.mapTo(page, logo.rect().bottomLeft()).y()
-        title_top = title.mapTo(page, title.rect().topLeft()).y()
         assert logo_top <= theme.PROFILE.page_margin + 8, \
             f"로고 위 여백 {logo_top}px — 로고가 페이지 맨 위가 아니다"
-        gap = title_top - logo_bottom
-        assert gap <= theme.PROFILE.section_gap + 8, \
-            f"로고와 제목 사이 여백 {gap}px — 그 사이에 무엇이 끼었다"
+        l_mid = logo.mapTo(page, logo.rect().center()).y()
+        t_mid = title.mapTo(page, title.rect().center()).y()
+        assert abs(l_mid - t_mid) <= logo.height() // 2, \
+            f"로고({l_mid}px)와 제목({t_mid}px)이 다른 줄에 있다"
+        logo_right = logo.mapTo(page, logo.rect().topRight()).x()
+        title_left = title.mapTo(page, title.rect().topLeft()).x()
+        assert logo_right <= title_left, "로고가 제목 왼쪽이 아니다"
+        assert logo.property("inline") == "true", \
+            "밴드용 여백·눈금을 지우는 QSS 표식이 없다"
+        # 제목 위에는 아무것도 없다 — 제목의 줄이 곧 페이지의 첫 줄이다.
+        title_top = title.mapTo(page, title.rect().topLeft()).y()
+        assert title_top <= theme.PROFILE.page_margin + logo.height(), \
+            f"제목 위 여백 {title_top}px — 그 위에 무엇이 끼었다"
     finally:
         page.close()
 

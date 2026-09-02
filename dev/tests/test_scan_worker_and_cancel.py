@@ -55,6 +55,31 @@ def test_worker_scan_equals_the_direct_scan(styled_qapp, tmp_path):
     assert sr.common_slot_names == direct.common_slot_names
 
 
+def test_worker_scans_only_the_chosen_slots(styled_qapp, tmp_path, monkeypatch):
+    """'일부 슬롯만 진행' — 워커가 `only=` 를 스캔에 넘겨 **그 폴더들만** 연다.
+
+    사용자 신고: "먼저 대상 폴더를 찾고나서 일부 폴더만 하는데에도 모든 폴더를
+    스캔해서 느립니다."  예전에는 전부 훑은 뒤 `_on_scan_done` 이 결과를 줄였다."""
+    ref, val = _tree(tmp_path)
+    opened: list[str] = []
+    from aoi_verification.app.models import slot as slot_mod
+    real = slot_mod._list_images
+    monkeypatch.setattr(slot_mod, "_list_images",
+                        lambda folder: (opened.append(Path(folder).name),
+                                        real(folder))[1])
+    got: list = []
+    seen: list = []
+    w = MW._FolderScan(1, ref, val, only={"S2"})
+    w.signals.done.connect(lambda tk, sr: got.append(sr))
+    w.signals.progress.connect(lambda _tk, d, t: seen.append((d, t)))
+    w.run()
+
+    assert got and sorted(got[0].slots) == ["S2"], "고르지 않은 슬롯이 결과에 남았다"
+    assert set(opened) == {"S2"}, f"고르지 않은 폴더를 열었다: {sorted(set(opened))}"
+    # 진행 총량도 고른 슬롯 수다 — 바가 '25개 중' 을 세면 안 된다.
+    assert seen and seen[-1] == (1, 1), f"진행 총량이 전체 슬롯 수다: {seen}"
+
+
 def test_worker_reports_progress_as_two_numbers(styled_qapp, tmp_path):
     """진행 콜백의 (done, total) 계약은 그대로다 — 마지막은 반드시 (total, total)."""
     ref, val = _tree(tmp_path)
@@ -115,12 +140,12 @@ def test_progress_is_throttled_by_time_not_by_count(styled_qapp, tmp_path,
     # 슬롯 하나에 최소 간격보다 오래 걸리게 만든다 → 전부 보고돼야 한다.
     real = MW.scan
 
-    def slow(ref_root, val_root, progress=None):
+    def slow(ref_root, val_root, progress=None, only=None):
         def _slow(done, total):
             time.sleep((MW._FolderScan._PROGRESS_MIN_MS + 10) / 1000.0)
             if progress is not None:
                 progress(done, total)
-        return real(ref_root, val_root, progress=_slow)
+        return real(ref_root, val_root, progress=_slow, only=only)
 
     monkeypatch.setattr(MW, "scan", slow)
     seen: list = []

@@ -24,7 +24,7 @@ from .wafer_geometry import CamtekGeometry, FALLBACK_CAMTEK, camtek_geometry
 from .ini_text import read_ini_text
 
 __all__ = ["resolve", "load_folder", "load_abs_folder", "load_raw_folder",
-           "load_recipe_folder", "abs_coord"]
+           "load_recipe_folder", "abs_coord", "has_ini"]
 
 # INI 파일 이름 후보 — 대소문자 두 가지
 _INI_CANDIDATES = ("ColorImageGrabingInfo.ini", "ColorImageGrabinginfo.ini")
@@ -39,6 +39,19 @@ def _find_ini(folder: Path) -> Optional[Path]:
         if p.exists():
             return p
     return None
+
+
+def has_ini(folder: Path) -> bool:
+    """이 폴더에 Camtek INI 가 **있는가** — 파일 존재만 본다(파싱하지 않는다).
+
+    설정 화면의 die 안내가 '변환할 INI 는 있는데 pitch 를 적은 파일이 없다' 를
+    판정하는 데 쓴다.  :func:`~.wafer_geometry.has_camtek_entries` 는 INI 를 통째로
+    파싱하는데(결함 수천 건, 순수 파이썬), 그 비용이 UI 스레드를 굶겼다
+    (`wafer_geometry.peek_die_pitch` 주석).  존재 확인은 stat 두 번이다."""
+    try:
+        return _find_ini(Path(folder)) is not None
+    except OSError:
+        return False
 
 
 @lru_cache(maxsize=256)

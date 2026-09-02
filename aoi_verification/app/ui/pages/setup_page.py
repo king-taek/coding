@@ -73,11 +73,14 @@ _LIVE_DIE_SCANS: set = set()
 
 
 class _DieGeometryScan(QThread):
-    """기준 폴더의 die 기하를 **워커 스레드에서** 읽는다(UI 가 멈추지 않게).
+    """기준 폴더의 die 크기를 **워커 스레드에서** 읽는다(UI 가 멈추지 않게).
 
-    이 스캔은 슬롯을 하나씩 열어 INI 를 파싱하므로 자재에 따라 초 단위다 — 실측으로
-    슬롯 25개 × 결함 3,000개에서 1.4초, NAS 에서는 파일 왕복이 더해진다.  UI 스레드에서
-    돌리면 그동안 창이 통째로 멈춘다(그게 이 변경의 이유다).
+    ★ 스레드만으로는 부족했다.  워커가 하는 일이 순수 파이썬 파싱(결함 수천 건의
+    INI·die 맵)이면 GIL 을 쥔 채 UI 스레드를 굶겨, 폴더를 고른 뒤 'die 안내가 뜰 때까지'
+    창이 멈춘다(사용자 신고 — 스캔을 워커로 옮긴 뒤에도 남았다).  그래서 워커가 하는
+    일 자체를 **작은 파일 몇 개의 읽기**로 줄였다(`SetupPage._detect_die_geometry`).
+    스레드는 그래도 남긴다 — NAS 왕복은 I/O 라 GIL 을 놓지만, 끊긴 경로에서는 OS
+    타임아웃까지 돌아오지 않는다.
 
     ``token`` 은 **결과가 늦게 도착했을 때 버리기 위한 세대 번호**다.  사용자가 폴더를
     연달아 바꾸면 스캔이 겹치는데, 늦게 끝난 옛 스캔이 새 폴더의 안내를 덮어쓰면 안 된다.
@@ -220,10 +223,9 @@ class SetupPage(QWidget):
         root.setContentsMargins(m, m, m, m)
         root.setSpacing(theme.PROFILE.section_gap)
 
-        # 상단 로고 — 스크롤 **안**에 둔다.  아래를 볼 때 위로 밀려 올라가며
-        # 화면을 넓게 쓰게 한다(사용자 요청: 고정 칸이 아니게).
-        root.addWidget(build_logo_label(host))
-
+        # ※ 로고는 별도 밴드가 아니라 **제목 줄의 왼쪽 끝**에 있다(`_build_top_bar`).
+        #   스크롤 **안**이라는 점은 그대로다 — 아래를 볼 때 함께 밀려 올라간다
+        #   (사용자 요청: 고정 칸이 아니게).
         self._build_body(root)
 
         # 액션바는 스크롤 **밖**에 고정한다(주요 액션이 항상 손에 닿게).
@@ -339,20 +341,27 @@ class SetupPage(QWidget):
                              else Qt.AlignmentFlag(0))
 
     def _build_top_bar(self) -> QWidget:
-        """제목 + 모드 배지 + 보기 옵션 — **한 줄**.
+        """로고 + 제목 + 모드 배지 + 보기 옵션 — **한 줄**.
 
         ★ 예전엔 보기 옵션이 제목 **위**의 별도 줄이었다.  '모션 줄이기' 까지 있던
         시절엔 한 줄에 몰면 800×600 에서 가로가 넘쳤지만, 지금 보기 옵션은 다크 모드
         스위치 하나뿐이라 같은 줄에 들어간다.  줄을 하나로 합치면 제목 위의 빈 띠
         (툴바 높이 + 줄 간격) 가 통째로 사라져 제목이 화면 맨 위로 올라온다
-        (사용자 요청: '상단 여백이 너무 많다').  좁은 창 안전은
+        (사용자 요청: '상단 여백이 너무 많다').
+
+        ★ 로고도 이 줄의 **왼쪽 끝**이다(사용자 요청: "메인 로고가 너무 많은 부분을
+        차지함").  예전엔 제목 위에 44px 밴드로 따로 있어 1600px 폭에서 작은 마크
+        하나가 한 줄(로고 + 눈금 + 줄 간격)을 통째로 차지했다.  다른 화면의 로고는
+        아직 밴드 그대로다(`widgets/app_logo.py`).  좁은 창 안전은
         `test_setup_top_spacing` 이 800px 가로 넘침 없음으로 지킨다."""
         host = QWidget(self)
-        # 제목 왼쪽, 모드 배지 오른쪽.  배지가 제목과 같은 줄에 있어야 '무슨 모드야'가
+        # 로고·제목 왼쪽, 모드 배지 오른쪽.  배지가 제목과 같은 줄에 있어야 '무슨 모드야'가
         # 첫 시선에 들어온다.  보기 옵션은 그 오른쪽 끝.
         tr = QHBoxLayout(host)
         tr.setContentsMargins(0, 0, 0, 0)
         tr.setSpacing(16)
+        tr.addWidget(build_logo_label(host, inline=True),
+                     alignment=Qt.AlignmentFlag.AlignVCenter)
         tr.addWidget(self._build_title())
         tr.addStretch(1)
         tr.addWidget(self._build_mode_badge(),
@@ -1053,11 +1062,14 @@ class SetupPage(QWidget):
     def _refresh_die_hint(self, ref_text: Optional[str]) -> None:
         """기준 폴더의 die 크기 안내를 갱신한다 — **스캔은 백그라운드에서** 한다.
 
-        ★ 여기서 직접 훑지 않는다.  `_detect_die_geometry` 는 슬롯을 하나씩 열어
-        INI 를 파싱하므로 자재에 따라 초 단위고(실측: 슬롯 25 × 결함 3,000 → 1.4초),
-        UI 스레드에서 돌리면 **폴더를 고르는 순간 창이 그만큼 멈춘다**.  이게 실제
-        사용자 신고였다.  계산량은 줄이지 않는다 — pitch 검산은 정확도 가드라
-        완화하면 격자가 다른 자재에 상수가 채택된다(CLAUDE.md).  자리를 옮길 뿐이다.
+        ★ 여기서 직접 훑지 않는다.  UI 스레드에서 파일을 열면 **폴더를 고르는 순간
+        창이 그만큼 멈춘다** — 이게 실제 사용자 신고였다.
+        ★ 그리고 워커가 하는 일도 **가볍다**(`_detect_die_geometry`).  예전에는 매칭과
+        같은 `camtek_geometry` 를 불러 결함 수천 건의 INI 와 die 맵을 파싱했는데, 그
+        순수 파이썬 파싱은 워커에서 돌아도 GIL 을 쥐어 UI 를 굶겼다 — 워커로 옮긴
+        뒤에도 "die 안내가 뜰 때까지 멈춘다" 는 신고가 남은 이유다.  매칭의 pitch
+        검산(정확도 가드, CLAUDE.md)은 그대로다 — 안내는 그 가드를 **쓰지 않을** 뿐,
+        가드 자체는 손대지 않았다.
 
         같은 경로로 다시 불리면 스캔하지 않고 캐시한 결과로 문구만 다시 그린다 —
         허용 오차를 건드릴 때마다(`coord_tol_spin.valueChanged` → `_schedule_validate`)
@@ -1127,26 +1139,30 @@ class SetupPage(QWidget):
     def _detect_die_geometry(ref_text: str):
         """기준 폴더의 **첫 슬롯 하나**를 읽어 ``((pitch_x, pitch_y) | None, 출처, 못쓰는가)``.
 
-        · Camtek INI 슬롯 → `Params_WaferInfo.ini` 등에서 die pitch
-        · KLA 슬롯        → `.001` 의 `DiePitch`
+        · Camtek 슬롯 → `Params_WaferInfo.ini`·`ProductInfo.ini` 에 적힌 die pitch
+        · KLA 슬롯    → `.001` 헤더의 `DiePitch`
         · LIVE 파일명 슬롯 → die pitch 는 없지만 **좌표는 파일명에서 나온다**(경고 대상 아님)
 
-        '못쓰는가' 는 **Camtek INI 항목이 있는데 pitch 를 확정 못 한** 경우만 True 다.
+        '못쓰는가' 는 **Camtek INI 가 있는데 pitch 를 적은 파일이 없는** 경우만 True 다.
         전 구간 fail-safe — 안내가 실패해도 설정 화면이 막히면 안 된다.
 
-        ★ **슬롯 하나만 읽는다**(사용자 결정).  예전에는 기하를 찾을 때까지 슬롯을
-        차례로 열었고, 못 찾는 자재(LIVE 파일명 등)에서는 **25개를 전부** 훑었다 —
-        슬롯마다 폴더를 통째로 열거하고 INI 후보를 열어 보므로 실측 25슬롯 기준
-        파일시스템 왕복이 750여 회, NAS 에서는 그게 통째로 대기시간이 된다
-        (25슬롯 × 결함 3,000개에서 로컬 SSD 로도 1.1초).  이 값은 화면의 안내 한 줄에만
-        쓰이고 매칭 정확도·[검증 시작] 활성화와 무관하므로, 표본은 한 슬롯이면 된다.
+        ★ **작은 파일만 읽는다**(사용자 신고: 폴더를 고르면 die 안내가 뜰 때까지 멈춤).
+        예전에는 매칭과 같은 `camtek_geometry`·`kla_info.load_folder` 를 불러 결함
+        수천 건의 INI·die 맵·DefectList 를 파싱했다.  그 파싱은 순수 파이썬이라 워커
+        스레드에서 돌아도 GIL 을 쥔 채 UI 스레드를 굶긴다 — 스캔을 워커로 옮기고
+        표본을 슬롯 하나로 줄인 뒤에도 정지가 남은 이유다.  지금 여는 것은 pitch 가
+        적힌 몇 줄짜리 INI 와 `.001` 헤더(앞 64KB)뿐이다
+        (`wafer_geometry.peek_die_pitch`·`kla_info.peek_die_pitch`).
 
-        ⚠ 바뀌는 것: 첫 슬롯에 die 정보가 없고 뒤 슬롯에만 있으면 예전에는 뒤 슬롯의
-        값을 보여줬지만 이제 '못 찾음' 으로 안내한다.  **매칭은 영향받지 않는다** —
-        매칭은 이 안내를 쓰지 않고 슬롯 폴더마다 따로 기하를 구한다."""
-        from ...coords import kla_info
-        from ...coords.wafer_geometry import (camtek_geometry, has_camtek_entries,
-                                              kla_geometry)
+        ⚠ 바뀌는 것: 안내는 파일에 적힌 값을 **검산 없이** 보여 준다.  검산(INI 의
+        Col/Row 와 대조)은 매칭이 pitch 를 채택할 때 그대로 한다 — 안내가 보여 준 값을
+        매칭이 거부하는 드문 자재라면 매칭은 예전처럼 절대좌표로 간다.  **매칭 정확도는
+        영향받지 않는다.**
+
+        ★ **슬롯 하나만 읽는다**(사용자 결정).  이 값은 화면의 안내 한 줄에만 쓰이고
+        매칭 정확도·[검증 시작] 활성화와 무관하므로, 표본은 한 슬롯이면 된다."""
+        from ...coords import camtek_ini, kla_info
+        from ...coords.wafer_geometry import peek_die_pitch
         from ...models.slot import list_slot_dirs
 
         try:
@@ -1161,14 +1177,15 @@ class SetupPage(QWidget):
             if not slots:
                 return (None, "", False)
             _name, folder = slots[0]          # 표본 한 슬롯 — 위 주석 참조
-            geom = camtek_geometry(folder)
-            if geom is not None:
-                return ((geom.pitch_x, geom.pitch_y), geom.source, False)
-            if kla_info.load_folder(folder):              # KLA 슬롯 — DiePitch 가 있다
-                kg = kla_geometry(folder)
-                return ((kg.pitch_x, kg.pitch_y), i18n.KO.DIE_SIZE_SRC_KLA, False)
-            # 변환할 항목이 있는데 pitch 를 못 정했다 — 진짜 문제라 경고한다.
-            return (None, "", has_camtek_entries(folder))
+            got = peek_die_pitch(folder)
+            if got is not None:
+                px, py, src = got
+                return ((px, py), src, False)
+            kla = kla_info.peek_die_pitch(folder)          # KLA 슬롯 — 헤더에 있다
+            if kla is not None:
+                return (kla, i18n.KO.DIE_SIZE_SRC_KLA, False)
+            # 변환할 INI 는 있는데 pitch 를 적은 파일이 없다 — 진짜 문제라 경고한다.
+            return (None, "", camtek_ini.has_ini(folder))
         except Exception:
             return (None, "", False)
 
@@ -1176,11 +1193,12 @@ class SetupPage(QWidget):
         """[폴더 선택…] — OS 파일 브라우저를 열고 고른 경로를 입력란에 넣는다.
 
         ★ 여기서 **정지를 계측한다**(로그만).  '폴더를 고르면 몇 초 멈춘다' 는 신고를
-        세 번 고쳤는데(die 안내 스캔·폴더 확인을 워커로, 표본을 슬롯 하나로) 계측상
-        이 경로에는 UI 스레드가 건드리는 파일이 하나도 남아 있지 않다.  그래서 남은
-        후보는 우리 코드 밖이다 — OS 파일 브라우저 자신, 또는 무거운 import·GPU
-        워밍업이 GIL 을 쥐는 구간.  **어느 쪽인지 로그가 말하게 한다**: 브라우저에
-        머문 시간과, 닫힌 뒤의 UI 정지를 따로 남긴다.  정상이면 아무 말도 하지 않는다.
+        네 번 고쳤다 — die 안내 스캔·폴더 확인을 워커로, 표본을 슬롯 하나로, 그리고
+        워커가 하는 파싱 자체를 작은 파일 읽기로(`_detect_die_geometry`: 순수 파이썬
+        파싱은 워커에서도 GIL 을 쥐어 UI 를 굶긴다).  그래도 남는 정지가 있다면 후보는
+        우리 코드 밖이다 — OS 파일 브라우저 자신, 또는 무거운 import·GPU 워밍업이
+        GIL 을 쥐는 구간.  **어느 쪽인지 로그가 말하게 한다**: 브라우저에 머문 시간과,
+        닫힌 뒤의 UI 정지를 따로 남긴다.  정상이면 아무 말도 하지 않는다.
         """
         import time
         from .. import stall_watch

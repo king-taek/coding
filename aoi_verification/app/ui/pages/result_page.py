@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from datetime import datetime
 from pathlib import Path
 
@@ -65,7 +64,9 @@ class ResultPage(QWidget):
         super().__init__(parent)
         self._result: FinalResult | None = None
         self._template_path: Path | None = None
-        self._target_path: Path | None = None     # 미리 복사된 작업 파일
+        # 결과 파일이 놓일 경로 — [검증 시작] 이 정해 둔 이름.  ★ 파일은 아직 없다:
+        # [엑셀로 저장] 에서 이름을 확정하는 순간 exporter 가 그 자리에 만든다.
+        self._target_path: Path | None = None
         self._save_path: Path | None = None
         # 매치 실패 사진 검토(#8) 에 필요한 외부 데이터 — main_window 가 주입.
         self._val_pool: dict | None = None
@@ -456,11 +457,11 @@ class ResultPage(QWidget):
     def _on_export(self) -> None:
         if self._result is None:
             return
-        # 양식 → 작업 파일은 이미 검증 시작 시점에 복사되었으므로 그대로 채워 쓴다.
-        # 그 경로가 없다면(=양식 없음 + 복사 실패) 사용자에게 위치를 물어본다.
+        # [검증 시작] 이 결과 파일의 경로를 정해 두었다(파일은 아직 없다 — 여기서
+        # 저장하는 순간 생긴다).  경로가 없다면(=세션 없이 결과만 보인 경우) 사용자에게
+        # 위치를 물어본다.
         if self._target_path is not None:
-            # ★ **이름만** 확인받는다(사용자 요청).  파일은 [검증 시작] 때 이미
-            #   만들어져 있고 저장은 그 파일에 한다 — 이 창은 저장을 기다리게 하지
+            # ★ **이름만** 확인받는다(사용자 요청).  이 창은 저장을 기다리게 하지
             #   않고 최종 이름만 정한다.  '다시 저장'(이미 한 번 저장한 뒤)에는 묻지
             #   않는다: 같은 파일에 덮어쓰는 것이 그때의 약속이다.
             if self._exported:
@@ -533,26 +534,17 @@ class ResultPage(QWidget):
         lab.setToolTip(str(path))
 
     def _ask_save_name(self, target: Path):
-        """저장 직전에 이름을 확인받는다 — 취소면 ``None``.
+        """저장 직전에 이름을 확인받는다 — 취소면 ``None``, 아니면 저장할 경로.
 
-        고른 이름이 지금 파일과 다르면 **작업 파일을 그 이름으로 옮긴다.**  옮기지
-        않으면 검증 시작 때 만든 사본이 결과 폴더에 유령으로 남는다.  옮기지 못하면
-        (열려 있음·권한) 새 경로로 그냥 저장한다 — 이름 때문에 저장 자체가 막히면
-        안 된다."""
+        같은 폴더 안에서 이름만 바뀐다.  ★ 옮길 파일은 없다 — 결과 파일은 이 뒤의
+        저장이 처음 만든다(검증 시작 때 미리 만들지 않는다: 저장까지 안 간 세션마다
+        빈 xlsx 가 남았다)."""
         from ..widgets.save_name_dialog import SaveNameDialog
 
         dlg = SaveNameDialog(target.name, target.parent, parent=self)
         if not sheets.run(dlg) or dlg.chosen is None:
             return None
-        dst = target.with_name(dlg.chosen)
-        if dst == target:
-            return target
-        try:
-            if target.exists():
-                os.replace(str(target), str(dst))
-        except OSError as exc:
-            _LOG.warning("작업 파일 이름 변경 실패 — 새 경로로 저장합니다: %s", exc)
-        return dst
+        return target.with_name(dlg.chosen)
 
     def _on_export_done(self, path: str) -> None:
         self._loading.hide_overlay()
