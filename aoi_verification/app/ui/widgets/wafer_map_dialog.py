@@ -9,7 +9,7 @@
 
 맵 만들기는 **폴더 판정·사진 목록부터** 워커 스레드(:class:`_MapBuild`)가 한다 — NAS
 에서는 폴더 열거만으로도 초 단위라, 폴더를 고른 **그 순간** 오버레이가 떠서 지금 무슨
-일을 하는지("폴더 훑는 중" → "좌표 읽는 중" → "사진 미리보기 준비 중") 말한다.
+일을 하는지("폴더 탐색 중" → "좌표 읽는 중" → "사진 미리보기 준비 중") 말한다.
 진행은 시그널로 :class:`LoadingOverlay` 에 전달한다(CLAUDE.md 로딩 계약).
 썸네일 선로딩은 사진이 :data:`PREWARM_MAX` 장 이하일 때만 한다 — 그 이상이면
 선로딩이 맵보다 오래 걸려 기다림이 목적을 잡아먹는다(그때는 마우스를 올릴 때 만든다).
@@ -24,8 +24,8 @@ from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
-from PyQt6.QtWidgets import (QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout,
-                             QLabel, QSizePolicy, QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import (QApplication, QComboBox, QDialog, QFileDialog, QFrame,
+                             QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget)
 
 from ... import i18n
 from ...coords import resolve_batch
@@ -267,6 +267,13 @@ class WaferMapDialog(QDialog):
         if self._build_thread is not None and self._build_thread.isRunning():
             self._build_thread.requestInterruption()
         self._loading.show_overlay(first_msg)
+        # ★ 워커를 띄우기 **전에** 오버레이를 실제로 한 번 그린다.  `show()` 는 페인트를
+        #   예약만 하는데, 곧바로 시작한 워커가 순수 파이썬 파싱(INI 수천 건)으로 GIL
+        #   을 쥐면 UI 스레드의 그 첫 페인트가 밀려 '폴더를 골랐는데 한참 아무것도
+        #   없다' 가 된다(setup_page `_DieGeometryScan` 과 같은 현상).  여기서 이벤트를
+        #   한 바퀴 돌려 덮개가 눈에 보이는 상태로 워커에 들어간다.
+        self._loading.repaint()
+        QApplication.processEvents()
         th = _MapBuild(token, job)
         th.signals.progress.connect(self._on_progress)
 
@@ -303,7 +310,7 @@ class WaferMapDialog(QDialog):
             self.show_folder(Path(path))
 
     def show_folder(self, folder: Path) -> None:
-        """폴더 판정(슬롯/LOT)부터 워커 — 고른 순간 '폴더 훑는 중' 이 뜬다."""
+        """폴더 판정(슬롯/LOT)부터 워커 — 고른 순간 '폴더 탐색 중' 이 뜬다."""
         self._folder = folder
         self.folder_label.setText(str(folder))
         self.pick_btn.setText(i18n.KO.WAFER_MAP_PICK_FOLDER_ANOTHER)
