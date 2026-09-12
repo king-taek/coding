@@ -10,7 +10,9 @@
 - 좌표를 못 놓은 사진은 조용히 사라지지 않고 ``unplaced`` 에 남는다.
 - 격자선은 원 안만, 개수는 지름/pitch 근처 — die 8만 개도 선 몇백 개다.
 - 뷰: 휠은 커서 기준 확대, 점 판정은 HIT_PX 이내, PNG 렌더는 화면과 같은 함수.
-- 결과 시트는 기준/검증 두 맵, 셋업 시트는 폴더 안내 → 폴더 지정 시 맵 하나.
+- 결과 시트는 기준/검증 두 맵, 셋업 시트는 폴더 안내 → 슬롯 폴더면 맵 하나, LOT 폴더면
+  전체 합산 + '슬롯 선택…' 으로 일부만.  맵은 워커가 만들고 썸네일을 미리 굽는다.
+- 점 더블클릭이 ``point_activated`` 를 낸다(단일 클릭은 아무것도 열지 않는다).
 - 엑셀: 렌더러가 주입되고 ``slot_images`` 가 있으면 'Wafer Map' 시트에 슬롯 행 +
   LOT 합산 행이 생긴다.  워커는 ui 를 import 하지 않는다(렌더러는 인자).
 """
@@ -231,6 +233,17 @@ def test_render_png_draws_wafer(qt, tmp_path):
     assert c.name() != bg.name()          # 중심(점)은 바탕과 다른 색
 
 
+def _wait_build(qt, dlg, timeout_ms: int = 10000) -> None:
+    """워커가 끝나고 done 시그널이 처리될 때까지."""
+    from PyQt6.QtCore import QDeadlineTimer
+    dl = QDeadlineTimer(timeout_ms)
+    while dlg.is_building() and not dl.hasExpired():
+        qt.processEvents()
+    qt.processEvents()
+    qt.processEvents()
+    assert not dlg.is_building(), "맵 워커가 끝나지 않았다"
+
+
 def test_dialog_result_mode_shows_two_maps(qt, tmp_path):
     from aoi_verification.app.models.result import FinalResult, MatchResult
     from aoi_verification.app.ui.widgets.wafer_map_dialog import WaferMapDialog
@@ -244,6 +257,8 @@ def test_dialog_result_mode_shows_two_maps(qt, tmp_path):
     )
     dlg = WaferMapDialog(result=result)
     try:
+        assert dlg.is_building()                      # 워커가 돈다 — 로딩이 뜬 상태
+        _wait_build(qt, dlg)
         assert dlg.slot_combo.count() == 2
         assert not dlg.empty.isVisibleTo(dlg)
         assert dlg.left.isVisibleTo(dlg) and dlg.right.isVisibleTo(dlg)
@@ -251,12 +266,13 @@ def test_dialog_result_mode_shows_two_maps(qt, tmp_path):
         assert dlg.right.view.data().frame.kind == "kla"
         assert "1호기" in dlg.left.title.text()
         dlg.slot_combo.setCurrentIndex(1)
+        _wait_build(qt, dlg)
         assert dlg.current_slot() == "S1"
     finally:
         dlg.deleteLater()
 
 
-def test_dialog_setup_mode_folder_flow(qt, tmp_path):
+def test_dialog_setup_mode_slot_folder(qt, tmp_path):
     from aoi_verification.app import i18n
     from aoi_verification.app.ui.widgets.wafer_map_dialog import WaferMapDialog
     dlg = WaferMapDialog()
@@ -268,10 +284,79 @@ def test_dialog_setup_mode_folder_flow(qt, tmp_path):
         assert dlg.empty.text() == i18n.KO.WAFER_MAP_NO_IMAGES
         folder = _camtek_folder(tmp_path, [("a", CX, CY)])
         dlg.show_folder(folder)
+        _wait_build(qt, dlg)
         assert dlg.left.isVisibleTo(dlg) and not dlg.right.isVisibleTo(dlg)
+        assert not dlg.slots_btn.isVisibleTo(dlg)      # 슬롯 폴더 — 슬롯 선택 없음
         assert i18n.KO.WAFER_MAP_LEGEND_DEFECT in dlg.left.legend.text()
     finally:
         dlg.deleteLater()
+
+
+def test_dialog_setup_mode_lot_folder_and_subset(qt, tmp_path):
+    """LOT 폴더 → 전체 합산 먼저, 슬롯 선택으로 일부만."""
+    from aoi_verification.app import i18n
+    from aoi_verification.app.ui.widgets.wafer_map_dialog import (WaferMapDialog,
+                                                                 classify_folder)
+    lot = tmp_path / "LOT1"
+    _camtek_folder(lot, [("a", CX, CY)]).rename(lot / "S1")
+    _camtek_folder(lot, [("b", 60000.0, 120000.0)]).rename(lot / "S2")
+    (lot / "S3").mkdir()                                  # 사진 없는 폴더는 슬롯이 아니다
+    kind, slots = classify_folder(lot)
+    assert kind == "lot" and set(slots) == {"S1", "S2"}   # 슬롯명 = LOT 바로 아래 폴더명
+    dlg = WaferMapDialog()
+    try:
+        dlg.show_folder(lot)
+        _wait_build(qt, dlg)
+        assert dlg.slots_btn.isVisibleTo(dlg)
+        assert len(dlg.left.view.data().points) == 2
+        assert dlg.left.title.text() == i18n.KO.WAFER_MAP_LOT_ALL_FMT.format(
+            lot="LOT1", total=2)
+        dlg._selected = {"S2"}
+        dlg._rebuild_folder_map()
+        _wait_build(qt, dlg)
+        pts = dlg.left.view.data().points
+        assert [p.path.stem for p in pts] == ["b"]
+        assert "1/2" in dlg.left.title.text()
+    finally:
+        dlg.deleteLater()
+
+
+def test_build_prewarms_thumbnails(qt, isolated_cache, tmp_path):
+    pytest.importorskip("PIL.Image")
+    from PIL import Image
+    from aoi_verification.app.ui.widgets.wafer_map_dialog import WaferMapDialog
+    from aoi_verification.app.utils import image_io
+    folder = _camtek_folder(tmp_path, [("a", CX, CY)])
+    Image.new("RGB", (400, 300)).save(str(folder / "a.jpeg"), "JPEG")
+    dlg = WaferMapDialog()
+    try:
+        dlg.show_folder(folder)
+        _wait_build(qt, dlg)
+        thumb = image_io.get_thumb_path(folder / "a.jpeg")   # 이미 있어야 한다
+        assert thumb.exists() and thumb.stat().st_size > 0
+    finally:
+        dlg.deleteLater()
+
+
+def test_view_double_click_activates_point(qt, tmp_path):
+    from PyQt6.QtCore import QEvent, QPointF, Qt
+    from PyQt6.QtGui import QMouseEvent
+    view, _ = _view_with_points(qt, tmp_path)
+    got = []
+    view.point_activated.connect(got.append)
+    center = QPointF(200, 200)
+    mk = lambda kind: QMouseEvent(kind, center, Qt.MouseButton.LeftButton,   # noqa: E731
+                                  Qt.MouseButton.LeftButton,
+                                  Qt.KeyboardModifier.NoModifier)
+    view.mousePressEvent(mk(QEvent.Type.MouseButtonPress))
+    view.mouseReleaseEvent(mk(QEvent.Type.MouseButtonRelease))
+    assert got == []                                         # 단일 클릭은 아무것도 안 연다
+    view.mouseDoubleClickEvent(mk(QEvent.Type.MouseButtonDblClick))
+    assert [p.stem for p in got] == ["a"]
+    view.mouseDoubleClickEvent(QMouseEvent(
+        QEvent.Type.MouseButtonDblClick, QPointF(20, 20), Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier))
+    assert len(got) == 1                                     # 빈 곳은 원래 크기 복귀만
 
 
 def test_setup_and_result_pages_have_buttons(qt):

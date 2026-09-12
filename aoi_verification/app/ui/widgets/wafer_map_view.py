@@ -7,7 +7,8 @@
 개(한 변 ~300)여도 선은 600개 남짓이라 매 paint 에 그려도 된다.  점은 수백~수천 개다.
 
 상호작용: 휠 = 커서 기준 확대, 드래그 = 이동, 호버 = col/row·x/y 툴팁 + 썸네일,
-클릭 = ``point_clicked(Path)``.  QPainter 순수 구현 — 새 패키지 없음.
+점 더블클릭 = ``point_activated(Path)``(상세 정보), 빈 곳 더블클릭 = 원래 크기.
+썸네일은 시트가 미리 만들어 둔 캐시 파일이라 툴팁이 바로 뜬다.  QPainter 순수 구현.
 """
 
 from __future__ import annotations
@@ -153,7 +154,7 @@ def render_map_png(data: Optional[MapData], size: int) -> bytes:
 class WaferMapView(QWidget):
     """휠 확대 · 드래그 이동 · 호버 툴팁 · 클릭 신호를 가진 맵 위젯."""
 
-    point_clicked = pyqtSignal(object)      # Path
+    point_activated = pyqtSignal(object)    # Path — 점 더블클릭
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -161,7 +162,6 @@ class WaferMapView(QWidget):
         self._zoom = 1.0
         self._pan = QPointF(0, 0)
         self._drag_from: Optional[QPoint] = None
-        self._drag_moved = False
         self._hover: Optional[MapPoint] = None
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.CrossCursor)
@@ -244,14 +244,11 @@ class WaferMapView(QWidget):
     def mousePressEvent(self, event):       # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_from = event.position().toPoint()
-            self._drag_moved = False
 
     def mouseMoveEvent(self, event):        # noqa: N802
         m = self._mapper()
         if self._drag_from is not None and m is not None:
             delta = event.position().toPoint() - self._drag_from
-            if delta.manhattanLength() > 3:
-                self._drag_moved = True
             self._pan = QPointF(self._pan.x() - delta.x() / m.scale,
                                 self._pan.y() + delta.y() / m.scale)
             self._drag_from = event.position().toPoint()
@@ -268,21 +265,20 @@ class WaferMapView(QWidget):
                                   self.tooltip_html(hit), self)
 
     def mouseReleaseEvent(self, event):     # noqa: N802
-        if event.button() != Qt.MouseButton.LeftButton:
-            return
-        moved, self._drag_from = self._drag_moved, None
-        if moved:
-            return
-        hit = self.point_at(event.position())
-        if hit is not None:
-            self.point_clicked.emit(hit.path)
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_from = None
 
     def leaveEvent(self, event):            # noqa: N802
         self._hover = None
         self.update()
 
     def mouseDoubleClickEvent(self, event):  # noqa: N802
-        self.reset_view()
+        self._drag_from = None
+        hit = self.point_at(event.position())
+        if hit is not None:
+            self.point_activated.emit(hit.path)
+        else:
+            self.reset_view()
 
     # ------------------------------------------------------------------
     @staticmethod
