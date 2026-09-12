@@ -7,10 +7,12 @@
 * **결과 단계**(``WaferMapDialog(parent, result=...)``): 슬롯을 고르면 기준/검증 맵을
   나란히, '전체' 를 고르면 LOT 의 모든 슬롯을 한 맵에 합산한다.  점은 매치됨/미매치.
 
-맵 만들기는 **워커 스레드**(:class:`_MapBuild`)가 한다 — 좌표 파싱은 폴더 단위 캐시라
-빠르지만 NAS 의 사진 수천 장 **썸네일 선로딩**은 I/O 라 UI 스레드에서 돌리면 창이
-멈춘다.  진행은 시그널로 :class:`LoadingOverlay` 에 전달한다(CLAUDE.md 로딩 계약).
-썸네일을 미리 만들어 두므로 점에 마우스를 올리면 사진이 바로 뜬다.
+맵 만들기는 **폴더 판정·사진 목록부터** 워커 스레드(:class:`_MapBuild`)가 한다 — NAS
+에서는 폴더 열거만으로도 초 단위라, 폴더를 고른 **그 순간** 오버레이가 떠서 지금 무슨
+일을 하는지("폴더 훑는 중" → "좌표 읽는 중" → "사진 미리보기 준비 중") 말한다.
+진행은 시그널로 :class:`LoadingOverlay` 에 전달한다(CLAUDE.md 로딩 계약).
+썸네일 선로딩은 사진이 :data:`PREWARM_MAX` 장 이하일 때만 한다 — 그 이상이면
+선로딩이 맵보다 오래 걸려 기다림이 목적을 잡아먹는다(그때는 마우스를 올릴 때 만든다).
 
 점을 **더블클릭**하면 :class:`ImageInfoDialog` 로 그 사진의 상세 수치를 본다(같은
 생산자 — 엑셀과 수치가 어긋나지 않는다).
@@ -40,6 +42,8 @@ from .wafer_map_view import WaferMapView
 
 # 페이지가 닫혀도 돌던 스레드가 수명을 다 살게 붙들어 둔다(setup_page 의 패턴).
 _LIVE_BUILDS: set = set()
+# 썸네일 선로딩 상한(장).  넘으면 선로딩을 건너뛴다 — 사용자 결정.
+PREWARM_MAX = 500
 
 
 class _MapBuild(QThread):
@@ -47,11 +51,12 @@ class _MapBuild(QThread):
 
     class _Signals(QObject):
         progress = pyqtSignal(int, int, int, str)      # token, done, total, msg
-        done = pyqtSignal(int, object, object)         # token, left MapData, right|None
+        done = pyqtSignal(int, object, object, object)  # token, left, right|None, extra
 
     def __init__(self, token: int, job) -> None:
-        """``job()`` 은 ``(left: MapData, right: MapData | None)`` 을 돌려주는 순수
-        호출체(좌표 계산).  썸네일은 그 결과의 점 전부에 대해 여기서 만든다."""
+        """``job(report)`` 는 ``(left: MapData, right: MapData | None, extra)`` 를
+        돌려준다(폴더 훑기 + 좌표 계산).  ``report(msg)`` 로 단계를 알린다.  썸네일은
+        그 결과의 점 전부에 대해 여기서 만든다(:data:`PREWARM_MAX` 이하일 때)."""
         super().__init__()
         self._token = token
         self._job = job
@@ -61,13 +66,16 @@ class _MapBuild(QThread):
 
     def run(self) -> None:      # type: ignore[override]
         t = self._token
+        report = lambda msg: self.signals.progress.emit(t, 0, 0, msg)   # noqa: E731
+        extra = None
         try:
-            self.signals.progress.emit(t, 0, 0, i18n.KO.WAFER_MAP_LOADING_COORDS)
-            left, right = self._job()
+            left, right, extra = self._job(report)
             paths = [p.path for p in left.points]
             if right is not None:
                 paths += [p.path for p in right.points]
             total = len(paths)
+            if total > PREWARM_MAX:
+                paths = []
             for i, path in enumerate(paths, start=1):
                 if self.isInterruptionRequested():
                     return
@@ -80,7 +88,7 @@ class _MapBuild(QThread):
                         t, i, total, i18n.KO.WAFER_MAP_LOADING_THUMBS)
         except Exception:
             left, right = MapData(None, (), ()), None
-        self.signals.done.emit(t, left, right)
+        self.signals.done.emit(t, left, right, extra)
 
 
 class _MapPanel(QWidget):
@@ -250,21 +258,23 @@ class WaferMapDialog(QDialog):
     # ------------------------------------------------------------------
     # 워커 — 좌표 + 썸네일 선로딩, 진행은 오버레이로
     # ------------------------------------------------------------------
-    def _start_build(self, job, on_done) -> None:
-        """``job`` 을 워커에서 돌리고 결과를 ``on_done(left, right)`` 로 받는다."""
+    def _start_build(self, job, on_done, first_msg: str) -> None:
+        """``job(report)`` 를 워커에서 돌리고 결과를 ``on_done(left, right, extra)`` 로
+        받는다.  오버레이는 **여기서 즉시** ``first_msg`` 로 뜬다 — 워커가 첫 보고를
+        하기 전에도 사용자는 무엇을 기다리는지 안다."""
         self._token += 1
         token = self._token
         if self._build_thread is not None and self._build_thread.isRunning():
             self._build_thread.requestInterruption()
-        self._loading.show_overlay(i18n.KO.WAFER_MAP_LOADING)
+        self._loading.show_overlay(first_msg)
         th = _MapBuild(token, job)
         th.signals.progress.connect(self._on_progress)
 
-        def _done(t, left, right):
+        def _done(t, left, right, extra):
             if t != self._token:
                 return                      # 늦게 온 옛 결과 — 새 폴더의 맵을 덮지 않는다
             self._loading.hide_overlay()
-            on_done(left, right)
+            on_done(left, right, extra)
 
         th.signals.done.connect(_done)
         self._build_thread = th
@@ -293,26 +303,40 @@ class WaferMapDialog(QDialog):
             self.show_folder(Path(path))
 
     def show_folder(self, folder: Path) -> None:
+        """폴더 판정(슬롯/LOT)부터 워커 — 고른 순간 '폴더 훑는 중' 이 뜬다."""
         self._folder = folder
         self.folder_label.setText(str(folder))
         self.pick_btn.setText(i18n.KO.WAFER_MAP_PICK_FOLDER_ANOTHER)
-        kind, slots = classify_folder(folder)
-        self._lot_slots = slots
+        self._lot_slots = {}
         self._selected = None
-        self.slots_btn.setVisible(kind == "lot")
-        if kind == "empty":
-            self._render_empty(i18n.KO.WAFER_MAP_NO_IMAGES)
-            return
-        self._rebuild_folder_map()
+        self.slots_btn.hide()
 
-    def _current_paths(self) -> list[Path]:
-        if not self._lot_slots:
-            return _list_images(self._folder) if self._folder else []
-        names = sorted(self._lot_slots if self._selected is None else self._selected)
-        out: list[Path] = []
-        for n in names:
-            out += _list_images(self._lot_slots[n])
-        return out
+        def job(report):
+            report(i18n.KO.WAFER_MAP_LOADING_SCAN)
+            kind, slots = classify_folder(folder)
+            if kind == "empty":
+                return MapData(None, (), ()), None, (kind, slots)
+            paths = (_list_images(folder) if kind == "slot"
+                     else [p for n in sorted(slots) for p in _list_images(slots[n])])
+            report(i18n.KO.WAFER_MAP_LOADING_COORDS)
+            return build_map(resolve_batch(paths)), None, (kind, slots)
+
+        def done(data, _right, extra):
+            kind, slots = extra or ("empty", {})
+            self._lot_slots = slots
+            self.slots_btn.setVisible(kind == "lot")
+            if kind == "empty":
+                self._render_empty(i18n.KO.WAFER_MAP_NO_IMAGES)
+            else:
+                self._show_folder_map(data)
+
+        self._start_build(job, done, i18n.KO.WAFER_MAP_LOADING_SCAN)
+
+    def _show_folder_map(self, data: MapData) -> None:
+        if data.frame is None:
+            self._render_empty(i18n.KO.WAFER_MAP_NO_FRAME)
+        else:
+            self._show_maps((self._folder_title(), data), None)
 
     def _folder_title(self) -> str:
         assert self._folder is not None
@@ -326,19 +350,18 @@ class WaferMapDialog(QDialog):
             lot=self._folder.name, n=len(self._selected), total=total)
 
     def _rebuild_folder_map(self) -> None:
-        paths = self._current_paths()
-        title = self._folder_title()
+        """LOT 의 선택 슬롯만 다시 — 사진 목록 수집도 워커에서."""
+        slots = dict(self._lot_slots)
+        names = sorted(slots if self._selected is None else self._selected)
 
-        def job():
-            return build_map(resolve_batch(paths)), None
+        def job(report):
+            report(i18n.KO.WAFER_MAP_LOADING_SCAN)
+            paths = [p for n in names for p in _list_images(slots[n])]
+            report(i18n.KO.WAFER_MAP_LOADING_COORDS)
+            return build_map(resolve_batch(paths)), None, None
 
-        def done(data, _right):
-            if data.frame is None:
-                self._render_empty(i18n.KO.WAFER_MAP_NO_FRAME)
-            else:
-                self._show_maps((title, data), None)
-
-        self._start_build(job, done)
+        self._start_build(job, lambda d, _r, _e: self._show_folder_map(d),
+                          i18n.KO.WAFER_MAP_LOADING_SCAN)
 
     def _on_pick_slots(self) -> None:
         """LOT 의 일부 슬롯만 — 진행 범위의 슬롯 선택 팝업을 그대로 쓴다."""
@@ -366,10 +389,11 @@ class WaferMapDialog(QDialog):
         ref_t = i18n.KO.WAFER_MAP_SIDE_REF_FMT.format(machine=result.ref_machine)
         val_t = i18n.KO.WAFER_MAP_SIDE_VAL_FMT.format(machine=result.val_machine)
 
-        def job():
-            return slot_maps(result, slot)
+        def job(report):
+            report(i18n.KO.WAFER_MAP_LOADING_COORDS)
+            return (*slot_maps(result, slot), None)
 
-        def done(ref, val):
+        def done(ref, val, _extra):
             has_ref = bool(ref.points or ref.unplaced)
             has_val = bool(val.points or val.unplaced)
             if not has_ref and not has_val:
@@ -381,7 +405,7 @@ class WaferMapDialog(QDialog):
             else:
                 self._show_maps((val_t, val), None)
 
-        self._start_build(job, done)
+        self._start_build(job, done, i18n.KO.WAFER_MAP_LOADING_COORDS)
 
     # ------------------------------------------------------------------
     def _on_point(self, path) -> None:

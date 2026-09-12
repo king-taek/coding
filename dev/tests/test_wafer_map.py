@@ -281,6 +281,10 @@ def test_dialog_setup_mode_slot_folder(qt, tmp_path):
         empty = tmp_path / "empty"
         empty.mkdir()
         dlg.show_folder(empty)
+        # 폴더를 고른 **그 순간** 오버레이가 무슨 일인지 말한다 — 워커 첫 보고 전에.
+        assert not dlg._loading.isHidden()          # 시트 자체는 아직 show 전이라 isVisibleTo
+        assert dlg._loading._label.text() == i18n.KO.WAFER_MAP_LOADING_SCAN
+        _wait_build(qt, dlg)
         assert dlg.empty.text() == i18n.KO.WAFER_MAP_NO_IMAGES
         folder = _camtek_folder(tmp_path, [("a", CX, CY)])
         dlg.show_folder(folder)
@@ -334,6 +338,30 @@ def test_build_prewarms_thumbnails(qt, isolated_cache, tmp_path):
         _wait_build(qt, dlg)
         thumb = image_io.get_thumb_path(folder / "a.jpeg")   # 이미 있어야 한다
         assert thumb.exists() and thumb.stat().st_size > 0
+    finally:
+        dlg.deleteLater()
+
+
+def test_prewarm_skipped_above_cap(qt, isolated_cache, tmp_path, monkeypatch):
+    """사진이 PREWARM_MAX 장을 넘으면 썸네일 선로딩을 건너뛴다(사용자 결정: 500)."""
+    pytest.importorskip("PIL.Image")
+    from PIL import Image
+    from aoi_verification.app.ui.widgets import wafer_map_dialog as wmd
+    from aoi_verification.app.utils import image_io
+    assert wmd.PREWARM_MAX == 500
+    monkeypatch.setattr(wmd, "PREWARM_MAX", 1)
+    folder = _camtek_folder(tmp_path, [("a", CX, CY), ("b", 60000.0, 120000.0)])
+    for n in ("a", "b"):
+        Image.new("RGB", (40, 30)).save(str(folder / f"{n}.jpeg"), "JPEG")
+    calls = []
+    monkeypatch.setattr(image_io, "get_thumb_path",
+                        lambda p, **k: calls.append(p) or p)
+    dlg = wmd.WaferMapDialog()
+    try:
+        dlg.show_folder(folder)
+        _wait_build(qt, dlg)
+        assert len(dlg.left.view.data().points) == 2
+        assert calls == []
     finally:
         dlg.deleteLater()
 
