@@ -18,6 +18,7 @@ from ..widgets.app_logo import build_logo_label
 from ..widgets.loading_overlay import LoadingOverlay
 from ..widgets.neon_button import NeonButton
 from ..widgets.neon_card import NeonCard
+from ..widgets.wafer_map_view import render_map_png
 from ..widgets import sheet_host as sheets
 from ... import config as _config
 
@@ -193,6 +194,11 @@ class ResultPage(QWidget):
         self.review_btn.clicked.connect(self.back_to_review_requested.emit)
         bar.addWidget(self.review_btn)
 
+        # Wafer map — 슬롯별/LOT 합산 결함 분포(매치됨/미매치).  엑셀에도 같은 그림이 간다.
+        self.wafer_map_btn = NeonButton(i18n.KO.WAFER_MAP_BUTTON, role="ghost")
+        self.wafer_map_btn.clicked.connect(self._on_wafer_map)
+        bar.addWidget(self.wafer_map_btn)
+
         # 매치 실패 사진 검토 — 엑셀 저장 직전, 마지막 한 번 더 매칭 기회 (#8).
         # ★ warn(주의색)은 예외 상태 경고 전용이다 — 권장 이동 액션에 쓰면
         #   '위험한 동작' 처럼 읽힌다.  검토 권장은 상단 안내문이 담당한다.
@@ -319,6 +325,15 @@ class ResultPage(QWidget):
             self.review_unmatched_btn.setText(i18n.KO.BTN_REVIEW_UNMATCHED)
 
         self._refresh_save_target()      # 31안 — 누르기 전에 목적지를
+
+    # ------------------------------------------------------------------
+    def _on_wafer_map(self) -> None:
+        """Wafer map 시트 — 이번 결과의 슬롯별/LOT 합산 결함 위치."""
+        if self._result is None:
+            return
+        from ..widgets.wafer_map_dialog import WaferMapDialog
+        dlg = WaferMapDialog(self, result=self._result)
+        sheets.run(dlg, full_bleed=True)
 
     # ------------------------------------------------------------------
     def _on_review_unmatched(self) -> None:
@@ -493,6 +508,7 @@ class ResultPage(QWidget):
             include_full_template=self.full_template_chk.isChecked(),
             original_quality=self.original_quality_chk.isChecked(),
             unmatched_original_quality=self.unmatched_original_chk.isChecked(),
+            map_renderer=render_map_png,          # Wafer Map 시트(화면과 같은 렌더러)
         )
         # ★ 30안 — 워커가 보내는 문구(어느 시트·어느 슬롯)를 **그대로 띄운다**.
         #   예전엔 `msg` 를 버리고 고정 문구만 썼다.  행 수치는 여전히 오버레이의

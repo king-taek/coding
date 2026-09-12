@@ -857,6 +857,10 @@ class SetupPage(QWidget):
         self.image_info_btn = NeonButton(i18n.KO.IMAGE_INFO_BUTTON, role="ghost")
         self.image_info_btn.clicked.connect(self._open_image_info)
         bar.addWidget(self.image_info_btn)
+        # 웨이퍼 폴더 하나의 결함 위치를 원 위에 보는 도구 — 사진 정보 보기 옆.
+        self.wafer_map_btn = NeonButton(i18n.KO.WAFER_MAP_BUTTON, role="ghost")
+        self.wafer_map_btn.clicked.connect(self._open_wafer_map)
+        bar.addWidget(self.wafer_map_btn)
         # ★ 자리 계약: 왼쪽 보조 버튼들 → stretch → 힌트 → 주 액션(start_btn).
         #   새 위젯은 반드시 stretch **뒤**나 그 앞의 보조 묶음에 붙인다 — 잘못 넣으면
         #   주 액션이 가운데로 밀린다(test_action_bar_index_contract).
@@ -1289,6 +1293,12 @@ class SetupPage(QWidget):
         """단일 사진 정보 다이얼로그 — 사진 1장의 결함 좌표/measurement 확인."""
         from ..widgets.image_info_dialog import ImageInfoDialog
         dlg = ImageInfoDialog(self)
+        sheets.run(dlg, full_bleed=True)
+
+    def _open_wafer_map(self) -> None:
+        """Wafer map — 웨이퍼 폴더 하나의 결함 위치를 원 위에 본다."""
+        from ..widgets.wafer_map_dialog import WaferMapDialog
+        dlg = WaferMapDialog(self)
         sheets.run(dlg, full_bleed=True)
 
     def _on_threshold_changed(self, v: int) -> None:

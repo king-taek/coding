@@ -123,9 +123,13 @@ class ExcelExporter(QThread):
                  include_full_template: bool = False,
                  original_quality: bool = False,
                  unmatched_original_quality: bool = False,
+                 map_renderer=None,
                  parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._result = result
+        # Wafer map PNG 렌더러 ``(MapData, size_px) -> PNG bytes``.  UI 계층이 넘긴다
+        # (workers 는 ui 를 import 하지 않는다).  None 이면 Wafer Map 시트를 만들지 않는다.
+        self._map_renderer = map_renderer
         self._dst = Path(dst_path)
         self._template = Path(template_path) if template_path else None
         # 전체 양식(E~H 수기 영역 포함) 시트 생성 여부 — 기본 off(가볍고 빠른 출력).
@@ -226,10 +230,12 @@ class ExcelExporter(QThread):
         # 지난다.
         unmatched_rows = [r for r in rows_input if isinstance(r[2], MissEntry)]
         self._prog_done = 0
+        map_rows = self._wafer_map_rows()
         self._prog_total = (
             (len(rows_input) if self._include_full_template else 0)   # 전체 양식
             + len(unmatched_rows)                                    # 미매칭 시트
             + len(rows_input)                                        # 요약 시트
+            + len(map_rows)                                          # Wafer map 시트
         )
 
         # 전체 양식(E~H 포함) 시트는 옵션 — 기본 off 면 이미지 임베드를 1회만 하게
@@ -256,6 +262,14 @@ class ExcelExporter(QThread):
         # Slot 불일치 ---------------------------------------------------
         if self._result.slot_only_ref or self._result.slot_only_val:
             self._write_slot_mismatch_sheet(wb)
+
+        # Wafer map — 슬롯별 + LOT 합산 PNG.  그림 한 장의 실패가 저장 전체를
+        # 막지 않는다(사진 임베드와 같은 원칙).
+        if map_rows:
+            try:
+                self._write_wafer_map_sheet(wb, map_rows)
+            except Exception:
+                pass
 
         # 전체 양식 미포함이면, 헤더 복사가 끝난 지금 전체 양식 시트를 제거.
         if not self._include_full_template:
@@ -714,6 +728,70 @@ class ExcelExporter(QThread):
         """
         from ..coords import single_info
         return ExcelExporter._info_blocks(single_info.coord_lines(Path(path)))
+
+    # ------------------------------------------------------------------
+    # Wafer map 시트
+    # ------------------------------------------------------------------
+    _MAP_PX = 360          # 셀에 들어가는 그림 한 변(px)
+
+    def _wafer_map_rows(self) -> list[str]:
+        """시트에 실을 행 — ``""`` 은 LOT 합산, 나머지는 슬롯명(정렬).  사진이 없으면 빈 목록."""
+        if self._map_renderer is None:
+            return []
+        names = sorted(n for n, (r, v) in self._result.slot_images.items() if r or v)
+        if not names:
+            return []
+        return [""] + names if len(names) > 1 else names
+
+    def _write_wafer_map_sheet(self, wb, rows: list[str]) -> None:
+        """A=슬롯, B=기준 맵, C=검증 맵.  그림은 화면과 같은 렌더러(주입된 ``map_renderer``)."""
+        import io
+
+        from openpyxl.drawing.image import Image as XLImage
+        from openpyxl.styles import Alignment, Font
+        from openpyxl.utils.units import pixels_to_points
+
+        from ..coords.wafer_map import slot_maps
+
+        ws = wb.create_sheet(title=i18n.KO.WAFER_MAP_SHEET)
+        ws["A1"] = i18n.KO.WAFER_MAP_SHEET_COL_SLOT
+        ws["B1"] = i18n.KO.WAFER_MAP_SHEET_COL_REF
+        ws["C1"] = i18n.KO.WAFER_MAP_SHEET_COL_VAL
+        center = Alignment(horizontal="center", vertical="center")
+        for c in "ABC":
+            ws[f"{c}1"].font = Font(bold=True)
+            ws[f"{c}1"].alignment = center
+        ws.column_dimensions["A"].width = 22
+        px_w = self._MAP_PX + 8
+        for c in "BC":
+            ws.column_dimensions[c].width = px_w / 7.0
+
+        def png(data) -> XLImage:
+            xli = XLImage(io.BytesIO(self._map_renderer(data, self._MAP_PX)))
+            xli.width = xli.height = self._MAP_PX
+            return xli
+
+        base = self._prog_done
+        for idx, slot in enumerate(rows, start=1):
+            if self._stop.is_set():
+                raise _Cancelled
+            label = slot or i18n.KO.WAFER_MAP_SHEET_ALL
+            self.signals.progress.emit(
+                base + idx, self._prog_total,
+                i18n.KO.EXPORT_PHASE_FMT.format(sheet=i18n.KO.WAFER_MAP_SHEET,
+                                                slot=label))
+            r = idx + 1
+            ws.cell(row=r, column=1, value=label).alignment = center
+            ws.row_dimensions[r].height = pixels_to_points(px_w)
+            ref, val = slot_maps(self._result, slot)
+            for col, data in (("B", ref), ("C", val)):
+                if data.frame is None:
+                    continue
+                try:
+                    _add_image_centered(ws, png(data), col, r, px_w, px_w)
+                except Exception:
+                    ws[f"{col}{r}"] = "—"
+        self._prog_done = base + len(rows)
 
     # ------------------------------------------------------------------
     def _write_slot_mismatch_sheet(self, wb) -> None:

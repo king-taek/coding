@@ -1616,6 +1616,13 @@ class MainWindow(QMainWindow):
             slot_only_val=list(self._scan.val_only),
             unmatched_refs=unmatched_refs,
             kla_folders=dict(getattr(self, "_kla_folders", {})),
+            # Wafer map — 슬롯마다 양쪽 사진 전부(매치 여부는 matches 로 가른다).
+            slot_images={
+                name: ([it.path for it in s.ref_images],
+                       [it.path for it in s.val_images])
+                for name, s in self._scan.slots.items()
+                if s.ref_images or s.val_images
+            },
         )
         # 결과 페이지에는 ‘결과 파일이 놓일 경로’ 와 ‘템플릿 원본’ 둘 다 전달
         # (파일은 아직 없다 — [엑셀로 저장] 때 그 경로에 만들어진다).
