@@ -44,7 +44,7 @@ def test_hide_stops_every_running_thing(styled_qapp, monkeypatch) -> None:
     ※ 예전엔 여기서 회전 링(스피너) 타이머도 함께 봤다.  링은 제거됐다 — 상태 정보가
     없는 장식인데 62.5Hz 로 상시 돌아, UI 스레드가 바쁠 때 가장 먼저 끊기며 '로딩이
     버벅인다' 로 보이던 그 애니메이션이다.  총량 미상 구간의 '살아 있다' 신호는 이제
-    상단 눈금의 혜성 스윕(`_busy`)이 전담하므로, 그것이 멈추는지만 보면 된다."""
+    웨이퍼 맵의 동심 물결(`_wafer`)이 전담하므로, 그것이 멈추는지만 보면 된다."""
     # 헤드리스에서는 motion 이 꺼져 있어 fade/rise 가 아예 시작하지 않는다 — 켜서 태운다.
     monkeypatch.setattr(motion, "enabled", lambda: True)
 
@@ -53,11 +53,11 @@ def test_hide_stops_every_running_thing(styled_qapp, monkeypatch) -> None:
     ov = LoadingOverlay(host)
     ov.show_overlay("테스트", cancelable=True)     # busy 로 시작(총량 미상)
 
-    assert ov._busy._anim.state() != ov._busy._anim.State.Stopped
+    assert ov._wafer._anim.state() != ov._wafer._anim.State.Stopped
 
     ov.hide()
 
-    assert ov._busy._anim.state() == ov._busy._anim.State.Stopped, "busy 애니메이션이 남았다"
+    assert ov._wafer._anim.state() == ov._wafer._anim.State.Stopped, "busy 애니메이션이 남았다"
     assert not ov._bar_timer.isActive(), "진행바 스태거 타이머가 남았다"
     assert not ov._hide_timer.isActive(), "최소표시 래치 타이머가 남았다"
     assert ov._fade_anim.state() == ov._fade_anim.State.Stopped
@@ -76,7 +76,7 @@ def test_hide_after_cancel_then_page_switch_leaves_nothing_running(
     ov.hide_overlay()          # 최소 표시(350ms) 가 안 지나 래치만 걸린 상태
     host.hide()                # 페이지 전환 — 오버레이도 함께 숨는다
 
-    assert ov._busy._anim.state() == ov._busy._anim.State.Stopped
+    assert ov._wafer._anim.state() == ov._wafer._anim.State.Stopped
     assert not ov._hide_timer.isActive()
 
 

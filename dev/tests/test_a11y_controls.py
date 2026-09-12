@@ -374,8 +374,8 @@ def test_loading_indicator_reads_against_its_track(qapp, mode):
     트랙을 `LINE` 으로 두면 1.90/1.84 로 진행분이 보이지 않았다.
 
     ※ 회전 링(_SpinnerDot)은 제거됐다 — 상태 정보가 없는 장식이었고, 62.5Hz 타이머가
-    상시 돌아 '로딩이 버벅인다'의 원인이었다.  지금 지시자는 상단 눈금(결정형 채움 /
-    busy 혜성)과 여정 스텝 두 가지다."""
+    상시 돌아 '로딩이 버벅인다'의 원인이었다.  지금 지시자는 웨이퍼 맵(결정형 채움 /
+    busy 물결)과 여정 스텝 두 가지다.  `_BusyStripe` 는 시작 스플래시가 쓴다."""
     theme.set_color_mode(mode)
     c = theme.COLORS
     r = _ratio(c["accent"], c["line2"])
@@ -384,15 +384,16 @@ def test_loading_indicator_reads_against_its_track(qapp, mode):
     import inspect
 
     from aoi_verification.app.ui.widgets import loading_overlay as lo
-    for fn in (lo._BusyStripe.paintEvent, lo._JourneySteps.paintEvent):
+    for fn in (lo._BusyStripe.paintEvent, lo._JourneySteps.paintEvent,
+               lo._WaferMap.paintEvent):
         src = inspect.getsource(fn)
         code = "\n".join(ln for ln in src.splitlines()
                          if not ln.strip().startswith("#"))
         assert "theme.LINE2" in code, f"{fn.__qualname__} 트랙이 LINE2 가 아니다"
-    # 결정형 눈금의 트랙은 QSS 가 칠한다 — ★ 스타일시트 **문자열**을 보면 안 된다.
-    # 자손 선택자(`QWidget[role="loadingPanel"] QProgressBar`)가 특이도로 이겨서 규칙이
-    # 화면에 닿지 못한 적이 있다(실측: 트랙이 $bg 로 칠해졌다).  그때도 문자열 검사는
-    # 통과했다 — 그래서 **실제로 칠해진 픽셀**을 잰다.
+    # ★ 코드가 그 토큰을 쓴다는 것과 **화면에 그 색이 칠해진다**는 것은 다르다 —
+    #   예전 QSS 눈금은 자손 선택자에 밀려 트랙이 $bg 로 칠해진 채 문자열 검사만
+    #   통과한 적이 있다.  그래서 실제로 렌더된 픽셀을 잰다: 중앙 다이(가장 먼저
+    #   켜진다)는 accent, 가장 바깥 다이(가장 늦게 켜진다)는 트랙(line2).
     from aoi_verification.app.ui.widgets.loading_overlay import LoadingOverlay
 
     # ★ 테마는 이 파일의 포커스 링 테스트와 **같은 방식**으로 건다(`_focus_pixels`).
@@ -405,15 +406,20 @@ def test_loading_indicator_reads_against_its_track(qapp, mode):
     ov = LoadingOverlay(host)
     try:
         ov.show_overlay("t")
-        ov.set_progress(2, 10, "t")          # 결정형 — 오른쪽 끝이 미채움(=트랙)
+        ov.set_progress(2, 10, "t")          # 결정형 — 바깥 링은 미채움(=트랙)
         ov.show()
         qapp.processEvents()
-        img = ov._progress.grab().toImage()
-        track = img.pixelColor(img.width() - 3, img.height() // 2).name().lower()
+        wm = ov._wafer
+        img = wm.grab().toImage()
+        span = wm.GRID * wm.CELL + (wm.GRID - 1) * wm.GAP
+        o = (wm.SIZE - span) / 2.0
+        col, row, _rad = wm._dies[-1]                    # 가장 바깥 다이
+        px = int(o + col * (wm.CELL + wm.GAP) + wm.CELL / 2)
+        py = int(o + row * (wm.CELL + wm.GAP) + wm.CELL / 2)
+        track = img.pixelColor(px, py).name().lower()
         assert track == c["line2"].lower(), (
-            f"{mode}: 눈금 트랙이 화면에서 {track} 로 칠해졌다(기대 {c['line2']}) — "
-            "더 구체적인 선택자에 밀렸다")
-        chunk = img.pixelColor(2, img.height() // 2).name().lower()
+            f"{mode}: 미채움 다이가 화면에서 {track} 로 칠해졌다(기대 {c['line2']})")
+        chunk = img.pixelColor(wm.SIZE // 2, wm.SIZE // 2).name().lower()
         assert chunk == c["accent"].lower(), f"{mode}: 채움이 accent 가 아니다({chunk})"
     finally:
         ov.hide()

@@ -113,7 +113,7 @@ class _FolderScan(QThread):
         # ★ **개수가 아니라 경과 시간으로 조인다.**  예전에는 `done % 25 == 0` 이었는데,
         #   `scan` 은 슬롯마다 done 을 1부터 올리므로 **슬롯이 25개인 자재에서는
         #   done=25(=total) 한 번만 참**이 된다 — 즉 스캔이 끝나는 순간에야 처음
-        #   보고했고, 그때까지 오버레이는 busy(혜성 스윕) 그대로였다.  사용자가 본
+        #   보고했고, 그때까지 오버레이는 busy(동심 물결) 그대로였다.  사용자가 본
         #   "폴더 스캔만 도는데 얼마나 걸리는지도, 몇 개 되었는지도 모르겠다" 가
         #   이것이다.  시간으로 조이면 슬롯이 몇 개든 첫 슬롯에서 결정형으로 승격하고,
         #   슬롯이 수천 개여도 초당 20회를 넘지 않아 원래 걱정(큐 폭주)도 그대로 막힌다.
@@ -1219,7 +1219,7 @@ class MainWindow(QMainWindow):
 
         단계 3 표시는 `_on_thumbs_ready` 가 이미 세웠다(이 함수를 부르는 유일한
         곳이다).  여기서 또 부르면 `set_progress(0, 0, …)` 이 `_enter_busy` 를
-        한 번 더 돌려 혜성 스윕과 ETA 시계를 이유 없이 재시작한다."""
+        한 번 더 돌려 busy 물결과 ETA 시계를 이유 없이 재시작한다."""
         if self._input is None:
             return
         if self._input.automation_level == AutomationLevel.AUTO_ALL:

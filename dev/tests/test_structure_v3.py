@@ -101,12 +101,13 @@ def overlay(styled_qapp):
     styled_qapp.processEvents()
 
 
-def test_work_queue_freezes_the_finished_step_counts(overlay):
-    """단계가 넘어가도 지나온 단계의 수치가 남는다.
+def test_work_queue_marks_finished_current_and_pending_steps(overlay):
+    """단계가 넘어가도 지나온 단계는 '완료' 로 남는다.
 
-    ★ 이게 11안-B 의 전부다.  차단 오버레이는 화면을 가리는 대가로 '전체 중
-    어디쯤 · 무엇이 끝났나' 를 돌려줘야 한다 — 진행바 하나는 단계가 바뀌며 0 으로
-    스냅해 '다 됐다가 다시 0' 으로 읽혔다."""
+    ★ 이게 11안-B 의 핵심이다.  차단 오버레이는 화면을 가리는 대가로 '전체 중
+    어디쯤 · 무엇이 끝났나' 를 돌려줘야 한다 — 채움 하나는 단계가 바뀌며 0 으로
+    스냅해 '다 됐다가 다시 0' 으로 읽혔다.  (개선안 2a 부터 줄에 수치는 없다 —
+    점의 색이 완료/현재/대기를 말하고, 수치는 웨이퍼 맵 옆 한 줄이 맡는다.)"""
     steps = i18n.KO.LOAD_JOURNEY_STEPS
     overlay.show_overlay(i18n.KO.LOAD_SCAN, step=(1, 3), steps=steps)
     overlay.set_progress(50, 50, i18n.KO.LOAD_SCAN)
@@ -115,26 +116,26 @@ def test_work_queue_freezes_the_finished_step_counts(overlay):
 
     q = overlay._steps
     assert q._index == 1
-    assert q._counts[0] == (50, 50), "끝난 단계의 수치가 사라졌다"
-    assert q._counts[1] == (298, 480)
-    assert 2 not in q._counts, "아직 시작하지 않은 단계에 수치가 생겼다"
+    assert not q.isHidden()
     # 세로 목록이라 높이는 줄 수에 비례한다(가로 점 행이면 고정 1줄이었다).
     assert q.height() == q.ROW_H * len(steps)
 
 
-def test_work_queue_owns_the_numbers_while_it_is_shown(overlay):
-    """수치의 단일 출처 — 큐가 떠 있으면 바 아래 모노 라벨은 숨는다.
+def test_the_count_line_is_the_single_source_of_numbers(overlay):
+    """수치의 단일 출처 — 큐가 떠 있든 아니든 `진행 n / N` 줄 **하나**만 숫자를 적는다.
 
-    둘 다 켜 두면 같은 숫자가 한 패널에 두 번 적힌다(ko.py 의 단일 출처 규칙).
-    텍스트는 계속 채워 둔다 — 큐가 없는 호출부(매칭 화면)는 그대로 쓴다."""
+    스텝 줄에 수치를 또 달면 같은 숫자가 한 패널에 두 번 적힌다(ko.py 의 단일 출처
+    규칙).  그래서 스텝 줄은 점 + 이름뿐이고, 수치 줄은 늘 보인다."""
     steps = i18n.KO.LOAD_JOURNEY_STEPS
     overlay.show_overlay(i18n.KO.LOAD_SCAN, step=(1, 3), steps=steps)
     overlay.set_progress(3, 10, i18n.KO.LOAD_SCAN)
     assert not overlay._steps.isHidden()
-    assert overlay._count_label.isHidden()
-    assert overlay._count_label.text() != "", "텍스트까지 비우면 안 된다"
+    assert not overlay._count_label.isHidden()
+    assert overlay._count_label.text() == i18n.KO.LOADING_COUNT_FMT.format(
+        done=3, total=10)
+    assert not hasattr(overlay._steps, "_counts"), "스텝 줄이 수치를 다시 들었다"
 
-    # 여정을 주지 않은 호출부(매칭 화면)는 예전 그대로 — 라벨이 보인다.
+    # 여정을 주지 않은 호출부(매칭 화면)도 같다 — 라벨이 보인다.
     overlay.show_overlay(i18n.KO.LOAD_SCORING)
     overlay.set_progress(3, 10, i18n.KO.LOAD_SCORING)
     assert overlay._steps.isHidden()

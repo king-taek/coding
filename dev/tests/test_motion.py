@@ -76,9 +76,9 @@ def test_loading_overlay_instant_when_disabled(qapp):
     assert ov._fade == 1.0              # 즉시 완전 표시
     assert not ov.isHidden()           # show() 호출됨
     ov.set_progress(0, 0, "탐색")        # busy
-    assert not ov._busy.isHidden() and ov._progress.isHidden()
+    assert ov._wafer.is_busy()
     ov.set_progress(5, 10, "처리")       # 결정형
-    assert not ov._progress.isHidden() and ov._progress.maximum() == 10
+    assert not ov._wafer.is_busy() and ov._wafer.maximum() == 10
     ov.hide_overlay()
     assert ov.isHidden()               # 즉시 숨김
     ov.deleteLater()
@@ -137,7 +137,7 @@ def test_looping_indicators_stay_linear(qapp):
     from PyQt6.QtWidgets import QWidget
     host = QWidget()
     ov = LoadingOverlay(host)
-    assert ov._busy._anim.easingCurve().type() == QEasingCurve.Type.Linear
+    assert ov._wafer._anim.easingCurve().type() == QEasingCurve.Type.Linear
     assert ov._val_anim.easingCurve().type() == QEasingCurve.Type.Linear
     # 스크림 페이드도 등속(디밍 슬램 방지) — 별도 테스트가 고정하는 계약.
     assert ov._fade_anim.easingCurve().type() == QEasingCurve.Type.Linear

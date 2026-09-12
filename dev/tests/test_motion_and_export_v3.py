@@ -161,10 +161,10 @@ def test_reaching_100_percent_turns_the_panel_pass_coloured(styled_qapp):
     assert not ov._pct_label.property("state")
     ov.set_progress(10, 10, "계산 중")
     # ★ 색이 바뀌는 것은 **문구 하나**다.  B 목업을 실측하면 pass 는 "유사도 계산
-    #   완료" 스팬에만 걸려 있고 눈금은 accent, "100 %" 는 기본 잉크다 — 셋을 다
+    #   완료" 스팬에만 걸려 있고 맵은 accent, "100 %" 는 기본 잉크다 — 셋을 다
     #   칠하면 '한 화면에 강조 하나' 가 무너져 완료가 경고처럼 커진다.
     assert ov._label.property("state") == "done", "완료인데 문구 색이 그대로다"
-    assert not ov._progress.property("state"), "눈금까지 칠했다"
+    assert not ov._wafer.is_done(), "웨이퍼 맵까지 칠했다"
     assert not ov._pct_label.property("state"), "퍼센트까지 칠했다"
     # 다시 진행 중이 되면 완료 표시는 사라진다(다음 작업이 초록으로 시작하면 안 된다).
     ov.set_progress(0, 0, "다음 단계")
@@ -172,22 +172,22 @@ def test_reaching_100_percent_turns_the_panel_pass_coloured(styled_qapp):
     host.deleteLater()
 
 
-def test_only_the_finish_tick_colours_the_rule(styled_qapp):
-    """눈금이 완료색이 되는 것은 **200ms 틱 동안뿐**이다(A안의 그 틱).
+def test_only_the_finish_tick_colours_the_wafer_map(styled_qapp):
+    """웨이퍼 맵이 완료색이 되는 것은 **200ms 틱 동안뿐**이다(A안의 그 틱).
 
     ★ 평상시 100% 는 문구만 초록이다(B).  '수 분 작업의 끝' 한 지점에서만
-    눈금이 한 번 빛나고, 오버레이가 걷히면 되돌아간다 — 다음 작업이 완료색으로
+    맵이 한 번 빛나고, 오버레이가 걷히면 되돌아간다 — 다음 작업이 완료색으로
     시작하면 그 색이 신호이기를 그만둔다."""
     from aoi_verification.app.ui.widgets.loading_overlay import LoadingOverlay
 
     host = QWidget()
     ov = LoadingOverlay(host)
     ov.set_progress(10, 10, "계산 중")
-    assert not ov._progress.property("state")
+    assert not ov._wafer.is_done()
     ov.finish_tick()
-    assert ov._progress.property("state") == "done", "틱인데 눈금이 그대로다"
+    assert ov._wafer.is_done(), "틱인데 웨이퍼 맵이 그대로다"
     ov._finish_hide()
-    assert not ov._progress.property("state"), "틱이 끝났는데 눈금이 초록이다"
+    assert not ov._wafer.is_done(), "틱이 끝났는데 웨이퍼 맵이 초록이다"
     host.deleteLater()
 
 

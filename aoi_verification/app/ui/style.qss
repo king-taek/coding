@@ -479,6 +479,17 @@ QPushButton[role="primary"],
 QPushButton[role="ghost"] {
     min-height: 30px;
 }
+/* 패널 안 보조 조작 — 로딩 오버레이의 [중지](개선안 2a).  액션 등급 44 가 아니라
+   32 다: 화면의 유일한 조작이라 오클릭 위험이 없고, 44 면 머리줄이 표제보다 무거워
+   패널의 초점이 버튼으로 옮겨 간다.  ★ 위 함정과 같은 이유로 QSS 에서 맞춘다 —
+   `setFixedHeight(32)` 만 주면 min-height 26 + 패딩 12 + 보더 2 = 40 이 이긴다.
+   여기서는 내용 30 + 보더 2 = 32(세로 패딩 0). */
+QPushButton[grade="panel"] {
+    min-height: 30px;
+    max-height: 30px;
+    padding-top: 0px;
+    padding-bottom: 0px;
+}
 /* 허용 오차 ± — 입력란과 **같은 높이**여야 중심이 맞는다.  ghost 의 min-height 30
    (+패딩 = 44)이 `setFixedSize(38,38)` 을 이겨 38×44 로 렌더돼 3px 어긋났다(실측).
    38px 은 WCAG 2.5.8(AA 24)을 넘으므로 액션 등급 44 를 강제하지 않는다. */
@@ -675,37 +686,12 @@ QWidget[role="rowHost"],
 QWidget[role="switchRowText"] {
     background: transparent;
 }
-/* 진행바 트랙 — 기본 $panel 은 **패널 면과 같은 색**이라 트랙이 보이지 않고 채움만
-   공중에 떠 보인다(실측 지적).  패널 안에서는 한 단계 어두운 면을 쓴다. */
-QWidget[role="loadingPanel"] QProgressBar {
-    background: $bg;
-}
-
-/* ── 로딩 타이틀블록 ─────────────────────────────────────────────────────
-   제도 시트의 타이틀블록 어휘로 재구성한 패널.  장식(회전 링)을 걷어 내고, 화면이
-   말해야 할 것만 남긴다 — 전체 여정의 어디쯤 · 지금 무엇을 · 얼마나 · 얼마나 더.
+/* ── 로딩 패널(개선안 2a — 원형 웨이퍼 맵) ──────────────────────────────
+   진행 표시는 QSS 가 아니라 `_WaferMap` 이 직접 그린다(다이 격자 · 중앙에서 바깥으로
+   채움 · busy 는 동심 물결).  여기에는 글자 등급만 남는다 — 전체 여정의 어디쯤 ·
+   지금 무엇을 · 얼마나 · 얼마나 더.
    ★ 결정형일 때 이 패널에는 상시 애니메이션이 없다(예전 62.5Hz 스피너 타이머는
      UI 스레드가 바쁠 때 가장 먼저 끊겨 '로딩이 버벅인다' 로 보이던 바로 그것이다). */
-/* 패널 상단 진행 눈금 — 4px '치수선'.
-   ★ 선택자에 `QWidget[role="loadingPanel"]` 을 **반드시 함께 적는다.**  위쪽의
-     `QWidget[role="loadingPanel"] QProgressBar { background: $bg }` 는 자손 선택자라
-     특이도가 더 높아, 이걸 빼면 트랙이 $line2 가 아니라 $bg 로 칠해진다(실측:
-     라이트에서 #ECE9E2).  그러면 대비 게이트가 화면에 없는 값을 보증하게 된다.
-   ★ 모서리는 **각진 채로 둔다.**  Qt 는 QProgressBar 의 groove/chunk 에 준
-     `border-radius` 를 무시하므로(높이 4·20px 실측) 여기서 둥글리려는 시도는 죽은
-     코드가 된다.  둥근 패널 모서리와의 충돌은 **레이아웃**이 푼다 —
-     `LoadingOverlay.RULE_INSET_PX` 가 눈금을 반지름만큼 좌우로 들인다. */
-QWidget[role="loadingPanel"] QProgressBar[role="loadingRule"] {
-    background: $line2;
-    border: none;
-    border-radius: 0;
-    min-height: 4px;
-    max-height: 4px;
-}
-QWidget[role="loadingPanel"] QProgressBar[role="loadingRule"]::chunk {
-    background: $accent;
-    border-radius: 0;
-}
 /* 단계 서수 — 모노 캡션. */
 QLabel[role="loadingStage"] {
     font-family: $font_mono;
@@ -720,18 +706,13 @@ QLabel[role="loadingTitle"] {
     letter-spacing: $title_tracking;
     color: $ink;
 }
-/* 큰 진행률 — 이 패널에서 가장 큰 글자.  모노라 자릿수가 바뀌어도 안 흔들린다. */
-/* 완료(100%) 상태 — 마침 신호는 색이다(구조개편 23안-B, 모션 0).
-   ★ 눈금 선택자는 반드시 자손 형태로 쓴다 — `QWidget[role="loadingPanel"]` 를
-     빼면 패널 안의 일반 QProgressBar 규칙이 특이도로 이겨 규칙이 화면에 닿지
-     못한다(이 파일 위쪽 loadingRule 주석의 그 함정). */
-QWidget[role="loadingPanel"] QProgressBar[role="loadingRule"][state="done"]::chunk {
-    background-color: $pass;
-}
+/* 완료(100%) 상태 — 마침 신호는 색이다(구조개편 23안-B, 모션 0).  문구 하나만
+   초록이다; 웨이퍼 맵은 `finish_tick` 의 200ms 동안만 코드가 pass 색으로 그린다. */
 QLabel[role="loadingTitle"][state="done"] {
     color: $pass;
 }
 
+/* 큰 진행률 — 이 패널에서 가장 큰 글자.  모노라 자릿수가 바뀌어도 안 흔들린다. */
 QLabel[role="loadingPct"] {
     font-family: $font_mono;
     font-size: 34px;

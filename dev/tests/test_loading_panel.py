@@ -142,110 +142,117 @@ def test_panel_has_own_surface_for_readability(qapp):
 
 
 # ---------------------------------------------------------------------------
-# ★ 상단 진행 눈금은 **패널 테두리 안**에 앉는다
-#
-# 실제 신고: "위에 파란색 바 — 진행 로딩바의 윗부분까지 팝업박스 테두리 처리가 되어야
-# 할 듯. 지금은 뭔가 파란색 바가 위에 덧붙여진 느낌이 강함."  원인은 바깥 레이아웃
-# 여백 0(눈금이 1px 테두리를 덮음) + 눈금의 `border-radius: 0`(패널의 둥근 모서리
-# 밖으로 삐져나옴) 조합이었다.
+# ★ 원형 웨이퍼 맵(개선안 2a) — 격자를 웨이퍼 윤곽으로 자르고, 채움은 중앙에서
+#   바깥으로, busy 는 중앙에서 번지는 동심 물결.
 # ---------------------------------------------------------------------------
-def test_the_rule_sits_inside_the_panel_border(qapp):
-    """눈금의 위·좌·우가 패널 테두리·모서리 안쪽에 있어야 한다."""
+def test_wafer_map_is_clipped_to_a_circle(qapp):
+    """13×13 격자에서 반지름 밖의 모서리 다이는 없다 — 원이어야 웨이퍼다."""
+    from aoi_verification.app.ui.widgets.loading_overlay import _WaferMap
+    wm = _WaferMap()
+    n = wm.die_count()
+    assert 0 < n < wm.GRID * wm.GRID, f"격자를 자르지 않았다({n})"
+    for col, row, rad in wm._dies:
+        assert rad <= wm.RADIUS
+        assert 0 <= col < wm.GRID and 0 <= row < wm.GRID
+    # 네 모서리는 반드시 잘려 나간다.
+    corners = {(0, 0), (0, wm.GRID - 1), (wm.GRID - 1, 0), (wm.GRID - 1, wm.GRID - 1)}
+    assert not corners & {(c, r) for c, r, _ in wm._dies}
+    wm.deleteLater()
+
+
+def test_wafer_map_fills_from_the_centre_outwards(qapp):
+    """채움 순서는 반지름 오름차순이다 — 한 번 켜진 다이보다 먼 다이가 먼저 켜지지 않는다."""
+    from aoi_verification.app.ui.widgets.loading_overlay import _WaferMap
+    wm = _WaferMap()
+    radii = [rad for _c, _r, rad in wm._dies]
+    assert radii == sorted(radii), "채움 순서가 중앙→바깥이 아니다"
+    assert wm._dies[0][:2] == (wm.GRID // 2, wm.GRID // 2), "첫 다이가 중앙이 아니다"
+    wm.setRange(0, 100)
+    wm.setValue(0)
+    assert wm.lit_count() == 0
+    wm.setValue(50)
+    assert 0 < wm.lit_count() < wm.die_count()
+    wm.setValue(100)
+    assert wm.lit_count() == wm.die_count(), "100% 인데 다 켜지지 않았다"
+    wm.deleteLater()
+
+
+def test_wafer_map_busy_ripple_runs_only_while_busy(qapp, monkeypatch):
+    """busy 물결은 총량 미상 구간에만 돈다 — 결정형에서는 상시 애니메이션 0 개."""
+    from aoi_verification.app.ui import motion
+    from aoi_verification.app.ui.widgets.loading_overlay import _WaferMap
+    monkeypatch.setattr(motion, "enabled", lambda: True)
+    wm = _WaferMap()
+    from PyQt6.QtCore import QEasingCurve
+    # 등속 — 끝에서 감속하는 숨쉬기는 '거의 끝났다' 는 거짓 신호다.
+    assert wm._anim.easingCurve().type() == QEasingCurve.Type.Linear
+    assert wm._anim.loopCount() == -1
+    wm.set_busy(True)
+    assert wm._anim.state() != wm._anim.State.Stopped
+    # 물결은 반지름이 클수록 늦게 온다(동심 물결) — 바깥 링은 중앙 다이의 파형을
+    # 반지름 × RIPPLE_MS 만큼 **시간 이동**한 것과 같다.
+    shift = wm.RIPPLE_MS / wm.PULSE_MS
+    for rad in (1.0, 3.0, 6.0):
+        wm._phase = 0.35
+        outer = wm._pulse_alpha(rad)
+        wm._phase = (0.35 - rad * shift) % 1.0
+        assert abs(outer - wm._pulse_alpha(0.0)) < 1e-9
+    wm._phase = 0.0
+    assert wm._pulse_alpha(0.0) < wm._pulse_alpha(0.5), "중앙이 먼저 밝아지지 않는다"
+    lo, hi = wm.PULSE_MIN_ALPHA, 1.0
+    for rad in (0.0, 2.5, 6.6):
+        for ph in (0.0, 0.25, 0.5, 0.9):
+            wm._phase = ph
+            assert lo - 1e-9 <= wm._pulse_alpha(rad) <= hi + 1e-9
+    wm.set_busy(False)
+    assert wm._anim.state() == wm._anim.State.Stopped, "결정형인데 물결이 돈다"
+    # stop() 은 애니메이션만 멈추고 busy 여부는 남긴다 — 숨었다 다시 보일 때 되살린다.
+    wm.set_busy(True)
+    wm.stop()
+    assert wm.is_busy() and wm._anim.state() == wm._anim.State.Stopped
+    wm.start()
+    assert wm._anim.state() != wm._anim.State.Stopped
+    wm.deleteLater()
+
+
+def test_stop_button_is_panel_grade_32(qapp):
+    """[중지] 는 앱 공통 액션 등급(44)이 아니라 패널 안 보조 조작 32px 이다(개선안 2a).
+
+    ★ 44 로 되돌리면 머리줄이 표제보다 무거워져 패널의 초점이 버튼으로 옮겨 간다.
+    화면의 유일한 조작이라 오클릭 위험은 없고 WCAG 최소 목표 크기(24)는 넘는다."""
+    theme.apply_to_app(qapp)                 # QSS min-height 가 이겨도 32 여야 한다
     host, ov = _overlay(qapp)
     try:
-        ov.show_overlay("테스트")
-        ov.set_progress(3, 10, "테스트")
+        ov.show_overlay("작업", cancelable=True)
         for _ in range(4):
             qapp.processEvents()
-        b, inset = ov.PANEL_BORDER_PX, ov.rule_inset_px()
-        assert b >= 1, "테두리 두께 상수가 사라졌다"
-        assert inset >= theme.PROFILE.radius, \
-            f"들임({inset})이 패널 라디우스({theme.PROFILE.radius})보다 작다 — 곡선에 닿는다"
-        rule = ov._progress.geometry()          # 패널 좌표계
-        assert rule.top() >= b, f"눈금이 테두리를 덮는다 (top={rule.top()}, 테두리={b})"
-        assert rule.left() >= inset, f"눈금이 왼쪽 곡선에 닿는다 (left={rule.left()})"
-        assert rule.right() <= ov._panel.width() - 1 - inset, \
-            f"눈금이 오른쪽 곡선에 닿는다 (right={rule.right()}, 폭={ov._panel.width()})"
-        # busy 는 결정형과 **같은 가로 자리**를 나눠 쓴다 — 한쪽만 들이면 전환에 튄다.
-        # ★ 높이는 비교하지 않는다: 이 파일의 `qapp` 은 테마를 적용하지 않아
-        #   `max-height: 4px` 가 안 먹고 QProgressBar 가 기본 높이로 남는다(실측 22px).
-        #   가로 들임이 이 테스트의 관심사다.
-        busy = ov._busy.geometry()
-        assert (busy.left(), busy.width()) == (rule.left(), rule.width()), \
-            f"busy 스윕이 눈금과 다른 가로 자리에 있다: {busy.getRect()} vs {rule.getRect()}"
+        assert ov.STOP_BTN_H == 32
+        assert ov._cancel_btn.height() == 32, f"실측 {ov._cancel_btn.height()}px"
+        assert ov._cancel_btn.width() == 120
     finally:
         host.deleteLater()
 
 
-def _rounded_overflow(qapp, ov) -> float:
-    """눈금이 패널의 **둥근 실루엣 밖으로** 몇 px 나갔는가(px, 클수록 나쁨).
-
-    ★ 화면을 실제로 렌더해 픽셀을 본다.  이전 가드는 QSS **문자열**에 라디우스가
-    적혀 있는지만 봐서, Qt 가 그 라디우스를 무시한다는 사실을 못 봤다 — 고쳤다고
-    믿는 채로 각진 끝이 2.5px 삐져나온 상태가 남아 있었다."""
-    import math
-
-    for _ in range(6):
-        qapp.processEvents()
-    img = ov._panel.grab().toImage()
-    w, r = img.width(), theme.PROFILE.radius
-    panel = QColor(theme.PANEL).rgb() & 0xFFFFFF
-    worst = 0.0
-    for y in range(0, 6):
-        dy = r - (y + 0.5)
-        silhouette = r - math.sqrt(max(0.0, r * r - dy * dy)) if dy > 0 else 0.0
-        for xs, depth in ((range(r + 3), lambda x: x + 0.5),
-                          (range(w - 1, w - r - 4, -1), lambda x: w - x - 0.5)):
-            first = next(
-                (x for x in xs
-                 if ((img.pixel(x, y) >> 24) & 0xFF) > 20
-                 and (img.pixel(x, y) & 0xFFFFFF) != panel), None)
-            if first is not None:
-                worst = max(worst, silhouette - depth(first))
-    return worst
-
-
-# 안티에일리어싱 한 픽셀은 봐준다 — 그 이상은 각진 끝이 실제로 보인다는 뜻이다.
-_AA_TOLERANCE_PX = 1.0
-
-
-@pytest.mark.parametrize("mode", ["light", "dark"])
-@pytest.mark.parametrize("state", ["determinate", "full", "busy"])
-def test_the_rule_never_leaves_the_rounded_panel(qapp, mode, state):
-    """★ 실제 신고: "파란 바가 위에 덧붙여진 느낌이 강함."
-
-    각진 눈금이 둥근 패널 모서리 밖으로 삐져나오면 그렇게 보인다.  QSS 로 눈금을
-    둥글리는 길은 **막혀 있다** — Qt 는 `QProgressBar` 의 groove/chunk 라디우스를
-    무시한다(높이 4px·20px 실측).  그래서 레이아웃으로 반지름만큼 들인다.
-    셋 다 같은 자리를 쓰므로 세 상태를 모두 본다(busy 는 직접 페인트라 QSS 가
-    닿지도 않는다)."""
-    theme.set_color_mode(mode)
-    theme.apply_to_app(qapp)
+def test_wafer_map_sits_beside_the_step_list_inside_the_panel(qapp):
+    """맵은 패널 안 왼쪽, 오른쪽 열(스텝·수치)은 맵과 나란히 — 패널 폭은 그대로 424."""
     host, ov = _overlay(qapp)
     try:
-        ov.show_overlay("작업", step=(1, 3), steps=("a", "b", "c"))
-        if state == "determinate":
-            ov.set_progress(4, 25, "작업")
-        elif state == "full":
-            ov.set_progress(25, 25, "작업")
-        over = _rounded_overflow(qapp, ov)
-        assert over <= _AA_TOLERANCE_PX, (
-            f"{mode}/{state}: 눈금이 둥근 모서리 밖으로 {over:.1f}px 나갔다 "
-            f"— '위에 덧붙여진' 그 모양이다")
+        ov.show_overlay("작업", step=(2, 3), steps=("a", "b", "c"))
+        ov.set_progress(3, 10, "작업")
+        for _ in range(4):
+            qapp.processEvents()
+        assert ov._panel.width() == ov.PANEL_W
+        wm = ov._wafer.geometry()
+        steps = ov._steps.geometry()
+        nums = ov._bar_host.geometry()
+        assert wm.width() == wm.height() == ov._wafer.SIZE
+        assert wm.left() >= ov.PANEL_BORDER_PX + 24
+        assert steps.left() >= wm.right() + ov.BODY_GAP_PX, "스텝이 맵과 겹친다"
+        assert nums.left() == steps.left(), "수치 묶음이 스텝과 다른 열에 있다"
+        assert nums.bottom() <= wm.bottom() + 1, "수치가 맵보다 아래로 내려갔다"
+        assert wm.bottom() < ov._panel.height() - ov.PANEL_BORDER_PX
     finally:
-        theme.set_color_mode("light")
-        theme.apply_to_app(qapp)
         host.deleteLater()
-
-
-def test_no_dead_radius_is_left_in_the_qss(qapp):
-    """Qt 가 무시하는 라디우스를 QSS 에 남겨 두지 않는다 — 다음 사람이 그게 듣는 줄 안다."""
-    out = theme.render_qss(_QSS)
-    i = out.find('QProgressBar[role="loadingRule"]')
-    tail = out[i:i + 1200]
-    assert "border-top-left-radius" not in tail and \
-        "border-top-right-radius" not in tail, \
-        f"눈금에 죽은 라디우스가 남아 있다:\n{tail[:400]}"
 
 
 def test_no_nested_graphics_effect(qapp):
@@ -340,14 +347,14 @@ def test_loading_contract_preserved(qapp):
     try:
         ov.show_overlay("작업 중")
         ov.set_progress(0, 0, "탐색")               # total<=0 → busy
-        assert not ov._busy.isHidden() and ov._progress.isHidden()
+        assert ov._wafer.is_busy()
         ov.set_progress(5, 10, "처리")              # 결정형
-        assert not ov._progress.isHidden() and ov._progress.maximum() == 10
-        assert ov._progress.value() == 5
+        assert not ov._wafer.is_busy() and ov._wafer.maximum() == 10
+        assert ov._wafer.value() == 5
         ov.set_progress(9, 10)                      # 증가
-        assert ov._progress.value() == 9
+        assert ov._wafer.value() == 9
         ov.set_progress(2, 40)                      # 범위 변경 → 스냅
-        assert ov._progress.maximum() == 40 and ov._progress.value() == 2
+        assert ov._wafer.maximum() == 40 and ov._wafer.value() == 2
     finally:
         host.deleteLater()
 
@@ -355,7 +362,7 @@ def test_loading_contract_preserved(qapp):
 def test_show_overlay_starts_busy_not_a_frozen_zero_bar(qapp):
     """★ ``show_overlay`` 만 부르는 호출부에서 **바가 0 에 얼어 있으면 안 된다.**
 
-    이전에는 `_progress`(range 0..100, value 0) 가 보이는 채로 `_busy` 가 숨어 있었다.
+    예전 눈금은 결정형 바(range 0..100, value 0)가 보이는 채로 busy 가 숨어 있었다.
     그래서 총량을 모르는 작업(OpenVINO 설치 · KLA 파일명 읽기 · 선계산 대기)에서는
     바가 영원히 0 이었다 — 사용자가 보고한 "바가 채워지지 않는" 버그이고,
     CLAUDE.md 로딩 계약 위반이다.
@@ -363,28 +370,27 @@ def test_show_overlay_starts_busy_not_a_frozen_zero_bar(qapp):
     host, ov = _overlay(qapp)
     try:
         ov.show_overlay("설치 중")             # set_progress 를 부르지 않는 호출부
-        assert not ov._busy.isHidden(), "busy 표시가 없다 — 바가 0 에 얼어 있다"
-        assert ov._progress.isHidden(), "결정형 바가 0 으로 보이고 있다"
+        assert ov._wafer.is_busy(), "busy 물결이 없다 — 맵이 0 에 얼어 있다"
         assert ov._count_label.text() == "", "총량을 모르는데 숫자를 적었다"
         assert ov._pct_label.text() == "", "총량을 모르는데 퍼센트를 적었다"
 
         # 총량이 알려지면 결정형으로 **승격**된다.
         ov.set_progress(3, 10, "처리")
-        assert not ov._progress.isHidden() and ov._busy.isHidden()
-        assert ov._progress.maximum() == 10
+        assert not ov._wafer.is_busy()
+        assert ov._wafer.maximum() == 10
         assert ov._count_label.text() == i18n.KO.LOADING_COUNT_FMT.format(
             done=3, total=10)
         assert ov._pct_label.text() == "30%"
 
         # 다시 총량을 잃으면 busy 로 되돌아온다(왕복).
         ov.set_progress(0, 0, "마무리")
-        assert not ov._busy.isHidden() and ov._progress.isHidden()
+        assert ov._wafer.is_busy()
 
         # 감췄다 다시 띄워도 busy 로 시작한다(이전 결정형 상태가 새지 않게).
         ov.set_progress(7, 10)
         ov._finish_hide()
         ov.show_overlay("다시 시작")
-        assert not ov._busy.isHidden() and ov._progress.isHidden()
+        assert ov._wafer.is_busy()
     finally:
         host.deleteLater()
 
@@ -419,11 +425,11 @@ def test_dense_updates_track_the_real_progress(qapp, monkeypatch):
                 qapp.processEvents()
             ov.set_progress(i, need, f"{i}/{need}")
             qapp.processEvents()
-            lag = abs(ov._progress.value() - i) / need
+            lag = abs(ov._wafer.value() - i) / need
             worst = max(worst, lag)
         assert worst <= 0.10, f"표시값이 실제 진행에서 최대 {worst * 100:.1f}% 벗어났다"
-        assert ov._progress.value() == need, \
-            f"작업이 끝났는데 바가 {ov._progress.value()}/{need} 에서 멈췄다"
+        assert ov._wafer.value() == need, \
+            f"작업이 끝났는데 바가 {ov._wafer.value()}/{need} 에서 멈췄다"
     finally:
         host.deleteLater()
 
@@ -458,12 +464,12 @@ def test_last_update_is_not_left_mid_tween(qapp, monkeypatch):
                 qapp.processEvents()
             ov.set_progress(i, need, f"{i}/{need}")
             qapp.processEvents()
-        assert ov._progress.value() == need, (
-            f"작업이 끝났는데 바가 {ov._progress.value()}/{need} 에서 멈췄다 "
+        assert ov._wafer.value() == need, (
+            f"작업이 끝났는데 바가 {ov._wafer.value()}/{need} 에서 멈췄다 "
             "(마지막 증가가 tween 으로 걸렸다)")
         ov.hide_overlay()
         qapp.processEvents()
-        assert ov._progress.value() == need, \
+        assert ov._wafer.value() == need, \
             "퇴장 페이드 동안 바가 목표값 아래로 남았다"
     finally:
         host.hide()
@@ -494,11 +500,11 @@ def test_running_tween_is_never_restarted(qapp, monkeypatch):
         ov.set_progress(40, 100, "도약")
         qapp.processEvents()
         assert ov._val_anim.state() != ov._val_anim.State.Stopped, "tween 이 안 걸렸다"
-        started_at = ov._progress.value()
+        started_at = ov._wafer.value()
         # tween 이 도는 **중에** 다음 값이 온다 → 재시작이 아니라 즉시 스냅.
         ov.set_progress(60, 100, "다음")
-        assert ov._progress.value() == 60, (
-            f"돌고 있는 tween 을 재시작했다(값 {ov._progress.value()}, "
+        assert ov._wafer.value() == 60, (
+            f"돌고 있는 tween 을 재시작했다(값 {ov._wafer.value()}, "
             f"tween 시작값 {started_at}) — 이 재시작이 반복되면 목표를 영원히 못 따라간다")
         assert ov._val_anim.state() == ov._val_anim.State.Stopped
     finally:
@@ -530,11 +536,11 @@ def test_irregular_updates_stay_monotonic_and_finish(qapp, monkeypatch):
                 qapp.processEvents()
             ov.set_progress(i, need, f"{i}/{need}")
             qapp.processEvents()
-            cur = ov._progress.value()
+            cur = ov._wafer.value()
             assert cur >= prev, f"표시값이 뒤로 갔다: {prev} → {cur}"
             assert cur <= i, f"표시값이 실제 진행({i})을 앞질렀다: {cur}"
             prev = cur
-        assert ov._progress.value() == need
+        assert ov._wafer.value() == need
     finally:
         host.hide()
         qapp.processEvents()
@@ -561,7 +567,7 @@ def test_sparse_updates_still_tween(qapp, monkeypatch):
         ov.set_progress(80, 100, "도약")
         qapp.processEvents()
         # 방금 걸었으므로 아직 80 에 닿지 않았어야 한다(= tween 이 걸렸다).
-        assert ov._progress.value() < 80, "드문 갱신인데 tween 없이 스냅했다"
+        assert ov._wafer.value() < 80, "드문 갱신인데 tween 없이 스냅했다"
         assert ov._val_anim.state() != ov._val_anim.State.Stopped
     finally:
         host.deleteLater()

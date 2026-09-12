@@ -346,8 +346,8 @@ def test_no_always_on_animation_while_determinate(qapp):
     try:
         ov.show_overlay("작업")
         ov.set_progress(5, 10, "작업")           # 결정형으로 승격
-        assert ov._busy.isHidden(), "결정형인데 busy 스윕이 남아 돌고 있다"
-        assert ov._busy._anim.state() == ov._busy._anim.State.Stopped
+        assert not ov._wafer.is_busy(), "결정형인데 busy 물결이 남아 돌고 있다"
+        assert ov._wafer._anim.state() == ov._wafer._anim.State.Stopped
     finally:
         ov.hide()
         host.deleteLater()
@@ -374,37 +374,6 @@ def test_a_long_message_does_not_stretch_the_panel(qapp):
         assert ov._panel.width() == narrow, (
             f"긴 메시지에 패널 폭이 {narrow} → {ov._panel.width()} 로 늘었다")
         assert ov._panel.width() <= LoadingOverlay.PANEL_W
-    finally:
-        ov.hide()
-        host.deleteLater()
-
-
-def test_busy_sweep_spans_the_same_rule_as_the_determinate_fill(qapp):
-    """busy 와 결정형은 패널 상단의 **같은 자리**를 나눠 쓴다.
-
-    busy 폭을 상수로 고정해 두면 패널이 클램프되거나 넓어질 때 스윕이 눈금의 일부만
-    덮어, 자리를 나눠 쓴다는 계약이 조용히 깨진다.
-
-    ★ 기준은 패널 폭에서 **모서리 반지름을 뺀 폭**이다 — 눈금은 둥근 모서리의 곡선
-      구간에 들어가지 않도록 좌우로 그만큼 들어가 있다(각진 끝이 곡선 밖으로
-      삐져나오던 것을 그렇게 고쳤다: `test_loading_panel` 의 픽셀 가드 참조)."""
-    host, ov = _overlay(qapp, show_host=True)
-    try:
-        ov.show_overlay("작업")
-        ov.show()
-        qapp.processEvents()
-        # 바깥 레이아웃의 테두리 여백 + 눈금 행의 들임을 양쪽에서 뺀 폭.
-        inner = ov._panel.width() - 2 * (ov.PANEL_BORDER_PX + ov.rule_inset_px())
-        assert not ov._busy.isHidden()
-        assert ov._busy.width() == inner, (
-            f"busy 스윕({ov._busy.width()})이 눈금 폭({inner})과 다르다")
-
-        ov.set_progress(3, 10, "작업")
-        qapp.processEvents()
-        assert ov._progress.width() == inner, "결정형 눈금 폭이 들임과 안 맞는다"
-        assert ov._progress.width() == ov._busy.width(), \
-            "busy 와 결정형이 같은 자리를 나눠 쓰지 않는다"
-        assert ov._progress.height() == 4, "눈금 높이가 4px 가 아니다"
     finally:
         ov.hide()
         host.deleteLater()
