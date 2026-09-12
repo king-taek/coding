@@ -96,6 +96,17 @@ def get_thumb_path(src: Path, *,
                            extra=f"t{tier.thumb_px}q{tier.thumb_q}")
 
 
+def get_map_thumb_path(src: Path) -> Path:
+    """Wafer map 툴팁용 **저화질** 썸네일(:data:`config.Sizing.MAP_THUMB_PX`).
+
+    화질 티어와 무관하게 항상 같은 작은 파일이다 — 맵 위에서 사진은 '무엇인지 알아볼'
+    용도라 화질보다 즉시성이 먼저다.  상세는 더블클릭(사진 정보 시트)이 맡는다."""
+    return _ensure_resized(src, size_option="thumb",
+                           long_edge=config.Sizing.MAP_THUMB_PX,
+                           jpeg_q=config.Sizing.MAP_THUMB_JPEG_Q,
+                           extra=f"map{config.Sizing.MAP_THUMB_PX}")
+
+
 def get_mid_path(src: Path, *,
                  tier: Optional["config.SizingTier"] = None) -> Path:
     """중간 이미지 캐시 파일 경로를 보장 (없으면 생성).

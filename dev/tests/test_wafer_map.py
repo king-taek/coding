@@ -336,8 +336,12 @@ def test_build_prewarms_thumbnails(qt, isolated_cache, tmp_path):
     try:
         dlg.show_folder(folder)
         _wait_build(qt, dlg)
-        thumb = image_io.get_thumb_path(folder / "a.jpeg")   # 이미 있어야 한다
+        thumb = image_io.get_map_thumb_path(folder / "a.jpeg")   # 이미 있어야 한다
         assert thumb.exists() and thumb.stat().st_size > 0
+        # 저화질 전용 — 일반 썸네일(240px)과 다른 파일, 긴 변이 MAP_THUMB_PX 이하.
+        from aoi_verification.app.config import Sizing
+        assert thumb != image_io.get_thumb_path(folder / "a.jpeg")
+        assert max(Image.open(thumb).size) <= Sizing.MAP_THUMB_PX
     finally:
         dlg.deleteLater()
 
@@ -354,7 +358,7 @@ def test_prewarm_skipped_above_cap(qt, isolated_cache, tmp_path, monkeypatch):
     for n in ("a", "b"):
         Image.new("RGB", (40, 30)).save(str(folder / f"{n}.jpeg"), "JPEG")
     calls = []
-    monkeypatch.setattr(image_io, "get_thumb_path",
+    monkeypatch.setattr(image_io, "get_map_thumb_path",
                         lambda p, **k: calls.append(p) or p)
     dlg = wmd.WaferMapDialog()
     try:

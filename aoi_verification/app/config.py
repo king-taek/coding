@@ -46,6 +46,10 @@ class Sizing:
     SIMILARITY_PX = 384     # cropped ROI longest-edge for similarity
     ROI_RATIO = 0.55        # 중심 영역 비율 (0.5~0.6)
     THUMB_JPEG_Q = 90
+    # Wafer map 툴팁 전용 저화질 썸네일 — 마우스를 올리는 순간 떠야 하므로 화질보다
+    # 속도다(JPEG draft 디코드는 목표 변이 작을수록 빠르다).  사용자 결정.
+    MAP_THUMB_PX = 120
+    MAP_THUMB_JPEG_Q = 60
     MID_JPEG_Q = 88
     # 다이얼로그/패널별 타일 기본 크기 — 흩어져 있던 매직 넘버를 한 곳에 모음(D2).
     # (값은 기존과 동일 — 동작 불변.  슬라이더가 있는 화면은 이를 시작값으로 사용.)

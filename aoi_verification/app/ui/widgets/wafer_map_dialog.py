@@ -80,7 +80,7 @@ class _MapBuild(QThread):
                 if self.isInterruptionRequested():
                     return
                 try:
-                    image_io.get_thumb_path(path)
+                    image_io.get_map_thumb_path(path)
                 except Exception:
                     pass
                 if i % 20 == 0 or i == total:

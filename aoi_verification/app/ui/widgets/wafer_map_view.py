@@ -8,7 +8,8 @@
 
 상호작용: 휠 = 커서 기준 확대, 드래그 = 이동, 호버 = col/row·x/y 툴팁 + 썸네일,
 점 더블클릭 = ``point_activated(Path)``(상세 정보), 빈 곳 더블클릭 = 원래 크기.
-썸네일은 시트가 미리 만들어 둔 캐시 파일이라 툴팁이 바로 뜬다.  QPainter 순수 구현.
+썸네일은 **저화질 전용 캐시**(120px·Q60)라 만들기도 띄우기도 가볍고, 시트가 미리
+만들어 두면 툴팁이 바로 뜬다.  QPainter 순수 구현.
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ DOT_R = 3.0            # 점 반지름(px) — 확대해도 그대로
 HIT_PX = 8.0           # 호버/클릭 판정 거리(px)
 ZOOM_STEP = 1.25
 ZOOM_MAX = 60.0
-_TOOLTIP_THUMB = 160
+_TOOLTIP_THUMB = 120   # = config.Sizing.MAP_THUMB_PX — 저화질 캐시를 그대로(업스케일 없이)
 _NOTCH_FRAC = 0.03     # 노치 표시 반지름 = 지름의 3% (실물 1 mm 는 보이지 않는다)
 
 
@@ -290,7 +291,7 @@ class WaferMapView(QWidget):
         xy = i18n.KO.WAFER_MAP_TIP_XY_FMT.format(x=p.x, y=p.y)
         img = ""
         try:
-            tp = image_io.get_thumb_path(p.path)
+            tp = image_io.get_map_thumb_path(p.path)     # 저화질 — 즉시성 우선
             img = (f"<br><img src='{Path(tp).as_uri()}' "
                    f"width='{_TOOLTIP_THUMB}'>")
         except Exception:
