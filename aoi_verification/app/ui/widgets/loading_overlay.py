@@ -14,9 +14,9 @@
     └────────────────────────────────────┘
 
 웨이퍼 맵(`_WaferMap`): 13×13 다이 격자를 웨이퍼 윤곽으로 자른 것이다.
-- 결정형: 채움은 **중앙 다이에서 바깥으로** 퍼진다(반지름 → 각도 순).  아직 안 채워진
-  다이 위로는 busy 의 동심 물결이 옅게 **계속** 친다(사용자 요청 — 파동은 항상,
-  진행은 채움으로).
+- 결정형: 채움은 **중앙 다이에서 바깥으로** 퍼진다(반지름 → 각도 순).  동심 물결은
+  계속 치되 켜진 다이는 파란색, 안 켜진 다이는 회색으로 파동한다(사용자 요청 —
+  파동은 항상, 진행은 색으로).
 - busy(총량 미상): 중앙에서 번지는 **동심 물결**(다이 하나당 140ms 지연 · 1.6초 주기).
   이것이 '살아 있다' 신호의 전부다.
 - 완료: `finish_tick` 의 200ms 동안만 전체가 pass 색이다(23안-B 의 그 틱).  물결 정지.
@@ -153,14 +153,23 @@ class _JourneySteps(QWidget):
                            | Qt.AlignmentFlag.AlignVCenter), text)
 
 
+def _mix(a: QColor, b: QColor, t: float) -> QColor:
+    """``a`` → ``b`` 를 ``t``(0..1) 로 선형 보간한 새 QColor."""
+    t = max(0.0, min(1.0, t))
+    return QColor(int(a.red() + (b.red() - a.red()) * t),
+                  int(a.green() + (b.green() - a.green()) * t),
+                  int(a.blue() + (b.blue() - a.blue()) * t))
+
+
 class _WaferMap(QWidget):
     """원형 웨이퍼 맵 — 13×13 다이 격자를 웨이퍼 윤곽으로 잘라 진행을 보여 준다.
 
     상태는 셋뿐이다(`set_progress` 계약과 1:1):
     · **결정형** — `setRange/setValue` 의 비율만큼 다이가 **중앙에서 바깥으로** 켜진다
-      (accent, 불투명).  아직 안 켜진 다이는 같은 동심 물결을 **옅게**(알파 상한
-      `PENDING_ALPHA`) 계속 친다 — 사용자 요청: "파동 애니메이션은 항상 지속되고,
-      진행되면서 점점 색이 채워진다".  채워진 다이와 대기 다이는 불투명도로 갈린다.
+      (accent).  **모든 다이가 같은 동심 물결로 숨쉬되 색으로 갈린다** — 켜진 다이는
+      파란색(accent), 아직 안 켜진 다이는 회색(LINE2)으로 파동한다(사용자 요청:
+      "로딩 안 된 것은 회색으로 파동, 로딩된 것은 파란색으로 파동").  켜지는 순간
+      회색 → 파란색 200ms 색 보간(`FADE_MS`).
     · **busy** — 모든 다이가 accent 로, 중앙에서 번지는 동심 물결로 숨쉰다
       (다이 반지름 1 당 140ms 지연 · 1.6초 주기 · 알파 .18↔1).  ★ 등속(Linear) 무한
       루프다 — 끝에서 감속하는 '숨쉬기' 는 총량을 모르는 작업에 '거의 끝났다' 는
@@ -181,8 +190,7 @@ class _WaferMap(QWidget):
     PULSE_MS = 1600             # busy 물결 한 주기
     RIPPLE_MS = 140             # busy 물결 — 반지름 1 당 지연
     PULSE_MIN_ALPHA = 0.18      # 물결의 골(가장 옅을 때)
-    PENDING_ALPHA = 0.45        # 결정형에서 아직 안 채워진 다이의 물결 알파 상한
-    FADE_MS = 200               # 다이 하나가 켜질 때 옅음 → 불투명 페이드(사용자 요청)
+    FADE_MS = 200               # 다이 하나가 켜질 때 회색 → 파란색 색 보간(사용자 요청)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -326,21 +334,15 @@ class _WaferMap(QWidget):
             elif self._busy:
                 color = QColor(accent)
                 color.setAlphaF(self._pulse_alpha(rad))
-            elif rank < lit:
-                # 켜진 다이 — 물결이 돌 때만 옅음 → 불투명 200ms 페이드(리페인트는 물결
-                # tick 이 준다).  물결이 없으면(모션 off) 곧바로 불투명.
-                frac = self._fade_frac(rank, now) if rippling else 1.0
-                color = accent
-                if frac < 1.0:
-                    pending = self._pulse_alpha(rad) * self.PENDING_ALPHA
-                    color = QColor(accent)
-                    color.setAlphaF(pending + (1.0 - pending) * frac)
             elif rippling:
-                # 대기 다이 — 같은 물결을 옅게.  모션 off 면 정적 트랙(line2)으로.
-                color = QColor(accent)
-                color.setAlphaF(self._pulse_alpha(rad) * self.PENDING_ALPHA)
+                # 결정형 + 물결 — 켜진 다이는 파란색, 대기 다이는 회색으로 **같은 물결**.
+                # 켜지는 순간은 회색 → 파란색 200ms 색 보간(리페인트는 물결 tick 이 준다).
+                frac = self._fade_frac(rank, now) if rank < lit else 0.0
+                color = _mix(line2, accent, frac)
+                color.setAlphaF(self._pulse_alpha(rad))
             else:
-                color = line2
+                # 모션 off — 정적: 켜진 다이 파란색, 나머지 회색 트랙.
+                color = accent if rank < lit else line2
             p.setBrush(color)
             x = ox + col * (self.CELL + self.GAP)
             y = oy + r * (self.CELL + self.GAP)
