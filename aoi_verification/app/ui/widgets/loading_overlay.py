@@ -14,11 +14,12 @@
     └────────────────────────────────────┘
 
 웨이퍼 맵(`_WaferMap`): 13×13 다이 격자를 웨이퍼 윤곽으로 자른 것이다.
-- 결정형: 채움은 **중앙 다이에서 바깥으로** 퍼진다(반지름 → 각도 순).  이 채움에
-  상시 애니메이션은 없다 — 값이 바뀔 때만 다시 그린다.
+- 결정형: 채움은 **중앙 다이에서 바깥으로** 퍼진다(반지름 → 각도 순).  아직 안 채워진
+  다이 위로는 busy 의 동심 물결이 옅게 **계속** 친다(사용자 요청 — 파동은 항상,
+  진행은 채움으로).
 - busy(총량 미상): 중앙에서 번지는 **동심 물결**(다이 하나당 140ms 지연 · 1.6초 주기).
   이것이 '살아 있다' 신호의 전부다.
-- 완료: `finish_tick` 의 200ms 동안만 전체가 pass 색이다(23안-B 의 그 틱).
+- 완료: `finish_tick` 의 200ms 동안만 전체가 pass 색이다(23안-B 의 그 틱).  물결 정지.
 
 ★ **회전 링(스피너)을 두지 않는다.**  링은 상태 정보가 없는 장식인데, 62.5Hz 타이머로
   상시 돌아 UI 스레드가 바쁠 때 가장 먼저 끊겼다 — 사용자가 본 "로딩 표현이 버벅거린다"
@@ -33,13 +34,19 @@ CLAUDE.md 로딩 계약 유지: set_progress(done,total,msg), total>0 결정형,
 백그라운드 스레드+시그널로 갱신.  결정형 채움 규칙:
 
 - 감소/총량 변경 → **즉시 스냅**
-- **완료**(done ≥ total) → **즉시 스냅**.  마지막 증가를 tween 하면 오버레이가 내려가며
-  잘려 끝까지 찬 적이 없게 된다.
-- **돌고 있는 tween** → 재시작하지 않고 **즉시 스냅**(재시작이 '따라가지 못함'의 기계다).
-- **촘촘한** 증가(간격 < VAL_TWEEN_MS) → **즉시 스냅**.
-- 그 밖의 **드문** 증가 → 부드럽게 tween.
-- 퇴장/숨김 직전에는 `_settle_progress()` 로 **목표값을 확정**한 뒤 멈춘다 — 멈춘 tween 의
-  중간값이 마지막 프레임으로 남지 않게(set_progress 주석에 실측값과 이유가 있다).
+- 증가 → **등속 추격 tween**(`_chase`).  지속시간은 도약 폭에 비례(1% 당 `VAL_PER_PCT_MS`)
+  하되 `[VAL_TWEEN_MIN_MS, VAL_TWEEN_MAX_MS]` 로 클램프한다 — 사용자 요청: 몇 % 씩
+  한 번에 뛰어도 색과 숫자가 **점진적으로** 오른다.  완료(done ≥ total)도 예외가 아니다.
+  · 재시작은 **지금 보이는 값**에서 출발하므로 진행을 잃지 않고, 폭이 클수록 빨라져
+    마지막 보고 뒤 `VAL_TWEEN_MAX_MS` 안에 반드시 닿는다(예전 고정 240ms 재시작이
+    영원히 못 따라가던 원인 = 남은 거리의 일정 비율만 움직이는 지수 추격이었다).
+  · 숫자(개수·%)와 완료 문구는 **표시값**을 따른다(`_sync_display`) — 채움과 숫자가
+    어긋나지 않는다.
+- 퇴장(`hide_overlay`)·마침 틱(`finish_tick`)은 돌던 추격이 **끝날 때까지 기다린다**
+  (상한 `VAL_TWEEN_MAX_MS`) — 100% 로 차오르는 것을 잘라먹지 않는다.  그 뒤 숨김 직전에는
+  `_settle_progress()` 로 목표값을 확정한 뒤 멈춘다(멈춘 tween 의 중간값이 마지막
+  프레임으로 남지 않게).
+- 다이 하나가 켜질 때는 200ms(`_WaferMap.FADE_MS`) 페이드로 켜진다(사용자 요청).
 """
 
 from __future__ import annotations
@@ -151,12 +158,16 @@ class _WaferMap(QWidget):
 
     상태는 셋뿐이다(`set_progress` 계약과 1:1):
     · **결정형** — `setRange/setValue` 의 비율만큼 다이가 **중앙에서 바깥으로** 켜진다
-      (accent).  아직 안 켜진 다이는 트랙 등급(LINE2).  값이 바뀔 때만 다시 그린다.
+      (accent, 불투명).  아직 안 켜진 다이는 같은 동심 물결을 **옅게**(알파 상한
+      `PENDING_ALPHA`) 계속 친다 — 사용자 요청: "파동 애니메이션은 항상 지속되고,
+      진행되면서 점점 색이 채워진다".  채워진 다이와 대기 다이는 불투명도로 갈린다.
     · **busy** — 모든 다이가 accent 로, 중앙에서 번지는 동심 물결로 숨쉰다
       (다이 반지름 1 당 140ms 지연 · 1.6초 주기 · 알파 .18↔1).  ★ 등속(Linear) 무한
       루프다 — 끝에서 감속하는 '숨쉬기' 는 총량을 모르는 작업에 '거의 끝났다' 는
       거짓 신호를 준다(`_BusyStripe` 와 같은 판단).
-    · **완료** — 전체가 pass 색.  `finish_tick` 의 200ms 동안만 켜진다.
+    · **완료** — 전체가 pass 색, 물결 정지.  `finish_tick` 의 200ms 동안만 켜진다.
+
+    물결은 busy·결정형 양쪽에서 돈다 — `start`/`stop` 은 오버레이의 보임/숨김이 부른다.
 
     값 API 는 QProgressBar 의 이름을 그대로 쓴다(`setRange`·`setValue`·`value`·
     `maximum`) — 채움 tween(`LoadingOverlay._val_anim`)이 그 이름으로 밀어 넣는다.
@@ -170,6 +181,8 @@ class _WaferMap(QWidget):
     PULSE_MS = 1600             # busy 물결 한 주기
     RIPPLE_MS = 140             # busy 물결 — 반지름 1 당 지연
     PULSE_MIN_ALPHA = 0.18      # 물결의 골(가장 옅을 때)
+    PENDING_ALPHA = 0.45        # 결정형에서 아직 안 채워진 다이의 물결 알파 상한
+    FADE_MS = 200               # 다이 하나가 켜질 때 옅음 → 불투명 페이드(사용자 요청)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -191,6 +204,9 @@ class _WaferMap(QWidget):
         self._busy = False
         self._done = False
         self._phase = 0.0
+        self._clock = QElapsedTimer()
+        self._clock.start()
+        self._lit_at: dict[int, int] = {}      # rank → 켜진 시각(ms) — 페이드 중인 다이
         self._anim = QVariantAnimation(self)
         self._anim.setStartValue(0.0)
         self._anim.setEndValue(1.0)
@@ -208,7 +224,14 @@ class _WaferMap(QWidget):
     def setValue(self, v: int) -> None:  # noqa: N802
         v = max(0, min(int(v), self._max))
         if v != self._value:
+            before = self.lit_count()
             self._value = v
+            after = self.lit_count()
+            now = self._clock.elapsed()
+            for rank in range(before, after):          # 새로 켜진 다이 — 페이드 시작
+                self._lit_at[rank] = now
+            for rank in [r for r in self._lit_at if r >= after]:   # 되감김 — 페이드 취소
+                del self._lit_at[rank]
             self.update()
 
     def value(self) -> int:
@@ -226,14 +249,14 @@ class _WaferMap(QWidget):
 
     # -- 상태 ---------------------------------------------------------------
     def set_busy(self, on: bool) -> None:
+        """busy ↔ 결정형.  물결은 어느 쪽에서도 계속 돈다 — busy 진입 때 (다시) 켜고,
+        결정형으로 바뀌어도 끄지 않는다(대기 다이가 옅게 이어받는다)."""
         on = bool(on)
         if on != self._busy:
             self._busy = on
             self.update()
         if on:
             self.start()
-        else:
-            self.stop()
 
     def is_busy(self) -> bool:
         return self._busy
@@ -243,25 +266,38 @@ class _WaferMap(QWidget):
         if on != self._done:
             self._done = on
             self.update()
+        if on:
+            self.stop()                 # 완료색 위에서 물결이 치면 '아직' 으로 읽힌다
 
     def is_done(self) -> bool:
         return self._done
 
     def start(self) -> None:
-        """busy 물결을 (다시) 돌린다 — busy 가 아니면 아무것도 하지 않는다."""
-        if self._busy and motion.enabled():
+        """물결을 (다시) 돌린다 — 완료 상태나 모션 off 면 아무것도 하지 않는다."""
+        if not self._done and motion.enabled():
             self._anim.stop()
             self._anim.setDuration(motion.dur(self.PULSE_MS))
             self._anim.start()
         self.update()
 
     def stop(self) -> None:
-        """물결만 멈춘다(busy 여부는 남긴다 — 숨었다 다시 보일 때 `start` 로 되살린다)."""
+        """물결만 멈춘다(busy/값은 남긴다 — 숨었다 다시 보일 때 `start` 로 되살린다)."""
         self._anim.stop()
 
     def _on_phase(self, v) -> None:
         self._phase = float(v)
         self.update()
+
+    def _fade_frac(self, rank: int, now_ms: int) -> float:
+        """켜진 다이의 페이드 진행(0 = 방금 켜짐 … 1 = 불투명).  끝난 다이는 잊는다."""
+        at = self._lit_at.get(rank)
+        if at is None:
+            return 1.0
+        frac = (now_ms - at) / float(self.FADE_MS)
+        if frac >= 1.0:
+            del self._lit_at[rank]
+            return 1.0
+        return max(0.0, frac)
 
     def _pulse_alpha(self, rad: float) -> float:
         """busy 물결 — 반지름만큼 지연된 코사인 숨쉬기(.18 ↔ 1)."""
@@ -281,6 +317,8 @@ class _WaferMap(QWidget):
         accent, line2, passc = (QColor(theme.ACCENT), QColor(theme.LINE2),
                                 QColor(theme.PASS))
         lit = self.lit_count()
+        rippling = self._anim.state() != self._anim.State.Stopped
+        now = self._clock.elapsed()
         p.setPen(Qt.PenStyle.NoPen)
         for rank, (col, r, rad) in enumerate(self._dies):
             if self._done:
@@ -288,8 +326,21 @@ class _WaferMap(QWidget):
             elif self._busy:
                 color = QColor(accent)
                 color.setAlphaF(self._pulse_alpha(rad))
+            elif rank < lit:
+                # 켜진 다이 — 물결이 돌 때만 옅음 → 불투명 200ms 페이드(리페인트는 물결
+                # tick 이 준다).  물결이 없으면(모션 off) 곧바로 불투명.
+                frac = self._fade_frac(rank, now) if rippling else 1.0
+                color = accent
+                if frac < 1.0:
+                    pending = self._pulse_alpha(rad) * self.PENDING_ALPHA
+                    color = QColor(accent)
+                    color.setAlphaF(pending + (1.0 - pending) * frac)
+            elif rippling:
+                # 대기 다이 — 같은 물결을 옅게.  모션 off 면 정적 트랙(line2)으로.
+                color = QColor(accent)
+                color.setAlphaF(self._pulse_alpha(rad) * self.PENDING_ALPHA)
             else:
-                color = accent if rank < lit else line2
+                color = line2
             p.setBrush(color)
             x = ox + col * (self.CELL + self.GAP)
             y = oy + r * (self.CELL + self.GAP)
@@ -396,7 +447,13 @@ class LoadingOverlay(QWidget):
     STOP_BTN_H = 32                        # [중지] — 패널 안 보조 조작 높이(조립부 주석)
     # 결정형 바의 부드러운 채움 지속시간 **이자** '촘촘한 갱신' 판정 기준.
     # 두 값을 따로 두면 어긋난다 — 하나로 묶어 둔다(set_progress 주석 참조).
-    VAL_TWEEN_MS = 240
+    # 채움 추격 — 1% 당 10ms(0→100 을 쉬지 않고 채우면 1초).  ★ 표시 속도가 실제 작업
+    # 속도보다 느리면 지연이 쌓인다(30ms/장 재계산 = 1%/15ms).  MIN 구간(작은 증가)에서는
+    # 속도가 폭에 비례해 떨어지므로 정상 지연 ≈ 실제속도 × MIN = 6~7% 에서 멈춘다 —
+    # `test_dense_updates_track_the_real_progress` 의 10% 상한이 이 값을 지킨다.
+    VAL_PER_PCT_MS = 10
+    VAL_TWEEN_MIN_MS = 100      # 한 칸짜리 증가도 이만큼은 미끄러진다
+    VAL_TWEEN_MAX_MS = 600      # 마지막 보고 뒤 이 안에 반드시 닿는다(추격 상한)
 
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
@@ -428,8 +485,6 @@ class LoadingOverlay(QWidget):
         self._count_label = QLabel("", self._content)
         self._count_label.setProperty("role", "progressCount")
         self._target_val = 0
-        # 결정형 갱신 **간격** 측정 — 촘촘하면 tween 을 건너뛴다.
-        self._val_gap = QElapsedTimer()
         # 결정형 부드러운 채움 — QVariantAnimation(OutQuart) 로 프레임 균일.
         # ★ tick 마다 OutQuart 를 걸면 매 갱신이 끝에서 감속해 채움이 절뚝인다.
         #   연속 갱신되는 결정형 바는 **등속**이 맞다(전체 곡선은 작업 속도가 만든다).
@@ -608,7 +663,34 @@ class LoadingOverlay(QWidget):
         self._place_panel()
 
     def _on_val_tick(self, v) -> None:
-        self._wafer.setValue(int(v))
+        self._sync_display(int(v))
+
+    def _sync_display(self, v: int) -> None:
+        """표시값 하나로 맵·개수·%·완료 문구를 **함께** 움직인다 — 채움이 추격 중이면
+        숫자도 같이 오르고, 완료 문구도 표시가 끝에 닿았을 때 켜진다."""
+        total = self._wafer.maximum()
+        self._wafer.setValue(v)
+        self._set_text(self._count_label,
+                       i18n.KO.LOADING_COUNT_FMT.format(done=v, total=total))
+        self._set_text(self._pct_label, f"{int(v * 100 / max(1, total))}%")
+        self._set_done_state(v >= total and self._target_val >= total)
+
+    def _chase(self, cur: int, done: int, total: int) -> None:
+        """표시값을 ``cur → done`` 으로 등속 추격한다(헤더 규칙 참조)."""
+        pct = (done - cur) * 100.0 / max(1, total)
+        dur = int(min(self.VAL_TWEEN_MAX_MS,
+                      max(self.VAL_TWEEN_MIN_MS, pct * self.VAL_PER_PCT_MS)))
+        self._val_anim.stop()
+        self._val_anim.setStartValue(int(cur))
+        self._val_anim.setEndValue(int(done))
+        self._val_anim.setDuration(motion.dur(dur))
+        self._val_anim.start()
+
+    def _fill_remaining_ms(self) -> int:
+        """돌고 있는 채움 추격이 끝나기까지 남은 ms(안 돌면 0)."""
+        if self._val_anim.state() == self._val_anim.State.Stopped:
+            return 0
+        return max(0, self._val_anim.duration() - self._val_anim.currentTime())
 
     def _on_bar_tick(self, v) -> None:
         self._set_bar_slide(float(v))
@@ -719,7 +801,7 @@ class LoadingOverlay(QWidget):
         이 곧 진실이므로 그것으로 맞춘 뒤 멈춘다."""
         self._val_anim.stop()
         if not self._wafer.is_busy():
-            self._wafer.setValue(int(self._target_val))
+            self._sync_display(int(self._target_val))
 
     def _enter_busy(self) -> None:
         """총량을 모르는 상태 — 웨이퍼 맵을 동심 물결로 돌린다.
@@ -731,7 +813,6 @@ class LoadingOverlay(QWidget):
         증상이고, CLAUDE.md 로딩 계약("진행량을 모를 때도 0 에 멈추지 말고 busy 를
         띄운다")을 정면으로 어긴다."""
         self._val_anim.stop()
-        self._val_gap.invalidate()         # 다음 결정형의 첫 갱신은 '드문 것'으로 본다
         # 총량을 모르니 수치도 추정도 없다 — 비우고 다음 결정형을 위해 리셋한다.
         self._set_text(self._count_label, "")
         self._set_text(self._pct_label, "")
@@ -876,6 +957,9 @@ class LoadingOverlay(QWidget):
         #   `motion.enabled()` 안쪽에 두면 '모션 줄이기' 사용자만 깜빡임을 그대로 받는다
         #   (모션에 민감해서 끈 사람에게 정확히 깜빡임을 주는 셈).  게이트 밖에 둔다.
         remaining = self.MIN_DISPLAY_MS - self._shown_elapsed.elapsed()
+        # 채움이 아직 목표로 차오르는 중이면 그만큼 더 기다린다(상한 VAL_TWEEN_MAX_MS)
+        # — 100% 로 차는 마지막 구간을 퇴장이 잘라먹지 않게.
+        remaining = max(remaining, self._fill_remaining_ms())
         token = self._show_token
         if remaining > 0:                      # 아직 최소 표시 시간 전 → 지연 퇴장
             if not self._hide_pending:
@@ -969,12 +1053,12 @@ class LoadingOverlay(QWidget):
         걸리는 200ms 틱의 실익이 있다고 못박았다 — 스캔·저장처럼 짧은 작업에는
         달지 않는다.  그래서 이건 자동이 아니라 **호출부가 고르는** 신호다.
         ★ 여기서 하는 일은 완료색을 켠 뒤 그만큼 붙잡아 두는 것뿐이다(애니메이션
-        객체를 새로 만들지 않는다).  ``then`` 은 보통 ``hide_overlay`` 다."""
-        self._set_done_state(True)
-        # 웨이퍼 맵이 '한 번 빛나고 멈춘다' — 이 200ms 동안만 전체가 완료색이다
-        # (A안의 그 틱).  `_finish_hide` 가 되돌린다.
-        self._wafer.set_done(True)
+        객체를 새로 만들지 않는다).  ``then`` 은 보통 ``hide_overlay`` 다.
+        ★ 채움이 아직 100% 로 차오르는 중이면 그게 끝난 뒤 같은 타이머로 다시 들어온다
+        — 완료색이 차오르는 다이 위를 덮어 버리지 않게."""
         if not motion.enabled():
+            self._set_done_state(True)
+            self._wafer.set_done(True)
             if then is not None:
                 then()
             return
@@ -988,9 +1072,23 @@ class LoadingOverlay(QWidget):
             timer.timeout.disconnect()
         except TypeError:
             pass
+        wait = self._fill_remaining_ms()
+        if wait > 0:
+            self._finish_then = then
+            timer.timeout.connect(self._retry_finish_tick)
+            timer.start(wait)
+            return
+        self._set_done_state(True)
+        # 웨이퍼 맵이 '한 번 빛나고 멈춘다' — 이 200ms 동안만 전체가 완료색이다
+        # (A안의 그 틱).  `_finish_hide` 가 되돌린다.
+        self._wafer.set_done(True)
         if then is not None:
             timer.timeout.connect(then)
         timer.start(motion.DUR_FINISH_TICK)
+
+    def _retry_finish_tick(self) -> None:
+        """채움 추격이 끝난 뒤 `finish_tick` 재진입(바인드 메서드 — 람다 연결 금지)."""
+        self.finish_tick(getattr(self, "_finish_then", None))
 
     def set_progress(self, done: int, total: int, message: str = "") -> None:
         if message:
@@ -1001,22 +1099,10 @@ class LoadingOverlay(QWidget):
             self._wafer.set_busy(False)
             done = max(0, min(int(done), int(total)))
             self._target_val = done
-            # ★ hide 하지 않는다 — 자리를 예약해 두면 busy↔결정형 전환에 패널 높이가
-            #   뛰지 않는다(이전 36px 점프 → 중앙 정렬이라 상단이 18px 즉시 튀었다).
-            self._set_text(self._count_label,
-                           i18n.KO.LOADING_COUNT_FMT.format(done=done,
-                                                            total=int(total)))
-            self._set_text(self._pct_label, f"{int(done * 100 / max(1, total))}%")
-            # ★ 23안-B — 100% 에 닿는 순간의 **마침 신호는 색이다**(모션 0).
-            #   수 분짜리 작업이 끝나면 오버레이는 140ms 페이드로 조용히 사라져,
-            #   다른 창을 보던 사용자는 끝을 놓쳤다.  design-v2 가 이미 세운
-            #   '진행 정보 → statusPass 전환' 규칙을 여기 그대로 적용한다.
-            self._set_done_state(done >= int(total))
             if self._wafer.maximum() != total:         # 단계 전환/총량 변경 → 스냅
                 self._val_anim.stop()
                 self._wafer.setRange(0, total)
-                self._wafer.setValue(done)
-                self._val_gap.start()                  # 이 시점부터 간격을 잰다
+                self._sync_display(done)
                 # ★ 총량이 바뀌었다 = 다른 일이 시작됐다 — 이전 단계의 처리율을
                 #   물려받으면 추정치가 조용히 거짓말을 한다.
                 self._reset_eta()
@@ -1027,38 +1113,11 @@ class LoadingOverlay(QWidget):
                 #   '버리니까 괜찮다' 는 **순서**에 불변식을 기대게 된다.
                 self._feed_eta(done, int(total))
                 cur = self._wafer.value()
-                # ★ tween 은 **예외**다 — 기본은 정확한 위치(스냅)이고, 아래 세 조건을
-                #   모두 피한 '드문 증가'만 부드럽게 채운다.  진행률은 장식이 아니라
-                #   정보이므로, 부드러움과 정확함이 부딪히면 정확함이 이긴다.
-                #
-                #   (1) 완료(`done >= total`)는 항상 스냅.  마지막 증가를 tween 으로 걸면
-                #       작업이 끝나 오버레이가 내려가면서 `_finish_hide` 의 stop() 에 잘려
-                #       **끝까지 찬 적이 없다**(실측: 400ms 간격 5칸 작업에서 4/5 로 종료).
-                #       완료 뒤에는 부드러워야 할 것이 없다.
-                #   (2) **돌고 있는 tween 은 재시작하지 않는다.**  재시작이 곧 '따라가지
-                #       못함'의 기계다 — 매번 몇 프레임만 돌고 처음으로 밀린다(실측,
-                #       고치기 전: 30ms 간격 50회에서 5/50→0% · 15/50→20% · 50/50→88%).
-                #       간격 측정과 달리 이 조건은 **타이밍에 의존하지 않는 불변식**이라
-                #       불규칙한 갱신에서도, `processEvents()` 로 도는 호출부(실패 사진
-                #       재계산 — tween 이 이벤트 루프를 거의 못 받는다)에서도 성립한다.
-                #   (3) 촘촘한 갱신(간격 < tween 지속시간)도 스냅.  판정 기준을 지속시간
-                #       그 자체로 둔다(값이 하나여야 어긋나지 않는다).
-                gap = self._val_gap.restart() if self._val_gap.isValid() else None
-                dense = gap is not None and gap < motion.dur(self.VAL_TWEEN_MS)
-                running = self._val_anim.state() != self._val_anim.State.Stopped
-                if (done <= cur                        # 리셋/감소
-                        or done >= int(total)          # (1) 완료
-                        or running                     # (2) 진행 중 tween
-                        or dense                       # (3) 촘촘
-                        or not motion.enabled()):
+                if done <= cur or not motion.enabled():    # 리셋/감소·모션 off → 스냅
                     self._val_anim.stop()
-                    self._wafer.setValue(done)
-                else:                                  # 드문 증가 → 부드럽게 tween
-                    self._val_anim.stop()
-                    self._val_anim.setStartValue(int(cur))
-                    self._val_anim.setEndValue(done)
-                    self._val_anim.setDuration(motion.dur(self.VAL_TWEEN_MS))
-                    self._val_anim.start()
+                    self._sync_display(done)
+                else:                                      # 증가 → 등속 추격(헤더 규칙)
+                    self._chase(cur, done, int(total))
         else:
             self._set_done_state(False)                 # 다시 진행 중이다
             self._enter_busy()                          # busy: 동심 물결로 교체
@@ -1095,7 +1154,7 @@ class LoadingOverlay(QWidget):
     def _rearm(self) -> None:
         """`hideEvent` 가 꺼 놓은 것들을 되살린다 — 아직 끝나지 않은 작업이므로."""
         self._set_input_lock(True)
-        self._wafer.start()                # 총량 미상이면 동심 물결도 다시(결정형이면 무동작)
+        self._wafer.start()                # 동심 물결도 다시(busy·결정형 모두, 완료면 무동작)
         # 페이드/상승 애니메이션은 이미 멈췄다 — 다시 재생하면 깜빡이므로 최종값으로.
         self._on_fade(1.0)
         self._on_rise(1.0)

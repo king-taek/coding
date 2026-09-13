@@ -46,6 +46,11 @@ _LIVE_BUILDS: set = set()
 PREWARM_MAX = 500
 
 
+def _coord_progress(report):
+    """``resolve_batch`` 의 ``progress(done, total)`` → 오버레이 결정형 보고."""
+    return lambda done, total: report(i18n.KO.WAFER_MAP_LOADING_COORDS, done, total)
+
+
 class _MapBuild(QThread):
     """좌표 → MapData 계산 + 썸네일 선로딩.  ``token`` 으로 늦은 결과를 버린다."""
 
@@ -55,7 +60,8 @@ class _MapBuild(QThread):
 
     def __init__(self, token: int, job) -> None:
         """``job(report)`` 는 ``(left: MapData, right: MapData | None, extra)`` 를
-        돌려준다(폴더 훑기 + 좌표 계산).  ``report(msg)`` 로 단계를 알린다.  썸네일은
+        돌려준다(폴더 훑기 + 좌표 계산).  ``report(msg, done=0, total=0)`` 로 단계·진행을
+        알린다(``total>0`` 이면 결정형).  썸네일은
         그 결과의 점 전부에 대해 여기서 만든다(:data:`PREWARM_MAX` 이하일 때)."""
         super().__init__()
         self._token = token
@@ -66,7 +72,8 @@ class _MapBuild(QThread):
 
     def run(self) -> None:      # type: ignore[override]
         t = self._token
-        report = lambda msg: self.signals.progress.emit(t, 0, 0, msg)   # noqa: E731
+        def report(msg, done=0, total=0):
+            self.signals.progress.emit(t, done, total, msg)
         extra = None
         try:
             left, right, extra = self._job(report)
@@ -326,7 +333,8 @@ class WaferMapDialog(QDialog):
             paths = (_list_images(folder) if kind == "slot"
                      else [p for n in sorted(slots) for p in _list_images(slots[n])])
             report(i18n.KO.WAFER_MAP_LOADING_COORDS)
-            return build_map(resolve_batch(paths)), None, (kind, slots)
+            coords = resolve_batch(paths, _coord_progress(report))
+            return build_map(coords), None, (kind, slots)
 
         def done(data, _right, extra):
             kind, slots = extra or ("empty", {})
@@ -365,7 +373,7 @@ class WaferMapDialog(QDialog):
             report(i18n.KO.WAFER_MAP_LOADING_SCAN)
             paths = [p for n in names for p in _list_images(slots[n])]
             report(i18n.KO.WAFER_MAP_LOADING_COORDS)
-            return build_map(resolve_batch(paths)), None, None
+            return build_map(resolve_batch(paths, _coord_progress(report))), None, None
 
         self._start_build(job, lambda d, _r, _e: self._show_folder_map(d),
                           i18n.KO.WAFER_MAP_LOADING_SCAN)
@@ -398,7 +406,7 @@ class WaferMapDialog(QDialog):
 
         def job(report):
             report(i18n.KO.WAFER_MAP_LOADING_COORDS)
-            return (*slot_maps(result, slot), None)
+            return (*slot_maps(result, slot, _coord_progress(report)), None)
 
         def done(ref, val, _extra):
             has_ref = bool(ref.points or ref.unplaced)

@@ -183,6 +183,30 @@ def test_slot_maps_merges_lot_and_marks_matches(tmp_path):
     assert len(ref1.points) == 1 and not val1.points
 
 
+def test_resolve_batch_reports_progress(tmp_path):
+    """좌표 해석은 결정형 진행을 낸다 — 마지막 보고가 (n, n) 이고 done 은 단조 증가."""
+    n = 120
+    folder = _camtek_folder(tmp_path, [(f"p{i}", CX, CY) for i in range(n)])
+    seen: list[tuple[int, int]] = []
+    resolve_batch([folder / f"p{i}.jpeg" for i in range(n)],
+                  progress=lambda d, t: seen.append((d, t)))
+    assert seen and seen[-1] == (n, n)
+    assert all(t == n for _, t in seen)
+    assert [d for d, _ in seen] == sorted(d for d, _ in seen)
+
+
+def test_slot_maps_progress_sums_ref_and_val(tmp_path):
+    from aoi_verification.app.models.result import FinalResult
+    f1 = _camtek_folder(tmp_path / "s1", [("a", CX, CY), ("b", CX, CY)])
+    f2 = _camtek_folder(tmp_path / "s2", [("c", CX, CY)])
+    result = FinalResult(mode="single", ref_machine="1", val_machine="2", matches=[],
+                         slot_images={"S1": ([f1 / "a.jpeg", f1 / "b.jpeg"],
+                                             [f2 / "c.jpeg"])})
+    seen: list[tuple[int, int]] = []
+    wm.slot_maps(result, "S1", progress=lambda d, t: seen.append((d, t)))
+    assert seen == [(2, 3), (3, 3)]        # 기준 2장 → 검증 1장, 총량은 합산 3
+
+
 # ---------------------------------------------------------------------------
 # Qt — 뷰 · 시트 · 엑셀
 # ---------------------------------------------------------------------------
@@ -292,6 +316,25 @@ def test_dialog_setup_mode_slot_folder(qt, tmp_path):
         assert dlg.left.isVisibleTo(dlg) and not dlg.right.isVisibleTo(dlg)
         assert not dlg.slots_btn.isVisibleTo(dlg)      # 슬롯 폴더 — 슬롯 선택 없음
         assert i18n.KO.WAFER_MAP_LEGEND_DEFECT in dlg.left.legend.text()
+    finally:
+        dlg.deleteLater()
+
+
+def test_dialog_overlay_gets_determinate_coord_progress(qt, tmp_path, monkeypatch):
+    """좌표 읽기 단계가 오버레이에 (done, total>0) 로 도착한다 — busy 로만 머물면
+    수천 장 파싱 동안 '진척도가 안 나타난다'(실제 보고)."""
+    from aoi_verification.app.ui.widgets.wafer_map_dialog import WaferMapDialog
+    folder = _camtek_folder(tmp_path, [(f"p{i}", CX, CY) for i in range(60)])
+    dlg = WaferMapDialog()
+    calls: list[tuple[int, int, str]] = []
+    real = dlg._loading.set_progress
+    monkeypatch.setattr(dlg._loading, "set_progress",
+                        lambda d, t, m="": (calls.append((d, t, m)), real(d, t, m)))
+    try:
+        dlg.show_folder(folder)
+        _wait_build(qt, dlg)
+        det = [(d, t) for d, t, _ in calls if t > 0]
+        assert (60, 60) in det, calls
     finally:
         dlg.deleteLater()
 

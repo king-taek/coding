@@ -32,6 +32,20 @@ def qapp():
     return QApplication.instance() or QApplication([])
 
 
+def _spin(qapp, ms: int) -> None:
+    """이벤트 루프를 ``ms`` 동안 돌린다(tween 이 진행되게)."""
+    from PyQt6.QtCore import QElapsedTimer
+    t = QElapsedTimer()
+    t.start()
+    while t.elapsed() < ms:
+        qapp.processEvents()
+
+
+def _settle_ms(ov) -> int:
+    """추격 상한 + 여유 — 마지막 보고 뒤 이만큼 돌리면 표시값이 목표에 닿아 있어야 한다."""
+    return ov.VAL_TWEEN_MAX_MS + 150
+
+
 def _overlay(qapp, w=900, h=600):
     host = QWidget()
     host.resize(w, h)
@@ -177,8 +191,9 @@ def test_wafer_map_fills_from_the_centre_outwards(qapp):
     wm.deleteLater()
 
 
-def test_wafer_map_busy_ripple_runs_only_while_busy(qapp, monkeypatch):
-    """busy 물결은 총량 미상 구간에만 돈다 — 결정형에서는 상시 애니메이션 0 개."""
+def test_wafer_map_ripple_keeps_running_in_determinate(qapp, monkeypatch):
+    """물결은 busy 에서 시작해 결정형으로 바뀌어도 **계속** 돈다(사용자 요청 — 파동은
+    항상, 진행은 채움으로).  완료색이 켜지면 그때 멈춘다."""
     from aoi_verification.app.ui import motion
     from aoi_verification.app.ui.widgets.loading_overlay import _WaferMap
     monkeypatch.setattr(motion, "enabled", lambda: True)
@@ -205,7 +220,14 @@ def test_wafer_map_busy_ripple_runs_only_while_busy(qapp, monkeypatch):
             wm._phase = ph
             assert lo - 1e-9 <= wm._pulse_alpha(rad) <= hi + 1e-9
     wm.set_busy(False)
-    assert wm._anim.state() == wm._anim.State.Stopped, "결정형인데 물결이 돈다"
+    assert wm._anim.state() != wm._anim.State.Stopped, "결정형으로 바뀌자 물결이 멈췄다"
+    # 대기 다이의 물결은 채워진 다이(불투명)보다 옅다 — 둘이 불투명도로 갈린다.
+    assert 0 < wm.PENDING_ALPHA < 1
+    wm.set_done(True)
+    assert wm._anim.state() == wm._anim.State.Stopped, "완료색 위에서 물결이 돈다"
+    wm.start()
+    assert wm._anim.state() == wm._anim.State.Stopped, "완료 뒤 start 가 물결을 되살렸다"
+    wm.set_done(False)
     # stop() 은 애니메이션만 멈추고 busy 여부는 남긴다 — 숨었다 다시 보일 때 되살린다.
     wm.set_busy(True)
     wm.stop()
@@ -428,28 +450,18 @@ def test_dense_updates_track_the_real_progress(qapp, monkeypatch):
             lag = abs(ov._wafer.value() - i) / need
             worst = max(worst, lag)
         assert worst <= 0.10, f"표시값이 실제 진행에서 최대 {worst * 100:.1f}% 벗어났다"
+        _spin(qapp, _settle_ms(ov))             # 완료도 추격한다 — 상한 안에 닿는다
         assert ov._wafer.value() == need, \
             f"작업이 끝났는데 바가 {ov._wafer.value()}/{need} 에서 멈췄다"
     finally:
         host.deleteLater()
 
 
-def test_last_update_is_not_left_mid_tween(qapp, monkeypatch):
-    """★ **완료는 tween 하지 않는다** — 마지막 증가가 tween 이면 바가 못 채워진다.
-
-    '촘촘한 갱신' 수정이 못 막은 잔여 버그다(사용자: "개선됐지만 여전히 가끔").
-    갱신이 드물면(예: 400ms 간격) 증가마다 tween 이 걸리는데, **마지막** 증가의 tween 은
-    작업이 끝나 오버레이가 내려가면서 `_finish_hide` 의 `stop()` 에 잘린다.  실측(수정 전,
-    5칸 작업):
-
-        루프 종료 직후 bar = 4 / 5   (100% 여야 한다)
-        숨긴 뒤        bar = 4 / 5
-
-    완료는 **정보**이고 뒤에 부드러워야 할 것이 없다 → `done >= total` 은 항상 스냅한다.
-    그리고 퇴장 경로는 tween 을 멈추기 전에 목표값으로 확정해, 페이드아웃 동안 보이는
-    마지막 프레임이 '멈춘 tween 의 중간값'이 되지 않게 한다."""
-    from PyQt6.QtCore import QElapsedTimer
-
+def test_completion_glides_in_and_exit_waits_for_it(qapp, monkeypatch):
+    """★ 완료(done ≥ total)도 **점진적으로** 찬다(사용자 요청) — 대신 퇴장이 그 추격을
+    기다린다.  예전 규칙('완료는 스냅')이 막던 잔여 버그 — 마지막 증가의 tween 이
+    `_finish_hide` 의 `stop()` 에 잘려 4/5 로 끝나던 것 — 는 `hide_overlay` 가 추격의
+    남은 시간만큼 래치를 늘려서 막는다.  표시값은 단조 증가하고 끝은 정확히 total 이다."""
     from aoi_verification.app.ui import motion
     monkeypatch.setattr(motion, "enabled", lambda: True)
     host, ov = _overlay(qapp)
@@ -458,19 +470,33 @@ def test_last_update_is_not_left_mid_tween(qapp, monkeypatch):
         ov.show_overlay("점수 계산 중")
         ov.set_progress(0, need, "점수 계산 중")
         for i in range(1, need + 1):
-            t = QElapsedTimer()                 # 한 칸당 400ms — tween 보다 드물다
-            t.start()
-            while t.elapsed() < 400:
-                qapp.processEvents()
+            _spin(qapp, 400)                    # 한 칸당 400ms — 드문 갱신
             ov.set_progress(i, need, f"{i}/{need}")
             qapp.processEvents()
-        assert ov._wafer.value() == need, (
-            f"작업이 끝났는데 바가 {ov._wafer.value()}/{need} 에서 멈췄다 "
-            "(마지막 증가가 tween 으로 걸렸다)")
-        ov.hide_overlay()
-        qapp.processEvents()
-        assert ov._wafer.value() == need, \
-            "퇴장 페이드 동안 바가 목표값 아래로 남았다"
+        # 마지막 보고 직후에는 아직 차오르는 중이어야 한다(= 완료도 스냅이 아니다).
+        assert ov._wafer.value() < need, "완료를 한 번에 채웠다(점진 요청 위반)"
+        assert ov._val_anim.state() != ov._val_anim.State.Stopped
+        # 퇴장 페이드가 **시작되는 순간**의 표시값을 붙잡는다 — 그때 이미 100% 여야
+        # '차오르는 마지막 구간을 퇴장이 잘라먹지 않았다' 가 성립한다(샘플링 타이밍에
+        # 기대지 않는다).
+        at_fade = []
+        real_begin = ov._begin_fade_out
+        monkeypatch.setattr(ov, "_begin_fade_out",
+                            lambda tok: (at_fade.append(ov._wafer.value()),
+                                         real_begin(tok)))
+        ov.hide_overlay()                       # 퇴장 요청 — 추격이 끝날 때까지 기다린다
+        assert ov.is_retiring()
+        prev = ov._wafer.value()
+        for _ in range(300):
+            _spin(qapp, 10)
+            cur = ov._wafer.value()
+            assert cur >= prev, f"표시값이 뒤로 갔다: {prev} → {cur}"
+            prev = cur
+            if not ov.isVisible():
+                break
+        assert not ov.isVisible(), "퇴장이 끝나지 않았다"
+        assert at_fade == [need], f"페이드 시작 시점의 표시값 {at_fade} ≠ {need}"
+        assert ov._wafer.value() == need
     finally:
         host.hide()
         qapp.processEvents()
@@ -478,34 +504,26 @@ def test_last_update_is_not_left_mid_tween(qapp, monkeypatch):
         qapp.processEvents()
 
 
-def test_running_tween_is_never_restarted(qapp, monkeypatch):
-    """★ **돌고 있는 tween 을 재시작하지 않는다** — 재시작이 '따라가지 못함'의 기계다.
-
-    간격 측정만으로는 부족하다: 갱신이 불규칙하면(빠름·빠름·느림) 판정이 틀리고, tween 은
-    이벤트 루프가 돌 때만 진행하므로 `processEvents()` 로 도는 호출부(실패 사진 재계산)
-    에서는 몇 프레임만 돌고 계속 처음으로 밀린다.  '재시작 금지'는 간격과 달리
-    **타이밍에 의존하지 않는 불변식**이라 어느 호출부에서도 성립한다."""
-    from PyQt6.QtCore import QElapsedTimer
-
+def test_retarget_continues_from_displayed_value_and_lands(qapp, monkeypatch):
+    """★ 돌고 있는 추격 위로 새 값이 와도 **지금 보이는 값**에서 이어 간다 — 뒤로 가지도,
+    처음으로 밀리지도 않는다.  예전 '재시작 금지' 는 고정 240ms 재시작이 남은 거리의
+    일정 비율만 움직이는 지수 추격이라 영원히 못 따라가던 것을 막던 규칙이었다.  지금은
+    폭에 비례한 등속이라 재시작해도 속도가 유지되고, 상한 `VAL_TWEEN_MAX_MS` 안에 닿는다."""
     from aoi_verification.app.ui import motion
     monkeypatch.setattr(motion, "enabled", lambda: True)
     host, ov = _overlay(qapp)
     try:
         ov.show_overlay("작업 중")
         ov.set_progress(0, 100, "시작")
-        t = QElapsedTimer()
-        t.start()
-        while t.elapsed() < 600:                # 드문 갱신 → tween 이 걸린다
-            qapp.processEvents()
         ov.set_progress(40, 100, "도약")
+        _spin(qapp, 150)                        # 추격 중간 — 0 < 표시값 < 40
+        mid = ov._wafer.value()
+        assert 0 < mid < 40, f"추격이 안 걸렸거나 이미 끝났다(표시값 {mid})"
+        ov.set_progress(60, 100, "다음")          # 돌고 있는 추격 위로 새 목표
         qapp.processEvents()
-        assert ov._val_anim.state() != ov._val_anim.State.Stopped, "tween 이 안 걸렸다"
-        started_at = ov._wafer.value()
-        # tween 이 도는 **중에** 다음 값이 온다 → 재시작이 아니라 즉시 스냅.
-        ov.set_progress(60, 100, "다음")
-        assert ov._wafer.value() == 60, (
-            f"돌고 있는 tween 을 재시작했다(값 {ov._wafer.value()}, "
-            f"tween 시작값 {started_at}) — 이 재시작이 반복되면 목표를 영원히 못 따라간다")
+        assert mid <= ov._wafer.value() < 60, "재시작이 보이는 값을 버렸다"
+        _spin(qapp, _settle_ms(ov))
+        assert ov._wafer.value() == 60, "상한 안에 목표에 닿지 않았다"
         assert ov._val_anim.state() == ov._val_anim.State.Stopped
     finally:
         host.hide()
@@ -540,6 +558,7 @@ def test_irregular_updates_stay_monotonic_and_finish(qapp, monkeypatch):
             assert cur >= prev, f"표시값이 뒤로 갔다: {prev} → {cur}"
             assert cur <= i, f"표시값이 실제 진행({i})을 앞질렀다: {cur}"
             prev = cur
+        _spin(qapp, _settle_ms(ov))
         assert ov._wafer.value() == need
     finally:
         host.hide()
@@ -569,5 +588,83 @@ def test_sparse_updates_still_tween(qapp, monkeypatch):
         # 방금 걸었으므로 아직 80 에 닿지 않았어야 한다(= tween 이 걸렸다).
         assert ov._wafer.value() < 80, "드문 갱신인데 tween 없이 스냅했다"
         assert ov._val_anim.state() != ov._val_anim.State.Stopped
+    finally:
+        host.deleteLater()
+
+
+def test_percent_and_count_follow_the_displayed_value(qapp, monkeypatch):
+    """큰 도약이 와도 %·개수는 **표시값**과 함께 점진적으로 오른다(사용자 요청) —
+    맵은 천천히 차는데 숫자만 먼저 80% 를 찍으면 둘이 서로 거짓말한다."""
+    from aoi_verification.app.ui import motion
+    monkeypatch.setattr(motion, "enabled", lambda: True)
+    host, ov = _overlay(qapp)
+    try:
+        ov.show_overlay("작업 중")
+        ov.set_progress(0, 100, "시작")
+        ov.set_progress(80, 100, "도약")
+        qapp.processEvents()
+        assert ov._pct_label.text() != "80%", "숫자가 채움보다 먼저 뛰었다"
+        _spin(qapp, 150)
+        mid = ov._wafer.value()
+        assert 0 < mid < 80
+        assert ov._pct_label.text() == f"{mid}%"
+        assert ov._count_label.text() == i18n.KO.LOADING_COUNT_FMT.format(
+            done=mid, total=100)
+        _spin(qapp, _settle_ms(ov))
+        assert ov._pct_label.text() == "80%"
+        assert ov._count_label.text() == i18n.KO.LOADING_COUNT_FMT.format(
+            done=80, total=100)
+    finally:
+        host.deleteLater()
+
+
+def test_die_lights_up_with_a_200ms_fade(qapp, monkeypatch):
+    """다이 하나가 켜질 때 옅음 → 불투명 200ms 페이드(사용자 요청).  되감기면 취소."""
+    from aoi_verification.app.ui import motion
+    from aoi_verification.app.ui.widgets.loading_overlay import _WaferMap
+    monkeypatch.setattr(motion, "enabled", lambda: True)
+    wm = _WaferMap()
+    assert wm.FADE_MS == 200
+    wm.set_busy(True)
+    wm.set_busy(False)                          # 결정형 — 물결은 계속 돈다
+    wm.setRange(0, 100)
+    wm.setValue(50)
+    lit = wm.lit_count()
+    assert 0 < lit < wm.die_count()
+    now = wm._clock.elapsed()
+    # 방금 켜진 다이는 전부 페이드 시작점(0)에 있고, 100ms 뒤 절반, 200ms 뒤 불투명.
+    assert all(wm._fade_frac(r, now) < 0.2 for r in range(lit))
+    assert abs(wm._fade_frac(0, now + 100) - 0.5) < 0.2
+    assert wm._fade_frac(0, now + 250) == 1.0
+    assert 0 not in wm._lit_at, "끝난 페이드를 잊지 않았다(딕셔너리가 자란다)"
+    # 안 켜진 다이는 페이드 대상이 아니다 → 1.0(불투명 판정은 paint 가 rank<lit 로 가른다)
+    assert wm._fade_frac(lit + 1, now) == 1.0
+    # 되감기: 값이 줄면 그 위 다이의 페이드는 취소된다.
+    wm.setValue(100)
+    wm.setValue(10)
+    assert all(r < wm.lit_count() for r in wm._lit_at)
+    wm.deleteLater()
+
+
+def test_finish_tick_waits_for_the_fill_to_land(qapp, monkeypatch):
+    """마침 틱은 채움이 100% 에 닿은 **뒤** 완료색을 켠다 — 차오르는 다이 위를 초록으로
+    덮어 버리면 점진 채움이 보이지 않는다."""
+    from aoi_verification.app.ui import motion
+    monkeypatch.setattr(motion, "enabled", lambda: True)
+    host, ov = _overlay(qapp)
+    try:
+        ov.show_overlay("작업 중")
+        ov.set_progress(0, 100, "시작")
+        ov.set_progress(100, 100, "끝")
+        qapp.processEvents()
+        assert ov._wafer.value() < 100
+        fired = []
+        ov.finish_tick(then=lambda: fired.append(ov._wafer.value()))
+        assert not ov._wafer.is_done(), "채움이 끝나기 전에 완료색을 켰다"
+        _spin(qapp, _settle_ms(ov))
+        assert ov._wafer.value() == 100
+        assert ov._wafer.is_done(), "채움이 끝났는데 완료색이 안 켜졌다"
+        _spin(qapp, motion.DUR_FINISH_TICK + 100)
+        assert fired == [100], "then 이 200ms 틱 뒤 한 번 불려야 한다"
     finally:
         host.deleteLater()

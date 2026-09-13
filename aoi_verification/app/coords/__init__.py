@@ -31,8 +31,11 @@ def resolve(image_path: Path) -> Optional[DefectCoord]:
     return kla_info.resolve(image_path)
 
 
-def resolve_batch(paths) -> dict:
+def resolve_batch(paths, progress=None) -> dict:
     """여러 이미지 경로를 한꺼번에 resolve → {path: DefectCoord | None}.
+
+    ``progress(done, total)`` 을 주면 해석 진행을 알린다(로딩바용 — 폴더마다 첫 장은
+    INI 파싱으로 느리고 나머지는 캐시 적중이라, 수천 장이면 busy 로는 멈춘 듯 보인다).
 
     INI/KLA 파일은 폴더별로 한 번만 파싱(lru_cache 활용)하므로
     같은 폴더 내 여러 이미지를 반복 파싱하지 않는다.
@@ -45,8 +48,12 @@ def resolve_batch(paths) -> dict:
     절대좌표 비교는 die-내부보다 오히려 엄격하다).
     """
     result: dict = {}
-    for p in paths:
+    paths = list(paths)
+    total = len(paths)
+    for i, p in enumerate(paths, start=1):
         result[p] = resolve(p)
+        if progress is not None and (i % 50 == 0 or i == total):
+            progress(i, total)
 
     sources = {c.source for c in result.values() if c is not None}
 

@@ -261,11 +261,13 @@ def grid_lines(frame: WaferFrame) -> tuple[list[float], list[float]]:
 ALL_SLOTS_KEY = ""      # '전체(LOT 합산)' 를 뜻하는 슬롯 키
 
 
-def slot_maps(result, slot: str = ALL_SLOTS_KEY) -> tuple[MapData, MapData]:
+def slot_maps(result, slot: str = ALL_SLOTS_KEY,
+              progress=None) -> tuple[MapData, MapData]:
     """결과의 한 슬롯(또는 ``ALL_SLOTS_KEY`` = 전체)에 대한 (기준 맵, 검증 맵).
 
     ``result`` 는 :class:`~..models.result.FinalResult` — ``slot_images`` 와 ``matches``
-    만 쓴다.  결과 화면과 엑셀 시트가 **같은 함수**로 만든다."""
+    만 쓴다.  결과 화면과 엑셀 시트가 **같은 함수**로 만든다.
+    ``progress(done, total)`` 은 기준+검증 합산 진행(로딩바용)."""
     from . import resolve_batch          # 순환 import 회피(패키지 __init__)
 
     names = list(result.slot_images) if slot == ALL_SLOTS_KEY else [slot]
@@ -277,5 +279,10 @@ def slot_maps(result, slot: str = ALL_SLOTS_KEY) -> tuple[MapData, MapData]:
         val_paths += list(v)
     matched = {Path(m.ref_path) for m in result.matches if m.slot in names}
     matched |= {Path(m.val_path) for m in result.matches if m.slot in names}
-    return (build_map(resolve_batch(ref_paths), matched),
-            build_map(resolve_batch(val_paths), matched))
+    n_ref, total = len(ref_paths), len(ref_paths) + len(val_paths)
+    ref_prog = val_prog = None
+    if progress is not None:
+        ref_prog = lambda d, _t: progress(d, total)             # noqa: E731
+        val_prog = lambda d, _t: progress(n_ref + d, total)     # noqa: E731
+    return (build_map(resolve_batch(ref_paths, ref_prog), matched),
+            build_map(resolve_batch(val_paths, val_prog), matched))
