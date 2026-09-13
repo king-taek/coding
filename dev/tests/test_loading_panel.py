@@ -221,13 +221,23 @@ def test_wafer_map_ripple_keeps_running_in_determinate(qapp, monkeypatch):
             assert lo - 1e-9 <= wm._pulse_alpha(rad) <= hi + 1e-9
     wm.set_busy(False)
     assert wm._anim.state() != wm._anim.State.Stopped, "결정형으로 바뀌자 물결이 멈췄다"
-    # 켜진 다이는 파란색, 대기 다이는 회색으로 같은 물결 — 둘은 **색**으로 갈린다.
+    # 켜진 다이는 파란색으로 **얕게**(.62↔1) 숨쉰다 — busy 의 .18↔1 은 너무 요란했다
+    # (사용자가 3안 비교 후 '진폭 축소' 채택).  대기 다이는 회색 정지(paint 가 line2).
+    assert wm.PULSE_MIN_ALPHA == 0.62, "busy 와 결정형이 같은 얕은 진폭이어야 한다"
+    wm._phase = 0.0
+    assert abs(wm._pulse_alpha(0.0) - wm.PULSE_MIN_ALPHA) < 1e-9      # 골
+    wm._phase = 0.5
+    assert abs(wm._pulse_alpha(0.0) - 1.0) < 1e-9                     # 마루
+    # busy → 결정형 전환은 200ms 회색 페이드로 — 전환 시각이 기록된다.
+    wm.set_busy(True)
+    before = wm._clock.elapsed()
+    wm.set_busy(False)
+    assert 0 <= wm._greyed_at - before < 50 and wm.GREY_FADE_MS == 200
     from aoi_verification.app.ui.widgets.loading_overlay import _mix
     from PyQt6.QtGui import QColor
     grey, blue = QColor(theme.LINE2), QColor(theme.ACCENT)
     assert _mix(grey, blue, 0.0).name() == grey.name()
     assert _mix(grey, blue, 1.0).name() == blue.name()
-    assert _mix(grey, blue, 0.5).name() not in (grey.name(), blue.name())
     wm.set_done(True)
     assert wm._anim.state() == wm._anim.State.Stopped, "완료색 위에서 물결이 돈다"
     wm.start()
