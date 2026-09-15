@@ -180,7 +180,15 @@ class CoordScheduler(QThread):
                 all_paths.append(r.path)
             for v in vals:
                 all_paths.append(v.path)
-        coord_cache: Dict[Path, object] = _resolve_batch(all_paths)
+        # ★ 파싱 진행을 **반드시 보고한다**(CLAUDE.md 로딩 계약: "0 에서 안 움직이다
+        #   갑자기 완료" 금지).  폴더마다 첫 장이 INI/KLA 파싱으로 느려 수천 장이면
+        #   이 단계만 수십 초인데, ``progress`` 를 안 넘겨 그동안 바가 '좌표 파싱 중…'
+        #   라벨만 띄운 채 멈춰 있었다.  ``resolve_batch`` 는 이미 콜백 계약을 갖고
+        #   있다(웨이퍼 맵이 쓰는 그것) — 여기서 안 쓰고 있었을 뿐이다.
+        coord_cache: Dict[Path, object] = _resolve_batch(
+            all_paths,
+            lambda done, total: self.signals.progress.emit(done, total),
+        )
 
         # ── 좌표 없는 경우 조기 종료 ────────────────────────────────────
         total_refs = sum(len(refs) for _, refs, _ in self._tasks)
@@ -196,6 +204,10 @@ class CoordScheduler(QThread):
         done_pairs = 0
         tol = self._tolerance
         self.signals.phase.emit(i18n.KO.PHASE_COORD)
+        # 파싱 단계의 총량(사진 장수)과 여기서 쓰는 총량(쌍 수)이 다르다 — 바가
+        # '파싱 100%' 자리에 걸린 채 매칭을 시작하지 않도록 새 범위로 즉시 되돌린다
+        # (LoadingOverlay 는 범위가 바뀌면 tween 없이 스냅한다).
+        self.signals.progress.emit(0, total_pairs)
 
         for slot_idx, (slot, refs, vals) in enumerate(self._tasks):
             if self._stop.is_set():

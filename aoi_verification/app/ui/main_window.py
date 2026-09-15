@@ -1616,6 +1616,7 @@ class MainWindow(QMainWindow):
             slot_only_val=list(self._scan.val_only),
             unmatched_refs=unmatched_refs,
             kla_folders=dict(getattr(self, "_kla_folders", {})),
+            slot_numbers=self._slot_numbers(),
             # Wafer map — 슬롯마다 양쪽 사진 전부(매치 여부는 matches 로 가른다).
             slot_images={
                 name: ([it.path for it in s.ref_images],
@@ -1726,6 +1727,33 @@ class MainWindow(QMainWindow):
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             dst = dst.with_name(dst.stem + f"_{ts}" + dst.suffix)
         self._working_xlsx = dst
+
+    def _slot_numbers(self) -> dict[str, str]:
+        """{slot명 → 카세트 슬롯 번호} — 엑셀 B열의 `(#6)` 표기용.
+
+        번호는 슬롯 폴더의 ``WaferInfo.ini`` 의 ``ActiveSlot`` 이다.  기준·검증 폴더를
+        모두 읽고 **값이 다르면 병기**한다(KLA 폴더명 표기와 같은 관습 — 한쪽만 남기면
+        어느 장비의 번호인지 알 수 없다).  같은 웨이퍼라도 두 장비에서 카세트 위치가
+        다를 수 있어 한쪽 값으로 단정하지 않는다.
+
+        못 읽은 슬롯은 아예 넣지 않는다 → 엑셀은 slot명만 찍는다.  파일 접근은 슬롯당
+        최대 두 번(INI 1개씩)이고 :func:`read_active_slot` 이 폴더별로 캐시하므로,
+        결과↔검토를 오가며 이 함수가 다시 돌아도 왕복이 늘지 않는다.
+        """
+        from ..models.lot_info import read_active_slot
+
+        out: dict[str, str] = {}
+        if self._scan is None:
+            return out
+        for name, slot in self._scan.slots.items():
+            nums: list[str] = []
+            for d in (slot.ref_dir, slot.val_dir):
+                n = read_active_slot(Path(d)) if d else None
+                if n and n not in nums:
+                    nums.append(n)
+            if nums:
+                out[name] = " / ".join(nums)
+        return out
 
     @staticmethod
     def _suggest_result_name(inp: SetupInput) -> str:

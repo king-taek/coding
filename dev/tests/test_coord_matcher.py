@@ -122,3 +122,66 @@ def test_match_neighbors_distance_beyond_3tol_fails():
     # 같은 die 지만 die-내부 거리 > 3×tol → 매치 실패.
     out = _match(0.0, 0.0, 1, 1, {(1, 1): [(far, 9000.0, 0.0)]}, TOL)
     assert out == []
+
+
+# ---------------------------------------------------------------------------
+# 좌표 파싱 단계의 진행 보고 (CLAUDE.md 로딩 계약)
+# ---------------------------------------------------------------------------
+# 증상: 좌표 매칭을 돌리면 '좌표 파싱 중…' 구간에서 진척도가 뜨지 않았다.  원인은
+# ``resolve_batch`` 가 이미 갖고 있는 ``progress(done, total)`` 콜백을 **안 넘겨서**,
+# 사진 수천 장을 훑는 그 구간 동안 워커가 보고할 것이 없었던 것이다.
+class _Coord:
+    """``DefectCoord`` 대역 — 스케줄러가 보는 네 필드만 있으면 된다."""
+
+    def __init__(self, col: int, row: int, x: float, y: float) -> None:
+        self.col, self.row, self.x, self.y = col, row, x, y
+
+
+def _items(slot: str, side: str, n: int):
+    return [cm.ImageItem(slot, Path(f"/tmp/{slot}_{side}{i}.jpg"), side)
+            for i in range(n)]
+
+
+@pytest.fixture
+def scheduler_with_stub_resolve(monkeypatch):
+    """``_resolve_batch`` 를 가벼운 더미로 바꿔 실제 파일 없이 ``_run`` 을 돈다."""
+    def fake_resolve_batch(paths, progress=None):
+        paths = list(paths)
+        assert progress is not None, (
+            "좌표 파싱에 진행 콜백이 안 넘어왔다 — 바가 그 구간 동안 멈춘다")
+        for i, _p in enumerate(paths, start=1):
+            progress(i, len(paths))
+        return {p: _Coord(1, 1, 0.0, 0.0) for p in paths}
+
+    monkeypatch.setattr(cm, "_resolve_batch", fake_resolve_batch)
+    refs, vals = _items("A", "ref", 2), _items("A", "val", 3)
+    sched = cm.CoordScheduler([("A", refs, vals)])
+    seen: list[tuple[int, int]] = []
+    phases: list[str] = []
+    sched.signals.progress.connect(lambda d, t: seen.append((d, t)))
+    sched.signals.phase.connect(phases.append)
+    sched._run()                       # QThread.run() 을 동기 실행
+    return seen, phases
+
+
+def test_parse_phase_reports_progress(scheduler_with_stub_resolve):
+    """파싱 구간에서 사진 1장(콜백 1회)마다 진행이 올라간다."""
+    seen, phases = scheduler_with_stub_resolve
+    total_paths = 5                    # ref 2 + val 3
+    parse = seen[:total_paths]
+    assert [d for d, _t in parse] == [1, 2, 3, 4, 5], f"진행이 안 올라갔다: {seen}"
+    assert all(t == total_paths for _d, t in parse)
+    assert phases[0] == cm.i18n.KO.PHASE_COORD_PARSE
+
+
+def test_progress_restarts_at_the_pair_scale(scheduler_with_stub_resolve):
+    """파싱(장수)과 매칭(쌍 수)은 총량이 다르다 — 바가 '파싱 100%' 에 걸리지 않는다."""
+    seen, _phases = scheduler_with_stub_resolve
+    total_pairs = 2 * 3
+    after = seen[5:]
+    assert after[0] == (0, total_pairs), (
+        f"매칭 단계 첫 보고가 새 범위(0/{total_pairs})가 아니다: {after[:3]}")
+    assert after[-1] == (total_pairs, total_pairs)
+    # 같은 총량 구간 안에서는 단조 증가 (로딩바가 뒤로 가지 않는다).
+    dones = [d for d, _t in after]
+    assert dones == sorted(dones)

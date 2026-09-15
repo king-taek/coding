@@ -56,10 +56,13 @@ IMG_COL_WIDTH = 22
 #   생김새가 달라지므로, 서식을 바꿀 땐 여기를 고치고 그 스크립트를 다시 돌린다.
 TEMPLATE_FONT = "맑은 고딕"
 
-# 열 폭 — 사진 열(C·D)은 현행 유지, 수기 열(E~H)과 A·B 는 좁혔다(사용자 지정).
-#   A·B 를 좁힌 이유: 'No' 는 3자리, slot 명도 짧은데 사진 열만큼 자리를 먹어
-#   가로가 불필요하게 길었다.
-COL_WIDTHS = {"A": 4.5, "B": 9.5, "C": 31.8, "D": 31.8,
+# 열 폭 — 사진 열(C·D)은 현행 유지, 수기 열(E~H)과 A 는 좁혔다(사용자 지정).
+#   A 를 좁힌 이유: 'No' 는 3자리인데 사진 열만큼 자리를 먹어 가로가 불필요하게 길었다.
+#   ★ B(slot#)는 9.5 였다가 15 로 넓혔다 — slot 명이 짧다는 전제가 틀렸다.  실물
+#     slot 명은 WaferID 12자(`A1033ABQEWG3`·`25195007EWF6`)라 9.5 에서는 뒤가 잘려
+#     보였다(사용자 지적).  폭 단위는 기준 글꼴 '0' 자 기준이고 대문자가 그보다
+#     넓으므로 12자 + 여유 → 15.
+COL_WIDTHS = {"A": 4.5, "B": 15, "C": 31.8, "D": 31.8,
               "E": 13, "F": 13, "G": 13, "H": 13}
 
 # 헤더 1행 — 진한 남색 띠(흰 글씨).  표 상단이 하나로 읽힌다.
@@ -448,26 +451,42 @@ class ExcelExporter(QThread):
 
     # ------------------------------------------------------------------
     def _write_slot_cell(self, ws, row: int, slot: str, center) -> None:
-        """B열에 slot명을 쓴다.  KLA 장비면 slot명(WaferID) 아래 줄에 KLA 하위폴더명을
-        **회색 글씨**로 함께 표기한다 (#KLA).  rich text 미지원 시 plain 폴백."""
+        """B열에 slot명을 쓴다.  아래 줄에 덧붙는 것이 둘 있다:
+
+        · **카세트 슬롯 번호** — ``WaferInfo.ini`` 의 ``ActiveSlot`` (사용자 요청)::
+
+              A1033ABQEWG3
+              (#6)
+
+          장비가 준 값이라 slot명과 같은 글씨로 찍는다(보조 정보가 아니다).
+        · **KLA 하위폴더명** — KLA 장비일 때만, 그 아래 줄에 **회색 작은 글씨**로
+          (#KLA).  rich text 미지원 시 plain 폴백.
+        """
         from openpyxl.styles import Alignment
 
         cell = ws[f"{COL_SLOT}{row}"]
+        num = (self._result.slot_numbers or {}).get(slot)
         kf = (self._result.kla_folders or {}).get(slot)
-        if not kf:
+        if not num and not kf:
             cell.value = slot
             cell.alignment = center
             return
+        # 여러 줄을 쓰면 wrap_text 가 있어야 엑셀이 줄바꿈을 보여준다.
         wrap = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        head = f"{slot}\n(#{num})" if num else slot
+        if not kf:
+            cell.value = head
+            cell.alignment = wrap
+            return
         try:
             from openpyxl.cell.rich_text import CellRichText, TextBlock
             from openpyxl.cell.text import InlineFont
             cell.value = CellRichText(
-                TextBlock(InlineFont(), f"{slot}\n"),
+                TextBlock(InlineFont(), f"{head}\n"),
                 TextBlock(InlineFont(sz=8, color="808080"), str(kf)),
             )
         except Exception:
-            cell.value = f"{slot}\n{kf}"
+            cell.value = f"{head}\n{kf}"
         cell.alignment = wrap
 
     # ------------------------------------------------------------------

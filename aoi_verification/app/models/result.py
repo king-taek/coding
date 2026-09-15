@@ -43,6 +43,9 @@ class FinalResult:
     # KLA 장비 사용 시: {slot명(WaferID) → KLA 하위폴더명}.  엑셀 B열에 slot명 아래
     # 회색 글씨로 KLA 폴더명을 함께 표기한다.
     kla_folders: dict[str, str] = field(default_factory=dict)
+    # {slot명 → 카세트 슬롯 번호(`WaferInfo.ini` 의 `ActiveSlot`)}.  엑셀 B열에 slot명
+    # 아래 `(#6)` 으로 함께 표기한다.  못 읽은 슬롯은 아예 들어오지 않는다(표기 생략).
+    slot_numbers: dict[str, str] = field(default_factory=dict)
     # Wafer map 용 — {slot명 → (기준 사진 경로들, 검증 사진 경로들)}.  스캔 결과에서
     # 옮겨 담는다(결과 화면·엑셀 시트가 같은 목록을 본다).  매치 여부는 ``matches`` 로.
     slot_images: dict[str, tuple[list[Path], list[Path]]] = field(default_factory=dict)

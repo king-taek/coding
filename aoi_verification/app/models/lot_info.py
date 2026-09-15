@@ -1,4 +1,5 @@
-"""자재·Layer 이름 — 장비가 쓴 ``WaferInfo.ini`` 에서 읽는다.
+"""장비가 쓴 ``WaferInfo.ini`` 를 읽는다 — 자재·Layer(:func:`read_lot_info`) 와
+카세트 슬롯 번호(:func:`read_active_slot`).
 
 결과 엑셀의 **추천 파일 제목**을 만드는 데 쓴다(사용자 요청):
 
@@ -26,18 +27,22 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
 from ..coords.ini_text import read_ini_text
 
-__all__ = ["LotInfo", "read_lot_info"]
+__all__ = ["LotInfo", "read_lot_info", "read_active_slot"]
 
 _INI_NAME = "WaferInfo.ini"
 # `InputLot=GFW-RDL4` — 값 안의 **첫 하이픈**에서 자재와 Layer 로 나뉜다.
 # ★ `UseLot` 도 같은 값을 갖지만(실물 확인) `InputLot` 만 본다 — 하나로 정해 두지
 #   않으면 둘이 다를 때 무엇을 읽었는지 알 수 없다.
 _INPUT_LOT = re.compile(r"(?im)^\s*InputLot\s*=\s*(\S+)\s*$")
+# `ActiveSlot=6` — 웨이퍼가 꽂혀 있던 **카세트 슬롯 번호**.  결과 엑셀 slot# 칸에
+# slot명 아래 `(#6)` 으로 함께 찍는다(사용자 요청).
+_ACTIVE_SLOT = re.compile(r"(?im)^\s*ActiveSlot\s*=\s*(\d+)\s*$")
 
 
 @dataclass(frozen=True)
@@ -93,5 +98,31 @@ def read_lot_info(root: Path) -> Optional[LotInfo]:
             if material and layer:
                 return LotInfo(material=material, layer=layer, source=ini)
         return None
+    except Exception:
+        return None
+
+
+@lru_cache(maxsize=256)
+def read_active_slot(folder: Path) -> Optional[str]:
+    """``folder`` 의 ``WaferInfo.ini`` 에서 ``ActiveSlot``(카세트 슬롯 번호) 를 읽는다.
+
+    실물 근거(`docs/WaferInfo.ini`)::
+
+        [AutoCycleInfo]
+        ActiveSlot=5
+
+    ⚠ :func:`read_lot_info` 와 달리 **부모 폴더는 보지 않는다**.  자재·Layer 는 로트
+    공통이라 아무 슬롯에서 읽어도 같지만 ``ActiveSlot`` 은 **웨이퍼 한 장의 값**이다 —
+    슬롯 폴더 옆에 놓인 INI 를 읽으면 다른 웨이퍼의 번호를 그 슬롯에 붙인다.  못 찾으면
+    번호 없이 slot명만 찍히므로, 잘못된 번호를 찍는 것보다 없는 편이 낫다.
+
+    못 읽으면 ``None`` — 전 구간 fail-safe(엑셀 표기용 부가 정보라 흐름을 멈추지 않는다).
+    """
+    try:
+        ini = Path(folder) / _INI_NAME
+        if not ini.is_file():
+            return None
+        m = _ACTIVE_SLOT.search(read_ini_text(ini) or "")
+        return m.group(1) if m else None
     except Exception:
         return None

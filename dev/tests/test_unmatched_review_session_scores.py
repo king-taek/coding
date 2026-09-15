@@ -248,7 +248,8 @@ def test_coord_scheduler_marks_which_refs_were_scored_classically(monkeypatch):
         def __init__(self, col, row, x, y):
             self.col, self.row, self.x, self.y = col, row, x, y
 
-    monkeypatch.setattr(CM, "_resolve_batch", lambda paths: {
+    # ``progress`` 는 로딩바용 콜백 — 스케줄러가 항상 넘긴다(파싱 구간 진척도).
+    monkeypatch.setattr(CM, "_resolve_batch", lambda paths, progress=None: {
         with_coord.path: _C(1, 1, 0.0, 0.0),
         val.path: _C(1, 1, 10.0, 0.0),
     })
