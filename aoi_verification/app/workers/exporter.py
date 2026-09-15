@@ -40,6 +40,11 @@ SHEET_FULL_NAME = "전체 양식"
 # 슬롯 구분선이 그려지는 컬럼 — 사용자 요청 (#6): A~D 만, 두껍게.
 BORDER_COLS = ["A", "B", "C", "D"]
 
+# 카세트 슬롯 번호(`WaferInfo.ini` 의 `ActiveSlot`) 표기 — slot명 **아래 줄**에 붙는다.
+# 요약/미매칭 시트의 B열과 Wafer Map 시트의 슬롯 칸이 같은 표기를 쓴다(두 벌로 갈라지면
+# 같은 슬롯이 시트마다 다르게 적힌다).
+SLOT_NUMBER_FMT = "(#{num})"
+
 # 셀 ↔ 사진 크기 정합:
 #   · 양식.xlsx 의 데이터 행 높이 (165.75pt) 와 일치시켜 템플릿 안팎의 행 높이를
 #     맞춘다. 양식이 없을 때(폴백) 도 동일 값으로 통일.
@@ -450,6 +455,16 @@ class ExcelExporter(QThread):
         ws.row_dimensions[2].height = 19.5
 
     # ------------------------------------------------------------------
+    def _slot_with_number(self, slot: str) -> str:
+        """slot명 (+ 번호를 읽었으면 아래 줄에 ``(#6)``).
+
+        요약·미매칭 시트의 B열과 Wafer Map 시트의 슬롯 칸이 **같은 표기**를 쓰도록
+        여기 한 곳에서 만든다.  여러 줄이 되므로 호출부는 wrap_text 를 줘야 한다.
+        """
+        num = (self._result.slot_numbers or {}).get(slot)
+        return f"{slot}\n{SLOT_NUMBER_FMT.format(num=num)}" if num else slot
+
+    # ------------------------------------------------------------------
     def _write_slot_cell(self, ws, row: int, slot: str, center) -> None:
         """B열에 slot명을 쓴다.  아래 줄에 덧붙는 것이 둘 있다:
 
@@ -473,7 +488,7 @@ class ExcelExporter(QThread):
             return
         # 여러 줄을 쓰면 wrap_text 가 있어야 엑셀이 줄바꿈을 보여준다.
         wrap = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        head = f"{slot}\n(#{num})" if num else slot
+        head = self._slot_with_number(slot)
         if not kf:
             cell.value = head
             cell.alignment = wrap
@@ -762,8 +777,23 @@ class ExcelExporter(QThread):
             return []
         return [""] + names if len(names) > 1 else names
 
+    @staticmethod
+    def _map_col_header(role: str, machine: str) -> str:
+        """Wafer Map 시트의 기준/검증 머리칸 — ``기준`` 아래 줄에 ``AOI-17``.
+
+        요약 시트는 머리 2행(그룹 / AOI-N)으로 호기를 밝히는데 이 시트는 머리가 한 줄이라
+        **어느 호기의 맵인지 적혀 있지 않았다**(사용자 지적).  호기 입력이 비어 있으면
+        역할만 적는다 — 빈 줄을 남기지 않는다.
+        """
+        label = _machine_label(machine)
+        if not label:
+            return role
+        return i18n.KO.WAFER_MAP_SHEET_COL_MACHINE_FMT.format(role=role,
+                                                              machine=label)
+
     def _write_wafer_map_sheet(self, wb, rows: list[str]) -> None:
-        """A=슬롯, B=기준 맵, C=검증 맵.  그림은 화면과 같은 렌더러(주입된 ``map_renderer``)."""
+        """A=슬롯(+카세트 번호), B=기준 맵, C=검증 맵.  그림은 화면과 같은
+        렌더러(주입된 ``map_renderer``)."""
         import io
 
         from openpyxl.drawing.image import Image as XLImage
@@ -774,12 +804,16 @@ class ExcelExporter(QThread):
 
         ws = wb.create_sheet(title=i18n.KO.WAFER_MAP_SHEET)
         ws["A1"] = i18n.KO.WAFER_MAP_SHEET_COL_SLOT
-        ws["B1"] = i18n.KO.WAFER_MAP_SHEET_COL_REF
-        ws["C1"] = i18n.KO.WAFER_MAP_SHEET_COL_VAL
-        center = Alignment(horizontal="center", vertical="center")
+        ws["B1"] = self._map_col_header(i18n.KO.WAFER_MAP_SHEET_COL_REF,
+                                       self._result.ref_machine)
+        ws["C1"] = self._map_col_header(i18n.KO.WAFER_MAP_SHEET_COL_VAL,
+                                       self._result.val_machine)
+        # 머리칸·슬롯칸 모두 여러 줄이 될 수 있다 — wrap_text 없으면 줄바꿈이 안 보인다.
+        center = Alignment(horizontal="center", vertical="center", wrap_text=True)
         for c in "ABC":
             ws[f"{c}1"].font = Font(bold=True)
             ws[f"{c}1"].alignment = center
+        ws.row_dimensions[1].height = 30      # 두 줄 머리칸이 잘리지 않게
         ws.column_dimensions["A"].width = 22
         px_w = self._MAP_PX + 8
         for c in "BC":
@@ -794,13 +828,16 @@ class ExcelExporter(QThread):
         for idx, slot in enumerate(rows, start=1):
             if self._stop.is_set():
                 raise _Cancelled
+            # 진행 라벨은 slot명 한 줄로(여러 줄이면 오버레이 문구가 깨진다).
             label = slot or i18n.KO.WAFER_MAP_SHEET_ALL
             self.signals.progress.emit(
                 base + idx, self._prog_total,
                 i18n.KO.EXPORT_PHASE_FMT.format(sheet=i18n.KO.WAFER_MAP_SHEET,
                                                 slot=label))
             r = idx + 1
-            ws.cell(row=r, column=1, value=label).alignment = center
+            # 슬롯 칸에는 요약 시트 B열과 **같은 표기**를 쓴다 — slot명 아래 `(#6)`.
+            cell_label = self._slot_with_number(slot) if slot else label
+            ws.cell(row=r, column=1, value=cell_label).alignment = center
             ws.row_dimensions[r].height = pixels_to_points(px_w)
             ref, val = slot_maps(self._result, slot)
             for col, data in (("B", ref), ("C", val)):

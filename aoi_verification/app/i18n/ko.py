@@ -1079,6 +1079,9 @@ WAFER_MAP_SHEET_COL_SLOT = "슬롯"
 WAFER_MAP_SHEET_COL_REF = "기준"
 WAFER_MAP_SHEET_COL_VAL = "검증"
 WAFER_MAP_SHEET_ALL = "전체 (LOT 합산)"
+# Wafer Map 시트의 기준/검증 머리칸 — 요약 시트 머리(그룹 위 · AOI-N 아래)와 같은
+# 두 줄 표기.  어느 호기의 맵인지 시트만 봐도 알 수 있어야 한다(사용자 지적).
+WAFER_MAP_SHEET_COL_MACHINE_FMT = "{role}\n{machine}"
 WAFER_MAP_PICK_SLOTS = "슬롯 선택…"
 WAFER_MAP_LOT_ALL_FMT = "{lot} · 전체 슬롯 {total}개 합산"
 WAFER_MAP_LOT_SUBSET_FMT = "{lot} · 슬롯 {n}/{total} 합산"

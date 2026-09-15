@@ -484,3 +484,70 @@ def test_export_writes_wafer_map_sheet(qt, isolated_cache, tmp_path):
         i18n.KO.WAFER_MAP_SHEET_ALL, "S1", "S2"]
     # 전체(기준·검증) + S1(기준·검증) + S2(기준만) = 5 장.
     assert len(ws._images) == 5
+
+
+def test_wafer_map_sheet_names_the_machines_and_slot_numbers(
+        qt, isolated_cache, tmp_path):
+    """Wafer Map 시트도 '어느 호기의 맵인지' 와 '몇 번 슬롯인지' 를 적는다.
+
+    요약 시트는 머리 2행(그룹 / AOI-N)과 B열 `(#6)` 으로 둘 다 밝히는데, 이 시트만
+    `기준`·`검증`·슬롯명뿐이라 호기와 카세트 번호가 빠져 있었다(사용자 지적).
+    """
+    pytest.importorskip("openpyxl")
+    pytest.importorskip("PIL.Image")
+    from openpyxl import load_workbook
+    from PIL import Image
+
+    from aoi_verification.app import i18n
+    from aoi_verification.app.models.result import FinalResult, MatchResult
+    from aoi_verification.app.workers.exporter import ExcelExporter
+
+    f1 = _camtek_folder(tmp_path / "s1", [("a", CX, CY)])
+    f2 = _camtek_folder(tmp_path / "s2", [("b", 60000.0, 120000.0)])
+    for p in (f1 / "a.jpeg", f2 / "b.jpeg"):
+        Image.new("RGB", (40, 30)).save(str(p), "JPEG")
+    result = FinalResult(
+        mode="cross", ref_machine="17", val_machine="23",
+        matches=[MatchResult(slot="A1033ABQEWG3", ref_path=f1 / "a.jpeg",
+                             val_path=f2 / "b.jpeg", score=1.0)],
+        slot_images={"A1033ABQEWG3": ([f1 / "a.jpeg"], [f2 / "b.jpeg"])},
+        slot_numbers={"A1033ABQEWG3": "6"},
+    )
+    dst = tmp_path / "out.xlsx"
+    from aoi_verification.app.ui.widgets.wafer_map_view import render_map_png
+    ExcelExporter(result, dst_path=dst, template_path=tmp_path / "none.xlsx",
+                  map_renderer=render_map_png).run()
+    ws = load_workbook(str(dst))[i18n.KO.WAFER_MAP_SHEET]
+
+    # 머리칸 — 역할 + 호기(요약 시트의 'AOI-N' 과 같은 라벨).
+    assert ws["B1"].value == f"{i18n.KO.WAFER_MAP_SHEET_COL_REF}\nAOI-17"
+    assert ws["C1"].value == f"{i18n.KO.WAFER_MAP_SHEET_COL_VAL}\nAOI-23"
+    # 줄바꿈이 보이려면 wrap_text 가 있어야 한다.
+    assert ws["B1"].alignment.wrap_text is True
+    # 슬롯 칸 — 요약 시트 B열과 같은 표기(slot명 아래 `(#6)`).
+    assert ws["A2"].value == "A1033ABQEWG3\n(#6)"
+    assert ws["A2"].alignment.wrap_text is True
+
+
+def test_wafer_map_sheet_header_without_machine_input(qt, isolated_cache, tmp_path):
+    """호기 입력이 비어 있으면 역할만 적는다 — 빈 줄을 남기지 않는다."""
+    pytest.importorskip("openpyxl")
+    pytest.importorskip("PIL.Image")
+    from openpyxl import load_workbook
+    from PIL import Image
+
+    from aoi_verification.app import i18n
+    from aoi_verification.app.models.result import FinalResult
+    from aoi_verification.app.workers.exporter import ExcelExporter
+
+    f1 = _camtek_folder(tmp_path / "s1", [("a", CX, CY)])
+    Image.new("RGB", (40, 30)).save(str(f1 / "a.jpeg"), "JPEG")
+    result = FinalResult(mode="single", ref_machine="", val_machine="",
+                         slot_images={"S1": ([f1 / "a.jpeg"], [])})
+    dst = tmp_path / "out.xlsx"
+    from aoi_verification.app.ui.widgets.wafer_map_view import render_map_png
+    ExcelExporter(result, dst_path=dst, template_path=tmp_path / "none.xlsx",
+                  map_renderer=render_map_png).run()
+    ws = load_workbook(str(dst))[i18n.KO.WAFER_MAP_SHEET]
+    assert ws["B1"].value == i18n.KO.WAFER_MAP_SHEET_COL_REF
+    assert ws["C1"].value == i18n.KO.WAFER_MAP_SHEET_COL_VAL
