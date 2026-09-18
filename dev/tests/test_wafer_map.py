@@ -63,6 +63,19 @@ def _camtek_folder(tmp_path: Path, entries, *, center: bool = True) -> Path:
     return folder
 
 
+def _write_die_map(folder: Path, cells, *, repeat: int = 1) -> None:
+    """``s_DieLocation.dat`` + 사이드카 — cells: {(x_index, y_index)} stage 인덱스."""
+    import struct
+    recs = b"".join(bytes(16) + struct.pack("<dd", i * PX + 10.0, j * PY + 10.0)
+                    for i, j in sorted(cells)) * repeat
+    (folder / wafer_geometry._DIE_MAP_FILE).write_bytes(recs)
+    (folder / (wafer_geometry._DIE_MAP_FILE + ".md")).write_text(
+        '<root><RecordSize Size="32"/><Fields>'
+        '<Field Name="x" Id="1" Offset="16" Vartype="5"/>'
+        '<Field Name="y" Id="2" Offset="24" Vartype="5"/>'
+        '</Fields></root>', encoding="utf-8")
+
+
 def _kla_folder(tmp_path: Path, defects, *, center: bool = True) -> Path:
     """defects: [(stem, XREL, YREL, XINDEX, YINDEX)]."""
     folder = tmp_path / "kla"
@@ -115,6 +128,84 @@ class TestCamtekPlane:
         # 선 개수 ≈ 지름/pitch (+1) — die 8만 개(pitch ~1 mm)도 몇백 개다.
         assert abs(len(xs) - DIA / PX) <= 2
         assert abs(len(ys) - DIA / PY) <= 2
+
+    def test_die_grid_segments_cover_exactly_the_whole_dies(self, tmp_path):
+        """격자 선분은 온전한 die(네 꼭짓점이 원 안)의 변을 전부, 그리고 그것만 덮는다."""
+        folder = _camtek_folder(tmp_path, [("a", 150000.0, 210000.0)])
+        frame = wm.frame_for_folder(folder, "camtek")
+        xs, ys = wm.grid_lines(frame)
+        r = frame.radius
+        inside = lambda x, y: x * x + y * y <= r * r + 1e-6       # noqa: E731
+        want = set()        # 단위 변: ("v", i, j) = x=xs[i] 위 ys[j]~ys[j+1]
+        for i in range(len(xs) - 1):
+            for j in range(len(ys) - 1):
+                if all(inside(x, y) for x in xs[i:i + 2] for y in ys[j:j + 2]):
+                    want |= {("v", i, j), ("v", i + 1, j),
+                             ("h", i, j), ("h", i, j + 1)}
+        assert want
+        got = set()
+        for x1, y1, x2, y2 in wm.die_grid_segments(frame):
+            assert inside(x1, y1) and inside(x2, y2)
+            if x1 == x2:
+                i = xs.index(x1)
+                got |= {("v", i, j) for j in range(ys.index(y1), ys.index(y2))}
+            else:
+                j = ys.index(y1)
+                got |= {("h", i, j) for i in range(xs.index(x1), xs.index(x2))}
+        assert got == want
+
+    def test_die_map_cells_are_drawn_as_is(self, tmp_path):
+        """장비 die 맵이 채택되면 격자는 **그 칸만** — 계산(원 안 판정)으로 덮어쓰지 않는다.
+        맵에서 가장자리 die 하나를 빼 두면(계산으로는 '있는' 칸) 그 칸은 그려지지 않는다."""
+        folder = _camtek_folder(tmp_path, [("a", 150000.0, 210000.0)])
+        r2 = (DIA / 2) ** 2
+        full = {(i, j) for i in range(10) for j in range(10)
+                if all((x - CX) ** 2 + (y - CY) ** 2 <= r2
+                       for x in (i * PX, (i + 1) * PX) for y in (j * PY, (j + 1) * PY))}
+        top = min(j for _, j in full)
+        dropped = max(c for c in full if c[1] == top)        # 맨 윗줄 오른쪽 끝 die
+        cells = full - {dropped}
+        _write_die_map(folder, cells, repeat=3)     # 레코드 ≥ _MIN_DIE_MAP
+        frame = wm.frame_for_folder(folder, "camtek")
+        assert frame.die_cells == {(i, -(j + 1)) for i, j in cells}
+
+        want = set()
+        for i, k in frame.die_cells:
+            want |= {("v", i, k), ("v", i + 1, k), ("h", i, k), ("h", i, k + 1)}
+        kx = lambda x: round((x - frame.grid_x0) / PX)          # noqa: E731
+        ky = lambda y: round((y - frame.grid_y0) / PY)          # noqa: E731
+        got = set()
+        for x1, y1, x2, y2 in wm.die_grid_segments(frame):
+            if x1 == x2:
+                got |= {("v", kx(x1), k) for k in range(ky(y1), ky(y2))}
+            else:
+                got |= {("h", i, ky(y1)) for i in range(kx(x1), kx(x2))}
+        assert got == want
+        # 뺀 die 의 바깥쪽 두 변(위·오른쪽)은 어느 이웃과도 공유되지 않는다.
+        di, dk = dropped[0], -(dropped[1] + 1)
+        assert ("h", di, dk + 1) not in got and ("v", di + 1, dk) not in got
+
+    def test_partial_die_map_falls_back_to_computed_and_says_so(self, tmp_path):
+        """부분 맵(유도값과 ±1 밖)은 기하가 버린다 → 격자도 계산으로, 범례에 그 사실을."""
+        pytest.importorskip("PyQt6.QtWidgets")
+        from aoi_verification.app import i18n
+        from aoi_verification.app.ui.widgets.wafer_map_dialog import _MapPanel
+        folder = _camtek_folder(tmp_path, [("a", 150000.0, 210000.0)])
+        _write_die_map(folder, {(4 + n % 2, 3 + n % 2) for n in range(2)}, repeat=30)
+        data = wm.build_map(resolve_batch([folder / "a.jpeg"]))
+        assert data.frame.die_cells is None
+        assert i18n.KO.WAFER_MAP_GRID_COMPUTED in _MapPanel.legend_text(data)
+
+        wm._camtek.cache_clear()
+        wafer_geometry.camtek_geometry.cache_clear()
+        r2 = (DIA / 2) ** 2                                     # 온전한 맵 → 표기 없음
+        full = {(i, j) for i in range(10) for j in range(10)
+                if all((x - CX) ** 2 + (y - CY) ** 2 <= r2
+                       for x in (i * PX, (i + 1) * PX) for y in (j * PY, (j + 1) * PY))}
+        _write_die_map(folder, full, repeat=3)
+        data = wm.build_map(resolve_batch([folder / "a.jpeg"]))
+        assert data.frame.die_cells
+        assert i18n.KO.WAFER_MAP_GRID_COMPUTED not in _MapPanel.legend_text(data)
 
     def test_no_center_is_assumed_and_inside_wafer(self, tmp_path):
         folder = _camtek_folder(tmp_path, [("a", 150000.0, 210000.0)], center=False)

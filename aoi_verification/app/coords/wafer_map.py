@@ -33,7 +33,8 @@ from . import kla_info, wafer_geometry as wg
 from .models import DefectCoord
 
 __all__ = ["WaferFrame", "MapPoint", "MapData", "frame_for_folder", "to_plane",
-           "build_map", "grid_lines", "slot_maps", "ALL_SLOTS_KEY"]
+           "build_map", "grid_lines", "die_grid_segments", "slot_maps",
+           "ALL_SLOTS_KEY"]
 
 _LOG = logging.getLogger("aoi.coords.wafer_map")
 
@@ -47,7 +48,12 @@ class WaferFrame:
 
     격자 경계는 ``grid_x0 + k·pitch_x`` / ``grid_y0 + k·pitch_y`` (k 는 임의 정수) —
     위상만 있으면 되므로 원점을 따로 두지 않는다.  ``pitch_*`` 가 ``None`` 이면 격자를
-    모른다(절대좌표 폴더)."""
+    모른다(절대좌표 폴더).
+
+    ``die_cells`` 는 **장비 die 맵에 실제로 있는 칸**(출처 등급 ``파일``) — ``(kx, ky)`` 는
+    그 칸의 왼쪽·아래 경계가 ``grid_x0 + kx·pitch_x`` / ``grid_y0 + ky·pitch_y`` 라는 뜻.
+    ``None`` 이면 맵이 없거나 못 믿는 폴더라 격자를 **계산**(원 안에 온전히 드는 die)으로
+    그린다 — 화면은 그 사실을 표기한다."""
     diameter: float
     pitch_x: Optional[float]
     pitch_y: Optional[float]
@@ -55,6 +61,7 @@ class WaferFrame:
     grid_y0: float
     center_source: str          # SOURCE_OBSERVED | SOURCE_ASSUMED
     kind: str                   # "camtek" | "kla"
+    die_cells: Optional[frozenset] = None
 
     @property
     def radius(self) -> float:
@@ -88,6 +95,7 @@ class _Camtek:
     cx: Optional[float]         # stage 중심(Y 아래로 증가)
     cy: Optional[float]
     source: str
+    cells: Optional[frozenset] = None   # die 맵의 (x_index, y_index) — stage 인덱스
 
 
 @dataclass(frozen=True)
@@ -117,7 +125,12 @@ def _camtek(folder: Path) -> _Camtek:
         if cy is None:
             # row_total 은 '온전히 들어오는 마지막 행' — 그 아래 경계에서 반 pitch 바깥.
             cy = (geom.row_total + 1) * geom.pitch_y + geom.pitch_y / 2.0 - dia / 2.0
-    return _Camtek(geom=geom, diameter=dia, cx=cx, cy=cy, source=source)
+    # die 맵은 **기하가 그 맵을 채택했을 때만** 쓴다 — 부분 맵(유도값과 ±1 밖)은
+    # camtek_geometry 가 이미 버렸고, 그때는 격자도 계산으로 그린다.
+    cells = None
+    if geom is not None and geom.source.endswith(wg._DIE_MAP_FILE):
+        cells = wg.die_map_cells(folder, geom.pitch_x, geom.pitch_y)
+    return _Camtek(geom=geom, diameter=dia, cx=cx, cy=cy, source=source, cells=cells)
 
 
 @lru_cache(maxsize=256)
@@ -164,10 +177,14 @@ def frame_for_folder(folder: Path, kind: str) -> Optional[WaferFrame]:
     px = c.geom.pitch_x if c.geom is not None else None
     py = c.geom.pitch_y if c.geom is not None else None
     # stage y 는 아래로 증가 → 평면 y = cy − stage_y.  경계 stage_y = k·py 는
-    # 평면에서 cy − k·py 라 위상은 cy 다.
+    # 평면에서 cy − k·py 라 위상은 cy 다.  stage 칸 j 는 [j·py, (j+1)·py] 라 평면에서
+    # 아래 경계가 cy − (j+1)·py → ky = −(j+1).
+    cells = None
+    if c.cells is not None:
+        cells = frozenset((i, -(j + 1)) for i, j in c.cells)
     return WaferFrame(diameter=c.diameter, pitch_x=px, pitch_y=py,
                       grid_x0=-c.cx, grid_y0=c.cy,
-                      center_source=c.source, kind="camtek")
+                      center_source=c.source, kind="camtek", die_cells=cells)
 
 
 def _kind_of(coord: DefectCoord) -> str:
@@ -253,6 +270,66 @@ def grid_lines(frame: WaferFrame) -> tuple[list[float], list[float]]:
         return [x0 + k * pitch for k in range(k_lo, k_hi + 1)]
 
     return axis(frame.grid_x0, frame.pitch_x), axis(frame.grid_y0, frame.pitch_y)
+
+
+def _cell_segments(frame: WaferFrame) -> list[tuple[float, float, float, float]]:
+    """``frame.die_cells`` 의 칸을 감싸는 선분 — 한 경계선 위에서 이어지는 변은 하나로."""
+    cells = frame.die_cells
+    x_at = lambda k: frame.grid_x0 + k * frame.pitch_x          # noqa: E731
+    y_at = lambda k: frame.grid_y0 + k * frame.pitch_y          # noqa: E731
+
+    def runs(edges: set) -> list[tuple[int, int, int]]:
+        """``{(선, 칸)}`` → ``(선, 시작칸, 끝칸+1)`` — 연속한 칸을 한 구간으로."""
+        out = []
+        for line, k in sorted(edges):
+            if out and out[-1][0] == line and out[-1][2] == k:
+                out[-1] = (line, out[-1][1], k + 1)
+            else:
+                out.append((line, k, k + 1))
+        return out
+
+    vert = {(i + d, j) for i, j in cells for d in (0, 1)}
+    horz = {(j + d, i) for i, j in cells for d in (0, 1)}
+    segs = [(x_at(i), y_at(a), x_at(i), y_at(b)) for i, a, b in runs(vert)]
+    segs += [(x_at(a), y_at(j), x_at(b), y_at(j)) for j, a, b in runs(horz)]
+    return segs
+
+
+@lru_cache(maxsize=16)
+def die_grid_segments(frame: WaferFrame
+                      ) -> list[tuple[float, float, float, float]]:
+    """die 가 **있는 칸만** 감싸는 격자 선분 ``(x1, y1, x2, y2)`` — 평면 µm.
+
+    ``frame.die_cells``(장비 die 맵)가 있으면 그 칸을 그대로 그린다.  없으면 계산으로
+    폴백한다 — die 가 '있다' 의 기준(유도)은 네 꼭짓점이 모두 원 안에 드는 것 — col/row 원점을 정하는
+    '온전히 들어오는 첫 die' 규칙(:mod:`.wafer_geometry`)과 같다.  가장자리에서 잘리는
+    die 에는 선을 긋지 않아 윤곽이 계단 모양이 된다.  선분 수는 :func:`grid_lines` 와
+    같은 수준(경계선마다 1개)이다."""
+    if frame.die_cells and frame.pitch_x and frame.pitch_y:
+        return _cell_segments(frame)
+    xs, ys = grid_lines(frame)
+    r2 = frame.radius ** 2
+
+    def spans(a: list[float], b: list[float]) -> list[Optional[tuple[float, float]]]:
+        """``a`` 의 이웃한 두 경계 사이 띠마다, 온전한 die 가 차지하는 ``b`` 축 구간."""
+        out: list[Optional[tuple[float, float]]] = []
+        for lo, hi in zip(a, a[1:]):
+            half = math.sqrt(max(0.0, r2 - max(lo * lo, hi * hi)))
+            inside = [v for v in b if -half <= v <= half]
+            out.append((inside[0], inside[-1]) if len(inside) >= 2 else None)
+        return out
+
+    def edges(a: list[float], b: list[float]):
+        """경계선 ``a[i]`` 위의 선분 = 양옆 띠 구간 중 넓은 쪽(구간은 서로 포함 관계)."""
+        band = [None, *spans(a, b), None]
+        for i, v in enumerate(a):
+            near = [s for s in (band[i], band[i + 1]) if s is not None]
+            if near:
+                yield v, min(s[0] for s in near), max(s[1] for s in near)
+
+    segs = [(x, lo, x, hi) for x, lo, hi in edges(xs, ys)]
+    segs += [(lo, y, hi, y) for y, lo, hi in edges(ys, xs)]
+    return segs
 
 
 # ---------------------------------------------------------------------------

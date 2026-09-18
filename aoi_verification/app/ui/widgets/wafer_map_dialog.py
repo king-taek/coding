@@ -143,6 +143,8 @@ class _MapPanel(QWidget):
             parts.append(i18n.KO.WAFER_MAP_UNPLACED_FMT.format(n=len(data.unplaced)))
         if data.frame.center_source == SOURCE_ASSUMED:
             parts.append(i18n.KO.WAFER_MAP_CENTER_ASSUMED)
+        if data.frame.pitch_x and data.frame.pitch_y and not data.frame.die_cells:
+            parts.append(i18n.KO.WAFER_MAP_GRID_COMPUTED)
         return " &nbsp;·&nbsp; ".join(parts)
 
 

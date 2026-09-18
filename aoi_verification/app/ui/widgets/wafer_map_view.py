@@ -22,7 +22,7 @@ from PyQt6.QtGui import (QColor, QImage, QPainter, QPainterPath, QPen)
 from PyQt6.QtWidgets import QToolTip, QWidget
 
 from ... import i18n
-from ...coords.wafer_map import MapData, MapPoint, grid_lines
+from ...coords.wafer_map import MapData, MapPoint, die_grid_segments
 from ...utils import image_io
 from .. import theme
 
@@ -94,20 +94,15 @@ def paint_map(painter: QPainter, rect: QRectF, data: Optional[MapData], *,
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
     painter.fillPath(wafer, col["wafer"])
 
-    # die 격자 — 원 안 현(弦)만.  선 폭 1px 고정, 안티앨리어싱 없이(600개가 또렷하게).
+    # die 격자.  선 폭 1px 고정, 안티앨리어싱 없이(600개가 또렷하게).
     painter.setClipPath(wafer, Qt.ClipOperation.IntersectClip)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-    xs, ys = grid_lines(frame)
     # 너무 촘촘하면(경계 간격 < 3px) 격자는 생략 — 면이 회색으로 뭉개진다.
     if frame.pitch_x and frame.pitch_x * m.scale >= 3.0 \
             and frame.pitch_y and frame.pitch_y * m.scale >= 3.0:
-        lines = []
-        for x in xs:
-            h = (r * r - x * x) ** 0.5
-            lines.append(QLineF(m.to_px(x, -h), m.to_px(x, h)))
-        for y in ys:
-            w = (r * r - y * y) ** 0.5
-            lines.append(QLineF(m.to_px(-w, y), m.to_px(w, y)))
+        # 온전한 die 만 — 가장자리에서 잘리는 die 에는 선을 긋지 않는다.
+        lines = [QLineF(m.to_px(x1, y1), m.to_px(x2, y2))
+                 for x1, y1, x2, y2 in die_grid_segments(frame)]
         painter.setPen(QPen(col["grid"], 1))
         painter.drawLines(lines)
     painter.setClipRect(rect)

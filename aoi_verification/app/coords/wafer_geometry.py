@@ -509,6 +509,18 @@ def _die_map_origins(folder: Path, px: float, py: float
     안 맞거나, die 가 :data:`_MIN_DIE_MAP` 개 미만이거나, 인덱스가 상식 범위를 벗어나면
     ``None`` 을 돌려 기존 유도 경로로 넘긴다.  전 구간 fail-safe.
     """
+    cells = die_map_cells(folder, px, py)
+    if cells is None:
+        return None
+    return min(i for i, _ in cells), max(j for _, j in cells)
+
+
+def die_map_cells(folder: Path, px: float, py: float
+                  ) -> Optional[frozenset[tuple[int, int]]]:
+    """die 맵의 die 전체 — ``(x_index, y_index)`` 집합(stage 인덱스, 보정 전).
+
+    :func:`_die_map_origins` 와 **같은 읽기**다(그 함수의 fail-safe 조건이 전부 여기 있다).
+    Wafer map 이 'die 가 실제로 있는 칸' 만 격자로 그리는 데 쓴다."""
     for base in _search_dirs(folder):
         dat = base / _DIE_MAP_FILE
         layout = _dat_layout(dat)
@@ -531,19 +543,18 @@ def _die_map_origins(folder: Path, px: float, py: float
         count = len(data) // rec
         if count < _MIN_DIE_MAP:
             continue
-        xs: set[int] = set()
-        ys: set[int] = set()
+        cells: set[tuple[int, int]] = set()
         for i in range(count):
             b = i * rec
             x = struct.unpack_from("<d", data, b + off_x)[0]
             y = struct.unpack_from("<d", data, b + off_y)[0]
-            xs.add(math.floor(x / px))
-            ys.add(math.floor(y / py))
-        col_origin, row_total = min(xs), max(ys)
+            cells.add((math.floor(x / px), math.floor(y / py)))
+        col_origin = min(i for i, _ in cells)
+        row_total = max(j for _, j in cells)
         if not (0 <= col_origin <= _MAX_DIE_INDEX
                 and 0 <= row_total <= _MAX_DIE_INDEX):
             continue
-        return col_origin, row_total
+        return frozenset(cells)
     return None
 
 
