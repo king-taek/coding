@@ -1089,3 +1089,15 @@ WAFER_MAP_LOT_SUBSET_FMT = "{lot} · 슬롯 {n}/{total} 합산"
 WAFER_MAP_LOADING_SCAN = "폴더 탐색 중 — 사진 목록 확인"
 WAFER_MAP_LOADING_COORDS = "좌표 읽는 중"
 WAFER_MAP_LOADING_THUMBS = "사진 미리보기 준비 중"
+# 보기 옵션 — die 색칠 · 노치 방향(90° 단위 회전) · 사진 1장만 보기.
+WAFER_MAP_FILL_DIES = "die 색칠"
+WAFER_MAP_FILL_DIES_TIP = (
+    "결함 위치(점) 대신 결함이 든 die 칸을 통째로 칠합니다. "
+    "die 격자를 모르는 폴더(절대좌표)에서는 점 그대로입니다.")
+WAFER_MAP_NOTCH_FMT = "노치: {dir}"
+WAFER_MAP_NOTCH_DIRS = ("아래", "왼쪽", "위", "오른쪽")
+WAFER_MAP_NOTCH_TIP = "누를 때마다 90°씩 돌려 노치 방향을 맞춥니다(화면 보기 전용)."
+WAFER_MAP_PICK_IMAGE = "사진 1장"
+WAFER_MAP_PICK_IMAGE_TITLE = "결함 사진 1장 선택"
+WAFER_MAP_ONE_IMAGE_FMT = "{name} · 사진 1장"
+WAFER_MAP_NO_COORD = "이 사진을 맵에 찍지 못했습니다 — 좌표 또는 die 기하를 읽지 못했습니다."

@@ -3,6 +3,8 @@
 * **셋업 단계**(``WaferMapDialog(parent)``): 폴더를 고른다.  **슬롯 폴더**(사진이 바로
   든 폴더)면 그 웨이퍼 하나, **LOT 폴더**(슬롯 폴더들이 든 폴더)면 전체 슬롯을 한 맵에
   합산하고 ‘슬롯 선택…’ 으로 일부만 본다(진행 범위의 슬롯 선택 팝업과 같은 창).
+  ‘사진 1장’ 으로 **결함 사진 한 장만** 골라 그 결함만 볼 수도 있다 — 고른 사진의
+  폴더에서 웨이퍼 기하를 읽으므로 원·격자는 그대로다.
   매칭 전이라 점은 한 색(결함)이다.
 * **결과 단계**(``WaferMapDialog(parent, result=...)``): 슬롯을 고르면 기준/검증 맵을
   나란히, '전체' 를 고르면 LOT 의 모든 슬롯을 한 맵에 합산한다.  점은 매치됨/미매치.
@@ -16,6 +18,11 @@
 
 점을 **더블클릭**하면 :class:`ImageInfoDialog` 로 그 사진의 상세 수치를 본다(같은
 생산자 — 엑셀과 수치가 어긋나지 않는다).
+
+보기 옵션 둘은 두 맵에 **함께** 걸린다(기준/검증을 같은 눈으로 봐야 비교가 된다):
+‘die 색칠’ 은 점 대신 결함이 든 die 칸을 칠하고, ‘노치: …’ 는 누를 때마다 90°씩 돌려
+노치 방향을 맞춘다.  둘 다 **화면 보기 전용**이다 — 엑셀에 들어가는 맵 그림은 기본값
+(노치 아래·점 표시)으로 고정이라 결과 파일이 볼 때마다 달라지지 않는다(사용자 결정).
 """
 
 from __future__ import annotations
@@ -28,6 +35,7 @@ from PyQt6.QtWidgets import (QApplication, QComboBox, QDialog, QFileDialog, QFra
                              QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget)
 
 from ... import i18n
+from ...config import CONFIG
 from ...coords import resolve_batch
 from ...coords.wafer_map import (ALL_SLOTS_KEY, MapData, SOURCE_ASSUMED,
                                  build_map, slot_maps)
@@ -169,8 +177,10 @@ class WaferMapDialog(QDialog):
         self.setWindowTitle(i18n.KO.WAFER_MAP_TITLE)
         self._result = result
         self._folder: Optional[Path] = None
+        self._single: Optional[Path] = None           # 사진 1장만 볼 때
         self._lot_slots: dict[str, Path] = {}         # LOT 폴더일 때만
         self._selected: Optional[set[str]] = None     # None = 전체
+        self._rot = 0                                 # 노치 방향(90° 단위)
         self._token = 0
         self._build_thread: Optional[_MapBuild] = None
         self._build()
@@ -218,10 +228,17 @@ class WaferMapDialog(QDialog):
             self.slots_btn.setAutoDefault(False)
             self.slots_btn.hide()
             top.addWidget(self.slots_btn)
+            # 사진 1장만 — LOT/웨이퍼보다 더 좁은 단위(사용자 요청).
+            self.image_btn = NeonButton(i18n.KO.WAFER_MAP_PICK_IMAGE, role="ghost")
+            self.image_btn.setToolTip(i18n.KO.WAFER_MAP_PICK_IMAGE_TITLE)
+            self.image_btn.clicked.connect(self._on_pick_image)
+            self.image_btn.setAutoDefault(False)
+            top.addWidget(self.image_btn)
             self.folder_label = QLabel("", self)
             self.folder_label.setProperty("role", "monoMuted")
             top.addWidget(self.folder_label, stretch=1)
         top.addStretch(1)
+        self._add_view_options(top)
         root.addLayout(top)
 
         self.empty = QLabel(i18n.KO.WAFER_MAP_NO_FOLDER, self)
@@ -242,6 +259,39 @@ class WaferMapDialog(QDialog):
         for panel in (self.left, self.right):
             panel.view.point_activated.connect(self._on_point)
         self.resize(1100, 720)
+
+    def _add_view_options(self, top) -> None:
+        """보기 옵션 — die 색칠 토글 · 노치 방향.  두 맵에 **함께** 건다."""
+        self.fill_btn = NeonButton(i18n.KO.WAFER_MAP_FILL_DIES, role="ghost")
+        self.fill_btn.setCheckable(True)
+        self.fill_btn.setToolTip(i18n.KO.WAFER_MAP_FILL_DIES_TIP)
+        self.fill_btn.setAutoDefault(False)
+        self.fill_btn.toggled.connect(self._on_fill_toggled)
+        top.addWidget(self.fill_btn)
+        self.notch_btn = NeonButton("", role="ghost")
+        self.notch_btn.setToolTip(i18n.KO.WAFER_MAP_NOTCH_TIP)
+        self.notch_btn.setAutoDefault(False)
+        self.notch_btn.clicked.connect(self._on_rotate)
+        self._update_notch_text()
+        top.addWidget(self.notch_btn)
+
+    def _views(self):
+        return (self.left.view, self.right.view)
+
+    def _on_fill_toggled(self, on: bool) -> None:
+        for view in self._views():
+            view.set_fill_dies(on)
+
+    def _on_rotate(self) -> None:
+        """누를 때마다 시계 방향 90° — 노치가 아래→왼쪽→위→오른쪽으로 돈다."""
+        self._rot = (self._rot + 1) % len(i18n.KO.WAFER_MAP_NOTCH_DIRS)
+        for view in self._views():
+            view.set_rotation(self._rot)
+        self._update_notch_text()
+
+    def _update_notch_text(self) -> None:
+        self.notch_btn.setText(i18n.KO.WAFER_MAP_NOTCH_FMT.format(
+            dir=i18n.KO.WAFER_MAP_NOTCH_DIRS[self._rot]))
 
     # ------------------------------------------------------------------
     def _render_empty(self, text: str = "") -> None:
@@ -321,6 +371,7 @@ class WaferMapDialog(QDialog):
     def show_folder(self, folder: Path) -> None:
         """폴더 판정(슬롯/LOT)부터 워커 — 고른 순간 '폴더 탐색 중' 이 뜬다."""
         self._folder = folder
+        self._single = None
         self.folder_label.setText(str(folder))
         self.pick_btn.setText(i18n.KO.WAFER_MAP_PICK_FOLDER_ANOTHER)
         self._lot_slots = {}
@@ -349,13 +400,15 @@ class WaferMapDialog(QDialog):
 
         self._start_build(job, done, i18n.KO.WAFER_MAP_LOADING_SCAN)
 
-    def _show_folder_map(self, data: MapData) -> None:
+    def _show_folder_map(self, data: MapData, empty_msg: str = "") -> None:
         if data.frame is None:
-            self._render_empty(i18n.KO.WAFER_MAP_NO_FRAME)
+            self._render_empty(empty_msg or i18n.KO.WAFER_MAP_NO_FRAME)
         else:
             self._show_maps((self._folder_title(), data), None)
 
     def _folder_title(self) -> str:
+        if self._single is not None:
+            return i18n.KO.WAFER_MAP_ONE_IMAGE_FMT.format(name=self._single.name)
         assert self._folder is not None
         if not self._lot_slots:
             return self._folder.name
@@ -379,6 +432,41 @@ class WaferMapDialog(QDialog):
 
         self._start_build(job, lambda d, _r, _e: self._show_folder_map(d),
                           i18n.KO.WAFER_MAP_LOADING_SCAN)
+
+    def _on_pick_image(self) -> None:
+        """결함 사진 1장 — QFileDialog 는 시트로 감싸지 않는다(sheet_host 의 결정)."""
+        patterns = " ".join(f"*{e}" for e in CONFIG.image_extensions)
+        start = str(self._single.parent if self._single is not None
+                    else (self._folder or ""))
+        path, _ = QFileDialog.getOpenFileName(
+            self, i18n.KO.WAFER_MAP_PICK_IMAGE_TITLE, start,
+            i18n.KO.IMAGE_INFO_FILE_FILTER_FMT.format(patterns=patterns))
+        if path:
+            self.show_image(Path(path))
+
+    def show_image(self, path: Path) -> None:
+        """사진 1장만 맵에 — 원·격자는 **그 사진이 든 폴더**의 기하 그대로다.
+
+        LOT/웨이퍼 단위로는 점이 수천 개라 한 결함을 짚기 어렵다(사용자 요청).  폴더를
+        훑지 않으므로 좌표 1건만 읽는다 — NAS 에서도 즉시 뜬다."""
+        self._single = path
+        self._folder = path.parent
+        self._lot_slots = {}
+        self._selected = None
+        self.slots_btn.hide()
+        self.folder_label.setText(str(path))
+
+        def job(report):
+            report(i18n.KO.WAFER_MAP_LOADING_COORDS)
+            return build_map(resolve_batch([path], _coord_progress(report))), None, None
+
+        self._start_build(
+            job,
+            lambda d, _r, _e: self._show_folder_map(d, i18n.KO.WAFER_MAP_NO_COORD),
+            i18n.KO.WAFER_MAP_LOADING_COORDS)
+
+    def single_image(self) -> Optional[Path]:
+        return self._single
 
     def _on_pick_slots(self) -> None:
         """LOT 의 일부 슬롯만 — 진행 범위의 슬롯 선택 팝업을 그대로 쓴다."""

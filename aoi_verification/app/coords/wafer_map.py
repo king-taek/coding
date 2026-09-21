@@ -6,8 +6,10 @@ die 내부 좌표라 그대로는 원 안에 찍을 수 없다.  여기서 폴�
 장비가 달라도 같은 평면이라 기준/검증 맵을 같은 눈으로 볼 수 있다.
 
 방향 규약(관측): 장비 화면은 **맵 왼쪽 맨 아래가 (col 0, row 0)** 이고 row 는 위로
-는다(:func:`wafer_geometry._row_total`).  그래서 평면 +Y 가 화면 위다.  노치는 아래
-고정이다(파일에 각도 정보가 없다 — 가정).
+는다(:func:`wafer_geometry._row_total`).  그래서 평면 +Y 가 화면 위다.  노치 방향은
+파일에 없어(가정) 평면에서 **아래**로 둔다 — 실물과 다르면 화면에서 90° 단위로 돌린다
+(:class:`~..ui.widgets.wafer_map_view.WaferMapView`).  회전은 보기 상태일 뿐이라 여기
+평면 좌표는 그대로다.
 
 중심 출처 등급:
 
@@ -33,8 +35,8 @@ from . import kla_info, wafer_geometry as wg
 from .models import DefectCoord
 
 __all__ = ["WaferFrame", "MapPoint", "MapData", "frame_for_folder", "to_plane",
-           "build_map", "grid_lines", "die_grid_segments", "slot_maps",
-           "ALL_SLOTS_KEY"]
+           "build_map", "grid_lines", "die_grid_segments", "cell_of",
+           "cell_bounds", "defect_cells", "slot_maps", "ALL_SLOTS_KEY"]
 
 _LOG = logging.getLogger("aoi.coords.wafer_map")
 
@@ -330,6 +332,52 @@ def die_grid_segments(frame: WaferFrame
     segs = [(x, lo, x, hi) for x, lo, hi in edges(xs, ys)]
     segs += [(lo, y, hi, y) for y, lo, hi in edges(ys, xs)]
     return segs
+
+
+# ---------------------------------------------------------------------------
+# 결함이 든 die 칸 — 점 대신 칸을 통째로 칠할 때 쓴다
+# ---------------------------------------------------------------------------
+def cell_of(frame: WaferFrame, x: float, y: float) -> Optional[tuple[int, int]]:
+    """평면 (x, y) 가 든 die 칸 ``(kx, ky)``.  pitch 를 모르면 None.
+
+    칸 인덱스 규약은 :attr:`WaferFrame.die_cells` 와 같다 — 칸의 왼쪽·아래 경계가
+    ``grid_x0 + kx·pitch_x`` / ``grid_y0 + ky·pitch_y`` 다.  그래서 :func:`_cell_segments`
+    가 그리는 격자와 :func:`defect_cells` 가 칠하는 면이 같은 칸을 가리킨다."""
+    if not frame.pitch_x or not frame.pitch_y:
+        return None
+    return (math.floor((x - frame.grid_x0) / frame.pitch_x),
+            math.floor((y - frame.grid_y0) / frame.pitch_y))
+
+
+def cell_bounds(frame: WaferFrame, cell: tuple[int, int]
+                ) -> tuple[float, float, float, float]:
+    """die 칸의 평면 경계 ``(x0, y0, x1, y1)`` — 왼쪽·아래·오른쪽·위."""
+    kx, ky = cell
+    x0 = frame.grid_x0 + kx * frame.pitch_x
+    y0 = frame.grid_y0 + ky * frame.pitch_y
+    return (x0, y0, x0 + frame.pitch_x, y0 + frame.pitch_y)
+
+
+# 한 칸에 여러 결함이 들면 이 순서로 색이 정해진다 — **미매치가 이긴다**.
+# 매치된 결함에 가려 '이 die 에 미매치가 있다' 가 사라지면 안 된다(정확도 우선).
+_CELL_RANK = {False: 2, True: 1, None: 0}
+
+
+def defect_cells(data: MapData) -> dict[tuple[int, int], Optional[bool]]:
+    """결함이 하나라도 든 die 칸 → 그 칸의 매칭 상태(``MapPoint.matched`` 와 같은 값).
+
+    pitch 를 모르는 폴더(절대좌표)면 빈 dict — 칸을 못 정하므로 화면은 점으로 돌아간다.
+    순수 — 헤드리스 테스트한다."""
+    if data.frame is None:
+        return {}
+    out: dict[tuple[int, int], Optional[bool]] = {}
+    for p in data.points:
+        cell = cell_of(data.frame, p.x, p.y)
+        if cell is None:
+            continue
+        if cell not in out or _CELL_RANK[p.matched] > _CELL_RANK[out[cell]]:
+            out[cell] = p.matched
+    return out
 
 
 # ---------------------------------------------------------------------------
