@@ -13,8 +13,9 @@
 - 결과 시트는 기준/검증 두 맵, 셋업 시트는 폴더 안내 → 슬롯 폴더면 맵 하나, LOT 폴더면
   전체 합산 + '슬롯 선택…' 으로 일부만.  맵은 워커가 만들고 썸네일을 미리 굽는다.
 - 점 더블클릭이 ``point_activated`` 를 낸다(단일 클릭은 아무것도 열지 않는다).
-- die 색칠: 결함이 든 **그 칸만** 칠하고 점은 생략한다.  한 칸에 매치/미매치가 섞이면
-  **미매치가 이긴다**.  칠하기 모드에서는 칸 아무 데나 집어도 그 결함이 잡힌다.
+- die 색칠: 결함이 든 **그 칸만**, **결함 점과 같은 색**으로 칠하고 점은 생략한다.
+  토글은 **셋업 단계 화면에만** 있다(결과 단계는 점 색이 곧 매치됨/미매치).
+  칠하기 모드에서는 칸 아무 데나 집어도 그 결함이 잡힌다.
 - 노치 회전: 90° 단위 시계 방향.  점·격자·노치·히트 판정이 **같이** 돈다(한 곳에서만
   회전하므로).  평면 좌표(``MapPoint.x/y``)는 안 바뀐다 — 보기 상태일 뿐이다.
 - 사진 1장 선택: 고른 사진 하나만 찍고, 원·격자는 그 사진 폴더의 기하 그대로다.
@@ -254,24 +255,20 @@ class TestDefectCells:
         xs, ys = wm.grid_lines(frame)
         for v, axis in ((x0, xs), (x1, xs), (y0, ys), (y1, ys)):
             assert min(abs(v - g) for g in axis) < 1e-6
-        assert wm.defect_cells(data) == {cell: None}
+        assert wm.defect_cells(data) == {cell}
 
-    def test_unmatched_wins_in_a_shared_die(self, tmp_path):
-        """한 칸에 매치·미매치가 섞이면 미매치 색이다 — 위험을 가리지 않는다."""
-        # 같은 die 안의 두 점(같은 칸, die 내부 위치만 다름) + 다른 die 의 점 하나.
-        folder = _camtek_folder(tmp_path, [("hit", 150000.0, 210000.0),
-                                           ("miss", 151000.0, 211000.0),
+    def test_several_defects_in_one_die_collapse_to_one_cell(self, tmp_path):
+        """한 칸에 결함이 여럿이어도 칸 하나다 — 칠하는 색은 하나뿐이라 상태를 안 담는다."""
+        # 같은 die 안의 두 점(칸은 같고 die 내부 위치만 다름) + 다른 die 의 점 하나.
+        folder = _camtek_folder(tmp_path, [("one", 150000.0, 210000.0),
+                                           ("two", 151000.0, 211000.0),
                                            ("far", 60000.0, 120000.0)])
-        paths = [folder / f"{n}.jpeg" for n in ("hit", "miss", "far")]
-        data = wm.build_map(resolve_batch(paths), matched={paths[0], paths[2]})
-        cells = wm.defect_cells(data)
+        paths = [folder / f"{n}.jpeg" for n in ("one", "two", "far")]
+        data = wm.build_map(resolve_batch(paths))
         by_stem = {p.path.stem: p for p in data.points}
-        shared = wm.cell_of(data.frame, by_stem["hit"].x, by_stem["hit"].y)
-        assert shared == wm.cell_of(data.frame, by_stem["miss"].x, by_stem["miss"].y)
-        assert cells[shared] is False               # 미매치가 이긴다
-        assert cells[wm.cell_of(data.frame, by_stem["far"].x,
-                                by_stem["far"].y)] is True
-        assert len(cells) == 2                      # 세 점이 두 칸
+        at = lambda n: wm.cell_of(data.frame, by_stem[n].x, by_stem[n].y)  # noqa: E731
+        assert at("one") == at("two") != at("far")
+        assert wm.defect_cells(data) == {at("one"), at("far")}   # 세 점이 두 칸
 
     def test_no_pitch_means_no_cells(self, tmp_path):
         """die 기하를 모르는(절대좌표) 프레임은 칸을 못 정한다 — 화면은 점으로 남는다."""
@@ -281,7 +278,7 @@ class TestDefectCells:
                              grid_x0=0.0, grid_y0=0.0,
                              center_source=wm.SOURCE_OBSERVED, kind="camtek")
         assert wm.cell_of(flat, 0.0, 0.0) is None
-        assert wm.defect_cells(wm.MapData(flat, data.points, ())) == {}
+        assert wm.defect_cells(wm.MapData(flat, data.points, ())) == set()
 
 
 class TestKlaPlane:
@@ -406,10 +403,14 @@ def test_fill_dies_paints_the_die_not_the_dot(qt, tmp_path):
 
     off = view.grab().toImage()
     assert off.pixelColor(at(inside)).name() == col["wafer"].name()
+    dot_color = off.pixelColor(at((pt.x, pt.y))).name()      # 점 모드에서 찍힌 그 색
+    assert dot_color == col["neutral"].name()
     view.set_fill_dies(True)
     assert view.fill_dies()
     on = view.grab().toImage()
-    assert on.pixelColor(at(inside)).name() == col["neutral"].name()
+    # ★ 칸 색은 **기존 결함 점 색과 같은 색**이다(사용자 결정) — 매치됨/미매치로
+    #   갈리지 않는다.  켜는 곳이 셋업 단계뿐이라 거기서는 점이 전부 이 색이다.
+    assert on.pixelColor(at(inside)).name() == dot_color
     assert on.pixelColor(at(empty_mid)).name() == col["wafer"].name()
     # 칠하기 모드에서는 점이 안 보이므로 칸 아무 데나 집어도 그 결함이 잡힌다.
     assert view.point_at(m.to_px(*inside)).path.stem == "a"
@@ -579,8 +580,10 @@ def test_dialog_single_image_shows_only_that_defect(qt, tmp_path):
         dlg.deleteLater()
 
 
-def test_dialog_view_options_apply_to_both_maps(qt, tmp_path):
-    """die 색칠·노치 회전은 기준/검증 두 맵에 함께 걸리고, 맵이 바뀌어도 유지된다."""
+def test_fill_toggle_is_setup_only_and_notch_turns_both_maps(qt, tmp_path):
+    """die 색칠은 **셋업 단계에만** 단다(사용자 결정) — 결과 단계는 점 색이 곧
+    매치됨/미매치라 한 색으로 칠하면 그 정보가 사라진다.  노치 회전은 두 단계 모두
+    이고, 결과 단계에서는 기준·검증 두 맵에 함께 걸린다."""
     from aoi_verification.app import i18n
     from aoi_verification.app.models.result import FinalResult
     from aoi_verification.app.ui.widgets.wafer_map_dialog import WaferMapDialog
@@ -592,16 +595,14 @@ def test_dialog_view_options_apply_to_both_maps(qt, tmp_path):
     try:
         _wait_build(qt, dlg)
         views = (dlg.left.view, dlg.right.view)
+        assert dlg.fill_btn is None                 # 결과 단계 — 칠하기 없음
         assert not any(v.fill_dies() for v in views)
         assert dlg.notch_btn.text() == i18n.KO.WAFER_MAP_NOTCH_FMT.format(dir="아래")
-        dlg.fill_btn.setChecked(True)
-        assert all(v.fill_dies() for v in views)
         dlg.notch_btn.click()
         assert [v.rotation() for v in views] == [1, 1]
         assert dlg.notch_btn.text() == i18n.KO.WAFER_MAP_NOTCH_FMT.format(dir="왼쪽")
         dlg.slot_combo.setCurrentIndex(1)           # 새 맵이 들어와도 보기 상태 유지
         _wait_build(qt, dlg)
-        assert all(v.fill_dies() for v in views)
         assert [v.rotation() for v in views] == [1, 1]
         for _ in range(3):                          # 네 번 누르면 제자리
             dlg.notch_btn.click()
@@ -609,6 +610,23 @@ def test_dialog_view_options_apply_to_both_maps(qt, tmp_path):
         assert dlg.notch_btn.text() == i18n.KO.WAFER_MAP_NOTCH_FMT.format(dir="아래")
     finally:
         dlg.deleteLater()
+
+    setup = WaferMapDialog()                        # 셋업 단계 — 칠하기가 있다
+    try:
+        setup.show_folder(f1)
+        _wait_build(qt, setup)
+        assert setup.fill_btn is not None
+        assert setup.fill_btn.isCheckable()
+        assert not setup.left.view.fill_dies()
+        setup.fill_btn.setChecked(True)
+        assert setup.left.view.fill_dies()
+        setup.show_folder(f2)                       # 새 맵이 들어와도 유지된다
+        _wait_build(qt, setup)
+        assert setup.left.view.fill_dies()
+        setup.notch_btn.click()
+        assert setup.left.view.rotation() == 1
+    finally:
+        setup.deleteLater()
 
 
 def test_excel_map_ignores_view_options(qt, tmp_path):

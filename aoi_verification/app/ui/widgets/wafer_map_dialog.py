@@ -19,10 +19,14 @@
 점을 **더블클릭**하면 :class:`ImageInfoDialog` 로 그 사진의 상세 수치를 본다(같은
 생산자 — 엑셀과 수치가 어긋나지 않는다).
 
-보기 옵션 둘은 두 맵에 **함께** 걸린다(기준/검증을 같은 눈으로 봐야 비교가 된다):
-‘die 색칠’ 은 점 대신 결함이 든 die 칸을 칠하고, ‘노치: …’ 는 누를 때마다 90°씩 돌려
-노치 방향을 맞춘다.  둘 다 **화면 보기 전용**이다 — 엑셀에 들어가는 맵 그림은 기본값
-(노치 아래·점 표시)으로 고정이라 결과 파일이 볼 때마다 달라지지 않는다(사용자 결정).
+보기 옵션은 **화면 전용**이다 — 엑셀에 들어가는 맵 그림은 기본값(노치 아래·점 표시)
+으로 고정이라 결과 파일이 볼 때마다 달라지지 않는다(사용자 결정).
+
+* ‘die 색칠’ — **셋업 단계에서만** 단다(사용자 결정).  점 대신 결함이 든 die 칸을
+  **결함 점과 같은 색**으로 칠한다.  결과 단계는 매치됨/미매치를 점 색으로 읽는
+  화면이라 칠하기를 두지 않는다.
+* ‘노치: …’ — 두 단계 모두.  누를 때마다 90°씩 돌려 노치 방향을 맞춘다.  결과 단계
+  에서는 기준·검증 두 맵에 **함께** 걸린다(같은 눈으로 봐야 비교가 된다).
 """
 
 from __future__ import annotations
@@ -261,13 +265,19 @@ class WaferMapDialog(QDialog):
         self.resize(1100, 720)
 
     def _add_view_options(self, top) -> None:
-        """보기 옵션 — die 색칠 토글 · 노치 방향.  두 맵에 **함께** 건다."""
-        self.fill_btn = NeonButton(i18n.KO.WAFER_MAP_FILL_DIES, role="ghost")
-        self.fill_btn.setCheckable(True)
-        self.fill_btn.setToolTip(i18n.KO.WAFER_MAP_FILL_DIES_TIP)
-        self.fill_btn.setAutoDefault(False)
-        self.fill_btn.toggled.connect(self._on_fill_toggled)
-        top.addWidget(self.fill_btn)
+        """보기 옵션 — die 색칠(셋업 단계만) · 노치 방향(두 단계 모두).
+
+        ``fill_btn`` 은 셋업 단계에서만 만든다 — 결과 단계는 점 색이 곧 매치됨/미매치
+        라 칸을 한 색으로 칠하면 그 정보가 사라진다(사용자 결정).  없는 단계에서
+        참조하다 조용히 깨지지 않게 :attr:`fill_btn` 은 그때 ``None`` 이다."""
+        self.fill_btn: Optional[NeonButton] = None
+        if self._result is None:
+            self.fill_btn = NeonButton(i18n.KO.WAFER_MAP_FILL_DIES, role="ghost")
+            self.fill_btn.setCheckable(True)
+            self.fill_btn.setToolTip(i18n.KO.WAFER_MAP_FILL_DIES_TIP)
+            self.fill_btn.setAutoDefault(False)
+            self.fill_btn.toggled.connect(self._on_fill_toggled)
+            top.addWidget(self.fill_btn)
         self.notch_btn = NeonButton("", role="ghost")
         self.notch_btn.setToolTip(i18n.KO.WAFER_MAP_NOTCH_TIP)
         self.notch_btn.setAutoDefault(False)

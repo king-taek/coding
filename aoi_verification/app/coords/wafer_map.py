@@ -358,26 +358,20 @@ def cell_bounds(frame: WaferFrame, cell: tuple[int, int]
     return (x0, y0, x0 + frame.pitch_x, y0 + frame.pitch_y)
 
 
-# 한 칸에 여러 결함이 들면 이 순서로 색이 정해진다 — **미매치가 이긴다**.
-# 매치된 결함에 가려 '이 die 에 미매치가 있다' 가 사라지면 안 된다(정확도 우선).
-_CELL_RANK = {False: 2, True: 1, None: 0}
+def defect_cells(data: MapData) -> set[tuple[int, int]]:
+    """결함이 하나라도 든 die 칸들.  한 칸에 여러 결함이 들면 칸 하나로 합쳐진다.
 
+    **매칭 상태는 담지 않는다** — 이 칸들을 칠하는 것은 셋업 단계 화면뿐이고, 거기서는
+    모든 점이 같은 '결함' 색이다(매칭 전이라 ``matched`` 가 전부 None).  결과 단계는
+    점 표시 그대로다(사용자 결정).
 
-def defect_cells(data: MapData) -> dict[tuple[int, int], Optional[bool]]:
-    """결함이 하나라도 든 die 칸 → 그 칸의 매칭 상태(``MapPoint.matched`` 와 같은 값).
-
-    pitch 를 모르는 폴더(절대좌표)면 빈 dict — 칸을 못 정하므로 화면은 점으로 돌아간다.
+    pitch 를 모르는 폴더(절대좌표)면 빈 집합 — 칸을 못 정하므로 화면은 점으로 돌아간다.
     순수 — 헤드리스 테스트한다."""
     if data.frame is None:
-        return {}
-    out: dict[tuple[int, int], Optional[bool]] = {}
-    for p in data.points:
-        cell = cell_of(data.frame, p.x, p.y)
-        if cell is None:
-            continue
-        if cell not in out or _CELL_RANK[p.matched] > _CELL_RANK[out[cell]]:
-            out[cell] = p.matched
-    return out
+        return set()
+    cells = {cell_of(data.frame, p.x, p.y) for p in data.points}
+    cells.discard(None)
+    return cells
 
 
 # ---------------------------------------------------------------------------
