@@ -13,6 +13,8 @@
 - 호스트가 없으면 **네이티브로 폴백**한다 — 구조 변경이 '아무것도 안 뜨는' 경로를
   만들면 안 된다.
 - 창 크기를 따라간다(리사이즈).
+- ``set_chrome_visible`` 로 제목줄을 감출 수 있다('내용만 남기는' 보기 — 맵 전체화면).
+  시트가 아니면 조용히 아무 일도 하지 않는다(폴백 규칙).
 """
 
 from __future__ import annotations
@@ -327,6 +329,43 @@ def test_titled_dialog_gets_a_title_bar_and_a_close_button(qapp, host):
     assert got["hosted"], "다이얼로그가 제목줄 안으로 들어가지 않았다"
     assert got["has_close"], "닫기 버튼이 없다 — 닫을 방법이 사라졌다"
     assert h._stack == [], "닫기 버튼을 눌렀는데 시트가 남았다"
+
+
+def test_chrome_can_be_hidden_and_restored(qapp, host):
+    """제목줄을 감췄다 되돌릴 수 있다 — 맵 전체화면이 '맵만 남기려고' 쓴다.
+
+    ★ 감추면 닫기 ✕ 도 같이 사라지므로, 부르는 쪽이 다른 나가기 경로를 줘야 한다는
+    경고가 `_SheetFrame.set_bar_visible` docstring 에 붙어 있다."""
+    win, h = host
+    dlg = QDialog(win)
+    dlg.setWindowTitle("Wafer Map")
+    got = {}
+
+    def check():
+        frame = h._stack[-1]["frame"]
+        bar = lambda: [w for w in frame.findChildren(QWidget)       # noqa: E731
+                       if w.property("role") == "sheetBar"][0]
+        got["shown"] = bar().isVisibleTo(frame)
+        got["hid"] = sheet_host.set_chrome_visible(dlg, False)
+        got["after_hide"] = bar().isVisibleTo(frame)
+        sheet_host.set_chrome_visible(dlg, True)
+        got["after_show"] = bar().isVisibleTo(frame)
+        dlg.reject()
+
+    _later(40, check)
+    sheet_host.run(dlg, full_bleed=True)
+    assert got["shown"] and got["hid"] is True
+    assert got["after_hide"] is False, "제목줄이 감춰지지 않았다"
+    assert got["after_show"] is True, "제목줄이 되돌아오지 않았다"
+
+
+def test_chrome_toggle_is_a_no_op_outside_a_sheet(qapp):
+    """시트가 아니면 조용히 아무 일도 하지 않는다 — 호스트 없는 경로도 살아야 한다."""
+    loose = QDialog()
+    try:
+        assert sheet_host.set_chrome_visible(loose, False) is False
+    finally:
+        loose.deleteLater()
 
 
 def test_message_sheet_is_not_double_titled(qapp, host):

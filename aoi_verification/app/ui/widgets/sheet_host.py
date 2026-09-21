@@ -125,10 +125,19 @@ class _SheetFrame(QWidget):
         btn.clicked.connect(self.close_requested.emit)
         h.addWidget(btn)
         v.addWidget(bar)
+        self._bar = bar
 
         self._body = QVBoxLayout()
         self._body.setContentsMargins(0, 0, 0, 0)
         v.addLayout(self._body, 1)
+
+    def set_bar_visible(self, visible: bool) -> None:
+        """제목줄을 감춘다/되돌린다 — '내용만 남기는' 보기(맵 전체화면)용.
+
+        ★ 감추면 **닫기 ✕ 도 같이 사라진다**.  부르는 쪽이 다른 나가기 경로(ESC·떠
+        있는 버튼)를 반드시 함께 제공해야 한다 — 이 모듈 docstring 의 '정체를 모르고
+        닫을 수도 없는 시트' 를 스스로 만들지 않기 위해서다."""
+        self._bar.setVisible(visible)
 
     def set_content(self, w: QWidget) -> None:
         w.setParent(self)
@@ -517,6 +526,22 @@ def host_for(widget: Optional[QWidget]) -> Optional[SheetHost]:
         node = node.parentWidget()
         depth += 1
     return None
+
+
+def set_chrome_visible(widget: QWidget, visible: bool) -> bool:
+    """시트로 뜬 ``widget`` 의 제목줄(제목 + ✕)을 감추거나 되돌린다.
+
+    ``widget`` 이 시트가 아니면(호스트 없는 네이티브 폴백·헤드리스 테스트) 아무 일도
+    하지 않고 ``False`` 를 돌려준다 — 그 경로에서도 호출부는 그대로 동작해야 한다
+    (이 모듈의 설계 규칙 2 '폴백을 반드시 남긴다').
+
+    ★ 감추기 전에 :meth:`_SheetFrame.set_bar_visible` 의 경고를 읽을 것 — 닫기 ✕ 가
+    같이 사라지므로 부르는 쪽이 다른 나가기 경로를 줘야 한다."""
+    frame = widget.parentWidget()
+    if not isinstance(frame, _SheetFrame):
+        return False
+    frame.set_bar_visible(visible)
+    return True
 
 
 def run(dialog, *, full_bleed: bool = False) -> int:

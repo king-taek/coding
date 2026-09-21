@@ -19,6 +19,9 @@
 - 노치 회전: 90° 단위 시계 방향.  점·격자·노치·히트 판정이 **같이** 돈다(한 곳에서만
   회전하므로).  평면 좌표(``MapPoint.x/y``)는 안 바뀐다 — 보기 상태일 뿐이다.
 - 사진 1장 선택: 고른 사진 하나만 찍고, 원·격자는 그 사진 폴더의 기하 그대로다.
+- 전체화면: 주변 표시(설명·버튼줄·제목·범례)를 감춰 맵이 실제로 **커진다**.  나가기는
+  ESC 와 떠 있는 버튼 둘 다.  닫을 때 내가 키운 창은 되돌린다.  안 보이는 창은 건드리지
+  않는다(뜰 생각 없던 창을 띄우지 않는다).
 - 엑셀: 렌더러가 주입되고 ``slot_images`` 가 있으면 'Wafer Map' 시트에 슬롯 행 +
   LOT 합산 행이 생긴다.  워커는 ui 를 import 하지 않는다(렌더러는 인자).
 """
@@ -627,6 +630,92 @@ def test_fill_toggle_is_setup_only_and_notch_turns_both_maps(qt, tmp_path):
         assert setup.left.view.rotation() == 1
     finally:
         setup.deleteLater()
+
+
+def test_fullscreen_hides_the_chrome_and_grows_the_map(qt, tmp_path):
+    """전체화면: 주변 표시가 빠져 맵 **몫이 커지고**, 앱 창도 같이 전체화면이 된다.
+
+    시트와 같은 모양으로(창 안 자식 위젯) 띄워서 잰다 — 실제 경로가 그렇다.  높이 자체
+    대신 **창에서 맵이 차지하는 비율**을 비교한다: 창이 전체화면으로 커지는 것과 주변
+    표시가 빠지는 것을 섞지 않고, 뒤엣것만 본다."""
+    from PyQt6.QtCore import QEvent, Qt
+    from PyQt6.QtGui import QKeyEvent
+    from PyQt6.QtWidgets import QVBoxLayout, QWidget
+    from aoi_verification.app.ui.widgets.wafer_map_dialog import WaferMapDialog
+    folder = _camtek_folder(tmp_path, [("a", CX, CY)])
+    win = QWidget()
+    win.resize(900, 700)
+    lay = QVBoxLayout(win)
+    lay.setContentsMargins(0, 0, 0, 0)
+    dlg = WaferMapDialog(win)
+    dlg.setWindowFlags(Qt.WindowType.Widget)         # 시트처럼 창 **안**으로
+    lay.addWidget(dlg)
+    win.show()
+    qt.processEvents()
+    try:
+        dlg.show_folder(folder)
+        _wait_build(qt, dlg)
+        qt.processEvents()
+        share = lambda: dlg.left.view.height() / max(1, dlg.height())   # noqa: E731
+        before = share()
+        assert 0 < before < 1
+        assert not dlg.is_fullscreen() and not win.isFullScreen()
+        assert dlg.exit_btn.isHidden()
+
+        dlg.full_btn.click()
+        qt.processEvents()
+        assert dlg.is_fullscreen()
+        assert win.isFullScreen(), "앱 창이 전체화면으로 바뀌지 않았다"
+        # 주변 표시가 전부 빠지고 맵만 남는다.
+        assert not dlg.sub.isVisibleTo(dlg)
+        assert not dlg._top_host.isVisibleTo(dlg)
+        assert not dlg.left.title.isVisibleTo(dlg)
+        assert not dlg.left.legend.isVisibleTo(dlg)
+        assert dlg.layout().contentsMargins().top() == 0
+        assert dlg.exit_btn.isVisibleTo(dlg)         # 유일한 나가기 버튼이 뜬다
+        assert dlg.exit_btn.x() + dlg.exit_btn.width() <= dlg.width()
+        full_share = share()
+        assert full_share > before, "맵 몫이 커지지 않았다"
+
+        dlg.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Escape,
+                                    Qt.KeyboardModifier.NoModifier))
+        qt.processEvents()
+        assert not dlg.is_fullscreen()
+        assert not win.isFullScreen(), "창이 되돌아오지 않았다"
+        assert dlg.sub.isVisibleTo(dlg) and dlg._top_host.isVisibleTo(dlg)
+        assert dlg.left.title.isVisibleTo(dlg)
+        assert dlg.exit_btn.isHidden()
+        # 창 크기가 돌아오는 폭은 플랫폼마다 달라 절대값은 안 본다 — 주변 표시가
+        # 되살아나 맵 몫이 **다시 줄었다**는 것만 본다.
+        assert share() < full_share, "주변 표시가 되살아나지 않았다"
+
+        dlg.full_btn.click()                         # 떠 있는 버튼으로도 나온다
+        assert dlg.is_fullscreen()
+        dlg.exit_btn.click()
+        qt.processEvents()
+        assert not dlg.is_fullscreen() and not win.isFullScreen()
+    finally:
+        win.hide()
+        qt.processEvents()
+        win.deleteLater()
+        qt.processEvents()
+
+
+def test_fullscreen_leaves_an_unshown_window_alone(qt, tmp_path):
+    """안 보이는 창은 건드리지 않는다 — 뜰 생각이 없던 창을 띄우면 안 된다.
+
+    닫을 때는 전체화면을 스스로 푼다(내가 키운 창이 전체화면으로 남으면 안 된다)."""
+    from aoi_verification.app.ui.widgets.wafer_map_dialog import WaferMapDialog
+    dlg = WaferMapDialog()
+    try:
+        dlg.set_fullscreen(True)
+        assert dlg.is_fullscreen()
+        assert not dlg.isVisible() and not dlg.isFullScreen()
+        assert dlg._win_changed is False           # 창 상태는 손대지 않았다
+        dlg.close()
+        assert not dlg.is_fullscreen()
+    finally:
+        dlg.deleteLater()
 
 
 def test_excel_map_ignores_view_options(qt, tmp_path):

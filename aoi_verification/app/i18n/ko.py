@@ -1100,4 +1100,9 @@ WAFER_MAP_NOTCH_TIP = "누를 때마다 90°씩 돌려 노치 방향을 맞춥�
 WAFER_MAP_PICK_IMAGE = "사진 1장"
 WAFER_MAP_PICK_IMAGE_TITLE = "결함 사진 1장 선택"
 WAFER_MAP_ONE_IMAGE_FMT = "{name} · 사진 1장"
+WAFER_MAP_FULLSCREEN = "전체화면"
+WAFER_MAP_FULLSCREEN_EXIT = "전체화면 나가기 (ESC)"
+WAFER_MAP_FULLSCREEN_TIP = (
+    "맵만 남기고 주변 표시(설명·버튼·제목·범례)를 감춘 뒤 앱 창도 전체화면으로 "
+    "바꿉니다. ESC 를 누르면 원래대로 돌아옵니다.")
 WAFER_MAP_NO_COORD = "이 사진을 맵에 찍지 못했습니다 — 좌표 또는 die 기하를 읽지 못했습니다."

@@ -27,6 +27,13 @@
   화면이라 칠하기를 두지 않는다.
 * ‘노치: …’ — 두 단계 모두.  누를 때마다 90°씩 돌려 노치 방향을 맞춘다.  결과 단계
   에서는 기준·검증 두 맵에 **함께** 걸린다(같은 눈으로 봐야 비교가 된다).
+* ‘전체화면’ — 두 단계 모두.  주변 표시(설명·버튼줄·제목·범례·시트 제목줄)를 감춰
+  맵만 남기고, **메인 창**도 전체화면으로 바꾼다.  맵이 둘이면 둘 다 나란히 커진다
+  (비교가 목적이므로 — 사용자 결정).  나가기는 ESC 와 떠 있는 버튼.
+  ⚠ 시트 자신에게 ``showFullScreen()`` 을 걸어 봐야 소용없다 — 자식 위젯에는 통하지
+  않는다(``widgets/window_controls`` 의 실측 기록).  그래서 '맵만 남기기'(여기)와
+  '창 키우기'(메인 창)를 나눠서 한다.  내가 바꾼 창만 되돌린다 — 사용자가 이미 F11
+  로 전체화면을 쓰고 있었다면 나갈 때 그 상태를 빼앗지 않는다.
 """
 
 from __future__ import annotations
@@ -34,7 +41,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import QObject, QThread, pyqtSignal
+from PyQt6.QtCore import QObject, Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (QApplication, QComboBox, QDialog, QFileDialog, QFrame,
                              QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget)
 
@@ -51,6 +58,7 @@ from . import sheet_host as sheets
 from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
 from .wafer_map_view import WaferMapView
+from .window_controls import set_window_fullscreen
 
 # 페이지가 닫혀도 돌던 스레드가 수명을 다 살게 붙들어 둔다(setup_page 의 패턴).
 _LIVE_BUILDS: set = set()
@@ -130,6 +138,11 @@ class _MapPanel(QWidget):
         self.legend.setWordWrap(True)
         lay.addWidget(self.legend)
 
+    def set_chrome_visible(self, visible: bool) -> None:
+        """제목·범례를 감춘다/되돌린다 — 맵 전체화면에서 맵만 남기려고."""
+        self.title.setVisible(visible)
+        self.legend.setVisible(visible)
+
     def show_map(self, title: str, data: Optional[MapData]) -> None:
         self.title.setText(title)
         self.view.set_data(data)
@@ -185,6 +198,9 @@ class WaferMapDialog(QDialog):
         self._lot_slots: dict[str, Path] = {}         # LOT 폴더일 때만
         self._selected: Optional[set[str]] = None     # None = 전체
         self._rot = 0                                 # 노치 방향(90° 단위)
+        self._fullscreen = False
+        self._win_state: dict = {}                    # 창을 되돌릴 때 쓸 원래 상태
+        self._win_changed = False                     # 창을 **내가** 바꿨나
         self._token = 0
         self._build_thread: Optional[_MapBuild] = None
         self._build()
@@ -202,12 +218,16 @@ class WaferMapDialog(QDialog):
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(theme.PROFILE.section_gap // 2)
 
-        sub = QLabel(i18n.KO.WAFER_MAP_SUBTITLE, self)
-        sub.setProperty("role", "subtitle")
-        sub.setWordWrap(True)
-        root.addWidget(sub)
+        self.sub = QLabel(i18n.KO.WAFER_MAP_SUBTITLE, self)
+        self.sub.setProperty("role", "subtitle")
+        self.sub.setWordWrap(True)
+        root.addWidget(self.sub)
 
-        top = QHBoxLayout()
+        # ★ 상단줄을 **위젯으로 싼다** — 전체화면에서 줄 하나를 통째로 감추려면
+        #   레이아웃이 아니라 위젯이어야 한다(QHBoxLayout 에는 setVisible 이 없다).
+        self._top_host = QWidget(self)
+        top = QHBoxLayout(self._top_host)
+        top.setContentsMargins(0, 0, 0, 0)
         top.setSpacing(12)
         if self._result is not None:
             cap = QLabel(i18n.KO.WAFER_MAP_SLOT_LABEL, self)
@@ -243,7 +263,7 @@ class WaferMapDialog(QDialog):
             top.addWidget(self.folder_label, stretch=1)
         top.addStretch(1)
         self._add_view_options(top)
-        root.addLayout(top)
+        root.addWidget(self._top_host)
 
         self.empty = QLabel(i18n.KO.WAFER_MAP_NO_FOLDER, self)
         self.empty.setProperty("role", "muted")
@@ -262,6 +282,15 @@ class WaferMapDialog(QDialog):
         root.addLayout(maps, stretch=1)
         for panel in (self.left, self.right):
             panel.view.point_activated.connect(self._on_point)
+
+        # 전체화면에서 유일하게 남는 나가기 버튼 — 레이아웃 밖에 **떠 있다**(맵 넓이를
+        # 한 픽셀도 먹지 않게).  시트 제목줄의 ✕ 가 그때 감춰지므로 ESC 와 함께 이
+        # 버튼이 나가기 경로다(sheet_host.set_chrome_visible 의 경고).
+        self.exit_btn = NeonButton(i18n.KO.WAFER_MAP_FULLSCREEN_EXIT, role="ghost",
+                                   parent=self)
+        self.exit_btn.setAutoDefault(False)
+        self.exit_btn.clicked.connect(lambda: self.set_fullscreen(False))
+        self.exit_btn.hide()
         self.resize(1100, 720)
 
     def _add_view_options(self, top) -> None:
@@ -284,6 +313,13 @@ class WaferMapDialog(QDialog):
         self.notch_btn.clicked.connect(self._on_rotate)
         self._update_notch_text()
         top.addWidget(self.notch_btn)
+        # ★ 토글 버튼(checkable)이 아니다 — 전체화면에서는 이 줄이 통째로 감춰져
+        #   ESC·떠 있는 버튼으로 나오므로, checked 상태를 따로 맞춰 줄 일이 없게 한다.
+        self.full_btn = NeonButton(i18n.KO.WAFER_MAP_FULLSCREEN, role="ghost")
+        self.full_btn.setToolTip(i18n.KO.WAFER_MAP_FULLSCREEN_TIP)
+        self.full_btn.setAutoDefault(False)
+        self.full_btn.clicked.connect(lambda: self.set_fullscreen(True))
+        top.addWidget(self.full_btn)
 
     def _views(self):
         return (self.left.view, self.right.view)
@@ -302,6 +338,70 @@ class WaferMapDialog(QDialog):
     def _update_notch_text(self) -> None:
         self.notch_btn.setText(i18n.KO.WAFER_MAP_NOTCH_FMT.format(
             dir=i18n.KO.WAFER_MAP_NOTCH_DIRS[self._rot]))
+
+    # ------------------------------------------------------------------
+    # 전체화면 — 맵만 남기고, 앱 창도 같이 키운다
+    # ------------------------------------------------------------------
+    def set_fullscreen(self, on: bool) -> None:
+        """맵만 남기는 보기.  주변 표시를 감추고 **메인 창**도 전체화면으로 바꾼다.
+
+        ★ 시트 자신에게 ``showFullScreen()`` 을 걸지 않는다 — 자식 위젯에는 통하지
+        않는다(``widgets/window_controls`` 의 실측 기록).  그래서 '맵만 남기기'(이
+        위젯이 하는 일)와 '창 키우기'(메인 창이 하는 일)를 나눠서 한다.
+
+        ★ 창은 **내가 바꿨을 때만** 되돌린다.  사용자가 이미 F11 로 전체화면을 쓰고
+        있었다면 나갈 때 그 상태를 빼앗지 않는다."""
+        on = bool(on)
+        if on == self._fullscreen:
+            return
+        self._fullscreen = on
+        self.sub.setVisible(not on)
+        self._top_host.setVisible(not on)
+        for panel in (self.left, self.right):
+            panel.set_chrome_visible(not on)
+        m = 0 if on else 16
+        self.layout().setContentsMargins(m, m, m, m)
+        sheets.set_chrome_visible(self, not on)     # 시트 제목줄(+ ✕)
+        self._sync_window_fullscreen(on)
+        self.exit_btn.setVisible(on)
+        if on:
+            self.exit_btn.raise_()
+            self._place_exit_btn()
+
+    def is_fullscreen(self) -> bool:
+        return self._fullscreen
+
+    def _sync_window_fullscreen(self, on: bool) -> None:
+        win = self.window()
+        # 보이지 않는 창은 건드리지 않는다 — 시트로 뜨기 전(헤드리스 테스트 포함)에
+        # showFullScreen 을 걸면 뜰 생각이 없던 창이 떠 버린다.
+        if win is None or not win.isVisible():
+            return
+        if on:
+            if not win.isFullScreen():
+                set_window_fullscreen(win, True, self._win_state)
+                self._win_changed = True
+        elif self._win_changed:
+            set_window_fullscreen(win, False, self._win_state)
+            self._win_changed = False
+
+    def _place_exit_btn(self) -> None:
+        """맵 오른쪽 위 구석 — 웨이퍼는 원이라 네 구석은 비어 있다."""
+        self.exit_btn.adjustSize()
+        self.exit_btn.move(max(0, self.width() - self.exit_btn.width() - 12), 12)
+
+    def resizeEvent(self, event):       # noqa: N802
+        super().resizeEvent(event)
+        if self._fullscreen:
+            self._place_exit_btn()
+
+    def keyPressEvent(self, event):     # noqa: N802
+        """Esc — 전체화면이면 **거기서만** 빠져나온다(창은 닫지 않는다)."""
+        if event.key() == Qt.Key.Key_Escape and self._fullscreen:
+            self.set_fullscreen(False)
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     # ------------------------------------------------------------------
     def _render_empty(self, text: str = "") -> None:
@@ -364,6 +464,8 @@ class WaferMapDialog(QDialog):
         return self._build_thread is not None and self._build_thread.isRunning()
 
     def closeEvent(self, event):        # noqa: N802
+        # 전체화면인 채 닫으면 내가 키운 창이 전체화면으로 남는다 — 먼저 되돌린다.
+        self.set_fullscreen(False)
         if self.is_building():
             self._build_thread.requestInterruption()
         super().closeEvent(event)
