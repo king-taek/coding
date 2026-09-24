@@ -3,8 +3,10 @@
 * **셋업 단계**(``WaferMapDialog(parent)``): 폴더를 고른다.  **슬롯 폴더**(사진이 바로
   든 폴더)면 그 웨이퍼 하나, **LOT 폴더**(슬롯 폴더들이 든 폴더)면 전체 슬롯을 한 맵에
   합산하고 ‘슬롯 선택…’ 으로 일부만 본다(진행 범위의 슬롯 선택 팝업과 같은 창).
-  ‘사진 1장’ 으로 **결함 사진 한 장만** 골라 그 결함만 볼 수도 있다 — 고른 사진의
-  폴더에서 웨이퍼 기하를 읽으므로 원·격자는 그대로다.
+  **사진 1장을 창에 끌어다 놓으면** 그 결함만 볼 수 있다 — 놓은 사진의 폴더에서
+  웨이퍼 기하를 읽으므로 원·격자는 그대로다.
+  ‘Map 저장’ 은 지금 맵을 txt 로 쓰고(:mod:`coords.wafer_map_txt`), ‘Map 합치기’ 나
+  **txt 끌어놓기**로 여러 맵을 한 맵에 합친다(합친 맵에 더 놓으면 계속 더해진다).
   매칭 전이라 점은 한 색(결함)이다.
 * **결과 단계**(``WaferMapDialog(parent, result=...)``): 슬롯을 고르면 기준/검증 맵을
   나란히, '전체' 를 고르면 LOT 의 모든 슬롯을 한 맵에 합산한다.  점은 매치됨/미매치.
@@ -47,7 +49,7 @@ from PyQt6.QtWidgets import (QApplication, QComboBox, QDialog, QFileDialog, QFra
 
 from ... import i18n
 from ...config import CONFIG
-from ...coords import resolve_batch
+from ...coords import resolve_batch, wafer_map_txt
 from ...coords.wafer_map import (ALL_SLOTS_KEY, MapData, SOURCE_ASSUMED,
                                  build_map, slot_maps)
 from ...models.result import FinalResult
@@ -205,6 +207,8 @@ class WaferMapDialog(QDialog):
         self._win_changed = False                     # 창을 **내가** 바꿨나
         self._token = 0
         self._build_thread: Optional[_MapBuild] = None
+        self._current: Optional[MapData] = None       # 셋업 단계에서 지금 보이는 맵
+        self._merged: list[Path] = []                 # 합친 맵이면 그 txt 들
         self._build()
         self._loading = LoadingOverlay(self)
         if result is not None:
@@ -254,12 +258,18 @@ class WaferMapDialog(QDialog):
             self.slots_btn.setAutoDefault(False)
             self.slots_btn.hide()
             top.addWidget(self.slots_btn)
-            # 사진 1장만 — LOT/웨이퍼보다 더 좁은 단위(사용자 요청).
-            self.image_btn = NeonButton(i18n.KO.WAFER_MAP_PICK_IMAGE, role="ghost")
-            self.image_btn.setToolTip(i18n.KO.WAFER_MAP_PICK_IMAGE_TITLE)
-            self.image_btn.clicked.connect(self._on_pick_image)
-            self.image_btn.setAutoDefault(False)
-            top.addWidget(self.image_btn)
+            # 사진 1장은 버튼이 아니라 **끌어놓기**다(사용자 요청) — dropEvent.
+            self.export_btn = NeonButton(i18n.KO.WAFER_MAP_EXPORT, role="ghost")
+            self.export_btn.clicked.connect(self._on_export)
+            self.export_btn.setAutoDefault(False)
+            self.export_btn.setEnabled(False)
+            top.addWidget(self.export_btn)
+            self.merge_btn = NeonButton(i18n.KO.WAFER_MAP_MERGE, role="ghost")
+            self.merge_btn.setToolTip(i18n.KO.WAFER_MAP_MERGE_TIP)
+            self.merge_btn.clicked.connect(self._on_merge)
+            self.merge_btn.setAutoDefault(False)
+            top.addWidget(self.merge_btn)
+            self.setAcceptDrops(True)
             self.folder_label = QLabel("", self)
             self.folder_label.setProperty("role", "monoMuted")
             top.addWidget(self.folder_label, stretch=1)
@@ -486,6 +496,8 @@ class WaferMapDialog(QDialog):
         """폴더 판정(슬롯/LOT)부터 워커 — 고른 순간 '폴더 탐색 중' 이 뜬다."""
         self._folder = folder
         self._single = None
+        self._merged = []
+        self._set_current(None)
         self.folder_label.setText(str(folder))
         self.pick_btn.setText(i18n.KO.WAFER_MAP_PICK_FOLDER_ANOTHER)
         self._lot_slots = {}
@@ -516,9 +528,122 @@ class WaferMapDialog(QDialog):
 
     def _show_folder_map(self, data: MapData, empty_msg: str = "") -> None:
         if data.frame is None:
+            self._set_current(None)
             self._render_empty(empty_msg or i18n.KO.WAFER_MAP_NO_FRAME)
         else:
+            self._set_current(data)
             self._show_maps((self._folder_title(), data), None)
+
+    def _set_current(self, data: Optional[MapData]) -> None:
+        self._current = data
+        self.export_btn.setEnabled(data is not None)
+
+    def current_map(self) -> Optional[MapData]:
+        return self._current
+
+    # ------------------------------------------------------------------
+    # txt 저장 / 합치기 / 끌어놓기
+    # ------------------------------------------------------------------
+    def _on_export(self) -> None:
+        if self._current is None:
+            return
+        base = self._folder or Path.home()
+        name = (self._single.stem if self._single is not None
+                else (base.name if not self._merged else "merged"))
+        path, _ = QFileDialog.getSaveFileName(
+            self, i18n.KO.WAFER_MAP_EXPORT_TITLE, str(base / f"{name}_wafer_map.txt"),
+            i18n.KO.WAFER_MAP_TXT_FILTER)
+        if path:
+            self.export_to(Path(path))
+
+    def export_to(self, path: Path) -> bool:
+        try:
+            wafer_map_txt.save(self._current, path)
+        except (OSError, TypeError) as exc:
+            sheets.error(self, i18n.KO.WAFER_MAP_EXPORT,
+                         i18n.KO.WAFER_MAP_EXPORT_FAIL_FMT.format(err=exc))
+            return False
+        self.folder_label.setText(i18n.KO.WAFER_MAP_EXPORT_DONE_FMT.format(path=path))
+        return True
+
+    def _on_merge(self) -> None:
+        start = str(self._merged[-1].parent if self._merged else (self._folder or ""))
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, i18n.KO.WAFER_MAP_MERGE_TITLE, start, i18n.KO.WAFER_MAP_TXT_FILTER)
+        if paths:
+            self.merge_files([Path(p) for p in paths], add=False)
+
+    def merge_files(self, paths: list[Path], *, add: bool = True) -> None:
+        """txt 맵들을 한 맵으로.  ``add`` 면 이미 합친 맵에 더한다(끌어놓기)."""
+        files = list(self._merged) if add else []
+        files += [p for p in paths if p not in files]
+        maps, bad = [], []
+        for f in files:
+            try:
+                maps.append(wafer_map_txt.load(f))
+            except (OSError, ValueError, IndexError, UnicodeDecodeError):
+                bad.append(f)
+        if bad:
+            sheets.warn(self, i18n.KO.WAFER_MAP_MERGE,
+                        i18n.KO.WAFER_MAP_MERGE_BAD_FMT.format(
+                            names="\n".join(b.name for b in bad)))
+        good = [f for f in files if f not in bad]
+        if not good:
+            return
+        self._merged = good
+        self._single = None
+        self._lot_slots = {}
+        self._selected = None
+        self.slots_btn.hide()
+        self.folder_label.setText(" + ".join(f.name for f in good))
+        data = wafer_map_txt.merge(maps)
+        if data.frame is None:
+            self._set_current(None)
+            self._render_empty(i18n.KO.WAFER_MAP_NO_FRAME)
+            return
+        self._set_current(data)
+        self._show_maps((i18n.KO.WAFER_MAP_MERGED_FMT.format(n=len(good)), data), None)
+
+    def merged_files(self) -> list[Path]:
+        return list(self._merged)
+
+    @staticmethod
+    def _dropped(event) -> tuple[list[Path], list[Path]]:
+        """끌어놓은 것 → (txt 목록, 사진 목록).  로컬 파일만."""
+        txts, imgs = [], []
+        exts = {e.lower() for e in CONFIG.image_extensions}
+        md = event.mimeData()
+        for url in (md.urls() if md is not None and md.hasUrls() else []):
+            if not url.isLocalFile():
+                continue
+            p = Path(url.toLocalFile())
+            if p.suffix.lower() == ".txt":
+                txts.append(p)
+            elif p.suffix.lower() in exts:
+                imgs.append(p)
+        return txts, imgs
+
+    def dragEnterEvent(self, event):    # noqa: N802
+        txts, imgs = self._dropped(event)
+        if txts or imgs:
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):     # noqa: N802
+        self.dragEnterEvent(event)
+
+    def dropEvent(self, event):         # noqa: N802
+        """txt → 맵 합치기(합친 맵이면 더하기) / 사진 → 그 1장만.  txt 가 우선."""
+        txts, imgs = self._dropped(event)
+        if txts:
+            self.merge_files(txts, add=bool(self._merged))
+        elif imgs:
+            self.show_image(imgs[0])
+        else:
+            event.ignore()
+            return
+        event.acceptProposedAction()
 
     def _folder_title(self) -> str:
         if self._single is not None:
@@ -547,17 +672,6 @@ class WaferMapDialog(QDialog):
         self._start_build(job, lambda d, _r, _e: self._show_folder_map(d),
                           i18n.KO.WAFER_MAP_LOADING_SCAN)
 
-    def _on_pick_image(self) -> None:
-        """결함 사진 1장 — QFileDialog 는 시트로 감싸지 않는다(sheet_host 의 결정)."""
-        patterns = " ".join(f"*{e}" for e in CONFIG.image_extensions)
-        start = str(self._single.parent if self._single is not None
-                    else (self._folder or ""))
-        path, _ = QFileDialog.getOpenFileName(
-            self, i18n.KO.WAFER_MAP_PICK_IMAGE_TITLE, start,
-            i18n.KO.IMAGE_INFO_FILE_FILTER_FMT.format(patterns=patterns))
-        if path:
-            self.show_image(Path(path))
-
     def show_image(self, path: Path) -> None:
         """사진 1장만 맵에 — 원·격자는 **그 사진이 든 폴더**의 기하 그대로다.
 
@@ -565,6 +679,8 @@ class WaferMapDialog(QDialog):
         훑지 않으므로 좌표 1건만 읽는다 — NAS 에서도 즉시 뜬다."""
         self._single = path
         self._folder = path.parent
+        self._merged = []
+        self._set_current(None)
         self._lot_slots = {}
         self._selected = None
         self.slots_btn.hide()

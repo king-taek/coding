@@ -20,7 +20,10 @@
   칠하기 모드에서는 칸 아무 데나 집어도 그 결함이 잡힌다.
 - 노치 회전: 90° 단위 시계 방향.  점·격자·노치·히트 판정이 **같이** 돈다(한 곳에서만
   회전하므로).  평면 좌표(``MapPoint.x/y``)는 안 바뀐다 — 보기 상태일 뿐이다.
-- 사진 1장 선택: 고른 사진 하나만 찍고, 원·격자는 그 사진 폴더의 기하 그대로다.
+- 사진 1장: 버튼이 아니라 **끌어놓기**.  고른 사진 하나만 찍고, 원·격자는 그 사진
+  폴더의 기하 그대로다.
+- Map 저장/합치기: txt 는 원본 폴더 없이 다시 읽혀 **같은 맵**이 된다(점·프레임·die 맵).
+  합치기는 점을 모으고 프레임은 첫 파일, txt 끌어놓기는 합친 맵에 더한다.
 - 전체화면: 주변 표시(설명·버튼줄·제목·범례)를 감춰 맵이 실제로 **커진다**.  나가기는
   ESC 와 떠 있는 버튼 둘 다.  닫을 때 내가 키운 창은 되돌린다.  안 보이는 창은 건드리지
   않는다(뜰 생각 없던 창을 띄우지 않는다).
@@ -649,6 +652,80 @@ def test_dialog_single_image_shows_only_that_defect(qt, tmp_path):
         assert dlg.single_image() is None
         assert len(dlg.left.view.data().points) == 2
         assert dlg.left.title.text() == folder.name
+    finally:
+        dlg.deleteLater()
+
+
+def test_map_txt_roundtrip_and_merge(tmp_path):
+    """txt 로 쓰고 읽으면 같은 맵 — 원본 폴더를 지워도 된다.  합치면 점이 모인다."""
+    from aoi_verification.app.coords import wafer_map_txt as wt
+    folder = _camtek_folder(tmp_path, [("a", CX, CY), ("b", 60000.0, 120000.0)])
+    _write_die_map(folder, {(i, j) for i in range(2, 9) for j in range(1, 8)}, repeat=2)
+    data = wm.build_map(resolve_batch([folder / "a.jpeg", folder / "b.jpeg",
+                                       folder / "none.jpeg"]))
+    assert data.frame.die_cells and data.unplaced
+    txt = tmp_path / "a map.txt"
+    wt.save(data, txt)
+    back = wt.load(txt)
+    assert back == data
+
+    kla = _kla_folder(tmp_path, [("k", 1000.0, 2000.0, 1, 1)])
+    other = wm.build_map(resolve_batch([kla / "k.jpg"]))
+    merged = wt.merge([back, other])
+    assert merged.frame == data.frame
+    assert len(merged.points) == 3 and merged.unplaced == data.unplaced
+
+    bad = tmp_path / "memo.txt"
+    bad.write_text("그냥 메모", encoding="utf-8")
+    with pytest.raises(ValueError):
+        wt.load(bad)
+
+
+def test_dialog_export_merge_and_drop(qt, tmp_path):
+    """Map 저장 → txt, Map 합치기(끌어놓기 포함), 사진 끌어놓기 = 그 1장만."""
+    from PyQt6.QtCore import QMimeData, QPointF, Qt, QUrl
+    from PyQt6.QtGui import QDropEvent
+    from aoi_verification.app import i18n
+    from aoi_verification.app.ui.widgets.wafer_map_dialog import WaferMapDialog
+
+    def drop(dlg, *paths):
+        md = QMimeData()
+        md.setUrls([QUrl.fromLocalFile(str(p)) for p in paths])
+        ev = QDropEvent(QPointF(5, 5), Qt.DropAction.CopyAction, md,
+                        Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier)
+        dlg.dropEvent(ev)
+
+    folder = _camtek_folder(tmp_path, [("a", CX, CY), ("b", 60000.0, 120000.0)])
+    dlg = WaferMapDialog()
+    try:
+        assert not hasattr(dlg, "image_btn")          # 사진 1장은 버튼이 아니다
+        assert not dlg.export_btn.isEnabled()         # 맵이 없으면 저장할 것도 없다
+        dlg.show_folder(folder)
+        _wait_build(qt, dlg)
+        assert dlg.export_btn.isEnabled()
+        t1, t2 = tmp_path / "m1.txt", tmp_path / "m2.txt"
+        assert dlg.export_to(t1)
+        dlg.show_image(folder / "b.jpeg")
+        _wait_build(qt, dlg)
+        assert dlg.export_to(t2)
+
+        dlg.merge_files([t1, t2], add=False)
+        assert dlg.merged_files() == [t1, t2]
+        assert len(dlg.left.view.data().points) == 3
+        assert dlg.left.title.text() == i18n.KO.WAFER_MAP_MERGED_FMT.format(n=2)
+
+        drop(dlg, t1)                                 # 합친 맵에 txt 를 놓으면 더한다
+        assert len(dlg.merged_files()) == 2           # 같은 파일은 두 번 안 더한다
+        t3 = tmp_path / "m3.txt"
+        assert dlg.export_to(t3)                      # 합친 맵도 저장된다
+        drop(dlg, t3)
+        assert len(dlg.left.view.data().points) == 6
+
+        drop(dlg, folder / "a.jpeg")                  # 사진 → 그 1장만
+        _wait_build(qt, dlg)
+        assert dlg.single_image() == folder / "a.jpeg"
+        assert dlg.merged_files() == []
+        assert [p.path.stem for p in dlg.left.view.data().points] == ["a"]
     finally:
         dlg.deleteLater()
 
