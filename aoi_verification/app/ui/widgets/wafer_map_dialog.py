@@ -3,8 +3,8 @@
 * **셋업 단계**(``WaferMapDialog(parent)``): 폴더를 고른다.  **슬롯 폴더**(사진이 바로
   든 폴더)면 그 웨이퍼 하나, **LOT 폴더**(슬롯 폴더들이 든 폴더)면 전체 슬롯을 한 맵에
   합산하고 ‘슬롯 선택…’ 으로 일부만 본다(진행 범위의 슬롯 선택 팝업과 같은 창).
-  **사진 1장을 창에 끌어다 놓으면** 그 결함만 볼 수 있다 — 놓은 사진의 폴더에서
-  웨이퍼 기하를 읽으므로 원·격자는 그대로다.
+  **사진(1장 또는 여러 장)을 창에 끌어다 놓으면** 그 결함들만 볼 수 있다 — 놓은
+  사진의 폴더에서 웨이퍼 기하를 읽으므로 원·격자는 그대로다(여러 폴더면 첫 사진 것).
   ‘Map 저장’ 은 지금 맵을 txt 로 쓰고(:mod:`coords.wafer_map_txt`), ‘Map 합치기’ 나
   **txt 끌어놓기**로 여러 맵을 한 맵에 합친다(합친 맵에 더 놓으면 계속 더해진다).
   매칭 전이라 점은 한 색(결함)이다.
@@ -198,7 +198,7 @@ class WaferMapDialog(QDialog):
         self.setWindowTitle(i18n.KO.WAFER_MAP_TITLE)
         self._result = result
         self._folder: Optional[Path] = None
-        self._single: Optional[Path] = None           # 사진 1장만 볼 때
+        self._images: list[Path] = []                 # 끌어놓은 사진만 볼 때
         self._lot_slots: dict[str, Path] = {}         # LOT 폴더일 때만
         self._selected: Optional[set[str]] = None     # None = 전체
         self._rot = 0                                 # 노치 방향(90° 단위)
@@ -258,7 +258,7 @@ class WaferMapDialog(QDialog):
             self.slots_btn.setAutoDefault(False)
             self.slots_btn.hide()
             top.addWidget(self.slots_btn)
-            # 사진 1장은 버튼이 아니라 **끌어놓기**다(사용자 요청) — dropEvent.
+            # 사진 보기는 버튼이 아니라 **끌어놓기**다(사용자 요청) — dropEvent.
             self.export_btn = NeonButton(i18n.KO.WAFER_MAP_EXPORT, role="ghost")
             self.export_btn.clicked.connect(self._on_export)
             self.export_btn.setAutoDefault(False)
@@ -495,7 +495,7 @@ class WaferMapDialog(QDialog):
     def show_folder(self, folder: Path) -> None:
         """폴더 판정(슬롯/LOT)부터 워커 — 고른 순간 '폴더 탐색 중' 이 뜬다."""
         self._folder = folder
-        self._single = None
+        self._images = []
         self._merged = []
         self._set_current(None)
         self.folder_label.setText(str(folder))
@@ -548,7 +548,7 @@ class WaferMapDialog(QDialog):
         if self._current is None:
             return
         base = self._folder or Path.home()
-        name = (self._single.stem if self._single is not None
+        name = (self._images[0].stem if self._images
                 else (base.name if not self._merged else "merged"))
         path, _ = QFileDialog.getSaveFileName(
             self, i18n.KO.WAFER_MAP_EXPORT_TITLE, str(base / f"{name}_wafer_map.txt"),
@@ -591,7 +591,7 @@ class WaferMapDialog(QDialog):
         if not good:
             return
         self._merged = good
-        self._single = None
+        self._images = []
         self._lot_slots = {}
         self._selected = None
         self.slots_btn.hide()
@@ -639,15 +639,17 @@ class WaferMapDialog(QDialog):
         if txts:
             self.merge_files(txts, add=bool(self._merged))
         elif imgs:
-            self.show_image(imgs[0])
+            self.show_images(imgs)
         else:
             event.ignore()
             return
         event.acceptProposedAction()
 
     def _folder_title(self) -> str:
-        if self._single is not None:
-            return i18n.KO.WAFER_MAP_ONE_IMAGE_FMT.format(name=self._single.name)
+        if len(self._images) == 1:
+            return i18n.KO.WAFER_MAP_ONE_IMAGE_FMT.format(name=self._images[0].name)
+        if self._images:
+            return i18n.KO.WAFER_MAP_IMAGES_FMT.format(n=len(self._images))
         assert self._folder is not None
         if not self._lot_slots:
             return self._folder.name
@@ -673,22 +675,27 @@ class WaferMapDialog(QDialog):
                           i18n.KO.WAFER_MAP_LOADING_SCAN)
 
     def show_image(self, path: Path) -> None:
-        """사진 1장만 맵에 — 원·격자는 **그 사진이 든 폴더**의 기하 그대로다.
+        self.show_images([path])
 
-        LOT/웨이퍼 단위로는 점이 수천 개라 한 결함을 짚기 어렵다(사용자 요청).  폴더를
-        훑지 않으므로 좌표 1건만 읽는다 — NAS 에서도 즉시 뜬다."""
-        self._single = path
-        self._folder = path.parent
+    def show_images(self, paths: list[Path]) -> None:
+        """끌어놓은 사진만 맵에 — 원·격자는 **첫 사진이 든 폴더**의 기하 그대로다.
+
+        LOT/웨이퍼 단위로는 점이 수천 개라 몇 결함을 짚기 어렵다(사용자 요청).  폴더를
+        훑지 않으므로 놓은 사진의 좌표만 읽는다 — NAS 에서도 즉시 뜬다."""
+        paths = list(dict.fromkeys(paths))          # 같은 사진 두 번은 한 번으로
+        self._images = paths
+        self._folder = paths[0].parent
         self._merged = []
         self._set_current(None)
         self._lot_slots = {}
         self._selected = None
         self.slots_btn.hide()
-        self.folder_label.setText(str(path))
+        self.folder_label.setText(str(paths[0]) if len(paths) == 1
+                                  else f"{paths[0].parent}  ({len(paths)})")
 
         def job(report):
             report(i18n.KO.WAFER_MAP_LOADING_COORDS)
-            return build_map(resolve_batch([path], _coord_progress(report))), None, None
+            return build_map(resolve_batch(paths, _coord_progress(report))), None, None
 
         self._start_build(
             job,
@@ -696,7 +703,10 @@ class WaferMapDialog(QDialog):
             i18n.KO.WAFER_MAP_LOADING_COORDS)
 
     def single_image(self) -> Optional[Path]:
-        return self._single
+        return self._images[0] if len(self._images) == 1 else None
+
+    def shown_images(self) -> list[Path]:
+        return list(self._images)
 
     def _on_pick_slots(self) -> None:
         """LOT 의 일부 슬롯만 — 진행 범위의 슬롯 선택 팝업을 그대로 쓴다."""

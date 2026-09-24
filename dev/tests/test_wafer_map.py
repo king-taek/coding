@@ -20,7 +20,7 @@
   칠하기 모드에서는 칸 아무 데나 집어도 그 결함이 잡힌다.
 - 노치 회전: 90° 단위 시계 방향.  점·격자·노치·히트 판정이 **같이** 돈다(한 곳에서만
   회전하므로).  평면 좌표(``MapPoint.x/y``)는 안 바뀐다 — 보기 상태일 뿐이다.
-- 사진 1장: 버튼이 아니라 **끌어놓기**.  고른 사진 하나만 찍고, 원·격자는 그 사진
+- 사진 보기: 버튼이 아니라 **끌어놓기**(여러 장 가능).  놓은 사진만 찍고, 원·격자는 그 사진
   폴더의 기하 그대로다.
 - Map 저장/합치기: txt 는 원본 폴더 없이 다시 읽혀 **같은 맵**이 된다(점·프레임·die 맵).
   합치기는 점을 모으고 프레임은 첫 파일, txt 끌어놓기는 합친 맵에 더한다.
@@ -726,6 +726,13 @@ def test_dialog_export_merge_and_drop(qt, tmp_path):
         assert dlg.single_image() == folder / "a.jpeg"
         assert dlg.merged_files() == []
         assert [p.path.stem for p in dlg.left.view.data().points] == ["a"]
+
+        drop(dlg, folder / "a.jpeg", folder / "b.jpeg", folder / "a.jpeg")  # 여러 장
+        _wait_build(qt, dlg)
+        assert dlg.shown_images() == [folder / "a.jpeg", folder / "b.jpeg"]
+        assert dlg.single_image() is None
+        assert sorted(p.path.stem for p in dlg.left.view.data().points) == ["a", "b"]
+        assert dlg.left.title.text() == i18n.KO.WAFER_MAP_IMAGES_FMT.format(n=2)
     finally:
         dlg.deleteLater()
 

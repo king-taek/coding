@@ -1056,7 +1056,7 @@ WAFER_MAP_PICK_FOLDER_ANOTHER = "다른 폴더"
 WAFER_MAP_PICK_FOLDER_TITLE = "웨이퍼(슬롯) 폴더 또는 LOT 폴더 선택"
 WAFER_MAP_NO_FOLDER = (
     "‘폴더 선택’ 으로 사진이 든 웨이퍼(슬롯) 폴더를 고르세요.\n"
-    "사진 1장을 끌어다 놓으면 그 결함만, 저장한 맵 txt 를 끌어다 놓으면 맵을 합칩니다.\n\n"
+    "사진(여러 장 가능)을 끌어다 놓으면 그 결함만, 저장한 맵 txt 를 끌어다 놓으면 맵을 합칩니다.\n\n"
     "좌표는 그 폴더의 정보파일에서 읽습니다 — "
     "ColorImageGrabingInfo.ini(Camtek) · LIVE 파일명 · KLA 정보파일."
 )
@@ -1110,6 +1110,7 @@ WAFER_MAP_MERGE_TITLE = "합칠 wafer map txt 선택 (여러 개)"
 WAFER_MAP_MERGE_BAD_FMT = "wafer map txt 가 아니어서 뺀 파일:\n{names}"
 WAFER_MAP_MERGED_FMT = "맵 {n}개 합침"
 WAFER_MAP_ONE_IMAGE_FMT = "{name} · 사진 1장"
+WAFER_MAP_IMAGES_FMT = "사진 {n}장"
 WAFER_MAP_FULLSCREEN = "전체화면"
 WAFER_MAP_FULLSCREEN_EXIT = "전체화면 나가기 (ESC)"
 WAFER_MAP_FULLSCREEN_TIP = (
