@@ -8,6 +8,8 @@
   이게 틀리면 die 격자와 점이 어긋난다.
 - 중심이 없으면 ``가정`` 등급으로 표시하고 점은 원 안에 놓인다(±½ pitch).
 - 좌표를 못 놓은 사진은 조용히 사라지지 않고 ``unplaced`` 에 남는다.
+- LIVE 파일명 사진만 든 폴더(INI 항목 없음)도 찍힌다 — 같은 결함의 INI 경로와 같은 자리.
+  pitch 가 파일에 없으면 상수를 **가정**으로 쓰고 범례에 표기, 가정이 반증되면 안 찍는다.
 - 격자선은 원 안만, 개수는 지름/pitch 근처 — die 8만 개도 선 몇백 개다.
 - 뷰: 휠은 커서 기준 확대, 점 판정은 HIT_PX 이내, PNG 렌더는 화면과 같은 함수.
 - 결과 시트는 기준/검증 두 맵, 셋업 시트는 폴더 안내 → 슬롯 폴더면 맵 하나, LOT 폴더면
@@ -49,7 +51,8 @@ CX, CY = 165994.0, 202629.0        # T254 실측 중심(§6-L) — 값 자체는
 def _clear_caches():
     for fn in (wm._camtek, wm._kla, camtek_ini.load_folder, camtek_ini.load_raw_folder,
                camtek_ini.load_abs_folder, kla_info.load_folder,
-               wafer_geometry.camtek_geometry, wafer_geometry.kla_geometry):
+               wafer_geometry.camtek_geometry, wafer_geometry.kla_geometry,
+               wafer_geometry.live_geometry):
         fn.cache_clear()
     yield
 
@@ -241,6 +244,71 @@ class TestCamtekPlane:
         assert flags == {"a": True, "b": False}
         neutral = wm.build_map(resolve_batch(paths))
         assert all(p.matched is None for p in neutral.points)
+
+
+def _live_folder(tmp_path: Path, stems, *, params: bool = True) -> Path:
+    """LIVE 파일명 사진만 든 폴더 — ColorImageGrabingInfo.ini 없음."""
+    folder = tmp_path / "live"
+    folder.mkdir(parents=True)
+    if params:
+        (folder / "Params_WaferInfo.ini").write_text(
+            f"[Geometry]\nDieStep_X={PX:.6f}\nDieStep_Y={PY:.6f}\n"
+            f"[Geometric]\nDiameter={DIA:.6f}\nCenter_X={CX:.6f}\nCenter_Y={CY:.6f}\n",
+            encoding="utf-8")
+    for stem in stems:
+        (folder / f"{stem}.jpg").write_bytes(b"")
+    return folder
+
+
+class TestLivePlane:
+    """★ LIVE 사진만 든 폴더는 예전엔 기하가 None 이라 전부 '좌표 없음' 이었다."""
+
+    def test_live_only_folder_lands_where_ini_puts_the_same_defect(self, tmp_path):
+        """같은 결함을 INI 로 찍은 자리와 LIVE 파일명으로 찍은 자리가 같다(1 µm)."""
+        X, Y = 150000.0, 210000.0
+        ini_dir = _camtek_folder(tmp_path, [("a", X, Y)])
+        (ini_pt,) = wm.build_map(resolve_batch([ini_dir / "a.jpeg"])).points
+        c = camtek_ini.resolve(ini_dir / "a.jpeg")
+        stem = f"TB500_RDL4 - Multi_FDV-RDL4_W1XYA1_{c.col}_{c.row}_{c.x}_{c.y}_Bump"
+        live_dir = _live_folder(tmp_path, [stem])
+        data = wm.build_map(resolve_batch([live_dir / f"{stem}.jpg"]))
+        assert not data.unplaced and data.frame is not None
+        assert data.frame.pitch_assumed is False
+        assert data.frame.center_source == wm.SOURCE_OBSERVED
+        (p,) = data.points
+        assert (p.col, p.row) == (c.col, c.row)
+        assert abs(p.x - ini_pt.x) <= 1 and abs(p.y - ini_pt.y) <= 1
+
+    def test_no_ini_at_all_assumes_pitch_and_says_so(self, tmp_path):
+        pytest.importorskip("PyQt6.QtWidgets")
+        from aoi_verification.app import i18n
+        from aoi_verification.app.ui.widgets.wafer_map_dialog import _MapPanel
+        stem = "TB500_RDL4 - Multi_FDV-RDL4_W1XYA1_3_2_1000.5_2000.5_Bump"
+        folder = _live_folder(tmp_path, [stem], params=False)
+        data = wm.build_map(resolve_batch([folder / f"{stem}.jpg"]))
+        assert not data.unplaced
+        assert data.frame.pitch_assumed is True
+        (p,) = data.points
+        assert math.hypot(p.x, p.y) <= DIA / 2
+        assert i18n.KO.WAFER_MAP_PITCH_ASSUMED in _MapPanel.legend_text(data)
+
+    def test_assumed_pitch_contradicted_by_data_is_not_placed(self, tmp_path):
+        """die 내부 x 가 가정한 pitch 보다 크면 그 자재가 아니다 — 틀린 자리에 안 찍는다."""
+        stem = f"LOT_REC_W1XYA1_3_2_{PX + 500:.1f}_2000.5_Bump"
+        folder = _live_folder(tmp_path, [stem], params=False)
+        data = wm.build_map(resolve_batch([folder / f"{stem}.jpg"]))
+        assert data.points == () and len(data.unplaced) == 1
+
+    def test_ini_folder_without_pitch_is_untouched(self, tmp_path):
+        """INI 항목이 있는데 검산 실패한 폴더(절대좌표)는 LIVE 기하를 쓰지 않는다."""
+        # Col=Row=0 이라 상수 후보는 '의미없음', 파일 pitch 는 X 등호에서 거부된다.
+        folder = _camtek_folder(tmp_path, [("a", 10000.0, 10000.0)])
+        (folder / "Params_WaferInfo.ini").write_text(
+            f"[Geometry]\nDieStep_X=9999.0\nDieStep_Y=9999.0\n"
+            f"[Geometric]\nDiameter={DIA:.6f}\nCenter_X={CX:.6f}\nCenter_Y={CY:.6f}\n",
+            encoding="utf-8")
+        data = wm.build_map(resolve_batch([folder / "a.jpeg"]))
+        assert data.frame.pitch_x is None and data.frame.pitch_assumed is False
 
 
 class TestDefectCells:

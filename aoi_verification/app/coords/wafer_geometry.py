@@ -42,7 +42,7 @@ from .models import (CAMTEK_COL_OFFSET, CAMTEK_PITCH_X, CAMTEK_PITCH_Y,
                      DEFAULT_WAFER_DIAMETER, KLA_ZERO_X, KLA_ZERO_Y)
 
 __all__ = ["CamtekGeometry", "KlaGeometry", "camtek_geometry", "kla_geometry",
-           "has_camtek_entries", "peek_die_pitch", "FALLBACK_CAMTEK",
+           "has_camtek_entries", "peek_die_pitch", "live_geometry", "FALLBACK_CAMTEK",
            "FALLBACK_KLA"]
 
 _LOG = logging.getLogger("aoi.coords")
@@ -435,39 +435,7 @@ def camtek_geometry(folder: Path) -> Optional[CamtekGeometry]:
                 continue
             if src == _CONST_SOURCE and not meaningful:
                 continue      # 검산이 pitch 를 제약하지 못했다 — 상수를 추정으로 쓰지 않는다
-            # col·row 기준은 **장비가 쓴 die 맵이 1순위**다(§6-N) — 웨이퍼가 어디 놓였는지
-            # 로 유도하던 값을, 유도하지 않고 장비가 적어 둔 대로 읽는다.  맵이 없으면
-            # 기존 유도로 폴백한다: 중심은 Params 의 Center_X/Y → Wafer2Table.ini 순으로
-            # 찾고(§6-L), 그래도 없으면 각각 상수/옛 식으로 폴백한다(§6-H·§6-J).
-            dia = _read_diameter(folder)
-            cx, cy = _wafer_center(folder)
-            d_origin = _col_origin(cx, dia, px)
-            d_total = _row_total(cy, dia, py)
-            mapped = _die_map_origins(folder, px, py)
-            if mapped is not None:
-                m_origin, m_total = mapped
-                # ⚠ 맵은 유도값과 **±1 이내일 때만** 믿는다.  이 파일이 웨이퍼 전체가
-                #   아니라 '스캔한 영역'만 담은 스캔이 오면 min/max 가 통째로 좁아져
-                #   기준이 조용히 틀어진다 — 실측 74장의 차이는 전부 0 또는 −1 이라
-                #   ±1 밖은 관측된 적 없는 영역이고, 그때는 검증된 유도 경로를 지킨다.
-                if abs(m_origin - d_origin) <= 1 and abs(m_total - d_total) <= 1:
-                    # 조용히 갈리지 않게 남긴다 — 유도식이 틀리는 스캔을 나중에
-                    # 알아보려면 이 기록이 있어야 한다(실측 74장 중 1장이 그랬다).
-                    if (m_origin, m_total) != (d_origin, d_total):
-                        _LOG.info(
-                            "die 맵과 중심 유도가 다르다 — 맵을 쓴다(맵이 장비 "
-                            "표시값이다). col_origin %d→%d · row_total %d→%d: %s",
-                            d_origin, m_origin, d_total, m_total, folder)
-                    return CamtekGeometry(pitch_x=px, pitch_y=py,
-                                          col_origin=m_origin, row_total=m_total,
-                                          source=f"{src}+{_DIE_MAP_FILE}")
-                _LOG.warning(
-                    "%s 의 die 기준 (%d, %d) 이 유도값 (%d, %d) 과 1 넘게 달라 "
-                    "무시합니다(부분 맵 의심 — 웨이퍼 전체 맵이면 있을 수 없는 차이): %s",
-                    _DIE_MAP_FILE, m_origin, m_total, d_origin, d_total, folder)
-            return CamtekGeometry(pitch_x=px, pitch_y=py,
-                                  col_origin=d_origin, row_total=d_total,
-                                  source=src)
+            return _with_origins(folder, px, py, src)
         # ★ Camtek INI 자체가 없는 폴더(KLA 슬롯·LIVE 파일명 슬롯)는 **조용히** None.
         #   경고는 '변환할 항목이 있는데 pitch 를 못 정한' 진짜 문제일 때만 낸다 —
         #   안 그러면 KLA 폴더마다 무의미한 경고가 쌓인다.
@@ -479,6 +447,67 @@ def camtek_geometry(folder: Path) -> Optional[CamtekGeometry]:
         return None
     except Exception:
         return None
+
+
+def _with_origins(folder: Path, px: float, py: float, src: str) -> CamtekGeometry:
+    """채택한 pitch 에 col·row 기준을 붙인다 — :func:`camtek_geometry` 와
+    :func:`live_geometry` 가 **같은 규칙**을 쓰게 한 곳에 둔다."""
+    # col·row 기준은 **장비가 쓴 die 맵이 1순위**다(§6-N) — 웨이퍼가 어디 놓였는지
+    # 로 유도하던 값을, 유도하지 않고 장비가 적어 둔 대로 읽는다.  맵이 없으면
+    # 기존 유도로 폴백한다: 중심은 Params 의 Center_X/Y → Wafer2Table.ini 순으로
+    # 찾고(§6-L), 그래도 없으면 각각 상수/옛 식으로 폴백한다(§6-H·§6-J).
+    dia = _read_diameter(folder)
+    cx, cy = _wafer_center(folder)
+    d_origin = _col_origin(cx, dia, px)
+    d_total = _row_total(cy, dia, py)
+    mapped = _die_map_origins(folder, px, py)
+    if mapped is not None:
+        m_origin, m_total = mapped
+        # ⚠ 맵은 유도값과 **±1 이내일 때만** 믿는다.  이 파일이 웨이퍼 전체가
+        #   아니라 '스캔한 영역'만 담은 스캔이 오면 min/max 가 통째로 좁아져
+        #   기준이 조용히 틀어진다 — 실측 74장의 차이는 전부 0 또는 −1 이라
+        #   ±1 밖은 관측된 적 없는 영역이고, 그때는 검증된 유도 경로를 지킨다.
+        if abs(m_origin - d_origin) <= 1 and abs(m_total - d_total) <= 1:
+            # 조용히 갈리지 않게 남긴다 — 유도식이 틀리는 스캔을 나중에
+            # 알아보려면 이 기록이 있어야 한다(실측 74장 중 1장이 그랬다).
+            if (m_origin, m_total) != (d_origin, d_total):
+                _LOG.info(
+                    "die 맵과 중심 유도가 다르다 — 맵을 쓴다(맵이 장비 "
+                    "표시값이다). col_origin %d→%d · row_total %d→%d: %s",
+                    d_origin, m_origin, d_total, m_total, folder)
+            return CamtekGeometry(pitch_x=px, pitch_y=py,
+                                  col_origin=m_origin, row_total=m_total,
+                                  source=f"{src}+{_DIE_MAP_FILE}")
+        _LOG.warning(
+            "%s 의 die 기준 (%d, %d) 이 유도값 (%d, %d) 과 1 넘게 달라 "
+            "무시합니다(부분 맵 의심 — 웨이퍼 전체 맵이면 있을 수 없는 차이): %s",
+            _DIE_MAP_FILE, m_origin, m_total, d_origin, d_total, folder)
+    return CamtekGeometry(pitch_x=px, pitch_y=py,
+                          col_origin=d_origin, row_total=d_total,
+                          source=src)
+
+
+@lru_cache(maxsize=256)
+def live_geometry(folder: Path) -> CamtekGeometry:
+    """**Camtek INI 항목이 없는** 폴더(LIVE 파일명 슬롯)의 die 기하 — Wafer map 배치 전용.
+
+    LIVE 사진은 파일명에 ``col``/``row``·die 내부 ``x``/``y`` 를 다 갖고 있어 매칭에는
+    기하가 필요 없다.  하지만 **맵에 찍으려면** die pitch 가 있어야 하는데,
+    :func:`camtek_geometry` 는 검산할 INI 항목이 없으면 None 이라 LIVE 전용 폴더의
+    사진이 전부 '좌표 없음' 이 됐다.
+
+    검산(:func:`_grid_check`)은 INI 의 ``Col``/``Row`` 필드로 pitch 를 확인하는 장치라
+    여기서는 돌릴 재료가 없다 — 파일(폴더·부모의 ``Params_WaferInfo.ini`` 등)에 적힌
+    pitch 를 그대로 쓰고, 없으면 마지막 후보인 상수(출처 :data:`_CONST_SOURCE`)를 쓴다.
+    상수는 **가정**이다 — 호출부(:mod:`.wafer_map`)가 그 사실을 화면에 표기하고,
+    die 내부 좌표가 그 pitch 를 넘는 사진은 찍지 않는다(가정이 반증된 것).
+    col·row 기준은 :func:`camtek_geometry` 와 같은 :func:`_with_origins` 로 붙인다.
+    전 구간 fail-safe."""
+    try:
+        px, py, src = next(_pitch_candidates(folder))   # 상수가 마지막이라 늘 하나는 있다
+        return _with_origins(folder, px, py, src)
+    except Exception:
+        return FALLBACK_CAMTEK
 
 
 def _die_map_origins(folder: Path, px: float, py: float
