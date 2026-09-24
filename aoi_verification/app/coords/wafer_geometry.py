@@ -488,7 +488,7 @@ def _with_origins(folder: Path, px: float, py: float, src: str) -> CamtekGeometr
 
 
 @lru_cache(maxsize=256)
-def live_geometry(folder: Path) -> CamtekGeometry:
+def live_geometry(folder: Path) -> Optional[CamtekGeometry]:
     """**Camtek INI 항목이 없는** 폴더(LIVE 파일명 슬롯)의 die 기하 — Wafer map 배치 전용.
 
     LIVE 사진은 파일명에 ``col``/``row``·die 내부 ``x``/``y`` 를 다 갖고 있어 매칭에는
@@ -498,16 +498,15 @@ def live_geometry(folder: Path) -> CamtekGeometry:
 
     검산(:func:`_grid_check`)은 INI 의 ``Col``/``Row`` 필드로 pitch 를 확인하는 장치라
     여기서는 돌릴 재료가 없다 — 파일(폴더·부모의 ``Params_WaferInfo.ini`` 등)에 적힌
-    pitch 를 그대로 쓰고, 없으면 마지막 후보인 상수(출처 :data:`_CONST_SOURCE`)를 쓴다.
-    상수는 **가정**이다 — 호출부(:mod:`.wafer_map`)가 그 사실을 화면에 표기하고,
-    die 내부 좌표가 그 pitch 를 넘는 사진은 찍지 않는다(가정이 반증된 것).
+    pitch 를 그대로 쓴다.  **상수(TB500)는 쓰지 않는다** — 다른 자재에서 조용히 틀린
+    자리에 찍힌다.  파일이 없으면 None(호출부가 사진 좌표로 추정한다).
     col·row 기준은 :func:`camtek_geometry` 와 같은 :func:`_with_origins` 로 붙인다.
     전 구간 fail-safe."""
     try:
-        px, py, src = next(_pitch_candidates(folder))   # 상수가 마지막이라 늘 하나는 있다
-        return _with_origins(folder, px, py, src)
+        got = peek_die_pitch(folder)
+        return None if got is None else _with_origins(folder, *got)
     except Exception:
-        return FALLBACK_CAMTEK
+        return None
 
 
 def _die_map_origins(folder: Path, px: float, py: float

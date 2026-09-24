@@ -279,25 +279,27 @@ class TestLivePlane:
         assert (p.col, p.row) == (c.col, c.row)
         assert abs(p.x - ini_pt.x) <= 1 and abs(p.y - ini_pt.y) <= 1
 
-    def test_no_ini_at_all_assumes_pitch_and_says_so(self, tmp_path):
+    def test_no_ini_estimates_pitch_from_photos_and_says_so(self, tmp_path):
+        """die 크기 파일이 없으면 TB500 상수가 아니라 **사진 좌표**로 pitch 를 추정한다.
+
+        작은 die(4 mm) 자재 — 상수(37 mm)를 쓰면 col 30 이 웨이퍼 밖으로 나간다."""
         pytest.importorskip("PyQt6.QtWidgets")
         from aoi_verification.app import i18n
         from aoi_verification.app.ui.widgets.wafer_map_dialog import _MapPanel
-        stem = "TB500_RDL4 - Multi_FDV-RDL4_W1XYA1_3_2_1000.5_2000.5_Bump"
-        folder = _live_folder(tmp_path, [stem], params=False)
-        data = wm.build_map(resolve_batch([folder / f"{stem}.jpg"]))
-        assert not data.unplaced
-        assert data.frame.pitch_assumed is True
-        (p,) = data.points
-        assert math.hypot(p.x, p.y) <= DIA / 2
+        stems = ["LOT_REC_W1XYA1_30_40_3900.0_2950.0_Bump",
+                 "LOT_REC_W1XYA1_2_35_100.0_200.0_Bump"]
+        folder = _live_folder(tmp_path, stems, params=False)
+        data = wm.build_map(resolve_batch([folder / f"{s}.jpg" for s in stems]))
+        assert not data.unplaced and data.frame.pitch_assumed is True
+        assert data.frame.pitch_x < 5000 and data.frame.pitch_y < 5000
+        assert data.frame.pitch_x > 3900 and data.frame.pitch_y > 2950
+        for p in data.points:
+            assert math.hypot(p.x, p.y) <= DIA / 2
+        # 칸 간격이 파일명 col/row 차이와 같다(row 는 위로 증가)
+        a, b = sorted(data.points, key=lambda p: p.col)
+        ka, kb = (wm.cell_of(data.frame, p.x, p.y) for p in (a, b))
+        assert (kb[0] - ka[0], kb[1] - ka[1]) == (b.col - a.col, b.row - a.row)
         assert i18n.KO.WAFER_MAP_PITCH_ASSUMED in _MapPanel.legend_text(data)
-
-    def test_assumed_pitch_contradicted_by_data_is_not_placed(self, tmp_path):
-        """die 내부 x 가 가정한 pitch 보다 크면 그 자재가 아니다 — 틀린 자리에 안 찍는다."""
-        stem = f"LOT_REC_W1XYA1_3_2_{PX + 500:.1f}_2000.5_Bump"
-        folder = _live_folder(tmp_path, [stem], params=False)
-        data = wm.build_map(resolve_batch([folder / f"{stem}.jpg"]))
-        assert data.points == () and len(data.unplaced) == 1
 
     def test_ini_folder_without_pitch_is_untouched(self, tmp_path):
         """INI 항목이 있는데 검산 실패한 폴더(절대좌표)는 LIVE 기하를 쓰지 않는다."""

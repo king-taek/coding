@@ -64,7 +64,7 @@ class WaferFrame:
     center_source: str          # SOURCE_OBSERVED | SOURCE_ASSUMED
     kind: str                   # "camtek" | "kla"
     die_cells: Optional[frozenset] = None
-    pitch_assumed: bool = False  # pitch 가 파일이 아니라 상수(가정) — LIVE 전용 폴더
+    pitch_assumed: bool = False  # pitch 가 파일이 아니라 사진 좌표로 추정 — LIVE 전용 폴더
 
     @property
     def radius(self) -> float:
@@ -111,6 +111,32 @@ class _Kla:
     source: str
 
 
+def _live_pitch_estimate(folder: Path) -> Optional[tuple[float, float]]:
+    """die 크기 파일이 없을 때 — 폴더 LIVE 파일명의 die 내부 x/y 최댓값으로 pitch 를 추정.
+
+    die 내부 좌표는 pitch 를 넘을 수 없으므로 최댓값은 **하한**이다(추정 등급 ``가정``).
+    5 % 여유를 둬 최댓값 사진이 옆 die 경계에 걸리지 않게 한다.  사진이 많을수록 실제
+    pitch 에 가까워지고, col/row(파일명 값)는 추정과 무관하게 정확하다.
+    상수(TB500)를 쓰지 않는 이유: 다른 자재에서 조용히 엉뚱한 자리에 찍힌다."""
+    from .camtek_live import parse_live_name
+    xs: list[float] = []
+    ys: list[float] = []
+    try:
+        for f in folder.iterdir():
+            got = parse_live_name(f.stem)
+            if got is not None:
+                xs.append(got.x)
+                ys.append(got.y)
+    except OSError:
+        return None
+    if not xs:
+        return None
+    px, py = max(xs) * 1.05, max(ys) * 1.05
+    if not (wg._MIN_PITCH <= px <= wg._MAX_PITCH and wg._MIN_PITCH <= py <= wg._MAX_PITCH):
+        return None
+    return px, py
+
+
 def _assumed_edge(first_full_index: int, pitch: float) -> float:
     """'온전히 들어오는 첫 die' 경계에서 반 pitch 바깥 = 가정한 웨이퍼 가장자리."""
     return first_full_index * pitch - pitch / 2.0
@@ -121,11 +147,15 @@ def _camtek(folder: Path) -> _Camtek:
     geom = wg.camtek_geometry(folder)
     pitch_assumed = False
     # INI 항목이 **없는** 폴더(LIVE 파일명 슬롯)는 검산 재료가 없어 위가 늘 None 이다 —
-    # 그러면 LIVE 사진이 전부 '좌표 없음' 이 된다.  파일 pitch(없으면 상수=가정)로
-    # 기하를 만든다.  INI 항목이 있는데 None 인 폴더(절대좌표)는 건드리지 않는다.
+    # 그러면 LIVE 사진이 전부 '좌표 없음' 이 된다.  파일 pitch 로, 없으면 사진 좌표로
+    # 추정한 pitch 로 기하를 만든다.  INI 항목이 있는데 None 인 폴더(절대좌표)는 그대로.
     if geom is None and not wg.has_camtek_entries(folder):
         geom = wg.live_geometry(folder)
-        pitch_assumed = geom.source in (wg._CONST_SOURCE, "fallback")
+        if geom is None:
+            est = _live_pitch_estimate(folder)
+            if est is not None:
+                geom = wg._with_origins(folder, *est, "LIVE 사진 좌표 추정")
+                pitch_assumed = True
     dia = wg._read_diameter(folder)
     cx, cy = wg._wafer_center(folder)
     source = SOURCE_OBSERVED
@@ -210,7 +240,7 @@ def to_plane(coord: DefectCoord, folder: Path) -> Optional[tuple[float, float]]:
     * camtek_ini / camtek_live: stage x = (col + col_origin)·px + x,
       stage y = (row_total − row)·py + y  → (sx − cx, cy − sy)
     * camtek_live 인데 폴더에 INI 항목이 없으면 기하는 :func:`~.wafer_geometry.live_geometry`
-      (pitch 가 가정이면 die 내부 좌표가 pitch 를 넘는 사진은 None)
+      — 그것도 없으면 폴더 LIVE 사진의 die 내부 좌표 최댓값으로 pitch 를 추정(가정)
     * camtek_abs: (x, y) 가 이미 stage 절대좌표 → (x − cx, cy − y)
     * kla: 인덱스 프레임 x = (col − zero_x)·px + x,  y = (row − zero_y)·py + (py − y)
       (``DefectCoord.y = py − YREL`` 이라 되돌린다) → (kx − cx, ky − cy)
@@ -233,10 +263,6 @@ def to_plane(coord: DefectCoord, folder: Path) -> Optional[tuple[float, float]]:
         if c.geom is None:
             return None
         g = c.geom
-        # 가정한 pitch 보다 die 내부 좌표가 크면 가정이 반증된 것 — 틀린 자리에 찍지 않는다.
-        if c.pitch_assumed and not (0 <= coord.x <= g.pitch_x
-                                    and 0 <= coord.y <= g.pitch_y):
-            return None
         sx = (coord.col + g.col_origin) * g.pitch_x + coord.x
         sy = (g.row_total - coord.row) * g.pitch_y + coord.y
         return (sx - c.cx, c.cy - sy)
