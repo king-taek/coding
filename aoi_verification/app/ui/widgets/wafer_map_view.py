@@ -12,8 +12,8 @@
   다르면 90° 단위로 돌린다.  회전은 :class:`_Mapper` 안에서만 일어나므로 점·격자·
   히트 판정·확대 기준이 저절로 같이 돈다.
 * ``fill_dies`` — 점 대신 **결함이 든 die 칸을 통째로** 칠한다(:func:`defect_cells`).
-  색은 **결함 점과 같은 색**(``neutral``) 하나다 — 켜는 곳이 셋업 단계 화면뿐이라
-  거기서는 모든 점이 그 색이다(매칭 전).  pitch 를 모르는 폴더(절대좌표)는 칸을 못
+  색은 **그 칸 결함 점과 같은 색**이다 — 셋업 단계는 결함 색 하나, 결과 단계는
+  매치됨/미매치(한 칸에 섞이면 미매치).  pitch 를 모르는 폴더(절대좌표)는 칸을 못
   정하므로 점으로 남는다.
 
 결함 수(:func:`count_text`)는 **엑셀 PNG 에만** 그림 안 오른쪽 아래 빈 곳에 찍는다
@@ -120,6 +120,9 @@ class _Mapper:
         return QPointF(*rotate_xy(v.x(), v.y(), -self.rot))
 
 
+_STATE_KEY = {None: "neutral", False: "unmatched", True: "matched"}
+
+
 def paint_map(painter: QPainter, rect: QRectF, data: Optional[MapData], *,
               zoom: float = 1.0, pan: QPointF = QPointF(0, 0), rot: int = 0,
               fill_dies: bool = False, colors: Optional[dict] = None,
@@ -147,19 +150,21 @@ def paint_map(painter: QPainter, rect: QRectF, data: Optional[MapData], *,
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
     painter.fillPath(wafer, col["wafer"])
 
-    # 결함이 든 die 칸 칠하기(셋업 단계 화면의 토글).  격자·윤곽보다 **먼저** 칠해
-    # 선이 면 위에 남는다.  pitch 를 모르면 cells 가 비고, 그때는 점 그리기로 돌아간다.
+    # 결함이 든 die 칸 칠하기(화면 토글).  격자·윤곽보다 **먼저** 칠해 선이 면 위에
+    # 남는다.  pitch 를 모르면 cells 가 비고, 그때는 점 그리기로 돌아간다.
     painter.setClipPath(wafer, Qt.ClipOperation.IntersectClip)
-    cells = defect_cells(data) if fill_dies else set()
+    cells = defect_cells(data) if fill_dies else {}
     if cells:
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(col["neutral"])        # 결함 점과 같은 색(사용자 결정)
-        rects = []
-        for cell in cells:
+        by_state: dict[str, list[QRectF]] = {}
+        for cell, state in cells.items():
             x0, y0, x1, y1 = cell_bounds(frame, cell)
-            rects.append(QRectF(m.to_px(x0, y0), m.to_px(x1, y1)).normalized())
-        painter.drawRects(rects)
+            by_state.setdefault(_STATE_KEY[state], []).append(
+                QRectF(m.to_px(x0, y0), m.to_px(x1, y1)).normalized())
+        for key, rects in by_state.items():
+            painter.setBrush(col[key])          # 그 칸 결함 점과 같은 색(사용자 결정)
+            painter.drawRects(rects)
 
     # die 격자.  선 폭 1px 고정, 안티앨리어싱 없이(600개가 또렷하게).
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)

@@ -1095,7 +1095,8 @@ WAFER_MAP_LOADING_THUMBS = "사진 미리보기 준비 중"
 # 보기 옵션 — die 색칠 · 노치 방향(90° 단위 회전) · 사진 1장만 보기.
 WAFER_MAP_FILL_DIES = "die 색칠"
 WAFER_MAP_FILL_DIES_TIP = (
-    "결함 위치(점) 대신 결함이 든 die 칸을 통째로 칠합니다. "
+    "결함 위치(점) 대신 결함이 든 die 칸을 통째로 칠합니다(점과 같은 색 — "
+    "결과 화면에서는 한 칸에 매치됨·미매치가 섞이면 미매치 색). "
     "die 격자를 모르는 폴더(절대좌표)에서는 점 그대로입니다.")
 WAFER_MAP_NOTCH_FMT = "노치: {dir}"
 WAFER_MAP_NOTCH_DIRS = ("아래", "왼쪽", "위", "오른쪽")
