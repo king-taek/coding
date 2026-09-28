@@ -23,8 +23,10 @@
 으로 고정이라 결과 파일이 볼 때마다 달라지지 않는다(사용자 결정).
 
 * ‘die 색칠’ — 두 단계 모두.  점 대신 결함이 든 die 칸을 **그 칸 결함 점과 같은
-  색**으로 칠한다 — 셋업 단계는 결함 색 하나, 결과 단계는 매치됨/미매치(한 칸에
-  섞이면 미매치가 이긴다 — 위험을 가리지 않는다).
+  색**으로 칠한다 — 셋업 단계는 결함 색 하나, 결과 단계는 매치됨/미매치.
+* ‘미매치 우선’ — 결과 단계에서 **die 색칠을 켰을 때만** 보인다(사용자 요청).  한 칸에
+  매치·미매치가 섞이면 켜짐(기본) = 미매치 색(위험을 가리지 않는다), 꺼짐 = 매치됨 색.
+  셋업 단계는 매칭 전이라 섞일 일이 없어 두지 않는다.
 * ‘노치: …’ — 두 단계 모두.  누를 때마다 90°씩 돌려 노치 방향을 맞춘다.
 * 결과 단계에서는 두 옵션 모두 기준·검증 두 맵에 **함께** 걸린다(같은 눈으로 봐야
   비교가 된다).
@@ -312,6 +314,16 @@ class WaferMapDialog(QDialog):
         self.fill_btn.setAutoDefault(False)
         self.fill_btn.toggled.connect(self._on_fill_toggled)
         top.addWidget(self.fill_btn)
+        # 결과 단계에서만, die 색칠이 켜졌을 때만 보인다(_on_fill_toggled).
+        self.unmatched_first_btn = NeonButton(i18n.KO.WAFER_MAP_UNMATCHED_FIRST,
+                                              role="ghost")
+        self.unmatched_first_btn.setCheckable(True)
+        self.unmatched_first_btn.setChecked(True)
+        self.unmatched_first_btn.setToolTip(i18n.KO.WAFER_MAP_UNMATCHED_FIRST_TIP)
+        self.unmatched_first_btn.setAutoDefault(False)
+        self.unmatched_first_btn.toggled.connect(self._on_unmatched_first_toggled)
+        self.unmatched_first_btn.hide()
+        top.addWidget(self.unmatched_first_btn)
         self.notch_btn = NeonButton("", role="ghost")
         self.notch_btn.setToolTip(i18n.KO.WAFER_MAP_NOTCH_TIP)
         self.notch_btn.setAutoDefault(False)
@@ -332,6 +344,11 @@ class WaferMapDialog(QDialog):
     def _on_fill_toggled(self, on: bool) -> None:
         for view in self._views():
             view.set_fill_dies(on)
+        self.unmatched_first_btn.setVisible(on and self._result is not None)
+
+    def _on_unmatched_first_toggled(self, on: bool) -> None:
+        for view in self._views():
+            view.set_unmatched_first(on)
 
     def _on_rotate(self) -> None:
         """누를 때마다 시계 방향 90° — 노치가 아래→왼쪽→위→오른쪽으로 돈다."""

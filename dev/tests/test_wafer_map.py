@@ -17,7 +17,8 @@
 - 점 더블클릭이 ``point_activated`` 를 낸다(단일 클릭은 아무것도 열지 않는다).
 - die 색칠: 결함이 든 **그 칸만**, **그 칸 결함 점과 같은 색**으로 칠하고 점은 생략한다.
   토글은 셋업·결과 두 단계 모두 있다.  결과 단계에서 한 칸에 매치/미매치가 섞이면
-  **미매치가 이긴다**.  칠하기 모드에서는 칸 아무 데나 집어도 그 결함이 잡힌다.
+  기본은 **미매치가 이긴다** — '미매치 우선' 옵션(결과 단계·색칠 켰을 때만 보임)을
+  끄면 매치됨이 이긴다.  칠하기 모드에서는 칸 아무 데나 집어도 그 결함이 잡힌다.
 - 노치 회전: 90° 단위 시계 방향.  점·격자·노치·히트 판정이 **같이** 돈다(한 곳에서만
   회전하므로).  평면 좌표(``MapPoint.x/y``)는 안 바뀐다 — 보기 상태일 뿐이다.
 - 사진 보기: 버튼이 아니라 **끌어놓기**(여러 장 가능).  놓은 사진만 찍고, 원·격자는 그 사진
@@ -355,6 +356,9 @@ class TestDefectCells:
         at = lambda n: wm.cell_of(data.frame, by_stem[n].x, by_stem[n].y)  # noqa: E731
         assert at("hit") == at("miss")
         assert wm.defect_cells(data) == {at("hit"): False, at("far"): True}
+        # '미매치 우선' 을 끄면 섞인 칸은 매치됨 색 — 섞이지 않은 칸은 그대로.
+        assert wm.defect_cells(data, unmatched_first=False) == {at("hit"): True,
+                                                               at("far"): True}
 
     def test_no_pitch_means_no_cells(self, tmp_path):
         """die 기하를 모르는(절대좌표) 프레임은 칸을 못 정한다 — 화면은 점으로 남는다."""
@@ -785,8 +789,18 @@ def test_view_options_in_both_stages_and_apply_to_both_maps(qt, tmp_path):
         views = (dlg.left.view, dlg.right.view)
         assert dlg.fill_btn.isCheckable()
         assert not any(v.fill_dies() for v in views)
+        assert dlg.unmatched_first_btn.isHidden()   # 색칠 전에는 안 보인다
         dlg.fill_btn.setChecked(True)
         assert all(v.fill_dies() for v in views)
+        assert not dlg.unmatched_first_btn.isHidden()
+        assert dlg.unmatched_first_btn.isChecked()  # 기본 = 미매치 우선
+        assert all(v.unmatched_first() for v in views)
+        dlg.unmatched_first_btn.setChecked(False)   # 두 맵에 함께 걸린다
+        assert not any(v.unmatched_first() for v in views)
+        dlg.unmatched_first_btn.setChecked(True)
+        dlg.fill_btn.setChecked(False)
+        assert dlg.unmatched_first_btn.isHidden()
+        dlg.fill_btn.setChecked(True)
         assert dlg.notch_btn.text() == i18n.KO.WAFER_MAP_NOTCH_FMT.format(dir="아래")
         dlg.notch_btn.click()
         assert [v.rotation() for v in views] == [1, 1]
@@ -810,6 +824,7 @@ def test_view_options_in_both_stages_and_apply_to_both_maps(qt, tmp_path):
         assert not setup.left.view.fill_dies()
         setup.fill_btn.setChecked(True)
         assert setup.left.view.fill_dies()
+        assert setup.unmatched_first_btn.isHidden()  # 셋업 단계는 섞일 일이 없다
         setup.show_folder(f2)                       # 새 맵이 들어와도 유지된다
         _wait_build(qt, setup)
         assert setup.left.view.fill_dies()

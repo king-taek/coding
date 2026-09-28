@@ -13,7 +13,7 @@
   히트 판정·확대 기준이 저절로 같이 돈다.
 * ``fill_dies`` — 점 대신 **결함이 든 die 칸을 통째로** 칠한다(:func:`defect_cells`).
   색은 **그 칸 결함 점과 같은 색**이다 — 셋업 단계는 결함 색 하나, 결과 단계는
-  매치됨/미매치(한 칸에 섞이면 미매치).  pitch 를 모르는 폴더(절대좌표)는 칸을 못
+  매치됨/미매치(한 칸에 섞이면 기본은 미매치, ``unmatched_first`` 를 끄면 매치됨).  pitch 를 모르는 폴더(절대좌표)는 칸을 못
   정하므로 점으로 남는다.
 
 결함 수(:func:`count_text`)는 **엑셀 PNG 에만** 그림 안 오른쪽 아래 빈 곳에 찍는다
@@ -125,8 +125,8 @@ _STATE_KEY = {None: "neutral", False: "unmatched", True: "matched"}
 
 def paint_map(painter: QPainter, rect: QRectF, data: Optional[MapData], *,
               zoom: float = 1.0, pan: QPointF = QPointF(0, 0), rot: int = 0,
-              fill_dies: bool = False, colors: Optional[dict] = None,
-              dot_r: float = DOT_R, show_count: bool = False) -> Optional[_Mapper]:
+              fill_dies: bool = False, unmatched_first: bool = True,
+              colors: Optional[dict] = None, dot_r: float = DOT_R, show_count: bool = False) -> Optional[_Mapper]:
     """``rect`` 안에 맵을 그린다.  ``data``/프레임이 없으면 바탕만.  매퍼를 돌려준다."""
     col = colors or _colors()
     painter.fillRect(rect, col["bg"])
@@ -153,7 +153,7 @@ def paint_map(painter: QPainter, rect: QRectF, data: Optional[MapData], *,
     # 결함이 든 die 칸 칠하기(화면 토글).  격자·윤곽보다 **먼저** 칠해 선이 면 위에
     # 남는다.  pitch 를 모르면 cells 가 비고, 그때는 점 그리기로 돌아간다.
     painter.setClipPath(wafer, Qt.ClipOperation.IntersectClip)
-    cells = defect_cells(data) if fill_dies else {}
+    cells = defect_cells(data, unmatched_first) if fill_dies else {}
     if cells:
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         painter.setPen(Qt.PenStyle.NoPen)
@@ -281,6 +281,7 @@ class WaferMapView(QWidget):
         self._zoom = 1.0
         self._rot = 0
         self._fill_dies = False
+        self._unmatched_first = True
         self._pan = QPointF(0, 0)
         self._drag_from: Optional[QPoint] = None
         self._hover: Optional[MapPoint] = None
@@ -331,13 +332,25 @@ class WaferMapView(QWidget):
     def fill_dies(self) -> bool:
         return self._fill_dies
 
+    def set_unmatched_first(self, on: bool) -> None:
+        """die 색칠에서 한 칸에 매치·미매치가 섞이면 미매치 색(True) / 매치됨 색(False)."""
+        on = bool(on)
+        if on == self._unmatched_first:
+            return
+        self._unmatched_first = on
+        self.update()
+
+    def unmatched_first(self) -> bool:
+        return self._unmatched_first
+
     # ------------------------------------------------------------------
     def paintEvent(self, event):            # noqa: N802
         painter = QPainter(self)
         try:
             m = paint_map(painter, QRectF(self.rect()), self._data,
                           zoom=self._zoom, pan=self._pan, rot=self._rot,
-                          fill_dies=self._fill_dies)
+                          fill_dies=self._fill_dies,
+                          unmatched_first=self._unmatched_first)
             if m is not None and self._hover is not None:
                 painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
                 painter.setPen(QPen(QColor(theme.INK), 1.5))

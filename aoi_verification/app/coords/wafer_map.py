@@ -401,27 +401,32 @@ def cell_bounds(frame: WaferFrame, cell: tuple[int, int]
     return (x0, y0, x0 + frame.pitch_x, y0 + frame.pitch_y)
 
 
-# 한 칸에 여러 결함이 들면 이 순서로 색이 정해진다 — **미매치가 이긴다**.
+# 한 칸에 여러 결함이 들면 이 순서로 색이 정해진다.  기본은 **미매치가 이긴다** —
 # 매치된 결함에 가려 '이 die 에 미매치가 있다' 가 사라지면 안 된다(정확도 우선).
+# ``unmatched_first=False`` 면 매치됨이 이긴다(결과 화면 옵션 — 사용자 요청).
 _CELL_RANK = {False: 2, True: 1, None: 0}
+_CELL_RANK_MATCHED_FIRST = {True: 2, False: 1, None: 0}
 
 
-def defect_cells(data: MapData) -> dict[tuple[int, int], Optional[bool]]:
+def defect_cells(data: MapData, unmatched_first: bool = True
+                 ) -> dict[tuple[int, int], Optional[bool]]:
     """결함이 든 die 칸 → 그 칸의 매칭 상태(``MapPoint.matched`` 와 같은 값).
 
     칸은 **그 칸 결함 점과 같은 색**으로 칠한다 — 셋업 단계는 매칭 전이라 전부 None
-    (결함 색), 결과 단계는 매치됨/미매치.  한 칸에 섞이면 미매치가 이긴다.
+    (결함 색), 결과 단계는 매치됨/미매치.  한 칸에 섞이면 ``unmatched_first`` 면
+    미매치가, 아니면 매치됨이 이긴다.
 
     pitch 를 모르는 폴더(절대좌표)면 빈 dict — 칸을 못 정하므로 화면은 점으로 돌아간다.
     순수 — 헤드리스 테스트한다."""
     if data.frame is None:
         return {}
+    rank = _CELL_RANK if unmatched_first else _CELL_RANK_MATCHED_FIRST
     out: dict[tuple[int, int], Optional[bool]] = {}
     for p in data.points:
         cell = cell_of(data.frame, p.x, p.y)
         if cell is None:
             continue
-        if cell not in out or _CELL_RANK[p.matched] > _CELL_RANK[out[cell]]:
+        if cell not in out or rank[p.matched] > rank[out[cell]]:
             out[cell] = p.matched
     return out
 
