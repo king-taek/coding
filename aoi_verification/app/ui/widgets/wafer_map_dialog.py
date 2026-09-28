@@ -59,7 +59,7 @@ from .. import theme
 from . import sheet_host as sheets
 from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
-from .wafer_map_view import WaferMapView
+from .wafer_map_view import WaferMapView, count_text
 from .window_controls import set_window_fullscreen
 
 # 페이지가 닫혀도 돌던 스레드가 수명을 다 살게 붙들어 둔다(setup_page 의 패턴).
@@ -135,20 +135,32 @@ class _MapPanel(QWidget):
         self.view.setSizePolicy(QSizePolicy.Policy.Expanding,
                                 QSizePolicy.Policy.Expanding)
         lay.addWidget(self.view, stretch=1)
+        # 범례(왼쪽) + 결함 수(오른쪽) — 맵 **밖**에 둔다.  맵 그림 안에 쓰면 캡처에
+        # 숫자가 박힌다(사용자 결정).  엑셀 그림만 그림 안에 찍는다(render_map_image).
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
         self.legend = QLabel("", self)
         self.legend.setProperty("role", "mono")
         self.legend.setWordWrap(True)
-        lay.addWidget(self.legend)
+        row.addWidget(self.legend, stretch=1)
+        self.count = QLabel("", self)
+        self.count.setProperty("role", "mono")
+        self.count.setAlignment(Qt.AlignmentFlag.AlignRight
+                                | Qt.AlignmentFlag.AlignBottom)
+        row.addWidget(self.count)
+        lay.addLayout(row)
 
     def set_chrome_visible(self, visible: bool) -> None:
         """제목·범례를 감춘다/되돌린다 — 맵 전체화면에서 맵만 남기려고."""
         self.title.setVisible(visible)
         self.legend.setVisible(visible)
+        self.count.setVisible(visible)
 
     def show_map(self, title: str, data: Optional[MapData]) -> None:
         self.title.setText(title)
         self.view.set_data(data)
         self.legend.setText(self.legend_text(data))
+        self.count.setText(count_text(data) if data is not None else "")
 
     @staticmethod
     def legend_text(data: Optional[MapData]) -> str:

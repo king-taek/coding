@@ -580,23 +580,28 @@ def test_defect_count_label_bottom_right_outside_wafer(qt):
     assert count_label_rect(QRectF(0, 0, 60, 60), "Defect 12,345개", QFont()) is None
 
 
-def test_defect_count_includes_unplaced_and_is_drawn(qt, tmp_path):
-    """글은 이 맵(슬롯/LOT 합산)의 결함 전부 — 좌표 없는 사진도 센다.  그림에는
-    오른쪽 아래 글상자 자리에 실제로 무언가 그려진다."""
+def test_defect_count_only_in_excel_image_not_on_screen(qt, tmp_path):
+    """결함 수는 좌표 없는 사진까지 센다.  엑셀 PNG 는 그림 안 오른쪽 아래에 찍고,
+    화면 위젯은 그림 안에 쓰지 않는다 — 맵을 캡처해 쓰므로(사용자 결정)."""
     from PyQt6.QtCore import QRectF
     from PyQt6.QtGui import QFont
     from aoi_verification.app.ui.widgets import wafer_map_view as v
-    _, data = _view_with_points(qt, tmp_path)
+    view, data = _view_with_points(qt, tmp_path)
     assert v.count_text(data) == "Defect 2개"
     data = wm.MapData(data.frame, data.points, (tmp_path / "x.jpeg",))
     assert v.count_text(data) == "Defect 3개"
+
+    def box_colors(img):
+        box = v.count_label_rect(QRectF(0, 0, 400, 400), v.count_text(data), QFont())
+        return {img.pixelColor(x, y).name()
+                for x in range(int(box.left()), int(box.right()))
+                for y in range(int(box.top()), int(box.bottom()))}
+
     img = v.render_map_image(data, size=400)
-    box = v.count_label_rect(QRectF(0, 0, 400, 400), v.count_text(data), QFont())
-    bg = img.pixelColor(2, 2).name()
-    inside = {img.pixelColor(x, y).name()
-              for x in range(int(box.left()), int(box.right()))
-              for y in range(int(box.top()), int(box.bottom()))}
-    assert inside - {bg}                   # 글자가 찍혔다
+    assert box_colors(img) - {img.pixelColor(2, 2).name()}     # 엑셀: 글자가 찍혔다
+    view.set_data(data)
+    shot = view.grab().toImage()
+    assert box_colors(shot) == {shot.pixelColor(2, 2).name()}  # 화면: 바탕뿐
 
 
 def _wait_build(qt, dlg, timeout_ms: int = 10000) -> None:
@@ -658,6 +663,9 @@ def test_dialog_setup_mode_slot_folder(qt, tmp_path):
         assert dlg.left.isVisibleTo(dlg) and not dlg.right.isVisibleTo(dlg)
         assert not dlg.slots_btn.isVisibleTo(dlg)      # 슬롯 폴더 — 슬롯 선택 없음
         assert i18n.KO.WAFER_MAP_LEGEND_DEFECT in dlg.left.legend.text()
+        # 결함 수는 맵 밖(범례 줄 오른쪽)에 — 맵 위젯 안이 아니다.
+        assert dlg.left.count.text() == "Defect 1개"
+        assert dlg.left.count.parent() is dlg.left
     finally:
         dlg.deleteLater()
 
@@ -864,6 +872,7 @@ def test_fullscreen_hides_the_chrome_and_grows_the_map(qt, tmp_path):
         assert not dlg._top_host.isVisibleTo(dlg)
         assert not dlg.left.title.isVisibleTo(dlg)
         assert not dlg.left.legend.isVisibleTo(dlg)
+        assert not dlg.left.count.isVisibleTo(dlg)   # 캡처용 화면 — 숫자도 감춘다
         assert dlg.layout().contentsMargins().top() == 0
         assert dlg.exit_btn.isVisibleTo(dlg)         # 유일한 나가기 버튼이 뜬다
         assert dlg.exit_btn.x() + dlg.exit_btn.width() <= dlg.width()

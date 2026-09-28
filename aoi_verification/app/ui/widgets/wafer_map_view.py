@@ -16,9 +16,11 @@
   거기서는 모든 점이 그 색이다(매칭 전).  pitch 를 모르는 폴더(절대좌표)는 칸을 못
   정하므로 점으로 남는다.
 
-오른쪽 아래에는 그 맵(슬롯 또는 LOT 합산)의 **결함 수**를 쓴다(:func:`count_text`).
-자리는 원래 크기 원과 겹치지 않게 잡고(:func:`count_label_rect`), 공간이 모자라면
-글자를 줄이다 끝내 안 되면 생략한다.  엑셀 PNG 에도 같이 찍힌다(같은 :func:`paint_map`).
+결함 수(:func:`count_text`)는 **엑셀 PNG 에만** 그림 안 오른쪽 아래 빈 곳에 찍는다
+(``show_count``) — 원래 크기 원과 겹치지 않게 잡고(:func:`count_label_rect`), 공간이
+모자라면 글자를 줄이다 끝내 안 되면 생략한다.  화면 위젯은 그림 안에 쓰지 않는다 —
+맵을 캡처해 쓰므로 거기 숫자가 박히면 안 된다(사용자 결정).  화면에서는 시트가 맵
+**밖**에 따로 적는다(``wafer_map_dialog._MapPanel.count``).
 
 상호작용: 휠 = 커서 기준 확대, 드래그 = 이동, 호버 = col/row·x/y 툴팁 + 썸네일,
 점 더블클릭 = ``point_activated(Path)``(상세 정보), 빈 곳 더블클릭 = 원래 크기.
@@ -121,7 +123,7 @@ class _Mapper:
 def paint_map(painter: QPainter, rect: QRectF, data: Optional[MapData], *,
               zoom: float = 1.0, pan: QPointF = QPointF(0, 0), rot: int = 0,
               fill_dies: bool = False, colors: Optional[dict] = None,
-              dot_r: float = DOT_R) -> Optional[_Mapper]:
+              dot_r: float = DOT_R, show_count: bool = False) -> Optional[_Mapper]:
     """``rect`` 안에 맵을 그린다.  ``data``/프레임이 없으면 바탕만.  매퍼를 돌려준다."""
     col = colors or _colors()
     painter.fillRect(rect, col["bg"])
@@ -185,7 +187,8 @@ def paint_map(painter: QPainter, rect: QRectF, data: Optional[MapData], *,
                 if p.matched is want:
                     painter.drawEllipse(m.to_px(p.x, p.y), dot_r, dot_r)
     painter.restore()
-    _paint_count(painter, rect, count_text(data), col)
+    if show_count:
+        _paint_count(painter, rect, count_text(data), col)
     return m
 
 
@@ -245,6 +248,7 @@ def render_map_image(data: Optional[MapData], size: int = 720,
     try:
         paint_map(painter, QRectF(0, 0, size, size), data,
                   colors=_colors(palette or theme.PALETTES["light"]),
+                  show_count=True,
                   dot_r=max(2.0, size / 240))
     finally:
         painter.end()
