@@ -560,6 +560,45 @@ def test_render_png_draws_wafer(qt, tmp_path):
     assert c.name() != bg.name()          # 중심(점)은 바탕과 다른 색
 
 
+def test_defect_count_label_bottom_right_outside_wafer(qt):
+    """결함 수 글상자는 오른쪽 아래, 원래 크기 원과 겹치지 않는다(정사각·가로로 긴 창
+    모두).  원이 꽉 차 자리가 없으면 그리지 않는다(맵을 가리지 않는다)."""
+    from PyQt6.QtCore import QRectF
+    from PyQt6.QtGui import QFont
+    from aoi_verification.app.ui.widgets.wafer_map_view import count_label_rect
+    for w, h in ((240, 240), (400, 400), (720, 720), (900, 400)):
+        rect = QRectF(0, 0, w, h)
+        box = count_label_rect(rect, "Defect 12,345개", QFont())
+        assert box is not None, (w, h)
+        assert rect.contains(box)
+        assert box.center().x() > rect.center().x()
+        assert box.center().y() > rect.center().y()
+        cx, cy, rad = w / 2, h / 2, min(w, h) * 0.46
+        nx = min(max(cx, box.left()), box.right())      # 원 중심에서 최근접점
+        ny = min(max(cy, box.top()), box.bottom())
+        assert (nx - cx) ** 2 + (ny - cy) ** 2 > rad * rad
+    assert count_label_rect(QRectF(0, 0, 60, 60), "Defect 12,345개", QFont()) is None
+
+
+def test_defect_count_includes_unplaced_and_is_drawn(qt, tmp_path):
+    """글은 이 맵(슬롯/LOT 합산)의 결함 전부 — 좌표 없는 사진도 센다.  그림에는
+    오른쪽 아래 글상자 자리에 실제로 무언가 그려진다."""
+    from PyQt6.QtCore import QRectF
+    from PyQt6.QtGui import QFont
+    from aoi_verification.app.ui.widgets import wafer_map_view as v
+    _, data = _view_with_points(qt, tmp_path)
+    assert v.count_text(data) == "Defect 2개"
+    data = wm.MapData(data.frame, data.points, (tmp_path / "x.jpeg",))
+    assert v.count_text(data) == "Defect 3개"
+    img = v.render_map_image(data, size=400)
+    box = v.count_label_rect(QRectF(0, 0, 400, 400), v.count_text(data), QFont())
+    bg = img.pixelColor(2, 2).name()
+    inside = {img.pixelColor(x, y).name()
+              for x in range(int(box.left()), int(box.right()))
+              for y in range(int(box.top()), int(box.bottom()))}
+    assert inside - {bg}                   # 글자가 찍혔다
+
+
 def _wait_build(qt, dlg, timeout_ms: int = 10000) -> None:
     """워커가 끝나고 done 시그널이 처리될 때까지."""
     from PyQt6.QtCore import QDeadlineTimer

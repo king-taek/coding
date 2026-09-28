@@ -16,6 +16,10 @@
   거기서는 모든 점이 그 색이다(매칭 전).  pitch 를 모르는 폴더(절대좌표)는 칸을 못
   정하므로 점으로 남는다.
 
+오른쪽 아래에는 그 맵(슬롯 또는 LOT 합산)의 **결함 수**를 쓴다(:func:`count_text`).
+자리는 원래 크기 원과 겹치지 않게 잡고(:func:`count_label_rect`), 공간이 모자라면
+글자를 줄이다 끝내 안 되면 생략한다.  엑셀 PNG 에도 같이 찍힌다(같은 :func:`paint_map`).
+
 상호작용: 휠 = 커서 기준 확대, 드래그 = 이동, 호버 = col/row·x/y 툴팁 + 썸네일,
 점 더블클릭 = ``point_activated(Path)``(상세 정보), 빈 곳 더블클릭 = 원래 크기.
 썸네일은 **저화질 전용 캐시**(120px·Q60)라 만들기도 띄우기도 가볍고, 시트가 미리
@@ -28,7 +32,8 @@ from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtCore import QLineF, QPoint, QPointF, QRectF, Qt, pyqtSignal
-from PyQt6.QtGui import (QColor, QImage, QPainter, QPainterPath, QPen)
+from PyQt6.QtGui import (QColor, QFontMetricsF, QImage, QPainter, QPainterPath,
+                         QPen)
 from PyQt6.QtWidgets import QToolTip, QWidget
 
 from ... import i18n
@@ -43,6 +48,8 @@ ZOOM_STEP = 1.25
 ZOOM_MAX = 60.0
 _TOOLTIP_THUMB = 120   # = config.Sizing.MAP_THUMB_PX — 저화질 캐시를 그대로(업스케일 없이)
 _NOTCH_FRAC = 0.03     # 노치 표시 반지름 = 지름의 3% (실물 1 mm 는 보이지 않는다)
+_COUNT_MIN_PX = 8      # 결함 수 글자 크기(px) 범위 — 맵 크기에 비례
+_COUNT_MAX_PX = 22
 ROTATIONS = 4          # 90° 단위 — rotation 은 0~3(시계 방향 회전 수), 0 = 노치 아래
 
 
@@ -74,6 +81,7 @@ def _colors(palette: Optional[dict] = None) -> dict[str, QColor]:
         "matched": QColor(c["pass"]),
         "unmatched": QColor(c["danger"]),
         "neutral": QColor(c["accent"]),
+        "text": QColor(c["ink"]),
     }
 
 
@@ -177,7 +185,55 @@ def paint_map(painter: QPainter, rect: QRectF, data: Optional[MapData], *,
                 if p.matched is want:
                     painter.drawEllipse(m.to_px(p.x, p.y), dot_r, dot_r)
     painter.restore()
+    _paint_count(painter, rect, count_text(data), col)
     return m
+
+
+def count_label_rect(rect: QRectF, text: str, font) -> Optional[QRectF]:
+    """결함 수 글상자 자리 — ``rect`` 오른쪽 아래, **원래 크기 원과 겹치지 않게**.
+
+    원은 :class:`_Mapper` 의 맞춤(지름 = 짧은 변의 92%)이다.  글이 원에 닿으면 글자를
+    한 px 씩 줄이고, 최소 크기에서도 닿으면 ``None``(그리지 않음).  ``font`` 의 픽셀
+    크기를 바꾼다.  확대하면 맵이 어디든 덮으므로 판정은 원래 크기 기준이다."""
+    s = min(rect.width(), rect.height())
+    cx, cy, rad = rect.center().x(), rect.center().y(), s * 0.46
+    pad = max(3.0, s * 0.01)
+    for px in range(max(_COUNT_MIN_PX, min(_COUNT_MAX_PX, round(s * 0.035))),
+                    _COUNT_MIN_PX - 1, -1):
+        font.setPixelSize(px)
+        fm = QFontMetricsF(font)
+        w, h = fm.horizontalAdvance(text) + pad * 2, fm.height() + pad
+        box = QRectF(rect.right() - pad - w, rect.bottom() - pad - h, w, h)
+        # 원 중심에서 글상자까지의 최근접 거리 > 반지름 이면 겹치지 않는다.
+        nx = min(max(cx, box.left()), box.right())
+        ny = min(max(cy, box.top()), box.bottom())
+        if (nx - cx) ** 2 + (ny - cy) ** 2 > rad * rad:
+            return box
+    return None
+
+
+def count_text(data: MapData) -> str:
+    """이 맵(슬롯 또는 LOT 합산)의 결함 수 — 좌표를 못 놓은 사진도 센다."""
+    return i18n.KO.WAFER_MAP_DEFECT_TOTAL_FMT.format(
+        n=len(data.points) + len(data.unplaced))
+
+
+def _paint_count(painter: QPainter, rect: QRectF, text: str, col: dict) -> None:
+    """:func:`count_text` 를 맵 오른쪽 아래(:func:`count_label_rect`)에 쓴다."""
+    font = painter.font()
+    box = count_label_rect(rect, text, font)
+    if box is None:
+        return
+    painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    painter.setFont(font)
+    # 확대하면 맵이 글 밑으로 들어온다 — 바탕을 깔아 읽히게 한다.
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(col["bg"])
+    painter.drawRoundedRect(box, 4, 4)
+    painter.setPen(col["text"])
+    painter.drawText(box, Qt.AlignmentFlag.AlignCenter, text)
+    painter.restore()
 
 
 def render_map_image(data: Optional[MapData], size: int = 720,
