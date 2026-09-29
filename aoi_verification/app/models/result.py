@@ -5,6 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# `FinalResult.mode` 값 — Defect 추출(매칭 없이 한쪽 폴더에서 고른 사진만 엑셀로).
+# 이때 ``unmatched_refs`` 가 고른 사진 목록이고 ``matches`` 는 비어 있다.
+EXTRACT_MODE = "extract"
+
 
 @dataclass
 class MatchResult:
@@ -31,7 +35,7 @@ class MissEntry:
 @dataclass
 class FinalResult:
     """엑셀 저장으로 전달되는 최종 결과 묶음."""
-    mode: str                                            # "single" | "cross"
+    mode: str                                            # "single" | "cross" | EXTRACT_MODE
     ref_machine: str                                     # 예) "1호기"
     val_machine: str                                     # 예) "3호기"
     matches: list[MatchResult] = field(default_factory=list)
@@ -49,3 +53,25 @@ class FinalResult:
     # Wafer map 용 — {slot명 → (기준 사진 경로들, 검증 사진 경로들)}.  스캔 결과에서
     # 옮겨 담는다(결과 화면·엑셀 시트가 같은 목록을 본다).  매치 여부는 ``matches`` 로.
     slot_images: dict[str, tuple[list[Path], list[Path]]] = field(default_factory=dict)
+
+
+def extract_result(machine: str, picked: dict, *, kla_folders=None,
+                   slot_numbers=None) -> FinalResult:
+    """Defect 추출의 엑셀 입력 — ``picked`` : {slot명 → 고른 사진 경로들}.
+
+    고른 사진은 ``unmatched_refs`` 로 싣는다.  exporter 가 미매칭 행과 **같은 모양**
+    (C=사진, D=파일명·계측·좌표 글자)으로 적게 하려는 것이고(사용자 결정), '미매칭'
+    표시는 ``mode`` 를 보고 exporter 가 뺀다.  Wafer map 에는 **고른 사진만** 찍힌다."""
+    rows: list[MissEntry] = []
+    images: dict[str, tuple[list[Path], list[Path]]] = {}
+    for slot in sorted(picked):
+        paths = [Path(p) for p in picked[slot]]
+        if not paths:
+            continue
+        rows += [MissEntry(slot=slot, side="ref", path=p) for p in paths]
+        images[slot] = (paths, [])
+    return FinalResult(mode=EXTRACT_MODE, ref_machine=machine, val_machine="",
+                       unmatched_refs=rows,
+                       kla_folders=dict(kla_folders or {}),
+                       slot_numbers=dict(slot_numbers or {}),
+                       slot_images=images)

@@ -215,6 +215,68 @@ def scan(ref_root: Path, val_root: Path, progress=None,
     return ScanResult(slots=slots, ref_only=ref_only, val_only=val_only)
 
 
+def scan_one_side(root: Path, progress=None, only=None) -> ScanResult:
+    """Defect 추출용 — **한쪽 폴더만** 훑는다.  사진은 전부 ``ref_images`` 에 담긴다.
+
+    폴더 종류는 자동으로 가린다:
+
+    · 폴더 **바로 안에 결함 사진이 있으면** wafer 폴더 하나 → 슬롯 1개(이름 = 폴더명).
+      이때 ``only`` 는 무시한다 — 하위 폴더(`_recipe_files…` 등)는 슬롯이 아니다.
+    · 아니면 LOT 폴더 → 하위 폴더 하나가 슬롯 하나(:func:`scan` 과 같은 규칙).
+
+    ⚠ 판정 기준을 '하위 폴더가 있는가' 로 바꾸지 마라.  Camtek wafer 폴더에는
+    `_recipe_files_…`·`_wafer2table_…` 같은 하위 폴더가 함께 있다(docs 좌표 예시).
+    ``ref_only``/``val_only`` 는 비워 둔다 — 짝지을 상대가 없다."""
+    root = Path(root)
+    if _list_images(root):
+        dirs = {root.name: root}
+    else:
+        dirs = _enum_slot_dirs(root)
+        if only is not None:
+            wanted = set(only)
+            dirs = {n: d for n, d in dirs.items() if n in wanted}
+    names = sorted(dirs)
+    slots: dict[str, Slot] = {}
+    for idx, name in enumerate(names, start=1):
+        d = dirs[name]
+        slots[name] = Slot(name=name,
+                           ref_images=[ImageItem(name, p, "ref")
+                                       for p in _list_images(d)],
+                           ref_dir=d)
+        if progress is not None:
+            try:
+                progress(idx, len(names))
+            except Exception:
+                pass
+    return ScanResult(slots=slots, ref_only=[], val_only=[])
+
+
+def rename_slots_by_wafer_id(sr: ScanResult, wid_by_folder: dict) -> dict[str, str]:
+    """KLA 폴더(슬롯)를 WaferID 이름으로 바꾼다 — Defect 추출용(짝이 없는 한쪽 스캔).
+
+    ``wid_by_folder`` : {폴더(슬롯)명 → WaferID}.  반환은 {새 slot명 → KLA 폴더명}
+    (엑셀 B열 회색 표기, :attr:`FinalResult.kla_folders`).
+
+    slot명 표기는 매칭의 :func:`merge_unmatched_by_wafer_id` 와 같다(대문자 정규화).
+    새 이름이 **다른 슬롯과 겹치면 바꾸지 않는다** — 겹친 채 바꾸면 한쪽 사진이
+    덮여 웨이퍼가 조용히 사라진다(같은 함수의 충돌 규칙과 같은 이유).
+    ``sr`` 를 직접 수정한다."""
+    kla: dict[str, str] = {}
+    for folder, wid in sorted((wid_by_folder or {}).items()):
+        if not wid or folder not in sr.slots:
+            continue
+        new = _norm_key(wid)
+        if new != folder and new in sr.slots:
+            continue
+        slot = sr.slots.pop(folder)
+        slot.name = new
+        slot.ref_images = [ImageItem(slot=new, path=it.path, side="ref")
+                           for it in slot.ref_images]
+        sr.slots[new] = slot
+        kla[new] = folder
+    return kla
+
+
 def drop_empty_unmatched(sr: ScanResult) -> None:
     """한쪽 전용(ref_only/val_only) 중 **사진이 한 장도 없는 폴더**를 목록에서 제거.
 

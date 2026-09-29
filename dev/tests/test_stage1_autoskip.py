@@ -69,6 +69,9 @@ class _Win:
     def _show_page(self, page):
         self.shown.append(page)
 
+    def _is_extract(self):
+        return False            # 매칭 세션(Defect 추출은 test_defect_extract.py)
+
     def _on_select_finished(self):
         self.finished_calls += 1
 

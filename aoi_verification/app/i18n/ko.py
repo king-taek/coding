@@ -1112,3 +1112,36 @@ WAFER_MAP_FULLSCREEN_TIP = (
     "맵만 남기고 주변 표시(설명·버튼·제목·범례)를 감춘 뒤 앱 창도 전체화면으로 "
     "바꿉니다. ESC 를 누르면 원래대로 돌아옵니다.")
 WAFER_MAP_NO_COORD = "이 사진을 맵에 찍지 못했습니다 — 좌표 또는 die 기하를 읽지 못했습니다."
+
+# ── Defect 추출 (매칭 없이 한쪽 폴더에서 고른 사진을 엑셀로) ─────────────────
+# 흐름: 설정(한쪽만) → 후보 선별(매칭과 같은 화면) → 요약 → 저장.
+EXTRACT_BUTTON = "Defect 추출"
+EXTRACT_BUTTON_TOOLTIP = (
+    "매칭 없이, wafer 또는 LOT 폴더에서 고른 defect 사진과 그 정보(좌표·계측)를\n"
+    "엑셀로 저장합니다.")
+EXTRACT_BACK_BUTTON = "← 매칭 검증으로"
+EXTRACT_TITLE = "Defect 추출"
+EXTRACT_GROUP = "대상 장비"
+BTN_EXTRACT_START = "추출 시작"
+# KLA 여부 — 매칭은 짝이 안 맞는 폴더가 있을 때 '어느 쪽이 KLA 인가' 를 묻지만, 추출은
+# 장비가 하나라 '이 장비가 KLA 인가' 만 묻는다.  호기가 K-n 이면 묻지 않는다(매칭과 같음).
+EXTRACT_KLA_HEADING = "이 장비가 KLA 장비인가요?"
+EXTRACT_KLA_BODY = (
+    "KLA 장비면 폴더의 정보파일(없으면 사진 OCR)에서 WaferID 를 읽어 슬롯 이름으로 씁니다.")
+EXTRACT_KLA_YES = "KLA 장비"
+EXTRACT_NONE_FOUND = "추출할 사진을 찾지 못했습니다.\n폴더를 다시 확인하세요."
+EXTRACT_NONE_CHOSEN_TITLE = "고른 사진이 없습니다"
+EXTRACT_NONE_CHOSEN_BODY = (
+    "추출할 사진을 한 장도 고르지 않았습니다.\n\n"
+    "설정 화면으로 돌아갈까요? (아니오 = 선별 화면에 남기 — Z 로 되돌릴 수 있습니다)")
+EXTRACT_SUMMARY_TITLE = "Defect 추출"
+EXTRACT_SUMMARY_FMT = "슬롯 {wafers}개에서 defect {n}건을 엑셀로 저장합니다."
+EXTRACT_SUMMARY_SAVE = "엑셀로 저장"
+EXTRACT_SUMMARY_BACK = "선별로 돌아가기"
+EXTRACT_SUMMARY_CANCEL = "설정으로 돌아가기"      # 선별을 건너뛴 경우(모든 사진 자동)
+# 저장 파일 이름 — 결과 엑셀 제목 규칙에 '추출' 을 붙인 것(사용자 결정).
+EXTRACT_FILE_TITLE_FMT = "{machine} {layer}_{material} Defect 추출.xlsx"
+EXTRACT_FILE_TITLE_FALLBACK_FMT = "AOI {machine} Defect 추출.xlsx"
+# 엑셀 — 요약 시트 D열 머리(C열 사진의 파일명·계측·좌표 칸)와 Wafer Map 시트 머리.
+EXTRACT_INFO_HEADER = "정보"
+EXTRACT_MAP_SHEET_COL = "결함 위치"

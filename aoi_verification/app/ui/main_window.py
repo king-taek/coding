@@ -26,10 +26,11 @@ from .. import config, i18n
 from . import theme
 from ..coords import kla_info
 from ..models import session as session_mod
-from ..models.result import FinalResult, MatchResult, MissEntry
+from ..models.result import FinalResult, MatchResult, MissEntry, extract_result
 from ..models.slot import (ImageItem, ScanResult, drop_empty_unmatched,
                            merge_unmatched_by_wafer_id,
-                           push_one_sided_to_unmatched, scan)
+                           push_one_sided_to_unmatched,
+                           rename_slots_by_wafer_id, scan, scan_one_side)
 from ..utils import paths, wafer_id, wakelock
 from ..utils import prefs as _prefs
 from ..utils.prefs import AutomationLevel, EngineMode
@@ -92,14 +93,17 @@ class _FolderScan(QThread):
         done = pyqtSignal(int, object)           # token, ScanResult
         failed = pyqtSignal(int, str)            # token, message
 
-    def __init__(self, token: int, ref_root, val_root, only=None) -> None:
+    def __init__(self, token: int, ref_root, val_root, only=None,
+                 extract: bool = False) -> None:
         """``only`` 는 '일부 슬롯만 진행' 의 슬롯명 집합 — 스캔이 **그 폴더들만** 연다.
-        ``None`` 이면 전체.  (`models.slot.scan` 의 같은 인자로 그대로 넘어간다.)"""
+        ``None`` 이면 전체.  (`models.slot.scan` 의 같은 인자로 그대로 넘어간다.)
+        ``extract`` 면 ``ref_root`` 한쪽만 훑는다(`models.slot.scan_one_side`)."""
         super().__init__()                  # 부모 없음(위 주석)
         self._token = token
         self._ref_root = ref_root
         self._val_root = val_root
         self._only = set(only) if only is not None else None
+        self._extract = bool(extract)
         self._stop = False
         self.signals = self._Signals()
 
@@ -133,8 +137,12 @@ class _FolderScan(QThread):
             self.signals.progress.emit(self._token, done, total)
 
         try:
-            sr = scan(self._ref_root, self._val_root, progress=_progress,
-                      only=self._only)
+            if self._extract:
+                sr = scan_one_side(self._ref_root, progress=_progress,
+                                   only=self._only)
+            else:
+                sr = scan(self._ref_root, self._val_root, progress=_progress,
+                          only=self._only)
         except _FolderScan._Stopped:
             return                          # 취소 — 아무것도 보고하지 않는다
         except Exception as exc:
@@ -1005,7 +1013,8 @@ class MainWindow(QMainWindow):
         self._stage = "scan"
         self._scan_token += 1
         worker = _FolderScan(self._scan_token, inp.ref_root, inp.val_root,
-                             only=getattr(inp, "selected_slots", None))
+                             only=getattr(inp, "selected_slots", None),
+                             extract=self._is_extract())
         worker.signals.progress.connect(self._on_scan_progress)
         worker.signals.done.connect(self._on_scan_done)
         worker.signals.failed.connect(self._on_scan_failed)
@@ -1050,6 +1059,9 @@ class MainWindow(QMainWindow):
         #   한때 여기서 예시 사진과 함께 물었지만 사용자 결정으로 '항상 뺀다' 로
         #   돌아갔다.
         self._scan = sr
+        if self._is_extract():
+            self._extract_after_scan(sr)
+            return
         # ※ 사진 0장 폴더 정리(drop_empty_unmatched)는 **KLA 해석 뒤**(_after_slot_resolved)
         #   로 미룬다 — 정보파일은 사진이 없어도 WaferID 를 주므로, 여기서 미리 버리면
         #   짝지을 수 있는 폴더를 놓친다.
@@ -1224,6 +1236,10 @@ class MainWindow(QMainWindow):
             return
         if self._input.automation_level == AutomationLevel.AUTO_ALL:
             self._loading.hide_overlay()
+            if self._is_extract():          # 선별을 건너뛴다 = 전부 추출
+                self._finish_extract({
+                    n: list(s.ref_images) for n, s in self._scan.slots.items()})
+                return
             self._enter_stage2_auto_all()
             return
         self._loading.hide_overlay()
@@ -1287,14 +1303,19 @@ class MainWindow(QMainWindow):
     # ==================================================================
     def _enter_stage1_phase_a(self) -> None:
         assert self._scan is not None and self._input is not None
-        slots = [self._scan.slots[n] for n in self._scan.common_slot_names]
+        # 추출은 짝이 없다 — 한쪽 스캔의 슬롯 전부가 후보다.
+        names = (sorted(self._scan.slots) if self._is_extract()
+                 else self._scan.common_slot_names)
+        slots = [self._scan.slots[n] for n in names]
         # queue: 기준(ref) 사진 전부 (Slot 명 / 파일명 오름차순)
         queue: list[ImageItem] = []
         for slot in sorted(slots, key=lambda s: s.name):
             queue.extend(slot.ref_images)
 
         # 이전에 이 기준 폴더로 고른 기준 사진이 있으면 재사용할지 물어본다 (#6).
-        restored = self._maybe_restore_ref_selection(queue)
+        # ★ 추출은 묻지도 기록하지도 않는다 — 그 기록은 '매칭에 쓸 기준 사진' 이다.
+        restored = ({} if self._is_extract()
+                    else self._maybe_restore_ref_selection(queue))
         self._select_page.load_state(
             queue=queue,
             targets=restored, excluded={}, history=[],
@@ -1310,6 +1331,9 @@ class MainWindow(QMainWindow):
         self._autosave()
 
     def _on_select_finished(self) -> None:
+        if self._phase == PHASE_A_SELECT and self._is_extract():
+            self._on_extract_select_finished()
+            return
         if self._phase == PHASE_A_SELECT:
             self._stage1_a_snapshot = {
                 "targets": self._collect_panel(self._select_page.get_state().targets),
@@ -1578,6 +1602,179 @@ class MainWindow(QMainWindow):
             QApplication.alert(self)
 
     # ==================================================================
+    # Defect 추출 — 매칭 없이 한쪽 폴더에서 고른 사진을 엑셀로
+    # ==================================================================
+    # 흐름: 설정(추출 모드) → 스캔 → (KLA면 slot명 해석) → 썸네일 → 후보 선별(매칭과
+    # 같은 화면) → 요약 → 이름 확인 → 저장 → 설정 화면.  매칭·검토·결과 화면은 거치지
+    # 않고, 세션 자동 저장·기준 사진 기록도 하지 않는다(`_autosave` 주석).
+    def _is_extract(self) -> bool:
+        return bool(getattr(self._input, "extract", False))
+
+    def _extract_after_scan(self, sr: ScanResult) -> None:
+        """스캔 직후 — 사진 없는 슬롯을 빼고, KLA 면 slot명을 WaferID 로 바꾼 뒤 썸네일로."""
+        for name in [n for n, s in sr.slots.items() if not s.ref_images]:
+            sr.slots.pop(name)
+        if not sr.slots:
+            self._loading.hide_overlay()
+            wakelock.release()
+            sheets.warn(self, i18n.KO.APP_TITLE, i18n.KO.EXTRACT_NONE_FOUND)
+            return
+        # KLA 여부 — 호기가 K-n 이면 묻지 않는다(매칭과 같은 규칙).  추출은 장비가
+        # 하나라 '어느 쪽' 이 아니라 'KLA 인가' 만 묻는다.
+        is_kla = self._kla_machine_side(self._input) is not None
+        if not is_kla:
+            is_kla = sheets.choose(
+                self, i18n.KO.KLA_ASK_TITLE, i18n.KO.EXTRACT_KLA_BODY,
+                [("kla", i18n.KO.EXTRACT_KLA_YES, "option"),
+                 ("none", i18n.KO.KLA_SIDE_NONE, "option")],
+                heading=i18n.KO.EXTRACT_KLA_HEADING, tiles=True) == "kla"
+        # 이름은 **해석이 끝난 뒤** 센다 — KLA 면 그 사이 slot명이 WaferID 로 바뀐다.
+        proceed = lambda: self._continue_start_after_scan(sorted(sr.slots))  # noqa: E731
+        if is_kla:
+            self._resolve_kla_extract(sr, on_done=proceed)
+        else:
+            proceed()
+
+    def _resolve_kla_extract(self, sr: ScanResult, on_done) -> None:
+        """KLA 폴더의 slot명 = WaferID — **정보파일 우선, OCR 폴백**(매칭과 같은 순서).
+
+        OCR 은 정보파일에서 못 읽은 폴더에만, 백그라운드 워커에서 돈다."""
+        self._loading.show_overlay(i18n.KO.LOAD_KLA_INFO, step=(1, 3),
+                                   steps=i18n.KO.LOAD_JOURNEY_STEPS)
+        QApplication.processEvents()
+        info: dict[str, str] = {}
+        for name, slot in sr.slots.items():
+            wid = kla_info.read_wafer_id(slot.ref_dir) if slot.ref_dir else None
+            if wid:
+                info[name] = wid
+
+        def finalize(ocr=None) -> None:
+            try:
+                self._kla_folders = rename_slots_by_wafer_id(sr, {**info, **(ocr or {})})
+            finally:
+                self._ocr_worker = None
+                on_done()
+
+        jobs = [("ref", n, [it.path for it in s.ref_images])
+                for n, s in sorted(sr.slots.items()) if n not in info]
+        if jobs and wafer_id.ocr_available():
+            from ..workers.wafer_id_ocr import WaferIdOcrWorker
+            self._loading.show_overlay(i18n.KO.LOAD_KLA_OCR, step=(1, 3),
+                                       steps=i18n.KO.LOAD_JOURNEY_STEPS)
+            worker = WaferIdOcrWorker(jobs, parent=self)
+            self._ocr_worker = worker          # GC 방지 참조 보관
+            worker.signals.progress.connect(
+                lambda d, t: self._loading.set_progress(d, t, i18n.KO.LOAD_KLA_OCR))
+            worker.signals.done.connect(lambda ocr_ref, _val: finalize(ocr_ref))
+            worker.signals.failed.connect(lambda _msg: finalize())
+            worker.start()
+            return
+        finalize()
+
+    def _on_extract_select_finished(self) -> None:
+        """후보 선별이 끝났다 — 오른쪽(고른 사진)이 곧 추출 대상이다."""
+        st = self._select_page.get_state()
+        picked = {k: list(v) for k, v in (st.targets if st else {}).items() if v}
+        if not picked:
+            r = sheets.ask(
+                self, i18n.KO.EXTRACT_NONE_CHOSEN_TITLE,
+                i18n.KO.EXTRACT_NONE_CHOSEN_BODY,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            if r == QMessageBox.StandardButton.Yes:
+                self._on_select_cancelled()
+            return
+        self._finish_extract(picked)
+
+    def _finish_extract(self, picked: dict[str, list[ImageItem]]) -> None:
+        """간단한 요약 → 이름 확인 → 저장(사용자 결정: 결과 화면 없이 바로 저장)."""
+        assert self._input is not None
+        result = extract_result(
+            self._input.ref_machine,
+            {slot: [it.path for it in items] for slot, items in picked.items()},
+            kla_folders=getattr(self, "_kla_folders", {}),
+            slot_numbers=self._slot_numbers())
+        from_select = self._stack.currentWidget() is self._select_page
+        choice = sheets.choose(
+            self, i18n.KO.EXTRACT_SUMMARY_TITLE,
+            i18n.KO.EXTRACT_SUMMARY_FMT.format(wafers=len(result.slot_images),
+                                               n=len(result.unmatched_refs)),
+            [("save", i18n.KO.EXTRACT_SUMMARY_SAVE, "primary"),
+             ("back", i18n.KO.EXTRACT_SUMMARY_BACK if from_select
+              else i18n.KO.EXTRACT_SUMMARY_CANCEL, "ghost")],
+            default="save")
+        dst = None
+        if choice == "save" and self._working_xlsx is not None:
+            from .widgets.save_name_dialog import SaveNameDialog
+            dlg = SaveNameDialog(self._working_xlsx.name, self._working_xlsx.parent,
+                                 parent=self)
+            if sheets.run(dlg) and dlg.chosen is not None:
+                dst = self._working_xlsx.with_name(dlg.chosen)
+        if dst is None:
+            # 선별에서 왔으면 그 화면에 남는다(Z 로 되돌려 다시 고를 수 있다).
+            # 선별을 건너뛴 경우(모든 사진 자동)에는 돌아갈 화면이 설정뿐이다.
+            if not from_select:
+                self._new_session()
+            return
+        self._start_extract_export(result, dst)
+
+    def _start_extract_export(self, result: FinalResult, dst: Path) -> None:
+        from ..workers.exporter import ExcelExporter
+        from .widgets.wafer_map_view import render_map_png
+
+        self._extract_result, self._extract_dst = result, dst
+        self._loading.show_overlay(i18n.KO.LOAD_EXPORT)
+        exporter = ExcelExporter(result, dst, template_path=self._template_used,
+                                 map_renderer=render_map_png)
+        self._extract_exporter = exporter      # GC 방지 + closeEvent 에서 취소
+        exporter.signals.progress.connect(
+            lambda d, t, msg: self._loading.set_progress(
+                d, t, msg or i18n.KO.LOAD_EXPORT))
+        exporter.signals.done.connect(self._on_extract_export_done)
+        exporter.signals.failed.connect(self._on_extract_export_failed)
+        exporter.start()
+
+    def _on_extract_export_done(self, path: str) -> None:
+        self._loading.hide_overlay()
+        self._extract_saved = Path(path)
+        # 워커 시그널 슬롯에서 곧바로 모달을 열지 않는다(결과 화면과 같은 이유).
+        QTimer.singleShot(0, self._offer_open_extract)
+
+    def _offer_open_extract(self) -> None:
+        """저장 완료 — 파일/폴더 열기를 권하고 설정 화면(추출 모드 그대로)으로."""
+        from PyQt6.QtCore import QUrl
+        from PyQt6.QtGui import QDesktopServices
+
+        path = self._extract_saved
+        choice = sheets.choose(
+            self, i18n.KO.APP_TITLE, i18n.KO.SAVE_SUCCESS_FMT.format(path=path),
+            [("open_file", i18n.KO.BTN_OPEN_SAVED_FILE, "primary"),
+             ("open_dir", i18n.KO.BTN_OPEN_SAVED_FOLDER, "ghost"),
+             ("close", i18n.KO.MSG_BTN_CLOSE, "ghost")],
+            default="open_file")
+        if choice in ("open_file", "open_dir"):
+            target = path if choice == "open_file" else path.parent
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
+        self._new_session()
+
+    def _on_extract_export_failed(self, msg: str) -> None:
+        """실패 — 결과 화면과 같은 안내(열려 있는 파일이 가장 흔한 원인) + 다시 시도."""
+        self._loading.hide_overlay()
+        locked = "permission" in msg.lower() or "errno 13" in msg.lower()
+        body = (i18n.KO.SAVE_FAIL_LOCKED_FMT.format(error=msg) if locked
+                else i18n.KO.SAVE_FAIL_FMT.format(error=msg))
+        choice = sheets.choose(
+            self, i18n.KO.APP_TITLE, body,
+            [("retry", i18n.KO.BTN_RETRY_SAVE, "primary"),
+             ("close", i18n.KO.MSG_BTN_CLOSE, "ghost")],
+            default="retry")
+        if choice == "retry":
+            self._start_extract_export(self._extract_result, self._extract_dst)
+        elif self._stack.currentWidget() is not self._select_page:
+            self._new_session()
+
+    # ==================================================================
     # Result
     # ==================================================================
     def _finish_session(self) -> None:
@@ -1768,6 +1965,14 @@ class MainWindow(QMainWindow):
         여기서 폴더를 훑기 시작하면 설정 화면 die 안내가 겪은 그 정지가 재현된다."""
         from ..models.lot_info import read_lot_info
 
+        if getattr(inp, "extract", False):
+            # 추출 — 같은 규칙(자재·Layer 는 WaferInfo.ini)에 '추출' 을 붙인다(사용자 결정).
+            lot = read_lot_info(inp.ref_root)
+            if lot is None:
+                return i18n.KO.EXTRACT_FILE_TITLE_FALLBACK_FMT.format(
+                    machine=inp.ref_machine)
+            return i18n.KO.EXTRACT_FILE_TITLE_FMT.format(
+                machine=inp.ref_machine, layer=lot.layer, material=lot.material)
         lot = read_lot_info(inp.val_root)
         if lot is None:
             _LOG.info("WaferInfo.ini 에서 자재·Layer 를 못 읽어 기본 제목을 씁니다: %s",
@@ -2186,8 +2391,9 @@ class MainWindow(QMainWindow):
         '판정 기준은 하나이므로 문장도 하나에서 나온다' 는 단일 출처다.  레일이
         따로 조립하면 엔진을 하나 더 만들 때 둘 중 하나가 낡는다."""
         page = getattr(self, "_setup_page", None)
-        if page is None or self._input is None:
-            self._rail.set_criteria("")     # 아직 시작 전 — 기준이 확정되지 않았다
+        if page is None or self._input is None or self._is_extract():
+            # 시작 전이면 기준이 확정되지 않았고, 추출에는 판정 기준이 없다.
+            self._rail.set_criteria("")
             return
         try:
             name, value = page.judgement_text()
@@ -2274,6 +2480,8 @@ class MainWindow(QMainWindow):
     # Auto-save
     # ==================================================================
     def _schedule_autosave(self) -> None:
+        if self._is_extract():
+            return          # 추출은 이어하기·기준 사진 기록 대상이 아니다(`_autosave`)
         # 결정이 있을 때마다 즉시 저장한다 (가벼움)
         self._autosave()
         # ★ Stage 1 진행 중에도 '직접 고른 기준 사진' 을 남긴다.  예전엔 선별을 **끝냈을
@@ -2291,7 +2499,9 @@ class MainWindow(QMainWindow):
             self._save_ref_selection(state.targets)
 
     def _autosave(self) -> None:
-        if self._input is None:
+        # ★ 추출 세션은 저장하지 않는다 — '이어하기' 는 매칭 세션을 되살리는 기능이라
+        #   추출 입력이 남으면 다음 실행에서 매칭으로 복원된다.
+        if self._input is None or self._is_extract():
             return
         # Stage 1 / Stage 2 의 현재 상태도 함께 직렬화 (#19)
         decisions: dict[str, str] = {}
@@ -2397,11 +2607,13 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         # ★ 엑셀 저장 워커 — 기다리기만 하면 반쯤 쓰인 xlsx 가 남으므로 먼저 취소한다.
-        try:
-            exporter = getattr(self._result_page, "_exporter", None)
-            if exporter is not None and exporter.isRunning():
-                exporter.stop()
-                exporter.wait(3000)
-        except Exception:
-            pass
+        #   Defect 추출의 저장 워커도 같다.
+        for exporter in (getattr(self._result_page, "_exporter", None),
+                         getattr(self, "_extract_exporter", None)):
+            try:
+                if exporter is not None and exporter.isRunning():
+                    exporter.stop()
+                    exporter.wait(3000)
+            except Exception:
+                pass
         super().closeEvent(event)

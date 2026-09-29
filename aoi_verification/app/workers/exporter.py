@@ -20,7 +20,7 @@ from typing import Optional
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
 from .. import i18n
-from ..models.result import FinalResult, MatchResult, MissEntry
+from ..models.result import EXTRACT_MODE, FinalResult, MatchResult, MissEntry
 from ..utils import image_io
 
 
@@ -135,6 +135,10 @@ class ExcelExporter(QThread):
                  parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._result = result
+        # Defect 추출 — 행이 전부 '고른 사진'(unmatched_refs)이다.  미매칭 행과 같은 모양
+        # (C=사진, D=파일명·계측·좌표 글자)으로 적되 '미매칭' 표시(행 틴트·메모·시트)는
+        # 붙이지 않는다 — 매칭을 하지 않았으므로 미매칭도 아니다.
+        self._extract = result.mode == EXTRACT_MODE
         # Wafer map PNG 렌더러 ``(MapData, size_px) -> PNG bytes``.  UI 계층이 넘긴다
         # (workers 는 ui 를 import 하지 않는다).  None 이면 Wafer Map 시트를 만들지 않는다.
         self._map_renderer = map_renderer
@@ -206,6 +210,9 @@ class ExcelExporter(QThread):
             ws[f"{COL_REF}{HEADER_AOI_ROW}"] = ref_label
         if val_label:
             ws[f"{COL_VAL}{HEADER_AOI_ROW}"] = val_label
+        if self._extract:
+            # 추출은 장비가 하나다 — D열은 두 번째 장비가 아니라 C열 사진의 정보 칸.
+            ws[f"{COL_VAL}{HEADER_AOI_ROW}"] = i18n.KO.EXTRACT_INFO_HEADER
 
         # 컬럼 폭 보정 — 양식.xlsx 는 ‘Scan Defect (C1:D1)’ 같은 병합 헤더의
         # 왼쪽 셀에만 width 를 지정해 두어, 오른쪽 셀(D, F, H 등) 이 기본 폭
@@ -236,7 +243,8 @@ class ExcelExporter(QThread):
         # 진행률 총량 = 이번 저장이 채울 **모든 시트의 행 수 합** (아래 채우는
         # 순서와 같은 순서로 더한다).  시트가 몇 장이든 바는 0 → 100 을 한 번만
         # 지난다.
-        unmatched_rows = [r for r in rows_input if isinstance(r[2], MissEntry)]
+        unmatched_rows = ([] if self._extract else
+                          [r for r in rows_input if isinstance(r[2], MissEntry)])
         self._prog_done = 0
         map_rows = self._wafer_map_rows()
         self._prog_total = (
@@ -612,7 +620,8 @@ class ExcelExporter(QThread):
             # 배경·격자를 **먼저** 입힌다 — 아래 슬롯 구분선(굵은 top)이 이 위에
             # 덧그려져야 살아남는다(순서를 바꾸면 구분선이 지워진다).
             self._style_data_row(ws, row, style_cols, idx - 1,
-                                 unmatched=isinstance(payload, MissEntry))
+                                 unmatched=(isinstance(payload, MissEntry)
+                                            and not self._extract))
 
             # 슬롯 변경 시 A~H 전 열에 top border 적용 (기존 좌/우/하 보존).
             if prev_slot is not None and cur_slot != prev_slot:
@@ -687,7 +696,8 @@ class ExcelExporter(QThread):
                 cell_val.alignment = Alignment(
                     horizontal="center", vertical="center", wrap_text=True,
                 )
-                cell_val.comment = Comment("미매칭", "AOI")
+                if not self._extract:
+                    cell_val.comment = Comment("미매칭", "AOI")
                 self.signals.progress.emit(base + idx, overall, _phase(u.slot))
 
             row += 1
@@ -804,10 +814,13 @@ class ExcelExporter(QThread):
 
         ws = wb.create_sheet(title=i18n.KO.WAFER_MAP_SHEET)
         ws["A1"] = i18n.KO.WAFER_MAP_SHEET_COL_SLOT
-        ws["B1"] = self._map_col_header(i18n.KO.WAFER_MAP_SHEET_COL_REF,
-                                       self._result.ref_machine)
-        ws["C1"] = self._map_col_header(i18n.KO.WAFER_MAP_SHEET_COL_VAL,
-                                       self._result.val_machine)
+        ws["B1"] = self._map_col_header(
+            i18n.KO.EXTRACT_MAP_SHEET_COL if self._extract
+            else i18n.KO.WAFER_MAP_SHEET_COL_REF,
+            self._result.ref_machine)
+        if not self._extract:          # 추출은 장비가 하나 — 검증 맵 칸이 없다
+            ws["C1"] = self._map_col_header(i18n.KO.WAFER_MAP_SHEET_COL_VAL,
+                                           self._result.val_machine)
         # 머리칸·슬롯칸 모두 여러 줄이 될 수 있다 — wrap_text 없으면 줄바꿈이 안 보인다.
         center = Alignment(horizontal="center", vertical="center", wrap_text=True)
         for c in "ABC":

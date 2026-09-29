@@ -33,6 +33,7 @@ from typing import Optional
 
 from . import kla_info, wafer_geometry as wg
 from .models import DefectCoord
+from ..models.result import EXTRACT_MODE
 
 __all__ = ["WaferFrame", "MapPoint", "MapData", "frame_for_folder", "to_plane",
            "build_map", "grid_lines", "die_grid_segments", "cell_of",
@@ -455,6 +456,10 @@ def slot_maps(result, slot: str = ALL_SLOTS_KEY,
         val_paths += list(v)
     matched = {Path(m.ref_path) for m in result.matches if m.slot in names}
     matched |= {Path(m.val_path) for m in result.matches if m.slot in names}
+    # Defect 추출은 매칭을 하지 않는다 — '미매치' 로 칠하면 거짓이므로 매칭 정보 없음
+    # (셋업 단계와 같은 결함 색)으로 둔다.
+    if getattr(result, "mode", "") == EXTRACT_MODE:
+        matched = None
     n_ref, total = len(ref_paths), len(ref_paths) + len(val_paths)
     ref_prog = val_prog = None
     if progress is not None:

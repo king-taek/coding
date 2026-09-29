@@ -52,6 +52,9 @@ class SetupInput:
     coord_tolerance: float = config.DEFAULT_COORD_TOLERANCE
     # 진행할 슬롯 부분집합 (None = 전체 진행). '일부 슬롯만 진행' 옵션으로 설정.
     selected_slots: Optional[set] = None
+    # Defect 추출 — 매칭 없이 ``ref_root`` 한쪽에서 고른 사진을 엑셀로.  이때
+    # ``val_root``·``val_machine`` 은 쓰지 않는다(``val_root`` 는 ``ref_root`` 와 같게 둔다).
+    extract: bool = False
 
 
 # '실행 옵션'·'매칭 설정' 두 카드를 가로로 나란히 세우려면 이만큼은 있어야 한다.
@@ -161,6 +164,9 @@ class SetupPage(QWidget):
         # 잠근다.  ★ 기본은 True 다: 이 페이지를 단독으로 띄우는 곳(테스트·미리보기)
         # 에서 버튼이 영원히 잠기면 안 된다.  메인 창이 곧바로 False 로 뒤집는다.
         self._backend_ready = True
+        # Defect 추출 모드 — 검증 장비 카드·매칭 설정을 감추고 한쪽 폴더만 받는다.
+        # ★ `_build` 전에 둔다: 액션바를 만들며 부르는 `_validate` 가 읽는다.
+        self._extract_mode = False
         # die 기하 스캔(백그라운드) 상태.  `_die_scanned_for` 는 **이미 스캔이 끝난
         # 경로** 다 — 같은 경로로 `_validate` 가 다시 와도(허용 오차를 건드리면 온다)
         # 다시 훑지 않고 캐시한 결과로 문구만 다시 그린다.
@@ -441,6 +447,7 @@ class SetupPage(QWidget):
         # (드래그, 최대화/복원, 모서리 리사이즈) 으로만 처리.
         title = QLabel(i18n.KO.SETUP_TITLE, self)
         title.setProperty("role", "title")
+        self._title_label = title
         return title
 
     def _build_howto(self) -> QWidget:
@@ -861,6 +868,12 @@ class SetupPage(QWidget):
         self.wafer_map_btn = NeonButton(i18n.KO.WAFER_MAP_BUTTON, role="ghost")
         self.wafer_map_btn.clicked.connect(self._open_wafer_map)
         bar.addWidget(self.wafer_map_btn)
+        # Defect 추출 — 같은 화면을 한쪽 폴더만 받는 모드로 바꾼다(누르면 되돌아가는 버튼).
+        self.extract_btn = NeonButton(i18n.KO.EXTRACT_BUTTON, role="ghost")
+        self.extract_btn.setToolTip(i18n.KO.EXTRACT_BUTTON_TOOLTIP)
+        self.extract_btn.clicked.connect(
+            lambda: self.set_extract_mode(not self._extract_mode))
+        bar.addWidget(self.extract_btn)
         # ★ 자리 계약: 왼쪽 보조 버튼들 → stretch → 힌트 → 주 액션(start_btn).
         #   새 위젯은 반드시 stretch **뒤**나 그 앞의 보조 묶음에 붙인다 — 잘못 넣으면
         #   주 액션이 가운데로 밀린다(test_action_bar_index_contract).
@@ -869,6 +882,10 @@ class SetupPage(QWidget):
         # 왜 시작할 수 없는지 — 툴팁이 아니라 버튼 옆에 보이게.
         self._start_hint = QLabel("", host)
         self._start_hint.setProperty("role", "muted")
+        # ★ 좁은 창에서는 두 줄로 접힌다.  한 줄 고정이면 이 문구(~200px)가 액션바의
+        #   최소 폭을 정해, [Defect 추출] 을 더한 뒤 800px 창에서 설정 카드가 세로로
+        #   쌓이지 못했다(페이지 최소 폭 862 → 971px).  넓은 창에서는 그대로 한 줄이다.
+        self._start_hint.setWordWrap(True)
         bar.addWidget(self._start_hint)
         self.start_btn = NeonButton(i18n.KO.BTN_START, role="primary")
         self.start_btn.setMinimumWidth(220)
@@ -888,6 +905,7 @@ class SetupPage(QWidget):
         head = QLabel(title, card)
         head.setProperty("role", "cardTitle")
         card.body().addWidget(head)
+        card.setProperty("_headLabel", head)      # 추출 모드가 제목을 바꾼다
 
         grid = QGridLayout()
         grid.setContentsMargins(0, 4, 0, 0)
@@ -973,9 +991,40 @@ class SetupPage(QWidget):
         여전히 :meth:`_validate` 하나가 정한다 — 여기서 직접 ``setEnabled`` 를 부르면
         다음 폴더 입력의 디바운스가 그것을 곧바로 덮어쓴다."""
         self._backend_ready = bool(ready)
-        self.start_btn.setText(
-            i18n.KO.BTN_START if self._backend_ready
-            else i18n.KO.BTN_START_PREPARING)
+        self._refresh_start_text()
+        self._validate()
+
+    def _refresh_start_text(self) -> None:
+        if not self._backend_ready:
+            self.start_btn.setText(i18n.KO.BTN_START_PREPARING)
+        else:
+            self.start_btn.setText(i18n.KO.BTN_EXTRACT_START if self._extract_mode
+                                   else i18n.KO.BTN_START)
+
+    def is_extract_mode(self) -> bool:
+        return self._extract_mode
+
+    def set_extract_mode(self, on: bool) -> None:
+        """Defect 추출 ↔ 매칭 검증.  **같은 화면**에서 한쪽만 받도록 바꾼다(사용자 결정).
+
+        감추는 것: 검증 장비 카드 · 매칭 설정 카드 · 모드 배지(판정 기준은 매칭에만 있다).
+        남기는 것: 기준 장비 카드(제목만 '대상 장비') · 실행 옵션(자동화 수준 = 선별
+        건너뛰기, 진행 범위 = 일부 슬롯).  입력값은 그대로 둔다 — 되돌아오면 이어서 쓴다."""
+        on = bool(on)
+        self._extract_mode = on
+        self._title_label.setText(i18n.KO.EXTRACT_TITLE if on else i18n.KO.SETUP_TITLE)
+        head = self.ref_group.property("_headLabel")
+        if head is not None:
+            head.setText(i18n.KO.EXTRACT_GROUP if on else i18n.KO.SETUP_REF_GROUP)
+        self.val_group.setVisible(not on)
+        # 그리드에서도 빼야 빈 칸이 반폭을 차지하지 않는다(재배치는 reflow 가 한다).
+        self._device_cards = [self.ref_group] if on else [self.ref_group, self.val_group]
+        self._reflow_device_row()
+        self._setting_cards[1].setVisible(not on)          # 매칭 설정 카드
+        self._mode_badge_card.setVisible(not on)
+        self.extract_btn.setText(i18n.KO.EXTRACT_BACK_BUTTON if on
+                                 else i18n.KO.EXTRACT_BUTTON)
+        self._refresh_start_text()
         self._validate()
 
     def _probe_state(self, text: str) -> Optional[str]:
@@ -1029,7 +1078,8 @@ class SetupPage(QWidget):
         시작을 잠근다.  헤드리스에서는 동기로 확인해 호출 즉시 판정이 나오게 한다
         (테스트가 `_validate()` 의 반환값을 그 자리에서 단언한다)."""
         ref_text = self.ref_path_edit.text()
-        val_text = self.val_path_edit.text()
+        # 추출 모드는 검증 폴더를 받지 않는다 — 기준 폴더를 한 번 더 보면 판정이 같다.
+        val_text = ref_text if self._extract_mode else self.val_path_edit.text()
         if self._sync_probe:
             ref_state: Optional[str] = self._dir_state(ref_text)
             val_state: Optional[str] = self._dir_state(val_text)
@@ -1375,6 +1425,8 @@ class SetupPage(QWidget):
         self.start_requested.emit(inp)
 
     def _collect_input(self):
+        if self._extract_mode:
+            return self._collect_extract_input()
         ref_root = Path(self.ref_path_edit.text().strip())
         val_root = Path(self.val_path_edit.text().strip())
         ref_machine = self.ref_machine_edit.text().strip()
@@ -1450,6 +1502,32 @@ class SetupPage(QWidget):
             coord_tolerance=coord_tolerance,
             selected_slots=(set(self._selected_slots)
                             if self._selected_slots is not None else None),
+        )
+
+    def _collect_extract_input(self):
+        """Defect 추출 입력 — 대상 폴더 하나 + 호기 + 실행 옵션.
+
+        매칭 전용 값(임계치·엔진·허용 오차)은 넘기지 않는다(기본값).  prefs 에는
+        폴더·호기만 남긴다 — 매칭의 '마지막 입력' 을 추출이 덮어쓰지 않게 따로 두지는
+        않는다: 같은 입력란이라 다음에 열 때 그대로 보이는 것이 맞다."""
+        root = Path(self.ref_path_edit.text().strip())
+        if not root.exists() or not root.is_dir():
+            sheets.warn(self, i18n.KO.APP_TITLE,
+                        i18n.KO.WARN_PATH_NOT_EXIST.format(path=root))
+            return None
+        machine = (self.ref_machine_edit.text().strip()
+                   or i18n.KO.DEFAULT_REF_MACHINE)
+        automation = self.auto_group.current_key() or AutomationLevel.USER_SELECT
+        _prefs.patch(last_ref_root=str(root), last_ref_machine=machine,
+                     automation_level=automation)
+        return SetupInput(
+            mode="single", ref_root=root, val_root=root,
+            ref_machine=machine, val_machine="",
+            threshold=self.slider.value() / 100.0,
+            automation_level=automation,
+            selected_slots=(set(self._selected_slots)
+                            if self._selected_slots is not None else None),
+            extract=True,
         )
 
     # ── 작성 중 입력 이관 (색 모드/배치 전환 시) ─────────────────────────────
