@@ -779,8 +779,10 @@ class ExcelExporter(QThread):
         """한 시트에 Recipe 마다 [사진 | 정보] 열을 옆으로 나란히 (사용자 결정).
 
         머리 1행 = Recipe 이름(두 칸 병합), 2행 = AOI-N · 정보.  슬롯 안에서는 **순서대로**
-        채운다 — i 행 = 각 Recipe 의 i 번째 사진(파일명 순), 모자라면 빈칸.  같은 행의
-        사진끼리는 관계가 없다(사용자 결정).  정보 칸은 D열과 같은 글자다."""
+        채운다 — i 행 = 각 Recipe 의 i 번째 사진(파일명 순), 모자라면 빈칸.  단,
+        Recipe 끼리 위치 차가 150µm 미만인 사진은 같은 행에 모아 **위쪽**에 둔다
+        (:func:`pair_rows`, 사용자 결정 — x20·x5 가 같은 결함을 찍은 경우).  정보 칸은
+        D열과 같은 글자다."""
         from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
         from openpyxl.utils import get_column_letter
 
@@ -833,7 +835,11 @@ class ExcelExporter(QThread):
         t_sheet, t_info, t_img = time.perf_counter(), 0.0, 0.0
         for s_i, slot in enumerate(slots):
             lists = per_slot[slot]
-            for i in range(max(len(x) for x in lists)):
+            # ★ 서로 다른 Recipe 가 같은 결함을 찍은 사진(위치 차 < 150µm)은 같은 행에,
+            #   그 행들을 위로(사용자 결정 — 따로 표시하지 않는다).  나머지는 순서대로.
+            slot_rows = pair_rows([[r[2].path for r in x] for x in lists],
+                                  defect_position)
+            for i, row_paths in enumerate(slot_rows):
                 if self._stop.is_set():
                     raise _Cancelled
                 no += 1
@@ -850,10 +856,9 @@ class ExcelExporter(QThread):
                 self._write_slot_cell(ws, row, slot,
                                       Alignment(horizontal="center",
                                                 vertical="center"))
-                for (pc, ic), items in zip(cols, lists):
-                    if i >= len(items):
+                for (pc, ic), path in zip(cols, row_paths):
+                    if path is None:
                         continue
-                    path = items[i][2].path
                     t0 = time.perf_counter()
                     if not self._place_image(ws, path, pc, row, cell_w_px, cell_h_px):
                         ws[f"{pc}{row}"] = Path(path).name
@@ -1116,6 +1121,85 @@ def recipe_groups(paths) -> list[tuple[str, list[Path]]]:
         key = (1, 0) if code is None else (0, code)
         order[label] = min(order.get(label, key), key)
     return sorted(groups.items(), key=lambda kv: (order[kv[0]], kv[0]))
+
+
+# Recipe 나란히 배치에서 '같은 결함' 으로 보고 같은 행에 두는 거리 — 미만(사용자 결정).
+PAIR_TOL_UM = 150.0
+
+
+def defect_position(path):
+    """사진의 결함 위치 — 거리 비교용.  모르면 ``None``.
+
+    · Camtek: 절대 stage 좌표 ``("abs", X, Y)`` µm (INI 의 X/Y 또는 점표기 파일명)
+    · 그 밖(KLA·LIVE 파일명): die 좌표 ``("die", col, row, x, y)`` — **같은 die 끼리만**
+      비교한다(die 원점을 모르면 다른 die 와의 거리를 알 수 없다)."""
+    from .. import coords
+    from ..coords import abs_coord
+    xy = abs_coord.absolute_xy(Path(path))
+    if xy is not None:
+        return ("abs", float(xy[0]), float(xy[1]))
+    c = coords.resolve(Path(path))
+    if c is None:
+        return None
+    return ("die", c.col, c.row, float(c.x), float(c.y))
+
+
+def _pos_distance(a, b) -> float:
+    import math
+    if a is None or b is None or a[0] != b[0]:
+        return math.inf
+    if a[0] == "abs":
+        return math.hypot(a[1] - b[1], a[2] - b[2])
+    if a[1:3] != b[1:3]:
+        return math.inf
+    return math.hypot(a[3] - b[3], a[4] - b[4])
+
+
+def pair_rows(lists, position, tol: float = PAIR_TOL_UM) -> list[list]:
+    """Recipe 별 사진 목록 → 행 목록.  행 = Recipe 마다 사진 하나 또는 ``None``.
+
+    1) 서로 다른 Recipe 의 두 사진이 ``tol`` **미만**이면 같은 결함으로 보고 한 행에
+       모은다.  가까운 쌍부터 1:1 로 확정한다(한 사진은 한 행에만).  Recipe 가 셋
+       이상이면 행에 들어 있는 **모든** 사진과 ``tol`` 미만일 때만 합류한다.
+    2) 그렇게 모인 행을 위에(왼쪽 Recipe 의 순서대로), 나머지는 예전처럼 Recipe 별로
+       순서대로 채운다(모자라면 ``None``).
+    순수 함수 — ``position(path)`` 만 주입받아 헤드리스로 테스트한다."""
+    pos = [[position(p) for p in col] for col in lists]
+    edges = []
+    for a in range(len(lists)):
+        for b in range(a + 1, len(lists)):
+            for i, pa in enumerate(pos[a]):
+                for j, pb in enumerate(pos[b]):
+                    d = _pos_distance(pa, pb)
+                    if d < tol:
+                        edges.append((d, a, i, b, j))
+    edges.sort()
+    rows: list[dict] = []
+    where: dict = {}
+
+    def fits(r: dict, col: int, idx: int) -> bool:
+        return col not in r and all(
+            _pos_distance(pos[c][k], pos[col][idx]) < tol for c, k in r.items())
+
+    for _d, a, i, b, j in edges:
+        ra, rb = where.get((a, i)), where.get((b, j))
+        if ra is None and rb is None:
+            where[(a, i)] = where[(b, j)] = len(rows)
+            rows.append({a: i, b: j})
+        elif ra is not None and rb is None and fits(rows[ra], b, j):
+            rows[ra][b] = j
+            where[(b, j)] = ra
+        elif rb is not None and ra is None and fits(rows[rb], a, i):
+            rows[rb][a] = i
+            where[(a, i)] = rb
+    rows.sort(key=lambda r: min(r.items()))
+    out = [[lists[c][r[c]] if c in r else None for c in range(len(lists))]
+           for r in rows]
+    rest = [[p for k, p in enumerate(col) if (c, k) not in where]
+            for c, col in enumerate(lists)]
+    for i in range(max((len(x) for x in rest), default=0)):
+        out.append([x[i] if i < len(x) else None for x in rest])
+    return out
 
 
 def _safe_sheet_title(name: str, taken: set) -> str:

@@ -746,16 +746,37 @@ class _ChoiceSheet(QDialog):
         self.setMaximumWidth(_MSG_MAX_W + 48)
 
     def _build_button_row(self, options, default):
-        """오른쪽 정렬 버튼 줄 — 하나가 주 액션인 질문(설치할까요? 등)."""
-        bar = QHBoxLayout()
-        bar.setContentsMargins(0, 0, 0, 0)
-        bar.setSpacing(8)
-        bar.addStretch(1)
+        """오른쪽 정렬 버튼 줄 — 하나가 주 액션인 질문(설치할까요? 등).
+
+        ★ 버튼들이 시트 폭(`_MSG_MAX_W`)에 한 줄로 안 들어가면 **두 열로 접는다.**
+        한 줄에 억지로 넣으면 시트가 최대 폭에 막혀 버튼이 글자보다 좁아지고 글자가
+        잘렸다(사용자 신고: Defect 추출 저장 방식 버튼 4개)."""
+        buttons = []
         for key, label, role in options:
             btn = NeonButton(label, role=role, parent=self)
             btn.clicked.connect(lambda _c=False, k=key: self._pick(k))
-            bar.addWidget(btn)
+            buttons.append(btn)
             self._buttons[key] = btn
+        spacing = 8
+        need = (sum(b.sizeHint().width() for b in buttons)
+                + spacing * max(0, len(buttons) - 1))
+        if need <= _MSG_MAX_W:
+            bar = QHBoxLayout()
+            bar.setContentsMargins(0, 0, 0, 0)
+            bar.setSpacing(spacing)
+            bar.addStretch(1)
+            for btn in buttons:
+                bar.addWidget(btn)
+        else:
+            bar = QGridLayout()
+            bar.setContentsMargins(0, 0, 0, 0)
+            bar.setSpacing(spacing)
+            for i, btn in enumerate(buttons):
+                btn.setSizePolicy(QSizePolicy.Policy.Expanding,
+                                  QSizePolicy.Policy.Fixed)
+                bar.addWidget(btn, i // 2, i % 2)
+            bar.setColumnStretch(0, 1)
+            bar.setColumnStretch(1, 1)
         if default in self._buttons:
             self._buttons[default].setDefault(True)
             self._buttons[default].setFocus()

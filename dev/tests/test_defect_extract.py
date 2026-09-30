@@ -565,3 +565,103 @@ def test_summary_offers_layouts_and_remembers(qapp, tmp_path, monkeypatch):
         assert seen[1][1] == ex.RECIPE_LAYOUT_COLUMNS         # 마지막 선택이 기본
     finally:
         win.close()
+
+
+# ── Recipe 나란히: 같은 결함(150µm 미만)은 같은 행, 위쪽으로 ─────────────────
+def _abs(**xy):
+    return lambda p: ("abs",) + xy[str(p)] if str(p) in xy else None
+
+
+def test_pair_rows_puts_close_defects_on_one_row_first():
+    from aoi_verification.app.workers.exporter import pair_rows
+    x20 = ["a", "b", "c"]
+    x5 = ["p", "q"]
+    pos = _abs(a=(0.0, 0.0), b=(1000.0, 0.0), c=(5000.0, 0.0),
+               p=(5100.0, 0.0),            # c 와 100µm → 같은 행
+               q=(1000.0, 149.9))          # b 와 149.9µm → 같은 행
+    assert pair_rows([x20, x5], pos) == [["b", "q"], ["c", "p"], ["a", None]]
+
+
+def test_pair_rows_threshold_is_strict_and_one_to_one():
+    from aoi_verification.app.workers.exporter import pair_rows
+    # a–p 는 정확히 150µm → '미만' 이 아니므로 짝이 아니다(순서대로 채운 행).
+    pos = _abs(a=(0.0, 0.0), b=(1000.0, 0.0), p=(150.0, 0.0), q=(1003.0, 0.0))
+    assert pair_rows([["a", "b"], ["p", "q"]], pos) == [["b", "q"], ["a", "p"]]
+    # q 는 a(2µm)·b(3µm) 둘 다 가깝지만 한 행에만 — 더 가까운 a 와.
+    pos = _abs(a=(0.0, 0.0), b=(5.0, 0.0), q=(2.0, 0.0))
+    assert pair_rows([["a", "b"], ["q"]], pos) == [["a", "q"], ["b", None]]
+
+
+def test_pair_rows_three_recipes_needs_all_close():
+    from aoi_verification.app.workers.exporter import pair_rows
+    pos = _abs(a=(0.0, 0.0), p=(100.0, 0.0), u=(200.0, 0.0), v=(50.0, 0.0))
+    # u 는 p 와 100 이지만 a 와 200 → a·p 행에 못 들어간다.  v 는 둘 다 150 미만.
+    assert pair_rows([["a"], ["p"], ["u", "v"]], pos) == [["a", "p", "v"],
+                                                          [None, None, "u"]]
+
+
+def test_pair_rows_die_coords_compare_only_within_same_die():
+    from aoi_verification.app.workers.exporter import pair_rows
+    pos = {"a": ("die", 1, 2, 10.0, 10.0), "p": ("die", 1, 2, 20.0, 10.0),
+           "b": ("die", 1, 3, 10.0, 10.0), "q": ("die", 1, 4, 10.0, 10.0)}.get
+    assert pair_rows([["a", "b"], ["q", "p"]], pos) == [["a", "p"], ["b", "q"]]
+
+
+def test_columns_sheet_pairs_rows_on_top(qapp, tmp_path, monkeypatch):
+    pytest.importorskip("openpyxl")
+    pytest.importorskip("PIL.Image")
+    from openpyxl import load_workbook
+
+    from aoi_verification.app.workers import exporter as ex
+
+    _fake_recipes(monkeypatch, {"a.jpg": (1, "x20"), "b.jpg": (1, "x20"),
+                                "c.jpg": (2, "x5"), "d.jpg": (2, "x5")})
+    xy = {"a.jpg": (0.0, 0.0), "b.jpg": (9000.0, 0.0),
+          "c.jpg": (50000.0, 0.0), "d.jpg": (9050.0, 30.0)}   # b–d 58µm
+    monkeypatch.setattr(ex, "defect_position",
+                        lambda p: ("abs",) + xy[Path(p).name])
+    ps = [_touch_jpeg(tmp_path / "src" / "S1" / n)
+          for n in ("a.jpg", "b.jpg", "c.jpg", "d.jpg")]
+    dst = tmp_path / "out.xlsx"
+    ex.ExcelExporter(extract_result("3", {"S1": ps}), dst_path=dst,
+                     template_path=tmp_path / "none.xlsx",
+                     recipe_layout=ex.RECIPE_LAYOUT_COLUMNS).run()
+    ws = load_workbook(str(dst), rich_text=True)["out"]
+
+    def name(cell):
+        return None if cell.value is None else str(cell.value).split("\n")[0]
+    assert [(name(ws[f"D{r}"]), name(ws[f"F{r}"])) for r in (3, 4)] == [
+        ("b.jpg", "d.jpg"), ("a.jpg", "c.jpg")]
+    # 따로 표시하지 않는다 — 두 행의 정보 칸 글꼴·채움이 같은 규칙(줄무늬)을 따른다.
+    assert ws["D3"].comment is None and ws["D4"].comment is None
+
+
+def test_choice_buttons_wrap_instead_of_clipping(styled_qapp):
+    """버튼이 시트 폭에 한 줄로 안 들어가면 두 열로 접는다 — 글자가 잘리지 않는다."""
+    from PyQt6.QtWidgets import QGridLayout
+
+    from aoi_verification.app import i18n
+    from aoi_verification.app.ui.widgets import sheet_host as sh
+    K = i18n.KO
+    many = [("s", K.EXTRACT_SAVE_SINGLE, "primary"),
+            ("h", K.EXTRACT_SAVE_SHEETS, "ghost"),
+            ("c", K.EXTRACT_SAVE_COLUMNS, "ghost"),
+            ("b", K.EXTRACT_SUMMARY_BACK, "ghost")]
+    d = sh._ChoiceSheet("t", "body", many, default="s")
+    try:
+        d.show()
+        for _ in range(3):
+            styled_qapp.processEvents()
+        assert d.width() <= d.maximumWidth()
+        for b in d._buttons.values():
+            assert b.width() >= b.sizeHint().width(), b.text()
+        grids = [d.layout().itemAt(i).layout() for i in range(d.layout().count())]
+        assert any(isinstance(g, QGridLayout) for g in grids)
+    finally:
+        d.deleteLater()
+    few = sh._ChoiceSheet("t", "body", many[:2], default="s")
+    try:
+        grids = [few.layout().itemAt(i).layout() for i in range(few.layout().count())]
+        assert not any(isinstance(g, QGridLayout) for g in grids)   # 들어가면 예전 그대로
+    finally:
+        few.deleteLater()
