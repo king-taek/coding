@@ -92,8 +92,51 @@ def _unpack(buf: bytes, base: int, offset: int, fmt: str) -> Optional[float]:
         return None
 
 
+def _record_struct():
+    """스키마(`_FIELDS`)를 레코드 **한 개를 한 번에** 푸는 ``struct.Struct`` 로 만든다.
+
+    반환 ``(Struct, RawRecord 필드 순서로 값을 고르는 인덱스)``.  필드가 겹치거나
+    레코드 밖으로 나가면 ``None`` — 그때는 필드별로 푸는 예전 경로를 쓴다.
+    매번 새로 만든다(테스트가 스키마를 바꿔 끼운다 — 만드는 비용은 무시할 만하다)."""
+    parts: list[str] = []
+    names: list[str] = []
+    pos = 0
+    for name, (off, fmt) in sorted(_FIELDS.items(), key=lambda kv: kv[1][0]):
+        if off is None or off < pos:
+            return None
+        if off > pos:
+            parts.append(f"{off - pos}x")
+        parts.append(fmt)
+        names.append(name)
+        pos = off + struct.calcsize(_BYTE_ORDER + fmt)
+    if pos > _RECORD_SIZE:
+        return None
+    if _RECORD_SIZE > pos:
+        parts.append(f"{_RECORD_SIZE - pos}x")
+    st = struct.Struct(_BYTE_ORDER + "".join(parts))
+    return st, [names.index(f) for f in RawRecord._fields]
+
+
 def _parse_flt(path: Path) -> tuple[RawRecord, ...]:
+    """★ 레코드마다 ``struct.iter_unpack`` 한 번이다.  예전에는 필드 8개를 따로
+    ``unpack_from`` 하고 dict 를 만들어 넘겼는데, Surface.flt 는 **웨이퍼 전체 결함**을
+    담아 레코드가 수만 개일 수 있다(Defect 추출 저장이 느린 원인 후보 — 추정이며
+    실측 전이다).  값은 같다
+    (같은 바이트 순서·포맷, 꼬리의 불완전 레코드는 예전처럼 버린다) — 회귀 가드
+    ``test_surface_flt.test_fast_parse_matches_field_by_field``."""
     data = path.read_bytes()
+    fast = _record_struct()
+    if fast is not None:
+        st, order = fast
+        body = data[_HEADER_BYTES:]
+        body = body[:len(body) // _RECORD_SIZE * _RECORD_SIZE]
+        make = RawRecord._make
+        return tuple(make([v[i] for i in order]) for v in st.iter_unpack(body))
+    return _parse_flt_by_field(data)
+
+
+def _parse_flt_by_field(data: bytes) -> tuple[RawRecord, ...]:
+    """필드별로 푸는 예전 경로 — 스키마가 한 번에 풀 수 없는 모양일 때만."""
     out: list[RawRecord] = []
     pos = _HEADER_BYTES
     n = len(data)

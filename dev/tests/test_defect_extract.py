@@ -336,8 +336,8 @@ def test_end_to_end_select_then_save(qapp, tmp_path, monkeypatch):
         choices.append((title, text, keys))
         if "kla" in keys:
             return "none"                     # KLA 아님
-        if "save" in keys:
-            return "save"
+        if "single" in keys:
+            return "single"                   # 요약 창 — 한 시트로 저장
         return "close"                        # 저장 완료 → 닫기
 
     monkeypatch.setattr(mw.sheets, "choose", fake_choose)
@@ -362,7 +362,7 @@ def test_end_to_end_select_then_save(qapp, tmp_path, monkeypatch):
             assert _pump_until(lambda: page._current is not cur
                                or not page.get_state().queue, 5)
         assert _pump_until(lambda: win._stack.currentWidget() is win._setup_page)
-        summary = [c for c in choices if "save" in c[2]]
+        summary = [c for c in choices if "single" in c[2]]
         assert summary and "2" in summary[0][1]       # defect 2건
         saved = list(results.glob("*추출*.xlsx"))
         assert len(saved) == 1
@@ -372,5 +372,196 @@ def test_end_to_end_select_then_save(qapp, tmp_path, monkeypatch):
         # 추출 세션은 이어하기에 남지 않는다
         from aoi_verification.app.models import session as session_mod
         assert session_mod.load() is None
+    finally:
+        win.close()
+
+
+# ── Recipe 나누기 ────────────────────────────────────────────────────────────
+def _fake_recipes(monkeypatch, table):
+    """파일명 → (코드, 이름).  Surface.flt 를 합성하지 않고 분류 규칙만 본다."""
+    from aoi_verification.app.workers import exporter as ex
+    none = (None, ex.i18n.KO.EXTRACT_RECIPE_NONE)
+    monkeypatch.setattr(ex, "recipe_of", lambda p: table.get(Path(p).name, none))
+
+
+def test_recipe_groups_order_and_none_last(monkeypatch):
+    from aoi_verification.app.workers import exporter as ex
+    _fake_recipes(monkeypatch, {"a.jpg": (2, "PI"), "b.jpg": (1, "PI_Bubble"),
+                                "c.jpg": (2, "PI")})
+    got = ex.recipe_groups([Path("/x/a.jpg"), Path("/x/z.jpg"), Path("/x/b.jpg"),
+                            Path("/x/c.jpg")])
+    assert [(label, [p.name for p in ps]) for label, ps in got] == [
+        ("PI_Bubble", ["b.jpg"]), ("PI", ["a.jpg", "c.jpg"]),
+        (ex.i18n.KO.EXTRACT_RECIPE_NONE, ["z.jpg"])]
+
+
+def test_recipe_of_uses_surface_flt_name_then_code(monkeypatch):
+    """출처는 Surface.flt recipe(사용자 결정) — 이름이 없으면 코드로 대신한다."""
+    from aoi_verification.app.coords import geometry
+    from aoi_verification.app.coords.models import DefectGeometry
+    from aoi_verification.app.workers import exporter as ex
+
+    def geo(name):
+        return geometry.GeometryResult("ok", DefectGeometry(
+            1, 1, 1, 1, zone=1, recipe=3, pixel_um=1, recipe_name=name))
+    monkeypatch.setattr(geometry, "resolve", lambda p: geo("PI_Bubble"))
+    assert ex.recipe_of("/x/a.jpg") == (3, "PI_Bubble")
+    monkeypatch.setattr(geometry, "resolve", lambda p: geo(""))
+    assert ex.recipe_of("/x/a.jpg") == (3, "Recipe 3")
+    monkeypatch.setattr(geometry, "resolve",
+                        lambda p: geometry.GeometryResult("no_flt", None))
+    assert ex.recipe_of("/x/a.jpg") == (None, ex.i18n.KO.EXTRACT_RECIPE_NONE)
+
+
+def test_safe_sheet_title():
+    from aoi_verification.app.workers.exporter import _safe_sheet_title
+    assert _safe_sheet_title("PI/Bubble:[1]", set()) == "PI_Bubble__1_"
+    assert _safe_sheet_title("PI", {"PI"}) == "PI (2)"
+    assert len(_safe_sheet_title("x" * 40, {"x" * 31})) == 31
+
+
+def _three_slot_result(tmp_path):
+    ps = {n: _touch_jpeg(tmp_path / "src" / slot / n)
+          for slot, n in [("S1", "a.jpg"), ("S1", "b.jpg"), ("S1", "c.jpg"),
+                          ("S2", "d.jpg")]}
+    return extract_result("3", {"S1": [ps["a.jpg"], ps["b.jpg"], ps["c.jpg"]],
+                                "S2": [ps["d.jpg"]]})
+
+
+def test_sheets_layout_one_sheet_per_recipe(qapp, tmp_path, monkeypatch):
+    pytest.importorskip("openpyxl")
+    pytest.importorskip("PIL.Image")
+    from openpyxl import load_workbook
+
+    from aoi_verification.app import i18n
+    from aoi_verification.app.workers import exporter as ex
+
+    _fake_recipes(monkeypatch, {"a.jpg": (1, "PI_Bubble"), "c.jpg": (1, "PI_Bubble"),
+                                "b.jpg": (2, "PI")})
+    dst = tmp_path / "out.xlsx"
+    exp = ex.ExcelExporter(_three_slot_result(tmp_path), dst_path=dst,
+                           template_path=tmp_path / "none.xlsx", map_renderer=_png,
+                           recipe_layout=ex.RECIPE_LAYOUT_SHEETS)
+    exp.run()
+    wb = load_workbook(str(dst), rich_text=True)
+    assert wb.sheetnames == ["PI_Bubble", "PI", i18n.KO.EXTRACT_RECIPE_NONE,
+                             i18n.KO.WAFER_MAP_SHEET]
+
+    def rows(name):
+        ws = wb[name]
+        out, r = [], 3
+        while ws[f"A{r}"].value is not None:
+            out.append((str(ws[f"B{r}"].value), str(ws[f"D{r}"].value).split("\n")[0]))
+            r += 1
+        return out
+    assert rows("PI_Bubble") == [("S1", "a.jpg"), ("S1", "c.jpg")]
+    assert rows("PI") == [("S1", "b.jpg")]
+    assert rows(i18n.KO.EXTRACT_RECIPE_NONE) == [("S2", "d.jpg")]
+    assert wb["PI"]["D2"].value == i18n.KO.EXTRACT_INFO_HEADER
+
+
+def test_columns_layout_side_by_side(qapp, tmp_path, monkeypatch):
+    """한 시트, Recipe 마다 [사진|정보] 열.  슬롯 안에서는 순서대로 채우고 모자라면 빈칸."""
+    pytest.importorskip("openpyxl")
+    pytest.importorskip("PIL.Image")
+    from openpyxl import load_workbook
+
+    from aoi_verification.app import i18n
+    from aoi_verification.app.workers import exporter as ex
+
+    _fake_recipes(monkeypatch, {"a.jpg": (1, "PI_Bubble"), "c.jpg": (1, "PI_Bubble"),
+                                "b.jpg": (2, "PI")})
+    dst = tmp_path / "out.xlsx"
+    single = tmp_path / "single.xlsx"
+    ex.ExcelExporter(_three_slot_result(tmp_path), dst_path=dst,
+                     template_path=tmp_path / "none.xlsx", map_renderer=_png,
+                     recipe_layout=ex.RECIPE_LAYOUT_COLUMNS).run()
+    ex.ExcelExporter(_three_slot_result(tmp_path), dst_path=single,
+                     template_path=tmp_path / "none.xlsx").run()
+    wb = load_workbook(str(dst), rich_text=True)
+    assert wb.sheetnames == ["out", i18n.KO.WAFER_MAP_SHEET]
+    ws = wb["out"]
+    # 머리: Recipe 이름(두 칸 병합) / AOI-N · 정보
+    assert [ws[f"{c}1"].value for c in "CEG"] == ["PI_Bubble", "PI",
+                                                 i18n.KO.EXTRACT_RECIPE_NONE]
+    assert [ws[f"{c}2"].value for c in "CDEF"] == ["AOI-3", i18n.KO.EXTRACT_INFO_HEADER,
+                                                  "AOI-3", i18n.KO.EXTRACT_INFO_HEADER]
+    assert "C1:D1" in {str(r) for r in ws.merged_cells.ranges}
+
+    def name(cell):
+        return None if cell.value is None else str(cell.value).split("\n")[0]
+    # S1: PI_Bubble a,c / PI b → 2행 · S2: 없음 d → 1행
+    grid = [(ws[f"A{r}"].value, str(ws[f"B{r}"].value), name(ws[f"D{r}"]),
+             name(ws[f"F{r}"]), name(ws[f"H{r}"])) for r in (3, 4, 5)]
+    assert grid == [(1, "S1", "a.jpg", "b.jpg", None),
+                    (2, "S1", "c.jpg", None, None),
+                    (3, "S2", None, None, "d.jpg")]
+    assert ws["A6"].value is None
+    assert len(ws._images) == 4                      # 사진 4장
+    # 정보 칸 글자는 한 시트 배치의 D열과 같다(같은 생산자)
+    ss = load_workbook(str(single), rich_text=True)["single"]
+    assert str(ws["D3"].value) == str(ss["D3"].value)
+
+
+def test_layout_is_ignored_for_match_results(qapp, tmp_path):
+    """Recipe 나누기는 추출 전용 — 매칭 결과에 값을 줘도 예전 배치 그대로다."""
+    from aoi_verification.app.workers import exporter as ex
+    exp = ex.ExcelExporter(FinalResult(mode="single", ref_machine="1", val_machine="2"),
+                           dst_path=tmp_path / "o.xlsx",
+                           recipe_layout=ex.RECIPE_LAYOUT_SHEETS)
+    assert exp._recipe_layout == ex.RECIPE_LAYOUT_SINGLE
+
+
+def test_export_logs_stage_times(qapp, tmp_path, caplog):
+    """느린 단계를 실측으로 가리기 위한 기록 — app.log 로 가는 'aoi.export' 로거."""
+    import logging
+
+    from aoi_verification.app.workers import exporter as ex
+    p = _touch_jpeg(tmp_path / "src" / "S1" / "a.jpg")
+    with caplog.at_level(logging.INFO, logger="aoi.export"):
+        ex.ExcelExporter(extract_result("3", {"S1": [p]}), dst_path=tmp_path / "o.xlsx",
+                         template_path=tmp_path / "none.xlsx").run()
+    text = caplog.text
+    assert "저장 소요 [시트" in text and "저장 소요 [파일 쓰기]" in text
+
+
+def test_summary_offers_layouts_and_remembers(qapp, tmp_path, monkeypatch):
+    """요약 창에서 방식을 고르고, 마지막 선택이 다음 기본이 된다."""
+    from aoi_verification.app.ui import main_window as mw
+    from aoi_verification.app.ui.pages.setup_page import SetupInput
+    from aoi_verification.app.ui.widgets import save_name_dialog
+    from aoi_verification.app.utils import prefs
+    from aoi_verification.app.workers import exporter as ex
+
+    monkeypatch.setattr(mw.MainWindow, "_start_backend_import_async",
+                        lambda self: None)
+    win = mw.MainWindow()
+    seen, started = [], []
+    monkeypatch.setattr(mw.sheets, "choose",
+                        lambda *a, **k: (seen.append((a[3], k.get("default"))),
+                                         ex.RECIPE_LAYOUT_COLUMNS)[1])
+
+    class _Dlg:
+        def __init__(self, name, _folder, parent=None):
+            self.chosen = name
+    monkeypatch.setattr(save_name_dialog, "SaveNameDialog", _Dlg)
+    monkeypatch.setattr(mw.sheets, "run", lambda dlg, **k: True)
+    monkeypatch.setattr(mw.MainWindow, "_start_extract_export",
+                        lambda self, r, d, layout: started.append(layout))
+    try:
+        win._input = SetupInput(mode="single", ref_root=tmp_path, val_root=tmp_path,
+                                ref_machine="3", val_machine="", threshold=0.7,
+                                extract=True)
+        win._working_xlsx = tmp_path / "x.xlsx"
+        item = mw.ImageItem("S1", _touch_jpeg(tmp_path / "S1" / "a.jpg"), "ref")
+        win._finish_extract({"S1": [item]})
+        keys = [o[0] for o in seen[0][0]]
+        assert keys[:3] == [ex.RECIPE_LAYOUT_SINGLE, ex.RECIPE_LAYOUT_SHEETS,
+                            ex.RECIPE_LAYOUT_COLUMNS]
+        assert seen[0][1] == ex.RECIPE_LAYOUT_SINGLE          # 처음엔 한 시트
+        assert started == [ex.RECIPE_LAYOUT_COLUMNS]
+        assert prefs.load().extract_recipe_layout == ex.RECIPE_LAYOUT_COLUMNS
+        win._finish_extract({"S1": [item]})
+        assert seen[1][1] == ex.RECIPE_LAYOUT_COLUMNS         # 마지막 선택이 기본
     finally:
         win.close()

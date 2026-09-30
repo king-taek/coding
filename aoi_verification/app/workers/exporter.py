@@ -12,8 +12,10 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -22,6 +24,9 @@ from PyQt6.QtCore import QObject, QThread, pyqtSignal
 from .. import i18n
 from ..models.result import EXTRACT_MODE, FinalResult, MatchResult, MissEntry
 from ..utils import image_io
+
+# 저장 단계별 소요 시간(app.log) — 느린 단계를 실측으로 가리기 위해.  화면에는 안 나간다.
+_LOG = logging.getLogger("aoi.export")
 
 
 # ---------------------------------------------------------------------------
@@ -44,6 +49,14 @@ BORDER_COLS = ["A", "B", "C", "D"]
 # 요약/미매칭 시트의 B열과 Wafer Map 시트의 슬롯 칸이 같은 표기를 쓴다(두 벌로 갈라지면
 # 같은 슬롯이 시트마다 다르게 적힌다).
 SLOT_NUMBER_FMT = "(#{num})"
+
+# Defect 추출의 Recipe 나누기(사용자 결정 — 저장 직전 요약 창에서 고른다).
+#   single  : 시트 1개, 세로(기본 — 예전 그대로)
+#   sheets  : Recipe 마다 시트 1개(시트 안 구성은 single 과 같다)
+#   columns : 시트 1개, Recipe 마다 [사진 | 정보] 열을 옆으로 나란히
+RECIPE_LAYOUT_SINGLE = "single"
+RECIPE_LAYOUT_SHEETS = "sheets"
+RECIPE_LAYOUT_COLUMNS = "columns"
 
 # 셀 ↔ 사진 크기 정합:
 #   · 양식.xlsx 의 데이터 행 높이 (165.75pt) 와 일치시켜 템플릿 안팎의 행 높이를
@@ -132,6 +145,7 @@ class ExcelExporter(QThread):
                  original_quality: bool = False,
                  unmatched_original_quality: bool = False,
                  map_renderer=None,
+                 recipe_layout: str = RECIPE_LAYOUT_SINGLE,
                  parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._result = result
@@ -139,6 +153,9 @@ class ExcelExporter(QThread):
         # (C=사진, D=파일명·계측·좌표 글자)으로 적되 '미매칭' 표시(행 틴트·메모·시트)는
         # 붙이지 않는다 — 매칭을 하지 않았으므로 미매칭도 아니다.
         self._extract = result.mode == EXTRACT_MODE
+        # Recipe 나누기는 추출에만 있다 — 매칭 결과는 언제나 예전 배치다.
+        self._recipe_layout = (recipe_layout if self._extract
+                               else RECIPE_LAYOUT_SINGLE)
         # Wafer map PNG 렌더러 ``(MapData, size_px) -> PNG bytes``.  UI 계층이 넘긴다
         # (workers 는 ui 를 import 하지 않는다).  None 이면 Wafer Map 시트를 만들지 않는다.
         self._map_renderer = map_renderer
@@ -184,6 +201,8 @@ class ExcelExporter(QThread):
     # ------------------------------------------------------------------
     def _do_export(self) -> None:
         from openpyxl import Workbook, load_workbook
+
+        t_start = time.perf_counter()
 
         # 양식이 있으면 그대로 로드해서 셀 서식을 모두 보존.
         # 없으면 동일 컬럼 구조의 워크북을 빈 상태로 만든다.
@@ -247,12 +266,17 @@ class ExcelExporter(QThread):
                           [r for r in rows_input if isinstance(r[2], MissEntry)])
         self._prog_done = 0
         map_rows = self._wafer_map_rows()
+        prewarm = ([u.path for u in self._result.unmatched_refs]
+                   if self._extract else [])
         self._prog_total = (
-            (len(rows_input) if self._include_full_template else 0)   # 전체 양식
+            len(prewarm)                                             # 사진 준비(추출)
+            + (len(rows_input) if self._include_full_template else 0)   # 전체 양식
             + len(unmatched_rows)                                    # 미매칭 시트
             + len(rows_input)                                        # 요약 시트
             + len(map_rows)                                          # Wafer map 시트
         )
+        if prewarm:
+            self._prewarm_images(prewarm)
 
         # 전체 양식(E~H 포함) 시트는 옵션 — 기본 off 면 이미지 임베드를 1회만 하게
         # 요약 시트만 채운다(더 빠르고 가벼운 파일).  켜면 전체 양식도 채운다.
@@ -268,7 +292,21 @@ class ExcelExporter(QThread):
                     a.value = None
 
         # 시트 순서: 미매칭(첫 번째, 조건부) → 요약 → 전체 양식.
-        if unmatched_rows:
+        if self._recipe_layout != RECIPE_LAYOUT_SINGLE:
+            t0 = time.perf_counter()
+            groups = self._recipe_row_groups(rows_input)
+            _LOG.info("저장 소요 [Recipe 분류] %.2f초 %d장 → %d그룹",
+                      time.perf_counter() - t0, len(rows_input), len(groups))
+            if self._recipe_layout == RECIPE_LAYOUT_SHEETS:
+                taken = {SHEET_FULL_NAME, i18n.KO.WAFER_MAP_SHEET,
+                         i18n.KO.SLOT_MISMATCH_SHEET}
+                for i, (label, rows) in enumerate(groups):
+                    title = _safe_sheet_title(label, taken)
+                    taken.add(title)
+                    self._build_ad_sheet(wb, title, i, rows)
+            else:
+                self._write_recipe_columns_sheet(wb, groups)
+        elif unmatched_rows:
             # 미매칭 시트를 index 0(첫 번째)에 만들고, 요약은 index 1.
             self._write_unmatched_sheet(wb, unmatched_rows)
             self._build_summary_sheet(wb, rows_input, index=1)
@@ -282,10 +320,13 @@ class ExcelExporter(QThread):
         # Wafer map — 슬롯별 + LOT 합산 PNG.  그림 한 장의 실패가 저장 전체를
         # 막지 않는다(사진 임베드와 같은 원칙).
         if map_rows:
+            t0 = time.perf_counter()
             try:
                 self._write_wafer_map_sheet(wb, map_rows)
             except Exception:
                 pass
+            _LOG.info("저장 소요 [Wafer Map] %.2f초 %d장",
+                      time.perf_counter() - t0, len(map_rows))
 
         # 전체 양식 미포함이면, 헤더 복사가 끝난 지금 전체 양식 시트를 제거.
         if not self._include_full_template:
@@ -298,7 +339,10 @@ class ExcelExporter(QThread):
         # ★ 여기서 한 번 더 본다 — 저장을 시작한 뒤 취소되면 파일이 깨진다.
         if self._stop.is_set():
             raise _Cancelled
+        t0 = time.perf_counter()
         wb.save(str(self._dst))
+        _LOG.info("저장 소요 [파일 쓰기] %.2f초 · 전체 %.2f초",
+                  time.perf_counter() - t0, time.perf_counter() - t_start)
         # SharePoint / MIP 메타데이터 제거 — 회사 Excel 에서 ‘읽기 전용’ /
         # ‘보호 보기’ 로 열리는 것을 방지.
         try:
@@ -574,8 +618,7 @@ class ExcelExporter(QThread):
 
     def _fill_rows(self, ws, rows_input: list[tuple[str, str, object]],
                    *, style_cols: str = "ABCD", sheet_label: str = "") -> None:
-        from openpyxl.comments import Comment
-        from openpyxl.styles import Alignment, Border, Font, Side
+        from openpyxl.styles import Alignment, Border, Side
 
         total = len(rows_input)
         # 이 시트 이전까지 채운 행 수 — 진행률은 여기에 이어서 보고한다(단조 증가).
@@ -594,8 +637,6 @@ class ExcelExporter(QThread):
                 return slot
             return i18n.KO.EXPORT_PHASE_FMT.format(sheet=sheet_label, slot=slot)
         row = DATA_START_ROW
-        # 리치 텍스트를 못 쓰는 openpyxl 에서의 같은 등급(8pt, 본문 검정).
-        name_font = Font(color="FF000000", size=8)
         center = Alignment(horizontal="center", vertical="center")
         # 슬롯이 바뀌는 첫 행 위에 굵은 가로 구분선 (#4).  같은 슬롯끼리
         # 시각적으로 묶이도록.
@@ -609,6 +650,8 @@ class ExcelExporter(QThread):
             ws.column_dimensions[COL_REF].width or IMG_COL_WIDTH
         )
         cell_h_px = _row_height_to_px(template_row_h)
+        t_sheet = time.perf_counter()
+        t_info = t_img = 0.0           # 정보(좌표·계측) 조회 / 사진 임베드에 쓴 시간
         for idx, (cur_slot, _key, payload) in enumerate(rows_input, start=1):
             if self._stop.is_set():
                 raise _Cancelled
@@ -658,52 +701,216 @@ class ExcelExporter(QThread):
                 # 각 사진을 개별 try 로 감싼다 (Bug #3).  실패하면 사진이 없으니
                 # 캡션이 그대로 보인다 — 예전의 파일명 대체와 같은 정보다.
                 for src, col in ((m.ref_path, COL_REF), (m.val_path, COL_VAL)):
+                    t0 = time.perf_counter()
                     self._write_caption(ws, col, row, src)
+                    t1 = time.perf_counter()
                     self._place_image(ws, src, col, row, cell_w_px, cell_h_px)
+                    t_info += t1 - t0
+                    t_img += time.perf_counter() - t1
                 self.signals.progress.emit(base + idx, overall, _phase(m.slot))
             else:
                 u: MissEntry = payload
                 self._write_slot_cell(ws, row, u.slot, center)
                 # 기준 이미지: 정상 임베드.  '미매칭 사진만 원본 화질' 옵션은 여기만 탄다.
+                t0 = time.perf_counter()
                 if not self._place_image(ws, u.path, COL_REF, row,
                                          cell_w_px, cell_h_px,
                                          original=self._unmatched_original):
                     ws[f"{COL_REF}{row}"] = str(Path(u.path).name)
-                # 검증 컬럼에 파일명 텍스트 (검정 8pt — 28안 ②).  결함 geometry(area/width/
-                # length/contrast) 또는 명시적 마커를 파일명 아래 같은 등급으로 덧붙인다
-                # (#geometry).  geometry 비활성(스키마 미충전) 이면 기존과 동일.
-                cell_val = ws[f"{COL_VAL}{row}"]
-                name = Path(u.path).name
-                # geometry(Surface.flt) + 좌표(col/row/x/y, 매칭단계 메커니즘 재사용).
-                # 좌표는 Surface.flt 유무와 무관하므로 미지원 자재 행에도 붙는다.
-                blocks = self._geometry_blocks(u.path) + self._coord_blocks(u.path)
-                # ★ 28안 ② — 파일명을 **빨강 굵은 글씨에서** 아래 geometry·좌표
-                #   줄과 같은 8pt 로 내린다.  '미매칭' 이라는 구분은 이제 **행
-                #   틴트**가 담당하므로 글씨가 혼자 소리칠 이유가 없어졌다.
-                #   ★ 색은 **검정**이다(사용자 결정) — 시안은 회색(#808080)이었지만
-                #   인쇄물에서 8pt 회색은 실제로 읽기 어려웠다.  크기로 등급을
-                #   낮추되 명도는 본문 그대로 둔다.
-                if blocks:
-                    from openpyxl.cell.rich_text import CellRichText, TextBlock
-                    from openpyxl.cell.text import InlineFont
-                    name_inline = InlineFont(sz=8, color="FF000000")
-                    cell_val.value = CellRichText(
-                        TextBlock(name_inline, name), *blocks,
-                    )
-                else:
-                    cell_val.value = name
-                    cell_val.font = name_font
-                cell_val.alignment = Alignment(
-                    horizontal="center", vertical="center", wrap_text=True,
-                )
-                if not self._extract:
-                    cell_val.comment = Comment("미매칭", "AOI")
+                t1 = time.perf_counter()
+                self._write_info_cell(ws, COL_VAL, row, u.path,
+                                      unmatched_note=not self._extract)
+                t_img += t1 - t0
+                t_info += time.perf_counter() - t1
                 self.signals.progress.emit(base + idx, overall, _phase(u.slot))
 
             row += 1
 
+        _LOG.info("저장 소요 [시트 %s] %.2f초 %d행 (정보 조회 %.2f · 사진 %.2f)",
+                  sheet_label, time.perf_counter() - t_sheet, total, t_info, t_img)
         # 다음 시트가 이어서 셀 수 있게 이 시트 몫을 확정한다.
         self._prog_done = base + total
+
+    def _prewarm_images(self, paths: list) -> None:
+        """임베드할 중간 화질 사진을 **병렬로** 미리 만든다(Defect 추출).
+
+        ★ 결과는 같다 — 같은 함수(`_embed_image_path`)가 같은 캐시 파일을 만들 뿐이고,
+        행을 채울 때는 그 파일을 그대로 쓴다.  보통은 로딩 단계의 썸네일 풀이 이미
+        만들어 두어 즉시 끝난다.  그 단계를 [중지] 로 건너뛰었거나 캐시가 지워졌으면
+        예전에는 행마다 **하나씩** 만들었다(실측: 1380×1036 사진 400장 15초/4코어 —
+        그중 리사이즈가 12초).  Pillow 의 디코드·리사이즈는 GIL 을 놓으므로 스레드로
+        나누면 코어 수만큼 빨라진다.  실패한 사진은 행을 채울 때 예전처럼 처리된다."""
+        import os
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        base, overall = self._prog_done, self._prog_total or len(paths)
+        t0 = time.perf_counter()
+
+        def one(p):
+            try:
+                self._embed_image_path(Path(p), force_original=self._unmatched_original)
+            except Exception:
+                pass
+
+        workers = max(2, (os.cpu_count() or 2) - 1)
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [pool.submit(one, p) for p in paths]
+            for done, _f in enumerate(as_completed(futures), start=1):
+                if self._stop.is_set():
+                    for f in futures:
+                        f.cancel()
+                    raise _Cancelled
+                self.signals.progress.emit(base + done, overall,
+                                           i18n.KO.EXPORT_PREPARE_IMAGES)
+        self._prog_done = base + len(paths)
+        _LOG.info("저장 소요 [사진 준비] %.2f초 %d장 (스레드 %d — 로딩 캐시가 있으면 0에 가깝다)",
+                  time.perf_counter() - t0, len(paths), workers)
+
+    # ------------------------------------------------------------------
+    # Recipe 나누기 (Defect 추출)
+    # ------------------------------------------------------------------
+    def _recipe_row_groups(self, rows_input: list) -> list[tuple[str, list]]:
+        """행들을 Recipe 이름별로 — ``[(이름, 행들)]``, 순서는 :func:`recipe_groups`."""
+        by_path = {Path(r[2].path): r for r in rows_input}
+        return [(label, [by_path[p] for p in paths])
+                for label, paths in recipe_groups(list(by_path))]
+
+    def _write_recipe_columns_sheet(self, wb, groups: list) -> None:
+        """한 시트에 Recipe 마다 [사진 | 정보] 열을 옆으로 나란히 (사용자 결정).
+
+        머리 1행 = Recipe 이름(두 칸 병합), 2행 = AOI-N · 정보.  슬롯 안에서는 **순서대로**
+        채운다 — i 행 = 각 Recipe 의 i 번째 사진(파일명 순), 모자라면 빈칸.  같은 행의
+        사진끼리는 관계가 없다(사용자 결정).  정보 칸은 D열과 같은 글자다."""
+        from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+        from openpyxl.utils import get_column_letter
+
+        full = wb[SHEET_FULL_NAME]
+        ws = wb.create_sheet(title=self._summary_sheet_name(), index=0)
+        center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        head_font = Font(name=TEMPLATE_FONT, bold=True, color="FFFFFFFF")
+        sub_font = Font(name=TEMPLATE_FONT, bold=True, color="FF1F2937")
+        navy = PatternFill("solid", fgColor=HEADER_NAVY)
+        sub_fill = PatternFill("solid", fgColor=GROUP_FILLS["C"])
+        thin = Side(style="thin", color=BODY_GRID_COLOR)
+        thick = Side(border_style="thick", color="FF333333")
+        img_w = full.column_dimensions[COL_REF].width or IMG_COL_WIDTH
+        row_h = full.row_dimensions[DATA_START_ROW].height or ROW_HEIGHT_PT
+
+        for col, text in (("A", "No"), ("B", "slot#")):
+            ws[f"{col}1"] = full[f"{col}1"].value or text
+            ws.merge_cells(f"{col}1:{col}2")
+            ws[f"{col}1"].font, ws[f"{col}1"].fill = head_font, navy
+            ws[f"{col}1"].alignment = center
+            ws.column_dimensions[col].width = COL_WIDTHS[col]
+        machine = _machine_label(self._result.ref_machine)
+        cols: list[tuple[str, str]] = []            # Recipe 마다 (사진 열, 정보 열)
+        for k, (label, _rows) in enumerate(groups):
+            pc, ic = get_column_letter(3 + 2 * k), get_column_letter(4 + 2 * k)
+            cols.append((pc, ic))
+            ws[f"{pc}1"] = label
+            ws.merge_cells(f"{pc}1:{ic}1")
+            ws[f"{pc}2"] = machine
+            ws[f"{ic}2"] = i18n.KO.EXTRACT_INFO_HEADER
+            for c in (pc, ic):
+                ws[f"{c}1"].font, ws[f"{c}1"].fill = head_font, navy
+                ws[f"{c}2"].font, ws[f"{c}2"].fill = sub_font, sub_fill
+                ws[f"{c}1"].alignment = ws[f"{c}2"].alignment = center
+                ws.column_dimensions[c].width = img_w
+        ws.row_dimensions[1].height = 21.75
+        ws.row_dimensions[2].height = 19.5
+        self._apply_sheet_view(ws)
+
+        # {slot: [Recipe 별 사진 목록]} — 행은 slot → 파일명 순서 그대로 들어온다.
+        slots = sorted({r[0] for _l, rows in groups for r in rows})
+        per_slot = {s: [[r for r in rows if r[0] == s] for _l, rows in groups]
+                    for s in slots}
+        cell_w_px = _col_width_to_px(img_w)
+        cell_h_px = _row_height_to_px(row_h)
+        last_col = cols[-1][1] if cols else "B"
+        all_cols = ["A", "B"] + [c for pair in cols for c in pair]
+        row, no, placed = DATA_START_ROW, 0, 0
+        base, overall = self._prog_done, self._prog_total or 1
+        t_sheet, t_info, t_img = time.perf_counter(), 0.0, 0.0
+        for s_i, slot in enumerate(slots):
+            lists = per_slot[slot]
+            for i in range(max(len(x) for x in lists)):
+                if self._stop.is_set():
+                    raise _Cancelled
+                no += 1
+                ws.row_dimensions[row].height = row_h
+                band = BODY_FILLS["A"][(no - 1) % 2]
+                for c in all_cols:
+                    cell = ws[f"{c}{row}"]
+                    cell.fill = PatternFill("solid", fgColor=band)
+                    cell.border = Border(left=thin, right=thin, bottom=thin,
+                                         top=thick if (i == 0 and s_i) else thin)
+                ws[f"A{row}"] = no
+                ws[f"A{row}"].alignment = Alignment(horizontal="center",
+                                                    vertical="center")
+                self._write_slot_cell(ws, row, slot,
+                                      Alignment(horizontal="center",
+                                                vertical="center"))
+                for (pc, ic), items in zip(cols, lists):
+                    if i >= len(items):
+                        continue
+                    path = items[i][2].path
+                    t0 = time.perf_counter()
+                    if not self._place_image(ws, path, pc, row, cell_w_px, cell_h_px):
+                        ws[f"{pc}{row}"] = Path(path).name
+                    t1 = time.perf_counter()
+                    self._write_info_cell(ws, ic, row, path, unmatched_note=False)
+                    t_img += t1 - t0
+                    t_info += time.perf_counter() - t1
+                    placed += 1
+                    self.signals.progress.emit(
+                        base + placed, overall,
+                        i18n.KO.EXPORT_PHASE_FMT.format(sheet=ws.title, slot=slot))
+                row += 1
+        _LOG.info("저장 소요 [Recipe 나란히 시트, 열 끝 %s] %.2f초 %d장 "
+                  "(정보 조회 %.2f · 사진 %.2f)", last_col,
+                  time.perf_counter() - t_sheet, placed, t_info, t_img)
+        self._prog_done = base + placed
+
+    def _write_info_cell(self, ws, col: str, row: int, path, *,
+                         unmatched_note: bool) -> None:
+        """미매칭 행의 정보 칸 — 파일명 + 계측·좌표 줄을 **보이는 글자**로.
+
+        Defect 추출의 D열(정보)과 Recipe 나란히 배치의 정보 열도 같은 모양이다
+        (사용자 결정: '마치 미매칭 사진 정보 출력하듯이')."""
+        from openpyxl.comments import Comment
+        from openpyxl.styles import Alignment, Font
+
+        # 리치 텍스트를 못 쓰는 openpyxl 에서의 같은 등급(8pt, 본문 검정).
+        name_font = Font(color="FF000000", size=8)
+        # 검증 컬럼에 파일명 텍스트 (검정 8pt — 28안 ②).  결함 geometry(area/width/
+        # length/contrast) 또는 명시적 마커를 파일명 아래 같은 등급으로 덧붙인다
+        # (#geometry).  geometry 비활성(스키마 미충전) 이면 기존과 동일.
+        cell_val = ws[f"{col}{row}"]
+        name = Path(path).name
+        # geometry(Surface.flt) + 좌표(col/row/x/y, 매칭단계 메커니즘 재사용).
+        # 좌표는 Surface.flt 유무와 무관하므로 미지원 자재 행에도 붙는다.
+        blocks = self._geometry_blocks(path) + self._coord_blocks(path)
+        # ★ 28안 ② — 파일명을 **빨강 굵은 글씨에서** 아래 geometry·좌표
+        #   줄과 같은 8pt 로 내린다.  '미매칭' 이라는 구분은 이제 **행
+        #   틴트**가 담당하므로 글씨가 혼자 소리칠 이유가 없어졌다.
+        #   ★ 색은 **검정**이다(사용자 결정) — 시안은 회색(#808080)이었지만
+        #   인쇄물에서 8pt 회색은 실제로 읽기 어려웠다.  크기로 등급을
+        #   낮추되 명도는 본문 그대로 둔다.
+        if blocks:
+            from openpyxl.cell.rich_text import CellRichText, TextBlock
+            from openpyxl.cell.text import InlineFont
+            name_inline = InlineFont(sz=8, color="FF000000")
+            cell_val.value = CellRichText(
+                TextBlock(name_inline, name), *blocks,
+            )
+        else:
+            cell_val.value = name
+            cell_val.font = name_font
+        cell_val.alignment = Alignment(
+            horizontal="center", vertical="center", wrap_text=True,
+        )
+        if unmatched_note:
+            cell_val.comment = Comment("미매칭", "AOI")
 
     # ------------------------------------------------------------------
     def _write_caption(self, ws, col: str, row: int, src) -> None:
@@ -876,6 +1083,51 @@ class ExcelExporter(QThread):
             ws.cell(row=r, column=1, value="검증 전용")
             ws.cell(row=r, column=2, value=s)
             r += 1
+
+
+# ---------------------------------------------------------------------------
+# Recipe 분류 (Defect 추출)
+# ---------------------------------------------------------------------------
+def recipe_of(path) -> tuple[Optional[int], str]:
+    """사진 1장의 Recipe — ``(코드, 이름)``.  모르면 ``(None, 'Recipe 없음')``.
+
+    출처는 **Surface.flt 의 recipe**(사용자 결정) — D열 정보에 나오는 값과 같은
+    생산자(:func:`coords.geometry.resolve`)다.  표기는 이름만(사용자 결정)이고,
+    이름 파일(`RecipesInfo.ini` 등)이 없어 이름을 못 읽으면 코드로 대신한다."""
+    from ..coords import geometry
+    res = geometry.resolve(Path(path))
+    if res.status != "ok" or res.geometry is None:
+        return None, i18n.KO.EXTRACT_RECIPE_NONE
+    g = res.geometry
+    return g.recipe, (g.recipe_name
+                      or i18n.KO.EXTRACT_RECIPE_CODE_FMT.format(code=g.recipe))
+
+
+def recipe_groups(paths) -> list[tuple[str, list[Path]]]:
+    """사진들을 Recipe **이름**별로 묶는다 — ``[(이름, 사진들)]``.
+
+    순서: Recipe 코드 오름차순, 'Recipe 없음' 은 맨 끝(사용자 결정: 빠지는 사진 없이
+    한 그룹으로 모은다).  그룹 안의 사진 순서는 들어온 순서 그대로다."""
+    groups: dict[str, list[Path]] = {}
+    order: dict[str, tuple] = {}
+    for p in paths:
+        code, label = recipe_of(p)
+        groups.setdefault(label, []).append(Path(p))
+        key = (1, 0) if code is None else (0, code)
+        order[label] = min(order.get(label, key), key)
+    return sorted(groups.items(), key=lambda kv: (order[kv[0]], kv[0]))
+
+
+def _safe_sheet_title(name: str, taken: set) -> str:
+    """엑셀 시트 이름 규칙(31자·금지문자·중복 불가)에 맞춘다."""
+    base = re.sub(r'[:\\/?*\[\]]', "_", str(name)).strip() or "Recipe"
+    base = base[:31]
+    title, n = base, 2
+    while title in taken:
+        tail = f" ({n})"
+        title = base[:31 - len(tail)] + tail
+        n += 1
+    return title
 
 
 # ---------------------------------------------------------------------------

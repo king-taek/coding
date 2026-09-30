@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -1011,6 +1012,7 @@ class MainWindow(QMainWindow):
         #   사진 열거(NAS 왕복)를 기다렸다.  줄이는 자리는 스캔 하나뿐이다 —
         #   결과가 이미 선택 슬롯만 담으므로 다운스트림은 손댈 것이 없다.
         self._stage = "scan"
+        self._stage_clock()                 # 단계별 소요 시간(app.log) — 여기서 시작
         self._scan_token += 1
         worker = _FolderScan(self._scan_token, inp.ref_root, inp.val_root,
                              only=getattr(inp, "selected_slots", None),
@@ -1022,6 +1024,18 @@ class MainWindow(QMainWindow):
         worker.finished.connect(lambda w=worker: _LIVE_SCANS.discard(w))
         self._scan_worker = worker
         worker.start()
+
+    def _stage_clock(self, label: str = "", **info) -> None:
+        """단계별 소요 시간을 app.log 에 남긴다 — 느린 단계를 실측으로 가리기 위해.
+
+        ``label`` 없이 부르면 시계만 다시 건다(세션 시작).  있으면 직전 호출부터
+        지금까지를 그 단계의 시간으로 적고 시계를 다시 건다.  화면에는 나가지 않는다."""
+        now = time.perf_counter()
+        start = getattr(self, "_stage_t0", None)
+        self._stage_t0 = now
+        if label and start is not None:
+            extra = " ".join(f"{k}={v}" for k, v in info.items())
+            _LOG.info("단계 소요 [%s] %.2f초 %s", label, now - start, extra)
 
     def _on_scan_progress(self, token: int, done: int, total: int) -> None:
         if token != self._scan_token:
@@ -1049,6 +1063,9 @@ class MainWindow(QMainWindow):
             return                          # 취소·재시작으로 밀려난 옛 스캔
         self._scan_worker = None
         self._stage = ""
+        self._stage_clock("scan", slots=len(sr.slots),
+                          photos=sum(len(s.ref_images) + len(s.val_images)
+                                     for s in sr.slots.values()))
         inp = self._input
         if inp is None:
             return
@@ -1102,6 +1119,8 @@ class MainWindow(QMainWindow):
         sr = self._scan
         if sr is None:
             return
+        # KLA 해석·수동 매핑(사용자 대답을 기다린 시간 포함)이 여기서 끝난다.
+        self._stage_clock("slots(KLA/mapping/dialog wait)", slots=len(common))
         # 매핑/OCR 단계에서 오버레이가 숨겨졌을 수 있으므로 **반드시 다시 띄운다** —
         # 그렇지 않으면 썸네일 생성 동안 메인 창이 클릭 가능 상태로 남아 버그 유발.
         # (set_progress 는 숨겨진 오버레이를 다시 띄우지 않으므로 show_overlay 필수.)
@@ -1186,6 +1205,7 @@ class MainWindow(QMainWindow):
         if self._thumbs_handled:
             return
         self._thumbs_handled = True
+        self._stage_clock("thumbnails")
         self._loading.set_stage((3, 3), i18n.KO.LOAD_JOURNEY_STEPS)
         self._loading.set_progress(0, 0, i18n.KO.LOAD_STAGE_PREP)
         QTimer.singleShot(0, self._continue_after_thumbs)
@@ -1695,17 +1715,29 @@ class MainWindow(QMainWindow):
             {slot: [it.path for it in items] for slot, items in picked.items()},
             kla_folders=getattr(self, "_kla_folders", {}),
             slot_numbers=self._slot_numbers())
+        from ..workers import exporter as ex
+
         from_select = self._stack.currentWidget() is self._select_page
+        # 저장 방식(Recipe 나누기)을 여기서 고른다(사용자 결정) — 마지막 선택이 기본.
+        layouts = [(ex.RECIPE_LAYOUT_SINGLE, i18n.KO.EXTRACT_SAVE_SINGLE),
+                   (ex.RECIPE_LAYOUT_SHEETS, i18n.KO.EXTRACT_SAVE_SHEETS),
+                   (ex.RECIPE_LAYOUT_COLUMNS, i18n.KO.EXTRACT_SAVE_COLUMNS)]
+        last = getattr(_prefs.load(), "extract_recipe_layout", ex.RECIPE_LAYOUT_SINGLE)
+        if last not in dict(layouts):
+            last = ex.RECIPE_LAYOUT_SINGLE
         choice = sheets.choose(
             self, i18n.KO.EXTRACT_SUMMARY_TITLE,
             i18n.KO.EXTRACT_SUMMARY_FMT.format(wafers=len(result.slot_images),
-                                               n=len(result.unmatched_refs)),
-            [("save", i18n.KO.EXTRACT_SUMMARY_SAVE, "primary"),
-             ("back", i18n.KO.EXTRACT_SUMMARY_BACK if from_select
-              else i18n.KO.EXTRACT_SUMMARY_CANCEL, "ghost")],
-            default="save")
+                                               n=len(result.unmatched_refs))
+            + "\n\n" + i18n.KO.EXTRACT_SUMMARY_LAYOUT_HINT,
+            [(key, label, "primary" if key == last else "ghost")
+             for key, label in layouts]
+            + [("back", i18n.KO.EXTRACT_SUMMARY_BACK if from_select
+                else i18n.KO.EXTRACT_SUMMARY_CANCEL, "ghost")],
+            default=last)
         dst = None
-        if choice == "save" and self._working_xlsx is not None:
+        if choice in dict(layouts) and self._working_xlsx is not None:
+            _prefs.patch(extract_recipe_layout=choice)
             from .widgets.save_name_dialog import SaveNameDialog
             dlg = SaveNameDialog(self._working_xlsx.name, self._working_xlsx.parent,
                                  parent=self)
@@ -1717,16 +1749,18 @@ class MainWindow(QMainWindow):
             if not from_select:
                 self._new_session()
             return
-        self._start_extract_export(result, dst)
+        self._start_extract_export(result, dst, choice)
 
-    def _start_extract_export(self, result: FinalResult, dst: Path) -> None:
+    def _start_extract_export(self, result: FinalResult, dst: Path,
+                              layout: str) -> None:
         from ..workers.exporter import ExcelExporter
         from .widgets.wafer_map_view import render_map_png
 
         self._extract_result, self._extract_dst = result, dst
+        self._extract_layout = layout
         self._loading.show_overlay(i18n.KO.LOAD_EXPORT)
         exporter = ExcelExporter(result, dst, template_path=self._template_used,
-                                 map_renderer=render_map_png)
+                                 map_renderer=render_map_png, recipe_layout=layout)
         self._extract_exporter = exporter      # GC 방지 + closeEvent 에서 취소
         exporter.signals.progress.connect(
             lambda d, t, msg: self._loading.set_progress(
@@ -1770,7 +1804,8 @@ class MainWindow(QMainWindow):
              ("close", i18n.KO.MSG_BTN_CLOSE, "ghost")],
             default="retry")
         if choice == "retry":
-            self._start_extract_export(self._extract_result, self._extract_dst)
+            self._start_extract_export(self._extract_result, self._extract_dst,
+                                       self._extract_layout)
         elif self._stack.currentWidget() is not self._select_page:
             self._new_session()
 

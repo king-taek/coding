@@ -18,6 +18,7 @@ ActualX/ActualY 와 nearest-match 해 해당 레코드의 geometry 를 환산해
 from __future__ import annotations
 
 import math
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -38,14 +39,46 @@ class GeometryResult:
     geometry: Optional[DefectGeometry]   # status == "ok" 일 때만 채워짐
 
 
+# {id(records) → (records, 정렬된 x 목록, 그 x 의 원래 인덱스)} — Surface.flt 한 폴더당
+# 한 번만 정렬한다.  키가 id 라서 **records 자신을 함께 쥐고** 같은 객체인지 확인한다
+# (id 는 객체가 사라지면 재사용된다).  폴더 수만큼만 쌓이게 상한을 둔다.
+_X_INDEX: dict = {}
+_X_INDEX_MAX = 64
+
+
+def _x_index(records: tuple[RawRecord, ...]):
+    hit = _X_INDEX.get(id(records))
+    if hit is not None and hit[0] is records:
+        return hit[1], hit[2]
+    # NaN 은 정렬을 깨고, 예전 루프에서도 절대 뽑히지 않았다(비교가 전부 거짓) — 뺀다.
+    pairs = sorted((r.actual_x, i) for i, r in enumerate(records)
+                   if r.actual_x == r.actual_x)
+    xs = [p[0] for p in pairs]
+    idx = [p[1] for p in pairs]
+    if len(_X_INDEX) >= _X_INDEX_MAX:
+        _X_INDEX.clear()
+    _X_INDEX[id(records)] = (records, xs, idx)
+    return xs, idx
+
+
 def _nearest(records: tuple[RawRecord, ...],
              xy: tuple[float, float],
              tol: float) -> Optional[RawRecord]:
-    """xy 에 가장 가까운 레코드를 반환(거리 ≤ tol).  없으면 None."""
+    """xy 에 가장 가까운 레코드를 반환(거리 ≤ tol).  없으면 None.
+
+    ★ 레코드 전부를 훑지 않는다.  Surface.flt 는 웨이퍼 전체 결함(수만 건)이라 사진마다
+    전수 비교하면 비용이 사진 수 × 레코드 수다(Defect 추출 저장이 느린 원인 후보 —
+    추정이며 실측 전이다).  x 로 정렬한 색인에서
+    ``|dx| ≤ tol`` 인 것만 꺼내 **원래 순서대로** 같은 비교를 한다 — 그 밖의 레코드는
+    예전 루프에서도 뽑힐 수 없었고(거리 ≥ |dx| > tol), 순서가 같으니 동점일 때 뒤의
+    레코드가 이기는 규칙까지 같다.  회귀 가드 ``test_surface_flt.test_indexed_nearest_*``."""
     x, y = xy
+    xs, idx = _x_index(records)
+    lo, hi = bisect_left(xs, x - tol), bisect_right(xs, x + tol)
     best: Optional[RawRecord] = None
     best_d = tol
-    for rec in records:
+    for i in sorted(idx[lo:hi]):
+        rec = records[i]
         # |dx| > best_d 면 hypot 은 반드시 그보다 크다 — 계산 전에 걸러낸다.
         # 고르는 레코드도, 동점 처리 순서도 그대로다.
         dx = rec.actual_x - x

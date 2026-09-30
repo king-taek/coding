@@ -334,3 +334,72 @@ def test_dotted_filename_abs_coord(tmp_path):
     img.write_bytes(b"")
     xy = abs_coord.absolute_xy(img)
     assert xy == (147206.0, 243725.0)
+
+
+# ── 속도 개선의 회귀 가드 — 결과는 한 비트도 달라지면 안 된다 ──────────────
+def test_fast_parse_matches_field_by_field(tmp_path):
+    """실제 스키마(152바이트)로 무작위 레코드를 만들어 두 경로의 결과를 비교한다.
+
+    한 번에 푸는 경로(`struct.iter_unpack`)가 필드별 경로와 **같은 값·같은 개수**를
+    내야 한다(꼬리의 불완전 레코드는 둘 다 버린다)."""
+    import random
+    rnd = random.Random(7)
+    data = bytes(rnd.getrandbits(8) for _ in range(surface_flt._RECORD_SIZE * 300 + 17))
+    p = tmp_path / "Surface.flt"
+    p.write_bytes(data)
+    fast = surface_flt._parse_flt(p)
+    slow = surface_flt._parse_flt_by_field(data)
+    assert len(fast) == len(slow) == 300
+    # NaN 은 == 가 거짓이라 바이트 표현으로 비교한다.
+    assert [tuple(map(repr, r)) for r in fast] == [tuple(map(repr, r)) for r in slow]
+
+
+def test_fast_parse_follows_patched_schema(monkeypatch, tmp_path):
+    """테스트가 끼워 넣는 합성 스키마에서도 같은 결과(스키마를 매번 읽는다)."""
+    _install_schema(monkeypatch)
+    recs = [_pack_record(actual_x=i, actual_y=-i, area=i * 2, blob_breadth=1,
+                         blob_feret_max=2, contrast=3, zone=i % 5, recipe=i % 3)
+            for i in range(50)]
+    _write_flt(tmp_path, *recs)
+    data = (tmp_path / "Surface.flt").read_bytes()
+    assert (surface_flt._parse_flt(tmp_path / "Surface.flt")
+            == surface_flt._parse_flt_by_field(data))
+
+
+def _brute_nearest(records, xy, tol):
+    """색인 도입 전의 원래 루프 그대로 — 비교 기준."""
+    import math
+    x, y = xy
+    best, best_d = None, tol
+    for rec in records:
+        dx = rec.actual_x - x
+        if dx > best_d or dx < -best_d:
+            continue
+        d = math.hypot(dx, rec.actual_y - y)
+        if d <= best_d:
+            best_d, best = d, rec
+    return best
+
+
+def test_indexed_nearest_matches_brute_force():
+    """색인 탐색이 전수 탐색과 **같은 레코드**를 고른다 — 동점·경계·NaN 포함."""
+    import random
+    rnd = random.Random(11)
+    R = surface_flt.RawRecord
+    recs = []
+    for i in range(2000):
+        x = rnd.choice([rnd.uniform(0, 500), float(rnd.randint(0, 50))])
+        y = rnd.choice([rnd.uniform(0, 500), float(rnd.randint(0, 50))])
+        recs.append(R(x, y, i, 0, 0, 0, 0, 0))
+    recs += [R(10.0, 10.0, 9001, 0, 0, 0, 0, 0),      # 완전 동점 — 뒤가 이긴다
+             R(10.0, 10.0, 9002, 0, 0, 0, 0, 0),
+             R(float("nan"), 10.0, 9003, 0, 0, 0, 0, 0),
+             R(15.0, 10.0, 9004, 0, 0, 0, 0, 0)]      # 정확히 tol 거리
+    recs = tuple(recs)
+    probes = [(10.0, 10.0), (20.0, 10.0), (float("nan"), 1.0)]
+    probes += [(rnd.uniform(-10, 510), rnd.uniform(-10, 510)) for _ in range(400)]
+    probes += [(float(rnd.randint(0, 50)), float(rnd.randint(0, 50))) for _ in range(200)]
+    for xy in probes:
+        assert geometry._nearest(recs, xy, 5.0) is _brute_nearest(recs, xy, 5.0), xy
+    assert geometry._nearest(recs, (10.0, 10.0), 5.0).area == 9002
+    assert geometry._nearest((), (1.0, 1.0), 5.0) is None

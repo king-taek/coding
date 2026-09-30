@@ -73,6 +73,9 @@ class UiPrefs:
     #   "user_select" : Stage 1 만 직접, Stage 2 자동 매치 + 검토.  (기본)
     #   "auto_all"    : Stage 1 건너뜀 (모든 ref 사용), Stage 2 자동 매치 + 검토.
     automation_level: str = "user_select"
+    # Defect 추출의 Recipe 나누기 — 마지막으로 고른 것(요약 창의 기본 버튼).
+    #   "single"(한 시트) | "sheets"(Recipe별 시트) | "columns"(Recipe별 열 나란히)
+    extract_recipe_layout: str = "single"
     # OpenVINO (Intel GPU 가속) 자동 설치 안내를 거절한 경우 — 다시 묻지
     # 않음.  사용자가 ‘다시 보지 않기’ 를 선택했거나 설치 시도 후 실패하면 True.
     openvino_install_declined: bool = False
