@@ -112,6 +112,9 @@ COLORS: dict[str, str] = dict(_LIGHT)
 # 사진 판독 뷰어의 잉크 — 바탕(`viewer_bg`)이 순검정이라 화면 색의 mute 를 쓰면 안 된다
 # (벨럼의 mute #5A574E 는 검정 위에서 거의 안 보인다).  검정 위 대비를 위한 고정 밝은 회색.
 _VIEWER_INK = "#AEA798"
+# 같은 검정 바탕 위의 강조선(Scan 위치 상자 등) — 화면의 ACCENT(#2C5A86)는 검정 위에서
+# 묻힌다.  옛 다크 팔레트의 강조색을 고정값으로 남긴다.
+VIEWER_ACCENT = "#8FBEEA"
 
 # LoadingOverlay·시트 스크림 — 뒤 화면이 보이도록 옅게(실측 뒤 텍스트 대비 7.07).
 SCRIM_RGBA = (27, 26, 23, 84)

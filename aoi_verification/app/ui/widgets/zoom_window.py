@@ -417,8 +417,8 @@ class FullscreenViewer(QDialog):
         if self._overlay is not None:
             left, top, ow, oh = self._overlay
             s = scaled.width() / float(max(1, self._pix.width()))
-            # 뷰어 바탕은 두 모드 모두 검정이라 다크 팔레트의 강조색을 쓴다.
-            pen = QPen(QColor(theme.PALETTES["dark"]["accent"]))
+            # 뷰어 바탕은 검정이라 검정 위용 고정 강조색을 쓴다.
+            pen = QPen(QColor(theme.VIEWER_ACCENT))
             pen.setWidth(2)
             p.setPen(pen)
             p.drawRect(int(x + left * s), int(y + top * s),
