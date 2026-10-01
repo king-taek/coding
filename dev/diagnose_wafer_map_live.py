@@ -37,8 +37,27 @@ import traceback
 from collections import Counter, defaultdict
 from pathlib import Path
 
-DEFAULT_TARGET = (r"\\k5cifsn2\k5tsvdata$\1. Conder Scan\531. NVIDIA INT"
-                  r"\145. AST254-AG6S2-6CAA\22. E1X000.C03 DCC20 (WVU)\2. BS CUP")
+_ROOT = r"\\k5cifsn2\k5tsvdata$\1. Conder Scan"
+DEFAULT_TARGETS = [_ROOT + "\\" + rel for rel in (
+    r"531. NVIDIA INT\145. AST254-AG6S2-6CAA\22. E1X000.C03 DCC20 (WVU)\2. BS CUP",
+    r"531. NVIDIA INT\145. AST254-AG6S2-6CAA\22. E1X000.C03 DCC20 (WVU)\0. ASSY\1.O\T254INT.286 DCC05",
+    r"531. NVIDIA INT\96. ASGH100-S8N6F-4MAC\967. UMV476.S2V (DYN)\1. BS\1. OR",
+    r"63. LUXTERA LL\14. 3000000\4. N8R531.01-02 (NUY)\1. IC",
+    r"151. MSCC-SOC\20. RTPFS160ZT-U28WB1X52_DIE\1. 119078 DCC01 (DCU)\2. FVI",
+    r"802. ALTERA\7. 001-0000521\24. C609Q3D0 (XUY)\3. FVI",
+    r"2499. GLOBAL UNI\3. KENDALL_INTP\171. INTP-KENDALL-97-2608 (CTP)\7. RDL3_ 재리뷰",
+    r"2499. GLOBAL UNI\3. KENDALL_INTP\171. INTP-KENDALL-97-2608 (CTP)\6. PIDS7",
+    r"2499. GLOBAL UNI\5. KENDALL A0 TOP DIE_DUMMY\32. GUCDUM_31 (NXB)\1. FVI",
+    r"531. NVIDIA INT\131. AST256-AG2S1-2CAA\121. E3M778.S06 DCC20 (VAF)\2. BS CUP",
+    r"734. QUALCOMM\220. WB90-74053-11D\3. 000FA622KH6.0000#U8G552.00 (VDV)\1. IC",
+    r"734. QUALCOMM\200. WP90-74053-15C\6. 000FA5304NG.0A00#U8G100.00 DCC01 (LTT)\1. FVI\2. 재리뷰",
+)]
+DEFAULT_TARGET = DEFAULT_TARGETS[0]
+# 여러 LOT 을 한 파일에 담으므로 슬롯당 상세 출력에 상한을 둔다(요약·판정은 전수).
+_MAX_TABLE_ROWS = 400       # 사진별 전체 표
+_MAX_FOCUS_TRACE = 5        # 포커스 칸 추적 사진 수
+_MAX_SIM_ASCII = 3          # 단독 재현 시나리오별 슬롯 ASCII 맵 수
+_MAX_WAFER_TXT_DUMP = 3     # LOT 폴더의 웨이퍼 맵 .txt 원문 덤프 수
 DEFAULT_OUT_DIR = r"C:\Users\304236\Desktop\종료된 업무"
 DEFAULT_FOCUS = ["3,3", "9,3"]
 
@@ -729,6 +748,8 @@ def _diagnose_slot(rep: Report, name: str, folder: Path, focus: list[tuple[int, 
     if any("f" in sh.split("_") for sh in shapes):
         rep.find(f"{name}: 지수표기/쉼표 소수 토큰이 있다 — 앱 파서는 수치로 안 읽어 x/y 가 밀릴 수 있음")
 
+    S["wt"] = _guard(rep, "웨이퍼 맵 .txt 대조", _wafer_txt_section, rep, name, folder, used)
+
     if not APP:
         rep.w("  (앱 코드 import 실패 — 이하 앱 경로 재현 생략)")
         return
@@ -737,6 +758,7 @@ def _diagnose_slot(rep: Report, name: str, folder: Path, focus: list[tuple[int, 
     rep.h2("앱 좌표 해석(coords.resolve) — 소스별 장수")
     coords = {p: C.resolve(p) for p in used}
     src = Counter((c.source if c else "None(좌표 없음)") for c in coords.values())
+    S["src"] = src
     rep.kv("소스 분포", dict(src))
     live = {p: camtek_live.parse_live_name(p.stem) for p in used}
     n_live = sum(v is not None for v in live.values())
@@ -873,6 +895,7 @@ def _diagnose_slot(rep: Report, name: str, folder: Path, focus: list[tuple[int, 
         by_file[pt.path] = (fc, frw, dc, dr, cell, pt.x, pt.y)
     S.update(by_file=by_file, live=live, co=co, rt=rt)
     rep.kv("파일명≠찍힌 칸", f"{mismatch}/{len(table)}  어긋남(Δcol,Δrow) 분포 {shift.most_common(8)}")
+    S["outside"] = (outside_die, len(table))
     rep.kv("격자에 없는 칸에 찍힘", f"{outside_die}/{len(table)}")
     rep.kv("웨이퍼 원 밖에 찍힘", f"{outside_circle}/{len(table)}")
     if mismatch:
@@ -928,7 +951,7 @@ def _diagnose_slot(rep: Report, name: str, folder: Path, focus: list[tuple[int, 
         there = [t for t in table if (t[9], t[10]) == (fc_, fr_)]
         rep.w(f"  ▶ 파일명이 ({fc_},{fr_}) 인 사진 {len(hits)}장 / 맵에서 ({fc_},{fr_}) 칸에 "
               f"찍힌 사진 {len(there)}장 / 그 칸이 격자에 있나: {(fc_, fr_) in drawn_disp}")
-        for t in (hits + [t for t in there if t not in hits])[:15]:
+        for t in (hits + [t for t in there if t not in hits])[:_MAX_FOCUS_TRACE]:
             nm = t[0]
             rep.w(f"     {nm}")
             rep.w(f"        토큰={nm.rsplit('.', 1)[0].split('_')}")
@@ -958,7 +981,9 @@ def _diagnose_slot(rep: Report, name: str, folder: Path, focus: list[tuple[int, 
     rep.h2("사진별 전체 표 (탭 구분 — 엑셀에 붙여 넣기 가능)")
     rep.w("  파일\t소스\tfn_col\tfn_row\tfn_x\tfn_y\tplane_x\tplane_y\tcell\tmap_col\tmap_row"
           "\t일치\t격자안\t원안\tr_um")
-    for t in table:
+    if len(table) > _MAX_TABLE_ROWS:
+        rep.w(f"  (전체 {len(table)}장 중 앞 {_MAX_TABLE_ROWS}장만 — 요약·판정은 전수)")
+    for t in table[:_MAX_TABLE_ROWS]:
         rep.w("  " + "\t".join(_fmt(v) if isinstance(v, float) else str(v) for v in t))
 
 
@@ -1095,6 +1120,7 @@ def _lot_side_files(rep: Report, target: Path, slots: dict[str, Path]) -> None:
         rep.h2(f"{'대상 폴더' if lvl == 0 else f'부모 {lvl}단계'} {d} — 비-사진 파일 {len(files)}개")
         files = [p for p in files if p.suffix.lower() not in (".py", ".pyc")
                  and not p.name.startswith("wafer_map_진단_")]
+        wm_count = 0
         for p in files[:_SIDE_MAX_FILES]:
             rep.w(f"  - {p.name}  ({_stat(p)})")
             try:
@@ -1105,9 +1131,18 @@ def _lot_side_files(rep: Report, target: Path, slots: dict[str, Path]) -> None:
                 continue
             if size > _SIDE_MAX_BYTES or not _looks_text(head):
                 continue
-            _DUMPED.setdefault(p, "LOT 부가")
             txt, enc, _ = _read_text(p)
             lines = txt.splitlines()
+            if "RowData" in txt:
+                wm_count += 1
+                if wm_count > _MAX_WAFER_TXT_DUMP:
+                    hdr = _parse_wafer_txt_text(txt)
+                    rep.w("      (웨이퍼 맵 — 머리만) " + " ".join(
+                        f"{k}={hdr['head'].get(k)}" for k in
+                        ("WAFER", "FNLOC", "ROWCT", "COLCT", "XDIES", "YDIES", "DUTMS",
+                         "REFPX", "REFPY")))
+                    continue
+            _DUMPED.setdefault(p, "LOT 부가")
             hits = [(i, ln.strip()) for i, ln in enumerate(lines, 1) if _CLUE_PAT.search(ln)]
             rep.w(f"      {enc}, {len(lines)}줄, 단서 줄 {len(hits)}개"
                   + (" — 처음 25개:" if hits else ""))
@@ -1225,11 +1260,13 @@ def _sim_scenario(rep: Report, label: str, slots: dict, recs: dict, pitch_of, fo
     rep.kv("슬롯별 격자 모양 종류", len(shapes))
     # 포커스 칸
     for fc, frw in focus:
-        rep.w(f"  ▶ ({fc},{frw}) 추적")
+        rep.w(f"  ▶ ({fc},{frw}) 추적 (슬롯당 최대 {_MAX_FOCUS_TRACE}장)")
         for nm, g in geoms.items():
+            shown = 0
             for col, row, x, y, n in recs[nm]:
-                if (col, row) != (fc, frw):
+                if (col, row) != (fc, frw) or shown >= _MAX_FOCUS_TRACE:
                     continue
+                shown += 1
                 p = _sim_plane(g, col, row, x, y)
                 cell = _sim_cell(g, *p)
                 dc, dr = _disp_of_cell(*cell, g["co"], g["rt"])
@@ -1249,7 +1286,7 @@ def _sim_scenario(rep: Report, label: str, slots: dict, recs: dict, pitch_of, fo
             f"{nm}=({_sim_plane(g, fc, frw, 0, 0)[0] / 1000:.1f},"
             f"{_sim_plane(g, fc, frw, 0, 0)[1] / 1000:.1f})" for nm, g in geoms.items()))
     # 슬롯별 ASCII (앱 화면 재현)
-    for nm, g in geoms.items():
+    for nm, g in list(geoms.items())[:_MAX_SIM_ASCII]:
         marks = Counter()
         for col, row, x, y, _n in recs[nm]:
             marks[_disp_of_cell(*_sim_cell(g, *_sim_plane(g, col, row, x, y)),
@@ -1336,6 +1373,252 @@ def _standalone_sim(rep: Report, slots: dict[str, Path], focus) -> None:
 
 
 # ---------------------------------------------------------------------------
+# 웨이퍼 맵 .txt (LOT 폴더의 <WaferID>.txt — ROWCT/COLCT/XDIES/RowData) 대조
+# ---------------------------------------------------------------------------
+_WT_EMPTY = re.compile(r"^[_.\-]+$")          # 칸에 die 없음 표기(관측: '___')
+_WT_KEY = re.compile(r"^\s*([A-Za-z][A-Za-z0-9_]*)\s*:\s*(.*?)\s*$")
+_UNIT_UM = {"mm": 1000.0, "um": 1.0, "µm": 1.0, "micron": 1.0, "mil": 25.4,
+            "mils": 25.4, "cm": 10000.0}
+
+
+def _parse_wafer_txt_text(txt: str) -> dict:
+    head: dict[str, str] = {}
+    rows: list[list[str]] = []
+    for ln in txt.splitlines():
+        if ln.strip().lower().startswith("rowdata"):
+            rows.append(ln.split(":", 1)[1].split() if ":" in ln else [])
+            continue
+        m = _WT_KEY.match(ln)
+        if m and m.group(1).upper() not in head:
+            head[m.group(1).upper()] = m.group(2)
+    return {"head": head, "rows": rows}
+
+
+def _find_wafer_txt(folder: Path):
+    """슬롯 폴더 이름과 같은 웨이퍼 맵 .txt — 부모(LOT) 폴더 → 자신 → 조부모 순."""
+    name = folder.name.lower()
+    dirs = [folder.parent, folder, folder.parent.parent]
+    for d in dirs:
+        p = d / f"{folder.name}.txt"
+        if p.is_file():
+            return p, "이름 일치"
+    for d in dirs:                                   # 이름이 달라도 WAFER: 가 같으면
+        try:
+            cands = [q for q in d.iterdir() if q.suffix.lower() == ".txt" and q.is_file()
+                     and q.stat().st_size < 1024 * 1024]
+        except OSError:
+            continue
+        for q in cands[:400]:
+            try:
+                txt, _, _ = _read_text(q, 64 * 1024)
+            except OSError:
+                continue
+            if "RowData" not in txt:
+                continue
+            w = _parse_wafer_txt_text(txt)["head"].get("WAFER", "").strip().lower()
+            if w and (w == name or w in name or name in w):
+                return q, f"WAFER:{w} 일치"
+    return None, None
+
+
+def _read_diestep(folder: Path):
+    """Params_WaferInfo.ini / ProductInfo.ini 의 die 간격(앱 없이도) — 비교용."""
+    for base in _search_dirs(folder):
+        for rel, kx, ky in (("Params_WaferInfo.ini", "DieStep_X", "DieStep_Y"),
+                            ("ProductInfo.ini", "XDieIndex", "YDieIndex")):
+            q = base / rel
+            if not q.is_file():
+                continue
+            txt, _, _ = _read_text(q)
+            mx = re.search(r"(?im)^\s*" + kx + r"\s*=\s*([-\d.eE]+)", txt)
+            my = re.search(r"(?im)^\s*" + ky + r"\s*=\s*([-\d.eE]+)", txt)
+            if mx and my:
+                try:
+                    return float(mx.group(1)), float(my.group(1)), str(q)
+                except ValueError:
+                    pass
+    return None
+
+
+def _wafer_txt_section(rep: Report, name: str, folder: Path, used: list[Path]):
+    rep.h2("웨이퍼 맵 .txt 대조 — 파일명 (col,row) 가 장비 맵의 어느 칸인가")
+    wt, how = _find_wafer_txt(folder)
+    if wt is None:
+        rep.w("  ✗ 슬롯 이름의 웨이퍼 맵 .txt 없음 (LOT 폴더·자신·조부모)")
+        return {"found": False}
+    txt, enc, _ = _read_text(wt)
+    d = _parse_wafer_txt_text(txt)
+    head, rows = d["head"], d["rows"]
+    rep.w(f"  ✓ {wt}  ({how}, {enc})")
+    rep.w("  머리: " + "  ".join(f"{k}={v}" for k, v in head.items()))
+    R = len(rows)
+    C = max((len(r) for r in rows), default=0)
+    widths = Counter(len(r) for r in rows)
+    rep.kv("RowData 행 수 / 열 수(분포)", f"{R} / {dict(widths)}")
+    try:
+        rc, cc = int(head.get("ROWCT", -1)), int(head.get("COLCT", -1))
+    except ValueError:
+        rc = cc = -1
+    if (rc, cc) != (R, C) or len(widths) > 1:
+        rep.find(f"{name}: 맵 머리 ROWCT/COLCT=({rc},{cc}) 와 RowData 모양 ({R},{dict(widths)}) 불일치")
+    toks = Counter(t for r in rows for t in r)
+    rep.kv("칸 값 분포", dict(toks.most_common(20)))
+    passes = set(re.split(r"[\s,;]+", head.get("BCEQU", "").strip())) - {""}
+    rep.kv("양품 bin(BCEQU)", passes or "(없음 — 000 으로 가정)")
+    if not passes:
+        passes = {"000"}
+
+    def cell(ci, ri_top):
+        if not (0 <= ri_top < R and 0 <= ci < len(rows[ri_top])):
+            return None
+        return rows[ri_top][ci]
+
+    unit = head.get("DUTMS", "").strip().lower()
+    mul = _UNIT_UM.get(unit)
+    dx = dy = None
+    try:
+        if mul and "XDIES" in head and "YDIES" in head:
+            dx, dy = float(head["XDIES"]) * mul, float(head["YDIES"]) * mul
+    except ValueError:
+        pass
+    rep.kv("XDIES/YDIES (µm)", f"{_fmt(dx)} / {_fmt(dy)}  (단위 {unit or '없음'})")
+
+    photos = []
+    for p in used:
+        v = _parse_live(p.stem)
+        if v:
+            photos.append(v)
+    rep.kv("LIVE 파일명 사진", f"{len(photos)}/{len(used)}")
+    res: dict = {"found": True, "path": str(wt), "R": R, "C": C, "fnloc": head.get("FNLOC"),
+                 "dx": dx, "dy": dy, "n": len(photos), "hyp": {}}
+    if photos and dx and dy:
+        mx = max(v[2] for v in photos)
+        my = max(v[3] for v in photos)
+        rep.kv("사진 x/y 최대 vs XDIES/YDIES",
+               f"{mx:.1f}/{my:.1f} vs {dx:.1f}/{dy:.1f}  → 초과 x {sum(v[2] > dx for v in photos)}장, "
+               f"y {sum(v[3] > dy for v in photos)}장")
+        res.update(mx=mx, my=my, over=sum(v[2] > dx or v[3] > dy for v in photos))
+    ds = _read_diestep(folder)
+    if ds:
+        rep.kv("DieStep(파일) vs XDIES", f"{ds[0]:.3f}/{ds[1]:.3f} vs {_fmt(dx, 3)}/{_fmt(dy, 3)}"
+               + (f"  차이 {ds[0] - dx:+.3f}/{ds[1] - dy:+.3f} µm" if dx else "") + f"  ({ds[2]})")
+        res["diestep"] = ds[:2]
+    if not photos:
+        return res
+
+    hyps = {
+        "아래부터0 (앱 규약)": lambda c, r: (c, R - 1 - r),
+        "위부터0": lambda c, r: (c, r),
+        "아래부터0+col뒤집기": lambda c, r: (C - 1 - c, R - 1 - r),
+        "위부터0+col뒤집기": lambda c, r: (C - 1 - c, r),
+        "1-based 아래부터": lambda c, r: (c - 1, R - r),
+        "1-based 위부터": lambda c, r: (c - 1, r - 1),
+        "축교환 아래부터0": lambda c, r: (r, R - 1 - c),
+    }
+    uniq = sorted({(v[0], v[1]) for v in photos})
+    rep.w(f"  해석별 — 결함 칸(고유 (col,row) {len(uniq)}개) 이 맵의 어디에 떨어지나")
+    rep.w("    해석\t범위밖\tdie없음\t양품bin\t불량bin\t불량bin비율")
+    for label, f in hyps.items():
+        cnt = Counter()
+        for c, r in uniq:
+            v = cell(*f(c, r))
+            if v is None:
+                cnt["범위밖"] += 1
+            elif _WT_EMPTY.match(v):
+                cnt["die없음"] += 1
+            elif v in passes:
+                cnt["양품"] += 1
+            else:
+                cnt["불량"] += 1
+        rate = cnt["불량"] / len(uniq)
+        res["hyp"][label] = (cnt["불량"], len(uniq), cnt["범위밖"] + cnt["die없음"])
+        rep.w(f"    {label:<20}\t{cnt['범위밖']}\t{cnt['die없음']}\t{cnt['양품']}\t"
+              f"{cnt['불량']}\t{100 * rate:5.1f}%")
+    best = max(res["hyp"], key=lambda k: (res["hyp"][k][0], -res["hyp"][k][2]))
+    res["best"] = best
+    tied = [k for k, v in res["hyp"].items() if v[0] == res["hyp"][best][0] and v[2] == res["hyp"][best][2]]
+    rep.kv("가장 잘 맞는 해석", f"{best}" + (f"  (동률: {tied} — 이 표본으론 구분 불가)" if len(tied) > 1 else ""))
+    if best != "아래부터0 (앱 규약)" and res["hyp"][best][0] > res["hyp"]["아래부터0 (앱 규약)"][0]:
+        rep.find(f"{name}: 웨이퍼 맵 대조에서 '{best}' 가 앱 규약보다 잘 맞는다 — 방향 규약 재검토 필요"
+                 f" (FNLOC={head.get('FNLOC')})")
+    # ASCII — 앱 규약(아래부터 0) 으로 맵 위에 결함 칸 표시
+    if C <= _MAX_ASCII_COLS:
+        marks = {hyps["아래부터0 (앱 규약)"](c, r) for c, r in uniq}
+        rep.w(f"  [맵 원본 + 결함 칸 (아래부터0)]  '.'=양품  'x'=불량bin  '#'=결함사진+불량  "
+              f"'+'=결함사진+양품  '!'=결함사진인데 die 없음")
+        rep.w("        " + "".join(str(c // 10 % 10) for c in range(C)))
+        rep.w("        " + "".join(str(c % 10) for c in range(C)))
+        for ri in range(R):
+            line = []
+            for ci in range(C):
+                v = cell(ci, ri)
+                has = (ci, ri) in marks
+                if v is None or _WT_EMPTY.match(v):
+                    line.append("!" if has else " ")
+                elif v in passes:
+                    line.append("+" if has else ".")
+                else:
+                    line.append("#" if has else "x")
+            rep.w(f"  {R - 1 - ri:>4}  " + "".join(line))
+    return res
+
+
+_LOT_ROWS: list[dict] = []
+
+
+def _lot_summary_row(target: Path, kind: str, slots: dict, summary: dict) -> None:
+    row = {"target": target, "kind": kind, "slots": len(slots)}
+    n_ph = sum(s.get("n", 0) for s in summary.values())
+    src = Counter()
+    for s_ in summary.values():
+        src.update(s_.get("src") or {})
+    geo = Counter()
+    for f in slots.values():
+        for nm in ("Params_WaferInfo.ini", "ProductInfo.ini", "s_DieLocation.dat",
+                   "ColorImageGrabingInfo.ini"):
+            if any((b / nm).exists() for b in _search_dirs(f)):
+                geo[nm] += 1
+    wts = [s_.get("wt") for s_ in summary.values() if s_.get("wt")]
+    found = [w for w in wts if w.get("found")]
+    hyp_tot: dict = defaultdict(lambda: [0, 0, 0])
+    for w in found:
+        for k, (a, b, c) in w.get("hyp", {}).items():
+            hyp_tot[k][0] += a
+            hyp_tot[k][1] += b
+            hyp_tot[k][2] += c
+    pxs = [s_["geom"].pitch_x for s_ in summary.values() if s_.get("geom")]
+    out = [s_["outside"] for s_ in summary.values() if s_.get("outside")]
+    row.update(
+        photos=n_ph, src=dict(src), geo=dict(geo), wt=f"{len(found)}/{len(slots)}",
+        fnloc=sorted({str(w.get("fnloc")) for w in found}),
+        shape=sorted({f"{w['R']}x{w['C']}" for w in found}),
+        dies=sorted({f"{_fmt(w.get('dx'))}x{_fmt(w.get('dy'))}" for w in found}),
+        over=sum(w.get("over", 0) for w in found),
+        diestep=sorted({f"{a:.1f}x{b:.1f}" for w in found if w.get("diestep") for a, b in [w["diestep"]]}),
+        hyp={k: f"{v[0]}/{v[1]} 불량, {v[2]} 맵밖" for k, v in hyp_tot.items()},
+        pitch_spread=(f"{min(pxs):.0f}..{max(pxs):.0f}" if pxs else "-"),
+        outside=(f"{sum(a for a, _ in out)}/{sum(b for _, b in out)}" if out else "-"),
+    )
+    _LOT_ROWS.append(row)
+
+
+def _lot_summary_section(rep: Report) -> None:
+    rep.h1(f"LOT 별 요약 ({len(_LOT_ROWS)}개) — 이것만 봐도 결론이 나오게")
+    for i, r in enumerate(_LOT_ROWS, 1):
+        rep.w(f"  [{i}] {r['target']}")
+        for k, label in (("kind", "분류"), ("slots", "슬롯 수"), ("photos", "사진 수"),
+                         ("src", "좌표 소스"), ("geo", "기하 파일 있는 슬롯 수"),
+                         ("wt", "웨이퍼 맵 .txt 찾은 슬롯"), ("shape", "맵 행x열"),
+                         ("fnloc", "FNLOC(노치)"), ("dies", "XDIES x YDIES µm"),
+                         ("diestep", "DieStep(파일)"), ("over", "x/y 가 XDIES/YDIES 초과 사진"),
+                         ("pitch_spread", "앱 pitch_x 범위(슬롯간)"),
+                         ("outside", "앱 화면에서 격자 밖 점")):
+            if k in r:
+                rep.w(f"      {label:<26}: {r[k]}")
+        for k, v in (r.get("hyp") or {}).items():
+            rep.w(f"      해석 {k:<20}: {v}")
+
+# ---------------------------------------------------------------------------
 # 부록 — 원재료 텍스트 전문
 # ---------------------------------------------------------------------------
 def _appendix(rep: Report) -> None:
@@ -1402,7 +1685,7 @@ def _env(rep: Report, targets: list[Path], out: Path) -> None:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("folders", nargs="*", default=[DEFAULT_TARGET])
+    ap.add_argument("folders", nargs="*", default=list(DEFAULT_TARGETS))
     ap.add_argument("--out", default=DEFAULT_OUT_DIR, help="출력 폴더")
     ap.add_argument("--app", default=None,
                     help="앱 코드 폴더(aoi_verification 이 든 폴더). 안 주면 자동으로 찾는다")
@@ -1421,7 +1704,7 @@ def main(argv=None) -> int:
         out_dir = Path.cwd()
     out = out_dir / f"wafer_map_진단_{_dt.datetime.now():%Y%m%d_%H%M%S}.txt"
     rep = Report(out)
-    targets = [Path(f) for f in a.folders]
+    targets = [Path(f.strip().strip('"')) for f in a.folders]
     print(f"진단 중… 결과: {out}")
     try:
         _guard(rep, "환경", _env, rep, targets, out)
@@ -1450,6 +1733,8 @@ def main(argv=None) -> int:
             if APP and len(slots) > 1:
                 _clear_app_caches()
                 _guard(rep, "LOT 합산", _lot_combined, rep, slots)
+            _guard(rep, "LOT 요약 행", _lot_summary_row, target, kind, slots, summary)
+        _guard(rep, "LOT 요약", _lot_summary_section, rep)
         _guard(rep, "부록", _appendix, rep)
         rep.h1(f"자동 판정 요약 ({len(rep.findings)}건)")
         rep.w(*[f"  {i}. {m}" for i, m in enumerate(rep.findings, 1)] or ["  (특이사항 없음)"])
