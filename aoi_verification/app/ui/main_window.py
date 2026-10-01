@@ -642,7 +642,7 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------
     def _maybe_show_whats_new(self) -> None:
-        """업데이트 후 첫 실행이면 '바뀐 점' 을 한 번 보여 준다(사용자 요청, A. 짧은 목록형).
+        """업데이트 후 첫 실행이면 '바뀐 점' 을 한 번 보여 준다(사용자 결정: 하이라이트형).
 
         본 것으로 기록하는 시점은 **보여 준 뒤**다 — 띄우다 실패하면 다음 실행에 다시 뜬다."""
         try:
@@ -651,7 +651,8 @@ class MainWindow(QMainWindow):
             todo = _wn.pending(_prefs.load().whats_new_seen, _notes.ENTRIES)
             if not todo:
                 return
-            sheets.info(self, i18n.KO.WHATS_NEW_TITLE, _wn.render(todo))
+            from .widgets.whats_new_dialog import WhatsNewDialog
+            sheets.run(WhatsNewDialog(_wn.merge(todo), self))
             _prefs.patch(whats_new_seen=_notes.ENTRIES[0]["id"])
         except Exception:
             _LOG.exception("업데이트 안내를 띄우지 못함")
