@@ -157,3 +157,33 @@ def test_loader_is_not_a_child_of_the_viewer(qapp, tmp_path, monkeypatch):
         assert ld.parent() is None
     finally:
         ld.wait(2000)
+
+
+def test_wheel_zoom_keeps_the_point_under_the_cursor(qapp, tmp_path,
+                                                     monkeypatch):
+    """휠 확대/축소는 사진 중앙이 아니라 **커서 아래 점**을 고정한다."""
+    from PyQt6.QtCore import QPoint, QPointF, Qt
+    from PyQt6.QtGui import QWheelEvent
+
+    v = _viewer(qapp, tmp_path, monkeypatch, 4000, 3000)
+    v.resize(1000, 700)
+    v.show()
+    QApplication.processEvents()
+    cur = QPointF(300, 200)
+    m = v._label.mapFrom(v, cur.toPoint())
+
+    def under_cursor():
+        cw, ch = v._view_size()
+        x = (cw - 4000 * v._scale) / 2 + v._offset_x
+        y = (ch - 3000 * v._scale) / 2 + v._offset_y
+        return (m.x() - x) / v._scale, (m.y() - y) / v._scale
+
+    before = under_cursor()
+    for delta in (120,) * 12 + (-120,) * 4:
+        v.wheelEvent(QWheelEvent(
+            cur, cur, QPoint(), QPoint(0, delta), Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase,
+            False))
+    after = under_cursor()
+    assert after == pytest.approx(before, abs=1e-6)
+    v.deleteLater()

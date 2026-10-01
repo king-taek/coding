@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable, Optional
 
-from PyQt6.QtCore import QObject, QThread, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QObject, QRectF, QThread, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import (QColor, QImage, QPainter, QPen, QPixmap, QShortcut,
                          QKeySequence)
 from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout,
@@ -352,7 +352,21 @@ class FullscreenViewer(QDialog):
 
     def wheelEvent(self, e):  # noqa: N802
         step = 1.1 if e.angleDelta().y() > 0 else (1.0 / 1.1)
-        self._scale = max(0.02, min(8.0, self._scale * step))
+        old = self._scale
+        new = max(0.02, min(8.0, old * step))
+        if new == old:
+            return
+        # ★ 커서 아래의 사진 점이 제자리에 머물도록 오프셋을 보정한다 — 사진 중앙 기준이
+        #   아니라 마우스 기준 확대/축소.  캔버스 = 라벨 크기라 라벨 좌표가 곧 캔버스 좌표다.
+        cw, ch = self._view_size()
+        m = self._label.mapFrom(self, e.position().toPoint())
+        pw, ph = self._pix.width(), self._pix.height()
+        # 사진 점(소수 픽셀) = (커서 − 사진 좌상단) / 배율
+        u = (m.x() - ((cw - pw * old) / 2 + self._offset_x)) / old
+        v = (m.y() - ((ch - ph * old) / 2 + self._offset_y)) / old
+        self._offset_x = m.x() - u * new - (cw - pw * new) / 2
+        self._offset_y = m.y() - v * new - (ch - ph * new) / 2
+        self._scale = new
         self._redraw()
 
     def mousePressEvent(self, e):  # noqa: N802
@@ -390,39 +404,52 @@ class FullscreenViewer(QDialog):
                 lay.activate()
             self._fitted = self._label.width() > 1 and self._label.height() > 1
             self._fit_to_view()
-        # ★ 스케일 결과를 한 장 캐시한다.  드래그 팬은 offset 만 바뀌는데도 매
-        #   마우스 이벤트마다 수천 px 를 SmoothTransformation 으로 다시 줄이고 있었다
-        #   — 큰 모니터에서 팬이 마우스를 따라오지 못한 이유다.  무효화 지점은
-        #   `_pix` 와 `_scale` 뿐이므로(맞춤·휠 줌·원본 교체) 그 둘을 키로 쓴다.
-        key = (self._pix.cacheKey(), round(float(self._scale), 6))
-        if getattr(self, "_scaled_key", None) == key:
-            scaled = self._scaled_cache
-        else:
-            w = int(self._pix.width() * self._scale)
-            h = int(self._pix.height() * self._scale)
-            scaled = self._pix.scaled(
-                w, h, Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-            self._scaled_key = key
-            self._scaled_cache = scaled
-        # 단순 중앙 + offset — 캔버스는 **사진이 놓이는 칸** 크기다(`_view_size`).
         cw, ch = self._view_size()
+        pw, ph = self._pix.width(), self._pix.height()
+        sc = float(self._scale)
+        # 사진 좌상단의 캔버스 좌표 — 단순 중앙 + offset.  캔버스는 **사진이 놓이는 칸**
+        # 크기다(`_view_size`).
+        x = (cw - pw * sc) / 2 + self._offset_x
+        y = (ch - ph * sc) / 2 + self._offset_y
         canvas = QPixmap(cw, ch)
         canvas.fill(QColor(theme.VIEWER_BG))
         p = QPainter(canvas)
-        x = (cw - scaled.width()) // 2 + self._offset_x
-        y = (ch - scaled.height()) // 2 + self._offset_y
-        p.drawPixmap(x, y, scaled)
+        if sc >= 1.0:
+            # ★ 확대(≥100%)는 **원본 픽셀에서 보이는 영역만** 바로 그린다.  전체를 배율만큼
+            #   키운 뒤 자르면 수만 px 비트맵이 되어 메모리·속도가 무너지고, 상한에 걸려
+            #   흐려진다 — 이쪽은 어떤 배율에서도 원본 화질이며 비용은 화면 크기에 비례한다.
+            sx0 = max(0.0, -x / sc)
+            sy0 = max(0.0, -y / sc)
+            sx1 = min(float(pw), (cw - x) / sc)
+            sy1 = min(float(ph), (ch - y) / sc)
+            if sx1 > sx0 and sy1 > sy0:
+                src = QRectF(sx0, sy0, sx1 - sx0, sy1 - sy0)
+                dst = QRectF(x + sx0 * sc, y + sy0 * sc,
+                             (sx1 - sx0) * sc, (sy1 - sy0) * sc)
+                p.drawPixmap(dst, self._pix, src)
+        else:
+            # ★ 축소는 스케일 결과를 한 장 캐시한다.  드래그 팬은 offset 만 바뀌는데도 매
+            #   마우스 이벤트마다 수천 px 를 SmoothTransformation 으로 다시 줄이고 있었다.
+            #   무효화 지점은 `_pix` 와 `_scale` 뿐이다(맞춤·휠 줌·원본 교체).
+            key = (self._pix.cacheKey(), round(sc, 6))
+            if getattr(self, "_scaled_key", None) == key:
+                scaled = self._scaled_cache
+            else:
+                scaled = self._pix.scaled(
+                    max(1, int(pw * sc)), max(1, int(ph * sc)),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation)
+                self._scaled_key = key
+                self._scaled_cache = scaled
+            p.drawPixmap(int(round(x)), int(round(y)), scaled)
         if self._overlay is not None:
             left, top, ow, oh = self._overlay
-            s = scaled.width() / float(max(1, self._pix.width()))
             # 뷰어 바탕은 두 모드 모두 검정이라 다크 팔레트의 강조색을 쓴다.
             pen = QPen(QColor(theme.PALETTES["dark"]["accent"]))
             pen.setWidth(2)
             p.setPen(pen)
-            p.drawRect(int(x + left * s), int(y + top * s),
-                       max(1, int(ow * s)), max(1, int(oh * s)))
+            p.drawRect(int(x + left * sc), int(y + top * sc),
+                       max(1, int(ow * sc)), max(1, int(oh * sc)))
         p.end()
         self._label.setPixmap(canvas)
 
