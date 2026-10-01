@@ -222,7 +222,7 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self._status_bar)
         # 개발자 크레딧 — 모든 화면 공통(상태바 좌측).
         self._credit_label = QLabel(i18n.KO.CREDIT, self._status_bar)
-        self._apply_statusbar_theme()      # 색 모드 전환 때와 같은 코드로 칠한다
+        self._apply_statusbar_theme()
         self._status_bar.addWidget(self._credit_label)
         self._mem_label = QLabel("", self._status_bar)
         self._mem_label.setProperty("role", "muted")
@@ -231,9 +231,6 @@ class MainWindow(QMainWindow):
         self._mem_timer.setInterval(2000)
         self._mem_timer.timeout.connect(self._update_memory_label)
         self._mem_pressure_shown = False
-        # 색 모드 전환 중 재진입 차단 — 연타로 페이지 재생성이 겹치면 스냅샷·페이지가
-        # 어긋나고, 최악에는 잠금이 풀리지 않는다.
-        self._appearance_busy = False
         # 타이머는 psutil 유무와 무관하게 구동 — 콜백이 안전 가드한다.
         # ★ 여기서 첫 갱신을 직접 부르지 않는다.  콜백이 `import psutil` 을 하는데,
         #   그것이 창이 뜨기 전 시작 경로 위에 얹힌다(사용자 체감: 시작이 느리다).
@@ -770,7 +767,7 @@ class MainWindow(QMainWindow):
         반환 "ref"/"val"/"both" 또는 None(KLA 아님 → 파일명/OCR 자동 매칭 건너뜀)."""
         # ★ 네 경우(기준/검증/둘다/KLA 아님)를 모두 유지한다 — 한쪽만 추가하지 말 것
         #   (CLAUDE.md 규칙).  강조 문장은 인라인 HTML 대신 시트의 warn 라벨이 담당한다
-        #   (색을 f-string 으로 굽지 않으므로 다크 모드 전환에도 따라온다).
+        #   (색을 f-string 으로 굽지 않는다).
         # ★ `tiles=True` — 넷은 **대등한 선택지**다.  예전엔 '기준' 만 파란 주 버튼이라
         #   "왜 저것만 강조돼 있지?" 로 읽혔다(사용자 지적).  정답이 정해져 있지 않으면
         #   기본값을 세우지도 않는다(`default` 없음).  순서는 읽는 순서대로.
@@ -2216,12 +2213,10 @@ class MainWindow(QMainWindow):
         """페이지 생성 + 스택 추가 + 시그널 배선 (단일 출처 — 재구축 재사용).
 
         ★ **첫 화면만 먼저** 만든다.  나머지 넷은 cv2·OpenVINO·numpy·PIL 을 끌고
-        오므로, 다 불러온 뒤(``_on_backend_loaded``)에 만든다.  색 모드 전환의
-        재구축은 이미 준비가 끝난 뒤이므로 그 자리에서 다섯을 모두 만든다.
+        오므로, 다 불러온 뒤(``_on_backend_loaded``)에 만든다.  이미 준비가 끝난
+        뒤의 재구축이면 그 자리에서 다섯을 모두 만든다.
 
-        ``progress(done, total, message)`` 를 주면 진행을 보고한다(시작 스플래시).
-        색 모드 전환의 재구축 때는 주지 않는다 — 그때는 로딩 표시가 없고,
-        크로스페이드가 전환을 대신 알린다."""
+        ``progress(done, total, message)`` 를 주면 진행을 보고한다(시작 스플래시)."""
         report = progress or (lambda *_: None)
         report(0, 1, i18n.KO.SPLASH_PAGES)
         self._build_setup_page()
@@ -2238,9 +2233,6 @@ class MainWindow(QMainWindow):
         self._stack.addWidget(self._setup_page)
         self._setup_page.start_requested.connect(self._on_start)
         self._setup_page.update_check_requested.connect(self._manual_update_check)
-        # 색 모드/배치 변경 → 페이지 재생성(세션 시작 전에만).
-        if hasattr(self._setup_page, "appearance_changed"):
-            self._setup_page.appearance_changed.connect(self._on_appearance_changed)
         # 백엔드가 아직이면 '검증 시작' 을 잠그고 버튼에 준비 중을 표기한다.
         self._setup_page.set_backend_ready(self._backend_ready)
 
@@ -2324,188 +2316,8 @@ class MainWindow(QMainWindow):
         # ★ 무거운 import 뒤에 이어 붙인다(같은 모듈이 필요하고, 시작 경로를 비운다).
         self._warmup_accel_async()
 
-    def _on_appearance_changed(self, mode: str = "") -> None:
-        """색 모드(어두운 화면) 변경을 화면에 반영한다 — **옛 화면을 걷어내는 크로스페이드**.
-
-        위젯이 생성 시점에 ``theme.INK`` 같은 색을 f-string 으로 굽기 때문에 QSS 재적용만
-        으로는 부족하다 → 페이지를 다시 만든다.  **세션 시작 전(PHASE_NONE)에만** 허용해
-        진행 중 상태가 사라지지 않게 이중으로 막는다.
-
-        전환이 한 프레임에 튀지 않도록: 옛 색 화면을 스냅샷으로 떠 두고, 아래에서 새 색
-        페이지로 즉시 갈아 끼운 뒤 스냅샷을 ``motion.DUR_RECOLOR``(OutQuart)로 빼낸다.
-
-        ★ ``mode`` 는 셋업 페이지가 실어 보낸 새 색 모드다.  **prefs 를 다시 읽지 않는다**
-        (전환 경로의 디스크 왕복을 2회 → 1회로).  빈 문자열이면(옛 연결·직접 호출)
-        prefs 에서 읽어 오는 예전 경로로 폴백한다.
-
-        ★ 전환 중에는 토글이 **눌리지 않아야 한다.**  두 겹으로 막는다:
-        (a) ``_appearance_busy`` 로 재진입 자체를 차단하고,
-        (b) 새로 만든 페이지의 스위치를 비활성해 눌리지 않는 것이 **눈에 보이게** 한다.
-        (a) 만 있으면 눌러도 아무 일이 없는 '먹은 클릭'이 되고, (b) 만 있으면 페이지
-        재생성 사이의 틈으로 두 번째 요청이 새어 든다."""
-        if self._phase != PHASE_NONE or self._appearance_busy:
-            return
-        from . import motion
-        self._appearance_busy = True
-        try:
-            # ★ 스냅샷은 **창 전체**다(옛날엔 `self._stack` 만 찍었다).  상태바는 스택
-            #   밖이라 크로스페이드에 덮이지 않았고, QSS 재적용으로 **첫 프레임에 즉시**
-            #   새 색이 됐다 — 그래서 전환 700ms 동안 하단바만 혼자 다른 모드로 보였다
-            #   (실측: 0ms 에 상태바 (28,26,21) / 본문 (236,233,226)).
-            #   `_loading`·`_sheets` 도 창의 자식으로 창 전체를 덮으므로 같은 방식이다.
-            snapshot = self.grab() if motion.enabled() else None
-            try:
-                if not mode:
-                    p = _prefs.load()
-                    mode = getattr(p, "color_mode", theme.DEFAULT_COLOR_MODE)
-                theme.set_color_mode(mode)
-            except Exception:
-                self._appearance_busy = False
-                return
-            # ★ **페이지를 다시 만들지 않는다.**  위젯이 색을 f-string 으로 굽던
-            #   자리를 전부 QSS role 로 옮겨서(style.qss '인라인에서 옮겨 온 규칙'),
-            #   시트를 다시 적용하고 폴리시만 다시 태우면 살아 있는 화면이 새 색을
-            #   입는다.  재생성 124ms 가 통째로 빠진다(실측).
-            #   ※ QSS 로 못 바꾸는 것 둘은 따로 손본다 —
-            #     로고는 **픽스맵 반전**이라 다시 칠해야 하고,
-            #     상태바는 인라인 스타일이라 같은 코드로 다시 칠한다.
-            self._recolor_in_place()
-            self._set_appearance_controls_enabled(False)
-            motion.crossfade_from(self, snapshot,
-                                  on_done=self._end_appearance_transition)
-        except Exception:
-            # ★ 어떤 경로로 실패해도 잠금은 반드시 풀린다 — 잠긴 채 남으면 다크 모드를
-            #   **영구히** 못 바꾼다(원래 버그보다 나쁘다).
-            self._end_appearance_transition()
-            raise
-
-    def _recolor_in_place(self) -> None:
-        """페이지를 다시 만들지 않고 **살아 있는 화면의 색만** 갈아 끼운다.
-
-        세 가지를 한다:
-        1. ``theme.apply_to_app`` — 새 팔레트로 렌더한 style.qss 를 앱에 적용.
-        2. **폴리시 재적용** — QSS 를 새로 적용해도 Qt 는 이미 polish 된 위젯을
-           자동으로 다시 계산하지 않는 경우가 있다.  트리를 돌며 unpolish/polish 한다.
-        3. QSS 로 **못 바꾸는 것** 두 가지:
-           · 로고는 픽스맵 RGB 반전이라 다시 칠해야 한다(``app_logo.refresh_all``).
-           · 상태바 크레딧은 인라인 스타일이라 같은 코드로 다시 칠한다.
-
-        ★ 3번을 빼먹으면 다크 화면에 어두운 로고가 그대로 남아 안 보인다 — 재생성
-        방식과 픽셀 단위로 비교해 잡아낸 자리다(회귀 가드
-        ``dev/tests/test_recolor_in_place.py``).
-        """
-        from .widgets import app_logo
-
-        app = QApplication.instance()
-        if app is not None:
-            theme.apply_to_app(app)
-        # ★ 트리 **전체**를 한 프레임에 다시 폴리시하면 메인 스레드가 실측 ~125ms
-        #   멈춘다(페이지 5장 × 위젯 수백 개).  그 정지가 곧 '버벅임' 이다.
-        #   지금 **보이는 페이지와 창 밖 장식(레일·상태바·시트/오버레이)** 만 즉시
-        #   처리하고, 숨은 페이지 4장은 이벤트 루프가 빈 틈에 한 장씩 나눠 맡긴다 —
-        #   숨은 페이지는 다시 보일 때까지 색이 틀려도 사용자가 볼 수 없다.
-        #   (구조개편 24안 — 정지 125 → ~30ms)
-        self._repolish_visible_now()
-        app_logo.refresh_all(self)
-        self._apply_statusbar_theme()
-        self._queue_hidden_page_repolish()
-
-    def _repolish_visible_now(self) -> None:
-        """보이는 페이지 + 스택 밖 창 장식만 즉시 다시 폴리시한다.
-
-        ★ **창 자신(그리고 그 척추)** 을 먼저 처리한다.  화면 본문의 바탕색은
-        페이지가 아니라 `QMainWindow { background-color: $bg }` 가 칠한다
-        (style.qss 는 전역 QWidget 에 배경을 주지 않는다 — 스크롤이 죽는다).
-        페이지만 다시 폴리시하면 **본문 바탕이 옛 색으로 남아** 하단바와 따로
-        논다(회귀 가드 `test_recolor_covers_window`)."""
-        style = self.style()
-
-        def one(w):
-            if w is None:
-                return
-            style.unpolish(w)
-            style.polish(w)
-            w.update()
-
-        one(self)                      # 창 자신 — 본문 바탕을 칠하는 주체
-        one(self.centralWidget())      # 척추: 중앙 위젯 → 스택
-        one(self._stack)
-        current = self._stack.currentWidget()
-        if current is not None:
-            self._repolish_tree(current)
-        # 스택 밖(레일·상태바·시트·로딩 오버레이)은 항상 보이므로 함께 간다.
-        for w in (getattr(self, "_rail", None), self._status_bar,
-                  getattr(self, "_sheets", None), getattr(self, "_loading", None)):
-            if w is not None:
-                self._repolish_tree(w)
-
-    def _queue_hidden_page_repolish(self) -> None:
-        """숨은 페이지들을 **한 장씩** 뒤늦게 다시 폴리시한다.
-
-        ★ 타이머는 창에 parent 를 둔다(정적 `QTimer.singleShot` 금지 — 창이 먼저
-        닫히면 죽은 위젯을 건드린다).  간격 0 이면 이벤트 루프가 한 바퀴 도는
-        사이마다 한 장씩 처리돼, 화면이 멈추는 구간이 페이지 하나 분량으로 쪼개진다.
-        ★ 다시 보이는 순간에도 안전하다 — `_show_page` 는 색을 건드리지 않지만
-          이 큐가 그 전에 끝나거나, 끝나지 않았다면 그 페이지 차례가 곧 온다."""
-        current = self._stack.currentWidget()
-        pending = [p for p in (self._setup_page, self._select_page,
-                               self._match_page, self._match_review_page,
-                               self._result_page)
-                   if p is not None and p is not current]
-        if not pending:
-            return
-        timer = getattr(self, "_repolish_timer", None)
-        if timer is None:
-            timer = QTimer(self)
-            timer.setSingleShot(True)
-            timer.timeout.connect(self._repolish_next_hidden)
-            self._repolish_timer = timer
-        self._repolish_queue = pending
-        timer.start(0)
-
-    def _repolish_next_hidden(self) -> None:
-        queue = getattr(self, "_repolish_queue", None)
-        if not queue:
-            return
-        page = queue.pop(0)
-        try:
-            self._repolish_tree(page)
-        except RuntimeError:
-            pass                       # 페이지가 사라졌다 — 다음 장으로
-        if queue:
-            self._repolish_timer.start(0)
-
-    @staticmethod
-    def _repolish_tree(root) -> None:
-        """위젯 트리 전체에 스타일을 다시 태운다(자식까지).
-
-        ``setStyleSheet`` 만으로는 이미 polish 된 위젯의 속성이 갱신되지 않는 경우가
-        있어, 명시적으로 unpolish → polish 한다."""
-        style = root.style()
-        stack = [root]
-        while stack:
-            w = stack.pop()
-            style.unpolish(w)
-            style.polish(w)
-            w.update()
-            stack.extend(c for c in w.children() if isinstance(c, QWidget))
-
-    def _set_appearance_controls_enabled(self, on: bool) -> None:
-        """색 모드 토글의 활성 상태 — 페이지가 재생성되므로 **새** 위젯에 걸어야 한다."""
-        sw = getattr(self._setup_page, "_dark_switch", None)
-        if sw is not None:
-            sw.setEnabled(bool(on))
-
-    def _end_appearance_transition(self) -> None:
-        self._appearance_busy = False
-        self._set_appearance_controls_enabled(True)
-
     def _apply_statusbar_theme(self) -> None:
-        """상태바 라벨 색을 테마 토큰으로 적용(페이지 밖 위젯).
-
-        ★ 생성자도 이 메서드를 쓴다 — 같은 f-string 을 양쪽에 두면 한쪽만 고쳤을 때
-        색 모드를 한 번 바꾼 뒤에야 크레딧 라벨 모양이 달라진다(발견이 늦다).
-        토큰(`theme.MUTE`)은 모드에 따라 바뀌므로 상수로 굳힐 수 없다."""
+        """상태바 크레딧 라벨 색을 테마 토큰으로 적용(페이지 밖 위젯)."""
         self._credit_label.setStyleSheet(
             f"color: {theme.MUTE}; padding: 0 8px; font-weight: 600;")
 
@@ -2631,8 +2443,7 @@ class MainWindow(QMainWindow):
         self._stack.setCurrentWidget(w)        # 레이아웃 확정 후 스냅샷
         # ★ `w.grab()` 을 쓰지 마라 — 페이지는 배경을 안 칠하고 창이 뒤에서 칠하므로,
         #   떼어 찍으면 빈 자리가 Qt 기본 팔레트(#efefef, 밝은 회색)로 채워진다.
-        #   다크 모드에서 '밝은 화면이 먼저 보였다가 어두워지는' 원인이었다
-        #   (실측 밝기 85.7 vs 실제 30.4).  자세한 근거는 `motion.snapshot`.
+        #   자세한 근거는 `motion.snapshot`.
         new_pix = motion.snapshot(w)
         self._stack.setCurrentWidget(old)      # 리페인트 전 원복(사용자엔 불가시)
         motion.transition_in(
@@ -2748,6 +2559,9 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):  # noqa: N802
         # 종료 직전 마지막 크기/최대화 상태 저장 → 다음 실행에서 그대로 복원.
         self._persist_geometry()
+        # ★ 열린 시트의 중첩 루프를 끝낸다.  시트는 창이 숨을 때 저절로 닫히지 않는다
+        #   (최소화로 팝업이 사라지지 않게 — `SheetHost.eventFilter`).
+        self._sheets.close_all()
         # #14 절전 억제 해제 (남아 있을 경우).
         wakelock.release()
         if self._thumb_pool is not None:

@@ -214,6 +214,11 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   (`embedder_openvino._async_infer_queue_cls`). 조용한 폴백이 비동기 추론을 죽인 적이 있다
   (→ `docs/규칙_배경.md`). 회귀 가드 `dev/tests/test_async_infer_queue.py` 는 심볼 존재만
   보지 않고 **실제로 비동기 경로를 태운다**.
+- **`AsyncInferQueue.set_callback` 에 파이썬 콜백을 주지 마라** — 결과는 메인 스레드가
+  `get_idle_request_id()`·`userdata` 로 걷는다(`embedder_openvino._infer_raw`). 콜백이
+  있으면 스트림 스레드가 GIL 을 잡으러 오고, 메인이 GIL 을 쥔 채 `CompiledModel` 을 놓는
+  순간 서로를 기다려 **영원히 멈춘다**(실측, gdb). 걷기 전 `wait()` 로 실패 요청을 걸러야
+  직전 사진의 출력이 다른 사진에 붙지 않는다.
 
 ## 매칭 / 좌표 검토 규칙
 - **정확도 우선**: 지금 운영 조합(고효율 모드 = GPU MobileNetV3 임베딩으로 후보 추림 +
@@ -393,6 +398,15 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   비싸져서, 21회 호출이 스위트 시간의 절반(82초)을 먹은 적이 있다(→ `docs/규칙_배경.md`).
   QSS **문자열만** 검사하는 테스트는 `theme.render_qss` 로 렌더해 문자열을 직접 본다
   (앱에 적용할 필요가 없다 — 참조: `test_sheet_size_and_edge`).
+- **정적 `QTimer.singleShot(ms, lambda: self...)` 금지** — 람다가 위젯보다 오래 살아 죽은
+  객체를 만지면 PyQt6 가 프로세스를 끝낸다(간헐 세그폴트·abort 의 실제 원인이었다).
+  바운드 메서드를 넘기거나 `ui/deferred.call_later(owner, ms, fn)` 을 쓴다.  가드:
+  `dev/tests/test_deferred_call.py`.  테스트의 `deleteLater()` 는 `processEvents()` 로
+  처리되지 않으므로 conftest 의 `_flush_deferred_deletes` 가 테스트마다 처리한다 — 빼지 마라.
+- **`eventFilter` 에는 `@tolerate_teardown`(`ui/teardown.py`)을 붙인다.** GC 가 순환을 치울 때
+  파이썬 속성을 먼저 비우고 C++ 창을 지우는데, `~QWidget` 이 그 사이 이벤트를 필터에 통과시켜
+  `AttributeError` → abort 가 났다(실측 core dump, 앱에서는 종료 경로). 가드:
+  `dev/tests/test_teardown_event_filter.py`.
 - 무거운 의존성(cv2/openvino/torch/PyQt6)은 환경에 없을 수 있어 `pytest.importorskip` 으로
   게이트한다(모듈 단위 import 도 포함). **순수 로직은 무거운 의존성 없이** 단위 테스트되게 설계
   (예: 좌표 후보 선택 `_select_coord_candidates`, 업데이트 브랜치 정규화/자기교정).

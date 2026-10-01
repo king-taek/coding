@@ -4,8 +4,8 @@
 '기준 장비와 검증 장비는…' 문구 삭제".
 
 되돌아가기 쉬운 두 가지를 못 박는다.
-1. 보기 옵션(다크 모드)이 제목 **위 별도 줄**로 다시 갈라지면 제목이 그 높이만큼
-   내려간다 → 제목 줄과 스위치가 같은 줄(같은 y)에 있어야 한다.
+1. 제목 줄의 항목(모드 배지)이 제목 **위 별도 줄**로 갈라지면 제목이 그 높이만큼
+   내려간다 → 제목과 배지가 같은 줄(같은 y)에 있어야 한다.
 2. 그렇게 한 줄로 합쳐도 800px 에서 가로가 넘치면 안 된다(이 앱은 가로 넘침 금지).
 """
 
@@ -48,18 +48,17 @@ def _title_label(page: sp.SetupPage) -> QLabel:
     raise AssertionError("제목 라벨을 찾지 못했다")
 
 
-def test_dark_switch_shares_the_title_row(qapp):
-    """보기 옵션이 제목 위 별도 줄로 돌아가면(= 제목이 내려가면) 실패."""
+def test_mode_badge_shares_the_title_row(qapp):
+    """배지가 제목 위 별도 줄로 갈라지면(= 제목이 내려가면) 실패."""
     page = _page(qapp)
     try:
         title = _title_label(page)
-        switch = page._dark_switch
+        badge = page._mode_badge_card
         t_mid = title.mapTo(page, title.rect().center()).y()
-        s_mid = switch.mapTo(page, switch.rect().center()).y()
-        # 허용치는 스위치 행 높이 — 제목 라벨 높이를 쓰면 줄이 갈라져도 통과한다
-        # (라벨이 줄 높이만큼 늘어나 85px 이 되므로 별도 줄 간격 70px 을 삼킨다).
-        assert abs(t_mid - s_mid) <= switch.height(), \
-            f"제목({t_mid}px)과 다크 모드 스위치({s_mid}px)가 다른 줄에 있다"
+        b_mid = badge.mapTo(page, badge.rect().center()).y()
+        # 허용치는 배지 높이 — 제목 라벨 높이를 쓰면 줄이 갈라져도 통과한다.
+        assert abs(t_mid - b_mid) <= badge.height(), \
+            f"제목({t_mid}px)과 모드 배지({b_mid}px)가 다른 줄에 있다"
     finally:
         page.close()
 
@@ -115,7 +114,7 @@ def test_no_setup_hint_paragraph(qapp):
 
 @pytest.mark.parametrize("width", [800, 1024, 1512])
 def test_no_horizontal_overflow(qapp, width):
-    """제목·배지·스위치를 한 줄에 둬도 좁은 창에서 가로 스크롤이 없어야 한다."""
+    """로고·제목·배지를 한 줄에 둬도 좁은 창에서 가로 스크롤이 없어야 한다."""
     page = _page(qapp, width)
     try:
         scroll = page.findChild(QScrollArea)

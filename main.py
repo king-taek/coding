@@ -61,14 +61,8 @@ def _apply_app_font(app) -> None:
 
 
 def _load_stylesheet(app) -> None:
-    from aoi_verification.app.utils import paths, prefs as _prefs
+    from aoi_verification.app.utils import paths
     from aoi_verification.app.ui import theme
-    # 저장된 색 모드·모션 설정을 스타일시트 적용 전에 확정.
-    try:
-        _p = _prefs.load()
-        theme.set_color_mode(getattr(_p, "color_mode", theme.DEFAULT_COLOR_MODE))
-    except Exception:
-        pass
     qss_path = paths.resource_path("aoi_verification/app/ui/style.qss")
     try:
         text = Path(qss_path).read_text(encoding="utf-8")

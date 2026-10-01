@@ -37,17 +37,6 @@ def qapp():
     return QApplication.instance() or QApplication([])
 
 
-# ★ 모드 목록을 복제하지 않는다 — theme 에서 읽어야 새 색 모드가
-#   추가되는 순간 모든 대비·포커스 계약이 자동으로 걸린다.
-_MODES = list(theme.color_mode_keys())
-
-
-@pytest.fixture(autouse=True)
-def _restore_light():
-    yield
-    theme.set_color_mode("light")
-
-
 # ── 1.4.11 비-텍스트 대비 ────────────────────────────────────────────────
 def _lum(hexv: str) -> float:
     h = hexv.lstrip("#")
@@ -63,48 +52,40 @@ def _ratio(a: str, b: str) -> float:
     return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
 
 
-@pytest.mark.parametrize("mode", _MODES)
 @pytest.mark.parametrize("surface", ["elev", "panel", "bg"])
-def test_interactive_border_meets_non_text_contrast(mode, surface):
+def test_interactive_border_meets_non_text_contrast(surface):
     """평상시 컨트롤 경계가 **모든** 면에서 3:1 이상 — 안 보이는 입력란 재발 방지."""
-    theme.set_color_mode(mode)
     c = theme.COLORS
     r = _ratio(c["line_strong"], c[surface])
-    assert r >= 3.0, f"{mode}: line_strong on {surface} = {r:.2f}"
+    assert r >= 3.0, f"line_strong on {surface} = {r:.2f}"
 
 
-@pytest.mark.parametrize("mode", _MODES)
-def test_structural_rule_meets_non_text_contrast(mode):
+def test_structural_rule_meets_non_text_contrast():
     """카드 외곽·행 구분 눈금($line)도 시트 면·바탕에서 3:1 이상."""
-    theme.set_color_mode(mode)
     c = theme.COLORS
     for surface in ("panel", "bg"):
         r = _ratio(c["line"], c[surface])
-        assert r >= 3.0, f"{mode}: line on {surface} = {r:.2f}"
+        assert r >= 3.0, f"line on {surface} = {r:.2f}"
 
 
-@pytest.mark.parametrize("mode", _MODES)
-def test_focus_ring_meets_contrast(mode):
+def test_focus_ring_meets_contrast():
     """포커스 링은 링이 놓이는 모든 면에서 3:1 이상이어야 보인다."""
-    theme.set_color_mode(mode)
     c = theme.COLORS
     for surface in ("elev", "panel", "bg"):
         r = _ratio(c["focus"], c[surface])
-        assert r >= 3.0, f"{mode}: focus on {surface} = {r:.2f}"
+        assert r >= 3.0, f"focus on {surface} = {r:.2f}"
 
 
-@pytest.mark.parametrize("mode", _MODES)
-def test_filled_button_focus_ring_contrasts_with_its_own_fill(mode):
+def test_filled_button_focus_ring_contrasts_with_its_own_fill():
     """★ 채운 버튼의 링은 **자기 채움**과 대비해야 한다 — 페이지 배경이 아니다.
 
     이 검사가 없어서 실제로 구멍이 났다: `$focus` 는 `$accent` 와 1.23:1 이라
     [검증 시작]에 링을 그려도 자기 색에 묻혀 보이지 않았다(캡처 실측).  픽셀 검사만으로는
     잡히지 않는다 — 링 색 픽셀이 '존재'하기는 했으니까.  그래서 색 관계로 못 박는다."""
-    theme.set_color_mode(mode)
     c = theme.COLORS
     ring = _ring_color_for_primary()
     r = _ratio(ring, c["accent"])
-    assert r >= 3.0, f"{mode}: primary 링({ring}) vs 채움({c['accent']}) = {r:.2f}"
+    assert r >= 3.0, f"primary 링({ring}) vs 채움({c['accent']}) = {r:.2f}"
 
 
 def _ring_color_for_primary() -> str:
@@ -216,7 +197,7 @@ def test_switch_row_target(qapp):
 
 
 # ── 2.4.7 포커스 가시성 — 선언이 아니라 **렌더된 픽셀**로 증명 ─────────────
-def _focus_pixels(qapp, mode: str, make, pick=None, ring: str = "focus") -> bool:
+def _focus_pixels(qapp, make, pick=None, ring: str = "focus") -> bool:
     """포커스 색 픽셀이 실제로 그려졌는지 — QSS 에 링을 '선언'한 것만으로는 증명이 안 된다.
 
     ★ 자식 위젯을 단독으로 show() 하면 창이 활성화되지 않아 포커스가 실제로 들어가지
@@ -226,7 +207,6 @@ def _focus_pixels(qapp, mode: str, make, pick=None, ring: str = "focus") -> bool
     ``ring`` — 기대 링 색 토큰.  채운 primary 는 자기 채움과 대비해야 하므로
     ``on_accent`` 를 쓴다(위 test_filled_button_focus_ring_contrasts_with_its_own_fill).
     """
-    theme.set_color_mode(mode)
     qapp.setStyleSheet(theme.render_qss(_QSS))
     host = QWidget()
     lay = _QVBox(host)
@@ -259,7 +239,6 @@ def _focus_pixels(qapp, mode: str, make, pick=None, ring: str = "focus") -> bool
 from PyQt6.QtWidgets import QVBoxLayout as _QVBox        # noqa: E402
 
 
-@pytest.mark.parametrize("mode", _MODES)
 @pytest.mark.parametrize("make,label,ring", [
     (lambda p: QLineEdit(p), "입력란", "focus"),
     (lambda p: NeonButton("버튼", role="ghost", parent=p), "ghost 버튼", "focus"),
@@ -270,26 +249,24 @@ from PyQt6.QtWidgets import QVBoxLayout as _QVBox        # noqa: E402
     (lambda p: QDoubleSpinBox(p), "스핀박스", "focus"),
     (lambda p: QCheckBox("모션 줄이기", p), "체크박스", "focus"),
 ])
-def test_focus_ring_actually_renders(qapp, mode, make, label, ring):
+def test_focus_ring_actually_renders(qapp, make, label, ring):
     """★ 이 테스트가 ghost/danger 버튼의 링이 **아예 없던** 버그를 잡아냈다:
     `QPushButton[role="ghost"]` 의 border-color 가 특이도 동급·후순위로 일반
     `QPushButton:focus` 를 덮어쓰고 있었다."""
-    assert _focus_pixels(qapp, mode, make, ring=ring), \
-        f"{mode}/{label}: 포커스 링({ring})이 실제로 렌더되지 않았다"
+    assert _focus_pixels(qapp, make, ring=ring), \
+        f"{label}: 포커스 링({ring})이 실제로 렌더되지 않았다"
 
 
-@pytest.mark.parametrize("mode", _MODES)
-def test_toggle_switch_focus_ring_renders(qapp, mode):
+def test_toggle_switch_focus_ring_renders(qapp):
     """커스텀 페인트 위젯 — QSS 가 아니라 paintEvent 가 링을 그린다."""
     assert _focus_pixels(
-        qapp, mode,
+        qapp,
         lambda p: SwitchRow("구형 모드", checked=False, parent=p),
         pick=lambda row: row.switch, ring="on_accent",
-    ), f"{mode}: 스위치 포커스 링 미렌더"
+    ), "스위치 포커스 링 미렌더"
 
 
-@pytest.mark.parametrize("mode", _MODES)
-def test_slider_focus_ring_renders(qapp, mode):
+def test_slider_focus_ring_renders(qapp):
     """★ QSS 로는 불가능한 케이스 — Qt 는 서브컨트롤에 :focus 를 지원하지 않고, 위젯
     border 도 서브컨트롤이 스타일링된 슬라이더에선 렌더되지 않는다.  그래서
     `NoWheelSlider.paintEvent` 가 직접 그린다.  이 테스트가 그 계약을 지킨다."""
@@ -301,16 +278,15 @@ def test_slider_focus_ring_renders(qapp, mode):
         sl.setValue(55)
         return sl
 
-    assert _focus_pixels(qapp, mode, make), f"{mode}: 슬라이더 포커스 링 미렌더"
+    assert _focus_pixels(qapp, make), "슬라이더 포커스 링 미렌더"
 
 
-@pytest.mark.parametrize("mode", _MODES)
-def test_option_tile_focus_ring_renders(qapp, mode):
+def test_option_tile_focus_ring_renders(qapp):
     assert _focus_pixels(
-        qapp, mode,
+        qapp,
         lambda p: OptionGroup([("a", "가"), ("b", "나")], parent=p),
         pick=lambda g: g.button("a"),
-    ), f"{mode}: 옵션 타일 포커스 링 미렌더"
+    ), "옵션 타일 포커스 링 미렌더"
 
 
 # ── 합성면 대비 — "전 쌍 통과"가 거짓이었던 구멍을 막는다 ────────────────────────
@@ -330,44 +306,29 @@ def _tint_alpha(rgba: str) -> int:
     return int(rgba.rsplit(",", 1)[1].strip(" )"))
 
 
-@pytest.mark.parametrize("mode", _MODES)
 @pytest.mark.parametrize("base", ["panel", "bg"])
-def test_selected_tile_label_on_its_own_tint(mode, base):
+def test_selected_tile_label_on_its_own_tint(base):
     """선택 타일 **라벨**은 자기 틴트 위에서 프로젝트 게이트(5.0)를 넘어야 한다.
 
     알파 36 에서 4.66~4.87 로 게이트를 깨고 있었다 — 라벨-대-면만 재던 표가 놓친 쌍."""
-    theme.set_color_mode(mode)
     c = theme.COLORS
     surface = _mix(c["accent"], _tint_alpha(theme.ACCENT_TINT), c[base])
     r = _ratio(c["accent"], surface)
-    assert r >= 5.0, f"{mode}/{base}: 선택 타일 라벨 {r:.2f}"
+    assert r >= 5.0, f"{base}: 선택 타일 라벨 {r:.2f}"
 
 
-@pytest.mark.parametrize("mode", _MODES)
-def test_text_behind_scrim_stays_readable(mode):
+def test_text_behind_scrim_stays_readable():
     """반투명 스크림의 **요점**은 뒤 화면이 읽히는 것이다 — 게이트 5.0 을 지킨다.
 
-    이전 알파(96/120)는 다크에서 4.43 이었고, 여유가 **적은** 다크에 오히려 더 두꺼운
-    디밍을 줘 모드 간 관계가 거꾸로였다."""
-    theme.set_color_mode(mode)
+    이전 알파(96/120)는 게이트 여유를 깎았다."""
     c = theme.COLORS
     sr, sg, sb, sa = theme.SCRIM_RGBA
     scrim = "#%02X%02X%02X" % (sr, sg, sb)
     r = _ratio(_mix(scrim, sa, c["ink"]), _mix(scrim, sa, c["bg"]))
-    assert r >= 5.0, f"{mode}: 스크림(알파 {sa}) 아래 본문 {r:.2f}"
+    assert r >= 5.0, f"스크림(알파 {sa}) 아래 본문 {r:.2f}"
 
 
-def test_scrim_is_not_heavier_in_the_mode_with_less_headroom():
-    """다크가 라이트보다 더 두꺼우면 안 된다(여유가 적은 쪽을 더 가리는 셈)."""
-    theme.set_color_mode("light")
-    light_a = theme.SCRIM_RGBA[3]
-    theme.set_color_mode("dark")
-    dark_a = theme.SCRIM_RGBA[3]
-    assert dark_a <= light_a + 16, f"라이트 {light_a} / 다크 {dark_a}"
-
-
-@pytest.mark.parametrize("mode", _MODES)
-def test_loading_indicator_reads_against_its_track(qapp, mode):
+def test_loading_indicator_reads_against_its_track(qapp):
     """busy 혜성·여정 스텝이 **자기 트랙**과 3:1 이상.
 
     '모션 줄이기' + busy 조합에서는 이 대비가 '살아 있다'는 유일한 신호다.
@@ -376,10 +337,9 @@ def test_loading_indicator_reads_against_its_track(qapp, mode):
     ※ 회전 링(_SpinnerDot)은 제거됐다 — 상태 정보가 없는 장식이었고, 62.5Hz 타이머가
     상시 돌아 '로딩이 버벅인다'의 원인이었다.  지금 지시자는 웨이퍼 맵(결정형 채움 /
     busy 물결)과 여정 스텝 두 가지다.  `_BusyStripe` 는 시작 스플래시가 쓴다."""
-    theme.set_color_mode(mode)
     c = theme.COLORS
     r = _ratio(c["accent"], c["line2"])
-    assert r >= 3.0, f"{mode}: 지시자 vs 트랙 {r:.2f}"
+    assert r >= 3.0, f"지시자 vs 트랙 {r:.2f}"
     # 실제로 그 토큰을 쓰는지 — 코드가 LINE 으로 되돌아가면 위 계산이 무의미해진다.
     import inspect
 
@@ -418,21 +378,19 @@ def test_loading_indicator_reads_against_its_track(qapp, mode):
         py = int(o + row * (wm.CELL + wm.GAP) + wm.CELL / 2)
         track = img.pixelColor(px, py).name().lower()
         assert track == c["line2"].lower(), (
-            f"{mode}: 미채움 다이가 화면에서 {track} 로 칠해졌다(기대 {c['line2']})")
+            f"미채움 다이가 화면에서 {track} 로 칠해졌다(기대 {c['line2']})")
         chunk = img.pixelColor(wm.SIZE // 2, wm.SIZE // 2).name().lower()
-        assert chunk == c["accent"].lower(), f"{mode}: 채움이 accent 가 아니다({chunk})"
+        assert chunk == c["accent"].lower(), f"채움이 accent 가 아니다({chunk})"
     finally:
         ov.hide()
         host.deleteLater()
 
 
-@pytest.mark.parametrize("mode", _MODES)
-def test_warn_is_a_distinct_channel_from_body_ink(mode):
+def test_warn_is_a_distinct_channel_from_body_ink():
     """★ 라이트 `warn` 이 `ink` 와 **바이트 단위로 같았다** — 경고 채널의 신호가 0.
 
     그런데 대비표는 그 쌍을 15.68 로 적어 표에서 가장 좋아 보이게 했다(측정이
     거짓을 보증한 사례).  경고는 본문과 구분되어야 하고 면 위에서 읽혀야 한다."""
-    theme.set_color_mode(mode)
     c = theme.COLORS
     assert c["warn"].upper() != c["ink"].upper(), "warn 이 ink 와 동일하다"
     # ★ 휘도비로 재면 안 된다 — 어두운 모드에서는 warn·ink 가 **둘 다 밝아** 휘도가
@@ -442,35 +400,32 @@ def test_warn_is_a_distinct_channel_from_body_ink(mode):
         h = h.lstrip("#")
         return [int(h[i:i + 2], 16) for i in (0, 2, 4)]
     delta = max(abs(a - b) for a, b in zip(ch(c["warn"]), ch(c["ink"])))
-    assert delta >= 60, f"{mode}: warn 이 ink 와 구분되지 않는다 (maxΔ={delta})"
+    assert delta >= 60, f"warn 이 ink 와 구분되지 않는다 (maxΔ={delta})"
     for surface in ("panel", "bg"):
         r = _ratio(c["warn"], c[surface])
-        assert r >= 5.0, f"{mode}: warn on {surface} = {r:.2f}"
+        assert r >= 5.0, f"warn on {surface} = {r:.2f}"
 
 
-@pytest.mark.parametrize("mode", _MODES)
-def test_toggle_switch_focus_ring_contrasts_with_its_track(mode):
+def test_toggle_switch_focus_ring_contrasts_with_its_track():
     """★ 커스텀 페인트 스위치 — ON 이면 트랙이 `accent` 라 `focus` 링이 1.23:1 로 묻힌다.
 
     채운 primary 버튼에서 고친 것과 **같은 함정**이 여기 남아 있었고, 픽셀 테스트가
     `checked=False` 만 검사해 통과했다.  두 상태를 모두 검사한다."""
-    theme.set_color_mode(mode)
     c = theme.COLORS
     # OFF 트랙 = line_strong, ON 트랙 = accent.  각 상태의 링 색이 그 위에서 보여야 한다.
     # 링은 트랙 위에 그려진다 — 하나의 링 색(on_accent)이 **두 트랙 색** 모두와
-    # 대비되어야 한다.  FOCUS 는 OFF 트랙에서 1.78(다크)로 묻혔다.
+    # 대비되어야 한다.
     assert _ratio(c["on_accent"], c["line_strong"]) >= 3.0, "OFF 링이 트랙에 묻힌다"
     assert _ratio(c["on_accent"], c["accent"]) >= 3.0, "ON 링이 트랙에 묻힌다"
 
 
-@pytest.mark.parametrize("mode", _MODES)
-def test_toggle_switch_focus_ring_renders_when_on(qapp, mode):
+def test_toggle_switch_focus_ring_renders_when_on(qapp):
     """ON 상태에서도 링이 실제로 렌더되는지 — 이전 테스트는 OFF 만 봤다."""
     assert _focus_pixels(
-        qapp, mode,
+        qapp,
         lambda p: SwitchRow("구형 모드", checked=True, parent=p),
         pick=lambda row: row.switch, ring="on_accent",
-    ), f"{mode}: ON 스위치 포커스 링 미렌더"
+    ), "ON 스위치 포커스 링 미렌더"
 
 
 def test_action_grade_controls_actually_render_at_44(qapp):

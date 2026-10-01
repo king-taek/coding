@@ -262,10 +262,8 @@ def test_compare_viewer_fills_the_window_as_a_sheet(qapp, big_source):
         qapp.processEvents()
 
 
-@pytest.mark.parametrize("mode", ["light", "dark"])
-def test_action_button_text_is_legible(qapp, big_source, mode):
+def test_action_button_text_is_legible(qapp, big_source):
     """액션 버튼(다음↔닫기 사이)의 글자/배경 대비가 WCAG AA(4.5:1) 이상."""
-    theme.set_color_mode(mode)
     theme.apply_to_app(qapp)
     v = _viewer()
     try:
@@ -281,8 +279,6 @@ def test_action_button_text_is_legible(qapp, big_source, mode):
         assert len(top) == 2, "버튼이 단색으로만 렌더 — 글자가 안 보인다"
         bg, fg = QColor(top[0][0]), QColor(top[1][0])
         ratio = _contrast(bg, fg)
-        assert ratio >= 4.5, f"{mode}: 대비 {ratio:.2f}:1 (배경 {bg.name()} / 글자 {fg.name()})"
+        assert ratio >= 4.5, f"대비 {ratio:.2f}:1 (배경 {bg.name()} / 글자 {fg.name()})"
     finally:
         v.close()
-        theme.set_color_mode("light")
-        theme.apply_to_app(qapp)

@@ -68,6 +68,54 @@ def test_infer_raw_returns_every_input_through_the_async_path(monkeypatch):
         assert float(np.asarray(raw[f"img{i}"]).ravel()[0]) == pytest.approx(i)
 
 
+def test_no_python_callback_is_handed_to_openvino(monkeypatch):
+    """★ 스트림 스레드에 파이썬 콜백을 주지 않는다 — 멈춤의 회귀 가드.
+
+    콜백이 있으면 스트림 스레드가 GIL 을 잡으러 오고, 그 순간 메인이 GIL 을 쥔 채
+    `CompiledModel` 을 놓으면 서로를 기다려 영원히 멈췄다(실측, gdb)."""
+    base = emb._async_infer_queue_cls()
+    calls = []
+
+    class _NoCb(base):                                    # type: ignore[misc, valid-type]
+        def set_callback(self, fn):
+            calls.append(fn)
+            return super().set_callback(fn)
+
+    monkeypatch.setattr(emb, "_async_infer_queue_cls", lambda: _NoCb)
+    raw = emb._infer_raw(_tiny_compiled(), [(f"c{i}", _x(i)) for i in range(7)],
+                         n_streams=3)
+    assert calls == [], "AsyncInferQueue 에 파이썬 콜백을 걸었다"
+    assert len(raw) == 7
+
+
+def test_a_failed_request_is_dropped_not_given_a_stale_result(monkeypatch):
+    """결과를 직접 걷게 되면서 생긴 위험 — 실패한 요청이 **직전 사진의 출력** 을 내주면
+    다른 사진의 임베딩이 붙는다(정확도).  실패는 콜백 시절처럼 **누락** 이어야 한다."""
+    base = emb._async_infer_queue_cls()
+
+    class _Fail:
+        def __init__(self, req):
+            self._req = req
+
+        def wait(self):
+            raise RuntimeError("추론 실패 흉내")
+
+        def __getattr__(self, name):
+            return getattr(self._req, name)
+
+    class _Flaky(base):                                   # type: ignore[misc, valid-type]
+        def __getitem__(self, h):
+            req = super().__getitem__(h)
+            return _Fail(req) if self.userdata[h] == "bad" else req
+
+    monkeypatch.setattr(emb, "_async_infer_queue_cls", lambda: _Flaky)
+    inputs = [("a", _x(1)), ("bad", _x(2)), ("c", _x(3)), ("d", _x(4))]
+    raw = emb._infer_raw(_tiny_compiled(), inputs, n_streams=1)
+    assert "bad" not in raw
+    for k, v in (("a", 1), ("c", 3), ("d", 4)):
+        assert float(np.asarray(raw[k]).ravel()[0]) == pytest.approx(v)
+
+
 def test_progress_is_reported_once_per_image():
     """진행률이 per-image 로 올라가야 한다(느린 NAS 에서 멈춘 것처럼 보이지 않게)."""
     compiled = _tiny_compiled()

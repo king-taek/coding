@@ -59,6 +59,7 @@ from PyQt6.QtGui import QColor, QPainter, QPen
 from PyQt6.QtWidgets import (QApplication, QGraphicsOpacityEffect, QHBoxLayout,
                              QLabel, QSizePolicy, QVBoxLayout, QWidget)
 
+from ..teardown import tolerate_teardown
 from ... import i18n
 from ...config import Fonts as _Fonts
 from .. import theme
@@ -514,6 +515,7 @@ class LoadingOverlay(QWidget):
         #   애니메이션 tick 이 **죽은 C++ 객체로** 들어간다 — 파이썬 예외가 아니라
         #   세그폴트다(전체 테스트에서 실측: 애니메이션이 도는 중 오버레이를 지우면 죽었다).
         self._val_anim.valueChanged.connect(self._on_val_tick)
+        self._val_anim.finished.connect(self._on_fill_finished)
 
         # 단계 서수 · 단계 이름 · 여정 스텝 ------------------------------
         self._stage_label = QLabel("", self._content)
@@ -541,10 +543,7 @@ class LoadingOverlay(QWidget):
         self._reset_eta()
 
         # #8 중지 버튼 — cancelable=True 로 보여진 작업에서만.
-        # ★ 인스턴스 스타일시트로 색을 굽지 않는다.  오버레이는 앱 시작 때 한 번 만들어지고
-        #   `_recolor_in_place` 는 인스턴스 스타일시트를 못 바꾸므로, 구운 라이트 팔레트가
-        #   다크 전환 뒤에도 그대로 남아 글자 대비가 2.19:1 로 무너졌다(실측 캡처).
-        #   role 로 옮기면 전역 QSS 가 다시 렌더되면서 두 모드를 모두 따라온다.
+        # ★ 인스턴스 스타일시트로 색을 굽지 않는다 — 색은 전역 QSS 의 role 이 칠한다.
         self._cancel_btn = NeonButton(i18n.KO.BTN_STOP, role="danger",
                                       parent=self._content)
         self._cancel_btn.setFixedWidth(120)
@@ -983,12 +982,29 @@ class LoadingOverlay(QWidget):
             if not self._hide_pending:
                 self._hide_pending = True
                 self._hide_token = token
+                self._fill_waited = False
                 self._hide_timer.start(int(remaining))
             return
         self._begin_fade_out(token)
 
     def _on_hide_latch(self) -> None:
+        # ★ 래치 타이머와 채움 tween 은 **서로 다른 시계**다.  부하가 걸리면 래치가 tween 의
+        #   마지막 tick 보다 먼저 와서, 100% 에 닿기 전(4/5)에 퇴장이 시작되고 정착에서 끝
+        #   칸이 '툭' 찼다(실측: 부하 중 40회에 16회).  아직 차오르는 중이면 tween 의
+        #   `finished` 를 기다린다 — 다른 경로가 tween 을 `stop()` 하면 `finished` 가 안
+        #   나므로, 상한(VAL_TWEEN_MAX_MS) 뒤 한 번 더 오는 이 래치가 안전망이다.
+        if (self._val_anim.state() != self._val_anim.State.Stopped
+                and not getattr(self, "_fill_waited", False)):
+            self._fill_waited = True
+            self._hide_timer.start(self.VAL_TWEEN_MAX_MS + 100)
+            return
         self._begin_fade_out(getattr(self, "_hide_token", self._show_token))
+
+    def _on_fill_finished(self) -> None:
+        """채움이 끝에 닿았다 — 그걸 기다리던 퇴장이 있으면 지금 시작한다."""
+        if self._hide_pending and getattr(self, "_fill_waited", False):
+            self._hide_timer.stop()
+            self._begin_fade_out(getattr(self, "_hide_token", self._show_token))
 
     def _begin_fade_out(self, token: int) -> None:
         self._hide_pending = False
@@ -1243,6 +1259,7 @@ class LoadingOverlay(QWidget):
     #   나누지 마라 — 한쪽만 갱신되면 '어떤 덮개는 단축키를 통과시킨다' 가 된다.
     _BLOCKED = motion.BLOCKED_INPUT_EVENTS
 
+    @tolerate_teardown
     def eventFilter(self, obj, event) -> bool:  # noqa: N802
         # ★ ``getattr`` 로 읽는다 — 잠금이 걸린 채 오버레이가 파괴되면 앱에 걸어 둔
         #   전역 필터가 잠시 살아남아, 파이썬 속성이 이미 사라진 객체로 이벤트가

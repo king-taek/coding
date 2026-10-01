@@ -189,25 +189,10 @@ async function freePlay(page, label) {
   if (await page.locator('[data-test="start"]').isDisabled())
     problems.push(`[${label}] 폴더를 둘 다 골랐는데 [검증 시작] 이 잠겨 있습니다`);
 
-  // 다크 모드 — 검증을 시작하기 전에는 바뀌어야 한다(끝난 뒤에는 잠긴다)
-  const before = await page.getAttribute("html", "data-mode");
-  await page.click('[data-test="dark"]');
-  await page.waitForTimeout(400);
-  const after = await page.getAttribute("html", "data-mode");
-  if (after === before) problems.push(`[${label}] 다크 모드가 바뀌지 않았습니다 (${before})`);
-  await page.click('[data-test="dark"]');
-  await page.waitForTimeout(400);
-
   await page.click('[data-test="start"]');
   await page.waitForSelector('[data-test="opt-none"]', { timeout: 15000 });
   await page.click('[data-test="opt-none"]');
   await page.waitForSelector('[data-page="select"]', { timeout: 15000 });
-
-  // 시작 뒤에는 다크 모드가 잠겨야 한다 — 진행 중 상태를 보호하는 규칙
-  await page.waitForTimeout(150);
-  const darkAfterStart = page.locator('[data-test="dark"]');
-  if ((await darkAfterStart.count()) && !(await darkAfterStart.isDisabled()))
-    problems.push(`[${label}] 검증을 시작했는데 다크 모드가 잠기지 않았습니다`);
 
   // 1단계 — 키보드로 절반, 버튼으로 절반.
   // ★ 로딩 오버레이가 떠 있는 동안은 누르지 않는다 — 앱과 마찬가지로 입력을 막는 것이

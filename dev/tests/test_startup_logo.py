@@ -50,7 +50,6 @@ from PyQt6.QtGui import QPixmap                             # noqa: E402
 from PyQt6.QtWidgets import QApplication, QLabel            # noqa: E402
 
 from aoi_verification.app.ui import main_window as mw       # noqa: E402
-from aoi_verification.app.ui import theme                   # noqa: E402
 from aoi_verification.app.ui.widgets import app_logo        # noqa: E402
 from aoi_verification.app.ui.widgets.startup_splash import (  # noqa: E402
     StartupSplash)
@@ -97,20 +96,18 @@ def test_splash_determinate_advances(splash):
 # ── 메인 창 상단 로고 ─────────────────────────────────────────────────────
 @pytest.fixture
 def window(qapp, monkeypatch, isolated_cache):
-    # 시작 시 뜨는 업데이트 확인 모달을 막는다(test_dark_mode_transition 과 같은 이유).
+    # 시작 시 뜨는 업데이트 확인 모달을 막는다(헤드리스에서 루프가 멈춘다).
     monkeypatch.setattr(mw.MainWindow, "_check_for_update_async", lambda self: None)
     monkeypatch.setattr(mw.MainWindow, "_maybe_offer_openvino", lambda self: None)
     monkeypatch.setattr(mw.MainWindow, "_warmup_accel_async", lambda self: None)
     # 백엔드 로딩은 테스트가 직접 굴린다 — 스레드 타이밍에 기대지 않는다.
     monkeypatch.setattr(mw.MainWindow, "_start_backend_import_async",
                         lambda self: None)
-    theme.set_color_mode("light")
     w = mw.MainWindow()
     yield w
     w.close()
     w.deleteLater()
     qapp.processEvents()
-    theme.set_color_mode("light")
 
 
 def _logos(widget) -> list:
@@ -175,18 +172,14 @@ def test_every_page_carries_the_logo(window, qapp):
             f"{type(page).__name__} 에 로고가 {len(_logos(page))}개다"
 
 
-def test_logo_inverts_for_dark_mode(qapp):
-    """로고 마크가 거의 검정이라, 반전하지 않으면 어두운 화면에서 묻힌다."""
-    theme.set_color_mode("light")
-    light = app_logo.build_logo_label().pixmap().toImage()
-    theme.set_color_mode("dark")
-    dark = app_logo.build_logo_label().pixmap().toImage()
-    theme.set_color_mode("light")
-    assert dark != light
-    # 알파는 보존한 채 RGB 만 뒤집혔는지 — 가장 진한 획이 밝아진다.
-    mid = (light.width() // 2, light.height() // 2)
-    assert (dark.pixelColor(*mid).lightness()
-            > light.pixelColor(*mid).lightness())
+def test_logo_is_the_original_mark_not_recolored(qapp):
+    """화면은 밝은 색 하나뿐이다 — 로고는 원본 그대로(색 반전 없이) 축소만 한다."""
+    from PyQt6.QtCore import Qt
+    shown = app_logo.build_logo_label().pixmap()
+    assert not shown.isNull()
+    src = QPixmap(str(paths.logo_path("logo_clear.png"))).scaledToHeight(
+        shown.height(), Qt.TransformationMode.SmoothTransformation)
+    assert shown.toImage() == src.toImage()
 
 
 def test_build_pages_reports_progress_for_the_splash(qapp, monkeypatch,

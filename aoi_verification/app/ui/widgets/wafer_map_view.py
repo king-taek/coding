@@ -246,13 +246,13 @@ def _paint_count(painter: QPainter, rect: QRectF, text: str, col: dict) -> None:
 
 def render_map_image(data: Optional[MapData], size: int = 720,
                      palette: Optional[dict] = None) -> QImage:
-    """엑셀 삽입용 PNG 원본 — 화면과 같은 :func:`paint_map`.  기본은 밝은 팔레트."""
+    """엑셀 삽입용 PNG 원본 — 화면과 같은 :func:`paint_map`.  기본은 앱 팔레트."""
     img = QImage(size, size, QImage.Format.Format_ARGB32)
     img.fill(0)
     painter = QPainter(img)
     try:
         paint_map(painter, QRectF(0, 0, size, size), data,
-                  colors=_colors(palette or theme.PALETTES["light"]),
+                  colors=_colors(palette or theme.COLORS),
                   show_count=True,
                   dot_r=max(2.0, size / 240))
     finally:

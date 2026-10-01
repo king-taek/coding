@@ -15,7 +15,6 @@ def test_defaults():
     assert p.engine_mode == prefs.EngineMode.COORDINATE
     assert p.legacy_enabled is None            # '아직 설정 안 됨'
     assert p.legacy_engine == ""
-    assert p.color_mode == "light"
 
 
 # ── 구형 모드 상태 유도 (순수 함수 — Qt 불필요) ─────────────────────────────
@@ -61,12 +60,10 @@ def test_resolve_legacy_engine_remembers_sub_choice():
 
 def test_new_fields_round_trip(isolated_cache):
     prefs.save(prefs.UiPrefs(legacy_enabled=True,
-                             legacy_engine=prefs.EngineMode.EFFICIENCY,
-                             color_mode="dark"))
+                             legacy_engine=prefs.EngineMode.EFFICIENCY))
     loaded = prefs.load()
     assert loaded.legacy_enabled is True          # None 과 구분되어 왕복
     assert loaded.legacy_engine == prefs.EngineMode.EFFICIENCY
-    assert loaded.color_mode == "dark"
 
 
 def test_prefs_json_without_switch_keys_yields_unset(isolated_cache):
@@ -125,7 +122,6 @@ def test_window_and_splitter_keys_round_trip(isolated_cache):
         window_maximized=True,
         splitter_state_select_h="QlpoOTFBWQ==",
         splitter_state_match_h="ZHVtbXk=",
-        howto_expanded=True,
     )
     prefs.save(p)
     loaded = prefs.load()
@@ -134,7 +130,6 @@ def test_window_and_splitter_keys_round_trip(isolated_cache):
     assert loaded.window_maximized is True
     assert loaded.splitter_state_select_h == "QlpoOTFBWQ=="
     assert loaded.splitter_state_match_h == "ZHVtbXk="
-    assert loaded.howto_expanded is True
 
 
 def test_window_keys_default_to_unset(isolated_cache):
@@ -143,7 +138,6 @@ def test_window_keys_default_to_unset(isolated_cache):
     assert p.window_width == 0
     assert p.window_height == 0
     assert p.window_maximized is False
-    assert p.howto_expanded is False
 
 
 def test_removed_keys_from_older_versions_load_without_error(isolated_cache):
@@ -159,12 +153,16 @@ def test_removed_keys_from_older_versions_load_without_error(isolated_cache):
         "image_long_edge_match": 1000,
         "splitter_state_select_v": "YWJjZA==",
         "speed_mode": True,
+        "color_mode": "dark",              # 다크 모드 제거
+        "howto_expanded": True,            # 설정 화면 '사용 방법' 안내 제거
         "last_ref_root": "D:/기준",        # ★ 이건 남아 있어야 한다(U-01 대비)
     }
     p = prefs.UiPrefs.from_dict(old)
     assert p.threshold == 0.7
     assert p.last_ref_root == "D:/기준"
-    assert not hasattr(p, "speed_mode")
+    for gone in ("speed_mode", "color_mode", "howto_expanded"):
+        assert not hasattr(p, gone)
+        assert gone not in p.to_dict(), f"저장하면 폐기 키 {gone} 가 다시 쓰인다"
 
 
 def test_last_used_inputs_are_still_persisted():

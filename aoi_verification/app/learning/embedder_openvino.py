@@ -304,7 +304,8 @@ def _infer_raw(compiled, inputs, n_streams: int, progress_cb=None) -> Dict[Path,
     """``inputs=[(path, (1,3,H,W) ndarray), ...]`` → ``{path: raw_feat}``.
 
     ``AsyncInferQueue(jobs=n_streams)`` 로 다수 추론을 동시에 띄워 파이프라인을
-    채운다.  큐를 못 만들면 InferRequest 단일 흐름으로 폴백.  실패 path 는 누락.
+    채운다(결과는 콜백이 아니라 메인 스레드가 걷는다 — 아래 ★).  큐를 못 만들면
+    InferRequest 단일 흐름으로 폴백.  실패 path 는 누락.
     ``progress_cb(n)`` 이 주어지면 추론 결과가 나올 때마다 처리 장수를 보고한다
     (느린 NAS 에서도 진행률이 per-image 로 즉시 올라가게 — #3)."""
     AsyncInferQueue = _async_infer_queue_cls()
@@ -316,26 +317,45 @@ def _infer_raw(compiled, inputs, n_streams: int, progress_cb=None) -> Dict[Path,
         except Exception:
             queue = None
     if queue is not None:
-        def _cb(infer_request, userdata):
+        # ★ 파이썬 콜백(`set_callback`)을 걸지 않는다 — 결과는 **메인 스레드가** 걷는다.
+        #   OpenVINO 의 스트림 스레드는 '끝났다' 를 알린 뒤에도 콜백 사본을 쥐고 있다가
+        #   놓을 때 GIL 을 잡는다.  그 사이 메인이 GIL 을 쥔 채 `CompiledModel` 을 놓으면
+        #   소멸자가 그 스레드를 join 하며 서로를 기다려 **영원히 멈춘다**(실측: gdb 로
+        #   `~CPUStreamsExecutor → join` ↔ `PyEval_AcquireThread`).  콜백이 없으면 스트림
+        #   스레드가 파이썬을 만질 일이 없다.  병렬도는 그대로다(요청 jobs 개가 동시에 돈다).
+        outstanding: set = set()        # 결과를 아직 걷지 않은 요청 번호
+
+        def _collect(h: int) -> None:
+            if h not in outstanding:
+                return
+            outstanding.discard(h)
+            req = queue[h]
             try:
-                raw[userdata] = list(infer_request.results.values())[0]
+                req.wait()              # 실패한 추론은 여기서 예외 — 옛 결과를 걷지 않는다
+                p = queue.userdata[h]
+                raw[p] = list(req.results.values())[0]
             except Exception:
-                pass
+                return
             if progress_cb is not None:
                 try:
-                    progress_cb(_udata_count(userdata))
+                    progress_cb(_udata_count(p))
                 except Exception:
                     pass
-        queue.set_callback(_cb)
+
         for p, x in inputs:
             try:
+                h = queue.get_idle_request_id()     # GIL 을 놓고 빈 요청을 기다린다
+                _collect(h)                         # 재사용 전에 직전 결과를 걷는다
                 queue.start_async({0: x}, userdata=p)
             except Exception:
                 continue
+            outstanding.add(h)
         try:
             queue.wait_all()
         except Exception:
             pass
+        for h in list(outstanding):
+            _collect(h)
     else:
         try:
             req = compiled.create_infer_request()

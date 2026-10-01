@@ -81,7 +81,7 @@ def test_hide_after_cancel_then_page_switch_leaves_nothing_running(
 
 
 def test_cancel_button_has_no_baked_stylesheet(styled_qapp) -> None:
-    """[중지] 는 role 로 칠한다 — 인라인 스타일은 다크 전환을 영영 못 따라온다."""
+    """[중지] 는 role 로 칠한다 — 인라인 스타일로 색을 굽지 않는다."""
     host = QWidget()
     ov = LoadingOverlay(host)
     assert ov._cancel_btn.styleSheet() == ""

@@ -141,7 +141,7 @@ class _ThumbTile(QFrame):
 
         ★ 예전엔 클래스 상수 `_SEL_STYLE` 을 인스턴스 스타일시트로 걸었다.  세 가지가
         동시에 틀렸다: (1) 클래스 본문에서 `theme.ACCENT` 를 `.format()` 했으므로 색이
-        **import 시점에 굳어** 다크 전환이 영영 안 먹었고, (2) 선택자가 스코프 없는
+        **import 시점에 굳었고**, (2) 선택자가 스코프 없는
         `QFrame {…}` 이라 자식 QLabel(파일명·이미지)까지 캐스케이드돼 타일이 3중 액자로
         보였으며, (3) 배경이 현 팔레트에 없는 옛 네온 팔레트의 주황이었다.
         게다가 한 화면에 수백 개인 위젯이라 인스턴스 스타일시트 자체가 렉의 원인이다.
@@ -220,7 +220,7 @@ class _PlusTile(QFrame):
         lay.setContentsMargins(6, 6, 6, 6)
         lab = QLabel(i18n.KO.COUNT_PLUS_N_FMT.format(n=n), self)
         lab.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        # 색은 QSS 가 준다(role="plusTile") — 구우면 색 모드 전환 때 이 타일만 남는다.
+        # 색은 QSS 가 준다(role="plusTile") — 인스턴스 스타일시트로 굽지 않는다.
         lab.setProperty("role", "plusTile")
         lab.setMinimumHeight(size)
         lay.addWidget(lab)

@@ -1,14 +1,12 @@
 """12px 캡션 등급의 **실측** 대비 — 색이 아니라 크기가 원인이었다.
 
-배경(실측): 토큰 조합을 전수로 재면 라이트 5.65~16.67 · 다크 5.41~15.27 로 팔레트는
-전부 WCAG AA(4.5:1)를 넘는다.  그런데 화면에서 잘라 재면 **캡션 등급만** 3.58~4.23:1 로
-떨어졌다 — 결과 통계 타일 캡션 4개(라이트 3.58~3.83 / 다크 3.63~3.74)와 실패 검토 타일의
-파일명 캡션(라이트 3.77 · 다크 4.23).  12px 에서는 획이 1px 미만이라 **렌더된 픽셀이
-지정색에 도달하지 못한다**(가장 진한 단일 픽셀로 재도 다크 4.61 로 겨우 걸쳤다).
-그래서 색을 더 진하게 하는 것으로는 못 고치고, 크기·굵기를 올려서 고쳤다
-(`theme.Profile.font_caption_lg` / `font_caption_lg_weight`).
+배경(실측): 토큰 조합을 전수로 재면 5.65~16.67 로 팔레트는 전부 WCAG AA(4.5:1)를
+넘는다.  그런데 화면에서 잘라 재면 **캡션 등급만** 3.58~3.83:1 로 떨어졌다 — 결과 통계
+타일 캡션 4개와 실패 검토 타일의 파일명 캡션(3.77).  12px 에서는 획이 1px 미만이라
+**렌더된 픽셀이 지정색에 도달하지 못한다**.  그래서 색을 더 진하게 하는 것으로는 못
+고치고, 크기·굵기를 올려서 고쳤다(`theme.Profile.font_caption_lg` / `font_caption_lg_weight`).
 
-여기서 세우는 불변식: **캡션 등급은 두 색 모드 모두에서 4.5:1 을 넘는다.**
+여기서 세우는 불변식: **캡션 등급은 4.5:1 을 넘는다.**
 지정색이 아니라 **그려진 픽셀**로 잰다 — 그게 사용자가 보는 것이고, 이 회귀는 지정색만
 보면 절대 안 보인다.
 
@@ -51,19 +49,10 @@ def _ratio(a, b) -> float:
     return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
 
 
-@pytest.fixture
-def restore_mode():
-    """색 모드를 원래대로 되돌린다 — 이 파일이 다른 테스트에 다크를 흘리면 안 된다."""
-    before = theme.COLOR_MODE
-    yield
-    theme.set_color_mode(before)
-
-
-def _measure(mode: str, tile_role: str, caption_role: str, text: str) -> float:
+def _measure(tile_role: str, caption_role: str, text: str) -> float:
     """`tile_role` 면 위에 `caption_role` 라벨을 실제로 그려 대비를 잰다."""
     from aoi_verification.app.ui import motion
 
-    theme.set_color_mode(mode)
     qss = theme.render_qss(_QSS.read_text(encoding="utf-8"))
 
     root = QWidget()
@@ -103,7 +92,6 @@ def _measure(mode: str, tile_role: str, caption_role: str, text: str) -> float:
     return _ratio(fg, bg)
 
 
-@pytest.mark.parametrize("mode", ["light", "dark"])
 @pytest.mark.parametrize(
     "tile_role, caption_role, text",
     [
@@ -111,11 +99,10 @@ def _measure(mode: str, tile_role: str, caption_role: str, text: str) -> float:
         ("statTile", "statCaption", "매치 성공"),
     ],
 )
-def test_caption_grade_meets_wcag_aa(qapp, restore_mode, mode,
-                                     tile_role, caption_role, text):
-    r = _measure(mode, tile_role, caption_role, text)
+def test_caption_grade_meets_wcag_aa(qapp, tile_role, caption_role, text):
+    r = _measure(tile_role, caption_role, text)
     assert r >= 4.5, (
-        f"[{mode}] {caption_role} '{text}' 실측 대비 {r:.2f}:1 — 4.5 미만.\n"
+        f"{caption_role} '{text}' 실측 대비 {r:.2f}:1 — 4.5 미만.\n"
         "색을 진하게 하는 것으로는 못 고친다(지정색은 이미 5:1 이상). "
         "theme.Profile.font_caption_lg / font_caption_lg_weight 를 확인하라.")
 
@@ -123,12 +110,11 @@ def test_caption_grade_meets_wcag_aa(qapp, restore_mode, mode,
 def test_file_captions_share_one_grade(qapp):
     """타일 파일명 캡션 두 곳이 **같은 등급**을 쓴다.
 
-    ★ 여기서 그린 픽셀을 재지 않는 이유를 적어 둔다: 파일명 캡션의 실측 미달(라이트
-    3.77 · 다크 4.23)은 **실제 다이얼로그 전체를 렌더했을 때** 나온 값이고, 타일 하나만
+    ★ 여기서 그린 픽셀을 재지 않는 이유를 적어 둔다: 파일명 캡션의 실측 미달(3.77)은 **실제 다이얼로그 전체를 렌더했을 때** 나온 값이고, 타일 하나만
     떼어 그리면 같은 조건이 재현되지 않는다(떼어 재면 지정색 그대로 6.5/6.1 이 나온다).
     재현되지 않는 측정을 테스트에 굳히는 대신, **고친 메커니즘**(두 화면이 같은 캡션
     등급을 쓴다 + 그 등급이 커졌다)을 못 박는다.  화면 전체 실측은 외부 하네스가 맡는다
-    (수리 후 라이트 4.61 · 다크 5.02).
+    (수리 후 4.61).
     """
     from aoi_verification.app.ui.widgets import thumb_grid, unmatched_review_dialog
     src = [Path(thumb_grid.__file__).read_text(encoding="utf-8"),
@@ -149,13 +135,12 @@ def test_caption_grade_is_bigger_and_bolder_than_the_chip_grade():
     assert p.font_caption_lg_weight >= 600
 
 
-def test_the_measurement_would_catch_a_low_contrast_caption(qapp, restore_mode):
+def test_the_measurement_would_catch_a_low_contrast_caption(qapp):
     """가드가 늘 통과하는 빈 껍데기가 아님을 스스로 증명한다.
 
     같은 자리에 **거의 배경색인 글자**를 그리면 4.5 아래로 떨어져야 한다."""
     from aoi_verification.app.ui import motion
 
-    theme.set_color_mode("light")
     root = QWidget()
     root.setStyleSheet(
         f"QWidget {{ background: {theme.ELEV}; }} "

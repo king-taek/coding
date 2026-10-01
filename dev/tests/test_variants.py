@@ -8,8 +8,6 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from pathlib import Path
 
-import pytest
-
 from aoi_verification.app.ui import theme
 
 _REPO = Path(__file__).resolve().parents[2]
@@ -57,15 +55,13 @@ def test_tokens_cover_colors_and_structure():
 
 
 def test_no_old_palette():
-    for mode, palette in theme.PALETTES.items():
-        for name, hexv in palette.items():
-            assert hexv.upper() not in _OLD_HEXES, f"{mode}.{name} = 구팔레트 {hexv}"
+    for name, hexv in theme.COLORS.items():
+        assert hexv.upper() not in _OLD_HEXES, f"{name} = 구팔레트 {hexv}"
 
 
-@pytest.mark.parametrize("mode", ["light", "dark"])
-def test_contrast_has_aa_headroom_both_modes(mode):
-    """라이트·다크 **양쪽** 전 기능 색상쌍이 AA 여유(≥5.0) — 포커스 링은 ≥4.5."""
-    c = theme.PALETTES[mode]
+def test_contrast_has_aa_headroom():
+    """전 기능 색상쌍이 AA 여유(≥5.0) — 포커스 링은 ≥4.5."""
+    c = theme.COLORS
     fails = []
     checks = [
         ("ink/bg", c["ink"], c["bg"], 7.0),
@@ -128,5 +124,5 @@ def test_apply_to_app_renders(styled_qapp):
 
     ★ 테마 적용은 conftest 의 `styled_qapp` 이 **세션당 1회**만 한다 — 여기서
     `apply_to_app` 을 또 부르면 그 `setStyleSheet` 비용이 그대로 더해지고(부를수록
-    비싸진다), 공유 앱을 이 테스트의 색 모드로 오염시킨 채 복원하지 않는다."""
+    비싸진다)."""
     assert "$" not in styled_qapp.styleSheet()

@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (QApplication, QFrame, QGridLayout, QHBoxLayout,
 
 from ... import i18n
 from .. import theme
+from ..deferred import call_later
 from ..score_fmt import fmt_score
 from ...models.result import MatchResult, MissEntry
 from ...models.slot import ImageItem
@@ -150,8 +151,7 @@ class _LazyThumb(QLabel):
         # ★ 인스턴스별 setStyleSheet 를 쓰지 않는다(#렉).  한 화면에 썸네일이 수백 개
         #   생기는데, 위젯마다 자기 스타일시트를 가지면 그만큼 규칙 집합이 따로 만들어져
         #   폴리시·재계산 비용이 개수에 비례해 커진다.  role 속성 + 전역 규칙 한 줄이면
-        #   같은 그림을 그리면서 비용은 1회다.  덤으로 색이 생성 시점에 박히지 않아
-        #   다크 모드 전환에도 자동으로 따라간다.
+        #   같은 그림을 그리면서 비용은 1회다.  덤으로 색이 생성 시점에 박히지 않는다.
         self.setProperty("role", "thumbFrame")
         self.setProperty("subtle", "true" if subtle else "false")
         # placeholder — 첫 paint 후 실제 이미지로 교체(패널보다 살짝 밝은 elev 바탕).
@@ -1119,8 +1119,7 @@ class MatchReviewPage(QWidget):
         self._update_summary()
         # 검토 화면이 새로 열릴 때마다 스크롤을 항상 최상단으로 (이전 세션의
         # 스크롤 위치가 남지 않도록). 레이아웃 확정 후 적용.
-        QTimer.singleShot(
-            0, lambda: self._scroll.verticalScrollBar().setValue(0))
+        call_later(self, 0, lambda: self._scroll.verticalScrollBar().setValue(0))
 
     # ------------------------------------------------------------------
     # 행 생성 — 한 번에 다 만들지 않는다.
@@ -1250,14 +1249,14 @@ class MatchReviewPage(QWidget):
         """‘후보 한 줄 더 보기’ 후 — 행이 화면에서 같은 자리에 있도록 스크롤 보정 (#6)."""
         sb = self._scroll.verticalScrollBar()
         delta = self._row_top(row) - sb.value()
-        QTimer.singleShot(
-            0, lambda: sb.setValue(max(0, self._row_top(row) - delta)))
+        # 주인은 **행** 이다 — 재렌더로 행이 먼저 지워져도 예약이 함께 취소된다.
+        call_later(row, 0, lambda: sb.setValue(max(0, self._row_top(row) - delta)))
 
     def _on_row_less(self, row) -> None:
         """‘접기’ 후 — 접은 행의 사진들이 최상단에 오도록 부드럽게 복귀 (#1/#6)."""
         from .. import motion
         sb = self._scroll.verticalScrollBar()
-        QTimer.singleShot(0, lambda: motion.animate_scroll(sb, self._row_top(row)))
+        call_later(row, 0, lambda: motion.animate_scroll(sb, self._row_top(row)))
 
     # ── 현재 행 표시 (스왑 뒤 그 행을 보이게 스크롤하는 용도) ────────────────
     def _visible_rows(self) -> list["_MatchRow"]:
