@@ -1297,6 +1297,7 @@ class ExcelExporter(QThread):
             return xli
 
         base = self._prog_done
+        live_seen = False
         for idx, slot in enumerate(rows, start=1):
             if self._stop.is_set():
                 raise _Cancelled
@@ -1315,10 +1316,21 @@ class ExcelExporter(QThread):
             for col, data in (("B", ref), ("C", val)):
                 if data.frame is None:
                     continue
+                live_seen = live_seen or data.live_points > 0
                 try:
                     _add_image_centered(ws, png(data), col, r, px_w, px_w)
                 except Exception:
                     ws[f"{col}{r}"] = "—"
+        # LIVE 파일로 그린 맵이 있으면 표 아래에 재검토 당부(화면 배너와 같은 문구).
+        if live_seen:
+            note_row = len(rows) + 3
+            ws.merge_cells(start_row=note_row, start_column=1,
+                           end_row=note_row, end_column=3)
+            note = ws.cell(row=note_row, column=1,
+                           value=i18n.KO.WAFER_MAP_WARN_LIVE_UNVERIFIED)
+            note.font = Font(bold=True, color="FF8C4A0F")
+            note.alignment = Alignment(wrap_text=True, vertical="center")
+            ws.row_dimensions[note_row].height = 36
         self._prog_done = base + len(rows)
 
     # ------------------------------------------------------------------

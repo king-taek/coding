@@ -1094,6 +1094,9 @@ WAFER_MAP_WARN_OFF_DIE_FMT = "die 가 없는 칸(또는 웨이퍼 밖)에 찍힌
 WAFER_MAP_WARN_MIXED_FRAMES = "합친 슬롯들의 die 격자가 서로 달라 다른 슬롯 점이 엉뚱한 칸에 찍힐 수 있음"
 WAFER_MAP_WARN_UNPLACED_FMT = "좌표를 읽지 못해 맵에서 빠진 사진 {n}장"
 WAFER_MAP_WARN_PITCH_ASSUMED = "die 크기 정보가 없어 사진으로 추정함 — die 칸은 맞지만 die 크기·웨이퍼 외곽은 근사"
+WAFER_MAP_WARN_LIVE_UNVERIFIED = (
+    "LIVE 파일로 만든 맵은 아직 검증이 충분히 이뤄지지 않아 틀린 정보가 있을 수 있습니다 — "
+    "중요한 정보는 반드시 장비 화면이나 원본 데이터로 재검토하세요")
 WAFER_MAP_WARN_SIDE_FMT = "{side} — {reasons}"
 WAFER_MAP_DISCLAIMER = (
     "※ Wafer map 은 파일명·장비 파일로 다시 그린 참고용 그림입니다. "

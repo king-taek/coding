@@ -1096,6 +1096,10 @@ def test_export_writes_wafer_map_sheet(qt, isolated_cache, tmp_path):
         i18n.KO.WAFER_MAP_SHEET_ALL, "S1", "S2"]
     # 전체(기준·검증) + S1(기준·검증) + S2(기준만) = 5 장.
     assert len(ws._images) == 5
+    # INI 로 그린 맵에는 LIVE 재검토 당부가 붙지 않는다.
+    assert not ws.merged_cells.ranges
+    assert i18n.KO.WAFER_MAP_WARN_LIVE_UNVERIFIED not in {
+        c.value for row in ws.iter_rows() for c in row}
 
 
 def test_wafer_map_sheet_names_the_machines_and_slot_numbers(

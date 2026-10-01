@@ -206,16 +206,44 @@ def _codes(data):
     return [c for c, _ in wm.map_warnings(data)]
 
 
-def test_no_warning_when_map_and_die_size_are_known(tmp_path):
+def test_live_map_always_asks_for_review_even_when_known(tmp_path):
+    """LIVE 파일로 그린 맵은 검증이 아직 충분하지 않다 — 맵·die 크기를 알아도 늘 재검토 당부
+    (사용자 지시).  그 밖의 경고는 없다."""
     lot = _lot(tmp_path)
     paths = [p for w in sorted(_PHOTOS) for p in _photos(lot, w)]
-    assert _codes(wm.build_map(resolve_batch(paths))) == []
+    data = wm.build_map(resolve_batch(paths))
+    assert wm.map_warnings(data) == [(wm.WARN_LIVE_UNVERIFIED, len(data.points))]
+
+
+def test_excel_wafer_map_sheet_carries_live_review_note(qt, isolated_cache, tmp_path):
+    """엑셀 Wafer Map 시트도 LIVE 파일로 그린 맵이면 표 아래에 같은 당부를 적는다."""
+    pytest.importorskip("openpyxl")
+    from openpyxl import load_workbook
+
+    from aoi_verification.app import i18n
+    from aoi_verification.app.models.result import FinalResult
+    from aoi_verification.app.ui.widgets.wafer_map_view import render_map_png
+    from aoi_verification.app.workers.exporter import ExcelExporter
+
+    lot = _lot(tmp_path)
+    result = FinalResult(mode="single", ref_machine="1", val_machine="2",
+                         slot_images={"S1": (_photos(lot, "GX57004924"), [])})
+    dst = tmp_path / "out.xlsx"
+    ExcelExporter(result, dst_path=dst, template_path=tmp_path / "none.xlsx",
+                  map_renderer=render_map_png).run()
+    ws = load_workbook(str(dst))[i18n.KO.WAFER_MAP_SHEET]
+    assert ws["A4"].value == i18n.KO.WAFER_MAP_WARN_LIVE_UNVERIFIED
+    assert "A4:C4" in {str(r) for r in ws.merged_cells.ranges}
+
+
+def test_non_live_map_has_no_review_warning():
+    assert wm.map_warnings(wm.MapData(None, (), (), live_points=0)) == []
 
 
 def test_estimated_die_size_warns(tmp_path):
     lot = _lot(tmp_path, dx="", dy="")
     assert _codes(wm.build_map(resolve_batch(_photos(lot, "GX57004924")))) == \
-        [wm.WARN_PITCH_ASSUMED]
+        [wm.WARN_PITCH_ASSUMED, wm.WARN_LIVE_UNVERIFIED]
 
 
 def test_mixed_grids_and_off_die_and_unplaced_warn(tmp_path):
@@ -260,7 +288,10 @@ def test_dialog_shows_banner_only_when_needed_and_always_the_disclaimer(qt, tmp_
     try:
         dlg.show_folder(ok)
         _wait(qt, dlg)
-        assert not dlg.warn_banner.isVisibleTo(dlg)
+        # 칸이 틀렸을 이유는 없지만 LIVE 파일 맵이라 재검토 당부만 뜬다
+        assert dlg.warn_banner.isVisibleTo(dlg)
+        assert i18n.KO.WAFER_MAP_WARN_LIVE_UNVERIFIED in dlg.warn_banner.text()
+        assert i18n.KO.WAFER_MAP_WARN_PITCH_ASSUMED not in dlg.warn_banner.text()
         assert dlg.disclaimer.isVisibleTo(dlg)
         assert dlg.disclaimer.text() == i18n.KO.WAFER_MAP_DISCLAIMER
         dlg.show_folder(bad)

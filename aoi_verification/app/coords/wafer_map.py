@@ -38,7 +38,8 @@ from ..models.result import EXTRACT_MODE
 __all__ = ["WaferFrame", "MapPoint", "MapData", "frame_for_folder", "to_plane",
            "build_map", "grid_lines", "die_grid_segments", "cell_of",
            "cell_bounds", "defect_cells", "slot_maps", "ALL_SLOTS_KEY", "map_warnings",
-           "WARN_OFF_DIE", "WARN_MIXED_FRAMES", "WARN_UNPLACED", "WARN_PITCH_ASSUMED"]
+           "WARN_OFF_DIE", "WARN_MIXED_FRAMES", "WARN_UNPLACED", "WARN_PITCH_ASSUMED",
+           "WARN_LIVE_UNVERIFIED"]
 
 _LOG = logging.getLogger("aoi.coords.wafer_map")
 
@@ -91,6 +92,9 @@ class MapData:
     # 점을 놓은 폴더들의 격자(pitch·위상)가 첫 폴더와 다르다 — LOT 합산에서 다른 슬롯
     # 점이 엉뚱한 칸에 찍힌다(실측: 파일명 (3,3) 이 (9,3) 칸).  :func:`map_warnings`.
     mixed_frames: bool = False
+    # LIVE 파일명(`camtek_live`)으로 놓은 점 수 — 그 경로는 아직 검증이 충분하지 않다
+    # (사용자 지시: 맵을 볼 때마다 재검토를 당부한다).
+    live_points: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -397,6 +401,7 @@ def build_map(coords: dict, matched=None) -> MapData:
     """
     points: list[MapPoint] = []
     unplaced: list[Path] = []
+    live = 0
     frame: Optional[WaferFrame] = None
     folder_frames: dict = {}
     for path, coord in coords.items():
@@ -414,6 +419,7 @@ def build_map(coords: dict, matched=None) -> MapData:
         if frame is None:
             frame = folder_frames[key]
         die_known = coord.source != "camtek_abs"
+        live += coord.source == "camtek_live"
         points.append(MapPoint(
             path=path, x=xy[0], y=xy[1],
             col=coord.col if die_known else None,
@@ -424,7 +430,7 @@ def build_map(coords: dict, matched=None) -> MapData:
                                              f.grid_x0, f.grid_y0)
     mixed = len({grid(f) for f in folder_frames.values()}) > 1
     return MapData(frame=frame, points=tuple(points), unplaced=tuple(unplaced),
-                   mixed_frames=mixed)
+                   mixed_frames=mixed, live_points=live)
 
 
 # ---------------------------------------------------------------------------
@@ -434,6 +440,7 @@ WARN_OFF_DIE = "off_die"                # die 가 없는 칸(또는 원 밖)에 
 WARN_MIXED_FRAMES = "mixed_frames"      # 합친 폴더들의 격자가 서로 다르다
 WARN_UNPLACED = "unplaced"              # 좌표를 못 놓은 사진이 있다
 WARN_PITCH_ASSUMED = "pitch_assumed"    # die 크기를 사진으로 추정했다(크기·외곽 근사)
+WARN_LIVE_UNVERIFIED = "live_unverified"  # LIVE 파일명으로 그린 맵 — 검증이 아직 충분하지 않다
 
 
 def _cell_drawn(frame: WaferFrame, cell: tuple[int, int]) -> bool:
@@ -450,6 +457,8 @@ def map_warnings(data: Optional[MapData]) -> list[tuple[str, int]]:
 
     **칸이 틀렸을 수 있는 것**만 고른다.  중심 가정·계산 격자는 거의 모든 LIVE·INI
     폴더에 붙어 늘 뜨면 무시하게 되므로 범례에만 둔다(:class:`WaferFrame` 플래그).
+    단 **LIVE 파일명으로 그린 맵은 늘 경고한다**(사용자 지시) — 그 경로의 검증이 아직
+    충분하지 않아, 중요한 정보는 재검토하라고 매번 알린다.
     순수 — 헤드리스 테스트한다."""
     if data is None:
         return []
@@ -466,6 +475,8 @@ def map_warnings(data: Optional[MapData]) -> list[tuple[str, int]]:
         out.append((WARN_UNPLACED, len(data.unplaced)))
     if fr is not None and fr.pitch_assumed:
         out.append((WARN_PITCH_ASSUMED, len(data.points)))
+    if data.live_points:
+        out.append((WARN_LIVE_UNVERIFIED, data.live_points))
     return out
 
 
