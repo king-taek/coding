@@ -6,7 +6,7 @@
 바탕 쪽으로 당긴 `$disabled_ink`/`$disabled_line` 을 쓴다.
 
 여기서 고정하는 것:
-- 두 색 모드 모두에서 토큰이 존재한다(빠지면 `render_qss` 가 KeyError 로 죽는다).
+- 토큰이 존재한다(빠지면 `render_qss` 가 KeyError 로 죽는다).
 - 비활성 글자가 활성(`$ink2`)·기존(`$mute`)보다 **확실히 옅다** — 그러나 사라지진 않는다.
 - 버튼 계열 `:disabled` 규칙이 실제로 그 토큰을 쓴다(테마만 고치고 QSS 를 잊는 실수 방지).
 
@@ -52,53 +52,33 @@ def _contrast(a: str, b: str) -> float:
     return (hi + 0.05) / (lo + 0.05)
 
 
-def _with_mode(name: str):
-    theme.set_color_mode(name)
-    return dict(theme.TOKENS)
-
-
-def test_disabled_tokens_exist_in_both_modes():
-    try:
-        for mode in ("light", "dark"):
-            tokens = _with_mode(mode)
-            for key in ("disabled_ink", "disabled_line"):
-                assert key in tokens, f"{mode} 모드에 ${key} 토큰이 없다"
-                assert tokens[key].startswith("#"), \
-                    f"${key} 는 불투명 색이어야 한다(면 위에서 일정하게 옅어야 한다)"
-    finally:
-        theme.set_color_mode(theme.DEFAULT_COLOR_MODE)
+def test_disabled_tokens_exist():
+    tokens = theme.TOKENS
+    for key in ("disabled_ink", "disabled_line"):
+        assert key in tokens, f"${key} 토큰이 없다"
+        assert tokens[key].startswith("#"), \
+            f"${key} 는 불투명 색이어야 한다(면 위에서 일정하게 옅어야 한다)"
 
 
 def test_disabled_ink_is_clearly_fainter_than_the_active_label():
     """비활성 글자는 활성보다 **눈에 띄게** 옅다 — 그러나 사라지진 않는다."""
-    try:
-        for mode in ("light", "dark"):
-            tokens = _with_mode(mode)
-            bg = tokens["bg"]
-            active = _contrast(tokens["ink2"], bg)
-            old = _contrast(tokens["mute"], bg)
-            now = _contrast(tokens["disabled_ink"], bg)
-            assert now < old, (
-                f"{mode}: 비활성이 예전($mute {old:.2f})보다 옅어지지 않았다 "
-                f"(현재 {now:.2f})")
-            assert now < active * 0.6, (
-                f"{mode}: 활성({active:.2f}) 대비 비활성({now:.2f})이 충분히 죽지 않았다")
-            assert now >= 1.5, (
-                f"{mode}: 비활성이 바탕에 묻혀 아예 안 보인다({now:.2f})")
-    finally:
-        theme.set_color_mode(theme.DEFAULT_COLOR_MODE)
+    tokens = theme.TOKENS
+    bg = tokens["bg"]
+    active = _contrast(tokens["ink2"], bg)
+    old = _contrast(tokens["mute"], bg)
+    now = _contrast(tokens["disabled_ink"], bg)
+    assert now < old, (
+        f"비활성이 예전($mute {old:.2f})보다 옅어지지 않았다 (현재 {now:.2f})")
+    assert now < active * 0.6, (
+        f"활성({active:.2f}) 대비 비활성({now:.2f})이 충분히 죽지 않았다")
+    assert now >= 1.5, f"비활성이 바탕에 묻혀 아예 안 보인다({now:.2f})"
 
 
 def test_disabled_border_is_fainter_than_the_active_border():
-    try:
-        for mode in ("light", "dark"):
-            tokens = _with_mode(mode)
-            bg = tokens["bg"]
-            assert _contrast(tokens["disabled_line"], bg) \
-                < _contrast(tokens["line_strong"], bg), \
-                f"{mode}: 비활성 테두리가 활성 경계만큼 진하다"
-    finally:
-        theme.set_color_mode(theme.DEFAULT_COLOR_MODE)
+    tokens = theme.TOKENS
+    bg = tokens["bg"]
+    assert _contrast(tokens["disabled_line"], bg) \
+        < _contrast(tokens["line_strong"], bg), "비활성 테두리가 활성 경계만큼 진하다"
 
 
 def test_button_disabled_rules_use_the_disabled_tokens():
@@ -113,9 +93,4 @@ def test_button_disabled_rules_use_the_disabled_tokens():
 
 def test_render_still_substitutes_every_token():
     """토큰 오타는 즉시 드러나야 한다(`Template.substitute` 는 미지 토큰에 KeyError)."""
-    try:
-        for mode in ("light", "dark"):
-            theme.set_color_mode(mode)
-            assert "$" not in theme.render_qss(_QSS)
-    finally:
-        theme.set_color_mode(theme.DEFAULT_COLOR_MODE)
+    assert "$" not in theme.render_qss(_QSS)

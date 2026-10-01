@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout,
                              QHBoxLayout, QLabel, QRubberBand, QScrollArea,
                              QSizePolicy, QVBoxLayout, QWidget)
 
+from ..teardown import tolerate_teardown
 from ... import config, i18n
 from .. import theme
 from ...models.slot import ImageItem
@@ -145,8 +146,7 @@ class _SelectTile(QFrame):
 
     @staticmethod
     def _sel_style() -> str:
-        """★ 모듈/클래스 상수로 굽지 않는다 — 호출 시점에 팔레트를 읽어야 다크 전환이
-        따라온다.  배경도 강조색 틴트를 쓴다(예전엔 현 팔레트에 없는 네온 초록이라
+        """★ 모듈/클래스 상수로 굽지 않는다 — 호출 시점에 팔레트를 읽는다.  배경도 강조색 틴트를 쓴다(예전엔 현 팔레트에 없는 네온 초록이라
         파란 강조 체계에서 이 화면만 연둣빛으로 어긋났다)."""
         return (f"#selTile {{ border: 2px solid {theme.ACCENT}; border-radius: 8px;"
                 f" background: {theme.ACCENT_TINT_SOFT}; }}")
@@ -481,6 +481,7 @@ class BulkSelectDialog(QDialog):
     # ------------------------------------------------------------------
     # 드래그(러버밴드) 다중 선택
     # ------------------------------------------------------------------
+    @tolerate_teardown
     def eventFilter(self, obj, event):                  # noqa: N802
         if not hasattr(self, "_scroll") or obj is not self._scroll.viewport():
             return super().eventFilter(obj, event)

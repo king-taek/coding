@@ -33,8 +33,6 @@
 - **시트(창 안 팝업)는 중첩 이벤트 루프 안에서 찍는다.**  ``sheets.run/choose`` 는
   ``QEventLoop`` 로 블로킹하므로, 호출 **전에** ``QTimer.singleShot(0, …)`` 으로 캡처를
   예약해 그 루프 안에서 찍고 시트를 닫는다.
-- **다크(흑연) 캡처는 창을 새로 만든다.**  위젯이 생성 시점에 색을 f-string 으로 굽기
-  때문에(theme.py 주석) QSS 재적용만으로는 색이 다 바뀌지 않는다.
 - **예시 사진은 그린다**(`demo_images.py` — 직물 짜임 + 중앙 얼룩).  설명서는 사외로
   나갈 수 있어 실제 검사 사진을 넣지 않는다.  대신 화면에 적힌 거리와 **앞뒤가 맞는**
   그림을 그린다 — 같은 얼룩이면 두 장비가 같은 곳을 찍은 것처럼, 다른 얼룩이면 실제로
@@ -83,7 +81,6 @@ EXPECTED = [
     "15_검토_시트", "16_크롭_검토행", "17_시트_좌우비교",
     "18_결과",
     "20_시트_사진정보", "21_시트_업데이트",
-    "22_셋업_흑연",
 ]
 # ★ 여기 있는 것은 **설명서가 실제로 쓰는 그림만**이다.  그림을 새로 쓰려면 목록에
 #   추가하고 **본문에서 참조까지** 해야 한다 — `make_manual_pdf.py` 가 참조되지 않는
@@ -281,7 +278,7 @@ class Shooter:
             "file": path.name,
             "w": widget.width(), "h": widget.height(),
             "dpr": pm.devicePixelRatio(),
-            "mode": theme.COLOR_MODE, "bg": theme.BG,
+            "bg": theme.BG,
             "scrim": list(theme.SCRIM_RGBA),
             "rects": self._rects(widget, rects or {}),
         }
@@ -519,7 +516,6 @@ def _setup_rects(win) -> dict:
         "기준호기입력": sp.ref_machine_edit,
         "검증호기입력": sp.val_machine_edit,
         "판정기준배지": getattr(sp, "_mode_badge_card", None),
-        "다크모드스위치": getattr(sp, "_dark_switch", None),
         "실행옵션카드": cards[0] if cards else None,
         "매칭설정카드": cards[1] if len(cards) > 1 else None,
         "자동화수준": getattr(sp, "auto_group", None),
@@ -529,7 +525,6 @@ def _setup_rects(win) -> dict:
         "구형엔진스위치": getattr(sp, "legacy_switch", None),
         "구형모드선택": getattr(sp, "legacy_group", None),
         "임계치줄": getattr(sp, "_threshold_row", None),
-        "사용방법": getattr(sp, "_howto_section", None),
         "업데이트확인": getattr(sp, "update_btn", None),
         "사진정보보기": getattr(sp, "image_info_btn", None),
         "검증시작": getattr(sp, "start_btn", None),
@@ -762,11 +757,9 @@ def main() -> int:
 
     sp = win._setup_page
     sp.legacy_switch.set_on(True, emit=True)
-    sp._howto_section.set_expanded(True, animate=False)
     sh.pump(30)
     sh.shoot("03_셋업_구형엔진", win, rects=_setup_rects(win))
     sp.legacy_switch.set_on(False, emit=True)
-    sp._howto_section.set_expanded(False, animate=False)
     sh.pump(20)
 
     m = sh.manifest["02_셋업_입력완료"]["rects"]
@@ -851,18 +844,6 @@ def main() -> int:
 
     sh.sheet("21_시트_업데이트", win,
              lambda: win._on_update_found({"version": "2026.08.05", "branch": "main"}))
-
-    # --- 흑연(다크) — 위젯을 새로 만들어야 색이 전부 바뀐다 -------------------
-    print("흑연(다크) 모드")
-    win.hide()
-    win.deleteLater()
-    sh.pump(20)
-    theme.set_color_mode("dark")
-    theme.apply_to_app(app)
-    win2 = _make_window()
-    _fill_setup(win2, ref_root, val_root)
-    _cosmetic_paths(win2)
-    sh.shoot("22_셋업_흑연", win2, rects=_setup_rects(win2))
 
     sh.optimize()
     sh.verify_colors()

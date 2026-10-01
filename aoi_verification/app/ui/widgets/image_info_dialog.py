@@ -45,6 +45,7 @@ from ...config import CONFIG
 from ...coords import scan_image, single_info
 from ...utils import image_io as _io
 from .. import theme
+from ..deferred import call_later
 from . import sheet_host as sheets
 from .neon_button import NeonButton
 
@@ -631,4 +632,4 @@ class ImageInfoDialog(QDialog):
             return
         QApplication.clipboard().setText(self.as_text())
         self._toast.setText(i18n.KO.IMAGE_INFO_COPIED)
-        QTimer.singleShot(_TOAST_MS, lambda: self._toast.setText(""))
+        call_later(self, _TOAST_MS, lambda: self._toast.setText(""))

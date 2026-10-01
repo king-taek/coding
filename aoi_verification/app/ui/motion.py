@@ -24,6 +24,7 @@ from PyQt6.QtCore import (QEasingCurve, QEvent, QObject, QPoint, QPointF,
 from PyQt6.QtWidgets import (QApplication, QGraphicsEffect,
                              QGraphicsOpacityEffect, QLabel)
 
+from .teardown import tolerate_teardown
 from . import theme
 
 # ── '지금 보이는 그림이 라이브 위젯이 아니다' 동안 버리는 입력 이벤트 ──────────
@@ -49,6 +50,7 @@ class _InputSwallow(QObject):
     이라 절대 만들면 안 된다(`loading_overlay.hideEvent` 주석의 실측 사고).
     """
 
+    @tolerate_teardown
     def eventFilter(self, obj, event) -> bool:  # noqa: N802
         try:
             etype = event.type()
@@ -59,7 +61,7 @@ class _InputSwallow(QObject):
 # 지속시간 토큰 (ms) — motion_scale 로 스케일.
 # ※ 한때 `DUR_FAST`·`EASE_LARGE`(OutExpo)·`EASE_LEGACY`(InOutCubic)·`fade_out_snapshot()`
 #   도 있었으나 호출처가 **0곳**이었다.  '큰 이동은 OutExpo' 는 docstring 에만 존재하는
-#   규칙이었고 `CollapsibleSection` 은 이제 OutQuart 를 쓴다 — 쓰지 않는 토큰은 규칙처럼
+#   규칙이었다 — 쓰지 않는 토큰은 규칙처럼
 #   읽혀 다음 사람을 오도하므로 지웠다.  필요해지면 그때 다시 만들면 된다.
 # ★ 이 모듈의 애니메이션은 **`DeleteWhenStopped` 를 쓰지 않는다.**
 #
@@ -87,10 +89,6 @@ DUR_SLOW = 400
 #   그대로 쓴다.  스케일이 필요한 자리는 여전히 `dur()` 를 쓴다.
 DUR_SHEET = 400          # 작은 화면 팝업(시트) 등장/퇴장 — 발원점을 모를 때의 폴백
 DUR_LOADING = 500        # 로딩 화면 팝업 등장
-# ★ 사용자 결정으로 **기존 값 유지**.  구조개편 24안은 이 페이드를 280ms 로 줄이자고
-#   했지만(긴 페이드 동안 어중간한 혼합색이 머문다는 근거), 실제로 보고 되돌렸다 —
-#   같은 안의 나머지(재색 정지시간 125→~30ms 분할, 팔레트 ①, 토글 노브)는 그대로다.
-DUR_RECOLOR = 700        # 색 모드(어두운 화면) 전환
 # 구조개편 21·23·25·26·27안이 **눈으로 정한** 지속시간 — 위 셋과 같이 dur() 를 타지
 # 않는다(시안이 밀리초로 명시한 값이라 스케일을 곱하면 지정과 실제가 갈라진다).
 DUR_RAIL_LEAD = 140      # 21안 — 여정 레일 눈금이 페이지보다 **먼저** 채워지는 시간
@@ -99,7 +97,7 @@ DUR_RISE_IN = 220        # 25안 — 검토 행 페이드-라이즈
 STAGGER_RISE_MS = 60     # 25안 — 행 사이 지연
 DUR_SWIPE_OUT = 180      # 26안 — 결정한 사진이 방향으로 밀려나는 시간
 DUR_SWIPE_IN = 120       # 26안 — 다음 사진 페이드인
-DUR_KNOB = 180           # 24안 — 다크 토글 노브 슬라이드(누른 즉시의 답)
+DUR_KNOB = 180           # 24안 — 토글 스위치 노브 슬라이드(누른 즉시의 답)
 
 
 def _ease_material_decelerate() -> QEasingCurve:
@@ -136,29 +134,9 @@ def _ease_material_decelerate() -> QEasingCurve:
     return c
 
 
-def _ease_soft_decelerate() -> QEasingCurve:
-    """더 완만한 감속 (CSS `cubic-bezier(.33,1,.68,1)`) — **색 모드 전환 전용**.
-
-    | 시점 | 기본(머티리얼) | 이 곡선 |
-    |---|---|---|
-    | t=0.10 | 0.621 | 0.272 |
-    | t=0.25 | 0.832 | 0.577 |
-    | t=0.50 | 0.950 | 0.872 |
-    | **보이는 구간** | 65% | **73%** |
-
-    색 모드 전환은 **화면 전체의 밝기가 뒤집히는** 가장 큰 변화라, 기본 곡선으로도
-    앞부분이 급했다(사용자 지정).  출발을 늦추고 변화를 더 고르게 퍼뜨린다.
-    """
-    c = QEasingCurve(QEasingCurve.Type.BezierSpline)
-    c.addCubicBezierSegment(QPointF(0.33, 1.0), QPointF(0.68, 1.0),
-                            QPointF(1.0, 1.0))
-    return c
-
-
 # QEasingCurve 는 값 타입이라 ``setEasingCurve()`` 가 복사한다 — 하나를 공유해도
 # 안전하고, 호출부는 예전처럼 이 이름만 넘기면 된다.
 EASE_PRIMARY = _ease_material_decelerate()    # 앱 기본 — 끝까지 보이는 감속
-EASE_SOFT = _ease_soft_decelerate()           # 색 모드 전환 — 더 완만하게
 
 
 def enabled() -> bool:
@@ -191,15 +169,9 @@ def snapshot(widget):
     (투명) **창이 뒤에서** 칠해 준다.  그래서 페이지만 떼어 grab 하면 빈 자리가
     Qt 기본 팔레트 Window 색 — 테마와 무관한 **밝은 회색 `#efefef`** — 으로 채워진다.
 
-    다크 모드에서 그 스냅샷을 페이드인하면 '밝은 화면이 먼저 보였다가 어두워지는'
-    것으로 보인다.  실측(다크, SelectPage 진입):
-
-    | 방식 | 평균 밝기 |
-    |---|---|
-    | `w.grab()` (옛 방식) | 85.7 |
-    | `stack.grab()` · `WA_StyledBackground` · repolish | 85.7 (전부 그대로) |
-    | **`theme.BG` 로 채우고 `DrawChildren` 렌더** | **30.4** |
-    | 실제 라이브 화면 | 30.4 |
+    그 스냅샷을 페이드인하면 전환 동안 화면 바탕(`theme.BG`)과 다른 색이 비친다.
+    (예전 어두운 화면에서 실측: `w.grab()` 평균 밝기 85.7 ↔ 라이브 30.4 — 배경을 먼저
+    칠하는 이 방식이 라이브와 같은 값을 냈다.)
 
     배경을 먼저 칠하고 ``DrawWindowBackground`` **없이** 자식만 렌더해야 한다 —
     그 플래그를 주면 Qt 가 다시 기본 팔레트로 덮어쓴다.
@@ -277,7 +249,10 @@ def transition_in(container, new_pixmap, *, forward: bool = True,
     overlay.raise_()
 
     # 불투명도와 위치를 **각자 속성 애니메이션**으로 — 람다 tick 이 형제 객체를 건드리지
-    # 않게(위 crossfade_from 주석의 파괴 순서 함정과 같은 이유).
+    # 않게.  ★ 람다로 `eff.setOpacity` 를 부르면 tick 이 애니메이션의 **형제**(둘 다
+    # overlay 의 자식)를 건드린다.  형제 사이의 파괴 순서는 보장되지 않아서, `eff` 가
+    # 먼저 사라진 뒤 마지막 tick 이 발화하면 세그폴트가 난다(실측).  QPropertyAnimation
+    # 은 대상을 QPointer 로 잡아 대상이 죽으면 스스로 멈춘다.
     fade = QPropertyAnimation(eff, b"opacity", overlay)
     fade.setStartValue(0.0)
     fade.setEndValue(1.0)
@@ -297,73 +272,6 @@ def transition_in(container, new_pixmap, *, forward: bool = True,
     fade.finished.connect(_finish)
     fade.start()
     slide.start()
-
-
-def crossfade_from(container, old_pixmap, *, duration: int = DUR_RECOLOR,
-                   on_done=None) -> None:
-    """**옛 화면 스냅샷**을 위에 얹어 빼면서 새 화면을 드러낸다(색만 바뀌는 전환).
-
-    :func:`transition_in` 과 방향이 반대다 — 저쪽은 들어오는 화면을 얹어 넣고, 이쪽은
-    **나가는 화면을 걷어낸다.**  다크 모드 전환처럼 레이아웃은 그대로이고 색만 바뀔 때는
-    이게 맞다: 위치 이동을 섞으면 '화면이 옮겨졌다'는 거짓 신호가 된다(슬라이드 없음).
-
-    호출부는 **먼저** 새 색으로 화면을 갈아 끼운 뒤(즉시 교체) 이 함수에 옛 스냅샷을
-    넘긴다.  ``on_done`` 은 성공·즉시완료·비활성 어느 경로에서도 **정확히 한 번** 불린다 —
-    호출부가 여기서 전환 잠금을 풀기 때문에, 안 불리면 토글이 영구히 잠긴다.
-    """
-    from PyQt6.QtCore import Qt
-    done_once = {"v": False}
-
-    def _done():
-        if not done_once["v"]:
-            done_once["v"] = True
-            if on_done is not None:
-                on_done()
-
-    if not enabled() or old_pixmap is None or old_pixmap.isNull():
-        _done()
-        return
-
-    prev = container.findChild(QLabel, "_pageRecolorOverlay")
-    if prev is not None:
-        prev.deleteLater()
-
-    overlay = QLabel(container)
-    overlay.setObjectName("_pageRecolorOverlay")
-    overlay.setPixmap(old_pixmap)
-    overlay.setScaledContents(False)
-    overlay.setGeometry(container.rect())
-    # ★ 마우스를 **흡수한다**.  전환 240ms 동안 스택이 담고 있는 것은 아직 **옛 페이지**라
-    #   (main_window._show_page 가 스냅샷을 찍고 되돌려 놓는다), 마우스를 통과시키면
-    #   눈에 보이는 새 화면이 아니라 방금 떠난 화면의 그 좌표 위젯이 눌린다.
-    #   (키·단축키는 여전히 통과한다 — 그건 각 페이지의 isVisible 가드가 막는다.)
-    overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
-    eff = QGraphicsOpacityEffect(overlay)
-    eff.setOpacity(1.0)
-    overlay.setGraphicsEffect(eff)
-    overlay.show()
-    overlay.raise_()
-
-    # ★ **QPropertyAnimation** 을 쓴다(QVariantAnimation + 람다가 아니다).
-    #   Qt 가 대상(`eff`)을 QPointer 로 잡아 두므로 대상이 죽으면 애니메이션이 스스로
-    #   멈춘다 — tick 이 죽은 객체로 들어갈 수 없다.
-    #
-    #   ★ 이게 왜 필요했나: 람다로 `eff.setOpacity` 를 부르면 tick 이 애니메이션의
-    #   **형제**(둘 다 overlay 의 자식)를 건드린다.  형제 사이의 파괴 순서는 보장되지
-    #   않아서, `eff` 가 먼저 사라진 뒤 마지막 tick 이 발화하면 세그폴트가 난다(실측).
-    #   규칙: **tick 은 자기 부모(또는 부모의 상태)만 건드린다 — 형제는 안 된다.**
-    anim = QPropertyAnimation(eff, b"opacity", overlay)
-    anim.setStartValue(1.0)
-    anim.setEndValue(0.0)
-    anim.setDuration(int(duration))     # 사용자 지정 실측 ms — 스케일 없음
-    anim.setEasingCurve(EASE_SOFT)      # 색 전환은 더 완만하게(사용자 지정)
-
-    def _finish():
-        overlay.deleteLater()
-        _done()
-
-    anim.finished.connect(_finish)
-    anim.start()
 
 
 def animate_scroll(bar, target: int, *, duration: int = DUR_BASE) -> None:

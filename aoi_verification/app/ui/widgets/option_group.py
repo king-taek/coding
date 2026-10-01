@@ -7,7 +7,7 @@
 
 1. **선택 상태는 QSS 가 칠한다 — 인라인 스타일시트 금지.**
    ``style.qss`` 의 ``QPushButton[role="option"]:checked`` 가 토큰(``$accent_tint`` 등)으로
-   칠하므로 라이트/다크 어느 팔레트에서도 자동으로 맞는다.  기존
+   칠하므로 팔레트와 자동으로 맞는다.  기존
    ``_SlotTile``/``_SelectTile`` 은 선택 틴트를 죽은 네온 팔레트로 하드코딩해 두었는데
    (``rgba(57,255,20,…)``), 같은 실수를 반복하지 않기 위한 규칙이다.
 2. **열 수는 가용 폭에서 계산한다** — 가로 스크롤이 생기지 않게(800×600 지원).
@@ -22,6 +22,7 @@ from PyQt6.QtCore import QEvent, Qt, pyqtSignal
 from PyQt6.QtWidgets import (QButtonGroup, QGridLayout, QPushButton, QSizePolicy,
                              QWidget)
 
+from ..teardown import tolerate_teardown
 from .. import theme
 from .neon_button import NeonButton
 
@@ -111,9 +112,8 @@ class OptionGroup(QWidget):
         ``activate_on_arrow`` — 방향키로 선택까지 확정할지.  **기본이 ``False``** 다:
         방향키는 **포커스만** 옮기고 확정은 Space/Enter 로 한다.
 
-        왜 기본이 False 인가 — 이 위젯의 선택은 **부수효과를 가진다**.  배치·색 모드는
-        페이지 재생성(입력 이관·포커스 소실)이고, 진행 범위 'subset' 은 **모달 다이얼로그**
-        를 띄운다.  실측: 진행 범위 타일에 → 키 한 번으로 "먼저 기준 폴더를 선택하세요"
+        왜 기본이 False 인가 — 이 위젯의 선택은 **부수효과를 가질 수 있다**.  진행 범위
+        'subset' 은 **모달 다이얼로그**를 띄운다.  실측: 진행 범위 타일에 → 키 한 번으로 "먼저 기준 폴더를 선택하세요"
         경고창이 떠 테스트 하네스가 블로킹됐다.  방향키로 목록을 훑는 것은 탐색이지
         실행이 아니므로, 부수효과가 **없는** 그룹에서만 ``True`` 를 켜라.
         """
@@ -246,6 +246,7 @@ class OptionGroup(QWidget):
 
     _ARROWS = (Qt.Key.Key_Right, Qt.Key.Key_Down, Qt.Key.Key_Left, Qt.Key.Key_Up)
 
+    @tolerate_teardown
     def eventFilter(self, obj, event):  # noqa: N802
         """타일에 온 방향키를 **Qt 버튼 처리보다 먼저** 소비한다(위 주석 참조)."""
         if (event.type() == QEvent.Type.KeyPress

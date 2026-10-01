@@ -44,8 +44,7 @@ class ScalableImage(QLabel):
         self._pix_orig: Optional[QPixmap] = None
         self._target_long_edge = self.DEFAULT_LONG_EDGE
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        # 색은 QSS 가 준다(role="imagePlate") — 구우면 색 모드 전환 때 이 판만
-        # 옛 색으로 남는다(실측: 다크 전환 후 가운데 사진 자리가 밝은 크림).
+        # 색은 QSS 가 준다(role="imagePlate") — 인스턴스 스타일시트로 굽지 않는다.
         self.setProperty("role", "imagePlate")
         self.setMinimumSize(QSize(self.MIN_LONG_EDGE, self.MIN_LONG_EDGE))
 

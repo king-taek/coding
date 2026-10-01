@@ -201,7 +201,7 @@ class _CandidateTile(QFrame):
     # objectName 스코프 셀렉터 — 최외곽 프레임에만 테두리. (QLabel 이 QFrame
     # 서브클래스라 ``QFrame {…}`` 는 내부 이미지/점수/캡션 라벨까지 번진다.)
     # ★ 색을 **클래스 본문에서 굽지 않는다** — 클래스 본문은 import 시점에 한 번만
-    #   평가돼 그때의 팔레트(항상 라이트)가 영구히 박힌다(다크 모드가 안 먹는다).
+    #   평가돼 그때의 팔레트가 영구히 박힌다.
     #   배경 틴트도 옛 네온 초록 리터럴 대신 팔레트의 강조 틴트를 쓴다.
     @staticmethod
     def _sel_style() -> str:
@@ -1199,7 +1199,9 @@ class UnmatchedReviewDialog(QDialog):
         if t is None:
             t = self._toast_timer = QTimer(self)
             t.setSingleShot(True)
-            t.timeout.connect(lambda: self._toast.setText(""))
+            # 람다로 `self` 를 붙잡지 않는다 — 라벨의 C++ 슬롯에 직접 묶으면 순환 참조가
+            # 없고 라벨이 먼저 지워져도 Qt 가 연결을 끊는다(→ `ui/deferred.py`).
+            t.timeout.connect(self._toast.clear)
         t.start(_TOAST_MS)
 
     def _on_confirm(self) -> None:

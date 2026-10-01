@@ -66,8 +66,6 @@ class UiPrefs:
     # QSplitter 상태 (Select/Match 페이지). base64 인코딩 문자열.
     splitter_state_select_h: str = ""
     splitter_state_match_h: str = ""
-    # 사용 방법 패널 펼침 상태 (기본 접힘)
-    howto_expanded: bool = False
     # 썸네일 빠른 모드 (사용자가 강제로 가장 낮은 품질 티어 사용)
     # 자동화 수준 — 사용자 개입 정도 (#3 올인원 모드)
     #   "user_select" : Stage 1 만 직접, Stage 2 자동 매치 + 검토.  (기본)
@@ -92,8 +90,6 @@ class UiPrefs:
     legacy_enabled: bool | None = None
     # 구형 모드 하위 선택 기억 — engine_mode 가 coordinate 로 바뀌어도 잃지 않게 분리.
     legacy_engine: str = ""                  # "" = 미설정
-    # 화면 색 모드 — 수동 토글(라이트/다크). OS 자동 감지는 하지 않는다.
-    color_mode: str = "light"                # "light" | "dark"
     persist_scores: bool = False             # 유사도 점수 디스크 캐시 (#5B)
     # 고효율 모드 동시 추론 수(in-flight).  높일수록 GPU
     # 메모리·throughput↑ (계산 결과 불변).  setup_page 슬라이더로 조절.

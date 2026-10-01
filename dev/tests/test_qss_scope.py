@@ -82,8 +82,7 @@ def test_top_level_popups_still_carry_their_own_surface():
         assert "background-color" in body, f"{selector} 가 면을 잃었다"
 
 
-@pytest.mark.parametrize("mode", ["light", "dark"])
-def test_page_still_renders_on_the_theme_surface(qapp, mode):
+def test_page_still_renders_on_the_theme_surface(qapp):
     """설정 화면을 실제로 그려 **바탕이 테마 색**인지 본다(회색 구멍 방지).
 
     ★ 스타일시트를 **창에만** 건다(`QApplication.setStyleSheet` 금지).  앱 단위
@@ -91,7 +90,6 @@ def test_page_still_renders_on_the_theme_surface(qapp, mode):
     (conftest 주석: 21회 = 82초).  위젯 단위 시트는 그 위젯과 자식에 적용되므로
     여기서 검사하려는 범위와 정확히 같다."""
     from aoi_verification.app.ui.pages.setup_page import SetupPage
-    theme.set_color_mode(mode)
     win = QMainWindow()
     win.setStyleSheet(theme.render_qss(_QSS))
     win.resize(1000, 700)
@@ -113,11 +111,10 @@ def test_page_still_renders_on_the_theme_surface(qapp, mode):
                      (2, img.height() - 3), (img.width() - 3, img.height() - 3)):
             got = QColor(img.pixel(x, y))
             assert got.name() == expected.name(), (
-                f"{mode}: ({x},{y}) 바탕이 {got.name()} — 기대 {expected.name()}. "
+                f"({x},{y}) 바탕이 {got.name()} — 기대 {expected.name()}. "
                 "전역 면을 없앤 자리를 창이 못 메우고 있다")
     finally:
         win.close()
         page.deleteLater()
         win.deleteLater()
         qapp.processEvents()
-        theme.set_color_mode(theme.DEFAULT_COLOR_MODE)

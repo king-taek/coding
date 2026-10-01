@@ -39,15 +39,16 @@ def test_builder_seam_exists():
     ※ `_build_automation_card` + `_build_scope_row` 는 **`_build_run_options_card`
     하나로 합쳐졌다** — 값이 둘뿐인 두 설정이 전체폭 카드 두 장을 쓰고 있었다."""
     src = inspect.getsource(sp.SetupPage)
-    for name in ("_build_body", "_build_title", "_build_view_options",
-                 "_build_howto", "_build_run_options_card", "_build_device_row",
-                 "_build_engine_card", "_build_action_bar"):
+    for name in ("_build_body", "_build_title", "_build_run_options_card",
+                 "_build_device_row", "_build_engine_card", "_build_action_bar"):
         assert f"def {name}" in src, f"{name} 빌더 누락"
     # 합쳐진 두 빌더는 되살아나지 말아야 한다(같은 선택을 두 카드가 다시 나누지 않게).
     # `_build_credit` 도 마찬가지다 — 크레딧의 단일 출처는 상태바
     # (`main_window._credit_label`) 이고, 페이지가 다시 넣으면 한 화면에 두 번 보인다
     # (실측 버그 → `test_credit_not_duplicated.py`).
-    for gone in ("_build_automation_card", "_build_scope_row", "_build_credit"):
+    # 하단 '사용 방법' 접이식 안내와 다크 모드 보기 옵션은 사용자 요청으로 지웠다.
+    for gone in ("_build_automation_card", "_build_scope_row", "_build_credit",
+                 "_build_howto", "_build_view_options"):
         assert f"def {gone}" not in src, f"{gone} 부활 — 카드가 다시 갈라졌다"
 
 
@@ -135,9 +136,6 @@ def test_reading_the_explanation_does_not_change_engine(qapp):
         before = page._current_engine_mode()
         page._auto_help_btn.setChecked(True)          # 도움말 펼치기
         page._auto_help_btn.setChecked(False)
-        if hasattr(page, "_howto_section"):           # 사용 방법 섹션도 펼쳐 본다
-            page._howto_section.set_expanded(True, animate=False)
-            page._howto_section.set_expanded(False, animate=False)
         assert page._current_engine_mode() == before == EngineMode.COORDINATE
         # 접이식 상태를 모드 판단에 쓰는 코드가 남아 있지 않아야 한다.
         src = inspect.getsource(sp.SetupPage._current_engine_mode)
@@ -231,11 +229,11 @@ def test_legacy_toggle_does_not_move_when_switched(qapp):
         page.deleteLater()
 
 
-def test_view_options_has_only_the_dark_mode_switch(qapp):
-    """'모션 줄이기' 토글은 제거했다 — 모션은 항상 켜진다(사용자 결정)."""
+def test_no_view_option_switches(qapp):
+    """'모션 줄이기'·'다크 모드' 토글은 제거했다(사용자 결정)."""
     page = sp.SetupPage()
     try:
-        assert hasattr(page, "_dark_switch")
+        assert not hasattr(page, "_dark_switch"), "'다크 모드' 스위치가 되살아났다"
         assert not hasattr(page, "_reduce_switch"), "'모션 줄이기' 스위치가 되살아났다"
         assert not hasattr(page, "_on_reduce_motion")
     finally:
@@ -404,13 +402,8 @@ def test_no_horizontal_scroll_at_800x600(qapp):
         page.deleteLater()
 
 
-# ── 색 모드/배치 전환이 작성 중 입력을 날리지 않아야 한다 ──────────────────────
-# ※ `capture_draft`/`restore_draft`/`_recreate_pages` 를 쓰던 테스트 3개는 없앴다.
-#    색 전환이 페이지를 다시 만들지 않게 되면서(`main_window._recolor_in_place`)
-#    입력값을 걷어 두었다가 다시 심을 일 자체가 사라졌고, 그 메서드들도 함께
-#    지웠다.  '전환해도 입력이 남는가' 는 이제 구조적으로 보장되며
-#    `test_recolor_covers_window.py::test_scroll_position_survives_the_transition`
-#    이 같은 위젯이 살아남는 것으로 확인한다.
+# ※ `capture_draft`/`restore_draft`/`_recreate_pages` 를 쓰던 테스트 3개는 없앴다 —
+#    페이지를 다시 만드는 전환(색 모드)이 사라져 입력값을 옮겨 심을 일이 없다.
 def test_switch_does_not_toggle_on_press_alone(qapp):
     """★ press 즉시 토글하면 터치 패널의 스크롤 제스처가 판정 엔진을 바꾼다."""
     from PyQt6.QtCore import QPointF, Qt as _Qt

@@ -57,7 +57,7 @@ QLabel[role="appLogo"][inline="true"] {
 
 /* 여정 레일 — 창 최상단의 상시 진행 지도(widgets/journey_rail.py).
    ★ 면만 QSS 가 칠하고, 단계 표식·글자는 위젯이 paintEvent 에서 theme 토큰을 직접
-     읽어 그린다(다크 전환 때 옛 색이 남지 않게).  아래 눈금도 그쪽이 그린다 —
+     읽어 그린다.  아래 눈금도 그쪽이 그린다 —
      여기에 border-bottom 을 또 주면 2px 로 겹쳐 보인다. */
 QWidget[role="journeyRail"] {
     background-color: $panel;
@@ -136,11 +136,9 @@ QLabel[role="mono"] {
     font-family: $font_mono;
 }
 
-/* ── 색 모드 전환을 위해 인라인 스타일에서 옮겨 온 규칙 ────────────────────
-   ★ 위젯이 `setStyleSheet(f"color: {theme.INK}")` 처럼 색을 **생성 시점에 구우면**
-     색 모드를 바꿔도 그 위젯만 옛 색으로 남는다.  그래서 예전에는 색을 바꿀 때
-     페이지 5개를 통째로 다시 만들어야 했다(실측 124ms).  여기로 옮기면
-     `apply_to_app` 한 번으로 살아 있는 위젯이 전부 새 색을 입는다.
+/* ── 인라인 스타일에서 옮겨 온 규칙 ──────────────────────────────────────
+   ★ 위젯이 `setStyleSheet(f"color: {theme.INK}")` 처럼 색을 **생성 시점에 굽지**
+     않게 한다 — 색의 단일 출처가 QSS 토큰으로 남는다.
      새 화면을 만들 때도 인라인 f-string 대신 role 을 붙여라. */
 QLabel[role="paneTitle"] {
     font-weight: 700;
@@ -380,8 +378,8 @@ QFrame[role="section"] {
 /* Stage 1 좌측 패널의 인라인 선택(체크박스 없이 타일 클릭으로 고르는 상태).
    ★ role 을 갈아끼우지 말고 **속성 두 개를 겹쳐** 쓴다 — 타일은 이미 card-soft 라
      role 을 바꾸면 카드 면·라운드를 통째로 잃는다.  선택자가 둘이라 위 규칙을 이긴다.
-   ★ 예전엔 이걸 위젯의 인스턴스 스타일시트로 걸었는데, 색이 import 시점에 굳어
-     다크 전환이 영영 안 먹었고 스코프가 없어 자식 라벨까지 테두리가 번졌다. */
+   ★ 예전엔 이걸 위젯의 인스턴스 스타일시트로 걸었는데, 색이 import 시점에 굳었고
+     스코프가 없어 자식 라벨까지 테두리가 번졌다. */
 QFrame[role="card-soft"][inlineSelected="true"] {
     background-color: $card_selected_bg;
     border: 2px solid $accent;
@@ -541,7 +539,7 @@ QPushButton[role="primary"]:disabled {
     font-weight: 600;
 }
 /* ★ 채운 버튼의 포커스 링은 페이지 배경이 아니라 **버튼 자기 면**과 대비해야 한다.
-   `$focus` 는 `$accent` 와 1.23:1(라이트)/1.30:1(다크) — 링을 그려도 자기 채움에
+   `$focus` 는 `$accent` 와 1.23:1 — 링을 그려도 자기 채움에
    묻혀 보이지 않았다(캡처 실측).  `$on_accent`(라벨 색)는 정의상 채움과 대비하므로
    6.5:1/8.57:1 을 보장한다. 링이 라벨과 붙지 않게 안쪽 눈금을 한 겹 둔다. */
 QPushButton[role="primary"]:focus {
@@ -610,7 +608,7 @@ QPushButton:checked {
 
 /* 옵션 타일 (OptionGroup) — 작은 라디오 대신 '타일 전체가 클릭영역'인 배타 선택.
    ★ 선택 상태를 여기서만 칠한다 — 위젯 쪽 인라인 스타일시트 금지(죽은 팔레트 하드코딩
-   재발 방지 + 라이트/다크 자동 대응).  아래 :checked 는 위의 일반 QPushButton:checked 보다
+   재발 방지).  아래 :checked 는 위의 일반 QPushButton:checked 보다
    특이도가 높고 뒤에 선언돼 있어 특이도·순서가 모두 일치한다 — 재정렬 주의. */
 QPushButton[role="option"] {
     background: transparent;
@@ -727,7 +725,7 @@ QLabel[role="loadingEta"] {
 }
 
 /* 배지 캡션 — ★ `role="colHead"`($mute) 를 쓰면 구형 상태의 warn_tint 면 위에서
-   4.66(다크)로 게이트(5.0)를 깬다.  캡션이지만 한 단계 진한 잉크를 쓴다
+   게이트(5.0) 여유가 없다.  캡션이지만 한 단계 진한 잉크를 쓴다
    (대비표가 **실제로 쓰는 토큰**을 재도록 전용 역할로 분리). */
 QLabel[role="badgeCaption"] {
     color: $ink2;
@@ -807,7 +805,7 @@ QPushButton[role="segment"]:checked:disabled {
 
 /* 차단 이유 문구 — '왜 지금 확인할 수 없는가'.  ★ `role="warn"` 은 QPushButton 에만
    있었어서 라벨에 붙이면 조용히 기본 잉크로 렌더된다(선언했으니 될 것이라 믿으면 안 되는
-   그 함정).  라벨 등급을 따로 둔다.  면 대비 실측: 라이트 6.10/5.58 · 다크 9.52/10.55. */
+   그 함정).  라벨 등급을 따로 둔다.  면 대비 실측: 6.10/5.58. */
 QLabel[role="warn"] {
     color: $warn;
     font-weight: 600;
@@ -818,8 +816,8 @@ QLabel[role="warn"] {
    (WCAG 2.5.8 AA 24px 상회).
 
    ★ 선택 상태를 **여기서만** 칠한다.  이전 `_SlotTile` 은 `rgba(57,255,20,0.10)` —
-   지금 어느 팔레트에도 없는 죽은 네온 초록을 인라인으로 하드코딩해, 다크에서 배경만
-   초록으로 뜨고 라벨 대비도 측정된 적이 없었다.  토큰으로 칠하면 두 모드가 자동이다.
+   지금 팔레트에 없는 죽은 네온 초록을 인라인으로 하드코딩해, 라벨 대비도 측정된 적이
+   없었다.  토큰으로 칠한다.
 
    ★ `:focus` 규칙은 없다 — 타일이 `NoFocus` 라 절대 발화하지 않는다(사용자 결정으로
    타일 키보드 조작 제거).  '그릴 수 없는 상태'의 스타일을 남겨 두면 다음 사람이
@@ -1116,8 +1114,8 @@ QScrollBar::add-line, QScrollBar::sub-line {
 }
 
 /* ── 진행 바 ────────────────────────────────────────────────────────── */
-/* ★ 바 안에 숫자를 넣지 않는다 — 채움이 글자 아래를 지나가는 순간 대비가 2.41(라이트)
-   /1.85(다크) 로 붕괴한다(실측).  숫자는 바 **밖**의 모노 라벨이 담당한다
+/* ★ 바 안에 숫자를 넣지 않는다 — 채움이 글자 아래를 지나가는 순간 대비가 2.41 로
+   붕괴한다(실측).  숫자는 바 **밖**의 모노 라벨이 담당한다
    (loading_overlay._count_label).  그래서 text-align/color 규칙도 없다. */
 QProgressBar {
     background: $panel;
@@ -1257,12 +1255,10 @@ QToolButton[objectName="helpToggle"]:focus {
 }
 
 /* ── 사진 판독 뷰어 (풀스크린 · 좌우 비교) ─────────────────────────────── */
-/* ★ 이 계층만 테마를 따르지 않는다 — 판독 바탕은 라이트/다크 어느 쪽이든 순검정
-     이어야 사진의 계조가 눈을 속이지 않는다($viewer_bg 는 두 팔레트가 같은 값).
-     그래서 잉크도 활성 팔레트가 아니라 흑연 팔레트에서 고정으로 뽑은 $viewer_ink
-     를 쓴다(라이트의 mute 는 검정 위에서 2:1 이 안 된다).
-   ★ 인라인 f-string 으로 굽던 자리를 옮겨 온 규칙이다 — 생성 시점에 색을 구우면
-     살아 있는 위젯 재채색(_recolor_in_place) 경로에서 옛 색이 그대로 남는다. */
+/* ★ 이 계층만 화면 색을 따르지 않는다 — 판독 바탕은 순검정($viewer_bg)이어야
+     사진의 계조가 눈을 속이지 않는다.  그래서 잉크도 화면의 mute 가 아니라 검정 위
+     전용 고정색 $viewer_ink 를 쓴다(화면의 mute 는 검정 위에서 2:1 이 안 된다).
+   ★ 인라인 f-string 으로 굽던 자리를 옮겨 온 규칙이다. */
 QDialog[role="viewer"],
 QLabel[role="viewer"] {
     background-color: $viewer_bg;

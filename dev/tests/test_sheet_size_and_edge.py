@@ -105,32 +105,22 @@ def test_slot_dialog_sheet_is_tall_enough(qapp, win):
 # ---------------------------------------------------------------------------
 # 2) 시트 경계가 보인다
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize("mode", ["light", "dark"])
-def test_sheet_surface_differs_from_page(qapp, mode):
+def test_sheet_surface_differs_from_page(qapp):
     """시트 면이 뒷화면 면보다 한 단 위 — 같은 색이면 경계가 사라진다."""
-    theme.set_color_mode(mode)
-    try:
-        assert theme.ELEV != theme.BG
-        # 면만으로는 미미하므로 테두리가 실제 경계를 만든다(아래 테스트).
-        assert _contrast(theme.BG, theme.ELEV) > _contrast(theme.BG, theme.PANEL)
-    finally:
-        theme.set_color_mode("light")
+    assert theme.ELEV != theme.BG
+    # 면만으로는 미미하므로 테두리가 실제 경계를 만든다(아래 테스트).
+    assert _contrast(theme.BG, theme.ELEV) > _contrast(theme.BG, theme.PANEL)
 
 
-@pytest.mark.parametrize("mode", ["light", "dark"])
-def test_sheet_border_is_visible(mode):
+def test_sheet_border_is_visible():
     """시트 테두리가 뒷화면과 3:1 이상으로 구분되고, 굵기가 2px 이다.
 
     ★ 검사 대상은 **렌더된 QSS 문자열**이라 앱에 적용할 필요가 없다.  `apply_to_app` 은
     부를수록 비싸지므로(conftest 주석) 여기서는 `render_qss` 로 문자열만 얻는다."""
-    theme.set_color_mode(mode)
-    try:
-        assert _contrast(theme.BG, theme.LINE_STRONG) >= 3.0
-        qss = theme.render_qss(_QSS_SRC)
-        i = qss.find('QDialog[role="sheet"]')
-        assert i >= 0
-        block = qss[i:i + 220]
-        assert "border: 2px solid" in block, block
-        assert f"background-color: {theme.ELEV};" in block, block
-    finally:
-        theme.set_color_mode("light")
+    assert _contrast(theme.BG, theme.LINE_STRONG) >= 3.0
+    qss = theme.render_qss(_QSS_SRC)
+    i = qss.find('QDialog[role="sheet"]')
+    assert i >= 0
+    block = qss[i:i + 220]
+    assert "border: 2px solid" in block, block
+    assert f"background-color: {theme.ELEV};" in block, block

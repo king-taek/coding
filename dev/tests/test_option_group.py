@@ -86,7 +86,7 @@ def test_arrow_keys_move_selection_when_opted_in(qapp):
 def test_arrow_keys_do_not_commit_by_default(qapp):
     """★ 기본은 '포커스만 이동'이다 — 이 위젯의 선택은 부수효과를 가진다.
 
-    배치·색 모드는 페이지 재생성이고 진행 범위 'subset' 은 **모달**을 띄운다.
+    진행 범위 'subset' 은 **모달**을 띄운다.
     실측으로 방향키 한 번에 경고창이 떠 하네스가 블로킹된 적이 있다.
     ★ 키는 포커스된 타일에 보낸다 — `QAbstractButton` 이 방향키를 스스로 처리해
     `click()` 까지 호출할 수 있어서, 컨테이너 경로만 검증하면 구멍이 남는다."""

@@ -1,10 +1,9 @@
 """테마 밖에서 **색을 굽는** 코드가 다시 들어오지 못하게 막는다.
 
 배경(실제 사고): 위젯층 세 곳이 `theme.X` 를 모듈/클래스 상수의 f-string 에 박아
-넣었다.  그러면 색이 **import 시점**에 굳어 다크 전환(`_recolor_in_place` 는 전역 QSS 만
-다시 렌더한다)이 영영 안 먹는다 — 다크에서 [중지] 글자 대비가 2.19:1 이었고, Stage 1
-선택 타일은 다크 배경에 라이트 남색 테두리(2.18:1)로 떠 있었다.  같은 자리에 현
-팔레트에 없는 색(옛 네온 초록·앰버·다크 네이비)까지 함께 있었다.
+넣었다.  그러면 색이 **import 시점**에 굳어 색의 단일 출처(QSS 토큰)를 벗어난다 —
+당시 있던 다크 모드에서 [중지] 글자 대비가 2.19:1 로 무너진 것이 그 결과였다.  같은
+자리에 현 팔레트에 없는 색(옛 네온 초록·앰버·다크 네이비)까지 함께 있었다.
 
 `test_theme.py` 가 style.qss 를 지키고, 이 파일은 **파이썬 쪽**을 지킨다.
 """
@@ -105,14 +104,8 @@ def test_new_qss_roles_exist():
     assert m and theme.LINE_STRONG in m.group(0)
 
 
-def test_viewer_background_token_exists_in_both_modes():
-    """한쪽 팔레트에만 넣으면 그 모드에서 render_qss 가 KeyError 로 앱을 죽인다."""
+def test_viewer_background_token_exists():
+    """토큰이 빠지면 render_qss 가 KeyError 로 앱을 죽인다."""
     theme = pytest.importorskip("aoi_verification.app.ui.theme")
-    before = theme.COLOR_MODE
-    try:
-        for mode in ("light", "dark"):
-            theme.set_color_mode(mode)
-            assert theme.VIEWER_BG, f"{mode}: VIEWER_BG 비어 있음"
-            theme.render_qss((_UI / "style.qss").read_text(encoding="utf-8"))
-    finally:
-        theme.set_color_mode(before)
+    assert theme.VIEWER_BG, "VIEWER_BG 비어 있음"
+    theme.render_qss((_UI / "style.qss").read_text(encoding="utf-8"))
