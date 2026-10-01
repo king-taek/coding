@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 from PyQt6.QtCore import QObject, QThread, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import (QColor, QImage, QPainter, QPixmap, QShortcut,
+from PyQt6.QtGui import (QColor, QImage, QPainter, QPen, QPixmap, QShortcut,
                          QKeySequence)
 from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout,
                               QHBoxLayout, QLabel, QMenu, QScrollArea,
@@ -218,7 +218,12 @@ class FullscreenViewer(QDialog):
     # 800px 보다 훨씬 선명하다).
     _WORK_OVERSAMPLE = 2
 
-    def __init__(self, image_path: Path, parent=None) -> None:
+    def __init__(self, image_path: Path, parent=None, *,
+                 image: Optional[QImage] = None,
+                 overlay: Optional[tuple[int, int, int, int]] = None) -> None:
+        """``image`` 를 주면 그 픽셀을 그대로 보여 준다(mid·원본 로드 생략).
+        ``overlay`` = 그 이미지 픽셀 좌표의 (left, top, w, h) 사각형 — 사진에 굽지 않고
+        그릴 때마다 위에 덧그린다(Scan 원본 위 Crop 범위 표시)."""
         super().__init__(parent)
         self.setWindowTitle(image_path.name)
         self.setModal(True)
@@ -240,9 +245,11 @@ class FullscreenViewer(QDialog):
         self._offset_y = 0
         self._last_drag = None
         self._loader: Optional[_OriginalLoader] = None
+        self._overlay = overlay
 
         # 풀 사이즈 이미지는 디코드가 느릴 수 있어 우선 mid 로 즉시 그린다.
-        self._pix = QPixmap(str(image_io.get_mid_path(image_path)))
+        self._pix = (QPixmap.fromImage(image) if image is not None
+                     else QPixmap(str(image_io.get_mid_path(image_path))))
         if self._pix.isNull():
             self._pix = QPixmap(800, 600)
             self._pix.fill(QColor(theme.VIEWER_BG))
@@ -264,7 +271,8 @@ class FullscreenViewer(QDialog):
         lay.addWidget(self._hint)
 
         QShortcut(QKeySequence("Esc"), self, activated=self.close)
-        self._start_original_load()
+        if image is None:
+            self._start_original_load()
 
     # -- 원본 화질로 교체 ------------------------------------------------
     def _start_original_load(self) -> None:
@@ -406,6 +414,15 @@ class FullscreenViewer(QDialog):
         x = (cw - scaled.width()) // 2 + self._offset_x
         y = (ch - scaled.height()) // 2 + self._offset_y
         p.drawPixmap(x, y, scaled)
+        if self._overlay is not None:
+            left, top, ow, oh = self._overlay
+            s = scaled.width() / float(max(1, self._pix.width()))
+            # 뷰어 바탕은 두 모드 모두 검정이라 다크 팔레트의 강조색을 쓴다.
+            pen = QPen(QColor(theme.PALETTES["dark"]["accent"]))
+            pen.setWidth(2)
+            p.setPen(pen)
+            p.drawRect(int(x + left * s), int(y + top * s),
+                       max(1, int(ow * s)), max(1, int(oh * s)))
         p.end()
         self._label.setPixmap(canvas)
 

@@ -22,24 +22,31 @@ Surface.flt)이다.  사진만 따로 복사한 폴더에서는 LIVE 형식 파�
 
 조회는 폴더 단위 ``lru_cache`` 를 타는 파서 몇 번이라 즉시 끝난다.  장시간 작업이
 아니므로 백그라운드 스레드·``LoadingOverlay`` 를 쓰지 않는다.
+
+**Scan image** 만은 예외다 — 같은 폴더의 Scan 원본(수 MB, NAS)을 읽어 잘라야 하므로
+워커 스레드(`_ScanLoader`)에서 돈다.  Scan 이 있다고 판정되면 Color 아래에 자리를 먼저
+잡고 '불러오는 중' 을 띄운 뒤 그림으로 바꾼다.  Scan 이 없으면 칸 자체를 만들지 않는다
+(사용자 결정).  사진을 바꿀 때마다 세대 번호를 올려, 늦게 도착한 이전 사진의 결과가
+새 사진 아래에 붙지 않게 한다.  계산은 엑셀과 같은 :mod:`coords.scan_image` 다.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFontMetrics, QKeySequence, QShortcut
+from PyQt6.QtCore import QObject, QThread, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QFontMetrics, QImage, QKeySequence, QPixmap, QShortcut
 from PyQt6.QtWidgets import (QApplication, QDialog, QFileDialog, QFrame,
                              QGridLayout, QHBoxLayout, QLabel, QScrollArea,
                              QSizePolicy, QVBoxLayout, QWidget)
 
 from ... import i18n
 from ...config import CONFIG
-from ...coords import single_info
+from ...coords import scan_image, single_info
 from ...utils import image_io as _io
 from .. import theme
 from ..deferred import call_later
+from . import sheet_host as sheets
 from .neon_button import NeonButton
 
 # 미리보기 — 고정 정사각형이 아니라 폭 하한만 두고 세로는 표와 함께 늘어난다.
@@ -50,6 +57,64 @@ _TOAST_MS = 1800
 # 라벨 열 폭의 **하한** — 값이 전부 여기서부터 시작한다.  실제 폭은 시트에 실린 가장 긴
 # 라벨에 맞춰 넓힌다(`_label_col_w`).
 _LABEL_COL_MIN = 132
+# Scan 칸의 최소 한 변 — 창이 낮아도 이보다 작게 줄이지 않는다.
+_SCAN_MIN_SIDE = 120
+
+
+def pil_to_qimage(im) -> QImage:
+    """PIL 이미지 → 독립 QImage(버퍼를 복사한다).  워커 스레드에서 불러도 된다."""
+    if im.mode != "L":
+        im = im.convert("RGB")
+    fmt = (QImage.Format.Format_Grayscale8 if im.mode == "L"
+           else QImage.Format.Format_RGB888)
+    data = im.tobytes()
+    return QImage(data, im.width, im.height, len(im.mode) * im.width, fmt).copy()
+
+
+# 살아 있는 로더를 붙잡아 둔다 — 다이얼로그의 자식으로 두면 창을 닫는 순간 실행 중인
+# QThread 가 파괴돼 프로세스가 죽는다(`zoom_window._LIVE_LOADERS` 와 같은 이유).
+_LIVE_SCAN_LOADS: set = set()
+
+
+class _ScanLoader(QThread):
+    """Scan 판정 → (있으면) 원본 디코드와 Crop.  QPixmap 은 만들지 않는다(GUI 전용)."""
+
+    class _Signals(QObject):
+        found = pyqtSignal(int)                          # 세대 — Scan 있음 판정
+        done = pyqtSignal(int, str, object, object, object, str)
+        # (세대, 상태, Crop QImage, 전체 QImage, Crop 범위, Scan 파일명)
+
+    def __init__(self, path: Path, gen: int) -> None:
+        super().__init__()                  # 부모 없음(위 주석)
+        self._path, self._gen = path, gen
+        self.signals = self._Signals()
+
+    def run(self) -> None:      # type: ignore[override]
+        m = scan_image.resolve(self._path)
+        if not m.ok:
+            self.signals.done.emit(self._gen, m.status, None, None, None, "")
+            return
+        self.signals.found.emit(self._gen)
+        res = scan_image.load_crop(m)
+        if res is None:
+            self.signals.done.emit(self._gen, scan_image.UNREADABLE,
+                                   None, None, None, "")
+            return
+        crop, cand = res
+        full = scan_image.load_full(cand)
+        self.signals.done.emit(
+            self._gen, scan_image.OK, pil_to_qimage(crop),
+            pil_to_qimage(full) if full is not None else None,
+            tuple(cand.box), str(cand.path))
+
+
+class _ClickLabel(QLabel):
+    clicked = pyqtSignal()
+
+    def mousePressEvent(self, e):           # noqa: N802
+        if e.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(e)
 
 
 def _shape_columns(grid: QGridLayout, label_w: int) -> None:
@@ -103,6 +168,11 @@ class ImageInfoDialog(QDialog):
         self.setAcceptDrops(True)
         self._path: Path | None = None
         self._groups: list = []
+        self._scan_gen = 0
+        self._scan_crop: QImage | None = None
+        self._scan_full: QImage | None = None
+        self._scan_box = None
+        self._scan_name = ""
         self._build()
         if image_path:
             self.show_image(Path(image_path))
@@ -164,7 +234,19 @@ class ImageInfoDialog(QDialog):
         # 프레임이 사진을 **딱 감싸도록** 위쪽 정렬로 두고, 크기는 픽스맵에 맞춘다.
         lay.addWidget(self.preview, alignment=Qt.AlignmentFlag.AlignTop
                       | Qt.AlignmentFlag.AlignHCenter)
+        # Scan image — Scan 이 있다고 판정될 때만 보인다.
+        self.scan_title = QLabel(i18n.KO.SCAN_IMAGE_TITLE, host)
+        self.scan_title.setProperty("role", "mutedCaption")
+        self.scan_view = _ClickLabel(host)
+        self.scan_view.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.scan_view.setWordWrap(True)
+        self.scan_view.clicked.connect(self._open_full_scan)
+        lay.addWidget(self.scan_title)
+        lay.addWidget(self.scan_view, alignment=Qt.AlignmentFlag.AlignTop
+                      | Qt.AlignmentFlag.AlignHCenter)
+        self._set_scan_visible(False)
         lay.addStretch(1)
+        self._preview_host = host
         self._set_drop_active(False)
         return host
 
@@ -279,7 +361,93 @@ class ImageInfoDialog(QDialog):
         self._path = Path(path)
         self._groups = single_info.describe(self._path)
         self.pick_btn.setText(i18n.KO.IMAGE_INFO_PICK_ANOTHER)
+        self._start_scan()
         self._render()
+
+    # ------------------------------------------------------------------
+    # Scan image
+    # ------------------------------------------------------------------
+    def _set_scan_visible(self, on: bool) -> None:
+        self.scan_title.setVisible(on)
+        self.scan_view.setVisible(on)
+
+    def _start_scan(self) -> None:
+        """이전 사진의 Scan 을 즉시 치우고 새 사진의 판정을 워커에 맡긴다."""
+        self._scan_gen += 1
+        self._scan_crop = self._scan_full = self._scan_box = None
+        self._scan_name = ""
+        self._set_scan_visible(False)
+        ld = _ScanLoader(self._path, self._scan_gen)
+        ld.signals.found.connect(self._on_scan_found)
+        ld.signals.done.connect(self._on_scan_done)
+        _LIVE_SCAN_LOADS.add(ld)
+        ld.finished.connect(lambda: _LIVE_SCAN_LOADS.discard(ld))
+        ld.start()
+
+    def _on_scan_found(self, gen: int) -> None:
+        if gen != self._scan_gen:
+            return
+        self._show_scan_text(i18n.KO.SCAN_IMAGE_LOADING)
+
+    def _on_scan_done(self, gen, status, crop, full, box, name) -> None:
+        if gen != self._scan_gen:
+            return                      # 이미 다른 사진으로 넘어갔다
+        if status == scan_image.OK and crop is not None:
+            self._scan_crop, self._scan_full = crop, full
+            self._scan_box, self._scan_name = box, name
+            self._set_scan_visible(True)
+            self._refresh_preview()
+        elif status == scan_image.UNREADABLE:
+            self._show_scan_text(i18n.KO.SCAN_IMAGE_UNREADABLE)
+        else:
+            self._set_scan_visible(False)
+
+    def _show_scan_text(self, text: str) -> None:
+        self._scan_crop = None
+        self.scan_view.setPixmap(QPixmap())
+        self.scan_view.setText(text)
+        self.scan_view.setCursor(Qt.CursorShape.ArrowCursor)
+        self.scan_view.setToolTip("")
+        self.scan_view.setStyleSheet(
+            f"border: 1px dashed {theme.THUMB_FRAME};"
+            f" border-radius: {theme.PROFILE.radius_sm}px; color: {theme.MUTE};")
+        self._set_scan_visible(True)
+        self._refresh_preview()
+
+    def _scan_side(self, preview_w: int, preview_h: int) -> int:
+        """Scan 칸 한 변 — Color 폭을 넘지 않고, 미리보기 열 높이 안에 들게."""
+        host = self._preview_host
+        room = (host.height() - preview_h - self.scan_title.sizeHint().height()
+                - 2 * host.layout().spacing())
+        return max(_SCAN_MIN_SIDE, min(preview_w, room))
+
+    def _refresh_scan(self, preview_w: int, preview_h: int) -> None:
+        """이미 메모리에 있는 Crop 만 다시 스케일한다(파일을 다시 읽지 않는다)."""
+        if self.scan_view.isHidden() and self._scan_crop is None:
+            return
+        side = self._scan_side(preview_w, preview_h)
+        if self._scan_crop is None:
+            self.scan_view.setFixedSize(side, side)
+            return
+        pix = QPixmap.fromImage(self._scan_crop).scaled(
+            side, side, Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation)
+        self.scan_view.setText("")
+        self.scan_view.setPixmap(pix)
+        self.scan_view.setFixedSize(pix.size())
+        self.scan_view.setStyleSheet(f"border: 1px solid {theme.THUMB_FRAME};")
+        self.scan_view.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.scan_view.setToolTip(i18n.KO.SCAN_IMAGE_OPEN_TIP)
+        self.scan_view.setAccessibleName(i18n.KO.SCAN_IMAGE_TITLE)
+
+    def _open_full_scan(self) -> None:
+        """전체 Scan 원본에 잘라낸 범위를 덧그려 기존 전체화면 뷰어로 연다."""
+        if self._scan_full is None or self._scan_box is None:
+            return
+        from .zoom_window import FullscreenViewer
+        viewer = FullscreenViewer(Path(self._scan_name), self,
+                                  image=self._scan_full, overlay=self._scan_box)
+        sheets.run(viewer, full_bleed=True)
 
     def resizeEvent(self, event):           # noqa: N802
         super().resizeEvent(event)
@@ -303,6 +471,7 @@ class ImageInfoDialog(QDialog):
         # 프레임이 사진을 딱 감싸도록 라벨을 픽스맵 크기로 — 레터박스 여백 제거.
         self.preview.setFixedSize(pix.size())
         self.preview.setAccessibleName(self._path.name)
+        self._refresh_scan(pix.width(), pix.height())
 
     # ------------------------------------------------------------------
     def _render(self) -> None:

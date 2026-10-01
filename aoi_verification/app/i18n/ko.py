@@ -912,7 +912,26 @@ IMAGE_INFO_EMPTY = (
     "있는지 확인하세요."
 )
 IMAGE_INFO_COPY = "전체 복사"
+# 업데이트 안내 — 업데이트 후 첫 실행 때 한 번(항목은 `i18n/whats_new.py`).
+WHATS_NEW_TITLE = "업데이트 안내"
+WHATS_NEW_KICKER_FMT = "UPDATE · {date}"
+WHATS_NEW_OTHERS = "그 밖에 달라진 점"
+WHATS_NEW_NOTICE = "주의"
+WHATS_NEW_OK = "좋아요"
 IMAGE_INFO_COPIED = "복사했습니다"
+
+# ── Scan 이미지 (Color 결함 위치를 같은 폴더 Scan 사진에서 300㎛ 로 잘라 보임) ──
+# Scan 이 없는 사진에서는 칸 자체를 만들지 않는다(사용자 결정) — '없음' 문구는 화면에 없다.
+SCAN_IMAGE_TITLE = "Scan image"
+SCAN_IMAGE_LOADING = "Scan 이미지 불러오는 중"
+SCAN_IMAGE_UNREADABLE = "Scan 이미지를 읽을 수 없음"
+SCAN_IMAGE_OPEN_TIP = "누르면 전체 Scan 이미지에서 이 범위를 보여줍니다"
+# 엑셀 — Scan 열 머리(2행)와, Scan 열이 생긴 시트에서 그 행만 Scan 이 없을 때의 칸 문구.
+SCAN_EXCEL_HEADER_FMT = "{machine} Scan"
+SCAN_EXCEL_HEADER = "Scan"
+SCAN_EXCEL_NONE = "Scan 없음"
+SCAN_EXCEL_UNREADABLE = "Scan 이미지를 읽을 수 없음"
+SCAN_EXPORT_PHASE = "엑셀로 저장 중 — Scan 이미지 확인"
 
 # ── 일반 상태 표시 ─────────────────────────────────────────────────────────
 COUNT_PLUS_N_FMT = "+{n}"
@@ -1029,6 +1048,19 @@ WAFER_MAP_CENTER_ASSUMED = "중심 가정(±½ die)"
 WAFER_MAP_GRID_COMPUTED = "die 격자: 계산값(장비 die 맵 없음)"
 WAFER_MAP_PITCH_ASSUMED = "die 크기 추정(사진 좌표 기준 — 폴더에 die 크기 정보 없음, 위치 근사)"
 WAFER_MAP_TIP_COLROW_FMT = "col {col} · row {row}"
+WAFER_MAP_WARN_HEAD = "⚠ 이 Wafer map 은 실제와 다르게 그려졌을 수 있습니다"
+WAFER_MAP_WARN_OFF_DIE_FMT = "die 가 없는 칸(또는 웨이퍼 밖)에 찍힌 사진 {n}장"
+WAFER_MAP_WARN_MIXED_FRAMES = "합친 슬롯들의 die 격자가 서로 달라 다른 슬롯 점이 엉뚱한 칸에 찍힐 수 있음"
+WAFER_MAP_WARN_UNPLACED_FMT = "좌표를 읽지 못해 맵에서 빠진 사진 {n}장"
+WAFER_MAP_WARN_PITCH_ASSUMED = "die 크기 정보가 없어 사진으로 추정함 — die 칸은 맞지만 die 크기·웨이퍼 외곽은 근사"
+WAFER_MAP_WARN_LIVE_UNVERIFIED = (
+    "LIVE 파일로 만든 맵은 아직 검증이 충분히 이뤄지지 않아 틀린 정보가 있을 수 있습니다 — "
+    "중요한 정보는 반드시 장비 화면이나 원본 데이터로 재검토하세요")
+WAFER_MAP_WARN_SIDE_FMT = "{side} — {reasons}"
+WAFER_MAP_DISCLAIMER = (
+    "※ Wafer map 은 파일명·장비 파일로 다시 그린 참고용 그림입니다. "
+    "die 위치와 판정은 반드시 장비 화면이나 원본 데이터로 확인하세요."
+)
 WAFER_MAP_TIP_NO_DIE = "die 인덱스 없음(절대좌표)"
 WAFER_MAP_TIP_XY_FMT = "X {x:,.0f} · Y {y:,.0f} ㎛"
 WAFER_MAP_SHEET = "Wafer Map"
@@ -1078,7 +1110,9 @@ EXTRACT_BACK_BUTTON = "← 매칭으로"
 EXTRACT_TITLE = "Defect 추출"
 EXTRACT_GROUP = "대상 장비"
 # 여러 LOT — 대상 장비 카드에 줄을 늘린다(최대 10개).  줄마다 슬롯을 따로 고른다.
-EXTRACT_FOLDER_PLACEHOLDER = "LOT 또는 wafer 폴더"
+EXTRACT_FOLDER_PLACEHOLDER = "LOT 또는 wafer 폴더 (끌어다 놓기 가능)"
+# 끌어다 놓은 폴더가 LOT 줄 최대 개수를 넘을 때.
+EXTRACT_DROP_TOO_MANY_FMT = "LOT 은 최대 {max}개까지 넣을 수 있어 {n}개는 넣지 않았습니다."
 EXTRACT_LOT_ADD_FMT = "+ LOT 추가 ({n}/{max})"
 EXTRACT_LOT_REMOVE = "이 LOT 빼기"
 EXTRACT_SLOT_BTN_ALL = "슬롯: 전체"

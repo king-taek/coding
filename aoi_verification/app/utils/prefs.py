@@ -79,6 +79,8 @@ class UiPrefs:
     # OpenVINO (Intel GPU 가속) 자동 설치 안내를 거절한 경우 — 다시 묻지
     # 않음.  사용자가 ‘다시 보지 않기’ 를 선택했거나 설치 시도 후 실패하면 True.
     openvino_install_declined: bool = False
+    # 업데이트 안내 팝업 — 마지막으로 본 항목 id(`i18n/whats_new.py`).  "" = 아직 없음.
+    whats_new_seen: str = ""
     # 유사도 엔진 모드 — 마지막으로 '실제 실행된' 모드(파생값).
     # 기본값은 좌표 매칭: 신규 사용자가 구형(유사도) 모드로 시작하던 버그를 고친다
     # (셋업 화면 안내 문구도 좌표 매칭이 기본이라고 말한다).

@@ -9,7 +9,7 @@
 - 중심이 없으면 ``가정`` 등급으로 표시하고 점은 원 안에 놓인다(±½ pitch).
 - 좌표를 못 놓은 사진은 조용히 사라지지 않고 ``unplaced`` 에 남는다.
 - LIVE 파일명 사진만 든 폴더(INI 항목 없음)도 찍힌다 — 같은 결함의 INI 경로와 같은 자리.
-  pitch 가 파일에 없으면 상수를 **가정**으로 쓰고 범례에 표기, 가정이 반증되면 안 찍는다.
+  pitch 가 파일에 없으면 **같은 LOT 사진**으로 추정(가정)하고 범례에 표기한다.
 - 격자선은 원 안만, 개수는 지름/pitch 근처 — die 8만 개도 선 몇백 개다.
 - 뷰: 휠은 커서 기준 확대, 점 판정은 HIT_PX 이내, PNG 렌더는 화면과 같은 함수.
 - 결과 시트는 기준/검증 두 맵, 셋업 시트는 폴더 안내 → 슬롯 폴더면 맵 하나, LOT 폴더면
@@ -1096,6 +1096,10 @@ def test_export_writes_wafer_map_sheet(qt, isolated_cache, tmp_path):
         i18n.KO.WAFER_MAP_SHEET_ALL, "S1", "S2"]
     # 전체(기준·검증) + S1(기준·검증) + S2(기준만) = 5 장.
     assert len(ws._images) == 5
+    # INI 로 그린 맵에는 LIVE 재검토 당부가 붙지 않는다.
+    assert not ws.merged_cells.ranges
+    assert i18n.KO.WAFER_MAP_WARN_LIVE_UNVERIFIED not in {
+        c.value for row in ws.iter_rows() for c in row}
 
 
 def test_wafer_map_sheet_names_the_machines_and_slot_numbers(
