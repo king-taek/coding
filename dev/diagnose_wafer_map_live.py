@@ -55,13 +55,71 @@ _MAX_WALK_DEPTH = 4              # 슬롯 폴더를 찾아 내려가는 깊이
 # ---------------------------------------------------------------------------
 _HERE = Path(__file__).resolve()
 _APP_IMPORT_ERR = ""
-for _cand in (_HERE.parents[1], Path.cwd(), *Path.cwd().parents):
-    if (_cand / "aoi_verification" / "app").is_dir():
-        sys.path.insert(0, str(_cand))
-        _REPO = _cand
-        break
-else:
-    _REPO = None
+_MARK = Path("aoi_verification") / "app" / "coords" / "wafer_map.py"
+_SKIP_DIRS = {"windows", "$recycle.bin", "appdata", "node_modules", ".git", "python",
+              "__pycache__", ".pytest_cache", "system volume information", "programdata"}
+_APP_SEARCH_LOG: list[str] = []
+
+
+def _walk_for_app(root: Path, depth: int):
+    """root 아래 depth 단계까지 앱 코드(aoi_verification) 폴더를 찾는다."""
+    try:
+        if (root / _MARK).is_file():
+            yield root
+        if depth <= 0:
+            return
+        with os.scandir(root) as it:
+            subs = [Path(e.path) for e in it
+                    if e.is_dir() and e.name.lower() not in _SKIP_DIRS
+                    and not e.name.startswith(".")]
+    except OSError:
+        return
+    for d in subs:
+        yield from _walk_for_app(d, depth - 1)
+
+
+def _find_app_root():
+    """앱 코드 위치 — ``--app <폴더>`` · 환경변수 ``AOI_APP_ROOT`` · 스크립트/현재 폴더의
+    부모 · 사용자 폴더(바탕화면·문서·다운로드) · C:/D: 드라이브 얕은 곳 순으로 찾는다.
+    바탕화면에 스크립트만 복사해 돌려도 설치된 앱(포터블/exe 의 app 폴더)을 찾게 한다."""
+    explicit = []
+    if "--app" in sys.argv:
+        i = sys.argv.index("--app")
+        if i + 1 < len(sys.argv):
+            explicit.append(Path(sys.argv[i + 1]))
+    if os.environ.get("AOI_APP_ROOT"):
+        explicit.append(Path(os.environ["AOI_APP_ROOT"]))
+    for c in explicit:
+        for cand in (c, c / "app"):
+            if (cand / _MARK).is_file():
+                return cand
+        _APP_SEARCH_LOG.append(f"지정한 경로에 앱 코드 없음: {c}")
+    for c in (*_HERE.parents, Path.cwd(), *Path.cwd().parents):
+        if (c / _MARK).is_file():
+            return c
+    home = Path.home()
+    roots = [(home / n, 4) for n in ("Desktop", "바탕 화면", "OneDrive", "Documents",
+                                     "Downloads")]
+    roots += [(home, 2), (Path("C:/"), 3), (Path("D:/"), 3)]
+    found = []
+    for r, depth in roots:
+        if not r.exists():
+            continue
+        found += list(_walk_for_app(r, depth))
+        if found:
+            break
+    if found:
+        # 여러 개면 wafer_map.py 가 가장 최근인 것
+        found.sort(key=lambda c: (c / _MARK).stat().st_mtime, reverse=True)
+        _APP_SEARCH_LOG.append("찾은 앱 코드 후보: " + ", ".join(str(c) for c in found[:8]))
+        return found[0]
+    _APP_SEARCH_LOG.append("탐색한 곳: " + ", ".join(str(r) for r, _ in roots))
+    return None
+
+
+_REPO = _find_app_root()
+if _REPO is not None:
+    sys.path.insert(0, str(_REPO))
 
 try:
     from aoi_verification.app import coords as C                       # noqa: E402
@@ -1014,6 +1072,270 @@ def _lot_combined(rep: Report, slots: dict[str, Path]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# LOT 폴더(와 부모)의 부가 파일 — die 크기 단서가 여기 있을 수 있다
+# ---------------------------------------------------------------------------
+_CLUE_PAT = re.compile(
+    r"die\s*_?(step|pitch|size|index)|diepitch|dieindex|diestep|pitch|step_?[xy]|"
+    r"index_?[xy]|[xy]_?index|center|diameter|wafer\s*size|samplesize|notch|flat|"
+    r"col|row|x_?size|y_?size", re.I)
+_SIDE_MAX_FILES = 60
+_SIDE_MAX_BYTES = 8 * 1024 * 1024
+
+
+def _lot_side_files(rep: Report, target: Path, slots: dict[str, Path]) -> None:
+    rep.h1("LOT 폴더·부모의 부가 파일 (.txt/.csv/.lot 등) — die 크기·배치 단서")
+    dirs = [target, *[d for d in _search_dirs(target)[1:]]]
+    for lvl, d in enumerate(dirs):
+        try:
+            files = sorted((p for p in d.iterdir() if p.is_file() and not _is_image(p.name)),
+                           key=lambda p: p.name.lower())
+        except OSError as e:
+            rep.w(f"  {d}: 열거 실패 {e}")
+            continue
+        rep.h2(f"{'대상 폴더' if lvl == 0 else f'부모 {lvl}단계'} {d} — 비-사진 파일 {len(files)}개")
+        files = [p for p in files if p.suffix.lower() not in (".py", ".pyc")
+                 and not p.name.startswith("wafer_map_진단_")]
+        for p in files[:_SIDE_MAX_FILES]:
+            rep.w(f"  - {p.name}  ({_stat(p)})")
+            try:
+                size = p.stat().st_size
+                with p.open("rb") as fh:
+                    head = fh.read(8192)
+            except OSError:
+                continue
+            if size > _SIDE_MAX_BYTES or not _looks_text(head):
+                continue
+            _DUMPED.setdefault(p, "LOT 부가")
+            txt, enc, _ = _read_text(p)
+            lines = txt.splitlines()
+            hits = [(i, ln.strip()) for i, ln in enumerate(lines, 1) if _CLUE_PAT.search(ln)]
+            rep.w(f"      {enc}, {len(lines)}줄, 단서 줄 {len(hits)}개"
+                  + (" — 처음 25개:" if hits else ""))
+            for i, ln in hits[:25]:
+                rep.w(f"        L{i}: {ln[:200]}")
+            # 슬롯명이 이름에 든 파일이면 그 슬롯과 연결해 둔다
+            for nm in slots:
+                if nm.lower() in p.name.lower():
+                    rep.w(f"      ↳ 슬롯 [{nm}] 과 이름이 같다")
+        if len(files) > _SIDE_MAX_FILES:
+            rep.w(f"  … 외 {len(files) - _SIDE_MAX_FILES}개 생략")
+
+
+# ---------------------------------------------------------------------------
+# 단독 재현 — 앱 코드 없이 'LIVE 전용 폴더' 경로를 그대로 계산한다
+# ---------------------------------------------------------------------------
+# 앱 상수(models.py)와 같은 값 — 기하 파일이 하나도 없는 폴더에서 앱이 쓰는 폴백.
+_SIM_DIA = 300000.0           # DEFAULT_WAFER_DIAMETER
+_SIM_COL_ORIGIN = 2           # CAMTEK_COL_OFFSET (Center_X 미기록 폴백)
+_SIM_MIN_PITCH, _SIM_MAX_PITCH = 100.0, 500000.0
+# 참고 비교용: 저장소 실물 die 맵(GX57001305, T254) 의 DieStep — **다른 웨이퍼 값(가정)**.
+_SIM_T254 = (14400.1, 31109.8)
+
+
+def _parse_live(stem: str):
+    """camtek_live.parse_live_name 과 같은 규칙(앱 없이)."""
+    toks = stem.split("_")
+    at = next((i for i in range(len(toks) - 1)
+               if _INT.match(toks[i]) and _INT.match(toks[i + 1])), None)
+    if at is None or at < 2:
+        return None
+    col, row = int(toks[at]), int(toks[at + 1])
+    if col < 0 or row < 0:
+        return None
+    nums = [float(t) for t in toks[at + 2:] if _NUM.match(t)]
+    if len(nums) < 2:
+        return None
+    return col, row, nums[0], nums[1]
+
+
+class _SimFrame:
+    """wafer_map.WaferFrame 과 같은 속성 — _drawn_cells/_visual_cell 에 그대로 넣는다."""
+    die_cells = None
+
+    def __init__(self, px, py, gx0, gy0, dia=_SIM_DIA):
+        self.pitch_x, self.pitch_y, self.grid_x0, self.grid_y0 = px, py, gx0, gy0
+        self.diameter = dia
+
+    @property
+    def radius(self):
+        return self.diameter / 2.0
+
+
+def _sim_geom(px: float, py: float) -> dict:
+    """wafer_map._camtek 의 'LIVE 전용 + 중심 없음' 분기와 같은 계산."""
+    rt = math.ceil(_SIM_DIA / py)                         # _row_total(None, …)
+    co = _SIM_COL_ORIGIN                                  # _col_origin(None, …)
+    cx = (co * px - px / 2.0) + _SIM_DIA / 2.0            # _assumed_edge + D/2
+    cy = (rt + 1) * py + py / 2.0 - _SIM_DIA / 2.0
+    return {"px": px, "py": py, "co": co, "rt": rt, "cx": cx, "cy": cy,
+            "frame": _SimFrame(px, py, -cx, cy)}
+
+
+def _sim_plane(g: dict, col, row, x, y) -> tuple[float, float]:
+    sx = (col + g["co"]) * g["px"] + x
+    sy = (g["rt"] - row) * g["py"] + y
+    return sx - g["cx"], g["cy"] - sy
+
+
+def _sim_cell(g: dict, px_, py_) -> tuple[int, int]:
+    fr = g["frame"]
+    return (math.floor((px_ - fr.grid_x0) / fr.pitch_x),
+            math.floor((py_ - fr.grid_y0) / fr.pitch_y))
+
+
+def _sim_estimate(names: list[str]):
+    """wafer_map._live_pitch_estimate — 사진 x/y 최댓값 × 1.05."""
+    pr = [v for v in (_parse_live(Path(n).stem) for n in names) if v]
+    if not pr:
+        return None
+    px, py = max(v[2] for v in pr) * 1.05, max(v[3] for v in pr) * 1.05
+    if not (_SIM_MIN_PITCH <= px <= _SIM_MAX_PITCH and _SIM_MIN_PITCH <= py <= _SIM_MAX_PITCH):
+        return None
+    return px, py
+
+
+def _sim_scenario(rep: Report, label: str, slots: dict, recs: dict, pitch_of, focus) -> None:
+    rep.h2(label)
+    geoms = {}
+    rep.w("  슬롯\t사진\tpitch_x\tpitch_y\tcol_origin\trow_total\tcx\tcy\t격자칸\t"
+          "격자밖\t원밖\t격자 col범위\t격자 row범위")
+    for nm in slots:
+        pr = recs[nm]
+        pt = pitch_of(nm)
+        if pt is None or not pr:
+            rep.w(f"  {nm}\t{len(pr)}\t(pitch 없음 → 앱은 이 슬롯 점을 '좌표 없음' 처리)")
+            continue
+        g = _sim_geom(*pt)
+        drawn, _ = _drawn_cells(g["frame"])
+        disp = {_disp_of_cell(kx, ky, g["co"], g["rt"]) for kx, ky in drawn}
+        out_g = out_c = 0
+        for col, row, x, y, _n in pr:
+            p = _sim_plane(g, col, row, x, y)
+            out_g += _sim_cell(g, *p) not in drawn
+            out_c += math.hypot(*p) > _SIM_DIA / 2
+        g.update(drawn=drawn, disp=disp)
+        geoms[nm] = g
+        rep.w(f"  {nm}\t{len(pr)}\t{pt[0]:.1f}\t{pt[1]:.1f}\t{g['co']}\t{g['rt']}\t"
+              f"{g['cx']:.0f}\t{g['cy']:.0f}\t{len(drawn)}\t{out_g}\t{out_c}\t"
+              f"{min(c for c, _ in disp) if disp else '-'}..{max(c for c, _ in disp) if disp else '-'}\t"
+              f"{min(r for _, r in disp) if disp else '-'}..{max(r for _, r in disp) if disp else '-'}")
+    if not geoms:
+        return
+    shapes = {frozenset(g["disp"]) for g in geoms.values()}
+    rep.kv("슬롯별 격자 모양 종류", len(shapes))
+    # 포커스 칸
+    for fc, frw in focus:
+        rep.w(f"  ▶ ({fc},{frw}) 추적")
+        for nm, g in geoms.items():
+            for col, row, x, y, n in recs[nm]:
+                if (col, row) != (fc, frw):
+                    continue
+                p = _sim_plane(g, col, row, x, y)
+                cell = _sim_cell(g, *p)
+                dc, dr = _disp_of_cell(*cell, g["co"], g["rt"])
+                same_row = sorted(c for c, r in g["disp"] if r == dr)
+                rank = sum(c < dc for c in same_row)
+                vis = [_visual_cell(g["frame"], g["drawn"], p[0], p[1], rot) for rot in range(4)]
+                rep.w(f"     [{nm}] {n}")
+                rep.w(f"        평면=({p[0]:.0f},{p[1]:.0f}) r={math.hypot(*p) / 1000:.1f}mm  "
+                      f"칸표시=({dc},{dr}) 격자안={cell in g['drawn']}  "
+                      f"그 행 격자 col {same_row[:1]}..{same_row[-1:]} → 왼쪽 끝부터 {rank}번째")
+                rep.w("        화면에서 '왼쪽 아래 기준 칸'(0부터) rot0/1/2/3 = "
+                      + " / ".join(f"({a},{b})" for a, b in vis))
+    # 같은 die 의 평면 위치가 슬롯마다
+    rep.w("  ▶ 같은 die 의 평면 위치(die 왼아래 모서리, mm) — 슬롯마다 같아야 정상")
+    for fc, frw in focus:
+        rep.w(f"     ({fc},{frw}): " + "  ".join(
+            f"{nm}=({_sim_plane(g, fc, frw, 0, 0)[0] / 1000:.1f},"
+            f"{_sim_plane(g, fc, frw, 0, 0)[1] / 1000:.1f})" for nm, g in geoms.items()))
+    # 슬롯별 ASCII (앱 화면 재현)
+    for nm, g in geoms.items():
+        marks = Counter()
+        for col, row, x, y, _n in recs[nm]:
+            marks[_disp_of_cell(*_sim_cell(g, *_sim_plane(g, col, row, x, y)),
+                                g["co"], g["rt"])] += 1
+        rep.w(*_ascii_map(g["disp"], marks, f"{nm} — {label}"))
+    # LOT 합산 — 격자는 첫 슬롯 frame, 점은 각자 frame (build_map 동작)
+    first = next(iter(geoms))
+    g0 = geoms[first]
+    marks = Counter()
+    out = Counter()
+    for nm, g in geoms.items():
+        for col, row, x, y, _n in recs[nm]:
+            cell = _sim_cell(g0, *_sim_plane(g, col, row, x, y))
+            d = _disp_of_cell(*cell, g0["co"], g0["rt"])
+            marks[d] += 1
+            out[nm] += cell not in g0["drawn"]
+    rep.w(f"  LOT 합산(격자=[{first}] 기준) 격자 밖 점: {dict(out)}")
+    rep.w(*_ascii_map(g0["disp"], marks, f"LOT 합산 — {label}"))
+
+
+def _standalone_sim(rep: Report, slots: dict[str, Path], focus) -> None:
+    rep.h1("단독 재현 — 앱 코드 없이 'LIVE 전용 폴더' 맵 계산을 그대로 흉내 낸다")
+    rep.w("  전제: 슬롯·부모 어디에도 Params_WaferInfo.ini / ProductInfo.ini / Wafer2Table.ini /",
+          "  s_DieLocation.dat / ColorImageGrabingInfo.ini 가 없을 때 앱이 타는 경로:",
+          "   · pitch  = 그 슬롯 사진 파일명 x/y 최댓값 × 1.05   (wafer_map._live_pitch_estimate)",
+          f"   · col_origin = {_SIM_COL_ORIGIN} (상수 폴백), row_total = ceil(직경/pitch_y)",
+          "   · 웨이퍼 중심 = 위 두 값으로 역산(가정),  직경 300 mm,  격자 = 원 안에 온전히 드는 칸",
+          "  ※ 기하 파일이 있는 폴더라면 이 섹션은 무시하고 슬롯 섹션(앱 코드 재현)을 본다.")
+    recs: dict[str, list] = {}
+    all_names = []
+    folder_names: dict[str, list[str]] = {}
+    for nm, folder in slots.items():
+        try:
+            # 앱 추정(_live_pitch_estimate)은 사진만이 아니라 폴더의 **모든 항목** 이름을 본다
+            names = sorted(p.name for p in folder.iterdir())
+        except OSError:
+            names = []
+        folder_names[nm] = names
+        all_names += names
+        rows = []
+        for n in names:
+            if not _is_image(n):
+                continue
+            v = _parse_live(Path(n).stem)
+            if v:
+                rows.append((*v, n))
+        recs[nm] = rows
+    rep.h2("슬롯별 파일명 좌표 요약")
+    rep.w("  슬롯\t사진\tcol범위\trow범위\tx최대\ty최대\tx최소\ty최소")
+    for nm, pr in recs.items():
+        if not pr:
+            rep.w(f"  {nm}\t0")
+            continue
+        rep.w(f"  {nm}\t{len(pr)}\t{min(v[0] for v in pr)}..{max(v[0] for v in pr)}\t"
+              f"{min(v[1] for v in pr)}..{max(v[1] for v in pr)}\t"
+              f"{max(v[2] for v in pr):.1f}\t{max(v[3] for v in pr):.1f}\t"
+              f"{min(v[2] for v in pr):.1f}\t{min(v[3] for v in pr):.1f}")
+    allx = [v[2] for pr in recs.values() for v in pr]
+    ally = [v[3] for pr in recs.values() for v in pr]
+    if allx:
+        rep.kv("LOT 전체 x 최대 / y 최대", f"{max(allx):.1f} / {max(ally):.1f}")
+        # die 내부 좌표 분포 — 실제 pitch 의 하한·형태를 본다(10등분 히스토그램)
+        for axis, vals in (("x", allx), ("y", ally)):
+            hi = max(vals)
+            bins = Counter(min(9, int(v / hi * 10)) for v in vals) if hi > 0 else Counter()
+            rep.kv(f"LOT 전체 {axis} 분포(0..max 10등분)", [bins.get(i, 0) for i in range(10)])
+    per_slot = {nm: _sim_estimate(folder_names[nm]) for nm in recs}
+    est_lot = _sim_estimate(all_names)
+    est = {nm: v for nm, v in per_slot.items()}
+    _sim_scenario(rep, "A. 앱 현재 동작 — 슬롯마다 자기 사진으로 pitch 추정", slots, recs,
+                  lambda nm: est[nm], focus)
+    if est_lot:
+        _sim_scenario(rep, f"B. 비교 — LOT 전체 사진으로 pitch 하나 추정 "
+                           f"({est_lot[0]:.1f}, {est_lot[1]:.1f})", slots, recs,
+                      lambda nm: est_lot, focus)
+    _sim_scenario(rep, f"C. 비교 — 저장소의 T254 실물(GX57001305) DieStep {_SIM_T254} "
+                       f"(다른 웨이퍼 값 · 가정)", slots, recs, lambda nm: _SIM_T254, focus)
+    bad = [nm for nm, v in per_slot.items() if v is not None]
+    if len({per_slot[nm] for nm in bad}) > 1:
+        rep.find("단독 재현: 기하 파일이 없어 **슬롯마다 사진 최댓값으로 pitch 를 따로 추정** — "
+                 "추정값이 " + ", ".join(f"{nm}=({per_slot[nm][0]:.0f},{per_slot[nm][1]:.0f})"
+                                       for nm in bad)
+                 + " 로 제각각이라 슬롯을 바꾸면 격자가 바뀐다(증상 1)")
+
+
+# ---------------------------------------------------------------------------
 # 부록 — 원재료 텍스트 전문
 # ---------------------------------------------------------------------------
 def _appendix(rep: Report) -> None:
@@ -1053,7 +1375,9 @@ def _env(rep: Report, targets: list[Path], out: Path) -> None:
     rep.kv("OS", platform.platform())
     rep.kv("스크립트", _HERE)
     rep.kv("앱 코드 루트", _REPO)
-    rep.kv("앱 코드 import", "성공" if APP else "실패")
+    rep.kv("앱 코드 import", "성공" if APP else "실패 — '단독 재현' 섹션이 대신 앱 계산을 흉내 낸다")
+    for ln in _APP_SEARCH_LOG:
+        rep.w(f"   {ln}")
     if not APP:
         rep.w(*["   " + ln for ln in _APP_IMPORT_ERR.splitlines()])
     for cand in ([_REPO / "VERSION", _REPO.parent / "VERSION", _REPO / "app" / "VERSION"]
@@ -1080,6 +1404,8 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("folders", nargs="*", default=[DEFAULT_TARGET])
     ap.add_argument("--out", default=DEFAULT_OUT_DIR, help="출력 폴더")
+    ap.add_argument("--app", default=None,
+                    help="앱 코드 폴더(aoi_verification 이 든 폴더). 안 주면 자동으로 찾는다")
     ap.add_argument("--focus", action="append", default=None,
                     help="추적할 die 'col,row' (여러 번 가능, 기본 3,3 과 9,3)")
     a = ap.parse_args(argv)
@@ -1112,6 +1438,8 @@ def main(argv=None) -> int:
                                   "deep": f"앱은 '비어 있음' 으로 봄 — 더 깊은 곳에 사진 폴더 {len(slots)}개",
                                   "empty": "사진 없음"}[kind])
             rep.kv("슬롯 순서(앱과 같은 정렬)", list(slots))
+            _guard(rep, "LOT 부가 파일", _lot_side_files, rep, target, slots)
+            _guard(rep, "단독 재현", _standalone_sim, rep, slots, focus)
             summary: dict = {}
             for i, (nm, folder) in enumerate(slots.items(), 1):
                 print(f"  [{i}/{len(slots)}] {nm}")
