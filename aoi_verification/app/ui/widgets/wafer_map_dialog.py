@@ -52,7 +52,8 @@ from ... import i18n
 from ...config import CONFIG
 from ...coords import resolve_batch
 from ...coords.wafer_map import (ALL_SLOTS_KEY, MapData, SOURCE_ASSUMED,
-                                 build_map, slot_maps)
+                                 WARN_MIXED_FRAMES, WARN_OFF_DIE, WARN_PITCH_ASSUMED,
+                                 WARN_UNPLACED, build_map, map_warnings, slot_maps)
 from ...models.result import FinalResult
 from ...models.slot import _list_images, list_slot_dirs
 from ...utils import image_io
@@ -278,6 +279,13 @@ class WaferMapDialog(QDialog):
         self._add_view_options(top)
         root.addWidget(self._top_host)
 
+        # 실제와 다르게 그려졌을 수 있는 맵 — 칸이 틀렸을 수 있을 때만 뜬다(map_warnings).
+        self.warn_banner = QLabel("", self)
+        self.warn_banner.setProperty("role", "hintWarn")
+        self.warn_banner.setWordWrap(True)
+        self.warn_banner.hide()
+        root.addWidget(self.warn_banner)
+
         self.empty = QLabel(i18n.KO.WAFER_MAP_NO_FOLDER, self)
         self.empty.setProperty("role", "muted")
         self.empty.setWordWrap(True)
@@ -293,6 +301,13 @@ class WaferMapDialog(QDialog):
         maps.addWidget(self.rule)
         maps.addWidget(self.right, stretch=1)
         root.addLayout(maps, stretch=1)
+
+        # 맵 아래 상시 안내 — 맵은 재구성한 그림이라 판정 근거로 쓰지 않게(사용자 요청).
+        self.disclaimer = QLabel(i18n.KO.WAFER_MAP_DISCLAIMER, self)
+        self.disclaimer.setProperty("role", "warn")
+        self.disclaimer.setWordWrap(True)
+        self.disclaimer.hide()
+        root.addWidget(self.disclaimer)
         for panel in (self.left, self.right):
             panel.view.point_activated.connect(self._on_point)
 
@@ -379,6 +394,8 @@ class WaferMapDialog(QDialog):
         self._fullscreen = on
         self.sub.setVisible(not on)
         self._top_host.setVisible(not on)
+        # 경고 배너는 전체화면에서도 남긴다 — 맵만 크게 볼 때가 칸을 세는 때다.
+        self.disclaimer.setVisible(not on and self.left.isVisibleTo(self))
         for panel in (self.left, self.right):
             panel.set_chrome_visible(not on)
         m = 0 if on else 16
@@ -429,6 +446,8 @@ class WaferMapDialog(QDialog):
     def _render_empty(self, text: str = "") -> None:
         self.empty.setText(text or i18n.KO.WAFER_MAP_NO_FOLDER)
         self.empty.show()
+        self.warn_banner.hide()
+        self.disclaimer.hide()
         self.left.hide()
         self.rule.hide()
         self.right.hide()
@@ -436,6 +455,10 @@ class WaferMapDialog(QDialog):
     def _show_maps(self, left: tuple[str, MapData],
                    right: Optional[tuple[str, MapData]]) -> None:
         self.empty.hide()
+        text = self.warning_text([left] + ([right] if right is not None else []))
+        self.warn_banner.setText(text)
+        self.warn_banner.setVisible(bool(text))
+        self.disclaimer.setVisible(not self._fullscreen)
         self.left.show_map(*left)
         self.left.show()
         if right is None:
@@ -445,6 +468,23 @@ class WaferMapDialog(QDialog):
             self.right.show_map(*right)
             self.rule.show()
             self.right.show()
+
+    @staticmethod
+    def warning_text(sides: list[tuple[str, Optional[MapData]]]) -> str:
+        """경고 배너 문구 — 문제 없으면 빈 문자열.  맵이 둘이면 맵마다 제목을 붙인다."""
+        fmt = {
+            WARN_OFF_DIE: lambda n: i18n.KO.WAFER_MAP_WARN_OFF_DIE_FMT.format(n=n),
+            WARN_MIXED_FRAMES: lambda n: i18n.KO.WAFER_MAP_WARN_MIXED_FRAMES,
+            WARN_UNPLACED: lambda n: i18n.KO.WAFER_MAP_WARN_UNPLACED_FMT.format(n=n),
+            WARN_PITCH_ASSUMED: lambda n: i18n.KO.WAFER_MAP_WARN_PITCH_ASSUMED,
+        }
+        lines = []
+        for title, data in sides:
+            reasons = " · ".join(fmt[code](n) for code, n in map_warnings(data))
+            if reasons:
+                lines.append(i18n.KO.WAFER_MAP_WARN_SIDE_FMT.format(side=title, reasons=reasons)
+                             if len(sides) > 1 else reasons)
+        return "\n".join([i18n.KO.WAFER_MAP_WARN_HEAD, *lines]) if lines else ""
 
     # ------------------------------------------------------------------
     # 워커 — 좌표 + 썸네일 선로딩, 진행은 오버레이로

@@ -170,7 +170,18 @@ def test_missing_xdies_estimates_once_per_lot(tmp_path):
     lot = _lot(tmp_path, dx="", dy="")
     a, b = (wm.frame_for_folder(lot / w, "camtek") for w in _PHOTOS)
     assert a.pitch_assumed and (a.pitch_x, a.pitch_y) == (b.pitch_x, b.pitch_y)
-    assert a.pitch_x == pytest.approx(8034.37924730752 * 1.05)   # LOT 최대 x(7304)
+    assert a.pitch_x > 8034.38 and a.pitch_y > 30702.34          # LOT 사진보다 작지 않다
+
+
+def test_estimated_die_map_fills_the_wafer(tmp_path):
+    """XDIES 가 없으면 사진 최댓값만으론 하한이라 맵이 작게 그려졌다(실측 69 mm/150).
+    die 맵이 원을 채우도록 맞춘다 — 최외곽 모서리 ≈ 0.97·반경, 원 밖으로 나가지 않는다."""
+    import math
+    lot = _lot(tmp_path, dx="", dy="")
+    fr = wm.frame_for_folder(lot / "GX57004924", "camtek")
+    far = max(math.hypot(fr.grid_x0 + (kx + a) * fr.pitch_x, fr.grid_y0 + (ky + b) * fr.pitch_y)
+              for kx, ky in fr.die_cells for a in (0, 1) for b in (0, 1))
+    assert 0.95 * fr.radius <= far <= fr.radius
 
 
 def test_without_txt_the_estimate_is_lot_wide_too(tmp_path):
@@ -186,3 +197,92 @@ def test_unverified_notch_falls_back_not_flipped(tmp_path):
     lot = _lot(tmp_path, fn="90")
     frame = wm.frame_for_folder(lot / "GX57004924", "camtek")
     assert frame.die_cells is None and frame.pitch_assumed
+
+
+# ---------------------------------------------------------------------------
+# 경고 — 실제와 다르게 그려졌을 수 있는 맵(배너) · 참고용 안내(하단)
+# ---------------------------------------------------------------------------
+def _codes(data):
+    return [c for c, _ in wm.map_warnings(data)]
+
+
+def test_no_warning_when_map_and_die_size_are_known(tmp_path):
+    lot = _lot(tmp_path)
+    paths = [p for w in sorted(_PHOTOS) for p in _photos(lot, w)]
+    assert _codes(wm.build_map(resolve_batch(paths))) == []
+
+
+def test_estimated_die_size_warns(tmp_path):
+    lot = _lot(tmp_path, dx="", dy="")
+    assert _codes(wm.build_map(resolve_batch(_photos(lot, "GX57004924")))) == \
+        [wm.WARN_PITCH_ASSUMED]
+
+
+def test_mixed_grids_and_off_die_and_unplaced_warn(tmp_path):
+    """한 슬롯만 맵 파일이 없어 격자가 다르면 — 이번 (3,3)→(9,3) 유형 — 경고한다."""
+    lot = _lot(tmp_path)
+    (lot / "GX57007304.txt").unlink()
+    (lot / "GX57004924" / "no_coords.jpg").write_bytes(b"")
+    paths = [p for w in sorted(_PHOTOS) for p in _photos(lot, w)]
+    codes = _codes(wm.build_map(resolve_batch(paths)))
+    assert wm.WARN_MIXED_FRAMES in codes and wm.WARN_UNPLACED in codes
+
+
+def test_off_die_point_warns_with_count(tmp_path):
+    lot = _lot(tmp_path)
+    (lot / "GX57004924" / f"{_P}GX57004924_0_0_Bump_10.0_10.0.jpg").write_bytes(b"")  # 맵 밖 칸
+    data = wm.build_map(resolve_batch(_photos(lot, "GX57004924")))
+    assert (wm.WARN_OFF_DIE, 1) in wm.map_warnings(data)
+
+
+def _wait(qt, dlg):
+    import time
+    end = time.monotonic() + 10
+    while dlg.is_building() and time.monotonic() < end:
+        qt.processEvents()
+        time.sleep(0.01)
+    qt.processEvents()
+
+
+@pytest.fixture
+def qt():
+    pytest.importorskip("PyQt6.QtWidgets")
+    from PyQt6.QtWidgets import QApplication
+    return QApplication.instance() or QApplication([])
+
+
+def test_dialog_shows_banner_only_when_needed_and_always_the_disclaimer(qt, tmp_path):
+    from aoi_verification.app import i18n
+    from aoi_verification.app.ui.widgets.wafer_map_dialog import WaferMapDialog
+    ok = _lot(tmp_path / "ok")
+    bad = _lot(tmp_path / "bad", dx="", dy="")
+    dlg = WaferMapDialog()
+    try:
+        dlg.show_folder(ok)
+        _wait(qt, dlg)
+        assert not dlg.warn_banner.isVisibleTo(dlg)
+        assert dlg.disclaimer.isVisibleTo(dlg)
+        assert dlg.disclaimer.text() == i18n.KO.WAFER_MAP_DISCLAIMER
+        dlg.show_folder(bad)
+        _wait(qt, dlg)
+        assert dlg.warn_banner.isVisibleTo(dlg)
+        assert dlg.warn_banner.text().startswith(i18n.KO.WAFER_MAP_WARN_HEAD)
+        assert i18n.KO.WAFER_MAP_WARN_PITCH_ASSUMED in dlg.warn_banner.text()
+        dlg.set_fullscreen(True)                    # 칸을 세는 전체화면에서도 경고는 남는다
+        assert dlg.warn_banner.isVisibleTo(dlg) and not dlg.disclaimer.isVisibleTo(dlg)
+        dlg.set_fullscreen(False)
+        assert dlg.disclaimer.isVisibleTo(dlg)
+    finally:
+        dlg.set_fullscreen(False)
+        dlg.deleteLater()
+
+
+def test_two_maps_name_the_side_in_the_banner():
+    from aoi_verification.app import i18n
+    from aoi_verification.app.ui.widgets.wafer_map_dialog import WaferMapDialog
+    pytest.importorskip("PyQt6.QtWidgets")
+    bad = wm.MapData(None, (), (Path("x.jpg"),))
+    text = WaferMapDialog.warning_text([("기준 · A", bad), ("검증 · B", wm.MapData(None, (), ()))])
+    assert "기준 · A — " in text and "검증 · B" not in text
+    assert WaferMapDialog.warning_text([("x", wm.MapData(None, (), ()))]) == ""
+    assert i18n.KO.WAFER_MAP_WARN_UNPLACED_FMT.format(n=1) in text

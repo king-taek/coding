@@ -264,10 +264,16 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
 - **LIVE 파일명 전용 LOT(기하 파일 없음)의 Wafer map 은 LOT 폴더의 `<WaferID>.txt`
   (ROWCT/COLCT/RowData)가 die 맵이다** (`coords.wafer_txt`). 파일명 `col` = 맵 열(왼쪽부터 0),
   `row` = **아래부터 0** — 실측 9 LOT 결함 칸 185 중 184 가 불량 bin(다른 해석은 반증).
-  불변식: `FNLOC`≠180 은 방향 미확인이라 쓰지 않는다(경고), `XDIES/YDIES` 는 같은 웨이퍼라도
+  불변식: `FNLOC`≠180 은 방향 미확인이라 쓰지 않는다(경고). `XDIES/YDIES` 는 die **크기**다
+  (간격 아님 — T254 같은 레시피 `DieSize` 와 일치, 다른 제품은 미확인)이고 같은 웨이퍼라도
   파일마다 달랐으므로 **LOT 사진이 전부 그 안에 들 때만** 쓴다. pitch 추정은 **슬롯 단위로
   하지 마라** — 사진 수에 따라 슬롯마다 격자가 달라져 LOT 합산에서 (3,3)이 (9,3)에 찍혔다.
-  같은 LOT(`camtek_live.lot_key`) 사진 전체로 한 번 추정한다. 회귀 가드: `test_wafer_txt.py`.
+  같은 LOT(`camtek_live.lot_key`) 사진 전체로 한 번 추정하고 die 맵이 원을 채우게 맞춘다
+  (`_fit_to_wafer`, 사진 좌표가 하한). 회귀 가드: `test_wafer_txt.py`.
+- **Wafer map 경고**: 칸이 틀렸을 수 있는 맵(die 없는 칸에 찍힌 점·슬롯 간 격자 불일치·
+  좌표 없는 사진·die 크기 추정)은 `wafer_map.map_warnings` 로 판정해 화면 위 배너로 알린다.
+  중심 가정·계산 격자는 거의 늘 붙어 배너에 넣지 않는다(범례만). 맵 아래에는 '참고용' 안내가
+  상시 붙는다(`WAFER_MAP_DISCLAIMER`, 사용자 요청).
 - **한 매칭 실행 안에서 Camtek 좌표 프레임은 하나여야 한다**(`coords.resolve_batch`).
   pitch 검산은 웨이퍼 폴더마다 독립이라 ref 는 통과하고 val 은 실패할 수 있는데, 그러면
   row 규약이 달라(`row_total−y_index` vs `−Row`) `(col,row) ±1` 게이트가 절대 안 맞아

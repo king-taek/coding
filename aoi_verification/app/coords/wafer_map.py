@@ -37,7 +37,8 @@ from ..models.result import EXTRACT_MODE
 
 __all__ = ["WaferFrame", "MapPoint", "MapData", "frame_for_folder", "to_plane",
            "build_map", "grid_lines", "die_grid_segments", "cell_of",
-           "cell_bounds", "defect_cells", "slot_maps", "ALL_SLOTS_KEY"]
+           "cell_bounds", "defect_cells", "slot_maps", "ALL_SLOTS_KEY", "map_warnings",
+           "WARN_OFF_DIE", "WARN_MIXED_FRAMES", "WARN_UNPLACED", "WARN_PITCH_ASSUMED"]
 
 _LOG = logging.getLogger("aoi.coords.wafer_map")
 
@@ -87,6 +88,9 @@ class MapData:
     frame: Optional[WaferFrame]     # 격자·원 크기의 기준(첫 번째로 놓인 폴더의 것)
     points: tuple[MapPoint, ...]
     unplaced: tuple[Path, ...]      # 좌표를 못 놓은 사진
+    # 점을 놓은 폴더들의 격자(pitch·위상)가 첫 폴더와 다르다 — LOT 합산에서 다른 슬롯
+    # 점이 엉뚱한 칸에 찍힌다(실측: 파일명 (3,3) 이 (9,3) 칸).  :func:`map_warnings`.
+    mixed_frames: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -182,8 +186,10 @@ def _txt_pitch(wt: "wafer_txt.WaferTxt", folder: Path
                ) -> tuple[Optional[tuple[float, float]], bool]:
     """웨이퍼 맵 .txt 슬롯의 pitch — ``((px, py), 추정여부)``.
 
-    ``XDIES/YDIES`` 는 **같은 LOT 사진이 전부 그 안에 들어갈 때만** 쓴다(파일마다 다른
-    값이 관측됐고 뜻도 미구분 — :mod:`.wafer_txt`).  아니면 LOT 사진으로 추정한다."""
+    ``XDIES/YDIES`` 는 die **크기**라 간격보다 스크라이브 폭만큼 작지만(T254 0.8 %) 간격이
+    파일에 없어 그대로 격자 간격으로 쓴다.  **같은 LOT 사진이 전부 그 안에 들어갈 때만**
+    쓴다(같은 웨이퍼라도 파일마다 다른 값이 관측됐다 — :mod:`.wafer_txt`).  아니면 LOT
+    사진으로 추정하고 :func:`_fit_to_wafer` 로 맵을 웨이퍼 원에 맞춘다."""
     ext = _live_extent(folder)
     if wt.die_x and wt.die_y and (ext is None or (ext[0] < wt.die_x and ext[1] < wt.die_y)):
         return (wt.die_x, wt.die_y), False
@@ -193,6 +199,33 @@ def _txt_pitch(wt: "wafer_txt.WaferTxt", folder: Path
                      wt.die_y, ext[0], ext[1])
     est = _live_pitch_estimate(folder)
     return (est, True) if est is not None else (None, False)
+
+
+# die 맵이 웨이퍼 원을 채우는 비율 — 최외곽 die 모서리 / 반경.  ``XDIES`` 가 있던 실측
+# 5 LOT(AST254·AST256·KENDALL 2·ASGH100)이 0.95~1.00(평균 0.97) 이었다(유도).
+_FILL = 0.97
+
+
+def _fit_to_wafer(cells, px: float, py: float, diameter: float,
+                  ext: Optional[tuple[float, float]]) -> tuple[float, float]:
+    """사진으로 추정한 pitch 를 **die 맵이 웨이퍼 원을 채우도록** 배율 조정한다.
+
+    사진 최댓값 × 1.05 는 하한일 뿐이라 사진이 적은 LOT 은 맵이 원 가운데에 작게
+    그려지고(실측 69 mm / 반경 150), 여유 5 % 때문에 원 밖으로 나가기도 했다(158 mm).
+    가로세로 비는 사진 추정을 따르고, 사진 좌표보다 작아지지는 않는다(칸이 바뀌지 않게).
+    칸(col/row)은 파일명·맵에서 오므로 이 조정과 무관하다."""
+    i_lo = min(i for i, _ in cells)
+    i_hi = max(i for i, _ in cells) + 1
+    j_lo = min(j for _, j in cells)
+    j_hi = max(j for _, j in cells) + 1
+    ci, cj = (i_lo + i_hi) / 2.0, (j_lo + j_hi) / 2.0
+    far = max(math.hypot((i + a - ci) * px, (j + b - cj) * py)
+              for i, j in cells for a in (0, 1) for b in (0, 1))
+    if far <= 0:
+        return px, py
+    s = _FILL * diameter / 2.0 / far
+    lo_x, lo_y = (ext[0] * 1.001, ext[1] * 1.001) if ext else (0.0, 0.0)
+    return max(px * s, lo_x), max(py * s, lo_y)
 
 
 def _assumed_edge(first_full_index: int, pitch: float) -> float:
@@ -218,6 +251,9 @@ def _camtek(folder: Path) -> _Camtek:
                 pitch, pitch_assumed = _txt_pitch(wt, folder)
                 if pitch is None:
                     wt = None
+            if wt is not None and pitch_assumed:
+                pitch = _fit_to_wafer(wt.cells, *pitch, wg._read_diameter(folder),
+                                      _live_extent(folder))
             if wt is not None:
                 # 파일명 col 이 곧 맵 열, stage y 칸 j = rows−1−row (위에서부터) — 원점 보정 없음.
                 geom = wg.CamtekGeometry(pitch_x=pitch[0], pitch_y=pitch[1], col_origin=0,
@@ -362,6 +398,7 @@ def build_map(coords: dict, matched=None) -> MapData:
     points: list[MapPoint] = []
     unplaced: list[Path] = []
     frame: Optional[WaferFrame] = None
+    folder_frames: dict = {}
     for path, coord in coords.items():
         path = Path(path)
         if coord is None:
@@ -371,8 +408,11 @@ def build_map(coords: dict, matched=None) -> MapData:
         if xy is None:
             unplaced.append(path)
             continue
+        key = (path.parent, _kind_of(coord))
+        if key not in folder_frames:
+            folder_frames[key] = frame_for_folder(*key)
         if frame is None:
-            frame = frame_for_folder(path.parent, _kind_of(coord))
+            frame = folder_frames[key]
         die_known = coord.source != "camtek_abs"
         points.append(MapPoint(
             path=path, x=xy[0], y=xy[1],
@@ -380,7 +420,53 @@ def build_map(coords: dict, matched=None) -> MapData:
             row=coord.row if die_known else None,
             matched=None if matched is None else (path in matched),
         ))
-    return MapData(frame=frame, points=tuple(points), unplaced=tuple(unplaced))
+    grid = lambda f: None if f is None else (f.pitch_x, f.pitch_y,      # noqa: E731
+                                             f.grid_x0, f.grid_y0)
+    mixed = len({grid(f) for f in folder_frames.values()}) > 1
+    return MapData(frame=frame, points=tuple(points), unplaced=tuple(unplaced),
+                   mixed_frames=mixed)
+
+
+# ---------------------------------------------------------------------------
+# 경고 — 실제와 다르게 그려졌을 수 있는 맵
+# ---------------------------------------------------------------------------
+WARN_OFF_DIE = "off_die"                # die 가 없는 칸(또는 원 밖)에 찍힌 점이 있다
+WARN_MIXED_FRAMES = "mixed_frames"      # 합친 폴더들의 격자가 서로 다르다
+WARN_UNPLACED = "unplaced"              # 좌표를 못 놓은 사진이 있다
+WARN_PITCH_ASSUMED = "pitch_assumed"    # die 크기를 사진으로 추정했다(크기·외곽 근사)
+
+
+def _cell_drawn(frame: WaferFrame, cell: tuple[int, int]) -> bool:
+    """그 칸이 화면에 die 로 그려지는가 — :func:`die_grid_segments` 와 같은 기준."""
+    if frame.die_cells:
+        return cell in frame.die_cells
+    x0, y0, x1, y1 = cell_bounds(frame, cell)
+    r2 = frame.radius ** 2
+    return all(x * x + y * y <= r2 for x in (x0, x1) for y in (y0, y1))
+
+
+def map_warnings(data: Optional[MapData]) -> list[tuple[str, int]]:
+    """이 맵이 실제와 다르게 그려졌을 수 있는 이유 — ``[(코드, 해당 사진 수)]``, 심각한 순.
+
+    **칸이 틀렸을 수 있는 것**만 고른다.  중심 가정·계산 격자는 거의 모든 LIVE·INI
+    폴더에 붙어 늘 뜨면 무시하게 되므로 범례에만 둔다(:class:`WaferFrame` 플래그).
+    순수 — 헤드리스 테스트한다."""
+    if data is None:
+        return []
+    out: list[tuple[str, int]] = []
+    fr = data.frame
+    if fr is not None and fr.pitch_x and fr.pitch_y:
+        off = sum(1 for p in data.points
+                  if not _cell_drawn(fr, cell_of(fr, p.x, p.y)))
+        if off:
+            out.append((WARN_OFF_DIE, off))
+    if data.mixed_frames:
+        out.append((WARN_MIXED_FRAMES, len(data.points)))
+    if data.unplaced:
+        out.append((WARN_UNPLACED, len(data.unplaced)))
+    if fr is not None and fr.pitch_assumed:
+        out.append((WARN_PITCH_ASSUMED, len(data.points)))
+    return out
 
 
 def grid_lines(frame: WaferFrame) -> tuple[list[float], list[float]]:
