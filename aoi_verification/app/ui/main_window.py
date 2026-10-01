@@ -331,6 +331,7 @@ class MainWindow(QMainWindow):
         if self._startup_done:
             return
         self._startup_done = True
+        self._maybe_show_whats_new()         # 업데이트 후 첫 실행이면 바뀐 점 안내.
         self._maybe_resume()                 # 모달(exec) — 닫힌 뒤 OpenVINO 안내.
         QTimer.singleShot(0, self._maybe_offer_openvino)
 
@@ -640,6 +641,21 @@ class MainWindow(QMainWindow):
         self._show_page(self._setup_page)
 
     # ------------------------------------------------------------------
+    def _maybe_show_whats_new(self) -> None:
+        """업데이트 후 첫 실행이면 '바뀐 점' 을 한 번 보여 준다(사용자 요청, A. 짧은 목록형).
+
+        본 것으로 기록하는 시점은 **보여 준 뒤**다 — 띄우다 실패하면 다음 실행에 다시 뜬다."""
+        try:
+            from ..i18n import whats_new as _notes
+            from ..utils import whats_new as _wn
+            todo = _wn.pending(_prefs.load().whats_new_seen, _notes.ENTRIES)
+            if not todo:
+                return
+            sheets.info(self, i18n.KO.WHATS_NEW_TITLE, _wn.render(todo))
+            _prefs.patch(whats_new_seen=_notes.ENTRIES[0]["id"])
+        except Exception:
+            _LOG.exception("업데이트 안내를 띄우지 못함")
+
     def _maybe_offer_openvino(self) -> None:
         """Intel 하드웨어인데 OpenVINO 가 없으면 설치를 한 번 안내.
 

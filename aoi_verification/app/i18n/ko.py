@@ -955,6 +955,9 @@ IMAGE_INFO_EMPTY = (
     "있는지 확인하세요."
 )
 IMAGE_INFO_COPY = "전체 복사"
+# 업데이트 안내 — 업데이트 후 첫 실행 때 한 번(항목은 `i18n/whats_new.py`).
+WHATS_NEW_TITLE = "업데이트 안내"
+WHATS_NEW_ITEM_FMT = "· {text}"
 IMAGE_INFO_COPIED = "복사했습니다"
 
 # ── Scan 이미지 (Color 결함 위치를 같은 폴더 Scan 사진에서 300㎛ 로 잘라 보임) ──
