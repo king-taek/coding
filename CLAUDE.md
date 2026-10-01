@@ -209,6 +209,11 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   (`embedder_openvino._async_infer_queue_cls`). 조용한 폴백이 비동기 추론을 죽인 적이 있다
   (→ `docs/규칙_배경.md`). 회귀 가드 `dev/tests/test_async_infer_queue.py` 는 심볼 존재만
   보지 않고 **실제로 비동기 경로를 태운다**.
+- **`AsyncInferQueue.set_callback` 에 파이썬 콜백을 주지 마라** — 결과는 메인 스레드가
+  `get_idle_request_id()`·`userdata` 로 걷는다(`embedder_openvino._infer_raw`). 콜백이
+  있으면 스트림 스레드가 GIL 을 잡으러 오고, 메인이 GIL 을 쥔 채 `CompiledModel` 을 놓는
+  순간 서로를 기다려 **영원히 멈춘다**(실측, gdb). 걷기 전 `wait()` 로 실패 요청을 걸러야
+  직전 사진의 출력이 다른 사진에 붙지 않는다.
 
 ## 매칭 / 좌표 검토 규칙
 - **정확도 우선**: 지금 운영 조합(고효율 모드 = GPU MobileNetV3 임베딩으로 후보 추림 +
