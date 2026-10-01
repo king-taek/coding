@@ -48,7 +48,17 @@ def qapp():
 
 @pytest.fixture
 def host(qapp):
-    """호스트를 가진 '창' — 실제 메인 창과 같은 규약(`_sheets` 속성)."""
+    """호스트를 가진 '창' — 실제 메인 창과 같은 규약(`_sheets` 속성).
+
+    ★ 같은 프로세스에서 앞서 돈 다른 테스트가 **모달 다이얼로그를 띄운 채** 끝나는
+    경우가 있다(일괄 선택·매치 실패 검토).  보이는 앱 모달은 이 창의 키·단축키를
+    전부 막아 아래 단축키 대조군이 xdist 분배에 따라 실행마다 갈려 실패했다(실측).
+    이 파일의 계약은 '이 창이 입력을 받는다' 가 전제이므로 시작 전에 그 모달만 숨긴다."""
+    for _ in range(16):
+        stray = QApplication.activeModalWidget()
+        if stray is None or not stray.isVisible():
+            break
+        stray.hide()
     win = QWidget()
     win.resize(900, 700)
     h = sheet_host.SheetHost(win)
