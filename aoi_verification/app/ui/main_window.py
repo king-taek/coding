@@ -104,7 +104,11 @@ class _FolderScan(QThread):
         self._token = token
         self._ref_root = ref_root
         self._val_root = val_root
-        self._only = set(only) if only is not None else None
+        # 추출은 LOT 별 목록(`scan_lots`), 매칭은 슬롯명 집합 하나.
+        if extract:
+            self._only = list(only) if only is not None else None
+        else:
+            self._only = set(only) if only is not None else None
         self._extract = bool(extract)
         self._roots = list(roots) if roots else [ref_root]
         self._stop = False
@@ -1016,7 +1020,9 @@ class MainWindow(QMainWindow):
         self._stage_clock()                 # 단계별 소요 시간(app.log) — 여기서 시작
         self._scan_token += 1
         worker = _FolderScan(self._scan_token, inp.ref_root, inp.val_root,
-                             only=getattr(inp, "selected_slots", None),
+                             only=(getattr(inp, "extract_slots", None)
+                                   if self._is_extract()
+                                   else getattr(inp, "selected_slots", None)),
                              extract=self._is_extract(),
                              roots=getattr(inp, "extract_roots", None))
         worker.signals.progress.connect(self._on_scan_progress)

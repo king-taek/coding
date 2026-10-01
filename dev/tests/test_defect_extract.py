@@ -786,46 +786,81 @@ def test_wafer_map_switch_controls_the_sheet(qapp, tmp_path, monkeypatch):
         win.close()
 
 
-def test_setup_takes_several_lots(qapp, tmp_path, monkeypatch):
+def test_lot_rows_up_to_ten(qapp):
+    from aoi_verification.app import i18n
     from aoi_verification.app.ui.pages import setup_page as sp
-    a, b = tmp_path / "LOT_A", tmp_path / "LOT_B"
-    a.mkdir()
-    b.mkdir()
     page = sp.SetupPage()
     try:
-        assert page._map_switch.isHidden()                # 매칭 모드에는 없다
+        assert page._lot_list.isHidden() and not page._scope_row.isHidden()
         page.set_extract_mode(True)
-        assert not page._map_switch.isHidden()
-        # [폴더 선택…] 은 뒤에 덧붙인다(같은 폴더는 한 번만)
-        for pick in (a, b, a):
-            monkeypatch.setattr(sp.QFileDialog, "getExistingDirectory",
-                                lambda *x, p=pick: str(p))
-            page._browse(page.ref_path_edit)
-        assert page.ref_path_edit.text() == f"{a}; {b}"
-        assert page._validate() is True
-        page._map_switch.set_on(False)
-        inp = page._collect_input()
-        assert inp.extract_roots == [a, b] and inp.ref_root == a
-        assert inp.extract_wafer_map is False
-        page.ref_path_edit.setText(f"{a}; {tmp_path / '없음'}")
-        assert page._validate() is False                  # 하나라도 없으면 막는다
+        assert not page._lot_list.isHidden()
+        assert page._scope_row.isHidden()                  # 줄마다 [슬롯 선택] 이 대신
+        assert not page._lot1_slot_btn.isHidden()
+        for _ in range(12):                                # 10개에서 멈춘다
+            page._add_lot_row()
+        assert len(page._lot_rows) == page.MAX_LOTS == 10
+        assert not page._lot_add_btn.isEnabled()
+        assert page._lot_add_btn.text() == i18n.KO.EXTRACT_LOT_ADD_FMT.format(n=10, max=10)
+        page._remove_lot_row(page._lot_rows[3])
+        assert len(page._lot_rows) == 9 and page._lot_add_btn.isEnabled()
+        assert [r["label"].text() for r in page._lot_rows[1:]] == [
+            f"LOT {k}" for k in range(2, 10)]              # 번호는 다시 매긴다
         page.set_extract_mode(False)
-        assert page._map_switch.isHidden()
+        assert page._lot_list.isHidden() and not page._scope_row.isHidden()
     finally:
         page.deleteLater()
 
 
-def test_subset_needs_a_single_lot(qapp, tmp_path, monkeypatch):
+def test_lot_rows_folders_and_slots(qapp, tmp_path, monkeypatch):
     from aoi_verification.app.ui.pages import setup_page as sp
-    for n in ("A", "B"):
-        (tmp_path / n).mkdir()
+    from aoi_verification.app.ui.widgets import slot_select_dialog as ssd
+    a, b = tmp_path / "LOT_A", tmp_path / "LOT_B"
+    for lot in (a, b):
+        for slot in ("S1", "S2", "S3"):
+            (lot / slot).mkdir(parents=True)
     page = sp.SetupPage()
-    told = []
-    monkeypatch.setattr(sp.sheets, "info", lambda *a, **k: told.append(a[2]))
     try:
         page.set_extract_mode(True)
-        page.ref_path_edit.setText(f"{tmp_path / 'A'}; {tmp_path / 'B'}")
-        page._open_slot_select()
-        assert told and page._selected_slots is None
+        page.ref_path_edit.setText(str(a))
+        page._add_lot_row()
+        row = page._lot_rows[1]
+        monkeypatch.setattr(sp.QFileDialog, "getExistingDirectory",
+                            lambda *x: str(b))
+        page._browse(row["edit"])                          # 그 줄 자기 칸에 들어간다
+        assert row["edit"].text() == str(b) and page.ref_path_edit.text() == str(a)
+        page._add_lot_row()                                # 빈 줄은 무시한다
+        assert page._validate() is True
+
+        # LOT 별 슬롯 선택 — 선택 창이 고른 결과를 그 줄에만 반영한다
+        class _Dlg:
+            def __init__(self, names, preselected=None, **k):
+                self.names = names
+                self.accepted_ok = True
+                self.selected = {"S2"}
+        monkeypatch.setattr(ssd, "SlotSelectDialog", _Dlg)
+        monkeypatch.setattr(sp.sheets, "run", lambda dlg, **k: True)
+        page._pick_lot_slots(1)
+        assert row["sel"] == {"S2"} and row["slot_btn"].text() == "슬롯 1/3"
+        assert page._lot_rows[0]["sel"] is None
+
+        inp = page._collect_input()
+        assert inp.extract_roots == [a, b]
+        assert inp.extract_slots == [None, {"S2"}]
+        # 폴더를 바꾸면 그 줄의 선택은 전체로 돌아간다
+        row["edit"].setText(str(a))
+        assert row["sel"] is None and row["slot_btn"].text() == "슬롯: 전체"
+        # 하나라도 없는 폴더면 막는다
+        row["edit"].setText(str(tmp_path / "없음"))
+        assert page._validate() is False
     finally:
         page.deleteLater()
+
+
+def test_scan_lots_takes_slots_per_lot(tmp_path):
+    from aoi_verification.app.models.slot import scan_lots
+    for lot in ("LOT_A", "LOT_B"):
+        for slot in ("S1", "S2"):
+            _touch_jpeg(tmp_path / lot / slot / "a.jpg")
+    sr = scan_lots([tmp_path / "LOT_A", tmp_path / "LOT_B"], only=[{"S2"}, None])
+    assert sorted(sr.slots) == ["LOT_A/S2", "LOT_B/S1", "LOT_B/S2"]
+    assert sorted(scan_lots([tmp_path / "LOT_A"], only=[{"S1"}]).slots) == ["S1"]

@@ -241,6 +241,14 @@ def _one_side_dirs(root: Path, only=None) -> dict[str, Path]:
     return dirs
 
 
+def extract_slot_dirs(root) -> dict[str, Path]:
+    """Defect 추출에서 그 폴더의 슬롯들 — 스캔과 **같은 규칙**(wafer 폴더면 자기 하나).
+
+    설정 화면의 LOT 별 [슬롯 선택] 이 쓴다(그래야 고를 수 있는 슬롯과 실제로 훑는
+    슬롯이 같다).  폴더를 여는 일이라 NAS 에서는 왕복이 있다."""
+    return _one_side_dirs(Path(root))
+
+
 def _scan_dirs(dirs: dict[str, Path], progress=None) -> ScanResult:
     names = sorted(dirs)
     slots: dict[str, Slot] = {}
@@ -279,19 +287,24 @@ def scan_lots(roots, progress=None, only=None) -> ScanResult:
     하나면 :func:`scan_one_side` 그대로(slot명 접두 없음 — 예전과 같다).  둘 이상이면
     slot명을 ``"LOT/slot"`` 으로 만든다 — 서로 다른 LOT 에 같은 이름의 슬롯이 흔해서
     접두 없이는 사진이 섞인다.  LOT 이름은 폴더명이고, 같은 이름의 폴더가 둘이면
-    ``이름 (2)`` 로 가른다.  ``only``(일부 슬롯)는 LOT 가 하나일 때만 쓴다."""
+    ``이름 (2)`` 로 가른다.
+
+    ``only`` 는 LOT 별 '일부 슬롯' — ``roots`` 와 같은 순서의 목록(각 원소는 슬롯명
+    집합, ``None`` = 전체).  LOT 하나에는 집합 하나를 그대로 줘도 된다."""
     roots = [Path(r) for r in roots]
+    if only is None or isinstance(only, (set, frozenset)):
+        only = [only] + [None] * (len(roots) - 1)
     if len(roots) == 1:
-        return scan_one_side(roots[0], progress=progress, only=only)
+        return scan_one_side(roots[0], progress=progress, only=only[0])
     dirs: dict[str, Path] = {}
     used: set = set()
-    for root in roots:
+    for k, root in enumerate(roots):
         lot, n = root.name or str(root), 2
         while lot in used:
             lot = f"{root.name} ({n})"
             n += 1
         used.add(lot)
-        for name, d in _one_side_dirs(root).items():
+        for name, d in _one_side_dirs(root, only[k]).items():
             dirs[f"{lot}{LOT_SEP}{name}"] = d
     return _scan_dirs(dirs, progress)
 

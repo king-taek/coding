@@ -1119,18 +1119,18 @@ EXTRACT_BUTTON = "Defect 추출"
 EXTRACT_BUTTON_TOOLTIP = (
     "매칭 없이, wafer 또는 LOT 폴더에서 고른 defect 사진과 그 정보(좌표·계측)를\n"
     "엑셀로 저장합니다.")
-EXTRACT_BACK_BUTTON = "← 매칭 검증으로"
+# ★ 짧게 둔다 — [Defect 추출] 과 같은 자리를 바꿔 쓰므로, 길면 800px 창에서 액션바가
+#   페이지를 창보다 넓게 민다(실측: "← 매칭 검증으로" 일 때 864px > 840px).
+EXTRACT_BACK_BUTTON = "← 매칭으로"
 EXTRACT_TITLE = "Defect 추출"
 EXTRACT_GROUP = "대상 장비"
-# 여러 LOT — 입력란에 `;` 로 이어 적는다.  [폴더 선택…] 은 뒤에 덧붙인다.
-EXTRACT_FOLDER_PLACEHOLDER = "LOT 또는 wafer 폴더 — 여러 개면 [폴더 선택…] 을 반복"
-EXTRACT_FOLDER_TOOLTIP = (
-    "[폴더 선택…] 을 누를 때마다 폴더가 뒤에 추가됩니다(; 로 구분).\n"
-    "LOT 가 여러 개면 엑셀에서 LOT 마다 시트가 나뉩니다.\n"
-    "빼려면 입력란에서 그 경로를 지우세요.")
-EXTRACT_SUBSET_ONE_LOT = (
-    "일부 슬롯 고르기는 폴더가 하나일 때만 쓸 수 있습니다.\n"
-    "여러 LOT 는 모든 슬롯으로 진행합니다.")
+# 여러 LOT — 대상 장비 카드에 줄을 늘린다(최대 10개).  줄마다 슬롯을 따로 고른다.
+EXTRACT_FOLDER_PLACEHOLDER = "LOT 또는 wafer 폴더"
+EXTRACT_LOT_ADD_FMT = "+ LOT 추가 ({n}/{max})"
+EXTRACT_LOT_REMOVE = "이 LOT 빼기"
+EXTRACT_SLOT_BTN_ALL = "슬롯: 전체"
+EXTRACT_SLOT_BTN_FMT = "슬롯 {n}/{total}"
+EXTRACT_SLOT_NEED_FOLDER = "먼저 이 줄의 폴더를 선택하세요."
 EXTRACT_WAFER_MAP_SWITCH = "Wafer Map 시트 넣기"
 EXTRACT_WAFER_MAP_SWITCH_DESC = "끄면 엑셀에 Wafer Map 시트를 만들지 않습니다(저장이 빨라집니다)."
 BTN_EXTRACT_START = "추출 시작"

@@ -59,6 +59,8 @@ class SetupInput:
     extract_roots: Optional[list] = None
     # Defect 추출 엑셀에 Wafer Map 시트를 넣을지(설정 화면 스위치, 사용자 결정).
     extract_wafer_map: bool = True
+    # LOT 별 '일부 슬롯'(``extract_roots`` 와 같은 순서, ``None`` = 전체).
+    extract_slots: Optional[list] = None
 
 
 # '실행 옵션'·'매칭 설정' 두 카드를 가로로 나란히 세우려면 이만큼은 있어야 한다.
@@ -502,8 +504,13 @@ class SetupPage(QWidget):
         self._device_grid = QGridLayout(host)
         self._device_grid.setContentsMargins(0, 0, 0, 0)
         self._device_grid.setSpacing(20)
+        # Defect 추출 — 첫 LOT 줄의 [슬롯 선택](추출 모드에서만 보인다).
+        self._lot1_slot_btn = NeonButton(i18n.KO.EXTRACT_SLOT_BTN_ALL, role="ghost")
+        self._lot1_slot_btn.setVisible(False)
         self.ref_group, self.ref_path_edit, self.ref_machine_edit = \
-            self._make_machine_group(i18n.KO.SETUP_REF_GROUP)
+            self._make_machine_group(i18n.KO.SETUP_REF_GROUP,
+                                     extra=self._lot1_slot_btn)
+        self._build_lot_list()
         self.val_group, self.val_path_edit, self.val_machine_edit = \
             self._make_machine_group(i18n.KO.SETUP_VAL_GROUP)
         self._device_cards = [self.ref_group, self.val_group]
@@ -514,6 +521,127 @@ class SetupPage(QWidget):
         host.installEventFilter(self)
         self._reflow_device_row()
         return host
+
+    # ------------------------------------------------------------------
+    # Defect 추출 — LOT 줄(최대 10개) + LOT 별 슬롯 선택
+    # ------------------------------------------------------------------
+    MAX_LOTS = 10
+
+    def _build_lot_list(self) -> None:
+        """대상 장비 카드 안, 첫 폴더 줄 아래의 추가 LOT 줄들 + [+ LOT 추가].
+
+        첫 LOT 은 원래의 폴더 입력란(``ref_path_edit``)이다 — 매칭과 같은 칸을 쓴다.
+        추가 줄마다 [폴더 선택…] · [슬롯 선택] · [✕].  추출 모드에서만 보인다."""
+        self._lot_rows: list[dict] = [{
+            "host": None, "edit": self.ref_path_edit,
+            "slot_btn": self._lot1_slot_btn, "sel": None, "total": 0}]
+        self._lot1_slot_btn.clicked.connect(lambda: self._pick_lot_slots(0))
+        self.ref_path_edit.textChanged.connect(lambda _t: self._reset_lot_slots(0))
+        host = QWidget(self.ref_group)
+        host.setProperty("role", "rowHost")
+        lay = QVBoxLayout(host)
+        lay.setContentsMargins(0, 4, 0, 0)
+        lay.setSpacing(8)
+        self._lot_rows_lay = QVBoxLayout()
+        self._lot_rows_lay.setSpacing(8)
+        lay.addLayout(self._lot_rows_lay)
+        self._lot_add_btn = NeonButton("", role="ghost")
+        self._lot_add_btn.clicked.connect(self._add_lot_row)
+        add_row = QHBoxLayout()
+        add_row.addWidget(self._lot_add_btn)
+        add_row.addStretch(1)
+        lay.addLayout(add_row)
+        host.setVisible(False)
+        self.ref_group.body().addWidget(host)
+        self._lot_list = host
+        self._refresh_lot_add_btn()
+
+    def _add_lot_row(self) -> None:
+        if len(self._lot_rows) >= self.MAX_LOTS:
+            return
+        host = QWidget(self._lot_list)
+        host.setProperty("role", "rowHost")
+        row = QHBoxLayout(host)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(10)
+        label = QLabel("", host)
+        edit = QLineEdit(host)
+        edit.setMinimumWidth(self._PATH_MIN_W)
+        edit.setPlaceholderText(i18n.KO.EXTRACT_FOLDER_PLACEHOLDER)
+        browse = NeonButton(i18n.KO.BTN_BROWSE, role="ghost")
+        slot_btn = NeonButton(i18n.KO.EXTRACT_SLOT_BTN_ALL, role="ghost")
+        remove = NeonButton("✕", role="ghost")
+        remove.setToolTip(i18n.KO.EXTRACT_LOT_REMOVE)
+        remove.setAccessibleName(i18n.KO.EXTRACT_LOT_REMOVE)
+        for w in (label, edit, browse, slot_btn, remove):
+            row.addWidget(w, 1 if w is edit else 0)
+        rec = {"host": host, "edit": edit, "slot_btn": slot_btn, "sel": None,
+               "total": 0, "label": label}
+        self._lot_rows.append(rec)
+        browse.clicked.connect(lambda: self._browse(edit))
+        slot_btn.clicked.connect(lambda: self._pick_lot_slots(self._lot_rows.index(rec)))
+        remove.clicked.connect(lambda: self._remove_lot_row(rec))
+        edit.textChanged.connect(
+            lambda _t: (self._reset_lot_slots(self._lot_rows.index(rec)),
+                        self._schedule_validate()))
+        self._lot_rows_lay.addWidget(host)
+        self._refresh_lot_add_btn()
+        edit.setFocus()
+
+    def _remove_lot_row(self, rec: dict) -> None:
+        self._lot_rows.remove(rec)
+        rec["host"].setParent(None)
+        rec["host"].deleteLater()
+        self._refresh_lot_add_btn()
+        self._schedule_validate()
+
+    def _refresh_lot_add_btn(self) -> None:
+        n = len(self._lot_rows)
+        self._lot_add_btn.setText(i18n.KO.EXTRACT_LOT_ADD_FMT.format(
+            n=n, max=self.MAX_LOTS))
+        self._lot_add_btn.setEnabled(n < self.MAX_LOTS)
+        for k, r in enumerate(self._lot_rows[1:], start=2):     # 줄 번호
+            r["label"].setText(f"LOT {k}")
+
+    def _lot_paths(self) -> list[str]:
+        """비어 있지 않은 LOT 줄의 경로들(위에서부터)."""
+        return [r["edit"].text().strip() for r in self._lot_rows
+                if r["edit"].text().strip()]
+
+    def _reset_lot_slots(self, idx: int) -> None:
+        """폴더가 바뀌면 그 줄의 슬롯 선택은 무효다 — 전체로 되돌린다."""
+        if 0 <= idx < len(self._lot_rows):
+            rec = self._lot_rows[idx]
+            rec["sel"], rec["total"] = None, 0
+            rec["slot_btn"].setText(i18n.KO.EXTRACT_SLOT_BTN_ALL)
+
+    def _pick_lot_slots(self, idx: int) -> None:
+        """LOT 한 줄의 슬롯을 고른다 — 매칭의 '일부 슬롯만…' 과 같은 선택 창."""
+        from ...models.slot import extract_slot_dirs
+        from ..widgets.slot_select_dialog import SlotSelectDialog
+
+        rec = self._lot_rows[idx]
+        text = rec["edit"].text().strip()
+        root = Path(text) if text else None
+        if root is None or not root.is_dir():
+            sheets.warn(self, i18n.KO.APP_TITLE, i18n.KO.EXTRACT_SLOT_NEED_FOLDER)
+            return
+        dirs = extract_slot_dirs(root)
+        names = sorted(dirs)
+        if not names:
+            sheets.info(self, i18n.KO.APP_TITLE, i18n.KO.SLOT_SELECT_EMPTY)
+            return
+        dlg = SlotSelectDialog(names, preselected=rec["sel"], ref_dirs=dirs,
+                               val_root=None, parent=self)
+        if not (sheets.run(dlg) and dlg.accepted_ok):
+            return                                   # 취소 — 그대로 둔다
+        chosen = set(dlg.selected or ())
+        if not chosen or chosen == set(names):
+            self._reset_lot_slots(idx)
+        else:
+            rec["sel"], rec["total"] = chosen, len(names)
+            rec["slot_btn"].setText(i18n.KO.EXTRACT_SLOT_BTN_FMT.format(
+                n=len(chosen), total=len(names)))
 
     def eventFilter(self, obj, event):  # noqa: N802
         from PyQt6.QtCore import QEvent
@@ -611,8 +739,10 @@ class SetupPage(QWidget):
         self.scope_group.set_option_tooltip("subset",
                                             i18n.KO.SLOT_SELECT_BTN_TOOLTIP)
         self.scope_group.selection_changed.connect(self._on_scope_changed)
-        col.addWidget(self._labeled_segment_row(card, i18n.KO.SCOPE_TITLE,
-                                                self.scope_group))
+        # 진행 범위 줄 — 추출 모드에서는 LOT 줄마다 [슬롯 선택] 이 대신한다(숨김).
+        self._scope_row = self._labeled_segment_row(card, i18n.KO.SCOPE_TITLE,
+                                                    self.scope_group)
+        col.addWidget(self._scope_row)
 
         # Defect 추출 전용 — 엑셀에 Wafer Map 시트를 넣을지(사용자 결정: 끌 수 있게).
         # 추출 모드에서만 보인다(`set_extract_mode`).  마지막 선택을 기억한다.
@@ -915,7 +1045,8 @@ class SetupPage(QWidget):
         return host
 
     # ------------------------------------------------------------------
-    def _make_machine_group(self, title: str) -> tuple[QWidget, QLineEdit, QLineEdit]:
+    def _make_machine_group(self, title: str, extra: Optional[QWidget] = None
+                            ) -> tuple[QWidget, QLineEdit, QLineEdit]:
         """기준/검증 장비 입력 카드.
 
         QGroupBox(라디우스 8px + margin-top) 대신 카드 + 그리드로 — 시트의 형태 언어와
@@ -943,6 +1074,8 @@ class SetupPage(QWidget):
         grid.addWidget(QLabel(i18n.KO.SETUP_FOLDER_LABEL, card), 0, 0)
         grid.addWidget(path_edit, 0, 1)
         grid.addWidget(browse, 0, 2)
+        if extra is not None:                # 추출 모드의 첫 LOT [슬롯 선택]
+            grid.addWidget(extra, 0, 3)
 
         # 이유를 말하는 인라인 오류 줄.
         # ★ show/hide 하면 카드 높이가 30px, 옆 카드 정렬이 23px 흔들린다(실측 지적) —
@@ -988,8 +1121,8 @@ class SetupPage(QWidget):
 
     @staticmethod
     def split_roots(text: str) -> list[str]:
-        """Defect 추출 입력란 → 폴더 목록.  ``;`` 로 구분한다(여러 LOT)."""
-        return [t.strip() for t in (text or "").split(";") if t.strip()]
+        """LOT 줄들을 이은 문자열(줄바꿈 구분) → 폴더 목록.  경로에 올 수 없는 글자다."""
+        return [t.strip() for t in (text or "").split("\n") if t.strip()]
 
     @staticmethod
     def _dirs_state(text: str) -> str:
@@ -1055,10 +1188,12 @@ class SetupPage(QWidget):
         self._setting_cards[1].setVisible(not on)          # 매칭 설정 카드
         self._mode_badge_card.setVisible(not on)
         self._map_switch.setVisible(on)                    # 추출 전용 옵션
+        self._lot1_slot_btn.setVisible(on)
+        self._lot_list.setVisible(on)
+        self._scope_row.setVisible(not on)
         self.ref_path_edit.setPlaceholderText(
             i18n.KO.EXTRACT_FOLDER_PLACEHOLDER if on
             else i18n.KO.SETUP_FOLDER_PLACEHOLDER)
-        self.ref_path_edit.setToolTip(i18n.KO.EXTRACT_FOLDER_TOOLTIP if on else "")
         self.extract_btn.setText(i18n.KO.EXTRACT_BACK_BUTTON if on
                                  else i18n.KO.EXTRACT_BUTTON)
         self._refresh_start_text()
@@ -1116,6 +1251,9 @@ class SetupPage(QWidget):
         시작을 잠근다.  헤드리스에서는 동기로 확인해 호출 즉시 판정이 나오게 한다
         (테스트가 `_validate()` 의 반환값을 그 자리에서 단언한다)."""
         ref_text = self.ref_path_edit.text()
+        if self._extract_mode:
+            # LOT 줄 전부를 한 문자열로(줄바꿈 구분) — 확인 워커가 폴더별로 본다.
+            ref_text = "\n".join(self._lot_paths())
         # 추출 모드는 검증 폴더를 받지 않는다 — 기준 폴더를 한 번 더 보면 판정이 같다.
         val_text = ref_text if self._extract_mode else self.val_path_edit.text()
         if self._sync_probe:
@@ -1308,14 +1446,6 @@ class SetupPage(QWidget):
         # 아니다.  아래 감시자가 재는 '닫힌 뒤의 정지' 와 짝지어 봐야 의미가 있다.
         _LOG.info("폴더 선택: 파일 브라우저가 %.2f초 열려 있었다", dialog_s)
         stall_watch.watch(self, self._log_stall)
-        if self._extract_mode and target is self.ref_path_edit:
-            # Defect 추출은 LOT 를 여러 개 받는다 — 고를 때마다 **뒤에 덧붙인다**.
-            roots = self.split_roots(target.text())
-            if path not in roots:
-                roots.append(path)
-            target.setText("; ".join(roots))
-            self._reset_slot_selection()
-            return
         target.setText(path)
         # 기준 폴더가 바뀌면 이전 슬롯 선택은 더 이상 유효하지 않다.
         if target is self.ref_path_edit:
@@ -1350,14 +1480,6 @@ class SetupPage(QWidget):
         from ..widgets.slot_select_dialog import SlotSelectDialog
 
         ref_text = self.ref_path_edit.text().strip()
-        if self._extract_mode:
-            roots = self.split_roots(ref_text)
-            if len(roots) > 1:
-                # 슬롯 이름이 LOT 마다 겹치므로 일부 슬롯 고르기는 LOT 하나일 때만.
-                sheets.info(self, i18n.KO.APP_TITLE, i18n.KO.EXTRACT_SUBSET_ONE_LOT)
-                self._reset_slot_selection()
-                return
-            ref_text = roots[0] if roots else ""
         ref_root = Path(ref_text) if ref_text else None
         if ref_root is None or not ref_root.is_dir():
             sheets.warn(
@@ -1568,7 +1690,9 @@ class SetupPage(QWidget):
         매칭 전용 값(임계치·엔진·허용 오차)은 넘기지 않는다(기본값).  prefs 에는
         폴더·호기만 남긴다 — 매칭의 '마지막 입력' 을 추출이 덮어쓰지 않게 따로 두지는
         않는다: 같은 입력란이라 다음에 열 때 그대로 보이는 것이 맞다."""
-        roots = [Path(t) for t in self.split_roots(self.ref_path_edit.text())]
+        rows = [(t.strip(), r["sel"]) for r in self._lot_rows
+                for t in [r["edit"].text()] if t.strip()]
+        roots = [Path(t) for t, _sel in rows]
         for r in roots:
             if not r.is_dir():
                 sheets.warn(self, i18n.KO.APP_TITLE,
@@ -1588,10 +1712,9 @@ class SetupPage(QWidget):
             ref_machine=machine, val_machine="",
             threshold=self.slider.value() / 100.0,
             automation_level=automation,
-            selected_slots=(set(self._selected_slots)
-                            if self._selected_slots is not None and len(roots) == 1
-                            else None),
             extract=True, extract_roots=roots, extract_wafer_map=wafer_map,
+            extract_slots=[set(sel) if sel is not None else None
+                           for _t, sel in rows],
         )
 
     # ── 작성 중 입력 이관 (색 모드/배치 전환 시) ─────────────────────────────
