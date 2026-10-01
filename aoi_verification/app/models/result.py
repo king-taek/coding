@@ -8,6 +8,12 @@ from pathlib import Path
 # `FinalResult.mode` 값 — Defect 추출(매칭 없이 한쪽 폴더에서 고른 사진만 엑셀로).
 # 이때 ``unmatched_refs`` 가 고른 사진 목록이고 ``matches`` 는 비어 있다.
 EXTRACT_MODE = "extract"
+# AVAGO 재리뷰 — 1차 리뷰 맵의 Reject die 사진을 빼고 다시 본 결과.  ``unmatched_refs`` 가
+# 재리뷰한 사진 전부(``note`` = :data:`VERDICT_GOOD`/:data:`VERDICT_REJECT`)이고
+# ``rereview`` 가 웨이퍼별 계획(:class:`~..coords.rereview.WaferPlan`)이다.
+REREVIEW_MODE = "rereview"
+VERDICT_GOOD = "Good"
+VERDICT_REJECT = "Reject"
 
 
 @dataclass
@@ -53,6 +59,13 @@ class FinalResult:
     # Wafer map 용 — {slot명 → (기준 사진 경로들, 검증 사진 경로들)}.  스캔 결과에서
     # 옮겨 담는다(결과 화면·엑셀 시트가 같은 목록을 본다).  매치 여부는 ``matches`` 로.
     slot_images: dict[str, tuple[list[Path], list[Path]]] = field(default_factory=dict)
+    # AVAGO 재리뷰 전용 — {slot명 → WaferPlan}.  다른 모드에서는 비어 있다.
+    rereview: dict = field(default_factory=dict)
+
+    def rereview_rejects(self, slot: str) -> list[Path]:
+        """재리뷰에서 Reject 로 고른 사진 — 결과 화면·엑셀이 같은 목록을 센다."""
+        return [u.path for u in self.unmatched_refs
+                if u.slot == slot and u.note == VERDICT_REJECT]
 
 
 def extract_result(machine: str, picked: dict, *, kla_folders=None,
@@ -75,3 +88,22 @@ def extract_result(machine: str, picked: dict, *, kla_folders=None,
                        kla_folders=dict(kla_folders or {}),
                        slot_numbers=dict(slot_numbers or {}),
                        slot_images=images)
+
+
+def rereview_result(machine: str, plans: dict, rejects: dict, goods: dict, *,
+                    slot_numbers=None) -> FinalResult:
+    """AVAGO 재리뷰의 결과 — ``rejects``/``goods`` : {slot명 → 사진 경로들}.
+
+    재리뷰한 사진은 **전부** 행으로 싣는다(사용자 결정 — 엑셀에 판정 열).  Reject 를
+    먼저, 그 안에서 파일명 순."""
+    rows: list[MissEntry] = []
+    images: dict[str, tuple[list[Path], list[Path]]] = {}
+    for slot in sorted(plans):
+        rej = sorted((Path(p) for p in rejects.get(slot, ())), key=lambda p: p.name.lower())
+        good = sorted((Path(p) for p in goods.get(slot, ())), key=lambda p: p.name.lower())
+        rows += [MissEntry(slot=slot, side="ref", path=p, note=VERDICT_REJECT) for p in rej]
+        rows += [MissEntry(slot=slot, side="ref", path=p, note=VERDICT_GOOD) for p in good]
+        images[slot] = (rej + good, [])
+    return FinalResult(mode=REREVIEW_MODE, ref_machine=machine, val_machine="",
+                       unmatched_refs=rows, slot_numbers=dict(slot_numbers or {}),
+                       slot_images=images, rereview=dict(plans))

@@ -18,6 +18,19 @@
 
 ENTRIES = [
     {
+        "id": "2026-10-01b",
+        "date": "2026-10-01",
+        "headline": "AVAGO 재리뷰 모드가\n생겼습니다",
+        "summary": "1차 리뷰 Map 에서 이미 Reject 인 die 의 사진은 빼고,\n"
+                   "나머지를 ← Good / → Reject 로 한 장씩 다시 봅니다.",
+        "others": [
+            ("설정", "[AVAGO 재리뷰] — Scanresult LOT 폴더와 Map 폴더를 고릅니다"),
+            ("결과", "Reject 사진 수와 신규 / Map / 합계 Reject die 수"),
+            ("결과 엑셀", "판정·die 열 + 재리뷰 요약 + Reject die 맵"),
+        ],
+        "notice": "Map 과 장비 die 영역이 다른 웨이퍼는 사진을 빼지 않고 전부 재리뷰합니다",
+    },
+    {
         "id": "2026-10-01",
         "date": "2026-10-01",
         "headline": "이제 Scan 이미지도\n함께 봅니다",

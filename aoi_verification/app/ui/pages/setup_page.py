@@ -61,6 +61,8 @@ class SetupInput:
     extract_wafer_map: bool = True
     # LOT 별 '일부 슬롯'(``extract_roots`` 와 같은 순서, ``None`` = 전체).
     extract_slots: Optional[list] = None
+    # AVAGO 재리뷰 — ``ref_root`` = Scanresult LOT 폴더, ``val_root`` = 1차 리뷰 Map 폴더.
+    rereview: bool = False
 
 
 # '실행 옵션'·'매칭 설정' 두 카드를 가로로 나란히 세우려면 이만큼은 있어야 한다.
@@ -201,6 +203,9 @@ class SetupPage(QWidget):
         # Defect 추출 모드 — 검증 장비 카드·매칭 설정을 감추고 한쪽 폴더만 받는다.
         # ★ `_build` 전에 둔다: 액션바를 만들며 부르는 `_validate` 가 읽는다.
         self._extract_mode = False
+        # AVAGO 재리뷰 모드 — 두 입력란을 'Scanresult LOT · Map 폴더' 로 바꿔 쓴다.
+        self._rereview_mode = False
+        self._rereview_stash: Optional[tuple] = None    # 들어가기 전 매칭 입력값
         # die 기하 스캔(백그라운드) 상태.  `_die_scanned_for` 는 **이미 스캔이 끝난
         # 경로** 다 — 같은 경로로 `_validate` 가 다시 와도(허용 오차를 건드리면 온다)
         # 다시 훑지 않고 캐시한 결과로 문구만 다시 그린다.
@@ -316,7 +321,7 @@ class SetupPage(QWidget):
         root.addWidget(self._build_top_bar())
         root.addWidget(self._build_device_row())
         self._place_setting_cards(root)
-        root.addWidget(self._build_howto())
+        root.addWidget(self._build_howto_row())
         root.addStretch(1)
         if not self._pinned_action_bar():
             root.addWidget(self._build_action_bar())
@@ -483,6 +488,25 @@ class SetupPage(QWidget):
         title.setProperty("role", "title")
         self._title_label = title
         return title
+
+    def _build_howto_row(self) -> QWidget:
+        """사용 방법(접이식) + 오른쪽 끝 [AVAGO 재리뷰].
+
+        ★ 재리뷰 버튼을 액션바·제목 줄에 두지 않는다 — 둘 다 800px 창의 폭 예산이 이미
+        꽉 차 있어, 붙이면 페이지가 창보다 넓어졌다(실측: 액션바 830 → 967px, 제목 줄은
+        가로 넘침 40px).  이 줄은 접힌 안내 토글 오른쪽이 비어 있다."""
+        host = QWidget(self)
+        host.setProperty("role", "rowHost")
+        row = QHBoxLayout(host)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(16)
+        row.addWidget(self._build_howto(), 1)
+        self.rereview_btn = NeonButton(i18n.KO.REREVIEW_BUTTON, role="ghost")
+        self.rereview_btn.setToolTip(i18n.KO.REREVIEW_BUTTON_TOOLTIP)
+        self.rereview_btn.clicked.connect(
+            lambda: self.set_rereview_mode(not self._rereview_mode))
+        row.addWidget(self.rereview_btn, 0, Qt.AlignmentFlag.AlignTop)
+        return host
 
     def _build_howto(self) -> QWidget:
         """사용 방법 안내 — 접을 수 있는 섹션 (기본 접힘)."""
@@ -1175,10 +1199,15 @@ class SetupPage(QWidget):
 
         machine_edit = QLineEdit(card)
         machine_edit.setPlaceholderText(i18n.KO.SETUP_MACHINE_PLACEHOLDER)
-        grid.addWidget(QLabel(i18n.KO.SETUP_MACHINE_LABEL, card), 2, 0)
+        machine_label = QLabel(i18n.KO.SETUP_MACHINE_LABEL, card)
+        grid.addWidget(machine_label, 2, 0)
         grid.addWidget(machine_edit, 2, 1, 1, 2)
+        card.setProperty("_machineLabel", machine_label)   # 재리뷰 모드가 감춘다
 
         card.body().addLayout(grid)
+        # 내용은 위로 붙인다 — 재리뷰 모드가 Map 카드의 호기 줄을 감추면, 옆 카드 높이에
+        # 맞춰 늘어난 카드 안에서 폴더 줄이 세로 가운데로 떠 있었다.
+        card.body().addStretch(1)
         # 유효성 표시를 위해 오류 라벨을 입력란에 붙여 둔다.
         path_edit.setProperty("_errLabel", err)
         path_edit.textChanged.connect(self._schedule_validate)
@@ -1249,6 +1278,8 @@ class SetupPage(QWidget):
     def _refresh_start_text(self) -> None:
         if not self._backend_ready:
             self.start_btn.setText(i18n.KO.BTN_START_PREPARING)
+        elif self._rereview_mode:
+            self.start_btn.setText(i18n.KO.BTN_REREVIEW_START)
         else:
             self.start_btn.setText(i18n.KO.BTN_EXTRACT_START if self._extract_mode
                                    else i18n.KO.BTN_START)
@@ -1263,7 +1294,10 @@ class SetupPage(QWidget):
         남기는 것: 기준 장비 카드(제목만 '대상 장비') · 실행 옵션(자동화 수준 = 선별
         건너뛰기, 진행 범위 = 일부 슬롯).  입력값은 그대로 둔다 — 되돌아오면 이어서 쓴다."""
         on = bool(on)
+        if on and self._rereview_mode:
+            self.set_rereview_mode(False)
         self._extract_mode = on
+        self.rereview_btn.setVisible(not on)
         self._title_label.setText(i18n.KO.EXTRACT_TITLE if on else i18n.KO.SETUP_TITLE)
         head = self.ref_group.property("_headLabel")
         if head is not None:
@@ -1287,6 +1321,56 @@ class SetupPage(QWidget):
         # 첫 입력란이 놓기를 가로채 'file:///…' 글자를 끼워 넣지 않게, 그때만 페이지가 받는다.
         self.setAcceptDrops(on)
         self.ref_path_edit.setAcceptDrops(not on)
+        self._refresh_start_text()
+        self._validate()
+
+    def is_rereview_mode(self) -> bool:
+        return self._rereview_mode
+
+    def set_rereview_mode(self, on: bool) -> None:
+        """AVAGO 재리뷰 ↔ 매칭 검증.  **같은 화면**의 두 입력란을 바꿔 쓴다.
+
+        기준 칸 = Scanresult LOT 폴더(호기 입력은 그대로 — 엑셀 머리에 쓴다),
+        검증 칸 = 1차 리뷰 Map 폴더(호기 줄은 감춘다).  실행 옵션·매칭 설정은 감춘다
+        (재리뷰는 늘 한 장씩 판정한다).  입력값은 모드별로 따로 기억한다 — 매칭의 두
+        폴더가 재리뷰 칸에 남으면 엉뚱한 폴더로 시작하게 된다."""
+        on = bool(on)
+        if on == self._rereview_mode:
+            return
+        if on and self._extract_mode:
+            self.set_extract_mode(False)
+        if on:
+            self._rereview_stash = (self.ref_path_edit.text(), self.val_path_edit.text())
+            p = _prefs.load()
+            self.ref_path_edit.setText(p.last_rereview_scan)
+            self.val_path_edit.setText(p.last_rereview_map)
+        elif self._rereview_stash is not None:
+            ref, val = self._rereview_stash
+            self.ref_path_edit.setText(ref)
+            self.val_path_edit.setText(val)
+            self._rereview_stash = None
+        self._rereview_mode = on
+        self._title_label.setText(i18n.KO.REREVIEW_TITLE if on else i18n.KO.SETUP_TITLE)
+        for card, title_on, title_off in (
+                (self.ref_group, i18n.KO.REREVIEW_SCAN_GROUP, i18n.KO.SETUP_REF_GROUP),
+                (self.val_group, i18n.KO.REREVIEW_MAP_GROUP, i18n.KO.SETUP_VAL_GROUP)):
+            head = card.property("_headLabel")
+            if head is not None:
+                head.setText(title_on if on else title_off)
+        lbl = self.val_group.property("_machineLabel")
+        if lbl is not None:
+            lbl.setVisible(not on)
+        self.val_machine_edit.setVisible(not on)
+        self.ref_path_edit.setPlaceholderText(
+            i18n.KO.REREVIEW_SCAN_PLACEHOLDER if on else i18n.KO.SETUP_FOLDER_PLACEHOLDER)
+        self.val_path_edit.setPlaceholderText(
+            i18n.KO.REREVIEW_MAP_PLACEHOLDER if on else i18n.KO.SETUP_FOLDER_PLACEHOLDER)
+        for card in self._setting_cards:
+            card.setVisible(not on)
+        self._mode_badge_card.setVisible(not on)
+        self.extract_btn.setVisible(not on)
+        self.rereview_btn.setText(i18n.KO.EXTRACT_BACK_BUTTON if on
+                                  else i18n.KO.REREVIEW_BUTTON)
         self._refresh_start_text()
         self._validate()
 
@@ -1371,7 +1455,9 @@ class SetupPage(QWidget):
             if checking:
                 self._start_hint.setText(i18n.KO.START_CHECKING_HINT)
             elif not dirs_ok:
-                self._start_hint.setText(i18n.KO.START_BLOCKED_HINT)
+                self._start_hint.setText(i18n.KO.REREVIEW_START_BLOCKED_HINT
+                                         if self._rereview_mode
+                                         else i18n.KO.START_BLOCKED_HINT)
             elif not self._backend_ready:
                 self._start_hint.setText(i18n.KO.START_PREPARING_HINT)
             else:
@@ -1698,6 +1784,8 @@ class SetupPage(QWidget):
     def _collect_input(self):
         if self._extract_mode:
             return self._collect_extract_input()
+        if self._rereview_mode:
+            return self._collect_rereview_input()
         ref_root = Path(self.ref_path_edit.text().strip())
         val_root = Path(self.val_path_edit.text().strip())
         ref_machine = self.ref_machine_edit.text().strip()
@@ -1806,6 +1894,29 @@ class SetupPage(QWidget):
             extract=True, extract_roots=roots, extract_wafer_map=wafer_map,
             extract_slots=[set(sel) if sel is not None else None
                            for _t, sel in rows],
+        )
+
+    def _collect_rereview_input(self):
+        """AVAGO 재리뷰 입력 — Scanresult LOT 폴더 + Map 폴더 + 호기.
+
+        선별은 건너뛸 수 없다(재리뷰 자체가 사람이 한 장씩 보는 일이다)."""
+        scan = Path(self.ref_path_edit.text().strip())
+        map_dir = Path(self.val_path_edit.text().strip())
+        for r in (scan, map_dir):
+            if not r.is_dir():
+                sheets.warn(self, i18n.KO.APP_TITLE,
+                            i18n.KO.WARN_PATH_NOT_EXIST.format(path=r))
+                return None
+        machine = (self.ref_machine_edit.text().strip()
+                   or i18n.KO.DEFAULT_REF_MACHINE)
+        _prefs.patch(last_rereview_scan=str(scan), last_rereview_map=str(map_dir),
+                     last_ref_machine=machine)
+        return SetupInput(
+            mode="single", ref_root=scan, val_root=map_dir,
+            ref_machine=machine, val_machine="",
+            threshold=self.slider.value() / 100.0,
+            automation_level=AutomationLevel.USER_SELECT,
+            rereview=True,
         )
 
     # ── 작성 중 입력 이관 (색 모드/배치 전환 시) ─────────────────────────────

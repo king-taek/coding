@@ -12,13 +12,13 @@ from PyQt6.QtWidgets import (QCheckBox, QFileDialog, QFrame, QHBoxLayout, QLabel
 
 from ... import i18n
 from .. import theme
-from ...models.result import FinalResult
+from ...models.result import REREVIEW_MODE, FinalResult
 from ...workers.exporter import ExcelExporter
 from ..widgets.app_logo import build_logo_label
 from ..widgets.loading_overlay import LoadingOverlay
 from ..widgets.neon_button import NeonButton
 from ..widgets.neon_card import NeonCard
-from ..widgets.wafer_map_view import render_map_png
+from ..widgets.wafer_map_view import render_map_png, render_reject_map_png
 from ..widgets import sheet_host as sheets
 from ... import config as _config
 
@@ -270,6 +270,7 @@ class ResultPage(QWidget):
         #   빠져도 **그 자리에 그대로 남아** 새 타일 뒤로 삐져나왔다(결과를 다시 그릴
         #   때마다 누적).  재귀로 위젯까지 확실히 지운다.
         _clear_layout(self._summary_layout)
+        self._apply_mode_chrome(result.mode == REREVIEW_MODE)
 
         # 라인 헬퍼
         def line(text: str, role: str = "subtitle"):
@@ -277,6 +278,12 @@ class ResultPage(QWidget):
             lab.setProperty("role", role)
             lab.setWordWrap(True)
             self._summary_layout.addWidget(lab)
+
+        if result.mode == REREVIEW_MODE:
+            self._show_rereview_summary(result, line)
+            self._add_file_row()
+            self._refresh_save_target()
+            return
 
         line(i18n.KO.RESULT_MACHINES_FMT.format(ref=result.ref_machine,
                                                 val=result.val_machine))
@@ -297,20 +304,7 @@ class ResultPage(QWidget):
         # '내가 저장을 했던가?' 에 답할 것이 아무것도 없었다(_exported 는 내부
         # 플래그였다).  자리를 예약해 두고 문자열만 갱신한다 — show/hide 를 쓰면
         # 저장 순간 줄이 생기며 레이아웃이 흔들린다.
-        self._saved_label = None
-        if self._target_path is not None:
-            file_row = QHBoxLayout()
-            file_row.setContentsMargins(0, 0, 0, 0)
-            path_lab = QLabel(
-                f"{i18n.KO.WORKING_FILE_LABEL}: {self._target_path}",
-                self._summary_card)
-            path_lab.setProperty("role", "monoMuted")
-            path_lab.setWordWrap(True)
-            file_row.addWidget(path_lab, 1)
-            self._saved_label = QLabel("", self._summary_card)
-            self._saved_label.setProperty("role", "statusPass")
-            file_row.addWidget(self._saved_label)
-            self._summary_layout.addLayout(file_row)
+        self._add_file_row()
 
         # 검토 가능한 매치 실패 사진이 있을 때만 검토 버튼 활성.
         n_unmatched = len(result.unmatched_refs)
@@ -325,6 +319,22 @@ class ResultPage(QWidget):
             self.review_unmatched_btn.setText(i18n.KO.BTN_REVIEW_UNMATCHED)
 
         self._refresh_save_target()      # 31안 — 누르기 전에 목적지를
+
+    def _add_file_row(self) -> None:
+        self._saved_label = None
+        if self._target_path is not None:
+            file_row = QHBoxLayout()
+            file_row.setContentsMargins(0, 0, 0, 0)
+            path_lab = QLabel(
+                f"{i18n.KO.WORKING_FILE_LABEL}: {self._target_path}",
+                self._summary_card)
+            path_lab.setProperty("role", "monoMuted")
+            path_lab.setWordWrap(True)
+            file_row.addWidget(path_lab, 1)
+            self._saved_label = QLabel("", self._summary_card)
+            self._saved_label.setProperty("role", "statusPass")
+            file_row.addWidget(self._saved_label)
+            self._summary_layout.addLayout(file_row)
 
     # ------------------------------------------------------------------
     def _on_wafer_map(self) -> None:
@@ -433,6 +443,63 @@ class ResultPage(QWidget):
         row.addStretch(1)
         return row
 
+    # ------------------------------------------------------------------
+    # AVAGO 재리뷰 결과
+    # ------------------------------------------------------------------
+    def _apply_mode_chrome(self, rereview: bool) -> None:
+        """재리뷰 결과에는 매칭 전용 버튼·옵션이 의미가 없다 — 감추고, 검토 복귀는
+        '선별로' 가 된다(판정을 고치러 선별 화면으로 돌아간다)."""
+        K = i18n.KO
+        self.title.setText(K.REREVIEW_RESULT_TITLE if rereview else K.RESULT_TITLE)
+        self.review_btn.setText(K.REREVIEW_BACK_TO_SELECT if rereview
+                                else K.BTN_BACK_TO_REVIEW)
+        for w in (self.wafer_map_btn, self.review_unmatched_btn,
+                  self.unmatched_original_chk, self.full_template_chk):
+            w.setVisible(not rereview)
+
+    def _show_rereview_summary(self, result: FinalResult, line) -> None:
+        """사진 수(전체·제외·재리뷰·Reject) 와 die 수(신규·Map·합계) — 엑셀 요약 시트와
+        **같은 함수**(`coords.rereview.wafer_stats`)로 센다."""
+        from ...coords import rereview as rr
+
+        K = i18n.KO
+        stats = [rr.wafer_stats(result.rereview[s], result.rereview_rejects(s))
+                 for s in sorted(result.rereview)]
+        line(K.REREVIEW_RESULT_HEAD_FMT.format(machine=result.ref_machine,
+                                               n=len(stats)))
+
+        def tot(attr: str) -> int:
+            return sum(getattr(st, attr) for st in stats)
+
+        n_rej = tot("reject")
+        for specs in (
+                [(tot("total"), K.REREVIEW_STAT_TOTAL, "none"),
+                 (tot("excluded"), K.REREVIEW_STAT_EXCLUDED, "none"),
+                 (tot("reviewed"), K.REREVIEW_STAT_REVIEWED, "ok"),
+                 (n_rej, K.REREVIEW_STAT_REJECT, "over" if n_rej else "none")],
+                [(tot("new_reject_dies"), K.REREVIEW_STAT_NEW_DIES,
+                  "over" if tot("new_reject_dies") else "none"),
+                 (tot("map_reject_dies"), K.REREVIEW_STAT_MAP_DIES, "none"),
+                 (tot("total_reject_dies"), K.REREVIEW_STAT_TOTAL_DIES, "none")]):
+            row = QHBoxLayout()
+            row.setSpacing(10)
+            for value, caption, tone in specs:
+                row.addWidget(self._stat_tile(value, caption, tone))
+            row.addStretch(1)
+            self._summary_layout.addLayout(row)
+        for st in stats:
+            line(K.REREVIEW_WAFER_LINE_FMT.format(
+                wafer=st.slot, total=st.total, excluded=st.excluded,
+                reviewed=st.reviewed, reject=st.reject, new=st.new_reject_dies,
+                map=st.map_reject_dies, sum=st.total_reject_dies), role="muted")
+        unknown = tot("unknown_die_rejects")
+        if unknown:
+            line(K.REREVIEW_UNKNOWN_DIE_FMT.format(n=unknown), role="muted")
+        warns = rr.warning_lines(result.rereview)
+        if warns:
+            line(K.REREVIEW_WARN_HEAD + "\n" + "\n".join("• " + w for w in warns),
+                 role="error")
+
     def _stat_tile(self, value: int, caption: str, tone: str) -> QFrame:
         tile = QFrame(self._summary_card)
         tile.setProperty("role", "statTile")
@@ -509,6 +576,7 @@ class ResultPage(QWidget):
             original_quality=self.original_quality_chk.isChecked(),
             unmatched_original_quality=self.unmatched_original_chk.isChecked(),
             map_renderer=render_map_png,          # Wafer Map 시트(화면과 같은 렌더러)
+            reject_map_renderer=render_reject_map_png,   # AVAGO 재리뷰 Reject die 맵
         )
         # ★ 30안 — 워커가 보내는 문구(어느 시트·어느 슬롯)를 **그대로 띄운다**.
         #   예전엔 `msg` 를 버리고 고정 문구만 썼다.  행 수치는 여전히 오버레이의
