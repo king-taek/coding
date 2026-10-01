@@ -29,7 +29,7 @@ import pytest
 
 pytest.importorskip("PyQt6.QtWidgets")
 
-from PyQt6.QtCore import QTimer                                  # noqa: E402
+from PyQt6.QtCore import Qt, QTimer                              # noqa: E402
 from PyQt6.QtWidgets import (QApplication, QDialog, QLabel,       # noqa: E402
                              QMessageBox, QWidget)
 
@@ -53,13 +53,12 @@ def host(qapp):
     ★ 같은 프로세스에서 앞서 돈 다른 테스트가 **모달 다이얼로그를 띄운 채** 끝나는
     경우가 있다(일괄 선택·매치 실패 검토).  보이는 앱 모달은 이 창의 키·단축키를
     전부 막아 아래 단축키 대조군이 xdist 분배에 따라 실행마다 갈려 실패했다(실측).
-    이 파일의 계약은 '이 창이 입력을 받는다' 가 전제이므로 시작 전에 그 모달만 숨긴다."""
-    for _ in range(16):
-        stray = QApplication.activeModalWidget()
-        if stray is None or not stray.isVisible():
-            break
-        stray.hide()
+    이 파일의 계약은 '이 창이 입력을 받는다' 가 전제이므로 **이 창을 앱 모달로** 띄운다 —
+    가장 나중에 뜬 모달이 입력을 받으므로 남은 창을 건드리지 않고도 막히지 않는다.
+    (남은 다이얼로그를 숨기거나 닫으면 그 다이얼로그의 늦은 콜백이 죽은 객체로 들어가
+    워커가 세그폴트로 죽었다 — 남의 객체 수명은 건드리지 않는다.)"""
     win = QWidget()
+    win.setWindowModality(Qt.WindowModality.ApplicationModal)
     win.resize(900, 700)
     h = sheet_host.SheetHost(win)
     win._sheets = h
