@@ -198,9 +198,16 @@ class SheetHost(QWidget):
             return super().eventFilter(obj, event)
         # 시트가 스스로 숨거나 닫히면(accept/reject 없이) 루프를 끝내야 한다 —
         # 안 끝나면 중첩 이벤트 루프가 남아 앱이 그 자리에서 굳는다.
+        #
+        # ★ ``Hide`` 는 시트 **자신이** 숨겨졌을 때(``isHidden()``)만 닫기로 친다.  창을
+        #   최소화하면 Qt 가 자식 전체에 자발적 Hide 를 보내고, 부모가 숨으면 비자발적
+        #   Hide 가 오는데 — 둘 다 '안 보일 뿐' 이지 닫힌 게 아니다.  예전엔 이것까지
+        #   닫기로 받아 최소화→복원하면 열려 있던 팝업이 사라졌다(사용자 신고).
         if etype in (QEvent.Type.Close, QEvent.Type.Hide):
             for entry in list(self._stack):
                 if entry["widget"] is obj:
+                    if etype == QEvent.Type.Hide and not obj.isHidden():
+                        break
                     if etype == QEvent.Type.Close:
                         event.ignore()       # 창을 파괴하지 않고 시트만 닫는다
                     self._close(entry)

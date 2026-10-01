@@ -2614,6 +2614,9 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):  # noqa: N802
         # 종료 직전 마지막 크기/최대화 상태 저장 → 다음 실행에서 그대로 복원.
         self._persist_geometry()
+        # ★ 열린 시트의 중첩 루프를 끝낸다.  시트는 창이 숨을 때 저절로 닫히지 않는다
+        #   (최소화로 팝업이 사라지지 않게 — `SheetHost.eventFilter`).
+        self._sheets.close_all()
         # #14 절전 억제 해제 (남아 있을 경우).
         wakelock.release()
         if self._thumb_pool is not None:
