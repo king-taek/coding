@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (QApplication, QFrame, QGridLayout, QHBoxLayout,
 
 from ... import i18n
 from .. import theme
+from ..deferred import call_later
 from ..score_fmt import fmt_score
 from ...models.result import MatchResult, MissEntry
 from ...models.slot import ImageItem
@@ -1118,8 +1119,7 @@ class MatchReviewPage(QWidget):
         self._update_summary()
         # 검토 화면이 새로 열릴 때마다 스크롤을 항상 최상단으로 (이전 세션의
         # 스크롤 위치가 남지 않도록). 레이아웃 확정 후 적용.
-        QTimer.singleShot(
-            0, lambda: self._scroll.verticalScrollBar().setValue(0))
+        call_later(self, 0, lambda: self._scroll.verticalScrollBar().setValue(0))
 
     # ------------------------------------------------------------------
     # 행 생성 — 한 번에 다 만들지 않는다.
@@ -1249,14 +1249,14 @@ class MatchReviewPage(QWidget):
         """‘후보 한 줄 더 보기’ 후 — 행이 화면에서 같은 자리에 있도록 스크롤 보정 (#6)."""
         sb = self._scroll.verticalScrollBar()
         delta = self._row_top(row) - sb.value()
-        QTimer.singleShot(
-            0, lambda: sb.setValue(max(0, self._row_top(row) - delta)))
+        # 주인은 **행** 이다 — 재렌더로 행이 먼저 지워져도 예약이 함께 취소된다.
+        call_later(row, 0, lambda: sb.setValue(max(0, self._row_top(row) - delta)))
 
     def _on_row_less(self, row) -> None:
         """‘접기’ 후 — 접은 행의 사진들이 최상단에 오도록 부드럽게 복귀 (#1/#6)."""
         from .. import motion
         sb = self._scroll.verticalScrollBar()
-        QTimer.singleShot(0, lambda: motion.animate_scroll(sb, self._row_top(row)))
+        call_later(row, 0, lambda: motion.animate_scroll(sb, self._row_top(row)))
 
     # ── 현재 행 표시 (스왑 뒤 그 행을 보이게 스크롤하는 용도) ────────────────
     def _visible_rows(self) -> list["_MatchRow"]:

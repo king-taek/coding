@@ -137,6 +137,27 @@ def _qt_app():
     return app
 
 
+@pytest.fixture(autouse=True)
+def _flush_deferred_deletes():
+    """테스트가 부른 ``deleteLater()`` 를 **그 테스트가 끝나는 자리에서** 실제로 처리한다.
+
+    ★ 이벤트 루프 밖에서 부른 ``deleteLater()`` 는 ``processEvents()`` 로는 처리되지 않는다
+      (실측: Qt 6.11 — ``sendPostedEvents(None, DeferredDelete)`` 를 불러야 지워진다).
+      그래서 테스트 끝의 ``dlg.deleteLater()`` 는 그동안 **아무것도 지우지 않았고**, 창·
+      타이머·애니메이션이 워커 수명 내내 쌓여 있다가, 뒤의 어떤 테스트가 중첩 이벤트 루프
+      (``sheets.ask`` 등)를 여는 순간 **한꺼번에** 지워졌다.  그 시점이 xdist 분배에 따라
+      실행마다 달라 엉뚱한 테스트에서 세그폴트·멈춤·'남은 모달이 입력을 막음' 으로 터졌다.
+    ★ 여기서 지우면 호출 스택에 그 객체를 쓰는 코드가 없으므로 안전하다.  Qt 를 이미 쓰는
+      프로세스에서만 돈다(순수 로직 테스트에 Qt import 를 끌어들이지 않는다).
+    """
+    yield
+    if "PyQt6.QtCore" not in sys.modules:
+        return
+    from PyQt6.QtCore import QCoreApplication, QEvent
+    if QCoreApplication.instance() is not None:
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete.value)
+
+
 @pytest.fixture(scope="session")
 def qapp(_qt_app):
     """QApplication — 테마는 적용하지 않는다."""

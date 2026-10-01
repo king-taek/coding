@@ -13,7 +13,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Optional
 
-from PyQt6.QtCore import QByteArray, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QByteArray, Qt, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel,
                               QProgressBar, QScrollArea, QSizePolicy, QSlider,
@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel,
 
 from ... import config, i18n
 from .. import theme
+from ..deferred import call_later
 from ...models.result import MatchResult
 from ...models.slot import ImageItem
 from ...utils import prefs as _prefs
@@ -1126,8 +1127,7 @@ class MatchPage(ProgressRowMixin, QWidget):
                 self._update_auto_progress()
                 # ★ user=False — 페이지 전환 애니메이션 중에는 isVisible() 이
                 #   False 라, 사람이 부른 것처럼 다루면 사슬이 끊긴다.
-                QTimer.singleShot(
-                    0, lambda: self._confirm_no_match(user=False))
+                call_later(self, 0, lambda: self._confirm_no_match(user=False))
             else:
                 self._loading.hide_overlay()
                 sheets.info(self, i18n.KO.APP_TITLE,
@@ -1139,7 +1139,7 @@ class MatchPage(ProgressRowMixin, QWidget):
         if self._auto_mode:
             top = self._candidates[0]
             self._update_auto_progress()
-            QTimer.singleShot(0, lambda: self._on_pick(
+            call_later(self, 0, lambda: self._on_pick(
                 ThumbEntry(item=top.item, extra={"score": float(top.score)})
             ))
             return

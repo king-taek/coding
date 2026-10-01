@@ -359,6 +359,11 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   비싸져서, 21회 호출이 스위트 시간의 절반(82초)을 먹은 적이 있다(→ `docs/규칙_배경.md`).
   QSS **문자열만** 검사하는 테스트는 `theme.render_qss` 로 렌더해 문자열을 직접 본다
   (앱에 적용할 필요가 없다 — 참조: `test_sheet_size_and_edge`).
+- **정적 `QTimer.singleShot(ms, lambda: self...)` 금지** — 람다가 위젯보다 오래 살아 죽은
+  객체를 만지면 PyQt6 가 프로세스를 끝낸다(간헐 세그폴트·abort 의 실제 원인이었다).
+  바운드 메서드를 넘기거나 `ui/deferred.call_later(owner, ms, fn)` 을 쓴다.  가드:
+  `dev/tests/test_deferred_call.py`.  테스트의 `deleteLater()` 는 `processEvents()` 로
+  처리되지 않으므로 conftest 의 `_flush_deferred_deletes` 가 테스트마다 처리한다 — 빼지 마라.
 - 무거운 의존성(cv2/openvino/torch/PyQt6)은 환경에 없을 수 있어 `pytest.importorskip` 으로
   게이트한다(모듈 단위 import 도 포함). **순수 로직은 무거운 의존성 없이** 단위 테스트되게 설계
   (예: 좌표 후보 선택 `_select_coord_candidates`, 업데이트 브랜치 정규화/자기교정).

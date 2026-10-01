@@ -1199,7 +1199,9 @@ class UnmatchedReviewDialog(QDialog):
         if t is None:
             t = self._toast_timer = QTimer(self)
             t.setSingleShot(True)
-            t.timeout.connect(lambda: self._toast.setText(""))
+            # 람다로 `self` 를 붙잡지 않는다 — 라벨의 C++ 슬롯에 직접 묶으면 순환 참조가
+            # 없고 라벨이 먼저 지워져도 Qt 가 연결을 끊는다(→ `ui/deferred.py`).
+            t.timeout.connect(self._toast.clear)
         t.start(_TOAST_MS)
 
     def _on_confirm(self) -> None:

@@ -39,6 +39,7 @@ from ...config import CONFIG
 from ...coords import single_info
 from ...utils import image_io as _io
 from .. import theme
+from ..deferred import call_later
 from .neon_button import NeonButton
 
 # 미리보기 — 고정 정사각형이 아니라 폭 하한만 두고 세로는 표와 함께 늘어난다.
@@ -462,4 +463,4 @@ class ImageInfoDialog(QDialog):
             return
         QApplication.clipboard().setText(self.as_text())
         self._toast.setText(i18n.KO.IMAGE_INFO_COPIED)
-        QTimer.singleShot(_TOAST_MS, lambda: self._toast.setText(""))
+        call_later(self, _TOAST_MS, lambda: self._toast.setText(""))
