@@ -469,6 +469,62 @@ def test_dense_updates_track_the_real_progress(qapp, monkeypatch):
         host.deleteLater()
 
 
+def test_an_early_latch_waits_for_the_fill_to_land(qapp, monkeypatch):
+    """★ 래치 타이머가 채움 tween 의 마지막 tick 보다 **먼저** 와도 퇴장은 100% 뒤다.
+
+    둘은 서로 다른 시계라 부하가 걸리면 순서가 뒤집혔다 — 4/5 에서 퇴장이 시작되고
+    정착에서 끝 칸이 '툭' 찼다(실측: 부하 중 40회에 16회).  여기서는 그 순서를
+    **직접** 만든다(타이밍에 기대지 않는다)."""
+    from aoi_verification.app.ui import motion
+    monkeypatch.setattr(motion, "enabled", lambda: True)
+    host, ov = _overlay(qapp)
+    try:
+        ov.show_overlay("작업")
+        ov.set_progress(4, 5, "작업")
+        _spin(qapp, _settle_ms(ov))
+        ov.set_progress(5, 5, "작업")           # 마지막 칸이 차오르기 시작
+        at_fade = []
+        real_begin = ov._begin_fade_out
+        monkeypatch.setattr(ov, "_begin_fade_out",
+                            lambda tok: (at_fade.append(ov._wafer.value()),
+                                         real_begin(tok)))
+        ov.hide_overlay()
+        assert ov._val_anim.state() != ov._val_anim.State.Stopped
+        ov._hide_timer.stop()
+        ov._on_hide_latch()                     # 래치가 tween 보다 먼저 왔다
+        assert at_fade == [], "차오르는 중에 퇴장을 시작했다"
+        assert ov.is_retiring(), "기다리는 동안 '곧 사라진다' 표식이 빠졌다"
+        _spin(qapp, _settle_ms(ov))
+        assert at_fade == [5], f"페이드 시작 시점의 표시값 {at_fade} ≠ 5"
+    finally:
+        host.hide()
+        qapp.processEvents()
+        host.deleteLater()
+
+
+def test_an_early_latch_cannot_keep_the_overlay_forever(qapp, monkeypatch):
+    """안전망 — tween 이 `finished` 없이 멈춰도(`stop()`) 퇴장은 결국 온다."""
+    from aoi_verification.app.ui import motion
+    monkeypatch.setattr(motion, "enabled", lambda: True)
+    host, ov = _overlay(qapp)
+    try:
+        ov.show_overlay("작업")
+        ov.set_progress(1, 5, "작업")
+        ov.hide_overlay()
+        ov._hide_timer.stop()
+        ov._on_hide_latch()                     # 채움을 기다리기로 함
+        ov._val_anim.stop()                     # finished 가 나지 않는 정지
+        for _ in range(100):
+            _spin(qapp, 20)
+            if not ov.isVisible():
+                break
+        assert not ov.isVisible(), "채움을 기다리다 오버레이가 영영 남았다"
+    finally:
+        host.hide()
+        qapp.processEvents()
+        host.deleteLater()
+
+
 def test_completion_glides_in_and_exit_waits_for_it(qapp, monkeypatch):
     """★ 완료(done ≥ total)도 **점진적으로** 찬다(사용자 요청) — 대신 퇴장이 그 추격을
     기다린다.  예전 규칙('완료는 스냅')이 막던 잔여 버그 — 마지막 증가의 tween 이

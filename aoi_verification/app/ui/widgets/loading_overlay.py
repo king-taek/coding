@@ -514,6 +514,7 @@ class LoadingOverlay(QWidget):
         #   애니메이션 tick 이 **죽은 C++ 객체로** 들어간다 — 파이썬 예외가 아니라
         #   세그폴트다(전체 테스트에서 실측: 애니메이션이 도는 중 오버레이를 지우면 죽었다).
         self._val_anim.valueChanged.connect(self._on_val_tick)
+        self._val_anim.finished.connect(self._on_fill_finished)
 
         # 단계 서수 · 단계 이름 · 여정 스텝 ------------------------------
         self._stage_label = QLabel("", self._content)
@@ -980,12 +981,29 @@ class LoadingOverlay(QWidget):
             if not self._hide_pending:
                 self._hide_pending = True
                 self._hide_token = token
+                self._fill_waited = False
                 self._hide_timer.start(int(remaining))
             return
         self._begin_fade_out(token)
 
     def _on_hide_latch(self) -> None:
+        # ★ 래치 타이머와 채움 tween 은 **서로 다른 시계**다.  부하가 걸리면 래치가 tween 의
+        #   마지막 tick 보다 먼저 와서, 100% 에 닿기 전(4/5)에 퇴장이 시작되고 정착에서 끝
+        #   칸이 '툭' 찼다(실측: 부하 중 40회에 16회).  아직 차오르는 중이면 tween 의
+        #   `finished` 를 기다린다 — 다른 경로가 tween 을 `stop()` 하면 `finished` 가 안
+        #   나므로, 상한(VAL_TWEEN_MAX_MS) 뒤 한 번 더 오는 이 래치가 안전망이다.
+        if (self._val_anim.state() != self._val_anim.State.Stopped
+                and not getattr(self, "_fill_waited", False)):
+            self._fill_waited = True
+            self._hide_timer.start(self.VAL_TWEEN_MAX_MS + 100)
+            return
         self._begin_fade_out(getattr(self, "_hide_token", self._show_token))
+
+    def _on_fill_finished(self) -> None:
+        """채움이 끝에 닿았다 — 그걸 기다리던 퇴장이 있으면 지금 시작한다."""
+        if self._hide_pending and getattr(self, "_fill_waited", False):
+            self._hide_timer.stop()
+            self._begin_fade_out(getattr(self, "_hide_token", self._show_token))
 
     def _begin_fade_out(self, token: int) -> None:
         self._hide_pending = False
