@@ -23,6 +23,7 @@ from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
 from .. import i18n
 from ..models.result import EXTRACT_MODE, FinalResult, MatchResult, MissEntry
+from ..models.slot import lot_of, slot_label
 from ..utils import image_io
 
 # 저장 단계별 소요 시간(app.log) — 느린 단계를 실측으로 가리기 위해.  화면에는 안 나간다.
@@ -292,20 +293,10 @@ class ExcelExporter(QThread):
                     a.value = None
 
         # 시트 순서: 미매칭(첫 번째, 조건부) → 요약 → 전체 양식.
-        if self._recipe_layout != RECIPE_LAYOUT_SINGLE:
-            t0 = time.perf_counter()
-            groups = self._recipe_row_groups(rows_input)
-            _LOG.info("저장 소요 [Recipe 분류] %.2f초 %d장 → %d그룹",
-                      time.perf_counter() - t0, len(rows_input), len(groups))
-            if self._recipe_layout == RECIPE_LAYOUT_SHEETS:
-                taken = {SHEET_FULL_NAME, i18n.KO.WAFER_MAP_SHEET,
-                         i18n.KO.SLOT_MISMATCH_SHEET}
-                for i, (label, rows) in enumerate(groups):
-                    title = _safe_sheet_title(label, taken)
-                    taken.add(title)
-                    self._build_ad_sheet(wb, title, i, rows)
-            else:
-                self._write_recipe_columns_sheet(wb, groups)
+        lots = self._lot_units(rows_input) if self._extract else []
+        if self._extract and (self._recipe_layout != RECIPE_LAYOUT_SINGLE
+                              or len(lots) > 1):
+            self._write_extract_sheets(wb, lots)
         elif unmatched_rows:
             # 미매칭 시트를 index 0(첫 번째)에 만들고, 요약은 index 1.
             self._write_unmatched_sheet(wb, unmatched_rows)
@@ -507,14 +498,16 @@ class ExcelExporter(QThread):
         ws.row_dimensions[2].height = 19.5
 
     # ------------------------------------------------------------------
-    def _slot_with_number(self, slot: str) -> str:
+    def _slot_with_number(self, slot: str, shown: Optional[str] = None) -> str:
         """slot명 (+ 번호를 읽었으면 아래 줄에 ``(#6)``).
 
         요약·미매칭 시트의 B열과 Wafer Map 시트의 슬롯 칸이 **같은 표기**를 쓰도록
         여기 한 곳에서 만든다.  여러 줄이 되므로 호출부는 wrap_text 를 줘야 한다.
+        ``shown`` 은 화면에 쓸 이름(기본은 ``slot`` 그대로) — 번호는 ``slot`` 으로 찾는다.
         """
+        text = shown or slot
         num = (self._result.slot_numbers or {}).get(slot)
-        return f"{slot}\n{SLOT_NUMBER_FMT.format(num=num)}" if num else slot
+        return f"{text}\n{SLOT_NUMBER_FMT.format(num=num)}" if num else text
 
     # ------------------------------------------------------------------
     def _write_slot_cell(self, ws, row: int, slot: str, center) -> None:
@@ -534,13 +527,16 @@ class ExcelExporter(QThread):
         cell = ws[f"{COL_SLOT}{row}"]
         num = (self._result.slot_numbers or {}).get(slot)
         kf = (self._result.kla_folders or {}).get(slot)
+        # 여러 LOT 추출이면 slot 키가 'LOT/slot' 이다 — LOT 는 시트 이름이 말하므로
+        # B열에는 slot 만 쓴다(매칭·LOT 하나면 그대로).
+        shown = slot_label(slot)
         if not num and not kf:
-            cell.value = slot
+            cell.value = shown
             cell.alignment = center
             return
         # 여러 줄을 쓰면 wrap_text 가 있어야 엑셀이 줄바꿈을 보여준다.
         wrap = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        head = self._slot_with_number(slot)
+        head = self._slot_with_number(slot, shown=shown)
         if not kf:
             cell.value = head
             cell.alignment = wrap
@@ -775,7 +771,54 @@ class ExcelExporter(QThread):
         return [(label, [by_path[p] for p in paths])
                 for label, paths in recipe_groups(list(by_path))]
 
-    def _write_recipe_columns_sheet(self, wb, groups: list) -> None:
+    @staticmethod
+    def _lot_units(rows_input: list) -> list[tuple[str, list]]:
+        """행들을 LOT 별로 — ``[(LOT, 행들)]``, LOT 이름순.  LOT 가 하나면 ``[("", 전부)]``.
+
+        LOT 는 slot 키의 접두(``"LOT/slot"``)에서 읽는다(`models.slot.scan_lots`)."""
+        units: dict[str, list] = {}
+        for r in rows_input:
+            units.setdefault(lot_of(r[0]), []).append(r)
+        return sorted(units.items())
+
+    def _write_extract_sheets(self, wb, lots: list) -> None:
+        """Defect 추출의 시트들 — LOT 마다(여러 LOT) × 저장 방식(Recipe 나누기).
+
+        · 한 시트      : LOT 마다 시트 1개
+        · Recipe별 열  : LOT 마다 시트 1개(Recipe 나란히)
+        · Recipe별 시트: LOT × Recipe 마다 시트 1개(이름 'LOT Recipe')
+        LOT 가 하나면 시트 이름은 예전과 같다(파일명 / Recipe 이름)."""
+        taken = {SHEET_FULL_NAME, i18n.KO.WAFER_MAP_SHEET,
+                 i18n.KO.SLOT_MISMATCH_SHEET}
+        index = 0
+
+        def title_of(name: str) -> str:
+            t = _safe_sheet_title(name, taken)
+            taken.add(t)
+            return t
+
+        for lot, rows in lots:
+            base = lot or self._summary_sheet_name()
+            if self._recipe_layout == RECIPE_LAYOUT_SINGLE:
+                self._build_ad_sheet(wb, title_of(base), index, rows)
+                index += 1
+                continue
+            t0 = time.perf_counter()
+            groups = self._recipe_row_groups(rows)
+            _LOG.info("저장 소요 [Recipe 분류 %s] %.2f초 %d장 → %d그룹", lot or "-",
+                      time.perf_counter() - t0, len(rows), len(groups))
+            if self._recipe_layout == RECIPE_LAYOUT_SHEETS:
+                for label, grows in groups:
+                    name = f"{lot} {label}" if lot else label
+                    self._build_ad_sheet(wb, title_of(name), index, grows)
+                    index += 1
+            else:
+                self._write_recipe_columns_sheet(wb, groups, title=title_of(base),
+                                                 index=index)
+                index += 1
+
+    def _write_recipe_columns_sheet(self, wb, groups: list, *, title: str,
+                                    index: int = 0) -> None:
         """한 시트에 Recipe 마다 [사진 | 정보] 열을 옆으로 나란히 (사용자 결정).
 
         머리 1행 = Recipe 이름(두 칸 병합), 2행 = AOI-N · 정보.  슬롯 안에서
@@ -786,7 +829,7 @@ class ExcelExporter(QThread):
         from openpyxl.utils import get_column_letter
 
         full = wb[SHEET_FULL_NAME]
-        ws = wb.create_sheet(title=self._summary_sheet_name(), index=0)
+        ws = wb.create_sheet(title=title, index=index)
         center = Alignment(horizontal="center", vertical="center", wrap_text=True)
         head_font = Font(name=TEMPLATE_FONT, bold=True, color="FFFFFFFF")
         sub_font = Font(name=TEMPLATE_FONT, bold=True, color="FF1F2937")

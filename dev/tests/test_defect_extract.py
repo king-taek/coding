@@ -670,3 +670,162 @@ def test_choice_buttons_wrap_instead_of_clipping(styled_qapp):
         assert not any(isinstance(g, QGridLayout) for g in grids)   # 들어가면 예전 그대로
     finally:
         few.deleteLater()
+
+
+# ── 여러 LOT ─────────────────────────────────────────────────────────────────
+def test_scan_lots_prefixes_slots_with_lot(tmp_path):
+    from aoi_verification.app.models.slot import lot_of, scan_lots, slot_label
+    for lot in ("LOT_A", "LOT_B"):
+        _touch_jpeg(tmp_path / lot / "S1" / "a.jpg")          # 같은 slot 이름
+    _touch_jpeg(tmp_path / "x" / "LOT_A" / "S2" / "b.jpg")      # 같은 LOT 폴더명
+    roots = [tmp_path / "LOT_A", tmp_path / "LOT_B", tmp_path / "x" / "LOT_A"]
+    sr = scan_lots(roots)
+    assert sorted(sr.slots) == ["LOT_A (2)/S2", "LOT_A/S1", "LOT_B/S1"]
+    assert all(it.slot == "LOT_B/S1" for it in sr.slots["LOT_B/S1"].ref_images)
+    assert lot_of("LOT_B/S1") == "LOT_B" and slot_label("LOT_B/S1") == "S1"
+    assert lot_of("S1") == "" and slot_label("S1") == "S1"
+    # 하나면 예전과 같다 — 접두 없음, only 도 그대로
+    assert sorted(scan_lots([tmp_path / "LOT_A"], only={"S1"}).slots) == ["S1"]
+
+
+def test_kla_rename_keeps_lot_prefix(tmp_path):
+    from aoi_verification.app.models.slot import scan_lots
+    _touch_jpeg(tmp_path / "LOT_A" / "k1" / "x.jpg")
+    _touch_jpeg(tmp_path / "LOT_B" / "k1" / "x.jpg")
+    sr = scan_lots([tmp_path / "LOT_A", tmp_path / "LOT_B"])
+    kla = rename_slots_by_wafer_id(sr, {"LOT_A/k1": "w1", "LOT_B/k1": "w2"})
+    assert sorted(sr.slots) == ["LOT_A/W1", "LOT_B/W2"]
+    assert kla == {"LOT_A/W1": "k1", "LOT_B/W2": "k1"}
+
+
+def _two_lot_result(tmp_path):
+    ps = {}
+    for lot, slot, n in [("LOT_A", "S1", "a.jpg"), ("LOT_A", "S1", "b.jpg"),
+                         ("LOT_B", "S1", "c.jpg")]:
+        ps.setdefault(f"{lot}/{slot}", []).append(
+            _touch_jpeg(tmp_path / "src" / lot / slot / n))
+    return extract_result("3", ps, slot_numbers={"LOT_B/S1": "6"})
+
+
+def _sheet_rows(ws):
+    out, r = [], 3
+    while ws[f"A{r}"].value is not None:
+        out.append((str(ws[f"B{r}"].value), str(ws[f"D{r}"].value).split("\n")[0]))
+        r += 1
+    return out
+
+
+@pytest.mark.parametrize("layout", ["single", "sheets", "columns"])
+def test_multi_lot_one_sheet_per_lot(qapp, tmp_path, monkeypatch, layout):
+    pytest.importorskip("openpyxl")
+    pytest.importorskip("PIL.Image")
+    from openpyxl import load_workbook
+
+    from aoi_verification.app import i18n
+    from aoi_verification.app.workers import exporter as ex
+
+    _fake_recipes(monkeypatch, {"a.jpg": (1, "PI"), "b.jpg": (1, "PI"),
+                                "c.jpg": (1, "PI")})
+    dst = tmp_path / "out.xlsx"
+    ex.ExcelExporter(_two_lot_result(tmp_path), dst_path=dst,
+                     template_path=tmp_path / "none.xlsx", map_renderer=_png,
+                     recipe_layout=layout).run()
+    wb = load_workbook(str(dst), rich_text=True)
+    names = {"single": ["LOT_A", "LOT_B"], "sheets": ["LOT_A PI", "LOT_B PI"],
+             "columns": ["LOT_A", "LOT_B"]}[layout]
+    assert wb.sheetnames == names + [i18n.KO.WAFER_MAP_SHEET]
+    # B열에는 LOT 없이 slot 만(LOT 는 시트 이름이 말한다), 번호는 그대로 찾는다
+    assert _sheet_rows(wb[names[0]]) == [("S1", "a.jpg"), ("S1", "b.jpg")]
+    assert _sheet_rows(wb[names[1]]) == [("S1\n(#6)", "c.jpg")]
+
+
+def test_single_lot_sheet_names_unchanged(qapp, tmp_path):
+    pytest.importorskip("openpyxl")
+    from openpyxl import load_workbook
+
+    from aoi_verification.app.workers import exporter as ex
+    p = _touch_jpeg(tmp_path / "src" / "S1" / "a.jpg")
+    dst = tmp_path / "out.xlsx"
+    ex.ExcelExporter(extract_result("3", {"S1": [p]}), dst_path=dst,
+                     template_path=tmp_path / "none.xlsx").run()
+    assert load_workbook(str(dst)).sheetnames == ["out"]
+
+
+def test_wafer_map_switch_controls_the_sheet(qapp, tmp_path, monkeypatch):
+    """설정 화면의 스위치를 끄면 렌더러를 넘기지 않는다 → Wafer Map 시트가 없다."""
+    from aoi_verification.app.ui import main_window as mw
+    from aoi_verification.app.ui.pages.setup_page import SetupInput
+    from aoi_verification.app.workers import exporter as ex
+
+    got = []
+
+    class _Exp:
+        def __init__(self, *a, **k):
+            got.append(k.get("map_renderer"))
+            self.signals = type("S", (), {})()
+            for n in ("progress", "done", "failed"):
+                setattr(self.signals, n, type("Sig", (), {"connect": lambda *a: None})())
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(ex, "ExcelExporter", _Exp)
+    monkeypatch.setattr(mw.MainWindow, "_start_backend_import_async",
+                        lambda self: None)
+    win = mw.MainWindow()
+    try:
+        for on in (True, False):
+            win._input = SetupInput(mode="single", ref_root=tmp_path, val_root=tmp_path,
+                                    ref_machine="3", val_machine="", threshold=0.7,
+                                    extract=True, extract_wafer_map=on)
+            win._start_extract_export(extract_result("3", {}), tmp_path / "o.xlsx",
+                                      ex.RECIPE_LAYOUT_SINGLE)
+        assert got[0] is not None and got[1] is None
+    finally:
+        win._loading.hide_overlay()
+        win.close()
+
+
+def test_setup_takes_several_lots(qapp, tmp_path, monkeypatch):
+    from aoi_verification.app.ui.pages import setup_page as sp
+    a, b = tmp_path / "LOT_A", tmp_path / "LOT_B"
+    a.mkdir()
+    b.mkdir()
+    page = sp.SetupPage()
+    try:
+        assert page._map_switch.isHidden()                # 매칭 모드에는 없다
+        page.set_extract_mode(True)
+        assert not page._map_switch.isHidden()
+        # [폴더 선택…] 은 뒤에 덧붙인다(같은 폴더는 한 번만)
+        for pick in (a, b, a):
+            monkeypatch.setattr(sp.QFileDialog, "getExistingDirectory",
+                                lambda *x, p=pick: str(p))
+            page._browse(page.ref_path_edit)
+        assert page.ref_path_edit.text() == f"{a}; {b}"
+        assert page._validate() is True
+        page._map_switch.set_on(False)
+        inp = page._collect_input()
+        assert inp.extract_roots == [a, b] and inp.ref_root == a
+        assert inp.extract_wafer_map is False
+        page.ref_path_edit.setText(f"{a}; {tmp_path / '없음'}")
+        assert page._validate() is False                  # 하나라도 없으면 막는다
+        page.set_extract_mode(False)
+        assert page._map_switch.isHidden()
+    finally:
+        page.deleteLater()
+
+
+def test_subset_needs_a_single_lot(qapp, tmp_path, monkeypatch):
+    from aoi_verification.app.ui.pages import setup_page as sp
+    for n in ("A", "B"):
+        (tmp_path / n).mkdir()
+    page = sp.SetupPage()
+    told = []
+    monkeypatch.setattr(sp.sheets, "info", lambda *a, **k: told.append(a[2]))
+    try:
+        page.set_extract_mode(True)
+        page.ref_path_edit.setText(f"{tmp_path / 'A'}; {tmp_path / 'B'}")
+        page._open_slot_select()
+        assert told and page._selected_slots is None
+    finally:
+        page.deleteLater()

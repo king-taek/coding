@@ -31,7 +31,7 @@ from ..models.result import FinalResult, MatchResult, MissEntry, extract_result
 from ..models.slot import (ImageItem, ScanResult, drop_empty_unmatched,
                            merge_unmatched_by_wafer_id,
                            push_one_sided_to_unmatched,
-                           rename_slots_by_wafer_id, scan, scan_one_side)
+                           rename_slots_by_wafer_id, scan, scan_lots)
 from ..utils import paths, wafer_id, wakelock
 from ..utils import prefs as _prefs
 from ..utils.prefs import AutomationLevel, EngineMode
@@ -95,16 +95,18 @@ class _FolderScan(QThread):
         failed = pyqtSignal(int, str)            # token, message
 
     def __init__(self, token: int, ref_root, val_root, only=None,
-                 extract: bool = False) -> None:
+                 extract: bool = False, roots=None) -> None:
         """``only`` 는 '일부 슬롯만 진행' 의 슬롯명 집합 — 스캔이 **그 폴더들만** 연다.
         ``None`` 이면 전체.  (`models.slot.scan` 의 같은 인자로 그대로 넘어간다.)
-        ``extract`` 면 ``ref_root`` 한쪽만 훑는다(`models.slot.scan_one_side`)."""
+        ``extract`` 면 한쪽만 훑는다 — ``roots``(여러 LOT, 없으면 ``ref_root`` 하나)
+        를 `models.slot.scan_lots` 로."""
         super().__init__()                  # 부모 없음(위 주석)
         self._token = token
         self._ref_root = ref_root
         self._val_root = val_root
         self._only = set(only) if only is not None else None
         self._extract = bool(extract)
+        self._roots = list(roots) if roots else [ref_root]
         self._stop = False
         self.signals = self._Signals()
 
@@ -139,8 +141,7 @@ class _FolderScan(QThread):
 
         try:
             if self._extract:
-                sr = scan_one_side(self._ref_root, progress=_progress,
-                                   only=self._only)
+                sr = scan_lots(self._roots, progress=_progress, only=self._only)
             else:
                 sr = scan(self._ref_root, self._val_root, progress=_progress,
                           only=self._only)
@@ -1016,7 +1017,8 @@ class MainWindow(QMainWindow):
         self._scan_token += 1
         worker = _FolderScan(self._scan_token, inp.ref_root, inp.val_root,
                              only=getattr(inp, "selected_slots", None),
-                             extract=self._is_extract())
+                             extract=self._is_extract(),
+                             roots=getattr(inp, "extract_roots", None))
         worker.signals.progress.connect(self._on_scan_progress)
         worker.signals.done.connect(self._on_scan_done)
         worker.signals.failed.connect(self._on_scan_failed)
@@ -1759,8 +1761,12 @@ class MainWindow(QMainWindow):
         self._extract_result, self._extract_dst = result, dst
         self._extract_layout = layout
         self._loading.show_overlay(i18n.KO.LOAD_EXPORT)
+        # Wafer Map 시트는 설정 화면 스위치로 끌 수 있다(사용자 결정) — 렌더러가 없으면
+        # exporter 가 그 시트를 만들지 않는다.
+        with_map = bool(getattr(self._input, "extract_wafer_map", True))
         exporter = ExcelExporter(result, dst, template_path=self._template_used,
-                                 map_renderer=render_map_png, recipe_layout=layout)
+                                 map_renderer=render_map_png if with_map else None,
+                                 recipe_layout=layout)
         self._extract_exporter = exporter      # GC 방지 + closeEvent 에서 취소
         exporter.signals.progress.connect(
             lambda d, t, msg: self._loading.set_progress(

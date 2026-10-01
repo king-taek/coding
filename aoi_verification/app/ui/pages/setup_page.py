@@ -55,6 +55,10 @@ class SetupInput:
     # Defect 추출 — 매칭 없이 ``ref_root`` 한쪽에서 고른 사진을 엑셀로.  이때
     # ``val_root``·``val_machine`` 은 쓰지 않는다(``val_root`` 는 ``ref_root`` 와 같게 둔다).
     extract: bool = False
+    # Defect 추출 대상 폴더들(여러 LOT).  하나면 ``[ref_root]``.  ``ref_root`` 는 첫 폴더다.
+    extract_roots: Optional[list] = None
+    # Defect 추출 엑셀에 Wafer Map 시트를 넣을지(설정 화면 스위치, 사용자 결정).
+    extract_wafer_map: bool = True
 
 
 # '실행 옵션'·'매칭 설정' 두 카드를 가로로 나란히 세우려면 이만큼은 있어야 한다.
@@ -125,17 +129,20 @@ class _DirProbe(QThread):
     class _Signals(QObject):
         done = pyqtSignal(int, str, str, str, str)   # token, ref_text, ref_state, val_text, val_state
 
-    def __init__(self, token: int, ref_text: str, val_text: str) -> None:
+    def __init__(self, token: int, ref_text: str, val_text: str,
+                 multi: bool = False) -> None:
         super().__init__()                  # 부모 없음(`_DieGeometryScan` 과 같은 이유)
         self._token = token
         self._ref_text = ref_text
         self._val_text = val_text
+        # Defect 추출 — 입력란에 폴더 여러 개(`;` 구분).  매칭은 경로 하나다.
+        self._state = SetupPage._dirs_state if multi else SetupPage._dir_state
         self.signals = self._Signals()
 
     def run(self) -> None:      # type: ignore[override]
         try:
-            ref_state = SetupPage._dir_state(self._ref_text)
-            val_state = SetupPage._dir_state(self._val_text)
+            ref_state = self._state(self._ref_text)
+            val_state = self._state(self._val_text)
         except Exception:
             # 여기서 예외가 새면 안내가 영원히 '확인 중' 으로 남는다.
             ref_state = val_state = "missing"
@@ -607,6 +614,18 @@ class SetupPage(QWidget):
         col.addWidget(self._labeled_segment_row(card, i18n.KO.SCOPE_TITLE,
                                                 self.scope_group))
 
+        # Defect 추출 전용 — 엑셀에 Wafer Map 시트를 넣을지(사용자 결정: 끌 수 있게).
+        # 추출 모드에서만 보인다(`set_extract_mode`).  마지막 선택을 기억한다.
+        self._map_switch = SwitchRow(
+            i18n.KO.EXTRACT_WAFER_MAP_SWITCH,
+            description=i18n.KO.EXTRACT_WAFER_MAP_SWITCH_DESC,
+            checked=bool(getattr(_prefs_now, "extract_wafer_map", True)),
+            parent=card)
+        self._map_switch.toggled.connect(
+            lambda on: _prefs.patch(extract_wafer_map=bool(on)))
+        self._map_switch.setVisible(False)
+        col.addWidget(self._map_switch)
+
         # 도움말 본문 — 두 설정을 한 번에 설명한다(기본 접힘).
         self._auto_hint = QLabel(i18n.KO.RUN_OPTIONS_HINT, card)
         self._auto_hint.setProperty("role", "muted")
@@ -967,6 +986,19 @@ class SetupPage(QWidget):
         except OSError:
             return "missing"                 # 접근 불가한 경로도 '없음' 취급
 
+    @staticmethod
+    def split_roots(text: str) -> list[str]:
+        """Defect 추출 입력란 → 폴더 목록.  ``;`` 로 구분한다(여러 LOT)."""
+        return [t.strip() for t in (text or "").split(";") if t.strip()]
+
+    @staticmethod
+    def _dirs_state(text: str) -> str:
+        """여러 폴더 판정 — 하나라도 없으면 ``missing``, 하나도 없으면 ``empty``."""
+        roots = SetupPage.split_roots(text)
+        if not roots:
+            return "empty"
+        return "" if all(SetupPage._dir_state(r) == "" for r in roots) else "missing"
+
     def _set_field_state(self, edit: QLineEdit, state: str) -> None:
         """동적 프로퍼티 + repolish(안 하면 QSS 가 다시 그려지지 않는다)."""
         edit.setProperty("state", "invalid" if state else "")
@@ -1022,6 +1054,11 @@ class SetupPage(QWidget):
         self._reflow_device_row()
         self._setting_cards[1].setVisible(not on)          # 매칭 설정 카드
         self._mode_badge_card.setVisible(not on)
+        self._map_switch.setVisible(on)                    # 추출 전용 옵션
+        self.ref_path_edit.setPlaceholderText(
+            i18n.KO.EXTRACT_FOLDER_PLACEHOLDER if on
+            else i18n.KO.SETUP_FOLDER_PLACEHOLDER)
+        self.ref_path_edit.setToolTip(i18n.KO.EXTRACT_FOLDER_TOOLTIP if on else "")
         self.extract_btn.setText(i18n.KO.EXTRACT_BACK_BUTTON if on
                                  else i18n.KO.EXTRACT_BUTTON)
         self._refresh_start_text()
@@ -1052,7 +1089,8 @@ class SetupPage(QWidget):
             return
         self._probing_for = (ref_text, val_text)
         self._probe_token += 1
-        probe = _DirProbe(self._probe_token, ref_text, val_text)
+        probe = _DirProbe(self._probe_token, ref_text, val_text,
+                          multi=self._extract_mode)
         probe.signals.done.connect(self._on_dir_probe_done)
         _LIVE_DIR_PROBES.add(probe)
         probe.finished.connect(lambda p=probe: _LIVE_DIR_PROBES.discard(p))
@@ -1081,8 +1119,9 @@ class SetupPage(QWidget):
         # 추출 모드는 검증 폴더를 받지 않는다 — 기준 폴더를 한 번 더 보면 판정이 같다.
         val_text = ref_text if self._extract_mode else self.val_path_edit.text()
         if self._sync_probe:
-            ref_state: Optional[str] = self._dir_state(ref_text)
-            val_state: Optional[str] = self._dir_state(val_text)
+            judge = self._dirs_state if self._extract_mode else self._dir_state
+            ref_state: Optional[str] = judge(ref_text)
+            val_state: Optional[str] = judge(val_text)
         else:
             self._start_dir_probe(ref_text, val_text)
             ref_state = self._probe_state(ref_text)
@@ -1110,7 +1149,10 @@ class SetupPage(QWidget):
                 self._start_hint.setText("")
         # die 안내는 **폴더가 확실히 있을 때만** 시작한다 — 확인 중(None)에 넘기면
         # 있는지도 모르는 경로를 훑는다.
-        self._refresh_die_hint(ref_text if ref_state == "" else None)
+        die_text = ref_text
+        if self._extract_mode:                 # 여러 LOT 면 첫 폴더로 안내한다
+            die_text = (self.split_roots(ref_text) or [""])[0]
+        self._refresh_die_hint(die_text if ref_state == "" else None)
         return ok
 
     def _refresh_die_hint(self, ref_text: Optional[str]) -> None:
@@ -1266,6 +1308,14 @@ class SetupPage(QWidget):
         # 아니다.  아래 감시자가 재는 '닫힌 뒤의 정지' 와 짝지어 봐야 의미가 있다.
         _LOG.info("폴더 선택: 파일 브라우저가 %.2f초 열려 있었다", dialog_s)
         stall_watch.watch(self, self._log_stall)
+        if self._extract_mode and target is self.ref_path_edit:
+            # Defect 추출은 LOT 를 여러 개 받는다 — 고를 때마다 **뒤에 덧붙인다**.
+            roots = self.split_roots(target.text())
+            if path not in roots:
+                roots.append(path)
+            target.setText("; ".join(roots))
+            self._reset_slot_selection()
+            return
         target.setText(path)
         # 기준 폴더가 바뀌면 이전 슬롯 선택은 더 이상 유효하지 않다.
         if target is self.ref_path_edit:
@@ -1300,6 +1350,14 @@ class SetupPage(QWidget):
         from ..widgets.slot_select_dialog import SlotSelectDialog
 
         ref_text = self.ref_path_edit.text().strip()
+        if self._extract_mode:
+            roots = self.split_roots(ref_text)
+            if len(roots) > 1:
+                # 슬롯 이름이 LOT 마다 겹치므로 일부 슬롯 고르기는 LOT 하나일 때만.
+                sheets.info(self, i18n.KO.APP_TITLE, i18n.KO.EXTRACT_SUBSET_ONE_LOT)
+                self._reset_slot_selection()
+                return
+            ref_text = roots[0] if roots else ""
         ref_root = Path(ref_text) if ref_text else None
         if ref_root is None or not ref_root.is_dir():
             sheets.warn(
@@ -1510,24 +1568,30 @@ class SetupPage(QWidget):
         매칭 전용 값(임계치·엔진·허용 오차)은 넘기지 않는다(기본값).  prefs 에는
         폴더·호기만 남긴다 — 매칭의 '마지막 입력' 을 추출이 덮어쓰지 않게 따로 두지는
         않는다: 같은 입력란이라 다음에 열 때 그대로 보이는 것이 맞다."""
-        root = Path(self.ref_path_edit.text().strip())
-        if not root.exists() or not root.is_dir():
-            sheets.warn(self, i18n.KO.APP_TITLE,
-                        i18n.KO.WARN_PATH_NOT_EXIST.format(path=root))
+        roots = [Path(t) for t in self.split_roots(self.ref_path_edit.text())]
+        for r in roots:
+            if not r.is_dir():
+                sheets.warn(self, i18n.KO.APP_TITLE,
+                            i18n.KO.WARN_PATH_NOT_EXIST.format(path=r))
+                return None
+        if not roots:
             return None
+        root = roots[0]
+        wafer_map = self._map_switch.is_on()
         machine = (self.ref_machine_edit.text().strip()
                    or i18n.KO.DEFAULT_REF_MACHINE)
         automation = self.auto_group.current_key() or AutomationLevel.USER_SELECT
         _prefs.patch(last_ref_root=str(root), last_ref_machine=machine,
-                     automation_level=automation)
+                     automation_level=automation, extract_wafer_map=wafer_map)
         return SetupInput(
             mode="single", ref_root=root, val_root=root,
             ref_machine=machine, val_machine="",
             threshold=self.slider.value() / 100.0,
             automation_level=automation,
             selected_slots=(set(self._selected_slots)
-                            if self._selected_slots is not None else None),
-            extract=True,
+                            if self._selected_slots is not None and len(roots) == 1
+                            else None),
+            extract=True, extract_roots=roots, extract_wafer_map=wafer_map,
         )
 
     # ── 작성 중 입력 이관 (색 모드/배치 전환 시) ─────────────────────────────

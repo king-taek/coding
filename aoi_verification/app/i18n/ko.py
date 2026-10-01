@@ -1122,6 +1122,17 @@ EXTRACT_BUTTON_TOOLTIP = (
 EXTRACT_BACK_BUTTON = "← 매칭 검증으로"
 EXTRACT_TITLE = "Defect 추출"
 EXTRACT_GROUP = "대상 장비"
+# 여러 LOT — 입력란에 `;` 로 이어 적는다.  [폴더 선택…] 은 뒤에 덧붙인다.
+EXTRACT_FOLDER_PLACEHOLDER = "LOT 또는 wafer 폴더 — 여러 개면 [폴더 선택…] 을 반복"
+EXTRACT_FOLDER_TOOLTIP = (
+    "[폴더 선택…] 을 누를 때마다 폴더가 뒤에 추가됩니다(; 로 구분).\n"
+    "LOT 가 여러 개면 엑셀에서 LOT 마다 시트가 나뉩니다.\n"
+    "빼려면 입력란에서 그 경로를 지우세요.")
+EXTRACT_SUBSET_ONE_LOT = (
+    "일부 슬롯 고르기는 폴더가 하나일 때만 쓸 수 있습니다.\n"
+    "여러 LOT 는 모든 슬롯으로 진행합니다.")
+EXTRACT_WAFER_MAP_SWITCH = "Wafer Map 시트 넣기"
+EXTRACT_WAFER_MAP_SWITCH_DESC = "끄면 엑셀에 Wafer Map 시트를 만들지 않습니다(저장이 빨라집니다)."
 BTN_EXTRACT_START = "추출 시작"
 # KLA 여부 — 매칭은 짝이 안 맞는 폴더가 있을 때 '어느 쪽이 KLA 인가' 를 묻지만, 추출은
 # 장비가 하나라 '이 장비가 KLA 인가' 만 묻는다.  호기가 K-n 이면 묻지 않는다(매칭과 같음).

@@ -227,14 +227,21 @@ def scan_one_side(root: Path, progress=None, only=None) -> ScanResult:
     ⚠ 판정 기준을 '하위 폴더가 있는가' 로 바꾸지 마라.  Camtek wafer 폴더에는
     `_recipe_files_…`·`_wafer2table_…` 같은 하위 폴더가 함께 있다(docs 좌표 예시).
     ``ref_only``/``val_only`` 는 비워 둔다 — 짝지을 상대가 없다."""
-    root = Path(root)
+    return _scan_dirs(_one_side_dirs(Path(root), only), progress)
+
+
+def _one_side_dirs(root: Path, only=None) -> dict[str, Path]:
+    """{슬롯명 → 폴더} — wafer 폴더면 자기 자신 하나, LOT 폴더면 하위 폴더들."""
     if _list_images(root):
-        dirs = {root.name: root}
-    else:
-        dirs = _enum_slot_dirs(root)
-        if only is not None:
-            wanted = set(only)
-            dirs = {n: d for n, d in dirs.items() if n in wanted}
+        return {root.name: root}
+    dirs = _enum_slot_dirs(root)
+    if only is not None:
+        wanted = set(only)
+        dirs = {n: d for n, d in dirs.items() if n in wanted}
+    return dirs
+
+
+def _scan_dirs(dirs: dict[str, Path], progress=None) -> ScanResult:
     names = sorted(dirs)
     slots: dict[str, Slot] = {}
     for idx, name in enumerate(names, start=1):
@@ -251,6 +258,44 @@ def scan_one_side(root: Path, progress=None, only=None) -> ScanResult:
     return ScanResult(slots=slots, ref_only=[], val_only=[])
 
 
+# 여러 LOT 를 한 번에 추출할 때 slot명 앞에 붙는 LOT 이름의 구분자.
+# ★ '/' 는 폴더명·WaferID 에 올 수 없는 글자라 구분이 모호해지지 않는다.
+LOT_SEP = "/"
+
+
+def lot_of(slot_name: str) -> str:
+    """``"LOT/slot"`` → ``"LOT"``.  LOT 가 하나뿐이라 접두가 없으면 ``""``."""
+    return slot_name.split(LOT_SEP, 1)[0] if LOT_SEP in slot_name else ""
+
+
+def slot_label(slot_name: str) -> str:
+    """``"LOT/slot"`` → ``"slot"`` (엑셀 B열 표기 — LOT 는 시트 이름이 말한다)."""
+    return slot_name.split(LOT_SEP, 1)[1] if LOT_SEP in slot_name else slot_name
+
+
+def scan_lots(roots, progress=None, only=None) -> ScanResult:
+    """Defect 추출 — 폴더 **여러 개**(LOT·wafer 섞여도 된다)를 한 번에 훑는다.
+
+    하나면 :func:`scan_one_side` 그대로(slot명 접두 없음 — 예전과 같다).  둘 이상이면
+    slot명을 ``"LOT/slot"`` 으로 만든다 — 서로 다른 LOT 에 같은 이름의 슬롯이 흔해서
+    접두 없이는 사진이 섞인다.  LOT 이름은 폴더명이고, 같은 이름의 폴더가 둘이면
+    ``이름 (2)`` 로 가른다.  ``only``(일부 슬롯)는 LOT 가 하나일 때만 쓴다."""
+    roots = [Path(r) for r in roots]
+    if len(roots) == 1:
+        return scan_one_side(roots[0], progress=progress, only=only)
+    dirs: dict[str, Path] = {}
+    used: set = set()
+    for root in roots:
+        lot, n = root.name or str(root), 2
+        while lot in used:
+            lot = f"{root.name} ({n})"
+            n += 1
+        used.add(lot)
+        for name, d in _one_side_dirs(root).items():
+            dirs[f"{lot}{LOT_SEP}{name}"] = d
+    return _scan_dirs(dirs, progress)
+
+
 def rename_slots_by_wafer_id(sr: ScanResult, wid_by_folder: dict) -> dict[str, str]:
     """KLA 폴더(슬롯)를 WaferID 이름으로 바꾼다 — Defect 추출용(짝이 없는 한쪽 스캔).
 
@@ -265,7 +310,9 @@ def rename_slots_by_wafer_id(sr: ScanResult, wid_by_folder: dict) -> dict[str, s
     for folder, wid in sorted((wid_by_folder or {}).items()):
         if not wid or folder not in sr.slots:
             continue
-        new = _norm_key(wid)
+        # 여러 LOT 면 LOT 접두는 그대로 두고 slot 부분만 WaferID 로 바꾼다.
+        lot = lot_of(folder)
+        new = f"{lot}{LOT_SEP}{_norm_key(wid)}" if lot else _norm_key(wid)
         if new != folder and new in sr.slots:
             continue
         slot = sr.slots.pop(folder)
@@ -273,7 +320,7 @@ def rename_slots_by_wafer_id(sr: ScanResult, wid_by_folder: dict) -> dict[str, s
         slot.ref_images = [ImageItem(slot=new, path=it.path, side="ref")
                            for it in slot.ref_images]
         sr.slots[new] = slot
-        kla[new] = folder
+        kla[new] = slot_label(folder)
     return kla
 
 
