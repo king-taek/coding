@@ -152,6 +152,31 @@ class _DirProbe(QThread):
                                self._val_text, val_state)
 
 
+def extract_drop_folders(local_paths, *, is_dir, is_image) -> list[str]:
+    """끌어다 놓은 경로들 → Defect 추출 입력란에 넣을 폴더(순서 유지, 중복 없음).
+
+    폴더는 그 폴더 그대로(LOT 든 wafer 든 — 입력란이 둘 다 받는다), 사진은 **그 사진이
+    든 폴더**(wafer 폴더).  그 밖의 파일은 버린다.  순수 — 헤드리스 테스트한다."""
+    import os
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in local_paths:
+        if not raw:
+            continue
+        p = Path(raw)
+        if is_dir(p):
+            d = p
+        elif is_image(str(p)):
+            d = p.parent
+        else:
+            continue
+        key = os.path.normcase(os.path.normpath(str(d)))
+        if key not in seen:
+            seen.add(key)
+            out.append(str(d))
+    return out
+
+
 class SetupPage(QWidget):
     """검증 시작 화면."""
 
@@ -568,6 +593,7 @@ class SetupPage(QWidget):
         edit = QLineEdit(host)
         edit.setMinimumWidth(self._PATH_MIN_W)
         edit.setPlaceholderText(i18n.KO.EXTRACT_FOLDER_PLACEHOLDER)
+        edit.setAcceptDrops(False)          # 놓기는 페이지가 받는다(`dropEvent`)
         browse = NeonButton(i18n.KO.BTN_BROWSE, role="ghost")
         slot_btn = NeonButton(i18n.KO.EXTRACT_SLOT_BTN_ALL, role="ghost")
         remove = NeonButton("✕", role="ghost")
@@ -607,6 +633,67 @@ class SetupPage(QWidget):
         """비어 있지 않은 LOT 줄의 경로들(위에서부터)."""
         return [r["edit"].text().strip() for r in self._lot_rows
                 if r["edit"].text().strip()]
+
+    # -- 끌어다 놓기(Defect 추출) -------------------------------------
+    @staticmethod
+    def _drop_locals(event) -> list[str]:
+        data = event.mimeData()
+        if not data.hasUrls():
+            return []
+        return [u.toLocalFile() for u in data.urls() if u.toLocalFile()]
+
+    def dragEnterEvent(self, event):        # noqa: N802
+        # 여기서는 디스크를 보지 않는다(NAS 에서 멈추지 않게) — 로컬 경로가 있으면 받는다.
+        if self._extract_mode and self._drop_locals(event):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):         # noqa: N802
+        self.dragEnterEvent(event)
+
+    def dropEvent(self, event):             # noqa: N802
+        if not self._extract_mode:
+            event.ignore()
+            return
+        folders = extract_drop_folders(
+            self._drop_locals(event), is_dir=lambda p: p.is_dir(),
+            is_image=config.CONFIG.is_image)
+        if not folders:
+            event.ignore()
+            return
+        event.acceptProposedAction()
+        self.add_extract_folders(folders)
+
+    def add_extract_folders(self, folders: list[str]) -> int:
+        """폴더들을 LOT 입력란에 넣는다 — 빈 줄부터 채우고, 모자라면 줄을 늘린다.
+
+        이미 들어 있는 폴더는 건너뛴다.  최대 줄 수를 넘는 것은 넣지 않고 알린다.
+        넣은 개수를 돌려준다."""
+        import os
+
+        def key(t: str) -> str:
+            return os.path.normcase(os.path.normpath(t))
+
+        have = {key(t) for t in self._lot_paths()}
+        todo = [f for f in folders if key(f) not in have]
+        added = 0
+        for f in list(todo):
+            row = next((r for r in self._lot_rows if not r["edit"].text().strip()),
+                       None)
+            if row is None:
+                if len(self._lot_rows) >= self.MAX_LOTS:
+                    break
+                self._add_lot_row()
+                row = self._lot_rows[-1]
+            row["edit"].setText(f)
+            todo.remove(f)
+            added += 1
+        if todo:
+            sheets.info(self, i18n.KO.APP_TITLE,
+                        i18n.KO.EXTRACT_DROP_TOO_MANY_FMT.format(
+                            max=self.MAX_LOTS, n=len(todo)))
+        return added
 
     def _reset_lot_slots(self, idx: int) -> None:
         """폴더가 바뀌면 그 줄의 슬롯 선택은 무효다 — 전체로 되돌린다."""
@@ -1196,6 +1283,10 @@ class SetupPage(QWidget):
             else i18n.KO.SETUP_FOLDER_PLACEHOLDER)
         self.extract_btn.setText(i18n.KO.EXTRACT_BACK_BUTTON if on
                                  else i18n.KO.EXTRACT_BUTTON)
+        # 추출 모드에서는 사진·폴더를 화면 어디에 놓아도 입력란에 들어간다(사용자 요청).
+        # 첫 입력란이 놓기를 가로채 'file:///…' 글자를 끼워 넣지 않게, 그때만 페이지가 받는다.
+        self.setAcceptDrops(on)
+        self.ref_path_edit.setAcceptDrops(not on)
         self._refresh_start_text()
         self._validate()
 

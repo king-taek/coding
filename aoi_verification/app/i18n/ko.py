@@ -1151,7 +1151,9 @@ EXTRACT_BACK_BUTTON = "← 매칭으로"
 EXTRACT_TITLE = "Defect 추출"
 EXTRACT_GROUP = "대상 장비"
 # 여러 LOT — 대상 장비 카드에 줄을 늘린다(최대 10개).  줄마다 슬롯을 따로 고른다.
-EXTRACT_FOLDER_PLACEHOLDER = "LOT 또는 wafer 폴더"
+EXTRACT_FOLDER_PLACEHOLDER = "LOT 또는 wafer 폴더 (끌어다 놓기 가능)"
+# 끌어다 놓은 폴더가 LOT 줄 최대 개수를 넘을 때.
+EXTRACT_DROP_TOO_MANY_FMT = "LOT 은 최대 {max}개까지 넣을 수 있어 {n}개는 넣지 않았습니다."
 EXTRACT_LOT_ADD_FMT = "+ LOT 추가 ({n}/{max})"
 EXTRACT_LOT_REMOVE = "이 LOT 빼기"
 EXTRACT_SLOT_BTN_ALL = "슬롯: 전체"
