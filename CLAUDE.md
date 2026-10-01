@@ -288,6 +288,12 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   - score 인코딩은 검토 타일 역산과 round-trip 되게 유지한다: `dist≤tol → 1-dist/tol`(양수),
     `tol<dist≤3tol → -(dist/tol)`(음수='허용범위 초과'). 후보 선택 로직은 순수 헬퍼
     `_select_coord_candidates` 로 분리해 헤드리스 테스트한다.
+- **Scan image(Color 결함 → 같은 폴더 `.t.` Scan 사진의 300㎛ Crop)는 `coords/scan_image.py`
+  하나가 계산한다** — 단일 사진 정보 화면과 결과 엑셀이 같은 함수를 쓴다(두 벌 금지).
+  불변식: 좌표는 `u = W/2 + (결함X − 중심X)/px_x`(Y 동일, 실제 JPEG W/H, 반전·2배 보정 없음,
+  EXIF 회전 미적용 raw), 픽셀 크기를 못 읽으면 **실패**(0.77 폴백 금지), 후보는 coverage →
+  정규화 중심거리 → 이름순.  Scan 이 없으면 화면 칸·엑셀 열을 만들지 않는다(엑셀은 한 장이라도
+  있으면 열을 넣는다 — 사용자 결정 '묶어서').  골든: `test_scan_image.py`(실측 11쌍).
 - KLA(WaferID) 장비 쪽 판정은 **기준/검증/둘다/KLA 아님**(`ref`/`val`/`both`/`None`) 네 경우를
   모두 지원한다(`main_window._ask_kla_side`·`_kla_resolve_impl`). 한쪽만 추가하지 말 것.
 - KLA 폴더의 slot명(WaferID)은 **정보파일이 1순위, OCR 이 폴백**이다. 정보파일은 폴더 안의

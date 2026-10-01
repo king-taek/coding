@@ -19,10 +19,16 @@ from typing import Optional
 
 from . import camtek_ini
 
-__all__ = ["absolute_xy"]
+__all__ = ["absolute_xy", "dotted_xy"]
 
 # "147206.243725.c.2104939970.2.jpeg" → 앞 두 토큰이 절대 X.Y.
 _DOTTED_PAT = re.compile(r'^(\d+(?:\.\d+)?)\.(\d+(?:\.\d+)?)\.')
+
+
+def dotted_xy(name: str) -> Optional[tuple[float, float]]:
+    """점표기 파일명의 앞 두 토큰 → 절대 (X, Y).  형식이 아니면 None."""
+    m = _DOTTED_PAT.match(name)
+    return (float(m.group(1)), float(m.group(2))) if m else None
 
 
 def absolute_xy(image_path: Path) -> Optional[tuple[float, float]]:
@@ -34,9 +40,7 @@ def absolute_xy(image_path: Path) -> Optional[tuple[float, float]]:
         if xy is not None:
             return xy
         # 2) 점표기 파일명에서 절대 X.Y.
-        m = _DOTTED_PAT.match(image_path.name)
-        if m:
-            return (float(m.group(1)), float(m.group(2)))
+        return dotted_xy(image_path.name)
     except Exception:
         return None
     return None

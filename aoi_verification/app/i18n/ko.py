@@ -957,6 +957,19 @@ IMAGE_INFO_EMPTY = (
 IMAGE_INFO_COPY = "전체 복사"
 IMAGE_INFO_COPIED = "복사했습니다"
 
+# ── Scan 이미지 (Color 결함 위치를 같은 폴더 Scan 사진에서 300㎛ 로 잘라 보임) ──
+# Scan 이 없는 사진에서는 칸 자체를 만들지 않는다(사용자 결정) — '없음' 문구는 화면에 없다.
+SCAN_IMAGE_TITLE = "Scan image"
+SCAN_IMAGE_LOADING = "Scan 이미지 불러오는 중"
+SCAN_IMAGE_UNREADABLE = "Scan 이미지를 읽을 수 없음"
+SCAN_IMAGE_OPEN_TIP = "누르면 전체 Scan 이미지에서 이 범위를 보여줍니다"
+# 엑셀 — Scan 열 머리(2행)와, Scan 열이 생긴 시트에서 그 행만 Scan 이 없을 때의 칸 문구.
+SCAN_EXCEL_HEADER_FMT = "{machine} Scan"
+SCAN_EXCEL_HEADER = "Scan"
+SCAN_EXCEL_NONE = "Scan 없음"
+SCAN_EXCEL_UNREADABLE = "Scan 이미지를 읽을 수 없음"
+SCAN_EXPORT_PHASE = "엑셀로 저장 중 — Scan 이미지 확인"
+
 # ── 일반 상태 표시 ─────────────────────────────────────────────────────────
 COUNT_PLUS_N_FMT = "+{n}"
 # 진행 표시는 **두 등급**으로 나뉜다 — 슬롯명은 보조(mute), 수치는 모노 본문 잉크.

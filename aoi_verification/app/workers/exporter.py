@@ -46,6 +46,13 @@ SHEET_FULL_NAME = "전체 양식"
 # 슬롯 구분선이 그려지는 컬럼 — 사용자 요청 (#6): A~D 만, 두껍게.
 BORDER_COLS = ["A", "B", "C", "D"]
 
+# Scan image 열 — 이번 저장의 사진 중 하나라도 Scan 이 확인될 때만 생긴다(사용자 결정:
+# '묶어서 판단').  기존 열 뒤에 붙인다: 매칭은 E=기준 Scan·F=검증 Scan, 추출은 E=Scan.
+# 전체 양식의 수기 칸(E~H)은 그만큼 오른쪽으로 밀린다.  Scan 이 없는 저장은 지금과
+# 똑같은 열 구성이다(양식.xlsx 도 그대로 — 열은 저장할 때 끼운다).
+SCAN_COL_START = 5                       # E
+SCAN_JPEG_QUALITY = 92
+
 # 카세트 슬롯 번호(`WaferInfo.ini` 의 `ActiveSlot`) 표기 — slot명 **아래 줄**에 붙는다.
 # 요약/미매칭 시트의 B열과 Wafer Map 시트의 슬롯 칸이 같은 표기를 쓴다(두 벌로 갈라지면
 # 같은 슬롯이 시트마다 다르게 적힌다).
@@ -180,6 +187,9 @@ class ExcelExporter(QThread):
         # ★ 앱을 닫는데 저장이 돌고 있으면, 기다리기만 해서는 반쯤 쓰인 xlsx 가 남는다
         #   (openpyxl 의 save 는 원자적이지 않다).  중간에 빠져나올 수 있게 한다.
         self._stop = threading.Event()
+        # Scan image — `_scan_prepass` 가 채운다.  비어 있으면 Scan 열이 없는 예전 배치.
+        self._scan_cols: list[str] = []
+        self._scan_cache: dict[str, tuple[str, Optional[bytes]]] = {}
 
     def stop(self) -> None:
         """진행 중인 저장을 취소한다 — 파일을 쓰기 **전에** 멈춘다."""
@@ -269,13 +279,18 @@ class ExcelExporter(QThread):
         map_rows = self._wafer_map_rows()
         prewarm = ([u.path for u in self._result.unmatched_refs]
                    if self._extract else [])
+        scan_paths = self._scan_paths()
         self._prog_total = (
-            len(prewarm)                                             # 사진 준비(추출)
+            len(scan_paths)                                          # Scan 확인
+            + len(prewarm)                                           # 사진 준비(추출)
             + (len(rows_input) if self._include_full_template else 0)   # 전체 양식
             + len(unmatched_rows)                                    # 미매칭 시트
             + len(rows_input)                                        # 요약 시트
             + len(map_rows)                                          # Wafer map 시트
         )
+        self._scan_prepass(scan_paths)
+        if self._scan_cols:
+            self._insert_scan_columns(ws)
         if prewarm:
             self._prewarm_images(prewarm)
 
@@ -283,7 +298,7 @@ class ExcelExporter(QThread):
         # 요약 시트만 채운다(더 빠르고 가벼운 파일).  켜면 전체 양식도 채운다.
         if self._include_full_template:
             # 전체 양식만 E~H(수기 영역)가 있으므로 그 열까지 칠한다.
-            self._fill_rows(ws, rows_input, style_cols="ABCDEFGH",
+            self._fill_rows(ws, rows_input, style_cols=self._full_cols(),
                             sheet_label=SHEET_FULL_NAME)
             # 양식.xlsx 의 A3..A22 미리 박힌 1..20 행번호 중 안 채운 행은 비운다.
             data_end_row = DATA_START_ROW + len(rows_input) - 1
@@ -370,10 +385,11 @@ class ExcelExporter(QThread):
         full = wb[SHEET_FULL_NAME]
         ws = wb.create_sheet(title=title, index=index)
 
-        # A~D 헤더(row 1~2) 값/서식 복사.  E~H 는 만들지 않는다(요약 시트엔 없음).
+        # A~D(+Scan 열) 헤더(row 1~2) 값/서식 복사.  수기 칸은 만들지 않는다(요약 시트엔 없음).
         from copy import copy as _copy
+        cols = self._ad_cols()
         for r in (1, 2):
-            for col in ("A", "B", "C", "D"):
+            for col in cols:
                 src = full[f"{col}{r}"]
                 dst = ws[f"{col}{r}"]
                 dst.value = src.value
@@ -383,14 +399,14 @@ class ExcelExporter(QThread):
                     dst.border = _copy(src.border)
                     dst.alignment = _copy(src.alignment)
                     dst.number_format = src.number_format
-        # 병합 헤더(A1:A2, B1:B2, C1:D1) 재현 — A~D 범위만.
-        for rng in ("A1:A2", "B1:B2", "C1:D1"):
+        # 병합 헤더(A1:A2, B1:B2, C1:D1 — Scan 열이 있으면 C1 부터 그 끝까지) 재현.
+        for rng in ("A1:A2", "B1:B2", f"C1:{cols[-1]}1"):
             try:
                 ws.merge_cells(rng)
             except Exception:
                 pass
-        # 열 폭 — A~D 만 전체 시트와 동일하게.
-        for col in ("A", "B", "C", "D"):
+        # 열 폭 — 이 시트의 열만 전체 시트와 동일하게.
+        for col in cols:
             w = full.column_dimensions[col].width
             if w:
                 ws.column_dimensions[col].width = w
@@ -400,7 +416,7 @@ class ExcelExporter(QThread):
         # 새로 만든 시트는 양식의 화면/인쇄 설정을 물려받지 않는다 — 여기서 준다.
         self._apply_sheet_view(ws)
         # A~D 데이터 채우기(이미지는 mid 캐시에서 다시 임베드 — 시트 간 공유 불가).
-        self._fill_rows(ws, rows_input, sheet_label=title)
+        self._fill_rows(ws, rows_input, style_cols=cols, sheet_label=title)
         data_end = DATA_START_ROW + len(rows_input) - 1
         for rr in range(max(data_end + 1, DATA_START_ROW), ws.max_row + 1):
             a = ws.cell(row=rr, column=1)
@@ -567,6 +583,174 @@ class ExcelExporter(QThread):
         return image_io.get_mid_path(Path(src))
 
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Scan image
+    # ------------------------------------------------------------------
+    def _ad_cols(self) -> list[str]:
+        """요약·미매칭(·추출 한 시트) 시트의 열 — A~D + Scan 열."""
+        return ["A", "B", "C", "D"] + self._scan_cols
+
+    def _full_cols(self) -> list[str]:
+        """전체 양식 시트의 열 — 요약 열 + 수기 4칸(Scan 열만큼 밀린 자리)."""
+        from openpyxl.utils import get_column_letter
+        n = len(self._scan_cols)
+        return self._ad_cols() + [get_column_letter(5 + n + k) for k in range(4)]
+
+    def _body_fills(self) -> dict:
+        """열 문자 → 줄무늬 색.  Scan 열은 사진 열(C)과, 밀린 수기 칸은 원래 칸과 같다."""
+        from openpyxl.utils import get_column_letter
+        n = len(self._scan_cols)
+        if not n:
+            return BODY_FILLS
+        fills = {c: BODY_FILLS[c] for c in "ABCD"}
+        fills.update({c: BODY_FILLS["C"] for c in self._scan_cols})
+        for k, orig in enumerate("EFGH"):
+            fills[get_column_letter(5 + n + k)] = BODY_FILLS[orig]
+        return fills
+
+    def _scan_paths(self) -> list[Path]:
+        """Scan 을 확인할 Color 경로(중복 없이, 순서 고정).
+
+        Scan 목록 파일이 있는 폴더의 사진만 — 목록이 없는 폴더는 확인할 것이 없고,
+        그래야 Scan 자료가 없는 저장은 진행률까지 예전과 똑같다."""
+        from ..coords import scan_image
+        seen: dict[str, Path] = {}
+        for m in self._result.matches:
+            for p in (m.ref_path, m.val_path):
+                seen.setdefault(str(p), Path(p))
+        for u in self._result.unmatched_refs:
+            seen.setdefault(str(u.path), Path(u.path))
+        has_list: dict[Path, bool] = {}
+        out = []
+        for p in seen.values():
+            folder = p.parent
+            if folder not in has_list:
+                has_list[folder] = (folder / scan_image.SCAN_LIST_NAME).is_file()
+            if has_list[folder]:
+                out.append(p)
+        return out
+
+    def _scan_one(self, path: Path) -> tuple[str, Optional[bytes]]:
+        """사진 한 장 → (상태, Crop JPEG 바이트).  화면과 같은 `scan_image` 계산이다."""
+        import io
+        from ..coords import scan_image
+        m = scan_image.resolve(path)
+        if not m.ok:
+            return m.status, None
+        res = scan_image.load_crop(m)
+        if res is None:
+            return scan_image.UNREADABLE, None
+        buf = io.BytesIO()
+        crop = res[0]
+        (crop if crop.mode in ("L", "RGB") else crop.convert("RGB")).save(
+            buf, format="JPEG", quality=SCAN_JPEG_QUALITY)
+        return scan_image.OK, buf.getvalue()
+
+    def _scan_prepass(self, paths: list[Path]) -> None:
+        """모든 사진의 Scan 을 미리 확인하고 Crop 을 만든다 → Scan 열을 넣을지 결정.
+
+        하나라도 Scan 이 확인되면(못 읽은 경우 포함) 열을 넣는다(사용자 결정: 묶어서
+        판단).  원본은 NAS 에 있어 스레드로 나눠 읽는다 — 디코드는 GIL 을 놓는다."""
+        import os
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from ..coords import scan_image
+
+        base, overall = self._prog_done, self._prog_total or len(paths)
+        t0 = time.perf_counter()
+        workers = max(2, min(4, (os.cpu_count() or 2) - 1))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {pool.submit(self._scan_one, p): p for p in paths}
+            for done, f in enumerate(as_completed(futures), start=1):
+                if self._stop.is_set():
+                    for g in futures:
+                        g.cancel()
+                    raise _Cancelled
+                try:
+                    self._scan_cache[str(futures[f])] = f.result()
+                except Exception:
+                    self._scan_cache[str(futures[f])] = (scan_image.NO_CANDIDATE, None)
+                self.signals.progress.emit(base + done, overall,
+                                           i18n.KO.SCAN_EXPORT_PHASE)
+        self._prog_done = base + len(paths)
+        counts: dict[str, int] = {}
+        for st, _b in self._scan_cache.values():
+            counts[st] = counts.get(st, 0) + 1
+        found = counts.get(scan_image.OK, 0) + counts.get(scan_image.UNREADABLE, 0)
+        if found:
+            self._scan_cols = ["E"] if self._extract else ["E", "F"]
+        _LOG.info("저장 소요 [Scan 확인] %.2f초 %d장 — 상태별 %s",
+                  time.perf_counter() - t0, len(paths), counts)
+
+    def _insert_scan_columns(self, ws) -> None:
+        """전체 양식 시트 D 뒤에 Scan 열을 끼운다(수기 칸은 오른쪽으로).
+
+        ★ ``insert_cols`` 는 병합·열 폭을 옮기지 않는다.  병합을 먼저 풀어 두었다가
+        밀린 자리로 다시 걸고, 폭도 직접 옮긴다.  사진을 넣기 **전**에 부르므로 그림
+        앵커는 아직 없다."""
+        from copy import copy as _copy
+        from openpyxl.utils import get_column_letter
+
+        n = len(self._scan_cols)
+        merges = [(r.min_row, r.min_col, r.max_row, r.max_col)
+                  for r in ws.merged_cells.ranges]
+        for r in list(ws.merged_cells.ranges):
+            ws.unmerge_cells(str(r))
+        widths = {c: ws.column_dimensions[get_column_letter(c)].width
+                  for c in range(1, max(ws.max_column, 8) + 1)}
+        ws.insert_cols(SCAN_COL_START, n)
+        for c, w in sorted(widths.items(), reverse=True):
+            if c >= SCAN_COL_START and w:
+                ws.column_dimensions[get_column_letter(c + n)].width = w
+        img_w = widths.get(3) or IMG_COL_WIDTH
+        for col in self._scan_cols:
+            ws.column_dimensions[col].width = img_w
+        for r1, c1, r2, c2 in merges:
+            if c1 >= SCAN_COL_START:
+                c1, c2 = c1 + n, c2 + n
+            elif c1 <= 3 <= c2 and c2 == 4:     # 'Scan Defect' 그룹이 Scan 열까지 덮는다
+                c2 = 4 + n
+            ws.merge_cells(start_row=r1, start_column=c1, end_row=r2, end_column=c2)
+        for row in range(1, ws.max_row + 1):
+            src = ws[f"D{row}"]
+            for col in self._scan_cols:
+                dst = ws[f"{col}{row}"]
+                if src.has_style and type(dst).__name__ != "MergedCell":
+                    dst.font = _copy(src.font)
+                    dst.fill = _copy(src.fill)
+                    dst.border = _copy(src.border)
+                    dst.alignment = _copy(src.alignment)
+        if self._extract:
+            ws[f"E{HEADER_AOI_ROW}"] = i18n.KO.SCAN_EXCEL_HEADER
+        else:
+            for col, src in zip(self._scan_cols, (COL_REF, COL_VAL)):
+                ws[f"{col}{HEADER_AOI_ROW}"] = i18n.KO.SCAN_EXCEL_HEADER_FMT.format(
+                    machine=ws[f"{src}{HEADER_AOI_ROW}"].value or "").strip()
+
+    def _place_scan(self, ws, src, col: str, row: int,
+                    cell_w_px: float, cell_h_px: float) -> None:
+        """Scan Crop 을 셀 중앙에.  없으면 짧은 회색 문구(사용자 결정)."""
+        import io
+        from openpyxl.drawing.image import Image as XLImage
+        from openpyxl.styles import Alignment, Font
+        from ..coords import scan_image
+
+        status, data = self._scan_cache.get(str(src), (scan_image.NO_CANDIDATE, None))
+        if data:
+            try:
+                # 시트마다 새 이미지 객체 — 같은 객체를 여러 시트에 쓰면 저장이 깨진다.
+                xli = XLImage(io.BytesIO(data))
+                _fit_to_cell(xli, cell_w_px, cell_h_px)
+                _add_image_centered(ws, xli, col, row, cell_w_px, cell_h_px)
+                return
+            except Exception:
+                status = scan_image.UNREADABLE
+        cell = ws[f"{col}{row}"]
+        cell.value = (i18n.KO.SCAN_EXCEL_UNREADABLE if status == scan_image.UNREADABLE
+                      else i18n.KO.SCAN_EXCEL_NONE)
+        cell.font = Font(size=8, color="FF808080")
+        cell.alignment = Alignment(horizontal="center", vertical="center",
+                                   wrap_text=True)
+
     def _place_image(self, ws, src, col: str, row: int,
                      cell_w_px: float, cell_h_px: float,
                      original: bool = False) -> bool:
@@ -583,8 +767,9 @@ class ExcelExporter(QThread):
             return False
 
     @staticmethod
-    def _style_data_row(ws, row: int, cols: str, band_index: int,
-                        *, unmatched: bool = False) -> None:
+    def _style_data_row(ws, row: int, cols, band_index: int,
+                        *, unmatched: bool = False, fills=None,
+                        tint_cols=BORDER_COLS) -> None:
         """데이터 행 한 줄에 그룹 배경 + 얇은 격자를 입힌다.
 
         ★ **템플릿에 미리 칠해 둔 20행에 기대지 않는다.**  실제 결함은 그보다 훨씬
@@ -597,6 +782,7 @@ class ExcelExporter(QThread):
         """
         from openpyxl.styles import Border, PatternFill, Side
 
+        fills = fills or BODY_FILLS
         side = Side(style="thin", color=BODY_GRID_COLOR)
         box = Border(left=side, right=side, top=side, bottom=side)
         for col in cols:
@@ -605,17 +791,20 @@ class ExcelExporter(QThread):
             #   전체 양식 시트는 style_cols 가 "ABCDEFGH" 라 그대로 두면 E~H
             #   **수기 입력 영역**까지 물든다 — 그 칸들은 사람이 직접 쓰는 자리라
             #   그룹색(연두·주황)이 세로로 이어지는 것이 정보다.
-            tint = unmatched and col in BORDER_COLS
+            tint = unmatched and col in tint_cols
             cell.fill = PatternFill(
                 "solid",
                 fgColor=(UNMATCHED_FILL if tint
-                         else BODY_FILLS[col][band_index % 2]))
+                         else fills[col][band_index % 2]))
             cell.border = box
 
     def _fill_rows(self, ws, rows_input: list[tuple[str, str, object]],
-                   *, style_cols: str = "ABCD", sheet_label: str = "") -> None:
+                   *, style_cols=None, sheet_label: str = "") -> None:
         from openpyxl.styles import Alignment, Border, Side
 
+        style_cols = style_cols or self._ad_cols()
+        border_cols = self._ad_cols()
+        fills = self._body_fills()
         total = len(rows_input)
         # 이 시트 이전까지 채운 행 수 — 진행률은 여기에 이어서 보고한다(단조 증가).
         # `_prog_total` 이 0 이면(이 메서드만 단독으로 부른 경우) 예전처럼 이 시트
@@ -660,11 +849,12 @@ class ExcelExporter(QThread):
             # 덧그려져야 살아남는다(순서를 바꾸면 구분선이 지워진다).
             self._style_data_row(ws, row, style_cols, idx - 1,
                                  unmatched=(isinstance(payload, MissEntry)
-                                            and not self._extract))
+                                            and not self._extract),
+                                 fills=fills, tint_cols=border_cols)
 
             # 슬롯 변경 시 A~H 전 열에 top border 적용 (기존 좌/우/하 보존).
             if prev_slot is not None and cur_slot != prev_slot:
-                for col in BORDER_COLS:
+                for col in border_cols:
                     cell = ws[f"{col}{row}"]
                     old = cell.border
                     cell.border = Border(
@@ -703,6 +893,8 @@ class ExcelExporter(QThread):
                     self._place_image(ws, src, col, row, cell_w_px, cell_h_px)
                     t_info += t1 - t0
                     t_img += time.perf_counter() - t1
+                for src, col in zip((m.ref_path, m.val_path), self._scan_cols):
+                    self._place_scan(ws, src, col, row, cell_w_px, cell_h_px)
                 self.signals.progress.emit(base + idx, overall, _phase(m.slot))
             else:
                 u: MissEntry = payload
@@ -716,6 +908,11 @@ class ExcelExporter(QThread):
                 t1 = time.perf_counter()
                 self._write_info_cell(ws, COL_VAL, row, u.path,
                                       unmatched_note=not self._extract)
+                # 미매칭·추출 행의 Scan 은 **그 사진의 것**만, 첫 Scan 열(E)에 둔다.
+                # 검증 Scan 칸(F)은 짝 사진이 없으니 비워 둔다.
+                if self._scan_cols:
+                    self._place_scan(ws, u.path, self._scan_cols[0], row,
+                                     cell_w_px, cell_h_px)
                 t_img += t1 - t0
                 t_info += time.perf_counter() - t1
                 self.signals.progress.emit(base + idx, overall, _phase(u.slot))
@@ -847,15 +1044,20 @@ class ExcelExporter(QThread):
             ws[f"{col}1"].alignment = center
             ws.column_dimensions[col].width = COL_WIDTHS[col]
         machine = _machine_label(self._result.ref_machine)
-        cols: list[tuple[str, str]] = []            # Recipe 마다 (사진 열, 정보 열)
+        # Recipe 마다 (사진 열, 정보 열[, Scan 열]) — Scan 이 있으면 3열씩.
+        stride = 3 if self._scan_cols else 2
+        cols: list[tuple] = []
         for k, (label, _rows) in enumerate(groups):
-            pc, ic = get_column_letter(3 + 2 * k), get_column_letter(4 + 2 * k)
-            cols.append((pc, ic))
+            trip = tuple(get_column_letter(3 + stride * k + j) for j in range(stride))
+            cols.append(trip)
+            pc, ic = trip[0], trip[1]
             ws[f"{pc}1"] = label
-            ws.merge_cells(f"{pc}1:{ic}1")
+            ws.merge_cells(f"{pc}1:{trip[-1]}1")
             ws[f"{pc}2"] = machine
             ws[f"{ic}2"] = i18n.KO.EXTRACT_INFO_HEADER
-            for c in (pc, ic):
+            if stride == 3:
+                ws[f"{trip[2]}2"] = i18n.KO.SCAN_EXCEL_HEADER
+            for c in trip:
                 ws[f"{c}1"].font, ws[f"{c}1"].fill = head_font, navy
                 ws[f"{c}2"].font, ws[f"{c}2"].fill = sub_font, sub_fill
                 ws[f"{c}1"].alignment = ws[f"{c}2"].alignment = center
@@ -870,7 +1072,7 @@ class ExcelExporter(QThread):
                     for s in slots}
         cell_w_px = _col_width_to_px(img_w)
         cell_h_px = _row_height_to_px(row_h)
-        last_col = cols[-1][1] if cols else "B"
+        last_col = cols[-1][-1] if cols else "B"
         all_cols = ["A", "B"] + [c for pair in cols for c in pair]
         row, no, placed = DATA_START_ROW, 0, 0
         base, overall = self._prog_done, self._prog_total or 1
@@ -898,12 +1100,15 @@ class ExcelExporter(QThread):
                 self._write_slot_cell(ws, row, slot,
                                       Alignment(horizontal="center",
                                                 vertical="center"))
-                for (pc, ic), path in zip(cols, row_paths):
+                for trip, path in zip(cols, row_paths):
                     if path is None:
                         continue
+                    pc, ic = trip[0], trip[1]
                     t0 = time.perf_counter()
                     if not self._place_image(ws, path, pc, row, cell_w_px, cell_h_px):
                         ws[f"{pc}{row}"] = Path(path).name
+                    if len(trip) > 2:
+                        self._place_scan(ws, path, trip[2], row, cell_w_px, cell_h_px)
                     t1 = time.perf_counter()
                     self._write_info_cell(ws, ic, row, path, unmatched_note=False)
                     t_img += t1 - t0
