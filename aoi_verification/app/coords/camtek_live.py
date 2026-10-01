@@ -58,7 +58,7 @@ from typing import NamedTuple, Optional
 
 from .models import DefectCoord
 
-__all__ = ["resolve", "parse_live_name", "LiveName"]
+__all__ = ["resolve", "parse_live_name", "LiveName", "lot_key"]
 
 # 정수 토큰.  **음수를 포함시키는 게 중요하다** — KLA 파일명
 # ``00MEU018XYG1_-1_4_23_1`` 에서 `-1` 을 정수로 보지 않으면 '처음 연속한 정수 쌍' 이
@@ -87,6 +87,25 @@ class LiveName(NamedTuple):
     extra: tuple[float, ...]
 
 
+def _pair_at(toks: list[str]) -> Optional[int]:
+    """규칙 1 — 처음 등장하는 '연속한 두 정수 토큰' 의 위치."""
+    return next((i for i in range(len(toks) - 1)
+                 if _INT.match(toks[i]) and _INT.match(toks[i + 1])), None)
+
+
+def lot_key(stem: str) -> Optional[tuple[str, ...]]:
+    """같은 LOT 의 LIVE 사진끼리 같은 값 — col/row 앞 토큰에서 **바로 앞(웨이퍼 ID)을 뺀** 것.
+
+    예) ``2D@R5-AS-T254-A01_0857122AY-0B_WVU_GX57004924_0_3_…`` →
+    ``('2D@R5-AS-T254-A01', '0857122AY-0B', 'WVU')``.  웨이퍼 ID 가 col/row 바로 앞이라는
+    것은 관측(이 형식의 실물 전부)이고, 아니어도 묶음이 웨이퍼 단위로 좁아질 뿐이다.
+    LIVE 형식이 아니면 ``None``."""
+    if parse_live_name(stem) is None:
+        return None
+    toks = stem.split('_')
+    return tuple(toks[:_pair_at(toks) - 1])
+
+
 def parse_live_name(stem: str) -> Optional[LiveName]:
     """LIVE 파일명 stem → :class:`LiveName`.  형식이 아니면 ``None``.
 
@@ -95,8 +114,7 @@ def parse_live_name(stem: str) -> Optional[LiveName]:
     toks = stem.split('_')
 
     # 규칙 1 — 처음 등장하는 '연속한 두 정수 토큰'
-    at = next((i for i in range(len(toks) - 1)
-               if _INT.match(toks[i]) and _INT.match(toks[i + 1])), None)
+    at = _pair_at(toks)
     if at is None:
         return None
 

@@ -31,7 +31,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
-from . import kla_info, wafer_geometry as wg
+from . import kla_info, wafer_geometry as wg, wafer_txt
 from .models import DefectCoord
 from ..models.result import EXTRACT_MODE
 
@@ -112,30 +112,87 @@ class _Kla:
     source: str
 
 
+# LOT 범위를 넓힐 때 훑는 형제 폴더 상한 — 엉뚱한 상위 폴더를 골랐을 때 멈추지 않게.
+_MAX_SIBLINGS = 200
+
+
+def _live_extent(folder: Path) -> Optional[tuple[float, float]]:
+    """같은 LOT 의 LIVE 사진 die 내부 x/y 최댓값 — 이 슬롯 + **형제 슬롯 폴더 전부**.
+
+    ★ 슬롯 하나의 사진만 보면 사진 수에 따라 추정이 제각각이라(실측: 같은 LOT 에서
+    1,632 ~ 14,942 µm) slot 을 바꿀 때마다 격자가 바뀌고, LOT 합산 화면에서는 첫 슬롯
+    격자 위에 다른 슬롯 점이 엉뚱한 칸에 떨어졌다((3,3)→(9,3)).  같은 LOT 의 사진은
+    :func:`camtek_live.lot_key` 로 묶는다 — 다른 자재가 섞인 상위 폴더에서도 안전하다."""
+    return _lot_extent(folder.parent, _folder_lot_key(folder))
+
+
+def _folder_lot_key(folder: Path):
+    from .camtek_live import lot_key
+    try:
+        for f in folder.iterdir():
+            k = lot_key(f.stem)
+            if k is not None:
+                return k
+    except OSError:
+        pass
+    return None
+
+
+@lru_cache(maxsize=64)
+def _lot_extent(parent: Path, key) -> Optional[tuple[float, float]]:
+    from .camtek_live import lot_key, parse_live_name
+    if key is None:
+        return None
+    xs: list[float] = []
+    ys: list[float] = []
+    try:
+        dirs = sorted(d for d in parent.iterdir() if d.is_dir())[:_MAX_SIBLINGS]
+    except OSError:
+        return None
+    for d in dirs:
+        try:
+            names = [f.stem for f in d.iterdir()]
+        except OSError:
+            continue
+        for stem in names:
+            got = parse_live_name(stem)
+            if got is not None and lot_key(stem) == key:
+                xs.append(got.x)
+                ys.append(got.y)
+    return (max(xs), max(ys)) if xs else None
+
+
 def _live_pitch_estimate(folder: Path) -> Optional[tuple[float, float]]:
-    """die 크기 파일이 없을 때 — 폴더 LIVE 파일명의 die 내부 x/y 최댓값으로 pitch 를 추정.
+    """die 크기 파일이 없을 때 — **같은 LOT** LIVE 파일명의 die 내부 x/y 최댓값으로 pitch 를 추정.
 
     die 내부 좌표는 pitch 를 넘을 수 없으므로 최댓값은 **하한**이다(추정 등급 ``가정``).
     5 % 여유를 둬 최댓값 사진이 옆 die 경계에 걸리지 않게 한다.  사진이 많을수록 실제
     pitch 에 가까워지고, col/row(파일명 값)는 추정과 무관하게 정확하다.
     상수(TB500)를 쓰지 않는 이유: 다른 자재에서 조용히 엉뚱한 자리에 찍힌다."""
-    from .camtek_live import parse_live_name
-    xs: list[float] = []
-    ys: list[float] = []
-    try:
-        for f in folder.iterdir():
-            got = parse_live_name(f.stem)
-            if got is not None:
-                xs.append(got.x)
-                ys.append(got.y)
-    except OSError:
+    ext = _live_extent(folder)
+    if ext is None:
         return None
-    if not xs:
-        return None
-    px, py = max(xs) * 1.05, max(ys) * 1.05
+    px, py = ext[0] * 1.05, ext[1] * 1.05
     if not (wg._MIN_PITCH <= px <= wg._MAX_PITCH and wg._MIN_PITCH <= py <= wg._MAX_PITCH):
         return None
     return px, py
+
+
+def _txt_pitch(wt: "wafer_txt.WaferTxt", folder: Path
+               ) -> tuple[Optional[tuple[float, float]], bool]:
+    """웨이퍼 맵 .txt 슬롯의 pitch — ``((px, py), 추정여부)``.
+
+    ``XDIES/YDIES`` 는 **같은 LOT 사진이 전부 그 안에 들어갈 때만** 쓴다(파일마다 다른
+    값이 관측됐고 뜻도 미구분 — :mod:`.wafer_txt`).  아니면 LOT 사진으로 추정한다."""
+    ext = _live_extent(folder)
+    if wt.die_x and wt.die_y and (ext is None or (ext[0] < wt.die_x and ext[1] < wt.die_y)):
+        return (wt.die_x, wt.die_y), False
+    if wt.die_x and wt.die_y:
+        _LOG.warning("웨이퍼 맵 %s 의 XDIES/YDIES(%.1f/%.1f µm)보다 큰 사진 좌표(%.1f/%.1f)가 "
+                     "있어 die 크기로 쓰지 않고 사진으로 추정한다", wt.path, wt.die_x,
+                     wt.die_y, ext[0], ext[1])
+    est = _live_pitch_estimate(folder)
+    return (est, True) if est is not None else (None, False)
 
 
 def _assumed_edge(first_full_index: int, pitch: float) -> float:
@@ -150,16 +207,38 @@ def _camtek(folder: Path) -> _Camtek:
     # INI 항목이 **없는** 폴더(LIVE 파일명 슬롯)는 검산 재료가 없어 위가 늘 None 이다 —
     # 그러면 LIVE 사진이 전부 '좌표 없음' 이 된다.  파일 pitch 로, 없으면 사진 좌표로
     # 추정한 pitch 로 기하를 만든다.  INI 항목이 있는데 None 인 폴더(절대좌표)는 그대로.
+    wt = None
     if geom is None and not wg.has_camtek_entries(folder):
         geom = wg.live_geometry(folder)
         if geom is None:
-            est = _live_pitch_estimate(folder)
-            if est is not None:
-                geom = wg._with_origins(folder, *est, "LIVE 사진 좌표 추정")
-                pitch_assumed = True
+            # 1순위: LOT 폴더의 웨이퍼 맵 .txt — die 칸과 col/row 기준을 장비 맵에서 읽는다.
+            wt = wafer_txt.load(folder)
+            pitch = None
+            if wt is not None:
+                pitch, pitch_assumed = _txt_pitch(wt, folder)
+                if pitch is None:
+                    wt = None
+            if wt is not None:
+                # 파일명 col 이 곧 맵 열, stage y 칸 j = rows−1−row (위에서부터) — 원점 보정 없음.
+                geom = wg.CamtekGeometry(pitch_x=pitch[0], pitch_y=pitch[1], col_origin=0,
+                                         row_total=wt.rows - 1, source=wt.path.name)
+            else:
+                est = _live_pitch_estimate(folder)
+                if est is not None:
+                    geom = wg._with_origins(folder, *est, "LIVE 사진 좌표 추정")
+                    pitch_assumed = True
     dia = wg._read_diameter(folder)
     cx, cy = wg._wafer_center(folder)
     source = SOURCE_OBSERVED
+    if wt is not None and (cx is None or cy is None):
+        # 맵에 중심이 없다 — die 맵 외곽의 가운데를 웨이퍼 중심으로 가정한다.
+        source = SOURCE_ASSUMED
+        i_lo = min(i for i, _ in wt.cells)
+        i_hi = max(i for i, _ in wt.cells) + 1
+        j_lo = min(j for _, j in wt.cells)
+        j_hi = max(j for _, j in wt.cells) + 1
+        cx = (i_lo + i_hi) / 2.0 * geom.pitch_x if cx is None else cx
+        cy = (j_lo + j_hi) / 2.0 * geom.pitch_y if cy is None else cy
     if (cx is None or cy is None) and geom is not None:
         source = SOURCE_ASSUMED
         if cx is None:
@@ -170,7 +249,9 @@ def _camtek(folder: Path) -> _Camtek:
     # die 맵은 **기하가 그 맵을 채택했을 때만** 쓴다 — 부분 맵(유도값과 ±1 밖)은
     # camtek_geometry 가 이미 버렸고, 그때는 격자도 계산으로 그린다.
     cells = None
-    if geom is not None and geom.source.endswith(wg._DIE_MAP_FILE):
+    if wt is not None:
+        cells = wt.cells
+    elif geom is not None and geom.source.endswith(wg._DIE_MAP_FILE):
         cells = wg.die_map_cells(folder, geom.pitch_x, geom.pitch_y)
     return _Camtek(geom=geom, diameter=dia, cx=cx, cy=cy, source=source, cells=cells,
                    pitch_assumed=pitch_assumed)
