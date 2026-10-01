@@ -778,11 +778,10 @@ class ExcelExporter(QThread):
     def _write_recipe_columns_sheet(self, wb, groups: list) -> None:
         """한 시트에 Recipe 마다 [사진 | 정보] 열을 옆으로 나란히 (사용자 결정).
 
-        머리 1행 = Recipe 이름(두 칸 병합), 2행 = AOI-N · 정보.  슬롯 안에서는 **순서대로**
-        채운다 — i 행 = 각 Recipe 의 i 번째 사진(파일명 순), 모자라면 빈칸.  단,
-        Recipe 끼리 위치 차가 150µm 미만인 사진은 같은 행에 모아 **위쪽**에 둔다
-        (:func:`pair_rows`, 사용자 결정 — x20·x5 가 같은 결함을 찍은 경우).  정보 칸은
-        D열과 같은 글자다."""
+        머리 1행 = Recipe 이름(두 칸 병합), 2행 = AOI-N · 정보.  슬롯 안에서
+        Recipe 끼리 위치 차가 150µm 미만인 사진(x20·x5 가 같은 결함을 찍은 것)은 같은
+        행에 모아 **위쪽**에 두고, 짝이 없는 사진은 한 장이 한 행이다(:func:`pair_rows`,
+        사용자 결정).  정보 칸은 D열과 같은 글자다."""
         from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
         from openpyxl.utils import get_column_letter
 
@@ -1161,8 +1160,10 @@ def pair_rows(lists, position, tol: float = PAIR_TOL_UM) -> list[list]:
     1) 서로 다른 Recipe 의 두 사진이 ``tol`` **미만**이면 같은 결함으로 보고 한 행에
        모은다.  가까운 쌍부터 1:1 로 확정한다(한 사진은 한 행에만).  Recipe 가 셋
        이상이면 행에 들어 있는 **모든** 사진과 ``tol`` 미만일 때만 합류한다.
-    2) 그렇게 모인 행을 위에(왼쪽 Recipe 의 순서대로), 나머지는 예전처럼 Recipe 별로
-       순서대로 채운다(모자라면 ``None``).
+    2) 그렇게 모인 행을 위에(왼쪽 Recipe 의 순서대로) 둔다.
+    3) 짝이 없는 사진은 **한 장이 한 행**이다(그 Recipe 칸만 차고 나머지는 ``None``) —
+       150µm 이상 떨어진 사진끼리 한 행에 섞이지 않게(사용자 결정).  Recipe 순서 →
+       들어온 순서(파일명)로 놓는다.
     순수 함수 — ``position(path)`` 만 주입받아 헤드리스로 테스트한다."""
     pos = [[position(p) for p in col] for col in lists]
     edges = []
@@ -1195,10 +1196,10 @@ def pair_rows(lists, position, tol: float = PAIR_TOL_UM) -> list[list]:
     rows.sort(key=lambda r: min(r.items()))
     out = [[lists[c][r[c]] if c in r else None for c in range(len(lists))]
            for r in rows]
-    rest = [[p for k, p in enumerate(col) if (c, k) not in where]
-            for c, col in enumerate(lists)]
-    for i in range(max((len(x) for x in rest), default=0)):
-        out.append([x[i] if i < len(x) else None for x in rest])
+    for c, col in enumerate(lists):
+        for k, p in enumerate(col):
+            if (c, k) not in where:
+                out.append([p if cc == c else None for cc in range(len(lists))])
     return out
 
 

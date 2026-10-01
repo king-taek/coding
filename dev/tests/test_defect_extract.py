@@ -461,7 +461,7 @@ def test_sheets_layout_one_sheet_per_recipe(qapp, tmp_path, monkeypatch):
 
 
 def test_columns_layout_side_by_side(qapp, tmp_path, monkeypatch):
-    """한 시트, Recipe 마다 [사진|정보] 열.  슬롯 안에서는 순서대로 채우고 모자라면 빈칸."""
+    """한 시트, Recipe 마다 [사진|정보] 열.  위치를 모르는 사진은 짝이 없으므로 한 장이 한 행."""
     pytest.importorskip("openpyxl")
     pytest.importorskip("PIL.Image")
     from openpyxl import load_workbook
@@ -490,13 +490,14 @@ def test_columns_layout_side_by_side(qapp, tmp_path, monkeypatch):
 
     def name(cell):
         return None if cell.value is None else str(cell.value).split("\n")[0]
-    # S1: PI_Bubble a,c / PI b → 2행 · S2: 없음 d → 1행
+    # 짝 없는 사진은 섞이지 않는다 — Recipe 순서 → 파일명 순서로 한 장씩
     grid = [(ws[f"A{r}"].value, str(ws[f"B{r}"].value), name(ws[f"D{r}"]),
-             name(ws[f"F{r}"]), name(ws[f"H{r}"])) for r in (3, 4, 5)]
-    assert grid == [(1, "S1", "a.jpg", "b.jpg", None),
+             name(ws[f"F{r}"]), name(ws[f"H{r}"])) for r in (3, 4, 5, 6)]
+    assert grid == [(1, "S1", "a.jpg", None, None),
                     (2, "S1", "c.jpg", None, None),
-                    (3, "S2", None, None, "d.jpg")]
-    assert ws["A6"].value is None
+                    (3, "S1", None, "b.jpg", None),
+                    (4, "S2", None, None, "d.jpg")]
+    assert ws["A7"].value is None
     assert len(ws._images) == 4                      # 사진 4장
     # 정보 칸 글자는 한 시트 배치의 D열과 같다(같은 생산자)
     ss = load_workbook(str(single), rich_text=True)["single"]
@@ -584,9 +585,10 @@ def test_pair_rows_puts_close_defects_on_one_row_first():
 
 def test_pair_rows_threshold_is_strict_and_one_to_one():
     from aoi_verification.app.workers.exporter import pair_rows
-    # a–p 는 정확히 150µm → '미만' 이 아니므로 짝이 아니다(순서대로 채운 행).
+    # a–p 는 정확히 150µm → '미만' 이 아니므로 짝이 아니다 → 각자 다른 행.
     pos = _abs(a=(0.0, 0.0), b=(1000.0, 0.0), p=(150.0, 0.0), q=(1003.0, 0.0))
-    assert pair_rows([["a", "b"], ["p", "q"]], pos) == [["b", "q"], ["a", "p"]]
+    assert pair_rows([["a", "b"], ["p", "q"]], pos) == [["b", "q"], ["a", None],
+                                                        [None, "p"]]
     # q 는 a(2µm)·b(3µm) 둘 다 가깝지만 한 행에만 — 더 가까운 a 와.
     pos = _abs(a=(0.0, 0.0), b=(5.0, 0.0), q=(2.0, 0.0))
     assert pair_rows([["a", "b"], ["q"]], pos) == [["a", "q"], ["b", None]]
@@ -604,7 +606,9 @@ def test_pair_rows_die_coords_compare_only_within_same_die():
     from aoi_verification.app.workers.exporter import pair_rows
     pos = {"a": ("die", 1, 2, 10.0, 10.0), "p": ("die", 1, 2, 20.0, 10.0),
            "b": ("die", 1, 3, 10.0, 10.0), "q": ("die", 1, 4, 10.0, 10.0)}.get
-    assert pair_rows([["a", "b"], ["q", "p"]], pos) == [["a", "p"], ["b", "q"]]
+    # b·q 는 다른 die → 거리를 모른다 → 각자 다른 행.
+    assert pair_rows([["a", "b"], ["q", "p"]], pos) == [["a", "p"], ["b", None],
+                                                        [None, "q"]]
 
 
 def test_columns_sheet_pairs_rows_on_top(qapp, tmp_path, monkeypatch):
@@ -630,10 +634,11 @@ def test_columns_sheet_pairs_rows_on_top(qapp, tmp_path, monkeypatch):
 
     def name(cell):
         return None if cell.value is None else str(cell.value).split("\n")[0]
-    assert [(name(ws[f"D{r}"]), name(ws[f"F{r}"])) for r in (3, 4)] == [
-        ("b.jpg", "d.jpg"), ("a.jpg", "c.jpg")]
+    # b–d 58µm → 한 행(위).  a–c 는 50mm 떨어짐 → 같은 행에 섞지 않고 각자 한 행.
+    assert [(name(ws[f"D{r}"]), name(ws[f"F{r}"])) for r in (3, 4, 5)] == [
+        ("b.jpg", "d.jpg"), ("a.jpg", None), (None, "c.jpg")]
     # 따로 표시하지 않는다 — 두 행의 정보 칸 글꼴·채움이 같은 규칙(줄무늬)을 따른다.
-    assert ws["D3"].comment is None and ws["D4"].comment is None
+    assert all(ws[f"D{r}"].comment is None for r in (3, 4))
 
 
 def test_choice_buttons_wrap_instead_of_clipping(styled_qapp):
