@@ -59,6 +59,7 @@ from PyQt6.QtGui import QColor, QPainter, QPen
 from PyQt6.QtWidgets import (QApplication, QGraphicsOpacityEffect, QHBoxLayout,
                              QLabel, QSizePolicy, QVBoxLayout, QWidget)
 
+from ..teardown import tolerate_teardown
 from ... import i18n
 from ...config import Fonts as _Fonts
 from .. import theme
@@ -1258,6 +1259,7 @@ class LoadingOverlay(QWidget):
     #   나누지 마라 — 한쪽만 갱신되면 '어떤 덮개는 단축키를 통과시킨다' 가 된다.
     _BLOCKED = motion.BLOCKED_INPUT_EVENTS
 
+    @tolerate_teardown
     def eventFilter(self, obj, event) -> bool:  # noqa: N802
         # ★ ``getattr`` 로 읽는다 — 잠금이 걸린 채 오버레이가 파괴되면 앱에 걸어 둔
         #   전역 필터가 잠시 살아남아, 파이썬 속성이 이미 사라진 객체로 이벤트가

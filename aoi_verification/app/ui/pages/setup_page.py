@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (QBoxLayout, QDoubleSpinBox, QFileDialog,
                               QMessageBox, QScrollArea, QSizePolicy,
                               QToolButton, QVBoxLayout, QWidget)
 
+from ..teardown import tolerate_teardown
 from ... import i18n
 from .. import theme
 from ...utils import prefs as _prefs
@@ -601,6 +602,7 @@ class SetupPage(QWidget):
             rec["slot_btn"].setText(i18n.KO.EXTRACT_SLOT_BTN_FMT.format(
                 n=len(chosen), total=len(names)))
 
+    @tolerate_teardown
     def eventFilter(self, obj, event):  # noqa: N802
         from PyQt6.QtCore import QEvent
         if (event.type() == QEvent.Type.Resize

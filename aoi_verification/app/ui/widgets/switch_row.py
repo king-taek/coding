@@ -18,6 +18,7 @@ from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import (QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout,
                              QWidget)
 
+from ..teardown import tolerate_teardown
 from .. import theme
 
 _KNOB_M = 3                      # 트랙 안쪽 여백
@@ -235,6 +236,7 @@ class SwitchRow(QWidget):
     def set_on(self, on: bool, *, emit: bool = False) -> None:
         self.switch.set_on(on, emit=emit)
 
+    @tolerate_teardown
     def eventFilter(self, obj, event):  # noqa: N802
         """제목 라벨 클릭 = 토글(release 기준, 라벨 밖으로 끌면 취소)."""
         if obj is self._title and self.isEnabled():

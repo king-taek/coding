@@ -24,6 +24,7 @@ from PyQt6.QtCore import (QEasingCurve, QEvent, QObject, QPoint, QPointF,
 from PyQt6.QtWidgets import (QApplication, QGraphicsEffect,
                              QGraphicsOpacityEffect, QLabel)
 
+from .teardown import tolerate_teardown
 from . import theme
 
 # ── '지금 보이는 그림이 라이브 위젯이 아니다' 동안 버리는 입력 이벤트 ──────────
@@ -49,6 +50,7 @@ class _InputSwallow(QObject):
     이라 절대 만들면 안 된다(`loading_overlay.hideEvent` 주석의 실측 사고).
     """
 
+    @tolerate_teardown
     def eventFilter(self, obj, event) -> bool:  # noqa: N802
         try:
             etype = event.type()

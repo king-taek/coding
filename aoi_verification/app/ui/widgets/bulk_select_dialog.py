@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout,
                              QHBoxLayout, QLabel, QRubberBand, QScrollArea,
                              QSizePolicy, QVBoxLayout, QWidget)
 
+from ..teardown import tolerate_teardown
 from ... import config, i18n
 from .. import theme
 from ...models.slot import ImageItem
@@ -480,6 +481,7 @@ class BulkSelectDialog(QDialog):
     # ------------------------------------------------------------------
     # 드래그(러버밴드) 다중 선택
     # ------------------------------------------------------------------
+    @tolerate_teardown
     def eventFilter(self, obj, event):                  # noqa: N802
         if not hasattr(self, "_scroll") or obj is not self._scroll.viewport():
             return super().eventFilter(obj, event)

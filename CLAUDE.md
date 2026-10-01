@@ -369,6 +369,10 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   바운드 메서드를 넘기거나 `ui/deferred.call_later(owner, ms, fn)` 을 쓴다.  가드:
   `dev/tests/test_deferred_call.py`.  테스트의 `deleteLater()` 는 `processEvents()` 로
   처리되지 않으므로 conftest 의 `_flush_deferred_deletes` 가 테스트마다 처리한다 — 빼지 마라.
+- **`eventFilter` 에는 `@tolerate_teardown`(`ui/teardown.py`)을 붙인다.** GC 가 순환을 치울 때
+  파이썬 속성을 먼저 비우고 C++ 창을 지우는데, `~QWidget` 이 그 사이 이벤트를 필터에 통과시켜
+  `AttributeError` → abort 가 났다(실측 core dump, 앱에서는 종료 경로). 가드:
+  `dev/tests/test_teardown_event_filter.py`.
 - 무거운 의존성(cv2/openvino/torch/PyQt6)은 환경에 없을 수 있어 `pytest.importorskip` 으로
   게이트한다(모듈 단위 import 도 포함). **순수 로직은 무거운 의존성 없이** 단위 테스트되게 설계
   (예: 좌표 후보 선택 `_select_coord_candidates`, 업데이트 브랜치 정규화/자기교정).

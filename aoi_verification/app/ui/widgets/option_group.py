@@ -22,6 +22,7 @@ from PyQt6.QtCore import QEvent, Qt, pyqtSignal
 from PyQt6.QtWidgets import (QButtonGroup, QGridLayout, QPushButton, QSizePolicy,
                              QWidget)
 
+from ..teardown import tolerate_teardown
 from .. import theme
 from .neon_button import NeonButton
 
@@ -245,6 +246,7 @@ class OptionGroup(QWidget):
 
     _ARROWS = (Qt.Key.Key_Right, Qt.Key.Key_Down, Qt.Key.Key_Left, Qt.Key.Key_Up)
 
+    @tolerate_teardown
     def eventFilter(self, obj, event):  # noqa: N802
         """타일에 온 방향키를 **Qt 버튼 처리보다 먼저** 소비한다(위 주석 참조)."""
         if (event.type() == QEvent.Type.KeyPress

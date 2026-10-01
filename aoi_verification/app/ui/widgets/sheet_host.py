@@ -36,6 +36,7 @@ from PyQt6.QtWidgets import (QApplication, QDialog, QGraphicsOpacityEffect,
                              QGridLayout, QHBoxLayout, QLabel, QMessageBox,
                              QSizePolicy, QVBoxLayout, QWidget)
 
+from ..teardown import tolerate_teardown
 from ... import i18n
 from .. import motion, theme
 from .neon_button import NeonButton
@@ -189,6 +190,7 @@ class SheetHost(QWidget):
         parent.installEventFilter(self)
 
     # -- 배치 ----------------------------------------------------------
+    @tolerate_teardown
     def eventFilter(self, obj, event) -> bool:  # noqa: N802
         etype = event.type()
         if obj is self.parent() and etype == QEvent.Type.Resize:
