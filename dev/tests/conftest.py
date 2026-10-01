@@ -56,7 +56,7 @@ def _no_startup_side_effects(monkeypatch):
 
     ★ 왜 필요한가 — 실제로 테스트가 **영구히 멈췄다.**  `MainWindow.__init__` 은 마지막에
     ``QTimer.singleShot(400, self._check_for_update_async)`` 를 건다.  이벤트 루프를
-    400ms 넘게 돌리는 테스트(색 모드 전환은 크로스페이드 700ms 를 기다린다)에서 이 타이머가
+    400ms 넘게 돌리는 테스트에서 이 타이머가
     발화해 업데이트 서버로 나가고, 응답이 오면 ``sheets.ask`` 가 **중첩 이벤트 루프**를 열어
     아무도 닫지 않는다.  실측으로 375ms 지점에서 멈췄다.
 

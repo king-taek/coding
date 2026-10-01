@@ -136,5 +136,5 @@ def test_engine_mode_labels_dropped_internals():
     assert "정밀 비교" not in i18n.KO.ENGINE_MODE_BASIC
     assert "CPU" not in i18n.KO.ENGINE_MODE_EFFICIENCY
     assert "사진이 많을 때" in i18n.KO.ENGINE_MODE_EFFICIENCY
-    for text in (i18n.KO.LEGACY_MODE_HINT, i18n.KO.LEGACY_SWITCH_DESC):
+    for text in (i18n.KO.LEGACY_MODE_HINT, i18n.KO.LEGACY_SWITCH_TITLE):
         assert "정밀 비교" not in text and "CPU+GPU" not in text

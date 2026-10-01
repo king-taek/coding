@@ -541,10 +541,7 @@ class LoadingOverlay(QWidget):
         self._reset_eta()
 
         # #8 중지 버튼 — cancelable=True 로 보여진 작업에서만.
-        # ★ 인스턴스 스타일시트로 색을 굽지 않는다.  오버레이는 앱 시작 때 한 번 만들어지고
-        #   `_recolor_in_place` 는 인스턴스 스타일시트를 못 바꾸므로, 구운 라이트 팔레트가
-        #   다크 전환 뒤에도 그대로 남아 글자 대비가 2.19:1 로 무너졌다(실측 캡처).
-        #   role 로 옮기면 전역 QSS 가 다시 렌더되면서 두 모드를 모두 따라온다.
+        # ★ 인스턴스 스타일시트로 색을 굽지 않는다 — 색은 전역 QSS 의 role 이 칠한다.
         self._cancel_btn = NeonButton(i18n.KO.BTN_STOP, role="danger",
                                       parent=self._content)
         self._cancel_btn.setFixedWidth(120)

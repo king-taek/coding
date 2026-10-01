@@ -11,8 +11,7 @@
   골라도 아직 눌리면 안 된다 — 누르면 그 자리에서 import 가 터진다.
 - 활성 여부의 주인은 여전히 ``SetupPage._validate`` 하나다.  준비 완료를 별도
   경로로 ``setEnabled`` 하면 다음 폴더 입력 디바운스가 그것을 덮어쓴다.
-- 준비 전에 색 모드를 바꿔도(페이지 재생성) 깨지지 않고, 뒤늦게 도착한 준비 완료가
-  나머지 페이지를 **한 번만** 만든다.
+- 준비 완료가 두 번 와도 나머지 페이지를 **한 번만** 만든다.
 """
 
 from __future__ import annotations
@@ -27,7 +26,6 @@ pytest.importorskip("PyQt6.QtWidgets")
 
 from aoi_verification.app import i18n                        # noqa: E402
 from aoi_verification.app.ui import main_window as mw        # noqa: E402
-from aoi_verification.app.ui import theme                    # noqa: E402
 
 
 @pytest.fixture
@@ -39,13 +37,11 @@ def window(qapp, monkeypatch, isolated_cache):
     # 스레드를 띄우지 않는다 — 테스트가 `_on_backend_loaded` 를 직접 부른다.
     monkeypatch.setattr(mw.MainWindow, "_start_backend_import_async",
                         lambda self: None)
-    theme.set_color_mode("light")
     w = mw.MainWindow()
     yield w
     w.close()
     w.deleteLater()
     qapp.processEvents()
-    theme.set_color_mode("light")
 
 
 def _fill_valid_dirs(page, tmp_path) -> None:
@@ -101,30 +97,6 @@ def test_ready_twice_does_not_duplicate_pages(window):
     window._on_backend_loaded()
     window._on_backend_loaded()
     assert window._stack.count() == 5, "준비 완료가 두 번 와서 페이지가 중복 생성됐다"
-
-
-def test_color_mode_change_before_ready_is_safe(window, qapp, tmp_path):
-    """준비 전 다크 전환 → 첫 화면만 재생성.  뒤늦은 준비 완료가 나머지를 만든다."""
-    window._on_appearance_changed("dark")
-    qapp.processEvents()
-    assert window._stack.count() == 1
-    assert window._select_page is None
-
-    window._on_backend_loaded()
-    assert window._stack.count() == 5
-    page = window._setup_page
-    assert page.start_btn.text() == i18n.KO.BTN_START
-    _fill_valid_dirs(page, tmp_path)
-    assert page._validate() is True
-
-
-def test_color_mode_change_after_ready_rebuilds_all_five(window, qapp):
-    window._on_backend_loaded()
-    assert window._stack.count() == 5
-    window._on_appearance_changed("dark")
-    qapp.processEvents()
-    assert window._stack.count() == 5, "재생성 후 페이지 수가 달라졌다"
-    assert window._setup_page.start_btn.text() == i18n.KO.BTN_START
 
 
 def test_setup_page_alone_is_not_locked(qapp):

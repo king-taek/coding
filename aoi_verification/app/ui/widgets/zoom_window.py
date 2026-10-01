@@ -38,7 +38,7 @@ class _MidTile(QFrame):
 
     ★ 선택 강조는 **QSS 동적 프로퍼티**(`role="card-soft"` + `inlineSelected`)로 한다 —
       thumb_grid._ThumbTile 과 같은 경로다.  예전엔 스코프 없는 `QWidget {…}` 인스턴스
-      스타일이었는데, 색이 생성 시점에 굳어 다크 전환이 안 먹었고 자식 라벨까지 테두리가
+      스타일이었는데, 색이 생성 시점에 굳었고 자식 라벨까지 테두리가
       번져 캡션이 `border:none` 으로 개별 우회해야 했다(그 우회도 함께 지웠다).
     """
 

@@ -4,7 +4,7 @@
 '지금 켜져 있나?'를 멀리서 못 읽는다.  이 위젯은 **행 전체가 클릭영역**(집안 관습)이고
 노브 위치·트랙 색으로 상태를 크게 말한다.
 
-색은 전부 ``theme`` 토큰에서 읽으므로 라이트/다크 팔레트를 자동으로 따른다.
+색은 전부 ``theme`` 토큰에서 읽는다.
 노브 이동은 ``motion`` 을 거치므로 '모션 줄이기'·헤드리스에서는 즉시 스냅한다.
 """
 
@@ -12,16 +12,16 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PyQt6.QtCore import (QEvent, QPointF, QRectF, QSize, Qt,
+from PyQt6.QtCore import (QEvent, QRectF, QSize, Qt,
                           QVariantAnimation, pyqtSignal)
-from PyQt6.QtGui import QColor, QPainter, QPainterPath
+from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import (QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout,
                              QWidget)
 
 from .. import theme
 
 _KNOB_M = 3                      # 트랙 안쪽 여백
-# 행 전체가 클릭영역이므로 **행 높이**가 실제 타깃이다 — 설명 없는 스위치(어두운 화면)
+# 행 전체가 클릭영역이므로 **행 높이**가 실제 타깃이다 — 설명 없는 스위치
 # 에서도 WCAG 2.5.8(AA, 24px)을 넉넉히 넘기게 하한을 둔다.
 _ROW_MIN_H = 34
 
@@ -31,13 +31,10 @@ class ToggleSwitch(QWidget):
 
     toggled = pyqtSignal(bool)
 
-    def __init__(self, checked: bool = False, parent: Optional[QWidget] = None,
-                 *, glyph: bool = False) -> None:
+    def __init__(self, checked: bool = False,
+                 parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._checked = bool(checked)
-        # 노브 위에 해/달을 그릴지 — 다크 모드 스위치 **전용**이다(구조개편 24안).
-        # 일반 스위치(구형 엔진 등)에까지 달면 '켜짐/꺼짐' 말고 다른 뜻을 암시한다.
-        self._glyph = bool(glyph)
         self._pos = 1.0 if self._checked else 0.0     # 0=off, 1=on (노브 위치)
         self._pressed = False
         # ★ 애니메이션은 **한 번만** 만들어 재사용한다.  이전엔 토글마다 새로 만들면서
@@ -153,14 +150,14 @@ class ToggleSwitch(QWidget):
 
         # 포커스 링 — 키보드 사용자가 지금 어디 있는지 보이게.
         # ★ 링을 **트랙 안쪽**에 `FOCUS` 로 그리면 안 된다: ON 일 때 트랙이 `ACCENT` 인데
-        #   `FOCUS` vs `ACCENT` 는 1.23:1(라이트)/1.30(다크) 이라 링이 자기 트랙에
+        #   `FOCUS` vs `ACCENT` 는 1.23:1 이라 링이 자기 트랙에
         #   묻힌다 — 채운 primary 버튼에서 고친 것과 **같은 함정**이 커스텀 페인트
         #   위젯에 남아 있었다.  링 색을 트랙 상태에 맞춰 고른다.
         if self.hasFocus():
             from PyQt6.QtGui import QPen
             #   링은 **트랙 위에** 그려지므로 두 트랙 색(OFF=line_strong, ON=accent)
             #   모두와 대비되는 하나의 색을 쓴다: ON_ACCENT — OFF 3.59/6.24,
-            #   ON 6.50/8.57(실측).  FOCUS 는 OFF 트랙에서 1.78(다크)로 묻힌다.
+            #   ON 6.50/8.57(실측).
             ring = QColor(theme.ON_ACCENT)
             p.setBrush(Qt.BrushStyle.NoBrush)
             fp = QPen(ring)
@@ -174,51 +171,7 @@ class ToggleSwitch(QWidget):
         x = _KNOB_M + on * (w - knob_d - 2 * _KNOB_M)
         p.setBrush(QColor(theme.ON_ACCENT if enabled else theme.ELEV))
         p.drawEllipse(QRectF(x, _KNOB_M, knob_d, knob_d))
-        if self._glyph:
-            self._paint_glyph(p, QRectF(x, _KNOB_M, knob_d, knob_d), on, enabled)
         p.end()
-
-    @staticmethod
-    def _paint_glyph(p, knob: QRectF, on: float, enabled: bool) -> None:
-        """노브 위 해(off) ↔ 달(on) 크로스페이드 — 이동과 같은 곡선을 탄다.
-
-        ★ 글자가 아니라 **선과 도형**으로 그린다.  시안은 '폰트 문자(신규 아이콘
-        리소스 0)' 라고 했지만, 동봉 폰트(NanumSquare)에는 ☀(U+2600)·☾(U+263E)
-        글리프가 없어 PC 마다 대체 글꼴이 달라지거나 두부(□)가 나온다 — 같은
-        저장소에서 ✓(U+2713)로 이미 확인한 함정이다.  그려도 리소스는 0 이다.
-        ★ 색은 노브 위이므로 노브색의 반대편(ACCENT/LINE)을 쓴다 — 노브가
-        ON_ACCENT 라 잉크색을 그대로 얹으면 대비가 무너진다.
-        """
-        from PyQt6.QtGui import QPen
-
-        ink = QColor(theme.ACCENT if enabled else theme.LINE)
-        c = knob.center()
-        r = knob.width() / 2.0
-        # 해 — 작은 원 + 네 방향 짧은 광선.  off(=밝은 화면)일 때 진하다.
-        sun_a = max(0.0, 1.0 - on)
-        if sun_a > 0.01:
-            ink.setAlphaF(sun_a)
-            pen = QPen(ink)
-            pen.setWidthF(1.4)
-            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-            p.setPen(pen)
-            p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawEllipse(c, r * 0.34, r * 0.34)
-            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-                p.drawLine(QPointF(c.x() + dx * r * 0.56, c.y() + dy * r * 0.56),
-                           QPointF(c.x() + dx * r * 0.80, c.y() + dy * r * 0.80))
-        # 달 — 원에서 원을 빼 만든 초승달.  on(=어두운 화면)일 때 진하다.
-        if on > 0.01:
-            ink2 = QColor(theme.ACCENT if enabled else theme.LINE)
-            ink2.setAlphaF(min(1.0, on))
-            path = QPainterPath()
-            path.addEllipse(c, r * 0.52, r * 0.52)
-            cut = QPainterPath()
-            cut.addEllipse(QPointF(c.x() + r * 0.30, c.y() - r * 0.16),
-                           r * 0.46, r * 0.46)
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(ink2)
-            p.drawPath(path.subtracted(cut))
 
 
 class SwitchRow(QWidget):
@@ -238,7 +191,7 @@ class SwitchRow(QWidget):
     toggled = pyqtSignal(bool)
 
     def __init__(self, title: str, *, description: str = "",
-                 checked: bool = False, glyph: bool = False,
+                 checked: bool = False,
                  parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setMinimumHeight(_ROW_MIN_H)
@@ -271,7 +224,7 @@ class SwitchRow(QWidget):
                                   QSizePolicy.Policy.Preferred)
         row.addWidget(text_host, stretch=1)
 
-        self.switch = ToggleSwitch(checked, parent=self, glyph=glyph)
+        self.switch = ToggleSwitch(checked, parent=self)
         self.switch.toggled.connect(self.toggled.emit)
         row.addWidget(self.switch, alignment=Qt.AlignmentFlag.AlignVCenter)
 

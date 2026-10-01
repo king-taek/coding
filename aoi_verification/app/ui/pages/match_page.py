@@ -283,7 +283,7 @@ class MatchPage(ProgressRowMixin, QWidget):
         self._img_scroll.setWidgetResizable(False)
         self._img_scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._img_scroll.setWidget(self.center_img)
-        # 색은 QSS 가 준다 — 구우면 색 모드 전환 때 이 영역만 옛 색으로 남는다.
+        # 색은 QSS 가 준다 — 인스턴스 스타일시트로 굽지 않는다.
         self._img_scroll.setProperty("role", "imageViewport")
         self._img_scroll.setMinimumHeight(300)
         self._img_scroll.setSizePolicy(QSizePolicy.Policy.Expanding,

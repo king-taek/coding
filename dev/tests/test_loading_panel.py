@@ -136,11 +136,8 @@ def test_exit_travels_less_than_entry(qapp):
 
 def test_scrim_lets_the_page_show_through(qapp):
     """스크림이 화면을 '전부 가리지' 않아야 한다 — 완전 불투명 금지."""
-    for mode in theme.color_mode_keys():
-        theme.set_color_mode(mode)
-        assert theme.SCRIM_RGBA[3] < 255
-        assert theme.SCRIM_RGBA[3] <= 130, f"{mode}: 너무 진하다"
-    theme.set_color_mode("light")
+    assert theme.SCRIM_RGBA[3] < 255
+    assert theme.SCRIM_RGBA[3] <= 130, "너무 진하다"
 
 
 def test_panel_has_own_surface_for_readability(qapp):

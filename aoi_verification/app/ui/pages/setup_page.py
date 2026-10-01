@@ -19,7 +19,6 @@ from ...utils import prefs as _prefs
 from ... import config
 from ...utils.prefs import AutomationLevel, EngineMode
 from ..widgets.app_logo import build_logo_label
-from ..widgets.collapsible_section import CollapsibleSection
 from ..widgets.neon_button import NeonButton
 from ..widgets.neon_card import NeonCard
 from ..widgets.no_wheel_slider import NoWheelDoubleSpinBox, NoWheelSlider
@@ -73,9 +72,8 @@ _SIDE_BY_SIDE_MIN_W = 900
 # 살아 있는 die 기하 스캔을 여기에 붙잡아 둔다 — **페이지의 자식으로 두지 않는다.**
 #
 # ★ 이유: 실행 중인 QThread 가 파괴되면 Qt 는 "QThread: Destroyed while thread is
-#   still running" 으로 프로세스를 죽인다.  다크 모드 전환은 이 페이지를 다시 만들 수
-#   있어(`main_window._build_setup_page`), 스캔이 끝나기 전에 페이지가 사라지면 정확히
-#   그 일이 벌어진다.  부모를 떼고 여기서 참조를 쥐고 있다가 `finished` 에서 놓아 주면
+#   still running" 으로 프로세스를 죽인다.  스캔이 끝나기 전에 페이지가 사라지면(창
+#   닫기 등) 정확히 그 일이 벌어진다.  부모를 떼고 여기서 참조를 쥐고 있다가 `finished` 에서 놓아 주면
 #   페이지가 언제 죽든 스레드는 자기 수명을 다 살고 조용히 사라진다
 #   (`widgets/zoom_window.py` 의 `_LIVE_LOADERS` 와 같은 패턴).
 _LIVE_DIE_SCANS: set = set()
@@ -157,18 +155,9 @@ class SetupPage(QWidget):
 
     start_requested = pyqtSignal(object)             # SetupInput
     update_check_requested = pyqtSignal()            # '업데이트 확인' 버튼
-    # 색 모드 변경 → 페이지 재생성 요청.  ★ 새 색 모드를 **인자로 싣는다** — 받는 쪽이
-    # prefs 를 다시 읽지 않아도 되게(전환 경로에서 디스크 왕복을 한 번 줄인다).
-    appearance_changed = pyqtSignal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        # 손잡이 이동이 끝난 뒤 색을 갈아 끼우기 위한 지연 타이머(연타 합치기 겸용).
-        # ★ 부모 있는 타이머여야 페이지가 파괴될 때 함께 죽는다(_on_dark_mode_toggled 주석).
-        self._pending_color_mode: Optional[str] = None
-        self._appearance_timer = QTimer(self)
-        self._appearance_timer.setSingleShot(True)
-        self._appearance_timer.timeout.connect(self._emit_appearance_changed)
         # 무거운 구성 요소(영상 처리·가속)가 준비됐는가 — 준비 전엔 [검증 시작] 을
         # 잠근다.  ★ 기본은 True 다: 이 페이지를 단독으로 띄우는 곳(테스트·미리보기)
         # 에서 버튼이 영원히 잠기면 안 된다.  메인 창이 곧바로 False 로 뒤집는다.
@@ -221,8 +210,6 @@ class SetupPage(QWidget):
             "QScrollArea > QWidget#qt_scrollarea_viewport { background: transparent; }"
         )
         outer.addWidget(scroll)
-        # 색 모드 전환은 이제 이 페이지를 **버리지 않는다**(`main_window._recolor_in_place`).
-        # 스크롤 위치·입력값이 저절로 남으므로 옮겨 심는 코드가 필요 없다.
         self._scroll = scroll
 
         host = QWidget()
@@ -256,8 +243,7 @@ class SetupPage(QWidget):
             outer.addWidget(bar)
 
         # ★ 첫 포커스를 첫 입력란에 둔다.  이전엔 탭 체인 첫 정지가 보기 옵션이라,
-        #   키보드 사용자가 폴더를 입력하려면 화면을 다시 만드는 컨트롤(다크 모드)을
-        #   먼저 지나야 했다.  QTimer 로 미루는 이유는 show() 이후에야 포커스가 실제로
+        #   키보드 사용자가 폴더를 입력하려면 그 컨트롤을 먼저 지나야 했다.  QTimer 로 미루는 이유는 show() 이후에야 포커스가 실제로
         #   들어가기 때문.
         QTimer.singleShot(0, self._focus_first_field)
 
@@ -291,7 +277,6 @@ class SetupPage(QWidget):
         root.addWidget(self._build_top_bar())
         root.addWidget(self._build_device_row())
         self._place_setting_cards(root)
-        root.addWidget(self._build_howto())
         root.addStretch(1)
         if not self._pinned_action_bar():
             root.addWidget(self._build_action_bar())
@@ -356,13 +341,11 @@ class SetupPage(QWidget):
                              else Qt.AlignmentFlag(0))
 
     def _build_top_bar(self) -> QWidget:
-        """로고 + 제목 + 모드 배지 + 보기 옵션 — **한 줄**.
+        """로고 + 제목 + 모드 배지 — **한 줄**.
 
-        ★ 예전엔 보기 옵션이 제목 **위**의 별도 줄이었다.  '모션 줄이기' 까지 있던
-        시절엔 한 줄에 몰면 800×600 에서 가로가 넘쳤지만, 지금 보기 옵션은 다크 모드
-        스위치 하나뿐이라 같은 줄에 들어간다.  줄을 하나로 합치면 제목 위의 빈 띠
-        (툴바 높이 + 줄 간격) 가 통째로 사라져 제목이 화면 맨 위로 올라온다
-        (사용자 요청: '상단 여백이 너무 많다').
+        ★ 예전엔 보기 옵션이 제목 **위**의 별도 줄이었다가 같은 줄로 합쳐졌고, 보기
+        옵션을 없애면서 그 자리도 사라졌다.  제목 위에 빈 띠가 없어 제목이 화면 맨
+        위로 올라온다(사용자 요청: '상단 여백이 너무 많다').
 
         ★ 로고도 이 줄의 **왼쪽 끝**이다(사용자 요청: "메인 로고가 너무 많은 부분을
         차지함").  예전엔 제목 위에 44px 밴드로 따로 있어 1600px 폭에서 작은 마크
@@ -371,7 +354,7 @@ class SetupPage(QWidget):
         `test_setup_top_spacing` 이 800px 가로 넘침 없음으로 지킨다."""
         host = QWidget(self)
         # 로고·제목 왼쪽, 모드 배지 오른쪽.  배지가 제목과 같은 줄에 있어야 '무슨 모드야'가
-        # 첫 시선에 들어온다.  보기 옵션은 그 오른쪽 끝.
+        # 첫 시선에 들어온다.
         tr = QHBoxLayout(host)
         tr.setContentsMargins(0, 0, 0, 0)
         tr.setSpacing(16)
@@ -380,8 +363,6 @@ class SetupPage(QWidget):
         tr.addWidget(self._build_title())
         tr.addStretch(1)
         tr.addWidget(self._build_mode_badge(),
-                     alignment=Qt.AlignmentFlag.AlignVCenter)
-        tr.addWidget(self._build_view_options(),
                      alignment=Qt.AlignmentFlag.AlignVCenter)
         return host
 
@@ -458,29 +439,6 @@ class SetupPage(QWidget):
         title.setProperty("role", "title")
         self._title_label = title
         return title
-
-    def _build_howto(self) -> QWidget:
-        """사용 방법 안내 — 접을 수 있는 섹션 (기본 접힘)."""
-        _prefs_now = _prefs.load()
-        self._howto_section = CollapsibleSection(
-            open_label=i18n.KO.HOWTO_TOGGLE_OPEN,
-            close_label=i18n.KO.HOWTO_TOGGLE_CLOSE,
-            expanded=bool(_prefs_now.howto_expanded),
-            parent=self,
-        )
-        howto_card = NeonCard(role="card-soft", parent=self._howto_section)
-        howto_title = QLabel(i18n.KO.SETUP_HOW_TO_USE_TITLE, howto_card)
-        howto_title.setProperty("role", "cardTitle")
-        howto_card.body().addWidget(howto_title)
-        howto_body = QLabel(i18n.KO.SETUP_HOW_TO_USE_BODY, howto_card)
-        howto_body.setWordWrap(True)
-        howto_body.setProperty("role", "bodyText")
-        howto_card.body().addWidget(howto_body)
-        self._howto_section.add_content_widget(howto_card)
-        self._howto_section.toggled.connect(
-            lambda expanded: _prefs.patch(howto_expanded=bool(expanded))
-        )
-        return self._howto_section
 
     # ★ 나란히 둘지는 **카드가 요구하는 폭**으로 판단한다 — '900px' 같은 매직 넘버는
     #   맞출 수 없다.  실제로 900 으로 두었더니 1000px 창에서 두 카드가 나란히 서고
@@ -866,7 +824,6 @@ class SetupPage(QWidget):
 
         self.legacy_switch = SwitchRow(
             i18n.KO.LEGACY_SWITCH_TITLE,
-            description=i18n.KO.LEGACY_SWITCH_DESC,
             checked=_legacy_on,
             parent=engine_card,
         )
@@ -1537,67 +1494,6 @@ class SetupPage(QWidget):
         _prefs.patch(threshold=v / 100.0)
 
     # ------------------------------------------------------------------
-    def _build_view_options(self) -> QWidget:
-        """상단 보기 옵션 줄 — '다크 모드' 하나.
-
-        ※ 옆에 '모션 줄이기' 스위치가 있었으나 사용자 결정으로 제거했다(모션은 항상
-        켜진다).  화면에 남는 보기 옵션은 색 모드 하나뿐이다."""
-        host = QWidget(self)
-        row = QHBoxLayout(host)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(14)
-        row.addStretch(1)
-
-        self._dark_switch = SwitchRow(
-            i18n.KO.DARK_MODE_LABEL, parent=host, glyph=True,
-            checked=theme.is_dark_mode(),
-        )
-        self._dark_switch.setToolTip(i18n.KO.DARK_MODE_TOOLTIP)
-        self._dark_switch.toggled.connect(self._on_dark_mode_toggled)
-        row.addWidget(self._dark_switch)
-        return host
-
-    def _on_dark_mode_toggled(self, on: bool) -> None:
-        """다크 모드 전환 요청 — 실제 적용(페이지 재생성)은 main_window 가 한다.
-
-        ★ 이 지연값에는 **상반된 두 결정**이 쌓여 있다.  처음에는 손잡이 이동
-        (당시 160ms)이 끝난 뒤 무거운 일을 시작했는데, 그 일이 메인 스레드를
-        실측 223ms 잡아 **누르고 색이 움직이기까지 383ms** 였다 — 그래서 지연을
-        0 으로 내렸다.  구조개편 24안이 그 전제를 바꿨다: 재색의 정지시간을
-        ~30ms 로 쪼갰으므로(`main_window._repolish_visible_now`) 이제 노브가 얼지
-        않는다.  다시 '노브 도착(180ms) → 재색' 순서로 두면 색이 움직이기까지
-        ~210ms 로 지연 0 시절(223ms)보다 **오히려 빠르고**, 그 180ms 동안 노브가
-        실제로 움직여 '눌렸다' 는 답을 준다(예전에는 그 구간이 통째로 얼었다).
-
-        ★ 타이머 자체는 **남긴다.**  두 가지를 계속 해 준다:
-        (a) 연타를 **한 번으로 합친다**(prefs 는 마지막 값, emit 은 한 번),
-        (b) 클릭 핸들러가 **먼저 반환**되게 해 눌린 상태가 화면에 반영된다.
-        ★ 정적 `QTimer.singleShot` 금지 — 부모 있는 타이머여야 페이지가 파괴될 때 함께
-        죽는다(죽은 위젯으로 콜백이 들어가면 세그폴트다, 전례 있음).
-        """
-        key = "dark" if on else "light"
-        self._pending_color_mode = key
-        _prefs.patch(color_mode=key)       # 재생성된 페이지가 prefs 에서 상태를 복원한다
-        # ★ 구조개편 24안 — **노브가 도착한 뒤** 재색을 시작한다(180ms).
-        #   ⚠ 이 값은 위 주석의 '지연 0' 결정을 **되돌린 것**이다.  그때 지연을 없앤
-        #   이유는 재색이 메인 스레드를 223ms 잡아 손잡이가 얼어붙었기 때문인데,
-        #   24안이 그 정지를 ~30ms 로 쪼갰다(main_window._repolish_visible_now).
-        #   멈칫이 사라졌으므로 이제는 '노브가 먼저 답하고 화면이 뒤따르는' 순서가
-        #   성립한다 — 누른 즉시 답이 오고, 총 180+280 = 460ms 안에 끝난다.
-        from .. import motion
-        self._appearance_timer.start(motion.DUR_KNOB)
-
-    def _emit_appearance_changed(self) -> None:
-        """손잡이 이동이 끝났다 — 이제 색을 갈아 끼운다(연타는 여기서 한 번으로 합쳐진다)."""
-        key = self._pending_color_mode or theme.COLOR_MODE
-        self._pending_color_mode = None
-        if key == theme.COLOR_MODE:
-            return                         # 연타로 제자리 → 재생성할 이유가 없다
-        # ★ 색 모드를 **인자로 실어 보낸다** — 받는 쪽이 prefs 를 다시 읽지 않게(디스크
-        #   왕복 2회 → 1회.  회사 환경에서 prefs 가 네트워크 홈에 있으면 이 한 번이 크다).
-        self.appearance_changed.emit(key)
-
-    # ------------------------------------------------------------------
     def _on_start(self) -> None:
         inp = self._collect_input()
         if inp is None:
@@ -1717,12 +1613,6 @@ class SetupPage(QWidget):
                            for _t, sel in rows],
         )
 
-    # ── 작성 중 입력 이관 (색 모드/배치 전환 시) ─────────────────────────────
-    # 색 모드·배치를 바꾸면 페이지를 파괴하고 다시 만든다(구운 색 교체).  '세션 시작
-    # 전'은 **아무것도 입력하지 않았다는 뜻이 아니다** — 폴더·호기·진행 범위·손으로 고른
-    # 슬롯·허용 오차는 [검증 시작] 전까지 prefs 에 없다.  그대로 파괴하면 조용히 사라지고,
-    # 특히 '일부 슬롯 12/40' 이 '모든 슬롯'으로 되돌아가면 40슬롯을 통째로 돌리게 된다.
-    # 그래서 재생성 전에 여기서 걷어 두고, 새 페이지에 다시 심는다.
     # ------------------------------------------------------------------
     def apply_state(self, ref_root: str, val_root: str,
                     ref_machine: str, val_machine: str,

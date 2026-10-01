@@ -123,10 +123,3 @@ def test_tooltip_matches_the_real_keys(qapp):
             assert btn.toolTip() == tip
     finally:
         page.deleteLater()
-
-
-def test_how_to_use_body_agrees_with_the_keys(qapp):
-    """셋업의 '사용 방법' 도 같은 방향을 말해야 한다(문서 두 곳이 갈리면 안 된다)."""
-    body = i18n.KO.SETUP_HOW_TO_USE_BODY
-    assert "→ = 검증" in body and "← = 제외" in body
-    assert "[✕ 제외] / [✓ 검증]" in body, "화면 순서와 같게 적는다"

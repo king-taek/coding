@@ -21,7 +21,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from string import Template
 
-from .. import i18n as _i18n
 from ..config import Fonts
 
 
@@ -34,10 +33,10 @@ class Profile:
     font_subtitle: int = 15
     font_caption: int = 12
     # ★ **읽어야 하는** 캡션 등급(통계 타일 캡션·타일 파일명)은 12px 로는 WCAG 4.5:1 을
-    #   실측에서 못 넘겼다 — 색 문제가 아니다(토큰 조합은 라이트 5.65~16.67, 다크
-    #   5.41~15.27 로 전부 통과).  12px 에서는 획이 1px 미만이라 **렌더된 픽셀이 지정색에
-    #   도달하지 못한다**(실측 3.58~4.23:1).  가장 진한 단일 픽셀로 재도 다크 4.61 로 겨우
-    #   걸쳐, 색을 더 진하게 하는 것으로는 한계였다.  그래서 크기·굵기를 올린다.
+    #   실측에서 못 넘겼다 — 색 문제가 아니다(토큰 조합은 5.65~16.67 로 전부 통과).
+    #   12px 에서는 획이 1px 미만이라 **렌더된 픽셀이 지정색에 도달하지 못한다**
+    #   (실측 3.58~4.23:1).  색을 더 진하게 하는 것으로는 한계였다.  그래서 크기·굵기를
+    #   올린다.
     #   ※ `font_caption`(12px) 은 판정 칩처럼 **폭이 고정된** 자리가 계속 쓴다 — 그 값을
     #     올리면 칩(chip_w=88)이 넘친다.  등급을 나누는 이유가 그것이다.
     #   회귀 가드: `dev/tests/test_caption_contrast.py`
@@ -78,15 +77,11 @@ class Profile:
     motion_scale: float = 0.8       # 제도 시트답게 담백한 모션
 
 
-# ── 색 — 라이트/다크 두 팔레트.  구조(PROFILE)는 공유하고 색만 교체한다. ────────
-#
-# 다크는 라이트의 단순 반전이 아니다.  '도면' 의 야간판은 **불 끈 제도실**이다 —
-# 같은 벨럼 시트를 어둡게 한 무채·따뜻한 바탕에, 청사진 블루는 잉크로만 남는다.
-# 웜-무채 바탕 위에서는 같은 블루가 더 유채로 읽혀 '강조 하나' 원칙이 오히려 또렷해진다.
+# ── 색 — 벨럼(밝은 제도지) 단일 팔레트.  화면은 이 색으로 고정이다. ─────────────
 _LIGHT: dict[str, str] = {
     "bg": "#ECE9E2",        # 벨럼 바탕
-    # 사진 판독 전용 바탕 — 결함 사진의 명암을 왜곡하지 않게 두 모드 모두 순검정이다
-    # (의도적으로 테마를 따르지 않는다).  리터럴을 흩뿌리지 말고 이 토큰을 참조할 것.
+    # 사진 판독 전용 바탕 — 결함 사진의 명암을 왜곡하지 않게 순검정이다
+    # (의도적으로 화면 색을 따르지 않는다).  리터럴을 흩뿌리지 말고 이 토큰을 참조할 것.
     "viewer_bg": "#000000",
     "panel": "#F5F3ED",     # 시트 면
     "elev": "#FBFAF7",
@@ -112,71 +107,14 @@ _LIGHT: dict[str, str] = {
     "thumb_frame": "#A39D8F",   # 어두운 다이가 시트에 묻히지 않게
 }
 
-# ── 어두운 모드: **흑연(graphite)** ────────────────────────────────────────────
-#
-# 라이트가 '벨럼 시트'(밝은 제도지)라면 다크는 **같은 시트의 불을 끈 것**이다 —
-# 무채·따뜻한 어두운 제도지에 흑연 선, 청사진 블루는 잉크로만 쓴다.
-# 웜-무채 바탕 위에서는 같은 블루 강조가 훨씬 유채로 읽혀 '강조 하나'가 또렷해진다.
-#
-# ※ 한때 세 번째 모드로 '청사진'(짙은 청색 감광지 + 백선, bg 채도지표 0.228)이 있었다.
-#   컨셉으로는 성립했지만 (a) 모드가 셋이라 '어두운 화면 켜기'를 boolean 으로 못 쓰고
-#   3칩 선택기가 필요했고 (b) 유지비가 두 배였다.  사용자 결정으로 흑연 하나만 남겨
-#   **다크 모드 토글**로 단순화했다.  키는 `"dark"` 라 기존 prefs 가 그대로 동작한다.
-# ※ 2026-08 구조개편 24안 — **팔레트 ① '덜 어두운 흑연'** 채택.  면·선을 한 단씩
-#   밝혀 다크에서도 카드/행/시트의 층이 보이게 한다(예전 bg 1C1A15 는 panel 과의
-#   차이가 눈으로 거의 안 잡혔다).  면을 밝히면 그 위 잉크의 대비 **여유가 줄어들므로**
-#   ink2·mute·thumb_frame 도 같은 폭으로 한 단 밝혀 균형을 맞춘다 — 시안이 그린 값이
-#   그대로 이 값들이다.  단 `line` 만은 시안값 #8A8271 이 elev(#403B30) 위에서 2.92 로
-#   저장소 자체 게이트(비문자 3.0, `test_a11y_controls`)를 0.08 차이로 못 넘겨
-#   #8E8675 로 한 단 올렸다.
-_DARK: dict[str, str] = {
-    "bg": "#2B2820",        # 불 끈 제도지(팔레트 ①)
-    "viewer_bg": "#000000",   # 라이트와 같다 — 사진 판독 바탕은 테마를 따르지 않는다
-    "panel": "#363228",
-    "elev": "#403B30",
-    "line": "#8E8675",      # 흑연 눈금 — elev 3.08 / panel 3.54 / bg 4.08
-    "line2": "#4A453B",     # 장식 전용
-    "line_strong": "#9A9280",   # 상호작용 경계 — elev 에서도 3.60
-    "ink": "#F3F0E8",       # 흑연 선(밝게)
-    "ink2": "#D6D0C2",
-    "mute": "#AEA798",      # panel 5.34 / elev 4.66 — 면을 밝힌 만큼 같이 올렸다
-                            # (시안값 ABA495 는 statTile(elev) 위에서 4.49 로 캡션 게이트 4.5 미달)
-    "accent": "#8FBEEA",    # 청사진 블루 — 웜 무채 바탕에서 유일한 유채
-    "accent_hover": "#A6CDF1",
-    "accent_pressed": "#76A9DC",
-    "on_accent": "#16140F",
-    "pass": "#8ACB8E",
-    "danger": "#FFA398",
-    # ★ 채도 0.485 로 accent(0.389)를 이기고 있었다 — 경고가 강조보다 튀면 '강조 하나'가
-    #   깨진다.  0.327 로 낮춘다(면 대비 9.52/10.55 로 게이트는 여유).
-    "warn": "#DFC796",
-    "focus": "#ABCEF6",
-    "thumb_frame": "#7A7263",
-}
+COLORS: dict[str, str] = dict(_LIGHT)
 
-PALETTES: dict[str, dict[str, str]] = {"light": _LIGHT, "dark": _DARK}
-# 사용자에게 보이는 이름 — dict 순서 = 밝음 → 어두움.
-COLOR_MODE_LABELS: dict[str, str] = {"light": _i18n.KO.COLOR_MODE_LIGHT,
-                                     "dark": _i18n.KO.COLOR_MODE_DARK}
-DEFAULT_COLOR_MODE = "light"
-COLOR_MODE = DEFAULT_COLOR_MODE
-# 사라진 모드 키 → 지금의 모드.  ★ 이게 없으면 흑연을 쓰던 사용자의 저장값
-# (`color_mode:"graphite"`)이 미지 값이 되어 `set_color_mode` 의 폴백으로 **라이트로
-# 튄다**.  삭제한 모드는 '가장 가까운 후신'으로 접어 주는 것이 사용자 입장의 정답이다.
-_COLOR_MODE_ALIASES: dict[str, str] = {
-    "graphite": "dark",      # 흑연이 곧 다크가 됐다
-    "cyanotype": "dark",     # 청사진(삭제) → 남은 어두운 모드로
-}
+# 사진 판독 뷰어의 잉크 — 바탕(`viewer_bg`)이 순검정이라 화면 색의 mute 를 쓰면 안 된다
+# (벨럼의 mute #5A574E 는 검정 위에서 거의 안 보인다).  검정 위 대비를 위한 고정 밝은 회색.
+_VIEWER_INK = "#AEA798"
 
-# LoadingOverlay 스크림 — 뒤 화면이 보이도록 옅게(모드별).
-# ★ 이전 값(96/120)은 (a) 다크의 뒤 텍스트 대비를 4.43 으로 떨궈 자체 게이트 5.0 을
-#   깼고 (b) 여유가 **적은** 다크에 오히려 더 두꺼운 디밍을 줘 거꾸로였다.
-#   실측: light 84 → 7.07 · dark 96 → 5.67 (둘 다 게이트 통과).
-_SCRIMS = {"light": (27, 26, 23, 84),
-           "dark": (11, 10, 8, 96)}         # 실측 뒤 텍스트 6.48 (게이트 5.0)
-
-COLORS: dict[str, str] = dict(_LIGHT)   # 현재 모드의 색(set_color_mode 가 갱신)
-SCRIM_RGBA = _SCRIMS[DEFAULT_COLOR_MODE]
+# LoadingOverlay·시트 스크림 — 뒤 화면이 보이도록 옅게(실측 뒤 텍스트 대비 7.07).
+SCRIM_RGBA = (27, 26, 23, 84)
 
 
 def _rgb(hexv: str) -> tuple:
@@ -248,7 +186,7 @@ def load_app_fonts() -> list[str]:
 
 PROFILE = Profile()
 
-# 인라인 f-string 스타일이 쓰는 색 상수 — set_color_mode() 가 일괄 갱신한다.
+# 인라인 f-string 스타일이 쓰는 색 상수 — 모듈 로드 시 `_init_colors()` 가 채운다.
 BG = PANEL = ELEV = LINE = LINE2 = LINE_STRONG = VIEWER_BG = ""
 INK = INK2 = MUTE = ""
 ACCENT = ACCENT_HOVER = ACCENT_PRESSED = ON_ACCENT = ""
@@ -313,38 +251,25 @@ def _derive_tokens() -> dict:
         "row_divider": c["line"],
         # 점수 컬럼 눈금 — ink 반투명이라 시트 위에서 또렷.
         "score_rule": _tint(c["ink"], 55),
-        # 사진 판독 뷰어의 잉크 — 바탕($viewer_bg)이 테마와 무관한 순검정이라
-        # 잉크도 테마를 따르면 안 된다(라이트의 mute 는 검정 위에서 거의 안 보인다).
-        # 그래서 활성 팔레트가 아니라 **흑연 팔레트의 mute** 를 고정으로 쓴다.
-        "viewer_ink": _DARK["mute"],
+        # 사진 판독 뷰어의 잉크 — 바탕($viewer_bg)이 순검정이라 고정색을 쓴다.
+        "viewer_ink": _VIEWER_INK,
     }
 
 
 TOKENS: dict[str, str] = {}
 
 
-def set_color_mode(name: str) -> None:
-    """색 모드를 ``"light"``/``"dark"`` 로 전환(미지 값은 기본 모드).
+def _init_colors() -> None:
+    """``COLORS`` 에서 모듈 전역 색 상수·틴트·``TOKENS`` 를 채운다.
 
-    모듈 전역과 ``TOKENS`` 를 일괄 갱신한다.  ``TOKENS`` 는 **in-place** 로 바꿔
-    이미 참조를 들고 있는 쪽이 끊기지 않게 한다.
-
-    주의: 위젯이 생성 시점에 ``theme.INK`` 같은 값을 f-string 으로 굽기 때문에, 이미
-    만들어진 화면에 즉시 반영하려면 호출부가 **페이지를 다시 만들어야** 한다
-    (``main_window`` 가 세션 시작 전에만 그렇게 한다)."""
-    global COLOR_MODE, COLORS, SCRIM_RGBA
+    ``TOKENS`` 는 **in-place** 로 바꿔 이미 참조를 들고 있는 쪽이 끊기지 않게 한다."""
     global BG, PANEL, ELEV, LINE, LINE2, LINE_STRONG, INK, INK2, MUTE, VIEWER_BG
     global ACCENT, ACCENT_HOVER, ACCENT_PRESSED, ON_ACCENT
     global PASS, DANGER, WARN, FOCUS, THUMB_FRAME
     global ACCENT_TINT, ACCENT_TINT_SOFT, PASS_TINT
     global DANGER_TINT, DANGER_TINT_SOFT, WARN_TINT
 
-    mode = normalize_color_mode(name)
-    COLOR_MODE = mode
-    c = PALETTES[mode]
-    COLORS = dict(c)
-    SCRIM_RGBA = _SCRIMS[mode]
-
+    c = COLORS
     BG, PANEL, ELEV = c["bg"], c["panel"], c["elev"]
     VIEWER_BG = c["viewer_bg"]
     LINE, LINE2, LINE_STRONG = c["line"], c["line2"], c["line_strong"]
@@ -357,7 +282,7 @@ def set_color_mode(name: str) -> None:
 
     # ★ 알파 36 이면 선택 타일 **라벨**(accent)이 자기 틴트 위에서 4.66~4.87 로
     #   프로젝트 게이트(5.0)를 깬다 — 이전 대비표는 라벨-대-면만 재고 이 합성면
-    #   쌍을 빼놨다.  24 로 낮추면 최악 5.11(라이트·다크 전부 통과).
+    #   쌍을 빼놨다.  24 로 낮추면 최악 5.11 로 통과한다.
     ACCENT_TINT = _tint(ACCENT, 24)
     ACCENT_TINT_SOFT = _tint(ACCENT, 20)
     PASS_TINT = _tint(PASS, 30)
@@ -367,27 +292,6 @@ def set_color_mode(name: str) -> None:
 
     TOKENS.clear()
     TOKENS.update(_derive_tokens())
-
-
-def color_mode_keys() -> tuple[str, ...]:
-    return tuple(PALETTES.keys())
-
-
-def normalize_color_mode(name: str) -> str:
-    """저장된 색 모드 값 → 지금 존재하는 모드 키.  **순수 함수**(헤드리스 테스트 가능).
-
-    삭제된 모드는 폴백(기본=라이트)으로 떨구지 않고 ``_COLOR_MODE_ALIASES`` 로 '가장
-    가까운 후신'에 접는다.  흑연을 쓰던 사용자의 저장값 ``"graphite"`` 가 라이트로
-    튀면, 사용자 입장에서는 설정이 조용히 초기화된 것으로 보인다.
-    """
-    key = str(name or "").strip().lower()
-    key = _COLOR_MODE_ALIASES.get(key, key)
-    return key if key in PALETTES else DEFAULT_COLOR_MODE
-
-
-def is_dark_mode() -> bool:
-    """다크 모드 토글의 단일 출처 — 화면·prefs 가 같은 판단을 쓰게."""
-    return COLOR_MODE == "dark"
 
 
 def render_qss(template_text: str) -> str:
@@ -405,13 +309,11 @@ _QSS_RENDERED: dict[int, str] = {}      # TOKENS 지문 → 렌더 결과
 def apply_to_app(app) -> None:
     """style.qss 를 렌더해 앱 전체에 적용.
 
-    ★ 원문 읽기와 렌더 결과를 **캐시**한다.  다크 모드 전환은 이 함수를 매번 부르는데
-    style.qss 는 1,200 줄이라 '디스크 읽기 + ``Template.substitute``' 만으로 실측
-    55~99 ms 를 메인 스레드에서 먹었다 — 전환이 버벅이던 몫이다.  ``setStyleSheet``
-    자체의 비용은 남지만 그건 Qt 몫이라 우리가 줄일 수 없다.
+    ★ 원문 읽기와 렌더 결과를 **캐시**한다.  style.qss 는 1,200 줄이라 '디스크 읽기 +
+    ``Template.substitute``' 만으로 실측 55~99 ms 를 메인 스레드에서 먹는다.
 
-    캐시 키는 :data:`TOKENS` 의 지문이다 — 모드 이름으로만 잡으면 팔레트를 흔드는
-    테스트가 옛 렌더를 받는다.  지문 계산은 62 개 짧은 문자열이라 마이크로초다.
+    캐시 키는 :data:`TOKENS` 의 지문이다 — 팔레트를 흔드는 테스트가 옛 렌더를 받지
+    않게.  지문 계산은 62 개 짧은 문자열이라 마이크로초다.
     """
     global _QSS_SOURCE
     if _QSS_SOURCE is None:
@@ -427,5 +329,5 @@ def apply_to_app(app) -> None:
     app.setStyleSheet(rendered)
 
 
-# 모듈 로드 시 기본 모드 확정 — import 만 해도 전역·TOKENS 가 채워져 있다.
-set_color_mode(DEFAULT_COLOR_MODE)
+# 모듈 로드 시 확정 — import 만 해도 전역·TOKENS 가 채워져 있다.
+_init_colors()

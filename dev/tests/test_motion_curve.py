@@ -1,6 +1,6 @@
 """모션 곡선·지속시간 계약 — "곡선인데 등속처럼 보인다" 재발 방지.
 
-사용자 지적: 색 모드 전환이 **툭** 바뀌고 끝난다.  조사해 보니 곡선이 없어서가 아니라
+사용자 지적: 화면 전환이 **툭** 바뀌고 끝난다.  조사해 보니 곡선이 없어서가 아니라
 옛 곡선 `cubic-bezier(.16,1,.3,1)` 이 전체 시간의 절반 지점에서 이미 97.2% 진행돼,
 남은 절반의 변화가 0.03 이었다 — **불투명도 채널에서는 보이지 않는 양**이다.
 
@@ -55,18 +55,12 @@ def test_primary_curve_matches_the_documented_table():
             f"t={t} 에서 곡선이 표와 다르다"
 
 
-def test_soft_curve_matches_the_documented_table():
-    c = motion.EASE_SOFT
-    for t, expect in ((0.10, 0.272), (0.25, 0.577), (0.50, 0.872)):
-        assert c.valueForProgress(t) == pytest.approx(expect, abs=0.002)
-
-
 def test_curves_are_decelerating():
     """처음에 빠르고 끝으로 갈수록 느려진다(사용자 요구의 핵심)."""
-    for name, c in (("기본", motion.EASE_PRIMARY), ("완만", motion.EASE_SOFT)):
-        first = c.valueForProgress(0.25) - c.valueForProgress(0.0)
-        last = c.valueForProgress(1.0) - c.valueForProgress(0.75)
-        assert first > last * 3, f"{name} 곡선이 감속하지 않는다"
+    c = motion.EASE_PRIMARY
+    first = c.valueForProgress(0.25) - c.valueForProgress(0.0)
+    last = c.valueForProgress(1.0) - c.valueForProgress(0.75)
+    assert first > last * 3, "곡선이 감속하지 않는다"
 
 
 def test_change_is_spread_across_the_duration():
@@ -74,18 +68,10 @@ def test_change_is_spread_across_the_duration():
 
     옛 곡선 `cubic-bezier(.16,1,.3,1)` 은 이 값이 54% 였다(나머지 46% 의 시간 동안
     화면이 멈춰 있었다).  60% 를 하한으로 둔다."""
-    for name, c in (("기본", motion.EASE_PRIMARY), ("완만", motion.EASE_SOFT)):
-        span = _visible_span(c)
-        assert span >= 0.60, (
-            f"{name} 곡선의 보이는 구간이 {span:.0%} — 나머지 시간에 아무 일도"
-            " 일어나지 않아 '툭 끊긴다'고 읽힌다")
-
-
-def test_recolor_uses_the_softer_curve():
-    """색 모드 전환은 화면 전체 밝기가 뒤집히는 가장 큰 변화 — 더 완만하게(사용자 지정)."""
-    assert _visible_span(motion.EASE_SOFT) > _visible_span(motion.EASE_PRIMARY)
-    src = inspect.getsource(motion.crossfade_from)
-    assert "EASE_SOFT" in src
+    span = _visible_span(motion.EASE_PRIMARY)
+    assert span >= 0.60, (
+        f"곡선의 보이는 구간이 {span:.0%} — 나머지 시간에 아무 일도"
+        " 일어나지 않아 '툭 끊긴다'고 읽힌다")
 
 
 # ── 지속시간 ────────────────────────────────────────────────────────────
@@ -93,7 +79,6 @@ def test_user_specified_durations():
     """사용자가 실측 ms 로 지정한 값 — 바꾸려면 사용자에게 물어야 한다."""
     assert motion.DUR_SHEET == 400        # 작은 화면 팝업
     assert motion.DUR_LOADING == 500      # 로딩 화면 팝업
-    assert motion.DUR_RECOLOR == 700      # 색 모드 전환
 
 
 def test_specified_durations_are_not_scaled():

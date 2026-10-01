@@ -1,6 +1,6 @@
-"""구조 개편 — 여정 레일 · 헤더 진행 · 로딩 작업 큐 · 다크 팔레트 ①.
+"""구조 개편 — 여정 레일 · 헤더 진행 · 로딩 작업 큐 · QSS 렌더 캐시.
 
-디자인 결정(2026-08-30)의 회귀 가드다.  네 가지가 각각 실제 사고/지적에서 나왔다:
+디자인 결정(2026-08-30)의 회귀 가드다.  각각 실제 사고/지적에서 나왔다:
 
 1안-A **여정 레일** — 화면마다 뜻이 다르던 [← 설정으로] 를 없애고, 창 상단의 상시
   진행 지도가 복귀를 통일해서 맡는다.  '모르고 되돌아가 결정을 폐기' 가 이 앱의
@@ -10,8 +10,8 @@
   표제 바로 옆으로 올려 다섯 화면이 같은 자리를 쓴다.  하단 상태바는 현행 유지.
 11안-B **작업 큐** — 차단은 유지하되, 단계가 넘어가며 진행바가 0 으로 스냅해도
   '몇 개 남았나' 가 사라지지 않게 지나온 단계의 수치를 얼려 둔다.
-24안 **팔레트 ①** — 다크의 면·선을 한 단 밝혀 층이 보이게 한다.  면을 밝히면 그
-  위 잉크의 대비 여유가 줄어드므로 잉크도 함께 올라간다(게이트는 a11y 쪽이 잰다).
+24안 **QSS 렌더 캐시** — 스타일시트를 다시 적용할 때 style.qss 를 매번 읽고 렌더하지
+  않는다.
 """
 
 from __future__ import annotations
@@ -40,35 +40,12 @@ from aoi_verification.app.ui.widgets.loading_overlay import (    # noqa: E402
     LoadingOverlay)
 
 
-# ═══ 24안 — 팔레트 ① '덜 어두운 흑연' ═══════════════════════════════════════
-def test_dark_surfaces_are_layered_enough_to_see():
-    """면 셋(bg/panel/elev)이 눈으로 구분돼야 카드·행·시트의 층이 읽힌다.
-
-    ★ 팔레트 ① 이 바꾼 것은 면 사이의 **간격**이 아니라 면이 앉은 **높이**다
-    (옛/새 모두 단 차이는 평균 9 안팎).  어두울수록 같은 밝기 차이가 덜 보이므로
-    (Weber), 바닥을 25 → 38 로 들어 올리는 것만으로 같은 단이 눈에 잡힌다.
-    그래서 이 테스트는 '간격이 넓어졌는가' 가 아니라 **바닥이 다시 내려가지
-    않는가** 를 지킨다 — 그게 되돌리면 안 되는 결정이다."""
-    dark = theme.PALETTES["dark"]
-
-    def mean(hexv: str) -> float:
-        h = hexv.lstrip("#")
-        return sum(int(h[i:i + 2], 16) for i in (0, 2, 4)) / 3
-
-    bg, panel, elev = mean(dark["bg"]), mean(dark["panel"]), mean(dark["elev"])
-    assert bg < panel < elev, "다크의 면 위계가 무너졌다"
-    assert bg >= 34, f"다크 바탕이 다시 내려앉았다 (평균 {bg:.1f} — 팔레트 ① 은 38)"
-    assert panel - bg >= 8, f"panel 이 bg 위로 안 뜬다 (차이 {panel - bg:.1f})"
-    assert elev - panel >= 8, f"elev 가 panel 위로 안 뜬다 (차이 {elev - panel:.1f})"
-    # 그래도 '어두운 화면' 이어야 한다 — a11y 게이트(mean<90)보다 보수적으로 둔다.
-    assert bg < 60, "다크 바탕이 더 이상 어둡지 않다"
-
-
+# ═══ 24안 — QSS 렌더 캐시 ═══════════════════════════════════════════════════
 def test_apply_to_app_caches_the_rendered_qss(monkeypatch):
-    """색 모드를 오갈 때 style.qss 를 매번 디스크에서 읽고 렌더하지 않는다.
+    """스타일시트를 다시 적용할 때 style.qss 를 매번 디스크에서 읽고 렌더하지 않는다.
 
     1,200 줄 QSS 의 '읽기 + Template.substitute' 만으로 실측 55~99 ms 가 메인
-    스레드에서 사라졌다 — 다크 전환이 버벅이던 몫이다(24안 '버벅임 제거')."""
+    스레드에서 사라진다(24안 '버벅임 제거')."""
     calls: list[int] = []
     real = theme.render_qss
     monkeypatch.setattr(theme, "render_qss",
@@ -79,15 +56,9 @@ def test_apply_to_app_caches_the_rendered_qss(monkeypatch):
             pass
 
     app = _App()
-    start = theme.COLOR_MODE
-    try:
-        for mode in ("light", "dark", "light", "dark", "light"):
-            theme.set_color_mode(mode)
-            theme.apply_to_app(app)
-    finally:
-        theme.set_color_mode(start)
-    assert len(calls) <= 2, (
-        f"모드 2개에 렌더 {len(calls)} 회 — 캐시가 동작하지 않는다")
+    for _ in range(5):
+        theme.apply_to_app(app)
+    assert len(calls) <= 1, f"5회 적용에 렌더 {len(calls)} 회 — 캐시가 동작하지 않는다"
 
 
 # ═══ 11안-B — 로딩 패널의 작업 큐 ════════════════════════════════════════════
@@ -150,7 +121,6 @@ def window(styled_qapp, monkeypatch, isolated_cache):
     monkeypatch.setattr(mw.MainWindow, "_warmup_accel_async", lambda self: None)
     monkeypatch.setattr(mw.MainWindow, "_start_backend_import_async",
                         lambda self: None)
-    theme.set_color_mode("light")
     w = mw.MainWindow()
     w._build_remaining_pages()
     yield w
