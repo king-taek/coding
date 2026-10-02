@@ -1196,8 +1196,6 @@ REREVIEW_WARN_NO_DIE_MAP_FMT = (
 REREVIEW_WARN_ALIGN_FAIL_FMT = (
     "{wafer}: Map die {a}칸과 장비 die {b}칸이 맞춰지지 않아 칸이 어긋날 수 있습니다 — "
     "사진을 전부 재리뷰합니다.")
-# 엑셀 요약 '비고' — 정렬은 됐고 장비가 검사하지 않은 die 가 맵에만 있다(정보).
-REREVIEW_UNSCANNED_NOTE_FMT = "장비가 검사하지 않은 die {n}칸(Map 에만 있음) — 정렬에는 영향 없음"
 REREVIEW_WARN_FLIP_SUFFIX = " (뒤집힌 Map 과는 일치 — 방향 확인 필요)"
 REREVIEW_WARN_UNPLACED_FMT = "{wafer}: 좌표를 못 읽은 사진 {n}장은 재리뷰에 넣었습니다."
 REREVIEW_WARN_OFF_MAP_FMT = "{wafer}: Map 의 die 없는 칸에 찍힌 사진 {n}장은 재리뷰에 넣었습니다."
@@ -1245,11 +1243,6 @@ REREVIEW_FILE_TITLE_FMT = "{lot} AVAGO 재리뷰.xlsx"
 REREVIEW_VERDICT_HEADER = "판정"
 REREVIEW_DIE_HEADER = "die (col, row)"
 REREVIEW_DIE_CELL_FMT = "({col}, {row})"
-REREVIEW_SUMMARY_SHEET = "재리뷰 요약"
-REREVIEW_SUMMARY_COLS = ("Wafer", "전체 사진", "Map Reject die 제외", "재리뷰",
-                         "Good", "Reject 사진", "신규 Reject die", "Map Reject die",
-                         "Reject die 합계", "Map 파일", "비고")
-REREVIEW_SUMMARY_TOTAL = "합계"
 REREVIEW_MAP_LEGEND = "■ 파랑 = Map Reject(1차)   ■ 빨강 = 신규 Reject(재리뷰)   ·   노치 = 아래(FNLOC 180)"
 REREVIEW_MAP_NOT_ALIGNED = "Map 과 장비 die 를 대조하지 못해 신규 Reject 를 수정된 Map 에 표시하지 못했습니다"
 REREVIEW_MAP_NO_MAP = "Map 파일 없음"

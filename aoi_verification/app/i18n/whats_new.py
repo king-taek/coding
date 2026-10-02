@@ -18,6 +18,16 @@
 
 ENTRIES = [
     {
+        "id": "2026-10-02d",
+        "date": "2026-10-02",
+        "headline": "AVAGO 재리뷰 엑셀이\n더 간결해졌습니다",
+        "summary": "'재리뷰 요약' 시트를 없앴습니다.\n"
+                   "Wafer Map 의 'Notch' 는 웨이퍼 아래로 옮겨 die 를 가리지 않습니다.",
+        "others": [
+            ("Wafer Map", "Reject die 개수를 작게, 오른쪽 아래에"),
+        ],
+    },
+    {
         "id": "2026-10-02c",
         "date": "2026-10-02",
         "headline": "AVAGO 재리뷰: 슬롯 선택과\nLOT명 자동 입력",

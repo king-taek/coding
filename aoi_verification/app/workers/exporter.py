@@ -161,7 +161,7 @@ class ExcelExporter(QThread):
         super().__init__(parent)
         self._result = result
         # AVAGO 재리뷰 — 행은 재리뷰한 사진 전부(추출과 같은 C=사진·D=정보 모양)에 판정·die
-        # 열을 덧붙이고, '재리뷰 요약' 시트와 Reject die 맵 시트를 만든다.
+        # 열을 덧붙이고, Reject die 맵 시트를 만든다(요약 시트는 두지 않는다 — 사용자 결정).
         self._rereview = result.mode == REREVIEW_MODE
         # ``(RejectMap, 신규 Reject 칸, size_px) -> PNG`` — UI 계층이 넘긴다(맵 렌더러와 같은 이유).
         self._reject_map_renderer = reject_map_renderer
@@ -302,7 +302,7 @@ class ExcelExporter(QThread):
                    if self._one_side else [])
         sheet_rows = len(rows_input)
         if self._rereview:
-            # 시트: Reject → (Good 포함이면) 전체 → 재리뷰 요약 → Wafer Map (사용자 지정 순서).
+            # 시트: Reject → (Good 포함이면) 전체 → Wafer Map (사용자 지정 순서).
             rr_reject_rows = [r for r in rows_input if r[2].note == VERDICT_REJECT]
             rr_all_rows = rows_input if self._include_good else []
             sheet_rows = len(rr_reject_rows) + len(rr_all_rows)
@@ -347,7 +347,6 @@ class ExcelExporter(QThread):
                 self._build_ad_sheet(wb, title, index, rows)
                 self._add_rereview_columns(wb[title], rows)
                 index += 1
-            self._write_rereview_summary_sheet(wb, index=index)
         elif self._extract and (self._recipe_layout != RECIPE_LAYOUT_SINGLE
                               or len(lots) > 1):
             self._write_extract_sheets(wb, lots)
@@ -1417,54 +1416,6 @@ class ExcelExporter(QThread):
             d.value = (i18n.KO.REREVIEW_DIE_CELL_FMT.format(col=die[0], row=die[1])
                        if die else "—")
             d.alignment = center
-
-    def _write_rereview_summary_sheet(self, wb, *, index: int) -> None:
-        """웨이퍼별 숫자표 — 결과 화면과 **같은 함수**(`wafer_stats`)로 센다."""
-        from openpyxl.styles import Alignment, Font
-        from openpyxl.utils import get_column_letter
-
-        from ..coords import rereview as rr
-
-        ws = wb.create_sheet(title=i18n.KO.REREVIEW_SUMMARY_SHEET, index=index)
-        heads = i18n.KO.REREVIEW_SUMMARY_COLS
-        for k, text in enumerate(heads, start=1):
-            self._rr_header(ws.cell(row=1, column=k), text)
-            ws.column_dimensions[get_column_letter(k)].width = 14
-        ws.column_dimensions["A"].width = 18
-        ws.column_dimensions[get_column_letter(len(heads) - 1)].width = 22
-        ws.column_dimensions[get_column_letter(len(heads))].width = 60
-        ws.row_dimensions[1].height = 30
-        attrs = ("total", "excluded", "reviewed", "good", "reject",
-                 "new_reject_dies", "map_reject_dies", "total_reject_dies")
-        sums = dict.fromkeys(attrs, 0)
-        r = 2
-        for slot in sorted(self._result.rereview):
-            plan = self._result.rereview[slot]
-            st = rr.wafer_stats(plan, self._result.rereview_rejects(slot))
-            ws.cell(row=r, column=1, value=self._slot_with_number(slot))
-            for k, a in enumerate(attrs, start=2):
-                v = getattr(st, a)
-                sums[a] += v
-                ws.cell(row=r, column=k, value=v).alignment = Alignment(
-                    horizontal="center")
-            ws.cell(row=r, column=len(attrs) + 2,
-                    value=plan.reject_map.path.name if plan.reject_map
-                    else i18n.KO.REREVIEW_MAP_NO_MAP)
-            notes = rr.warning_lines({slot: plan})
-            if plan.unscanned:
-                notes.append(i18n.KO.REREVIEW_UNSCANNED_NOTE_FMT.format(
-                    n=len(plan.unscanned)))
-            note = ws.cell(row=r, column=len(attrs) + 3,
-                           value="\n".join(notes) or None)
-            note.alignment = Alignment(wrap_text=True, vertical="top")
-            r += 1
-        ws.cell(row=r, column=1, value=i18n.KO.REREVIEW_SUMMARY_TOTAL).font = Font(
-            bold=True)
-        for k, a in enumerate(attrs, start=2):
-            c = ws.cell(row=r, column=k, value=sums[a])
-            c.font = Font(bold=True)
-            c.alignment = Alignment(horizontal="center")
-        ws.freeze_panes = "B2"
 
     _RR_MAP_PX = 480       # 재리뷰 맵 한 변(px) — die 수천 칸이라 결함 맵보다 크게
 

@@ -279,7 +279,9 @@ def paint_reject_map(painter: QPainter, rect: QRectF, reject_map, new_cells=(),
 
     웨이퍼 원판 + 노치 홈 + die 격자 위에 1차 Map Reject 칸(주의색)과 재리뷰 신규 Reject
     칸(적색)을 칠한다.  맵 파일 그대로(첫 RowData = 위)이고 ``FNLOC:180`` 만 쓰므로 노치는
-    **아래**다(``wafer_txt`` 가 다른 값을 거른다) — 홈 옆에 'Notch' 를 적어 방향을 밝힌다.
+    **아래**다(``wafer_txt`` 가 다른 값을 거른다) — 원판 **아래** 빈 줄에 'Notch' 를 적어
+    방향을 밝힌다(원판 안에 적으면 die 를 가린다 — 사용자 지적).  ``label``(Reject die 수)은
+    같은 줄 오른쪽에 작게 적는다.
     die 칸 비율은 장비 pitch(``pitch``)를 따르고, 모르면 정사각으로 그린다.  원 중심은
     die 칸 묶음의 가운데로 잡는다(맵 파일에 중심 좌표가 없다)."""
     import math
@@ -301,7 +303,16 @@ def paint_reject_map(painter: QPainter, rect: QRectF, reject_map, new_cells=(),
             for x, y in ((box(i, j)[0], box(i, j)[1]), (box(i, j)[2], box(i, j)[3]),
                          (box(i, j)[0], box(i, j)[3]), (box(i, j)[2], box(i, j)[1])))
     r *= 1.03
-    m = _Mapper(rect, r)
+    # 아래 글자 줄 — 원판은 그 위 영역에 맞춘다(글자가 die 를 덮지 않게).
+    side = min(rect.width(), rect.height())
+    font = painter.font()
+    font.setPixelSize(max(9, round(side * 0.026)))
+    font.setBold(True)
+    fm = QFontMetricsF(font)
+    band = fm.height() + 4
+    disc = QRectF(rect.left(), rect.top(), rect.width(), rect.height() - band)
+    m = _Mapper(disc, r)
+    m.scale = min(disc.width(), disc.height()) * 0.49 / max(r, 1.0)
     painter.save()
     painter.setClipRect(rect)
     center = m.to_px(0.0, 0.0)
@@ -334,20 +345,22 @@ def paint_reject_map(painter: QPainter, rect: QRectF, reject_map, new_cells=(),
     painter.setPen(QPen(col["outline"], 1.5))
     painter.setBrush(Qt.BrushStyle.NoBrush)
     painter.drawPath(wafer)
-    # 노치 방향 표시 — 홈 바로 위에 'Notch'.
-    font = painter.font()
-    font.setPixelSize(max(9, round(min(rect.width(), rect.height()) * 0.03)))
-    font.setBold(True)
+    # 노치 방향 — 원판 **아래** 줄, 홈 바로 밑 가운데.
     painter.setFont(font)
     painter.setPen(col["text"])
-    fm = QFontMetricsF(font)
+    base = rect.bottom() - fm.descent() - 2
     txt = i18n.KO.REREVIEW_MAP_NOTCH
-    tw = fm.horizontalAdvance(txt)
-    painter.drawText(QPointF(notch_at.x() - tw / 2, notch_at.y() - nr - fm.descent() - 2),
-                     txt)
-    painter.restore()
+    painter.drawText(QPointF(notch_at.x() - fm.horizontalAdvance(txt) / 2, base), txt)
+    # Reject die 수 — 같은 줄 오른쪽 끝에 **작게**(본문보다 한 단계 아래, 굵기 없음).
     if label:
-        _paint_count(painter, rect, label, col)
+        small = painter.font()
+        small.setPixelSize(max(8, round(side * 0.022)))
+        small.setBold(False)
+        painter.setFont(small)
+        sfm = QFontMetricsF(small)
+        painter.drawText(QPointF(rect.right() - sfm.horizontalAdvance(label) - 4, base),
+                         label)
+    painter.restore()
 
 
 def render_reject_map_png(reject_map, new_cells, size: int, *, pitch=None,

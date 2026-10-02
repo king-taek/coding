@@ -275,19 +275,16 @@ def _column(ws, header: str, rows: range) -> list:
 
 
 def test_excel_reject_only_by_default(styled_qapp, lot, tmp_path):
-    """시트 순서(사용자 지정): Reject → 재리뷰 요약 → Wafer Map.  Good 제외면 '전체' 없음."""
+    """시트 순서(사용자 지정): Reject → Wafer Map.  Good 제외면 '전체' 없음, 요약 시트 없음."""
     K = i18n.KO
     wb = _export(lot, tmp_path, include_good=False)
-    assert wb.sheetnames == [K.REREVIEW_SHEET_REJECT, K.REREVIEW_SUMMARY_SHEET,
-                             K.WAFER_MAP_SHEET]
+    assert wb.sheetnames == [K.REREVIEW_SHEET_REJECT, K.WAFER_MAP_SHEET]
     rej = wb[K.REREVIEW_SHEET_REJECT]
     assert _column(rej, K.REREVIEW_VERDICT_HEADER, range(3, 6)) == ["Reject"] * 3
     assert rej.cell(row=6, column=1).value is None          # Good 행은 없다
     assert rej["C2"].value == "8"                            # LOT명 그대로(AOI-8 아님)
     dies = _column(rej, K.REREVIEW_DIE_HEADER, range(3, 6))
     assert dies[0] == dies[1] != dies[2]                     # a1·a2 는 같은 die
-    summ = wb[K.REREVIEW_SUMMARY_SHEET]
-    assert [c.value for c in summ[2]][1:9] == [5, 1, 4, 1, 3, 2, 4, 6]
     # 기존 Map · 수정된 Map 두 장.
     assert len(wb[K.WAFER_MAP_SHEET]._images) == 2
 
@@ -296,7 +293,7 @@ def test_excel_with_good_adds_all_sheet(styled_qapp, lot, tmp_path):
     K = i18n.KO
     wb = _export(lot, tmp_path, include_good=True)
     assert wb.sheetnames == [K.REREVIEW_SHEET_REJECT, K.REREVIEW_SHEET_ALL,
-                             K.REREVIEW_SUMMARY_SHEET, K.WAFER_MAP_SHEET]
+                             K.WAFER_MAP_SHEET]
     assert _column(wb[K.REREVIEW_SHEET_ALL], K.REREVIEW_VERDICT_HEADER,
                    range(3, 7)) == ["Reject", "Reject", "Reject", "Good"]
 
@@ -388,3 +385,25 @@ def test_end_to_end_rereview(qapp, lot, monkeypatch):
         assert session_mod.load() is None          # 이어하기에 남지 않는다
     finally:
         win.close()
+
+
+def test_notch_label_sits_below_the_dies(styled_qapp):
+    """'Notch' 글자는 원판 **아래**에 있다 — die 격자를 덮지 않는다(사용자 지적)."""
+    from PyQt6.QtGui import QImage
+
+    from aoi_verification.app.ui.widgets import wafer_map_view as wmv
+    from .test_rereview import _real_map_text
+
+    rm = rr.parse_map(_real_map_text(), Path("m"), WAFER)
+    img = QImage.fromData(wmv.render_reject_map_png(rm, frozenset(), 480,
+                                                    label="Reject die 4 (신규 0)"))
+    cols = wmv._colors()
+    grid = cols["grid"].rgb() & 0xFFFFFF
+    text = cols["text"].rgb() & 0xFFFFFF
+    mid = range(img.width() // 2 - 40, img.width() // 2 + 40)
+    grid_rows = [y for y in range(img.height())
+                 if any(img.pixel(x, y) & 0xFFFFFF == grid for x in mid)]
+    text_rows = [y for y in range(img.height())
+                 if any(img.pixel(x, y) & 0xFFFFFF == text for x in mid)]
+    assert grid_rows and text_rows
+    assert min(text_rows) > max(grid_rows)        # 글자는 die 격자보다 아래
