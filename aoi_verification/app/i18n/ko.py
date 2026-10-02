@@ -871,6 +871,7 @@ DEFECT_ABS_XY_LABEL = "wafer x / y"
 DEFECT_ABS_XY_FMT = "wafer x {x:.0f} / y {y:.0f} ㎛"
 
 # 화면 전용 라벨 — 파일 하나에서만 의미 있는 항목(엑셀에는 나가지 않는다).
+IMAGE_INFO_LOADING = "사진 정보를 불러오는 중"
 IMAGE_INFO_GROUP_FILE = "파일"
 IMAGE_INFO_GROUP_DEFECT = "결함 계측"
 IMAGE_INFO_COL_VALUE = "값"

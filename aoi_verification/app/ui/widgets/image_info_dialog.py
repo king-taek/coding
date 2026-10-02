@@ -32,6 +32,7 @@ Surface.flt)이다.  사진만 따로 복사한 폴더에서는 LIVE 형식 파�
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from PyQt6.QtCore import QObject, QThread, Qt, QTimer, pyqtSignal
@@ -47,6 +48,7 @@ from ...utils import image_io as _io
 from .. import theme
 from ..deferred import call_later
 from . import sheet_host as sheets
+from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
 
 # 미리보기 — 고정 정사각형이 아니라 폭 하한만 두고 세로는 표와 함께 늘어난다.
@@ -90,6 +92,13 @@ class _ScanLoader(QThread):
         self.signals = self._Signals()
 
     def run(self) -> None:      # type: ignore[override]
+        try:
+            self._run()
+        except Exception:                   # 예외로 끝나면 로딩 덮개가 영영 안 걷힌다
+            self.signals.done.emit(self._gen, scan_image.UNREADABLE,
+                                   None, None, None, "")
+
+    def _run(self) -> None:
         m = scan_image.resolve(self._path)
         if not m.ok:
             self.signals.done.emit(self._gen, m.status, None, None, None, "")
@@ -106,6 +115,43 @@ class _ScanLoader(QThread):
             self._gen, scan_image.OK, pil_to_qimage(crop),
             pil_to_qimage(full) if full is not None else None,
             tuple(cand.box), str(cand.path))
+
+
+class _InfoLoader(QThread):
+    """사진 정보 읽기(`single_info.describe`) + 미리보기 캐시 준비 — 둘 다 NAS 를 읽는다.
+
+    QPixmap 은 만들지 않는다(GUI 전용) — 미리보기는 캐시 파일만 만들어 두고, 메인 스레드가
+    그 캐시를 읽어 그린다."""
+
+    class _Signals(QObject):
+        done = pyqtSignal(int, object)                   # (세대, 정보 덩이 목록)
+
+    def __init__(self, path: Path, gen: int) -> None:
+        super().__init__()                  # 부모 없음(위 주석)
+        self._path, self._gen = path, gen
+        self.signals = self._Signals()
+
+    def run(self) -> None:      # type: ignore[override]
+        try:
+            groups = _describe(self._path)
+        except Exception:                   # 빈 표로라도 이어가야 덮개가 걷힌다
+            groups = []
+        self.signals.done.emit(self._gen, groups)
+
+
+def _describe(path: Path) -> list:
+    """정보 덩이 + 미리보기 캐시 예열(실패해도 메인 스레드가 폴백을 그린다)."""
+    groups = single_info.describe(path)
+    try:
+        _io.get_mid_path(path)
+    except Exception:
+        pass
+    return groups
+
+
+def _async_info() -> bool:
+    """헤드리스 테스트는 결정성을 위해 동기로 돈다(`zoom_window` 의 원본 로더와 같은 관례)."""
+    return os.environ.get("QT_QPA_PLATFORM", "") != "offscreen"
 
 
 class _ClickLabel(QLabel):
@@ -169,10 +215,12 @@ class ImageInfoDialog(QDialog):
         self._path: Path | None = None
         self._groups: list = []
         self._scan_gen = 0
+        self._info_gen = 0
         self._scan_crop: QImage | None = None
         self._scan_full: QImage | None = None
         self._scan_box = None
         self._scan_name = ""
+        self._loading = LoadingOverlay(self)
         self._build()
         if image_path:
             self.show_image(Path(image_path))
@@ -357,9 +405,29 @@ class ImageInfoDialog(QDialog):
 
     # ------------------------------------------------------------------
     def show_image(self, path: Path) -> None:
-        """사진을 조회해 미리보기와 계측 표를 갱신한다."""
+        """사진을 조회해 미리보기와 계측 표를 갱신한다.
+
+        정보 읽기·미리보기·Scan 은 전부 NAS 를 읽어 느리므로 로딩 표시를 띄우고 워커에서
+        돌린다.  덮개는 Scan 판정까지 끝나(또는 Scan 이 없다고 판정돼) 화면이 다 채워진
+        뒤에 걷힌다."""
         self._path = Path(path)
-        self._groups = single_info.describe(self._path)
+        self._info_gen += 1
+        self._scan_gen += 1               # 이전 사진의 Scan 결과가 늦게 와도 버린다
+        if not _async_info():
+            self._on_info_done(self._info_gen, _describe(self._path))
+            return
+        self._loading.show_overlay(i18n.KO.IMAGE_INFO_LOADING)
+        self._loading.set_progress(0, 0, i18n.KO.IMAGE_INFO_LOADING)   # busy — 0 에 멈추지 않는다
+        ld = _InfoLoader(self._path, self._info_gen)
+        ld.signals.done.connect(self._on_info_done)
+        _LIVE_SCAN_LOADS.add(ld)
+        ld.finished.connect(lambda: _LIVE_SCAN_LOADS.discard(ld))
+        ld.start()
+
+    def _on_info_done(self, gen: int, groups) -> None:
+        if gen != self._info_gen:
+            return
+        self._groups = groups
         self.pick_btn.setText(i18n.KO.IMAGE_INFO_PICK_ANOTHER)
         self._start_scan()
         self._render()
@@ -392,6 +460,7 @@ class ImageInfoDialog(QDialog):
     def _on_scan_done(self, gen, status, crop, full, box, name) -> None:
         if gen != self._scan_gen:
             return                      # 이미 다른 사진으로 넘어갔다
+        self._loading.hide_overlay()    # Scan 판정까지 끝나야 화면이 다 채워진 것
         if status == scan_image.OK and crop is not None:
             self._scan_crop, self._scan_full = crop, full
             self._scan_box, self._scan_name = box, name

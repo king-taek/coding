@@ -170,3 +170,26 @@ def test_pil_to_qimage_keeps_pixels(qapp):
     q = iid.pil_to_qimage(im)
     assert (q.width(), q.height()) == (3, 2)
     assert q.pixelColor(2, 1).red() == 250
+
+
+def test_drop_shows_loading_until_scan_settles(qapp, isolated_cache, tmp_path,
+                                               monkeypatch):
+    """사진을 놓으면 로딩 덮개가 뜨고, Scan 판정까지 끝나야 걷힌다."""
+    monkeypatch.setattr(iid, "_async_info", lambda: True)
+    dlg = iid.ImageInfoDialog()
+    dlg.resize(1100, 760)
+    dlg.show()
+    dlg.show_image(_wafer(tmp_path))
+    assert dlg._loading.isVisible()
+    assert _wait(lambda: dlg._scan_crop is not None)
+    assert _wait(lambda: not dlg._loading.isVisible(), 8000)
+    assert dlg._groups
+    dlg.close()
+    _idle()
+
+
+def test_stale_info_result_is_ignored(qapp, isolated_cache):
+    dlg = iid.ImageInfoDialog()
+    dlg._info_gen = 3
+    dlg._on_info_done(2, ["stale"])
+    assert dlg._groups == []
