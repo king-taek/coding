@@ -270,6 +270,50 @@ def render_map_png(data: Optional[MapData], size: int) -> bytes:
     return bytes(buf.data())
 
 
+
+# AVAGO 재리뷰 Reject die 맵 색 — 엑셀 그림 전용(흰 바탕 인쇄물).  범례 문구는
+# `i18n.KO.REREVIEW_MAP_LEGEND` 와 같은 순서·색이다.
+_RR_DIE = "#d0d4da"
+_RR_MAP_REJECT = "#f0a030"
+_RR_NEW_REJECT = "#e02020"
+
+
+def render_reject_map_png(reject_map, new_cells, size: int) -> bytes:
+    """1차 리뷰 맵의 die 격자 — 회색 die · 주황 Map Reject · 빨강 신규 Reject.
+
+    ``reject_map`` 은 :class:`coords.rereview.RejectMap`, ``new_cells`` 는 같은 맵 칸
+    좌표(열, 위에서부터 줄).  맵 파일 그대로(위 = 첫 RowData) 그린다.  QImage 만 쓰므로
+    저장 워커 스레드에서 불러도 된다(:func:`render_map_png` 와 같은 계약)."""
+    from PyQt6.QtCore import QBuffer, QIODevice, QRectF
+    from PyQt6.QtGui import QColor, QImage, QPainter
+
+    img = QImage(size, size, QImage.Format.Format_ARGB32)
+    img.fill(QColor("white"))
+    rows, cols = reject_map.rows, reject_map.cols
+    cell = min((size - 8) / max(cols, 1), (size - 8) / max(rows, 1))
+    ox = (size - cell * cols) / 2
+    oy = (size - cell * rows) / 2
+    gap = 1.0 if cell >= 4 else 0.0
+    p = QPainter(img)
+    try:
+        p.setPen(Qt.PenStyle.NoPen)
+        for (i, j) in reject_map.cells:
+            if (i, j) in new_cells:
+                color = _RR_NEW_REJECT
+            elif (i, j) in reject_map.rejects:
+                color = _RR_MAP_REJECT
+            else:
+                color = _RR_DIE
+            p.setBrush(QColor(color))
+            p.drawRect(QRectF(ox + i * cell, oy + j * cell, cell - gap, cell - gap))
+    finally:
+        p.end()
+    buf = QBuffer()
+    buf.open(QIODevice.OpenModeFlag.WriteOnly)
+    img.save(buf, "PNG")
+    return bytes(buf.data())
+
+
 class WaferMapView(QWidget):
     """휠 확대 · 드래그 이동 · 호버 툴팁 · 클릭 신호를 가진 맵 위젯."""
 

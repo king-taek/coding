@@ -76,6 +76,10 @@ class UiPrefs:
     extract_recipe_layout: str = "single"
     # Defect 추출 엑셀에 Wafer Map 시트를 넣을지 — 설정 화면 스위치의 마지막 값.
     extract_wafer_map: bool = True
+    # AVAGO 재리뷰 — 마지막 Scanresult LOT 폴더 / 1차 리뷰 Map 폴더(매칭 입력과 따로 둔다:
+    # 같은 입력란을 쓰므로, 모드를 오갈 때 서로의 값을 덮지 않게).
+    last_rereview_scan: str = ""
+    last_rereview_map: str = ""
     # OpenVINO (Intel GPU 가속) 자동 설치 안내를 거절한 경우 — 다시 묻지
     # 않음.  사용자가 ‘다시 보지 않기’ 를 선택했거나 설치 시도 후 실패하면 True.
     openvino_install_declined: bool = False

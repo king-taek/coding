@@ -105,6 +105,7 @@ class _SidePanel(QFrame):
         #   (`dev/tests/test_pane_title_fits.py`).
         if title_tooltip:
             ttl.setToolTip(title_tooltip)
+        self._title_label = ttl
         head.addWidget(ttl)
         head.addStretch(1)
 
@@ -324,6 +325,22 @@ class _SidePanel(QFrame):
         """선택 표시를 지운다 — 액션 실행 뒤/화면을 떠날 때 스테일 테두리 방지."""
         self._set_all_inline(False)
 
+    def relabel(self, title: str, tooltip: str, action_labels: dict,
+                inline_fmts: Optional[dict] = None) -> None:
+        """제목·일괄 액션 이름만 바꾼다(AVAGO 재리뷰 — 같은 패널을 Good/Reject 로).
+
+        액션 **id** 는 그대로다 — 동작은 바뀌지 않고 이름만 바뀐다."""
+        self._title = title
+        self._title_label.setText(title)
+        self._title_label.setToolTip(tooltip)
+        self._actions = [(aid, action_labels.get(aid, label), role)
+                         for aid, label, role in self._actions]
+        ids = ("batch_exclude", "batch_verify")
+        for aid, btn in zip(ids, self._inline_buttons):
+            if inline_fmts and aid in inline_fmts:
+                btn.setProperty("labelFmt", inline_fmts[aid])
+        self._refresh_inline_buttons()
+
     def _refresh_inline_buttons(self) -> None:
         n = len(self.inline_selected_items())
         for btn in getattr(self, "_inline_buttons", ()):
@@ -385,6 +402,10 @@ class SelectPage(ProgressRowMixin, QWidget):
         self._state: Stage1State | None = None
         self._current: Optional[ImageItem] = None
         self._phase_b_already_matched: dict[str, list[ImageItem]] = {}
+        # AVAGO 재리뷰 — 오른쪽 = Reject, 왼쪽(제외) = Good.  ``_die_of`` 는 사진 경로 →
+        # 장비 화면 die (col, row) (가운데 사진 위에 표시).
+        self._rereview = False
+        self._die_of: dict = {}
         # 스플리터 방향을 첫 showEvent 에서 한 번만 확정했는지 (#cold-start).
         self._orientation_seeded = False
         self._build()
@@ -490,6 +511,7 @@ class SelectPage(ProgressRowMixin, QWidget):
         center_card = NeonCard(role="card", parent=self)
         cl = center_card.body()
         center_title = QLabel(i18n.KO.PANEL_CENTER_DECIDE, center_card)
+        self._center_title = center_title
         center_title.setProperty("role", "paneTitle")
         center_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         cl.addWidget(center_title)
@@ -604,9 +626,59 @@ class SelectPage(ProgressRowMixin, QWidget):
         QShortcut(QKeySequence("Left"), self,
                   activated=lambda: self._decide("exclude"))
         QShortcut(QKeySequence("Z"), self, activated=self._undo)
+        QShortcut(QKeySequence.StandardKey.Undo, self, activated=self._undo)   # Ctrl+Z
         # Ctrl+A — 좌측 후보 패널 전체 선택 (#2).
         QShortcut(QKeySequence.StandardKey.SelectAll, self,
                   activated=self._select_all_candidates)
+
+    def set_rereview(self, on: bool, die_of: Optional[dict] = None) -> None:
+        """AVAGO 재리뷰 ↔ 후보 선별.  **동작은 그대로**, 이름만 바꾼다.
+
+        오른쪽(검증 대상) = Reject, 왼쪽으로 보내는 제외 = Good.  방향키도 화면 배치를
+        그대로 따른다(→ Reject / ← Good — 사용자 지정)."""
+        on = bool(on)
+        self._rereview = on
+        self._die_of = dict(die_of or {}) if on else {}
+        K = i18n.KO
+        self.title.setText(K.REREVIEW_STAGE_TITLE if on else K.STAGE1_TITLE)
+        self._center_title.setText(K.REREVIEW_PANEL_CENTER if on else K.PANEL_CENTER_DECIDE)
+        self.btn_verify.setText("→  " + K.REREVIEW_BTN_REJECT if on
+                                else "✓  " + K.BTN_VERIFY)
+        self.btn_exclude.setText("←  " + K.REREVIEW_BTN_GOOD if on
+                                 else "✕  " + K.BTN_EXCLUDE)
+        # 색도 뜻을 따른다 — 재리뷰에서 빨강(danger)은 Reject 다.  그대로 두면 'Good' 이
+        # 제외용 빨강으로 칠해진다.
+        self.btn_verify.setRole("danger" if on else "primary")
+        self.btn_exclude.setRole("primary" if on else "danger")
+        tip = K.REREVIEW_SHORTCUT_TOOLTIP if on else K.SHORTCUT_TOOLTIP
+        for b in (self.btn_verify, self.btn_exclude, self.btn_undo):
+            b.setToolTip(tip)
+        self.btn_end_selection.setText(K.REREVIEW_BTN_END if on else K.BTN_END_SELECTION)
+        if on:
+            self.left_panel.relabel(
+                K.REREVIEW_PANEL_LEFT, K.REREVIEW_PANEL_LEFT_TOOLTIP,
+                {"batch_exclude": K.REREVIEW_BATCH_GOOD,
+                 "batch_verify": K.REREVIEW_BATCH_REJECT},
+                {"batch_exclude": K.REREVIEW_INLINE_GOOD_FMT,
+                 "batch_verify": K.REREVIEW_INLINE_REJECT_FMT})
+            self.right_panel.relabel(
+                K.REREVIEW_PANEL_RIGHT, K.REREVIEW_PANEL_RIGHT_TOOLTIP,
+                {"to_exclude": K.REREVIEW_MOVE_TO_GOOD})
+        else:
+            self.left_panel.relabel(
+                K.PANEL_LEFT_CANDIDATES, K.PANEL_LEFT_CANDIDATES_TOOLTIP,
+                {"batch_exclude": K.BTN_BATCH_EXCLUDE,
+                 "batch_verify": K.BTN_BATCH_VERIFY},
+                {"batch_exclude": K.BTN_INLINE_EXCLUDE_FMT,
+                 "batch_verify": K.BTN_INLINE_VERIFY_FMT})
+            self.right_panel.relabel(
+                K.PANEL_RIGHT_TARGETS, K.PANEL_RIGHT_TARGETS_TOOLTIP,
+                {"to_exclude": K.BTN_MOVE_TO_EXCLUDE})
+        self._refresh_excluded_button()
+        self._refresh_end_selection_button()
+
+    def is_rereview(self) -> bool:
+        return self._rereview
 
     def _select_all_candidates(self) -> None:
         if self.isVisible():
@@ -826,7 +898,10 @@ class SelectPage(ProgressRowMixin, QWidget):
     def _refresh_end_selection_button(self) -> None:
         """큐에 미결정 사진이 남아 있으면 활성, 비면 비활성."""
         n_remaining = len(self._state.queue) if self._state else 0
-        self.btn_end_selection.setEnabled(n_remaining > 0)
+        # 재리뷰는 결과 화면에서 돌아와 판정을 고친 뒤 **다시 결과로** 갈 길이 필요하다
+        # (큐가 비어 있으면 '끝' 신호가 다시 오지 않는다) — 그래서 늘 누를 수 있다.
+        self.btn_end_selection.setEnabled(
+            n_remaining > 0 or (self._rereview and self._state is not None))
 
     def _refresh_excluded_button(self) -> None:
         if self._state is None:
@@ -836,9 +911,9 @@ class SelectPage(ProgressRowMixin, QWidget):
             self.btn_view_excluded.setEnabled(False)
             return
         n = sum(len(v) for v in self._state.excluded.values())
-        self.btn_view_excluded.setText(
-            i18n.KO.BTN_VIEW_EXCLUDED_FMT.format(n=n)
-        )
+        fmt = (i18n.KO.REREVIEW_BTN_VIEW_GOOD_FMT if self._rereview
+               else i18n.KO.BTN_VIEW_EXCLUDED_FMT)
+        self.btn_view_excluded.setText(fmt.format(n=n))
         self.btn_view_excluded.setEnabled(n > 0)
 
     def _advance_to_next(self) -> None:
@@ -906,6 +981,13 @@ class SelectPage(ProgressRowMixin, QWidget):
     def _show_center(self, item: ImageItem) -> None:
         self.center_img.set_image(item.path)
         # 파일명은 표시하지 않고 Slot 명만 노출한다 (요청 사항).
+        if self._rereview:
+            die = self._die_of.get(item.path)
+            self.slot_label.setText(
+                i18n.KO.REREVIEW_SLOT_DIE_FMT.format(slot=item.slot, col=die[0],
+                                                     row=die[1]) if die
+                else i18n.KO.REREVIEW_SLOT_NO_DIE_FMT.format(slot=item.slot))
+            return
         self.slot_label.setText(i18n.KO.SLOT_LABEL_FMT.format(slot=item.slot))
 
     def _on_size_changed(self, value: int) -> None:
@@ -1204,11 +1286,15 @@ class SelectPage(ProgressRowMixin, QWidget):
             return
         n_remaining = len(self._state.queue)
         if n_remaining == 0:
+            if self._rereview:          # 판정을 고친 뒤 결과로 돌아간다
+                self.finished.emit()
             return
         from PyQt6.QtWidgets import QMessageBox
+        fmt = (i18n.KO.REREVIEW_END_CONFIRM_FMT if self._rereview
+               else i18n.KO.END_SELECTION_CONFIRM_FMT)
         ret = sheets.ask(
             self, i18n.KO.END_SELECTION_CONFIRM_TITLE,
-            i18n.KO.END_SELECTION_CONFIRM_FMT.format(n=n_remaining),
+            fmt.format(n=n_remaining),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             # ★ 기본은 '아니오' 다 — 남은 수백 장을 일괄 제외하는 파괴 흐름이라,
             #   조회 버튼을 노리다 한 칸 옆을 누른 손이 Enter 습관으로 그대로
@@ -1242,10 +1328,12 @@ class SelectPage(ProgressRowMixin, QWidget):
         if not data:
             return
         dlg = BulkSelectDialog(
-            title=i18n.KO.BULK_SELECT_EXCLUDED_TITLE,
+            title=(i18n.KO.REREVIEW_GOOD_TITLE if self._rereview
+                   else i18n.KO.BULK_SELECT_EXCLUDED_TITLE),
             data=data,
             actions=[
-                ("to_target", i18n.KO.BTN_MOVE_TO_TARGET, "primary"),
+                ("to_target", (i18n.KO.REREVIEW_MOVE_TO_REJECT if self._rereview
+                               else i18n.KO.BTN_MOVE_TO_TARGET), "primary"),
                 ("recenter", i18n.KO.BTN_BACK_TO_CENTER, "ghost"),
             ],
             parent=self,
