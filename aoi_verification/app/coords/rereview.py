@@ -16,16 +16,26 @@ Reject 판정(사용자 결정): ``BCEQU``(양품 bin, 없으면 ``000``) 이 �
     y_index = 맵 줄(위에서부터 0) + dy        y_index = floor(Y / pitch_y)
 
 방향(왼→오, 위→아래)은 :mod:`.wafer_txt` 의 관측 규약(LIVE 9 LOT, 185칸 중 184칸)과
-Camtek 의 ``row = row_total − y_index``(아래가 0) 를 그대로 따른 것이다.  ``dx``/``dy`` 는
-맵의 die 칸 집합과 장비 die 맵(``s_DieLocation.dat``) 집합의 최솟값을 맞춰 구하고,
-**두 집합이 한 칸도 빠짐없이 같아야** 채택한다(사용자 결정: 자동 대조, 불일치면 경고 후
-그 웨이퍼는 제외하지 않는다).  1칸이라도 어긋나면 엉뚱한 die 의 사진이 빠지기 때문이다.
+Camtek 의 ``row = row_total − y_index``(아래가 0) 를 그대로 따른 것이다.
 
-⚠ 경쟁 가설(R1): 맵이 좌우·상하로 뒤집힌 경우.  웨이퍼 die 영역은 거의 대칭이라
-**모양 대조만으로는 뒤집힘을 구분하지 못할 수 있다** — 대칭인 웨이퍼에서는 '미구분' 이다.
-그래서 방향은 위 관측 규약에 고정하고, 뒤집힌 가설만 맞는 웨이퍼는 쓰지 않는다
-(진단용으로 :attr:`WaferPlan.flip_hint` 에 남긴다).  AVAGO 실물로 Reject die 의 장비 화면
-(col,row) 를 한 번 대조하면 이 미구분이 풀린다.
+정렬 채택 조건(:func:`align`) — 장비 die 맵(``s_DieLocation.dat``)의 die 가 **하나도
+빠짐없이** 옮긴 맵의 die 칸 위에 놓여야 하고, 그런 평행이동이 **딱 하나**여야 한다.
+맵에만 있는 칸은 :data:`MAX_UNSCANNED` 개까지 허용한다(장비가 검사하지 않은 die).
+1칸이라도 장비 die 가 맵 밖에 떨어지면 엉뚱한 die 의 사진이 빠질 수 있어 쓰지 않는다
+(사용자 결정: 자동 대조, 불일치면 경고 후 그 웨이퍼는 제외하지 않는다).
+
+왜 '완전 일치' 가 아닌가(`관측`, 2026-10): 실물 PH3Q42 4장이 'Map 2962 ≠ 장비 2960/2961'
+로 전부 거부됐다.  저장소의 실물 die 맵 PGEE48-13C5(같은 70×54 격자)를 PH8Q66-02B6 맵과
+대조하니 **2,960칸이 평행이동 (2,2) 하나로 전부 겹치고**, 맵에만 2칸이 남았다 — 노치 옆
+(6시, 중심에서 128 mm)과 3시 축(106 mm)의 die.  좌표는 die 중심(소수부 0.498)이라
+같은 칸 충돌도 없다.  즉 장비는 몇몇 die 를 **검사 목록에서 뺀다**(이유는 미확인 — 노치·
+기준 die 로 추정, `가정`).  die 수천 칸의 원형 영역에서 평행이동이 1칸만 달라도 수십 칸이
+맵 밖으로 나가므로 '전부 포함 + 유일' 은 완전 일치만큼 안전하다.
+
+경쟁 가설(R1) — 맵이 좌우·상하·180° 뒤집힌 경우: 위 실물 대조에서 **뒤집힌 세 가설은
+어느 평행이동으로도 포함되지 않았다**(그대로일 때만 (2,2) 하나) → 이 격자(70×54)에서는
+방향이 구분되어 확정이다.  대칭인 다른 격자에서는 다시 '미구분' 일 수 있어, 정렬 실패
+때 뒤집힌 가설만 맞으면 :attr:`WaferPlan.flip_hint` 에 남긴다(쓰지는 않는다).
 
 맵이 없거나·못 믿거나·정렬이 안 되거나·좌표를 못 읽은 사진은 **재리뷰에 넣는다**
 (사용자 결정 — 놓치는 쪽보다 한 번 더 보는 쪽이 안전하다).  순수 로직이라 Qt 없이
@@ -92,6 +102,7 @@ class WaferPlan:
     warnings: list = field(default_factory=list)      # [(코드, 숫자 또는 None)]
     flip_hint: str = ""                               # 정렬 실패 시 뒤집힌 가설 진단
     pitch: Optional[tuple] = None                     # (x, y) µm — 맵 그림의 칸 비율용
+    unscanned: list = field(default_factory=list)     # 맵에만 있는 칸(장비 미검사 die)
 
     @property
     def aligned(self) -> bool:
@@ -175,19 +186,30 @@ def load_map(map_dir: Path, wafer: str) -> tuple[Optional[RejectMap], Optional[s
 # ---------------------------------------------------------------------------
 # 정렬
 # ---------------------------------------------------------------------------
+# 맵에만 있고 장비 die 맵에는 없는 칸(장비가 검사하지 않은 die)의 허용 개수.
+# 관측 최대 2(PH3Q42 4장: 1~2, PGEE48 대조: 2).  이보다 많으면 '부분 맵' 일 수 있다.
+MAX_UNSCANNED = 5
+# 평행이동 후보 탐색 폭 — 최솟값 맞춤 ± 이만큼.  빠진 칸이 가장자리면 최솟값이 밀린다.
+_ALIGN_SEARCH = 3
+
+
 def align(map_cells: Iterable, die_cells: Iterable) -> Optional[tuple[int, int]]:
     """맵 칸 ``(열, 줄)`` → stage ``(x_index, y_index)`` 평행이동 ``(dx, dy)``.
 
-    두 집합이 평행이동으로 **정확히** 겹칠 때만 돌려준다.  겹친다면 최솟값끼리
-    맞아야 하므로 후보는 하나뿐이다."""
+    장비 die 가 **전부** 옮긴 맵 칸 위에 놓이고(맵에만 있는 칸은
+    :data:`MAX_UNSCANNED` 개까지), 그런 평행이동이 **유일할** 때만 돌려준다."""
     a, b = set(map_cells), set(die_cells)
-    if not a or len(a) != len(b):
+    if not a or not b or len(b) > len(a) or len(a) - len(b) > MAX_UNSCANNED:
         return None
-    dx = min(i for i, _ in b) - min(i for i, _ in a)
-    dy = min(j for _, j in b) - min(j for _, j in a)
-    if {(i + dx, j + dy) for i, j in a} == b:
-        return dx, dy
-    return None
+    dx0 = min(i for i, _ in b) - min(i for i, _ in a)
+    dy0 = min(j for _, j in b) - min(j for _, j in a)
+    hits = []
+    for dx in range(dx0 - _ALIGN_SEARCH, dx0 + _ALIGN_SEARCH + 1):
+        for dy in range(dy0 - _ALIGN_SEARCH, dy0 + _ALIGN_SEARCH + 1):
+            moved = {(i + dx, j + dy) for i, j in a}
+            if b <= moved:
+                hits.append((dx, dy))
+    return hits[0] if len(hits) == 1 else None
 
 
 def _flip_hint(map_cells: frozenset, die_cells: frozenset, rows: int, cols: int) -> str:
@@ -254,6 +276,11 @@ def _plan_into(plan: WaferPlan, paths: list, map_dir: Optional[Path], wafer: str
         return
     plan.offset = off
     dx, dy = off
+    plan.unscanned = sorted({(i, j) for i, j in rm.cells
+                             if (i + dx, j + dy) not in die_cells})
+    if plan.unscanned:
+        _LOG.info("재리뷰: %s 장비 die 맵에 없는 맵 칸 %d개(장비 미검사 die) %s — 정렬은 유일",
+                  wafer, len(plan.unscanned), plan.unscanned)
     review, excluded = [], []
     unplaced = off_map = 0
     for p in paths:

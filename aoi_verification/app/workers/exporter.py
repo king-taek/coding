@@ -1450,8 +1450,12 @@ class ExcelExporter(QThread):
             ws.cell(row=r, column=len(attrs) + 2,
                     value=plan.reject_map.path.name if plan.reject_map
                     else i18n.KO.REREVIEW_MAP_NO_MAP)
+            notes = rr.warning_lines({slot: plan})
+            if plan.unscanned:
+                notes.append(i18n.KO.REREVIEW_UNSCANNED_NOTE_FMT.format(
+                    n=len(plan.unscanned)))
             note = ws.cell(row=r, column=len(attrs) + 3,
-                           value="\n".join(rr.warning_lines({slot: plan})) or None)
+                           value="\n".join(notes) or None)
             note.alignment = Alignment(wrap_text=True, vertical="top")
             r += 1
         ws.cell(row=r, column=1, value=i18n.KO.REREVIEW_SUMMARY_TOTAL).font = Font(

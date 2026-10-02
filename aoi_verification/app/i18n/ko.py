@@ -1194,8 +1194,10 @@ REREVIEW_WARN_NO_DIE_MAP_FMT = (
     "{wafer}: 장비 die 맵(s_DieLocation.dat)이 없어 Map 과 대조하지 못했습니다 — "
     "사진을 전부 재리뷰합니다.")
 REREVIEW_WARN_ALIGN_FAIL_FMT = (
-    "{wafer}: Map die {a}칸과 장비 die {b}칸이 달라 칸이 어긋날 수 있습니다 — "
+    "{wafer}: Map die {a}칸과 장비 die {b}칸이 맞춰지지 않아 칸이 어긋날 수 있습니다 — "
     "사진을 전부 재리뷰합니다.")
+# 엑셀 요약 '비고' — 정렬은 됐고 장비가 검사하지 않은 die 가 맵에만 있다(정보).
+REREVIEW_UNSCANNED_NOTE_FMT = "장비가 검사하지 않은 die {n}칸(Map 에만 있음) — 정렬에는 영향 없음"
 REREVIEW_WARN_FLIP_SUFFIX = " (뒤집힌 Map 과는 일치 — 방향 확인 필요)"
 REREVIEW_WARN_UNPLACED_FMT = "{wafer}: 좌표를 못 읽은 사진 {n}장은 재리뷰에 넣었습니다."
 REREVIEW_WARN_OFF_MAP_FMT = "{wafer}: Map 의 die 없는 칸에 찍힌 사진 {n}장은 재리뷰에 넣었습니다."
