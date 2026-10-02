@@ -581,8 +581,18 @@ class SetupPage(QWidget):
             self._make_machine_group(i18n.KO.SETUP_REF_GROUP,
                                      extra=self._lot1_slot_btn)
         self._build_lot_list()
+        # AVAGO 재리뷰 — Scanresult(오른쪽 카드)의 [슬롯 선택](재리뷰 모드에서만 보인다).
+        # 선택 창·규칙은 Defect 추출의 LOT 별 슬롯 선택과 같다(`_pick_rereview_slots`).
+        self._rr_slot_btn = NeonButton(i18n.KO.EXTRACT_SLOT_BTN_ALL, role="ghost")
+        self._rr_slot_btn.setVisible(False)
+        self._rr_slot_btn.clicked.connect(self._pick_rereview_slots)
+        self._rr_slots: Optional[set] = None
         self.val_group, self.val_path_edit, self.val_machine_edit = \
-            self._make_machine_group(i18n.KO.SETUP_VAL_GROUP)
+            self._make_machine_group(i18n.KO.SETUP_VAL_GROUP, extra=self._rr_slot_btn)
+        # 폴더가 바뀌면 고른 슬롯은 무효 — 전체로.  Map 경로가 바뀌면 LOT명(S/M) 자동 채움.
+        self.val_path_edit.textChanged.connect(lambda _t: self._reset_rereview_slots())
+        self._rr_auto_lot = ""
+        self.ref_path_edit.textChanged.connect(self._autofill_rereview_lot)
         self._device_cards = [self.ref_group, self.val_group]
         self._device_host = host
         # ★ 자기 폭이 정해진 뒤 다시 흘려야 한다 — B안에서는 이 행이 좁은 그리드 칸
@@ -739,6 +749,51 @@ class SetupPage(QWidget):
                         i18n.KO.EXTRACT_DROP_TOO_MANY_FMT.format(
                             max=self.MAX_LOTS, n=len(todo)))
         return added
+
+    def _reset_rereview_slots(self) -> None:
+        self._rr_slots = None
+        self._rr_slot_btn.setText(i18n.KO.EXTRACT_SLOT_BTN_ALL)
+
+    def _pick_rereview_slots(self) -> None:
+        """Scanresult LOT 의 슬롯(웨이퍼)을 고른다 — 매칭의 '일부 슬롯만…' 과 같은 선택 창."""
+        from ...models.slot import extract_slot_dirs
+        from ..widgets.slot_select_dialog import SlotSelectDialog
+
+        text = self.val_path_edit.text().strip()
+        root = Path(text) if text else None
+        if root is None or not root.is_dir():
+            sheets.warn(self, i18n.KO.APP_TITLE, i18n.KO.EXTRACT_SLOT_NEED_FOLDER)
+            return
+        dirs = extract_slot_dirs(root)
+        names = sorted(dirs)
+        if not names:
+            sheets.info(self, i18n.KO.APP_TITLE, i18n.KO.SLOT_SELECT_EMPTY)
+            return
+        dlg = SlotSelectDialog(names, preselected=self._rr_slots, ref_dirs=dirs,
+                               val_root=None, parent=self)
+        if not (sheets.run(dlg) and dlg.accepted_ok):
+            return                                   # 취소 — 그대로 둔다
+        chosen = set(dlg.selected or ())
+        if not chosen or chosen == set(names):
+            self._reset_rereview_slots()
+        else:
+            self._rr_slots = chosen
+            self._rr_slot_btn.setText(i18n.KO.EXTRACT_SLOT_BTN_FMT.format(
+                n=len(chosen), total=len(names)))
+
+    def _autofill_rereview_lot(self, text: str) -> None:
+        """1차 리뷰 Map 경로의 ``288. PH3Q42.00 (FSX)`` → LOT명(S/M) 칸에 자동으로.
+
+        사용자가 고쳐 쓴 값은 덮지 않는다 — 칸이 비어 있거나 직전 자동값 그대로일
+        때만 채운다(사용자 요청: 자동 입력하되 수정 가능)."""
+        if not self._rereview_mode:
+            return
+        from ...coords.rereview import lot_from_map_path
+        lot = lot_from_map_path(text)
+        cur = self.val_machine_edit.text().strip()
+        if lot and cur in ("", self._rr_auto_lot):
+            self.val_machine_edit.setText(lot)
+            self._rr_auto_lot = lot
 
     def _reset_lot_slots(self, idx: int) -> None:
         """폴더가 바뀌면 그 줄의 슬롯 선택은 무효다 — 전체로 되돌린다."""
@@ -1398,6 +1453,10 @@ class SetupPage(QWidget):
         if lbl is not None:
             lbl.setVisible(not on)
         self.ref_machine_edit.setVisible(not on)
+        self._rr_slot_btn.setVisible(on)
+        if on:
+            self._rr_auto_lot = ""
+            self._autofill_rereview_lot(self.ref_path_edit.text())
         # 오른쪽(Scanresult) 카드의 둘째 줄 = LOT명(S/M).
         lbl = self.val_group.property("_machineLabel")
         if lbl is not None:
@@ -1902,6 +1961,7 @@ class SetupPage(QWidget):
             threshold=self.slider.value() / 100.0,
             automation_level=AutomationLevel.USER_SELECT,
             rereview=True,
+            selected_slots=(set(self._rr_slots) if self._rr_slots is not None else None),
         )
 
     # ------------------------------------------------------------------

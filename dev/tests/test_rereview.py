@@ -295,3 +295,12 @@ def test_stats_count_distinct_new_reject_dies(tmp_path):
     assert (st.new_reject_dies, st.map_reject_dies, st.total_reject_dies) == (2, 4, 6)
     assert st.unknown_die_rejects == 0
     assert rr.new_reject_cells(plan, rejects) == {(30, 30), (31, 30)}
+
+
+def test_lot_from_map_path():
+    base = r"\\k5cifsn2\k5tsvdata$\1. Conder Scan\540. AVAGO TECH\14. 15966PA0-BW2"
+    assert rr.lot_from_map_path(base + r"\288. PH3Q42.00 (FSX)\2. FVI\1. OR") == \
+        "PH3Q42.00 (FSX)"
+    assert rr.lot_from_map_path("Z:/a/290. PH8Q66.00 (NHW)/2. FVI/1. OR") == "PH8Q66.00 (NHW)"
+    assert rr.lot_from_map_path(base) == ""                 # LOT 폴더 위 — 없음
+    assert rr.lot_from_map_path("") == ""

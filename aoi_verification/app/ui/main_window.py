@@ -1036,7 +1036,10 @@ class MainWindow(QMainWindow):
         worker = _FolderScan(self._scan_token, inp.ref_root, inp.val_root,
                              only=(getattr(inp, "extract_slots", None)
                                    if self._is_extract()
-                                   else None if self._is_rereview()
+                                   # 재리뷰는 LOT 하나 — 한쪽 스캔은 LOT 별 목록을 받는다.
+                                   else ([inp.selected_slots]
+                                         if inp.selected_slots is not None else None)
+                                   if self._is_rereview()
                                    else getattr(inp, "selected_slots", None)),
                              # 재리뷰도 한쪽(Scanresult LOT)만 훑는다 — 검증 칸은 Map 폴더다.
                              extract=self._is_extract() or self._is_rereview(),

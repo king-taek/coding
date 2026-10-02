@@ -121,6 +121,8 @@ class ResultPage(QWidget):
         card_row.addWidget(self._summary_card, 100)
         card_row.addStretch(1)
         root.addLayout(card_row)
+        self._root = root
+        self._card_row = card_row
 
         root.addStretch(1)
 
@@ -282,8 +284,11 @@ class ResultPage(QWidget):
         #   때마다 누적).  재귀로 위젯까지 확실히 지운다.
         _clear_layout(self._summary_layout)
         self._apply_mode_chrome(result.mode == REREVIEW_MODE)
-        # 재리뷰는 웨이퍼 표가 들어가 조금 넓게 쓴다.
-        self._summary_card.setMaximumWidth(980 if result.mode == REREVIEW_MODE else 820)
+        # 재리뷰는 웨이퍼 표(보통 25장)가 들어가 넓게 쓰고, 세로로도 남는 높이를 다 쓴다
+        # — 표만 카드 안에서 스크롤한다(카드가 잘리지 않게).
+        rr_mode = result.mode == REREVIEW_MODE
+        self._summary_card.setMaximumWidth(980 if rr_mode else 820)
+        self._root.setStretchFactor(self._card_row, 6 if rr_mode else 0)
 
         # 라인 헬퍼
         def line(text: str, role: str = "subtitle"):
@@ -294,8 +299,7 @@ class ResultPage(QWidget):
 
         if result.mode == REREVIEW_MODE:
             self._show_rereview_summary(result, line)
-            self._add_file_row()
-            self._refresh_save_target()
+            self._refresh_save_target()      # 저장 파일명은 아래 버튼 줄이 이미 보여 준다
             return
 
         line(i18n.KO.RESULT_MACHINES_FMT.format(ref=result.ref_machine,
@@ -472,10 +476,11 @@ class ResultPage(QWidget):
         self.include_good_chk.setVisible(rereview)
 
     def _show_rereview_summary(self, result: FinalResult, line) -> None:
-        """핵심 하나(**신규 Reject die**)를 크게, 나머지는 옆에 작게, 웨이퍼별은 표로.
+        """필요한 것만: **신규 Reject die**(크게) · Reject 사진 · Reject die 합계, 그리고
+        웨이퍼별 표.  LOT 은 보통 25장이라 **표만 스크롤**한다(카드·글자가 잘리지 않게).
 
         숫자는 엑셀 요약 시트와 **같은 함수**(`coords.rereview.wafer_stats`)로 센다."""
-        from PyQt6.QtWidgets import QGridLayout
+        from PyQt6.QtWidgets import QGridLayout, QScrollArea, QWidget
 
         from ...coords import rereview as rr
 
@@ -487,11 +492,13 @@ class ResultPage(QWidget):
         def tot(attr: str) -> int:
             return sum(getattr(st, attr) for st in stats)
 
-        line(K.REREVIEW_RESULT_HEAD_FMT.format(lot=result.ref_machine, n=len(stats)))
+        line(K.REREVIEW_RESULT_HEAD_FMT.format(
+            lot=result.ref_machine, n=len(stats), reviewed=tot("reviewed"),
+            excluded=tot("excluded")), role="muted")
 
-        # ── 핵심 수치 + 보조 수치 ────────────────────────────────────────
+        # ── 핵심 수치 ────────────────────────────────────────────────────
         hero = QHBoxLayout()
-        hero.setSpacing(24)
+        hero.setSpacing(20)
         big = QVBoxLayout()
         big.setSpacing(0)
         n_new = tot("new_reject_dies")
@@ -509,39 +516,45 @@ class ResultPage(QWidget):
         n_rej = tot("reject")
         for value, caption, tone in (
                 (n_rej, K.REREVIEW_STAT_REJECT, "over" if n_rej else "none"),
-                (tot("map_reject_dies"), K.REREVIEW_STAT_MAP_DIES, "none"),
                 (tot("total_reject_dies"), K.REREVIEW_STAT_TOTAL_DIES, "none")):
             hero.addWidget(self._stat_tile(value, caption, tone),
                            alignment=Qt.AlignmentFlag.AlignVCenter)
         hero.addStretch(1)
         self._summary_layout.addLayout(hero)
-        line(K.REREVIEW_SCOPE_FMT.format(reviewed=tot("reviewed"), total=tot("total"),
-                                         excluded=tot("excluded")), role="muted")
 
-        # ── 웨이퍼별 표 ──────────────────────────────────────────────────
-        table = QGridLayout()
-        table.setHorizontalSpacing(0)
-        table.setVerticalSpacing(0)
+        # ── 웨이퍼별 표(스크롤) ──────────────────────────────────────────
+        # 머리줄은 스크롤 **밖**에 고정한다(25장을 내려도 열 이름이 보이게).  두 격자의
+        # 열 비율·오른쪽 여백(스크롤바 자리)을 같게 둬 열이 위아래로 맞는다.
         heads = K.REREVIEW_TABLE_COLS
+        head_grid = QGridLayout()
+        head_grid.setContentsMargins(0, 0, 14, 0)
+        head_grid.setHorizontalSpacing(0)
         for c, text in enumerate(heads):
             h = QLabel(text, card)
             h.setProperty("role", "rrHead")
             h.setAlignment(Qt.AlignmentFlag.AlignLeft if c == 0
                            else Qt.AlignmentFlag.AlignRight)
-            table.addWidget(h, 0, c)
-        warned = {slot for slot, plan in result.rereview.items() if plan.warnings}
+            head_grid.addWidget(h, 0, c)
+            head_grid.setColumnStretch(c, 3 if c == 0 else 2)
+        self._summary_layout.addLayout(head_grid)
+        host = QWidget()
+        host.setProperty("role", "rowHost")
+        table = QGridLayout(host)
+        table.setContentsMargins(0, 0, 0, 0)
+        table.setHorizontalSpacing(0)
+        table.setVerticalSpacing(0)
         for r, st in enumerate(stats, start=1):
-            name = QLabel(st.slot + ("  ⚠" if st.slot in warned else ""), card)
+            plan = result.rereview[st.slot]
+            name = QLabel(st.slot + ("  ⚠" if plan.warnings else ""), host)
             name.setProperty("role", "rrCellName")
-            if st.slot in warned:
-                name.setToolTip("\n".join(rr.warning_lines({st.slot: result.rereview[st.slot]})))
+            if plan.warnings:
+                name.setToolTip("\n".join(rr.warning_lines({st.slot: plan})))
             table.addWidget(name, r, 0)
-            cells = (st.reviewed, st.reject, st.new_reject_dies,
-                     st.map_reject_dies, st.total_reject_dies)
+            cells = (st.reject, st.new_reject_dies, st.total_reject_dies)
             for c, v in enumerate(cells, start=1):
-                lab = QLabel(f"{v:,}", card)
+                lab = QLabel(f"{v:,}", host)
                 lab.setProperty("role", "rrCell")
-                if c == 3 and v:
+                if c == 2 and v:
                     lab.setProperty("tone", "over")
                 lab.setAlignment(Qt.AlignmentFlag.AlignRight
                                  | Qt.AlignmentFlag.AlignVCenter)
@@ -549,18 +562,28 @@ class ResultPage(QWidget):
         table.setColumnStretch(0, 3)
         for c in range(1, len(heads)):
             table.setColumnStretch(c, 2)
-        self._summary_layout.addSpacing(6)
-        self._summary_layout.addLayout(table)
+        table.setRowStretch(len(stats) + 1, 1)
+        scroll = QScrollArea(card)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # 스크롤바가 있든 없든 열 위치가 머리줄과 같게 — 자리를 늘 비워 둔다.
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        scroll.setProperty("role", "rowHost")
+        scroll.viewport().setProperty("role", "rowHost")
+        scroll.setWidget(host)
+        scroll.setMinimumHeight(120)
+        self._summary_layout.setSpacing(6)
+        self._rr_table_scroll = scroll
+        self._summary_layout.addWidget(scroll, 1)
 
+        # 확인이 필요한 웨이퍼는 표의 ⚠ 에 이유가 있다 — 여기에는 한 줄만.
+        n_warn = sum(1 for p in result.rereview.values() if p.warnings)
         unknown = tot("unknown_die_rejects")
+        if n_warn:
+            line(K.REREVIEW_WARN_SUMMARY_FMT.format(n=n_warn), role="sectionWarn")
         if unknown:
             line(K.REREVIEW_UNKNOWN_DIE_FMT.format(n=unknown), role="muted")
-        warns = rr.warning_lines(result.rereview)
-        if warns:
-            self._summary_layout.addSpacing(6)
-            line(K.REREVIEW_WARN_HEAD, role="sectionWarn")
-            for w in warns:
-                line("• " + w, role="muted")
 
     def _stat_tile(self, value: int, caption: str, tone: str) -> QFrame:
         tile = QFrame(self._summary_card)

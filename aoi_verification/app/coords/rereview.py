@@ -55,7 +55,7 @@ from . import camtek_ini, wafer_geometry, wafer_txt
 from .ini_text import read_ini_text
 
 __all__ = ["RejectMap", "WaferPlan", "WaferStats", "parse_map", "find_map",
-           "load_map", "warning_lines", "align", "plan_wafer", "wafer_stats", "new_reject_cells",
+           "load_map", "warning_lines", "lot_from_map_path", "align", "plan_wafer", "wafer_stats", "new_reject_cells",
            "W_NO_MAP", "W_MAP_INVALID", "W_NO_GEOMETRY", "W_NO_DIE_MAP",
            "W_ALIGN_FAIL", "W_UNPLACED", "W_OFF_MAP"]
 
@@ -366,3 +366,20 @@ def warning_lines(plans: dict) -> list[str]:
                 line = fmt.format(wafer=slot, n=val)
             out.append(line)
     return out
+
+
+# 1차 리뷰 Map 경로의 LOT 폴더 이름 — ``288. PH3Q42.00 (FSX)`` (번호. LOT명 (S/M)).
+_LOT_DIR = re.compile(r"^\s*\d+\s*\.\s*(\S+)\s*\(\s*([^()]+?)\s*\)\s*$")
+
+
+def lot_from_map_path(path: str) -> str:
+    """Map 폴더 경로에서 ``LOT명 (S/M)`` — 못 찾으면 ``""``.
+
+    예: ``\\\\k5cifsn2\\…\\288. PH3Q42.00 (FSX)\\2. FVI\\1. OR`` → ``PH3Q42.00 (FSX)``.
+    Windows UNC 경로를 어느 OS 에서든 같게 나누려고 ``\\``·``/`` 둘 다 구분자로 본다.
+    가장 깊은 일치 폴더를 쓴다."""
+    for part in reversed(re.split(r"[\\/]+", path or "")):
+        m = _LOT_DIR.match(part)
+        if m:
+            return f"{m.group(1)} ({m.group(2)})"
+    return ""

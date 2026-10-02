@@ -93,6 +93,61 @@ def test_file_name_uses_lot_name():
     assert mw.MainWindow._suggest_result_name(inp) == "PH3Q42_00 AVAGO 재리뷰.xlsx"
 
 
+def test_lot_name_is_filled_from_map_path_but_stays_editable(styled_qapp):
+    """Map 경로의 '288. PH3Q42.00 (FSX)' → LOT명(S/M).  사용자가 고친 값은 덮지 않는다."""
+    from aoi_verification.app.ui.pages import setup_page as sp
+
+    base = r"\\k5cifsn2\k5tsvdata$\1. Conder Scan\540. AVAGO TECH\14. 15966PA0-BW2"
+    page = sp.SetupPage()
+    try:
+        page.set_rereview_mode(True)
+        page.ref_path_edit.setText(base + r"\288. PH3Q42.00 (FSX)\2. FVI\1. OR")
+        assert page.val_machine_edit.text() == "PH3Q42.00 (FSX)"
+        # 자동값 그대로면 경로를 바꿀 때 따라 바뀐다.
+        page.ref_path_edit.setText(base + r"\290. PH8Q66.00 (NHW)\2. FVI\1. OR")
+        assert page.val_machine_edit.text() == "PH8Q66.00 (NHW)"
+        # 고쳐 쓴 값은 그대로 둔다.
+        page.val_machine_edit.setText("PH8Q66.00-수정")
+        page.ref_path_edit.setText(base + r"\288. PH3Q42.00 (FSX)\2. FVI\1. OR")
+        assert page.val_machine_edit.text() == "PH8Q66.00-수정"
+    finally:
+        page.deleteLater()
+
+
+def test_scanresult_slots_can_be_picked(styled_qapp, tmp_path, monkeypatch):
+    """Scanresult 카드의 [슬롯 선택] — 매칭과 같은 선택 창, 고른 슬롯만 진행."""
+    from aoi_verification.app.ui.pages import setup_page as sp
+    from aoi_verification.app.ui.widgets import slot_select_dialog as ssd
+
+    scan, maps = tmp_path / "NHW", tmp_path / "maps"
+    for w in ("PH3Q42-01A5", "PH3Q42-03G6", "PH3Q42-04G1"):
+        (scan / w).mkdir(parents=True)
+    maps.mkdir()
+
+    class _Dlg:
+        def __init__(self, names, **kw):
+            self.accepted_ok, self.selected = True, {names[0], names[2]}
+
+    monkeypatch.setattr(ssd, "SlotSelectDialog", _Dlg)
+    monkeypatch.setattr(sp.sheets, "run", lambda dlg, **k: True)
+    page = sp.SetupPage()
+    try:
+        assert page._rr_slot_btn.isHidden()            # 매칭 모드에는 없다
+        page.set_rereview_mode(True)
+        assert not page._rr_slot_btn.isHidden()
+        page.ref_path_edit.setText(str(maps))
+        page.val_path_edit.setText(str(scan))
+        page.val_machine_edit.setText("PH3Q42.00 (FSX)")
+        page._rr_slot_btn.click()
+        assert page._rr_slot_btn.text() == i18n.KO.EXTRACT_SLOT_BTN_FMT.format(n=2, total=3)
+        inp = page._collect_input()
+        assert inp.selected_slots == {"PH3Q42-01A5", "PH3Q42-04G1"}
+        page.val_path_edit.setText(str(scan) + "x")     # 폴더가 바뀌면 전체로
+        assert page._rr_slots is None
+    finally:
+        page.deleteLater()
+
+
 def test_rereview_button_sits_right_of_extract(styled_qapp):
     """[AVAGO 재리뷰] 는 [Defect 추출] 바로 오른쪽(사용자 지정) — 보조 묶음 안."""
     from aoi_verification.app.ui.pages import setup_page as sp
@@ -186,9 +241,10 @@ def test_result_page_shows_rereview_counts(styled_qapp, lot):
         labels = page._summary_card.findChildren(QLabel)
         hero = [w for w in labels if w.property("role") == "rrHeroValue"]
         assert [w.text() for w in hero] == ["2"]                 # 신규 Reject die
-        # 표: 웨이퍼 · 재리뷰 4 · Reject 사진 3 · 신규 2 · Map 4 · 합계 6
-        cells = [w.text() for w in labels if w.property("role") == "rrCell"]
-        assert cells == ["4", "3", "2", "4", "6"]
+        # 표: 웨이퍼 · Reject 사진 3 · 신규 2 · 합계 6(Map 4 + 신규 2)
+        cells = [w.text() for w in page.findChildren(QLabel)
+                 if w.property("role") == "rrCell"]
+        assert cells == ["3", "2", "6"]
         assert page.title.text() == i18n.KO.REREVIEW_RESULT_TITLE
         assert page.wafer_map_btn.isHidden() and page.review_unmatched_btn.isHidden()
         assert not page.include_good_chk.isHidden()

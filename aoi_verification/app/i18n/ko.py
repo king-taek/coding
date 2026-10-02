@@ -1227,16 +1227,14 @@ REREVIEW_SLOT_NO_DIE_FMT = "웨이퍼: {slot}   ·   die 좌표 없음"
 
 # 결과 화면
 REREVIEW_RESULT_TITLE = "AVAGO 재리뷰 결과"
-REREVIEW_RESULT_HEAD_FMT = "LOT {lot}  ·  웨이퍼 {n}장"
-REREVIEW_SCOPE_FMT = "재리뷰 {reviewed}장  —  전체 {total}장 중 Map Reject die 의 사진 {excluded}장은 제외"
-REREVIEW_TABLE_COLS = ("웨이퍼", "재리뷰", "Reject 사진", "신규 Reject die",
-                       "Map Reject die", "합계")
+REREVIEW_RESULT_HEAD_FMT = ("LOT {lot}  ·  웨이퍼 {n}장  ·  재리뷰 사진 {reviewed}장"
+                            "  (Map Reject die 사진 {excluded}장 제외)")
+REREVIEW_TABLE_COLS = ("웨이퍼", "Reject 사진", "신규 Reject die", "Reject die 합계")
+REREVIEW_WARN_SUMMARY_FMT = "⚠ 확인 필요 웨이퍼 {n}장 — 표의 ⚠ 에 마우스를 올리면 이유가 보입니다"
 REREVIEW_STAT_REJECT = "Reject 사진"
 REREVIEW_STAT_NEW_DIES = "신규 Reject die"
-REREVIEW_STAT_MAP_DIES = "Map Reject die"
 REREVIEW_STAT_TOTAL_DIES = "Reject die 합계"
 REREVIEW_UNKNOWN_DIE_FMT = "※ die 좌표를 몰라 die 수에 넣지 못한 Reject 사진 {n}장"
-REREVIEW_WARN_HEAD = "확인 필요"
 REREVIEW_INCLUDE_GOOD_LABEL = "Good die 모두 넣기"
 REREVIEW_INCLUDE_GOOD_TOOLTIP = (
     "켜면 재리뷰한 사진 전부(Good 포함)를 '전체' 시트에도 넣습니다.\n"

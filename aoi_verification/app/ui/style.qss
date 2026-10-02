@@ -327,7 +327,7 @@ QLabel[role="rrHeroCaption"] {
 QLabel[role="rrCell"] {
     font-family: $font_mono;
     color: $ink;
-    padding: 6px 4px;
+    padding: 3px 4px;
     border-bottom: 1px solid $line;
 }
 QLabel[role="rrCell"][tone="over"] { color: $danger; font-weight: 700; }
@@ -342,7 +342,7 @@ QLabel[role="rrHead"] {
 QLabel[role="rrCellName"] {
     color: $ink;
     font-weight: 700;
-    padding: 6px 4px;
+    padding: 3px 4px;
     border-bottom: 1px solid $line;
 }
 
