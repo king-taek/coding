@@ -294,6 +294,11 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   (col,row)·x·y 45장이 앱의 INI 변환과 전부 같은 die·≤10 µm 이고, 앱 정렬의 Map 칸이 전부
   `(col, 아래부터 row)` 의 Reject bin 이다('위부터' 는 전부 000 — 반증).  기대값을 고쳐서
   통과시키지 마라.  회귀 가드: `test_rereview.py`(`test_real_die_map_fits_real_map_only_unflipped`).
+- **AVAGO 재리뷰의 '1차 Reject 사진 폴더'(`rereview.read_reject_dies`)는 파일명 좌표의 die `(col,row)` 를
+  Scanresult 사진의 INI 유도 die 와 등호로 비교해 뺀다**(Map 과 합집합, 정렬 불필요). 파일명 해석은
+  `camtek_live.parse_live_name` 그대로. 폴더가 맞는지 못 믿으면(웨이퍼 하위 폴더 없음·맞는 die 0개·
+  이름 못 읽음) **빼지 않고 경고**한다. 실물 골든 `test_rereview_reject_folder.py` 가 '#11 재 저장'
+  이름만으로 뺀 사진이 Map 으로 뺀 사진과 같음을 못 박는다 — 기대값을 고쳐 통과시키지 마라.
 - **Wafer map 경고**: 칸이 틀렸을 수 있는 맵(die 없는 칸에 찍힌 점·슬롯 간 격자 불일치·
   좌표 없는 사진·die 크기 추정)은 `wafer_map.map_warnings` 로 판정해 화면 위 배너로 알린다.
   중심 가정·계산 격자는 거의 늘 붙어 배너에 넣지 않는다(범례만).  단 **LIVE 파일명으로 그린

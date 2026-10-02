@@ -219,7 +219,7 @@ mw.MainWindow._maybe_offer_openvino = lambda self: None
 app = QApplication([])
 win = mw.MainWindow()
 started = threading.Event()
-def slow(*a):
+def slow(*a, **k):
     started.set()
     time.sleep(2)
     return rr.WaferPlan('W', Path('.'))

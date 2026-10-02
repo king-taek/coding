@@ -65,6 +65,8 @@ class SetupInput:
     rereview: bool = False
     # Map 경로를 비워 뒀다 — 제외 없이 전부 재리뷰(``val_root`` 는 ``ref_root`` 와 같게 둔다).
     rereview_no_map: bool = False
+    # 1차 Reject 사진 폴더(선택) — 파일명 좌표의 die 를 재리뷰에서 뺀다(Map 과 합집합).
+    rereview_reject_dir: Optional[Path] = None
 
 
 # '실행 옵션'·'매칭 설정' 두 카드를 가로로 나란히 세우려면 이만큼은 있어야 한다.
@@ -583,6 +585,7 @@ class SetupPage(QWidget):
             self._make_machine_group(i18n.KO.SETUP_REF_GROUP,
                                      extra=self._lot1_slot_btn)
         self._build_lot_list()
+        self._build_reject_row()
         # AVAGO 재리뷰 — Scanresult(오른쪽 카드)의 [슬롯 선택](재리뷰 모드에서만 보인다).
         # 선택 창·규칙은 Defect 추출의 LOT 별 슬롯 선택과 같다(`_pick_rereview_slots`).
         self._rr_slot_btn = NeonButton(i18n.KO.EXTRACT_SLOT_BTN_ALL, role="ghost")
@@ -637,6 +640,28 @@ class SetupPage(QWidget):
         self.ref_group.body().addWidget(host)
         self._lot_list = host
         self._refresh_lot_add_btn()
+
+    def _build_reject_row(self) -> None:
+        """AVAGO 재리뷰 — Map 카드 안의 '1차 Reject 사진 폴더(선택)' 줄(재리뷰 모드에서만 보인다).
+
+        폴더 존재 확인은 시작 버튼을 누를 때 한 번 한다(`_collect_rereview_input`) —
+        여기서 입력마다 stat 하지 않는다(NAS)."""
+        host = QWidget(self.ref_group)
+        host.setProperty("role", "rowHost")
+        row = QHBoxLayout(host)
+        row.setContentsMargins(0, 4, 0, 0)
+        row.setSpacing(10)
+        label = QLabel(i18n.KO.REREVIEW_RJ_LABEL, host)
+        self.rj_path_edit = QLineEdit(host)
+        self.rj_path_edit.setMinimumWidth(self._PATH_MIN_W)
+        self.rj_path_edit.setPlaceholderText(i18n.KO.REREVIEW_RJ_PLACEHOLDER)
+        browse = NeonButton(i18n.KO.BTN_BROWSE, role="ghost")
+        browse.clicked.connect(lambda: self._browse(self.rj_path_edit))
+        for w in (label, self.rj_path_edit, browse):
+            row.addWidget(w, 1 if w is self.rj_path_edit else 0)
+        host.setVisible(False)
+        self.ref_group.body().addWidget(host)
+        self._rj_host = host
 
     def _add_lot_row(self) -> None:
         if len(self._lot_rows) >= self.MAX_LOTS:
@@ -1434,6 +1459,7 @@ class SetupPage(QWidget):
                                     self.val_machine_edit.text())
             p = _prefs.load()
             self.ref_path_edit.setText(p.last_rereview_map)
+            self.rj_path_edit.setText(p.last_rereview_reject)
             self.val_path_edit.setText(p.last_rereview_scan)
             self.val_machine_edit.setText("")          # LOT 마다 다르다 — 기억하지 않는다
         elif self._rereview_stash is not None:
@@ -1456,6 +1482,7 @@ class SetupPage(QWidget):
             lbl.setVisible(not on)
         self.ref_machine_edit.setVisible(not on)
         self._rr_slot_btn.setVisible(on)
+        self._rj_host.setVisible(on)
         if on:
             self._rr_auto_lot = ""
             self._autofill_rereview_lot(self.ref_path_edit.text())
@@ -1959,11 +1986,19 @@ class SetupPage(QWidget):
             sheets.warn(self, i18n.KO.APP_TITLE, i18n.KO.REREVIEW_LOT_REQUIRED)
             self.val_machine_edit.setFocus()
             return None
+        rj_text = self.rj_path_edit.text().strip()
+        rj_dir = Path(rj_text) if rj_text else None
+        if rj_dir is not None and not rj_dir.is_dir():
+            sheets.warn(self, i18n.KO.APP_TITLE,
+                        i18n.KO.REREVIEW_RJ_NOT_FOUND.format(path=rj_dir))
+            return None
         _prefs.patch(last_rereview_scan=str(scan),
-                     last_rereview_map=str(map_dir) if map_dir else "")
+                     last_rereview_map=str(map_dir) if map_dir else "",
+                     last_rereview_reject=rj_text)
         return SetupInput(
             mode="single", ref_root=scan, val_root=map_dir or scan,
             rereview_no_map=map_dir is None,
+            rereview_reject_dir=rj_dir,
             ref_machine=lot, val_machine="",
             threshold=self.slider.value() / 100.0,
             automation_level=AutomationLevel.USER_SELECT,

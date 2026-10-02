@@ -21,9 +21,10 @@ class RereviewPlannerSignals(QObject):
 class RereviewPlanner(QThread):
     """``jobs`` : [(slot명, 웨이퍼 폴더, [사진 경로])]."""
 
-    def __init__(self, jobs, map_dir, token: int = 0, parent=None) -> None:
+    def __init__(self, jobs, map_dir, token: int = 0, parent=None, reject_dir=None) -> None:
         super().__init__(parent)
         self._token = token
+        self._reject_dir = Path(reject_dir) if reject_dir is not None else None
         self._stop = False
         self._jobs = list(jobs)
         self._map_dir = Path(map_dir) if map_dir is not None else None   # None = Map 없이 전체
@@ -41,7 +42,8 @@ class RereviewPlanner(QThread):
             # plan_wafer 는 전 구간 fail-safe(실패 = 그 웨이퍼 전부 재리뷰 + 경고).
             if self._stop:
                 return
-            plans[slot] = rereview.plan_wafer(slot, folder, paths, self._map_dir)
+            plans[slot] = rereview.plan_wafer(slot, folder, paths, self._map_dir,
+                                               reject_dir=self._reject_dir)
             self.signals.progress.emit(self._token, k, total)
         if not self._stop:
             self.signals.done.emit(self._token, plans)

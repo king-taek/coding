@@ -82,6 +82,7 @@ class UiPrefs:
     # 같은 입력란을 쓰므로, 모드를 오갈 때 서로의 값을 덮지 않게).
     last_rereview_scan: str = ""
     last_rereview_map: str = ""
+    last_rereview_reject: str = ""      # 1차 Reject 사진 폴더(선택)
     # 재리뷰 결과 엑셀에 Good 사진까지 넣을지(결과 화면 체크 — 마지막 값).
     rereview_include_good: bool = False
     # OpenVINO (Intel GPU 가속) 자동 설치 안내를 거절한 경우 — 다시 묻지

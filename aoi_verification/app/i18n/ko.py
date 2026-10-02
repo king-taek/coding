@@ -1183,6 +1183,12 @@ REREVIEW_PLAN_FMT = (
     "{review}장을 재리뷰합니다.")
 REREVIEW_PLAN_NO_MAP_FMT = (
     "Map 경로를 지정하지 않아 제외 없이 웨이퍼 {wafers}장 · 사진 {total}장을 전부 재리뷰합니다.")
+REREVIEW_PLAN_SRC_FMT = (
+    "웨이퍼 {wafers}장 · 사진 {total}장 중 1차 Reject 사진이 있는 die(또는 Map 의 Reject die)의 "
+    "사진 {excluded}장을 빼고 {review}장을 재리뷰합니다.")
+REREVIEW_RJ_LABEL = "1차 Reject 사진"
+REREVIEW_RJ_PLACEHOLDER = "(선택) 1차 리뷰에서 Reject 한 사진 폴더 — 웨이퍼마다 하위 폴더"
+REREVIEW_RJ_NOT_FOUND = "1차 Reject 사진 폴더를 찾을 수 없습니다: {path}"
 REREVIEW_PLAN_WARN_HEAD = "아래 웨이퍼는 확인이 필요합니다:"
 REREVIEW_PLAN_CONTINUE = "재리뷰 시작"
 REREVIEW_PLAN_CANCEL = "설정으로 돌아가기"
@@ -1201,6 +1207,13 @@ REREVIEW_WARN_ALIGN_FAIL_FMT = (
 REREVIEW_WARN_FLIP_SUFFIX = " (뒤집힌 Map 과는 일치 — 방향 확인 필요)"
 REREVIEW_WARN_UNPLACED_FMT = "{wafer}: 좌표를 못 읽은 사진 {n}장은 재리뷰에 넣었습니다."
 REREVIEW_WARN_PLAN_FAILED_FMT = ("{wafer}: Map 대조 중 예상 못 한 오류가 나 사진을 전부 재리뷰에 넣었습니다.")
+REREVIEW_WARN_RJ_NO_FOLDER_FMT = (
+    "{wafer}: 1차 Reject 사진 폴더에 이 웨이퍼 폴더가 없어 그 기준으로는 빼지 않았습니다.")
+REREVIEW_WARN_RJ_BAD_NAME_FMT = (
+    "{wafer}: 1차 Reject 사진 {n}장은 파일명에서 die 를 읽지 못해 반영하지 못했습니다.")
+REREVIEW_WARN_RJ_NO_MATCH_FMT = (
+    "{wafer}: 1차 Reject 사진 die {n}칸 중 Scanresult 사진과 맞는 die 가 하나도 없습니다 — "
+    "폴더가 맞는지 확인하세요.")
 REREVIEW_WARN_OFF_MAP_FMT = "{wafer}: Map 의 die 없는 칸에 찍힌 사진 {n}장은 재리뷰에 넣었습니다."
 
 # 선별 화면 — 후보 선별을 그대로 쓰고 이름만 바꾼다(오른쪽 = Reject, 왼쪽 = Good).

@@ -62,7 +62,8 @@ from .ini_text import read_ini_text
 __all__ = ["RejectMap", "WaferPlan", "WaferStats", "parse_map", "find_map",
            "load_map", "warning_lines", "lot_from_map_path", "align", "plan_wafer", "wafer_stats", "new_reject_cells", "confirmed_new_rejects",
            "W_NO_MAP", "W_MAP_INVALID", "W_NO_GEOMETRY", "W_NO_DIE_MAP",
-           "W_ALIGN_FAIL", "W_UNPLACED", "W_OFF_MAP", "W_PLAN_FAILED"]
+           "W_ALIGN_FAIL", "W_UNPLACED", "W_OFF_MAP", "W_PLAN_FAILED",
+           "W_RJ_NO_FOLDER", "W_RJ_BAD_NAME", "W_RJ_NO_MATCH", "find_reject_dir", "read_reject_dies"]
 
 _LOG = logging.getLogger("aoi.coords")
 
@@ -77,6 +78,9 @@ W_MAP_INVALID = "map_invalid"     # 맵 형식·WAFER·FNLOC 를 못 믿는다 �
 W_NO_GEOMETRY = "no_geometry"     # die pitch 를 못 정했다 → 전부 재리뷰
 W_NO_DIE_MAP = "no_die_map"       # s_DieLocation.dat 이 없다/못 읽는다 → 전부 재리뷰
 W_ALIGN_FAIL = "align_fail"       # 맵과 장비 die 영역이 다르다 → 전부 재리뷰
+W_RJ_NO_FOLDER = "rj_no_folder"     # 1차 Reject 사진 폴더에 이 웨이퍼 폴더가 없다
+W_RJ_BAD_NAME = "rj_bad_name"       # 파일명에서 die 를 못 읽은 Reject 사진 수
+W_RJ_NO_MATCH = "rj_no_match"       # Reject 사진의 die 가 Scanresult 어느 사진과도 안 맞는다
 W_PLAN_FAILED = "plan_failed"       # 예상 밖 예외 — 그 웨이퍼 전부 재리뷰
 W_UNPLACED = "unplaced"           # 좌표를 못 읽은 사진(재리뷰에 넣음)
 W_OFF_MAP = "off_map"             # 맵의 die 없는 칸에 떨어진 사진(재리뷰에 넣음)
@@ -236,14 +240,21 @@ def _flip_hint(map_cells: frozenset, die_cells: frozenset, rows: int, cols: int)
 # 웨이퍼 하나
 # ---------------------------------------------------------------------------
 def plan_wafer(slot: str, folder: Optional[Path], images: Iterable,
-               map_dir: Optional[Path], wafer: Optional[str] = None) -> WaferPlan:
+               map_dir: Optional[Path], wafer: Optional[str] = None,
+               reject_dir: Optional[Path] = None) -> WaferPlan:
     """웨이퍼 하나의 재리뷰 계획.  ``wafer`` 를 안 주면 폴더명이 WaferID 다.
+
+    ``reject_dir`` — 1차 Reject 사진 폴더(웨이퍼마다 하위 폴더, 파일명에 die 좌표).  그 사진이
+    있는 die 의 사진을 Map 과 **별개로** 뺀다(둘 다 주면 합집합).
 
     실패는 전부 '그 웨이퍼는 전부 재리뷰 + 경고' 로 떨어진다(전 구간 fail-safe)."""
     paths = [Path(p) for p in images]
     plan = WaferPlan(slot=slot, folder=folder)
     try:
-        _plan_into(plan, paths, map_dir, wafer or (folder.name if folder else slot))
+        name = wafer or (folder.name if folder else slot)
+        _plan_into(plan, paths, map_dir, name)
+        if reject_dir is not None:
+            _apply_reject_folder(plan, reject_dir, name)
     except Exception:
         _LOG.exception("재리뷰 계획 실패 — %s 전부 재리뷰", slot)
         plan.review, plan.excluded = list(paths), []
@@ -328,6 +339,67 @@ def _plan_into(plan: WaferPlan, paths: list, map_dir: Optional[Path], wafer: str
         plan.warnings.append((W_UNPLACED, unplaced))
     if off_map:
         plan.warnings.append((W_OFF_MAP, off_map))
+
+
+_PHOTO_EXT = frozenset({".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"})
+
+
+def find_reject_dir(root: Path, wafer: str) -> Optional[Path]:
+    """1차 Reject 사진 폴더 안의 이 웨이퍼 하위 폴더(대소문자 무시).  없으면 ``None``."""
+    try:
+        for p in Path(root).iterdir():
+            if p.is_dir() and p.name.upper() == wafer.upper():
+                return p
+    except OSError:
+        pass
+    return None
+
+
+def read_reject_dies(folder: Path) -> tuple[frozenset, int]:
+    """폴더(하위 포함)의 사진 파일명에서 읽은 die ``(col, row)`` 집합과, 못 읽은 사진 수.
+
+    파일명 해석은 LIVE 파일명 규칙(:func:`camtek_live.parse_live_name`)을 그대로 쓴다 —
+    ``col``/``row`` 는 장비 화면 표기라 앱의 INI 변환과 같다(실물 골든 45장 전부 일치)."""
+    import os
+    from . import camtek_live
+    dies, bad = set(), 0
+    for dirpath, _dirs, files in os.walk(folder):
+        for name in files:
+            if Path(name).suffix.lower() not in _PHOTO_EXT:
+                continue
+            ln = camtek_live.parse_live_name(Path(name).stem)
+            if ln is None:
+                bad += 1
+            else:
+                dies.add((ln.col, ln.row))
+    return frozenset(dies), bad
+
+
+def _apply_reject_folder(plan: WaferPlan, reject_dir: Path, wafer: str) -> None:
+    """1차 Reject 사진이 있는 die 의 사진을 재리뷰에서 뺀다 — 못 믿으면 빼지 않고 경고."""
+    d = find_reject_dir(reject_dir, wafer)
+    if d is None:
+        plan.warnings.append((W_RJ_NO_FOLDER, None))
+        return
+    dies, bad = read_reject_dies(d)
+    if bad:
+        plan.warnings.append((W_RJ_BAD_NAME, bad))
+    if not dies:
+        return
+    if not plan.die_of:                       # 이 웨이퍼 사진의 die 를 모른다 — 비교할 수 없다
+        if not any(c == W_NO_GEOMETRY for c, _ in plan.warnings):
+            plan.warnings.append((W_NO_GEOMETRY, None))
+        return
+    hit = [p for p in plan.review if plan.die_of.get(p) in dies]
+    if not hit:
+        plan.warnings.append((W_RJ_NO_MATCH, len(dies)))
+    gone = set(hit)
+    plan.review = [p for p in plan.review if p not in gone]
+    plan.excluded = plan.excluded + hit
+    if not any(c == W_UNPLACED for c, _ in plan.warnings):
+        unplaced = sum(1 for p in plan.review if p not in plan.die_of)
+        if unplaced:
+            plan.warnings.append((W_UNPLACED, unplaced))
 
 
 def _forget_caches() -> None:
@@ -415,7 +487,10 @@ def warning_lines(plans: dict) -> list[str]:
             W_ALIGN_FAIL: i18n.KO.REREVIEW_WARN_ALIGN_FAIL_FMT,
             W_UNPLACED: i18n.KO.REREVIEW_WARN_UNPLACED_FMT,
             W_OFF_MAP: i18n.KO.REREVIEW_WARN_OFF_MAP_FMT,
-            W_PLAN_FAILED: i18n.KO.REREVIEW_WARN_PLAN_FAILED_FMT}
+            W_PLAN_FAILED: i18n.KO.REREVIEW_WARN_PLAN_FAILED_FMT,
+            W_RJ_NO_FOLDER: i18n.KO.REREVIEW_WARN_RJ_NO_FOLDER_FMT,
+            W_RJ_BAD_NAME: i18n.KO.REREVIEW_WARN_RJ_BAD_NAME_FMT,
+            W_RJ_NO_MATCH: i18n.KO.REREVIEW_WARN_RJ_NO_MATCH_FMT}
     out: list[str] = []
     for slot in sorted(plans):
         plan = plans[slot]
