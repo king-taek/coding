@@ -21,12 +21,12 @@ class RereviewPlannerSignals(QObject):
 class RereviewPlanner(QThread):
     """``jobs`` : [(slot명, 웨이퍼 폴더, [사진 경로])]."""
 
-    def __init__(self, jobs, map_dir: Path, token: int = 0, parent=None) -> None:
+    def __init__(self, jobs, map_dir, token: int = 0, parent=None) -> None:
         super().__init__(parent)
         self._token = token
         self._stop = False
         self._jobs = list(jobs)
-        self._map_dir = Path(map_dir)
+        self._map_dir = Path(map_dir) if map_dir is not None else None   # None = Map 없이 전체
         self.signals = RereviewPlannerSignals()
 
     def stop(self) -> None:

@@ -18,6 +18,15 @@
 
 ENTRIES = [
     {
+        "id": "2026-10-02g",
+        "date": "2026-10-02",
+        "headline": "AVAGO 재리뷰 —\nMap 없이도 시작합니다",
+        "summary": "Map 폴더를 비워 두면 사진을 하나도 빼지 않고\n전부 재리뷰합니다.",
+        "others": [
+            ("AVAGO 재리뷰", "Map 없이 진행하면 Reject 한 사진의 die 가 모두 '추가된 Reject die' 로 집계됩니다"),
+        ],
+    },
+    {
         "id": "2026-10-02f",
         "date": "2026-10-02",
         "headline": "AVAGO 재리뷰\n안전장치를 보강했습니다",

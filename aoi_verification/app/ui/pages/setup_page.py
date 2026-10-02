@@ -63,6 +63,8 @@ class SetupInput:
     extract_slots: Optional[list] = None
     # AVAGO 재리뷰 — ``ref_root`` = Scanresult LOT 폴더, ``val_root`` = 1차 리뷰 Map 폴더.
     rereview: bool = False
+    # Map 경로를 비워 뒀다 — 제외 없이 전부 재리뷰(``val_root`` 는 ``ref_root`` 와 같게 둔다).
+    rereview_no_map: bool = False
 
 
 # '실행 옵션'·'매칭 설정' 두 카드를 가로로 나란히 세우려면 이만큼은 있어야 한다.
@@ -1541,6 +1543,8 @@ class SetupPage(QWidget):
             self._start_dir_probe(ref_text, val_text)
             ref_state = self._probe_state(ref_text)
             val_state = self._probe_state(val_text)
+        if self._rereview_mode and not ref_text.strip():
+            ref_state = ""            # 재리뷰의 Map 경로는 선택 — 비우면 전체 리뷰
         checking = ref_state is None or val_state is None
         # 비어 있는 초기 상태에서 빨간 테두리로 겁주지 않는다 — 문구만 조용히.
         # 확인 중(None)도 마찬가지다 — 아직 모르는 것을 틀렸다고 칠할 수는 없다.
@@ -1569,7 +1573,7 @@ class SetupPage(QWidget):
         die_text = ref_text
         if self._extract_mode:                 # 여러 LOT 면 첫 폴더로 안내한다
             die_text = (self.split_roots(ref_text) or [""])[0]
-        self._refresh_die_hint(die_text if ref_state == "" else None)
+        self._refresh_die_hint(die_text if ref_state == "" and die_text.strip() else None)
         return ok
 
     def _refresh_die_hint(self, ref_text: Optional[str]) -> None:
@@ -1942,10 +1946,11 @@ class SetupPage(QWidget):
 
         선별은 건너뛸 수 없다(재리뷰 자체가 사람이 한 장씩 보는 일이다).
         LOT명은 필수다 — 결과 파일 이름과 엑셀 머리에 쓴다."""
-        map_dir = Path(self.ref_path_edit.text().strip())
+        map_text = self.ref_path_edit.text().strip()
+        map_dir = Path(map_text) if map_text else None      # 비워 두면 전체 리뷰
         scan = Path(self.val_path_edit.text().strip())
         for r in (map_dir, scan):
-            if not r.is_dir():
+            if r is not None and not r.is_dir():
                 sheets.warn(self, i18n.KO.APP_TITLE,
                             i18n.KO.WARN_PATH_NOT_EXIST.format(path=r))
                 return None
@@ -1954,9 +1959,11 @@ class SetupPage(QWidget):
             sheets.warn(self, i18n.KO.APP_TITLE, i18n.KO.REREVIEW_LOT_REQUIRED)
             self.val_machine_edit.setFocus()
             return None
-        _prefs.patch(last_rereview_scan=str(scan), last_rereview_map=str(map_dir))
+        _prefs.patch(last_rereview_scan=str(scan),
+                     last_rereview_map=str(map_dir) if map_dir else "")
         return SetupInput(
-            mode="single", ref_root=scan, val_root=map_dir,
+            mode="single", ref_root=scan, val_root=map_dir or scan,
+            rereview_no_map=map_dir is None,
             ref_machine=lot, val_machine="",
             threshold=self.slider.value() / 100.0,
             automation_level=AutomationLevel.USER_SELECT,

@@ -109,6 +109,7 @@ class WaferPlan:
     flip_hint: str = ""                               # 정렬 실패 시 뒤집힌 가설 진단
     pitch: Optional[tuple] = None                     # (x, y) µm — 맵 그림의 칸 비율용
     unscanned: list = field(default_factory=list)     # 맵에만 있는 칸(장비 미검사 die)
+    no_map: bool = False                              # 사용자가 Map 경로를 안 줬다 — 전부 재리뷰(경고 아님)
 
     @property
     def aligned(self) -> bool:
@@ -271,7 +272,10 @@ def _plan_into(plan: WaferPlan, paths: list, map_dir: Optional[Path], wafer: str
         if c is not None:
             plan.die_of[p] = (c.col, c.row)
 
-    rm, warn = load_map(map_dir, wafer) if map_dir else (None, W_NO_MAP)
+    if map_dir is None:               # Map 경로 미지정 = 의도된 '전체 리뷰' (경고가 아니다)
+        plan.no_map = True
+        return
+    rm, warn = load_map(map_dir, wafer)
     plan.reject_map = rm
     if rm is None:
         plan.warnings.append((warn, None))
@@ -373,7 +377,8 @@ def wafer_stats(plan: WaferPlan, reject_paths: Iterable) -> WaferStats:
         excluded=len(plan.excluded), reviewed=n_rev,
         good=n_rev - len(rej), reject=len(rej),
         new_reject_dies=len(dies), unknown_die_rejects=unknown,
-        map_reject_dies=map_dies, total_reject_dies=map_dies + len(new_reject_cells(plan, rej)))
+        map_reject_dies=map_dies, total_reject_dies=map_dies + (len(dies) if plan.no_map
+                                                    else len(new_reject_cells(plan, rej))))
 
 
 def confirmed_new_rejects(plan: WaferPlan, reject_paths: Iterable) -> list:
@@ -382,6 +387,8 @@ def confirmed_new_rejects(plan: WaferPlan, reject_paths: Iterable) -> list:
     맵과 정렬이 됐고, 사진의 칸이 맵의 실제 die 칸이며, 그 칸이 1차 리뷰에서 이미 Reject 가
     아닐 때만 '새로 추가된 Reject' 라 부른다.  정렬 실패·맵 밖·좌표 없음은 die 번호를 알아도
     맵 대응이 미확정이라 여기서 뺀다(사진 행·엑셀 판정은 그대로 남는다)."""
+    if plan.no_map:                   # 맵이 없으면 Reject 한 사진의 die 가 전부 '추가'다
+        return [Path(p) for p in reject_paths if Path(p) in plan.die_of]
     rm = plan.reject_map
     if not plan.aligned or rm is None:
         return []
@@ -395,7 +402,8 @@ def confirmed_new_rejects(plan: WaferPlan, reject_paths: Iterable) -> list:
 
 def new_reject_cells(plan: WaferPlan, reject_paths: Iterable) -> frozenset:
     """확정 신규 Reject 사진이 떨어진 **맵 칸** — Wafer Map 그림·개수 공용."""
-    return frozenset(plan.cell_of[p] for p in confirmed_new_rejects(plan, reject_paths))
+    return frozenset(plan.cell_of[p] for p in confirmed_new_rejects(plan, reject_paths)
+                     if p in plan.cell_of)
 
 
 def warning_lines(plans: dict) -> list[str]:

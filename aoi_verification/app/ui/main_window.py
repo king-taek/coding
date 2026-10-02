@@ -1888,7 +1888,8 @@ class MainWindow(QMainWindow):
         self._loading.set_progress(0, len(jobs), i18n.KO.LOAD_REREVIEW_PLAN)
         # 부모 없이 만들고 모듈 집합이 수명을 잡는다 — 창을 닫아도 도는 스레드가 지워지지 않는다.
         token = self._scan_token
-        worker = RereviewPlanner(jobs, self._input.val_root, token=token)
+        map_dir = None if self._input.rereview_no_map else self._input.val_root
+        worker = RereviewPlanner(jobs, map_dir, token=token)
         self._rereview_worker = worker
         _LIVE_REREVIEW.add(worker)
         worker.finished.connect(lambda w=worker: _LIVE_REREVIEW.discard(w))
@@ -1919,8 +1920,11 @@ class MainWindow(QMainWindow):
         n_total = sum(len(p.review) + len(p.excluded) for p in plans.values())
         n_excl = sum(len(p.excluded) for p in plans.values())
         n_review = n_total - n_excl
-        body = i18n.KO.REREVIEW_PLAN_FMT.format(wafers=len(plans), total=n_total,
-                                                excluded=n_excl, review=n_review)
+        if self._input.rereview_no_map:
+            body = i18n.KO.REREVIEW_PLAN_NO_MAP_FMT.format(wafers=len(plans), total=n_total)
+        else:
+            body = i18n.KO.REREVIEW_PLAN_FMT.format(wafers=len(plans), total=n_total,
+                                                    excluded=n_excl, review=n_review)
         from ..coords.rereview import warning_lines
         warns = warning_lines(plans)
         if warns:

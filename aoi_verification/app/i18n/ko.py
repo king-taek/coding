@@ -1166,7 +1166,7 @@ REREVIEW_TITLE = "AVAGO 재리뷰 모드"
 REREVIEW_SCAN_GROUP = "Scanresult (LOT 폴더)"
 REREVIEW_MAP_GROUP = "1차 리뷰 Map 폴더"
 REREVIEW_SCAN_PLACEHOLDER = r"예: M:\AOI-8\Scanresult\…\6321\NHW"
-REREVIEW_MAP_PLACEHOLDER = r"예: \\k5cifsn2\…\2. FVI\1. OR  (웨이퍼마다 <WaferID>.txt)"
+REREVIEW_MAP_PLACEHOLDER = r"(선택) 예: \\k5cifsn2\…\2. FVI\1. OR  — 비우면 전부 재리뷰"
 BTN_REREVIEW_START = "재리뷰 시작"
 # Scanresult 카드 둘째 줄 — '호기 번호' 대신(사용자 지정).  결과 파일 이름·엑셀 머리에 쓴다.
 REREVIEW_LOT_LABEL = "LOT명(S/M)"
@@ -1181,6 +1181,8 @@ REREVIEW_PLAN_TITLE = "Map 대조 결과"
 REREVIEW_PLAN_FMT = (
     "웨이퍼 {wafers}장 · 사진 {total}장 중 Map 의 Reject die 사진 {excluded}장을 빼고 "
     "{review}장을 재리뷰합니다.")
+REREVIEW_PLAN_NO_MAP_FMT = (
+    "Map 경로를 지정하지 않아 제외 없이 웨이퍼 {wafers}장 · 사진 {total}장을 전부 재리뷰합니다.")
 REREVIEW_PLAN_WARN_HEAD = "아래 웨이퍼는 확인이 필요합니다:"
 REREVIEW_PLAN_CONTINUE = "재리뷰 시작"
 REREVIEW_PLAN_CANCEL = "설정으로 돌아가기"
@@ -1248,7 +1250,7 @@ REREVIEW_MAP_LEGEND = "■ 파랑 = Map Reject(1차)   ■ 빨강 = 신규 Rejec
 REREVIEW_MAP_NOT_ALIGNED = "Map 과 장비 die 를 대조하지 못해 신규 Reject 를 수정된 Map 에 표시하지 못했습니다"
 REREVIEW_MAP_NO_MAP = "Map 파일 없음"
 REREVIEW_BACK_TO_SELECT = "← 선별로 (판정 고치기)"
-REREVIEW_START_BLOCKED_HINT = "Scanresult·Map 폴더를 먼저 지정하세요."
+REREVIEW_START_BLOCKED_HINT = "Scanresult 폴더를 먼저 지정하세요. (Map 은 선택 — 비우면 전부 재리뷰)"
 REREVIEW_MAP_NOTCH = "Notch"
 REREVIEW_MAP_COL_ORIG = "기존 Map (1차 리뷰)"
 REREVIEW_MAP_COL_NEW = "수정된 Map (재리뷰 반영)"

@@ -296,7 +296,7 @@ class ExcelExporter(QThread):
                           [r for r in rows_input if isinstance(r[2], MissEntry)])
         self._prog_done = 0
         map_rows = [] if self._rereview else self._wafer_map_rows()
-        rr_map_rows = (sorted(self._result.rereview)
+        rr_map_rows = (sorted(s for s, p in self._result.rereview.items() if not p.no_map)
                        if self._rereview and self._reject_map_renderer else [])
         prewarm = ([u.path for u in self._result.unmatched_refs]
                    if self._one_side else [])
