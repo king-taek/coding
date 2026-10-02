@@ -229,25 +229,59 @@ def test_result_rows_reject_first(lot):
         ("g", VERDICT_GOOD)]
 
 
-def test_result_page_shows_rereview_counts(styled_qapp, lot):
-    """핵심 수치(신규 Reject die)는 크게, 웨이퍼별은 표로 — 엑셀과 같은 숫자."""
+def test_result_page_shows_only_new_reject_dies(styled_qapp, lot):
+    """결과 화면은 **추가된 Reject die 만** — 웨이퍼별 나열 없이 die 목록(사용자 결정)."""
     from PyQt6.QtWidgets import QLabel
 
+    from aoi_verification.app.coords import camtek_ini
     from aoi_verification.app.ui.pages.result_page import ResultPage
 
+    _root, folder, _maps = lot
     page = ResultPage()
     try:
         page.show_result(_result(lot))
-        labels = page._summary_card.findChildren(QLabel)
-        hero = [w for w in labels if w.property("role") == "rrHeroValue"]
-        assert [w.text() for w in hero] == ["2"]                 # 신규 Reject die
-        # 표: 웨이퍼 · Reject 사진 3 · 신규 2 · 합계 6(Map 4 + 신규 2)
-        cells = [w.text() for w in page.findChildren(QLabel)
-                 if w.property("role") == "rrCell"]
-        assert cells == ["3", "2", "6"]
+        labels = page.findChildren(QLabel)
+        hero = [w.text() for w in labels if w.property("role") == "rrHeroValue"]
+        assert hero == ["2"]                                     # a1·a2 같은 die + b
+        a1 = camtek_ini.resolve(folder / "a1.jpeg")
+        b = camtek_ini.resolve(folder / "b.jpeg")
+        cells = [w.text() for w in labels if w.property("role") == "rrCell"]
+        fmt = i18n.KO.REREVIEW_DIE_CELL_FMT
+        assert sorted(zip(cells[::2], cells[1::2])) == sorted([
+            (fmt.format(col=a1.col, row=a1.row), "2"),
+            (fmt.format(col=b.col, row=b.row), "1")])
+        names = [w.text() for w in labels if w.property("role") == "rrCellName"]
+        assert names == [WAFER, WAFER]                          # die 마다 한 줄
         assert page.title.text() == i18n.KO.REREVIEW_RESULT_TITLE
         assert page.wafer_map_btn.isHidden() and page.review_unmatched_btn.isHidden()
         assert not page.include_good_chk.isHidden()
+    finally:
+        page.deleteLater()
+
+
+def test_select_page_center_crop(styled_qapp, tmp_path, monkeypatch):
+    """선별 '가운데 확대' — 원본 사진의 가운데 50%·30% 만 크게(결함은 정중앙)."""
+    from PIL import Image
+
+    from aoi_verification.app.models.slot import ImageItem
+    from aoi_verification.app.ui.pages import select_page as sp
+    from aoi_verification.app.utils import prefs
+
+    saved: dict = {}
+    monkeypatch.setattr(prefs, "patch", lambda **kw: saved.update(kw))
+    img = tmp_path / "d.jpg"
+    Image.new("RGB", (1380, 1036), (100, 100, 100)).save(img, "JPEG")
+    page = sp.SelectPage()
+    try:
+        page.load_state(queue=[ImageItem(slot="W", path=img, side="ref")])
+        for key, w, h in (("30", 414, 311), ("50", 690, 518)):
+            page.crop_group.set_current_key(key)
+            page._on_crop_changed(key)
+            pix = page.center_img._pix_orig
+            assert (pix.width(), pix.height()) == (w, h)        # 원본에서 잘랐다
+            assert saved["select_center_crop"] == key
+        page._on_crop_changed("100")
+        assert page.center_img.center_crop() == 1.0
     finally:
         page.deleteLater()
 

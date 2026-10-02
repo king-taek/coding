@@ -37,6 +37,7 @@ from ..widgets.app_logo import build_logo_label
 from ..widgets.neon_button import NeonButton
 from ..widgets.no_wheel_slider import NoWheelSlider
 from ..widgets.neon_card import NeonCard
+from ..widgets.option_group import OptionGroup
 from ..widgets.scalable_image import ScalableImage
 from ..widgets.slot_section import SlotSection
 from ..widgets.thumb_grid import ThumbEntry
@@ -263,7 +264,8 @@ class _SidePanel(QFrame):
 
         ★ 라벨을 멤버로 들고 있으면 `update_data` 가 `_host_layout` 을 통째로 비울 때
         함께 파괴돼 죽은 참조가 남는다 — 매번 찾아 쓰고, 없으면 새로 만든다."""
-        hint_text = getattr(i18n.KO, f"PANEL_{self._name.upper()}_EMPTY", "")
+        hint_text = (getattr(self, "_empty_hint", None)
+                     or getattr(i18n.KO, f"PANEL_{self._name.upper()}_EMPTY", ""))
         if not hint_text:
             return
         # ★ `deleteLater` 로 지운 위젯은 이벤트 루프가 돌기 전까지 `findChildren` 에
@@ -326,11 +328,13 @@ class _SidePanel(QFrame):
         self._set_all_inline(False)
 
     def relabel(self, title: str, tooltip: str, action_labels: dict,
-                inline_fmts: Optional[dict] = None) -> None:
+                inline_fmts: Optional[dict] = None,
+                empty_hint: Optional[str] = None) -> None:
         """제목·일괄 액션 이름만 바꾼다(AVAGO 재리뷰 — 같은 패널을 Good/Reject 로).
 
         액션 **id** 는 그대로다 — 동작은 바뀌지 않고 이름만 바뀐다."""
         self._title = title
+        self._empty_hint = empty_hint            # None = 기본 안내(i18n PANEL_*_EMPTY)
         self._title_label.setText(title)
         self._title_label.setToolTip(tooltip)
         self._actions = [(aid, action_labels.get(aid, label), role)
@@ -340,6 +344,7 @@ class _SidePanel(QFrame):
             if inline_fmts and aid in inline_fmts:
                 btn.setProperty("labelFmt", inline_fmts[aid])
         self._refresh_inline_buttons()
+        self._refresh_empty_hint()
 
     def _refresh_inline_buttons(self) -> None:
         n = len(self.inline_selected_items())
@@ -548,9 +553,25 @@ class SelectPage(ProgressRowMixin, QWidget):
         size_row.addWidget(size_label)
         size_row.addWidget(self.size_slider, stretch=1)
         size_row.addWidget(self.size_value)
+        # 가운데 확대 — 결함은 사진 정중앙에 있다.  가운데 50%·30% 만 잘라 크게 본다.
+        size_row.addSpacing(12)
+        crop_label = QLabel(i18n.KO.CENTER_CROP_LABEL, center_card)
+        crop_label.setProperty("role", "muted")
+        crop_label.setToolTip(i18n.KO.CENTER_CROP_TOOLTIP)
+        _crop_now = str(getattr(_prefs.load(), "select_center_crop", "100"))
+        self.crop_group = OptionGroup(
+            [("100", i18n.KO.CENTER_CROP_FULL), ("50", "50%"), ("30", "30%")],
+            current=_crop_now if _crop_now in ("100", "50", "30") else "100",
+            role="segment", min_tile_w=56, fixed_cols=3, activate_on_arrow=False,
+            parent=center_card)
+        self.crop_group.setToolTip(i18n.KO.CENTER_CROP_TOOLTIP)
+        self.crop_group.selection_changed.connect(self._on_crop_changed)
+        size_row.addWidget(crop_label)
+        size_row.addWidget(self.crop_group)
 
         # 이미지 (스크롤 영역) -----------------------------------------
         self.center_img = ScalableImage(center_card)
+        self.center_img.set_center_crop(int(self.crop_group.current_key() or "100") / 100)
         self._img_scroll = QScrollArea(center_card)
         self._img_scroll.setWidgetResizable(False)
         self._img_scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -663,7 +684,8 @@ class SelectPage(ProgressRowMixin, QWidget):
                  "batch_verify": K.REREVIEW_INLINE_REJECT_FMT})
             self.right_panel.relabel(
                 K.REREVIEW_PANEL_RIGHT, K.REREVIEW_PANEL_RIGHT_TOOLTIP,
-                {"to_exclude": K.REREVIEW_MOVE_TO_GOOD})
+                {"to_exclude": K.REREVIEW_MOVE_TO_GOOD},
+                empty_hint=K.REREVIEW_PANEL_RIGHT_EMPTY)
         else:
             self.left_panel.relabel(
                 K.PANEL_LEFT_CANDIDATES, K.PANEL_LEFT_CANDIDATES_TOOLTIP,
@@ -989,6 +1011,11 @@ class SelectPage(ProgressRowMixin, QWidget):
                 else i18n.KO.REREVIEW_SLOT_NO_DIE_FMT.format(slot=item.slot))
             return
         self.slot_label.setText(i18n.KO.SLOT_LABEL_FMT.format(slot=item.slot))
+
+    def _on_crop_changed(self, key: str) -> None:
+        """가운데 확대 비율 — 지금 사진에 바로 적용하고 다음 실행에도 기억한다."""
+        self.center_img.set_center_crop(int(key or "100") / 100)
+        _prefs.patch(select_center_crop=key or "100")
 
     def _on_size_changed(self, value: int) -> None:
         self.size_value.setText(f"{value} px")

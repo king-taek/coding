@@ -42,6 +42,9 @@ class ScalableImage(QLabel):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._pix_orig: Optional[QPixmap] = None
+        self._path: Optional[Path] = None
+        # 가운데 확대 — 사진 가운데의 이 비율(가로·세로)만 잘라 크게 보인다.  1.0 = 전체.
+        self._crop = 1.0
         self._target_long_edge = self.DEFAULT_LONG_EDGE
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         # 색은 QSS 가 준다(role="imagePlate") — 인스턴스 스타일시트로 굽지 않는다.
@@ -51,10 +54,34 @@ class ScalableImage(QLabel):
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+    def set_center_crop(self, frac: float) -> None:
+        """사진 가운데 ``frac``(0~1) 만 잘라 보인다 — 결함은 사진 정중앙에 있다.
+
+        자른 부분은 **원본 사진**에서 읽는다(중간 화질 캐시를 자르면 30% 가 수백 px 라
+        크게 볼 때 흐려진다).  원본을 못 읽으면 캐시를 자른다."""
+        frac = 1.0 if not frac or frac >= 1.0 else max(0.05, float(frac))
+        if frac == self._crop:
+            return
+        self._crop = frac
+        if self._path is not None:
+            self.set_image(self._path)
+
+    def center_crop(self) -> float:
+        return self._crop
+
     def set_image(self, path: Path) -> None:
+        self._path = path
+        if self._crop < 1.0:
+            pix = self._load_center(path, self._crop)
+            if pix is not None:
+                self._pix_orig = pix
+                self._rescale()
+                return
         try:
             mid = image_io.get_mid_path(path)
             pix = QPixmap(str(mid))
+            if self._crop < 1.0 and not pix.isNull():
+                pix = pix.copy(self._center_rect(pix.width(), pix.height(), self._crop))
         except Exception:
             pix = QPixmap(800, 800)
             pix.fill(QColor(8, 16, 32))
@@ -64,7 +91,30 @@ class ScalableImage(QLabel):
         self._pix_orig = pix
         self._rescale()
 
+    @staticmethod
+    def _center_rect(w: int, h: int, frac: float):
+        from PyQt6.QtCore import QRect
+        cw, ch = max(1, round(w * frac)), max(1, round(h * frac))
+        return QRect((w - cw) // 2, (h - ch) // 2, cw, ch)
+
+    @classmethod
+    def _load_center(cls, path: Path, frac: float) -> Optional[QPixmap]:
+        """원본 사진의 가운데 ``frac`` 만 디코드한다(QImageReader 의 clip)."""
+        from PyQt6.QtGui import QImageReader
+        try:
+            reader = QImageReader(str(path))
+            reader.setAutoTransform(False)       # EXIF 회전 미적용 — 좌표 규약과 같게
+            size = reader.size()
+            if not size.isValid():
+                return None
+            reader.setClipRect(cls._center_rect(size.width(), size.height(), frac))
+            img = reader.read()
+            return None if img.isNull() else QPixmap.fromImage(img)
+        except Exception:
+            return None
+
     def clear_image(self) -> None:
+        self._path = None
         self._pix_orig = None
         self.clear()
         self.setMinimumSize(QSize(self.MIN_LONG_EDGE, self.MIN_LONG_EDGE))

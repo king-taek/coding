@@ -1207,6 +1207,7 @@ REREVIEW_PANEL_LEFT_TOOLTIP = "아직 Good / Reject 를 정하지 않은 사진�
 REREVIEW_PANEL_CENTER = "판정할 사진"
 REREVIEW_PANEL_RIGHT = "Reject"
 REREVIEW_PANEL_RIGHT_TOOLTIP = "Reject 로 판정한 사진들 — 골라서 Good 으로 돌릴 수 있습니다"
+REREVIEW_PANEL_RIGHT_EMPTY = "→ 또는 [Reject] 로 보낸 사진이 여기에 쌓입니다."
 REREVIEW_BTN_GOOD = "Good"
 REREVIEW_BTN_REJECT = "Reject"
 REREVIEW_SHORTCUT_TOOLTIP = "단축키:  → = Reject   /   ← = Good   /   Ctrl+Z · Z = 되돌리기"
@@ -1225,14 +1226,13 @@ REREVIEW_SLOT_NO_DIE_FMT = "웨이퍼: {slot}   ·   die 좌표 없음"
 
 # 결과 화면
 REREVIEW_RESULT_TITLE = "AVAGO 재리뷰 결과"
-REREVIEW_RESULT_HEAD_FMT = ("LOT {lot}  ·  웨이퍼 {n}장  ·  재리뷰 사진 {reviewed}장"
-                            "  (Map Reject die 사진 {excluded}장 제외)")
-REREVIEW_TABLE_COLS = ("웨이퍼", "Reject 사진", "신규 Reject die", "Reject die 합계")
-REREVIEW_WARN_SUMMARY_FMT = "⚠ 확인 필요 웨이퍼 {n}장 — 표의 ⚠ 에 마우스를 올리면 이유가 보입니다"
-REREVIEW_STAT_REJECT = "Reject 사진"
+REREVIEW_RESULT_HEAD_FMT = "LOT {lot}  ·  웨이퍼 {n}장"
+REREVIEW_NEW_DIES_SUB_FMT = "Reject 사진 {photos}장 · 웨이퍼 {wafers}장에서"
+REREVIEW_TABLE_COLS = ("웨이퍼", "추가된 Reject die (col, row)", "Reject 사진")
+REREVIEW_NO_NEW_DIES = "추가된 Reject die 가 없습니다."
+REREVIEW_DIE_UNKNOWN = "die 좌표 없음"
+REREVIEW_WARN_SUMMARY_FMT = "⚠ 확인 필요 웨이퍼 {n}장 — 마우스를 올리면 이유가 보입니다"
 REREVIEW_STAT_NEW_DIES = "신규 Reject die"
-REREVIEW_STAT_TOTAL_DIES = "Reject die 합계"
-REREVIEW_UNKNOWN_DIE_FMT = "※ die 좌표를 몰라 die 수에 넣지 못한 Reject 사진 {n}장"
 REREVIEW_INCLUDE_GOOD_LABEL = "Good die 모두 넣기"
 REREVIEW_INCLUDE_GOOD_TOOLTIP = (
     "켜면 재리뷰한 사진 전부(Good 포함)를 '전체' 시트에도 넣습니다.\n"
@@ -1255,3 +1255,8 @@ REREVIEW_MAP_LABEL_ORIG_FMT = "Reject die {n}"
 REREVIEW_MAP_LABEL_NEW_FMT = "Reject die {n} (신규 {new})"
 REREVIEW_SHEET_REJECT = "Reject"
 REREVIEW_SHEET_ALL = "전체"
+
+# 선별 화면 — 사진 가운데만 잘라 크게 보기(결함은 사진 정중앙).
+CENTER_CROP_LABEL = "가운데 확대"
+CENTER_CROP_FULL = "전체"
+CENTER_CROP_TOOLTIP = "사진 가운데(결함 위치)만 잘라 크게 봅니다 — 50% 는 가운데 절반, 30% 는 더 좁게."
