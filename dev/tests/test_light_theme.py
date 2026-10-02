@@ -171,12 +171,12 @@ def test_removed_strings_are_gone():
     for gone in ("DARK_MODE_LABEL", "DARK_MODE_TOOLTIP", "COLOR_MODE_LIGHT",
                  "COLOR_MODE_DARK", "HOWTO_TOGGLE_OPEN", "HOWTO_TOGGLE_CLOSE",
                  "SETUP_HOW_TO_USE_TITLE", "SETUP_HOW_TO_USE_BODY",
-                 "LEGACY_SWITCH_DESC"):
+                 "LEGACY_SWITCH_DESC", "ENGINE_ACTIVE_COORD"):
         assert not hasattr(i18n.KO, gone), f"i18n.KO.{gone} 가 남아 있다"
     # 스위치 제목·툴팁·배지 문구는 그대로다.
     assert i18n.KO.LEGACY_SWITCH_TITLE == "유사도 엔진(구형) 사용"
     assert i18n.KO.LEGACY_MODE_HINT
-    assert i18n.KO.ENGINE_ACTIVE_COORD and i18n.KO.ENGINE_ACTIVE_LEGACY_FMT
+    assert i18n.KO.ENGINE_ACTIVE_LEGACY_FMT
 
 
 # ── 화면 (헤드리스) ───────────────────────────────────────────────────────

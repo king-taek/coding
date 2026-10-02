@@ -1052,7 +1052,7 @@ def test_setup_and_result_pages_have_buttons(qt):
     page = sp.SetupPage()
     try:
         bar = page._action_bar
-        assert bar.itemAt(2).widget() is page.wafer_map_btn      # 사진 정보 보기 옆
+        assert page._aux_row.buttons()[2] is page.wafer_map_btn  # 사진 정보 보기 옆
         assert bar.itemAt(bar.count() - 1).widget() is page.start_btn
         assert page.wafer_map_btn.text() == i18n.KO.WAFER_MAP_BUTTON
     finally:

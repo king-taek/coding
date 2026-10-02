@@ -83,6 +83,7 @@ def _colors(palette: Optional[dict] = None) -> dict[str, QColor]:
         "matched": QColor(c["pass"]),
         "unmatched": QColor(c["danger"]),
         "neutral": QColor(c["accent"]),
+        "map_reject": QColor(c["accent"]),     # 재리뷰 맵: 1차 Map Reject(신규 적색과 구분)
         "text": QColor(c["ink"]),
     }
 
@@ -271,43 +272,100 @@ def render_map_png(data: Optional[MapData], size: int) -> bytes:
 
 
 
-# AVAGO 재리뷰 Reject die 맵 색 — 엑셀 그림 전용(흰 바탕 인쇄물).  범례 문구는
-# `i18n.KO.REREVIEW_MAP_LEGEND` 와 같은 순서·색이다.
-_RR_DIE = "#d0d4da"
-_RR_MAP_REJECT = "#f0a030"
-_RR_NEW_REJECT = "#e02020"
+def paint_reject_map(painter: QPainter, rect: QRectF, reject_map, new_cells=(),
+                     *, pitch=None, colors: Optional[dict] = None,
+                     label: str = "") -> None:
+    """AVAGO 재리뷰 Reject die 맵 — **Wafer map 보기와 같은 생김새**(:func:`paint_map`).
+
+    웨이퍼 원판 + 노치 홈 + die 격자 위에 1차 Map Reject 칸(주의색)과 재리뷰 신규 Reject
+    칸(적색)을 칠한다.  맵 파일 그대로(첫 RowData = 위)이고 ``FNLOC:180`` 만 쓰므로 노치는
+    **아래**다(``wafer_txt`` 가 다른 값을 거른다) — 홈 옆에 'Notch' 를 적어 방향을 밝힌다.
+    die 칸 비율은 장비 pitch(``pitch``)를 따르고, 모르면 정사각으로 그린다.  원 중심은
+    die 칸 묶음의 가운데로 잡는다(맵 파일에 중심 좌표가 없다)."""
+    import math
+
+    col = colors or _colors()
+    painter.fillRect(rect, col["bg"])
+    rows, cols = reject_map.rows, reject_map.cols
+    px, py = pitch if pitch else (1.0, 1.0)
+    cells = reject_map.cells
+    # 평면(µm, +y 위) — 칸 (i, j) 의 왼쪽 아래 모서리.  가운데를 0 으로.
+    i0 = min(i for i, _ in cells); i1 = max(i for i, _ in cells) + 1
+    j0 = min(j for _, j in cells); j1 = max(j for _, j in cells) + 1
+    ox, oy = (i0 + i1) / 2 * px, (j0 + j1) / 2 * py
+
+    def box(i, j):
+        return (i * px - ox, oy - (j + 1) * py, (i + 1) * px - ox, oy - j * py)
+
+    r = max(math.hypot(x, y) for i, j in cells
+            for x, y in ((box(i, j)[0], box(i, j)[1]), (box(i, j)[2], box(i, j)[3]),
+                         (box(i, j)[0], box(i, j)[3]), (box(i, j)[2], box(i, j)[1])))
+    r *= 1.03
+    m = _Mapper(rect, r)
+    painter.save()
+    painter.setClipRect(rect)
+    center = m.to_px(0.0, 0.0)
+    rp = r * m.scale
+    wafer = QPainterPath()
+    wafer.addEllipse(center, rp, rp)
+    notch = QPainterPath()
+    nr = r * _NOTCH_FRAC * m.scale
+    notch_at = m.to_px(0.0, -r)
+    notch.addEllipse(notch_at, nr, nr)
+    wafer = wafer.subtracted(notch)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    painter.fillPath(wafer, col["wafer"])
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+    rects = {"die": [], "map": [], "new": []}
+    for i, j in cells:
+        x0, y0, x1, y1 = box(i, j)
+        q = QRectF(m.to_px(x0, y0), m.to_px(x1, y1)).normalized()
+        key = ("new" if (i, j) in new_cells
+               else "map" if (i, j) in reject_map.rejects else "die")
+        rects[key].append(q)
+    painter.setPen(QPen(col["grid"], 1))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRects(rects["die"])
+    for key, color in (("map", col["map_reject"]), ("new", col["unmatched"])):
+        if rects[key]:
+            painter.setBrush(color)
+            painter.drawRects(rects[key])
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    painter.setPen(QPen(col["outline"], 1.5))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawPath(wafer)
+    # 노치 방향 표시 — 홈 바로 위에 'Notch'.
+    font = painter.font()
+    font.setPixelSize(max(9, round(min(rect.width(), rect.height()) * 0.03)))
+    font.setBold(True)
+    painter.setFont(font)
+    painter.setPen(col["text"])
+    fm = QFontMetricsF(font)
+    txt = i18n.KO.REREVIEW_MAP_NOTCH
+    tw = fm.horizontalAdvance(txt)
+    painter.drawText(QPointF(notch_at.x() - tw / 2, notch_at.y() - nr - fm.descent() - 2),
+                     txt)
+    painter.restore()
+    if label:
+        _paint_count(painter, rect, label, col)
 
 
-def render_reject_map_png(reject_map, new_cells, size: int) -> bytes:
-    """1차 리뷰 맵의 die 격자 — 회색 die · 주황 Map Reject · 빨강 신규 Reject.
-
-    ``reject_map`` 은 :class:`coords.rereview.RejectMap`, ``new_cells`` 는 같은 맵 칸
-    좌표(열, 위에서부터 줄).  맵 파일 그대로(위 = 첫 RowData) 그린다.  QImage 만 쓰므로
-    저장 워커 스레드에서 불러도 된다(:func:`render_map_png` 와 같은 계약)."""
-    from PyQt6.QtCore import QBuffer, QIODevice, QRectF
-    from PyQt6.QtGui import QColor, QImage, QPainter
+def render_reject_map_png(reject_map, new_cells, size: int, *, pitch=None,
+                          label: str = "") -> bytes:
+    """:func:`paint_reject_map` 를 PNG 로 — 엑셀 저장 워커에 인자로 넘긴다.  QImage 만
+    쓰므로 워커 스레드에서 불러도 된다(:func:`render_map_png` 와 같은 계약)."""
+    from PyQt6.QtCore import QBuffer, QIODevice
 
     img = QImage(size, size, QImage.Format.Format_ARGB32)
-    img.fill(QColor("white"))
-    rows, cols = reject_map.rows, reject_map.cols
-    cell = min((size - 8) / max(cols, 1), (size - 8) / max(rows, 1))
-    ox = (size - cell * cols) / 2
-    oy = (size - cell * rows) / 2
-    gap = 1.0 if cell >= 4 else 0.0
-    p = QPainter(img)
+    img.fill(0)
+    painter = QPainter(img)
     try:
-        p.setPen(Qt.PenStyle.NoPen)
-        for (i, j) in reject_map.cells:
-            if (i, j) in new_cells:
-                color = _RR_NEW_REJECT
-            elif (i, j) in reject_map.rejects:
-                color = _RR_MAP_REJECT
-            else:
-                color = _RR_DIE
-            p.setBrush(QColor(color))
-            p.drawRect(QRectF(ox + i * cell, oy + j * cell, cell - gap, cell - gap))
+        cols = _colors(theme.COLORS)
+        paint_reject_map(painter, QRectF(0, 0, size, size), reject_map,
+                         frozenset(new_cells or ()), pitch=pitch, colors=cols,
+                         label=label)
     finally:
-        p.end()
+        painter.end()
     buf = QBuffer()
     buf.open(QIODevice.OpenModeFlag.WriteOnly)
     img.save(buf, "PNG")

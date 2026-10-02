@@ -310,6 +310,42 @@ QLabel[role="statCaption"] {
     font-weight: $font_caption_lg_weight;
 }
 
+/* AVAGO 재리뷰 결과 — 핵심 수치(신규 Reject die) 하나를 크게.  나머지는 statTile 등급. */
+QLabel[role="rrHeroValue"] {
+    font-family: $font_mono;
+    font-size: 48px;
+    font-weight: 700;
+    color: $danger;
+}
+QLabel[role="rrHeroValue"][tone="none"] { color: $ink2; }
+QLabel[role="rrHeroCaption"] {
+    color: $ink;
+    font-size: 15px;
+    font-weight: 700;
+}
+/* 웨이퍼 표 — 머리는 colHead, 수치는 모노 우측 정렬, 줄마다 옅은 구분선. */
+QLabel[role="rrCell"] {
+    font-family: $font_mono;
+    color: $ink;
+    padding: 6px 4px;
+    border-bottom: 1px solid $line;
+}
+QLabel[role="rrCell"][tone="over"] { color: $danger; font-weight: 700; }
+QLabel[role="rrCell"][tone="warn"] { color: $warn; font-weight: 700; }
+QLabel[role="rrHead"] {
+    color: $mute;
+    font-size: $font_caption_sz;
+    font-weight: 700;
+    padding: 4px 4px 6px 4px;
+    border-bottom: 2px solid $line;
+}
+QLabel[role="rrCellName"] {
+    color: $ink;
+    font-weight: 700;
+    padding: 6px 4px;
+    border-bottom: 1px solid $line;
+}
+
 /* 타일 아래 파일명 캡션 — 썸네일 그리드(thumb_grid)와 실패 검토 후보 타일
    (unmatched_review_dialog)이 **같은 내용을 같은 등급으로** 쓴다.  둘 다 폭이 모자라
    ElideMiddle 로 줄이고(파일명은 앞뒤가 다 정보다), 대비를 위해 캡션 등급을 쓴다. */

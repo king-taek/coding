@@ -92,15 +92,17 @@ def test_page_satisfies_attr_contract(qapp):
 
 
 def test_action_bar_index_contract(qapp):
-    """[0]=update_btn, [1]=image_info_btn, 마지막은 주 액션(start_btn).
+    """보조 버튼 묶음(update → image_info → …)이 맨 앞, 마지막은 주 액션(start_btn).
 
     액션 바의 자리 계약 — 새 위젯을 stretch **앞**에 붙이면 주 액션이 가운데로
-    밀려 화면이 어그러진다."""
+    밀려 화면이 어그러진다.  보조 버튼은 좁은 창에서 두 줄로 접히는 묶음
+    (`_aux_row`) 안에 있다."""
     page = sp.SetupPage()
     try:
         bar = page._action_bar
-        assert bar.itemAt(0).widget() is page.update_btn
-        assert bar.itemAt(1).widget() is page.image_info_btn
+        assert bar.itemAt(0).widget() is page._aux_row
+        aux = page._aux_row.buttons()
+        assert aux[0] is page.update_btn and aux[1] is page.image_info_btn
         last = bar.itemAt(bar.count() - 1).widget()
         assert last is page.start_btn
     finally:
@@ -258,7 +260,8 @@ def test_motion_module_has_no_reduce_knobs():
 def test_active_mode_is_stated_in_words(qapp):
     page = sp.SetupPage()
     try:
-        assert "좌표" in page._engine_inert_hint.text()
+        # 좌표 매칭(기본)은 문장을 두지 않는다(사용자 요청).
+        assert page._engine_inert_hint.text() == ""
         page.legacy_switch.set_on(True, emit=True)
         assert "구형" in page._engine_inert_hint.text()
     finally:

@@ -2135,13 +2135,10 @@ class MainWindow(QMainWindow):
         from ..models.lot_info import read_lot_info
 
         if getattr(inp, "rereview", False):
-            # 재리뷰 — 추출과 같은 규칙(Scanresult LOT 의 WaferInfo.ini)에 'AVAGO 재리뷰'.
-            lot = read_lot_info(inp.ref_root)
-            if lot is None:
-                return i18n.KO.REREVIEW_FILE_TITLE_FALLBACK_FMT.format(
-                    machine=inp.ref_machine)
-            return i18n.KO.REREVIEW_FILE_TITLE_FMT.format(
-                machine=inp.ref_machine, layer=lot.layer, material=lot.material)
+            # 재리뷰 — 사용자가 적은 LOT명(S/M) + 'AVAGO 재리뷰'.  파일명 금지 문자는 _.
+            import re as _re
+            lot = _re.sub(r'[\\/:*?"<>|]', "_", inp.ref_machine).strip() or "AOI"
+            return i18n.KO.REREVIEW_FILE_TITLE_FMT.format(lot=lot)
         if getattr(inp, "extract", False):
             # 추출 — 같은 규칙(자재·Layer 는 WaferInfo.ini)에 '추출' 을 붙인다(사용자 결정).
             lot = read_lot_info(inp.ref_root)

@@ -91,6 +91,7 @@ class WaferPlan:
     cell_of: dict = field(default_factory=dict)       # 경로 → 맵 칸 (열, 위에서부터 줄)
     warnings: list = field(default_factory=list)      # [(코드, 숫자 또는 None)]
     flip_hint: str = ""                               # 정렬 실패 시 뒤집힌 가설 진단
+    pitch: Optional[tuple] = None                     # (x, y) µm — 맵 그림의 칸 비율용
 
     @property
     def aligned(self) -> bool:
@@ -223,6 +224,8 @@ def _plan_into(plan: WaferPlan, paths: list, map_dir: Optional[Path], wafer: str
     folder = plan.folder
     # 장비 화면 die (col, row) — 표시·die 개수용.  맵이 없어도 채운다.
     geom = _geometry(folder)
+    if geom is not None:
+        plan.pitch = (geom.pitch_x, geom.pitch_y)
     coords = camtek_ini.load_folder(folder) if (folder and geom) else {}
     for p in paths:
         c = coords.get(p.stem.lower())

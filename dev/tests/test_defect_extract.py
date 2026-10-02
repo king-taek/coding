@@ -270,7 +270,8 @@ def test_extract_button_sits_in_the_auxiliary_group(qapp):
         widgets = [bar.itemAt(i).widget() for i in range(bar.count())]
         stretch_at = next(i for i in range(bar.count())
                           if bar.itemAt(i).spacerItem() is not None)
-        assert widgets.index(page.extract_btn) < stretch_at
+        assert widgets.index(page._aux_row) < stretch_at
+        assert page.extract_btn in page._aux_row.buttons()
         assert widgets[-1] is page.start_btn
     finally:
         page.deleteLater()

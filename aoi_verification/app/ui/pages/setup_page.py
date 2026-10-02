@@ -178,6 +178,87 @@ def extract_drop_folders(local_paths, *, is_dir, is_image) -> list[str]:
     return out
 
 
+class _AuxButtonRow(QWidget):
+    """설정 액션바의 보조 버튼 줄 — 폭이 모자라면 **두 줄로 접힌다**.
+
+    ``sizeHint`` 는 늘 한 줄 폭(넓으면 한 줄로 돌아올 수 있게), ``minimumSizeHint`` 는
+    두 줄 폭이다 — 레이아웃이 그 사이 아무 폭이나 주면 ``resizeEvent`` 가 줄 수를 고른다.
+    숨긴 버튼(모드별)은 자리를 차지하지 않는다."""
+
+    def __init__(self, buttons, *, spacing: int, parent=None) -> None:
+        super().__init__(parent)
+        self.setProperty("role", "rowHost")
+        self._buttons = list(buttons)
+        self._grid = QGridLayout(self)
+        self._grid.setContentsMargins(0, 0, 0, 0)
+        self._grid.setSpacing(max(spacing, 0))
+        self._rows = 0
+        for b in self._buttons:
+            b.installEventFilter(self)          # 보이기/숨기기·글자 변경 → 다시 잰다
+        self._place(1)
+
+    def buttons(self) -> list:
+        return list(self._buttons)
+
+    def _visible(self) -> list:
+        return [b for b in self._buttons if not b.isHidden()]
+
+    def _row_w(self, btns) -> int:
+        if not btns:
+            return 0
+        return (sum(b.sizeHint().width() for b in btns)
+                + self._grid.spacing() * (len(btns) - 1))
+
+    def _split(self, btns):
+        half = (len(btns) + 1) // 2
+        return btns[:half], btns[half:]
+
+    def sizeHint(self):                            # noqa: N802
+        from PyQt6.QtCore import QSize
+        btns = self._visible()
+        h = max((b.sizeHint().height() for b in btns), default=0)
+        return QSize(self._row_w(btns), h * max(self._rows, 1)
+                     + self._grid.spacing() * (max(self._rows, 1) - 1))
+
+    def minimumSizeHint(self):                     # noqa: N802
+        from PyQt6.QtCore import QSize
+        a, b = self._split(self._visible())
+        return QSize(max(self._row_w(a), self._row_w(b)), self.sizeHint().height())
+
+    def _place(self, rows: int) -> None:
+        while self._grid.count():
+            self._grid.takeAt(0)
+        btns = self._visible()
+        lines = [btns] if rows == 1 else list(self._split(btns))
+        for r, line in enumerate(lines):
+            for c, b in enumerate(line):
+                self._grid.addWidget(b, r, c)
+        for b in self._buttons:
+            if b.isHidden():
+                self._grid.addWidget(b, 3, 0)     # 숨김 — 자리는 없지만 부모는 유지
+        if rows != self._rows:
+            self._rows = rows
+            self.updateGeometry()
+
+    def _reflow(self) -> None:
+        rows = 1 if self.width() >= self._row_w(self._visible()) else 2
+        self._place(rows)
+
+    def resizeEvent(self, event):                  # noqa: N802
+        super().resizeEvent(event)
+        self._reflow()
+
+    @tolerate_teardown
+    def eventFilter(self, obj, event):             # noqa: N802
+        from PyQt6.QtCore import QEvent
+        if event.type() in (QEvent.Type.Show, QEvent.Type.Hide,
+                            QEvent.Type.FontChange) or (
+                event.type() == QEvent.Type.DynamicPropertyChange):
+            self.updateGeometry()
+            self._reflow()
+        return super().eventFilter(obj, event)
+
+
 class SetupPage(QWidget):
     """검증 시작 화면."""
 
@@ -395,15 +476,6 @@ class SetupPage(QWidget):
         tr.addStretch(1)
         tr.addWidget(self._build_mode_badge(),
                      alignment=Qt.AlignmentFlag.AlignVCenter)
-        # AVAGO 재리뷰 — 같은 화면을 'Scanresult LOT + Map 폴더' 입력으로 바꾼다.
-        # ★ 액션바에 두지 않는다 — 그 줄은 800px 창의 폭 예산이 꽉 차 있어, 붙이면
-        #   페이지가 창보다 넓어졌다(실측: 액션바 최소 폭 830 → 967px).  이 줄은 다크 모드
-        #   스위치가 빠진 자리가 비어 있다(800px 가로 넘침은 `test_setup_top_spacing`).
-        self.rereview_btn = NeonButton(i18n.KO.REREVIEW_BUTTON, role="ghost")
-        self.rereview_btn.setToolTip(i18n.KO.REREVIEW_BUTTON_TOOLTIP)
-        self.rereview_btn.clicked.connect(
-            lambda: self.set_rereview_mode(not self._rereview_mode))
-        tr.addWidget(self.rereview_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
         return host
 
     def _build_mode_badge(self) -> QWidget:
@@ -925,9 +997,10 @@ class SetupPage(QWidget):
         #   자체를 없애 같은 실수가 재발할 수 없게 한다.
         _legacy_on, _legacy_sub = self._resolved_legacy_state(_prefs_now)
 
+        # 스위치는 제목 **바로 옆**(사용자 요청 — 카드 오른쪽 끝에 떨어져 있었다).
         self.legacy_switch = SwitchRow(
             i18n.KO.LEGACY_SWITCH_TITLE,
-            checked=_legacy_on,
+            checked=_legacy_on, compact=True,
             parent=engine_card,
         )
         # 언제 이 모드를 쓰는지는 툴팁으로 — 화면을 조용하게 유지한다.
@@ -1043,8 +1116,10 @@ class SetupPage(QWidget):
                      else i18n.KO.ENGINE_MODE_BASIC_SHORT)
             text = i18n.KO.ENGINE_ACTIVE_LEGACY_FMT.format(sub=short)
         else:
-            text = i18n.KO.ENGINE_ACTIVE_COORD
+            # 좌표 매칭(기본)일 때는 문장을 두지 않는다(사용자 요청 — 배지가 이미 말한다).
+            text = ""
         self._engine_inert_hint.setText(text)
+        self._engine_inert_hint.setVisible(bool(text))
         self._refresh_mode_badge()
 
     def _on_legacy_toggled(self, on: bool) -> None:
@@ -1068,21 +1143,30 @@ class SetupPage(QWidget):
         #   유틸리티다).
         self.update_btn = NeonButton(i18n.KO.MENU_CHECK_UPDATE, role="ghost")
         self.update_btn.clicked.connect(self.update_check_requested.emit)
-        bar.addWidget(self.update_btn)
         # 사진 한 장의 결함 정보를 바로 보는 도구.
         self.image_info_btn = NeonButton(i18n.KO.IMAGE_INFO_BUTTON, role="ghost")
         self.image_info_btn.clicked.connect(self._open_image_info)
-        bar.addWidget(self.image_info_btn)
         # 웨이퍼 폴더 하나의 결함 위치를 원 위에 보는 도구 — 사진 정보 보기 옆.
         self.wafer_map_btn = NeonButton(i18n.KO.WAFER_MAP_BUTTON, role="ghost")
         self.wafer_map_btn.clicked.connect(self._open_wafer_map)
-        bar.addWidget(self.wafer_map_btn)
         # Defect 추출 — 같은 화면을 한쪽 폴더만 받는 모드로 바꾼다(누르면 되돌아가는 버튼).
         self.extract_btn = NeonButton(i18n.KO.EXTRACT_BUTTON, role="ghost")
         self.extract_btn.setToolTip(i18n.KO.EXTRACT_BUTTON_TOOLTIP)
         self.extract_btn.clicked.connect(
             lambda: self.set_extract_mode(not self._extract_mode))
-        bar.addWidget(self.extract_btn)
+        # AVAGO 재리뷰 — 같은 화면을 'Map 폴더 + Scanresult LOT' 입력으로 바꾼다
+        # (Defect 추출 오른쪽 — 사용자 지정).
+        self.rereview_btn = NeonButton(i18n.KO.REREVIEW_BUTTON, role="ghost")
+        self.rereview_btn.setToolTip(i18n.KO.REREVIEW_BUTTON_TOOLTIP)
+        self.rereview_btn.clicked.connect(
+            lambda: self.set_rereview_mode(not self._rereview_mode))
+        # 보조 버튼 묶음 — **좁은 창에서는 두 줄로 접힌다**(`_AuxButtonRow`).
+        #   [AVAGO 재리뷰] 를 더하자 한 줄 최소 폭이 830 → 967px 이 돼 800px 창에서 페이지가
+        #   창보다 넓어졌다(실측).  넓은 창에서는 예전처럼 한 줄이다.
+        self._aux_row = _AuxButtonRow(
+            [self.update_btn, self.image_info_btn, self.wafer_map_btn,
+             self.extract_btn, self.rereview_btn], spacing=bar.spacing(), parent=host)
+        bar.addWidget(self._aux_row)
         # ★ 자리 계약: 왼쪽 보조 버튼들 → stretch → 힌트 → 주 액션(start_btn).
         #   새 위젯은 반드시 stretch **뒤**나 그 앞의 보조 묶음에 붙인다 — 잘못 넣으면
         #   주 액션이 가운데로 밀린다(test_action_bar_index_contract).
@@ -1277,43 +1361,53 @@ class SetupPage(QWidget):
         return self._rereview_mode
 
     def set_rereview_mode(self, on: bool) -> None:
-        """AVAGO 재리뷰 ↔ 매칭 검증.  **같은 화면**의 두 입력란을 바꿔 쓴다.
+        """AVAGO 재리뷰 ↔ 매칭 검증.  **같은 화면**의 두 카드를 바꿔 쓴다(사용자 지정).
 
-        기준 칸 = Scanresult LOT 폴더(호기 입력은 그대로 — 엑셀 머리에 쓴다),
-        검증 칸 = 1차 리뷰 Map 폴더(호기 줄은 감춘다).  실행 옵션·매칭 설정은 감춘다
-        (재리뷰는 늘 한 장씩 판정한다).  입력값은 모드별로 따로 기억한다 — 매칭의 두
-        폴더가 재리뷰 칸에 남으면 엉뚱한 폴더로 시작하게 된다."""
+        왼쪽 카드 = 1차 리뷰 **Map 폴더**(둘째 줄 없음),
+        오른쪽 카드 = **Scanresult LOT 폴더** + 둘째 줄 '호기 번호' 대신 **LOT명(S/M)**.
+        실행 옵션·매칭 설정은 감춘다(재리뷰는 늘 한 장씩 판정한다).  입력값은 모드별로
+        따로 둔다 — 매칭의 두 폴더가 재리뷰 칸에 남으면 엉뚱한 폴더로 시작하게 된다."""
         on = bool(on)
         if on == self._rereview_mode:
             return
         if on and self._extract_mode:
             self.set_extract_mode(False)
         if on:
-            self._rereview_stash = (self.ref_path_edit.text(), self.val_path_edit.text())
+            self._rereview_stash = (self.ref_path_edit.text(), self.val_path_edit.text(),
+                                    self.val_machine_edit.text())
             p = _prefs.load()
-            self.ref_path_edit.setText(p.last_rereview_scan)
-            self.val_path_edit.setText(p.last_rereview_map)
+            self.ref_path_edit.setText(p.last_rereview_map)
+            self.val_path_edit.setText(p.last_rereview_scan)
+            self.val_machine_edit.setText("")          # LOT 마다 다르다 — 기억하지 않는다
         elif self._rereview_stash is not None:
-            ref, val = self._rereview_stash
+            ref, val, val_machine = self._rereview_stash
             self.ref_path_edit.setText(ref)
             self.val_path_edit.setText(val)
+            self.val_machine_edit.setText(val_machine)
             self._rereview_stash = None
         self._rereview_mode = on
         self._title_label.setText(i18n.KO.REREVIEW_TITLE if on else i18n.KO.SETUP_TITLE)
         for card, title_on, title_off in (
-                (self.ref_group, i18n.KO.REREVIEW_SCAN_GROUP, i18n.KO.SETUP_REF_GROUP),
-                (self.val_group, i18n.KO.REREVIEW_MAP_GROUP, i18n.KO.SETUP_VAL_GROUP)):
+                (self.ref_group, i18n.KO.REREVIEW_MAP_GROUP, i18n.KO.SETUP_REF_GROUP),
+                (self.val_group, i18n.KO.REREVIEW_SCAN_GROUP, i18n.KO.SETUP_VAL_GROUP)):
             head = card.property("_headLabel")
             if head is not None:
                 head.setText(title_on if on else title_off)
-        lbl = self.val_group.property("_machineLabel")
+        # 왼쪽(Map) 카드는 둘째 줄이 없다.
+        lbl = self.ref_group.property("_machineLabel")
         if lbl is not None:
             lbl.setVisible(not on)
-        self.val_machine_edit.setVisible(not on)
+        self.ref_machine_edit.setVisible(not on)
+        # 오른쪽(Scanresult) 카드의 둘째 줄 = LOT명(S/M).
+        lbl = self.val_group.property("_machineLabel")
+        if lbl is not None:
+            lbl.setText(i18n.KO.REREVIEW_LOT_LABEL if on else i18n.KO.SETUP_MACHINE_LABEL)
+        self.val_machine_edit.setPlaceholderText(
+            i18n.KO.REREVIEW_LOT_PLACEHOLDER if on else i18n.KO.SETUP_MACHINE_PLACEHOLDER)
         self.ref_path_edit.setPlaceholderText(
-            i18n.KO.REREVIEW_SCAN_PLACEHOLDER if on else i18n.KO.SETUP_FOLDER_PLACEHOLDER)
-        self.val_path_edit.setPlaceholderText(
             i18n.KO.REREVIEW_MAP_PLACEHOLDER if on else i18n.KO.SETUP_FOLDER_PLACEHOLDER)
+        self.val_path_edit.setPlaceholderText(
+            i18n.KO.REREVIEW_SCAN_PLACEHOLDER if on else i18n.KO.SETUP_FOLDER_PLACEHOLDER)
         for card in self._setting_cards:
             card.setVisible(not on)
         self._mode_badge_card.setVisible(not on)
@@ -1785,23 +1879,26 @@ class SetupPage(QWidget):
         )
 
     def _collect_rereview_input(self):
-        """AVAGO 재리뷰 입력 — Scanresult LOT 폴더 + Map 폴더 + 호기.
+        """AVAGO 재리뷰 입력 — 왼쪽 Map 폴더 + 오른쪽 Scanresult LOT 폴더 + LOT명(S/M).
 
-        선별은 건너뛸 수 없다(재리뷰 자체가 사람이 한 장씩 보는 일이다)."""
-        scan = Path(self.ref_path_edit.text().strip())
-        map_dir = Path(self.val_path_edit.text().strip())
-        for r in (scan, map_dir):
+        선별은 건너뛸 수 없다(재리뷰 자체가 사람이 한 장씩 보는 일이다).
+        LOT명은 필수다 — 결과 파일 이름과 엑셀 머리에 쓴다."""
+        map_dir = Path(self.ref_path_edit.text().strip())
+        scan = Path(self.val_path_edit.text().strip())
+        for r in (map_dir, scan):
             if not r.is_dir():
                 sheets.warn(self, i18n.KO.APP_TITLE,
                             i18n.KO.WARN_PATH_NOT_EXIST.format(path=r))
                 return None
-        machine = (self.ref_machine_edit.text().strip()
-                   or i18n.KO.DEFAULT_REF_MACHINE)
-        _prefs.patch(last_rereview_scan=str(scan), last_rereview_map=str(map_dir),
-                     last_ref_machine=machine)
+        lot = self.val_machine_edit.text().strip()
+        if not lot:
+            sheets.warn(self, i18n.KO.APP_TITLE, i18n.KO.REREVIEW_LOT_REQUIRED)
+            self.val_machine_edit.setFocus()
+            return None
+        _prefs.patch(last_rereview_scan=str(scan), last_rereview_map=str(map_dir))
         return SetupInput(
             mode="single", ref_root=scan, val_root=map_dir,
-            ref_machine=machine, val_machine="",
+            ref_machine=lot, val_machine="",
             threshold=self.slider.value() / 100.0,
             automation_level=AutomationLevel.USER_SELECT,
             rereview=True,

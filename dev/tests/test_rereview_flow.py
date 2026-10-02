@@ -39,52 +39,92 @@ def lot(tmp_path):
 
 
 # ── 설정 화면 ────────────────────────────────────────────────────────────────
-def test_setup_rereview_mode_uses_two_folders(styled_qapp, tmp_path):
+def test_setup_rereview_mode_uses_two_folders(styled_qapp, tmp_path, monkeypatch):
+    """왼쪽 = Map 폴더, 오른쪽 = Scanresult + LOT명(S/M) — 사용자 지정 배치."""
     from aoi_verification.app.ui.pages import setup_page as sp
 
     scan, maps = tmp_path / "scan", tmp_path / "maps"
     scan.mkdir()
     maps.mkdir()
+    warned: list = []
+    monkeypatch.setattr(sp.sheets, "warn", lambda *a, **k: warned.append(a))
     page = sp.SetupPage()
     try:
         page.ref_path_edit.setText("매칭 기준")
         page.val_path_edit.setText("매칭 검증")
+        page.val_machine_edit.setText("3")
         page.set_rereview_mode(True)
         assert page.is_rereview_mode()
         assert page._title_label.text() == i18n.KO.REREVIEW_TITLE
         assert page.start_btn.text() == i18n.KO.BTN_REREVIEW_START
+        assert page.ref_group.property("_headLabel").text() == i18n.KO.REREVIEW_MAP_GROUP
+        assert page.val_group.property("_headLabel").text() == i18n.KO.REREVIEW_SCAN_GROUP
+        assert (page.val_group.property("_machineLabel").text()
+                == i18n.KO.REREVIEW_LOT_LABEL)
+        assert page.ref_machine_edit.isHidden() and not page.val_machine_edit.isHidden()
+        assert page.val_machine_edit.text() == ""          # LOT 은 매번 새로 적는다
         assert all(c.isHidden() for c in page._setting_cards)
-        assert page.val_machine_edit.isHidden() and page.extract_btn.isHidden()
-        page.ref_path_edit.setText(str(scan))
-        page.val_path_edit.setText(str(maps))
+        assert page.extract_btn.isHidden()
+        page.ref_path_edit.setText(str(maps))
+        page.val_path_edit.setText(str(scan))
         assert page._validate() is True
-        page.ref_machine_edit.setText("8")
+        assert page._collect_input() is None and warned     # LOT명 필수
+        page.val_machine_edit.setText("PH3Q42.00")
         inp = page._collect_input()
         assert inp.rereview is True and not inp.extract
-        assert (inp.ref_root, inp.val_root, inp.ref_machine) == (scan, maps, "8")
-        # 되돌리면 매칭 입력이 그대로 돌아온다(모드별로 따로 기억).
+        assert (inp.ref_root, inp.val_root, inp.ref_machine) == (scan, maps, "PH3Q42.00")
+        # 되돌리면 매칭 입력이 그대로 돌아온다(모드별로 따로 둔다).
         page.set_rereview_mode(False)
         assert page.ref_path_edit.text() == "매칭 기준"
         assert page.val_path_edit.text() == "매칭 검증"
+        assert page.val_machine_edit.text() == "3"
+        assert page.val_group.property("_machineLabel").text() == i18n.KO.SETUP_MACHINE_LABEL
         assert not page._setting_cards[1].isHidden()
         assert not page.extract_btn.isHidden()
     finally:
         page.deleteLater()
 
 
-def test_rereview_button_stays_out_of_the_action_bar(styled_qapp):
-    """액션바에 붙이면 800px 창에서 페이지가 창보다 넓어진다(실측 967px) — 위 줄에 둔다.
+def test_file_name_uses_lot_name():
+    from aoi_verification.app.ui import main_window as mw
+    from aoi_verification.app.ui.pages.setup_page import SetupInput
+    inp = SetupInput(mode="single", ref_root=Path("s"), val_root=Path("m"),
+                     ref_machine="PH3Q42/00", val_machine="", threshold=0.7, rereview=True)
+    assert mw.MainWindow._suggest_result_name(inp) == "PH3Q42_00 AVAGO 재리뷰.xlsx"
 
-    액션바 자리 계약(주 액션이 맨 끝)도 그대로다."""
+
+def test_rereview_button_sits_right_of_extract(styled_qapp):
+    """[AVAGO 재리뷰] 는 [Defect 추출] 바로 오른쪽(사용자 지정) — 보조 묶음 안."""
     from aoi_verification.app.ui.pages import setup_page as sp
     page = sp.SetupPage()
     try:
+        aux = page._aux_row.buttons()
+        assert aux.index(page.rereview_btn) == aux.index(page.extract_btn) + 1
         bar = page._action_bar
-        widgets = [bar.itemAt(i).widget() for i in range(bar.count())]
-        assert page.rereview_btn not in widgets
-        assert widgets[-1] is page.start_btn
+        assert bar.itemAt(bar.count() - 1).widget() is page.start_btn
     finally:
         page.deleteLater()
+
+
+@pytest.mark.parametrize("width", [800, 1024, 1280])
+def test_action_bar_fits_the_window(styled_qapp, width):
+    """보조 버튼 5개가 한 줄이면 967px — 좁은 창에서는 두 줄로 접혀 창 안에 든다."""
+    from PyQt6.QtWidgets import QApplication
+    from aoi_verification.app.ui.pages import setup_page as sp
+    page = sp.SetupPage()
+    try:
+        page.resize(width, 700)
+        page.show()
+        for _ in range(10):
+            QApplication.processEvents()
+        assert page.width() == width
+        assert page.start_btn.geometry().right() <= page._action_bar.parentWidget().width()
+        if width == 800:
+            assert page._aux_row._rows == 2          # 한 줄(967px)은 들어가지 않는다
+        elif width == 1280:
+            assert page._aux_row._rows == 1          # 넓으면 예전처럼 한 줄
+    finally:
+        page.close()
 
 
 # ── 선별 화면 ────────────────────────────────────────────────────────────────
@@ -135,6 +175,7 @@ def test_result_rows_reject_first(lot):
 
 
 def test_result_page_shows_rereview_counts(styled_qapp, lot):
+    """핵심 수치(신규 Reject die)는 크게, 웨이퍼별은 표로 — 엑셀과 같은 숫자."""
     from PyQt6.QtWidgets import QLabel
 
     from aoi_verification.app.ui.pages.result_page import ResultPage
@@ -142,43 +183,88 @@ def test_result_page_shows_rereview_counts(styled_qapp, lot):
     page = ResultPage()
     try:
         page.show_result(_result(lot))
-        texts = [w.text() for w in page._summary_card.findChildren(QLabel)]
-        assert i18n.KO.REREVIEW_STAT_NEW_DIES in texts
-        # 사진 5 · 제외 1 · 재리뷰 4 · Reject 3 / die 신규 2 · Map 4 · 합계 6
-        line = i18n.KO.REREVIEW_WAFER_LINE_FMT.format(
-            wafer=WAFER, total=5, excluded=1, reviewed=4, reject=3, new=2, map=4, sum=6)
-        assert line in texts
+        labels = page._summary_card.findChildren(QLabel)
+        hero = [w for w in labels if w.property("role") == "rrHeroValue"]
+        assert [w.text() for w in hero] == ["2"]                 # 신규 Reject die
+        # 표: 웨이퍼 · 재리뷰 4 · Reject 사진 3 · 신규 2 · Map 4 · 합계 6
+        cells = [w.text() for w in labels if w.property("role") == "rrCell"]
+        assert cells == ["4", "3", "2", "4", "6"]
         assert page.title.text() == i18n.KO.REREVIEW_RESULT_TITLE
         assert page.wafer_map_btn.isHidden() and page.review_unmatched_btn.isHidden()
+        assert not page.include_good_chk.isHidden()
     finally:
         page.deleteLater()
 
 
-def test_excel_has_verdict_summary_and_map(styled_qapp, lot, tmp_path):
+def _export(lot, tmp_path, include_good: bool):
     from aoi_verification.app.ui.widgets.wafer_map_view import render_reject_map_png
     from aoi_verification.app.workers.exporter import ExcelExporter
 
-    dst = tmp_path / "out" / "재리뷰.xlsx"
+    dst = tmp_path / f"out{int(include_good)}" / "재리뷰.xlsx"
     ex = ExcelExporter(_result(lot), dst,
                        template_path=Path("dev/양식.xlsx"),
-                       reject_map_renderer=render_reject_map_png)
+                       reject_map_renderer=render_reject_map_png,
+                       include_good=include_good)
     errors: list = []
     ex.signals.failed.connect(errors.append)
     ex.run()                                  # 같은 스레드에서 — 결과만 본다
     assert not errors, errors
-    wb = openpyxl.load_workbook(dst)
-    assert wb.sheetnames[0] == i18n.KO.REREVIEW_SUMMARY_SHEET
-    assert i18n.KO.WAFER_MAP_SHEET in wb.sheetnames
-    summ = wb[i18n.KO.REREVIEW_SUMMARY_SHEET]
+    return openpyxl.load_workbook(dst)
+
+
+def _column(ws, header: str, rows: range) -> list:
+    head = [c.value for c in ws[1]]
+    v = head.index(header)
+    return [ws.cell(row=r, column=v + 1).value for r in rows]
+
+
+def test_excel_reject_only_by_default(styled_qapp, lot, tmp_path):
+    """시트 순서(사용자 지정): Reject → 재리뷰 요약 → Wafer Map.  Good 제외면 '전체' 없음."""
+    K = i18n.KO
+    wb = _export(lot, tmp_path, include_good=False)
+    assert wb.sheetnames == [K.REREVIEW_SHEET_REJECT, K.REREVIEW_SUMMARY_SHEET,
+                             K.WAFER_MAP_SHEET]
+    rej = wb[K.REREVIEW_SHEET_REJECT]
+    assert _column(rej, K.REREVIEW_VERDICT_HEADER, range(3, 6)) == ["Reject"] * 3
+    assert rej.cell(row=6, column=1).value is None          # Good 행은 없다
+    assert rej["C2"].value == "8"                            # LOT명 그대로(AOI-8 아님)
+    dies = _column(rej, K.REREVIEW_DIE_HEADER, range(3, 6))
+    assert dies[0] == dies[1] != dies[2]                     # a1·a2 는 같은 die
+    summ = wb[K.REREVIEW_SUMMARY_SHEET]
     assert [c.value for c in summ[2]][1:9] == [5, 1, 4, 1, 3, 2, 4, 6]
-    photos = wb[wb.sheetnames[1]]
-    head = [c.value for c in photos[1]]
-    v = head.index(i18n.KO.REREVIEW_VERDICT_HEADER)
-    verdicts = [photos.cell(row=r, column=v + 1).value for r in range(3, 7)]
-    assert verdicts == ["Reject", "Reject", "Reject", "Good"]
-    dies = [photos.cell(row=r, column=v + 2).value for r in range(3, 7)]
-    assert dies[0] == dies[1] != dies[2]              # a1·a2 는 같은 die
-    assert len(wb[i18n.KO.WAFER_MAP_SHEET]._images) == 1
+    # 기존 Map · 수정된 Map 두 장.
+    assert len(wb[K.WAFER_MAP_SHEET]._images) == 2
+
+
+def test_excel_with_good_adds_all_sheet(styled_qapp, lot, tmp_path):
+    K = i18n.KO
+    wb = _export(lot, tmp_path, include_good=True)
+    assert wb.sheetnames == [K.REREVIEW_SHEET_REJECT, K.REREVIEW_SHEET_ALL,
+                             K.REREVIEW_SUMMARY_SHEET, K.WAFER_MAP_SHEET]
+    assert _column(wb[K.REREVIEW_SHEET_ALL], K.REREVIEW_VERDICT_HEADER,
+                   range(3, 7)) == ["Reject", "Reject", "Reject", "Good"]
+
+
+def test_reject_map_paints_both_kinds(styled_qapp):
+    """기존 Map 은 1차 Reject 만, 수정된 Map 은 신규 Reject 도 — 색이 서로 다르다."""
+    from PyQt6.QtGui import QImage
+
+    from aoi_verification.app.ui.widgets import wafer_map_view as wmv
+    from .test_rereview import _real_map_text
+
+    rm = rr.parse_map(_real_map_text(), Path("m"), WAFER)
+    new = {(30, 30)}
+    a = QImage.fromData(wmv.render_reject_map_png(rm, frozenset(), 400))
+    b = QImage.fromData(wmv.render_reject_map_png(rm, new, 400))
+    cols = wmv._colors()
+    red = cols["unmatched"].rgb() & 0xFFFFFF
+    blue = cols["map_reject"].rgb() & 0xFFFFFF
+
+    def count(img, rgb):
+        return sum(1 for y in range(img.height()) for x in range(img.width())
+                   if img.pixel(x, y) & 0xFFFFFF == rgb)
+    assert count(a, red) == 0 and count(a, blue) > 0
+    assert count(b, red) > 0
 
 
 # ── 메인 창: 설정 → 스캔 → Map 대조 → 선별 → 결과 화면 ─────────────────────────

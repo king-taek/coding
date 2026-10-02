@@ -273,7 +273,6 @@ ENGINE_CARD_TITLE = "매칭 설정"
 LEGACY_SWITCH_TITLE = "유사도 엔진(구형) 사용"
 LEGACY_MODE_HINT = "좌표 데이터가 없는 예전 자료에 쓰는 대체 경로입니다."
 # 지금 어떤 파라미터가 유효한지 문장으로 알려준다(비활성 컨트롤의 이유).
-ENGINE_ACTIVE_COORD = "좌표 매칭 사용 중 — 허용 오차가 판정 기준입니다."
 ENGINE_ACTIVE_LEGACY_FMT = "구형 {sub} 모드 사용 중 — 유사도 임계치가 판정 기준입니다."
 # 문장 안에 넣을 짧은 이름(타일 라벨의 괄호까지 넣으면 괄호가 겹친다).
 ENGINE_MODE_BASIC_SHORT = "기본"
@@ -1169,6 +1168,10 @@ REREVIEW_MAP_GROUP = "1차 리뷰 Map 폴더"
 REREVIEW_SCAN_PLACEHOLDER = r"예: M:\AOI-8\Scanresult\…\6321\NHW"
 REREVIEW_MAP_PLACEHOLDER = r"예: \\k5cifsn2\…\2. FVI\1. OR  (웨이퍼마다 <WaferID>.txt)"
 BTN_REREVIEW_START = "재리뷰 시작"
+# Scanresult 카드 둘째 줄 — '호기 번호' 대신(사용자 지정).  결과 파일 이름·엑셀 머리에 쓴다.
+REREVIEW_LOT_LABEL = "LOT명(S/M)"
+REREVIEW_LOT_PLACEHOLDER = "예) PH8Q66.00"
+REREVIEW_LOT_REQUIRED = "LOT명(S/M)을 입력하세요."
 
 LOAD_REREVIEW_PLAN = "1차 리뷰 Map 대조 중…"
 REREVIEW_NONE_FOUND = (
@@ -1222,23 +1225,23 @@ REREVIEW_SLOT_NO_DIE_FMT = "웨이퍼: {slot}   ·   die 좌표 없음"
 
 # 결과 화면
 REREVIEW_RESULT_TITLE = "AVAGO 재리뷰 결과"
-REREVIEW_RESULT_HEAD_FMT = "장비: {machine}    웨이퍼 {n}장"
-REREVIEW_STAT_TOTAL = "전체 사진"
-REREVIEW_STAT_EXCLUDED = "Map Reject die 제외"
-REREVIEW_STAT_REVIEWED = "재리뷰"
+REREVIEW_RESULT_HEAD_FMT = "LOT {lot}  ·  웨이퍼 {n}장"
+REREVIEW_SCOPE_FMT = "재리뷰 {reviewed}장  —  전체 {total}장 중 Map Reject die 의 사진 {excluded}장은 제외"
+REREVIEW_TABLE_COLS = ("웨이퍼", "재리뷰", "Reject 사진", "신규 Reject die",
+                       "Map Reject die", "합계")
 REREVIEW_STAT_REJECT = "Reject 사진"
 REREVIEW_STAT_NEW_DIES = "신규 Reject die"
 REREVIEW_STAT_MAP_DIES = "Map Reject die"
 REREVIEW_STAT_TOTAL_DIES = "Reject die 합계"
-REREVIEW_WAFER_LINE_FMT = (
-    "{wafer}: 사진 {total} · 제외 {excluded} · 재리뷰 {reviewed} (Reject {reject}) · "
-    "Reject die 신규 {new} + Map {map} = {sum}")
 REREVIEW_UNKNOWN_DIE_FMT = "※ die 좌표를 몰라 die 수에 넣지 못한 Reject 사진 {n}장"
-REREVIEW_WARN_HEAD = "주의"
+REREVIEW_WARN_HEAD = "확인 필요"
+REREVIEW_INCLUDE_GOOD_LABEL = "Good die 모두 넣기"
+REREVIEW_INCLUDE_GOOD_TOOLTIP = (
+    "켜면 재리뷰한 사진 전부(Good 포함)를 '전체' 시트에도 넣습니다.\n"
+    "끄면 Reject 사진만 엑셀에 넣습니다.")
 
 # 엑셀
-REREVIEW_FILE_TITLE_FMT = "{machine} {layer}_{material} AVAGO 재리뷰.xlsx"
-REREVIEW_FILE_TITLE_FALLBACK_FMT = "AOI {machine} AVAGO 재리뷰.xlsx"
+REREVIEW_FILE_TITLE_FMT = "{lot} AVAGO 재리뷰.xlsx"
 REREVIEW_VERDICT_HEADER = "판정"
 REREVIEW_DIE_HEADER = "die (col, row)"
 REREVIEW_DIE_CELL_FMT = "({col}, {row})"
@@ -1247,9 +1250,15 @@ REREVIEW_SUMMARY_COLS = ("Wafer", "전체 사진", "Map Reject die 제외", "재
                          "Good", "Reject 사진", "신규 Reject die", "Map Reject die",
                          "Reject die 합계", "Map 파일", "비고")
 REREVIEW_SUMMARY_TOTAL = "합계"
-REREVIEW_MAP_SHEET_COL = "Reject die"
-REREVIEW_MAP_LEGEND = "■ 회색 = die   ■ 주황 = Map Reject(1차)   ■ 빨강 = 신규 Reject(재리뷰)"
-REREVIEW_MAP_NOT_ALIGNED = "Map 과 장비 die 를 대조하지 못해 그리지 않았습니다"
+REREVIEW_MAP_LEGEND = "■ 파랑 = Map Reject(1차)   ■ 빨강 = 신규 Reject(재리뷰)   ·   노치 = 아래(FNLOC 180)"
+REREVIEW_MAP_NOT_ALIGNED = "Map 과 장비 die 를 대조하지 못해 신규 Reject 를 수정된 Map 에 표시하지 못했습니다"
 REREVIEW_MAP_NO_MAP = "Map 파일 없음"
 REREVIEW_BACK_TO_SELECT = "← 선별로 (판정 고치기)"
 REREVIEW_START_BLOCKED_HINT = "Scanresult·Map 폴더를 먼저 지정하세요."
+REREVIEW_MAP_NOTCH = "Notch"
+REREVIEW_MAP_COL_ORIG = "기존 Map (1차 리뷰)"
+REREVIEW_MAP_COL_NEW = "수정된 Map (재리뷰 반영)"
+REREVIEW_MAP_LABEL_ORIG_FMT = "Reject die {n}"
+REREVIEW_MAP_LABEL_NEW_FMT = "Reject die {n} (신규 {new})"
+REREVIEW_SHEET_REJECT = "Reject"
+REREVIEW_SHEET_ALL = "전체"

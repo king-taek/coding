@@ -192,8 +192,9 @@ class SwitchRow(QWidget):
     toggled = pyqtSignal(bool)
 
     def __init__(self, title: str, *, description: str = "",
-                 checked: bool = False,
+                 checked: bool = False, compact: bool = False,
                  parent: Optional[QWidget] = None) -> None:
+        """``compact`` 면 스위치가 행 오른쪽 끝이 아니라 **제목 바로 옆**에 붙는다."""
         super().__init__(parent)
         self.setMinimumHeight(_ROW_MIN_H)
 
@@ -223,11 +224,13 @@ class SwitchRow(QWidget):
         # 제목이 자기 글자 폭만 차지하게 — 여백까지 늘어나면 다시 넓은 핫존이 된다.
         self._title.setSizePolicy(QSizePolicy.Policy.Maximum,
                                   QSizePolicy.Policy.Preferred)
-        row.addWidget(text_host, stretch=1)
+        row.addWidget(text_host, stretch=0 if compact else 1)
 
         self.switch = ToggleSwitch(checked, parent=self)
         self.switch.toggled.connect(self.toggled.emit)
         row.addWidget(self.switch, alignment=Qt.AlignmentFlag.AlignVCenter)
+        if compact:
+            row.addStretch(1)               # 남는 폭은 스위치 오른쪽으로
 
     # ------------------------------------------------------------------
     def is_on(self) -> bool:

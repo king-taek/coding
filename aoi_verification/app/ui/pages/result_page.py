@@ -21,6 +21,7 @@ from ..widgets.neon_card import NeonCard
 from ..widgets.wafer_map_view import render_map_png, render_reject_map_png
 from ..widgets import sheet_host as sheets
 from ... import config as _config
+from ...utils import prefs as _prefs
 
 # 조용히 삼키던 사실을 남기는 로거 — `main._setup_logging` 이 캐시 폴더의 app.log 로
 # 보낸다(`ui/main_window.py` 와 같은 이름 규칙).
@@ -164,6 +165,16 @@ class ResultPage(QWidget):
         #   (묶음 캡션은 사용자 결정으로 삭제 — 배치·순서는 현행 그대로다.)
         self.original_quality_chk.toggled.connect(self._sync_option_dependency)
 
+        # AVAGO 재리뷰 전용 — 끄면 Reject 사진만 엑셀에 넣는다(사용자 요청).
+        self.include_good_chk = QCheckBox(i18n.KO.REREVIEW_INCLUDE_GOOD_LABEL, self)
+        self.include_good_chk.setToolTip(i18n.KO.REREVIEW_INCLUDE_GOOD_TOOLTIP)
+        self.include_good_chk.setChecked(
+            bool(getattr(_prefs.load(), "rereview_include_good", False)))
+        self.include_good_chk.toggled.connect(
+            lambda on: _prefs.patch(rereview_include_good=bool(on)))
+        self.include_good_chk.setVisible(False)
+        opt_row.addWidget(self.include_good_chk)
+
         self.full_template_chk = QCheckBox(i18n.KO.EXPORT_FULL_TEMPLATE_LABEL, self)
         self.full_template_chk.setChecked(False)
         self.full_template_chk.setToolTip(i18n.KO.EXPORT_FULL_TEMPLATE_TOOLTIP)
@@ -271,6 +282,8 @@ class ResultPage(QWidget):
         #   때마다 누적).  재귀로 위젯까지 확실히 지운다.
         _clear_layout(self._summary_layout)
         self._apply_mode_chrome(result.mode == REREVIEW_MODE)
+        # 재리뷰는 웨이퍼 표가 들어가 조금 넓게 쓴다.
+        self._summary_card.setMaximumWidth(980 if result.mode == REREVIEW_MODE else 820)
 
         # 라인 헬퍼
         def line(text: str, role: str = "subtitle"):
@@ -456,49 +469,98 @@ class ResultPage(QWidget):
         for w in (self.wafer_map_btn, self.review_unmatched_btn,
                   self.unmatched_original_chk, self.full_template_chk):
             w.setVisible(not rereview)
+        self.include_good_chk.setVisible(rereview)
 
     def _show_rereview_summary(self, result: FinalResult, line) -> None:
-        """사진 수(전체·제외·재리뷰·Reject) 와 die 수(신규·Map·합계) — 엑셀 요약 시트와
-        **같은 함수**(`coords.rereview.wafer_stats`)로 센다."""
+        """핵심 하나(**신규 Reject die**)를 크게, 나머지는 옆에 작게, 웨이퍼별은 표로.
+
+        숫자는 엑셀 요약 시트와 **같은 함수**(`coords.rereview.wafer_stats`)로 센다."""
+        from PyQt6.QtWidgets import QGridLayout
+
         from ...coords import rereview as rr
 
         K = i18n.KO
+        card = self._summary_card
         stats = [rr.wafer_stats(result.rereview[s], result.rereview_rejects(s))
                  for s in sorted(result.rereview)]
-        line(K.REREVIEW_RESULT_HEAD_FMT.format(machine=result.ref_machine,
-                                               n=len(stats)))
 
         def tot(attr: str) -> int:
             return sum(getattr(st, attr) for st in stats)
 
+        line(K.REREVIEW_RESULT_HEAD_FMT.format(lot=result.ref_machine, n=len(stats)))
+
+        # ── 핵심 수치 + 보조 수치 ────────────────────────────────────────
+        hero = QHBoxLayout()
+        hero.setSpacing(24)
+        big = QVBoxLayout()
+        big.setSpacing(0)
+        n_new = tot("new_reject_dies")
+        val = QLabel(f"{n_new:,}", card)
+        val.setProperty("role", "rrHeroValue")
+        val.setProperty("tone", "over" if n_new else "none")
+        cap = QLabel(K.REREVIEW_STAT_NEW_DIES, card)
+        cap.setProperty("role", "rrHeroCaption")
+        big.addWidget(val)
+        big.addWidget(cap)
+        hero.addLayout(big)
+        rule = QFrame(card)
+        rule.setProperty("role", "vrule")
+        hero.addWidget(rule)
         n_rej = tot("reject")
-        for specs in (
-                [(tot("total"), K.REREVIEW_STAT_TOTAL, "none"),
-                 (tot("excluded"), K.REREVIEW_STAT_EXCLUDED, "none"),
-                 (tot("reviewed"), K.REREVIEW_STAT_REVIEWED, "ok"),
-                 (n_rej, K.REREVIEW_STAT_REJECT, "over" if n_rej else "none")],
-                [(tot("new_reject_dies"), K.REREVIEW_STAT_NEW_DIES,
-                  "over" if tot("new_reject_dies") else "none"),
-                 (tot("map_reject_dies"), K.REREVIEW_STAT_MAP_DIES, "none"),
-                 (tot("total_reject_dies"), K.REREVIEW_STAT_TOTAL_DIES, "none")]):
-            row = QHBoxLayout()
-            row.setSpacing(10)
-            for value, caption, tone in specs:
-                row.addWidget(self._stat_tile(value, caption, tone))
-            row.addStretch(1)
-            self._summary_layout.addLayout(row)
-        for st in stats:
-            line(K.REREVIEW_WAFER_LINE_FMT.format(
-                wafer=st.slot, total=st.total, excluded=st.excluded,
-                reviewed=st.reviewed, reject=st.reject, new=st.new_reject_dies,
-                map=st.map_reject_dies, sum=st.total_reject_dies), role="muted")
+        for value, caption, tone in (
+                (n_rej, K.REREVIEW_STAT_REJECT, "over" if n_rej else "none"),
+                (tot("map_reject_dies"), K.REREVIEW_STAT_MAP_DIES, "none"),
+                (tot("total_reject_dies"), K.REREVIEW_STAT_TOTAL_DIES, "none")):
+            hero.addWidget(self._stat_tile(value, caption, tone),
+                           alignment=Qt.AlignmentFlag.AlignVCenter)
+        hero.addStretch(1)
+        self._summary_layout.addLayout(hero)
+        line(K.REREVIEW_SCOPE_FMT.format(reviewed=tot("reviewed"), total=tot("total"),
+                                         excluded=tot("excluded")), role="muted")
+
+        # ── 웨이퍼별 표 ──────────────────────────────────────────────────
+        table = QGridLayout()
+        table.setHorizontalSpacing(0)
+        table.setVerticalSpacing(0)
+        heads = K.REREVIEW_TABLE_COLS
+        for c, text in enumerate(heads):
+            h = QLabel(text, card)
+            h.setProperty("role", "rrHead")
+            h.setAlignment(Qt.AlignmentFlag.AlignLeft if c == 0
+                           else Qt.AlignmentFlag.AlignRight)
+            table.addWidget(h, 0, c)
+        warned = {slot for slot, plan in result.rereview.items() if plan.warnings}
+        for r, st in enumerate(stats, start=1):
+            name = QLabel(st.slot + ("  ⚠" if st.slot in warned else ""), card)
+            name.setProperty("role", "rrCellName")
+            if st.slot in warned:
+                name.setToolTip("\n".join(rr.warning_lines({st.slot: result.rereview[st.slot]})))
+            table.addWidget(name, r, 0)
+            cells = (st.reviewed, st.reject, st.new_reject_dies,
+                     st.map_reject_dies, st.total_reject_dies)
+            for c, v in enumerate(cells, start=1):
+                lab = QLabel(f"{v:,}", card)
+                lab.setProperty("role", "rrCell")
+                if c == 3 and v:
+                    lab.setProperty("tone", "over")
+                lab.setAlignment(Qt.AlignmentFlag.AlignRight
+                                 | Qt.AlignmentFlag.AlignVCenter)
+                table.addWidget(lab, r, c)
+        table.setColumnStretch(0, 3)
+        for c in range(1, len(heads)):
+            table.setColumnStretch(c, 2)
+        self._summary_layout.addSpacing(6)
+        self._summary_layout.addLayout(table)
+
         unknown = tot("unknown_die_rejects")
         if unknown:
             line(K.REREVIEW_UNKNOWN_DIE_FMT.format(n=unknown), role="muted")
         warns = rr.warning_lines(result.rereview)
         if warns:
-            line(K.REREVIEW_WARN_HEAD + "\n" + "\n".join("• " + w for w in warns),
-                 role="error")
+            self._summary_layout.addSpacing(6)
+            line(K.REREVIEW_WARN_HEAD, role="sectionWarn")
+            for w in warns:
+                line("• " + w, role="muted")
 
     def _stat_tile(self, value: int, caption: str, tone: str) -> QFrame:
         tile = QFrame(self._summary_card)
@@ -577,6 +639,7 @@ class ResultPage(QWidget):
             unmatched_original_quality=self.unmatched_original_chk.isChecked(),
             map_renderer=render_map_png,          # Wafer Map 시트(화면과 같은 렌더러)
             reject_map_renderer=render_reject_map_png,   # AVAGO 재리뷰 Reject die 맵
+            include_good=self.include_good_chk.isChecked(),
         )
         # ★ 30안 — 워커가 보내는 문구(어느 시트·어느 슬롯)를 **그대로 띄운다**.
         #   예전엔 `msg` 를 버리고 고정 문구만 썼다.  행 수치는 여전히 오버레이의

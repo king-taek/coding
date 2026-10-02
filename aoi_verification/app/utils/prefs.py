@@ -80,6 +80,8 @@ class UiPrefs:
     # 같은 입력란을 쓰므로, 모드를 오갈 때 서로의 값을 덮지 않게).
     last_rereview_scan: str = ""
     last_rereview_map: str = ""
+    # 재리뷰 결과 엑셀에 Good 사진까지 넣을지(결과 화면 체크 — 마지막 값).
+    rereview_include_good: bool = False
     # OpenVINO (Intel GPU 가속) 자동 설치 안내를 거절한 경우 — 다시 묻지
     # 않음.  사용자가 ‘다시 보지 않기’ 를 선택했거나 설치 시도 후 실패하면 True.
     openvino_install_declined: bool = False
