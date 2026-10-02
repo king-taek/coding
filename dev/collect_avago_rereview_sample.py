@@ -180,6 +180,8 @@ def _add_folder_files(zf: zipfile.ZipFile, src: Path, arc: str, log: list[str],
     for p in entries:
         if not p.is_file():
             continue
+        if p.name.casefold() == "thumbs.db":       # 썸네일 부산물 = 사진으로 친다
+            continue
         if p.suffix.lower() in IMAGE_EXT:
             if photos is not None:
                 photos.append(p.name)

@@ -67,6 +67,8 @@ PHASE_A_MATCH = "A_match"
 # 스캔 워커가 도는 동안 파이썬 참조를 붙잡아 두는 곳 — 지역 변수로만 두면 함수가
 # 끝나는 순간 GC 가 QThread 를 파괴한다(`pages/setup_page.py` 의 `_LIVE_DIE_SCANS`).
 _LIVE_SCANS: set = set()
+# 재리뷰 계획 워커도 같다 — 창(부모)이 먼저 죽어도 스레드가 끝날 때까지 살아 있어야 한다.
+_LIVE_REREVIEW: set = set()
 
 
 class _FolderScan(QThread):
@@ -1267,6 +1269,10 @@ class MainWindow(QMainWindow):
         self._scan_token += 1
         w = self._scan_worker
         self._scan_worker = None
+        rw = self.__dict__.get("_rereview_worker")
+        if rw is not None:
+            rw.stop()
+            self._rereview_worker = None
         self._stage = ""
         if w is not None:
             w.stop()
@@ -1880,18 +1886,30 @@ class MainWindow(QMainWindow):
         jobs = [(n, s.ref_dir, [it.path for it in s.ref_images])
                 for n, s in sorted(sr.slots.items())]
         self._loading.set_progress(0, len(jobs), i18n.KO.LOAD_REREVIEW_PLAN)
-        worker = RereviewPlanner(jobs, self._input.val_root, parent=self)
-        self._rereview_worker = worker            # GC 방지
-        worker.signals.progress.connect(
-            lambda d, t: self._loading.set_progress(d, t, i18n.KO.LOAD_REREVIEW_PLAN))
+        # 부모 없이 만들고 모듈 집합이 수명을 잡는다 — 창을 닫아도 도는 스레드가 지워지지 않는다.
+        token = self._scan_token
+        worker = RereviewPlanner(jobs, self._input.val_root, token=token)
+        self._rereview_worker = worker
+        _LIVE_REREVIEW.add(worker)
+        worker.finished.connect(lambda w=worker: _LIVE_REREVIEW.discard(w))
+        worker.signals.progress.connect(self._on_rereview_progress)
         worker.signals.done.connect(self._on_rereview_planned)
         worker.start()
 
-    def _on_rereview_planned(self, plans: dict) -> None:
+    def _on_rereview_progress(self, token: int, done: int, total: int) -> None:
+        if token != self._scan_token:
+            return                                 # 옛 세대의 늦은 진행률
+        self._loading.set_progress(done, total, i18n.KO.LOAD_REREVIEW_PLAN)
+
+    def _on_rereview_planned(self, token: int, plans: dict) -> None:
+        if token != self._scan_token or not self._is_rereview():
+            return                                 # 취소·새 세션 — 옛 계획은 버린다
         self._rereview_worker = None
         sr = self._scan
         if sr is None or self._input is None:
             return                                 # 그 사이 취소됐다
+        if any(name not in sr.slots for name in plans):
+            return
         self._rereview_plans = plans
         # 선별 대상 = 재리뷰 사진만.  뺀 사진은 썸네일도 만들지 않는다.
         for name, plan in plans.items():
@@ -1918,7 +1936,8 @@ class MainWindow(QMainWindow):
             self._new_session()
             return
         if n_review == 0:                          # 볼 사진이 없다 — 바로 결과로
-            self._finish_rereview()
+            # 선별 페이지는 재사용되므로 이전 LOT 의 판정이 남아 있다 — 읽지 않는다.
+            self._finish_rereview(from_select=False)
             return
         self._continue_start_after_scan(
             sorted(n for n, s in sr.slots.items() if s.ref_images))
@@ -1930,12 +1949,15 @@ class MainWindow(QMainWindow):
             out.update(plan.die_of)
         return out
 
-    def _finish_rereview(self) -> None:
-        """선별 끝 — 오른쪽(Reject)·제외(Good)를 결과로 묶어 결과 화면에."""
+    def _finish_rereview(self, from_select: bool = True) -> None:
+        """선별 끝 — 오른쪽(Reject)·제외(Good)를 결과로 묶어 결과 화면에.
+
+        ``from_select=False`` 는 볼 사진이 0장이라 선별을 거치지 않은 경우 — 선별 페이지가
+        들고 있는 상태는 이전 세션 것이라 읽지 않는다."""
         from ..models.result import rereview_result
 
         assert self._input is not None
-        st = self._select_page.get_state()
+        st = self._select_page.get_state() if from_select else None
         rejects = {k: [it.path for it in v] for k, v in (st.targets if st else {}).items()}
         goods = {k: [it.path for it in v] for k, v in (st.excluded if st else {}).items()}
         result = rereview_result(self._input.ref_machine,
@@ -2575,6 +2597,10 @@ class MainWindow(QMainWindow):
         if self._scan_worker is not None:
             self._scan_worker.stop()
             self._scan_worker = None
+        rw = self.__dict__.get("_rereview_worker")
+        if rw is not None:
+            rw.stop()                      # 수명은 `_LIVE_REREVIEW` 가 잡는다
+            self._rereview_worker = None
         # MatchPage 의 점수 사전 계산 워커도 안전 종료.
         try:
             pre = getattr(self._match_page, "_precompute_worker", None)

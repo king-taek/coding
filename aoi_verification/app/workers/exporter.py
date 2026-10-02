@@ -720,7 +720,7 @@ class ExcelExporter(QThread):
             counts[st] = counts.get(st, 0) + 1
         found = counts.get(scan_image.OK, 0) + counts.get(scan_image.UNREADABLE, 0)
         if found:
-            self._scan_cols = ["E"] if self._extract else ["E", "F"]
+            self._scan_cols = ["E"] if self._one_side else ["E", "F"]
         _LOG.info("저장 소요 [Scan 확인] %.2f초 %d장 — 상태별 %s",
                   time.perf_counter() - t0, len(paths), counts)
 
@@ -762,7 +762,7 @@ class ExcelExporter(QThread):
                     dst.fill = _copy(src.fill)
                     dst.border = _copy(src.border)
                     dst.alignment = _copy(src.alignment)
-        if self._extract:
+        if self._one_side:
             ws[f"E{HEADER_AOI_ROW}"] = i18n.KO.SCAN_EXCEL_HEADER
         else:
             for col, src in zip(self._scan_cols, (COL_REF, COL_VAL)):

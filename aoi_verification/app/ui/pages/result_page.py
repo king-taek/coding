@@ -489,8 +489,10 @@ class ResultPage(QWidget):
         dies: dict = {}
         for slot in sorted(result.rereview):
             plan = result.rereview[slot]
+            confirmed = set(rr.confirmed_new_rejects(plan, result.rereview_rejects(slot)))
             for p in result.rereview_rejects(slot):
-                key = (slot, plan.die_of.get(Path(p)))
+                # 맵 대응이 확정된 신규 die 만 die 로 센다 — 정렬 실패·맵 밖은 '확인 필요'.
+                key = (slot, plan.die_of.get(Path(p)) if Path(p) in confirmed else None)
                 dies[key] = dies.get(key, 0) + 1
         known = sorted(k for k in dies if k[1] is not None)
         unknown = sorted(k for k in dies if k[1] is None)

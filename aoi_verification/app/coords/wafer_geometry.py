@@ -543,13 +543,16 @@ def _die_map_origins(folder: Path, px: float, py: float
     return min(i for i, _ in cells), max(j for _, j in cells)
 
 
-def die_map_cells(folder: Path, px: float, py: float
+def die_map_cells(folder: Path, px: float, py: float, *, local_only: bool = False
                   ) -> Optional[frozenset[tuple[int, int]]]:
     """die 맵의 die 전체 — ``(x_index, y_index)`` 집합(stage 인덱스, 보정 전).
 
     :func:`_die_map_origins` 와 **같은 읽기**다(그 함수의 fail-safe 조건이 전부 여기 있다).
-    Wafer map 이 'die 가 실제로 있는 칸' 만 격자로 그리는 데 쓴다."""
-    for base in _search_dirs(folder):
+    Wafer map 이 'die 가 실제로 있는 칸' 만 격자로 그리는 데 쓴다.
+
+    ``local_only`` — 부모 폴더의 목록을 쓰지 않는다(그 웨이퍼 자신의 파일만).  AVAGO 재리뷰는
+    이 목록으로 사진을 **제외**하므로, 다른 웨이퍼의 목록이 섞이면 안 된다."""
+    for base in (_search_dirs(folder)[:1] if local_only else _search_dirs(folder)):
         dat = base / _DIE_MAP_FILE
         layout = _dat_layout(dat)
         if layout is None:

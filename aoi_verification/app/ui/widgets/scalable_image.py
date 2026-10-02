@@ -103,7 +103,7 @@ class ScalableImage(QLabel):
         from PyQt6.QtGui import QImageReader
         try:
             reader = QImageReader(str(path))
-            reader.setAutoTransform(False)       # EXIF 회전 미적용 — 좌표 규약과 같게
+            reader.setAutoTransform(True)        # 전체 보기(image_io)와 같은 EXIF 방향
             size = reader.size()
             if not size.isValid():
                 return None

@@ -1198,6 +1198,7 @@ REREVIEW_WARN_ALIGN_FAIL_FMT = (
     "사진을 전부 재리뷰합니다.")
 REREVIEW_WARN_FLIP_SUFFIX = " (뒤집힌 Map 과는 일치 — 방향 확인 필요)"
 REREVIEW_WARN_UNPLACED_FMT = "{wafer}: 좌표를 못 읽은 사진 {n}장은 재리뷰에 넣었습니다."
+REREVIEW_WARN_PLAN_FAILED_FMT = ("{wafer}: Map 대조 중 예상 못 한 오류가 나 사진을 전부 재리뷰에 넣었습니다.")
 REREVIEW_WARN_OFF_MAP_FMT = "{wafer}: Map 의 die 없는 칸에 찍힌 사진 {n}장은 재리뷰에 넣었습니다."
 
 # 선별 화면 — 후보 선별을 그대로 쓰고 이름만 바꾼다(오른쪽 = Reject, 왼쪽 = Good).

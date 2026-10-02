@@ -14,25 +14,34 @@ from ..coords import rereview
 
 
 class RereviewPlannerSignals(QObject):
-    progress = pyqtSignal(int, int)        # done, total
-    done = pyqtSignal(object)              # {slot명 → WaferPlan}
+    progress = pyqtSignal(int, int, int)   # 세대 token, done, total
+    done = pyqtSignal(int, object)         # 세대 token, {slot명 → WaferPlan}
 
 
 class RereviewPlanner(QThread):
     """``jobs`` : [(slot명, 웨이퍼 폴더, [사진 경로])]."""
 
-    def __init__(self, jobs, map_dir: Path, parent=None) -> None:
+    def __init__(self, jobs, map_dir: Path, token: int = 0, parent=None) -> None:
         super().__init__(parent)
+        self._token = token
+        self._stop = False
         self._jobs = list(jobs)
         self._map_dir = Path(map_dir)
         self.signals = RereviewPlannerSignals()
 
+    def stop(self) -> None:
+        """웨이퍼 사이에서 협조적으로 멈춘다(진행 중인 읽기는 끊지 못한다)."""
+        self._stop = True
+
     def run(self) -> None:      # type: ignore[override]
         total = len(self._jobs)
         plans: dict = {}
-        self.signals.progress.emit(0, total)
+        self.signals.progress.emit(self._token, 0, total)
         for k, (slot, folder, paths) in enumerate(self._jobs, start=1):
             # plan_wafer 는 전 구간 fail-safe(실패 = 그 웨이퍼 전부 재리뷰 + 경고).
+            if self._stop:
+                return
             plans[slot] = rereview.plan_wafer(slot, folder, paths, self._map_dir)
-            self.signals.progress.emit(k, total)
-        self.signals.done.emit(plans)
+            self.signals.progress.emit(self._token, k, total)
+        if not self._stop:
+            self.signals.done.emit(self._token, plans)

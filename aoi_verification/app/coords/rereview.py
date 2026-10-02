@@ -60,9 +60,9 @@ from . import camtek_ini, wafer_geometry, wafer_txt
 from .ini_text import read_ini_text
 
 __all__ = ["RejectMap", "WaferPlan", "WaferStats", "parse_map", "find_map",
-           "load_map", "warning_lines", "lot_from_map_path", "align", "plan_wafer", "wafer_stats", "new_reject_cells",
+           "load_map", "warning_lines", "lot_from_map_path", "align", "plan_wafer", "wafer_stats", "new_reject_cells", "confirmed_new_rejects",
            "W_NO_MAP", "W_MAP_INVALID", "W_NO_GEOMETRY", "W_NO_DIE_MAP",
-           "W_ALIGN_FAIL", "W_UNPLACED", "W_OFF_MAP"]
+           "W_ALIGN_FAIL", "W_UNPLACED", "W_OFF_MAP", "W_PLAN_FAILED"]
 
 _LOG = logging.getLogger("aoi.coords")
 
@@ -77,6 +77,7 @@ W_MAP_INVALID = "map_invalid"     # 맵 형식·WAFER·FNLOC 를 못 믿는다 �
 W_NO_GEOMETRY = "no_geometry"     # die pitch 를 못 정했다 → 전부 재리뷰
 W_NO_DIE_MAP = "no_die_map"       # s_DieLocation.dat 이 없다/못 읽는다 → 전부 재리뷰
 W_ALIGN_FAIL = "align_fail"       # 맵과 장비 die 영역이 다르다 → 전부 재리뷰
+W_PLAN_FAILED = "plan_failed"       # 예상 밖 예외 — 그 웨이퍼 전부 재리뷰
 W_UNPLACED = "unplaced"           # 좌표를 못 읽은 사진(재리뷰에 넣음)
 W_OFF_MAP = "off_map"             # 맵의 die 없는 칸에 떨어진 사진(재리뷰에 넣음)
 
@@ -194,8 +195,6 @@ def load_map(map_dir: Path, wafer: str) -> tuple[Optional[RejectMap], Optional[s
 # 맵에만 있고 장비 die 맵에는 없는 칸(장비가 검사하지 않은 die)의 허용 개수.
 # 관측 최대 2(PH3Q42 4장: 1~2, PGEE48 대조: 2).  이보다 많으면 '부분 맵' 일 수 있다.
 MAX_UNSCANNED = 5
-# 평행이동 후보 탐색 폭 — 최솟값 맞춤 ± 이만큼.  빠진 칸이 가장자리면 최솟값이 밀린다.
-_ALIGN_SEARCH = 3
 
 
 def align(map_cells: Iterable, die_cells: Iterable) -> Optional[tuple[int, int]]:
@@ -206,14 +205,19 @@ def align(map_cells: Iterable, die_cells: Iterable) -> Optional[tuple[int, int]]
     a, b = set(map_cells), set(die_cells)
     if not a or not b or len(b) > len(a) or len(a) - len(b) > MAX_UNSCANNED:
         return None
-    dx0 = min(i for i, _ in b) - min(i for i, _ in a)
-    dy0 = min(j for _, j in b) - min(j for _, j in a)
+    # b 의 모든 칸이 a 를 (dx, dy) 옮긴 곳에 들어가려면 dx 는 [max(b)-max(a), min(b)-min(a)]
+    # 안이어야 한다 — 그 범위를 전부 본다(창을 잘라 보면 창 밖의 두 번째 해를 놓친다).
+    dx_hi = min(i for i, _ in b) - min(i for i, _ in a)
+    dy_hi = min(j for _, j in b) - min(j for _, j in a)
+    dx_lo = max(i for i, _ in b) - max(i for i, _ in a)
+    dy_lo = max(j for _, j in b) - max(j for _, j in a)
     hits = []
-    for dx in range(dx0 - _ALIGN_SEARCH, dx0 + _ALIGN_SEARCH + 1):
-        for dy in range(dy0 - _ALIGN_SEARCH, dy0 + _ALIGN_SEARCH + 1):
-            moved = {(i + dx, j + dy) for i, j in a}
-            if b <= moved:
+    for dx in range(dx_lo, dx_hi + 1):
+        for dy in range(dy_lo, dy_hi + 1):
+            if all((i - dx, j - dy) in a for i, j in b):
                 hits.append((dx, dy))
+                if len(hits) > 1:
+                    return None
     return hits[0] if len(hits) == 1 else None
 
 
@@ -243,17 +247,25 @@ def plan_wafer(slot: str, folder: Optional[Path], images: Iterable,
         _LOG.exception("재리뷰 계획 실패 — %s 전부 재리뷰", slot)
         plan.review, plan.excluded = list(paths), []
         plan.offset = None
+        plan.cell_of.clear()
+        plan.unscanned = []
+        plan.warnings.append((W_PLAN_FAILED, None))
     return plan
 
 
 def _plan_into(plan: WaferPlan, paths: list, map_dir: Optional[Path], wafer: str) -> None:
     plan.review = list(paths)          # 기본: 전부 재리뷰
     folder = plan.folder
+    _forget_caches()          # 같은 경로의 INI 가 갱신됐을 수 있다 — 옛 좌표를 쓰지 않는다
     # 장비 화면 die (col, row) — 표시·die 개수용.  맵이 없어도 채운다.
     geom = _geometry(folder)
     if geom is not None:
         plan.pitch = (geom.pitch_x, geom.pitch_y)
     coords = camtek_ini.load_folder(folder) if (folder and geom) else {}
+    # 같은 stem 에 항목이 둘 이상(확장자만 다른 사진·INI 섹션)이면 어느 쪽 좌표인지 모른다.
+    ambiguous = _ambiguous_stems(folder, paths) if (folder and geom) else set()
+    coords = {k: c for k, c in coords.items()
+              if k not in ambiguous and c.source == "camtek_ini"}
     for p in paths:
         c = coords.get(p.stem.lower())
         if c is not None:
@@ -267,7 +279,8 @@ def _plan_into(plan: WaferPlan, paths: list, map_dir: Optional[Path], wafer: str
     if geom is None:
         plan.warnings.append((W_NO_GEOMETRY, None))
         return
-    die_cells = wafer_geometry.die_map_cells(folder, geom.pitch_x, geom.pitch_y)
+    die_cells = wafer_geometry.die_map_cells(folder, geom.pitch_x, geom.pitch_y,
+                                             local_only=True)
     if not die_cells:
         plan.warnings.append((W_NO_DIE_MAP, None))
         return
@@ -313,6 +326,28 @@ def _plan_into(plan: WaferPlan, paths: list, map_dir: Optional[Path], wafer: str
         plan.warnings.append((W_OFF_MAP, off_map))
 
 
+def _forget_caches() -> None:
+    for fn in (camtek_ini.load_folder, camtek_ini.load_raw_folder,
+               camtek_ini.load_abs_folder, camtek_ini.load_recipe_folder,
+               wafer_geometry.camtek_geometry):
+        fn.cache_clear()
+
+
+def _ambiguous_stems(folder: Path, paths: list) -> set:
+    """소문자 stem 이 둘 이상의 사진 또는 INI 섹션에 걸려 있는 것들."""
+    from .ini_text import read_ini_text
+    seen: dict = {}
+    for p in paths:
+        seen.setdefault(p.stem.lower(), set()).add(p.name.lower())
+    ini = camtek_ini._find_ini(folder)
+    if ini is not None:
+        parts = camtek_ini._SECTION_PAT.split(read_ini_text(ini) or "")
+        for name in parts[1::2]:
+            n = name.strip().lower()
+            seen.setdefault(Path(n).stem, set()).add(n)
+    return {stem for stem, names in seen.items() if len(names) > 1}
+
+
 def _geometry(folder: Optional[Path]):
     if folder is None:
         return None
@@ -328,8 +363,9 @@ def _geometry(folder: Optional[Path]):
 def wafer_stats(plan: WaferPlan, reject_paths: Iterable) -> WaferStats:
     """재리뷰 판정(``reject_paths`` = Reject 로 고른 사진)을 숫자로."""
     rej = [Path(p) for p in reject_paths]
-    dies = {plan.die_of[p] for p in rej if p in plan.die_of}
-    unknown = sum(1 for p in rej if p not in plan.die_of)
+    confirmed = confirmed_new_rejects(plan, rej)
+    dies = {plan.die_of[p] for p in confirmed if p in plan.die_of}
+    unknown = len(rej) - len(confirmed)
     map_dies = len(plan.reject_map.rejects) if plan.reject_map else 0
     n_rev = len(plan.review)
     return WaferStats(
@@ -337,13 +373,29 @@ def wafer_stats(plan: WaferPlan, reject_paths: Iterable) -> WaferStats:
         excluded=len(plan.excluded), reviewed=n_rev,
         good=n_rev - len(rej), reject=len(rej),
         new_reject_dies=len(dies), unknown_die_rejects=unknown,
-        map_reject_dies=map_dies, total_reject_dies=map_dies + len(dies))
+        map_reject_dies=map_dies, total_reject_dies=map_dies + len(new_reject_cells(plan, rej)))
+
+
+def confirmed_new_rejects(plan: WaferPlan, reject_paths: Iterable) -> list:
+    """Reject 사진 중 **확정 신규 Reject die** 에 놓인 것만.
+
+    맵과 정렬이 됐고, 사진의 칸이 맵의 실제 die 칸이며, 그 칸이 1차 리뷰에서 이미 Reject 가
+    아닐 때만 '새로 추가된 Reject' 라 부른다.  정렬 실패·맵 밖·좌표 없음은 die 번호를 알아도
+    맵 대응이 미확정이라 여기서 뺀다(사진 행·엑셀 판정은 그대로 남는다)."""
+    rm = plan.reject_map
+    if not plan.aligned or rm is None:
+        return []
+    out = []
+    for p in reject_paths:
+        cell = plan.cell_of.get(Path(p))
+        if cell is not None and cell in rm.cells and cell not in rm.rejects:
+            out.append(Path(p))
+    return out
 
 
 def new_reject_cells(plan: WaferPlan, reject_paths: Iterable) -> frozenset:
-    """신규 Reject 사진이 떨어진 **맵 칸** — Wafer Map 그림용(정렬된 웨이퍼만)."""
-    return frozenset(plan.cell_of[Path(p)] for p in reject_paths
-                     if Path(p) in plan.cell_of)
+    """확정 신규 Reject 사진이 떨어진 **맵 칸** — Wafer Map 그림·개수 공용."""
+    return frozenset(plan.cell_of[p] for p in confirmed_new_rejects(plan, reject_paths))
 
 
 def warning_lines(plans: dict) -> list[str]:
@@ -354,7 +406,8 @@ def warning_lines(plans: dict) -> list[str]:
             W_NO_DIE_MAP: i18n.KO.REREVIEW_WARN_NO_DIE_MAP_FMT,
             W_ALIGN_FAIL: i18n.KO.REREVIEW_WARN_ALIGN_FAIL_FMT,
             W_UNPLACED: i18n.KO.REREVIEW_WARN_UNPLACED_FMT,
-            W_OFF_MAP: i18n.KO.REREVIEW_WARN_OFF_MAP_FMT}
+            W_OFF_MAP: i18n.KO.REREVIEW_WARN_OFF_MAP_FMT,
+            W_PLAN_FAILED: i18n.KO.REREVIEW_WARN_PLAN_FAILED_FMT}
     out: list[str] = []
     for slot in sorted(plans):
         plan = plans[slot]
