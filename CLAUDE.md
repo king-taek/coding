@@ -290,7 +290,10 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   맵 밖에 하나라도 떨어지는 경우·유일하지 않은 경우를 허용하지 마라** — 엉뚱한 die 의
   사진이 조용히 빠진다.  맵 없음·불일치·좌표 없음은 전부 **재리뷰에 넣는다**(빼지 않는다).
   방향: 70×54 격자는 뒤집힌 세 가설이 실물 대조로 반증됐다(R1 해소).  다른 격자는 미확인.
-  회귀 가드: `test_rereview.py`(`test_real_die_map_fits_real_map_only_unflipped`).
+  **실물 골든(`test_rereview_golden.py`, PH3Q42 2장)**: `2. FVI\2. #11 재 저장` 사진 파일명의
+  (col,row)·x·y 45장이 앱의 INI 변환과 전부 같은 die·≤10 µm 이고, 앱 정렬의 Map 칸이 전부
+  `(col, 아래부터 row)` 의 Reject bin 이다('위부터' 는 전부 000 — 반증).  기대값을 고쳐서
+  통과시키지 마라.  회귀 가드: `test_rereview.py`(`test_real_die_map_fits_real_map_only_unflipped`).
 - **Wafer map 경고**: 칸이 틀렸을 수 있는 맵(die 없는 칸에 찍힌 점·슬롯 간 격자 불일치·
   좌표 없는 사진·die 크기 추정)은 `wafer_map.map_warnings` 로 판정해 화면 위 배너로 알린다.
   중심 가정·계산 격자는 거의 늘 붙어 배너에 넣지 않는다(범례만).  단 **LIVE 파일명으로 그린
