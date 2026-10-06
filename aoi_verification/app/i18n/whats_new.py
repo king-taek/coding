@@ -18,6 +18,14 @@
 
 ENTRIES = [
     {
+        "id": "2026-10-06",
+        "date": "2026-10-06",
+        "headline": "결함 계측 — recipe 이름이\n숫자 대신 표시됩니다",
+        "summary": "recipe 이름 파일이 없는 폴더(예: 2D)도 Recipe.ini 의 이름을 읽어\n"
+                   "'0 / B' 대신 '2D / B' 처럼 보여 줍니다.",
+        "others": [],
+    },
+    {
         "id": "2026-10-02h",
         "date": "2026-10-02",
         "headline": "AVAGO 재리뷰 —\n1차 Reject 사진 폴더로도 뺍니다",

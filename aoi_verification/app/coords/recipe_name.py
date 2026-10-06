@@ -7,6 +7,8 @@ recipe 이름도 zone 이름처럼 **자재/제품별로 다르다** — 같은 
   예) ``[Recipe-1] Name=PI_Bubble`` → recipe 코드 1 = PI_Bubble,  ``[Recipe-2] Name=PI``.
 Surface.flt 의 recipe 코드가 곧 ``[Recipe-<N>]`` 의 N 이다(실측 대조 일치).
 대안 형식(폴백): ``RecipeName``/``RecipeNumber`` 키 쌍.
+최후 폴백: ``Recipe.ini`` 의 ``[General] Recipe Name=`` — recipe 가 하나뿐인 폴더(예: ``2D``)는
+``RecipesInfo.ini`` 가 없고 이 값만 있다.  번호는 ``[Scan] recipe_1=0,2D`` 의 0 이므로 0 번에 붙인다.
 
 못 찾으면 빈 매핑(이름 없이 코드만).  전 구간 fail-safe.
 """
@@ -25,6 +27,7 @@ _ID = re.compile(r"(?im)^\s*RecipeNumber\s*=\s*(\d+)")
 # RecipesInfo.ini 의 [Recipe-<N>] 섹션 + 그 안의 Name=
 _RECIPE_SEC = re.compile(r"\[Recipe-(\d+)\]([^\[]*)", re.IGNORECASE)
 _SEC_NAME = re.compile(r"(?im)^\s*Name\s*=\s*(.+?)\s*$")
+_GENERAL_NAME = re.compile(r"(?im)^\s*Recipe\s+Name\s*=\s*(.+?)\s*$")
 # 우선 탐색 파일(빠른 경로). 못 찾으면 폴더 안 모든 *.ini 로 확대.
 _PREFERRED = ("RecipesInfo.ini", "ProductInfo.ini", "Recipe2-ProductInfo.ini")
 
@@ -59,6 +62,16 @@ def _scan(paths) -> dict:
     return out
 
 
+def _scan_single_recipe(folder: Path) -> dict:
+    """Recipe.ini 의 ``Recipe Name=`` → {0: name} (recipe 하나뿐인 폴더의 폴백)."""
+    try:
+        txt = read_ini_text(folder / "Recipe.ini") or ""
+    except OSError:
+        return {}
+    m = _GENERAL_NAME.search(txt)
+    return {0: m.group(1).strip()} if m and m.group(1).strip() else {}
+
+
 @lru_cache(maxsize=256)
 def recipe_map(folder: Path) -> tuple:
     """{recipe_number: recipe_name} 을 (id, name) 튜플들로 반환(hashable).  fail-safe.
@@ -73,6 +86,8 @@ def recipe_map(folder: Path) -> tuple:
                 out = _scan(sorted(folder.glob("*.ini")))
             except OSError:
                 pass
+        if not out:
+            out = _scan_single_recipe(folder)
     except Exception:
         return ()
     return tuple(sorted(out.items()))
