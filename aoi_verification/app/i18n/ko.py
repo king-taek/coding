@@ -477,6 +477,9 @@ UPDATE_PHASE_PREPARE = "업데이트 준비 중…"
 UPDATE_PHASE_DEPS = "필요한 패키지 설치 중…"
 UPDATE_PHASE_APPLY = "업데이트 적용 중…"
 UPDATE_PHASE_DONE = "업데이트 완료"
+# 사용자에게는 크게 두 단계로만 보인다 — 받는 일(다운로드) / 그 뒤 전부(설치: 압축 해제·
+# 준비·패키지·적용).  `UPDATE_PHASE_DOWNLOAD` 만 1단계, 나머지 phase 는 2단계다.
+UPDATE_JOURNEY_STEPS = ("다운로드", "설치")
 
 # 업데이트 실패 사유 — `updater.last_error()` 에 담겨 main_window 가 CAUSE_PREFIX 뒤에
 # 붙여 사용자에게 보여 준다(개발자용 로그가 아니다).

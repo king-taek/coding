@@ -443,6 +443,7 @@ class _BusyStripe(QWidget):
 
 
 _NBSP = "\u00a0"
+_NBHY = "\u2011"      # 하이픈에서도 끊기지 않게(4F-/K-01 로 갈라졌다)
 
 
 def _wrap_friendly(text: str) -> str:
@@ -450,7 +451,7 @@ def _wrap_friendly(text: str) -> str:
 
     `(…)` 묶음 안과 `·` 양옆은 한 덩어리로 읽힌다 — 그래서 줄은 그 덩어리 사이에서만
     바뀐다(예: `… (4F-K-01 기준)` / `시트 · 31266522EWF4`)."""
-    text = re.sub(r"\([^()]*\)", lambda m: m.group(0).replace(" ", _NBSP), text)
+    text = re.sub(r"\([^()]*\)", lambda m: m.group(0).replace(" ", _NBSP).replace("-", _NBHY), text)
     return text.replace(" · ", f"{_NBSP}·{_NBSP}")
 
 

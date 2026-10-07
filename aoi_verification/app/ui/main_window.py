@@ -439,7 +439,9 @@ class MainWindow(QMainWindow):
                 return
         except Exception:
             pass
-        self._loading.show_overlay(i18n.KO.UPDATE_DOWNLOADING)
+        self._update_step = 1
+        self._loading.show_overlay(i18n.KO.UPDATE_DOWNLOADING, step=(1, 2),
+                                   steps=i18n.KO.UPDATE_JOURNEY_STEPS)
         self._loading.set_progress(0, 0, i18n.KO.UPDATE_DOWNLOADING)   # busy → 0 에서 안 멈춤
 
         import threading
@@ -461,7 +463,13 @@ class MainWindow(QMainWindow):
         threading.Thread(target=_work, name="update-apply", daemon=True).start()
 
     def _on_update_progress(self, done: int, total: int, phase: str) -> None:
-        """업데이트 진행(다운로드/압축해제/적용) → 로딩바 갱신(메인 스레드)."""
+        """업데이트 진행(다운로드/압축해제/적용) → 로딩바 갱신(메인 스레드).
+
+        화면에는 크게 두 단계만 보인다: 다운로드(1) → 설치(2, 다운로드 이후 전부)."""
+        step = 1 if phase == i18n.KO.UPDATE_PHASE_DOWNLOAD else 2
+        if step != getattr(self, "_update_step", 1):
+            self._update_step = step
+            self._loading.set_stage((step, 2), i18n.KO.UPDATE_JOURNEY_STEPS)
         self._loading.set_progress(done, total, phase)
 
     def _on_update_applied(self, ok: bool, info: dict) -> None:

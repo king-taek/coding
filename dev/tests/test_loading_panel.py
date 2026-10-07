@@ -754,6 +754,6 @@ def test_two_line_title_grows_panel_and_keeps_chunks_together(qapp):
         assert ov._panel.height() >= ov._panel.layout().totalHeightForWidth(
             ov._panel.width())
         text = ov._label.text()
-        assert "(4F-K-01 기준)" in text and "시트 · 31266522EWF4" in text
+        assert "(4F\u2011K\u201101\u00a0기준)" in text and "시트\u00a0·\u00a031266522EWF4" in text
     finally:
         host.deleteLater()
