@@ -736,3 +736,24 @@ def test_finish_tick_waits_for_the_fill_to_land(qapp, monkeypatch):
         assert fired == [100], "then 이 200ms 틱 뒤 한 번 불려야 한다"
     finally:
         host.deleteLater()
+
+
+def test_two_line_title_grows_panel_and_keeps_chunks_together(qapp):
+    """표제가 두 줄이 되면 패널이 그만큼 커져 하단(맵·수치)이 잘리지 않고,
+    `(…)`·`·` 묶음은 줄 중간에서 끊기지 않는다."""
+    host, ov = _overlay(qapp)
+    try:
+        ov.show_overlay("저장 중")
+        for _ in range(4):
+            qapp.processEvents()
+        one = ov._panel.height()
+        ov.set_progress(1, 2, "엑셀로 저장 중 — AOI-20 검증 (4F-K-01 기준) 시트 · 31266522EWF4")
+        for _ in range(4):
+            qapp.processEvents()
+        assert ov._panel.height() > one, "두 줄 표제인데 패널 높이가 그대로다"
+        assert ov._panel.height() >= ov._panel.layout().totalHeightForWidth(
+            ov._panel.width())
+        text = ov._label.text()
+        assert "(4F-K-01 기준)" in text and "시트 · 31266522EWF4" in text
+    finally:
+        host.deleteLater()

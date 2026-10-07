@@ -52,6 +52,7 @@ CLAUDE.md 로딩 계약 유지: set_progress(done,total,msg), total>0 결정형,
 from __future__ import annotations
 
 import math
+import re
 
 from PyQt6.QtCore import (QEasingCurve, QElapsedTimer, QEvent, QRect, QRectF, Qt,
                           QTimer, QVariantAnimation, pyqtSignal)
@@ -441,6 +442,19 @@ class _BusyStripe(QWidget):
             p.drawRoundedRect(max(0, sx), 0, min(sw, w - max(0, sx)), h, r, r)
 
 
+_NBSP = "\u00a0"
+
+
+def _wrap_friendly(text: str) -> str:
+    """표제가 두 줄이 될 때 어색한 곳에서 끊기지 않게 **붙여 쓸 곳**을 비분리 공백으로 묶는다.
+
+    `(…)` 묶음 안과 `·` 양옆은 한 덩어리로 읽힌다 — 그래서 줄은 그 덩어리 사이에서만
+    바뀐다(예: `… (4F-K-01 기준)` / `시트 · 31266522EWF4`)."""
+    text = re.sub(r"\([^()]*\)", lambda m: m.group(0).replace(" ", _NBSP), text)
+    return text.replace(" · ", f"{_NBSP}·{_NBSP}")
+
+
+
 class LoadingOverlay(QWidget):
     """부모 위젯 size 를 따라가는 풀-커버 오버레이 (페이드 인/아웃)."""
 
@@ -809,6 +823,19 @@ class LoadingOverlay(QWidget):
         if label.text() != text:
             label.setText(text)
 
+    def _set_title(self, message: str) -> None:
+        """표제를 적는다.  줄 수가 달라지면 패널 높이도 다시 잰다 — 안 재면 옛 높이에
+        두 줄이 눌려 들어가 맵 아래가 잘린다."""
+        text = _wrap_friendly(message)
+        if self._label.text() != text:
+            self._label.setText(text)
+            # 레이아웃 캐시가 옛 줄 수라 먼저 무효화해야 새 높이가 나온다.
+            lay = self._panel.layout()
+            if lay is not None:
+                lay.invalidate()
+                lay.activate()
+            self._place_panel()
+
     def _settle_progress(self) -> None:
         """돌던 채움 tween 을 **목표값으로 확정한 뒤** 멈춘다 — 퇴장/숨김 직전에 부른다.
 
@@ -847,7 +874,7 @@ class LoadingOverlay(QWidget):
         """
         self._active = True
         self._arming = True              # 아래 `show()` 가 부를 showEvent 의 재무장 억제
-        self._set_text(self._label, message)
+        self._set_title(message)
         self._apply_stage(step, steps)
         self._set_input_lock(True)
         self._cancel_btn.setVisible(bool(cancelable))
@@ -1126,7 +1153,7 @@ class LoadingOverlay(QWidget):
 
     def set_progress(self, done: int, total: int, message: str = "") -> None:
         if message:
-            self._set_text(self._label, message)
+            self._set_title(message)
         was_busy = self._wafer.is_busy()
         mode_changed = (total > 0) == was_busy
         if total > 0:
@@ -1342,7 +1369,11 @@ class LoadingOverlay(QWidget):
             return
         hint = self._panel.sizeHint()
         pw = min(max(self.PANEL_W, hint.width()), max(1, w - 48))
-        ph = min(hint.height(), max(1, h - 48))
+        # ★ 줄바꿈 라벨은 폭이 정해져야 높이가 나온다 — sizeHint 는 한 줄 기준이라
+        #   두 줄 표제에서 하단이 잘렸다.  확정 폭으로 다시 잰 높이와 큰 쪽을 쓴다.
+        lay = self._panel.layout()
+        need = lay.totalHeightForWidth(pw) if lay is not None else -1
+        ph = min(max(hint.height(), need), max(1, h - 48))
         offset = int(round(self._rise_span * (1.0 - self._rise)))
         self._panel.setGeometry((w - pw) // 2, (h - ph) // 2 + offset, pw, ph)
 
