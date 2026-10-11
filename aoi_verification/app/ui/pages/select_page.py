@@ -637,9 +637,10 @@ class SelectPage(ProgressRowMixin, QWidget):
         큐 앞으로 옮길 뿐이라 결정·되돌리기 기록은 그대로다."""
         host = QWidget(self.left_panel)
         host.setProperty("role", "rowHost")
-        row = QHBoxLayout(host)
+        # 라벨을 위에 둔다 — 후보 패널은 좁아서 옆에 두면 WaferID 가 잘린다.
+        row = QVBoxLayout(host)
         row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(8)
+        row.setSpacing(4)
         label = QLabel(i18n.KO.SLOT_JUMP_LABEL, host)
         label.setProperty("role", "muted")
         self.slot_jump = QComboBox(host)
@@ -649,7 +650,7 @@ class SelectPage(ProgressRowMixin, QWidget):
         self.slot_jump.setMinimumContentsLength(8)
         self.slot_jump.activated.connect(self._on_slot_jump)
         row.addWidget(label)
-        row.addWidget(self.slot_jump, 1)
+        row.addWidget(self.slot_jump)
         host.setVisible(False)
         self.left_panel.layout().insertWidget(1, host)
         self._slot_jump_host = host
@@ -678,6 +679,11 @@ class SelectPage(ProgressRowMixin, QWidget):
         for slot in sorted(remaining):
             self.slot_jump.addItem(
                 i18n.KO.SLOT_JUMP_ITEM_FMT.format(slot=slot, n=remaining[slot]), slot)
+        # 펼친 목록은 패널보다 넓어도 된다 — 슬롯 이름이 잘리지 않게.
+        fm = self.slot_jump.fontMetrics()
+        widest = max(fm.horizontalAdvance(self.slot_jump.itemText(i))
+                     for i in range(self.slot_jump.count()))
+        self.slot_jump.view().setMinimumWidth(widest + 40)
         idx = self.slot_jump.findData(cur)
         if idx >= 0:
             self.slot_jump.setCurrentIndex(idx)
