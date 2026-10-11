@@ -927,6 +927,8 @@ IMAGE_INFO_COPIED = "복사했습니다"
 # Scan 이 없는 사진에서는 칸 자체를 만들지 않는다(사용자 결정) — '없음' 문구는 화면에 없다.
 SCAN_IMAGE_TITLE = "Scan image"
 SCAN_IMAGE_LOADING = "Scan 이미지 불러오는 중"
+# 불러오는 동안 문구 아래에서 도는 점 — 폭이 같은 프레임이라 글자가 흔들리지 않는다.
+SCAN_IMAGE_LOADING_DOTS = ("●  ○  ○", "○  ●  ○", "○  ○  ●", "○  ●  ○")
 SCAN_IMAGE_UNREADABLE = "Scan 이미지를 읽을 수 없음"
 SCAN_IMAGE_OPEN_TIP = "누르면 전체 Scan 이미지에서 이 범위를 보여줍니다"
 # 엑셀 — Scan 열 머리(2행)와, Scan 열이 생긴 시트에서 그 행만 Scan 이 없을 때의 칸 문구.

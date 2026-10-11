@@ -90,7 +90,16 @@ def test_loading_state_reserves_the_box(qapp, isolated_cache):
     dlg = iid.ImageInfoDialog()
     dlg._on_scan_found(dlg._scan_gen)
     assert not dlg.scan_view.isHidden()
-    assert dlg.scan_view.text() == i18n.KO.SCAN_IMAGE_LOADING
+    assert dlg.scan_view.text().startswith(i18n.KO.SCAN_IMAGE_LOADING)
+    # 가벼운 점 애니메이션 — 타이머가 돌고, 한 칸 넘기면 점만 바뀐다.
+    assert dlg._scan_dots.isActive()
+    before = dlg.scan_view.text()
+    dlg._tick_scan_dots()
+    after = dlg.scan_view.text()
+    assert after != before and after.startswith(i18n.KO.SCAN_IMAGE_LOADING)
+    # 결과가 오면 애니메이션은 멈춘다.
+    dlg._on_scan_done(dlg._scan_gen, scan_image.NO_CANDIDATE, None, None, None, "")
+    assert not dlg._scan_dots.isActive() and dlg.scan_view.isHidden()
 
 
 def test_stale_result_is_ignored(qapp, isolated_cache):
@@ -172,18 +181,34 @@ def test_pil_to_qimage_keeps_pixels(qapp):
     assert q.pixelColor(2, 1).red() == 250
 
 
-def test_drop_shows_loading_until_scan_settles(qapp, isolated_cache, tmp_path,
-                                               monkeypatch):
-    """사진을 놓으면 로딩 덮개가 뜨고, Scan 판정까지 끝나야 걷힌다."""
+def test_info_shows_before_scan_finishes(qapp, isolated_cache, tmp_path,
+                                         monkeypatch):
+    """사진을 놓으면 로딩 덮개가 뜨고, **정보가 오면 바로** 걷힌다 — Scan 원본을
+    기다리지 않는다.  Scan 은 자기 칸에서 '불러오는 중' 으로 따로 기다린다(사용자 요청)."""
+    import threading
     monkeypatch.setattr(iid, "_async_info", lambda: True)
+    gate = threading.Event()
+    real_load_crop = scan_image.load_crop
+
+    def slow_load_crop(m):
+        gate.wait(10)
+        return real_load_crop(m)
+    monkeypatch.setattr(scan_image, "load_crop", slow_load_crop)
+
     dlg = iid.ImageInfoDialog()
     dlg.resize(1100, 760)
     dlg.show()
     dlg.show_image(_wafer(tmp_path))
     assert dlg._loading.isVisible()
-    assert _wait(lambda: dlg._scan_crop is not None)
+    # Scan 은 아직 막혀 있는데 덮개는 걷히고 표가 채워진다.
     assert _wait(lambda: not dlg._loading.isVisible(), 8000)
-    assert dlg._groups
+    assert dlg._groups and dlg._scan_crop is None
+    assert _wait(lambda: dlg.scan_view.text().startswith(
+        i18n.KO.SCAN_IMAGE_LOADING))
+    assert dlg._scan_dots.isActive()
+    gate.set()
+    assert _wait(lambda: dlg._scan_crop is not None)
+    assert not dlg._scan_dots.isActive()
     dlg.close()
     _idle()
 

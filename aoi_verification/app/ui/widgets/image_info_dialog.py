@@ -24,8 +24,9 @@ Surface.flt)이다.  사진만 따로 복사한 폴더에서는 LIVE 형식 파�
 아니므로 백그라운드 스레드·``LoadingOverlay`` 를 쓰지 않는다.
 
 **Scan image** 만은 예외다 — 같은 폴더의 Scan 원본(수 MB, NAS)을 읽어 잘라야 하므로
-워커 스레드(`_ScanLoader`)에서 돈다.  Scan 이 있다고 판정되면 Color 아래에 자리를 먼저
-잡고 '불러오는 중' 을 띄운 뒤 그림으로 바꾼다.  Scan 이 없으면 칸 자체를 만들지 않는다
+워커 스레드(`_ScanLoader`)에서 돈다.  계측 표는 Scan 을 기다리지 않고 먼저 뜬다.  Scan
+목록 파일이 있으면 Color 아래에 자리를 먼저 잡고 '불러오는 중'(점 애니메이션)을 띄운 뒤
+그림으로 바꾼다.  Scan 이 없으면 칸 자체를 만들지 않는다
 (사용자 결정).  사진을 바꿀 때마다 세대 번호를 올려, 늦게 도착한 이전 사진의 결과가
 새 사진 아래에 붙지 않게 한다.  계산은 엑셀과 같은 :mod:`coords.scan_image` 다.
 """
@@ -61,6 +62,8 @@ _TOAST_MS = 1800
 _LABEL_COL_MIN = 132
 # Scan 칸의 최소 한 변 — 창이 낮아도 이보다 작게 줄이지 않는다.
 _SCAN_MIN_SIDE = 120
+# Scan '불러오는 중' 점 애니메이션 한 칸 간격 — 가볍게(초당 몇 번만 글자를 바꾼다).
+_SCAN_DOTS_MS = 350
 
 
 def pil_to_qimage(im) -> QImage:
@@ -99,11 +102,18 @@ class _ScanLoader(QThread):
                                    None, None, None, "")
 
     def _run(self) -> None:
+        # 목록 파일이 있으면 Scan 이 있을 가능성이 높다 — 판정(Scan 원본 머리 읽기)을
+        # 기다리지 않고 칸부터 잡아 '불러오는 중' 을 띄운다.  판정이 '없음' 이면
+        # `_on_scan_done` 이 칸을 다시 접는다.
+        announced = (self._path.parent / scan_image.SCAN_LIST_NAME).exists()
+        if announced:
+            self.signals.found.emit(self._gen)
         m = scan_image.resolve(self._path)
         if not m.ok:
             self.signals.done.emit(self._gen, m.status, None, None, None, "")
             return
-        self.signals.found.emit(self._gen)
+        if not announced:
+            self.signals.found.emit(self._gen)
         res = scan_image.load_crop(m)
         if res is None:
             self.signals.done.emit(self._gen, scan_image.UNREADABLE,
@@ -220,6 +230,10 @@ class ImageInfoDialog(QDialog):
         self._scan_full: QImage | None = None
         self._scan_box = None
         self._scan_name = ""
+        self._scan_dots = QTimer(self)
+        self._scan_dots.setInterval(_SCAN_DOTS_MS)
+        self._scan_dots.timeout.connect(self._tick_scan_dots)
+        self._scan_dot_i = 0
         self._loading = LoadingOverlay(self)
         self._build()
         if image_path:
@@ -408,8 +422,8 @@ class ImageInfoDialog(QDialog):
         """사진을 조회해 미리보기와 계측 표를 갱신한다.
 
         정보 읽기·미리보기·Scan 은 전부 NAS 를 읽어 느리므로 로딩 표시를 띄우고 워커에서
-        돌린다.  덮개는 Scan 판정까지 끝나(또는 Scan 이 없다고 판정돼) 화면이 다 채워진
-        뒤에 걷힌다."""
+        돌린다.  덮개는 **정보가 오면 바로** 걷힌다 — Scan 원본(수 MB)을 기다리지 않는다.
+        Scan 은 자기 칸에서 '불러오는 중' 점 애니메이션으로 따로 기다린다(사용자 요청)."""
         self._path = Path(path)
         self._info_gen += 1
         self._scan_gen += 1               # 이전 사진의 Scan 결과가 늦게 와도 버린다
@@ -429,6 +443,7 @@ class ImageInfoDialog(QDialog):
             return
         self._groups = groups
         self.pick_btn.setText(i18n.KO.IMAGE_INFO_PICK_ANOTHER)
+        self._loading.hide_overlay()    # 정보는 다 왔다 — Scan 은 자기 칸에서 기다린다
         self._start_scan()
         self._render()
 
@@ -444,6 +459,7 @@ class ImageInfoDialog(QDialog):
         self._scan_gen += 1
         self._scan_crop = self._scan_full = self._scan_box = None
         self._scan_name = ""
+        self._scan_dots.stop()
         self._set_scan_visible(False)
         ld = _ScanLoader(self._path, self._scan_gen)
         ld.signals.found.connect(self._on_scan_found)
@@ -455,12 +471,24 @@ class ImageInfoDialog(QDialog):
     def _on_scan_found(self, gen: int) -> None:
         if gen != self._scan_gen:
             return
-        self._show_scan_text(i18n.KO.SCAN_IMAGE_LOADING)
+        self._scan_dot_i = 0
+        self._show_scan_text(self._scan_loading_text())
+        self._scan_dots.start()
+
+    def _scan_loading_text(self) -> str:
+        frames = i18n.KO.SCAN_IMAGE_LOADING_DOTS
+        return (f"{i18n.KO.SCAN_IMAGE_LOADING}\n"
+                f"{frames[self._scan_dot_i % len(frames)]}")
+
+    def _tick_scan_dots(self) -> None:
+        """점 한 칸 이동 — 글자만 바꾼다(칸 크기·테두리는 그대로)."""
+        self._scan_dot_i += 1
+        self.scan_view.setText(self._scan_loading_text())
 
     def _on_scan_done(self, gen, status, crop, full, box, name) -> None:
         if gen != self._scan_gen:
             return                      # 이미 다른 사진으로 넘어갔다
-        self._loading.hide_overlay()    # Scan 판정까지 끝나야 화면이 다 채워진 것
+        self._scan_dots.stop()
         if status == scan_image.OK and crop is not None:
             self._scan_crop, self._scan_full = crop, full
             self._scan_box, self._scan_name = box, name
