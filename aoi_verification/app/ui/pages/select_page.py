@@ -24,7 +24,7 @@ from typing import Optional
 from PyQt6.QtCore import (QByteArray, QPoint, QPropertyAnimation, QRect,
                           Qt, pyqtSignal)
 from PyQt6.QtGui import QFontMetrics, QKeySequence, QShortcut
-from PyQt6.QtWidgets import (QFrame, QGraphicsOpacityEffect, QHBoxLayout,
+from PyQt6.QtWidgets import (QComboBox, QFrame, QGraphicsOpacityEffect, QHBoxLayout,
                              QLabel, QProgressBar, QScrollArea, QSizePolicy,
                              QSlider, QSplitter, QVBoxLayout, QWidget)
 
@@ -485,6 +485,7 @@ class SelectPage(ProgressRowMixin, QWidget):
         # 3 col × (120 thumb + 14 padding) + spacing + 패널 padding 을 담을 최소
         # 너비.  좁은 창에선 세로 스택으로 reflow 되어 무관.
         self.left_panel.setMinimumWidth(220)
+        self._build_slot_jump()
         self._h_splitter.addWidget(self.left_panel)
 
         # CENTER ------------------------------------------------------
@@ -625,6 +626,74 @@ class SelectPage(ProgressRowMixin, QWidget):
         # Ctrl+A — 좌측 후보 패널 전체 선택 (#2).
         QShortcut(QKeySequence.StandardKey.SelectAll, self,
                   activated=self._select_all_candidates)
+
+    def _build_slot_jump(self) -> None:
+        """후보 패널 머리 아래 '슬롯 고르기' 줄 — **한 슬롯 모드에서만** 보인다.
+
+        사진이 많아(`SELECT_SINGLE_SLOT_THRESHOLD`) 후보 패널이 지금 슬롯만 보여 줄 때,
+        예전에는 다른 슬롯으로 갈 길이 없었다 — 큐 맨 앞 슬롯을 다 끝내기 전에는 다른
+        슬롯 사진을 볼 수도 고를 수도 없었다(실측 신고: KLA 처럼 결함이 아주 많은
+        웨이퍼에서 Defect 추출 때 '슬롯 선택이 안 된다').  고른 슬롯의 남은 사진을
+        큐 앞으로 옮길 뿐이라 결정·되돌리기 기록은 그대로다."""
+        host = QWidget(self.left_panel)
+        host.setProperty("role", "rowHost")
+        row = QHBoxLayout(host)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(8)
+        label = QLabel(i18n.KO.SLOT_JUMP_LABEL, host)
+        label.setProperty("role", "muted")
+        self.slot_jump = QComboBox(host)
+        self.slot_jump.setToolTip(i18n.KO.SLOT_JUMP_TOOLTIP)
+        self.slot_jump.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.slot_jump.setMinimumContentsLength(8)
+        self.slot_jump.activated.connect(self._on_slot_jump)
+        row.addWidget(label)
+        row.addWidget(self.slot_jump, 1)
+        host.setVisible(False)
+        self.left_panel.layout().insertWidget(1, host)
+        self._slot_jump_host = host
+        self._slot_jump_key: tuple = ()
+
+    def _refresh_slot_jump(self) -> None:
+        """슬롯 고르기 목록을 지금 큐에 맞춘다 — 남은 사진이 있는 슬롯만."""
+        host = getattr(self, "_slot_jump_host", None)
+        if host is None:
+            return
+        remaining: dict[str, int] = defaultdict(int)
+        if self._state is not None:
+            for it in self._state.queue:
+                remaining[it.slot] += 1
+        cur = self._current.slot if self._current is not None else None
+        show = self._is_single_slot_mode() and len(remaining) > 1
+        host.setVisible(show)
+        if not show:
+            return
+        key = (tuple(sorted(remaining.items())), cur)
+        if key == self._slot_jump_key:
+            return
+        self._slot_jump_key = key
+        self.slot_jump.blockSignals(True)
+        self.slot_jump.clear()
+        for slot in sorted(remaining):
+            self.slot_jump.addItem(
+                i18n.KO.SLOT_JUMP_ITEM_FMT.format(slot=slot, n=remaining[slot]), slot)
+        idx = self.slot_jump.findData(cur)
+        if idx >= 0:
+            self.slot_jump.setCurrentIndex(idx)
+        self.slot_jump.blockSignals(False)
+
+    def _on_slot_jump(self, index: int) -> None:
+        """고른 슬롯의 남은 사진을 큐 맨 앞으로(순서 유지) — 그 슬롯의 첫 장이 가운데로."""
+        if self._state is None:
+            return
+        slot = self.slot_jump.itemData(index)
+        if not slot or (self._current is not None and self._current.slot == slot):
+            return
+        q = self._state.queue
+        q[:] = [it for it in q if it.slot == slot] + [it for it in q if it.slot != slot]
+        self.left_panel.clear_inline_selection()
+        self._advance_to_next()
 
     def _select_all_candidates(self) -> None:
         if self.isVisible():
@@ -840,6 +909,7 @@ class SelectPage(ProgressRowMixin, QWidget):
                 {k: list(v) for k, v in self._state.targets.items()})
         self._refresh_excluded_button()
         self._refresh_end_selection_button()
+        self._refresh_slot_jump()
 
     def _refresh_end_selection_button(self) -> None:
         """큐에 미결정 사진이 남아 있으면 활성, 비면 비활성."""
@@ -892,6 +962,7 @@ class SelectPage(ProgressRowMixin, QWidget):
             self._update_slots_incremental({prev_slot})
             self._refresh_excluded_button()
             self._refresh_end_selection_button()
+            self._refresh_slot_jump()
             self.finished.emit()
             return
         self._current = self._state.queue[0]
@@ -905,6 +976,7 @@ class SelectPage(ProgressRowMixin, QWidget):
                                        dropped_left=(self._current,))
         self._refresh_excluded_button()
         self._refresh_end_selection_button()
+        self._refresh_slot_jump()
 
     def _already_decided_count(self) -> int:
         if self._state is None:

@@ -117,6 +117,48 @@ def test_single_slot_mode_switches_on_slot_change(qapp, isolated_cache):
     sp.deleteLater()
 
 
+def test_single_slot_mode_can_jump_to_another_slot(qapp, isolated_cache):
+    """사진이 많아 지금 슬롯만 보일 때도 **다른 슬롯을 고를 수 있어야** 한다.
+
+    예전에는 큐 맨 앞 슬롯을 다 끝내기 전에는 다른 슬롯 사진을 볼 길이 없었다
+    (Defect 추출에서 KLA 처럼 결함이 아주 많을 때 '슬롯 선택이 안 된다' 신고)."""
+    from aoi_verification.app.ui.pages.select_page import SelectPage
+    sp = SelectPage()
+    sp.show()
+    QApplication.processEvents()
+    sp.load_state(queue=_build_queue([("S1", 200), ("S2", 150), ("S3", 5)]))
+    assert sp._is_single_slot_mode() is True
+    assert sp._slot_jump_host.isVisibleTo(sp)
+    slots = [sp.slot_jump.itemData(i) for i in range(sp.slot_jump.count())]
+    assert slots == ["S1", "S2", "S3"]
+    assert sp.slot_jump.currentData() == "S1"
+
+    sp._on_slot_jump(slots.index("S3"))
+    assert sp._current.slot == "S3"
+    assert set(sp.left_panel._sections.keys()) == {"S3"}
+    assert sp.slot_jump.currentData() == "S3"
+    # 사진은 하나도 사라지거나 늘지 않는다 — 순서만 바뀐다.
+    assert len(sp._state.queue) == 355
+    # 결정·되돌리기는 그대로 동작한다.
+    first = sp._current
+    sp._decide("verify")
+    assert first in sp._state.targets["S3"]
+    sp._undo()
+    assert sp._current is first
+    sp.deleteLater()
+
+
+def test_slot_jump_hidden_when_all_slots_are_shown(qapp, isolated_cache):
+    from aoi_verification.app.ui.pages.select_page import SelectPage
+    sp = SelectPage()
+    sp.show()
+    QApplication.processEvents()
+    sp.load_state(queue=_build_queue([("S1", 5), ("S2", 5)]))
+    assert sp._is_single_slot_mode() is False
+    assert not sp._slot_jump_host.isVisibleTo(sp)
+    sp.deleteLater()
+
+
 # ===========================================================================
 # ★ 검증 대상(우) 패널은 슬롯이 넘어가도 **유지된다**
 #
