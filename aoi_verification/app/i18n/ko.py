@@ -692,6 +692,9 @@ SLOT_SELECT_NONE = "전체 해제"
 SLOT_SELECT_TILE_COUNT_FMT = "기준 {ref} · 검증 {val}"
 SLOT_SELECT_TILE_COUNT_PENDING = "확인 중…"
 SLOT_SELECT_TILE_COUNT_NONE = "—"      # 검증 폴더에 그 슬롯이 없다
+# KLA 폴더 타일 이름 — 폴더명(검사 시각) 대신 정보파일의 WaferID·Slot 번호(사용자 요청).
+SLOT_SELECT_KLA_FMT = "{wafer_id}  ·  슬롯 #{slot}"
+SLOT_MAP_FOLDER_TIP_FMT = "폴더: {folder}"
 # 진행 범위 타일 — 상태를 옆 라벨이 아니라 타일 자신이 말한다.
 # ── 실행 옵션 카드 — '자동화 수준' + '진행 범위' 를 한 카드에 담는다.
 RUN_OPTIONS_TITLE = "실행 옵션"

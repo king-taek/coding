@@ -172,7 +172,12 @@ class SlotMappingDialog(QDialog):
         if method == "none":
             return f"{name}{i18n.KO.SLOT_MAP_NO_PHOTO_LINE}"
         if slot:
-            return f"{name}\n→ {slot}  ({_METHOD_LABEL.get(method, method)})"
+            # KLA 는 폴더명(검사 시각)이 아니라 정보파일의 WaferID·Slot# 로 보여 준다
+            # (사용자 요청) — 폴더명은 툴팁에 남긴다(`_make_item`).
+            no = info.get("slot_no")
+            head = (i18n.KO.SLOT_SELECT_KLA_FMT.format(wafer_id=slot, slot=no)
+                    if no else slot)
+            return f"{head}\n({_METHOD_LABEL.get(method, method)})"
         if method == "unread":
             return f"{name}{i18n.KO.SLOT_MAP_UNREAD_LINE}"
         return name
@@ -180,6 +185,7 @@ class SlotMappingDialog(QDialog):
     def _make_item(self, name: str, meta: dict) -> QListWidgetItem:
         item = QListWidgetItem(self._label_for(name, meta))
         item.setData(Qt.ItemDataRole.UserRole, name)
+        item.setToolTip(i18n.KO.SLOT_MAP_FOLDER_TIP_FMT.format(folder=name))
         ic = self._icon_for(name, meta)
         if ic is not None:
             item.setIcon(ic)
