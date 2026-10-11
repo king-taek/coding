@@ -85,3 +85,77 @@ def test_wafer_id_is_uppercased(tmp_path):
     d = _folder(tmp_path, "s9", "a.001",
                 text='WaferID "w6459076xyg1";\n')
     assert kla_info.read_wafer_id(d) == "W6459076XYG1"
+
+
+def test_reads_slot_number_from_the_same_header(tmp_path):
+    """`Slot 10;` — 카세트 슬롯 번호.  슬롯 고르기 화면이 WaferID 와 함께 보여 준다."""
+    d = _folder(tmp_path, "s9", "a.001")
+    assert kla_info.read_header_ids(d) == ("W6459076XYG1", "10")
+    assert kla_info.read_slot_no(d) == "10"
+
+
+def test_slot_number_absent_is_none(tmp_path):
+    d = _folder(tmp_path, "s10", "a.001", text=_HEADER.replace("Slot 10;\n", ""))
+    assert kla_info.read_header_ids(d) == ("W6459076XYG1", None)
+
+
+def test_non_kla_folder_has_no_ids(tmp_path):
+    d = _folder(tmp_path, "s11", None)
+    (d / "a.jpg").write_bytes(b"x")
+    assert kla_info.read_header_ids(d) == (None, None)
+
+
+# ---------------------------------------------------------------------------
+# '일부 슬롯만 진행' + KLA — 고른 웨이퍼의 짝 폴더가 스캔에서 빠지면 안 된다
+# ---------------------------------------------------------------------------
+def _kla_lot(tmp_path):
+    """기준 = KLA(폴더명 = 검사 시각), 검증 = Camtek(폴더명 = WaferID)."""
+    ref, val = tmp_path / "ref", tmp_path / "val"
+    for slot, (ts, wid) in enumerate([("2026-08-02-23-09_1", "WAAA0001"),
+                                      ("2026-08-02-23-10_2", "WAAA0002"),
+                                      ("2026-08-02-23-11_3", "WAAA0003")], start=1):
+        d = ref / ts
+        d.mkdir(parents=True)
+        (d / f"x_LOT_{wid}.001").write_text(
+            _HEADER.replace("W6459076XYG1", wid).replace("Slot 10;", f"Slot {slot};"),
+            encoding="utf-8")
+        (d / f"{wid}_2_0_23_1.jpg").write_bytes(b"x")
+        v = val / wid
+        v.mkdir(parents=True)
+        (v / "1.jpg").write_bytes(b"x")
+    return ref, val
+
+
+def test_subset_scan_keeps_the_kla_partner_folder(tmp_path):
+    """KLA 폴더를 골랐을 때 검증 쪽 WaferID 폴더도 함께 열린다.
+
+    예전에는 이름으로만 걸러 짝이 스캔에서 빠졌고, KLA 해석이 짝을 못 찾아 그 웨이퍼가
+    '기준 전용' 으로 떨어져 매칭이 통째로 사라졌다."""
+    from aoi_verification.app.models.slot import merge_unmatched_by_wafer_id, scan
+    ref, val = _kla_lot(tmp_path)
+    sr = scan(ref, val, only={"2026-08-02-23-10_2"})
+    assert sorted(sr.slots) == ["2026-08-02-23-10_2", "WAAA0002"]
+    merge_unmatched_by_wafer_id(
+        sr, {"2026-08-02-23-10_2": kla_info.read_wafer_id(ref / "2026-08-02-23-10_2")}, {})
+    assert sr.common_slot_names == ["WAAA0002"]
+
+
+def test_subset_scan_finds_kla_partner_on_the_val_side(tmp_path):
+    """반대로 검증이 KLA 여도 같다 — 고른 기준 슬롯(WaferID)의 KLA 폴더를 찾는다."""
+    from aoi_verification.app.models.slot import scan
+    ref, val = _kla_lot(tmp_path)
+    sr = scan(val, ref, only={"WAAA0003"})
+    assert sorted(sr.slots) == ["2026-08-02-23-11_3", "WAAA0003"]
+
+
+def test_subset_scan_reads_nothing_when_names_pair_up(tmp_path, monkeypatch):
+    """이름으로 짝이 다 맞으면(일반 Camtek↔Camtek) 정보파일을 하나도 읽지 않는다."""
+    from aoi_verification.app.models import slot as slot_mod
+    for side in ("ref", "val"):
+        for n in ("S1", "S2"):
+            (tmp_path / side / n).mkdir(parents=True)
+    calls = []
+    monkeypatch.setattr(kla_info, "read_wafer_id", lambda d: calls.append(d))
+    sr = slot_mod.scan(tmp_path / "ref", tmp_path / "val", only={"S1"})
+    assert sorted(sr.slots) == ["S1"]
+    assert calls == []

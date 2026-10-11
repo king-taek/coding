@@ -855,12 +855,14 @@ class MainWindow(QMainWindow):
         # 메타 작성 + 다음 단계 — OCR 결과(있으면)를 반영해 최종 메타를 만든다.
         # 판독에 성공한 폴더는 **사진이 없어도**(image=None) slot명을 갖는다 → 수동
         # 매핑에서 미리보기만 없고 선택은 가능하다.
-        def build_meta(names, is_kla, info, ocr, img0) -> dict:
+        def build_meta(names, is_kla, info, ocr, img0, is_ref) -> dict:
             meta: dict[str, dict] = {}
             for n in names:
                 img = img0.get(n)
                 if is_kla and n in info:
-                    meta[n] = {"slot": info[n], "method": "info", "image": img}
+                    d = dir_of(n, is_ref)
+                    meta[n] = {"slot": info[n], "method": "info", "image": img,
+                               "slot_no": kla_info.read_slot_no(d) if d else None}
                 elif is_kla and n in ocr:
                     meta[n] = {"slot": ocr[n], "method": "ocr", "image": img}
                 elif img is None:
@@ -894,9 +896,9 @@ class MainWindow(QMainWindow):
                         add(w, n)
             self._kla_folders = kla
             self._slot_meta_ref = build_meta(list(sr.ref_only), do_ref, info_ref,
-                                             ocr_ref, img0_ref)
+                                             ocr_ref, img0_ref, True)
             self._slot_meta_val = build_meta(list(sr.val_only), do_val, info_val,
-                                             ocr_val, img0_val)
+                                             ocr_val, img0_val, False)
             self._ocr_worker = None
             on_done()
 
@@ -956,6 +958,9 @@ class MainWindow(QMainWindow):
                 ImageItem(slot=ref_name, path=it.path, side="val")
                 for it in val_slot.val_images
             ]
+            # 검증 폴더 경로도 옮긴다 — 빠뜨리면 그 슬롯의 검증 쪽 정보(슬롯 번호·
+            # 정보파일)를 나중에 찾을 수 없다(`merge_unmatched_by_wafer_id` 와 같은 규칙).
+            ref_slot.val_dir = val_slot.val_dir
             sr.slots.pop(val_name, None)
         sr.ref_only = [s for s in sr.ref_only if s not in ref_used]
         sr.val_only = [s for s in sr.val_only if s not in val_used]
@@ -2003,6 +2008,10 @@ class MainWindow(QMainWindow):
         어느 장비의 번호인지 알 수 없다).  같은 웨이퍼라도 두 장비에서 카세트 위치가
         다를 수 있어 한쪽 값으로 단정하지 않는다.
 
+        KLA 폴더에는 ``WaferInfo.ini`` 가 없다 — 정보파일 헤더의 ``Slot N;`` 이 같은
+        번호다(``kla_info.read_slot_no``).  예전에는 이걸 보지 않아 KLA 쪽 웨이퍼는
+        엑셀에 번호가 빠졌다.
+
         못 읽은 슬롯은 아예 넣지 않는다 → 엑셀은 slot명만 찍는다.  파일 접근은 슬롯당
         최대 두 번(INI 1개씩)이고 :func:`read_active_slot` 이 폴더별로 캐시하므로,
         결과↔검토를 오가며 이 함수가 다시 돌아도 왕복이 늘지 않는다.
@@ -2012,10 +2021,15 @@ class MainWindow(QMainWindow):
         out: dict[str, str] = {}
         if self._scan is None:
             return out
+        # KLA 로 해석된 슬롯만 정보파일을 본다 — 다른 폴더까지 보면 사진 수천 장 폴더를
+        # 슬롯마다 한 번 더 훑는다(정보파일 후보를 찾는 열거).
+        kla_slots = set(getattr(self, "_kla_folders", {}) or {})
         for name, slot in self._scan.slots.items():
             nums: list[str] = []
             for d in (slot.ref_dir, slot.val_dir):
                 n = read_active_slot(Path(d)) if d else None
+                if n is None and d and name in kla_slots:
+                    n = kla_info.read_slot_no(Path(d))
                 if n and n not in nums:
                     nums.append(n)
             if nums:
