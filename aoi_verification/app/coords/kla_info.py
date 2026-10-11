@@ -26,7 +26,7 @@ from .wafer_geometry import kla_geometry
 from .ini_text import decode_ini_bytes, read_ini_text
 
 __all__ = ["resolve", "load_folder", "load_folder_raw", "read_wafer_id",
-           "peek_die_pitch"]
+           "read_slot_no", "read_header_ids", "peek_die_pitch"]
 
 # 정보파일 후보에서 제외할 확장자 — 사진/패스/설정/스크립트.
 _NON_INFO_SUFFIXES = ('.jpg', '.jpeg', '.pass', '.ini', '.py')
@@ -51,6 +51,8 @@ _TIFF_PAT = re.compile(r'TiffFileName\s+(\S+)', re.IGNORECASE)
 
 # WaferID "W6459076XYG1";  — 정보파일 **헤더**의 slot명(WaferID) 줄.
 _WAFER_ID_PAT = re.compile(r'Wafer\s*ID\s+"([^"]*)"', re.IGNORECASE)
+# Slot 10;  — 같은 헤더의 **카세트 슬롯 번호**(WaferID 바로 아래 줄).
+_SLOT_PAT = re.compile(r'^\s*Slot\s+(\d+)\s*;', re.IGNORECASE | re.MULTILINE)
 # WaferID 는 헤더(파일 앞부분)에 있으므로 앞부분만 읽는다 — DefectList 가 큰 파일도 저렴하게.
 _HEAD_BYTES = 65536
 
@@ -94,23 +96,49 @@ def _info_candidates(folder: Path) -> list[Path]:
 
 
 @lru_cache(maxsize=256)
-def read_wafer_id(folder: Path) -> Optional[str]:
-    """폴더의 KLA 정보파일에서 ``WaferID "XXXX";`` 를 읽어 대문자로 반환(없으면 None).
+def read_header_ids(folder: Path) -> tuple[Optional[str], Optional[str]]:
+    """정보파일 헤더의 ``(WaferID, Slot)`` — **같은 파일**에서 함께 읽는다.
 
-    사진과 무관하게 읽히므로 **사진이 한 장도 없는 폴더도 식별**된다 — 파일명 추측이나
-    OCR 로는 불가능했던 경우다.  후보 파일을 순서대로 시도해 첫 성공값을 쓴다."""
+    KLA 폴더명은 검사 시각(``2026-08-02-23-09_4``)이라 어느 웨이퍼인지 알 수 없다 —
+    슬롯을 고르는 화면은 이 두 값으로 웨이퍼를 보여 준다.  KLA 가 아니면 ``(None, None)``.
+
+    후보 파일을 순서대로 시도해 WaferID 가 있는 첫 파일을 쓴다(슬롯 번호도 그 파일의
+    값이다 — 다른 파일의 번호를 섞으면 다른 웨이퍼의 번호가 붙는다)."""
     for p in _info_candidates(folder):
         try:
             with p.open("rb") as fh:
                 head = fh.read(_HEAD_BYTES)
         except OSError:
             continue
-        m = _WAFER_ID_PAT.search(decode_ini_bytes(head))
-        if m:
-            wid = m.group(1).strip().upper()
-            if wid:
-                return wid
-    return None
+        text = decode_ini_bytes(head)
+        m = _WAFER_ID_PAT.search(text)
+        if not m:
+            continue
+        wid = m.group(1).strip().upper()
+        if not wid:
+            continue
+        sm = _SLOT_PAT.search(text)
+        return wid, (str(int(sm.group(1))) if sm else None)
+    return None, None
+
+
+def read_wafer_id(folder: Path) -> Optional[str]:
+    """폴더의 KLA 정보파일에서 ``WaferID "XXXX";`` 를 읽어 대문자로 반환(없으면 None).
+
+    사진과 무관하게 읽히므로 **사진이 한 장도 없는 폴더도 식별**된다 — 파일명 추측이나
+    OCR 로는 불가능했던 경우다.  후보 파일을 순서대로 시도해 첫 성공값을 쓴다."""
+    return read_header_ids(Path(folder))[0]
+
+
+# 예전에는 이 함수 자체가 캐시였다 — 호출부(테스트 픽스처)의 `cache_clear()` 를 그대로 받는다.
+read_wafer_id.cache_clear = read_header_ids.cache_clear
+
+
+def read_slot_no(folder: Path) -> Optional[str]:
+    """KLA 정보파일 헤더의 ``Slot N;`` — 카세트 슬롯 번호(문자열).  없으면 None.
+
+    Camtek 의 ``WaferInfo.ini`` ``ActiveSlot`` 과 같은 뜻이다(엑셀 slot# 표기)."""
+    return read_header_ids(Path(folder))[1]
 
 
 def peek_die_pitch(folder: Path) -> Optional[tuple[float, float]]:

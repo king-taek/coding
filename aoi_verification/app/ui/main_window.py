@@ -67,8 +67,6 @@ PHASE_A_MATCH = "A_match"
 # 스캔 워커가 도는 동안 파이썬 참조를 붙잡아 두는 곳 — 지역 변수로만 두면 함수가
 # 끝나는 순간 GC 가 QThread 를 파괴한다(`pages/setup_page.py` 의 `_LIVE_DIE_SCANS`).
 _LIVE_SCANS: set = set()
-# 재리뷰 계획 워커도 같다 — 창(부모)이 먼저 죽어도 스레드가 끝날 때까지 살아 있어야 한다.
-_LIVE_REREVIEW: set = set()
 
 
 class _FolderScan(QThread):
@@ -857,12 +855,14 @@ class MainWindow(QMainWindow):
         # 메타 작성 + 다음 단계 — OCR 결과(있으면)를 반영해 최종 메타를 만든다.
         # 판독에 성공한 폴더는 **사진이 없어도**(image=None) slot명을 갖는다 → 수동
         # 매핑에서 미리보기만 없고 선택은 가능하다.
-        def build_meta(names, is_kla, info, ocr, img0) -> dict:
+        def build_meta(names, is_kla, info, ocr, img0, is_ref) -> dict:
             meta: dict[str, dict] = {}
             for n in names:
                 img = img0.get(n)
                 if is_kla and n in info:
-                    meta[n] = {"slot": info[n], "method": "info", "image": img}
+                    d = dir_of(n, is_ref)
+                    meta[n] = {"slot": info[n], "method": "info", "image": img,
+                               "slot_no": kla_info.read_slot_no(d) if d else None}
                 elif is_kla and n in ocr:
                     meta[n] = {"slot": ocr[n], "method": "ocr", "image": img}
                 elif img is None:
@@ -896,9 +896,9 @@ class MainWindow(QMainWindow):
                         add(w, n)
             self._kla_folders = kla
             self._slot_meta_ref = build_meta(list(sr.ref_only), do_ref, info_ref,
-                                             ocr_ref, img0_ref)
+                                             ocr_ref, img0_ref, True)
             self._slot_meta_val = build_meta(list(sr.val_only), do_val, info_val,
-                                             ocr_val, img0_val)
+                                             ocr_val, img0_val, False)
             self._ocr_worker = None
             on_done()
 
@@ -958,6 +958,9 @@ class MainWindow(QMainWindow):
                 ImageItem(slot=ref_name, path=it.path, side="val")
                 for it in val_slot.val_images
             ]
+            # 검증 폴더 경로도 옮긴다 — 빠뜨리면 그 슬롯의 검증 쪽 정보(슬롯 번호·
+            # 정보파일)를 나중에 찾을 수 없다(`merge_unmatched_by_wafer_id` 와 같은 규칙).
+            ref_slot.val_dir = val_slot.val_dir
             sr.slots.pop(val_name, None)
         sr.ref_only = [s for s in sr.ref_only if s not in ref_used]
         sr.val_only = [s for s in sr.val_only if s not in val_used]
@@ -1046,13 +1049,8 @@ class MainWindow(QMainWindow):
         worker = _FolderScan(self._scan_token, inp.ref_root, inp.val_root,
                              only=(getattr(inp, "extract_slots", None)
                                    if self._is_extract()
-                                   # 재리뷰는 LOT 하나 — 한쪽 스캔은 LOT 별 목록을 받는다.
-                                   else ([inp.selected_slots]
-                                         if inp.selected_slots is not None else None)
-                                   if self._is_rereview()
                                    else getattr(inp, "selected_slots", None)),
-                             # 재리뷰도 한쪽(Scanresult LOT)만 훑는다 — 검증 칸은 Map 폴더다.
-                             extract=self._is_extract() or self._is_rereview(),
+                             extract=self._is_extract(),
                              roots=getattr(inp, "extract_roots", None))
         worker.signals.progress.connect(self._on_scan_progress)
         worker.signals.done.connect(self._on_scan_done)
@@ -1113,9 +1111,6 @@ class MainWindow(QMainWindow):
         #   한때 여기서 예시 사진과 함께 물었지만 사용자 결정으로 '항상 뺀다' 로
         #   돌아갔다.
         self._scan = sr
-        if self._is_rereview():
-            self._rereview_after_scan(sr)
-            return
         if self._is_extract():
             self._extract_after_scan(sr)
             return
@@ -1277,10 +1272,6 @@ class MainWindow(QMainWindow):
         self._scan_token += 1
         w = self._scan_worker
         self._scan_worker = None
-        rw = self.__dict__.get("_rereview_worker")
-        if rw is not None:
-            rw.stop()
-            self._rereview_worker = None
         self._stage = ""
         if w is not None:
             w.stop()
@@ -1368,7 +1359,7 @@ class MainWindow(QMainWindow):
     def _enter_stage1_phase_a(self) -> None:
         assert self._scan is not None and self._input is not None
         # 추출은 짝이 없다 — 한쪽 스캔의 슬롯 전부가 후보다.
-        one_side = self._is_extract() or self._is_rereview()
+        one_side = self._is_extract()
         names = (sorted(self._scan.slots) if one_side
                  else self._scan.common_slot_names)
         slots = [self._scan.slots[n] for n in names]
@@ -1381,10 +1372,6 @@ class MainWindow(QMainWindow):
         # ★ 추출은 묻지도 기록하지도 않는다 — 그 기록은 '매칭에 쓸 기준 사진' 이다.
         restored = ({} if one_side
                     else self._maybe_restore_ref_selection(queue))
-        # 재리뷰면 선별 화면의 이름(Good/Reject)·die 표시를 바꾼다 — 다른 모드면 되돌린다.
-        self._select_page.set_rereview(
-            self._is_rereview(),
-            die_of=self._rereview_die_of() if self._is_rereview() else None)
         self._select_page.load_state(
             queue=queue,
             targets=restored, excluded={}, history=[],
@@ -1400,9 +1387,6 @@ class MainWindow(QMainWindow):
         self._autosave()
 
     def _on_select_finished(self) -> None:
-        if self._phase == PHASE_A_SELECT and self._is_rereview():
-            self._finish_rereview()
-            return
         if self._phase == PHASE_A_SELECT and self._is_extract():
             self._on_extract_select_finished()
             return
@@ -1641,12 +1625,6 @@ class MainWindow(QMainWindow):
         매치(`_merge_matches`)로 화면을 다시 만들어 사용자가 검토에서 한 스왑·매치
         없음 표시를 **전부 지워 버린다**.  검토 결과(`_reviewed_matches`)를 기반으로,
         '매치 없음' 표시까지 복원해서 들어간다."""
-        if self._is_rereview():
-            # 재리뷰는 매치 검토가 없다 — 판정을 고치러 **선별 화면**으로 돌아간다.
-            # 선별 상태(Reject/Good 패널)는 그대로 남아 있다.
-            self._phase = PHASE_A_SELECT
-            self._show_page(self._select_page)
-            return
         if self._match_review_page is None or self._match_page is None:
             return
         # '매치 없음' 표시까지 되살리려면 그 행들이 있어야 하므로 **전체 목록**을
@@ -1872,117 +1850,6 @@ class MainWindow(QMainWindow):
             self._new_session()
 
     # ==================================================================
-    # AVAGO 재리뷰 — 1차 리뷰 맵의 Reject die 사진을 빼고 한 장씩 Good/Reject
-    # ==================================================================
-    # 흐름: 설정(Scanresult LOT + Map 폴더) → 스캔 → 맵 대조(워커) → 요약·경고 → 썸네일
-    # → 선별(매칭과 같은 화면, → Reject / ← Good) → 결과 화면 → 엑셀.  세션 자동 저장·
-    # 기준 사진 기록은 하지 않는다(추출과 같은 이유 — `_autosave`).
-    def _is_rereview(self) -> bool:
-        return bool(getattr(self._input, "rereview", False))
-
-    def _rereview_after_scan(self, sr: ScanResult) -> None:
-        """스캔 직후 — 웨이퍼마다 맵을 대조한다(백그라운드)."""
-        from ..workers.rereview_planner import RereviewPlanner
-
-        for name in [n for n, s in sr.slots.items() if not s.ref_images]:
-            sr.slots.pop(name)
-        if not sr.slots:
-            self._loading.hide_overlay()
-            wakelock.release()
-            sheets.warn(self, i18n.KO.APP_TITLE, i18n.KO.REREVIEW_NONE_FOUND)
-            return
-        jobs = [(n, s.ref_dir, [it.path for it in s.ref_images])
-                for n, s in sorted(sr.slots.items())]
-        self._loading.set_progress(0, len(jobs), i18n.KO.LOAD_REREVIEW_PLAN)
-        # 부모 없이 만들고 모듈 집합이 수명을 잡는다 — 창을 닫아도 도는 스레드가 지워지지 않는다.
-        token = self._scan_token
-        map_dir = None if self._input.rereview_no_map else self._input.val_root
-        worker = RereviewPlanner(jobs, map_dir, token=token,
-                                 reject_dir=self._input.rereview_reject_dir)
-        self._rereview_worker = worker
-        _LIVE_REREVIEW.add(worker)
-        worker.finished.connect(lambda w=worker: _LIVE_REREVIEW.discard(w))
-        worker.signals.progress.connect(self._on_rereview_progress)
-        worker.signals.done.connect(self._on_rereview_planned)
-        worker.start()
-
-    def _on_rereview_progress(self, token: int, done: int, total: int) -> None:
-        if token != self._scan_token:
-            return                                 # 옛 세대의 늦은 진행률
-        self._loading.set_progress(done, total, i18n.KO.LOAD_REREVIEW_PLAN)
-
-    def _on_rereview_planned(self, token: int, plans: dict) -> None:
-        if token != self._scan_token or not self._is_rereview():
-            return                                 # 취소·새 세션 — 옛 계획은 버린다
-        self._rereview_worker = None
-        sr = self._scan
-        if sr is None or self._input is None:
-            return                                 # 그 사이 취소됐다
-        if any(name not in sr.slots for name in plans):
-            return
-        self._rereview_plans = plans
-        # 선별 대상 = 재리뷰 사진만.  뺀 사진은 썸네일도 만들지 않는다.
-        for name, plan in plans.items():
-            keep = set(plan.review)
-            slot = sr.slots[name]
-            slot.ref_images = [it for it in slot.ref_images if it.path in keep]
-        n_total = sum(len(p.review) + len(p.excluded) for p in plans.values())
-        n_excl = sum(len(p.excluded) for p in plans.values())
-        n_review = n_total - n_excl
-        if self._input.rereview_no_map and self._input.rereview_reject_dir is None:
-            body = i18n.KO.REREVIEW_PLAN_NO_MAP_FMT.format(wafers=len(plans), total=n_total)
-        else:
-            fmt = (i18n.KO.REREVIEW_PLAN_SRC_FMT if self._input.rereview_reject_dir is not None
-                   else i18n.KO.REREVIEW_PLAN_FMT)
-            body = fmt.format(wafers=len(plans), total=n_total, excluded=n_excl, review=n_review)
-        from ..coords.rereview import warning_lines
-        warns = warning_lines(plans)
-        if warns:
-            body += "\n\n" + i18n.KO.REREVIEW_PLAN_WARN_HEAD + "\n" + "\n".join(
-                "• " + w for w in warns)
-        self._loading.hide_overlay()
-        choice = sheets.choose(
-            self, i18n.KO.REREVIEW_PLAN_TITLE, body,
-            [("go", i18n.KO.REREVIEW_PLAN_CONTINUE, "primary"),
-             ("back", i18n.KO.REREVIEW_PLAN_CANCEL, "ghost")],
-            default="go")
-        if choice != "go":
-            self._new_session()
-            return
-        if n_review == 0:                          # 볼 사진이 없다 — 바로 결과로
-            # 선별 페이지는 재사용되므로 이전 LOT 의 판정이 남아 있다 — 읽지 않는다.
-            self._finish_rereview(from_select=False)
-            return
-        self._continue_start_after_scan(
-            sorted(n for n, s in sr.slots.items() if s.ref_images))
-
-    def _rereview_die_of(self) -> dict:
-        """{사진 경로 → 장비 화면 die (col, row)} — 선별 화면 표시용."""
-        out: dict = {}
-        for plan in getattr(self, "_rereview_plans", {}).values():
-            out.update(plan.die_of)
-        return out
-
-    def _finish_rereview(self, from_select: bool = True) -> None:
-        """선별 끝 — 오른쪽(Reject)·제외(Good)를 결과로 묶어 결과 화면에.
-
-        ``from_select=False`` 는 볼 사진이 0장이라 선별을 거치지 않은 경우 — 선별 페이지가
-        들고 있는 상태는 이전 세션 것이라 읽지 않는다."""
-        from ..models.result import rereview_result
-
-        assert self._input is not None
-        st = self._select_page.get_state() if from_select else None
-        rejects = {k: [it.path for it in v] for k, v in (st.targets if st else {}).items()}
-        goods = {k: [it.path for it in v] for k, v in (st.excluded if st else {}).items()}
-        result = rereview_result(self._input.ref_machine,
-                                 getattr(self, "_rereview_plans", {}), rejects, goods,
-                                 slot_numbers=self._slot_numbers())
-        self._result_page.show_result(result, template_path=self._template_used,
-                                      target_path=self._working_xlsx)
-        self._show_page(self._result_page)
-        self._phase = PHASE_NONE
-
-    # ==================================================================
     # Result
     # ==================================================================
     def _finish_session(self) -> None:
@@ -2141,6 +2008,10 @@ class MainWindow(QMainWindow):
         어느 장비의 번호인지 알 수 없다).  같은 웨이퍼라도 두 장비에서 카세트 위치가
         다를 수 있어 한쪽 값으로 단정하지 않는다.
 
+        KLA 폴더에는 ``WaferInfo.ini`` 가 없다 — 정보파일 헤더의 ``Slot N;`` 이 같은
+        번호다(``kla_info.read_slot_no``).  예전에는 이걸 보지 않아 KLA 쪽 웨이퍼는
+        엑셀에 번호가 빠졌다.
+
         못 읽은 슬롯은 아예 넣지 않는다 → 엑셀은 slot명만 찍는다.  파일 접근은 슬롯당
         최대 두 번(INI 1개씩)이고 :func:`read_active_slot` 이 폴더별로 캐시하므로,
         결과↔검토를 오가며 이 함수가 다시 돌아도 왕복이 늘지 않는다.
@@ -2150,10 +2021,15 @@ class MainWindow(QMainWindow):
         out: dict[str, str] = {}
         if self._scan is None:
             return out
+        # KLA 로 해석된 슬롯만 정보파일을 본다 — 다른 폴더까지 보면 사진 수천 장 폴더를
+        # 슬롯마다 한 번 더 훑는다(정보파일 후보를 찾는 열거).
+        kla_slots = set(getattr(self, "_kla_folders", {}) or {})
         for name, slot in self._scan.slots.items():
             nums: list[str] = []
             for d in (slot.ref_dir, slot.val_dir):
                 n = read_active_slot(Path(d)) if d else None
+                if n is None and d and name in kla_slots:
+                    n = kla_info.read_slot_no(Path(d))
                 if n and n not in nums:
                     nums.append(n)
             if nums:
@@ -2173,11 +2049,6 @@ class MainWindow(QMainWindow):
         여기서 폴더를 훑기 시작하면 설정 화면 die 안내가 겪은 그 정지가 재현된다."""
         from ..models.lot_info import read_lot_info
 
-        if getattr(inp, "rereview", False):
-            # 재리뷰 — 사용자가 적은 LOT명(S/M) + 'AVAGO 재리뷰'.  파일명 금지 문자는 _.
-            import re as _re
-            lot = _re.sub(r'[\\/:*?"<>|]', "_", inp.ref_machine).strip() or "AOI"
-            return i18n.KO.REREVIEW_FILE_TITLE_FMT.format(lot=lot)
         if getattr(inp, "extract", False):
             # 추출 — 같은 규칙(자재·Layer 는 WaferInfo.ini)에 '추출' 을 붙인다(사용자 결정).
             lot = read_lot_info(inp.ref_root)
@@ -2419,8 +2290,7 @@ class MainWindow(QMainWindow):
         '판정 기준은 하나이므로 문장도 하나에서 나온다' 는 단일 출처다.  레일이
         따로 조립하면 엔진을 하나 더 만들 때 둘 중 하나가 낡는다."""
         page = getattr(self, "_setup_page", None)
-        if (page is None or self._input is None or self._is_extract()
-                or self._is_rereview()):
+        if page is None or self._input is None or self._is_extract():
             # 시작 전이면 기준이 확정되지 않았고, 추출에는 판정 기준이 없다.
             self._rail.set_criteria("")
             return
@@ -2508,7 +2378,7 @@ class MainWindow(QMainWindow):
     # Auto-save
     # ==================================================================
     def _schedule_autosave(self) -> None:
-        if self._is_extract() or self._is_rereview():
+        if self._is_extract():
             return          # 추출은 이어하기·기준 사진 기록 대상이 아니다(`_autosave`)
         # 결정이 있을 때마다 즉시 저장한다 (가벼움)
         self._autosave()
@@ -2529,7 +2399,7 @@ class MainWindow(QMainWindow):
     def _autosave(self) -> None:
         # ★ 추출 세션은 저장하지 않는다 — '이어하기' 는 매칭 세션을 되살리는 기능이라
         #   추출 입력이 남으면 다음 실행에서 매칭으로 복원된다.
-        if self._input is None or self._is_extract() or self._is_rereview():
+        if self._input is None or self._is_extract():
             return
         # Stage 1 / Stage 2 의 현재 상태도 함께 직렬화 (#19)
         decisions: dict[str, str] = {}
@@ -2611,10 +2481,6 @@ class MainWindow(QMainWindow):
         if self._scan_worker is not None:
             self._scan_worker.stop()
             self._scan_worker = None
-        rw = self.__dict__.get("_rereview_worker")
-        if rw is not None:
-            rw.stop()                      # 수명은 `_LIVE_REREVIEW` 가 잡는다
-            self._rereview_worker = None
         # MatchPage 의 점수 사전 계산 워커도 안전 종료.
         try:
             pre = getattr(self._match_page, "_precompute_worker", None)

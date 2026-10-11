@@ -71,6 +71,8 @@ class _SlotCountScan(QThread):
     class _Signals(QObject):
         counted = pyqtSignal(int, str, int, int)     # token, slot, ref, val
         # ★ `val` 이 음수면 '검증 폴더에 그 슬롯이 없다'는 뜻이다(0 장과 구분된다).
+        # KLA 폴더면 정보파일 헤더의 (WaferID, Slot) — 타일 이름을 그것으로 바꾼다.
+        labeled = pyqtSignal(int, str, str, str)     # token, slot, wafer_id, slot_no
 
     def __init__(self, token: int, ref_dirs: dict, val_root) -> None:
         super().__init__()                  # 부모 없음(위 주석)
@@ -80,11 +82,20 @@ class _SlotCountScan(QThread):
         self.signals = self._Signals()
 
     def run(self) -> None:      # type: ignore[override]
+        from ...coords import kla_info
         from ...models.slot import count_images
 
         for name, folder in sorted(self._ref_dirs.items()):
             if self.isInterruptionRequested():
                 return
+            # KLA 폴더명은 검사 시각이라 어느 웨이퍼인지 알 수 없다 — 정보파일 헤더의
+            # WaferID·Slot 을 먼저 읽어 이름부터 바꾼다(사용자 요청).  헤더 앞부분만 읽는다.
+            try:
+                wid, slot_no = kla_info.read_header_ids(Path(folder))
+            except Exception:
+                wid, slot_no = None, None
+            if wid:
+                self.signals.labeled.emit(self._token, name, wid, slot_no or "")
             try:
                 ref_n = count_images(folder)
             except Exception:
@@ -93,6 +104,9 @@ class _SlotCountScan(QThread):
             if self._val_root is not None:
                 try:
                     vd = self._val_root / name
+                    # KLA 기준이면 검증 폴더는 WaferID 이름이다.
+                    if not vd.is_dir() and wid:
+                        vd = self._val_root / wid
                     val_n = count_images(vd) if vd.is_dir() else -1
                 except Exception:
                     val_n = -1
@@ -115,6 +129,8 @@ class _SlotTile(NeonButton):
     def __init__(self, name: str, *, selected: bool = False, parent=None) -> None:
         super().__init__("", role="slotTile", parent=parent)
         self.name = name
+        # 타일에 보이는 이름 — 보통은 폴더명, KLA 면 'WaferID · 슬롯 #N'(`set_display`).
+        self.display = name
         self.setCheckable(True)
         self.setChecked(bool(selected))
         # ★ autoExclusive 를 끈다 — 부모를 공유하는 checkable 버튼은 Qt 가 라디오처럼
@@ -142,6 +158,13 @@ class _SlotTile(NeonButton):
         lay.addWidget(self._count)
         self._elide()
 
+    def set_display(self, text: str) -> None:
+        """타일 이름을 바꾼다(KLA: WaferID·Slot#).  폴더명은 툴팁에 남긴다."""
+        self.display = text
+        self.setAccessibleName(text)
+        self.setToolTip(f"{text}\n{self.name}" if text != self.name else self.name)
+        self._elide()
+
     def set_count_text(self, text: str) -> None:
         """둘째 줄 문구 교체 — 값이 바뀔 때만 적는다(리페인트를 아낀다)."""
         if self._count.text() != text:
@@ -160,7 +183,8 @@ class _SlotTile(NeonButton):
         앞/뒤 생략을 쓰면 'PI_Opening_A1' 과 'PI_Opening_A2' 를 구분할 수 없다."""
         fm = QFontMetrics(self.font())
         avail = max(40, self.width() - 28)
-        self.setText(fm.elidedText(self.name, Qt.TextElideMode.ElideMiddle, avail))
+        self.setText(fm.elidedText(getattr(self, "display", self.name),
+                                   Qt.TextElideMode.ElideMiddle, avail))
 
 
 class SlotSelectDialog(QDialog):
@@ -210,6 +234,7 @@ class SlotSelectDialog(QDialog):
         self._count_token += 1
         scan = _SlotCountScan(self._count_token, ref_dirs, val_root)
         scan.signals.counted.connect(self._on_counted)
+        scan.signals.labeled.connect(self._on_labeled)
         _LIVE_COUNT_SCANS.add(scan)
         scan.finished.connect(lambda s=scan: _LIVE_COUNT_SCANS.discard(s))
         self._count_scan = scan
@@ -221,6 +246,18 @@ class SlotSelectDialog(QDialog):
             return
         self._counts[slot] = (ref_n, val_n)
         self._apply_count(slot)
+
+    def _on_labeled(self, token: int, slot: str, wafer_id: str, slot_no: str) -> None:
+        """KLA 폴더 — 타일 이름을 정보파일의 WaferID·Slot# 로(최신 세대만)."""
+        if token != self._count_token:
+            return
+        tile = self._tiles.get(slot)
+        if tile is None:
+            return
+        tile.set_display(i18n.KO.SLOT_SELECT_KLA_FMT.format(wafer_id=wafer_id, slot=slot_no)
+                         if slot_no else wafer_id)
+        if self._search.text().strip():
+            self._on_search(self._search.text())     # 새 이름으로도 찾히게
 
     def _apply_count(self, slot: str) -> None:
         """센 값 → 타일 둘째 줄.  순수 렌더링(파일을 읽지 않는다)."""
@@ -434,7 +471,8 @@ class SlotSelectDialog(QDialog):
     # ── 검색(필터) ────────────────────────────────────────────────────
     def _on_search(self, text: str) -> None:
         q = (text or "").strip().lower()
-        self._visible = [n for n in self._slot_names if q in n.lower()] if q \
+        self._visible = [n for n in self._slot_names
+                         if q in n.lower() or q in self._tiles[n].display.lower()] if q \
             else list(self._slot_names)
         for name, tile in self._tiles.items():
             tile.setVisible(name in set(self._visible))

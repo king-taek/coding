@@ -527,3 +527,37 @@ def test_count_qss_is_rendered_not_hardcoded(qapp):
     src = inspect.getsource(ssd)
     assert "setStyleSheet" not in src.split("_SlotTile")[1].split("class SlotSelect")[0], \
         "타일이 인라인 스타일시트로 색을 굽는다"
+
+
+# ---------------------------------------------------------------------------
+# KLA — 폴더명(검사 시각)이 아니라 정보파일의 WaferID·Slot# 로 보여 준다(사용자 요청)
+# ---------------------------------------------------------------------------
+def test_kla_tile_shows_wafer_id_and_slot_number(qapp, tmp_path):
+    from aoi_verification.app.models.slot import list_slot_dirs
+
+    ref, val = _lot(tmp_path, {"2026-08-02-23-09_4": 2, "S2": 1}, {"W6459076XYG1": 3})
+    (ref / "2026-08-02-23-09_4" / "x_TB500INT.271@6324_W6459076XYG1.001").write_text(
+        'WaferID "W6459076XYG1";\nSlot 4;\n', encoding="utf-8")
+    dirs = list_slot_dirs(ref)
+    dlg = SlotSelectDialog(sorted(dirs), ref_dirs=dirs, val_root=val)
+    dlg.show()
+    for _ in range(8):
+        qapp.processEvents()
+    assert dlg._count_scan.wait(10_000)
+    for _ in range(8):
+        qapp.processEvents()
+    tile = dlg._tiles["2026-08-02-23-09_4"]
+    want = i18n.KO.SLOT_SELECT_KLA_FMT.format(wafer_id="W6459076XYG1", slot="4")
+    assert tile.display == want
+    assert "W6459076XYG1" in tile.text() and "#4" in tile.text()
+    assert "2026-08-02-23-09_4" in tile.toolTip()          # 폴더명은 툴팁에 남는다
+    # KLA 기준이면 검증 폴더는 WaferID 이름 — 그 장수를 센다.
+    assert tile.count_text() == i18n.KO.SLOT_SELECT_TILE_COUNT_FMT.format(ref="2", val="3")
+    # 일반 폴더는 그대로다.
+    assert dlg._tiles["S2"].display == "S2"
+    # WaferID 로도 검색되고, 고른 결과는 여전히 폴더명이다(스캔이 폴더명으로 연다).
+    dlg._search.setText("6459076")
+    assert dlg._visible == ["2026-08-02-23-09_4"]
+    dlg._select_visible()
+    assert dlg.selected == {"2026-08-02-23-09_4"}
+    dlg.deleteLater()

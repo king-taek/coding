@@ -217,3 +217,37 @@ def test_slot_without_ini_is_absent(tmp_path):
     (tmp_path / "ref" / "S1").mkdir(parents=True)
     got = _collect(_scan_of({"S1": _slot("S1", tmp_path / "ref" / "S1", None)}))
     assert got == {}
+
+
+def test_kla_folder_number_comes_from_info_header(tmp_path):
+    """KLA 폴더에는 `WaferInfo.ini` 가 없다 — 정보파일 헤더의 `Slot N;` 이 번호다.
+
+    예전에는 이걸 보지 않아 KLA 쪽 웨이퍼는 엑셀에 번호가 빠졌다."""
+    import types
+    mw = pytest.importorskip("aoi_verification.app.ui.main_window")
+    kla = tmp_path / "ref" / "2026-08-02-23-09_4"
+    kla.mkdir(parents=True)
+    (kla / "x_TB500INT.271@6324_W1.001").write_text(
+        f'WaferID "{_WAFER_ID}";\nSlot 4;\n', encoding="utf-8")
+    _wafer_info(tmp_path / "val" / _WAFER_ID, "ActiveSlot=6")
+    scan = _scan_of({_WAFER_ID: _slot(_WAFER_ID, kla, tmp_path / "val" / _WAFER_ID)})
+    got = mw.MainWindow._slot_numbers(types.SimpleNamespace(
+        _scan=scan, _kla_folders={_WAFER_ID: kla.name}))
+    assert got == {_WAFER_ID: "4 / 6"}
+
+
+def test_manual_pair_keeps_the_val_folder(tmp_path):
+    """수동 매핑으로 묶은 슬롯도 검증 폴더 경로를 잃지 않는다 — 잃으면 검증 쪽 번호가
+    엑셀에서 빠졌다(자동 병합 `merge_unmatched_by_wafer_id` 는 옮기고 있었다)."""
+    from aoi_verification.app.models.slot import ImageItem, ScanResult, Slot
+    mw = pytest.importorskip("aoi_verification.app.ui.main_window")
+    vdir = tmp_path / "val" / "KLA_A"
+    sr = ScanResult(slots={
+        "A": Slot(name="A", ref_images=[ImageItem("A", tmp_path / "a.jpg", "ref")],
+                  ref_dir=tmp_path / "ref" / "A"),
+        "KLA_A": Slot(name="KLA_A", val_images=[ImageItem("KLA_A", tmp_path / "b.jpg", "val")],
+                      val_dir=vdir),
+    }, ref_only=["A"], val_only=["KLA_A"])
+    mw.MainWindow._apply_slot_pairs(None, sr, [("A", "KLA_A")])
+    assert sr.slots["A"].val_dir == vdir
+    assert sr.common_slot_names == ["A"]

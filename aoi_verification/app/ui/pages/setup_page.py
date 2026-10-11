@@ -61,12 +61,6 @@ class SetupInput:
     extract_wafer_map: bool = True
     # LOT 별 '일부 슬롯'(``extract_roots`` 와 같은 순서, ``None`` = 전체).
     extract_slots: Optional[list] = None
-    # AVAGO 재리뷰 — ``ref_root`` = Scanresult LOT 폴더, ``val_root`` = 1차 리뷰 Map 폴더.
-    rereview: bool = False
-    # Map 경로를 비워 뒀다 — 제외 없이 전부 재리뷰(``val_root`` 는 ``ref_root`` 와 같게 둔다).
-    rereview_no_map: bool = False
-    # 1차 Reject 사진 폴더(선택) — 파일명 좌표의 die 를 재리뷰에서 뺀다(Map 과 합집합).
-    rereview_reject_dir: Optional[Path] = None
 
 
 # '실행 옵션'·'매칭 설정' 두 카드를 가로로 나란히 세우려면 이만큼은 있어야 한다.
@@ -278,9 +272,6 @@ class SetupPage(QWidget):
         # Defect 추출 모드 — 검증 장비 카드·매칭 설정을 감추고 한쪽 폴더만 받는다.
         # ★ `_build` 전에 둔다: 액션바를 만들며 부르는 `_validate` 가 읽는다.
         self._extract_mode = False
-        # AVAGO 재리뷰 모드 — 두 입력란을 'Scanresult LOT · Map 폴더' 로 바꿔 쓴다.
-        self._rereview_mode = False
-        self._rereview_stash: Optional[tuple] = None    # 들어가기 전 매칭 입력값
         # die 기하 스캔(백그라운드) 상태.  `_die_scanned_for` 는 **이미 스캔이 끝난
         # 경로** 다 — 같은 경로로 `_validate` 가 다시 와도(허용 오차를 건드리면 온다)
         # 다시 훑지 않고 캐시한 결과로 문구만 다시 그린다.
@@ -585,19 +576,8 @@ class SetupPage(QWidget):
             self._make_machine_group(i18n.KO.SETUP_REF_GROUP,
                                      extra=self._lot1_slot_btn)
         self._build_lot_list()
-        self._build_reject_row()
-        # AVAGO 재리뷰 — Scanresult(오른쪽 카드)의 [슬롯 선택](재리뷰 모드에서만 보인다).
-        # 선택 창·규칙은 Defect 추출의 LOT 별 슬롯 선택과 같다(`_pick_rereview_slots`).
-        self._rr_slot_btn = NeonButton(i18n.KO.EXTRACT_SLOT_BTN_ALL, role="ghost")
-        self._rr_slot_btn.setVisible(False)
-        self._rr_slot_btn.clicked.connect(self._pick_rereview_slots)
-        self._rr_slots: Optional[set] = None
         self.val_group, self.val_path_edit, self.val_machine_edit = \
-            self._make_machine_group(i18n.KO.SETUP_VAL_GROUP, extra=self._rr_slot_btn)
-        # 폴더가 바뀌면 고른 슬롯은 무효 — 전체로.  Map 경로가 바뀌면 LOT명(S/M) 자동 채움.
-        self.val_path_edit.textChanged.connect(lambda _t: self._reset_rereview_slots())
-        self._rr_auto_lot = ""
-        self.ref_path_edit.textChanged.connect(self._autofill_rereview_lot)
+            self._make_machine_group(i18n.KO.SETUP_VAL_GROUP)
         self._device_cards = [self.ref_group, self.val_group]
         self._device_host = host
         # ★ 자기 폭이 정해진 뒤 다시 흘려야 한다 — B안에서는 이 행이 좁은 그리드 칸
@@ -640,28 +620,6 @@ class SetupPage(QWidget):
         self.ref_group.body().addWidget(host)
         self._lot_list = host
         self._refresh_lot_add_btn()
-
-    def _build_reject_row(self) -> None:
-        """AVAGO 재리뷰 — Map 카드 안의 '1차 Reject 사진 폴더(선택)' 줄(재리뷰 모드에서만 보인다).
-
-        폴더 존재 확인은 시작 버튼을 누를 때 한 번 한다(`_collect_rereview_input`) —
-        여기서 입력마다 stat 하지 않는다(NAS)."""
-        host = QWidget(self.ref_group)
-        host.setProperty("role", "rowHost")
-        row = QHBoxLayout(host)
-        row.setContentsMargins(0, 4, 0, 0)
-        row.setSpacing(10)
-        label = QLabel(i18n.KO.REREVIEW_RJ_LABEL, host)
-        self.rj_path_edit = QLineEdit(host)
-        self.rj_path_edit.setMinimumWidth(self._PATH_MIN_W)
-        self.rj_path_edit.setPlaceholderText(i18n.KO.REREVIEW_RJ_PLACEHOLDER)
-        browse = NeonButton(i18n.KO.BTN_BROWSE, role="ghost")
-        browse.clicked.connect(lambda: self._browse(self.rj_path_edit))
-        for w in (label, self.rj_path_edit, browse):
-            row.addWidget(w, 1 if w is self.rj_path_edit else 0)
-        host.setVisible(False)
-        self.ref_group.body().addWidget(host)
-        self._rj_host = host
 
     def _add_lot_row(self) -> None:
         if len(self._lot_rows) >= self.MAX_LOTS:
@@ -776,51 +734,6 @@ class SetupPage(QWidget):
                         i18n.KO.EXTRACT_DROP_TOO_MANY_FMT.format(
                             max=self.MAX_LOTS, n=len(todo)))
         return added
-
-    def _reset_rereview_slots(self) -> None:
-        self._rr_slots = None
-        self._rr_slot_btn.setText(i18n.KO.EXTRACT_SLOT_BTN_ALL)
-
-    def _pick_rereview_slots(self) -> None:
-        """Scanresult LOT 의 슬롯(웨이퍼)을 고른다 — 매칭의 '일부 슬롯만…' 과 같은 선택 창."""
-        from ...models.slot import extract_slot_dirs
-        from ..widgets.slot_select_dialog import SlotSelectDialog
-
-        text = self.val_path_edit.text().strip()
-        root = Path(text) if text else None
-        if root is None or not root.is_dir():
-            sheets.warn(self, i18n.KO.APP_TITLE, i18n.KO.EXTRACT_SLOT_NEED_FOLDER)
-            return
-        dirs = extract_slot_dirs(root)
-        names = sorted(dirs)
-        if not names:
-            sheets.info(self, i18n.KO.APP_TITLE, i18n.KO.SLOT_SELECT_EMPTY)
-            return
-        dlg = SlotSelectDialog(names, preselected=self._rr_slots, ref_dirs=dirs,
-                               val_root=None, parent=self)
-        if not (sheets.run(dlg) and dlg.accepted_ok):
-            return                                   # 취소 — 그대로 둔다
-        chosen = set(dlg.selected or ())
-        if not chosen or chosen == set(names):
-            self._reset_rereview_slots()
-        else:
-            self._rr_slots = chosen
-            self._rr_slot_btn.setText(i18n.KO.EXTRACT_SLOT_BTN_FMT.format(
-                n=len(chosen), total=len(names)))
-
-    def _autofill_rereview_lot(self, text: str) -> None:
-        """1차 리뷰 Map 경로의 ``288. PH3Q42.00 (FSX)`` → LOT명(S/M) 칸에 자동으로.
-
-        사용자가 고쳐 쓴 값은 덮지 않는다 — 칸이 비어 있거나 직전 자동값 그대로일
-        때만 채운다(사용자 요청: 자동 입력하되 수정 가능)."""
-        if not self._rereview_mode:
-            return
-        from ...coords.rereview import lot_from_map_path
-        lot = lot_from_map_path(text)
-        cur = self.val_machine_edit.text().strip()
-        if lot and cur in ("", self._rr_auto_lot):
-            self.val_machine_edit.setText(lot)
-            self._rr_auto_lot = lot
 
     def _reset_lot_slots(self, idx: int) -> None:
         """폴더가 바뀌면 그 줄의 슬롯 선택은 무효다 — 전체로 되돌린다."""
@@ -1236,18 +1149,11 @@ class SetupPage(QWidget):
         self.extract_btn.setToolTip(i18n.KO.EXTRACT_BUTTON_TOOLTIP)
         self.extract_btn.clicked.connect(
             lambda: self.set_extract_mode(not self._extract_mode))
-        # AVAGO 재리뷰 — 같은 화면을 'Map 폴더 + Scanresult LOT' 입력으로 바꾼다
-        # (Defect 추출 오른쪽 — 사용자 지정).
-        self.rereview_btn = NeonButton(i18n.KO.REREVIEW_BUTTON, role="ghost")
-        self.rereview_btn.setToolTip(i18n.KO.REREVIEW_BUTTON_TOOLTIP)
-        self.rereview_btn.clicked.connect(
-            lambda: self.set_rereview_mode(not self._rereview_mode))
         # 보조 버튼 묶음 — **좁은 창에서는 두 줄로 접힌다**(`_AuxButtonRow`).
-        #   [AVAGO 재리뷰] 를 더하자 한 줄 최소 폭이 830 → 967px 이 돼 800px 창에서 페이지가
-        #   창보다 넓어졌다(실측).  넓은 창에서는 예전처럼 한 줄이다.
+        #   넓은 창에서는 한 줄이다.
         self._aux_row = _AuxButtonRow(
             [self.update_btn, self.image_info_btn, self.wafer_map_btn,
-             self.extract_btn, self.rereview_btn], spacing=bar.spacing(), parent=host)
+             self.extract_btn], spacing=bar.spacing(), parent=host)
         bar.addWidget(self._aux_row)
         # ★ 자리 계약: 왼쪽 보조 버튼들 → stretch → 힌트 → 주 액션(start_btn).
         #   새 위젯은 반드시 stretch **뒤**나 그 앞의 보조 묶음에 붙인다 — 잘못 넣으면
@@ -1317,12 +1223,8 @@ class SetupPage(QWidget):
         machine_label = QLabel(i18n.KO.SETUP_MACHINE_LABEL, card)
         grid.addWidget(machine_label, 2, 0)
         grid.addWidget(machine_edit, 2, 1, 1, 2)
-        card.setProperty("_machineLabel", machine_label)   # 재리뷰 모드가 감춘다
 
         card.body().addLayout(grid)
-        # 내용은 위로 붙인다 — 재리뷰 모드가 Map 카드의 호기 줄을 감추면, 옆 카드 높이에
-        # 맞춰 늘어난 카드 안에서 폴더 줄이 세로 가운데로 떠 있었다.
-        card.body().addStretch(1)
         # 유효성 표시를 위해 오류 라벨을 입력란에 붙여 둔다.
         path_edit.setProperty("_errLabel", err)
         path_edit.textChanged.connect(self._schedule_validate)
@@ -1393,8 +1295,6 @@ class SetupPage(QWidget):
     def _refresh_start_text(self) -> None:
         if not self._backend_ready:
             self.start_btn.setText(i18n.KO.BTN_START_PREPARING)
-        elif self._rereview_mode:
-            self.start_btn.setText(i18n.KO.BTN_REREVIEW_START)
         else:
             self.start_btn.setText(i18n.KO.BTN_EXTRACT_START if self._extract_mode
                                    else i18n.KO.BTN_START)
@@ -1409,10 +1309,7 @@ class SetupPage(QWidget):
         남기는 것: 기준 장비 카드(제목만 '대상 장비') · 실행 옵션(자동화 수준 = 선별
         건너뛰기, 진행 범위 = 일부 슬롯).  입력값은 그대로 둔다 — 되돌아오면 이어서 쓴다."""
         on = bool(on)
-        if on and self._rereview_mode:
-            self.set_rereview_mode(False)
         self._extract_mode = on
-        self.rereview_btn.setVisible(not on)
         self._title_label.setText(i18n.KO.EXTRACT_TITLE if on else i18n.KO.SETUP_TITLE)
         head = self.ref_group.property("_headLabel")
         if head is not None:
@@ -1436,72 +1333,6 @@ class SetupPage(QWidget):
         # 첫 입력란이 놓기를 가로채 'file:///…' 글자를 끼워 넣지 않게, 그때만 페이지가 받는다.
         self.setAcceptDrops(on)
         self.ref_path_edit.setAcceptDrops(not on)
-        self._refresh_start_text()
-        self._validate()
-
-    def is_rereview_mode(self) -> bool:
-        return self._rereview_mode
-
-    def set_rereview_mode(self, on: bool) -> None:
-        """AVAGO 재리뷰 ↔ 매칭 검증.  **같은 화면**의 두 카드를 바꿔 쓴다(사용자 지정).
-
-        왼쪽 카드 = 1차 리뷰 **Map 폴더**(둘째 줄 없음),
-        오른쪽 카드 = **Scanresult LOT 폴더** + 둘째 줄 '호기 번호' 대신 **LOT명(S/M)**.
-        실행 옵션·매칭 설정은 감춘다(재리뷰는 늘 한 장씩 판정한다).  입력값은 모드별로
-        따로 둔다 — 매칭의 두 폴더가 재리뷰 칸에 남으면 엉뚱한 폴더로 시작하게 된다."""
-        on = bool(on)
-        if on == self._rereview_mode:
-            return
-        if on and self._extract_mode:
-            self.set_extract_mode(False)
-        if on:
-            self._rereview_stash = (self.ref_path_edit.text(), self.val_path_edit.text(),
-                                    self.val_machine_edit.text())
-            p = _prefs.load()
-            self.ref_path_edit.setText(p.last_rereview_map)
-            self.rj_path_edit.setText(p.last_rereview_reject)
-            self.val_path_edit.setText(p.last_rereview_scan)
-            self.val_machine_edit.setText("")          # LOT 마다 다르다 — 기억하지 않는다
-        elif self._rereview_stash is not None:
-            ref, val, val_machine = self._rereview_stash
-            self.ref_path_edit.setText(ref)
-            self.val_path_edit.setText(val)
-            self.val_machine_edit.setText(val_machine)
-            self._rereview_stash = None
-        self._rereview_mode = on
-        self._title_label.setText(i18n.KO.REREVIEW_TITLE if on else i18n.KO.SETUP_TITLE)
-        for card, title_on, title_off in (
-                (self.ref_group, i18n.KO.REREVIEW_MAP_GROUP, i18n.KO.SETUP_REF_GROUP),
-                (self.val_group, i18n.KO.REREVIEW_SCAN_GROUP, i18n.KO.SETUP_VAL_GROUP)):
-            head = card.property("_headLabel")
-            if head is not None:
-                head.setText(title_on if on else title_off)
-        # 왼쪽(Map) 카드는 둘째 줄이 없다.
-        lbl = self.ref_group.property("_machineLabel")
-        if lbl is not None:
-            lbl.setVisible(not on)
-        self.ref_machine_edit.setVisible(not on)
-        self._rr_slot_btn.setVisible(on)
-        self._rj_host.setVisible(on)
-        if on:
-            self._rr_auto_lot = ""
-            self._autofill_rereview_lot(self.ref_path_edit.text())
-        # 오른쪽(Scanresult) 카드의 둘째 줄 = LOT명(S/M).
-        lbl = self.val_group.property("_machineLabel")
-        if lbl is not None:
-            lbl.setText(i18n.KO.REREVIEW_LOT_LABEL if on else i18n.KO.SETUP_MACHINE_LABEL)
-        self.val_machine_edit.setPlaceholderText(
-            i18n.KO.REREVIEW_LOT_PLACEHOLDER if on else i18n.KO.SETUP_MACHINE_PLACEHOLDER)
-        self.ref_path_edit.setPlaceholderText(
-            i18n.KO.REREVIEW_MAP_PLACEHOLDER if on else i18n.KO.SETUP_FOLDER_PLACEHOLDER)
-        self.val_path_edit.setPlaceholderText(
-            i18n.KO.REREVIEW_SCAN_PLACEHOLDER if on else i18n.KO.SETUP_FOLDER_PLACEHOLDER)
-        for card in self._setting_cards:
-            card.setVisible(not on)
-        self._mode_badge_card.setVisible(not on)
-        self.extract_btn.setVisible(not on)
-        self.rereview_btn.setText(i18n.KO.EXTRACT_BACK_BUTTON if on
-                                  else i18n.KO.REREVIEW_BUTTON)
         self._refresh_start_text()
         self._validate()
 
@@ -1570,8 +1401,6 @@ class SetupPage(QWidget):
             self._start_dir_probe(ref_text, val_text)
             ref_state = self._probe_state(ref_text)
             val_state = self._probe_state(val_text)
-        if self._rereview_mode and not ref_text.strip():
-            ref_state = ""            # 재리뷰의 Map 경로는 선택 — 비우면 전체 리뷰
         checking = ref_state is None or val_state is None
         # 비어 있는 초기 상태에서 빨간 테두리로 겁주지 않는다 — 문구만 조용히.
         # 확인 중(None)도 마찬가지다 — 아직 모르는 것을 틀렸다고 칠할 수는 없다.
@@ -1588,9 +1417,7 @@ class SetupPage(QWidget):
             if checking:
                 self._start_hint.setText(i18n.KO.START_CHECKING_HINT)
             elif not dirs_ok:
-                self._start_hint.setText(i18n.KO.REREVIEW_START_BLOCKED_HINT
-                                         if self._rereview_mode
-                                         else i18n.KO.START_BLOCKED_HINT)
+                self._start_hint.setText(i18n.KO.START_BLOCKED_HINT)
             elif not self._backend_ready:
                 self._start_hint.setText(i18n.KO.START_PREPARING_HINT)
             else:
@@ -1856,8 +1683,6 @@ class SetupPage(QWidget):
     def _collect_input(self):
         if self._extract_mode:
             return self._collect_extract_input()
-        if self._rereview_mode:
-            return self._collect_rereview_input()
         ref_root = Path(self.ref_path_edit.text().strip())
         val_root = Path(self.val_path_edit.text().strip())
         ref_machine = self.ref_machine_edit.text().strip()
@@ -1966,44 +1791,6 @@ class SetupPage(QWidget):
             extract=True, extract_roots=roots, extract_wafer_map=wafer_map,
             extract_slots=[set(sel) if sel is not None else None
                            for _t, sel in rows],
-        )
-
-    def _collect_rereview_input(self):
-        """AVAGO 재리뷰 입력 — 왼쪽 Map 폴더 + 오른쪽 Scanresult LOT 폴더 + LOT명(S/M).
-
-        선별은 건너뛸 수 없다(재리뷰 자체가 사람이 한 장씩 보는 일이다).
-        LOT명은 필수다 — 결과 파일 이름과 엑셀 머리에 쓴다."""
-        map_text = self.ref_path_edit.text().strip()
-        map_dir = Path(map_text) if map_text else None      # 비워 두면 전체 리뷰
-        scan = Path(self.val_path_edit.text().strip())
-        for r in (map_dir, scan):
-            if r is not None and not r.is_dir():
-                sheets.warn(self, i18n.KO.APP_TITLE,
-                            i18n.KO.WARN_PATH_NOT_EXIST.format(path=r))
-                return None
-        lot = self.val_machine_edit.text().strip()
-        if not lot:
-            sheets.warn(self, i18n.KO.APP_TITLE, i18n.KO.REREVIEW_LOT_REQUIRED)
-            self.val_machine_edit.setFocus()
-            return None
-        rj_text = self.rj_path_edit.text().strip()
-        rj_dir = Path(rj_text) if rj_text else None
-        if rj_dir is not None and not rj_dir.is_dir():
-            sheets.warn(self, i18n.KO.APP_TITLE,
-                        i18n.KO.REREVIEW_RJ_NOT_FOUND.format(path=rj_dir))
-            return None
-        _prefs.patch(last_rereview_scan=str(scan),
-                     last_rereview_map=str(map_dir) if map_dir else "",
-                     last_rereview_reject=rj_text)
-        return SetupInput(
-            mode="single", ref_root=scan, val_root=map_dir or scan,
-            rereview_no_map=map_dir is None,
-            rereview_reject_dir=rj_dir,
-            ref_machine=lot, val_machine="",
-            threshold=self.slider.value() / 100.0,
-            automation_level=AutomationLevel.USER_SELECT,
-            rereview=True,
-            selected_slots=(set(self._rr_slots) if self._rr_slots is not None else None),
         )
 
     # ------------------------------------------------------------------

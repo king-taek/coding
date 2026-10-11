@@ -184,7 +184,7 @@ def scan(ref_root: Path, val_root: Path, progress=None,
 
     all_names = sorted(set(ref_dirs.keys()) | set(val_dirs.keys()))
     if only is not None:
-        wanted = set(only)
+        wanted = set(only) | _kla_partners(set(only), ref_dirs, val_dirs)
         all_names = [n for n in all_names if n in wanted]
     total = len(all_names)
     slots: dict[str, Slot] = {}
@@ -213,6 +213,47 @@ def scan(ref_root: Path, val_root: Path, progress=None,
                 pass
 
     return ScanResult(slots=slots, ref_only=ref_only, val_only=val_only)
+
+
+def _kla_partners(wanted: set, ref_dirs: dict, val_dirs: dict) -> set:
+    """'일부 슬롯만' 으로 고른 슬롯의 **상대 장비 폴더**를 WaferID 로 찾는다.
+
+    KLA 폴더명은 검사 시각(``2026-08-02-23-09_4``)이고 상대 장비 폴더명은 WaferID 라,
+    이름으로만 거르면 고른 웨이퍼의 짝 폴더가 스캔에서 빠진다 — 그러면 KLA 해석이
+    짝을 찾을 수 없어 '기준/검증 전용' 이 되고 매칭이 통째로 사라졌다.
+
+    이름으로 짝이 다 맞으면(일반 Camtek↔Camtek) **아무것도 읽지 않는다**.  짝이 없는
+    슬롯이 있을 때만 고른 폴더의 WaferID 와, 반대쪽 폴더들의 WaferID(정보파일 헤더)를
+    읽어 같은 웨이퍼를 더한다(스캔 워커 안에서 돈다).  반환은 더할 폴더명들이다."""
+    from ..coords import kla_info
+
+    def norm(v) -> str:
+        return str(v).strip().upper()
+
+    lonely = [n for n in wanted
+              if (n in ref_dirs) != (n in val_dirs)]
+    if not lonely:
+        return set()
+    keys = {norm(n) for n in lonely}
+    for n in lonely:
+        d = ref_dirs.get(n) or val_dirs.get(n)
+        wid = kla_info.read_wafer_id(d) if d is not None else None
+        if wid:
+            keys.add(norm(wid))
+    extra: set = set()
+    others = {id(d): d for d in (val_dirs if n in ref_dirs else ref_dirs
+                                 for n in lonely)}
+    for other in others.values():
+        for name, d in other.items():
+            if name in wanted or name in extra:
+                continue
+            if norm(name) in keys:
+                extra.add(name)
+                continue
+            wid = kla_info.read_wafer_id(d)
+            if wid and norm(wid) in keys:
+                extra.add(name)
+    return extra
 
 
 def scan_one_side(root: Path, progress=None, only=None) -> ScanResult:

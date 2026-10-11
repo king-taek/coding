@@ -56,9 +56,6 @@ class _Win:
             def load_state(self, **kw):
                 self.loaded = kw
 
-            def set_rereview(self, on, die_of=None):
-                self.rereview = on
-
         self._select_page = _Page()
 
     # 재사용 질의는 대역이 대신한다 — 복원분을 queue 에서 빼고 targets 로.
@@ -74,9 +71,6 @@ class _Win:
 
     def _is_extract(self):
         return False            # 매칭 세션(Defect 추출은 test_defect_extract.py)
-
-    def _is_rereview(self):
-        return False            # 매칭 세션(AVAGO 재리뷰는 test_rereview_flow.py)
 
     def _on_select_finished(self):
         self.finished_calls += 1
