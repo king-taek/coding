@@ -60,36 +60,21 @@ def load_folder(folder: Path) -> dict[str, DefectCoord]:
 
     같은 폴더의 두 번째 이미지부터는 캐시에서 즉시 반환된다.
     """
-    ini = _find_ini(folder)
-    if ini is None:
-        return {}
     try:
+        entries = _sections(folder)
+        if not entries:
+            return {}
         # die 격자 기하는 폴더당 한 번만 구한다(자체 캐시).
         geom = camtek_geometry(folder)
         if geom is None:
             # ★ pitch 를 몰라도 **매칭은 된다** — INI 의 절대 X/Y 를 그대로 쓰면 된다.
             #   die 로 쪼개는 건 (a) 화면·엑셀의 die-내부 좌표 표기와 (b) KLA 교차 매칭에만
             #   필요하다.  Camtek↔Camtek 은 ref/val 이 같은 규칙이면 그만이다.
-            return _parse_ini_abs(ini)
-        return _parse_ini(ini, geom)
+            return _abs_entries(entries)
+        return {stem: _coord_from_raw(raw, geom)
+                for stem, raw, _xy, _recipe in entries if raw is not None}
     except Exception:
         return {}
-
-
-def _parse_ini(path: Path, geom: CamtekGeometry) -> dict[str, DefectCoord]:
-    text = read_ini_text(path) or ""
-
-    # 섹션 단위로 분리: [filename.jpeg] → 내용 반복
-    parts = _SECTION_PAT.split(text)
-    # parts[0] = 섹션 전 텍스트(무시), 이후 [이름, 내용, 이름, 내용, ...] 교대
-    result: dict[str, DefectCoord] = {}
-    it = iter(parts[1:])
-    for name, content in zip(it, it):
-        stem = Path(name.strip()).stem   # "foo.jpeg" → "foo"
-        coord = _extract_coord(content, geom)
-        if coord is not None:
-            result[stem.lower()] = coord
-    return result
 
 
 def _extract_coord(content: str,
@@ -100,6 +85,12 @@ def _extract_coord(content: str,
     raw = _extract_raw(content)
     if raw is None:
         return None
+    return _coord_from_raw(raw, geom)
+
+
+def _coord_from_raw(raw: tuple[float, float, int, int],
+                    geom: CamtekGeometry) -> DefectCoord:
+    """원시 ``(X, Y, Col, Row)`` → die-내부 DefectCoord."""
     X, Y, _col_i, _row_i = raw
     # ★ die 인덱스는 **좌표에서 유도**한다 — INI 의 Col/Row 필드를 쓰지 않는다.
     #   실측: 같은 결함을 두 레시피가 찍으면 Col 은 같은데 Row 만 1 어긋난다
@@ -126,7 +117,7 @@ def abs_coord(X: float, Y: float, col_i: int, row_i: int) -> DefectCoord:
                        source="camtek_abs")
 
 
-def _parse_ini_abs(path: Path) -> dict[str, DefectCoord]:
+def _abs_entries(entries) -> dict[str, DefectCoord]:
     """die pitch 를 모를 때의 폴백 — **절대 wafer 좌표**로 DefectCoord 를 만든다.
 
     · ``col`` 은 pitch 없이도 정확하다(``Col − CAMTEK_COL_OFFSET``).
@@ -141,40 +132,85 @@ def _parse_ini_abs(path: Path) -> dict[str, DefectCoord]:
     실패' 로 보이므로, 한 실행 안에서 프레임이 섞이는 건 :func:`..coords.resolve_batch`
     가 미리 막는다.
     """
-    text = read_ini_text(path) or ""
-    parts = _SECTION_PAT.split(text)
-    result: dict[str, DefectCoord] = {}
-    it = iter(parts[1:])
-    for name, content in zip(it, it):
-        raw = _extract_raw(content)
-        if raw is None:
-            continue
-        X, Y, col_i, row_i = raw
-        result[Path(name.strip()).stem.lower()] = abs_coord(X, Y, col_i, row_i)
-    return result
+    return {stem: abs_coord(*raw)
+            for stem, raw, _xy, _recipe in entries if raw is not None}
 
 
 def _extract_raw(content: str) -> Optional[tuple[float, float, int, int]]:
     """INI 섹션 내용 → 원시 ``(X, Y, Col, Row)``. 필수 키가 없으면 None."""
+    return _raw_from_kv(_kv(content))
+
+
+def _kv(content: str) -> dict[str, str]:
+    """INI 섹션 내용 → ``{키(대문자) → 값}``.  같은 키는 뒤의 것이 이긴다."""
     kv: dict[str, str] = {}
-    for m in _KEY_PAT.finditer(content):
-        kv[m.group(1).upper()] = m.group(2).strip()
+    for key, value in _KEY_PAT.findall(content):
+        kv[key.upper()] = value.strip()
+    return kv
 
-    def fget(key: str) -> Optional[float]:
-        v = kv.get(key)
-        try:
-            return float(v) if v is not None else None
-        except ValueError:
-            return None
 
-    X = fget("X") if fget("X") is not None else fget("FAULTX")
-    Y = fget("Y") if fget("Y") is not None else fget("FAULTY")
-    Col = fget("COL")
-    Row = fget("ROW")
-
-    if None in (X, Y, Col, Row):
+def _fget(kv: dict[str, str], key: str) -> Optional[float]:
+    v = kv.get(key)
+    try:
+        return float(v) if v is not None else None
+    except ValueError:
         return None
-    return (X, Y, int(Col), int(Row))   # type: ignore[arg-type]
+
+
+def _xy_from_kv(kv: dict[str, str]) -> Optional[tuple[float, float]]:
+    """X/Y(없으면 FaultX/FaultY).  하나라도 없으면 None."""
+    X = _fget(kv, "X")
+    if X is None:
+        X = _fget(kv, "FAULTX")
+    Y = _fget(kv, "Y")
+    if Y is None:
+        Y = _fget(kv, "FAULTY")
+    if X is None or Y is None:
+        return None
+    return (X, Y)
+
+
+def _raw_from_kv(kv: dict[str, str]) -> Optional[tuple[float, float, int, int]]:
+    xy = _xy_from_kv(kv)
+    Col = _fget(kv, "COL")
+    Row = _fget(kv, "ROW")
+    if xy is None or Col is None or Row is None:
+        return None
+    return (xy[0], xy[1], int(Col), int(Row))
+
+
+# ── 폴더당 INI 1회 읽기 ──────────────────────────────────────────────────
+# 결함이 수천 건이면 INI 가 수 MB 다.  예전에는 좌표·검산·레시피·절대좌표가 **각자**
+# 파일을 다시 읽고 섹션 전체를 다시 파싱해, 사진 한 장을 조회해도 NAS 에서 같은 파일을
+# 4번 읽었다(단일 사진 정보가 느렸던 원인).  여기서 한 번 읽어 섹션마다
+# (stem, 원시 X/Y/Col/Row, 절대 X/Y, RecipeNumber) 를 뽑아 두고 네 맵이 나눠 쓴다.
+# 캐시 키에 mtime·크기를 넣어 파일이 바뀌면 다시 읽는다.
+_RECIPE_PAT = re.compile(r"(?im)^\s*RecipeNumber\s*=\s*(-?\d+)\s*$")
+
+
+def _sections(folder: Path) -> tuple:
+    ini = _find_ini(folder)
+    if ini is None:
+        return ()
+    try:
+        st = ini.stat()
+    except OSError:
+        return ()
+    return _parse_sections(ini, st.st_mtime_ns, st.st_size)
+
+
+@lru_cache(maxsize=32)
+def _parse_sections(ini: Path, _mtime_ns: int, _size: int) -> tuple:
+    text = read_ini_text(ini) or ""
+    parts = _SECTION_PAT.split(text)
+    out = []
+    it = iter(parts[1:])
+    for name, content in zip(it, it):
+        kv = _kv(content)
+        m = _RECIPE_PAT.search(content)
+        out.append((Path(name.strip()).stem.lower(), _raw_from_kv(kv),
+                    _xy_from_kv(kv), int(m.group(1)) if m else 0))
+    return tuple(out)
 
 
 @lru_cache(maxsize=256)
@@ -184,19 +220,9 @@ def load_raw_folder(folder: Path) -> dict[str, tuple[float, float, int, int]]:
     :func:`~.wafer_geometry.camtek_geometry` 가 읽은 die pitch 를 검산할 때 쓴다
     (``Col == floor(X/pitch_x)``).  변환 상수를 안 쓰므로 geometry 와 순환하지 않는다.
     """
-    ini = _find_ini(folder)
-    if ini is None:
-        return {}
     try:
-        text = read_ini_text(ini) or ""
-        parts = _SECTION_PAT.split(text)
-        result: dict[str, tuple[float, float, int, int]] = {}
-        it = iter(parts[1:])
-        for name, content in zip(it, it):
-            raw = _extract_raw(content)
-            if raw is not None:
-                result[Path(name.strip()).stem.lower()] = raw
-        return result
+        return {stem: raw for stem, raw, _xy, _recipe in _sections(folder)
+                if raw is not None}
     except Exception:
         return {}
 
@@ -211,18 +237,8 @@ def load_recipe_folder(folder: Path) -> dict[str, int]:
 
     :func:`load_raw_folder` 의 4-튜플 계약을 안 건드리려고 별도 캐시로 둔다
     (``load_abs_folder`` 와 같은 관습)."""
-    ini = _find_ini(folder)
-    if ini is None:
-        return {}
     try:
-        text = read_ini_text(ini) or ""
-        parts = _SECTION_PAT.split(text)
-        result: dict[str, int] = {}
-        it = iter(parts[1:])
-        for name, content in zip(it, it):
-            m = re.search(r"(?im)^\s*RecipeNumber\s*=\s*(-?\d+)\s*$", content)
-            result[Path(name.strip()).stem.lower()] = int(m.group(1)) if m else 0
-        return result
+        return {stem: recipe for stem, _raw, _xy, recipe in _sections(folder)}
     except Exception:
         return {}
 
@@ -241,39 +257,8 @@ def resolve(image_path: Path) -> Optional[DefectCoord]:
 @lru_cache(maxsize=256)
 def load_abs_folder(folder: Path) -> dict[str, tuple[float, float]]:
     """폴더의 INI → {stem(소문자) → (절대 X, 절대 Y)}.  없으면 빈 dict."""
-    ini = _find_ini(folder)
-    if ini is None:
-        return {}
     try:
-        text = read_ini_text(ini) or ""
-        parts = _SECTION_PAT.split(text)
-        result: dict[str, tuple[float, float]] = {}
-        it = iter(parts[1:])
-        for name, content in zip(it, it):
-            stem = Path(name.strip()).stem
-            xy = _extract_abs(content)
-            if xy is not None:
-                result[stem.lower()] = xy
-        return result
+        return {stem: xy for stem, _raw, xy, _recipe in _sections(folder)
+                if xy is not None}
     except Exception:
         return {}
-
-
-def _extract_abs(content: str) -> Optional[tuple[float, float]]:
-    """INI 섹션 내용 → (절대 X, 절대 Y).  X/Y(또는 FaultX/FaultY) 없으면 None."""
-    kv: dict[str, str] = {}
-    for m in _KEY_PAT.finditer(content):
-        kv[m.group(1).upper()] = m.group(2).strip()
-
-    def fget(key: str) -> Optional[float]:
-        v = kv.get(key)
-        try:
-            return float(v) if v is not None else None
-        except ValueError:
-            return None
-
-    X = fget("X") if fget("X") is not None else fget("FAULTX")
-    Y = fget("Y") if fget("Y") is not None else fget("FAULTY")
-    if X is None or Y is None:
-        return None
-    return (X, Y)

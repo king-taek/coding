@@ -258,3 +258,39 @@ def test_describe_survives_missing_file(tmp_path):
     groups = single_info.describe(tmp_path / "nope.jpeg")
     assert _labels(groups) == [i18n.KO.IMAGE_INFO_ROW_FILE,
                                i18n.KO.IMAGE_INFO_ROW_FOLDER]
+
+
+# ---------------------------------------------------------------------------
+# 성능 회귀 — 사진 1장 조회에 INI 를 한 번만 읽는다
+# ---------------------------------------------------------------------------
+def test_describe_reads_the_ini_only_once(tmp_path, monkeypatch):
+    """결함 수천 건 폴더에서 INI 는 수 MB 다.  좌표·pitch 검산·레시피·절대좌표가
+    각자 다시 읽던 때는 사진 한 장에 NAS 에서 같은 파일을 4번 읽어 단일 사진 정보가
+    느렸다 — 한 번만 읽고, 결과는 그대로여야 한다."""
+    import shutil
+    from pathlib import Path
+
+    from aoi_verification.app.coords import wafer_geometry
+
+    src = (Path(__file__).resolve().parents[2]
+           / "dev" / "좌표 확인" / "die맵" / "PGEE48-13C5(AOI-11)")
+    for f in src.iterdir():
+        shutil.copy(f, tmp_path / f.name)
+    img = tmp_path / "145526.119503.c.-1654695316.jpeg"
+    img.write_bytes(b"x")
+    for fn in (camtek_ini.load_folder, camtek_ini.load_raw_folder,
+               camtek_ini.load_recipe_folder, camtek_ini._parse_sections,
+               wafer_geometry.camtek_geometry):
+        fn.cache_clear()
+
+    reads = []
+    real = camtek_ini.read_ini_text
+    monkeypatch.setattr(camtek_ini, "read_ini_text",
+                        lambda p: reads.append(Path(p).name) or real(p))
+
+    groups = single_info.describe(img)
+
+    assert reads.count("ColorImageGrabingInfo.ini") == 1
+    assert "col / row" in _labels(groups)
+    assert camtek_ini.load_abs_folder(tmp_path)[img.stem.lower()] == (
+        145523.83432694, 119503.165751992)
