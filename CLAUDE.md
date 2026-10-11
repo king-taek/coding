@@ -280,25 +280,6 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   하지 마라** — 사진 수에 따라 슬롯마다 격자가 달라져 LOT 합산에서 (3,3)이 (9,3)에 찍혔다.
   같은 LOT(`camtek_live.lot_key`) 사진 전체로 한 번 추정하고 die 맵이 원을 채우게 맞춘다
   (`_fit_to_wafer`, 사진 좌표가 하한). 회귀 가드: `test_wafer_txt.py`.
-- **AVAGO 재리뷰(`coords/rereview.py`)는 1차 리뷰 맵(`<WaferID>.txt`)의 Reject die 사진을
-  재리뷰에서 뺀다** — Reject = `BCEQU`(없으면 `000`) 가 아닌 bin 전부(사용자 결정).
-  맵 칸 ↔ Camtek stage 인덱스는 **평행이동만**, 그리고 `s_DieLocation.dat` 의 die 가
-  **하나도 빠짐없이** 옮긴 맵 die 칸 위에 놓이고 그 이동이 **유일할 때만** 쓴다
-  (`rereview.align`).  맵에만 있는 칸(장비가 검사 목록에서 뺀 die)은 `MAX_UNSCANNED`(5)
-  까지 허용 — 실물 PH3Q42 가 2962 ≠ 2960/2961 로 전부 거부됐고, 실물 PGEE48 die 맵 대조에서
-  2,960칸이 (2,2) 하나로 겹치고 맵에만 2칸(노치 옆·3시 축)이 남았다(`관측`).  **장비 die 가
-  맵 밖에 하나라도 떨어지는 경우·유일하지 않은 경우를 허용하지 마라** — 엉뚱한 die 의
-  사진이 조용히 빠진다.  맵 없음·불일치·좌표 없음은 전부 **재리뷰에 넣는다**(빼지 않는다).
-  방향: 70×54 격자는 뒤집힌 세 가설이 실물 대조로 반증됐다(R1 해소).  다른 격자는 미확인.
-  **실물 골든(`test_rereview_golden.py`, PH3Q42 2장)**: `2. FVI\2. #11 재 저장` 사진 파일명의
-  (col,row)·x·y 45장이 앱의 INI 변환과 전부 같은 die·≤10 µm 이고, 앱 정렬의 Map 칸이 전부
-  `(col, 아래부터 row)` 의 Reject bin 이다('위부터' 는 전부 000 — 반증).  기대값을 고쳐서
-  통과시키지 마라.  회귀 가드: `test_rereview.py`(`test_real_die_map_fits_real_map_only_unflipped`).
-- **AVAGO 재리뷰의 '1차 Reject 사진 폴더'(`rereview.read_reject_dies`)는 파일명 좌표의 die `(col,row)` 를
-  Scanresult 사진의 INI 유도 die 와 등호로 비교해 뺀다**(Map 과 합집합, 정렬 불필요). 파일명 해석은
-  `camtek_live.parse_live_name` 그대로. 폴더가 맞는지 못 믿으면(웨이퍼 하위 폴더 없음·맞는 die 0개·
-  이름 못 읽음) **빼지 않고 경고**한다. 실물 골든 `test_rereview_reject_folder.py` 가 '#11 재 저장'
-  이름만으로 뺀 사진이 Map 으로 뺀 사진과 같음을 못 박는다 — 기대값을 고쳐 통과시키지 마라.
 - **Wafer map 경고**: 칸이 틀렸을 수 있는 맵(die 없는 칸에 찍힌 점·슬롯 간 격자 불일치·
   좌표 없는 사진·die 크기 추정)은 `wafer_map.map_warnings` 로 판정해 화면 위 배너로 알린다.
   중심 가정·계산 격자는 거의 늘 붙어 배너에 넣지 않는다(범례만).  단 **LIVE 파일명으로 그린

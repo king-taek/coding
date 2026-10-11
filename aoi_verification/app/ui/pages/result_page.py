@@ -6,22 +6,21 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QTimer, pyqtSignal
 from PyQt6.QtWidgets import (QCheckBox, QFileDialog, QFrame, QHBoxLayout, QLabel,
                               QVBoxLayout, QWidget)
 
 from ... import i18n
 from .. import theme
-from ...models.result import REREVIEW_MODE, FinalResult
+from ...models.result import FinalResult
 from ...workers.exporter import ExcelExporter
 from ..widgets.app_logo import build_logo_label
 from ..widgets.loading_overlay import LoadingOverlay
 from ..widgets.neon_button import NeonButton
 from ..widgets.neon_card import NeonCard
-from ..widgets.wafer_map_view import render_map_png, render_reject_map_png
+from ..widgets.wafer_map_view import render_map_png
 from ..widgets import sheet_host as sheets
 from ... import config as _config
-from ...utils import prefs as _prefs
 
 # 조용히 삼키던 사실을 남기는 로거 — `main._setup_logging` 이 캐시 폴더의 app.log 로
 # 보낸다(`ui/main_window.py` 와 같은 이름 규칙).
@@ -121,8 +120,6 @@ class ResultPage(QWidget):
         card_row.addWidget(self._summary_card, 100)
         card_row.addStretch(1)
         root.addLayout(card_row)
-        self._root = root
-        self._card_row = card_row
 
         root.addStretch(1)
 
@@ -166,16 +163,6 @@ class ResultPage(QWidget):
         #   비활성으로 내려 '지금은 의미 없음' 을 화면이 직접 말하게 한다.
         #   (묶음 캡션은 사용자 결정으로 삭제 — 배치·순서는 현행 그대로다.)
         self.original_quality_chk.toggled.connect(self._sync_option_dependency)
-
-        # AVAGO 재리뷰 전용 — 끄면 Reject 사진만 엑셀에 넣는다(사용자 요청).
-        self.include_good_chk = QCheckBox(i18n.KO.REREVIEW_INCLUDE_GOOD_LABEL, self)
-        self.include_good_chk.setToolTip(i18n.KO.REREVIEW_INCLUDE_GOOD_TOOLTIP)
-        self.include_good_chk.setChecked(
-            bool(getattr(_prefs.load(), "rereview_include_good", False)))
-        self.include_good_chk.toggled.connect(
-            lambda on: _prefs.patch(rereview_include_good=bool(on)))
-        self.include_good_chk.setVisible(False)
-        opt_row.addWidget(self.include_good_chk)
 
         self.full_template_chk = QCheckBox(i18n.KO.EXPORT_FULL_TEMPLATE_LABEL, self)
         self.full_template_chk.setChecked(False)
@@ -283,12 +270,6 @@ class ResultPage(QWidget):
         #   빠져도 **그 자리에 그대로 남아** 새 타일 뒤로 삐져나왔다(결과를 다시 그릴
         #   때마다 누적).  재귀로 위젯까지 확실히 지운다.
         _clear_layout(self._summary_layout)
-        self._apply_mode_chrome(result.mode == REREVIEW_MODE)
-        # 재리뷰는 웨이퍼 표(보통 25장)가 들어가 넓게 쓰고, 세로로도 남는 높이를 다 쓴다
-        # — 표만 카드 안에서 스크롤한다(카드가 잘리지 않게).
-        rr_mode = result.mode == REREVIEW_MODE
-        self._summary_card.setMaximumWidth(980 if rr_mode else 820)
-        self._root.setStretchFactor(self._card_row, 6 if rr_mode else 0)
 
         # 라인 헬퍼
         def line(text: str, role: str = "subtitle"):
@@ -296,11 +277,6 @@ class ResultPage(QWidget):
             lab.setProperty("role", role)
             lab.setWordWrap(True)
             self._summary_layout.addWidget(lab)
-
-        if result.mode == REREVIEW_MODE:
-            self._show_rereview_summary(result, line)
-            self._refresh_save_target()      # 저장 파일명은 아래 버튼 줄이 이미 보여 준다
-            return
 
         line(i18n.KO.RESULT_MACHINES_FMT.format(ref=result.ref_machine,
                                                 val=result.val_machine))
@@ -460,126 +436,6 @@ class ResultPage(QWidget):
         row.addStretch(1)
         return row
 
-    # ------------------------------------------------------------------
-    # AVAGO 재리뷰 결과
-    # ------------------------------------------------------------------
-    def _apply_mode_chrome(self, rereview: bool) -> None:
-        """재리뷰 결과에는 매칭 전용 버튼·옵션이 의미가 없다 — 감추고, 검토 복귀는
-        '선별로' 가 된다(판정을 고치러 선별 화면으로 돌아간다)."""
-        K = i18n.KO
-        self.title.setText(K.REREVIEW_RESULT_TITLE if rereview else K.RESULT_TITLE)
-        self.review_btn.setText(K.REREVIEW_BACK_TO_SELECT if rereview
-                                else K.BTN_BACK_TO_REVIEW)
-        for w in (self.wafer_map_btn, self.review_unmatched_btn,
-                  self.unmatched_original_chk, self.full_template_chk):
-            w.setVisible(not rereview)
-        self.include_good_chk.setVisible(rereview)
-
-    def _show_rereview_summary(self, result: FinalResult, line) -> None:
-        """**추가된 Reject die 만** 보인다(사용자 결정) — 신규 Reject die 수(크게)와
-        그 die 목록(웨이퍼 · die (col, row) · Reject 사진 수).  웨이퍼별 나열은 하지 않는다.
-        목록이 길면 그 목록만 카드 안에서 스크롤한다(카드·글자가 잘리지 않게)."""
-        from PyQt6.QtWidgets import QGridLayout, QScrollArea, QWidget
-
-        from ...coords import rereview as rr
-
-        K = i18n.KO
-        card = self._summary_card
-        # (웨이퍼, die) → 그 die 에서 Reject 한 사진 수.  die 를 모르면 (웨이퍼, None).
-        dies: dict = {}
-        for slot in sorted(result.rereview):
-            plan = result.rereview[slot]
-            confirmed = set(rr.confirmed_new_rejects(plan, result.rereview_rejects(slot)))
-            for p in result.rereview_rejects(slot):
-                # 맵 대응이 확정된 신규 die 만 die 로 센다 — 정렬 실패·맵 밖은 '확인 필요'.
-                key = (slot, plan.die_of.get(Path(p)) if Path(p) in confirmed else None)
-                dies[key] = dies.get(key, 0) + 1
-        known = sorted(k for k in dies if k[1] is not None)
-        unknown = sorted(k for k in dies if k[1] is None)
-        n_new = len(known)
-        n_photos = sum(dies.values())
-
-        line(K.REREVIEW_RESULT_HEAD_FMT.format(lot=result.ref_machine,
-                                               n=len(result.rereview)), role="muted")
-        hero = QHBoxLayout()
-        hero.setSpacing(16)
-        val = QLabel(f"{n_new:,}", card)
-        val.setProperty("role", "rrHeroValue")
-        val.setProperty("tone", "over" if n_new else "none")
-        hero.addWidget(val, alignment=Qt.AlignmentFlag.AlignVCenter)
-        cap = QVBoxLayout()
-        cap.setSpacing(2)
-        c1 = QLabel(K.REREVIEW_STAT_NEW_DIES, card)
-        c1.setProperty("role", "rrHeroCaption")
-        c2 = QLabel(K.REREVIEW_NEW_DIES_SUB_FMT.format(
-            photos=n_photos, wafers=len({w for w, _ in dies})), card)
-        c2.setProperty("role", "muted")
-        cap.addWidget(c1)
-        cap.addWidget(c2)
-        hero.addLayout(cap)
-        hero.addStretch(1)
-        self._summary_layout.addLayout(hero)
-
-        if not dies:
-            line(K.REREVIEW_NO_NEW_DIES, role="muted")
-        else:
-            heads = K.REREVIEW_TABLE_COLS
-            head_grid = QGridLayout()
-            head_grid.setContentsMargins(0, 0, 14, 0)
-            head_grid.setHorizontalSpacing(0)
-            for c, text in enumerate(heads):
-                h = QLabel(text, card)
-                h.setProperty("role", "rrHead")
-                h.setAlignment(Qt.AlignmentFlag.AlignLeft if c < 2
-                               else Qt.AlignmentFlag.AlignRight)
-                head_grid.addWidget(h, 0, c)
-                head_grid.setColumnStretch(c, 3 if c == 0 else 2)
-            self._summary_layout.addLayout(head_grid)
-            host = QWidget()
-            host.setProperty("role", "rowHost")
-            table = QGridLayout(host)
-            table.setContentsMargins(0, 0, 0, 0)
-            table.setSpacing(0)
-            for r, key in enumerate(known + unknown):
-                slot, die = key
-                cells = (slot,
-                         K.REREVIEW_DIE_CELL_FMT.format(col=die[0], row=die[1]) if die
-                         else K.REREVIEW_DIE_UNKNOWN,
-                         f"{dies[key]:,}")
-                for c, text in enumerate(cells):
-                    lab = QLabel(text, host)
-                    lab.setProperty("role", "rrCellName" if c == 0 else "rrCell")
-                    if c == 1 and die:
-                        lab.setProperty("tone", "over")
-                    lab.setAlignment((Qt.AlignmentFlag.AlignLeft if c < 2
-                                      else Qt.AlignmentFlag.AlignRight)
-                                     | Qt.AlignmentFlag.AlignVCenter)
-                    table.addWidget(lab, r, c)
-            table.setColumnStretch(0, 3)
-            for c in range(1, len(heads)):
-                table.setColumnStretch(c, 2)
-            table.setRowStretch(len(dies), 1)
-            scroll = QScrollArea(card)
-            scroll.setWidgetResizable(True)
-            scroll.setFrameShape(QFrame.Shape.NoFrame)
-            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-            scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
-            scroll.setProperty("role", "rowHost")
-            scroll.viewport().setProperty("role", "rowHost")
-            scroll.setWidget(host)
-            scroll.setMinimumHeight(120)
-            self._rr_table_scroll = scroll
-            self._summary_layout.addWidget(scroll, 1)
-        self._summary_layout.setSpacing(6)
-
-        # 확인이 필요한 웨이퍼(맵 대조 실패 등) — 결과 해석에 걸리므로 한 줄만 남긴다.
-        n_warn = sum(1 for p in result.rereview.values() if p.warnings)
-        if n_warn:
-            warn = QLabel(K.REREVIEW_WARN_SUMMARY_FMT.format(n=n_warn), card)
-            warn.setProperty("role", "sectionWarn")
-            warn.setToolTip("\n".join(rr.warning_lines(result.rereview)))
-            self._summary_layout.addWidget(warn)
-
     def _stat_tile(self, value: int, caption: str, tone: str) -> QFrame:
         tile = QFrame(self._summary_card)
         tile.setProperty("role", "statTile")
@@ -656,8 +512,6 @@ class ResultPage(QWidget):
             original_quality=self.original_quality_chk.isChecked(),
             unmatched_original_quality=self.unmatched_original_chk.isChecked(),
             map_renderer=render_map_png,          # Wafer Map 시트(화면과 같은 렌더러)
-            reject_map_renderer=render_reject_map_png,   # AVAGO 재리뷰 Reject die 맵
-            include_good=self.include_good_chk.isChecked(),
         )
         # ★ 30안 — 워커가 보내는 문구(어느 시트·어느 슬롯)를 **그대로 띄운다**.
         #   예전엔 `msg` 를 버리고 고정 문구만 썼다.  행 수치는 여전히 오버레이의

@@ -22,8 +22,7 @@ from typing import Optional
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
 from .. import i18n
-from ..models.result import (EXTRACT_MODE, REREVIEW_MODE, VERDICT_REJECT, FinalResult,
-                             MatchResult, MissEntry)
+from ..models.result import EXTRACT_MODE, FinalResult, MatchResult, MissEntry
 from ..models.slot import lot_of, slot_label
 from ..utils import image_io
 
@@ -155,24 +154,13 @@ class ExcelExporter(QThread):
                  unmatched_original_quality: bool = False,
                  map_renderer=None,
                  recipe_layout: str = RECIPE_LAYOUT_SINGLE,
-                 reject_map_renderer=None,
-                 include_good: bool = False,
                  parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._result = result
-        # AVAGO 재리뷰 — 행은 재리뷰한 사진 전부(추출과 같은 C=사진·D=정보 모양)에 판정·die
-        # 열을 덧붙이고, Reject die 맵 시트를 만든다(요약 시트는 두지 않는다 — 사용자 결정).
-        self._rereview = result.mode == REREVIEW_MODE
-        # ``(RejectMap, 신규 Reject 칸, size_px) -> PNG`` — UI 계층이 넘긴다(맵 렌더러와 같은 이유).
-        self._reject_map_renderer = reject_map_renderer
-        # 재리뷰 — Good 사진까지 '전체' 시트로 넣을지(끄면 Reject 시트만, 사용자 결정).
-        self._include_good = bool(include_good)
         # Defect 추출 — 행이 전부 '고른 사진'(unmatched_refs)이다.  미매칭 행과 같은 모양
         # (C=사진, D=파일명·계측·좌표 글자)으로 적되 '미매칭' 표시(행 틴트·메모·시트)는
         # 붙이지 않는다 — 매칭을 하지 않았으므로 미매칭도 아니다.
         self._extract = result.mode == EXTRACT_MODE
-        # 한쪽 장비 사진만 싣는 모드 — 행이 '미매칭' 이 아니다(틴트·메모를 붙이지 않는다).
-        self._one_side = self._extract or self._rereview
         # Recipe 나누기는 추출에만 있다 — 매칭 결과는 언제나 예전 배치다.
         self._recipe_layout = (recipe_layout if self._extract
                                else RECIPE_LAYOUT_SINGLE)
@@ -182,8 +170,7 @@ class ExcelExporter(QThread):
         self._dst = Path(dst_path)
         self._template = Path(template_path) if template_path else None
         # 전체 양식(E~H 수기 영역 포함) 시트 생성 여부 — 기본 off(가볍고 빠른 출력).
-        self._include_full_template = (bool(include_full_template)
-                                       and not self._rereview)
+        self._include_full_template = bool(include_full_template)
         # 사진을 원본 화질로 임베드할지 — 기본 off(중간 화질 캐시로 가볍게).
         self._original_quality = bool(original_quality)
         # 미매칭 사진만 원본 화질로 — 전체 원본 옵션이 켜져 있으면 어차피 전부 원본.
@@ -247,15 +234,13 @@ class ExcelExporter(QThread):
         ws.title = SHEET_FULL_NAME
 
         # row 2 의 ‘AOI-N’ 헤더를 실제 호기 번호로 교체 (#3).
-        # 재리뷰는 호기 대신 사용자가 적은 LOT명(S/M)을 그대로 쓴다.
-        ref_label = (self._result.ref_machine if self._rereview
-                     else _machine_label(self._result.ref_machine))
+        ref_label = _machine_label(self._result.ref_machine)
         val_label = _machine_label(self._result.val_machine)
         if ref_label:
             ws[f"{COL_REF}{HEADER_AOI_ROW}"] = ref_label
         if val_label:
             ws[f"{COL_VAL}{HEADER_AOI_ROW}"] = val_label
-        if self._one_side:
+        if self._extract:
             # 추출은 장비가 하나다 — D열은 두 번째 장비가 아니라 C열 사진의 정보 칸.
             ws[f"{COL_VAL}{HEADER_AOI_ROW}"] = i18n.KO.EXTRACT_INFO_HEADER
 
@@ -283,39 +268,25 @@ class ExcelExporter(QThread):
             rows_input.append((m.slot, str(m.ref_path.name).lower(), m))
         for u in self._result.unmatched_refs:
             rows_input.append((u.slot, str(u.path.name).lower(), u))
-        if self._rereview:
-            # 재리뷰는 결과가 정한 순서(웨이퍼 → Reject 먼저 → 파일명)를 그대로 쓴다.
-            rows_input.sort(key=lambda x: x[0])
-        else:
-            rows_input.sort(key=lambda x: (x[0], x[1]))
+        rows_input.sort(key=lambda x: (x[0], x[1]))
 
         # 진행률 총량 = 이번 저장이 채울 **모든 시트의 행 수 합** (아래 채우는
         # 순서와 같은 순서로 더한다).  시트가 몇 장이든 바는 0 → 100 을 한 번만
         # 지난다.
-        unmatched_rows = ([] if self._one_side else
+        unmatched_rows = ([] if self._extract else
                           [r for r in rows_input if isinstance(r[2], MissEntry)])
         self._prog_done = 0
-        map_rows = [] if self._rereview else self._wafer_map_rows()
-        rr_map_rows = (sorted(s for s, p in self._result.rereview.items() if not p.no_map)
-                       if self._rereview and self._reject_map_renderer else [])
+        map_rows = self._wafer_map_rows()
         prewarm = ([u.path for u in self._result.unmatched_refs]
-                   if self._one_side else [])
-        sheet_rows = len(rows_input)
-        if self._rereview:
-            # 시트: Reject → (Good 포함이면) 전체 → Wafer Map (사용자 지정 순서).
-            rr_reject_rows = [r for r in rows_input if r[2].note == VERDICT_REJECT]
-            rr_all_rows = rows_input if self._include_good else []
-            sheet_rows = len(rr_reject_rows) + len(rr_all_rows)
-            prewarm = [r[2].path for r in (rr_all_rows or rr_reject_rows)]
+                   if self._extract else [])
         scan_paths = self._scan_paths()
         self._prog_total = (
             len(scan_paths)                                          # Scan 확인
             + len(prewarm)                                           # 사진 준비(추출)
             + (len(rows_input) if self._include_full_template else 0)   # 전체 양식
             + len(unmatched_rows)                                    # 미매칭 시트
-            + sheet_rows                                             # 요약 시트(들)
+            + len(rows_input)                                        # 요약 시트
             + len(map_rows)                                          # Wafer map 시트
-            + len(rr_map_rows)                                       # Reject die 맵
         )
         self._scan_prepass(scan_paths)
         if self._scan_cols:
@@ -338,16 +309,7 @@ class ExcelExporter(QThread):
 
         # 시트 순서: 미매칭(첫 번째, 조건부) → 요약 → 전체 양식.
         lots = self._lot_units(rows_input) if self._extract else []
-        if self._rereview:
-            index = 0
-            for title, rows in ((i18n.KO.REREVIEW_SHEET_REJECT, rr_reject_rows),
-                                (i18n.KO.REREVIEW_SHEET_ALL, rr_all_rows)):
-                if title == i18n.KO.REREVIEW_SHEET_ALL and not self._include_good:
-                    continue                    # Reject 만 출력 — '전체' 시트 미생성
-                self._build_ad_sheet(wb, title, index, rows)
-                self._add_rereview_columns(wb[title], rows)
-                index += 1
-        elif self._extract and (self._recipe_layout != RECIPE_LAYOUT_SINGLE
+        if self._extract and (self._recipe_layout != RECIPE_LAYOUT_SINGLE
                               or len(lots) > 1):
             self._write_extract_sheets(wb, lots)
         elif unmatched_rows:
@@ -363,11 +325,6 @@ class ExcelExporter(QThread):
 
         # Wafer map — 슬롯별 + LOT 합산 PNG.  그림 한 장의 실패가 저장 전체를
         # 막지 않는다(사진 임베드와 같은 원칙).
-        if rr_map_rows:
-            try:
-                self._write_reject_map_sheet(wb, rr_map_rows)
-            except Exception:
-                _LOG.exception("Reject die 맵 시트 실패 — 건너뜀")
         if map_rows:
             t0 = time.perf_counter()
             try:
@@ -720,7 +677,7 @@ class ExcelExporter(QThread):
             counts[st] = counts.get(st, 0) + 1
         found = counts.get(scan_image.OK, 0) + counts.get(scan_image.UNREADABLE, 0)
         if found:
-            self._scan_cols = ["E"] if self._one_side else ["E", "F"]
+            self._scan_cols = ["E"] if self._extract else ["E", "F"]
         _LOG.info("저장 소요 [Scan 확인] %.2f초 %d장 — 상태별 %s",
                   time.perf_counter() - t0, len(paths), counts)
 
@@ -762,7 +719,7 @@ class ExcelExporter(QThread):
                     dst.fill = _copy(src.fill)
                     dst.border = _copy(src.border)
                     dst.alignment = _copy(src.alignment)
-        if self._one_side:
+        if self._extract:
             ws[f"E{HEADER_AOI_ROW}"] = i18n.KO.SCAN_EXCEL_HEADER
         else:
             for col, src in zip(self._scan_cols, (COL_REF, COL_VAL)):
@@ -892,7 +849,7 @@ class ExcelExporter(QThread):
             # 덧그려져야 살아남는다(순서를 바꾸면 구분선이 지워진다).
             self._style_data_row(ws, row, style_cols, idx - 1,
                                  unmatched=(isinstance(payload, MissEntry)
-                                            and not self._one_side),
+                                            and not self._extract),
                                  fills=fills, tint_cols=border_cols)
 
             # 슬롯 변경 시 A~H 전 열에 top border 적용 (기존 좌/우/하 보존).
@@ -950,7 +907,7 @@ class ExcelExporter(QThread):
                     ws[f"{COL_REF}{row}"] = str(Path(u.path).name)
                 t1 = time.perf_counter()
                 self._write_info_cell(ws, COL_VAL, row, u.path,
-                                      unmatched_note=not self._one_side)
+                                      unmatched_note=not self._extract)
                 # 미매칭·추출 행의 Scan 은 **그 사진의 것**만, 첫 Scan 열(E)에 둔다.
                 # 검증 Scan 칸(F)은 짝 사진이 없으니 비워 둔다.
                 if self._scan_cols:
@@ -1375,114 +1332,6 @@ class ExcelExporter(QThread):
             note.alignment = Alignment(wrap_text=True, vertical="center")
             ws.row_dimensions[note_row].height = 36
         self._prog_done = base + len(rows)
-
-    # ------------------------------------------------------------------
-    # AVAGO 재리뷰
-    # ------------------------------------------------------------------
-    def _rr_header(self, cell, text: str) -> None:
-        from openpyxl.styles import Alignment, Font, PatternFill
-        cell.value = text
-        cell.font = Font(name=TEMPLATE_FONT, bold=True, color="FFFFFFFF")
-        cell.fill = PatternFill("solid", fgColor=HEADER_NAVY)
-        cell.alignment = Alignment(horizontal="center", vertical="center",
-                                   wrap_text=True)
-
-    def _add_rereview_columns(self, ws, rows_input: list) -> None:
-        """사진 시트 끝에 **판정**·**die (col, row)** 열 — 행 순서는 ``_fill_rows`` 와 같다."""
-        from openpyxl.styles import Alignment, Font, PatternFill
-        from openpyxl.utils import get_column_letter
-
-        n = len(self._ad_cols())
-        v_col, d_col = get_column_letter(n + 1), get_column_letter(n + 2)
-        for col, text in ((v_col, i18n.KO.REREVIEW_VERDICT_HEADER),
-                          (d_col, i18n.KO.REREVIEW_DIE_HEADER)):
-            self._rr_header(ws[f"{col}1"], text)
-            ws.merge_cells(f"{col}1:{col}2")
-            ws.column_dimensions[col].width = 13
-        center = Alignment(horizontal="center", vertical="center")
-        for idx, (slot, _key, u) in enumerate(rows_input):
-            r = DATA_START_ROW + idx
-            reject = u.note == VERDICT_REJECT
-            c = ws[f"{v_col}{r}"]
-            c.value = u.note
-            c.alignment = center
-            c.font = Font(name=TEMPLATE_FONT, bold=True,
-                          color="FFC00000" if reject else "FF2E7D32")
-            if reject:
-                c.fill = PatternFill("solid", fgColor="FFFDE2E2")
-            plan = self._result.rereview.get(slot)
-            die = plan.die_of.get(Path(u.path)) if plan else None
-            d = ws[f"{d_col}{r}"]
-            d.value = (i18n.KO.REREVIEW_DIE_CELL_FMT.format(col=die[0], row=die[1])
-                       if die else "—")
-            d.alignment = center
-
-    _RR_MAP_PX = 480       # 재리뷰 맵 한 변(px) — die 수천 칸이라 결함 맵보다 크게
-
-    def _write_reject_map_sheet(self, wb, slots: list[str]) -> None:
-        """웨이퍼마다 **기존 Map**(1차 리뷰) · **수정된 Map**(재리뷰 신규 Reject 반영).
-
-        그림은 Wafer map 보기와 같은 생김새(`paint_reject_map`) — 노치는 아래에 표시."""
-        import io
-
-        from openpyxl.drawing.image import Image as XLImage
-        from openpyxl.styles import Alignment, Font
-        from openpyxl.utils.units import pixels_to_points
-
-        from ..coords import rereview as rr
-
-        K = i18n.KO
-        ws = wb.create_sheet(title=K.WAFER_MAP_SHEET)
-        ws["A1"] = K.WAFER_MAP_SHEET_COL_SLOT
-        ws["B1"] = K.REREVIEW_MAP_COL_ORIG
-        ws["C1"] = K.REREVIEW_MAP_COL_NEW
-        center = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        for c in "ABC":
-            ws[f"{c}1"].font = Font(bold=True)
-            ws[f"{c}1"].alignment = center
-        ws.row_dimensions[1].height = 24
-        ws.column_dimensions["A"].width = 22
-        size = self._RR_MAP_PX
-        px_w = size + 8
-        for c in "BC":
-            ws.column_dimensions[c].width = px_w / 7.0
-        ws.column_dimensions["D"].width = 40
-        legend = ws.cell(row=2, column=1, value=K.REREVIEW_MAP_LEGEND)
-        legend.font = Font(bold=True, color="FF5A574E")
-        ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=3)
-        base = self._prog_done
-        for idx, slot in enumerate(slots, start=1):
-            if self._stop.is_set():
-                raise _Cancelled
-            self.signals.progress.emit(
-                base + idx, self._prog_total,
-                K.EXPORT_PHASE_FMT.format(sheet=K.WAFER_MAP_SHEET, slot=slot))
-            r = idx + 2
-            ws.cell(row=r, column=1, value=self._slot_with_number(slot)).alignment = center
-            ws.row_dimensions[r].height = pixels_to_points(px_w)
-            plan = self._result.rereview[slot]
-            rm = plan.reject_map
-            if rm is None:
-                ws.cell(row=r, column=2, value=K.REREVIEW_MAP_NO_MAP).alignment = center
-                continue
-            new = (rr.new_reject_cells(plan, self._result.rereview_rejects(slot))
-                   if plan.aligned else frozenset())
-            n_map = len(rm.rejects)
-            for col, cells, label in (
-                    ("B", frozenset(), K.REREVIEW_MAP_LABEL_ORIG_FMT.format(n=n_map)),
-                    ("C", new, K.REREVIEW_MAP_LABEL_NEW_FMT.format(
-                        n=n_map + len(new), new=len(new)))):
-                try:
-                    xli = XLImage(io.BytesIO(self._reject_map_renderer(
-                        rm, cells, size, pitch=plan.pitch, label=label)))
-                    xli.width = xli.height = size
-                    _add_image_centered(ws, xli, col, r, px_w, px_w)
-                except Exception:
-                    ws[f"{col}{r}"] = "—"
-            if not plan.aligned:
-                note = ws.cell(row=r, column=4, value=K.REREVIEW_MAP_NOT_ALIGNED)
-                note.alignment = Alignment(wrap_text=True, vertical="center")
-        self._prog_done = base + len(slots)
 
     # ------------------------------------------------------------------
     def _write_slot_mismatch_sheet(self, wb) -> None:
