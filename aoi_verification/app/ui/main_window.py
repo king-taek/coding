@@ -2337,7 +2337,12 @@ class MainWindow(QMainWindow):
         """무거운 모듈이 다 올라왔다 — 나머지 페이지를 만들고 시작 버튼을 연다."""
         if self._select_page is None:
             try:
+                # 화면 스레드에서 위젯을 만드는 구간이라 그동안 UI 가 멈춘다 — 폴더 창을
+                # 닫은 직후의 정지(`setup_page._log_stall`)와 시각을 맞춰 보려고 남긴다.
+                t0 = time.perf_counter()
                 self._build_remaining_pages()
+                _LOG.info("나머지 화면 생성: %.2f초(화면 스레드)",
+                          time.perf_counter() - t0)
             except Exception as exc:          # import 실패가 여기서 표면화된다
                 sheets.error(self, i18n.KO.APP_TITLE,
                              i18n.KO.BACKEND_LOAD_FAILED_FMT.format(err=exc))
