@@ -151,6 +151,10 @@ class SimilarityConfig:
     embed_batch: int = 1
     # 좌표 기반 매칭(v2) 허용 오차 — µm 단위.  두 좌표의 유클리드 거리가 이 이내면 매칭.
     coord_tolerance: float = DEFAULT_COORD_TOLERANCE
+    # KLA↔Camtek 좌표 보정값 (dx, dy) µm — Camtek − KLA.  매칭 직전 '좌표 보정' 화면에서
+    # 사용자가 고른 쌍으로 정한다(``coords.calibration``).  **매칭 계산에만** 쓰이고
+    # 엑셀·화면 좌표에는 영향이 없다(사용자 지시).  (0, 0) = 보정 안 함(건너뛰기).
+    coord_offset: tuple = (0.0, 0.0)
     # CPU 재채점 고속화 노브 — ORB 검출 특징 수(0=기본 500).  ORB(디스크립터 검출/
     # 정합)는 고전 채점에서 가장 비싼 항이라, 특징 수를 줄이면 CPU 매치 단계가 빨라진다
     # (정확도는 검증 필요).  개발자 벤치마크 전용으로만 0 이 아닌 값을 쓴다.

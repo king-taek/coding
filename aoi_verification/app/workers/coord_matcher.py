@@ -47,6 +47,7 @@ from typing import Dict, List, Optional, Set, Tuple
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
 from ..coords import resolve_batch as _resolve_batch
+from ..coords import calibration as _calib
 from .. import i18n
 from ..models.slot import ImageItem
 from .matcher import score_ref_classical
@@ -158,6 +159,9 @@ class CoordScheduler(QThread):
         _dflt = _config.DEFAULT_COORD_TOLERANCE
         tol = getattr(cfg, "coord_tolerance", _dflt) if cfg is not None else _dflt
         self._tolerance = float(tol) if tol and tol > 0.0 else _dflt
+        # KLA↔Camtek 보정값 — 매칭용 사본에만 적용한다(`_calib.apply_offset`).
+        off = getattr(cfg, "coord_offset", None) if cfg is not None else None
+        self._offset = (float(off[0]), float(off[1])) if off else _calib.ZERO
 
     def stop(self) -> None:
         self._stop.set()
@@ -189,6 +193,8 @@ class CoordScheduler(QThread):
             all_paths,
             lambda done, total: self.signals.progress.emit(done, total),
         )
+        # ★ 사용자 보정값은 **이 사본에만** 더한다 — resolve 캐시·엑셀·화면 좌표는 원래 값.
+        coord_cache = _calib.apply_offset(coord_cache, self._offset)
 
         # ── 좌표 없는 경우 조기 종료 ────────────────────────────────────
         total_refs = sum(len(refs) for _, refs, _ in self._tasks)

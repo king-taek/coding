@@ -160,6 +160,47 @@ class _FolderScan(QThread):
             self.signals.done.emit(self._token, sr)
 
 
+
+class _CalibPrepWorker(QThread):
+    """좌표 보정 화면 데이터 준비 — 좌표 읽기(INI/.001 파싱)가 느려 백그라운드에서.
+
+    ``groups`` 는 슬롯마다 ``(기준 사진들, 검증 사진들)``.  ``ready`` 로
+    ``(entries, hint)`` 를 낸다(:mod:`coords.calibration`).  실패하면 ``([], None)``
+    — 보정을 건너뛰고 매칭은 그대로 진행한다."""
+
+    progress = pyqtSignal(int, int)
+    ready = pyqtSignal(object)
+
+    # die-내부 좌표를 내는 소스만 짝지을 수 있다(절대좌표 'camtek_abs' 는 틀이 다르다).
+    _DIE_LOCAL = frozenset({"kla", "camtek_ini", "camtek_live"})
+
+    def __init__(self, groups, kla_side: str, parent=None) -> None:
+        super().__init__(parent)
+        self._groups = groups
+        self._src_is_kla = kla_side == "ref"
+
+    def run(self) -> None:  # type: ignore[override]
+        try:
+            from ..coords import calibration as cal
+            from ..coords import resolve_batch
+            paths = [it.path for refs, vals in self._groups for it in (*refs, *vals)]
+            coords = resolve_batch(paths, self.progress.emit)
+
+            def c_of(it):
+                c = coords.get(it.path)
+                return c if c is not None and c.source in self._DIE_LOCAL else None
+
+            groups = [([(it, c_of(it)) for it in refs], [(v, c_of(v)) for v in vals])
+                      for refs, vals in self._groups]
+            hint = cal.guess_offset(
+                [([c for _k, c in s if c], [c for _k, c in o if c]) for s, o in groups],
+                src_is_kla=self._src_is_kla)
+            entries = cal.build_entries(groups, src_is_kla=self._src_is_kla)
+            self.ready.emit((entries, hint))
+        except Exception:
+            _LOG.exception("좌표 보정 준비 실패 — 보정 없이 진행")
+            self.ready.emit(([], None))
+
 class MainWindow(QMainWindow):
 
     # 좁은 창에서도 동작하도록 충분히 작게 (#2 — 사용자 요청: 좌우 스크롤
@@ -282,6 +323,11 @@ class MainWindow(QMainWindow):
         self._sizing_tier: Optional[config.SizingTier] = None
         # 폴더 스캔 워커 (U-05) + [중지] 가 무엇을 멈춰야 하는지 알려 주는 현재 단계 (P-09).
         self._scan_token = 0
+        # 좌표 보정(KLA ↔ Camtek, 매칭 전용) — `_calibrate_then` 참고.
+        self._coord_offset = None
+        self._calib_next = None
+        self._calib_worker = None
+        self._calib_side = None
         self._scan_worker: Optional[_FolderScan] = None
         self._stage = ""
         self._scan: Optional[ScanResult] = None
@@ -996,6 +1042,8 @@ class MainWindow(QMainWindow):
             orb_center_weight=orb_center_weight,
             coord_tolerance=float(getattr(inp, "coord_tolerance",
                                           config.DEFAULT_COORD_TOLERANCE)),
+            # 좌표 보정(매칭 전용) — 보정 화면에서 [보정 적용] 했을 때만 0 이 아니다.
+            coord_offset=tuple(getattr(self, "_coord_offset", None) or (0.0, 0.0)),
         )
 
 
@@ -1324,18 +1372,7 @@ class MainWindow(QMainWindow):
             sheets.warn(self, i18n.KO.APP_TITLE, i18n.KO.WARN_NO_IMAGES)
             return
         pool = self._build_val_pool_by_slot()
-        _sim_cfg = self._make_sim_cfg()
-        self._match_page.load_state(
-            queue=queue,
-            val_pool_by_slot=pool,
-            threshold=self._input.threshold,
-            session_id=self._session_id,
-            auto_mode=True,
-            engine_cfg=_sim_cfg,
-        )
-        self._show_page(self._match_page)
-        self._phase = PHASE_A_MATCH
-        self._autosave()
+        self._calibrate_then(queue, pool, auto_mode=True)
 
     def _on_match_review_done(self,
                               kept: list,
@@ -1502,15 +1539,102 @@ class MainWindow(QMainWindow):
         # 매칭 대상 풀 = 같은 Slot 의 검증(val) 쪽 모든 사진
         pool = self._build_val_pool_by_slot()
 
-        _sim_cfg = self._make_sim_cfg()
         auto_mode = AutomationLevel.is_auto(self._input.automation_level)
+        self._calibrate_then(queue, pool, auto_mode=auto_mode)
+
+    # ==================================================================
+    # 좌표 보정 (KLA ↔ Camtek) — Stage 2 매칭 직전
+    # ==================================================================
+    def _kla_camtek_side(self) -> Optional[str]:
+        """이 실행이 KLA ↔ Camtek 이면 KLA 쪽(``"ref"``/``"val"``), 아니면 None.
+
+        폴더의 KLA 정보파일 헤더(WaferID)만 읽는다 — 좌표 파싱보다 훨씬 싸다.
+        KLA ↔ KLA·Camtek ↔ Camtek 은 같은 장비 규칙이라 보정할 어긋남이 없다."""
+        sr = self._scan
+        if sr is None:
+            return None
+
+        def is_kla(images, folder) -> bool:
+            d = images[0].path.parent if images else folder
+            return d is not None and kla_info.read_wafer_id(Path(d)) is not None
+
+        for name in sr.common_slot_names:
+            slot = sr.slots[name]
+            rk = is_kla(slot.ref_images, slot.ref_dir)
+            vk = is_kla(slot.val_images, slot.val_dir)
+            if rk != vk:
+                return "ref" if rk else "val"
+        return None
+
+    def _calibrate_then(self, queue: list, pool: dict, *, auto_mode: bool) -> None:
+        """좌표 매칭이고 KLA ↔ Camtek 이면 **좌표 보정 화면**을 거쳐 Stage 2 로.
+
+        보정값은 `_make_sim_cfg` → `CoordScheduler` 로만 간다 — 매칭 계산에만 쓰이고
+        엑셀·화면 좌표는 바뀌지 않는다(사용자 지시).  사용자 결정: 평행이동만·실행
+        전체 1회·저장 안 함.  좌표 읽기는 백그라운드에서 하고 진행을 오버레이로 보인다
+        (CLAUDE.md 로딩 규칙)."""
+        self._coord_offset = None
+        self._calib_next = (queue, pool, auto_mode)
+        engine = getattr(self._input, "engine_mode", EngineMode.COORDINATE)
+        side = (self._kla_camtek_side()
+                if EngineMode.is_coordinate(engine) else None)
+        if side is None:
+            self._start_stage2()
+            return
+        self._calib_side = side
+        groups = []
+        for slot_name in sorted(pool):
+            refs = [it for it in queue if it.slot == slot_name]
+            if refs:
+                groups.append((refs, pool[slot_name]))
+        self._loading.show_overlay(i18n.KO.COORD_CAL_LOADING)
+        self._loading.set_progress(0, 0, i18n.KO.COORD_CAL_LOADING)
+        worker = _CalibPrepWorker(groups, side, self)
+        worker.progress.connect(self._on_calib_progress)
+        worker.ready.connect(self._on_calib_ready)
+        self._calib_worker = worker
+        worker.start()
+
+    def _on_calib_progress(self, done: int, total: int) -> None:
+        self._loading.set_progress(done, total, i18n.KO.COORD_CAL_LOADING)
+
+    def _on_calib_ready(self, result) -> None:
+        if self.sender() is not self._calib_worker:
+            return                          # 새 세션으로 밀려난 옛 준비
+        self._calib_worker = None
+        self._loading.hide_overlay()
+        if self._input is None or self._scan is None:
+            return
+        entries, hint = result
+        if entries:
+            from PyQt6.QtWidgets import QDialog
+            from .widgets.coord_calibration_dialog import CoordCalibrationDialog
+            dlg = CoordCalibrationDialog(
+                entries, kla_side=self._calib_side, hint=hint,
+                tolerance=float(getattr(self._input, "coord_tolerance",
+                                        config.DEFAULT_COORD_TOLERANCE)),
+                parent=self)
+            if (sheets.run(dlg, full_bleed=True) == QDialog.DialogCode.Accepted
+                    and dlg.offset is not None):
+                self._coord_offset = dlg.offset
+                _LOG.info("좌표 보정 적용(KLA→Camtek, 매칭 전용): dx=%.1f dy=%.1f µm",
+                          *dlg.offset)
+        else:
+            _LOG.info("좌표 보정: 가까운 짝 후보가 있는 사진이 없어 건너뜀")
+        self._start_stage2()
+
+    def _start_stage2(self) -> None:
+        nxt, self._calib_next = self._calib_next, None
+        if nxt is None or self._input is None or self._scan is None:
+            return
+        queue, pool, auto_mode = nxt
         self._match_page.load_state(
             queue=queue,
             val_pool_by_slot=pool,
             threshold=self._input.threshold,
             session_id=self._session_id,
             auto_mode=auto_mode,
-            engine_cfg=_sim_cfg,
+            engine_cfg=self._make_sim_cfg(),
         )
         self._show_page(self._match_page)
         self._phase = PHASE_A_MATCH
@@ -2085,6 +2209,10 @@ class MainWindow(QMainWindow):
 
     def _new_session(self) -> None:
         session_mod.clear()
+        # 준비 중인 좌표 보정은 버린다(뒤늦은 ready 는 `_on_calib_ready` 가 무시한다).
+        self._calib_worker = None
+        self._calib_next = None
+        self._coord_offset = None
         # #14 세션 종료 — 절전 억제 해제.
         wakelock.release()
         self._matches_a.clear()

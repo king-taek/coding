@@ -1171,3 +1171,27 @@ EXTRACT_MAP_SHEET_COL = "결함 위치"
 CENTER_CROP_LABEL = "가운데 확대"
 CENTER_CROP_FULL = "전체"
 CENTER_CROP_TOOLTIP = "사진 가운데(결함 위치)만 잘라 크게 봅니다 — 50% 는 가운데 절반, 30% 는 더 좁게."
+
+# 좌표 보정(KLA ↔ Camtek) — 매칭 직전, 사용자가 '같은 결함' 사진 쌍을 골라 어긋남을 뺀다.
+# 보정은 매칭 계산에만 쓰이고 엑셀·화면 좌표는 바뀌지 않는다(사용자 지시).
+COORD_CAL_TITLE = "좌표 보정 (KLA ↔ Camtek)"
+COORD_CAL_HINT_FMT = (
+    "왼쪽에서 {src} 사진을 하나 고르고, 오른쪽에서 같은 결함인 {dst} 사진을 누르세요. "
+    "3쌍쯤 고르면 두 장비 좌표의 어긋남을 계산해 매칭 전에 보정합니다.\n"
+    "보정은 매칭에만 쓰이고 엑셀·화면에 찍히는 좌표는 바뀌지 않습니다.")
+COORD_CAL_SRC_HEAD_FMT = "{side} 사진 {n}장"
+COORD_CAL_SRC_MORE_FMT = "가까운 짝 후보가 있는 사진만 보여요 · 후보가 많은 {n}장은 생략"
+COORD_CAL_SIDE_REF_FMT = "기준({dev})"
+COORD_CAL_PICK_FIRST = "왼쪽에서 사진을 고르세요."
+COORD_CAL_CANDS_HEAD_FMT = "같은 결함인 {dst} 사진을 누르세요 — 그럴듯한 순서 · 숫자는 보정 전 거리"
+COORD_CAL_DIST_FMT = "{d:.0f} µm"
+COORD_CAL_PAIRED_FMT = "✓ {i}번 쌍"
+COORD_CAL_PAIRS_NONE = "아직 고른 쌍이 없습니다 — 3쌍쯤 고르면 좋아요."
+COORD_CAL_PAIR_ROW_FMT = "{i}.  {a}  ↔  {b}      가로 {dx:+.0f} · 세로 {dy:+.0f} µm"
+COORD_CAL_RESULT_FMT = "보정값  가로 {dx:+.0f} µm · 세로 {dy:+.0f} µm   ({n}쌍 · 쌍별 남은 오차 최대 {r:.0f} µm)"
+COORD_CAL_RESIDUAL_WARN_FMT = (
+    "남은 오차가 큰 쌍이 있어요(최대 {r:.0f} µm). 잘못 고른 쌍이면 지워 주세요.")
+COORD_CAL_REMOVE = "지우기"
+COORD_CAL_SKIP = "보정 건너뛰기"
+COORD_CAL_APPLY = "보정 적용"
+COORD_CAL_LOADING = "좌표 보정 준비 중 — 두 장비의 좌표를 읽고 있습니다…"
