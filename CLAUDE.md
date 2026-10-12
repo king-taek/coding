@@ -294,6 +294,10 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   AOI Data Viewer VBA `Module_Compare`: `Abs(col차)<=1 And Abs(row차)<=1`). KLA↔Camtek 처럼
   두 장비의 die 인덱스가 1 어긋날 수 있어 정확 일치만 하면 매칭이 전멸한다. 순수 헬퍼
   `_match_neighbors` 로 분리해 헤드리스 테스트한다.
+- **KLA ↔ Camtek 좌표 보정(`coords/calibration.py`)은 매칭 계산 전용이다**(사용자 지시).
+  매칭 직전 보정 화면에서 고른 쌍의 `Camtek − KLA` 중앙값을 `SimilarityConfig.coord_offset` 로
+  넘기고, `CoordScheduler` 가 **자기 사본에만** KLA 좌표를 옮긴다(`apply_offset`). resolve 캐시·
+  엑셀·화면 좌표에 새게 하지 마라. 사용자 결정: 평행이동만·실행 전체 1회·저장 안 함.
 - 좌표 기반 매칭의 검토 후보 노출 규칙:
   - (col,row) ±1 이내 val 후보 중 **최소 거리 ≤ `CONFIDENT_DIST`(=20)** 면 '거의 정확히 일치'로 보고
     **1장만**, 그 외에는 **3×tol 이내 후보를 전부**(거리 오름차순=점수 내림차순) 차순위로 보여준다.

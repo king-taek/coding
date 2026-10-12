@@ -1,0 +1,241 @@
+"""KLA↔Camtek 좌표 보정(`coords.calibration`) — 순수 로직 + 매칭 반영 검증."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from aoi_verification.app.coords import calibration as cal
+from aoi_verification.app.coords.models import DefectCoord
+
+
+def _k(col, row, x, y):
+    return DefectCoord(col=col, row=row, x=x, y=y, source="kla",
+                       native_x=x + 1, native_y=y + 2)
+
+
+def _c(col, row, x, y):
+    return DefectCoord(col=col, row=row, x=x, y=y, source="camtek_ini")
+
+
+def test_pair_offset_is_cam_minus_kla():
+    assert cal.pair_offset(_k(1, 1, 100, 200), _c(1, 1, 112, 82)) == (12, -118)
+
+
+def test_estimate_uses_median_so_one_bad_pair_does_not_drag():
+    pairs = [(10, -120), (12, -118), (11, -119), (900, 900)]
+    dx, dy = cal.estimate_offset(pairs)
+    assert 10 <= dx <= 12 + 1e-9 and -120 <= dy <= -118
+    assert cal.estimate_offset([]) == cal.ZERO
+
+
+def test_residuals():
+    assert cal.residuals([(3, 4), (0, 0)], (0, 0)) == [5.0, 0.0]
+
+
+def test_apply_offset_shifts_only_kla_and_leaves_input_untouched():
+    k = _k(2, 3, 100.0, 200.0)
+    c = _c(2, 3, 50.0, 60.0)
+    src = {"k": k, "c": c, "none": None}
+    out = cal.apply_offset(src, (10.0, -20.0))
+    assert out["k"].x == 110.0 and out["k"].y == 180.0
+    assert (out["k"].col, out["k"].row) == (2, 3)
+    # KLA 원본값(엑셀 표기용)은 그대로
+    assert (out["k"].native_x, out["k"].native_y) == (101.0, 202.0)
+    assert out["c"] is c and out["none"] is None
+    # 입력 dict·객체는 바뀌지 않는다 — 보정이 엑셀·화면 좌표로 새지 않는다
+    assert src["k"] is k and k.x == 100.0
+
+
+def test_apply_zero_offset_is_identity_copy():
+    src = {"k": _k(0, 0, 1, 2)}
+    out = cal.apply_offset(src, (0.0, 0.0))
+    assert out == src and out is not src
+
+
+def test_guess_offset_finds_shared_shift_among_noise():
+    shift = (15.0, -120.0)
+    kla = [_k(i % 3, i // 3, 1000.0 + 300 * i, 2000.0 + 170 * i) for i in range(8)]
+    cam = [_c(k.col, k.row, k.x + shift[0], k.y + shift[1]) for k in kla]
+    # 우연한 이웃(흩어진 어긋남)
+    cam += [_c(0, 0, 1400.0, 1700.0), _c(1, 0, 1800.0, 2900.0)]
+    g = cal.guess_offset([(kla, cam)], src_is_kla=True)
+    assert g is not None
+    assert abs(g[0] - shift[0]) < 1e-6 and abs(g[1] - shift[1]) < 1e-6
+    # 기준이 Camtek 이어도 부호 규약(cam − kla)은 같다
+    g2 = cal.guess_offset([(cam[:8], kla)], src_is_kla=False)
+    assert abs(g2[0] - shift[0]) < 1e-6 and abs(g2[1] - shift[1]) < 1e-6
+
+
+def test_guess_offset_none_without_votes():
+    assert cal.guess_offset([([_k(0, 0, 0, 0)], [])], src_is_kla=True) is None
+
+
+def test_near_candidates_orders_by_hint_and_reports_raw_distance():
+    k = _k(5, 5, 1000.0, 1000.0)
+    true_mate = _c(5, 5, 1015.0, 880.0)       # 어긋남 (15, −120) — 거리 ≈ 121
+    decoy = _c(5, 5, 1000.0, 1050.0)          # 보정 전엔 더 가깝다(50)
+    far_die = _c(7, 5, 1000.0, 1000.0)        # die 게이트(±1) 밖
+    too_far = _c(5, 5, 3000.0, 3000.0)        # 반경 밖
+    others = [("m", true_mate), ("d", decoy), ("f", far_die), ("t", too_far)]
+    no_hint = cal.near_candidates(k, others, src_is_kla=True)
+    assert [key for key, _ in no_hint] == ["d", "m"]
+    hinted = cal.near_candidates(k, others, src_is_kla=True, hint=(15.0, -120.0))
+    assert [key for key, _ in hinted] == ["m", "d"]
+    assert hinted[0][1] == pytest.approx(120.93, abs=0.01)   # 표시는 보정 전 거리
+
+
+def test_build_entries_keeps_slots_apart_and_puts_clear_cases_first():
+    k1 = _k(1, 1, 1000.0, 1000.0)
+    k2 = _k(1, 1, 5000.0, 5000.0)
+    near_k1 = [("a", _c(1, 1, 1010.0, 990.0)), ("b", _c(1, 1, 1200.0, 1000.0))]
+    near_k2 = [("c", _c(1, 1, 5010.0, 4990.0))]
+    groups = [
+        ([("k1", k1), ("none", None)], near_k1 + [("x", None)]),
+        ([("k2", k2)], near_k2),
+        # 다른 슬롯의 같은 자리 사진은 섞이지 않는다
+        ([("lonely", _k(1, 1, 1000.0, 1000.0))], []),
+    ]
+    entries = cal.build_entries(groups, src_is_kla=True)
+    assert [e[0] for e in entries] == ["k2", "k1"]
+    assert {c[0] for c in entries[1][2]} == {"a", "b"}
+
+
+def test_coord_scheduler_applies_offset_only_to_matching(monkeypatch):
+    """보정값이 있으면 어긋남이 큰 쌍도 '확정' 이 되고, resolve 결과는 그대로다."""
+    pytest.importorskip("PyQt6.QtCore")
+    from aoi_verification.app import config
+    from aoi_verification.app.models.slot import ImageItem
+    from aoi_verification.app.workers import coord_matcher as cm
+
+    ref = ImageItem("s", Path("/r/a.jpg"), "ref")
+    val = ImageItem("s", Path("/v/b.jpg"), "val")
+    base = {ref.path: _k(1, 1, 1000.0, 1000.0), val.path: _c(1, 1, 1015.0, 880.0)}
+    snapshot = dict(base)
+    monkeypatch.setattr(cm, "_resolve_batch", lambda paths, cb=None: dict(base))
+
+    def run(offset):
+        cfg = config.SimilarityConfig(engine="coordinate", coord_offset=offset)
+        res: dict = {}
+        sch = cm.CoordScheduler([("s", [ref], [val])], cfg=cfg, results=res)
+        sch._run()
+        return res[("s", ref.path)]
+
+    plain = run((0.0, 0.0))
+    fixed = run((15.0, -120.0))
+    assert plain and plain[0][1] < 0.5          # 121 µm 떨어짐 → 낮은 점수
+    assert fixed == [(val.path, 1.0)]           # 보정 뒤 거리 0 → 확정
+    assert base == snapshot                     # 원본 좌표는 그대로
+
+
+# ---------------------------------------------------------------------------
+# 실측 쌍 — Camtek 예시1 ↔ KLA 예시1 (같은 결함, 약 120 µm 어긋남)
+_COORD_DATA = Path(__file__).resolve().parents[2] / "dev" / "좌표 확인"
+_CAM1 = _COORD_DATA / "Camtek" / "예시1" / "272646.165679.c.1000203959.2.jpeg"
+_KLA1 = _COORD_DATA / "KLA" / "예시1" / "W6459076XYG1_2_0_23_2.jpg"
+
+
+@pytest.mark.skipif(not _COORD_DATA.exists(), reason="실측 데이터 폴더 없음")
+def test_real_pair_is_offered_and_its_offset_makes_it_exact():
+    from aoi_verification.app.coords import camtek_ini, kla_info
+    camtek_ini.load_folder.cache_clear()
+    kla_info.load_folder.cache_clear()
+    kla_info.load_folder_raw.cache_clear()
+    kla = kla_info.resolve(_KLA1)
+    cam = camtek_ini.resolve(_CAM1)
+    entries = cal.build_entries([([("k", kla)], [("c", cam)])], src_is_kla=True)
+    assert [e[0] for e in entries] == ["k"]
+    (_key, _c, found), = entries
+    assert found[0][0] == "c" and 100 < found[0][2] < 130     # 보정 전 거리
+    off = cal.pair_offset(kla, cam)
+    fixed = cal.apply_offset({"k": kla}, off)["k"]
+    assert (fixed.x, fixed.y) == (cam.x, cam.y)
+    # 원래 좌표(엑셀·화면용)는 그대로
+    assert kla_info.resolve(_KLA1) == kla
+
+
+# ---------------------------------------------------------------------------
+# 화면 — 쌍을 고르면 보정값이 나오고, 건너뛰면 None
+def _make_entries(tmp_path):
+    from PIL import Image
+    from aoi_verification.app.models.slot import ImageItem
+    shift = (15.0, -120.0)
+    entries = []
+    for i in range(3):
+        rp = tmp_path / f"W1_{i}.jpg"
+        Image.new("RGB", (64, 64), (40 * i, 80, 120)).save(rp)
+        ref = ImageItem("s", rp, "ref")
+        kc = _k(1, 1, 1000.0 + 500 * i, 2000.0)
+        found = []
+        for j, (dx, dy) in enumerate([(shift[0] + i, shift[1] - i), (300.0, 200.0)]):
+            vp = tmp_path / f"cam_{i}_{j}.jpeg"
+            Image.new("RGB", (64, 64), (120, 40 * j, 80)).save(vp)
+            vc = _c(1, 1, kc.x + dx, kc.y + dy)
+            found.append((ImageItem("s", vp, "val"), vc,
+                          ((vc.x - kc.x) ** 2 + (vc.y - kc.y) ** 2) ** 0.5))
+        entries.append((ref, kc, found))
+    return entries, shift
+
+
+def test_dialog_pairs_give_median_offset(styled_qapp, tmp_path):
+    from aoi_verification.app.ui.widgets.coord_calibration_dialog import (
+        CoordCalibrationDialog)
+    entries, shift = _make_entries(tmp_path)
+    dlg = CoordCalibrationDialog(entries, kla_side="ref", hint=shift)
+    assert not dlg._apply.isEnabled()                 # 쌍이 없으면 적용 불가
+    for ref, _kc, _found in entries:
+        dlg._on_src_clicked(ref)
+        # 힌트 덕분에 진짜 짝이 첫 후보다
+        assert dlg._cand_tiles[0].key == _found[0][0]
+        dlg._on_cand_clicked(dlg._cand_tiles[0].key)
+    assert dlg._apply.isEnabled()
+    dlg._on_apply()
+    assert dlg.offset == pytest.approx((shift[0] + 1, shift[1] - 1))
+    dlg.deleteLater()
+
+
+def test_dialog_reclick_cancels_and_skip_gives_none(styled_qapp, tmp_path):
+    from aoi_verification.app.ui.widgets.coord_calibration_dialog import (
+        CoordCalibrationDialog)
+    entries, _shift = _make_entries(tmp_path)
+    dlg = CoordCalibrationDialog(entries, kla_side="val")
+    ref, kc, found = entries[0]
+    dlg._on_src_clicked(ref)
+    dlg._on_cand_clicked(found[0][0])
+    # 기준이 Camtek(검증이 KLA)이면 부호가 뒤집힌다 — 늘 Camtek − KLA
+    assert dlg.current_offset() == pytest.approx((kc.x - found[0][1].x,
+                                                  kc.y - found[0][1].y))
+    dlg._on_cand_clicked(found[0][0])                 # 같은 사진 다시 → 취소
+    assert dlg.current_offset() is None
+    dlg.reject()
+    assert dlg.offset is None
+    dlg.deleteLater()
+
+
+def test_kla_camtek_side_reads_folder_headers(tmp_path):
+    """KLA 정보파일이 있는 쪽이 KLA — 양쪽 다/둘 다 아니면 보정하지 않는다."""
+    pytest.importorskip("PyQt6.QtWidgets")
+    import shutil
+    from aoi_verification.app.coords import kla_info
+    from aoi_verification.app.models.slot import ImageItem, ScanResult, Slot
+    from aoi_verification.app.ui.main_window import MainWindow
+
+    kla_dir = tmp_path / "kla"
+    cam_dir = tmp_path / "cam"
+    kla_dir.mkdir()
+    cam_dir.mkdir()
+    shutil.copy(next((_COORD_DATA / "KLA" / "예시1").glob("*.001")), kla_dir)
+    shutil.copy(_COORD_DATA / "Camtek" / "예시1" / "ColorImageGrabingInfo.ini", cam_dir)
+    kla_info.read_header_ids.cache_clear()
+
+    def side(ref_dir, val_dir):
+        slot = Slot("s", [ImageItem("s", ref_dir / "a.jpg", "ref")],
+                    [ImageItem("s", val_dir / "b.jpg", "val")])
+        fake = type("W", (), {"_scan": ScanResult({"s": slot}, [], [])})()
+        return MainWindow._kla_camtek_side(fake)
+
+    assert side(kla_dir, cam_dir) == "ref"
+    assert side(cam_dir, kla_dir) == "val"
+    assert side(cam_dir, cam_dir) is None
+    assert side(kla_dir, kla_dir) is None
