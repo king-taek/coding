@@ -1137,14 +1137,15 @@ class SelectPage(ProgressRowMixin, QWidget):
         fade.setStartValue(1.0)
         fade.setEndValue(0.0)
         fade.setDuration(motion.DUR_SWIPE_OUT)
-        fade.setEasingCurve(motion.EASE_PRIMARY)
+        # 퇴장은 가속 — 감속이면 90ms 에 이미 안 보여 다음 사진까지 빈 화면이 남는다.
+        fade.setEasingCurve(motion.EASE_EXIT)
 
         dx = self._SWIPE_PX if action == "verify" else -self._SWIPE_PX
         move = QPropertyAnimation(ghost, b"pos", ghost)
         move.setStartValue(start)
         move.setEndValue(QPoint(start.x() + dx, start.y()))
         move.setDuration(motion.DUR_SWIPE_OUT)
-        move.setEasingCurve(motion.EASE_PRIMARY)
+        move.setEasingCurve(motion.EASE_EXIT)
         # ★ 정리는 **한쪽에서만** 건다 — 두 애니에 각각 걸면 두 번 불린다.
         move.finished.connect(self._drop_swipe_ghost)
         fade.start()
