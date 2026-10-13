@@ -120,3 +120,30 @@ def test_indeterminate_indicators_stay_linear():
     src = inspect.getsource(_BusyStripe.__init__)
     assert "QEasingCurve.Type.Linear" in src, "무한 진행 표시가 등속을 잃었다"
     assert QEasingCurve(QEasingCurve.Type.Linear).valueForProgress(0.5) == 0.5
+
+
+# ── 퇴장 곡선 ───────────────────────────────────────────────────────────
+def test_exit_curve_matches_the_documented_table():
+    """``motion._ease_material_accelerate`` 독스트링의 표(남은 불투명도)를 못 박는다."""
+    c = motion.EASE_EXIT
+    for ms, expect in ((40, 0.972), (90, 0.846), (140, 0.553)):
+        assert 1 - c.valueForProgress(ms / 180) == pytest.approx(expect, abs=0.002)
+
+
+def test_swipe_exit_stays_visible_until_the_next_photo_arrives():
+    """선별 스와이프의 잔상은 다음 사진이 들어오기(180ms) **직전까지** 보여야 한다.
+
+    감속 곡선이면 90ms 에 불투명도 0.05 — 나머지 절반이 빈 화면이었다."""
+    from aoi_verification.app.ui.pages import select_page as sp
+
+    half = 1 - motion.EASE_EXIT.valueForProgress(0.5)
+    assert half > 0.5, "퇴장 곡선이 절반 시점에 이미 거의 사라진다"
+    src = inspect.getsource(sp.SelectPage._swipe_out_decided)
+    assert "EASE_PRIMARY" not in src, "퇴장에 감속 곡선을 쓰고 있다"
+    assert src.count("motion.EASE_EXIT") == 2, "이동·페이드 둘 다 가속이어야 한다"
+    assert "easing=EASE_EXIT" in inspect.getsource(motion.swipe_out)
+
+
+def test_next_photo_fade_in_is_linear_as_specified():
+    """다음 사진 페이드인은 시안 `dsFadeIn .12s linear` 그대로 등속이다."""
+    assert "Type.Linear" in inspect.getsource(motion.fade_in)
