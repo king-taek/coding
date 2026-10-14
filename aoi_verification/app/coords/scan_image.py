@@ -29,6 +29,7 @@ import math
 import os
 import threading
 from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -197,9 +198,25 @@ def _mtime(p: Path) -> int:
         return -1
 
 
-@lru_cache(maxsize=64)
+# Scan 머리(W, H)를 동시에 몇 개까지 읽을까 — NAS 는 한 번 열 때마다 왕복 지연이 있어
+# 수백 장을 차례로 열면 수 초가 걸린다.  지연이 대부분이라 나눠 열면 그만큼 줄어든다.
+_SIZE_WORKERS = 16
+_index_lock = threading.Lock()
+
+
 def _index(folder: str, list_mtime: int, dir_mtime: int):
-    """(상태, [(실제 경로, 중심XY)]) — 목록 + 폴더 열거 한 번(대소문자 매핑)."""
+    """(상태, [(실제 경로, 중심XY, (W, H))]) — 폴더당 한 번만 만든다.
+
+    목록 + 폴더 열거 한 번(대소문자 매핑) + Scan 머리 읽기를 **폴더 단위로** 캐시한다.
+    예전에는 사진을 열 때마다 목록의 Scan 전부를 하나씩 stat 해(NAS 왕복 × 수백) 캐시가
+    있어도 매번 1초 가까이 걸렸다.  폴더나 목록 파일이 바뀌면(mtime) 다시 만든다.
+    엑셀 저장은 여러 스레드가 같은 폴더를 동시에 처음 부르므로, 잠가서 한 번만 만든다."""
+    with _index_lock:
+        return _index_cached(folder, list_mtime, dir_mtime)
+
+
+@lru_cache(maxsize=64)
+def _index_cached(folder: str, list_mtime: int, dir_mtime: int):
     if list_mtime < 0:
         return NO_MANIFEST, ()
     try:
@@ -214,12 +231,16 @@ def _index(folder: str, list_mtime: int, dir_mtime: int):
             real = {e.name.casefold(): e.path for e in it}
     except OSError:
         return NO_MANIFEST, ()
-    out = []
+    found = []
     for name, x, y in rows:
         p = real.get(name.casefold())
         if p is not None:
-            out.append((Path(p), (x, y)))
-    return OK, tuple(out)
+            found.append((Path(p), (x, y)))
+    if not found:
+        return OK, ()
+    with ThreadPoolExecutor(max_workers=min(_SIZE_WORKERS, len(found))) as pool:
+        sizes = list(pool.map(lambda r: _image_size(str(r[0])), found))
+    return OK, tuple((p, c, wh) for (p, c), wh in zip(found, sizes) if wh is not None)
 
 
 @lru_cache(maxsize=64)
@@ -227,8 +248,7 @@ def _abs_map(folder: str, ini_mtime: int) -> dict:
     return camtek_ini.load_abs_folder(Path(folder)) if ini_mtime >= 0 else {}
 
 
-@lru_cache(maxsize=4096)
-def _image_size(path: str, mtime: int) -> Optional[tuple[int, int]]:
+def _image_size(path: str) -> Optional[tuple[int, int]]:
     """JPEG 머리만 읽어 (W, H).  전체 디코드하지 않는다."""
     try:
         from PIL import Image
@@ -262,12 +282,7 @@ def resolve(color_path, side_um: float = CROP_SIDE_UM) -> ScanMatch:
         px = pixel_size.scan_pixel_size_xy(folder)
         if px is None:
             return ScanMatch(NO_PIXEL_SIZE, color, xy)
-        entries = []
-        for p, center in rows:
-            size = _image_size(str(p), _mtime(p))
-            if size is not None:
-                entries.append((p, center, size))
-        cands = rank_candidates(xy, entries, px, side_um)
+        cands = rank_candidates(xy, rows, px, side_um)
         if not cands:
             return ScanMatch(NO_CANDIDATE, color, xy, px)
         return ScanMatch(OK, color, xy, px, tuple(cands))
@@ -342,8 +357,7 @@ def load_full(cand: Candidate):
 
 
 def clear_caches() -> None:
-    _index.cache_clear()
+    _index_cached.cache_clear()
     _abs_map.cache_clear()
-    _image_size.cache_clear()
     with _decoded_lock:
         _decoded.clear()
