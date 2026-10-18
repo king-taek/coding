@@ -102,6 +102,15 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
 - `.claude/skills/` 에 ponytail · graphify 가 있다(출처 · 고정 커밋은 그 폴더 `README.md`).
 - **ponytail 은 lite 로 쓴다** — 위 일반 지침과 겹치고, 정확도 · 좌표 규칙 · 방어 코드를 줄이자는 제안은 이 파일의 규칙이 우선한다.
 - graphify 는 코드만 볼 때 `--code-only` 로 돌린다. 산출물 `graphify-out/` 은 커밋하지 않는다.
+- 2026-10-18 추가: superpowers(작업 절차) · Addy Osmani 6개 · ECC 발췌(스킬 6 + 에이전트 `silent-failure-hunter` · `python-reviewer`) ·
+  디자인(`impeccable` · `ui-ux-pro-max` · `design-dna` · `awesome-design-md` · `diagram-design`). 목록은 `.claude/skills/README.md`.
+- **스킬은 알아서 쓴다**(사용자가 초보라 자동을 원함): 읽기 · 검토 · 디버깅 · 설계 조언 스킬은 묻지 않고 쓰고, 쓴 스킬 이름을 답에 한 줄 밝힌다.
+  여러 파일을 고치거나 지우는 스킬(`deprecation-and-migration` 실행 · `ponytail-audit` 결과 적용 · `using-git-worktrees`)만 먼저 묻는다.
+- **겹칠 때 우선순위**: 이 CLAUDE.md(정확도 · 좌표 골든 · 로딩바 · 업데이트 불변식) → 위 일반 지침(Karpathy) → 작업 절차(superpowers) →
+  관점(Addy · ECC · ponytail) → 디자인 스킬. 예: 좌표 수정은 `systematic-debugging` 으로 재현하되 골든 기대값은 절대 고치지 않는다.
+- 디자인 스킬은 웹 기준이 많다. PyQt6 화면에는 원칙(위계 · 간격 · 대비)만 옮기고 공통 버튼(`NeonButton`) · `ko.py` 문자열 규칙을 따른다.
+  `diagram-design` 은 설명서(`dev/사용설명서_자료`) 그림용이며 사진 파일 정책은 그대로다.
+- 새 스킬을 넣으면 금지어 가드(`test_no_spyder_conda.py`)를 다시 돌린다 — 저장소 안 모든 글자를 훑는다.
 
 ## 로딩바(LoadingOverlay) 규칙 — 오작동 방지 (중요)
 로딩 진행을 바꾸거나 새 장시간 작업을 추가할 때 **반드시** 아래를 지킨다. 안 지키면
