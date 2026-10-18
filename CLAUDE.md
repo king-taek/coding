@@ -98,6 +98,11 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
 - Always write Korean (and other non-ASCII) strings in tool-call parameters as literal UTF-8;
   never as "\uXXXX" unicode escapes.
 
+## 설치한 외부 스킬
+- `.claude/skills/` 에 ponytail · graphify 가 있다(출처 · 고정 커밋은 그 폴더 `README.md`).
+- **ponytail 은 lite 로 쓴다** — 위 일반 지침과 겹치고, 정확도 · 좌표 규칙 · 방어 코드를 줄이자는 제안은 이 파일의 규칙이 우선한다.
+- graphify 는 코드만 볼 때 `--code-only` 로 돌린다. 산출물 `graphify-out/` 은 커밋하지 않는다.
+
 ## 로딩바(LoadingOverlay) 규칙 — 오작동 방지 (중요)
 로딩 진행을 바꾸거나 새 장시간 작업을 추가할 때 **반드시** 아래를 지킨다. 안 지키면
 "0 에서 안 움직이다 갑자기 완료" 같은 오작동이 난다.
