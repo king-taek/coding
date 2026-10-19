@@ -77,8 +77,8 @@ BTN_SELECT_MODE = "선택 모드"
 # Stage 1 좌측 패널 — 사진을 여러 장 고르면 헤더에 나타나는 일괄 액션.
 # ★ 예전엔 클릭 선택이 아무 데도 연결되지 않아 '테두리만 생기고 할 수 있는 게 없는'
 #   죽은 기능이었다.  라벨에 개수를 넣어 무엇에 적용되는지 분명히 한다.
-BTN_INLINE_VERIFY_FMT = "선택 {n} 장 검증"
-BTN_INLINE_EXCLUDE_FMT = "선택 {n} 장 제외"
+BTN_INLINE_VERIFY_FMT = "선택 {n}장 검증"
+BTN_INLINE_EXCLUDE_FMT = "선택 {n}장 제외"
 
 # ── 다중 선택 다이얼로그 (Stage 1 선택 모드) ─────────────────────────────
 BULK_SELECT_TITLE_FMT = "{panel} — 다중 선택"
@@ -86,10 +86,10 @@ BULK_SELECT_HINT = (
     "사진을 클릭하거나 빈 곳에서 드래그해 여러 장을 선택/해제하세요. "
     "선택된 사진들에 아래 액션이 적용됩니다."
 )
-BULK_SELECT_SUMMARY_FMT = "선택됨: {n} 장"
+BULK_SELECT_SUMMARY_FMT = "선택됨: {n}장"
 # ★ 페이지네이션 중에는 선택이 페이지를 넘어 유지되므로, 이 페이지에 보이는 것보다
 #   훨씬 많은 사진이 함께 처리될 수 있다.  실행 직전에 그 간극을 화면이 말한다.
-BULK_SELECT_SUMMARY_OFFPAGE_FMT = "선택됨: {n} 장 (이 페이지 밖 {m} 장 포함)"
+BULK_SELECT_SUMMARY_OFFPAGE_FMT = "선택됨: {n}장 (이 페이지 밖 {m}장 포함)"
 BULK_SELECT_EMPTY = "표시할 사진이 없습니다."
 BULK_SELECT_ALL = "전체 선택"
 BULK_DESELECT_ALL = "선택 해제"
@@ -117,12 +117,12 @@ MATCH_CANCEL_CONFIRM_FMT = (
 )
 SELECT_BACK_CONFIRM_TITLE = "설정으로 돌아가기"
 SELECT_BACK_CONFIRM_FMT = (
-    "지금까지 결정한 {n} 장이 사라지고 설정 화면으로 돌아갑니다.\n"
+    "지금까지 결정한 {n}장이 사라지고 설정 화면으로 돌아갑니다.\n"
     "계속할까요?"
 )
 END_SELECTION_CONFIRM_TITLE = "선택 종료"
 END_SELECTION_CONFIRM_FMT = (
-    "남은 {n} 장의 미결정 사진을 모두 ‘검증 제외 사진’ 으로 보내고 "
+    "남은 {n}장의 미결정 사진을 모두 ‘검증 제외 사진’ 으로 보내고 "
     "다음 단계로 진행할까요?"
 )
 BULK_SELECT_EXCLUDED_TITLE = "검증 제외 사진"
@@ -202,13 +202,13 @@ SKIPPED_DIALOG_TITLE = "매치 없음 사진"
 #   기능(코드·테스트)은 그대로 두고 문구만 남긴다: 지우면 보류를 되살릴 때 다시
 #   만들어야 하고, 남겨 두어도 숨어 있어 해가 없다.  되살린다면 위 버튼 이름도
 #   함께 '보류' 를 되돌려야 한다.
-SKIPPED_SECTION_DEFER_FMT = "잠시 보류 ({n} 장)"
-SKIPPED_SECTION_NO_MATCH_FMT = "매치 없음 확정 ({n} 장)"
+SKIPPED_SECTION_DEFER_FMT = "잠시 보류 ({n}장)"
+SKIPPED_SECTION_NO_MATCH_FMT = "매치 없음 확정 ({n}장)"
 SKIPPED_DIALOG_EMPTY = "매치 없음 사진이 없습니다."
 
 # 매치 실패 사진 검토 다이얼로그 (#8)
 BTN_REVIEW_UNMATCHED = "매치 실패 사진 검토"
-UNMATCHED_REVIEW_TITLE = "매치 실패 사진 검토 — {n} 장"
+UNMATCHED_REVIEW_TITLE = "매치 실패 사진 검토 — {n}장"
 UNMATCHED_REVIEW_PROGRESS_FMT = "{idx} / {total} — {slot}"
 UNMATCHED_REVIEW_HINT = (
     "매치 실패한 기준 사진을 하나씩 검토합니다. 같은 슬롯의 검증 장비 후보를"
@@ -253,7 +253,7 @@ UNMATCHED_CANCELLED_SEPARATOR = f"── {CANCELLED_NOTE_MARK} 목록 ──"
 
 # ── 줌-뷰 윈도우 ───────────────────────────────────────────────────────────
 ZOOM_TITLE_TARGETS = "검증 대상인 사진들 — {slot}"
-ZOOM_TITLE_EXCLUDED = "검증 하지 않을 사진 — {slot}"
+ZOOM_TITLE_EXCLUDED = "검증하지 않을 사진 — {slot}"
 ZOOM_TITLE_CANDIDATES = "검증 후보 사진들 — {slot}"
 ZOOM_BTN_EXCLUDE = "검증에서 제외"
 ZOOM_BTN_TO_TARGET = "검증 대상으로 변경"
@@ -745,7 +745,7 @@ SLOT_SELECT_EMPTY = "기준 폴더에서 슬롯(하위 폴더)을 찾지 못했�
 REF_REUSE_TITLE = "이전 기준 사진 재사용"
 REF_REUSE_BODY_FMT = (
     "이 기준 폴더로 이전에 매치를 진행한 기록이 있습니다.\n"
-    "그때 직접 고른 기준 사진 {n} 장을 그대로 사용하시겠습니까?\n\n"
+    "그때 직접 고른 기준 사진 {n}장을 그대로 사용하시겠습니까?\n\n"
     "예 — 해당 사진들을 자동으로 ‘검증 대상’ 으로 옮긴 상태에서 시작합니다.\n"
     "아니오 — 처음부터 직접 고릅니다."
 )
@@ -960,7 +960,7 @@ COUNT_PLUS_N_FMT = "+{n}"
 MATCH_AUTO_RESULT_NOTE = "매치 결과는 다음 ‘매치 검토’ 화면에서 확인합니다."
 PROGRESS_SLOT_ONLY_FMT = "{slot}  ·"
 PROGRESS_COUNT_FMT = "{done} / {total}"
-GROUP_HEADER_FMT = "{slot}  ·  {count} 장"
+GROUP_HEADER_FMT = "{slot}  ·  {count}장"
 # 후보 선별 상단의 슬롯별 전체 장수 — 참고용 (#2).  ★ 'LOT' 이 아니다.
 LOT_COUNTS_PREFIX = "슬롯별 장수:  "
 
@@ -1004,11 +1004,11 @@ VIEWER_NO_CANDIDATES = "후보 없음"
 
 # 매치 실패 검토
 UNMATCHED_FAIL_LIST_TITLE = "실패 목록"
-UNMATCHED_CAND_COUNT_FMT = "후보 {n} 장 (유사도 순)"
+UNMATCHED_CAND_COUNT_FMT = "후보 {n}장 (유사도 순)"
 # 후보가 300장 이상인 좌표 세션 — 유사도를 다시 계산하지 않고 좌표 매칭이 만든
 # 순서를 그대로 쓴다.  그때는 위 문구('유사도 순')와 백분율이 모두 거짓이 되므로
 # 순서 기준을 바로 적고, 점수 자리에는 아래 문구를 쓴다 (C-2).
-UNMATCHED_CAND_COUNT_COORD_FMT = "후보 {n} 장 (좌표 거리 순)"
+UNMATCHED_CAND_COUNT_COORD_FMT = "후보 {n}장 (좌표 거리 순)"
 # ★ 점수 자리에 그대로 들어가므로 **백분율만큼 짧게** 유지한다 — 타일은 고정
 #   크기라(`_CandidateTile`) 길면 잘린다(실측 굵은 서체: "100.0 %"=54px,
 #   "계산 안 함"=55px, "유사도 계산 안 함"=95px).  무엇을 계산 안 했는지는 바로
