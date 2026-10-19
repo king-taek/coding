@@ -453,9 +453,12 @@ def _make_window():
     from aoi_verification.app.ui import main_window as mw
     from aoi_verification.app.ui.pages.match_page import MatchPage
 
+    # ★ `_run_startup_popups` 도 끈다 — 21번(업데이트 시트)을 닫으면 '거절' 로 읽혀 시작
+    #   팝업(바뀐 점 안내 등)을 띄우는데, 그 시트는 캡처 예약이 없어 영영 닫히지 않는다
+    #   (스크립트가 마지막 캡처 뒤에 멈춰 shots.json 을 못 쓴다).
     for attr in ("_check_for_update_async", "_maybe_offer_openvino",
                  "_warmup_accel_async", "_start_backend_import_async",
-                 "_prune_old_cache_async"):
+                 "_prune_old_cache_async", "_run_startup_popups"):
         if hasattr(mw.MainWindow, attr):
             setattr(mw.MainWindow, attr, lambda self: None)
     # 점수 사전계산은 실제 매칭 엔진(cv2)을 부른다 — 화면만 필요하므로 끈다.
@@ -544,6 +547,7 @@ def _stage_select(win, sr) -> dict:
         items.extend(imgs[3:])
     page.load_state(items, targets=targets, excluded=excluded)
     win._stack.setCurrentWidget(page)
+    win._sync_rail(page)      # 레일도 그 단계를 가리키게(_show_page 와 같게)
     _pump(30)
     return {
         "왼쪽패널": getattr(page, "left_panel", None),
@@ -588,6 +592,7 @@ def _stage_match(win, sr) -> dict:
     # 것과 같은 헬퍼를 태워야 캡처가 실제 화면과 어긋나지 않는다.
     page._set_progress(slot, 3, len(refs))
     win._stack.setCurrentWidget(page)
+    win._sync_rail(page)      # 레일도 그 단계를 가리키게(_show_page 와 같게)
     # 진행 바가 도는 그 순간 — 앱의 `_update_auto_progress` 와 같은 문구·같은 값.
     page._loading.show_overlay(cancelable=True)
     page._loading.set_progress(
@@ -642,6 +647,7 @@ def _stage_review(win, sr) -> dict:
     page.load_state(matches, candidates_by_ref=cands, coord_mode=True,
                     tolerance=_TOL, coord_failed_count=1)
     win._stack.setCurrentWidget(page)
+    win._sync_rail(page)      # 레일도 그 단계를 가리키게(_show_page 와 같게)
     _pump(40)
     # 한 줄은 '매치 없음' 으로 표시해 세 가지 판정이 한 화면에 다 보이게 한다.
     rows = list(getattr(page, "_rows", []))
@@ -710,6 +716,7 @@ def _stage_result(win, sr) -> dict:
     page.show_result(res, target_path=Path(r"C:\AOI_Verify\결과\AOI 18호기 검증 (17호기 기준).xlsx"),
                      val_pool=val_pool, coord_mode=True, tolerance=_TOL)
     win._stack.setCurrentWidget(page)
+    win._sync_rail(page)      # 레일도 그 단계를 가리키게(_show_page 와 같게)
     _pump(30)
     # 숫자 타일 4개(매칭 성공·허용 초과·매치 없음·Slot 불일치)는 담는 위젯이 따로
     # 없어 **합집합**으로 가리킨다 — 설명서가 이 네 숫자를 따로 설명하기 때문이다.
@@ -773,6 +780,7 @@ def main() -> int:
     # --- 시트 ---------------------------------------------------------------
     print("창 안 시트")
     win._stack.setCurrentWidget(win._setup_page)
+    win._sync_rail(win._setup_page)      # 레일도 그 단계를 가리키게(_show_page 와 같게)
     sh.pump(10)
     sh.sheet("09_시트_KLA확인", win, win._ask_kla_side,
              rects_fn=lambda: _sheet_rects(win, (i18n.KO.KLA_SIDE_REF, i18n.KO.KLA_SIDE_VAL,
