@@ -15,6 +15,9 @@
 런처는 파이썬이 ``app/`` 에서 아무것도 import 하기 전에 돌기 때문에 할 수 있다.
 
 **불변식: 이 파일의 모든 실패 경로는 '구버전을 그대로 실행' 으로 끝난다.**
+
+★ ``scripts/run_aoi.bat`` 이 같은 일(교체 → ``AOI_APP_HOME`` → 실행)을 한다 — 회사 보안이
+  이 exe 를 지우는 PC 에서는 그 bat 이 런처다.  교체 규칙을 바꾸면 둘 다 고친다.
 """
 
 from __future__ import annotations

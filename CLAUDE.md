@@ -156,6 +156,11 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
     (`portable_build` 는 `aoi_verification`·`main.py`·`requirements.txt`·`양식.xlsx`·IR 만).
     `docs/사용설명서.pdf`·`docs/상세설명서.pdf` 를 `_UPDATE_KEEP_ONLY` 에서 빼면 사용자에게
     설명서가 영영 가지 않는다. 회귀 가드: `dev/tests/test_update_payload.py`.
+- **실행은 `scripts/run_aoi.bat` 이 런처다**(회사 보안이 서명 없는 exe 를 지운다). bat 도 exe 런처와
+  같은 일을 한다 — `app.new` 교체(실패 시 구버전) → `AOI_APP_HOME` 설정 → 실행. 둘 중 하나만 고치지
+  마라(`test_bootstrap`). bat 은 아이콘을 못 가지므로 앱이 켜질 때 설치 루트에 `.lnk` 를 만든다
+  (`utils/shortcut.py`, 파일 직접 작성 — PowerShell·VBScript 로 만들지 마라: 보안을 다시 자극한다).
+  설치 루트의 bat 은 자동 업데이트로 바뀌지 않는다 — 고치면 재배포가 필요하다.
 - **깨지 않아야 할 불변식 3개** (각각 실제 사고에서 나왔다 → `docs/규칙_배경.md`):
   - **런처 exe(`scripts/exe_launcher.py`)에는 앱 코드를 한 줄도 넣지 않는다.** PyInstaller 의
     `FrozenImporter` 가 exe 안 사본으로 디스크의 최신 사본을 **가린다**. `exe_launcher.spec` 의

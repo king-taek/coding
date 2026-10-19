@@ -186,9 +186,22 @@ def _setup_logging() -> None:
         pass
 
 
+def _ensure_shortcut() -> None:
+    """설치 폴더에 아이콘 달린 바로가기를 둔다 — exe 대신 ``run_aoi.bat`` 으로 켜기 때문.
+
+    부가 기능이라 실패해도 그냥 지나간다(``shortcut.ensure_shortcut`` 이 로그만 남긴다)."""
+    from aoi_verification.app.utils import paths, shortcut
+
+    shortcut.ensure_shortcut(paths.install_root(), paths._project_root())
+
+
 def main() -> int:
     _ensure_package_on_path()
     _setup_logging()
+    try:
+        _ensure_shortcut()
+    except Exception:
+        pass
     try:
         deps_ok = _ensure_deps_installed()
     except Exception:
