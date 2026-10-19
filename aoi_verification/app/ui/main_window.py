@@ -219,11 +219,15 @@ class MainWindow(QMainWindow):
     # 스레드에서 위젯을 만들 수 없으므로 시그널로 메인 스레드에 넘긴다(CLAUDE.md).
     _backend_loaded = pyqtSignal()
 
-    def __init__(self, progress=None) -> None:
+    def __init__(self, progress=None, startup_checks=None) -> None:
         """``progress(done, total, message)`` 를 주면 페이지 생성 진행을 보고한다
         (시작 스플래시의 로딩 표시).  창 생성은 메인 스레드를 막으므로, 진행을
-        보고하지 않으면 로딩 표시가 그 구간 내내 멈춰 보인다."""
+        보고하지 않으면 로딩 표시가 그 구간 내내 멈춰 보인다.
+
+        ``startup_checks`` 는 로딩창에서 미리 끝낸 업데이트 확인(``main._StartupChecks``:
+        ``done`` Event·``info``).  끝났으면 그 결과를 쓰고, 아니면 예전처럼 직접 확인한다."""
         super().__init__()
+        self._startup_checks = startup_checks
         self.setWindowTitle(i18n.KO.APP_TITLE)
         self.setMinimumSize(self._MIN_W, self._MIN_H)
         self._apply_initial_geometry()
@@ -367,7 +371,17 @@ class MainWindow(QMainWindow):
         self._update_progress.connect(self._on_update_progress)
         self._update_none.connect(self._on_update_none)
         self._startup_proceed.connect(self._run_startup_popups)
-        QTimer.singleShot(400, self._check_for_update_async)
+        QTimer.singleShot(400, self._begin_update_check)
+
+    def _begin_update_check(self) -> None:
+        """로딩창에서 이미 확인했으면 그 결과로, 아니면(시간 초과·없음) 직접 확인한다."""
+        checks = self._startup_checks
+        if checks is None or not checks.done.is_set():
+            self._check_for_update_async()
+        elif checks.info:
+            self._update_found.emit(checks.info)
+        else:
+            self._startup_proceed.emit()
 
     def _run_startup_popups(self) -> None:
         """업데이트 흐름이 끝난 뒤(없음/거절/실패) 나머지 시작 팝업을 순서대로 1회만."""

@@ -113,9 +113,30 @@ def test_refresh_bats_leaves_dev_checkouts_alone(tmp_path):
     assert not (tmp_path / "run_aoi.bat").exists()
 
 
-def test_main_only_touches_bats_from_pythonw_after_a_delay():
+def test_main_only_touches_bats_from_pythonw_after_bat_settles():
     """cmd 는 도는 중인 bat 을 다시 읽는다 — 디버그 bat(python.exe) 실행 중엔 바꾸면 안 된다."""
     src = (Path(__file__).resolve().parents[2] / "main.py").read_text(encoding="utf-8")
-    body = src[src.index("def _install_launchers"):src.index("def main(")]
-    assert '!= "pythonw"' in body and "threading.Timer(" in body
+    body = src[src.index("class _StartupChecks"):src.index("def _wait_startup_checks")]
+    assert '== "pythonw"' in body and "_BAT_SETTLE" in body
     assert body.index("refresh_bats") < body.index("ensure_shortcut")   # bat 이 먼저 있어야 바로가기
+
+
+def test_startup_checks_finish_before_the_main_window_shows(monkeypatch):
+    """사용자 요청: bat·바로가기·업데이트 확인을 로딩창에서 끝낸 뒤 메인 창을 띄운다."""
+    import importlib.util
+    import sys
+
+    root = Path(__file__).resolve().parents[2]
+    src = (root / "main.py").read_text(encoding="utf-8")
+    body = src[src.index("def _open_main_window"):src.index("def _ensure_deps_installed")]
+    assert body.index("_wait_startup_checks(") < body.index("window.show()")
+
+    spec = importlib.util.spec_from_file_location("aoi_main_for_test", root / "main.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    from aoi_verification.app.utils import updater
+    monkeypatch.setattr(updater, "check_for_update", lambda: {"sha": "abc"})
+    monkeypatch.setattr(sys, "executable", "/x/python.exe")          # bat 은 건드리지 않는 경로
+    checks = mod._StartupChecks(started=0.0)
+    assert checks.done.wait(5)
+    assert checks.info == {"sha": "abc"}

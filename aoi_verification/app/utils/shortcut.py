@@ -125,7 +125,7 @@ def refresh_bats(install_root: Optional[Path], app_root: Path) -> list:
 
     ★ cmd 는 bat 을 **한 줄씩 다시 열어 읽는다** — 실행 중인 bat 을 바꾸면 옛 위치부터
       새 내용을 읽어 엉뚱한 줄을 실행한다.  그래서 부르는 쪽이 bat 이 이미 끝난 뒤
-      (``start`` 로 띄워진 pythonw 에서 몇 초 뒤)에만 부른다(`main._install_launchers`).
+      (``start`` 로 띄워진 pythonw 에서 몇 초 뒤)에만 부른다(`main._StartupChecks`).
     바꾼 파일 목록을 돌려준다."""
     roots = [install_root] if install_root is not None else []
     if app_root.name == "app":
