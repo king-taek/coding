@@ -98,6 +98,20 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
 - Always write Korean (and other non-ASCII) strings in tool-call parameters as literal UTF-8;
   never as "\uXXXX" unicode escapes.
 
+## 설치한 외부 스킬
+- `.claude/skills/` 에 ponytail · graphify 가 있다(출처 · 고정 커밋은 그 폴더 `README.md`).
+- **ponytail 은 lite 로 쓴다** — 위 일반 지침과 겹치고, 정확도 · 좌표 규칙 · 방어 코드를 줄이자는 제안은 이 파일의 규칙이 우선한다.
+- graphify 는 코드만 볼 때 `--code-only` 로 돌린다. 산출물 `graphify-out/` 은 커밋하지 않는다.
+- 2026-10-18 추가: superpowers(작업 절차) · Addy Osmani 6개 · ECC 발췌(스킬 6 + 에이전트 `silent-failure-hunter` · `python-reviewer`) ·
+  디자인(`impeccable` · `ui-ux-pro-max` · `design-dna` · `awesome-design-md` · `diagram-design`). 목록은 `.claude/skills/README.md`.
+- **스킬은 알아서 쓴다**(사용자가 초보라 자동을 원함): 읽기 · 검토 · 디버깅 · 설계 조언 스킬은 묻지 않고 쓰고, 쓴 스킬 이름을 답에 한 줄 밝힌다.
+  여러 파일을 고치거나 지우는 스킬(`deprecation-and-migration` 실행 · `ponytail-audit` 결과 적용 · `using-git-worktrees`)만 먼저 묻는다.
+- **겹칠 때 우선순위**: 이 CLAUDE.md(정확도 · 좌표 골든 · 로딩바 · 업데이트 불변식) → 위 일반 지침(Karpathy) → 작업 절차(superpowers) →
+  관점(Addy · ECC · ponytail) → 디자인 스킬. 예: 좌표 수정은 `systematic-debugging` 으로 재현하되 골든 기대값은 절대 고치지 않는다.
+- 디자인 스킬은 웹 기준이 많다. PyQt6 화면에는 원칙(위계 · 간격 · 대비)만 옮기고 공통 버튼(`NeonButton`) · `ko.py` 문자열 규칙을 따른다.
+  `diagram-design` 은 설명서(`dev/사용설명서_자료`) 그림용이며 사진 파일 정책은 그대로다.
+- 새 스킬을 넣으면 금지어 가드(`test_no_spyder_conda.py`)를 다시 돌린다 — 저장소 안 모든 글자를 훑는다.
+
 ## 로딩바(LoadingOverlay) 규칙 — 오작동 방지 (중요)
 로딩 진행을 바꾸거나 새 장시간 작업을 추가할 때 **반드시** 아래를 지킨다. 안 지키면
 "0 에서 안 움직이다 갑자기 완료" 같은 오작동이 난다.
@@ -134,10 +148,21 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
     적어야 전달된다 — 안 적으면 조용히 빠진다.
   - 트리 **깊은 곳**의 개별 제외는 `_UPDATE_SKIP_PATHS`(저장소 기준 상대경로)로 한다.
     지금은 미등록 글꼴 6개(2.8 MB)가 여기 있다 — 저장소에는 두고 배포에서만 뺀다.
+  - ⚠ **위 세 목록을 바꾸면 루트 `.gitattributes`(export-ignore)도 같이 고친다.** 업데이트는
+    GitHub zip 을 사용자 PC 임시 폴더에 **전부 푼 뒤** 거르므로, zip 단계에서 빼지 않으면
+    개발 파일이 사용자 디스크에 쏟아진다 — `.claude` 스킬 스크립트가 그렇게 풀린 뒤 회사
+    보안이 앱 exe 를 지웠다. `test_update_payload` 가 `git archive` 결과와 배포분을 대조한다.
   - **설명서 PDF 는 자동 업데이트가 유일한 전달 경로다.** 빌드는 `docs/` 를 담지 않는다
     (`portable_build` 는 `aoi_verification`·`main.py`·`requirements.txt`·`양식.xlsx`·IR 만).
     `docs/사용설명서.pdf`·`docs/상세설명서.pdf` 를 `_UPDATE_KEEP_ONLY` 에서 빼면 사용자에게
     설명서가 영영 가지 않는다. 회귀 가드: `dev/tests/test_update_payload.py`.
+- **실행은 `scripts/run_aoi.bat` 이 런처다**(회사 보안이 서명 없는 exe 를 지운다). bat 도 exe 런처와
+  같은 일을 한다 — `app.new` 교체(실패 시 구버전) → `AOI_APP_HOME` 설정 → 실행. 둘 중 하나만 고치지
+  마라(`test_bootstrap`). bat 은 아이콘을 못 가지므로 앱이 켜질 때 설치 루트에 `.lnk` 를 만든다
+  (`utils/shortcut.py`, 파일 직접 작성 — PowerShell·VBScript 로 만들지 마라: 보안을 다시 자극한다).
+  설치 루트의 bat 은 업데이트 트리 밖이라, 앱이 켜진 뒤 `app\scripts\` 사본으로 바꿔 놓는다
+  (`shortcut.refresh_bats`). **pythonw 일 때만·몇 초 뒤**다 — cmd 는 도는 중인 bat 을 다시 읽으므로
+  디버그 bat(python.exe)이 도는 동안 바꾸면 엉뚱한 줄이 실행된다. 이 조건을 풀지 마라.
 - **깨지 않아야 할 불변식 3개** (각각 실제 사고에서 나왔다 → `docs/규칙_배경.md`):
   - **런처 exe(`scripts/exe_launcher.py`)에는 앱 코드를 한 줄도 넣지 않는다.** PyInstaller 의
     `FrozenImporter` 가 exe 안 사본으로 디스크의 최신 사본을 **가린다**. `exe_launcher.spec` 의
