@@ -18,7 +18,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import QElapsedTimer, QObject, QThread, QTimer, pyqtSignal
+from PyQt6.QtCore import (QElapsedTimer, QObject, Qt, QThread, QTimer,
+                          pyqtSignal)
 from PyQt6.QtWidgets import (QApplication, QLabel, QMainWindow,
                               QMessageBox, QStackedWidget, QStatusBar,
                               QVBoxLayout, QWidget)
@@ -617,7 +618,10 @@ class MainWindow(QMainWindow):
         if p.window_maximized:
             # 최대화 전 크기도 합리적인 값으로 세팅해 ‘복원’ 동작이 자연스럽게.
             self.resize(int(avail_w * 0.9), int(avail_h * 0.9))
-            self.showMaximized()
+            # ★ 상태만 정한다 — 띄우는 건 `main` 의 show() 다.  여기서 showMaximized()
+            #   를 부르면 로딩창 대기 중에 창이 먼저 떠서, 그 사이 업데이트 안내 시트가
+            #   대기 루프 안에서 열리고 로딩창이 끝나지 않았다(사용자 신고).
+            self.setWindowState(Qt.WindowState.WindowMaximized)
             return
         w = p.window_width
         h = p.window_height

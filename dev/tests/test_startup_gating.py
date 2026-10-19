@@ -186,3 +186,24 @@ def test_startup_popups_wait_until_the_window_is_visible(window, monkeypatch):
     window.show()
     window._begin_update_check()
     assert calls == ["check"]
+
+
+def test_maximized_window_stays_hidden_until_main_shows_it(qapp, monkeypatch, isolated_cache):
+    """지난번에 최대화로 닫았어도 창은 **생성만** 된다 — 띄우는 건 ``main`` 이다.
+
+    예전에는 생성자가 ``showMaximized()`` 를 불러 로딩창 대기(`_wait_backend`) 중에 창이
+    먼저 떴다.  그러면 400ms 시작 흐름이 '보이는 창' 으로 통과해 업데이트 안내 시트가
+    그 대기 루프 안에서 중첩 루프를 쥐고, 로딩창은 안 닫힌 채 메인 창 위에 계속
+    떠 있었다(사용자 신고: 로딩이 메인 화면과 함께 뜨고 끝나지 않는다)."""
+    from aoi_verification.app.utils import prefs as _prefs
+    _prefs.patch(window_maximized=True)
+    monkeypatch.setattr(mw.MainWindow, "_start_backend_import_async", lambda self: None)
+    w = mw.MainWindow()
+    try:
+        assert not w.isVisible(), "생성자가 창을 띄웠다 — 로딩창 대기 중에 창이 보인다"
+        w.show()
+        assert w.isMaximized(), "main 의 show() 가 최대화 상태로 띄워야 한다"
+    finally:
+        w.close()
+        w.deleteLater()
+        qapp.processEvents()
