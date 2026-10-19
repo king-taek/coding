@@ -180,9 +180,11 @@ class ResultPage(QWidget):
         self.save_target_label.setProperty("role", "monoMuted")
         target_row.addWidget(self.save_target_label)
         # '저장 완료 HH:MM' — 목적지 바로 옆.  예전엔 같은 경로를 요약 카드에도 한 번 더
-        # 적었다(한 화면에 같은 경로가 두 번).  자리는 늘 있고 글자만 바뀐다.
+        # 적었다(한 화면에 같은 경로가 두 번).  같은 줄 안이라 숨겨도 높이는 그대로다 —
+        # 비어 있을 때 숨기는 것은 빈 칸의 간격이 경로를 버튼 끝선에서 밀어내서다.
         self._saved_label = QLabel("", self)
         self._saved_label.setProperty("role", "statusPass")
+        self._saved_label.setVisible(False)
         target_row.addWidget(self._saved_label)
 
         bar = QHBoxLayout()
@@ -302,6 +304,7 @@ class ResultPage(QWidget):
         # '내가 저장을 했던가?' 에 답할 것이 아무것도 없었다(_exported 는 내부
         # 플래그였다).  자리는 [엑셀로 저장] 위 목적지 줄에 늘 있다.
         self._saved_label.setText("")
+        self._saved_label.setVisible(False)
 
         # 검토 가능한 매치 실패 사진이 있을 때만 검토 버튼 활성.
         n_unmatched = len(result.unmatched_refs)
@@ -559,6 +562,7 @@ class ResultPage(QWidget):
         # 시트를 닫아도 '저장했다' 는 사실이 화면에 남는다(자리 예약 라벨).
         self._saved_label.setText(i18n.KO.RESULT_SAVED_AT_FMT.format(
             time=datetime.now().strftime("%H:%M")))
+        self._saved_label.setVisible(True)
         # 이제부터는 '다시 저장 = 덮어쓰기' 다 — 캡션이 그 사실로 바뀐다(31안).
         self._refresh_save_target()
         # ★ 워커 시그널 슬롯에서 곧바로 모달을 열면 중첩 이벤트 루프가 생긴다 —
