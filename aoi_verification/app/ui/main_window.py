@@ -490,6 +490,8 @@ class MainWindow(QMainWindow):
             self, i18n.KO.UPDATE_AVAILABLE_TITLE, body,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes,
+            labels={QMessageBox.StandardButton.Yes: i18n.KO.UPDATE_BTN_NOW,
+                    QMessageBox.StandardButton.No: i18n.KO.UPDATE_BTN_LATER},
         )
         if ans != QMessageBox.StandardButton.Yes:
             self._run_startup_popups()       # 거절 → 나머지 시작 팝업 진행

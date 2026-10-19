@@ -393,15 +393,15 @@ class SelectPage(ProgressRowMixin, QWidget):
     # ------------------------------------------------------------------
     def _build(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(16, 16, 16, 16)
+        pm = theme.PROFILE.page_margin
+        root.setContentsMargins(pm, 16, pm, 16)
         root.setSpacing(10)
 
-        # 상단 로고 — 이 화면은 전체 스크롤이 없어 맨 위에 그대로 둔다
-        # (보이는 결과는 예전과 같다).
-        root.addWidget(build_logo_label(self))
-
         # 상단 바 -------------------------------------------------------
+        # 로고는 표제 줄 왼쪽 끝 — 설정 화면과 같은 머리말(밴드 한 줄을 본문에 돌려준다).
         top = QHBoxLayout()
+        top.addWidget(build_logo_label(self, inline=True))
+        top.addSpacing(16)
         self.title = QLabel(i18n.KO.STAGE1_TITLE, self)
         self.title.setProperty("role", "title")
         top.addWidget(self.title)

@@ -880,19 +880,24 @@ class MatchReviewPage(QWidget):
     # ------------------------------------------------------------------
     def _build(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(20, 12, 20, 12)
+        pm = theme.PROFILE.page_margin
+        root.setContentsMargins(pm, 16, pm, 12)
         root.setSpacing(10)
 
         # ── 상단 집계/액션 바 (A2) — 탤리 · (stretch) · 사진 크기 · 검토 완료 ──
         # ★ 로고는 스크롤 **밖 최상단**에 둔다.  예전엔 스크롤 안 첫 위젯이라
         #   고정 컬럼 헤더와 첫 행 사이에 밴드가 끼어 표가 머리와 몸통으로 갈라졌다.
-        root.addWidget(build_logo_label(self))
-
+        #   표제 줄 왼쪽 끝에 앉힌다 — 설정 화면과 같은 머리말.
         # ★ 이 화면에는 표제가 없었다 — 로고를 스크롤 안에 두고 컬럼 헤더만 있어서,
         #   '지금 어느 단계인지' 를 화면이 말해 주지 않았다(다른 페이지는 전부 표제가 있다).
+        head = QHBoxLayout()
+        head.setSpacing(16)
+        head.addWidget(build_logo_label(self, inline=True))
         self.title = QLabel(i18n.KO.MATCH_REVIEW_TITLE, self)
         self.title.setProperty("role", "title")
-        root.addWidget(self.title)
+        head.addWidget(self.title)
+        head.addStretch(1)
+        root.addLayout(head)
 
 
         bar = QHBoxLayout()
