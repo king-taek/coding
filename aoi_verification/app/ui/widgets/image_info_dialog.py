@@ -36,7 +36,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from PyQt6.QtCore import QObject, QThread, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QObject, QSize, QThread, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QFontMetrics, QImage, QKeySequence, QPixmap, QShortcut
 from PyQt6.QtWidgets import (QApplication, QDialog, QFileDialog, QFrame,
                              QGridLayout, QHBoxLayout, QLabel, QScrollArea,
@@ -237,6 +237,12 @@ class ImageInfoDialog(QDialog):
         self._build()
         if image_path:
             self.show_image(Path(image_path))
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        """시트 호스트가 읽는 크기.  값 라벨이 `Ignored` 폭이라 레이아웃 계산값은
+        값 열을 거의 0 으로 잡는다 — 그대로 두면 창 안 시트에서 값이 '1.' 처럼
+        잘린다.  창보다 크면 시트 호스트가 줄인다."""
+        return QSize(1100, 800)
 
     # ------------------------------------------------------------------
     def _build(self) -> None:
