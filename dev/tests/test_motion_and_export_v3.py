@@ -418,3 +418,69 @@ def test_save_destination_is_shown_before_and_after_saving(page, styled_qapp):
     assert "덮어" in text, f"재저장이 덮어쓰기임을 말하지 않는다: {text!r}"
 
 
+
+
+# ═══ 2차 점검 — 토스트·먼 스크롤 ════════════════════════════════════════════
+def test_toast_fades_and_last_message_wins(styled_qapp, motion_on):
+    """알림은 페이드로 오가고, 연속 알림에서 앞 알림의 지우기가 뒤 알림을 지우지 않는다.
+
+    예전엔 호출마다 새 지연 지우기를 걸어 1.5초 간격 두 번 복사하면 두 번째
+    '복사됨' 이 0.3초만 보였다."""
+    import time
+
+    from PyQt6.QtWidgets import QApplication
+
+    host = QWidget()
+    lab = QLabel("", host)
+    host.show()
+    motion.flash_text(lab, "첫째", hold_ms=60)
+    assert lab.graphicsEffect() is not None, "나타날 때 페이드가 없다"
+    motion.flash_text(lab, "둘째", hold_ms=400)
+
+    def spin(ms):
+        end = time.monotonic() + ms / 1000
+        while time.monotonic() < end:
+            QApplication.processEvents()
+            time.sleep(0.005)
+
+    spin(150)                    # 첫째의 60ms 타이머가 살아 있었다면 이미 지웠다
+    assert lab.text() == "둘째", "앞 알림의 지우기가 뒤 알림을 지웠다"
+    spin(400 + motion.DUR_TOAST_OUT + 200)
+    assert lab.text() == "", "유지 시간이 지나도 사라지지 않는다"
+    lab._motionToastTimer.stop()
+    host.deleteLater()
+
+
+def test_new_toast_during_fade_out_is_not_cleared(styled_qapp, motion_on):
+    """사라지는 도중 새 알림이 오면 옛 페이드의 끝이 새 글자를 지우면 안 된다."""
+    host = QWidget()
+    lab = QLabel("", host)
+    motion.flash_text(lab, "첫째", hold_ms=10_000)
+    motion._toast_out(lab)
+    fading = [a for a in lab.findChildren(motion.QPropertyAnimation)
+              if a.endValue() == 1.0 and a.easingCurve() == motion.EASE_EXIT]
+    assert fading, "사라질 때 페이드가 없다"
+    motion.flash_text(lab, "둘째", hold_ms=10_000)
+    for a in fading:
+        a.setCurrentTime(a.totalDuration())         # 옛 페이드가 뒤늦게 끝난다
+    assert lab.text() == "둘째"
+    lab._motionToastTimer.stop()
+
+
+def test_far_scroll_only_animates_the_last_screen(styled_qapp, motion_on):
+    """두 화면 넘게 떨어진 목표는 한 화면 앞으로 순간 이동한 뒤 그 한 화면만 굴린다."""
+    from PyQt6.QtWidgets import QScrollBar
+
+    bar = QScrollBar()
+    bar.setRange(0, 100_000)
+    bar.setPageStep(800)
+    bar.setValue(0)
+    motion.animate_scroll(bar, 50_000)
+    anim = bar._motionScrollAnim
+    assert anim.startValue() == 50_000 - 800
+    assert anim.endValue() == 50_000
+    # 가까운 거리는 그대로 굴린다.
+    anim.stop()
+    bar.setValue(1000)
+    motion.animate_scroll(bar, 1500)
+    assert bar._motionScrollAnim.startValue() == 1000

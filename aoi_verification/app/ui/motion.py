@@ -8,7 +8,9 @@
   그리고 **로딩 오버레이는 두 축을 분리**한다 — 불투명도는 Linear(스크림 디밍이 슬램하지
   않게), 위치는 OutQuad(잔여 **이동량**이 눈에 보이게).  이유는 ``widgets/loading_overlay.py``
   주석과 ``docs/화면_디자인_도면.md`` 참조.
-- 퇴장은 입장보다 짧게.  장식이 아니라 상태·공간 연속성을 전달.
+- 퇴장은 입장보다 짧게, 그리고 **가속(ease-in)** 으로 — ``EASE_EXIT``.  떠나는 것에
+  감속 곡선을 쓰면 첫 몇 프레임에 거의 다 사라져 남은 시간이 빈 화면이 된다.
+  장식이 아니라 상태·공간 연속성을 전달.
 - **결정론**: 헤드리스(offscreen) 면 모든 헬퍼가 즉시 적용(테스트/캡처가 흔들리지
   않게).  이 경우 동작 의미는 애니메이션 없이 동일.
 
@@ -20,7 +22,7 @@ import os
 
 from PyQt6.QtCore import (QEasingCurve, QEvent, QObject, QPoint, QPointF,
                           QPropertyAnimation, QSequentialAnimationGroup,
-                          QVariantAnimation, pyqtProperty)
+                          QTimer, QVariantAnimation, pyqtProperty)
 from PyQt6.QtWidgets import (QApplication, QGraphicsEffect,
                              QGraphicsOpacityEffect, QLabel)
 
@@ -98,6 +100,8 @@ STAGGER_RISE_MS = 60     # 25안 — 행 사이 지연
 DUR_SWIPE_OUT = 180      # 26안 — 결정한 사진이 방향으로 밀려나는 시간
 DUR_SWIPE_IN = 120       # 26안 — 다음 사진 페이드인
 DUR_KNOB = 180           # 24안 — 토글 스위치 노브 슬라이드(누른 즉시의 답)
+DUR_TOAST_IN = 160       # 자리 예약 토스트 — 나타남(등장)
+DUR_TOAST_OUT = 200      # 자리 예약 토스트 — 사라짐(퇴장, 가속)
 
 
 def _ease_material_decelerate() -> QEasingCurve:
@@ -134,9 +138,32 @@ def _ease_material_decelerate() -> QEasingCurve:
     return c
 
 
+def _ease_material_accelerate() -> QEasingCurve:
+    """머터리얼 '강조 가속' 곡선 (CSS `cubic-bezier(.3,0,.8,.15)`) — **퇴장** 전용.
+
+    ★ 떠나는 것에 ``EASE_PRIMARY``(감속)를 쓰면 안 된다.  후보 선별 스와이프(180ms)
+    에서 실측: 잔상 불투명도가 20ms 에 0.35, **90ms 에 0.05** — 눈에는 이미 없다.
+    다음 사진은 180ms 에 들어오므로 그 사이 ~90ms 가 **빈 화면**이었다(26안이 막으려던
+    바로 그 '한순간 비어 보임').  가속 곡선은 같은 시점에 0.85 를 남기고 끝에서 빠지므로
+    떠남과 들어옴이 이어진다.
+
+    | 시점(180ms 중) | 감속(옛) | 이 곡선 |
+    |---|---|---|
+    | 40ms | 0.193 | 0.972 |
+    | 90ms | 0.050 | 0.846 |
+    | 140ms | 0.007 | 0.553 |
+    (남은 불투명도 = 1 − 진행률.  회귀 가드 ``dev/tests/test_motion_curve.py``.)
+    """
+    c = QEasingCurve(QEasingCurve.Type.BezierSpline)
+    c.addCubicBezierSegment(QPointF(0.30, 0.0), QPointF(0.80, 0.15),
+                            QPointF(1.0, 1.0))
+    return c
+
+
 # QEasingCurve 는 값 타입이라 ``setEasingCurve()`` 가 복사한다 — 하나를 공유해도
 # 안전하고, 호출부는 예전처럼 이 이름만 넘기면 된다.
 EASE_PRIMARY = _ease_material_decelerate()    # 앱 기본 — 끝까지 보이는 감속
+EASE_EXIT = _ease_material_accelerate()       # 퇴장 — 끝에서 빠져나가는 가속
 
 
 def enabled() -> bool:
@@ -289,6 +316,14 @@ def animate_scroll(bar, target: int, *, duration: int = DUR_BASE) -> None:
         anim = QPropertyAnimation(bar, b"value", bar)
         bar._motionScrollAnim = anim
     anim.stop()
+    # ★ 먼 거리는 **마지막 한 화면만** 굴린다.  240ms 에 수만 px 를 지나가면 내용이
+    #   번져 읽을 수 없는 띠가 되고 도착 위치의 맥락도 안 생긴다(검토 600행에서 맨
+    #   아래 행으로 점프).  두 화면 넘게 떨어져 있으면 목표 한 화면 앞으로 순간 이동한
+    #   뒤 거기서부터 감속해 안착한다 — 방향과 도착은 보이고, 번짐은 없다.
+    page = max(1, int(bar.pageStep()))
+    cur = int(bar.value())
+    if abs(target - cur) > 2 * page:
+        bar.setValue(target - page if target > cur else target + page)
     # ★ 반드시 stop() **뒤에** 현재값을 시작값으로 잡는다 — 실행 중인 애니메이션의
     #   시작값 변경은 Qt 가 무시한다(스크롤이 옛 위치에서 튄다).
     anim.setStartValue(int(bar.value()))
@@ -415,7 +450,8 @@ class _OffsetFade(QGraphicsEffect):
 
 
 def _run_offset_fade(widget, *, offset_from, offset_to, opacity_from,
-                     opacity_to, duration, delay_ms, on_done):
+                     opacity_to, duration, delay_ms, on_done,
+                     easing=EASE_PRIMARY):
     """공통 몸통 — 이펙트를 걸고 한 번 재생한 뒤 **떼어 낸다**.
 
     ★ 끝나면 반드시 `setGraphicsEffect(None)`.  이펙트가 붙어 있는 동안 Qt 는 그
@@ -439,7 +475,7 @@ def _run_offset_fade(widget, *, offset_from, offset_to, opacity_from,
     anim.setStartValue(0.0)
     anim.setEndValue(1.0)
     anim.setDuration(int(duration))
-    anim.setEasingCurve(EASE_PRIMARY)
+    anim.setEasingCurve(easing)
 
     def _finish():
         # ★ **자기가 건 이펙트일 때만** 뗀다.  연타로 같은 위젯에 새 등장이 걸리면
@@ -482,11 +518,15 @@ def fade_in(widget, *, delay_ms: int = 0, duration: int = DUR_SWIPE_IN,
 
     ``delay_ms`` 동안은 투명하다(CSS 의 ``backwards`` 와 같은 뜻) — 시안이
     `dsFadeIn .12s linear .18s backwards` 로 적은 그대로, 앞 사진이 다 빠진 **뒤**
-    들어온다.  그 동안 자리는 떠나는 고스트가 덮고 있다."""
+    들어온다.  그 동안 자리는 떠나는 고스트가 덮고 있다.
+
+    ★ 곡선도 시안 그대로 **등속**이다.  120ms 에 감속 곡선을 씌우면 12ms 만에 62%
+      가 떠 사실상 '툭 나타남' 이 된다."""
     return _run_offset_fade(widget, offset_from=(0, 0), offset_to=(0, 0),
                             opacity_from=0.0, opacity_to=1.0,
                             duration=duration, delay_ms=delay_ms,
-                            on_done=on_done)
+                            on_done=on_done,
+                            easing=QEasingCurve(QEasingCurve.Type.Linear))
 
 
 def swipe_out(widget, *, dx: int = 64, duration: int = DUR_SWIPE_OUT,
@@ -497,4 +537,48 @@ def swipe_out(widget, *, dx: int = 64, duration: int = DUR_SWIPE_OUT,
       **떠나는 그림의 사본(고스트)** 에 걸어야 한다."""
     return _run_offset_fade(widget, offset_from=(0, 0), offset_to=(dx, 0),
                             opacity_from=1.0, opacity_to=0.0,
-                            duration=duration, delay_ms=0, on_done=on_done)
+                            duration=duration, delay_ms=0, on_done=on_done,
+                            easing=EASE_EXIT)
+
+
+def fade_out(widget, *, duration: int = DUR_TOAST_OUT, on_done=None):
+    """제자리에서 사라진다(퇴장 = 가속).  레이아웃은 그대로 — 자리를 비우지 않는다."""
+    return _run_offset_fade(widget, offset_from=(0, 0), offset_to=(0, 0),
+                            opacity_from=1.0, opacity_to=0.0,
+                            duration=duration, delay_ms=0, on_done=on_done,
+                            easing=EASE_EXIT)
+
+
+def flash_text(label, text: str, *, hold_ms: int) -> None:
+    """자리 예약 라벨에 짧은 알림을 띄웠다가 지운다 — '복사됨'·'확정됨' 토스트.
+
+    나타날 때 페이드인, ``hold_ms`` 뒤 가속 페이드아웃 후 글자를 비운다.  예전엔
+    글자가 한 프레임에 생기고 한 프레임에 사라져 '깜빡' 으로만 읽혔다.
+
+    ★ 타이머는 **라벨이 부모인 하나**를 재사용한다.  호출마다 새 지연 호출을 걸면
+      연속 복사 때 **앞 호출의 지우기가 뒤 알림을 일찍 지운다**(1.5초 간격 두 번 →
+      두 번째 알림이 0.3초만 보였다).  재시작 한 번이면 늘 마지막 알림 기준이다.
+    ★ 사라지는 도중 새 알림이 오면 옛 페이드의 지우기가 새 글자를 지우면 안 된다 —
+      세대 번호로 막는다."""
+    gen = getattr(label, "_motionToastGen", 0) + 1
+    label._motionToastGen = gen
+    label.setText(text)
+    fade_in(label, duration=DUR_TOAST_IN)
+    timer = getattr(label, "_motionToastTimer", None)
+    if timer is None:
+        timer = QTimer(label)
+        timer.setSingleShot(True)
+        # tick 이 건드리는 것은 타이머의 **부모**(label)뿐 — 파괴 순서가 안전하다.
+        timer.timeout.connect(lambda: _toast_out(label))
+        label._motionToastTimer = timer
+    timer.start(int(hold_ms))
+
+
+def _toast_out(label) -> None:
+    gen = getattr(label, "_motionToastGen", 0)
+
+    def _clear():
+        if getattr(label, "_motionToastGen", 0) == gen:
+            label.clear()
+
+    fade_out(label, on_done=_clear)

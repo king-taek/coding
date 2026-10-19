@@ -46,8 +46,7 @@ from ... import i18n
 from ...config import CONFIG
 from ...coords import scan_image, single_info
 from ...utils import image_io as _io
-from .. import theme
-from ..deferred import call_later
+from .. import motion, theme
 from . import sheet_host as sheets
 from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
@@ -728,5 +727,5 @@ class ImageInfoDialog(QDialog):
         if not self._groups:
             return
         QApplication.clipboard().setText(self.as_text())
-        self._toast.setText(i18n.KO.IMAGE_INFO_COPIED)
-        call_later(self, _TOAST_MS, lambda: self._toast.setText(""))
+        motion.flash_text(self._toast, i18n.KO.IMAGE_INFO_COPIED,
+                          hold_ms=_TOAST_MS)
