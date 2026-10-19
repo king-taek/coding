@@ -1577,12 +1577,15 @@ class SetupPage(QWidget):
         t0 = time.perf_counter()
         path = QFileDialog.getExistingDirectory(self, i18n.KO.SETUP_FOLDER_LABEL)
         dialog_s = time.perf_counter() - t0
-        if not path:
-            return
         # 브라우저에 머문 시간에는 사용자가 폴더를 찾은 시간이 섞여 있다 — 정지시간이
         # 아니다.  아래 감시자가 재는 '닫힌 뒤의 정지' 와 짝지어 봐야 의미가 있다.
-        _LOG.info("폴더 선택: 파일 브라우저가 %.2f초 열려 있었다", dialog_s)
+        # ★ **취소해도 잰다.**  취소하면 우리 코드는 아무것도 하지 않는데도 멈춘다는
+        #   신고가 왔다 — 그 정지가 곧 '우리 코드 밖' 이라는 직접 증거다.
+        _LOG.info("폴더 선택: 파일 브라우저가 %.2f초 열려 있었다(%s)",
+                  dialog_s, "고름" if path else "취소")
         stall_watch.watch(self, self._log_stall)
+        if not path:
+            return
         target.setText(path)
         # 기준 폴더가 바뀌면 이전 슬롯 선택은 더 이상 유효하지 않다.
         if target is self.ref_path_edit:
@@ -1598,7 +1601,7 @@ class SetupPage(QWidget):
         QThread 는 ``threading.enumerate`` 에 안 잡혀 `stall_watch` 가 못 본다 —
         이 페이지가 워커에 맡겨 둔 일은 여기서 덧붙인다."""
         _LOG.warning(
-            "폴더 선택 직후 UI 가 %.2f초 멈췄다 — 그때 돌던 작업: %s"
+            "폴더 창을 닫은 직후 UI 가 %.2f초 멈췄다 — 그때 돌던 작업: %s"
             " / 폴더 확인 %s · die 안내 스캔 %s",
             seconds, jobs or "없음",
             "진행 중" if self._probing_for is not None else "아님",
