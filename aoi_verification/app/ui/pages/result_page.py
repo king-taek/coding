@@ -82,9 +82,6 @@ class ResultPage(QWidget):
         self._exporter: ExcelExporter | None = None
         # 이번 결과를 한 번이라도 저장했는가 — [새 검증 시작] 확인의 근거(U-06).
         self._exported = False
-        # '저장 완료 HH:MM' 자리 — 요약 카드를 다시 그릴 때마다 새로 만들어진다
-        # (즉 새 결과가 들어오면 자연히 비워진다).
-        self._saved_label: QLabel | None = None
         self._build()
 
     # ------------------------------------------------------------------
@@ -182,6 +179,11 @@ class ResultPage(QWidget):
         self.save_target_label = QLabel("", self)
         self.save_target_label.setProperty("role", "monoMuted")
         target_row.addWidget(self.save_target_label)
+        # '저장 완료 HH:MM' — 목적지 바로 옆.  예전엔 같은 경로를 요약 카드에도 한 번 더
+        # 적었다(한 화면에 같은 경로가 두 번).  자리는 늘 있고 글자만 바뀐다.
+        self._saved_label = QLabel("", self)
+        self._saved_label.setProperty("role", "statusPass")
+        target_row.addWidget(self._saved_label)
 
         bar = QHBoxLayout()
         bar.addStretch(1)
@@ -288,19 +290,18 @@ class ResultPage(QWidget):
         #   '몇 장이 맞았고 몇 장이 문제인가' 를 스크롤 없이 2초 안에 읽히게 타일로 낸다.
         self._summary_layout.addLayout(self._build_stat_tiles(result))
 
-        if result.slot_only_ref or result.slot_only_val:
+        # 빈 쪽은 적지 않는다 — '검증 전용: 없음' 같은 줄은 읽을 것이 없다.
+        if result.slot_only_ref:
             line(i18n.KO.RESULT_SLOT_ONLY_REF_FMT.format(
-                names=", ".join(result.slot_only_ref) or i18n.KO.VALUE_NONE),
-                role="muted")
+                names=", ".join(result.slot_only_ref)), role="muted")
+        if result.slot_only_val:
             line(i18n.KO.RESULT_SLOT_ONLY_VAL_FMT.format(
-                names=", ".join(result.slot_only_val) or i18n.KO.VALUE_NONE),
-                role="muted")
+                names=", ".join(result.slot_only_val)), role="muted")
 
-        # 결과 파일 위치 + 저장 완료 표시.  ★ 저장 성공 시트를 닫고 나면 화면에
+        # 새 결과 — 저장 완료 표시를 비운다.  ★ 저장 성공 시트를 닫고 나면 화면에
         # '내가 저장을 했던가?' 에 답할 것이 아무것도 없었다(_exported 는 내부
-        # 플래그였다).  자리를 예약해 두고 문자열만 갱신한다 — show/hide 를 쓰면
-        # 저장 순간 줄이 생기며 레이아웃이 흔들린다.
-        self._add_file_row()
+        # 플래그였다).  자리는 [엑셀로 저장] 위 목적지 줄에 늘 있다.
+        self._saved_label.setText("")
 
         # 검토 가능한 매치 실패 사진이 있을 때만 검토 버튼 활성.
         n_unmatched = len(result.unmatched_refs)
@@ -315,22 +316,6 @@ class ResultPage(QWidget):
             self.review_unmatched_btn.setText(i18n.KO.BTN_REVIEW_UNMATCHED)
 
         self._refresh_save_target()      # 31안 — 누르기 전에 목적지를
-
-    def _add_file_row(self) -> None:
-        self._saved_label = None
-        if self._target_path is not None:
-            file_row = QHBoxLayout()
-            file_row.setContentsMargins(0, 0, 0, 0)
-            path_lab = QLabel(
-                f"{i18n.KO.WORKING_FILE_LABEL}: {self._target_path}",
-                self._summary_card)
-            path_lab.setProperty("role", "monoMuted")
-            path_lab.setWordWrap(True)
-            file_row.addWidget(path_lab, 1)
-            self._saved_label = QLabel("", self._summary_card)
-            self._saved_label.setProperty("role", "statusPass")
-            file_row.addWidget(self._saved_label)
-            self._summary_layout.addLayout(file_row)
 
     # ------------------------------------------------------------------
     def _on_wafer_map(self) -> None:
@@ -572,9 +557,8 @@ class ResultPage(QWidget):
         self._loading.hide_overlay()
         self._exported = True
         # 시트를 닫아도 '저장했다' 는 사실이 화면에 남는다(자리 예약 라벨).
-        if self._saved_label is not None:
-            self._saved_label.setText(i18n.KO.RESULT_SAVED_AT_FMT.format(
-                time=datetime.now().strftime("%H:%M")))
+        self._saved_label.setText(i18n.KO.RESULT_SAVED_AT_FMT.format(
+            time=datetime.now().strftime("%H:%M")))
         # 이제부터는 '다시 저장 = 덮어쓰기' 다 — 캡션이 그 사실로 바뀐다(31안).
         self._refresh_save_target()
         # ★ 워커 시그널 슬롯에서 곧바로 모달을 열면 중첩 이벤트 루프가 생긴다 —
