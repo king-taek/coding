@@ -42,3 +42,6 @@ dev/layout_variants/.applied
 dev/사용설명서_자료/*.png
 dev/사용설명서_자료/*.jpg
 dev/사용설명서_자료/*.jpeg
+
+# graphify 코드 지도(생성물)
+graphify-out/
