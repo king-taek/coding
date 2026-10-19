@@ -148,6 +148,10 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
     적어야 전달된다 — 안 적으면 조용히 빠진다.
   - 트리 **깊은 곳**의 개별 제외는 `_UPDATE_SKIP_PATHS`(저장소 기준 상대경로)로 한다.
     지금은 미등록 글꼴 6개(2.8 MB)가 여기 있다 — 저장소에는 두고 배포에서만 뺀다.
+  - ⚠ **위 세 목록을 바꾸면 루트 `.gitattributes`(export-ignore)도 같이 고친다.** 업데이트는
+    GitHub zip 을 사용자 PC 임시 폴더에 **전부 푼 뒤** 거르므로, zip 단계에서 빼지 않으면
+    개발 파일이 사용자 디스크에 쏟아진다 — `.claude` 스킬 스크립트가 그렇게 풀린 뒤 회사
+    보안이 앱 exe 를 지웠다. `test_update_payload` 가 `git archive` 결과와 배포분을 대조한다.
   - **설명서 PDF 는 자동 업데이트가 유일한 전달 경로다.** 빌드는 `docs/` 를 담지 않는다
     (`portable_build` 는 `aoi_verification`·`main.py`·`requirements.txt`·`양식.xlsx`·IR 만).
     `docs/사용설명서.pdf`·`docs/상세설명서.pdf` 를 `_UPDATE_KEEP_ONLY` 에서 빼면 사용자에게

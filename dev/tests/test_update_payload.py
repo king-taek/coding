@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from aoi_verification.app.utils import updater
 
 _REPO = Path(__file__).resolve().parents[2]
@@ -145,13 +147,41 @@ def test_skip_paths_match_the_repo_and_never_hide_a_registered_font():
         assert Path(rel).name not in registered, f"{rel} 은 등록 대상이라 빼면 안 된다"
 
 
-def test_dev_tool_folders_never_reach_the_update_zip():
-    """`.claude`(스킬 스크립트 700여 개)는 업데이트 zip 에 **아예 들어 있지 않아야** 한다.
 
-    `_UPDATE_SKIP_TOP` 는 압축을 푼 *뒤* 거른다 — 그 전에 사용자 PC 임시 폴더에 js·sh
-    스크립트가 쏟아지고, 회사 보안이 그걸 보고 앱 exe 를 지웠다.  GitHub 브랜치 zip 은
-    `.gitattributes` 의 export-ignore 를 따르므로 거기서 뺀다(사용자 PC 의 옛 updater
-    로도 바로 효과가 난다)."""
-    lines = (_REPO / ".gitattributes").read_text(encoding="utf-8").splitlines()
-    rules = {ln.split()[0] for ln in lines if ln.strip().endswith("export-ignore")}
-    assert {".claude", ".impeccable"} <= rules
+def test_update_zip_holds_exactly_what_the_update_ships(tmp_path):
+    """GitHub 브랜치 zip(`.gitattributes` export-ignore 적용)이 **배포분과 똑같아야** 한다.
+
+    updater 는 zip 을 사용자 PC 임시 폴더에 전부 푼 *뒤* 거른다 — 거를 파일도 일단
+    디스크에 쏟아지고, `.claude` 스킬 스크립트가 그렇게 풀린 뒤 회사 보안이 앱 exe 를
+    지웠다.  그래서 zip 단계에서 뺀다.  두 목록이 어긋나면:
+      · zip 이 더 많으면 — 개발 파일이 다시 사용자 PC 로 풀린다.
+      · zip 이 더 적으면 — 사용자에게 그 파일이 영영 안 간다.
+    GitHub 와 같은 규칙으로 `git archive` 를 만들어 두 쪽을 `_stage_tree` 로 비교한다."""
+    import subprocess
+    import tarfile
+
+    if not (_REPO / ".git").exists():
+        pytest.skip("git 작업트리가 아님")
+    tar = tmp_path / "src.tar"
+    subprocess.run(["git", "-C", str(_REPO), "archive", "--worktree-attributes",
+                    "-o", str(tar), "HEAD"], check=True)
+    zip_root = tmp_path / "zip"
+    with tarfile.open(tar) as t:
+        t.extractall(zip_root)  # 우리 저장소에서 방금 만든 tar 다
+    zipped = {p.relative_to(zip_root).as_posix()
+              for p in zip_root.rglob("*") if p.is_file()}
+
+    staged = tmp_path / "staged"
+    updater._stage_tree(_REPO, staged, lambda *a: None)
+    shipped = {p.relative_to(staged).as_posix()
+               for p in staged.rglob("*") if p.is_file()}
+    # 작업트리에만 있는 미추적 파일(캐시 등)은 zip 에 원래 없다 — 추적 파일만 비교한다.
+    tracked = set(subprocess.run(["git", "-C", str(_REPO), "ls-files", "-z"], check=True,
+                                 capture_output=True, text=True,
+                                 encoding="utf-8").stdout.split("\0"))
+    shipped = {r for r in shipped if r in tracked or r == "양식.xlsx"}
+
+    # dev/양식.xlsx 는 zip 에선 원래 자리, 배포에선 앱 루트로 옮겨진다.
+    assert "dev/양식.xlsx" in zipped
+    assert zipped - {"dev/양식.xlsx"} == shipped - {"양식.xlsx"}
+    assert not any(r.startswith(".claude/") for r in zipped)

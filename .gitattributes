@@ -1,6 +1,43 @@
-# GitHub 의 브랜치 zip(자동 업데이트가 받는 그 파일)에서 뺀다 — 앱 구동과 무관한
-# 개발 도구다.  .claude 의 스킬 스크립트(js·mjs·sh 700여 개)가 사용자 PC 임시 폴더에
-# 풀리면 회사 보안이 앱 exe 를 악성으로 보고 지운다.  (updater._UPDATE_SKIP_TOP 는
-# 압축을 푼 *뒤* 거르므로 그것만으로는 막지 못한다.)
-.claude export-ignore
-.impeccable export-ignore
+# 자동 업데이트가 받는 GitHub 브랜치 zip 에는 **배포에 필요한 것만** 담는다.
+#
+# 업데이트는 그 zip 을 사용자 PC 임시 폴더에 전부 푼 *뒤에* `updater._UPDATE_SKIP_TOP`·
+# `_UPDATE_KEEP_ONLY`·`_UPDATE_SKIP_PATHS` 로 거른다.  그래서 거를 파일도 일단 사용자
+# PC 디스크에 쏟아지는데, 10-18 에 넣은 .claude 스킬 스크립트(js·mjs·sh 700여 개)가
+# 그렇게 풀린 뒤 회사 보안이 앱 exe 를 악성으로 보고 지웠다.  여기서 빼면 zip 에 아예
+# 들어가지 않는다(사용자 PC 의 옛 updater 로도 바로 효과가 난다).
+#
+# ★ 아래는 updater 의 세 목록과 **같은 결과**여야 한다 — 여기만 고치면 사용자에게 파일이
+#   안 가거나(너무 뺌) 다시 새 나간다(덜 뺌).  `test_update_payload.py` 가 둘을 대조한다.
+
+# 최상위 개발 전용 (= _UPDATE_SKIP_TOP)
+.claude/**      export-ignore
+.impeccable/**  export-ignore
+.vscode/**      export-ignore
+.github/**      export-ignore
+.coverage       export-ignore
+.gitignore      export-ignore
+.gitattributes  export-ignore
+CLAUDE.md       export-ignore
+README.md       export-ignore
+pytest.ini      export-ignore
+# dev/ 는 통째로 빼되 엑셀 양식만 남긴다(updater 가 앱 루트로 옮긴다 — 구동 필수).
+dev/**          export-ignore
+dev/양식.xlsx   -export-ignore
+
+# docs·scripts 는 남길 것만 (= _UPDATE_KEEP_ONLY)
+docs/**                 export-ignore
+docs/사용설명서.pdf     -export-ignore
+docs/상세설명서.pdf     -export-ignore
+docs/체험하기.html      -export-ignore
+scripts/**              export-ignore
+scripts/run_aoi.bat     -export-ignore
+scripts/run_aoi_debug.bat -export-ignore
+scripts/update_app.bat  -export-ignore
+
+# 미등록 글꼴 (= _UPDATE_SKIP_PATHS)
+aoi_verification/app/ui/assets/font/NanumSquareB.otf        export-ignore
+aoi_verification/app/ui/assets/font/NanumSquareR.otf        export-ignore
+aoi_verification/app/ui/assets/font/NanumSquareOTF_acB.otf  export-ignore
+aoi_verification/app/ui/assets/font/NanumSquareOTF_acR.otf  export-ignore
+aoi_verification/app/ui/assets/font/NanumSquare_acB.ttf     export-ignore
+aoi_verification/app/ui/assets/font/NanumSquare_acR.ttf     export-ignore
