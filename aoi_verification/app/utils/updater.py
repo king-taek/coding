@@ -525,6 +525,8 @@ _UPDATE_SKIP_TOP = {
     ".coverage",      # coverage.py 가 남긴 테스트 커버리지 DB — 순수 개발 잔재.
     ".gitignore",     # 배포본엔 .git 이 없다(위에서 건너뛴다) → 아무 역할이 없다.
                       #   ※ 개발환경 판정은 `.git` 폴더로 한다(`is_git_checkout`).
+    ".gitattributes", #   같은 이유.  (GitHub zip 에서 개발 파일을 빼는 export-ignore 목록 —
+                      #   이 세 목록과 같은 결과여야 한다, `test_update_payload.py`.)
     "CLAUDE.md",      # 개발 지침·README — 앱이 열지 않는다(코드의 등장은 전부 주석 인용).
     "README.md",
 }

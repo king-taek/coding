@@ -206,15 +206,31 @@ def test_run_bats_isolate_from_the_pcs_own_packages():
     자동 업데이트로 고칠 수 없다(재빌드·재배포가 필요하다)."""
     from pathlib import Path as _P
     root = _P(__file__).resolve().parents[2] / "scripts"
-    for name in ("run_aoi.bat", "run_aoi_debug.bat"):
-        text = (root / name).read_text(encoding="utf-8")
-        assert "PYTHONNOUSERSITE=1" in text, name
-        # 포터블도 같은 파일을 쓴다 — AOI_APP_HOME 을 **설정하면** 포터블 업데이트가
-        # app.new 에 고여 영원히 적용되지 않는다.  (주석에 이름이 나오는 건 무방하다.)
-        sets = [ln for ln in text.splitlines()
-                if ln.strip().lower().startswith("set ")]
-        assert not any("AOI_APP_HOME" in ln for ln in sets), \
-            f"{name} 이 AOI_APP_HOME 을 설정해 포터블 업데이트를 망가뜨린다"
+    run = (root / "run_aoi.bat").read_text(encoding="utf-8")
+    assert "PYTHONNOUSERSITE=1" in run
+    # 디버그 bat 은 같은 런처를 콘솔 모드로 부른다(교체·환경변수를 두 벌로 두지 않는다).
+    debug = (root / "run_aoi_debug.bat").read_text(encoding="utf-8")
+    assert 'call "%~dp0run_aoi.bat" debug' in debug
+
+
+def test_run_bat_that_names_a_launcher_also_swaps():
+    """exe 가 회사 보안에 지워져 bat 이 **런처**다.  AOI_APP_HOME 을 넘기면 업데이트가
+    app.new 에 스테이징만 하므로, bat 이 그 교체를 직접 해야 한다 — 안 하면 업데이트가
+    app.new 에 고여 영원히 적용되지 않는다(포터블도 같은 파일을 쓴다)."""
+    from pathlib import Path as _P
+    text = (_P(__file__).resolve().parents[2] / "scripts" / "run_aoi.bat"
+            ).read_text(encoding="utf-8")
+    lines = [ln.strip() for ln in text.splitlines() if not ln.strip().upper().startswith("REM")]
+    body = "\n".join(lines)
+    i_swap = body.index('ren "app.new" "app"')
+    i_home = body.index('set "AOI_APP_HOME=')
+    i_start = body.index('start ""')
+    assert i_swap < i_home < i_start, "교체 → 런처 알림 → 실행 순서여야 한다"
+    # 교체 실패 경로는 '구버전 복귀' 여야 한다(exe_launcher.swap_pending 과 같은 계약).
+    assert 'ren "app" "app.old" && (ren "app.new" "app" || ren "app.old" "app")' in body
+    # 지난 교체가 끊겨 app 이 없으면 먼저 복구한다.
+    assert body.index('if not exist "app\\"') < i_swap
+
 
 
 # ── lite 배포의 첫 실행 설치 (bootstrap.ensure_deps) ───────────────────────────
