@@ -181,14 +181,14 @@ class MatchPage(ProgressRowMixin, QWidget):
     # ------------------------------------------------------------------
     def _build(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(16, 16, 16, 16)
+        pm = theme.PROFILE.page_margin
+        root.setContentsMargins(pm, 16, pm, 16)
         root.setSpacing(10)
 
-        # 상단 로고 — 이 화면은 전체 스크롤이 없어 맨 위에 그대로 둔다
-        # (보이는 결과는 예전과 같다).
-        root.addWidget(build_logo_label(self))
-
+        # 로고는 표제 줄 왼쪽 끝 — 설정 화면과 같은 머리말.
         top = QHBoxLayout()
+        top.addWidget(build_logo_label(self, inline=True))
+        top.addSpacing(16)
         # ★ [← 설정으로] 는 없앴다 — 여정 레일이 복귀를 통일해서 맡는다
         #   (구조개편 1안-A).  폐기 확인은 `_on_cancel_requested` 에 그대로 남아
         #   있고, 레일이 `request_back_to_setup()` 으로 그것을 부른다.

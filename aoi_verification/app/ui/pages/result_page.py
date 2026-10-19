@@ -90,16 +90,19 @@ class ResultPage(QWidget):
     # ------------------------------------------------------------------
     def _build(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(40, 40, 40, 40)
+        pm = theme.PROFILE.page_margin
+        root.setContentsMargins(pm, 16, pm, pm)
         root.setSpacing(20)
 
-        # 상단 로고 — 이 화면은 전체 스크롤이 없어 맨 위에 그대로 둔다
-        # (보이는 결과는 예전과 같다).
-        root.addWidget(build_logo_label(self))
-
+        # 로고는 표제 줄 왼쪽 끝 — 설정 화면과 같은 머리말.
+        head = QHBoxLayout()
+        head.setSpacing(16)
+        head.addWidget(build_logo_label(self, inline=True))
         self.title = QLabel(i18n.KO.RESULT_TITLE, self)
         self.title.setProperty("role", "title")
-        root.addWidget(self.title)
+        head.addWidget(self.title)
+        head.addStretch(1)
+        root.addLayout(head)
 
         # 요약 카드 — ★ 폭을 묶는다.  1600px 창에서 카드가 화면 끝까지 늘어나면
         #   짧은 문장 몇 줄이 가로로 흩어져 '빈 카드' 처럼 보인다.  읽기 좋은 폭으로
