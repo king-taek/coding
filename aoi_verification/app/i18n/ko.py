@@ -152,9 +152,11 @@ SETUP_FOLDER_PLACEHOLDER = "폴더를 선택해 주세요"
 SETUP_MACHINE_PLACEHOLDER = "예) 1호기"
 
 # ── 검증 단계 헤더 ─────────────────────────────────────────────────────────
-STAGE1_TITLE = "Stage 1 — 후보 선별"
-STAGE2_TITLE = "Stage 2 — 유사도 기반 매칭"
-STAGE2_TITLE_COORD = "Stage 2 — 좌표 기반 매칭 (v2)"
+# ★ 레일 이름을 그대로 쓴다 — "Stage 1" 은 레일의 ② 와 번호가 어긋났고(설정이 ①),
+#   "(v2)" 는 사용자가 알 필요 없는 내부 판 번호였다.
+STAGE1_TITLE = "후보 선별"
+STAGE2_TITLE = "매칭 · 유사도 기반"
+STAGE2_TITLE_COORD = "매칭 · 좌표 기반"
 RESULT_TITLE = "검증 결과"
 # 결과 요약 — 핵심 수치는 타일로, 나머지는 문장으로.
 RESULT_MACHINES_FMT = "기준 장비: {ref}    검증 장비: {val}"
@@ -700,7 +702,7 @@ SLOT_MAP_FOLDER_TIP_FMT = "폴더: {folder}"
 # ── 실행 옵션 카드 — '자동화 수준' + '진행 범위' 를 한 카드에 담는다.
 RUN_OPTIONS_TITLE = "실행 옵션"
 RUN_OPTIONS_HINT = (
-    "· 자동화 수준 — ‘모든 사진 자동’은 후보 선별(Stage 1)을 건너뛰고 모든 기준 사진을"
+    "· 자동화 수준 — ‘모든 사진 자동’은 후보 선별을 건너뛰고 모든 기준 사진을"
     " 자동으로 매치합니다. 매치가 끝나면 검토 화면에서 결과를 하나씩 확인하고"
     " 잘못된 매치를 [매치 없음] 으로 되돌릴 수 있습니다.\n"
     # ★ 라벨 그대로 적는다 — SCOPE_SUBSET 은 말줄임표까지 포함해 '일부 슬롯만…' 이다.
