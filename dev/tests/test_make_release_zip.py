@@ -57,12 +57,12 @@ def test_update_leftovers_and_test_results_are_excluded():
 def test_instructions_cover_what_users_get_wrong():
     """설치법에 빠지면 실제로 사고가 나는 항목들."""
     t = rel.instructions_text()
-    assert "AOI_Verify.exe" in t                  # 무엇을 더블클릭하는지
+    assert "run_aoi.bat" in t                     # 무엇을 더블클릭하는지(exe 는 보안이 지운다)
+    assert "바로가기" in t                         # 아이콘 달린 실행 바로가기
     assert "C:\\AOI_Verify" in t                  # 짧은 경로 권장
     assert "Program Files" in t                   # 쓰기 불가 위치 경고
     assert "run_aoi_debug.bat" in t               # 안 켜질 때 진단
     assert "결과" in t                             # 결과 파일 위치
-    assert "추가 정보" in t                        # 미서명 경고 대응
     assert "다시 실행" in t                        # 업데이트는 재실행 시 적용
     assert t.endswith("\r\n") and "\r\n" in t     # 메모장에서 깨지지 않게 CRLF
 

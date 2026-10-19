@@ -117,12 +117,13 @@ def _show_splash(app):
     return splash
 
 
-def _open_main_window(splash):
-    """메인 창 생성(페이지 진행을 스플래시에 보고) → 표시 → 스플래시 걷기."""
+def _open_main_window(app, splash, checks):
+    """메인 창 생성(페이지 진행을 스플래시에 보고) → 시작 준비 대기 → 표시 → 스플래시 걷기."""
     from aoi_verification.app import i18n
     from aoi_verification.app.ui.main_window import MainWindow
 
-    window = MainWindow(progress=splash.set_progress)
+    window = MainWindow(progress=splash.set_progress, startup_checks=checks)
+    _wait_startup_checks(app, splash, checks)
     window.show()
     splash.set_progress(1, 1, i18n.KO.SPLASH_READY)
     splash.finish(window)
@@ -186,9 +187,76 @@ def _setup_logging() -> None:
         pass
 
 
+class _StartupChecks:
+    """로딩창(스플래시)이 떠 있는 동안 끝내 둘 준비 — 메인 창은 이게 끝난 뒤 뜬다(사용자 요청).
+
+      1) 설치 루트의 실행 bat 을 최신으로 바꾸고 아이콘 달린 바로가기를 둔다.  bat 은 자동
+         업데이트가 안 닿는 설치 루트에 있어서, 앱이 ``app\\scripts\\`` 사본을 직접 옮겨
+         놓는다(재빌드 없이 새 런처 bat 을 전하는 유일한 길).
+      2) 새 버전이 있는지 확인한다(네트워크).  결과는 메인 창이 받아 안내만 한다.
+
+    ★ bat 교체는 ``pythonw`` 일 때만, 시작 후 ``_BAT_SETTLE`` 초가 지난 뒤 한다 — 그때는
+      bat 이 ``start`` 를 끝으로 이미 빠져나갔다.  ``python.exe``(디버그 bat·lite 첫 실행)는
+      bat 이 아직 돌고 있을 수 있어 건드리지 않는다(cmd 는 도는 중인 bat 을 다시 읽는다).
+    ★ 메인 스레드를 막지 않게 백그라운드에서 돈다.  실패는 전부 삼킨다 — 부가 준비가 앱
+      실행을 막으면 안 된다(업데이트 확인 실패는 '업데이트 없음' 과 같게 다룬다)."""
+
+    _BAT_SETTLE = 2.0
+
+    def __init__(self, started: float) -> None:
+        import threading
+
+        self.info = None
+        self.done = threading.Event()
+        self._started = started
+        threading.Thread(target=self._run, name="startup-checks", daemon=True).start()
+
+    def _run(self) -> None:
+        import time
+
+        try:
+            if Path(sys.executable).stem.lower() == "pythonw":
+                from aoi_verification.app.utils import paths, shortcut
+
+                time.sleep(max(0.0, self._started + self._BAT_SETTLE - time.monotonic()))
+                app_root = paths._project_root()
+                shortcut.refresh_bats(paths.install_root(), app_root)
+                shortcut.ensure_shortcut(paths.install_root(), app_root)
+        except Exception:
+            pass
+        try:
+            from aoi_verification.app.utils import updater
+
+            self.info = updater.check_for_update()
+        except Exception:
+            self.info = None
+        self.done.set()
+
+
+def _wait_startup_checks(app, splash, checks, timeout: float = 10.0) -> None:
+    """메인 창을 띄우기 전에 시작 준비가 끝나길 기다린다(로딩창은 계속 움직인다).
+
+    네트워크가 막혀 오래 걸리면 ``timeout`` 뒤 그냥 연다 — 그때는 메인 창이 예전처럼
+    스스로 다시 확인한다(`MainWindow._begin_update_check`)."""
+    import time
+
+    from aoi_verification.app import i18n
+
+    if checks.done.is_set():
+        return
+    splash.set_progress(0, 0, i18n.KO.SPLASH_UPDATE_CHECK)   # busy — 0 에서 안 멈춘다
+    end = time.monotonic() + timeout
+    while not checks.done.is_set() and time.monotonic() < end:
+        app.processEvents()
+        checks.done.wait(0.03)
+
+
 def main() -> int:
     _ensure_package_on_path()
     _setup_logging()
+    import time
+
+    started = time.monotonic()
     try:
         deps_ok = _ensure_deps_installed()
     except Exception:
@@ -245,9 +313,11 @@ def main() -> int:
     #   뜬다.  나머지는 창이 뜬 뒤 `MainWindow` 가 백그라운드에서 불러오고, 그동안
     #   '검증 시작' 버튼이 '준비 중' 으로 잠긴다.
     splash = _show_splash(app)
+    # bat 교체·바로가기·업데이트 확인을 로딩창 뒤에서 시작한다 — 창 생성과 겹쳐 돈다.
+    checks = _StartupChecks(started)
 
     # 좀비 윈도우 방지를 위해 함수 로컬에 둔다.
-    window_ref = [_open_main_window(splash)]
+    window_ref = [_open_main_window(app, splash, checks)]
 
     # 외부에서 만든 app 을 재사용한 경우엔 우리가 루프를 굴리지 않는다(IDE 콘솔).
     if not created_here:
