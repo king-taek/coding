@@ -84,3 +84,38 @@ def test_failure_never_raises(tmp_path, monkeypatch):
     root = _install(tmp_path)
     (root / f"{i18n.KO.APP_TITLE}.lnk").mkdir()                    # 쓸 수 없는 자리
     assert shortcut.ensure_shortcut(root, root / "app") is None
+
+
+def test_refresh_bats_copies_the_updated_launcher_to_the_install_root(tmp_path):
+    """설치 루트의 bat 은 업데이트가 안 닿는다 — 앱이 app\\scripts 사본으로 바꿔 놓는다."""
+    root = tmp_path / "AOI_Verify"
+    (root / "python").mkdir(parents=True)
+    (root / "python" / "pythonw.exe").write_bytes(b"x")
+    scripts = root / "app" / "scripts"
+    scripts.mkdir(parents=True)
+    (scripts / "run_aoi.bat").write_text("new run\n")
+    (scripts / "run_aoi_debug.bat").write_text("new debug\n")
+    (root / "run_aoi.bat").write_text("old run\n")          # 옛 bat — AOI_APP_HOME 없음
+
+    changed = shortcut.refresh_bats(None, root / "app")      # 옛 bat 으로 켜도 찾는다
+    assert sorted(p.name for p in changed) == ["run_aoi.bat", "run_aoi_debug.bat"]
+    assert (root / "run_aoi.bat").read_text() == "new run\n"
+    assert (root / "run_aoi_debug.bat").read_text() == "new debug\n"
+    assert not list(root.glob("*.new"))
+    assert shortcut.refresh_bats(root, root / "app") == []   # 같으면 다시 안 쓴다
+
+
+def test_refresh_bats_leaves_dev_checkouts_alone(tmp_path):
+    repo = tmp_path / "coding"
+    (repo / "scripts").mkdir(parents=True)
+    (repo / "scripts" / "run_aoi.bat").write_text("x")
+    assert shortcut.refresh_bats(None, repo) == []
+    assert not (tmp_path / "run_aoi.bat").exists()
+
+
+def test_main_only_touches_bats_from_pythonw_after_a_delay():
+    """cmd 는 도는 중인 bat 을 다시 읽는다 — 디버그 bat(python.exe) 실행 중엔 바꾸면 안 된다."""
+    src = (Path(__file__).resolve().parents[2] / "main.py").read_text(encoding="utf-8")
+    body = src[src.index("def _install_launchers"):src.index("def main(")]
+    assert '!= "pythonw"' in body and "threading.Timer(" in body
+    assert body.index("refresh_bats") < body.index("ensure_shortcut")   # bat 이 먼저 있어야 바로가기

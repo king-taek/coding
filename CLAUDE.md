@@ -160,7 +160,9 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   같은 일을 한다 — `app.new` 교체(실패 시 구버전) → `AOI_APP_HOME` 설정 → 실행. 둘 중 하나만 고치지
   마라(`test_bootstrap`). bat 은 아이콘을 못 가지므로 앱이 켜질 때 설치 루트에 `.lnk` 를 만든다
   (`utils/shortcut.py`, 파일 직접 작성 — PowerShell·VBScript 로 만들지 마라: 보안을 다시 자극한다).
-  설치 루트의 bat 은 자동 업데이트로 바뀌지 않는다 — 고치면 재배포가 필요하다.
+  설치 루트의 bat 은 업데이트 트리 밖이라, 앱이 켜진 뒤 `app\scripts\` 사본으로 바꿔 놓는다
+  (`shortcut.refresh_bats`). **pythonw 일 때만·몇 초 뒤**다 — cmd 는 도는 중인 bat 을 다시 읽으므로
+  디버그 bat(python.exe)이 도는 동안 바꾸면 엉뚱한 줄이 실행된다. 이 조건을 풀지 마라.
 - **깨지 않아야 할 불변식 3개** (각각 실제 사고에서 나왔다 → `docs/규칙_배경.md`):
   - **런처 exe(`scripts/exe_launcher.py`)에는 앱 코드를 한 줄도 넣지 않는다.** PyInstaller 의
     `FrozenImporter` 가 exe 안 사본으로 디스크의 최신 사본을 **가린다**. `exe_launcher.spec` 의

@@ -9,6 +9,10 @@
   '스크립트를 띄우는 앱' 으로 보여 보안 프로그램을 다시 자극할 수 있고, pywin32 는
   번들에 없다.  필요한 블록은 헤더·LinkInfo(로컬 경로)·문자열 3개뿐이다.
 ★ 부가 기능이다 — 어떤 실패도 앱 실행을 막지 않는다(로그만 남긴다).
+
+설치 루트의 bat 자체도 여기서 새것으로 바꾼다(`refresh_bats`).  bat 은 ``app\\`` 바깥이라
+자동 업데이트가 건드리지 않는데, 재빌드·재배포 없이 새 런처 bat 을 전하려면 업데이트로
+받은 ``app\\scripts\\`` 사본을 앱이 직접 옮겨 놓는 수밖에 없다.
 """
 
 from __future__ import annotations
@@ -24,6 +28,7 @@ from .. import i18n
 _log = logging.getLogger("aoi.shortcut")
 
 _BAT = "run_aoi.bat"
+_ROOT_BATS = ("run_aoi.bat", "run_aoi_debug.bat")   # 빌드가 설치 루트에 두는 실행 bat
 _ICON_REL = Path("app") / "aoi_verification" / "app" / "ui" / "assets" / "logo.ico"
 
 # ShellLinkHeader.LinkFlags
@@ -113,3 +118,39 @@ def ensure_shortcut(install_root: Optional[Path], app_root: Path) -> Optional[Pa
     except Exception:
         _log.warning("바로가기를 만들지 못했습니다", exc_info=True)
         return None
+
+
+def refresh_bats(install_root: Optional[Path], app_root: Path) -> list:
+    """업데이트로 받은 ``app\\scripts\\`` 의 실행 bat 을 설치 루트로 옮긴다(다를 때만).
+
+    ★ cmd 는 bat 을 **한 줄씩 다시 열어 읽는다** — 실행 중인 bat 을 바꾸면 옛 위치부터
+      새 내용을 읽어 엉뚱한 줄을 실행한다.  그래서 부르는 쪽이 bat 이 이미 끝난 뒤
+      (``start`` 로 띄워진 pythonw 에서 몇 초 뒤)에만 부른다(`main._install_launchers`).
+    바꾼 파일 목록을 돌려준다."""
+    roots = [install_root] if install_root is not None else []
+    if app_root.name == "app":
+        roots.append(app_root.parent)
+    root = next((r for r in roots
+                 if (r / "python" / "pythonw.exe").is_file()), None)
+    if root is None:
+        return []                              # 개발 작업트리·온라인 배포
+    changed = []
+    for name in _ROOT_BATS:
+        src, dst = app_root / "scripts" / name, root / name
+        try:
+            data = src.read_bytes()
+        except OSError:
+            continue                           # 이 버전에 그 bat 이 없다 — 있는 것을 둔다
+        try:
+            if dst.read_bytes() == data:
+                continue
+        except OSError:
+            pass
+        try:
+            tmp = dst.with_name(dst.name + ".new")
+            tmp.write_bytes(data)
+            os.replace(tmp, dst)               # 반쯤 쓴 bat 이 남지 않게
+            changed.append(dst)
+        except OSError:
+            _log.warning("실행 bat 을 갱신하지 못했습니다: %s", dst, exc_info=True)
+    return changed

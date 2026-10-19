@@ -186,20 +186,39 @@ def _setup_logging() -> None:
         pass
 
 
-def _ensure_shortcut() -> None:
-    """설치 폴더에 아이콘 달린 바로가기를 둔다 — exe 대신 ``run_aoi.bat`` 으로 켜기 때문.
+def _install_launchers() -> None:
+    """설치 루트의 실행 bat 을 최신으로 바꾸고, 아이콘 달린 바로가기를 둔다.
 
-    부가 기능이라 실패해도 그냥 지나간다(``shortcut.ensure_shortcut`` 이 로그만 남긴다)."""
+    bat 은 자동 업데이트가 안 닿는 설치 루트에 있어서, 앱이 ``app\\scripts\\`` 사본을
+    직접 옮겨 놓는다(재빌드 없이 새 런처 bat 을 전하는 유일한 길).
+    ★ ``pythonw`` 일 때만, **몇 초 뒤** 한다 — 그때는 bat 이 ``start`` 를 끝으로 이미
+      빠져나갔다.  ``python.exe``(디버그 bat·lite 첫 실행)는 bat 이 아직 돌고 있을 수
+      있어 건드리지 않는다(cmd 는 도는 중인 bat 을 다시 읽는다).
+    부가 기능이라 실패해도 그냥 지나간다(로그만 남는다)."""
+    import threading
+
+    if Path(sys.executable).stem.lower() != "pythonw":
+        return
     from aoi_verification.app.utils import paths, shortcut
 
-    shortcut.ensure_shortcut(paths.install_root(), paths._project_root())
+    def _run():
+        try:
+            app_root = paths._project_root()
+            shortcut.refresh_bats(paths.install_root(), app_root)
+            shortcut.ensure_shortcut(paths.install_root(), app_root)
+        except Exception:
+            pass
+
+    t = threading.Timer(5.0, _run)
+    t.daemon = True
+    t.start()
 
 
 def main() -> int:
     _ensure_package_on_path()
     _setup_logging()
     try:
-        _ensure_shortcut()
+        _install_launchers()
     except Exception:
         pass
     try:
