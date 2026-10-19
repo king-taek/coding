@@ -143,3 +143,15 @@ def test_skip_paths_match_the_repo_and_never_hide_a_registered_font():
     for rel in updater._UPDATE_SKIP_PATHS:
         assert (_REPO / rel).exists(), f"{rel} 이 저장소에 없다(오타이거나 이미 지워졌다)"
         assert Path(rel).name not in registered, f"{rel} 은 등록 대상이라 빼면 안 된다"
+
+
+def test_dev_tool_folders_never_reach_the_update_zip():
+    """`.claude`(스킬 스크립트 700여 개)는 업데이트 zip 에 **아예 들어 있지 않아야** 한다.
+
+    `_UPDATE_SKIP_TOP` 는 압축을 푼 *뒤* 거른다 — 그 전에 사용자 PC 임시 폴더에 js·sh
+    스크립트가 쏟아지고, 회사 보안이 그걸 보고 앱 exe 를 지웠다.  GitHub 브랜치 zip 은
+    `.gitattributes` 의 export-ignore 를 따르므로 거기서 뺀다(사용자 PC 의 옛 updater
+    로도 바로 효과가 난다)."""
+    lines = (_REPO / ".gitattributes").read_text(encoding="utf-8").splitlines()
+    rules = {ln.split()[0] for ln in lines if ln.strip().endswith("export-ignore")}
+    assert {".claude", ".impeccable"} <= rules

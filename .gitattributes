@@ -1,0 +1,6 @@
+# GitHub 의 브랜치 zip(자동 업데이트가 받는 그 파일)에서 뺀다 — 앱 구동과 무관한
+# 개발 도구다.  .claude 의 스킬 스크립트(js·mjs·sh 700여 개)가 사용자 PC 임시 폴더에
+# 풀리면 회사 보안이 앱 exe 를 악성으로 보고 지운다.  (updater._UPDATE_SKIP_TOP 는
+# 압축을 푼 *뒤* 거르므로 그것만으로는 막지 못한다.)
+.claude export-ignore
+.impeccable export-ignore
