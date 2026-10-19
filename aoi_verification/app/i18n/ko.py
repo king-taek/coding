@@ -437,6 +437,9 @@ UPDATE_AVAILABLE_TITLE = "업데이트 있음"
 # 제목으로 띄우면 제목과 본문이 정반대 사실을 말한다(제목만 읽은 사용자는 오해한다).
 UPDATE_CHECK_TITLE = "업데이트 확인"
 UPDATE_AVAILABLE_BODY = "새 버전이 있습니다. 지금 업데이트할까요?"
+# 버튼은 동작 이름으로 — '예/아니오' 는 질문을 다시 읽어야 뜻이 정해진다.
+UPDATE_BTN_NOW = "지금 업데이트"
+UPDATE_BTN_LATER = "나중에"
 UPDATE_UNKNOWN_CURRENT = "최신 버전을 받아 적용할까요?"
 UPDATE_DOWNLOADING = "업데이트 다운로드 중…"
 UPDATE_DONE_RESTART = "업데이트가 적용되었습니다.\n프로그램을 종료합니다. 다시 실행해 주세요."

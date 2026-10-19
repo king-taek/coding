@@ -52,6 +52,17 @@ def test_escape_still_answers_no(styled_qapp):
     s.deleteLater()
 
 
+def test_custom_labels_keep_the_standard_answer(styled_qapp):
+    """버튼 문구만 동작 이름으로 바뀌고, 반환값·ESC 는 표준 버튼 그대로다."""
+    s = sheets._MessageSheet(None, "제목", "본문", _SB.Yes | _SB.No, _SB.Yes,
+                             "question", {_SB.Yes: "지금 업데이트", _SB.No: "나중에"})
+    assert s._buttons[_SB.Yes].text() == "지금 업데이트"
+    assert s._buttons[_SB.No].text() == "나중에"
+    QTest.keyClick(s, Qt.Key.Key_Escape)
+    assert s.answer() == _SB.No
+    s.deleteLater()
+
+
 def test_page_transition_overlay_absorbs_clicks(styled_qapp, monkeypatch):
     """전환 240ms 동안 스택이 담고 있는 것은 아직 **옛 페이지**다(P-13).
 

@@ -587,7 +587,7 @@ class _MessageSheet(QDialog):
     """앱 안 메시지 시트 — 제목 · 본문 · 표준 버튼.  선택 결과를 그대로 돌려준다."""
 
     def __init__(self, parent: Optional[QWidget], title: str, text: str,
-                 buttons, default, kind: str) -> None:
+                 buttons, default, kind: str, labels=None) -> None:
         super().__init__(parent)
         self.setProperty("role", "sheet")
         self.setObjectName("_messageSheet")
@@ -620,7 +620,8 @@ class _MessageSheet(QDialog):
             if not (buttons & sb):
                 continue
             key, role = _BUTTON_SPEC[sb]
-            btn = NeonButton(getattr(i18n.KO, key), role=role, parent=self)
+            text_ = (labels or {}).get(sb) or getattr(i18n.KO, key)
+            btn = NeonButton(text_, role=role, parent=self)
             btn.clicked.connect(lambda _c=False, s=sb: self._answer_with(s))
             bar.addWidget(btn)
             self._buttons[sb] = btn
@@ -662,7 +663,8 @@ class _MessageSheet(QDialog):
 
 
 def _message(parent: Optional[QWidget], title: str, text: str, *,
-             buttons=_SB.Ok, default=_SB.NoButton, kind: str = "info"):
+             buttons=_SB.Ok, default=_SB.NoButton, kind: str = "info",
+             labels=None):
     """앱 안 메시지 시트를 띄우고 **누른 표준 버튼**을 돌려준다.
 
     호스트가 없으면 네이티브 ``QMessageBox`` 로 폴백한다(반환값 동일)."""
@@ -674,7 +676,7 @@ def _message(parent: Optional[QWidget], title: str, text: str, *,
         if default == _SB.NoButton:
             return fn(parent, title, text, buttons)
         return fn(parent, title, text, buttons, default)
-    sheet = _MessageSheet(None, title, text, buttons, default, kind)
+    sheet = _MessageSheet(None, title, text, buttons, default, kind, labels)
     try:
         host.run(sheet, chrome=False)
         return sheet.answer()
@@ -701,10 +703,13 @@ def error(parent, title: str, text: str, buttons=_SB.Ok, default=_SB.NoButton):
 
 
 def ask(parent, title: str, text: str, buttons=_SB.Yes | _SB.No,
-        default=_SB.No):
-    """``QMessageBox.question`` 대체 — 반환값은 ``QMessageBox.StandardButton``."""
+        default=_SB.No, *, labels=None):
+    """``QMessageBox.question`` 대체 — 반환값은 ``QMessageBox.StandardButton``.
+
+    ``labels`` — ``{표준 버튼: 문구}``.  '예/아니오' 대신 동작 이름을 버튼에 적을 때.
+    반환값은 그대로 표준 버튼이라 호출부 판정은 바뀌지 않는다."""
     return _message(parent, title, text, buttons=buttons, default=default,
-                    kind="question")
+                    kind="question", labels=labels)
 
 
 # ---------------------------------------------------------------------------
