@@ -442,8 +442,9 @@ def test_confirm_toast_does_not_move_the_header_buttons(qapp):
         #   한참 뒤 다른 테스트의 이벤트 루프에서 발화해 이미 사라진 라벨을 만진다
         #   (실측: 그 시점에 프로세스가 통째로 죽었다).  앱에서는 창이 닫히며 부모와
         #   함께 죽지만, 테스트는 `deleteLater` 라 그 보장이 없다.
-        if dlg._toast_timer is not None:
-            dlg._toast_timer.stop()
+        t = getattr(dlg._toast, "_motionToastTimer", None)
+        if t is not None:
+            t.stop()
         dlg.hide()
         dlg.deleteLater()
         qapp.processEvents()

@@ -45,7 +45,7 @@ from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout,
                               QScrollArea, QToolButton, QVBoxLayout, QWidget)
 
 from ... import config, i18n
-from .. import theme
+from .. import motion, theme
 from ..score_fmt import fmt_score
 from ...models.result import MatchResult, MissEntry
 from ...models.slot import ImageItem
@@ -434,7 +434,6 @@ class UnmatchedReviewDialog(QDialog):
         self._last_cand_key: tuple | None = None
         self._close_prompted = False
         # 확정 토스트를 지우는 타이머 — 첫 확정 때 만들어 재사용한다(`_show_toast`).
-        self._toast_timer: QTimer | None = None
 
         # 닫는 즉시 C++ 위젯 해제 — 매번 열 때마다 부모에 누적되지 않도록.
         # exec() 직후엔 Python 측 new_matches/resolved_refs 접근이 여전히 안전.
@@ -1191,18 +1190,9 @@ class UnmatchedReviewDialog(QDialog):
     def _show_toast(self, text: str) -> None:
         """확정 결과를 헤더에서 잠깐 알린다(자리는 예약돼 있어 레이아웃 불변).
 
-        ★ 정적 `QTimer.singleShot` 을 쓰지 않는다 — 그 타이머는 시트가 먼저 닫혀도
-          계속 살아 있어 죽은 위젯의 슬롯을 부른다.  **부모 있는** 타이머 하나를
-          재사용하면 창과 함께 죽고, 연속 확정 때 타이머가 쌓이지도 않는다."""
-        self._toast.setText(text)
-        t = self._toast_timer
-        if t is None:
-            t = self._toast_timer = QTimer(self)
-            t.setSingleShot(True)
-            # 람다로 `self` 를 붙잡지 않는다 — 라벨의 C++ 슬롯에 직접 묶으면 순환 참조가
-            # 없고 라벨이 먼저 지워져도 Qt 가 연결을 끊는다(→ `ui/deferred.py`).
-            t.timeout.connect(self._toast.clear)
-        t.start(_TOAST_MS)
+        페이드인 → 유지 → 페이드아웃은 `motion.flash_text` 가 한다(라벨 소유 타이머
+        하나를 재사용 — 시트가 먼저 닫혀도 라벨과 함께 죽는다)."""
+        motion.flash_text(self._toast, text, hold_ms=_TOAST_MS)
 
     def _on_confirm(self) -> None:
         # 확정 직전 현재 항목의 표시 행 — 확정 후 그 자리로 올라온 다음

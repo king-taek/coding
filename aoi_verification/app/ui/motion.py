@@ -22,7 +22,7 @@ import os
 
 from PyQt6.QtCore import (QEasingCurve, QEvent, QObject, QPoint, QPointF,
                           QPropertyAnimation, QSequentialAnimationGroup,
-                          QVariantAnimation, pyqtProperty)
+                          QTimer, QVariantAnimation, pyqtProperty)
 from PyQt6.QtWidgets import (QApplication, QGraphicsEffect,
                              QGraphicsOpacityEffect, QLabel)
 
@@ -100,6 +100,8 @@ STAGGER_RISE_MS = 60     # 25안 — 행 사이 지연
 DUR_SWIPE_OUT = 180      # 26안 — 결정한 사진이 방향으로 밀려나는 시간
 DUR_SWIPE_IN = 120       # 26안 — 다음 사진 페이드인
 DUR_KNOB = 180           # 24안 — 토글 스위치 노브 슬라이드(누른 즉시의 답)
+DUR_TOAST_IN = 160       # 자리 예약 토스트 — 나타남(등장)
+DUR_TOAST_OUT = 200      # 자리 예약 토스트 — 사라짐(퇴장, 가속)
 
 
 def _ease_material_decelerate() -> QEasingCurve:
@@ -314,6 +316,14 @@ def animate_scroll(bar, target: int, *, duration: int = DUR_BASE) -> None:
         anim = QPropertyAnimation(bar, b"value", bar)
         bar._motionScrollAnim = anim
     anim.stop()
+    # ★ 먼 거리는 **마지막 한 화면만** 굴린다.  240ms 에 수만 px 를 지나가면 내용이
+    #   번져 읽을 수 없는 띠가 되고 도착 위치의 맥락도 안 생긴다(검토 600행에서 맨
+    #   아래 행으로 점프).  두 화면 넘게 떨어져 있으면 목표 한 화면 앞으로 순간 이동한
+    #   뒤 거기서부터 감속해 안착한다 — 방향과 도착은 보이고, 번짐은 없다.
+    page = max(1, int(bar.pageStep()))
+    cur = int(bar.value())
+    if abs(target - cur) > 2 * page:
+        bar.setValue(target - page if target > cur else target + page)
     # ★ 반드시 stop() **뒤에** 현재값을 시작값으로 잡는다 — 실행 중인 애니메이션의
     #   시작값 변경은 Qt 가 무시한다(스크롤이 옛 위치에서 튄다).
     anim.setStartValue(int(bar.value()))
@@ -529,3 +539,46 @@ def swipe_out(widget, *, dx: int = 64, duration: int = DUR_SWIPE_OUT,
                             opacity_from=1.0, opacity_to=0.0,
                             duration=duration, delay_ms=0, on_done=on_done,
                             easing=EASE_EXIT)
+
+
+def fade_out(widget, *, duration: int = DUR_TOAST_OUT, on_done=None):
+    """제자리에서 사라진다(퇴장 = 가속).  레이아웃은 그대로 — 자리를 비우지 않는다."""
+    return _run_offset_fade(widget, offset_from=(0, 0), offset_to=(0, 0),
+                            opacity_from=1.0, opacity_to=0.0,
+                            duration=duration, delay_ms=0, on_done=on_done,
+                            easing=EASE_EXIT)
+
+
+def flash_text(label, text: str, *, hold_ms: int) -> None:
+    """자리 예약 라벨에 짧은 알림을 띄웠다가 지운다 — '복사됨'·'확정됨' 토스트.
+
+    나타날 때 페이드인, ``hold_ms`` 뒤 가속 페이드아웃 후 글자를 비운다.  예전엔
+    글자가 한 프레임에 생기고 한 프레임에 사라져 '깜빡' 으로만 읽혔다.
+
+    ★ 타이머는 **라벨이 부모인 하나**를 재사용한다.  호출마다 새 지연 호출을 걸면
+      연속 복사 때 **앞 호출의 지우기가 뒤 알림을 일찍 지운다**(1.5초 간격 두 번 →
+      두 번째 알림이 0.3초만 보였다).  재시작 한 번이면 늘 마지막 알림 기준이다.
+    ★ 사라지는 도중 새 알림이 오면 옛 페이드의 지우기가 새 글자를 지우면 안 된다 —
+      세대 번호로 막는다."""
+    gen = getattr(label, "_motionToastGen", 0) + 1
+    label._motionToastGen = gen
+    label.setText(text)
+    fade_in(label, duration=DUR_TOAST_IN)
+    timer = getattr(label, "_motionToastTimer", None)
+    if timer is None:
+        timer = QTimer(label)
+        timer.setSingleShot(True)
+        # tick 이 건드리는 것은 타이머의 **부모**(label)뿐 — 파괴 순서가 안전하다.
+        timer.timeout.connect(lambda: _toast_out(label))
+        label._motionToastTimer = timer
+    timer.start(int(hold_ms))
+
+
+def _toast_out(label) -> None:
+    gen = getattr(label, "_motionToastGen", 0)
+
+    def _clear():
+        if getattr(label, "_motionToastGen", 0) == gen:
+            label.clear()
+
+    fade_out(label, on_done=_clear)
