@@ -568,7 +568,8 @@ class SetupPage(QWidget):
         host = QWidget(self)
         self._device_grid = QGridLayout(host)
         self._device_grid.setContentsMargins(0, 0, 0, 0)
-        self._device_grid.setSpacing(20)
+        # 아래 설정 카드 줄과 같은 간격 — 다르면 두 줄의 카드 세로 선이 어긋난다.
+        self._device_grid.setSpacing(theme.PROFILE.section_gap)
         # Defect 추출 — 첫 LOT 줄의 [슬롯 선택](추출 모드에서만 보인다).
         self._lot1_slot_btn = NeonButton(i18n.KO.EXTRACT_SLOT_BTN_ALL, role="ghost")
         self._lot1_slot_btn.setVisible(False)
