@@ -254,3 +254,36 @@ def test_unreadable_scan_returns_none(tmp_path):
     (folder / "-97826.8291.t.jpeg").write_bytes(b"broken")
     si.clear_caches()
     assert si.load_crop(m) is None
+
+
+def test_scan_sizes_are_read_once_per_folder_not_per_photo(tmp_path, monkeypatch):
+    """사진을 열 때마다 목록의 Scan 전부를 다시 stat·조회하지 않는다(NAS 왕복 × 수백).
+
+    Scan 머리는 폴더당 한 번 — 여러 스레드(엑셀 저장)가 동시에 처음 불러도 한 번이다."""
+    import threading
+    folder, color = _wafer(tmp_path)
+    other = folder / "1001.2001.c.124.jpeg"
+    other.write_bytes(color.read_bytes())
+    calls = []
+    real = si._image_size
+    monkeypatch.setattr(si, "_image_size", lambda p: calls.append(p) or real(p))
+    ts = [threading.Thread(target=si.resolve, args=(c,)) for c in (color, other) * 4]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert si.resolve(color).ok and si.resolve(other).ok
+    assert len(calls) == 1
+
+
+def test_scan_folder_reindexed_when_folder_changes(tmp_path):
+    folder, color = _wafer(tmp_path)
+    assert si.resolve(color).ok
+    new = "-1.0.t.jpeg"
+    _gradient(200, 100).save(folder / new)
+    (folder / si.SCAN_LIST_NAME).write_text(
+        f"Version=1\n-97826.8291.t.jpeg,1000.0,2000.0\n{new},1000.0,2000.0\n")
+    import os
+    later = (folder / si.SCAN_LIST_NAME).stat().st_mtime_ns + 10**9
+    os.utime(folder / si.SCAN_LIST_NAME, ns=(later, later))
+    assert len(si.resolve(color).candidates) == 2
