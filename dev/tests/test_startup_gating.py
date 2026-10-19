@@ -109,3 +109,68 @@ def test_setup_page_alone_is_not_locked(qapp):
     finally:
         page.deleteLater()
         qapp.processEvents()
+
+
+# ── 창을 띄우기 전에 로딩창에서 끝낸다(첫 [폴더 선택…] 직후 멈춤) ─────────────
+# 사용자 신고: 앱을 켜고 처음 한 번, 폴더 창을 취소하고 돌아오면 몇 초 버튼이 안
+# 눌린다.  창이 뜬 뒤 끝나는 import(GIL 점유)와 나머지 화면 생성이 원인이었다.
+
+def _load_main_module():
+    import importlib.util
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location("aoi_main_for_gating", root / "main.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod, (root / "main.py").read_text(encoding="utf-8")
+
+
+class _Splash:
+    def __init__(self):
+        self.calls = []
+
+    def set_progress(self, done, total, msg):
+        self.calls.append((done, total, msg))
+
+
+def test_main_waits_for_the_backend_before_showing_the_window():
+    _mod, src = _load_main_module()
+    body = src[src.index("def _open_main_window"):src.index("def _ensure_deps_installed")]
+    assert body.index("_wait_backend(") < body.index("window.show()")
+
+
+def test_wait_backend_runs_the_queued_page_build_while_hidden(window, qapp):
+    """로딩창 대기 중에 '로딩 끝' 신호가 배달돼 나머지 화면이 **창이 숨은 채** 만들어진다."""
+    mod, _src = _load_main_module()
+    assert not window.backend_settled()
+    import threading
+    t = threading.Thread(target=window._backend_loaded.emit)   # 실제처럼 다른 스레드에서
+    t.start()
+    t.join()                                      # 큐 연결 — 이벤트를 돌려야 배달된다
+    assert not window.backend_settled()
+    splash = _Splash()
+    mod._wait_backend(qapp, splash, window, timeout=5.0)
+    assert window.backend_settled()
+    assert window._select_page is not None
+    assert not window.isVisible()
+    assert splash.calls and splash.calls[0][:2] == (0, 0), "busy 로 띄워야 한다(0 에 멈춤 금지)"
+
+
+def test_wait_backend_gives_up_after_timeout(window, qapp):
+    mod, _src = _load_main_module()
+    mod._wait_backend(qapp, _Splash(), window, timeout=0.1)   # 신호가 안 온다
+    assert not window.backend_settled()                        # 그냥 연다 — 예전 경로
+
+
+def test_backend_error_waits_until_the_window_is_visible(window, monkeypatch):
+    """숨은 창에 시트를 열면 보이지 않는 팝업이 시작을 막는다 — 보일 때까지 미룬다."""
+    shown = []
+    monkeypatch.setattr(mw.sheets, "error", lambda *a, **k: shown.append(a))
+    monkeypatch.setattr(window, "_build_remaining_pages",
+                        lambda: (_ for _ in ()).throw(ImportError("cv2")))
+    window._on_backend_loaded()
+    assert window.backend_settled()
+    assert shown == [], "창이 숨어 있는데 오류 시트를 열었다"
+    window.show()
+    window._show_backend_error()
+    assert len(shown) == 1

@@ -123,6 +123,7 @@ def _open_main_window(app, splash, checks):
     from aoi_verification.app.ui.main_window import MainWindow
 
     window = MainWindow(progress=splash.set_progress, startup_checks=checks)
+    _wait_backend(app, splash, window)
     _wait_startup_checks(app, splash, checks)
     window.show()
     splash.set_progress(1, 1, i18n.KO.SPLASH_READY)
@@ -233,6 +234,29 @@ class _StartupChecks:
         self.done.set()
 
 
+def _wait_backend(app, splash, window, timeout: float = 120.0) -> None:
+    """메인 창을 띄우기 전에 무거운 구성 요소(cv2·OpenVINO)와 나머지 화면을 끝낸다.
+
+    ★ 창이 뜬 뒤로 미루면 **앱을 켜고 처음 한 번** 화면이 몇 초 멈춘다(사용자 신고:
+      첫 [폴더 선택…] 을 취소하고 돌아오면 버튼이 안 눌린다).  import 는 백그라운드
+      스레드에서 돌지만 C 확장이 DLL 을 올리는 동안 GIL 을 쥐어 화면 스레드를 굶기고,
+      끝나면 나머지 화면 생성이 화면 스레드에서 돈다.  로딩창에서 기다리면 그 정지가
+      사용자가 아무것도 누르지 않는 동안 지나간다.
+    ``timeout`` 을 넘기면 그냥 연다 — 예전처럼 창이 뜬 뒤 끝나고 그동안 '검증 시작' 이
+    '준비 중' 으로 잠긴다."""
+    import time
+
+    from aoi_verification.app import i18n
+
+    if window.backend_settled():
+        return
+    splash.set_progress(0, 0, i18n.KO.SPLASH_MODULES)        # busy — 0 에서 안 멈춘다
+    end = time.monotonic() + timeout
+    while not window.backend_settled() and time.monotonic() < end:
+        app.processEvents()
+        time.sleep(0.03)
+
+
 def _wait_startup_checks(app, splash, checks, timeout: float = 10.0) -> None:
     """메인 창을 띄우기 전에 시작 준비가 끝나길 기다린다(로딩창은 계속 움직인다).
 
@@ -308,10 +332,9 @@ def main() -> int:
     _load_stylesheet(app)
 
     # 스플래시(로고) → 윈도우 ---------------------------------------------
-    # ★ 여기서 무거운 모듈을 미리 불러오지 않는다.  `main_window` 는 이제 가볍고
-    #   (cv2·OpenVINO·numpy·PIL 을 끌고 오지 않는다), 창은 첫 화면만으로 곧바로
-    #   뜬다.  나머지는 창이 뜬 뒤 `MainWindow` 가 백그라운드에서 불러오고, 그동안
-    #   '검증 시작' 버튼이 '준비 중' 으로 잠긴다.
+    # ★ 무거운 모듈은 `MainWindow` 가 백그라운드에서 불러오고, 창을 띄우기 **전에**
+    #   로딩창에서 그것이 끝나길 기다린다(`_wait_backend` — 창이 뜬 뒤 끝나면 첫 조작
+    #   직후 화면이 몇 초 멈췄다).
     splash = _show_splash(app)
     # bat 교체·바로가기·업데이트 확인을 로딩창 뒤에서 시작한다 — 창 생성과 겹쳐 돈다.
     checks = _StartupChecks(started)

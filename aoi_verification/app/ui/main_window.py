@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import (QApplication, QLabel, QMainWindow,
                               QVBoxLayout, QWidget)
 
 from .. import config, i18n
-from . import theme
+from . import deferred, theme
 from ..coords import kla_info
 from ..models import session as session_mod
 from ..models.result import FinalResult, MatchResult, MissEntry, extract_result
@@ -2347,6 +2347,28 @@ class MainWindow(QMainWindow):
 
         threading.Thread(target=_work, name="backend-import", daemon=True).start()
 
+    def backend_settled(self) -> bool:
+        """백그라운드 import 와 나머지 화면 생성이 끝났는가(성공·실패 무관).
+
+        `main._wait_backend` 가 이것을 보고 **창을 띄우기 전에** 기다린다.  창이 뜬 뒤에
+        끝나면 그 순간 화면이 몇 초 멈춘다 — 사용자는 막 [폴더 선택…] 을 누른 참이라
+        폴더 창을 닫자마자 앱이 굳는 것으로 보였다(앱을 켜고 처음 한 번만 — 사용자 확인).
+        import 하는 C 확장(cv2·OpenVINO)은 DLL 을 올리는 동안 GIL 을 놓지 않아, 다른
+        스레드에서 돌려도 화면 스레드를 굶긴다."""
+        return getattr(self, "_backend_settled", False)
+
+    def _show_backend_error(self) -> None:
+        """구성 요소 로딩 실패 안내 — **창이 보일 때** 띄운다.
+
+        `main._wait_backend` 가 창을 띄우기 전에 이벤트를 돌리므로 실패가 창이 숨은 채로
+        들어올 수 있다.  숨은 창에 시트를 열면 보이지 않는 팝업이 중첩 루프를 쥐고
+        시작이 그 자리에서 멈춘다 — 보일 때까지 미룬다."""
+        if not self.isVisible():
+            deferred.call_later(self, 200, self._show_backend_error)
+            return
+        sheets.error(self, i18n.KO.APP_TITLE,
+                     i18n.KO.BACKEND_LOAD_FAILED_FMT.format(err=self._backend_error))
+
     def _on_backend_loaded(self) -> None:
         """무거운 모듈이 다 올라왔다 — 나머지 페이지를 만들고 시작 버튼을 연다."""
         if self._select_page is None:
@@ -2358,9 +2380,11 @@ class MainWindow(QMainWindow):
                 _LOG.info("나머지 화면 생성: %.2f초(화면 스레드)",
                           time.perf_counter() - t0)
             except Exception as exc:          # import 실패가 여기서 표면화된다
-                sheets.error(self, i18n.KO.APP_TITLE,
-                             i18n.KO.BACKEND_LOAD_FAILED_FMT.format(err=exc))
+                self._backend_settled = True
+                self._backend_error = exc
+                self._show_backend_error()
                 return                        # 시작 버튼은 '준비 중' 그대로 둔다
+        self._backend_settled = True
         self._backend_ready = True
         try:
             self._setup_page.set_backend_ready(True)
