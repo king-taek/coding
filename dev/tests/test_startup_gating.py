@@ -174,3 +174,15 @@ def test_backend_error_waits_until_the_window_is_visible(window, monkeypatch):
     window.show()
     window._show_backend_error()
     assert len(shown) == 1
+
+
+def test_startup_popups_wait_until_the_window_is_visible(window, monkeypatch):
+    """로딩창 대기 중 400ms 타이머가 숨은 창에서 발화해도 시작 팝업을 열지 않는다."""
+    calls = []
+    monkeypatch.setattr(window, "_check_for_update_async", lambda: calls.append("check"))
+    window._startup_checks = None
+    window._begin_update_check()
+    assert calls == [], "창이 숨어 있는데 시작 흐름(업데이트 안내·이어하기)을 시작했다"
+    window.show()
+    window._begin_update_check()
+    assert calls == ["check"]

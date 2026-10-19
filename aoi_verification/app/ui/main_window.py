@@ -374,7 +374,14 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(400, self._begin_update_check)
 
     def _begin_update_check(self) -> None:
-        """로딩창에서 이미 확인했으면 그 결과로, 아니면(시간 초과·없음) 직접 확인한다."""
+        """로딩창에서 이미 확인했으면 그 결과로, 아니면(시간 초과·없음) 직접 확인한다.
+
+        ★ **창이 보일 때만** 시작한다.  `main._wait_backend` 가 창을 띄우기 전에 이벤트를
+          돌리므로 400ms 타이머가 숨은 창에서 발화할 수 있다 — 그때 업데이트 안내·이어하기
+          시트를 열면 보이지 않는 팝업이 중첩 루프를 쥐어 시작이 영영 끝나지 않는다."""
+        if not self.isVisible():
+            deferred.call_later(self, 200, self._begin_update_check)
+            return
         checks = self._startup_checks
         if checks is None or not checks.done.is_set():
             self._check_for_update_async()
