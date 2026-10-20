@@ -57,7 +57,7 @@ def test_designed_durations_are_not_scaled():
     '실제 값' 이 갈라진다 — DUR_SHEET/LOADING/RECOLOR 가 이미 그 이유로 예외인
     자리이고, 21·23·25·26안의 값도 같은 성격이다."""
     assert (motion.DUR_RAIL_LEAD, motion.DUR_FINISH_TICK) == (140, 200)
-    assert (motion.DUR_RISE_IN, motion.STAGGER_RISE_MS) == (220, 60)
+    assert (motion.DUR_RISE_IN, motion.STAGGER_RISE_MS) == (220, 30)
     assert (motion.DUR_SWIPE_OUT, motion.DUR_SWIPE_IN) == (180, 120)
     assert motion.DUR_KNOB == 180
     for fn in (motion._run_offset_fade,):
@@ -126,11 +126,11 @@ def test_headless_still_calls_back(styled_qapp):
 
 # ═══ 21안-A — 레일 선행 릴레이 ═══════════════════════════════════════════════
 def test_rail_fills_first_then_the_page_slides(styled_qapp, motion_on):
-    """레일이 **먼저** 채워지고(140ms), 화면이 뒤이어 슬라이드-인(240ms).
+    """레일이 **먼저** 채워지기 시작하고(140ms), 반쯤 찼을 때 화면이 이어받는다.
 
-    ★ 겹쳐 재생하면 같은 정보('어디로 가는가')를 두 모션이 동시에 말해 서로를
-    흐린다 — 순서가 곧 인과(레일 → 화면)를 만든다.  순차라 동시 애니는 늘 1개,
-    총 380ms 로 예산 안이다."""
+    ★ 레일이 먼저 출발하므로 순서(레일 → 화면)는 그대로 읽힌다.  예전엔 다 찬 뒤에야
+    화면이 움직여 기다리는 느낌이 있었고, 사용자가 실제 화면 녹화로 비교해 반만
+    겹치는 쪽(03안, ``DUR_RAIL_HANDOFF``)을 골랐다(2026-10)."""
     from aoi_verification.app.ui.widgets.journey_rail import JourneyRail
 
     rail = JourneyRail()
@@ -146,7 +146,8 @@ def test_rail_fills_first_then_the_page_slides(styled_qapp, motion_on):
     # 화면 전환은 그 시간만큼 **미뤄진다**(창이 릴레이의 두 번째 박자를 쥔다).
     from aoi_verification.app.ui import main_window as mw
     src = inspect.getsource(mw.MainWindow._show_page)
-    assert "DUR_RAIL_LEAD" in src and "_run_pending_page_transition" in src
+    assert "DUR_RAIL_HANDOFF" in src and "_run_pending_page_transition" in src
+    assert 0 < motion.DUR_RAIL_HANDOFF < motion.DUR_RAIL_LEAD
     rail.deleteLater()
 
 
@@ -193,7 +194,7 @@ def test_only_the_finish_tick_colours_the_wafer_map(styled_qapp):
 
 # ═══ 25안 — 검토 리스트 진입 스태거 ══════════════════════════════════════════
 def test_entrance_stagger_matches_the_designed_budget():
-    """가시 8행 · 60ms 간격 · 220ms 라이즈 — 총 640ms.
+    """가시 8행 · 30ms 간격 · 220ms 라이즈 — 총 430ms(07안, 옛 60ms 간격은 640ms).
 
     ★ 600행 전체에 걸면 화면 밖 행까지 비용을 내고 마지막 행이 수십 초 뒤에
     나타난다.  스태거가 말하려는 것은 '목록이 방금 만들어졌다 · 여기부터 봐라'

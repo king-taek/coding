@@ -1121,6 +1121,7 @@ class SelectPage(ProgressRowMixin, QWidget):
             return False
         if shot.isNull():
             return False
+        self._stamp(shot, action == "verify")
         ghost = QLabel(viewport)
         ghost.setPixmap(shot)
         ghost.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
@@ -1150,7 +1151,56 @@ class SelectPage(ProgressRowMixin, QWidget):
         move.finished.connect(self._drop_swipe_ghost)
         fade.start()
         move.start()
+        # 사진이 들어간 곳이 한 번 반짝인다 — 검증은 오른쪽 목록, 제외는 '제외한 사진' 버튼.
+        if action == "verify":
+            motion.flash_outline(self.right_panel, theme.ACCENT)
+        else:
+            motion.flash_outline(self.btn_view_excluded, theme.DANGER)
         return True
+
+    @staticmethod
+    def _stamp(pm, verify: bool) -> None:
+        """떠나는 사진(고스트)에 결정 도장을 찍는다 — 테두리 + 왼쪽 위 '✓ 검증'/'✕ 제외'(06안).
+
+        ★ 체크·엑스는 **글자가 아니라 선**이다 — 동봉 폰트에 ✓ 글리프가 없어 두부(□)로
+          나올 수 있다(`journey_rail` 과 같은 이유)."""
+        from PyQt6.QtCore import QPointF, QRectF
+        from PyQt6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF
+        color = QColor(theme.ACCENT if verify else theme.DANGER)
+        text = i18n.KO.BTN_VERIFY if verify else i18n.KO.BTN_EXCLUDE
+        dpr = pm.devicePixelRatioF() or 1.0
+        w, h = pm.width() / dpr, pm.height() / dpr
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(color)
+        pen.setWidth(6)
+        p.setPen(pen)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRect(QRectF(3, 3, w - 6, h - 6))
+        f = QFont(p.font())
+        f.setPointSizeF(15)
+        f.setBold(True)
+        p.setFont(f)
+        icon = 16
+        box = QRectF(14, 14, 12 + icon + 8 + p.fontMetrics().horizontalAdvance(text) + 14, 38)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(color)
+        p.drawRoundedRect(box, 6, 6)
+        mark = QPen(QColor(theme.ON_ACCENT))
+        mark.setWidthF(2.6)
+        mark.setCapStyle(Qt.PenCapStyle.RoundCap)
+        mark.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        p.setPen(mark)
+        x0, cy = box.left() + 12, box.center().y()
+        if verify:
+            p.drawPolyline(QPolygonF([QPointF(x0, cy), QPointF(x0 + 5, cy + 5),
+                                      QPointF(x0 + icon, cy - 6)]))
+        else:
+            p.drawLine(QPointF(x0 + 2, cy - 6), QPointF(x0 + icon - 2, cy + 6))
+            p.drawLine(QPointF(x0 + icon - 2, cy - 6), QPointF(x0 + 2, cy + 6))
+        p.drawText(QRectF(x0 + icon + 8, box.top(), box.width(), box.height()),
+                   int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), text)
+        p.end()
 
     def _fade_in_next(self) -> None:
         """다음 사진이 제자리에서 떠오른다 — 스와이프가 끝난 뒤 120ms (26안).

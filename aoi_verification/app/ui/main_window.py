@@ -2503,10 +2503,11 @@ class MainWindow(QMainWindow):
             self._stack.setCurrentWidget(w)
             self._notify_shown(w)
             return
-        # ★ 21안-A '레일 선행 릴레이' — 레일 눈금이 먼저 차오르고(140ms), 그것이
-        #   끝난 **뒤** 화면이 슬라이드-인(240ms)한다.  순차라 동시 애니는 늘 1개,
-        #   총 380ms.  겹쳐 재생하면 같은 정보(어디로 가는가)를 두 모션이 동시에
-        #   말해 서로를 흐린다 — 순서가 곧 인과(레일 → 화면)를 만든다.
+        # ★ 레일 선행 릴레이 — 레일 눈금이 먼저 차오르기 시작하고(140ms), 그 절반
+        #   (``DUR_RAIL_HANDOFF`` 70ms)에서 화면 전환이 이어받는다(03안).  예전(21안-A)엔
+        #   다 찬 **뒤** 시작해서 누른 뒤 화면이 반응하기까지 기다리는 느낌이 있었다 —
+        #   사용자가 실제 화면 녹화로 비교하고 반만 겹치는 쪽을 골랐다(2026-10).
+        #   레일이 먼저 출발하므로 '레일 → 화면' 순서는 그대로 읽힌다.
         #   지연 중 새 전환이 들어오면 **마지막 것만** 산다(연타 보호).
         self._pending_page = w
         timer = getattr(self, "_page_lead_timer", None)
@@ -2516,10 +2517,10 @@ class MainWindow(QMainWindow):
             timer.setSingleShot(True)
             timer.timeout.connect(self._run_pending_page_transition)
             self._page_lead_timer = timer
-        timer.start(motion.DUR_RAIL_LEAD)
+        timer.start(motion.DUR_RAIL_HANDOFF)
 
     def _run_pending_page_transition(self) -> None:
-        """레일이 다 찼다 — 이제 화면을 밀어 넣는다(21안-A 의 두 번째 박자)."""
+        """레일이 반쯤 찼다 — 이제 화면을 밀어 넣는다(릴레이의 두 번째 박자)."""
         from . import motion
         w = getattr(self, "_pending_page", None)
         self._pending_page = None

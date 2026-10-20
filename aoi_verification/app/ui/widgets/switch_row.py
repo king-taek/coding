@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import math
+
 from typing import Optional
 
 from PyQt6.QtCore import (QEvent, QRectF, QSize, Qt,
@@ -76,8 +78,10 @@ class ToggleSwitch(QWidget):
         self._anim.stop()
         if not animate or not motion.enabled():
             self._pos = target
+            self._knob_from = self._knob_to = target
             self.update()
             return
+        self._knob_from, self._knob_to = float(self._pos), float(target)
         self._anim.setStartValue(float(self._pos))
         self._anim.setEndValue(float(target))
         # ★ 노브는 `dur()` 스케일을 타지 않는다 — 시안이 180ms 로 못박은 값이고,
@@ -167,11 +171,22 @@ class ToggleSwitch(QWidget):
             p.drawRoundedRect(QRectF(2, 2, w - 4, h - 4), r - 2, r - 2)
             p.setPen(Qt.PenStyle.NoPen)
 
-        # 노브
+        # 노브 — 움직이는 도중엔 지나온 쪽으로 늘어났다가 도착하면 둥글게 돌아온다(15안).
         knob_d = h - 2 * _KNOB_M
         x = _KNOB_M + on * (w - knob_d - 2 * _KNOB_M)
+        knob = QRectF(x, _KNOB_M, knob_d, knob_d)
+        f0 = getattr(self, "_knob_from", on)
+        f1 = getattr(self, "_knob_to", on)
+        if f1 != f0:
+            from .. import motion
+            prog = max(0.0, min(1.0, (on - f0) / (f1 - f0)))
+            stretch = motion.KNOB_STRETCH_PX * math.sin(math.pi * prog)
+            if f1 > f0:
+                knob.setLeft(max(float(_KNOB_M), x - stretch))
+            else:
+                knob.setRight(min(float(w - _KNOB_M), x + knob_d + stretch))
         p.setBrush(QColor(theme.ON_ACCENT if enabled else theme.ELEV))
-        p.drawEllipse(QRectF(x, _KNOB_M, knob_d, knob_d))
+        p.drawRoundedRect(knob, knob_d / 2.0, knob_d / 2.0)
         p.end()
 
 
