@@ -110,6 +110,8 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   관점(Addy · ECC · ponytail) → 디자인 스킬. 예: 좌표 수정은 `systematic-debugging` 으로 재현하되 골든 기대값은 절대 고치지 않는다.
 - 디자인 스킬은 웹 기준이 많다. PyQt6 화면에는 원칙(위계 · 간격 · 대비)만 옮기고 공통 버튼(`NeonButton`) · `ko.py` 문자열 규칙을 따른다.
   `diagram-design` 은 설명서(`dev/사용설명서_자료`) 그림용이며 사진 파일 정책은 그대로다.
+- 2026-10-20 추가: `motion-reference` — 모션 이름 · 시간 · 이징 사전(motion-reference.takayustudio.jp, 라이선스 명시 없음 → 링크만, 코드 복사 금지).
+  우선순위는 디자인 스킬 **다음**이고, 구현은 `ui/motion.py` 상수로만 한다(로딩바 규칙 · motion.py 원칙이 사이트 값보다 먼저).
 - 새 스킬을 넣으면 금지어 가드(`test_no_spyder_conda.py`)를 다시 돌린다 — 저장소 안 모든 글자를 훑는다.
 
 ## 로딩바(LoadingOverlay) 규칙 — 오작동 방지 (중요)

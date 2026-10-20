@@ -30,3 +30,11 @@
 - 겹칠 때 우선순위는 `CLAUDE.md` 에 적었다. 갱신은 같은 고정 커밋 경로에서 다시 복사한다.
 - 데스크톱(PyQt6) 앱이라 디자인 스킬의 CSS · 웹폰트 · CDN 조언은 버리고 원칙만 쓴다. diagram-design 은 설명서 그림용이고 사진 파일 정책은 그대로다.
 - 추가 뒤 `python scripts/internal/verify_no_forbidden.py` 와 `test_no_spyder_conda.py` 통과를 확인했다.
+
+## 모션 레퍼런스 링크 (2026-10-20, 사용자 요청)
+
+| 폴더 | 출처 | 라이선스 | 무엇 |
+|---|---|---|---|
+| `motion-reference/` | https://motion-reference.takayustudio.jp/ (TakayuStudio) — 외부 파일 없음, `SKILL.md` 만 이 저장소에서 새로 씀 | **명시 없음**("개인 학습용 레퍼런스") — 그래서 링크만 둔다 | 모션 이름 · 시간 · 이징을 찾는 사전. 코드 · 설명 · 목록은 복사하지 않고 수치와 원리만 참고 |
+
+- 받아 온 파일이 없어 SkillSpector 검사는 하지 않았다.
