@@ -19,8 +19,8 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import (QEasingCurve, QPoint, QRect, Qt, QVariantAnimation,
-                          pyqtSignal)
+from PyQt6.QtCore import (QEasingCurve, QPoint, QPointF, QRect, Qt,
+                          QVariantAnimation, pyqtSignal)
 from PyQt6.QtGui import (QColor, QFont, QFontMetrics, QPainter, QPen,
                          QPolygon)
 from PyQt6.QtWidgets import QWidget
@@ -68,6 +68,12 @@ class JourneyRail(QWidget):
         # '레일이 먼저 말하고 화면이 따라온다' 는 한 이야기가 된다.
         self._fill = 1.0
         self._fill_anim = None
+        # 02안 — 앞으로 들어오는 중(선이 차는 동안)엔 새 단계를 아직 '예정' 으로 그리고,
+        # 다 찬 순간 고리가 한 번 퍼진다(``_arrive`` 1→0).  선이 뒤따라오며 이미 켜진
+        # 단계를 가리키면 순서가 거꾸로 읽혔다.
+        self._arriving = False
+        self._arrive = 0.0
+        self._arrive_anim = None
         # 마지막 paint 가 남긴 단계별 클릭 영역 — 히트 테스트는 이걸 본다.
         self._hit: list[QRect] = []
         self.setMouseTracking(True)
@@ -77,15 +83,18 @@ class JourneyRail(QWidget):
         """현재 단계(0-based).
 
         ``animate=True`` 면 새 단계로 들어오는 연결선이 :data:`motion.DUR_RAIL_LEAD`
-        동안 차오른다.  창은 그 시간이 지난 **뒤** 페이지 슬라이드를 시작한다 —
-        두 모션이 겹치지 않아 동시 애니는 늘 1개이고, 이동의 원인(레일)과
-        결과(화면)가 순서대로 읽힌다(21안-A)."""
+        동안 차오르고, 다 찬 순간 새 단계가 켜지며 고리가 한 번 퍼진다(02안).  창은
+        선이 반쯤 찼을 때(:data:`motion.DUR_RAIL_HANDOFF`) 페이지 슬라이드를 시작한다 —
+        레일이 먼저 출발하므로 원인(레일) → 결과(화면) 순서는 그대로 읽힌다(03안)."""
         index = max(0, min(int(index), len(self._labels) - 1))
         if index == self._index:
             return
         forward = index > self._index
         self._index = index
         self._sync_cursor()
+        if self._arrive_anim is not None:
+            self._arrive_anim.stop()
+        self._arrive = 0.0
         if animate and forward:
             self._start_fill()
         else:
@@ -93,12 +102,14 @@ class JourneyRail(QWidget):
             if self._fill_anim is not None:
                 self._fill_anim.stop()
             self._fill = 1.0
+            self._arriving = False
         self.update()
 
     def _start_fill(self) -> None:
         from .. import motion
         if not motion.enabled():
             self._fill = 1.0
+            self._arriving = False
             return
         anim = self._fill_anim
         if anim is None:
@@ -112,14 +123,39 @@ class JourneyRail(QWidget):
             #   이 저장소가 결정형 진행바에 같은 이유로 등속을 쓴다.
             anim.setEasingCurve(QEasingCurve.Type.Linear)
             anim.valueChanged.connect(self._on_fill_tick)
+            anim.finished.connect(self._start_arrive)
             self._fill_anim = anim
         anim.stop()
         anim.setDuration(motion.DUR_RAIL_LEAD)
         self._fill = 0.0
+        self._arriving = True
         anim.start()
 
     def _on_fill_tick(self, value) -> None:
         self._fill = float(value)
+        self.update()
+
+    def _start_arrive(self) -> None:
+        """선이 다 찼다 — 새 단계를 켜고 고리를 한 번 퍼뜨린다(02안)."""
+        from .. import motion
+        self._arriving = False
+        anim = self._arrive_anim
+        if anim is None:
+            # fill 과 같은 규약: 위젯당 하나, tick 은 부모(this)만 건드린다.
+            anim = QVariantAnimation(self)
+            anim.setStartValue(1.0)
+            anim.setEndValue(0.0)
+            anim.setEasingCurve(motion.EASE_PRIMARY)
+            anim.valueChanged.connect(self._on_arrive_tick)
+            self._arrive_anim = anim
+        anim.stop()
+        anim.setDuration(motion.DUR_RAIL_ARRIVE)
+        self._arrive = 1.0
+        anim.start()
+        self.update()
+
+    def _on_arrive_tick(self, value) -> None:
+        self._arrive = float(value)
         self.update()
 
     def set_navigable(self, indexes) -> None:
@@ -241,6 +277,10 @@ class JourneyRail(QWidget):
             done_step, current = i < self._index, i == self._index
             fm = fm_cur if current else fm_oth
             tw = fm.horizontalAdvance(text)
+            # 선이 차는 동안 새 단계는 '예정' 모양으로 그린다(02안).  폭은 위에서 이미
+            # '현재' 기준으로 쟀다 — 켜지는 순간 뒤 단계들이 옆으로 밀리지 않게.
+            if current and self._arriving:
+                current = False
             mark = QRect(x, cy - d // 2, d, d)
             # 표식 — 완료=채운 원+체크 / 현재=2px 테두리+번호 / 예정=옅은 테두리+번호.
             if done_step:
@@ -252,6 +292,16 @@ class JourneyRail(QWidget):
                 p.setPen(pen)
                 p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawEllipse(mark)
+            if current and self._arrive > 0.0:
+                # 도착 — 고리가 바깥으로 한 번 퍼지며 사라진다.
+                ring = QColor(accent)
+                ring.setAlphaF(0.55 * self._arrive)
+                pen = QPen(ring)
+                pen.setWidthF(2.0)
+                p.setPen(pen)
+                p.setBrush(Qt.BrushStyle.NoBrush)
+                r = d / 2 + 1 + 7 * (1.0 - self._arrive)
+                p.drawEllipse(QPointF(mark.center()), r, r)
             if done_step:
                 # ★ 체크는 **글자가 아니라 선**이다 — 동봉 폰트(NanumSquare)에
                 #   U+2713 글리프가 없어 '✓' 는 두부(□)로 나온다.

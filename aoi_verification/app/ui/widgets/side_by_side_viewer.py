@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QPoint, QSize, Qt, QTimer, QVariantAnimation, pyqtSignal
 from PyQt6.QtGui import (QColor, QKeySequence, QPainter, QPixmap, QShortcut)
 from PyQt6.QtWidgets import (QApplication, QDialog, QHBoxLayout, QLabel,
                              QSizePolicy, QVBoxLayout, QWidget)
@@ -119,32 +119,121 @@ class _Pane(QWidget):
         super().resizeEvent(e)
 
     # -- 확대/이동 ------------------------------------------------------
-    def zoom_by(self, factor: float) -> None:
-        """맞춤 배율 대비 배수를 곱한다.  **유효 배율**(맞춤×배수)로 클램프한다.
+    def _zoom_plan(self, factor: float, anchor: Optional[QPoint]):
+        """배수를 곱한 뒤의 (배수, 이동 x, 이동 y)와 그때 커서 아래 사진 점(원본 픽셀).
 
-        휠 이벤트가 아니라 이 메서드가 확대의 단일 출구다 — 헤드리스에서 그대로
-        부를 수 있다."""
+        ``anchor``(사진 라벨 좌표)가 있으면 **그 자리의 사진 점이 커서 아래에 그대로**
+        남도록 이동을 정한다(12안) — 예전엔 가운데 기준이라 보려던 곳이 밀려났다.
+        못 하면 None."""
         target = self._target_box()
         if self._pix is None or target is None:
-            return
+            return None
         base = fit_scale(self._pix.width(), self._pix.height(),
                          target.width(), target.height())
         if base <= 0:
-            return
+            return None
         eff = max(_SCALE_MIN, min(_SCALE_MAX, base * self._zoom * factor))
-        self._zoom = eff / base
-        if abs(self._zoom - 1.0) < 1e-6:
+        zoom = eff / base
+        if abs(zoom - 1.0) < 1e-6:
             # 맞춤으로 돌아왔으면 이동도 푼다 — 안 그러면 사진이 화면 밖에 남는다.
-            self._zoom = 1.0
-            self._off_x = self._off_y = 0
+            return 1.0, 0, 0, None
+        if anchor is None:
+            return zoom, self._off_x, self._off_y, None
+        cw, ch = max(1, self._img.width()), max(1, self._img.height())
+        pw, ph = self._pix.width(), self._pix.height()
+        s0 = base * self._zoom
+        u = (anchor.x() - ((cw - pw * s0) / 2 + self._off_x)) / s0
+        v = (anchor.y() - ((ch - ph * s0) / 2 + self._off_y)) / s0
+        return zoom, *self._offset_for(zoom, anchor, u, v), (u, v)
+
+    def _offset_for(self, zoom: float, anchor: QPoint, u: float, v: float):
+        """배수 ``zoom`` 에서 사진 점 (u, v) 가 ``anchor`` 에 오는 이동량."""
+        target = self._target_box()
+        base = fit_scale(self._pix.width(), self._pix.height(),
+                         target.width(), target.height())
+        cw, ch = max(1, self._img.width()), max(1, self._img.height())
+        s = base * zoom
+        return (int(round(anchor.x() - u * s - (cw - self._pix.width() * s) / 2)),
+                int(round(anchor.y() - v * s - (ch - self._pix.height() * s) / 2)))
+
+    def zoom_by(self, factor: float, anchor: Optional[QPoint] = None) -> None:
+        """맞춤 배율 대비 배수를 곱한다.  **유효 배율**(맞춤×배수)로 클램프한다.
+
+        휠 이벤트가 아니라 이 메서드가 확대의 단일 출구다 — 헤드리스에서 그대로
+        부를 수 있다.  ``anchor`` 는 :meth:`_zoom_plan` 참조."""
+        self._stop_zoom_anim()
+        plan = self._zoom_plan(factor, anchor)
+        if plan is None:
+            return
+        self._zoom, self._off_x, self._off_y, _uv = plan
         self._redraw()
 
     def wheelEvent(self, e):  # noqa: N802
-        self.zoom_by(_ZOOM_STEP if e.angleDelta().y() > 0 else 1.0 / _ZOOM_STEP)
+        from .. import motion
+        factor = _ZOOM_STEP if e.angleDelta().y() > 0 else 1.0 / _ZOOM_STEP
+        anchor = self._img.mapFrom(self, e.position().toPoint())
         e.accept()
+        if not motion.enabled():
+            self.zoom_by(factor, anchor)
+            return
+        self._animate_zoom(factor, anchor)
+
+    def _stop_zoom_anim(self) -> None:
+        anim = getattr(self, "_zoom_anim", None)
+        if anim is not None and anim.state() == anim.State.Running:
+            anim.stop()
+            self._redraw()                      # 빠른 경로로 멈춘 그림을 매끈하게
+
+    def _animate_zoom(self, factor: float, anchor: QPoint) -> None:
+        """휠 한 칸을 ``DUR_ZOOM_STEP`` 에 걸쳐 커서 자리 기준으로 넘긴다(12안).
+
+        연속으로 굴리면 **목표에서** 다음 칸을 계산한다 — 보이는 중간값에서 계산하면
+        빠르게 굴릴수록 덜 커진다."""
+        from .. import motion
+        anim = getattr(self, "_zoom_anim", None)
+        shown = (self._zoom, self._off_x, self._off_y)
+        if anim is not None and anim.state() == anim.State.Running:
+            # 지금 그려진 중간값 대신 목표 상태에서 다음 칸을 계산한다.
+            self._zoom, self._off_x, self._off_y = self._zoom_goal
+        plan = self._zoom_plan(factor, anchor)
+        self._zoom, self._off_x, self._off_y = shown
+        if plan is None:
+            return
+        zoom, ox, oy, uv = plan
+        self._zoom_from = shown
+        self._zoom_goal = (zoom, ox, oy)
+        self._zoom_anchor = (anchor, uv)
+        if anim is None:
+            # tick 이 건드리는 것은 부모(이 패널)뿐 — 모듈 수명 규약.
+            anim = QVariantAnimation(self)
+            anim.setStartValue(0.0)
+            anim.setEndValue(1.0)
+            anim.setEasingCurve(motion.EASE_PRIMARY)
+            anim.valueChanged.connect(self._zoom_tick)
+            anim.finished.connect(self._redraw)   # 끝은 매끈한 축소로 다시 그린다
+            self._zoom_anim = anim
+        anim.stop()
+        anim.setDuration(motion.DUR_ZOOM_STEP)
+        anim.start()
+
+    def _zoom_tick(self, t) -> None:
+        t = float(t)
+        z0, x0, y0 = self._zoom_from
+        z1, x1, y1 = self._zoom_goal
+        anchor, uv = self._zoom_anchor
+        zoom = z0 + (z1 - z0) * t
+        if uv is None or z1 == 1.0:
+            ox, oy = int(round(x0 + (x1 - x0) * t)), int(round(y0 + (y1 - y0) * t))
+        else:
+            ox, oy = self._offset_for(zoom, anchor, *uv)
+        if t >= 1.0:
+            zoom, ox, oy = z1, x1, y1
+        self._zoom, self._off_x, self._off_y = zoom, ox, oy
+        self._redraw(fast=t < 1.0)
 
     def mousePressEvent(self, e):  # noqa: N802
         if e.button() == Qt.MouseButton.LeftButton:
+            self._stop_zoom_anim()              # 끌기가 확대 꼬리에 덮이지 않게
             self._last_drag = e.position().toPoint()
 
     def mouseMoveEvent(self, e):  # noqa: N802
@@ -167,7 +256,9 @@ class _Pane(QWidget):
                             and self._box.height() > 0) else self._img.size()
         return box if (box.width() > 0 and box.height() > 0) else None
 
-    def _redraw(self) -> None:
+    def _redraw(self, fast: bool = False) -> None:
+        """``fast`` — 확대 애니메이션 도중의 프레임.  원본을 매 프레임 매끈하게 줄이면
+        무거워서 그동안만 빠른 축소를 쓰고, 끝 프레임을 매끈하게 다시 그린다."""
         if self._pix is None or self._pix.isNull():
             return
         target = self._target_box()
@@ -191,6 +282,13 @@ class _Pane(QWidget):
                target.width(), target.height())
         if getattr(self, "_scaled_key", None) == key:
             scaled = self._scaled_cache
+        elif fast:
+            scaled = self._pix.scaled(
+                max(1, int(self._pix.width() * base * self._zoom)),
+                max(1, int(self._pix.height() * base * self._zoom)),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.FastTransformation,
+            )
         else:
             scaled = self._pix.scaled(
                 max(1, int(self._pix.width() * base * self._zoom)),

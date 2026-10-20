@@ -125,7 +125,7 @@ def test_transition_duration_makes_the_settle_visible(qapp):
     """곡선만 바꾸고 시간을 그대로 두면 안착이 눈에 안 보인다.
 
     안착 구간(전체의 60%+)이 최소 140ms 는 돼야 사람이 '천천히 끝났다' 고 느낀다."""
-    settle_ms = motion.dur(motion.DUR_BASE) * _settle_time_fraction(
+    settle_ms = motion.DUR_PAGE_ENTER * _settle_time_fraction(
         motion.EASE_PRIMARY)
     assert settle_ms >= 140, f"안착이 {settle_ms:.0f}ms 뿐 — 여전히 뚝 끊긴다"
 

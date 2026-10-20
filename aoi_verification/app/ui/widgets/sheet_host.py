@@ -29,12 +29,14 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PyQt6.QtCore import (QEvent, QEventLoop, QPoint, QPropertyAnimation, QSize,
-                          Qt, QVariantAnimation, pyqtSignal)
-from PyQt6.QtGui import QColor, QPainter
-from PyQt6.QtWidgets import (QApplication, QDialog, QGraphicsOpacityEffect,
-                             QGridLayout, QHBoxLayout, QLabel, QMessageBox,
-                             QSizePolicy, QVBoxLayout, QWidget)
+from PyQt6.QtCore import (QEvent, QEventLoop, QPoint, QPointF,
+                          QPropertyAnimation, QRect, QSize, Qt,
+                          QVariantAnimation, pyqtSignal)
+from PyQt6.QtGui import QColor, QCursor, QPainter
+from PyQt6.QtWidgets import (QAbstractButton, QApplication, QDialog,
+                             QGraphicsOpacityEffect, QGridLayout, QHBoxLayout,
+                             QLabel, QMessageBox, QSizePolicy, QVBoxLayout,
+                             QWidget)
 
 from ..teardown import tolerate_teardown
 from ... import i18n
@@ -310,6 +312,8 @@ class SheetHost(QWidget):
         있으면 씌운다' — 스스로 제목을 그리는 메시지/선택 시트는 ``False`` 로 끈다."""
         if chrome is None:
             chrome = bool(widget.windowTitle())
+        # 발원점은 **호스트를 띄우기 전에** 본다 — 띄운 뒤엔 커서 아래가 스크림이다.
+        origin = self._origin_of(widget)
         prev_parent = widget.parentWidget()
         prev_flags = widget.windowFlags()
         frame: Optional[_SheetFrame] = None
@@ -350,7 +354,7 @@ class SheetHost(QWidget):
         widget.show()
         self._place(root, full_bleed)
         widget.setFocus(Qt.FocusReason.PopupFocusReason)
-        self._enter(root)
+        self._enter(root, origin)
         try:
             loop.exec()                      # ★ exec() 과 같은 동기 의미
         finally:
@@ -366,9 +370,41 @@ class SheetHost(QWidget):
     # 같은 시간·같은 곡선으로 **함께** 움직여야 한 덩어리로 떠오른다.
     ENTER_RISE_PX = 18
 
-    def _enter(self, w: QWidget) -> None:
-        """시트 등장 — 아래에서 살짝 올라오며 나타난다(불투명도 + 위치)."""
+    #: 부르는 쪽이 '이 시트는 화면의 이 사각형에서 커져 나온다' 고 알려 주는 속성
+    #: (전역 좌표 QRect).  검토 행의 '크게 보기' 가 행 사진 자리를 넘긴다(11안).
+    ORIGIN_RECT_PROP = "sheetOriginRect"
+
+    def _origin_of(self, widget: QWidget):
+        """시트가 커져 나올 자리 — ``("rect", QRect)`` · ``("point", QPoint)`` · None.
+
+        속성으로 받은 사각형이 1순위, 아니면 **방금 누른 버튼** 위의 커서 자리다.
+        버튼 위가 아니면(단축키·자동 팝업) 발원점을 모르는 것이니 None — 그때는 예전처럼
+        아래에서 올라온다(``DUR_SHEET``).  좌표는 호스트(=부모 창 전체) 기준."""
         if not motion.enabled():
+            return None
+        parent = self.parentWidget()
+        if parent is None:
+            return None
+        rect = widget.property(self.ORIGIN_RECT_PROP)
+        if isinstance(rect, QRect) and rect.isValid():
+            return ("rect", QRect(parent.mapFromGlobal(rect.topLeft()), rect.size()))
+        pos = QCursor.pos()
+        node = QApplication.widgetAt(pos)
+        depth = 0
+        while node is not None and not isinstance(node, QAbstractButton) and depth < 3:
+            node = node.parentWidget()
+            depth += 1
+        if not isinstance(node, QAbstractButton) or node.window() is not parent.window():
+            return None
+        local = parent.mapFromGlobal(pos)
+        return ("point", local) if parent.rect().contains(local) else None
+
+    def _enter(self, w: QWidget, origin=None) -> None:
+        """시트 등장 — 발원점을 알면 거기서 커지며(04·11안), 모르면 아래에서 살짝
+        올라오며 나타난다(불투명도 + 위치)."""
+        if not motion.enabled():
+            return
+        if origin is not None and self._grow_from(w, origin):
             return
         eff = QGraphicsOpacityEffect(w)
         eff.setOpacity(0.0)
@@ -393,6 +429,32 @@ class SheetHost(QWidget):
         rise.setDuration(motion.DUR_SHEET)
         rise.setEasingCurve(motion.EASE_PRIMARY)
         rise.start()
+
+    def _grow_from(self, w: QWidget, origin) -> bool:
+        """``origin`` 에서 커지며 열린다.  못 하면 False(호출부가 기본 등장으로)."""
+        r1 = w.geometry()
+        if r1.width() <= 0 or r1.height() <= 0:
+            return False
+        kind, where = origin
+        if kind == "rect":
+            # 행 사진 자리 → 시트 자리.  배율 s0 로 줄인 시트의 가운데가 사진 가운데에
+            # 오도록 고정점 o 를 푼다: o + s0·(c1 − o) = c0.
+            s0 = where.width() / r1.width()
+            if 0.0 < s0 < 0.95:
+                c0 = QPointF(where.center() - r1.topLeft())
+                c1 = QPointF(r1.width() / 2, r1.height() / 2)
+                o = (c0 - c1 * s0) / (1.0 - s0)
+                motion.grow_in(w, origin=o, scale_from=s0, opacity_from=0.35,
+                               duration=motion.DUR_MORPH, easing=motion.EASE_MORPH)
+                return True
+            where = where.center()
+        local = where - r1.topLeft()
+        o = QPointF(min(max(local.x(), 0), r1.width()),
+                    min(max(local.y(), 0), r1.height()))
+        motion.grow_in(w, origin=o, scale_from=motion.SHEET_OPEN_SCALE,
+                       rise_px=motion.SHEET_OPEN_RISE,
+                       duration=motion.DUR_SHEET_OPEN)
+        return True
 
     def _make_ghost(self, entry: dict) -> Optional[QLabel]:
         """닫기 직전 시트의 **스냅샷**을 호스트 소유 QLabel 로 떠서 돌려준다.
@@ -420,18 +482,11 @@ class SheetHost(QWidget):
             return None
 
     def _fade_out_ghost(self, ghost: QLabel, *, then_hide_host: bool) -> None:
-        """스냅샷을 페이드아웃하고, 마지막 시트였으면 끝난 뒤 호스트를 숨긴다.
+        """스냅샷을 살짝 작아지며 빠지게 하고, 마지막 시트였으면 끝난 뒤 호스트를 숨긴다.
 
-        퇴장은 입장보다 짧게(모션 원칙).  애니메이션은 ghost 를 부모로 가져
+        퇴장은 입장보다 짧게, **가속**으로(05안, ``motion.shrink_out``).  예전 감속
+        페이드는 닫은 뒤에도 끝자락이 남아 있었다.  애니메이션은 ghost 를 부모로 가져
         ``DeleteWhenStopped`` 없이도 ghost 와 함께 정리된다."""
-        eff = QGraphicsOpacityEffect(ghost)
-        eff.setOpacity(1.0)
-        ghost.setGraphicsEffect(eff)
-        anim = QPropertyAnimation(eff, b"opacity", ghost)
-        anim.setStartValue(1.0)
-        anim.setEndValue(0.0)
-        anim.setDuration(motion.DUR_SHEET // 2)   # 퇴장은 입장보다 짧게
-        anim.setEasingCurve(motion.EASE_PRIMARY)
 
         def _done() -> None:
             try:
@@ -448,9 +503,8 @@ class SheetHost(QWidget):
                     Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
                 self.hide()
 
-        anim.finished.connect(_done)
         self._ghosts.append(ghost)
-        anim.start()
+        motion.shrink_out(ghost, on_done=_done)
 
     def _drop_ghosts(self) -> None:
         """남아 있는 퇴장 스냅샷을 즉시 치운다(새 시트가 열릴 때)."""

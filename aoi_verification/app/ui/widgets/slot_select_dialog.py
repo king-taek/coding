@@ -157,6 +157,30 @@ class _SlotTile(NeonButton):
         lay.addStretch(1)
         lay.addWidget(self._count)
         self._elide()
+        # 선택 표시 — 오른쪽 위 체크가 켜고 끌 때 톡 나타나고 들어간다(16안).
+        # '전체 선택' 같은 코드 경로의 setChecked 도 따라가도록 toggled 에 건다.
+        from .. import motion
+        self._badge = motion.CheckBadge(self, on=self.isChecked())
+        self.toggled.connect(self._on_toggled)
+        self._before = None
+
+    def mousePressEvent(self, event):  # noqa: N802
+        # 바뀌기 전 모습 — release 에서 토글되면 이 그림에서 새 모습으로 넘어간다(16안).
+        from .. import motion
+        self._before = self.grab() if motion.enabled() else None
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):  # noqa: N802
+        super().mouseReleaseEvent(event)        # 안에서 놓았으면 여기서 토글된다
+        self._before = None                     # 밖으로 끌어 취소했으면 버린다
+
+    def _on_toggled(self, on: bool) -> None:
+        from .. import motion
+        before, self._before = self._before, None
+        if before is not None:
+            motion.crossfade_from(self, before)
+        self._badge.set_on(on)
+        self._badge.raise_()
 
     def set_display(self, text: str) -> None:
         """타일 이름을 바꾼다(KLA: WaferID·Slot#).  폴더명은 툴팁에 남긴다."""
@@ -176,6 +200,9 @@ class _SlotTile(NeonButton):
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
         self._elide()
+        badge = getattr(self, "_badge", None)
+        if badge is not None:
+            badge.move(self.width() - badge.width() - 6, 6)
 
     def _elide(self) -> None:
         """긴 슬롯명은 **가운데** 생략 — 접두(레시피)와 접미(다이 좌표)를 둘 다 남긴다.

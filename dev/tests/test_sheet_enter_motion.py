@@ -152,4 +152,4 @@ def test_slot_select_dialog_goes_through_the_sheet_host():
 def test_run_calls_enter():
     """`run` 이 등장 모션을 부르는지 — 호출이 빠지면 조용히 옛 동작으로 돌아간다."""
     src = inspect.getsource(sh.SheetHost.run)
-    assert "self._enter(root)" in src
+    assert "self._enter(root, origin)" in src

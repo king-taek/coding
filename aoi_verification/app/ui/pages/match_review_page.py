@@ -13,9 +13,11 @@
 
 from __future__ import annotations
 
+import weakref
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from PyQt6.QtCore import QPoint, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QObject, QPoint, QRect, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPixmap
 from PyQt6.QtWidgets import (QApplication, QFrame, QGridLayout, QHBoxLayout,
                              QLabel, QMenu, QScrollArea, QSizePolicy,
@@ -130,6 +132,61 @@ def tally(matches, unmatched_keys, coord_mode: bool) -> tuple[int, int, int]:
     return ok, over, none
 
 
+class _ThumbLoader(QObject):
+    """중간 크기 캐시 파일 만들기(디코드 · 축소 · 저장)를 **UI 스레드 밖**에서 한다(10안).
+
+    ★ 예전엔 첫 paint 가 그 일을 UI 스레드에서 했다.  검토 화면에 처음 들어갈 때
+      전환 스냅샷이 썸네일을 그리는 순간 이 일이 한꺼번에 걸려, 전환이 약 0.25초
+      (검토 300행이면 0.5초) 멈췄다가 툭 나타났다(실측).  파일을 만드는 일만 일꾼
+      스레드가 하고, ``QPixmap`` 은 Qt 규칙대로 UI 스레드에서 만든다(``_LazyThumb._load``).
+    ★ 썸네일이 그사이 사라질 수 있으므로 약한 참조로 기다린다 — 죽은 위젯을 만지지 않는다.
+    """
+
+    ready = pyqtSignal(str)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._pool = ThreadPoolExecutor(max_workers=2,
+                                        thread_name_prefix="review-thumb")
+        self._waiting: dict[str, list] = {}
+        # 일꾼 스레드에서 emit → 받는 쪽(이 객체)은 UI 스레드 소속이라 큐 연결이 된다.
+        self.ready.connect(self._deliver)
+
+    def request(self, thumb: "_LazyThumb") -> None:
+        key = str(thumb._path)
+        waiting = self._waiting.setdefault(key, [])
+        waiting.append(weakref.ref(thumb))
+        if len(waiting) == 1:                    # 같은 사진은 한 번만 만든다
+            self._pool.submit(self._work, key)
+
+    def _work(self, key: str) -> None:
+        try:
+            image_io.get_mid_path(Path(key))
+        except Exception:
+            pass                                 # 실패는 _load 의 폴백 그림이 맡는다
+        self.ready.emit(key)
+
+    def _deliver(self, key: str) -> None:
+        for ref in self._waiting.pop(key, []):
+            thumb = ref()
+            if thumb is None:
+                continue
+            try:
+                thumb._load()
+            except RuntimeError:
+                pass                             # 위젯이 이미 사라졌다
+
+
+_thumb_loader: _ThumbLoader | None = None
+
+
+def _get_thumb_loader() -> _ThumbLoader:
+    global _thumb_loader
+    if _thumb_loader is None:
+        _thumb_loader = _ThumbLoader()
+    return _thumb_loader
+
+
 class _LazyThumb(QLabel):
     """첫 paint 시점에 썸네일을 지연 디코드하고, 우클릭 ‘크게보기’ 를 지원 (#6-4/#13)."""
 
@@ -168,7 +225,7 @@ class _LazyThumb(QLabel):
         super().paintEvent(event)
         if not self._image_loaded:
             self._image_loaded = True
-            QTimer.singleShot(0, self._load)
+            _get_thumb_loader().request(self)
 
     def _load(self) -> None:
         try:
@@ -612,7 +669,16 @@ class _MatchRow(QFrame):
             lambda it: self.swap_requested.emit(
                 self.match, it, self._score_for(it))
         )
+        tile = next((t for t in self._runner_tiles if t.item.path == item.path), None)
+        if tile is not None:
+            self._set_view_origin(viewer, tile)
         sheets.run(viewer, full_bleed=True)
+
+    @staticmethod
+    def _set_view_origin(viewer, src: QWidget) -> None:
+        """뷰어가 ``src``(행의 사진) 자리에서 커져 나오게 알린다(11안)."""
+        viewer.setProperty(sheets.SheetHost.ORIGIN_RECT_PROP,
+                           QRect(src.mapToGlobal(QPoint(0, 0)), src.size()))
 
     def _primary_val_item(self) -> ImageItem:
         """현재 1위 매치 val 의 ImageItem — runners_up 엔 없으므로 즉석 생성 (#5)."""
@@ -638,6 +704,7 @@ class _MatchRow(QFrame):
             lambda it: self.swap_requested.emit(
                 self.match, it, self._score_for(it))
         )
+        self._set_view_origin(viewer, self._ref_img)
         sheets.run(viewer, full_bleed=True)
 
     def _score_for(self, item: ImageItem) -> float:
@@ -742,16 +809,36 @@ class _MatchRow(QFrame):
 
     def _on_more(self) -> None:
         """‘후보 한 줄 더 보기’ — 표시 줄 수를 1 늘린다 (#5).
-        높이 변화로 스크롤이 튀지 않게 페이지가 위치를 보정한다 (#6)."""
+        높이 변화로 스크롤이 튀지 않게 페이지가 위치를 보정한다 (#6).
+        행이 커지는 동안 새 후보가 차례로 나타난다(09안)."""
+        from .. import motion
+        before = {id(t) for t in self._runner_tiles if not t.isHidden()}
+        h0 = self.height()
         self._visible_lines += 1
         self._layout_runner_tiles()
+        if motion.enabled() and self.isVisible():
+            self.layout().activate()
+            motion.animate_height(self, h0, self.sizeHint().height(),
+                                  duration=motion.DUR_ROW_RESIZE)
+            new = [t for t in self._runner_tiles
+                   if not t.isHidden() and id(t) not in before]
+            for i, t in enumerate(new):
+                motion.fade_in(t, delay_ms=40 + i * motion.STAGGER_TILE_MS,
+                               duration=motion.DUR_TILE_IN)
         self.more_clicked.emit(self)
 
     def _on_less(self) -> None:
         """‘접기’ — 펼친 줄을 전부 한 번에 접고(첫 줄만 남김), 페이지가 이 행을
-        최상단으로 스크롤 복귀한다 (#1/#6)."""
+        최상단으로 스크롤 복귀한다 (#1/#6).  접기는 펼침보다 짧게 가속으로 닫힌다(09안)."""
+        from .. import motion
+        h0 = self.height()
         self._visible_lines = 1
         self._layout_runner_tiles()
+        if motion.enabled() and self.isVisible():
+            self.layout().activate()
+            motion.animate_height(self, h0, self.sizeHint().height(),
+                                  duration=motion.DUR_ROW_SHRINK,
+                                  easing=motion.EASE_EXIT)
         self.less_clicked.emit(self)
 
     def _make_thumb(self, path: Path, *, size: int = _THUMB_PX,
@@ -810,7 +897,8 @@ class _MatchRow(QFrame):
         r = theme.PROFILE.row_radius
         p.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), r, r)
 
-    def set_unmatched(self, unmatched: bool) -> None:
+    def set_unmatched(self, unmatched: bool, *, animate: bool = False) -> None:
+        """``animate`` — 사용자가 방금 누른 경우에만 접힘·펼침을 보여 준다(08안)."""
         self._is_unmatched = unmatched
         if unmatched:
             # 되돌리기(↩) 상태 — reject 의도 해제(호버에서 위험색 안 뜨게).
@@ -818,27 +906,55 @@ class _MatchRow(QFrame):
             self.btn_toggle.setToolTip(i18n.KO.BTN_RESTORE_MATCH)
             self.btn_toggle.setProperty("intent", "")
             # 후보 영역(인라인 첫 줄 + 아래 그리드/‘더 보기’)을 모두 숨긴다 (#1/#3).
-            self._set_candidates_visible(False)
+            self._set_candidates_visible(False, animate=animate)
         else:
             self.btn_toggle.setText(i18n.KO.BTN_NO_MATCH_COMPACT)
             self.btn_toggle.setToolTip(i18n.KO.BTN_MARK_NO_MATCH)
             self.btn_toggle.setProperty("intent", "reject")
             # 후보 영역을 이전 표시 상태로 복원한다 (#1).
-            self._set_candidates_visible(True)
+            self._set_candidates_visible(True, animate=animate)
         self.btn_toggle.style().unpolish(self.btn_toggle)
         self.btn_toggle.style().polish(self.btn_toggle)
         # 빨간 테두리 등 상태 스타일은 rowState 프로퍼티로 일괄 적용 (#1).
         self._apply_state()
 
-    def _set_candidates_visible(self, visible: bool) -> None:
+    def _set_candidates_visible(self, visible: bool, *,
+                                animate: bool = False) -> None:
         """인라인 첫 줄 + 아래 후보 호스트의 표시 여부를 한꺼번에 토글 (#1/#3).
 
         후보가 아예 없는 행이면 첫 줄 컨테이너는 계속 숨김 상태로 둔다.
+        ``animate`` 면 행 높이가 접히고 펼쳐지며 후보가 흐려지고 떠오른다(08안) —
+        예전엔 한 프레임에 사라져 아래 행들이 툭 올라왔다.
         """
+        from .. import motion
+        hosts = []
         if self._runners_up:
-            self._first_line_host.setVisible(visible)
+            hosts.append(self._first_line_host)
         if self._runner_host is not None:
-            self._runner_host.setVisible(visible)
+            hosts.append(self._runner_host)
+        # 연타 — 앞 접힘이 끝날 때 숨기기를 하지 않게 세대를 올린다.
+        self._cand_gen = gen = getattr(self, "_cand_gen", 0) + 1
+        animate = animate and bool(hosts) and motion.enabled() and self.isVisible()
+        h0 = self.height()
+        for h in hosts:
+            h.setVisible(visible)
+        if not animate:
+            return
+        self.layout().activate()
+        h1 = self.sizeHint().height()
+        if visible:
+            for h in hosts:
+                motion.fade_in(h, delay_ms=60, duration=motion.DUR_TILE_IN)
+        else:
+            # 접히는 동안 후보가 흐려지는 모습을 보인다 — 다 흐려지면 그때 숨긴다.
+            def _hide(h):
+                if getattr(self, "_cand_gen", 0) == gen:
+                    h.setVisible(False)
+            for h in hosts:
+                h.setVisible(True)
+                motion.fade_out(h, duration=motion.DUR_TILE_IN,
+                                on_done=lambda h=h: _hide(h))
+        motion.animate_height(self, h0, h1, duration=motion.DUR_ROW_RESIZE)
 
 
 class MatchReviewPage(QWidget):
@@ -1180,8 +1296,8 @@ class MatchReviewPage(QWidget):
 
     #: 진입 스태거를 거는 행 수 — 시안이 '화면에 보이는 첫 8행' 으로 정했다.
     _ENTRANCE_ROWS = 8
-    #: 행 사이 지연(ms) — 8행 × 60 + 220 = 640ms 안에 전부 끝난다.
-    _ENTRANCE_STEP_MS = 60
+    #: 행 사이 지연(ms) — 7 × 30 + 220 = 430ms 안에 전부 끝난다(07안, 옛 60ms 는 700ms).
+    _ENTRANCE_STEP_MS = 30
 
     def _arm_entrance(self) -> None:
         """스태거를 예약한다 — 화면에 **앉은 뒤** 재생한다.
@@ -1427,7 +1543,7 @@ class MatchReviewPage(QWidget):
         row = self._rows_by_key.get(key)
         if row is not None:
             # 행은 제자리에 두고 빨간 테두리 강조만 토글한다 (#1).
-            row.set_unmatched(now_unmatched)
+            row.set_unmatched(now_unmatched, animate=True)
         self._update_summary()
 
     def _update_summary(self) -> None:
