@@ -21,7 +21,7 @@ from __future__ import annotations
 import os
 
 from PyQt6.QtCore import (QEasingCurve, QEvent, QObject, QParallelAnimationGroup,
-                          QPoint, QPointF, QPropertyAnimation,
+                          QPoint, QPointF, QPropertyAnimation, QRectF,
                           QSequentialAnimationGroup, QTimer, QVariantAnimation,
                           pyqtProperty)
 from PyQt6.QtGui import QPainter
@@ -554,11 +554,21 @@ class _OffsetFade(QGraphicsEffect):
     progress = pyqtProperty(float, _get_progress, _set_progress)
 
     def boundingRectFor(self, rect):  # noqa: N802
-        return rect.adjusted(
+        r = rect.adjusted(
             min(0.0, self._from.x(), self._to.x()),
             min(0.0, self._from.y(), self._to.y()),
             max(0.0, self._from.x(), self._to.x()),
             max(0.0, self._from.y(), self._to.y()))
+        # 고정점이 위젯 **밖**이면(행 사진 → 시트, 11안) 줄어든 그림이 위젯 밖에 놓인다.
+        # 배율은 선형이라 가장 작은 배율의 사각형까지만 합치면 그 사이가 다 들어간다.
+        s = min(self._sc_from, self._sc_to)
+        if s < 1.0:
+            o = self._origin
+            small = QRectF(o.x() + (rect.left() - o.x()) * s,
+                           o.y() + (rect.top() - o.y()) * s,
+                           rect.width() * s, rect.height() * s)
+            r = r.united(small.translated(self._from)).united(small.translated(self._to))
+        return r
 
     def draw(self, painter):
         t = max(0.0, min(1.0, self._progress))

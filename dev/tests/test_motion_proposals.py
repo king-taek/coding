@@ -351,3 +351,17 @@ def test_offset_fade_really_changes_pixels(styled_qapp):
     assert img.pixelColor(10, 10).name() == "#cc3333"        # 줄어든 자리 안
     assert img.pixelColor(150, 120).name() != "#cc3333", "배율이 그림에 안 들어갔다"
     win.deleteLater()
+
+
+def test_offset_fade_bounds_cover_scaled_picture_outside_widget(styled_qapp):
+    """고정점이 위젯 밖이면(시트 밖 행 사진에서 커질 때) 처음 그림이 위젯 밖에 놓인다 —
+    경계가 그만큼 넓지 않으면 Qt 가 잘라 처음엔 안 보인다."""
+    from PyQt6.QtCore import QRectF
+    eff = motion._OffsetFade()
+    eff.configure(offset_from=(0, 0), offset_to=(0, 0), opacity_from=0.35,
+                  opacity_to=1.0, scale_from=0.1, scale_to=1.0,
+                  origin=QPointF(-500, 300))
+    r = eff.boundingRectFor(QRectF(0, 0, 400, 300))
+    # 배율 0.1 의 그림: x = -500 + (0+500)*0.1 = -450 부터 40 폭.
+    assert r.contains(QRectF(-450, 270, 40, 30))
+    assert r.contains(QRectF(0, 0, 400, 300))
