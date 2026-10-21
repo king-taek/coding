@@ -569,6 +569,18 @@ class ImageInfoDialog(QDialog):
             self.preview.setFixedSize(box, box)
             return
         pix = _io.load_thumb_qpixmap(self._path, box, kind="mid")
+        # Scan 이 있으면 세로를 둘이 나눠 쓴다 — Color 가 높이를 다 먹으면 Scan 이 120px 대로
+        # 쪼그라든다(흑백이 작다는 지적).  Color 를 줄여 Scan 이 Color 와 비슷한 크기가 되게 한다.
+        if not self.scan_view.isHidden() and pix.height() > 0:
+            host = self._preview_host
+            extra = (self.scan_title.sizeHint().height()
+                     + 2 * host.layout().spacing())
+            room = host.height() - extra
+            if room > 0:
+                color_h = min(pix.height(), int(room * 0.5))
+                if color_h < pix.height():
+                    w = max(1, int(pix.width() * color_h / pix.height()))
+                    pix = _io.load_thumb_qpixmap(self._path, w, kind="mid")
         self.preview.setPixmap(pix)
         # 프레임이 사진을 딱 감싸도록 라벨을 픽스맵 크기로 — 레터박스 여백 제거.
         self.preview.setFixedSize(pix.size())
