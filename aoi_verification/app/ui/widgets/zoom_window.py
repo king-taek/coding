@@ -26,6 +26,8 @@ from .neon_button import NeonButton
 from .option_group import columns_for_width
 from . import sheet_host as sheets
 
+_BOX_PX = 3     # Scan 범위 박스 선 두께(화면 픽셀)
+
 # source 종류 ----------------------------------------------------------------
 SOURCE_TARGET = "target"        # 검증 대상 (Right)
 SOURCE_EXCLUDED = "excluded"    # 제외됨 (Bottom)
@@ -268,11 +270,35 @@ class FullscreenViewer(QDialog):
         lay.setContentsMargins(0, 0, 0, 8)
         lay.setSpacing(6)
         lay.addWidget(self._label, 1)
-        lay.addWidget(self._hint)
+        # 박스(Scan 범위)가 있을 때만 끄고 켤 수 있다 — 박스 밑의 결함을 가리면 볼 수 없어서.
+        self._show_box = overlay is not None
+        self._btn_box: Optional[NeonButton] = None
+        if overlay is not None:
+            self._btn_box = NeonButton(i18n.KO.VIEWER_BOX_OFF, role="ghost")
+            self._btn_box.setToolTip(i18n.KO.VIEWER_BOX_TIP)
+            # 뷰어 바탕이 순검정이라 ghost 버튼 글자가 묻힌다 — 밝은 글자로 고정.
+            self._btn_box.setStyleSheet(
+                f"QPushButton {{ color: {theme.VIEWER_BOX}; }}")
+            self._btn_box.clicked.connect(self._toggle_box)
+            row = QHBoxLayout()
+            row.setContentsMargins(8, 0, 8, 0)
+            row.addWidget(self._btn_box)
+            row.addWidget(self._hint, 1)
+            lay.addLayout(row)
+            QShortcut(QKeySequence("B"), self, activated=self._toggle_box)
+        else:
+            lay.addWidget(self._hint)
 
         QShortcut(QKeySequence("Esc"), self, activated=self.close)
         if image is None:
             self._start_original_load()
+
+    def _toggle_box(self) -> None:
+        self._show_box = not self._show_box
+        if self._btn_box is not None:
+            self._btn_box.setText(i18n.KO.VIEWER_BOX_OFF if self._show_box
+                                  else i18n.KO.VIEWER_BOX_ON)
+        self._redraw()
 
     # -- 원본 화질로 교체 ------------------------------------------------
     def _start_original_load(self) -> None:
@@ -442,14 +468,21 @@ class FullscreenViewer(QDialog):
                 self._scaled_key = key
                 self._scaled_cache = scaled
             p.drawPixmap(int(round(x)), int(round(y)), scaled)
-        if self._overlay is not None:
+        if self._overlay is not None and self._show_box:
             left, top, ow, oh = self._overlay
-            # 뷰어 바탕은 검정이라 검정 위용 고정 강조색을 쓴다.
-            pen = QPen(QColor(theme.VIEWER_ACCENT))
-            pen.setWidth(2)
-            p.setPen(pen)
-            p.drawRect(int(x + left * sc), int(y + top * sc),
-                       max(1, int(ow * sc)), max(1, int(oh * sc)))
+            rect = QRectF(x + left * sc, y + top * sc,
+                          max(1.0, ow * sc), max(1.0, oh * sc))
+            # 흑백 사진 위에서도 보이게 밝은 노랑 3px 선을 검은 테두리로 감싼다
+            # (선 두께는 확대 배율과 무관한 화면 픽셀).
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            casing = QPen(QColor(0, 0, 0, 230))
+            casing.setWidth(_BOX_PX + 2)
+            p.setPen(casing)
+            p.drawRect(rect)
+            line = QPen(QColor(theme.VIEWER_BOX))
+            line.setWidth(_BOX_PX)
+            p.setPen(line)
+            p.drawRect(rect)
         p.end()
         self._label.setPixmap(canvas)
 
