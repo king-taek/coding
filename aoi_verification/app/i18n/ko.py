@@ -605,8 +605,14 @@ COMPARE_HINT = "← → 후보 이동 · 휠 확대/축소 · 드래그 이동 (
 COMPARE_HINT_ACTION = (
     "← → 후보 이동 · Enter 선택 · 휠 확대/축소 · 드래그 이동 (사진마다 따로)")
 # 단일 풀스크린 뷰어 — 화면에 사진 말고는 아무 표시가 없어 확대가 되는 줄 모른다.
-VIEWER_HINT = "휠 확대/축소 · 드래그 이동 · Esc 닫기"
+VIEWER_HINT = "휠 확대/축소 · 드래그 이동 · Ctrl+C 원본 복사 · Esc 닫기"
 # Scan 범위 박스가 있는 뷰어 — 박스 밑 결함을 보려고 끄는 버튼.
+VIEWER_CROP = "크롭하기"
+VIEWER_CROP_CANCEL = "크롭 취소"
+VIEWER_CROP_TIP = "드래그한 구역을 원본 화질 그대로 복사합니다"
+VIEWER_CROP_HINT = "복사할 구역을 드래그하세요"
+VIEWER_COPIED_FULL = "원본 복사됨"
+VIEWER_COPIED_CROP = "구역 복사됨 ({w}×{h}px)"
 VIEWER_BOX_OFF = "박스 끄기"
 VIEWER_BOX_ON = "박스 켜기"
 VIEWER_BOX_TIP = "Scan 범위 박스를 숨기거나 다시 보여줍니다 (B)"

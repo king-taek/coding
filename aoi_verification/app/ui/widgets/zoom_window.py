@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable, Optional
 
-from PyQt6.QtCore import QObject, QRectF, QThread, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QObject, QPoint, QRect, QRectF, QThread, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import (QColor, QImage, QPainter, QPen, QPixmap, QShortcut,
                          QKeySequence)
 from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout,
@@ -248,6 +248,11 @@ class FullscreenViewer(QDialog):
         self._last_drag = None
         self._loader: Optional[_OriginalLoader] = None
         self._overlay = overlay
+        # 복사는 항상 원본 픽셀로 한다 — 화면용 `_pix` 는 상한 때문에 줄어 있을 수 있다.
+        self._orig: Optional[QImage] = image
+        self._crop_mode = False
+        self._crop_a: Optional[QPoint] = None      # 크롭 드래그 시작/현재(라벨 좌표)
+        self._crop_b: Optional[QPoint] = None
 
         # 풀 사이즈 이미지는 디코드가 느릴 수 있어 우선 mid 로 즉시 그린다.
         self._pix = (QPixmap.fromImage(image) if image is not None
@@ -270,28 +275,109 @@ class FullscreenViewer(QDialog):
         lay.setContentsMargins(0, 0, 0, 8)
         lay.setSpacing(6)
         lay.addWidget(self._label, 1)
-        # 박스(Scan 범위)가 있을 때만 끄고 켤 수 있다 — 박스 밑의 결함을 가리면 볼 수 없어서.
+        row = QHBoxLayout()
+        row.setContentsMargins(8, 0, 8, 0)
+        row.setSpacing(8)
+        # 뷰어 바탕이 순검정이라 ghost 버튼 글자가 묻힌다 — 밝은 글자로 고정.
+        btn_css = f"QPushButton {{ color: {theme.VIEWER_BOX}; }}"
+        self._btn_crop = NeonButton(i18n.KO.VIEWER_CROP, role="ghost")
+        self._btn_crop.setToolTip(i18n.KO.VIEWER_CROP_TIP)
+        self._btn_crop.setStyleSheet(btn_css)
+        self._btn_crop.clicked.connect(self._toggle_crop)
+        row.addWidget(self._btn_crop)
+        # 박스(Scan 범위)가 있을 때만 끄고 켤 수 있다 — 박스 밑 결함을 가리면 볼 수 없어서.
         self._show_box = overlay is not None
         self._btn_box: Optional[NeonButton] = None
         if overlay is not None:
             self._btn_box = NeonButton(i18n.KO.VIEWER_BOX_OFF, role="ghost")
             self._btn_box.setToolTip(i18n.KO.VIEWER_BOX_TIP)
-            # 뷰어 바탕이 순검정이라 ghost 버튼 글자가 묻힌다 — 밝은 글자로 고정.
-            self._btn_box.setStyleSheet(
-                f"QPushButton {{ color: {theme.VIEWER_BOX}; }}")
+            self._btn_box.setStyleSheet(btn_css)
             self._btn_box.clicked.connect(self._toggle_box)
-            row = QHBoxLayout()
-            row.setContentsMargins(8, 0, 8, 0)
             row.addWidget(self._btn_box)
-            row.addWidget(self._hint, 1)
-            lay.addLayout(row)
             QShortcut(QKeySequence("B"), self, activated=self._toggle_box)
-        else:
-            lay.addWidget(self._hint)
-
+        row.addWidget(self._hint, 1)
+        lay.addLayout(row)
+        QShortcut(QKeySequence.StandardKey.Copy, self, activated=self._copy_original)
         QShortcut(QKeySequence("Esc"), self, activated=self.close)
         if image is None:
             self._start_original_load()
+
+    # -- 복사(원본 화질) -------------------------------------------------
+    def _original_image(self) -> QImage:
+        """복사할 원본 픽셀.  원본 디코드가 아직이면 여기서 한 번 읽는다."""
+        if self._orig is None or self._orig.isNull():
+            self._orig = QImage(str(self._path))
+        return self._orig
+
+    def _flash(self, text: str) -> None:
+        """조작 힌트 줄을 잠깐 알림으로 쓴다(부모 있는 타이머 — 창과 함께 죽는다)."""
+        self._hint.setText(text)
+        t = QTimer(self)
+        t.setSingleShot(True)
+        t.timeout.connect(lambda: self._hint.setText(i18n.KO.VIEWER_HINT))
+        t.start(1600)
+
+    def _copy_original(self) -> None:
+        img = self._original_image()
+        if img.isNull():
+            return
+        QApplication.clipboard().setImage(img)
+        self._flash(i18n.KO.VIEWER_COPIED_FULL)
+
+    def _toggle_crop(self) -> None:
+        self._crop_mode = not self._crop_mode
+        self._crop_a = self._crop_b = None
+        self._btn_crop.setText(i18n.KO.VIEWER_CROP_CANCEL if self._crop_mode
+                               else i18n.KO.VIEWER_CROP)
+        self._label.setCursor(Qt.CursorShape.CrossCursor if self._crop_mode
+                              else Qt.CursorShape.ArrowCursor)
+        self._hint.setText(i18n.KO.VIEWER_CROP_HINT if self._crop_mode
+                           else i18n.KO.VIEWER_HINT)
+        self._redraw()
+
+    def _crop_to_original(self) -> Optional[QImage]:
+        """드래그한 사각형을 **원본 픽셀 좌표**로 바꿔 잘라 낸다(화면 배율·상한과 무관)."""
+        if self._crop_a is None or self._crop_b is None:
+            return None
+        orig = self._original_image()
+        pw, ph = self._pix.width(), self._pix.height()
+        if orig.isNull() or pw <= 0 or ph <= 0:
+            return None
+        cw, ch = self._view_size()
+        sc = float(self._scale)
+        x0 = (cw - pw * sc) / 2 + self._offset_x
+        y0 = (ch - ph * sc) / 2 + self._offset_y
+        fx, fy = orig.width() / pw, orig.height() / ph
+
+        def to_src(pt: QPoint) -> tuple[float, float]:
+            return ((pt.x() - x0) / sc * fx, (pt.y() - y0) / sc * fy)
+
+        ax, ay = to_src(self._crop_a)
+        bx, by = to_src(self._crop_b)
+        import math
+        left = max(0, int(math.floor(min(ax, bx))))
+        top = max(0, int(math.floor(min(ay, by))))
+        right = min(orig.width(), int(math.ceil(max(ax, bx))))
+        bottom = min(orig.height(), int(math.ceil(max(ay, by))))
+        if right - left < 2 or bottom - top < 2:
+            return None
+        return orig.copy(QRect(left, top, right - left, bottom - top))
+
+    def _finish_crop(self) -> None:
+        crop = self._crop_to_original()
+        if crop is not None and not crop.isNull():
+            QApplication.clipboard().setImage(crop)
+            msg = i18n.KO.VIEWER_COPIED_CROP.format(w=crop.width(), h=crop.height())
+        else:
+            msg = ""
+        self._crop_mode = False
+        self._crop_a = self._crop_b = None
+        self._btn_crop.setText(i18n.KO.VIEWER_CROP)
+        self._label.setCursor(Qt.CursorShape.ArrowCursor)
+        self._hint.setText(i18n.KO.VIEWER_HINT)
+        self._redraw()
+        if msg:
+            self._flash(msg)
 
     def _toggle_box(self) -> None:
         self._show_box = not self._show_box
@@ -330,6 +416,7 @@ class FullscreenViewer(QDialog):
         갑자기 몇 배로 커진다.  사용자가 이미 줌/팬 했더라도 화면은 그대로다."""
         if img.isNull():
             return
+        self._orig = img                # 복사용 — 아래 상한 축소 전의 원본
         # 지나치게 큰 원본은 뷰포트의 몇 배 선까지만 — 휠 줌 응답을 지키기 위해.
         cap = self._WORK_OVERSAMPLE * max(1, self.width(), self.height())
         if max(img.width(), img.height()) > cap:
@@ -395,11 +482,23 @@ class FullscreenViewer(QDialog):
         self._scale = new
         self._redraw()
 
+    def _label_pos(self, e) -> QPoint:
+        return self._label.mapFrom(self, e.position().toPoint())
+
     def mousePressEvent(self, e):  # noqa: N802
-        if e.button() == Qt.MouseButton.LeftButton:
-            self._last_drag = e.position().toPoint()
+        if e.button() != Qt.MouseButton.LeftButton:
+            return
+        if self._crop_mode:
+            self._crop_a = self._crop_b = self._label_pos(e)
+            return
+        self._last_drag = e.position().toPoint()
 
     def mouseMoveEvent(self, e):  # noqa: N802
+        if self._crop_mode:
+            if self._crop_a is not None:
+                self._crop_b = self._label_pos(e)
+                self._redraw()
+            return
         if self._last_drag is not None:
             cur = e.position().toPoint()
             self._offset_x += cur.x() - self._last_drag.x()
@@ -408,6 +507,10 @@ class FullscreenViewer(QDialog):
             self._redraw()
 
     def mouseReleaseEvent(self, e):  # noqa: N802
+        if self._crop_mode and self._crop_a is not None:
+            self._crop_b = self._label_pos(e)
+            self._finish_crop()
+            return
         self._last_drag = None
 
     def _redraw(self) -> None:
@@ -483,6 +586,16 @@ class FullscreenViewer(QDialog):
             line.setWidth(_BOX_PX)
             p.setPen(line)
             p.drawRect(rect)
+        if self._crop_a is not None and self._crop_b is not None:
+            r = QRect(self._crop_a, self._crop_b).normalized()
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            for color, width in ((QColor(0, 0, 0, 230), _BOX_PX + 2),
+                                 (QColor(theme.VIEWER_BOX), _BOX_PX)):
+                pen = QPen(color)
+                pen.setWidth(width)
+                pen.setStyle(Qt.PenStyle.DashLine)
+                p.setPen(pen)
+                p.drawRect(r)
         p.end()
         self._label.setPixmap(canvas)
 

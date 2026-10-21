@@ -43,3 +43,28 @@ def test_box_drawn_and_toggled(styled_qapp):
 def test_no_button_without_overlay(styled_qapp):
     v = _viewer(styled_qapp, None)
     assert v._btn_box is None
+
+
+def test_copy_is_original_pixels(styled_qapp):
+    from PyQt6.QtCore import QPoint
+    from PyQt6.QtWidgets import QApplication
+    v = _viewer(styled_qapp, (100, 100, 100, 100))
+    v._copy_original()
+    got = QApplication.clipboard().image()
+    assert (got.width(), got.height()) == (400, 300)
+
+    # 화면용 사진이 원본보다 작아도(상한 축소) 크롭은 원본 픽셀 기준이다.
+    big = QImage(800, 600, QImage.Format.Format_Grayscale8)
+    big.fill(QColor(50, 50, 50))
+    v._orig = big
+    cw, ch = v._view_size()
+    pw, ph = v._pix.width(), v._pix.height()
+    sc = v._scale
+    x0, y0 = (cw - pw * sc) / 2, (ch - ph * sc) / 2
+    v._toggle_crop()
+    v._crop_a = QPoint(int(x0 + 20 * sc), int(y0 + 20 * sc))      # 화면용 사진 기준 20..70
+    v._crop_b = QPoint(int(x0 + 70 * sc), int(y0 + 70 * sc))
+    v._finish_crop()
+    got = QApplication.clipboard().image()
+    assert abs(got.width() - 100) <= 3 and abs(got.height() - 100) <= 3   # 원본은 2배
+    assert not v._crop_mode
