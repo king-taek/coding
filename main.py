@@ -123,9 +123,14 @@ def _open_main_window(app, splash, checks):
     from aoi_verification.app.ui.main_window import MainWindow
 
     window = MainWindow(progress=splash.set_progress, startup_checks=checks)
+    _boot_mark("창 생성")
     _wait_backend(app, splash, window)
+    _boot_mark("백엔드 대기")
     _wait_startup_checks(app, splash, checks)
+    _boot_mark("시작 점검 대기")
     window.show()
+    _boot_mark("창 표시")
+    _log_boot_timing("메인 창 표시")
     splash.set_progress(1, 1, i18n.KO.SPLASH_READY)
     splash.finish(window)
     return window
@@ -184,6 +189,58 @@ def _setup_logging() -> None:
         log.setLevel(logging.DEBUG)
         log.addHandler(handler)
         log.propagate = False                  # 루트로 새어 stderr 에 중복 출력 방지
+    except Exception:
+        pass
+
+
+_BOOT: list = []        # (구간 이름, time.monotonic()) — 시작 지연을 app.log 에 남기려는 기록
+
+
+def _boot_mark(name: str) -> None:
+    import time
+
+    _BOOT.append((name, time.monotonic()))
+
+
+def _process_age_ms():
+    """프로세스가 만들어진 뒤 지금까지(ms).  Windows 만 — 파이썬이 뜨기 전(보안 검사·DLL
+    로딩)에 걸린 시간까지 보려는 것이다.  알 수 없으면 None."""
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        k32 = ctypes.windll.kernel32
+        k32.GetCurrentProcess.restype = wintypes.HANDLE
+        c, e, k, u = (wintypes.FILETIME() for _ in range(4))
+        k32.GetProcessTimes(k32.GetCurrentProcess(), ctypes.byref(c), ctypes.byref(e),
+                            ctypes.byref(k), ctypes.byref(u))
+        created = ((c.dwHighDateTime << 32) | c.dwLowDateTime) / 1e4      # 100ns → ms
+        now = wintypes.FILETIME()
+        k32.GetSystemTimeAsFileTime(ctypes.byref(now))
+        return ((now.dwHighDateTime << 32) | now.dwLowDateTime) / 1e4 - created
+    except Exception:
+        return None
+
+
+def _log_boot_timing(label: str) -> None:
+    """시작 구간별 소요(ms)를 app.log 한 줄로 남긴다 — 사용자 PC 에서 어디가 느린지 가리는 용도.
+
+    ``프로세스 경과`` 는 프로세스가 만들어진 순간부터 지금까지다.  구간 합보다 크면 그 차이가
+    파이썬 시작 전(보안 검사·DLL 로딩)이다.  실패는 삼킨다."""
+    import logging
+
+    try:
+        parts, prev = [], _BOOT[0][1]
+        for name, t in _BOOT[1:]:
+            parts.append(f"{name} {1000 * (t - prev):.0f}")
+            prev = t
+        age = _process_age_ms()
+        extra = f" | 프로세스 경과 {age:.0f}" if age is not None else ""
+        logging.getLogger("aoi.boot").info(
+            "시작 구간(ms) [%s]: %s | 합계 %.0f%s", label, ", ".join(parts),
+            1000 * (prev - _BOOT[0][1]), extra)
     except Exception:
         pass
 
@@ -281,6 +338,7 @@ def main() -> int:
     import time
 
     started = time.monotonic()
+    _boot_mark("시작")
     try:
         deps_ok = _ensure_deps_installed()
     except Exception:
@@ -294,6 +352,7 @@ def main() -> int:
             pass         # 콘솔이 없는 실행 경로(pythonw) — 대기할 수 없을 뿐이다
         return 4
 
+    _boot_mark("의존성 확인")
     from PyQt6.QtCore import Qt
     from PyQt6.QtGui import QGuiApplication
     from PyQt6.QtWidgets import QApplication
@@ -330,12 +389,15 @@ def main() -> int:
     _apply_app_font(app)
     _apply_app_icon(app)
     _load_stylesheet(app)
+    _boot_mark("Qt·폰트·스타일")
 
     # 스플래시(로고) → 윈도우 ---------------------------------------------
     # ★ 무거운 모듈은 `MainWindow` 가 백그라운드에서 불러오고, 창을 띄우기 **전에**
     #   로딩창에서 그것이 끝나길 기다린다(`_wait_backend` — 창이 뜬 뒤 끝나면 첫 조작
     #   직후 화면이 몇 초 멈췄다).
     splash = _show_splash(app)
+    _boot_mark("스플래시 표시")
+    _log_boot_timing("스플래시 표시")
     # bat 교체·바로가기·업데이트 확인을 로딩창 뒤에서 시작한다 — 창 생성과 겹쳐 돈다.
     checks = _StartupChecks(started)
 
