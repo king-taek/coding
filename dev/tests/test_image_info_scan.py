@@ -218,3 +218,15 @@ def test_stale_info_result_is_ignored(qapp, isolated_cache):
     dlg._info_gen = 3
     dlg._on_info_done(2, ["stale"])
     assert dlg._groups == []
+
+
+def test_scan_gets_about_half_the_column_height(qapp, isolated_cache, tmp_path):
+    """Color 가 열 높이를 다 먹어 Scan 이 쪼그라들던 문제 — 둘이 세로를 나눠 쓴다."""
+    dlg = iid.ImageInfoDialog(image_path=str(_wafer(tmp_path)))
+    dlg.resize(1100, 760)
+    dlg.show()
+    assert _wait(lambda: dlg._scan_crop is not None)
+    _wait(lambda: False, 300)
+    assert dlg.scan_view.height() >= dlg.preview.height() * 0.8
+    dlg.close()
+    _idle()
