@@ -546,3 +546,24 @@ def test_truncated_kla_info_file_warns_and_keeps_what_it_read(tmp_path, caplog):
         got = kla_info.load_folder(kla)
     assert "frontsideadrimg_572445" in got and "frontsideadrimg_9" not in got
     assert "EndOfFile" in caplog.text
+
+
+def test_fused_number_row_is_dropped_not_shifted(tmp_path, caplog):
+    """좌표 전반 점검(2026-10-24, 관측) — LSU ``59295773EWA7.001`` 에 두 수가 붙어 적힌 행
+    ``43 9784.08023366.970 28203.080 3213.973 0 0 9.990 …`` 이 있었다.  예전 정규식은 한 칸씩
+    밀려 YREL=0·XINDEX=0·YINDEX=9('9.990' 의 앞 글자)로 읽어 col/row 를 (3,12) 로 조용히
+    틀리게 냈다.  그 행은 버리고 경고한다(행 문자열은 실물 그대로)."""
+    import logging
+    from aoi_verification.app.coords import kla_info
+    kla, _cam = _make_rdl1_folders(tmp_path)
+    fused = (" 43 9784.08023366.970 28203.080 3213.973 0 0 9.990 13.730 137.150000 13.730 "
+             "23 3 0 0 3 3 0 2373 0 1 1 1 0;\n")
+    text = _RDL1_KLA_HEAD.replace(
+        "EndOfFile;\n", "TiffFileName FrontSideADRImg_43.jpg;\nDefectList\n" + fused
+        + "EndOfFile;\n")
+    (kla / "W6458244XYE1.001").write_text(text, encoding="utf-8")
+    with caplog.at_level(logging.WARNING, logger="aoi.coords"):
+        got = kla_info.load_folder(kla)
+    assert "frontsideadrimg_43" not in got
+    assert "frontsideadrimg_572445" in got           # 정상 행은 그대로
+    assert "형식이 깨져" in caplog.text
