@@ -690,6 +690,15 @@ def kla_geometry(folder: Path) -> KlaGeometry:
                     _LOG.warning(
                         "KLA %s 에 SampleTestPlan 이 없어 die 인덱스 원점 X 도 "
                         "기본값(%d)을 씁니다.", info.name, KLA_ZERO_X)
+                elif geom.source == "DiePitch+SampleTestPlan":
+                    # 검사한 die 목록의 최솟값 — 가장자리 열을 검사하지 않은 레시피면 원점이
+                    # 어긋나고, row 원점은 상수다(부분 목록에서 원점을 잡는 같은 부류의 위험,
+                    # 좌표 전반 점검 2026-10-24).  조용히 쓰지 않는다.
+                    _LOG.warning(
+                        "KLA %s 에 SampleCenterLocation 이 없어 die 원점을 검사 목록"
+                        "(SampleTestPlan) 최솟값 X=%d · 기본값 Y=%d 로 잡습니다 — 목록이 "
+                        "일부 die 만 담으면 col/row 가 어긋날 수 있습니다.",
+                        info.name, geom.zero_x, geom.zero_y)
                 return geom
         _LOG.warning(
             "KLA die 격자 정보를 찾지 못해 기본값을 씁니다: %s", folder)

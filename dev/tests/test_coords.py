@@ -503,3 +503,24 @@ def test_real_pair2_kla_camtek_align(tmp_path, stem):
     c = camtek_ini.load_folder(cam)[stem]
     assert (c.col, c.row) == (k.col, k.row) == (5, 3)
     assert math.hypot(c.x - k.x, c.y - k.y) <= 200
+
+
+@pytest.mark.parametrize("bad", ["X=nan", "X=inf", "Col=inf"])
+def test_one_non_finite_entry_does_not_empty_the_folder(tmp_path, bad):
+    """좌표 전반 점검(2026-10-24) — 항목 하나의 값이 nan/inf 여도 **나머지 항목은 남는다**.
+
+    예전에는 ``floor(nan)``·``int(inf)`` 예외를 ``load_folder`` 의 바깥 except 가 삼켜
+    폴더 전체가 {} 가 됐다(경고도 없이 그 슬롯 사진이 전부 '좌표 없음').  합성 입력."""
+    from aoi_verification.app.coords import camtek_ini
+    good = "[good_1.jpeg]\nX=102450.6\nY=156233.9\nCol=4\nRow=3\n"
+    key, _ = bad.split("=")
+    fields = {"X": "102460.6", "Y": "156240.9", "Col": "4", "Row": "3"}
+    fields[key] = bad.split("=")[1]
+    body = "".join(f"{k}={v}\n" for k, v in fields.items())
+    (tmp_path / "ColorImageGrabingInfo.ini").write_text(
+        good + "[bad_2.jpeg]\n" + body, encoding="utf-8")
+    camtek_ini.load_folder.cache_clear()
+    camtek_ini.load_abs_folder.cache_clear()
+    got = camtek_ini.load_folder(tmp_path)
+    assert "good_1" in got
+    assert "bad_2" not in got

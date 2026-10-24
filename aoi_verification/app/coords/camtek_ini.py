@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import re
 from functools import lru_cache
@@ -25,6 +26,8 @@ from .ini_text import read_ini_text
 
 __all__ = ["resolve", "load_folder", "load_abs_folder", "load_raw_folder",
            "load_recipe_folder", "abs_coord", "has_ini"]
+
+_LOG = logging.getLogger("aoi.coords")
 
 # INI 파일 이름 후보 — 대소문자 두 가지
 _INI_CANDIDATES = ("ColorImageGrabingInfo.ini", "ColorImageGrabinginfo.ini")
@@ -152,9 +155,15 @@ def _kv(content: str) -> dict[str, str]:
 def _fget(kv: dict[str, str], key: str) -> Optional[float]:
     v = kv.get(key)
     try:
-        return float(v) if v is not None else None
+        f = float(v) if v is not None else None
     except ValueError:
         return None
+    # nan/inf 는 숫자가 아니다 — 그대로 두면 floor/int 가 예외를 던지고 load_folder 의
+    # 바깥 except 가 **폴더 전체**를 {} 로 만든다(좌표 전반 점검, 2026-10-24).  그 항목만 뺀다.
+    if f is not None and not math.isfinite(f):
+        _LOG.warning("Camtek INI 값 %s=%s 는 유한한 수가 아니다 — 그 항목만 건너뛴다", key, v)
+        return None
+    return f
 
 
 def _xy_from_kv(kv: dict[str, str]) -> Optional[tuple[float, float]]:

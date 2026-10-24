@@ -1269,7 +1269,7 @@ class ExcelExporter(QThread):
         from openpyxl.styles import Alignment, Font
         from openpyxl.utils.units import pixels_to_points
 
-        from ..coords.wafer_map import slot_maps
+        from ..coords.wafer_map import WARN_LIVE_UNVERIFIED, slot_maps, warning_reasons
 
         ws = wb.create_sheet(title=i18n.KO.WAFER_MAP_SHEET)
         ws["A1"] = i18n.KO.WAFER_MAP_SHEET_COL_SLOT
@@ -1282,7 +1282,9 @@ class ExcelExporter(QThread):
                                            self._result.val_machine)
         # 머리칸·슬롯칸 모두 여러 줄이 될 수 있다 — wrap_text 없으면 줄바꿈이 안 보인다.
         center = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        for c in "ABC":
+        # D=주의 — 화면 배너와 같은 경고(칸이 틀렸을 수 있는 맵).  LIVE 당부는 표 아래.
+        ws["D1"] = i18n.KO.WAFER_MAP_SHEET_COL_WARN
+        for c in "ABCD":
             ws[f"{c}1"].font = Font(bold=True)
             ws[f"{c}1"].alignment = center
         ws.row_dimensions[1].height = 30      # 두 줄 머리칸이 잘리지 않게
@@ -1290,6 +1292,7 @@ class ExcelExporter(QThread):
         px_w = self._MAP_PX + 8
         for c in "BC":
             ws.column_dimensions[c].width = px_w / 7.0
+        ws.column_dimensions["D"].width = 40
 
         def png(data) -> XLImage:
             xli = XLImage(io.BytesIO(self._map_renderer(data, self._MAP_PX)))
@@ -1313,14 +1316,24 @@ class ExcelExporter(QThread):
             ws.cell(row=r, column=1, value=cell_label).alignment = center
             ws.row_dimensions[r].height = pixels_to_points(px_w)
             ref, val = slot_maps(self._result, slot)
+            warns = []
             for col, data in (("B", ref), ("C", val)):
                 if data.frame is None:
                     continue
                 live_seen = live_seen or data.live_points > 0
+                reasons = warning_reasons(data, skip=(WARN_LIVE_UNVERIFIED,))
+                if reasons:
+                    warns.append(i18n.KO.WAFER_MAP_WARN_SIDE_FMT.format(
+                        side=(ws[f"{col}1"].value or "").split("\n")[0], reasons=reasons))
                 try:
                     _add_image_centered(ws, png(data), col, r, px_w, px_w)
                 except Exception:
+                    _LOG.exception("Wafer map 그림 생성 실패: %s", label)
                     ws[f"{col}{r}"] = "—"
+            if warns:
+                w = ws.cell(row=r, column=4, value="\n".join(warns))
+                w.font = Font(color="FF8C4A0F")
+                w.alignment = Alignment(wrap_text=True, vertical="center")
         # LIVE 파일로 그린 맵이 있으면 표 아래에 재검토 당부(화면 배너와 같은 문구).
         if live_seen:
             note_row = len(rows) + 3
