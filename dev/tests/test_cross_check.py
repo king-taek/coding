@@ -261,3 +261,31 @@ def test_pages_label_the_reverse_direction(styled_qapp):
     finally:
         for w in (sel, mat, rev):
             w.deleteLater()
+
+
+# ---------------------------------------------------------------------------
+# 결과 화면 실패 검토 — 짝지은 상대가 반대쪽 미매칭이면 그것도 함께 해결
+# ---------------------------------------------------------------------------
+def test_unmatched_review_resolves_the_counterpart_entry(styled_qapp, monkeypatch):
+    """기준 r1 ↔ 검증 v1 을 짝지으면 v1 의 '검증에만 있음' 항목도 해결이다.
+
+    빼먹으면 v1 이 엑셀에 매치와 '검증에만 있음' 으로 두 번 찍히고, 같은 창에서
+    v1 항목이 r1 을 다시 골라 같은 쌍이 한 번 더 생긴다(점검 쓰레드 지적)."""
+    from aoi_verification.app.ui.widgets import unmatched_review_dialog as ur
+
+    r1, v1 = Path("/tmp/xc_r1.png"), Path("/tmp/xc_v1.png")
+    e_ref = MissEntry("S1", "ref", r1)
+    e_val = MissEntry("S1", "val", v1)
+    pool = {("S1", "ref"): [ImageItem("S1", v1, "val")],
+            ("S1", "val"): [ImageItem("S1", r1, "ref")]}
+    monkeypatch.setattr(ur.UnmatchedReviewDialog, "_lookup_or_compute_score",
+                        lambda self, e, it: 0.5)
+    dlg = ur.UnmatchedReviewDialog(unmatched=[e_ref, e_val], val_pool=pool,
+                                   already_used_vals=set(), parent=None)
+    try:
+        dlg._make_match(e_ref, ImageItem("S1", v1, "val"))
+        assert dlg._entry_resolved(1), "짝이 된 v1 의 '검증에만 있음' 이 남았다"
+        assert r1 in dlg._used_vals, "v1 항목이 r1 을 다시 고를 수 있다(중복 쌍)"
+        assert [(m.ref_path, m.val_path) for m in dlg.new_matches] == [(r1, v1)]
+    finally:
+        dlg.deleteLater()
