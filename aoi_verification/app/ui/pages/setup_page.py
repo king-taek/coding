@@ -34,7 +34,7 @@ _LOG = logging.getLogger("aoi.ui")
 
 @dataclass
 class SetupInput:
-    mode: str        # 항상 "single" (양쪽 교차검증 제거).
+    mode: str        # "single" | "cross"(교차검증 — `models/cross_check.py`)
     ref_root: Path
     val_root: Path
     ref_machine: str
@@ -886,6 +886,16 @@ class SetupPage(QWidget):
         self._map_switch.setVisible(False)
         col.addWidget(self._map_switch)
 
+        # 교차검증(양방향) — 매칭 전용(추출에서는 숨긴다).  마지막 선택을 기억한다.
+        self._cross_switch = SwitchRow(
+            i18n.KO.CROSS_SWITCH,
+            description=i18n.KO.CROSS_SWITCH_DESC,
+            checked=bool(getattr(_prefs_now, "cross_check", False)),
+            parent=card)
+        self._cross_switch.toggled.connect(
+            lambda on: _prefs.patch(cross_check=bool(on)))
+        col.addWidget(self._cross_switch)
+
         # 도움말 본문 — 두 설정을 한 번에 설명한다(기본 접힘).
         self._auto_hint = QLabel(i18n.KO.RUN_OPTIONS_HINT, card)
         self._auto_hint.setProperty("role", "muted")
@@ -1323,6 +1333,7 @@ class SetupPage(QWidget):
         self._setting_cards[1].setVisible(not on)          # 매칭 설정 카드
         self._mode_badge_card.setVisible(not on)
         self._map_switch.setVisible(on)                    # 추출 전용 옵션
+        self._cross_switch.setVisible(not on)              # 매칭 전용 옵션
         self._lot1_slot_btn.setVisible(on)
         self._lot_list.setVisible(on)
         self._scope_row.setVisible(not on)
@@ -1729,7 +1740,7 @@ class SetupPage(QWidget):
             if r != QMessageBox.StandardButton.Yes:
                 return
 
-        mode = "single"             # 양쪽 교차검증 제거 — 항상 한쪽만 검증.
+        mode = "cross" if self._cross_switch.is_on() else "single"
         threshold = self.slider.value() / 100.0
         # 타일 키가 곧 AutomationLevel 값 — 분기 없이 읽는다.
         automation = self.auto_group.current_key() or AutomationLevel.USER_SELECT

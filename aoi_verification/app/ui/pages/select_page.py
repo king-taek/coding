@@ -799,6 +799,13 @@ class SelectPage(ProgressRowMixin, QWidget):
             return i18n.KO.EXTRACT_SELECT_TEXT[key]
         return getattr(i18n.KO, key)
 
+    def set_reverse(self, on: bool) -> None:
+        """교차검증 두 번째 방향(검증 → 기준) — 표제만 바꾼다(조작·배치는 같다).
+
+        큐에는 검증 사진 중 첫 방향에서 짝을 못 찾은 것만 들어온다(사용자 결정)."""
+        self.title.setText(i18n.KO.STAGE1_TITLE
+                           + (i18n.KO.CROSS_REVERSE_SUFFIX if on else ""))
+
     def set_extract_mode(self, on: bool) -> None:
         """Defect 추출 ↔ 매칭 — 같은 선별 화면의 '검증' 문구를 '추출' 로 바꿔 끼운다.
 
