@@ -12,9 +12,25 @@ from aoi_verification.app import i18n
 from aoi_verification.app.utils import shortcut
 
 
+def _link_info_at(data: bytes) -> int:
+    """헤더(76) 뒤 IDList(크기 첫 2바이트 + 그 2바이트)를 건너뛴 LinkInfo 위치."""
+    return 76 + 2 + struct.unpack_from("<H", data, 76)[0]
+
+
+def _id_items(data: bytes) -> list:
+    off, items = 78, []
+    while True:
+        n = struct.unpack_from("<H", data, off)[0]
+        if n == 0:
+            return items
+        items.append(data[off + 2: off + n])
+        off += n
+
+
 def _strings_after_link_info(data: bytes) -> list:
-    """헤더(76) → LinkInfo(크기 첫 4바이트) → StringData 3개를 읽는다."""
-    off = 76 + struct.unpack_from("<I", data, 76)[0]
+    """헤더(76) → IDList → LinkInfo(크기 첫 4바이트) → StringData 3개를 읽는다."""
+    li = _link_info_at(data)
+    off = li + struct.unpack_from("<I", data, li)[0]
     out = []
     for _ in range(3):
         n = struct.unpack_from("<H", data, off)[0]
@@ -32,9 +48,10 @@ def test_lnk_points_at_the_bat_with_the_app_icon():
     assert data[4:20] == bytes.fromhex("0114020000000000c000000000000046")
     flags = struct.unpack_from("<I", data, 20)[0]
     assert flags & 0x80 and flags & 0x40 and flags & 0x02       # 유니코드·아이콘·LinkInfo
+    assert flags & 0x01                                          # IDList — 아래 테스트 참고
     assert struct.unpack_from("<I", data, 60)[0] == 7           # 최소화로 띄움(콘솔 번쩍임 방지)
 
-    li = 76
+    li = _link_info_at(data)
     size, head, _flags, _vol, _base, _net, _suf, base_u, _suf_u = \
         struct.unpack_from("<9I", data, li)
     assert head == 0x24                                          # 유니코드 경로 오프셋 포함
@@ -48,6 +65,26 @@ def test_lnk_points_at_the_bat_with_the_app_icon():
     assert desc == "AOI 레시피 검증"
     assert workdir == r"C:\AOI 검증"
     assert icon == r"C:\AOI 검증\app\logo.ico"
+
+
+def test_lnk_has_target_id_list_so_explorer_offers_open():
+    """LinkInfo 만 있던 바로가기는 우클릭에 '열기' 가 없고 실행이 안 됐다(사용자 신고).
+
+    탐색기는 IDList 로 대상의 종류·메뉴를 정한다 — 내 PC → C:\\ → 나머지 경로."""
+    root = PureWindowsPath(r"C:\AOI_Verify")
+    data = shortcut.build_lnk(root / "run_aoi.bat", root, root / "a.ico", "x")
+    computer, drive, leaf = _id_items(data)
+    assert computer == b"\x1f\x50" + bytes.fromhex("e04fd020ea3a6910a2d808002b30309d")
+    assert len(drive) + 2 == 0x19 and drive[:4] == b"\x2fC:\\"
+    assert leaf[0] == 0x32 and leaf[12:] == b"AOI_Verify\\run_aoi.bat\0"   # 파일 항목
+
+
+def test_no_id_list_for_unc_paths():
+    """드라이브 문자가 없으면 IDList 를 만들지 않는다 — 틀린 IDList 보다 없는 편이 낫다."""
+    root = PureWindowsPath(r"\\srv\share\AOI")
+    data = shortcut.build_lnk(root / "run_aoi.bat", root, root / "a.ico", "x")
+    assert not struct.unpack_from("<I", data, 20)[0] & 0x01
+    assert struct.unpack_from("<I", data, 76 + 4)[0] == 0x24    # LinkInfo 가 헤더 바로 뒤
 
 
 def _install(tmp_path: Path) -> Path:
