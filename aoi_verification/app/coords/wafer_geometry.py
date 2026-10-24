@@ -460,7 +460,7 @@ def _with_origins(folder: Path, px: float, py: float, src: str) -> CamtekGeometr
     cx, cy = _wafer_center(folder)
     d_origin = _col_origin(cx, dia, px)
     d_total = _row_total(cy, dia, py)
-    cells = _lot_die_map_cells(folder, px, py, (d_origin, d_total))
+    cells = lot_die_map_cells(folder, px, py)
     if cells is not None and _covers_wafer(cells, cx, cy, dia, px, py, folder):
         m_origin = min(i for i, _ in cells)
         m_total = max(j for _, j in cells)
@@ -544,8 +544,8 @@ def _die_map_origins(folder: Path, px: float, py: float
     return min(i for i, _ in cells), max(j for _, j in cells)
 
 
-def _lot_die_map_cells(folder: Path, px: float, py: float,
-                       derived: tuple[int, int]) -> Optional[frozenset[tuple[int, int]]]:
+def lot_die_map_cells(folder: Path, px: float, py: float
+                      ) -> Optional[frozenset[tuple[int, int]]]:
     """자기 die 맵에 **같은 LOT(형제 슬롯 폴더)의 die 맵을 합친** 칸 집합.  자기 맵이 없으면 None.
 
     die 맵은 **그 웨이퍼의 die 목록**이라, 웨이퍼마다 가장자리 die 가 빠질 수 있다.
@@ -554,11 +554,24 @@ def _lot_die_map_cells(folder: Path, px: float, py: float,
     01C1(맵 3)의 LIVE 파일명 20장이 전부 ``x_index − 2`` 였고(앱은 1 작게 냈다),
     07F6(맵 2)도 Conder 와 일치했다.  즉 기준은 웨이퍼 목록이 아니라 **격자**의 것이다.
 
-    그래서 중심 유도값이 같은(= stage 위 같은 격자인) 형제 슬롯의 맵을 합친다.
-    형제가 없거나 격자가 다르면 자기 맵 그대로다.  전 구간 fail-safe."""
+    col·row 기준(:func:`_with_origins`)과 Wafer map 의 칸(``wafer_map``)이 **같은 집합**을
+    쓰도록 이 함수 하나로 계산한다.  합치는 조건(어긋나면 자기 맵 그대로):
+
+    * 자기 폴더의 웨이퍼 중심을 안다 — 모르면 유도값이 상수라 '같은 격자' 를 가를 수 없다.
+    * 형제의 pitch · 지름 · 중심 유도값이 같다(= stage 위 같은 격자).
+    * 형제 칸은 **이 웨이퍼 원 안에 온전히 드는 것만** 받는다 — 실측 맵 5장(T254·NELA26
+      ·PGEE48·XYA2, 관측)의 칸은 전부 원 안에 온전히 들었다.  원 밖 칸 하나가 LOT 전체의
+      기준을 끌어내리지 못하게 한다(±1 클램프는 유도값과 비교하므로 그걸 못 막는다).
+
+    전 구간 fail-safe."""
     own = die_map_cells(folder, px, py)
     if own is None:
         return None
+    key = _grid_key(folder, px, py)
+    if key is None:
+        return own
+    dia, (cx, cy), _ = key
+    r = dia / 2.0
     cells = set(own)
     try:
         siblings = sorted(p for p in folder.parent.iterdir()
@@ -566,19 +579,35 @@ def _lot_die_map_cells(folder: Path, px: float, py: float,
     except OSError:
         return own
     for sib in siblings:
-        if (peek_die_pitch(sib) or (None, None))[:2] != (px, py):
-            continue                      # 다른 자재 — 같은 pitch 가 아니면 인덱스가 무의미
-        dia = _read_diameter(sib)
-        cx, cy = _wafer_center(sib)
-        if (_col_origin(cx, dia, px), _row_total(cy, dia, py)) != derived:
-            continue                      # 다른 격자(웨이퍼 위치)의 슬롯은 섞지 않는다
-        cells |= die_map_cells(sib, px, py) or set()
+        if _grid_key(sib, px, py) is None or _grid_key(sib, px, py)[::2] != key[::2]:
+            continue                      # 다른 자재·다른 격자(웨이퍼 위치)는 섞지 않는다
+        cells |= {(i, j) for i, j in die_map_cells(sib, px, py) or ()
+                  if all(math.hypot(x - cx, y - cy) <= r
+                         for x in (i * px, (i + 1) * px) for y in (j * py, (j + 1) * py))}
     return frozenset(cells)
 
 
+@lru_cache(maxsize=1024)
+def _grid_key(folder: Path, px: float, py: float):
+    """``(지름, 중심, 중심 유도 (col_origin, row_total))`` — 형제 비교용.  pitch 가 다르거나
+    중심을 모르면 None.  슬롯마다 형제를 전부 훑으므로(N²) 폴더 단위로 캐시한다 —
+    :func:`camtek_geometry` 도 폴더 단위 캐시라 같은 수명이다."""
+    if (peek_die_pitch(folder) or (None, None))[:2] != (px, py):
+        return None
+    cx, cy = _wafer_center(folder)
+    if cx is None or cy is None:
+        return None
+    dia = _read_diameter(folder)
+    return dia, (cx, cy), (_col_origin(cx, dia, px), _row_total(cy, dia, py))
+
+
 # die 맵이 '웨이퍼 전체' 로 인정받으려면 웨이퍼 원 안에 온전히 드는 칸의 이만큼은 담아야
-# 한다.  실측: 전체 맵 0.88(T254 GX57001305)·0.95(NELA26 25장)·0.96(PGEE48),
+# 한다.  관측: 전체 맵 0.88(T254 GX57001305)·0.95(NELA26 25장)·0.96(PGEE48),
 # 부분 맵 0.38(T254 GX57007306 — 50칸, row 기준이 1 작아 LIVE 248장 전부 row 1 어긋남).
+# 0.7 은 그 사이에 둔 **가정**이다(표본 제품 4종).  가장자리 제외 폭이 큰 제품은 전체 맵도
+# 0.7 아래로 떨어질 수 있는데, 그때는 맵을 버리고 검증된 중심 유도로 간다(경고가 남는다).
+# 판정은 기준을 정하는 집합(LOT 합집합)에 한다 — 자기 맵이 비어도 형제가 격자를 채우면
+# 기준은 격자의 것이라 맞다(AVAGO 와 같은 이유).
 _MIN_MAP_COVERAGE = 0.7
 
 
@@ -615,7 +644,7 @@ def die_map_cells(folder: Path, px: float, py: float
 
     :func:`_die_map_origins` 와 **같은 읽기**다(그 함수의 fail-safe 조건이 전부 여기 있다).
     Wafer map 이 'die 가 실제로 있는 칸' 만 격자로 그리는 데 쓴다.  같은 LOT 의 형제
-    슬롯이 서로의 맵을 읽으므로(:func:`_lot_die_map_cells`) 파일 단위로 캐시한다 —
+    슬롯이 서로의 맵을 읽으므로(:func:`lot_die_map_cells`) 파일 단위로 캐시한다 —
     키에 수정 시각·크기를 넣어 파일이 바뀌면 다시 읽는다."""
     for base in _search_dirs(folder):
         dat = base / _DIE_MAP_FILE

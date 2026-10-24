@@ -275,7 +275,8 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   `.dat.md` 사이드카로 읽는다 — 하드코딩하지 마라. **맵은 유도값과 ±1 이내일 때만
   채택한다**(부분 맵 방어) — 이 클램프를 풀지 마라. 실물 골든: `TestDieMapGolden`.
   ⚠ 맵은 **그 웨이퍼의 die 목록**이라 가장자리가 빠질 수 있다(§6-P): ① 같은 격자(유도값·pitch
-  동일)인 **형제 슬롯의 맵을 합쳐** 기준을 잡고(`_lot_die_map_cells` — AVAGO 12/25장 col 1 작음),
+  동일)인 **형제 슬롯의 맵을 합쳐** 기준을 잡고(`lot_die_map_cells` — AVAGO 12/25장 col 1 작음;
+  형제 칸은 원 안에 온전한 것만, 중심을 모르면 합치지 않음, Wafer map 도 같은 집합을 그린다),
   ② 웨이퍼 원 안 온전한 칸의 70% 미만만 담긴 맵은 **버린다**(`_covers_wafer` — T254 GX57007306,
   ±1 클램프를 통과해 row 가 1 작았다). 골든: `TestPartialDieMap`·`TestLotDieMap`·`TestLotDieMapGolden`.
 - **die 인덱스는 좌표에서 유도한다** — `floor(X/DieStep_X)`, `floor(Y/DieStep_Y)`.

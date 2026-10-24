@@ -1567,7 +1567,7 @@ class TestLotDieMap:
         (folder / "Params_WaferInfo.ini").write_text(
             _params_ini(self.PX, self.PY) + "\n[Geometric]\nDiameter=300000\n" + center,
             encoding="utf-8")
-        cells = self._full_cells(center, min_x)
+        cells = self._full_cells(center or self.CENTER, min_x)    # 중심을 지워도 맵은 같은 웨이퍼
         (folder / wg._DIE_MAP_FILE).write_bytes(b"".join(
             b"\x00" * 16 + struct.pack("<dd", (i + 0.5) * self.PX, (j + 0.5) * self.PY)
             for i, j in cells))
@@ -1612,6 +1612,48 @@ class TestLotDieMap:
                    center="Center_X=158500.0\nCenter_Y=154732.57\n")   # 유도 col 3
         geom = self._geom(self._slot(tmp_path, "W01", 3))
         assert geom.col_origin == 3
+
+    def _add_cells(self, folder: Path, extra):
+        import struct
+        with (folder / wg._DIE_MAP_FILE).open("ab") as fh:
+            for i, j in extra:
+                fh.write(b"\x00" * 16 + struct.pack("<dd", (i + 0.5) * self.PX,
+                                                    (j + 0.5) * self.PY))
+
+    def test_a_stray_die_outside_the_wafer_does_not_shift_the_lot(self, tmp_path):
+        """형제 맵의 원 밖 칸 하나가 LOT 전체 기준을 끌어내리지 못한다(점검 쓰레드 지적 —
+        합집합은 min/max 만 넓히고 ±1 클램프는 유도값(2)과 비교하므로 x_index 1 이 통과했다)."""
+        sib = self._slot(tmp_path, "W07", 3)
+        self._add_cells(sib, [(1, 28)])                    # 원 밖(왼쪽 가장자리 바깥)
+        geom = self._geom(self._slot(tmp_path, "W01", 3))
+        assert geom.col_origin == 3
+
+    def test_no_merge_without_a_center(self, tmp_path):
+        """중심을 모르면 유도값이 상수라 '같은 격자' 를 가를 수 없다 — 합치지 않는다."""
+        self._slot(tmp_path, "W07", 2, center="")
+        short = self._slot(tmp_path, "W01", 3, center="")
+        assert (wg.lot_die_map_cells(short, self.PX, self.PY)
+                == wg.die_map_cells(short, self.PX, self.PY))
+
+    def test_no_merge_across_diameters(self, tmp_path):
+        sib = self._slot(tmp_path, "W07", 2)
+        params = sib / "Params_WaferInfo.ini"
+        params.write_text(params.read_text(encoding="utf-8")
+                          .replace("Diameter=300000", "Diameter=200000"), encoding="utf-8")
+        geom = self._geom(self._slot(tmp_path, "W01", 3))
+        assert geom.col_origin == 3
+
+    def test_wafer_map_draws_the_same_cells_that_set_the_origin(self, tmp_path):
+        """기준을 LOT 합집합으로 정했으면 맵도 그 칸을 그린다 — 자기 맵만 그리면 형제 덕에
+        채택된 맵이 빈 칸투성이로 그려진다(점검 쓰레드 지적)."""
+        from aoi_verification.app.coords import wafer_map
+        self._slot(tmp_path, "W07", 2)
+        short = self._slot(tmp_path, "W01", 3)
+        geom = self._geom(short)
+        wafer_map._camtek.cache_clear()
+        drawn = wafer_map._camtek(short).cells
+        assert drawn == wg.lot_die_map_cells(short, geom.pitch_x, geom.pitch_y)
+        assert min(i for i, _ in drawn) == geom.col_origin == 2
 
 
 class TestPartialDieMap:
