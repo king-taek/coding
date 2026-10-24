@@ -345,9 +345,12 @@ class _MatchRow(QFrame):
                  *,
                  thumb_px: int = _THUMB_PX,
                  coord_mode: bool = False,
-                 tolerance: float = _DFLT_TOL) -> None:
+                 tolerance: float = _DFLT_TOL,
+                 ref_caption_fmt: str = i18n.KO.COMPARE_REF_CAPTION_FMT) -> None:
         super().__init__(parent)
         self.match = match
+        # 비교 뷰어 왼쪽 사진의 이름표 — 교차검증 역방향에서는 왼쪽이 검증 사진이다.
+        self._ref_caption_fmt = ref_caption_fmt
         self._is_unmatched = False
         self._pulse = 0.0                # 상태 전환 펄스(0=없음) — paintEvent 가 읽음
         self._prev_state = None          # 초기 로드 시 펄스 억제용
@@ -660,7 +663,7 @@ class _MatchRow(QFrame):
                 break
         viewer = SideBySideViewer(
             self.match.ref_path, candidates, start,
-            ref_caption=i18n.KO.COMPARE_REF_CAPTION_FMT.format(
+            ref_caption=self._ref_caption_fmt.format(
                 name=self.match.ref_path.name),
             action_label=i18n.KO.BTN_MATCH_THIS,
             parent=self.window(),
@@ -695,7 +698,7 @@ class _MatchRow(QFrame):
                        for it, s in self._runners_up]
         viewer = SideBySideViewer(
             self.match.ref_path, candidates, max(0, int(start)),
-            ref_caption=i18n.KO.COMPARE_REF_CAPTION_FMT.format(
+            ref_caption=self._ref_caption_fmt.format(
                 name=self.match.ref_path.name),
             action_label=i18n.KO.BTN_MATCH_THIS,
             parent=self.window(),
@@ -1159,6 +1162,22 @@ class MatchReviewPage(QWidget):
                 lbl.setFixedWidth(self._thumb_px)
 
     # ------------------------------------------------------------------
+    # 교차검증 두 번째 방향(검증 → 기준) — 행의 왼쪽이 검증 사진, 오른쪽이 기준 사진.
+    #   목록·신호는 방향을 모른다(큐 쪽이 ``ref_path``).  바뀌는 것은 문구뿐이다.
+    _reverse = False
+
+    def set_reverse(self, on: bool) -> None:
+        """교차검증 역방향 표기 — ``load_state`` 전에 부른다(행이 이름표를 물려받는다)."""
+        self._reverse = bool(on)
+        self.title.setText(i18n.KO.MATCH_REVIEW_TITLE
+                           + (i18n.KO.CROSS_REVERSE_SUFFIX if on else ""))
+        self._hdr_ref.setText(i18n.KO.COL_VAL if on else i18n.KO.COL_REF)
+        self._hdr_val.setText(i18n.KO.COL_REF if on else i18n.KO.COL_VAL)
+
+    def _ref_caption_fmt(self) -> str:
+        return (i18n.KO.COMPARE_VAL_CAPTION_FMT if self._reverse
+                else i18n.KO.COMPARE_REF_CAPTION_FMT)
+
     def load_state(self,
                    matches: list[MatchResult],
                    *,
@@ -1424,7 +1443,8 @@ class MatchReviewPage(QWidget):
         row = _MatchRow(match, runners_up=runners, parent=self,
                         thumb_px=self._thumb_px,
                         coord_mode=self._coord_mode,
-                        tolerance=self._tolerance)
+                        tolerance=self._tolerance,
+                        ref_caption_fmt=self._ref_caption_fmt())
         row.toggle_requested.connect(self._on_toggle)
         row.swap_requested.connect(self._on_swap)
         row.more_clicked.connect(self._on_row_more)
@@ -1469,6 +1489,7 @@ class MatchReviewPage(QWidget):
                 thumb_px=self._thumb_px,
                 coord_mode=self._coord_mode,
                 tolerance=self._tolerance,
+                ref_caption_fmt=self._ref_caption_fmt(),
             )
             new_row.toggle_requested.connect(self._on_toggle)
             new_row.swap_requested.connect(self._on_swap)

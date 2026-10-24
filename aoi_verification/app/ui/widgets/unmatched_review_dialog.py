@@ -566,6 +566,7 @@ class UnmatchedReviewDialog(QDialog):
         ref_title.setProperty("role", "paneTitle")
         ref_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         ll.addWidget(ref_title)
+        self._ref_title = ref_title          # 검증 쪽 미매칭이면 문구가 바뀐다
         self.ref_filename = QLabel("", left)
         self.ref_filename.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.ref_filename.setProperty("role", "mutedPad2")
@@ -598,6 +599,7 @@ class UnmatchedReviewDialog(QDialog):
         cand_title = QLabel(i18n.KO.PANEL_MATCH_CANDIDATES, right)
         cand_title.setProperty("role", "paneTitle")
         cand_head.addWidget(cand_title)
+        self._cand_title = cand_title
         # '검증 장비 후보' 옆 '크게 보기' — 선택 후보(없으면 1순위)부터 좌우 비교.
         self.btn_zoom_cand = NeonButton(i18n.KO.BTN_VIEW_LARGER, role="ghost")
         self.btn_zoom_cand.clicked.connect(self._open_compare_selected)
@@ -781,6 +783,12 @@ class UnmatchedReviewDialog(QDialog):
             )
         )
         self.btn_prev.setEnabled(self._idx > 0)
+        # 교차검증의 검증 쪽 미매칭은 왼쪽이 검증 사진, 후보가 기준 사진이다.
+        on_val = cur.side == "val"
+        self._ref_title.setText(i18n.KO.PANEL_MATCH_REF_REVERSE if on_val
+                                else i18n.KO.PANEL_MATCH_REF)
+        self._cand_title.setText(i18n.KO.PANEL_MATCH_CANDIDATES_REVERSE if on_val
+                                 else i18n.KO.PANEL_MATCH_CANDIDATES)
         self.ref_filename.setText(Path(cur.path).name)
         self._cur_ref_path = Path(cur.path)
 

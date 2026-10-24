@@ -172,6 +172,9 @@ STAT_MATCHED = "매치 성공"
 STAT_OVER_TOLERANCE = "허용 초과"
 STAT_NO_MATCH = "매치 없음"
 STAT_SLOT_MISMATCH = "슬롯 불일치"
+# 교차검증(양방향) — '매치 없음' 을 어느 장비에만 있었는지로 나눈다.
+STAT_ONLY_REF = "기준에만 있음"
+STAT_ONLY_VAL = "검증에만 있음"
 MATCH_REVIEW_TITLE = "매치 검토"
 
 # ★ 패널 제목에 괄호 부연을 넣지 않는다.  이 제목은 `role=paneTitle` QLabel 이고
@@ -189,6 +192,11 @@ PANEL_RIGHT_EMPTY = "→ 또는 [✓ 검증] 으로 보낸 사진이 여기에 �
 
 PANEL_MATCH_REF = "기준 사진"
 PANEL_MATCH_CANDIDATES = "검증 장비 후보"
+# 교차검증 두 번째 방향(검증 → 기준) — 큐가 검증 사진, 후보가 기준 사진이다.
+PANEL_MATCH_REF_REVERSE = "검증 사진"
+PANEL_MATCH_CANDIDATES_REVERSE = "기준 장비 후보"
+# 선별·매칭·검토 화면 표제 뒤에 붙는다 — 지금 두 번째 방향이라는 것을 표제가 말한다.
+CROSS_REVERSE_SUFFIX = " · 2단계: 검증 → 기준"
 
 # Stage 2 의 '매치 없음' 사진 팝업
 # ★ 이 팝업의 이름에서 '보류' 를 뺐다.  버튼은 오래 "보류된 사진 보기 (n)" 이었지만
@@ -625,6 +633,7 @@ COL_DISTANCE = "거리(µm)"
 COL_SIMILARITY = "유사도(%)"
 COL_VERDICT = "판정"
 COMPARE_REF_CAPTION_FMT = "기준 — {name}"
+COMPARE_VAL_CAPTION_FMT = "검증 — {name}"     # 교차검증 역방향
 # 비교 뷰어 상단 조작 힌트.  확대/이동은 **마우스가 올라간 쪽 사진에만** 적용된다
 # (사용자 결정) — 기준을 그대로 두고 후보만 파고들어 볼 수 있다.
 COMPARE_HINT = "← → 후보 이동 · 휠 확대/축소 · 드래그 이동 (사진마다 따로)"
@@ -1181,6 +1190,12 @@ EXTRACT_LOT_REMOVE = "이 LOT 빼기"
 EXTRACT_SLOT_BTN_ALL = "슬롯: 전체"
 EXTRACT_SLOT_BTN_FMT = "슬롯 {n}/{total}"
 EXTRACT_SLOT_NEED_FOLDER = "먼저 이 줄의 폴더를 선택하세요."
+# 교차검증(양방향) 스위치 — 매칭 모드의 실행 옵션.  마지막 선택을 기억한다.
+CROSS_SWITCH = "교차검증 (양방향)"
+CROSS_SWITCH_DESC = ("기준→검증 검토가 끝나면 검증→기준을 한 번 더 봅니다. "
+                     "이미 짝지은 사진은 다시 나오지 않습니다.")
+# 엑셀 — 검증에만 있는 사진 행의 메모.  기준 쪽 미매칭은 예전 그대로 '미매칭'.
+NOTE_ONLY_VAL = "미매칭 (검증에만 있음)"
 EXTRACT_WAFER_MAP_SWITCH = "Wafer Map 시트 넣기"
 EXTRACT_WAFER_MAP_SWITCH_DESC = "끄면 엑셀에 Wafer Map 시트를 만들지 않습니다(저장이 빨라집니다)."
 BTN_EXTRACT_START = "추출 시작"
