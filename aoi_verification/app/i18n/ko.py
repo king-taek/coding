@@ -1284,6 +1284,15 @@ COORD_CAL_PAIR_ROW_FMT = "{i}.  {a}  ↔  {b}      가로 {dx:+.0f} · 세로 {d
 COORD_CAL_RESULT_FMT = "보정값  가로 {dx:+.0f} µm · 세로 {dy:+.0f} µm   ({n}쌍 · 쌍별 남은 오차 최대 {r:.0f} µm)"
 COORD_CAL_RESIDUAL_WARN_FMT = (
     "남은 오차가 큰 쌍이 있어요(최대 {r:.0f} µm). 잘못 고른 쌍이면 지워 주세요.")
+COORD_CAL_AUTO_FMT = (
+    "자동 계산값  가로 {dx:+.0f} µm · 세로 {dy:+.0f} µm   (근거 {n}쌍) — "
+    "그대로 '보정 적용' 을 누르거나, 쌍을 골라 직접 정할 수 있어요.")
+COORD_CAL_AUTO_WEAK_FMT = (
+    "자동 계산은 근거가 부족해요(맞는 짝 {n}쌍 · 다른 후보 무리 {m}쌍). "
+    "같은 결함 쌍을 직접 골라 주세요.")
+COORD_CAL_AUTO_DIFF_FMT = (
+    "고른 쌍의 보정값이 자동 계산값(가로 {ax:+.0f} · 세로 {ay:+.0f} µm)과 {d:.0f} µm 달라요. "
+    "같은 결함이 맞는지 확인해 주세요.")
 COORD_CAL_REMOVE = "지우기"
 COORD_CAL_SKIP = "보정 건너뛰기"
 COORD_CAL_APPLY = "보정 적용"

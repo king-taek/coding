@@ -72,6 +72,70 @@ def test_guess_offset_none_without_votes():
     assert cal.guess_offset([([_k(0, 0, 0, 0)], [])], src_is_kla=True) is None
 
 
+def _shifted(n, shift, *, start=0):
+    # 1000 µm(후보 반경)보다 멀리 떨어뜨린다 — 서로 남의 짝으로 표를 주지 않게.
+    kla = [_k(i % 3, i // 3, 1000.0 + 1500 * i, 2000.0 + 1100 * i) for i in range(start, start + n)]
+    return kla, [_c(k.col, k.row, k.x + shift[0], k.y + shift[1]) for k in kla]
+
+
+def test_auto_offset_is_confident_with_enough_agreeing_pairs():
+    kla, cam = _shifted(10, (87.0, -91.0))
+    a = cal.auto_offset([(kla, cam)], src_is_kla=True)
+    assert a.offset == pytest.approx((87.0, -91.0))
+    assert a.support == 10 and a.runner_up == 0
+    assert cal.is_confident(a)
+
+
+def test_auto_offset_is_not_confident_with_few_pairs():
+    """근거가 적으면(실측: 한 웨이퍼 짝 2~5개) 자동값을 내밀지 않는다."""
+    kla, cam = _shifted(cal.MIN_AUTO_SUPPORT - 1, (87.0, -91.0))
+    a = cal.auto_offset([(kla, cam)], src_is_kla=True)
+    assert a is not None and not cal.is_confident(a)
+
+
+def test_auto_offset_is_not_confident_when_a_rival_cluster_is_close_in_size():
+    """결함이 몰린 웨이퍼처럼 다른 어긋남 무리가 비슷하게 크면 믿지 않는다
+    (실측 31266524EWG5: (117, −72) 를 5표 대 3표로 냈다)."""
+    kla, cam = _shifted(10, (87.0, -91.0))
+    k2, c2 = _shifted(6, (300.0, 250.0), start=20)
+    a = cal.auto_offset([(kla + k2, cam + c2)], src_is_kla=True)
+    assert a.offset == pytest.approx((87.0, -91.0))
+    assert a.runner_up == 6
+    assert not cal.is_confident(a)
+
+
+def test_auto_offset_sees_a_rival_just_outside_the_support_radius():
+    """30~60 µm 떨어진 무리도 경쟁자로 센다(예전엔 그 구간이 빈칸이라 못 봤다 — 검토 지적)."""
+    kla, cam = _shifted(10, (87.0, -91.0))
+    k2, c2 = _shifted(9, (87.0 + 45.0, -91.0), start=20)
+    a = cal.auto_offset([(kla + k2, cam + c2)], src_is_kla=True)
+    assert not cal.is_confident(a)
+
+
+def test_support_counts_distinct_defects_not_votes():
+    """한 결함이 이웃 여럿에 표를 던져도 근거는 1개다(결함 무리·긁힘)."""
+    k = _k(1, 1, 5000.0, 5000.0)
+    cams = [_c(1, 1, 5000.0 + 87 + i, 5000.0 - 91) for i in range(10)]   # 같은 어긋남 10표
+    a = cal.auto_offset([([k], cams)], src_is_kla=True)
+    assert a.votes == 10 and a.support == 1
+    assert not cal.is_confident(a)
+
+
+def test_exactly_twice_the_rival_is_not_enough():
+    assert not cal.is_confident(cal.AutoOffset((0.0, 0.0), support=8, runner_up=4, votes=12))
+    assert cal.is_confident(cal.AutoOffset((0.0, 0.0), support=9, runner_up=4, votes=13))
+
+
+def test_auto_offset_accepts_a_one_shot_iterable():
+    kla, cam = _shifted(10, (87.0, -91.0))
+    a = cal.auto_offset(iter([(kla, cam)]), src_is_kla=True)
+    assert a is not None and a.support == 10
+
+
+def test_is_confident_none():
+    assert not cal.is_confident(None)
+
+
 def test_near_candidates_orders_by_hint_and_reports_raw_distance():
     k = _k(5, 5, 1000.0, 1000.0)
     true_mate = _c(5, 5, 1015.0, 880.0)       # 어긋남 (15, −120) — 거리 ≈ 121
@@ -213,6 +277,52 @@ def test_dialog_reclick_cancels_and_skip_gives_none(styled_qapp, tmp_path):
     dlg.deleteLater()
 
 
+def test_dialog_offers_a_confident_auto_value_without_pairs(styled_qapp, tmp_path):
+    from aoi_verification.app.ui.widgets.coord_calibration_dialog import (
+        CoordCalibrationDialog)
+    entries, shift = _make_entries(tmp_path)
+    auto = cal.AutoOffset(offset=(87.0, -91.0), support=20, runner_up=2, votes=40)
+    dlg = CoordCalibrationDialog(entries, kla_side="ref", hint=auto.offset, auto=auto)
+    assert dlg._apply.isEnabled()                     # 쌍을 안 골라도 자동값으로 적용
+    assert "+87" in dlg._result.text() and "20" in dlg._result.text()
+    # 쌍을 고르면 쌍이 우선이다
+    ref, _kc, found = entries[0]
+    dlg._on_src_clicked(ref)
+    dlg._on_cand_clicked(found[0][0])
+    assert dlg.current_offset() == pytest.approx(shift)
+    dlg._remove_pair(ref)                             # 지우면 다시 자동값
+    dlg._on_apply()
+    assert dlg.offset == pytest.approx((87.0, -91.0))
+    dlg.deleteLater()
+
+
+def test_dialog_warns_when_a_single_pair_disagrees_with_the_auto_value(styled_qapp, tmp_path):
+    """쌍 하나는 남은 오차가 0 이라 경고가 안 뜬다 — 믿을 만한 자동값과 크게 다르면 알린다."""
+    from aoi_verification.app.ui.widgets.coord_calibration_dialog import (
+        CoordCalibrationDialog)
+    entries, shift = _make_entries(tmp_path)                 # 쌍 어긋남 ≈ (15, −120)
+    auto = cal.AutoOffset(offset=(87.0, -91.0), support=20, runner_up=2, votes=40)
+    dlg = CoordCalibrationDialog(entries, kla_side="ref", auto=auto, tolerance=100.0)
+    ref, _kc, found = entries[0]
+    dlg._on_src_clicked(ref)
+    dlg._on_cand_clicked(found[0][0])
+    assert "자동 계산값" in dlg._warn.text()
+    assert dlg._apply.isEnabled()                            # 막지는 않는다
+    dlg.deleteLater()
+
+
+def test_dialog_weak_auto_value_still_needs_pairs(styled_qapp, tmp_path):
+    from aoi_verification.app.ui.widgets.coord_calibration_dialog import (
+        CoordCalibrationDialog)
+    entries, _shift = _make_entries(tmp_path)
+    weak = cal.AutoOffset(offset=(117.0, -72.0), support=5, runner_up=3, votes=184)
+    dlg = CoordCalibrationDialog(entries, kla_side="ref", hint=weak.offset, auto=weak)
+    assert not dlg._apply.isEnabled()
+    assert dlg._warn.text()                           # 근거 부족을 알린다
+    assert dlg.current_offset() is None
+    dlg.deleteLater()
+
+
 def test_kla_camtek_side_reads_folder_headers(tmp_path):
     """KLA 정보파일이 있는 쪽이 KLA — 양쪽 다/둘 다 아니면 보정하지 않는다."""
     pytest.importorskip("PyQt6.QtWidgets")
@@ -239,3 +349,58 @@ def test_kla_camtek_side_reads_folder_headers(tmp_path):
     assert side(cam_dir, kla_dir) == "val"
     assert side(cam_dir, cam_dir) is None
     assert side(kla_dir, kla_dir) is None
+
+
+# ---------------------------------------------------------------------------
+# 실물 골든 — TB500 RDL4 LOT 2개(2026-10-24, 현택님 수집, dev/collect_kla_lot.py)
+# ---------------------------------------------------------------------------
+_KLA_CAMTEK = (Path(__file__).resolve().parents[1] / "좌표 확인" / "KLA_Camtek(TB500 RDL4)")
+
+
+def _real_groups(lot: str):
+    """웨이퍼마다 (KLA 좌표들, Camtek 좌표들) — 사진 실물 없이 사진목록.txt 의 이름으로."""
+    import re
+    from aoi_verification.app.coords import resolve_batch
+
+    def listed(folder):
+        return [folder / ln.strip() for ln in (folder / "사진목록.txt")
+                .read_text(encoding="utf-8").splitlines()
+                if ln.strip() and not ln.startswith("#")]
+    groups = []
+    for kdir in sorted((_KLA_CAMTEK / lot / "KLA").iterdir()):
+        wid = re.search(r'WaferID\s+"([^"]+)"',
+                        next(kdir.glob("*.001")).read_text(errors="ignore")).group(1)
+        kp, cp = listed(kdir), listed(_KLA_CAMTEK / lot / "Camtek" / wid)
+        co = resolve_batch(kp + cp)
+        groups.append(([co[p] for p in kp if co.get(p) and co[p].source == "kla"],
+                       [co[p] for p in cp if co.get(p) and co[p].source == "camtek_ini"]))
+    return groups
+
+
+@pytest.mark.parametrize("lot", ["VPK", "LSU"])
+def test_real_lot_auto_offset_is_confident_and_matches_the_analysis(lot):
+    """관측: 웨이퍼 중심 기준 절대좌표로 따로 짝지은 분석(LSU 156쌍)에서 die 안쪽
+    Camtek − KLA ≈ (+86, −92) µm, 웨이퍼별 ±4 µm.  실행 전체로 추정하면 그 값이 나와야 하고
+    자동 적용할 만큼 믿을 만해야 한다.  (원인: 두 레시피의 die 기준점 정의 차이 —
+    ``docs/좌표_KLA_Camtek_오프셋.md``.)"""
+    a = cal.auto_offset(_real_groups(lot), src_is_kla=True)
+    assert cal.is_confident(a), a
+    assert a.offset[0] == pytest.approx(87.0, abs=5)
+    assert a.offset[1] == pytest.approx(-91.0, abs=5)
+
+
+def test_real_single_clustered_wafer_is_not_trusted():
+    """한 웨이퍼만 보면 결함이 몰린 곳에서 짝이 섞인다 — 31266524EWG5 는 (117, −72) 를
+    냈다.  그런 값은 '근거 부족' 으로 걸러져야 한다(그래서 실행 전체로 추정한다)."""
+    groups = _real_groups("VPK")
+    names = sorted(p.name for p in (_KLA_CAMTEK / "VPK" / "KLA").iterdir())
+    import re
+    for kdir_name, g in zip(names, groups):
+        txt = next((_KLA_CAMTEK / "VPK" / "KLA" / kdir_name).glob("*.001")).read_text(
+            errors="ignore")
+        if re.search(r'WaferID\s+"31266524EWG5"', txt):
+            a = cal.auto_offset([g], src_is_kla=True)
+            assert a is not None and abs(a.offset[0] - 87) > 15   # 실제로 틀린 값을 낸다
+            assert not cal.is_confident(a)
+            return
+    pytest.fail("31266524EWG5 가 자료에 없다")

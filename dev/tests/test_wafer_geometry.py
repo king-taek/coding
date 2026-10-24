@@ -1544,3 +1544,196 @@ class TestDieMapGolden:
         geom = wg.camtek_geometry(folder)
         assert (geom.col_origin, geom.row_total) == (1, 6)    # 유도값 그대로
         assert wg._DIE_MAP_FILE not in geom.source
+
+
+# ---------------------------------------------------------------------------
+# LOT 단위 die 맵 — 웨이퍼마다 가장자리 die 가 빠져도 기준은 격자의 것이다
+# ---------------------------------------------------------------------------
+class TestLotDieMap:
+    """AVAGO 15966TA0 NELA26 실측(2026-10-24, 25장): 12장은 die 목록에 맨 왼쪽 열이 없어
+    맵 기준이 3, 나머지는 2 였다.  장비는 모두 2 기준이다 — 01C1(맵 3) LIVE 파일명 20장이
+    전부 ``x_index − 2`` 였다(앱은 1 작게 냈다).  실물 파일이 오기 전까지 합성으로 못 박는다."""
+
+    PX, PY = 4160.9, 5294.0
+    CENTER = "Center_X=154281.495\nCenter_Y=154732.57\n"      # 유도값 (2, 56)
+
+    def _slot(self, lot: Path, name: str, min_x: int, center: str = CENTER) -> Path:
+        import struct
+        folder = lot / name
+        folder.mkdir(parents=True)
+        (folder / "ColorImageGrabingInfo.ini").write_text(
+            _grabbing_ini([("8406.138140.c.1.1", 8406.0, 138140.0, 2, 26)]),
+            encoding="utf-8")
+        (folder / "Params_WaferInfo.ini").write_text(
+            _params_ini(self.PX, self.PY) + "\n[Geometric]\nDiameter=300000\n" + center,
+            encoding="utf-8")
+        cells = self._full_cells(center or self.CENTER, min_x)    # 중심을 지워도 맵은 같은 웨이퍼
+        (folder / wg._DIE_MAP_FILE).write_bytes(b"".join(
+            b"\x00" * 16 + struct.pack("<dd", (i + 0.5) * self.PX, (j + 0.5) * self.PY)
+            for i, j in cells))
+        (folder / (wg._DIE_MAP_FILE + ".md")).write_text(
+            '<root><RecordSize Size="32"/><Fields>'
+            '<Field Name="x" Id="1" Offset="16" Vartype="5"/>'
+            '<Field Name="y" Id="2" Offset="24" Vartype="5"/>'
+            '</Fields></root>', encoding="utf-8")
+        return folder
+
+    def _full_cells(self, center: str, min_x: int):
+        """웨이퍼 원 안에 온전히 드는 칸 전부(= 전체 맵) — 단 ``min_x`` 왼쪽 열은 뺀다."""
+        import math
+        kv = dict(ln.split("=") for ln in center.split())
+        cx, cy, r = float(kv["Center_X"]), float(kv["Center_Y"]), 150000.0
+        # 실측 맵(NELA26)처럼 맨 위 행(56)은 장비 목록에 없다 → row 기준 55.
+        return [(i, j) for i in range(min_x, 80) for j in range(56)
+                if all(math.hypot(x - cx, y - cy) <= r
+                       for x in (i * self.PX, (i + 1) * self.PX)
+                       for y in (j * self.PY, (j + 1) * self.PY))]
+
+    def _geom(self, folder):
+        wg.camtek_geometry.cache_clear()
+        return wg.camtek_geometry(folder)
+
+    def test_missing_edge_column_uses_the_lot_grid(self, tmp_path):
+        self._slot(tmp_path, "W07", 2)
+        short = self._slot(tmp_path, "W01", 3)
+        geom = self._geom(short)
+        assert (geom.col_origin, geom.row_total) == (2, 55)
+        c = camtek_ini.load_folder(short)["8406.138140.c.1.1"]
+        assert (c.col, c.row) == (0, 29)        # 07F6 의 Conder 정답과 같은 규약
+
+    def test_alone_it_keeps_its_own_map(self, tmp_path):
+        """형제가 없으면 예전 동작 그대로 — 근거 없이 바꾸지 않는다."""
+        geom = self._geom(self._slot(tmp_path, "W01", 3))
+        assert (geom.col_origin, geom.row_total) == (3, 55)
+
+    def test_does_not_merge_a_slot_on_another_grid(self, tmp_path):
+        """웨이퍼 위치(유도 기준)가 다른 슬롯의 맵은 섞지 않는다."""
+        self._slot(tmp_path, "W07", 2,
+                   center="Center_X=158500.0\nCenter_Y=154732.57\n")   # 유도 col 3
+        geom = self._geom(self._slot(tmp_path, "W01", 3))
+        assert geom.col_origin == 3
+
+    def _add_cells(self, folder: Path, extra):
+        import struct
+        with (folder / wg._DIE_MAP_FILE).open("ab") as fh:
+            for i, j in extra:
+                fh.write(b"\x00" * 16 + struct.pack("<dd", (i + 0.5) * self.PX,
+                                                    (j + 0.5) * self.PY))
+
+    def test_a_stray_die_outside_the_wafer_does_not_shift_the_lot(self, tmp_path):
+        """형제 맵의 원 밖 칸 하나가 LOT 전체 기준을 끌어내리지 못한다(점검 쓰레드 지적 —
+        합집합은 min/max 만 넓히고 ±1 클램프는 유도값(2)과 비교하므로 x_index 1 이 통과했다)."""
+        sib = self._slot(tmp_path, "W07", 3)
+        self._add_cells(sib, [(1, 28)])                    # 원 밖(왼쪽 가장자리 바깥)
+        geom = self._geom(self._slot(tmp_path, "W01", 3))
+        assert geom.col_origin == 3
+
+    def test_no_merge_without_a_center(self, tmp_path):
+        """중심을 모르면 유도값이 상수라 '같은 격자' 를 가를 수 없다 — 합치지 않는다."""
+        self._slot(tmp_path, "W07", 2, center="")
+        short = self._slot(tmp_path, "W01", 3, center="")
+        assert (wg.lot_die_map_cells(short, self.PX, self.PY)
+                == wg.die_map_cells(short, self.PX, self.PY))
+
+    def test_no_merge_across_diameters(self, tmp_path):
+        sib = self._slot(tmp_path, "W07", 2)
+        params = sib / "Params_WaferInfo.ini"
+        params.write_text(params.read_text(encoding="utf-8")
+                          .replace("Diameter=300000", "Diameter=200000"), encoding="utf-8")
+        geom = self._geom(self._slot(tmp_path, "W01", 3))
+        assert geom.col_origin == 3
+
+    def test_wafer_map_draws_the_same_cells_that_set_the_origin(self, tmp_path):
+        """기준을 LOT 합집합으로 정했으면 맵도 그 칸을 그린다 — 자기 맵만 그리면 형제 덕에
+        채택된 맵이 빈 칸투성이로 그려진다(점검 쓰레드 지적)."""
+        from aoi_verification.app.coords import wafer_map
+        self._slot(tmp_path, "W07", 2)
+        short = self._slot(tmp_path, "W01", 3)
+        geom = self._geom(short)
+        wafer_map._camtek.cache_clear()
+        drawn = wafer_map._camtek(short).cells
+        assert drawn == wg.lot_die_map_cells(short, geom.pitch_x, geom.pitch_y)
+        assert min(i for i, _ in drawn) == geom.col_origin == 2
+
+
+class TestPartialDieMap:
+    """★ 일부 die 만 담긴 die 맵은 쓰지 않는다 — T254 GX57007306 실물(2026-10-24).
+
+    그 웨이퍼의 ``s_DieLocation.dat`` 은 50칸뿐이다(웨이퍼 원 안 온전한 칸 131, 같은 자재
+    전체 맵 GX57001305 는 115).  y_index 최댓값이 9 라 row 기준이 9 가 됐고, 유도값 10 과
+    ±1 안이라 클램프를 통과해 **Conder scan LIVE 파일명 248장 전부 row 가 1 작았다**
+    (col·die 내부 x·y 는 1.3 µm 안에서 일치).  사진 파일명이 장비가 쓴 정답이다."""
+
+    FOLDER = _DIE_MAP_REAL / "GX57007306(T254 부분맵)"
+
+    def test_partial_map_is_rejected(self, tmp_path):
+        import shutil
+        alone = tmp_path / "LOT" / "GX57007306"        # 형제 슬롯 없이 단독으로
+        shutil.copytree(self.FOLDER, alone)
+        geom = wg.camtek_geometry(alone)
+        assert (geom.col_origin, geom.row_total) == (2, 10)
+        assert wg._DIE_MAP_FILE not in geom.source
+        assert wg._die_map_origins(alone, geom.pitch_x, geom.pitch_y) == (2, 9)
+
+    def test_ini_matches_every_conder_live_name(self):
+        from aoi_verification.app.coords import camtek_live
+        ini = list(camtek_ini.load_folder(self.FOLDER).values())
+        names = [ln.strip() for ln in (self.FOLDER / "사진목록_Conder.txt")
+                 .read_text(encoding="utf-8").splitlines()
+                 if ln.strip() and not ln.startswith("#")]
+        assert len(names) == 248
+        for n in names:
+            live = camtek_live.parse_live_name(Path(n).stem)
+            best = min(ini, key=lambda c: (c.x - live.x) ** 2 + (c.y - live.y) ** 2)
+            assert (best.col, best.row) == (live.col, live.row), n
+            assert abs(best.x - live.x) <= 2 and abs(best.y - live.y) <= 2, n
+
+    def test_partial_map_is_rejected_without_a_center(self, tmp_path):
+        """중심(Center·Wafer2Table)이 없는 폴더에서도 부분 맵을 거른다 — 판정을 건너뛰면
+        ±1 클램프가 상수 폴백(2, ceil(D/py))과 비교해 부분 맵을 그대로 받는다."""
+        import shutil
+        alone = tmp_path / "LOT" / "GX57007306"
+        shutil.copytree(self.FOLDER, alone)
+        (alone / "Wafer2Table.ini").unlink()
+        params = alone / "Params_WaferInfo.ini"
+        params.write_text("\n".join(
+            ln for ln in params.read_text(encoding="utf-8", errors="replace").splitlines()
+            if not ln.startswith(("Center_X", "Center_Y"))), encoding="utf-8")
+        assert wg._wafer_center(alone) == (None, None)
+        geom = wg.camtek_geometry(alone)
+        assert (geom.col_origin, geom.row_total) == (2, 10)
+        assert wg._DIE_MAP_FILE not in geom.source
+
+
+class TestLotDieMapGolden:
+    """★ AVAGO NELA26 실물(2026-10-24, 현택님 수집) — :class:`TestLotDieMap` 의 실물판.
+
+    01C1 의 die 맵엔 맨 왼쪽 열(x_index 2)이 없어 자기 맵만 보면 col_origin 3 이다.
+    같은 LOT 의 07F6(맵 2)과 합쳐야 장비와 같은 2 가 된다.  정답은 Conder scan LIVE
+    파일명(장비가 쓴 col_row_x_y) — 01C1 20장 · 07F6 11장."""
+
+    LOT = _DIE_MAP_REAL / "NELA26(AVAGO LOT)"
+
+    def test_alone_the_short_wafer_is_off_by_one(self, tmp_path):
+        """이 테스트가 지키는 것: 합치지 않으면 정말 1 틀린다(수정이 헛돌지 않는다)."""
+        import shutil
+        alone = tmp_path / "LOT" / "NELA26-01C1"
+        shutil.copytree(self.LOT / "NELA26-01C1", alone)
+        assert wg.camtek_geometry(alone).col_origin == 3
+
+    @pytest.mark.parametrize("wafer, count", [("NELA26-01C1", 20), ("NELA26-07F6", 11)])
+    def test_ini_matches_every_conder_live_name(self, wafer, count):
+        from aoi_verification.app.coords import camtek_live
+        folder = self.LOT / wafer
+        geom = wg.camtek_geometry(folder)
+        assert (geom.col_origin, geom.row_total) == (2, 55)
+        ini = list(camtek_ini.load_folder(folder).values())
+        names = [ln.strip() for ln in (folder / "사진목록_Conder.txt")
+                 .read_text(encoding="utf-8").splitlines()
+                 if ln.strip() and not ln.startswith("#")]
+        assert len(names) == count
+        for n in names:
+            live = camtek_live.parse_live_name(Path(n).stem)
+            best = min(ini, key=lambda c: (c.x - live.x) ** 2 + (c.y - live.y) ** 2)
+            assert (best.col, best.row) == (live.col, live.row), n
+            assert abs(best.x - live.x) <= 10 and abs(best.y - live.y) <= 10, n
