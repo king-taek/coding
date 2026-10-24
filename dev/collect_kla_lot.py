@@ -1,4 +1,4 @@
-"""KLA↔Camtek 보정 원인 조사 — 한 LOT 의 웨이퍼 전부를 두 장비 쪽에서 모아 zip 하나로 만든다(읽기 전용).
+"""KLA↔Camtek 보정 원인 조사 — LOT 쌍마다 웨이퍼 전부를 두 장비 쪽에서 모아 zip 하나로 만든다(읽기 전용).
 
 무엇을 확인하려는가: 웨이퍼 한 장(31266529EWF6)에서는 Camtek−KLA 가 die 안쪽 좌표로 약
 (+90, −92) µm 였다.  그중 (+38, −100) 은 두 장비가 die 격자를 웨이퍼 중심에 거는 방식
@@ -24,9 +24,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-# 2026-10-24 KLA↔Camtek 보정 건 — VPK RDL4 4F-K1(KLA) ↔ AOI-20(Camtek), LOT TB500.INT895@6412.
-KLA_LOT = r"H:\2026-10-03\TB500.INT895@6412"
-CAMTEK_RECIPE = r"P:\AOI-20\Scanresult\TB500_RDL4 - Multi\Setup1\VPK-RDL4 4F RE"
+# 2026-10-24 KLA↔Camtek 보정 건 — (KLA LOT 폴더, Camtek 레시피 폴더) 쌍.
+LOT_PAIRS = [
+    # VPK RDL4: 4F-K1(KLA) ↔ AOI-20(Camtek)
+    (r"H:\2026-10-03\TB500.INT895@6412",
+     r"P:\AOI-20\Scanresult\TB500_RDL4 - Multi\Setup1\VPK-RDL4 4F RE"),
+    # LSU RDL4: KLA ↔ AOI-23(Camtek)
+    (r"H:\2026-09-24\TB500.INT846@6412",
+     r"P:\AOI-23\Scanresult\TB500_RDL4 - Multi - Swelling\Setup1\LSU-RDL4 RE"),
+]
 
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".gif"}
 MAX_FILE_MB = 2           # 이보다 큰 비사진 파일은 담지 않고 보고에만 적는다(웨이퍼가 많다)
@@ -152,10 +158,16 @@ def collect(folders: list[Path], out_dir: Path) -> Path:
 
 
 def _wafer_folders(log: list[str]) -> list[Path]:
-    """KLA 실행 폴더와, 같은 WaferID 의 Camtek 웨이퍼 폴더를 번갈아 담은 목록."""
+    """LOT 쌍마다 KLA 실행 폴더와, 같은 WaferID 의 Camtek 웨이퍼 폴더를 번갈아 담은 목록."""
+    out: list[Path] = []
+    for kla_lot, cam in LOT_PAIRS:
+        out += _pair_folders(Path(kla_lot), Path(cam), log)
+    return out
+
+
+def _pair_folders(kla_lot: Path, cam: Path, log: list[str]) -> list[Path]:
     import re
     out: list[Path] = []
-    kla_lot, cam = Path(KLA_LOT), Path(CAMTEK_RECIPE)
     try:
         runs = sorted(p for p in kla_lot.iterdir() if p.is_dir())
     except OSError as exc:
@@ -170,14 +182,14 @@ def _wafer_folders(log: list[str]) -> list[Path]:
                 if m:
                     wid = m.group(1)
                     break
-        log.append(f"KLA {run.name}: WaferID {wid}")
+        log.append(f"KLA {kla_lot.name}\\{run.name}: WaferID {wid}")
         if wid is None:
             continue
         out.append(run)
         if (cam / wid).is_dir():
             out.append(cam / wid)
         else:
-            log.append(f"  ! Camtek 쪽에 {wid} 폴더가 없음")
+            log.append(f"  ! Camtek 쪽에 {wid} 폴더가 없음: {cam}")
     return out
 
 
