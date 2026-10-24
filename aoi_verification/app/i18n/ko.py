@@ -660,6 +660,8 @@ HELP_TOGGLE_TOOLTIP = "설명 보기/숨기기"
 #   "Stage 1 — 후보 선별" 이라 하면 사용자가 둘을 맞춰 보는 데 한 박자를 쓴다.
 #   레일은 짧은 쪽(단계 이름)만 적고, 긴 표제는 화면이 계속 담당한다.
 JOURNEY_RAIL_STEPS = ("설정", "후보 선별", "매칭", "매치 검토", "결과")
+# Defect 추출 — 매칭·검토·결과 화면이 없다(사용자 결정: 3단계로 줄이기).
+EXTRACT_JOURNEY_RAIL_STEPS = ("설정", "후보 선별", "저장")
 JOURNEY_RAIL_BACK_TOOLTIP_FMT = "{step} 단계로 돌아갑니다 — 이후 결정은 폐기됩니다."
 # 검토 화면에서 설정으로 되돌아갈 때.  선별·매칭은 각 화면이 이미 자기 확인 문구를
 # 갖고 있어 그대로 쓰고, 검토에는 그런 경로가 없었으므로 여기서 묻는다.
@@ -1179,12 +1181,40 @@ EXTRACT_SLOT_NEED_FOLDER = "먼저 이 줄의 폴더를 선택하세요."
 EXTRACT_WAFER_MAP_SWITCH = "Wafer Map 시트 넣기"
 EXTRACT_WAFER_MAP_SWITCH_DESC = "끄면 엑셀에 Wafer Map 시트를 만들지 않습니다(저장이 빨라집니다)."
 BTN_EXTRACT_START = "추출 시작"
-# KLA 여부 — 매칭은 짝이 안 맞는 폴더가 있을 때 '어느 쪽이 KLA 인가' 를 묻지만, 추출은
-# 장비가 하나라 '이 장비가 KLA 인가' 만 묻는다.  호기가 K-n 이면 묻지 않는다(매칭과 같음).
-EXTRACT_KLA_HEADING = "이 장비가 KLA 장비인가요?"
-EXTRACT_KLA_BODY = (
-    "KLA 장비면 폴더의 정보파일(없으면 사진 OCR)에서 WaferID 를 읽어 슬롯 이름으로 씁니다.")
-EXTRACT_KLA_YES = "KLA 장비"
+# 선별 화면을 추출에 쓸 때 바꿔 끼우는 문구(`SelectPage.set_extract_mode`) — 키는 매칭
+# 문구 이름 그대로다.  추출에는 '검증' 이 없다(사용자 지적).  패널 제목은 짧게 둔다
+# (`test_pane_title_fits` — 매칭 제목과 글자 수가 같다).
+EXTRACT_SELECT_TEXT = {
+    "PANEL_LEFT_CANDIDATES": "추출 후보",
+    "PANEL_LEFT_CANDIDATES_TOOLTIP": "아직 추출/제외를 결정하지 않은 남은 사진들",
+    "PANEL_CENTER_DECIDE": "추출 결정할 사진",
+    "PANEL_RIGHT_TARGETS": "추출 대상",
+    "PANEL_RIGHT_TARGETS_TOOLTIP": "엑셀로 저장할 사진들",
+    "PANEL_RIGHT_EMPTY": "→ 또는 [✓ 추출] 로 보낸 사진이 여기에 쌓입니다.",
+    "BTN_VERIFY": "추출",
+    "BTN_BATCH_EXCLUDE": "선택 항목 추출 제외",
+    "BTN_BATCH_VERIFY": "선택 항목 추출 대상 지정",
+    "BTN_INLINE_VERIFY_FMT": "선택 {n}장 추출",
+    "BTN_MOVE_TO_TARGET": "추출 대상으로 이동",
+    "BTN_VIEW_EXCLUDED_FMT": "제외한 사진 보기 ({n})",
+    "BULK_SELECT_EXCLUDED_TITLE": "제외한 사진",
+    "END_SELECTION_CONFIRM_FMT": (
+        "남은 {n}장의 미결정 사진을 모두 제외하고 저장 단계로 넘어갈까요?"),
+    "SHORTCUT_TOOLTIP": "단축키:  → = 추출   /   ← = 제외   /   Z = 되돌리기",
+}
+# 로딩 오버레이 단계 — 추출에는 매칭이 없다(마지막 단계는 선별 화면 준비).
+EXTRACT_LOAD_JOURNEY_STEPS = ("폴더 스캔", "썸네일", "선별 준비")
+EXTRACT_BLOCKED_HINT = "LOT 또는 wafer 폴더를 먼저 지정하세요."
+EXTRACT_AUTOMATION_USER_SELECT = "추출할 사진을 직접 고릅니다"
+EXTRACT_AUTOMATION_AUTO_ALL = "모든 사진 자동 — 선별 없이 전부 추출"
+EXTRACT_RUN_OPTIONS_HINT = (
+    "· 자동화 수준 — ‘모든 사진 자동’은 후보 선별을 건너뛰고 폴더의 모든 사진을"
+    " 엑셀로 저장합니다.\n"
+    "· 슬롯 — LOT 줄마다 [슬롯] 버튼으로 일부 슬롯만 고를 수 있습니다.\n"
+    "· Wafer Map 시트 — 끄면 엑셀에 맵 시트를 만들지 않아 저장이 빨라집니다.")
+EXTRACT_SAVE_NAME_BODY = (
+    "아래 이름으로 저장합니다. 필요하면 고쳐 주세요.\n"
+    "규칙: 호기 Layer_자재 Defect 추출")
 EXTRACT_NONE_FOUND = "추출할 사진을 찾지 못했습니다.\n폴더를 다시 확인하세요."
 EXTRACT_NONE_CHOSEN_TITLE = "고른 사진이 없습니다"
 EXTRACT_NONE_CHOSEN_BODY = (

@@ -53,6 +53,9 @@ class _Win:
             def __init__(self):
                 self.loaded = None
 
+            def set_extract_mode(self, on):
+                pass
+
             def load_state(self, **kw):
                 self.loaded = kw
 

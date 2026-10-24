@@ -949,7 +949,7 @@ class MainWindow(QMainWindow):
         #   (i18n `LOAD_JOURNEY_STEPS` 주석의 '단계 수를 바꾸지 않는다' 가 이 뜻이다).
         self._loading.show_overlay(i18n.KO.LOAD_KLA_INFO,
                                    step=(1, 3),
-                                   steps=i18n.KO.LOAD_JOURNEY_STEPS)
+                                   steps=self._journey_steps())
         QApplication.processEvents()
         info_ref: dict[str, str] = {}
         info_val: dict[str, str] = {}
@@ -1042,7 +1042,7 @@ class MainWindow(QMainWindow):
             from ..workers.wafer_id_ocr import WaferIdOcrWorker
             self._loading.show_overlay(
                 i18n.KO.LOAD_KLA_OCR, step=(1, 3),
-                steps=i18n.KO.LOAD_JOURNEY_STEPS)
+                steps=self._journey_steps())
             worker = WaferIdOcrWorker(jobs, parent=self)
             self._ocr_worker = worker          # GC 방지 참조 보관
 
@@ -1152,7 +1152,7 @@ class MainWindow(QMainWindow):
         #   보였다.
         self._loading.show_overlay(i18n.KO.LOAD_SCAN, cancelable=True,
                                    step=(1, 3),
-                                   steps=i18n.KO.LOAD_JOURNEY_STEPS)
+                                   steps=self._journey_steps())
         QApplication.processEvents()
 
         # 결과 파일의 **이름·자리만** 정한다 — 파일 자체는 [엑셀로 저장] 때 만든다.
@@ -1287,7 +1287,7 @@ class MainWindow(QMainWindow):
         # 썸네일 단계는 가장 오래 걸리므로 [중지] 로 건너뛸 수 있게 한다(#C2).
         self._loading.show_overlay(
             i18n.KO.LOAD_THUMBNAIL, cancelable=True,
-            step=(2, 3), steps=i18n.KO.LOAD_JOURNEY_STEPS)
+            step=(2, 3), steps=self._journey_steps())
         QApplication.processEvents()
         all_items: list[ImageItem] = []
         for name in common:
@@ -1366,7 +1366,7 @@ class MainWindow(QMainWindow):
             return
         self._thumbs_handled = True
         self._stage_clock("thumbnails")
-        self._loading.set_stage((3, 3), i18n.KO.LOAD_JOURNEY_STEPS)
+        self._loading.set_stage((3, 3), self._journey_steps())
         self._loading.set_progress(0, 0, i18n.KO.LOAD_STAGE_PREP)
         QTimer.singleShot(0, self._continue_after_thumbs)
 
@@ -1486,6 +1486,7 @@ class MainWindow(QMainWindow):
         # ★ 추출은 묻지도 기록하지도 않는다 — 그 기록은 '매칭에 쓸 기준 사진' 이다.
         restored = ({} if one_side
                     else self._maybe_restore_ref_selection(queue))
+        self._select_page.set_extract_mode(one_side)     # '검증' ↔ '추출' 문구
         self._select_page.load_state(
             queue=queue,
             targets=restored, excluded={}, history=[],
@@ -1867,6 +1868,11 @@ class MainWindow(QMainWindow):
     def _is_extract(self) -> bool:
         return bool(getattr(self._input, "extract", False))
 
+    def _journey_steps(self) -> tuple:
+        """로딩 오버레이의 단계 이름 — 추출에는 매칭이 없어 마지막 단계 이름만 다르다."""
+        return (i18n.KO.EXTRACT_LOAD_JOURNEY_STEPS if self._is_extract()
+                else i18n.KO.LOAD_JOURNEY_STEPS)
+
     def _extract_after_scan(self, sr: ScanResult) -> None:
         """스캔 직후 — 사진 없는 슬롯을 빼고, KLA 면 slot명을 WaferID 로 바꾼 뒤 썸네일로."""
         for name in [n for n, s in sr.slots.items() if not s.ref_images]:
@@ -1876,15 +1882,12 @@ class MainWindow(QMainWindow):
             wakelock.release()
             sheets.warn(self, i18n.KO.APP_TITLE, i18n.KO.EXTRACT_NONE_FOUND)
             return
-        # KLA 여부 — 호기가 K-n 이면 묻지 않는다(매칭과 같은 규칙).  추출은 장비가
-        # 하나라 '어느 쪽' 이 아니라 'KLA 인가' 만 묻는다.
-        is_kla = self._kla_machine_side(self._input) is not None
-        if not is_kla:
-            is_kla = sheets.choose(
-                self, i18n.KO.KLA_ASK_TITLE, i18n.KO.EXTRACT_KLA_BODY,
-                [("kla", i18n.KO.EXTRACT_KLA_YES, "option"),
-                 ("none", i18n.KO.KLA_SIDE_NONE, "option")],
-                heading=i18n.KO.EXTRACT_KLA_HEADING, tiles=True) == "kla"
+        # KLA 여부는 **묻지 않는다**(사용자 지적: "KLA인지 확인하는거 왜뜨냐").  매칭은
+        # 짝이 안 맞을 때만 묻지만 예전 추출은 Camtek 폴더에도 매번 물었다.  호기가 K-n
+        # 이거나, 폴더에 KLA 정보파일(`WaferID "…";`)이 하나라도 있으면 KLA 다 —
+        # 좌표 보정의 장비 판별(`_kla_camtek_side`)과 같은 기준이다.
+        is_kla = (self._kla_machine_side(self._input) is not None
+                  or self._has_kla_info(sr))
         # 이름은 **해석이 끝난 뒤** 센다 — KLA 면 그 사이 slot명이 WaferID 로 바뀐다.
         proceed = lambda: self._continue_start_after_scan(sorted(sr.slots))  # noqa: E731
         if is_kla:
@@ -1892,12 +1895,21 @@ class MainWindow(QMainWindow):
         else:
             proceed()
 
+    @staticmethod
+    def _has_kla_info(sr: ScanResult) -> bool:
+        """추출 대상 폴더 중 하나라도 KLA 정보파일 헤더(WaferID)를 가졌는가.
+
+        헤더 앞부분만 읽고 캐시된다(`kla_info.read_header_ids`) — 이어지는 slot명
+        해석이 같은 값을 다시 읽지 않는다."""
+        return any(kla_info.read_wafer_id(s.ref_dir) is not None
+                   for s in sr.slots.values() if s.ref_dir)
+
     def _resolve_kla_extract(self, sr: ScanResult, on_done) -> None:
         """KLA 폴더의 slot명 = WaferID — **정보파일 우선, OCR 폴백**(매칭과 같은 순서).
 
         OCR 은 정보파일에서 못 읽은 폴더에만, 백그라운드 워커에서 돈다."""
         self._loading.show_overlay(i18n.KO.LOAD_KLA_INFO, step=(1, 3),
-                                   steps=i18n.KO.LOAD_JOURNEY_STEPS)
+                                   steps=self._journey_steps())
         QApplication.processEvents()
         info: dict[str, str] = {}
         for name, slot in sr.slots.items():
@@ -1917,7 +1929,7 @@ class MainWindow(QMainWindow):
         if jobs and wafer_id.ocr_available():
             from ..workers.wafer_id_ocr import WaferIdOcrWorker
             self._loading.show_overlay(i18n.KO.LOAD_KLA_OCR, step=(1, 3),
-                                       steps=i18n.KO.LOAD_JOURNEY_STEPS)
+                                       steps=self._journey_steps())
             worker = WaferIdOcrWorker(jobs, parent=self)
             self._ocr_worker = worker          # GC 방지 참조 보관
             worker.signals.progress.connect(
@@ -1977,7 +1989,7 @@ class MainWindow(QMainWindow):
             _prefs.patch(extract_recipe_layout=choice)
             from .widgets.save_name_dialog import SaveNameDialog
             dlg = SaveNameDialog(self._working_xlsx.name, self._working_xlsx.parent,
-                                 parent=self)
+                                 parent=self, body=i18n.KO.EXTRACT_SAVE_NAME_BODY)
             if sheets.run(dlg) and dlg.chosen is not None:
                 dst = self._working_xlsx.with_name(dlg.chosen)
         if dst is None:
@@ -1995,6 +2007,8 @@ class MainWindow(QMainWindow):
 
         self._extract_result, self._extract_dst = result, dst
         self._extract_layout = layout
+        self._rail.set_current(2)            # 추출 레일의 마지막 단계 '저장'
+        self._rail.set_navigable(())
         self._loading.show_overlay(i18n.KO.LOAD_EXPORT)
         # Wafer Map 시트는 설정 화면 스위치로 끌 수 있다(사용자 결정) — 렌더러가 없으면
         # exporter 가 그 시트를 만들지 않는다.
@@ -2036,6 +2050,7 @@ class MainWindow(QMainWindow):
     def _on_extract_export_failed(self, msg: str) -> None:
         """실패 — 결과 화면과 같은 안내(열려 있는 파일이 가장 흔한 원인) + 다시 시도."""
         self._loading.hide_overlay()
+        self._sync_rail(self._stack.currentWidget())      # '저장' → 지금 화면
         locked = "permission" in msg.lower() or "errno 13" in msg.lower()
         body = (i18n.KO.SAVE_FAIL_LOCKED_FMT.format(error=msg) if locked
                 else i18n.KO.SAVE_FAIL_FMT.format(error=msg))
@@ -2345,6 +2360,7 @@ class MainWindow(QMainWindow):
         self._stack.addWidget(self._setup_page)
         self._setup_page.start_requested.connect(self._on_start)
         self._setup_page.update_check_requested.connect(self._manual_update_check)
+        self._setup_page.extract_mode_changed.connect(self._on_extract_mode_changed)
         # 백엔드가 아직이면 '검증 시작' 을 잠그고 버튼에 준비 중을 표기한다.
         self._setup_page.set_backend_ready(self._backend_ready)
 
@@ -2491,8 +2507,23 @@ class MainWindow(QMainWindow):
         ``animate`` 는 페이지가 실제로 슬라이드할 때만 True 다 — 그때 레일 눈금이
         먼저 채워지고, 창은 그 뒤에 화면을 밀어 넣는다(21안-A)."""
         idx = self._page_order(w)
+        self._rail.set_labels(self._rail_labels(w))
         self._rail.set_current(idx, animate=animate)
         self._rail.set_navigable(self._RAIL_ROUTES.get(idx, ()))
+
+    def _rail_labels(self, w: QWidget) -> tuple:
+        """레일 단계 이름 — Defect 추출은 매칭·검토·결과를 거치지 않아 3단계다(사용자 결정).
+
+        설정 화면에서는 입력란의 모드가, 그 뒤로는 시작한 실행의 모드가 기준이다."""
+        if w is self._setup_page and self._setup_page is not None:
+            extract = self._setup_page.is_extract_mode()
+        else:
+            extract = self._is_extract()
+        return (i18n.KO.EXTRACT_JOURNEY_RAIL_STEPS if extract
+                else i18n.KO.JOURNEY_RAIL_STEPS)
+
+    def _on_extract_mode_changed(self, _on: bool) -> None:
+        self._sync_rail(self._stack.currentWidget())
 
     def _on_rail_step_clicked(self, target: int) -> None:
         """레일에서 지난 단계를 눌렀다 — 그 화면이 가진 복귀 흐름을 그대로 부른다.

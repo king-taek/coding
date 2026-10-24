@@ -58,18 +58,19 @@ def sanitize_name(text: str) -> tuple[str, str]:
 class SaveNameDialog(QDialog):
     """추천 이름을 보여주고 고치게 한다.  :attr:`chosen` 이 결과(취소면 ``None``)."""
 
-    def __init__(self, suggested: str, folder: Path, parent=None) -> None:
+    def __init__(self, suggested: str, folder: Path, parent=None,
+                 *, body: str | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(i18n.KO.SAVE_NAME_TITLE)
         self._chosen: str | None = None
-        self._build(suggested, Path(folder))
+        self._build(suggested, Path(folder), body or i18n.KO.SAVE_NAME_BODY)
 
     @property
     def chosen(self) -> str | None:
         return self._chosen
 
     # ------------------------------------------------------------------
-    def _build(self, suggested: str, folder: Path) -> None:
+    def _build(self, suggested: str, folder: Path, body_text: str) -> None:
         root = QVBoxLayout(self)
         m = theme.PROFILE.page_margin // 2
         root.setContentsMargins(m, m, m, m)
@@ -79,7 +80,7 @@ class SaveNameDialog(QDialog):
         head.setProperty("role", "title")
         root.addWidget(head)
 
-        body = QLabel(i18n.KO.SAVE_NAME_BODY, self)
+        body = QLabel(body_text, self)
         body.setProperty("role", "muted")
         body.setWordWrap(True)
         root.addWidget(body)
