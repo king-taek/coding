@@ -131,6 +131,7 @@ def _window(automation):
                                  extract=False)
     win._scan = _scan()
     win._reviewed_matches = [_m("S1", "/r/1.jpg", "/v/2.jpg")]   # A 확정분
+    win._a_reviewed = True
     win._matches_a = list(win._reviewed_matches)
     win._match_page = SimpleNamespace(review_context=lambda: SimpleNamespace(
         fast_results={("S1", Path("/r/1.jpg")): []},
@@ -342,3 +343,30 @@ def test_setup_starts_cross_off_and_tolerance_at_default(styled_qapp, monkeypatc
         assert not hasattr(_prefs.UiPrefs(), "cross_check")
     finally:
         page.deleteLater()
+
+
+# ---------------------------------------------------------------------------
+# 검토에서 매치를 **전부** '매치 없음' 으로 표시해도 자동 매치가 되살아나지 않는다
+# ---------------------------------------------------------------------------
+def test_review_that_drops_every_match_is_not_treated_as_unreviewed(styled_qapp):
+    """빈 kept 는 '검토 안 함' 이 아니라 '전부 버림' 이다.
+
+    ★ 예전에는 `_reviewed_matches` 가 비면 자동 매치(`_merge_matches`)로 돌아가서,
+      사용자가 지운 짝이 결과에 그대로 나오고 2차 큐에서도 그 검증 사진이 빠졌다."""
+    from aoi_verification.app.utils.prefs import AutomationLevel
+    MW, win = _window(AutomationLevel.USER_SELECT)
+    a_match = win._reviewed_matches[0]
+    win._reviewed_matches = []
+    win._reviewed_unmatched = []
+    win._reviewed_unmatched_keys = set()
+    win._reviewed_all_matches = []
+    win._a_reviewed = False
+    win._merge_matches = lambda: [a_match]              # 자동 매치는 짝이 있다
+    win._match_review_page = SimpleNamespace(
+        unmatched_keys=lambda: {a_match.key}, all_matches=lambda: [a_match])
+    miss = MissEntry("S1", "ref", a_match.ref_path, "x")
+    win._on_match_review_done([], [miss])
+    assert win._a_final_matches() == []
+    # 2차 큐에 사용자가 짝을 지운 검증 사진이 다시 들어간다.
+    queued = [it.path for it in win._select_page.loaded["queue"]]
+    assert a_match.val_path in queued
