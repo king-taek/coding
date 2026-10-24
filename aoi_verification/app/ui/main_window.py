@@ -20,9 +20,10 @@ from typing import Optional
 
 from PyQt6.QtCore import (QElapsedTimer, QObject, Qt, QThread, QTimer,
                           pyqtSignal)
+from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (QApplication, QLabel, QMainWindow,
-                              QMessageBox, QStackedWidget, QStatusBar,
-                              QVBoxLayout, QWidget)
+                              QMessageBox, QPushButton, QStackedWidget,
+                              QStatusBar, QVBoxLayout, QWidget)
 
 from .. import config, i18n
 from . import deferred, theme
@@ -273,6 +274,15 @@ class MainWindow(QMainWindow):
         self._mem_label = QLabel("", self._status_bar)
         self._mem_label.setProperty("role", "muted")
         self._status_bar.addPermanentWidget(self._mem_label)
+        # 개발자 모드(Ctrl+Shift+D) — 켜져 있을 때만 상태바에 설정 버튼이 보인다.
+        self._dev_btn = QPushButton(i18n.KO.DEV_MODE_BUTTON, self._status_bar)
+        self._dev_btn.setFlat(True)
+        self._dev_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._dev_btn.clicked.connect(self._open_dev_mode)
+        self._status_bar.addPermanentWidget(self._dev_btn)
+        self._dev_btn.setVisible(_prefs.load().dev_mode)
+        QShortcut(QKeySequence("Ctrl+Shift+D"), self,
+                  activated=self._toggle_dev_mode)
         self._mem_timer = QTimer(self)
         self._mem_timer.setInterval(2000)
         self._mem_timer.timeout.connect(self._update_memory_label)
@@ -482,6 +492,38 @@ class MainWindow(QMainWindow):
         # 새 버전이 있는 _on_update_found 전용).
         sheets.info(self, i18n.KO.UPDATE_CHECK_TITLE, msg)
 
+    # ==================================================================
+    # 개발자 모드 (Ctrl+Shift+D) — 업데이트 저장소·브랜치 고르기
+    # ==================================================================
+    def _toggle_dev_mode(self) -> None:
+        """켜면 설정 창을 바로 연다.  끄면 자동 업데이트가 기본 브랜치로 돌아간다."""
+        on = not _prefs.load().dev_mode
+        _prefs.patch(dev_mode=on)
+        self._dev_btn.setVisible(on)
+        self._status_bar.showMessage(
+            i18n.KO.DEV_MODE_ON if on else i18n.KO.DEV_MODE_OFF, 4000)
+        if on:
+            self._open_dev_mode()
+
+    def _open_dev_mode(self) -> None:
+        from .widgets.dev_mode_dialog import DevModeDialog
+        dlg = DevModeDialog(parent=self)
+        sheets.run(dlg)
+        info = dlg.install_info
+        if not info:
+            return
+        ans = sheets.ask(
+            self, i18n.KO.DEV_MODE_TITLE,
+            i18n.KO.DEV_MODE_INSTALL_ASK_FMT.format(
+                repo=info["repo"], branch=info["branch"], sha=str(info["sha"])[:7]),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+            labels={QMessageBox.StandardButton.Yes: i18n.KO.UPDATE_BTN_NOW,
+                    QMessageBox.StandardButton.No: i18n.KO.UPDATE_BTN_LATER},
+        )
+        if ans == QMessageBox.StandardButton.Yes:
+            self._start_update_download(info, dev=True)
+
     def _on_update_found(self, info: dict) -> None:
         """'업데이트 있음' 안내 → 동의하면 백그라운드로 다운로드/교체."""
         # 사용자에겐 개발자용 커밋 메시지/SSL 멘트 대신 간단한 안내만.
@@ -497,6 +539,13 @@ class MainWindow(QMainWindow):
         if ans != QMessageBox.StandardButton.Yes:
             self._run_startup_popups()       # 거절 → 나머지 시작 팝업 진행
             return
+        from ..utils import updater
+        self._start_update_download(info, dev=updater.dev_target() is not None)
+
+    def _start_update_download(self, info: dict, dev: bool = False) -> None:
+        """``info`` 의 repo/branch/sha 를 받아 적용한다(백그라운드 + 로딩바).
+
+        ``dev`` 는 개발자 모드에서 고른 대상이라는 표식(VERSION 에 남는다)."""
         # 개발(git) 작업트리에서는 자동 덮어쓰기로 로컬 변경을 날릴 수 있어 막는다.
         try:
             from ..utils import updater
@@ -523,7 +572,8 @@ class MainWindow(QMainWindow):
             try:
                 from ..utils import updater
                 ok = updater.download_and_apply(
-                    info["repo"], info["branch"], info["sha"], progress=_report)
+                    info["repo"], info["branch"], info["sha"], progress=_report,
+                    dev=dev)
             except Exception:
                 ok = False
             self._update_applied.emit(bool(ok), info or {})

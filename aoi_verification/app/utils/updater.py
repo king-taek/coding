@@ -261,22 +261,26 @@ def current_version() -> Optional[dict]:
     return None
 
 
-def _write_version_to(root: Path, sha: str, branch: str, repo: str) -> None:
+def _write_version_to(root: Path, sha: str, branch: str, repo: str,
+                      dev: bool = False) -> None:
     """``root/VERSION`` 에 업데이트 식별자를 쓴다.
 
     스테이징 트리에 쓰기 위해 위치를 인자로 받는다 — 살아있는 ``app/VERSION`` 에 미리
-    쓰면 교체가 보류·실패했을 때 앱이 "최신입니다"라고 하면서 **구버전을 영원히 실행**한다."""
+    쓰면 교체가 보류·실패했을 때 앱이 "최신입니다"라고 하면서 **구버전을 영원히 실행**한다.
+
+    ``dev`` 는 개발자 모드에서 고른 저장소·브랜치로 받았다는 표식이다 — 개발자 모드를
+    끄면 ``_identity`` 가 이 표식을 보고 기본 저장소·브랜치로 돌아간다."""
+    data = {"sha": sha, "branch": branch, "repo": repo}
+    if dev:
+        data["dev"] = True
     try:
-        (Path(root) / "VERSION").write_text(
-            json.dumps({"sha": sha, "branch": branch, "repo": repo}),
-            encoding="utf-8",
-        )
+        (Path(root) / "VERSION").write_text(json.dumps(data), encoding="utf-8")
     except Exception:
         pass
 
 
-def _write_version(sha: str, branch: str, repo: str) -> None:
-    _write_version_to(_app_root(), sha, branch, repo)
+def _write_version(sha: str, branch: str, repo: str, dev: bool = False) -> None:
+    _write_version_to(_app_root(), sha, branch, repo, dev)
 
 
 def ensure_version_file() -> Optional[dict]:
@@ -358,16 +362,22 @@ def latest_commit(repo: str, branch: str, timeout: float = 15.0) -> Optional[dic
     return _latest_via_atom(repo, branch, timeout)
 
 
-def _latest_self_healing(repo: str, branch: str) -> tuple[Optional[dict], str]:
+def _latest_self_healing(repo: str, branch: str,
+                         heal: bool = True) -> tuple[Optional[dict], str]:
     """``latest_commit`` 을 시도하되, 추적 브랜치가 삭제/이름변경(404)돼 실패하면
     저장소의 **실제 기본 브랜치**로 한 번 더 시도한다.
 
     ``(info, 실제_사용_브랜치)`` 를 돌려준다 — 다운로드(``download_and_apply``)도 살아있는
     브랜치로 가야 하므로 호출부가 교정된 브랜치를 그대로 쓸 수 있게 한다.  둘 다 실패하면
-    ``(None, branch)`` (사유는 ``last_error()``)."""
+    ``(None, branch)`` (사유는 ``last_error()``).
+
+    ``heal=False`` 면 기본 브랜치로 바꾸지 않는다 — 개발자 모드에서 고른 브랜치가 없을 때
+    조용히 다른 브랜치를 받으면 안 된다."""
     info = latest_commit(repo, branch)
     if info:
         return info, branch
+    if not heal:
+        return None, branch
     db = _default_branch(repo)
     if db and db != branch:
         info = latest_commit(repo, db)
@@ -431,10 +441,11 @@ def check_for_update() -> Optional[dict]:
     if update_pending():
         return None                     # 이미 받아뒀다 — 재시작만 하면 된다(재다운로드 금지)
     ensure_version_file()
-    repo, branch, cur_sha = _identity()
+    pinned = dev_target()                # 한 번만 읽는다 — 두 번 읽으면 서로 어긋날 수 있다
+    repo, branch, cur_sha = _identity(pinned)
     if not branch:
         return None
-    latest, branch = _latest_self_healing(repo, branch)
+    latest, branch = _latest_self_healing(repo, branch, heal=pinned is None)
     if not latest or not latest.get("sha"):
         return None
     if cur_sha and str(latest["sha"]) == str(cur_sha):
@@ -471,13 +482,25 @@ def _git_head() -> Optional[dict]:
     return None
 
 
-def _identity() -> tuple:
+def _identity(pinned: Optional[tuple] = None) -> tuple:
     """추적 대상 ``(repo, branch, current_sha)`` 를 결정한다.
 
-    우선순위: VERSION 파일 → git HEAD → 코드 내장 기본값(DEFAULT_REPO/BRANCH).
-    VERSION·git 이 모두 없으면 current_sha 는 빈 문자열("미상")이지만, repo/branch 는
-    기본값으로 알 수 있으므로 **최신 버전을 받아 적용하는 것은 가능**하다."""
+    우선순위: 개발자 모드 대상 → VERSION 파일 → git HEAD → 코드 내장 기본값
+    (DEFAULT_REPO/BRANCH).  VERSION·git 이 모두 없으면 current_sha 는 빈 문자열("미상")
+    이지만, repo/branch 는 기본값으로 알 수 있으므로 **최신 버전을 받아 적용하는 것은
+    가능**하다.
+
+    개발자 모드 대상은 정규화하지 않는다(``claude/`` 브랜치도 그대로) — 그걸 고르려고
+    켠 모드다.  개발자 모드로 받은 설치본(VERSION ``dev``)은 모드를 끄면 기본 저장소·
+    브랜치로 돌아간다."""
     cur = current_version()
+    if pinned:
+        sha = str((cur or {}).get("sha") or "")
+        if not cur:
+            sha = str((_git_head() or {}).get("sha") or "")
+        return (pinned[0], pinned[1], sha)
+    if cur and cur.get("dev"):
+        return (DEFAULT_REPO, _default_branch(DEFAULT_REPO), str(cur.get("sha") or ""))
     if cur and cur.get("branch"):
         repo = cur.get("repo") or DEFAULT_REPO
         return (repo, _resolve_branch(cur["branch"], repo), str(cur.get("sha") or ""))
@@ -499,14 +522,79 @@ def manual_check() -> tuple:
     (한 번 받으면 VERSION 이 기록돼 이후엔 정상 비교)"""
     global _last_error
     _last_error = ""
-    repo, branch, cur_sha = _identity()
-    latest, branch = _latest_self_healing(repo, branch)
+    pinned = dev_target()
+    repo, branch, cur_sha = _identity(pinned)
+    latest, branch = _latest_self_healing(repo, branch, heal=pinned is None)
     if not latest or not latest.get("sha"):
         return ("unknown", {"error": _last_error or i18n.KO.UPDATE_ERR_GITHUB})
     if cur_sha and str(latest["sha"]) == str(cur_sha):
         return ("latest", {})
     info = {"repo": repo, "branch": branch, "sha": latest["sha"],
             "message": latest.get("message", "")}
+    if not cur_sha:
+        info["current_unknown"] = True
+    return ("update", info)
+
+
+def dev_target() -> Optional[tuple]:
+    """개발자 모드에서 고른 업데이트 대상 ``(repo, branch)``.  고르지 않았으면 None.
+
+    개발자 모드가 **켜져 있고** 브랜치가 적혀 있을 때만 유효하다 — 모드를 끄면 저장된
+    값이 남아 있어도 기본 브랜치를 따른다.  설정 파일을 못 읽으면 None(부가 기능)."""
+    try:
+        from . import prefs
+        p = prefs.load()
+    except Exception:
+        return None
+    branch = (p.dev_update_branch or "").strip()
+    if not p.dev_mode or not branch:
+        return None
+    return ((p.dev_update_repo or "").strip() or DEFAULT_REPO, branch)
+
+
+_API_BRANCHES = "https://api.github.com/repos/{repo}/branches?per_page=100"
+
+
+def list_branches(repo: str, timeout: float = 10.0) -> list:
+    """저장소의 브랜치 이름 목록(기본 브랜치가 맨 앞).  실패하면 ``[]``(사유는 ``last_error()``).
+
+    개발자 모드 화면의 목록용이다.  api.github.com 이 막혀 있으면 빈 목록이 오고,
+    화면에서 브랜치 이름을 직접 적으면 된다."""
+    global _last_error
+    url = _API_BRANCHES.format(repo=repo)
+    try:
+        raw = _http_get(url, {**_UA, "Accept": "application/vnd.github+json"}, timeout)
+        names = [str(b.get("name")) for b in json.loads(raw.decode("utf-8"))
+                 if isinstance(b, dict) and b.get("name")]
+    except Exception as exc:
+        _last_error = _describe_err(exc, url)
+        return []
+    db = _default_branch(repo)
+    if db in names:
+        names.remove(db)
+        names.insert(0, db)
+    return names
+
+
+def check_target(repo: str, branch: str) -> tuple:
+    """개발자 모드 — 지정한 ``repo``/``branch`` 의 최신 커밋을 현재 설치본과 비교한다.
+
+    반환 ``(status, info)``: status 는 ``"update"``·``"latest"``·``"unknown"``.
+    ``manual_check`` 와 달리 ``"latest"`` 여도 ``info`` 에 받을 대상
+    (``repo,branch,sha,message``)을 실어 준다 — 같은 버전이라도 다시 받을 수 있게.
+    다른 브랜치로 바꿔 받지 않는다(자기교정 없음).  ``branch`` 가 비면 기본 브랜치."""
+    global _last_error
+    _last_error = ""
+    branch = (branch or "").strip() or _default_branch(repo)
+    cur = current_version() or _git_head() or {}
+    cur_sha = str(cur.get("sha") or "")
+    latest = latest_commit(repo, branch)
+    if not latest or not latest.get("sha"):
+        return ("unknown", {"error": _last_error or i18n.KO.UPDATE_ERR_GITHUB})
+    info = {"repo": repo, "branch": branch, "sha": latest["sha"],
+            "message": latest.get("message", "")}
+    if cur_sha and str(latest["sha"]) == cur_sha:
+        return ("latest", info)
     if not cur_sha:
         info["current_unknown"] = True
     return ("update", info)
@@ -749,7 +837,8 @@ def _ensure_deps(root: Path, staging: Path, emit) -> bool:
 
 def download_and_apply(repo: str, branch: str, target_sha: str,
                        timeout: float = 60.0,
-                       progress: Optional[callable] = None) -> bool:
+                       progress: Optional[callable] = None,
+                       dev: bool = False) -> bool:
     """브랜치 zip 을 받아 **앱 구동에 필요한 것을 전부** 담은 새 트리를 만들어 적용한다.
 
     적용 방식은 두 가지다:
@@ -761,7 +850,9 @@ def download_and_apply(repo: str, branch: str, target_sha: str,
     남아 다음 실행에 다시 시도할 수 있다.
 
     ``progress(done, total, phase)`` 가 주어지면 다운로드/압축해제/준비/적용 단계의 진행을
-    보고한다(로딩바가 0 에서 멈추지 않도록).  total<=0 이면 진행량 미상(busy) 의미."""
+    보고한다(로딩바가 0 에서 멈추지 않도록).  total<=0 이면 진행량 미상(busy) 의미.
+
+    ``dev`` 는 개발자 모드에서 고른 대상이라는 표식으로, VERSION 에 함께 남는다."""
     import shutil
     import tempfile
     import zipfile
@@ -821,7 +912,7 @@ def download_and_apply(repo: str, branch: str, target_sha: str,
         staging = _staging_dir(install_root, app_root)
         shutil.rmtree(staging, ignore_errors=True)
         _stage_tree(src_root, staging, _emit)
-        _write_version_to(staging, target_sha, branch, repo)
+        _write_version_to(staging, target_sha, branch, repo, dev)
 
         # 4) 검증 — 여기를 통과해야만 적용한다.
         reason = _verify_staged(staging)
@@ -841,7 +932,7 @@ def download_and_apply(repo: str, branch: str, target_sha: str,
             staging = None                           # finally 가 지우지 않도록
         else:                                        # 포터블/온라인 — 제자리 적용
             _promote_in_place(staging, app_root, _emit)
-            _write_version(target_sha, branch, repo)
+            _write_version(target_sha, branch, repo, dev)
         _emit(1, 1, i18n.KO.UPDATE_PHASE_DONE)
         return True
     except Exception as exc:
