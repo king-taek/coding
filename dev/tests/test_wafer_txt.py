@@ -283,6 +283,31 @@ def test_excel_wafer_map_sheet_carries_the_banner_warnings(qt, isolated_cache, t
     assert ws["A4"].value == i18n.KO.WAFER_MAP_WARN_LIVE_UNVERIFIED
 
 
+def test_excel_warns_even_when_no_photo_could_be_placed(qt, isolated_cache, tmp_path):
+    """좌표를 하나도 못 읽은 맵(frame 없음)도 '좌표 없는 사진 N장' 을 엑셀에 남긴다 —
+    빈 칸이면 '사진이 없는 쪽' 과 구분되지 않는다(PR #50 리뷰)."""
+    pytest.importorskip("openpyxl")
+    from openpyxl import load_workbook
+
+    from aoi_verification.app import i18n
+    from aoi_verification.app.models.result import FinalResult
+    from aoi_verification.app.ui.widgets.wafer_map_view import render_map_png
+    from aoi_verification.app.workers.exporter import ExcelExporter
+
+    d = tmp_path / "S1"
+    d.mkdir()
+    photos = [d / "a.jpg", d / "b.jpg"]           # 좌표 원천이 하나도 없는 사진
+    for p in photos:
+        p.write_bytes(b"")
+    result = FinalResult(mode="single", ref_machine="1", val_machine="2",
+                         slot_images={"S1": (photos, [])})
+    dst = tmp_path / "out.xlsx"
+    ExcelExporter(result, dst_path=dst, template_path=tmp_path / "none.xlsx",
+                  map_renderer=render_map_png).run()
+    ws = load_workbook(str(dst))[i18n.KO.WAFER_MAP_SHEET]
+    assert i18n.KO.WAFER_MAP_WARN_UNPLACED_FMT.format(n=2) in (ws["D2"].value or "")
+
+
 def test_non_live_map_has_no_review_warning():
     assert wm.map_warnings(wm.MapData(None, (), (), live_points=0)) == []
 

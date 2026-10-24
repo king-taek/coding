@@ -1318,13 +1318,15 @@ class ExcelExporter(QThread):
             ref, val = slot_maps(self._result, slot)
             warns = []
             for col, data in (("B", ref), ("C", val)):
-                if data.frame is None:
-                    continue
-                live_seen = live_seen or data.live_points > 0
+                # 경고는 그림보다 먼저 — 사진 좌표를 전부 못 읽으면 frame 이 None 인데,
+                # 그때야말로 '좌표 없는 사진 N장' 이 엑셀에 남아야 한다.
                 reasons = warning_reasons(data, skip=(WARN_LIVE_UNVERIFIED,))
                 if reasons:
                     warns.append(i18n.KO.WAFER_MAP_WARN_SIDE_FMT.format(
                         side=(ws[f"{col}1"].value or "").split("\n")[0], reasons=reasons))
+                if data.frame is None:
+                    continue
+                live_seen = live_seen or data.live_points > 0
                 try:
                     _add_image_centered(ws, png(data), col, r, px_w, px_w)
                 except Exception:
