@@ -44,13 +44,13 @@ def _clear_caches():
     for f in (wg.camtek_geometry, wg.kla_geometry, camtek_ini.load_folder,
               camtek_ini.load_raw_folder, camtek_ini.load_abs_folder,
               camtek_ini.load_recipe_folder,
-              kla_info.load_folder, kla_info.load_folder_raw, wg.die_map_cells):
+              kla_info.load_folder, kla_info.load_folder_raw):
         f.cache_clear()
     yield
     for f in (wg.camtek_geometry, wg.kla_geometry, camtek_ini.load_folder,
               camtek_ini.load_raw_folder, camtek_ini.load_abs_folder,
               camtek_ini.load_recipe_folder,
-              kla_info.load_folder, kla_info.load_folder_raw, wg.die_map_cells):
+              kla_info.load_folder, kla_info.load_folder_raw):
         f.cache_clear()
 
 
@@ -1567,7 +1567,7 @@ class TestLotDieMap:
         (folder / "Params_WaferInfo.ini").write_text(
             _params_ini(self.PX, self.PY) + "\n[Geometric]\nDiameter=300000\n" + center,
             encoding="utf-8")
-        cells = [(i, j) for i in range(min_x, 72) for j in (2, 30, 55)]
+        cells = self._full_cells(center, min_x)
         (folder / wg._DIE_MAP_FILE).write_bytes(b"".join(
             b"\x00" * 16 + struct.pack("<dd", (i + 0.5) * self.PX, (j + 0.5) * self.PY)
             for i, j in cells))
@@ -1577,6 +1577,17 @@ class TestLotDieMap:
             '<Field Name="y" Id="2" Offset="24" Vartype="5"/>'
             '</Fields></root>', encoding="utf-8")
         return folder
+
+    def _full_cells(self, center: str, min_x: int):
+        """웨이퍼 원 안에 온전히 드는 칸 전부(= 전체 맵) — 단 ``min_x`` 왼쪽 열은 뺀다."""
+        import math
+        kv = dict(ln.split("=") for ln in center.split())
+        cx, cy, r = float(kv["Center_X"]), float(kv["Center_Y"]), 150000.0
+        # 실측 맵(NELA26)처럼 맨 위 행(56)은 장비 목록에 없다 → row 기준 55.
+        return [(i, j) for i in range(min_x, 80) for j in range(56)
+                if all(math.hypot(x - cx, y - cy) <= r
+                       for x in (i * self.PX, (i + 1) * self.PX)
+                       for y in (j * self.PY, (j + 1) * self.PY))]
 
     def _geom(self, folder):
         wg.camtek_geometry.cache_clear()
@@ -1601,3 +1612,36 @@ class TestLotDieMap:
                    center="Center_X=158500.0\nCenter_Y=154732.57\n")   # 유도 col 3
         geom = self._geom(self._slot(tmp_path, "W01", 3))
         assert geom.col_origin == 3
+
+
+class TestPartialDieMap:
+    """★ 일부 die 만 담긴 die 맵은 쓰지 않는다 — T254 GX57007306 실물(2026-10-24).
+
+    그 웨이퍼의 ``s_DieLocation.dat`` 은 50칸뿐이다(웨이퍼 원 안 온전한 칸 131, 같은 자재
+    전체 맵 GX57001305 는 115).  y_index 최댓값이 9 라 row 기준이 9 가 됐고, 유도값 10 과
+    ±1 안이라 클램프를 통과해 **Conder scan LIVE 파일명 248장 전부 row 가 1 작았다**
+    (col·die 내부 x·y 는 1.3 µm 안에서 일치).  사진 파일명이 장비가 쓴 정답이다."""
+
+    FOLDER = _DIE_MAP_REAL / "GX57007306(T254 부분맵)"
+
+    def test_partial_map_is_rejected(self, tmp_path):
+        import shutil
+        alone = tmp_path / "LOT" / "GX57007306"        # 형제 슬롯 없이 단독으로
+        shutil.copytree(self.FOLDER, alone)
+        geom = wg.camtek_geometry(alone)
+        assert (geom.col_origin, geom.row_total) == (2, 10)
+        assert wg._DIE_MAP_FILE not in geom.source
+        assert wg._die_map_origins(alone, geom.pitch_x, geom.pitch_y) == (2, 9)
+
+    def test_ini_matches_every_conder_live_name(self):
+        from aoi_verification.app.coords import camtek_live
+        ini = list(camtek_ini.load_folder(self.FOLDER).values())
+        names = [ln.strip() for ln in (self.FOLDER / "사진목록_Conder.txt")
+                 .read_text(encoding="utf-8").splitlines()
+                 if ln.strip() and not ln.startswith("#")]
+        assert len(names) == 248
+        for n in names:
+            live = camtek_live.parse_live_name(Path(n).stem)
+            best = min(ini, key=lambda c: (c.x - live.x) ** 2 + (c.y - live.y) ** 2)
+            assert (best.col, best.row) == (live.col, live.row), n
+            assert abs(best.x - live.x) <= 2 and abs(best.y - live.y) <= 2, n

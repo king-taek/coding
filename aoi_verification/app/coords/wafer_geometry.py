@@ -460,10 +460,10 @@ def _with_origins(folder: Path, px: float, py: float, src: str) -> CamtekGeometr
     cx, cy = _wafer_center(folder)
     d_origin = _col_origin(cx, dia, px)
     d_total = _row_total(cy, dia, py)
-    mapped = _die_map_origins(folder, px, py)
-    if mapped is not None:
-        m_origin, m_total = _lot_die_map_origins(folder, px, py, (d_origin, d_total),
-                                                 mapped)
+    cells = _lot_die_map_cells(folder, px, py, (d_origin, d_total))
+    if cells is not None and _covers_wafer(cells, cx, cy, dia, px, py, folder):
+        m_origin = min(i for i, _ in cells)
+        m_total = max(j for _, j in cells)
         # ⚠ 맵은 유도값과 **±1 이내일 때만** 믿는다.  이 파일이 웨이퍼 전체가
         #   아니라 '스캔한 영역'만 담은 스캔이 오면 min/max 가 통째로 좁아져
         #   기준이 조용히 틀어진다 — 실측 74장의 차이는 전부 0 또는 −1 이라
@@ -544,10 +544,9 @@ def _die_map_origins(folder: Path, px: float, py: float
     return min(i for i, _ in cells), max(j for _, j in cells)
 
 
-def _lot_die_map_origins(folder: Path, px: float, py: float,
-                         derived: tuple[int, int], own: tuple[int, int]
-                         ) -> tuple[int, int]:
-    """같은 LOT(형제 슬롯 폴더)의 die 맵을 합쳐 ``(col_origin, row_total)`` 을 낸다.
+def _lot_die_map_cells(folder: Path, px: float, py: float,
+                       derived: tuple[int, int]) -> Optional[frozenset[tuple[int, int]]]:
+    """자기 die 맵에 **같은 LOT(형제 슬롯 폴더)의 die 맵을 합친** 칸 집합.  자기 맵이 없으면 None.
 
     die 맵은 **그 웨이퍼의 die 목록**이라, 웨이퍼마다 가장자리 die 가 빠질 수 있다.
     실측(AVAGO 15966TA0 NELA26, 25장 · 중심 25장 동일): 12장은 맨 왼쪽 열이 목록에
@@ -555,9 +554,12 @@ def _lot_die_map_origins(folder: Path, px: float, py: float,
     01C1(맵 3)의 LIVE 파일명 20장이 전부 ``x_index − 2`` 였고(앱은 1 작게 냈다),
     07F6(맵 2)도 Conder 와 일치했다.  즉 기준은 웨이퍼 목록이 아니라 **격자**의 것이다.
 
-    그래서 중심 유도값이 같은(= stage 위 같은 격자인) 형제 슬롯의 맵을 합쳐 min/max 를
-    잡는다.  형제가 없거나 격자가 다르면 자기 맵 그대로다.  전 구간 fail-safe."""
-    col, row = own
+    그래서 중심 유도값이 같은(= stage 위 같은 격자인) 형제 슬롯의 맵을 합친다.
+    형제가 없거나 격자가 다르면 자기 맵 그대로다.  전 구간 fail-safe."""
+    own = die_map_cells(folder, px, py)
+    if own is None:
+        return None
+    cells = set(own)
     try:
         siblings = sorted(p for p in folder.parent.iterdir()
                           if p != folder and (p / _DIE_MAP_FILE).is_file())
@@ -570,54 +572,93 @@ def _lot_die_map_origins(folder: Path, px: float, py: float,
         cx, cy = _wafer_center(sib)
         if (_col_origin(cx, dia, px), _row_total(cy, dia, py)) != derived:
             continue                      # 다른 격자(웨이퍼 위치)의 슬롯은 섞지 않는다
-        got = _die_map_origins(sib, px, py)
-        if got is not None:
-            col, row = min(col, got[0]), max(row, got[1])
-    return col, row
+        cells |= die_map_cells(sib, px, py) or set()
+    return frozenset(cells)
 
 
-@lru_cache(maxsize=256)
+# die 맵이 '웨이퍼 전체' 로 인정받으려면 웨이퍼 원 안에 온전히 드는 칸의 이만큼은 담아야
+# 한다.  실측: 전체 맵 0.88(T254 GX57001305)·0.95(NELA26 25장)·0.96(PGEE48),
+# 부분 맵 0.38(T254 GX57007306 — 50칸, row 기준이 1 작아 LIVE 248장 전부 row 1 어긋남).
+_MIN_MAP_COVERAGE = 0.7
+
+
+def _covers_wafer(cells, cx: Optional[float], cy: Optional[float], dia: float,
+                  px: float, py: float, folder: Path) -> bool:
+    """die 맵이 웨이퍼 전체 목록인가 — 일부 die 만 담긴 맵이면 min/max 가 좁아져 기준이
+    ±1 안에서 **조용히** 틀어진다(±1 클램프로는 못 거른다).  중심을 모르면 판단할 수
+    없으므로 예전처럼 믿는다."""
+    if cx is None or cy is None:
+        return True
+    r = dia / 2.0
+    inside = sum(
+        1 for i in range(math.floor((cx - r) / px), math.ceil((cx + r) / px))
+        for j in range(math.floor((cy - r) / py), math.ceil((cy + r) / py))
+        if all(math.hypot(x - cx, y - cy) <= r
+               for x in (i * px, (i + 1) * px) for y in (j * py, (j + 1) * py)))
+    if inside and len(cells) < _MIN_MAP_COVERAGE * inside:
+        _LOG.warning("%s 가 웨이퍼 die 의 일부(%d/%d칸)만 담고 있어 쓰지 않습니다"
+                     "(부분 맵 — 기준이 좁아진다): %s", _DIE_MAP_FILE, len(cells),
+                     inside, folder)
+        return False
+    return True
+
+
 def die_map_cells(folder: Path, px: float, py: float
                   ) -> Optional[frozenset[tuple[int, int]]]:
     """die 맵의 die 전체 — ``(x_index, y_index)`` 집합(stage 인덱스, 보정 전).
 
     :func:`_die_map_origins` 와 **같은 읽기**다(그 함수의 fail-safe 조건이 전부 여기 있다).
-    Wafer map 이 'die 가 실제로 있는 칸' 만 격자로 그리는 데 쓴다."""
+    Wafer map 이 'die 가 실제로 있는 칸' 만 격자로 그리는 데 쓴다.  같은 LOT 의 형제
+    슬롯이 서로의 맵을 읽으므로(:func:`_lot_die_map_cells`) 파일 단위로 캐시한다 —
+    키에 수정 시각·크기를 넣어 파일이 바뀌면 다시 읽는다."""
     for base in _search_dirs(folder):
         dat = base / _DIE_MAP_FILE
-        layout = _dat_layout(dat)
-        if layout is None:
-            continue
-        rec, fields = layout
         try:
-            off_x, vt_x = fields["x"]
-            off_y, vt_y = fields["y"]
-        except KeyError:
-            continue
-        if vt_x != _VT_DOUBLE or vt_y != _VT_DOUBLE:
-            continue
-        try:
-            data = dat.read_bytes()
+            st = dat.stat()
+            md = Path(str(dat) + ".md").stat()
         except OSError:
             continue
-        if rec <= 0 or not data or len(data) % rec:
-            continue
-        count = len(data) // rec
-        if count < _MIN_DIE_MAP:
-            continue
-        cells: set[tuple[int, int]] = set()
-        for i in range(count):
-            b = i * rec
-            x = struct.unpack_from("<d", data, b + off_x)[0]
-            y = struct.unpack_from("<d", data, b + off_y)[0]
-            cells.add((math.floor(x / px), math.floor(y / py)))
-        col_origin = min(i for i, _ in cells)
-        row_total = max(j for _, j in cells)
-        if not (0 <= col_origin <= _MAX_DIE_INDEX
-                and 0 <= row_total <= _MAX_DIE_INDEX):
-            continue
-        return frozenset(cells)
+        got = _dat_cells(dat, st.st_mtime_ns, st.st_size, md.st_mtime_ns, px, py)
+        if got is not None:
+            return got
     return None
+
+
+@lru_cache(maxsize=256)
+def _dat_cells(dat: Path, _mtime_ns: int, _size: int, _md_mtime_ns: int,
+               px: float, py: float) -> Optional[frozenset[tuple[int, int]]]:
+    layout = _dat_layout(dat)
+    if layout is None:
+        return None
+    rec, fields = layout
+    try:
+        off_x, vt_x = fields["x"]
+        off_y, vt_y = fields["y"]
+    except KeyError:
+        return None
+    if vt_x != _VT_DOUBLE or vt_y != _VT_DOUBLE:
+        return None
+    try:
+        data = dat.read_bytes()
+    except OSError:
+        return None
+    if rec <= 0 or not data or len(data) % rec:
+        return None
+    count = len(data) // rec
+    if count < _MIN_DIE_MAP:
+        return None
+    cells: set[tuple[int, int]] = set()
+    for i in range(count):
+        b = i * rec
+        x = struct.unpack_from("<d", data, b + off_x)[0]
+        y = struct.unpack_from("<d", data, b + off_y)[0]
+        cells.add((math.floor(x / px), math.floor(y / py)))
+    col_origin = min(i for i, _ in cells)
+    row_total = max(j for _, j in cells)
+    if not (0 <= col_origin <= _MAX_DIE_INDEX
+            and 0 <= row_total <= _MAX_DIE_INDEX):
+        return None
+    return frozenset(cells)
 
 
 def _dat_layout(dat: Path) -> Optional[tuple[int, dict[str, tuple[int, int]]]]:
