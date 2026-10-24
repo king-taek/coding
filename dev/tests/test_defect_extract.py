@@ -6,7 +6,8 @@
 · 선별: 매칭의 후보 선별 화면·조작 그대로.
 · 엑셀: 양식.xlsx, 시트 1개(세로), A=No · B=Slot · C=사진 · D=정보 — **미매칭 사진
   정보를 적듯이**(D열 글자로 보이게) + Wafer Map 시트.  정렬 slot → 파일명.
-· KLA slot명: 매칭과 같다(정보파일 우선, OCR 폴백, KLA 여부는 묻는다).
+· KLA slot명: 매칭과 같다(정보파일 우선, OCR 폴백).  KLA 여부는 묻지 않는다 —
+  호기 K-n 이거나 폴더에 KLA 정보파일이 있으면 KLA(사용자 지적으로 바뀜).
 · 저장: 결과 엑셀과 같은 방식, 이름에 '추출'.  간단한 요약 후 저장.
 """
 
@@ -111,6 +112,25 @@ def test_kla_rename_never_overwrites_another_slot(tmp_path):
 
 
 # ── 결과 묶음 ────────────────────────────────────────────────────────────────
+def test_kla_is_detected_from_info_file_without_asking(tmp_path):
+    """KLA 여부는 묻지 않는다 — 폴더 하나라도 KLA 정보파일이 있으면 KLA, 없으면 Camtek."""
+    pytest.importorskip("PyQt6.QtWidgets")
+    from aoi_verification.app.coords import kla_info
+    from aoi_verification.app.ui.main_window import MainWindow
+
+    camtek = tmp_path / "camtek"
+    for slot in ("S1", "S2"):
+        _touch_jpeg(camtek / slot / "a.jpg")
+    kla = tmp_path / "kla"
+    for slot in ("2026-08-02-23-09_4", "2026-08-03-20-28_2"):
+        _touch_jpeg(kla / slot / "a.jpg")
+    (kla / "2026-08-03-20-28_2" / "info.001").write_text(
+        'WaferID "W1";\nSlot 3;\n', encoding="ascii")
+    kla_info.read_header_ids.cache_clear()
+    assert MainWindow._has_kla_info(scan_one_side(camtek)) is False
+    assert MainWindow._has_kla_info(scan_one_side(kla)) is True
+
+
 def test_extract_result_carries_only_picked_photos():
     r = extract_result("3", {"S2": [Path("/x/S2/b.jpg")], "S1": [Path("/x/S1/a.jpg")],
                              "S3": []},
@@ -335,8 +355,7 @@ def test_end_to_end_select_then_save(qapp, tmp_path, monkeypatch):
     def fake_choose(_parent, title, text, options, **kw):
         keys = [o[0] for o in options]
         choices.append((title, text, keys))
-        if "kla" in keys:
-            return "none"                     # KLA 아님
+        assert "kla" not in keys              # KLA 여부는 묻지 않는다
         if "single" in keys:
             return "single"                   # 요약 창 — 한 시트로 저장
         return "close"                        # 저장 완료 → 닫기
@@ -344,7 +363,7 @@ def test_end_to_end_select_then_save(qapp, tmp_path, monkeypatch):
     monkeypatch.setattr(mw.sheets, "choose", fake_choose)
 
     class _Dlg:
-        def __init__(self, name, _folder, parent=None):
+        def __init__(self, name, _folder, parent=None, **_kw):
             self.chosen = name
 
     monkeypatch.setattr(save_name_dialog, "SaveNameDialog", _Dlg)
@@ -544,7 +563,7 @@ def test_summary_offers_layouts_and_remembers(qapp, tmp_path, monkeypatch):
                                          ex.RECIPE_LAYOUT_COLUMNS)[1])
 
     class _Dlg:
-        def __init__(self, name, _folder, parent=None):
+        def __init__(self, name, _folder, parent=None, **_kw):
             self.chosen = name
     monkeypatch.setattr(save_name_dialog, "SaveNameDialog", _Dlg)
     monkeypatch.setattr(mw.sheets, "run", lambda dlg, **k: True)
@@ -865,3 +884,60 @@ def test_scan_lots_takes_slots_per_lot(tmp_path):
     sr = scan_lots([tmp_path / "LOT_A", tmp_path / "LOT_B"], only=[{"S2"}, None])
     assert sorted(sr.slots) == ["LOT_A/S2", "LOT_B/S1", "LOT_B/S2"]
     assert sorted(scan_lots([tmp_path / "LOT_A"], only=[{"S1"}]).slots) == ["S1"]
+
+
+# ── 선별 화면 문구 — 추출에는 '검증' 이 없다 ─────────────────────────────────
+def test_select_page_says_extract_not_verify(styled_qapp):
+    """추출 모드면 선별 화면의 '검증' 문구가 '추출' 로 바뀌고, 매칭으로 돌아오면 되돌아온다."""
+    from PyQt6.QtWidgets import QLabel
+
+    from aoi_verification.app import i18n
+    from aoi_verification.app.ui.pages.select_page import SelectPage
+
+    page = SelectPage()
+    try:
+        def visible_text():
+            labels = [w.text() for w in page.findChildren(QLabel)
+                      if w.property("role") in ("paneTitle", "emptyHint")]
+            return labels + [page.btn_verify.text(), page.btn_view_excluded.text(),
+                             page.btn_verify.toolTip()]
+
+        page.set_extract_mode(True)
+        texts = visible_text()
+        assert not [t for t in texts if "검증" in t], texts
+        assert i18n.KO.EXTRACT_SELECT_TEXT["PANEL_RIGHT_TARGETS"] in texts
+        assert page._tx("END_SELECTION_CONFIRM_FMT") == (
+            i18n.KO.EXTRACT_SELECT_TEXT["END_SELECTION_CONFIRM_FMT"])
+        assert dict((a, lab) for a, lab, _r in page.left_panel._actions)[
+            "batch_verify"] == i18n.KO.EXTRACT_SELECT_TEXT["BTN_BATCH_VERIFY"]
+
+        page.set_extract_mode(False)
+        texts = visible_text()
+        assert i18n.KO.PANEL_RIGHT_TARGETS in texts
+        assert page._tx("BTN_VERIFY") == i18n.KO.BTN_VERIFY
+    finally:
+        page.close()
+
+
+def test_extract_select_text_keys_exist():
+    """바꿔 끼우는 키는 모두 매칭 문구에 실재해야 한다(오타면 조용히 안 바뀐다)."""
+    from aoi_verification.app import i18n
+    missing = [k for k in i18n.KO.EXTRACT_SELECT_TEXT if not hasattr(i18n.KO, k)]
+    assert missing == []
+
+
+def test_setup_extract_mode_swaps_help_and_blocked_hint(qapp):
+    from aoi_verification.app import i18n
+    from aoi_verification.app.ui.pages.setup_page import SetupPage
+
+    page = SetupPage()
+    try:
+        page.set_extract_mode(True)
+        assert page._auto_hint.text() == i18n.KO.EXTRACT_RUN_OPTIONS_HINT
+        page.ref_path_edit.setText("")
+        page._validate()
+        assert page._start_hint.text() == i18n.KO.EXTRACT_BLOCKED_HINT
+        page.set_extract_mode(False)
+        assert page._auto_hint.text() == i18n.KO.RUN_OPTIONS_HINT
+    finally:
+        page.close()

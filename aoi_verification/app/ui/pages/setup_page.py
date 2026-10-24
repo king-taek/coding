@@ -1325,6 +1325,17 @@ class SetupPage(QWidget):
         self._lot1_slot_btn.setVisible(on)
         self._lot_list.setVisible(on)
         self._scope_row.setVisible(not on)
+        # 도움말·자동화 툴팁 — 매칭 문구는 '매치·검토 화면' 을 말한다(추출에는 없다).
+        self._auto_hint.setText(i18n.KO.EXTRACT_RUN_OPTIONS_HINT if on
+                                else i18n.KO.RUN_OPTIONS_HINT)
+        self.auto_group.set_option_tooltip(
+            AutomationLevel.USER_SELECT,
+            i18n.KO.EXTRACT_AUTOMATION_USER_SELECT if on
+            else i18n.KO.AUTOMATION_USER_SELECT)
+        self.auto_group.set_option_tooltip(
+            AutomationLevel.AUTO_ALL,
+            i18n.KO.EXTRACT_AUTOMATION_AUTO_ALL if on
+            else i18n.KO.AUTOMATION_AUTO_ALL)
         self.ref_path_edit.setPlaceholderText(
             i18n.KO.EXTRACT_FOLDER_PLACEHOLDER if on
             else i18n.KO.SETUP_FOLDER_PLACEHOLDER)
@@ -1418,7 +1429,9 @@ class SetupPage(QWidget):
             if checking:
                 self._start_hint.setText(i18n.KO.START_CHECKING_HINT)
             elif not dirs_ok:
-                self._start_hint.setText(i18n.KO.START_BLOCKED_HINT)
+                self._start_hint.setText(i18n.KO.EXTRACT_BLOCKED_HINT
+                                         if self._extract_mode
+                                         else i18n.KO.START_BLOCKED_HINT)
             elif not self._backend_ready:
                 self._start_hint.setText(i18n.KO.START_PREPARING_HINT)
             else:
