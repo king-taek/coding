@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+import math
+
 from typing import Optional
 
 from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
@@ -393,8 +395,16 @@ class CoordCalibrationDialog(QDialog):
             r = max(res) if res else 0.0
             self._result.setText(i18n.KO.COORD_CAL_RESULT_FMT.format(
                 dx=off[0], dy=off[1], n=len(self._pairs), r=r))
-            self._warn.setText(i18n.KO.COORD_CAL_RESIDUAL_WARN_FMT.format(r=r)
-                               if r > self._tol * 0.5 else "")
+            warn = (i18n.KO.COORD_CAL_RESIDUAL_WARN_FMT.format(r=r)
+                    if r > self._tol * 0.5 else "")
+            # 쌍 하나는 남은 오차가 늘 0 이라 위 경고가 안 뜬다 — 믿을 만한 자동값과
+            # 크게 다르면 잘못 고른 쌍일 수 있다고 알린다(적용은 막지 않는다).
+            if not warn and self._auto is not None:
+                ax, ay = self._auto.offset
+                d = math.hypot(off[0] - ax, off[1] - ay)
+                if d > self._tol * 0.5:
+                    warn = i18n.KO.COORD_CAL_AUTO_DIFF_FMT.format(ax=ax, ay=ay, d=d)
+            self._warn.setText(warn)
         self._apply.setEnabled(off is not None)
 
     def _on_apply(self) -> None:

@@ -1214,6 +1214,9 @@ COORD_CAL_AUTO_FMT = (
 COORD_CAL_AUTO_WEAK_FMT = (
     "자동 계산은 근거가 부족해요(맞는 짝 {n}쌍 · 다른 후보 무리 {m}쌍). "
     "같은 결함 쌍을 직접 골라 주세요.")
+COORD_CAL_AUTO_DIFF_FMT = (
+    "고른 쌍의 보정값이 자동 계산값(가로 {ax:+.0f} · 세로 {ay:+.0f} µm)과 {d:.0f} µm 달라요. "
+    "같은 결함이 맞는지 확인해 주세요.")
 COORD_CAL_REMOVE = "지우기"
 COORD_CAL_SKIP = "보정 건너뛰기"
 COORD_CAL_APPLY = "보정 적용"

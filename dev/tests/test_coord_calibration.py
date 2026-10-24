@@ -104,6 +104,34 @@ def test_auto_offset_is_not_confident_when_a_rival_cluster_is_close_in_size():
     assert not cal.is_confident(a)
 
 
+def test_auto_offset_sees_a_rival_just_outside_the_support_radius():
+    """30~60 µm 떨어진 무리도 경쟁자로 센다(예전엔 그 구간이 빈칸이라 못 봤다 — 검토 지적)."""
+    kla, cam = _shifted(10, (87.0, -91.0))
+    k2, c2 = _shifted(9, (87.0 + 45.0, -91.0), start=20)
+    a = cal.auto_offset([(kla + k2, cam + c2)], src_is_kla=True)
+    assert not cal.is_confident(a)
+
+
+def test_support_counts_distinct_defects_not_votes():
+    """한 결함이 이웃 여럿에 표를 던져도 근거는 1개다(결함 무리·긁힘)."""
+    k = _k(1, 1, 5000.0, 5000.0)
+    cams = [_c(1, 1, 5000.0 + 87 + i, 5000.0 - 91) for i in range(10)]   # 같은 어긋남 10표
+    a = cal.auto_offset([([k], cams)], src_is_kla=True)
+    assert a.votes == 10 and a.support == 1
+    assert not cal.is_confident(a)
+
+
+def test_exactly_twice_the_rival_is_not_enough():
+    assert not cal.is_confident(cal.AutoOffset((0.0, 0.0), support=8, runner_up=4, votes=12))
+    assert cal.is_confident(cal.AutoOffset((0.0, 0.0), support=9, runner_up=4, votes=13))
+
+
+def test_auto_offset_accepts_a_one_shot_iterable():
+    kla, cam = _shifted(10, (87.0, -91.0))
+    a = cal.auto_offset(iter([(kla, cam)]), src_is_kla=True)
+    assert a is not None and a.support == 10
+
+
 def test_is_confident_none():
     assert not cal.is_confident(None)
 
@@ -265,6 +293,21 @@ def test_dialog_offers_a_confident_auto_value_without_pairs(styled_qapp, tmp_pat
     dlg._remove_pair(ref)                             # 지우면 다시 자동값
     dlg._on_apply()
     assert dlg.offset == pytest.approx((87.0, -91.0))
+    dlg.deleteLater()
+
+
+def test_dialog_warns_when_a_single_pair_disagrees_with_the_auto_value(styled_qapp, tmp_path):
+    """쌍 하나는 남은 오차가 0 이라 경고가 안 뜬다 — 믿을 만한 자동값과 크게 다르면 알린다."""
+    from aoi_verification.app.ui.widgets.coord_calibration_dialog import (
+        CoordCalibrationDialog)
+    entries, shift = _make_entries(tmp_path)                 # 쌍 어긋남 ≈ (15, −120)
+    auto = cal.AutoOffset(offset=(87.0, -91.0), support=20, runner_up=2, votes=40)
+    dlg = CoordCalibrationDialog(entries, kla_side="ref", auto=auto, tolerance=100.0)
+    ref, _kc, found = entries[0]
+    dlg._on_src_clicked(ref)
+    dlg._on_cand_clicked(found[0][0])
+    assert "자동 계산값" in dlg._warn.text()
+    assert dlg._apply.isEnabled()                            # 막지는 않는다
     dlg.deleteLater()
 
 
