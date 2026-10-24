@@ -1661,3 +1661,37 @@ class TestPartialDieMap:
         geom = wg.camtek_geometry(alone)
         assert (geom.col_origin, geom.row_total) == (2, 10)
         assert wg._DIE_MAP_FILE not in geom.source
+
+
+class TestLotDieMapGolden:
+    """★ AVAGO NELA26 실물(2026-10-24, 현택님 수집) — :class:`TestLotDieMap` 의 실물판.
+
+    01C1 의 die 맵엔 맨 왼쪽 열(x_index 2)이 없어 자기 맵만 보면 col_origin 3 이다.
+    같은 LOT 의 07F6(맵 2)과 합쳐야 장비와 같은 2 가 된다.  정답은 Conder scan LIVE
+    파일명(장비가 쓴 col_row_x_y) — 01C1 20장 · 07F6 11장."""
+
+    LOT = _DIE_MAP_REAL / "NELA26(AVAGO LOT)"
+
+    def test_alone_the_short_wafer_is_off_by_one(self, tmp_path):
+        """이 테스트가 지키는 것: 합치지 않으면 정말 1 틀린다(수정이 헛돌지 않는다)."""
+        import shutil
+        alone = tmp_path / "LOT" / "NELA26-01C1"
+        shutil.copytree(self.LOT / "NELA26-01C1", alone)
+        assert wg.camtek_geometry(alone).col_origin == 3
+
+    @pytest.mark.parametrize("wafer, count", [("NELA26-01C1", 20), ("NELA26-07F6", 11)])
+    def test_ini_matches_every_conder_live_name(self, wafer, count):
+        from aoi_verification.app.coords import camtek_live
+        folder = self.LOT / wafer
+        geom = wg.camtek_geometry(folder)
+        assert (geom.col_origin, geom.row_total) == (2, 55)
+        ini = list(camtek_ini.load_folder(folder).values())
+        names = [ln.strip() for ln in (folder / "사진목록_Conder.txt")
+                 .read_text(encoding="utf-8").splitlines()
+                 if ln.strip() and not ln.startswith("#")]
+        assert len(names) == count
+        for n in names:
+            live = camtek_live.parse_live_name(Path(n).stem)
+            best = min(ini, key=lambda c: (c.x - live.x) ** 2 + (c.y - live.y) ** 2)
+            assert (best.col, best.row) == (live.col, live.row), n
+            assert abs(best.x - live.x) <= 10 and abs(best.y - live.y) <= 10, n

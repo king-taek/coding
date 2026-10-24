@@ -277,7 +277,7 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   ⚠ 맵은 **그 웨이퍼의 die 목록**이라 가장자리가 빠질 수 있다(§6-P): ① 같은 격자(유도값·pitch
   동일)인 **형제 슬롯의 맵을 합쳐** 기준을 잡고(`_lot_die_map_cells` — AVAGO 12/25장 col 1 작음),
   ② 웨이퍼 원 안 온전한 칸의 70% 미만만 담긴 맵은 **버린다**(`_covers_wafer` — T254 GX57007306,
-  ±1 클램프를 통과해 row 가 1 작았다). 골든: `TestPartialDieMap`·`TestLotDieMap`.
+  ±1 클램프를 통과해 row 가 1 작았다). 골든: `TestPartialDieMap`·`TestLotDieMap`·`TestLotDieMapGolden`.
 - **die 인덱스는 좌표에서 유도한다** — `floor(X/DieStep_X)`, `floor(Y/DieStep_Y)`.
   `ColorImageGrabingInfo.ini` 의 `Col`/`Row` 필드를 변환에 쓰지 마라.
   **레시피마다 `Row` 원점이 다를 수 있다**(실측 15호기: 같은 결함을 두 레시피가 찍으면
