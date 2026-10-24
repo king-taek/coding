@@ -320,12 +320,14 @@ def _camtek(folder: Path) -> _Camtek:
             # row_total 은 '온전히 들어오는 마지막 행' — 그 아래 경계에서 반 pitch 바깥.
             cy = (geom.row_total + 1) * geom.pitch_y + geom.pitch_y / 2.0 - dia / 2.0
     # die 맵은 **기하가 그 맵을 채택했을 때만** 쓴다 — 부분 맵(유도값과 ±1 밖)은
-    # camtek_geometry 가 이미 버렸고, 그때는 격자도 계산으로 그린다.
+    # camtek_geometry 가 이미 버렸고, 그때는 격자도 계산으로 그린다.  칸은 기준을 정한
+    # 것과 **같은 집합**(LOT 합집합)이다 — 자기 맵만 그리면 형제 덕에 채택된 부분 맵이
+    # 거의 빈 웨이퍼로 그려진다.
     cells = None
     if wt is not None:
         cells = wt.cells
     elif geom is not None and geom.source.endswith(wg._DIE_MAP_FILE):
-        cells = wg.die_map_cells(folder, geom.pitch_x, geom.pitch_y)
+        cells = wg.lot_die_map_cells(folder, geom.pitch_x, geom.pitch_y)
     return _Camtek(geom=geom, diameter=dia, cx=cx, cy=cy, source=source, cells=cells,
                    pitch_assumed=pitch_assumed)
 

@@ -1,0 +1,10 @@
+# KLA 결함 사진 파일명(사진 자체는 담지 않음)
+34155090EWG2_-1_1_7_2.jpg
+34155090EWG2_-2_1_23_1.jpg
+FrontSideADRImg_744277.jpg
+FrontSideADRImg_744280.jpg
+FrontSideADRImg_744282.jpg
+FrontSideADRImg_744287.jpg
+FrontSideADRImg_744289.jpg
+FrontSideADRImg_744290.jpg
+FrontSideADRImg_744294.jpg

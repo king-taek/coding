@@ -1,0 +1,103 @@
+FileVersion 1 2;
+FileTimestamp 10-04-26 10:44:19;
+InspectionStationID "KLA" "LDS CIRCL" "Tool";
+SampleType WAFER;
+ResultTimestamp 10-03-26 02:08:08;
+LotID "TB500.INT895@6412";
+SampleSize 1 300;
+DeviceID "4DT-TB500-H-M1";
+SetupID "ROOT-HVM-4DT-TB500-H-M1-RDL4_AUTO_RBB" 09-22-26 17:29:00;
+StepID "RDL4_AUTO_RBB";
+SampleOrientationMarkType NOTCH;
+OrientationMarkLocation DOWN;
+DiePitch 3.7247898000e+004 4.4905344000e+004;
+DieOrigin 0.0000000000e+000 0.0000000000e+000;
+WaferID "19246096EWG1";
+Slot 20;
+SampleCenterLocation 1.8419000000e+004 -1.5299700000e+002;
+ClassLookup 16
+  0 "	Unclassified"
+  3 "Metal Residue	"
+  1 "Undersized Bump	"
+  2 "Missing bump	"
+  4 "Bridged Bumps	"
+  7 "Irregular Bump	"
+  9 "Oversized Bump	"
+  14 "RDL defect	"
+  22 "Scratch	"
+  23 "re-passivation defect	"
+  31 "Foreign Material	"
+  94 "Other	"
+  777 "Monitor1	"
+  778 "Monitor2	"
+  779 "Monitor3	"
+  780 "Swelling	"  ;
+OrientationInstructions "Front";
+CoordinatesMirrored NO;
+InspectionTest 3;
+SampleTestPlan 30
+  -3 -1 
+  -3 0 
+  -2 -2 
+  -2 -1 
+  -2 0 
+  -2 1 
+  -1 -3 
+  -1 -2 
+  -1 -1 
+  -1 0 
+  -1 1 
+  -1 2 
+  0 -3 
+  0 -2 
+  0 -1 
+  0 0 
+  0 1 
+  0 2 
+  1 -3 
+  1 -2 
+  1 -1 
+  1 0 
+  1 1 
+  1 2 
+  2 -2 
+  2 -1 
+  2 0 
+  2 1 
+  3 -1 
+  3 0 ;
+AreaPerTest 1.0035800000e+011;
+DefectRecordSpec 22 DEFECTID X Y XREL YREL XINDEX YINDEX XSIZE YSIZE DEFECTAREA DSIZE CLASSNUMBER TEST CLUSTERNUMBER ROUGHBINNUMBER FINEBINNUMBER CHANNELID MACROSIGCLASS INTENSITY MACROSIGID IMAGECOUNT IMAGELIST ;
+DefectList;
+TiffFileName 19246096EWG1_0_2_7_1.jpg;
+DefectList
+ 1 -15280.479 114825.330 3138.520 24861.646 0 2 12.480 27.470 342.880000 27.470 7 3 0 0 1 1 0 2120 0 1 1 1 0;
+TiffFileName 19246096EWG1_0_2_7_2.jpg;
+DefectList
+ 2 -15239.279 114810.350 3179.720 24846.666 0 2 27.470 21.220 582.900000 27.470 7 3 0 0 4 4 0 3880 0 1 1 1 0;
+TiffFileName 19246096EWG1_-3_0_7_3.jpg;
+DefectList
+ 3 -100244.289 18364.160 29918.405 18211.163 -3 0 2.500 12.480 31.170000 12.480 7 3 1 0 1 1 0 331 0 1 1 1 0;
+TiffFileName 19246096EWG1_-3_0_7_4.jpg;
+DefectList
+ 4 -100219.319 18327.960 29943.375 18174.963 -3 0 8.740 8.740 76.370000 8.740 7 3 1 0 1 1 0 772 0 1 1 1 0;
+TiffFileName 19246096EWG1_3_0_23_5.jpg;
+DefectList
+ 5 97444.480 15786.190 4119.785 15633.193 3 0 16.230 16.230 263.390000 16.230 23 3 0 0 1 1 0 2143 0 1 1 1 0;
+TiffFileName 19246096EWG1_3_-1_31_6.jpg;
+DefectList
+ 6 95531.900 -26745.999 2207.205 18006.347 3 -1 4.990 4.990 24.940000 4.990 31 3 0 0 2 2 0 2904 0 1 1 1 0;
+TiffFileName 19246096EWG1_-1_-2_23_7.jpg;
+DefectList
+ 7 -33405.059 -54784.119 22261.838 34873.571 -1 -2 13.730 32.460 445.740000 32.460 23 3 0 0 3 3 0 2239 0 1 1 1 0;
+TiffFileName 19246096EWG1_-1_2_7_8.jpg;
+DefectList
+ 8 -23684.119 120599.930 31982.778 30636.246 -1 2 3.130 1.560 4.900000 3.130 7 3 0 0 3 3 0 1936 0 1 1 1 0;
+TiffFileName 19246096EWG1_0_-2_7_9.jpg;
+DefectList
+ 9 12605.210 -75799.259 31024.210 13858.431 0 -2 1.560 1.250 1.960000 1.560 7 3 2 0 1 1 0 2845 0 1 1 1 0;
+SummarySpec 5
+  TESTNO    NDEFECT    DEFDENSITY    NDIE    NDEFDIE  ;
+SummaryList 
+  3    9    8.9679146961e-003    30    26  ;
+EndOfFile;
