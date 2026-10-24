@@ -585,10 +585,16 @@ _MIN_MAP_COVERAGE = 0.7
 def _covers_wafer(cells, cx: Optional[float], cy: Optional[float], dia: float,
                   px: float, py: float, folder: Path) -> bool:
     """die 맵이 웨이퍼 전체 목록인가 — 일부 die 만 담긴 맵이면 min/max 가 좁아져 기준이
-    ±1 안에서 **조용히** 틀어진다(±1 클램프로는 못 거른다).  중심을 모르면 판단할 수
-    없으므로 예전처럼 믿는다."""
-    if cx is None or cy is None:
-        return True
+    ±1 안에서 **조용히** 틀어진다(±1 클램프로는 못 거른다).
+
+    중심을 모르면 맵이 차지한 범위의 가운데를 중심으로 놓고 센다 — 원 안에 온전히 드는
+    칸 수는 웨이퍼가 어디 놓였든 거의 같아서(T254: 131 안팎) 부분 맵(50칸)을 가른다.
+    중심이 없다고 판정을 건너뛰면 ±1 클램프가 상수 폴백과 비교하게 돼 부분 맵이 그대로
+    통과한다."""
+    if cx is None:
+        cx = (min(i for i, _ in cells) + max(i for i, _ in cells) + 1) * px / 2.0
+    if cy is None:
+        cy = (min(j for _, j in cells) + max(j for _, j in cells) + 1) * py / 2.0
     r = dia / 2.0
     inside = sum(
         1 for i in range(math.floor((cx - r) / px), math.ceil((cx + r) / px))

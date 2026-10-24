@@ -1645,3 +1645,19 @@ class TestPartialDieMap:
             best = min(ini, key=lambda c: (c.x - live.x) ** 2 + (c.y - live.y) ** 2)
             assert (best.col, best.row) == (live.col, live.row), n
             assert abs(best.x - live.x) <= 2 and abs(best.y - live.y) <= 2, n
+
+    def test_partial_map_is_rejected_without_a_center(self, tmp_path):
+        """중심(Center·Wafer2Table)이 없는 폴더에서도 부분 맵을 거른다 — 판정을 건너뛰면
+        ±1 클램프가 상수 폴백(2, ceil(D/py))과 비교해 부분 맵을 그대로 받는다."""
+        import shutil
+        alone = tmp_path / "LOT" / "GX57007306"
+        shutil.copytree(self.FOLDER, alone)
+        (alone / "Wafer2Table.ini").unlink()
+        params = alone / "Params_WaferInfo.ini"
+        params.write_text("\n".join(
+            ln for ln in params.read_text(encoding="utf-8", errors="replace").splitlines()
+            if not ln.startswith(("Center_X", "Center_Y"))), encoding="utf-8")
+        assert wg._wafer_center(alone) == (None, None)
+        geom = wg.camtek_geometry(alone)
+        assert (geom.col_origin, geom.row_total) == (2, 10)
+        assert wg._DIE_MAP_FILE not in geom.source
