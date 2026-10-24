@@ -61,6 +61,9 @@ def _add_dir(zf: zipfile.ZipFile, d: Path, arc: str, log: list[str]) -> list[Pat
     for p in files:
         if p.name.casefold() == "thumbs.db":       # 썸네일 부산물 = 사진으로 친다
             continue
+        if p.suffix.lower() == ".zip":             # 장비 로그 묶음(얼라인 zip 등) — 크고 좌표와 무관
+            log.append(f"  - zip 이라 뺌: {p}")
+            continue
         if p.suffix.lower() in IMAGE_EXT:
             photos.append(p)
             continue
@@ -161,7 +164,8 @@ def _wafer_folders(log: list[str]) -> list[Path]:
     for run in runs:
         wid = None
         for f in run.iterdir():
-            if f.is_file() and f.suffix.lower() not in IMAGE_EXT and f.stat().st_size < 5e6:
+            if (f.is_file() and f.suffix.lower() not in IMAGE_EXT | {".zip"}
+                    and f.stat().st_size < 5e6):
                 m = re.search(r'WaferID\s+"([^"]+)"', f.read_text(errors="ignore"))
                 if m:
                     wid = m.group(1)

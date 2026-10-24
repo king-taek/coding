@@ -40,7 +40,7 @@ DEFAULT_FOLDERS = [
 ]
 
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".gif"}
-MAX_FILE_MB = 50          # 이보다 큰 비사진 파일은 담지 않고 보고에만 적는다
+MAX_FILE_MB = 30          # 이보다 큰 비사진 파일은 담지 않고 보고에만 적는다(현택님 지시)
 MAX_DEPTH = 3             # 고른 폴더 아래로 내려가는 깊이
 MAX_DIRS = 400            # 폴더 하나에서 훑는 하위 폴더 상한(LOT 통째로 골랐을 때 대비)
 
@@ -71,6 +71,9 @@ def _add_dir(zf: zipfile.ZipFile, d: Path, arc: str, log: list[str]) -> list[Pat
         return photos
     for p in files:
         if p.name.casefold() == "thumbs.db":       # 썸네일 부산물 = 사진으로 친다
+            continue
+        if p.suffix.lower() == ".zip":             # 장비 로그 묶음(얼라인 zip 등) — 크고 좌표와 무관
+            log.append(f"  - zip 이라 뺌: {p}")
             continue
         if p.suffix.lower() in IMAGE_EXT:
             photos.append(p)
