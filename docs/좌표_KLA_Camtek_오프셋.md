@@ -52,6 +52,15 @@
 회귀 가드: `dev/tests/test_coord_calibration.py` — `test_real_lot_auto_offset_is_confident_and_matches_the_analysis`
 (VPK · LSU 실물), `test_real_single_clustered_wafer_is_not_trusted`, 합성 신뢰도 테스트.
 
+## 현장 답변(2026-10-24, 현택님)
+- Camtek die 위치는 **사람이 레시피를 만들 때 직접 잡는다 — 매번 조금씩 다르다.** 위 '레시피의 die
+  기준점 정의 차이' 가설과 맞고, 같은 제품이라도 레시피를 다시 만들면 값이 바뀔 수 있다는 뜻이다.
+  → 값을 저장 · 하드코딩하면 안 되는 직접 근거. 실행마다 추정하는 현재 방식을 유지한다.
+- KLA die 원점 정의 · Camtek Center 값의 기준 · 두 레시피 차이를 적은 문서: 없음/모름.
+- 끊긴 KLA `.001`(LSU 59295773EWA7 · 34155084EWE0, `EndOfFile;` 없음): 장비 쪽 에러로 보임.
+  그 파일의 남은 결함은 좌표가 없어 표가 줄 뿐 추정을 치우치게 하지 않는다.
+- `FrontSideADRImg_*` 사진 91장이 `.001` 목록에 없는 이유: 모름.
+
 ## 남은 확인(장비 엔지니어)
 - KLA 레시피 `RDL4_AUTO_RBB` 의 die 원점(DieOrigin · 기준 마크) 정의와 Camtek TB500 RDL4 레시피의 die
   학습 기준점(`TrainData/Die.ini`) — (+48, −9) µm 의 출처.
