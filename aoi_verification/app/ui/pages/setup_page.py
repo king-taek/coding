@@ -262,6 +262,7 @@ class SetupPage(QWidget):
 
     start_requested = pyqtSignal(object)             # SetupInput
     update_check_requested = pyqtSignal()            # '업데이트 확인' 버튼
+    extract_mode_changed = pyqtSignal(bool)          # Defect 추출 ↔ 매칭 (레일 단계 이름)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -1347,6 +1348,7 @@ class SetupPage(QWidget):
         self.ref_path_edit.setAcceptDrops(not on)
         self._refresh_start_text()
         self._validate()
+        self.extract_mode_changed.emit(on)
 
     def _probe_state(self, text: str) -> Optional[str]:
         """파일시스템에 **손대지 않고** 알 수 있는 것만 — 모르면 ``None``(확인 필요).

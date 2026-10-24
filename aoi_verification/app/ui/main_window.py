@@ -1957,6 +1957,8 @@ class MainWindow(QMainWindow):
 
         self._extract_result, self._extract_dst = result, dst
         self._extract_layout = layout
+        self._rail.set_current(2)            # 추출 레일의 마지막 단계 '저장'
+        self._rail.set_navigable(())
         self._loading.show_overlay(i18n.KO.LOAD_EXPORT)
         # Wafer Map 시트는 설정 화면 스위치로 끌 수 있다(사용자 결정) — 렌더러가 없으면
         # exporter 가 그 시트를 만들지 않는다.
@@ -1998,6 +2000,7 @@ class MainWindow(QMainWindow):
     def _on_extract_export_failed(self, msg: str) -> None:
         """실패 — 결과 화면과 같은 안내(열려 있는 파일이 가장 흔한 원인) + 다시 시도."""
         self._loading.hide_overlay()
+        self._sync_rail(self._stack.currentWidget())      # '저장' → 지금 화면
         locked = "permission" in msg.lower() or "errno 13" in msg.lower()
         body = (i18n.KO.SAVE_FAIL_LOCKED_FMT.format(error=msg) if locked
                 else i18n.KO.SAVE_FAIL_FMT.format(error=msg))
@@ -2307,6 +2310,7 @@ class MainWindow(QMainWindow):
         self._stack.addWidget(self._setup_page)
         self._setup_page.start_requested.connect(self._on_start)
         self._setup_page.update_check_requested.connect(self._manual_update_check)
+        self._setup_page.extract_mode_changed.connect(self._on_extract_mode_changed)
         # 백엔드가 아직이면 '검증 시작' 을 잠그고 버튼에 준비 중을 표기한다.
         self._setup_page.set_backend_ready(self._backend_ready)
 
@@ -2453,8 +2457,23 @@ class MainWindow(QMainWindow):
         ``animate`` 는 페이지가 실제로 슬라이드할 때만 True 다 — 그때 레일 눈금이
         먼저 채워지고, 창은 그 뒤에 화면을 밀어 넣는다(21안-A)."""
         idx = self._page_order(w)
+        self._rail.set_labels(self._rail_labels(w))
         self._rail.set_current(idx, animate=animate)
         self._rail.set_navigable(self._RAIL_ROUTES.get(idx, ()))
+
+    def _rail_labels(self, w: QWidget) -> tuple:
+        """레일 단계 이름 — Defect 추출은 매칭·검토·결과를 거치지 않아 3단계다(사용자 결정).
+
+        설정 화면에서는 입력란의 모드가, 그 뒤로는 시작한 실행의 모드가 기준이다."""
+        if w is self._setup_page and self._setup_page is not None:
+            extract = self._setup_page.is_extract_mode()
+        else:
+            extract = self._is_extract()
+        return (i18n.KO.EXTRACT_JOURNEY_RAIL_STEPS if extract
+                else i18n.KO.JOURNEY_RAIL_STEPS)
+
+    def _on_extract_mode_changed(self, _on: bool) -> None:
+        self._sync_rail(self._stack.currentWidget())
 
     def _on_rail_step_clicked(self, target: int) -> None:
         """레일에서 지난 단계를 눌렀다 — 그 화면이 가진 복귀 흐름을 그대로 부른다.

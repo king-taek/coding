@@ -941,3 +941,34 @@ def test_setup_extract_mode_swaps_help_and_blocked_hint(qapp):
         assert page._auto_hint.text() == i18n.KO.RUN_OPTIONS_HINT
     finally:
         page.close()
+
+
+# ── 여정 레일 — 추출은 3단계(설정·후보 선별·저장) ───────────────────────────
+def test_rail_set_labels_clamps_index(qapp):
+    from aoi_verification.app import i18n
+    from aoi_verification.app.ui.widgets.journey_rail import JourneyRail
+
+    rail = JourneyRail()
+    rail.set_current(4)
+    rail.set_navigable((0, 3))
+    rail.set_labels(i18n.KO.EXTRACT_JOURNEY_RAIL_STEPS)
+    assert rail._labels == i18n.KO.EXTRACT_JOURNEY_RAIL_STEPS
+    assert rail._index == 2 and rail._navigable == frozenset({0})
+
+
+def test_rail_follows_extract_mode(qapp, monkeypatch):
+    """설정에서 [Defect 추출] 을 누르면 레일이 3단계로, 되돌리면 5단계로 돌아온다."""
+    from aoi_verification.app import i18n
+    from aoi_verification.app.ui import main_window as mw
+
+    monkeypatch.setattr(mw.MainWindow, "_start_backend_import_async",
+                        lambda self: None)
+    win = mw.MainWindow()
+    try:
+        assert win._rail._labels == i18n.KO.JOURNEY_RAIL_STEPS
+        win._setup_page.set_extract_mode(True)
+        assert win._rail._labels == i18n.KO.EXTRACT_JOURNEY_RAIL_STEPS
+        win._setup_page.set_extract_mode(False)
+        assert win._rail._labels == i18n.KO.JOURNEY_RAIL_STEPS
+    finally:
+        win.close()
