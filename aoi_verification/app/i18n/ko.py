@@ -473,6 +473,35 @@ UPDATE_UNKNOWN = "업데이트를 확인할 수 없습니다. 인터넷 연결�
 UPDATE_GIT_HINT = "개발(git) 환경입니다. 'git pull' 로 업데이트하세요."
 # 첫 화면 '업데이트 확인' 버튼 라벨(좌상단 도움말 메뉴 대체).
 MENU_CHECK_UPDATE = "업데이트 확인"
+
+# ── 개발자 모드 (메인 화면 Ctrl+Shift+D) ───────────────────────────────────
+DEV_MODE_ON = "개발자 모드를 켰습니다."
+DEV_MODE_OFF = "개발자 모드를 껐습니다. 자동 업데이트는 기본 브랜치를 따릅니다."
+DEV_MODE_BUTTON = "개발자 모드"
+DEV_MODE_TITLE = "개발자 모드 — 업데이트 대상"
+DEV_MODE_BODY = (
+    "업데이트를 받을 저장소와 브랜치를 고릅니다. 개발자 모드가 켜져 있는 동안에는 "
+    "자동 업데이트도 이 브랜치를 따릅니다. 브랜치를 비우면 기본 브랜치를 따릅니다.\n"
+    "개발자 모드를 끄면(Ctrl+Shift+D) 다음 업데이트부터 기본 브랜치로 돌아갑니다."
+)
+DEV_MODE_CURRENT_FMT = "지금 설치된 버전: {branch} @ {sha}  ({repo})"
+DEV_MODE_CURRENT_UNKNOWN = "지금 설치된 버전: 알 수 없음"
+DEV_MODE_REPO = "저장소 (소유자/이름)"
+DEV_MODE_BRANCH = "브랜치"
+DEV_MODE_BRANCH_DEFAULT_HINT = "비우면 기본 브랜치"
+DEV_MODE_LOAD_BRANCHES = "브랜치 목록 불러오기"
+DEV_MODE_LOADING_BRANCHES = "브랜치 목록을 불러오는 중…"
+DEV_MODE_BRANCHES_LOADED_FMT = "브랜치 {n}개를 불러왔습니다."
+DEV_MODE_BRANCHES_FAILED = "브랜치 목록을 불러오지 못했습니다. 이름을 직접 적어 주세요."
+DEV_MODE_CHECK = "업데이트 확인"
+DEV_MODE_INSTALL = "이 브랜치로 설치"
+DEV_MODE_RESET = "기본으로 되돌리기"
+DEV_MODE_CLOSE = "닫기"
+DEV_MODE_CHECKING = "확인 중…"
+DEV_MODE_RESULT_UPDATE_FMT = "새 버전이 있습니다: {sha}  {message}"
+DEV_MODE_RESULT_LATEST_FMT = "이미 이 버전입니다: {sha}  ([이 브랜치로 설치] 로 다시 받을 수 있습니다)"
+DEV_MODE_RESULT_UNKNOWN_FMT = "확인할 수 없습니다 — {error}"
+DEV_MODE_INSTALL_ASK_FMT = "{repo} 의 {branch} 브랜치({sha})를 설치할까요?"
 LOAD_AUTO_MATCH = "자동 매치 진행 중…"
 
 # ── 자동 업데이트 진행 단계 (utils/updater.py → LoadingOverlay) ──────────────

@@ -105,6 +105,11 @@ class UiPrefs:
     # 저장 파일의 세대.  기본값을 바꿨을 때 **이미 저장된 파일**을 한 번만 손보기 위한
     # 표식이다 — 아래 `migrate` 참조.  0 = 이 표식이 생기기 전에 저장된 파일.
     prefs_version: int = 0
+    # 개발자 모드(메인 화면 Ctrl+Shift+D).  켜져 있고 브랜치가 적혀 있으면 자동 업데이트가
+    # 기본 브랜치 대신 이 저장소·브랜치를 따른다(`updater.dev_target`).  repo "" = 기본 저장소.
+    dev_mode: bool = False
+    dev_update_repo: str = ""
+    dev_update_branch: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
 
     # ------------------------------------------------------------------
