@@ -85,27 +85,6 @@ def _add_dir(zf: zipfile.ZipFile, d: Path, arc: str, log: list[str]) -> list[Pat
     return photos
 
 
-def _app_rows(photos: list[Path]) -> list[str]:
-    """이 PC 의 앱 코드로 계산한 사진별 좌표.  앱을 못 불러오면 빈 목록."""
-    try:
-        from aoi_verification.app.coords import resolve
-    except Exception:
-        return []
-    rows = []
-    for p in photos:
-        try:
-            c = resolve(p)
-        except Exception as exc:                  # 한 장 실패가 수집을 막지 않게
-            rows.append(f"{p.parent.name}\t{p.name}\t오류 {exc}")
-            continue
-        if c is None:
-            rows.append(f"{p.parent.name}\t{p.name}\t좌표없음")
-        else:
-            rows.append(f"{p.parent.name}\t{p.name}\t{c.source}\t{c.col}\t{c.row}"
-                        f"\t{c.x:.3f}\t{c.y:.3f}\t{c.native_x}\t{c.native_y}")
-    return rows
-
-
 def _app_geometry(d: Path) -> str:
     """폴더의 die 격자 — 앱이 쓰는 값과, 비교용 중심 유도값·die 맵 값을 함께."""
     try:
@@ -128,31 +107,37 @@ def _app_geometry(d: Path) -> str:
 
 
 def collect(folders: list[Path], out_dir: Path) -> Path:
+    """폴더마다 진행을 찍는다 — 웨이퍼가 많고 NAS 라 오래 걸리는데, 아무것도 안 찍으면
+    멈춘 것처럼 보인다(현택님 실행 때 실제로 그랬다).  사진별 앱 좌표(``앱좌표.tsv``)는
+    계산하지 않는다 — 사진 수천 장을 하나씩 풀어 가장 느린 단계였고, 같은 값을 받은 INI ·
+    파일명에서 다시 계산할 수 있다.  상위 폴더는 한 번씩만 담는다."""
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    dst = out_dir / f"좌표대조_{folders[0].name}_{stamp}.zip"
+    dst = out_dir / f"좌표대조_LOT_{stamp}.zip"
     log = [f"수집 {datetime.now():%Y-%m-%d %H:%M}", ""]
-    tsv = ["폴더\t사진\tsource\tcol\trow\tx\ty\tnative_x\tnative_y"]
     geo: list[str] = []
+    done_up: set[Path] = set()
     with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zf:
         for k, root in enumerate(folders, 1):
+            print(f"[{k}/{len(folders)}] {root}", flush=True)
             tag = f"{k}_{root.name}"
             log.append(f"[{k}] {root}")
             if not root.is_dir():
                 log.append("  ! 폴더가 없음")
                 continue
             for up_i, up in enumerate((root.parent, root.parent.parent), 1):
-                _add_dir(zf, up, f"{tag}/_상위{up_i}_{up.name}", log)
+                if up not in done_up:
+                    done_up.add(up)
+                    _add_dir(zf, up, f"_상위/{up_i}_{up.name}", log)
             for d in _walk(root):
                 rel = d.relative_to(root).as_posix()
                 arc = tag if rel == "." else f"{tag}/{rel}"
                 photos = _add_dir(zf, d, arc, log)
                 if photos:
                     log.append(f"  {rel}: 사진 {len(photos)}장")
-                    tsv += _app_rows(photos)
-                    geo.append(_app_geometry(d))
+                    if rel == ".":
+                        geo.append(_app_geometry(d))
             log.append("")
         zf.writestr("수집_보고.txt", "\n".join(log) + "\n")
-        zf.writestr("앱좌표.tsv", "\n".join(tsv) + "\n")
         zf.writestr("앱기하.txt", "\n\n".join(geo) + "\n")
     return dst
 
@@ -196,6 +181,7 @@ def _pair_folders(kla_lot: Path, cam: Path, log: list[str]) -> list[Path]:
 def main() -> int:
     out = Path.home() / "Desktop"
     log: list[str] = []
+    print("웨이퍼 목록을 찾는 중…", flush=True)
     folders = _wafer_folders(log)
     print("\n".join(log))
     if not folders:
