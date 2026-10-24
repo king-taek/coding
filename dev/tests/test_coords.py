@@ -526,6 +526,32 @@ def test_one_non_finite_entry_does_not_empty_the_folder(tmp_path, bad):
     assert "bad_2" not in got
 
 
+def test_clear_caches_picks_up_a_rewritten_or_late_ini(tmp_path):
+    """점검(2026-10-24) — 좌표 캐시 키가 폴더뿐이라, 앱을 켠 채 INI 가 **늦게 생기거나**
+    (첫 읽기가 빈 결과로 캐시) **다시 쓰이면** 앱을 다시 켤 때까지 옛 값을 썼다.
+    검증을 시작할 때 ``coords.clear_caches()`` 를 부르면 새 파일을 읽는다.  합성 입력."""
+    from aoi_verification.app import coords
+    from aoi_verification.app.coords import camtek_ini
+    coords.clear_caches()
+    assert camtek_ini.load_folder(tmp_path) == {}            # 아직 INI 가 없다
+    ini = tmp_path / "ColorImageGrabingInfo.ini"
+    ini.write_text("[a_1.jpeg]\nX=102450.6\nY=156233.9\nCol=4\nRow=3\n", encoding="utf-8")
+    assert camtek_ini.load_folder(tmp_path) == {}            # 캐시가 옛 빈 결과를 낸다
+    coords.clear_caches()
+    first = camtek_ini.load_folder(tmp_path)["a_1"]
+    ini.write_text("[a_1.jpeg]\nX=104450.6\nY=156233.9\nCol=4\nRow=3\n", encoding="utf-8")
+    coords.clear_caches()
+    assert camtek_ini.load_folder(tmp_path)["a_1"].x != first.x
+
+
+def test_scan_start_clears_coordinate_caches():
+    """배선 가드 — 검증 시작 경로가 ``coords.clear_caches()`` 를 부른다."""
+    src = (Path(__file__).resolve().parents[2] / "aoi_verification" / "app" / "ui"
+           / "main_window.py").read_text(encoding="utf-8")
+    i = src.index("_cache.reset_mtime_cache()")
+    assert "_coords.clear_caches()" in src[i:i + 300]
+
+
 def test_truncated_kla_info_file_warns_and_keeps_what_it_read(tmp_path, caplog):
     """좌표 전반 점검(2026-10-24, 관측) — LSU TB500 RDL4 44장 중 2장의 ``.001`` 이 결함 행
     중간에서 끊겨 뒤쪽 사진 58장이 좌표 없이 조용히 빠졌다.  읽은 결함은 그대로 쓰고,

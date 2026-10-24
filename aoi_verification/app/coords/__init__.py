@@ -15,9 +15,25 @@ from typing import Optional
 from . import camtek_ini, camtek_live, kla_info
 from .models import DefectCoord
 
-__all__ = ["resolve", "resolve_batch", "DefectCoord"]
+__all__ = ["resolve", "resolve_batch", "clear_caches", "DefectCoord"]
 
 _LOG = logging.getLogger("aoi.coords")
+
+
+def clear_caches() -> None:
+    """좌표 파서들의 폴더 단위 캐시를 전부 비운다 — **검증을 새로 시작할 때마다** 부른다.
+
+    캐시 키가 폴더 경로뿐이라, 앱을 켠 채 장비가 INI·``.001``·die 맵을 다시 쓰거나
+    첫 읽기가 NAS 오류로 실패하면(빈 결과가 캐시된다) 앱을 다시 켤 때까지 옛 값·빈 값을
+    썼다.  한 실행 안에서는 캐시가 그대로 효과를 낸다(폴더당 1회 파싱)."""
+    import importlib
+    import pkgutil
+    for info in pkgutil.iter_modules(__path__):
+        mod = importlib.import_module(f"{__name__}.{info.name}")
+        for obj in vars(mod).values():
+            if callable(getattr(obj, "cache_clear", None)) and \
+                    getattr(obj, "__module__", None) == mod.__name__:
+                obj.cache_clear()
 
 
 def resolve(image_path: Path) -> Optional[DefectCoord]:

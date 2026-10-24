@@ -1721,6 +1721,40 @@ class TestLotDieMapGolden:
         shutil.copytree(self.LOT / "NELA26-01C1", alone)
         assert wg.camtek_geometry(alone).col_origin == 3
 
+    @pytest.mark.parametrize("corrupt", ["offset", "nan"])
+    def test_one_broken_sibling_map_does_not_drop_the_lot_to_absolute(
+            self, tmp_path, corrupt, caplog):
+        """점검(2026-10-24) — 형제 하나의 die 맵이 깨져도(사이드카 오프셋이 레코드 밖 ·
+        x 가 nan) **LOT 전체가 기하 None(=절대좌표)** 으로 떨어지지 않는다.  예전에는
+        읽기 예외가 camtek_geometry 의 except 에 삼켜져 01C1·07F6 둘 다 None 이 됐고
+        (``resolve_batch`` 가 그 실행 전체를 절대좌표로 내렸다) 경고도 없었다.
+        실물 맵을 복사해 깨뜨린 **합성** 입력이다 — 기대값은 '깨진 맵만 버린다' 이다."""
+        import logging
+        import shutil
+        import struct
+        lot = tmp_path / "LOT"
+        shutil.copytree(self.LOT, lot)
+        bad = lot / "NELA26-07F6"
+        if corrupt == "offset":
+            md = bad / "s_DieLocation.dat.md"
+            md.write_text(md.read_text(encoding="utf-8").replace(
+                'Name="x" Id="1073741827" Offset="8"',
+                'Name="x" Id="1073741827" Offset="9999"'), encoding="utf-8")
+        else:
+            dat = bad / "s_DieLocation.dat"
+            b = bytearray(dat.read_bytes())
+            struct.pack_into("<d", b, 8, float("nan"))
+            dat.write_bytes(bytes(b))
+        with caplog.at_level(logging.WARNING, logger="aoi.coords"):
+            good = wg.camtek_geometry(lot / "NELA26-01C1")
+            broken = wg.camtek_geometry(bad)
+        # 01C1 은 자기 맵으로(형제 없이 혼자일 때와 같은 값 — 경고가 남는다).
+        assert good is not None and wg._DIE_MAP_FILE in good.source
+        assert good.col_origin == 3
+        # 깨진 슬롯은 die 맵이 없는 폴더와 같은 중심 유도 경로로 간다(None 이 아니다).
+        assert broken is not None and wg._DIE_MAP_FILE not in broken.source
+        assert "die 맵은 쓰지 않습니다" in caplog.text
+
     @pytest.mark.parametrize("wafer, count", [("NELA26-01C1", 20), ("NELA26-07F6", 11)])
     def test_ini_matches_every_conder_live_name(self, wafer, count):
         from aoi_verification.app.coords import camtek_live

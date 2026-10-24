@@ -446,6 +446,8 @@ def camtek_geometry(folder: Path) -> Optional[CamtekGeometry]:
                 "ProductInfo.ini `XDieIndex/YDieIndex` 가 필요합니다: %s", folder)
         return None
     except Exception:
+        # 조용한 폴백 금지 — 여기서 None 이면 그 실행의 Camtek 좌표가 전부 절대좌표로 내려간다.
+        _LOG.exception("die 격자 기하를 읽다 실패해 절대 wafer 좌표로 매칭합니다: %s", folder)
         return None
 
 
@@ -683,11 +685,18 @@ def _dat_cells(dat: Path, _mtime_ns: int, _size: int, _md_mtime_ns: int,
     if count < _MIN_DIE_MAP:
         return None
     cells: set[tuple[int, int]] = set()
-    for i in range(count):
-        b = i * rec
-        x = struct.unpack_from("<d", data, b + off_x)[0]
-        y = struct.unpack_from("<d", data, b + off_y)[0]
-        cells.add((math.floor(x / px), math.floor(y / py)))
+    try:
+        for i in range(count):
+            b = i * rec
+            x = struct.unpack_from("<d", data, b + off_x)[0]
+            y = struct.unpack_from("<d", data, b + off_y)[0]
+            cells.add((math.floor(x / px), math.floor(y / py)))
+    except (struct.error, ValueError, OverflowError) as e:
+        # ★ 깨진 맵 하나는 **그 맵만** 버린다.  예전에는 여기서 난 예외가
+        #   camtek_geometry 의 except 까지 올라가 LOT 형제 전부가 기하 None(=절대좌표)
+        #   으로 조용히 떨어졌다(사이드카 오프셋이 레코드 밖이거나 x 가 nan 일 때).
+        _LOG.warning("%s 를 읽지 못해 이 die 맵은 쓰지 않습니다(%s): %s", dat.name, e, dat)
+        return None
     col_origin = min(i for i, _ in cells)
     row_total = max(j for _, j in cells)
     if not (0 <= col_origin <= _MAX_DIE_INDEX
