@@ -97,6 +97,8 @@ class _SidePanel(QFrame):
         head = QHBoxLayout()
         ttl = QLabel(title, self)
         ttl.setProperty("role", "paneTitle")
+        self._title_label = ttl
+        self._empty_hint: Optional[str] = None     # None = i18n 기본(PANEL_*_EMPTY)
         # ★ `role=paneTitle` 은 wordWrap 도 elide 도 없어 **말줄임표 없이 하드 클립**된다 —
         #   1024 폭에서 옛 제목("검증 대상 (검증하기로 한 사진들)")이 189px 을 요구하는데
         #   자리는 135px 이라 "검증 대상 (검증하기로 " 까지만 보였다.  제목을 짧게 줄이고
@@ -137,6 +139,7 @@ class _SidePanel(QFrame):
                     ("batch_verify", i18n.KO.BTN_INLINE_VERIFY_FMT, "primary")):
                 btn = NeonButton(label_fmt.format(n=0), role=role)
                 btn.setProperty("labelFmt", label_fmt)
+                btn.setProperty("actionId", action_id)
                 btn.clicked.connect(
                     lambda _c=False, a=action_id: self._fire_inline_action(a))
                 btn.hide()
@@ -263,7 +266,8 @@ class _SidePanel(QFrame):
 
         ★ 라벨을 멤버로 들고 있으면 `update_data` 가 `_host_layout` 을 통째로 비울 때
         함께 파괴돼 죽은 참조가 남는다 — 매번 찾아 쓰고, 없으면 새로 만든다."""
-        hint_text = getattr(i18n.KO, f"PANEL_{self._name.upper()}_EMPTY", "")
+        hint_text = (self._empty_hint if self._empty_hint is not None
+                     else getattr(i18n.KO, f"PANEL_{self._name.upper()}_EMPTY", ""))
         if not hint_text:
             return
         # ★ `deleteLater` 로 지운 위젯은 이벤트 루프가 돌기 전까지 `findChildren` 에
@@ -325,6 +329,25 @@ class _SidePanel(QFrame):
         """선택 표시를 지운다 — 액션 실행 뒤/화면을 떠날 때 스테일 테두리 방지."""
         self._set_all_inline(False)
 
+    def set_texts(self, title: str, tooltip: str,
+                  labels: dict[str, str], empty_hint: Optional[str]) -> None:
+        """제목·액션 라벨·빈 칸 안내를 바꿔 끼운다(Defect 추출 ↔ 매칭).
+
+        ``labels`` 는 action_id → 라벨(일괄 선택 팝업)과 ``"inline:<action_id>"`` →
+        개수 서식(인라인 버튼)이다.  없는 키는 그대로 둔다."""
+        self._title = title
+        self._title_label.setText(title)
+        self._title_label.setToolTip(tooltip)
+        self._actions = [(a, labels.get(a, lab), role)
+                         for a, lab, role in self._actions]
+        for btn in self._inline_buttons:
+            fmt = labels.get("inline:" + str(btn.property("actionId")))
+            if fmt:
+                btn.setProperty("labelFmt", fmt)
+        self._refresh_inline_buttons()
+        self._empty_hint = empty_hint
+        self._refresh_empty_hint()
+
     def _refresh_inline_buttons(self) -> None:
         n = len(self.inline_selected_items())
         for btn in getattr(self, "_inline_buttons", ()):
@@ -384,6 +407,7 @@ class SelectPage(ProgressRowMixin, QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._state: Stage1State | None = None
+        self._extract = False          # Defect 추출에 쓰는 중인가(`set_extract_mode`)
         self._current: Optional[ImageItem] = None
         self._phase_b_already_matched: dict[str, list[ImageItem]] = {}
         # 스플리터 방향을 첫 showEvent 에서 한 번만 확정했는지 (#cold-start).
@@ -423,7 +447,7 @@ class SelectPage(ProgressRowMixin, QWidget):
         # [검증 제외 사진 보기 (n)] — 제외된 사진은 화면에서 숨기고,
         # 이 버튼으로 팝업에서 모아 본다. 0 장이면 비활성.
         self.btn_view_excluded = NeonButton(
-            i18n.KO.BTN_VIEW_EXCLUDED_FMT.format(n=0), role="ghost",
+            self._tx("BTN_VIEW_EXCLUDED_FMT").format(n=0), role="ghost",
         )
         self.btn_view_excluded.clicked.connect(self._open_excluded_dialog)
         self.btn_view_excluded.setEnabled(False)
@@ -492,6 +516,7 @@ class SelectPage(ProgressRowMixin, QWidget):
         center_card = NeonCard(role="card", parent=self)
         cl = center_card.body()
         center_title = QLabel(i18n.KO.PANEL_CENTER_DECIDE, center_card)
+        self._center_title = center_title
         center_title.setProperty("role", "paneTitle")
         center_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         cl.addWidget(center_title)
@@ -768,6 +793,39 @@ class SelectPage(ProgressRowMixin, QWidget):
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+    def _tx(self, key: str) -> str:
+        """화면 문구 — Defect 추출 중이면 `EXTRACT_SELECT_TEXT` 의 같은 키가 이긴다."""
+        if self._extract and key in i18n.KO.EXTRACT_SELECT_TEXT:
+            return i18n.KO.EXTRACT_SELECT_TEXT[key]
+        return getattr(i18n.KO, key)
+
+    def set_reverse(self, on: bool) -> None:
+        """교차검증 두 번째 방향(검증 → 기준) — 표제만 바꾼다(조작·배치는 같다).
+
+        큐에는 검증 사진 중 첫 방향에서 짝을 못 찾은 것만 들어온다(사용자 결정)."""
+        self.title.setText(i18n.KO.STAGE1_TITLE
+                           + (i18n.KO.CROSS_REVERSE_SUFFIX if on else ""))
+
+    def set_extract_mode(self, on: bool) -> None:
+        """Defect 추출 ↔ 매칭 — 같은 선별 화면의 '검증' 문구를 '추출' 로 바꿔 끼운다.
+
+        추출에는 검증이 없다(사용자 지적: 추출 모드 전반 UI/UX).  조작·배치는 그대로다."""
+        self._extract = bool(on)
+        t = self._tx
+        self.left_panel.set_texts(
+            t("PANEL_LEFT_CANDIDATES"), t("PANEL_LEFT_CANDIDATES_TOOLTIP"),
+            {"batch_exclude": t("BTN_BATCH_EXCLUDE"),
+             "batch_verify": t("BTN_BATCH_VERIFY"),
+             "inline:batch_verify": t("BTN_INLINE_VERIFY_FMT")}, None)
+        self.right_panel.set_texts(
+            t("PANEL_RIGHT_TARGETS"), t("PANEL_RIGHT_TARGETS_TOOLTIP"), {},
+            t("PANEL_RIGHT_EMPTY"))
+        self._center_title.setText(t("PANEL_CENTER_DECIDE"))
+        self.btn_verify.setText("✓  " + t("BTN_VERIFY"))
+        for b in (self.btn_verify, self.btn_exclude, self.btn_undo):
+            b.setToolTip(t("SHORTCUT_TOOLTIP"))
+        self._refresh_excluded_button()
+
     def load_state(self,
                    queue: list[ImageItem],
                    targets: dict[str, list[ImageItem]] | None = None,
@@ -925,13 +983,13 @@ class SelectPage(ProgressRowMixin, QWidget):
     def _refresh_excluded_button(self) -> None:
         if self._state is None:
             self.btn_view_excluded.setText(
-                i18n.KO.BTN_VIEW_EXCLUDED_FMT.format(n=0)
+                self._tx("BTN_VIEW_EXCLUDED_FMT").format(n=0)
             )
             self.btn_view_excluded.setEnabled(False)
             return
         n = sum(len(v) for v in self._state.excluded.values())
         self.btn_view_excluded.setText(
-            i18n.KO.BTN_VIEW_EXCLUDED_FMT.format(n=n)
+            self._tx("BTN_VIEW_EXCLUDED_FMT").format(n=n)
         )
         self.btn_view_excluded.setEnabled(n > 0)
 
@@ -1121,7 +1179,7 @@ class SelectPage(ProgressRowMixin, QWidget):
             return False
         if shot.isNull():
             return False
-        self._stamp(shot, action == "verify")
+        self._stamp(shot, action == "verify", self._tx("BTN_VERIFY"))
         ghost = QLabel(viewport)
         ghost.setPixmap(shot)
         ghost.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
@@ -1159,7 +1217,7 @@ class SelectPage(ProgressRowMixin, QWidget):
         return True
 
     @staticmethod
-    def _stamp(pm, verify: bool) -> None:
+    def _stamp(pm, verify: bool, verify_text: str = i18n.KO.BTN_VERIFY) -> None:
         """떠나는 사진(고스트)에 결정 도장을 찍는다 — 테두리 + 왼쪽 위 '✓ 검증'/'✕ 제외'(06안).
 
         ★ 체크·엑스는 **글자가 아니라 선**이다 — 동봉 폰트에 ✓ 글리프가 없어 두부(□)로
@@ -1167,7 +1225,7 @@ class SelectPage(ProgressRowMixin, QWidget):
         from PyQt6.QtCore import QPointF, QRectF
         from PyQt6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF
         color = QColor(theme.ACCENT if verify else theme.DANGER)
-        text = i18n.KO.BTN_VERIFY if verify else i18n.KO.BTN_EXCLUDE
+        text = verify_text if verify else i18n.KO.BTN_EXCLUDE
         dpr = pm.devicePixelRatioF() or 1.0
         w, h = pm.width() / dpr, pm.height() / dpr
         p = QPainter(pm)
@@ -1360,7 +1418,7 @@ class SelectPage(ProgressRowMixin, QWidget):
         from PyQt6.QtWidgets import QMessageBox
         ret = sheets.ask(
             self, i18n.KO.END_SELECTION_CONFIRM_TITLE,
-            i18n.KO.END_SELECTION_CONFIRM_FMT.format(n=n_remaining),
+            self._tx("END_SELECTION_CONFIRM_FMT").format(n=n_remaining),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             # ★ 기본은 '아니오' 다 — 남은 수백 장을 일괄 제외하는 파괴 흐름이라,
             #   조회 버튼을 노리다 한 칸 옆을 누른 손이 Enter 습관으로 그대로
@@ -1394,10 +1452,10 @@ class SelectPage(ProgressRowMixin, QWidget):
         if not data:
             return
         dlg = BulkSelectDialog(
-            title=i18n.KO.BULK_SELECT_EXCLUDED_TITLE,
+            title=self._tx("BULK_SELECT_EXCLUDED_TITLE"),
             data=data,
             actions=[
-                ("to_target", i18n.KO.BTN_MOVE_TO_TARGET, "primary"),
+                ("to_target", self._tx("BTN_MOVE_TO_TARGET"), "primary"),
                 ("recenter", i18n.KO.BTN_BACK_TO_CENTER, "ghost"),
             ],
             parent=self,

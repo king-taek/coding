@@ -420,6 +420,14 @@ class ResultPage(QWidget):
             (n_miss, i18n.KO.STAT_NO_MATCH, "over" if n_miss else "none"),
             (n_slot, i18n.KO.STAT_SLOT_MISMATCH, "none"),
         ]
+        if result.mode == "cross":
+            # 교차검증 — '매치 없음' 을 어느 장비에만 있었는지로 나눠 보인다.
+            n_val = sum(1 for u in result.unmatched_refs if u.side == "val")
+            n_ref = n_miss - n_val
+            specs[2:3] = [
+                (n_ref, i18n.KO.STAT_ONLY_REF, "over" if n_ref else "none"),
+                (n_val, i18n.KO.STAT_ONLY_VAL, "over" if n_val else "none"),
+            ]
         if not self._coord_mode:
             del specs[1]              # 유사도 모드엔 '허용 오차' 개념이 없다
         for value, caption, tone in specs:

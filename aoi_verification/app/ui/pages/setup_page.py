@@ -34,7 +34,7 @@ _LOG = logging.getLogger("aoi.ui")
 
 @dataclass
 class SetupInput:
-    mode: str        # 항상 "single" (양쪽 교차검증 제거).
+    mode: str        # "single" | "cross"(교차검증 — `models/cross_check.py`)
     ref_root: Path
     val_root: Path
     ref_machine: str
@@ -262,6 +262,7 @@ class SetupPage(QWidget):
 
     start_requested = pyqtSignal(object)             # SetupInput
     update_check_requested = pyqtSignal()            # '업데이트 확인' 버튼
+    extract_mode_changed = pyqtSignal(bool)          # Defect 추출 ↔ 매칭 (레일 단계 이름)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -885,6 +886,16 @@ class SetupPage(QWidget):
         self._map_switch.setVisible(False)
         col.addWidget(self._map_switch)
 
+        # 교차검증(양방향) — 매칭 전용(추출에서는 숨긴다).  마지막 선택을 기억한다.
+        self._cross_switch = SwitchRow(
+            i18n.KO.CROSS_SWITCH,
+            description=i18n.KO.CROSS_SWITCH_DESC,
+            checked=bool(getattr(_prefs_now, "cross_check", False)),
+            parent=card)
+        self._cross_switch.toggled.connect(
+            lambda on: _prefs.patch(cross_check=bool(on)))
+        col.addWidget(self._cross_switch)
+
         # 도움말 본문 — 두 설정을 한 번에 설명한다(기본 접힘).
         self._auto_hint = QLabel(i18n.KO.RUN_OPTIONS_HINT, card)
         self._auto_hint.setProperty("role", "muted")
@@ -1322,9 +1333,21 @@ class SetupPage(QWidget):
         self._setting_cards[1].setVisible(not on)          # 매칭 설정 카드
         self._mode_badge_card.setVisible(not on)
         self._map_switch.setVisible(on)                    # 추출 전용 옵션
+        self._cross_switch.setVisible(not on)              # 매칭 전용 옵션
         self._lot1_slot_btn.setVisible(on)
         self._lot_list.setVisible(on)
         self._scope_row.setVisible(not on)
+        # 도움말·자동화 툴팁 — 매칭 문구는 '매치·검토 화면' 을 말한다(추출에는 없다).
+        self._auto_hint.setText(i18n.KO.EXTRACT_RUN_OPTIONS_HINT if on
+                                else i18n.KO.RUN_OPTIONS_HINT)
+        self.auto_group.set_option_tooltip(
+            AutomationLevel.USER_SELECT,
+            i18n.KO.EXTRACT_AUTOMATION_USER_SELECT if on
+            else i18n.KO.AUTOMATION_USER_SELECT)
+        self.auto_group.set_option_tooltip(
+            AutomationLevel.AUTO_ALL,
+            i18n.KO.EXTRACT_AUTOMATION_AUTO_ALL if on
+            else i18n.KO.AUTOMATION_AUTO_ALL)
         self.ref_path_edit.setPlaceholderText(
             i18n.KO.EXTRACT_FOLDER_PLACEHOLDER if on
             else i18n.KO.SETUP_FOLDER_PLACEHOLDER)
@@ -1336,6 +1359,7 @@ class SetupPage(QWidget):
         self.ref_path_edit.setAcceptDrops(not on)
         self._refresh_start_text()
         self._validate()
+        self.extract_mode_changed.emit(on)
 
     def _probe_state(self, text: str) -> Optional[str]:
         """파일시스템에 **손대지 않고** 알 수 있는 것만 — 모르면 ``None``(확인 필요).
@@ -1418,7 +1442,9 @@ class SetupPage(QWidget):
             if checking:
                 self._start_hint.setText(i18n.KO.START_CHECKING_HINT)
             elif not dirs_ok:
-                self._start_hint.setText(i18n.KO.START_BLOCKED_HINT)
+                self._start_hint.setText(i18n.KO.EXTRACT_BLOCKED_HINT
+                                         if self._extract_mode
+                                         else i18n.KO.START_BLOCKED_HINT)
             elif not self._backend_ready:
                 self._start_hint.setText(i18n.KO.START_PREPARING_HINT)
             else:
@@ -1714,7 +1740,7 @@ class SetupPage(QWidget):
             if r != QMessageBox.StandardButton.Yes:
                 return
 
-        mode = "single"             # 양쪽 교차검증 제거 — 항상 한쪽만 검증.
+        mode = "cross" if self._cross_switch.is_on() else "single"
         threshold = self.slider.value() / 100.0
         # 타일 키가 곧 AutomationLevel 값 — 분기 없이 읽는다.
         automation = self.auto_group.current_key() or AutomationLevel.USER_SELECT

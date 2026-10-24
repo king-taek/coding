@@ -246,6 +246,7 @@ class MatchPage(ProgressRowMixin, QWidget):
         title.setProperty("role", "paneTitle")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         cl.addWidget(title)
+        self._ref_pane_title = title        # 교차검증 역방향에서 문구를 바꾼다
 
         # Slot 명만 표시 (파일명 미표시) -------------------------------
         self.slot_label = QLabel("", center)
@@ -342,6 +343,7 @@ class MatchPage(ProgressRowMixin, QWidget):
         rt = QLabel(i18n.KO.PANEL_MATCH_CANDIDATES, right)
         rt.setProperty("role", "paneTitle")
         rl.addWidget(rt)
+        self._cand_pane_title = rt
 
         # 후보 패널 내부 스택: page 0 = 썸네일 그리드, page 1 = 확대 보기
         self._right_stack = QStackedWidget(right)
@@ -428,6 +430,18 @@ class MatchPage(ProgressRowMixin, QWidget):
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+    # 교차검증 두 번째 방향(검증 → 기준)인가 — 큐가 검증 사진, 후보가 기준 사진이다.
+    #   계산은 방향을 모른다(큐 쪽을 ``ref_path`` 로 담는다).  바뀌는 것은 문구뿐이다.
+    _reverse = False
+
+    def set_reverse(self, on: bool) -> None:
+        """교차검증 역방향 표기 — ``load_state`` **전에** 부른다(표제는 거기서 갱신)."""
+        self._reverse = bool(on)
+        self._ref_pane_title.setText(i18n.KO.PANEL_MATCH_REF_REVERSE if on
+                                     else i18n.KO.PANEL_MATCH_REF)
+        self._cand_pane_title.setText(i18n.KO.PANEL_MATCH_CANDIDATES_REVERSE if on
+                                      else i18n.KO.PANEL_MATCH_CANDIDATES)
+
     def load_state(self,
                    queue: list[ImageItem],
                    val_pool_by_slot: dict[str, list[ImageItem]],
@@ -457,7 +471,8 @@ class MatchPage(ProgressRowMixin, QWidget):
         self._fast_results.clear()
         self._match_history.clear()        # 되돌리기 히스토리 초기화 (#C1)
         self._update_undo_button()
-        self.title.setText(_stage2_title(self._engine_cfg))
+        self.title.setText(_stage2_title(self._engine_cfg)
+                           + (i18n.KO.CROSS_REVERSE_SUFFIX if self._reverse else ""))
         self._refresh_skipped_panel()
         # 모든 (ref, val) 쌍 점수를 미리 계산 → 이후 매칭은 캐시 조회만.
         self._start_precompute()

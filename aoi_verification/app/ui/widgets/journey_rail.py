@@ -158,6 +158,20 @@ class JourneyRail(QWidget):
         self._arrive = float(value)
         self.update()
 
+    def set_labels(self, labels) -> None:
+        """단계 이름을 바꿔 끼운다 — Defect 추출은 3단계(설정·후보 선별·저장)다.
+
+        단계 수가 바뀌면 현재 단계를 범위 안으로 당기고 채움 애니메이션을 끝낸다."""
+        labels = tuple(labels)
+        if labels == self._labels:
+            return
+        self._labels = labels
+        self._index = max(0, min(self._index, len(labels) - 1))
+        self._navigable = frozenset(i for i in self._navigable if i < len(labels))
+        self._fill, self._arriving = 1.0, False
+        self._hit = []
+        self.update()
+
     def set_navigable(self, indexes) -> None:
         """지금 화면에서 **되돌아갈 수 있는** 단계들.
 

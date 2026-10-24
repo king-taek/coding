@@ -78,6 +78,8 @@ class UiPrefs:
     extract_recipe_layout: str = "single"
     # Defect 추출 엑셀에 Wafer Map 시트를 넣을지 — 설정 화면 스위치의 마지막 값.
     extract_wafer_map: bool = True
+    # 교차검증(양방향) — 설정 화면 스위치의 마지막 값(기본 꺼짐: 예전처럼 한 방향).
+    cross_check: bool = False
     # OpenVINO (Intel GPU 가속) 자동 설치 안내를 거절한 경우 — 다시 묻지
     # 않음.  사용자가 ‘다시 보지 않기’ 를 선택했거나 설치 시도 후 실패하면 True.
     openvino_install_declined: bool = False
@@ -105,6 +107,11 @@ class UiPrefs:
     # 저장 파일의 세대.  기본값을 바꿨을 때 **이미 저장된 파일**을 한 번만 손보기 위한
     # 표식이다 — 아래 `migrate` 참조.  0 = 이 표식이 생기기 전에 저장된 파일.
     prefs_version: int = 0
+    # 개발자 모드(메인 화면 Ctrl+Shift+D).  켜져 있고 브랜치가 적혀 있으면 자동 업데이트가
+    # 기본 브랜치 대신 이 저장소·브랜치를 따른다(`updater.dev_target`).  repo "" = 기본 저장소.
+    dev_mode: bool = False
+    dev_update_repo: str = ""
+    dev_update_branch: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
 
     # ------------------------------------------------------------------

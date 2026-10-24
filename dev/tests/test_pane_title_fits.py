@@ -54,9 +54,14 @@ def _page(styled_qapp, w: int, h: int):
     return page
 
 
+@pytest.mark.parametrize("extract", [False, True])
 @pytest.mark.parametrize("w, h", _SIZES)
-def test_pane_titles_are_not_clipped(styled_qapp, w, h):
+def test_pane_titles_are_not_clipped(styled_qapp, w, h, extract):
+    """Defect 추출 문구(`EXTRACT_SELECT_TEXT`)로 바꿔 끼워도 잘리지 않는다."""
     page = _page(styled_qapp, w, h)
+    page.set_extract_mode(extract)
+    for _ in range(10):
+        styled_qapp.processEvents()
     try:
         titles = _pane_titles(page)
         assert titles, "패널 제목을 찾지 못했다(테스트가 아무것도 검증하지 않는다)"

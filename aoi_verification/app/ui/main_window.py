@@ -20,13 +20,15 @@ from typing import Optional
 
 from PyQt6.QtCore import (QElapsedTimer, QObject, Qt, QThread, QTimer,
                           pyqtSignal)
+from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (QApplication, QLabel, QMainWindow,
-                              QMessageBox, QStackedWidget, QStatusBar,
-                              QVBoxLayout, QWidget)
+                              QMessageBox, QPushButton, QStackedWidget,
+                              QStatusBar, QVBoxLayout, QWidget)
 
 from .. import config, i18n
 from . import deferred, theme
 from ..coords import kla_info
+from ..models import cross_check
 from ..models import session as session_mod
 from ..models.result import FinalResult, MatchResult, MissEntry, extract_result
 from ..models.slot import (ImageItem, ScanResult, drop_empty_unmatched,
@@ -63,6 +65,9 @@ _LOG = logging.getLogger("aoi.ui")
 PHASE_NONE = "none"
 PHASE_A_SELECT = "A_select"
 PHASE_A_MATCH = "A_match"
+# 교차검증의 두 번째 방향(검증 → 기준) — `models/cross_check.py`.
+PHASE_B_SELECT = "B_select"
+PHASE_B_MATCH = "B_match"
 
 
 # 스캔 워커가 도는 동안 파이썬 참조를 붙잡아 두는 곳 — 지역 변수로만 두면 함수가
@@ -274,6 +279,15 @@ class MainWindow(QMainWindow):
         self._mem_label = QLabel("", self._status_bar)
         self._mem_label.setProperty("role", "muted")
         self._status_bar.addPermanentWidget(self._mem_label)
+        # 개발자 모드(Ctrl+Shift+D) — 켜져 있을 때만 상태바에 설정 버튼이 보인다.
+        self._dev_btn = QPushButton(i18n.KO.DEV_MODE_BUTTON, self._status_bar)
+        self._dev_btn.setFlat(True)
+        self._dev_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._dev_btn.clicked.connect(self._open_dev_mode)
+        self._status_bar.addPermanentWidget(self._dev_btn)
+        self._dev_btn.setVisible(_prefs.load().dev_mode)
+        QShortcut(QKeySequence("Ctrl+Shift+D"), self,
+                  activated=self._toggle_dev_mode)
         self._mem_timer = QTimer(self)
         self._mem_timer.setInterval(2000)
         self._mem_timer.timeout.connect(self._update_memory_label)
@@ -348,6 +362,7 @@ class MainWindow(QMainWindow):
         self._reviewed_unmatched_keys: set = set()
         # 검토 대상 전체('매치 없음' 표시분 포함) — 결과↔검토 왕복의 기반.
         self._reviewed_all_matches: list[MatchResult] = []
+        self._reset_cross_state()
         self._run_log_written = False
         # 기준 사진 기록 저장 디바운스 — ★ self 를 부모로(정적 singleShot 금지).
         self._ref_history_timer = QTimer(self)
@@ -483,6 +498,38 @@ class MainWindow(QMainWindow):
         # 새 버전이 있는 _on_update_found 전용).
         sheets.info(self, i18n.KO.UPDATE_CHECK_TITLE, msg)
 
+    # ==================================================================
+    # 개발자 모드 (Ctrl+Shift+D) — 업데이트 저장소·브랜치 고르기
+    # ==================================================================
+    def _toggle_dev_mode(self) -> None:
+        """켜면 설정 창을 바로 연다.  끄면 자동 업데이트가 기본 브랜치로 돌아간다."""
+        on = not _prefs.load().dev_mode
+        _prefs.patch(dev_mode=on)
+        self._dev_btn.setVisible(on)
+        self._status_bar.showMessage(
+            i18n.KO.DEV_MODE_ON if on else i18n.KO.DEV_MODE_OFF, 4000)
+        if on:
+            self._open_dev_mode()
+
+    def _open_dev_mode(self) -> None:
+        from .widgets.dev_mode_dialog import DevModeDialog
+        dlg = DevModeDialog(parent=self)
+        sheets.run(dlg)
+        info = dlg.install_info
+        if not info:
+            return
+        ans = sheets.ask(
+            self, i18n.KO.DEV_MODE_TITLE,
+            i18n.KO.DEV_MODE_INSTALL_ASK_FMT.format(
+                repo=info["repo"], branch=info["branch"], sha=str(info["sha"])[:7]),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+            labels={QMessageBox.StandardButton.Yes: i18n.KO.UPDATE_BTN_NOW,
+                    QMessageBox.StandardButton.No: i18n.KO.UPDATE_BTN_LATER},
+        )
+        if ans == QMessageBox.StandardButton.Yes:
+            self._start_update_download(info, dev=True)
+
     def _on_update_found(self, info: dict) -> None:
         """'업데이트 있음' 안내 → 동의하면 백그라운드로 다운로드/교체."""
         # 사용자에겐 개발자용 커밋 메시지/SSL 멘트 대신 간단한 안내만.
@@ -498,6 +545,13 @@ class MainWindow(QMainWindow):
         if ans != QMessageBox.StandardButton.Yes:
             self._run_startup_popups()       # 거절 → 나머지 시작 팝업 진행
             return
+        from ..utils import updater
+        self._start_update_download(info, dev=updater.dev_target() is not None)
+
+    def _start_update_download(self, info: dict, dev: bool = False) -> None:
+        """``info`` 의 repo/branch/sha 를 받아 적용한다(백그라운드 + 로딩바).
+
+        ``dev`` 는 개발자 모드에서 고른 대상이라는 표식(VERSION 에 남는다)."""
         # 개발(git) 작업트리에서는 자동 덮어쓰기로 로컬 변경을 날릴 수 있어 막는다.
         try:
             from ..utils import updater
@@ -524,7 +578,8 @@ class MainWindow(QMainWindow):
             try:
                 from ..utils import updater
                 ok = updater.download_and_apply(
-                    info["repo"], info["branch"], info["sha"], progress=_report)
+                    info["repo"], info["branch"], info["sha"], progress=_report,
+                    dev=dev)
             except Exception:
                 ok = False
             self._update_applied.emit(bool(ok), info or {})
@@ -900,7 +955,7 @@ class MainWindow(QMainWindow):
         #   (i18n `LOAD_JOURNEY_STEPS` 주석의 '단계 수를 바꾸지 않는다' 가 이 뜻이다).
         self._loading.show_overlay(i18n.KO.LOAD_KLA_INFO,
                                    step=(1, 3),
-                                   steps=i18n.KO.LOAD_JOURNEY_STEPS)
+                                   steps=self._journey_steps())
         QApplication.processEvents()
         info_ref: dict[str, str] = {}
         info_val: dict[str, str] = {}
@@ -993,7 +1048,7 @@ class MainWindow(QMainWindow):
             from ..workers.wafer_id_ocr import WaferIdOcrWorker
             self._loading.show_overlay(
                 i18n.KO.LOAD_KLA_OCR, step=(1, 3),
-                steps=i18n.KO.LOAD_JOURNEY_STEPS)
+                steps=self._journey_steps())
             worker = WaferIdOcrWorker(jobs, parent=self)
             self._ocr_worker = worker          # GC 방지 참조 보관
 
@@ -1087,6 +1142,9 @@ class MainWindow(QMainWindow):
         self._reviewed_unmatched.clear()
         self._reviewed_unmatched_keys = set()
         self._reviewed_all_matches = []
+        self._reset_cross_state()
+        if self._is_cross():
+            self._cross_stage = "A"
         self._run_log_written = False
         self._thumbs_handled = False        # 썸네일 완료 one-shot 가드 리셋(#C2)
         # 타일 픽스맵 캐시 비우기 — 폴더가 바뀌어도 stale 픽스맵이 남지 않게(#렉).
@@ -1103,7 +1161,7 @@ class MainWindow(QMainWindow):
         #   보였다.
         self._loading.show_overlay(i18n.KO.LOAD_SCAN, cancelable=True,
                                    step=(1, 3),
-                                   steps=i18n.KO.LOAD_JOURNEY_STEPS)
+                                   steps=self._journey_steps())
         QApplication.processEvents()
 
         # 결과 파일의 **이름·자리만** 정한다 — 파일 자체는 [엑셀로 저장] 때 만든다.
@@ -1238,7 +1296,7 @@ class MainWindow(QMainWindow):
         # 썸네일 단계는 가장 오래 걸리므로 [중지] 로 건너뛸 수 있게 한다(#C2).
         self._loading.show_overlay(
             i18n.KO.LOAD_THUMBNAIL, cancelable=True,
-            step=(2, 3), steps=i18n.KO.LOAD_JOURNEY_STEPS)
+            step=(2, 3), steps=self._journey_steps())
         QApplication.processEvents()
         all_items: list[ImageItem] = []
         for name in common:
@@ -1317,7 +1375,7 @@ class MainWindow(QMainWindow):
             return
         self._thumbs_handled = True
         self._stage_clock("thumbnails")
-        self._loading.set_stage((3, 3), i18n.KO.LOAD_JOURNEY_STEPS)
+        self._loading.set_stage((3, 3), self._journey_steps())
         self._loading.set_progress(0, 0, i18n.KO.LOAD_STAGE_PREP)
         QTimer.singleShot(0, self._continue_after_thumbs)
 
@@ -1405,7 +1463,13 @@ class MainWindow(QMainWindow):
     def _on_match_review_done(self,
                               kept: list,
                               unmatched_refs: list) -> None:
-        """MatchReviewPage 의 [검토 완료] 시그널 → 결과 페이지 진입."""
+        """MatchReviewPage 의 [검토 완료] 시그널 → 결과 페이지 진입.
+
+        교차검증이면 첫 방향(A)의 검토가 끝난 뒤 결과 대신 두 번째 방향(B)으로 간다."""
+        if self._cross_stage == "B":
+            self._store_b_review(kept, unmatched_refs)
+            self._finish_session()
+            return
         self._reviewed_matches = list(kept)
         self._reviewed_unmatched = list(unmatched_refs)
         # ★ 결과 화면에서 검토로 되돌아올 때 되살리려면 '매치 없음' 표시를 키로 들고
@@ -1416,7 +1480,104 @@ class MainWindow(QMainWindow):
         #   빠져 있어서, 그걸 기반으로 되돌아가면 복원할 행이 없다 → 다음 [검토 완료]
         #   에서 그 사진들이 매치에도 미매칭에도 없는 상태가 돼 결과에서 사라진다.
         self._reviewed_all_matches = self._match_review_page.all_matches()
+        if self._cross_stage == "A":
+            self._enter_cross_b()
+            return
         self._finish_session()
+
+    # ==================================================================
+    # 교차검증 — 두 번째 방향(검증 → 기준).  순수 로직은 `models/cross_check.py`.
+    # ==================================================================
+    # 클래스 기본값 — `_reset_cross_state` 가 인스턴스 값을 채운다(그 전에 읽혀도 안전하게).
+    _cross_stage = ""
+    _ctx_a = None
+
+    def _is_cross(self) -> bool:
+        """시작한 실행이 교차검증인가 — `_on_start` 에서만 본다.  그 뒤로는
+        `_cross_stage`(비어 있지 않음 = 교차검증 실행)가 같은 사실을 들고 다닌다."""
+        return (getattr(self._input, "mode", "") == cross_check.CROSS_MODE
+                and not self._is_extract())
+
+    def _reset_cross_state(self) -> None:
+        """교차검증 상태를 비운다 — 새 실행·새 세션마다."""
+        # "" = 교차검증 아님, "A" = 첫 방향 진행 중, "B" = 두 번째 방향 진입 후.
+        self._cross_stage = ""
+        self._ctx_a = None                   # A 의 검토 맥락 사본(B 가 MatchPage 를 덮는다)
+        self._matches_b: list[MatchResult] = []      # B 자동 매치 — **큐 방향**
+        self._skipped_b: dict[str, list[ImageItem]] = defaultdict(list)
+        self._b_reviewed = False
+        self._b_kept: list[MatchResult] = []         # B 검토 결과 — **정방향**
+        self._b_misses: list[MissEntry] = []         # B 검토에서 '매치 없음' (side="val")
+        self._b_all: list[MatchResult] = []          # B 검토 왕복의 기반 — 큐 방향
+        self._b_unmatched_keys: set = set()
+
+    def _a_final_matches(self) -> list[MatchResult]:
+        """첫 방향의 확정 매치 — `_finish_session` 과 같은 규칙."""
+        if self._reviewed_matches:
+            return list(self._reviewed_matches)
+        return self._merge_matches()
+
+    def _enter_cross_b(self) -> None:
+        """A 검토 완료 → B 선별(또는 올인원이면 곧장 B 매칭).
+
+        큐 = 검증 사진 − A 에서 짝지은 검증 사진(사용자 결정: 다시 나타나지 않는다).
+        후보 풀은 기준 사진 전부다(`cross_check` 모듈 docstring)."""
+        assert self._scan is not None and self._input is not None
+        self._cross_stage = "B"
+        # ★ B 를 MatchPage 에 싣는 순간 A 의 선계산 결과(fast_results)가 지워진다.
+        #   결과 화면의 실패 검토가 A 쪽 미매칭에도 그 값을 쓰므로 사본을 떠 둔다.
+        ctx = self._match_page.review_context()
+        self._ctx_a = (dict(ctx.fast_results), frozenset(ctx.coord_classical_refs))
+        sr = self._scan
+        val_by_slot = {n: list(sr.slots[n].val_images) for n in sr.common_slot_names}
+        by_slot = cross_check.reverse_queue(val_by_slot, self._a_final_matches())
+        queue = [it for n in sorted(by_slot) for it in by_slot[n]]
+        if not queue:                       # 검증 사진이 전부 A 에서 짝지어졌다
+            self._finish_session()
+            return
+        if self._input.automation_level == AutomationLevel.AUTO_ALL:
+            self._start_cross_b_match(queue)
+            return
+        self._select_page.set_extract_mode(False)
+        self._select_page.set_reverse(True)
+        self._select_page.load_state(queue=queue, targets={}, excluded={},
+                                     history=[])
+        self._phase = PHASE_B_SELECT
+        self._show_page(self._select_page)
+
+    def _start_cross_b_match(self, queue: list[ImageItem]) -> None:
+        """B 매칭 — 큐는 검증 사진, 후보 풀은 같은 슬롯의 기준 사진 전부.
+
+        좌표 보정은 다시 묻지 않는다 — A 에서 정한 값(`_coord_offset`)을 그대로 쓴다.
+        보정은 KLA 좌표(`source == "kla"`)에만 더해지므로 방향과 무관하다."""
+        assert self._scan is not None and self._input is not None
+        sr = self._scan
+        pool = {n: list(sr.slots[n].ref_images) for n in sr.common_slot_names}
+        self._matches_b.clear()
+        self._skipped_b.clear()
+        auto_mode = AutomationLevel.is_auto(self._input.automation_level)
+        self._calib_next = (queue, pool, auto_mode)
+        self._start_stage2()
+
+    def _store_b_review(self, kept: list, unmatched: list) -> None:
+        """B 검토 완료 — 큐 방향을 정방향으로 돌려 보관한다."""
+        self._b_reviewed = True
+        self._b_kept = [cross_check.swap(m) for m in kept]
+        self._b_misses = cross_check.as_val_misses(unmatched)
+        self._b_unmatched_keys = set(self._match_review_page.unmatched_keys())
+        self._b_all = self._match_review_page.all_matches()
+
+    def _cross_b_parts(self) -> tuple[list[MatchResult], list[MissEntry]]:
+        """B 의 (정방향 매치, 검증 쪽 미매칭)."""
+        if self._b_reviewed:
+            matches = list(self._b_kept)
+        else:
+            matches = [cross_check.swap(m) for m in self._matches_b]
+        misses = list(self._b_misses) + [
+            MissEntry(slot=slot, side="val", path=it.path,
+                      note=i18n.KO.NOTE_UNMATCHED)
+            for slot, items in self._skipped_b.items() for it in items]
+        return matches, misses
 
     # ==================================================================
     # Stage 1
@@ -1437,6 +1598,8 @@ class MainWindow(QMainWindow):
         # ★ 추출은 묻지도 기록하지도 않는다 — 그 기록은 '매칭에 쓸 기준 사진' 이다.
         restored = ({} if one_side
                     else self._maybe_restore_ref_selection(queue))
+        self._select_page.set_extract_mode(one_side)     # '검증' ↔ '추출' 문구
+        self._select_page.set_reverse(False)
         self._select_page.load_state(
             queue=queue,
             targets=restored, excluded={}, history=[],
@@ -1452,6 +1615,14 @@ class MainWindow(QMainWindow):
         self._autosave()
 
     def _on_select_finished(self) -> None:
+        if self._phase == PHASE_B_SELECT:
+            targets = self._collect_panel(self._select_page.get_state().targets)
+            queue = [it for slot in sorted(targets) for it in targets[slot]]
+            if not queue:                   # 검증 쪽에 더 볼 사진이 없다 — 결과로
+                self._finish_session()
+                return
+            self._start_cross_b_match(queue)
+            return
         if self._phase == PHASE_A_SELECT and self._is_extract():
             self._on_extract_select_finished()
             return
@@ -1662,6 +1833,8 @@ class MainWindow(QMainWindow):
         if nxt is None or self._input is None or self._scan is None:
             return
         queue, pool, auto_mode = nxt
+        reverse = self._cross_stage == "B"
+        self._match_page.set_reverse(reverse)
         self._match_page.load_state(
             queue=queue,
             val_pool_by_slot=pool,
@@ -1671,12 +1844,14 @@ class MainWindow(QMainWindow):
             engine_cfg=self._make_sim_cfg(),
         )
         self._show_page(self._match_page)
-        self._phase = PHASE_A_MATCH
+        self._phase = PHASE_B_MATCH if reverse else PHASE_A_MATCH
         self._autosave()
 
     def _on_match_confirmed(self, match: MatchResult) -> None:
         if self._phase == PHASE_A_MATCH:
             self._matches_a.append(match)
+        elif self._phase == PHASE_B_MATCH:
+            self._matches_b.append(match)
         self._schedule_autosave()
 
     def _on_match_undone(self, match: MatchResult) -> None:
@@ -1684,10 +1859,12 @@ class MainWindow(QMainWindow):
 
         같은 ``key``(slot/ref명/val명) 의 마지막 항목을 제거한다.
         """
-        if self._phase == PHASE_A_MATCH:
-            for i in range(len(self._matches_a) - 1, -1, -1):
-                if self._matches_a[i].key == match.key:
-                    del self._matches_a[i]
+        bucket = {PHASE_A_MATCH: self._matches_a,
+                  PHASE_B_MATCH: self._matches_b}.get(self._phase)
+        if bucket is not None:
+            for i in range(len(bucket) - 1, -1, -1):
+                if bucket[i].key == match.key:
+                    del bucket[i]
                     break
         self._schedule_autosave()
 
@@ -1703,14 +1880,16 @@ class MainWindow(QMainWindow):
         `motion.transition_in` 이 그 전환 구간의 키를 막아 원인 하나는 닫혔지만,
         신호가 두 번 오는 경로는 또 생길 수 있으므로 **받는 쪽도 멱등하게** 둔다.
         """
-        if self._phase == PHASE_A_MATCH:
+        if self._phase in (PHASE_A_MATCH, PHASE_B_MATCH):
+            skipped = (self._skipped_b if self._phase == PHASE_B_MATCH
+                       else self._skipped_a)
             st = self._match_page.get_state()
             if st is not None:
                 # 미탐으로 기록할 것은 ‘매칭 없음 확정’ 만. ‘잠시 보류’ 는 사용자
                 # 결정 미정 → 미탐 시트에 넣지 않는다.
                 for slot, items in st.no_match.items():
-                    seen = {it.key for it in self._skipped_a[slot]}
-                    self._skipped_a[slot].extend(
+                    seen = {it.key for it in skipped[slot]}
+                    skipped[slot].extend(
                         it for it in items if it.key not in seen
                     )
             self._proceed_to_review_or_finish()
@@ -1726,7 +1905,9 @@ class MainWindow(QMainWindow):
         #   조용히 물러나는 것이 맞다.
         if self._input is None or self._scan is None:
             return
-        merged = self._merge_matches()
+        reverse = self._cross_stage == "B"
+        merged = list(self._matches_b) if reverse else self._merge_matches()
+        self._match_review_page.set_reverse(reverse)
         # MatchPage 가 들고 있는 점수 캐시 + val_pool 을 매치 검토 페이지에
         # 넘겨 차순위 후보를 행마다 표시한다 (참고용 시각 정보).
         ctx = self._match_page.review_context()
@@ -1757,7 +1938,17 @@ class MainWindow(QMainWindow):
         항상 이겨 실패 검토로 확정한 매치가 검토 화면에 실리지 않는다.  그 상태로
         [검토 완료] 를 다시 누르면 그 쌍이 결과에서 사라지고 기준 사진이 '미매칭' 으로
         되돌아간다 — 사용자가 눈으로 확인해 확정한 것이 조용히 없어지는 것이다.
+
+        교차검증이면 결과 목록에 두 방향이 섞여 있다 — 새 매치를 A·B 몫으로 갈라
+        각자의 보관처를 같은 규칙으로 고친다(`cross_check.split_new_matches`).
         """
+        if self._cross_stage:
+            self._on_result_edited_cross(matches, unmatched)
+            return
+        self._apply_a_edit(matches, unmatched)
+
+    def _apply_a_edit(self, matches: list, unmatched: list) -> None:
+        """첫 방향(A) 보관처를 결과 화면의 편집에 맞춘다(`_on_result_edited`)."""
         self._reviewed_matches = list(matches)
         self._reviewed_unmatched = list(unmatched)
         # 짝을 찾은 기준 사진은 더 이상 '매치 없음' 이 아니다 — 그 표시를 걷어낸다.
@@ -1776,6 +1967,28 @@ class MainWindow(QMainWindow):
         self._reviewed_all_matches = list(matches) + still_marked
         self._reviewed_unmatched_keys = {m.key for m in still_marked}
 
+    def _on_result_edited_cross(self, matches: list, unmatched: list) -> None:
+        b_matches, b_misses = self._cross_b_parts()
+        a_matches = self._a_final_matches()
+        new_a, new_b = cross_check.split_new_matches(
+            matches, a_matches + b_matches, [u.path for u in b_misses])
+        self._apply_a_edit(a_matches + new_a,
+                           [u for u in unmatched if u.side == "ref"])
+        # B — A 와 같은 규칙을 큐 방향으로.  B 보관처는 이제 '검토를 거친 것' 이다.
+        b_kept = b_matches + new_b
+        matched_vals = {Path(m.val_path) for m in matches}
+        self._b_kept = b_kept
+        self._b_misses = [u for u in unmatched if u.side == "val"]
+        for slot, its in list(self._skipped_b.items()):
+            self._skipped_b[slot] = [it for it in its
+                                     if Path(it.path) not in matched_vals]
+        still_marked = [m for m in self._b_all
+                        if Path(m.ref_path) not in matched_vals
+                        and m.key in self._b_unmatched_keys]
+        self._b_all = [cross_check.swap(m) for m in b_kept] + still_marked
+        self._b_unmatched_keys = {m.key for m in still_marked}
+        self._b_reviewed = True
+
     def _reenter_review(self) -> None:
         """결과 화면 → 매치 검토 화면 복귀(U-10).
 
@@ -1785,10 +1998,20 @@ class MainWindow(QMainWindow):
         '매치 없음' 표시까지 복원해서 들어간다."""
         if self._match_review_page is None or self._match_page is None:
             return
+        # ★ 교차검증은 **두 번째 방향(B)의 검토**로 돌아간다.  MatchPage 가 지금 들고 있는
+        #   후보·점수가 B 의 것이라 A 검토는 다시 만들 수 없다(A 의 확정분은 그대로 둔다).
+        reverse = self._cross_stage == "B"
+        self._match_review_page.set_reverse(reverse)
         # '매치 없음' 표시까지 되살리려면 그 행들이 있어야 하므로 **전체 목록**을
         #   기반으로 한다(`_reviewed_matches` 는 표시된 행이 빠진 kept 다).
-        base = list(getattr(self, "_reviewed_all_matches", None)
-                    or self._reviewed_matches or self._merge_matches())
+        if reverse:
+            base = list(self._b_all or [cross_check.swap(m) for m in self._b_kept]
+                        or self._matches_b)
+            marked = self._b_unmatched_keys
+        else:
+            base = list(getattr(self, "_reviewed_all_matches", None)
+                        or self._reviewed_matches or self._merge_matches())
+            marked = getattr(self, "_reviewed_unmatched_keys", None)
         ctx = self._match_page.review_context()
         match_state = self._match_page.get_state()
         val_pool = match_state.val_pool if match_state is not None else None
@@ -1803,7 +2026,7 @@ class MainWindow(QMainWindow):
             coord_mode=ctx.coord_mode,
             tolerance=ctx.tolerance,
             coord_failed_count=ctx.coord_failed_count,
-            unmatched_keys=getattr(self, "_reviewed_unmatched_keys", None),
+            unmatched_keys=marked,
         )
         self._notify_ready_for_review()
         self._show_page(self._match_review_page)
@@ -1824,6 +2047,11 @@ class MainWindow(QMainWindow):
     def _is_extract(self) -> bool:
         return bool(getattr(self._input, "extract", False))
 
+    def _journey_steps(self) -> tuple:
+        """로딩 오버레이의 단계 이름 — 추출에는 매칭이 없어 마지막 단계 이름만 다르다."""
+        return (i18n.KO.EXTRACT_LOAD_JOURNEY_STEPS if self._is_extract()
+                else i18n.KO.LOAD_JOURNEY_STEPS)
+
     def _extract_after_scan(self, sr: ScanResult) -> None:
         """스캔 직후 — 사진 없는 슬롯을 빼고, KLA 면 slot명을 WaferID 로 바꾼 뒤 썸네일로."""
         for name in [n for n, s in sr.slots.items() if not s.ref_images]:
@@ -1833,15 +2061,12 @@ class MainWindow(QMainWindow):
             wakelock.release()
             sheets.warn(self, i18n.KO.APP_TITLE, i18n.KO.EXTRACT_NONE_FOUND)
             return
-        # KLA 여부 — 호기가 K-n 이면 묻지 않는다(매칭과 같은 규칙).  추출은 장비가
-        # 하나라 '어느 쪽' 이 아니라 'KLA 인가' 만 묻는다.
-        is_kla = self._kla_machine_side(self._input) is not None
-        if not is_kla:
-            is_kla = sheets.choose(
-                self, i18n.KO.KLA_ASK_TITLE, i18n.KO.EXTRACT_KLA_BODY,
-                [("kla", i18n.KO.EXTRACT_KLA_YES, "option"),
-                 ("none", i18n.KO.KLA_SIDE_NONE, "option")],
-                heading=i18n.KO.EXTRACT_KLA_HEADING, tiles=True) == "kla"
+        # KLA 여부는 **묻지 않는다**(사용자 지적: "KLA인지 확인하는거 왜뜨냐").  매칭은
+        # 짝이 안 맞을 때만 묻지만 예전 추출은 Camtek 폴더에도 매번 물었다.  호기가 K-n
+        # 이거나, 폴더에 KLA 정보파일(`WaferID "…";`)이 하나라도 있으면 KLA 다 —
+        # 좌표 보정의 장비 판별(`_kla_camtek_side`)과 같은 기준이다.
+        is_kla = (self._kla_machine_side(self._input) is not None
+                  or self._has_kla_info(sr))
         # 이름은 **해석이 끝난 뒤** 센다 — KLA 면 그 사이 slot명이 WaferID 로 바뀐다.
         proceed = lambda: self._continue_start_after_scan(sorted(sr.slots))  # noqa: E731
         if is_kla:
@@ -1849,12 +2074,21 @@ class MainWindow(QMainWindow):
         else:
             proceed()
 
+    @staticmethod
+    def _has_kla_info(sr: ScanResult) -> bool:
+        """추출 대상 폴더 중 하나라도 KLA 정보파일 헤더(WaferID)를 가졌는가.
+
+        헤더 앞부분만 읽고 캐시된다(`kla_info.read_header_ids`) — 이어지는 slot명
+        해석이 같은 값을 다시 읽지 않는다."""
+        return any(kla_info.read_wafer_id(s.ref_dir) is not None
+                   for s in sr.slots.values() if s.ref_dir)
+
     def _resolve_kla_extract(self, sr: ScanResult, on_done) -> None:
         """KLA 폴더의 slot명 = WaferID — **정보파일 우선, OCR 폴백**(매칭과 같은 순서).
 
         OCR 은 정보파일에서 못 읽은 폴더에만, 백그라운드 워커에서 돈다."""
         self._loading.show_overlay(i18n.KO.LOAD_KLA_INFO, step=(1, 3),
-                                   steps=i18n.KO.LOAD_JOURNEY_STEPS)
+                                   steps=self._journey_steps())
         QApplication.processEvents()
         info: dict[str, str] = {}
         for name, slot in sr.slots.items():
@@ -1874,7 +2108,7 @@ class MainWindow(QMainWindow):
         if jobs and wafer_id.ocr_available():
             from ..workers.wafer_id_ocr import WaferIdOcrWorker
             self._loading.show_overlay(i18n.KO.LOAD_KLA_OCR, step=(1, 3),
-                                       steps=i18n.KO.LOAD_JOURNEY_STEPS)
+                                       steps=self._journey_steps())
             worker = WaferIdOcrWorker(jobs, parent=self)
             self._ocr_worker = worker          # GC 방지 참조 보관
             worker.signals.progress.connect(
@@ -1934,7 +2168,7 @@ class MainWindow(QMainWindow):
             _prefs.patch(extract_recipe_layout=choice)
             from .widgets.save_name_dialog import SaveNameDialog
             dlg = SaveNameDialog(self._working_xlsx.name, self._working_xlsx.parent,
-                                 parent=self)
+                                 parent=self, body=i18n.KO.EXTRACT_SAVE_NAME_BODY)
             if sheets.run(dlg) and dlg.chosen is not None:
                 dst = self._working_xlsx.with_name(dlg.chosen)
         if dst is None:
@@ -1952,6 +2186,8 @@ class MainWindow(QMainWindow):
 
         self._extract_result, self._extract_dst = result, dst
         self._extract_layout = layout
+        self._rail.set_current(2)            # 추출 레일의 마지막 단계 '저장'
+        self._rail.set_navigable(())
         self._loading.show_overlay(i18n.KO.LOAD_EXPORT)
         # Wafer Map 시트는 설정 화면 스위치로 끌 수 있다(사용자 결정) — 렌더러가 없으면
         # exporter 가 그 시트를 만들지 않는다.
@@ -1993,6 +2229,7 @@ class MainWindow(QMainWindow):
     def _on_extract_export_failed(self, msg: str) -> None:
         """실패 — 결과 화면과 같은 안내(열려 있는 파일이 가장 흔한 원인) + 다시 시도."""
         self._loading.hide_overlay()
+        self._sync_rail(self._stack.currentWidget())      # '저장' → 지금 화면
         locked = "permission" in msg.lower() or "errno 13" in msg.lower()
         body = (i18n.KO.SAVE_FAIL_LOCKED_FMT.format(error=msg) if locked
                 else i18n.KO.SAVE_FAIL_FMT.format(error=msg))
@@ -2036,6 +2273,12 @@ class MainWindow(QMainWindow):
             seen.add(key)
             deduped.append(u)
         unmatched_refs = deduped
+        if self._cross_stage:
+            # 두 방향을 합친다 — 한쪽에서 놓친 사진이 다른 방향에서 짝을 찾았으면
+            # 미매칭에서 빠진다(`cross_check.merge` 불변식).
+            b_matches, b_misses = self._cross_b_parts()
+            merged, unmatched_refs = cross_check.merge(
+                merged, unmatched_refs, b_matches, b_misses)
 
         result = FinalResult(
             mode=self._input.mode,
@@ -2069,6 +2312,15 @@ class MainWindow(QMainWindow):
             review_pool[(slot_name, "ref")] = list(slot.val_images)
             review_pool[(slot_name, "val")] = list(slot.ref_images)
         ctx = self._match_page.review_context()
+        fast_results, classical = ctx.fast_results, ctx.coord_classical_refs
+        if self._ctx_a is not None:
+            # 교차검증 — A 의 선계산(키 = 기준 사진)과 B 의 것(키 = 검증 사진)을 합친다.
+            #   키가 겹치지 않는다: 같은 경로가 양쪽 폴더에 있을 수 없다.
+            #   점수 캐시는 MatchPage 가 같은 객체를 계속 쓰고 키가 방향을 가진다
+            #   ((기준, 검증) ↔ (검증, 기준)) — 따로 합칠 것이 없다.
+            a_fast, a_classical = self._ctx_a
+            fast_results = {**a_fast, **fast_results}
+            classical = frozenset(a_classical) | frozenset(classical)
         self._result_page.show_result(
             result,
             template_path=self._template_used,
@@ -2076,11 +2328,11 @@ class MainWindow(QMainWindow):
             auto_mode=auto_mode,
             val_pool=review_pool,
             score_cache=ctx.score_cache,
-            fast_results=ctx.fast_results,
+            fast_results=fast_results,
             coord_mode=ctx.coord_mode,
             tolerance=ctx.tolerance,
             review_scores=ctx.review_scores,
-            coord_classical_refs=ctx.coord_classical_refs,
+            coord_classical_refs=classical,
         )
         self._show_page(self._result_page)
         self._phase = PHASE_NONE
@@ -2256,6 +2508,7 @@ class MainWindow(QMainWindow):
         self._reviewed_unmatched.clear()
         self._reviewed_unmatched_keys = set()
         self._reviewed_all_matches = []
+        self._reset_cross_state()
         self._run_log_written = False
         self._phase = PHASE_NONE
         # ★ **세션 입력·스캔 결과도 함께 버린다.**  `_autosave` 는 결정마다뿐 아니라
@@ -2302,6 +2555,7 @@ class MainWindow(QMainWindow):
         self._stack.addWidget(self._setup_page)
         self._setup_page.start_requested.connect(self._on_start)
         self._setup_page.update_check_requested.connect(self._manual_update_check)
+        self._setup_page.extract_mode_changed.connect(self._on_extract_mode_changed)
         # 백엔드가 아직이면 '검증 시작' 을 잠그고 버튼에 준비 중을 표기한다.
         self._setup_page.set_backend_ready(self._backend_ready)
 
@@ -2448,8 +2702,23 @@ class MainWindow(QMainWindow):
         ``animate`` 는 페이지가 실제로 슬라이드할 때만 True 다 — 그때 레일 눈금이
         먼저 채워지고, 창은 그 뒤에 화면을 밀어 넣는다(21안-A)."""
         idx = self._page_order(w)
+        self._rail.set_labels(self._rail_labels(w))
         self._rail.set_current(idx, animate=animate)
         self._rail.set_navigable(self._RAIL_ROUTES.get(idx, ()))
+
+    def _rail_labels(self, w: QWidget) -> tuple:
+        """레일 단계 이름 — Defect 추출은 매칭·검토·결과를 거치지 않아 3단계다(사용자 결정).
+
+        설정 화면에서는 입력란의 모드가, 그 뒤로는 시작한 실행의 모드가 기준이다."""
+        if w is self._setup_page and self._setup_page is not None:
+            extract = self._setup_page.is_extract_mode()
+        else:
+            extract = self._is_extract()
+        return (i18n.KO.EXTRACT_JOURNEY_RAIL_STEPS if extract
+                else i18n.KO.JOURNEY_RAIL_STEPS)
+
+    def _on_extract_mode_changed(self, _on: bool) -> None:
+        self._sync_rail(self._stack.currentWidget())
 
     def _on_rail_step_clicked(self, target: int) -> None:
         """레일에서 지난 단계를 눌렀다 — 그 화면이 가진 복귀 흐름을 그대로 부른다.

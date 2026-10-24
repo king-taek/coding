@@ -7,7 +7,10 @@
 
 ★ 파일은 직접 쓴다(MS-SHLLINK 형식).  PowerShell·VBScript 로 만들면 그 자체가
   '스크립트를 띄우는 앱' 으로 보여 보안 프로그램을 다시 자극할 수 있고, pywin32 는
-  번들에 없다.  필요한 블록은 헤더·LinkInfo(로컬 경로)·문자열 3개뿐이다.
+  번들에 없다.  필요한 블록은 헤더·IDList·LinkInfo(로컬 경로)·문자열 3개다.
+★ IDList 를 빼면 안 된다 — 탐색기는 대상의 종류·'열기' 메뉴를 IDList 로 정한다.
+  LinkInfo 만 있던 바로가기는 파일 구조는 맞아도 우클릭에 '열기' 가 없고 실행이 안 됐다
+  (사용자 신고).
 ★ 부가 기능이다 — 어떤 실패도 앱 실행을 막지 않는다(로그만 남긴다).
 
 설치 루트의 bat 자체도 여기서 새것으로 바꾼다(`refresh_bats`).  bat 은 ``app\\`` 바깥이라
@@ -32,6 +35,7 @@ _ROOT_BATS = ("run_aoi.bat", "run_aoi_debug.bat")   # 빌드가 설치 루트에
 _ICON_REL = Path("app") / "aoi_verification" / "app" / "ui" / "assets" / "logo.ico"
 
 # ShellLinkHeader.LinkFlags
+_HAS_LINK_TARGET_ID_LIST = 0x01
 _HAS_LINK_INFO = 0x02
 _HAS_NAME = 0x04
 _HAS_WORKING_DIR = 0x10
@@ -39,6 +43,7 @@ _HAS_ICON_LOCATION = 0x40
 _IS_UNICODE = 0x80
 _SW_SHOWMINNOACTIVE = 7          # bat 의 콘솔 창이 화면에 번쩍이지 않게 최소화로 띄운다
 _CLSID = bytes.fromhex("0114020000000000c000000000000046")
+_CLSID_MY_COMPUTER = bytes.fromhex("e04fd020ea3a6910a2d808002b30309d")   # {20D04FE0-…} LE
 
 
 def _ansi(text: str) -> bytes:
@@ -55,10 +60,37 @@ def _string(text: str) -> bytes:
     return struct.pack("<H", len(data) // 2) + data
 
 
+def _id_list(target: str) -> Optional[bytes]:
+    """LinkTargetIDList — 내 PC → 드라이브 → 파일(나머지 경로 통째).  만들 수 없으면 None.
+
+    파일 항목은 탐색기가 확장 블록 없이도 읽는 단순형(0x32 + 빈 크기·시각·속성 + ANSI
+    이름)이다.  ANSI 로 못 옮기는 글자가 있거나 드라이브 문자 경로가 아니면(UNC) 만들지
+    않는다 — 틀린 IDList 보다 없는 편이 낫다."""
+    drive, sep, rest = target.partition("\\")
+    if len(drive) != 2 or drive[1] != ":" or not sep or not rest:
+        return None
+    try:
+        name = rest.encode("mbcs")
+    except LookupError:                       # Windows 가 아닌 곳(테스트) — 한국어 ANSI
+        name = rest.encode("cp949", "replace")
+    except UnicodeEncodeError:
+        return None
+    items = [
+        b"\x1f\x50" + _CLSID_MY_COMPUTER,
+        (b"\x2f" + (drive + "\\").encode("ascii")).ljust(23, b"\0"),
+        b"\x32" + b"\0" * 11 + name + b"\0",
+    ]
+    body = b"".join(struct.pack("<H", len(i) + 2) + i for i in items) + b"\0\0"
+    return struct.pack("<H", len(body)) + body
+
+
 def build_lnk(target: Path, working_dir: Path, icon: Path, description: str) -> bytes:
     """``target`` 을 가리키는 .lnk 파일 내용."""
+    id_list = _id_list(str(target))
     flags = (_HAS_LINK_INFO | _HAS_NAME | _HAS_WORKING_DIR
              | _HAS_ICON_LOCATION | _IS_UNICODE)
+    if id_list is not None:
+        flags |= _HAS_LINK_TARGET_ID_LIST
     header = struct.pack(
         "<I16sII8s8s8sIiIH2sII",
         0x4C, _CLSID, flags,
@@ -86,7 +118,7 @@ def build_lnk(target: Path, working_dir: Path, icon: Path, description: str) -> 
     assert len(link_info) == size
 
     strings = _string(description) + _string(str(working_dir)) + _string(str(icon))
-    return header + link_info + strings + b"\0\0\0\0"    # ExtraData 끝 표시
+    return header + (id_list or b"") + link_info + strings + b"\0\0\0\0"    # ExtraData 끝 표시
 
 
 def _launcher_root(install_root: Optional[Path], app_root: Path) -> Optional[Path]:

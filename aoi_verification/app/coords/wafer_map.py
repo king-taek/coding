@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import logging
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional
@@ -82,6 +82,9 @@ class MapPoint:
     col: Optional[int]
     row: Optional[int]
     matched: Optional[bool]     # None = 매칭 정보 없음(셋업 단계)
+    # die 안쪽 좌표(µm) — 장비·Conder scan 이 쓰는 표기.  절대좌표 점은 None.
+    die_x: Optional[float] = None
+    die_y: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -427,10 +430,22 @@ def build_map(coords: dict, matched=None) -> MapData:
             col=coord.col if die_known else None,
             row=coord.row if die_known else None,
             matched=None if matched is None else (path in matched),
+            die_x=coord.x if die_known else None,
+            die_y=coord.y if die_known else None,
         ))
     grid = lambda f: None if f is None else (f.pitch_x, f.pitch_y,      # noqa: E731
                                              f.grid_x0, f.grid_y0)
     mixed = len({grid(f) for f in folder_frames.values()}) > 1
+    # LOT 합산: die 맵은 웨이퍼마다 가장자리 칸이 다르다(실측 AVAGO TYW 25장 —
+    # 2921~2956칸, 맨 왼쪽 열이 있는 웨이퍼·없는 웨이퍼).  첫 폴더 맵만 그리면 다른
+    # 슬롯의 가장자리 die 점이 격자 밖에 떨어진다.  격자가 같은 폴더들의 칸을 합친다.
+    if frame is not None and frame.die_cells:
+        union = set(frame.die_cells)
+        for f in folder_frames.values():
+            if f is not None and f.die_cells and grid(f) == grid(frame):
+                union |= f.die_cells
+        if len(union) > len(frame.die_cells):
+            frame = replace(frame, die_cells=frozenset(union))
     return MapData(frame=frame, points=tuple(points), unplaced=tuple(unplaced),
                    mixed_frames=mixed, live_points=live)
 
