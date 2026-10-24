@@ -1082,7 +1082,7 @@ CAUSE_PREFIX = "\n\n[원인] "
 # ── Wafer map ────────────────────────────────────────────────────────────────
 WAFER_MAP_BUTTON = "Wafer Map 보기"
 WAFER_MAP_TITLE = "Wafer Map"
-WAFER_MAP_SUBTITLE = "결함 사진을 웨이퍼 위 실제 위치에 찍습니다 — 휠: 확대 · 드래그: 이동 · 점에 마우스: 사진 · 점 더블클릭: 상세 정보 · 빈 곳 더블클릭: 원래 크기"
+WAFER_MAP_SUBTITLE = "결함 사진을 웨이퍼 위 실제 위치에 찍습니다 — 휠: 확대 · 드래그: 이동 · 점에 마우스: 사진 · 점 더블클릭: 상세 정보"
 WAFER_MAP_PICK_FOLDER = "폴더 선택"
 WAFER_MAP_PICK_FOLDER_ANOTHER = "다른 폴더"
 WAFER_MAP_PICK_FOLDER_TITLE = "웨이퍼(슬롯) 폴더 또는 LOT 폴더 선택"

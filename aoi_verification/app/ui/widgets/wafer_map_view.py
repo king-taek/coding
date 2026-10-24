@@ -23,7 +23,8 @@
 **밖**에 따로 적는다(``wafer_map_dialog._MapPanel.count``).
 
 상호작용: 휠 = 커서 기준 확대, 드래그 = 이동, 호버 = col/row·x/y 툴팁 + 썸네일,
-점 더블클릭 = ``point_activated(Path)``(상세 정보), 빈 곳 더블클릭 = 원래 크기.
+점 더블클릭 = ``point_activated(Path)``(상세 정보).  빈 곳 더블클릭은 아무것도 하지 않는다
+(사용자 결정 — 점을 빗맞히면 확대가 풀려 불편했다).
 썸네일은 **저화질 전용 캐시**(120px·Q60)라 만들기도 띄우기도 가볍고, 시트가 미리
 만들어 두면 툴팁이 바로 뜬다.  QPainter 순수 구현.
 """
@@ -455,8 +456,6 @@ class WaferMapView(QWidget):
         hit = self.point_at(event.position())
         if hit is not None:
             self.point_activated.emit(hit.path)
-        else:
-            self.reset_view()
 
     # ------------------------------------------------------------------
     @staticmethod

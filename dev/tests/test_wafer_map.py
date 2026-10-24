@@ -1040,10 +1040,12 @@ def test_view_double_click_activates_point(qt, tmp_path):
     assert got == []                                         # 단일 클릭은 아무것도 안 연다
     view.mouseDoubleClickEvent(mk(QEvent.Type.MouseButtonDblClick))
     assert [p.stem for p in got] == ["a"]
+    view._zoom = zoom_before = 3.0
     view.mouseDoubleClickEvent(QMouseEvent(
         QEvent.Type.MouseButtonDblClick, QPointF(20, 20), Qt.MouseButton.LeftButton,
         Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier))
-    assert len(got) == 1                                     # 빈 곳은 원래 크기 복귀만
+    assert len(got) == 1
+    assert view.zoom() == zoom_before                        # 빈 곳은 아무것도 안 한다(확대 유지)
 
 
 def test_setup_and_result_pages_have_buttons(qt):
