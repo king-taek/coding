@@ -899,19 +899,30 @@ class ExcelExporter(QThread):
             else:
                 u: MissEntry = payload
                 self._write_slot_cell(ws, row, u.slot, center)
-                # 기준 이미지: 정상 임베드.  '미매칭 사진만 원본 화질' 옵션은 여기만 탄다.
+                # ★ 사진은 **그 사진을 찍은 장비의 열**에 둔다.  기준 쪽 미매칭은 C(기준)
+                #   에 사진·D 에 정보, 교차검증의 검증 쪽 미매칭(side="val")은 거꾸로
+                #   D(검증)에 사진·C 에 정보 — 열 머리(호기)가 곧 '어느 장비에만 있었나' 다.
+                on_val = u.side == "val" and not self._extract
+                img_col, info_col = ((COL_VAL, COL_REF) if on_val
+                                     else (COL_REF, COL_VAL))
+                # '미매칭 사진만 원본 화질' 옵션은 여기만 탄다.
                 t0 = time.perf_counter()
-                if not self._place_image(ws, u.path, COL_REF, row,
+                if not self._place_image(ws, u.path, img_col, row,
                                          cell_w_px, cell_h_px,
                                          original=self._unmatched_original):
-                    ws[f"{COL_REF}{row}"] = str(Path(u.path).name)
+                    ws[f"{img_col}{row}"] = str(Path(u.path).name)
                 t1 = time.perf_counter()
-                self._write_info_cell(ws, COL_VAL, row, u.path,
-                                      unmatched_note=not self._extract)
-                # 미매칭·추출 행의 Scan 은 **그 사진의 것**만, 첫 Scan 열(E)에 둔다.
-                # 검증 Scan 칸(F)은 짝 사진이 없으니 비워 둔다.
+                self._write_info_cell(ws, info_col, row, u.path,
+                                      unmatched_note=not self._extract,
+                                      note=(i18n.KO.NOTE_ONLY_VAL if on_val
+                                            else "미매칭"))
+                # 미매칭·추출 행의 Scan 은 **그 사진의 것**만, 그 장비의 Scan 열에 둔다
+                # (기준 = 첫 Scan 열 E, 검증 = F).  짝 사진 칸은 비워 둔다.
                 if self._scan_cols:
-                    self._place_scan(ws, u.path, self._scan_cols[0], row,
+                    scan_col = (self._scan_cols[1]
+                                if on_val and len(self._scan_cols) > 1
+                                else self._scan_cols[0])
+                    self._place_scan(ws, u.path, scan_col, row,
                                      cell_w_px, cell_h_px)
                 t_img += t1 - t0
                 t_info += time.perf_counter() - t1
@@ -1124,7 +1135,7 @@ class ExcelExporter(QThread):
         self._prog_done = base + placed
 
     def _write_info_cell(self, ws, col: str, row: int, path, *,
-                         unmatched_note: bool) -> None:
+                         unmatched_note: bool, note: str = "미매칭") -> None:
         """미매칭 행의 정보 칸 — 파일명 + 계측·좌표 줄을 **보이는 글자**로.
 
         Defect 추출의 D열(정보)과 Recipe 나란히 배치의 정보 열도 같은 모양이다
@@ -1162,7 +1173,7 @@ class ExcelExporter(QThread):
             horizontal="center", vertical="center", wrap_text=True,
         )
         if unmatched_note:
-            cell_val.comment = Comment("미매칭", "AOI")
+            cell_val.comment = Comment(note, "AOI")
 
     # ------------------------------------------------------------------
     def _write_caption(self, ws, col: str, row: int, src) -> None:
