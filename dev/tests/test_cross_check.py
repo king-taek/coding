@@ -289,3 +289,56 @@ def test_unmatched_review_resolves_the_counterpart_entry(styled_qapp, monkeypatc
         assert [(m.ref_path, m.val_path) for m in dlg.new_matches] == [(r1, v1)]
     finally:
         dlg.deleteLater()
+
+
+# ---------------------------------------------------------------------------
+# 상단 레일 — 교차검증은 선별·매칭·검토를 1차·2차 두 번 보여 준다(8단계)
+# ---------------------------------------------------------------------------
+def _rail_window(stage):
+    import aoi_verification.app.ui.main_window as MW
+    win = MW.MainWindow.__new__(MW.MainWindow)
+    win._reset_cross_state()
+    win._cross_stage = stage
+    win._input = SimpleNamespace(mode="cross" if stage else "single", extract=False)
+    (win._setup_page, win._select_page, win._match_page,
+     win._match_review_page, win._result_page) = (object() for _ in range(5))
+    return win
+
+
+def test_rail_follows_the_cross_order(styled_qapp):
+    from aoi_verification.app import i18n
+    a, b = _rail_window("A"), _rail_window("B")
+    assert a._rail_labels(a._select_page) == i18n.KO.CROSS_JOURNEY_RAIL_STEPS
+    pages = ("_select_page", "_match_page", "_match_review_page")
+    assert [a._rail_index(getattr(a, p)) for p in pages] == [1, 2, 3]
+    assert [b._rail_index(getattr(b, p)) for p in pages] == [4, 5, 6]
+    assert b._rail_index(b._result_page) == 7
+    labels = i18n.KO.CROSS_JOURNEY_RAIL_STEPS
+    assert labels[4].startswith("2차") and labels[7] == "결과"
+    # 복귀: 결과 → 2차 검토(실제 복귀 경로), 그 밖에는 설정만.
+    assert b._rail_routes(7) == (6,)
+    assert b._rail_routes(4) == (0,) and a._rail_routes(2) == (0,)
+
+
+def test_single_mode_rail_is_unchanged(styled_qapp):
+    from aoi_verification.app import i18n
+    w = _rail_window("")
+    assert w._rail_labels(w._select_page) == i18n.KO.JOURNEY_RAIL_STEPS
+    assert w._rail_index(w._result_page) == 4
+    assert w._rail_routes(4) == (3,)
+
+
+def test_setup_starts_cross_off_and_tolerance_at_default(styled_qapp, monkeypatch):
+    """앱을 켤 때마다 교차검증은 꺼짐, 허용 오차는 200 µm 에서 시작한다(사용자 결정)."""
+    from aoi_verification.app import config
+    from aoi_verification.app.utils import prefs as _prefs
+    saved = _prefs.UiPrefs(coord_tolerance=350.0, prefs_version=_prefs.PREFS_VERSION)
+    monkeypatch.setattr(_prefs, "load", lambda: saved)
+    from aoi_verification.app.ui.pages.setup_page import SetupPage
+    page = SetupPage()
+    try:
+        assert not page.is_cross_mode()
+        assert page.coord_tol_spin.value() == config.DEFAULT_COORD_TOLERANCE == 200.0
+        assert not hasattr(_prefs.UiPrefs(), "cross_check")
+    finally:
+        page.deleteLater()

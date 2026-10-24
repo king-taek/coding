@@ -78,8 +78,6 @@ class UiPrefs:
     extract_recipe_layout: str = "single"
     # Defect 추출 엑셀에 Wafer Map 시트를 넣을지 — 설정 화면 스위치의 마지막 값.
     extract_wafer_map: bool = True
-    # 교차검증(양방향) — 설정 화면 스위치의 마지막 값(기본 꺼짐: 예전처럼 한 방향).
-    cross_check: bool = False
     # OpenVINO (Intel GPU 가속) 자동 설치 안내를 거절한 경우 — 다시 묻지
     # 않음.  사용자가 ‘다시 보지 않기’ 를 선택했거나 설치 시도 후 실패하면 True.
     openvino_install_declined: bool = False

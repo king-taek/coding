@@ -2549,6 +2549,7 @@ class MainWindow(QMainWindow):
         self._setup_page.start_requested.connect(self._on_start)
         self._setup_page.update_check_requested.connect(self._manual_update_check)
         self._setup_page.extract_mode_changed.connect(self._on_extract_mode_changed)
+        self._setup_page.cross_mode_changed.connect(self._on_extract_mode_changed)
         # 백엔드가 아직이면 '검증 시작' 을 잠그고 버튼에 준비 중을 표기한다.
         self._setup_page.set_backend_ready(self._backend_ready)
 
@@ -2688,26 +2689,51 @@ class MainWindow(QMainWindow):
         3: (0,),        # 매치 검토 → 설정   (여기서 묻는다 — 화면에 경로가 없었다)
         4: (3,),        # 결과     → 매치 검토 (기존 [← 검토 화면으로] 와 같은 길)
     }
+    # 교차검증 레일(8단계)의 단계 → 위 표의 단계.  선별·매칭·검토가 1차(1~3)·2차(4~6)
+    # 두 번 나오고 결과가 7 이다.  복귀 경로는 같은 화면이 가진 그대로다 — 결과에서는
+    # 2차 검토로만 돌아간다(`_reenter_review`).
+    _CROSS_RAIL_STEP = {0: 0, 1: 1, 2: 2, 3: 3, 4: 1, 5: 2, 6: 3, 7: 4}
+
+    def _rail_index(self, w: QWidget) -> int:
+        """레일에 표시할 단계 번호 — 교차검증의 2차(검증 → 기준)는 3칸 뒤다."""
+        idx = self._page_order(w)
+        if not self._cross_stage or idx == 0:
+            return idx
+        if idx == 4:
+            return 7
+        return idx + 3 if self._cross_stage == "B" else idx
+
+    def _rail_routes(self, rail_idx: int) -> tuple[int, ...]:
+        if not self._cross_stage:
+            return self._RAIL_ROUTES.get(rail_idx, ())
+        if rail_idx == 7:
+            return (6,)
+        return (0,) if rail_idx else ()
 
     def _sync_rail(self, w: QWidget, *, animate: bool = False) -> None:
         """레일의 현재 단계와 '눌러서 갈 수 있는 단계' 를 화면에 맞춘다.
 
         ``animate`` 는 페이지가 실제로 슬라이드할 때만 True 다 — 그때 레일 눈금이
         먼저 채워지고, 창은 그 뒤에 화면을 밀어 넣는다(21안-A)."""
-        idx = self._page_order(w)
+        idx = self._rail_index(w)
         self._rail.set_labels(self._rail_labels(w))
         self._rail.set_current(idx, animate=animate)
-        self._rail.set_navigable(self._RAIL_ROUTES.get(idx, ()))
+        self._rail.set_navigable(self._rail_routes(idx))
 
     def _rail_labels(self, w: QWidget) -> tuple:
         """레일 단계 이름 — Defect 추출은 매칭·검토·결과를 거치지 않아 3단계다(사용자 결정).
+        교차검증은 선별·매칭·검토를 두 번 돌아 8단계다(사용자 요청 2026-10-24).
 
         설정 화면에서는 입력란의 모드가, 그 뒤로는 시작한 실행의 모드가 기준이다."""
         if w is self._setup_page and self._setup_page is not None:
             extract = self._setup_page.is_extract_mode()
+            cross = self._setup_page.is_cross_mode()
         else:
             extract = self._is_extract()
-        return (i18n.KO.EXTRACT_JOURNEY_RAIL_STEPS if extract
+            cross = bool(self._cross_stage)
+        if extract:
+            return i18n.KO.EXTRACT_JOURNEY_RAIL_STEPS
+        return (i18n.KO.CROSS_JOURNEY_RAIL_STEPS if cross
                 else i18n.KO.JOURNEY_RAIL_STEPS)
 
     def _on_extract_mode_changed(self, _on: bool) -> None:
@@ -2718,9 +2744,11 @@ class MainWindow(QMainWindow):
 
         ★ 폐기 확인을 여기서 새로 쓰지 않는다.  선별/매칭은 이미 자기 규칙(무엇이
         사라지는지)을 알고 물어보므로 그쪽을 부르는 것이 단일 출처다."""
-        cur = self._page_order(self._stack.currentWidget())
-        if target not in self._RAIL_ROUTES.get(cur, ()):
+        rail_cur = self._rail_index(self._stack.currentWidget())
+        if target not in self._rail_routes(rail_cur):
             return
+        cur = (self._CROSS_RAIL_STEP[rail_cur] if self._cross_stage
+               else rail_cur)
         if cur == 1 and self._select_page is not None:
             self._select_page.request_back_to_setup()
         elif cur == 2 and self._match_page is not None:
