@@ -14,8 +14,8 @@ LIVE 파일명 사진, Camtek ↔ KLA)로 봤을 때 앱이 계산한 die (col, 
 
 사용법::
 
-    python dev/collect_coord_samples.py "<폴더1>" "<폴더2>" ...
-    python dev/collect_coord_samples.py              # 창에서 폴더를 하나씩 고른다(취소 = 끝)
+    더블클릭                                          # 아래 DEFAULT_FOLDERS 를 모은다
+    python dev/collect_coord_samples.py "<폴더1>" "<폴더2>" ...   # 다른 폴더를 줄 때
 
 폴더는 웨이퍼 폴더(사진이 바로 든 폴더)를 주는 게 가장 좋다.  zip 은 바탕화면에 만든다
 (``--out`` 으로 바꿀 수 있다).  원본은 아무것도 바꾸지 않는다.
@@ -32,42 +32,17 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+# 인자 없이(더블클릭) 실행하면 모을 폴더 — 2026-10-24 T254 좌표 불일치 건.
+DEFAULT_FOLDERS = [
+    r"V:\AOI-16\Scanresult\2D@R5-AS-T254-A01_0857122AY-0B\6324\WVU\GX57007306",
+    r"\\k5cifsn2\k5tsvdata$\1. Conder Scan\531. NVIDIA INT\145. AST254-AG6S2-6CAA"
+    r"\22. E1X000.C03 DCC20 (WVU)\2. BS CUP\GX57007306",
+]
+
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".gif"}
 MAX_FILE_MB = 50          # 이보다 큰 비사진 파일은 담지 않고 보고에만 적는다
 MAX_DEPTH = 3             # 고른 폴더 아래로 내려가는 깊이
 MAX_DIRS = 400            # 폴더 하나에서 훑는 하위 폴더 상한(LOT 통째로 골랐을 때 대비)
-
-
-def _pick_folders() -> list[str]:
-    """창(PyQt6 → tkinter → 콘솔)으로 폴더를 하나씩 고른다.  취소하면 끝."""
-    out: list[str] = []
-    try:
-        from PyQt6.QtWidgets import QApplication, QFileDialog
-        _app = QApplication.instance() or QApplication(sys.argv)  # noqa: F841
-        while True:
-            p = QFileDialog.getExistingDirectory(
-                None, f"{len(out) + 1}번째 폴더 (다 골랐으면 취소)", out[-1] if out else "")
-            if not p:
-                return out
-            out.append(p)
-    except ImportError:
-        pass
-    try:
-        import tkinter
-        from tkinter import filedialog
-        tkinter.Tk().withdraw()
-        while True:
-            p = filedialog.askdirectory(title=f"{len(out) + 1}번째 폴더 (다 골랐으면 취소)")
-            if not p:
-                return out
-            out.append(p)
-    except ImportError:
-        pass
-    while True:
-        p = input(f"{len(out) + 1}번째 폴더 경로 (빈칸 = 끝): ").strip().strip('"')
-        if not p:
-            return out
-        out.append(p)
 
 
 def _walk(root: Path):
@@ -186,13 +161,10 @@ def collect(folders: list[Path], out_dir: Path) -> Path:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("folders", nargs="*", help="웨이퍼 폴더들(없으면 창에서 고름)")
+    ap.add_argument("folders", nargs="*", help="웨이퍼 폴더들(없으면 DEFAULT_FOLDERS)")
     ap.add_argument("--out", default=str(Path.home() / "Desktop"), help="zip 저장 폴더")
     args = ap.parse_args(argv)
-    folders = args.folders or _pick_folders()
-    if not folders:
-        print("고른 폴더가 없습니다.")
-        return 1
+    folders = args.folders or DEFAULT_FOLDERS
     dst = collect([Path(f) for f in folders], Path(args.out))
     print(f"만들었습니다: {dst}\n이 zip 을 대화에 올려 주세요.")
     try:
@@ -203,4 +175,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    code = main()
+    if len(sys.argv) == 1:                         # 더블클릭 — 창이 바로 닫히지 않게
+        input("엔터를 누르면 닫힙니다.")
+    sys.exit(code)
