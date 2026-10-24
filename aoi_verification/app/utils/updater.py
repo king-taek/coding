@@ -63,7 +63,7 @@ _API = "https://api.github.com/repos/{repo}/commits/{branch}"
 _ATOM = "https://github.com/{repo}/commits/{branch}.atom"
 _ZIP = "https://github.com/{repo}/archive/refs/heads/{branch}.zip"
 _UA = {"User-Agent": "AOI-Verify-Updater"}
-# 개발자 모드의 '전부 받기' — 브랜치 zip 은 `.gitattributes` 의 export-ignore 로 배포용만
+# 개발자 모드 설치(배포분 + dev/) — 브랜치 zip 은 `.gitattributes` 의 export-ignore 로 배포용만
 # 담기므로, 커밋의 파일 목록(trees API)을 받아 파일마다 raw 로 내려받는다.
 _API_TREE = "https://api.github.com/repos/{repo}/git/trees/{sha}?recursive=1"
 _RAW = "https://raw.githubusercontent.com/{repo}/{sha}/{path}"
@@ -705,8 +705,8 @@ def _stage_tree(src_root: Path, staging: Path, emit, full: bool = False) -> None
     덮어쓰기만 해서 지운 모듈이 사용자 디스크에 영원히 남았다), ``__pycache__`` 의 낡은
     바이트코드도 따라오지 않는다.
 
-    ``full`` 이면 배포 거르기(세 목록)를 하나도 적용하지 않는다 — 개발자 모드의
-    '전부 받기' 다(``_download_full_tree`` 가 이미 받을 것만 받아 왔다)."""
+    ``full`` 이면 배포 거르기(세 목록)를 적용하지 않는다 — 개발자 모드 설치다
+    (``_download_full_tree`` 가 이미 받을 것만 받아 왔다: 배포분 + ``dev/``)."""
     import shutil
 
     staging.mkdir(parents=True, exist_ok=True)
@@ -842,18 +842,30 @@ def _ensure_deps(root: Path, staging: Path, emit) -> bool:
     return True
 
 
-# 개발자 모드 '전부 받기' 에서도 빼는 최상위 폴더.
-# ★ `.claude`(스킬 스크립트 js·sh 700여 개)는 사용자 PC 에 풀린 뒤 회사 보안이 앱 exe 를
-#   지운 원인이었다(`.gitattributes` 머리말) — 앱 실행·테스트와도 무관하다.
-_DEV_FULL_SKIP_TOP = {".claude"}
+# 개발자 모드 설치가 배포분에 **더해** 받는 최상위 폴더(사용자 결정: dev 까지만).
+# 나머지(.claude·docs·scripts 의 개발 파일 등)는 일반 업데이트와 똑같이 거른다.
+_DEV_EXTRA_TOP = {"dev"}
+
+
+def _dev_wanted(rel: str) -> bool:
+    """개발자 모드에서 받을 파일인가 — 배포분(세 목록을 통과하는 것) + ``dev/`` 전부."""
+    top, _, rest = rel.partition("/")
+    if top in _DEV_EXTRA_TOP:
+        return True
+    if top in _UPDATE_SKIP_TOP or rel in _UPDATE_SKIP_PATHS:
+        return False
+    keep = _UPDATE_KEEP_ONLY.get(top)
+    if keep is not None and rest:
+        return rest.split("/", 1)[0] in keep
+    return True
 
 
 def _download_full_tree(repo: str, sha: str, dest: Path, timeout: float,
                         emit) -> Path:
-    """커밋 ``sha`` 의 **저장소 파일 전부**를 ``dest`` 아래에 받아 그 폴더를 돌려준다.
+    """커밋 ``sha`` 의 배포분 + ``dev/`` 를 ``dest`` 아래에 받아 그 폴더를 돌려준다
+    (``_dev_wanted``).
 
-    브랜치 zip 은 export-ignore 로 개발 파일(dev·docs·scripts 대부분)이 빠져 있어
-    개발자 모드에서는 쓸 수 없다.  trees API 로 목록을 받고 raw 로 파일마다 받는다
+    브랜치 zip 은 export-ignore 로 ``dev/`` 가 빠져 있어 개발자 모드에서는 쓸 수 없다.  trees API 로 목록을 받고 raw 로 파일마다 받는다
     (동시 8개).  목록이 잘렸거나(truncated) 한 파일이라도 실패하면 예외 —
     반쪽 트리를 적용하지 않는다."""
     import urllib.parse
@@ -866,7 +878,7 @@ def _download_full_tree(repo: str, sha: str, dest: Path, timeout: float,
         raise RuntimeError("git tree truncated")
     paths = [e["path"] for e in tree.get("tree", [])
              if e.get("type") == "blob" and e.get("path")
-             and e["path"].split("/", 1)[0] not in _DEV_FULL_SKIP_TOP]
+             and _dev_wanted(e["path"])]
     root = dest / "src"
     n = len(paths)
     emit(0, n, i18n.KO.UPDATE_PHASE_DOWNLOAD)
@@ -933,8 +945,8 @@ def download_and_apply(repo: str, branch: str, target_sha: str,
     보고한다(로딩바가 0 에서 멈추지 않도록).  total<=0 이면 진행량 미상(busy) 의미.
 
     ``dev`` 는 개발자 모드에서 고른 대상이라는 표식으로, VERSION 에 함께 남는다.
-    이때는 배포용 zip 대신 **저장소 파일 전부**를 받아 거르지 않고 적용한다
-    (``_download_full_tree`` — dev·docs·scripts 등 개발 파일 포함)."""
+    이때는 배포용 zip 대신 파일을 하나씩 받아 **배포분 + ``dev/``** 를 적용한다
+    (``_download_full_tree``·``_dev_wanted``)."""
     import shutil
     import tempfile
 
