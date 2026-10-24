@@ -5,7 +5,9 @@
 (``docs/좌표_검증_필요자료.md`` — 119 µm).  허용 오차(기본 200 µm)의 절반을 그
 고정 어긋남이 먹는다.  매칭 직전에 사용자가 쌍 몇 개를 고르면 그 차이로
 **평행이동 보정값** ``(dx, dy)`` 를 구해 KLA 쪽 좌표에 더한다(사용자 결정:
-평행이동만·실행 전체 1회·저장 안 함).
+평행이동만·실행 전체 1회·저장 안 함).  쌍을 고르기 전에 자료에서 자동으로 추정한 값
+(:func:`auto_offset`)을 먼저 내밀고, 믿을 만하면 사용자가 그대로 적용할 수 있다
+(사용자 결정 2026-10-24 — 하드코딩 대신 실행마다 계산).
 
 ★ **보정은 매칭 계산 안에서만 쓴다**(사용자 지시).  :func:`apply_offset` 은 새 dict 를
 돌려줄 뿐 ``coords.resolve`` 의 캐시·엑셀·화면 좌표는 건드리지 않는다.
@@ -22,12 +24,13 @@ from __future__ import annotations
 import math
 from dataclasses import replace
 from statistics import median
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, NamedTuple, Optional, Sequence, Tuple
 
 from .models import DefectCoord
 
 __all__ = ["Offset", "ZERO", "SEARCH_RADIUS_UM", "is_zero", "pair_offset",
-           "estimate_offset", "residuals", "guess_offset", "build_entries", "order_candidates",
+           "estimate_offset", "residuals", "guess_offset", "AutoOffset", "auto_offset",
+           "is_confident", "build_entries", "order_candidates",
            "near_candidates",
            "apply_offset"]
 
@@ -40,6 +43,13 @@ ZERO: Offset = (0.0, 0.0)
 SEARCH_RADIUS_UM = 1000.0
 # :func:`guess_offset` 의 투표 칸 크기(µm).
 _VOTE_BIN_UM = 20.0
+# :func:`auto_offset` 의 신뢰 기준.  관측(2026-10-24, TB500 RDL4 LOT 2개 44장 —
+# VPK 4F-K1↔AOI-20 · LSU ↔AOI-23): 실행 전체로 모으면 추정값 (87, −91) 주변 30 µm 안에
+# 207표, 그 밖 가장 큰 무리 18표.  웨이퍼 한 장씩 보면 결함이 몰린 웨이퍼(31266524EWG5)가
+# (117, −72) 를 냈는데 5표 대 3표였다.  아래 두 값은 그 사이에 둔 **가정**이다.
+_SUPPORT_UM = 30.0          # 추정값 주변 이 거리 안의 표를 '지지' 로 센다
+MIN_AUTO_SUPPORT = 8        # 지지 표가 이보다 적으면 자동값을 믿지 않는다
+AUTO_DOMINANCE = 2.0        # 지지 표가 두 번째 무리의 이 배수 이상이어야 한다
 
 
 def is_zero(offset: Optional[Offset]) -> bool:
@@ -91,8 +101,8 @@ def guess_offset(groups: Iterable[Tuple[Sequence[DefectCoord], Sequence[DefectCo
     ``groups`` 는 슬롯마다 ``(기준 좌표들, 검증 좌표들)`` — 매칭처럼 같은 슬롯끼리만
     본다.  이웃 후보 전부의 ``cam − kla`` 를 ``_VOTE_BIN_UM`` 칸에 투표해 가장 많이
     모인 칸(과 그 이웃 칸)의 중앙값을 낸다.  진짜 같은 결함들은 같은 어긋남을
-    공유하고, 우연한 이웃은 흩어진다.  **후보 정렬용 힌트**일 뿐 보정값으로 바로 쓰지
-    않는다 — 보정값은 늘 사용자가 확정한 쌍에서만 나온다.  표가 2표 미만이면 None."""
+    공유하고, 우연한 이웃은 흩어진다.  후보 정렬 힌트이자 :func:`auto_offset` 의 추정값
+    이다 — 보정값으로 쓸 때는 늘 사용자가 화면에서 확인하고 적용한다.  표가 2표 미만이면 None."""
     votes: List[Offset] = []
     for src, others in groups:
         indexed = list(enumerate(others))
@@ -116,6 +126,56 @@ def guess_offset(groups: Iterable[Tuple[Sequence[DefectCoord], Sequence[DefectCo
             if abs(math.floor(dx / _VOTE_BIN_UM) - best[0]) <= 1
             and abs(math.floor(dy / _VOTE_BIN_UM) - best[1]) <= 1]
     return estimate_offset(near)
+
+
+class AutoOffset(NamedTuple):
+    """자료에서 자동으로 추정한 보정값과 그 근거(표 수)."""
+    offset: Offset
+    support: int        # 추정값 주변 ``_SUPPORT_UM`` 안의 표
+    runner_up: int      # 그 밖에서 가장 큰 무리의 표
+    votes: int          # 전체 표
+
+
+def _votes(groups, *, src_is_kla: bool, radius: float) -> List[Offset]:
+    out: List[Offset] = []
+    for src, others in groups:
+        indexed = list(enumerate(others))
+        for s in src:
+            for _k, c, _d in _neighbors(s, indexed, radius):
+                out.append(_cam_minus_kla(s, c, src_is_kla))
+    return out
+
+
+def auto_offset(groups: Iterable[Tuple[Sequence[DefectCoord], Sequence[DefectCoord]]],
+                *, src_is_kla: bool,
+                radius: float = SEARCH_RADIUS_UM) -> Optional[AutoOffset]:
+    """매칭할 때마다 **자료에서** 보정값을 추정한다 — 값을 저장하거나 하드코딩하지 않는다.
+
+    원인(2026-10-24 분석, ``docs/좌표_KLA_Camtek_오프셋.md``): KLA·Camtek 레시피가 die
+    기준점을 서로 다른 곳에 정의해 둔 것이라 웨이퍼·Camtek 장비와 무관하게 일정했지만,
+    제품이 바뀌면 달라지는지는 모른다.  그래서 실행마다 다시 잰다.
+
+    추정 자체는 :func:`guess_offset`(투표)이고, 여기서는 **믿을 만한지**를 판단할 근거를
+    붙인다(:func:`is_confident`).  ``groups`` 는 실행 전체 슬롯을 넘긴다 — 웨이퍼 한 장
+    으로는 결함이 몰린 곳에서 짝이 섞여 틀린 값이 나왔다(위 상수 주석)."""
+    guess = guess_offset(groups, src_is_kla=src_is_kla, radius=radius)
+    if guess is None:
+        return None
+    groups = [(list(s), list(o)) for s, o in groups]
+    votes = _votes(groups, src_is_kla=src_is_kla, radius=radius)
+    gx, gy = guess
+    near = [v for v in votes if math.hypot(v[0] - gx, v[1] - gy) <= _SUPPORT_UM]
+    rest = [v for v in votes if math.hypot(v[0] - gx, v[1] - gy) > 2 * _SUPPORT_UM]
+    runner = max((sum(1 for w in rest
+                      if math.hypot(w[0] - v[0], w[1] - v[1]) <= _SUPPORT_UM)
+                  for v in rest), default=0)
+    return AutoOffset(offset=guess, support=len(near), runner_up=runner, votes=len(votes))
+
+
+def is_confident(auto: Optional[AutoOffset]) -> bool:
+    """자동값을 사용자에게 '그대로 적용' 으로 내밀어도 되는가."""
+    return (auto is not None and auto.support >= MIN_AUTO_SUPPORT
+            and auto.support >= AUTO_DOMINANCE * auto.runner_up)
 
 
 def build_entries(groups, *, src_is_kla: bool, radius: float = SEARCH_RADIUS_UM):

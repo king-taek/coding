@@ -1,0 +1,87 @@
+FileVersion 1 2;
+FileTimestamp 09-28-26 07:11:30;
+InspectionStationID "KLA" "LDS CIRCL" "Tool";
+SampleType WAFER;
+ResultTimestamp 09-24-26 15:51:21;
+LotID "TB500.INT846@6412";
+SampleSize 1 300;
+DeviceID "4DT-TB500-H-M1";
+SetupID "ROOT-HVM-4DT-TB500-H-M1-RDL4_AUTO_RBB" 09-22-26 17:29:00;
+StepID "RDL4_AUTO_RBB";
+SampleOrientationMarkType NOTCH;
+OrientationMarkLocation DOWN;
+DiePitch 3.7247898000e+004 4.4905344000e+004;
+DieOrigin 0.0000000000e+000 0.0000000000e+000;
+WaferID "34155082EWC7";
+Slot 25;
+SampleCenterLocation 1.8419000000e+004 -1.5299700000e+002;
+ClassLookup 15
+  0 "	Unclassified"
+  3 "Metal Residue	"
+  1 "Undersized Bump	"
+  2 "Missing bump	"
+  4 "Bridged Bumps	"
+  7 "Irregular Bump	"
+  9 "Oversized Bump	"
+  14 "RDL defect	"
+  22 "Scratch	"
+  23 "re-passivation defect	"
+  31 "Foreign Material	"
+  94 "Other	"
+  777 "Monitor1	"
+  778 "Monitor2	"
+  779 "Monitor3	"  ;
+OrientationInstructions "Front";
+CoordinatesMirrored NO;
+InspectionTest 3;
+SampleTestPlan 30
+  -3 -1 
+  -3 0 
+  -2 -2 
+  -2 -1 
+  -2 0 
+  -2 1 
+  -1 -3 
+  -1 -2 
+  -1 -1 
+  -1 0 
+  -1 1 
+  -1 2 
+  0 -3 
+  0 -2 
+  0 -1 
+  0 0 
+  0 1 
+  0 2 
+  1 -3 
+  1 -2 
+  1 -1 
+  1 0 
+  1 1 
+  1 2 
+  2 -2 
+  2 -1 
+  2 0 
+  2 1 
+  3 -1 
+  3 0 ;
+AreaPerTest 1.0035800000e+011;
+DefectRecordSpec 22 DEFECTID X Y XREL YREL XINDEX YINDEX XSIZE YSIZE DEFECTAREA DSIZE CLASSNUMBER TEST CLUSTERNUMBER ROUGHBINNUMBER FINEBINNUMBER CHANNELID MACROSIGCLASS INTENSITY MACROSIGID IMAGECOUNT IMAGELIST ;
+DefectList;
+TiffFileName 34155082EWC7_-3_0_23_1.jpg;
+DefectList
+ 1 -126719.559 3289.570 3443.135 3136.573 -3 0 32.460 18.730 607.830000 32.460 23 3 0 0 4 4 0 3357 0 1 1 1 0;
+TiffFileName 34155082EWC7_3_-1_23_2.jpg;
+DefectList
+ 2 124074.550 -14919.799 30749.855 29832.547 3 -1 4.990 3.750 18.700000 4.990 23 3 0 0 1 1 0 2740 0 1 1 1 0;
+TiffFileName 34155082EWC7_0_-1_14_3.jpg;
+DefectList
+ 3 12869.030 -7015.039 31288.030 37737.307 0 -1 1.560 1.560 2.450000 1.560 14 3 0 0 3 3 0 2081 0 1 1 1 0;
+TiffFileName 34155082EWC7_1_-2_14_4.jpg;
+DefectList
+ 4 49944.800 -72973.269 31115.902 16684.421 1 -2 1.560 1.880 2.940000 1.880 14 3 0 0 4 4 0 3338 0 1 1 1 0;
+SummarySpec 5
+  TESTNO    NDEFECT    DEFDENSITY    NDIE    NDEFDIE  ;
+SummaryList 
+  3    4    3.9857398649e-003    30    15  ;
+EndOfFile;

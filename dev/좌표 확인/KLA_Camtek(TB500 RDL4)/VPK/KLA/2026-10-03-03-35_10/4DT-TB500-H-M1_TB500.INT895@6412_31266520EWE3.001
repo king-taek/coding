@@ -1,0 +1,109 @@
+FileVersion 1 2;
+FileTimestamp 10-04-26 10:30:53;
+InspectionStationID "KLA" "LDS CIRCL" "Tool";
+SampleType WAFER;
+ResultTimestamp 10-03-26 02:08:08;
+LotID "TB500.INT895@6412";
+SampleSize 1 300;
+DeviceID "4DT-TB500-H-M1";
+SetupID "ROOT-HVM-4DT-TB500-H-M1-RDL4_AUTO_RBB" 09-22-26 17:29:00;
+StepID "RDL4_AUTO_RBB";
+SampleOrientationMarkType NOTCH;
+OrientationMarkLocation DOWN;
+DiePitch 3.7247898000e+004 4.4905344000e+004;
+DieOrigin 0.0000000000e+000 0.0000000000e+000;
+WaferID "31266520EWE3";
+Slot 10;
+SampleCenterLocation 1.8419000000e+004 -1.5299700000e+002;
+ClassLookup 16
+  0 "	Unclassified"
+  3 "Metal Residue	"
+  1 "Undersized Bump	"
+  2 "Missing bump	"
+  4 "Bridged Bumps	"
+  7 "Irregular Bump	"
+  9 "Oversized Bump	"
+  14 "RDL defect	"
+  22 "Scratch	"
+  23 "re-passivation defect	"
+  31 "Foreign Material	"
+  94 "Other	"
+  777 "Monitor1	"
+  778 "Monitor2	"
+  779 "Monitor3	"
+  780 "Swelling	"  ;
+OrientationInstructions "Front";
+CoordinatesMirrored NO;
+InspectionTest 3;
+SampleTestPlan 30
+  -3 -1 
+  -3 0 
+  -2 -2 
+  -2 -1 
+  -2 0 
+  -2 1 
+  -1 -3 
+  -1 -2 
+  -1 -1 
+  -1 0 
+  -1 1 
+  -1 2 
+  0 -3 
+  0 -2 
+  0 -1 
+  0 0 
+  0 1 
+  0 2 
+  1 -3 
+  1 -2 
+  1 -1 
+  1 0 
+  1 1 
+  1 2 
+  2 -2 
+  2 -1 
+  2 0 
+  2 1 
+  3 -1 
+  3 0 ;
+AreaPerTest 1.0035800000e+011;
+DefectRecordSpec 22 DEFECTID X Y XREL YREL XINDEX YINDEX XSIZE YSIZE DEFECTAREA DSIZE CLASSNUMBER TEST CLUSTERNUMBER ROUGHBINNUMBER FINEBINNUMBER CHANNELID MACROSIGCLASS INTENSITY MACROSIGID IMAGECOUNT IMAGELIST ;
+DefectList;
+TiffFileName 31266520EWE3_-1_2_31_1.jpg;
+DefectList
+ 1 -47597.109 132937.320 8069.788 42973.636 -1 2 3.750 23.720 88.840000 23.720 31 3 0 0 1 1 0 1754 0 1 1 1 0;
+TiffFileName 31266520EWE3_0_-3_23_2.jpg;
+DefectList
+ 2 5794.120 -93267.729 24213.120 41295.304 0 -3 3.750 2.500 9.350000 3.750 23 3 2 0 1 1 0 2681 0 1 1 1 0;
+TiffFileName 31266520EWE3_0_-3_23_3.jpg;
+DefectList
+ 3 5800.370 -93230.269 24219.370 41332.764 0 -3 12.480 7.490 93.510000 12.480 23 3 2 0 1 1 0 1089 0 1 1 1 0;
+TiffFileName 31266520EWE3_-1_-3_23_4.jpg;
+DefectList
+ 4 -30387.619 -103238.809 25279.278 31324.224 -1 -3 4.990 3.750 18.700000 4.990 23 3 0 0 2 2 0 3252 0 1 1 1 0;
+TiffFileName 31266520EWE3_-1_-3_31_5.jpg;
+DefectList
+ 5 -38794.489 -129133.389 16872.408 5429.644 -1 -3 12.480 16.230 202.610000 16.230 31 3 1 0 1 1 0 1612 0 1 1 1 0;
+TiffFileName 31266520EWE3_-1_-3_31_6.jpg;
+DefectList
+ 6 -38816.959 -129033.519 16849.938 5529.514 -1 -3 1.250 2.500 3.120000 2.500 31 3 1 0 2 2 0 2550 0 1 1 1 0;
+TiffFileName 31266520EWE3_-1_-3_31_7.jpg;
+DefectList
+ 7 -38824.449 -129107.179 16842.448 5455.854 -1 -3 9.990 8.740 87.280000 9.990 31 3 1 0 1 1 0 1833 0 1 1 1 0;
+TiffFileName 31266520EWE3_-1_-3_31_8.jpg;
+DefectList
+ 8 -38853.169 -129036.019 16813.728 5527.014 -1 -3 4.990 11.240 56.110000 11.240 31 3 1 0 2 2 0 3475 0 1 1 1 0;
+TiffFileName 31266520EWE3_-1_-3_31_9.jpg;
+DefectList
+ 9 -38859.409 -129102.179 16807.488 5460.854 -1 -3 9.990 13.730 137.150000 13.730 31 3 1 0 1 1 0 1728 0 1 1 1 0;
+TiffFileName 31266520EWE3_-1_-3_23_10.jpg;
+DefectList
+ 10 -54555.809 -127883.729 1111.088 6679.304 -1 -3 4.990 2.500 12.470000 4.990 23 3 0 0 1 1 0 2716 0 1 1 1 0;
+TiffFileName 31266520EWE3_0_-1_3_11.jpg;
+DefectList
+ 11 -12885.699 -19755.389 5533.300 24996.957 0 -1 0.940 0.630 0.590000 0.940 3 3 0 0 1 1 0 731 0 1 1 1 0;
+SummarySpec 5
+  TESTNO    NDEFECT    DEFDENSITY    NDIE    NDEFDIE  ;
+SummaryList 
+  3    11    1.0960784629e-002    30    23  ;
+EndOfFile;
