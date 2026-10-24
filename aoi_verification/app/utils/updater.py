@@ -63,6 +63,10 @@ _API = "https://api.github.com/repos/{repo}/commits/{branch}"
 _ATOM = "https://github.com/{repo}/commits/{branch}.atom"
 _ZIP = "https://github.com/{repo}/archive/refs/heads/{branch}.zip"
 _UA = {"User-Agent": "AOI-Verify-Updater"}
+# 개발자 모드 설치(배포분 + dev/) — 브랜치 zip 은 `.gitattributes` 의 export-ignore 로 배포용만
+# 담기므로, 커밋의 파일 목록(trees API)을 받아 파일마다 raw 로 내려받는다.
+_API_TREE = "https://api.github.com/repos/{repo}/git/trees/{sha}?recursive=1"
+_RAW = "https://raw.githubusercontent.com/{repo}/{sha}/{path}"
 
 # 마지막 네트워크 오류 사유(사용자에게 표시 — '왜 안 되는지' 진단).
 _last_error: str = ""
@@ -261,22 +265,26 @@ def current_version() -> Optional[dict]:
     return None
 
 
-def _write_version_to(root: Path, sha: str, branch: str, repo: str) -> None:
+def _write_version_to(root: Path, sha: str, branch: str, repo: str,
+                      dev: bool = False) -> None:
     """``root/VERSION`` 에 업데이트 식별자를 쓴다.
 
     스테이징 트리에 쓰기 위해 위치를 인자로 받는다 — 살아있는 ``app/VERSION`` 에 미리
-    쓰면 교체가 보류·실패했을 때 앱이 "최신입니다"라고 하면서 **구버전을 영원히 실행**한다."""
+    쓰면 교체가 보류·실패했을 때 앱이 "최신입니다"라고 하면서 **구버전을 영원히 실행**한다.
+
+    ``dev`` 는 개발자 모드에서 고른 저장소·브랜치로 받았다는 표식이다 — 개발자 모드를
+    끄면 ``_identity`` 가 이 표식을 보고 기본 저장소·브랜치로 돌아간다."""
+    data = {"sha": sha, "branch": branch, "repo": repo}
+    if dev:
+        data["dev"] = True
     try:
-        (Path(root) / "VERSION").write_text(
-            json.dumps({"sha": sha, "branch": branch, "repo": repo}),
-            encoding="utf-8",
-        )
+        (Path(root) / "VERSION").write_text(json.dumps(data), encoding="utf-8")
     except Exception:
         pass
 
 
-def _write_version(sha: str, branch: str, repo: str) -> None:
-    _write_version_to(_app_root(), sha, branch, repo)
+def _write_version(sha: str, branch: str, repo: str, dev: bool = False) -> None:
+    _write_version_to(_app_root(), sha, branch, repo, dev)
 
 
 def ensure_version_file() -> Optional[dict]:
@@ -358,16 +366,22 @@ def latest_commit(repo: str, branch: str, timeout: float = 15.0) -> Optional[dic
     return _latest_via_atom(repo, branch, timeout)
 
 
-def _latest_self_healing(repo: str, branch: str) -> tuple[Optional[dict], str]:
+def _latest_self_healing(repo: str, branch: str,
+                         heal: bool = True) -> tuple[Optional[dict], str]:
     """``latest_commit`` 을 시도하되, 추적 브랜치가 삭제/이름변경(404)돼 실패하면
     저장소의 **실제 기본 브랜치**로 한 번 더 시도한다.
 
     ``(info, 실제_사용_브랜치)`` 를 돌려준다 — 다운로드(``download_and_apply``)도 살아있는
     브랜치로 가야 하므로 호출부가 교정된 브랜치를 그대로 쓸 수 있게 한다.  둘 다 실패하면
-    ``(None, branch)`` (사유는 ``last_error()``)."""
+    ``(None, branch)`` (사유는 ``last_error()``).
+
+    ``heal=False`` 면 기본 브랜치로 바꾸지 않는다 — 개발자 모드에서 고른 브랜치가 없을 때
+    조용히 다른 브랜치를 받으면 안 된다."""
     info = latest_commit(repo, branch)
     if info:
         return info, branch
+    if not heal:
+        return None, branch
     db = _default_branch(repo)
     if db and db != branch:
         info = latest_commit(repo, db)
@@ -431,10 +445,11 @@ def check_for_update() -> Optional[dict]:
     if update_pending():
         return None                     # 이미 받아뒀다 — 재시작만 하면 된다(재다운로드 금지)
     ensure_version_file()
-    repo, branch, cur_sha = _identity()
+    pinned = dev_target()                # 한 번만 읽는다 — 두 번 읽으면 서로 어긋날 수 있다
+    repo, branch, cur_sha = _identity(pinned)
     if not branch:
         return None
-    latest, branch = _latest_self_healing(repo, branch)
+    latest, branch = _latest_self_healing(repo, branch, heal=pinned is None)
     if not latest or not latest.get("sha"):
         return None
     if cur_sha and str(latest["sha"]) == str(cur_sha):
@@ -471,13 +486,25 @@ def _git_head() -> Optional[dict]:
     return None
 
 
-def _identity() -> tuple:
+def _identity(pinned: Optional[tuple] = None) -> tuple:
     """추적 대상 ``(repo, branch, current_sha)`` 를 결정한다.
 
-    우선순위: VERSION 파일 → git HEAD → 코드 내장 기본값(DEFAULT_REPO/BRANCH).
-    VERSION·git 이 모두 없으면 current_sha 는 빈 문자열("미상")이지만, repo/branch 는
-    기본값으로 알 수 있으므로 **최신 버전을 받아 적용하는 것은 가능**하다."""
+    우선순위: 개발자 모드 대상 → VERSION 파일 → git HEAD → 코드 내장 기본값
+    (DEFAULT_REPO/BRANCH).  VERSION·git 이 모두 없으면 current_sha 는 빈 문자열("미상")
+    이지만, repo/branch 는 기본값으로 알 수 있으므로 **최신 버전을 받아 적용하는 것은
+    가능**하다.
+
+    개발자 모드 대상은 정규화하지 않는다(``claude/`` 브랜치도 그대로) — 그걸 고르려고
+    켠 모드다.  개발자 모드로 받은 설치본(VERSION ``dev``)은 모드를 끄면 기본 저장소·
+    브랜치로 돌아간다."""
     cur = current_version()
+    if pinned:
+        sha = str((cur or {}).get("sha") or "")
+        if not cur:
+            sha = str((_git_head() or {}).get("sha") or "")
+        return (pinned[0], pinned[1], sha)
+    if cur and cur.get("dev"):
+        return (DEFAULT_REPO, _default_branch(DEFAULT_REPO), str(cur.get("sha") or ""))
     if cur and cur.get("branch"):
         repo = cur.get("repo") or DEFAULT_REPO
         return (repo, _resolve_branch(cur["branch"], repo), str(cur.get("sha") or ""))
@@ -499,14 +526,79 @@ def manual_check() -> tuple:
     (한 번 받으면 VERSION 이 기록돼 이후엔 정상 비교)"""
     global _last_error
     _last_error = ""
-    repo, branch, cur_sha = _identity()
-    latest, branch = _latest_self_healing(repo, branch)
+    pinned = dev_target()
+    repo, branch, cur_sha = _identity(pinned)
+    latest, branch = _latest_self_healing(repo, branch, heal=pinned is None)
     if not latest or not latest.get("sha"):
         return ("unknown", {"error": _last_error or i18n.KO.UPDATE_ERR_GITHUB})
     if cur_sha and str(latest["sha"]) == str(cur_sha):
         return ("latest", {})
     info = {"repo": repo, "branch": branch, "sha": latest["sha"],
             "message": latest.get("message", "")}
+    if not cur_sha:
+        info["current_unknown"] = True
+    return ("update", info)
+
+
+def dev_target() -> Optional[tuple]:
+    """개발자 모드에서 고른 업데이트 대상 ``(repo, branch)``.  고르지 않았으면 None.
+
+    개발자 모드가 **켜져 있고** 브랜치가 적혀 있을 때만 유효하다 — 모드를 끄면 저장된
+    값이 남아 있어도 기본 브랜치를 따른다.  설정 파일을 못 읽으면 None(부가 기능)."""
+    try:
+        from . import prefs
+        p = prefs.load()
+    except Exception:
+        return None
+    branch = (p.dev_update_branch or "").strip()
+    if not p.dev_mode or not branch:
+        return None
+    return ((p.dev_update_repo or "").strip() or DEFAULT_REPO, branch)
+
+
+_API_BRANCHES = "https://api.github.com/repos/{repo}/branches?per_page=100"
+
+
+def list_branches(repo: str, timeout: float = 10.0) -> list:
+    """저장소의 브랜치 이름 목록(기본 브랜치가 맨 앞).  실패하면 ``[]``(사유는 ``last_error()``).
+
+    개발자 모드 화면의 목록용이다.  api.github.com 이 막혀 있으면 빈 목록이 오고,
+    화면에서 브랜치 이름을 직접 적으면 된다."""
+    global _last_error
+    url = _API_BRANCHES.format(repo=repo)
+    try:
+        raw = _http_get(url, {**_UA, "Accept": "application/vnd.github+json"}, timeout)
+        names = [str(b.get("name")) for b in json.loads(raw.decode("utf-8"))
+                 if isinstance(b, dict) and b.get("name")]
+    except Exception as exc:
+        _last_error = _describe_err(exc, url)
+        return []
+    db = _default_branch(repo)
+    if db in names:
+        names.remove(db)
+        names.insert(0, db)
+    return names
+
+
+def check_target(repo: str, branch: str) -> tuple:
+    """개발자 모드 — 지정한 ``repo``/``branch`` 의 최신 커밋을 현재 설치본과 비교한다.
+
+    반환 ``(status, info)``: status 는 ``"update"``·``"latest"``·``"unknown"``.
+    ``manual_check`` 와 달리 ``"latest"`` 여도 ``info`` 에 받을 대상
+    (``repo,branch,sha,message``)을 실어 준다 — 같은 버전이라도 다시 받을 수 있게.
+    다른 브랜치로 바꿔 받지 않는다(자기교정 없음).  ``branch`` 가 비면 기본 브랜치."""
+    global _last_error
+    _last_error = ""
+    branch = (branch or "").strip() or _default_branch(repo)
+    cur = current_version() or _git_head() or {}
+    cur_sha = str(cur.get("sha") or "")
+    latest = latest_commit(repo, branch)
+    if not latest or not latest.get("sha"):
+        return ("unknown", {"error": _last_error or i18n.KO.UPDATE_ERR_GITHUB})
+    info = {"repo": repo, "branch": branch, "sha": latest["sha"],
+            "message": latest.get("message", "")}
+    if cur_sha and str(latest["sha"]) == cur_sha:
+        return ("latest", info)
     if not cur_sha:
         info["current_unknown"] = True
     return ("update", info)
@@ -606,22 +698,25 @@ _REQUIRED_IN_STAGING = (
 )
 
 
-def _stage_tree(src_root: Path, staging: Path, emit) -> None:
+def _stage_tree(src_root: Path, staging: Path, emit, full: bool = False) -> None:
     """새 앱 트리를 **통째로** 만든다(기존 트리에 병합하지 않는다).
 
     통째로 만들기 때문에 상류에서 **삭제된 파일이 자동으로 사라지고**(옛 미러링 방식은
     덮어쓰기만 해서 지운 모듈이 사용자 디스크에 영원히 남았다), ``__pycache__`` 의 낡은
-    바이트코드도 따라오지 않는다."""
+    바이트코드도 따라오지 않는다.
+
+    ``full`` 이면 배포 거르기(세 목록)를 적용하지 않는다 — 개발자 모드 설치다
+    (``_download_full_tree`` 가 이미 받을 것만 받아 왔다: 배포분 + ``dev/``)."""
     import shutil
 
     staging.mkdir(parents=True, exist_ok=True)
-    ignore = _skip_filter(src_root)
+    ignore = (lambda d, names: set()) if full else _skip_filter(src_root)
     items = [p for p in sorted(src_root.iterdir(), key=lambda p: p.name)
-             if p.name not in _UPDATE_SKIP_TOP]
+             if full or p.name not in _UPDATE_SKIP_TOP]
     m = len(items)
     for i, item in enumerate(items, start=1):
         dst = staging / item.name
-        keep = _UPDATE_KEEP_ONLY.get(item.name)
+        keep = None if full else _UPDATE_KEEP_ONLY.get(item.name)
         if keep is not None and item.is_dir():
             # 남기기로 한 것만 골라 담는다 — 없는 이름은 조용히 지나간다(상류에서
             # 이름이 바뀌어도 업데이트 자체는 계속 돌아야 한다).
@@ -747,9 +842,95 @@ def _ensure_deps(root: Path, staging: Path, emit) -> bool:
     return True
 
 
+# 개발자 모드 설치가 배포분에 **더해** 받는 최상위 폴더(사용자 결정: dev 까지만).
+# 나머지(.claude·docs·scripts 의 개발 파일 등)는 일반 업데이트와 똑같이 거른다.
+_DEV_EXTRA_TOP = {"dev"}
+
+
+def _dev_wanted(rel: str) -> bool:
+    """개발자 모드에서 받을 파일인가 — 배포분(세 목록을 통과하는 것) + ``dev/`` 전부."""
+    top, _, rest = rel.partition("/")
+    if top in _DEV_EXTRA_TOP:
+        return True
+    if top in _UPDATE_SKIP_TOP or rel in _UPDATE_SKIP_PATHS:
+        return False
+    keep = _UPDATE_KEEP_ONLY.get(top)
+    if keep is not None and rest:
+        return rest.split("/", 1)[0] in keep
+    return True
+
+
+def _download_full_tree(repo: str, sha: str, dest: Path, timeout: float,
+                        emit) -> Path:
+    """커밋 ``sha`` 의 배포분 + ``dev/`` 를 ``dest`` 아래에 받아 그 폴더를 돌려준다
+    (``_dev_wanted``).
+
+    브랜치 zip 은 export-ignore 로 ``dev/`` 가 빠져 있어 개발자 모드에서는 쓸 수 없다.  trees API 로 목록을 받고 raw 로 파일마다 받는다
+    (동시 8개).  목록이 잘렸거나(truncated) 한 파일이라도 실패하면 예외 —
+    반쪽 트리를 적용하지 않는다."""
+    import urllib.parse
+    from concurrent.futures import ThreadPoolExecutor
+
+    raw = _http_get(_API_TREE.format(repo=repo, sha=sha),
+                    {**_UA, "Accept": "application/vnd.github+json"}, timeout)
+    tree = json.loads(raw.decode("utf-8"))
+    if tree.get("truncated"):
+        raise RuntimeError("git tree truncated")
+    paths = [e["path"] for e in tree.get("tree", [])
+             if e.get("type") == "blob" and e.get("path")
+             and _dev_wanted(e["path"])]
+    root = dest / "src"
+    n = len(paths)
+    emit(0, n, i18n.KO.UPDATE_PHASE_DOWNLOAD)
+
+    def _one(rel: str) -> None:
+        url = _RAW.format(repo=repo, sha=sha,
+                          path=urllib.parse.quote(rel, safe="/"))
+        out = root / rel
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(_http_get(url, _UA, timeout))
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for i, _ in enumerate(pool.map(_one, paths), start=1):
+            emit(i, n, i18n.KO.UPDATE_PHASE_DOWNLOAD)
+    return root
+
+
+def _download_zip(url: str, tmpd: Path, timeout: float, emit) -> Optional[Path]:
+    """브랜치 zip 을 받아 풀고 그 최상위 폴더(``coding-<branch>``)를 돌려준다."""
+    import zipfile
+
+    # 1) 다운로드 — Content-Length 가 있으면 바이트 진행, 없으면 busy.
+    zip_path = tmpd / "src.zip"
+    with _urlopen(url, _UA, timeout) as r, open(zip_path, "wb") as f:
+        total = int(getattr(r, "headers", {}).get("Content-Length", 0) or 0)
+        done = 0
+        emit(0, total, i18n.KO.UPDATE_PHASE_DOWNLOAD)
+        while True:
+            chunk = r.read(64 * 1024)
+            if not chunk:
+                break
+            f.write(chunk)
+            done += len(chunk)
+            emit(done, total, i18n.KO.UPDATE_PHASE_DOWNLOAD)
+
+    # 2) 압축 해제 — 파일 수 기준 진행.
+    with zipfile.ZipFile(zip_path) as z:
+        names = z.namelist()
+        n = len(names)
+        for i, name in enumerate(names, start=1):
+            z.extract(name, tmpd)
+            if i % 20 == 0 or i == n:
+                emit(i, n, i18n.KO.UPDATE_PHASE_EXTRACT)
+
+    roots = [p for p in tmpd.iterdir() if p.is_dir()]
+    return roots[0] if roots else None
+
+
 def download_and_apply(repo: str, branch: str, target_sha: str,
                        timeout: float = 60.0,
-                       progress: Optional[callable] = None) -> bool:
+                       progress: Optional[callable] = None,
+                       dev: bool = False) -> bool:
     """브랜치 zip 을 받아 **앱 구동에 필요한 것을 전부** 담은 새 트리를 만들어 적용한다.
 
     적용 방식은 두 가지다:
@@ -761,10 +942,13 @@ def download_and_apply(repo: str, branch: str, target_sha: str,
     남아 다음 실행에 다시 시도할 수 있다.
 
     ``progress(done, total, phase)`` 가 주어지면 다운로드/압축해제/준비/적용 단계의 진행을
-    보고한다(로딩바가 0 에서 멈추지 않도록).  total<=0 이면 진행량 미상(busy) 의미."""
+    보고한다(로딩바가 0 에서 멈추지 않도록).  total<=0 이면 진행량 미상(busy) 의미.
+
+    ``dev`` 는 개발자 모드에서 고른 대상이라는 표식으로, VERSION 에 함께 남는다.
+    이때는 배포용 zip 대신 파일을 하나씩 받아 **배포분 + ``dev/``** 를 적용한다
+    (``_download_full_tree``·``_dev_wanted``)."""
     import shutil
     import tempfile
-    import zipfile
 
     global _last_error, _deps_changed, _deps_blocked
     _deps_changed = False
@@ -778,36 +962,16 @@ def download_and_apply(repo: str, branch: str, target_sha: str,
             except Exception:
                 pass
 
-    url = _ZIP.format(repo=repo, branch=branch)
+    url = (_API_TREE.format(repo=repo, sha=target_sha) if dev
+           else _ZIP.format(repo=repo, branch=branch))
     tmpd = Path(tempfile.mkdtemp(prefix="aoi_update_"))
     try:
-        # 1) 다운로드 — Content-Length 가 있으면 바이트 진행, 없으면 busy.
-        zip_path = tmpd / "src.zip"
-        with _urlopen(url, _UA, timeout) as r, open(zip_path, "wb") as f:
-            total = int(getattr(r, "headers", {}).get("Content-Length", 0) or 0)
-            done = 0
-            _emit(0, total, i18n.KO.UPDATE_PHASE_DOWNLOAD)
-            while True:
-                chunk = r.read(64 * 1024)
-                if not chunk:
-                    break
-                f.write(chunk)
-                done += len(chunk)
-                _emit(done, total, i18n.KO.UPDATE_PHASE_DOWNLOAD)
-
-        # 2) 압축 해제 — 파일 수 기준 진행.
-        with zipfile.ZipFile(zip_path) as z:
-            names = z.namelist()
-            n = len(names)
-            for i, name in enumerate(names, start=1):
-                z.extract(name, tmpd)
-                if i % 20 == 0 or i == n:
-                    _emit(i, n, i18n.KO.UPDATE_PHASE_EXTRACT)
-
-        roots = [p for p in tmpd.iterdir() if p.is_dir()]
-        if not roots:
-            return False
-        src_root = roots[0]                 # coding-<branch> 형태의 단일 최상위 폴더
+        if dev:
+            src_root = _download_full_tree(repo, target_sha, tmpd, timeout, _emit)
+        else:
+            src_root = _download_zip(url, tmpd, timeout, _emit)
+            if src_root is None:
+                return False
         app_root = _app_root()
         if not (src_root / "aoi_verification").exists():
             return False
@@ -820,8 +984,8 @@ def download_and_apply(repo: str, branch: str, target_sha: str,
         install_root = _install_root()
         staging = _staging_dir(install_root, app_root)
         shutil.rmtree(staging, ignore_errors=True)
-        _stage_tree(src_root, staging, _emit)
-        _write_version_to(staging, target_sha, branch, repo)
+        _stage_tree(src_root, staging, _emit, full=dev)
+        _write_version_to(staging, target_sha, branch, repo, dev)
 
         # 4) 검증 — 여기를 통과해야만 적용한다.
         reason = _verify_staged(staging)
@@ -841,7 +1005,7 @@ def download_and_apply(repo: str, branch: str, target_sha: str,
             staging = None                           # finally 가 지우지 않도록
         else:                                        # 포터블/온라인 — 제자리 적용
             _promote_in_place(staging, app_root, _emit)
-            _write_version(target_sha, branch, repo)
+            _write_version(target_sha, branch, repo, dev)
         _emit(1, 1, i18n.KO.UPDATE_PHASE_DONE)
         return True
     except Exception as exc:
