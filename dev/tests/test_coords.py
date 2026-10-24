@@ -524,3 +524,25 @@ def test_one_non_finite_entry_does_not_empty_the_folder(tmp_path, bad):
     got = camtek_ini.load_folder(tmp_path)
     assert "good_1" in got
     assert "bad_2" not in got
+
+
+def test_truncated_kla_info_file_warns_and_keeps_what_it_read(tmp_path, caplog):
+    """좌표 전반 점검(2026-10-24, 관측) — LSU TB500 RDL4 44장 중 2장의 ``.001`` 이 결함 행
+    중간에서 끊겨 뒤쪽 사진 58장이 좌표 없이 조용히 빠졌다.  읽은 결함은 그대로 쓰고,
+    끊겼다는 사실은 경고로 남긴다(정상 파일은 경고 없음)."""
+    import logging
+    from aoi_verification.app.coords import kla_info
+    kla, _cam = _make_rdl1_folders(tmp_path)
+    with caplog.at_level(logging.WARNING, logger="aoi.coords"):
+        assert "frontsideadrimg_572445" in kla_info.load_folder(kla)
+    assert "EndOfFile" not in caplog.text
+    cut = _RDL1_KLA_HEAD.replace("EndOfFile;\n", "TiffFileName FrontSideADRImg_9.jpg;\n"
+                                 "DefectList\n 15 1.0 2.0 3.0")
+    (kla / "W6458244XYE1.001").write_text(cut, encoding="utf-8")
+    kla_info.load_folder.cache_clear()
+    kla_info.load_folder_raw.cache_clear()
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="aoi.coords"):
+        got = kla_info.load_folder(kla)
+    assert "frontsideadrimg_572445" in got and "frontsideadrimg_9" not in got
+    assert "EndOfFile" in caplog.text

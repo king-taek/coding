@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from functools import lru_cache
 from pathlib import Path
@@ -24,6 +25,8 @@ from typing import Optional
 from .models import DefectCoord
 from .wafer_geometry import kla_geometry
 from .ini_text import decode_ini_bytes, read_ini_text
+
+_LOG = logging.getLogger("aoi.coords")
 
 __all__ = ["resolve", "load_folder", "load_folder_raw", "read_wafer_id",
            "read_slot_no", "read_header_ids", "peek_die_pitch"]
@@ -206,6 +209,12 @@ def load_folder(folder: Path) -> dict[str, DefectCoord]:
 
 def _parse_info_raw(path: Path) -> dict[str, dict]:
     text = read_ini_text(path) or ""
+    if text and "endoffile" not in text[-4096:].lower():
+        # 실측(2026-10-24, LSU TB500 RDL4): 44장 중 2장의 .001 이 결함 행 중간에서 끊겨
+        # 있었다 — 뒤쪽 사진 58장은 좌표가 없다.  끊긴 이유는 미확인(장비 기록 중 · 복사).
+        # 읽은 데까지는 쓰되 조용히 넘어가지 않는다.
+        _LOG.warning("KLA 정보파일 %s 이 끝(EndOfFile)까지 기록되지 않았다 — 뒤쪽 결함 "
+                     "사진은 좌표가 없다", path)
     lines = text.splitlines()
 
     # DiePitchY 추출
