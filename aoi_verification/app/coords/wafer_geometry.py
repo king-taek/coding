@@ -462,7 +462,8 @@ def _with_origins(folder: Path, px: float, py: float, src: str) -> CamtekGeometr
     d_total = _row_total(cy, dia, py)
     mapped = _die_map_origins(folder, px, py)
     if mapped is not None:
-        m_origin, m_total = mapped
+        m_origin, m_total = _lot_die_map_origins(folder, px, py, (d_origin, d_total),
+                                                 mapped)
         # ⚠ 맵은 유도값과 **±1 이내일 때만** 믿는다.  이 파일이 웨이퍼 전체가
         #   아니라 '스캔한 영역'만 담은 스캔이 오면 min/max 가 통째로 좁아져
         #   기준이 조용히 틀어진다 — 실측 74장의 차이는 전부 0 또는 −1 이라
@@ -543,6 +544,39 @@ def _die_map_origins(folder: Path, px: float, py: float
     return min(i for i, _ in cells), max(j for _, j in cells)
 
 
+def _lot_die_map_origins(folder: Path, px: float, py: float,
+                         derived: tuple[int, int], own: tuple[int, int]
+                         ) -> tuple[int, int]:
+    """같은 LOT(형제 슬롯 폴더)의 die 맵을 합쳐 ``(col_origin, row_total)`` 을 낸다.
+
+    die 맵은 **그 웨이퍼의 die 목록**이라, 웨이퍼마다 가장자리 die 가 빠질 수 있다.
+    실측(AVAGO 15966TA0 NELA26, 25장 · 중심 25장 동일): 12장은 맨 왼쪽 열이 목록에
+    없어 ``min(x_index)`` 가 3, 나머지는 2 였다.  장비는 25장 모두 2 기준으로 표시했다 —
+    01C1(맵 3)의 LIVE 파일명 20장이 전부 ``x_index − 2`` 였고(앱은 1 작게 냈다),
+    07F6(맵 2)도 Conder 와 일치했다.  즉 기준은 웨이퍼 목록이 아니라 **격자**의 것이다.
+
+    그래서 중심 유도값이 같은(= stage 위 같은 격자인) 형제 슬롯의 맵을 합쳐 min/max 를
+    잡는다.  형제가 없거나 격자가 다르면 자기 맵 그대로다.  전 구간 fail-safe."""
+    col, row = own
+    try:
+        siblings = sorted(p for p in folder.parent.iterdir()
+                          if p != folder and (p / _DIE_MAP_FILE).is_file())
+    except OSError:
+        return own
+    for sib in siblings:
+        if (peek_die_pitch(sib) or (None, None))[:2] != (px, py):
+            continue                      # 다른 자재 — 같은 pitch 가 아니면 인덱스가 무의미
+        dia = _read_diameter(sib)
+        cx, cy = _wafer_center(sib)
+        if (_col_origin(cx, dia, px), _row_total(cy, dia, py)) != derived:
+            continue                      # 다른 격자(웨이퍼 위치)의 슬롯은 섞지 않는다
+        got = _die_map_origins(sib, px, py)
+        if got is not None:
+            col, row = min(col, got[0]), max(row, got[1])
+    return col, row
+
+
+@lru_cache(maxsize=256)
 def die_map_cells(folder: Path, px: float, py: float
                   ) -> Optional[frozenset[tuple[int, int]]]:
     """die 맵의 die 전체 — ``(x_index, y_index)`` 집합(stage 인덱스, 보정 전).

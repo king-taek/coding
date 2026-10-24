@@ -44,13 +44,13 @@ def _clear_caches():
     for f in (wg.camtek_geometry, wg.kla_geometry, camtek_ini.load_folder,
               camtek_ini.load_raw_folder, camtek_ini.load_abs_folder,
               camtek_ini.load_recipe_folder,
-              kla_info.load_folder, kla_info.load_folder_raw):
+              kla_info.load_folder, kla_info.load_folder_raw, wg.die_map_cells):
         f.cache_clear()
     yield
     for f in (wg.camtek_geometry, wg.kla_geometry, camtek_ini.load_folder,
               camtek_ini.load_raw_folder, camtek_ini.load_abs_folder,
               camtek_ini.load_recipe_folder,
-              kla_info.load_folder, kla_info.load_folder_raw):
+              kla_info.load_folder, kla_info.load_folder_raw, wg.die_map_cells):
         f.cache_clear()
 
 
@@ -1544,3 +1544,60 @@ class TestDieMapGolden:
         geom = wg.camtek_geometry(folder)
         assert (geom.col_origin, geom.row_total) == (1, 6)    # 유도값 그대로
         assert wg._DIE_MAP_FILE not in geom.source
+
+
+# ---------------------------------------------------------------------------
+# LOT 단위 die 맵 — 웨이퍼마다 가장자리 die 가 빠져도 기준은 격자의 것이다
+# ---------------------------------------------------------------------------
+class TestLotDieMap:
+    """AVAGO 15966TA0 NELA26 실측(2026-10-24, 25장): 12장은 die 목록에 맨 왼쪽 열이 없어
+    맵 기준이 3, 나머지는 2 였다.  장비는 모두 2 기준이다 — 01C1(맵 3) LIVE 파일명 20장이
+    전부 ``x_index − 2`` 였다(앱은 1 작게 냈다).  실물 파일이 오기 전까지 합성으로 못 박는다."""
+
+    PX, PY = 4160.9, 5294.0
+    CENTER = "Center_X=154281.495\nCenter_Y=154732.57\n"      # 유도값 (2, 56)
+
+    def _slot(self, lot: Path, name: str, min_x: int, center: str = CENTER) -> Path:
+        import struct
+        folder = lot / name
+        folder.mkdir(parents=True)
+        (folder / "ColorImageGrabingInfo.ini").write_text(
+            _grabbing_ini([("8406.138140.c.1.1", 8406.0, 138140.0, 2, 26)]),
+            encoding="utf-8")
+        (folder / "Params_WaferInfo.ini").write_text(
+            _params_ini(self.PX, self.PY) + "\n[Geometric]\nDiameter=300000\n" + center,
+            encoding="utf-8")
+        cells = [(i, j) for i in range(min_x, 72) for j in (2, 30, 55)]
+        (folder / wg._DIE_MAP_FILE).write_bytes(b"".join(
+            b"\x00" * 16 + struct.pack("<dd", (i + 0.5) * self.PX, (j + 0.5) * self.PY)
+            for i, j in cells))
+        (folder / (wg._DIE_MAP_FILE + ".md")).write_text(
+            '<root><RecordSize Size="32"/><Fields>'
+            '<Field Name="x" Id="1" Offset="16" Vartype="5"/>'
+            '<Field Name="y" Id="2" Offset="24" Vartype="5"/>'
+            '</Fields></root>', encoding="utf-8")
+        return folder
+
+    def _geom(self, folder):
+        wg.camtek_geometry.cache_clear()
+        return wg.camtek_geometry(folder)
+
+    def test_missing_edge_column_uses_the_lot_grid(self, tmp_path):
+        self._slot(tmp_path, "W07", 2)
+        short = self._slot(tmp_path, "W01", 3)
+        geom = self._geom(short)
+        assert (geom.col_origin, geom.row_total) == (2, 55)
+        c = camtek_ini.load_folder(short)["8406.138140.c.1.1"]
+        assert (c.col, c.row) == (0, 29)        # 07F6 의 Conder 정답과 같은 규약
+
+    def test_alone_it_keeps_its_own_map(self, tmp_path):
+        """형제가 없으면 예전 동작 그대로 — 근거 없이 바꾸지 않는다."""
+        geom = self._geom(self._slot(tmp_path, "W01", 3))
+        assert (geom.col_origin, geom.row_total) == (3, 55)
+
+    def test_does_not_merge_a_slot_on_another_grid(self, tmp_path):
+        """웨이퍼 위치(유도 기준)가 다른 슬롯의 맵은 섞지 않는다."""
+        self._slot(tmp_path, "W07", 2,
+                   center="Center_X=158500.0\nCenter_Y=154732.57\n")   # 유도 col 3
+        geom = self._geom(self._slot(tmp_path, "W01", 3))
+        assert geom.col_origin == 3
