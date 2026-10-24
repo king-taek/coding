@@ -212,3 +212,89 @@ def test_dialog_ignores_results_after_close(styled_qapp, tmp_path, monkeypatch):
     old._on_checked("update", {"repo": "o/r", "branch": "A", "sha": "S"}, True)
     assert old.install_info is None
     assert prefs.load().dev_update_branch == "B"
+
+
+# ---------------------------------------------------------------------------
+# 개발자 모드 설치는 배포용 zip 이 아니라 저장소 파일 **전부**를 받는다
+# ---------------------------------------------------------------------------
+_FULL_REPO = {
+    "aoi_verification/app/ui/main_window.py": b"class MainWindow: pass\n",
+    "aoi_verification/app/ui/style.qss": b"QWidget {}\n",
+    "aoi_verification/app/utils/updater.py": b"DEFAULT_BRANCH = 'b'\n",
+    "main.py": b"print('hi')\n",
+    "requirements.txt": b"numpy==1\n",
+    "dev/양식.xlsx": b"TEMPLATE",
+    "dev/tests/test_x.py": b"def test(): pass\n",
+    "docs/개발기록.md": b"doc\n",
+    "scripts/internal/build.bat": b"rem\n",
+    "pytest.ini": b"[pytest]\n",
+    "CLAUDE.md": b"rules\n",
+    "aoi_verification/app/ui/assets/font/NanumSquareB.otf": b"font",
+    ".claude/skills/x/run.sh": b"echo\n",           # 회사 보안 사고 원인 — 받지 않는다
+}
+
+
+def test_dev_install_fetches_every_file_and_applies_unfiltered(tmp_path, monkeypatch):
+    import urllib.parse
+
+    app = tmp_path / "app"
+    app.mkdir()
+    monkeypatch.setattr(updater, "_app_root", lambda: app)
+    monkeypatch.setattr(updater, "_install_root", lambda: None)   # 포터블(제자리 적용)
+    tree = {"truncated": False,
+            "tree": [{"path": p, "type": "blob"} for p in _FULL_REPO]
+            + [{"path": "dev", "type": "tree"}]}
+    asked = []
+
+    def fake_get(url, headers, timeout):
+        asked.append(url)
+        if "/git/trees/SHA1" in url:
+            return json.dumps(tree).encode("utf-8")
+        prefix = "https://raw.githubusercontent.com/me/fork/SHA1/"
+        assert url.startswith(prefix), url
+        return _FULL_REPO[urllib.parse.unquote(url[len(prefix):])]
+
+    monkeypatch.setattr(updater, "_http_get", fake_get)
+    monkeypatch.setattr(updater, "_urlopen",
+                        lambda *a, **k: pytest.fail("배포용 zip 을 받으면 안 된다"))
+
+    assert updater.download_and_apply("me/fork", "claude/feat", "SHA1", dev=True)
+    for rel in _FULL_REPO:
+        if rel.startswith(".claude/"):
+            assert not (app / rel).exists()
+            assert not any(".claude" in u for u in asked)
+        else:
+            assert (app / rel).read_bytes() == _FULL_REPO[rel], rel
+    assert (app / "양식.xlsx").read_bytes() == b"TEMPLATE"     # 앱 루트 양식도 그대로
+    ver = json.loads((app / "VERSION").read_text())
+    assert ver == {"sha": "SHA1", "branch": "claude/feat", "repo": "me/fork", "dev": True}
+
+
+def test_dev_install_refuses_truncated_tree(tmp_path, monkeypatch):
+    app = tmp_path / "app"
+    app.mkdir()
+    monkeypatch.setattr(updater, "_app_root", lambda: app)
+    monkeypatch.setattr(updater, "_install_root", lambda: None)
+    monkeypatch.setattr(updater, "_http_get",
+                        lambda u, h, t: json.dumps({"truncated": True, "tree": []}).encode())
+    assert not updater.download_and_apply("o/r", "b", "S", dev=True)
+    assert not (app / "VERSION").exists()
+
+
+def test_dev_install_fails_whole_when_one_file_fails(tmp_path, monkeypatch):
+    app = tmp_path / "app"
+    app.mkdir()
+    monkeypatch.setattr(updater, "_app_root", lambda: app)
+    monkeypatch.setattr(updater, "_install_root", lambda: None)
+    tree = {"tree": [{"path": p, "type": "blob"} for p in _FULL_REPO]}
+
+    def fake_get(url, headers, timeout):
+        if "/git/trees/" in url:
+            return json.dumps(tree).encode("utf-8")
+        if url.endswith("main.py"):
+            raise OSError("reset")
+        return b"x"
+
+    monkeypatch.setattr(updater, "_http_get", fake_get)
+    assert not updater.download_and_apply("o/r", "b", "S", dev=True)
+    assert list(app.iterdir()) == []                  # 반쪽 트리를 적용하지 않는다

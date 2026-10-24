@@ -63,6 +63,10 @@ _API = "https://api.github.com/repos/{repo}/commits/{branch}"
 _ATOM = "https://github.com/{repo}/commits/{branch}.atom"
 _ZIP = "https://github.com/{repo}/archive/refs/heads/{branch}.zip"
 _UA = {"User-Agent": "AOI-Verify-Updater"}
+# 개발자 모드의 '전부 받기' — 브랜치 zip 은 `.gitattributes` 의 export-ignore 로 배포용만
+# 담기므로, 커밋의 파일 목록(trees API)을 받아 파일마다 raw 로 내려받는다.
+_API_TREE = "https://api.github.com/repos/{repo}/git/trees/{sha}?recursive=1"
+_RAW = "https://raw.githubusercontent.com/{repo}/{sha}/{path}"
 
 # 마지막 네트워크 오류 사유(사용자에게 표시 — '왜 안 되는지' 진단).
 _last_error: str = ""
@@ -694,22 +698,25 @@ _REQUIRED_IN_STAGING = (
 )
 
 
-def _stage_tree(src_root: Path, staging: Path, emit) -> None:
+def _stage_tree(src_root: Path, staging: Path, emit, full: bool = False) -> None:
     """새 앱 트리를 **통째로** 만든다(기존 트리에 병합하지 않는다).
 
     통째로 만들기 때문에 상류에서 **삭제된 파일이 자동으로 사라지고**(옛 미러링 방식은
     덮어쓰기만 해서 지운 모듈이 사용자 디스크에 영원히 남았다), ``__pycache__`` 의 낡은
-    바이트코드도 따라오지 않는다."""
+    바이트코드도 따라오지 않는다.
+
+    ``full`` 이면 배포 거르기(세 목록)를 하나도 적용하지 않는다 — 개발자 모드의
+    '전부 받기' 다(``_download_full_tree`` 가 이미 받을 것만 받아 왔다)."""
     import shutil
 
     staging.mkdir(parents=True, exist_ok=True)
-    ignore = _skip_filter(src_root)
+    ignore = (lambda d, names: set()) if full else _skip_filter(src_root)
     items = [p for p in sorted(src_root.iterdir(), key=lambda p: p.name)
-             if p.name not in _UPDATE_SKIP_TOP]
+             if full or p.name not in _UPDATE_SKIP_TOP]
     m = len(items)
     for i, item in enumerate(items, start=1):
         dst = staging / item.name
-        keep = _UPDATE_KEEP_ONLY.get(item.name)
+        keep = None if full else _UPDATE_KEEP_ONLY.get(item.name)
         if keep is not None and item.is_dir():
             # 남기기로 한 것만 골라 담는다 — 없는 이름은 조용히 지나간다(상류에서
             # 이름이 바뀌어도 업데이트 자체는 계속 돌아야 한다).
@@ -835,6 +842,79 @@ def _ensure_deps(root: Path, staging: Path, emit) -> bool:
     return True
 
 
+# 개발자 모드 '전부 받기' 에서도 빼는 최상위 폴더.
+# ★ `.claude`(스킬 스크립트 js·sh 700여 개)는 사용자 PC 에 풀린 뒤 회사 보안이 앱 exe 를
+#   지운 원인이었다(`.gitattributes` 머리말) — 앱 실행·테스트와도 무관하다.
+_DEV_FULL_SKIP_TOP = {".claude"}
+
+
+def _download_full_tree(repo: str, sha: str, dest: Path, timeout: float,
+                        emit) -> Path:
+    """커밋 ``sha`` 의 **저장소 파일 전부**를 ``dest`` 아래에 받아 그 폴더를 돌려준다.
+
+    브랜치 zip 은 export-ignore 로 개발 파일(dev·docs·scripts 대부분)이 빠져 있어
+    개발자 모드에서는 쓸 수 없다.  trees API 로 목록을 받고 raw 로 파일마다 받는다
+    (동시 8개).  목록이 잘렸거나(truncated) 한 파일이라도 실패하면 예외 —
+    반쪽 트리를 적용하지 않는다."""
+    import urllib.parse
+    from concurrent.futures import ThreadPoolExecutor
+
+    raw = _http_get(_API_TREE.format(repo=repo, sha=sha),
+                    {**_UA, "Accept": "application/vnd.github+json"}, timeout)
+    tree = json.loads(raw.decode("utf-8"))
+    if tree.get("truncated"):
+        raise RuntimeError("git tree truncated")
+    paths = [e["path"] for e in tree.get("tree", [])
+             if e.get("type") == "blob" and e.get("path")
+             and e["path"].split("/", 1)[0] not in _DEV_FULL_SKIP_TOP]
+    root = dest / "src"
+    n = len(paths)
+    emit(0, n, i18n.KO.UPDATE_PHASE_DOWNLOAD)
+
+    def _one(rel: str) -> None:
+        url = _RAW.format(repo=repo, sha=sha,
+                          path=urllib.parse.quote(rel, safe="/"))
+        out = root / rel
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(_http_get(url, _UA, timeout))
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for i, _ in enumerate(pool.map(_one, paths), start=1):
+            emit(i, n, i18n.KO.UPDATE_PHASE_DOWNLOAD)
+    return root
+
+
+def _download_zip(url: str, tmpd: Path, timeout: float, emit) -> Optional[Path]:
+    """브랜치 zip 을 받아 풀고 그 최상위 폴더(``coding-<branch>``)를 돌려준다."""
+    import zipfile
+
+    # 1) 다운로드 — Content-Length 가 있으면 바이트 진행, 없으면 busy.
+    zip_path = tmpd / "src.zip"
+    with _urlopen(url, _UA, timeout) as r, open(zip_path, "wb") as f:
+        total = int(getattr(r, "headers", {}).get("Content-Length", 0) or 0)
+        done = 0
+        emit(0, total, i18n.KO.UPDATE_PHASE_DOWNLOAD)
+        while True:
+            chunk = r.read(64 * 1024)
+            if not chunk:
+                break
+            f.write(chunk)
+            done += len(chunk)
+            emit(done, total, i18n.KO.UPDATE_PHASE_DOWNLOAD)
+
+    # 2) 압축 해제 — 파일 수 기준 진행.
+    with zipfile.ZipFile(zip_path) as z:
+        names = z.namelist()
+        n = len(names)
+        for i, name in enumerate(names, start=1):
+            z.extract(name, tmpd)
+            if i % 20 == 0 or i == n:
+                emit(i, n, i18n.KO.UPDATE_PHASE_EXTRACT)
+
+    roots = [p for p in tmpd.iterdir() if p.is_dir()]
+    return roots[0] if roots else None
+
+
 def download_and_apply(repo: str, branch: str, target_sha: str,
                        timeout: float = 60.0,
                        progress: Optional[callable] = None,
@@ -852,10 +932,11 @@ def download_and_apply(repo: str, branch: str, target_sha: str,
     ``progress(done, total, phase)`` 가 주어지면 다운로드/압축해제/준비/적용 단계의 진행을
     보고한다(로딩바가 0 에서 멈추지 않도록).  total<=0 이면 진행량 미상(busy) 의미.
 
-    ``dev`` 는 개발자 모드에서 고른 대상이라는 표식으로, VERSION 에 함께 남는다."""
+    ``dev`` 는 개발자 모드에서 고른 대상이라는 표식으로, VERSION 에 함께 남는다.
+    이때는 배포용 zip 대신 **저장소 파일 전부**를 받아 거르지 않고 적용한다
+    (``_download_full_tree`` — dev·docs·scripts 등 개발 파일 포함)."""
     import shutil
     import tempfile
-    import zipfile
 
     global _last_error, _deps_changed, _deps_blocked
     _deps_changed = False
@@ -869,36 +950,16 @@ def download_and_apply(repo: str, branch: str, target_sha: str,
             except Exception:
                 pass
 
-    url = _ZIP.format(repo=repo, branch=branch)
+    url = (_API_TREE.format(repo=repo, sha=target_sha) if dev
+           else _ZIP.format(repo=repo, branch=branch))
     tmpd = Path(tempfile.mkdtemp(prefix="aoi_update_"))
     try:
-        # 1) 다운로드 — Content-Length 가 있으면 바이트 진행, 없으면 busy.
-        zip_path = tmpd / "src.zip"
-        with _urlopen(url, _UA, timeout) as r, open(zip_path, "wb") as f:
-            total = int(getattr(r, "headers", {}).get("Content-Length", 0) or 0)
-            done = 0
-            _emit(0, total, i18n.KO.UPDATE_PHASE_DOWNLOAD)
-            while True:
-                chunk = r.read(64 * 1024)
-                if not chunk:
-                    break
-                f.write(chunk)
-                done += len(chunk)
-                _emit(done, total, i18n.KO.UPDATE_PHASE_DOWNLOAD)
-
-        # 2) 압축 해제 — 파일 수 기준 진행.
-        with zipfile.ZipFile(zip_path) as z:
-            names = z.namelist()
-            n = len(names)
-            for i, name in enumerate(names, start=1):
-                z.extract(name, tmpd)
-                if i % 20 == 0 or i == n:
-                    _emit(i, n, i18n.KO.UPDATE_PHASE_EXTRACT)
-
-        roots = [p for p in tmpd.iterdir() if p.is_dir()]
-        if not roots:
-            return False
-        src_root = roots[0]                 # coding-<branch> 형태의 단일 최상위 폴더
+        if dev:
+            src_root = _download_full_tree(repo, target_sha, tmpd, timeout, _emit)
+        else:
+            src_root = _download_zip(url, tmpd, timeout, _emit)
+            if src_root is None:
+                return False
         app_root = _app_root()
         if not (src_root / "aoi_verification").exists():
             return False
@@ -911,7 +972,7 @@ def download_and_apply(repo: str, branch: str, target_sha: str,
         install_root = _install_root()
         staging = _staging_dir(install_root, app_root)
         shutil.rmtree(staging, ignore_errors=True)
-        _stage_tree(src_root, staging, _emit)
+        _stage_tree(src_root, staging, _emit, full=dev)
         _write_version_to(staging, target_sha, branch, repo, dev)
 
         # 4) 검증 — 여기를 통과해야만 적용한다.
