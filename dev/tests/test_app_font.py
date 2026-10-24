@@ -90,7 +90,12 @@ def test_entry_point_registers_before_stylesheet():
     # 찾는 뜻이라 폴백이 동작하지 않는다.
     # ★ 독스트링을 빼고 **코드만** 본다 — 그 함정을 경고하는 주석이 독스트링에 있어서,
     #   원문 전체를 검사하면 경고문 자체에 걸려 가드가 거짓 실패한다.
-    font_src = inspect.getsource(app_main._apply_app_font)
-    code = font_src.replace(app_main._apply_app_font.__doc__ or "", "")
+    #   `__doc__` 로 문자열 치환하면 안 된다 — 파이썬 3.13 부터 `__doc__` 는 들여쓰기가
+    #   벗겨져 원문과 달라 치환이 조용히 아무것도 안 한다.  AST 로 첫 문장을 뺀다.
+    import ast
+    fn = ast.parse(inspect.getsource(app_main._apply_app_font)).body[0]
+    if ast.get_docstring(fn) is not None:
+        fn.body = fn.body[1:]
+    code = ast.unparse(fn)               # unparse 는 문자열을 작은따옴표로 쓴다
     assert "setFamilies(" in code
-    assert 'QFont("' not in code, "쉼표 문자열을 QFont 에 넘기고 있다"
+    assert "QFont('" not in code, "쉼표 문자열을 QFont 에 넘기고 있다"
