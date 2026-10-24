@@ -1040,10 +1040,12 @@ def test_view_double_click_activates_point(qt, tmp_path):
     assert got == []                                         # 단일 클릭은 아무것도 안 연다
     view.mouseDoubleClickEvent(mk(QEvent.Type.MouseButtonDblClick))
     assert [p.stem for p in got] == ["a"]
+    view._zoom = zoom_before = 3.0
     view.mouseDoubleClickEvent(QMouseEvent(
         QEvent.Type.MouseButtonDblClick, QPointF(20, 20), Qt.MouseButton.LeftButton,
         Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier))
-    assert len(got) == 1                                     # 빈 곳은 원래 크기 복귀만
+    assert len(got) == 1
+    assert view.zoom() == zoom_before                        # 빈 곳은 아무것도 안 한다(확대 유지)
 
 
 def test_setup_and_result_pages_have_buttons(qt):
@@ -1167,3 +1169,36 @@ def test_wafer_map_sheet_header_without_machine_input(qt, isolated_cache, tmp_pa
     ws = load_workbook(str(dst))[i18n.KO.WAFER_MAP_SHEET]
     assert ws["B1"].value == i18n.KO.WAFER_MAP_SHEET_COL_REF
     assert ws["C1"].value == i18n.KO.WAFER_MAP_SHEET_COL_VAL
+
+
+def test_lot_merge_draws_every_slots_die_cells(tmp_path):
+    """LOT 합산 격자 = 같은 격자를 쓰는 폴더들의 die 맵 **합집합**.
+
+    실측(AVAGO TYW): 웨이퍼마다 맨 왼쪽 열이 die 맵에 있거나 없다.  첫 폴더 맵만 그리면
+    다른 슬롯의 가장자리 die 점이 격자 밖에 떨어져 die 가 안 보였다."""
+    r2 = (DIA / 2) ** 2
+    full = {(i, j) for i in range(10) for j in range(10)
+            if all((x - CX) ** 2 + (y - CY) ** 2 <= r2
+                   for x in (i * PX, (i + 1) * PX) for y in (j * PY, (j + 1) * PY))}
+    edge = max(full, key=lambda c: c[0])            # 오른쪽 끝 die 하나
+    X, Y = (edge[0] + 0.5) * PX, (edge[1] + 0.5) * PY
+    a = _camtek_folder(tmp_path / "s1", [("a", 150000.0, 210000.0)])
+    b = _camtek_folder(tmp_path / "s2", [("b", X, Y)])
+    _write_die_map(a, full - {edge}, repeat=3)
+    _write_die_map(b, full, repeat=3)
+    data = wm.build_map(resolve_batch([a / "a.jpeg", b / "b.jpeg"]))
+    assert not data.mixed_frames
+    assert data.frame.die_cells == {(i, -(j + 1)) for i, j in full}
+    assert not wm.map_warnings(data)
+
+
+def test_tooltip_shows_die_internal_xy_like_the_equipment(tmp_path):
+    """툴팁은 장비·Conder scan 과 같은 **die 안쪽** x·y 를 col·row 와 함께 보인다."""
+    pytest.importorskip("PyQt6.QtWidgets")
+    from aoi_verification.app.ui.widgets.wafer_map_view import WaferMapView
+    X, Y = 3 * PX + 80.4, 4 * PY + 496.9
+    folder = _camtek_folder(tmp_path, [("a", X, Y)])
+    (p,) = wm.build_map(resolve_batch([folder / "a.jpeg"])).points
+    assert (p.die_x, p.die_y) == (80.0, 496.0)
+    html = WaferMapView.tooltip_html(p)
+    assert f"col {p.col} · row {p.row} · x 80 · y 496" in html

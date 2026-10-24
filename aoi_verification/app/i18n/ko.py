@@ -1082,7 +1082,7 @@ CAUSE_PREFIX = "\n\n[원인] "
 # ── Wafer map ────────────────────────────────────────────────────────────────
 WAFER_MAP_BUTTON = "Wafer Map 보기"
 WAFER_MAP_TITLE = "Wafer Map"
-WAFER_MAP_SUBTITLE = "결함 사진을 웨이퍼 위 실제 위치에 찍습니다 — 휠: 확대 · 드래그: 이동 · 점에 마우스: 사진 · 점 더블클릭: 상세 정보 · 빈 곳 더블클릭: 원래 크기"
+WAFER_MAP_SUBTITLE = "결함 사진을 웨이퍼 위 실제 위치에 찍습니다 — 휠: 확대 · 드래그: 이동 · 점에 마우스: 사진 · 점 더블클릭: 상세 정보"
 WAFER_MAP_PICK_FOLDER = "폴더 선택"
 WAFER_MAP_PICK_FOLDER_ANOTHER = "다른 폴더"
 WAFER_MAP_PICK_FOLDER_TITLE = "웨이퍼(슬롯) 폴더 또는 LOT 폴더 선택"
@@ -1122,7 +1122,9 @@ WAFER_MAP_DISCLAIMER = (
     "die 위치와 판정은 반드시 장비 화면이나 원본 데이터로 확인하세요."
 )
 WAFER_MAP_TIP_NO_DIE = "die 인덱스 없음(절대좌표)"
-WAFER_MAP_TIP_XY_FMT = "X {x:,.0f} · Y {y:,.0f} ㎛"
+# die 안쪽 x·y — 장비·Conder scan 과 같은 표기.  아래 X·Y 는 웨이퍼 중심 기준이라 다르다.
+WAFER_MAP_TIP_DIE_FMT = "col {col} · row {row} · x {x:,.0f} · y {y:,.0f} ㎛"
+WAFER_MAP_TIP_XY_FMT = "웨이퍼 중심 기준 X {x:,.0f} · Y {y:,.0f} ㎛"
 WAFER_MAP_SHEET = "Wafer Map"
 WAFER_MAP_SHEET_COL_SLOT = "슬롯"
 WAFER_MAP_SHEET_COL_REF = "기준"
