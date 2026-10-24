@@ -461,7 +461,10 @@ class WaferMapView(QWidget):
     # ------------------------------------------------------------------
     @staticmethod
     def tooltip_html(p: MapPoint) -> str:
-        if p.col is not None:
+        if p.col is not None and p.die_x is not None:
+            pos = i18n.KO.WAFER_MAP_TIP_DIE_FMT.format(col=p.col, row=p.row,
+                                                       x=p.die_x, y=p.die_y)
+        elif p.col is not None:
             pos = i18n.KO.WAFER_MAP_TIP_COLROW_FMT.format(col=p.col, row=p.row)
         else:
             pos = i18n.KO.WAFER_MAP_TIP_NO_DIE

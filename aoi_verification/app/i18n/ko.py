@@ -1122,7 +1122,9 @@ WAFER_MAP_DISCLAIMER = (
     "die 위치와 판정은 반드시 장비 화면이나 원본 데이터로 확인하세요."
 )
 WAFER_MAP_TIP_NO_DIE = "die 인덱스 없음(절대좌표)"
-WAFER_MAP_TIP_XY_FMT = "X {x:,.0f} · Y {y:,.0f} ㎛"
+# die 안쪽 x·y — 장비·Conder scan 과 같은 표기.  아래 X·Y 는 웨이퍼 중심 기준이라 다르다.
+WAFER_MAP_TIP_DIE_FMT = "col {col} · row {row} · x {x:,.0f} · y {y:,.0f} ㎛"
+WAFER_MAP_TIP_XY_FMT = "웨이퍼 중심 기준 X {x:,.0f} · Y {y:,.0f} ㎛"
 WAFER_MAP_SHEET = "Wafer Map"
 WAFER_MAP_SHEET_COL_SLOT = "슬롯"
 WAFER_MAP_SHEET_COL_REF = "기준"
