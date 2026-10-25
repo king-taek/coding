@@ -112,6 +112,7 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   `diagram-design` 은 설명서(`dev/사용설명서_자료`) 그림용이며 사진 파일 정책은 그대로다.
 - 2026-10-20 추가: `motion-reference` — 모션 이름 · 시간 · 이징 사전(motion-reference.takayustudio.jp, 라이선스 명시 없음 → 링크만, 코드 복사 금지).
   우선순위는 디자인 스킬 **다음**이고, 구현은 `ui/motion.py` 상수로만 한다(로딩바 규칙 · motion.py 원칙이 사이트 값보다 먼저).
+- 2026-10-25 추가: `deep-interview` — 모호한 요구를 질문 하나씩 다듬어 스펙으로(oh-my-claudecode 원본, 그 플러그인의 후속 스킬 · `.omc/` 는 없음 → 실행은 `writing-plans`).
 - 새 스킬을 넣으면 금지어 가드(`test_no_spyder_conda.py`)를 다시 돌린다 — 저장소 안 모든 글자를 훑는다.
 
 ## 로딩바(LoadingOverlay) 규칙 — 오작동 방지 (중요)
