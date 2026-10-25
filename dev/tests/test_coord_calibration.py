@@ -323,24 +323,58 @@ def test_dialog_weak_auto_value_still_needs_pairs(styled_qapp, tmp_path):
     dlg.deleteLater()
 
 
-def test_auto_offset_aborts_after_deadline():
-    import time
-    kla, cam = _shifted(30, (87.0, -91.0))
-    with pytest.raises(cal.AutoOffsetTimeout):
-        cal.auto_offset([(kla, cam)], src_is_kla=True, deadline=time.monotonic() - 1.0)
-    # 기한이 넉넉하면 평소와 같다.
-    a = cal.auto_offset([(kla, cam)], src_is_kla=True, deadline=time.monotonic() + 60.0)
-    assert a is not None and cal.is_confident(a)
+def test_auto_offset_stops_at_the_deadline_and_judges_what_it_has(monkeypatch):
+    """기한에 걸리면 모인 표로 판단한다 — 결함을 다 볼 필요는 없다(사용자 지시 2026-10-25)."""
+    slots = [_shifted(10, (87.0, -91.0), start=10 * i) for i in range(4)]
+    seen = []
+    monkeypatch.setattr(cal.time, "monotonic", lambda: seen.append(1) or (0.0 if len(seen) <= 24 else 99.0))
+    a = cal.auto_offset(slots, src_is_kla=True, deadline=1.0)
+    assert a.partial and cal.is_confident(a)
+    assert a.offset == pytest.approx((87.0, -91.0), abs=1.0)
+    assert a.support == 24                            # 40 개 중 기한 안에 본 24 개만
 
 
-def test_dialog_tells_when_auto_timed_out(styled_qapp, tmp_path):
-    from aoi_verification.app.ui.widgets.coord_calibration_dialog import (
-        CoordCalibrationDialog)
-    entries, _shift = _make_entries(tmp_path)
-    dlg = CoordCalibrationDialog(entries, kla_side="ref", auto=None, auto_timed_out=True)
-    assert "중단" in dlg._warn.text()
-    assert not dlg._apply.isEnabled()                 # 쌍을 고를 때까지 적용 불가
-    dlg.deleteLater()
+def test_votes_alternate_slots_so_a_cut_covers_every_slot():
+    """앞 슬롯만 보고 멈추지 않게 슬롯을 번갈아 훑는다."""
+    a = _shifted(3, (87.0, -91.0))
+    b = _shifted(3, (87.0, -91.0), start=3)
+    votes, partial = cal._collect_votes([a, b], src_is_kla=True, radius=cal.SEARCH_RADIUS_UM)
+    assert not partial
+    firsts = [sid for _v, sid in votes][:2]
+    assert firsts == [0, 1]                           # 슬롯 a 첫 결함, 슬롯 b 첫 결함
+
+
+def test_confident_auto_value_is_applied_without_the_dialog(monkeypatch):
+    """믿을 만한 자동값은 보정 화면 없이 바로 적용한다(사용자 결정 2026-10-25)."""
+    pytest.importorskip("PyQt6.QtWidgets")
+    from types import SimpleNamespace
+    from aoi_verification.app.ui.main_window import MainWindow
+    from aoi_verification.app.ui.widgets import coord_calibration_dialog as ccd
+
+    def no_dialog(*a, **kw):
+        raise AssertionError("믿을 만한데 보정 화면을 띄웠다")
+    monkeypatch.setattr(ccd, "CoordCalibrationDialog", no_dialog)
+    started = []
+    worker = object()
+    fake = SimpleNamespace(sender=lambda: worker, _calib_worker=worker,
+                           _loading=SimpleNamespace(hide_overlay=lambda: None),
+                           _input=object(), _scan=object(), _coord_offset=None,
+                           _calib_side="ref", _start_stage2=lambda: started.append(1))
+    auto = cal.AutoOffset(offset=(87.0, -91.0), support=20, runner_up=2, votes=40)
+    MainWindow._on_calib_ready(fake, ([], auto))
+    assert fake._coord_offset == (87.0, -91.0)
+    assert started == [1]
+
+
+def test_stage2_title_shows_the_applied_offset():
+    pytest.importorskip("PyQt6.QtWidgets")
+    from dataclasses import replace
+    from aoi_verification.app import config
+    from aoi_verification.app.utils.prefs import EngineMode
+    from aoi_verification.app.ui.pages import match_page as mp
+    cfg = replace(config.DEFAULT_SIM_CONFIG, engine=EngineMode.COORDINATE,
+                  coord_offset=(87.0, -91.0))
+    assert "+87" in mp._stage2_title(cfg) and "-91" in mp._stage2_title(cfg)
 
 
 def test_kla_camtek_side_reads_folder_headers(tmp_path):
