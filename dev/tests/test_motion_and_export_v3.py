@@ -308,8 +308,7 @@ def exported(isolated_cache):
     tmp = Path(tempfile.mkdtemp())
     dst = tmp / "out.xlsx"
     exp = ExcelExporter(_tiny_result(tmp), dst,
-                        template_path=tmp / "none.xlsx",
-                        include_full_template=True)
+                        template_path=tmp / "none.xlsx")
     msgs: list[str] = []
     exp.signals.progress.connect(lambda d, t, m: msgs.append(m))
     exp.run()
@@ -396,9 +395,7 @@ def test_option_row_and_order_are_unchanged(page):
         return w.mapTo(page, w.rect().topLeft()).x()
 
     assert left(page.unmatched_original_chk) < left(page.original_quality_chk)
-    assert left(page.original_quality_chk) < left(page.full_template_chk)
-    for chk in (page.unmatched_original_chk, page.original_quality_chk,
-                page.full_template_chk):
+    for chk in (page.unmatched_original_chk, page.original_quality_chk):
         assert not chk.isChecked(), "기본값이 바뀌었다"
 
 

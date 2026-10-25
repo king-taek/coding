@@ -1,4 +1,4 @@
-"""엑셀 저장 옵션 3개는 **한 줄에 나란히**, 버튼 줄 **위**에 있다(사용자 선택 1안).
+"""엑셀 저장 옵션은 **한 줄에 나란히**, 버튼 줄 **위**에 있다(사용자 선택 1안).
 
 실측 버그: '사진을 원본 화질로 넣기' 는 버튼 줄 위, '전체 양식 포함' 은 버튼 줄
 아래로 **110px 갈라져** 있었다.  전부 '엑셀로 저장' 에만 걸리는 옵션인데 버튼
@@ -43,8 +43,7 @@ def _left(w) -> int:
 
 
 def _options(page):
-    return (page.unmatched_original_chk, page.original_quality_chk,
-            page.full_template_chk)
+    return (page.unmatched_original_chk, page.original_quality_chk)
 
 
 def test_export_options_share_one_row(page):
@@ -74,6 +73,13 @@ def test_options_do_not_overlap_each_other(page):
 def test_unmatched_option_is_left_of_original_quality(page):
     """'미매칭 사진만 원본' 은 '사진을 원본 화질로' **왼쪽**(사용자 요청 배치)."""
     assert _left(page.unmatched_original_chk) < _left(page.original_quality_chk)
+
+
+def test_full_template_option_is_gone(page):
+    """'전체 양식(E~H 수기 영역) 포함' 옵션은 삭제됐다(사용자 요청 2026-10-25)."""
+    assert not hasattr(page, "full_template_chk")
+    from PyQt6.QtWidgets import QCheckBox
+    assert all("수기" not in c.text() for c in page.findChildren(QCheckBox))
 
 
 def test_all_options_still_drive_the_export(page):

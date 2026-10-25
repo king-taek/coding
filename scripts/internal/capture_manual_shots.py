@@ -727,7 +727,6 @@ def _stage_result(win, sr) -> dict:
         "요약카드": getattr(page, "_summary_card", None),
         "통계타일": stat_tiles or None,
         "원본화질": getattr(page, "original_quality_chk", None),
-        "전체양식": getattr(page, "full_template_chk", None),
         "새검증": getattr(page, "new_btn", None),
         "검토화면복귀": getattr(page, "review_btn", None),
         "실패검토": getattr(page, "review_unmatched_btn", None),

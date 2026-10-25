@@ -33,7 +33,9 @@ from aoi_verification.app.models.result import (                 # noqa: E402
 from aoi_verification.app.utils import paths                     # noqa: E402
 from aoi_verification.app.workers import exporter as ex          # noqa: E402
 
-SHEET = ex.SHEET_FULL_NAME
+# '전체 양식' 시트는 저장하지 않는다(옵션 삭제, 2026-10-25) — 사용자가 받는 요약 시트를 본다.
+SHEET = "out"        # 요약 시트 이름 = 결과 파일 이름
+AD = "ABCD"
 N_ROWS = 25          # 템플릿이 미리 칠해 둔 20행보다 **많게**
 
 
@@ -65,8 +67,7 @@ def exported(qapp, tmp_path_factory):
     dst = tmp / "out.xlsx"
     ExcelExporter = ex.ExcelExporter
     ExcelExporter(result=result, dst_path=dst,
-                  template_path=paths.template_path(),
-                  include_full_template=True)._do_export()
+                  template_path=paths.template_path())._do_export()
 
     import openpyxl
     return openpyxl.load_workbook(dst)
@@ -76,6 +77,8 @@ def test_column_widths_survive_the_export(exported):
     """★ 양식이 정한 폭이 그대로 나온다 — 사고 1."""
     ws = exported[SHEET]
     for col, want in ex.COL_WIDTHS.items():
+        if col not in AD:
+            continue
         got = ws.column_dimensions[col].width
         assert got == pytest.approx(want, abs=0.6), (
             f"{col}열 폭이 {got} — 양식이 정한 {want} 로 나와야 한다")
@@ -88,21 +91,13 @@ def test_photo_columns_stay_equal(exported):
             == pytest.approx(ws.column_dimensions["D"].width, abs=0.01))
 
 
-def test_manual_columns_are_narrower_than_photo_columns(exported):
-    """수기 열이 사진 열만큼 넓어지면 가로가 다시 길어진다."""
-    ws = exported[SHEET]
-    photo = ws.column_dimensions["C"].width
-    for col in "EFGH":
-        assert ws.column_dimensions[col].width < photo
-
-
 def test_body_style_continues_past_the_template_rows(exported):
     """★ 21행 이후에도 배경·격자가 이어진다 — 사고 2."""
     ws = exported[SHEET]
     last = ex.DATA_START_ROW + N_ROWS - 1
     assert last > 22, "템플릿 미리칠한 범위를 넘겨야 의미 있는 검사다"
     for row in (ex.DATA_START_ROW, 23, last):
-        for col in "ABCDEFGH":
+        for col in AD:
             cell = ws[f"{col}{row}"]
             assert cell.fill.fgColor.rgb in ex.BODY_FILLS[col], (
                 f"{col}{row} 배경이 {cell.fill.fgColor.rgb} — 그룹 배경이 아니다")
@@ -115,14 +110,6 @@ def test_banding_alternates_by_data_order(exported):
     first, second = ex.DATA_START_ROW, ex.DATA_START_ROW + 1
     assert (ws[f"A{first}"].fill.fgColor.rgb
             != ws[f"A{second}"].fill.fgColor.rgb)
-
-
-def test_group_colors_differ_between_camtek_and_kla(exported):
-    """Camtek(E·F)과 KLA(G·H)가 같은 색이면 색 구분의 의미가 없다."""
-    ws = exported[SHEET]
-    row = ex.DATA_START_ROW
-    assert ws[f"E{row}"].fill.fgColor.rgb != ws[f"G{row}"].fill.fgColor.rgb
-    assert ws["E2"].fill.fgColor.rgb != ws["G2"].fill.fgColor.rgb
 
 
 def test_committed_template_matches_the_exporter_constants():

@@ -164,10 +164,6 @@ class ResultPage(QWidget):
         #   (묶음 캡션은 사용자 결정으로 삭제 — 배치·순서는 현행 그대로다.)
         self.original_quality_chk.toggled.connect(self._sync_option_dependency)
 
-        self.full_template_chk = QCheckBox(i18n.KO.EXPORT_FULL_TEMPLATE_LABEL, self)
-        self.full_template_chk.setChecked(False)
-        self.full_template_chk.setToolTip(i18n.KO.EXPORT_FULL_TEMPLATE_TOOLTIP)
-        opt_row.addWidget(self.full_template_chk)
         self._sync_option_dependency(self.original_quality_chk.isChecked())
 
         # ★ 31안 — 누르기 **전에** 목적지를 말한다.  [엑셀로 저장] 을 눌러야
@@ -512,7 +508,6 @@ class ResultPage(QWidget):
         self._loading.show_overlay(i18n.KO.LOAD_EXPORT)
         self._exporter = ExcelExporter(
             self._result, self._save_path, template_path=self._template_path,
-            include_full_template=self.full_template_chk.isChecked(),
             original_quality=self.original_quality_chk.isChecked(),
             unmatched_original_quality=self.unmatched_original_chk.isChecked(),
             map_renderer=render_map_png,          # Wafer Map 시트(화면과 같은 렌더러)

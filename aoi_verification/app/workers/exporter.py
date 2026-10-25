@@ -6,7 +6,8 @@
   매치 행은 두 사진 칸의 **셀 값**으로도 캡션(파일명 + 계측·좌표)을 적는다 — 미매칭
   행이 D열에 적던 것과 같은 정보다.  평소에는 사진이 그 위를 덮어 보이지 않고, 필요할
   때 엑셀에서 사진을 치우면 드러난다(사용자 요청: 특별한 경우가 아니면 볼 일이 없다).
-- E~H 컬럼(Escape Defect Camtek/KLA)은 사용자가 수기로 채울 영역이라 비워 둔다.
+- E~H 컬럼(Escape Defect Camtek/KLA 수기 영역)이 있는 '전체 양식' 시트는 저장하지 않는다
+  (옵션 삭제, 사용자 요청 2026-10-25) — 양식은 요약·미매칭 헤더의 원본으로만 쓴다.
 - ‘매칭 방향’ 컬럼은 사용자 요청으로 더 이상 쓰지 않는다 (#4).
 """
 
@@ -151,7 +152,6 @@ class ExcelExporter(QThread):
                  result: FinalResult,
                  dst_path: Path,
                  template_path: Optional[Path] = None,
-                 include_full_template: bool = False,
                  original_quality: bool = False,
                  unmatched_original_quality: bool = False,
                  map_renderer=None,
@@ -171,8 +171,6 @@ class ExcelExporter(QThread):
         self._map_renderer = map_renderer
         self._dst = Path(dst_path)
         self._template = Path(template_path) if template_path else None
-        # 전체 양식(E~H 수기 영역 포함) 시트 생성 여부 — 기본 off(가볍고 빠른 출력).
-        self._include_full_template = bool(include_full_template)
         # 사진을 원본 화질로 임베드할지 — 기본 off(중간 화질 캐시로 가볍게).
         self._original_quality = bool(original_quality)
         # 미매칭 사진만 원본 화질로 — 전체 원본 옵션이 켜져 있으면 어차피 전부 원본.
@@ -286,7 +284,6 @@ class ExcelExporter(QThread):
         self._prog_total = (
             len(scan_paths)                                          # Scan 확인
             + len(prewarm)                                           # 사진 준비(추출)
-            + (len(rows_input) if self._include_full_template else 0)   # 전체 양식
             + len(unmatched_rows)                                    # 미매칭 시트
             + len(rows_input)                                        # 요약 시트
             + len(map_rows)                                          # Wafer map 시트
@@ -297,20 +294,7 @@ class ExcelExporter(QThread):
         if prewarm:
             self._prewarm_images(prewarm)
 
-        # 전체 양식(E~H 포함) 시트는 옵션 — 기본 off 면 이미지 임베드를 1회만 하게
-        # 요약 시트만 채운다(더 빠르고 가벼운 파일).  켜면 전체 양식도 채운다.
-        if self._include_full_template:
-            # 전체 양식만 E~H(수기 영역)가 있으므로 그 열까지 칠한다.
-            self._fill_rows(ws, rows_input, style_cols=self._full_cols(),
-                            sheet_label=SHEET_FULL_NAME)
-            # 양식.xlsx 의 A3..A22 미리 박힌 1..20 행번호 중 안 채운 행은 비운다.
-            data_end_row = DATA_START_ROW + len(rows_input) - 1
-            for r in range(max(data_end_row + 1, DATA_START_ROW), ws.max_row + 1):
-                a = ws.cell(row=r, column=1)
-                if isinstance(a.value, (int, float)):
-                    a.value = None
-
-        # 시트 순서: 미매칭(첫 번째, 조건부) → 요약 → 전체 양식.
+        # 시트 순서: 미매칭(첫 번째, 조건부) → 요약.
         lots = self._lot_units(rows_input) if self._extract else []
         if self._extract and (self._recipe_layout != RECIPE_LAYOUT_SINGLE
                               or len(lots) > 1):
@@ -340,12 +324,12 @@ class ExcelExporter(QThread):
             _LOG.info("저장 소요 [Wafer Map] %.2f초 %d장",
                       time.perf_counter() - t0, len(map_rows))
 
-        # 전체 양식 미포함이면, 헤더 복사가 끝난 지금 전체 양식 시트를 제거.
-        if not self._include_full_template:
-            try:
-                wb.remove(wb[SHEET_FULL_NAME])
-            except Exception:
-                pass
+        # 전체 양식(E~H 수기 영역) 시트는 저장하지 않는다(사용자 요청 2026-10-25 — 옵션 삭제).
+        #   양식 시트는 요약·미매칭 헤더를 복사하는 원본으로만 쓰고, 복사가 끝난 지금 지운다.
+        try:
+            wb.remove(wb[SHEET_FULL_NAME])
+        except Exception:
+            pass
 
         self._dst.parent.mkdir(parents=True, exist_ok=True)
         # ★ 여기서 한 번 더 본다 — 저장을 시작한 뒤 취소되면 파일이 깨진다.
@@ -611,12 +595,6 @@ class ExcelExporter(QThread):
     def _ad_cols(self) -> list[str]:
         """요약·미매칭(·추출 한 시트) 시트의 열 — A~D + Scan 열."""
         return ["A", "B", "C", "D"] + self._scan_cols
-
-    def _full_cols(self) -> list[str]:
-        """전체 양식 시트의 열 — 요약 열 + 수기 4칸(Scan 열만큼 밀린 자리)."""
-        from openpyxl.utils import get_column_letter
-        n = len(self._scan_cols)
-        return self._ad_cols() + [get_column_letter(5 + n + k) for k in range(4)]
 
     def _body_fills(self) -> dict:
         """열 문자 → 줄무늬 색.  Scan 열은 사진 열(C)과, 밀린 수기 칸은 원래 칸과 같다."""
