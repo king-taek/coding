@@ -146,3 +146,30 @@ def test_select_page_prefetches_the_next_photos(styled_qapp, tmp_path):
             (q[2].path, page.center_img.center_crop())}
     assert set(page.center_img._prefetched) == want
     page.close()
+
+
+def test_set_image_waits_for_a_running_prefetch(styled_qapp, tmp_path,
+                                                monkeypatch):
+    """읽는 중인 사진은 두 번 읽지 않고 그 결과를 기다린다(쓰는 중인 캐시 파일 방지)."""
+    import threading
+
+    paths = _photos(tmp_path, 1)
+    started, release = threading.Event(), threading.Event()
+    calls = []
+    real = ScalableImage._decode.__func__
+
+    def slow(cls, path, crop):
+        calls.append(threading.current_thread().name)
+        started.set()
+        release.wait(5)
+        return real(cls, path, crop)
+
+    monkeypatch.setattr(ScalableImage, "_decode", classmethod(slow))
+    w = ScalableImage()
+    w.prefetch([paths[0]])
+    assert started.wait(5)
+    threading.Timer(0.05, release.set).start()
+    w.set_image(paths[0])
+    assert len(calls) == 1, "같은 사진을 메인 스레드에서 또 읽었다"
+    assert w._pix_orig is not None and w._pix_orig.width() == 120
+

@@ -88,7 +88,10 @@ class ScalableImage(QLabel):
         self._path = path
         img = None
         fut = self._prefetched.pop((path, self._crop), None)
-        if fut is not None and fut.done():
+        # ★ 이미 읽는 중이면 **기다린다** — 같은 사진을 두 번 읽기 시작하면 중간 화질
+        #   캐시를 쓰는 도중의 파일을 읽어 빈 화면이 될 수 있다(`_ensure_resized` 는
+        #   최종 경로에 바로 쓴다).  아직 시작 전이면 취소하고 여기서 읽는다.
+        if fut is not None and not fut.cancel():
             try:
                 img = fut.result()
             except Exception:
@@ -108,7 +111,7 @@ class ScalableImage(QLabel):
 
         ``paths`` 에 없는 옛 예약은 버린다(되돌리기·건너뛰기로 순서가 바뀌어도 쌓이지 않는다).
         아직 다 못 읽은 사진은 `set_image` 가 그 자리에서 읽는다 — 결과는 같다."""
-        want = {(Path(p), self._crop) for p in paths}
+        want = [(Path(p), self._crop) for p in paths]       # 순서 = 넘길 순서
         for key in list(self._prefetched):
             if key not in want:
                 self._prefetched.pop(key).cancel()
