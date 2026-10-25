@@ -108,3 +108,76 @@ def test_display_shift_parsing(tmp_path, text, want):
 
 def test_no_recipe_means_no_shift(tmp_path):
     assert camtek_ini.display_shift(tmp_path) == (0, 0)
+
+
+# ── Conder scan(LIVE 파일명) 폴더: Recipe.ini 가 없어 LOT 맵 txt 로 시프트를 추정한다 ──
+
+def _materialize_conder(tmp_path: Path) -> Path:
+    """사진목록의 이름으로 빈 파일을 만든 Conder LOT 폴더(사진 실물은 저장소에 없다)."""
+    lot = tmp_path / "FS UBM"
+    lot.mkdir()
+    for t in _CON.glob("*.txt"):
+        (lot / t.name).write_bytes(t.read_bytes())
+    for wafer in (p for p in _CON.iterdir() if p.is_dir()):
+        (lot / wafer.name).mkdir()
+        for n in _names(wafer / "사진목록.txt"):
+            (lot / wafer.name / n).touch()
+    return lot
+
+
+def test_conder_lot_shift_is_inferred_from_the_lot_map(tmp_path):
+    lot = _materialize_conder(tmp_path)
+    assert camtek_live.lot_display_shift(lot) == (-1, 0)
+
+
+def test_conder_names_resolve_to_the_same_die_as_the_camtek_ini(tmp_path):
+    """같은 결함을 Camtek INI 로 보든 Conder 파일명으로 보든 실제 die·화면 번호가 같다."""
+    from aoi_verification.app.coords import resolve
+    lot = _materialize_conder(tmp_path)
+    for wafer, live, ini in _pairs():
+        name = next(n for n in _names(_CON / wafer / "사진목록.txt")
+                    if camtek_live.parse_live_name(Path(n).stem) == live)
+        c = resolve(lot / wafer / name)
+        assert (c.col, c.row) == (ini.col, ini.row), name
+        assert (c.screen_col, c.screen_row) == (live.col, live.row), name
+
+
+def _synthetic_lot(tmp_path: Path, bad_cols, names) -> Path:
+    """1행 5열 맵(불량 칸 ``bad_cols``) + LIVE 이름들로 된 LOT 폴더."""
+    lot = tmp_path / "LOT"
+    (lot / "W1").mkdir(parents=True)
+    row = " ".join("009" if c in bad_cols else "000" for c in range(5))
+    (lot / "W1.txt").write_text(
+        f"WAFER:W1\nFNLOC:180\nROWCT:1\nCOLCT:5\nBCEQU:000\nRowData:{row}\n",
+        encoding="utf-8")
+    for n in names:
+        (lot / "W1" / n).touch()
+    return lot
+
+
+def _live(col, x=10.0):
+    return f"R_DEV_REC_LOT_W1_{col}_0_Foreign_{x}_5.0.jpg"
+
+
+def test_unshifted_lot_stays_zero(tmp_path):
+    lot = _synthetic_lot(tmp_path, {1, 2, 3}, [_live(1), _live(2), _live(3)])
+    assert camtek_live.lot_display_shift(lot) == (0, 0)
+
+
+def test_shift_needs_several_distinct_cells(tmp_path):
+    """한 칸에 사진이 몰려 있으면(근거 1칸) 시프트를 채택하지 않는다."""
+    lot = _synthetic_lot(tmp_path, {3}, [_live(2, x) for x in (1.0, 2.0, 3.0, 4.0)])
+    assert camtek_live.lot_display_shift(lot) == (0, 0)
+
+
+def test_shift_rejected_when_zero_also_fits(tmp_path):
+    """시프트 0 으로도 상당수가 맞으면(섞임) 0 을 유지한다."""
+    lot = _synthetic_lot(tmp_path, {1, 2, 3, 4},
+                         [_live(0), _live(1), _live(2), _live(3)])
+    assert camtek_live.lot_display_shift(lot) == (0, 0)
+
+
+def test_no_map_means_no_shift(tmp_path):
+    (tmp_path / "W1").mkdir()
+    (tmp_path / "W1" / _live(2)).touch()
+    assert camtek_live.lot_display_shift(tmp_path) == (0, 0)

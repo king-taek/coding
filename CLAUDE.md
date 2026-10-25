@@ -294,8 +294,11 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   (`camtek_ini.display_shift` → `DefectCoord.col_shift/row_shift`, 사용자 결정 2026-10-25).
   `col`/`row` 는 실제 die — 매칭·Wafer map 위치·KLA·LOT 맵 txt 와 같은 번호다. 장비 화면·LIVE 파일명은
   시프트를 더한 번호라 사진 정보·엑셀·맵 툴팁만 `screen_col`/`screen_row` 를 쓴다(T254 FS UBM `-1`, 관측).
-  ⚠ LIVE 파일명 자체가 화면 번호라, 시프트가 있는 레시피의 LIVE 이름은 실제 die 와 1 다르다(그 폴더엔
-  Recipe.ini 가 없어 되돌릴 수 없다 — 미해결). row 시프트 실물은 아직 없다(같은 부호는 가정). 골든: `test_display_shift.py`.
+  LIVE 파일명도 화면 번호다. Conder 폴더엔 Recipe.ini 가 없어 **LOT 맵 txt 불량 칸과 대조해 추정**한다
+  (`camtek_live.lot_display_shift`) — 서로 다른 칸 3개 이상 · 맞은 사진의 90% 이상 · 시프트 0 은 10% 이하일 때만
+  0 이 아닌 값을 채택한다(시프트 없는 4 LOT 278장은 0, FS UBM 42장은 −1). 맵이 결함을 표시하지 않는 제품(QORVO)은
+  근거가 없어 0. 이 조건을 느슨하게 하지 마라 — 틀린 시프트는 모든 사진을 한 칸 옮긴다. row 시프트 실물은 없다(가정).
+  ⚠ 시프트 −1 레시피의 맨 왼쪽 열은 화면 col −1 이라 `parse_live_name` 이 음수로 버린다(미해결). 골든: `test_display_shift.py`.
 - **LIVE 파일명(`camtek_live`)은 정규식이 아니라 `_` 토큰으로 읽는다.** 배치가 셋이라
   (`x_y_이름` · `이름_x_y` · `이름_x_y_크기_면적`) 정규식으로는 서로 잡아먹는다 —
   실제로 greedy `.+`+`$` 가 **맨 뒤 두 수치(DYSize·DArea)를 x·y 로** 집어 30,212 µm
