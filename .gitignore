@@ -45,3 +45,6 @@ dev/사용설명서_자료/*.jpeg
 
 # graphify 코드 지도(생성물)
 graphify-out/
+
+# deep-interview 스킬 상태 · 스펙(개발 PC 전용)
+.omc/
