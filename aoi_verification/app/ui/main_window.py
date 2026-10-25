@@ -171,8 +171,10 @@ class _CalibPrepWorker(QThread):
     """좌표 보정 화면 데이터 준비 — 좌표 읽기(INI/.001 파싱)가 느려 백그라운드에서.
 
     ``groups`` 는 슬롯마다 ``(기준 사진들, 검증 사진들)``.  ``ready`` 로
-    ``(entries, auto)`` 를 낸다(:mod:`coords.calibration`).  실패하면 ``([], None)``
-    — 보정을 건너뛰고 매칭은 그대로 진행한다."""
+    ``(entries, auto)`` 를 낸다(:mod:`coords.calibration`).  자동 계산은
+    ``AUTO_TIME_LIMIT_S`` 에서 표 모으기를 멈추고 모인 표로 판단한다.  믿을 만하면
+    수동 화면이 필요 없으니 ``entries`` 를 만들지 않는다(빈 목록).  실패하면
+    ``([], None)`` — 보정을 건너뛰고 매칭은 그대로 진행한다."""
 
     progress = pyqtSignal(int, int)
     ready = pyqtSignal(object)
@@ -201,8 +203,10 @@ class _CalibPrepWorker(QThread):
             # 실행 전체 슬롯으로 한 번 — 웨이퍼 한 장씩이면 결함이 몰린 곳에서 틀린다.
             auto = cal.auto_offset(
                 [([c for _k, c in s if c], [c for _k, c in o if c]) for s, o in groups],
-                src_is_kla=self._src_is_kla)
-            entries = cal.build_entries(groups, src_is_kla=self._src_is_kla)
+                src_is_kla=self._src_is_kla,
+                deadline=time.monotonic() + cal.AUTO_TIME_LIMIT_S)
+            entries = ([] if cal.is_confident(auto)
+                       else cal.build_entries(groups, src_is_kla=self._src_is_kla))
             self.ready.emit((entries, auto))
         except Exception:
             _LOG.exception("좌표 보정 준비 실패 — 보정 없이 진행")
@@ -1814,13 +1818,19 @@ class MainWindow(QMainWindow):
         if self._input is None or self._scan is None:
             return
         entries, auto = result
+        from ..coords import calibration as cal
         if auto is not None:
-            from ..coords import calibration as cal
             _LOG.info("좌표 보정 자동 계산: dx=%.1f dy=%.1f µm (근거 %d표 · 다른 무리 %d표 · "
-                      "전체 %d표 · 신뢰 %s)", *auto.offset, auto.support, auto.runner_up,
-                      auto.votes, cal.is_confident(auto))
+                      "전체 %d표 · 일부만 봄 %s · 신뢰 %s)", *auto.offset, auto.support,
+                      auto.runner_up, auto.votes, auto.partial, cal.is_confident(auto))
         hint = auto.offset if auto is not None else None
-        if entries:
+        if cal.is_confident(auto):
+            # 믿을 만하면 화면 없이 바로 적용한다(사용자 결정 2026-10-25) — 값은
+            # 매칭 화면 표제에 보인다(`match_page._stage2_title`).
+            self._coord_offset = auto.offset
+            _LOG.info("좌표 보정 자동 적용(KLA→Camtek, 매칭 전용): dx=%.1f dy=%.1f µm",
+                      *auto.offset)
+        elif entries:
             from PyQt6.QtWidgets import QDialog
             from .widgets.coord_calibration_dialog import CoordCalibrationDialog
             dlg = CoordCalibrationDialog(

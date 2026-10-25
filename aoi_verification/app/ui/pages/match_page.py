@@ -66,6 +66,10 @@ def _stage2_title(sim_cfg) -> str:
     화면이 스스로 모순됐다.  이제 `load_state` 가 이 함수로 표제를 갱신한다.
     """
     if EngineMode.is_coordinate(getattr(sim_cfg, "engine", "")):
+        dx, dy = tuple(getattr(sim_cfg, "coord_offset", None) or (0.0, 0.0))
+        if dx or dy:                # 좌표 보정(KLA ↔ Camtek)을 적용했으면 값을 보인다
+            return i18n.KO.STAGE2_TITLE_COORD + i18n.KO.STAGE2_COORD_OFFSET_FMT.format(
+                dx=dx, dy=dy)
         return i18n.KO.STAGE2_TITLE_COORD
     return i18n.KO.STAGE2_TITLE
 

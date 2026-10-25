@@ -159,6 +159,7 @@ SETUP_MACHINE_PLACEHOLDER = "예) 1호기"
 STAGE1_TITLE = "후보 선별"
 STAGE2_TITLE = "매칭 · 유사도 기반"
 STAGE2_TITLE_COORD = "매칭 · 좌표 기반"
+STAGE2_COORD_OFFSET_FMT = "  ·  보정 가로 {dx:+.0f} · 세로 {dy:+.0f} µm"
 RESULT_TITLE = "검증 결과"
 # 결과 요약 — 핵심 수치는 타일로, 나머지는 문장으로.
 RESULT_MACHINES_FMT = "기준 장비: {ref}    검증 장비: {val}"

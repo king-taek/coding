@@ -22,6 +22,7 @@ Qt 없이 테스트되는 순수 함수만 둔다(``dev/tests/test_coord_calibra
 from __future__ import annotations
 
 import math
+import time
 from dataclasses import replace
 from statistics import median
 from typing import Dict, Iterable, List, NamedTuple, Optional, Sequence, Tuple
@@ -51,6 +52,7 @@ _VOTE_BIN_UM = 20.0
 _SUPPORT_UM = 30.0          # 추정값 주변 이 거리 안에 표를 던진 결함을 '지지' 로 센다
 MIN_AUTO_SUPPORT = 8        # 지지 결함이 이보다 적으면 자동값을 믿지 않는다
 AUTO_DOMINANCE = 2.0        # 지지 결함이 두 번째 무리의 이 배수를 넘어야 한다
+AUTO_TIME_LIMIT_S = 20.0    # 표 모으기를 이 시간에서 멈추고 모인 표로 판단한다(사용자 지시 2026-10-25)
 
 
 def is_zero(offset: Optional[Offset]) -> bool:
@@ -104,12 +106,11 @@ def guess_offset(groups: Iterable[Tuple[Sequence[DefectCoord], Sequence[DefectCo
     모인 칸(과 그 이웃 칸)의 중앙값을 낸다.  진짜 같은 결함들은 같은 어긋남을
     공유하고, 우연한 이웃은 흩어진다.  후보 정렬 힌트이자 :func:`auto_offset` 의 추정값
     이다 — 보정값으로 쓸 때는 늘 사용자가 화면에서 확인하고 적용한다.  표가 2표 미만이면 None."""
-    votes: List[Offset] = []
-    for src, others in groups:
-        indexed = list(enumerate(others))
-        for s in src:
-            for _k, c, _d in _neighbors(s, indexed, radius):
-                votes.append(_cam_minus_kla(s, c, src_is_kla))
+    votes, _ = _collect_votes(groups, src_is_kla=src_is_kla, radius=radius)
+    return _guess_from([v for v, _sid in votes])
+
+
+def _guess_from(votes: List[Offset]) -> Optional[Offset]:
     if len(votes) < 2:
         return None
     bins: Dict[Tuple[int, int], int] = {}
@@ -135,25 +136,37 @@ class AutoOffset(NamedTuple):
     support: int        # 추정값 주변 ``_SUPPORT_UM`` 안에 표를 던진 서로 다른 결함 수
     runner_up: int      # 그 밖에서 가장 큰 무리의 서로 다른 결함 수
     votes: int          # 전체 표
+    partial: bool = False   # 기한에 걸려 결함 일부만 보고 낸 값
 
 
-def _votes(groups, *, src_is_kla: bool, radius: float) -> List[Tuple[Offset, int]]:
-    """이웃 후보마다 ``(cam − kla, 출발 결함 번호)`` — 한 결함이 이웃 여럿에 표를 던지므로
-    근거는 표 수가 아니라 **서로 다른 결함 수**로 센다."""
+def _collect_votes(groups, *, src_is_kla: bool, radius: float,
+                   deadline: Optional[float] = None) -> Tuple[List[Tuple[Offset, int]], bool]:
+    """이웃 후보마다 ``(cam − kla, 출발 결함 번호)`` 와 '기한에 걸려 멈췄는가'.
+
+    한 결함이 이웃 여럿에 표를 던지므로 근거는 표 수가 아니라 **서로 다른 결함 수**로
+    센다.  결함은 **슬롯을 번갈아** 훑는다 — ``deadline``(``time.monotonic()`` 기준)에서
+    멈춰도 앞 슬롯만 보지 않고 실행 전체에서 고르게 모인 표가 남는다(웨이퍼 한 장으로는
+    결함이 몰린 곳에서 틀린 값이 나왔다)."""
+    slots = [(list(src), list(enumerate(others))) for src, others in groups]
     out: List[Tuple[Offset, int]] = []
     n = 0
-    for src, others in groups:
-        indexed = list(enumerate(others))
-        for s in src:
+    for i in range(max((len(src) for src, _o in slots), default=0)):
+        for src, indexed in slots:
+            if i >= len(src):
+                continue
+            if deadline is not None and time.monotonic() > deadline:
+                return out, True
+            s = src[i]
             for _k, c, _d in _neighbors(s, indexed, radius):
                 out.append((_cam_minus_kla(s, c, src_is_kla), n))
             n += 1
-    return out
+    return out, False
 
 
 def auto_offset(groups: Iterable[Tuple[Sequence[DefectCoord], Sequence[DefectCoord]]],
                 *, src_is_kla: bool,
-                radius: float = SEARCH_RADIUS_UM) -> Optional[AutoOffset]:
+                radius: float = SEARCH_RADIUS_UM,
+                deadline: Optional[float] = None) -> Optional[AutoOffset]:
     """매칭할 때마다 **자료에서** 보정값을 추정한다 — 값을 저장하거나 하드코딩하지 않는다.
 
     원인(2026-10-24 분석, ``docs/좌표_KLA_Camtek_오프셋.md``): KLA·Camtek 레시피가 die
@@ -167,11 +180,11 @@ def auto_offset(groups: Iterable[Tuple[Sequence[DefectCoord], Sequence[DefectCoo
     * ``support`` — 추정값에서 ``_SUPPORT_UM`` 안에 표를 던진 **서로 다른 결함** 수.
     * ``runner_up`` — 그 밖의 표 **전부**(빈 구간 없이)를 ``_SUPPORT_UM`` 칸으로 묶어,
       3×3 칸 안 서로 다른 결함 수가 가장 많은 무리.  칸 단위라 표 수에 비례해 돈다."""
-    groups = [(list(s), list(o)) for s, o in groups]
-    guess = guess_offset(groups, src_is_kla=src_is_kla, radius=radius)
+    votes, partial = _collect_votes(groups, src_is_kla=src_is_kla, radius=radius,
+                                    deadline=deadline)
+    guess = _guess_from([v for v, _sid in votes])
     if guess is None:
         return None
-    votes = _votes(groups, src_is_kla=src_is_kla, radius=radius)
     gx, gy = guess
     near_src = set()
     bins: Dict[Tuple[int, int], set] = {}
@@ -189,7 +202,7 @@ def auto_offset(groups: Iterable[Tuple[Sequence[DefectCoord], Sequence[DefectCoo
                 srcs |= bins.get((kx + a, ky + b), set())
         runner = max(runner, len(srcs))
     return AutoOffset(offset=guess, support=len(near_src), runner_up=runner,
-                      votes=len(votes))
+                      votes=len(votes), partial=partial)
 
 
 def is_confident(auto: Optional[AutoOffset]) -> bool:
