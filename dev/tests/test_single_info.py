@@ -75,9 +75,12 @@ def test_kla_adds_native_coordinate_line(tmp_path):
     img.write_bytes(b"x")
 
     lines = single_info.coord_lines(img)
-    assert len(lines) == 3
+    assert len(lines) == 4
     assert lines[0] == "col 1 / row 3"      # XINDEX -2 +KLA_ZERO_X, YINDEX -1 +KLA_ZERO_Y
-    assert lines[2] == i18n.KO.EXPORT_KLA_NATIVE_FMT.format(x=1234.5, y=2345.6)
+    # 이 .001 엔 SampleCenterLocation 이 없어 번호가 추정값 — 바로 밑에 ⚠ 가 붙는다.
+    assert lines[1] == i18n.KO.DEFECT_NUMBER_WARN_FMT.format(
+        text=i18n.KO.DEFECT_NUMBER_WARN_KLA_GUESS)
+    assert lines[3] == i18n.KO.EXPORT_KLA_NATIVE_FMT.format(x=1234.5, y=2345.6)
     # 줄바꿈은 붙이는 쪽(엑셀 exporter)이 넣는다 — 여기서는 순수 텍스트.
     assert not any(line.startswith("\n") for line in lines)
 

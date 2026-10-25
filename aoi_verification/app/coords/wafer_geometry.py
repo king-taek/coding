@@ -43,7 +43,7 @@ from .models import (CAMTEK_COL_OFFSET, CAMTEK_PITCH_X, CAMTEK_PITCH_Y,
 
 __all__ = ["CamtekGeometry", "KlaGeometry", "camtek_geometry", "kla_geometry",
            "has_camtek_entries", "peek_die_pitch", "live_geometry", "FALLBACK_CAMTEK",
-           "FALLBACK_KLA"]
+           "FALLBACK_KLA", "EXPORT_SOURCE_TAG", "KLA_CENTER_SOURCE"]
 
 _LOG = logging.getLogger("aoi.coords")
 
@@ -495,6 +495,8 @@ def camtek_geometry(folder: Path) -> Optional[CamtekGeometry]:
 _EXPORT_FILE = "ProductInfo.ini"
 _EXPORT_SECTION = re.compile(r"(?ims)^\s*\[ExportData\]\s*$(.*?)(?=^\s*\[|\Z)")
 _EXPORT_KEYS = ("cMin", "cMax", "rMin", "rMax")
+# :attr:`CamtekGeometry.source` 에 이 꼬리표가 있으면 번호 기준을 장비 번호표에서 읽은 것이다.
+EXPORT_SOURCE_TAG = f"{_EXPORT_FILE}[ExportData]"
 
 
 def _export_origins(folder: Path, px: float, py: float, dia: float,
@@ -565,7 +567,7 @@ def _with_origins(folder: Path, px: float, py: float, src: str) -> CamtekGeometr
     exp = _export_origins(folder, px, py, dia, cx, cy)
     if exp is not None:
         return CamtekGeometry(pitch_x=px, pitch_y=py, col_origin=exp[0], row_total=exp[1],
-                              source=f"{src}+{_EXPORT_FILE}[ExportData]")
+                              source=f"{src}+{EXPORT_SOURCE_TAG}")
     d_origin = _col_origin(cx, dia, px)
     d_total = _row_total(cy, dia, py)
     cells = lot_die_map_cells(folder, px, py)
@@ -843,6 +845,11 @@ def _dat_layout(dat: Path) -> Optional[tuple[int, dict[str, tuple[int, int]]]]:
     return (int(m.group(1)), fields) if fields else None
 
 
+# KLA 원점을 헤더의 웨이퍼 중심(SampleCenterLocation)으로 유도했다는 꼬리표.  그 밖의 경로
+# (SampleTestPlan 최솟값 · 상수)는 번호가 틀렸을 수 있어 화면·엑셀에 경고를 단다.
+KLA_CENTER_SOURCE = "DiePitch+SampleCenterLocation"
+
+
 def _kla_zero(center: float, diameter: float, pitch: float) -> Optional[int]:
     """die 인덱스 원점 = **−(웨이퍼에 온전히 들어오는 첫 인덱스)**.  비상식적이면 None.
 
@@ -902,7 +909,7 @@ def parse_kla_header(text: str) -> Optional[KlaGeometry]:
     zeros = _kla_zeros_from_center(text, px, py)
     if zeros is not None:
         return KlaGeometry(pitch_x=px, pitch_y=py, zero_x=zeros[0], zero_y=zeros[1],
-                           source="DiePitch+SampleCenterLocation")
+                           source=KLA_CENTER_SOURCE)
 
     zero_x, src = KLA_ZERO_X, "DiePitch"
     tm = _TESTPLAN_PAT.search(text)

@@ -989,14 +989,18 @@ class TestAbsoluteFallback:
         assert c.row < 0               # 음수 = 장비 화면 값이 아님이 드러난다(버킷 전용)
 
     def test_display_shows_absolute_and_admits_unknown_row(self, tmp_path):
-        """표시 문구는 있는 사실만 적는다 — col + 절대 wafer 좌표, row 는 '미상'."""
+        """표시 문구는 있는 사실만 적는다 — col 숫자 대신 ⚠ + 절대 wafer 좌표.
+
+        col 도 상수 오프셋(−2)이라 첫 열이 2 가 아닌 제품에서 틀린다(사용자 결정 2026-10-25).
+        """
         from aoi_verification.app import i18n
         from aoi_verification.app.coords import single_info
 
         folder = _make_bare_folder(tmp_path / "s", [("a", 101023.8, 157436.6, 4, 4)])
         (folder / "a.jpeg").write_bytes(b"")
         lines = single_info.coord_lines(folder / "a.jpeg")
-        assert lines[0] == i18n.KO.DEFECT_COL_ONLY_FMT.format(col=2)
+        assert lines[0] == i18n.KO.DEFECT_COL_UNKNOWN_FMT
+        assert "2" not in lines[0]       # 틀릴 수 있는 숫자를 보이지 않는다
         assert lines[1] == i18n.KO.DEFECT_ABS_XY_FMT.format(x=101023.0, y=157436.0)
         # die-내부 좌표인 척하지 않는다
         assert not any(l.startswith("x ") for l in lines)

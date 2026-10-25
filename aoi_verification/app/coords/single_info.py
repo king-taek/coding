@@ -31,6 +31,7 @@ from pathlib import Path
 from .. import i18n
 from . import abs_coord, geometry, kla_info
 from . import resolve as _resolve_coord
+from .models import NUMBER_WARN_KLA_GUESS, NUMBER_WARN_NO_TABLE
 
 __all__ = ["Measure", "InfoRow", "InfoGroup", "measures", "geometry_lines",
            "coord_lines", "defect_lines", "describe", "has_measurements"]
@@ -105,6 +106,13 @@ def geometry_measures(image_path: Path) -> tuple[str, list[Measure]]:
         return "no_data", []
 
 
+# DefectCoord.number_warn → ko.py 문구 이름.  camtek_abs 는 위에서 숫자 자체를 바꾼다.
+_NUMBER_WARN_TEXT = {
+    NUMBER_WARN_NO_TABLE: "DEFECT_NUMBER_WARN_NO_TABLE",
+    NUMBER_WARN_KLA_GUESS: "DEFECT_NUMBER_WARN_KLA_GUESS",
+}
+
+
 def coord_measures(image_path: Path) -> list[Measure]:
     """die col/row 와 die 내부 local x/y(µm).
 
@@ -117,13 +125,13 @@ def coord_measures(image_path: Path) -> list[Measure]:
             return []
         if c.source == "camtek_abs":
             # die pitch 를 몰라 die 로 못 쪼갠 경우 — 있는 사실만 적는다.
-            # col 은 정확하지만 row 기준과 die-내부 좌표는 알 수 없으므로 꾸며내지 않고,
-            # 대신 **절대 wafer 좌표**를 준다(그 자체로 위치 식별에 쓸 수 있다).
+            # col 도 상수 오프셋이라 첫 열이 2 가 아닌 제품(RDL4 1 · QORVO 5)에서 틀린다 —
+            # 숫자 대신 경고를 적고(사용자 결정 2026-10-25), **절대 wafer 좌표**를 준다.
             return [
                 Measure(
                     label=i18n.KO.DEFECT_COL_ONLY_LABEL,
-                    value=str(c.screen_col),
-                    line=i18n.KO.DEFECT_COL_ONLY_FMT.format(col=c.screen_col),
+                    value=i18n.KO.DEFECT_COL_UNKNOWN_VALUE,
+                    line=i18n.KO.DEFECT_COL_UNKNOWN_FMT,
                 ),
                 Measure(
                     label=i18n.KO.DEFECT_ABS_XY_LABEL,
@@ -139,6 +147,14 @@ def coord_measures(image_path: Path) -> list[Measure]:
                                                             row=c.screen_row),
                 line=i18n.KO.DEFECT_COLROW_FMT.format(col=c.screen_col, row=c.screen_row),
             ),
+        ]
+        # 번호가 틀렸을 수 있을 때만 바로 밑에 경고 — 정상이면 아무것도 붙이지 않는다.
+        warn = _NUMBER_WARN_TEXT.get(c.number_warn)
+        if warn:
+            text = getattr(i18n.KO, warn)
+            out.append(Measure(label=i18n.KO.DEFECT_NUMBER_WARN_LABEL, value=text,
+                               line=i18n.KO.DEFECT_NUMBER_WARN_FMT.format(text=text)))
+        out += [
             Measure(
                 label=i18n.KO.DEFECT_XY_LABEL,
                 value=i18n.KO.DEFECT_XY_VALUE_FMT.format(x=c.x, y=c.y),
