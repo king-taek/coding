@@ -19,6 +19,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import logging
 import os
 import threading
 from collections import OrderedDict
@@ -31,6 +32,8 @@ from PyQt6.QtCore import QObject, QThread, pyqtSignal
 from ..models.slot import ImageItem
 from . import pipeline as _pipeline
 from .pipeline import Feature
+
+_LOG = logging.getLogger("aoi.match")
 
 # OpenCV 가 내부에서 multi-threading 하면 우리 ThreadPoolExecutor 와
 # over-subscription 발생 → 오히려 느려짐.  외부에서만 병렬화하도록 끔.
@@ -58,6 +61,8 @@ def _score_signature(cfg) -> str:
     """점수에 영향을 주는 모든 설정을 묶은 sha1 시그니처."""
     from .. import config as _config
     src = "|".join([
+        # 특징 추출·점수 공식이 바뀌면 옛 점수 파일이 적중하지 않게 한다(pipeline 참고).
+        _pipeline._FEATURE_VERSION,
         getattr(cfg, "engine", "basic"),
         cfg.cache_extra("ref") if cfg is not None else "",
         cfg.cache_extra("val") if cfg is not None else "",
@@ -221,8 +226,10 @@ class SlotFeatureCache:
                     it.path, cfg=cfg, side=getattr(it, "side", "val"),
                 )
             except Exception:
-                # 단일 이미지 실패는 무시 — 호출자가 빈 dict 로 처리.
-                pass
+                # 단일 이미지 실패는 이 사진만 빠진다 — 호출자가 빈 dict 로 처리.
+                # 조용히 삼키면 '왜 이 후보가 없지' 를 추적할 수 없으므로 남긴다.
+                _LOG.warning("특징 추출 실패 — 이 사진은 후보에서 빠집니다: %s",
+                             it.path, exc_info=True)
             _tick(idx)
 
         with self._lock:
@@ -447,7 +454,8 @@ class SlotPrecomputeWorker(QThread):
                             r.path, cfg=self._cfg, side="ref",
                         )
                     except Exception:
-                        pass
+                        _LOG.warning("기준 특징 추출 실패 — 이 기준은 점수가 없습니다: %s",
+                                     r.path, exc_info=True)
                     self.signals.progress.emit(len(vals) + ri, feat_total)
 
                 # 3) 모든 (ref, val) 쌍 점수 — ThreadPoolExecutor 로 병렬 (#5).
@@ -536,11 +544,21 @@ class SlotPrecomputeWorker(QThread):
                             continue
                     yield (rp, vp, rf, vf)
 
+        # 점수 시그니처(`_score_signature`)가 키로 삼는 재채점 항·중앙가중을 **실제 채점에도
+        # 똑같이** 넘긴다 — 키에는 있는데 채점엔 안 쓰면, 다른 설정으로 만든 점수가 이
+        # 설정의 이름으로 디스크에 저장된다.  값은 ``score_ref_classical`` 과 동일하게 해석.
+        _comps = getattr(self._cfg, "rerank_components", None)
+        comps = set(_comps) if _comps else None
+        center_strength = float(getattr(self._cfg, "orb_center_weight", 0.0) or 0.0)
+
         def _score(args):
             rp, vp, rf, vf = args
             try:
-                return rp, vp, float(_pipeline.score(rf, vf))
+                return rp, vp, float(_pipeline.score(
+                    rf, vf, components=comps, center_strength=center_strength))
             except Exception:
+                _LOG.warning("점수 계산 실패 — 이 쌍은 건너뜁니다: %s ↔ %s",
+                             rp, vp, exc_info=True)
                 return rp, vp, None
 
         n_workers = _worker_count()

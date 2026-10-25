@@ -65,7 +65,7 @@ def test_precompute_fills_score_cache(isolated_cache, monkeypatch, qtbot=None):
     def fake_extract(p, **_kw):
         return _FakeFeat(p)
 
-    def fake_score(a, b, weights=None):
+    def fake_score(a, b, weights=None, **_kw):
         # ref / val 의 파일명 끝 숫자를 합쳐 결정적 점수.
         return float(
             (hash((str(a.path), str(b.path))) % 100) / 100.0
@@ -104,7 +104,7 @@ def test_precompute_stop_aborts_early(isolated_cache, monkeypatch):
         def __init__(self, p): self.path = p
 
     monkeypatch.setattr(pipeline, "extract", lambda p, **_kw: _FF(p))
-    monkeypatch.setattr(pipeline, "score", lambda a, b, weights=None: 0.5)
+    monkeypatch.setattr(pipeline, "score", lambda a, b, weights=None, **_kw: 0.5)
 
     slot_cache = SlotFeatureCache()
     score_cache = SlotScoreCache()
@@ -133,7 +133,7 @@ def test_threaded_scoring_matches_serial_result(isolated_cache, monkeypatch):
     # 결정적 score: 두 path 의 hash xor 로 0.0~1.0 사이 값.
     monkeypatch.setattr(
         pipeline, "score",
-        lambda a, b, weights=None:
+        lambda a, b, weights=None, **_kw:
             ((hash(str(a.path)) ^ hash(str(b.path))) & 0xFFFF) / 65535.0,
     )
 
@@ -172,10 +172,13 @@ def test_score_signature_is_pinned():
     캐시 속도로 도는 비용이다.  그래도 조용히 일어나면 안 되므로 여기에 못 박는다.
 
     이 값을 바꾸는 변경(가중치 필드 추가/삭제, 시그니처 항목 변경)을 할 때는
-    **의도한 무효화인지 확인하고** 이 기대값을 함께 고쳐라."""
+    **의도한 무효화인지 확인하고** 이 기대값을 함께 고쳐라.
+
+    (이력: `_FEATURE_VERSION` 토큰을 시그니처에 넣으면서 의도적으로 한 번 바뀌었다 —
+    알고리즘 버전이 없던 옛 점수 파일을 더는 적중시키지 않기 위해서다.)"""
     from aoi_verification.app.similarity.slot_features import _score_signature
     assert _score_signature(None) == (
-        "f71ffa4b1e86b6da1d432c5f17d580b4b07809dd")
+        "725a8043ba483ef18a6dcf16cf880d406e8d407e")
 
 
 def test_score_signature_tracks_the_weights():

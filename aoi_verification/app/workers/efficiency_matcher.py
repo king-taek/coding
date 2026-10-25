@@ -13,6 +13,7 @@ GPU/OpenVINO 가 없으면 CPU 고전 단독으로 폴백한다(절대 크래시
 
 from __future__ import annotations
 
+import logging
 import os
 import queue
 import threading
@@ -27,6 +28,8 @@ from ..models.slot import ImageItem
 from ..similarity import embedding_index as _ann
 from ..similarity import pipeline as _pipeline
 from .matcher import score_ref_classical
+
+_LOG = logging.getLogger("aoi.match")
 
 
 def _rerank_workers() -> int:
@@ -230,6 +233,20 @@ class EfficiencyScheduler(QThread):
         tail = [(vp, _cos_to_unit(cos)) for vp, cos in ordered[topk:]]
         out = list(head) + tail
         out.sort(key=lambda x: -x[1])
+        # 임베딩이 **없는** val(디코드 실패 등)은 인덱스에 들어가지 못해 위 점수 어디에도
+        # 없다 — 예전엔 결과에서 조용히 사라졌다.  고전 점수만으로라도 채점해 덧붙인다
+        # (점수 척도·융합식은 건드리지 않는다: 사진을 잃지 않는 것까지만).
+        # 실패가 없으면 missing 이 비어 위 결과가 그대로다.
+        embedded = {Path(p) for p in val_paths}
+        missing = [v for v in vals if Path(v.path) not in embedded]
+        if missing:
+            extra = score_ref_classical(ref, missing, threshold=0.0, cfg=self._cfg,
+                                        val_features=vfmap, components=comps,
+                                        stop_cb=self._stop.is_set)
+            _LOG.warning("임베딩 없는 후보 %d장은 고전 점수로만 채점 (기준 %s, 채점 실패 %d)",
+                         len(missing), ref.path, len(extra.failed))
+            out.extend((c.item.path, float(c.score)) for c in extra)
+            out.sort(key=lambda x: -x[1])        # 안정 정렬 — 기존 항목끼리 순서 유지
         return out
 
     def _on_embed_image(self, n: int) -> None:
@@ -253,12 +270,20 @@ class EfficiencyScheduler(QThread):
             jobs=dynamic_concurrency(len(vals), batch, cap), batch=batch,
             progress_cb=cb)
         built = _ann.build_from(val_emb) if val_emb else None
+        n_val_fail = len(vals) - len(val_emb or {})
+        if n_val_fail > 0:
+            _LOG.warning("슬롯 %s: 검증 임베딩 실패 %d/%d장 (전부 실패면 고전 점수로 폴백)",
+                         vals[0].slot if vals else "?", n_val_fail, len(vals))
         ref_emb: Dict = {}
         if built is not None:
             ref_emb = _ov.device_embed(
                 [Path(r.path) for r in refs], model_kind=mk, device=dev, cfg=self._cfg,
                 jobs=dynamic_concurrency(len(refs), batch, cap), batch=batch,
                 progress_cb=cb)
+            n_ref_fail = len(refs) - len(ref_emb)
+            if n_ref_fail > 0:
+                _LOG.warning("슬롯 %s: 기준 임베딩 실패 %d/%d장 (해당 기준은 고전 점수로 폴백)",
+                             refs[0].slot if refs else "?", n_ref_fail, len(refs))
         return built, ref_emb
 
     def _emit_progress(self) -> None:
@@ -283,6 +308,8 @@ class EfficiencyScheduler(QThread):
             try:
                 return v.path, _pipeline.extract(v.path, cfg=self._cfg, side="val")
             except Exception:
+                _LOG.warning("특징 추출 실패 — 재추출 시도 후에도 실패하면 이 후보는 채점에서 빠집니다: %s",
+                             v.path, exc_info=True)
                 return v.path, None
         out: dict = {}
         futs = [self._pool.submit(_ex, v) for v in vals]
@@ -303,6 +330,7 @@ class EfficiencyScheduler(QThread):
         try:
             cands = self._fuse_ref(r, vals, built, ref_emb, by_path, vfmap)
         except Exception:
+            _LOG.warning("융합 재채점 실패 — 고전 점수로 폴백: %s", r.path, exc_info=True)
             cands = None
         if cands is None:                            # 고전 폴백(임베딩 실패/미가용)
             cc = score_ref_classical(r, vals, threshold=self._threshold,
@@ -327,6 +355,8 @@ class EfficiencyScheduler(QThread):
             try:
                 cands = fut.result()
             except Exception:
+                _LOG.warning("재채점 실패 — 이 기준은 빈 결과: 슬롯 %s %s",
+                             slot, r.path, exc_info=True)
                 cands = []
             self._results[(slot, Path(r.path))] = cands
             with self._plock:
@@ -408,6 +438,10 @@ class EfficiencyScheduler(QThread):
                                 built, ref_emb = (self._embed_slot(backend, refs, vals)
                                                   if vals else (None, {}))
                             except Exception:
+                                # 슬롯 임베딩이 통째로 실패해도 실행은 계속(고전 폴백)하되,
+                                # 왜 느려졌는지 알 수 있게 남긴다.
+                                _LOG.warning("슬롯 %s 임베딩 실패 — 고전 점수로 폴백",
+                                             slot, exc_info=True)
                                 built, ref_emb = None, {}
                             embed_seen += len(refs) + len(vals)
                             with self._plock:

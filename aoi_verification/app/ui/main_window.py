@@ -781,7 +781,15 @@ class MainWindow(QMainWindow):
         self._show_page(self._setup_page)
 
     def _on_match_cancelled(self) -> None:
-        """#8 매치 페이지에서 중지 — 진행 중 작업을 멈추고 셋업 화면으로 복귀."""
+        """#8 매치 페이지에서 중지 — 진행 중 작업을 멈추고 셋업 화면으로 복귀.
+
+        ★ `_on_select_cancelled` 처럼 세션 상태도 버린다.  세션 파일과 `_phase` 가 남으면
+          자동 저장이 접은 실행을 계속 다시 쓰고, 다음 실행의 '이어하기' 가 그걸 되살린다."""
+        self._phase = PHASE_NONE
+        self._matches_a.clear()
+        self._skipped_a.clear()
+        self._reset_cross_state()
+        session_mod.clear()
         wakelock.release()
         self._show_page(self._setup_page)
 
@@ -936,10 +944,21 @@ class MainWindow(QMainWindow):
         OCR 은 **메인 스레드를 막지 않도록 백그라운드 워커**에서 돌리므로, 이 메서드는
         OCR 이 끝난 뒤(또는 OCR 불필요 시 즉시) ``on_done()`` 콜백으로 다음 단계를
         잇는다.  OCR 은 **정보파일에서 WaferID 를 못 읽은 폴더에만** 돈다(불필요한 OCR 방지)."""
-        try:
-            self._kla_resolve_impl(sr, kla_side, on_done)
-        except Exception:
+        # ★ on_done 은 한 번만 — `finalize()` 가 이미 on_done 을 부른 뒤에 예외가 나면
+        #   폴백이 다음 단계를 **두 번** 돌린다.  예외는 삼키지 않고 기록한다.
+        ran = [False]
+
+        def once() -> None:
+            if ran[0]:
+                return
+            ran[0] = True
             on_done()
+
+        try:
+            self._kla_resolve_impl(sr, kla_side, once)
+        except Exception:
+            _LOG.exception("KLA 정보파일/OCR 해석 실패 — 해석 없이 다음 단계로 진행")
+            once()
 
     def _kla_resolve_impl(self, sr: ScanResult, kla_side: str, on_done) -> None:
         do_ref = kla_side in ("ref", "both")
@@ -1059,6 +1078,17 @@ class MainWindow(QMainWindow):
             self._ocr_worker = None
             on_done()
 
+        def finalize_in_slot(ocr_ref=None, ocr_val=None) -> None:
+            """Qt 슬롯에서 쓰는 finalize — 예외가 슬롯 밖으로 나가지 않게 한다.
+            finalize 가 on_done 전에 죽었으면 다음 단계가 영영 안 이어지므로 on_done 도
+            이어 준다(바깥 `_resolve_and_merge_kla` 의 once 가 중복 호출을 막는다)."""
+            try:
+                finalize(ocr_ref, ocr_val)
+            except Exception:
+                _LOG.exception("KLA 메타 작성 실패 — 메타 없이 다음 단계로 진행")
+                self._ocr_worker = None
+                on_done()
+
         # 2) [OCR] **정보파일에서 WaferID 를 못 읽은 폴더에만** 헤더 OCR (사진이 있어야
         #    가능).  정보파일에서 읽혔으면 그 값을 신뢰하고 OCR 을 건너뛴다(불필요한
         #    OCR·응답없음 방지).  OCR 은 백그라운드 워커에서 → UI 비차단.
@@ -1090,12 +1120,15 @@ class MainWindow(QMainWindow):
                     # 읽은 쪽의 WaferID 키가 사라져 같은 WaferID 인데도 병합에 실패한다.
                     merge_unmatched_by_wafer_id(
                         sr, {**info_ref, **ocr_ref}, {**info_val, **ocr_val})
+                except Exception:
+                    # Qt 슬롯 밖으로 예외가 나가면 PyQt6 가 프로세스를 끝낸다.
+                    _LOG.exception("OCR 결과 병합 실패 — 병합 없이 계속")
                 finally:
-                    finalize(ocr_ref, ocr_val)
+                    finalize_in_slot(ocr_ref, ocr_val)
 
             worker.signals.progress.connect(_on_progress)
             worker.signals.done.connect(_on_ocr_done)
-            worker.signals.failed.connect(lambda _msg: finalize())
+            worker.signals.failed.connect(lambda _msg: finalize_in_slot())
             worker.start()
             return
 
@@ -1200,6 +1233,10 @@ class MainWindow(QMainWindow):
         from ..utils import cache as _cache
         _cache.reset_mtime_cache()
         self._kla_folders: dict[str, str] = {}      # KLA slot명→폴더명(엑셀 회색 표기)
+        # KLA 폴더별 판독 메타 — `_kla_resolve_impl` 이 채운다.  안 지우면 KLA 가 아닌 다음
+        # 실행에서도 옛 메타가 엑셀·실행 로그에 새어 나간다.
+        self._slot_meta_ref = None
+        self._slot_meta_val = None
 
         # 폴더 스캔 — 워커에서 (U-05).  진행은 시그널로만 올라온다.
         # ★ '일부 슬롯만 진행' 이면 **그 슬롯 폴더만** 연다.  예전에는 전부 훑은 뒤
@@ -2052,8 +2089,12 @@ class MainWindow(QMainWindow):
         # '매치 없음' 표시까지 되살리려면 그 행들이 있어야 하므로 **전체 목록**을
         #   기반으로 한다(`_reviewed_matches` 는 표시된 행이 빠진 kept 다).
         if reverse:
-            base = list(self._b_all or [cross_check.swap(m) for m in self._b_kept]
-                        or self._matches_b)
+            # ★ 검토를 거친 B 는 빈 목록도 확정이다 — `or` 로 이으면 사용자가 전부 버린
+            #   뒤에 B 자동 매치(`_matches_b`)가 되살아난다(A 의 `_a_reviewed` 와 같은 이치).
+            if self._b_reviewed:
+                base = list(self._b_all or [cross_check.swap(m) for m in self._b_kept])
+            else:
+                base = list(self._matches_b)
             marked = self._b_unmatched_keys
         else:
             base = list(getattr(self, "_reviewed_all_matches", None)
@@ -2409,8 +2450,8 @@ class MainWindow(QMainWindow):
             kla_used = bool(getattr(self, "_slot_meta_ref", None)
                             or getattr(self, "_slot_meta_val", None))
             ocr_used = any((m or {}).get("method") == "ocr"
-                           for m in {**getattr(self, "_slot_meta_ref", {}),
-                                     **getattr(self, "_slot_meta_val", {})}.values())
+                           for m in {**(getattr(self, "_slot_meta_ref", None) or {}),
+                                     **(getattr(self, "_slot_meta_val", None) or {})}.values())
             rec = run_log.build_record(
                 options=options, ref_root=inp.ref_root, val_root=inp.val_root,
                 slot_count=len(common), ref_photos=ref_photos, val_photos=val_photos,
@@ -2556,6 +2597,8 @@ class MainWindow(QMainWindow):
         self._reset_cross_state()
         self._run_log_written = False
         self._phase = PHASE_NONE
+        self._slot_meta_ref = None
+        self._slot_meta_val = None
         # ★ **세션 입력·스캔 결과도 함께 버린다.**  `_autosave` 는 결정마다뿐 아니라
         #   30 초 타이머(`_autosave_timer`)로도 돌기 때문에, `_input` 을 남겨 두면
         #   맨 위에서 지운 세션 파일이 **옛 입력 그대로 다시 쓰여** 다음 실행의
@@ -2935,6 +2978,10 @@ class MainWindow(QMainWindow):
         #   추출 입력이 남으면 다음 실행에서 매칭으로 복원된다.
         if self._input is None or self._is_extract():
             return
+        # ★ 단계가 없으면(끝났거나 접은 세션) 저장하지 않는다 — 결과까지 간 세션은 실행
+        #   로그가 파일을 지웠는데, 30 초 타이머가 stage "none" 으로 다시 써 두었다.
+        if self._phase == PHASE_NONE:
+            return
         # Stage 1 / Stage 2 의 현재 상태도 함께 직렬화 (#19)
         decisions: dict[str, str] = {}
         no_match_keys: list[str] = []
@@ -3022,7 +3069,7 @@ class MainWindow(QMainWindow):
                 pre.stop()
                 pre.wait(500)
         except Exception:
-            pass
+            _LOG.warning("종료 중 점수 사전 계산 워커 정리 실패 — 계속 종료합니다", exc_info=True)
         # OpenVINO 설치 워커 정리.
         try:
             if (self._openvino_worker is not None
@@ -3030,7 +3077,7 @@ class MainWindow(QMainWindow):
                 self._openvino_worker.stop()
                 self._openvino_worker.wait(500)
         except Exception:
-            pass
+            _LOG.warning("종료 중 OpenVINO 설치 워커 정리 실패 — 계속 종료합니다", exc_info=True)
         # ★ KLA OCR 워커 — `_ocr_worker` 는 __init__ 에 선언이 없어(그 단계를 안 거친
         #   세션엔 속성 자체가 없다) getattr 로 방어한다.  정리하지 않으면 창을 닫을 때
         #   "QThread: Destroyed while thread is still running" 으로 강제 종료됐다.
@@ -3040,7 +3087,7 @@ class MainWindow(QMainWindow):
                 ocr.stop()
                 ocr.wait(500)
         except Exception:
-            pass
+            _LOG.warning("종료 중 KLA OCR 워커 정리 실패 — 계속 종료합니다", exc_info=True)
         # ★ 엑셀 저장 워커 — 기다리기만 하면 반쯤 쓰인 xlsx 가 남으므로 먼저 취소한다.
         #   Defect 추출의 저장 워커도 같다.
         for exporter in (getattr(self._result_page, "_exporter", None),
@@ -3050,5 +3097,5 @@ class MainWindow(QMainWindow):
                     exporter.stop()
                     exporter.wait(3000)
             except Exception:
-                pass
+                _LOG.warning("종료 중 엑셀/추출 저장 워커 정리 실패 — 계속 종료합니다", exc_info=True)
         super().closeEvent(event)

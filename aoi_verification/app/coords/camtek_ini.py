@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import re
 from functools import lru_cache
@@ -26,10 +27,14 @@ from .ini_text import read_ini_text
 __all__ = ["resolve", "load_folder", "load_abs_folder", "load_raw_folder",
            "load_recipe_folder", "abs_coord", "has_ini"]
 
+_LOG = logging.getLogger("aoi.coords")
+
 # INI 파일 이름 후보 — 대소문자 두 가지
 _INI_CANDIDATES = ("ColorImageGrabingInfo.ini", "ColorImageGrabinginfo.ini")
 
-_KEY_PAT = re.compile(r'^(\w+)\s*=\s*(.+)$', re.MULTILINE)
+# ★ '=' 앞뒤는 ``\s`` 가 아니라 ``[ \t]`` — ``\s*`` 는 줄바꿈까지 먹어서 값이 빈 키(``Foo=``)가
+#   다음 줄(``X=100.0``)을 자기 값으로 삼켜 그 섹션이 좌표를 잃었다.
+_KEY_PAT = re.compile(r'^(\w+)[ \t]*=[ \t]*(.+)$', re.MULTILINE)
 _SECTION_PAT = re.compile(r'\[([^\]]+)\]')
 
 
@@ -74,6 +79,8 @@ def load_folder(folder: Path) -> dict[str, DefectCoord]:
         return {stem: _coord_from_raw(raw, geom)
                 for stem, raw, _xy, _recipe in entries if raw is not None}
     except Exception:
+        _LOG.warning("Camtek INI 파싱 실패 — 이 폴더의 좌표를 비웁니다: %s", folder,
+                     exc_info=True)
         return {}
 
 
@@ -185,7 +192,7 @@ def _raw_from_kv(kv: dict[str, str]) -> Optional[tuple[float, float, int, int]]:
 # 4번 읽었다(단일 사진 정보가 느렸던 원인).  여기서 한 번 읽어 섹션마다
 # (stem, 원시 X/Y/Col/Row, 절대 X/Y, RecipeNumber) 를 뽑아 두고 네 맵이 나눠 쓴다.
 # 캐시 키에 mtime·크기를 넣어 파일이 바뀌면 다시 읽는다.
-_RECIPE_PAT = re.compile(r"(?im)^\s*RecipeNumber\s*=\s*(-?\d+)\s*$")
+_RECIPE_PAT = re.compile(r"(?im)^\s*RecipeNumber[ \t]*=[ \t]*(-?\d+)\s*$")
 
 
 def _sections(folder: Path) -> tuple:
@@ -224,6 +231,7 @@ def load_raw_folder(folder: Path) -> dict[str, tuple[float, float, int, int]]:
         return {stem: raw for stem, raw, _xy, _recipe in _sections(folder)
                 if raw is not None}
     except Exception:
+        _LOG.warning("Camtek INI 원시값 파싱 실패: %s", folder, exc_info=True)
         return {}
 
 
@@ -240,6 +248,7 @@ def load_recipe_folder(folder: Path) -> dict[str, int]:
     try:
         return {stem: recipe for stem, _raw, _xy, recipe in _sections(folder)}
     except Exception:
+        _LOG.warning("Camtek INI RecipeNumber 파싱 실패: %s", folder, exc_info=True)
         return {}
 
 
@@ -261,4 +270,5 @@ def load_abs_folder(folder: Path) -> dict[str, tuple[float, float]]:
         return {stem: xy for stem, _raw, xy, _recipe in _sections(folder)
                 if xy is not None}
     except Exception:
+        _LOG.warning("Camtek INI 절대 좌표 파싱 실패: %s", folder, exc_info=True)
         return {}

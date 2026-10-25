@@ -40,6 +40,7 @@ LIVE 파일명 사진만 든 LOT 에는 ``Params_WaferInfo.ini``·``s_DieLocatio
 from __future__ import annotations
 
 import logging
+import math
 import re
 from dataclasses import dataclass
 from functools import lru_cache
@@ -80,7 +81,7 @@ def _die_um(head: dict, key: str) -> Optional[float]:
         v = float(head.get(key, ""))
     except ValueError:
         return None
-    return v * mul if mul and v > 0 else None
+    return v * mul if mul and math.isfinite(v) and v > 0 else None
 
 
 def parse(text: str, path: Path, wafer: str = "") -> Optional[WaferTxt]:

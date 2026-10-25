@@ -47,3 +47,15 @@ def test_reset_mtime_cache_clears(tmp_path, monkeypatch):
     assert cache._mtime_cache                      # 채워짐
     cache.reset_mtime_cache()
     assert not cache._mtime_cache                  # 비워짐
+
+
+def test_failed_stat_is_not_memoized(tmp_path):
+    """없는(또는 순간 못 읽은) 파일의 0.0 이 세션 내내 굳으면 안 된다 — 나중에 생기면 실제 mtime."""
+    src = tmp_path / "late.jpg"
+    cache.reset_mtime_cache()
+    assert cache.memo_mtime(src) == 0.0
+    assert cache._abspath(src) not in cache._mtime_cache
+    src.write_bytes(b"x")
+    assert cache.memo_mtime(src) == src.stat().st_mtime > 0
+    # 성공한 값은 메모된다.
+    assert cache._abspath(src) in cache._mtime_cache
