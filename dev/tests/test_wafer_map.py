@@ -508,6 +508,35 @@ def test_fill_dies_paints_the_die_not_the_dot(qt, tmp_path):
     assert view.point_at(m.to_px(*inside)) is None     # 점 모드는 HIT_PX 그대로
 
 
+def test_dot_radius_changes_drawing_only(qt, tmp_path):
+    """점 크기: 그리는 반지름만 바뀐다 — 점 위치(좌표)는 그대로, 범위는 클램프."""
+    from PyQt6.QtCore import QPointF
+    from aoi_verification.app.ui.widgets.wafer_map_view import (
+        DOT_R, DOT_R_MAX, DOT_R_MIN, HIT_PX, _colors)
+    view, data = _view_with_points(qt, tmp_path)
+    pt = next(p for p in data.points if p.path.stem == "a")
+    m = view._mapper()
+    c = m.to_px(pt.x, pt.y)
+    probe = (c + QPointF(7, 0)).toPoint()
+    col = _colors()
+    assert view.dot_radius() == DOT_R
+    assert view.grab().toImage().pixelColor(probe).name() == col["wafer"].name()
+    view.set_dot_radius(10)
+    assert view.dot_radius() == 10
+    assert view.grab().toImage().pixelColor(probe).name() == col["neutral"].name()
+    assert view._mapper().to_px(pt.x, pt.y) == c        # 위치는 그대로
+    assert [(p.x, p.y) for p in view.data().points] == [(p.x, p.y) for p in data.points]
+    # 점을 키우면 점 가장자리도 집힌다(HIT_PX 보다 큰 반지름).
+    edge = c + QPointF(HIT_PX + 1.5, 0)
+    assert view.point_at(edge).path.stem == "a"
+    view.set_dot_radius(DOT_R)
+    assert view.point_at(edge) is None
+    view.set_dot_radius(0)
+    assert view.dot_radius() == DOT_R_MIN
+    view.set_dot_radius(99)
+    assert view.dot_radius() == DOT_R_MAX
+
+
 def test_fill_dies_uses_matched_colors_in_result_stage(qt, tmp_path):
     """결과 단계: 칸은 그 칸 점과 같은 매치됨/미매치 색으로 칠한다."""
     from aoi_verification.app.ui.widgets.wafer_map_view import WaferMapView, _colors
@@ -798,8 +827,12 @@ def test_view_options_in_both_stages_and_apply_to_both_maps(qt, tmp_path):
         dlg.unmatched_first_btn.setChecked(False)   # 두 맵에 함께 걸린다
         assert not any(v.unmatched_first() for v in views)
         dlg.unmatched_first_btn.setChecked(True)
+        assert not dlg.dot_slider.isEnabled()       # 색칠 중엔 점이 없다
         dlg.fill_btn.setChecked(False)
         assert dlg.unmatched_first_btn.isHidden()
+        assert dlg.dot_slider.isEnabled()
+        dlg.dot_slider.setValue(8)                  # 점 크기도 두 맵에 함께
+        assert [v.dot_radius() for v in views] == [8, 8]
         dlg.fill_btn.setChecked(True)
         assert dlg.notch_btn.text() == i18n.KO.WAFER_MAP_NOTCH_FMT.format(dir="아래")
         dlg.notch_btn.click()
@@ -809,6 +842,7 @@ def test_view_options_in_both_stages_and_apply_to_both_maps(qt, tmp_path):
         _wait_build(qt, dlg)
         assert all(v.fill_dies() for v in views)
         assert [v.rotation() for v in views] == [1, 1]
+        assert [v.dot_radius() for v in views] == [8, 8]
         for _ in range(3):                          # 네 번 누르면 제자리
             dlg.notch_btn.click()
         assert [v.rotation() for v in views] == [0, 0]

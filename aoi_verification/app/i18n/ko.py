@@ -1162,6 +1162,8 @@ WAFER_MAP_UNMATCHED_FIRST = "미매치 우선"
 WAFER_MAP_UNMATCHED_FIRST_TIP = (
     "한 die 칸에 매치됨·미매치 결함이 섞여 있을 때 칸 색을 정합니다. "
     "켜면 미매치 색(미매치가 가려지지 않음), 끄면 매치됨 색입니다.")
+WAFER_MAP_DOT_SIZE = "점 크기"
+WAFER_MAP_DOT_SIZE_TIP = "결함 점을 키우거나 줄입니다(화면 보기 전용 — die 색칠 중에는 꺼집니다)."
 WAFER_MAP_NOTCH_FMT = "노치: {dir}"
 WAFER_MAP_NOTCH_DIRS = ("아래", "왼쪽", "위", "오른쪽")
 WAFER_MAP_NOTCH_TIP = "누를 때마다 90°씩 돌려 노치 방향을 맞춥니다(화면 보기 전용)."

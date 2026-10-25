@@ -45,7 +45,9 @@ from ...coords.wafer_map import (MapData, MapPoint, cell_bounds, cell_of,
 from ...utils import image_io
 from .. import theme
 
-DOT_R = 3.0            # 점 반지름(px) — 확대해도 그대로
+DOT_R = 3.0            # 점 반지름(px) 기본값 — 확대해도 그대로
+DOT_R_MIN = 1          # 점 크기 슬라이더 범위(px, 반지름)
+DOT_R_MAX = 12
 HIT_PX = 8.0           # 호버/클릭 판정 거리(px)
 ZOOM_STEP = 1.25
 ZOOM_MAX = 60.0
@@ -283,6 +285,7 @@ class WaferMapView(QWidget):
         self._rot = 0
         self._fill_dies = False
         self._unmatched_first = True
+        self._dot_r = DOT_R
         self._pan = QPointF(0, 0)
         self._drag_from: Optional[QPoint] = None
         self._hover: Optional[MapPoint] = None
@@ -344,6 +347,17 @@ class WaferMapView(QWidget):
     def unmatched_first(self) -> bool:
         return self._unmatched_first
 
+    def set_dot_radius(self, r: float) -> None:
+        """점 반지름(px) — 화면 보기 전용.  좌표·칸 계산과 무관하다."""
+        r = float(min(DOT_R_MAX, max(DOT_R_MIN, r)))
+        if r == self._dot_r:
+            return
+        self._dot_r = r
+        self.update()
+
+    def dot_radius(self) -> float:
+        return self._dot_r
+
     # ------------------------------------------------------------------
     def paintEvent(self, event):            # noqa: N802
         painter = QPainter(self)
@@ -351,13 +365,14 @@ class WaferMapView(QWidget):
             m = paint_map(painter, QRectF(self.rect()), self._data,
                           zoom=self._zoom, pan=self._pan, rot=self._rot,
                           fill_dies=self._fill_dies,
-                          unmatched_first=self._unmatched_first)
+                          unmatched_first=self._unmatched_first,
+                          dot_r=self._dot_r)
             if m is not None and self._hover is not None:
                 painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
                 painter.setPen(QPen(QColor(theme.INK), 1.5))
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.drawEllipse(m.to_px(self._hover.x, self._hover.y),
-                                    DOT_R + 3, DOT_R + 3)
+                                    self._dot_r + 3, self._dot_r + 3)
         finally:
             painter.end()
 
@@ -382,7 +397,8 @@ class WaferMapView(QWidget):
             q = m.to_px(p.x, p.y)
             return (q.x() - pos.x()) ** 2 + (q.y() - pos.y()) ** 2
 
-        best, best_d = None, HIT_PX * HIT_PX
+        hit = max(HIT_PX, self._dot_r)      # 점을 키우면 점 전체가 집히게
+        best, best_d = None, hit * hit
         for p in self._data.points:
             d = d2(p)
             if d <= best_d:
