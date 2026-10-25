@@ -144,6 +144,13 @@ def diagnose(name: str, kla_lot: Path, cam: Path) -> list[str]:
     sr = slotmod.scan(kla_lot, cam)
     info_ref = {n: w for n in sr.ref_only
                 if (w := kla_info.read_wafer_id(sr.slots[n].ref_dir))}
+    # 앱처럼 정보파일이 빈 폴더는 파일 이름 + 슬롯 번호로 한 번 더 본다(`_kla_resolve_impl`).
+    ids, broken = slotmod.wafer_ids_from_broken_info(
+        {n: sr.slots[n].ref_dir for n in sr.ref_only},
+        {n: sr.slots[n].val_dir for n in sr.val_only}, info_ref)
+    info_ref.update(ids)
+    for n, w, ok in broken:
+        out.append(f"  정보파일 비어 있음: {n} (이름의 WaferID {w}) → 이름+슬롯번호로 짝 {'지음' if ok else '못 지음'}")
     slotmod.merge_unmatched_by_wafer_id(sr, info_ref, {})
     out.append(f"  짝지어진 슬롯 {sum(1 for s in sr.slots.values() if s.ref_dir and s.val_dir)}개")
     out.append(f"  기준(KLA) 전용: {sorted(sr.ref_only)}")
