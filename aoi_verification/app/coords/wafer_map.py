@@ -444,7 +444,7 @@ def _align_phase(xy: tuple[float, float], own: Optional[WaferFrame],
     pitch 가 다르면 맞출 수 없어 그대로 둔다(``mixed_frames`` 경고)."""
     if own is None or ref is None or own is ref:
         return xy
-    if not (own.pitch_x and own.pitch_y) or \
+    if own.kind != ref.kind or not (own.pitch_x and own.pitch_y) or \
             (own.pitch_x, own.pitch_y) != (ref.pitch_x, ref.pitch_y):
         return xy
     return (xy[0] + _wrap(ref.grid_x0 - own.grid_x0, own.pitch_x),
