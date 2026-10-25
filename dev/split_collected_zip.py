@@ -20,7 +20,10 @@ SOURCE_GLOB = "좌표대조_1. REVERSE ETCH_*.zip"
 GROUPS = [
     ("1_TB500_SGG", (1, 2)), ("2_TB500_KUH", (3, 4)), ("3_T254_RDL1", (5, 6)),
     ("4_T254_FSUBM", (7, 8)), ("5_TI_CCG", (9, 10)), ("6_TI_CCB", (11, 12)),
-    ("7_QORVO_FVI", (13, 14, 15, 16)), ("8_QORVO_UBM", (17, 18)),
+    # 7 은 레시피 3개라 한 zip 이 30 MB 를 넘었다 → 레시피(폴더)마다 나눈다.
+    ("7a_QORVO_FVI_Conder", (13,)), ("7b_QORVO_FVI_CTK_SRD", (14,)),
+    ("7c_QORVO_FVI_CTK", (15,)), ("7d_QORVO_FVI_CTK_EDGE", (16,)),
+    ("8_QORVO_UBM", (17, 18)),
 ]
 COMMON = ("수집_보고.txt", "앱좌표.tsv", "앱기하.txt")   # 모든 zip 에 함께 넣는다(작다)
 SKIP_NAMES = {n.casefold() for n in (
@@ -29,14 +32,20 @@ SKIP_NAMES = {n.casefold() for n in (
     "s_Coplanarity.dat", "ChuckMappingForScanCamera_dX.grd",
     "ChuckMappingForScanCamera_dY.grd")}
 MAP_LIMIT = 3
+# 이번에 만들 묶음(비우면 전부).  2026-10-25: 1~6·8 은 이미 받았다.
+ONLY = {"7a_QORVO_FVI_Conder", "7b_QORVO_FVI_CTK_SRD", "7c_QORVO_FVI_CTK",
+        "7d_QORVO_FVI_CTK_EDGE"}
 
 
 def split(src: Path, out: Path) -> list[Path]:
     out.mkdir(parents=True, exist_ok=True)
     made = []
+    only = ONLY or {label for label, _ in GROUPS}
     with zipfile.ZipFile(src) as zin:
         infos = zin.infolist()
         for label, nums in GROUPS:
+            if label not in only:
+                continue
             dst = out / f"{label}.zip"
             maps: Counter = Counter()
             with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zout:
