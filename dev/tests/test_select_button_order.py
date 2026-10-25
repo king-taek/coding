@@ -69,6 +69,13 @@ def _shortcuts(page) -> dict[str, object]:
     return {sc.key().toString(): sc for sc in page.findChildren(QShortcut)}
 
 
+def _wait(qapp, ms):
+    import time
+    end = time.monotonic() + ms / 1000
+    while time.monotonic() < end:
+        qapp.processEvents()
+
+
 def test_arrow_keys_follow_the_layout(qapp):
     """→ = 검증, ← = 제외.  등록 여부가 아니라 **발화시켜 결과**로 확인한다."""
     from pathlib import Path
@@ -84,11 +91,14 @@ def test_arrow_keys_follow_the_layout(qapp):
         keys = _shortcuts(page)
         assert {"Right", "Left", "Z"} <= set(keys), f"등록된 키: {sorted(keys)}"
 
+        # 사진이 보인 뒤 `_MIN_VIEW_MS` 안의 입력은 버린다(보지 못한 사진 결정 방지).
+        _wait(qapp, page._MIN_VIEW_MS + 20)
         keys["Right"].activated.emit()
         qapp.processEvents()
         assert len(page._state.targets["A01"]) == 1, "→ 는 검증이어야 한다"
         assert not page._state.excluded["A01"]
 
+        _wait(qapp, page._MIN_VIEW_MS + 20)
         keys["Left"].activated.emit()
         qapp.processEvents()
         assert len(page._state.excluded["A01"]) == 1, "← 는 제외여야 한다"

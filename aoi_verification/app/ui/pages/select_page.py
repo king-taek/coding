@@ -17,11 +17,12 @@
 
 from __future__ import annotations
 
+import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Optional
 
-from PyQt6.QtCore import (QByteArray, QPoint, QPropertyAnimation, QRect,
+from PyQt6.QtCore import (QByteArray, QEvent, QPoint, QPropertyAnimation, QRect,
                           Qt, pyqtSignal)
 from PyQt6.QtGui import QFontMetrics, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (QComboBox, QFrame, QGraphicsOpacityEffect, QHBoxLayout,
@@ -30,6 +31,8 @@ from PyQt6.QtWidgets import (QComboBox, QFrame, QGraphicsOpacityEffect, QHBoxLay
 
 from ... import config, i18n
 from .. import theme
+from ..deferred import call_later
+from ..teardown import tolerate_teardown
 from ...models.slot import ImageItem
 from ...utils import prefs as _prefs
 from .progress_row import ProgressRowMixin
@@ -571,6 +574,7 @@ class SelectPage(ProgressRowMixin, QWidget):
 
         # 이미지 (스크롤 영역) -----------------------------------------
         self.center_img = ScalableImage(center_card)
+        self.center_img.installEventFilter(self)   # 사진이 그려졌는지 = 입력 잠금 해제
         self.center_img.set_center_crop(int(self.crop_group.current_key() or "100") / 100)
         self._img_scroll = QScrollArea(center_card)
         self._img_scroll.setWidgetResizable(False)
@@ -594,8 +598,8 @@ class SelectPage(ProgressRowMixin, QWidget):
         self.btn_verify.setToolTip(i18n.KO.SHORTCUT_TOOLTIP)
         self.btn_exclude.setToolTip(i18n.KO.SHORTCUT_TOOLTIP)
         self.btn_undo.setToolTip(i18n.KO.SHORTCUT_TOOLTIP)
-        self.btn_verify.clicked.connect(lambda: self._decide("verify"))
-        self.btn_exclude.clicked.connect(lambda: self._decide("exclude"))
+        self.btn_verify.clicked.connect(lambda: self._decide_input("verify"))
+        self.btn_exclude.clicked.connect(lambda: self._decide_input("exclude"))
         self.btn_undo.clicked.connect(self._undo)
         btn_row.addWidget(self.btn_undo)
         btn_row.addStretch(1)
@@ -642,10 +646,12 @@ class SelectPage(ProgressRowMixin, QWidget):
         self._h_splitter.splitterMoved.connect(self._save_splitter_state)
 
         # 단축키 — 화면 배치와 같은 방향(오른쪽 = 검증) ------------------
-        QShortcut(QKeySequence("Right"), self,
-                  activated=lambda: self._decide("verify"))
-        QShortcut(QKeySequence("Left"), self,
-                  activated=lambda: self._decide("exclude"))
+        # ★ 키를 누르고 있어도 한 장만 넘긴다 — 자동 반복이면 보지 못한 사진까지
+        #   연달아 결정된다.
+        for key, action in (("Right", "verify"), ("Left", "exclude")):
+            sc = QShortcut(QKeySequence(key), self,
+                           activated=lambda a=action: self._decide_input(a))
+            sc.setAutoRepeat(False)
         QShortcut(QKeySequence("Z"), self, activated=self._undo)
         QShortcut(QKeySequence.StandardKey.Undo, self, activated=self._undo)   # Ctrl+Z
         # Ctrl+A — 좌측 후보 패널 전체 선택 (#2).
@@ -1061,6 +1067,51 @@ class SelectPage(ProgressRowMixin, QWidget):
         self.center_img.set_image(item.path)
         # 파일명은 표시하지 않고 Slot 명만 노출한다 (요청 사항).
         self.slot_label.setText(i18n.KO.SLOT_LABEL_FMT.format(slot=item.slot))
+        # 다음 두 장은 미리 읽어 둔다 — 넘길 때 디스크를 기다리지 않게.
+        if self._state is not None:
+            self.center_img.prefetch([it.path for it in self._state.queue[1:3]])
+        self._close_input_gate()
+
+    # ------------------------------------------------------------------
+    # 입력 잠금 — 화면에 보이기 전의 사진은 결정할 수 없다
+    # ------------------------------------------------------------------
+    #: 사진이 그려진 뒤 이만큼은 결정 입력을 버린다.  사람이 사진을 보고 반응하는 데는
+    #: 이보다 오래 걸리므로(시각 반응 ≥ 150ms) 이 안에 온 입력은 **앞 사진을 보며 누른
+    #: 것**이다 — 처리가 밀린 동안 쌓인 연타가 대표적이다.  실제 연타(초당 8~10회)는 막지 않는다.
+    _MIN_VIEW_MS = 100
+    #: 그려졌다는 신호(Paint)가 끝내 오지 않을 때(스크롤로 사진이 화면 밖 등)의 안전 시한.
+    _GATE_TIMEOUT_MS = 300
+
+    def _close_input_gate(self) -> None:
+        """새 사진을 넣었다 — 그것이 보일 때까지 →/← 와 검증/제외 버튼을 버린다.
+
+        ★ 버린다(큐에 담지 않는다).  담아 두면 그려지자마자 결정돼 결국 보지 못한
+          사진을 결정하는 것과 같다 — 연타가 사진을 건너뛰던 원인이 이것이다."""
+        self._gate_token = getattr(self, "_gate_token", 0) + 1
+        self._shown_at = None
+        token = self._gate_token
+        call_later(self, self._GATE_TIMEOUT_MS, lambda: self._mark_shown(token))
+
+    def _mark_shown(self, token: int | None = None) -> None:
+        # 시한 타이머는 그 사진의 것일 때만 쓴다 — 지난 사진의 타이머가 새 잠금을 풀면 안 된다.
+        if token is not None and token != getattr(self, "_gate_token", 0):
+            return
+        if getattr(self, "_shown_at", None) is None:
+            self._shown_at = time.monotonic()
+
+    @tolerate_teardown
+    def eventFilter(self, obj, event):                  # noqa: N802
+        if obj is self.center_img and event.type() == QEvent.Type.Paint:
+            self._mark_shown()
+        return super().eventFilter(obj, event)
+
+    def _decide_input(self, action: str) -> None:
+        """사용자 입력(→/←·검증/제외 버튼)에서 오는 결정 — 사진이 보인 뒤에만 받는다."""
+        if getattr(self, "_gate_token", 0):
+            shown = getattr(self, "_shown_at", None)
+            if shown is None or (time.monotonic() - shown) * 1000 < self._MIN_VIEW_MS:
+                return
+        self._decide(action)
 
     def _on_crop_changed(self, key: str) -> None:
         """가운데 확대 비율 — 지금 사진에 바로 적용하고 다음 실행에도 기억한다."""
@@ -1125,47 +1176,33 @@ class SelectPage(ProgressRowMixin, QWidget):
         self._state.history.append((action, item))
         self.decision_made.emit(action, item)
         self.state_changed.emit()
-        # ★ 26안 — 결정한 사진이 **결정의 방향**으로 밀려나며 사라진다.
-        #   결정 자체는 위에서 이미 커밋됐다(모션은 잔상일 뿐) — 연타해도 애니를
-        #   기다리지 않는다.  떠나는 그림의 사본을 먼저 떠 둬야 하므로 아래
-        #   `_advance_incremental`(다음 사진을 같은 위젯에 넣는다)보다 **먼저**다.
-        moved = self._swipe_out_decided(action)
+        # ★ 다음 사진은 **즉시** 보인다(사용자 결정 2026-10-25, '짧은 잔상' 안).  예전
+        #   26안은 앞 사진이 180ms 밀려난 뒤 다음 사진이 120ms 떠올랐는데, 그 300ms 동안
+        #   다음 사진이 투명해 연타하면 보지도 못한 사진이 결정됐다.  이제 떠나는 사진의
+        #   사본만 새 사진 **위에서** 짧게 빠지고, 살아 있는 사진에는 모션을 걸지 않는다.
+        #   사본을 먼저 떠 둬야 하므로 `_advance_incremental` 보다 **먼저**다.
+        self._swipe_out_decided(action)
         # 핫 경로 — 전체 재생성 대신 영향 슬롯만 증분 갱신(#렉).
         self._advance_incremental(item.slot)
-        # 앞 사진이 다 빠진 **뒤** 다음 사진이 들어온다(총 300ms 한 동작).
-        # ★ 연타로 스와이프를 생략했으면 페이드인도 생략한다 — 짝이 맞아야
-        #   '떠나고 들어온다' 가 하나의 동작으로 읽히고, 비용도 함께 사라진다.
-        if moved:
-            self._fade_in_next()
 
-    #: 스와이프 이동 거리(px) — 시안값.  화면 밖까지 보내지 않는다: 카드 안에서
-    #: 벗어나는 정도면 방향이 읽히고, 긴 이동은 다음 사진을 기다리게 만든다.
-    _SWIPE_PX = 64
+    #: 잔상 이동 거리(px) — 방향만 읽히면 된다.  짧게 끝나야 새 사진을 덜 가린다.
+    _SWIPE_PX = 32
 
     def _swipe_out_decided(self, action: str) -> bool:
-        """방금 결정한 사진이 그 결정이 향한 쪽으로 밀려나며 사라진다 (26안).
+        """방금 결정한 사진의 **사본**이 결정 방향(→ 검증 / ← 제외)으로 살짝 밀리며 옅어진다.
 
-        ★ 방향은 화면이 이미 정해 둔 것을 그대로 따른다: 오른쪽 패널이 '검증',
-        왼쪽이 '제외' 이고 단축키도 →/← 다.  그래서 이 모션은 새 규칙을 만들지
-        않고 **이미 있는 공간 규칙을 몸이 기억하게** 한다.
-        ★ **떠나는 그림의 사본에만** 건다(시안 명시).  바로 뒤에서
-        `_advance_incremental` 이 같은 위젯에 다음 사진을 넣으므로 살아 있는
-        `center_img` 에 걸면 새 사진이 밀려나고, 그 위젯에 그래픽스 이펙트를
-        얹으면 사진이 다시 그려질 때마다 오프스크린 렌더가 따라붙는다.
-        ★ **연타 중에는 생략한다**(시안 명시).  이게 없으면 결정마다 애니가 쌓여
-        수백 장을 넘길 때 그냥 버벅이는 것으로만 남는다 — 실측(900px 사진 39회
-        연타, 결정당 평균): 모션 OFF 28.3ms · 가드 없음 33.7ms(최악 78.7) ·
-        가드 있음 28.2ms(최악 49.8).  즉 가드가 있으면 **공짜**다.
-        ★ 이동은 `pos`, 사라짐은 불투명도다.  고스트는 레이아웃이 자리를 정하지
-        않는 뷰포트 위 절대배치라 `move` 가 되돌려지지 않는다(리플로 0).
+        ★ 다음 사진은 그 아래에 이미 들어와 있다 — 잔상은 위에 얹힐 뿐 아무것도
+          기다리게 하지 않는다.  그래서 퇴장인데도 **감속** 곡선이다: 처음 몇 프레임에
+          대부분 사라져야 새 사진이 바로 보인다(가속이면 끝까지 새 사진을 가린다).
+        ★ 살아 있는 `center_img` 에는 걸지 않는다 — 같은 위젯에 다음 사진이 들어가고,
+          이펙트가 붙어 있으면 다시 그릴 때마다 오프스크린 렌더가 따라붙는다.
+        ★ 연타 중에는 앞 잔상을 즉시 치우고 새 잔상은 걸지 않는다 — 지난 사진이 지금
+          사진 위에 떠 있으면 화면이 거짓말을 한다.
         """
         from .. import motion
         if not motion.enabled():
             return False
-        prev = getattr(self, "_swipe_ghost", None)
-        if prev is not None:
-            # 연타 — 앞 잔상을 **즉시** 치우고 새 애니는 걸지 않는다.  남겨 두면
-            # 지지난 사진이 지금 사진 위에 떠 있게 된다(화면이 거짓말을 한다).
+        if getattr(self, "_swipe_ghost", None) is not None:
             self._drop_swipe_ghost()
             return False
         viewport = self._img_scroll.viewport()
@@ -1195,16 +1232,14 @@ class SelectPage(ProgressRowMixin, QWidget):
         fade = QPropertyAnimation(eff, b"opacity", ghost)
         fade.setStartValue(1.0)
         fade.setEndValue(0.0)
-        fade.setDuration(motion.DUR_SWIPE_OUT)
-        # 퇴장은 가속 — 감속이면 90ms 에 이미 안 보여 다음 사진까지 빈 화면이 남는다.
-        fade.setEasingCurve(motion.EASE_EXIT)
-
+        fade.setDuration(motion.DUR_SWIPE_OVER)
+        fade.setEasingCurve(motion.EASE_PRIMARY)
         dx = self._SWIPE_PX if action == "verify" else -self._SWIPE_PX
         move = QPropertyAnimation(ghost, b"pos", ghost)
         move.setStartValue(start)
         move.setEndValue(QPoint(start.x() + dx, start.y()))
-        move.setDuration(motion.DUR_SWIPE_OUT)
-        move.setEasingCurve(motion.EASE_EXIT)
+        move.setDuration(motion.DUR_SWIPE_OVER)
+        move.setEasingCurve(motion.EASE_PRIMARY)
         # ★ 정리는 **한쪽에서만** 건다 — 두 애니에 각각 걸면 두 번 불린다.
         move.finished.connect(self._drop_swipe_ghost)
         fade.start()
@@ -1260,17 +1295,6 @@ class SelectPage(ProgressRowMixin, QWidget):
                    int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), text)
         p.end()
 
-    def _fade_in_next(self) -> None:
-        """다음 사진이 제자리에서 떠오른다 — 스와이프가 끝난 뒤 120ms (26안).
-
-        ★ 지연이 곧 순서다.  같은 틱에 겹쳐 재생하면 떠나는 사진과 들어오는
-        사진이 동시에 반투명해져 한순간 화면이 비어 보인다 — 시안이 CSS 로
-        `.12s linear .18s backwards` 라 적은 것이 이 순서다."""
-        from .. import motion
-        if self._current is None:
-            return
-        motion.fade_in(self.center_img, delay_ms=motion.DUR_SWIPE_OUT)
-
     def _drop_swipe_ghost(self) -> None:
         """잔상을 치운다 — 애니가 끝났을 때와 연타로 잘렸을 때 모두 여기로 온다."""
         ghost = getattr(self, "_swipe_ghost", None)
@@ -1282,6 +1306,7 @@ class SelectPage(ProgressRowMixin, QWidget):
             ghost.deleteLater()
         except RuntimeError:
             pass                       # 이미 사라졌다
+
 
     def _undo(self) -> None:
         # Z 가 MatchPage 가 보일 때도 SelectPage 로 전달되는 것을 차단.
