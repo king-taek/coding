@@ -4,9 +4,11 @@
 Conder scan 폴더(LIVE 파일명 = 장비 정답) ↔ Camtek Scanresult 폴더다.  모으는 방식은
 ``collect_avago.collect`` 를 그대로 쓴다: 사진은 이름만, zip 은 뺀다.
 
-한 zip 에 담으니 500 MB 가 돼 올릴 수 없었다 → 디바이스마다 zip 을 따로 만들고, 파일
-하나 상한을 5 MB 로 낮췄다(뺀 파일은 ``수집_보고.txt`` 에 크기와 함께 남는다).  zip 마다
-확장자별 용량을 ``용량.txt`` 로 덧붙여, 무엇이 큰지 다음 수집에서 바로 거를 수 있게 한다.
+한 zip 에 담으니 500 MB 가 돼 올릴 수 없었다(현택님).  파일 목록을 보니 대부분이 앱이
+읽지 않는 Camtek 정렬·프레임 데이터(``DieAlignment.dat`` · ``s_FrameData.dat`` …)였다 →
+그 이름들을 빼고(:data:`SKIP_NAMES`), 작은 die 제품에서 10 MB 씩인 ``s_DieLocation.dat``
+은 폴더(root)마다 :data:`MAP_LIMIT` 장만 담는다 — 나머지 웨이퍼의 맵 요약은 앱기하.txt 에
+이미 계산돼 들어간다.  zip 은 디바이스마다 따로 만들고 확장자별 용량(``용량.txt``)을 붙인다.
 """
 
 from __future__ import annotations
@@ -20,7 +22,47 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import collect_avago  # noqa: E402
 
-collect_avago.MAX_FILE_MB = 5
+# 앱이 읽지 않는 Camtek 대용량 부산물(2026-10-25 첫 수집의 압축 후 용량 상위).
+SKIP_NAMES = {n.casefold() for n in (
+    "DieAlignment.dat", "s_FrameData.dat", "s_DieAlignPos.dat", "Zones.dat",
+    "WaferInfo.dat", "WaferInfo.org", "DieAlignMiss.flt", "s_Plane.dat",
+    "s_Coplanarity.dat", "ChuckMappingForScanCamera_dX.grd",
+    "ChuckMappingForScanCamera_dY.grd")}
+MAP_LIMIT = 3
+_maps: Counter = Counter()
+_orig_add_dir = collect_avago._add_dir
+
+
+class _Dir:
+    """``iterdir`` 에서 :data:`SKIP_NAMES`·초과 die 맵을 걸러 내는 ``Path`` 대리자."""
+
+    def __init__(self, d: Path, tag: str, log: list[str]):
+        self._d, self._tag, self._log = d, tag, log
+
+    def __getattr__(self, name):
+        return getattr(self._d, name)
+
+    def __str__(self):
+        return str(self._d)
+
+    def iterdir(self):
+        for p in self._d.iterdir():
+            n = p.name.casefold()
+            if n in SKIP_NAMES:
+                continue
+            if n == "s_dielocation.dat":
+                if _maps[self._tag] >= MAP_LIMIT:
+                    self._log.append(f"  - die 맵 {MAP_LIMIT}장 초과라 뺌: {p}")
+                    continue
+                _maps[self._tag] += 1
+            yield p
+
+
+def _add_dir(zf, d, arc, log):
+    return _orig_add_dir(zf, _Dir(d, arc.split("/")[0], log), arc, log)
+
+
+collect_avago._add_dir = _add_dir
 
 _CONDER = r"\\k5cifsn2\k5tsvdata$\1. Conder Scan"
 
