@@ -885,6 +885,9 @@ class LoadingOverlay(QWidget):
         self.show()
         self._hiding = False
         self._hide_pending = False
+        # 새 표시가 걷힘을 취소했으니, 그 걷힘에 걸려 있던 콜백도 함께 버린다
+        # (`hide_overlay` 는 대기 중 콜백을 덮어쓰지 않고 쌓기 때문에 여기서 끊는다).
+        self._hide_then = None
         self._show_token += 1
         self._shown_elapsed.restart()
         self._fade_anim.stop()
@@ -994,7 +997,19 @@ class LoadingOverlay(QWidget):
         # ★ `hide_overlay` 는 **동기 종료가 아니다** — 최소표시 래치와 페이드아웃이
         #   남아 있으면 타이머만 걸고 돌아온다.  '덮개가 걷힌 뒤' 에 할 일은 반드시
         #   이 콜백으로 걸어야 한다(바로 다음 줄에서 하면 아직 덮여 있다).
-        self._hide_then = then
+        # ★ 걷힘이 아직 진행 중일 때 다시 불려도(then=None 포함) **먼저 걸린 콜백을 버리지
+        #   않는다** — `match_review_page._arm_entrance` 가 이 콜백으로 걸려 있는데, 다른
+        #   곳의 인자 없는 `hide_overlay()` 가 덮어써서 입장 연출이 사라졌다.  둘 다
+        #   있으면 먼저 건 것부터 차례로 실행한다.
+        if then is not None:
+            prev = getattr(self, "_hide_then", None)
+            if prev is None:
+                self._hide_then = then
+            else:
+                def _both(first=prev, second=then) -> None:
+                    first()
+                    second()
+                self._hide_then = _both
         if not self.isVisible():
             self._finish_hide()
             return

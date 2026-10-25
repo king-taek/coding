@@ -12,7 +12,9 @@
 
 from __future__ import annotations
 
+import errno
 import logging
+import os
 import re
 import threading
 import time
@@ -330,8 +332,11 @@ class ExcelExporter(QThread):
             t0 = time.perf_counter()
             try:
                 self._write_wafer_map_sheet(wb, map_rows)
+            except _Cancelled:
+                raise
             except Exception:
-                pass
+                # 조용히 삼키면 Wafer Map 시트가 없는 이유를 아무도 모른다 — 기록은 남긴다.
+                _LOG.exception("Wafer Map 시트 작성 실패 — 이 시트 없이 저장을 계속한다")
             _LOG.info("저장 소요 [Wafer Map] %.2f초 %d장",
                       time.perf_counter() - t0, len(map_rows))
 
@@ -346,17 +351,33 @@ class ExcelExporter(QThread):
         # ★ 여기서 한 번 더 본다 — 저장을 시작한 뒤 취소되면 파일이 깨진다.
         if self._stop.is_set():
             raise _Cancelled
-        t0 = time.perf_counter()
-        wb.save(str(self._dst))
-        _LOG.info("저장 소요 [파일 쓰기] %.2f초 · 전체 %.2f초",
-                  time.perf_counter() - t0, time.perf_counter() - t_start)
-        # SharePoint / MIP 메타데이터 제거 — 회사 Excel 에서 ‘읽기 전용’ /
-        # ‘보호 보기’ 로 열리는 것을 방지.
+        # ★ 결과 파일에 곧장 쓰지 않는다 — openpyxl 은 대상을 먼저 비우고 쓰므로, 저장 도중
+        #   실패·취소·앱 종료가 나면 **이전 결과가 사라진다**.  같은 폴더의 임시 파일에 완성한 뒤
+        #   `os.replace` 로 바꾼다(실패하면 이전 파일이 그대로 남는다).
+        tmp = self._dst.with_name(self._dst.name + ".part")
         try:
-            _strip_corporate_metadata(self._dst)
-        except Exception:
-            # 메타데이터 정리 실패는 치명적이지 않다 — 결과 파일은 이미 저장됨.
-            pass
+            t0 = time.perf_counter()
+            wb.save(str(tmp))
+            _LOG.info("저장 소요 [파일 쓰기] %.2f초 · 전체 %.2f초",
+                      time.perf_counter() - t0, time.perf_counter() - t_start)
+            # SharePoint / MIP 메타데이터 제거 — 회사 Excel 에서 ‘읽기 전용’ /
+            # ‘보호 보기’ 로 열리는 것을 방지.
+            try:
+                _strip_corporate_metadata(tmp)
+            except Exception:
+                # 메타데이터 정리 실패는 치명적이지 않다 — 결과 파일은 이미 저장됨.
+                _LOG.warning("메타데이터 정리 실패 — 정리하지 않은 파일로 저장한다",
+                             exc_info=True)
+            if self._stop.is_set():          # 아직 이전 결과를 건드리지 않았다
+                raise _Cancelled
+            _replace_result(tmp, self._dst)
+        finally:
+            try:
+                tmp.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                _LOG.warning("임시 저장 파일을 지우지 못했다: %s", tmp, exc_info=True)
 
     # ------------------------------------------------------------------
     def _summary_sheet_name(self) -> str:
@@ -365,8 +386,8 @@ class ExcelExporter(QThread):
         import re as _re
         name = Path(self._dst).stem or "결과"
         name = _re.sub(r'[:\\/?*\[\]]', "_", name)   # 엑셀 시트명 금지문자 → _
-        name = name.strip() or "결과"
-        if name == SHEET_FULL_NAME:                  # 2번째 시트와 충돌 방지
+        name = name.strip().strip("'").strip() or "결과"   # 앞뒤 ' 는 시트명으로 못 쓴다
+        if name.casefold() == SHEET_FULL_NAME.casefold():   # 2번째 시트와 충돌 방지(대소문자 무관)
             name = name + " "
         return name[:31]
 
@@ -669,7 +690,9 @@ class ExcelExporter(QThread):
                 try:
                     self._scan_cache[str(futures[f])] = f.result()
                 except Exception:
-                    self._scan_cache[str(futures[f])] = (scan_image.NO_CANDIDATE, None)
+                    # '후보 없음' 이 아니라 '읽다가 실패' 다 — 같은 상태로 뭉개면 원인을 모른다.
+                    _LOG.warning("Scan 확인 실패: %s", futures[f], exc_info=True)
+                    self._scan_cache[str(futures[f])] = (scan_image.UNREADABLE, None)
                 self.signals.progress.emit(base + done, overall,
                                            i18n.KO.SCAN_EXPORT_PHASE)
         self._prog_done = base + len(paths)
@@ -744,6 +767,7 @@ class ExcelExporter(QThread):
                 _add_image_centered(ws, xli, col, row, cell_w_px, cell_h_px)
                 return
             except Exception:
+                _LOG.warning("Scan 그림 삽입 실패: %s", src, exc_info=True)
                 status = scan_image.UNREADABLE
         cell = ws[f"{col}{row}"]
         cell.value = (i18n.KO.SCAN_EXCEL_UNREADABLE if status == scan_image.UNREADABLE
@@ -757,14 +781,23 @@ class ExcelExporter(QThread):
                      original: bool = False) -> bool:
         """사진을 셀 중앙에 배치.  실패 시 False — 손상/누락 이미지 1 장 때문에
         export 전체가 abort 되지 않도록 호출자가 파일명 텍스트로 대체한다 (Bug #3)."""
+        import io
         from openpyxl.drawing.image import Image as XLImage
         try:
-            xli = XLImage(str(self._embed_image_path(Path(src),
-                                                     force_original=original)))
+            path = self._embed_image_path(Path(src), force_original=original)
+            if self._original_quality or original:
+                # 원본은 장당 수 MB 라 바이트로 쥐고 있으면 메모리가 폭증한다 — 경로로 둔다.
+                xli = XLImage(str(path))
+            else:
+                # ★ 중간 화질 캐시(이미 축소된 작은 JPEG)는 **지금** 읽어 둔다.  경로로 넘기면
+                #   openpyxl 이 저장 시점에야 다시 열어서, 그 사이 사라진 사진 한 장이
+                #   try 밖(wb.save)에서 터져 저장 전체가 중단된다.
+                xli = XLImage(io.BytesIO(Path(path).read_bytes()))
             _fit_to_cell(xli, cell_w_px, cell_h_px)
             _add_image_centered(ws, xli, col, row, cell_w_px, cell_h_px)
             return True
         except Exception:
+            _LOG.warning("사진 삽입 실패(파일명 글자로 대체): %s", src, exc_info=True)
             return False
 
     @staticmethod
@@ -1490,14 +1523,30 @@ def pair_rows(lists, position, tol: float = PAIR_TOL_UM) -> list[list]:
     return out
 
 
+def _replace_result(tmp: Path, dst: Path) -> None:
+    """완성된 임시 파일로 결과 파일을 바꾼다.
+
+    결과가 엑셀에 열려 있으면 윈도에서 ``os.replace`` 가 ``[WinError 5/32]`` 로 실패하는데,
+    UI(`result_page._on_export_failed`)는 문구의 'permission' / 'errno 13' 으로 '파일이 열려
+    있음' 안내를 고른다.  예전 ``wb.save`` 직접 쓰기와 **같은 문구**로 맞춰 그 안내가 유지된다."""
+    try:
+        os.replace(tmp, dst)
+    except PermissionError as exc:
+        raise PermissionError(errno.EACCES, "Permission denied", str(dst)) from exc
+
+
 def _safe_sheet_title(name: str, taken: set) -> str:
     """엑셀 시트 이름 규칙(31자·금지문자·중복 불가)에 맞춘다."""
-    base = re.sub(r'[:\\/?*\[\]]', "_", str(name)).strip() or "Recipe"
-    base = base[:31]
+    # 엑셀은 시트 이름의 대소문자를 구분하지 않는다('Abc' 와 'ABC' 는 같은 이름) → 비교는 소문자로.
+    # 앞뒤 작은따옴표도 허용되지 않는다(엑셀이 저장 때 파일을 못 연다).
+    base = re.sub(r'[:\\/?*\[\]]', "_", str(name)).strip().strip("'").strip() or "Recipe"
+    base = base[:31].strip().strip("'") or "Recipe"
+    low = {str(t).casefold() for t in taken}
     title, n = base, 2
-    while title in taken:
+    while title.casefold() in low:
         tail = f" ({n})"
-        title = base[:31 - len(tail)] + tail
+        # 31자로 자르다 끝에 공백·따옴표가 남을 수 있어 한 번 더 정리한다.
+        title = base[:31 - len(tail)].rstrip().rstrip("'") + tail
         n += 1
     return title
 
@@ -1585,9 +1634,16 @@ _STRIP_PREFIXES = ("customXml/", "docMetadata/")
 _STRIP_CONTENT_TYPE_OVERRIDES = _re.compile(
     r'<Override[^>]*PartName="/(?:customXml|docMetadata)[^"]*"[^>]*/>'
 )
-_STRIP_RELATIONSHIP_LINE = _re.compile(
-    r'<Relationship[^/]*?Target="(?:[^"]*/)?(?:customXml|docMetadata)[^"]*"[^/]*?/>'
-)
+# ★ 요소 단위로 잡는다 — 예전 ``<Relationship[^/]*?Target=`` 는 Type="http://…" 안의 '/'
+#   를 못 건너서 Type 이 먼저 오는 실제 파일(openpyxl 출력)에서는 한 줄도 지우지 못했다.
+_RELATIONSHIP_ELEMENT = _re.compile(r'<Relationship\b[^>]*/>')
+_RELATIONSHIP_TARGET = _re.compile(r'\bTarget="(?:[^"]*/)?(?:customXml|docMetadata)')
+
+
+def _strip_relationship_lines(text: str) -> str:
+    """rels XML 에서 customXml / docMetadata 를 가리키는 ``<Relationship/>`` 만 지운다."""
+    return _RELATIONSHIP_ELEMENT.sub(
+        lambda m: "" if _RELATIONSHIP_TARGET.search(m.group(0)) else m.group(0), text)
 
 
 def _strip_corporate_metadata(xlsx_path: Path) -> None:
@@ -1598,7 +1654,18 @@ def _strip_corporate_metadata(xlsx_path: Path) -> None:
     """
     xlsx_path = Path(xlsx_path)
     tmp_out = xlsx_path.with_suffix(xlsx_path.suffix + ".clean.tmp")
+    try:
+        _strip_into(xlsx_path, tmp_out)
+    finally:
+        # 도중에 실패하면 반쯤 쓴 *.clean.tmp 가 결과 폴더에 남는다(성공하면 이미 replace 됨).
+        if tmp_out.exists():
+            try:
+                tmp_out.unlink()
+            except OSError:
+                _LOG.warning("임시 정리 파일을 지우지 못했다: %s", tmp_out, exc_info=True)
 
+
+def _strip_into(xlsx_path: Path, tmp_out: Path) -> None:
     with _zip.ZipFile(xlsx_path, "r") as src:
         names = src.namelist()
         has_metadata = any(
@@ -1625,7 +1692,7 @@ def _strip_corporate_metadata(xlsx_path: Path) -> None:
                         dst.writestr(info, data)
                         continue
                     text = _STRIP_CONTENT_TYPE_OVERRIDES.sub("", text)
-                    text = _STRIP_RELATIONSHIP_LINE.sub("", text)
+                    text = _strip_relationship_lines(text)
                     data = text.encode("utf-8")
                 elif name == "docProps/custom.xml":
                     # ContentTypeId 만 가진 custom.xml 은 통째로 비워도 무방.

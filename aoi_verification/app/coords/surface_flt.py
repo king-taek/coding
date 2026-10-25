@@ -27,6 +27,7 @@ fail-safe(파일 없음/손상 시 빈 결과, **절대 raise 안 함**).
 
 from __future__ import annotations
 
+import logging
 import struct
 from collections import namedtuple
 from functools import lru_cache
@@ -34,6 +35,8 @@ from pathlib import Path
 from typing import Optional
 
 __all__ = ["load_folder", "has_flt", "RawRecord"]
+
+_LOG = logging.getLogger("aoi.coords")
 
 # ── 스키마(TB500 실측 84건 brute-force 로 확정 — 위 docstring 참조) ─────────
 _BYTE_ORDER = "<"        # little-endian
@@ -170,4 +173,6 @@ def load_folder(folder: Path) -> tuple[RawRecord, ...]:
             return ()
         return _parse_flt(flt)
     except Exception:
+        _LOG.warning("Surface.flt 파싱 실패 — 측정정보 없음으로 처리: %s", folder,
+                     exc_info=True)
         return ()

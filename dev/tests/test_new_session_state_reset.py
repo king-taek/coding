@@ -59,6 +59,7 @@ def test_new_session_stops_autosave_from_rewriting_the_old_session(
 
         win._input = _old_input(tmp_path)
         win._session_id = "2026-08-09T09-00-00"
+        win._phase = mw.PHASE_A_MATCH       # 단계가 없는 세션은 저장하지 않는다
         win._autosave()
         assert len(saved) == 1, "세션 중에는 그대로 저장돼야 한다(가드가 과하면 안 된다)"
         assert saved[0].ref_root == str(tmp_path / "ref_old")
@@ -112,5 +113,46 @@ def test_late_stage2_finish_after_new_session_does_not_blow_up(
         monkeypatch.setattr(win, "_show_page", lambda p: shown.append(p))
         win._proceed_to_review_or_finish()        # 뒤늦게 도착한 finished
         assert shown == [], "버려진 세션인데 검토/결과 화면으로 넘어갔다"
+    finally:
+        win.close()
+
+
+class _FakeScan:
+    """`_on_start` 가 띄우는 스캔 워커 대역 — 스레드 없이 시그널 접속만 받는다."""
+
+    class _Sig:
+        def connect(self, _f):
+            pass
+
+    def __init__(self, *a, **k):
+        self.signals = type("S", (), {"progress": self._Sig(), "done": self._Sig(),
+                                      "failed": self._Sig()})()
+        self.finished = self._Sig()
+
+    def start(self):
+        pass
+
+    def stop(self):                 # closeEvent 가 부른다
+        pass
+
+
+def test_kla_slot_meta_is_reset_for_the_next_run(qapp, monkeypatch, tmp_path):
+    """M5 — KLA 실행이 남긴 폴더별 판독 메타가 다음 실행(비-KLA)의 엑셀·로그에 새지 않는다."""
+    win = _window(monkeypatch)
+    try:
+        monkeypatch.setattr(mw, "_FolderScan", _FakeScan)
+        monkeypatch.setattr(mw.MainWindow, "_prepare_working_file", lambda self, inp: None)
+        monkeypatch.setattr(mw.session_mod, "save", lambda st: None)
+
+        win._slot_meta_ref = {"K1": {"slot": "W1", "method": "info"}}
+        win._slot_meta_val = {"K2": {"slot": "W1", "method": "ocr"}}
+        win._on_start(_old_input(tmp_path))
+        assert win._slot_meta_ref is None and win._slot_meta_val is None, \
+            "[검증 시작] 이 옛 KLA 메타를 남겼다"
+
+        win._slot_meta_ref = {"K1": {"slot": "W1", "method": "info"}}
+        win._slot_meta_val = {"K2": {"slot": "W1", "method": "ocr"}}
+        win._new_session()
+        assert win._slot_meta_ref is None and win._slot_meta_val is None
     finally:
         win.close()

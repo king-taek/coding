@@ -6,6 +6,9 @@ Pillow 기반으로 안전한 리사이즈를 수행하고, 캐시가 있으면 
 
 from __future__ import annotations
 
+import logging
+import os
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -14,6 +17,8 @@ from PIL import Image, ImageOps
 
 from .. import config
 from . import cache
+
+_LOG = logging.getLogger("aoi.image_io")
 
 
 # ---------------------------------------------------------------------------
@@ -146,7 +151,7 @@ def _ensure_resized(src: Path, *, size_option: str,
                     extra: str = "") -> Path:
     out = cache.cache_path(src, size_option, extra=extra)  # type: ignore[arg-type]
     try:                                  # exists()+stat() 2회 → stat() 1회로
-        if out.stat().st_size > 0:
+        if out.stat().st_size > 0 and _jpeg_complete(out):
             return out
     except OSError:
         pass
@@ -157,8 +162,37 @@ def _ensure_resized(src: Path, *, size_option: str,
         raise RuntimeError(f"이미지 로드 실패: {src} ({exc})") from exc
     img = _to_rgb(_fit_long_edge(img, long_edge))
     out.parent.mkdir(parents=True, exist_ok=True)
-    img.save(str(out), format="JPEG", quality=jpeg_q, optimize=True)
+    # ★ 캐시 파일에 곧장 쓰지 않는다 — 쓰는 도중 끊기면(앱 종료·디스크 가득) 크기만 있는 잘린
+    #   JPEG 가 '적중' 으로 믿겨 영원히 깨진 썸네일을 낸다.  같은 폴더 임시 파일에 완성한 뒤
+    #   `os.replace`(원자적)로 바꾼다.  임시 이름에 pid·스레드를 넣어 UI 와 풀이 같은 사진을
+    #   동시에 만들어도 서로의 파일을 밟지 않는다.  `.jpg` 로 끝나 prune_old_cache 가 치운다.
+    tmp = out.with_name(f"{out.stem}.{os.getpid()}-{threading.get_ident()}.part.jpg")
+    try:
+        img.save(str(tmp), format="JPEG", quality=jpeg_q, optimize=True)
+        os.replace(tmp, out)
+    except BaseException:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
     return out
+
+
+def _jpeg_complete(path: Path) -> bool:
+    """캐시 JPEG 가 끝 표식(EOI ``FF D9``)까지 있는가 — 잘린 파일을 '적중' 으로 믿지 않는다.
+
+    열어서 디코드하는 것보다 훨씬 싸다(끝 2바이트만 읽음).  읽다가 실패해도 '없는 것'으로
+    보고 다시 만든다."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(-2, os.SEEK_END)
+            ok = f.read(2) == b"\xff\xd9"
+    except OSError:
+        return False
+    if not ok:
+        _LOG.info("잘린 캐시 파일을 다시 만든다: %s", path)
+    return ok
 
 
 # ---------------------------------------------------------------------------
@@ -313,10 +347,12 @@ def cached_tile_pixmap(src: "Path", size: int, *,
     if cached is not None:
         return cached
 
+    failed = False          # 실패한 회색 칸은 캐시하지 않는다 — 다음에 다시 시도(load_thumb_qpixmap 과 같다)
     try:
         tp = get_mid_path(Path(src)) if prefer_mid else get_thumb_path(Path(src))
         pix = QPixmap(str(tp))
         if pix.isNull():
+            failed = True
             pix = QPixmap(size, size)
             pix.fill(QColor(20, 28, 40))
         pix = pix.scaled(
@@ -325,6 +361,7 @@ def cached_tile_pixmap(src: "Path", size: int, *,
             Qt.TransformationMode.SmoothTransformation,
         )
     except Exception:
+        failed = True
         pix = QPixmap(size, size)
         pix.fill(QColor(20, 28, 40))
 
@@ -337,5 +374,6 @@ def cached_tile_pixmap(src: "Path", size: int, *,
         p.end()
         pix = faded
 
-    cache_obj.put(key, pix)
+    if not failed:
+        cache_obj.put(key, pix)
     return pix

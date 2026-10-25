@@ -34,6 +34,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -68,6 +69,12 @@ _CAND_CAP_PX = 28       # 캡션 한 줄
 # 크기 슬라이더 범위 (기준 사진 한 변, px) — 후보 타일은 비율로 파생 (#1).
 _SIZE_MIN_PX = 250
 _SIZE_MAX_PX = 700
+
+
+_LOG = logging.getLogger("aoi.ui")
+# `_lookup_or_compute_score` 가 '계산하다 실패했다' 를 알리는 표식 — None(재계산 불가로 제외)
+# 과 구분한다.
+_SCORE_FAILED = object()
 
 
 # 채점 워커가 살아 있는 동안 파이썬 참조를 붙잡아 두는 곳 — 지역 변수로만 두면
@@ -214,7 +221,8 @@ class _CandidateTile(QFrame):
                  score_unknown: bool = False) -> None:
         super().__init__(parent)
         self.item = item
-        self.score = float(score)
+        # None = 이 쌍의 점수 계산이 실패했다(0% 와 다르다 — `score_text` 가 따로 표기).
+        self.score = None if score is None else float(score)
         # 점수가 '유사도' 가 아닐 때(좌표 거리 재사용, C-2) — 수치 대신 계산 안 함을
         # 표시한다.  정렬에는 그대로 쓴다(거리 오름차순 = 이 값 내림차순).
         self._score_unknown = bool(score_unknown)
@@ -308,13 +316,15 @@ class _CandidateTile(QFrame):
 
         갈라 두면 타일은 '계산 안 함' 인데 크게보기 캡션만 거짓 백분율을
         띄우는 식으로 조용히 어긋난다 (C-2)."""
+        if self.score is None:
+            return i18n.KO.SCORE_FAILED
         if self._score_unknown:
             return i18n.KO.SCORE_NOT_COMPUTED
         return fmt_score(self.score, self._coord_mode, self._tolerance)
 
     def set_score(self, score: float, *, unknown: bool | None = None) -> None:
         """같은 슬롯 재사용 시 새 기준 사진 기준으로 점수만 갱신 (#1b)."""
-        self.score = float(score)
+        self.score = None if score is None else float(score)
         if unknown is not None:
             self._score_unknown = bool(unknown)
         self._score_label.setText(self.score_text())
@@ -886,7 +896,9 @@ class UnmatchedReviewDialog(QDialog):
         수치 대신 '계산 안 함' 을 보여 준다.  정렬은 그대로다."""
         if token != self._score_token:
             return
-        scored = sorted(scored, key=lambda x: x[0], reverse=True)
+        # 계산에 실패한 후보(점수 None)는 실제 점수들 뒤로 보낸다.
+        scored = sorted(scored, key=lambda x: (x[0] is not None, x[0] or 0.0),
+                        reverse=True)
         # 좌표 순으로 줄을 세운 화면에서는 U-18 안내('순서 기준은 유사도')가
         # 거짓이 된다 — 그 경우에만 감춘다.
         note = getattr(self, "coord_note", None)
@@ -1070,7 +1082,8 @@ class UnmatchedReviewDialog(QDialog):
                 on_computed()
             if s is None:
                 continue                     # ≥300 & 캐시 miss → 재계산 없이 제외.
-            out.append((float(s), v))
+            # 계산이 **실패한** 후보는 0% 로 둔갑시키지 않고 점수 없음(None)으로 싣는다.
+            out.append((None if s is _SCORE_FAILED else float(s), v))
         return out
 
     # ------------------------------------------------------------------
@@ -1094,7 +1107,10 @@ class UnmatchedReviewDialog(QDialog):
             vf = _pipeline.extract(val_path)
             s = float(_pipeline.score(rf, vf))
         except Exception:
-            s = 0.0
+            # ★ 0.0 으로 기억하면 다음 방문에도 '유사도 0%' 로 굳는다 — 기록하지 않는다.
+            _LOG.warning("후보 점수 계산 실패: %s ↔ %s", ref_path.name, val_path.name,
+                         exc_info=True)
+            return _SCORE_FAILED
         self._remember_score(ref.slot, ref_path, val_path, s)
         return s
 

@@ -20,8 +20,8 @@ from typing import Optional
 from .ini_text import read_ini_text
 
 _SECTION = re.compile(r"\[[^\]]*\]")
-_NAME = re.compile(r"(?im)^\s*ZoneName\s*=\s*(.+?)\s*$")
-_ID = re.compile(r"(?im)^\s*ZoneID\s*=\s*(\d+)")
+_NAME = re.compile(r"(?im)^\s*ZoneName[ \t]*=[ \t]*(\S.*?)\s*$")
+_ID = re.compile(r"(?im)^\s*ZoneID[ \t]*=[ \t]*(\d+)")
 # 우선 탐색 파일(빠른 경로). 못 찾으면 폴더 안 모든 *.ini 로 확대.
 _PREFERRED = ("ProductInfo.ini", "RecipesInfo.ini", "Recipe2-ProductInfo.ini")
 

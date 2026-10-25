@@ -19,6 +19,20 @@ from . import phash as _phash
 from . import orb as _orb
 from . import ssim as _ssim
 
+# ★ 특징 추출·점수 공식(pHash/ORB/SSIM/전처리/ROI)이 바뀌면 반드시 올린다.
+#
+# 특징 캐시(.npz)와 점수 캐시(.json.gz)의 키에 '어떤 알고리즘으로 만든 값인가' 가 없으면,
+# 방식이 바뀐 뒤에도 옛 파일이 그대로 적중해 옛 특징·옛 점수가 새 값과 섞인다 —
+# 느려지는 게 아니라 매칭이 틀린다(임베딩 캐시의 ``_EMB_VERSION`` 과 같은 이유).
+#   f1 — 키에 버전 도입(이전: 없음).  ORB 키포인트 좌표(orb_xy) 저장 포함.
+_FEATURE_VERSION = "f1"
+
+
+def feature_cache_extra(cfg, side=None) -> str:
+    """특징 캐시 키 판별자 = 알고리즘 버전 + ``cfg.cache_extra(side)``."""
+    base = cfg.cache_extra(side) if cfg is not None else ""
+    return f"{_FEATURE_VERSION}-{base}" if base else _FEATURE_VERSION
+
 
 @dataclass
 class Feature:
@@ -48,14 +62,22 @@ class Feature:
     def load(cls, src: Path, path: Path) -> "Feature":
         # 옛 캐시에 남은 키(cnn·cnn_model)는 읽지 않으므로 그냥 무시된다 —
         # npz 는 요청한 항목만 꺼내므로 파일을 다시 만들 필요가 없다.
-        data = np.load(str(src), allow_pickle=True)
+        # 저장하는 배열은 전부 숫자형이라 pickle 이 필요 없다 — 끈다(손상·악성 캐시가
+        # 임의 코드를 실행하지 못하게).
+        data = np.load(str(src), allow_pickle=False)
+        # 디스크립터는 있는데 키포인트 좌표가 없는 파일은 좌표 저장 이전의 옛 캐시다.
+        # 그대로 읽으면 orb_xy=None 이 돼 중앙가중 ORB 가 **조용히 꺼진다** → 캐시 미스로
+        # 취급해 다시 계산하게 한다(extract 가 예외를 잡아 재계산).  디스크립터도 없으면
+        # (키포인트 0개) 좌표가 없는 게 정상이다.
+        if "orb_desc" in data.files and "orb_xy" not in data.files:
+            raise ValueError("stale feature cache: orb_xy missing")
         return cls(
             path=path,
             phash=data["phash"],
             roi_gray=data["roi_gray"],
             orb_kp=int(data["orb_kp"][0]),
             orb_desc=data["orb_desc"] if "orb_desc" in data.files else None,
-            orb_xy=data["orb_xy"] if "orb_xy" in data.files else None,   # 구 캐시엔 없음→None
+            orb_xy=data["orb_xy"] if "orb_xy" in data.files else None,
         )
 
 
@@ -75,7 +97,7 @@ def extract(src: Path, *, cfg=None,
     재채점에서 ORB 를 안 쓰는 고속 변형(개발자 벤치마크)이 추출 비용을 줄이려고
     사용한다.  부분 특징이 캐시에 섞이지 않도록 이 경우 캐시 읽기/쓰기를 끈다.
     """
-    extra = cfg.cache_extra(side) if cfg is not None else ""
+    extra = feature_cache_extra(cfg, side)
     cache_file = cache.cache_path(src, "feature", extra=extra)
     path = Path(src)
     no_cache = not need_orb          # 부분(ORB 생략) 특징은 캐시와 분리.

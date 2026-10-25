@@ -17,6 +17,7 @@ ActualX/ActualY 와 nearest-match 해 해당 레코드의 geometry 를 환산해
 
 from __future__ import annotations
 
+import logging
 import math
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
@@ -28,6 +29,8 @@ from .models import DefectGeometry, SURFACE_LEN_FACTOR
 from .surface_flt import RawRecord
 
 __all__ = ["resolve", "GeometryResult", "GEOMETRY_MATCH_TOL"]
+
+_LOG = logging.getLogger("aoi.coords")
 
 # 보고서 기준: 좌표 거리 ≤ 5 µm 면 동일 defect 로 강하게 판단.
 GEOMETRY_MATCH_TOL: float = 5.0
@@ -125,4 +128,5 @@ def resolve(image_path: Path) -> GeometryResult:
         )
         return GeometryResult("ok", geom)
     except Exception:
+        _LOG.warning("결함 형상 계산 실패 — no_data 로 처리: %s", image_path, exc_info=True)
         return GeometryResult("no_data", None)
