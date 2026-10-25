@@ -93,8 +93,9 @@ class MapData:
     frame: Optional[WaferFrame]     # 격자·원 크기의 기준(첫 번째로 놓인 폴더의 것)
     points: tuple[MapPoint, ...]
     unplaced: tuple[Path, ...]      # 좌표를 못 놓은 사진
-    # 점을 놓은 폴더들의 격자(pitch·위상)가 첫 폴더와 다르다 — LOT 합산에서 다른 슬롯
+    # 점을 놓은 폴더들의 die pitch 가 첫 폴더와 다르다 — LOT 합산에서 다른 슬롯
     # 점이 엉뚱한 칸에 찍힌다(실측: 파일명 (3,3) 이 (9,3) 칸).  :func:`map_warnings`.
+    # 위상(중심)만 다른 것은 :func:`_align_phase` 가 맞추므로 여기 들지 않는다.
     mixed_frames: bool = False
     # LIVE 파일명(`camtek_live`)으로 놓은 점 수 — 그 경로는 아직 검증이 충분하지 않다
     # (사용자 지시: 맵을 볼 때마다 재검토를 당부한다).
@@ -427,6 +428,29 @@ def to_plane(coord: DefectCoord, folder: Path) -> Optional[tuple[float, float]]:
         return None
 
 
+def _wrap(d: float, pitch: float) -> float:
+    """``d`` 를 pitch 로 접어 ``[-pitch/2, pitch/2)`` 로 — 가장 가까운 같은 위상까지의 거리."""
+    return (d + pitch / 2.0) % pitch - pitch / 2.0
+
+
+def _align_phase(xy: tuple[float, float], own: Optional[WaferFrame],
+                 ref: Optional[WaferFrame]) -> tuple[float, float]:
+    """LOT 합산에서 다른 폴더의 점을 **기준 프레임 격자의 같은 칸 같은 자리**로 옮긴다.
+
+    격자·원은 첫 폴더 것으로 그리는데, 웨이퍼마다 중심(``Center_X/Y``)이 조금씩 달라
+    격자 위상이 슬롯마다 다르다(실측 T254 WVU 6324: 최대 ~160/210 µm).  평면 좌표를 그대로
+    찍으면 die 경계 근처 점이 이웃 칸에 그려졌다(355점 중 18점).  위상 차를 pitch 로 접어
+    (½ pitch 미만) 옮기므로 점은 **자기 격자에서의 칸·die 안쪽 위치**를 그대로 지킨다.
+    pitch 가 다르면 맞출 수 없어 그대로 둔다(``mixed_frames`` 경고)."""
+    if own is None or ref is None or own is ref:
+        return xy
+    if not (own.pitch_x and own.pitch_y) or \
+            (own.pitch_x, own.pitch_y) != (ref.pitch_x, ref.pitch_y):
+        return xy
+    return (xy[0] + _wrap(ref.grid_x0 - own.grid_x0, own.pitch_x),
+            xy[1] + _wrap(ref.grid_y0 - own.grid_y0, own.pitch_y))
+
+
 def build_map(coords: dict, matched=None) -> MapData:
     """``{path: DefectCoord | None}`` → :class:`MapData`.
 
@@ -453,6 +477,7 @@ def build_map(coords: dict, matched=None) -> MapData:
             folder_frames[key] = frame_for_folder(*key)
         if frame is None:
             frame = folder_frames[key]
+        xy = _align_phase(xy, folder_frames[key], frame)
         die_known = coord.source != "camtek_abs"
         live += coord.source == "camtek_live"
         points.append(MapPoint(
@@ -465,7 +490,9 @@ def build_map(coords: dict, matched=None) -> MapData:
         ))
     grid = lambda f: None if f is None else (f.pitch_x, f.pitch_y,      # noqa: E731
                                              f.grid_x0, f.grid_y0)
-    mixed = len({grid(f) for f in folder_frames.values()}) > 1
+    # 위상만 다른 폴더는 :func:`_align_phase` 로 맞췄으니 pitch 가 다를 때만 섞인 것이다.
+    mixed = len({None if f is None else (f.pitch_x, f.pitch_y)
+                 for f in folder_frames.values()}) > 1
     # LOT 합산: die 맵은 웨이퍼마다 가장자리 칸이 다르다(실측 AVAGO TYW 25장 —
     # 2921~2956칸, 맨 왼쪽 열이 있는 웨이퍼·없는 웨이퍼).  첫 폴더 맵만 그리면 다른
     # 슬롯의 가장자리 die 점이 격자 밖에 떨어진다.  격자가 같은 폴더들의 칸을 합친다.
