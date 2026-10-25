@@ -1791,7 +1791,6 @@ RENDER.result = () => {
   page.appendChild(el("div", { class: "row", style: "justify-content:center;gap:22px" }, [
     cb("미매칭 사진만 원본 화질로 넣기", "미매칭 사진만 원본 화질 그대로 임베드합니다. 매칭된 사진은 중간 화질을 유지합니다."),
     cb("사진을 원본 화질로 넣기", "원본은 화질이 좋지만 파일 용량이 크게 늘고 저장이 느려질 수 있습니다."),
-    cb("전체 양식(E~H 수기 영역) 포함", "E~H 수기 입력 영역을 포함한 전체 양식 시트도 함께 저장합니다."),
   ]));
   page.appendChild(el("div", { class: "row", style: "justify-content:flex-end" }, [
     el("button", { class: "btn", text: KO.BTN_NEW_SESSION, "data-test": "restart",

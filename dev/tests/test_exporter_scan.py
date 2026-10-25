@@ -3,7 +3,7 @@
 사용자 결정:
 - 이번 저장의 사진 중 하나라도 Scan 이 확인되면 열을 넣는다(묶어서 판단).  없으면 예전 그대로.
 - 기존 열 뒤에 붙인다 — 매칭 C 기준·D 검증·E 기준 Scan·F 검증 Scan.  미매칭 행은 D 정보,
-  E 그 사진의 Scan, F 빈칸.  전체 양식의 수기 칸은 G~J 로 밀린다.
+  E 그 사진의 Scan, F 빈칸.
 - Scan 열이 있는 시트에서 그 행만 Scan 이 없으면 짧은 문구.
 - 추출은 C 사진·D 정보·E Scan, Recipe 나란히 배치는 [사진|정보|Scan].
 """
@@ -112,27 +112,6 @@ def test_no_scan_anywhere_keeps_old_layout(qapp, isolated_cache, tmp_path):
     ws = _export(result, tmp_path / "out.xlsx", template_path=tmp_path / "n.xlsx")["out"]
     assert ws.max_column == 4
     assert _anchors(ws) == {("C", 3), ("D", 3)}
-
-
-def test_full_template_pushes_handwritten_columns_right(qapp, isolated_cache, tmp_path):
-    tpl = paths.template_path()
-    if not tpl.exists():
-        pytest.skip("양식.xlsx 없음")
-    wb = _export(_match_result(tmp_path), tmp_path / "out.xlsx", template_path=tpl,
-                 include_full_template=True)
-    full = wb[ex.SHEET_FULL_NAME]
-    merges = {str(r) for r in full.merged_cells.ranges}
-    assert {"C1:F1", "G1:H1", "I1:J1"} <= merges
-    assert full["G1"].value == "Escape Defect [Camtek]"
-    assert full["I1"].value == "Escape Defect [KLA]"
-    assert [full[f"{c}2"].value for c in "GHIJ"] == ["Camtek", "KLA", "Camtek", "KLA"]
-    assert full["E2"].value == "AOI-17 Scan"
-    assert full.column_dimensions["G"].width == ex.COL_WIDTHS["E"]
-    assert full.column_dimensions["E"].width == full.column_dimensions["C"].width
-    assert {("E", 3), ("E", 4)} <= _anchors(full)
-    # 수기 칸은 미매칭 틴트를 받지 않는다(그룹색 유지), 사진 영역(A~F)은 받는다.
-    assert full["F4"].fill.fgColor.rgb == ex.UNMATCHED_FILL
-    assert full["G4"].fill.fgColor.rgb != ex.UNMATCHED_FILL
 
 
 def test_embedded_scan_is_the_shared_crop(qapp, isolated_cache, tmp_path):

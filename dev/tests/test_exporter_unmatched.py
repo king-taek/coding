@@ -123,8 +123,8 @@ def test_export_no_unmatched_unaffected(qapp, isolated_cache, tmp_path):
     assert ws["B4"].value is None
 
 
-def test_export_full_template_optional(qapp, isolated_cache, tmp_path):
-    """전체 양식(E~H 포함) 시트는 옵션 — 기본(off)이면 생성 안 하고, 켜면 생성(#3)."""
+def test_export_has_no_full_template_sheet(qapp, isolated_cache, tmp_path):
+    """전체 양식(E~H 수기 영역) 시트는 만들지 않는다 — 옵션 삭제(사용자 요청 2026-10-25)."""
     src = tmp_path / "src"
     src.mkdir()
     ref = _make_image(src, "ref.jpeg")
@@ -136,7 +136,7 @@ def test_export_full_template_optional(qapp, isolated_cache, tmp_path):
     from aoi_verification.app.utils import paths
     from openpyxl import load_workbook
 
-    # 기본(off) — 요약 시트만, '전체 양식' 없음.
+    # 요약 시트만, '전체 양식' 없음.
     dst = tmp_path / "결과_AOI-1_vs_AOI-2.xlsx"
     ExcelExporter(result, dst_path=dst,
                   template_path=paths.template_path()).run()
@@ -148,17 +148,9 @@ def test_export_full_template_optional(qapp, isolated_cache, tmp_path):
     assert summary["A1"].value == "No" and summary["C1"].value == "Scan Defect"
     assert summary["E1"].value is None and summary["G1"].value is None
     assert summary["B3"].value == "S1"
-
-    # 옵션 on — '전체 양식'(E~H 포함) 시트도 생성.
-    dst2 = tmp_path / "결과2.xlsx"
-    ExcelExporter(result, dst_path=dst2, template_path=paths.template_path(),
-                  include_full_template=True).run()
-    wb2 = load_workbook(str(dst2))
-    assert "전체 양식" in wb2.sheetnames
-    assert wb2.sheetnames.index("전체 양식") > 0          # 요약이 앞, 전체가 뒤
-    full = wb2["전체 양식"]
-    assert full["E1"].value is not None and full["G1"].value is not None
-    assert full["B3"].value == "S1"
+    # 옵션 인자 자체가 없어졌다 — 다시 켤 길이 남지 않게.
+    with pytest.raises(TypeError):
+        ExcelExporter(result, dst_path=dst, include_full_template=True)
 
 
 def test_export_unmatched_sheet(qapp, isolated_cache, tmp_path):

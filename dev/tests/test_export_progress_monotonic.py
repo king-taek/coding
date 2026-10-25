@@ -46,8 +46,8 @@ def _run_and_collect(tmp_path: Path, **kw) -> list[tuple[int, int]]:
 
 
 def test_progress_never_restarts_across_sheets(isolated_cache, tmp_path):
-    """미매칭 시트 + 요약 시트 + 전체 양식 — 세 번 채워도 바는 한 번만 찬다."""
-    seen = _run_and_collect(tmp_path, include_full_template=True)
+    """미매칭 시트 + 요약 시트 — 두 번 채워도 바는 한 번만 찬다."""
+    seen = _run_and_collect(tmp_path)
     dones = [d for d, _ in seen]
     totals = {t for _, t in seen}
 
@@ -56,14 +56,13 @@ def test_progress_never_restarts_across_sheets(isolated_cache, tmp_path):
     total = totals.pop()
     assert total > 0, "결정형(총 > 0)이어야 한다 — 0 이면 busy 로 오해된다"
     assert dones == sorted(dones), f"진행률이 되돌아갔다: {dones}"
-    # 전체 양식(5) + 미매칭(2) + 요약(5) = 12 행 → 마지막 보고가 끝을 가리킨다.
-    assert total == 12
+    # 미매칭(2) + 요약(5) = 7 행 → 마지막 보고가 끝을 가리킨다.
+    assert total == 7
     assert dones[0] == 1 and dones[-1] == total
 
 
-def test_progress_covers_every_sheet_without_the_full_template(isolated_cache,
-                                                               tmp_path):
-    """기본(전체 양식 off)에서도 총량은 실제로 채우는 시트들의 합이다."""
+def test_progress_total_is_the_sum_of_filled_sheets(isolated_cache, tmp_path):
+    """총량은 실제로 채우는 시트들의 합이다."""
     seen = _run_and_collect(tmp_path)
     dones = [d for d, _ in seen]
     totals = {t for _, t in seen}
