@@ -182,7 +182,9 @@ def test_lot_counts_label_fills_the_real_width_and_keeps_the_full_text(qapp):
     stack.addWidget(page)
     win.show()
     try:
-        slots = [f"W75483{i:02d}XYG4" for i in range(12)]
+        # ★ 슬롯 수는 넉넉히 — 전체 문자열이 창보다 길어야 '잘림' 을 검사할 수 있다.
+        #   12개는 글꼴에 따라 1600px 안에 다 들어가서(서버 기본 글꼴 1529px) 전제가 깨졌다.
+        slots = [f"W75483{i:02d}XYG4" for i in range(30)]
         queue = [sp.ImageItem(path=Path(f"/tmp/{slot}_{k}.jpg"), slot=slot, side="ref")
                  for slot in slots for k in range(3)]
         page.load_state(queue=queue)          # 앱과 같은 순서 — 표시보다 먼저
@@ -192,6 +194,8 @@ def test_lot_counts_label_fills_the_real_width_and_keeps_the_full_text(qapp):
 
         lb = page.lot_counts_label
         full = lb.toolTip()
+        assert QFontMetrics(lb.font()).horizontalAdvance(full) > win.width(), \
+            "전제: 전체 문자열이 창보다 길어야 한다"
         assert full.startswith(i18n.KO.LOT_COUNTS_PREFIX)
         assert all(slot in full for slot in slots), "툴팁에는 전부 있어야 한다"
 
