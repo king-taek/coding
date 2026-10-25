@@ -710,3 +710,42 @@ def test_unchanged_requirements_never_run_pip(tmp_path, monkeypatch):
     assert updater.download_and_apply("o/r", "x", "NEWSHA") is True
     assert calls == [], "요구사항이 그대로인데 pip 을 돌렸다"
     assert (root / "app.new").is_dir()
+
+
+def test_promote_in_place_rolls_back_the_in_flight_item_when_move_fails(
+        tmp_path, monkeypatch):
+    """H2: ``rename(aside)`` 뒤 ``shutil.move`` 가 실패해도 그 항목이 복원돼야 한다.
+
+    예전엔 move 가 끝난 뒤에야 롤백 목록에 올려서, 실패한 항목은 ``<name>.old-update`` 만
+    남고 살아있는 ``<name>`` 이 없었다(포터블 앱이 안 켜졌다)."""
+    import shutil
+
+    root = tmp_path / "root"
+    staging = tmp_path / "staging"
+    for name in ("a", "b", "c"):
+        (root / name).mkdir(parents=True)
+        (root / name / "f.txt").write_text(f"old-{name}", encoding="utf-8")
+        (staging / name).mkdir(parents=True)
+        (staging / name / "f.txt").write_text(f"new-{name}", encoding="utf-8")
+
+    real_move = shutil.move
+    calls = []
+
+    def flaky_move(src, dst, *a, **kw):
+        calls.append(src)
+        if len(calls) == 2:                       # 두 번째 항목에서 실패
+            # 반쯤 옮겨진 흔적(부분 dst)을 남기고 죽는다
+            import os
+            os.makedirs(dst, exist_ok=True)
+            (updater.Path(dst) / "partial.txt").write_text("x", encoding="utf-8")
+            raise OSError("disk full")
+        return real_move(src, dst, *a, **kw)
+
+    monkeypatch.setattr(shutil, "move", flaky_move)
+    with pytest.raises(OSError):
+        updater._promote_in_place(staging, root, lambda *_a: None)
+
+    for name in ("a", "b", "c"):
+        assert (root / name / "f.txt").read_text(encoding="utf-8") == f"old-{name}"
+        assert not (root / name / "partial.txt").exists()
+    assert not list(root.glob("*.old-update"))

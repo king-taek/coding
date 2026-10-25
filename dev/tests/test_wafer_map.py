@@ -735,6 +735,30 @@ def test_dialog_setup_mode_slot_folder(qt, tmp_path):
         dlg.deleteLater()
 
 
+def test_dialog_build_exception_shows_error_not_empty_map(qt, tmp_path, monkeypatch, caplog):
+    """L9 — 맵 계산이 예외로 죽으면 '사진 없음' 이 아니라 오류 안내가 뜨고 로그가 남는다."""
+    import logging
+    from aoi_verification.app import i18n
+    import aoi_verification.app.ui.widgets.wafer_map_dialog as W
+
+    def boom(*_a, **_k):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(W, "build_map", boom)
+    folder = _camtek_folder(tmp_path, [("a", CX, CY)])
+    dlg = W.WaferMapDialog()
+    try:
+        with caplog.at_level(logging.ERROR, logger="aoi.ui"):
+            dlg.show_folder(folder)
+            _wait_build(qt, dlg)
+        assert dlg.empty.isVisibleTo(dlg)
+        assert dlg.empty.text() == i18n.KO.WAFER_MAP_BUILD_FAILED
+        assert dlg.empty.text() != i18n.KO.WAFER_MAP_NO_IMAGES
+        assert any("Wafer map" in r.getMessage() for r in caplog.records)
+    finally:
+        dlg.deleteLater()
+
+
 def test_dialog_single_image_shows_only_that_defect(qt, tmp_path):
     """사진 1장 — 고른 결함만 찍고, 원·격자는 그 폴더 기하 그대로."""
     from aoi_verification.app import i18n

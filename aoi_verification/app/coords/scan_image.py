@@ -255,6 +255,7 @@ def _image_size(path: str) -> Optional[tuple[int, int]]:
         with Image.open(path) as im:
             return im.size
     except Exception:
+        _LOG.warning("Scan 이미지 머리를 읽지 못해 후보에서 뺍니다: %s", path, exc_info=True)
         return None
 
 
@@ -287,8 +288,9 @@ def resolve(color_path, side_um: float = CROP_SIDE_UM) -> ScanMatch:
             return ScanMatch(NO_CANDIDATE, color, xy, px)
         return ScanMatch(OK, color, xy, px, tuple(cands))
     except Exception:
+        # 예상 못 한 예외는 '후보 없음' 이 아니라 '읽다가 실패' 다 — 화면·엑셀이 구분해 알린다.
         _LOG.exception("Scan 연결 실패: %s", color)
-        return ScanMatch(NO_CANDIDATE, color)
+        return ScanMatch(UNREADABLE, color)
 
 
 # ---------------------------------------------------------------------------

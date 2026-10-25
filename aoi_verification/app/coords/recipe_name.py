@@ -22,12 +22,12 @@ from typing import Optional
 from .ini_text import read_ini_text
 
 _SECTION = re.compile(r"\[[^\]]*\]")
-_NAME = re.compile(r"(?im)^\s*RecipeName\s*=\s*(.+?)\s*$")
-_ID = re.compile(r"(?im)^\s*RecipeNumber\s*=\s*(\d+)")
+_NAME = re.compile(r"(?im)^\s*RecipeName[ \t]*=[ \t]*(\S.*?)\s*$")
+_ID = re.compile(r"(?im)^\s*RecipeNumber[ \t]*=[ \t]*(\d+)")
 # RecipesInfo.ini 의 [Recipe-<N>] 섹션 + 그 안의 Name=
 _RECIPE_SEC = re.compile(r"\[Recipe-(\d+)\]([^\[]*)", re.IGNORECASE)
-_SEC_NAME = re.compile(r"(?im)^\s*Name\s*=\s*(.+?)\s*$")
-_GENERAL_NAME = re.compile(r"(?im)^\s*Recipe\s+Name\s*=\s*(.+?)\s*$")
+_SEC_NAME = re.compile(r"(?im)^\s*Name[ \t]*=[ \t]*(\S.*?)\s*$")
+_GENERAL_NAME = re.compile(r"(?im)^\s*Recipe\s+Name[ \t]*=[ \t]*(\S.*?)\s*$")
 # 우선 탐색 파일(빠른 경로). 못 찾으면 폴더 안 모든 *.ini 로 확대.
 _PREFERRED = ("RecipesInfo.ini", "ProductInfo.ini", "Recipe2-ProductInfo.ini")
 

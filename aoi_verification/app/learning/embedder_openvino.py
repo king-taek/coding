@@ -538,12 +538,21 @@ _EMB_VERSION = "ir1"
 
 def _emb_signature(model_kind: str, cfg, side) -> str:
     cc = 0
+    ratio_tag = ""
     try:
         if cfg is not None and getattr(cfg, "_center_crop_for", None) is not None:
             cc = 1 if cfg._center_crop_for(side) else 0
+            if cc:
+                # 중앙 crop 이 켜지면 **비율**도 임베딩을 바꾼다(0.25 와 0.3 은 다른 벡터).
+                # image_io 가 쓰는 규칙과 똑같이 읽는다(비율 메서드 없으면 0.3).
+                # crop 이 꺼진 운영 키(cc0)는 한 글자도 바뀌지 않는다 → _EMB_VERSION 불변.
+                ratio_fn = getattr(cfg, "_center_crop_ratio", None)
+                ratio = float(ratio_fn()) if ratio_fn is not None else 0.3
+                ratio_tag = f"r{ratio!r}"
     except Exception:
         cc = 0
-    return f"{model_kind}|px{_INPUT_PX}|cc{cc}|{_EMB_VERSION}"
+        ratio_tag = ""
+    return f"{model_kind}|px{_INPUT_PX}|cc{cc}{ratio_tag}|{_EMB_VERSION}"
 
 
 def _emb_cache_file(path: Path, sig: str) -> Path:

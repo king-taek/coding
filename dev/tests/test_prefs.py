@@ -1,5 +1,7 @@
 """utils.prefs — 라운드트립 / patch / 기본값."""
 
+from pathlib import Path
+
 from aoi_verification.app.utils import prefs
 
 
@@ -171,3 +173,95 @@ def test_last_used_inputs_are_still_persisted():
     for name in ("last_ref_root", "last_val_root",
                  "last_ref_machine", "last_val_machine"):
         assert name in fields, f"{name} 가 사라졌다"
+
+
+# ---------------------------------------------------------------------------
+# 읽기 실패가 사용자 파일을 날리지 않는다 (M14)
+def _corrupt_siblings(file):
+    return sorted(file.parent.glob(file.name + ".corrupt-*"))
+
+
+def test_corrupt_file_is_moved_aside_not_destroyed(isolated_cache):
+    file = prefs._file()
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text('{"threshold": 0.9, "last_ref_root": "D:/x"', encoding="utf-8")  # 잘린 JSON
+    p = prefs.load()
+    assert p.threshold == prefs.UiPrefs().threshold          # 기본값으로 시작
+    kept = _corrupt_siblings(file)
+    assert len(kept) == 1 and "last_ref_root" in kept[0].read_text(encoding="utf-8")
+    assert not file.exists()
+    # 이어지는 저장은 새 파일을 만들 뿐 원본(.corrupt-*)은 그대로다.
+    prefs.patch(threshold=0.7)
+    assert prefs.load().threshold == 0.7
+    assert len(_corrupt_siblings(file)) == 1
+
+
+def test_non_object_json_counts_as_corrupt(isolated_cache):
+    file = prefs._file()
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text("[1, 2, 3]", encoding="utf-8")
+    assert prefs.load().threshold == prefs.UiPrefs().threshold
+    assert len(_corrupt_siblings(file)) == 1
+
+
+def test_missing_file_is_normal_and_writes_defaults(isolated_cache):
+    file = prefs._file()
+    assert not file.exists()
+    prefs.patch(threshold=0.61)
+    assert prefs.load().threshold == 0.61
+    assert _corrupt_siblings(file) == []
+
+
+def test_transient_read_error_skips_save(isolated_cache, monkeypatch):
+    prefs.save(prefs.UiPrefs(threshold=0.9, last_ref_root="D:/keep"))
+    file = prefs._file()
+    before = file.read_text(encoding="utf-8")
+    prefs._cached = None                                      # 메모에 기대지 않게
+
+    real = Path.read_text
+
+    def flaky(self, *a, **k):
+        if self == file:
+            raise PermissionError(13, "busy")
+        return real(self, *a, **k)
+    Path.read_text = flaky                  # monkeypatch.undo() 는 HOME 격리까지 되돌려 직접 복원
+    try:
+        out = prefs.patch(threshold=0.1)                      # load 실패 → 기본값 + save 건너뜀
+    finally:
+        Path.read_text = real
+    assert out.threshold == 0.1                               # 호출부는 평소처럼 값을 받는다
+    assert file.read_text(encoding="utf-8") == before         # 파일은 그대로
+    assert _corrupt_siblings(file) == []
+    # 다시 읽을 수 있게 되면 정상 복구.
+    assert prefs.load().threshold == 0.9
+    prefs.patch(threshold=0.8)
+    assert prefs.load().threshold == 0.8
+
+
+def test_from_dict_coerces_bad_field_types_per_field():
+    d = prefs.UiPrefs()
+    p = prefs.UiPrefs.from_dict({
+        "window_width": "9", "window_height": None, "threshold": "0.7",
+        "window_maximized": "yes", "last_mode": 5, "extra": [1],
+        "accel_concurrency": 3.5, "embed_batch": True, "coord_tolerance": float("nan"),
+        "legacy_enabled": "x", "select_center_crop": "50"})
+    assert p.window_width == 9                                # 숫자 문자열은 살린다
+    assert p.window_height == d.window_height                 # None → 기본값
+    assert p.threshold == 0.7
+    assert p.window_maximized is d.window_maximized
+    assert p.last_mode == d.last_mode
+    assert p.extra == {}
+    assert p.accel_concurrency == d.accel_concurrency         # 소수는 int 필드에 안 맞음
+    assert p.embed_batch == d.embed_batch                     # bool 은 int 로 안 친다
+    assert p.coord_tolerance == d.coord_tolerance
+    assert p.legacy_enabled is None
+    assert p.select_center_crop == "50"                       # 멀쩡한 필드는 그대로
+
+
+def test_from_dict_keeps_valid_values():
+    p = prefs.UiPrefs.from_dict({"legacy_enabled": True, "window_width": 1280,
+                                 "window_maximized": True, "extra": {"a": 1},
+                                 "coord_tolerance": 350})
+    assert p.legacy_enabled is True and p.window_width == 1280
+    assert p.window_maximized is True and p.extra == {"a": 1}
+    assert p.coord_tolerance == 350.0

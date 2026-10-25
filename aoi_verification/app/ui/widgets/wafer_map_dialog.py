@@ -41,6 +41,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Optional
 
@@ -63,6 +64,11 @@ from .neon_button import NeonButton
 from .no_wheel_slider import NoWheelSlider
 from .wafer_map_view import DOT_R, DOT_R_MAX, DOT_R_MIN, WaferMapView, count_text
 from .window_controls import set_window_fullscreen
+
+_LOG = logging.getLogger("aoi.ui")
+# 맵 만들기가 예외로 끝났다는 표식 — `done` 시그널의 ``extra`` 자리로 실어 보내, 다이얼로그가
+# '사진 없음' 이 아니라 오류 안내를 띄우게 한다.
+_BUILD_FAILED = object()
 
 # 페이지가 닫혀도 돌던 스레드가 수명을 다 살게 붙들어 둔다(setup_page 의 패턴).
 _LIVE_BUILDS: set = set()
@@ -118,7 +124,9 @@ class _MapBuild(QThread):
                     self.signals.progress.emit(
                         t, i, total, i18n.KO.WAFER_MAP_LOADING_THUMBS)
         except Exception:
-            left, right = MapData(None, (), ()), None
+            # ★ 삼키지 않는다 — 예전엔 빈 맵만 돌려줘 화면이 "사진이 없습니다" 라고 거짓말을 했다.
+            _LOG.exception("Wafer map 만들기 실패")
+            left, right, extra = MapData(None, (), ()), None, _BUILD_FAILED
         self.signals.done.emit(t, left, right, extra)
 
 
@@ -522,6 +530,9 @@ class WaferMapDialog(QDialog):
             if t != self._token:
                 return                      # 늦게 온 옛 결과 — 새 폴더의 맵을 덮지 않는다
             self._loading.hide_overlay()
+            if extra is _BUILD_FAILED:
+                self._render_empty(i18n.KO.WAFER_MAP_BUILD_FAILED)
+                return
             on_done(left, right, extra)
 
         th.signals.done.connect(_done)

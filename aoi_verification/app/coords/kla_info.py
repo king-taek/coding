@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import re
 from functools import lru_cache
 from pathlib import Path
@@ -65,20 +66,24 @@ _HEAD_BYTES = 65536
 
 def _find_info_file(folder: Path) -> Optional[Path]:
     """폴더에서 KLA .001 정보 파일 탐색."""
-    # 1순위: .001 확장자
-    for p in folder.glob("*.001"):
-        return p
-    # 2순위: .jpg/.pass 가 아닌 파일 (확장자 없는 파일 포함), .pass 제외
-    # ★ 조건 순서를 바꾸지 마라 — `is_file()` 은 파일 하나당 stat 이라 **맨 뒤**에 둔다.
-    #   맨 앞에 두면 폴더 안 사진을 전부 stat 한다(NAS 에서 사진 수만큼 왕복).  이름만
-    #   보면 되는 확장자로 먼저 거르면 stat 대상은 정보파일 후보 1~2개뿐이다.
-    #   세 조건 모두 부작용이 없어 순서를 바꿔도 결과는 같다(`test_kla_info_file_lookup`).
-    candidates = [
-        p for p in folder.iterdir()
-        if p.suffix.lower() not in _NON_INFO_SUFFIXES
-        and not p.name.startswith('.')
-        and p.is_file()
-    ]
+    # 폴더가 없거나 읽을 수 없으면 OSError — 호출자(resolve)가 전체 실행을 중단하지 않게 None.
+    try:
+        # 1순위: .001 확장자
+        for p in folder.glob("*.001"):
+            return p
+        # 2순위: .jpg/.pass 가 아닌 파일 (확장자 없는 파일 포함), .pass 제외
+        # ★ 조건 순서를 바꾸지 마라 — `is_file()` 은 파일 하나당 stat 이라 **맨 뒤**에 둔다.
+        #   맨 앞에 두면 폴더 안 사진을 전부 stat 한다(NAS 에서 사진 수만큼 왕복).  이름만
+        #   보면 되는 확장자로 먼저 거르면 stat 대상은 정보파일 후보 1~2개뿐이다.
+        #   세 조건 모두 부작용이 없어 순서를 바꿔도 결과는 같다(`test_kla_info_file_lookup`).
+        candidates = [
+            p for p in folder.iterdir()
+            if p.suffix.lower() not in _NON_INFO_SUFFIXES
+            and not p.name.startswith('.')
+            and p.is_file()
+        ]
+    except OSError:
+        return None
     if len(candidates) == 1:
         return candidates[0]
     return None
@@ -222,6 +227,11 @@ def load_folder(folder: Path) -> dict[str, DefectCoord]:
         return result
     geom = kla_geometry(folder)
     for stem, r in raw.items():
+        # XREL="1e400" 같은 inf/nan 은 round() 가 OverflowError/ValueError — 그 행만 건너뛴다.
+        if not all(math.isfinite(r[k]) for k in ("xrel", "yrel", "die_pitch_y")):
+            _LOG.warning("KLA 정보파일의 비정상(inf/nan) 좌표 행을 건너뜀: %s (%s)",
+                         stem, folder)
+            continue
         col = r["xindex"] + geom.zero_x
         row = r["yindex"] + geom.zero_y
         x = round(r["xrel"])

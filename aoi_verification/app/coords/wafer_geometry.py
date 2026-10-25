@@ -945,4 +945,5 @@ def kla_geometry(folder: Path) -> KlaGeometry:
             "KLA die 격자 정보를 찾지 못해 기본값을 씁니다: %s", folder)
         return FALLBACK_KLA
     except Exception:
+        _LOG.warning("KLA die 격자 판독 실패 — 기본값 사용: %s", folder, exc_info=True)
         return FALLBACK_KLA

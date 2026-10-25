@@ -441,3 +441,34 @@ def test_the_cpython_url_has_one_source_of_truth():
     spec.loader.exec_module(build)
     assert build.PY_STANDALONE_URL == bs.PY_STANDALONE_URL
     assert bs.PY_STANDALONE_URL.startswith("https://")
+
+
+def test_bootstrap_reinstall_on_changed_requirements_never_upgrades(tmp_path):
+    """M9: requirements 가 바뀌어 재설치할 때도 ``--upgrade`` 를 주지 않는다(CLAUDE.md).
+
+    ``>=`` 목록에 ``--upgrade`` 를 주면 잘 돌던 무거운 패키지까지 최신으로 끌어올린다."""
+    root = tmp_path / "app"
+    root.mkdir()
+    (root / "main.py").write_text("print(1)", encoding="utf-8")
+    (root / "aoi_verification").mkdir()
+    req = root / "requirements.txt"
+    req.write_text("numpy>=1\n", encoding="utf-8")
+    bs.write_deps_marker(root, "numpy>=1\n")          # 옛 목록으로 설치된 상태
+
+    req.write_text("numpy>=1\nscipy>=1\n", encoding="utf-8")   # 목록 변경
+    cmds = []
+
+    def run(cmd):
+        cmds.append(list(cmd))
+        return 0
+
+    def fetch_app(dest):
+        raise AssertionError("앱은 이미 있다")
+
+    rc = bs.bootstrap(root, repo="o/r", branch="b",
+                      fetch_app=fetch_app, run=run, frozen=True)
+    assert rc == 0
+    pip_cmds = [c for c in cmds if "pip" in c]
+    assert len(pip_cmds) == 1                          # 바뀌었으니 한 번 설치
+    assert "--upgrade" not in pip_cmds[0]
+    assert "--upgrade" not in bs.pip_install_cmd("py", req)   # 기본값도 False

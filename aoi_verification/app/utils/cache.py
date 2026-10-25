@@ -40,7 +40,9 @@ def memo_mtime(src) -> float:
         try:
             v = os.stat(ap).st_mtime
         except OSError:
-            v = 0.0
+            # 실패(NAS 순단·아직 없는 파일)는 메모하지 않는다 — 0.0 이 세션 내내 굳으면 그
+            # 사진의 캐시 키가 실제 mtime 으로 바뀌지 못해 다른 사진과 섞이고 재생성도 안 된다.
+            return 0.0
         _mtime_cache[ap] = v
     return v
 

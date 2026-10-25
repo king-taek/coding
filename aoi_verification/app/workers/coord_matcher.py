@@ -39,6 +39,7 @@ score 인코딩 (match_review_page 역산용):
 
 from __future__ import annotations
 
+import logging
 import math
 import threading
 from pathlib import Path
@@ -52,6 +53,8 @@ from .. import i18n
 from ..models.slot import ImageItem
 from .matcher import score_ref_classical
 from .. import config as _config
+
+_LOG = logging.getLogger("aoi.match")
 
 
 # 좌표 차이가 이 값(좌표 단위, µm) 이하이면 '거의 정확히 일치'로 보고 후보 1장만
@@ -271,11 +274,20 @@ class CoordScheduler(QThread):
                         self.signals.progress.emit(min(_b + idx, total_pairs),
                                                    total_pairs)
 
-                cands = score_ref_classical(
-                    ref, vals, threshold=0.0, cfg=self._cfg,
-                    progress_cb=_on_pair,
-                    stop_cb=self._stop.is_set,
-                )
+                try:
+                    cands = score_ref_classical(
+                        ref, vals, threshold=0.0, cfg=self._cfg,
+                        progress_cb=_on_pair,
+                        stop_cb=self._stop.is_set,
+                    )
+                except Exception:
+                    # 기준 사진 1장이 못 읽히면(깨진 파일·NAS 끊김) ``sim.extract`` 가 던져
+                    # 예전엔 **실행 전체가 중단**됐다.  좌표 경로와 똑같이 이 ref 만
+                    # 빈 결과 + 실패 목록으로 처리하고 나머지는 계속한다.
+                    _LOG.warning("좌표 폴백 채점 실패 — 이 기준은 매치 실패로 처리합니다: %s",
+                                 ref.path, exc_info=True)
+                    cands = []
+                    self.failed_set.add((slot, ref.path))
                 self._results[(slot, ref.path)] = [
                     (c.item.path, float(c.score)) for c in cands
                 ]

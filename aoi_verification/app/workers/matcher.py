@@ -7,6 +7,7 @@ val side 특징을 공유해 큰 폭으로 속도가 빨라진다).
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Mapping, Optional
@@ -18,10 +19,23 @@ from ..models.slot import ImageItem
 from ..similarity import pipeline as sim
 
 
+_LOG = logging.getLogger("aoi.match")
+
+
 @dataclass
 class Candidate:
     item: ImageItem
     score: float
+
+
+class ClassicalResult(list):
+    """``score_ref_classical`` 의 반환 — 평범한 ``list[Candidate]`` 이면서 채점에 **실패한**
+    후보 경로를 ``failed`` 로 들고 있다(호출자가 실패 건수를 셀 수 있게).  기존 호출자는
+    list 로만 쓰므로 호환된다."""
+
+    def __init__(self, *args) -> None:
+        super().__init__(*args)
+        self.failed: list[Path] = []
 
 
 def score_ref_classical(ref_item: ImageItem,
@@ -38,6 +52,8 @@ def score_ref_classical(ref_item: ImageItem,
     ``MatcherWorker`` 와 고효율 모드 CPU 유닛이 공유하는 순수 함수 (Qt 비의존).
     점수는 ``sim.score`` 가 이미 [0,1] 로 돌려준다.  ``val_features`` 가 주어지면
     재추출을 생략한다.  ``progress_cb(idx,total)`` / ``stop_cb()->bool`` 은 옵션.
+    채점이 예외로 실패한 후보는 0점으로 둔갑시키지 않고 **제외**하며, 반환 리스트의
+    ``failed`` 속성(경로 목록)에 남긴다.
 
     ``components`` (예: ``{"phash","ssim"}``) 가 주어지면 그 항만으로 채점한다 —
     비싼 ORB 를 빼서 CPU 재채점을 빠르게 하는 고속 변형용.  ORB 를 안 쓰면 특징
@@ -49,7 +65,7 @@ def score_ref_classical(ref_item: ImageItem,
     ref_feat = sim.extract(ref_item.path, cfg=cfg, side="ref", need_orb=need_orb)
     vfmap: dict[Path, sim.Feature] = dict(val_features or {})
     total = len(val_items)
-    out: list[Candidate] = []
+    out = ClassicalResult()
     for idx, vi in enumerate(val_items, start=1):
         if stop_cb is not None and stop_cb():
             break
@@ -61,12 +77,23 @@ def score_ref_classical(ref_item: ImageItem,
             s = sim.score(ref_feat, vf, components=components,
                           center_strength=center_strength)
         except Exception:
-            s = 0.0
+            # 예전엔 s=0.0 으로 바꿔 삼켰다 — threshold=0.0(좌표 폴백·고효율 재채점)이면
+            # 그 후보가 **진짜 0% 후보**로 결과에 실렸다.  실패는 점수가 아니므로 후보에서
+            # 빼고(경고로 남기고) ``failed`` 에 기록한다.
+            _LOG.warning("고전 채점 실패 — 이 후보는 건너뜁니다: %s ↔ %s",
+                         ref_item.path, vi.path, exc_info=True)
+            out.failed.append(vi.path)
+            if progress_cb is not None:
+                progress_cb(idx, total)
+            continue
         if s >= threshold:
             out.append(Candidate(item=vi, score=s))
         if progress_cb is not None:
             progress_cb(idx, total)
     out.sort(key=lambda c: c.score, reverse=True)
+    if out.failed:
+        _LOG.warning("고전 채점 실패 %d/%d건 (기준 %s)",
+                     len(out.failed), total, ref_item.path)
     return out
 
 

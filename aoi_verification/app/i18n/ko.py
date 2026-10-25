@@ -1068,6 +1068,8 @@ UNMATCHED_CAND_COUNT_COORD_FMT = "후보 {n}장 (좌표 거리 순)"
 #   "계산 안 함"=55px, "유사도 계산 안 함"=95px).  무엇을 계산 안 했는지는 바로
 #   위 후보 수 문구가 말해 준다.
 SCORE_NOT_COMPUTED = "계산 안 함"
+# 점수 계산을 시도했지만 실패한 후보 — 0% 와 구분한다(짧게 유지).
+SCORE_FAILED = "계산 불가"
 UNMATCHED_CAND_NONE = "후보 0 장"
 UNMATCHED_REF_PREFIX = "기준 — "
 
@@ -1106,6 +1108,7 @@ WAFER_MAP_NO_FOLDER = (
     "ColorImageGrabingInfo.ini(Camtek) · LIVE 파일명 · KLA 정보파일."
 )
 WAFER_MAP_NO_IMAGES = "이 폴더에는 사진이 없습니다."
+WAFER_MAP_BUILD_FAILED = "Wafer Map 을 만드는 중 오류가 났습니다 — 폴더를 다시 골라 보세요(자세한 내용은 app.log)."
 WAFER_MAP_NO_FRAME = "die 기하(pitch·웨이퍼 중심)를 찾지 못해 맵을 그릴 수 없습니다."
 WAFER_MAP_SLOT_LABEL = "슬롯"
 WAFER_MAP_ALL_SLOTS = "전체 (LOT 합산)"

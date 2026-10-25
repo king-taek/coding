@@ -784,12 +784,14 @@ def _promote_in_place(staging: Path, app_root: Path, emit) -> None:
             if dst.exists():
                 dst.rename(aside)         # 실패하면 예외 → 아래 롤백
                 moved_aside = True
-            shutil.move(str(item), str(dst))
+            # move 중간에 실패해도 롤백이 이 항목을 복원하도록 rename 직후에 기록한다
+            # (move 뒤에 기록하면 `.old-update` 만 남고 살아있는 항목이 없어진다).
             done.append((dst, aside if moved_aside else None))
+            shutil.move(str(item), str(dst))
             emit(i, m, i18n.KO.UPDATE_PHASE_APPLY)
     except Exception:
         for dst, aside in reversed(done):  # 되돌리기 — 구버전 트리를 복원한다
-            _discard(dst)
+            _discard(dst)                  # move 가 반쯤 만든 dst 도 여기서 치운다
             if aside is not None:
                 try:
                     aside.rename(dst)

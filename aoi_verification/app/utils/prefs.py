@@ -2,20 +2,29 @@
 
 - 슬라이더 위치 / 임계치 / 사진 크기 / 모델 카드 펼침 여부 등.
 - ``~/.aoi_verification_cache/ui_prefs.json`` 1 개 파일에 통합.
-- 읽기 실패는 묵묵히 기본값으로 fallback (검증 흐름을 절대 막지 않는다).
+- 읽기 실패는 기본값으로 fallback (검증 흐름을 절대 막지 않는다).  단, **기본값이 다음 저장에
+  사용자 파일을 덮어쓰지 않게** 한다: 깨진 JSON 은 옆으로 치우고(``.corrupt-<시각>``),
+  일시적 읽기 오류(OSError)면 그 사이의 저장은 건너뛴다.
 """
 
 from __future__ import annotations
 
 import json
+import logging
+import math
+import os
 from copy import deepcopy
-from dataclasses import asdict, dataclass, field
+from dataclasses import MISSING, asdict, dataclass, field
+from dataclasses import fields as dataclass_fields
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from . import paths
 from .. import config as _config
 
+
+_LOG = logging.getLogger("aoi.prefs")
 
 _PREFS_FILE = "ui_prefs.json"
 
@@ -118,8 +127,58 @@ class UiPrefs:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "UiPrefs":
-        valid = {k: d[k] for k in d if k in cls.__dataclass_fields__}
+        """알려진 키만, **필드마다 기본값의 자료형에 맞춰** 받는다.
+
+        손으로 고친/깨진 파일(``"window_width": "9"``, ``null``)의 값이 그대로 들어가면 창 크기
+        비교 같은 곳에서 TypeError 가 난다 — 맞지 않는 필드는 그 필드만 기본값으로 되돌린다."""
+        valid = {}
+        for f in dataclass_fields(cls):
+            if f.name in d:
+                valid[f.name] = _coerce(d[f.name], _default_of(f))
         return cls(**valid)
+
+
+def _default_of(f) -> Any:
+    if f.default is not MISSING:
+        return f.default
+    if f.default_factory is not MISSING:        # type: ignore[misc]
+        return f.default_factory()              # type: ignore[misc]
+    return None
+
+
+def _coerce(value: Any, default: Any) -> Any:
+    """``value`` 를 ``default`` 의 자료형으로.  못 맞추면 ``default``.
+
+    bool 은 int 의 하위형이라 가장 먼저 가른다.  ``default is None`` 은 ``bool | None``
+    (``legacy_enabled``) 하나뿐 — None 과 bool 만 받는다."""
+    if default is None:
+        return value if (value is None or isinstance(value, bool)) else None
+    if isinstance(default, bool):
+        return value if isinstance(value, bool) else default
+    if isinstance(default, int):
+        if isinstance(value, bool):
+            return default
+        if isinstance(value, int):
+            return value
+        try:
+            num = float(value) if isinstance(value, (float, str)) else None
+        except ValueError:
+            return default
+        return int(num) if (num is not None and math.isfinite(num)
+                            and num == int(num)) else default
+    if isinstance(default, float):
+        if isinstance(value, bool):
+            return default
+        try:
+            num = float(value) if isinstance(value, (int, float, str)) else None
+        except ValueError:
+            return default
+        return num if (num is not None and math.isfinite(num)) else default
+    if isinstance(default, str):
+        return value if isinstance(value, str) else default
+    if isinstance(default, dict):
+        return value if isinstance(value, dict) else default
+    return value
 
 
 # ---------------------------------------------------------------------------
@@ -183,6 +242,23 @@ def _file() -> Path:
 #   바뀌면 키가 달라져 저절로 무효화되고, `save` 는 mtime 을 바꾸므로 같은
 #   프로세스가 쓴 변경도 다음 load 에서 그대로 보인다.
 _cached: tuple | None = None
+# 마지막 load 가 '파일은 있는데 읽지 못했다'(일시적 OSError — 네트워크 홈 끊김, 다른 프로세스가
+# 쥐고 있음 등)로 끝났는가 — 그랬다면 그 파일 경로, 아니면 None.  그 상태의 기본값을 save 가
+# 쓰면 멀쩡한 사용자 파일이 사라진다.  (경로로 두는 건 다른 캐시 위치로 넘어가면 풀리게 하려는 것.)
+_read_failed: str | None = None
+
+
+def move_aside_corrupt(p: Path) -> Path | None:
+    """깨진 파일을 ``<이름>.corrupt-<시각>`` 으로 치운다(최선 노력).  못 하면 None.
+
+    다음 저장이 그 파일을 덮어써도 사용자가 원본을 되살릴 수 있게 하는 장치다."""
+    dest = p.with_name(f"{p.name}.corrupt-{datetime.now():%Y%m%d-%H%M%S-%f}")
+    try:
+        os.replace(p, dest)
+        return dest
+    except OSError:
+        _LOG.warning("깨진 파일을 치우지 못했다: %s", p, exc_info=True)
+        return None
 
 
 def load() -> UiPrefs:
@@ -190,20 +266,48 @@ def load() -> UiPrefs:
 
     ★ 메모한 dict 는 깊은 복사로 주고받는다 — ``extra`` 가 가변이라 얕게 넘기면
     호출부가 그것을 고칠 때 캐시가 함께 오염된다."""
-    global _cached
+    global _cached, _read_failed
     p = _file()
     try:
         st = p.stat()
         key = (str(p), st.st_mtime_ns, st.st_size)
+    except FileNotFoundError:
+        _read_failed = None
+        return UiPrefs()                 # 파일 없음 — 기본값(정상)
     except OSError:
-        return UiPrefs()                 # 파일 없음 — 기본값
+        _read_failed = str(p)             # 있는지조차 모르겠다 — 기본값으로 덮어쓰지 않는다
+        _LOG.warning("설정 파일 상태를 읽지 못했다: %s", p, exc_info=True)
+        return UiPrefs()
     if _cached is not None and _cached[0] == key:
+        _read_failed = None
         return migrate(UiPrefs.from_dict(deepcopy(_cached[1])))
     try:
-        data = json.loads(p.read_text(encoding="utf-8"))
+        text = p.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        _read_failed = None
+        return UiPrefs()
+    except UnicodeDecodeError:
+        text = None                      # 내용이 깨짐 → 아래에서 치운다
+    except OSError:
+        _read_failed = str(p)
+        _LOG.warning("설정 파일을 읽지 못했다(일시적일 수 있음): %s", p, exc_info=True)
+        return UiPrefs()
+    try:
+        if text is None:
+            raise ValueError("설정 파일이 UTF-8 이 아니다")
+        data = json.loads(text)
+        if not isinstance(data, dict):
+            raise ValueError("설정 파일의 최상위가 객체가 아니다")
         prefs = migrate(UiPrefs.from_dict(data))
     except Exception:
+        moved = move_aside_corrupt(p)
+        _LOG.warning("설정 파일이 깨져 있다 — 기본값으로 시작한다(원본: %s)", moved or p,
+                     exc_info=True)
+        # 치우지 못했다면 다음 저장이 덮어쓴다 — 어쩔 수 없지만 막을 수도 없다(읽기 전용 폴더면
+        # 저장도 실패한다).
+        _read_failed = None
         return UiPrefs()
+    _read_failed = None
     _cached = (key, deepcopy(data))
     return prefs
 
@@ -211,6 +315,10 @@ def load() -> UiPrefs:
 def save(prefs: UiPrefs) -> None:
     global _cached
     p = _file()
+    if _read_failed == str(p):
+        # 직전 load 가 사용자 파일을 읽지 못했다 — 기본값이 섞인 이 객체로 덮어쓰면 설정을 잃는다.
+        _LOG.warning("설정 파일을 읽지 못한 상태라 저장을 건너뛴다: %s", p)
+        return
     try:
         tmp = p.with_suffix(".tmp")
         tmp.write_text(

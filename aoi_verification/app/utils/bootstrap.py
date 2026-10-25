@@ -117,14 +117,14 @@ def write_deps_marker(root: Path, req_text: Optional[str]) -> None:
 
 
 def pip_install_cmd(python_exe: str, req_file: Path,
-                    upgrade: bool = True) -> List[str]:
+                    upgrade: bool = False) -> List[str]:
     """requirements.txt 를 설치하는 pip 명령(리스트).  회사 SSL 프록시 대비 truststore 는
     앱 런타임에서 처리하므로 여기선 표준 pip 만 쓴다.
 
-    ``upgrade=False`` 는 **빠진 것만 채운다**.  requirements 가 전부 ``>=`` 라
+    기본값 ``upgrade=False`` 는 **빠진 것만 채운다**.  requirements 가 전부 ``>=`` 라
     ``--upgrade`` 를 주면 이미 잘 돌던 무거운 패키지(PyQt6·openvino 등)까지 최신으로
-    끌어올려(대용량 + 회귀 위험) 버린다.  첫 설치(온라인 launcher)는 최신을 받는 게
-    맞으므로 기본값은 유지한다."""
+    끌어올려(대용량 + 회귀 위험) 버린다 — 첫 설치든 변경 후 재설치든 마찬가지다(CLAUDE.md).
+    ``upgrade=True`` 는 명시적으로 줄 때만 쓴다."""
     cmd = [str(python_exe), "-m", "pip", "install"]
     if upgrade:
         cmd.append("--upgrade")
@@ -280,7 +280,7 @@ def bootstrap(root: Path, *,
     req_text = req.read_text(encoding="utf-8") if req.exists() else None
     if req.exists() and not deps_installed(root, req_text):
         log(i18n.KO.BOOT_DEPS_INSTALLING_FIRST)
-        rc = run(pip_install_cmd(py, req))
+        rc = run(pip_install_cmd(py, req, upgrade=False))
         if rc != 0:
             log(i18n.KO.BOOT_DEPS_FAILED_SHORT)
             return 4
