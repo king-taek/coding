@@ -196,7 +196,7 @@ PANEL_MATCH_CANDIDATES = "검증 장비 후보"
 PANEL_MATCH_REF_REVERSE = "검증 사진"
 PANEL_MATCH_CANDIDATES_REVERSE = "기준 장비 후보"
 # 선별·매칭·검토 화면 표제 뒤에 붙는다 — 지금 두 번째 방향이라는 것을 표제가 말한다.
-CROSS_REVERSE_SUFFIX = " · 2단계: 검증 → 기준"
+CROSS_REVERSE_SUFFIX = " · 2차: 검증 → 기준"
 
 # Stage 2 의 '매치 없음' 사진 팝업
 # ★ 이 팝업의 이름에서 '보류' 를 뺐다.  버튼은 오래 "보류된 사진 보기 (n)" 이었지만
@@ -671,6 +671,9 @@ HELP_TOGGLE_TOOLTIP = "설명 보기/숨기기"
 JOURNEY_RAIL_STEPS = ("설정", "후보 선별", "매칭", "매치 검토", "결과")
 # Defect 추출 — 매칭·검토·결과 화면이 없다(사용자 결정: 3단계로 줄이기).
 EXTRACT_JOURNEY_RAIL_STEPS = ("설정", "후보 선별", "저장")
+# 교차검증 — 선별·매칭·검토를 기준→검증(1차), 검증→기준(2차) 두 번 돈다.
+CROSS_JOURNEY_RAIL_STEPS = ("설정", "1차 선별", "1차 매칭", "1차 검토",
+                            "2차 선별", "2차 매칭", "2차 검토", "결과")
 JOURNEY_RAIL_BACK_TOOLTIP_FMT = "{step} 단계로 돌아갑니다 — 이후 결정은 폐기됩니다."
 # 검토 화면에서 설정으로 되돌아갈 때.  선별·매칭은 각 화면이 이미 자기 확인 문구를
 # 갖고 있어 그대로 쓰고, 검토에는 그런 경로가 없었으므로 여기서 묻는다.
@@ -1189,10 +1192,8 @@ EXTRACT_LOT_REMOVE = "이 LOT 빼기"
 EXTRACT_SLOT_BTN_ALL = "슬롯: 전체"
 EXTRACT_SLOT_BTN_FMT = "슬롯 {n}/{total}"
 EXTRACT_SLOT_NEED_FOLDER = "먼저 이 줄의 폴더를 선택하세요."
-# 교차검증(양방향) 스위치 — 매칭 모드의 실행 옵션.  마지막 선택을 기억한다.
+# 교차검증(양방향) 스위치 — 매칭 모드의 실행 옵션.  앱을 켤 때마다 꺼진 채 시작한다.
 CROSS_SWITCH = "교차검증 (양방향)"
-CROSS_SWITCH_DESC = ("기준→검증 검토가 끝나면 검증→기준을 한 번 더 봅니다. "
-                     "이미 짝지은 사진은 다시 나오지 않습니다.")
 # 엑셀 — 검증에만 있는 사진 행의 메모.  기준 쪽 미매칭은 예전 그대로 '미매칭'.
 NOTE_ONLY_VAL = "미매칭 (검증에만 있음)"
 EXTRACT_WAFER_MAP_SWITCH = "Wafer Map 시트 넣기"

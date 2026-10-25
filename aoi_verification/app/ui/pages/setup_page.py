@@ -263,6 +263,7 @@ class SetupPage(QWidget):
     start_requested = pyqtSignal(object)             # SetupInput
     update_check_requested = pyqtSignal()            # '업데이트 확인' 버튼
     extract_mode_changed = pyqtSignal(bool)          # Defect 추출 ↔ 매칭 (레일 단계 이름)
+    cross_mode_changed = pyqtSignal(bool)            # 교차검증 스위치 (레일 단계 이름)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -886,14 +887,10 @@ class SetupPage(QWidget):
         self._map_switch.setVisible(False)
         col.addWidget(self._map_switch)
 
-        # 교차검증(양방향) — 매칭 전용(추출에서는 숨긴다).  마지막 선택을 기억한다.
-        self._cross_switch = SwitchRow(
-            i18n.KO.CROSS_SWITCH,
-            description=i18n.KO.CROSS_SWITCH_DESC,
-            checked=bool(getattr(_prefs_now, "cross_check", False)),
-            parent=card)
-        self._cross_switch.toggled.connect(
-            lambda on: _prefs.patch(cross_check=bool(on)))
+        # 교차검증(양방향) — 매칭 전용(추출에서는 숨긴다).  기억하지 않는다 — 앱을 켤
+        # 때마다 꺼진 채 시작한다(사용자 결정 2026-10-24).
+        self._cross_switch = SwitchRow(i18n.KO.CROSS_SWITCH, checked=False, parent=card)
+        self._cross_switch.toggled.connect(self.cross_mode_changed)
         col.addWidget(self._cross_switch)
 
         # 도움말 본문 — 두 설정을 한 번에 설명한다(기본 접힘).
@@ -963,8 +960,9 @@ class SetupPage(QWidget):
         # 배지와 표기를 일치시킨다 — 같은 값을 200 / 200.0 두 가지로 쓰지 않는다.
         self.coord_tol_spin.setDecimals(0)
         self.coord_tol_spin.setSuffix(" µm")
-        self.coord_tol_spin.setValue(getattr(_prefs_now, "coord_tolerance",
-                                     config.DEFAULT_COORD_TOLERANCE))
+        # 앱을 켤 때마다 기본값에서 시작한다 — 지난번 값을 기억하지 않는다(사용자 결정
+        # 2026-10-24: '허용오차 기본값은 200um').
+        self.coord_tol_spin.setValue(config.DEFAULT_COORD_TOLERANCE)
         self.coord_tol_spin.setToolTip(i18n.KO.COORD_TOLERANCE_TOOLTIP)
         # 수치는 모노 — '도면' 컨셉의 핵심인데 이 화면엔 모노가 한 글자도 없었다.
         self.coord_tol_spin.valueChanged.connect(
@@ -1313,6 +1311,10 @@ class SetupPage(QWidget):
 
     def is_extract_mode(self) -> bool:
         return self._extract_mode
+
+    def is_cross_mode(self) -> bool:
+        """교차검증 스위치 — 추출 모드에서는 숨겨지므로 꺼진 것으로 본다."""
+        return not self._extract_mode and self._cross_switch.is_on()
 
     def set_extract_mode(self, on: bool) -> None:
         """Defect 추출 ↔ 매칭 검증.  **같은 화면**에서 한쪽만 받도록 바꾼다(사용자 결정).
@@ -1740,7 +1742,7 @@ class SetupPage(QWidget):
             if r != QMessageBox.StandardButton.Yes:
                 return
 
-        mode = "cross" if self._cross_switch.is_on() else "single"
+        mode = "cross" if self.is_cross_mode() else "single"
         threshold = self.slider.value() / 100.0
         # 타일 키가 곧 AutomationLevel 값 — 분기 없이 읽는다.
         automation = self.auto_group.current_key() or AutomationLevel.USER_SELECT

@@ -1174,6 +1174,17 @@ class UnmatchedReviewDialog(QDialog):
         ))
         self.resolved_refs.append(ref_entry)
         self._used_vals.add(cand_path)
+        # ★ 교차검증에서는 짝이 된 후보도 **반대쪽 미매칭**일 수 있다(기준 r1 ↔ 검증 v1,
+        #   v1 은 '검증에만 있음').  그 항목도 함께 해결로 처리하고, 이번에 쓴 사진은 다른
+        #   항목의 후보에서 뺀다 — 안 그러면 v1 이 매치와 미매칭에 같이 남고, v1 항목에서
+        #   r1 을 다시 골라 같은 쌍이 두 번 생긴다.
+        self._used_vals.add(cur_path)
+        other = "ref" if ref_entry.side == "val" else "val"
+        for e in self._unmatched:
+            if (e.side == other and e.slot == ref_entry.slot
+                    and Path(e.path) == cand_path
+                    and not any(r is e for r in self.resolved_refs)):
+                self.resolved_refs.append(e)
 
     def _finalize_pending(self) -> int:
         """보류 선택을 모두 실제 매칭으로 확정. 확정한 건수를 돌려준다."""
