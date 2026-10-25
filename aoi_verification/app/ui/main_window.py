@@ -34,7 +34,8 @@ from ..models.result import FinalResult, MatchResult, MissEntry, extract_result
 from ..models.slot import (ImageItem, ScanResult, drop_empty_unmatched,
                            merge_unmatched_by_wafer_id,
                            push_one_sided_to_unmatched,
-                           rename_slots_by_wafer_id, scan, scan_lots)
+                           rename_slots_by_wafer_id, scan, scan_lots,
+                           wafer_ids_from_broken_info)
 from ..utils import paths, wafer_id, wakelock
 from ..utils import prefs as _prefs
 from ..utils.prefs import AutomationLevel, EngineMode
@@ -352,6 +353,8 @@ class MainWindow(QMainWindow):
         self._calib_next = None
         self._calib_worker = None
         self._calib_side = None
+        # KLA 정보파일이 비어 있던 폴더 — `_after_slot_resolved` 가 한 번 경고한다.
+        self._kla_broken: list = []
         self._scan_worker: Optional[_FolderScan] = None
         self._stage = ""
         self._scan: Optional[ScanResult] = None
@@ -987,6 +990,23 @@ class MainWindow(QMainWindow):
                 w = kla_info.read_wafer_id(d) if d else None
                 if w:
                     info_val[n] = w
+        # 정보파일이 비어 헤더를 못 읽은 KLA 폴더 — 파일 이름의 WaferID 와 카세트 슬롯
+        # 번호가 **둘 다** 상대 폴더와 맞을 때만 짝짓는다(사용자 결정 2026-10-25).
+        # 둘 다 KLA 면 상대에 `ActiveSlot` 이 없어 이 경로를 쓰지 않는다.
+        self._kla_broken = []
+        if kla_side in ("ref", "val"):
+            kla_is_ref = kla_side == "ref"
+            known = info_ref if kla_is_ref else info_val
+            ids, self._kla_broken = wafer_ids_from_broken_info(
+                {n: dir_of(n, kla_is_ref)
+                 for n in (sr.ref_only if kla_is_ref else sr.val_only)},
+                {n: dir_of(n, not kla_is_ref)
+                 for n in (sr.val_only if kla_is_ref else sr.ref_only)},
+                known)
+            known.update(ids)
+            for n, w, ok in self._kla_broken:
+                _LOG.warning("KLA 정보파일이 비어 있음: %s (이름의 WaferID %s, 슬롯 번호로 짝 %s)",
+                             n, w, "지음" if ok else "못 지음")
         merge_unmatched_by_wafer_id(sr, info_ref, info_val)
 
         # 메타 작성 + 다음 단계 — OCR 결과(있으면)를 반영해 최종 메타를 만든다.
@@ -1278,6 +1298,13 @@ class MainWindow(QMainWindow):
 
     def _after_slot_resolved(self, sr: ScanResult) -> None:
         """slot 매칭 확정 후 — 남은 미매칭은 수동 매핑, 그 다음 썸네일 단계."""
+        broken, self._kla_broken = self._kla_broken, []
+        if broken:
+            # 깨진 .001 에는 결함 좌표도 없다 — 짝을 지었어도 좌표 매칭이 안 되므로 알린다.
+            self._loading.hide_overlay()
+            sheets.warn(self, i18n.KO.APP_TITLE, i18n.KO.KLA_INFO_BROKEN_FMT.format(
+                n=len(broken), k=sum(1 for _n, _w, ok in broken if ok),
+                names=", ".join(f"{n}({w})" for n, w, _ok in broken)))
         # 사진이 한 장도 없는데 짝도 못 찾은 폴더는 손댈 게 없으므로 제외(그냥 넘어감).
         drop_empty_unmatched(sr)
         if sr.ref_only or sr.val_only:

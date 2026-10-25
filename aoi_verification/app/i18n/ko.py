@@ -1286,6 +1286,10 @@ COORD_CAL_PAIR_ROW_FMT = "{i}.  {a}  ↔  {b}      가로 {dx:+.0f} · 세로 {d
 COORD_CAL_RESULT_FMT = "보정값  가로 {dx:+.0f} µm · 세로 {dy:+.0f} µm   ({n}쌍 · 쌍별 남은 오차 최대 {r:.0f} µm)"
 COORD_CAL_RESIDUAL_WARN_FMT = (
     "남은 오차가 큰 쌍이 있어요(최대 {r:.0f} µm). 잘못 고른 쌍이면 지워 주세요.")
+KLA_INFO_BROKEN_FMT = (
+    "KLA 정보파일(.001)이 비어 있는 슬롯이 {n}개 있어요:\n{names}\n\n"
+    "파일 이름의 WaferID 와 슬롯 번호가 상대 장비와 맞는 {k}개는 짝을 지었어요.\n"
+    "이 슬롯들은 KLA 결함 좌표가 없어 좌표 매칭이 되지 않아요. KLA 결과 파일을 확인해 주세요.")
 COORD_CAL_AUTO_FMT = (
     "자동 계산값  가로 {dx:+.0f} µm · 세로 {dy:+.0f} µm   (근거 {n}쌍) — "
     "그대로 '보정 적용' 을 누르거나, 쌍을 골라 직접 정할 수 있어요.")
