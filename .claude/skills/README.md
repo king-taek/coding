@@ -46,5 +46,5 @@
 | `deep-interview/` | 현택님이 올린 zip(`SKILL.md` 1개) — 내용상 oh-my-claudecode 의 `deep-interview` 스킬(고정 커밋 미상) | zip 에 라이선스 파일 없음 | 질문을 하나씩 하며 '모호함 점수'가 기준 아래로 내려갈 때까지 요구사항을 다듬고 스펙을 쓴다 |
 
 - 원본 그대로 복사했다. 스크립트 · 실행 파일은 없고 마크다운 1개뿐이며 바깥 전송 지시도 없었다.
-- 원본은 oh-my-claudecode 플러그인 전제다 — 이어서 부르는 `oh-my-claudecode:plan` · `autopilot` · `ralph` · `team` · `autoresearch` 와 `.omc/` 상태 폴더는 이 저장소에 없다. 인터뷰와 스펙 작성만 쓰고, 실행 단계는 이 저장소의 `writing-plans` · `executing-plans` 로 넘긴다. 스펙 파일(`.omc/specs/`)은 커밋하지 않는다.
+- 원본은 oh-my-claudecode 플러그인 전제다 — 이어서 부르는 `oh-my-claudecode:plan` · `autopilot` · `ralph` · `team` · `autoresearch` 와 `.omc/` 상태 폴더는 이 저장소에 없다. 인터뷰와 스펙 작성만 쓰고, 실행 단계는 이 저장소의 `writing-plans` · `executing-plans` 로 넘긴다. 인터뷰 중에 부르는 `state_write`/`state_read` · `oh-my-claudecode:explore` 도 없어서 대체 방법을 `CLAUDE.md` 에 적었다(원본은 고치지 않음). 스펙 파일(`.omc/specs/`)은 커밋하지 않는다.
 - `interview-me` 와 겹친다: 가벼운 확인은 `interview-me`, 크고 모호한 요구를 점수로 다듬을 때 `deep-interview`.
