@@ -235,6 +235,25 @@ def test_export_puts_val_only_photo_in_val_column(isolated_cache, tmp_path):
     assert "val_only.jpg" in str(ws[f"C{val_row}"].value)
 
 
+def test_export_lists_matched_rows_before_unmatched(isolated_cache, tmp_path):
+    """결과 시트는 매치된 줄이 위, 짝 없는 줄이 아래다 — 슬롯·이름이 앞서도 마찬가지."""
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    pytest.importorskip("PyQt6.QtWidgets")
+    openpyxl = pytest.importorskip("openpyxl")
+    from aoi_verification.app.workers.exporter import ExcelExporter
+
+    res = FinalResult(
+        mode="single", ref_machine="1호기", val_machine="2호기",
+        matches=[MatchResult("S2", tmp_path / "z_ref.jpg", tmp_path / "z_val.jpg", 0.9)],
+        unmatched_refs=[MissEntry("S1", "ref", tmp_path / "a_only.jpg")])
+    ExcelExporter(res, dst_path=tmp_path / "out.xlsx",
+                  template_path=tmp_path / "no_template.xlsx").run()
+    wb = openpyxl.load_workbook(tmp_path / "out.xlsx")
+    ws = wb["out"]                         # 요약 시트 = 결과 파일명
+    first, second = (str(ws[f"C{r}"].value) for r in (3, 4))
+    assert "z_ref.jpg" in first and "a_only.jpg" in second, (first, second)
+
+
 # ---------------------------------------------------------------------------
 # 화면 — 역방향일 때 문구가 '검증 → 기준' 을 말하고, 되돌리면 원래대로
 # ---------------------------------------------------------------------------
