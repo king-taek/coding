@@ -52,11 +52,15 @@
 
 from __future__ import annotations
 
+import logging
 import re
+from functools import lru_cache
 from pathlib import Path
 from typing import NamedTuple, Optional
 
 from .models import DefectCoord
+
+_LOG = logging.getLogger("aoi.coords")
 
 __all__ = ["resolve", "parse_live_name", "LiveName", "lot_key"]
 
@@ -137,10 +141,88 @@ def parse_live_name(stem: str) -> Optional[LiveName]:
                     extra=tuple(nums[2:]))
 
 
+# 화면 번호 시프트 추정 — 후보·채택 조건.  근거: T254 FS UBM(``DisplayColShift=-1``)의
+# LIVE 42장이 전부 LOT 맵 txt 불량 칸의 한 칸 왼쪽이었고(관측), 시프트 없는 4 LOT 223장은
+# 시프트 0 에서 불량 칸에 떨어졌다(관측).  조건은 그 두 표본을 가르는 보수적 선(가정).
+_SHIFTS = tuple((dc, dr) for dc in (-1, 0, 1) for dr in (-1, 0, 1))
+_SHIFT_MIN_SUPPORT = 3        # 채택에 필요한 서로 다른 (웨이퍼, 칸) 수
+_SHIFT_MIN_SHARE = 0.9        # 어느 후보에든 맞은 사진 중 채택 후보가 맞힌 비율 하한
+_SHIFT_MAX_ZERO = 0.1         # 그중 시프트 0 이 맞힌 비율 상한
+_MAX_LOT_TXT = 200            # LOT 폴더에서 보는 맵 txt 상한(엉뚱한 상위 폴더 방어)
+
+
+@lru_cache(maxsize=64)
+def lot_display_shift(lot_folder: Path) -> tuple[int, int]:
+    """LOT 폴더의 LIVE 파일명이 **화면 번호**로 적혔다면 그 시프트 ``(col, row)``, 아니면 ``(0, 0)``.
+
+    Camtek 레시피에 ``DisplayColShift`` 가 있으면 장비는 화면·LIVE 파일명에 실제 die 번호
+    + 시프트를 적는다(:func:`.camtek_ini.display_shift`).  Conder scan 폴더엔 ``Recipe.ini``
+    가 없어 그 값을 못 읽으므로, 같은 폴더의 LOT 맵 txt(실제 die 번호에 불량 bin) 와 대조해
+    **추정**한다: 후보 시프트마다 '파일명 − 시프트' 칸이 불량 bin 인 사진 수를 센다.
+
+    0 이 아닌 값은 아래를 모두 만족할 때만 채택한다(아니면 0 — 지금까지의 동작):
+    서로 다른 (웨이퍼, 칸) 이 :data:`_SHIFT_MIN_SUPPORT` 개 이상, 맞은 사진의
+    :data:`_SHIFT_MIN_SHARE` 이상을 그 후보가 맞힘, 시프트 0 은 :data:`_SHIFT_MAX_ZERO` 이하.
+    ⚠ 맵이 결함을 표시하지 않는 제품(QORVO UBM — 55장 중 0장 일치)은 근거가 없어 0 이다."""
+    from . import wafer_txt
+    hits = {sh: 0 for sh in _SHIFTS}          # 후보별 맞힌 사진 수
+    support = {sh: set() for sh in _SHIFTS}   # 후보별 맞힌 (웨이퍼, 칸)
+    n_photos = 0                              # 어느 후보에든 맞은 사진 수
+    try:
+        txts = sorted(p for p in lot_folder.iterdir()
+                      if p.suffix.lower() == ".txt" and p.is_file())[:_MAX_LOT_TXT]
+    except OSError:
+        return (0, 0)
+    for t in txts:
+        slot = lot_folder / t.stem
+        if not slot.is_dir():
+            continue
+        wt = wafer_txt.load(slot)
+        if wt is None or not wt.bad:
+            continue
+        try:
+            stems = [f.stem for f in slot.iterdir()]
+        except OSError:
+            continue
+        for stem in stems:
+            got = parse_live_name(stem)
+            if got is None:
+                continue
+            any_hit = False
+            for dc, dr in _SHIFTS:
+                cell = (got.col - dc, wt.rows - 1 - (got.row - dr))
+                if cell in wt.bad:
+                    hits[(dc, dr)] += 1
+                    support[(dc, dr)].add((t.stem, cell))
+                    any_hit = True
+            n_photos += any_hit
+    if not n_photos:
+        return (0, 0)
+    best = max(_SHIFTS, key=lambda sh: (hits[sh], sh == (0, 0)))
+    if best == (0, 0):
+        return (0, 0)
+    if (len(support[best]) >= _SHIFT_MIN_SUPPORT
+            and hits[best] >= _SHIFT_MIN_SHARE * n_photos
+            and hits[(0, 0)] <= _SHIFT_MAX_ZERO * n_photos):
+        _LOG.warning("%s 의 LIVE 파일명이 LOT 맵 txt 와 col %+d · row %+d 어긋난다 — "
+                     "레시피 화면 번호 시프트로 보고 실제 die 로 되돌린다(사진 %d/%d장)",
+                     lot_folder, best[0], best[1], hits[best], n_photos)
+        return best
+    _LOG.warning("%s 의 LIVE 파일명이 LOT 맵 txt 불량 칸과 일정하게 맞지 않는다 — "
+                 "시프트를 정하지 못해 파일명 번호를 그대로 쓴다(후보별 사진 수 %s)",
+                 lot_folder, {sh: n for sh, n in hits.items() if n})
+    return (0, 0)
+
+
 def resolve(image_path: Path) -> Optional[DefectCoord]:
-    """LIVE 형식 파일명에서 DefectCoord 추출. 형식이 맞지 않으면 None."""
+    """LIVE 형식 파일명에서 DefectCoord 추출. 형식이 맞지 않으면 None.
+
+    파일명 번호는 장비 **화면 번호**다.  LOT 맵 txt 로 시프트가 확인되면
+    (:func:`lot_display_shift`) ``col/row`` 는 실제 die 로 되돌리고, 화면 번호는
+    ``screen_col/screen_row`` 로 남긴다(Camtek INI 와 같은 규약)."""
     got = parse_live_name(image_path.stem)
     if got is None:
         return None
-    return DefectCoord(col=got.col, row=got.row, x=got.x, y=got.y,
-                       source="camtek_live")
+    sc, sr = lot_display_shift(image_path.parent.parent)
+    return DefectCoord(col=got.col - sc, row=got.row - sr, x=got.x, y=got.y,
+                       source="camtek_live", col_shift=sc, row_shift=sr)

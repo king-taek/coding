@@ -63,7 +63,7 @@ _PHOTOS = {
 
 @pytest.fixture(autouse=True)
 def _clear_caches():
-    for fn in (wm._camtek, wm._kla, wm._lot_extent, wafer_txt.load,
+    for fn in (wm._camtek, wm._kla, wm._lot_extent, wm._lot_txt_cells, wafer_txt.load,
                camtek_ini.load_folder, camtek_ini.load_raw_folder,
                wafer_geometry.camtek_geometry, wafer_geometry.live_geometry):
         fn.cache_clear()
@@ -156,6 +156,27 @@ def test_lot_view_keeps_3_3_at_3_3(tmp_path):
     assert all(wm.cell_of(data.frame, p.x, p.y) in data.frame.die_cells for p in data.points)
 
 
+@pytest.mark.parametrize("dx,dy", [("14.28", "30.99"), ("", "")])
+def test_lot_view_with_a_slot_missing_its_edge_column(tmp_path, monkeypatch, dx, dy):
+    """좌표 전반 점검(2026-10-24) — 한 슬롯 맵만 맨 왼쪽 열이 비어 있어도 LOT 합산의
+    모든 점이 **파일명 (col,row) 칸**에 찍힌다.
+
+    맵에 중심이 없어 die 외곽 가운데를 중심으로 가정하는데, 슬롯마다 자기 외곽을 쓰면
+    그 슬롯만 중심이 반 칸 밀려 (3,3)→(2,3)·(4,7)→(3,7)·(8,0)→(7,0) 으로 찍혔다
+    (합성 — 실물 맵에서 col 0 을 지운 것).  die 칸 포함 여부만 보면 못 잡는다(옆 칸도
+    die 라서) — 칸 번호를 직접 단언한다."""
+    blank0 = "\n".join(" ".join(["___"] + ln.split()[1:])
+                       for ln in _MAPS["GX57007304"].splitlines())
+    monkeypatch.setitem(_MAPS, "GX57007304", blank0)
+    lot = _lot(tmp_path, dx=dx, dy=dy)
+    paths = [p for w in sorted(_PHOTOS) for p in _photos(lot, w)]
+    data = wm.build_map(resolve_batch(paths))
+    assert not data.mixed_frames
+    assert len(data.points) == 7
+    for p in data.points:
+        assert _disp(data.frame, p) == (p.col, p.row), p.path.name
+
+
 def test_xdies_contradicted_by_photos_is_not_used(tmp_path):
     """같은 웨이퍼의 ASSY 맵은 YDIES=27.3815 — 사진 y 30,702 µm 가 넘으므로 안 쓴다."""
     lot = _lot(tmp_path, dx="14.797", dy="27.3815")
@@ -234,6 +255,57 @@ def test_excel_wafer_map_sheet_carries_live_review_note(qt, isolated_cache, tmp_
     ws = load_workbook(str(dst))[i18n.KO.WAFER_MAP_SHEET]
     assert ws["A4"].value == i18n.KO.WAFER_MAP_WARN_LIVE_UNVERIFIED
     assert "A4:C4" in {str(r) for r in ws.merged_cells.ranges}
+
+
+def test_excel_wafer_map_sheet_carries_the_banner_warnings(qt, isolated_cache, tmp_path):
+    """좌표 전반 점검(2026-10-24) — 화면 배너의 경고(칸이 틀렸을 수 있음)가 엑셀에도 간다.
+
+    예전에는 LIVE 당부만 적혀, die 크기 추정·격자 불일치·좌표 없는 사진이 있는 맵도
+    엑셀에서는 멀쩡해 보였다.  LIVE 당부는 표 아래에 한 번만(중복 금지)."""
+    pytest.importorskip("openpyxl")
+    from openpyxl import load_workbook
+
+    from aoi_verification.app import i18n
+    from aoi_verification.app.models.result import FinalResult
+    from aoi_verification.app.ui.widgets.wafer_map_view import render_map_png
+    from aoi_verification.app.workers.exporter import ExcelExporter
+
+    lot = _lot(tmp_path, dx="", dy="")
+    result = FinalResult(mode="single", ref_machine="1", val_machine="2",
+                         slot_images={"S1": (_photos(lot, "GX57004924"), [])})
+    dst = tmp_path / "out.xlsx"
+    ExcelExporter(result, dst_path=dst, template_path=tmp_path / "none.xlsx",
+                  map_renderer=render_map_png).run()
+    ws = load_workbook(str(dst))[i18n.KO.WAFER_MAP_SHEET]
+    assert ws["D1"].value == i18n.KO.WAFER_MAP_SHEET_COL_WARN
+    assert i18n.KO.WAFER_MAP_WARN_PITCH_ASSUMED in ws["D2"].value
+    assert i18n.KO.WAFER_MAP_WARN_LIVE_UNVERIFIED not in ws["D2"].value
+    assert ws["A4"].value == i18n.KO.WAFER_MAP_WARN_LIVE_UNVERIFIED
+
+
+def test_excel_warns_even_when_no_photo_could_be_placed(qt, isolated_cache, tmp_path):
+    """좌표를 하나도 못 읽은 맵(frame 없음)도 '좌표 없는 사진 N장' 을 엑셀에 남긴다 —
+    빈 칸이면 '사진이 없는 쪽' 과 구분되지 않는다(PR #50 리뷰)."""
+    pytest.importorskip("openpyxl")
+    from openpyxl import load_workbook
+
+    from aoi_verification.app import i18n
+    from aoi_verification.app.models.result import FinalResult
+    from aoi_verification.app.ui.widgets.wafer_map_view import render_map_png
+    from aoi_verification.app.workers.exporter import ExcelExporter
+
+    d = tmp_path / "S1"
+    d.mkdir()
+    photos = [d / "a.jpg", d / "b.jpg"]           # 좌표 원천이 하나도 없는 사진
+    for p in photos:
+        p.write_bytes(b"")
+    result = FinalResult(mode="single", ref_machine="1", val_machine="2",
+                         slot_images={"S1": (photos, [])})
+    dst = tmp_path / "out.xlsx"
+    ExcelExporter(result, dst_path=dst, template_path=tmp_path / "none.xlsx",
+                  map_renderer=render_map_png).run()
+    ws = load_workbook(str(dst))[i18n.KO.WAFER_MAP_SHEET]
+    assert i18n.KO.WAFER_MAP_WARN_UNPLACED_FMT.format(n=2) in (ws["D2"].value or "")
 
 
 def test_non_live_map_has_no_review_warning():

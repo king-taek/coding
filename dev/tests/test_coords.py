@@ -503,3 +503,93 @@ def test_real_pair2_kla_camtek_align(tmp_path, stem):
     c = camtek_ini.load_folder(cam)[stem]
     assert (c.col, c.row) == (k.col, k.row) == (5, 3)
     assert math.hypot(c.x - k.x, c.y - k.y) <= 200
+
+
+@pytest.mark.parametrize("bad", ["X=nan", "X=inf", "Col=inf"])
+def test_one_non_finite_entry_does_not_empty_the_folder(tmp_path, bad):
+    """좌표 전반 점검(2026-10-24) — 항목 하나의 값이 nan/inf 여도 **나머지 항목은 남는다**.
+
+    예전에는 ``floor(nan)``·``int(inf)`` 예외를 ``load_folder`` 의 바깥 except 가 삼켜
+    폴더 전체가 {} 가 됐다(경고도 없이 그 슬롯 사진이 전부 '좌표 없음').  합성 입력."""
+    from aoi_verification.app.coords import camtek_ini
+    good = "[good_1.jpeg]\nX=102450.6\nY=156233.9\nCol=4\nRow=3\n"
+    key, _ = bad.split("=")
+    fields = {"X": "102460.6", "Y": "156240.9", "Col": "4", "Row": "3"}
+    fields[key] = bad.split("=")[1]
+    body = "".join(f"{k}={v}\n" for k, v in fields.items())
+    (tmp_path / "ColorImageGrabingInfo.ini").write_text(
+        good + "[bad_2.jpeg]\n" + body, encoding="utf-8")
+    camtek_ini.load_folder.cache_clear()
+    camtek_ini.load_abs_folder.cache_clear()
+    got = camtek_ini.load_folder(tmp_path)
+    assert "good_1" in got
+    assert "bad_2" not in got
+
+
+def test_clear_caches_picks_up_a_rewritten_or_late_ini(tmp_path):
+    """점검(2026-10-24) — 좌표 캐시 키가 폴더뿐이라, 앱을 켠 채 INI 가 **늦게 생기거나**
+    (첫 읽기가 빈 결과로 캐시) **다시 쓰이면** 앱을 다시 켤 때까지 옛 값을 썼다.
+    검증을 시작할 때 ``coords.clear_caches()`` 를 부르면 새 파일을 읽는다.  합성 입력."""
+    from aoi_verification.app import coords
+    from aoi_verification.app.coords import camtek_ini
+    coords.clear_caches()
+    assert camtek_ini.load_folder(tmp_path) == {}            # 아직 INI 가 없다
+    ini = tmp_path / "ColorImageGrabingInfo.ini"
+    ini.write_text("[a_1.jpeg]\nX=102450.6\nY=156233.9\nCol=4\nRow=3\n", encoding="utf-8")
+    assert camtek_ini.load_folder(tmp_path) == {}            # 캐시가 옛 빈 결과를 낸다
+    coords.clear_caches()
+    first = camtek_ini.load_folder(tmp_path)["a_1"]
+    ini.write_text("[a_1.jpeg]\nX=104450.6\nY=156233.9\nCol=4\nRow=3\n", encoding="utf-8")
+    coords.clear_caches()
+    assert camtek_ini.load_folder(tmp_path)["a_1"].x != first.x
+
+
+def test_scan_start_clears_coordinate_caches():
+    """배선 가드 — 검증 시작 경로가 ``coords.clear_caches()`` 를 부른다."""
+    src = (Path(__file__).resolve().parents[2] / "aoi_verification" / "app" / "ui"
+           / "main_window.py").read_text(encoding="utf-8")
+    i = src.index("_cache.reset_mtime_cache()")
+    assert "_coords.clear_caches()" in src[i:i + 300]
+
+
+def test_truncated_kla_info_file_warns_and_keeps_what_it_read(tmp_path, caplog):
+    """좌표 전반 점검(2026-10-24, 관측) — LSU TB500 RDL4 44장 중 2장의 ``.001`` 이 결함 행
+    중간에서 끊겨 뒤쪽 사진 58장이 좌표 없이 조용히 빠졌다.  읽은 결함은 그대로 쓰고,
+    끊겼다는 사실은 경고로 남긴다(정상 파일은 경고 없음)."""
+    import logging
+    from aoi_verification.app.coords import kla_info
+    kla, _cam = _make_rdl1_folders(tmp_path)
+    with caplog.at_level(logging.WARNING, logger="aoi.coords"):
+        assert "frontsideadrimg_572445" in kla_info.load_folder(kla)
+    assert "EndOfFile" not in caplog.text
+    cut = _RDL1_KLA_HEAD.replace("EndOfFile;\n", "TiffFileName FrontSideADRImg_9.jpg;\n"
+                                 "DefectList\n 15 1.0 2.0 3.0")
+    (kla / "W6458244XYE1.001").write_text(cut, encoding="utf-8")
+    kla_info.load_folder.cache_clear()
+    kla_info.load_folder_raw.cache_clear()
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="aoi.coords"):
+        got = kla_info.load_folder(kla)
+    assert "frontsideadrimg_572445" in got and "frontsideadrimg_9" not in got
+    assert "EndOfFile" in caplog.text
+
+
+def test_fused_number_row_is_dropped_not_shifted(tmp_path, caplog):
+    """좌표 전반 점검(2026-10-24, 관측) — LSU ``59295773EWA7.001`` 에 두 수가 붙어 적힌 행
+    ``43 9784.08023366.970 28203.080 3213.973 0 0 9.990 …`` 이 있었다.  예전 정규식은 한 칸씩
+    밀려 YREL=0·XINDEX=0·YINDEX=9('9.990' 의 앞 글자)로 읽어 col/row 를 (3,12) 로 조용히
+    틀리게 냈다.  그 행은 버리고 경고한다(행 문자열은 실물 그대로)."""
+    import logging
+    from aoi_verification.app.coords import kla_info
+    kla, _cam = _make_rdl1_folders(tmp_path)
+    fused = (" 43 9784.08023366.970 28203.080 3213.973 0 0 9.990 13.730 137.150000 13.730 "
+             "23 3 0 0 3 3 0 2373 0 1 1 1 0;\n")
+    text = _RDL1_KLA_HEAD.replace(
+        "EndOfFile;\n", "TiffFileName FrontSideADRImg_43.jpg;\nDefectList\n" + fused
+        + "EndOfFile;\n")
+    (kla / "W6458244XYE1.001").write_text(text, encoding="utf-8")
+    with caplog.at_level(logging.WARNING, logger="aoi.coords"):
+        got = kla_info.load_folder(kla)
+    assert "frontsideadrimg_43" not in got
+    assert "frontsideadrimg_572445" in got           # 정상 행은 그대로
+    assert "형식이 깨져" in caplog.text

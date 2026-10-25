@@ -33,6 +33,8 @@ LIVE 파일명 사진만 든 LOT 에는 ``Params_WaferInfo.ini``·``s_DieLocatio
   ASSY 14.797×27.3815 — 사진 y 최댓값 30,944 µm 가 후자를 넘는다) → 호출부가
   **사진 좌표가 그 안에 다 들어갈 때만** 쓴다.
 * ``REFPX/REFPY`` 의 뜻은 모른다 — 쓰지 않는다.
+* 레시피에 화면 번호 시프트(``DisplayColShift``)가 있으면 파일명은 화면 번호라 이 맵과 한 칸
+  어긋난다(T254 FS UBM, 42장 전부) — :func:`.camtek_live.lot_display_shift` 가 불량 칸 대조로 되돌린다.
 
 순수 파싱(:func:`parse`)은 Qt·파일 없이 헤드리스 테스트한다(``dev/tests/test_wafer_txt.py``).
 """
@@ -72,6 +74,9 @@ class WaferTxt:
     die_x: Optional[float]      # µm — die 크기(간격 아님), 호출부가 사진으로 검증
     die_y: Optional[float]
     fnloc: str
+    # 불량 bin 칸 ``(col, j)`` — 양품 bin(``BCEQU``, 없으면 ``000``)이 아닌 die 칸.
+    # LIVE 파일명이 화면 번호(레시피 시프트)로 적혔는지 가르는 데 쓴다(camtek_live).
+    bad: frozenset = frozenset()
 
 
 def _die_um(head: dict, key: str) -> Optional[float]:
@@ -122,9 +127,12 @@ def parse(text: str, path: Path, wafer: str = "") -> Optional[WaferTxt]:
                       for ci, tok in enumerate(r) if not _EMPTY.match(tok))
     if not cells:
         return None
+    good = head.get("BCEQU", "").strip() or "000"
+    bad = frozenset((ci, j) for j, r in enumerate(grid)
+                    for ci, tok in enumerate(r) if not _EMPTY.match(tok) and tok != good)
     return WaferTxt(path=path, rows=rows, cols=cols, cells=cells,
                     die_x=_die_um(head, "XDIES"), die_y=_die_um(head, "YDIES"),
-                    fnloc=fnloc)
+                    fnloc=fnloc, bad=bad)
 
 
 @lru_cache(maxsize=256)
