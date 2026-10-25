@@ -492,6 +492,66 @@ def camtek_geometry(folder: Path) -> Optional[CamtekGeometry]:
         return None
 
 
+_EXPORT_FILE = "ProductInfo.ini"
+_EXPORT_SECTION = re.compile(r"(?ims)^\s*\[ExportData\]\s*$(.*?)(?=^\s*\[|\Z)")
+_EXPORT_KEYS = ("cMin", "cMax", "rMin", "rMax")
+
+
+def _export_origins(folder: Path, px: float, py: float, dia: float,
+                    cx: Optional[float], cy: Optional[float]) -> Optional[tuple[int, int]]:
+    """``ProductInfo.ini [ExportData] cMin/cMax/rMin/rMax`` 로 ``(col_origin, row_total)``.
+
+    장비가 결과를 내보낼 때 쓰는 **die 번호 격자의 범위**(stage 인덱스)다 —
+    ``col = x_index − cMin``, ``row = rMax − y_index`` 가 장비 화면 번호다.
+
+    실측 근거(2026-10-25, 관측):
+
+    * QORVO W97218SGZ4BK16 (11호기, pitch 919.8, 3장): 장비 화면·Conder LIVE 파일명 55장이
+      전부 ``(x−5, 319−y)`` = ``(cMin, rMax)`` 였다.  중심 유도(2, 326→상한으로 327)·die 맵
+      (6, 317)·3 mm 격자(5, 323) 어느 것도 맞지 않았다.
+    * 그 밖에 이미 맞는 것으로 확인된 웨이퍼 폴더 165개(TB500 RDL4·SGG·KUH · T254 FS UBM·WVU ·
+      TI CCB · AVAGO NELA26)에서 기존 결과와 **전부 같다** — 1차원 유도가 틀리던 AVAGO
+      01C1(맵 3 → 장비 2)·T254 GX57007306(부분 맵) 도 이 값이 장비 번호와 같다.
+
+    ⚠ 자기 폴더의 파일만 믿는다(부모·형제 폴더 것 쓰지 않음).  채택 조건(어긋나면 None —
+    기존 경로로 간다): 네 키가 정수로 다 있고 ``min ≤ max`` · 같은 파일의
+    ``XDieIndex/YDieIndex`` 가 채택한 pitch 와 같다(다른 격자의 번호를 섞지 않게) ·
+    웨이퍼 중심을 알고 범위가 웨이퍼 원의 인덱스 범위 안이다 · die 맵이 있으면 die 가 전부
+    범위 안이다.  관측 171 폴더가 이 조건을 모두 통과했다.  ``_MAX_DIE_INDEX`` 상한은
+    여기 쓰지 않는다 — die 가 작은 제품(QORVO row 319)에서 정당한 값을 버린다."""
+    txt = read_ini_text(folder / _EXPORT_FILE)
+    if not txt:
+        return None
+    sec = _EXPORT_SECTION.search(txt)
+    if sec is None:
+        return None
+    kv = dict(re.findall(r"(?m)^\s*(\w+)\s*=\s*(-?\d+)\s*(?:;.*)?$", sec.group(1)))
+    try:
+        c_min, c_max, r_min, r_max = (int(kv[k]) for k in _EXPORT_KEYS)
+    except (KeyError, ValueError):
+        return None
+    if not (0 <= c_min <= c_max and 0 <= r_min <= r_max):
+        return None
+    xi = _read_key(folder / _EXPORT_FILE, "XDieIndex", _MIN_PITCH, _MAX_PITCH)
+    yi = _read_key(folder / _EXPORT_FILE, "YDieIndex", _MIN_PITCH, _MAX_PITCH)
+    if xi is None or yi is None or abs(xi - px) > 0.01 or abs(yi - py) > 0.01:
+        return None
+    if not cx or not cy:
+        return None
+    r = dia / 2.0
+    if not (math.floor((cx - r) / px) <= c_min and c_max <= math.floor((cx + r) / px)
+            and math.floor((cy - r) / py) <= r_min and r_max <= math.floor((cy + r) / py)):
+        _LOG.warning("%s [ExportData] 범위가 웨이퍼 밖이라 쓰지 않습니다: %s", _EXPORT_FILE, folder)
+        return None
+    cells = die_map_cells(folder, px, py)
+    if cells is not None and not all(c_min <= i <= c_max and r_min <= j <= r_max
+                                     for i, j in cells):
+        _LOG.warning("%s [ExportData] 범위 밖에 die 맵의 die 가 있어 쓰지 않습니다: %s",
+                     _EXPORT_FILE, folder)
+        return None
+    return c_min, r_max
+
+
 def _with_origins(folder: Path, px: float, py: float, src: str) -> CamtekGeometry:
     """채택한 pitch 에 col·row 기준을 붙인다 — :func:`camtek_geometry` 와
     :func:`live_geometry` 가 **같은 규칙**을 쓰게 한 곳에 둔다."""
@@ -501,6 +561,11 @@ def _with_origins(folder: Path, px: float, py: float, src: str) -> CamtekGeometr
     # 찾고(§6-L), 그래도 없으면 각각 상수/옛 식으로 폴백한다(§6-H·§6-J).
     dia = _read_diameter(folder)
     cx, cy = _wafer_center(folder)
+    # ★ 0순위: 장비가 내보낸 격자 범위(ProductInfo.ini [ExportData]) — 장비 화면 번호 그 자체다.
+    exp = _export_origins(folder, px, py, dia, cx, cy)
+    if exp is not None:
+        return CamtekGeometry(pitch_x=px, pitch_y=py, col_origin=exp[0], row_total=exp[1],
+                              source=f"{src}+{_EXPORT_FILE}[ExportData]")
     d_origin = _col_origin(cx, dia, px)
     d_total = _row_total(cy, dia, py)
     cells = lot_die_map_cells(folder, px, py)

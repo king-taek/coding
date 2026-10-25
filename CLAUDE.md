@@ -268,7 +268,12 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   **R1** 경쟁 가설을 하나 이상 세우고 표본이 둘을 구분하는지 계산한다(구분 못 해도 채택은
   가능 — "미구분" 을 코드·문서·요청목록에 적으면 된다). **R3** 모든 수치에 출처 등급
   (`관측`/`파일`/`유도`/`가정`/`합성`)을 붙인다. **R4** 합성값을 골든에 넣지 않는다.
-- **col/row 번호의 기준은 장비가 쓴 die 맵(`s_DieLocation.dat`)이 1순위다**
+- **col/row 번호의 0순위는 장비가 내보낸 번호 격자 `ProductInfo.ini [ExportData]`다**
+  (`wafer_geometry._export_origins`): `col_origin = cMin`, `row_total = rMax`. QORVO(pitch 919.8)는 중심 유도·die 맵·
+  3 mm 격자 모두 틀렸고 이 값만 장비 화면·Conder 55장과 맞았다(관측, 2026-10-25). 이미 맞던 165 웨이퍼에서도 기존 결과와 같다.
+  **자기 폴더 파일만**, 네 키 정수 · `XDieIndex/YDieIndex` = 채택 pitch · 중심을 알고 범위가 웨이퍼 원 안 · die 맵이 범위 안일 때만
+  쓴다 — 하나라도 어긋나면 아래 규칙으로 간다. `_MAX_DIE_INDEX` 상한은 여기 쓰지 않는다(QORVO row 319). 골든: `test_export_grid.py`.
+- **col/row 번호의 기준은 장비가 쓴 die 맵(`s_DieLocation.dat`)이 1순위다(ExportData 가 없을 때)**
   (`wafer_geometry._die_map_origins`): `col_origin = min(x_index)`, `row_total = max(y_index)`.
   중심 유도는 폴백이다 — 실측 74장 중 1장(PGEE48)에서 유도식이 row 를 1 크게 냈고 맵이
   장비 화면과 일치했다(§6-N). 레코드 배치는 장비마다 달라(`RecordSize` 72/128) 옆의
