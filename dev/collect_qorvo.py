@@ -7,8 +7,8 @@ SQ67P(LOT 6H7ENK) 와 짝이 안 맞았다 → 현택님이 준 SQ67P 경로(AOI
   (폴더마다 ``사진목록.txt``).  zip · 30 MB 초과 파일은 뺀다(현택님 지시).
 * 앱이 안 읽는 Camtek 정렬·프레임 데이터(:data:`SKIP_NAMES`)는 빼고, 작은 die 제품에서
   10 MB 씩인 ``s_DieLocation.dat`` 은 폴더(root)마다 :data:`MAP_LIMIT` 장만 담는다.
-* 앱 코드를 불러올 수 있으면 사진별 앱 좌표(``앱좌표.tsv``)와 폴더별 격자(``앱기하.txt``)도
-  넣는다.  못 불러와도 수집은 그대로 된다.
+* 표준 파이썬만 쓴다 — 앱 코드·다른 dev 스크립트를 하나도 불러오지 않는다(현택님 지시).
+  앱 좌표는 저장소에서 원재료로 다시 계산한다.
 """
 
 from __future__ import annotations
@@ -19,8 +19,6 @@ import zipfile
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 FOLDERS = [
     r"\\k5cifsn2\k5tsvdata$\1. Conder Scan\575. QORVO US\44. W97218SGZ4BK16"
@@ -91,49 +89,8 @@ def _add_dir(zf, d: Path, arc: str, log: list[str], maps: Counter) -> list[Path]
     return photos
 
 
-def _app_rows(photos: list[Path]) -> list[str]:
-    """이 PC 의 앱 코드로 계산한 사진별 좌표.  앱을 못 불러오면 빈 목록."""
-    try:
-        from aoi_verification.app.coords import resolve
-    except Exception:
-        return []
-    rows = []
-    for p in photos:
-        try:
-            c = resolve(p)
-        except Exception as exc:
-            rows.append(f"{p.parent.name}\t{p.name}\t오류 {exc}")
-            continue
-        if c is None:
-            rows.append(f"{p.parent.name}\t{p.name}\t좌표없음")
-        else:
-            rows.append(f"{p.parent.name}\t{p.name}\t{c.source}\t{c.col}\t{c.row}"
-                        f"\t{c.x:.3f}\t{c.y:.3f}\t{c.native_x}\t{c.native_y}")
-    return rows
-
-
-def _app_geometry(d: Path) -> str:
-    """폴더의 die 격자 — 앱이 쓰는 값과 중심 유도값·die 맵 값."""
-    try:
-        from aoi_verification.app.coords import wafer_geometry as wg
-        cg = wg.camtek_geometry(d) or wg.live_geometry(d)
-        line = f"{d}\n  camtek: {cg}"
-        if cg is not None:
-            dia = wg._read_diameter(d)
-            cx, cy = wg._wafer_center(d)
-            line += (f"\n  중심 유도: center=({cx}, {cy}) dia={dia} → col_origin="
-                     f"{wg._col_origin(cx, dia, cg.pitch_x)} row_total="
-                     f"{wg._row_total(cy, dia, cg.pitch_y)}"
-                     f"\n  die 맵: {wg._die_map_origins(d, cg.pitch_x, cg.pitch_y)}")
-        return line
-    except Exception as exc:
-        return f"{d}\n  ! 기하 계산 실패: {exc}"
-
-
 def collect(folders: list[Path], dst: Path) -> None:
     log = [f"수집 {datetime.now():%Y-%m-%d %H:%M}", ""]
-    tsv = ["폴더\t사진\tsource\tcol\trow\tx\ty\tnative_x\tnative_y"]
-    geo: list[str] = []
     maps: Counter = Counter()
     size: Counter = Counter()
     with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -153,14 +110,10 @@ def collect(folders: list[Path], dst: Path) -> None:
                 photos = _add_dir(zf, d, arc, log, maps)
                 if photos:
                     log.append(f"  {rel}: 사진 {len(photos)}장")
-                    tsv += _app_rows(photos)
-                    geo.append(_app_geometry(d))
             log.append("")
         for i in zf.infolist():
             size[Path(i.filename).suffix.lower() or "(없음)"] += i.file_size
         zf.writestr("수집_보고.txt", "\n".join(log) + "\n")
-        zf.writestr("앱좌표.tsv", "\n".join(tsv) + "\n")
-        zf.writestr("앱기하.txt", "\n\n".join(geo) + "\n")
         zf.writestr("용량.txt", "\n".join(f"{e}\t{b / 1e6:.1f} MB"
                                           for e, b in size.most_common()) + "\n")
 
