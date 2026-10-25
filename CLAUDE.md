@@ -279,6 +279,10 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   형제 칸은 원 안에 온전한 것만, 중심을 모르면 합치지 않음, Wafer map 도 같은 집합을 그린다),
   ② 웨이퍼 원 안 온전한 칸의 70% 미만만 담긴 맵은 **버린다**(`_covers_wafer` — T254 GX57007306,
   ±1 클램프를 통과해 row 가 1 작았다). 골든: `TestPartialDieMap`·`TestLotDieMap`·`TestLotDieMapGolden`.
+  ③ 중심을 알면 기준은 **2차원 격자**(`_grid_origins` — 가장자리 `_EDGE_EXCLUSION`=3 mm 안쪽 원에
+  네 모서리가 다 드는 die)로 유도하고, 맵은 그보다 **넓을 때만** 넓힌다(맵은 목록이라 빠질 수만
+  있다) — 형제 없이 단독인 AVAGO 01C1 도 장비와 같다. 3 mm 는 실측 10사례가 허용하는 2,925~3,975 µm
+  안의 **가정**이다(가르는 건 소형 die AVAGO 하나). 골든: `TestGridOriginGolden`.
 - **die 인덱스는 좌표에서 유도한다** — `floor(X/DieStep_X)`, `floor(Y/DieStep_Y)`.
   `ColorImageGrabingInfo.ini` 의 `Col`/`Row` 필드를 변환에 쓰지 마라.
   **레시피마다 `Row` 원점이 다를 수 있다**(실측 15호기: 같은 결함을 두 레시피가 찍으면

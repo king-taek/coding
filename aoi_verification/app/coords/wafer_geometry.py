@@ -163,6 +163,46 @@ def _row_total(center_y: Optional[float], diameter: float, pitch_y: float) -> in
     return total
 
 
+# 장비가 die 번호를 매기는 격자 = **웨이퍼 가장자리에서 이만큼 안쪽 원에 온전히 드는 die**.
+# 유도(2026-10-25): 실측 10사례(대형 die 6종 + AVAGO NELA26·PGEE48 · T254 · RDL4 17호기)가
+# 장비 정답과 전부 맞는 값의 범위가 2,925~3,975 µm 이다.  범위를 가르는 건 die 가 작은
+# AVAGO 제품 하나뿐이라(대형 die 는 0~4 mm 어디서나 같은 답) 3 mm 는 **가정**이다 —
+# 업계 표준 edge exclusion 값이고 그 범위 안에 든다.  다른 제품의 실제 설정은 미확인.
+_EDGE_EXCLUSION = 3000.0
+
+
+def _grid_origins(center_x: Optional[float], center_y: Optional[float], diameter: float,
+                  pitch_x: float, pitch_y: float) -> Optional[tuple[int, int]]:
+    """``(col_origin, row_total)`` = 웨이퍼 가장자리 :data:`_EDGE_EXCLUSION` 안쪽 원에
+    **네 모서리가 모두 드는** die 의 첫 열 · 마지막 행.  중심을 모르면 None.
+
+    :func:`_col_origin`·:func:`_row_total` 은 축 위 한 점(원의 좌우·위아래 끝)만 보는
+    1차원 식이라, die 가 작아 원 둘레를 따라 계단이 촘촘한 제품에서 틀린다 — AVAGO
+    NELA26·PGEE48 은 row 기준을 56 으로 냈는데 장비는 55 다(관측).  대형 die 6종은
+    두 식이 같은 값을 낸다(관측, ``TestDerivedPathGolden``).
+
+    die 맵(``s_DieLocation.dat``)은 **그 웨이퍼의 die 목록**이라 가장자리 열이 통째로
+    빠질 수 있지만(AVAGO 25장 중 12장 — 장비 번호는 그래도 빠지지 않은 격자 기준),
+    이 격자는 웨이퍼 한 장의 중심 · 지름 · pitch 만으로 정해져 형제 슬롯이 없어도 된다."""
+    if not center_x or not center_y:
+        return None
+    r = diameter / 2.0 - _EDGE_EXCLUSION
+    if r <= 0:
+        return None
+    i_lo, i_hi = math.floor((center_x - r) / pitch_x), math.ceil((center_x + r) / pitch_x)
+    j_lo, j_hi = math.floor((center_y - r) / pitch_y), math.ceil((center_y + r) / pitch_y)
+    inside = [(i, j) for i in range(i_lo, i_hi + 1) for j in range(j_lo, j_hi + 1)
+              if all(math.hypot(x - center_x, y - center_y) <= r
+                     for x in (i * pitch_x, (i + 1) * pitch_x)
+                     for y in (j * pitch_y, (j + 1) * pitch_y))]
+    if not inside:
+        return None
+    origin, total = min(i for i, _ in inside), max(j for _, j in inside)
+    if not (0 <= origin <= _MAX_DIE_INDEX and 0 <= total <= _MAX_DIE_INDEX):
+        return None
+    return origin, total
+
+
 def _col_origin(center_x: Optional[float], diameter: float, pitch_x: float) -> int:
     """col 번호 기준 = **웨이퍼 안에 온전히 들어오는 첫 die 열**.
 
@@ -462,10 +502,23 @@ def _with_origins(folder: Path, px: float, py: float, src: str) -> CamtekGeometr
     cx, cy = _wafer_center(folder)
     d_origin = _col_origin(cx, dia, px)
     d_total = _row_total(cy, dia, py)
+    # 중심을 알면 2차원 격자(가장자리 3 mm 안쪽 원)로 유도한다 — 1차원 식이 틀리는
+    # 작은 die 제품(AVAGO row 56→55)을 고친다.  대형 die 는 두 식이 같다.
+    grid = _grid_origins(cx, cy, dia, px, py)
+    if grid is not None:
+        if grid != (d_origin, d_total):
+            _LOG.info("2차원 격자 유도 (%d, %d) 를 쓴다(1차원 식은 (%d, %d)): %s",
+                      grid[0], grid[1], d_origin, d_total, folder)
+        d_origin, d_total = grid
     cells = lot_die_map_cells(folder, px, py)
     if cells is not None and _covers_wafer(cells, cx, cy, dia, px, py, folder):
         m_origin = min(i for i, _ in cells)
         m_total = max(j for _, j in cells)
+        if grid is not None:
+            # ★ 맵은 die **목록**이라 가장자리가 빠질 수만 있다(넘칠 수는 없다).  격자보다
+            #   좁으면 격자를 쓰고(AVAGO 01C1 단독: 맵 col 3 · 격자 2 · 장비 2), 넓으면 맵을
+            #   쓴다(가장자리 제외가 3 mm 보다 좁은 제품이면 맵이 맞다).
+            m_origin, m_total = min(m_origin, grid[0]), max(m_total, grid[1])
         # ⚠ 맵은 유도값과 **±1 이내일 때만** 믿는다.  이 파일이 웨이퍼 전체가
         #   아니라 '스캔한 영역'만 담은 스캔이 오면 min/max 가 통째로 좁아져
         #   기준이 조용히 틀어진다 — 실측 74장의 차이는 전부 0 또는 −1 이라

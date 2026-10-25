@@ -380,6 +380,54 @@ _DERIVED_GOLDEN = [
 ]
 
 
+class TestGridOriginGolden:
+    """★ 2차원 격자 유도(가장자리 3 mm 안쪽 원에 온전히 드는 die) — 2026-10-25.
+
+    1차원 식(:func:`_col_origin`·:func:`_row_total`)이 맞던 대형 die 6사례는 그대로
+    맞고, 1차원 식이 틀리던 AVAGO(row 56 → 장비 55)도 맞는다.  die 맵 없이 웨이퍼 한
+    장의 값만 쓰므로 형제 슬롯이 없어도 된다."""
+
+    _REAL = [  # (라벨, 폴더, 장비 col_origin, row_total) — 장비 정답(관측)
+        ("AVAGO PGEE48", "PGEE48-13C5(AOI-11)", 2, 55),
+        ("T254 GX57007306", "GX57007306(T254 부분맵)", 2, 10),
+        ("RDL4 XYA2", "XYA2(RDL4-17호기)", 1, 6),
+    ]
+
+    @pytest.mark.parametrize("label,cx,cy,px,py,co,rt", _DERIVED_GOLDEN,
+                             ids=[g[0] for g in _DERIVED_GOLDEN])
+    def test_large_die_cases_agree_with_the_1d_rule(self, label, cx, cy, px, py, co, rt):
+        assert wg._grid_origins(cx, cy, 300000.0, px, py) == (co, rt)
+
+    @pytest.mark.parametrize("label,folder,co,rt", _REAL, ids=[g[0] for g in _REAL])
+    def test_real_wafers(self, label, folder, co, rt):
+        f = _DIE_MAP_REAL / folder
+        px, py, _ = wg.peek_die_pitch(f)
+        cx, cy = wg._wafer_center(f)
+        assert wg._grid_origins(cx, cy, wg._read_diameter(f), px, py) == (co, rt)
+
+    def test_competing_rules_fail_on_avago(self):
+        """경쟁 가설 배제(회고 R1) — AVAGO(die 4.2 × 5.3 mm)만 셋을 가른다.
+        1차원 식 · 가장자리 제외 없음(0 mm) 은 row 56, 4 mm 는 col·row 가 줄어든다.
+        맞는 범위는 2,925~3,975 µm(유도) — 3 mm 는 그 안의 가정값이다."""
+        cx, cy, px, py = 154281.495, 154732.57, 4160.9, 5294.0
+        assert (wg._col_origin(cx, 300000.0, px), wg._row_total(cy, 300000.0, py)) == (2, 56)
+        old = wg._EDGE_EXCLUSION
+        try:
+            wg._EDGE_EXCLUSION = 0.0
+            assert wg._grid_origins(cx, cy, 300000.0, px, py) == (2, 56)
+            wg._EDGE_EXCLUSION = 2900.0
+            assert wg._grid_origins(cx, cy, 300000.0, px, py) == (2, 56)
+            wg._EDGE_EXCLUSION = 4000.0
+            assert wg._grid_origins(cx, cy, 300000.0, px, py) != (2, 55)
+        finally:
+            wg._EDGE_EXCLUSION = old
+        assert wg._grid_origins(cx, cy, 300000.0, px, py) == (2, 55)
+
+    def test_unknown_center_gives_none(self):
+        assert wg._grid_origins(None, 154732.57, 300000.0, 4160.9, 5294.0) is None
+        assert wg._grid_origins(0.0, 154732.57, 300000.0, 4160.9, 5294.0) is None
+
+
 class TestDerivedPathGolden:
     """★★ 중심 → 원점 유도가 장비 정답을 낸다 (폴백이 아니라 **주경로**)."""
 
@@ -1601,17 +1649,23 @@ class TestLotDieMap:
         c = camtek_ini.load_folder(short)["8406.138140.c.1.1"]
         assert (c.col, c.row) == (0, 29)        # 07F6 의 Conder 정답과 같은 규약
 
-    def test_alone_it_keeps_its_own_map(self, tmp_path):
-        """형제가 없으면 예전 동작 그대로 — 근거 없이 바꾸지 않는다."""
-        geom = self._geom(self._slot(tmp_path, "W01", 3))
-        assert (geom.col_origin, geom.row_total) == (3, 55)
+    def test_alone_the_grid_still_gives_the_equipment_origin(self, tmp_path):
+        """형제가 없어도 장비 기준 (2, 55) — 2차원 격자(가장자리 3 mm 안쪽)가 맵의 빠진
+        열을 메운다(2026-10-25, 현택님 '단독으로 쓰는 경우가 있다').  예전에는 자기 맵의
+        3 을 그대로 써 col 이 1 작았다(이 테스트가 그 동작을 '예전 그대로' 로 못 박았었다)."""
+        short = self._slot(tmp_path, "W01", 3)
+        assert min(i for i, _ in wg.die_map_cells(short, self.PX, self.PY)) == 3
+        geom = self._geom(short)
+        assert (geom.col_origin, geom.row_total) == (2, 55)
 
     def test_does_not_merge_a_slot_on_another_grid(self, tmp_path):
         """웨이퍼 위치(유도 기준)가 다른 슬롯의 맵은 섞지 않는다."""
         self._slot(tmp_path, "W07", 2,
                    center="Center_X=158500.0\nCenter_Y=154732.57\n")   # 유도 col 3
-        geom = self._geom(self._slot(tmp_path, "W01", 3))
-        assert geom.col_origin == 3
+        short = self._slot(tmp_path, "W01", 3)
+        assert (wg.lot_die_map_cells(short, self.PX, self.PY)
+                == wg.die_map_cells(short, self.PX, self.PY))      # 섞지 않았다
+        assert self._geom(short).col_origin == 2                     # 기준은 자기 격자
 
     def _add_cells(self, folder: Path, extra):
         import struct
@@ -1625,8 +1679,9 @@ class TestLotDieMap:
         합집합은 min/max 만 넓히고 ±1 클램프는 유도값(2)과 비교하므로 x_index 1 이 통과했다)."""
         sib = self._slot(tmp_path, "W07", 3)
         self._add_cells(sib, [(1, 28)])                    # 원 밖(왼쪽 가장자리 바깥)
-        geom = self._geom(self._slot(tmp_path, "W01", 3))
-        assert geom.col_origin == 3
+        short = self._slot(tmp_path, "W01", 3)
+        assert (1, 28) not in wg.lot_die_map_cells(short, self.PX, self.PY)
+        assert self._geom(short).col_origin == 2           # 격자 기준 — 1 로 끌려가지 않는다
 
     def test_no_merge_without_a_center(self, tmp_path):
         """중심을 모르면 유도값이 상수라 '같은 격자' 를 가를 수 없다 — 합치지 않는다."""
@@ -1640,8 +1695,10 @@ class TestLotDieMap:
         params = sib / "Params_WaferInfo.ini"
         params.write_text(params.read_text(encoding="utf-8")
                           .replace("Diameter=300000", "Diameter=200000"), encoding="utf-8")
-        geom = self._geom(self._slot(tmp_path, "W01", 3))
-        assert geom.col_origin == 3
+        short = self._slot(tmp_path, "W01", 3)
+        assert (wg.lot_die_map_cells(short, self.PX, self.PY)
+                == wg.die_map_cells(short, self.PX, self.PY))
+        assert self._geom(short).col_origin == 2
 
     def test_wafer_map_draws_the_same_cells_that_set_the_origin(self, tmp_path):
         """기준을 LOT 합집합으로 정했으면 맵도 그 칸을 그린다 — 자기 맵만 그리면 형제 덕에
@@ -1714,12 +1771,26 @@ class TestLotDieMapGolden:
 
     LOT = _DIE_MAP_REAL / "NELA26(AVAGO LOT)"
 
-    def test_alone_the_short_wafer_is_off_by_one(self, tmp_path):
-        """이 테스트가 지키는 것: 합치지 않으면 정말 1 틀린다(수정이 헛돌지 않는다)."""
+    def test_alone_the_short_wafer_matches_every_conder_live_name(self, tmp_path):
+        """★ 01C1 **단독**(형제 없음)도 장비와 같다 — 2026-10-25 현택님 '단독으로 쓰는
+        경우가 있다'.  자기 맵만 보면 col 기준이 3 이라 정말 1 틀린다(첫 단언 — 격자
+        유도가 헛돌지 않는다는 근거).  정답은 Conder LIVE 파일명 20장(관측)."""
         import shutil
+        from aoi_verification.app.coords import camtek_live
         alone = tmp_path / "LOT" / "NELA26-01C1"
         shutil.copytree(self.LOT / "NELA26-01C1", alone)
-        assert wg.camtek_geometry(alone).col_origin == 3
+        geom = wg.camtek_geometry(alone)
+        assert min(i for i, _ in wg.die_map_cells(alone, geom.pitch_x, geom.pitch_y)) == 3
+        assert (geom.col_origin, geom.row_total) == (2, 55)
+        ini = list(camtek_ini.load_folder(alone).values())
+        names = [ln.strip() for ln in (alone / "사진목록_Conder.txt")
+                 .read_text(encoding="utf-8").splitlines()
+                 if ln.strip() and not ln.startswith("#")]
+        assert len(names) == 20
+        for n in names:
+            live = camtek_live.parse_live_name(Path(n).stem)
+            best = min(ini, key=lambda c: (c.x - live.x) ** 2 + (c.y - live.y) ** 2)
+            assert (best.col, best.row) == (live.col, live.row), n
 
     @pytest.mark.parametrize("corrupt", ["offset", "nan"])
     def test_one_broken_sibling_map_does_not_drop_the_lot_to_absolute(
@@ -1748,11 +1819,12 @@ class TestLotDieMapGolden:
         with caplog.at_level(logging.WARNING, logger="aoi.coords"):
             good = wg.camtek_geometry(lot / "NELA26-01C1")
             broken = wg.camtek_geometry(bad)
-        # 01C1 은 자기 맵으로(형제 없이 혼자일 때와 같은 값 — 경고가 남는다).
+        # 01C1 은 자기 맵 + 격자로 장비 기준 (2, 55).
         assert good is not None and wg._DIE_MAP_FILE in good.source
-        assert good.col_origin == 3
-        # 깨진 슬롯은 die 맵이 없는 폴더와 같은 중심 유도 경로로 간다(None 이 아니다).
+        assert (good.col_origin, good.row_total) == (2, 55)
+        # 깨진 슬롯은 die 맵 없이 격자 유도로 간다 — 그래도 장비 기준과 같다(1차원 식은 row 56).
         assert broken is not None and wg._DIE_MAP_FILE not in broken.source
+        assert (broken.col_origin, broken.row_total) == (2, 55)
         assert "die 맵은 쓰지 않습니다" in caplog.text
 
     @pytest.mark.parametrize("wafer, count", [("NELA26-01C1", 20), ("NELA26-07F6", 11)])
