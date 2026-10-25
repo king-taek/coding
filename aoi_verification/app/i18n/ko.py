@@ -159,6 +159,7 @@ SETUP_MACHINE_PLACEHOLDER = "예) 1호기"
 STAGE1_TITLE = "후보 선별"
 STAGE2_TITLE = "매칭 · 유사도 기반"
 STAGE2_TITLE_COORD = "매칭 · 좌표 기반"
+STAGE2_COORD_OFFSET_FMT = "  ·  보정 가로 {dx:+.0f} · 세로 {dy:+.0f} µm"
 RESULT_TITLE = "검증 결과"
 # 결과 요약 — 핵심 수치는 타일로, 나머지는 문장으로.
 RESULT_MACHINES_FMT = "기준 장비: {ref}    검증 장비: {val}"
@@ -196,7 +197,7 @@ PANEL_MATCH_CANDIDATES = "검증 장비 후보"
 PANEL_MATCH_REF_REVERSE = "검증 사진"
 PANEL_MATCH_CANDIDATES_REVERSE = "기준 장비 후보"
 # 선별·매칭·검토 화면 표제 뒤에 붙는다 — 지금 두 번째 방향이라는 것을 표제가 말한다.
-CROSS_REVERSE_SUFFIX = " · 2단계: 검증 → 기준"
+CROSS_REVERSE_SUFFIX = " · 2차: 검증 → 기준"
 
 # Stage 2 의 '매치 없음' 사진 팝업
 # ★ 이 팝업의 이름에서 '보류' 를 뺐다.  버튼은 오래 "보류된 사진 보기 (n)" 이었지만
@@ -671,6 +672,9 @@ HELP_TOGGLE_TOOLTIP = "설명 보기/숨기기"
 JOURNEY_RAIL_STEPS = ("설정", "후보 선별", "매칭", "매치 검토", "결과")
 # Defect 추출 — 매칭·검토·결과 화면이 없다(사용자 결정: 3단계로 줄이기).
 EXTRACT_JOURNEY_RAIL_STEPS = ("설정", "후보 선별", "저장")
+# 교차검증 — 선별·매칭·검토를 기준→검증(1차), 검증→기준(2차) 두 번 돈다.
+CROSS_JOURNEY_RAIL_STEPS = ("설정", "1차 선별", "1차 매칭", "1차 검토",
+                            "2차 선별", "2차 매칭", "2차 검토", "결과")
 JOURNEY_RAIL_BACK_TOOLTIP_FMT = "{step} 단계로 돌아갑니다 — 이후 결정은 폐기됩니다."
 # 검토 화면에서 설정으로 되돌아갈 때.  선별·매칭은 각 화면이 이미 자기 확인 문구를
 # 갖고 있어 그대로 쓰고, 검토에는 그런 경로가 없었으므로 여기서 묻는다.
@@ -1190,10 +1194,8 @@ EXTRACT_LOT_REMOVE = "이 LOT 빼기"
 EXTRACT_SLOT_BTN_ALL = "슬롯: 전체"
 EXTRACT_SLOT_BTN_FMT = "슬롯 {n}/{total}"
 EXTRACT_SLOT_NEED_FOLDER = "먼저 이 줄의 폴더를 선택하세요."
-# 교차검증(양방향) 스위치 — 매칭 모드의 실행 옵션.  마지막 선택을 기억한다.
+# 교차검증(양방향) 스위치 — 매칭 모드의 실행 옵션.  앱을 켤 때마다 꺼진 채 시작한다.
 CROSS_SWITCH = "교차검증 (양방향)"
-CROSS_SWITCH_DESC = ("기준→검증 검토가 끝나면 검증→기준을 한 번 더 봅니다. "
-                     "이미 짝지은 사진은 다시 나오지 않습니다.")
 # 엑셀 — 검증에만 있는 사진 행의 메모.  기준 쪽 미매칭은 예전 그대로 '미매칭'.
 NOTE_ONLY_VAL = "미매칭 (검증에만 있음)"
 EXTRACT_WAFER_MAP_SWITCH = "Wafer Map 시트 넣기"
@@ -1285,6 +1287,10 @@ COORD_CAL_PAIR_ROW_FMT = "{i}.  {a}  ↔  {b}      가로 {dx:+.0f} · 세로 {d
 COORD_CAL_RESULT_FMT = "보정값  가로 {dx:+.0f} µm · 세로 {dy:+.0f} µm   ({n}쌍 · 쌍별 남은 오차 최대 {r:.0f} µm)"
 COORD_CAL_RESIDUAL_WARN_FMT = (
     "남은 오차가 큰 쌍이 있어요(최대 {r:.0f} µm). 잘못 고른 쌍이면 지워 주세요.")
+KLA_INFO_BROKEN_FMT = (
+    "KLA 정보파일(.001)이 비어 있는 슬롯이 {n}개 있어요:\n{names}\n\n"
+    "파일 이름의 WaferID 와 슬롯 번호가 상대 장비와 맞는 {k}개는 짝을 지었어요.\n"
+    "이 슬롯들은 KLA 결함 좌표가 없어 좌표 매칭이 되지 않아요. KLA 결과 파일을 확인해 주세요.")
 COORD_CAL_AUTO_FMT = (
     "자동 계산값  가로 {dx:+.0f} µm · 세로 {dy:+.0f} µm   (근거 {n}쌍) — "
     "그대로 '보정 적용' 을 누르거나, 쌍을 골라 직접 정할 수 있어요.")

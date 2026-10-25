@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Optional
 
 from .. import config
 
@@ -412,6 +413,44 @@ def push_one_sided_to_unmatched(sr: ScanResult) -> None:
 
 def _norm_key(s) -> str:
     return str(s).strip().upper()
+
+
+def kla_folder_slot_no(name: str) -> Optional[str]:
+    """KLA 실행 폴더명(``2026-09-24-15-51_1``) 끝의 카세트 슬롯 번호.  없으면 None."""
+    import re
+    m = re.search(r"_(\d+)$", str(name))
+    return str(int(m.group(1))) if m else None
+
+
+def wafer_ids_from_broken_info(kla_dirs: dict, other_dirs: dict,
+                               known: dict) -> tuple[dict, list]:
+    """정보파일이 비어 WaferID 를 못 읽은 KLA 폴더를 **이름 + 슬롯 번호**로 짝짓는다.
+
+    ``kla_dirs``/``other_dirs`` 는 {폴더명 → 경로}(짝 없는 쪽만), ``known`` 은 이미 헤더로
+    읽은 {폴더명 → WaferID}.  두 근거가 **모두** 맞을 때만 채택한다(사용자 결정
+    2026-10-25): ① 정보파일 이름의 WaferID 와 같은 이름의 상대(Camtek) 폴더가 있고,
+    ② KLA 폴더명 끝 슬롯 번호 = 그 폴더 ``WaferInfo.ini`` 의 ``ActiveSlot``.
+    반환 ``({KLA폴더명 → WaferID}, [(KLA폴더명, 이름의 WaferID 또는 None, 짝지었나)])`` —
+    두 번째는 정보파일이 깨진 폴더 전부라 화면 경고에 쓴다.  깨진 ``.001`` 에는 결함
+    좌표도 없다 — 짝을 지어도 그 슬롯은 좌표 매칭이 되지 않는다."""
+    from ..coords import kla_info
+    from .lot_info import read_active_slot
+    others = {_norm_key(n): d for n, d in other_dirs.items()}
+    ids: dict = {}
+    broken: list = []
+    for name, d in kla_dirs.items():
+        if name in known or d is None:
+            continue
+        wid = kla_info.wafer_id_from_info_name(d)
+        if wid is None:
+            continue                        # .001 자체가 없음 — KLA 폴더가 아니거나 OCR 대상
+        od = others.get(_norm_key(wid))
+        ok = (od is not None and kla_folder_slot_no(name) is not None
+              and read_active_slot(od) == kla_folder_slot_no(name))
+        if ok:
+            ids[name] = wid
+        broken.append((name, wid, ok))
+    return ids, broken
 
 
 def merge_unmatched_by_wafer_id(sr: ScanResult, wid_by_ref: dict,

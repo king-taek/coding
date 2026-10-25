@@ -371,9 +371,14 @@ class ResultPage(QWidget):
         # 신규 매칭을 결과에 합치고 미매칭 리스트에서 해당 ref 들을 제거.
         self._result.matches.extend(dlg.new_matches)
         resolved_paths = {Path(r.path) for r in dlg.resolved_refs}
+        # ★ 짝을 찾은 사진은 **그 쪽** 미매칭에 남을 수 없다(교차검증은 양쪽에 미매칭이
+        #   있다 — `cross_check.merge` 와 같은 불변식).  창이 반대쪽 항목을 놓쳐도 여기서 막는다.
+        matched = {"ref": {Path(m.ref_path) for m in self._result.matches},
+                   "val": {Path(m.val_path) for m in self._result.matches}}
         self._result.unmatched_refs = [
             u for u in self._result.unmatched_refs
             if Path(u.path) not in resolved_paths
+            and Path(u.path) not in matched.get(u.side, ())
         ]
         # ★ 상위(main_window)에 되돌려 준다 — 검토 화면으로 갔다 재완료하면
         #   새 FinalResult 가 만들어지므로, 여기서 확정한 매치가 사라진다.

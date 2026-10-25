@@ -262,13 +262,14 @@ class ExcelExporter(QThread):
         # 머리 2행 고정·반복 — 채우든 지우든(옵션 off) 상관없이 여기서 한 번.
         self._apply_sheet_view(ws)
 
-        # 매칭/미매칭 통합 정렬 → Slot 오름차순, 그 안에서 기준 파일명 오름차순.
+        # 매치된 줄이 위, 짝 없는 줄이 아래(사용자 요청 2026-10-25).  각 묶음 안에서는
+        # Slot 오름차순, 그 안에서 기준 파일명 오름차순.
         rows_input: list[tuple[str, str, object]] = []
         for m in self._result.matches:
             rows_input.append((m.slot, str(m.ref_path.name).lower(), m))
         for u in self._result.unmatched_refs:
             rows_input.append((u.slot, str(u.path.name).lower(), u))
-        rows_input.sort(key=lambda x: (x[0], x[1]))
+        rows_input.sort(key=lambda x: (isinstance(x[2], MissEntry), x[0], x[1]))
 
         # 진행률 총량 = 이번 저장이 채울 **모든 시트의 행 수 합** (아래 채우는
         # 순서와 같은 순서로 더한다).  시트가 몇 장이든 바는 0 → 100 을 한 번만

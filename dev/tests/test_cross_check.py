@@ -131,6 +131,7 @@ def _window(automation):
                                  extract=False)
     win._scan = _scan()
     win._reviewed_matches = [_m("S1", "/r/1.jpg", "/v/2.jpg")]   # A 확정분
+    win._a_reviewed = True
     win._matches_a = list(win._reviewed_matches)
     win._match_page = SimpleNamespace(review_context=lambda: SimpleNamespace(
         fast_results={("S1", Path("/r/1.jpg")): []},
@@ -234,6 +235,25 @@ def test_export_puts_val_only_photo_in_val_column(isolated_cache, tmp_path):
     assert "val_only.jpg" in str(ws[f"C{val_row}"].value)
 
 
+def test_export_lists_matched_rows_before_unmatched(isolated_cache, tmp_path):
+    """결과 시트는 매치된 줄이 위, 짝 없는 줄이 아래다 — 슬롯·이름이 앞서도 마찬가지."""
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    pytest.importorskip("PyQt6.QtWidgets")
+    openpyxl = pytest.importorskip("openpyxl")
+    from aoi_verification.app.workers.exporter import ExcelExporter
+
+    res = FinalResult(
+        mode="single", ref_machine="1호기", val_machine="2호기",
+        matches=[MatchResult("S2", tmp_path / "z_ref.jpg", tmp_path / "z_val.jpg", 0.9)],
+        unmatched_refs=[MissEntry("S1", "ref", tmp_path / "a_only.jpg")])
+    ExcelExporter(res, dst_path=tmp_path / "out.xlsx",
+                  template_path=tmp_path / "no_template.xlsx").run()
+    wb = openpyxl.load_workbook(tmp_path / "out.xlsx")
+    ws = wb["out"]                         # 요약 시트 = 결과 파일명
+    first, second = (str(ws[f"C{r}"].value) for r in (3, 4))
+    assert "z_ref.jpg" in first and "a_only.jpg" in second, (first, second)
+
+
 # ---------------------------------------------------------------------------
 # 화면 — 역방향일 때 문구가 '검증 → 기준' 을 말하고, 되돌리면 원래대로
 # ---------------------------------------------------------------------------
@@ -261,3 +281,111 @@ def test_pages_label_the_reverse_direction(styled_qapp):
     finally:
         for w in (sel, mat, rev):
             w.deleteLater()
+
+
+# ---------------------------------------------------------------------------
+# 결과 화면 실패 검토 — 짝지은 상대가 반대쪽 미매칭이면 그것도 함께 해결
+# ---------------------------------------------------------------------------
+def test_unmatched_review_resolves_the_counterpart_entry(styled_qapp, monkeypatch):
+    """기준 r1 ↔ 검증 v1 을 짝지으면 v1 의 '검증에만 있음' 항목도 해결이다.
+
+    빼먹으면 v1 이 엑셀에 매치와 '검증에만 있음' 으로 두 번 찍히고, 같은 창에서
+    v1 항목이 r1 을 다시 골라 같은 쌍이 한 번 더 생긴다(점검 쓰레드 지적)."""
+    from aoi_verification.app.ui.widgets import unmatched_review_dialog as ur
+
+    r1, v1 = Path("/tmp/xc_r1.png"), Path("/tmp/xc_v1.png")
+    e_ref = MissEntry("S1", "ref", r1)
+    e_val = MissEntry("S1", "val", v1)
+    pool = {("S1", "ref"): [ImageItem("S1", v1, "val")],
+            ("S1", "val"): [ImageItem("S1", r1, "ref")]}
+    monkeypatch.setattr(ur.UnmatchedReviewDialog, "_lookup_or_compute_score",
+                        lambda self, e, it: 0.5)
+    dlg = ur.UnmatchedReviewDialog(unmatched=[e_ref, e_val], val_pool=pool,
+                                   already_used_vals=set(), parent=None)
+    try:
+        dlg._make_match(e_ref, ImageItem("S1", v1, "val"))
+        assert dlg._entry_resolved(1), "짝이 된 v1 의 '검증에만 있음' 이 남았다"
+        assert r1 in dlg._used_vals, "v1 항목이 r1 을 다시 고를 수 있다(중복 쌍)"
+        assert [(m.ref_path, m.val_path) for m in dlg.new_matches] == [(r1, v1)]
+    finally:
+        dlg.deleteLater()
+
+
+# ---------------------------------------------------------------------------
+# 상단 레일 — 교차검증은 선별·매칭·검토를 1차·2차 두 번 보여 준다(8단계)
+# ---------------------------------------------------------------------------
+def _rail_window(stage):
+    import aoi_verification.app.ui.main_window as MW
+    win = MW.MainWindow.__new__(MW.MainWindow)
+    win._reset_cross_state()
+    win._cross_stage = stage
+    win._input = SimpleNamespace(mode="cross" if stage else "single", extract=False)
+    (win._setup_page, win._select_page, win._match_page,
+     win._match_review_page, win._result_page) = (object() for _ in range(5))
+    return win
+
+
+def test_rail_follows_the_cross_order(styled_qapp):
+    from aoi_verification.app import i18n
+    a, b = _rail_window("A"), _rail_window("B")
+    assert a._rail_labels(a._select_page) == i18n.KO.CROSS_JOURNEY_RAIL_STEPS
+    pages = ("_select_page", "_match_page", "_match_review_page")
+    assert [a._rail_index(getattr(a, p)) for p in pages] == [1, 2, 3]
+    assert [b._rail_index(getattr(b, p)) for p in pages] == [4, 5, 6]
+    assert b._rail_index(b._result_page) == 7
+    labels = i18n.KO.CROSS_JOURNEY_RAIL_STEPS
+    assert labels[4].startswith("2차") and labels[7] == "결과"
+    # 복귀: 결과 → 2차 검토(실제 복귀 경로), 그 밖에는 설정만.
+    assert b._rail_routes(7) == (6,)
+    assert b._rail_routes(4) == (0,) and a._rail_routes(2) == (0,)
+
+
+def test_single_mode_rail_is_unchanged(styled_qapp):
+    from aoi_verification.app import i18n
+    w = _rail_window("")
+    assert w._rail_labels(w._select_page) == i18n.KO.JOURNEY_RAIL_STEPS
+    assert w._rail_index(w._result_page) == 4
+    assert w._rail_routes(4) == (3,)
+
+
+def test_setup_starts_cross_off_and_tolerance_at_default(styled_qapp, monkeypatch):
+    """앱을 켤 때마다 교차검증은 꺼짐, 허용 오차는 200 µm 에서 시작한다(사용자 결정)."""
+    from aoi_verification.app import config
+    from aoi_verification.app.utils import prefs as _prefs
+    saved = _prefs.UiPrefs(coord_tolerance=350.0, prefs_version=_prefs.PREFS_VERSION)
+    monkeypatch.setattr(_prefs, "load", lambda: saved)
+    from aoi_verification.app.ui.pages.setup_page import SetupPage
+    page = SetupPage()
+    try:
+        assert not page.is_cross_mode()
+        assert page.coord_tol_spin.value() == config.DEFAULT_COORD_TOLERANCE == 200.0
+        assert not hasattr(_prefs.UiPrefs(), "cross_check")
+    finally:
+        page.deleteLater()
+
+
+# ---------------------------------------------------------------------------
+# 검토에서 매치를 **전부** '매치 없음' 으로 표시해도 자동 매치가 되살아나지 않는다
+# ---------------------------------------------------------------------------
+def test_review_that_drops_every_match_is_not_treated_as_unreviewed(styled_qapp):
+    """빈 kept 는 '검토 안 함' 이 아니라 '전부 버림' 이다.
+
+    ★ 예전에는 `_reviewed_matches` 가 비면 자동 매치(`_merge_matches`)로 돌아가서,
+      사용자가 지운 짝이 결과에 그대로 나오고 2차 큐에서도 그 검증 사진이 빠졌다."""
+    from aoi_verification.app.utils.prefs import AutomationLevel
+    MW, win = _window(AutomationLevel.USER_SELECT)
+    a_match = win._reviewed_matches[0]
+    win._reviewed_matches = []
+    win._reviewed_unmatched = []
+    win._reviewed_unmatched_keys = set()
+    win._reviewed_all_matches = []
+    win._a_reviewed = False
+    win._merge_matches = lambda: [a_match]              # 자동 매치는 짝이 있다
+    win._match_review_page = SimpleNamespace(
+        unmatched_keys=lambda: {a_match.key}, all_matches=lambda: [a_match])
+    miss = MissEntry("S1", "ref", a_match.ref_path, "x")
+    win._on_match_review_done([], [miss])
+    assert win._a_final_matches() == []
+    # 2차 큐에 사용자가 짝을 지운 검증 사진이 다시 들어간다.
+    queued = [it.path for it in win._select_page.loaded["queue"]]
+    assert a_match.val_path in queued
