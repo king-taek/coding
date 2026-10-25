@@ -290,6 +290,12 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   그 필드는 pitch 검산의 참조값으로만 쓴다 — 검산도 **X 는 등호, Y 는 레시피별 상수**다
   (`wafer_geometry._grid_check`). **X 등호는 완화하지 마라** — 항목이 1건인 폴더에서
   '상수' 는 공허하게 참이 돼 다른 자재에 TB500 상수가 채택된다(→ `docs/규칙_배경.md`).
+- **Camtek 레시피의 화면 번호 시프트(`Recipe.ini [Display] DisplayColShift/RowShift`)는 표시에만 쓴다**
+  (`camtek_ini.display_shift` → `DefectCoord.col_shift/row_shift`, 사용자 결정 2026-10-25).
+  `col`/`row` 는 실제 die — 매칭·Wafer map 위치·KLA·LOT 맵 txt 와 같은 번호다. 장비 화면·LIVE 파일명은
+  시프트를 더한 번호라 사진 정보·엑셀·맵 툴팁만 `screen_col`/`screen_row` 를 쓴다(T254 FS UBM `-1`, 관측).
+  ⚠ LIVE 파일명 자체가 화면 번호라, 시프트가 있는 레시피의 LIVE 이름은 실제 die 와 1 다르다(그 폴더엔
+  Recipe.ini 가 없어 되돌릴 수 없다 — 미해결). row 시프트 실물은 아직 없다(같은 부호는 가정). 골든: `test_display_shift.py`.
 - **LIVE 파일명(`camtek_live`)은 정규식이 아니라 `_` 토큰으로 읽는다.** 배치가 셋이라
   (`x_y_이름` · `이름_x_y` · `이름_x_y_크기_면적`) 정규식으로는 서로 잡아먹는다 —
   실제로 greedy `.+`+`$` 가 **맨 뒤 두 수치(DYSize·DArea)를 x·y 로** 집어 30,212 µm

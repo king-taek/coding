@@ -80,8 +80,8 @@ class MapPoint:
     path: Path
     x: float                    # 평면 µm(중심 기준, +Y 위)
     y: float
-    col: Optional[int]
-    row: Optional[int]
+    col: Optional[int]          # 툴팁 표기용 **장비 화면 번호**(레시피 시프트 적용) —
+    row: Optional[int]          # 점 위치는 x/y 가 정한다(실제 die)
     matched: Optional[bool]     # None = 매칭 정보 없음(셋업 단계)
     # die 안쪽 좌표(µm) — 장비·Conder scan 이 쓰는 표기.  절대좌표 점은 None.
     die_x: Optional[float] = None
@@ -457,8 +457,8 @@ def build_map(coords: dict, matched=None) -> MapData:
         live += coord.source == "camtek_live"
         points.append(MapPoint(
             path=path, x=xy[0], y=xy[1],
-            col=coord.col if die_known else None,
-            row=coord.row if die_known else None,
+            col=coord.screen_col if die_known else None,
+            row=coord.screen_row if die_known else None,
             matched=None if matched is None else (path in matched),
             die_x=coord.x if die_known else None,
             die_y=coord.y if die_known else None,

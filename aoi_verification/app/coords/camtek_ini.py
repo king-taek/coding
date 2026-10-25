@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import math
 import re
+from dataclasses import replace
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional
@@ -73,11 +74,58 @@ def load_folder(folder: Path) -> dict[str, DefectCoord]:
             # ★ pitch 를 몰라도 **매칭은 된다** — INI 의 절대 X/Y 를 그대로 쓰면 된다.
             #   die 로 쪼개는 건 (a) 화면·엑셀의 die-내부 좌표 표기와 (b) KLA 교차 매칭에만
             #   필요하다.  Camtek↔Camtek 은 ref/val 이 같은 규칙이면 그만이다.
-            return _abs_entries(entries)
-        return {stem: _coord_from_raw(raw, geom)
-                for stem, raw, _xy, _recipe in entries if raw is not None}
+            out = _abs_entries(entries)
+        else:
+            out = {stem: _coord_from_raw(raw, geom)
+                   for stem, raw, _xy, _recipe in entries if raw is not None}
+        shift = display_shift(folder)
+        if shift != (0, 0):
+            out = {k: replace(c, col_shift=shift[0], row_shift=shift[1])
+                   for k, c in out.items()}
+        return out
     except Exception:
         return {}
+
+
+_RECIPE_INI = "Recipe.ini"
+_SHIFT_KEYS = ("DisplayColShift", "DisplayRowShift")
+
+
+@lru_cache(maxsize=256)
+def display_shift(folder: Path) -> tuple[int, int]:
+    """``Recipe.ini [Display]`` 의 ``(DisplayColShift, DisplayRowShift)`` — 없으면 ``(0, 0)``.
+
+    장비가 화면에 col/row 를 **이만큼 더해서** 보여 준다.  실측(2026-10-25, T254 FS UBM
+    ``TSC-FS``): ``DisplayColShift=-1`` 인 레시피에서 앱 col 9 인 결함을 장비 화면·LIVE
+    파일명은 8 로 적었고, 같은 칸을 장비 맵에서 확인했다(관측, 42장).  다른 디바이스
+    68장은 전부 0.  ⚠ row 시프트가 0 이 아닌 실물은 아직 없다 — 같은 부호로 더한다는 건
+    col 에서 옮겨 온 **가정**이다.
+
+    매칭·Wafer map 위치에는 쓰지 않는다 — KLA·LOT 맵 txt·시프트 없는 레시피는 실제 die
+    번호를 쓰므로, 시프트를 섞으면 같은 die 가 1 어긋난다.  값은 줄 끝 ``; 주석`` 을 버리고
+    정수로 읽으며, 정수가 아니면 경고하고 0 으로 둔다(화면 표기만 바뀌므로 매칭은 안전)."""
+    p = Path(folder) / _RECIPE_INI
+    text = read_ini_text(p)
+    if text is None:
+        return (0, 0)
+    found = {k: 0 for k in _SHIFT_KEYS}
+    section = ""
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("["):
+            section = line.strip("[]").strip().casefold()
+            continue
+        if section != "display" or "=" not in line:
+            continue
+        key, val = (t.strip() for t in line.split("=", 1))
+        if key not in found:
+            continue
+        val = val.split(";", 1)[0].strip()
+        try:
+            found[key] = int(val)
+        except ValueError:
+            _LOG.warning("%s 의 %s=%r 를 정수로 못 읽어 0 으로 둡니다.", p, key, val)
+    return (found["DisplayColShift"], found["DisplayRowShift"])
 
 
 def _extract_coord(content: str,
