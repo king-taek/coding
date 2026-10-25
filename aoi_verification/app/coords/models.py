@@ -10,9 +10,19 @@ from dataclasses import dataclass
 from typing import Optional
 
 __all__ = ["DefectCoord", "DefectGeometry", "CAMTEK_PITCH_X", "CAMTEK_PITCH_Y",
+           "NUMBER_WARN_NO_GRID", "NUMBER_WARN_NO_TABLE", "NUMBER_WARN_KLA_GUESS",
            "CAMTEK_COL_OFFSET", "DEFAULT_WAFER_DIAMETER",
            "KLA_ZERO_X", "KLA_ZERO_Y",
            "SURFACE_AREA_FACTOR", "SURFACE_LEN_FACTOR"]
+
+
+# col/row 번호가 **틀렸을 수 있는** 이유 — :attr:`DefectCoord.number_warn`.  빈 문자열이면
+# 정상이고 화면·엑셀에 아무 표시도 하지 않는다(사용자 결정 2026-10-25: 문제가 있을 수 있을
+# 때만 경고).  근거: 장비가 번호 기준을 적어 둔 ``ProductInfo.ini [ExportData]`` 를 읽으면
+# 장비 번호와 같았고(관측, 8 LOT), 그 밖의 경로는 웨이퍼 기하에서 유도한 값이다.
+NUMBER_WARN_NO_GRID = "no_grid"      # die 격자를 못 읽어 col 을 상수(CAMTEK_COL_OFFSET)로 계산
+NUMBER_WARN_NO_TABLE = "no_table"    # Camtek 장비 번호표([ExportData])가 없어 웨이퍼 기하로 유도
+NUMBER_WARN_KLA_GUESS = "kla_guess"  # KLA 헤더에 웨이퍼 중심이 없어 원점을 목록·상수로 정함
 
 
 @dataclass(frozen=True)
@@ -33,6 +43,8 @@ class DefectCoord:
     # 화면·엑셀 표기만 :attr:`screen_col`/:attr:`screen_row` 를 쓴다(사용자 결정 2026-10-25).
     col_shift: int = 0
     row_shift: int = 0
+    # 번호가 틀렸을 수 있는 이유(``NUMBER_WARN_*``).  빈 문자열 = 정상(표시 없음).
+    number_warn: str = ""
 
     @property
     def screen_col(self) -> int:

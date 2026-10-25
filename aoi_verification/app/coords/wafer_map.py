@@ -100,6 +100,9 @@ class MapData:
     # LIVE 파일명(`camtek_live`)으로 놓은 점 수 — 그 경로는 아직 검증이 충분하지 않다
     # (사용자 지시: 맵을 볼 때마다 재검토를 당부한다).
     live_points: int = 0
+    # col/row 를 장비 번호표 없이 계산한(틀렸을 수 있는) 점 수 — DefectCoord.number_warn.
+    # 점 위치는 x/y 라 안 틀리고, 툴팁 번호만 틀렸을 수 있다.
+    guessed_points: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -461,6 +464,7 @@ def build_map(coords: dict, matched=None) -> MapData:
     points: list[MapPoint] = []
     unplaced: list[Path] = []
     live = 0
+    guessed = 0
     frame: Optional[WaferFrame] = None
     folder_frames: dict = {}
     for path, coord in coords.items():
@@ -480,6 +484,7 @@ def build_map(coords: dict, matched=None) -> MapData:
         xy = _align_phase(xy, folder_frames[key], frame)
         die_known = coord.source != "camtek_abs"
         live += coord.source == "camtek_live"
+        guessed += bool(coord.number_warn) and die_known
         points.append(MapPoint(
             path=path, x=xy[0], y=xy[1],
             col=coord.screen_col if die_known else None,
@@ -504,7 +509,7 @@ def build_map(coords: dict, matched=None) -> MapData:
         if len(union) > len(frame.die_cells):
             frame = replace(frame, die_cells=frozenset(union))
     return MapData(frame=frame, points=tuple(points), unplaced=tuple(unplaced),
-                   mixed_frames=mixed, live_points=live)
+                   mixed_frames=mixed, live_points=live, guessed_points=guessed)
 
 
 # ---------------------------------------------------------------------------
@@ -515,6 +520,7 @@ WARN_MIXED_FRAMES = "mixed_frames"      # 합친 폴더들의 격자가 서로 �
 WARN_UNPLACED = "unplaced"              # 좌표를 못 놓은 사진이 있다
 WARN_PITCH_ASSUMED = "pitch_assumed"    # die 크기를 사진으로 추정했다(크기·외곽 근사)
 WARN_LIVE_UNVERIFIED = "live_unverified"  # LIVE 파일명으로 그린 맵 — 검증이 아직 충분하지 않다
+WARN_NUMBER_GUESS = "number_guess"      # col/row 를 장비 번호표 없이 계산한 점이 있다(툴팁 번호)
 
 
 def _cell_drawn(frame: WaferFrame, cell: tuple[int, int]) -> bool:
@@ -551,6 +557,8 @@ def map_warnings(data: Optional[MapData]) -> list[tuple[str, int]]:
         out.append((WARN_PITCH_ASSUMED, len(data.points)))
     if data.live_points:
         out.append((WARN_LIVE_UNVERIFIED, data.live_points))
+    if data.guessed_points:
+        out.append((WARN_NUMBER_GUESS, data.guessed_points))
     return out
 
 
@@ -567,6 +575,7 @@ def warning_reasons(data: Optional[MapData], skip: tuple = ()) -> str:
         WARN_UNPLACED: lambda n: i18n.KO.WAFER_MAP_WARN_UNPLACED_FMT.format(n=n),
         WARN_PITCH_ASSUMED: lambda n: i18n.KO.WAFER_MAP_WARN_PITCH_ASSUMED,
         WARN_LIVE_UNVERIFIED: lambda n: i18n.KO.WAFER_MAP_WARN_LIVE_UNVERIFIED,
+        WARN_NUMBER_GUESS: lambda n: i18n.KO.WAFER_MAP_WARN_NUMBER_GUESS_FMT.format(n=n),
     }
     return " · ".join(fmt[code](n) for code, n in map_warnings(data) if code not in skip)
 

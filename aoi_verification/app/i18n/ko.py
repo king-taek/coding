@@ -928,9 +928,15 @@ DEFECT_XY_VALUE_FMT = "{x:.0f} / {y:.0f} ㎛"
 DEFECT_XY_FMT = "x {x:.0f} / y {y:.0f} ㎛"
 DEFECT_KLA_NATIVE_LABEL = "KLA원본 x / y"
 # die pitch 를 못 찾아 die 로 쪼개지 못한 경우(source="camtek_abs") — 있는 사실만 적는다.
-# col 은 pitch 없이도 정확하지만 row 기준·die 내부 좌표는 알 수 없으므로 꾸며내지 않는다.
-DEFECT_COL_ONLY_LABEL = "col"
-DEFECT_COL_ONLY_FMT = "col {col} (row 미상 — die 크기 정보 없음)"
+# col 도 상수 오프셋이라 제품에 따라 틀리므로 숫자 대신 경고를 적는다(사용자 결정 2026-10-25).
+DEFECT_COL_ONLY_LABEL = "col / row"
+DEFECT_COL_UNKNOWN_VALUE = "⚠ 확인 불가"
+DEFECT_COL_UNKNOWN_FMT = "⚠ col / row 확인 불가 — die 격자 정보를 못 읽음 (장비 화면으로 확인)"
+# 번호가 틀렸을 수 있을 때만 붙는 경고 — 정상이면 아무것도 붙이지 않는다(사용자 결정 2026-10-25).
+DEFECT_NUMBER_WARN_LABEL = "⚠ 번호"
+DEFECT_NUMBER_WARN_NO_TABLE = "장비 번호표가 없어 계산한 col / row — 장비 화면으로 확인"
+DEFECT_NUMBER_WARN_KLA_GUESS = "KLA 파일에 웨이퍼 중심이 없어 추정한 col / row — 장비 화면으로 확인"
+DEFECT_NUMBER_WARN_FMT = "⚠ {text}"
 DEFECT_ABS_XY_LABEL = "wafer x / y"
 DEFECT_ABS_XY_FMT = "wafer x {x:.0f} / y {y:.0f} ㎛"
 
@@ -1122,6 +1128,7 @@ WAFER_MAP_WARN_HEAD = "⚠ 이 Wafer map 은 실제와 다르게 그려졌을 �
 WAFER_MAP_WARN_OFF_DIE_FMT = "die 가 없는 칸(또는 웨이퍼 밖)에 찍힌 사진 {n}장"
 WAFER_MAP_WARN_MIXED_FRAMES = "합친 슬롯들의 die 격자가 서로 달라 다른 슬롯 점이 엉뚱한 칸에 찍힐 수 있음"
 WAFER_MAP_WARN_UNPLACED_FMT = "좌표를 읽지 못해 맵에서 빠진 사진 {n}장"
+WAFER_MAP_WARN_NUMBER_GUESS_FMT = "col / row 를 장비 번호표 없이 계산한 사진 {n}장 — 장비 화면으로 확인"
 WAFER_MAP_WARN_PITCH_ASSUMED = "die 크기 정보가 없어 사진으로 추정함 — die 칸은 맞지만 die 크기·웨이퍼 외곽은 근사"
 WAFER_MAP_WARN_LIVE_UNVERIFIED = (
     "LIVE 파일로 만든 맵은 아직 검증이 충분히 이뤄지지 않아 틀린 정보가 있을 수 있습니다 — "

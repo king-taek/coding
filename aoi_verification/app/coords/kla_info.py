@@ -23,8 +23,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
-from .models import DefectCoord
-from .wafer_geometry import kla_geometry
+from .models import NUMBER_WARN_KLA_GUESS, DefectCoord
+from .wafer_geometry import KLA_CENTER_SOURCE, kla_geometry
 from .ini_text import decode_ini_bytes, read_ini_text
 
 _LOG = logging.getLogger("aoi.coords")
@@ -226,6 +226,7 @@ def load_folder(folder: Path) -> dict[str, DefectCoord]:
     if not raw:
         return result
     geom = kla_geometry(folder)
+    warn = "" if geom.source == KLA_CENTER_SOURCE else NUMBER_WARN_KLA_GUESS
     for stem, r in raw.items():
         # XREL="1e400" 같은 inf/nan 은 round() 가 OverflowError/ValueError — 그 행만 건너뛴다.
         if not all(math.isfinite(r[k]) for k in ("xrel", "yrel", "die_pitch_y")):
@@ -239,6 +240,7 @@ def load_folder(folder: Path) -> dict[str, DefectCoord]:
         result[stem] = DefectCoord(
             col=col, row=row, x=float(x), y=float(y), source="kla",
             native_x=float(r["xrel"]), native_y=float(r["yrel"]),
+            number_warn=warn,
         )
     return result
 
