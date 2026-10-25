@@ -181,9 +181,10 @@ def _grid_origins(center_x: Optional[float], center_y: Optional[float], diameter
     NELA26·PGEE48 은 row 기준을 56 으로 냈는데 장비는 55 다(관측).  대형 die 6종은
     두 식이 같은 값을 낸다(관측, ``TestDerivedPathGolden``).
 
-    die 맵(``s_DieLocation.dat``)은 **그 웨이퍼의 die 목록**이라 가장자리 열이 통째로
-    빠질 수 있지만(AVAGO 25장 중 12장 — 장비 번호는 그래도 빠지지 않은 격자 기준),
-    이 격자는 웨이퍼 한 장의 중심 · 지름 · pitch 만으로 정해져 형제 슬롯이 없어도 된다."""
+    지금은 **die 맵이 가장자리를 빠뜨렸는지 가르는 데만** 쓴다(:func:`_with_origins`) —
+    1차원 식과 같은 값일 때만 맵을 넓힌다.  1차원 식을 대신하지 않는다: 대형 die 에서
+    두 식이 갈리는 배치(무작위 배치의 약 16%, 유도)는 실측이 없고, '중심만 들면 센다'
+    (반지름 ≈144 mm) 같은 경쟁 가설도 지금 표본으로는 구분되지 않는다."""
     if not center_x or not center_y:
         return None
     r = diameter / 2.0 - _EDGE_EXCLUSION
@@ -502,23 +503,26 @@ def _with_origins(folder: Path, px: float, py: float, src: str) -> CamtekGeometr
     cx, cy = _wafer_center(folder)
     d_origin = _col_origin(cx, dia, px)
     d_total = _row_total(cy, dia, py)
-    # 중심을 알면 2차원 격자(가장자리 3 mm 안쪽 원)로 유도한다 — 1차원 식이 틀리는
-    # 작은 die 제품(AVAGO row 56→55)을 고친다.  대형 die 는 두 식이 같다.
-    grid = _grid_origins(cx, cy, dia, px, py)
-    if grid is not None:
-        if grid != (d_origin, d_total):
-            _LOG.info("2차원 격자 유도 (%d, %d) 를 쓴다(1차원 식은 (%d, %d)): %s",
-                      grid[0], grid[1], d_origin, d_total, folder)
-        d_origin, d_total = grid
     cells = lot_die_map_cells(folder, px, py)
     if cells is not None and _covers_wafer(cells, cx, cy, dia, px, py, folder):
         m_origin = min(i for i, _ in cells)
         m_total = max(j for _, j in cells)
+        # ★ 맵은 die **목록**이라 가장자리 열·행이 통째로 빠질 수 있다(AVAGO 25장 중 12장,
+        #   장비 번호는 빠지지 않은 격자 기준).  형제가 없으면 합집합으로도 못 메운다.
+        #   **두 유도(1차원 식 · 2차원 격자)가 같은 값으로 맵보다 넓다고 할 때만** 넓힌다 —
+        #   둘이 갈리면 맵을 믿는다(PGEE48 row: 1차원 56 · 격자 55 · 맵 55 = 장비).
+        #   격자 하나만으로 바꾸지 않는 이유: 가장자리 3 mm 는 소형 die 한 제품으로 정한
+        #   가정이고, 대형 die 에서는 '중심만 들면 센다' 같은 경쟁 가설과 구분되지 않는다.
+        grid = _grid_origins(cx, cy, dia, px, py)
         if grid is not None:
-            # ★ 맵은 die **목록**이라 가장자리가 빠질 수만 있다(넘칠 수는 없다).  격자보다
-            #   좁으면 격자를 쓰고(AVAGO 01C1 단독: 맵 col 3 · 격자 2 · 장비 2), 넓으면 맵을
-            #   쓴다(가장자리 제외가 3 mm 보다 좁은 제품이면 맵이 맞다).
-            m_origin, m_total = min(m_origin, grid[0]), max(m_total, grid[1])
+            if grid[0] == d_origin < m_origin:
+                _LOG.warning("die 맵의 첫 열(%d)이 격자보다 좁아 %d 로 넓힙니다(가장자리 열이 "
+                             "목록에서 빠진 웨이퍼): %s", m_origin, d_origin, folder)
+                m_origin = d_origin
+            if grid[1] == d_total > m_total:
+                _LOG.warning("die 맵의 마지막 행(%d)이 격자보다 좁아 %d 로 넓힙니다(가장자리 "
+                             "행이 목록에서 빠진 웨이퍼): %s", m_total, d_total, folder)
+                m_total = d_total
         # ⚠ 맵은 유도값과 **±1 이내일 때만** 믿는다.  이 파일이 웨이퍼 전체가
         #   아니라 '스캔한 영역'만 담은 스캔이 오면 min/max 가 통째로 좁아져
         #   기준이 조용히 틀어진다 — 실측 74장의 차이는 전부 0 또는 −1 이라

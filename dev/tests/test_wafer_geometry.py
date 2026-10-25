@@ -384,8 +384,10 @@ class TestGridOriginGolden:
     """★ 2차원 격자 유도(가장자리 3 mm 안쪽 원에 온전히 드는 die) — 2026-10-25.
 
     1차원 식(:func:`_col_origin`·:func:`_row_total`)이 맞던 대형 die 6사례는 그대로
-    맞고, 1차원 식이 틀리던 AVAGO(row 56 → 장비 55)도 맞는다.  die 맵 없이 웨이퍼 한
-    장의 값만 쓰므로 형제 슬롯이 없어도 된다."""
+    맞고, 1차원 식이 틀리던 AVAGO(row 56 → 장비 55)도 맞는다.  앱은 이 값을 **die 맵이
+    가장자리를 빠뜨렸는지 가르는 데만** 쓴다(두 유도가 같을 때만 맵을 넓힌다).
+    ⚠ 서로 다른 (중심, pitch) 는 약 7개뿐이고, '중심만 반지름 ≈144 mm 안에 들면 센다'
+    는 경쟁 가설도 이 표본을 전부 맞힌다(구분 안 됨, 검토 2026-10-25)."""
 
     _REAL = [  # (라벨, 폴더, 장비 col_origin, row_total) — 장비 정답(관측)
         ("AVAGO PGEE48", "PGEE48-13C5(AOI-11)", 2, 55),
@@ -1822,9 +1824,10 @@ class TestLotDieMapGolden:
         # 01C1 은 자기 맵 + 격자로 장비 기준 (2, 55).
         assert good is not None and wg._DIE_MAP_FILE in good.source
         assert (good.col_origin, good.row_total) == (2, 55)
-        # 깨진 슬롯은 die 맵 없이 격자 유도로 간다 — 그래도 장비 기준과 같다(1차원 식은 row 56).
+        # 깨진 슬롯은 die 맵이 없는 폴더와 같은 1차원 유도로 간다(None 이 아니다).
+        # ⚠ 알려진 한계: 그 식은 이 제품에서 row 56(장비 55)이다 — 경고가 남는다.
         assert broken is not None and wg._DIE_MAP_FILE not in broken.source
-        assert (broken.col_origin, broken.row_total) == (2, 55)
+        assert (broken.col_origin, broken.row_total) == (2, 56)
         assert "die 맵은 쓰지 않습니다" in caplog.text
 
     @pytest.mark.parametrize("wafer, count", [("NELA26-01C1", 20), ("NELA26-07F6", 11)])
