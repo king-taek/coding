@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+import math
+
 from typing import Optional
 
 from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
@@ -103,15 +105,19 @@ class CoordCalibrationDialog(QDialog):
     """``entries`` = :func:`coords.calibration.build_entries` 결과(키는 ``ImageItem``).
 
     ``kla_side`` 는 ``"ref"``/``"val"`` — 어느 쪽이 KLA 인지(부호 규약용).
-    ``hint`` 는 :func:`coords.calibration.guess_offset` — 쌍을 고르기 전 후보 정렬용."""
+    ``hint`` 는 :func:`coords.calibration.guess_offset` — 쌍을 고르기 전 후보 정렬용.
+    ``auto`` 는 :func:`coords.calibration.auto_offset` — 믿을 만하면(:func:`is_confident`)
+    쌍을 고르지 않아도 그 값으로 '보정 적용' 할 수 있다.  고른 쌍이 있으면 쌍이 우선이다."""
 
-    def __init__(self, entries, *, kla_side: str, hint=None,
+    def __init__(self, entries, *, kla_side: str, hint=None, auto=None,
                  tolerance: float = 200.0, parent=None) -> None:
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.setWindowTitle(i18n.KO.COORD_CAL_TITLE)
         self._src_is_kla = kla_side == "ref"
         self._hint0 = hint
+        self._auto = auto if cal.is_confident(auto) else None
+        self._auto_weak = auto if self._auto is None else None
         self._tol = float(tolerance) if tolerance and tolerance > 0 else 200.0
         self._omitted = max(0, len(entries) - MAX_SRC_TILES)
         self._entries = list(entries)[:MAX_SRC_TILES]
@@ -252,7 +258,7 @@ class CoordCalibrationDialog(QDialog):
     # ------------------------------------------------------------------
     def current_offset(self) -> Optional[cal.Offset]:
         if not self._pairs:
-            return None
+            return self._auto.offset if self._auto is not None else None
         return cal.estimate_offset([d for _v, d in self._pairs.values()])
 
     def _hint(self):
@@ -375,16 +381,30 @@ class CoordCalibrationDialog(QDialog):
             if skey in self._src_tiles:
                 self._src_tiles[skey].set_badge(i18n.KO.COORD_CAL_PAIRED_FMT.format(i=i))
         off = self.current_offset()
-        if off is None:
-            self._result.setText("")
-            self._warn.setText("")
+        if not self._pairs:
+            if self._auto is not None:
+                self._result.setText(i18n.KO.COORD_CAL_AUTO_FMT.format(
+                    dx=off[0], dy=off[1], n=self._auto.support))
+            else:
+                self._result.setText("")
+            self._warn.setText("" if self._auto_weak is None else
+                               i18n.KO.COORD_CAL_AUTO_WEAK_FMT.format(
+                                   n=self._auto_weak.support, m=self._auto_weak.runner_up))
         else:
             res = cal.residuals([d for _v, d in self._pairs.values()], off)
             r = max(res) if res else 0.0
             self._result.setText(i18n.KO.COORD_CAL_RESULT_FMT.format(
                 dx=off[0], dy=off[1], n=len(self._pairs), r=r))
-            self._warn.setText(i18n.KO.COORD_CAL_RESIDUAL_WARN_FMT.format(r=r)
-                               if r > self._tol * 0.5 else "")
+            warn = (i18n.KO.COORD_CAL_RESIDUAL_WARN_FMT.format(r=r)
+                    if r > self._tol * 0.5 else "")
+            # 쌍 하나는 남은 오차가 늘 0 이라 위 경고가 안 뜬다 — 믿을 만한 자동값과
+            # 크게 다르면 잘못 고른 쌍일 수 있다고 알린다(적용은 막지 않는다).
+            if not warn and self._auto is not None:
+                ax, ay = self._auto.offset
+                d = math.hypot(off[0] - ax, off[1] - ay)
+                if d > self._tol * 0.5:
+                    warn = i18n.KO.COORD_CAL_AUTO_DIFF_FMT.format(ax=ax, ay=ay, d=d)
+            self._warn.setText(warn)
         self._apply.setEnabled(off is not None)
 
     def _on_apply(self) -> None:
