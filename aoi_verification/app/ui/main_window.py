@@ -171,8 +171,10 @@ class _CalibPrepWorker(QThread):
     """좌표 보정 화면 데이터 준비 — 좌표 읽기(INI/.001 파싱)가 느려 백그라운드에서.
 
     ``groups`` 는 슬롯마다 ``(기준 사진들, 검증 사진들)``.  ``ready`` 로
-    ``(entries, auto)`` 를 낸다(:mod:`coords.calibration`).  실패하면 ``([], None)``
-    — 보정을 건너뛰고 매칭은 그대로 진행한다."""
+    ``(entries, auto, timed_out)`` 를 낸다(:mod:`coords.calibration`).  자동 계산이
+    ``AUTO_TIME_LIMIT_S`` 를 넘기면 그것만 중단(``auto=None``, ``timed_out=True``)하고
+    수동 보정 화면은 그대로 연다.  실패하면 ``([], None, False)`` — 보정을 건너뛰고
+    매칭은 그대로 진행한다."""
 
     progress = pyqtSignal(int, int)
     ready = pyqtSignal(object)
@@ -199,14 +201,21 @@ class _CalibPrepWorker(QThread):
             groups = [([(it, c_of(it)) for it in refs], [(v, c_of(v)) for v in vals])
                       for refs, vals in self._groups]
             # 실행 전체 슬롯으로 한 번 — 웨이퍼 한 장씩이면 결함이 몰린 곳에서 틀린다.
-            auto = cal.auto_offset(
-                [([c for _k, c in s if c], [c for _k, c in o if c]) for s, o in groups],
-                src_is_kla=self._src_is_kla)
+            timed_out = False
+            try:
+                auto = cal.auto_offset(
+                    [([c for _k, c in s if c], [c for _k, c in o if c]) for s, o in groups],
+                    src_is_kla=self._src_is_kla,
+                    deadline=time.monotonic() + cal.AUTO_TIME_LIMIT_S)
+            except cal.AutoOffsetTimeout:
+                auto, timed_out = None, True
+                _LOG.warning("좌표 보정 자동 계산이 %.0f초를 넘겨 중단 — 수동 보정으로 넘김",
+                             cal.AUTO_TIME_LIMIT_S)
             entries = cal.build_entries(groups, src_is_kla=self._src_is_kla)
-            self.ready.emit((entries, auto))
+            self.ready.emit((entries, auto, timed_out))
         except Exception:
             _LOG.exception("좌표 보정 준비 실패 — 보정 없이 진행")
-            self.ready.emit(([], None))
+            self.ready.emit(([], None, False))
 
 class MainWindow(QMainWindow):
 
@@ -1813,7 +1822,7 @@ class MainWindow(QMainWindow):
         self._loading.hide_overlay()
         if self._input is None or self._scan is None:
             return
-        entries, auto = result
+        entries, auto, timed_out = result
         if auto is not None:
             from ..coords import calibration as cal
             _LOG.info("좌표 보정 자동 계산: dx=%.1f dy=%.1f µm (근거 %d표 · 다른 무리 %d표 · "
@@ -1825,6 +1834,7 @@ class MainWindow(QMainWindow):
             from .widgets.coord_calibration_dialog import CoordCalibrationDialog
             dlg = CoordCalibrationDialog(
                 entries, kla_side=self._calib_side, hint=hint, auto=auto,
+                auto_timed_out=timed_out,
                 tolerance=float(getattr(self._input, "coord_tolerance",
                                         config.DEFAULT_COORD_TOLERANCE)),
                 parent=self)

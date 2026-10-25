@@ -106,11 +106,12 @@ class CoordCalibrationDialog(QDialog):
 
     ``kla_side`` 는 ``"ref"``/``"val"`` — 어느 쪽이 KLA 인지(부호 규약용).
     ``hint`` 는 :func:`coords.calibration.guess_offset` — 쌍을 고르기 전 후보 정렬용.
+    ``auto_timed_out`` 이 참이면 자동 계산이 시간 제한으로 중단됐다는 안내를 띄운다.
     ``auto`` 는 :func:`coords.calibration.auto_offset` — 믿을 만하면(:func:`is_confident`)
     쌍을 고르지 않아도 그 값으로 '보정 적용' 할 수 있다.  고른 쌍이 있으면 쌍이 우선이다."""
 
     def __init__(self, entries, *, kla_side: str, hint=None, auto=None,
-                 tolerance: float = 200.0, parent=None) -> None:
+                 auto_timed_out: bool = False, tolerance: float = 200.0, parent=None) -> None:
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.setWindowTitle(i18n.KO.COORD_CAL_TITLE)
@@ -118,6 +119,7 @@ class CoordCalibrationDialog(QDialog):
         self._hint0 = hint
         self._auto = auto if cal.is_confident(auto) else None
         self._auto_weak = auto if self._auto is None else None
+        self._auto_timed_out = auto_timed_out
         self._tol = float(tolerance) if tolerance and tolerance > 0 else 200.0
         self._omitted = max(0, len(entries) - MAX_SRC_TILES)
         self._entries = list(entries)[:MAX_SRC_TILES]
@@ -387,9 +389,12 @@ class CoordCalibrationDialog(QDialog):
                     dx=off[0], dy=off[1], n=self._auto.support))
             else:
                 self._result.setText("")
-            self._warn.setText("" if self._auto_weak is None else
-                               i18n.KO.COORD_CAL_AUTO_WEAK_FMT.format(
-                                   n=self._auto_weak.support, m=self._auto_weak.runner_up))
+            if self._auto_weak is not None:
+                self._warn.setText(i18n.KO.COORD_CAL_AUTO_WEAK_FMT.format(
+                    n=self._auto_weak.support, m=self._auto_weak.runner_up))
+            else:
+                self._warn.setText(i18n.KO.COORD_CAL_AUTO_TIMEOUT_FMT.format(
+                    s=cal.AUTO_TIME_LIMIT_S) if self._auto_timed_out else "")
         else:
             res = cal.residuals([d for _v, d in self._pairs.values()], off)
             r = max(res) if res else 0.0

@@ -323,6 +323,26 @@ def test_dialog_weak_auto_value_still_needs_pairs(styled_qapp, tmp_path):
     dlg.deleteLater()
 
 
+def test_auto_offset_aborts_after_deadline():
+    import time
+    kla, cam = _shifted(30, (87.0, -91.0))
+    with pytest.raises(cal.AutoOffsetTimeout):
+        cal.auto_offset([(kla, cam)], src_is_kla=True, deadline=time.monotonic() - 1.0)
+    # 기한이 넉넉하면 평소와 같다.
+    a = cal.auto_offset([(kla, cam)], src_is_kla=True, deadline=time.monotonic() + 60.0)
+    assert a is not None and cal.is_confident(a)
+
+
+def test_dialog_tells_when_auto_timed_out(styled_qapp, tmp_path):
+    from aoi_verification.app.ui.widgets.coord_calibration_dialog import (
+        CoordCalibrationDialog)
+    entries, _shift = _make_entries(tmp_path)
+    dlg = CoordCalibrationDialog(entries, kla_side="ref", auto=None, auto_timed_out=True)
+    assert "중단" in dlg._warn.text()
+    assert not dlg._apply.isEnabled()                 # 쌍을 고를 때까지 적용 불가
+    dlg.deleteLater()
+
+
 def test_kla_camtek_side_reads_folder_headers(tmp_path):
     """KLA 정보파일이 있는 쪽이 KLA — 양쪽 다/둘 다 아니면 보정하지 않는다."""
     pytest.importorskip("PyQt6.QtWidgets")

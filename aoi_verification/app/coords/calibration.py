@@ -22,6 +22,7 @@ Qt 없이 테스트되는 순수 함수만 둔다(``dev/tests/test_coord_calibra
 from __future__ import annotations
 
 import math
+import time
 from dataclasses import replace
 from statistics import median
 from typing import Dict, Iterable, List, NamedTuple, Optional, Sequence, Tuple
@@ -51,6 +52,7 @@ _VOTE_BIN_UM = 20.0
 _SUPPORT_UM = 30.0          # 추정값 주변 이 거리 안에 표를 던진 결함을 '지지' 로 센다
 MIN_AUTO_SUPPORT = 8        # 지지 결함이 이보다 적으면 자동값을 믿지 않는다
 AUTO_DOMINANCE = 2.0        # 지지 결함이 두 번째 무리의 이 배수를 넘어야 한다
+AUTO_TIME_LIMIT_S = 20.0    # 자동 계산이 이 시간을 넘기면 중단하고 수동 보정으로 넘긴다(사용자 지시)
 
 
 def is_zero(offset: Optional[Offset]) -> bool:
@@ -94,9 +96,19 @@ def _cam_minus_kla(src: DefectCoord, other: DefectCoord, src_is_kla: bool) -> Of
     return pair_offset(src, other) if src_is_kla else pair_offset(other, src)
 
 
+class AutoOffsetTimeout(Exception):
+    """자동 계산이 ``deadline`` 을 넘겨 중단됐다 — 수동 보정으로 넘어간다."""
+
+
+def _check_deadline(deadline: Optional[float]) -> None:
+    if deadline is not None and time.monotonic() > deadline:
+        raise AutoOffsetTimeout
+
+
 def guess_offset(groups: Iterable[Tuple[Sequence[DefectCoord], Sequence[DefectCoord]]],
                  *, src_is_kla: bool,
-                 radius: float = SEARCH_RADIUS_UM) -> Optional[Offset]:
+                 radius: float = SEARCH_RADIUS_UM,
+                 deadline: Optional[float] = None) -> Optional[Offset]:
     """사용자가 아직 쌍을 고르기 전, **가장 많은 쌍이 공유하는 어긋남**을 추정한다.
 
     ``groups`` 는 슬롯마다 ``(기준 좌표들, 검증 좌표들)`` — 매칭처럼 같은 슬롯끼리만
@@ -108,6 +120,7 @@ def guess_offset(groups: Iterable[Tuple[Sequence[DefectCoord], Sequence[DefectCo
     for src, others in groups:
         indexed = list(enumerate(others))
         for s in src:
+            _check_deadline(deadline)
             for _k, c, _d in _neighbors(s, indexed, radius):
                 votes.append(_cam_minus_kla(s, c, src_is_kla))
     if len(votes) < 2:
@@ -137,7 +150,8 @@ class AutoOffset(NamedTuple):
     votes: int          # 전체 표
 
 
-def _votes(groups, *, src_is_kla: bool, radius: float) -> List[Tuple[Offset, int]]:
+def _votes(groups, *, src_is_kla: bool, radius: float,
+           deadline: Optional[float] = None) -> List[Tuple[Offset, int]]:
     """이웃 후보마다 ``(cam − kla, 출발 결함 번호)`` — 한 결함이 이웃 여럿에 표를 던지므로
     근거는 표 수가 아니라 **서로 다른 결함 수**로 센다."""
     out: List[Tuple[Offset, int]] = []
@@ -145,6 +159,7 @@ def _votes(groups, *, src_is_kla: bool, radius: float) -> List[Tuple[Offset, int
     for src, others in groups:
         indexed = list(enumerate(others))
         for s in src:
+            _check_deadline(deadline)
             for _k, c, _d in _neighbors(s, indexed, radius):
                 out.append((_cam_minus_kla(s, c, src_is_kla), n))
             n += 1
@@ -153,7 +168,8 @@ def _votes(groups, *, src_is_kla: bool, radius: float) -> List[Tuple[Offset, int
 
 def auto_offset(groups: Iterable[Tuple[Sequence[DefectCoord], Sequence[DefectCoord]]],
                 *, src_is_kla: bool,
-                radius: float = SEARCH_RADIUS_UM) -> Optional[AutoOffset]:
+                radius: float = SEARCH_RADIUS_UM,
+                deadline: Optional[float] = None) -> Optional[AutoOffset]:
     """매칭할 때마다 **자료에서** 보정값을 추정한다 — 값을 저장하거나 하드코딩하지 않는다.
 
     원인(2026-10-24 분석, ``docs/좌표_KLA_Camtek_오프셋.md``): KLA·Camtek 레시피가 die
@@ -168,10 +184,10 @@ def auto_offset(groups: Iterable[Tuple[Sequence[DefectCoord], Sequence[DefectCoo
     * ``runner_up`` — 그 밖의 표 **전부**(빈 구간 없이)를 ``_SUPPORT_UM`` 칸으로 묶어,
       3×3 칸 안 서로 다른 결함 수가 가장 많은 무리.  칸 단위라 표 수에 비례해 돈다."""
     groups = [(list(s), list(o)) for s, o in groups]
-    guess = guess_offset(groups, src_is_kla=src_is_kla, radius=radius)
+    guess = guess_offset(groups, src_is_kla=src_is_kla, radius=radius, deadline=deadline)
     if guess is None:
         return None
-    votes = _votes(groups, src_is_kla=src_is_kla, radius=radius)
+    votes = _votes(groups, src_is_kla=src_is_kla, radius=radius, deadline=deadline)
     gx, gy = guess
     near_src = set()
     bins: Dict[Tuple[int, int], set] = {}
