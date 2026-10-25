@@ -27,6 +27,22 @@ class DefectCoord:
     # 엑셀에 'Camtek 좌표계 변환값'과 'KLA 자체 좌표값'을 함께 표기하기 위함.
     native_x: Optional[float] = None
     native_y: Optional[float] = None
+    # Camtek 레시피의 화면 번호 시프트(``Recipe.ini [Display] DisplayColShift/RowShift``).
+    # ``col``/``row`` 는 **실제 die**(매칭·Wafer map 위치·KLA·LOT 맵 txt 와 같은 번호)이고,
+    # 장비 화면·LIVE 파일명은 여기에 시프트를 더한 번호를 쓴다(T254 FS UBM, 관측).
+    # 화면·엑셀 표기만 :attr:`screen_col`/:attr:`screen_row` 를 쓴다(사용자 결정 2026-10-25).
+    col_shift: int = 0
+    row_shift: int = 0
+
+    @property
+    def screen_col(self) -> int:
+        """장비 화면에 보이는 col 번호."""
+        return self.col + self.col_shift
+
+    @property
+    def screen_row(self) -> int:
+        """장비 화면에 보이는 row 번호."""
+        return self.row + self.row_shift
 
 
 @dataclass(frozen=True)

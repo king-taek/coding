@@ -122,8 +122,8 @@ def coord_measures(image_path: Path) -> list[Measure]:
             return [
                 Measure(
                     label=i18n.KO.DEFECT_COL_ONLY_LABEL,
-                    value=str(c.col),
-                    line=i18n.KO.DEFECT_COL_ONLY_FMT.format(col=c.col),
+                    value=str(c.screen_col),
+                    line=i18n.KO.DEFECT_COL_ONLY_FMT.format(col=c.screen_col),
                 ),
                 Measure(
                     label=i18n.KO.DEFECT_ABS_XY_LABEL,
@@ -132,10 +132,12 @@ def coord_measures(image_path: Path) -> list[Measure]:
                 ),
             ]
         out = [
+            # 화면 번호(레시피 시프트 적용) — 장비 화면과 같게(사용자 결정 2026-10-25).
             Measure(
                 label=i18n.KO.DEFECT_COLROW_LABEL,
-                value=i18n.KO.DEFECT_COLROW_VALUE_FMT.format(col=c.col, row=c.row),
-                line=i18n.KO.DEFECT_COLROW_FMT.format(col=c.col, row=c.row),
+                value=i18n.KO.DEFECT_COLROW_VALUE_FMT.format(col=c.screen_col,
+                                                            row=c.screen_row),
+                line=i18n.KO.DEFECT_COLROW_FMT.format(col=c.screen_col, row=c.screen_row),
             ),
             Measure(
                 label=i18n.KO.DEFECT_XY_LABEL,
