@@ -130,6 +130,29 @@ def read_wafer_id(folder: Path) -> Optional[str]:
     return read_header_ids(Path(folder))[0]
 
 
+# 정보파일 이름 ``<DEVICE>_<LOT>_<WaferID>.001`` 의 끝 토큰.
+_NAME_WAFER_ID_PAT = re.compile(r'_([A-Za-z0-9]{6,})$')
+
+
+def wafer_id_from_info_name(folder: Path) -> Optional[str]:
+    """정보파일 **이름**에 남은 WaferID — 헤더를 읽지 못할 때(:func:`read_wafer_id` 가 None)만 쓴다.
+
+    실측(2026-10-25, LSU TB500.INT846@6412): 25장 중 5장의 ``.001`` 이 0~1 바이트로 비어
+    헤더가 없었지만 이름(``4DT-TB500-H-M1_TB500.INT846@6412_59295774EWF1.001``)은 남아
+    있었다.  ``.001`` 만 보고, 이름이 서로 다른 ``.001`` 이 둘 이상이면 None 이다.
+    ⚠ 이름은 형식을 검증할 수 없으므로 **단독으로 짝짓지 않는다** — 호출부
+    (`slot.wafer_ids_from_broken_info`)가 카세트 슬롯 번호로 한 번 더 확인한다.
+    사진 파일명 prefix 로 추측하던 방식(되돌림, `docs/규칙_배경.md`)과 다르다."""
+    ids = set()
+    for p in _info_candidates(Path(folder)):
+        if p.suffix.lower() != '.001':
+            continue
+        m = _NAME_WAFER_ID_PAT.search(p.stem)
+        if m:
+            ids.add(m.group(1).upper())
+    return ids.pop() if len(ids) == 1 else None
+
+
 # 예전에는 이 함수 자체가 캐시였다 — 호출부(테스트 픽스처)의 `cache_clear()` 를 그대로 받는다.
 read_wafer_id.cache_clear = read_header_ids.cache_clear
 
