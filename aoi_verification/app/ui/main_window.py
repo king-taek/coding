@@ -1232,6 +1232,9 @@ class MainWindow(QMainWindow):
         # 원본 mtime 메모이즈 초기화 — 이번 세션 동안 캐시 키용 stat() 을 경로당 1회로(#5).
         from ..utils import cache as _cache
         _cache.reset_mtime_cache()
+        # 좌표 파서 캐시도 실행마다 새로 — 앱을 켠 채 장비가 파일을 다시 쓰면 옛 좌표가 남았다.
+        from .. import coords as _coords
+        _coords.clear_caches()
         self._kla_folders: dict[str, str] = {}      # KLA slot명→폴더명(엑셀 회색 표기)
         # KLA 폴더별 판독 메타 — `_kla_resolve_impl` 이 채운다.  안 지우면 KLA 가 아닌 다음
         # 실행에서도 옛 메타가 엑셀·실행 로그에 새어 나간다.

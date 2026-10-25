@@ -1226,3 +1226,32 @@ def test_tooltip_shows_die_internal_xy_like_the_equipment(tmp_path):
     assert (p.die_x, p.die_y) == (80.0, 496.0)
     html = WaferMapView.tooltip_html(p)
     assert f"col {p.col} · row {p.row} · x 80 · y 496" in html
+
+
+def test_lot_merge_keeps_each_slots_cell_when_centers_differ(tmp_path):
+    """LOT 합산: 웨이퍼마다 중심이 조금 다르면(격자 위상 차) 점을 **자기 격자의 칸·die 안쪽
+    위치**로 찍는다 — 첫 슬롯 격자에 평면 좌표를 그대로 찍으면 die 경계 근처 점이 이웃 칸에
+    그려졌다(실측 T254 WVU 6324, 355점 중 18점 · 중심 차 최대 ~160/210 µm).
+
+    중심 차는 **합성**(관측 범위 안의 값) — 골든이 아니라 그리기 계약이다."""
+    X, Y = 4 * PX + 50.0, 3 * PY + 60.0                  # die 경계 50/60 µm 안쪽
+    a = _camtek_folder(tmp_path / "s1", [("a", 150000.0, 210000.0)])
+    b = _camtek_folder(tmp_path / "s2", [("b", X, Y)])
+    params = b / "Params_WaferInfo.ini"                  # s2 만 중심을 옮긴다
+    params.write_text(params.read_text(encoding="utf-8").replace(
+        f"Center_X={CX:.6f}", f"Center_X={CX + 160.0:.6f}").replace(
+        f"Center_Y={CY:.6f}", f"Center_Y={CY - 210.0:.6f}"), encoding="utf-8")
+    coords = resolve_batch([a / "a.jpeg", b / "b.jpeg"])
+    alone = wm.build_map({b / "b.jpeg": coords[b / "b.jpeg"]})
+    merged = wm.build_map(coords)
+    own = next(p for p in alone.points)
+    got = next(p for p in merged.points if p.path.name == "b.jpeg")
+    assert merged.frame.grid_x0 != alone.frame.grid_x0       # 위상이 정말 다르다
+    assert wm.cell_of(merged.frame, got.x, got.y) == wm.cell_of(alone.frame, own.x, own.y)
+    # die 안쪽 위치(칸 왼쪽·아래 경계로부터의 거리)도 그대로
+    mx0, my0, _, _ = wm.cell_bounds(merged.frame, wm.cell_of(merged.frame, got.x, got.y))
+    ax0, ay0, _, _ = wm.cell_bounds(alone.frame, wm.cell_of(alone.frame, own.x, own.y))
+    assert got.x - mx0 == pytest.approx(own.x - ax0, abs=1e-6)
+    assert got.y - my0 == pytest.approx(own.y - ay0, abs=1e-6)
+    assert not merged.mixed_frames
+    assert wm.WARN_MIXED_FRAMES not in [c for c, _ in wm.map_warnings(merged)]

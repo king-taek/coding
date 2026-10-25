@@ -27,6 +27,8 @@ from .models import DefectCoord
 from .wafer_geometry import kla_geometry
 from .ini_text import decode_ini_bytes, read_ini_text
 
+_LOG = logging.getLogger("aoi.coords")
+
 __all__ = ["resolve", "load_folder", "load_folder_raw", "read_wafer_id",
            "read_slot_no", "read_header_ids", "peek_die_pitch"]
 
@@ -42,13 +44,14 @@ _DEFECT_PAT = re.compile(
     r'\s+([\d.eE+\-]+)'    # 3: XREL
     r'\s+([\d.eE+\-]+)'    # 4: YREL
     r'\s+([-\d]+)'         # 5: XINDEX
-    r'\s+([-\d]+)'         # 6: YINDEX
+    r'\s+([-\d]+)(?=[\s;]|$)'  # 6: YINDEX — 뒤가 끊겨야 한다('9.990' 의 '9' 를 잡지 않게)
 )
+
+# 결함 행의 시작(ID + 수) — 형식이 깨진 행을 세는 데만 쓴다.
+_ROW_START = re.compile(r'^\s*\d+\s+-?[\d.]')
 
 # DiePitch X Y; 헤더 라인
 _DIEPITCH_PAT = re.compile(r'DiePitch\s+([\d.eE+\-]+)\s+([\d.eE+\-]+)', re.IGNORECASE)
-
-_LOG = logging.getLogger("aoi.coords")
 
 # TiffFileName 라인 (파일명 추출)
 _TIFF_PAT = re.compile(r'TiffFileName\s+(\S+)', re.IGNORECASE)
@@ -242,6 +245,12 @@ def load_folder(folder: Path) -> dict[str, DefectCoord]:
 
 def _parse_info_raw(path: Path) -> dict[str, dict]:
     text = read_ini_text(path) or ""
+    if text and "endoffile" not in text[-4096:].lower():
+        # 실측(2026-10-24, LSU TB500 RDL4): 44장 중 2장의 .001 이 결함 행 중간에서 끊겨
+        # 있었다 — 뒤쪽 사진 58장은 좌표가 없다.  끊긴 이유는 미확인(장비 기록 중 · 복사).
+        # 읽은 데까지는 쓰되 조용히 넘어가지 않는다.
+        _LOG.warning("KLA 정보파일 %s 이 끝(EndOfFile)까지 기록되지 않았다 — 뒤쪽 결함 "
+                     "사진은 좌표가 없다", path)
     lines = text.splitlines()
 
     # DiePitchY 추출
@@ -255,6 +264,8 @@ def _parse_info_raw(path: Path) -> dict[str, dict]:
 
     if die_pitch_y is None:
         return {}
+
+    bad_rows = 0
 
     result: dict[str, dict] = {}
     current_stem: Optional[str] = None
@@ -270,7 +281,21 @@ def _parse_info_raw(path: Path) -> dict[str, dict]:
         # DefectList 데이터 행
         if current_stem is not None:
             dm = _DEFECT_PAT.match(line)
+            if dm is None and _ROW_START.match(line):
+                bad_rows += 1                 # 결함 행처럼 시작하는데 형식이 안 맞는다
+                current_stem = None
+                continue
             if dm:
+                # 실측(2026-10-24, LSU 59295773EWA7): 두 수가 붙어 적힌 행
+                # ``43 9784.08023366.970 28203.080 …`` 이 한 칸씩 밀려 읽혀 col/row 가
+                # (3,12) 로 조용히 틀렸다.  X/Y 가 수가 아니면 그 행은 쓰지 않는다.
+                # (필드 수로는 못 거른다 — IMAGELIST 가 가변 길이라 정상 행도 머리와 다르다.)
+                try:
+                    float(dm.group(2)), float(dm.group(3))
+                except ValueError:
+                    bad_rows += 1
+                    current_stem = None
+                    continue
                 try:
                     xrel = float(dm.group(4))
                     yrel = float(dm.group(5))
@@ -285,6 +310,9 @@ def _parse_info_raw(path: Path) -> dict[str, dict]:
                 }
                 current_stem = None  # 한 TiffFileName 당 하나의 DefectList 행
 
+    if bad_rows:
+        _LOG.warning("KLA 정보파일 %s 의 결함 행 %d개가 형식이 깨져(수가 아닌 X/Y) 좌표에서 "
+                     "뺐다", path, bad_rows)
     return result
 
 

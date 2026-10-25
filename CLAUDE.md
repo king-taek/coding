@@ -268,7 +268,12 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   **R1** 경쟁 가설을 하나 이상 세우고 표본이 둘을 구분하는지 계산한다(구분 못 해도 채택은
   가능 — "미구분" 을 코드·문서·요청목록에 적으면 된다). **R3** 모든 수치에 출처 등급
   (`관측`/`파일`/`유도`/`가정`/`합성`)을 붙인다. **R4** 합성값을 골든에 넣지 않는다.
-- **col/row 번호의 기준은 장비가 쓴 die 맵(`s_DieLocation.dat`)이 1순위다**
+- **col/row 번호의 0순위는 장비가 내보낸 번호 격자 `ProductInfo.ini [ExportData]`다**
+  (`wafer_geometry._export_origins`): `col_origin = cMin`, `row_total = rMax`. QORVO(pitch 919.8)는 중심 유도·die 맵·
+  3 mm 격자 모두 틀렸고 이 값만 장비 화면·Conder 55장과 맞았다(관측, 2026-10-25). 이미 맞던 165 웨이퍼에서도 기존 결과와 같다.
+  **자기 폴더 파일만**, 네 키 정수 · `XDieIndex/YDieIndex` = 채택 pitch · 중심을 알고 범위가 웨이퍼 원 안 · die 맵이 범위 안일 때만
+  쓴다 — 하나라도 어긋나면 아래 규칙으로 간다. `_MAX_DIE_INDEX` 상한은 여기 쓰지 않는다(QORVO row 319). 골든: `test_export_grid.py`.
+- **col/row 번호의 기준은 장비가 쓴 die 맵(`s_DieLocation.dat`)이 1순위다(ExportData 가 없을 때)**
   (`wafer_geometry._die_map_origins`): `col_origin = min(x_index)`, `row_total = max(y_index)`.
   중심 유도는 폴백이다 — 실측 74장 중 1장(PGEE48)에서 유도식이 row 를 1 크게 냈고 맵이
   장비 화면과 일치했다(§6-N). 레코드 배치는 장비마다 달라(`RecordSize` 72/128) 옆의
@@ -279,6 +284,10 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   형제 칸은 원 안에 온전한 것만, 중심을 모르면 합치지 않음, Wafer map 도 같은 집합을 그린다),
   ② 웨이퍼 원 안 온전한 칸의 70% 미만만 담긴 맵은 **버린다**(`_covers_wafer` — T254 GX57007306,
   ±1 클램프를 통과해 row 가 1 작았다). 골든: `TestPartialDieMap`·`TestLotDieMap`·`TestLotDieMapGolden`.
+  ③ 형제가 없어도 메우게, 맵이 **1차원 유도와 2차원 격자(`_grid_origins`, 가장자리 3 mm 안쪽 원에
+  온전히 드는 die) 둘 다보다 좁고 둘이 같은 값일 때만** 그 값으로 넓힌다(AVAGO 01C1 단독). 격자 하나로
+  1차원 식을 대신하지 마라 — 3 mm 는 소형 die 한 제품으로 정한 **가정**이고 대형 die 에선 경쟁 가설
+  ('중심만 들면 센다')과 구분되지 않는다. 골든: `TestGridOriginGolden`.
 - **die 인덱스는 좌표에서 유도한다** — `floor(X/DieStep_X)`, `floor(Y/DieStep_Y)`.
   `ColorImageGrabingInfo.ini` 의 `Col`/`Row` 필드를 변환에 쓰지 마라.
   **레시피마다 `Row` 원점이 다를 수 있다**(실측 15호기: 같은 결함을 두 레시피가 찍으면
@@ -286,6 +295,15 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   그 필드는 pitch 검산의 참조값으로만 쓴다 — 검산도 **X 는 등호, Y 는 레시피별 상수**다
   (`wafer_geometry._grid_check`). **X 등호는 완화하지 마라** — 항목이 1건인 폴더에서
   '상수' 는 공허하게 참이 돼 다른 자재에 TB500 상수가 채택된다(→ `docs/규칙_배경.md`).
+- **Camtek 레시피의 화면 번호 시프트(`Recipe.ini [Display] DisplayColShift/RowShift`)는 표시에만 쓴다**
+  (`camtek_ini.display_shift` → `DefectCoord.col_shift/row_shift`, 사용자 결정 2026-10-25).
+  `col`/`row` 는 실제 die — 매칭·Wafer map 위치·KLA·LOT 맵 txt 와 같은 번호다. 장비 화면·LIVE 파일명은
+  시프트를 더한 번호라 사진 정보·엑셀·맵 툴팁만 `screen_col`/`screen_row` 를 쓴다(T254 FS UBM `-1`, 관측).
+  LIVE 파일명도 화면 번호다. Conder 폴더엔 Recipe.ini 가 없어 **LOT 맵 txt 불량 칸과 대조해 추정**한다
+  (`camtek_live.lot_display_shift`) — 서로 다른 칸 3개 이상 · 맞은 사진의 90% 이상 · 시프트 0 은 10% 이하일 때만
+  0 이 아닌 값을 채택한다(시프트 없는 4 LOT 278장은 0, FS UBM 42장은 −1). 맵이 결함을 표시하지 않는 제품(QORVO)은
+  근거가 없어 0. 이 조건을 느슨하게 하지 마라 — 틀린 시프트는 모든 사진을 한 칸 옮긴다. row 시프트 실물은 없다(가정).
+  ⚠ 시프트 −1 레시피의 맨 왼쪽 열은 화면 col −1 이라 `parse_live_name` 이 음수로 버린다(미해결). 골든: `test_display_shift.py`.
 - **LIVE 파일명(`camtek_live`)은 정규식이 아니라 `_` 토큰으로 읽는다.** 배치가 셋이라
   (`x_y_이름` · `이름_x_y` · `이름_x_y_크기_면적`) 정규식으로는 서로 잡아먹는다 —
   실제로 greedy `.+`+`$` 가 **맨 뒤 두 수치(DYSize·DArea)를 x·y 로** 집어 30,212 µm

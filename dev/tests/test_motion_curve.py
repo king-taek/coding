@@ -130,17 +130,13 @@ def test_exit_curve_matches_the_documented_table():
         assert 1 - c.valueForProgress(ms / 180) == pytest.approx(expect, abs=0.002)
 
 
-def test_swipe_exit_stays_visible_until_the_next_photo_arrives():
-    """선별 스와이프의 잔상은 다음 사진이 들어오기(180ms) **직전까지** 보여야 한다.
+def test_swipe_exit_stays_visible_until_the_end():
+    """스와이프 퇴장은 가속 곡선이다 — 감속이면 90ms 에 불투명도 0.05 로 절반이 빈 화면.
 
-    감속 곡선이면 90ms 에 불투명도 0.05 — 나머지 절반이 빈 화면이었다."""
-    from aoi_verification.app.ui.pages import select_page as sp
-
+    (선별 화면은 2026-10-25 사용자 요청으로 사진 자리 모션을 없앴다 —
+    `test_select_fast_advance`.  `motion.swipe_out` 자체의 곡선만 지킨다.)"""
     half = 1 - motion.EASE_EXIT.valueForProgress(0.5)
     assert half > 0.5, "퇴장 곡선이 절반 시점에 이미 거의 사라진다"
-    src = inspect.getsource(sp.SelectPage._swipe_out_decided)
-    assert "EASE_PRIMARY" not in src, "퇴장에 감속 곡선을 쓰고 있다"
-    assert src.count("motion.EASE_EXIT") == 2, "이동·페이드 둘 다 가속이어야 한다"
     assert "easing=EASE_EXIT" in inspect.getsource(motion.swipe_out)
 
 

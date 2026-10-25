@@ -1133,6 +1133,7 @@ WAFER_MAP_WARN_LIVE_UNVERIFIED = (
     "LIVE 파일로 만든 맵은 아직 검증이 충분히 이뤄지지 않아 틀린 정보가 있을 수 있습니다 — "
     "중요한 정보는 반드시 장비 화면이나 원본 데이터로 재검토하세요")
 WAFER_MAP_WARN_SIDE_FMT = "{side} — {reasons}"
+WAFER_MAP_SHEET_COL_WARN = "주의(칸이 틀렸을 수 있음)"
 WAFER_MAP_DISCLAIMER = (
     "※ Wafer map 은 파일명·장비 파일로 다시 그린 참고용 그림입니다. "
     "die 위치와 판정은 반드시 장비 화면이나 원본 데이터로 확인하세요."

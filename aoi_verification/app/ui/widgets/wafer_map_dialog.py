@@ -53,9 +53,7 @@ from ... import i18n
 from ...config import CONFIG
 from ...coords import resolve_batch
 from ...coords.wafer_map import (ALL_SLOTS_KEY, MapData, SOURCE_ASSUMED,
-                                 WARN_LIVE_UNVERIFIED, WARN_MIXED_FRAMES, WARN_OFF_DIE,
-                                 WARN_PITCH_ASSUMED,
-                                 WARN_UNPLACED, build_map, map_warnings, slot_maps)
+                                 build_map, slot_maps, warning_reasons)
 from ...models.result import FinalResult
 from ...models.slot import _list_images, list_slot_dirs
 from ...utils import image_io
@@ -481,16 +479,9 @@ class WaferMapDialog(QDialog):
     @staticmethod
     def warning_text(sides: list[tuple[str, Optional[MapData]]]) -> str:
         """경고 배너 문구 — 문제 없으면 빈 문자열.  맵이 둘이면 맵마다 제목을 붙인다."""
-        fmt = {
-            WARN_OFF_DIE: lambda n: i18n.KO.WAFER_MAP_WARN_OFF_DIE_FMT.format(n=n),
-            WARN_MIXED_FRAMES: lambda n: i18n.KO.WAFER_MAP_WARN_MIXED_FRAMES,
-            WARN_UNPLACED: lambda n: i18n.KO.WAFER_MAP_WARN_UNPLACED_FMT.format(n=n),
-            WARN_PITCH_ASSUMED: lambda n: i18n.KO.WAFER_MAP_WARN_PITCH_ASSUMED,
-            WARN_LIVE_UNVERIFIED: lambda n: i18n.KO.WAFER_MAP_WARN_LIVE_UNVERIFIED,
-        }
         lines = []
         for title, data in sides:
-            reasons = " · ".join(fmt[code](n) for code, n in map_warnings(data))
+            reasons = warning_reasons(data)
             if reasons:
                 lines.append(i18n.KO.WAFER_MAP_WARN_SIDE_FMT.format(side=title, reasons=reasons)
                              if len(sides) > 1 else reasons)

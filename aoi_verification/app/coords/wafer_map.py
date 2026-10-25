@@ -38,6 +38,7 @@ from ..models.result import EXTRACT_MODE
 __all__ = ["WaferFrame", "MapPoint", "MapData", "frame_for_folder", "to_plane",
            "build_map", "grid_lines", "die_grid_segments", "cell_of",
            "cell_bounds", "defect_cells", "slot_maps", "ALL_SLOTS_KEY", "map_warnings",
+           "warning_reasons",
            "WARN_OFF_DIE", "WARN_MIXED_FRAMES", "WARN_UNPLACED", "WARN_PITCH_ASSUMED",
            "WARN_LIVE_UNVERIFIED"]
 
@@ -79,8 +80,8 @@ class MapPoint:
     path: Path
     x: float                    # 평면 µm(중심 기준, +Y 위)
     y: float
-    col: Optional[int]
-    row: Optional[int]
+    col: Optional[int]          # 툴팁 표기용 **장비 화면 번호**(레시피 시프트 적용) —
+    row: Optional[int]          # 점 위치는 x/y 가 정한다(실제 die)
     matched: Optional[bool]     # None = 매칭 정보 없음(셋업 단계)
     # die 안쪽 좌표(µm) — 장비·Conder scan 이 쓰는 표기.  절대좌표 점은 None.
     die_x: Optional[float] = None
@@ -92,8 +93,9 @@ class MapData:
     frame: Optional[WaferFrame]     # 격자·원 크기의 기준(첫 번째로 놓인 폴더의 것)
     points: tuple[MapPoint, ...]
     unplaced: tuple[Path, ...]      # 좌표를 못 놓은 사진
-    # 점을 놓은 폴더들의 격자(pitch·위상)가 첫 폴더와 다르다 — LOT 합산에서 다른 슬롯
+    # 점을 놓은 폴더들의 die pitch 가 첫 폴더와 다르다 — LOT 합산에서 다른 슬롯
     # 점이 엉뚱한 칸에 찍힌다(실측: 파일명 (3,3) 이 (9,3) 칸).  :func:`map_warnings`.
+    # 위상(중심)만 다른 것은 :func:`_align_phase` 가 맞추므로 여기 들지 않는다.
     mixed_frames: bool = False
     # LIVE 파일명(`camtek_live`)으로 놓은 점 수 — 그 경로는 아직 검증이 충분하지 않다
     # (사용자 지시: 맵을 볼 때마다 재검토를 당부한다).
@@ -235,6 +237,34 @@ def _fit_to_wafer(cells, px: float, py: float, diameter: float,
     return max(px * s, lo_x), max(py * s, lo_y)
 
 
+@lru_cache(maxsize=64)
+def _lot_txt_cells(folder: Path, wt: "wafer_txt.WaferTxt") -> frozenset:
+    """같은 LOT 슬롯들의 웨이퍼 맵 칸 합집합 — 맵에 중심이 없을 때 중심·크기 가정용.
+
+    맵 칸 번호(파일명 col/row)는 맵 격자 자체의 것이라 슬롯마다 같다.  그런데 중심을
+    **그 슬롯의 die 외곽**에서 잡으면, 가장자리 열이 비어 있는 슬롯만 중심이 반 칸 밀려
+    LOT 합산 화면에서 그 슬롯 점이 옆 칸에 찍혔다(좌표 전반 점검, 2026-10-24).  같은
+    LOT(:func:`camtek_live.lot_key`)·같은 맵 크기(ROWCT/COLCT)의 슬롯만 합친다."""
+    cells = set(wt.cells)
+    key = _folder_lot_key(folder)
+    if key is None:
+        return frozenset(cells)
+    try:
+        dirs = sorted(d for d in folder.parent.iterdir() if d.is_dir())[:_MAX_SIBLINGS]
+    except OSError:
+        return frozenset(cells)
+    for d in dirs:
+        if d == folder:
+            continue
+        other = wafer_txt.load(d)
+        if other is None or (other.rows, other.cols) != (wt.rows, wt.cols):
+            continue
+        if _folder_lot_key(d) != key:
+            continue
+        cells |= other.cells
+    return frozenset(cells)
+
+
 def _assumed_edge(first_full_index: int, pitch: float) -> float:
     """'온전히 들어오는 첫 die' 경계에서 반 pitch 바깥 = 가정한 웨이퍼 가장자리."""
     return first_full_index * pitch - pitch / 2.0
@@ -259,8 +289,8 @@ def _camtek(folder: Path) -> _Camtek:
                 if pitch is None:
                     wt = None
             if wt is not None and pitch_assumed:
-                pitch = _fit_to_wafer(wt.cells, *pitch, wg._read_diameter(folder),
-                                      _live_extent(folder))
+                pitch = _fit_to_wafer(_lot_txt_cells(folder, wt), *pitch,
+                                      wg._read_diameter(folder), _live_extent(folder))
             if wt is not None:
                 # 파일명 col 이 곧 맵 열, stage y 칸 j = rows−1−row (위에서부터) — 원점 보정 없음.
                 geom = wg.CamtekGeometry(pitch_x=pitch[0], pitch_y=pitch[1], col_origin=0,
@@ -276,10 +306,11 @@ def _camtek(folder: Path) -> _Camtek:
     if wt is not None and (cx is None or cy is None):
         # 맵에 중심이 없다 — die 맵 외곽의 가운데를 웨이퍼 중심으로 가정한다.
         source = SOURCE_ASSUMED
-        i_lo = min(i for i, _ in wt.cells)
-        i_hi = max(i for i, _ in wt.cells) + 1
-        j_lo = min(j for _, j in wt.cells)
-        j_hi = max(j for _, j in wt.cells) + 1
+        lot_cells = _lot_txt_cells(folder, wt)
+        i_lo = min(i for i, _ in lot_cells)
+        i_hi = max(i for i, _ in lot_cells) + 1
+        j_lo = min(j for _, j in lot_cells)
+        j_hi = max(j for _, j in lot_cells) + 1
         cx = (i_lo + i_hi) / 2.0 * geom.pitch_x if cx is None else cx
         cy = (j_lo + j_hi) / 2.0 * geom.pitch_y if cy is None else cy
     if (cx is None or cy is None) and geom is not None:
@@ -397,6 +428,29 @@ def to_plane(coord: DefectCoord, folder: Path) -> Optional[tuple[float, float]]:
         return None
 
 
+def _wrap(d: float, pitch: float) -> float:
+    """``d`` 를 pitch 로 접어 ``[-pitch/2, pitch/2)`` 로 — 가장 가까운 같은 위상까지의 거리."""
+    return (d + pitch / 2.0) % pitch - pitch / 2.0
+
+
+def _align_phase(xy: tuple[float, float], own: Optional[WaferFrame],
+                 ref: Optional[WaferFrame]) -> tuple[float, float]:
+    """LOT 합산에서 다른 폴더의 점을 **기준 프레임 격자의 같은 칸 같은 자리**로 옮긴다.
+
+    격자·원은 첫 폴더 것으로 그리는데, 웨이퍼마다 중심(``Center_X/Y``)이 조금씩 달라
+    격자 위상이 슬롯마다 다르다(실측 T254 WVU 6324: 최대 ~160/210 µm).  평면 좌표를 그대로
+    찍으면 die 경계 근처 점이 이웃 칸에 그려졌다(355점 중 18점).  위상 차를 pitch 로 접어
+    (½ pitch 미만) 옮기므로 점은 **자기 격자에서의 칸·die 안쪽 위치**를 그대로 지킨다.
+    pitch 가 다르면 맞출 수 없어 그대로 둔다(``mixed_frames`` 경고)."""
+    if own is None or ref is None or own is ref:
+        return xy
+    if own.kind != ref.kind or not (own.pitch_x and own.pitch_y) or \
+            (own.pitch_x, own.pitch_y) != (ref.pitch_x, ref.pitch_y):
+        return xy
+    return (xy[0] + _wrap(ref.grid_x0 - own.grid_x0, own.pitch_x),
+            xy[1] + _wrap(ref.grid_y0 - own.grid_y0, own.pitch_y))
+
+
 def build_map(coords: dict, matched=None) -> MapData:
     """``{path: DefectCoord | None}`` → :class:`MapData`.
 
@@ -423,19 +477,22 @@ def build_map(coords: dict, matched=None) -> MapData:
             folder_frames[key] = frame_for_folder(*key)
         if frame is None:
             frame = folder_frames[key]
+        xy = _align_phase(xy, folder_frames[key], frame)
         die_known = coord.source != "camtek_abs"
         live += coord.source == "camtek_live"
         points.append(MapPoint(
             path=path, x=xy[0], y=xy[1],
-            col=coord.col if die_known else None,
-            row=coord.row if die_known else None,
+            col=coord.screen_col if die_known else None,
+            row=coord.screen_row if die_known else None,
             matched=None if matched is None else (path in matched),
             die_x=coord.x if die_known else None,
             die_y=coord.y if die_known else None,
         ))
     grid = lambda f: None if f is None else (f.pitch_x, f.pitch_y,      # noqa: E731
                                              f.grid_x0, f.grid_y0)
-    mixed = len({grid(f) for f in folder_frames.values()}) > 1
+    # 위상만 다른 폴더는 :func:`_align_phase` 로 맞췄으니 pitch 가 다를 때만 섞인 것이다.
+    mixed = len({None if f is None else (f.pitch_x, f.pitch_y)
+                 for f in folder_frames.values()}) > 1
     # LOT 합산: die 맵은 웨이퍼마다 가장자리 칸이 다르다(실측 AVAGO TYW 25장 —
     # 2921~2956칸, 맨 왼쪽 열이 있는 웨이퍼·없는 웨이퍼).  첫 폴더 맵만 그리면 다른
     # 슬롯의 가장자리 die 점이 격자 밖에 떨어진다.  격자가 같은 폴더들의 칸을 합친다.
@@ -495,6 +552,23 @@ def map_warnings(data: Optional[MapData]) -> list[tuple[str, int]]:
     if data.live_points:
         out.append((WARN_LIVE_UNVERIFIED, data.live_points))
     return out
+
+
+def warning_reasons(data: Optional[MapData], skip: tuple = ()) -> str:
+    """:func:`map_warnings` → 사용자 문구(``" · "`` 로 이음).  없으면 빈 문자열.
+
+    화면 배너와 엑셀 Wafer Map 시트가 **같은 문구**를 쓰게 한 곳에 둔다 — 예전에는
+    배너에만 있어 엑셀로 나간 맵은 칸이 틀렸을 수 있다는 사실이 빠졌다(좌표 전반 점검,
+    2026-10-24).  ``skip`` 의 코드는 뺀다(엑셀은 LIVE 당부를 표 아래에 따로 적는다)."""
+    from .. import i18n
+    fmt = {
+        WARN_OFF_DIE: lambda n: i18n.KO.WAFER_MAP_WARN_OFF_DIE_FMT.format(n=n),
+        WARN_MIXED_FRAMES: lambda n: i18n.KO.WAFER_MAP_WARN_MIXED_FRAMES,
+        WARN_UNPLACED: lambda n: i18n.KO.WAFER_MAP_WARN_UNPLACED_FMT.format(n=n),
+        WARN_PITCH_ASSUMED: lambda n: i18n.KO.WAFER_MAP_WARN_PITCH_ASSUMED,
+        WARN_LIVE_UNVERIFIED: lambda n: i18n.KO.WAFER_MAP_WARN_LIVE_UNVERIFIED,
+    }
+    return " · ".join(fmt[code](n) for code, n in map_warnings(data) if code not in skip)
 
 
 def grid_lines(frame: WaferFrame) -> tuple[list[float], list[float]]:

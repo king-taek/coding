@@ -163,6 +163,47 @@ def _row_total(center_y: Optional[float], diameter: float, pitch_y: float) -> in
     return total
 
 
+# 장비가 die 번호를 매기는 격자 = **웨이퍼 가장자리에서 이만큼 안쪽 원에 온전히 드는 die**.
+# 유도(2026-10-25): 실측 10사례(대형 die 6종 + AVAGO NELA26·PGEE48 · T254 · RDL4 17호기)가
+# 장비 정답과 전부 맞는 값의 범위가 2,925~3,975 µm 이다.  범위를 가르는 건 die 가 작은
+# AVAGO 제품 하나뿐이라(대형 die 는 0~4 mm 어디서나 같은 답) 3 mm 는 **가정**이다 —
+# 업계 표준 edge exclusion 값이고 그 범위 안에 든다.  다른 제품의 실제 설정은 미확인.
+_EDGE_EXCLUSION = 3000.0
+
+
+def _grid_origins(center_x: Optional[float], center_y: Optional[float], diameter: float,
+                  pitch_x: float, pitch_y: float) -> Optional[tuple[int, int]]:
+    """``(col_origin, row_total)`` = 웨이퍼 가장자리 :data:`_EDGE_EXCLUSION` 안쪽 원에
+    **네 모서리가 모두 드는** die 의 첫 열 · 마지막 행.  중심을 모르면 None.
+
+    :func:`_col_origin`·:func:`_row_total` 은 축 위 한 점(원의 좌우·위아래 끝)만 보는
+    1차원 식이라, die 가 작아 원 둘레를 따라 계단이 촘촘한 제품에서 틀린다 — AVAGO
+    NELA26·PGEE48 은 row 기준을 56 으로 냈는데 장비는 55 다(관측).  대형 die 6종은
+    두 식이 같은 값을 낸다(관측, ``TestDerivedPathGolden``).
+
+    지금은 **die 맵이 가장자리를 빠뜨렸는지 가르는 데만** 쓴다(:func:`_with_origins`) —
+    1차원 식과 같은 값일 때만 맵을 넓힌다.  1차원 식을 대신하지 않는다: 대형 die 에서
+    두 식이 갈리는 배치(무작위 배치의 약 16%, 유도)는 실측이 없고, '중심만 들면 센다'
+    (반지름 ≈144 mm) 같은 경쟁 가설도 지금 표본으로는 구분되지 않는다."""
+    if not center_x or not center_y:
+        return None
+    r = diameter / 2.0 - _EDGE_EXCLUSION
+    if r <= 0:
+        return None
+    i_lo, i_hi = math.floor((center_x - r) / pitch_x), math.ceil((center_x + r) / pitch_x)
+    j_lo, j_hi = math.floor((center_y - r) / pitch_y), math.ceil((center_y + r) / pitch_y)
+    inside = [(i, j) for i in range(i_lo, i_hi + 1) for j in range(j_lo, j_hi + 1)
+              if all(math.hypot(x - center_x, y - center_y) <= r
+                     for x in (i * pitch_x, (i + 1) * pitch_x)
+                     for y in (j * pitch_y, (j + 1) * pitch_y))]
+    if not inside:
+        return None
+    origin, total = min(i for i, _ in inside), max(j for _, j in inside)
+    if not (0 <= origin <= _MAX_DIE_INDEX and 0 <= total <= _MAX_DIE_INDEX):
+        return None
+    return origin, total
+
+
 def _col_origin(center_x: Optional[float], diameter: float, pitch_x: float) -> int:
     """col 번호 기준 = **웨이퍼 안에 온전히 들어오는 첫 die 열**.
 
@@ -446,8 +487,69 @@ def camtek_geometry(folder: Path) -> Optional[CamtekGeometry]:
                 "ProductInfo.ini `XDieIndex/YDieIndex` 가 필요합니다: %s", folder)
         return None
     except Exception:
-        _LOG.warning("Camtek die 격자 판독 실패 — 절대 좌표로 처리: %s", folder, exc_info=True)
+        # 조용한 폴백 금지 — 여기서 None 이면 그 실행의 Camtek 좌표가 전부 절대좌표로 내려간다.
+        _LOG.exception("die 격자 기하를 읽다 실패해 절대 wafer 좌표로 매칭합니다: %s", folder)
         return None
+
+
+_EXPORT_FILE = "ProductInfo.ini"
+_EXPORT_SECTION = re.compile(r"(?ims)^\s*\[ExportData\]\s*$(.*?)(?=^\s*\[|\Z)")
+_EXPORT_KEYS = ("cMin", "cMax", "rMin", "rMax")
+
+
+def _export_origins(folder: Path, px: float, py: float, dia: float,
+                    cx: Optional[float], cy: Optional[float]) -> Optional[tuple[int, int]]:
+    """``ProductInfo.ini [ExportData] cMin/cMax/rMin/rMax`` 로 ``(col_origin, row_total)``.
+
+    장비가 결과를 내보낼 때 쓰는 **die 번호 격자의 범위**(stage 인덱스)다 —
+    ``col = x_index − cMin``, ``row = rMax − y_index`` 가 장비 화면 번호다.
+
+    실측 근거(2026-10-25, 관측):
+
+    * QORVO W97218SGZ4BK16 (11호기, pitch 919.8, 3장): 장비 화면·Conder LIVE 파일명 55장이
+      전부 ``(x−5, 319−y)`` = ``(cMin, rMax)`` 였다.  중심 유도(2, 326→상한으로 327)·die 맵
+      (6, 317)·3 mm 격자(5, 323) 어느 것도 맞지 않았다.
+    * 그 밖에 이미 맞는 것으로 확인된 웨이퍼 폴더 165개(TB500 RDL4·SGG·KUH · T254 FS UBM·WVU ·
+      TI CCB · AVAGO NELA26)에서 기존 결과와 **전부 같다** — 1차원 유도가 틀리던 AVAGO
+      01C1(맵 3 → 장비 2)·T254 GX57007306(부분 맵) 도 이 값이 장비 번호와 같다.
+
+    ⚠ 자기 폴더의 파일만 믿는다(부모·형제 폴더 것 쓰지 않음).  채택 조건(어긋나면 None —
+    기존 경로로 간다): 네 키가 정수로 다 있고 ``min ≤ max`` · 같은 파일의
+    ``XDieIndex/YDieIndex`` 가 채택한 pitch 와 같다(다른 격자의 번호를 섞지 않게) ·
+    웨이퍼 중심을 알고 범위가 웨이퍼 원의 인덱스 범위 안이다 · die 맵이 있으면 die 가 전부
+    범위 안이다.  관측 171 폴더가 이 조건을 모두 통과했다.  ``_MAX_DIE_INDEX`` 상한은
+    여기 쓰지 않는다 — die 가 작은 제품(QORVO row 319)에서 정당한 값을 버린다."""
+    txt = read_ini_text(folder / _EXPORT_FILE)
+    if not txt:
+        return None
+    sec = _EXPORT_SECTION.search(txt)
+    if sec is None:
+        return None
+    kv = dict(re.findall(r"(?m)^\s*(\w+)\s*=\s*(-?\d+)\s*(?:;.*)?$", sec.group(1)))
+    try:
+        c_min, c_max, r_min, r_max = (int(kv[k]) for k in _EXPORT_KEYS)
+    except (KeyError, ValueError):
+        return None
+    if not (0 <= c_min <= c_max and 0 <= r_min <= r_max):
+        return None
+    xi = _read_key(folder / _EXPORT_FILE, "XDieIndex", _MIN_PITCH, _MAX_PITCH)
+    yi = _read_key(folder / _EXPORT_FILE, "YDieIndex", _MIN_PITCH, _MAX_PITCH)
+    if xi is None or yi is None or abs(xi - px) > 0.01 or abs(yi - py) > 0.01:
+        return None
+    if not cx or not cy:
+        return None
+    r = dia / 2.0
+    if not (math.floor((cx - r) / px) <= c_min and c_max <= math.floor((cx + r) / px)
+            and math.floor((cy - r) / py) <= r_min and r_max <= math.floor((cy + r) / py)):
+        _LOG.warning("%s [ExportData] 범위가 웨이퍼 밖이라 쓰지 않습니다: %s", _EXPORT_FILE, folder)
+        return None
+    cells = die_map_cells(folder, px, py)
+    if cells is not None and not all(c_min <= i <= c_max and r_min <= j <= r_max
+                                     for i, j in cells):
+        _LOG.warning("%s [ExportData] 범위 밖에 die 맵의 die 가 있어 쓰지 않습니다: %s",
+                     _EXPORT_FILE, folder)
+        return None
+    return c_min, r_max
 
 
 def _with_origins(folder: Path, px: float, py: float, src: str) -> CamtekGeometry:
@@ -459,12 +561,33 @@ def _with_origins(folder: Path, px: float, py: float, src: str) -> CamtekGeometr
     # 찾고(§6-L), 그래도 없으면 각각 상수/옛 식으로 폴백한다(§6-H·§6-J).
     dia = _read_diameter(folder)
     cx, cy = _wafer_center(folder)
+    # ★ 0순위: 장비가 내보낸 격자 범위(ProductInfo.ini [ExportData]) — 장비 화면 번호 그 자체다.
+    exp = _export_origins(folder, px, py, dia, cx, cy)
+    if exp is not None:
+        return CamtekGeometry(pitch_x=px, pitch_y=py, col_origin=exp[0], row_total=exp[1],
+                              source=f"{src}+{_EXPORT_FILE}[ExportData]")
     d_origin = _col_origin(cx, dia, px)
     d_total = _row_total(cy, dia, py)
     cells = lot_die_map_cells(folder, px, py)
     if cells is not None and _covers_wafer(cells, cx, cy, dia, px, py, folder):
         m_origin = min(i for i, _ in cells)
         m_total = max(j for _, j in cells)
+        # ★ 맵은 die **목록**이라 가장자리 열·행이 통째로 빠질 수 있다(AVAGO 25장 중 12장,
+        #   장비 번호는 빠지지 않은 격자 기준).  형제가 없으면 합집합으로도 못 메운다.
+        #   **두 유도(1차원 식 · 2차원 격자)가 같은 값으로 맵보다 넓다고 할 때만** 넓힌다 —
+        #   둘이 갈리면 맵을 믿는다(PGEE48 row: 1차원 56 · 격자 55 · 맵 55 = 장비).
+        #   격자 하나만으로 바꾸지 않는 이유: 가장자리 3 mm 는 소형 die 한 제품으로 정한
+        #   가정이고, 대형 die 에서는 '중심만 들면 센다' 같은 경쟁 가설과 구분되지 않는다.
+        grid = _grid_origins(cx, cy, dia, px, py)
+        if grid is not None:
+            if grid[0] == d_origin < m_origin:
+                _LOG.warning("die 맵의 첫 열(%d)이 격자보다 좁아 %d 로 넓힙니다(가장자리 열이 "
+                             "목록에서 빠진 웨이퍼): %s", m_origin, d_origin, folder)
+                m_origin = d_origin
+            if grid[1] == d_total > m_total:
+                _LOG.warning("die 맵의 마지막 행(%d)이 격자보다 좁아 %d 로 넓힙니다(가장자리 "
+                             "행이 목록에서 빠진 웨이퍼): %s", m_total, d_total, folder)
+                m_total = d_total
         # ⚠ 맵은 유도값과 **±1 이내일 때만** 믿는다.  이 파일이 웨이퍼 전체가
         #   아니라 '스캔한 영역'만 담은 스캔이 오면 min/max 가 통째로 좁아져
         #   기준이 조용히 틀어진다 — 실측 74장의 차이는 전부 0 또는 −1 이라
@@ -684,11 +807,18 @@ def _dat_cells(dat: Path, _mtime_ns: int, _size: int, _md_mtime_ns: int,
     if count < _MIN_DIE_MAP:
         return None
     cells: set[tuple[int, int]] = set()
-    for i in range(count):
-        b = i * rec
-        x = struct.unpack_from("<d", data, b + off_x)[0]
-        y = struct.unpack_from("<d", data, b + off_y)[0]
-        cells.add((math.floor(x / px), math.floor(y / py)))
+    try:
+        for i in range(count):
+            b = i * rec
+            x = struct.unpack_from("<d", data, b + off_x)[0]
+            y = struct.unpack_from("<d", data, b + off_y)[0]
+            cells.add((math.floor(x / px), math.floor(y / py)))
+    except (struct.error, ValueError, OverflowError) as e:
+        # ★ 깨진 맵 하나는 **그 맵만** 버린다.  예전에는 여기서 난 예외가
+        #   camtek_geometry 의 except 까지 올라가 LOT 형제 전부가 기하 None(=절대좌표)
+        #   으로 조용히 떨어졌다(사이드카 오프셋이 레코드 밖이거나 x 가 nan 일 때).
+        _LOG.warning("%s 를 읽지 못해 이 die 맵은 쓰지 않습니다(%s): %s", dat.name, e, dat)
+        return None
     col_origin = min(i for i, _ in cells)
     row_total = max(j for _, j in cells)
     if not (0 <= col_origin <= _MAX_DIE_INDEX
@@ -801,6 +931,15 @@ def kla_geometry(folder: Path) -> KlaGeometry:
                     _LOG.warning(
                         "KLA %s 에 SampleTestPlan 이 없어 die 인덱스 원점 X 도 "
                         "기본값(%d)을 씁니다.", info.name, KLA_ZERO_X)
+                elif geom.source == "DiePitch+SampleTestPlan":
+                    # 검사한 die 목록의 최솟값 — 가장자리 열을 검사하지 않은 레시피면 원점이
+                    # 어긋나고, row 원점은 상수다(부분 목록에서 원점을 잡는 같은 부류의 위험,
+                    # 좌표 전반 점검 2026-10-24).  조용히 쓰지 않는다.
+                    _LOG.warning(
+                        "KLA %s 에 SampleCenterLocation 이 없어 die 원점을 검사 목록"
+                        "(SampleTestPlan) 최솟값 X=%d · 기본값 Y=%d 로 잡습니다 — 목록이 "
+                        "일부 die 만 담으면 col/row 가 어긋날 수 있습니다.",
+                        info.name, geom.zero_x, geom.zero_y)
                 return geom
         _LOG.warning(
             "KLA die 격자 정보를 찾지 못해 기본값을 씁니다: %s", folder)

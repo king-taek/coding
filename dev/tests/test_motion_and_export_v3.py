@@ -243,10 +243,12 @@ def test_swipe_touches_only_the_snapshot_never_the_live_photo():
     assert 'QPropertyAnimation(ghost, b"pos"' in src, "이동이 pos 애니가 아니다"
     assert "center_img)" not in src.replace("img = self.center_img", ""), (
         "살아 있는 사진 위젯에 모션을 걸고 있다")
-    # 들어오는 사진은 **앞 사진이 다 빠진 뒤** 들어온다(시안 CSS 의 `.18s backwards`).
-    fade = inspect.getsource(sp.SelectPage._fade_in_next)
-    assert "delay_ms=motion.DUR_SWIPE_OUT" in fade, (
-        "겹쳐 재생한다 — 한순간 화면이 비어 보인다")
+    # 다음 사진은 기다리지 않는다 — 잔상은 그 위에서 짧게, 감속으로 빠진다(2026-10-25).
+    assert not hasattr(sp.SelectPage, "_fade_in_next"), (
+        "다음 사진이 다시 늦게 떠오른다 — 연타하면 보지 못한 사진이 결정된다")
+    assert src.count("motion.DUR_SWIPE_OVER") == 2
+    assert src.count("motion.EASE_PRIMARY") == 2
+    assert motion.DUR_SWIPE_OVER <= 120
 
 
 def test_rapid_decisions_skip_the_animation(styled_qapp, motion_on, tmp_path):
