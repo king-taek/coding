@@ -61,7 +61,8 @@ from .. import theme
 from . import sheet_host as sheets
 from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
-from .wafer_map_view import WaferMapView, count_text
+from .no_wheel_slider import NoWheelSlider
+from .wafer_map_view import DOT_R, DOT_R_MAX, DOT_R_MIN, WaferMapView, count_text
 from .window_controls import set_window_fullscreen
 
 _LOG = logging.getLogger("aoi.ui")
@@ -329,7 +330,7 @@ class WaferMapDialog(QDialog):
         self.resize(1100, 720)
 
     def _add_view_options(self, top) -> None:
-        """보기 옵션 — die 색칠 · 노치 방향.  두 단계 모두, 두 맵에 **함께** 건다."""
+        """보기 옵션 — die 색칠 · 점 크기 · 노치 방향.  두 단계 모두, 두 맵에 **함께** 건다."""
         self.fill_btn = NeonButton(i18n.KO.WAFER_MAP_FILL_DIES, role="ghost")
         self.fill_btn.setCheckable(True)
         self.fill_btn.setToolTip(i18n.KO.WAFER_MAP_FILL_DIES_TIP)
@@ -346,6 +347,16 @@ class WaferMapDialog(QDialog):
         self.unmatched_first_btn.toggled.connect(self._on_unmatched_first_toggled)
         self.unmatched_first_btn.hide()
         top.addWidget(self.unmatched_first_btn)
+        # 점 크기 — die 색칠 중에는 점을 그리지 않으므로 끈다(_on_fill_toggled).
+        self.dot_label = QLabel(i18n.KO.WAFER_MAP_DOT_SIZE)
+        top.addWidget(self.dot_label)
+        self.dot_slider = NoWheelSlider(Qt.Orientation.Horizontal)
+        self.dot_slider.setRange(DOT_R_MIN, DOT_R_MAX)
+        self.dot_slider.setValue(int(DOT_R))
+        self.dot_slider.setFixedWidth(120)
+        self.dot_slider.setToolTip(i18n.KO.WAFER_MAP_DOT_SIZE_TIP)
+        self.dot_slider.valueChanged.connect(self._on_dot_size)
+        top.addWidget(self.dot_slider)
         self.notch_btn = NeonButton("", role="ghost")
         self.notch_btn.setToolTip(i18n.KO.WAFER_MAP_NOTCH_TIP)
         self.notch_btn.setAutoDefault(False)
@@ -367,6 +378,12 @@ class WaferMapDialog(QDialog):
         for view in self._views():
             view.set_fill_dies(on)
         self.unmatched_first_btn.setVisible(on and self._result is not None)
+        self.dot_label.setEnabled(not on)
+        self.dot_slider.setEnabled(not on)
+
+    def _on_dot_size(self, r: int) -> None:
+        for view in self._views():
+            view.set_dot_radius(r)
 
     def _on_unmatched_first_toggled(self, on: bool) -> None:
         for view in self._views():
