@@ -50,7 +50,8 @@ SHEET_FULL_NAME = "전체 양식"
 BORDER_COLS = ["A", "B", "C", "D"]
 
 # Scan image 열 — 이번 저장의 사진 중 하나라도 Scan 이 확인될 때만 생긴다(사용자 결정:
-# '묶어서 판단').  기존 열 뒤에 붙인다: 매칭은 E=기준 Scan·F=검증 Scan, 추출은 E=Scan.
+# '묶어서 판단').  Scan 목록이 없는 장비 쪽(KLA)은 열을 받지 않는다.
+# 기존 열 뒤에 붙인다: 매칭은 E=기준 Scan·F=검증 Scan(한 쪽만이면 E 하나), 추출은 E=Scan.
 # 전체 양식의 수기 칸(E~H)은 그만큼 오른쪽으로 밀린다.  Scan 이 없는 저장은 지금과
 # 똑같은 열 구성이다(양식.xlsx 도 그대로 — 열은 저장할 때 끼운다).
 SCAN_COL_START = 5                       # E
@@ -189,7 +190,12 @@ class ExcelExporter(QThread):
         self._stop = threading.Event()
         # Scan image — `_scan_prepass` 가 채운다.  비어 있으면 Scan 열이 없는 예전 배치.
         self._scan_cols: list[str] = []
-        self._scan_cache: dict[str, tuple[str, Optional[bytes]]] = {}
+        # `_scan_cols` 와 같은 순서의 장비 쪽("ref"/"val") — KLA 처럼 Scan 이 하나도 없는
+        # 쪽은 열을 만들지 않으므로 E 가 늘 기준 Scan 이라는 보장이 없다(사용자 요청).
+        self._scan_sides: list[str] = []
+        self._path_side: dict[str, str] = {}     # 경로 → "ref"/"val" (`_scan_paths`)
+        # 경로 → (상태, Crop JPEG, Scan 파일명).  파일명은 셀 값으로 적는다(사진 뒤에 숨는다).
+        self._scan_cache: dict[str, tuple[str, Optional[bytes], str]] = {}
 
     def stop(self) -> None:
         """진행 중인 저장을 취소한다 — 파일을 쓰기 **전에** 멈춘다."""
@@ -612,14 +618,19 @@ class ExcelExporter(QThread):
         """Scan 을 확인할 Color 경로(중복 없이, 순서 고정).
 
         Scan 목록 파일이 있는 폴더의 사진만 — 목록이 없는 폴더는 확인할 것이 없고,
-        그래야 Scan 자료가 없는 저장은 진행률까지 예전과 똑같다."""
+        그래야 Scan 자료가 없는 저장은 진행률까지 예전과 똑같다.
+        어느 장비 쪽 사진인지는 ``self._path_side`` 에 남긴다(열을 쪽별로 정한다)."""
         from ..coords import scan_image
         seen: dict[str, Path] = {}
+        self._path_side = {}
         for m in self._result.matches:
-            for p in (m.ref_path, m.val_path):
+            for p, side in ((m.ref_path, "ref"), (m.val_path, "val")):
                 seen.setdefault(str(p), Path(p))
+                self._path_side.setdefault(str(p), side)
         for u in self._result.unmatched_refs:
             seen.setdefault(str(u.path), Path(u.path))
+            side = "val" if u.side == "val" and not self._extract else "ref"
+            self._path_side.setdefault(str(u.path), side)
         has_list: dict[Path, bool] = {}
         out = []
         for p in seen.values():
@@ -630,21 +641,21 @@ class ExcelExporter(QThread):
                 out.append(p)
         return out
 
-    def _scan_one(self, path: Path) -> tuple[str, Optional[bytes]]:
-        """사진 한 장 → (상태, Crop JPEG 바이트).  화면과 같은 `scan_image` 계산이다."""
+    def _scan_one(self, path: Path) -> tuple[str, Optional[bytes], str]:
+        """사진 한 장 → (상태, Crop JPEG 바이트, Scan 파일명).  화면과 같은 `scan_image` 계산이다."""
         import io
         from ..coords import scan_image
         m = scan_image.resolve(path)
         if not m.ok:
-            return m.status, None
+            return m.status, None, ""
         res = scan_image.load_crop(m)
         if res is None:
-            return scan_image.UNREADABLE, None
+            return scan_image.UNREADABLE, None, m.best.path.name
         buf = io.BytesIO()
-        crop = res[0]
+        crop, cand = res
         (crop if crop.mode in ("L", "RGB") else crop.convert("RGB")).save(
             buf, format="JPEG", quality=SCAN_JPEG_QUALITY)
-        return scan_image.OK, buf.getvalue()
+        return scan_image.OK, buf.getvalue(), cand.path.name
 
     def _scan_prepass(self, paths: list[Path]) -> None:
         """모든 사진의 Scan 을 미리 확인하고 Crop 을 만든다 → Scan 열을 넣을지 결정.
@@ -670,16 +681,21 @@ class ExcelExporter(QThread):
                 except Exception:
                     # '후보 없음' 이 아니라 '읽다가 실패' 다 — 같은 상태로 뭉개면 원인을 모른다.
                     _LOG.warning("Scan 확인 실패: %s", futures[f], exc_info=True)
-                    self._scan_cache[str(futures[f])] = (scan_image.UNREADABLE, None)
+                    self._scan_cache[str(futures[f])] = (scan_image.UNREADABLE, None, "")
                 self.signals.progress.emit(base + done, overall,
                                            i18n.KO.SCAN_EXPORT_PHASE)
         self._prog_done = base + len(paths)
         counts: dict[str, int] = {}
-        for st, _b in self._scan_cache.values():
+        for st, _b, _n in self._scan_cache.values():
             counts[st] = counts.get(st, 0) + 1
         found = counts.get(scan_image.OK, 0) + counts.get(scan_image.UNREADABLE, 0)
         if found:
-            self._scan_cols = ["E"] if self._extract else ["E", "F"]
+            # 열은 **Scan 목록이 있는 장비 쪽**만 받는다 — 캐시에는 목록 폴더의 사진만
+            # 들어 있다(`_scan_paths`).  KLA 는 Scan 자료가 아예 없어 그 쪽 열은 늘
+            # 'Scan 없음' 뿐이었다(사용자 요청).  Camtek 쪽은 예전처럼 묶어서 판단한다.
+            sides = {self._path_side.get(k, "ref") for k in self._scan_cache}
+            self._scan_sides = [s for s in ("ref", "val") if s in sides]
+            self._scan_cols = ["E", "F"][:len(self._scan_sides)]
         _LOG.info("저장 소요 [Scan 확인] %.2f초 %d장 — 상태별 %s",
                   time.perf_counter() - t0, len(paths), counts)
 
@@ -724,7 +740,8 @@ class ExcelExporter(QThread):
         if self._extract:
             ws[f"E{HEADER_AOI_ROW}"] = i18n.KO.SCAN_EXCEL_HEADER
         else:
-            for col, src in zip(self._scan_cols, (COL_REF, COL_VAL)):
+            for col, side in zip(self._scan_cols, self._scan_sides):
+                src = COL_REF if side == "ref" else COL_VAL
                 ws[f"{col}{HEADER_AOI_ROW}"] = i18n.KO.SCAN_EXCEL_HEADER_FMT.format(
                     machine=ws[f"{src}{HEADER_AOI_ROW}"].value or "").strip()
 
@@ -736,7 +753,15 @@ class ExcelExporter(QThread):
         from openpyxl.styles import Alignment, Font
         from ..coords import scan_image
 
-        status, data = self._scan_cache.get(str(src), (scan_image.NO_CANDIDATE, None))
+        status, data, name = self._scan_cache.get(
+            str(src), (scan_image.NO_CANDIDATE, None, ""))
+        cell = ws[f"{col}{row}"]
+        if name:
+            # Color 사진 칸과 같다 — 파일명을 셀 값으로 적고 그림이 그 위를 덮는다.
+            cell.value = name
+            cell.font = Font(size=8, color="FF000000")
+            cell.alignment = Alignment(horizontal="center", vertical="center",
+                                       wrap_text=True)
         if data:
             try:
                 # 시트마다 새 이미지 객체 — 같은 객체를 여러 시트에 쓰면 저장이 깨진다.
@@ -747,9 +772,9 @@ class ExcelExporter(QThread):
             except Exception:
                 _LOG.warning("Scan 그림 삽입 실패: %s", src, exc_info=True)
                 status = scan_image.UNREADABLE
-        cell = ws[f"{col}{row}"]
-        cell.value = (i18n.KO.SCAN_EXCEL_UNREADABLE if status == scan_image.UNREADABLE
-                      else i18n.KO.SCAN_EXCEL_NONE)
+        msg = (i18n.KO.SCAN_EXCEL_UNREADABLE if status == scan_image.UNREADABLE
+               else i18n.KO.SCAN_EXCEL_NONE)
+        cell.value = f"{msg}\n{name}" if name else msg
         cell.font = Font(size=8, color="FF808080")
         cell.alignment = Alignment(horizontal="center", vertical="center",
                                    wrap_text=True)
@@ -905,7 +930,8 @@ class ExcelExporter(QThread):
                     self._place_image(ws, src, col, row, cell_w_px, cell_h_px)
                     t_info += t1 - t0
                     t_img += time.perf_counter() - t1
-                for src, col in zip((m.ref_path, m.val_path), self._scan_cols):
+                for side, col in zip(self._scan_sides, self._scan_cols):
+                    src = m.ref_path if side == "ref" else m.val_path
                     self._place_scan(ws, src, col, row, cell_w_px, cell_h_px)
                 self.signals.progress.emit(base + idx, overall, _phase(m.slot))
             else:
@@ -929,11 +955,10 @@ class ExcelExporter(QThread):
                                       note=(i18n.KO.NOTE_ONLY_VAL if on_val
                                             else "미매칭"))
                 # 미매칭·추출 행의 Scan 은 **그 사진의 것**만, 그 장비의 Scan 열에 둔다
-                # (기준 = 첫 Scan 열 E, 검증 = F).  짝 사진 칸은 비워 둔다.
-                if self._scan_cols:
-                    scan_col = (self._scan_cols[1]
-                                if on_val and len(self._scan_cols) > 1
-                                else self._scan_cols[0])
+                # (열이 없는 쪽 — KLA 등 — 은 건너뛴다).  짝 사진 칸은 비워 둔다.
+                side = "val" if on_val else "ref"
+                if side in self._scan_sides:
+                    scan_col = self._scan_cols[self._scan_sides.index(side)]
                     self._place_scan(ws, u.path, scan_col, row,
                                      cell_w_px, cell_h_px)
                 t_img += t1 - t0
