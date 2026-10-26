@@ -46,9 +46,10 @@ from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtCore import QObject, Qt, QThread, pyqtSignal
-from PyQt6.QtWidgets import (QApplication, QComboBox, QDialog, QFileDialog, QFrame,
+from PyQt6.QtWidgets import (QApplication, QComboBox, QDialog, QFrame,
                              QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget)
 
+from ..folder_picker import FolderPicker
 from ... import i18n
 from ...config import CONFIG
 from ...coords import resolve_batch
@@ -220,6 +221,8 @@ class WaferMapDialog(QDialog):
         self.setWindowTitle(i18n.KO.WAFER_MAP_TITLE)
         self._result = result
         self._folder: Optional[Path] = None
+        self._folder_picker = FolderPicker(self)
+        self._folder_picker.picked.connect(self._on_folder_picked)
         self._images: list[Path] = []                 # 끌어놓은 사진만 볼 때
         self._lot_slots: dict[str, Path] = {}         # LOT 폴더일 때만
         self._selected: Optional[set[str]] = None     # None = 전체
@@ -557,9 +560,11 @@ class WaferMapDialog(QDialog):
     # 셋업 단계 — 폴더(슬롯 또는 LOT)
     # ------------------------------------------------------------------
     def _on_pick(self) -> None:
+        # 비동기 OS 브라우저(`ui/folder_picker.py`) — `exec()` 는 UI 스레드를 세운다.
         start = str(self._folder) if self._folder else ""
-        path = QFileDialog.getExistingDirectory(
-            self, i18n.KO.WAFER_MAP_PICK_FOLDER_TITLE, start)
+        self._folder_picker.open(i18n.KO.WAFER_MAP_PICK_FOLDER_TITLE, start)
+
+    def _on_folder_picked(self, path: str) -> None:
         if path:
             self.show_folder(Path(path))
 

@@ -8,11 +8,12 @@ from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtCore import QObject, Qt, QThread, QTimer, pyqtSignal
-from PyQt6.QtWidgets import (QBoxLayout, QDoubleSpinBox, QFileDialog,
+from PyQt6.QtWidgets import (QBoxLayout, QDoubleSpinBox,
                               QGridLayout, QHBoxLayout, QLabel, QLineEdit,
                               QMessageBox, QScrollArea, QSizePolicy,
                               QToolButton, QVBoxLayout, QWidget)
 
+from ..folder_picker import FolderPicker
 from ..teardown import tolerate_teardown
 from ... import i18n
 from .. import theme
@@ -289,6 +290,12 @@ class SetupPage(QWidget):
         # 지금 워커가 확인 중인 (기준, 검증) 경로 쌍 — 같은 쌍으로 `_validate` 가 다시
         # 와도 스레드를 새로 띄우지 않는다(die 스캔의 `_die_scanning_for` 와 같은 뜻).
         self._probing_for: Optional[tuple[str, str]] = None
+        # [폴더 선택…] 의 OS 브라우저 — 비동기(`ui/folder_picker.py`).  어느 입력란이
+        # 눌렀는지는 `_browse_target` 에 기억해 두고 `picked` 에서 채운다.
+        self._folder_picker = FolderPicker(self)
+        self._folder_picker.picked.connect(self._on_folder_picked)
+        self._folder_picker.closed.connect(self._on_folder_dialog_closed)
+        self._browse_target: Optional[QLineEdit] = None
         # 헤드리스에서는 동기로 확인한다 — 테스트가 `_validate()` 의 반환값을
         # 호출 즉시 단언한다(`widgets/zoom_window.py` 와 같은 게이트).
         import os
@@ -1590,35 +1597,38 @@ class SetupPage(QWidget):
             return (None, "", False)
 
     def _browse(self, target: QLineEdit) -> None:
-        """[폴더 선택…] — OS 파일 브라우저를 열고 고른 경로를 입력란에 넣는다.
+        """[폴더 선택…] — OS 파일 브라우저를 **비동기로** 열고, 고른 경로를 입력란에 넣는다.
 
-        ★ 여기서 **정지를 계측한다**(로그만).  '폴더를 고르면 몇 초 멈춘다' 는 신고를
-        네 번 고쳤다 — die 안내 스캔·폴더 확인을 워커로, 표본을 슬롯 하나로, 그리고
-        워커가 하는 파싱 자체를 작은 파일 읽기로(`_detect_die_geometry`: 순수 파이썬
-        파싱은 워커에서도 GIL 을 쥐어 UI 를 굶긴다).  그래도 남는 정지가 있다면 후보는
-        우리 코드 밖이다 — OS 파일 브라우저 자신, 또는 무거운 import·GPU 워밍업이
-        GIL 을 쥐는 구간.  **어느 쪽인지 로그가 말하게 한다**: 브라우저에 머문 시간과,
-        닫힌 뒤의 UI 정지를 따로 남긴다.  정상이면 아무 말도 하지 않는다.
+        ★ ``QFileDialog.getExistingDirectory`` 를 쓰지 않는다.  그 함수는 ``exec()``
+        라 Windows 에서 Explorer 창을 **UI 스레드 안에서** 돌려, 셸 확장 로딩·네트워크
+        열거·닫을 때의 COM 정리가 전부 UI 정지가 되고, 그동안 멈춘 타이머·워커 결과가
+        닫는 순간 몰린다 — '텍스트로 치면 안 멈추는데 폴더 버튼으로 고르면 멈춘다' 의
+        원인이다(두 경로는 ``setText`` 이후가 같다).  `ui/folder_picker.py` 가
+        ``open()`` 으로 네이티브 창을 Qt 의 보조 스레드에 띄우고 결과를 시그널로 준다.
+
+        ★ 정지 **계측은 그대로** 남긴다(로그만).  이 변경이 맞다면 `app.log` 의
+        '폴더 창을 닫은 직후 UI 가 …초 멈췄다' 가 사라져야 한다 — 남으면 다음 후보를
+        그 로그가 가리킨다.  브라우저에 머문 시간은 취소해도 잰다(이전과 같다).
         """
-        import time
-        from .. import stall_watch
+        self._browse_target = target
+        self._folder_picker.open(i18n.KO.SETUP_FOLDER_LABEL)
 
-        t0 = time.perf_counter()
-        path = QFileDialog.getExistingDirectory(self, i18n.KO.SETUP_FOLDER_LABEL)
-        dialog_s = time.perf_counter() - t0
-        # 브라우저에 머문 시간에는 사용자가 폴더를 찾은 시간이 섞여 있다 — 정지시간이
-        # 아니다.  아래 감시자가 재는 '닫힌 뒤의 정지' 와 짝지어 봐야 의미가 있다.
-        # ★ **취소해도 잰다.**  취소하면 우리 코드는 아무것도 하지 않는데도 멈춘다는
-        #   신고가 왔다 — 그 정지가 곧 '우리 코드 밖' 이라는 직접 증거다.
-        _LOG.info("폴더 선택: 파일 브라우저가 %.2f초 열려 있었다(%s)",
-                  dialog_s, "고름" if path else "취소")
-        stall_watch.watch(self, self._log_stall)
-        if not path:
+    def _on_folder_picked(self, path: str) -> None:
+        target = getattr(self, "_browse_target", None)
+        if target is None or not path:
             return
         target.setText(path)
         # 기준 폴더가 바뀌면 이전 슬롯 선택은 더 이상 유효하지 않다.
         if target is self.ref_path_edit:
             self._reset_slot_selection()
+
+    def _on_folder_dialog_closed(self, chosen: bool, dialog_s: float) -> None:
+        from .. import stall_watch
+        # 브라우저에 머문 시간에는 사용자가 폴더를 찾은 시간이 섞여 있다 — 정지시간이
+        # 아니다.  아래 감시자가 재는 '닫힌 뒤의 정지' 와 짝지어 봐야 의미가 있다.
+        _LOG.info("폴더 선택: 파일 브라우저가 %.2f초 열려 있었다(%s)",
+                  dialog_s, "고름" if chosen else "취소")
+        stall_watch.watch(self, self._log_stall)
 
     def _log_stall(self, seconds: float, jobs: str) -> None:
         """폴더를 고른 뒤 UI 가 멈췄다 — 얼마나·그때 무엇이 돌았는지 남긴다.
