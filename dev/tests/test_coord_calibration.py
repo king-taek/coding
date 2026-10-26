@@ -311,6 +311,41 @@ def test_dialog_warns_when_a_single_pair_disagrees_with_the_auto_value(styled_qa
     dlg.deleteLater()
 
 
+def test_dialog_shows_the_picked_photo_beside_candidates_at_the_same_size(styled_qapp, tmp_path):
+    """고른 기준 사진은 후보와 **같은 크기** 타일로 후보 줄 맨 앞에 놓인다(크게 위에 두면 후보
+    줄이 접혀 파일명·거리가 안 보였다 — 캡처 2026-10-26).  제목은 시트 제목줄만 그린다."""
+    from PyQt6.QtWidgets import QLabel
+    from aoi_verification.app.ui.widgets import coord_calibration_dialog as mod
+    entries, _shift = _make_entries(tmp_path)
+    dlg = mod.CoordCalibrationDialog(entries, kla_side="ref")
+    dlg.show()
+    dlg._on_src_clicked(entries[1][0])
+    anchor = dlg._anchor_tile
+    assert anchor is not None and anchor.key == entries[1][0]
+    assert anchor.width() == dlg._cand_tiles[0].width()
+    assert anchor.height() == dlg._cand_tiles[0].height()
+    assert "기준" in anchor._badge.text()
+    titles = [w for w in dlg.findChildren(QLabel) if w.text() == dlg.windowTitle()]
+    assert titles == []
+    dlg.deleteLater()
+
+
+def test_tile_name_wraps_to_two_lines_keeping_the_tail(styled_qapp):
+    """같은 웨이퍼의 KLA 파일명은 머리(WaferID)가 전부 같다 — 꼬리(col·row)가 보여야 구분된다."""
+    from PyQt6.QtGui import QFont, QFontMetrics
+    from aoi_verification.app.ui.widgets.coord_calibration_dialog import _two_line_name
+    fm = QFontMetrics(QFont())
+    name = "31266529EWF6_16_16_40_1.jpg"
+    assert _two_line_name(name, fm, 10_000) == name
+    out = _two_line_name(name, fm, fm.horizontalAdvance("31266529EWF6_16_"))
+    first, second = out.split("\n")
+    assert first.endswith("_") and name.startswith(first)
+    assert second.endswith("40_1.jpg")
+    assert fm.horizontalAdvance(first) <= fm.horizontalAdvance("31266529EWF6_16_")
+    # 첫 토큰조차 안 들어가면 한 줄 줄임(…이 남는다)
+    assert "…" in _two_line_name(name, fm, fm.horizontalAdvance("3126"))
+
+
 def test_dialog_weak_auto_value_still_needs_pairs(styled_qapp, tmp_path):
     from aoi_verification.app.ui.widgets.coord_calibration_dialog import (
         CoordCalibrationDialog)

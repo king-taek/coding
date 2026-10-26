@@ -1,8 +1,11 @@
 """좌표 보정 화면 — KLA ↔ Camtek 매칭 직전, '같은 결함' 사진 쌍을 골라 어긋남을 뺀다.
 
-왼쪽: 기준 사진(짝 후보가 있는 것만, 후보가 적은 순).  오른쪽: 고른 사진을 크게 +
-가까운 die 의 검증 사진(그럴듯한 순).  같은 결함을 누르면 쌍이 기록되고, 바닥에
-쌍별 어긋남과 보정값(중앙값)·남은 오차가 보인다.  계산은 전부
+왼쪽: 기준 사진(짝 후보가 있는 것만, 후보가 적은 순).  오른쪽: 고른 기준 사진을
+**후보와 같은 크기로** 맨 앞에 두고, 눈금 너머에 가까운 die 의 검증 사진(그럴듯한 순).
+같은 크기로 나란히 놓아야 '같은 결함인가' 를 눈으로 견줄 수 있다 — 예전엔 기준 사진을
+크게 위에 두어 후보 줄이 아래로 밀려 파일명·거리가 접힌 채 보였다.  같은 결함을 누르면
+쌍이 기록되고, 바닥에 쌍별 어긋남과 보정값(중앙값)·남은 오차가 보인다.
+제목은 시트 제목줄이 그리므로 화면 안에 다시 쓰지 않는다.  계산은 전부
 :mod:`~aoi_verification.app.coords.calibration` 이 한다 — 이 파일은 화면만.
 
 결과는 :attr:`offset` — [보정 적용] 이면 ``(dx, dy)``(Camtek − KLA, µm), [보정
@@ -29,9 +32,9 @@ from .option_group import columns_for_width
 
 _SRC_TILE_PX = 120
 _CAND_TILE_PX = 200
-_PREVIEW_PX = 260
 _TILE_CHROME_W = 14
 _CAP_H = 20
+_NAME_LINES = 2          # 파일명 줄 수 — 아래 `_elide_name` 참조
 _GRID_SPACING = 8
 # 왼쪽 목록 상한 — 후보가 적은(=짝이 분명한) 사진부터 이만큼만 보인다.  보정은 몇 쌍이면
 # 되고, 수천 장을 타일로 만들면 여는 데만 수 초가 걸린다.
@@ -49,20 +52,41 @@ def _scroll_area(parent) -> QScrollArea:
     return sc
 
 
+def _two_line_name(text: str, fm: QFontMetrics, width: int) -> str:
+    """``_`` 토큰 경계에서 두 줄로 접은 파일명(순수 함수 — 테스트 `test_coord_calibration`)."""
+    if fm.horizontalAdvance(text) <= width:
+        return text
+    tokens = text.split("_")
+    first = ""
+    for i in range(len(tokens) - 1, 0, -1):          # 첫 줄에 최대한 많은 토큰
+        cand = "_".join(tokens[:i]) + "_"
+        if fm.horizontalAdvance(cand) <= width:
+            first, rest = cand, "_".join(tokens[i:])
+            break
+    else:
+        rest = text
+    if not first:                                    # 첫 토큰조차 안 들어가면 한 줄 줄임
+        return fm.elidedText(text, Qt.TextElideMode.ElideMiddle, width)
+    return first + "\n" + fm.elidedText(rest, Qt.TextElideMode.ElideMiddle, width)
+
+
 class _PhotoTile(QFrame):
     """타일 전체가 클릭 영역인 사진 카드(UI 관습 — 작은 체크박스 금지)."""
 
     clicked = pyqtSignal(object)          # key
 
     def __init__(self, key, path, px: int, *, kind: str = "thumb",
-                 parent=None) -> None:
+                 clickable: bool = True, parent=None) -> None:
         super().__init__(parent)
         self.key = key
         self._selected = False
+        self._px = px
+        self._name_text = path.name
         self.setObjectName("calTile")
         self.setProperty("role", "card-soft")
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedSize(px + _TILE_CHROME_W, px + 2 * _CAP_H + 20)
+        if clickable:
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFixedSize(px + _TILE_CHROME_W, px + (_NAME_LINES + 1) * _CAP_H + 20)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(6, 6, 6, 6)
         lay.setSpacing(2)
@@ -73,16 +97,32 @@ class _PhotoTile(QFrame):
         lay.addWidget(img, alignment=Qt.AlignmentFlag.AlignCenter)
         name = QLabel(self)
         name.setProperty("role", "muted")
-        name.setFixedHeight(_CAP_H)
-        name.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        name.setText(QFontMetrics(name.font()).elidedText(
-            path.name, Qt.TextElideMode.ElideMiddle, px - 4))
+        name.setFixedSize(px, _NAME_LINES * _CAP_H)
+        name.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
         name.setToolTip(path.name)
-        lay.addWidget(name)
+        lay.addWidget(name, alignment=Qt.AlignmentFlag.AlignHCenter)
+        self._name = name
+        self._elide_name()
         self._badge = QLabel("", self)
         self._badge.setFixedHeight(_CAP_H)
         self._badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(self._badge)
+
+    def _elide_name(self) -> None:
+        """파일명을 사진 폭 안에 **두 줄로** — 첫 줄은 ``_`` 토큰 단위로 들어가는 만큼,
+        둘째 줄은 나머지(안 들어가면 그 줄만 가운데를 줄인다).
+
+        한 줄 ElideMiddle 만 쓰면 ``312665…_1.jpg`` 처럼 WaferID 머리만 남고 **col·row 가
+        든 꼬리가 사라진다** — 같은 웨이퍼 사진은 머리가 전부 같아 서로 구분이 안 된다.
+        ★ 생성 시점과 ``showEvent`` 두 번 — QSS 폰트는 polish 뒤에야 라벨에 반영되므로
+        생성 시점 metrics 로만 재면 실제보다 짧게 잡혀 양끝이 잘렸다(캡처로 확인).
+        참조: ``thumb_grid._elide_caption``."""
+        self._name.setText(_two_line_name(self._name_text, QFontMetrics(self._name.font()),
+                                          max(24, self._px - 4)))
+
+    def showEvent(self, event):  # noqa: N802
+        super().showEvent(event)
+        self._elide_name()
 
     def set_badge(self, text: str) -> None:
         self._badge.setText(text)
@@ -142,9 +182,7 @@ class CoordCalibrationDialog(QDialog):
         root.setContentsMargins(m, m, m, m)
         root.setSpacing(10)
 
-        head = QLabel(i18n.KO.COORD_CAL_TITLE, self)
-        head.setProperty("role", "title")
-        root.addWidget(head)
+        # 제목은 시트 제목줄(`sheet_host` chrome)이 그린다 — 여기 또 쓰면 두 번 보인다.
         hint = QLabel(i18n.KO.COORD_CAL_HINT_FMT.format(
             src=self._src_dev, dst=self._dst_dev), self)
         hint.setProperty("role", "muted")
@@ -184,29 +222,26 @@ class CoordCalibrationDialog(QDialog):
         left.addWidget(self._src_scroll, stretch=1)
         body.addLayout(left)
 
-        # ── 오른쪽: 고른 사진 크게 + 후보 그리드.
+        # ── 오른쪽: 안내 한 줄 + [고른 기준 사진 | 눈금 | 후보 그리드] — 전부 같은 크기.
         right = QVBoxLayout()
         right.setSpacing(8)
-        top = QHBoxLayout()
-        top.setSpacing(12)
-        self._preview = QLabel(self)
-        self._preview.setFixedSize(_PREVIEW_PX, _PREVIEW_PX)
-        self._preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._preview.setProperty("role", "imagePlate")
-        top.addWidget(self._preview)
-        info = QVBoxLayout()
-        self._preview_name = QLabel(i18n.KO.COORD_CAL_PICK_FIRST, self)
-        self._preview_name.setProperty("role", "paneTitle")
-        self._preview_name.setWordWrap(True)
-        info.addWidget(self._preview_name)
-        self._cand_head = QLabel("", self)
-        self._cand_head.setProperty("role", "muted")
+        self._cand_head = QLabel(i18n.KO.COORD_CAL_PICK_FIRST, self)
+        self._cand_head.setProperty("role", "paneTitle")
         self._cand_head.setWordWrap(True)
-        info.addWidget(self._cand_head)
-        info.addStretch(1)
-        top.addLayout(info, stretch=1)
-        right.addLayout(top)
-
+        right.addWidget(self._cand_head)
+        row = QHBoxLayout()
+        row.setSpacing(12)
+        self._anchor_host = QWidget(self)
+        anchor_lay = QVBoxLayout(self._anchor_host)
+        anchor_lay.setContentsMargins(0, 0, 0, 0)
+        anchor_lay.setSpacing(4)
+        anchor_lay.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self._anchor_host.setFixedWidth(_CAND_TILE_PX + _TILE_CHROME_W)
+        self._anchor_tile: Optional[_PhotoTile] = None
+        row.addWidget(self._anchor_host, alignment=Qt.AlignmentFlag.AlignTop)
+        rule = QFrame(self)
+        rule.setProperty("role", "vrule")
+        row.addWidget(rule)
         self._cand_scroll = _scroll_area(self)
         self._cand_host = QWidget(self._cand_scroll)
         self._cand_grid = QGridLayout(self._cand_host)
@@ -215,7 +250,8 @@ class CoordCalibrationDialog(QDialog):
         self._cand_grid.setAlignment(Qt.AlignmentFlag.AlignTop
                                      | Qt.AlignmentFlag.AlignLeft)
         self._cand_scroll.setWidget(self._cand_host)
-        right.addWidget(self._cand_scroll, stretch=1)
+        row.addWidget(self._cand_scroll, stretch=1)
+        right.addLayout(row, stretch=1)
         body.addLayout(right, stretch=1)
         root.addLayout(body, stretch=1)
 
@@ -275,9 +311,14 @@ class CoordCalibrationDialog(QDialog):
             self._src_tiles[self._current].set_selected(False)
         self._current = key
         self._src_tiles[key].set_selected(True)
-        self._preview.setPixmap(
-            image_io.load_thumb_qpixmap(key.path, _PREVIEW_PX, kind="mid"))
-        self._preview_name.setText(key.path.name)
+        if self._anchor_tile is not None:
+            self._anchor_tile.hide()                # _fill_candidates 와 같은 이유
+            self._anchor_tile.deleteLater()
+        self._anchor_tile = _PhotoTile(key, key.path, _CAND_TILE_PX, kind="mid",
+                                       clickable=False, parent=self._anchor_host)
+        self._anchor_tile.set_badge(i18n.KO.COORD_CAL_ANCHOR_FMT.format(dev=self._src_dev))
+        self._anchor_host.layout().addWidget(self._anchor_tile)
+        self._anchor_tile.show()
         self._cand_head.setText(i18n.KO.COORD_CAL_CANDS_HEAD_FMT.format(
             dst=self._dst_dev))
         self._fill_candidates()

@@ -1296,14 +1296,14 @@ CENTER_CROP_TOOLTIP = "사진 가운데(결함 위치)만 잘라 크게 봅니�
 # 보정은 매칭 계산에만 쓰이고 엑셀·화면 좌표는 바뀌지 않는다(사용자 지시).
 COORD_CAL_TITLE = "좌표 보정 (KLA ↔ Camtek)"
 COORD_CAL_HINT_FMT = (
-    "왼쪽에서 {src} 사진을 하나 고르고, 오른쪽에서 같은 결함인 {dst} 사진을 누르세요. "
-    "3쌍쯤 고르면 두 장비 좌표의 어긋남을 계산해 매칭 전에 보정합니다.\n"
-    "보정은 매칭에만 쓰이고 엑셀·화면에 찍히는 좌표는 바뀌지 않습니다.")
+    "① 왼쪽에서 {src} 사진을 고르고  ② 오른쪽에서 같은 결함인 {dst} 사진을 누르세요 — 3쌍쯤이면 충분해요. "
+    "두 장비 좌표의 어긋남을 매칭 전에 보정합니다(엑셀·화면 좌표는 그대로).")
 COORD_CAL_SRC_HEAD_FMT = "{side} 사진 {n}장"
 COORD_CAL_SRC_MORE_FMT = "가까운 짝 후보가 있는 사진만 보여요 · 후보가 많은 {n}장은 생략"
 COORD_CAL_SIDE_REF_FMT = "기준({dev})"
 COORD_CAL_PICK_FIRST = "왼쪽에서 사진을 고르세요."
 COORD_CAL_CANDS_HEAD_FMT = "같은 결함인 {dst} 사진을 누르세요 — 그럴듯한 순서 · 숫자는 보정 전 거리"
+COORD_CAL_ANCHOR_FMT = "기준 ({dev})"
 COORD_CAL_DIST_FMT = "{d:.0f} µm"
 COORD_CAL_PAIRED_FMT = "✓ {i}번 쌍"
 COORD_CAL_PAIRS_NONE = "아직 고른 쌍이 없습니다 — 3쌍쯤 고르면 좋아요."
