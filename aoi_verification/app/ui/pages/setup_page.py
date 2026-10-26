@@ -62,6 +62,10 @@ class SetupInput:
     extract_wafer_map: bool = True
     # LOT 별 '일부 슬롯'(``extract_roots`` 와 같은 순서, ``None`` = 전체).
     extract_slots: Optional[list] = None
+    # 기준 1 ↔ 검증 여러 장비 — 두 번째부터의 검증 장비 ``[(폴더, 호기), …]``.
+    # 첫 검증 장비는 ``val_root``/``val_machine`` 그대로다(비면 예전과 똑같은 실행).
+    # 흐름은 `models/multi_val.py`.
+    extra_vals: Optional[list] = None
 
 
 # '실행 옵션'·'매칭 설정' 두 카드를 가로로 나란히 세우려면 이만큼은 있어야 한다.
@@ -588,6 +592,7 @@ class SetupPage(QWidget):
         self._build_lot_list()
         self.val_group, self.val_path_edit, self.val_machine_edit = \
             self._make_machine_group(i18n.KO.SETUP_VAL_GROUP)
+        self._build_val_list()
         self._device_cards = [self.ref_group, self.val_group]
         self._device_host = host
         # ★ 자기 폭이 정해진 뒤 다시 흘려야 한다 — B안에서는 이 행이 좁은 그리드 칸
@@ -683,6 +688,107 @@ class SetupPage(QWidget):
         """비어 있지 않은 LOT 줄의 경로들(위에서부터)."""
         return [r["edit"].text().strip() for r in self._lot_rows
                 if r["edit"].text().strip()]
+
+    # ------------------------------------------------------------------
+    # 기준 1 ↔ 검증 여러 장비 — 검증 카드 안의 추가 장비 줄 + [+ 검증 장비 추가]
+    # ------------------------------------------------------------------
+    MAX_VALS = 5             # 첫 검증 장비 포함
+
+    def _build_val_list(self) -> None:
+        """검증 카드 아래의 추가 장비 줄들(`_build_lot_list` 와 같은 모양).
+
+        줄마다 [폴더] [폴더 선택…] [호기] [✕].  하나도 없으면 예전 화면과 같다.
+        Defect 추출에서는 검증 카드째 숨는다."""
+        self._val_rows: list[dict] = []
+        host = QWidget(self.val_group)
+        host.setProperty("role", "rowHost")
+        lay = QVBoxLayout(host)
+        lay.setContentsMargins(0, 4, 0, 0)
+        lay.setSpacing(8)
+        self._val_rows_lay = QVBoxLayout()
+        self._val_rows_lay.setSpacing(8)
+        lay.addLayout(self._val_rows_lay)
+        self._val_add_btn = NeonButton("", role="ghost")
+        self._val_add_btn.clicked.connect(lambda: self._add_val_row())
+        add_row = QHBoxLayout()
+        add_row.addWidget(self._val_add_btn)
+        add_row.addStretch(1)
+        lay.addLayout(add_row)
+        self.val_group.body().addWidget(host)
+        self._val_list = host
+        self._refresh_val_add_btn()
+
+    def _add_val_row(self, path: str = "", machine: str = "") -> None:
+        if len(self._val_rows) + 1 >= self.MAX_VALS:
+            return
+        host = QWidget(self._val_list)
+        host.setProperty("role", "rowHost")
+        row = QHBoxLayout(host)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(10)
+        label = QLabel("", host)
+        edit = QLineEdit(host)
+        edit.setMinimumWidth(self._PATH_MIN_W)
+        edit.setPlaceholderText(i18n.KO.SETUP_FOLDER_PLACEHOLDER)
+        edit.setText(path)
+        browse = NeonButton(i18n.KO.BTN_BROWSE, role="ghost")
+        machine_edit = QLineEdit(host)
+        machine_edit.setPlaceholderText(i18n.KO.MULTI_VAL_MACHINE_PLACEHOLDER)
+        machine_edit.setMaximumWidth(140)
+        machine_edit.setText(machine)
+        remove = NeonButton("✕", role="ghost")
+        remove.setToolTip(i18n.KO.MULTI_VAL_REMOVE)
+        remove.setAccessibleName(i18n.KO.MULTI_VAL_REMOVE)
+        for w in (label, edit, browse, machine_edit, remove):
+            row.addWidget(w, 1 if w is edit else 0)
+        rec = {"host": host, "edit": edit, "machine": machine_edit, "label": label}
+        self._val_rows.append(rec)
+        browse.clicked.connect(lambda: self._browse(edit))
+        remove.clicked.connect(lambda: self._remove_val_row(rec))
+        self._val_rows_lay.addWidget(host)
+        self._refresh_val_add_btn()
+        if not path:
+            edit.setFocus()
+
+    def _remove_val_row(self, rec: dict) -> None:
+        self._val_rows.remove(rec)
+        rec["host"].setParent(None)
+        rec["host"].deleteLater()
+        self._refresh_val_add_btn()
+
+    def _refresh_val_add_btn(self) -> None:
+        n = len(self._val_rows) + 1
+        self._val_add_btn.setText(i18n.KO.MULTI_VAL_ADD_FMT.format(
+            n=n, max=self.MAX_VALS))
+        self._val_add_btn.setEnabled(n < self.MAX_VALS)
+        for k, r in enumerate(self._val_rows, start=2):        # 줄 번호
+            r["label"].setText(i18n.KO.MULTI_VAL_ROW_FMT.format(n=k))
+
+    def _collect_extra_vals(self, ref_root: Path, val_root: Path):
+        """추가 검증 장비 ``[(폴더, 호기), …]`` — 빈 줄은 건너뛴다.  잘못되면 None.
+
+        같은 폴더를 두 번 넣으면 같은 결과가 두 벌 나올 뿐이라 막는다(기준과 같은
+        폴더도 마찬가지 — 첫 검증 장비는 예전처럼 묻고 진행할 수 있다)."""
+        out: list[tuple[Path, str]] = []
+        seen = {ref_root.resolve(), val_root.resolve()}
+        for k, rec in enumerate(self._val_rows, start=2):
+            text = rec["edit"].text().strip()
+            if not text:
+                continue
+            root = Path(text)
+            if not root.is_dir():
+                sheets.warn(self, i18n.KO.APP_TITLE,
+                            i18n.KO.WARN_PATH_NOT_EXIST.format(path=root))
+                return None
+            if root.resolve() in seen:
+                sheets.warn(self, i18n.KO.APP_TITLE,
+                            i18n.KO.MULTI_VAL_DUPLICATE_FMT.format(path=root))
+                return None
+            seen.add(root.resolve())
+            machine = (rec["machine"].text().strip()
+                       or i18n.KO.MULTI_VAL_DEFAULT_MACHINE_FMT.format(n=k))
+            out.append((root, machine))
+        return out
 
     # -- 끌어다 놓기(Defect 추출) -------------------------------------
     @staticmethod
@@ -1743,6 +1849,10 @@ class SetupPage(QWidget):
         if not val_machine:
             val_machine = i18n.KO.DEFAULT_VAL_MACHINE
 
+        extra_vals = self._collect_extra_vals(ref_root, val_root)
+        if extra_vals is None:
+            return
+
         if ref_root.resolve() == val_root.resolve():
             r = sheets.ask(
                 self, i18n.KO.WARN_SAME_PATH_TITLE, i18n.KO.WARN_SAME_PATH_BODY,
@@ -1800,6 +1910,7 @@ class SetupPage(QWidget):
             coord_tolerance=coord_tolerance,
             selected_slots=(set(self._selected_slots)
                             if self._selected_slots is not None else None),
+            extra_vals=extra_vals or None,
         )
 
     def _collect_extract_input(self):

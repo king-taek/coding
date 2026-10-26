@@ -17,10 +17,15 @@ class MatchResult:
     ref_path: Path        # 기준 쪽 사진
     val_path: Path        # 검증 쪽 사진
     score: float
+    # 검증 장비 번호(기준 1 ↔ 검증 여러 장비, `models/multi_val.py`).  0 = 첫 검증 장비
+    # (장비가 하나면 늘 0).  다른 장비의 사진이 같은 이름이어도 키가 겹치지 않게 한다.
+    equip: int = 0
 
     @property
-    def key(self) -> tuple[str, str, str]:
-        return (self.slot, self.ref_path.name, self.val_path.name)
+    def key(self) -> tuple:
+        # 장비가 하나일 때의 키는 예전과 똑같다(3칸) — 장비 번호는 0 이 아닐 때만 붙는다.
+        base = (self.slot, self.ref_path.name, self.val_path.name)
+        return base + (self.equip,) if self.equip else base
 
 
 @dataclass
@@ -30,6 +35,7 @@ class MissEntry:
     side: str            # "ref" or "val" (어느 장비에서 봤는데 상대가 못 봤는지)
     path: Path
     note: str = ""
+    equip: int = 0       # 검증 장비 번호 — `MatchResult.equip` 과 같다
 
 
 @dataclass

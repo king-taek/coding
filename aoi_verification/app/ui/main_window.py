@@ -15,6 +15,7 @@ import logging
 import os
 import time
 from collections import defaultdict
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -47,6 +48,7 @@ from .widgets.loading_overlay import LoadingOverlay
 from .widgets import sheet_host as sheets
 from .widgets.sheet_host import SheetHost
 from .widgets.window_controls import add_fullscreen_shortcut
+from .multi_val_flow import MultiValFlow
 
 # ★ 무거운 것은 **여기서 import 하지 않는다**(시작 속도).  나머지 네 페이지와
 #   썸네일러는 cv2·OpenVINO·numpy·PIL 을 줄줄이 끌고 오는데, 첫 화면(SetupPage)은
@@ -215,7 +217,7 @@ class _CalibPrepWorker(QThread):
             _LOG.exception("좌표 보정 준비 실패 — 보정 없이 진행")
             self.ready.emit(([], None))
 
-class MainWindow(QMainWindow):
+class MainWindow(MultiValFlow, QMainWindow):
 
     # 좁은 창에서도 동작하도록 충분히 작게 (#2 — 사용자 요청: 좌우 스크롤
     # 발생하지 않게 상하 스크롤만으로 충분한 상태).  Stage 1/2 페이지는
@@ -1209,6 +1211,8 @@ class MainWindow(QMainWindow):
         self._reset_cross_state()
         if self._is_cross():
             self._cross_stage = "A"
+        # 기준 1 ↔ 검증 여러 장비 — 장비마다 구간을 만든다(`ui/multi_val_flow.py`).
+        self._init_legs(inp)
         self._run_log_written = False
         self._thumbs_handled = False        # 썸네일 완료 one-shot 가드 리셋(#C2)
         self._stop_lazy_thumb_pools()
@@ -1225,10 +1229,7 @@ class MainWindow(QMainWindow):
         #   만들고 검증 폴더의 INI 한 장을 읽는데, 그 폴더가 NAS 면 왕복이 초 단위일 수
         #   있다 — 예전에는 그동안 아무 표시도 없어 [검증 시작] 이 먹지 않은 것처럼
         #   보였다.
-        self._loading.show_overlay(i18n.KO.LOAD_SCAN, cancelable=True,
-                                   step=(1, 3),
-                                   steps=self._journey_steps())
-        QApplication.processEvents()
+        self._show_scan_overlay()
 
         # 결과 파일의 **이름·자리만** 정한다 — 파일 자체는 [엑셀로 저장] 때 만든다.
         self._prepare_working_file(inp)
@@ -1244,6 +1245,18 @@ class MainWindow(QMainWindow):
         # 실행에서도 옛 메타가 엑셀·실행 로그에 새어 나간다.
         self._slot_meta_ref = None
         self._slot_meta_val = None
+        self._launch_scan(inp)
+
+    def _show_scan_overlay(self) -> None:
+        self._loading.show_overlay(self._leg_message(i18n.KO.LOAD_SCAN),
+                                   cancelable=True, step=(1, 3),
+                                   steps=self._journey_steps())
+        QApplication.processEvents()
+
+    def _launch_scan(self, inp: SetupInput) -> None:
+        """폴더 스캔 워커를 띄운다 — 실행 시작과 다음 검증 장비(구간)가 같이 쓴다."""
+        if self._multi() and self._leg_idx > 0:
+            self._show_scan_overlay()
 
         # 폴더 스캔 — 워커에서 (U-05).  진행은 시그널로만 올라온다.
         # ★ '일부 슬롯만 진행' 이면 **그 슬롯 폴더만** 연다.  예전에는 전부 훑은 뒤
@@ -1282,7 +1295,7 @@ class MainWindow(QMainWindow):
     def _on_scan_progress(self, token: int, done: int, total: int) -> None:
         if token != self._scan_token:
             return
-        self._loading.set_progress(done, total, i18n.KO.LOAD_SCAN)
+        self._loading.set_progress(done, total, self._leg_message(i18n.KO.LOAD_SCAN))
 
     def _on_scan_failed(self, token: int, message: str) -> None:
         """스캔이 실패했다 — 오버레이를 반드시 내리고 알린다.
@@ -1295,7 +1308,11 @@ class MainWindow(QMainWindow):
         self._loading.hide_overlay()
         _LOG.warning("폴더 스캔 실패: %s", message)
         sheets.warn(self, i18n.KO.APP_TITLE,
-                    i18n.KO.WARN_SCAN_FAILED_FMT.format(detail=message))
+                    self._leg_message(
+                        i18n.KO.WARN_SCAN_FAILED_FMT.format(detail=message)))
+        if self._multi() and self._leg_idx > 0:
+            # 앞 장비들의 매칭은 끝났다 — 이 장비만 빼고 이어 간다.
+            self._multi_after_match_empty()
 
     def _on_scan_done(self, token: int, sr: ScanResult) -> None:
         """스캔이 끝났다 — 여기서부터는 예전 `_on_start` 의 나머지 그대로다.
@@ -1359,7 +1376,10 @@ class MainWindow(QMainWindow):
         common = sr.common_slot_names
         if not common:
             self._loading.hide_overlay()
-            sheets.warn(self, i18n.KO.APP_TITLE, i18n.KO.WARN_NO_SLOTS)
+            sheets.warn(self, i18n.KO.APP_TITLE,
+                        self._leg_message(i18n.KO.WARN_NO_SLOTS))
+            if self._multi() and self._leg_idx > 0:
+                self._multi_after_match_empty()      # 이 장비만 빼고 이어 간다
             return
         self._continue_start_after_scan(common)
 
@@ -1626,6 +1646,8 @@ class MainWindow(QMainWindow):
             self._enter_stage2_auto_all()
             return
         self._loading.hide_overlay()
+        if self._multi_skip_select():        # 둘째 검증 장비부터 — 선별은 한 번만
+            return
         self._phase = PHASE_A_SELECT
         self._enter_stage1_phase_a()
 
@@ -1663,6 +1685,9 @@ class MainWindow(QMainWindow):
         if self._cross_stage == "B":
             self._store_b_review(kept, unmatched_refs)
             self._finish_session()
+            return
+        if self._multi():
+            self._multi_review_done(kept, unmatched_refs)
             return
         self._reviewed_matches = list(kept)
         self._a_reviewed = True
@@ -1724,7 +1749,7 @@ class MainWindow(QMainWindow):
         self._cross_stage = "B"
         # ★ B 를 MatchPage 에 싣는 순간 A 의 선계산 결과(fast_results)가 지워진다.
         #   결과 화면의 실패 검토가 A 쪽 미매칭에도 그 값을 쓰므로 사본을 떠 둔다.
-        ctx = self._match_page.review_context()
+        ctx = self._review_ctx()
         self._ctx_a = (dict(ctx.fast_results), frozenset(ctx.coord_classical_refs))
         sr = self._scan
         val_by_slot = {n: list(sr.slots[n].val_images) for n in sr.common_slot_names}
@@ -2109,6 +2134,11 @@ class MainWindow(QMainWindow):
         if self._input is None or self._scan is None:
             return
         reverse = self._cross_stage == "B"
+        if self._multi():
+            if not reverse:                  # 다음 검증 장비로, 다 했으면 합친 검토
+                self._multi_after_match()
+                return
+            self._snapshot_leg_ctx()         # 2차 — 결과 화면이 이 장비 것을 쓰게
         merged = list(self._matches_b) if reverse else self._merge_matches()
         self._match_review_page.set_reverse(reverse)
         # MatchPage 가 들고 있는 점수 캐시 + val_pool 을 매치 검토 페이지에
@@ -2201,6 +2231,8 @@ class MainWindow(QMainWindow):
         없음 표시를 **전부 지워 버린다**.  검토 결과(`_reviewed_matches`)를 기반으로,
         '매치 없음' 표시까지 복원해서 들어간다."""
         if self._match_review_page is None or self._match_page is None:
+            return
+        if self._multi_reenter_review():
             return
         # ★ 교차검증은 **두 번째 방향(B)의 검토**로 돌아간다.  MatchPage 가 지금 들고 있는
         #   후보·점수가 B 의 것이라 A 검토는 다시 만들 수 없다(A 의 확정분은 그대로 둔다).
@@ -2457,6 +2489,13 @@ class MainWindow(QMainWindow):
     # ==================================================================
     def _finish_session(self) -> None:
         assert self._scan is not None and self._input is not None
+        if self._multi_leg_finished():       # 여러 검증 장비 — 다음 2차 또는 결과로
+            return
+        result = self._build_final_result()
+        self._show_final_result(result)
+
+    def _build_final_result(self) -> FinalResult:
+        """지금 실행(구간)의 최종 결과 — 화면 상태를 바꾸지 않는다."""
         # 자동 모드 + 매치 검토를 거친 경우 reviewed_matches 가 우선(비어 있어도).
         merged = self._a_final_matches()
         unmatched_refs = self._compute_unmatched_refs()
@@ -2503,6 +2542,9 @@ class MainWindow(QMainWindow):
                 if s.ref_images or s.val_images
             },
         )
+        return result
+
+    def _show_final_result(self, result: FinalResult) -> None:
         # 결과 페이지에는 ‘결과 파일이 놓일 경로’ 와 ‘템플릿 원본’ 둘 다 전달
         # (파일은 아직 없다 — [엑셀로 저장] 때 그 경로에 만들어진다).
         auto_mode = (
@@ -2516,7 +2558,7 @@ class MainWindow(QMainWindow):
             slot = self._scan.slots[slot_name]
             review_pool[(slot_name, "ref")] = list(slot.val_images)
             review_pool[(slot_name, "val")] = list(slot.ref_images)
-        ctx = self._match_page.review_context()
+        ctx = self._review_ctx()
         fast_results, classical = ctx.fast_results, ctx.coord_classical_refs
         if self._ctx_a is not None:
             # 교차검증 — A 의 선계산(키 = 기준 사진)과 B 의 것(키 = 검증 사진)을 합친다.
@@ -2539,6 +2581,8 @@ class MainWindow(QMainWindow):
             review_scores=ctx.review_scores,
             coord_classical_refs=classical,
         )
+        # 단일 실행이면 장비 버튼을 감춘다(여러 장비면 `_multi_show_result` 가 다시 건다).
+        self._result_page.set_equipments([], 0, None)
         self._show_page(self._result_page)
         self._phase = PHASE_NONE
         self._write_run_log()
@@ -2608,6 +2652,8 @@ class MainWindow(QMainWindow):
             self._template_used = template
 
         # 파일 이름 — "장비Layer_자재검증(장비기준)" (사용자 요청).
+        if self._multi():                    # 검증 장비 여러 대 — 이름을 모두 적는다
+            inp = replace(inp, val_machine="+".join(self._leg_labels()))
         dst_name = self._suggest_result_name(inp)
         dst = paths.results_dir() / dst_name
         if dst.exists():
@@ -2716,6 +2762,9 @@ class MainWindow(QMainWindow):
         self._reviewed_unmatched_keys = set()
         self._reviewed_all_matches = []
         self._reset_cross_state()
+        self._legs = []
+        self._leg_idx = 0
+        self._leg_ctx = None
         self._run_log_written = False
         self._phase = PHASE_NONE
         self._slot_meta_ref = None
@@ -2803,6 +2852,7 @@ class MainWindow(QMainWindow):
         # 실패 검토에서 새로 확정한 매치가 결과 객체에만 남아 있으면, 검토로 돌아갔다
         # 재완료할 때 새 FinalResult 가 만들어지며 사라진다 — 여기로 되돌려 받는다.
         self._result_page.result_edited.connect(self._on_result_edited)
+        self._result_page.equip_requested.connect(self._on_equip_requested)
 
     def _start_backend_import_async(self) -> None:
         """무거운 모듈을 **백그라운드 스레드에서 import 만** 한다.

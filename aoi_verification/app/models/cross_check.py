@@ -32,7 +32,7 @@ SINGLE_MODE = "single"
 def swap(m: MatchResult) -> MatchResult:
     """기준·검증 자리를 맞바꾼 새 매치 — 큐 방향 ↔ 정방향 변환(자기 역함수)."""
     return MatchResult(slot=m.slot, ref_path=m.val_path, val_path=m.ref_path,
-                       score=m.score)
+                       score=m.score, equip=m.equip)
 
 
 def reverse_queue(val_by_slot: dict, a_matches: Iterable[MatchResult]) -> dict:
@@ -49,7 +49,8 @@ def as_val_misses(entries: Iterable[MissEntry]) -> list[MissEntry]:
     """B 에서 짝을 못 찾은 사진(큐 방향 ``side="ref"``) → 검증 쪽 미매칭(``side="val"``).
 
     '검증 장비는 봤는데 기준 장비가 못 본' 결함이다."""
-    return [MissEntry(slot=e.slot, side="val", path=Path(e.path), note=e.note)
+    return [MissEntry(slot=e.slot, side="val", path=Path(e.path), note=e.note,
+                      equip=e.equip)
             for e in entries]
 
 
