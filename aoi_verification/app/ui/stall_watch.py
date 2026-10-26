@@ -67,6 +67,11 @@ def watch(parent, on_stall: Callable[[float, str], None], *,
         timer.setInterval(_TICK_MS)
         setattr(parent, _TIMER_ATTR, timer)
     else:
+        # ★ 다시 걸기 전에 **진행 중이던 감시의 밀린 정지를 먼저 보고한다.**
+        #   정지 구간 안에서 호출부가 다시 걸면(폴더 창이 닫히며 UI 가 막힌 그 슬롯
+        #   안에서 `closed` 가 와 6초 감시로 바꿔 거는 경우) 지각한 하트비트는 아직
+        #   오지 않았는데 기준 시각이 리셋돼 — 재려던 바로 그 구간이 사라진다.
+        _flush(timer)
         try:
             timer.timeout.disconnect()     # 지난 감시의 콜백을 떼고 다시 건다
         except TypeError:
@@ -75,8 +80,7 @@ def watch(parent, on_stall: Callable[[float, str], None], *,
     last = [time.perf_counter()]
     deadline = last[0] + seconds
 
-    def _tick() -> None:
-        now = time.perf_counter()
+    def _report(now: float) -> None:
         late_ms = (now - last[0]) * 1000.0 - _TICK_MS
         last[0] = now
         if late_ms >= threshold_ms:
@@ -84,9 +88,21 @@ def watch(parent, on_stall: Callable[[float, str], None], *,
                 on_stall(late_ms / 1000.0, running_jobs())
             except Exception:
                 pass                       # 진단이 앱을 멈추게 하지 않는다
+
+    def _tick() -> None:
+        now = time.perf_counter()
+        _report(now)
         if now >= deadline:
             timer.stop()                   # ⚠ 지우지 않는다 — 수명은 부모가 쥔다
 
     timer.timeout.connect(_tick)
+    timer._stall_report = _report          # `_flush` 가 쓴다 — 감시 중일 때만 의미
     timer.start()
     return timer
+
+
+def _flush(timer: QTimer) -> None:
+    """돌고 있는 감시가 있으면 지금까지의 지각을 그 감시의 콜백으로 보고한다."""
+    report = getattr(timer, "_stall_report", None)
+    if report is not None and timer.isActive():
+        report(time.perf_counter())
