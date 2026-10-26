@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from collections import defaultdict
 from datetime import datetime
@@ -39,6 +40,7 @@ from ..models.slot import (ImageItem, ScanResult, drop_empty_unmatched,
 from ..utils import paths, wafer_id, wakelock
 from ..utils import prefs as _prefs
 from ..utils.prefs import AutomationLevel, EngineMode
+from ..workers import thumb_plan      # 순수 로직(Qt·numpy 없음) — 무거운 썸네일러와 별개
 from .pages.setup_page import SetupInput, SetupPage
 from .widgets.journey_rail import JourneyRail
 from .widgets.loading_overlay import LoadingOverlay
@@ -1209,6 +1211,8 @@ class MainWindow(QMainWindow):
             self._cross_stage = "A"
         self._run_log_written = False
         self._thumbs_handled = False        # 썸네일 완료 one-shot 가드 리셋(#C2)
+        self._stop_lazy_thumb_pools()
+        self._lazy_val_thumbs = False
         # 타일 픽스맵 캐시 비우기 — 폴더가 바뀌어도 stale 픽스맵이 남지 않게(#렉).
         try:
             from ..utils import image_io as _io
@@ -1374,11 +1378,14 @@ class MainWindow(QMainWindow):
             i18n.KO.LOAD_THUMBNAIL, cancelable=True,
             step=(2, 3), steps=self._journey_steps())
         QApplication.processEvents()
-        all_items: list[ImageItem] = []
-        for name in common:
-            slot = sr.slots[name]
-            all_items.extend(slot.ref_images)
-            all_items.extend(slot.val_images)
+        # 좌표 매칭은 썸네일을 보지 않는다 — 검증 사진은 매칭 후보로 나온 것만 뒤에서
+        # 만들고, 여기서는 기준 사진만 기다린다(사용자 결정 2026-10-26).
+        self._lazy_val_thumbs = (
+            EngineMode.is_coordinate(
+                getattr(self._input, "engine_mode", EngineMode.COORDINATE))
+            and not self._is_extract())
+        all_items = thumb_plan.startup_items(sr.slots, common,
+                                             lazy_val=self._lazy_val_thumbs)
 
         # 이미지 수에 따라 화질 티어 자동 선택 — 빠른 모드(썸네일 화질↓)는 상시 적용.
         per_side_total = max(
@@ -1433,6 +1440,111 @@ class MainWindow(QMainWindow):
             return
         self._thumb_pool.start()
 
+    # ------------------------------------------------------------------
+    # 좌표 매칭 — 검증 사진 썸네일을 필요한 것만 뒤에서 (`workers/thumb_plan`)
+    # ------------------------------------------------------------------
+    # 좌표 매칭이면 검증 사진 썸네일을 시작 때 기다리지 않는다(`workers/thumb_plan`).
+    # 그 대신 뒤에서 도는 풀들 — 후보 사진용·교차검증 2차 대비(저부하)·2차 진입 마무리.
+    # 클래스 기본값이라 `_on_start` 전에 읽혀도 안전하다(`_cross_stage` 와 같은 방식).
+    _lazy_val_thumbs = False
+    _cand_pool = None
+    _cross_b_pool = None
+    _b_wait_pool = None
+    _b_wait_queue: Optional[list] = None
+
+    def _new_thumb_pool(self, **kw):
+        from ..workers.thumbnailer import ThumbnailPool
+        return ThumbnailPool(tier=self._sizing_tier, also_mid=True, parent=self, **kw)
+
+    def _on_coord_candidates(self, _slot: str, items: list) -> None:
+        """좌표 매칭이 슬롯 하나를 끝냈다 — 그 슬롯의 후보 사진 썸네일을 뒤에서 만든다.
+
+        화면은 썸네일이 없으면 그 자리에서 만들므로, 이 풀은 '미리' 일 뿐 정답에는
+        영향이 없다.  화면을 쓰는 동안이라 절반 코어·최저 우선순위로 돌린다."""
+        if not self._lazy_val_thumbs or not items:
+            return
+        if self._cand_pool is None:
+            self._cand_pool = self._new_thumb_pool(
+                num_workers=max(1, (os.cpu_count() or 2) // 2), low_priority=True)
+            self._cand_seen: set = set()
+        new = [it for it in items if it.path not in self._cand_seen]
+        self._cand_seen.update(it.path for it in new)
+        if new:
+            self._cand_pool.enqueue(new)
+            self._cand_pool.start()
+
+    def _start_cross_b_prefetch(self) -> None:
+        """교차검증 1차 매칭 끝 — 2차 큐에 들어갈 검증 사진 썸네일을 **천천히** 만든다.
+
+        사용자 결정: 컴퓨터 부하가 심하지 않게 — 일꾼 1명·OS 우선순위 최저.
+        1차 검토에서 짝을 풀면 그 사진도 2차 큐에 들어가지만, 그 사진은 이미 후보
+        썸네일로 만들어져 있다(짝이 됐다 = 후보였다)."""
+        if (not self._lazy_val_thumbs or self._cross_stage != "A"
+                or self._cross_b_pool is not None or self._scan is None):
+            return
+        sr = self._scan
+        val_by_slot = {n: list(sr.slots[n].val_images) for n in sr.common_slot_names}
+        items = thumb_plan.cross_b_prefetch_items(val_by_slot, self._matches_a)
+        if not items:
+            return
+        self._cross_b_pool = self._new_thumb_pool(num_workers=1, low_priority=True)
+        self._cross_b_pool.enqueue(items)
+        self._cross_b_pool.start()
+
+    def _wait_cross_b_thumbs(self, queue: list) -> None:
+        """2차 선별 진입 — 아직 안 만든 썸네일을 **전속력으로** 마저 만든 뒤 들어간다
+        (사용자 결정 '가').  이미 만든 사진은 캐시 적중이라 금방 지나간다."""
+        if self._cross_b_pool is not None:
+            self._cross_b_pool.stop()        # 저부하 풀은 할 일을 넘기고 물러난다
+        pool = self._new_thumb_pool()
+        self._b_wait_pool = pool
+        self._b_wait_queue = list(queue)
+        self._loading.show_overlay(i18n.KO.LOAD_THUMBNAIL_CROSS_B, cancelable=True)
+        self._loading.set_progress(0, len(queue), i18n.KO.LOAD_THUMBNAIL_CROSS_B)
+        pool.enqueue(queue)
+        pool.signals.progress.connect(self._on_b_wait_progress)
+        pool.signals.finished.connect(self._on_b_wait_finished)
+        pool.start()
+
+    def _on_b_wait_progress(self, done: int, total: int, _path: str) -> None:
+        if self._b_wait_queue is not None:
+            self._loading.set_progress(done, total, i18n.KO.LOAD_THUMBNAIL_CROSS_B)
+
+    def _on_b_wait_finished(self) -> None:
+        # finished 콜백 안에서 페이지를 바꾸지 않는다(`_on_thumbs_ready` 와 같은 이유).
+        QTimer.singleShot(0, self._show_cross_b_select)
+
+    def _show_cross_b_select(self) -> None:
+        """2차 선별 화면(올인원이면 곧장 2차 매칭) — 썸네일 마무리(또는 [중지]) 뒤
+        한 번만 들어간다."""
+        queue, self._b_wait_queue = self._b_wait_queue, None
+        if queue is None:
+            return
+        if self._b_wait_pool is not None:       # 썸네일 마무리 오버레이를 내린다
+            self._loading.hide_overlay()
+        if self._cross_stage != "B":
+            return
+        if self._input.automation_level == AutomationLevel.AUTO_ALL:
+            self._start_cross_b_match(queue)
+            return
+        self._select_page.set_extract_mode(False)
+        self._select_page.set_reverse(True)
+        self._select_page.load_state(queue=queue, targets={}, excluded={},
+                                     history=[])
+        self._phase = PHASE_B_SELECT
+        self._show_page(self._select_page)
+
+    def _stop_lazy_thumb_pools(self, wait_ms: int = 0) -> None:
+        """뒤에서 도는 썸네일 풀을 멈춘다 — 새 실행·새 세션·종료 때."""
+        for name in ("_cand_pool", "_cross_b_pool", "_b_wait_pool"):
+            pool = getattr(self, name, None)
+            if pool is not None:
+                pool.stop()
+                if wait_ms:
+                    pool.wait(wait_ms)
+            setattr(self, name, None)
+        self._b_wait_queue = None
+
     def _on_thumbs_ready(self) -> None:
         """썸네일 풀 finished 시그널 슬롯 — 모달/페이지 전환은 한 틱 뒤로 defer.
 
@@ -1468,6 +1580,12 @@ class MainWindow(QMainWindow):
         이미 끝난 풀에 호출해도 무해하므로 그 조합으로 가드한다."""
         if self._stage == "scan":
             self._cancel_scan()
+            return
+        if self._b_wait_queue is not None:
+            # 교차검증 2차 진입의 썸네일 마무리 — 멈추고 들어간다(남은 것은 화면이 만든다).
+            if self._b_wait_pool is not None:
+                self._b_wait_pool.stop()
+            self._show_cross_b_select()
             return
         pool = self._thumb_pool
         if pool is not None and not self._thumbs_handled:
@@ -1615,15 +1733,12 @@ class MainWindow(QMainWindow):
         if not queue:                       # 검증 사진이 전부 A 에서 짝지어졌다
             self._finish_session()
             return
-        if self._input.automation_level == AutomationLevel.AUTO_ALL:
-            self._start_cross_b_match(queue)
+        self._b_wait_queue = list(queue)
+        if self._lazy_val_thumbs:
+            # 올인원도 기다린다 — 2차 검토 화면이 이 사진들을 곧바로 그린다.
+            self._wait_cross_b_thumbs(queue)
             return
-        self._select_page.set_extract_mode(False)
-        self._select_page.set_reverse(True)
-        self._select_page.load_state(queue=queue, targets={}, excluded={},
-                                     history=[])
-        self._phase = PHASE_B_SELECT
-        self._show_page(self._select_page)
+        self._show_cross_b_select()
 
     def _start_cross_b_match(self, queue: list[ImageItem]) -> None:
         """B 매칭 — 큐는 검증 사진, 후보 풀은 같은 슬롯의 기준 사진 전부.
@@ -1969,6 +2084,8 @@ class MainWindow(QMainWindow):
         if self._phase in (PHASE_A_MATCH, PHASE_B_MATCH):
             skipped = (self._skipped_b if self._phase == PHASE_B_MATCH
                        else self._skipped_a)
+            if self._phase == PHASE_A_MATCH:
+                self._start_cross_b_prefetch()
             st = self._match_page.get_state()
             if st is not None:
                 # 미탐으로 기록할 것은 ‘매칭 없음 확정’ 만. ‘잠시 보류’ 는 사용자
@@ -2589,6 +2706,7 @@ class MainWindow(QMainWindow):
         self._coord_offset = None
         # #14 세션 종료 — 절전 억제 해제.
         wakelock.release()
+        self._stop_lazy_thumb_pools()
         self._matches_a.clear()
         self._skipped_a.clear()
         self._stage1_a_snapshot = None
@@ -2678,6 +2796,7 @@ class MainWindow(QMainWindow):
         self._match_page.skipped_changed.connect(self._schedule_autosave)
         self._match_page.finished.connect(self._on_match_finished)
         self._match_page.cancelled.connect(self._on_match_cancelled)
+        self._match_page.coord_candidates_ready.connect(self._on_coord_candidates)
         self._result_page.new_session_requested.connect(self._new_session)
         self._match_review_page.finished.connect(self._on_match_review_done)
         self._result_page.back_to_review_requested.connect(self._reenter_review)
@@ -3057,6 +3176,7 @@ class MainWindow(QMainWindow):
         if self._thumb_pool is not None:
             self._thumb_pool.stop()
             self._thumb_pool.wait(1000)
+        self._stop_lazy_thumb_pools(wait_ms=500)
         # 폴더 스캔 워커 (U-05) — 토큰을 올려 늦은 결과를 무효화하고 멈추라고 알린다.
         # 기다리지는 않는다: `scan` 은 NAS 응답을 기다리는 중일 수 있어 종료가 그만큼
         # 늦어진다.  daemon 이 아니라 QThread 지만 `_LIVE_SCANS` 가 수명을 잡고 있고,

@@ -30,6 +30,7 @@ from ...similarity.slot_features import (SlotFeatureCache, SlotPrecomputeWorker,
 from ...workers.matcher import Candidate, MatcherWorker
 from ...workers import efficiency_matcher as _eff
 from ...workers import coord_matcher as _coord
+from ...workers import thumb_plan
 from ...utils.prefs import EngineMode
 from .progress_row import ProgressRowMixin
 from ..widgets.app_logo import build_logo_label
@@ -109,6 +110,9 @@ class MatchPage(ProgressRowMixin, QWidget):
     skipped_changed = pyqtSignal()              # 외부 자동 저장 트리거
     finished = pyqtSignal()                     # 모든 큐 처리 완료
     cancelled = pyqtSignal()                    # #8 사용자가 중지 버튼 누름
+    # 좌표 매칭이 슬롯 하나를 끝냈다 — (슬롯, 그 슬롯의 후보로 나온 사진들).
+    # 본창이 그 사진들의 썸네일만 뒤에서 만든다(`workers/thumb_plan`).
+    coord_candidates_ready = pyqtSignal(str, object)
 
     # 좁은 창에선 중앙/우측 2-pane 을 세로 스택으로 자동 전환 (#2).
     _RESPONSIVE_THRESH_LO = 840
@@ -695,6 +699,9 @@ class MatchPage(ProgressRowMixin, QWidget):
         self.bg_status_label.setText(
             i18n.KO.PRECOMPUTE_BG_STATUS_FMT.format(idx=idx, total=total)
         )
+        if self._coord_mode and self._state is not None:
+            self.coord_candidates_ready.emit(slot, thumb_plan.candidate_items(
+                self._fast_results, slot, self._state.val_pool.get(slot, [])))
         if not self._streaming_precompute:
             return
         if idx == 1:
