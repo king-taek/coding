@@ -314,3 +314,21 @@ def test_dev_wanted_is_release_set_plus_dev():
     assert not w("docs/개발기록.md") and not w("scripts/internal/build.bat")
     assert not w("CLAUDE.md") and not w("pytest.ini")
     assert not w("aoi_verification/app/ui/assets/font/NanumSquareB.otf")
+
+
+def test_dialog_log_button_opens_the_cache_folder(styled_qapp, monkeypatch):
+    """[로그 폴더 열기] 는 app.log 가 있는 캐시 루트를 탐색기로 연다(사용자 요청)."""
+    from PyQt6.QtGui import QDesktopServices
+    from aoi_verification.app.ui.widgets.dev_mode_dialog import DevModeDialog
+    from aoi_verification.app.utils import paths
+
+    opened: list[str] = []
+    monkeypatch.setattr(QDesktopServices, "openUrl",
+                        staticmethod(lambda url: opened.append(url.toLocalFile())))
+    dlg = DevModeDialog()
+    try:
+        assert "app.log" in dlg.btn_log.toolTip()
+        dlg.btn_log.click()
+        assert opened == [str(paths.cache_root())]
+    finally:
+        dlg.deleteLater()
