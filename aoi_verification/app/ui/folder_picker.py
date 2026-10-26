@@ -47,16 +47,22 @@ _LOG = logging.getLogger(__name__)
 class FolderPicker(QObject):
     """폴더 하나를 고르는 비동기 OS 브라우저.
 
-    ``picked(path)`` 는 고른 뒤에만, ``closed(chosen, open_seconds)`` 는 닫힐 때마다
-    (취소 포함) 온다 — 호출부는 ``closed`` 에서 정지 계측을 켠다."""
+    ``picked(path)`` 는 고른 뒤에만, ``closed(chosen, open_seconds, since_nav)`` 는
+    닫힐 때마다(취소 포함) 온다.  ``since_nav`` 는 **사용자가 창 안에서 마지막으로
+    폴더를 누른 뒤 창이 닫히기까지** 걸린 초다(안 눌렀으면 -1) — '열려 있던 시간' 에는
+    사용자가 폴더를 찾은 시간이 섞여 있어, 멈춤이 창 **안쪽**(Windows 가 닫는 동안)에
+    있는지 보려면 이 꼬리 구간을 따로 재야 한다(실측: 닫힌 뒤의 UI 정지는 0건이었는데
+    신고는 남았다).  네이티브 창의 폴더 이동은 ``directoryEntered``/``currentChanged``
+    로 들어온다."""
 
     picked = pyqtSignal(str)
-    closed = pyqtSignal(bool, float)
+    closed = pyqtSignal(bool, float, float)
 
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
         self._dialog: Optional[QFileDialog] = None
         self._opened_at = 0.0
+        self._last_nav: Optional[float] = None
         self._chosen = False
 
     @property
@@ -73,6 +79,7 @@ class FolderPicker(QObject):
         if start:
             dlg.setDirectory(start)
         self._chosen = False
+        self._last_nav = None
         self._opened_at = time.perf_counter()
         dlg.open()                       # exec() 가 아니다 — 모듈 docstring
 
@@ -85,6 +92,8 @@ class FolderPicker(QObject):
             dlg.setOption(QFileDialog.Option.ShowDirsOnly, True)
             dlg.setAcceptMode(QFileDialog.AcceptMode.AcceptOpen)
             dlg.fileSelected.connect(self._on_selected)
+            dlg.directoryEntered.connect(self._on_nav)
+            dlg.currentChanged.connect(self._on_nav)
             dlg.finished.connect(self._on_finished)
             self._dialog = dlg
         else:
@@ -97,6 +106,10 @@ class FolderPicker(QObject):
         self._chosen = True
         self.picked.emit(path)
 
+    def _on_nav(self, _path: str) -> None:
+        self._last_nav = time.perf_counter()
+
     def _on_finished(self, _result: int) -> None:
-        open_s = time.perf_counter() - self._opened_at
-        self.closed.emit(self._chosen, open_s)
+        now = time.perf_counter()
+        since_nav = -1.0 if self._last_nav is None else now - self._last_nav
+        self.closed.emit(self._chosen, now - self._opened_at, since_nav)

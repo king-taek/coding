@@ -114,6 +114,28 @@ def test_rearming_reuses_the_same_timer(qapp):
 # ---------------------------------------------------------------------------
 # 설정 화면이 실제로 무엇을 남기는가
 # ---------------------------------------------------------------------------
+def test_rearming_inside_a_stall_reports_it_first(qapp):
+    """정지 구간 안에서 다시 걸어도 그 정지는 잃지 않는다.
+
+    폴더 창이 닫히며 UI 가 막힌 그 슬롯 안에서 `closed` 가 와 6초 감시로 바꿔 거는
+    경우다 — 지각한 하트비트는 아직 오지 않았는데 기준 시각이 리셋되면 재려던 바로
+    그 구간이 사라진다(코드 리뷰 지적)."""
+    host = QWidget()
+    first: list[float] = []
+    second: list[float] = []
+    stall_watch.watch(host, lambda s, j: first.append(s),
+                      seconds=5.0, threshold_ms=200.0)
+    qapp.processEvents()
+    time.sleep(0.5)                           # 막힌 채로 …
+    stall_watch.watch(host, lambda s, j: second.append(s),      # … 다시 건다
+                      seconds=0.5, threshold_ms=200.0)
+    _pump(qapp, 0.3)
+
+    assert first and first[0] >= 0.4, f"다시 걸며 정지를 잃었다: {first}"
+    assert second == [], f"새 감시가 옛 정지를 자기 것으로 적었다: {second}"
+    host.deleteLater()
+
+
 def test_setup_page_records_the_stall_with_its_own_workers(qapp, caplog):
     """QThread 는 `threading.enumerate` 에 안 잡힌다 — 페이지가 덧붙여야 한다."""
     from aoi_verification.app.ui.pages.setup_page import SetupPage

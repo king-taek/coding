@@ -102,6 +102,13 @@ class DevModeDialog(QDialog):
         self.btn_reset = NeonButton(i18n.KO.DEV_MODE_RESET, role="ghost")
         self.btn_reset.clicked.connect(self._reset)
         row.addWidget(self.btn_reset)
+        # app.log 가 있는 캐시 폴더를 탐색기로 연다 — 로그를 보내 달라고 할 때마다
+        # 경로를 설명하지 않아도 되게(사용자 요청).  툴팁에 실제 경로를 적는다.
+        self.btn_log = NeonButton(i18n.KO.DEV_MODE_OPEN_LOG, role="ghost")
+        self.btn_log.setToolTip(i18n.KO.DEV_MODE_LOG_PATH_FMT.format(
+            path=self.log_dir() / "app.log"))
+        self.btn_log.clicked.connect(self._open_log_dir)
+        row.addWidget(self.btn_log)
         row.addStretch(1)
         self.btn_close = NeonButton(i18n.KO.DEV_MODE_CLOSE, role="ghost")
         self.btn_close.clicked.connect(self.reject)
@@ -112,6 +119,18 @@ class DevModeDialog(QDialog):
         for b in (self.btn_close, self.btn_check, self.btn_install):
             row.addWidget(b)
         root.addLayout(row)
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def log_dir():
+        """`main._setup_logging` 이 app.log 를 두는 곳 — 캐시 루트와 같다."""
+        from ...utils import paths
+        return paths.cache_root()
+
+    def _open_log_dir(self) -> None:
+        from PyQt6.QtCore import QUrl
+        from PyQt6.QtGui import QDesktopServices
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.log_dir())))
 
     # ------------------------------------------------------------------
     def target(self) -> tuple:

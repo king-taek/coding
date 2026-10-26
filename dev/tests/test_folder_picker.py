@@ -57,22 +57,25 @@ def test_picked_and_closed_signals(host, qapp, tmp_path):
     got: list = []
     closed: list = []
     picker.picked.connect(got.append)
-    picker.closed.connect(lambda chosen, s: closed.append((chosen, s)))
+    picker.closed.connect(lambda chosen, s, nav: closed.append((chosen, s, nav)))
 
     picker.open("폴더")
     # 사용자가 폴더를 고른 것 — 네이티브 창이 하는 일을 흉내낸다(`accept()` 는
     # 비네이티브 창이 현재 폴더로 `fileSelected` 를 한 번 더 내서 쓰지 않는다).
+    picker._dialog.directoryEntered.emit(str(tmp_path))   # 창 안에서 폴더를 누름
     picker._dialog.fileSelected.emit(str(tmp_path))
     picker._dialog.done(QDialog.DialogCode.Accepted)
     qapp.processEvents()
     assert got == [str(tmp_path)]
     assert closed and closed[0][0] is True and closed[0][1] >= 0.0
+    assert 0.0 <= closed[0][2] <= closed[0][1]      # 마지막 클릭 뒤 꼬리 ≤ 열린 시간
 
     picker.open("폴더")                               # 취소 — picked 없이 closed 만
     picker._dialog.reject()
     qapp.processEvents()
     assert got == [str(tmp_path)]
     assert len(closed) == 2 and closed[1][0] is False
+    assert closed[1][2] == -1.0                       # 폴더를 누른 적 없음 → 모름
 
 
 def test_reopen_while_open_reuses_the_same_dialog(host, qapp):

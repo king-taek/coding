@@ -1716,7 +1716,12 @@ class SetupPage(QWidget):
         '폴더 창을 닫은 직후 UI 가 …초 멈췄다' 가 사라져야 한다 — 남으면 다음 후보를
         그 로그가 가리킨다.  브라우저에 머문 시간은 취소해도 잰다(이전과 같다).
         """
+        from .. import stall_watch
         self._browse_target = target
+        # ★ 창이 열려 있는 **동안**도 잰다.  비동기 창이라 UI 루프가 도니 잴 수 있고,
+        #   닫힌 뒤의 정지가 0건인데 신고가 남은 지금은 이 구간이 다음 후보다.
+        self._folder_dialog_open = True
+        stall_watch.watch(self, self._log_stall, seconds=self._DIALOG_WATCH_S)
         self._folder_picker.open(i18n.KO.SETUP_FOLDER_LABEL)
 
     def _on_folder_picked(self, path: str) -> None:
@@ -1728,12 +1733,21 @@ class SetupPage(QWidget):
         if target is self.ref_path_edit:
             self._reset_slot_selection()
 
-    def _on_folder_dialog_closed(self, chosen: bool, dialog_s: float) -> None:
+    # 폴더 창이 열려 있는 동안의 정지 감시 상한 — 사용자가 폴더를 찾는 시간은 길 수
+    # 있다(실측 최대 99초).  닫히면 6초짜리로 다시 건다.
+    _DIALOG_WATCH_S = 600.0
+
+    def _on_folder_dialog_closed(self, chosen: bool, dialog_s: float,
+                                 since_nav: float) -> None:
         from .. import stall_watch
+        self._folder_dialog_open = False
         # 브라우저에 머문 시간에는 사용자가 폴더를 찾은 시간이 섞여 있다 — 정지시간이
-        # 아니다.  아래 감시자가 재는 '닫힌 뒤의 정지' 와 짝지어 봐야 의미가 있다.
-        _LOG.info("폴더 선택: 파일 브라우저가 %.2f초 열려 있었다(%s)",
-                  dialog_s, "고름" if chosen else "취소")
+        # 아니다.  `since_nav`(마지막으로 폴더를 누른 뒤 닫히기까지)가 Windows 가 창을
+        # 닫는 데 쓴 꼬리이고, 아래 감시자가 재는 '닫힌 뒤의 정지' 와 짝지어 본다.
+        _LOG.info("폴더 선택: 파일 브라우저가 %.2f초 열려 있었다(%s) — "
+                  "마지막 폴더 클릭 뒤 닫히기까지 %s",
+                  dialog_s, "고름" if chosen else "취소",
+                  "모름" if since_nav < 0 else f"{since_nav:.2f}초")
         stall_watch.watch(self, self._log_stall)
 
     def _log_stall(self, seconds: float, jobs: str) -> None:
@@ -1746,8 +1760,10 @@ class SetupPage(QWidget):
         QThread 는 ``threading.enumerate`` 에 안 잡혀 `stall_watch` 가 못 본다 —
         이 페이지가 워커에 맡겨 둔 일은 여기서 덧붙인다."""
         _LOG.warning(
-            "폴더 창을 닫은 직후 UI 가 %.2f초 멈췄다 — 그때 돌던 작업: %s"
+            "폴더 창%s UI 가 %.2f초 멈췄다 — 그때 돌던 작업: %s"
             " / 폴더 확인 %s · die 안내 스캔 %s",
+            "이 열려 있는 동안" if getattr(self, "_folder_dialog_open", False)
+            else "을 닫은 직후",
             seconds, jobs or "없음",
             "진행 중" if self._probing_for is not None else "아님",
             "진행 중" if self._die_scanning_for is not None else "아님")
