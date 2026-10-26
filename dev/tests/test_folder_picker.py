@@ -93,3 +93,18 @@ def test_no_blocking_static_folder_dialog_in_ui_sources():
     hits = [str(p.relative_to(_UI)) for p in _UI.rglob("*.py")
             if pat.search(p.read_text(encoding="utf-8"))]
     assert hits == [], f"UI 스레드를 세우는 폴더 선택이 돌아왔다: {hits}"
+
+
+def test_timeline_records_clicks_in_order(host, qapp, tmp_path):
+    """창 안에서 일어난 일이 순서대로 한 줄에 남는다 — 어느 폴더에서 시간이 갔는지."""
+    picker = FolderPicker(host)
+    picker.open("폴더")
+    picker._dialog.directoryEntered.emit(str(tmp_path))
+    picker._dialog.currentChanged.emit(str(tmp_path / "A"))
+    picker._dialog.fileSelected.emit(str(tmp_path / "A"))
+    picker._dialog.done(QDialog.DialogCode.Accepted)
+    qapp.processEvents()
+    line = picker.timeline()
+    kinds = [tok.split()[1] for tok in line.split(" | ")]
+    assert kinds == ["open-returned", "enter-dir", "click", "selected", "finished"], line
+    assert "/A" in line

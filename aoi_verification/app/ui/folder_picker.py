@@ -64,6 +64,9 @@ class FolderPicker(QObject):
         self._opened_at = 0.0
         self._last_nav: Optional[float] = None
         self._chosen = False
+        # 창 안에서 일어난 일의 순서 — (열린 뒤 초, 종류, 경로 꼬리).  닫힐 때 호출부가
+        # `timeline()` 으로 한 줄에 남긴다: 어느 폴더를 눌렀을 때 시간이 갔는지.
+        self._events: list[tuple[float, str, str]] = []
 
     @property
     def is_open(self) -> bool:
@@ -80,8 +83,10 @@ class FolderPicker(QObject):
             dlg.setDirectory(start)
         self._chosen = False
         self._last_nav = None
+        self._events = []
         self._opened_at = time.perf_counter()
         dlg.open()                       # exec() 가 아니다 — 모듈 docstring
+        self._note("open-returned", "")
 
     def _ensure_dialog(self, caption: str) -> QFileDialog:
         dlg = self._dialog
@@ -92,24 +97,40 @@ class FolderPicker(QObject):
             dlg.setOption(QFileDialog.Option.ShowDirsOnly, True)
             dlg.setAcceptMode(QFileDialog.AcceptMode.AcceptOpen)
             dlg.fileSelected.connect(self._on_selected)
-            dlg.directoryEntered.connect(self._on_nav)
-            dlg.currentChanged.connect(self._on_nav)
+            dlg.directoryEntered.connect(self._on_dir)
+            dlg.currentChanged.connect(self._on_current)
             dlg.finished.connect(self._on_finished)
             self._dialog = dlg
         else:
             dlg.setWindowTitle(caption)
         return dlg
 
+    def _note(self, kind: str, path: str) -> None:
+        self._events.append((time.perf_counter() - self._opened_at, kind, path))
+
+    def timeline(self) -> str:
+        """마지막 창에서 일어난 일을 한 줄로 — ``+1.23s 종류 …경로꼬리`` 의 나열."""
+        return " | ".join(
+            f"+{t:.2f}s {kind}" + (f" …{path[-40:]}" if path else "")
+            for t, kind, path in self._events)
+
     def _on_selected(self, path: str) -> None:
+        self._note("selected", path)
         if not path:
             return
         self._chosen = True
         self.picked.emit(path)
 
-    def _on_nav(self, _path: str) -> None:
+    def _on_dir(self, path: str) -> None:
         self._last_nav = time.perf_counter()
+        self._note("enter-dir", path)
 
-    def _on_finished(self, _result: int) -> None:
+    def _on_current(self, path: str) -> None:
+        self._last_nav = time.perf_counter()
+        self._note("click", path)
+
+    def _on_finished(self, result: int) -> None:
         now = time.perf_counter()
+        self._note("finished", str(result))
         since_nav = -1.0 if self._last_nav is None else now - self._last_nav
         self.closed.emit(self._chosen, now - self._opened_at, since_nav)

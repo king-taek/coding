@@ -1514,6 +1514,7 @@ class SetupPage(QWidget):
         if token != self._probe_token:
             return
         self._probing_for = None
+        self._log_after_pick("probe", ref_state or "ok", val_state or "ok")
         changed = (self._probed.get(ref_text) != ref_state
                    or self._probed.get(val_text) != val_state)
         self._probed[ref_text] = ref_state
@@ -1624,6 +1625,7 @@ class SetupPage(QWidget):
         덮어쓸 수 있다.  세대 번호가 다르면 그 결과는 버린다."""
         if token != self._die_token:
             return
+        self._log_after_pick("die", "pitch" if pitch else "none", "")
         self._die_scanned_for = self._die_scanning_for
         self._die_scanning_for = None
         self._die_result = (pitch, src, broken)
@@ -1721,17 +1723,24 @@ class SetupPage(QWidget):
         # ★ 창이 열려 있는 **동안**도 잰다.  비동기 창이라 UI 루프가 도니 잴 수 있고,
         #   닫힌 뒤의 정지가 0건인데 신고가 남은 지금은 이 구간이 다음 후보다.
         self._folder_dialog_open = True
-        stall_watch.watch(self, self._log_stall, seconds=self._DIALOG_WATCH_S)
+        stall_watch.watch(self, self._log_stall, seconds=self._DIALOG_WATCH_S,
+                          on_stack=self._log_stall_stack)
         self._folder_picker.open(i18n.KO.SETUP_FOLDER_LABEL)
 
     def _on_folder_picked(self, path: str) -> None:
         target = getattr(self, "_browse_target", None)
         if target is None or not path:
             return
+        import time
+        t0 = time.perf_counter()
         target.setText(path)
         # 기준 폴더가 바뀌면 이전 슬롯 선택은 더 이상 유효하지 않다.
         if target is self.ref_path_edit:
             self._reset_slot_selection()
+        # 입력란에 넣는 일 자체가 비싼지(textChanged 연쇄) — 보통 0.00초여야 한다.
+        _LOG.info("폴더 선택: 입력란에 넣기 %.3f초 — %s",
+                  time.perf_counter() - t0, path)
+        self._picked_at = time.perf_counter()
 
     # 폴더 창이 열려 있는 동안의 정지 감시 상한 — 사용자가 폴더를 찾는 시간은 길 수
     # 있다(실측 최대 99초).  닫히면 6초짜리로 다시 건다.
@@ -1745,10 +1754,37 @@ class SetupPage(QWidget):
         # 아니다.  `since_nav`(마지막으로 폴더를 누른 뒤 닫히기까지)가 Windows 가 창을
         # 닫는 데 쓴 꼬리이고, 아래 감시자가 재는 '닫힌 뒤의 정지' 와 짝지어 본다.
         _LOG.info("폴더 선택: 파일 브라우저가 %.2f초 열려 있었다(%s) — "
-                  "마지막 폴더 클릭 뒤 닫히기까지 %s",
+                  "마지막 폴더 클릭 뒤 닫히기까지 %s / 창 안 순서: %s",
                   dialog_s, "고름" if chosen else "취소",
-                  "모름" if since_nav < 0 else f"{since_nav:.2f}초")
-        stall_watch.watch(self, self._log_stall)
+                  "모름" if since_nav < 0 else f"{since_nav:.2f}초",
+                  self._folder_picker.timeline() or "없음")
+        stall_watch.watch(self, self._log_stall, on_stack=self._log_stall_stack)
+
+    def _log_stall_stack(self, stale_s: float, stack: str) -> None:
+        """멈춰 있는 **도중에** 보조 스레드가 부른다 — 그 순간 UI 스레드의 호출 스택.
+
+        맨 아래 줄이 ``app.exec`` 뿐이면 Qt/Windows 안(우리 파이썬 밖)에서 막힌 것이고,
+        그 위에 우리 파일(`aoi_verification/…`)이 있으면 그 줄이 멈춤의 자리다."""
+        _LOG.warning("UI 스레드가 %.1f초째 멈춰 있다(폴더 창 %s) — 그 순간 하던 일:\n%s",
+                     stale_s,
+                     "열림" if getattr(self, "_folder_dialog_open", False) else "닫힘",
+                     stack or "(스택을 못 떴다)")
+
+    def _log_after_pick(self, what: str, a: str, b: str) -> None:
+        """폴더를 고른 뒤 워커들이 언제 끝났는지 — 고른 순간부터의 초.
+
+        문구는 `_LOG` 호출 안에만 둔다(화면 문구 가드 기준) — ``what`` 은 키다."""
+        picked_at = getattr(self, "_picked_at", None)
+        if picked_at is None:
+            return
+        import time
+        dt = time.perf_counter() - picked_at
+        if dt > 60.0:                        # 그 뒤 한참 지난 결과는 폴더 선택과 무관
+            return
+        if what == "probe":
+            _LOG.info("폴더 선택 뒤 %.2f초: 폴더 확인 끝(기준 %s · 검증 %s)", dt, a, b)
+        else:
+            _LOG.info("폴더 선택 뒤 %.2f초: die 안내 스캔 끝(%s)", dt, a)
 
     def _log_stall(self, seconds: float, jobs: str) -> None:
         """폴더를 고른 뒤 UI 가 멈췄다 — 얼마나·그때 무엇이 돌았는지 남긴다.
