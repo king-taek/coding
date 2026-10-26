@@ -150,6 +150,8 @@ class ThumbnailPool(QObject):
                 return
             need = self._num_workers - self._alive
             self._alive += max(0, need)
+        # 끝난 워커는 놓아준다 — 후보 풀은 슬롯마다 다시 띄우므로 쌓이면 `wait` 가 길어진다.
+        self._workers = [w for w in self._workers if not w.isFinished()]
         for _ in range(need):
             w = _PoolWorker(self)
             if self._low_priority:

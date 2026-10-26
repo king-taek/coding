@@ -271,3 +271,20 @@ def test_continue_start_uses_thumb_plan():
     assert "thumb_plan.startup_items" in body
     assert "val_images)" not in body.split("per_side_total")[0], \
         "시작 때 검증 사진을 다시 직접 넣고 있다"
+
+
+def test_auto_all_b_also_finishes_thumbs_before_matching(styled_qapp):
+    """올인원 2차도 기다린다 — 2차 검토 화면이 검증 사진을 곧바로 그리기 때문이다.
+    안 기다리면 저부하 일꾼 1명이 만드는 동안 검토 화면이 사진마다 멈춘다."""
+    from aoi_verification.app.utils.prefs import AutomationLevel
+    MW, win = _window(lazy=True)
+    win._input.automation_level = AutomationLevel.AUTO_ALL
+    started = []
+    win._start_cross_b_match = lambda q: started.append(q)
+    MW.MainWindow._start_cross_b_prefetch(win)
+    MW.MainWindow._enter_cross_b(win)
+    low, full = win._pools
+    assert low.stopped and full.started == 1 and started == []
+    MW.MainWindow._show_cross_b_select(win)
+    assert [it.path.name for it in started[0]] == ["1.jpg", "3.jpg", "9.jpg"]
+    assert win._select_loaded == [] and win._hidden == [True]

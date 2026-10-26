@@ -1515,12 +1515,18 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._show_cross_b_select)
 
     def _show_cross_b_select(self) -> None:
-        """2차 선별 화면 — 썸네일 마무리(또는 [중지]) 뒤 한 번만 들어간다."""
+        """2차 선별 화면(올인원이면 곧장 2차 매칭) — 썸네일 마무리(또는 [중지]) 뒤
+        한 번만 들어간다."""
         queue, self._b_wait_queue = self._b_wait_queue, None
-        if queue is None or self._cross_stage != "B":
+        if queue is None:
             return
         if self._b_wait_pool is not None:       # 썸네일 마무리 오버레이를 내린다
             self._loading.hide_overlay()
+        if self._cross_stage != "B":
+            return
+        if self._input.automation_level == AutomationLevel.AUTO_ALL:
+            self._start_cross_b_match(queue)
+            return
         self._select_page.set_extract_mode(False)
         self._select_page.set_reverse(True)
         self._select_page.load_state(queue=queue, targets={}, excluded={},
@@ -1727,11 +1733,9 @@ class MainWindow(QMainWindow):
         if not queue:                       # 검증 사진이 전부 A 에서 짝지어졌다
             self._finish_session()
             return
-        if self._input.automation_level == AutomationLevel.AUTO_ALL:
-            self._start_cross_b_match(queue)
-            return
         self._b_wait_queue = list(queue)
         if self._lazy_val_thumbs:
+            # 올인원도 기다린다 — 2차 검토 화면이 이 사진들을 곧바로 그린다.
             self._wait_cross_b_thumbs(queue)
             return
         self._show_cross_b_select()
