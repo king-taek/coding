@@ -779,15 +779,27 @@ def die_map_cells(folder: Path, px: float, py: float
             md = Path(str(dat) + ".md").stat()
         except OSError:
             continue
-        got = _dat_cells(dat, st.st_mtime_ns, st.st_size, md.st_mtime_ns, px, py)
+        got = _dat_cells(dat, st.st_mtime_ns, st.st_size, md.st_mtime_ns, px, py,
+                         _die_index_cap(_read_diameter(folder), px, py))
         if got is not None:
             return got
     return None
 
 
+def _die_index_cap(diameter: float, px: float, py: float) -> int:
+    """die 맵 인덱스 상한 — 웨이퍼 지름 ÷ die 크기(+1), 단 :data:`_MAX_DIE_INDEX` 보다 좁히지 않는다.
+
+    고정 200 은 die 가 작은 제품(QORVO pitch 919.8 → 인덱스 322)의 실물 맵을 버려 Wafer map 에
+    die 칸이 안 그려졌다(사용자 결정 2026-10-25, 안 A).  실물 die 맵 45개의 최대 인덱스는 전부
+    ``지름 / pitch`` 이하였다(관측: QORVO 322 < 326, TB500 8 ≤ 8.05).  큰 die 제품에서 기존
+    200 보다 좁히지 않는 것은 TB500 처럼 여유가 거의 없는 맵을 새로 버리지 않기 위해서다."""
+    return max(_MAX_DIE_INDEX, math.ceil(diameter / min(px, py)) + 1)
+
+
 @lru_cache(maxsize=256)
 def _dat_cells(dat: Path, _mtime_ns: int, _size: int, _md_mtime_ns: int,
-               px: float, py: float) -> Optional[frozenset[tuple[int, int]]]:
+               px: float, py: float, cap: int = _MAX_DIE_INDEX
+               ) -> Optional[frozenset[tuple[int, int]]]:
     layout = _dat_layout(dat)
     if layout is None:
         return None
@@ -823,8 +835,7 @@ def _dat_cells(dat: Path, _mtime_ns: int, _size: int, _md_mtime_ns: int,
         return None
     col_origin = min(i for i, _ in cells)
     row_total = max(j for _, j in cells)
-    if not (0 <= col_origin <= _MAX_DIE_INDEX
-            and 0 <= row_total <= _MAX_DIE_INDEX):
+    if not (0 <= col_origin <= cap and 0 <= row_total <= cap):
         return None
     return frozenset(cells)
 

@@ -332,6 +332,15 @@ def _camtek(folder: Path) -> _Camtek:
         cells = wt.cells
     elif geom is not None and geom.source.endswith(wg._DIE_MAP_FILE):
         cells = wg.lot_die_map_cells(folder, geom.pitch_x, geom.pitch_y)
+    elif geom is not None and wg.EXPORT_SOURCE_TAG in geom.source:
+        # 번호를 장비 번호표([ExportData])로 정했어도 die 맵은 그대로 그린다 — 번호표 채택이
+        # source 를 바꿔 위 조건이 빠지면서, 번호표가 있는 제품 전부가 계산 격자로 그려졌다.
+        # 번호표 검사가 맵 범위는 봤으니 부분 맵만 거른다(die 맵 채택과 같은 기준).
+        cells = wg.lot_die_map_cells(folder, geom.pitch_x, geom.pitch_y)
+        if cells is not None and not wg._covers_wafer(cells, *wg._wafer_center(folder),
+                                                      dia, geom.pitch_x, geom.pitch_y,
+                                                      folder):
+            cells = None
     return _Camtek(geom=geom, diameter=dia, cx=cx, cy=cy, source=source, cells=cells,
                    pitch_assumed=pitch_assumed)
 
