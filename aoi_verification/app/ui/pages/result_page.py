@@ -60,6 +60,8 @@ class ResultPage(QWidget):
     # ★ 이걸 상위로 되돌리지 않으면, 검토로 갔다 재완료할 때 새 FinalResult 가
     #   만들어지며 여기서 만든 매치가 조용히 사라진다.
     result_edited = pyqtSignal(list, list)      # (matches, unmatched_refs)
+    # 기준 1 ↔ 검증 여러 장비 — 위 장비 버튼(번호)을 눌렀다(`set_equipments`).
+    equip_requested = pyqtSignal(int)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -82,6 +84,8 @@ class ResultPage(QWidget):
         self._exporter: ExcelExporter | None = None
         # 이번 결과를 한 번이라도 저장했는가 — [새 검증 시작] 확인의 근거(U-06).
         self._exported = False
+        # 여러 검증 장비 — 엑셀 저장 때 장비마다의 결과를 받아 오는 함수(None = 한 장비).
+        self._results_provider = None
         self._build()
 
     # ------------------------------------------------------------------
@@ -100,6 +104,15 @@ class ResultPage(QWidget):
         head.addWidget(self.title)
         head.addStretch(1)
         root.addLayout(head)
+
+        # 기준 1 ↔ 검증 여러 장비 — 어느 장비의 결과를 볼지(사용자 결정 2026-10-26).
+        #   장비가 하나면 줄째 숨는다.
+        self._equip_host = QWidget(self)
+        self._equip_lay = QHBoxLayout(self._equip_host)
+        self._equip_lay.setContentsMargins(0, 0, 0, 0)
+        self._equip_lay.setSpacing(8)
+        self._equip_host.setVisible(False)
+        root.addWidget(self._equip_host)
 
         # 요약 카드 — ★ 폭을 묶는다.  1600px 창에서 카드가 화면 끝까지 늘어나면
         #   짧은 문장 몇 줄이 가로로 흩어져 '빈 카드' 처럼 보인다.  읽기 좋은 폭으로
@@ -468,6 +481,34 @@ class ResultPage(QWidget):
                 return
         self.new_session_requested.emit()
 
+    def set_equipments(self, labels: list, current: int, provider) -> None:
+        """여러 검증 장비의 장비 버튼 줄.  ``labels`` 가 2개 미만이면 숨긴다.
+
+        ``provider()`` 는 장비마다의 ``FinalResult`` 목록 — [엑셀로 저장] 이 부른다
+        (결과 화면에서 고친 것이 반영된 최신 값이어야 해서 목록이 아니라 함수를 받는다)."""
+        _clear_layout(self._equip_lay)
+        multi = len(labels) > 1
+        self._results_provider = provider if multi else None
+        self._equip_host.setVisible(multi)
+        if not multi:
+            return
+        cap = QLabel(i18n.KO.MULTI_VAL_RESULT_PICK, self._equip_host)
+        cap.setProperty("role", "muted")
+        self._equip_lay.addWidget(cap)
+        for k, label in enumerate(labels):
+            btn = NeonButton(label, role="primary" if k == current else "ghost")
+            btn.clicked.connect(lambda _c=False, k=k: self.equip_requested.emit(k))
+            self._equip_lay.addWidget(btn)
+        self._equip_lay.addStretch(1)
+
+    def export_state(self) -> tuple:
+        """장비를 바꿔 볼 때 '저장했음' 을 이어 가려고 — `restore_export_state` 와 짝."""
+        return (self._exported, self._save_path, self._target_path)
+
+    def restore_export_state(self, state: tuple) -> None:
+        self._exported, self._save_path, self._target_path = state
+        self._refresh_save_target()
+
     def has_unsaved_result(self) -> bool:
         """보여 줄 결과가 있는데 아직 한 번도 저장하지 않았는가."""
         return self._result is not None and not self._exported
@@ -511,6 +552,7 @@ class ResultPage(QWidget):
             original_quality=self.original_quality_chk.isChecked(),
             unmatched_original_quality=self.unmatched_original_chk.isChecked(),
             map_renderer=render_map_png,          # Wafer Map 시트(화면과 같은 렌더러)
+            legs=(self._results_provider() if self._results_provider else None),
         )
         # ★ 30안 — 워커가 보내는 문구(어느 시트·어느 슬롯)를 **그대로 띄운다**.
         #   예전엔 `msg` 를 버리고 고정 문구만 썼다.  행 수치는 여전히 오버레이의

@@ -343,10 +343,12 @@ def test_a_matched_ref_can_never_be_reported_unmatched(styled_qapp, tmp_path):
     src = (pathlib.Path(__file__).resolve().parents[2]
            / "aoi_verification/app/ui/main_window.py").read_text(encoding="utf-8")
     fn = next(n for n in ast.walk(ast.parse(src))
-              if isinstance(n, ast.FunctionDef) and n.name == "_finish_session")
+              if isinstance(n, ast.FunctionDef) and n.name == "_build_final_result")
     body = ast.unparse(fn)
+    # 결과를 만드는 자리(`_finish_session` → `_build_final_result`, 여러 검증 장비면
+    # 장비마다 이 함수를 부른다)가 막아야 한다.
     assert "matched_refs" in body, \
-        "_finish_session 이 '매치된 ref 는 미매칭일 수 없다' 를 보장하지 않는다"
+        "_build_final_result 가 '매치된 ref 는 미매칭일 수 없다' 를 보장하지 않는다"
 
 
 # ---------------------------------------------------------------------------

@@ -346,7 +346,9 @@ class _MatchRow(QFrame):
                  thumb_px: int = _THUMB_PX,
                  coord_mode: bool = False,
                  tolerance: float = _DFLT_TOL,
-                 ref_caption_fmt: str = i18n.KO.COMPARE_REF_CAPTION_FMT) -> None:
+                 ref_caption_fmt: str = i18n.KO.COMPARE_REF_CAPTION_FMT,
+                 lane_label: str = "",
+                 show_ref: bool = True) -> None:
         super().__init__(parent)
         self.match = match
         # 비교 뷰어 왼쪽 사진의 이름표 — 교차검증 역방향에서는 왼쪽이 검증 사진이다.
@@ -397,6 +399,13 @@ class _MatchRow(QFrame):
         self._slot_label.setToolTip(match.slot)   # 최소 폭만 부풀린다(가로 넘침).
         self._elide_slot()
         slot_lay.addWidget(self._slot_label)
+        # 기준 1 ↔ 검증 여러 장비 — 이 줄이 어느 검증 장비의 후보인지(`multi_val`).
+        if lane_label:
+            lane = QLabel(lane_label, slot_host)
+            lane.setProperty("role", "colHead")
+            lane.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lane.setToolTip(lane_label)
+            slot_lay.addWidget(lane)
         # ★ 조용한 **테두리 버튼**이다(옛 결정: 링크형 — 반복 8행에 테두리가 쌓이지
         #   않게).  결정을 바꾼 근거: 사진 더블클릭 확대를 없앤 뒤로 이것이 좌우 비교
         #   뷰어로 가는 **유일하게 눈에 보이는 경로**가 됐다(썸네일 우클릭 메뉴는 발견되지
@@ -418,6 +427,14 @@ class _MatchRow(QFrame):
         self._ref_img = self._make_thumb(match.ref_path, size=self._thumb_px,
                                          on_view=lambda: self._open_compare(0))
         top.addWidget(self._ref_img)
+        if not show_ref:
+            # 같은 기준 사진의 두 번째 장비 줄부터는 기준 사진·슬롯명을 다시 그리지 않는다
+            # — 자리는 남겨 열이 어긋나지 않게 한다(사용자 제안 '기준 1장에 장비별 후보').
+            for w in (self._ref_img, self._slot_label):
+                sp = w.sizePolicy()
+                sp.setRetainSizeWhenHidden(True)
+                w.setSizePolicy(sp)
+                w.hide()
 
         # 화살표 — ★ 폭을 **상수로 못 박는다**.  sizeHint 에 맡기면 서체·DPI 에 따라
         #   흔들리고, 상단 헤더는 그 값을 알 방법이 없어 '기준/검증' 라벨 정렬이 어긋난다.
@@ -1188,7 +1205,8 @@ class MatchReviewPage(QWidget):
                    coord_mode: bool = False,
                    tolerance: float = _DFLT_TOL,
                    coord_failed_count: int = 0,
-                   unmatched_keys: set | None = None) -> None:
+                   unmatched_keys: set | None = None,
+                   lanes: list | None = None) -> None:
         """매치 검토 화면 초기화.
 
         ``score_cache`` 와 ``val_pool`` 이 함께 주어지면 각 매치 행에 차순위
@@ -1202,6 +1220,11 @@ class MatchReviewPage(QWidget):
 
         ``coord_mode=True`` 면 score 를 µm 거리로 역산해 표시하고,
         ``coord_failed_count`` 를 요약에 "매치 실패 N쌍" 으로 포함한다.
+
+        ``lanes`` 가 주어지면 기준 1 ↔ 검증 여러 장비(`models/multi_val.py`)다 —
+        ``lanes[k]`` = 장비 k 의 ``{"label", "val_pool", "candidates_by_ref", "missing"}``
+        이고, 매치의 ``equip`` 이 어느 장비 것인지 고른다.  같은 기준 사진의 장비별 줄이
+        붙어 나오고, 그 사진에서 후보를 못 찾은 장비는 '후보 없음' 한 줄로 보인다.
         """
         # ★ 세대 토큰 — 배치 생성 도중 다시 들어오면(결과에서 검토로 복귀 등) 옛 배치가
         #   새 목록에 행을 섞어 넣는다.  토큰이 바뀐 배치는 스스로 멈춘다.
@@ -1230,6 +1253,7 @@ class MatchReviewPage(QWidget):
         self._val_pool = val_pool
         # fast 모드용 미리 계산된 후보 목록 (#7).
         self._candidates_by_ref = candidates_by_ref
+        self._lanes = list(lanes) if lanes else None
 
         while self._list_layout.count():
             it = self._list_layout.takeAt(0)
@@ -1244,6 +1268,8 @@ class MatchReviewPage(QWidget):
             empty = QLabel(i18n.KO.REVIEW_EMPTY_HINT)
             empty.setProperty("role", "mutedPad")
             self._list_layout.addWidget(empty)
+        elif self._lanes:
+            self._start_row_batches(self._multi_order())
         else:
             if self._coord_mode:
                 ordered = sorted(
@@ -1438,13 +1464,62 @@ class MatchReviewPage(QWidget):
         super().resizeEvent(event)
         self._resize_timer.start(80)
 
-    def _append_row(self, match: MatchResult) -> "_MatchRow":
+    # ------------------------------------------------------------------
+    # 기준 1 ↔ 검증 여러 장비 (`models/multi_val.py`)
+    # ------------------------------------------------------------------
+    _lanes = None
+
+    def _multi_order(self) -> list:
+        """행 순서 — 기준 사진마다 장비 순으로, 후보 없는 장비는 자리표 ``("missing", …)``."""
+        from ...models import multi_val
+        by_ref: dict = {}
+        for m in multi_val.review_order(self._matches):
+            by_ref.setdefault(str(m.ref_path), []).append(m)
+        ordered: list = []
+        for ms in by_ref.values():
+            have = {m.equip for m in ms}
+            first = True
+            for k, lane in enumerate(self._lanes):
+                for m in ms:
+                    if m.equip == k:
+                        ordered.append((m, first))
+                        first = False
+                if k not in have and ms[0].ref_path in lane.get("missing", ()):
+                    ordered.append(("missing", k))
+        return ordered
+
+    def _lane_label(self, equip: int) -> str:
+        if not self._lanes or equip >= len(self._lanes):
+            return ""
+        return self._lanes[equip].get("label", "")
+
+    def _lane_ctx(self, match: MatchResult):
+        """(후보 목록, val_pool) — 장비가 여럿이면 그 매치의 장비 것."""
+        if self._lanes and match.equip < len(self._lanes):
+            lane = self._lanes[match.equip]
+            return lane.get("candidates_by_ref"), lane.get("val_pool")
+        return self._candidates_by_ref, self._val_pool
+
+    def _append_row(self, entry) -> "QWidget":
+        show_ref = True
+        if isinstance(entry, tuple):
+            if entry[0] == "missing":
+                lab = QLabel(i18n.KO.MULTI_VAL_NO_CANDIDATE_FMT.format(
+                    machine=self._lane_label(entry[1])), self)
+                lab.setProperty("role", "mutedPad")
+                self._list_layout.addWidget(lab)
+                return lab
+            entry, show_ref = entry
+        match = entry
         runners = self._lookup_runners_up(match, self._score_cache, self._val_pool)
         row = _MatchRow(match, runners_up=runners, parent=self,
                         thumb_px=self._thumb_px,
                         coord_mode=self._coord_mode,
                         tolerance=self._tolerance,
-                        ref_caption_fmt=self._ref_caption_fmt())
+                        ref_caption_fmt=self._ref_caption_fmt(),
+                        lane_label=self._lane_label(match.equip),
+                        show_ref=show_ref)
+        row.setProperty("_laneFollower", not show_ref)
         row.toggle_requested.connect(self._on_toggle)
         row.swap_requested.connect(self._on_swap)
         row.more_clicked.connect(self._on_row_more)
@@ -1465,6 +1540,7 @@ class MatchReviewPage(QWidget):
             ref_path=old_match.ref_path,
             val_path=new_val_item.path,
             score=float(new_score),
+            equip=old_match.equip,
         )
         # matches 리스트에서 old → new 교체
         for i, m in enumerate(self._matches):
@@ -1490,7 +1566,10 @@ class MatchReviewPage(QWidget):
                 coord_mode=self._coord_mode,
                 tolerance=self._tolerance,
                 ref_caption_fmt=self._ref_caption_fmt(),
+                lane_label=self._lane_label(new_match.equip),
+                show_ref=not (old_row.property("_laneFollower") or False),
             )
+            new_row.setProperty("_laneFollower", old_row.property("_laneFollower"))
             new_row.toggle_requested.connect(self._on_toggle)
             new_row.swap_requested.connect(self._on_swap)
             new_row.more_clicked.connect(self._on_row_more)
@@ -1524,7 +1603,9 @@ class MatchReviewPage(QWidget):
         _MatchRow 가 처음엔 한 줄만 보여주고 ‘후보 한 줄 더 보기’ 로 늘릴 수
         있도록 최대 ``_MAX_RUNNERS`` 개까지 보관해서 돌려준다 (#5/#16).
         """
-        cbr = self._candidates_by_ref
+        cbr, lane_pool = self._lane_ctx(match)
+        if self._lanes:
+            val_pool = lane_pool
         if cbr is not None:
             key = (match.slot, match.ref_path.name)
             if key in cbr:
@@ -1600,7 +1681,7 @@ class MatchReviewPage(QWidget):
             if m.key in self._unmatched_keys:
                 unmatched_refs.append(MissEntry(
                     slot=m.slot, side="ref", path=m.ref_path,
-                    note=i18n.KO.NOTE_UNMATCHED_BY_USER,
+                    note=i18n.KO.NOTE_UNMATCHED_BY_USER, equip=m.equip,
                 ))
             else:
                 kept.append(m)
