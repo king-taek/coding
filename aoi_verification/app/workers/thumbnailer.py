@@ -68,6 +68,7 @@ class ThumbnailPool(QObject):
                  tier: Optional[config.SizingTier] = None,
                  also_mid: bool = True,
                  num_workers: Optional[int] = None,
+                 low_priority: bool = False,
                  parent: QObject | None = None) -> None:
         super().__init__(parent)
         self.signals = ThumbnailerSignals()
@@ -75,12 +76,19 @@ class ThumbnailPool(QObject):
         self._also_mid = bool(also_mid)
         cpu = os.cpu_count() or 2
         self._num_workers = int(num_workers) if num_workers else max(2, cpu - 1)
+        # 뒤에서 천천히 만드는 풀(교차검증 2차 대비 등) — OS 스레드 우선순위를 최저로
+        # 두어 화면·매칭이 CPU 를 원하면 그쪽이 먼저 가게 한다.
+        self._low_priority = bool(low_priority)
 
         self._heap: list[_Job] = []
         self._lock = threading.Lock()
         self._seq = 0
         self._stop = False
         self._workers: list[_PoolWorker] = []
+        # 아직 일을 꺼낼 수 있는 워커 수 — 워커는 큐가 비면 끝나므로, 끝난 뒤 다시
+        # ``enqueue`` 한 일을 놓치지 않도록 ``start`` 가 이 수만큼 모자란 워커를 새로
+        # 띄운다.  '큐가 비었다 → 끝낸다' 판단과 같은 lock 아래서 줄여 경합이 없다.
+        self._alive = 0
         self._total = 0
         self._done = 0
         # finished 시그널이 race condition 으로 두 번 emit / 한 번도 안 됨을 막기
@@ -133,12 +141,27 @@ class ThumbnailPool(QObject):
 
     # ------------------------------------------------------------------
     def start(self) -> None:
-        if self._workers:
-            return
-        for _ in range(self._num_workers):
+        """워커를 띄운다 — 이미 끝난 워커가 있으면 그만큼 다시 띄운다(재시작 가능).
+
+        좌표 매칭의 후보 썸네일처럼 일이 나중에 조금씩 들어오는 풀은
+        ``enqueue`` → ``start`` 를 여러 번 부른다."""
+        with self._lock:
+            if self._stop:
+                return
+            need = self._num_workers - self._alive
+            self._alive += max(0, need)
+        for _ in range(need):
             w = _PoolWorker(self)
-            w.start()
+            if self._low_priority:
+                w.start(QThread.Priority.LowestPriority)
+            else:
+                w.start()
             self._workers.append(w)
+
+    def is_done(self) -> bool:
+        """적재한 일을 전부 끝냈는가(빈 풀이면 참)."""
+        with self._lock:
+            return self._done >= self._total
 
     def stop(self) -> None:
         self._stop = True
@@ -186,10 +209,9 @@ class _PoolWorker(QThread):
 
     def run(self) -> None:  # type: ignore[override]
         while True:
-            if self._pool._stop:
-                return
             with self._pool._lock:
-                if not self._pool._heap:
+                if self._pool._stop or not self._pool._heap:
+                    self._pool._alive -= 1
                     return
                 job = heapq.heappop(self._pool._heap)
             ok = True
