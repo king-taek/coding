@@ -219,3 +219,15 @@ def test_kla_side_gets_no_scan_column(qapp, isolated_cache, tmp_path, kla_side):
     assert SCAN_NAME in rows and None in rows                # KLA 미매칭 행은 빈칸
     um = wb[i18n.KO.SHEET_UNMATCHED]                         # 미매칭 시트도 같은 구성
     assert um["E2"].value == f"{cam_machine} Scan" and um.max_column == 5
+
+
+def test_same_folder_on_both_sides_keeps_both_scan_columns(qapp, isolated_cache, tmp_path):
+    """같은 폴더끼리 비교하면 기준·검증 사진 경로가 같다 — 두 Scan 열이 다 있어야 한다."""
+    f = _folder(tmp_path, "w")
+    p = _color(f, 10000, 20000)
+    result = FinalResult(mode="single", ref_machine="17", val_machine="17",
+                         matches=[MatchResult(slot="S1", ref_path=p, val_path=p, score=1)],
+                         unmatched_refs=[])
+    ws = _export(result, tmp_path / "out.xlsx", template_path=tmp_path / "n.xlsx")["out"]
+    assert [ws[f"{c}2"].value for c in "EF"] == ["AOI-17 Scan", "AOI-17 Scan"]
+    assert {("E", 3), ("F", 3)} <= _anchors(ws)

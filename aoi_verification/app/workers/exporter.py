@@ -193,7 +193,9 @@ class ExcelExporter(QThread):
         # `_scan_cols` 와 같은 순서의 장비 쪽("ref"/"val") — KLA 처럼 Scan 이 하나도 없는
         # 쪽은 열을 만들지 않으므로 E 가 늘 기준 Scan 이라는 보장이 없다(사용자 요청).
         self._scan_sides: list[str] = []
-        self._path_side: dict[str, str] = {}     # 경로 → "ref"/"val" (`_scan_paths`)
+        # 경로 → 그 사진이 나오는 쪽들("ref"/"val").  같은 폴더끼리 비교하면 한 경로가
+        # 두 쪽에 다 나온다 — 하나만 기억하면 검증 Scan 열이 빠진다.
+        self._path_side: dict[str, set[str]] = {}
         # 경로 → (상태, Crop JPEG, Scan 파일명).  파일명은 셀 값으로 적는다(사진 뒤에 숨는다).
         self._scan_cache: dict[str, tuple[str, Optional[bytes], str]] = {}
 
@@ -626,11 +628,11 @@ class ExcelExporter(QThread):
         for m in self._result.matches:
             for p, side in ((m.ref_path, "ref"), (m.val_path, "val")):
                 seen.setdefault(str(p), Path(p))
-                self._path_side.setdefault(str(p), side)
+                self._path_side.setdefault(str(p), set()).add(side)
         for u in self._result.unmatched_refs:
             seen.setdefault(str(u.path), Path(u.path))
             side = "val" if u.side == "val" and not self._extract else "ref"
-            self._path_side.setdefault(str(u.path), side)
+            self._path_side.setdefault(str(u.path), set()).add(side)
         has_list: dict[Path, bool] = {}
         out = []
         for p in seen.values():
@@ -693,7 +695,8 @@ class ExcelExporter(QThread):
             # 열은 **Scan 목록이 있는 장비 쪽**만 받는다 — 캐시에는 목록 폴더의 사진만
             # 들어 있다(`_scan_paths`).  KLA 는 Scan 자료가 아예 없어 그 쪽 열은 늘
             # 'Scan 없음' 뿐이었다(사용자 요청).  Camtek 쪽은 예전처럼 묶어서 판단한다.
-            sides = {self._path_side.get(k, "ref") for k in self._scan_cache}
+            sides = set().union(*(self._path_side.get(k, {"ref"})
+                                  for k in self._scan_cache))
             self._scan_sides = [s for s in ("ref", "val") if s in sides]
             self._scan_cols = ["E", "F"][:len(self._scan_sides)]
         _LOG.info("저장 소요 [Scan 확인] %.2f초 %d장 — 상태별 %s",
