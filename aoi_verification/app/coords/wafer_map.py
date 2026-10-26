@@ -330,7 +330,10 @@ def _camtek(folder: Path) -> _Camtek:
     cells = None
     if wt is not None:
         cells = wt.cells
-    elif geom is not None and geom.source.endswith(wg._DIE_MAP_FILE):
+    elif geom is not None and wg.DIELUT_SOURCE_TAG in geom.source:
+        # 장비 die 목록으로 번호를 정했으면 칸도 그 목록이다(가장자리가 빠지는 스캔 맵보다 완전).
+        cells = wg.dielut_cells(folder)
+    elif geom is not None and wg._DIE_MAP_FILE in geom.source:
         cells = wg.lot_die_map_cells(folder, geom.pitch_x, geom.pitch_y)
     return _Camtek(geom=geom, diameter=dia, cx=cx, cy=cy, source=source, cells=cells,
                    pitch_assumed=pitch_assumed)

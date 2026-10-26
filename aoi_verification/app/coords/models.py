@@ -21,7 +21,7 @@ __all__ = ["DefectCoord", "DefectGeometry", "CAMTEK_PITCH_X", "CAMTEK_PITCH_Y",
 # 때만 경고).  근거: 장비가 번호 기준을 적어 둔 ``ProductInfo.ini [ExportData]`` 를 읽으면
 # 장비 번호와 같았고(관측, 8 LOT), 그 밖의 경로는 웨이퍼 기하에서 유도한 값이다.
 NUMBER_WARN_NO_GRID = "no_grid"      # die 격자를 못 읽어 col 을 상수(CAMTEK_COL_OFFSET)로 계산
-NUMBER_WARN_NO_TABLE = "no_table"    # Camtek 장비 번호표([ExportData])가 없어 웨이퍼 기하로 유도
+NUMBER_WARN_NO_TABLE = "no_table"    # Camtek 번호표([ExportData])·die 목록(DieLut.dat)이 없고 계산도 서로 달라 유도값
 NUMBER_WARN_KLA_GUESS = "kla_guess"  # KLA 헤더에 웨이퍼 중심이 없어 원점을 목록·상수로 정함
 
 

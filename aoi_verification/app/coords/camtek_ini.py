@@ -23,7 +23,7 @@ from typing import Optional
 
 from .models import (CAMTEK_COL_OFFSET, NUMBER_WARN_NO_GRID, NUMBER_WARN_NO_TABLE,
                      DefectCoord)
-from .wafer_geometry import (EXPORT_SOURCE_TAG, CamtekGeometry, FALLBACK_CAMTEK,
+from .wafer_geometry import (CamtekGeometry, FALLBACK_CAMTEK, is_trusted_source,
                              camtek_geometry)
 from .ini_text import read_ini_text
 
@@ -162,8 +162,9 @@ def _coord_from_raw(raw: tuple[float, float, int, int],
     # ref/val 양쪽 동일 규칙으로 2 µm 미만이라 매칭 판정(20/200 µm)에 영향 없다.
     x = float(math.floor(X - x_index * geom.pitch_x))
     y = float(math.floor(Y - y_index * geom.pitch_y))
-    # 번호 기준을 장비 번호표에서 읽지 못했으면 유도값이라 틀렸을 수 있다 — 화면에 경고만.
-    warn = "" if EXPORT_SOURCE_TAG in geom.source else NUMBER_WARN_NO_TABLE
+    # 번호 기준이 장비 기록(번호표 · die 목록)도, 표본 전부에서 맞았던 '중심식=격자식' 일치도
+    # 아니면 틀렸을 수 있다 — 화면에 경고만(wafer_geometry.is_trusted_source).
+    warn = "" if is_trusted_source(geom.source) else NUMBER_WARN_NO_TABLE
     return DefectCoord(col=col, row=row, x=x, y=y, source="camtek_ini", number_warn=warn)
 
 

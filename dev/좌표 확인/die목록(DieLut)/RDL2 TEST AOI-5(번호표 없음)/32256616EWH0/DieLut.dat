@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ArrayOfDieLutData xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <DieLutData Col="4" Row="1" RecipeNum="1" ScanField="1" StatusField="20" Bin="999" ClassId="29" />
+  <DieLutData Col="5" Row="1" RecipeNum="1" ScanField="3" StatusField="10" Bin="999" ClassId="29" />
+  <DieLutData Col="6" Row="1" RecipeNum="1" ScanField="1" StatusField="10" Bin="999" ClassId="29" />
+  <DieLutData Col="3" Row="2" RecipeNum="1" ScanField="1" StatusField="10" Bin="999" ClassId="29" />
+  <DieLutData Col="4" Row="2" RecipeNum="1" ScanField="3" StatusField="18" Bin="999" ClassId="29" />
+  <DieLutData Col="5" Row="2" RecipeNum="1" ScanField="1" StatusField="20" Bin="999" ClassId="29" />
+  <DieLutData Col="6" Row="2" RecipeNum="1" ScanField="3" StatusField="12" Bin="999" ClassId="29" />
+  <DieLutData Col="7" Row="2" RecipeNum="1" ScanField="1" StatusField="4" Bin="999" ClassId="29" />
+  <DieLutData Col="2" Row="3" RecipeNum="1" ScanField="1" StatusField="26" Bin="999" ClassId="29" />
+  <DieLutData Col="3" Row="3" RecipeNum="1" ScanField="3" StatusField="4" Bin="999" ClassId="29" />
+  <DieLutData Col="4" Row="3" RecipeNum="1" ScanField="1" StatusField="22" Bin="999" ClassId="29" />
+  <DieLutData Col="5" Row="3" RecipeNum="1" ScanField="1" StatusField="24" Bin="999" ClassId="29" />
+  <DieLutData Col="6" Row="3" RecipeNum="1" ScanField="1" StatusField="22" Bin="999" ClassId="29" />
+  <DieLutData Col="7" Row="3" RecipeNum="1" ScanField="3" StatusField="6" Bin="999" ClassId="29" />
+  <DieLutData Col="8" Row="3" RecipeNum="1" ScanField="1" StatusField="6" Bin="999" ClassId="29" />
+  <DieLutData Col="2" Row="4" RecipeNum="1" ScanField="1" StatusField="14" Bin="999" ClassId="29" />
+  <DieLutData Col="3" Row="4" RecipeNum="1" ScanField="1" StatusField="4" Bin="999" ClassId="29" />
+  <DieLutData Col="4" Row="4" RecipeNum="1" ScanField="1" StatusField="12" Bin="999" ClassId="29" />
+  <DieLutData Col="5" Row="4" RecipeNum="1" ScanField="3" StatusField="36" Bin="999" ClassId="29" />
+  <DieLutData Col="6" Row="4" RecipeNum="1" ScanField="1" StatusField="14" Bin="999" ClassId="29" />
+  <DieLutData Col="7" Row="4" RecipeNum="1" ScanField="1" StatusField="6" Bin="999" ClassId="29" />
+  <DieLutData Col="8" Row="4" RecipeNum="1" ScanField="1" StatusField="8" Bin="999" ClassId="29" />
+  <DieLutData Col="3" Row="5" RecipeNum="1" ScanField="1" StatusField="20" Bin="999" ClassId="29" />
+  <DieLutData Col="4" Row="5" RecipeNum="1" ScanField="3" StatusField="10" Bin="999" ClassId="29" />
+  <DieLutData Col="5" Row="5" RecipeNum="1" ScanField="1" StatusField="24" Bin="999" ClassId="29" />
+  <DieLutData Col="6" Row="5" RecipeNum="1" ScanField="3" StatusField="28" Bin="999" ClassId="29" />
+  <DieLutData Col="7" Row="5" RecipeNum="1" ScanField="1" StatusField="10" Bin="999" ClassId="29" />
+  <DieLutData Col="4" Row="6" RecipeNum="1" ScanField="1" StatusField="4" Bin="999" ClassId="29" />
+  <DieLutData Col="5" Row="6" RecipeNum="1" ScanField="1" StatusField="18" Bin="999" ClassId="29" />
+  <DieLutData Col="6" Row="6" RecipeNum="1" ScanField="1" StatusField="22" Bin="999" ClassId="29" />
+  <DieLutData Col="4" Row="1" RecipeNum="2" ScanField="1" Bin="0" ClassId="0" />
+  <DieLutData Col="5" Row="1" RecipeNum="2" ScanField="3" Bin="0" ClassId="0" />
+  <DieLutData Col="6" Row="1" RecipeNum="2" ScanField="1" Bin="0" ClassId="0" />
+  <DieLutData Col="3" Row="2" RecipeNum="2" ScanField="1" Bin="0" ClassId="0" />
+  <DieLutData Col="4" Row="2" RecipeNum="2" ScanField="3" Bin="0" ClassId="0" />
+  <DieLutData Col="5" Row="2" RecipeNum="2" ScanField="1" StatusField="2" Bin="999" ClassId="28" />
+  <DieLutData Col="6" Row="2" RecipeNum="2" ScanField="3" Bin="0" ClassId="0" />
+  <DieLutData Col="7" Row="2" RecipeNum="2" ScanField="1" Bin="0" ClassId="0" />
+  <DieLutData Col="2" Row="3" RecipeNum="2" ScanField="1" Bin="0" ClassId="0" />
+  <DieLutData Col="3" Row="3" RecipeNum="2" ScanField="3" StatusField="3" Bin="999" ClassId="29" />
+  <DieLutData Col="4" Row="3" RecipeNum="2" ScanField="1" Bin="0" ClassId="0" />
+  <DieLutData Col="5" Row="3" RecipeNum="2" ScanField="1" Bin="0" ClassId="0" />
+  <DieLutData Col="6" Row="3" RecipeNum="2" ScanField="1" Bin="0" ClassId="0" />
+  <DieLutData Col="7" Row="3" RecipeNum="2" ScanField="3" Bin="0" ClassId="0" />
+  <DieLutData Col="8" Row="3" RecipeNum="2" ScanField="1" Bin="0" ClassId="0" />
+  <DieLutData Col="2" Row="4" RecipeNum="2" ScanField="1" Bin="0" ClassId="0" />
+  <DieLutData Col="3" Row="4" RecipeNum="2" ScanField="1" Bin="0" ClassId="0" />
+  <DieLutData Col="4" Row="4" RecipeNum="2" ScanField="1" Bin="0" ClassId="0" />
+  <DieLutData Col="5" Row="4" RecipeNum="2" ScanField="3" Bin="0" ClassId="0" />
+  <DieLutData Col="6" Row="4" RecipeNum="2" ScanField="1" Bin="0" ClassId="0" />
+  <DieLutData Col="7" Row="4" RecipeNum="2" ScanField="1" Bin="0" ClassId="0" />
+  <DieLutData Col="8" Row="4" RecipeNum="2" ScanField="1" Bin="0" ClassId="0" />
+  <DieLutData Col="3" Row="5" RecipeNum="2" ScanField="1" Bin="0" ClassId="0" />
+  <DieLutData Col="4" Row="5" RecipeNum="2" ScanField="3" Bin="0" ClassId="0" />
+  <DieLutData Col="5" Row="5" RecipeNum="2" ScanField="1" Bin="0" ClassId="0" />
+  <DieLutData Col="6" Row="5" RecipeNum="2" ScanField="3" Bin="0" ClassId="0" />
+  <DieLutData Col="7" Row="5" RecipeNum="2" ScanField="1" Bin="0" ClassId="0" />
+  <DieLutData Col="4" Row="6" RecipeNum="2" ScanField="1" Bin="0" ClassId="0" />
+  <DieLutData Col="5" Row="6" RecipeNum="2" ScanField="1" Bin="0" ClassId="0" />
+  <DieLutData Col="6" Row="6" RecipeNum="2" ScanField="1" Bin="0" ClassId="0" />
+</ArrayOfDieLutData>

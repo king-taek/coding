@@ -43,7 +43,8 @@ from .models import (CAMTEK_COL_OFFSET, CAMTEK_PITCH_X, CAMTEK_PITCH_Y,
 
 __all__ = ["CamtekGeometry", "KlaGeometry", "camtek_geometry", "kla_geometry",
            "has_camtek_entries", "peek_die_pitch", "live_geometry", "FALLBACK_CAMTEK",
-           "FALLBACK_KLA", "EXPORT_SOURCE_TAG", "KLA_CENTER_SOURCE"]
+           "FALLBACK_KLA", "EXPORT_SOURCE_TAG", "DIELUT_SOURCE_TAG", "AGREE_SOURCE_TAG",
+           "is_trusted_source", "dielut_cells", "KLA_CENTER_SOURCE"]
 
 _LOG = logging.getLogger("aoi.coords")
 
@@ -498,6 +499,94 @@ _EXPORT_KEYS = ("cMin", "cMax", "rMin", "rMax")
 # :attr:`CamtekGeometry.source` 에 이 꼬리표가 있으면 번호 기준을 장비 번호표에서 읽은 것이다.
 EXPORT_SOURCE_TAG = f"{_EXPORT_FILE}[ExportData]"
 
+_DIELUT_FILE = "DieLut.dat"
+# 장비가 **스캔 때** 써 두는 die 목록(UTF-8 XML ``<DieLutData Col Row RecipeNum …/>``, Col/Row 는
+# stage 인덱스).  전체 레코드의 (min Col, max Col, min Row, max Row) 가 ``[ExportData]`` 의
+# (cMin, cMax, rMin, rMax) 와 같았다 — 둘 다 있는 26 LOT·51 폴더 전부(관측 2026-10-26), 계산이
+# 틀리던 AVAGO 01C1(die 맵 col 3 → 2) · T254 GX57007306(부분 맵 row 9 → 10) 도 포함.  검토
+# (Export Map) 전 폴더에도 있어, 번호표가 없는 RDL2 43장이 이것으로 장비 번호를 얻는다.
+# **다중 레시피 스캔(MultiRecipe.ini 의 recipe_N 이 켜진 스캔)에만 있다** — TI CCB·CCG, KUH,
+# QORVO, T254 TSC-FS, 단일 레시피로 찍은 RDL4 에는 없다.  → docs/규칙_배경.md
+DIELUT_SOURCE_TAG = _DIELUT_FILE
+# 번호표도 die 목록도 없을 때: 1차원 중심식과 2차원 3 mm 격자식(die 맵을 채택했으면 맵도)이
+# **같은 값**이면 그 값을 ⚠ 없이 쓴다.  번호표 있는 131 폴더에서 둘이 같은 123 폴더는 전부
+# 번호표와 같았고, 틀린 8(AVAGO 2 · QORVO 6)은 전부 둘이 다르거나 격자가 없었다(관측 2026-10-26).
+# 저장소 샘플 83 폴더도 같다(둘 일치 69, 틀림 0).  사용자 결정 2026-10-27: "지금까지 준 샘플에서
+# 전부 정답인 규칙이면 경고 표시 없어도 됨".  둘이 다르거나 하나뿐이면 ⚠(NUMBER_WARN_NO_TABLE).
+AGREE_SOURCE_TAG = "중심식=격자식"
+_TRUSTED_TAGS = (EXPORT_SOURCE_TAG, DIELUT_SOURCE_TAG, AGREE_SOURCE_TAG)
+_DIELUT_REC = re.compile(r"<DieLutData\b([^>]*?)/?>")
+_DIELUT_ATTR = re.compile(r'\b(Col|Row)="(-?\d+)"')
+
+
+def is_trusted_source(source: str) -> bool:
+    """:attr:`CamtekGeometry.source` 의 번호 기준이 ⚠ 없이 믿을 것인가 — 장비 기록(번호표 ·
+    die 목록)이거나, 표본 전부에서 맞았던 '중심식=격자식' 일치다.  그 밖은 유도값이라 경고."""
+    return any(tag in source for tag in _TRUSTED_TAGS)
+
+
+def dielut_cells(folder: Path) -> Optional[frozenset[tuple[int, int]]]:
+    """``DieLut.dat`` 의 die 칸 ``(Col, Row)`` 집합(stage 인덱스).  없거나 비었으면 None.
+
+    레시피(RecipeNum)마다 같은 칸이 반복되므로 집합으로 합친다.  Wafer map 의 칸과
+    번호 기준(:func:`_dielut_origins`)이 **같은 집합**을 쓰도록 여기 하나로 읽는다.
+    전 구간 fail-safe."""
+    p = folder / _DIELUT_FILE
+    try:
+        st = p.stat()
+    except OSError:
+        return None
+    return _dielut_cells(p, st.st_mtime_ns, st.st_size)
+
+
+@lru_cache(maxsize=256)
+def _dielut_cells(p: Path, _mtime_ns: int, _size: int) -> Optional[frozenset[tuple[int, int]]]:
+    try:
+        txt = p.read_bytes().decode("utf-8", "replace")
+    except OSError:
+        return None
+    cells = set()
+    for m in _DIELUT_REC.finditer(txt):
+        kv = dict(_DIELUT_ATTR.findall(m.group(1)))
+        if "Col" in kv and "Row" in kv:
+            cells.add((int(kv["Col"]), int(kv["Row"])))
+    return frozenset(cells) or None
+
+
+def _dielut_origins(folder: Path, px: float, py: float, dia: float,
+                    cx: Optional[float], cy: Optional[float]) -> Optional[tuple[int, int]]:
+    """``DieLut.dat`` 의 die 목록 범위로 ``(col_origin, row_total)`` = ``(min Col, max Row)``.
+
+    채택 조건은 :func:`_export_origins` 와 같다(어긋나면 None — 계산 경로로 간다): 같은 폴더
+    ``ProductInfo.ini`` 의 ``XDieIndex/YDieIndex`` 가 채택한 pitch 와 같다(다른 격자의 목록을
+    섞지 않게) · 웨이퍼 중심을 알고 범위가 웨이퍼 원의 인덱스 범위 안이다 · die 맵이 있으면
+    die 가 전부 범위 안이다(관측: s_DieLocation.dat ⊂ DieLut.dat).  ``_MAX_DIE_INDEX`` 상한은
+    쓰지 않는다(번호표와 같은 이유)."""
+    cells = dielut_cells(folder)
+    if cells is None:
+        return None
+    c_min, c_max = min(i for i, _ in cells), max(i for i, _ in cells)
+    r_min, r_max = min(j for _, j in cells), max(j for _, j in cells)
+    if c_min < 0 or r_min < 0:
+        return None
+    xi = _read_key(folder / _EXPORT_FILE, "XDieIndex", _MIN_PITCH, _MAX_PITCH)
+    yi = _read_key(folder / _EXPORT_FILE, "YDieIndex", _MIN_PITCH, _MAX_PITCH)
+    if xi is None or yi is None or abs(xi - px) > 0.01 or abs(yi - py) > 0.01:
+        return None
+    if not cx or not cy:
+        return None
+    r = dia / 2.0
+    if not (math.floor((cx - r) / px) <= c_min and c_max <= math.floor((cx + r) / px)
+            and math.floor((cy - r) / py) <= r_min and r_max <= math.floor((cy + r) / py)):
+        _LOG.warning("%s 범위가 웨이퍼 밖이라 쓰지 않습니다: %s", _DIELUT_FILE, folder)
+        return None
+    dmap = die_map_cells(folder, px, py)
+    if dmap is not None and not all(c_min <= i <= c_max and r_min <= j <= r_max
+                                    for i, j in dmap):
+        _LOG.warning("%s 범위 밖에 die 맵의 die 가 있어 쓰지 않습니다: %s", _DIELUT_FILE, folder)
+        return None
+    return c_min, r_max
+
 
 def _export_origins(folder: Path, px: float, py: float, dia: float,
                     cx: Optional[float], cy: Optional[float]) -> Optional[tuple[int, int]]:
@@ -557,19 +646,34 @@ def _export_origins(folder: Path, px: float, py: float, dia: float,
 def _with_origins(folder: Path, px: float, py: float, src: str) -> CamtekGeometry:
     """채택한 pitch 에 col·row 기준을 붙인다 — :func:`camtek_geometry` 와
     :func:`live_geometry` 가 **같은 규칙**을 쓰게 한 곳에 둔다."""
-    # col·row 기준은 **장비가 쓴 die 맵이 1순위**다(§6-N) — 웨이퍼가 어디 놓였는지
-    # 로 유도하던 값을, 유도하지 않고 장비가 적어 둔 대로 읽는다.  맵이 없으면
+    # col·row 기준: 번호표([ExportData]) → die 목록(DieLut.dat) → 장비가 쓴 die 맵(§6-N)
+    # → 중심 유도.  유도하던 값을 되도록 장비가 적어 둔 대로 읽는다.  맵이 없으면
     # 기존 유도로 폴백한다: 중심은 Params 의 Center_X/Y → Wafer2Table.ini 순으로
     # 찾고(§6-L), 그래도 없으면 각각 상수/옛 식으로 폴백한다(§6-H·§6-J).
     dia = _read_diameter(folder)
     cx, cy = _wafer_center(folder)
     # ★ 0순위: 장비가 내보낸 격자 범위(ProductInfo.ini [ExportData]) — 장비 화면 번호 그 자체다.
     exp = _export_origins(folder, px, py, dia, cx, cy)
+    # ★ 1순위: 장비가 스캔 때 쓴 die 목록(DieLut.dat)의 범위 — 번호표와 같았다(51/51).
+    lut = _dielut_origins(folder, px, py, dia, cx, cy)
     if exp is not None:
+        if lut is not None and lut != exp:
+            # 반증 조건 — 관측된 적 없다.  생기면 그 폴더를 보존해 규칙을 다시 본다.
+            _LOG.warning("[ExportData] %s 와 %s 범위 %s 가 다릅니다 — 번호표를 씁니다: %s",
+                         exp, _DIELUT_FILE, lut, folder)
         return CamtekGeometry(pitch_x=px, pitch_y=py, col_origin=exp[0], row_total=exp[1],
                               source=f"{src}+{EXPORT_SOURCE_TAG}")
+    if lut is not None:
+        return CamtekGeometry(pitch_x=px, pitch_y=py, col_origin=lut[0], row_total=lut[1],
+                              source=f"{src}+{DIELUT_SOURCE_TAG}")
     d_origin = _col_origin(cx, dia, px)
     d_total = _row_total(cy, dia, py)
+    grid = _grid_origins(cx, cy, dia, px, py)
+
+    def _agree(origin: int, total: int) -> str:
+        """채택값이 중심식·격자식과 모두 같을 때만 '계산 일치' 꼬리표 — 그래야 ⚠ 가 빠진다."""
+        return f"+{AGREE_SOURCE_TAG}" if grid == (origin, total) == (d_origin, d_total) else ""
+
     cells = lot_die_map_cells(folder, px, py)
     if cells is not None and _covers_wafer(cells, cx, cy, dia, px, py, folder):
         m_origin = min(i for i, _ in cells)
@@ -580,7 +684,6 @@ def _with_origins(folder: Path, px: float, py: float, src: str) -> CamtekGeometr
         #   둘이 갈리면 맵을 믿는다(PGEE48 row: 1차원 56 · 격자 55 · 맵 55 = 장비).
         #   격자 하나만으로 바꾸지 않는 이유: 가장자리 3 mm 는 소형 die 한 제품으로 정한
         #   가정이고, 대형 die 에서는 '중심만 들면 센다' 같은 경쟁 가설과 구분되지 않는다.
-        grid = _grid_origins(cx, cy, dia, px, py)
         if grid is not None:
             if grid[0] == d_origin < m_origin:
                 _LOG.warning("die 맵의 첫 열(%d)이 격자보다 좁아 %d 로 넓힙니다(가장자리 열이 "
@@ -604,14 +707,14 @@ def _with_origins(folder: Path, px: float, py: float, src: str) -> CamtekGeometr
                     d_origin, m_origin, d_total, m_total, folder)
             return CamtekGeometry(pitch_x=px, pitch_y=py,
                                   col_origin=m_origin, row_total=m_total,
-                                  source=f"{src}+{_DIE_MAP_FILE}")
+                                  source=f"{src}+{_DIE_MAP_FILE}{_agree(m_origin, m_total)}")
         _LOG.warning(
             "%s 의 die 기준 (%d, %d) 이 유도값 (%d, %d) 과 1 넘게 달라 "
             "무시합니다(부분 맵 의심 — 웨이퍼 전체 맵이면 있을 수 없는 차이): %s",
             _DIE_MAP_FILE, m_origin, m_total, d_origin, d_total, folder)
     return CamtekGeometry(pitch_x=px, pitch_y=py,
                           col_origin=d_origin, row_total=d_total,
-                          source=src)
+                          source=f"{src}{_agree(d_origin, d_total)}")
 
 
 @lru_cache(maxsize=256)
