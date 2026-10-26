@@ -844,8 +844,9 @@ def test_lot_rows_folders_and_slots(qapp, tmp_path, monkeypatch):
         page.ref_path_edit.setText(str(a))
         page._add_lot_row()
         row = page._lot_rows[1]
-        monkeypatch.setattr(sp.QFileDialog, "getExistingDirectory",
-                            lambda *x: str(b))
+        # OS 브라우저는 비동기(`ui/folder_picker.py`) — 고른 결과를 시그널로 흘려 넣는다.
+        monkeypatch.setattr(sp.FolderPicker, "open",
+                            lambda self, caption, start="": self.picked.emit(str(b)))
         page._browse(row["edit"])                          # 그 줄 자기 칸에 들어간다
         assert row["edit"].text() == str(b) and page.ref_path_edit.text() == str(a)
         page._add_lot_row()                                # 빈 줄은 무시한다
