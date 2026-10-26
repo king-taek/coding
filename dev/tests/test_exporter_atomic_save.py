@@ -237,7 +237,7 @@ def test_scan_exception_is_recorded_as_unreadable_and_logged(
     p = tmp_path / "a.jpg"
     with caplog.at_level("WARNING", logger="aoi.export"):
         e._scan_prepass([p])
-    assert e._scan_cache[str(p)] == (scan_image.UNREADABLE, None)
+    assert e._scan_cache[str(p)] == (scan_image.UNREADABLE, None, "")
     assert "Scan 확인 실패" in caplog.text
 
 

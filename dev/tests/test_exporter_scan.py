@@ -6,6 +6,8 @@
   E 그 사진의 Scan, F 빈칸.
 - Scan 열이 있는 시트에서 그 행만 Scan 이 없으면 짧은 문구.
 - 추출은 C 사진·D 정보·E Scan, Recipe 나란히 배치는 [사진|정보|Scan].
+- (2026-10-26) Scan 칸에도 Scan 파일명을 셀 값으로 적는다.  Scan 목록이 없는 장비 쪽(KLA)은
+  열을 만들지 않는다 — 그러면 Camtek 쪽 Scan 하나만 E 에 온다.
 """
 from __future__ import annotations
 
@@ -130,7 +132,7 @@ def test_unreadable_scan_writes_message(qapp, isolated_cache, tmp_path, monkeypa
     monkeypatch.setattr(scan_image, "load_crop", lambda m: None)
     ws = _export(_match_result(tmp_path), tmp_path / "out.xlsx",
                  template_path=tmp_path / "none.xlsx")["out"]
-    assert ws["E3"].value == i18n.KO.SCAN_EXCEL_UNREADABLE
+    assert ws["E3"].value.startswith(i18n.KO.SCAN_EXCEL_UNREADABLE)
     assert ws["E2"].value == "AOI-17 Scan"       # 판정은 통과했으니 열은 있다
 
 
@@ -161,3 +163,71 @@ def test_extract_columns_layout_uses_three_column_stride(qapp, isolated_cache, t
         i18n.KO.EXTRACT_INFO_HEADER, i18n.KO.SCAN_EXCEL_HEADER,
         i18n.KO.EXTRACT_INFO_HEADER, i18n.KO.SCAN_EXCEL_HEADER]
     assert {("C", 3), ("E", 3), ("F", 3), ("H", 3)} <= _anchors(ws)
+
+
+# --- Scan 파일명 · 장비 쪽별 열 (사용자 요청 2026-10-26) -----------------------------
+def test_scan_cell_holds_scan_file_name(qapp, isolated_cache, tmp_path):
+    """Color 사진 칸처럼 Scan 칸에도 파일명을 셀 값으로 적는다(그림이 위를 덮는다)."""
+    ws = _export(_match_result(tmp_path), tmp_path / "out.xlsx",
+                 template_path=tmp_path / "none.xlsx")["out"]
+    assert ws["E3"].value == SCAN_NAME and ("E", 3) in _anchors(ws)
+    assert ws["E4"].value == SCAN_NAME                       # 미매칭 행도
+    assert ws["F3"].value == i18n.KO.SCAN_EXCEL_NONE         # 후보가 없으면 이름도 없다
+
+
+def test_unreadable_scan_message_keeps_file_name(qapp, isolated_cache, tmp_path,
+                                                 monkeypatch):
+    monkeypatch.setattr(scan_image, "load_crop", lambda m: None)
+    ws = _export(_match_result(tmp_path), tmp_path / "out.xlsx",
+                 template_path=tmp_path / "none.xlsx")["out"]
+    assert ws["E3"].value == f"{i18n.KO.SCAN_EXCEL_UNREADABLE}\n{SCAN_NAME}"
+
+
+def _kla_folder(tmp_path, name):
+    """KLA 처럼 Scan 목록이 아예 없는 폴더."""
+    f = tmp_path / name
+    f.mkdir()
+    return f
+
+
+@pytest.mark.parametrize("kla_side", ["ref", "val"])
+def test_kla_side_gets_no_scan_column(qapp, isolated_cache, tmp_path, kla_side):
+    cam = _folder(tmp_path, "cam")
+    kla = _kla_folder(tmp_path, "kla")
+    cam_a = _color(cam, 10000, 20000)
+    kla_a = _color(kla, 10000, 20000)
+    cam_u = _color(cam, 10100, 20050, "2")
+    kla_u = _color(kla, 5, 6, "2")
+    ref_a, val_a = (kla_a, cam_a) if kla_side == "ref" else (cam_a, kla_a)
+    result = FinalResult(
+        mode="single", ref_machine="17", val_machine="23",
+        matches=[MatchResult(slot="S1", ref_path=ref_a, val_path=val_a, score=0.9)],
+        unmatched_refs=[
+            MissEntry(slot="S1", side=kla_side, path=kla_u, note=""),
+            MissEntry(slot="S1", side="val" if kla_side == "ref" else "ref",
+                      path=cam_u, note="")])
+    wb = _export(result, tmp_path / "out.xlsx", template_path=tmp_path / "none.xlsx")
+    ws = wb["out"]
+    cam_machine = "AOI-23" if kla_side == "ref" else "AOI-17"
+    # Scan 열은 Camtek 쪽 하나뿐 — E 하나, F 는 없다.
+    assert ws["E2"].value == f"{cam_machine} Scan"
+    assert ws.max_column == 5
+    assert "C1:E1" in {str(r) for r in ws.merged_cells.ranges}
+    a = _anchors(ws)
+    assert ("E", 3) in a and ws["E3"].value == SCAN_NAME     # 매치 행 = Camtek 사진의 Scan
+    rows = {ws[f"E{r}"].value for r in (4, 5)}
+    assert SCAN_NAME in rows and None in rows                # KLA 미매칭 행은 빈칸
+    um = wb[i18n.KO.SHEET_UNMATCHED]                         # 미매칭 시트도 같은 구성
+    assert um["E2"].value == f"{cam_machine} Scan" and um.max_column == 5
+
+
+def test_same_folder_on_both_sides_keeps_both_scan_columns(qapp, isolated_cache, tmp_path):
+    """같은 폴더끼리 비교하면 기준·검증 사진 경로가 같다 — 두 Scan 열이 다 있어야 한다."""
+    f = _folder(tmp_path, "w")
+    p = _color(f, 10000, 20000)
+    result = FinalResult(mode="single", ref_machine="17", val_machine="17",
+                         matches=[MatchResult(slot="S1", ref_path=p, val_path=p, score=1)],
+                         unmatched_refs=[])
+    ws = _export(result, tmp_path / "out.xlsx", template_path=tmp_path / "n.xlsx")["out"]
+    assert [ws[f"{c}2"].value for c in "EF"] == ["AOI-17 Scan", "AOI-17 Scan"]
+    assert {("E", 3), ("F", 3)} <= _anchors(ws)

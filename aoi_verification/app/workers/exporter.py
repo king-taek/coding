@@ -25,6 +25,7 @@ from typing import Optional
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
 from .. import i18n
+from ..models import multi_val
 from ..models.result import EXTRACT_MODE, FinalResult, MatchResult, MissEntry
 from ..models.slot import lot_of, slot_label
 from ..utils import image_io
@@ -50,7 +51,8 @@ SHEET_FULL_NAME = "전체 양식"
 BORDER_COLS = ["A", "B", "C", "D"]
 
 # Scan image 열 — 이번 저장의 사진 중 하나라도 Scan 이 확인될 때만 생긴다(사용자 결정:
-# '묶어서 판단').  기존 열 뒤에 붙인다: 매칭은 E=기준 Scan·F=검증 Scan, 추출은 E=Scan.
+# '묶어서 판단').  Scan 목록이 없는 장비 쪽(KLA)은 열을 받지 않는다.
+# 기존 열 뒤에 붙인다: 매칭은 E=기준 Scan·F=검증 Scan(한 쪽만이면 E 하나), 추출은 E=Scan.
 # 전체 양식의 수기 칸(E~H)은 그만큼 오른쪽으로 밀린다.  Scan 이 없는 저장은 지금과
 # 똑같은 열 구성이다(양식.xlsx 도 그대로 — 열은 저장할 때 끼운다).
 SCAN_COL_START = 5                       # E
@@ -156,9 +158,17 @@ class ExcelExporter(QThread):
                  unmatched_original_quality: bool = False,
                  map_renderer=None,
                  recipe_layout: str = RECIPE_LAYOUT_SINGLE,
+                 legs: Optional[list] = None,
                  parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._result = result
+        # 기준 1 ↔ 검증 여러 장비 — 장비마다의 FinalResult(`models/multi_val.py`).
+        # 둘 이상이면 요약 시트 + 장비별 시트(지금 양식 그대로)를 한 파일에 쓴다.
+        self._legs = list(legs) if legs and len(legs) > 1 else None
+        # 시트 이름 — 여러 장비면 장비별로 갈라 쓴다(`_emit_multi`).
+        self._full_name = SHEET_FULL_NAME
+        self._sheet_suffix = ""
+        self._leg_title = ""
         # Defect 추출 — 행이 전부 '고른 사진'(unmatched_refs)이다.  미매칭 행과 같은 모양
         # (C=사진, D=파일명·계측·좌표 글자)으로 적되 '미매칭' 표시(행 틴트·메모·시트)는
         # 붙이지 않는다 — 매칭을 하지 않았으므로 미매칭도 아니다.
@@ -189,7 +199,14 @@ class ExcelExporter(QThread):
         self._stop = threading.Event()
         # Scan image — `_scan_prepass` 가 채운다.  비어 있으면 Scan 열이 없는 예전 배치.
         self._scan_cols: list[str] = []
-        self._scan_cache: dict[str, tuple[str, Optional[bytes]]] = {}
+        # `_scan_cols` 와 같은 순서의 장비 쪽("ref"/"val") — KLA 처럼 Scan 이 하나도 없는
+        # 쪽은 열을 만들지 않으므로 E 가 늘 기준 Scan 이라는 보장이 없다(사용자 요청).
+        self._scan_sides: list[str] = []
+        # 경로 → 그 사진이 나오는 쪽들("ref"/"val").  같은 폴더끼리 비교하면 한 경로가
+        # 두 쪽에 다 나온다 — 하나만 기억하면 검증 Scan 열이 빠진다.
+        self._path_side: dict[str, set[str]] = {}
+        # 경로 → (상태, Crop JPEG, Scan 파일명).  파일명은 셀 값으로 적는다(사진 뒤에 숨는다).
+        self._scan_cache: dict[str, tuple[str, Optional[bytes], str]] = {}
 
     def stop(self) -> None:
         """진행 중인 저장을 취소한다 — 파일을 쓰기 **전에** 멈춘다."""
@@ -232,18 +249,15 @@ class ExcelExporter(QThread):
         # 구현: 템플릿(현재 ws)을 채워 '전체 양식' 으로 두고, 그 시트를 복제해 E~H 를
         #       지운 요약 시트를 앞쪽에 만든다(이미지/서식 보존을 위해 채운 뒤 복제).
         ws.title = SHEET_FULL_NAME
+        self._prepare_template(ws)
+        if self._legs:
+            self._emit_multi(wb, ws)
+        else:
+            self._emit_sheets(wb, ws)
+        self._save_workbook(wb, t_start)
 
-        # row 2 의 ‘AOI-N’ 헤더를 실제 호기 번호로 교체 (#3).
-        ref_label = _machine_label(self._result.ref_machine)
-        val_label = _machine_label(self._result.val_machine)
-        if ref_label:
-            ws[f"{COL_REF}{HEADER_AOI_ROW}"] = ref_label
-        if val_label:
-            ws[f"{COL_VAL}{HEADER_AOI_ROW}"] = val_label
-        if self._extract:
-            # 추출은 장비가 하나다 — D열은 두 번째 장비가 아니라 C열 사진의 정보 칸.
-            ws[f"{COL_VAL}{HEADER_AOI_ROW}"] = i18n.KO.EXTRACT_INFO_HEADER
-
+    def _prepare_template(self, ws) -> None:
+        """양식 시트의 폭·보기 설정 — 장비와 무관한 손질(여러 장비면 사본의 원본)."""
         # 컬럼 폭 보정 — 양식.xlsx 는 ‘Scan Defect (C1:D1)’ 같은 병합 헤더의
         # 왼쪽 셀에만 width 를 지정해 두어, 오른쪽 셀(D, F, H 등) 이 기본 폭
         # (~8) 으로 떨어져 사진이 작아 보이는 문제가 있다.  병합된 헤더 쌍의
@@ -262,32 +276,138 @@ class ExcelExporter(QThread):
         # 머리 2행 고정·반복 — 채우든 지우든(옵션 off) 상관없이 여기서 한 번.
         self._apply_sheet_view(ws)
 
-        # 매치된 줄이 위, 짝 없는 줄이 아래(사용자 요청 2026-10-25).  각 묶음 안에서는
-        # Slot 오름차순, 그 안에서 기준 파일명 오름차순.
+    def _rows_input(self) -> list:
+        """매치된 줄이 위, 짝 없는 줄이 아래(사용자 요청 2026-10-25).  각 묶음 안에서는
+        Slot 오름차순, 그 안에서 기준 파일명 오름차순."""
         rows_input: list[tuple[str, str, object]] = []
         for m in self._result.matches:
             rows_input.append((m.slot, str(m.ref_path.name).lower(), m))
         for u in self._result.unmatched_refs:
             rows_input.append((u.slot, str(u.path.name).lower(), u))
         rows_input.sort(key=lambda x: (isinstance(x[2], MissEntry), x[0], x[1]))
+        return rows_input
+
+    def _emit_multi(self, wb, pristine) -> None:
+        """여러 검증 장비 — 맨 앞 요약 시트 + 장비마다 지금 양식 그대로의 시트들.
+
+        장비마다 양식 사본을 하나씩 만들어 그 장비의 호기 머리칸·Scan 열을 끼우고,
+        단일 저장과 **같은 함수**(`_emit_sheets`)로 시트를 만든 뒤 사본을 지운다."""
+        legs = self._legs
+        # 진행률 총량 — 장비 전부를 한 번에(바가 장비마다 0 으로 돌아가지 않게).
+        total = len(multi_val.summary_rows(legs))
+        for res in legs:
+            self._result = res
+            total += self._sheet_rows_total()
+        self._prog_done, self._prog_total = 0, total
+        for k, res in enumerate(legs):
+            self._result = res
+            self._scan_cols, self._scan_sides = [], []
+            tmpl = wb.copy_worksheet(pristine)
+            tmpl.title = _safe_sheet_title(f"_tmpl{k}", set(wb.sheetnames))
+            self._full_name = tmpl.title
+            # 시트 이름은 사용자가 적은 호기 그대로(`_machine_label` 은 머리칸용 — 'AOI(…)').
+            label = (res.val_machine or "").strip() or f"{k + 1}"
+            self._leg_title = _safe_sheet_title(label, set(wb.sheetnames))
+            self._sheet_suffix = f" ({label})"
+            self._emit_sheets(wb, tmpl, count_progress=False)
+            wb.remove(tmpl)
+        self._full_name = SHEET_FULL_NAME
+        self._sheet_suffix = ""
+        self._write_multi_summary_sheet(wb, legs)
+        self._result = legs[0]
+
+    def _write_multi_summary_sheet(self, wb, legs: list) -> None:
+        """요약 시트(맨 앞) — 기준 사진마다 장비별 잡음/놓침 + 짝지은 검증 사진 이름."""
+        from openpyxl.styles import Alignment, Font, PatternFill
+        from openpyxl.utils import get_column_letter
+
+        rows = multi_val.summary_rows(legs)
+        ws = wb.create_sheet(title=_safe_sheet_title(
+            i18n.KO.MULTI_VAL_SUMMARY_SHEET, set(wb.sheetnames)), index=0)
+        heads = [i18n.KO.MULTI_VAL_SUMMARY_COL_SLOT,
+                 i18n.KO.MULTI_VAL_SUMMARY_COL_REF_FMT.format(
+                     machine=legs[0].ref_machine)]
+        heads += [r.val_machine for r in legs]
+        bold = Font(bold=True)
+        for c, h in enumerate(heads, start=1):
+            cell = ws.cell(row=1, column=c, value=h)
+            cell.font = bold
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        ws.column_dimensions["A"].width = 20
+        ws.column_dimensions["B"].width = 44
+        for c in range(3, len(heads) + 1):
+            ws.column_dimensions[get_column_letter(c)].width = 30
+        ws.freeze_panes = "C2"
+        fills = {multi_val.STATUS_FOUND: PatternFill("solid", fgColor="FFE2F2E6"),
+                 multi_val.STATUS_MISSED: PatternFill("solid", fgColor="FFFBE3E1"),
+                 multi_val.STATUS_NO_SLOT: PatternFill("solid", fgColor="FFF0F0F0")}
+        words = {multi_val.STATUS_FOUND: i18n.KO.MULTI_VAL_STATUS_FOUND,
+                 multi_val.STATUS_MISSED: i18n.KO.MULTI_VAL_STATUS_MISSED,
+                 multi_val.STATUS_NO_SLOT: i18n.KO.MULTI_VAL_STATUS_NO_SLOT}
+        wrap = Alignment(wrap_text=True, vertical="center")
+        base = self._prog_done
+        for r, (slot, ref, cells) in enumerate(rows, start=2):
+            if self._stop.is_set():
+                raise _Cancelled
+            ws.cell(row=r, column=1, value=slot).alignment = wrap
+            ws.cell(row=r, column=2, value=Path(ref).name).alignment = wrap
+            for c, (status, val) in enumerate(cells, start=3):
+                text = words[status]
+                if val is not None:
+                    text += "\n" + Path(val).name
+                cell = ws.cell(row=r, column=c, value=text)
+                cell.fill = fills[status]
+                cell.alignment = wrap
+            self.signals.progress.emit(
+                base + r - 1, self._prog_total,
+                i18n.KO.EXPORT_PHASE_FMT.format(
+                    sheet=i18n.KO.MULTI_VAL_SUMMARY_SHEET, slot=slot))
+        self._prog_done = base + len(rows)
+
+    def _sheet_rows_total(self) -> int:
+        """지금 결과(`self._result`)의 시트들이 채울 행 수 — 진행률 총량의 한 몫."""
+        rows_input = self._rows_input()
+        unmatched = ([] if self._extract or self._legs else
+                     [r for r in rows_input if isinstance(r[2], MissEntry)])
+        prewarm = ([u.path for u in self._result.unmatched_refs]
+                   if self._extract else [])
+        return (len(self._scan_paths()) + len(prewarm) + len(unmatched)
+                + len(rows_input) + len(self._wafer_map_rows()))
+
+    def _emit_sheets(self, wb, ws, *, count_progress: bool = True) -> None:
+        """지금 결과(`self._result`) 하나의 시트들을 만든다 — ``ws`` 는 양식 시트."""
+        # row 2 의 ‘AOI-N’ 헤더를 실제 호기 번호로 교체 (#3).
+        ref_label = _machine_label(self._result.ref_machine)
+        val_label = _machine_label(self._result.val_machine)
+        if ref_label:
+            ws[f"{COL_REF}{HEADER_AOI_ROW}"] = ref_label
+        if val_label:
+            ws[f"{COL_VAL}{HEADER_AOI_ROW}"] = val_label
+        if self._extract:
+            # 추출은 장비가 하나다 — D열은 두 번째 장비가 아니라 C열 사진의 정보 칸.
+            ws[f"{COL_VAL}{HEADER_AOI_ROW}"] = i18n.KO.EXTRACT_INFO_HEADER
+
+        rows_input = self._rows_input()
 
         # 진행률 총량 = 이번 저장이 채울 **모든 시트의 행 수 합** (아래 채우는
         # 순서와 같은 순서로 더한다).  시트가 몇 장이든 바는 0 → 100 을 한 번만
-        # 지난다.
-        unmatched_rows = ([] if self._extract else
+        # 지난다.  ★ 여러 검증 장비면 미매칭 시트를 따로 두지 않는다 — 장비 시트에
+        #   이미 있고, 장비 수만큼 시트가 두 배로 늘면 찾기 어렵다.
+        unmatched_rows = ([] if self._extract or self._legs else
                           [r for r in rows_input if isinstance(r[2], MissEntry)])
-        self._prog_done = 0
         map_rows = self._wafer_map_rows()
         prewarm = ([u.path for u in self._result.unmatched_refs]
                    if self._extract else [])
         scan_paths = self._scan_paths()
-        self._prog_total = (
-            len(scan_paths)                                          # Scan 확인
-            + len(prewarm)                                           # 사진 준비(추출)
-            + len(unmatched_rows)                                    # 미매칭 시트
-            + len(rows_input)                                        # 요약 시트
-            + len(map_rows)                                          # Wafer map 시트
-        )
+        if count_progress:
+            self._prog_done = 0
+            self._prog_total = (
+                len(scan_paths)                                      # Scan 확인
+                + len(prewarm)                                       # 사진 준비(추출)
+                + len(unmatched_rows)                                # 미매칭 시트
+                + len(rows_input)                                    # 요약 시트
+                + len(map_rows)                                      # Wafer map 시트
+            )
         self._scan_prepass(scan_paths)
         if self._scan_cols:
             self._insert_scan_columns(ws)
@@ -299,6 +419,9 @@ class ExcelExporter(QThread):
         if self._extract and (self._recipe_layout != RECIPE_LAYOUT_SINGLE
                               or len(lots) > 1):
             self._write_extract_sheets(wb, lots)
+        elif self._legs:
+            # 여러 검증 장비 — 장비 시트는 차례로 뒤에 붙인다(요약 시트가 맨 앞에 온다).
+            self._build_ad_sheet(wb, self._leg_title, len(wb.sheetnames), rows_input)
         elif unmatched_rows:
             # 미매칭 시트를 index 0(첫 번째)에 만들고, 요약은 index 1.
             self._write_unmatched_sheet(wb, unmatched_rows)
@@ -324,6 +447,7 @@ class ExcelExporter(QThread):
             _LOG.info("저장 소요 [Wafer Map] %.2f초 %d장",
                       time.perf_counter() - t0, len(map_rows))
 
+    def _save_workbook(self, wb, t_start: float) -> None:
         # 전체 양식(E~H 수기 영역) 시트는 저장하지 않는다(사용자 요청 2026-10-25 — 옵션 삭제).
         #   양식 시트는 요약·미매칭 헤더를 복사하는 원본으로만 쓰고, 복사가 끝난 지금 지운다.
         try:
@@ -388,7 +512,7 @@ class ExcelExporter(QThread):
 
         전체 양식 시트의 A~D 헤더/병합/폭/행높이를 복사하고 ``rows_input`` 으로
         이미지를 임베드한다.  요약(전체)·미매칭(부분) 시트가 공유한다."""
-        full = wb[SHEET_FULL_NAME]
+        full = wb[self._full_name]
         ws = wb.create_sheet(title=title, index=index)
 
         # A~D(+Scan 열) 헤더(row 1~2) 값/서식 복사.  수기 칸은 만들지 않는다(요약 시트엔 없음).
@@ -612,14 +736,19 @@ class ExcelExporter(QThread):
         """Scan 을 확인할 Color 경로(중복 없이, 순서 고정).
 
         Scan 목록 파일이 있는 폴더의 사진만 — 목록이 없는 폴더는 확인할 것이 없고,
-        그래야 Scan 자료가 없는 저장은 진행률까지 예전과 똑같다."""
+        그래야 Scan 자료가 없는 저장은 진행률까지 예전과 똑같다.
+        어느 장비 쪽 사진인지는 ``self._path_side`` 에 남긴다(열을 쪽별로 정한다)."""
         from ..coords import scan_image
         seen: dict[str, Path] = {}
+        self._path_side = {}
         for m in self._result.matches:
-            for p in (m.ref_path, m.val_path):
+            for p, side in ((m.ref_path, "ref"), (m.val_path, "val")):
                 seen.setdefault(str(p), Path(p))
+                self._path_side.setdefault(str(p), set()).add(side)
         for u in self._result.unmatched_refs:
             seen.setdefault(str(u.path), Path(u.path))
+            side = "val" if u.side == "val" and not self._extract else "ref"
+            self._path_side.setdefault(str(u.path), set()).add(side)
         has_list: dict[Path, bool] = {}
         out = []
         for p in seen.values():
@@ -630,21 +759,21 @@ class ExcelExporter(QThread):
                 out.append(p)
         return out
 
-    def _scan_one(self, path: Path) -> tuple[str, Optional[bytes]]:
-        """사진 한 장 → (상태, Crop JPEG 바이트).  화면과 같은 `scan_image` 계산이다."""
+    def _scan_one(self, path: Path) -> tuple[str, Optional[bytes], str]:
+        """사진 한 장 → (상태, Crop JPEG 바이트, Scan 파일명).  화면과 같은 `scan_image` 계산이다."""
         import io
         from ..coords import scan_image
         m = scan_image.resolve(path)
         if not m.ok:
-            return m.status, None
+            return m.status, None, ""
         res = scan_image.load_crop(m)
         if res is None:
-            return scan_image.UNREADABLE, None
+            return scan_image.UNREADABLE, None, m.best.path.name
         buf = io.BytesIO()
-        crop = res[0]
+        crop, cand = res
         (crop if crop.mode in ("L", "RGB") else crop.convert("RGB")).save(
             buf, format="JPEG", quality=SCAN_JPEG_QUALITY)
-        return scan_image.OK, buf.getvalue()
+        return scan_image.OK, buf.getvalue(), cand.path.name
 
     def _scan_prepass(self, paths: list[Path]) -> None:
         """모든 사진의 Scan 을 미리 확인하고 Crop 을 만든다 → Scan 열을 넣을지 결정.
@@ -670,16 +799,25 @@ class ExcelExporter(QThread):
                 except Exception:
                     # '후보 없음' 이 아니라 '읽다가 실패' 다 — 같은 상태로 뭉개면 원인을 모른다.
                     _LOG.warning("Scan 확인 실패: %s", futures[f], exc_info=True)
-                    self._scan_cache[str(futures[f])] = (scan_image.UNREADABLE, None)
+                    self._scan_cache[str(futures[f])] = (scan_image.UNREADABLE, None, "")
                 self.signals.progress.emit(base + done, overall,
                                            i18n.KO.SCAN_EXPORT_PHASE)
         self._prog_done = base + len(paths)
+        # 판단은 **이번에 본 사진만**으로 — 여러 검증 장비면 캐시에 앞 장비 사진도 있다.
+        mine = [str(p) for p in paths if str(p) in self._scan_cache]
         counts: dict[str, int] = {}
-        for st, _b in self._scan_cache.values():
+        for k in mine:
+            st = self._scan_cache[k][0]
             counts[st] = counts.get(st, 0) + 1
         found = counts.get(scan_image.OK, 0) + counts.get(scan_image.UNREADABLE, 0)
         if found:
-            self._scan_cols = ["E"] if self._extract else ["E", "F"]
+            # 열은 **Scan 목록이 있는 장비 쪽**만 받는다 — 캐시에는 목록 폴더의 사진만
+            # 들어 있다(`_scan_paths`).  KLA 는 Scan 자료가 아예 없어 그 쪽 열은 늘
+            # 'Scan 없음' 뿐이었다(사용자 요청).  Camtek 쪽은 예전처럼 묶어서 판단한다.
+            sides = set().union(*(self._path_side.get(k, {"ref"})
+                                  for k in mine))
+            self._scan_sides = [s for s in ("ref", "val") if s in sides]
+            self._scan_cols = ["E", "F"][:len(self._scan_sides)]
         _LOG.info("저장 소요 [Scan 확인] %.2f초 %d장 — 상태별 %s",
                   time.perf_counter() - t0, len(paths), counts)
 
@@ -724,7 +862,8 @@ class ExcelExporter(QThread):
         if self._extract:
             ws[f"E{HEADER_AOI_ROW}"] = i18n.KO.SCAN_EXCEL_HEADER
         else:
-            for col, src in zip(self._scan_cols, (COL_REF, COL_VAL)):
+            for col, side in zip(self._scan_cols, self._scan_sides):
+                src = COL_REF if side == "ref" else COL_VAL
                 ws[f"{col}{HEADER_AOI_ROW}"] = i18n.KO.SCAN_EXCEL_HEADER_FMT.format(
                     machine=ws[f"{src}{HEADER_AOI_ROW}"].value or "").strip()
 
@@ -736,7 +875,15 @@ class ExcelExporter(QThread):
         from openpyxl.styles import Alignment, Font
         from ..coords import scan_image
 
-        status, data = self._scan_cache.get(str(src), (scan_image.NO_CANDIDATE, None))
+        status, data, name = self._scan_cache.get(
+            str(src), (scan_image.NO_CANDIDATE, None, ""))
+        cell = ws[f"{col}{row}"]
+        if name:
+            # Color 사진 칸과 같다 — 파일명을 셀 값으로 적고 그림이 그 위를 덮는다.
+            cell.value = name
+            cell.font = Font(size=8, color="FF000000")
+            cell.alignment = Alignment(horizontal="center", vertical="center",
+                                       wrap_text=True)
         if data:
             try:
                 # 시트마다 새 이미지 객체 — 같은 객체를 여러 시트에 쓰면 저장이 깨진다.
@@ -747,9 +894,9 @@ class ExcelExporter(QThread):
             except Exception:
                 _LOG.warning("Scan 그림 삽입 실패: %s", src, exc_info=True)
                 status = scan_image.UNREADABLE
-        cell = ws[f"{col}{row}"]
-        cell.value = (i18n.KO.SCAN_EXCEL_UNREADABLE if status == scan_image.UNREADABLE
-                      else i18n.KO.SCAN_EXCEL_NONE)
+        msg = (i18n.KO.SCAN_EXCEL_UNREADABLE if status == scan_image.UNREADABLE
+               else i18n.KO.SCAN_EXCEL_NONE)
+        cell.value = f"{msg}\n{name}" if name else msg
         cell.font = Font(size=8, color="FF808080")
         cell.alignment = Alignment(horizontal="center", vertical="center",
                                    wrap_text=True)
@@ -905,7 +1052,8 @@ class ExcelExporter(QThread):
                     self._place_image(ws, src, col, row, cell_w_px, cell_h_px)
                     t_info += t1 - t0
                     t_img += time.perf_counter() - t1
-                for src, col in zip((m.ref_path, m.val_path), self._scan_cols):
+                for side, col in zip(self._scan_sides, self._scan_cols):
+                    src = m.ref_path if side == "ref" else m.val_path
                     self._place_scan(ws, src, col, row, cell_w_px, cell_h_px)
                 self.signals.progress.emit(base + idx, overall, _phase(m.slot))
             else:
@@ -929,11 +1077,10 @@ class ExcelExporter(QThread):
                                       note=(i18n.KO.NOTE_ONLY_VAL if on_val
                                             else "미매칭"))
                 # 미매칭·추출 행의 Scan 은 **그 사진의 것**만, 그 장비의 Scan 열에 둔다
-                # (기준 = 첫 Scan 열 E, 검증 = F).  짝 사진 칸은 비워 둔다.
-                if self._scan_cols:
-                    scan_col = (self._scan_cols[1]
-                                if on_val and len(self._scan_cols) > 1
-                                else self._scan_cols[0])
+                # (열이 없는 쪽 — KLA 등 — 은 건너뛴다).  짝 사진 칸은 비워 둔다.
+                side = "val" if on_val else "ref"
+                if side in self._scan_sides:
+                    scan_col = self._scan_cols[self._scan_sides.index(side)]
                     self._place_scan(ws, u.path, scan_col, row,
                                      cell_w_px, cell_h_px)
                 t_img += t1 - t0
@@ -1048,7 +1195,7 @@ class ExcelExporter(QThread):
         from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
         from openpyxl.utils import get_column_letter
 
-        full = wb[SHEET_FULL_NAME]
+        full = wb[self._full_name]
         ws = wb.create_sheet(title=title, index=index)
         center = Alignment(horizontal="center", vertical="center", wrap_text=True)
         head_font = Font(name=TEMPLATE_FONT, bold=True, color="FFFFFFFF")
@@ -1294,7 +1441,8 @@ class ExcelExporter(QThread):
 
         from ..coords.wafer_map import WARN_LIVE_UNVERIFIED, slot_maps, warning_reasons
 
-        ws = wb.create_sheet(title=i18n.KO.WAFER_MAP_SHEET)
+        ws = wb.create_sheet(title=_safe_sheet_title(
+            i18n.KO.WAFER_MAP_SHEET + self._sheet_suffix, set(wb.sheetnames)))
         ws["A1"] = i18n.KO.WAFER_MAP_SHEET_COL_SLOT
         ws["B1"] = self._map_col_header(
             i18n.KO.EXTRACT_MAP_SHEET_COL if self._extract
@@ -1373,7 +1521,8 @@ class ExcelExporter(QThread):
 
     # ------------------------------------------------------------------
     def _write_slot_mismatch_sheet(self, wb) -> None:
-        ws = wb.create_sheet(title=i18n.KO.SLOT_MISMATCH_SHEET)
+        ws = wb.create_sheet(title=_safe_sheet_title(
+            i18n.KO.SLOT_MISMATCH_SHEET + self._sheet_suffix, set(wb.sheetnames)))
         ws["A1"] = "구분"
         ws["B1"] = "Slot 명"
         r = 2
