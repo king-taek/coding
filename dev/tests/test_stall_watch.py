@@ -136,6 +136,26 @@ def test_rearming_inside_a_stall_reports_it_first(qapp):
     host.deleteLater()
 
 
+def test_sampler_captures_the_ui_stack_while_blocked(qapp):
+    """멈춰 있는 **도중에** 보조 스레드가 UI 스레드 스택을 떠서 준다.
+
+    '얼마나' 만으로는 다섯 번째 신고에서 다음 수정을 고를 수 없었다 — 그 순간
+    어디서 막혔는지(우리 파일 줄 또는 Qt 안)가 app.log 에 남아야 한다."""
+    host = QWidget()
+    stacks: list[tuple[float, str]] = []
+    stall_watch.watch(host, lambda s, j: None, seconds=3.0, threshold_ms=200.0,
+                      on_stack=lambda stale, st: stacks.append((stale, st)))
+    qapp.processEvents()
+    time.sleep(0.7)                           # UI 스레드가 통째로 막힌 상황
+    _pump(qapp, 0.2)
+
+    assert stacks, "멈춰 있는 동안 스택이 한 번도 찍히지 않았다"
+    stale, stack = stacks[0]
+    assert stale >= 0.2
+    assert "time.sleep" in stack or "test_stall_watch.py" in stack, stack
+    host.deleteLater()
+
+
 def test_setup_page_records_the_stall_with_its_own_workers(qapp, caplog):
     """QThread 는 `threading.enumerate` 에 안 잡힌다 — 페이지가 덧붙여야 한다."""
     from aoi_verification.app.ui.pages.setup_page import SetupPage
