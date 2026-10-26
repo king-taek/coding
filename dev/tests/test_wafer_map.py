@@ -1247,8 +1247,9 @@ def test_lot_merge_draws_every_slots_die_cells(tmp_path):
     data = wm.build_map(resolve_batch([a / "a.jpeg", b / "b.jpeg"]))
     assert not data.mixed_frames
     assert data.frame.die_cells == {(i, -(j + 1)) for i, j in full}
-    # 합성 폴더엔 장비 번호표([ExportData])가 없어 번호 경고만 붙는다 — 칸 경고는 없어야 한다.
-    assert wm.map_warnings(data) == [(wm.WARN_NUMBER_GUESS, 2)]
+    # 합성 폴더엔 장비 번호표([ExportData])가 없지만 중심식 = 격자식 = 맵이 같은 값이라
+    # 번호 경고도 붙지 않는다(2026-10-27 규칙, test_dielut_origins) — 칸 경고도 없어야 한다.
+    assert wm.map_warnings(data) == []
 
 
 def test_tooltip_shows_die_internal_xy_like_the_equipment(tmp_path):

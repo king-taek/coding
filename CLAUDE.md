@@ -275,7 +275,15 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   3 mm 격자 모두 틀렸고 이 값만 장비 화면·Conder 55장과 맞았다(관측, 2026-10-25). 이미 맞던 165 웨이퍼에서도 기존 결과와 같다.
   **자기 폴더 파일만**, 네 키 정수 · `XDieIndex/YDieIndex` = 채택 pitch · 중심을 알고 범위가 웨이퍼 원 안 · die 맵이 범위 안일 때만
   쓴다 — 하나라도 어긋나면 아래 규칙으로 간다. `_MAX_DIE_INDEX` 상한은 여기 쓰지 않는다(QORVO row 319). 골든: `test_export_grid.py`.
-- **col/row 번호의 기준은 장비가 쓴 die 맵(`s_DieLocation.dat`)이 1순위다(ExportData 가 없을 때)**
+- **번호표가 없으면 1순위는 장비가 스캔 때 쓴 die 목록 `DieLut.dat`다**(`wafer_geometry._dielut_origins`):
+  `col_origin = min Col`, `row_total = max Row`(전체 레코드, stage 번호). 둘 다 있는 26 LOT·51 폴더에서 번호표와 전부 같았다
+  (관측 2026-10-26, 계산이 틀리던 AVAGO 01C1·T254 GX57007306 포함). 검토 전 폴더에도 있지만 **다중 레시피 스캔에만** 있다.
+  채택 조건은 번호표와 같고, 번호표와 다르면 번호표를 쓰고 경고를 남긴다(반증 조건, 관측 0건). Wafer map 칸도 이 목록으로 그린다.
+  **⚠(`NUMBER_WARN_NO_TABLE`)은 번호표·DieLut 가 없고 중심식과 3 mm 격자식(맵을 채택했으면 맵도)이 다르거나 하나뿐일 때만** 붙는다
+  (`is_trusted_source`) — 둘이 같을 때 틀린 적이 없다(번호표 있는 123/123 · 저장소 샘플 69/69; 사용자 결정 2026-10-27
+  "지금까지 준 샘플에서 전부 정답인 규칙이면 경고 없이"). **둘이 같다고 번호표·DieLut 보다 앞세우지 마라** — QORVO 처럼 고객 맵을
+  들여온 제품은 die 목록이 기하가 아니다. 골든(실물): `test_dielut_origins.py`.
+- **col/row 번호의 기준은 장비가 쓴 die 맵(`s_DieLocation.dat`)이 2순위다(ExportData·DieLut 가 없을 때)**
   (`wafer_geometry._die_map_origins`): `col_origin = min(x_index)`, `row_total = max(y_index)`.
   중심 유도는 폴백이다 — 실측 74장 중 1장(PGEE48)에서 유도식이 row 를 1 크게 냈고 맵이
   장비 화면과 일치했다(§6-N). 레코드 배치는 장비마다 달라(`RecordSize` 72/128) 옆의

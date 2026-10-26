@@ -954,7 +954,7 @@ DEFECT_COL_UNKNOWN_VALUE = "⚠ 확인 불가"
 DEFECT_COL_UNKNOWN_FMT = "⚠ col / row 확인 불가 — die 격자 정보를 못 읽음 (장비 화면으로 확인)"
 # 번호가 틀렸을 수 있을 때만 붙는 경고 — 정상이면 아무것도 붙이지 않는다(사용자 결정 2026-10-25).
 DEFECT_NUMBER_WARN_LABEL = "⚠ 번호"
-DEFECT_NUMBER_WARN_NO_TABLE = "장비 번호표가 없어 계산한 col / row — 장비 화면으로 확인"
+DEFECT_NUMBER_WARN_NO_TABLE = "장비 번호표·die 목록이 없고 계산이 서로 달라 확실하지 않은 col / row — 장비 화면으로 확인"
 DEFECT_NUMBER_WARN_KLA_GUESS = "KLA 파일에 웨이퍼 중심이 없어 추정한 col / row — 장비 화면으로 확인"
 DEFECT_NUMBER_WARN_FMT = "⚠ {text}"
 DEFECT_ABS_XY_LABEL = "wafer x / y"
