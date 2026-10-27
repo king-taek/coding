@@ -18,7 +18,7 @@ UI 스레드 몫이 되고, 그 사이 멈춘 타이머·큐에 쌓인 워커 �
 ``QWindowsDialogThread`` 를 띄워 **네이티브 창을 별도 스레드에서** 돌리고, UI 이벤트
 루프는 그대로 돈다.  ``QDialog.open()`` 이 그 경로다.  이 모듈은 ``open()`` +
 ``fileSelected`` 시그널로 폴더 선택을 **비동기**로 바꾼다 — 그동안 디바운스·워커·
-로딩바가 평소처럼 돈다.  창은 Qt 자체 폴더 창이다(네이티브 창은 닫힌 뒤 입력이 막히는 일이 있었다).
+로딩바가 평소처럼 돈다.  보이는 창은 전과 같은 OS 파일 브라우저다.
 
 불변식:
 - ``getExistingDirectory``/``exec()`` 로 되돌리지 마라 — 회귀 가드
@@ -96,10 +96,6 @@ class FolderPicker(QObject):
             dlg.setFileMode(QFileDialog.FileMode.Directory)
             dlg.setOption(QFileDialog.Option.ShowDirsOnly, True)
             dlg.setAcceptMode(QFileDialog.AcceptMode.AcceptOpen)
-            # Windows 네이티브 창은 닫힌 뒤에도 주 창이 한동안 입력을 못 받는 일이 있었다
-            # (app.log: UI 정지 로그 없이 닫힘 알림이 1~7초 늦음).  Qt 자체 창은 우리
-            # 이벤트 루프 안에서 닫혀 그 구간이 없다.
-            dlg.setOption(QFileDialog.Option.DontUseNativeDialog, True)
             dlg.fileSelected.connect(self._on_selected)
             dlg.directoryEntered.connect(self._on_dir)
             dlg.currentChanged.connect(self._on_current)
