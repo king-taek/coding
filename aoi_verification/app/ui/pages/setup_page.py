@@ -24,7 +24,7 @@ from ..widgets.app_logo import build_logo_label
 from ..widgets.neon_button import NeonButton
 from ..widgets.neon_card import NeonCard
 from ..widgets.no_wheel_slider import NoWheelDoubleSpinBox, NoWheelSlider
-from ..widgets.option_group import OptionGroup, reflow_into_grid
+from ..widgets.option_group import OptionGroup
 from ..widgets.switch_row import SwitchRow
 from ..widgets import sheet_host as sheets
 
@@ -408,57 +408,63 @@ class SetupPage(QWidget):
     # 설정 카드 배치 — 두 카드를 나란히(넓을 때) / 위아래로(좁을 때)
     # ------------------------------------------------------------------
     def _place_setting_cards(self, root: QVBoxLayout) -> None:
-        """'실행 옵션'·'매칭 설정' 을 가로로 나란히 둔다.
+        """장비 카드 둘과 설정 카드 둘을 **두 열**로 놓는다(사용자 결정 2026-10-27, D안).
 
-        전에는 두 카드가 각각 전체 폭을 쓰면서 오른쪽이 크게 비었다(1512px 에서 빈 폭
-        75%).  나란히 세우면 그 폭을 둘이 나눠 갖는다.
+        왼쪽 열 = 기준 장비 + 실행 옵션, 오른쪽 열 = 검증 장비 + 매칭 설정.  검증 장비를
+        여러 대 추가해 오른쪽이 길어져도 왼쪽은 자기 높이를 지킨다.  예전에는 장비 줄과
+        설정 줄이 각각 가로 한 줄이라, 오른쪽이 길어지면 같은 줄의 기준 카드가 같이
+        늘어나 내용이 떠 보이고 실행 옵션은 그만큼 아래로 밀렸다.
 
-        ★ 두 가지를 지킨다.
-        1. **좁은 창에서는 세로로 쌓는다.**  800×600 에서 나란히 두면 카드가 최소 폭을
-           확보하지 못해 가로 스크롤이 생긴다(실측 69px 넘침).  이 앱은 가로 넘침을
-           금지하므로 임계 폭 미만에서는 원래대로 위아래로 놓는다.
-        2. **두 카드를 `AlignTop` 으로 넣는다.**  정렬을 주지 않으면 QHBoxLayout 이
-           두 아이템에 *행 높이 전체*(둘 중 큰 sizeHint)를 배정하고, NeonCard 는
-           sizePolicy 가 Preferred(=Grow) 라 sizeHint 보다 늘어난다.  그래서 구형
-           모드를 켜 '매칭 설정' 이 커지면 '실행 옵션' 카드까지 같이 부풀었다.
-        """
+        ★ 세 가지를 지킨다.
+        1. **좁은 창에서는 한 열로 쌓는다**(기준 → 검증 → 실행 옵션 → 매칭 설정 — 폴더가
+           먼저다).  800×600 에서 두 열은 카드가 최소 폭을 못 얻어 가로 스크롤이 생긴다.
+        2. **열은 `QVBoxLayout` + 맨 끝 stretch** 다.  그래야 NeonCard(Preferred=Grow)가
+           열 높이만큼 늘어나지 않는다.
+        3. 레이아웃은 **하나만** 만들고 위젯만 옮겨 담는다(재생성하면 Qt 가 거부한다)."""
         run_card = self._build_run_options_card()
         eng_card = self._build_engine_card()
         self._setting_cards = (run_card, eng_card)
-        self._cards_row = QWidget(self)
-        self._cards_row.setProperty("role", "rowHost")
-        # ★ 레이아웃은 **하나만** 만들고 방향만 뒤집는다(QBoxLayout.setDirection).
-        #   전환할 때마다 새 QLayout 을 붙이면 Qt 가 "이미 레이아웃이 있다"며 거부해
-        #   카드가 배치되지 않은 채 남는다(실측: 카드가 100×30 으로 찌그러짐).
-        self._cards_lay = QBoxLayout(QBoxLayout.Direction.LeftToRight,
-                                     self._cards_row)
-        self._cards_lay.setContentsMargins(0, 0, 0, 0)
-        self._cards_lay.setSpacing(theme.PROFILE.section_gap)
-        self._cards_lay.addWidget(run_card)
-        self._cards_lay.addWidget(eng_card)
         self._cards_side_by_side: Optional[bool] = None
         self._apply_card_orientation(self._side_by_side_fits())
-        root.addWidget(self._cards_row)
 
     def _side_by_side_fits(self) -> bool:
-        """지금 폭에서 두 카드를 나란히 세워도 가로가 넘치지 않는가."""
+        """지금 폭에서 두 열로 세워도 가로가 넘치지 않는가(추출 모드는 한 열)."""
+        if getattr(self, "_extract_mode", False):
+            return False
         width = self.width() or self.sizeHint().width()
-        return int(width) >= _SIDE_BY_SIDE_MIN_W
+        if int(width) < _SIDE_BY_SIDE_MIN_W:
+            return False
+        host = getattr(self, "_device_host", None)
+        avail = (host.width() if host is not None else 0) or int(width)
+        need = max([c.minimumSizeHint().width() for c in self._device_cards]
+                   + [self._VAL_CARD_MIN_W])
+        return avail >= 2 * need + theme.PROFILE.section_gap
 
     def _apply_card_orientation(self, side_by_side: bool) -> None:
-        """가로↔세로 배치 전환 — 카드는 그대로 두고 레이아웃 방향만 바꾼다."""
+        """두 열 ↔ 한 열 — 위젯만 옮겨 담는다."""
         if side_by_side == self._cards_side_by_side:
             return
         self._cards_side_by_side = side_by_side
-        lay = self._cards_lay
-        lay.setDirection(QBoxLayout.Direction.LeftToRight if side_by_side
-                         else QBoxLayout.Direction.TopToBottom)
-        for idx, card in enumerate(self._setting_cards):
-            # 나란히일 때만 폭을 반씩 나눠 갖는다.
-            lay.setStretch(idx, 1 if side_by_side else 0)
-            # 위 정렬 — 한 카드가 커져도 다른 카드는 자기 높이를 지킨다.
-            lay.setAlignment(card, Qt.AlignmentFlag.AlignTop if side_by_side
-                             else Qt.AlignmentFlag(0))
+        ref, val = self.ref_group, self.val_group
+        run, eng = self._setting_cards
+        lay, left, right = self._device_lay, self._col_left, self._col_right
+        for box in (left, right, lay):       # 전부 비운다(위젯은 지우지 않는다)
+            while box.count():
+                box.takeAt(0)
+        if side_by_side:
+            left.addWidget(ref)
+            left.addWidget(run)
+            left.addStretch(1)
+            right.addWidget(val)
+            right.addWidget(eng)
+            right.addStretch(1)
+            lay.addLayout(left, 1)
+            lay.addLayout(right, 1)
+            lay.setDirection(QBoxLayout.Direction.LeftToRight)
+        else:
+            lay.setDirection(QBoxLayout.Direction.TopToBottom)
+            for w in (ref, val, run, eng):
+                lay.addWidget(w)
 
     def _build_top_bar(self) -> QWidget:
         """로고 + 제목 + 모드 배지 — **한 줄**.
@@ -577,12 +583,19 @@ class SetupPage(QWidget):
     _PATH_MIN_W = 224
 
     def _build_device_row(self) -> QWidget:
-        """기준/검증 장비 폴더·호기 — 넓으면 2열, 좁으면 세로로 쌓는다."""
+        """기준/검증 장비 카드를 만들고, 설정 카드와 함께 놓일 호스트를 돌려준다.
+
+        카드를 놓는 일은 `_place_setting_cards` 가 한다(두 열/한 열)."""
         host = QWidget(self)
-        self._device_grid = QGridLayout(host)
-        self._device_grid.setContentsMargins(0, 0, 0, 0)
-        # 아래 설정 카드 줄과 같은 간격 — 다르면 두 줄의 카드 세로 선이 어긋난다.
-        self._device_grid.setSpacing(theme.PROFILE.section_gap)
+        gap = theme.PROFILE.section_gap
+        self._device_lay = QBoxLayout(QBoxLayout.Direction.LeftToRight, host)
+        self._device_lay.setContentsMargins(0, 0, 0, 0)
+        self._device_lay.setSpacing(gap)
+        self._col_left = QVBoxLayout()
+        self._col_right = QVBoxLayout()
+        for col in (self._col_left, self._col_right):
+            col.setContentsMargins(0, 0, 0, 0)
+            col.setSpacing(gap)
         # Defect 추출 — 첫 LOT 줄의 [슬롯 선택](추출 모드에서만 보인다).
         self._lot1_slot_btn = NeonButton(i18n.KO.EXTRACT_SLOT_BTN_ALL, role="ghost")
         self._lot1_slot_btn.setVisible(False)
@@ -595,11 +608,8 @@ class SetupPage(QWidget):
         self._build_val_list()
         self._device_cards = [self.ref_group, self.val_group]
         self._device_host = host
-        # ★ 자기 폭이 정해진 뒤 다시 흘려야 한다 — B안에서는 이 행이 좁은 그리드 칸
-        #   안에 들어가는데, 페이지 폭(1512)을 보고 나란히 두면 입력란이 104px 로
-        #   짜부라진다(실측).  호스트의 resize 를 직접 듣는다.
+        # 자기 폭이 정해진 뒤 두 열/한 열을 다시 고른다 — 호스트의 resize 를 직접 듣는다.
         host.installEventFilter(self)
-        self._reflow_device_row()
         return host
 
     # ------------------------------------------------------------------
@@ -693,6 +703,11 @@ class SetupPage(QWidget):
     # 기준 1 ↔ 검증 여러 장비 — 검증 카드 안의 추가 장비 줄 + [+ 검증 장비 추가]
     # ------------------------------------------------------------------
     MAX_VALS = 5             # 첫 검증 장비 포함
+    # 추가 장비 줄(라벨 · 폴더 · [폴더 선택…] · 호기 · ✕)이 들어갈 카드의 하한.  ★ 줄을
+    # 추가하는 순간 카드의 최소 폭이 커져 두 열 ↔ 한 열이 뒤집히면 화면이 튄다 — 그래서
+    # 줄이 없을 때도 이 값을 두 열 판단에 미리 넣는다(`_side_by_side_fits`).
+    _VAL_ROW_EDIT_MIN_W = 150
+    _VAL_CARD_MIN_W = 570
 
     def _build_val_list(self) -> None:
         """검증 카드 아래의 추가 장비 줄들(`_build_lot_list` 와 같은 모양).
@@ -727,14 +742,17 @@ class SetupPage(QWidget):
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(10)
         label = QLabel("", host)
+        # 첫 장비의 '최상위 폴더' 라벨과 같은 폭 — 입력란이 첫 장비와 같은 자리에서 시작한다.
+        label.setMinimumWidth(
+            label.fontMetrics().horizontalAdvance(i18n.KO.SETUP_FOLDER_LABEL))
         edit = QLineEdit(host)
-        edit.setMinimumWidth(self._PATH_MIN_W)
+        edit.setMinimumWidth(self._VAL_ROW_EDIT_MIN_W)
         edit.setPlaceholderText(i18n.KO.SETUP_FOLDER_PLACEHOLDER)
         edit.setText(path)
         browse = NeonButton(i18n.KO.BTN_BROWSE, role="ghost")
         machine_edit = QLineEdit(host)
         machine_edit.setPlaceholderText(i18n.KO.MULTI_VAL_MACHINE_PLACEHOLDER)
-        machine_edit.setMaximumWidth(140)
+        machine_edit.setFixedWidth(110)
         machine_edit.setText(machine)
         remove = NeonButton("✕", role="ghost")
         remove.setToolTip(i18n.KO.MULTI_VAL_REMOVE)
@@ -895,30 +913,14 @@ class SetupPage(QWidget):
         return super().eventFilter(obj, event)
 
     def _reflow_device_row(self) -> None:
-        grid = getattr(self, "_device_grid", None)
-        if grid is None:
-            return
-        # ★ **자기 호스트의 폭**을 쓴다 — 페이지 폭을 쓰면 좁은 그리드 칸(B안) 안에서도
-        #   1512px 인 줄 알고 두 카드를 나란히 둬 입력란이 104px 이 된다.
-        host = getattr(self, "_device_host", None)
-        avail = (host.width() if host is not None else 0) or 0
-        if avail <= 1:
-            avail = self.width() or 0
-        if avail <= 1:
-            p = self.parentWidget()
-            avail = p.width() if p is not None else 0
-        # 한 열로 접을지 두 열로 둘지 — 카드 자신의 하한을 넘긴다(reflow 가 열 수 계산).
-        need = max((c.minimumSizeHint().width() for c in self._device_cards),
-                   default=self._PATH_MIN_W)
-        reflow_into_grid(grid, self._device_cards, avail, need)
+        """두 열/한 열을 지금 폭에 맞춘다(같은 배치면 아무것도 하지 않는다)."""
+        if not hasattr(self, "_setting_cards"):
+            return                       # 카드가 아직 다 만들어지기 전
+        self._apply_card_orientation(self._side_by_side_fits())
 
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
         self._reflow_device_row()
-        # 설정 카드 배치도 폭을 따라간다 — 임계치를 넘나들 때만 실제로 바뀐다
-        # (`_apply_card_orientation` 이 같은 방향이면 즉시 반환).
-        if getattr(self, "_cards_row", None) is not None:
-            self._apply_card_orientation(self._side_by_side_fits())
 
     def _build_run_options_card(self) -> QWidget:
         """실행 옵션 — '자동화 수준' 과 '진행 범위' 를 **한 카드**에 작은 세그먼트로.
