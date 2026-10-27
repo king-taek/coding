@@ -48,17 +48,21 @@ def _title_label(page: sp.SetupPage) -> QLabel:
     raise AssertionError("제목 라벨을 찾지 못했다")
 
 
-def test_mode_badge_shares_the_title_row(qapp):
-    """배지가 제목 위 별도 줄로 갈라지면(= 제목이 내려가면) 실패."""
+def test_mode_badge_shares_the_start_bar_row(qapp):
+    """판정 기준 배지는 고정 시작 바에서 [검증 시작] 과 같은 줄이다(제목 줄이 아니다)."""
     page = _page(qapp)
     try:
-        title = _title_label(page)
+        page.resize(1280, 800)
+        page.show()
+        qapp.processEvents()
         badge = page._mode_badge_card
-        t_mid = title.mapTo(page, title.rect().center()).y()
+        start = page.start_btn
+        s_mid = start.mapTo(page, start.rect().center()).y()
         b_mid = badge.mapTo(page, badge.rect().center()).y()
-        # 허용치는 배지 높이 — 제목 라벨 높이를 쓰면 줄이 갈라져도 통과한다.
-        assert abs(t_mid - b_mid) <= badge.height(), \
-            f"제목({t_mid}px)과 모드 배지({b_mid}px)가 다른 줄에 있다"
+        assert abs(s_mid - b_mid) <= start.height(), \
+            f"시작({s_mid}px)과 판정 기준 배지({b_mid}px)가 다른 줄에 있다"
+        assert badge.mapTo(page, badge.rect().center()).x() < start.mapTo(
+            page, start.rect().center()).x()
     finally:
         page.close()
 
