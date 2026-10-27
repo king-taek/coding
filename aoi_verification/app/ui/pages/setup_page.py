@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -13,6 +14,7 @@ from PyQt6.QtWidgets import (QBoxLayout, QDoubleSpinBox,
                               QMessageBox, QScrollArea, QSizePolicy,
                               QToolButton, QVBoxLayout, QWidget)
 
+from ..deferred import call_later
 from ..folder_picker import FolderPicker
 from ..teardown import tolerate_teardown
 from ... import i18n
@@ -1759,6 +1761,28 @@ class SetupPage(QWidget):
                   "모름" if since_nav < 0 else f"{since_nav:.2f}초",
                   self._folder_picker.timeline() or "없음")
         stall_watch.watch(self, self._log_stall, on_stack=self._log_stall_stack)
+        self._probe_input_ready(time.perf_counter(), 0)
+
+    def _probe_input_ready(self, closed_at: float, n: int) -> None:
+        """창이 닫힌 뒤 주 창이 입력을 받을 수 있게 되기까지 — 0.25초마다 상태를 남긴다.
+
+        UI 정지 로그 없이 화면이 입력을 못 받는 구간이 있다면 여기서 보인다(모달 위젯이
+        남아 있거나, 주 창이 비활성이거나).  상태가 '정상' 이 되면 멈춘다."""
+        from PyQt6.QtWidgets import QApplication
+        win = self.window()
+        modal = QApplication.activeModalWidget()
+        active = QApplication.activeWindow()
+        ok = win.isEnabled() and modal is None and active is win
+        if ok or n >= 40:
+            _LOG.info("폴더 창 닫힌 뒤 %.2f초: 주 창 입력 %s", time.perf_counter() - closed_at,
+                      "가능" if ok else "여전히 불가(10초 감시 종료)")
+            return
+        if n == 0 or n % 4 == 0:
+            _LOG.info("폴더 창 닫힌 뒤 %.2f초: 주 창 입력 불가 — enabled=%s 모달=%s 활성창=%s",
+                      time.perf_counter() - closed_at, win.isEnabled(),
+                      type(modal).__name__ if modal else None,
+                      type(active).__name__ if active else None)
+        call_later(self, 250, lambda: self._probe_input_ready(closed_at, n + 1))
 
     def _log_stall_stack(self, stale_s: float, stack: str) -> None:
         """멈춰 있는 **도중에** 보조 스레드가 부른다 — 그 순간 UI 스레드의 호출 스택.
