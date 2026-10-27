@@ -96,14 +96,14 @@ def test_narrow_window_stacks_cards(qapp):
 
 def test_orientation_follows_resize(qapp):
     """폭이 임계치를 넘나들면 배치가 따라 바뀐다."""
-    page = _page(qapp, 1280)
+    page = _page(qapp, 1600)
     try:
         assert page._cards_side_by_side is True
         page.resize(800, 600)
         for _ in range(8):
             qapp.processEvents()
         assert page._cards_side_by_side is False
-        page.resize(1280, 900)
+        page.resize(1600, 900)
         for _ in range(8):
             qapp.processEvents()
         assert page._cards_side_by_side is True
@@ -133,7 +133,7 @@ def test_legacy_toggle_grows_only_engine_card(qapp, width):
 # 2-b) 두 열 — 검증 장비를 늘려도 왼쪽(기준 장비 · 실행 옵션)은 그대로(2026-10-27)
 # ---------------------------------------------------------------------------
 def test_adding_val_devices_does_not_move_left_column(qapp):
-    page = _page(qapp, 1280)
+    page = _page(qapp, 1600)
     try:
         assert page._cards_side_by_side is True
         run, _eng = page._setting_cards
@@ -152,7 +152,7 @@ def test_adding_val_devices_does_not_move_left_column(qapp):
 
 
 def test_two_columns_pair_ref_with_run_and_val_with_engine(qapp):
-    page = _page(qapp, 1280)
+    page = _page(qapp, 1600)
     try:
         run, eng = page._setting_cards
         assert abs(page.ref_group.x() - run.x()) <= 1
@@ -200,3 +200,35 @@ def test_engine_mode_labels_dropped_internals():
     assert "사진이 많을 때" in i18n.KO.ENGINE_MODE_EFFICIENCY
     for text in (i18n.KO.LEGACY_MODE_HINT, i18n.KO.LEGACY_SWITCH_TITLE):
         assert "정밀 비교" not in text and "CPU+GPU" not in text
+
+
+# ---------------------------------------------------------------------------
+# 도구 레일(2026-10-27) — 왼쪽 세로 줄이 폭을 먹으므로 두 열은 더 넓어야 선다
+# ---------------------------------------------------------------------------
+def test_rail_takes_width_so_1280_stacks_cards_without_overflow(qapp):
+    page = _page(qapp, 1280)
+    try:
+        assert page._rail_side is True
+        assert page._cards_side_by_side is False         # 레일 + 두 열은 1280 에 안 든다
+        assert page._scroll.horizontalScrollBar().maximum() == 0
+        rail = page._tool_rail
+        from PyQt6.QtCore import QPoint
+        origin = QPoint(0, 0)
+        assert rail.mapTo(page, origin).x() < page.ref_group.mapTo(page, origin).x()   # 레일이 카드 왼쪽
+    finally:
+        page.close()
+
+
+def test_rail_lies_flat_above_cards_on_narrow_window(qapp):
+    page = _page(qapp, 800, 600)
+    try:
+        assert page._rail_side is False
+        from PyQt6.QtCore import QPoint
+        origin = QPoint(0, 0)
+        assert (page._tool_rail.mapTo(page, origin).y()
+                < page.ref_group.mapTo(page, origin).y())   # 카드 위의 가로 줄
+        assert page._scroll.horizontalScrollBar().maximum() == 0
+        b = page._bar_host.contentsMargins()
+        assert b.left() == 32                            # 바 들여쓰기도 풀린다
+    finally:
+        page.close()

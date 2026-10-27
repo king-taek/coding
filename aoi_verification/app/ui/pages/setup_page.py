@@ -75,6 +75,9 @@ class SetupInput:
 # 생긴다(800px 실측 69px 넘침).  후보 배치안 5종을 비교한 끝에 '나란히' 를 채택했고,
 # 좁은 창 폴백만 덧붙였다.
 _SIDE_BY_SIDE_MIN_W = 900
+# 도구 레일을 왼쪽 세로 줄로 둘 최소 폭 — 이보다 좁으면 카드 위의 가로 줄로 눕는다
+# (800×600 에서 레일 200px 가 카드 폭을 갉아 가로 스크롤이 생기는 것을 막는다).
+_RAIL_SIDE_MIN_W = 1000
 
 
 # 살아 있는 die 기하 스캔을 여기에 붙잡아 둔다 — **페이지의 자식으로 두지 않는다.**
@@ -183,87 +186,6 @@ def extract_drop_folders(local_paths, *, is_dir, is_image) -> list[str]:
     return out
 
 
-class _AuxButtonRow(QWidget):
-    """설정 액션바의 보조 버튼 줄 — 폭이 모자라면 **두 줄로 접힌다**.
-
-    ``sizeHint`` 는 늘 한 줄 폭(넓으면 한 줄로 돌아올 수 있게), ``minimumSizeHint`` 는
-    두 줄 폭이다 — 레이아웃이 그 사이 아무 폭이나 주면 ``resizeEvent`` 가 줄 수를 고른다.
-    숨긴 버튼(모드별)은 자리를 차지하지 않는다."""
-
-    def __init__(self, buttons, *, spacing: int, parent=None) -> None:
-        super().__init__(parent)
-        self.setProperty("role", "rowHost")
-        self._buttons = list(buttons)
-        self._grid = QGridLayout(self)
-        self._grid.setContentsMargins(0, 0, 0, 0)
-        self._grid.setSpacing(max(spacing, 0))
-        self._rows = 0
-        for b in self._buttons:
-            b.installEventFilter(self)          # 보이기/숨기기·글자 변경 → 다시 잰다
-        self._place(1)
-
-    def buttons(self) -> list:
-        return list(self._buttons)
-
-    def _visible(self) -> list:
-        return [b for b in self._buttons if not b.isHidden()]
-
-    def _row_w(self, btns) -> int:
-        if not btns:
-            return 0
-        return (sum(b.sizeHint().width() for b in btns)
-                + self._grid.spacing() * (len(btns) - 1))
-
-    def _split(self, btns):
-        half = (len(btns) + 1) // 2
-        return btns[:half], btns[half:]
-
-    def sizeHint(self):                            # noqa: N802
-        from PyQt6.QtCore import QSize
-        btns = self._visible()
-        h = max((b.sizeHint().height() for b in btns), default=0)
-        return QSize(self._row_w(btns), h * max(self._rows, 1)
-                     + self._grid.spacing() * (max(self._rows, 1) - 1))
-
-    def minimumSizeHint(self):                     # noqa: N802
-        from PyQt6.QtCore import QSize
-        a, b = self._split(self._visible())
-        return QSize(max(self._row_w(a), self._row_w(b)), self.sizeHint().height())
-
-    def _place(self, rows: int) -> None:
-        while self._grid.count():
-            self._grid.takeAt(0)
-        btns = self._visible()
-        lines = [btns] if rows == 1 else list(self._split(btns))
-        for r, line in enumerate(lines):
-            for c, b in enumerate(line):
-                self._grid.addWidget(b, r, c)
-        for b in self._buttons:
-            if b.isHidden():
-                self._grid.addWidget(b, 3, 0)     # 숨김 — 자리는 없지만 부모는 유지
-        if rows != self._rows:
-            self._rows = rows
-            self.updateGeometry()
-
-    def _reflow(self) -> None:
-        rows = 1 if self.width() >= self._row_w(self._visible()) else 2
-        self._place(rows)
-
-    def resizeEvent(self, event):                  # noqa: N802
-        super().resizeEvent(event)
-        self._reflow()
-
-    @tolerate_teardown
-    def eventFilter(self, obj, event):             # noqa: N802
-        from PyQt6.QtCore import QEvent
-        if event.type() in (QEvent.Type.Show, QEvent.Type.Hide,
-                            QEvent.Type.FontChange) or (
-                event.type() == QEvent.Type.DynamicPropertyChange):
-            self.updateGeometry()
-            self._reflow()
-        return super().eventFilter(obj, event)
-
-
 class SetupPage(QWidget):
     """검증 시작 화면."""
 
@@ -352,12 +274,15 @@ class SetupPage(QWidget):
         #   (사용자 요청: 고정 칸이 아니게).
         self._build_body(root)
 
-        # 액션바는 스크롤 **밖**에 고정한다(주요 액션이 항상 손에 닿게).
+        # 시작 바는 스크롤 **밖**에 고정한다(주요 액션이 항상 손에 닿게).
         if self._pinned_action_bar():
             bar = self._build_action_bar()
             # 스크롤 안 본문과 같은 좌우 마진 + 상단 눈금으로 '고정된 바닥'임을 말한다.
-            bar.setContentsMargins(theme.PROFILE.page_margin, 12,
-                                   theme.PROFILE.page_margin, 16)
+            # 왼쪽은 도구 레일 폭만큼 더 들여 카드 열과 같은 선에서 시작한다.
+            bar.setContentsMargins(
+                theme.PROFILE.page_margin + self._RAIL_W + theme.PROFILE.section_gap,
+                12, theme.PROFILE.page_margin, 16)
+            self._bar_host = bar
             rule = QWidget(self)
             rule.setFixedHeight(1)
             rule.setProperty("role", "hrule")
@@ -397,9 +322,17 @@ class SetupPage(QWidget):
 
         두 설정 카드는 ``_place_setting_cards`` 가 창 폭에 따라 나란히/위아래로 놓는다."""
         root.addWidget(self._build_top_bar())
-        root.addWidget(self._build_device_row())
+        # 왼쪽 도구 레일 | 오른쪽 장비·설정 카드(사용자 결정 2026-10-27, 도구 레일 3안).
+        # 좁은 창에서는 카드 위의 가로 줄로 눕는다.
+        body = QBoxLayout(QBoxLayout.Direction.LeftToRight)
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(theme.PROFILE.section_gap)
+        self._body_lay = body
+        self._rail_side = True
+        body.addWidget(self._build_tool_rail(), 0, Qt.AlignmentFlag.AlignTop)
+        body.addWidget(self._build_device_row(), 1, Qt.AlignmentFlag.AlignTop)
         self._place_setting_cards(root)
-        root.addStretch(1)
+        root.addLayout(body, 1)
         if not self._pinned_action_bar():
             root.addWidget(self._build_action_bar())
         # ★ 크레딧을 여기에 두지 않는다 — `main_window` 의 **상태바**가 모든 화면에
@@ -436,8 +369,10 @@ class SetupPage(QWidget):
         width = self.width() or self.sizeHint().width()
         if int(width) < _SIDE_BY_SIDE_MIN_W:
             return False
-        host = getattr(self, "_device_host", None)
-        avail = (host.width() if host is not None else 0) or int(width)
+        # 카드 열이 쓸 수 있는 폭 — 레일이 왼쪽에 서 있으면 그만큼 빼고 잰다.
+        rail = (self._RAIL_W + theme.PROFILE.section_gap
+                if getattr(self, "_rail_side", False) else 0)
+        avail = int(width) - 2 * theme.PROFILE.page_margin - rail
         need = max([c.minimumSizeHint().width() for c in self._device_cards]
                    + [self._VAL_CARD_MIN_W])
         return avail >= 2 * need + theme.PROFILE.section_gap
@@ -469,7 +404,7 @@ class SetupPage(QWidget):
                 lay.addWidget(w)
 
     def _build_top_bar(self) -> QWidget:
-        """로고 + 제목 + 모드 배지 — **한 줄**.
+        """로고 + 제목 — **한 줄**(판정 기준 배지는 고정 시작 바로 옮겼다).
 
         ★ 예전엔 보기 옵션이 제목 **위**의 별도 줄이었다가 같은 줄로 합쳐졌고, 보기
         옵션을 없애면서 그 자리도 사라졌다.  제목 위에 빈 띠가 없어 제목이 화면 맨
@@ -481,8 +416,6 @@ class SetupPage(QWidget):
         아직 밴드 그대로다(`widgets/app_logo.py`).  좁은 창 안전은
         `test_setup_top_spacing` 이 800px 가로 넘침 없음으로 지킨다."""
         host = QWidget(self)
-        # 로고·제목 왼쪽, 모드 배지 오른쪽.  배지가 제목과 같은 줄에 있어야 '무슨 모드야'가
-        # 첫 시선에 들어온다.
         tr = QHBoxLayout(host)
         tr.setContentsMargins(0, 0, 0, 0)
         tr.setSpacing(16)
@@ -490,8 +423,6 @@ class SetupPage(QWidget):
                      alignment=Qt.AlignmentFlag.AlignVCenter)
         tr.addWidget(self._build_title())
         tr.addStretch(1)
-        tr.addWidget(self._build_mode_badge(),
-                     alignment=Qt.AlignmentFlag.AlignVCenter)
         return host
 
     def _build_mode_badge(self) -> QWidget:
@@ -914,10 +845,32 @@ class SetupPage(QWidget):
             self._reflow_device_row()
         return super().eventFilter(obj, event)
 
+    def _apply_rail_orientation(self, side: bool) -> None:
+        """도구 레일을 왼쪽 세로 줄 ↔ 카드 위 가로 줄로 — 같은 배치면 아무것도 안 한다."""
+        if side == getattr(self, "_rail_side", None) or not hasattr(self, "_tool_rail"):
+            return
+        self._rail_side = side
+        D = QBoxLayout.Direction
+        self._body_lay.setDirection(D.LeftToRight if side else D.TopToBottom)
+        self._rail_lay.setDirection(D.TopToBottom if side else D.LeftToRight)
+        if side:
+            self._tool_rail.setFixedWidth(self._RAIL_W)
+        else:
+            self._tool_rail.setMinimumWidth(0)
+            self._tool_rail.setMaximumWidth(16777215)
+        bar = getattr(self, "_bar_host", None)
+        if bar is not None:
+            m = theme.PROFILE.page_margin
+            bar.setContentsMargins(
+                m + (self._RAIL_W + theme.PROFILE.section_gap if side else 0),
+                12, m, 16)
+
     def _reflow_device_row(self) -> None:
         """두 열/한 열을 지금 폭에 맞춘다(같은 배치면 아무것도 하지 않는다)."""
         if not hasattr(self, "_setting_cards"):
             return                       # 카드가 아직 다 만들어지기 전
+        self._apply_rail_orientation((self.width() or self.sizeHint().width())
+                                     >= _RAIL_SIDE_MIN_W)
         self._apply_card_orientation(self._side_by_side_fits())
 
     def resizeEvent(self, event):  # noqa: N802
@@ -1253,22 +1206,30 @@ class SetupPage(QWidget):
         self._sync_engine_controls()
         _prefs.patch(legacy_engine=key, engine_mode=self._current_engine_mode())
 
-    def _build_action_bar(self) -> QWidget:
-        """시작 / 업데이트 확인 (+ 개발자 모드 버튼)."""
+    # 도구 레일 폭 — 가장 긴 이름 'Wafer Map 보기' 가 들어가는 하한.
+    _RAIL_W = 200
+
+    def _build_tool_rail(self) -> QWidget:
+        """왼쪽 도구 레일 — 사진 정보 · Wafer Map · Defect 추출, 맨 아래 업데이트 확인.
+
+        ★ 도구는 흐린 글자 링크가 아니라 **이름이 보이는 같은 크기 버튼**이다(사용자 요청:
+        사이드 기능도 중요).  주 흐름(폴더 → 방식 → 시작)과 눈으로 갈라져 서로 방해하지
+        않는다.  업데이트는 월 1회도 안 쓰는 유틸리티라 도구 아래에 한 칸 떨어져 있다.
+        버튼 객체·핸들러는 예전 액션바의 것을 그대로 옮겼다(자리만 바뀜)."""
         host = QWidget(self)
-        bar = QHBoxLayout(host)
-        bar.setContentsMargins(0, 0, 0, 0)
-        # 업데이트 확인은 좌측(보조), 검증 시작은 우측(주). 좌상단 도움말 메뉴 대체.
-        # ★ 보조 버튼에는 높이를 따로 주지 않는다 — 기본 ghost 등급(44px)이 이미
-        #   타깃 하한(2.5.5 AAA)을 넘는다.  셋을 다 46 으로 키우면 "유일한 primary —
-        #   가장 크게" 라는 이 화면의 위계가 색 하나로만 남는다(둘은 월 1회도 안 쓰는
-        #   유틸리티다).
-        self.update_btn = NeonButton(i18n.KO.MENU_CHECK_UPDATE, role="ghost")
-        self.update_btn.clicked.connect(self.update_check_requested.emit)
+        host.setProperty("role", "rowHost")
+        host.setFixedWidth(self._RAIL_W)       # 좁은 창에서는 풀린다(_apply_rail_orientation)
+        col = QBoxLayout(QBoxLayout.Direction.TopToBottom, host)
+        self._rail_lay = col
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(10)
+        cap = QLabel(i18n.KO.TOOL_RAIL_CAPTION, host)
+        cap.setProperty("role", "muted")
+        col.addWidget(cap)
         # 사진 한 장의 결함 정보를 바로 보는 도구.
         self.image_info_btn = NeonButton(i18n.KO.IMAGE_INFO_BUTTON, role="ghost")
         self.image_info_btn.clicked.connect(self._open_image_info)
-        # 웨이퍼 폴더 하나의 결함 위치를 원 위에 보는 도구 — 사진 정보 보기 옆.
+        # 웨이퍼 폴더 하나의 결함 위치를 원 위에 보는 도구.
         self.wafer_map_btn = NeonButton(i18n.KO.WAFER_MAP_BUTTON, role="ghost")
         self.wafer_map_btn.clicked.connect(self._open_wafer_map)
         # Defect 추출 — 같은 화면을 한쪽 폴더만 받는 모드로 바꾼다(누르면 되돌아가는 버튼).
@@ -1276,23 +1237,39 @@ class SetupPage(QWidget):
         self.extract_btn.setToolTip(i18n.KO.EXTRACT_BUTTON_TOOLTIP)
         self.extract_btn.clicked.connect(
             lambda: self.set_extract_mode(not self._extract_mode))
-        # 보조 버튼 묶음 — **좁은 창에서는 두 줄로 접힌다**(`_AuxButtonRow`).
-        #   넓은 창에서는 한 줄이다.
-        self._aux_row = _AuxButtonRow(
-            [self.update_btn, self.image_info_btn, self.wafer_map_btn,
-             self.extract_btn], spacing=bar.spacing(), parent=host)
-        bar.addWidget(self._aux_row)
-        # ★ 자리 계약: 왼쪽 보조 버튼들 → stretch → 힌트 → 주 액션(start_btn).
-        #   새 위젯은 반드시 stretch **뒤**나 그 앞의 보조 묶음에 붙인다 — 잘못 넣으면
-        #   주 액션이 가운데로 밀린다(test_action_bar_index_contract).
+        self.update_btn = NeonButton(i18n.KO.MENU_CHECK_UPDATE, role="ghost")
+        self.update_btn.clicked.connect(self.update_check_requested.emit)
+        for b in (self.image_info_btn, self.wafer_map_btn, self.extract_btn):
+            b.setMinimumHeight(theme.PROFILE.control_h_lg)   # 타깃 하한(44)
+            col.addWidget(b)
+        # 세로일 땐 도구 바로 아래(스크롤을 내려야 보이는 맨 아래가 아니다), 가로일 땐 오른쪽 끝.
+        col.addStretch(1)
+        col.addSpacing(10)
+        self.update_btn.setMinimumHeight(theme.PROFILE.control_h_lg)
+        col.addWidget(self.update_btn)
+        # 레일 순서 계약(test_setup_controls) — 도구 셋, 그 아래 업데이트.
+        self._tool_buttons = [self.image_info_btn, self.wafer_map_btn,
+                              self.extract_btn, self.update_btn]
+        self._tool_rail = host
+        return host
+
+    def _build_action_bar(self) -> QWidget:
+        """고정 시작 바 — 판정 기준(왼쪽) · 시작할 수 없는 이유 · [검증 시작](오른쪽)."""
+        host = QWidget(self)
+        bar = QHBoxLayout(host)
+        bar.setContentsMargins(0, 0, 0, 0)
+        # ★ 자리 계약: 판정 기준 배지 → stretch → 힌트 → 주 액션(start_btn).
+        #   새 위젯은 반드시 stretch **뒤**에 붙인다 — 잘못 넣으면 주 액션이 가운데로
+        #   밀린다(test_action_bar_index_contract).  판정 기준이 시작 버튼과 같은 줄에
+        #   있어야 '무슨 기준으로 도는지' 를 보고 누른다(모르고 켜둔 구형 엔진 방지).
         self._action_bar = bar
+        bar.addWidget(self._build_mode_badge())
+        self._refresh_mode_badge()           # 배지가 카드보다 나중에 만들어져 한 번 채워 준다
         bar.addStretch(1)
         # 왜 시작할 수 없는지 — 툴팁이 아니라 버튼 옆에 보이게.
         self._start_hint = QLabel("", host)
         self._start_hint.setProperty("role", "muted")
-        # ★ 좁은 창에서는 두 줄로 접힌다.  한 줄 고정이면 이 문구(~200px)가 액션바의
-        #   최소 폭을 정해, [Defect 추출] 을 더한 뒤 800px 창에서 설정 카드가 세로로
-        #   쌓이지 못했다(페이지 최소 폭 862 → 971px).  넓은 창에서는 그대로 한 줄이다.
+        # ★ 좁은 창에서는 두 줄로 접힌다(한 줄 고정이면 이 문구가 바의 최소 폭을 정한다).
         self._start_hint.setWordWrap(True)
         bar.addWidget(self._start_hint)
         self.start_btn = NeonButton(i18n.KO.BTN_START, role="primary")
