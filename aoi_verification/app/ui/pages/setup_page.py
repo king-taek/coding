@@ -1237,9 +1237,13 @@ class SetupPage(QWidget):
         self.extract_btn.setToolTip(i18n.KO.EXTRACT_BUTTON_TOOLTIP)
         self.extract_btn.clicked.connect(
             lambda: self.set_extract_mode(not self._extract_mode))
+        # 사진 한 장의 GL(밝기) 분포를 히스토그램·선 프로파일·통계로 보는 도구.
+        self.gl_btn = NeonButton(i18n.KO.GL_BUTTON, role="ghost")
+        self.gl_btn.setToolTip(i18n.KO.GL_BUTTON_TOOLTIP)
+        self.gl_btn.clicked.connect(self._open_gl_viewer)
         self.update_btn = NeonButton(i18n.KO.MENU_CHECK_UPDATE, role="ghost")
         self.update_btn.clicked.connect(self.update_check_requested.emit)
-        for b in (self.image_info_btn, self.wafer_map_btn, self.extract_btn):
+        for b in (self.image_info_btn, self.wafer_map_btn, self.extract_btn, self.gl_btn):
             b.setMinimumHeight(theme.PROFILE.control_h_lg)   # 타깃 하한(44)
             col.addWidget(b)
         # 세로일 땐 도구 바로 아래(스크롤을 내려야 보이는 맨 아래가 아니다), 가로일 땐 오른쪽 끝.
@@ -1249,7 +1253,7 @@ class SetupPage(QWidget):
         col.addWidget(self.update_btn)
         # 레일 순서 계약(test_setup_controls) — 도구 셋, 그 아래 업데이트.
         self._tool_buttons = [self.image_info_btn, self.wafer_map_btn,
-                              self.extract_btn, self.update_btn]
+                              self.extract_btn, self.gl_btn, self.update_btn]
         self._tool_rail = host
         return host
 
@@ -1863,6 +1867,12 @@ class SetupPage(QWidget):
         """단일 사진 정보 다이얼로그 — 사진 1장의 결함 좌표/measurement 확인."""
         from ..widgets.image_info_dialog import ImageInfoDialog
         dlg = ImageInfoDialog(self)
+        sheets.run(dlg, full_bleed=True)
+
+    def _open_gl_viewer(self) -> None:
+        """GL 히스토그램 뷰어 — 빈 화면으로 열고 사진은 안에서 고른다(끌어놓기도 된다)."""
+        from ..widgets.gl_viewer_dialog import GlViewerDialog
+        dlg = GlViewerDialog(self)
         sheets.run(dlg, full_bleed=True)
 
     def _open_wafer_map(self) -> None:

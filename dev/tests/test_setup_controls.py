@@ -95,7 +95,7 @@ def test_action_bar_index_contract(qapp):
     """시작 바: 판정 기준 배지가 맨 앞, stretch 뒤에 힌트, 마지막은 주 액션(start_btn).
 
     자리 계약 — 새 위젯을 stretch **앞**에 붙이면 주 액션이 가운데로 밀린다.
-    도구(사진 정보 · Wafer Map · Defect 추출 · 업데이트)는 시작 바가 아니라 왼쪽
+    도구(사진 정보 · Wafer Map · Defect 추출 · GL 히스토그램 · 업데이트)는 시작 바가 아니라 왼쪽
     도구 레일에 있다(`_tool_buttons`, 업데이트가 맨 아래)."""
     page = sp.SetupPage()
     try:
@@ -103,7 +103,7 @@ def test_action_bar_index_contract(qapp):
         assert bar.itemAt(0).widget() is page._mode_badge_card
         tools = page._tool_buttons
         assert tools == [page.image_info_btn, page.wafer_map_btn,
-                         page.extract_btn, page.update_btn]
+                         page.extract_btn, page.gl_btn, page.update_btn]
         assert all(page._tool_rail.isAncestorOf(b) for b in tools)
         assert not any(bar.indexOf(b) >= 0 for b in tools)
         last = bar.itemAt(bar.count() - 1).widget()

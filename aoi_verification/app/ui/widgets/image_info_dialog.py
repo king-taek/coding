@@ -341,6 +341,14 @@ class ImageInfoDialog(QDialog):
         self._toast.setMinimumWidth(96)
         bar.addWidget(self._toast)
         bar.addStretch(1)
+        # 지금 보고 있는 사진을 그대로 GL 히스토그램 뷰어로 넘긴다(컬러 결함 사진이면 Scan 의
+        # 결함 영역이 확대돼 열린다).  사진이 없으면 누를 수 없다.
+        self.gl_btn = NeonButton(i18n.KO.IMAGE_INFO_GL, role="ghost")
+        self.gl_btn.setMinimumHeight(theme.PROFILE.control_h_lg)
+        self.gl_btn.setToolTip(i18n.KO.GL_BUTTON_TOOLTIP)
+        self.gl_btn.setEnabled(False)
+        self.gl_btn.clicked.connect(self._on_open_gl)
+        bar.addWidget(self.gl_btn)
         self.copy_btn = NeonButton(i18n.KO.IMAGE_INFO_COPY, role="ghost")
         self.copy_btn.setMinimumHeight(theme.PROFILE.control_h_lg)
         bar.addWidget(self.copy_btn)
@@ -354,6 +362,7 @@ class ImageInfoDialog(QDialog):
         #   실행돼 '복사'가 뜻하지 않게 재발동한다(slot_select_dialog 와 같은 함정).
         self.pick_btn.setDefault(True)
         self.copy_btn.setAutoDefault(False)
+        self.gl_btn.setAutoDefault(False)
         return bar
 
     # ------------------------------------------------------------------
@@ -423,6 +432,12 @@ class ImageInfoDialog(QDialog):
         return None
 
     # ------------------------------------------------------------------
+    def _on_open_gl(self) -> None:
+        if self._path is None:
+            return
+        from .gl_viewer_dialog import GlViewerDialog
+        sheets.run(GlViewerDialog(self, image_path=str(self._path)), full_bleed=True)
+
     def show_image(self, path: Path) -> None:
         """사진을 조회해 미리보기와 계측 표를 갱신한다.
 
@@ -430,6 +445,7 @@ class ImageInfoDialog(QDialog):
         돌린다.  덮개는 **정보가 오면 바로** 걷힌다 — Scan 원본(수 MB)을 기다리지 않는다.
         Scan 은 자기 칸에서 '불러오는 중' 점 애니메이션으로 따로 기다린다(사용자 요청)."""
         self._path = Path(path)
+        self.gl_btn.setEnabled(True)
         self._info_gen += 1
         self._scan_gen += 1               # 이전 사진의 Scan 결과가 늦게 와도 버린다
         if not _async_info():
