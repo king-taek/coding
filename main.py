@@ -102,6 +102,7 @@ def _show_splash(app):
     from aoi_verification.app import i18n
     from aoi_verification.app.ui.widgets.startup_splash import StartupSplash
 
+    _boot_mark("스플래시 모듈 import")
     dpr = 1.0
     try:
         scr = app.primaryScreen()
@@ -109,11 +110,15 @@ def _show_splash(app):
             dpr = scr.devicePixelRatio() or 1.0
     except Exception:
         pass
-    splash = StartupSplash(_splash_logo(int(StartupSplash.LOGO_W * dpr)))
+    logo = _splash_logo(int(StartupSplash.LOGO_W * dpr))
+    _boot_mark("로고 디코드")
+    splash = StartupSplash(logo)
+    _boot_mark("스플래시 생성")
     splash.show()
     # 총량을 모르는 구간 → busy(무한 진행).  0 에 멈춰 있으면 안 된다(CLAUDE.md).
     splash.set_progress(0, 0, i18n.KO.SPLASH_MODULES)
     app.processEvents()
+    _boot_mark("스플래시 그리기")
     return splash
 
 
@@ -204,24 +209,29 @@ def _boot_mark(name: str) -> None:
 
 def _process_age_ms():
     """프로세스가 만들어진 뒤 지금까지(ms).  Windows 만 — 파이썬이 뜨기 전(보안 검사·DLL
-    로딩)에 걸린 시간까지 보려는 것이다.  알 수 없으면 None."""
+    로딩)에 걸린 시간까지 보려는 것이다.  Windows 가 아니면 None.
+    실패하면 예외를 그대로 던진다(호출자가 로그에 이유를 남긴다).
+
+    ★ ``argtypes`` 를 꼭 준다 — 안 주면 64비트에서 핸들(``-1`` 이 부호 없는 큰 수로 돌아온다)이
+      기본 ``c_int`` 에 안 들어가 ``ArgumentError`` 가 난다(첫 배포에서 실제로 그랬다)."""
     if sys.platform != "win32":
         return None
-    try:
-        import ctypes
-        from ctypes import wintypes
+    import ctypes
+    from ctypes import wintypes
 
-        k32 = ctypes.windll.kernel32
-        k32.GetCurrentProcess.restype = wintypes.HANDLE
-        c, e, k, u = (wintypes.FILETIME() for _ in range(4))
-        k32.GetProcessTimes(k32.GetCurrentProcess(), ctypes.byref(c), ctypes.byref(e),
-                            ctypes.byref(k), ctypes.byref(u))
-        created = ((c.dwHighDateTime << 32) | c.dwLowDateTime) / 1e4      # 100ns → ms
-        now = wintypes.FILETIME()
-        k32.GetSystemTimeAsFileTime(ctypes.byref(now))
-        return ((now.dwHighDateTime << 32) | now.dwLowDateTime) / 1e4 - created
-    except Exception:
-        return None
+    k32 = ctypes.windll.kernel32
+    ft_p = ctypes.POINTER(wintypes.FILETIME)
+    k32.GetCurrentProcess.restype = wintypes.HANDLE
+    k32.GetProcessTimes.argtypes = [wintypes.HANDLE, ft_p, ft_p, ft_p, ft_p]
+    k32.GetProcessTimes.restype = wintypes.BOOL
+    k32.GetSystemTimeAsFileTime.argtypes = [ft_p]
+    c, e, k, u, now = (wintypes.FILETIME() for _ in range(5))
+    if not k32.GetProcessTimes(k32.GetCurrentProcess(), ctypes.byref(c), ctypes.byref(e),
+                               ctypes.byref(k), ctypes.byref(u)):
+        raise OSError("GetProcessTimes 실패")
+    k32.GetSystemTimeAsFileTime(ctypes.byref(now))
+    created = ((c.dwHighDateTime << 32) | c.dwLowDateTime) / 1e4          # 100ns → ms
+    return ((now.dwHighDateTime << 32) | now.dwLowDateTime) / 1e4 - created
 
 
 def _log_boot_timing(label: str) -> None:
@@ -236,8 +246,11 @@ def _log_boot_timing(label: str) -> None:
         for name, t in _BOOT[1:]:
             parts.append(f"{name} {1000 * (t - prev):.0f}")
             prev = t
-        age = _process_age_ms()
-        extra = f" | 프로세스 경과 {age:.0f}" if age is not None else ""
+        try:
+            age = _process_age_ms()
+            extra = f" | 프로세스 경과 {age:.0f}" if age is not None else ""
+        except Exception as exc:
+            extra = f" | 프로세스 경과 확인 실패({type(exc).__name__}: {exc})"
         logging.getLogger("aoi.boot").info(
             "시작 구간(ms) [%s]: %s | 합계 %.0f%s", label, ", ".join(parts),
             1000 * (prev - _BOOT[0][1]), extra)
