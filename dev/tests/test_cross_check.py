@@ -125,6 +125,7 @@ class _SelectStub:
 def _window(automation):
     import aoi_verification.app.ui.main_window as MW
     win = MW.MainWindow.__new__(MW.MainWindow)
+    win._slot_numbers = lambda: {}
     win._reset_cross_state()
     win._cross_stage = "A"
     win._input = SimpleNamespace(mode="cross", automation_level=automation,
@@ -317,6 +318,7 @@ def test_unmatched_review_resolves_the_counterpart_entry(styled_qapp, monkeypatc
 def _rail_window(stage):
     import aoi_verification.app.ui.main_window as MW
     win = MW.MainWindow.__new__(MW.MainWindow)
+    win._slot_numbers = lambda: {}
     win._reset_cross_state()
     win._cross_stage = stage
     win._input = SimpleNamespace(mode="cross" if stage else "single", extract=False)

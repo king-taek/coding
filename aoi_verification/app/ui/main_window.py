@@ -1558,7 +1558,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._select_page.set_extract_mode(False)
         self._select_page.set_reverse(True)
         self._select_page.load_state(queue=queue, targets={}, excluded={},
-                                     history=[])
+                                     history=[], slot_numbers=self._slot_numbers())
         self._phase = PHASE_B_SELECT
         self._show_page(self._select_page)
 
@@ -1831,6 +1831,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._select_page.load_state(
             queue=queue,
             targets=restored, excluded={}, history=[],
+            slot_numbers=self._slot_numbers(),
         )
         self._phase = PHASE_A_SELECT
         # 판단할 후보가 하나도 없으면(예: 기준 사진 재사용으로 큐가 전부 비워짐)

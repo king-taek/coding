@@ -300,6 +300,7 @@ SLOT_LABEL_FMT = "슬롯: {slot}"
 SLOT_JUMP_LABEL = "다른 슬롯으로 이동"
 SLOT_JUMP_TOOLTIP = "사진이 많아 슬롯 하나씩 보여 줍니다 — 여기서 다른 슬롯으로 바로 넘어갈 수 있습니다"
 SLOT_JUMP_ITEM_FMT = "{slot} · {n}장"
+SLOT_JUMP_ITEM_NO_FMT = "#{no} · {slot} · {n}장"
 
 # ── 유사도 엔진 모드 + 중앙 전처리 ────────────────────────────────────────
 ENGINE_CARD_TITLE = "매칭 설정"
@@ -1040,6 +1041,7 @@ MATCH_AUTO_RESULT_NOTE = "매치 결과는 다음 ‘매치 검토’ 화면에�
 PROGRESS_SLOT_ONLY_FMT = "{slot}  ·"
 PROGRESS_COUNT_FMT = "{done} / {total}"
 GROUP_HEADER_FMT = "{slot}  ·  {count}장"
+GROUP_HEADER_NO_FMT = "{slot}\n#{no}  ·  {count}장"
 # 후보 선별 상단의 슬롯별 전체 장수 — 참고용 (#2).  ★ 'LOT' 이 아니다.
 LOT_COUNTS_PREFIX = "슬롯별 장수:  "
 
