@@ -4,9 +4,9 @@
 가운데(페이지가 직접 넣은 라벨)와 좌하단(상태바).  두 자리가 서로를 모른 채
 각자 넣고 있었고, 화면을 캡처해 보기 전까지 아무도 몰랐다.
 
-크레딧의 단일 출처는 `main_window._credit_label`(상태바) 다 — **모든 화면 공통**
-이므로 페이지는 자기 몫을 따로 넣지 않는다.  페이지가 다시 넣으면 이 테스트가
-깨진다.
+크레딧은 기본적으로 `main_window._credit_label`(상태바) 하나다 — **모든 화면 공통**.
+예외: 설정 화면은 자기 바닥 줄(레일 칸)에 크레딧을 두고, 그동안 상태바 쪽은 숨긴다
+(`MainWindow._sync_statusbar`).  어느 화면에서도 **보이는 크레딧은 하나**다.
 """
 
 from __future__ import annotations
@@ -29,14 +29,13 @@ def _credit_labels(widget) -> list[QLabel]:
             if (w.text() or "").strip() == i18n.KO.CREDIT]
 
 
-def test_setup_page_does_not_add_its_own_credit(styled_qapp):
-    """페이지 안에는 크레딧이 없다 — 상태바가 담당한다."""
+def test_setup_page_has_exactly_one_credit(styled_qapp):
+    """설정 화면은 자기 바닥 줄에 크레딧을 **하나** 둔다(상태바는 그동안 숨긴다)."""
     from aoi_verification.app.ui.pages import setup_page as sp
 
     page = sp.SetupPage()
     try:
-        assert _credit_labels(page) == [], (
-            "SetupPage 가 크레딧을 또 넣었다 — 상태바와 겹쳐 두 번 보인다")
+        assert len(_credit_labels(page)) == 1
     finally:
         page.close()
 
@@ -52,18 +51,25 @@ def test_result_page_does_not_add_its_own_credit(styled_qapp):
         page.close()
 
 
-def test_status_bar_still_shows_the_credit(styled_qapp):
-    """★ 위 두 테스트만 있으면 '크레딧을 전부 지운다' 로도 통과한다.
+def test_one_visible_credit_on_every_page(styled_qapp):
+    """★ 창 전체에서 **보이는** 크레딧은 늘 하나 — 설정 화면은 페이지 것, 나머지는 상태바 것.
 
-    단일 출처가 **살아 있는지**를 함께 못박아, 지우는 방향의 회귀도 잡는다.
-    """
+    '전부 지운다' 로도 '두 번 보인다' 로도 깨지게 못박는다."""
     from aoi_verification.app.ui.main_window import MainWindow
 
     win = MainWindow()
     try:
-        found = _credit_labels(win)
-        assert len(found) == 1, f"창 전체에 크레딧이 {len(found)}개 — 1개여야 한다"
-        # 그 하나는 상태바의 것이다
-        assert found[0] is win._credit_label
+        win.show()
+        styled_qapp.processEvents()
+
+        def visible() -> int:
+            return sum(1 for w in _credit_labels(win) if w.isVisibleTo(win)
+                       and (w is not win._credit_label or win._status_bar.isVisibleTo(win)))
+
+        win._show_page(win._setup_page, animate=False)
+        assert visible() == 1, "설정 화면: 보이는 크레딧이 1개가 아니다"
+        win._show_page(win._result_page, animate=False)
+        assert visible() == 1, "결과 화면: 보이는 크레딧이 1개가 아니다"
+        assert win._credit_label.isVisibleTo(win)
     finally:
         win.close()

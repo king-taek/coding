@@ -529,6 +529,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         on = not _prefs.load().dev_mode
         _prefs.patch(dev_mode=on)
         self._dev_btn.setVisible(on)
+        self._sync_statusbar(self._stack.currentWidget())
         self._status_bar.showMessage(
             i18n.KO.DEV_MODE_ON if on else i18n.KO.DEV_MODE_OFF, 4000)
         if on:
@@ -2913,6 +2914,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         사용자가 순서형을 고르면서 나머지 2안과 스위처·setup_layouts 를 제거했다."""
         self._setup_page = SetupPage()
         self._stack.addWidget(self._setup_page)
+        self._sync_statusbar(self._setup_page)        # 첫 화면도 같은 규칙(크레딧은 한 번만)
         self._setup_page.start_requested.connect(self._on_start)
         self._setup_page.update_check_requested.connect(self._manual_update_check)
         self._setup_page.extract_mode_changed.connect(self._on_extract_mode_changed)
@@ -3030,6 +3032,13 @@ class MainWindow(MultiValFlow, QMainWindow):
         # GPU 임베딩 모델을 미리 컴파일/워밍업 — 첫 슬롯의 커널 JIT 지연 제거(#3).
         # ★ 무거운 import 뒤에 이어 붙인다(같은 모듈이 필요하고, 시작 경로를 비운다).
         self._warmup_accel_async()
+
+    def _sync_statusbar(self, page: QWidget) -> None:
+        """설정 화면은 크레딧을 자기 바닥 줄에 두므로 상태바를 숨긴다(개발자 모드만 예외 —
+        설정 버튼이 거기 있다).  다른 화면은 그대로."""
+        on_setup = page is getattr(self, "_setup_page", None)
+        self._credit_label.setVisible(not on_setup)
+        self._status_bar.setVisible(not on_setup or _prefs.load().dev_mode)
 
     def _apply_statusbar_theme(self) -> None:
         """상태바 크레딧 라벨 색을 테마 토큰으로 적용(페이지 밖 위젯)."""
@@ -3161,6 +3170,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         #   미끄러져 들어오는 동안 레일만 먼저 새 단계를 가리키게 된다.  그게 옳다:
         #   레일은 '어디로 가는 중인가' 를 먼저 말해 주는 표지판이지 화면의 일부가
         #   아니다(사라졌다 나타나면 오히려 깜빡임으로 읽힌다).
+        self._sync_statusbar(w)
         old = self._stack.currentWidget()
         sliding = not (old is w or old is None or not animate
                        or not motion.enabled())
