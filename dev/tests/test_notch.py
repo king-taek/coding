@@ -227,7 +227,8 @@ def test_main_window_ask_notch_stores_dirs_only_when_not_standard(styled_qapp, m
 
     monkeypatch.setattr(notch_dialog, "NotchDialog", FakeDlg)
     monkeypatch.setattr(mw.sheets, "run", lambda dlg, **k: 1)
-    slot = SimpleNamespace(ref_dir=tmp_path / "r" / "s", val_dir=tmp_path / "v" / "s")
+    slot = SimpleNamespace(ref_dir=tmp_path / "r" / "s", val_dir=tmp_path / "v" / "s",
+                           ref_images=[], val_images=[])
     me = SimpleNamespace(
         _scan=SimpleNamespace(common_slot_names=["s"], slots={"s": slot}),
         _input=SimpleNamespace(ref_machine="A", val_machine="B",
@@ -241,3 +242,47 @@ def test_main_window_ask_notch_stores_dirs_only_when_not_standard(styled_qapp, m
     choice["v"] = ("down", "right")
     ask(me, True)
     assert me._notch_dirs == ((str(tmp_path / "r"), "down"), (str(tmp_path / "v"), "right"))
+
+
+# ---------------------------------------------------------------------------
+# 자동 감지
+def _auto_setup(monkeypatch, val_dir, pts_ref, pts_val):
+    from aoi_verification.app.workers import notch_auto
+    die = (11000.0, 8000.0)
+    rc, _ = _scan(pts_ref, notch.DOWN, *die, 700.0, 300.0)
+    vc, vframe = _scan(pts_val, val_dir, *die, 700.0, 300.0)
+    refs = [Path(f"/r/s/{i}.jpg") for i in range(len(rc))]
+    vals = [Path(f"/v/s/{i}.jpg") for i in range(len(vc))]
+    table = dict(zip(refs, rc)) | dict(zip(vals, vc))
+    monkeypatch.setattr(notch, "folder_frame", lambda folder, source: vframe)
+    return notch_auto, [(refs, vals)], table
+
+
+@pytest.mark.parametrize("val_dir", notch.DIRECTIONS)
+def test_auto_detect_finds_val_direction(monkeypatch, val_dir):
+    pytest.importorskip("PyQt6.QtCore")
+    pts = _points(60, seed=3)
+    na, groups, table = _auto_setup(monkeypatch, val_dir, pts, pts)
+    res = na.score_directions(groups, "/r", "/v", "down", 200.0,
+                              resolve=lambda paths: {p: table[p] for p in paths})
+    assert res.direction == val_dir and res.support >= 50
+
+
+def test_auto_detect_refuses_when_unrelated(monkeypatch):
+    pytest.importorskip("PyQt6.QtCore")
+    na, groups, table = _auto_setup(monkeypatch, notch.LEFT,
+                                    _points(60, seed=3), _points(60, seed=99))
+    res = na.score_directions(groups, "/r", "/v", "down", 200.0,
+                              resolve=lambda paths: {p: table[p] for p in paths})
+    assert res.direction is None
+
+
+def test_dialog_auto_result_fills_val_only(styled_qapp):
+    pytest.importorskip("PyQt6.QtWidgets")
+    from aoi_verification.app.ui.widgets.notch_dialog import NotchDialog
+    from aoi_verification.app.workers.notch_auto import AutoNotch
+    dlg = NotchDialog("A", "B", "up", "down", auto_args=([], "/r", "/v", 200.0))
+    dlg._on_auto_done(AutoNotch("right", 40, 3, 50))
+    assert dlg.dirs == ("up", "right")
+    dlg._on_auto_done(AutoNotch(None, 2, 1, 50))      # 못 찾으면 그대로
+    assert dlg.dirs == ("up", "right") and dlg.status.text()

@@ -2039,8 +2039,13 @@ class MainWindow(MultiValFlow, QMainWindow):
                      for d in [getattr(sr.slots[n], attr)] if d is not None]
             return max(set(found), key=found.count) if found else notch.DEFAULT
 
+        groups = [([it.path for it in sr.slots[n].ref_images],
+                   [it.path for it in sr.slots[n].val_images])
+                  for n in sr.common_slot_names[:5]]
+        tol = float(getattr(self._input, "coord_tolerance", config.DEFAULT_COORD_TOLERANCE))
         dlg = NotchDialog(self._input.ref_machine, self._input.val_machine,
-                          guess("ref_dir"), guess("val_dir"), parent=self)
+                          guess("ref_dir"), guess("val_dir"), parent=self,
+                          auto_args=(groups, self._input.ref_root, self._input.val_root, tol))
         sheets.run(dlg)
         dirs = ((str(self._input.ref_root), dlg.dirs[0]),
                 (str(self._input.val_root), dlg.dirs[1]))
