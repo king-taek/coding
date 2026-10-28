@@ -290,7 +290,7 @@ def test_extract_button_sits_in_the_tool_rail(qapp):
         widgets = [bar.itemAt(i).widget() for i in range(bar.count())]
         stretch_at = next(i for i in range(bar.count())
                           if bar.itemAt(i).spacerItem() is not None)
-        assert widgets.index(page._mode_badge_card) < stretch_at
+        assert stretch_at == 0 and page._mode_badge_card not in widgets
         assert page.extract_btn in page._tool_buttons
         assert page._tool_rail.isAncestorOf(page.extract_btn)
         assert widgets[-1] is page.start_btn

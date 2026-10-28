@@ -167,7 +167,7 @@ SETUP_FOLDER_LABEL = "최상위 폴더"
 SETUP_MACHINE_LABEL = "호기 번호"
 SETUP_THRESHOLD_LABEL = "유사도 임계치"
 SETUP_FOLDER_PLACEHOLDER = "폴더를 선택해 주세요"
-SETUP_MACHINE_PLACEHOLDER = "예) 1호기"
+SETUP_MACHINE_PLACEHOLDER = "호기"
 
 # ── 검증 단계 헤더 ─────────────────────────────────────────────────────────
 # ★ 레일 이름을 그대로 쓴다 — "Stage 1" 은 레일의 ② 와 번호가 어긋났고(설정이 ①),
@@ -303,7 +303,6 @@ SLOT_JUMP_ITEM_FMT = "{slot} · {n}장"
 SLOT_JUMP_ITEM_NO_FMT = "#{no} · {slot} · {n}장"
 
 # ── 유사도 엔진 모드 + 중앙 전처리 ────────────────────────────────────────
-ENGINE_CARD_TITLE = "매칭 설정"
 # 구형(유사도) 모드 — 명시적 스위치.  '펼치기 = 켜기' 였던 옛 동작을 없앴다.
 LEGACY_SWITCH_TITLE = "유사도 엔진(구형) 사용"
 LEGACY_MODE_HINT = "좌표 데이터가 없는 예전 자료에 쓰는 대체 경로입니다."
@@ -327,7 +326,7 @@ JUDGE_VALUE_LEGACY_FMT = "{th:.0f} %"
 # ★ 배치에 종속된 안내를 하지 않는다 — "아래 '매칭 설정' 카드" 라고 쓰면 C안처럼
 #   상세를 접어 두는 배치에서는 화면에 없는 것을 가리킨다.
 MODE_BADGE_TOOLTIP = (
-    "지금 이 설정으로 매칭합니다.  ‘매칭 설정’ 에서 바꿀 수 있습니다."
+    "지금 이 설정으로 매칭합니다.  아래 방식 구역에서 바꿀 수 있습니다."
 )
 COORD_NO_DATA_MSG = (
     "좌표 정보가 없습니다.\n\n"
@@ -505,6 +504,8 @@ UPDATE_GIT_HINT = "개발(git) 환경입니다. 'git pull' 로 업데이트하�
 # 첫 화면 '업데이트 확인' 버튼 라벨(좌상단 도움말 메뉴 대체).
 MENU_CHECK_UPDATE = "업데이트 확인"
 TOOL_RAIL_CAPTION = "도구"
+SETUP_SECTION_FOLDER = "1  폴더"
+SETUP_SECTION_MODE = "2  방식"
 
 # ── 개발자 모드 (메인 화면 Ctrl+Shift+D) ───────────────────────────────────
 DEV_MODE_ON = "개발자 모드를 켰습니다."
@@ -783,7 +784,6 @@ SLOT_SELECT_KLA_FMT = "{wafer_id}  ·  슬롯 #{slot}"
 SLOT_MAP_FOLDER_TIP_FMT = "폴더: {folder}"
 # 진행 범위 타일 — 상태를 옆 라벨이 아니라 타일 자신이 말한다.
 # ── 실행 옵션 카드 — '자동화 수준' + '진행 범위' 를 한 카드에 담는다.
-RUN_OPTIONS_TITLE = "실행 옵션"
 RUN_OPTIONS_HINT = (
     "· 자동화 수준 — ‘모든 사진 자동’은 후보 선별을 건너뛰고 모든 기준 사진을"
     " 자동으로 매치합니다. 매치가 끝나면 검토 화면에서 결과를 하나씩 확인하고"

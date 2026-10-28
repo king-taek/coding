@@ -71,7 +71,8 @@ def test_no_horizontal_scroll_with_max_val_devices(qapp, width):
         page.close()
 
 
-def test_wide_window_puts_cards_side_by_side(qapp):
+def test_wide_window_puts_cards_side_by_side(qapp, monkeypatch):
+    monkeypatch.setattr(sp.SetupPage, "_TWO_COLUMN", True)  # 두 열 코드는 남아 있다(기본은 한 열)
     page = _page(qapp, 1512)
     try:
         assert page._cards_side_by_side is True
@@ -94,7 +95,8 @@ def test_narrow_window_stacks_cards(qapp):
         page.close()
 
 
-def test_orientation_follows_resize(qapp):
+def test_orientation_follows_resize(qapp, monkeypatch):
+    monkeypatch.setattr(sp.SetupPage, "_TWO_COLUMN", True)  # 두 열 코드는 남아 있다(기본은 한 열)
     """폭이 임계치를 넘나들면 배치가 따라 바뀐다."""
     page = _page(qapp, 1600)
     try:
@@ -132,7 +134,8 @@ def test_legacy_toggle_grows_only_engine_card(qapp, width):
 # ---------------------------------------------------------------------------
 # 2-b) 두 열 — 검증 장비를 늘려도 왼쪽(기준 장비 · 실행 옵션)은 그대로(2026-10-27)
 # ---------------------------------------------------------------------------
-def test_adding_val_devices_does_not_move_left_column(qapp):
+def test_adding_val_devices_does_not_move_left_column(qapp, monkeypatch):
+    monkeypatch.setattr(sp.SetupPage, "_TWO_COLUMN", True)  # 두 열 코드는 남아 있다(기본은 한 열)
     page = _page(qapp, 1600)
     try:
         assert page._cards_side_by_side is True
@@ -151,7 +154,8 @@ def test_adding_val_devices_does_not_move_left_column(qapp):
         page.close()
 
 
-def test_two_columns_pair_ref_with_run_and_val_with_engine(qapp):
+def test_two_columns_pair_ref_with_run_and_val_with_engine(qapp, monkeypatch):
+    monkeypatch.setattr(sp.SetupPage, "_TWO_COLUMN", True)  # 두 열 코드는 남아 있다(기본은 한 열)
     page = _page(qapp, 1600)
     try:
         run, eng = page._setting_cards
@@ -228,7 +232,6 @@ def test_rail_lies_flat_above_cards_on_narrow_window(qapp):
         assert (page._tool_rail.mapTo(page, origin).y()
                 < page.ref_group.mapTo(page, origin).y())   # 카드 위의 가로 줄
         assert page._scroll.horizontalScrollBar().maximum() == 0
-        b = page._bar_host.contentsMargins()
-        assert b.left() == 32                            # 바 들여쓰기도 풀린다
+        assert not page._foot_rule.isVisible()           # 바닥 줄의 레일 칸도 풀린다
     finally:
         page.close()

@@ -107,8 +107,8 @@ def test_page_still_renders_on_the_theme_surface(qapp):
         expected = QColor(theme.BG)
         # 가장자리 표본 — 페이지가 차지하지 않는 자리는 창 바탕이 그대로 보여야 한다.
         # ※ 오른쪽 위는 스크롤바가 앉는 자리라 제외한다(그 색은 스크롤바 스타일이다).
-        for x, y in ((2, 2), (img.width() // 2, 2),
-                     (2, img.height() - 3), (img.width() - 3, img.height() - 3)):
+        # ※ 아래쪽은 고정 시작 바(패널색 면)가 차지하므로 표본에서 뺀다.
+        for x, y in ((2, 2), (img.width() // 2, 2), (2, img.height() // 2)):
             got = QColor(img.pixel(x, y))
             assert got.name() == expected.name(), (
                 f"({x},{y}) 바탕이 {got.name()} — 기대 {expected.name()}. "

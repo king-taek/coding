@@ -48,21 +48,19 @@ def _title_label(page: sp.SetupPage) -> QLabel:
     raise AssertionError("제목 라벨을 찾지 못했다")
 
 
-def test_mode_badge_shares_the_start_bar_row(qapp):
-    """판정 기준 배지는 고정 시작 바에서 [검증 시작] 과 같은 줄이다(제목 줄이 아니다)."""
+def test_mode_badge_sits_top_right(qapp):
+    """판정 기준 배지는 제목 줄 오른쪽 끝이다(사용자 선택 2026-10-28)."""
     page = _page(qapp)
     try:
         page.resize(1280, 800)
         page.show()
         qapp.processEvents()
         badge = page._mode_badge_card
-        start = page.start_btn
-        s_mid = start.mapTo(page, start.rect().center()).y()
-        b_mid = badge.mapTo(page, badge.rect().center()).y()
-        assert abs(s_mid - b_mid) <= start.height(), \
-            f"시작({s_mid}px)과 판정 기준 배지({b_mid}px)가 다른 줄에 있다"
-        assert badge.mapTo(page, badge.rect().center()).x() < start.mapTo(
-            page, start.rect().center()).x()
+        title = page._title_label
+        b = badge.mapTo(page, badge.rect().center())
+        t = title.mapTo(page, title.rect().center())
+        assert abs(b.y() - t.y()) <= title.height(), "배지가 제목 줄이 아니다"
+        assert b.x() > t.x() and b.x() > page.width() // 2, "배지가 오른쪽이 아니다"
     finally:
         page.close()
 
