@@ -187,8 +187,9 @@ class _CalibPrepWorker(QThread):
     # die-내부 좌표를 내는 소스만 짝지을 수 있다(절대좌표 'camtek_abs' 는 틀이 다르다).
     _DIE_LOCAL = frozenset({"kla", "camtek_ini", "camtek_live"})
 
-    def __init__(self, groups, kla_side: str, parent=None) -> None:
+    def __init__(self, groups, kla_side: str, parent=None, notch_dirs=()) -> None:
         super().__init__(parent)
+        self._notch_dirs = tuple(notch_dirs or ())
         self._groups = groups
         self._src_is_kla = kla_side == "ref"
 
@@ -198,6 +199,10 @@ class _CalibPrepWorker(QThread):
             from ..coords import resolve_batch
             paths = [it.path for refs, vals in self._groups for it in (*refs, *vals)]
             coords = resolve_batch(paths, self.progress.emit)
+            if self._notch_dirs:       # 보정 후보도 같은 방향으로 맞춘 좌표로 본다
+                from ..coords import notch
+                coords = notch.apply_notch(
+                    coords, lambda p: notch.notch_for_path(self._notch_dirs, p))
 
             def c_of(it):
                 c = coords.get(it.path)
@@ -354,6 +359,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._scan_token = 0
         # 좌표 보정(KLA ↔ Camtek, 매칭 전용) — `_calibrate_then` 참고.
         self._coord_offset = None
+        self._notch_dirs = ()
         self._calib_next = None
         self._calib_worker = None
         self._calib_side = None
@@ -1192,6 +1198,8 @@ class MainWindow(MultiValFlow, QMainWindow):
                                           config.DEFAULT_COORD_TOLERANCE)),
             # 좌표 보정(매칭 전용) — 보정 화면에서 [보정 적용] 했을 때만 0 이 아니다.
             coord_offset=tuple(getattr(self, "_coord_offset", None) or (0.0, 0.0)),
+            # Notch 방향 보정(매칭 전용) — 표준(아래)이 아닌 폴더가 있을 때만 비어 있지 않다.
+            notch_dirs=tuple(getattr(self, "_notch_dirs", None) or ()),
         )
 
 
@@ -1995,6 +2003,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._coord_offset = None
         self._calib_next = (queue, pool, auto_mode)
         engine = getattr(self._input, "engine_mode", EngineMode.COORDINATE)
+        self._ask_notch(EngineMode.is_coordinate(engine))
         side = (self._kla_camtek_side()
                 if EngineMode.is_coordinate(engine) else None)
         if side is None:
@@ -2008,11 +2017,36 @@ class MainWindow(MultiValFlow, QMainWindow):
                 groups.append((refs, pool[slot_name]))
         self._loading.show_overlay(i18n.KO.COORD_CAL_LOADING)
         self._loading.set_progress(0, 0, i18n.KO.COORD_CAL_LOADING)
-        worker = _CalibPrepWorker(groups, side, self)
+        worker = _CalibPrepWorker(groups, side, self, self._notch_dirs)
         worker.progress.connect(self._on_calib_progress)
         worker.ready.connect(self._on_calib_ready)
         self._calib_worker = worker
         worker.start()
+
+    def _ask_notch(self, coordinate: bool) -> None:
+        """좌표 매칭이면 기준·검증 notch 방향을 묻는다 — 결과는 `_notch_dirs`(매칭 전용).
+
+        처음 값은 폴더에서 읽은 값(KLA)이거나 표준(아래).  둘 다 표준이면 보정 없음."""
+        self._notch_dirs = ()
+        if not coordinate or self._scan is None or self._input is None:
+            return
+        from ..coords import notch
+        from .widgets.notch_dialog import NotchDialog
+        sr = self._scan
+
+        def guess(attr: str) -> str:
+            found = [notch.detect(Path(d)) for n in sr.common_slot_names[:5]
+                     for d in [getattr(sr.slots[n], attr)] if d is not None]
+            return max(set(found), key=found.count) if found else notch.DEFAULT
+
+        dlg = NotchDialog(self._input.ref_machine, self._input.val_machine,
+                          guess("ref_dir"), guess("val_dir"), parent=self)
+        sheets.run(dlg)
+        dirs = ((str(self._input.ref_root), dlg.dirs[0]),
+                (str(self._input.val_root), dlg.dirs[1]))
+        if any(not notch.is_none(d) for _r, d in dirs):
+            self._notch_dirs = dirs
+            _LOG.info(i18n.KO.NOTCH_LOG_FMT.format(dirs=", ".join(f"{r}={d}" for r, d in dirs)))
 
     def _on_calib_progress(self, done: int, total: int) -> None:
         self._loading.set_progress(done, total, i18n.KO.COORD_CAL_LOADING)
@@ -2750,6 +2784,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._calib_worker = None
         self._calib_next = None
         self._coord_offset = None
+        self._notch_dirs = ()
         # #14 세션 종료 — 절전 억제 해제.
         wakelock.release()
         self._stop_lazy_thumb_pools()

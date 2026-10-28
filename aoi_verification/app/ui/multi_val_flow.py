@@ -28,7 +28,7 @@ _LOG = logging.getLogger("aoi.ui")
 #   매인 값이면 여기에도 적는다 — 안 적으면 다음 구간이 앞 구간의 값을 물려받는다.
 _LEG_ATTRS = (
     "_input", "_scan", "_kla_folders", "_slot_meta_ref", "_slot_meta_val",
-    "_kla_broken", "_coord_offset", "_calib_side",
+    "_kla_broken", "_coord_offset", "_notch_dirs", "_calib_side",
     "_matches_a", "_skipped_a", "_reviewed_matches", "_a_reviewed",
     "_reviewed_unmatched", "_reviewed_unmatched_keys", "_reviewed_all_matches",
     "_stage1_a_snapshot",
@@ -112,6 +112,7 @@ class MultiValFlow:
         self._slot_meta_val = None
         self._kla_broken = []
         self._coord_offset = None
+        self._notch_dirs = ()
         self._calib_side = None
         self._matches_a = []
         self._skipped_a = defaultdict(list)

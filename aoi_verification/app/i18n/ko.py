@@ -1330,6 +1330,16 @@ COORD_CAL_AUTO_DIFF_FMT = (
 COORD_CAL_REMOVE = "지우기"
 COORD_CAL_SKIP = "보정 건너뛰기"
 COORD_CAL_APPLY = "보정 적용"
+NOTCH_TITLE = "Notch 방향"
+NOTCH_SIDE_FMT = "{side} · {machine}"
+NOTCH_REF = "기준"
+NOTCH_VAL = "검증"
+NOTCH_DIRS = {"up": "위", "left": "왼쪽", "right": "오른쪽", "down": "아래"}
+NOTCH_OK = "확인"
+NOTCH_FAIL_FMT = ("Notch 방향을 맞추지 못했습니다 — 웨이퍼 중심·die 크기를 읽을 수 없는 폴더가 있습니다.\n"
+                  "{detail}")
+NOTCH_LOG_FMT = "Notch 방향 보정(매칭 전용): {dirs}"
+
 COORD_CAL_LOADING = "좌표 보정 준비 중 — 두 장비의 좌표를 읽고 있습니다…"
 
 # ── GL 히스토그램 뷰어 ────────────────────────────────────────────────────
