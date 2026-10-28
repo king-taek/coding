@@ -568,7 +568,7 @@ class MatchPage(ProgressRowMixin, QWidget):
         else:
             # 자동 — 전체 진행을 하나의 차단 오버레이로 표시.
             self._loading.show_overlay(
-                i18n.KO.LOAD_SCORING,
+                i18n.KO.LOAD_COORD if coord_mode else i18n.KO.LOAD_SCORING,
                 cancelable=True,
             )
             self.bg_status_label.setText("")
@@ -582,7 +582,7 @@ class MatchPage(ProgressRowMixin, QWidget):
             )
         elif eff_mode:
             # 고효율 모드 — CPU+GPU 가 협업해 ref 를 처리, 결과를 _fast_results 에 저장.
-            self.bg_status_label.setText(_eff.describe_active_units())
+            self.bg_status_label.setText(_eff.describe_active_units(self._engine_cfg))
             self._precompute_worker = _eff.EfficiencyScheduler(
                 tasks, cfg=self._engine_cfg, threshold=self._threshold,
                 auto=self._auto_mode, results=self._fast_results, parent=self,
@@ -626,13 +626,13 @@ class MatchPage(ProgressRowMixin, QWidget):
         if self._precompute_worker is None or self._current is not None:
             return
         self._loading.show_overlay(
-            getattr(self, "_precompute_phase", "") or i18n.KO.PHASE_SCORING,
+            getattr(self, "_precompute_phase", "") or self._default_phase(),
             cancelable=True,
         )
         if self._precompute_total > 0:
             self._loading.set_progress(
                 self._precompute_done, self._precompute_total,
-                getattr(self, "_precompute_phase", "") or i18n.KO.PHASE_SCORING,
+                getattr(self, "_precompute_phase", "") or self._default_phase(),
             )
 
     def _precompute_signal_is_current(self) -> bool:
@@ -650,6 +650,11 @@ class MatchPage(ProgressRowMixin, QWidget):
             return True
         return s is w.signals
 
+    def _default_phase(self) -> str:
+        """단계 신호가 오기 전 기본 라벨 — 좌표 모드는 유사도를 계산하지 않는다."""
+        return (i18n.KO.PHASE_COORD_PARSE if self._coord_mode
+                else i18n.KO.PHASE_SCORING)
+
     def _on_precompute_phase(self, phase: str) -> None:
         """현재 작업 단계 라벨 갱신 (#8) — '이미지 특징 분석'/'유사도 계산' 등.
 
@@ -658,7 +663,7 @@ class MatchPage(ProgressRowMixin, QWidget):
         """
         if not self._precompute_signal_is_current():
             return
-        self._precompute_phase = phase or i18n.KO.PHASE_SCORING
+        self._precompute_phase = phase or self._default_phase()
         if self._current is None:
             # 마지막으로 받은 진행도를 유지하며 라벨만 바꾼다(아직 없으면 busy 표시).
             self._loading.set_progress(
@@ -677,7 +682,7 @@ class MatchPage(ProgressRowMixin, QWidget):
         self._precompute_done = done
         self._precompute_total = total
         if self._current is None:
-            phase = getattr(self, "_precompute_phase", "") or i18n.KO.PHASE_SCORING
+            phase = getattr(self, "_precompute_phase", "") or self._default_phase()
             # 라벨엔 현재 작업명, 진행도는 처리 갯수(done / total)로 표시.
             self._loading.set_progress(done, total, phase)
 
@@ -1029,7 +1034,7 @@ class MatchPage(ProgressRowMixin, QWidget):
             # 모달 없이 조용히 ‘매칭 없음’ 처리 (Bug #4).  수동 모드만 안내.
             if not self._auto_mode:
                 sheets.info(self, i18n.KO.APP_TITLE,
-                                        i18n.KO.INFO_NO_MATCH_FOUND)
+                                        i18n.KO.INFO_NO_VAL_PHOTOS)
             self._confirm_no_match(user=False)
             return
 
