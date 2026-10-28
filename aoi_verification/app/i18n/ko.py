@@ -1336,6 +1336,10 @@ NOTCH_REF = "기준"
 NOTCH_VAL = "검증"
 NOTCH_DIRS = {"up": "위", "left": "왼쪽", "right": "오른쪽", "down": "아래"}
 NOTCH_OK = "확인"
+NOTCH_AUTO = "자동 감지"
+NOTCH_AUTO_BUSY = "검증 폴더를 네 방향으로 돌려 맞춰 보는 중…"
+NOTCH_AUTO_FOUND_FMT = "검증 Notch: {dir} (기준 사진 {hit}장이 짝을 찾았습니다)"
+NOTCH_AUTO_UNSURE = "뚜렷한 방향을 찾지 못했습니다 — 직접 골라 주세요."
 NOTCH_FAIL_FMT = ("Notch 방향을 맞추지 못했습니다 — 웨이퍼 중심·die 크기를 읽을 수 없는 폴더가 있습니다.\n"
                   "{detail}")
 NOTCH_LOG_FMT = "Notch 방향 보정(매칭 전용): {dirs}"
