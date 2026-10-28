@@ -360,6 +360,8 @@ class MainWindow(MultiValFlow, QMainWindow):
         # 좌표 보정(KLA ↔ Camtek, 매칭 전용) — `_calibrate_then` 참고.
         self._coord_offset = None
         self._notch_dirs = ()
+        self._notch_worker = None
+        self._notch_guess = None
         self._calib_next = None
         self._calib_worker = None
         self._calib_side = None
@@ -2002,14 +2004,21 @@ class MainWindow(MultiValFlow, QMainWindow):
         (CLAUDE.md 로딩 규칙)."""
         self._coord_offset = None
         self._calib_next = (queue, pool, auto_mode)
+        self._notch_dirs = ()
         engine = getattr(self._input, "engine_mode", EngineMode.COORDINATE)
-        self._ask_notch(EngineMode.is_coordinate(engine))
+        if not EngineMode.is_coordinate(engine) or not self._start_notch_auto():
+            self._after_notch()
+
+    def _after_notch(self) -> None:
+        """Notch 방향이 정해진 뒤 — KLA ↔ Camtek 이면 좌표 보정, 아니면 바로 Stage 2."""
+        engine = getattr(self._input, "engine_mode", EngineMode.COORDINATE)
         side = (self._kla_camtek_side()
                 if EngineMode.is_coordinate(engine) else None)
         if side is None:
             self._start_stage2()
             return
         self._calib_side = side
+        queue, pool, _auto = self._calib_next
         groups = []
         for slot_name in sorted(pool):
             refs = [it for it in queue if it.slot == slot_name]
@@ -2023,35 +2032,86 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._calib_worker = worker
         worker.start()
 
-    def _ask_notch(self, coordinate: bool) -> None:
-        """좌표 매칭이면 기준·검증 notch 방향을 묻는다 — 결과는 `_notch_dirs`(매칭 전용).
+    def _start_notch_auto(self) -> bool:
+        """Notch 방향을 **자동으로** 확인한다(백그라운드) — 시작했으면 True.
 
-        처음 값은 폴더에서 읽은 값(KLA)이거나 표준(아래).  둘 다 표준이면 보정 없음."""
-        self._notch_dirs = ()
-        if not coordinate or self._scan is None or self._input is None:
-            return
+        기준 방향은 폴더에서 읽은 값(KLA 정보파일, 없으면 아래)이고, 검증 방향은 네 방향으로
+        돌려 기준과 가장 잘 맞는 쪽이다(`workers.notch_auto`).  결과는 `_on_notch_auto_done`."""
+        if self._scan is None or self._input is None:
+            return False
         from ..coords import notch
-        from .widgets.notch_dialog import NotchDialog
+        from ..workers.notch_auto import NotchAutoWorker
         sr = self._scan
+        names = sr.common_slot_names[:5]
 
         def guess(attr: str) -> str:
-            found = [notch.detect(Path(d)) for n in sr.common_slot_names[:5]
+            found = [notch.detect(Path(d)) for n in names
                      for d in [getattr(sr.slots[n], attr)] if d is not None]
             return max(set(found), key=found.count) if found else notch.DEFAULT
 
         groups = [([it.path for it in sr.slots[n].ref_images],
-                   [it.path for it in sr.slots[n].val_images])
-                  for n in sr.common_slot_names[:5]]
+                   [it.path for it in sr.slots[n].val_images]) for n in names]
         tol = float(getattr(self._input, "coord_tolerance", config.DEFAULT_COORD_TOLERANCE))
-        dlg = NotchDialog(self._input.ref_machine, self._input.val_machine,
-                          guess("ref_dir"), guess("val_dir"), parent=self,
-                          auto_args=(groups, self._input.ref_root, self._input.val_root, tol))
-        sheets.run(dlg)
-        dirs = ((str(self._input.ref_root), dlg.dirs[0]),
-                (str(self._input.val_root), dlg.dirs[1]))
-        if any(not notch.is_none(d) for _r, d in dirs):
-            self._notch_dirs = dirs
-            _LOG.info(i18n.KO.NOTCH_LOG_FMT.format(dirs=", ".join(f"{r}={d}" for r, d in dirs)))
+        ref_dir, val_dir = guess("ref_dir"), guess("val_dir")
+        auto_args = (groups, self._input.ref_root, self._input.val_root, tol)
+        self._notch_guess = (ref_dir, val_dir, auto_args)
+        self._loading.show_overlay(i18n.KO.NOTCH_CHECKING)
+        self._loading.set_progress(0, 0, i18n.KO.NOTCH_CHECKING)
+        # 부모 없이 `_LIVE_SCANS` 가 수명을 잡는다 — 감지 중에 창을 닫아도 실행 중인 QThread 가
+        # 창과 함께 파괴되지 않는다(폴더 스캔 워커와 같은 방식).
+        worker = NotchAutoWorker(groups, self._input.ref_root, self._input.val_root,
+                                 ref_dir, tol, None)
+        worker.progress.connect(self._on_notch_progress)
+        worker.done.connect(self._on_notch_auto_done)
+        _LIVE_SCANS.add(worker)
+        worker.finished.connect(lambda w=worker: _LIVE_SCANS.discard(w))
+        self._notch_worker = worker
+        worker.start()
+        return True
+
+    def _on_notch_progress(self, done: int, total: int) -> None:
+        self._loading.set_progress(done, total, i18n.KO.NOTCH_CHECKING)
+
+    def _on_notch_auto_done(self, res) -> None:
+        w = self.sender()
+        if w is not self._notch_worker:
+            return                          # 새 세션으로 밀려난 옛 감지
+        self._notch_worker = None
+        w.wait()
+        self._loading.hide_overlay()
+        if self._input is None or self._scan is None or self._calib_next is None:
+            return
+        ref_dir, val_dir, auto_args = self._notch_guess
+        self._ask_notch(ref_dir, val_dir, res, auto_args)
+        self._after_notch()
+
+    @staticmethod
+    def _notch_needs_confirm(ref_dir: str, res) -> bool:
+        """둘 다 아래로 **확인된** 경우만 묻지 않는다(사용자 지시 2026-10-28).
+
+        감지가 방향을 못 내면(``res.direction is None``) 확인받는다 — 모르는 걸 아래로 두지 않는다."""
+        from ..coords import notch
+        return not (notch.is_none(ref_dir) and res is not None
+                    and res.direction is not None and notch.is_none(res.direction))
+
+    def _ask_notch(self, ref_dir: str, val_dir: str, res, auto_args=None) -> None:
+        """감지 결과로 `_notch_dirs`(매칭 전용)를 정한다 — 둘 다 아래가 아니면 창으로 확인받는다."""
+        from ..coords import notch
+        from .widgets.notch_dialog import NotchDialog
+        self._notch_dirs = ()
+        if self._notch_needs_confirm(ref_dir, res):
+            dlg = NotchDialog(self._input.ref_machine, self._input.val_machine,
+                              ref_dir, val_dir, parent=self,
+                              auto_args=auto_args, auto_result=res)
+            sheets.run(dlg)
+            dirs = dlg.dirs
+        else:
+            dirs = (notch.DEFAULT, notch.DEFAULT)
+            _LOG.info("Notch 자동 확인: 기준·검증 모두 아래 — 묻지 않고 진행")
+        pairs = ((str(self._input.ref_root), dirs[0]), (str(self._input.val_root), dirs[1]))
+        if any(not notch.is_none(d) for _r, d in pairs):
+            self._notch_dirs = pairs
+            _LOG.info(i18n.KO.NOTCH_LOG_FMT.format(dirs=", ".join(f"{r}={d}" for r, d in pairs)))
 
     def _on_calib_progress(self, done: int, total: int) -> None:
         self._loading.set_progress(done, total, i18n.KO.COORD_CAL_LOADING)
@@ -2787,6 +2847,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         session_mod.clear()
         # 준비 중인 좌표 보정은 버린다(뒤늦은 ready 는 `_on_calib_ready` 가 무시한다).
         self._calib_worker = None
+        self._notch_worker = None
         self._calib_next = None
         self._coord_offset = None
         self._notch_dirs = ()

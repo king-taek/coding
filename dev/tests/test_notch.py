@@ -212,36 +212,53 @@ def test_dialog_defaults_and_choice(styled_qapp):
 
 
 def test_main_window_ask_notch_stores_dirs_only_when_not_standard(styled_qapp, monkeypatch, tmp_path):
-    """`_ask_notch` — 좌표 모드가 아니면 비우고, 표준만 고르면 비우고, 다르면 (루트, 방향) 쌍."""
+    """`_ask_notch` — 둘 다 아래로 감지되면 창 없이 비우고, 아니면 창에서 고른 (루트, 방향) 쌍."""
     pytest.importorskip("PyQt6.QtWidgets")
     from types import SimpleNamespace
     from aoi_verification.app.ui import main_window as mw
     from aoi_verification.app.ui.widgets import notch_dialog
+    from aoi_verification.app.workers.notch_auto import AutoNotch
 
     choice = {"v": ("down", "down")}
+    shown = []
 
     class FakeDlg:
         def __init__(self, *a, **k):
-            pass
+            shown.append(k.get("auto_result"))
         dirs = property(lambda self: choice["v"])
 
     monkeypatch.setattr(notch_dialog, "NotchDialog", FakeDlg)
     monkeypatch.setattr(mw.sheets, "run", lambda dlg, **k: 1)
-    slot = SimpleNamespace(ref_dir=tmp_path / "r" / "s", val_dir=tmp_path / "v" / "s",
-                           ref_images=[], val_images=[])
     me = SimpleNamespace(
-        _scan=SimpleNamespace(common_slot_names=["s"], slots={"s": slot}),
         _input=SimpleNamespace(ref_machine="A", val_machine="B",
                                ref_root=tmp_path / "r", val_root=tmp_path / "v"),
-        _notch_dirs=("stale",))
+        _notch_dirs=("stale",), _notch_needs_confirm=mw.MainWindow._notch_needs_confirm)
     ask = mw.MainWindow._ask_notch
-    ask(me, False)
-    assert me._notch_dirs == ()
-    ask(me, True)
-    assert me._notch_dirs == ()                         # 둘 다 표준
+    ask(me, "down", "down", AutoNotch("down", 30, 2, 40))
+    assert me._notch_dirs == () and shown == []         # 둘 다 아래 — 묻지 않는다
+    right = AutoNotch("right", 30, 2, 40)
     choice["v"] = ("down", "right")
-    ask(me, True)
+    ask(me, "down", "down", right)
+    assert shown == [right]                              # 감지 결과를 창에 넘긴다
     assert me._notch_dirs == ((str(tmp_path / "r"), "down"), (str(tmp_path / "v"), "right"))
+    choice["v"] = ("down", "down")
+    ask(me, "down", "down", right)                       # 창에서 아래로 되돌리면 보정 없음
+    assert me._notch_dirs == ()
+
+
+@pytest.mark.parametrize("ref_dir,direction,expected", [
+    ("down", "down", False),
+    ("down", "right", True),
+    ("up", "down", True),          # 기준(KLA 정보파일)이 아래가 아니다
+    ("down", None, True),          # 감지가 방향을 못 냈다 — 아래로 두지 않고 묻는다
+])
+def test_notch_confirm_only_when_not_both_down(ref_dir, direction, expected):
+    pytest.importorskip("PyQt6.QtWidgets")
+    from aoi_verification.app.ui import main_window as mw
+    from aoi_verification.app.workers.notch_auto import AutoNotch
+    res = AutoNotch(direction, 30, 2, 40)
+    assert mw.MainWindow._notch_needs_confirm(ref_dir, res) is expected
+    assert mw.MainWindow._notch_needs_confirm("down", None) is True
 
 
 # ---------------------------------------------------------------------------
@@ -268,6 +285,27 @@ def test_auto_detect_finds_val_direction(monkeypatch, val_dir):
     assert res.direction == val_dir and res.support >= 50
 
 
+@pytest.mark.parametrize("val_dir", notch.DIRECTIONS)
+@pytest.mark.parametrize("shift", [(-635.0, 3.0), (90.0, -380.0)])
+def test_auto_detect_survives_kla_camtek_offset(monkeypatch, val_dir, shift):
+    """KLA ↔ Camtek 처럼 같은 결함이 tol(200) 보다 멀리 어긋나도 방향을 찾는다.
+
+    관측(2026-10-28, Kendall RDL4 · Camtek Notch Right): 90° 돌린 뒤 짝 10쌍이 한 방향으로
+    약 635 µm 어긋났다(흩어짐 수 µm).  어긋남을 빼지 않고 세면 맞는 방향도 0 이었다."""
+    pytest.importorskip("PyQt6.QtCore")
+    from dataclasses import replace
+    pts = _points(60, seed=3)
+    na, groups, table = _auto_setup(monkeypatch, val_dir, pts, pts)
+    refs = groups[0][0]
+    # 기준 쪽(=KLA)에 어긋남을 준다 — 보정은 die 경계를 넘어도 번호를 다시 매기지 않는다.
+    table.update({p: replace(table[p], x=table[p].x - shift[0], y=table[p].y - shift[1])
+                  for p in refs})
+    res = na.score_directions(groups, "/r", "/v", "down", 200.0,
+                              resolve=lambda paths: {p: table[p] for p in paths})
+    assert res.direction == val_dir and res.support >= 50
+    assert res.offset == pytest.approx(shift, abs=20.0)
+
+
 def test_auto_detect_refuses_when_unrelated(monkeypatch):
     pytest.importorskip("PyQt6.QtCore")
     na, groups, table = _auto_setup(monkeypatch, notch.LEFT,
@@ -286,3 +324,86 @@ def test_dialog_auto_result_fills_val_only(styled_qapp):
     assert dlg.dirs == ("up", "right")
     dlg._on_auto_done(AutoNotch(None, 2, 1, 50))      # 못 찾으면 그대로
     assert dlg.dirs == ("up", "right") and dlg.status.text()
+
+
+def test_dialog_takes_precomputed_auto_result(styled_qapp):
+    """매칭 전에 돌린 감지 결과가 창을 열 때 바로 들어간다(다시 누를 필요 없음)."""
+    pytest.importorskip("PyQt6.QtWidgets")
+    from aoi_verification.app.ui.widgets.notch_dialog import NotchDialog
+    from aoi_verification.app.workers.notch_auto import AutoNotch
+    dlg = NotchDialog("A", "B", "down", "down", auto_result=AutoNotch("right", 9, 0, 14))
+    assert dlg.dirs == ("down", "right") and "9" in dlg.status.text()
+
+
+@pytest.mark.parametrize("found,expect_dialog", [("down", False), ("right", True)])
+def test_main_window_runs_notch_auto_before_matching(styled_qapp, monkeypatch, tmp_path,
+                                                     found, expect_dialog):
+    """좌표 매칭 시작 → 백그라운드 감지 → (둘 다 아래면 창 없이) 다음 단계로 이어진다."""
+    QtCore = pytest.importorskip("PyQt6.QtCore")
+    from types import SimpleNamespace
+    from aoi_verification.app.ui import main_window as mw
+    from aoi_verification.app.ui.widgets import notch_dialog
+    from aoi_verification.app.workers import notch_auto
+    from aoi_verification.app.workers.notch_auto import AutoNotch
+
+    class FakeWorker(QtCore.QThread):
+        progress = QtCore.pyqtSignal(int, int)
+        done = QtCore.pyqtSignal(object)
+
+        def __init__(self, groups, ref_root, val_root, ref_dir, tol, parent=None):
+            super().__init__(parent)
+
+        def run(self):
+            self.done.emit(AutoNotch(found, 20, 1, 25))
+
+    shown = []
+
+    class FakeDlg:
+        def __init__(self, *a, **k):
+            shown.append(k.get("auto_result"))
+        dirs = property(lambda self: ("down", "right"))
+
+    monkeypatch.setattr(notch_auto, "NotchAutoWorker", FakeWorker)
+    monkeypatch.setattr(notch_dialog, "NotchDialog", FakeDlg)
+    monkeypatch.setattr(mw.sheets, "run", lambda dlg, **k: 1)
+
+    class Host(QtCore.QObject):
+        _start_notch_auto = mw.MainWindow._start_notch_auto
+        _on_notch_progress = mw.MainWindow._on_notch_progress
+        _on_notch_auto_done = mw.MainWindow._on_notch_auto_done
+        _ask_notch = mw.MainWindow._ask_notch
+        _notch_needs_confirm = staticmethod(mw.MainWindow._notch_needs_confirm)
+
+        def _after_notch(self):
+            self.after.append(self._notch_dirs)
+
+    slot = SimpleNamespace(ref_dir=tmp_path / "r" / "s", val_dir=tmp_path / "v" / "s",
+                           ref_images=[], val_images=[])
+    host = Host()
+    host.after, host._notch_dirs, host._calib_next = [], (), ([], {}, False)
+    host._scan = SimpleNamespace(common_slot_names=["s"], slots={"s": slot})
+    host._input = SimpleNamespace(ref_machine="A", val_machine="B", coord_tolerance=200.0,
+                                  ref_root=tmp_path / "r", val_root=tmp_path / "v")
+    host._loading = SimpleNamespace(show_overlay=lambda *a: None, hide_overlay=lambda: None,
+                                    set_progress=lambda *a: None)
+    assert host._start_notch_auto() is True
+    for _ in range(200):
+        styled_qapp.processEvents()
+        if host.after:
+            break
+        QtCore.QThread.msleep(5)
+    assert len(host.after) == 1 and (len(shown) == 1) is expect_dialog
+    if expect_dialog:
+        assert host.after[0] == ((str(tmp_path / "r"), "down"), (str(tmp_path / "v"), "right"))
+    else:
+        assert host.after[0] == ()
+
+
+def test_auto_detect_offset_vote_does_not_invent_a_direction_on_dense_noise(monkeypatch):
+    """사진이 많아도(서로 무관한 600장) 방향마다 뺀 어긋남이 우연한 짝을 '방향' 으로 만들지 않는다."""
+    pytest.importorskip("PyQt6.QtCore")
+    na, groups, table = _auto_setup(monkeypatch, notch.RIGHT,
+                                    _points(600, seed=5), _points(600, seed=77))
+    res = na.score_directions(groups, "/r", "/v", "down", 200.0,
+                              resolve=lambda paths: {p: table[p] for p in paths})
+    assert res.direction is None

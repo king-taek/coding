@@ -1,7 +1,7 @@
 """Notch 방향 고르기 — 좌표 매칭 직전, 기준·검증 폴더의 notch 가 어느 쪽인지.
 
-두 줄(기준 / 검증)에 위·왼쪽·오른쪽·아래 네 칸.  처음 값은 폴더에서 읽은 값(KLA)이거나
-표준(아래)이라 대개 [확인] 한 번이면 된다.  방향이 다르면 매칭이 그 폴더의 좌표를 돌려서
+두 줄(기준 / 검증)에 위·왼쪽·오른쪽·아래 네 칸.  매칭 전에 자동 감지를 먼저 돌려 둘 다
+아래면 이 창은 뜨지 않는다(사용자 지시 2026-10-28) — 뜨면 감지 결과가 처음 값으로 들어 있다.  방향이 다르면 매칭이 그 폴더의 좌표를 돌려서
 (`coords.notch`) 계산한다 — 엑셀·화면 좌표는 그대로다.  결과는 :attr:`dirs` (기준, 검증).
 """
 
@@ -20,8 +20,10 @@ __all__ = ["NotchDialog"]
 
 class NotchDialog(QDialog):
     def __init__(self, ref_label: str, val_label: str, ref_dir: str, val_dir: str,
-                 parent=None, *, auto_args=None) -> None:
-        """``auto_args`` = ``(groups, ref_root, val_root, tol)`` — 있으면 [자동 감지] 가 생긴다."""
+                 parent=None, *, auto_args=None, auto_result=None) -> None:
+        """``auto_args`` = ``(groups, ref_root, val_root, tol)`` — 있으면 [자동 감지] 가 생긴다.
+        ``auto_result`` = 미리 돌린 감지 결과(:class:`~..workers.notch_auto.AutoNotch`) — 검증
+        방향과 안내 글에 바로 반영한다."""
         super().__init__(parent)
         self._auto_args = auto_args
         self._worker = None
@@ -54,6 +56,8 @@ class NotchDialog(QDialog):
         bar.addWidget(ok)
         root.addLayout(bar)
         self.setMinimumWidth(460)
+        if auto_result is not None:
+            self._on_auto_done(auto_result)
 
     def _run_auto(self) -> None:
         """기준 방향은 그대로 두고 검증 방향을 찾는다(백그라운드 — 창이 멈추지 않는다)."""
