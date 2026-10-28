@@ -27,9 +27,11 @@ class SlotSection(QWidget):
                  inline_select: bool = False,
                  truncate: bool = True,
                  tile_px: Optional[int] = None,
+                 slot_no: Optional[str] = None,
                  parent=None) -> None:
         super().__init__(parent)
         self._slot = slot_name
+        self._slot_no = slot_no
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 6, 0, 6)
@@ -52,11 +54,15 @@ class SlotSection(QWidget):
         outer.addWidget(self.grid)
 
     # ------------------------------------------------------------------
+    def _header(self, count: int) -> str:
+        if self._slot_no:
+            return i18n.KO.GROUP_HEADER_NO_FMT.format(
+                slot=self._slot, no=self._slot_no, count=count)
+        return i18n.KO.GROUP_HEADER_FMT.format(slot=self._slot, count=count)
+
     def set_entries(self, entries: Iterable[ThumbEntry]) -> None:
         entries = list(entries)
-        self._label.setText(
-            i18n.KO.GROUP_HEADER_FMT.format(slot=self._slot, count=len(entries))
-        )
+        self._label.setText(self._header(len(entries)))
         self.grid.set_entries(entries)
 
     def inline_selected(self) -> list[ThumbEntry]:
@@ -66,8 +72,5 @@ class SlotSection(QWidget):
         """한 장만 지우고 헤더 개수를 갱신한다(전체 재생성 회피)."""
         if not self.grid.remove_entry(entry):
             return False
-        self._label.setText(
-            i18n.KO.GROUP_HEADER_FMT.format(
-                slot=self._slot, count=len(self.grid._entries))
-        )
+        self._label.setText(self._header(len(self.grid._entries)))
         return True

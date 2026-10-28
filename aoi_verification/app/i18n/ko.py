@@ -19,8 +19,8 @@ SPLASH_READY = "준비 완료"
 OPENVINO_OFFER_TITLE = "Intel GPU 가속 활성화"
 OPENVINO_OFFER_BODY = (
     "Intel CPU 가 감지되었습니다.\n"
-    "OpenVINO 를 설치하면 Intel GPU (Iris Xe / Arc) 가속이 자동으로 "
-    "활성화되어 유사도 계산이 빨라집니다.\n\n"
+    "OpenVINO 를 설치하면 고효율 모드의 후보 생성이 Intel GPU (Iris Xe / Arc) 로 "
+    "빨라집니다. 좌표·기본 모드에는 영향이 없습니다.\n\n"
     "지금 설치할까요? (약 200 MB)"
 )
 OPENVINO_OFFER_BTN_INSTALL = "지금 설치"
@@ -28,7 +28,7 @@ OPENVINO_OFFER_BTN_LATER = "다음에"
 OPENVINO_OFFER_BTN_NEVER = "다시 보지 않기"
 OPENVINO_INSTALL_PROGRESS = "OpenVINO 설치 중…"
 OPENVINO_INSTALL_DONE = (
-    "OpenVINO 설치 완료!\n프로그램을 다시 시작하면 Intel GPU 가속이 적용됩니다."
+    "OpenVINO 설치 완료!\n프로그램을 다시 시작하면 고효율 모드에서 Intel GPU 가속을 쓸 수 있습니다."
 )
 OPENVINO_INSTALL_FAILED_FMT = (
     "OpenVINO 설치에 실패했습니다 — {error}\n\n"
@@ -176,7 +176,7 @@ STAGE1_TITLE = "후보 선별"
 STAGE2_TITLE = "매칭 · 유사도 기반"
 STAGE2_TITLE_COORD = "매칭 · 좌표 기반"
 STAGE2_COORD_OFFSET_FMT = "  ·  보정 가로 {dx:+.0f} · 세로 {dy:+.0f} µm"
-RESULT_TITLE = "검증 결과"
+RESULT_TITLE = "결과"
 # 결과 요약 — 핵심 수치는 타일로, 나머지는 문장으로.
 RESULT_MACHINES_FMT = "기준 장비: {ref}    검증 장비: {val}"
 RESULT_SLOT_ONLY_REF_FMT = "슬롯 불일치  ·  기준 전용: {names}"
@@ -232,12 +232,12 @@ SKIPPED_SECTION_NO_MATCH_FMT = "매치 없음 확정 ({n}장)"
 SKIPPED_DIALOG_EMPTY = "매치 없음 사진이 없습니다."
 
 # 매치 실패 사진 검토 다이얼로그 (#8)
-BTN_REVIEW_UNMATCHED = "매치 실패 사진 검토"
-UNMATCHED_REVIEW_TITLE = "매치 실패 사진 검토 — {n}장"
+BTN_REVIEW_UNMATCHED = "매치 없음 사진 검토"
+UNMATCHED_REVIEW_TITLE = "매치 없음 사진 검토 — {n}장"
 UNMATCHED_REVIEW_PROGRESS_FMT = "{idx} / {total} — {slot}"
 UNMATCHED_REVIEW_HINT = (
-    "매치 실패한 기준 사진을 하나씩 검토합니다. 같은 슬롯의 검증 장비 후보를"
-    " 유사도 순으로 보여줍니다. 맞는 사진을 클릭해 선택(파란 테두리)한 뒤"
+    "매치 없음인 기준 사진을 하나씩 검토합니다. 같은 슬롯의 검증 장비 후보를"
+    " 보여줍니다. 맞는 사진을 클릭해 선택(파란 테두리)한 뒤"
     " [매치 확정] 을 누르세요. 후보를 우클릭하면 크게 비교할 수 있습니다."
 )
 # 좌표로 매칭한 세션에서 이 화면만 유사도로 줄을 세운다는 사실을 알린다 (U-18).
@@ -300,6 +300,7 @@ SLOT_LABEL_FMT = "슬롯: {slot}"
 SLOT_JUMP_LABEL = "다른 슬롯으로 이동"
 SLOT_JUMP_TOOLTIP = "사진이 많아 슬롯 하나씩 보여 줍니다 — 여기서 다른 슬롯으로 바로 넘어갈 수 있습니다"
 SLOT_JUMP_ITEM_FMT = "{slot} · {n}장"
+SLOT_JUMP_ITEM_NO_FMT = "#{no} · {slot} · {n}장"
 
 # ── 유사도 엔진 모드 + 중앙 전처리 ────────────────────────────────────────
 ENGINE_CARD_TITLE = "매칭 설정"
@@ -442,6 +443,7 @@ EXPORT_PHASE_FMT = "엑셀로 저장 중 — {sheet} 시트 · {slot}"
 LOAD_REVIEW_ROWS = "검토 목록 준비 중…"
 LOAD_FEATURE = "검증 장비 특징 추출 중…"
 LOAD_SCORING = "유사도 계산 중…"
+LOAD_COORD = "좌표 매칭 중…"             # 좌표 모드는 유사도를 계산하지 않는다
 PHASE_FEATURE = "이미지 특징 분석"
 PHASE_SCORING = "유사도 계산"
 PHASE_EMBED = "후보 생성 (GPU 임베딩)"      # 고효율 모드 1단계 — 유사도 계산 직전
@@ -453,7 +455,7 @@ LOAD_PRECOMPUTE_FIRST_SLOT = (
     "첫 슬롯 준비 중… 잠시만 기다려 주세요."
 )
 LOAD_PRECOMPUTE_WAIT_FMT = (
-    "{slot} 슬롯 유사도 계산을 기다리는 중… 다음 슬롯은 백그라운드에서 준비됩니다"
+    "{slot} 슬롯 계산이 끝나기를 기다리는 중… 다음 슬롯은 백그라운드에서 준비됩니다"
 )
 PRECOMPUTE_BG_STATUS_FMT = "백그라운드 유사도 계산: {idx} / {total} 슬롯 완료"
 PRECOMPUTE_BG_DONE = "유사도 계산 완료"
@@ -463,6 +465,8 @@ UPDATE_AVAILABLE_TITLE = "업데이트 있음"
 # '있음' 은 실제로 새 버전이 있을 때만 쓴다.  최신이거나 확인에 실패한 결과까지 같은
 # 제목으로 띄우면 제목과 본문이 정반대 사실을 말한다(제목만 읽은 사용자는 오해한다).
 UPDATE_CHECK_TITLE = "업데이트 확인"
+UPDATE_DONE_TITLE = "업데이트 완료"
+UPDATE_FAILED_TITLE = "업데이트 실패"
 UPDATE_AVAILABLE_BODY = "새 버전이 있습니다. 지금 업데이트할까요?"
 # 버튼은 동작 이름으로 — '예/아니오' 는 질문을 다시 읽어야 뜻이 정해진다.
 UPDATE_BTN_NOW = "지금 업데이트"
@@ -748,10 +752,10 @@ SLOT_SELECT_BTN_TOOLTIP = (
     "기준 폴더의 슬롯 중 이번 검증에서 진행할 슬롯만 선택합니다.\n"
     "선택하지 않으면 모든 공통 슬롯을 진행합니다."
 )
-SLOT_SELECT_TITLE = "진행할 슬롯 선택"
+SLOT_SELECT_TITLE = "슬롯 선택"
 # 다이얼로그 상단 — 지금 무엇이 진행되는지 **큰 글자로** 말한다(이전엔 '선택 3 / 24' 뿐).
-SLOT_SELECT_COUNT_HEAD_FMT = "{total}개 중 {n}개 진행"
-SLOT_SELECT_COUNT_HEAD_ALL = "모든 슬롯 진행 ({total}개)"
+SLOT_SELECT_COUNT_HEAD_FMT = "{total}개 중 {n}개 선택"
+SLOT_SELECT_COUNT_HEAD_ALL = "모든 슬롯 선택 ({total}개)"
 SLOT_SELECT_SEARCH_PLACEHOLDER = "슬롯 이름으로 찾기"
 SLOT_SELECT_FILTER_HIT_FMT = "‘{q}’ 검색 결과 {n}개"
 SLOT_SELECT_FILTER_NONE_FMT = "‘{q}’ 와 맞는 슬롯이 없습니다"
@@ -761,8 +765,8 @@ SLOT_SELECT_NEED_ONE = "최소 한 개는 선택해야 합니다."
 # ※ SLOT_SELECT_KEY_HINT 는 제거했다 — 타일 키보드 조작을 없앴으므로(사용자 결정)
 #   안내할 키가 남지 않았다.  화면에 지키지 못할 약속을 적어 두지 않는다.
 SLOT_SELECT_HINT = (
-    "이번 검증에서 진행할 슬롯을 눌러 고르세요. 이름을 알면 위에서 바로 찾을 수 있습니다.\n"
-    "고르지 않은 슬롯은 스캔·매칭에서 제외됩니다."
+    "이번에 쓸 슬롯을 눌러 고르세요. 이름을 알면 위에서 바로 찾을 수 있습니다.\n"
+    "고르지 않은 슬롯은 이번 작업에서 제외됩니다."
 )
 SLOT_SELECT_ALL = "전체 선택"
 SLOT_SELECT_NONE = "전체 해제"
@@ -783,7 +787,7 @@ RUN_OPTIONS_TITLE = "실행 옵션"
 RUN_OPTIONS_HINT = (
     "· 자동화 수준 — ‘모든 사진 자동’은 후보 선별을 건너뛰고 모든 기준 사진을"
     " 자동으로 매치합니다. 매치가 끝나면 검토 화면에서 결과를 하나씩 확인하고"
-    " 잘못된 매치를 [매치 없음] 으로 되돌릴 수 있습니다.\n"
+    " 잘못된 매치는 검토 화면의 ‘×’ 버튼(매치 없음)으로 되돌릴 수 있습니다.\n"
     # ★ 라벨 그대로 적는다 — SCOPE_SUBSET 은 말줄임표까지 포함해 '일부 슬롯만…' 이다.
     "· 진행 범위 — 기본은 기준 폴더의 모든 슬롯입니다. ‘일부 슬롯만…’ 을 고르면 이번"
     " 검증에서 진행할 슬롯을 직접 선택합니다(급한 슬롯만 먼저 돌릴 때)."
@@ -855,7 +859,8 @@ INFO_RESUME_BODY = (
 #   안이고, 자동화 수준 두 가지가 둘 다 `AutomationLevel.AUTO_MODES` 라 2단계는 언제나
 #   자동이다.  수동 스트리밍 경로가 되살아날 때를 대비해 문구·경로를 남기되, 화면에
 #   없는 영어 낱말('Skip')과 낱말 규약을 어긴 표기는 지금 고쳐 둔다.
-INFO_NO_MATCH_FOUND = "임계치 이상인 후보가 없습니다. 자동으로 ‘매치 없음’ 으로 처리됩니다."
+INFO_NO_MATCH_FOUND = "조건에 맞는 검증 후보가 없습니다. 자동으로 ‘매치 없음’ 으로 처리됩니다."
+INFO_NO_VAL_PHOTOS = "이 슬롯에 검증 사진이 없습니다. 자동으로 ‘매치 없음’ 으로 처리됩니다."
 INFO_ALREADY_MATCHED_SECTION = "이미 매칭됨 (자동 제외)"
 
 # ── 저장/엑셀 ──────────────────────────────────────────────────────────────
@@ -1036,6 +1041,7 @@ MATCH_AUTO_RESULT_NOTE = "매치 결과는 다음 ‘매치 검토’ 화면에�
 PROGRESS_SLOT_ONLY_FMT = "{slot}  ·"
 PROGRESS_COUNT_FMT = "{done} / {total}"
 GROUP_HEADER_FMT = "{slot}  ·  {count}장"
+GROUP_HEADER_NO_FMT = "{slot}\n#{no}  ·  {count}장"
 # 후보 선별 상단의 슬롯별 전체 장수 — 참고용 (#2).  ★ 'LOT' 이 아니다.
 LOT_COUNTS_PREFIX = "슬롯별 장수:  "
 
@@ -1091,7 +1097,7 @@ UNMATCHED_CAND_COUNT_COORD_FMT = "후보 {n}장 (좌표 거리 순)"
 SCORE_NOT_COMPUTED = "계산 안 함"
 # 점수 계산을 시도했지만 실패한 후보 — 0% 와 구분한다(짧게 유지).
 SCORE_FAILED = "계산 불가"
-UNMATCHED_CAND_NONE = "후보 0 장"
+UNMATCHED_CAND_NONE = "후보 0장"
 UNMATCHED_REF_PREFIX = "기준 — "
 
 # 슬롯 매핑

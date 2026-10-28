@@ -633,7 +633,7 @@ class MainWindow(MultiValFlow, QMainWindow):
                     msg = f"{msg}{i18n.KO.CAUSE_PREFIX}{updater.last_error()}"
             except Exception:
                 pass
-            sheets.warn(self, i18n.KO.UPDATE_AVAILABLE_TITLE, msg)
+            sheets.warn(self, i18n.KO.UPDATE_FAILED_TITLE, msg)
             self._run_startup_popups()       # 실패 → 나머지 시작 팝업 진행
             return
         # 안내 후 프로그램을 자동 종료한다(자동 재실행은 하지 않음 — 사용자가 다시 실행).
@@ -647,7 +647,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         except Exception:
             pass
         sheets.info(
-            self, i18n.KO.UPDATE_AVAILABLE_TITLE, msg)
+            self, i18n.KO.UPDATE_DONE_TITLE, msg)
         QApplication.quit()
 
     # ==================================================================
@@ -1560,7 +1560,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._select_page.set_extract_mode(False)
         self._select_page.set_reverse(True)
         self._select_page.load_state(queue=queue, targets={}, excluded={},
-                                     history=[])
+                                     history=[], slot_numbers=self._slot_numbers())
         self._phase = PHASE_B_SELECT
         self._show_page(self._select_page)
 
@@ -1833,6 +1833,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._select_page.load_state(
             queue=queue,
             targets=restored, excluded={}, history=[],
+            slot_numbers=self._slot_numbers(),
         )
         self._phase = PHASE_A_SELECT
         # 판단할 후보가 하나도 없으면(예: 기준 사진 재사용으로 큐가 전부 비워짐)
