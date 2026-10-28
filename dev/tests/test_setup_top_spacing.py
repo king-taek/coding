@@ -41,26 +41,19 @@ def _page(qapp, w: int = 1280, h: int = 900) -> sp.SetupPage:
     return page
 
 
-def _title_label(page: sp.SetupPage) -> QLabel:
-    for lbl in page.findChildren(QLabel):
-        if lbl.text() == i18n.KO.SETUP_TITLE:
-            return lbl
-    raise AssertionError("제목 라벨을 찾지 못했다")
-
-
-def test_mode_badge_sits_top_right(qapp):
-    """판정 기준 배지는 제목 줄 오른쪽 끝이다(사용자 선택 2026-10-28)."""
+def test_mode_badge_sits_bottom_left(qapp):
+    """판정 기준 배지는 하단 바 왼쪽 끝, 시작 버튼과 같은 줄이다(사용자 요청 2026-10-28)."""
     page = _page(qapp)
     try:
         page.resize(1280, 800)
         page.show()
         qapp.processEvents()
         badge = page._mode_badge_card
-        title = page._title_label
+        start = page.start_btn
         b = badge.mapTo(page, badge.rect().center())
-        t = title.mapTo(page, title.rect().center())
-        assert abs(b.y() - t.y()) <= title.height(), "배지가 제목 줄이 아니다"
-        assert b.x() > t.x() and b.x() > page.width() // 2, "배지가 오른쪽이 아니다"
+        s = start.mapTo(page, start.rect().center())
+        assert abs(b.y() - s.y()) <= start.height(), "배지가 시작 버튼 줄이 아니다"
+        assert b.x() < s.x() and b.x() < page.width() // 2, "배지가 왼쪽이 아니다"
     finally:
         page.close()
 
@@ -81,8 +74,12 @@ def test_logo_shares_the_title_row(qapp):
     (a) 로고가 다시 제목 위 별도 줄로 갈라지는 것, (b) 제목 위에 무엇이 끼는 것이다."""
     page = _page(qapp)
     try:
+        assert not page._top_bar.isVisible(), "평소엔 제목 줄이 없다(단계 막대와 중복)"
+        page.set_extract_mode(True)            # 제목 줄은 추출 모드에서만 보인다
+        for _ in range(4):
+            qapp.processEvents()
         logo = _logo_label(page)
-        title = _title_label(page)
+        title = page._title_label
         logo_top = logo.mapTo(page, logo.rect().topLeft()).y()
         assert logo_top <= theme.PROFILE.page_margin + 8, \
             f"로고 위 여백 {logo_top}px — 로고가 페이지 맨 위가 아니다"

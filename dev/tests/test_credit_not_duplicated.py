@@ -63,9 +63,9 @@ def test_one_visible_credit_on_every_page(styled_qapp):
         styled_qapp.processEvents()
 
         def visible() -> int:
-            return sum(1 for w in _credit_labels(win) if w.isVisibleTo(win)
-                       and (w is not win._credit_label or win._status_bar.isVisibleTo(win)))
+            return sum(1 for w in _credit_labels(win) if w.isVisible())
 
+        win._build_remaining_pages()      # 결과 화면은 처음엔 없다(지연 생성)
         win._show_page(win._setup_page, animate=False)
         assert visible() == 1, "설정 화면: 보이는 크레딧이 1개가 아니다"
         win._show_page(win._result_page, animate=False)

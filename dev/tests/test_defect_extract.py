@@ -282,7 +282,7 @@ def test_setup_extract_mode_takes_one_folder(qapp, tmp_path):
 
 
 def test_extract_button_sits_in_the_tool_rail(qapp):
-    """도구는 왼쪽 레일, 시작 바는 배지 → stretch → … → 주 액션(맨 끝)."""
+    """도구는 왼쪽 레일, 시작 바는 배지(왼쪽 끝) → stretch → … → 주 액션(맨 끝)."""
     from aoi_verification.app.ui.pages import setup_page as sp
     page = sp.SetupPage()
     try:
@@ -290,7 +290,7 @@ def test_extract_button_sits_in_the_tool_rail(qapp):
         widgets = [bar.itemAt(i).widget() for i in range(bar.count())]
         stretch_at = next(i for i in range(bar.count())
                           if bar.itemAt(i).spacerItem() is not None)
-        assert stretch_at == 0 and page._mode_badge_card not in widgets
+        assert widgets[0] is page._mode_badge_card and stretch_at == 1
         assert page.extract_btn in page._tool_buttons
         assert page._tool_rail.isAncestorOf(page.extract_btn)
         assert widgets[-1] is page.start_btn

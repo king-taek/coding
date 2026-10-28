@@ -503,7 +503,6 @@ UPDATE_UNKNOWN = "업데이트를 확인할 수 없습니다. 인터넷 연결�
 UPDATE_GIT_HINT = "개발(git) 환경입니다. 'git pull' 로 업데이트하세요."
 # 첫 화면 '업데이트 확인' 버튼 라벨(좌상단 도움말 메뉴 대체).
 MENU_CHECK_UPDATE = "업데이트 확인"
-TOOL_RAIL_CAPTION = "도구"
 SETUP_SECTION_FOLDER = "1  폴더"
 SETUP_SECTION_MODE = "2  방식"
 
