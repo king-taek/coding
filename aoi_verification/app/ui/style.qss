@@ -108,6 +108,13 @@ QLabel[role="thumbFrame"][subtle="true"] {
     border-style: dashed;
 }
 
+QLabel[role="railTitle"] {
+    font-family: $font_title;
+    font-size: 15px;
+    font-weight: $title_weight;
+    color: $ink;
+}
+
 QLabel[role="title"] {
     font-family: $font_title;
     font-size: $font_title_sz;

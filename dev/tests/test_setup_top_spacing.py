@@ -65,28 +65,31 @@ def _logo_label(page: sp.SetupPage) -> QLabel:
     raise AssertionError("로고 라벨을 찾지 못했다")
 
 
-def test_logo_sits_atop_the_tool_rail(qapp):
-    """로고는 제목 줄이 없는 평소에도 보인다 — 왼쪽 도구 목록 맨 위, 첫 도구 버튼 위(사용자 요청 2026-10-29).
+def test_logo_and_title_sit_atop_the_tool_rail(qapp):
+    """로고 + 제목은 왼쪽 도구 목록 맨 위 한 줄이다(사용자 선택 2026-10-29, B안).
 
-    제목 줄(`_top_bar`)은 Defect 추출 모드에서만 보이고, 그때도 로고는 한 개뿐이다."""
+    Defect 추출 모드에서도 같은 자리에서 제목 글자만 바뀐다."""
     page = _page(qapp)
     try:
-        assert not page._top_bar.isVisible(), "평소엔 제목 줄이 없다(단계 막대와 중복)"
         logos = [l for l in page.findChildren(QLabel)
                  if l.property("role") == "appLogo" and l.isVisible()]
         assert logos == [page._rail_logo], "보이는 로고가 도구 목록 위 하나가 아니다"
-        logo = page._rail_logo
-        assert logo.property("inline") == "true"
-        assert page._tool_rail.isAncestorOf(logo)
-        logo_y = logo.mapTo(page, logo.rect().bottomLeft()).y()
+        logo, title = page._rail_logo, page._title_label
+        assert page._tool_rail.isAncestorOf(logo) and page._tool_rail.isAncestorOf(title)
+        l_mid = logo.mapTo(page, logo.rect().center())
+        t_mid = title.mapTo(page, title.rect().center())
+        assert abs(l_mid.y() - t_mid.y()) <= logo.height() // 2, "로고와 제목이 다른 줄이다"
+        assert logo.mapTo(page, logo.rect().topRight()).x() <= \
+            title.mapTo(page, title.rect().topLeft()).x(), "로고가 제목 왼쪽이 아니다"
         btn_y = page.image_info_btn.mapTo(page, page.image_info_btn.rect().topLeft()).y()
-        assert logo_y <= btn_y, "로고가 첫 도구 버튼 아래에 있다"
-        page.set_extract_mode(True)            # 제목 줄은 추출 모드에서만 보인다
+        assert logo.mapTo(page, logo.rect().bottomLeft()).y() <= btn_y, \
+            "로고가 첫 도구 버튼 아래에 있다"
+        assert title.text() == i18n.KO.SETUP_TITLE
+        page.set_extract_mode(True)
         for _ in range(4):
             qapp.processEvents()
-        assert page._top_bar.isVisible()
-        assert len([l for l in page.findChildren(QLabel)
-                    if l.property("role") == "appLogo" and l.isVisible()]) == 1
+        assert title.text() == i18n.KO.EXTRACT_TITLE and title.isVisible()
+        assert logo.isVisible()
     finally:
         page.close()
 
