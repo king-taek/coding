@@ -453,7 +453,7 @@ class SetupPage(QWidget):
                 lay.addWidget(w)
 
     def _build_top_bar(self) -> QWidget:
-        """로고 + 제목 — **한 줄**(판정 기준 배지는 고정 시작 바로 옮겼다).
+        """제목 줄 — 로고는 도구 목록 맨 위(`_build_tool_rail`)로 옮겼다.  원래는 로고 + 제목 **한 줄**(판정 기준 배지는 고정 시작 바로 옮겼다).
 
         ★ 예전엔 보기 옵션이 제목 **위**의 별도 줄이었다가 같은 줄로 합쳐졌고, 보기
         옵션을 없애면서 그 자리도 사라졌다.  제목 위에 빈 띠가 없어 제목이 화면 맨
@@ -468,8 +468,6 @@ class SetupPage(QWidget):
         tr = QHBoxLayout(host)
         tr.setContentsMargins(0, 0, 0, 0)
         tr.setSpacing(16)
-        tr.addWidget(build_logo_label(host, inline=True),
-                     alignment=Qt.AlignmentFlag.AlignVCenter)
         tr.addWidget(self._build_title())
         tr.addStretch(1)
         return host
@@ -1289,6 +1287,10 @@ class SetupPage(QWidget):
         self._rail_lay = col
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(10)
+        # 로고는 제목 줄이 없는 평소에도 보이도록 도구 목록 맨 위에 둔다(사용자 요청 2026-10-29).
+        self._rail_logo = build_logo_label(host, inline=True)
+        col.addWidget(self._rail_logo, alignment=Qt.AlignmentFlag.AlignLeft)
+        col.addSpacing(6)
         # 사진 한 장의 결함 정보를 바로 보는 도구.
         self.image_info_btn = NeonButton(i18n.KO.IMAGE_INFO_BUTTON, role="ghost")
         self.image_info_btn.clicked.connect(self._open_image_info)
