@@ -113,12 +113,17 @@ def _show_splash(app):
     logo = _splash_logo(int(StartupSplash.LOGO_W * dpr))
     _boot_mark("로고 디코드")
     splash = StartupSplash(logo)
-    _boot_mark("스플래시 생성")
+    _boot_mark("스플래시 창(로고)")
+    # 로고를 먼저 그린다 — 글자·진행 표시줄(글꼴 초기화가 느리다)은 그 뒤에 붙인다.
     splash.show()
+    app.processEvents()
+    _boot_mark("로고 그리기")
+    splash.build_progress()
+    _boot_mark("진행 위젯 생성")
     # 총량을 모르는 구간 → busy(무한 진행).  0 에 멈춰 있으면 안 된다(CLAUDE.md).
     splash.set_progress(0, 0, i18n.KO.SPLASH_MODULES)
     app.processEvents()
-    _boot_mark("스플래시 그리기")
+    _boot_mark("진행 그리기")
     return splash
 
 
