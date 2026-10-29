@@ -270,7 +270,7 @@ class SetupPage(QWidget):
         root.setContentsMargins(m, m, m, 0)   # 아래는 비운다 — 레일 세로선이 시작 바 윗선까지 닿는다
         root.setSpacing(theme.PROFILE.section_gap)
 
-        # ※ 로고는 별도 밴드가 아니라 **제목 줄의 왼쪽 끝**에 있다(`_build_top_bar`).
+        # ※ 로고 + 제목은 별도 밴드가 아니라 왼쪽 도구 목록 맨 위에 있다(`_build_tool_rail`).
         #   스크롤 **안**이라는 점은 그대로다 — 아래를 볼 때 함께 밀려 올라간다
         #   (사용자 요청: 고정 칸이 아니게).
         self._build_body(root)
@@ -280,7 +280,7 @@ class SetupPage(QWidget):
             bar = self._build_action_bar()
             self._bar_host = bar
             # 바닥 줄: [레일 칸(세로선이 바닥까지 이어진다)] [시작 바].
-            #   크레딧은 창 상태바가 아니라 레일 안(업데이트 확인 아래) — 문구 하나만을 위한 줄을 따로 두지 않는다.
+            #   업데이트 확인 · 크레딧은 이 왼쪽 칸 맨 아래 — 창 상태바나 문구 하나만을 위한 줄을 따로 두지 않는다.
             foot = QWidget(self)
             foot.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
             fl = QHBoxLayout(foot)
@@ -291,6 +291,8 @@ class SetupPage(QWidget):
             ll = QVBoxLayout(left)
             ll.setContentsMargins(theme.PROFILE.page_margin, 0, 12, 10)
             ll.addStretch(1)
+            ll.addWidget(self.update_btn)
+            ll.addWidget(self._rail_credit)
             self._foot_left_lay = ll
             self._foot_left = left
             self._foot_rule = QWidget(foot)
@@ -334,11 +336,7 @@ class SetupPage(QWidget):
         (아래 `_build_run_options_card` 주석 참조).
 
         두 설정 카드는 ``_place_setting_cards`` 가 창 폭에 따라 나란히/위아래로 놓는다."""
-        # 제목 줄은 Defect 추출 모드에서만 보인다 — 평소엔 맨 위 단계 막대가 같은 이름을
-        # 이미 보여 줘서 중복이었다(사용자 선택 2026-10-28, 상단 여백 A안).
-        self._top_bar = self._build_top_bar()
-        self._top_bar.setVisible(False)
-        root.addWidget(self._top_bar)
+        # 로고 + 제목은 왼쪽 도구 목록 맨 위(사용자 선택 2026-10-29, 로고 배치 B안).
         # 왼쪽 도구 레일 | 오른쪽 장비·설정 카드(사용자 결정 2026-10-27, 도구 레일 3안).
         # 좁은 창에서는 카드 위의 가로 줄로 눕는다.
         body = QBoxLayout(QBoxLayout.Direction.LeftToRight)
@@ -451,26 +449,6 @@ class SetupPage(QWidget):
                 else QBoxLayout.Direction.TopToBottom)
             for w in (self._sec_folder, ref, val, self._sec_mode, self._mode_row):
                 lay.addWidget(w)
-
-    def _build_top_bar(self) -> QWidget:
-        """제목 줄 — 로고는 도구 목록 맨 위(`_build_tool_rail`)로 옮겼다.  원래는 로고 + 제목 **한 줄**(판정 기준 배지는 고정 시작 바로 옮겼다).
-
-        ★ 예전엔 보기 옵션이 제목 **위**의 별도 줄이었다가 같은 줄로 합쳐졌고, 보기
-        옵션을 없애면서 그 자리도 사라졌다.  제목 위에 빈 띠가 없어 제목이 화면 맨
-        위로 올라온다(사용자 요청: '상단 여백이 너무 많다').
-
-        ★ 로고도 이 줄의 **왼쪽 끝**이다(사용자 요청: "메인 로고가 너무 많은 부분을
-        차지함").  예전엔 제목 위에 44px 밴드로 따로 있어 1600px 폭에서 작은 마크
-        하나가 한 줄(로고 + 눈금 + 줄 간격)을 통째로 차지했다.  다른 화면의 로고는
-        아직 밴드 그대로다(`widgets/app_logo.py`).  좁은 창 안전은
-        `test_setup_top_spacing` 이 800px 가로 넘침 없음으로 지킨다."""
-        host = QWidget(self)
-        tr = QHBoxLayout(host)
-        tr.setContentsMargins(0, 0, 0, 0)
-        tr.setSpacing(16)
-        tr.addWidget(self._build_title())
-        tr.addStretch(1)
-        return host
 
     def _build_mode_badge(self) -> QWidget:
         """상단 모드 배지 — 지금 무슨 엔진·무슨 판정 수치로 도는지.
@@ -914,8 +892,6 @@ class SetupPage(QWidget):
             self._tool_rail.setMinimumWidth(0)
             self._tool_rail.setMaximumWidth(16777215)
         self._apply_foot_geometry(side)
-        # 크레딧은 하나 — 옆 레일에선 업데이트 확인 아래, 눕는 좁은 창에선 바닥 줄 왼쪽.
-        (self._rail_col if side else self._foot_left_lay).addWidget(self._rail_credit)
 
     def _apply_foot_geometry(self, side: bool) -> None:
         """바닥 줄의 레일 칸 — 옆에 설 땐 레일 폭에 맞춰 세로선을 본문 선과 잇는다."""
@@ -930,6 +906,7 @@ class SetupPage(QWidget):
             left.setMinimumWidth(0)
             left.setMaximumWidth(16777215)
         self._foot_rule.setVisible(side)
+        self._foot_left_lay.setContentsMargins(m, 0, gap if side else 12, 10)
         bar.setContentsMargins(gap if side else 12, 10, m, 10)
 
     def _reflow_device_row(self) -> None:
@@ -1015,7 +992,7 @@ class SetupPage(QWidget):
             i18n.KO.EXTRACT_WAFER_MAP_SWITCH,
             description=i18n.KO.EXTRACT_WAFER_MAP_SWITCH_DESC,
             checked=bool(getattr(_prefs_now, "extract_wafer_map", True)),
-            parent=card)
+            compact=True, parent=card)
         self._map_switch.toggled.connect(
             lambda on: _prefs.patch(extract_wafer_map=bool(on)))
         self._map_switch.setVisible(False)
@@ -1023,7 +1000,8 @@ class SetupPage(QWidget):
 
         # 교차검증(양방향) — 매칭 전용(추출에서는 숨긴다).  기억하지 않는다 — 앱을 켤
         # 때마다 꺼진 채 시작한다(사용자 결정 2026-10-24).
-        self._cross_switch = SwitchRow(i18n.KO.CROSS_SWITCH, checked=False, parent=card)
+        self._cross_switch = SwitchRow(i18n.KO.CROSS_SWITCH, checked=False, compact=True,
+                                       parent=card)
         self._cross_switch.toggled.connect(self.cross_mode_changed)
         col.addWidget(self._cross_switch)
 
@@ -1288,8 +1266,19 @@ class SetupPage(QWidget):
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(10)
         # 로고는 제목 줄이 없는 평소에도 보이도록 도구 목록 맨 위에 둔다(사용자 요청 2026-10-29).
-        self._rail_logo = build_logo_label(host, inline=True)
-        col.addWidget(self._rail_logo, alignment=Qt.AlignmentFlag.AlignLeft)
+        head = QWidget(host)
+        head.setProperty("role", "rowHost")
+        hl = QHBoxLayout(head)
+        hl.setContentsMargins(0, 0, 0, 0)
+        hl.setSpacing(10)
+        self._rail_logo = build_logo_label(head, inline=True)
+        self._rail_logo.setFixedSize(34, 34)
+        self._rail_logo.setScaledContents(True)
+        hl.addWidget(self._rail_logo)
+        title = self._build_title()
+        title.setProperty("role", "railTitle")       # 26px 제목이 아니라 레일 폭에 맞는 크기
+        hl.addWidget(title, 1)
+        col.addWidget(head)
         col.addSpacing(6)
         # 사진 한 장의 결함 정보를 바로 보는 도구.
         self.image_info_btn = NeonButton(i18n.KO.IMAGE_INFO_BUTTON, role="ghost")
@@ -1317,20 +1306,16 @@ class SetupPage(QWidget):
                         (self.update_btn, "refresh")):
             b.setIcon(rail_icon(icon))
             b.setIconSize(QSize(20, 20))
-        # 업데이트는 실제 메뉴가 아니라 유틸리티 — 목록 맨 아래(가로일 땐 오른쪽 끝).
         col.addStretch(1)
-        col.addSpacing(10)
+        # 업데이트 확인 + 크레딧은 유틸리티라 도구 목록이 아니라 바닥 줄 왼쪽 칸(검증 시작과
+        # 같은 행)에 둔다 — `_build_foot` 가 이 둘을 가져다 놓는다.
         self.update_btn.setProperty("grade", "rail")
         self.update_btn.setMinimumHeight(52)
-        col.addWidget(self.update_btn)
-        # 크레딧은 업데이트 확인 바로 아래 — 같이 스크롤한다(가로로 누운 좁은 창에서는 바닥 줄 왼쪽).
         self._rail_credit = QLabel(i18n.KO.CREDIT, host)
         self._rail_credit.setProperty("role", "muted")
-        col.addWidget(self._rail_credit)
-        self._rail_col = col
-        # 레일 순서 계약(test_setup_controls) — 도구 셋, 그 아래 업데이트.
+        # 레일 순서 계약(test_setup_controls) — 도구 넷.  업데이트는 바닥 줄에 있다.
         self._tool_buttons = [self.image_info_btn, self.wafer_map_btn,
-                              self.extract_btn, self.gl_btn, self.update_btn]
+                              self.extract_btn, self.gl_btn]
         self._tool_rail = host
         return host
 
@@ -1513,7 +1498,6 @@ class SetupPage(QWidget):
         on = bool(on)
         self._extract_mode = on
         self._title_label.setText(i18n.KO.EXTRACT_TITLE if on else i18n.KO.SETUP_TITLE)
-        self._top_bar.setVisible(on)
         head = self.ref_group.property("_headLabel")
         if head is not None:
             head.setText(i18n.KO.EXTRACT_GROUP if on else i18n.KO.SETUP_REF_GROUP)
