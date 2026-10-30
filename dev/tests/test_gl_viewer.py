@@ -682,9 +682,9 @@ def test_compare_hover_works_from_either_canvas(dlg):
 # 크기 ± · 선 프로파일 · 통계 표는 **필요할 때만** 자리를 차지한다.
 def test_rail_tiles_are_square_after_qss_polish(dlg):
     # ★ Qt 는 polish 때 QSS min-height 로 setMinimumSize 를 덮어쓴다 — 코드의 setFixedSize 가
-    #   34px 로 눌려 아이콘 아래 이름이 잘렸던 회귀.  크기는 QSS(role=glTile)가 정한다.
+    #   34px 로 눌려 아이콘 아래 이름이 잘렸던 회귀.  크기는 QSS(role=glTile)가 정한다(48px).
     for b in list(dlg._tool_btns.values()) + [dlg.fit_btn, dlg.one_btn, dlg.undo_btn, dlg.clear_btn]:
-        assert (b.width(), b.height()) == (56, 56), b.caption()
+        assert b.width() == b.height() >= 44, b.caption()        # 정사각이고 34 로 눌리지 않는다
         assert b.property("role") == "glTile" and b.toolTip()
     assert [b.caption() for b in dlg._tool_btns.values()] == ["이동", "수평선", "수직선", "사각형", "정사각형", "원"]
 
@@ -746,7 +746,7 @@ def test_table_hidden_until_an_image_is_open(styled_qapp):
 def test_save_menu_holds_xlsx_png_and_roi_toggle(dlg):
     acts = dlg.save_menu.actions()
     texts = [a.text() for a in acts if not a.isSeparator()]
-    assert texts == ["엑셀로 저장…", "색 칠한 PNG 저장…", "PNG 에 ROI 선·이름도 그리기"]
+    assert texts == ["엑셀로 저장…", "색칠한 PNG 저장…", "PNG 에 ROI 선·이름도 그리기"]
     assert dlg.png_rois.isCheckable() and dlg.png_rois.isChecked()
 
 
@@ -769,3 +769,52 @@ def test_threshold_note_hidden_when_empty(dlg):
     dlg._set_thresholds(0, dlg._hi, "lo")
     _pump()
     assert not dlg.thr_note.isVisible()
+
+
+def test_save_actions_actually_save(dlg, monkeypatch):
+    got = []
+    monkeypatch.setattr(dlg, "save_xlsx", lambda path: got.append(("xlsx", path)))
+    monkeypatch.setattr(dlg, "save_png", lambda path, with_rois=True: got.append(("png", path, with_rois)))
+    from aoi_verification.app.ui.widgets import gl_viewer_dialog as gv
+    monkeypatch.setattr(gv.QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: ("/tmp/out.x", "")))
+    dlg.xlsx_act.trigger()
+    dlg.png_rois.setChecked(False)
+    dlg.png_act.trigger()
+    assert [g[0] for g in got] == ["xlsx", "png"] and got[1][2] is False
+
+
+def test_controls_disabled_until_an_image_is_open(styled_qapp):
+    d = GlViewerPanel(None)
+    d.show()
+    _pump()
+    try:
+        for b in (d.fit_btn, d.undo_btn, d.clear_btn, d.compare_btn, d.save_btn, d._tool_btns[R.RECT]):
+            assert not b.isEnabled()
+        assert d.open_btn.isEnabled()
+        d.show_view(loader.ViewLoad(loader.GlImage(np.zeros((20, 30), np.uint8), 8, False, "y.png", [])))
+        _pump()
+        assert d.fit_btn.isEnabled() and d.save_btn.isEnabled() and not d.undo_btn.isEnabled()
+    finally:
+        d.close()
+        d.deleteLater()
+
+
+def test_compare_table_is_taller_and_target_zoom_runs_once(dlg):
+    assert dlg.table.height() == 190
+    b = (dlg._gl.data // 2).astype(np.uint16)
+    dlg.show_compare(_b_view(b))
+    _pump()
+    assert dlg.table.height() == 280                 # ROI 마다 세 줄이라 더 준다
+    dlg._close_compare()
+    _pump()
+    assert dlg.table.height() == 190
+    # 결함 위치 확대는 사진을 연 뒤 처음 보일 때 한 번만 — 페이지로 쓰면 탭을 오갈 때 showEvent 가 또 온다.
+    dlg.show_view(loader.ViewLoad(dlg._gl, target_box=(10, 10, 20, 20)))
+    _pump()
+    assert not dlg._zoom_pending
+    dlg.canvas.set_scale(0.5)
+    st = dlg.canvas.view_state()
+    dlg.hide()
+    dlg.show()
+    _pump()
+    assert dlg.canvas.view_state() == st

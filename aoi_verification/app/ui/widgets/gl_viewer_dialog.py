@@ -10,7 +10,8 @@
 
 화면 구성(2026-10-30 개편 — "버튼이 많고 복잡하고 공간 효율이 나쁘다"):
 - 본체는 :class:`GlViewerPanel`(QWidget) 이고 :class:`GlViewerDialog` 는 그것을 담는 얇은 껍데기다.
-  페이지로 띄우는 화면(메뉴 탭 이동)도 같은 패널을 그대로 올린다.
+  팝업 대신 페이지(메뉴 탭 이동)로 올리는 작업은 별도 브랜치에서 하며, 그쪽이 다이얼로그든 패널이든
+  그대로 올릴 수 있게 생성자 · 창 제목을 유지한다.
 - 위 줄은 열기 · 파일 이름 · 비교 · 저장(메뉴) 뿐이다.  도구 6개와 맞춤 · 1:1 · 되돌리기 · 지우기는
   사진 왼쪽의 **아이콘 레일**(:class:`_RailTile`)로 내려가 사진이 그만큼 넓어진다.
 - 선택한 도형의 크기 ± 는 **선택했을 때만** 상태 줄에 나타나고, 선 프로파일은 **선을 그었을 때만**
@@ -29,7 +30,7 @@ from PyQt6.QtCore import QObject, QPoint, QRect, QSize, Qt, QThread, QTimer, pyq
 from PyQt6.QtGui import QAction, QColor, QFont, QImage, QPainter, QPen
 from PyQt6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QFileDialog, QFormLayout,
                              QFrame, QHBoxLayout, QHeaderView, QLabel, QMenu, QSpinBox,
-                             QSplitter, QStyle, QStyleOptionButton, QStylePainter,
+                             QSizePolicy, QSplitter, QStyle, QStyleOptionButton, QStylePainter,
                              QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from ... import i18n
@@ -57,9 +58,9 @@ _TOOL_LABEL = {"move": _KO.GL_TOOL_MOVE, R.HLINE: _KO.GL_TOOL_HLINE, R.VLINE: _K
 _TOOL_ICON = {"move": "move", R.HLINE: "hline", R.VLINE: "vline", R.RECT: "rect",
               R.SQUARE: "square", R.CIRCLE: "circle"}
 _RIGHT_W = 352                  # 오른쪽 패널 폭 — 나머지는 전부 사진이 가진다
-_TILE = 56                      # 레일 타일 한 변
 _TABLE_H = 190                  # ROI 통계 표 — 머리줄 + 5줄, 그 이상은 스크롤
-_ICON = 20
+_TABLE_H_CMP = 280              # 비교 때는 ROI 마다 A · B · B−A 세 줄이라 더 준다
+_ICON = 18
 _BITS_CHOICES = (8, 10, 12, 14, 16)
 _WARN_TEXT = {loader.W_COLOR: _KO.GL_WARN_COLOR, loader.W_JPEG: _KO.GL_WARN_JPEG,
               loader.W_HUGE: _KO.GL_WARN_HUGE}
@@ -167,12 +168,12 @@ def _mono_item(text: str, right: bool = True) -> QTableWidgetItem:
 class _RailTile(NeonButton):
     """레일의 정사각 타일 — 아이콘 위, 짧은 이름 아래.  QSS ``segment`` 상자 위에 직접 그린다.
 
-    글자만 있는 버튼 15개가 두 줄을 차지하던 것을 56px 타일 한 열로 줄이면서도, 아이콘만
-    남기면 뜻을 못 읽으니 이름을 작게 같이 적는다(툴팁에 단축키)."""
+    글자만 있는 버튼 15개가 두 줄을 차지하던 것을 48px 타일 한 열로 줄이면서도, 아이콘만
+    남기면 뜻을 못 읽으니 이름을 작게 같이 적고 단축키는 구석에 둔다."""
 
-    def __init__(self, icon: str, caption: str, tip: str, parent=None) -> None:
-        super().__init__("", role="glTile", parent=parent)      # 크기는 QSS 가 56px 로 고정한다
-        self._icon_name, self._caption = icon, caption
+    def __init__(self, icon: str, caption: str, tip: str, parent=None, *, key: str = "") -> None:
+        super().__init__("", role="glTile", parent=parent)      # 크기는 QSS 가 48px 로 고정한다
+        self._icon_name, self._caption, self._key = icon, caption, key
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)         # 방향키·숫자키는 사진 화면이 받는다
         self.setToolTip(tip)
         self.setAccessibleName(caption)
@@ -189,16 +190,23 @@ class _RailTile(NeonButton):
         p.setPen(QColor(ink))
         if self._icon_name:
             pm = rail_icon(self._icon_name, ink).pixmap(QSize(_ICON, _ICON))
-            p.drawPixmap(QPoint((self.width() - _ICON) // 2, 9), pm)
+            p.drawPixmap(QPoint((self.width() - _ICON) // 2, 7), pm)
             f.setPixelSize(11)
             p.setFont(f)
-            p.drawText(QRect(0, 9 + _ICON + 3, self.width(), 16),
+            p.drawText(QRect(0, 7 + _ICON + 2, self.width(), 16),
                        Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, self._caption)
         else:                                   # 아이콘 없는 타일(1:1)은 이름이 곧 아이콘
             f.setPixelSize(14)
             f.setBold(True)
             p.setFont(f)
             p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self._caption)
+        if self._key:                           # 단축키 번호 — 오른쪽 위 구석에 작게(툴팁 없이도 보이게)
+            f.setPixelSize(9)
+            f.setBold(False)
+            p.setFont(f)
+            p.setPen(QColor(theme.MUTE))
+            p.drawText(QRect(0, 2, self.width() - 4, 11),
+                       Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop, self._key)
         p.end()
 
     def caption(self) -> str:
@@ -241,6 +249,7 @@ class GlViewerPanel(QWidget):
         self._gen = 0
         self._gen_b = 0
         self._hover_text = _KO.GL_STATUS_OUT
+        self._zoom_pending = False
         self._loading = LoadingOverlay(self)
         self._refresh_timer = QTimer(self)
         self._refresh_timer.setSingleShot(True)
@@ -317,14 +326,14 @@ class GlViewerPanel(QWidget):
         self._tool_btns: dict[str, _RailTile] = {}
         for i, tool in enumerate(TOOLS, start=1):
             b = _RailTile(_TOOL_ICON[tool], _TOOL_LABEL[tool],
-                          _KO.GL_TOOL_TIP_FMT.format(name=_TOOL_LABEL[tool], key=i), host)
+                          _KO.GL_TOOL_TIP_FMT.format(name=_TOOL_LABEL[tool], key=i), host, key=str(i))
             b.setCheckable(True)
             b.clicked.connect(lambda _c=False, t=tool: self._set_tool(t))
             self._tool_btns[tool] = b
             col.addWidget(b)
         self._tool_btns["move"].setChecked(True)
         col.addSpacing(10)
-        self.fit_btn = _RailTile("fit", _KO.GL_FIT, _KO.GL_FIT_TIP, host)
+        self.fit_btn = _RailTile("fit", _KO.GL_FIT, _KO.GL_FIT_TIP, host, key="F")
         self.fit_btn.clicked.connect(lambda _c=False: self.canvas.fit())
         self.one_btn = _RailTile("", _KO.GL_ONE_TO_ONE, _KO.GL_ONE_TO_ONE_TIP, host)
         self.one_btn.clicked.connect(lambda _c=False: self.canvas.set_scale(1.0))
@@ -403,11 +412,13 @@ class GlViewerPanel(QWidget):
             b.clicked.connect(lambda _c=False, st=step: self.canvas.grow(st))
         self.toast = QLabel("", self)
         self.toast.setProperty("role", "muted")
+        self.toast.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)   # 긴 파일명이 줄을 밀지 않게
+        self.toast.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         row.addWidget(self.status, 1)
         row.addWidget(self.sel_label)
         row.addWidget(self.size_minus)
         row.addWidget(self.size_plus)
-        row.addWidget(self.toast)
+        row.addWidget(self.toast, 1)
         col.addLayout(row)
         # 표 머리줄: 제목 + 선 보이기 칩
         self.table_head = QWidget(self)
@@ -444,7 +455,15 @@ class GlViewerPanel(QWidget):
         col.addWidget(self.table)
         self._sync_selection_widgets()
         self._set_table_visible(False)                  # 사진이 없으면 빈 표가 자리를 차지하지 않는다
+        self._set_image_controls(False)
         return col
+
+    def _set_image_controls(self, on: bool) -> None:
+        """사진이 없으면 레일 · 비교 · 저장을 흐리게 — 눌러 봐야 '먼저 사진을 열어 주세요' 뿐이다."""
+        for w in list(self._tool_btns.values()) + [self.fit_btn, self.one_btn, self.clear_btn,
+                                                   self.compare_btn, self.save_btn]:
+            w.setEnabled(on)
+        self.undo_btn.setEnabled(on and self.canvas.rois.can_undo())
 
     def _set_table_visible(self, on: bool) -> None:
         self.table_head.setVisible(on)
@@ -456,30 +475,33 @@ class GlViewerPanel(QWidget):
         col = QVBoxLayout(host)
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(8)
-        # 임계값 — 한 줄: ■하한 [값]  ■상한 [값]  [자동]
-        col.addWidget(self._section(_KO.GL_THRESHOLD))
+        # 임계값 — 제목 줄 오른쪽에 [자동 추천], 아래 줄에 ■하한 [값]  ■상한 [값]
+        thead = QHBoxLayout()
+        thead.addWidget(self._section(_KO.GL_THRESHOLD), 1)
+        self.auto_btn = NeonButton(_KO.GL_THR_AUTO, role="segment")
+        self.auto_btn.setToolTip(_KO.GL_THR_AUTO_TIP)
+        self.auto_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.auto_btn.clicked.connect(self._auto_thresholds)
+        thead.addWidget(self.auto_btn)
+        col.addLayout(thead)
         row = QHBoxLayout()
         row.setSpacing(6)
         self.lo_spin, self.hi_spin = QSpinBox(self), QSpinBox(self)
-        for sp, name, color in ((self.lo_spin, _KO.GL_THR_LOW, QColor(47, 111, 224)),
-                                (self.hi_spin, _KO.GL_THR_HIGH, QColor(229, 50, 42))):
+        for sp, name, short, color in ((self.lo_spin, _KO.GL_THR_LOW, _KO.GL_THR_LOW_SHORT, QColor(47, 111, 224)),
+                                       (self.hi_spin, _KO.GL_THR_HIGH, _KO.GL_THR_HIGH_SHORT, QColor(229, 50, 42))):
             sp.setAccessibleName(name)
             sp.setToolTip(name)
             sp.setKeyboardTracking(False)
             sp.setRange(0, 255)
             sp.setStyleSheet(f"QSpinBox {{ color: {color.name()}; }}")
             row.addWidget(_Swatch(color, self))
-            lab = QLabel(name.split(" ")[0], self)
+            lab = QLabel(short, self)
             lab.setProperty("role", "muted")
+            lab.setToolTip(name)
             row.addWidget(lab)
             row.addWidget(sp, 1)
         self.lo_spin.valueChanged.connect(lambda v: self._set_thresholds(v, self._hi, "lo"))
         self.hi_spin.valueChanged.connect(lambda v: self._set_thresholds(self._lo, v, "hi"))
-        self.auto_btn = NeonButton(_KO.GL_THR_AUTO, role="ghost")
-        self.auto_btn.setToolTip(_KO.GL_THR_AUTO_TIP)
-        self.auto_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.auto_btn.clicked.connect(self._auto_thresholds)
-        row.addWidget(self.auto_btn)
         col.addLayout(row)
         self.thr_note = QLabel("", self)
         self.thr_note.setProperty("role", "muted")
@@ -532,14 +554,17 @@ class GlViewerPanel(QWidget):
                                    checked=False, tip=_KO.GL_HIST_DATA_RANGE_TIP)
         for cb in (self.overlay_cb, self.log_cb, self.range_cb):
             chips.addWidget(cb)
-        self.hist_info = QLabel("", self)
-        self.hist_info.setProperty("role", "mono")
-        chips.addWidget(self.hist_info, 1, Qt.AlignmentFlag.AlignRight)
+        chips.addStretch(1)
         col.addLayout(chips)
         self.hist = HistogramChart(self)
         self.hist.thresholdDragged.connect(self._on_hist_drag)
-        self.hist.hoverText.connect(self.hist_info.setText)
         col.addWidget(self.hist, 3)
+        self.hist_info = QLabel("", self)
+        self.hist_info.setProperty("role", "mono")
+        # 호버 문구는 길어질 수 있다(ROI 여러 개) — 패널 폭(고정)을 밀지 않게 폭을 요구하지 않는다.
+        self.hist_info.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.hist.hoverText.connect(self.hist_info.setText)
+        col.addWidget(self.hist_info)
         # 선 프로파일 — 선을 그었을 때만 나타난다.
         self.profile_rule = self._rule()
         self.profile_head = self._section(_KO.GL_PROFILE)
@@ -646,6 +671,7 @@ class GlViewerPanel(QWidget):
         self._view = v
         self._gl = v.image
         self._set_table_visible(True)
+        self._set_image_controls(True)
         self.canvas.rois.reset()
         self._bits = v.image.bits
         self._sync_bits_combo(self._bits)
@@ -670,12 +696,14 @@ class GlViewerPanel(QWidget):
         self.banner.setVisible(bool(notes))
         if v.target_box:
             self.canvas.set_target_box(v.target_box)
+            self._zoom_pending = True
             call_later(self, 0, self._zoom_to_target)
         self._refresh()
         self.canvas.setFocus()
 
     def _update_file_label(self, name: str) -> None:
-        self.file_label.setText(f"{name}   ·   {self._gl.shape[1]}×{self._gl.shape[0]} · {self._bits} bit")
+        self.file_label.setText(_KO.GL_FILE_LABEL_FMT.format(
+            name=name, w=self._gl.shape[1], h=self._gl.shape[0], bits=self._bits))
 
     # ------------------------------------------------------------------
     # 두 사진 비교
@@ -737,6 +765,7 @@ class GlViewerPanel(QWidget):
         self.compare_btn.setText(_KO.GL_COMPARE_CLOSE)
         self.overlay_cb.setEnabled(False)
         self.split.setSizes([1, 1])
+        self.table.setFixedHeight(_TABLE_H_CMP)       # 비교 열고 닫을 때만 바뀐다(끌기 중이 아니다)
         self._refresh()
 
     def _close_compare(self) -> None:
@@ -746,6 +775,7 @@ class GlViewerPanel(QWidget):
         self.cap_b.setVisible(False)
         self.compare_btn.setText(_KO.GL_COMPARE)
         self.overlay_cb.setEnabled(True)
+        self.table.setFixedHeight(_TABLE_H)
 
     def _sync_views(self) -> None:
         """한쪽을 확대·이동하면 다른 쪽도 같은 자리를 본다(비교는 같은 곳을 보는 일이다)."""
@@ -763,10 +793,13 @@ class GlViewerPanel(QWidget):
         # 창 크기가 정해진 뒤에 맞춘다(처음 그려질 때는 캔버스 크기가 아직 작다).
         if self._view and self._view.target_box and self.isVisible():
             self.canvas.zoom_to_box(self._view.target_box)
+            self._zoom_pending = False
 
     def showEvent(self, e):  # noqa: N802
         super().showEvent(e)
-        if self._view and self._view.target_box:
+        # ★ 사진을 연 뒤 **처음 보일 때 한 번만** 결함 위치로 간다.  페이지로 올리면 탭을 오갈
+        #   때마다 showEvent 가 오는데, 그때마다 되돌리면 사용자가 옮겨 둔 화면이 초기화된다.
+        if self._zoom_pending:
             self._zoom_to_target()
 
     # -- 끌어놓기 --------------------------------------------------------
@@ -940,7 +973,7 @@ class GlViewerPanel(QWidget):
         self.hist.set_range_data(self.range_cb.isChecked())
         self.hist.set_series(series, levels, normalize=len(series) > 1)
         self.hist.set_thresholds(self._lo, self._hi)
-        self.hist_name.setText(f"·  {name}")
+        self.hist_name.setText(_KO.GL_HIST_NAME_FMT.format(name=name))
         lines = []
         for r in (x for x in rois if x.is_line):
             if self._gl_b is None:

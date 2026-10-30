@@ -823,19 +823,20 @@ QPushButton[role="segment"]:checked:disabled {
 }
 
 /* GL 뷰어 도구 레일 타일(widgets/gl_viewer_dialog._RailTile) — 세그먼트의 색 그대로,
-   정사각 56px.  ★ 크기를 QSS 에 적는 이유: Qt 는 polish 때 QSS 의 min-height 로
+   정사각 48px(보더 포함).  ★ 크기를 QSS 에 적는 이유: Qt 는 polish 때 QSS 의 min-height 로
    setMinimumSize 를 **덮어쓴다**(segment 의 24+8+2=34).  코드의 setFixedSize(56) 가
-   조용히 34 로 눌려 아이콘 아래 이름이 잘려 나갔다(실측).  아이콘·이름은 타일이 직접 그린다. */
+   조용히 34 로 눌려 아이콘 아래 이름이 잘려 나갔다(실측).  48 인 이유: 타일 10개가 최소 창 높이
+   600 안에 들어가야 한다(56 이면 616px 로 넘친다).  아이콘·이름은 타일이 직접 그린다. */
 QPushButton[role="glTile"] {
     background: transparent;
     color: $ink2;
     border: 1px solid $line_strong;
     border-radius: $radius_sm;
     padding: 0;
-    min-width: 54px;
-    max-width: 54px;
-    min-height: 54px;
-    max-height: 54px;
+    min-width: 46px;
+    max-width: 46px;
+    min-height: 46px;
+    max-height: 46px;
 }
 QPushButton[role="glTile"]:hover {
     background-color: $elev;
