@@ -264,7 +264,9 @@ def test_setup_extract_mode_takes_one_folder(qapp, tmp_path):
         assert not page._setting_cards[0].isHidden()   # 실행 옵션은 남는다
         assert page.start_btn.text() == i18n.KO.BTN_EXTRACT_START
         assert page._title_label.text() == i18n.KO.EXTRACT_TITLE
-        assert page.extract_btn.text() == i18n.KO.EXTRACT_BACK_BUTTON
+        # 버튼 글자는 그대로, 왼쪽 메뉴에서 'Defect 추출' 이 눌린 모양(되돌아가기는 [매칭]).
+        assert page.extract_btn.property("_railText") == i18n.KO.EXTRACT_BUTTON
+        assert page.extract_btn.isChecked() and not page.match_btn.isChecked()
         page.ref_machine_edit.setText("17")
         inp = page._collect_input()
         assert inp.extract is True

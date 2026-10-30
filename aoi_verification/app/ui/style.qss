@@ -595,6 +595,13 @@ QPushButton[grade="rail"] {
     text-align: left;
     padding-left: 16px;
 }
+/* ※ 접힌 메뉴(52px)도 같은 규칙이다 — 왼쪽 16 + 아이콘 20 + 오른쪽 16 이라 아이콘이
+   저절로 가운데에 온다.  가운데 정렬로 바꾸지 마라: 서랍이 움직이는 동안 아이콘이 튄다. */
+/* 메뉴 접기 [«] — 아이콘만 있는 작은 정사각 버튼. */
+QPushButton[grade="railFold"] {
+    padding: 0px;
+    border-color: transparent;
+}
 
 /* ★ 역할별 :focus 를 반드시 따로 선언한다.  `QPushButton[role="ghost"]` 의
    border-color 는 위의 일반 `QPushButton:focus` 와 특이도가 같고 **뒤에** 선언돼 있어,

@@ -560,9 +560,10 @@ def test_setup_tool_rail_has_gl_button_that_opens_viewer(styled_qapp, monkeypatc
         assert page.gl_btn.text() == "GL 히스토그램"
         assert page._tool_rail.isAncestorOf(page.gl_btn)
         page.gl_btn.click()
-        assert len(seen) == 1 and isinstance(seen[0][0], gv.GlViewerDialog)
-        assert seen[0][1] == {"full_bleed": True}
-        seen[0][0].deleteLater()
+        # 팝업(시트)이 아니라 오른쪽 화면이 GL 로 바뀐다(사용자 요청 2026-10-30).
+        assert seen == []
+        assert page.current_page() == "gl"
+        assert isinstance(page.tool_dialog("gl"), gv.GlViewerDialog)
     finally:
         page.deleteLater()
 

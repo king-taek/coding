@@ -212,7 +212,7 @@ def test_engine_mode_labels_dropped_internals():
 def test_rail_takes_width_so_1280_stacks_cards_without_overflow(qapp):
     page = _page(qapp, 1280)
     try:
-        assert page._rail_side is True
+        assert page._wide is True and not page.is_rail_folded()
         assert page._cards_side_by_side is False         # 레일 + 두 열은 1280 에 안 든다
         assert page._scroll.horizontalScrollBar().maximum() == 0
         rail = page._tool_rail
@@ -223,15 +223,16 @@ def test_rail_takes_width_so_1280_stacks_cards_without_overflow(qapp):
         page.close()
 
 
-def test_rail_lies_flat_above_cards_on_narrow_window(qapp):
+def test_rail_folds_to_icons_on_narrow_window(qapp):
+    """좁은 창에서는 메뉴가 아이콘만 남는다(예전엔 카드 위 가로 줄로 누웠다) — 폭을 카드에 준다."""
     page = _page(qapp, 800, 600)
     try:
-        assert page._rail_side is False
+        assert page._wide is False and page.is_rail_folded()
         from PyQt6.QtCore import QPoint
         origin = QPoint(0, 0)
-        assert (page._tool_rail.mapTo(page, origin).y()
-                < page.ref_group.mapTo(page, origin).y())   # 카드 위의 가로 줄
+        assert (page._tool_rail.mapTo(page, origin).x()
+                < page.ref_group.mapTo(page, origin).x())   # 여전히 왼쪽 세로 줄
+        assert page._tool_rail.width() <= 80
         assert page._scroll.horizontalScrollBar().maximum() == 0
-        assert not page._foot_rule.isVisible()           # 바닥 줄의 레일 칸도 풀린다
     finally:
         page.close()

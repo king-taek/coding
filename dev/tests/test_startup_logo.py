@@ -148,14 +148,14 @@ def _is_inside(widget, ancestor) -> bool:
     return False
 
 
-def test_setup_page_logo_scrolls_with_the_content(window):
-    """설정 화면은 전체 스크롤이 있다 — 로고가 그 **안**에 있어야 함께 밀린다."""
-    from PyQt6.QtWidgets import QScrollArea
+def test_setup_page_logo_sits_in_the_left_menu(window):
+    """설정 화면의 로고는 왼쪽 메뉴 맨 위 하나다.
+
+    메뉴는 화면을 바꿔도 남는 세로 칸이라(2026-10-30, 도구 화면 이동) 스크롤 밖에 있다 —
+    위아래 높이를 먹던 예전 로고 밴드와 달리 본문 높이를 차지하지 않는다."""
     page = window._setup_page
-    scroll = page.findChild(QScrollArea)
-    assert scroll is not None, "설정 화면의 스크롤 영역이 사라졌다"
-    inside = _logos(scroll.widget())
-    assert len(inside) == 1, "로고가 스크롤 host 안에 없다 — 스크롤해도 따라오지 않는다"
+    inside = _logos(page._tool_rail)
+    assert len(inside) == 1, "로고가 왼쪽 메뉴 안에 없다"
     pm = inside[0].pixmap()
     assert not pm.isNull(), "logo_clear 를 못 읽었다"
     assert pm.height() == int(app_logo.LOGO_H * pm.devicePixelRatio())

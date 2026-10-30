@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtCore import (QElapsedTimer, QObject, Qt, QThread, QTimer,
-                          pyqtSignal)
+                          QVariantAnimation, pyqtSignal)
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (QApplication, QLabel, QMainWindow,
                               QMessageBox, QPushButton, QStackedWidget,
@@ -2930,8 +2930,73 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._setup_page.update_check_requested.connect(self._manual_update_check)
         self._setup_page.extract_mode_changed.connect(self._on_extract_mode_changed)
         self._setup_page.cross_mode_changed.connect(self._on_extract_mode_changed)
+        # Wafer Map '맵만 보기' — 시트일 때처럼 상태바까지 비켜 준다.
+        self._setup_page.tool_fullscreen_changed.connect(self._on_tool_fullscreen)
+        self._setup_page.rail_folded_changed.connect(self._on_setup_rail_folded)
+        # 사진 정보 · Wafer Map · GL 화면에서는 위 단계 줄(여정 레일)이 필요 없다(사용자 요청).
+        self._setup_page.page_changed.connect(self._on_setup_page_changed)
         # 백엔드가 아직이면 '검증 시작' 을 잠그고 버튼에 준비 중을 표기한다.
         self._setup_page.set_backend_ready(self._backend_ready)
+
+    def _on_tool_fullscreen(self, on: bool) -> None:
+        """Wafer Map '맵만 보기' — 상태바도 비켜 준다(시트일 때 맵이 창을 다 덮던 것처럼).
+        단계 줄은 도구 화면에서 이미 접혀 있다(`_on_setup_page_changed`)."""
+        if on:
+            self._status_bar.setVisible(False)
+        else:
+            self._sync_statusbar(self._stack.currentWidget())
+
+    def _on_setup_rail_folded(self, _folded: bool) -> None:
+        if self._stack.currentWidget() is self._setup_page:
+            self._sync_statusbar(self._setup_page)
+
+    def _on_setup_page_changed(self, key: str) -> None:
+        """도구 화면이면 위 단계 줄을 접어 올리고, 매칭·추출로 돌아오면 다시 내린다.
+
+        단계 줄은 '검증 흐름의 몇 번째인가' 를 말하는데, 도구 화면은 그 흐름 밖이다 —
+        거기서 '1 설정' 이 켜져 있으면 지금 어디인지 오히려 헷갈린다.  왼쪽 메뉴 서랍과
+        같은 시간·곡선으로 움직여 한 박자로 읽히게 한다."""
+        self._set_journey_shown(key in ("match", "extract"), animate=True)
+
+    def _set_journey_shown(self, on: bool, *, animate: bool) -> None:
+        from . import motion
+        rail = self._rail
+        full = JourneyRail.RAIL_H
+        target = full if on else 0
+        anim = getattr(self, "_journey_anim", None)
+        if anim is not None:
+            anim.stop()
+        # 시작 높이는 **보이기 전에** 잰다 — show() 뒤엔 숨어 있던 레일도 제 높이(42)를 가져
+        # 시작 = 끝이 되어, 펼침 없이 툭 나타났다(프레임 캡처로 확인).
+        start = rail.height() if rail.isVisible() else 0
+        if on:
+            rail.setFixedHeight(int(start))
+            rail.show()
+        if not animate or not motion.enabled() or not self.isVisible() or start == target:
+            rail.setFixedHeight(full)
+            rail.setVisible(on)
+            return
+        if anim is None:
+            # ★ 하나만 만들어 재사용하고, 부모는 레일 자신이다 — tick 은 부모만 만진다(motion 규약).
+            anim = QVariantAnimation(rail)
+            anim.valueChanged.connect(self._on_journey_tick)
+            anim.finished.connect(self._on_journey_done)
+            self._journey_anim = anim
+        anim.setEasingCurve(motion.EASE_PRIMARY)
+        anim.setDuration(motion.DUR_RAIL_UNFOLD if on else motion.DUR_RAIL_FOLD)
+        anim.setStartValue(float(start))
+        anim.setEndValue(float(target))
+        rail.setFixedHeight(int(start))
+        anim.start()
+
+    def _on_journey_tick(self, value) -> None:
+        self._rail.setFixedHeight(int(value))
+
+    def _on_journey_done(self) -> None:
+        anim = self._journey_anim
+        shown = float(anim.endValue()) > 0
+        self._rail.setFixedHeight(JourneyRail.RAIL_H)
+        self._rail.setVisible(shown)
 
     def _build_remaining_pages(self) -> None:
         """나머지 네 페이지 — **메인 스레드에서만** 부른다(Qt 위젯 규칙).
@@ -3045,9 +3110,11 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._warmup_accel_async()
 
     def _sync_statusbar(self, page: QWidget) -> None:
-        """설정 화면은 크레딧을 자기 바닥 줄에 두므로 상태바를 숨긴다(개발자 모드만 예외 —
-        설정 버튼이 거기 있다).  다른 화면은 그대로."""
-        on_setup = page is getattr(self, "_setup_page", None)
+        """설정 화면은 크레딧을 왼쪽 메뉴 맨 아래에 두므로 상태바를 숨긴다(개발자 모드만 예외 —
+        설정 버튼이 거기 있다).  다른 화면은 그대로.  메뉴를 아이콘만 남기면 크레딧이 들어갈
+        자리가 없어 상태바가 다시 맡는다."""
+        setup = getattr(self, "_setup_page", None)
+        on_setup = page is setup and setup is not None and not setup.is_rail_folded()
         self._credit_label.setVisible(not on_setup)
         self._status_bar.setVisible(not on_setup or _prefs.load().dev_mode)
 
@@ -3182,9 +3249,15 @@ class MainWindow(MultiValFlow, QMainWindow):
         #   레일은 '어디로 가는 중인가' 를 먼저 말해 주는 표지판이지 화면의 일부가
         #   아니다(사라졌다 나타나면 오히려 깜빡임으로 읽힌다).
         self._sync_statusbar(w)
+        # 단계 줄은 설정 화면의 도구 페이지(사진 정보·Wafer Map·GL)에서만 접혀 있다 —
+        # 다른 화면으로 가면 늘 다시 보인다(도구 페이지에 둔 채 흐름이 넘어가도).
         old = self._stack.currentWidget()
         sliding = not (old is w or old is None or not animate
                        or not motion.enabled())
+        setup = self._setup_page
+        self._set_journey_shown(
+            not (w is setup and setup.current_page() not in ("match", "extract")),
+            animate=sliding)
         self._sync_rail(w, animate=sliding)
         if not sliding:
             self._stack.setCurrentWidget(w)

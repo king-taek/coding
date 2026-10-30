@@ -1205,6 +1205,12 @@ WAFER_MAP_FULLSCREEN_TIP = (
     "바꿉니다. ESC 를 누르면 원래대로 돌아옵니다.")
 WAFER_MAP_NO_COORD = "이 사진을 맵에 찍지 못했습니다 — 좌표 또는 die 기하를 읽지 못했습니다."
 
+# ── 왼쪽 메뉴 — [매칭](기본 화면)·메뉴 접기(사용자 요청 2026-10-30) ──
+MATCH_NAV_BUTTON = "매칭"
+MATCH_NAV_TOOLTIP = "기준·검증 폴더를 고르고 매칭을 시작하는 기본 화면"
+RAIL_FOLD_TOOLTIP = "메뉴 접기 (아이콘만)"
+RAIL_UNFOLD_TOOLTIP = "메뉴 펼치기"
+
 # ── Defect 추출 (매칭 없이 한쪽 폴더에서 고른 사진을 엑셀로) ─────────────────
 # 흐름: 설정(한쪽만) → 후보 선별(매칭과 같은 화면) → 요약 → 저장.
 EXTRACT_BUTTON = "Defect 추출"
@@ -1213,7 +1219,6 @@ EXTRACT_BUTTON_TOOLTIP = (
     "엑셀로 저장합니다.")
 # ★ 짧게 둔다 — [Defect 추출] 과 같은 자리를 바꿔 쓰므로, 길면 800px 창에서 액션바가
 #   페이지를 창보다 넓게 민다(실측: "← 매칭 검증으로" 일 때 864px > 840px).
-EXTRACT_BACK_BUTTON = "← 매칭으로"
 EXTRACT_TITLE = "Defect 추출"
 EXTRACT_GROUP = "대상 장비"
 # 여러 LOT — 대상 장비 카드에 줄을 늘린다(최대 10개).  줄마다 슬롯을 따로 고른다.

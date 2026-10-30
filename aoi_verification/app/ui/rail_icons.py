@@ -44,12 +44,27 @@ def _paint_refresh(p: QPainter) -> None:
     p.drawLine(QPointF(16.6, 7.2), QPointF(12.6, 7.4))
 
 
+def _paint_fold(p: QPainter) -> None:
+    """« — 메뉴 접기."""
+    for x in (8.5, 13.5):
+        p.drawLine(QPointF(x, 5.5), QPointF(x - 4.5, 10))
+        p.drawLine(QPointF(x - 4.5, 10), QPointF(x, 14.5))
+
+
+def _paint_unfold(p: QPainter) -> None:
+    """» — 메뉴 펼치기."""
+    for x in (6.5, 11.5):
+        p.drawLine(QPointF(x, 5.5), QPointF(x + 4.5, 10))
+        p.drawLine(QPointF(x + 4.5, 10), QPointF(x, 14.5))
+
+
 _PAINTERS = {"camera": _paint_camera, "globe": _paint_globe, "doc": _paint_doc,
-             "bars": _paint_bars, "refresh": _paint_refresh}
+             "bars": _paint_bars, "refresh": _paint_refresh,
+             "fold": _paint_fold, "unfold": _paint_unfold}
 
 
 def rail_icon(name: str) -> QIcon:
-    """``name`` 아이콘(camera·globe·doc·bars·refresh) — 알 수 없는 이름은 빈 아이콘."""
+    """``name`` 아이콘(camera·globe·doc·bars·refresh·fold·unfold) — 알 수 없는 이름은 빈 아이콘."""
     paint = _PAINTERS.get(name)
     if paint is None:
         return QIcon()
