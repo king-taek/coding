@@ -307,10 +307,11 @@ def test_file_name_follows_result_rule_with_extract(qapp, tmp_path):
 
     lot = tmp_path / "LOT"
     (lot / "S1").mkdir(parents=True)
-    (lot / "S1" / "WaferInfo.ini").write_text("InputLot=GFW-RDL4\n", encoding="utf-8")
+    (lot / "S1" / "Params_WaferInfo.ini").write_text(
+        "SetupPath=c:\\job\\TB500_RDL4 - Multi\\Setup1\\\n", encoding="utf-8")
     inp = SetupInput(mode="single", ref_root=lot, val_root=lot, ref_machine="17",
                      val_machine="", threshold=0.7, extract=True)
-    assert mw.MainWindow._suggest_result_name(inp) == "17 RDL4_GFW Defect 추출.xlsx"
+    assert mw.MainWindow._suggest_result_name(inp) == "17 RDL4_TB500 Defect 추출.xlsx"
     inp.ref_root = inp.val_root = tmp_path / "없음"
     assert mw.MainWindow._suggest_result_name(inp) == "AOI 17 Defect 추출.xlsx"
 

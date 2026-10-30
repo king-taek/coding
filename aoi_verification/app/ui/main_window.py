@@ -393,6 +393,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._ref_history_timer.timeout.connect(self._flush_ref_history)
         self._stage1_a_snapshot: dict | None = None
         self._working_xlsx: Optional[Path] = None
+        self._title_fields_now: Optional[dict] = None
         self._template_used: Optional[Path] = None
         self._session_id: str = ""
 
@@ -2509,7 +2510,8 @@ class MainWindow(MultiValFlow, QMainWindow):
             _prefs.patch(extract_recipe_layout=choice)
             from .widgets.save_name_dialog import SaveNameDialog
             dlg = SaveNameDialog(self._working_xlsx.name, self._working_xlsx.parent,
-                                 parent=self, body=i18n.KO.EXTRACT_SAVE_NAME_BODY)
+                                 parent=self, body=i18n.KO.EXTRACT_SAVE_NAME_BODY,
+                                 fields=self._title_fields_now)
             if sheets.run(dlg) and dlg.chosen is not None:
                 dst = self._working_xlsx.with_name(dlg.chosen)
         if dst is None:
@@ -2755,8 +2757,10 @@ class MainWindow(MultiValFlow, QMainWindow):
         # 파일 이름 — "장비Layer_자재검증(장비기준)" (사용자 요청).
         if self._multi():                    # 검증 장비 여러 대 — 이름을 모두 적는다
             inp = replace(inp, val_machine="+".join(self._leg_labels()))
-        dst_name = self._suggest_result_name(inp)
-        dst = paths.results_dir() / dst_name
+        from .widgets.save_name_dialog import compose_title
+        self._title_fields_now = self._title_fields(inp)
+        self._result_page.set_title_fields(self._title_fields_now)
+        dst = paths.results_dir() / compose_title(self._title_fields_now)
         if dst.exists():
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             dst = dst.with_name(dst.stem + f"_{ts}" + dst.suffix)
@@ -2799,35 +2803,41 @@ class MainWindow(MultiValFlow, QMainWindow):
         return out
 
     @staticmethod
-    def _suggest_result_name(inp: SetupInput) -> str:
-        """결과 엑셀의 추천 제목 — `{검증장비} {Layer}_{자재} 검증({기준장비} 기준).xlsx`.
+    def _title_fields(inp: SetupInput) -> dict[str, str]:
+        """결과 엑셀 제목을 이루는 칸 — 저장 창 이름 아래에 추천값으로 채워 보여 준다.
 
-        Layer·자재는 **검증 대상 폴더**의 `WaferInfo.ini` `InputLot=자재-Layer` 에서
-        읽는다(사용자 결정).  못 읽으면 예전 이름으로 폴백한다 — 그때도 저장은 되어야
-        하고, 어차피 마지막 저장 직전에 사용자가 고칠 수 있다.
+        자재(제품 이름, 예: TB500)·Layer(예: RDL4)는 **검증 대상 폴더**에서, 못 읽은 칸은
+        기준 폴더에서 추천한다(`models/lot_info.read_title_parts`, 사용자 결정 2026-10-30).
+        추출은 기준 폴더뿐이다.  못 읽으면 빈 칸 — 저장 창에서 사용자가 채운다.
 
-        ⚠ 파일시스템 접근은 **슬롯 하나의 INI 한 번**이다(`read_lot_info`).  느린
-        NAS 라도 왕복 두어 번이라 [검증 시작] 의 오버레이 뒤에서 티가 나지 않는다 —
-        여기서 폴더를 훑기 시작하면 설정 화면 die 안내가 겪은 그 정지가 재현된다."""
-        from ..models.lot_info import read_lot_info
+        ⚠ 파일시스템 접근은 **폴더당 슬롯 하나의 INI 몇 개**다.  느린 NAS 라도 왕복
+        두어 번이라 [검증 시작] 의 오버레이 뒤에서 티가 나지 않는다 — 여기서 폴더를
+        훑기 시작하면 설정 화면 die 안내가 겪은 그 정지가 재현된다."""
+        from ..models.lot_info import TitleParts, read_title_parts
 
         if getattr(inp, "extract", False):
-            # 추출 — 같은 규칙(자재·Layer 는 WaferInfo.ini)에 '추출' 을 붙인다(사용자 결정).
-            lot = read_lot_info(inp.ref_root)
-            if lot is None:
-                return i18n.KO.EXTRACT_FILE_TITLE_FALLBACK_FMT.format(
-                    machine=inp.ref_machine)
-            return i18n.KO.EXTRACT_FILE_TITLE_FMT.format(
-                machine=inp.ref_machine, layer=lot.layer, material=lot.material)
-        lot = read_lot_info(inp.val_root)
-        if lot is None:
-            _LOG.info("WaferInfo.ini 에서 자재·Layer 를 못 읽어 기본 제목을 씁니다: %s",
-                      inp.val_root)
-            return i18n.KO.RESULT_FILE_TITLE_FALLBACK_FMT.format(
-                val=inp.val_machine, ref=inp.ref_machine)
-        return i18n.KO.RESULT_FILE_TITLE_FMT.format(
-            val=inp.val_machine, ref=inp.ref_machine,
-            layer=lot.layer, material=lot.material)
+            tp = read_title_parts(inp.ref_root)
+            return {"machine": inp.ref_machine, "layer": tp.layer,
+                    "material": tp.material}
+        tp = read_title_parts(inp.val_root)
+        if not (tp.material and tp.layer):
+            # 기준 폴더로 메우는 건 **같은 제품일 때만** — 자재가 다르면(또는 한쪽만
+            # 알면) 섞어서 'RDL2_T254' 같은 없는 조합을 만들지 않는다.
+            rp = read_title_parts(inp.ref_root)
+            if tp.material and rp.material == tp.material:
+                tp = TitleParts(material=tp.material, layer=tp.layer or rp.layer)
+            elif not tp.material and not tp.layer:
+                tp = rp
+        if not (tp.material or tp.layer):
+            _LOG.info("자재·Layer 를 못 읽어 기본 제목을 씁니다: %s", inp.val_root)
+        return {"val": inp.val_machine, "layer": tp.layer,
+                "material": tp.material, "ref": inp.ref_machine}
+
+    @staticmethod
+    def _suggest_result_name(inp: SetupInput) -> str:
+        """결과 엑셀의 추천 제목 — `{검증장비} {Layer}_{자재} 검증({기준장비} 기준).xlsx`."""
+        from .widgets.save_name_dialog import compose_title
+        return compose_title(MainWindow._title_fields(inp))
 
     def _merge_matches(self) -> list[MatchResult]:
         return list(self._matches_a)
@@ -2886,6 +2896,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._refresh_rail_criteria()      # 기준이 사라졌으니 레일도 비운다
         self._scan = None
         self._working_xlsx = None
+        self._title_fields_now = None      # 결과 화면 쪽은 다음 `_prepare_working_file` 이 덮는다
         self._session_id = ""
         self._show_page(self._setup_page)
 
