@@ -48,7 +48,18 @@ def _apply_app_font(app) -> None:
     가리키는 패밀리가 그 시점에 등록돼 있어야 폴백으로 새지 않는다.
     ★ ``QFont("A, B, C")`` 처럼 쉼표 문자열을 넘기지 마라.  Qt6 에서 그것은
     **'A, B, C' 라는 이름의 패밀리 하나**를 찾는 뜻이라 폴백이 동작하지 않는다.
-    목록은 ``setFamilies`` 로 준다."""
+    목록은 ``setFamilies`` 로 준다.
+    ★ 힌팅은 ``PreferVerticalHinting`` 으로 고정한다.  Qt 는 배율 100% 화면에서
+    기본값을 '전체 힌팅'으로 고르고, 그러면 GDI 방식(옛 GDI 엔진이거나 DirectWrite 의
+    ``GDI_CLASSIC`` — 16px 이하)으로 그려 한글 획이 픽셀 격자에 강제로 붙어 거칠어
+    보였다(사용자 캡처, 2026-10-30).  세로만 힌팅하면 DirectWrite ``CLEARTYPE_NATURAL``
+    로 그려져 가로는 부드럽고 기준선은 또렷하다 — Qt 가 고배율 화면의 16px 이하 글씨에
+    이미 고르는 방식과 같다.  글자 폭은 소수점 단위로 조금 달라질 수 있다.
+    ★ 서브픽셀(ClearType 무지개색) 대신 회색 안티앨리어싱을 쓴다
+    (``NoSubpixelAntialias``).  현택님이 PC 에서 4가지 방식을 나란히 보고
+    '세로 힌팅 + 회색' 을 골랐다(2026-10-30, ``dev/diagnose_font_render.py`` ④).
+    QSS 로 바꾼 글꼴과 ``QFont()``·``QFont(위젯 글꼴)`` 은 힌팅을 앱 글꼴에서
+    물려받으므로(회색 설정도 같다) 여기 한 곳이면 된다."""
     from PyQt6.QtGui import QFont
     from aoi_verification.app import config
     from aoi_verification.app.ui import theme
@@ -57,6 +68,8 @@ def _apply_app_font(app) -> None:
     font = QFont()
     font.setFamilies([config.Fonts.FAMILY, "Pretendard", "Noto Sans KR",
                       "Malgun Gothic", "Segoe UI"])
+    font.setHintingPreference(QFont.HintingPreference.PreferVerticalHinting)
+    font.setStyleStrategy(QFont.StyleStrategy.NoSubpixelAntialias)
     app.setFont(font)
 
 
@@ -102,6 +115,7 @@ def _show_splash(app):
     from aoi_verification.app import i18n
     from aoi_verification.app.ui.widgets.startup_splash import StartupSplash
 
+    _boot_mark("스플래시 모듈 import")
     dpr = 1.0
     try:
         scr = app.primaryScreen()
@@ -109,11 +123,20 @@ def _show_splash(app):
             dpr = scr.devicePixelRatio() or 1.0
     except Exception:
         pass
-    splash = StartupSplash(_splash_logo(int(StartupSplash.LOGO_W * dpr)))
+    logo = _splash_logo(int(StartupSplash.LOGO_W * dpr))
+    _boot_mark("로고 디코드")
+    splash = StartupSplash(logo)
+    _boot_mark("스플래시 창(로고)")
+    # 로고를 먼저 그린다 — 글자·진행 표시줄(글꼴 초기화가 느리다)은 그 뒤에 붙인다.
     splash.show()
+    app.processEvents()
+    _boot_mark("로고 그리기")
+    splash.build_progress()
+    _boot_mark("진행 위젯 생성")
     # 총량을 모르는 구간 → busy(무한 진행).  0 에 멈춰 있으면 안 된다(CLAUDE.md).
     splash.set_progress(0, 0, i18n.KO.SPLASH_MODULES)
     app.processEvents()
+    _boot_mark("진행 그리기")
     return splash
 
 
@@ -204,24 +227,29 @@ def _boot_mark(name: str) -> None:
 
 def _process_age_ms():
     """프로세스가 만들어진 뒤 지금까지(ms).  Windows 만 — 파이썬이 뜨기 전(보안 검사·DLL
-    로딩)에 걸린 시간까지 보려는 것이다.  알 수 없으면 None."""
+    로딩)에 걸린 시간까지 보려는 것이다.  Windows 가 아니면 None.
+    실패하면 예외를 그대로 던진다(호출자가 로그에 이유를 남긴다).
+
+    ★ ``argtypes`` 를 꼭 준다 — 안 주면 64비트에서 핸들(``-1`` 이 부호 없는 큰 수로 돌아온다)이
+      기본 ``c_int`` 에 안 들어가 ``ArgumentError`` 가 난다(첫 배포에서 실제로 그랬다)."""
     if sys.platform != "win32":
         return None
-    try:
-        import ctypes
-        from ctypes import wintypes
+    import ctypes
+    from ctypes import wintypes
 
-        k32 = ctypes.windll.kernel32
-        k32.GetCurrentProcess.restype = wintypes.HANDLE
-        c, e, k, u = (wintypes.FILETIME() for _ in range(4))
-        k32.GetProcessTimes(k32.GetCurrentProcess(), ctypes.byref(c), ctypes.byref(e),
-                            ctypes.byref(k), ctypes.byref(u))
-        created = ((c.dwHighDateTime << 32) | c.dwLowDateTime) / 1e4      # 100ns → ms
-        now = wintypes.FILETIME()
-        k32.GetSystemTimeAsFileTime(ctypes.byref(now))
-        return ((now.dwHighDateTime << 32) | now.dwLowDateTime) / 1e4 - created
-    except Exception:
-        return None
+    k32 = ctypes.windll.kernel32
+    ft_p = ctypes.POINTER(wintypes.FILETIME)
+    k32.GetCurrentProcess.restype = wintypes.HANDLE
+    k32.GetProcessTimes.argtypes = [wintypes.HANDLE, ft_p, ft_p, ft_p, ft_p]
+    k32.GetProcessTimes.restype = wintypes.BOOL
+    k32.GetSystemTimeAsFileTime.argtypes = [ft_p]
+    c, e, k, u, now = (wintypes.FILETIME() for _ in range(5))
+    if not k32.GetProcessTimes(k32.GetCurrentProcess(), ctypes.byref(c), ctypes.byref(e),
+                               ctypes.byref(k), ctypes.byref(u)):
+        raise OSError("GetProcessTimes 실패")
+    k32.GetSystemTimeAsFileTime(ctypes.byref(now))
+    created = ((c.dwHighDateTime << 32) | c.dwLowDateTime) / 1e4          # 100ns → ms
+    return ((now.dwHighDateTime << 32) | now.dwLowDateTime) / 1e4 - created
 
 
 def _log_boot_timing(label: str) -> None:
@@ -236,8 +264,11 @@ def _log_boot_timing(label: str) -> None:
         for name, t in _BOOT[1:]:
             parts.append(f"{name} {1000 * (t - prev):.0f}")
             prev = t
-        age = _process_age_ms()
-        extra = f" | 프로세스 경과 {age:.0f}" if age is not None else ""
+        try:
+            age = _process_age_ms()
+            extra = f" | 프로세스 경과 {age:.0f}" if age is not None else ""
+        except Exception as exc:
+            extra = f" | 프로세스 경과 확인 실패({type(exc).__name__}: {exc})"
         logging.getLogger("aoi.boot").info(
             "시작 구간(ms) [%s]: %s | 합계 %.0f%s", label, ", ".join(parts),
             1000 * (prev - _BOOT[0][1]), extra)

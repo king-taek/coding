@@ -19,8 +19,8 @@ SPLASH_READY = "준비 완료"
 OPENVINO_OFFER_TITLE = "Intel GPU 가속 활성화"
 OPENVINO_OFFER_BODY = (
     "Intel CPU 가 감지되었습니다.\n"
-    "OpenVINO 를 설치하면 Intel GPU (Iris Xe / Arc) 가속이 자동으로 "
-    "활성화되어 유사도 계산이 빨라집니다.\n\n"
+    "OpenVINO 를 설치하면 고효율 모드의 후보 생성이 Intel GPU (Iris Xe / Arc) 로 "
+    "빨라집니다. 좌표·기본 모드에는 영향이 없습니다.\n\n"
     "지금 설치할까요? (약 200 MB)"
 )
 OPENVINO_OFFER_BTN_INSTALL = "지금 설치"
@@ -28,7 +28,7 @@ OPENVINO_OFFER_BTN_LATER = "다음에"
 OPENVINO_OFFER_BTN_NEVER = "다시 보지 않기"
 OPENVINO_INSTALL_PROGRESS = "OpenVINO 설치 중…"
 OPENVINO_INSTALL_DONE = (
-    "OpenVINO 설치 완료!\n프로그램을 다시 시작하면 Intel GPU 가속이 적용됩니다."
+    "OpenVINO 설치 완료!\n프로그램을 다시 시작하면 고효율 모드에서 Intel GPU 가속을 쓸 수 있습니다."
 )
 OPENVINO_INSTALL_FAILED_FMT = (
     "OpenVINO 설치에 실패했습니다 — {error}\n\n"
@@ -151,7 +151,7 @@ SETUP_VAL_GROUP = "검증 장비"
 MULTI_VAL_ADD_FMT = "+ 검증 장비 추가 ({n}/{max})"
 MULTI_VAL_REMOVE = "이 검증 장비 빼기"
 MULTI_VAL_ROW_FMT = "검증 {n}"
-MULTI_VAL_MACHINE_PLACEHOLDER = "호기 (예: AOI-5)"
+MULTI_VAL_MACHINE_PLACEHOLDER = "예) AOI-5"
 MULTI_VAL_DEFAULT_MACHINE_FMT = "검증호기{n}"
 MULTI_VAL_NO_CANDIDATE_FMT = "{machine} · 이 기준 사진의 후보를 찾지 못했습니다"
 MULTI_VAL_LEG_FMT = "검증 장비 {n}/{total} ({machine}) — {msg}"
@@ -167,7 +167,7 @@ SETUP_FOLDER_LABEL = "최상위 폴더"
 SETUP_MACHINE_LABEL = "호기 번호"
 SETUP_THRESHOLD_LABEL = "유사도 임계치"
 SETUP_FOLDER_PLACEHOLDER = "폴더를 선택해 주세요"
-SETUP_MACHINE_PLACEHOLDER = "예) 1호기"
+SETUP_MACHINE_PLACEHOLDER = "호기"
 
 # ── 검증 단계 헤더 ─────────────────────────────────────────────────────────
 # ★ 레일 이름을 그대로 쓴다 — "Stage 1" 은 레일의 ② 와 번호가 어긋났고(설정이 ①),
@@ -176,7 +176,7 @@ STAGE1_TITLE = "후보 선별"
 STAGE2_TITLE = "매칭 · 유사도 기반"
 STAGE2_TITLE_COORD = "매칭 · 좌표 기반"
 STAGE2_COORD_OFFSET_FMT = "  ·  보정 가로 {dx:+.0f} · 세로 {dy:+.0f} µm"
-RESULT_TITLE = "검증 결과"
+RESULT_TITLE = "결과"
 # 결과 요약 — 핵심 수치는 타일로, 나머지는 문장으로.
 RESULT_MACHINES_FMT = "기준 장비: {ref}    검증 장비: {val}"
 RESULT_SLOT_ONLY_REF_FMT = "슬롯 불일치  ·  기준 전용: {names}"
@@ -232,12 +232,12 @@ SKIPPED_SECTION_NO_MATCH_FMT = "매치 없음 확정 ({n}장)"
 SKIPPED_DIALOG_EMPTY = "매치 없음 사진이 없습니다."
 
 # 매치 실패 사진 검토 다이얼로그 (#8)
-BTN_REVIEW_UNMATCHED = "매치 실패 사진 검토"
-UNMATCHED_REVIEW_TITLE = "매치 실패 사진 검토 — {n}장"
+BTN_REVIEW_UNMATCHED = "매치 없음 사진 검토"
+UNMATCHED_REVIEW_TITLE = "매치 없음 사진 검토 — {n}장"
 UNMATCHED_REVIEW_PROGRESS_FMT = "{idx} / {total} — {slot}"
 UNMATCHED_REVIEW_HINT = (
-    "매치 실패한 기준 사진을 하나씩 검토합니다. 같은 슬롯의 검증 장비 후보를"
-    " 유사도 순으로 보여줍니다. 맞는 사진을 클릭해 선택(파란 테두리)한 뒤"
+    "매치 없음인 기준 사진을 하나씩 검토합니다. 같은 슬롯의 검증 장비 후보를"
+    " 보여줍니다. 맞는 사진을 클릭해 선택(파란 테두리)한 뒤"
     " [매치 확정] 을 누르세요. 후보를 우클릭하면 크게 비교할 수 있습니다."
 )
 # 좌표로 매칭한 세션에서 이 화면만 유사도로 줄을 세운다는 사실을 알린다 (U-18).
@@ -300,9 +300,9 @@ SLOT_LABEL_FMT = "슬롯: {slot}"
 SLOT_JUMP_LABEL = "다른 슬롯으로 이동"
 SLOT_JUMP_TOOLTIP = "사진이 많아 슬롯 하나씩 보여 줍니다 — 여기서 다른 슬롯으로 바로 넘어갈 수 있습니다"
 SLOT_JUMP_ITEM_FMT = "{slot} · {n}장"
+SLOT_JUMP_ITEM_NO_FMT = "#{no} · {slot} · {n}장"
 
 # ── 유사도 엔진 모드 + 중앙 전처리 ────────────────────────────────────────
-ENGINE_CARD_TITLE = "매칭 설정"
 # 구형(유사도) 모드 — 명시적 스위치.  '펼치기 = 켜기' 였던 옛 동작을 없앴다.
 LEGACY_SWITCH_TITLE = "유사도 엔진(구형) 사용"
 LEGACY_MODE_HINT = "좌표 데이터가 없는 예전 자료에 쓰는 대체 경로입니다."
@@ -326,7 +326,7 @@ JUDGE_VALUE_LEGACY_FMT = "{th:.0f} %"
 # ★ 배치에 종속된 안내를 하지 않는다 — "아래 '매칭 설정' 카드" 라고 쓰면 C안처럼
 #   상세를 접어 두는 배치에서는 화면에 없는 것을 가리킨다.
 MODE_BADGE_TOOLTIP = (
-    "지금 이 설정으로 매칭합니다.  ‘매칭 설정’ 에서 바꿀 수 있습니다."
+    "지금 이 설정으로 매칭합니다.  아래 방식 구역에서 바꿀 수 있습니다."
 )
 COORD_NO_DATA_MSG = (
     "좌표 정보가 없습니다.\n\n"
@@ -398,11 +398,12 @@ EXPAND_POSITION_FMT = "{cur} / {total}"
 
 # ── 양식 파일 / 저장 파일 명명 ─────────────────────────────────────────────
 # 결과 엑셀 제목 — "장비Layer_자재검증(장비기준)" (사용자 요청).
-#   예: `4F-AOI-03 RDL4_GFW 검증(AOI-24 기준).xlsx`
-# Layer·자재는 **검증 대상 폴더**의 `WaferInfo.ini` `InputLot=자재-Layer` 에서
-# 읽는다(`models/lot_info.py`).  못 읽으면 아래 폴백 이름을 쓴다 — 그때도 저장은
-# 되어야 하고, 어차피 마지막 저장 직전에 사용자가 고칠 수 있다.
-RESULT_FILE_TITLE_FMT = "{val} {layer}_{material} 검증({ref} 기준).xlsx"
+#   예: `4F-AOI-03 TB500_RDL4_TB500.INT895 검증(AOI-24 기준).xlsx`
+# {tag} = "자재_Layer_LOT"(못 읽은 칸은 빠진다).  자재는 제품 이름(TB500)이고 Camtek Job
+# 이름·KLA 헤더에서, LOT 은 장비 LOT ID 의 `@` 앞에서 추천한다(`models/lot_info.py`,
+# 사용자 결정·요청 2026-10-30).  모두 못
+# 읽으면 아래 폴백 이름을 쓴다 — 저장 창에서 사용자가 칸을 채워 다시 만들 수 있다.
+RESULT_FILE_TITLE_FMT = "{val} {tag} 검증({ref} 기준).xlsx"
 RESULT_FILE_TITLE_FALLBACK_FMT = "AOI {val} 검증 ({ref} 기준).xlsx"
 TEMPLATE_NOT_FOUND_TITLE = "양식 파일 없음"
 TEMPLATE_NOT_FOUND_BODY = (
@@ -442,6 +443,7 @@ EXPORT_PHASE_FMT = "엑셀로 저장 중 — {sheet} 시트 · {slot}"
 LOAD_REVIEW_ROWS = "검토 목록 준비 중…"
 LOAD_FEATURE = "검증 장비 특징 추출 중…"
 LOAD_SCORING = "유사도 계산 중…"
+LOAD_COORD = "좌표 매칭 중…"             # 좌표 모드는 유사도를 계산하지 않는다
 PHASE_FEATURE = "이미지 특징 분석"
 PHASE_SCORING = "유사도 계산"
 PHASE_EMBED = "후보 생성 (GPU 임베딩)"      # 고효율 모드 1단계 — 유사도 계산 직전
@@ -453,7 +455,7 @@ LOAD_PRECOMPUTE_FIRST_SLOT = (
     "첫 슬롯 준비 중… 잠시만 기다려 주세요."
 )
 LOAD_PRECOMPUTE_WAIT_FMT = (
-    "{slot} 슬롯 유사도 계산을 기다리는 중… 다음 슬롯은 백그라운드에서 준비됩니다"
+    "{slot} 슬롯 계산이 끝나기를 기다리는 중… 다음 슬롯은 백그라운드에서 준비됩니다"
 )
 PRECOMPUTE_BG_STATUS_FMT = "백그라운드 유사도 계산: {idx} / {total} 슬롯 완료"
 PRECOMPUTE_BG_DONE = "유사도 계산 완료"
@@ -463,6 +465,8 @@ UPDATE_AVAILABLE_TITLE = "업데이트 있음"
 # '있음' 은 실제로 새 버전이 있을 때만 쓴다.  최신이거나 확인에 실패한 결과까지 같은
 # 제목으로 띄우면 제목과 본문이 정반대 사실을 말한다(제목만 읽은 사용자는 오해한다).
 UPDATE_CHECK_TITLE = "업데이트 확인"
+UPDATE_DONE_TITLE = "업데이트 완료"
+UPDATE_FAILED_TITLE = "업데이트 실패"
 UPDATE_AVAILABLE_BODY = "새 버전이 있습니다. 지금 업데이트할까요?"
 # 버튼은 동작 이름으로 — '예/아니오' 는 질문을 다시 읽어야 뜻이 정해진다.
 UPDATE_BTN_NOW = "지금 업데이트"
@@ -500,6 +504,8 @@ UPDATE_UNKNOWN = "업데이트를 확인할 수 없습니다. 인터넷 연결�
 UPDATE_GIT_HINT = "개발(git) 환경입니다. 'git pull' 로 업데이트하세요."
 # 첫 화면 '업데이트 확인' 버튼 라벨(좌상단 도움말 메뉴 대체).
 MENU_CHECK_UPDATE = "업데이트 확인"
+SETUP_SECTION_FOLDER = "1  폴더"
+SETUP_SECTION_MODE = "2  방식"
 
 # ── 개발자 모드 (메인 화면 Ctrl+Shift+D) ───────────────────────────────────
 DEV_MODE_ON = "개발자 모드를 켰습니다."
@@ -747,10 +753,10 @@ SLOT_SELECT_BTN_TOOLTIP = (
     "기준 폴더의 슬롯 중 이번 검증에서 진행할 슬롯만 선택합니다.\n"
     "선택하지 않으면 모든 공통 슬롯을 진행합니다."
 )
-SLOT_SELECT_TITLE = "진행할 슬롯 선택"
+SLOT_SELECT_TITLE = "슬롯 선택"
 # 다이얼로그 상단 — 지금 무엇이 진행되는지 **큰 글자로** 말한다(이전엔 '선택 3 / 24' 뿐).
-SLOT_SELECT_COUNT_HEAD_FMT = "{total}개 중 {n}개 진행"
-SLOT_SELECT_COUNT_HEAD_ALL = "모든 슬롯 진행 ({total}개)"
+SLOT_SELECT_COUNT_HEAD_FMT = "{total}개 중 {n}개 선택"
+SLOT_SELECT_COUNT_HEAD_ALL = "모든 슬롯 선택 ({total}개)"
 SLOT_SELECT_SEARCH_PLACEHOLDER = "슬롯 이름으로 찾기"
 SLOT_SELECT_FILTER_HIT_FMT = "‘{q}’ 검색 결과 {n}개"
 SLOT_SELECT_FILTER_NONE_FMT = "‘{q}’ 와 맞는 슬롯이 없습니다"
@@ -760,8 +766,8 @@ SLOT_SELECT_NEED_ONE = "최소 한 개는 선택해야 합니다."
 # ※ SLOT_SELECT_KEY_HINT 는 제거했다 — 타일 키보드 조작을 없앴으므로(사용자 결정)
 #   안내할 키가 남지 않았다.  화면에 지키지 못할 약속을 적어 두지 않는다.
 SLOT_SELECT_HINT = (
-    "이번 검증에서 진행할 슬롯을 눌러 고르세요. 이름을 알면 위에서 바로 찾을 수 있습니다.\n"
-    "고르지 않은 슬롯은 스캔·매칭에서 제외됩니다."
+    "이번에 쓸 슬롯을 눌러 고르세요. 이름을 알면 위에서 바로 찾을 수 있습니다.\n"
+    "고르지 않은 슬롯은 이번 작업에서 제외됩니다."
 )
 SLOT_SELECT_ALL = "전체 선택"
 SLOT_SELECT_NONE = "전체 해제"
@@ -777,19 +783,9 @@ SLOT_SELECT_TILE_COUNT_NONE = "—"      # 검증 폴더에 그 슬롯이 없다
 SLOT_SELECT_KLA_FMT = "{wafer_id}  ·  슬롯 #{slot}"
 SLOT_MAP_FOLDER_TIP_FMT = "폴더: {folder}"
 # 진행 범위 타일 — 상태를 옆 라벨이 아니라 타일 자신이 말한다.
-# ── 실행 옵션 카드 — '자동화 수준' + '진행 범위' 를 한 카드에 담는다.
-RUN_OPTIONS_TITLE = "실행 옵션"
-RUN_OPTIONS_HINT = (
-    "· 자동화 수준 — ‘모든 사진 자동’은 후보 선별을 건너뛰고 모든 기준 사진을"
-    " 자동으로 매치합니다. 매치가 끝나면 검토 화면에서 결과를 하나씩 확인하고"
-    " 잘못된 매치를 [매치 없음] 으로 되돌릴 수 있습니다.\n"
-    # ★ 라벨 그대로 적는다 — SCOPE_SUBSET 은 말줄임표까지 포함해 '일부 슬롯만…' 이다.
-    "· 진행 범위 — 기본은 기준 폴더의 모든 슬롯입니다. ‘일부 슬롯만…’ 을 고르면 이번"
-    " 검증에서 진행할 슬롯을 직접 선택합니다(급한 슬롯만 먼저 돌릴 때)."
-)
 SCOPE_TITLE = "진행 범위"
 SCOPE_ALL = "모든 슬롯"
-SCOPE_SUBSET = "일부 슬롯만…"
+SCOPE_SUBSET = "일부 슬롯만"
 SCOPE_SUBSET_COUNT_FMT = "일부 슬롯 ({n}/{total})"
 # 입력 유효성 — 왜 [검증 시작] 을 누를 수 없는지 눈에 보이게.
 SETUP_INVALID_FOLDER = "폴더를 찾을 수 없습니다."
@@ -854,7 +850,8 @@ INFO_RESUME_BODY = (
 #   안이고, 자동화 수준 두 가지가 둘 다 `AutomationLevel.AUTO_MODES` 라 2단계는 언제나
 #   자동이다.  수동 스트리밍 경로가 되살아날 때를 대비해 문구·경로를 남기되, 화면에
 #   없는 영어 낱말('Skip')과 낱말 규약을 어긴 표기는 지금 고쳐 둔다.
-INFO_NO_MATCH_FOUND = "임계치 이상인 후보가 없습니다. 자동으로 ‘매치 없음’ 으로 처리됩니다."
+INFO_NO_MATCH_FOUND = "조건에 맞는 검증 후보가 없습니다. 자동으로 ‘매치 없음’ 으로 처리됩니다."
+INFO_NO_VAL_PHOTOS = "이 슬롯에 검증 사진이 없습니다. 자동으로 ‘매치 없음’ 으로 처리됩니다."
 INFO_ALREADY_MATCHED_SECTION = "이미 매칭됨 (자동 제외)"
 
 # ── 저장/엑셀 ──────────────────────────────────────────────────────────────
@@ -864,9 +861,18 @@ INFO_ALREADY_MATCHED_SECTION = "이미 매칭됨 (자동 제외)"
 SAVE_NAME_TITLE = "저장할 파일 이름"
 SAVE_NAME_BODY = (
     "아래 이름으로 저장합니다. 필요하면 고쳐 주세요.\n"
-    "규칙: 장비 Layer_자재 검증(기준 장비 기준)"
+    "규칙: 장비 자재_Layer_LOT 검증(기준 장비 기준)"
 )
 SAVE_NAME_FOLDER_FMT = "저장 폴더: {path}"
+# 이름 아래 칸들 — 추천값이 들어 있고, 고친 뒤 버튼을 누르면 위 이름을 다시 만든다(사용자 요청 2026-10-30).
+SAVE_NAME_FIELDS_HINT = "아래 값을 고친 뒤 ‘제목 자동 생성’을 누르면 위 이름이 바뀝니다. 비워 둔 값은 제목에서 빠집니다."
+SAVE_NAME_AUTO = "제목 자동 생성"
+SAVE_NAME_FIELD_VAL = "검증 장비"
+SAVE_NAME_FIELD_REF = "기준 장비"
+SAVE_NAME_FIELD_MACHINE = "장비"
+SAVE_NAME_FIELD_LAYER = "Layer"
+SAVE_NAME_FIELD_MATERIAL = "자재"
+SAVE_NAME_FIELD_LOT = "LOT"
 SAVE_NAME_OK = "이 이름으로 저장"
 SAVE_NAME_CANCEL = "취소"
 SAVE_NAME_EMPTY = "이름을 비워 둘 수 없습니다."
@@ -1035,6 +1041,7 @@ MATCH_AUTO_RESULT_NOTE = "매치 결과는 다음 ‘매치 검토’ 화면에�
 PROGRESS_SLOT_ONLY_FMT = "{slot}  ·"
 PROGRESS_COUNT_FMT = "{done} / {total}"
 GROUP_HEADER_FMT = "{slot}  ·  {count}장"
+GROUP_HEADER_NO_FMT = "{slot}\n#{no}  ·  {count}장"
 # 후보 선별 상단의 슬롯별 전체 장수 — 참고용 (#2).  ★ 'LOT' 이 아니다.
 LOT_COUNTS_PREFIX = "슬롯별 장수:  "
 
@@ -1090,7 +1097,7 @@ UNMATCHED_CAND_COUNT_COORD_FMT = "후보 {n}장 (좌표 거리 순)"
 SCORE_NOT_COMPUTED = "계산 안 함"
 # 점수 계산을 시도했지만 실패한 후보 — 0% 와 구분한다(짧게 유지).
 SCORE_FAILED = "계산 불가"
-UNMATCHED_CAND_NONE = "후보 0 장"
+UNMATCHED_CAND_NONE = "후보 0장"
 UNMATCHED_REF_PREFIX = "기준 — "
 
 # 슬롯 매핑
@@ -1200,6 +1207,12 @@ WAFER_MAP_FULLSCREEN_TIP = (
     "바꿉니다. ESC 를 누르면 원래대로 돌아옵니다.")
 WAFER_MAP_NO_COORD = "이 사진을 맵에 찍지 못했습니다 — 좌표 또는 die 기하를 읽지 못했습니다."
 
+# ── 왼쪽 메뉴 — [매칭](기본 화면)·메뉴 접기(사용자 요청 2026-10-30) ──
+MATCH_NAV_BUTTON = "매칭"
+MATCH_NAV_TOOLTIP = "기준·검증 폴더를 고르고 매칭을 시작하는 기본 화면"
+RAIL_FOLD_TOOLTIP = "메뉴 접기 (아이콘만)"
+RAIL_UNFOLD_TOOLTIP = "메뉴 펼치기"
+
 # ── Defect 추출 (매칭 없이 한쪽 폴더에서 고른 사진을 엑셀로) ─────────────────
 # 흐름: 설정(한쪽만) → 후보 선별(매칭과 같은 화면) → 요약 → 저장.
 EXTRACT_BUTTON = "Defect 추출"
@@ -1208,7 +1221,6 @@ EXTRACT_BUTTON_TOOLTIP = (
     "엑셀로 저장합니다.")
 # ★ 짧게 둔다 — [Defect 추출] 과 같은 자리를 바꿔 쓰므로, 길면 800px 창에서 액션바가
 #   페이지를 창보다 넓게 민다(실측: "← 매칭 검증으로" 일 때 864px > 840px).
-EXTRACT_BACK_BUTTON = "← 매칭으로"
 EXTRACT_TITLE = "Defect 추출"
 EXTRACT_GROUP = "대상 장비"
 # 여러 LOT — 대상 장비 카드에 줄을 늘린다(최대 10개).  줄마다 슬롯을 따로 고른다.
@@ -1253,14 +1265,9 @@ EXTRACT_LOAD_JOURNEY_STEPS = ("폴더 스캔", "썸네일", "선별 준비")
 EXTRACT_BLOCKED_HINT = "LOT 또는 wafer 폴더를 먼저 지정하세요."
 EXTRACT_AUTOMATION_USER_SELECT = "추출할 사진을 직접 고릅니다"
 EXTRACT_AUTOMATION_AUTO_ALL = "모든 사진 자동 — 선별 없이 전부 추출"
-EXTRACT_RUN_OPTIONS_HINT = (
-    "· 자동화 수준 — ‘모든 사진 자동’은 후보 선별을 건너뛰고 폴더의 모든 사진을"
-    " 엑셀로 저장합니다.\n"
-    "· 슬롯 — LOT 줄마다 [슬롯] 버튼으로 일부 슬롯만 고를 수 있습니다.\n"
-    "· Wafer Map 시트 — 끄면 엑셀에 맵 시트를 만들지 않아 저장이 빨라집니다.")
 EXTRACT_SAVE_NAME_BODY = (
     "아래 이름으로 저장합니다. 필요하면 고쳐 주세요.\n"
-    "규칙: 호기 Layer_자재 Defect 추출")
+    "규칙: 호기 자재_Layer_LOT Defect 추출")
 EXTRACT_NONE_FOUND = "추출할 사진을 찾지 못했습니다.\n폴더를 다시 확인하세요."
 EXTRACT_NONE_CHOSEN_TITLE = "고른 사진이 없습니다"
 EXTRACT_NONE_CHOSEN_BODY = (
@@ -1283,7 +1290,7 @@ EXPORT_PREPARE_IMAGES = "엑셀에 넣을 사진 준비 중…"
 EXTRACT_SUMMARY_BACK = "선별로 돌아가기"
 EXTRACT_SUMMARY_CANCEL = "설정으로 돌아가기"      # 선별을 건너뛴 경우(모든 사진 자동)
 # 저장 파일 이름 — 결과 엑셀 제목 규칙에 '추출' 을 붙인 것(사용자 결정).
-EXTRACT_FILE_TITLE_FMT = "{machine} {layer}_{material} Defect 추출.xlsx"
+EXTRACT_FILE_TITLE_FMT = "{machine} {tag} Defect 추출.xlsx"
 EXTRACT_FILE_TITLE_FALLBACK_FMT = "AOI {machine} Defect 추출.xlsx"
 # 엑셀 — 요약 시트 D열 머리(C열 사진의 파일명·계측·좌표 칸)와 Wafer Map 시트 머리.
 EXTRACT_INFO_HEADER = "정보"
@@ -1329,4 +1336,150 @@ COORD_CAL_AUTO_DIFF_FMT = (
 COORD_CAL_REMOVE = "지우기"
 COORD_CAL_SKIP = "보정 건너뛰기"
 COORD_CAL_APPLY = "보정 적용"
+NOTCH_TITLE = "Notch 방향"
+NOTCH_SIDE_FMT = "{side} · {machine}"
+NOTCH_REF = "기준"
+NOTCH_VAL = "검증"
+NOTCH_DIRS = {"up": "위", "left": "왼쪽", "right": "오른쪽", "down": "아래"}
+NOTCH_OK = "확인"
+NOTCH_AUTO = "자동 감지"
+NOTCH_CHECKING = "Notch 방향 확인 중…"
+NOTCH_AUTO_BUSY = "검증 폴더를 네 방향으로 돌려 맞춰 보는 중…"
+NOTCH_AUTO_FOUND_FMT = "검증 Notch: {dir} (기준 사진 {hit}장이 짝을 찾았습니다)"
+NOTCH_AUTO_UNSURE = "뚜렷한 방향을 찾지 못했습니다 — 직접 골라 주세요."
+NOTCH_FAIL_FMT = ("Notch 방향을 맞추지 못했습니다 — 웨이퍼 중심·die 크기를 읽을 수 없는 폴더가 있습니다.\n"
+                  "{detail}")
+NOTCH_LOG_FMT = "Notch 방향 보정(매칭 전용): {dirs}"
+
 COORD_CAL_LOADING = "좌표 보정 준비 중 — 두 장비의 좌표를 읽고 있습니다…"
+
+# ── GL 히스토그램 뷰어 ────────────────────────────────────────────────────
+IMAGE_INFO_GL = "GL 보기"
+GL_BUTTON = "GL 히스토그램"
+GL_BUTTON_TOOLTIP = "사진의 밝기(GL) 분포를 히스토그램·선 프로파일·통계로 봅니다"
+GL_COMING_SOON = "Coming soon"
+GL_COMING_SOON_TOOLTIP = "GL 히스토그램 — 준비 중입니다"
+GL_TITLE = "GL 히스토그램"
+GL_OPEN = "사진 열기"
+GL_OPEN_FILTER_FMT = "사진 ({patterns});;모든 파일 (*.*)"
+GL_EMPTY_HINT = "사진을 열거나 이곳에 끌어다 놓으세요"
+GL_LOADING = "사진을 불러오는 중"
+GL_SAVE_XLSX = "엑셀 저장"
+GL_SAVE_PNG = "색 칠한 PNG 저장"
+GL_SAVE_XLSX_TITLE = "GL 분석 엑셀 저장"
+GL_SAVE_PNG_TITLE = "색 칠한 PNG 저장"
+GL_SAVED_FMT = "저장했어요: {name}"
+GL_SAVE_FAILED_FMT = "저장하지 못했어요: {why}"
+GL_NO_IMAGE = "먼저 사진을 열어 주세요."
+GL_OPEN_FAILED_FMT = "사진을 열지 못했어요: {why}"
+GL_COMPARE = "두 사진 비교"
+GL_COMPARE_CLOSE = "사진 하나로 돌아가기"
+GL_CMP_PICK = "비교할 B 사진 고르기"
+GL_CMP_MISMATCH_FMT = ("두 사진은 크기와 비트가 같아야 ROI 를 겹칠 수 있어요. "
+                       "A {a} · B {b}")
+GL_CMP_CLOSED_FMT = "새 A 사진({a})이 B 와 크기가 달라 비교를 닫았어요."
+
+GL_TOOL_MOVE = "이동"
+GL_TOOL_HLINE = "수평선"
+GL_TOOL_VLINE = "수직선"
+GL_TOOL_RECT = "사각형"
+GL_TOOL_SQUARE = "정사각형"
+GL_TOOL_CIRCLE = "원"
+GL_TOOL_TIP_FMT = "{name} 도구 (단축키 {key})"
+GL_SHOW_HLINE = "수평선 보기"
+GL_SHOW_VLINE = "수직선 보기"
+GL_SIZE_MINUS = "−"
+GL_SIZE_PLUS = "＋"
+GL_SIZE_LABEL = "크기"
+GL_SIZE_TIP = "선택한 도형 크기 조절 (＋ / − 키, 원은 반지름 1 px, Shift 는 10배)"
+GL_FIT = "맞춤"
+GL_ONE_TO_ONE = "1:1"
+GL_UNDO = "되돌리기"
+GL_CLEAR = "모두 지우기"
+GL_TOOLBAR_HINT = ("선은 클릭 한 번이면 사진 전체를 가로지르고, 끌어서 옮깁니다 · "
+                   "선택한 ROI 는 방향키로 1 px(Shift 10 px) 이동")
+
+GL_THRESHOLD = "판정 임계값"
+GL_THR_LOW = "하한 이하 = 파랑"
+GL_THR_HIGH = "상한 이상 = 빨강"
+GL_THR_AUTO = "자동 추천 (하위·상위 0.5%)"
+GL_THR_ORDER_NOTE = "하한은 상한보다 작아야 해서 상한 바로 아래에서 멈췄어요."
+GL_SCOPE_ALL = "사진 전체"
+GL_SCOPE_ROI = "ROI 안쪽만"
+GL_SCOPE_OFF = "끄기"
+GL_AUTO_CONTRAST = "화면 대비 자동 (보기 전용, 분석 값은 그대로)"
+GL_BITS = "GL 범위"
+GL_BITS_AUTO_FMT = "{bits} bit (자동)"
+GL_BITS_FMT = "{bits} bit"
+GL_HIST = "GL 히스토그램"
+GL_HIST_ALL = "사진 전체"
+GL_HIST_OVERLAY = "ROI끼리 겹쳐 보기"
+GL_HIST_LOG = "로그 눈금"
+GL_HIST_DATA_RANGE = "데이터 범위만"
+GL_PROFILE = "선 위치별 GL"
+GL_PROFILE_EMPTY = "수평선·수직선을 그으면 위치별 GL 이 나옵니다"
+
+GL_COL_ROI = "ROI"
+GL_COL_BOX = "위치·크기"
+GL_COL_COUNT = "픽셀 수"
+GL_COL_MEAN = "평균"
+GL_COL_STD = "표준편차"
+GL_COL_MIN = "최소"
+GL_COL_MAX = "최대"
+GL_COL_BELOW = "하한 이하"
+GL_COL_ABOVE = "상한 이상"
+GL_ROW_ALL = "사진 전체"
+GL_ROW_LINE_FMT = "{axis} {pos}"
+GL_AXIS_ROW = "행"
+GL_AXIS_COL = "열"
+
+GL_STATUS_FMT = "X {x} · Y {y} · GL {gl}"
+GL_STATUS_OUT = "—"
+GL_STATUS_VIEW_FMT = "{w}×{h} · {bits} bit · 배율 {zoom}%"
+
+GL_WARN_COLOR = "컬러 사진이라 밝기(0.299R+0.587G+0.114B)로 바꿔 분석합니다."
+GL_WARN_JPEG = "JPEG 는 손실 압축이라 원본 GL 과 조금 다를 수 있어요."
+GL_WARN_HUGE = "1억 화소가 넘어 느릴 수 있어요."
+GL_SCAN_FOUND_FMT = ("컬러 결함 사진이라 같은 폴더의 Scan 사진 {name} 에서 결함 위치"
+                     "(300 µm)를 확대해 보여 줍니다. 맞춤(F)으로 Scan 전체를 볼 수 있어요.")
+GL_SCAN_MISSING = "컬러 사진인데 이 폴더에서 Scan 사진을 찾지 못해 컬러 사진의 밝기로 분석합니다."
+
+GL_RAW_TITLE = "RAW 사진 설정"
+GL_RAW_WIDTH = "가로(px)"
+GL_RAW_HEIGHT = "세로(px)"
+GL_RAW_BITS = "비트"
+GL_RAW_ENDIAN = "바이트 순서"
+GL_RAW_LITTLE = "Little endian"
+GL_RAW_BIG = "Big endian"
+GL_RAW_HEADER = "헤더 크기(byte)"
+GL_RAW_OK = "열기"
+GL_RAW_CANCEL = "취소"
+
+GL_XLSX_SHEET_STATS = "ROI 통계"
+GL_XLSX_SHEET_HIST = "히스토그램"
+GL_XLSX_SHEET_PROFILE = "선 프로파일"
+GL_XLSX_SHEET_INFO = "분석 조건"
+GL_XLSX_GL = "GL"
+GL_XLSX_POS = "위치"
+
+GL_CANVAS_NAME = "GL 사진 화면"
+GL_TOO_SMALL = "도형이 너무 작습니다 (최소 2 px)"
+GL_LOUPE_FMT = "X {x}  Y {y}  GL {gl}"
+GL_LOUPE_LOW = "  ▼하한 이하"
+GL_LOUPE_HIGH = "  ▲상한 이상"
+GL_HIST_HOVER_FMT = "GL {gl:,} · {items}"
+GL_HIST_HOVER_ONE_FMT = "{n:,}개 ({pct:.2f}%)"
+GL_HIST_HOVER_ITEM_FMT = "{name} {n:,}개 ({pct:.2f}%)"
+GL_PROFILE_HOVER_FMT = "위치 {i:,} · {vals}"
+GL_PNG_ROIS = "ROI 선·이름도 그리기"
+GL_PNG_WRITE_FAILED = "PNG 를 쓰지 못했습니다"
+GL_INFO_PHOTO = "사진"
+GL_INFO_ANALYZED = "분석한 사진"
+GL_INFO_SIZE = "크기"
+GL_INFO_BITS = "GL 범위"
+GL_INFO_LOW = "하한 이하"
+GL_INFO_HIGH = "상한 이상"
+GL_INFO_SCAN = "Scan 사진"
+GL_INFO_B = "B 사진"
+GL_COL_BELOW_PCT = "하한 이하 %"
+GL_COL_ABOVE_PCT = "상한 이상 %"

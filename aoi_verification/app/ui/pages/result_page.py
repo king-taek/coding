@@ -70,6 +70,8 @@ class ResultPage(QWidget):
         # 결과 파일이 놓일 경로 — [검증 시작] 이 정해 둔 이름.  ★ 파일은 아직 없다:
         # [엑셀로 저장] 에서 이름을 확정하는 순간 exporter 가 그 자리에 만든다.
         self._target_path: Path | None = None
+        # 저장 창 이름 아래 칸(장비·Layer·자재)의 추천값 — `set_title_fields`.
+        self._title_fields: dict[str, str] | None = None
         self._save_path: Path | None = None
         # 매치 실패 사진 검토(#8) 에 필요한 외부 데이터 — main_window 가 주입.
         self._val_pool: dict | None = None
@@ -593,6 +595,10 @@ class ResultPage(QWidget):
             lab.setText(i18n.KO.SAVE_TARGET_FMT.format(name=path.name))
         lab.setToolTip(str(path))
 
+    def set_title_fields(self, fields: dict[str, str] | None) -> None:
+        """[검증 시작] 때 정한 제목 칸 추천값 — 저장 창이 이름 아래에 보여 준다."""
+        self._title_fields = dict(fields) if fields else None
+
     def _ask_save_name(self, target: Path):
         """저장 직전에 이름을 확인받는다 — 취소면 ``None``, 아니면 저장할 경로.
 
@@ -601,7 +607,8 @@ class ResultPage(QWidget):
         빈 xlsx 가 남았다)."""
         from ..widgets.save_name_dialog import SaveNameDialog
 
-        dlg = SaveNameDialog(target.name, target.parent, parent=self)
+        dlg = SaveNameDialog(target.name, target.parent, parent=self,
+                             fields=self._title_fields)
         if not sheets.run(dlg) or dlg.chosen is None:
             return None
         return target.with_name(dlg.chosen)

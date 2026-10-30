@@ -215,6 +215,9 @@ def classify_folder(folder: Path) -> tuple[str, dict[str, Path]]:
 
 
 class WaferMapDialog(QDialog):
+    #: '맵만 보기' 를 켜고 끌 때 — 화면으로 끼워 쓰는 쪽(설정 화면)이 메뉴를 감춘다.
+    fullscreen_changed = pyqtSignal(bool)
+
     def __init__(self, parent=None, *, result: Optional[FinalResult] = None,
                  folder: str = "") -> None:
         super().__init__(parent)
@@ -433,6 +436,7 @@ class WaferMapDialog(QDialog):
         if on:
             self.exit_btn.raise_()
             self._place_exit_btn()
+        self.fullscreen_changed.emit(on)
 
     def is_fullscreen(self) -> bool:
         return self._fullscreen

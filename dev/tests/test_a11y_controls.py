@@ -476,7 +476,7 @@ def test_segment_role_meets_min_target(qapp):
     WCAG 2.5.8 AA(24px)와 이 프로젝트 하한(`target_min` 26) 둘 다.
     높이는 QSS 가 정한다(min-height 24 + 패딩 8 + 보더 2 = 34) — 위젯이
     setMinimumHeight 로 따로 주장하지 않는다(둘이 갈리면 '주장 44 / 렌더 40' 이 된다)."""
-    g = OptionGroup([("a", "모든 슬롯"), ("b", "일부 슬롯만…")], role="segment")
+    g = OptionGroup([("a", "모든 슬롯"), ("b", "일부 슬롯만")], role="segment")
     try:
         qapp.setStyleSheet(theme.render_qss(_QSS))
         g.show()

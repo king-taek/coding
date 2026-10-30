@@ -1,133 +1,278 @@
 """결과 엑셀 제목 규칙 + 저장 직전 확인창 (UI 관련 PDF ⑥·⑧).
 
-사용자 요청:
+사용자 요청(처음):
 
     "Excel 파일제목의 형식을 고정하고자 함 … 그래서 `4F-AOI-03 RDL4_GFW
-     검증(AOI-24 기준)` 이런 식으로 고정하자. '장비Layer_자재검증(장비기준)'
-     Layer명과 자재명은 WaferInfo.ini 에 있음(slot 중 1개에서만 읽으면 나머진 동일함).
-     WaferInfo.ini 에 InputLot=GFW-RDL4 이렇게 적혀있음 — 여기서 GFW 가 자재고,
-     RDL4 가 Layer 임.  이 규칙으로 추천 파일제목을 작성해주고 사용자가 추천
-     파일제목에서 수정할 수 있도록 창을 띄워줘.  근데 파일 저장은 (검증과) 동시에
-     진행하고, 파일제목을 수정하거나 결정하는 동안 파일은 이미 저장중인 거로 하자."
+     검증(AOI-24 기준)` 이런 식으로 고정하자. '장비Layer_자재검증(장비기준)' …
+     이 규칙으로 추천 파일제목을 작성해주고 사용자가 추천 파일제목에서 수정할 수
+     있도록 창을 띄워줘."
 
-⚠ `WaferInfo.ini` 는 `Params_WaferInfo.ini` 와 **다른 파일**이다 — 이름이 비슷하지만
-그쪽은 die pitch 가 들어 있고 `InputLot` 이 없다.  헷갈리면 조용히 아무것도 못 읽는다.
+사용자 결정(2026-10-30): 자재는 LOT 이름 앞글자(GFW)가 아니라 **제품 이름(TB500)** 이다.
+Camtek Job 이름·제품코드, KLA DeviceID·StepID 에서 추천하고, 못 읽은 제품은 빈 칸으로
+두어 저장 창에서 채운다(제품코드 → 이름 표는 만들지 않는다).  저장 창 이름 아래에 칸을
+늘어놓고 [제목 자동 생성] 버튼으로 이름을 다시 만든다.
 """
 
 from __future__ import annotations
 
 import os
-import shutil
 from pathlib import Path
 
 import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from aoi_verification.app.models.lot_info import read_lot_info    # noqa: E402
+from aoi_verification.app.models.lot_info import (    # noqa: E402
+    TitleParts, clean_lot, parse_title_parts, read_title_parts)
 
 _REPO = Path(__file__).resolve().parents[2]
+_SAMPLES = _REPO / "dev" / "좌표 확인"
 
 
 # ---------------------------------------------------------------------------
-# WaferInfo.ini 읽기
+# 장비 문자열 → 자재·Layer (순수 함수)
 # ---------------------------------------------------------------------------
-def _lot_ini(folder: Path, line: str) -> None:
+@pytest.mark.parametrize("job, want", [
+    # 저장소 샘플의 실제 Camtek Job 이름(Params_WaferInfo.ini SetupPath, 관측).
+    ("TB500_RDL4 - Multi", ("TB500", "RDL4")),
+    ("TB500_RDL4 - Multi - Swelling", ("TB500", "RDL4")),
+    ("Test_TB500_RDL2 - Multi", ("TB500", "RDL2")),
+    ("R_TB500_LIVE_PI4", ("TB500", "PI4")),
+    ("R_T254 LIVE_0858711PD_FS UBM", ("T254", "")),
+    # 자재 앞의 레시피 접두(R5·A01)는 Layer 로 잡지 않는다.
+    ("2D@R5-AS-T254-A01_0857122AY-0B", ("T254", "")),
+    # 제품 이름이 Job 에 없는 제품은 비워 둔다 — 틀린 값보다 빈 칸(사용자가 채움).
+    ("2D@R2-15966TA0-BW2_0859654PD-0C", ("", "")),
+    ("2D@RE-W97218SGB1K16_0860463PD-0A", ("", "")),
+    ("TestProduct", ("", "")),
+    # Layer 처럼 생긴 레시피 토큰은 Layer 가 아니다(아는 Layer 이름만).
+    ("TB500_ECO3 - Multi", ("TB500", "")),
+    ("TB500_PIDS3", ("TB500", "PIDS3")),
+])
+def test_camtek_job_name(job, want):
+    tp = parse_title_parts(job=job)
+    assert (tp.material, tp.layer) == want
+
+
+def test_kla_device_and_step():
+    """KLA 정보파일 헤더 — StepID 는 첫 토큰만(`RDL4_AUTO_RBB` → RDL4)."""
+    tp = parse_title_parts(device="4DT-TB500-H-M1", step="RDL4_AUTO_RBB")
+    assert (tp.material, tp.layer) == ("TB500", "RDL4")
+    tp = parse_title_parts(device="4DT-T254-H-M1", step="RDL2_NEW(MULTI)")
+    assert (tp.material, tp.layer) == ("T254", "RDL2")
+    assert parse_title_parts(device="4DT-TB500-H-M1", step="AUTO1_RDL4").layer == ""
+
+
+def test_job_name_wins_over_device_code():
+    """Camtek 제품코드(`AST254-AG6S2-6CAA`)는 자재 토큰이 없어도 Job 이름으로 채운다."""
+    tp = parse_title_parts(job="2D@R5-AS-T254-A01_0857122AY-0B",
+                           device="AST254-AG6S2-6CAA")
+    assert tp.material == "T254"
+
+
+def test_input_lot_is_not_used(tmp_path):
+    """`InputLot=GFW-RDL4`(장비에 손으로 넣은 이름)는 자재로도 LOT 으로도 쓰지 않는다 —
+    GFW 는 자재가 아니고, LOT 은 장비 LOT ID(ProductInfo `LOT=`·KLA `LotID`)에서 읽는다."""
+    slot = tmp_path / "S1"
+    slot.mkdir()
+    (slot / "WaferInfo.ini").write_text("[AutoCycleInfo]\nInputLot=GFW-RDL4\n",
+                                        encoding="utf-8")
+    assert read_title_parts(tmp_path) == TitleParts()
+
+
+# ---------------------------------------------------------------------------
+# 폴더에서 읽기
+# ---------------------------------------------------------------------------
+def _camtek_slot(folder: Path, job: str, dev: str | None = None,
+                 encoding: str = "utf-8") -> None:
     folder.mkdir(parents=True, exist_ok=True)
-    (folder / "WaferInfo.ini").write_text(
-        f"[Recipe]\nName=PI_Bubble\n[AutoCycleInfo]\nAutoCycleScan=1\n{line}\n"
-        "InputWaferID=25195007EWF6\n", encoding="utf-8")
+    (folder / "Params_WaferInfo.ini").write_text(
+        f"[Path]\nSetupPath=c:\\job\\{job}\\Setup1\\Recipes\\x20\\\n",
+        encoding=encoding)
+    if dev:
+        (folder / "ProductInfo.ini").write_text(
+            f"[GENERAL]\nJobDesc=DEV={dev}~LOT=X@1~ID=#FI\n", encoding=encoding)
 
 
-def test_input_lot_splits_into_material_and_layer(tmp_path):
-    """`InputLot=GFW-RDL4` → 자재 GFW · Layer RDL4 (사용자가 준 예시 그대로)."""
-    _lot_ini(tmp_path / "Slot_01", "InputLot=GFW-RDL4")
-    lot = read_lot_info(tmp_path)
-    assert lot is not None and (lot.material, lot.layer) == ("GFW", "RDL4")
+@pytest.mark.parametrize("raw, want", [
+    # 저장소 샘플의 실제 LOT ID(ProductInfo.ini `LOT=` · KLA `LotID`, 관측) — `@` 뒤는 공정 번호.
+    ("TB500.INT895@6412", "TB500.INT895"),
+    ("NELA26.00@6321", "NELA26.00"),
+    ("E1X000.C03 DCC20@6321", "E1X000.C03 DCC20"),
+    ("6H7ENK@6412", "6H7ENK"),
+    ("  A/B:C@1 ", "ABC"),                      # 파일 이름에 못 쓰는 글자는 뺀다
+    ("", ""),
+])
+def test_clean_lot(raw, want):
+    assert clean_lot(raw) == want
 
 
-def test_it_reads_the_real_sample_in_the_repo(tmp_path):
-    """저장소의 실물 샘플(`docs/WaferInfo.ini`)로 확인한다 — 합성값만 믿지 않는다."""
-    sample = _REPO / "docs" / "WaferInfo.ini"
-    assert sample.is_file(), "실물 샘플이 사라졌다"
-    slot = tmp_path / "Slot_01"
-    slot.mkdir(parents=True)
-    shutil.copy(sample, slot / "WaferInfo.ini")
-    lot = read_lot_info(tmp_path)
-    assert lot is not None, "실물 샘플에서 아무것도 못 읽었다"
-    assert (lot.material, lot.layer) == ("TBD", "PIDS3")
+def test_camtek_lot_is_read(tmp_path):
+    slot = tmp_path / "S1"
+    _camtek_slot(slot, "TB500_RDL4 - Multi")
+    (slot / "ProductInfo.ini").write_text(
+        "[GENERAL]\nJobDesc=DEV=4DT-TB500-H-M1~LOT=TB500.INT888@6324~ID=#FI~\n",
+        encoding="utf-8")
+    assert read_title_parts(tmp_path) == TitleParts("TB500", "RDL4", "TB500.INT888")
 
 
-def test_params_wafer_info_is_a_different_file(tmp_path):
-    """`Params_WaferInfo.ini` 만 있으면 못 읽는다 — 둘을 헷갈리지 않게 못 박는다."""
-    sample = _REPO / "docs" / "Params_WaferInfo.ini"
-    assert sample.is_file()
-    slot = tmp_path / "Slot_01"
-    slot.mkdir(parents=True)
-    shutil.copy(sample, slot / "Params_WaferInfo.ini")
-    assert read_lot_info(tmp_path) is None
-
-
-def test_only_one_slot_is_read(tmp_path, monkeypatch):
-    """슬롯 하나만 읽는다 — 같은 로트는 자재·Layer 가 같다(사용자 확인).
-
-    전부 읽으면 폴더 수만큼 왕복이 늘 뿐이다(설정 화면 die 안내가 겪은 그 비용)."""
-    import aoi_verification.app.models.lot_info as mod
-
-    for i in range(5):
-        _lot_ini(tmp_path / f"Slot_{i + 1:02d}", "InputLot=GFW-RDL4")
-    opened: list = []
-    real = mod.read_ini_text
-    monkeypatch.setattr(mod, "read_ini_text",
-                        lambda p: (opened.append(p), real(p))[1])
-    assert read_lot_info(tmp_path) is not None
-    assert len(opened) == 1, f"INI 를 {len(opened)}번 읽었다: {opened}"
-
-
-def test_hidden_folders_are_not_the_sample(tmp_path):
-    """점 폴더가 이름순 첫 자리를 차지해도 표본은 진짜 슬롯이어야 한다."""
-    (tmp_path / ".aoi_verification_cache").mkdir()
-    _lot_ini(tmp_path / "Slot_01", "InputLot=GFW-RDL4")
-    lot = read_lot_info(tmp_path)
-    assert lot is not None and lot.material == "GFW"
-
-
-def test_unreadable_lot_is_none_not_a_crash(tmp_path):
-    """전 구간 fail-safe — 못 읽으면 None(호출부가 폴백 제목을 쓴다)."""
-    assert read_lot_info(tmp_path) is None                 # 빈 폴더
-    _lot_ini(tmp_path / "S1", "InputLot=하이픈없음")
-    assert read_lot_info(tmp_path) is None                 # 형식이 다르다
-    assert read_lot_info(tmp_path / "없는폴더") is None
+def test_camtek_folder_is_read(tmp_path):
+    _camtek_slot(tmp_path / "19246095EWB7", "TB500_RDL4 - Multi")
+    assert read_title_parts(tmp_path) == TitleParts("TB500", "RDL4")
 
 
 def test_utf16_ini_is_read(tmp_path):
     """장비가 UTF-16 으로 쓴 INI 도 읽는다(`coords.ini_text` 를 쓰는 이유)."""
-    slot = tmp_path / "S1"
-    slot.mkdir(parents=True)
-    (slot / "WaferInfo.ini").write_text(
-        "[AutoCycleInfo]\nInputLot=GFW-RDL4\n", encoding="utf-16")
-    lot = read_lot_info(tmp_path)
-    assert lot is not None and lot.layer == "RDL4"
+    _camtek_slot(tmp_path / "S1", "TB500_RDL4 - Multi", encoding="utf-16")
+    assert read_title_parts(tmp_path).layer == "RDL4"
+
+
+def test_kla_folder_is_read(tmp_path):
+    slot = tmp_path / "2026-05-18-11-24_5"
+    slot.mkdir()
+    (slot / "abc_TB500INT.271@6324_W6459081XYE1.001").write_text(
+        'FileVersion 1 2;\nLotID "TB500INT.271@6324";\n'
+        'DeviceID "4DT-TB500-H-M1";\nStepID "RDL2_NEW(MULTI)";\n'
+        'WaferID "W6459081XYE1";\nSlot 5;\n', encoding="utf-8")
+    assert read_title_parts(tmp_path) == TitleParts("TB500", "RDL2", "TB500INT.271")
+
+
+def test_system_folder_is_not_the_sample_slot(tmp_path):
+    """`$RECYCLE.BIN` 은 이름순으로 슬롯보다 앞이라 표본이 되면 칸이 비었다(리뷰 지적)."""
+    (tmp_path / "$RECYCLE.BIN").mkdir()
+    _camtek_slot(tmp_path / "a", "TB500_RDL4 - Multi")
+    assert read_title_parts(tmp_path) == TitleParts("TB500", "RDL4")
+
+
+def test_unreadable_is_empty(tmp_path):
+    assert read_title_parts(tmp_path) == TitleParts()          # 빈 폴더
+    assert read_title_parts(tmp_path / "없는폴더") == TitleParts()
+
+
+# 저장소 샘플 폴더(맨 위 이름) → 기대값.  샘플 폴더 이름표와 장비 파일(SetupPath·DeviceID)
+# 로 확인한 값(관측, 2026-10-30).  읽은 값은 **이 중 하나**여야 한다 — 빈 칸은 허용.
+_SAMPLE_EXPECT = {
+    "KLA": {("TB500", "RDL2")},
+    "KLA_Camtek(TB500 RDL4)": {("TB500", "RDL4")},
+    "die맵": {("", ""), ("T254", ""), ("TB500", "RDL4")},
+    "die목록(DieLut)": {("", ""), ("T254", ""), ("TB500", "RDL2")},
+    "장비격자(ExportData)": {("", ""), ("T254", "")},
+    "화면시프트(T254 FS UBM)": {("T254", "")},
+}
+
+
+def test_real_samples_give_only_known_values():
+    """저장소 실물 샘플 전부 — 틀린 값은 불허, 못 읽는 것(빈 칸)만 허용."""
+    from aoi_verification.app.models.lot_info import _read_folder
+
+    if not _SAMPLES.is_dir():
+        pytest.skip("샘플 없음")
+    seen = 0
+    for d in sorted({p.parent for p in _SAMPLES.rglob("*")
+                     if p.name in ("Params_WaferInfo.ini", "ProductInfo.ini")
+                     or p.suffix == ".001"}):
+        top = d.relative_to(_SAMPLES).parts[0]
+        tp = _read_folder(d)
+        assert top in _SAMPLE_EXPECT, f"새 샘플 폴더 — 기대값을 적어라: {top}"
+        assert (tp.material, tp.layer) in _SAMPLE_EXPECT[top], (str(d), tp)
+        assert "@" not in tp.lot and tp.lot == tp.lot.strip(), (str(d), tp)
+        seen += bool(tp.material)
+    assert seen >= 80, f"샘플에서 자재를 거의 못 읽었다: {seen}"
 
 
 # ---------------------------------------------------------------------------
 # 제목 조립
 # ---------------------------------------------------------------------------
-def test_the_suggested_title_matches_the_users_example(tmp_path):
-    """`4F-AOI-03 RDL4_GFW 검증(AOI-24 기준).xlsx` — 요청서의 예시 그대로."""
+def test_compose_title():
+    pytest.importorskip("PyQt6.QtWidgets")
+    from aoi_verification.app.ui.widgets.save_name_dialog import compose_title
+
+    f = {"val": "4F-AOI-03", "layer": "RDL4", "material": "TB500", "ref": "AOI-24"}
+    assert compose_title(f) == "4F-AOI-03 TB500_RDL4 검증(AOI-24 기준).xlsx"
+    assert compose_title({**f, "layer": ""}) == "4F-AOI-03 TB500 검증(AOI-24 기준).xlsx"
+    assert compose_title({**f, "lot": "TB500.INT895"}) == \
+        "4F-AOI-03 TB500_RDL4_TB500.INT895 검증(AOI-24 기준).xlsx"
+    assert compose_title({**f, "material": "", "lot": "NELA26.00"}) == \
+        "4F-AOI-03 RDL4_NELA26.00 검증(AOI-24 기준).xlsx"
+    assert compose_title({**f, "layer": " ", "material": ""}) == \
+        "AOI 4F-AOI-03 검증 (AOI-24 기준).xlsx"
+    ex = {"machine": "17", "layer": "RDL4", "material": "TB500"}
+    assert compose_title(ex) == "17 TB500_RDL4 Defect 추출.xlsx"
+    assert compose_title({**ex, "lot": "6H7ENK"}) == "17 TB500_RDL4_6H7ENK Defect 추출.xlsx"
+    assert compose_title({**ex, "layer": "", "material": ""}) == "AOI 17 Defect 추출.xlsx"
+    # 장비 칸을 비워도 이름에 이중 공백이 남지 않는다.
+    assert "  " not in compose_title({**f, "val": ""})
+
+
+def _inp(ref, val):
+    from aoi_verification.app.ui.pages.setup_page import SetupInput
+    return SetupInput(mode="single", ref_root=ref, val_root=val,
+                      ref_machine="AOI-24", val_machine="4F-AOI-03",
+                      threshold=0.55)
+
+
+def test_the_suggested_title_reads_the_val_side_first(tmp_path):
+    """검증 대상 폴더가 먼저, 못 읽은 Layer 는 **같은 제품일 때만** 기준 폴더에서."""
     pytest.importorskip("PyQt6.QtWidgets")
     from aoi_verification.app.ui.main_window import MainWindow
-    from aoi_verification.app.ui.pages.setup_page import SetupInput
 
-    _lot_ini(tmp_path / "Slot_01", "InputLot=GFW-RDL4")
-    inp = SetupInput(mode="single", ref_root=tmp_path, val_root=tmp_path,
-                     ref_machine="AOI-24", val_machine="4F-AOI-03",
-                     threshold=0.55)
-    assert MainWindow._suggest_result_name(inp) == \
-        "4F-AOI-03 RDL4_GFW 검증(AOI-24 기준).xlsx"
+    ref, val = tmp_path / "ref", tmp_path / "val"
+    _camtek_slot(ref / "S1", "TB500_RDL2 - Multi")
+    _camtek_slot(val / "S1", "R_TB500_LIVE")                     # Layer 없음
+    assert MainWindow._suggest_result_name(_inp(ref, val)) == \
+        "4F-AOI-03 TB500_RDL2 검증(AOI-24 기준).xlsx"
+    assert MainWindow._title_fields(_inp(ref, val)) == {
+        "val": "4F-AOI-03", "layer": "RDL2", "material": "TB500", "lot": "",
+        "ref": "AOI-24"}
 
 
-def test_the_title_falls_back_when_the_lot_is_unknown(tmp_path):
+def test_other_products_are_not_mixed(tmp_path):
+    """자재가 다르면 기준 폴더의 Layer 를 끌어오지 않는다 — 'T254_RDL2' 같은 없는 조합."""
+    pytest.importorskip("PyQt6.QtWidgets")
+    from aoi_verification.app.ui.main_window import MainWindow
+
+    ref, val = tmp_path / "ref", tmp_path / "val"
+    _camtek_slot(ref / "S1", "TB500_RDL2 - Multi")
+    _camtek_slot(val / "S1", "R_T254 LIVE_0858711PD_FS UBM")
+    assert MainWindow._suggest_result_name(_inp(ref, val)) == \
+        "4F-AOI-03 T254 검증(AOI-24 기준).xlsx"
+
+
+def test_ref_side_is_used_when_val_side_has_nothing(tmp_path):
+    pytest.importorskip("PyQt6.QtWidgets")
+    from aoi_verification.app.ui.main_window import MainWindow
+
+    ref, val = tmp_path / "ref", tmp_path / "val"
+    _camtek_slot(ref / "S1", "TB500_RDL4 - Multi")
+    (val / "S1").mkdir(parents=True)
+    assert MainWindow._suggest_result_name(_inp(ref, val)) == \
+        "4F-AOI-03 TB500_RDL4 검증(AOI-24 기준).xlsx"
+
+
+def test_lot_comes_from_the_ref_side_only_for_the_same_product(tmp_path):
+    """검증 폴더에 LOT 이 없으면 기준 폴더의 LOT 을 쓰되, 자재가 같을 때만."""
+    pytest.importorskip("PyQt6.QtWidgets")
+    from aoi_verification.app.ui.main_window import MainWindow
+
+    ref, val = tmp_path / "ref", tmp_path / "val"
+    _camtek_slot(ref / "S1", "TB500_RDL4 - Multi")
+    (ref / "S1" / "ProductInfo.ini").write_text(
+        "[GENERAL]\nJobDesc=DEV=4DT-TB500-H-M1~LOT=TB500.INT888@6324~\n", encoding="utf-8")
+    _camtek_slot(val / "S1", "TB500_RDL4 - Multi")
+    assert MainWindow._suggest_result_name(_inp(ref, val)) == \
+        "4F-AOI-03 TB500_RDL4_TB500.INT888 검증(AOI-24 기준).xlsx"
+    _camtek_slot(val / "S1", "R_T254 LIVE_0858711PD_FS UBM")      # 다른 제품
+    assert MainWindow._title_fields(_inp(ref, val))["lot"] == ""
+
+
+def test_parent_of_the_chosen_folder_is_not_read(tmp_path):
+    """고른 폴더의 **부모**는 관계없는 공용 폴더일 수 있다 — 거기 INI 를 읽지 않는다."""
+    _camtek_slot(tmp_path, "TB500_RDL4 - Multi")                 # 부모에 놓인 INI
+    (tmp_path / "LOT" / "S1").mkdir(parents=True)
+    assert read_title_parts(tmp_path / "LOT") == TitleParts()
+
+
+def test_the_title_falls_back_when_nothing_is_read(tmp_path):
     """못 읽어도 저장은 되어야 한다 — 예전 이름으로 폴백한다."""
     pytest.importorskip("PyQt6.QtWidgets")
     from aoi_verification.app import i18n
@@ -142,22 +287,6 @@ def test_the_title_falls_back_when_the_lot_is_unknown(tmp_path):
             val="4F-AOI-03", ref="AOI-24")
 
 
-def test_the_lot_is_read_from_the_val_side(tmp_path):
-    """Layer·자재는 **검증 대상 폴더**에서 읽는다(사용자 결정) — 기준이 아니다."""
-    pytest.importorskip("PyQt6.QtWidgets")
-    from aoi_verification.app.ui.main_window import MainWindow
-    from aoi_verification.app.ui.pages.setup_page import SetupInput
-
-    ref, val = tmp_path / "ref", tmp_path / "val"
-    _lot_ini(ref / "S1", "InputLot=REF-LAYERA")
-    _lot_ini(val / "S1", "InputLot=VAL-LAYERB")
-    inp = SetupInput(mode="single", ref_root=ref, val_root=val,
-                     ref_machine="AOI-24", val_machine="4F-AOI-03",
-                     threshold=0.55)
-    name = MainWindow._suggest_result_name(inp)
-    assert "LAYERB_VAL" in name, f"기준 폴더에서 읽었다: {name}"
-
-
 # ---------------------------------------------------------------------------
 # 이름 확인창
 # ---------------------------------------------------------------------------
@@ -166,7 +295,7 @@ def test_name_rules(tmp_path):
     pytest.importorskip("PyQt6.QtWidgets")
     from aoi_verification.app.ui.widgets.save_name_dialog import sanitize_name
 
-    ok, err = sanitize_name("4F-AOI-03 RDL4_GFW 검증(AOI-24 기준).xlsx")
+    ok, err = sanitize_name("4F-AOI-03 TB500_RDL4 검증(AOI-24 기준).xlsx")
     assert err == "" and ok.endswith(".xlsx")
     # 확장자를 지웠으면 되살린다 — 없으면 엑셀이 열지 못한다.
     assert sanitize_name("이름만") == ("이름만.xlsx", "")
@@ -248,13 +377,22 @@ def _stub_window(monkeypatch, tmp_path: Path):
     win = mw.MainWindow.__new__(mw.MainWindow)
     win._working_xlsx = None
     win._template_used = None
+    win._result_page = _FakeResultPage()
     return win, results
+
+
+class _FakeResultPage:
+    """저장 창에 넘길 제목 칸을 받아 두기만 한다."""
+    fields = None
+
+    def set_title_fields(self, fields):
+        self.fields = fields
 
 
 def _input(tmp_path: Path):
     from aoi_verification.app.ui.pages.setup_page import SetupInput
 
-    _lot_ini(tmp_path / "val" / "Slot_01", "InputLot=GFW-RDL4")
+    _camtek_slot(tmp_path / "val" / "Slot_01", "TB500_RDL4 - Multi")
     return SetupInput(mode="single", ref_root=tmp_path / "ref",
                       val_root=tmp_path / "val", ref_machine="AOI-24",
                       val_machine="4F-AOI-03", threshold=0.55)
@@ -269,9 +407,11 @@ def test_starting_a_run_creates_no_file(monkeypatch, tmp_path, isolated_cache):
     assert list(results.iterdir()) == [], \
         f"검증 시작만 했는데 파일이 생겼다: {[p.name for p in results.iterdir()]}"
     assert win._working_xlsx == \
-        results / "4F-AOI-03 RDL4_GFW 검증(AOI-24 기준).xlsx"
+        results / "4F-AOI-03 TB500_RDL4 검증(AOI-24 기준).xlsx"
     assert win._template_used is not None and win._template_used.exists(), \
         "양식 원본은 저장 때 필요하다 — 경로를 잃으면 안 된다"
+    assert win._result_page.fields == {"val": "4F-AOI-03", "layer": "RDL4",
+                                       "material": "TB500", "lot": "", "ref": "AOI-24"}
 
 
 def test_the_name_still_avoids_last_sessions_file(monkeypatch, tmp_path,
@@ -280,10 +420,10 @@ def test_the_name_still_avoids_last_sessions_file(monkeypatch, tmp_path,
     from aoi_verification.app.ui import main_window as mw
 
     win, results = _stub_window(monkeypatch, tmp_path)
-    (results / "4F-AOI-03 RDL4_GFW 검증(AOI-24 기준).xlsx").write_bytes(b"old")
+    (results / "4F-AOI-03 TB500_RDL4 검증(AOI-24 기준).xlsx").write_bytes(b"old")
     mw.MainWindow._prepare_working_file(win, _input(tmp_path))
     assert win._working_xlsx.parent == results
-    assert win._working_xlsx.name.startswith("4F-AOI-03 RDL4_GFW 검증(AOI-24 기준)_")
+    assert win._working_xlsx.name.startswith("4F-AOI-03 TB500_RDL4 검증(AOI-24 기준)_")
     assert not win._working_xlsx.exists(), "여전히 파일을 미리 만든다"
 
 
@@ -320,7 +460,7 @@ def _result_page(qapp, monkeypatch, target: Path, chosen):
     asked: list = []
 
     class _Dlg:
-        def __init__(self, suggested, folder, parent=None):
+        def __init__(self, suggested, folder, parent=None, fields=None):
             asked.append((suggested, Path(folder)))
             self.chosen = chosen
 
@@ -357,7 +497,7 @@ class _Sig:
 def test_export_asks_for_the_name_first(styled_qapp, monkeypatch, tmp_path,
                                         isolated_cache):
     """저장 직전에 추천 이름을 보여주고 고칠 기회를 준다(사용자 결정: 마지막 저장 직전)."""
-    target = tmp_path / "4F-AOI-03 RDL4_GFW 검증(AOI-24 기준).xlsx"
+    target = tmp_path / "4F-AOI-03 TB500_RDL4 검증(AOI-24 기준).xlsx"
     page, asked, started = _result_page(styled_qapp, monkeypatch, target,
                                         chosen="내가 고친 이름.xlsx")
     page._on_export()
@@ -418,3 +558,44 @@ def test_saving_again_does_not_ask_twice(styled_qapp, monkeypatch, tmp_path,
     assert page._save_path == target
     assert started
     page.deleteLater()
+
+
+def test_the_auto_button_rebuilds_the_name_from_the_fields(styled_qapp, tmp_path,
+                                                           isolated_cache):
+    """이름 아래 칸은 추천값으로 차 있고, 고친 뒤 [제목 자동 생성] 이 이름을 다시 만든다."""
+    from aoi_verification.app.ui.widgets.save_name_dialog import SaveNameDialog
+
+    fields = {"val": "4F-AOI-03", "layer": "", "material": "TB500", "lot": "",
+              "ref": "AOI-24"}
+    dlg = SaveNameDialog("4F-AOI-03 TB500 검증(AOI-24 기준).xlsx", tmp_path,
+                         fields=fields)
+    dlg.show()
+    styled_qapp.processEvents()
+    assert dlg._fields["material"].text() == "TB500"
+    assert dlg._fields["layer"].text() == "" and dlg._fields["lot"].text() == ""
+    dlg._fields["lot"].setText("TB500.INT895")
+    dlg.btn_auto.click()
+    assert dlg.edit.text() == "4F-AOI-03 TB500_TB500.INT895 검증(AOI-24 기준).xlsx"
+    dlg._fields["lot"].setText("")
+    dlg._fields["layer"].setText("RDL4")
+    dlg.btn_auto.click()
+    assert dlg.edit.text() == "4F-AOI-03 TB500_RDL4 검증(AOI-24 기준).xlsx"
+    # 같은 이름의 파일이 이미 있으면 덮지 않게 시각을 붙인다.
+    (tmp_path / dlg.edit.text()).write_bytes(b"")
+    dlg.btn_auto.click()
+    assert dlg.edit.text() != "4F-AOI-03 TB500_RDL4 검증(AOI-24 기준).xlsx"
+    assert dlg.edit.text().startswith("4F-AOI-03 TB500_RDL4 검증(AOI-24 기준)_")
+    # 칸에 금지 문자를 넣으면 확인이 잠긴다(이름 검사를 그대로 탄다).
+    dlg._fields["material"].setText("TB/500")
+    dlg.btn_auto.click()
+    assert not dlg.btn_ok.isEnabled()
+    dlg.deleteLater()
+
+
+def test_no_fields_no_auto_button(styled_qapp, tmp_path, isolated_cache):
+    """칸 정보가 없으면(세션 없이 결과만 보인 경우) 예전 창 그대로다."""
+    from aoi_verification.app.ui.widgets.save_name_dialog import SaveNameDialog
+
+    dlg = SaveNameDialog("결과.xlsx", tmp_path)
+    assert not hasattr(dlg, "btn_auto") and dlg._fields == {}
+    dlg.deleteLater()

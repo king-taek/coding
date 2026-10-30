@@ -41,24 +41,19 @@ def _page(qapp, w: int = 1280, h: int = 900) -> sp.SetupPage:
     return page
 
 
-def _title_label(page: sp.SetupPage) -> QLabel:
-    for lbl in page.findChildren(QLabel):
-        if lbl.text() == i18n.KO.SETUP_TITLE:
-            return lbl
-    raise AssertionError("제목 라벨을 찾지 못했다")
-
-
-def test_mode_badge_shares_the_title_row(qapp):
-    """배지가 제목 위 별도 줄로 갈라지면(= 제목이 내려가면) 실패."""
+def test_mode_badge_sits_bottom_left(qapp):
+    """판정 기준 배지는 하단 바 왼쪽 끝, 시작 버튼과 같은 줄이다(사용자 요청 2026-10-28)."""
     page = _page(qapp)
     try:
-        title = _title_label(page)
+        page.resize(1280, 800)
+        page.show()
+        qapp.processEvents()
         badge = page._mode_badge_card
-        t_mid = title.mapTo(page, title.rect().center()).y()
-        b_mid = badge.mapTo(page, badge.rect().center()).y()
-        # 허용치는 배지 높이 — 제목 라벨 높이를 쓰면 줄이 갈라져도 통과한다.
-        assert abs(t_mid - b_mid) <= badge.height(), \
-            f"제목({t_mid}px)과 모드 배지({b_mid}px)가 다른 줄에 있다"
+        start = page.start_btn
+        b = badge.mapTo(page, badge.rect().center())
+        s = start.mapTo(page, start.rect().center())
+        assert abs(b.y() - s.y()) <= start.height(), "배지가 시작 버튼 줄이 아니다"
+        assert b.x() < s.x() and b.x() < page.width() // 2, "배지가 왼쪽이 아니다"
     finally:
         page.close()
 
@@ -70,33 +65,31 @@ def _logo_label(page: sp.SetupPage) -> QLabel:
     raise AssertionError("로고 라벨을 찾지 못했다")
 
 
-def test_logo_shares_the_title_row(qapp):
-    """로고는 제목 **왼쪽, 같은 줄**이다 — 위에 따로 띠로 있지 않다.
+def test_logo_and_title_sit_atop_the_tool_rail(qapp):
+    """로고 + 제목은 왼쪽 도구 목록 맨 위 한 줄이다(사용자 선택 2026-10-29, B안).
 
-    사용자 지적: "메인 로고가 너무 많은 부분을 차지함 — 왼쪽으로 밀어버리고 기존에
-    로고 하단에 있던 것들을 로고와 같은 행에 두면 더 깔끔할 듯."  예전엔 44px 마크
-    하나가 제목 위 한 줄(로고 + 눈금 + 줄 간격)을 통째로 차지했다.  여기서 막는 것은
-    (a) 로고가 다시 제목 위 별도 줄로 갈라지는 것, (b) 제목 위에 무엇이 끼는 것이다."""
+    Defect 추출 모드에서도 같은 자리에서 제목 글자만 바뀐다."""
     page = _page(qapp)
     try:
-        logo = _logo_label(page)
-        title = _title_label(page)
-        logo_top = logo.mapTo(page, logo.rect().topLeft()).y()
-        assert logo_top <= theme.PROFILE.page_margin + 8, \
-            f"로고 위 여백 {logo_top}px — 로고가 페이지 맨 위가 아니다"
-        l_mid = logo.mapTo(page, logo.rect().center()).y()
-        t_mid = title.mapTo(page, title.rect().center()).y()
-        assert abs(l_mid - t_mid) <= logo.height() // 2, \
-            f"로고({l_mid}px)와 제목({t_mid}px)이 다른 줄에 있다"
-        logo_right = logo.mapTo(page, logo.rect().topRight()).x()
-        title_left = title.mapTo(page, title.rect().topLeft()).x()
-        assert logo_right <= title_left, "로고가 제목 왼쪽이 아니다"
-        assert logo.property("inline") == "true", \
-            "밴드용 여백·눈금을 지우는 QSS 표식이 없다"
-        # 제목 위에는 아무것도 없다 — 제목의 줄이 곧 페이지의 첫 줄이다.
-        title_top = title.mapTo(page, title.rect().topLeft()).y()
-        assert title_top <= theme.PROFILE.page_margin + logo.height(), \
-            f"제목 위 여백 {title_top}px — 그 위에 무엇이 끼었다"
+        logos = [l for l in page.findChildren(QLabel)
+                 if l.property("role") == "appLogo" and l.isVisible()]
+        assert logos == [page._rail_logo], "보이는 로고가 도구 목록 위 하나가 아니다"
+        logo, title = page._rail_logo, page._title_label
+        assert page._tool_rail.isAncestorOf(logo) and page._tool_rail.isAncestorOf(title)
+        l_mid = logo.mapTo(page, logo.rect().center())
+        t_mid = title.mapTo(page, title.rect().center())
+        assert abs(l_mid.y() - t_mid.y()) <= logo.height() // 2, "로고와 제목이 다른 줄이다"
+        assert logo.mapTo(page, logo.rect().topRight()).x() <= \
+            title.mapTo(page, title.rect().topLeft()).x(), "로고가 제목 왼쪽이 아니다"
+        btn_y = page.image_info_btn.mapTo(page, page.image_info_btn.rect().topLeft()).y()
+        assert logo.mapTo(page, logo.rect().bottomLeft()).y() <= btn_y, \
+            "로고가 첫 도구 버튼 아래에 있다"
+        assert title.text() == i18n.KO.SETUP_TITLE
+        page.set_extract_mode(True)
+        for _ in range(4):
+            qapp.processEvents()
+        assert title.text() == i18n.KO.EXTRACT_TITLE and title.isVisible()
+        assert logo.isVisible()
     finally:
         page.close()
 
