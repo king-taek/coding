@@ -187,8 +187,9 @@ class _CalibPrepWorker(QThread):
     # die-내부 좌표를 내는 소스만 짝지을 수 있다(절대좌표 'camtek_abs' 는 틀이 다르다).
     _DIE_LOCAL = frozenset({"kla", "camtek_ini", "camtek_live"})
 
-    def __init__(self, groups, kla_side: str, parent=None) -> None:
+    def __init__(self, groups, kla_side: str, parent=None, notch_dirs=()) -> None:
         super().__init__(parent)
+        self._notch_dirs = tuple(notch_dirs or ())
         self._groups = groups
         self._src_is_kla = kla_side == "ref"
 
@@ -198,6 +199,10 @@ class _CalibPrepWorker(QThread):
             from ..coords import resolve_batch
             paths = [it.path for refs, vals in self._groups for it in (*refs, *vals)]
             coords = resolve_batch(paths, self.progress.emit)
+            if self._notch_dirs:       # 보정 후보도 같은 방향으로 맞춘 좌표로 본다
+                from ..coords import notch
+                coords = notch.apply_notch(
+                    coords, lambda p: notch.notch_for_path(self._notch_dirs, p))
 
             def c_of(it):
                 c = coords.get(it.path)
@@ -354,6 +359,9 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._scan_token = 0
         # 좌표 보정(KLA ↔ Camtek, 매칭 전용) — `_calibrate_then` 참고.
         self._coord_offset = None
+        self._notch_dirs = ()
+        self._notch_worker = None
+        self._notch_guess = None
         self._calib_next = None
         self._calib_worker = None
         self._calib_side = None
@@ -522,6 +530,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         on = not _prefs.load().dev_mode
         _prefs.patch(dev_mode=on)
         self._dev_btn.setVisible(on)
+        self._sync_statusbar(self._stack.currentWidget())
         self._status_bar.showMessage(
             i18n.KO.DEV_MODE_ON if on else i18n.KO.DEV_MODE_OFF, 4000)
         if on:
@@ -626,7 +635,7 @@ class MainWindow(MultiValFlow, QMainWindow):
                     msg = f"{msg}{i18n.KO.CAUSE_PREFIX}{updater.last_error()}"
             except Exception:
                 pass
-            sheets.warn(self, i18n.KO.UPDATE_AVAILABLE_TITLE, msg)
+            sheets.warn(self, i18n.KO.UPDATE_FAILED_TITLE, msg)
             self._run_startup_popups()       # 실패 → 나머지 시작 팝업 진행
             return
         # 안내 후 프로그램을 자동 종료한다(자동 재실행은 하지 않음 — 사용자가 다시 실행).
@@ -640,7 +649,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         except Exception:
             pass
         sheets.info(
-            self, i18n.KO.UPDATE_AVAILABLE_TITLE, msg)
+            self, i18n.KO.UPDATE_DONE_TITLE, msg)
         QApplication.quit()
 
     # ==================================================================
@@ -1193,6 +1202,8 @@ class MainWindow(MultiValFlow, QMainWindow):
                                           config.DEFAULT_COORD_TOLERANCE)),
             # 좌표 보정(매칭 전용) — 보정 화면에서 [보정 적용] 했을 때만 0 이 아니다.
             coord_offset=tuple(getattr(self, "_coord_offset", None) or (0.0, 0.0)),
+            # Notch 방향 보정(매칭 전용) — 표준(아래)이 아닌 폴더가 있을 때만 비어 있지 않다.
+            notch_dirs=tuple(getattr(self, "_notch_dirs", None) or ()),
         )
 
 
@@ -1551,7 +1562,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._select_page.set_extract_mode(False)
         self._select_page.set_reverse(True)
         self._select_page.load_state(queue=queue, targets={}, excluded={},
-                                     history=[])
+                                     history=[], slot_numbers=self._slot_numbers())
         self._phase = PHASE_B_SELECT
         self._show_page(self._select_page)
 
@@ -1824,6 +1835,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._select_page.load_state(
             queue=queue,
             targets=restored, excluded={}, history=[],
+            slot_numbers=self._slot_numbers(),
         )
         self._phase = PHASE_A_SELECT
         # 판단할 후보가 하나도 없으면(예: 기준 사진 재사용으로 큐가 전부 비워짐)
@@ -1995,6 +2007,13 @@ class MainWindow(MultiValFlow, QMainWindow):
         (CLAUDE.md 로딩 규칙)."""
         self._coord_offset = None
         self._calib_next = (queue, pool, auto_mode)
+        self._notch_dirs = ()
+        engine = getattr(self._input, "engine_mode", EngineMode.COORDINATE)
+        if not EngineMode.is_coordinate(engine) or not self._start_notch_auto():
+            self._after_notch()
+
+    def _after_notch(self) -> None:
+        """Notch 방향이 정해진 뒤 — KLA ↔ Camtek 이면 좌표 보정, 아니면 바로 Stage 2."""
         engine = getattr(self._input, "engine_mode", EngineMode.COORDINATE)
         side = (self._kla_camtek_side()
                 if EngineMode.is_coordinate(engine) else None)
@@ -2002,6 +2021,7 @@ class MainWindow(MultiValFlow, QMainWindow):
             self._start_stage2()
             return
         self._calib_side = side
+        queue, pool, _auto = self._calib_next
         groups = []
         for slot_name in sorted(pool):
             refs = [it for it in queue if it.slot == slot_name]
@@ -2009,11 +2029,92 @@ class MainWindow(MultiValFlow, QMainWindow):
                 groups.append((refs, pool[slot_name]))
         self._loading.show_overlay(i18n.KO.COORD_CAL_LOADING)
         self._loading.set_progress(0, 0, i18n.KO.COORD_CAL_LOADING)
-        worker = _CalibPrepWorker(groups, side, self)
+        worker = _CalibPrepWorker(groups, side, self, self._notch_dirs)
         worker.progress.connect(self._on_calib_progress)
         worker.ready.connect(self._on_calib_ready)
         self._calib_worker = worker
         worker.start()
+
+    def _start_notch_auto(self) -> bool:
+        """Notch 방향을 **자동으로** 확인한다(백그라운드) — 시작했으면 True.
+
+        기준 방향은 폴더에서 읽은 값(KLA 정보파일, 없으면 아래)이고, 검증 방향은 네 방향으로
+        돌려 기준과 가장 잘 맞는 쪽이다(`workers.notch_auto`).  결과는 `_on_notch_auto_done`."""
+        if self._scan is None or self._input is None:
+            return False
+        from ..coords import notch
+        from ..workers.notch_auto import NotchAutoWorker
+        sr = self._scan
+        names = sr.common_slot_names[:5]
+
+        def guess(attr: str) -> str:
+            found = [notch.detect(Path(d)) for n in names
+                     for d in [getattr(sr.slots[n], attr)] if d is not None]
+            return max(set(found), key=found.count) if found else notch.DEFAULT
+
+        groups = [([it.path for it in sr.slots[n].ref_images],
+                   [it.path for it in sr.slots[n].val_images]) for n in names]
+        tol = float(getattr(self._input, "coord_tolerance", config.DEFAULT_COORD_TOLERANCE))
+        ref_dir, val_dir = guess("ref_dir"), guess("val_dir")
+        auto_args = (groups, self._input.ref_root, self._input.val_root, tol)
+        self._notch_guess = (ref_dir, val_dir, auto_args)
+        self._loading.show_overlay(i18n.KO.NOTCH_CHECKING)
+        self._loading.set_progress(0, 0, i18n.KO.NOTCH_CHECKING)
+        # 부모 없이 `_LIVE_SCANS` 가 수명을 잡는다 — 감지 중에 창을 닫아도 실행 중인 QThread 가
+        # 창과 함께 파괴되지 않는다(폴더 스캔 워커와 같은 방식).
+        worker = NotchAutoWorker(groups, self._input.ref_root, self._input.val_root,
+                                 ref_dir, tol, None)
+        worker.progress.connect(self._on_notch_progress)
+        worker.done.connect(self._on_notch_auto_done)
+        _LIVE_SCANS.add(worker)
+        worker.finished.connect(lambda w=worker: _LIVE_SCANS.discard(w))
+        self._notch_worker = worker
+        worker.start()
+        return True
+
+    def _on_notch_progress(self, done: int, total: int) -> None:
+        self._loading.set_progress(done, total, i18n.KO.NOTCH_CHECKING)
+
+    def _on_notch_auto_done(self, res) -> None:
+        w = self.sender()
+        if w is not self._notch_worker:
+            return                          # 새 세션으로 밀려난 옛 감지
+        self._notch_worker = None
+        w.wait()
+        self._loading.hide_overlay()
+        if self._input is None or self._scan is None or self._calib_next is None:
+            return
+        ref_dir, val_dir, auto_args = self._notch_guess
+        self._ask_notch(ref_dir, val_dir, res, auto_args)
+        self._after_notch()
+
+    @staticmethod
+    def _notch_needs_confirm(ref_dir: str, res) -> bool:
+        """둘 다 아래로 **확인된** 경우만 묻지 않는다(사용자 지시 2026-10-28).
+
+        감지가 방향을 못 내면(``res.direction is None``) 확인받는다 — 모르는 걸 아래로 두지 않는다."""
+        from ..coords import notch
+        return not (notch.is_none(ref_dir) and res is not None
+                    and res.direction is not None and notch.is_none(res.direction))
+
+    def _ask_notch(self, ref_dir: str, val_dir: str, res, auto_args=None) -> None:
+        """감지 결과로 `_notch_dirs`(매칭 전용)를 정한다 — 둘 다 아래가 아니면 창으로 확인받는다."""
+        from ..coords import notch
+        from .widgets.notch_dialog import NotchDialog
+        self._notch_dirs = ()
+        if self._notch_needs_confirm(ref_dir, res):
+            dlg = NotchDialog(self._input.ref_machine, self._input.val_machine,
+                              ref_dir, val_dir, parent=self,
+                              auto_args=auto_args, auto_result=res)
+            sheets.run(dlg)
+            dirs = dlg.dirs
+        else:
+            dirs = (notch.DEFAULT, notch.DEFAULT)
+            _LOG.info("Notch 자동 확인: 기준·검증 모두 아래 — 묻지 않고 진행")
+        pairs = ((str(self._input.ref_root), dirs[0]), (str(self._input.val_root), dirs[1]))
+        if any(not notch.is_none(d) for _r, d in pairs):
+            self._notch_dirs = pairs
+            _LOG.info(i18n.KO.NOTCH_LOG_FMT.format(dirs=", ".join(f"{r}={d}" for r, d in pairs)))
 
     def _on_calib_progress(self, done: int, total: int) -> None:
         self._loading.set_progress(done, total, i18n.KO.COORD_CAL_LOADING)
@@ -2758,8 +2859,10 @@ class MainWindow(MultiValFlow, QMainWindow):
         session_mod.clear()
         # 준비 중인 좌표 보정은 버린다(뒤늦은 ready 는 `_on_calib_ready` 가 무시한다).
         self._calib_worker = None
+        self._notch_worker = None
         self._calib_next = None
         self._coord_offset = None
+        self._notch_dirs = ()
         # #14 세션 종료 — 절전 억제 해제.
         wakelock.release()
         self._stop_lazy_thumb_pools()
@@ -2822,6 +2925,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         사용자가 순서형을 고르면서 나머지 2안과 스위처·setup_layouts 를 제거했다."""
         self._setup_page = SetupPage()
         self._stack.addWidget(self._setup_page)
+        self._sync_statusbar(self._setup_page)        # 첫 화면도 같은 규칙(크레딧은 한 번만)
         self._setup_page.start_requested.connect(self._on_start)
         self._setup_page.update_check_requested.connect(self._manual_update_check)
         self._setup_page.extract_mode_changed.connect(self._on_extract_mode_changed)
@@ -2939,6 +3043,13 @@ class MainWindow(MultiValFlow, QMainWindow):
         # GPU 임베딩 모델을 미리 컴파일/워밍업 — 첫 슬롯의 커널 JIT 지연 제거(#3).
         # ★ 무거운 import 뒤에 이어 붙인다(같은 모듈이 필요하고, 시작 경로를 비운다).
         self._warmup_accel_async()
+
+    def _sync_statusbar(self, page: QWidget) -> None:
+        """설정 화면은 크레딧을 자기 바닥 줄에 두므로 상태바를 숨긴다(개발자 모드만 예외 —
+        설정 버튼이 거기 있다).  다른 화면은 그대로."""
+        on_setup = page is getattr(self, "_setup_page", None)
+        self._credit_label.setVisible(not on_setup)
+        self._status_bar.setVisible(not on_setup or _prefs.load().dev_mode)
 
     def _apply_statusbar_theme(self) -> None:
         """상태바 크레딧 라벨 색을 테마 토큰으로 적용(페이지 밖 위젯)."""
@@ -3070,6 +3181,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         #   미끄러져 들어오는 동안 레일만 먼저 새 단계를 가리키게 된다.  그게 옳다:
         #   레일은 '어디로 가는 중인가' 를 먼저 말해 주는 표지판이지 화면의 일부가
         #   아니다(사라졌다 나타나면 오히려 깜빡임으로 읽힌다).
+        self._sync_statusbar(w)
         old = self._stack.currentWidget()
         sliding = not (old is w or old is None or not animate
                        or not motion.enabled())

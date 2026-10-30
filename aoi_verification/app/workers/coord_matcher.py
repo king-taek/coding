@@ -49,6 +49,7 @@ from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
 from ..coords import resolve_batch as _resolve_batch
 from ..coords import calibration as _calib
+from ..coords import notch as _notch
 from .. import i18n
 from ..models.slot import ImageItem
 from .matcher import score_ref_classical
@@ -165,6 +166,8 @@ class CoordScheduler(QThread):
         # KLA↔Camtek 보정값 — 매칭용 사본에만 적용한다(`_calib.apply_offset`).
         off = getattr(cfg, "coord_offset", None) if cfg is not None else None
         self._offset = (float(off[0]), float(off[1])) if off else _calib.ZERO
+        # notch 방향 보정 — 이것도 매칭용 사본에만 적용한다(`_notch.apply_notch`).
+        self._notch_dirs = tuple(getattr(cfg, "notch_dirs", None) or ()) if cfg is not None else ()
 
     def stop(self) -> None:
         self._stop.set()
@@ -196,6 +199,14 @@ class CoordScheduler(QThread):
             all_paths,
             lambda done, total: self.signals.progress.emit(done, total),
         )
+        # ★ notch 방향 보정이 먼저다 — KLA↔Camtek 평행이동은 같은 방향으로 맞춘 좌표 위에서 의미가 있다.
+        if self._notch_dirs:
+            try:
+                coord_cache = _notch.apply_notch(
+                    coord_cache, lambda p: _notch.notch_for_path(self._notch_dirs, p))
+            except _notch.NotchError as exc:
+                self.signals.failed.emit(i18n.KO.NOTCH_FAIL_FMT.format(detail=exc))
+                return
         # ★ 사용자 보정값은 **이 사본에만** 더한다 — resolve 캐시·엑셀·화면 좌표는 원래 값.
         coord_cache = _calib.apply_offset(coord_cache, self._offset)
 

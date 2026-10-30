@@ -92,28 +92,27 @@ def test_page_satisfies_attr_contract(qapp):
 
 
 def test_action_bar_index_contract(qapp):
-    """보조 버튼 묶음(update → image_info → …)이 맨 앞, 마지막은 주 액션(start_btn).
+    """시작 바: 맨 앞은 판정 기준 배지, 그 뒤 stretch, 마지막은 주 액션(start_btn).
 
-    액션 바의 자리 계약 — 새 위젯을 stretch **앞**에 붙이면 주 액션이 가운데로
-    밀려 화면이 어그러진다.  보조 버튼은 좁은 창에서 두 줄로 접히는 묶음
-    (`_aux_row`) 안에 있다."""
+    자리 계약 — 새 위젯을 stretch **앞**에 붙이면 주 액션이 가운데로 밀린다.
+    도구(사진 정보 · Wafer Map · Defect 추출 · GL 히스토그램)는 시작 바가 아니라 왼쪽
+    도구 레일에 있고, 업데이트 확인은 바닥 줄 왼쪽 칸(시작 바와 같은 행)에 있다."""
     page = sp.SetupPage()
     try:
         bar = page._action_bar
-        assert bar.itemAt(0).widget() is page._aux_row
-        aux = page._aux_row.buttons()
-        assert aux[0] is page.update_btn and aux[1] is page.image_info_btn
+        assert bar.itemAt(0).widget() is page._mode_badge_card
+        assert bar.itemAt(1).spacerItem() is not None
+        tools = page._tool_buttons
+        assert tools == [page.image_info_btn, page.wafer_map_btn,
+                         page.extract_btn, page.gl_btn]
+        assert all(page._tool_rail.isAncestorOf(b) for b in tools)
+        assert page._foot_left.isAncestorOf(page.update_btn)
+        assert not page._tool_rail.isAncestorOf(page.update_btn)
+        assert not any(bar.indexOf(b) >= 0 for b in tools)
         last = bar.itemAt(bar.count() - 1).widget()
         assert last is page.start_btn
     finally:
         page.deleteLater()
-
-
-def test_help_tooltip_comes_from_i18n():
-    """사용자 노출 문자열 하드코딩 금지(CLAUDE.md) — '?' 툴팁도 i18n 에서."""
-    src = inspect.getsource(sp)
-    assert "설명 보기/숨기기" not in src
-    assert "HELP_TOGGLE_TOOLTIP" in src
 
 
 # ── 구형 모드: 명시 스위치만이 모드를 바꾼다 (핵심 회귀) ─────────────────────
@@ -136,8 +135,6 @@ def test_reading_the_explanation_does_not_change_engine(qapp):
     page = sp.SetupPage()
     try:
         before = page._current_engine_mode()
-        page._auto_help_btn.setChecked(True)          # 도움말 펼치기
-        page._auto_help_btn.setChecked(False)
         assert page._current_engine_mode() == before == EngineMode.COORDINATE
         # 접이식 상태를 모드 판단에 쓰는 코드가 남아 있지 않아야 한다.
         src = inspect.getsource(sp.SetupPage._current_engine_mode)

@@ -40,6 +40,9 @@ def _scan_with(slot_name: str, n_ref: int) -> ScanResult:
 class _Win:
     """`_enter_stage1_phase_a` 만 실제 코드로 돌리는 최소 대역(headless)."""
 
+    def _slot_numbers(self):
+        return {}
+
     def __init__(self, scan, restored):
         self._scan = scan
         self._input = object()

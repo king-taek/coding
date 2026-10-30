@@ -91,3 +91,26 @@ def test_startup_shows_once_then_records_seen(qapp, monkeypatch):
     assert store["seen"] == notes.ENTRIES[0]["id"]
     host._maybe_show_whats_new()                   # 두 번째 실행 — 다시 뜨지 않는다
     assert len(shown) == 1
+
+
+@pytest.mark.parametrize("count", [3, 40])
+def test_dialog_keeps_text_when_many_updates_pile_up(styled_qapp, count):
+    """밀린 업데이트가 많아 화면 높이에 잘려도 줄이 눌려 사라지지 않고 목록이 스크롤된다."""
+    from PyQt6.QtWidgets import QLabel
+
+    from aoi_verification.app.ui.widgets.whats_new_dialog import WhatsNewDialog
+    view = wn.merge(notes.ENTRIES[:count])
+    dlg = WhatsNewDialog(view)
+    try:
+        dlg.resize(560, 620)                      # 720px 화면에서 시트가 쓸 수 있는 높이
+        dlg.show()
+        styled_qapp.processEvents()
+        inner = dlg.scroll.widget()
+        rows = [lb for lb in inner.findChildren(QLabel) if lb.text() and lb.wordWrap()]
+        assert rows, "줄이 하나도 없다"
+        assert all(lb.height() >= lb.fontMetrics().height() for lb in rows)
+        assert dlg.scroll.verticalScrollBar().maximum() > 0 or count == 3
+        for text in view.notices:                 # 주의 띠도 같은 스크롤 안에서 읽힌다
+            assert any(lb.text() == text for lb in inner.findChildren(QLabel))
+    finally:
+        dlg.deleteLater()

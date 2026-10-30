@@ -281,8 +281,8 @@ def test_setup_extract_mode_takes_one_folder(qapp, tmp_path):
         page.deleteLater()
 
 
-def test_extract_button_sits_in_the_auxiliary_group(qapp):
-    """액션바 자리 계약 — 보조 버튼은 stretch 앞, 주 액션은 맨 끝."""
+def test_extract_button_sits_in_the_tool_rail(qapp):
+    """도구는 왼쪽 레일, 시작 바는 배지(왼쪽 끝) → stretch → … → 주 액션(맨 끝)."""
     from aoi_verification.app.ui.pages import setup_page as sp
     page = sp.SetupPage()
     try:
@@ -290,8 +290,9 @@ def test_extract_button_sits_in_the_auxiliary_group(qapp):
         widgets = [bar.itemAt(i).widget() for i in range(bar.count())]
         stretch_at = next(i for i in range(bar.count())
                           if bar.itemAt(i).spacerItem() is not None)
-        assert widgets.index(page._aux_row) < stretch_at
-        assert page.extract_btn in page._aux_row.buttons()
+        assert widgets[0] is page._mode_badge_card and stretch_at == 1
+        assert page.extract_btn in page._tool_buttons
+        assert page._tool_rail.isAncestorOf(page.extract_btn)
         assert widgets[-1] is page.start_btn
     finally:
         page.deleteLater()
@@ -928,19 +929,17 @@ def test_extract_select_text_keys_exist():
     assert missing == []
 
 
-def test_setup_extract_mode_swaps_help_and_blocked_hint(qapp):
+def test_setup_extract_mode_swaps_blocked_hint(qapp):
     from aoi_verification.app import i18n
     from aoi_verification.app.ui.pages.setup_page import SetupPage
 
     page = SetupPage()
     try:
         page.set_extract_mode(True)
-        assert page._auto_hint.text() == i18n.KO.EXTRACT_RUN_OPTIONS_HINT
         page.ref_path_edit.setText("")
         page._validate()
         assert page._start_hint.text() == i18n.KO.EXTRACT_BLOCKED_HINT
         page.set_extract_mode(False)
-        assert page._auto_hint.text() == i18n.KO.RUN_OPTIONS_HINT
     finally:
         page.close()
 

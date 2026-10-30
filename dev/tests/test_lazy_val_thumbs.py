@@ -169,6 +169,7 @@ def _window(lazy):
     import aoi_verification.app.ui.main_window as MW
     from aoi_verification.app.utils.prefs import AutomationLevel
     win = MW.MainWindow.__new__(MW.MainWindow)
+    win._slot_numbers = lambda: {}
     win._reset_cross_state()
     win._cross_stage = "A"
     win._lazy_val_thumbs = lazy

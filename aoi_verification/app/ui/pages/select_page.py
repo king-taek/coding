@@ -90,6 +90,7 @@ class _SidePanel(QFrame):
         self._inline_select = bool(inline_select)
         self._sections: dict[str, SlotSection] = {}
         self._cached: dict[str, list[ImageItem]] = {}
+        self._slot_numbers: dict[str, str] = {}
 
         self.setProperty("role", "section")
         outer = QVBoxLayout(self)
@@ -191,7 +192,8 @@ class _SidePanel(QFrame):
                               select_mode=False,
                               inline_select=self._inline_select,
                               truncate=not self._inline_select,
-                              tile_px=self._tile_px, parent=self)
+                              tile_px=self._tile_px,
+                              slot_no=self._slot_numbers.get(slot), parent=self)
             entries = [ThumbEntry(item=it) for it in self._cached[slot]]
             sec.set_entries(entries)
             sec.tile_clicked.connect(
@@ -240,7 +242,8 @@ class _SidePanel(QFrame):
                           select_mode=False,
                           inline_select=self._inline_select,
                           truncate=not self._inline_select,
-                          tile_px=self._tile_px, parent=self)
+                          tile_px=self._tile_px,
+                              slot_no=self._slot_numbers.get(slot), parent=self)
         sec.set_entries(entries)
         sec.tile_clicked.connect(
             lambda ent, s=slot: self.tile_clicked.emit(self._name, s, ent.item)
@@ -708,8 +711,11 @@ class SelectPage(ProgressRowMixin, QWidget):
         self.slot_jump.blockSignals(True)
         self.slot_jump.clear()
         for slot in sorted(remaining):
-            self.slot_jump.addItem(
-                i18n.KO.SLOT_JUMP_ITEM_FMT.format(slot=slot, n=remaining[slot]), slot)
+            no = self._slot_numbers.get(slot)
+            text = (i18n.KO.SLOT_JUMP_ITEM_NO_FMT.format(slot=slot, no=no, n=remaining[slot])
+                    if no else
+                    i18n.KO.SLOT_JUMP_ITEM_FMT.format(slot=slot, n=remaining[slot]))
+            self.slot_jump.addItem(text, slot)
         # 펼친 목록은 패널보다 넓어도 된다 — 슬롯 이름이 잘리지 않게.
         fm = self.slot_jump.fontMetrics()
         widest = max(fm.horizontalAdvance(self.slot_jump.itemText(i))
@@ -838,7 +844,11 @@ class SelectPage(ProgressRowMixin, QWidget):
                    excluded: dict[str, list[ImageItem]] | None = None,
                    history: list[tuple[str, ImageItem]] | None = None,
                    phase_b_already_matched: dict[str, list[ImageItem]] | None = None,
+                   slot_numbers: dict[str, str] | None = None,
                    ) -> None:
+        self._slot_numbers = dict(slot_numbers or {})
+        for panel in (self.left_panel, self.right_panel):
+            panel._slot_numbers = self._slot_numbers
         self._state = Stage1State(
             queue=list(queue),
             targets=defaultdict(list, {k: list(v) for k, v in (targets or {}).items()}),

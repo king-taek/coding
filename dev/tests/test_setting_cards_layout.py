@@ -54,7 +54,25 @@ def test_no_horizontal_scroll_at_any_width(qapp, width):
         page.close()
 
 
-def test_wide_window_puts_cards_side_by_side(qapp):
+@pytest.mark.parametrize("width", [800, 900, 1024, 1150, 1280, 1512])
+def test_no_horizontal_scroll_with_max_val_devices(qapp, width):
+    """검증 장비를 최대로 늘려도 가로 스크롤이 없다 — 줄이 늘어도 두 열↔한 열이 뒤집히지 않는다."""
+    page = _page(qapp, width)
+    try:
+        side = page._cards_side_by_side
+        for _ in range(sp.SetupPage.MAX_VALS - 1):
+            page._add_val_row(r"D:\a\very\long\folder\path\for\this\machine")
+        for _ in range(8):
+            qapp.processEvents()
+        assert page._cards_side_by_side == side, "줄을 추가하자 배치가 뒤집혔다"
+        scroll = page.findChild(QScrollArea)
+        assert scroll.horizontalScrollBar().maximum() == 0, f"{width}px 가로 넘침"
+    finally:
+        page.close()
+
+
+def test_wide_window_puts_cards_side_by_side(qapp, monkeypatch):
+    monkeypatch.setattr(sp.SetupPage, "_TWO_COLUMN", True)  # 두 열 코드는 남아 있다(기본은 한 열)
     page = _page(qapp, 1512)
     try:
         assert page._cards_side_by_side is True
@@ -77,16 +95,17 @@ def test_narrow_window_stacks_cards(qapp):
         page.close()
 
 
-def test_orientation_follows_resize(qapp):
+def test_orientation_follows_resize(qapp, monkeypatch):
+    monkeypatch.setattr(sp.SetupPage, "_TWO_COLUMN", True)  # 두 열 코드는 남아 있다(기본은 한 열)
     """폭이 임계치를 넘나들면 배치가 따라 바뀐다."""
-    page = _page(qapp, 1280)
+    page = _page(qapp, 1600)
     try:
         assert page._cards_side_by_side is True
         page.resize(800, 600)
         for _ in range(8):
             qapp.processEvents()
         assert page._cards_side_by_side is False
-        page.resize(1280, 900)
+        page.resize(1600, 900)
         for _ in range(8):
             qapp.processEvents()
         assert page._cards_side_by_side is True
@@ -108,6 +127,53 @@ def test_legacy_toggle_grows_only_engine_card(qapp, width):
             qapp.processEvents()
         assert run.height() == run_before, "실행 옵션 카드가 같이 커졌다"
         assert eng.height() >= eng_before, "매칭 설정 카드는 커져야 한다"
+    finally:
+        page.close()
+
+
+# ---------------------------------------------------------------------------
+# 2-b) 두 열 — 검증 장비를 늘려도 왼쪽(기준 장비 · 실행 옵션)은 그대로(2026-10-27)
+# ---------------------------------------------------------------------------
+def test_adding_val_devices_does_not_move_left_column(qapp, monkeypatch):
+    monkeypatch.setattr(sp.SetupPage, "_TWO_COLUMN", True)  # 두 열 코드는 남아 있다(기본은 한 열)
+    page = _page(qapp, 1600)
+    try:
+        assert page._cards_side_by_side is True
+        run, _eng = page._setting_cards
+        ref = page.ref_group
+        before = (ref.height(), run.y(), run.height())
+        for _ in range(4):
+            page._add_val_row()
+        for _ in range(8):
+            qapp.processEvents()
+        assert page.val_group.height() > 300, "검증 카드가 늘어나야 이 시험이 의미가 있다"
+        assert (ref.height(), run.y(), run.height()) == before, \
+            "검증 장비를 늘리자 왼쪽 카드가 늘어나거나 밀렸다"
+        assert run.y() < page.val_group.y() + page.val_group.height()
+    finally:
+        page.close()
+
+
+def test_two_columns_pair_ref_with_run_and_val_with_engine(qapp, monkeypatch):
+    monkeypatch.setattr(sp.SetupPage, "_TWO_COLUMN", True)  # 두 열 코드는 남아 있다(기본은 한 열)
+    page = _page(qapp, 1600)
+    try:
+        run, eng = page._setting_cards
+        assert abs(page.ref_group.x() - run.x()) <= 1
+        assert abs(page.val_group.x() - eng.x()) <= 1
+        assert page.val_group.x() > page.ref_group.x() + page.ref_group.width() - 2
+    finally:
+        page.close()
+
+
+def test_narrow_window_keeps_folders_before_options(qapp):
+    """한 열일 때 순서 — 기준 → 검증 → 실행 옵션 → 매칭 설정."""
+    page = _page(qapp, 800, 600)
+    try:
+        run, eng = page._setting_cards
+        ys = [w.mapTo(page, w.rect().topLeft()).y()
+              for w in (page.ref_group, page.val_group, run, eng)]
+        assert ys == sorted(ys)
     finally:
         page.close()
 
@@ -138,3 +204,34 @@ def test_engine_mode_labels_dropped_internals():
     assert "사진이 많을 때" in i18n.KO.ENGINE_MODE_EFFICIENCY
     for text in (i18n.KO.LEGACY_MODE_HINT, i18n.KO.LEGACY_SWITCH_TITLE):
         assert "정밀 비교" not in text and "CPU+GPU" not in text
+
+
+# ---------------------------------------------------------------------------
+# 도구 레일(2026-10-27) — 왼쪽 세로 줄이 폭을 먹으므로 두 열은 더 넓어야 선다
+# ---------------------------------------------------------------------------
+def test_rail_takes_width_so_1280_stacks_cards_without_overflow(qapp):
+    page = _page(qapp, 1280)
+    try:
+        assert page._rail_side is True
+        assert page._cards_side_by_side is False         # 레일 + 두 열은 1280 에 안 든다
+        assert page._scroll.horizontalScrollBar().maximum() == 0
+        rail = page._tool_rail
+        from PyQt6.QtCore import QPoint
+        origin = QPoint(0, 0)
+        assert rail.mapTo(page, origin).x() < page.ref_group.mapTo(page, origin).x()   # 레일이 카드 왼쪽
+    finally:
+        page.close()
+
+
+def test_rail_lies_flat_above_cards_on_narrow_window(qapp):
+    page = _page(qapp, 800, 600)
+    try:
+        assert page._rail_side is False
+        from PyQt6.QtCore import QPoint
+        origin = QPoint(0, 0)
+        assert (page._tool_rail.mapTo(page, origin).y()
+                < page.ref_group.mapTo(page, origin).y())   # 카드 위의 가로 줄
+        assert page._scroll.horizontalScrollBar().maximum() == 0
+        assert not page._foot_rule.isVisible()           # 바닥 줄의 레일 칸도 풀린다
+    finally:
+        page.close()

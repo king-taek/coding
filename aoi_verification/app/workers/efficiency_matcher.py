@@ -103,10 +103,11 @@ def dynamic_concurrency(n_items: int, batch: int, cap: int = DEFAULT_ACCEL_CONCU
     return max(8, min(int(cap), reqs)) if cap >= 8 else max(1, min(int(cap), reqs))
 
 
-def describe_active_units() -> str:
-    """상태바용 라벨 — CPU + (가용) GPU."""
+def describe_active_units(cfg=None) -> str:
+    """상태바용 라벨 — CPU + (가용이고 설정에서 켠) GPU."""
     from .. import i18n
-    avail = [d for d in _ov.available_units() if d == "GPU"]
+    use_gpu = bool(getattr(cfg, "use_gpu", True))
+    avail = [d for d in _ov.available_units() if d == "GPU" and use_gpu]
     units = ["CPU"] + avail
     return i18n.KO.ACCEL_UNITS_FMT.format(units="+".join(units))
 

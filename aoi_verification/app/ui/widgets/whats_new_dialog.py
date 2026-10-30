@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QPixmap
-from PyQt6.QtWidgets import QDialog, QFrame, QHBoxLayout, QLabel, QVBoxLayout
+from PyQt6.QtWidgets import (QAbstractScrollArea, QDialog, QFrame, QHBoxLayout, QLabel,
+                             QScrollArea, QVBoxLayout, QWidget)
 
 from ... import i18n
 from ...utils import paths
@@ -46,7 +47,13 @@ class WhatsNewDialog(QDialog):
         root.setSpacing(0)
         root.addWidget(self._hero(view))
 
-        body = QVBoxLayout()
+        # ★ '그 밖에' 목록만 스크롤한다 — 밀린 업데이트가 많으면 안내창이 화면 높이에 잘리는데,
+        #   스크롤이 없으면 줄마다 높이가 눌려 글자가 사라진다.  
+        #   주의 띠도 같은 스크롤 안에 둔다 — 바깥에 두면 여러 개일 때 목록 자리를 다 먹는다.
+        inner = QWidget()
+        inner.setObjectName("whatsNewList")
+        inner.setStyleSheet("#whatsNewList { background:transparent; }")
+        body = QVBoxLayout(inner)
         body.setContentsMargins(28, 18, 28, 4)
         body.setSpacing(10)
         if view.others:
@@ -58,7 +65,17 @@ class WhatsNewDialog(QDialog):
         for text in view.notices:
             body.addSpacing(4)
             body.addWidget(self._notice(text))
-        root.addLayout(body)
+        body.addStretch(1)
+        self.scroll = QScrollArea(self)
+        self.scroll.setWidget(inner)
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # 내용만큼이 기본 높이, 모자라면 줄어들며 스크롤이 생긴다.
+        self.scroll.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustToContents)
+        self.scroll.setMinimumHeight(120)
+        self.scroll.setStyleSheet("QScrollArea { background:transparent; border:0; }")
+        root.addWidget(self.scroll, 1)
 
         bar = QHBoxLayout()
         bar.setContentsMargins(28, 12, 28, 20)

@@ -148,6 +148,20 @@ def test_single_slot_mode_can_jump_to_another_slot(qapp, isolated_cache):
     sp.deleteLater()
 
 
+def test_slot_number_shown_in_header_and_jump_list(qapp, isolated_cache):
+    """슬롯 번호를 아는 슬롯은 제목·이동 목록에 `슬롯 #N` 이 붙고, 모르면 예전 표기."""
+    from aoi_verification.app.ui.pages.select_page import SelectPage
+    sp = SelectPage()
+    sp.show()
+    QApplication.processEvents()
+    sp.load_state(queue=_build_queue([("S1", 200), ("S2", 150)]),
+                  slot_numbers={"S1": "3"})
+    texts = [sp.slot_jump.itemText(i) for i in range(sp.slot_jump.count())]
+    assert texts == ["#3 · S1 · 200장", "S2 · 150장"]
+    assert "#3" in sp.left_panel._sections["S1"]._label.text()
+    sp.deleteLater()
+
+
 def test_slot_jump_hidden_when_all_slots_are_shown(qapp, isolated_cache):
     from aoi_verification.app.ui.pages.select_page import SelectPage
     sp = SelectPage()

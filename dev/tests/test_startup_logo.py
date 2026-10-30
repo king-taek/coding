@@ -200,3 +200,21 @@ def test_build_pages_reports_progress_for_the_splash(qapp, monkeypatch,
         w.close()
         w.deleteLater()
         qapp.processEvents()
+
+
+def test_splash_logo_first_then_progress_widgets(qapp):
+    """로고는 글자·스타일 없이 먼저 뜬다 — Windows 글꼴 초기화(첫 실행 5~7초)가 로고 뒤로 간다.
+
+    창 크기는 처음부터 최종 크기여야 2단계에서 로고가 움직이지 않는다."""
+    s = StartupSplash(QPixmap(str(paths.logo_path("logo_big.png"))))
+    try:
+        assert s._label is None and s._busy is None and s._progress is None
+        assert not s._logo.pixmap().isNull()
+        size, logo_pos = s.size(), s._logo.pos()
+        s.set_progress(0, 0, "불러오는 중")        # 늦게 불러도 알아서 만든다
+        assert s._label.text() == "불러오는 중"
+        assert s.size() == size and s._logo.pos() == logo_pos
+    finally:
+        s.close()
+        s.deleteLater()
+        qapp.processEvents()
