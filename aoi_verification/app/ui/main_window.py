@@ -495,6 +495,9 @@ class MainWindow(MultiValFlow, QMainWindow):
         """도움말 > '업데이트 확인' — 소스/포터블 모두에서 결과를 명시적으로 안내."""
         import threading
         self._status_bar.showMessage(i18n.KO.UPDATE_CHECKING, 3000)
+        # 설정 화면은 상태바를 숨기므로(`_sync_statusbar`) 누른 버튼이 '확인 중' 을 대신 보인다 —
+        # 결과 창이 뜰 때까지 아무 반응이 없어 연타하던 자리다.  결과가 오면 다시 켠다.
+        self._set_update_btn_busy(True)
 
         def _work() -> None:
             status, info = "unknown", {}
@@ -517,9 +520,15 @@ class MainWindow(MultiValFlow, QMainWindow):
         threading.Thread(target=_work, name="update-check-manual",
                          daemon=True).start()
 
+    def _set_update_btn_busy(self, busy: bool) -> None:
+        btn = getattr(getattr(self, "_setup_page", None), "update_btn", None)
+        if btn is not None:
+            btn.setEnabled(not busy)
+
     def _on_update_none(self, msg: str) -> None:
         # 최신이거나 확인 불가인 결과다 — 중립 제목을 쓴다('업데이트 있음' 은 실제로
         # 새 버전이 있는 _on_update_found 전용).
+        self._set_update_btn_busy(False)
         sheets.info(self, i18n.KO.UPDATE_CHECK_TITLE, msg)
 
     # ==================================================================
@@ -557,6 +566,7 @@ class MainWindow(MultiValFlow, QMainWindow):
 
     def _on_update_found(self, info: dict) -> None:
         """'업데이트 있음' 안내 → 동의하면 백그라운드로 다운로드/교체."""
+        self._set_update_btn_busy(False)
         # 사용자에겐 개발자용 커밋 메시지/SSL 멘트 대신 간단한 안내만.
         body = (i18n.KO.UPDATE_UNKNOWN_CURRENT if (info or {}).get("current_unknown")
                 else i18n.KO.UPDATE_AVAILABLE_BODY)
@@ -2050,7 +2060,8 @@ class MainWindow(MultiValFlow, QMainWindow):
         def guess(attr: str) -> str:
             found = [notch.detect(Path(d)) for n in names
                      for d in [getattr(sr.slots[n], attr)] if d is not None]
-            return max(set(found), key=found.count) if found else notch.DEFAULT
+            # 동률이면 앞 슬롯의 값 — set 을 돌면 실행마다 순서가 달라 결과가 바뀐다.
+            return max(found, key=found.count) if found else notch.DEFAULT
 
         groups = [([it.path for it in sr.slots[n].ref_images],
                    [it.path for it in sr.slots[n].val_images]) for n in names]

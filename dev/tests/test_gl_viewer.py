@@ -555,6 +555,7 @@ def test_setup_tool_rail_has_gl_button_that_opens_viewer(styled_qapp, monkeypatc
     from aoi_verification.app.ui.widgets import gl_viewer_dialog as gv
     seen = []
     monkeypatch.setattr(sp.sheets, "run", lambda dlg, **kw: seen.append((dlg, kw)) or 0)
+    monkeypatch.setattr(sp.config, "GL_HISTOGRAM_READY", True)   # 준비되면 이렇게 열린다
     page = sp.SetupPage()
     try:
         assert page.gl_btn.text() == "GL 히스토그램"
@@ -572,7 +573,9 @@ def test_image_info_has_gl_button_enabled_only_with_photo(styled_qapp, tmp_path,
     from aoi_verification.app.ui.widgets import image_info_dialog as ii
     from aoi_verification.app.ui.widgets import gl_viewer_dialog as gv
     monkeypatch.setattr(ii, "_async_info", lambda: False)
+    monkeypatch.setattr(ii.config, "GL_HISTOGRAM_READY", True)
     d = ii.ImageInfoDialog(None)
+    assert not d.gl_btn.isHidden()
     assert not d.gl_btn.isEnabled()
     assert d.gl_btn.autoDefault() is False                  # Enter 가 GL 뷰어를 재실행하지 않는다
     p = tmp_path / "a.png"

@@ -131,9 +131,10 @@ def read_title_parts(root: Path) -> TitleParts:
             return got
         candidates = [root]
         # 숨김 폴더는 표본에서 뺀다(설정 화면 die 안내와 같은 관습 — 결과 폴더 옆의
-        # 점 폴더가 이름순 첫 자리를 차지하면 표본이 통째로 엉뚱해진다).
+        # 점 폴더가 이름순 첫 자리를 차지하면 표본이 통째로 엉뚱해진다).  Windows 시스템
+        # 폴더(`$RECYCLE.BIN`)도 `$` 가 글자·숫자보다 앞에 정렬돼 같은 일을 한다.
         candidates += [d for n, d in sorted(list_slot_dirs(root).items())
-                       if not n.startswith(".")][:1]
+                       if not n.startswith((".", "$"))][:1]
         for folder in candidates:
             p = _read_folder(folder)
             got = TitleParts(material=got.material or p.material,

@@ -130,6 +130,12 @@ SELECT_SINGLE_SLOT_THRESHOLD = 300
 # 메모리 압박 토스트 임계치 — 캐시 한도 + 1 GB 워킹셋.
 MEMORY_PRESSURE_BYTES = PIXMAP_CACHE_MAX_BYTES + 1024 * 1024 * 1024
 
+# GL 히스토그램 — 아직 배포하지 않는다(사용자 결정 2026-10-30).  거짓이면 왼쪽 메뉴에
+# 아이콘만 남기고 'Coming soon' 으로 막고, 사진 정보의 [GL 보기] 도 숨긴다.  코드는 그대로
+# 두므로 준비되면 이 값만 True 로 바꾼다.  ⚠ dev 브랜치는 True 로 켜 두고 기본 브랜치(배포)만
+# False 다 — 배포 PR 에서 False 로 되돌린다(사용자 결정 2026-10-30, CLAUDE.md 브랜치 규칙).
+GL_HISTOGRAM_READY = False
+
 
 # ---------------------------------------------------------------------------
 # Similarity engine/preprocess config — 모든 유사도 경로에 단일 객체로 전달.

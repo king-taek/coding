@@ -123,6 +123,17 @@ def test_apply_notch_raises_when_frame_missing(monkeypatch):
     assert notch.apply_notch({Path("a/1.jpg"): c}, lambda p: notch.DOWN)
 
 
+def test_kla_frame_refuses_guessed_pitch(tmp_path):
+    """DiePitch 가 없어 TB500 기본값을 댄 KLA 폴더는 돌리지 않는다(중심만 있어도) — 다른 die
+    크기의 자재를 조용히 틀리게 돌리지 않게 `NotchError` 로 간다(리뷰 지적)."""
+    from aoi_verification.app.coords import wafer_geometry as wg
+    (tmp_path / "wafer.001").write_text(
+        'WaferID "W1";\nSampleCenterLocation 150000 150000;\n', encoding="utf-8")
+    wg.kla_geometry.cache_clear()
+    assert wg.kla_geometry(tmp_path).source == "fallback"
+    assert notch.folder_frame(tmp_path, "kla") is None
+
+
 def test_normalize_and_detect_defaults(tmp_path):
     assert notch.normalize(None) == notch.DOWN
     assert notch.normalize(" UP ") == notch.UP

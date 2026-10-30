@@ -43,6 +43,7 @@ from PyQt6.QtWidgets import (QApplication, QDialog, QFileDialog, QFrame,
                              QSizePolicy, QVBoxLayout, QWidget)
 
 from ... import i18n
+from ... import config
 from ...config import CONFIG
 from ...coords import scan_image, single_info
 from ...utils import image_io as _io
@@ -349,6 +350,7 @@ class ImageInfoDialog(QDialog):
         self.gl_btn.setEnabled(False)
         self.gl_btn.clicked.connect(self._on_open_gl)
         bar.addWidget(self.gl_btn)
+        self.gl_btn.setVisible(config.GL_HISTOGRAM_READY)   # 준비 전에는 숨긴다
         self.copy_btn = NeonButton(i18n.KO.IMAGE_INFO_COPY, role="ghost")
         self.copy_btn.setMinimumHeight(theme.PROFILE.control_h_lg)
         bar.addWidget(self.copy_btn)

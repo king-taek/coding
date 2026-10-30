@@ -114,6 +114,13 @@ def test_kla_folder_is_read(tmp_path):
     assert read_title_parts(tmp_path) == TitleParts("TB500", "RDL2")
 
 
+def test_system_folder_is_not_the_sample_slot(tmp_path):
+    """`$RECYCLE.BIN` 은 이름순으로 슬롯보다 앞이라 표본이 되면 칸이 비었다(리뷰 지적)."""
+    (tmp_path / "$RECYCLE.BIN").mkdir()
+    _camtek_slot(tmp_path / "a", "TB500_RDL4 - Multi")
+    assert read_title_parts(tmp_path) == TitleParts("TB500", "RDL4")
+
+
 def test_unreadable_is_empty(tmp_path):
     assert read_title_parts(tmp_path) == TitleParts()          # 빈 폴더
     assert read_title_parts(tmp_path / "없는폴더") == TitleParts()

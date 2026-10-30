@@ -1279,9 +1279,14 @@ class SetupPage(QWidget):
         self.extract_btn.setToolTip(i18n.KO.EXTRACT_BUTTON_TOOLTIP)
         self.extract_btn.clicked.connect(lambda: self.show_page("extract"))
         # 사진 한 장의 GL(밝기) 분포를 히스토그램·선 프로파일·통계로 보는 도구.
-        self.gl_btn = NeonButton(i18n.KO.GL_BUTTON, role="ghost")
-        self.gl_btn.setToolTip(i18n.KO.GL_BUTTON_TOOLTIP)
-        self.gl_btn.clicked.connect(self._open_gl_viewer)
+        # 준비 전(`config.GL_HISTOGRAM_READY`)에는 아이콘은 그대로 두고 'Coming soon' 으로 막는다.
+        if config.GL_HISTOGRAM_READY:
+            self.gl_btn = NeonButton(i18n.KO.GL_BUTTON, role="ghost")
+            self.gl_btn.setToolTip(i18n.KO.GL_BUTTON_TOOLTIP)
+            self.gl_btn.clicked.connect(self._open_gl_viewer)
+        else:
+            self.gl_btn = NeonButton(i18n.KO.GL_COMING_SOON, role="ghost")
+            self.gl_btn.setToolTip(i18n.KO.GL_COMING_SOON_TOOLTIP)
         self.update_btn = NeonButton(i18n.KO.MENU_CHECK_UPDATE, role="ghost")
         self.update_btn.clicked.connect(self.update_check_requested.emit)
         self._nav_buttons = {"match": self.match_btn, "image_info": self.image_info_btn,
@@ -1297,6 +1302,12 @@ class SetupPage(QWidget):
                         (self.extract_btn, "doc"), (self.gl_btn, "bars"),
                         (self.update_btn, "refresh")):
             b.setIcon(rail_icon(icon))
+        if not config.GL_HISTOGRAM_READY:
+            # 누를 수 없게 하되 아이콘은 회색으로 바꾸지 않는다(사용자 요청 '아이콘은 그대로').
+            icon = self.gl_btn.icon()
+            icon.addPixmap(icon.pixmap(QSize(20, 20)), QIcon.Mode.Disabled)
+            self.gl_btn.setIcon(icon)
+            self.gl_btn.setEnabled(False)
         for b in (*self._nav_buttons.values(), self.update_btn):
             b.setIconSize(QSize(20, 20))
             b.setProperty("_railText", b.text())
