@@ -45,6 +45,9 @@ _SAMPLES = _REPO / "dev" / "좌표 확인"
     ("2D@R2-15966TA0-BW2_0859654PD-0C", ("", "")),
     ("2D@RE-W97218SGB1K16_0860463PD-0A", ("", "")),
     ("TestProduct", ("", "")),
+    # Layer 처럼 생긴 레시피 토큰은 Layer 가 아니다(아는 Layer 이름만).
+    ("TB500_ECO3 - Multi", ("TB500", "")),
+    ("TB500_PIDS3", ("TB500", "PIDS3")),
 ])
 def test_camtek_job_name(job, want):
     tp = parse_title_parts(job=job)
@@ -57,6 +60,7 @@ def test_kla_device_and_step():
     assert (tp.material, tp.layer) == ("TB500", "RDL4")
     tp = parse_title_parts(device="4DT-T254-H-M1", step="RDL2_NEW(MULTI)")
     assert (tp.material, tp.layer) == ("T254", "RDL2")
+    assert parse_title_parts(device="4DT-TB500-H-M1", step="AUTO1_RDL4").layer == ""
 
 
 def test_job_name_wins_over_device_code():
@@ -115,11 +119,20 @@ def test_unreadable_is_empty(tmp_path):
     assert read_title_parts(tmp_path / "없는폴더") == TitleParts()
 
 
-def test_real_samples_never_give_a_wrong_value():
-    """저장소 실물 샘플 전부 — 값을 내면 그 값은 폴더 이름표(제품·Layer)와 맞아야 한다.
+# 저장소 샘플 폴더(맨 위 이름) → 기대값.  샘플 폴더 이름표와 장비 파일(SetupPath·DeviceID)
+# 로 확인한 값(관측, 2026-10-30).  읽은 값은 **이 중 하나**여야 한다 — 빈 칸은 허용.
+_SAMPLE_EXPECT = {
+    "KLA": {("TB500", "RDL2")},
+    "KLA_Camtek(TB500 RDL4)": {("TB500", "RDL4")},
+    "die맵": {("", ""), ("T254", ""), ("TB500", "RDL4")},
+    "die목록(DieLut)": {("", ""), ("T254", ""), ("TB500", "RDL2")},
+    "장비격자(ExportData)": {("", ""), ("T254", "")},
+    "화면시프트(T254 FS UBM)": {("T254", "")},
+}
 
-    샘플 폴더 이름이 이미 `KLA_Camtek(TB500 RDL4)`·`화면시프트(T254 FS UBM)` 처럼 사람이 적은
-    정답을 담고 있다.  못 읽는 것(빈 칸)은 허용, **틀린 값은 불허**."""
+
+def test_real_samples_give_only_known_values():
+    """저장소 실물 샘플 전부 — 틀린 값은 불허, 못 읽는 것(빈 칸)만 허용."""
     from aoi_verification.app.models.lot_info import _read_folder
 
     if not _SAMPLES.is_dir():
@@ -128,14 +141,11 @@ def test_real_samples_never_give_a_wrong_value():
     for d in sorted({p.parent for p in _SAMPLES.rglob("*")
                      if p.name in ("Params_WaferInfo.ini", "ProductInfo.ini")
                      or p.suffix == ".001"}):
-        label = str(d.relative_to(_SAMPLES))
+        top = d.relative_to(_SAMPLES).parts[0]
         tp = _read_folder(d)
-        if tp.material:
-            seen += 1
-            if "TB500" in label or "T254" in label:
-                assert tp.material in label, (label, tp)
-        if tp.layer and "RDL" in label:
-            assert tp.layer in label, (label, tp)
+        assert top in _SAMPLE_EXPECT, f"새 샘플 폴더 — 기대값을 적어라: {top}"
+        assert (tp.material, tp.layer) in _SAMPLE_EXPECT[top], (str(d), tp)
+        seen += bool(tp.material)
     assert seen >= 80, f"샘플에서 자재를 거의 못 읽었다: {seen}"
 
 
@@ -154,25 +164,59 @@ def test_compose_title():
     ex = {"machine": "17", "layer": "RDL4", "material": "TB500"}
     assert compose_title(ex) == "17 RDL4_TB500 Defect 추출.xlsx"
     assert compose_title({**ex, "layer": "", "material": ""}) == "AOI 17 Defect 추출.xlsx"
+    # 장비 칸을 비워도 이름에 이중 공백이 남지 않는다.
+    assert "  " not in compose_title({**f, "val": ""})
+
+
+def _inp(ref, val):
+    from aoi_verification.app.ui.pages.setup_page import SetupInput
+    return SetupInput(mode="single", ref_root=ref, val_root=val,
+                      ref_machine="AOI-24", val_machine="4F-AOI-03",
+                      threshold=0.55)
 
 
 def test_the_suggested_title_reads_the_val_side_first(tmp_path):
-    """검증 대상 폴더가 먼저, 못 읽은 칸만 기준 폴더에서(사용자 결정)."""
+    """검증 대상 폴더가 먼저, 못 읽은 Layer 는 **같은 제품일 때만** 기준 폴더에서."""
     pytest.importorskip("PyQt6.QtWidgets")
     from aoi_verification.app.ui.main_window import MainWindow
-    from aoi_verification.app.ui.pages.setup_page import SetupInput
 
     ref, val = tmp_path / "ref", tmp_path / "val"
     _camtek_slot(ref / "S1", "TB500_RDL2 - Multi")
-    _camtek_slot(val / "S1", "R_T254 LIVE_0858711PD_FS UBM")     # Layer 없음
-    inp = SetupInput(mode="single", ref_root=ref, val_root=val,
-                     ref_machine="AOI-24", val_machine="4F-AOI-03",
-                     threshold=0.55)
-    assert MainWindow._suggest_result_name(inp) == \
-        "4F-AOI-03 RDL2_T254 검증(AOI-24 기준).xlsx"
-    fields = MainWindow._title_fields(inp)
-    assert fields == {"val": "4F-AOI-03", "layer": "RDL2", "material": "T254",
-                      "ref": "AOI-24"}
+    _camtek_slot(val / "S1", "R_TB500_LIVE")                     # Layer 없음
+    assert MainWindow._suggest_result_name(_inp(ref, val)) == \
+        "4F-AOI-03 RDL2_TB500 검증(AOI-24 기준).xlsx"
+    assert MainWindow._title_fields(_inp(ref, val)) == {
+        "val": "4F-AOI-03", "layer": "RDL2", "material": "TB500", "ref": "AOI-24"}
+
+
+def test_other_products_are_not_mixed(tmp_path):
+    """자재가 다르면 기준 폴더의 Layer 를 끌어오지 않는다 — 'RDL2_T254' 같은 없는 조합."""
+    pytest.importorskip("PyQt6.QtWidgets")
+    from aoi_verification.app.ui.main_window import MainWindow
+
+    ref, val = tmp_path / "ref", tmp_path / "val"
+    _camtek_slot(ref / "S1", "TB500_RDL2 - Multi")
+    _camtek_slot(val / "S1", "R_T254 LIVE_0858711PD_FS UBM")
+    assert MainWindow._suggest_result_name(_inp(ref, val)) == \
+        "4F-AOI-03 T254 검증(AOI-24 기준).xlsx"
+
+
+def test_ref_side_is_used_when_val_side_has_nothing(tmp_path):
+    pytest.importorskip("PyQt6.QtWidgets")
+    from aoi_verification.app.ui.main_window import MainWindow
+
+    ref, val = tmp_path / "ref", tmp_path / "val"
+    _camtek_slot(ref / "S1", "TB500_RDL4 - Multi")
+    (val / "S1").mkdir(parents=True)
+    assert MainWindow._suggest_result_name(_inp(ref, val)) == \
+        "4F-AOI-03 RDL4_TB500 검증(AOI-24 기준).xlsx"
+
+
+def test_parent_of_the_chosen_folder_is_not_read(tmp_path):
+    """고른 폴더의 **부모**는 관계없는 공용 폴더일 수 있다 — 거기 INI 를 읽지 않는다."""
+    _camtek_slot(tmp_path, "TB500_RDL4 - Multi")                 # 부모에 놓인 INI
+    (tmp_path / "LOT" / "S1").mkdir(parents=True)
+    assert read_title_parts(tmp_path / "LOT") == TitleParts()
 
 
 def test_the_title_falls_back_when_nothing_is_read(tmp_path):

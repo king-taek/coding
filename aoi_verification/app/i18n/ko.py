@@ -868,7 +868,7 @@ SAVE_NAME_BODY = (
 )
 SAVE_NAME_FOLDER_FMT = "저장 폴더: {path}"
 # 이름 아래 칸들 — 추천값이 들어 있고, 고친 뒤 버튼을 누르면 위 이름을 다시 만든다(사용자 요청 2026-10-30).
-SAVE_NAME_FIELDS_HINT = "칸을 고친 뒤 [제목 자동 생성]을 누르면 위 이름이 바뀝니다. 빈 칸은 제목에서 빠집니다."
+SAVE_NAME_FIELDS_HINT = "아래 값을 고친 뒤 ‘제목 자동 생성’을 누르면 위 이름이 바뀝니다. 비워 둔 값은 제목에서 빠집니다."
 SAVE_NAME_AUTO = "제목 자동 생성"
 SAVE_NAME_FIELD_VAL = "검증 장비"
 SAVE_NAME_FIELD_REF = "기준 장비"

@@ -65,8 +65,13 @@ def compose_title(fields: dict[str, str]) -> str:
 
     ``fields`` 에 ``machine`` 이 있으면 Defect 추출 제목, 아니면 검증 결과 제목이다
     (``val``·``ref``).  ``layer``·``material`` 중 빈 칸은 빠지고, 둘 다 비면 폴백 이름."""
-    g = {k: (v or "").strip() for k, v in fields.items()}
+    # 칸 안의 연속 공백은 하나로 — 빈 장비 칸이 이름에 이중 공백을 남기지 않게.
+    g = {k: " ".join((v or "").split()) for k, v in fields.items()}
     tag = "_".join(t for t in (g.get("layer", ""), g.get("material", "")) if t)
+    return " ".join(_compose(g, tag).split())
+
+
+def _compose(g: dict[str, str], tag: str) -> str:
     if "machine" in g:
         if not tag:
             return i18n.KO.EXTRACT_FILE_TITLE_FALLBACK_FMT.format(machine=g["machine"])

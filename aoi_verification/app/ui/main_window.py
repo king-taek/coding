@@ -385,6 +385,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._ref_history_timer.timeout.connect(self._flush_ref_history)
         self._stage1_a_snapshot: dict | None = None
         self._working_xlsx: Optional[Path] = None
+        self._title_fields_now: Optional[dict] = None
         self._template_used: Optional[Path] = None
         self._session_id: str = ""
 
@@ -2409,7 +2410,7 @@ class MainWindow(MultiValFlow, QMainWindow):
             from .widgets.save_name_dialog import SaveNameDialog
             dlg = SaveNameDialog(self._working_xlsx.name, self._working_xlsx.parent,
                                  parent=self, body=i18n.KO.EXTRACT_SAVE_NAME_BODY,
-                                 fields=getattr(self, "_title_fields_now", None))
+                                 fields=self._title_fields_now)
             if sheets.run(dlg) and dlg.chosen is not None:
                 dst = self._working_xlsx.with_name(dlg.chosen)
         if dst is None:
@@ -2711,7 +2712,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         ⚠ 파일시스템 접근은 **폴더당 슬롯 하나의 INI 몇 개**다.  느린 NAS 라도 왕복
         두어 번이라 [검증 시작] 의 오버레이 뒤에서 티가 나지 않는다 — 여기서 폴더를
         훑기 시작하면 설정 화면 die 안내가 겪은 그 정지가 재현된다."""
-        from ..models.lot_info import read_title_parts
+        from ..models.lot_info import TitleParts, read_title_parts
 
         if getattr(inp, "extract", False):
             tp = read_title_parts(inp.ref_root)
@@ -2719,9 +2720,13 @@ class MainWindow(MultiValFlow, QMainWindow):
                     "material": tp.material}
         tp = read_title_parts(inp.val_root)
         if not (tp.material and tp.layer):
+            # 기준 폴더로 메우는 건 **같은 제품일 때만** — 자재가 다르면(또는 한쪽만
+            # 알면) 섞어서 'RDL2_T254' 같은 없는 조합을 만들지 않는다.
             rp = read_title_parts(inp.ref_root)
-            tp = type(tp)(material=tp.material or rp.material,
-                          layer=tp.layer or rp.layer)
+            if tp.material and rp.material == tp.material:
+                tp = TitleParts(material=tp.material, layer=tp.layer or rp.layer)
+            elif not tp.material and not tp.layer:
+                tp = rp
         if not (tp.material or tp.layer):
             _LOG.info("자재·Layer 를 못 읽어 기본 제목을 씁니다: %s", inp.val_root)
         return {"val": inp.val_machine, "layer": tp.layer,
@@ -2788,6 +2793,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._refresh_rail_criteria()      # 기준이 사라졌으니 레일도 비운다
         self._scan = None
         self._working_xlsx = None
+        self._title_fields_now = None      # 결과 화면 쪽은 다음 `_prepare_working_file` 이 덮는다
         self._session_id = ""
         self._show_page(self._setup_page)
 

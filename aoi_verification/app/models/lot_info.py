@@ -20,7 +20,8 @@
 제품이 있다 — 그때는 칸을 비워 두고 저장 창에서 사용자가 채운다(사용자 결정: 제품코드 →
 이름 표는 만들지 않는다).  틀린 값을 채우느니 비워 두게 규칙을 좁게 잡았다:
 자재는 ``TB500``·``T254`` 처럼 **영문 1~2자 + 숫자 3자** 토큰, Layer 는 ``RDL4``·``PI4``
-처럼 **영문 2~4자 + 숫자 1~2자** 토큰(자재 토큰 **뒤**에서만, KLA 는 StepID 첫 토큰).
+처럼 **아는 Layer 이름(RDL·PI·PIDS·UBM) + 숫자** 토큰(자재 토큰 **뒤**에서만, KLA 는
+StepID 첫 토큰).
 
 ⚠ 슬롯 **하나만** 읽는다.  같은 로트의 슬롯은 자재·Layer 가 같다(사용자 확인).
   전부 읽으면 폴더 수만큼 왕복이 늘 뿐이다 — 슬롯 25개 자재에서 그 비용이 실제로
@@ -54,7 +55,9 @@ _RESULT_PATH = re.compile(r"(?im)^\s*ScanResultsPath\s*=.*?\\ScanResults\\([^\\\
 _JOB_DEV = re.compile(r"(?im)^\s*JobDesc\s*=.*?DEV=([^~\r\n]+)")
 _TOKEN_SPLIT = re.compile(r"[\s_\-@~()]+")
 _MATERIAL_TOKEN = re.compile(r"^[A-Z]{1,2}\d{3}$")     # TB500 · T254
-_LAYER_TOKEN = re.compile(r"^[A-Z]{2,4}\d{1,2}$")      # RDL4 · PI4
+# Layer 는 아는 이름만 — 모양만 보면 `ECO3`·`AUTO1` 같은 레시피 토큰도 Layer 로 잡힌다.
+# 새 Layer 이름이 나오면 여기 더한다(못 읽으면 빈 칸 — 저장 창에서 채운다).
+_LAYER_TOKEN = re.compile(r"^(?:RDL|PIDS|PI|UBM)\d{1,2}$")      # RDL4 · PI4 · PIDS3
 
 
 @dataclass(frozen=True)
@@ -97,18 +100,16 @@ def parse_title_parts(job: str = "", device: str = "", step: str = "") -> TitleP
 
 
 def _read_folder(folder: Path) -> TitleParts:
-    """한 폴더(+부모)의 Camtek INI 와 KLA 정보파일에서 추천값을 읽는다."""
+    """한 폴더의 Camtek INI 와 KLA 정보파일에서 추천값을 읽는다."""
     from ..coords.kla_info import read_device_step
 
-    job = device = ""
-    for base in (folder, folder.parent):
-        if not job:
-            text = read_ini_text(base / "Params_WaferInfo.ini") or ""
-            m = _SETUP_PATH.search(text) or _RESULT_PATH.search(text)
-            job = m.group(1).strip() if m else ""
-        if not device:
-            m = _JOB_DEV.search(read_ini_text(base / "ProductInfo.ini") or "")
-            device = m.group(1).strip() if m else ""
+    # ★ 부모는 보지 않는다 — 후보가 루트와 그 안의 슬롯뿐이라 슬롯의 부모는 루트(이미
+    #   후보)이고, 루트의 부모는 관계없는 공용 폴더일 수 있다.
+    text = read_ini_text(folder / "Params_WaferInfo.ini") or ""
+    m = _SETUP_PATH.search(text) or _RESULT_PATH.search(text)
+    job = m.group(1).strip() if m else ""
+    m = _JOB_DEV.search(read_ini_text(folder / "ProductInfo.ini") or "")
+    device = m.group(1).strip() if m else ""
     step = ""
     if not job and not device:              # Camtek 파일이 없으면 KLA 로 본다
         kdev, kstep = read_device_step(folder)
@@ -153,7 +154,7 @@ def read_active_slot(folder: Path) -> Optional[str]:
         [AutoCycleInfo]
         ActiveSlot=5
 
-    ⚠ :func:`read_lot_info` 와 달리 **부모 폴더는 보지 않는다**.  자재·Layer 는 로트
+    ⚠ :func:`read_title_parts` 처럼 **부모 폴더는 보지 않는다**.  자재·Layer 는 로트
     공통이라 아무 슬롯에서 읽어도 같지만 ``ActiveSlot`` 은 **웨이퍼 한 장의 값**이다 —
     슬롯 폴더 옆에 놓인 INI 를 읽으면 다른 웨이퍼의 번호를 그 슬롯에 붙인다.  못 찾으면
     번호 없이 slot명만 찍히므로, 잘못된 번호를 찍는 것보다 없는 편이 낫다.
