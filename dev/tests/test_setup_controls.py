@@ -115,13 +115,6 @@ def test_action_bar_index_contract(qapp):
         page.deleteLater()
 
 
-def test_help_tooltip_comes_from_i18n():
-    """사용자 노출 문자열 하드코딩 금지(CLAUDE.md) — '?' 툴팁도 i18n 에서."""
-    src = inspect.getsource(sp)
-    assert "설명 보기/숨기기" not in src
-    assert "HELP_TOGGLE_TOOLTIP" in src
-
-
 # ── 구형 모드: 명시 스위치만이 모드를 바꾼다 (핵심 회귀) ─────────────────────
 def test_fresh_prefs_starts_in_coordinate(qapp):
     from aoi_verification.app.utils.prefs import EngineMode
@@ -142,8 +135,6 @@ def test_reading_the_explanation_does_not_change_engine(qapp):
     page = sp.SetupPage()
     try:
         before = page._current_engine_mode()
-        page._auto_help_btn.setChecked(True)          # 도움말 펼치기
-        page._auto_help_btn.setChecked(False)
         assert page._current_engine_mode() == before == EngineMode.COORDINATE
         # 접이식 상태를 모드 판단에 쓰는 코드가 남아 있지 않아야 한다.
         src = inspect.getsource(sp.SetupPage._current_engine_mode)

@@ -782,18 +782,9 @@ SLOT_SELECT_TILE_COUNT_NONE = "—"      # 검증 폴더에 그 슬롯이 없다
 SLOT_SELECT_KLA_FMT = "{wafer_id}  ·  슬롯 #{slot}"
 SLOT_MAP_FOLDER_TIP_FMT = "폴더: {folder}"
 # 진행 범위 타일 — 상태를 옆 라벨이 아니라 타일 자신이 말한다.
-# ── 실행 옵션 카드 — '자동화 수준' + '진행 범위' 를 한 카드에 담는다.
-RUN_OPTIONS_HINT = (
-    "· 자동화 수준 — ‘모든 사진 자동’은 후보 선별을 건너뛰고 모든 기준 사진을"
-    " 자동으로 매치합니다. 매치가 끝나면 검토 화면에서 결과를 하나씩 확인하고"
-    " 잘못된 매치는 검토 화면의 ‘×’ 버튼(매치 없음)으로 되돌릴 수 있습니다.\n"
-    # ★ 라벨 그대로 적는다 — SCOPE_SUBSET 은 말줄임표까지 포함해 '일부 슬롯만…' 이다.
-    "· 진행 범위 — 기본은 기준 폴더의 모든 슬롯입니다. ‘일부 슬롯만…’ 을 고르면 이번"
-    " 검증에서 진행할 슬롯을 직접 선택합니다(급한 슬롯만 먼저 돌릴 때)."
-)
 SCOPE_TITLE = "진행 범위"
 SCOPE_ALL = "모든 슬롯"
-SCOPE_SUBSET = "일부 슬롯만…"
+SCOPE_SUBSET = "일부 슬롯만"
 SCOPE_SUBSET_COUNT_FMT = "일부 슬롯 ({n}/{total})"
 # 입력 유효성 — 왜 [검증 시작] 을 누를 수 없는지 눈에 보이게.
 SETUP_INVALID_FOLDER = "폴더를 찾을 수 없습니다."
@@ -1259,11 +1250,6 @@ EXTRACT_LOAD_JOURNEY_STEPS = ("폴더 스캔", "썸네일", "선별 준비")
 EXTRACT_BLOCKED_HINT = "LOT 또는 wafer 폴더를 먼저 지정하세요."
 EXTRACT_AUTOMATION_USER_SELECT = "추출할 사진을 직접 고릅니다"
 EXTRACT_AUTOMATION_AUTO_ALL = "모든 사진 자동 — 선별 없이 전부 추출"
-EXTRACT_RUN_OPTIONS_HINT = (
-    "· 자동화 수준 — ‘모든 사진 자동’은 후보 선별을 건너뛰고 폴더의 모든 사진을"
-    " 엑셀로 저장합니다.\n"
-    "· 슬롯 — LOT 줄마다 [슬롯] 버튼으로 일부 슬롯만 고를 수 있습니다.\n"
-    "· Wafer Map 시트 — 끄면 엑셀에 맵 시트를 만들지 않아 저장이 빨라집니다.")
 EXTRACT_SAVE_NAME_BODY = (
     "아래 이름으로 저장합니다. 필요하면 고쳐 주세요.\n"
     "규칙: 호기 Layer_자재 Defect 추출")

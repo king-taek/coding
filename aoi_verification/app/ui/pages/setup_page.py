@@ -12,7 +12,7 @@ from PyQt6.QtCore import QObject, QSize, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (QBoxLayout, QDoubleSpinBox, QFrame,
                               QGridLayout, QHBoxLayout, QLabel, QLineEdit,
                               QMessageBox, QScrollArea, QSizePolicy,
-                              QToolButton, QVBoxLayout, QWidget)
+                              QVBoxLayout, QWidget)
 
 from ..deferred import call_later
 from ..folder_picker import FolderPicker
@@ -665,11 +665,12 @@ class SetupPage(QWidget):
     # 기준 1 ↔ 검증 여러 장비 — 검증 카드 안의 추가 장비 줄 + [+ 검증 장비 추가]
     # ------------------------------------------------------------------
     MAX_VALS = 5             # 첫 검증 장비 포함
-    # 추가 장비 줄(라벨 · 폴더 · [폴더 선택…] · 호기 · ✕)이 들어갈 카드의 하한.  ★ 줄을
+    # 추가 장비 줄(라벨 · ✕ · 폴더 · 호기 · [폴더 선택…])이 들어갈 카드의 하한.  ★ 줄을
     # 추가하는 순간 카드의 최소 폭이 커져 두 열 ↔ 한 열이 뒤집히면 화면이 튄다 — 그래서
     # 줄이 없을 때도 이 값을 두 열 판단에 미리 넣는다(`_side_by_side_fits`).
     _VAL_ROW_EDIT_MIN_W = 150
     _VAL_CARD_MIN_W = 570
+    _VAL_REMOVE_W = 44       # ✕ 폭 — 라벨 열이 '검증 5' + ✕ 를 담도록 `_row_label_w` 가 쓴다
 
     def _build_val_list(self) -> None:
         """검증 카드 아래의 추가 장비 줄들(`_build_lot_list` 와 같은 모양).
@@ -704,8 +705,6 @@ class SetupPage(QWidget):
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(10)
         label = QLabel("", host)
-        # 첫 장비의 '최상위 폴더' 라벨과 같은 폭 — 입력란이 첫 장비와 같은 자리에서 시작한다.
-        label.setMinimumWidth(self._row_label_w(label))
         edit = QLineEdit(host)
         edit.setMinimumWidth(self._VAL_ROW_EDIT_MIN_W)
         edit.setPlaceholderText(i18n.KO.SETUP_FOLDER_PLACEHOLDER)
@@ -713,12 +712,16 @@ class SetupPage(QWidget):
         browse = NeonButton(i18n.KO.BTN_BROWSE, role="ghost")
         machine_edit = QLineEdit(host)
         machine_edit.setPlaceholderText(i18n.KO.MULTI_VAL_MACHINE_PLACEHOLDER)
-        machine_edit.setFixedWidth(110)
+        machine_edit.setFixedWidth(120)      # 첫 장비와 같은 폭 — 줄 끝이 맞는다
         machine_edit.setText(machine)
         remove = NeonButton("✕", role="ghost")
         remove.setToolTip(i18n.KO.MULTI_VAL_REMOVE)
         remove.setAccessibleName(i18n.KO.MULTI_VAL_REMOVE)
-        for w in (label, edit, machine_edit, browse, remove):   # 첫 줄과 같은 순서: 경로 · 호기 · 폴더 선택
+        # ✕ 는 라벨과 폴더 사이 — 줄 끝이 첫 장비(…[폴더 선택])와 같고, 라벨+✕ 가 첫 장비의
+        # 라벨 폭을 나눠 써서 입력란이 첫 장비와 같은 자리에서 시작한다.
+        remove.setFixedWidth(self._VAL_REMOVE_W)
+        label.setFixedWidth(self._row_label_w(label) - self._VAL_REMOVE_W - 10)
+        for w in (label, remove, edit, machine_edit, browse):   # 라벨 · ✕ · 경로 · 호기 · 폴더 선택
             row.addWidget(w, 1 if w is edit else 0)
         rec = {"host": host, "edit": edit, "machine": machine_edit, "label": label}
         self._val_rows.append(rec)
@@ -838,7 +841,7 @@ class SetupPage(QWidget):
             rec["slot_btn"].setText(i18n.KO.EXTRACT_SLOT_BTN_ALL)
 
     def _pick_lot_slots(self, idx: int) -> None:
-        """LOT 한 줄의 슬롯을 고른다 — 매칭의 '일부 슬롯만…' 과 같은 선택 창."""
+        """LOT 한 줄의 슬롯을 고른다 — 매칭의 '일부 슬롯만' 과 같은 선택 창."""
         from ...models.slot import extract_slot_dirs
         from ..widgets.slot_select_dialog import SlotSelectDialog
 
@@ -941,13 +944,6 @@ class SetupPage(QWidget):
         card.body().setContentsMargins(0, 12, 0, 2)
         col = card.body()
 
-        # 도움말은 카드 하나에 하나로 — 두 카드에 각자 '?' 를 두면 같은 어포던스가 둘이 된다.
-        self._auto_help_btn = QToolButton(card)
-        self._auto_help_btn.setText("?")
-        self._auto_help_btn.setObjectName("helpToggle")
-        self._auto_help_btn.setCheckable(True)
-        self._auto_help_btn.setToolTip(i18n.KO.HELP_TOGGLE_TOOLTIP)
-
         # ── 자동화 수준 — 키가 곧 AutomationLevel 값이라 분기 없이 읽는다.
         _last_auto = getattr(_prefs_now, "automation_level",
                              AutomationLevel.USER_SELECT)
@@ -967,7 +963,6 @@ class SetupPage(QWidget):
             lambda key: _prefs.patch(automation_level=key))
         auto_row = self._labeled_segment_row(card, i18n.KO.AUTOMATION_TITLE,
                                              self.auto_group)
-        auto_row.layout().addWidget(self._auto_help_btn)   # 도움말은 이 줄 오른쪽 끝
         col.addWidget(auto_row)
 
         # ── 진행 범위 — 상태가 **세그먼트 자신**에 산다(옆 라벨에 두지 않는다).
@@ -1005,14 +1000,6 @@ class SetupPage(QWidget):
         self._cross_switch.toggled.connect(self.cross_mode_changed)
         col.addWidget(self._cross_switch)
 
-        # 도움말 본문 — 두 설정을 한 번에 설명한다(기본 접힘).
-        self._auto_hint = QLabel(i18n.KO.RUN_OPTIONS_HINT, card)
-        self._auto_hint.setProperty("role", "muted")
-        self._auto_hint.setWordWrap(True)
-        self._auto_hint.setStyleSheet("padding-top: 4px;")
-        self._auto_hint.setVisible(False)
-        col.addWidget(self._auto_hint)
-        self._auto_help_btn.toggled.connect(self._auto_hint.setVisible)
         return card
 
     # 세그먼트 하나의 **하한** 폭.  실제 폭은 그룹 안 가장 넓은 라벨에 맞춰 균등해진다
@@ -1352,10 +1339,17 @@ class SetupPage(QWidget):
     # ------------------------------------------------------------------
     @staticmethod
     def _row_label_w(w: QWidget) -> int:
-        """폴더 줄 왼쪽 라벨(기준/검증/대상 장비)의 공통 폭 — 굵은 글씨 여유 포함."""
+        """폴더 줄 왼쪽 라벨(기준/검증/대상 장비)의 공통 폭 — 굵은 글씨 여유 포함.
+
+        추가 검증 줄의 '검증 N + ✕' 가 들어갈 폭을 하한으로 둔다(첫 줄 라벨 열도 같이 넓어져
+        모든 줄의 입력란이 같은 자리에서 시작한다)."""
         fm = w.fontMetrics()
         names = (i18n.KO.SETUP_REF_GROUP, i18n.KO.SETUP_VAL_GROUP, i18n.KO.EXTRACT_GROUP)
-        return max(fm.horizontalAdvance(n) for n in names) + 14
+        w_names = max(fm.horizontalAdvance(n) for n in names) + 14
+        # 추가 검증 줄은 같은 열에 '검증 N' + ✕ 를 담는다 — 안 잘리게 하한을 둔다.
+        w_extra = (fm.horizontalAdvance(i18n.KO.MULTI_VAL_ROW_FMT.format(n=5))
+                   + SetupPage._VAL_REMOVE_W + 20)
+        return max(w_names, w_extra)
 
     def _make_machine_group(self, title: str, extra: Optional[QWidget] = None
                             ) -> tuple[QWidget, QLineEdit, QLineEdit]:
@@ -1512,9 +1506,7 @@ class SetupPage(QWidget):
         self._lot1_slot_btn.setVisible(on)
         self._lot_list.setVisible(on)
         self._scope_row.setVisible(not on)
-        # 도움말·자동화 툴팁 — 매칭 문구는 '매치·검토 화면' 을 말한다(추출에는 없다).
-        self._auto_hint.setText(i18n.KO.EXTRACT_RUN_OPTIONS_HINT if on
-                                else i18n.KO.RUN_OPTIONS_HINT)
+        # 자동화 툴팁 — 매칭 문구는 '매치·검토 화면' 을 말한다(추출에는 없다).
         self.auto_group.set_option_tooltip(
             AutomationLevel.USER_SELECT,
             i18n.KO.EXTRACT_AUTOMATION_USER_SELECT if on

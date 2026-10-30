@@ -199,13 +199,13 @@ class OptionGroup(QWidget):
         if btn is not None:
             btn.setText(text)
             btn.setAccessibleName(text)
-            # 라벨이 길어지면 균등 폭을 다시 잡는다('일부 슬롯만…' → '일부 슬롯 (3/12)').
+            # 라벨이 길어지면 균등 폭을 다시 잡는다('일부 슬롯만' → '일부 슬롯 (3/12)').
             self._equalize_segments()
 
     def _equalize_segments(self) -> None:
         """세그먼트를 **서로 같은 폭**으로 — 짝이 하나의 컨트롤로 읽히게.
 
-        내용 폭에 맡기면 '모든 슬롯'(82px)과 '일부 슬롯만…'(106px)처럼 들쭉날쭉해져
+        내용 폭에 맡기면 '모든 슬롯'(82px)과 '일부 슬롯만'(106px)처럼 들쭉날쭉해져
         두 조각이 각자 다른 버튼처럼 보인다.  가장 넓은 조각에 맞추고 ``min_tile_w``
         를 하한으로 둔다(짧은 라벨이 손가락에 너무 좁아지지 않게).
         """
