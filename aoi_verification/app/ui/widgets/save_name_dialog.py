@@ -16,21 +16,26 @@
 
 ★ 확장자는 화면에 보이되 **사용자가 지우면 되살린다** — `.xlsx` 가 빠진 파일은
   엑셀이 열지 못한다.  이름을 고치라고 열어 준 창이 열 수 없는 파일을 만들면 안 된다.
+
+이름 아래에는 제목을 이루는 칸(장비·Layer·자재)이 추천값으로 채워져 있고, 고친 뒤
+[제목 자동 생성] 을 누르면 위 이름을 그 칸으로 다시 만든다(사용자 요청 2026-10-30) —
+자재·Layer 는 못 읽는 제품이 있어 빈 칸으로 올 수 있다(`models/lot_info.py`).
 """
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (QDialog, QHBoxLayout, QLabel, QLineEdit,
-                             QVBoxLayout)
+from PyQt6.QtWidgets import (QDialog, QGridLayout, QHBoxLayout, QLabel,
+                             QLineEdit, QVBoxLayout)
 
 from ... import i18n
 from .. import theme
 from .neon_button import NeonButton
 
-__all__ = ["SaveNameDialog", "sanitize_name"]
+__all__ = ["SaveNameDialog", "sanitize_name", "compose_title"]
 
 # Windows 파일명 금지 문자 — 여기서 막지 않으면 저장이 OS 오류로 실패한다.
 _BAD = set('\\/:*?"<>|')
@@ -55,22 +60,54 @@ def sanitize_name(text: str) -> tuple[str, str]:
     return (name, "")
 
 
+def compose_title(fields: dict[str, str]) -> str:
+    """제목 칸 → 파일 이름(순수 함수 — 헤드리스 테스트).
+
+    ``fields`` 에 ``machine`` 이 있으면 Defect 추출 제목, 아니면 검증 결과 제목이다
+    (``val``·``ref``).  ``layer``·``material`` 중 빈 칸은 빠지고, 둘 다 비면 폴백 이름."""
+    g = {k: (v or "").strip() for k, v in fields.items()}
+    tag = "_".join(t for t in (g.get("layer", ""), g.get("material", "")) if t)
+    if "machine" in g:
+        if not tag:
+            return i18n.KO.EXTRACT_FILE_TITLE_FALLBACK_FMT.format(machine=g["machine"])
+        return i18n.KO.EXTRACT_FILE_TITLE_FMT.format(machine=g["machine"], tag=tag)
+    if not tag:
+        return i18n.KO.RESULT_FILE_TITLE_FALLBACK_FMT.format(
+            val=g.get("val", ""), ref=g.get("ref", ""))
+    return i18n.KO.RESULT_FILE_TITLE_FMT.format(
+        val=g.get("val", ""), ref=g.get("ref", ""), tag=tag)
+
+
+# 칸 순서 = 제목에 나오는 순서.
+_FIELD_LABELS = (
+    ("machine", i18n.KO.SAVE_NAME_FIELD_MACHINE),
+    ("val", i18n.KO.SAVE_NAME_FIELD_VAL),
+    ("layer", i18n.KO.SAVE_NAME_FIELD_LAYER),
+    ("material", i18n.KO.SAVE_NAME_FIELD_MATERIAL),
+    ("ref", i18n.KO.SAVE_NAME_FIELD_REF),
+)
+
+
 class SaveNameDialog(QDialog):
     """추천 이름을 보여주고 고치게 한다.  :attr:`chosen` 이 결과(취소면 ``None``)."""
 
     def __init__(self, suggested: str, folder: Path, parent=None,
-                 *, body: str | None = None) -> None:
+                 *, body: str | None = None,
+                 fields: dict[str, str] | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(i18n.KO.SAVE_NAME_TITLE)
         self._chosen: str | None = None
-        self._build(suggested, Path(folder), body or i18n.KO.SAVE_NAME_BODY)
+        self._folder = Path(folder)
+        self._fields: dict[str, QLineEdit] = {}
+        self._build(suggested, self._folder, body or i18n.KO.SAVE_NAME_BODY, fields)
 
     @property
     def chosen(self) -> str | None:
         return self._chosen
 
     # ------------------------------------------------------------------
-    def _build(self, suggested: str, folder: Path, body_text: str) -> None:
+    def _build(self, suggested: str, folder: Path, body_text: str,
+               fields: dict[str, str] | None) -> None:
         root = QVBoxLayout(self)
         m = theme.PROFILE.page_margin // 2
         root.setContentsMargins(m, m, m, m)
@@ -99,6 +136,33 @@ class SaveNameDialog(QDialog):
         self._err.setWordWrap(True)
         root.addWidget(self._err)
 
+        if fields:
+            # QFormLayout 은 라벨을 칸 위쪽에 붙여 그린다(테마의 큰 입력칸) — 격자로
+            # 라벨을 칸 가운데 높이에 맞춘다.
+            form = QGridLayout()
+            form.setHorizontalSpacing(12)
+            form.setVerticalSpacing(6)
+            form.setColumnStretch(1, 1)
+            for key, label in _FIELD_LABELS:
+                if key not in fields:
+                    continue
+                ed = QLineEdit(fields[key] or "", self)
+                self._fields[key] = ed
+                r = form.rowCount()
+                form.addWidget(QLabel(label, self), r, 0,
+                               alignment=Qt.AlignmentFlag.AlignVCenter)
+                form.addWidget(ed, r, 1)
+            root.addLayout(form)
+            hint = QLabel(i18n.KO.SAVE_NAME_FIELDS_HINT, self)
+            hint.setProperty("role", "muted")
+            hint.setWordWrap(True)
+            auto_row = QHBoxLayout()
+            auto_row.addWidget(hint, 1)
+            self.btn_auto = NeonButton(i18n.KO.SAVE_NAME_AUTO, role="ghost")
+            self.btn_auto.clicked.connect(self._on_auto)
+            auto_row.addWidget(self.btn_auto)
+            root.addLayout(auto_row)
+
         where = QLabel(i18n.KO.SAVE_NAME_FOLDER_FMT.format(path=str(folder)), self)
         where.setProperty("role", "muted")
         where.setWordWrap(True)
@@ -118,6 +182,19 @@ class SaveNameDialog(QDialog):
 
         self.edit.setFocus(Qt.FocusReason.OtherFocusReason)
         self._revalidate()
+
+    def _on_auto(self) -> None:
+        """칸으로 이름을 다시 만든다.  같은 이름의 파일이 폴더에 있으면 시각을 붙인다
+        (검증 시작 때의 추천 이름과 같은 규칙 — 지난 결과를 덮지 않게)."""
+        name = compose_title({k: ed.text() for k, ed in self._fields.items()})
+        try:
+            exists = (self._folder / name).exists()
+        except (OSError, ValueError):
+            exists = False
+        if exists:
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            name = name[:-len(_EXT)] + f"_{ts}" + _EXT
+        self.edit.setText(name)
 
     def _revalidate(self) -> None:
         """쓸 수 없는 이름이면 **누르기 전에** 이유를 말하고 [확인] 을 잠근다."""
