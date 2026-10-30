@@ -8,17 +8,20 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import QObject, QSize, Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtCore import (QObject, QSize, Qt, QThread, QTimer,
+                          QVariantAnimation, pyqtSignal)
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (QBoxLayout, QDoubleSpinBox, QFrame,
                               QGridLayout, QHBoxLayout, QLabel, QLineEdit,
                               QMessageBox, QScrollArea, QSizePolicy,
-                              QVBoxLayout, QWidget)
+                              QStackedWidget, QVBoxLayout, QWidget)
 
 from ..deferred import call_later
 from ..folder_picker import FolderPicker
 from ..teardown import tolerate_teardown
 from ... import i18n
 from .. import theme
+from ...utils import paths
 from ...utils import prefs as _prefs
 from ... import config
 from ...utils.prefs import AutomationLevel, EngineMode
@@ -76,8 +79,8 @@ class SetupInput:
 # 생긴다(800px 실측 69px 넘침).  후보 배치안 5종을 비교한 끝에 '나란히' 를 채택했고,
 # 좁은 창 폴백만 덧붙였다.
 _SIDE_BY_SIDE_MIN_W = 900
-# 도구 레일을 왼쪽 세로 줄로 둘 최소 폭 — 이보다 좁으면 카드 위의 가로 줄로 눕는다
-# (800×600 에서 레일 200px 가 카드 폭을 갉아 가로 스크롤이 생기는 것을 막는다).
+# 왼쪽 메뉴를 이름까지 펼쳐 둘 최소 폭 — 이보다 좁으면 아이콘만 남긴다
+# (800×600 에서 메뉴 200px 가 카드 폭을 갉아 가로 스크롤이 생기는 것을 막는다).
 _RAIL_SIDE_MIN_W = 1000
 
 
@@ -194,6 +197,9 @@ class SetupPage(QWidget):
     update_check_requested = pyqtSignal()            # '업데이트 확인' 버튼
     extract_mode_changed = pyqtSignal(bool)          # Defect 추출 ↔ 매칭 (레일 단계 이름)
     cross_mode_changed = pyqtSignal(bool)            # 교차검증 스위치 (레일 단계 이름)
+    rail_folded_changed = pyqtSignal(bool)           # 왼쪽 메뉴 접힘(창이 크레딧을 상태바로 옮긴다)
+    page_changed = pyqtSignal(str)                   # 왼쪽 메뉴로 바꾼 화면(show_page)
+    tool_fullscreen_changed = pyqtSignal(bool)       # Wafer Map '맵만 보기' (창이 여정 레일을 감춘다)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -234,14 +240,33 @@ class SetupPage(QWidget):
 
     # ------------------------------------------------------------------
     def _build(self) -> None:
-        # 좁은/짧은 창에서도 모든 컨트롤에 접근 가능하도록 스크롤 영역으로 감싼다.
-        # 기존 디자인을 유지하려고 별도 마진·배경·푸터 chrome 은 추가하지 않는다.
-        # 스크롤바는 ‘필요할 때만’ 자동으로 나타난다.
-        outer = QVBoxLayout(self)
+        # [왼쪽 메뉴 | 세로선 | 오른쪽 화면 스택].  메뉴는 화면을 바꿔도 그 자리에 남고,
+        # 오른쪽만 매칭 설정 ↔ 사진 정보 · Wafer Map · GL 히스토그램으로 바뀐다
+        # (사용자 요청 2026-10-30: 도구는 팝업이 아니라 창 이동).
+        outer = QHBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
+        # 도구 화면은 처음 누를 때 만들고 그 뒤로는 살려 둔다 — 돌아오면 보던 사진·맵이 그대로다.
+        self._tool_pages: dict[str, QWidget] = {}
+        self._page_key = "match"
+        outer.addWidget(self._build_tool_rail())
+        self._rail_rule = QWidget(self)
+        self._rail_rule.setFixedWidth(1)
+        self._rail_rule.setProperty("role", "vrule")
+        outer.addWidget(self._rail_rule)
+        self._pages = QStackedWidget(self)
+        outer.addWidget(self._pages, 1)
 
-        scroll = QScrollArea(self)
+        match_host = QWidget(self)
+        mh = QVBoxLayout(match_host)
+        mh.setContentsMargins(0, 0, 0, 0)
+        mh.setSpacing(0)
+        self._pages.addWidget(match_host)
+        self._match_host = match_host
+
+        # 좁은/짧은 창에서도 모든 컨트롤에 접근 가능하도록 스크롤 영역으로 감싼다.
+        # 스크롤바는 ‘필요할 때만’ 자동으로 나타난다.
+        scroll = QScrollArea(match_host)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -254,7 +279,7 @@ class SetupPage(QWidget):
             "QScrollArea { background: transparent; border: none; }"
             "QScrollArea > QWidget#qt_scrollarea_viewport { background: transparent; }"
         )
-        outer.addWidget(scroll)
+        mh.addWidget(scroll)
         self._scroll = scroll
 
         host = QWidget()
@@ -262,47 +287,21 @@ class SetupPage(QWidget):
                            QSizePolicy.Policy.MinimumExpanding)
         scroll.setWidget(host)
 
-        # 원본과 동일한 외곽 마진/스페이싱 유지.
         root = QVBoxLayout(host)
         # ★ 하드코딩 40/20 이 `PROFILE.page_margin`·`section_gap` 을 죽은 토큰으로
         #   만들고 있었다 — 밀도를 한 곳에서 조절할 수 있게 토큰을 쓴다.
-        m = theme.PROFILE.page_margin
-        root.setContentsMargins(m, m, m, 0)   # 아래는 비운다 — 레일 세로선이 시작 바 윗선까지 닿는다
-        root.setSpacing(theme.PROFILE.section_gap)
-
-        # ※ 로고 + 제목은 별도 밴드가 아니라 왼쪽 도구 목록 맨 위에 있다(`_build_tool_rail`).
-        #   스크롤 **안**이라는 점은 그대로다 — 아래를 볼 때 함께 밀려 올라간다
-        #   (사용자 요청: 고정 칸이 아니게).
+        #   왼쪽은 메뉴 세로선에서 띄우는 간격이다(창 가장자리 여백은 메뉴가 가진다).
+        m, gap = theme.PROFILE.page_margin, theme.PROFILE.section_gap
+        root.setContentsMargins(gap, m, m, 0)
+        root.setSpacing(gap)
         self._build_body(root)
 
         # 시작 바는 스크롤 **밖**에 고정한다(주요 액션이 항상 손에 닿게).
         if self._pinned_action_bar():
             bar = self._build_action_bar()
             self._bar_host = bar
-            # 바닥 줄: [레일 칸(세로선이 바닥까지 이어진다)] [시작 바].
-            #   업데이트 확인 · 크레딧은 이 왼쪽 칸 맨 아래 — 창 상태바나 문구 하나만을 위한 줄을 따로 두지 않는다.
-            foot = QWidget(self)
-            foot.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
-            fl = QHBoxLayout(foot)
-            fl.setContentsMargins(0, 0, 0, 0)
-            fl.setSpacing(0)
-            left = QWidget(foot)
-            left.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
-            ll = QVBoxLayout(left)
-            ll.setContentsMargins(theme.PROFILE.page_margin, 0, 12, 10)
-            ll.addStretch(1)
-            ll.addWidget(self.update_btn)
-            ll.addWidget(self._rail_credit)
-            self._foot_left_lay = ll
-            self._foot_left = left
-            self._foot_rule = QWidget(foot)
-            self._foot_rule.setFixedWidth(1)
-            self._foot_rule.setProperty("role", "vrule")
-            fl.addWidget(left)
-            fl.addWidget(self._foot_rule)
-            fl.addWidget(bar, 1)
-            outer.addWidget(foot)
-            self._apply_foot_geometry(True)
+            bar.setContentsMargins(gap, 10, m, 10)
+            mh.addWidget(bar)
 
         # ★ 첫 포커스를 첫 입력란에 둔다.  이전엔 탭 체인 첫 정지가 보기 옵션이라,
         #   키보드 사용자가 폴더를 입력하려면 그 컨트롤을 먼저 지나야 했다.  QTimer 로 미루는 이유는 show() 이후에야 포커스가 실제로
@@ -336,24 +335,12 @@ class SetupPage(QWidget):
         (아래 `_build_run_options_card` 주석 참조).
 
         두 설정 카드는 ``_place_setting_cards`` 가 창 폭에 따라 나란히/위아래로 놓는다."""
-        # 로고 + 제목은 왼쪽 도구 목록 맨 위(사용자 선택 2026-10-29, 로고 배치 B안).
-        # 왼쪽 도구 레일 | 오른쪽 장비·설정 카드(사용자 결정 2026-10-27, 도구 레일 3안).
-        # 좁은 창에서는 카드 위의 가로 줄로 눕는다.
-        body = QBoxLayout(QBoxLayout.Direction.LeftToRight)
-        body.setContentsMargins(0, 0, 0, 0)
-        body.setSpacing(theme.PROFILE.section_gap)
-        self._body_lay = body
-        self._rail_side = True
-        # 위로 붙이지 않는다 — 레일이 본문 높이를 다 차지해야 업데이트가 맨 아래로 간다.
-        body.addWidget(self._build_tool_rail(), 0)
-        # 레일과 본문 사이 세로 구분선(옆에 설 때만 보인다).
-        self._rail_rule = QWidget(self)
-        self._rail_rule.setFixedWidth(1)
-        self._rail_rule.setProperty("role", "vrule")
-        body.addWidget(self._rail_rule)
-        body.addWidget(self._build_device_row(), 1, Qt.AlignmentFlag.AlignTop)
+        # 왼쪽 메뉴는 `_build` 가 화면 스택 밖에 둔다 — 여기는 장비·설정 카드만.
+        # `_wide` = 방식 구역을 나란히 세울 만큼 넓은가(좁으면 위아래, 메뉴는 아이콘만).
+        self._wide = True
+        device_row = self._build_device_row()
         self._place_setting_cards(root)
-        root.addLayout(body, 1)
+        root.addWidget(device_row, 1, Qt.AlignmentFlag.AlignTop)
         if not self._pinned_action_bar():
             root.addWidget(self._build_action_bar())
         # ★ 크레딧을 여기에 두지 않는다 — `main_window` 의 **상태바**가 모든 화면에
@@ -407,9 +394,8 @@ class SetupPage(QWidget):
         if int(width) < _SIDE_BY_SIDE_MIN_W:
             return False
         # 카드 열이 쓸 수 있는 폭 — 레일이 왼쪽에 서 있으면 그만큼 빼고 잰다.
-        rail = (self._RAIL_W + 2 * theme.PROFILE.section_gap + 1
-                if getattr(self, "_rail_side", False) else 0)
-        avail = int(width) - 2 * theme.PROFILE.page_margin - rail
+        rail = self._tool_rail.width() + 1
+        avail = int(width) - theme.PROFILE.page_margin - theme.PROFILE.section_gap - rail
         need = max([c.minimumSizeHint().width() for c in self._device_cards]
                    + [self._VAL_CARD_MIN_W])
         return avail >= 2 * need + theme.PROFILE.section_gap
@@ -445,7 +431,7 @@ class SetupPage(QWidget):
             self._mode_lay.addWidget(run, 1, top)
             self._mode_lay.addWidget(eng, 1, top)
             self._mode_lay.setDirection(
-                QBoxLayout.Direction.LeftToRight if getattr(self, "_rail_side", False)
+                QBoxLayout.Direction.LeftToRight if getattr(self, "_wide", False)
                 else QBoxLayout.Direction.TopToBottom)
             for w in (self._sec_folder, ref, val, self._sec_mode, self._mode_row):
                 lay.addWidget(w)
@@ -874,50 +860,36 @@ class SetupPage(QWidget):
         if (event.type() == QEvent.Type.Resize
                 and obj is getattr(self, "_device_host", None)):
             self._reflow_device_row()
+        elif (event.type() == QEvent.Type.KeyPress
+                and event.key() == Qt.Key.Key_Escape
+                and any(obj is p.property("_dialog")
+                        for p in getattr(self, "_tool_pages", {}).values())):
+            # 화면으로 끼운 도구는 Esc 로 닫히면 안 된다(`_make_tool_page`).
+            # 맵 전체화면만은 Esc 가 '빠져나오기' 다 — 그건 맵이 직접 받게 둔다.
+            fs = getattr(obj, "is_fullscreen", None)
+            return not (callable(fs) and fs())
         return super().eventFilter(obj, event)
 
-    def _apply_rail_orientation(self, side: bool) -> None:
-        """도구 레일을 왼쪽 세로 줄 ↔ 카드 위 가로 줄로 — 같은 배치면 아무것도 안 한다."""
-        if side == getattr(self, "_rail_side", None) or not hasattr(self, "_tool_rail"):
-            return
-        self._rail_side = side
-        D = QBoxLayout.Direction
-        self._body_lay.setDirection(D.LeftToRight if side else D.TopToBottom)
-        self._rail_lay.setDirection(D.TopToBottom if side else D.LeftToRight)
-        self._rail_rule.setVisible(side)
-        if hasattr(self, "_mode_lay"):       # 방식 구역: 넓으면 나란히, 좁으면 위아래
-            self._mode_lay.setDirection(D.LeftToRight if side else D.TopToBottom)
-        for b in self._tool_buttons:         # 가로 줄에서는 아이콘 자리를 비워 폭을 지킨다
-            b.setIconSize(QSize(20, 20) if side else QSize(0, 0))
-        if side:
-            self._tool_rail.setFixedWidth(self._RAIL_W)
-        else:
-            self._tool_rail.setMinimumWidth(0)
-            self._tool_rail.setMaximumWidth(16777215)
-        self._apply_foot_geometry(side)
+    def _apply_width_class(self, wide: bool) -> None:
+        """넓은 창 ↔ 좁은 창 — 같은 쪽이면 아무것도 안 한다.
 
-    def _apply_foot_geometry(self, side: bool) -> None:
-        """바닥 줄의 레일 칸 — 옆에 설 땐 레일 폭에 맞춰 세로선을 본문 선과 잇는다."""
-        bar = getattr(self, "_bar_host", None)
-        if bar is None:
+        좁은 창(800×600 등)에서는 메뉴를 아이콘만 남기고 방식 구역을 위아래로 쌓는다
+        (메뉴 200px 가 카드 폭을 갉아 가로 스크롤이 생기는 것을 막는다).  넓어지면
+        사용자가 고른 상태로 되돌린다."""
+        if wide == getattr(self, "_wide", None) or not hasattr(self, "_tool_rail"):
             return
-        m, gap = theme.PROFILE.page_margin, theme.PROFILE.section_gap
-        left = self._foot_left
-        if side:
-            left.setFixedWidth(m + self._RAIL_W + gap)
-        else:
-            left.setMinimumWidth(0)
-            left.setMaximumWidth(16777215)
-        self._foot_rule.setVisible(side)
-        self._foot_left_lay.setContentsMargins(m, 0, gap if side else 12, 10)
-        bar.setContentsMargins(gap if side else 12, 10, m, 10)
+        self._wide = wide
+        if hasattr(self, "_mode_lay"):       # 방식 구역: 넓으면 나란히, 좁으면 위아래
+            D = QBoxLayout.Direction
+            self._mode_lay.setDirection(D.LeftToRight if wide else D.TopToBottom)
+        self._apply_rail_collapsed(animate=False)
 
     def _reflow_device_row(self) -> None:
         """두 열/한 열을 지금 폭에 맞춘다(같은 배치면 아무것도 하지 않는다)."""
         if not hasattr(self, "_setting_cards"):
             return                       # 카드가 아직 다 만들어지기 전
-        self._apply_rail_orientation((self.width() or self.sizeHint().width())
-                                     >= _RAIL_SIDE_MIN_W)
+        self._apply_width_class((self.width() or self.sizeHint().width())
+                                >= _RAIL_SIDE_MIN_W)
         self._apply_card_orientation(self._side_by_side_fits())
 
     def resizeEvent(self, event):  # noqa: N802
@@ -1237,22 +1209,25 @@ class SetupPage(QWidget):
 
     # 도구 레일 폭 — 가장 긴 이름 'Wafer Map 보기' 가 들어가는 하한.
     _RAIL_W = 200
+    # 접은 메뉴의 버튼 한 변 — 아이콘(20) 양옆 16px.
+    _RAIL_ICON_W = 52
+    # 접은 메뉴의 좌우 여백.  펼친 메뉴는 창 여백(page_margin)·섹션 간격을 쓴다.
+    _RAIL_FOLD_PAD = 12
 
     def _build_tool_rail(self) -> QWidget:
-        """왼쪽 도구 레일 — 사진 정보 · Wafer Map · Defect 추출, 맨 아래 업데이트 확인.
+        """왼쪽 메뉴 — 매칭 · 사진 정보 · Wafer Map · Defect 추출 · GL, 맨 아래 업데이트 확인.
 
-        ★ 도구는 흐린 글자 링크가 아니라 **이름이 보이는 같은 크기 버튼**이다(사용자 요청:
-        사이드 기능도 중요).  주 흐름(폴더 → 방식 → 시작)과 눈으로 갈라져 서로 방해하지
-        않는다.  업데이트는 월 1회도 안 쓰는 유틸리티라 도구 아래에 한 칸 떨어져 있다.
-        버튼 객체·핸들러는 예전 액션바의 것을 그대로 옮겼다(자리만 바뀜)."""
+        ★ 메뉴는 화면 스택 **밖**에 있다 — 어느 화면에서든 그 자리에 남아 화면을 바꾼다
+        (사용자 요청 2026-10-30).  지금 보는 화면의 버튼은 눌린 모양(checked)이다.
+        [«] 를 누르면 아이콘만 남고(이름은 툴팁), 도구 화면으로 가면 저절로 접힌다.
+        도구는 흐린 글자 링크가 아니라 **이름이 보이는 같은 크기 버튼**이다(사용자 요청:
+        사이드 기능도 중요)."""
         host = QWidget(self)
         host.setProperty("role", "rowHost")
-        host.setFixedWidth(self._RAIL_W)       # 좁은 창에서는 풀린다(_apply_rail_orientation)
-        col = QBoxLayout(QBoxLayout.Direction.TopToBottom, host)
+        col = QVBoxLayout(host)
         self._rail_lay = col
-        col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(10)
-        # 로고는 제목 줄이 없는 평소에도 보이도록 도구 목록 맨 위에 둔다(사용자 요청 2026-10-29).
+        # 로고 + 제목 + [«] 한 줄(로고는 사용자 요청 2026-10-29 로 메뉴 맨 위).
         head = QWidget(host)
         head.setProperty("role", "rowHost")
         hl = QHBoxLayout(head)
@@ -1265,46 +1240,262 @@ class SetupPage(QWidget):
         title = self._build_title()
         title.setProperty("role", "railTitle")       # 26px 제목이 아니라 레일 폭에 맞는 크기
         hl.addWidget(title, 1)
+        self.rail_fold_btn = NeonButton("", role="ghost")
+        self.rail_fold_btn.setProperty("grade", "railFold")
+        self.rail_fold_btn.setFixedSize(34, 34)
+        self.rail_fold_btn.setIconSize(QSize(20, 20))
+        self.rail_fold_btn.clicked.connect(self.toggle_rail)
+        hl.addWidget(self.rail_fold_btn)
+        self._rail_head = head
         col.addWidget(head)
         col.addSpacing(6)
+        # 기본 화면(매칭 설정)으로 돌아오는 버튼 — 아이콘은 프로그램 아이콘(사용자 요청).
+        self.match_btn = NeonButton(i18n.KO.MATCH_NAV_BUTTON, role="ghost")
+        self.match_btn.setToolTip(i18n.KO.MATCH_NAV_TOOLTIP)
+        self.match_btn.clicked.connect(lambda: self.show_page("match"))
         # 사진 한 장의 결함 정보를 바로 보는 도구.
         self.image_info_btn = NeonButton(i18n.KO.IMAGE_INFO_BUTTON, role="ghost")
         self.image_info_btn.clicked.connect(self._open_image_info)
         # 웨이퍼 폴더 하나의 결함 위치를 원 위에 보는 도구.
         self.wafer_map_btn = NeonButton(i18n.KO.WAFER_MAP_BUTTON, role="ghost")
         self.wafer_map_btn.clicked.connect(self._open_wafer_map)
-        # Defect 추출 — 같은 화면을 한쪽 폴더만 받는 모드로 바꾼다(누르면 되돌아가는 버튼).
+        # Defect 추출 — 같은 화면을 한쪽 폴더만 받는 모드로 바꾼다([매칭] 으로 되돌아간다).
         self.extract_btn = NeonButton(i18n.KO.EXTRACT_BUTTON, role="ghost")
         self.extract_btn.setToolTip(i18n.KO.EXTRACT_BUTTON_TOOLTIP)
-        self.extract_btn.clicked.connect(
-            lambda: self.set_extract_mode(not self._extract_mode))
+        self.extract_btn.clicked.connect(lambda: self.show_page("extract"))
         # 사진 한 장의 GL(밝기) 분포를 히스토그램·선 프로파일·통계로 보는 도구.
         self.gl_btn = NeonButton(i18n.KO.GL_BUTTON, role="ghost")
         self.gl_btn.setToolTip(i18n.KO.GL_BUTTON_TOOLTIP)
         self.gl_btn.clicked.connect(self._open_gl_viewer)
         self.update_btn = NeonButton(i18n.KO.MENU_CHECK_UPDATE, role="ghost")
         self.update_btn.clicked.connect(self.update_check_requested.emit)
-        for b in (self.image_info_btn, self.wafer_map_btn, self.extract_btn, self.gl_btn):
+        self._nav_buttons = {"match": self.match_btn, "image_info": self.image_info_btn,
+                             "wafer_map": self.wafer_map_btn, "extract": self.extract_btn,
+                             "gl": self.gl_btn}
+        for b in self._nav_buttons.values():
             b.setProperty("grade", "rail")
+            b.setCheckable(True)
             b.setMinimumHeight(52)
             col.addWidget(b)
+        self.match_btn.setIcon(QIcon(str(paths.logo_path("logo.ico"))))
         for b, icon in ((self.image_info_btn, "camera"), (self.wafer_map_btn, "globe"),
                         (self.extract_btn, "doc"), (self.gl_btn, "bars"),
                         (self.update_btn, "refresh")):
             b.setIcon(rail_icon(icon))
+        for b in (*self._nav_buttons.values(), self.update_btn):
             b.setIconSize(QSize(20, 20))
+            b.setProperty("_railText", b.text())
+            b.setProperty("_railTip", b.toolTip())
         col.addStretch(1)
-        # 업데이트 확인 + 크레딧은 유틸리티라 도구 목록이 아니라 바닥 줄 왼쪽 칸(검증 시작과
-        # 같은 행)에 둔다 — `_build_foot` 가 이 둘을 가져다 놓는다.
+        # 업데이트 확인 + 크레딧은 유틸리티라 도구 목록과 떨어진 메뉴 맨 아래.
         self.update_btn.setProperty("grade", "rail")
         self.update_btn.setMinimumHeight(52)
+        col.addWidget(self.update_btn)
         self._rail_credit = QLabel(i18n.KO.CREDIT, host)
         self._rail_credit.setProperty("role", "muted")
-        # 레일 순서 계약(test_setup_controls) — 도구 넷.  업데이트는 바닥 줄에 있다.
-        self._tool_buttons = [self.image_info_btn, self.wafer_map_btn,
+        col.addWidget(self._rail_credit)
+        # 레일 순서 계약(test_setup_controls) — 매칭 + 도구 넷.  업데이트는 맨 아래 따로.
+        self._tool_buttons = [self.match_btn, self.image_info_btn, self.wafer_map_btn,
                               self.extract_btn, self.gl_btn]
         self._tool_rail = host
+        # 접힘 상태 — 사용자가 고른 것(`_rail_user_folded`)과 도구 화면에 들어가며
+        # 저절로 접은 것을 나눠 둔다.  매칭으로 돌아오면 사용자가 고른 상태로 되돌린다.
+        self._rail_user_folded = False
+        self._rail_folded: Optional[bool] = None
+        self._rail_anim = None
+        self._apply_rail_collapsed(animate=False)
+        self._sync_nav_checked()
         return host
+
+    # ------------------------------------------------------------------
+    # 왼쪽 메뉴 — 접기 · 화면 이동
+    # ------------------------------------------------------------------
+    def is_rail_folded(self) -> bool:
+        return bool(self._rail_folded)
+
+    def _rail_should_fold(self) -> bool:
+        """좁은 창이면 늘 접고, 아니면 사용자가 고른 대로."""
+        return self._rail_user_folded or not getattr(self, "_wide", True)
+
+    def toggle_rail(self) -> None:
+        """[«]/[»] — 메뉴를 아이콘만 ↔ 이름까지."""
+        self._rail_user_folded = not self._rail_folded
+        if not getattr(self, "_wide", True) and not self._rail_user_folded:
+            # 좁은 창에서도 사용자가 펼치면 펼친다(이번 한 번) — 눌러도 안 펼쳐지면 죽은 버튼이다.
+            self._set_rail_folded(False, animate=True)
+            return
+        self._apply_rail_collapsed(animate=True)
+
+    def _apply_rail_collapsed(self, *, animate: bool) -> None:
+        self._set_rail_folded(self._rail_should_fold(), animate=animate)
+
+    def _rail_width(self, folded: bool) -> int:
+        if folded:
+            return 2 * self._RAIL_FOLD_PAD + self._RAIL_ICON_W
+        return theme.PROFILE.page_margin + self._RAIL_W + theme.PROFILE.section_gap
+
+    def _set_rail_folded(self, folded: bool, *, animate: bool) -> None:
+        """메뉴를 접는다/편다.  폭은 짧게 tween 하고, 글자는 접기 **전**에 숨기고 펴기
+        **뒤**에 보인다(좁아지는 동안 글자가 잘려 보이지 않게)."""
+        folded = bool(folded)
+        if folded == self._rail_folded:
+            return
+        self._rail_folded = folded
+        self.rail_folded_changed.emit(folded)
+        from .. import motion
+        self.rail_fold_btn.setIcon(rail_icon("unfold" if folded else "fold"))
+        self.rail_fold_btn.setToolTip(i18n.KO.RAIL_UNFOLD_TOOLTIP if folded
+                                      else i18n.KO.RAIL_FOLD_TOOLTIP)
+        start, end = self._tool_rail.width(), self._rail_width(folded)
+        if folded:
+            # 접을 때는 글자·여백을 먼저 줄인다 — 좁아지는 동안 잘린 글자가 보이지 않게.
+            self._rail_show_labels(False)
+            self._rail_margins(True)
+        if self._rail_anim is not None:
+            self._rail_anim.stop()
+        if not animate or not motion.enabled() or not self.isVisible() or start == end:
+            self._tool_rail.setFixedWidth(end)
+            self._rail_settle()
+            return
+        anim = self._rail_anim
+        if anim is None:
+            # ★ 위젯당 하나만 만들어 재사용한다(motion 규약).  tick 은 부모(this)의 자식만 만진다.
+            anim = QVariantAnimation(self)
+            anim.setEasingCurve(motion.EASE_PRIMARY)
+            anim.valueChanged.connect(self._on_rail_tick)
+            anim.finished.connect(self._rail_settle)
+            self._rail_anim = anim
+        anim.setDuration(motion.DUR_RAIL_FOLD)
+        anim.setStartValue(int(start))
+        anim.setEndValue(int(end))
+        anim.start()
+
+    def _on_rail_tick(self, value) -> None:
+        self._tool_rail.setFixedWidth(int(value))
+
+    def _rail_settle(self) -> None:
+        """폭 이동이 끝난 자리 — 최종 폭·여백·글자를 맞춘다."""
+        folded = bool(self._rail_folded)
+        self._tool_rail.setFixedWidth(self._rail_width(folded))
+        self._rail_margins(folded)
+        self._rail_show_labels(not folded)
+        if hasattr(self, "_setting_cards"):
+            self._apply_card_orientation(self._side_by_side_fits())
+
+    def _rail_margins(self, folded: bool) -> None:
+        m, gap, pad = theme.PROFILE.page_margin, theme.PROFILE.section_gap, self._RAIL_FOLD_PAD
+        self._rail_lay.setContentsMargins(pad if folded else m, m, pad if folded else gap, 10)
+
+    def _rail_show_labels(self, on: bool) -> None:
+        """이름 ↔ 아이콘만.  접힌 동안 이름은 툴팁으로 옮긴다(아이콘만으로는 뜻을 모른다)."""
+        self._rail_logo.setVisible(on and not self._rail_logo.pixmap().isNull())
+        self._title_label.setVisible(on)
+        self._rail_credit.setVisible(on)
+        self._rail_head.layout().setAlignment(
+            self.rail_fold_btn, Qt.AlignmentFlag(0) if on else Qt.AlignmentFlag.AlignHCenter)
+        for b in (*self._nav_buttons.values(), self.update_btn):
+            text, tip = b.property("_railText") or "", b.property("_railTip") or ""
+            b.setText(text if on else "")
+            b.setToolTip(tip if on else (f"{text}\n{tip}" if tip else text))
+            b.setProperty("folded", "false" if on else "true")
+            if on:
+                b.setMinimumWidth(0)
+                b.setMaximumWidth(16777215)
+            else:
+                b.setFixedWidth(self._RAIL_ICON_W)
+            b.style().unpolish(b)
+            b.style().polish(b)
+
+    def current_page(self) -> str:
+        """지금 오른쪽에 보이는 화면 — match · extract · image_info · wafer_map · gl."""
+        if self._page_key == "match" and self._extract_mode:
+            return "extract"
+        return self._page_key
+
+    def _sync_nav_checked(self) -> None:
+        cur = self.current_page()
+        for key, b in self._nav_buttons.items():
+            b.setChecked(key == cur)
+
+    def show_page(self, key: str) -> None:
+        """왼쪽 메뉴로 화면을 옮긴다.
+
+        - ``match``·``extract``: 매칭 설정 화면(추출은 같은 화면의 한쪽 폴더 모드).
+          도구 화면에서 돌아오면 메뉴를 사용자가 고른 접힘 상태로 되돌린다.
+        - ``image_info``·``wafer_map``·``gl``: 도구 화면.  처음 갈 때 만들고 살려 두며,
+          메뉴는 저절로 아이콘만 남긴다(사용자 요청 — 도구는 화면이 넓어야 한다)."""
+        if key in ("match", "extract"):
+            was_tool = self._page_key != "match"
+            self._page_key = "match"
+            self._pages.setCurrentWidget(self._match_host)
+            if (key == "extract") != self._extract_mode:
+                self.set_extract_mode(key == "extract")
+            if was_tool:
+                self._apply_rail_collapsed(animate=True)
+        else:
+            page = self._tool_pages.get(key)
+            if page is None:
+                page = self._make_tool_page(key)
+                self._tool_pages[key] = page
+                self._pages.addWidget(page)
+            self._page_key = key
+            self._pages.setCurrentWidget(page)
+            self._set_rail_folded(True, animate=True)
+            page.property("_dialog").setFocus(Qt.FocusReason.OtherFocusReason)
+        self._sync_nav_checked()
+        self.page_changed.emit(self.current_page())
+
+    def tool_dialog(self, key: str):
+        """만들어 둔 도구 화면의 본체(없으면 None) — 테스트·창이 상태를 볼 때."""
+        page = self._tool_pages.get(key)
+        return page.property("_dialog") if page is not None else None
+
+    def _make_tool_page(self, key: str) -> QWidget:
+        """도구 다이얼로그를 **화면**으로 끼운다(시트로 띄우지 않는다).
+
+        시트일 때 제목줄이 하던 '무슨 화면인지' 는 위의 제목 한 줄이 대신하고, 닫기 ✕ 는
+        없다 — 나가는 길은 왼쪽 메뉴다.  ★ Esc 는 삼킨다: QDialog 는 Esc 로 reject→hide
+        하므로 그냥 두면 화면이 빈 칸으로 사라진다(맵 전체화면의 Esc 는 그대로 통과)."""
+        if key == "image_info":
+            from ..widgets.image_info_dialog import ImageInfoDialog
+            dlg = ImageInfoDialog(self)
+        elif key == "wafer_map":
+            from ..widgets.wafer_map_dialog import WaferMapDialog
+            dlg = WaferMapDialog(self)
+            dlg.fullscreen_changed.connect(self._on_tool_fullscreen)
+        else:
+            from ..widgets.gl_viewer_dialog import GlViewerDialog
+            dlg = GlViewerDialog(self)
+        page = QWidget(self._pages)
+        v = QVBoxLayout(page)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(0)
+        bar = QWidget(page)
+        bar.setProperty("role", "sheetBar")
+        bl = QHBoxLayout(bar)
+        bl.setContentsMargins(theme.PROFILE.section_gap, 10, 14, 10)
+        head = QLabel(dlg.windowTitle(), bar)
+        head.setProperty("role", "sheetTitle")
+        bl.addWidget(head)
+        bl.addStretch(1)
+        v.addWidget(bar)
+        dlg.setParent(page)
+        dlg.setWindowFlags(Qt.WindowType.Widget)
+        dlg.installEventFilter(self)
+        v.addWidget(dlg, 1)
+        dlg.show()
+        page.setProperty("_dialog", dlg)
+        page.setProperty("_bar", bar)
+        return page
+
+    def _on_tool_fullscreen(self, on: bool) -> None:
+        """맵만 남기는 보기 — 메뉴·제목줄도 감추고, 창(여정 레일)에 알린다."""
+        page = self._tool_pages.get("wafer_map")
+        if page is not None:
+            page.property("_bar").setVisible(not on)
+        self._tool_rail.setVisible(not on)
+        self._rail_rule.setVisible(not on)
+        self.tool_fullscreen_changed.emit(bool(on))
 
     def _build_action_bar(self) -> QWidget:
         """고정 시작 바 — 판정 기준(왼쪽) · 시작할 수 없는 이유 · [검증 시작](오른쪽)."""
@@ -1518,8 +1709,7 @@ class SetupPage(QWidget):
         self.ref_path_edit.setPlaceholderText(
             i18n.KO.EXTRACT_FOLDER_PLACEHOLDER if on
             else i18n.KO.SETUP_FOLDER_PLACEHOLDER)
-        self.extract_btn.setText(i18n.KO.EXTRACT_BACK_BUTTON if on
-                                 else i18n.KO.EXTRACT_BUTTON)
+        self._sync_nav_checked()
         # 추출 모드에서는 사진·폴더를 화면 어디에 놓아도 입력란에 들어간다(사용자 요청).
         # 첫 입력란이 놓기를 가로채 'file:///…' 글자를 끼워 넣지 않게, 그때만 페이지가 받는다.
         self.setAcceptDrops(on)
@@ -1931,22 +2121,16 @@ class SetupPage(QWidget):
             self._reset_slot_selection()        # 취소 → 전체 진행 유지
 
     def _open_image_info(self) -> None:
-        """단일 사진 정보 다이얼로그 — 사진 1장의 결함 좌표/measurement 확인."""
-        from ..widgets.image_info_dialog import ImageInfoDialog
-        dlg = ImageInfoDialog(self)
-        sheets.run(dlg, full_bleed=True)
+        """단일 사진 정보 — 사진 1장의 결함 좌표/measurement 확인(화면 이동)."""
+        self.show_page("image_info")
 
     def _open_gl_viewer(self) -> None:
-        """GL 히스토그램 뷰어 — 빈 화면으로 열고 사진은 안에서 고른다(끌어놓기도 된다)."""
-        from ..widgets.gl_viewer_dialog import GlViewerDialog
-        dlg = GlViewerDialog(self)
-        sheets.run(dlg, full_bleed=True)
+        """GL 히스토그램 — 빈 화면으로 열고 사진은 안에서 고른다(화면 이동)."""
+        self.show_page("gl")
 
     def _open_wafer_map(self) -> None:
-        """Wafer map — 웨이퍼 폴더 하나의 결함 위치를 원 위에 본다."""
-        from ..widgets.wafer_map_dialog import WaferMapDialog
-        dlg = WaferMapDialog(self)
-        sheets.run(dlg, full_bleed=True)
+        """Wafer map — 웨이퍼 폴더 하나의 결함 위치를 원 위에 본다(화면 이동)."""
+        self.show_page("wafer_map")
 
     def _on_threshold_changed(self, v: int) -> None:
         self.threshold_label.setText(f"{v} %")

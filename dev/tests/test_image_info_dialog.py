@@ -200,18 +200,20 @@ def test_drop_accepts_only_image_files(qapp, isolated_cache, tmp_path):
 
 
 def test_setup_page_opens_this_dialog(qapp, isolated_cache):
-    """셋업 액션바 버튼이 이 다이얼로그로 연결돼 있다.
+    """왼쪽 메뉴의 [사진 정보 보기] 가 이 다이얼로그를 **화면으로** 연다(팝업 아님).
 
-    액션바 인덱스 계약(개발자 버튼과의 순서)은
-    ``test_setup_controls.test_action_bar_index_contract`` 가 지킨다.
+    메뉴 순서 계약은 ``test_setup_controls.test_action_bar_index_contract`` 가 지킨다.
     """
-    import inspect
-
     from aoi_verification.app.ui.pages import setup_page as sp
+    from aoi_verification.app.ui.widgets.image_info_dialog import ImageInfoDialog
 
-    src = inspect.getsource(sp.SetupPage._open_image_info)
-    assert "ImageInfoDialog" in src
-    assert "full_bleed=True" in src
+    page = sp.SetupPage()
+    try:
+        page.image_info_btn.click()
+        assert page.current_page() == "image_info"
+        assert isinstance(page.tool_dialog("image_info"), ImageInfoDialog)
+    finally:
+        page.deleteLater()
 
 
 def test_values_start_at_one_line_left_of_the_gap(styled_qapp, isolated_cache,

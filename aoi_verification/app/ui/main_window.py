@@ -2919,8 +2919,18 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._setup_page.update_check_requested.connect(self._manual_update_check)
         self._setup_page.extract_mode_changed.connect(self._on_extract_mode_changed)
         self._setup_page.cross_mode_changed.connect(self._on_extract_mode_changed)
+        # Wafer Map '맵만 보기' — 시트일 때처럼 창 위 여정 레일까지 비켜 준다.
+        self._setup_page.tool_fullscreen_changed.connect(self._on_tool_fullscreen)
+        self._setup_page.rail_folded_changed.connect(self._on_setup_rail_folded)
         # 백엔드가 아직이면 '검증 시작' 을 잠그고 버튼에 준비 중을 표기한다.
         self._setup_page.set_backend_ready(self._backend_ready)
+
+    def _on_tool_fullscreen(self, on: bool) -> None:
+        self._rail.setVisible(not on)
+
+    def _on_setup_rail_folded(self, _folded: bool) -> None:
+        if self._stack.currentWidget() is self._setup_page:
+            self._sync_statusbar(self._setup_page)
 
     def _build_remaining_pages(self) -> None:
         """나머지 네 페이지 — **메인 스레드에서만** 부른다(Qt 위젯 규칙).
@@ -3034,9 +3044,11 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._warmup_accel_async()
 
     def _sync_statusbar(self, page: QWidget) -> None:
-        """설정 화면은 크레딧을 자기 바닥 줄에 두므로 상태바를 숨긴다(개발자 모드만 예외 —
-        설정 버튼이 거기 있다).  다른 화면은 그대로."""
-        on_setup = page is getattr(self, "_setup_page", None)
+        """설정 화면은 크레딧을 왼쪽 메뉴 맨 아래에 두므로 상태바를 숨긴다(개발자 모드만 예외 —
+        설정 버튼이 거기 있다).  다른 화면은 그대로.  메뉴를 아이콘만 남기면 크레딧이 들어갈
+        자리가 없어 상태바가 다시 맡는다."""
+        setup = getattr(self, "_setup_page", None)
+        on_setup = page is setup and setup is not None and not setup.is_rail_folded()
         self._credit_label.setVisible(not on_setup)
         self._status_bar.setVisible(not on_setup or _prefs.load().dev_mode)
 

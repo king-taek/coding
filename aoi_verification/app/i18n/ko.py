@@ -981,6 +981,11 @@ IMAGE_INFO_SOURCE_NAMES = {
 
 # 다이얼로그.
 IMAGE_INFO_BUTTON = "사진 정보 보기"
+# 왼쪽 메뉴 — 기본 화면(매칭 설정)으로 돌아오는 버튼과 메뉴 접기(사용자 요청 2026-10-30).
+MATCH_NAV_BUTTON = "매칭"
+MATCH_NAV_TOOLTIP = "기준·검증 폴더를 고르고 매칭을 시작하는 기본 화면"
+RAIL_FOLD_TOOLTIP = "메뉴 접기 (아이콘만)"
+RAIL_UNFOLD_TOOLTIP = "메뉴 펼치기"
 IMAGE_INFO_TITLE = "단일 사진 정보"
 IMAGE_INFO_SUBTITLE = "결과 엑셀에 찍히는 것과 같은 좌표·계측값을 사진 한 장에서 바로 읽습니다"
 IMAGE_INFO_PICK = "사진 선택"
@@ -1205,7 +1210,6 @@ EXTRACT_BUTTON_TOOLTIP = (
     "엑셀로 저장합니다.")
 # ★ 짧게 둔다 — [Defect 추출] 과 같은 자리를 바꿔 쓰므로, 길면 800px 창에서 액션바가
 #   페이지를 창보다 넓게 민다(실측: "← 매칭 검증으로" 일 때 864px > 840px).
-EXTRACT_BACK_BUTTON = "← 매칭으로"
 EXTRACT_TITLE = "Defect 추출"
 EXTRACT_GROUP = "대상 장비"
 # 여러 LOT — 대상 장비 카드에 줄을 늘린다(최대 10개).  줄마다 슬롯을 따로 고른다.
