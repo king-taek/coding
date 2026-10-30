@@ -29,7 +29,7 @@ from PyQt6.QtWidgets import QApplication                           # noqa: E402
 from aoi_verification.app.gl import analysis, loader                # noqa: E402
 from aoi_verification.app.gl import roi as R                        # noqa: E402
 from aoi_verification.app.ui.widgets.gl_canvas import TOOLS         # noqa: E402
-from aoi_verification.app.ui.widgets.gl_viewer_dialog import GlViewerDialog  # noqa: E402
+from aoi_verification.app.ui.widgets.gl_viewer_dialog import GlViewerDialog, GlViewerPanel  # noqa: E402
 
 W, H = 200, 150
 
@@ -44,7 +44,7 @@ def _make(styled_qapp, data=None, *, bits=16, view=None):
         rng = np.random.default_rng(3)
         hi = (1 << bits) - 1
         data = rng.integers(0, hi, size=(H, W)).astype(np.uint16 if bits > 8 else np.uint8)
-    dlg = GlViewerDialog(None)
+    dlg = GlViewerPanel(None)
     dlg.resize(1280, 820)
     dlg.show()
     _pump()
@@ -83,7 +83,7 @@ def _near(c, rgb, tol=70) -> bool:
 # ------------------------------------------------------------------ 1·5. 도구
 def test_tools_are_shapes_without_ellipse(dlg):
     assert TOOLS == ("move", R.HLINE, R.VLINE, R.RECT, R.SQUARE, R.CIRCLE)
-    labels = [b.text() for b in dlg._tool_btns.values()]
+    labels = [b.caption() for b in dlg._tool_btns.values()]
     assert not any("타원" in t for t in labels)
     for need in ("사각형", "정사각형", "원"):
         assert any(need in t for t in labels)
@@ -390,9 +390,9 @@ def test_threshold_order_is_kept(dlg):
 
 def test_8bit_image_has_no_bit_choice_16bit_has(styled_qapp):
     d8 = _make(styled_qapp, bits=8)
-    assert not d8.bits_combo.isEnabled() and d8._levels() == 256
+    assert not d8.bits_row.isVisible() and d8._levels() == 256     # 8 bit 는 고를 것이 없다 — 행이 없다
     d16 = _make(styled_qapp, bits=16)
-    assert d16.bits_combo.isEnabled()
+    assert d16.bits_row.isVisible()
     i12 = [i for i in range(d16.bits_combo.count()) if d16.bits_combo.itemData(i) == 12][0]
     d16.bits_combo.setCurrentIndex(i12)
     assert d16._levels() == 4096 and len(d16._full_hist) == 4096 and d16._hi <= 4095
@@ -491,7 +491,7 @@ def test_open_color_photo_end_to_end_switches_to_scan(styled_qapp, tmp_path, mon
     monkeypatch.setattr(scan_image, "resolve",
                         lambda p: scan_image.ScanMatch(scan_image.OK, cp, (1.0, 2.0), (1.0, 1.0), (cand,)))
     scan_image.clear_caches()
-    d = GlViewerDialog(None)
+    d = GlViewerPanel(None)
     d.resize(1280, 820)
     d.show()
     d.open_path(cp)
@@ -506,7 +506,7 @@ def test_open_color_photo_end_to_end_switches_to_scan(styled_qapp, tmp_path, mon
 
 
 def test_open_failure_shows_message_not_crash(styled_qapp, tmp_path):
-    d = GlViewerDialog(None)
+    d = GlViewerPanel(None)
     d.resize(1280, 820)
     d.show()
     (tmp_path / "bad.png").write_bytes(b"nope")
@@ -675,3 +675,97 @@ def test_compare_hover_works_from_either_canvas(dlg):
     QTest.mouseMove(dlg.canvas_b, _pt(dlg.canvas_b, 20, 30))
     _pump()
     assert "X 20" in dlg.status.text()
+
+
+# ------------------------------------------------------------------ 2026-10-30 화면 개편
+# "버튼이 많고 생김새가 이상하고 공간 효율이 나쁘다" → 도구는 왼쪽 아이콘 레일, 저장은 메뉴 하나,
+# 크기 ± · 선 프로파일 · 통계 표는 **필요할 때만** 자리를 차지한다.
+def test_rail_tiles_are_square_after_qss_polish(dlg):
+    # ★ Qt 는 polish 때 QSS min-height 로 setMinimumSize 를 덮어쓴다 — 코드의 setFixedSize 가
+    #   34px 로 눌려 아이콘 아래 이름이 잘렸던 회귀.  크기는 QSS(role=glTile)가 정한다.
+    for b in list(dlg._tool_btns.values()) + [dlg.fit_btn, dlg.one_btn, dlg.undo_btn, dlg.clear_btn]:
+        assert (b.width(), b.height()) == (56, 56), b.caption()
+        assert b.property("role") == "glTile" and b.toolTip()
+    assert [b.caption() for b in dlg._tool_btns.values()] == ["이동", "수평선", "수직선", "사각형", "정사각형", "원"]
+
+
+def test_size_stepper_only_for_selected_shape(dlg):
+    c = dlg.canvas
+    assert not dlg.size_plus.isVisible() and not dlg.sel_label.isVisible()
+    _add_rect(dlg, x=10, y=10, w=20, h=20)
+    c.roisChanged.emit()
+    _pump()
+    assert dlg.size_plus.isVisible() and dlg.size_minus.isVisible()
+    assert "사각형 1" in dlg.sel_label.text()
+    c.rois.add_line(R.HLINE, 5)                 # 선은 크기가 없다 → 숨긴다
+    c.roisChanged.emit()
+    _pump()
+    assert not dlg.size_plus.isVisible()
+    c.rois.selected = None
+    c.selectionChanged.emit()
+    _pump()
+    assert not dlg.size_plus.isVisible()
+
+
+def test_selecting_a_shape_does_not_move_the_picture(dlg):
+    """± 가 나타나며 상태 줄이 커지면 사진 화면이 줄어 맞춤 배율이 바뀌고 그리던 도형이 밀렸다."""
+    c = dlg.canvas
+    before = (c.geometry(), c.view_state())
+    _add_rect(dlg, x=10, y=10, w=20, h=20)
+    c.roisChanged.emit()
+    _pump()
+    assert (c.geometry(), c.view_state()) == before
+
+
+def test_profile_section_only_with_a_line(dlg):
+    assert not dlg.profile.isVisible() and not dlg.profile_head.isVisible()
+    dlg.canvas.rois.add_line(R.VLINE, 7)
+    dlg.canvas.roisChanged.emit()
+    _pump()
+    assert dlg.profile.isVisible() and dlg.profile_head.isVisible()
+    dlg.show_v.setChecked(False)                # 숨긴 선은 프로파일에서도 빠진다 → 칸도 접힌다
+    _pump()
+    assert not dlg.profile.isVisible()
+
+
+def test_table_hidden_until_an_image_is_open(styled_qapp):
+    d = GlViewerPanel(None)
+    d.resize(1280, 820)
+    d.show()
+    _pump()
+    try:
+        assert not d.table.isVisible() and not d.table_head.isVisible()
+        d.show_view(loader.ViewLoad(loader.GlImage(np.zeros((20, 30), np.uint8), 8, False, "y.png", [])))
+        _pump()
+        assert d.table.isVisible() and d.table.rowCount() == 1
+    finally:
+        d.close()
+        d.deleteLater()
+
+
+def test_save_menu_holds_xlsx_png_and_roi_toggle(dlg):
+    acts = dlg.save_menu.actions()
+    texts = [a.text() for a in acts if not a.isSeparator()]
+    assert texts == ["엑셀로 저장…", "색 칠한 PNG 저장…", "PNG 에 ROI 선·이름도 그리기"]
+    assert dlg.png_rois.isCheckable() and dlg.png_rois.isChecked()
+
+
+def test_dialog_wraps_panel_and_opens_given_path(styled_qapp, monkeypatch):
+    opened = []
+    monkeypatch.setattr(GlViewerPanel, "open_path", lambda self, path, **kw: opened.append(str(path)))
+    d = GlViewerDialog(None, image_path="/x/y.png")
+    try:
+        assert isinstance(d.panel, GlViewerPanel) and opened == ["/x/y.png"]
+        assert d.windowTitle() == "GL 히스토그램"
+    finally:
+        d.deleteLater()
+
+
+def test_threshold_note_hidden_when_empty(dlg):
+    assert not dlg.thr_note.isVisible()
+    dlg._set_thresholds(dlg._hi + 5, dlg._hi, "lo")        # 하한이 상한을 넘으면 바로 아래서 멈추고 알린다
+    _pump()
+    assert dlg.thr_note.isVisible() and dlg._lo == dlg._hi - 1
+    dlg._set_thresholds(0, dlg._hi, "lo")
+    _pump()
+    assert not dlg.thr_note.isVisible()
