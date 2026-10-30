@@ -115,6 +115,8 @@ def _kla_frame(folder: Path) -> Optional[Frame]:
     if cm is None:
         return None
     geom = wg.kla_geometry(folder)
+    if geom.source == "fallback":           # DiePitch 를 못 읽어 TB500 값을 댄 것 — 추측하지 않는다
+        return None
     sm = wg._SAMPLE_SIZE_PAT.search(head)
     dia = float(sm.group(1)) * 1000.0 if sm else DEFAULT_WAFER_DIAMETER
     cx, cy = float(cm.group(1)), float(cm.group(2))

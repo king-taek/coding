@@ -495,6 +495,9 @@ class MainWindow(MultiValFlow, QMainWindow):
         """도움말 > '업데이트 확인' — 소스/포터블 모두에서 결과를 명시적으로 안내."""
         import threading
         self._status_bar.showMessage(i18n.KO.UPDATE_CHECKING, 3000)
+        # 설정 화면은 상태바를 숨기므로(`_sync_statusbar`) 누른 버튼이 '확인 중' 을 대신 보인다 —
+        # 결과 창이 뜰 때까지 아무 반응이 없어 연타하던 자리다.  결과가 오면 다시 켠다.
+        self._set_update_btn_busy(True)
 
         def _work() -> None:
             status, info = "unknown", {}
@@ -517,9 +520,15 @@ class MainWindow(MultiValFlow, QMainWindow):
         threading.Thread(target=_work, name="update-check-manual",
                          daemon=True).start()
 
+    def _set_update_btn_busy(self, busy: bool) -> None:
+        btn = getattr(getattr(self, "_setup_page", None), "update_btn", None)
+        if btn is not None:
+            btn.setEnabled(not busy)
+
     def _on_update_none(self, msg: str) -> None:
         # 최신이거나 확인 불가인 결과다 — 중립 제목을 쓴다('업데이트 있음' 은 실제로
         # 새 버전이 있는 _on_update_found 전용).
+        self._set_update_btn_busy(False)
         sheets.info(self, i18n.KO.UPDATE_CHECK_TITLE, msg)
 
     # ==================================================================
@@ -557,6 +566,7 @@ class MainWindow(MultiValFlow, QMainWindow):
 
     def _on_update_found(self, info: dict) -> None:
         """'업데이트 있음' 안내 → 동의하면 백그라운드로 다운로드/교체."""
+        self._set_update_btn_busy(False)
         # 사용자에겐 개발자용 커밋 메시지/SSL 멘트 대신 간단한 안내만.
         body = (i18n.KO.UPDATE_UNKNOWN_CURRENT if (info or {}).get("current_unknown")
                 else i18n.KO.UPDATE_AVAILABLE_BODY)
@@ -2050,7 +2060,8 @@ class MainWindow(MultiValFlow, QMainWindow):
         def guess(attr: str) -> str:
             found = [notch.detect(Path(d)) for n in names
                      for d in [getattr(sr.slots[n], attr)] if d is not None]
-            return max(set(found), key=found.count) if found else notch.DEFAULT
+            # 동률이면 앞 슬롯의 값 — set 을 돌면 실행마다 순서가 달라 결과가 바뀐다.
+            return max(found, key=found.count) if found else notch.DEFAULT
 
         groups = [([it.path for it in sr.slots[n].ref_images],
                    [it.path for it in sr.slots[n].val_images]) for n in names]
@@ -2806,7 +2817,8 @@ class MainWindow(MultiValFlow, QMainWindow):
     def _title_fields(inp: SetupInput) -> dict[str, str]:
         """결과 엑셀 제목을 이루는 칸 — 저장 창 이름 아래에 추천값으로 채워 보여 준다.
 
-        자재(제품 이름, 예: TB500)·Layer(예: RDL4)는 **검증 대상 폴더**에서, 못 읽은 칸은
+        자재(제품 이름, 예: TB500)·Layer(예: RDL4)·LOT(예: TB500.INT895)는 **검증 대상 폴더**에서,
+        못 읽은 칸은
         기준 폴더에서 추천한다(`models/lot_info.read_title_parts`, 사용자 결정 2026-10-30).
         추출은 기준 폴더뿐이다.  못 읽으면 빈 칸 — 저장 창에서 사용자가 채운다.
 
@@ -2818,24 +2830,25 @@ class MainWindow(MultiValFlow, QMainWindow):
         if getattr(inp, "extract", False):
             tp = read_title_parts(inp.ref_root)
             return {"machine": inp.ref_machine, "layer": tp.layer,
-                    "material": tp.material}
+                    "material": tp.material, "lot": tp.lot}
         tp = read_title_parts(inp.val_root)
-        if not (tp.material and tp.layer):
+        if not (tp.material and tp.layer and tp.lot):
             # 기준 폴더로 메우는 건 **같은 제품일 때만** — 자재가 다르면(또는 한쪽만
-            # 알면) 섞어서 'RDL2_T254' 같은 없는 조합을 만들지 않는다.
+            # 알면) 섞어서 'T254_RDL2' 같은 없는 조합을 만들지 않는다.  LOT 도 같다.
             rp = read_title_parts(inp.ref_root)
             if tp.material and rp.material == tp.material:
-                tp = TitleParts(material=tp.material, layer=tp.layer or rp.layer)
-            elif not tp.material and not tp.layer:
+                tp = TitleParts(material=tp.material, layer=tp.layer or rp.layer,
+                                lot=tp.lot or rp.lot)
+            elif not tp.material and not tp.layer and not tp.lot:
                 tp = rp
-        if not (tp.material or tp.layer):
-            _LOG.info("자재·Layer 를 못 읽어 기본 제목을 씁니다: %s", inp.val_root)
+        if not (tp.material or tp.layer or tp.lot):
+            _LOG.info("자재·Layer·LOT 를 못 읽어 기본 제목을 씁니다: %s", inp.val_root)
         return {"val": inp.val_machine, "layer": tp.layer,
-                "material": tp.material, "ref": inp.ref_machine}
+                "material": tp.material, "lot": tp.lot, "ref": inp.ref_machine}
 
     @staticmethod
     def _suggest_result_name(inp: SetupInput) -> str:
-        """결과 엑셀의 추천 제목 — `{검증장비} {Layer}_{자재} 검증({기준장비} 기준).xlsx`."""
+        """결과 엑셀의 추천 제목 — `{검증장비} {자재}_{Layer}_{LOT} 검증({기준장비} 기준).xlsx`."""
         from .widgets.save_name_dialog import compose_title
         return compose_title(MainWindow._title_fields(inp))
 

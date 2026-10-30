@@ -69,8 +69,7 @@ def test_fold_button_leaves_only_icons(qapp):
 
 
 @pytest.mark.parametrize("key,btn", [("image_info", "image_info_btn"),
-                                     ("wafer_map", "wafer_map_btn"),
-                                     ("gl", "gl_btn")])
+                                     ("wafer_map", "wafer_map_btn")])
 def test_tool_opens_as_page_and_folds_menu(qapp, no_sheets, key, btn):
     page = _page(qapp)
     try:
@@ -92,11 +91,39 @@ def test_tool_opens_as_page_and_folds_menu(qapp, no_sheets, key, btn):
         page.close()
 
 
+def test_gl_is_coming_soon_until_ready(qapp, no_sheets, monkeypatch):
+    """GL 히스토그램은 아직 배포하지 않는다 — 메뉴에 아이콘은 그대로 두고 'Coming soon' 으로
+    막는다(사용자 요청 2026-10-30).  사진 정보의 [GL 보기] 도 숨긴다.
+    (dev 는 이 값을 켜 두고 기본 브랜치만 끈다 — 그래서 값 자체는 단언하지 않는다.)"""
+    from aoi_verification.app import config
+    from aoi_verification.app.ui.widgets.image_info_dialog import ImageInfoDialog
+    monkeypatch.setattr(config, "GL_HISTOGRAM_READY", False)
+    page = _page(qapp)
+    try:
+        btn = page.gl_btn
+        assert btn.text() == i18n.KO.GL_COMING_SOON
+        assert btn.isVisible() and not btn.isEnabled()
+        assert not btn.icon().isNull()
+        btn.click()
+        qapp.processEvents()
+        assert page.current_page() == "match"
+        assert page.tool_dialog("gl") is None
+        page.toggle_rail()                                   # 접어도 이름은 툴팁으로
+        assert i18n.KO.GL_COMING_SOON in btn.toolTip()
+    finally:
+        page.close()
+    dlg = ImageInfoDialog()
+    try:
+        assert dlg.gl_btn.isHidden()
+    finally:
+        dlg.deleteLater()
+
+
 def test_returning_keeps_user_fold_choice(qapp, no_sheets):
     page = _page(qapp)
     try:
         page.toggle_rail()                       # 사용자가 접어 둔 채
-        page.gl_btn.click()
+        page.image_info_btn.click()
         page.match_btn.click()
         assert page.is_rail_folded()             # 돌아와도 접힌 그대로
     finally:
@@ -203,12 +230,12 @@ def test_peeking_on_tool_page_keeps_match_choice(qapp, no_sheets):
     page = _page(qapp)
     try:
         page.toggle_rail()                       # 매칭에서 접음
-        page.gl_btn.click()
+        page.image_info_btn.click()
         page.toggle_rail()                       # 도구에서 펼쳐 봄
         assert not page.is_rail_folded()
         page.match_btn.click()
         assert page.is_rail_folded()
-        page.gl_btn.click()                      # 다시 들어가면 또 저절로 접힌다
+        page.image_info_btn.click()              # 다시 들어가면 또 저절로 접힌다
         assert page.is_rail_folded()
     finally:
         page.close()
@@ -243,10 +270,10 @@ def test_visited_tool_does_not_widen_matching_page(qapp, no_sheets):
     page = _page(qapp, 800, 600)
     try:
         before = page._pages.minimumSizeHint().width()
-        page.gl_btn.click()
+        page.image_info_btn.click()
         wide = QWidget()
         wide.setMinimumWidth(3000)                     # 아주 긴 파일명 같은 것
-        page.tool_dialog("gl").layout().addWidget(wide)
+        page.tool_dialog("image_info").layout().addWidget(wide)
         page.match_btn.click()
         for _ in range(8):
             qapp.processEvents()
@@ -267,7 +294,7 @@ def test_journey_rail_hidden_on_tool_pages(qapp, no_sheets, monkeypatch):
     try:
         sp_ = win._setup_page
         assert win._rail.isVisible()
-        sp_.gl_btn.click()
+        sp_.image_info_btn.click()
         assert not win._rail.isVisible()
         sp_.extract_btn.click()
         assert win._rail.isVisible()
@@ -297,7 +324,7 @@ def test_journey_rail_animation_settles(qapp, no_sheets, monkeypatch):
     win.show()
     try:
         sp_ = win._setup_page
-        sp_.gl_btn.click()
+        sp_.image_info_btn.click()
         QTest.qWait(60)
         assert 0 < win._rail.height() < JourneyRail.RAIL_H     # 접히는 중
         sp_.match_btn.click()                                  # 도중에 되돌린다
@@ -308,5 +335,39 @@ def test_journey_rail_animation_settles(qapp, no_sheets, monkeypatch):
         QTest.qWait(motion.DUR_RAIL_FOLD + 250)
         assert not win._rail.isVisible()
     finally:
+        win._loading.hide_overlay()
+        win.close()
+
+
+def test_update_button_shows_checking_on_setup_screen(qapp, no_sheets, monkeypatch):
+    """설정 화면은 상태바를 숨긴다 — [업데이트 확인] 을 누르면 결과가 올 때까지 버튼이 꺼져
+    '확인 중' 을 보이고(연타 방지), 결과가 오면 다시 켜진다(리뷰 지적)."""
+    import threading
+    from PyQt6.QtTest import QTest
+    from aoi_verification.app.ui import main_window as mw
+    from aoi_verification.app.utils import updater
+    gate = threading.Event()
+
+    def _check():
+        gate.wait(5)
+        return "latest", {}
+    monkeypatch.setattr(updater, "manual_check", _check)
+    shown = []
+    monkeypatch.setattr(mw.sheets, "info", lambda *a, **kw: shown.append(a))
+    monkeypatch.setattr(mw.MainWindow, "_start_backend_import_async", lambda self: None)
+    win = mw.MainWindow()
+    win.show()
+    try:
+        btn = win._setup_page.update_btn
+        btn.click()
+        assert not btn.isEnabled()
+        gate.set()
+        for _ in range(100):
+            if btn.isEnabled():
+                break
+            QTest.qWait(20)
+        assert btn.isEnabled() and len(shown) == 1
+    finally:
+        gate.set()
         win._loading.hide_overlay()
         win.close()
