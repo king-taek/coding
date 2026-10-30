@@ -135,16 +135,14 @@ def read_header_ids(folder: Path) -> tuple[Optional[str], Optional[str]]:
 
 _DEVICE_PAT = re.compile(r'^\s*DeviceID\s+"([^"]*)"', re.IGNORECASE | re.MULTILINE)
 _STEP_PAT = re.compile(r'^\s*StepID\s+"([^"]*)"', re.IGNORECASE | re.MULTILINE)
-_LOT_PAT = re.compile(r'^\s*LotID\s+"([^"]*)"', re.IGNORECASE | re.MULTILINE)
 
 
-def read_device_step(folder: Path) -> tuple[Optional[str], Optional[str], Optional[str]]:
-    """정보파일 헤더의 ``(DeviceID, StepID, LotID)`` — 결과 엑셀 제목의 자재·Layer·LOT 추천용.
+def read_device_step(folder: Path) -> tuple[Optional[str], Optional[str]]:
+    """정보파일 헤더의 ``(DeviceID, StepID)`` — 결과 엑셀 제목의 자재·Layer 추천용.
 
-    예: ``DeviceID "4DT-TB500-H-M1"`` · ``StepID "RDL4_AUTO_RBB"`` ·
-    ``LotID "TB500.INT895@6412"``(LOT 이름은 호출부가 ``@`` 앞만 쓴다).  KLA 가 아니면
-    ``(None, None, None)``.  :func:`read_header_ids` 처럼 후보를 순서대로 보고 DeviceID 가
-    있는 첫 파일의 값을 함께 쓴다."""
+    예: ``DeviceID "4DT-TB500-H-M1"`` · ``StepID "RDL4_AUTO_RBB"``.  KLA 가 아니면
+    ``(None, None)``.  :func:`read_header_ids` 처럼 후보를 순서대로 보고 DeviceID 가
+    있는 첫 파일의 두 값을 함께 쓴다."""
     for p in _info_candidates(Path(folder)):
         try:
             with p.open("rb") as fh:
@@ -155,11 +153,8 @@ def read_device_step(folder: Path) -> tuple[Optional[str], Optional[str], Option
         if not dm:
             continue
         sm = _STEP_PAT.search(text)
-        lm = _LOT_PAT.search(text)
-        return (dm.group(1).strip() or None,
-                (sm.group(1).strip() or None) if sm else None,
-                (lm.group(1).strip() or None) if lm else None)
-    return None, None, None
+        return dm.group(1).strip() or None, (sm.group(1).strip() or None) if sm else None
+    return None, None
 
 
 def read_wafer_id(folder: Path) -> Optional[str]:

@@ -2817,9 +2817,9 @@ class MainWindow(MultiValFlow, QMainWindow):
     def _title_fields(inp: SetupInput) -> dict[str, str]:
         """결과 엑셀 제목을 이루는 칸 — 저장 창 이름 아래에 추천값으로 채워 보여 준다.
 
-        자재(제품 이름, 예: TB500)·Layer(예: RDL4)·LOT(예: TB500.INT895)는 **검증 대상 폴더**에서,
-        못 읽은 칸은
-        기준 폴더에서 추천한다(`models/lot_info.read_title_parts`, 사용자 결정 2026-10-30).
+        자재(제품 이름, 예: TB500)·Layer(예: RDL4)·S/M(스트립 마크, 예: GFW)은 **검증 대상
+        폴더**에서, 못 읽은 칸은 기준 폴더에서 추천한다(`models/lot_info.read_title_parts`,
+        사용자 결정 2026-10-30).  KLA 폴더엔 S/M 이 없어 기준 쪽 Camtek 폴더로 메운다.
         추출은 기준 폴더뿐이다.  못 읽으면 빈 칸 — 저장 창에서 사용자가 채운다.
 
         ⚠ 파일시스템 접근은 **폴더당 슬롯 하나의 INI 몇 개**다.  느린 NAS 라도 왕복
@@ -2830,21 +2830,21 @@ class MainWindow(MultiValFlow, QMainWindow):
         if getattr(inp, "extract", False):
             tp = read_title_parts(inp.ref_root)
             return {"machine": inp.ref_machine, "layer": tp.layer,
-                    "material": tp.material, "lot": tp.lot}
+                    "material": tp.material, "sm": tp.sm}
         tp = read_title_parts(inp.val_root)
-        if not (tp.material and tp.layer and tp.lot):
+        if not (tp.material and tp.layer and tp.sm):
             # 기준 폴더로 메우는 건 **같은 제품일 때만** — 자재가 다르면(또는 한쪽만
-            # 알면) 섞어서 'T254_RDL2' 같은 없는 조합을 만들지 않는다.  LOT 도 같다.
+            # 알면) 섞어서 'T254_RDL2' 같은 없는 조합을 만들지 않는다.  S/M 도 같다.
             rp = read_title_parts(inp.ref_root)
             if tp.material and rp.material == tp.material:
                 tp = TitleParts(material=tp.material, layer=tp.layer or rp.layer,
-                                lot=tp.lot or rp.lot)
-            elif not tp.material and not tp.layer and not tp.lot:
+                                sm=tp.sm or rp.sm)
+            elif not tp.material and not tp.layer and not tp.sm:
                 tp = rp
-        if not (tp.material or tp.layer or tp.lot):
-            _LOG.info("자재·Layer·LOT 를 못 읽어 기본 제목을 씁니다: %s", inp.val_root)
+        if not (tp.material or tp.layer or tp.sm):
+            _LOG.info("자재·Layer·S/M 을 못 읽어 기본 제목을 씁니다: %s", inp.val_root)
         return {"val": inp.val_machine, "layer": tp.layer,
-                "material": tp.material, "lot": tp.lot, "ref": inp.ref_machine}
+                "material": tp.material, "sm": tp.sm, "ref": inp.ref_machine}
 
     @staticmethod
     def _suggest_result_name(inp: SetupInput) -> str:
@@ -2945,31 +2945,30 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._setup_page.cross_mode_changed.connect(self._on_extract_mode_changed)
         # Wafer Map '맵만 보기' — 시트일 때처럼 상태바까지 비켜 준다.
         self._setup_page.tool_fullscreen_changed.connect(self._on_tool_fullscreen)
-        self._setup_page.rail_folded_changed.connect(self._on_setup_rail_folded)
-        # 사진 정보 · Wafer Map · GL 화면에서는 위 단계 줄(여정 레일)이 필요 없다(사용자 요청).
+        # 사진 정보 · Wafer Map · GL 화면에서는 위 단계 줄에 단계 대신 화면 제목을 띄운다(사용자 요청).
         self._setup_page.page_changed.connect(self._on_setup_page_changed)
         # 백엔드가 아직이면 '검증 시작' 을 잠그고 버튼에 준비 중을 표기한다.
         self._setup_page.set_backend_ready(self._backend_ready)
 
     def _on_tool_fullscreen(self, on: bool) -> None:
-        """Wafer Map '맵만 보기' — 상태바도 비켜 준다(시트일 때 맵이 창을 다 덮던 것처럼).
-        단계 줄은 도구 화면에서 이미 접혀 있다(`_on_setup_page_changed`)."""
+        """Wafer Map '맵만 보기' — 단계 줄·상태바도 비켜 준다(시트일 때 맵이 창을 다 덮던 것처럼)."""
+        self._set_journey_shown(not on, animate=True)
         if on:
             self._status_bar.setVisible(False)
         else:
             self._sync_statusbar(self._stack.currentWidget())
 
-    def _on_setup_rail_folded(self, _folded: bool) -> None:
-        if self._stack.currentWidget() is self._setup_page:
-            self._sync_statusbar(self._setup_page)
-
-    def _on_setup_page_changed(self, key: str) -> None:
-        """도구 화면이면 위 단계 줄을 접어 올리고, 매칭·추출로 돌아오면 다시 내린다.
+    def _on_setup_page_changed(self, _key: str) -> None:
+        """도구 화면이면 맨 위 단계 줄에 단계 대신 그 화면 제목을 띄운다.
 
         단계 줄은 '검증 흐름의 몇 번째인가' 를 말하는데, 도구 화면은 그 흐름 밖이다 —
-        거기서 '1 설정' 이 켜져 있으면 지금 어디인지 오히려 헷갈린다.  왼쪽 메뉴 서랍과
-        같은 시간·곡선으로 움직여 한 박자로 읽히게 한다."""
-        self._set_journey_shown(key in ("match", "extract"), animate=True)
+        거기서 '1 설정' 이 켜져 있으면 지금 어디인지 오히려 헷갈린다.  줄은 접지 않는다
+        (사용자 요청 2026-10-30: 사라지지 않게, 그 자리에 제목)."""
+        self._sync_journey_title(self._stack.currentWidget())
+
+    def _sync_journey_title(self, page: QWidget) -> None:
+        setup = self._setup_page
+        self._rail.set_title(setup.tool_title() if page is setup else "")
 
     def _set_journey_shown(self, on: bool, *, animate: bool) -> None:
         from . import motion
@@ -3124,10 +3123,10 @@ class MainWindow(MultiValFlow, QMainWindow):
 
     def _sync_statusbar(self, page: QWidget) -> None:
         """설정 화면은 크레딧을 왼쪽 메뉴 맨 아래에 두므로 상태바를 숨긴다(개발자 모드만 예외 —
-        설정 버튼이 거기 있다).  다른 화면은 그대로.  메뉴를 아이콘만 남기면 크레딧이 들어갈
-        자리가 없어 상태바가 다시 맡는다."""
+        설정 버튼이 거기 있다).  다른 화면은 그대로.  메뉴를 접어 아이콘만 남겨도 상태바를
+        다시 띄우지 않는다 — 크레딧·메모리 사용량 모두 안 보인다(사용자 요청 2026-10-30)."""
         setup = getattr(self, "_setup_page", None)
-        on_setup = page is setup and setup is not None and not setup.is_rail_folded()
+        on_setup = page is setup and setup is not None
         self._credit_label.setVisible(not on_setup)
         self._status_bar.setVisible(not on_setup or _prefs.load().dev_mode)
 
@@ -3262,15 +3261,15 @@ class MainWindow(MultiValFlow, QMainWindow):
         #   레일은 '어디로 가는 중인가' 를 먼저 말해 주는 표지판이지 화면의 일부가
         #   아니다(사라졌다 나타나면 오히려 깜빡임으로 읽힌다).
         self._sync_statusbar(w)
-        # 단계 줄은 설정 화면의 도구 페이지(사진 정보·Wafer Map·GL)에서만 접혀 있다 —
-        # 다른 화면으로 가면 늘 다시 보인다(도구 페이지에 둔 채 흐름이 넘어가도).
+        # 단계 줄은 늘 보인다.  설정 화면의 도구 페이지(사진 정보·Wafer Map·GL)에서는 단계
+        # 대신 그 화면 제목을 띄우고, 다른 화면으로 가면 단계로 돌아간다(도구 페이지에 둔 채
+        # 흐름이 넘어가도).
         old = self._stack.currentWidget()
         sliding = not (old is w or old is None or not animate
                        or not motion.enabled())
-        setup = self._setup_page
-        self._set_journey_shown(
-            not (w is setup and setup.current_page() not in ("match", "extract")),
-            animate=sliding)
+        self._sync_journey_title(w)
+        if w is not self._setup_page:            # 맵 '맵만 보기' 로 접어 둔 채 넘어가도 되살린다
+            self._set_journey_shown(True, animate=False)
         self._sync_rail(w, animate=sliding)
         if not sliding:
             self._stack.setCurrentWidget(w)

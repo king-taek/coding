@@ -398,10 +398,10 @@ EXPAND_POSITION_FMT = "{cur} / {total}"
 
 # ── 양식 파일 / 저장 파일 명명 ─────────────────────────────────────────────
 # 결과 엑셀 제목 — "장비Layer_자재검증(장비기준)" (사용자 요청).
-#   예: `4F-AOI-03 TB500_RDL4_TB500.INT895 검증(AOI-24 기준).xlsx`
-# {tag} = "자재_Layer_LOT"(못 읽은 칸은 빠진다).  자재는 제품 이름(TB500)이고 Camtek Job
-# 이름·KLA 헤더에서, LOT 은 장비 LOT ID 의 `@` 앞에서 추천한다(`models/lot_info.py`,
-# 사용자 결정·요청 2026-10-30).  모두 못
+#   예: `4F-AOI-03 TB500_RDL4_GFW 검증(AOI-24 기준).xlsx`
+# {tag} = "자재_Layer_S/M"(못 읽은 칸은 빠진다).  자재는 제품 이름(TB500)이고 Camtek Job
+# 이름·KLA 헤더에서, S/M(스트립 마크)은 슬롯 WaferInfo.ini `InputLot` 의 첫 하이픈 앞에서
+# 추천한다(`models/lot_info.py`, 사용자 결정·요청 2026-10-30).  모두 못
 # 읽으면 아래 폴백 이름을 쓴다 — 저장 창에서 사용자가 칸을 채워 다시 만들 수 있다.
 RESULT_FILE_TITLE_FMT = "{val} {tag} 검증({ref} 기준).xlsx"
 RESULT_FILE_TITLE_FALLBACK_FMT = "AOI {val} 검증 ({ref} 기준).xlsx"
@@ -861,7 +861,7 @@ INFO_ALREADY_MATCHED_SECTION = "이미 매칭됨 (자동 제외)"
 SAVE_NAME_TITLE = "저장할 파일 이름"
 SAVE_NAME_BODY = (
     "아래 이름으로 저장합니다. 필요하면 고쳐 주세요.\n"
-    "규칙: 장비 자재_Layer_LOT 검증(기준 장비 기준)"
+    "규칙: 장비 자재_Layer_S/M 검증(기준 장비 기준)"
 )
 SAVE_NAME_FOLDER_FMT = "저장 폴더: {path}"
 # 이름 아래 칸들 — 추천값이 들어 있고, 고친 뒤 버튼을 누르면 위 이름을 다시 만든다(사용자 요청 2026-10-30).
@@ -872,7 +872,7 @@ SAVE_NAME_FIELD_REF = "기준 장비"
 SAVE_NAME_FIELD_MACHINE = "장비"
 SAVE_NAME_FIELD_LAYER = "Layer"
 SAVE_NAME_FIELD_MATERIAL = "자재"
-SAVE_NAME_FIELD_LOT = "LOT"
+SAVE_NAME_FIELD_SM = "S/M"
 SAVE_NAME_OK = "이 이름으로 저장"
 SAVE_NAME_CANCEL = "취소"
 SAVE_NAME_EMPTY = "이름을 비워 둘 수 없습니다."
@@ -1267,7 +1267,7 @@ EXTRACT_AUTOMATION_USER_SELECT = "추출할 사진을 직접 고릅니다"
 EXTRACT_AUTOMATION_AUTO_ALL = "모든 사진 자동 — 선별 없이 전부 추출"
 EXTRACT_SAVE_NAME_BODY = (
     "아래 이름으로 저장합니다. 필요하면 고쳐 주세요.\n"
-    "규칙: 호기 자재_Layer_LOT Defect 추출")
+    "규칙: 호기 자재_Layer_S/M Defect 추출")
 EXTRACT_NONE_FOUND = "추출할 사진을 찾지 못했습니다.\n폴더를 다시 확인하세요."
 EXTRACT_NONE_CHOSEN_TITLE = "고른 사진이 없습니다"
 EXTRACT_NONE_CHOSEN_BODY = (
