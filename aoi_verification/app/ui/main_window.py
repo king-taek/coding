@@ -2817,7 +2817,8 @@ class MainWindow(MultiValFlow, QMainWindow):
     def _title_fields(inp: SetupInput) -> dict[str, str]:
         """결과 엑셀 제목을 이루는 칸 — 저장 창 이름 아래에 추천값으로 채워 보여 준다.
 
-        자재(제품 이름, 예: TB500)·Layer(예: RDL4)는 **검증 대상 폴더**에서, 못 읽은 칸은
+        자재(제품 이름, 예: TB500)·Layer(예: RDL4)·LOT(예: TB500.INT895)는 **검증 대상 폴더**에서,
+        못 읽은 칸은
         기준 폴더에서 추천한다(`models/lot_info.read_title_parts`, 사용자 결정 2026-10-30).
         추출은 기준 폴더뿐이다.  못 읽으면 빈 칸 — 저장 창에서 사용자가 채운다.
 
@@ -2829,24 +2830,25 @@ class MainWindow(MultiValFlow, QMainWindow):
         if getattr(inp, "extract", False):
             tp = read_title_parts(inp.ref_root)
             return {"machine": inp.ref_machine, "layer": tp.layer,
-                    "material": tp.material}
+                    "material": tp.material, "lot": tp.lot}
         tp = read_title_parts(inp.val_root)
-        if not (tp.material and tp.layer):
+        if not (tp.material and tp.layer and tp.lot):
             # 기준 폴더로 메우는 건 **같은 제품일 때만** — 자재가 다르면(또는 한쪽만
-            # 알면) 섞어서 'RDL2_T254' 같은 없는 조합을 만들지 않는다.
+            # 알면) 섞어서 'RDL2_T254' 같은 없는 조합을 만들지 않는다.  LOT 도 같다.
             rp = read_title_parts(inp.ref_root)
             if tp.material and rp.material == tp.material:
-                tp = TitleParts(material=tp.material, layer=tp.layer or rp.layer)
-            elif not tp.material and not tp.layer:
+                tp = TitleParts(material=tp.material, layer=tp.layer or rp.layer,
+                                lot=tp.lot or rp.lot)
+            elif not tp.material and not tp.layer and not tp.lot:
                 tp = rp
-        if not (tp.material or tp.layer):
-            _LOG.info("자재·Layer 를 못 읽어 기본 제목을 씁니다: %s", inp.val_root)
+        if not (tp.material or tp.layer or tp.lot):
+            _LOG.info("자재·Layer·LOT 를 못 읽어 기본 제목을 씁니다: %s", inp.val_root)
         return {"val": inp.val_machine, "layer": tp.layer,
-                "material": tp.material, "ref": inp.ref_machine}
+                "material": tp.material, "lot": tp.lot, "ref": inp.ref_machine}
 
     @staticmethod
     def _suggest_result_name(inp: SetupInput) -> str:
-        """결과 엑셀의 추천 제목 — `{검증장비} {Layer}_{자재} 검증({기준장비} 기준).xlsx`."""
+        """결과 엑셀의 추천 제목 — `{검증장비} {Layer}_{자재}_{LOT} 검증({기준장비} 기준).xlsx`."""
         from .widgets.save_name_dialog import compose_title
         return compose_title(MainWindow._title_fields(inp))
 

@@ -64,10 +64,11 @@ def compose_title(fields: dict[str, str]) -> str:
     """제목 칸 → 파일 이름(순수 함수 — 헤드리스 테스트).
 
     ``fields`` 에 ``machine`` 이 있으면 Defect 추출 제목, 아니면 검증 결과 제목이다
-    (``val``·``ref``).  ``layer``·``material`` 중 빈 칸은 빠지고, 둘 다 비면 폴백 이름."""
+    (``val``·``ref``).  ``layer``·``material``·``lot`` 중 빈 칸은 빠지고, 모두 비면 폴백 이름."""
     # 칸 안의 연속 공백은 하나로 — 빈 장비 칸이 이름에 이중 공백을 남기지 않게.
     g = {k: " ".join((v or "").split()) for k, v in fields.items()}
-    tag = "_".join(t for t in (g.get("layer", ""), g.get("material", "")) if t)
+    tag = "_".join(t for t in (g.get("layer", ""), g.get("material", ""), g.get("lot", ""))
+                   if t)
     return " ".join(_compose(g, tag).split())
 
 
@@ -89,6 +90,7 @@ _FIELD_LABELS = (
     ("val", i18n.KO.SAVE_NAME_FIELD_VAL),
     ("layer", i18n.KO.SAVE_NAME_FIELD_LAYER),
     ("material", i18n.KO.SAVE_NAME_FIELD_MATERIAL),
+    ("lot", i18n.KO.SAVE_NAME_FIELD_LOT),
     ("ref", i18n.KO.SAVE_NAME_FIELD_REF),
 )
 
