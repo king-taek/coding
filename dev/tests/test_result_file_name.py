@@ -188,17 +188,17 @@ def test_compose_title():
     from aoi_verification.app.ui.widgets.save_name_dialog import compose_title
 
     f = {"val": "4F-AOI-03", "layer": "RDL4", "material": "TB500", "ref": "AOI-24"}
-    assert compose_title(f) == "4F-AOI-03 RDL4_TB500 검증(AOI-24 기준).xlsx"
+    assert compose_title(f) == "4F-AOI-03 TB500_RDL4 검증(AOI-24 기준).xlsx"
     assert compose_title({**f, "layer": ""}) == "4F-AOI-03 TB500 검증(AOI-24 기준).xlsx"
     assert compose_title({**f, "lot": "TB500.INT895"}) == \
-        "4F-AOI-03 RDL4_TB500_TB500.INT895 검증(AOI-24 기준).xlsx"
+        "4F-AOI-03 TB500_RDL4_TB500.INT895 검증(AOI-24 기준).xlsx"
     assert compose_title({**f, "material": "", "lot": "NELA26.00"}) == \
         "4F-AOI-03 RDL4_NELA26.00 검증(AOI-24 기준).xlsx"
     assert compose_title({**f, "layer": " ", "material": ""}) == \
         "AOI 4F-AOI-03 검증 (AOI-24 기준).xlsx"
     ex = {"machine": "17", "layer": "RDL4", "material": "TB500"}
-    assert compose_title(ex) == "17 RDL4_TB500 Defect 추출.xlsx"
-    assert compose_title({**ex, "lot": "6H7ENK"}) == "17 RDL4_TB500_6H7ENK Defect 추출.xlsx"
+    assert compose_title(ex) == "17 TB500_RDL4 Defect 추출.xlsx"
+    assert compose_title({**ex, "lot": "6H7ENK"}) == "17 TB500_RDL4_6H7ENK Defect 추출.xlsx"
     assert compose_title({**ex, "layer": "", "material": ""}) == "AOI 17 Defect 추출.xlsx"
     # 장비 칸을 비워도 이름에 이중 공백이 남지 않는다.
     assert "  " not in compose_title({**f, "val": ""})
@@ -220,14 +220,14 @@ def test_the_suggested_title_reads_the_val_side_first(tmp_path):
     _camtek_slot(ref / "S1", "TB500_RDL2 - Multi")
     _camtek_slot(val / "S1", "R_TB500_LIVE")                     # Layer 없음
     assert MainWindow._suggest_result_name(_inp(ref, val)) == \
-        "4F-AOI-03 RDL2_TB500 검증(AOI-24 기준).xlsx"
+        "4F-AOI-03 TB500_RDL2 검증(AOI-24 기준).xlsx"
     assert MainWindow._title_fields(_inp(ref, val)) == {
         "val": "4F-AOI-03", "layer": "RDL2", "material": "TB500", "lot": "",
         "ref": "AOI-24"}
 
 
 def test_other_products_are_not_mixed(tmp_path):
-    """자재가 다르면 기준 폴더의 Layer 를 끌어오지 않는다 — 'RDL2_T254' 같은 없는 조합."""
+    """자재가 다르면 기준 폴더의 Layer 를 끌어오지 않는다 — 'T254_RDL2' 같은 없는 조합."""
     pytest.importorskip("PyQt6.QtWidgets")
     from aoi_verification.app.ui.main_window import MainWindow
 
@@ -246,7 +246,7 @@ def test_ref_side_is_used_when_val_side_has_nothing(tmp_path):
     _camtek_slot(ref / "S1", "TB500_RDL4 - Multi")
     (val / "S1").mkdir(parents=True)
     assert MainWindow._suggest_result_name(_inp(ref, val)) == \
-        "4F-AOI-03 RDL4_TB500 검증(AOI-24 기준).xlsx"
+        "4F-AOI-03 TB500_RDL4 검증(AOI-24 기준).xlsx"
 
 
 def test_lot_comes_from_the_ref_side_only_for_the_same_product(tmp_path):
@@ -260,7 +260,7 @@ def test_lot_comes_from_the_ref_side_only_for_the_same_product(tmp_path):
         "[GENERAL]\nJobDesc=DEV=4DT-TB500-H-M1~LOT=TB500.INT888@6324~\n", encoding="utf-8")
     _camtek_slot(val / "S1", "TB500_RDL4 - Multi")
     assert MainWindow._suggest_result_name(_inp(ref, val)) == \
-        "4F-AOI-03 RDL4_TB500_TB500.INT888 검증(AOI-24 기준).xlsx"
+        "4F-AOI-03 TB500_RDL4_TB500.INT888 검증(AOI-24 기준).xlsx"
     _camtek_slot(val / "S1", "R_T254 LIVE_0858711PD_FS UBM")      # 다른 제품
     assert MainWindow._title_fields(_inp(ref, val))["lot"] == ""
 
@@ -295,7 +295,7 @@ def test_name_rules(tmp_path):
     pytest.importorskip("PyQt6.QtWidgets")
     from aoi_verification.app.ui.widgets.save_name_dialog import sanitize_name
 
-    ok, err = sanitize_name("4F-AOI-03 RDL4_TB500 검증(AOI-24 기준).xlsx")
+    ok, err = sanitize_name("4F-AOI-03 TB500_RDL4 검증(AOI-24 기준).xlsx")
     assert err == "" and ok.endswith(".xlsx")
     # 확장자를 지웠으면 되살린다 — 없으면 엑셀이 열지 못한다.
     assert sanitize_name("이름만") == ("이름만.xlsx", "")
@@ -407,7 +407,7 @@ def test_starting_a_run_creates_no_file(monkeypatch, tmp_path, isolated_cache):
     assert list(results.iterdir()) == [], \
         f"검증 시작만 했는데 파일이 생겼다: {[p.name for p in results.iterdir()]}"
     assert win._working_xlsx == \
-        results / "4F-AOI-03 RDL4_TB500 검증(AOI-24 기준).xlsx"
+        results / "4F-AOI-03 TB500_RDL4 검증(AOI-24 기준).xlsx"
     assert win._template_used is not None and win._template_used.exists(), \
         "양식 원본은 저장 때 필요하다 — 경로를 잃으면 안 된다"
     assert win._result_page.fields == {"val": "4F-AOI-03", "layer": "RDL4",
@@ -420,10 +420,10 @@ def test_the_name_still_avoids_last_sessions_file(monkeypatch, tmp_path,
     from aoi_verification.app.ui import main_window as mw
 
     win, results = _stub_window(monkeypatch, tmp_path)
-    (results / "4F-AOI-03 RDL4_TB500 검증(AOI-24 기준).xlsx").write_bytes(b"old")
+    (results / "4F-AOI-03 TB500_RDL4 검증(AOI-24 기준).xlsx").write_bytes(b"old")
     mw.MainWindow._prepare_working_file(win, _input(tmp_path))
     assert win._working_xlsx.parent == results
-    assert win._working_xlsx.name.startswith("4F-AOI-03 RDL4_TB500 검증(AOI-24 기준)_")
+    assert win._working_xlsx.name.startswith("4F-AOI-03 TB500_RDL4 검증(AOI-24 기준)_")
     assert not win._working_xlsx.exists(), "여전히 파일을 미리 만든다"
 
 
@@ -497,7 +497,7 @@ class _Sig:
 def test_export_asks_for_the_name_first(styled_qapp, monkeypatch, tmp_path,
                                         isolated_cache):
     """저장 직전에 추천 이름을 보여주고 고칠 기회를 준다(사용자 결정: 마지막 저장 직전)."""
-    target = tmp_path / "4F-AOI-03 RDL4_TB500 검증(AOI-24 기준).xlsx"
+    target = tmp_path / "4F-AOI-03 TB500_RDL4 검증(AOI-24 기준).xlsx"
     page, asked, started = _result_page(styled_qapp, monkeypatch, target,
                                         chosen="내가 고친 이름.xlsx")
     page._on_export()
@@ -579,12 +579,12 @@ def test_the_auto_button_rebuilds_the_name_from_the_fields(styled_qapp, tmp_path
     dlg._fields["lot"].setText("")
     dlg._fields["layer"].setText("RDL4")
     dlg.btn_auto.click()
-    assert dlg.edit.text() == "4F-AOI-03 RDL4_TB500 검증(AOI-24 기준).xlsx"
+    assert dlg.edit.text() == "4F-AOI-03 TB500_RDL4 검증(AOI-24 기준).xlsx"
     # 같은 이름의 파일이 이미 있으면 덮지 않게 시각을 붙인다.
     (tmp_path / dlg.edit.text()).write_bytes(b"")
     dlg.btn_auto.click()
-    assert dlg.edit.text() != "4F-AOI-03 RDL4_TB500 검증(AOI-24 기준).xlsx"
-    assert dlg.edit.text().startswith("4F-AOI-03 RDL4_TB500 검증(AOI-24 기준)_")
+    assert dlg.edit.text() != "4F-AOI-03 TB500_RDL4 검증(AOI-24 기준).xlsx"
+    assert dlg.edit.text().startswith("4F-AOI-03 TB500_RDL4 검증(AOI-24 기준)_")
     # 칸에 금지 문자를 넣으면 확인이 잠긴다(이름 검사를 그대로 탄다).
     dlg._fields["material"].setText("TB/500")
     dlg.btn_auto.click()

@@ -2834,7 +2834,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         tp = read_title_parts(inp.val_root)
         if not (tp.material and tp.layer and tp.lot):
             # 기준 폴더로 메우는 건 **같은 제품일 때만** — 자재가 다르면(또는 한쪽만
-            # 알면) 섞어서 'RDL2_T254' 같은 없는 조합을 만들지 않는다.  LOT 도 같다.
+            # 알면) 섞어서 'T254_RDL2' 같은 없는 조합을 만들지 않는다.  LOT 도 같다.
             rp = read_title_parts(inp.ref_root)
             if tp.material and rp.material == tp.material:
                 tp = TitleParts(material=tp.material, layer=tp.layer or rp.layer,
@@ -2848,7 +2848,7 @@ class MainWindow(MultiValFlow, QMainWindow):
 
     @staticmethod
     def _suggest_result_name(inp: SetupInput) -> str:
-        """결과 엑셀의 추천 제목 — `{검증장비} {Layer}_{자재}_{LOT} 검증({기준장비} 기준).xlsx`."""
+        """결과 엑셀의 추천 제목 — `{검증장비} {자재}_{Layer}_{LOT} 검증({기준장비} 기준).xlsx`."""
         from .widgets.save_name_dialog import compose_title
         return compose_title(MainWindow._title_fields(inp))
 

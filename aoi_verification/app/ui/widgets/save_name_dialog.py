@@ -67,7 +67,7 @@ def compose_title(fields: dict[str, str]) -> str:
     (``val``·``ref``).  ``layer``·``material``·``lot`` 중 빈 칸은 빠지고, 모두 비면 폴백 이름."""
     # 칸 안의 연속 공백은 하나로 — 빈 장비 칸이 이름에 이중 공백을 남기지 않게.
     g = {k: " ".join((v or "").split()) for k, v in fields.items()}
-    tag = "_".join(t for t in (g.get("layer", ""), g.get("material", ""), g.get("lot", ""))
+    tag = "_".join(t for t in (g.get("material", ""), g.get("layer", ""), g.get("lot", ""))
                    if t)
     return " ".join(_compose(g, tag).split())
 
@@ -88,8 +88,8 @@ def _compose(g: dict[str, str], tag: str) -> str:
 _FIELD_LABELS = (
     ("machine", i18n.KO.SAVE_NAME_FIELD_MACHINE),
     ("val", i18n.KO.SAVE_NAME_FIELD_VAL),
-    ("layer", i18n.KO.SAVE_NAME_FIELD_LAYER),
     ("material", i18n.KO.SAVE_NAME_FIELD_MATERIAL),
+    ("layer", i18n.KO.SAVE_NAME_FIELD_LAYER),
     ("lot", i18n.KO.SAVE_NAME_FIELD_LOT),
     ("ref", i18n.KO.SAVE_NAME_FIELD_REF),
 )
