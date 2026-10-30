@@ -55,8 +55,11 @@ def _apply_app_font(app) -> None:
     보였다(사용자 캡처, 2026-10-30).  세로만 힌팅하면 DirectWrite ``CLEARTYPE_NATURAL``
     로 그려져 가로는 부드럽고 기준선은 또렷하다 — Qt 가 고배율 화면의 16px 이하 글씨에
     이미 고르는 방식과 같다.  글자 폭은 소수점 단위로 조금 달라질 수 있다.
+    ★ 서브픽셀(ClearType 무지개색) 대신 회색 안티앨리어싱을 쓴다
+    (``NoSubpixelAntialias``).  현택님이 PC 에서 4가지 방식을 나란히 보고
+    '세로 힌팅 + 회색' 을 골랐다(2026-10-30, ``dev/diagnose_font_render.py`` ④).
     QSS 로 바꾼 글꼴과 ``QFont()``·``QFont(위젯 글꼴)`` 은 힌팅을 앱 글꼴에서
-    물려받으므로 여기 한 곳이면 된다."""
+    물려받으므로(회색 설정도 같다) 여기 한 곳이면 된다."""
     from PyQt6.QtGui import QFont
     from aoi_verification.app import config
     from aoi_verification.app.ui import theme
@@ -66,6 +69,7 @@ def _apply_app_font(app) -> None:
     font.setFamilies([config.Fonts.FAMILY, "Pretendard", "Noto Sans KR",
                       "Malgun Gothic", "Segoe UI"])
     font.setHintingPreference(QFont.HintingPreference.PreferVerticalHinting)
+    font.setStyleStrategy(QFont.StyleStrategy.NoSubpixelAntialias)
     app.setFont(font)
 
 

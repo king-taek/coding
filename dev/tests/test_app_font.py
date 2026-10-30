@@ -102,7 +102,7 @@ def test_entry_point_registers_before_stylesheet():
 
 
 def test_app_font_uses_vertical_hinting(qapp):
-    """★ 앱 글꼴은 세로 힌팅이다 — 기본값(배율 100% 에서 전체 힌팅)은 한글 획을 픽셀에
+    """★ 앱 글꼴은 세로 힌팅 + 회색 안티앨리어싱이다(현택님 선택 ④) — 기본값(배율 100% 에서 전체 힌팅)은 한글 획을 픽셀에
     붙여 거칠게 보였다(사용자 캡처, 2026-10-30).
 
     QSS 로 패밀리·크기·굵기를 바꾼 위젯도 힌팅은 앱 글꼴에서 물려받는다 — 그래서
@@ -123,11 +123,14 @@ def test_app_font_uses_vertical_hinting(qapp):
         lb.ensurePolished()
         assert lb.font().pixelSize() == 15          # QSS 가 실제로 적용됐다
         assert lb.font().hintingPreference() == vertical
+        gray = QFont.StyleStrategy.NoSubpixelAntialias
+        assert lb.font().styleStrategy() & gray
         assert QFont().hintingPreference() == vertical   # 새로 만든 QFont 도
         # 이름으로 만든 QFont 는 힌팅이 비어 있다가, QPainter.setFont·위젯 setFont 가
         # 장치(위젯) 글꼴로 resolve 할 때 채워진다.
         named = QFont("Malgun Gothic", 12)
         assert named.resolve(lb.font()).hintingPreference() == vertical
+        assert named.resolve(lb.font()).styleStrategy() & gray
     finally:
         if lb is not None:
             lb.deleteLater()
