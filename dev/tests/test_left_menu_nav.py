@@ -232,3 +232,25 @@ def test_extract_drop_ignored_while_tool_page_shown(qapp, no_sheets, tmp_path):
         assert len(page._lot_paths()) == 0 or page._lot_paths() == [before]
     finally:
         page.close()
+
+
+def test_visited_tool_does_not_widen_matching_page(qapp, no_sheets):
+    """한 번 연 도구 화면(숨은 페이지)이 매칭 화면의 최소 폭을 넓히지 않는다.
+
+    QStackedWidget 은 숨은 페이지까지 합쳐 최소 크기를 잡는다 — 넓은 도구가 남아 있으면
+    좁은 창의 매칭 화면에 가로 스크롤이 생긴다(PR #91 리뷰)."""
+    from PyQt6.QtWidgets import QWidget
+    page = _page(qapp, 800, 600)
+    try:
+        before = page._pages.minimumSizeHint().width()
+        page.gl_btn.click()
+        wide = QWidget()
+        wide.setMinimumWidth(3000)                     # 아주 긴 파일명 같은 것
+        page.tool_dialog("gl").layout().addWidget(wide)
+        page.match_btn.click()
+        for _ in range(8):
+            qapp.processEvents()
+        assert page._pages.minimumSizeHint().width() <= max(before, 200)
+        assert page._scroll.horizontalScrollBar().maximum() == 0
+    finally:
+        page.close()

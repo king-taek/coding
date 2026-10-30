@@ -1472,7 +1472,7 @@ class SetupPage(QWidget):
         else:
             from ..widgets.gl_viewer_dialog import GlViewerDialog
             dlg = GlViewerDialog(self)
-        page = QWidget(self._pages)
+        page = QWidget()
         v = QVBoxLayout(page)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(0)
@@ -1490,9 +1490,19 @@ class SetupPage(QWidget):
         dlg.installEventFilter(self)
         v.addWidget(dlg, 1)
         dlg.show()
-        page.setProperty("_dialog", dlg)
-        page.setProperty("_bar", bar)
-        return page
+        # ★ 스크롤 칸으로 감싼다.  QStackedWidget 의 최소 크기는 **숨은 페이지까지** 합쳐
+        #   잡히므로, 한 번 연 도구(긴 파일명·줄바꿈 없는 도구줄)가 매칭 화면까지 넓혀
+        #   좁은 창에서 가로 스크롤을 만든다.  스크롤 칸은 자기 최소 크기가 작아 그걸 끊는다.
+        holder = QScrollArea(self._pages)
+        holder.setWidgetResizable(True)
+        holder.setFrameShape(QScrollArea.Shape.NoFrame)
+        holder.setStyleSheet(
+            "QScrollArea { background: transparent; border: none; }"
+            "QScrollArea > QWidget#qt_scrollarea_viewport { background: transparent; }")
+        holder.setWidget(page)
+        holder.setProperty("_dialog", dlg)
+        holder.setProperty("_bar", bar)
+        return holder
 
     def _on_tool_fullscreen(self, on: bool) -> None:
         """맵만 남기는 보기 — 메뉴·제목줄도 감추고, 창(여정 레일)에 알린다."""
