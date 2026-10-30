@@ -398,11 +398,11 @@ EXPAND_POSITION_FMT = "{cur} / {total}"
 
 # ── 양식 파일 / 저장 파일 명명 ─────────────────────────────────────────────
 # 결과 엑셀 제목 — "장비Layer_자재검증(장비기준)" (사용자 요청).
-#   예: `4F-AOI-03 RDL4_GFW 검증(AOI-24 기준).xlsx`
-# Layer·자재는 **검증 대상 폴더**의 `WaferInfo.ini` `InputLot=자재-Layer` 에서
-# 읽는다(`models/lot_info.py`).  못 읽으면 아래 폴백 이름을 쓴다 — 그때도 저장은
-# 되어야 하고, 어차피 마지막 저장 직전에 사용자가 고칠 수 있다.
-RESULT_FILE_TITLE_FMT = "{val} {layer}_{material} 검증({ref} 기준).xlsx"
+#   예: `4F-AOI-03 RDL4_TB500 검증(AOI-24 기준).xlsx`
+# {tag} = "Layer_자재"(둘 중 못 읽은 칸은 빠진다).  자재는 제품 이름(TB500)이고 Camtek Job
+# 이름·KLA 헤더에서 추천한다(`models/lot_info.py`, 사용자 결정 2026-10-30).  둘 다 못
+# 읽으면 아래 폴백 이름을 쓴다 — 저장 창에서 사용자가 칸을 채워 다시 만들 수 있다.
+RESULT_FILE_TITLE_FMT = "{val} {tag} 검증({ref} 기준).xlsx"
 RESULT_FILE_TITLE_FALLBACK_FMT = "AOI {val} 검증 ({ref} 기준).xlsx"
 TEMPLATE_NOT_FOUND_TITLE = "양식 파일 없음"
 TEMPLATE_NOT_FOUND_BODY = (
@@ -863,6 +863,14 @@ SAVE_NAME_BODY = (
     "규칙: 장비 Layer_자재 검증(기준 장비 기준)"
 )
 SAVE_NAME_FOLDER_FMT = "저장 폴더: {path}"
+# 이름 아래 칸들 — 추천값이 들어 있고, 고친 뒤 버튼을 누르면 위 이름을 다시 만든다(사용자 요청 2026-10-30).
+SAVE_NAME_FIELDS_HINT = "아래 값을 고친 뒤 ‘제목 자동 생성’을 누르면 위 이름이 바뀝니다. 비워 둔 값은 제목에서 빠집니다."
+SAVE_NAME_AUTO = "제목 자동 생성"
+SAVE_NAME_FIELD_VAL = "검증 장비"
+SAVE_NAME_FIELD_REF = "기준 장비"
+SAVE_NAME_FIELD_MACHINE = "장비"
+SAVE_NAME_FIELD_LAYER = "Layer"
+SAVE_NAME_FIELD_MATERIAL = "자재"
 SAVE_NAME_OK = "이 이름으로 저장"
 SAVE_NAME_CANCEL = "취소"
 SAVE_NAME_EMPTY = "이름을 비워 둘 수 없습니다."
@@ -1275,7 +1283,7 @@ EXPORT_PREPARE_IMAGES = "엑셀에 넣을 사진 준비 중…"
 EXTRACT_SUMMARY_BACK = "선별로 돌아가기"
 EXTRACT_SUMMARY_CANCEL = "설정으로 돌아가기"      # 선별을 건너뛴 경우(모든 사진 자동)
 # 저장 파일 이름 — 결과 엑셀 제목 규칙에 '추출' 을 붙인 것(사용자 결정).
-EXTRACT_FILE_TITLE_FMT = "{machine} {layer}_{material} Defect 추출.xlsx"
+EXTRACT_FILE_TITLE_FMT = "{machine} {tag} Defect 추출.xlsx"
 EXTRACT_FILE_TITLE_FALLBACK_FMT = "AOI {machine} Defect 추출.xlsx"
 # 엑셀 — 요약 시트 D열 머리(C열 사진의 파일명·계측·좌표 칸)와 Wafer Map 시트 머리.
 EXTRACT_INFO_HEADER = "정보"

@@ -56,7 +56,7 @@ def test_reads_the_real_sample_in_the_repo(tmp_path):
 def test_parent_folder_is_not_read(tmp_path):
     """부모의 INI 는 **다른 웨이퍼**의 번호다 — 그 슬롯에 붙이면 안 된다.
 
-    자재·Layer(`read_lot_info`)는 로트 공통이라 부모까지 보지만, ActiveSlot 은
+    자재·Layer(`read_title_parts`)는 로트 공통이라 부모까지 보지만, ActiveSlot 은
     웨이퍼 한 장의 값이다.  못 읽으면 번호 없이 slot명만 찍히는 게 맞다.
     """
     _wafer_info(tmp_path, "ActiveSlot=6")
