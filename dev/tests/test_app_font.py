@@ -124,7 +124,10 @@ def test_app_font_uses_vertical_hinting(qapp):
         assert lb.font().pixelSize() == 15          # QSS 가 실제로 적용됐다
         assert lb.font().hintingPreference() == vertical
         assert QFont().hintingPreference() == vertical   # 새로 만든 QFont 도
-        assert QFont("Malgun Gothic", 12).hintingPreference() == vertical
+        # 이름으로 만든 QFont 는 힌팅이 비어 있다가, QPainter.setFont·위젯 setFont 가
+        # 장치(위젯) 글꼴로 resolve 할 때 채워진다.
+        named = QFont("Malgun Gothic", 12)
+        assert named.resolve(lb.font()).hintingPreference() == vertical
     finally:
         if lb is not None:
             lb.deleteLater()
