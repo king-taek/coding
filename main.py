@@ -48,7 +48,15 @@ def _apply_app_font(app) -> None:
     가리키는 패밀리가 그 시점에 등록돼 있어야 폴백으로 새지 않는다.
     ★ ``QFont("A, B, C")`` 처럼 쉼표 문자열을 넘기지 마라.  Qt6 에서 그것은
     **'A, B, C' 라는 이름의 패밀리 하나**를 찾는 뜻이라 폴백이 동작하지 않는다.
-    목록은 ``setFamilies`` 로 준다."""
+    목록은 ``setFamilies`` 로 준다.
+    ★ 힌팅은 ``PreferVerticalHinting`` 으로 고정한다.  Qt 는 배율 100% 화면에서
+    기본값을 '전체 힌팅'으로 고르고, 그러면 GDI 방식(옛 GDI 엔진이거나 DirectWrite 의
+    ``GDI_CLASSIC`` — 16px 이하)으로 그려 한글 획이 픽셀 격자에 강제로 붙어 거칠어
+    보였다(사용자 캡처, 2026-10-30).  세로만 힌팅하면 DirectWrite ``CLEARTYPE_NATURAL``
+    로 그려져 가로는 부드럽고 기준선은 또렷하다 — Qt 가 고배율 화면의 16px 이하 글씨에
+    이미 고르는 방식과 같다.  글자 폭은 소수점 단위로 조금 달라질 수 있다.
+    QSS 로 바꾼 글꼴과 ``QFont()``·``QFont(위젯 글꼴)`` 은 힌팅을 앱 글꼴에서
+    물려받으므로 여기 한 곳이면 된다."""
     from PyQt6.QtGui import QFont
     from aoi_verification.app import config
     from aoi_verification.app.ui import theme
@@ -57,6 +65,7 @@ def _apply_app_font(app) -> None:
     font = QFont()
     font.setFamilies([config.Fonts.FAMILY, "Pretendard", "Noto Sans KR",
                       "Malgun Gothic", "Segoe UI"])
+    font.setHintingPreference(QFont.HintingPreference.PreferVerticalHinting)
     app.setFont(font)
 
 
