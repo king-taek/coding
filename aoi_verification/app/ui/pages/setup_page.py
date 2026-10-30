@@ -198,7 +198,6 @@ class SetupPage(QWidget):
     extract_mode_changed = pyqtSignal(bool)          # Defect 추출 ↔ 매칭 (레일 단계 이름)
     cross_mode_changed = pyqtSignal(bool)            # 교차검증 스위치 (레일 단계 이름)
     rail_folded_changed = pyqtSignal(bool)           # 왼쪽 메뉴 접힘(창이 크레딧을 상태바로 옮긴다)
-    page_changed = pyqtSignal(str)                   # 왼쪽 메뉴로 바꾼 화면(show_page)
     tool_fullscreen_changed = pyqtSignal(bool)       # Wafer Map '맵만 보기' (창이 여정 레일을 감춘다)
 
     def __init__(self, parent=None) -> None:
@@ -768,7 +767,8 @@ class SetupPage(QWidget):
 
     def dragEnterEvent(self, event):        # noqa: N802
         # 여기서는 디스크를 보지 않는다(NAS 에서 멈추지 않게) — 로컬 경로가 있으면 받는다.
-        if self._extract_mode and self._drop_locals(event):
+        # 도구 화면이 떠 있을 때는 받지 않는다 — 안 보이는 추출 목록에 몰래 쌓인다.
+        if self._extract_mode and self._page_key == "match" and self._drop_locals(event):
             event.acceptProposedAction()
         else:
             event.ignore()
@@ -777,7 +777,7 @@ class SetupPage(QWidget):
         self.dragEnterEvent(event)
 
     def dropEvent(self, event):             # noqa: N802
-        if not self._extract_mode:
+        if not self._extract_mode or self._page_key != "match":
             event.ignore()
             return
         folders = extract_drop_folders(
@@ -879,6 +879,7 @@ class SetupPage(QWidget):
         if wide == getattr(self, "_wide", None) or not hasattr(self, "_tool_rail"):
             return
         self._wide = wide
+        self._rail_narrow_open = False
         if hasattr(self, "_mode_lay"):       # 방식 구역: 넓으면 나란히, 좁으면 위아래
             D = QBoxLayout.Direction
             self._mode_lay.setDirection(D.LeftToRight if wide else D.TopToBottom)
@@ -1298,9 +1299,11 @@ class SetupPage(QWidget):
         self._tool_buttons = [self.match_btn, self.image_info_btn, self.wafer_map_btn,
                               self.extract_btn, self.gl_btn]
         self._tool_rail = host
-        # 접힘 상태 — 사용자가 고른 것(`_rail_user_folded`)과 도구 화면에 들어가며
-        # 저절로 접은 것을 나눠 둔다.  매칭으로 돌아오면 사용자가 고른 상태로 되돌린다.
+        # 접힘 상태 — 상황마다 따로 기억한다(`_rail_should_fold`).  매칭 화면에서 고른 것
+        # (`_rail_user_folded`)은 도구 화면·좁은 창에서 잠깐 펼쳐도 바뀌지 않는다.
         self._rail_user_folded = False
+        self._rail_tool_open = False         # 도구 화면에서 사용자가 펼쳤나(들어갈 때마다 접힘)
+        self._rail_narrow_open = False       # 좁은 창에서 사용자가 펼쳤나(폭이 바뀌면 접힘)
         self._rail_folded: Optional[bool] = None
         self._rail_anim = None
         self._apply_rail_collapsed(animate=False)
@@ -1314,16 +1317,22 @@ class SetupPage(QWidget):
         return bool(self._rail_folded)
 
     def _rail_should_fold(self) -> bool:
-        """좁은 창이면 늘 접고, 아니면 사용자가 고른 대로."""
-        return self._rail_user_folded or not getattr(self, "_wide", True)
+        """도구 화면이면 접고, 좁은 창이면 접고, 아니면 사용자가 고른 대로 — 각 상황에서
+        사용자가 [»] 로 펼쳤으면 그 상황 동안은 펼친다(눌러도 안 펼쳐지면 죽은 버튼이다)."""
+        if self._page_key != "match":
+            return not self._rail_tool_open
+        if not getattr(self, "_wide", True):
+            return not self._rail_narrow_open
+        return self._rail_user_folded
 
     def toggle_rail(self) -> None:
-        """[«]/[»] — 메뉴를 아이콘만 ↔ 이름까지."""
-        self._rail_user_folded = not self._rail_folded
-        if not getattr(self, "_wide", True) and not self._rail_user_folded:
-            # 좁은 창에서도 사용자가 펼치면 펼친다(이번 한 번) — 눌러도 안 펼쳐지면 죽은 버튼이다.
-            self._set_rail_folded(False, animate=True)
-            return
+        """[«]/[»] — 메뉴를 아이콘만 ↔ 이름까지.  지금 상황의 선택만 바꾼다."""
+        if self._page_key != "match":
+            self._rail_tool_open = bool(self._rail_folded)
+        elif not getattr(self, "_wide", True):
+            self._rail_narrow_open = bool(self._rail_folded)
+        else:
+            self._rail_user_folded = not self._rail_folded
         self._apply_rail_collapsed(animate=True)
 
     def _apply_rail_collapsed(self, *, animate: bool) -> None:
@@ -1397,12 +1406,9 @@ class SetupPage(QWidget):
             text, tip = b.property("_railText") or "", b.property("_railTip") or ""
             b.setText(text if on else "")
             b.setToolTip(tip if on else (f"{text}\n{tip}" if tip else text))
+            # 폭은 고정하지 않는다 — 접힌 메뉴 칸이 곧 52px 이고, 폭이 움직이는 동안
+            # 아이콘이 버튼 가운데를 따라가야 튀지 않는다.
             b.setProperty("folded", "false" if on else "true")
-            if on:
-                b.setMinimumWidth(0)
-                b.setMaximumWidth(16777215)
-            else:
-                b.setFixedWidth(self._RAIL_ICON_W)
             b.style().unpolish(b)
             b.style().polish(b)
 
@@ -1421,29 +1427,29 @@ class SetupPage(QWidget):
         """왼쪽 메뉴로 화면을 옮긴다.
 
         - ``match``·``extract``: 매칭 설정 화면(추출은 같은 화면의 한쪽 폴더 모드).
-          도구 화면에서 돌아오면 메뉴를 사용자가 고른 접힘 상태로 되돌린다.
+          도구 화면에서 돌아오면 메뉴를 사용자가 매칭 화면에서 고른 접힘 상태로 되돌린다.
         - ``image_info``·``wafer_map``·``gl``: 도구 화면.  처음 갈 때 만들고 살려 두며,
           메뉴는 저절로 아이콘만 남긴다(사용자 요청 — 도구는 화면이 넓어야 한다)."""
         if key in ("match", "extract"):
-            was_tool = self._page_key != "match"
             self._page_key = "match"
             self._pages.setCurrentWidget(self._match_host)
             if (key == "extract") != self._extract_mode:
                 self.set_extract_mode(key == "extract")
-            if was_tool:
-                self._apply_rail_collapsed(animate=True)
+            self._apply_rail_collapsed(animate=True)
         else:
             page = self._tool_pages.get(key)
             if page is None:
                 page = self._make_tool_page(key)
                 self._tool_pages[key] = page
                 self._pages.addWidget(page)
+            entering = self._page_key == "match"
             self._page_key = key
             self._pages.setCurrentWidget(page)
-            self._set_rail_folded(True, animate=True)
+            if entering:
+                self._rail_tool_open = False
+            self._apply_rail_collapsed(animate=True)
             page.property("_dialog").setFocus(Qt.FocusReason.OtherFocusReason)
         self._sync_nav_checked()
-        self.page_changed.emit(self.current_page())
 
     def tool_dialog(self, key: str):
         """만들어 둔 도구 화면의 본체(없으면 None) — 테스트·창이 상태를 볼 때."""

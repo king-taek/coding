@@ -2926,7 +2926,12 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._setup_page.set_backend_ready(self._backend_ready)
 
     def _on_tool_fullscreen(self, on: bool) -> None:
+        """Wafer Map '맵만 보기' — 여정 레일·상태바도 비켜 준다(시트일 때 맵이 창을 다 덮던 것처럼)."""
         self._rail.setVisible(not on)
+        if on:
+            self._status_bar.setVisible(False)
+        else:
+            self._sync_statusbar(self._stack.currentWidget())
 
     def _on_setup_rail_folded(self, _folded: bool) -> None:
         if self._stack.currentWidget() is self._setup_page:

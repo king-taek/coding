@@ -181,3 +181,54 @@ def test_fold_animation_settles_and_survives_teardown(qapp, monkeypatch):
         page.close()
         page.deleteLater()
     QTest.qWait(motion.DUR_RAIL_FOLD + 100)
+
+
+def test_tool_page_stays_folded_when_window_widens(qapp, no_sheets):
+    """좁은 창에서 도구를 연 뒤 창을 넓혀도 도구 화면에서는 메뉴가 저절로 펴지지 않는다."""
+    page = _page(qapp, 800, 600)
+    try:
+        page.wafer_map_btn.click()
+        page.resize(1400, 900)
+        for _ in range(8):
+            qapp.processEvents()
+        assert page._wide and page.is_rail_folded()
+        page.match_btn.click()
+        assert not page.is_rail_folded()                # 매칭은 넓은 창의 사용자 선택(펼침)
+    finally:
+        page.close()
+
+
+def test_peeking_on_tool_page_keeps_match_choice(qapp, no_sheets):
+    """도구 화면에서 [»] 로 잠깐 펼쳐도, 매칭 화면에서 고른 '접힘' 은 그대로다."""
+    page = _page(qapp)
+    try:
+        page.toggle_rail()                       # 매칭에서 접음
+        page.gl_btn.click()
+        page.toggle_rail()                       # 도구에서 펼쳐 봄
+        assert not page.is_rail_folded()
+        page.match_btn.click()
+        assert page.is_rail_folded()
+        page.gl_btn.click()                      # 다시 들어가면 또 저절로 접힌다
+        assert page.is_rail_folded()
+    finally:
+        page.close()
+
+
+def test_extract_drop_ignored_while_tool_page_shown(qapp, no_sheets, tmp_path):
+    """추출 모드인 채 도구 화면에 폴더를 놓아도 안 보이는 추출 목록에 쌓이지 않는다."""
+    from PyQt6.QtCore import QMimeData, QPointF, QUrl
+    from PyQt6.QtGui import QDropEvent
+    page = _page(qapp)
+    try:
+        page.extract_btn.click()
+        page.image_info_btn.click()
+        before = page.ref_path_edit.text()
+        mime = QMimeData()
+        mime.setUrls([QUrl.fromLocalFile(str(tmp_path))])
+        ev = QDropEvent(QPointF(5, 5), Qt.DropAction.CopyAction, mime,
+                        Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+        page.dropEvent(ev)
+        assert page.ref_path_edit.text() == before
+        assert len(page._lot_paths()) == 0 or page._lot_paths() == [before]
+    finally:
+        page.close()

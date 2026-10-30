@@ -357,7 +357,8 @@ class ImageInfoDialog(QDialog):
         #   제목줄에 ✕(닫기)를 붙이므로, 또 두면 닫기 어포던스가 둘이 된다.
         #   이 앱의 관습도 그렇다 — 확인/취소를 받는 '동작' 시트만 바닥 버튼을 두고,
         #   보기 전용 시트(unmatched_review·label_maker·dev_benchmark)는 두지 않는다.
-        #   Esc 도 그대로 동작한다.
+        #   시트일 때는 Esc 로 닫힌다.  설정 화면의 왼쪽 메뉴가 **화면으로** 끼워 쓸
+        #   때는 닫기 대신 메뉴로 나가므로 Esc 를 삼킨다(`SetupPage._make_tool_page`).
         # ★ Enter 를 autoDefault 에 맡기지 않는다 — 마지막으로 눌린 버튼이 다시
         #   실행돼 '복사'가 뜻하지 않게 재발동한다(slot_select_dialog 와 같은 함정).
         self.pick_btn.setDefault(True)

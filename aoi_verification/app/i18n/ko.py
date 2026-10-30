@@ -981,11 +981,6 @@ IMAGE_INFO_SOURCE_NAMES = {
 
 # 다이얼로그.
 IMAGE_INFO_BUTTON = "사진 정보 보기"
-# 왼쪽 메뉴 — 기본 화면(매칭 설정)으로 돌아오는 버튼과 메뉴 접기(사용자 요청 2026-10-30).
-MATCH_NAV_BUTTON = "매칭"
-MATCH_NAV_TOOLTIP = "기준·검증 폴더를 고르고 매칭을 시작하는 기본 화면"
-RAIL_FOLD_TOOLTIP = "메뉴 접기 (아이콘만)"
-RAIL_UNFOLD_TOOLTIP = "메뉴 펼치기"
 IMAGE_INFO_TITLE = "단일 사진 정보"
 IMAGE_INFO_SUBTITLE = "결과 엑셀에 찍히는 것과 같은 좌표·계측값을 사진 한 장에서 바로 읽습니다"
 IMAGE_INFO_PICK = "사진 선택"
@@ -1201,6 +1196,12 @@ WAFER_MAP_FULLSCREEN_TIP = (
     "맵만 남기고 주변 표시(설명·버튼·제목·범례)를 감춘 뒤 앱 창도 전체화면으로 "
     "바꿉니다. ESC 를 누르면 원래대로 돌아옵니다.")
 WAFER_MAP_NO_COORD = "이 사진을 맵에 찍지 못했습니다 — 좌표 또는 die 기하를 읽지 못했습니다."
+
+# ── 왼쪽 메뉴 — [매칭](기본 화면)·메뉴 접기(사용자 요청 2026-10-30) ──
+MATCH_NAV_BUTTON = "매칭"
+MATCH_NAV_TOOLTIP = "기준·검증 폴더를 고르고 매칭을 시작하는 기본 화면"
+RAIL_FOLD_TOOLTIP = "메뉴 접기 (아이콘만)"
+RAIL_UNFOLD_TOOLTIP = "메뉴 펼치기"
 
 # ── Defect 추출 (매칭 없이 한쪽 폴더에서 고른 사진을 엑셀로) ─────────────────
 # 흐름: 설정(한쪽만) → 후보 선별(매칭과 같은 화면) → 요약 → 저장.
