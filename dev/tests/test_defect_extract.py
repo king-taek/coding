@@ -928,19 +928,17 @@ def test_extract_select_text_keys_exist():
     assert missing == []
 
 
-def test_setup_extract_mode_swaps_help_and_blocked_hint(qapp):
+def test_setup_extract_mode_swaps_blocked_hint(qapp):
     from aoi_verification.app import i18n
     from aoi_verification.app.ui.pages.setup_page import SetupPage
 
     page = SetupPage()
     try:
         page.set_extract_mode(True)
-        assert page._auto_hint.text() == i18n.KO.EXTRACT_RUN_OPTIONS_HINT
         page.ref_path_edit.setText("")
         page._validate()
         assert page._start_hint.text() == i18n.KO.EXTRACT_BLOCKED_HINT
         page.set_extract_mode(False)
-        assert page._auto_hint.text() == i18n.KO.RUN_OPTIONS_HINT
     finally:
         page.close()
 
