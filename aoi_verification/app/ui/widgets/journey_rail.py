@@ -63,6 +63,8 @@ class JourneyRail(QWidget):
         self._index = 0
         self._navigable: frozenset[int] = frozenset()
         self._criteria = ""
+        # 도구 화면(사진 정보·Wafer Map)에서는 단계 대신 그 화면 제목을 띄운다 — 줄은 남긴다.
+        self._title = ""
         # 현재 단계로 **들어오는** 연결선이 얼마나 찼는지(0~1).
         # 21안-A '레일 선행 릴레이': 이 채워짐이 페이지 슬라이드보다 **먼저** 끝나야
         # '레일이 먼저 말하고 화면이 따라온다' 는 한 이야기가 된다.
@@ -184,6 +186,18 @@ class JourneyRail(QWidget):
         self._sync_cursor()
         self.update()
 
+    def set_title(self, text: str) -> None:
+        """단계 대신 화면 제목 한 줄을 띄운다(빈 문자열이면 단계로 돌아간다).
+
+        도구 화면은 검증 흐름 밖이라 '1 설정' 이 켜져 있으면 지금 어디인지 헷갈린다 —
+        그렇다고 줄을 접으면 화면 위가 들썩인다(사용자 요청 2026-10-30: 줄은 두고 제목만)."""
+        text = str(text or "")
+        if text == self._title:
+            return
+        self._title = text
+        self._hit = []
+        self.update()
+
     def set_criteria(self, text: str) -> None:
         """오른쪽 끝의 판정 기준 한 줄(예: ``좌표 매칭 · 허용 오차 200 µm``)."""
         text = str(text or "")
@@ -209,14 +223,14 @@ class JourneyRail(QWidget):
         if event.button() != Qt.MouseButton.LeftButton:
             return super().mousePressEvent(event)
         i = self._step_at(event.position().toPoint())
-        if i >= 0 and i in self._navigable:
+        if i >= 0 and i in self._navigable and not self._title:
             self.step_clicked.emit(i)
         return None
 
     def mouseMoveEvent(self, event):  # noqa: N802
         # 되돌아갈 수 있는 단계 위에서만 손가락 커서 — 나머지는 기본 커서다.
         i = self._step_at(event.position().toPoint())
-        if i >= 0 and i in self._navigable:
+        if i >= 0 and i in self._navigable and not self._title:
             self.setCursor(Qt.CursorShape.PointingHandCursor)
             self.setToolTip(i18n.KO.JOURNEY_RAIL_BACK_TOOLTIP_FMT.format(
                 step=self._labels[i]))
@@ -257,7 +271,7 @@ class JourneyRail(QWidget):
 
         # 오른쪽 판정 기준 — 먼저 자리를 떼어 놓고 남는 폭에 단계를 그린다.
         right_edge = w - self.PAD_X
-        if self._criteria:
+        if self._criteria and not self._title:
             # ★ 모노를 쓰지 않는다 — 이 줄은 한글과 'µ' 가 섞여 있고, 동봉 모노
             #   계열(JetBrains Mono·Consolas)에는 한글 글리프가 없어 PC 마다
             #   대체 글꼴이 달라진다(실측: 'µ' 가 두부로 나왔다).
@@ -287,6 +301,14 @@ class JourneyRail(QWidget):
 
         self._hit = []
         x = self.PAD_X + mark_w + self.WORDMARK_GAP
+        if self._title:
+            # 도구 화면 — 단계 자리에 그 화면 제목만(현재 단계 이름과 같은 굵기·잉크).
+            p.setFont(cur_font)
+            p.setPen(ink)
+            p.drawText(QRect(x, 0, max(0, right_edge - x), h - 1),
+                       int(Qt.AlignmentFlag.AlignLeft
+                           | Qt.AlignmentFlag.AlignVCenter), self._title)
+            return
         for i, text in enumerate(self._labels):
             done_step, current = i < self._index, i == self._index
             fm = fm_cur if current else fm_oth

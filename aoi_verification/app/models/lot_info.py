@@ -1,23 +1,26 @@
-"""결과 엑셀 제목의 **자재·Layer·LOT 추천값**(:func:`read_title_parts`) 과 카세트 슬롯
+"""결과 엑셀 제목의 **자재·Layer·S/M 추천값**(:func:`read_title_parts`) 과 카세트 슬롯
 번호(:func:`read_active_slot`) 를 장비 파일에서 읽는다.
 
 추천 제목(사용자 요청)::
 
-    `{검증장비} {자재}_{Layer}_{LOT} 검증({기준장비} 기준).xlsx`
-        →  `4F-AOI-03 TB500_RDL4_TB500.INT895 검증(AOI-24 기준).xlsx`
+    `{검증장비} {자재}_{Layer}_{S/M} 검증({기준장비} 기준).xlsx`
+        →  `4F-AOI-03 TB500_RDL4_GFW 검증(AOI-24 기준).xlsx`
 
-자재 = **제품 이름**(TB500·T254)이다(사용자 결정 2026-10-30).  예전에는
-``WaferInfo.ini`` 의 ``InputLot``(GFW-RDL4) 을 잘라 썼는데, 그 값은 장비에 넣은 **LOT
-이름**이라 자재 자리에 GFW·FDV 같은 LOT 앞글자가 들어갔고, 띄어쓰기가 든 LOT 은 아예
-못 읽었다.  LOT 이름은 자재와 **따로** 한 칸으로 넣는다(사용자 요청 2026-10-30) — 장비가
-적어 둔 LOT ID 의 ``@`` 앞(``TB500.INT895@6412`` → ``TB500.INT895``, ``@`` 뒤는 공정 번호).
+자재 = **제품 이름**(TB500·T254)이다(사용자 결정 2026-10-30).  S/M(스트립 마크, 예: GFW)
+은 자재와 **따로** 한 칸으로 넣는다(사용자 요청 2026-10-30) — 슬롯 ``WaferInfo.ini`` 의
+``InputLot=GFW-RDL4`` 에서 첫 하이픈 앞.  한때 장비 LOT ID(``TB500.INT895``)를 넣었는데
+LOT ID 가 제품 이름으로 시작해 자재가 두 번 들어갔다(사용자 지적).
 
-읽는 곳(실물 근거: 저장소 `dev/좌표 확인` 샘플)::
+읽는 곳(실물 근거: 저장소 `dev/좌표 확인` 샘플 · `docs/WaferInfo.ini`)::
 
     Camtek  Params_WaferInfo.ini  SetupPath=c:\\job\\TB500_RDL4 - Multi\\Setup1\\...
             ProductInfo.ini       JobDesc=DEV=4DT-TB500-H-M1~LOT=TB500.INT888@6324~...
+            WaferInfo.ini         InputLot=TBD-PIDS3           ← S/M = TBD
     KLA     정보파일(.001) 헤더   DeviceID "4DT-TB500-H-M1";  StepID "RDL4_AUTO_RBB";
-                                  LotID "TB500.INT895@6412";
+                                  (S/M 은 없다 — 기준 쪽 Camtek 폴더에서 채운다)
+
+⚠ ``InputLot`` 은 장비에 **손으로 넣는 값**이라 하이픈이 없으면 어디까지가 S/M 인지
+  모른다 — 그때는 비워 둔다(가정: S/M 은 늘 첫 하이픈 앞).
 
 ⚠ **추천값일 뿐이다.**  Job 이름 모양이 제품마다 달라(`2D@R2-15966TA0-BW2_…`) 못 읽는
 제품이 있다 — 그때는 칸을 비워 두고 저장 창에서 사용자가 채운다(사용자 결정: 제품코드 →
@@ -56,9 +59,10 @@ _SETUP_PATH = re.compile(r"(?im)^\s*SetupPath\s*=.*?\\job\\([^\\\r\n]+)")
 _RESULT_PATH = re.compile(r"(?im)^\s*ScanResultsPath\s*=.*?\\ScanResults\\([^\\\r\n]+)")
 # ProductInfo.ini `JobDesc=DEV=4DT-TB500-H-M1~LOT=…`
 _JOB_DEV = re.compile(r"(?im)^\s*JobDesc\s*=.*?DEV=([^~\r\n]+)")
-# ProductInfo.ini `JobDesc=…~LOT=TB500.INT888@6324~…` — LOT 이름은 `@` 앞(뒤는 공정 번호).
-_JOB_LOT = re.compile(r"(?im)^\s*JobDesc\s*=.*?LOT=([^~\r\n]+)")
-# 파일 이름에 쓸 수 없는 글자 — LOT 은 장비 문자열을 그대로 쓰므로 여기서 걸러 낸다.
+# WaferInfo.ini `InputLot=GFW-RDL4` — S/M 은 첫 하이픈 앞.  ★ `UseLot` 도 같은 값을
+# 갖지만(실물 확인) `InputLot` 만 본다 — 둘이 다를 때 무엇을 읽었는지 알 수 있게.
+_INPUT_LOT = re.compile(r"(?im)^\s*InputLot\s*=[ \t]*(.*?)\s*$")
+# 파일 이름에 쓸 수 없는 글자 — S/M 은 장비 문자열을 그대로 쓰므로 여기서 걸러 낸다.
 _BAD_NAME_CHARS = re.compile(r'[\\/:*?"<>|]')
 _TOKEN_SPLIT = re.compile(r"[\s_\-@~()]+")
 _MATERIAL_TOKEN = re.compile(r"^[A-Z]{1,2}\d{3}$")     # TB500 · T254
@@ -72,7 +76,7 @@ class TitleParts:
     """제목 추천값 — 못 읽은 칸은 빈 문자열."""
     material: str = ""     # 자재 — 예: TB500
     layer: str = ""        # Layer — 예: RDL4
-    lot: str = ""          # LOT 이름 — 예: TB500.INT895
+    sm: str = ""           # S/M(스트립 마크) — 예: GFW
 
 
 def _tokens(text: str) -> list[str]:
@@ -107,11 +111,13 @@ def parse_title_parts(job: str = "", device: str = "", step: str = "") -> TitleP
     return TitleParts(material=material, layer=layer)
 
 
-def clean_lot(raw: str) -> str:
-    """장비 LOT ID → 제목에 쓸 LOT 이름: ``@`` 앞만, 파일 이름에 못 쓰는 글자는 빼고,
-    공백은 하나로(``E1X000.C03 DCC20`` 처럼 띄어쓰기가 든 LOT 도 있다)."""
-    name = (raw or "").split("@", 1)[0]
-    return " ".join(_BAD_NAME_CHARS.sub("", name).split())
+def strip_mark(input_lot: str) -> str:
+    """``InputLot`` 값 → S/M: 첫 하이픈 앞, 파일 이름에 못 쓰는 글자는 빼고 공백은 하나로.
+    하이픈이 없으면 빈 값(어디까지가 S/M 인지 모른다)."""
+    head, dash, _ = (input_lot or "").partition("-")
+    if not dash:
+        return ""
+    return " ".join(_BAD_NAME_CHARS.sub("", head).split())
 
 
 def _read_folder(folder: Path) -> TitleParts:
@@ -126,20 +132,20 @@ def _read_folder(folder: Path) -> TitleParts:
     product = read_ini_text(folder / "ProductInfo.ini") or ""
     m = _JOB_DEV.search(product)
     device = m.group(1).strip() if m else ""
-    m = _JOB_LOT.search(product)
-    lot = m.group(1) if m else ""
+    m = _INPUT_LOT.search(read_ini_text(folder / _INI_NAME) or "")
+    sm = strip_mark(m.group(1)) if m else ""
     step = ""
     if not job and not device:              # Camtek 파일이 없으면 KLA 로 본다
-        kdev, kstep, klot = read_device_step(folder)
-        device, step, lot = kdev or "", kstep or "", klot or ""
+        kdev, kstep = read_device_step(folder)
+        device, step = kdev or "", kstep or ""
     tp = parse_title_parts(job, device, step)
-    return TitleParts(material=tp.material, layer=tp.layer, lot=clean_lot(lot))
+    return TitleParts(material=tp.material, layer=tp.layer, sm=sm)
 
 
 def read_title_parts(root: Path) -> TitleParts:
-    """``root`` 자신과 **첫 슬롯** 폴더에서 자재·Layer·LOT 추천값을 읽는다.
+    """``root`` 자신과 **첫 슬롯** 폴더에서 자재·Layer·S/M 추천값을 읽는다.
 
-    두 칸을 따로 채운다 — 앞 폴더에서 못 읽은 칸만 다음 폴더로 메운다.
+    칸을 따로 채운다 — 앞 폴더에서 못 읽은 칸만 다음 폴더로 메운다.
     """
     from .slot import list_slot_dirs
 
@@ -157,8 +163,8 @@ def read_title_parts(root: Path) -> TitleParts:
         for folder in candidates:
             p = _read_folder(folder)
             got = TitleParts(material=got.material or p.material,
-                             layer=got.layer or p.layer, lot=got.lot or p.lot)
-            if got.material and got.layer and got.lot:
+                             layer=got.layer or p.layer, sm=got.sm or p.sm)
+            if got.material and got.layer and got.sm:
                 break
     except Exception:
         pass
