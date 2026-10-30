@@ -14,6 +14,7 @@ pytest.importorskip("PyQt6.QtWidgets")
 
 from PyQt6.QtCore import QEvent, Qt  # noqa: E402
 from PyQt6.QtGui import QKeyEvent  # noqa: E402
+from PyQt6.QtWidgets import QWidget  # noqa: E402
 
 from aoi_verification.app import i18n  # noqa: E402
 from aoi_verification.app.ui.pages import setup_page as sp  # noqa: E402
@@ -283,9 +284,9 @@ def test_visited_tool_does_not_widen_matching_page(qapp, no_sheets):
         page.close()
 
 
-def test_journey_rail_hidden_on_tool_pages(qapp, no_sheets, monkeypatch):
-    """맨 위 단계 줄은 매칭·추출에서만 — 도구 화면에서는 접히고, 다른 화면으로 가면 다시 보인다
-    (사용자 요청 2026-10-30)."""
+def test_journey_rail_shows_tool_title_on_tool_pages(qapp, no_sheets, monkeypatch):
+    """맨 위 단계 줄은 도구 화면에서도 사라지지 않고, 단계 대신 그 화면 제목을 띄운다 —
+    화면 안의 제목줄은 따로 두지 않는다(사용자 요청 2026-10-30)."""
     from aoi_verification.app.ui import main_window as mw
     monkeypatch.setattr(mw.MainWindow, "_start_backend_import_async", lambda self: None)
     win = mw.MainWindow()
@@ -293,27 +294,56 @@ def test_journey_rail_hidden_on_tool_pages(qapp, no_sheets, monkeypatch):
     win.show()
     try:
         sp_ = win._setup_page
-        assert win._rail.isVisible()
+        assert win._rail.isVisible() and win._rail._title == ""
         sp_.image_info_btn.click()
-        assert not win._rail.isVisible()
-        sp_.extract_btn.click()
         assert win._rail.isVisible()
+        assert win._rail._title == sp_.tool_dialog("image_info").windowTitle() != ""
+        page = sp_._pages.currentWidget()
+        assert not [w for w in page.findChildren(QWidget) if w.property("role") == "sheetBar"]
         sp_.wafer_map_btn.click()
-        assert not win._rail.isVisible()
+        assert win._rail._title == sp_.tool_dialog("wafer_map").windowTitle()
+        sp_.extract_btn.click()
+        assert win._rail.isVisible() and win._rail._title == ""
+        sp_.wafer_map_btn.click()
         win._on_backend_loaded()
         win._show_page(win._result_page, animate=False)   # 도구 화면에 둔 채 흐름이 넘어가도
-        assert win._rail.isVisible()
-        win._show_page(sp_, animate=False)                 # 돌아오면 다시 도구 화면 규칙
-        assert not win._rail.isVisible()
+        assert win._rail.isVisible() and win._rail._title == ""
+        win._show_page(sp_, animate=False)                 # 돌아오면 다시 그 화면 제목
+        assert win._rail._title == sp_.tool_dialog("wafer_map").windowTitle()
         sp_.match_btn.click()
-        assert win._rail.isVisible()
+        assert win._rail._title == ""
     finally:
         win._loading.hide_overlay()
         win.close()
 
 
-def test_journey_rail_animation_settles(qapp, no_sheets, monkeypatch):
-    """모션을 켠 경로 — 단계 줄이 접혔다 펴지는 동안 끊겨도 높이 42·보임 상태로 끝난다."""
+def test_folded_menu_shows_no_credit_or_memory(qapp, no_sheets, monkeypatch):
+    """설정 화면에서 메뉴를 접어도 맨 아래 크레딧·메모리 사용량(상태바)이 나오지 않는다
+    (사용자 요청 2026-10-30)."""
+    from aoi_verification.app.ui import main_window as mw
+    from aoi_verification.app.utils import prefs
+    monkeypatch.setattr(mw.MainWindow, "_start_backend_import_async", lambda self: None)
+    monkeypatch.setattr(mw._prefs, "load", lambda: prefs.UiPrefs(dev_mode=False))
+    win = mw.MainWindow()
+    win.resize(1400, 900)
+    win.show()
+    try:
+        sp_ = win._setup_page
+        assert not win._status_bar.isVisible()
+        sp_.toggle_rail()
+        for _ in range(5):
+            qapp.processEvents()
+        assert sp_.is_rail_folded()
+        assert not win._status_bar.isVisible() and not sp_._rail_credit.isVisible()
+        sp_.image_info_btn.click()                       # 도구 화면은 저절로 접힌다
+        assert not win._status_bar.isVisible()
+    finally:
+        win._loading.hide_overlay()
+        win.close()
+
+
+def test_map_fullscreen_folds_the_journey_rail_and_settles(qapp, no_sheets, monkeypatch):
+    """모션을 켠 경로 — '맵만 보기' 에서는 단계 줄이 접히고, 도중에 끊겨도 높이 42·보임으로 끝난다."""
     from PyQt6.QtTest import QTest
     from aoi_verification.app.ui import main_window as mw, motion
     from aoi_verification.app.ui.widgets.journey_rail import JourneyRail
@@ -324,16 +354,17 @@ def test_journey_rail_animation_settles(qapp, no_sheets, monkeypatch):
     win.show()
     try:
         sp_ = win._setup_page
-        sp_.image_info_btn.click()
+        sp_.wafer_map_btn.click()
+        sp_._on_tool_fullscreen(True)
         QTest.qWait(60)
         assert 0 < win._rail.height() < JourneyRail.RAIL_H     # 접히는 중
-        sp_.match_btn.click()                                  # 도중에 되돌린다
+        sp_._on_tool_fullscreen(False)                         # 도중에 되돌린다
         QTest.qWait(motion.DUR_RAIL_UNFOLD + 250)
         assert win._rail.isVisible() and win._rail.height() == JourneyRail.RAIL_H
-        assert win._credit_label.isHidden() == (not sp_.is_rail_folded())
-        sp_.wafer_map_btn.click()
+        sp_._on_tool_fullscreen(True)
         QTest.qWait(motion.DUR_RAIL_FOLD + 250)
         assert not win._rail.isVisible()
+        sp_._on_tool_fullscreen(False)
     finally:
         win._loading.hide_overlay()
         win.close()

@@ -198,7 +198,6 @@ class SetupPage(QWidget):
     extract_mode_changed = pyqtSignal(bool)          # Defect 추출 ↔ 매칭 (레일 단계 이름)
     cross_mode_changed = pyqtSignal(bool)            # 교차검증 스위치 (레일 단계 이름)
     page_changed = pyqtSignal(str)                   # 왼쪽 메뉴로 바꾼 화면(창이 단계 줄을 감춘다)
-    rail_folded_changed = pyqtSignal(bool)           # 왼쪽 메뉴 접힘(창이 크레딧을 상태바로 옮긴다)
     tool_fullscreen_changed = pyqtSignal(bool)       # Wafer Map '맵만 보기' (창이 여정 레일을 감춘다)
 
     def __init__(self, parent=None) -> None:
@@ -1449,7 +1448,6 @@ class SetupPage(QWidget):
         self._rail_show_labels(not folded)
         self._rail_credit.setVisible(not folded)
         self._set_tool_hscroll(True)
-        self.rail_folded_changed.emit(folded)
         if hasattr(self, "_setting_cards"):
             self._apply_card_orientation(self._side_by_side_fits())
 
@@ -1465,6 +1463,11 @@ class SetupPage(QWidget):
             text, tip = b.property("_railText") or "", b.property("_railTip") or ""
             b.setText(text if on else "")
             b.setToolTip(tip if on else (f"{text}\n{tip}" if tip else text))
+
+    def tool_title(self) -> str:
+        """지금 보이는 도구 화면의 제목(매칭·추출이면 빈 문자열) — 창 맨 위 단계 줄에 띄운다."""
+        dlg = self.tool_dialog(self._page_key) if self._page_key != "match" else None
+        return dlg.windowTitle() if dlg is not None else ""
 
     def current_page(self) -> str:
         """지금 오른쪽에 보이는 화면 — match · extract · image_info · wafer_map · gl."""
@@ -1520,8 +1523,9 @@ class SetupPage(QWidget):
     def _make_tool_page(self, key: str) -> QWidget:
         """도구 다이얼로그를 **화면**으로 끼운다(시트로 띄우지 않는다).
 
-        시트일 때 제목줄이 하던 '무슨 화면인지' 는 위의 제목 한 줄이 대신하고, 닫기 ✕ 는
-        없다 — 나가는 길은 왼쪽 메뉴다.  ★ Esc 는 삼킨다: QDialog 는 Esc 로 reject→hide
+        시트일 때 제목줄이 하던 '무슨 화면인지' 는 창 맨 위 단계 줄이 대신한다(`tool_title`,
+        사용자 요청 2026-10-30 — 화면 안에 제목줄을 또 두지 않는다).  닫기 ✕ 는 없다 —
+        나가는 길은 왼쪽 메뉴다.  ★ Esc 는 삼킨다: QDialog 는 Esc 로 reject→hide
         하므로 그냥 두면 화면이 빈 칸으로 사라진다(맵 전체화면의 Esc 는 그대로 통과)."""
         if key == "image_info":
             from ..widgets.image_info_dialog import ImageInfoDialog
@@ -1537,15 +1541,6 @@ class SetupPage(QWidget):
         v = QVBoxLayout(page)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(0)
-        bar = QWidget(page)
-        bar.setProperty("role", "sheetBar")
-        bl = QHBoxLayout(bar)
-        bl.setContentsMargins(theme.PROFILE.section_gap, 10, 14, 10)
-        head = QLabel(dlg.windowTitle(), bar)
-        head.setProperty("role", "sheetTitle")
-        bl.addWidget(head)
-        bl.addStretch(1)
-        v.addWidget(bar)
         dlg.setParent(page)
         dlg.setWindowFlags(Qt.WindowType.Widget)
         dlg.installEventFilter(self)
@@ -1562,14 +1557,10 @@ class SetupPage(QWidget):
             "QScrollArea > QWidget#qt_scrollarea_viewport { background: transparent; }")
         holder.setWidget(page)
         holder.setProperty("_dialog", dlg)
-        holder.setProperty("_bar", bar)
         return holder
 
     def _on_tool_fullscreen(self, on: bool) -> None:
-        """맵만 남기는 보기 — 메뉴·제목줄도 감추고, 창(여정 레일)에 알린다."""
-        page = self._tool_pages.get("wafer_map")
-        if page is not None:
-            page.property("_bar").setVisible(not on)
+        """맵만 남기는 보기 — 메뉴도 감추고, 창(맨 위 단계 줄·상태바)에 알린다."""
         self._tool_rail.setVisible(not on)
         self._rail_rule.setVisible(not on)
         self.tool_fullscreen_changed.emit(bool(on))

@@ -17,9 +17,9 @@
 ★ 확장자는 화면에 보이되 **사용자가 지우면 되살린다** — `.xlsx` 가 빠진 파일은
   엑셀이 열지 못한다.  이름을 고치라고 열어 준 창이 열 수 없는 파일을 만들면 안 된다.
 
-이름 아래에는 제목을 이루는 칸(장비·Layer·자재)이 추천값으로 채워져 있고, 고친 뒤
+이름 아래에는 제목을 이루는 칸(장비·자재·Layer·S/M)이 추천값으로 채워져 있고, 고친 뒤
 [제목 자동 생성] 을 누르면 위 이름을 그 칸으로 다시 만든다(사용자 요청 2026-10-30) —
-자재·Layer 는 못 읽는 제품이 있어 빈 칸으로 올 수 있다(`models/lot_info.py`).
+자재·Layer·S/M 은 못 읽는 제품이 있어 빈 칸으로 올 수 있다(`models/lot_info.py`).
 """
 
 from __future__ import annotations
@@ -64,10 +64,10 @@ def compose_title(fields: dict[str, str]) -> str:
     """제목 칸 → 파일 이름(순수 함수 — 헤드리스 테스트).
 
     ``fields`` 에 ``machine`` 이 있으면 Defect 추출 제목, 아니면 검증 결과 제목이다
-    (``val``·``ref``).  ``layer``·``material``·``lot`` 중 빈 칸은 빠지고, 모두 비면 폴백 이름."""
+    (``val``·``ref``).  ``layer``·``material``·``sm`` 중 빈 칸은 빠지고, 모두 비면 폴백 이름."""
     # 칸 안의 연속 공백은 하나로 — 빈 장비 칸이 이름에 이중 공백을 남기지 않게.
     g = {k: " ".join((v or "").split()) for k, v in fields.items()}
-    tag = "_".join(t for t in (g.get("material", ""), g.get("layer", ""), g.get("lot", ""))
+    tag = "_".join(t for t in (g.get("material", ""), g.get("layer", ""), g.get("sm", ""))
                    if t)
     return " ".join(_compose(g, tag).split())
 
@@ -90,7 +90,7 @@ _FIELD_LABELS = (
     ("val", i18n.KO.SAVE_NAME_FIELD_VAL),
     ("material", i18n.KO.SAVE_NAME_FIELD_MATERIAL),
     ("layer", i18n.KO.SAVE_NAME_FIELD_LAYER),
-    ("lot", i18n.KO.SAVE_NAME_FIELD_LOT),
+    ("sm", i18n.KO.SAVE_NAME_FIELD_SM),
     ("ref", i18n.KO.SAVE_NAME_FIELD_REF),
 )
 

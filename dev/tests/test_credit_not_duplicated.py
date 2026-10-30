@@ -6,7 +6,8 @@
 
 크레딧은 기본적으로 `main_window._credit_label`(상태바) 하나다 — **모든 화면 공통**.
 예외: 설정 화면은 자기 바닥 줄(레일 칸)에 크레딧을 두고, 그동안 상태바 쪽은 숨긴다
-(`MainWindow._sync_statusbar`).  어느 화면에서도 **보이는 크레딧은 하나**다.
+(`MainWindow._sync_statusbar`).  어느 화면에서도 **보이는 크레딧은 하나 이하**다 —
+설정 화면에서 메뉴를 접으면 크레딧을 아예 보이지 않는다(사용자 요청 2026-10-30).
 """
 
 from __future__ import annotations
@@ -52,7 +53,8 @@ def test_result_page_does_not_add_its_own_credit(styled_qapp):
 
 
 def test_one_visible_credit_on_every_page(styled_qapp):
-    """★ 창 전체에서 **보이는** 크레딧은 늘 하나 — 설정 화면은 페이지 것, 나머지는 상태바 것.
+    """★ 창 전체에서 **보이는** 크레딧은 하나 — 설정 화면은 페이지 것(메뉴를 접으면 0),
+    나머지는 상태바 것.
 
     '전부 지운다' 로도 '두 번 보인다' 로도 깨지게 못박는다."""
     from aoi_verification.app.ui.main_window import MainWindow
@@ -67,7 +69,14 @@ def test_one_visible_credit_on_every_page(styled_qapp):
 
         win._build_remaining_pages()      # 결과 화면은 처음엔 없다(지연 생성)
         win._show_page(win._setup_page, animate=False)
-        assert visible() == 1, "설정 화면: 보이는 크레딧이 1개가 아니다"
+        sp_ = win._setup_page
+        want = 0 if sp_.is_rail_folded() else 1
+        assert visible() == want, "설정 화면: 보이는 크레딧 수가 메뉴 접힘과 맞지 않다"
+        sp_.toggle_rail()                 # 반대 상태도 확인
+        styled_qapp.processEvents()
+        sp_._apply_rail_collapsed(animate=False)
+        want = 0 if sp_.is_rail_folded() else 1
+        assert visible() == want, "설정 화면(메뉴 전환 뒤): 보이는 크레딧 수가 맞지 않다"
         win._show_page(win._result_page, animate=False)
         assert visible() == 1, "결과 화면: 보이는 크레딧이 1개가 아니다"
         assert win._credit_label.isVisibleTo(win)
