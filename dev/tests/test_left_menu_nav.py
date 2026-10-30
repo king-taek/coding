@@ -254,3 +254,59 @@ def test_visited_tool_does_not_widen_matching_page(qapp, no_sheets):
         assert page._scroll.horizontalScrollBar().maximum() == 0
     finally:
         page.close()
+
+
+def test_journey_rail_hidden_on_tool_pages(qapp, no_sheets, monkeypatch):
+    """맨 위 단계 줄은 매칭·추출에서만 — 도구 화면에서는 접히고, 다른 화면으로 가면 다시 보인다
+    (사용자 요청 2026-10-30)."""
+    from aoi_verification.app.ui import main_window as mw
+    monkeypatch.setattr(mw.MainWindow, "_start_backend_import_async", lambda self: None)
+    win = mw.MainWindow()
+    win.resize(1400, 900)
+    win.show()
+    try:
+        sp_ = win._setup_page
+        assert win._rail.isVisible()
+        sp_.gl_btn.click()
+        assert not win._rail.isVisible()
+        sp_.extract_btn.click()
+        assert win._rail.isVisible()
+        sp_.wafer_map_btn.click()
+        assert not win._rail.isVisible()
+        win._on_backend_loaded()
+        win._show_page(win._result_page, animate=False)   # 도구 화면에 둔 채 흐름이 넘어가도
+        assert win._rail.isVisible()
+        win._show_page(sp_, animate=False)                 # 돌아오면 다시 도구 화면 규칙
+        assert not win._rail.isVisible()
+        sp_.match_btn.click()
+        assert win._rail.isVisible()
+    finally:
+        win._loading.hide_overlay()
+        win.close()
+
+
+def test_journey_rail_animation_settles(qapp, no_sheets, monkeypatch):
+    """모션을 켠 경로 — 단계 줄이 접혔다 펴지는 동안 끊겨도 높이 42·보임 상태로 끝난다."""
+    from PyQt6.QtTest import QTest
+    from aoi_verification.app.ui import main_window as mw, motion
+    from aoi_verification.app.ui.widgets.journey_rail import JourneyRail
+    monkeypatch.setattr(motion, "enabled", lambda: True)
+    monkeypatch.setattr(mw.MainWindow, "_start_backend_import_async", lambda self: None)
+    win = mw.MainWindow()
+    win.resize(1400, 900)
+    win.show()
+    try:
+        sp_ = win._setup_page
+        sp_.gl_btn.click()
+        QTest.qWait(60)
+        assert 0 < win._rail.height() < JourneyRail.RAIL_H     # 접히는 중
+        sp_.match_btn.click()                                  # 도중에 되돌린다
+        QTest.qWait(motion.DUR_RAIL_UNFOLD + 250)
+        assert win._rail.isVisible() and win._rail.height() == JourneyRail.RAIL_H
+        assert win._credit_label.isHidden() == (not sp_.is_rail_folded())
+        sp_.wafer_map_btn.click()
+        QTest.qWait(motion.DUR_RAIL_FOLD + 250)
+        assert not win._rail.isVisible()
+    finally:
+        win._loading.hide_overlay()
+        win.close()

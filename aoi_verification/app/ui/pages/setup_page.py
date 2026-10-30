@@ -197,6 +197,7 @@ class SetupPage(QWidget):
     update_check_requested = pyqtSignal()            # '업데이트 확인' 버튼
     extract_mode_changed = pyqtSignal(bool)          # Defect 추출 ↔ 매칭 (레일 단계 이름)
     cross_mode_changed = pyqtSignal(bool)            # 교차검증 스위치 (레일 단계 이름)
+    page_changed = pyqtSignal(str)                   # 왼쪽 메뉴로 바꾼 화면(창이 단계 줄을 감춘다)
     rail_folded_changed = pyqtSignal(bool)           # 왼쪽 메뉴 접힘(창이 크레딧을 상태바로 옮긴다)
     tool_fullscreen_changed = pyqtSignal(bool)       # Wafer Map '맵만 보기' (창이 여정 레일을 감춘다)
 
@@ -1234,13 +1235,26 @@ class SetupPage(QWidget):
         hl = QHBoxLayout(head)
         hl.setContentsMargins(0, 0, 0, 0)
         hl.setSpacing(10)
-        self._rail_logo = build_logo_label(head, inline=True)
+        # 로고+제목은 한 칸에 묶는다 — 서랍이 좁아지면 이 칸이 오른쪽부터 가려진다(제목 →
+        # 로고 순).  칸의 최소 폭을 0 으로 풀어 [«] 를 밀어내지 않는다.
+        brand = QWidget(head)
+        brand.setProperty("role", "rowHost")
+        brand.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        bl = QHBoxLayout(brand)
+        bl.setSizeConstraint(QHBoxLayout.SizeConstraint.SetNoConstraint)
+        bl.setContentsMargins(0, 0, 0, 0)
+        bl.setSpacing(10)
+        self._rail_logo = build_logo_label(brand, inline=True)
         self._rail_logo.setFixedSize(34, 34)
         self._rail_logo.setScaledContents(True)
-        hl.addWidget(self._rail_logo)
+        bl.addWidget(self._rail_logo)
         title = self._build_title()
         title.setProperty("role", "railTitle")       # 26px 제목이 아니라 레일 폭에 맞는 크기
-        hl.addWidget(title, 1)
+        bl.addWidget(title, 1)
+        self._rail_brand = brand
+        hl.addWidget(brand, 1)
+        # 제목이 숨으면 이 빈칸이 [«] 를 오른쪽 끝에 붙들어 둔다(서랍이 움직이는 동안 안 튄다).
+        hl.addStretch(0)
         self.rail_fold_btn = NeonButton("", role="ghost")
         self.rail_fold_btn.setProperty("grade", "railFold")
         self.rail_fold_btn.setFixedSize(34, 34)
@@ -1301,6 +1315,14 @@ class SetupPage(QWidget):
         self._tool_rail = host
         # 접힘 상태 — 상황마다 따로 기억한다(`_rail_should_fold`).  매칭 화면에서 고른 것
         # (`_rail_user_folded`)은 도구 화면·좁은 창에서 잠깐 펼쳐도 바뀌지 않는다.
+        self._rail_t = 1.0
+        # 서랍이 좁아지는 동안 버튼·글자가 칸을 밀어내지 않고 **가려지게** — 최소 폭을
+        # 글자 폭이 아니라 아이콘 칸으로 낮춘다.
+        for b in (*self._nav_buttons.values(), self.update_btn):
+            b.setMinimumWidth(self._RAIL_ICON_W)
+        for lb in (self._title_label, self._rail_credit):
+            lb.setMinimumWidth(1)
+            lb.setSizePolicy(QSizePolicy.Policy.Ignored, lb.sizePolicy().verticalPolicy())
         self._rail_user_folded = False
         self._rail_tool_open = False         # 도구 화면에서 사용자가 펼쳤나(들어갈 때마다 접힘)
         self._rail_narrow_open = False       # 좁은 창에서 사용자가 펼쳤나(폭이 바뀌면 접힘)
@@ -1344,73 +1366,94 @@ class SetupPage(QWidget):
         return theme.PROFILE.page_margin + self._RAIL_W + theme.PROFILE.section_gap
 
     def _set_rail_folded(self, folded: bool, *, animate: bool) -> None:
-        """메뉴를 접는다/편다.  폭은 짧게 tween 하고, 글자는 접기 **전**에 숨기고 펴기
-        **뒤**에 보인다(좁아지는 동안 글자가 잘려 보이지 않게)."""
+        """메뉴를 접는다/편다 — **서랍처럼** 닫히고 열린다.
+
+        폭과 좌우 여백을 한 진행값(`_rail_t`, 0=접힘·1=펼침)으로 함께 몰아, 아이콘은
+        제자리에서 미끄러지고 이름은 서랍 오른쪽 끝에 가려지며 사라진다(펴질 때는 그
+        반대).  글자를 먼저 지우거나 끝에 툭 붙이지 않는다 — 접힌 52px 칸에서는 글자가
+        어차피 가려져 있어, 시작·끝에 글자를 바꿔도 화면에 이음매가 없다.
+        """
         folded = bool(folded)
         if folded == self._rail_folded:
             return
         self._rail_folded = folded
-        self.rail_folded_changed.emit(folded)
         from .. import motion
         self.rail_fold_btn.setIcon(rail_icon("unfold" if folded else "fold"))
         self.rail_fold_btn.setToolTip(i18n.KO.RAIL_UNFOLD_TOOLTIP if folded
                                       else i18n.KO.RAIL_FOLD_TOOLTIP)
-        start, end = self._tool_rail.width(), self._rail_width(folded)
-        if folded:
-            # 접을 때는 글자·여백을 먼저 줄인다 — 좁아지는 동안 잘린 글자가 보이지 않게.
-            self._rail_show_labels(False)
-            self._rail_margins(True)
+        end = 0.0 if folded else 1.0
         if self._rail_anim is not None:
             self._rail_anim.stop()
-        if not animate or not motion.enabled() or not self.isVisible() or start == end:
-            self._tool_rail.setFixedWidth(end)
+        if not folded:
+            self._rail_show_labels(True)       # 52px 칸에선 가려져 있다가 서랍이 열리며 드러난다
+        # 크레딧은 서랍이 움직이는 동안 감춰 두고 멈춘 뒤 자리를 정한다(_rail_settle) — 그때
+        # 창이 상태줄을 켜고 끈다.  시작에 바꾸면 상태줄이 서랍보다 먼저 튀어 화면이 밀린다.
+        self._rail_credit.setVisible(False)
+        if not animate or not motion.enabled() or not self.isVisible():
+            self._apply_rail_t(end)
             self._rail_settle()
             return
         anim = self._rail_anim
         if anim is None:
             # ★ 위젯당 하나만 만들어 재사용한다(motion 규약).  tick 은 부모(this)의 자식만 만진다.
             anim = QVariantAnimation(self)
-            anim.setEasingCurve(motion.EASE_PRIMARY)
             anim.valueChanged.connect(self._on_rail_tick)
             anim.finished.connect(self._rail_settle)
             self._rail_anim = anim
-        anim.setDuration(motion.DUR_RAIL_FOLD)
-        anim.setStartValue(int(start))
-        anim.setEndValue(int(end))
+        # 서랍 — 감속 곡선 하나로 끝까지 보이게(motion 기본).  닫힐 때가 조금 더 짧다
+        # (나가는 쪽을 짧게: motion.py 원칙).
+        anim.setEasingCurve(motion.EASE_PRIMARY)
+        anim.setDuration(motion.DUR_RAIL_FOLD if folded else motion.DUR_RAIL_UNFOLD)
+        anim.setStartValue(float(self._rail_t))
+        anim.setEndValue(end)
+        # 서랍이 움직이는 동안 도구 화면의 폭이 잠깐 최소 폭보다 좁아져 가로 스크롤이
+        # 깜빡인다 — 움직이는 동안만 막고, 멈추면(_rail_settle) 되돌린다.
+        self._set_tool_hscroll(False)
         anim.start()
 
     def _on_rail_tick(self, value) -> None:
-        self._tool_rail.setFixedWidth(int(value))
+        self._apply_rail_t(float(value))
+
+    def _apply_rail_t(self, t: float) -> None:
+        """진행값 t(0=접힘·1=펼침) 하나로 폭·여백·머리줄을 맞춘다."""
+        t = max(0.0, min(1.0, float(t)))
+        self._rail_t = t
+        m, gap, pad = theme.PROFILE.page_margin, theme.PROFILE.section_gap, self._RAIL_FOLD_PAD
+        w0, w1 = self._rail_width(True), self._rail_width(False)
+        left = round(pad + (m - pad) * t)
+        right = round(pad + (gap - pad) * t)
+        self._tool_rail.setFixedWidth(round(w0 + (w1 - w0) * t))
+        self._rail_lay.setContentsMargins(left, m, right, 10)
+        # [«] 는 펼치면 머리줄 오른쪽 끝, 접히면 아이콘 줄과 같은 세로선(52 칸의 가운데) —
+        # 그 사이를 같은 t 로 옮긴다(끝에서 튀지 않게).
+        shift = round((self._RAIL_ICON_W - self.rail_fold_btn.width()) / 2 * (1.0 - t))
+        self._rail_head.layout().setContentsMargins(0, 0, shift, 0)
+        # 로고·제목은 묶음 칸째 서랍 끝에 가려지며 줄어든다 — 다 닫혔을 때만 감춘다.
+        self._rail_brand.setVisible(t > 0.0)
 
     def _rail_settle(self) -> None:
-        """폭 이동이 끝난 자리 — 최종 폭·여백·글자를 맞춘다."""
+        """서랍이 멈춘 자리 — 최종 값을 박고, 접혔으면 이름을 툴팁으로 옮긴다."""
         folded = bool(self._rail_folded)
-        self._tool_rail.setFixedWidth(self._rail_width(folded))
-        self._rail_margins(folded)
+        self._apply_rail_t(0.0 if folded else 1.0)
         self._rail_show_labels(not folded)
+        self._rail_credit.setVisible(not folded)
+        self._set_tool_hscroll(True)
+        self.rail_folded_changed.emit(folded)
         if hasattr(self, "_setting_cards"):
             self._apply_card_orientation(self._side_by_side_fits())
 
-    def _rail_margins(self, folded: bool) -> None:
-        m, gap, pad = theme.PROFILE.page_margin, theme.PROFILE.section_gap, self._RAIL_FOLD_PAD
-        self._rail_lay.setContentsMargins(pad if folded else m, m, pad if folded else gap, 10)
+    def _set_tool_hscroll(self, on: bool) -> None:
+        policy = (Qt.ScrollBarPolicy.ScrollBarAsNeeded if on
+                  else Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        for holder in self._tool_pages.values():
+            holder.setHorizontalScrollBarPolicy(policy)
 
     def _rail_show_labels(self, on: bool) -> None:
         """이름 ↔ 아이콘만.  접힌 동안 이름은 툴팁으로 옮긴다(아이콘만으로는 뜻을 모른다)."""
-        self._rail_logo.setVisible(on and not self._rail_logo.pixmap().isNull())
-        self._title_label.setVisible(on)
-        self._rail_credit.setVisible(on)
-        self._rail_head.layout().setAlignment(
-            self.rail_fold_btn, Qt.AlignmentFlag(0) if on else Qt.AlignmentFlag.AlignHCenter)
         for b in (*self._nav_buttons.values(), self.update_btn):
             text, tip = b.property("_railText") or "", b.property("_railTip") or ""
             b.setText(text if on else "")
             b.setToolTip(tip if on else (f"{text}\n{tip}" if tip else text))
-            # 폭은 고정하지 않는다 — 접힌 메뉴 칸이 곧 52px 이고, 폭이 움직이는 동안
-            # 아이콘이 버튼 가운데를 따라가야 튀지 않는다.
-            b.setProperty("folded", "false" if on else "true")
-            b.style().unpolish(b)
-            b.style().polish(b)
 
     def current_page(self) -> str:
         """지금 오른쪽에 보이는 화면 — match · extract · image_info · wafer_map · gl."""
@@ -1429,7 +1472,13 @@ class SetupPage(QWidget):
         - ``match``·``extract``: 매칭 설정 화면(추출은 같은 화면의 한쪽 폴더 모드).
           도구 화면에서 돌아오면 메뉴를 사용자가 매칭 화면에서 고른 접힘 상태로 되돌린다.
         - ``image_info``·``wafer_map``·``gl``: 도구 화면.  처음 갈 때 만들고 살려 두며,
-          메뉴는 저절로 아이콘만 남긴다(사용자 요청 — 도구는 화면이 넓어야 한다)."""
+          메뉴는 저절로 아이콘만 남긴다(사용자 요청 — 도구는 화면이 넓어야 한다).
+
+        화면이 바뀌는 순간은 **한 박자**로 묶는다: 오른쪽 화면은 누른 즉시 바뀌고,
+        메뉴 서랍이 닫히며(또는 열리며) 창 위 단계 줄이 같은 시간·곡선으로 접혀
+        올라간다(창이 `page_changed` 를 받아).
+        ★ 새 화면에 페이드(그래픽 이펙트)를 걸지 마라 — 페이지는 배경을 칠하지 않아
+          첫 프레임이 **검은 사각형**으로 찍혔다(실측, 프레임 캡처)."""
         if key in ("match", "extract"):
             self._page_key = "match"
             self._pages.setCurrentWidget(self._match_host)
@@ -1450,6 +1499,7 @@ class SetupPage(QWidget):
             self._apply_rail_collapsed(animate=True)
             page.property("_dialog").setFocus(Qt.FocusReason.OtherFocusReason)
         self._sync_nav_checked()
+        self.page_changed.emit(self.current_page())
 
     def tool_dialog(self, key: str):
         """만들어 둔 도구 화면의 본체(없으면 None) — 테스트·창이 상태를 볼 때."""
