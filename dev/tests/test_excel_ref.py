@@ -154,3 +154,12 @@ def test_roundtrip_with_real_exporter(qapp, isolated_cache, tmp_path):
     from aoi_verification.app.models.slot import scan
     sc = scan(ref.root, val_f.parent / "val")          # 풀어 둔 폴더가 기준 폴더로 스캔된다
     assert sc.ref_only or sc.slots or sc.val_only
+
+
+def test_apply_excel_ref_resets_slot_selection(styled_qapp):
+    pytest.importorskip("PyQt6.QtWidgets")
+    from aoi_verification.app.ui.pages.setup_page import SetupPage
+    w = SetupPage()
+    w._selected_slots = {"옛슬롯"}
+    w.apply_excel_ref("/x/a.xlsx", str(__import__("tempfile").gettempdir()), "AOI-17", 3, 1, 3)
+    assert w._selected_slots is None

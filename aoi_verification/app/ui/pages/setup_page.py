@@ -2075,6 +2075,7 @@ class SetupPage(QWidget):
                         photos: int, slots: int, coords: int) -> None:
         """풀어 둔 기준 폴더를 기준 칸에 넣는다(메인 창이 불러온 뒤 부른다)."""
         self.ref_path_edit.setText(root)
+        self._reset_slot_selection()          # 이전 기준 폴더의 슬롯 선택은 더 이상 맞지 않는다
         if machine and not self.ref_machine_edit.text().strip():
             self.ref_machine_edit.setText(machine)
         tip = i18n.KO.EXCEL_REF_DONE_TIP_FMT.format(
