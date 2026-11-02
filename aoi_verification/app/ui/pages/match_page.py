@@ -441,10 +441,12 @@ class MatchPage(ProgressRowMixin, QWidget):
     # 교차검증 두 번째 방향(검증 → 기준)인가 — 큐가 검증 사진, 후보가 기준 사진이다.
     #   계산은 방향을 모른다(큐 쪽을 ``ref_path`` 로 담는다).  바뀌는 것은 문구뿐이다.
     _reverse = False
+    _cross = False
 
-    def set_reverse(self, on: bool) -> None:
-        """교차검증 역방향 표기 — ``load_state`` **전에** 부른다(표제는 거기서 갱신)."""
+    def set_reverse(self, on: bool, cross: bool = False) -> None:
+        """교차검증 방향 표기 — ``load_state`` **전에** 부른다(표제는 거기서 갱신)."""
         self._reverse = bool(on)
+        self._cross = bool(cross)
         self._ref_pane_title.setText(i18n.KO.PANEL_MATCH_REF_REVERSE if on
                                      else i18n.KO.PANEL_MATCH_REF)
         self._cand_pane_title.setText(i18n.KO.PANEL_MATCH_CANDIDATES_REVERSE if on
@@ -480,7 +482,7 @@ class MatchPage(ProgressRowMixin, QWidget):
         self._match_history.clear()        # 되돌리기 히스토리 초기화 (#C1)
         self._update_undo_button()
         self.title.setText(_stage2_title(self._engine_cfg)
-                           + (i18n.KO.CROSS_REVERSE_SUFFIX if self._reverse else ""))
+                           + i18n.direction_suffix(self._reverse, self._cross))
         self._refresh_skipped_panel()
         # 모든 (ref, val) 쌍 점수를 미리 계산 → 이후 매칭은 캐시 조회만.
         self._start_precompute()

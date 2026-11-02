@@ -1570,7 +1570,7 @@ class MainWindow(MultiValFlow, QMainWindow):
             self._start_cross_b_match(queue)
             return
         self._select_page.set_extract_mode(False)
-        self._select_page.set_reverse(True)
+        self._select_page.set_reverse(True, cross=True)
         self._select_page.load_state(queue=queue, targets={}, excluded={},
                                      history=[], slot_numbers=self._slot_numbers())
         self._phase = PHASE_B_SELECT
@@ -1841,7 +1841,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         restored = ({} if one_side
                     else self._maybe_restore_ref_selection(queue))
         self._select_page.set_extract_mode(one_side)     # '검증' ↔ '추출' 문구
-        self._select_page.set_reverse(False)
+        self._select_page.set_reverse(False, cross=bool(self._cross_stage))
         self._select_page.load_state(
             queue=queue,
             targets=restored, excluded={}, history=[],
@@ -2173,7 +2173,7 @@ class MainWindow(MultiValFlow, QMainWindow):
             return
         queue, pool, auto_mode = nxt
         reverse = self._cross_stage == "B"
-        self._match_page.set_reverse(reverse)
+        self._match_page.set_reverse(reverse, cross=bool(self._cross_stage))
         self._match_page.load_state(
             queue=queue,
             val_pool_by_slot=pool,
@@ -2253,7 +2253,7 @@ class MainWindow(MultiValFlow, QMainWindow):
                 return
             self._snapshot_leg_ctx()         # 2차 — 결과 화면이 이 장비 것을 쓰게
         merged = list(self._matches_b) if reverse else self._merge_matches()
-        self._match_review_page.set_reverse(reverse)
+        self._match_review_page.set_reverse(reverse, cross=bool(self._cross_stage))
         # MatchPage 가 들고 있는 점수 캐시 + val_pool 을 매치 검토 페이지에
         # 넘겨 차순위 후보를 행마다 표시한다 (참고용 시각 정보).
         ctx = self._match_page.review_context()
@@ -2350,7 +2350,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         # ★ 교차검증은 **두 번째 방향(B)의 검토**로 돌아간다.  MatchPage 가 지금 들고 있는
         #   후보·점수가 B 의 것이라 A 검토는 다시 만들 수 없다(A 의 확정분은 그대로 둔다).
         reverse = self._cross_stage == "B"
-        self._match_review_page.set_reverse(reverse)
+        self._match_review_page.set_reverse(reverse, cross=bool(self._cross_stage))
         # '매치 없음' 표시까지 되살리려면 그 행들이 있어야 하므로 **전체 목록**을
         #   기반으로 한다(`_reviewed_matches` 는 표시된 행이 빠진 kept 다).
         if reverse:

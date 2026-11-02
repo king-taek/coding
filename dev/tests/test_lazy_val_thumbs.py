@@ -197,7 +197,7 @@ def _window(lazy):
         fast_results={}, coord_classical_refs=frozenset()))
     win._select_loaded = []
     win._select_page = SimpleNamespace(
-        set_extract_mode=lambda on: None, set_reverse=lambda on: None,
+        set_extract_mode=lambda on: None, set_reverse=lambda on, cross=False: None,
         load_state=lambda **kw: win._select_loaded.append(kw))
     win._show_page = lambda w, **kw: None
     return MW, win
