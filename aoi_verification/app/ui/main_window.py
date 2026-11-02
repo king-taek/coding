@@ -2843,8 +2843,11 @@ class MainWindow(MultiValFlow, QMainWindow):
                 tp = rp
         if not (tp.material or tp.layer or tp.sm):
             _LOG.info("자재·Layer·S/M 을 못 읽어 기본 제목을 씁니다: %s", inp.val_root)
-        return {"val": inp.val_machine, "layer": tp.layer,
-                "material": tp.material, "sm": tp.sm, "ref": inp.ref_machine}
+        out = {"val": inp.val_machine, "layer": tp.layer,
+               "material": tp.material, "sm": tp.sm, "ref": inp.ref_machine}
+        if getattr(inp, "mode", "") == cross_check.CROSS_MODE:
+            out["cross"] = "1"          # 양방향 — 제목이 '기준↔검증 … 교차검증'
+        return out
 
     @staticmethod
     def _suggest_result_name(inp: SetupInput) -> str:
