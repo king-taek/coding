@@ -24,12 +24,31 @@ def photo_key(slot: str, stem: str) -> str:
 
 
 @lru_cache(maxsize=8)
-def _load(root: str) -> dict:
+def _load_all(root: str) -> dict:
     try:
         data = json.loads((Path(root) / SIDECAR_NAME).read_text(encoding="utf-8"))
-        return data.get("photos", {}) if isinstance(data, dict) else {}
+        return data if isinstance(data, dict) else {}
     except (OSError, ValueError):
         return {}
+
+
+def _load(root: str) -> dict:
+    return _load_all(root).get("photos", {})
+
+
+def kla_slot_ids(folder: Path) -> tuple:
+    """엑셀에서 푼 **KLA** 슬롯 폴더의 ``(WaferID, 카세트 슬롯 번호)`` — 아니면 ``(None, None)``.
+
+    KLA 정보파일(.001)이 없는 폴더라 ``kla_info.read_header_ids`` 가 못 읽는다.  엑셀의 슬롯 칸이
+    WaferID 이므로 폴더 이름이 곧 WaferID 다.  이게 KLA 로 인식돼야 KLA↔Camtek 좌표 보정·
+    슬롯 번호 표기가 일반 KLA 폴더와 같게 돈다."""
+    f = Path(folder)
+    if not (f.parent / SIDECAR_NAME).is_file():
+        return None, None
+    rec = _load_all(str(f.parent)).get("slots", {}).get(f.name)
+    if not rec or not rec.get("kla"):
+        return None, None
+    return f.name.strip().upper(), rec.get("no")
 
 
 def resolve(image_path: Path) -> Optional[DefectCoord]:

@@ -208,3 +208,26 @@ def test_resolve_batch_mixes_excel_ref_and_live_folder(tmp_path):
     out = coords.resolve_batch([rp, vp])
     assert out[rp].source == out[vp].source == "camtek_live"
     assert (out[rp].col, out[rp].row) == (3, 5)        # 엑셀 셀에 적힌 번호가 우선한다
+
+
+def test_kla_reference_excel_behaves_like_a_kla_folder(tmp_path):
+    """KLA 기준 엑셀 — 정보파일이 없어도 KLA 로 인식(WaferID=슬롯 폴더명 · 카세트 번호)되고,
+    같은 이름의 Camtek 검증 폴더와 짝지어지며, KLA↔Camtek 판별이 선다(좌표 보정이 돈다)."""
+    from aoi_verification.app.coords import kla_info
+    from aoi_verification.app.models.slot import scan
+
+    x = tmp_path / "kla_prev.xlsx"
+    _book(x, [("W6459076XYG1\n(#6)", "k1.jpg", KLA, "C"),
+              ("W6459076XYG1\n(#6)", "k2.jpg", KLA, "C"),
+              ("CAMTEKONLY", "c1.jpg", CAMTEK, "C")])
+    ref = excel_ref.load_excel_ref(x)
+    kla_dir, cam_dir = ref.root / "W6459076XYG1", ref.root / "CAMTEKONLY"
+    assert kla_info.read_wafer_id(kla_dir) == "W6459076XYG1"
+    assert kla_info.read_slot_no(kla_dir) == "6"
+    assert kla_info.read_wafer_id(cam_dir) is None          # Camtek 좌표 폴더는 KLA 가 아니다
+    val = tmp_path / "val"
+    (val / "W6459076XYG1").mkdir(parents=True)
+    Image.new("RGB", (40, 30)).save(val / "W6459076XYG1" / "v.jpg")
+    sc = scan(ref.root, val)
+    assert "W6459076XYG1" in sc.common_slot_names             # 이름이 같아 KLA 해석 없이 바로 짝
+    assert len(sc.slots["W6459076XYG1"].ref_images) == 2

@@ -23,6 +23,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
+from . import excel_ref
 from .models import NUMBER_WARN_KLA_GUESS, DefectCoord
 from .wafer_geometry import KLA_CENTER_SOURCE, kla_geometry
 from .ini_text import decode_ini_bytes, read_ini_text
@@ -115,6 +116,9 @@ def read_header_ids(folder: Path) -> tuple[Optional[str], Optional[str]]:
 
     후보 파일을 순서대로 시도해 WaferID 가 있는 첫 파일을 쓴다(슬롯 번호도 그 파일의
     값이다 — 다른 파일의 번호를 섞으면 다른 웨이퍼의 번호가 붙는다)."""
+    ids = excel_ref.kla_slot_ids(folder)        # 이전 결과 엑셀에서 푼 KLA 폴더 — 정보파일이 없다
+    if ids[0]:
+        return ids
     for p in _info_candidates(folder):
         try:
             with p.open("rb") as fh:

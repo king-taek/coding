@@ -103,6 +103,17 @@ def _text(v) -> str:
     return "" if v is None else str(v)
 
 
+_RE_SLOT_NO = re.compile(r"^\(#(\d+)\)$")
+
+
+def _slot_no_of(cell_text: str) -> Optional[str]:
+    """B열의 둘째 줄 ``(#6)`` → ``"6"``(카세트 슬롯 번호)."""
+    for line in cell_text.replace("\r", "").split("\n")[1:]:
+        if (m := _RE_SLOT_NO.match(line.strip())):
+            return m.group(1)
+    return None
+
+
 def _slot_of(cell_text: str) -> str:
     """B열 → 슬롯명.  첫 줄이 슬롯명이고 아래 ``(#N)`` · KLA 하위폴더명은 버린다."""
     first = cell_text.replace("\r", "").split("\n", 1)[0].strip()
@@ -123,7 +134,7 @@ def _cache_dir(xlsx: Path) -> Path:
     from .paths import cache_root
     st = xlsx.stat()
     key = hashlib.sha1(
-        f"v2|{xlsx.resolve()}|{st.st_mtime_ns}|{st.st_size}".encode()).hexdigest()[:16]
+        f"v3|{xlsx.resolve()}|{st.st_mtime_ns}|{st.st_size}".encode()).hexdigest()[:16]
     return cache_root() / "excel_ref" / key
 
 
@@ -154,6 +165,7 @@ def load_excel_ref(xlsx, progress: Optional[Callable] = None) -> ExcelRef:
     shutil.rmtree(tmp, ignore_errors=True)
     tmp.mkdir(parents=True)
     sidecar: dict = {}
+    slot_info: dict = {}                       # 슬롯 → {"no": 카세트 번호, "kla": 좌표가 KLA 인가}
     seen: set = set()
     slots: set = set()
     machine = ""
@@ -216,14 +228,17 @@ def load_excel_ref(xlsx, progress: Optional[Callable] = None) -> ExcelRef:
         d.mkdir(exist_ok=True)
         (d / name).write_bytes(data)
         slots.add(slot)
+        si = slot_info.setdefault(slot, {"no": None, "kla": False})
+        si["no"] = si["no"] or _slot_no_of(_text(ws.cell(row=r, column=2).value))
         if coord is not None:
             sidecar[photo_key(slot, Path(name).stem)] = coord
+            si["kla"] = si["kla"] or coord["source"] == "kla"
 
     if not seen:
         shutil.rmtree(tmp, ignore_errors=True)
         raise ExcelRefError(i18n.KO.EXCEL_REF_ERR_NOPHOTO)
     (tmp / SIDECAR_NAME).write_text(
-        json.dumps({"version": 1, "photos": sidecar}, ensure_ascii=False),
+        json.dumps({"version": 2, "photos": sidecar, "slots": slot_info}, ensure_ascii=False),
         encoding="utf-8")
     info = {"machine": machine_input(machine), "photos": len(seen), "slots": len(slots),
             "with_coord": len(sidecar), "skipped": skipped,
