@@ -2642,6 +2642,8 @@ class MainWindow(MultiValFlow, QMainWindow):
             mode=self._input.mode,
             ref_machine=self._input.ref_machine,
             val_machine=self._input.val_machine,
+            ref_root=str(self._input.ref_root),
+            val_root=str(self._input.val_root),
             matches=merged,
             slot_only_ref=list(self._scan.ref_only),
             slot_only_val=list(self._scan.val_only),

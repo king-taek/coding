@@ -6,7 +6,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
-from PyQt6.QtCore import QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (QCheckBox, QFileDialog, QFrame, QHBoxLayout, QLabel,
                               QVBoxLayout, QWidget)
 
@@ -296,8 +296,22 @@ class ResultPage(QWidget):
             lab.setWordWrap(True)
             self._summary_layout.addWidget(lab)
 
-        line(i18n.KO.RESULT_MACHINES_FMT.format(ref=result.ref_machine,
-                                                val=result.val_machine))
+        if result.ref_root and result.val_root:
+            # 어느 폴더로 돌린 결과인지 — 장비 이름 바로 아래에 주소를 옅게 붙인다.
+            for fmt, name, root in (
+                    (i18n.KO.RESULT_REF_FMT, result.ref_machine, result.ref_root),
+                    (i18n.KO.RESULT_VAL_FMT, result.val_machine, result.val_root)):
+                line(fmt.format(name=name))
+                path_lab = QLabel(root, self._summary_card)
+                path_lab.setProperty("role", "muted")
+                path_lab.setWordWrap(True)
+                path_lab.setTextInteractionFlags(
+                    Qt.TextInteractionFlag.TextSelectableByMouse)
+                self._summary_layout.addWidget(path_lab)
+                self._summary_layout.addSpacing(6)
+        else:
+            line(i18n.KO.RESULT_MACHINES_FMT.format(ref=result.ref_machine,
+                                                    val=result.val_machine))
 
         # ★ 검증의 종착 화면인데 핵심 수치가 비슷한 크기의 문장 속에 묻혀 있었다.
         #   '몇 장이 맞았고 몇 장이 문제인가' 를 스크롤 없이 2초 안에 읽히게 타일로 낸다.

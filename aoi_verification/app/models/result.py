@@ -44,6 +44,9 @@ class FinalResult:
     mode: str                                            # "single" | "cross" | EXTRACT_MODE
     ref_machine: str                                     # 예) "1호기"
     val_machine: str                                     # 예) "3호기"
+    # 입력한 폴더 주소 — 결과 화면이 '어느 폴더로 돌렸는지' 를 보인다(없으면 안 보임).
+    ref_root: str = ""
+    val_root: str = ""
     matches: list[MatchResult] = field(default_factory=list)
     slot_only_ref: list[str] = field(default_factory=list)
     slot_only_val: list[str] = field(default_factory=list)
