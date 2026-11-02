@@ -87,6 +87,18 @@ def parse_coord_lines(lines) -> Optional[dict]:
     return None
 
 
+def machine_input(label: str) -> str:
+    """엑셀 머리의 호기 라벨 → 설정 화면 호기 입력값(``AOI-17`` → ``17``, ``AOI(K-2)`` → ``K-2``).
+
+    exporter 의 ``_machine_label`` 의 거꾸로다.  그대로 입력란에 넣으면 저장 때 ``AOI(AOI-17)`` 이 된다."""
+    s = (label or "").strip()
+    if (m := re.fullmatch(r"AOI-(\d+)", s)):
+        return m.group(1)
+    if (m := re.fullmatch(r"AOI\((.*)\)", s)):
+        return m.group(1)
+    return s
+
+
 def _text(v) -> str:
     return "" if v is None else str(v)
 
@@ -111,7 +123,7 @@ def _cache_dir(xlsx: Path) -> Path:
     from .paths import cache_root
     st = xlsx.stat()
     key = hashlib.sha1(
-        f"{xlsx.resolve()}|{st.st_mtime_ns}|{st.st_size}".encode()).hexdigest()[:16]
+        f"v2|{xlsx.resolve()}|{st.st_mtime_ns}|{st.st_size}".encode()).hexdigest()[:16]
     return cache_root() / "excel_ref" / key
 
 
@@ -213,7 +225,7 @@ def load_excel_ref(xlsx, progress: Optional[Callable] = None) -> ExcelRef:
     (tmp / SIDECAR_NAME).write_text(
         json.dumps({"version": 1, "photos": sidecar}, ensure_ascii=False),
         encoding="utf-8")
-    info = {"machine": machine, "photos": len(seen), "slots": len(slots),
+    info = {"machine": machine_input(machine), "photos": len(seen), "slots": len(slots),
             "with_coord": len(sidecar), "skipped": skipped,
             "slot_names": sorted(slots)}
     (tmp / ".meta.json").write_text(json.dumps(info, ensure_ascii=False),

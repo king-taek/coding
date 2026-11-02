@@ -64,7 +64,7 @@ def test_load_unpacks_only_reference_column(tmp_path):
               ("SLOT_B", "p3.jpg", KLA, "C"),
               ("SLOT_B", "val.jpg", CAMTEK, "D")])           # D = 검증 → 풀지 않는다
     ref = excel_ref.load_excel_ref(x)
-    assert (ref.photos, ref.slots, ref.with_coord, ref.machine) == (3, 2, 2, "AOI-17")
+    assert (ref.photos, ref.slots, ref.with_coord, ref.machine) == (3, 2, 2, "17")
     assert sorted(p.name for p in ref.root.glob("*/*.jpg")) == ["p1.jpg", "p2.jpg", "p3.jpg"]
     assert not list(ref.root.glob("*/val.jpg"))
 
@@ -144,7 +144,7 @@ def test_roundtrip_with_real_exporter(qapp, isolated_cache, tmp_path):
     ex.ExcelExporter(result, dst_path=dst, template_path=tmp_path / "none.xlsx").run()
 
     ref = excel_ref.load_excel_ref(dst)
-    assert (ref.photos, ref.with_coord, ref.machine) == (2, 2, "AOI-17")
+    assert (ref.photos, ref.with_coord, ref.machine) == (2, 2, "17")
     for orig in (a, b):                              # 검증 사진(v)은 풀리지 않는다
         got = coords.resolve(ref.root / "W75483" / orig.name)
         want = coords.resolve(orig)
@@ -163,3 +163,48 @@ def test_apply_excel_ref_resets_slot_selection(styled_qapp):
     w._selected_slots = {"옛슬롯"}
     w.apply_excel_ref("/x/a.xlsx", str(__import__("tempfile").gettempdir()), "AOI-17", 3, 1, 3)
     assert w._selected_slots is None
+
+
+@pytest.mark.parametrize("layout", ["single", "sheets", "columns"])
+def test_roundtrip_defect_extract_layouts(qapp, isolated_cache, tmp_path, layout):
+    """Defect 추출 엑셀(세 가지 Recipe 배치)도 다시 읽힌다 — 사진 C · 정보 D(또는 [사진|정보] 열)."""
+    from aoi_verification.app.models.result import extract_result
+    from aoi_verification.app.workers import exporter as ex
+
+    f = tmp_path / "w"
+    f.mkdir()
+    paths = []
+    for i, (c, r) in enumerate([(1, 2), (3, 4), (5, 6)]):
+        p = f / f"AOI_RDL4_W1_{c}_{r}_{1000 + i}_{2000 + i}_Bump.jpg"
+        Image.new("RGB", (50, 40), (10 * i, 80, 80)).save(p)
+        paths.append(p)
+    dst = tmp_path / "ext.xlsx"
+    ex.ExcelExporter(extract_result("3", {"S1": paths}), dst_path=dst,
+                     template_path=tmp_path / "none.xlsx",
+                     recipe_layout=layout).run()
+    ref = excel_ref.load_excel_ref(dst)
+    assert (ref.photos, ref.with_coord, ref.machine) == (3, 3, "3")
+    for p in paths:
+        got, want = coords.resolve(ref.root / "S1" / p.name), coords.resolve(p)
+        assert (got.col, got.row) == (want.col, want.row)
+
+
+def test_machine_input_inverts_exporter_label():
+    from aoi_verification.app.workers.exporter import _machine_label
+    for raw in ("17", "K-2", "KLA"):
+        assert excel_ref.machine_input(_machine_label(raw)) == raw
+
+
+def test_resolve_batch_mixes_excel_ref_and_live_folder(tmp_path):
+    """기준(엑셀에서 푼 폴더)과 검증(LIVE 파일명 폴더)의 좌표가 한 실행 안에서 같은 프레임으로 풀린다."""
+    x = tmp_path / "prev.xlsx"
+    _book(x, [("S", "AOI_RDL4_W1_5_4_31863_26908_Bump.jpg", CAMTEK, "C")])
+    ref = excel_ref.load_excel_ref(x)
+    val = tmp_path / "v"
+    val.mkdir()
+    vp = val / "AOI_RDL4_W1_5_4_31860_26910_Bump.jpg"
+    vp.write_bytes(b"x")
+    rp = ref.root / "S" / "AOI_RDL4_W1_5_4_31863_26908_Bump.jpg"
+    out = coords.resolve_batch([rp, vp])
+    assert out[rp].source == out[vp].source == "camtek_live"
+    assert (out[rp].col, out[rp].row) == (3, 5)        # 엑셀 셀에 적힌 번호가 우선한다
