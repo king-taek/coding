@@ -296,26 +296,22 @@ class ResultPage(QWidget):
             lab.setWordWrap(True)
             self._summary_layout.addWidget(lab)
 
-        if result.ref_root and result.val_root:
-            # 어느 폴더로 돌린 결과인지 — 장비 이름 바로 아래에 주소를 옅게 붙인다.
-            for fmt, name, root in (
-                    (i18n.KO.RESULT_REF_FMT, result.ref_machine, result.ref_root),
-                    (i18n.KO.RESULT_VAL_FMT, result.val_machine, result.val_root)):
-                line(fmt.format(name=name))
-                path_lab = QLabel(root, self._summary_card)
-                path_lab.setProperty("role", "muted")
-                path_lab.setWordWrap(True)
-                path_lab.setTextInteractionFlags(
-                    Qt.TextInteractionFlag.TextSelectableByMouse)
-                self._summary_layout.addWidget(path_lab)
-                self._summary_layout.addSpacing(6)
-        else:
-            line(i18n.KO.RESULT_MACHINES_FMT.format(ref=result.ref_machine,
-                                                    val=result.val_machine))
+        line(i18n.KO.RESULT_MACHINES_FMT.format(ref=result.ref_machine,
+                                                val=result.val_machine))
 
         # ★ 검증의 종착 화면인데 핵심 수치가 비슷한 크기의 문장 속에 묻혀 있었다.
         #   '몇 장이 맞았고 몇 장이 문제인가' 를 스크롤 없이 2초 안에 읽히게 타일로 낸다.
         self._summary_layout.addLayout(self._build_stat_tiles(result))
+
+        # 어느 폴더로 돌린 결과인지 — 타일 아래 한 줄(드래그해 복사할 수 있다).
+        if result.ref_root and result.val_root:
+            path_lab = QLabel(i18n.KO.RESULT_ROOTS_FMT.format(
+                ref=result.ref_root, val=result.val_root), self._summary_card)
+            path_lab.setProperty("role", "muted")
+            path_lab.setWordWrap(True)
+            path_lab.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse)
+            self._summary_layout.addWidget(path_lab)
 
         # 빈 쪽은 적지 않는다 — '검증 전용: 없음' 같은 줄은 읽을 것이 없다.
         if result.slot_only_ref:
