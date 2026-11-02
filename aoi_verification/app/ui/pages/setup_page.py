@@ -194,6 +194,7 @@ class SetupPage(QWidget):
     """검증 시작 화면."""
 
     start_requested = pyqtSignal(object)             # SetupInput
+    excel_ref_requested = pyqtSignal(str)            # 이전 결과 엑셀을 기준으로 (경로)
     update_check_requested = pyqtSignal()            # '업데이트 확인' 버튼
     extract_mode_changed = pyqtSignal(bool)          # Defect 추출 ↔ 매칭 (레일 단계 이름)
     cross_mode_changed = pyqtSignal(bool)            # 교차검증 스위치 (레일 단계 이름)
@@ -544,9 +545,14 @@ class SetupPage(QWidget):
         # Defect 추출 — 첫 LOT 줄의 [슬롯 선택](추출 모드에서만 보인다).
         self._lot1_slot_btn = NeonButton(i18n.KO.EXTRACT_SLOT_BTN_ALL, role="ghost")
         self._lot1_slot_btn.setVisible(False)
+        # 이전 결과 엑셀을 기준으로 — 매칭 모드의 기준 폴더 줄 끝(추출 모드에서는 감춘다).
+        self._excel_ref_btn = NeonButton(i18n.KO.EXCEL_REF_BTN, role="ghost")
+        self._excel_ref_btn.setToolTip(i18n.KO.EXCEL_REF_BTN_TIP)
+        self._excel_ref_btn.clicked.connect(self._pick_excel_ref)
         self.ref_group, self.ref_path_edit, self.ref_machine_edit = \
             self._make_machine_group(i18n.KO.SETUP_REF_GROUP,
-                                     extra=self._lot1_slot_btn)
+                                     extra=self._lot1_slot_btn,
+                                     extra2=self._excel_ref_btn)
         self._build_lot_list()
         self.val_group, self.val_path_edit, self.val_machine_edit = \
             self._make_machine_group(i18n.KO.SETUP_VAL_GROUP)
@@ -1610,7 +1616,8 @@ class SetupPage(QWidget):
                    + SetupPage._VAL_REMOVE_W + 20)
         return max(w_names, w_extra)
 
-    def _make_machine_group(self, title: str, extra: Optional[QWidget] = None
+    def _make_machine_group(self, title: str, extra: Optional[QWidget] = None,
+                            extra2: Optional[QWidget] = None
                             ) -> tuple[QWidget, QLineEdit, QLineEdit]:
         """기준/검증 장비 입력 카드.
 
@@ -1651,7 +1658,11 @@ class SetupPage(QWidget):
         err.setProperty("role", "error")
         err.setMinimumHeight(12)
         err.setWordWrap(True)
-        grid.addWidget(err, 1, 1, 1, 3)
+        if extra2 is not None:               # 매칭 모드의 [엑셀로] — [폴더 선택…] 바로 아래(카드 폭을 늘리지 않는다)
+            grid.addWidget(err, 1, 1, 1, 2)
+            grid.addWidget(extra2, 1, 3, Qt.AlignmentFlag.AlignTop)
+        else:
+            grid.addWidget(err, 1, 1, 1, 3)
 
         machine_edit = QLineEdit(card)
         machine_edit.setPlaceholderText(i18n.KO.SETUP_MACHINE_PLACEHOLDER)
@@ -1763,6 +1774,7 @@ class SetupPage(QWidget):
         self._map_switch.setVisible(on)                    # 추출 전용 옵션
         self._cross_switch.setVisible(not on)              # 매칭 전용 옵션
         self._lot1_slot_btn.setVisible(on)
+        self._excel_ref_btn.setVisible(not on)
         self._lot_list.setVisible(on)
         self._scope_row.setVisible(not on)
         # 자동화 툴팁 — 매칭 문구는 '매치·검토 화면' 을 말한다(추출에는 없다).
@@ -2037,6 +2049,40 @@ class SetupPage(QWidget):
                           on_stack=self._log_stall_stack)
         self._folder_picker.open(i18n.KO.SETUP_FOLDER_LABEL)
 
+    # ── 이전 결과 엑셀을 기준으로 ─────────────────────────────────────────────
+    def _pick_excel_ref(self) -> None:
+        """[엑셀로] — 엑셀 파일 하나를 **비동기로** 고른다(`exec()` 금지: 폴더 선택과 같은 이유)."""
+        from PyQt6.QtWidgets import QFileDialog
+        dlg = getattr(self, "_excel_dialog", None)
+        if dlg is None:
+            dlg = QFileDialog(self, i18n.KO.EXCEL_REF_PICK_CAPTION, "",
+                              i18n.KO.EXCEL_REF_FILTER)
+            dlg.setFileMode(QFileDialog.FileMode.ExistingFile)
+            dlg.fileSelected.connect(self._on_excel_picked)
+            self._excel_dialog = dlg
+        dlg.open()
+
+    def _on_excel_picked(self, path: str) -> None:
+        if path:
+            self.excel_ref_requested.emit(path)
+
+    def _reset_excel_ref_btn(self) -> None:
+        self._excel_ref_btn.setText(i18n.KO.EXCEL_REF_BTN)
+        self._excel_ref_btn.setToolTip(i18n.KO.EXCEL_REF_BTN_TIP)
+        self.ref_path_edit.setToolTip("")
+
+    def apply_excel_ref(self, xlsx: str, root: str, machine: str,
+                        photos: int, slots: int, coords: int) -> None:
+        """풀어 둔 기준 폴더를 기준 칸에 넣는다(메인 창이 불러온 뒤 부른다)."""
+        self.ref_path_edit.setText(root)
+        if machine and not self.ref_machine_edit.text().strip():
+            self.ref_machine_edit.setText(machine)
+        tip = i18n.KO.EXCEL_REF_DONE_TIP_FMT.format(
+            name=Path(xlsx).name, photos=photos, groups=slots, coords=coords)
+        self.ref_path_edit.setToolTip(tip)
+        self._excel_ref_btn.setText(i18n.KO.EXCEL_REF_DONE_BTN)
+        self._excel_ref_btn.setToolTip(tip)
+
     def _on_folder_picked(self, path: str) -> None:
         target = getattr(self, "_browse_target", None)
         if target is None or not path:
@@ -2047,6 +2093,7 @@ class SetupPage(QWidget):
         # 기준 폴더가 바뀌면 이전 슬롯 선택은 더 이상 유효하지 않다.
         if target is self.ref_path_edit:
             self._reset_slot_selection()
+            self._reset_excel_ref_btn()
         # 입력란에 넣는 일 자체가 비싼지(textChanged 연쇄) — 보통 0.00초여야 한다.
         _LOG.info("폴더 선택: 입력란에 넣기 %.3f초 — %s",
                   time.perf_counter() - t0, path)

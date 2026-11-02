@@ -234,6 +234,8 @@ class MainWindow(MultiValFlow, QMainWindow):
     _update_found = pyqtSignal(dict)
     _update_applied = pyqtSignal(bool, dict)
     _update_progress = pyqtSignal(int, int, str)   # 다운로드/적용 진행(로딩바)
+    _excel_ref_progress = pyqtSignal(int, int)     # 이전 엑셀 → 기준 폴더 풀기 진행
+    _excel_ref_done = pyqtSignal(str, object, str)  # 엑셀 경로, ExcelRef|None, 오류 문구
     _update_none = pyqtSignal(str)          # 수동 확인: 최신/확인불가 안내
     _startup_proceed = pyqtSignal()         # 업데이트 흐름 종료 → 나머지 시작 팝업
     # 무거운 모듈(cv2·OpenVINO·numpy·PIL)을 백그라운드에서 다 불러왔다는 신호.
@@ -410,6 +412,8 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._update_found.connect(self._on_update_found)
         self._update_applied.connect(self._on_update_applied)
         self._update_progress.connect(self._on_update_progress)
+        self._excel_ref_progress.connect(self._on_excel_ref_progress)
+        self._excel_ref_done.connect(self._on_excel_ref_done)
         self._update_none.connect(self._on_update_none)
         self._startup_proceed.connect(self._run_startup_popups)
         QTimer.singleShot(400, self._begin_update_check)
@@ -620,6 +624,41 @@ class MainWindow(MultiValFlow, QMainWindow):
             self._update_applied.emit(bool(ok), info or {})
 
         threading.Thread(target=_work, name="update-apply", daemon=True).start()
+
+    def _on_excel_ref_requested(self, xlsx: str) -> None:
+        """이전 결과 엑셀 → 기준 폴더(백그라운드 + 로딩바).  끝나면 설정 화면 기준 칸에 넣는다."""
+        self._loading.show_overlay(i18n.KO.EXCEL_REF_LOADING)
+        self._loading.set_progress(0, 0, i18n.KO.EXCEL_REF_LOADING)     # busy → 0 에서 안 멈춤
+
+        import threading
+
+        def _work() -> None:
+            from ..utils import excel_ref
+            try:
+                ref = excel_ref.load_excel_ref(
+                    xlsx, progress=lambda d, t: self._excel_ref_progress.emit(int(d), int(t)))
+                self._excel_ref_done.emit(xlsx, ref, "")
+            except excel_ref.ExcelRefError as e:
+                self._excel_ref_done.emit(xlsx, None, str(e))
+            except Exception:
+                _LOG.exception("이전 엑셀 읽기 실패")
+                self._excel_ref_done.emit(xlsx, None, i18n.KO.EXCEL_REF_ERR_OPEN)
+
+        threading.Thread(target=_work, name="excel-ref", daemon=True).start()
+
+    def _on_excel_ref_progress(self, done: int, total: int) -> None:
+        self._loading.set_progress(done, total, i18n.KO.EXCEL_REF_LOADING)
+
+    def _on_excel_ref_done(self, xlsx: str, ref, error: str) -> None:
+        self._loading.hide_overlay()
+        if ref is None:
+            sheets.warn(self, i18n.KO.APP_TITLE, error)
+            return
+        self._setup_page.apply_excel_ref(
+            xlsx, str(ref.root), ref.machine, ref.photos, ref.slots, ref.with_coord)
+        if ref.with_coord < ref.photos:
+            sheets.info(self, i18n.KO.APP_TITLE, i18n.KO.EXCEL_REF_PARTIAL_FMT.format(
+                n=ref.photos - ref.with_coord))
 
     def _on_update_progress(self, done: int, total: int, phase: str) -> None:
         """업데이트 진행(다운로드/압축해제/적용) → 로딩바 갱신(메인 스레드).
@@ -2945,6 +2984,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._stack.addWidget(self._setup_page)
         self._sync_statusbar(self._setup_page)        # 첫 화면도 같은 규칙(크레딧은 한 번만)
         self._setup_page.start_requested.connect(self._on_start)
+        self._setup_page.excel_ref_requested.connect(self._on_excel_ref_requested)
         self._setup_page.update_check_requested.connect(self._manual_update_check)
         self._setup_page.extract_mode_changed.connect(self._on_extract_mode_changed)
         self._setup_page.cross_mode_changed.connect(self._on_extract_mode_changed)
