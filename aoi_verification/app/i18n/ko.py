@@ -179,6 +179,9 @@ STAGE2_COORD_OFFSET_FMT = "  ·  보정 가로 {dx:+.0f} · 세로 {dy:+.0f} µm
 RESULT_TITLE = "결과"
 # 결과 요약 — 핵심 수치는 타일로, 나머지는 문장으로.
 RESULT_MACHINES_FMT = "기준 장비: {ref}    검증 장비: {val}"
+# 입력한 폴더 주소 — 숫자 타일 아래, 기준·검증 한 줄씩.
+RESULT_REF_ROOT_FMT = "기준  {path}"
+RESULT_VAL_ROOT_FMT = "검증  {path}"
 RESULT_SLOT_ONLY_REF_FMT = "슬롯 불일치  ·  기준 전용: {names}"
 RESULT_SLOT_ONLY_VAL_FMT = "슬롯 불일치  ·  검증 전용: {names}"
 VALUE_NONE = "없음"
@@ -214,6 +217,8 @@ PANEL_MATCH_REF_REVERSE = "검증 사진"
 PANEL_MATCH_CANDIDATES_REVERSE = "기준 장비 후보"
 # 선별·매칭·검토 화면 표제 뒤에 붙는다 — 지금 두 번째 방향이라는 것을 표제가 말한다.
 CROSS_REVERSE_SUFFIX = " · 2차: 검증 → 기준"
+# 교차검증 첫 방향 — 2차 화면에만 방향이 적히면 1차 화면은 '어느 방향인가' 가 비어 보인다.
+CROSS_FORWARD_SUFFIX = " · 1차: 기준 → 검증"
 
 # Stage 2 의 '매치 없음' 사진 팝업
 # ★ 이 팝업의 이름에서 '보류' 를 뺐다.  버튼은 오래 "보류된 사진 보기 (n)" 이었지만
@@ -651,6 +656,10 @@ REVIEW_EMPTY_HINT = (
     # ★ 화면의 버튼 이름과 같게 적는다 — 예전엔 [완료] 라고 안내했지만 실제 버튼은
     #   '검토 완료 · 유지 n' 이라, 있지도 않은 버튼을 찾게 만들었다.
     "자동 매치된 항목이 없습니다.  [검토 완료] 를 누르면 결과 화면으로 이동합니다."
+)
+# 교차검증 1차 검토 — 다음은 결과가 아니라 2차 선별이다(문구가 틀린 곳으로 안내하던 것).
+REVIEW_EMPTY_HINT_CROSS_A = (
+    "자동 매치된 항목이 없습니다.  [검토 완료] 를 누르면 2차 선별로 이동합니다."
 )
 # 검토 리스트 컬럼 헤더 — ★ 이미지 세 종류를 **각자 자기 사진 위**에 놓기 위해
 # 하나였던 'COL_IMAGES = 기준 · 검증 · 후보' 를 셋으로 쪼갰다(한 라벨이면 어느 것도

@@ -1182,12 +1182,13 @@ class MatchReviewPage(QWidget):
     # 교차검증 두 번째 방향(검증 → 기준) — 행의 왼쪽이 검증 사진, 오른쪽이 기준 사진.
     #   목록·신호는 방향을 모른다(큐 쪽이 ``ref_path``).  바뀌는 것은 문구뿐이다.
     _reverse = False
+    _cross = False
 
-    def set_reverse(self, on: bool) -> None:
-        """교차검증 역방향 표기 — ``load_state`` 전에 부른다(행이 이름표를 물려받는다)."""
+    def set_reverse(self, on: bool, cross: bool = False) -> None:
+        """교차검증 방향 표기 — ``load_state`` 전에 부른다(행이 이름표를 물려받는다)."""
         self._reverse = bool(on)
-        self.title.setText(i18n.KO.MATCH_REVIEW_TITLE
-                           + (i18n.KO.CROSS_REVERSE_SUFFIX if on else ""))
+        self._cross = bool(cross)
+        self.title.setText(i18n.KO.MATCH_REVIEW_TITLE + i18n.direction_suffix(on, cross))
         self._hdr_ref.setText(i18n.KO.COL_VAL if on else i18n.KO.COL_REF)
         self._hdr_val.setText(i18n.KO.COL_REF if on else i18n.KO.COL_VAL)
 
@@ -1265,7 +1266,9 @@ class MatchReviewPage(QWidget):
         self._current_row = None
 
         if not self._matches:
-            empty = QLabel(i18n.KO.REVIEW_EMPTY_HINT)
+            empty = QLabel(i18n.KO.REVIEW_EMPTY_HINT_CROSS_A
+                           if self._cross and not self._reverse
+                           else i18n.KO.REVIEW_EMPTY_HINT)
             empty.setProperty("role", "mutedPad")
             self._list_layout.addWidget(empty)
         elif self._lanes:
