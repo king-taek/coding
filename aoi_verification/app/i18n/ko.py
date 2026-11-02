@@ -405,6 +405,10 @@ EXPAND_POSITION_FMT = "{cur} / {total}"
 # 읽으면 아래 폴백 이름을 쓴다 — 저장 창에서 사용자가 칸을 채워 다시 만들 수 있다.
 RESULT_FILE_TITLE_FMT = "{val} {tag} 검증({ref} 기준).xlsx"
 RESULT_FILE_TITLE_FALLBACK_FMT = "AOI {val} 검증 ({ref} 기준).xlsx"
+# 교차검증은 양방향(기준→검증 + 검증→기준)이라 '어느 쪽 기준'이 없다 — 두 장비를 ↔ 로 묶는다.
+#   예: `AOI-24↔4F-AOI-03 TB500_RDL4_GFW 교차검증.xlsx`
+CROSS_FILE_TITLE_FMT = "{ref}↔{val} {tag} 교차검증.xlsx"
+CROSS_FILE_TITLE_FALLBACK_FMT = "AOI {ref}↔{val} 교차검증.xlsx"
 TEMPLATE_NOT_FOUND_TITLE = "양식 파일 없음"
 TEMPLATE_NOT_FOUND_BODY = (
     "‘양식’ 폴더 안의 ‘양식.xlsx’ 를 찾을 수 없습니다.\n"
@@ -862,6 +866,10 @@ SAVE_NAME_TITLE = "저장할 파일 이름"
 SAVE_NAME_BODY = (
     "아래 이름으로 저장합니다. 필요하면 고쳐 주세요.\n"
     "규칙: 장비 자재_Layer_S/M 검증(기준 장비 기준)"
+)
+SAVE_NAME_CROSS_BODY = (
+    "아래 이름으로 저장합니다. 필요하면 고쳐 주세요.\n"
+    "규칙: 기준 장비↔검증 장비 자재_Layer_S/M 교차검증"
 )
 SAVE_NAME_FOLDER_FMT = "저장 폴더: {path}"
 # 이름 아래 칸들 — 추천값이 들어 있고, 고친 뒤 버튼을 누르면 위 이름을 다시 만든다(사용자 요청 2026-10-30).
