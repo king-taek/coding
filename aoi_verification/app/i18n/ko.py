@@ -179,8 +179,9 @@ STAGE2_COORD_OFFSET_FMT = "  ·  보정 가로 {dx:+.0f} · 세로 {dy:+.0f} µm
 RESULT_TITLE = "결과"
 # 결과 요약 — 핵심 수치는 타일로, 나머지는 문장으로.
 RESULT_MACHINES_FMT = "기준 장비: {ref}    검증 장비: {val}"
-# 입력한 폴더 주소 — 숫자 타일 아래 한 줄.
-RESULT_ROOTS_FMT = "기준 {ref}   ·   검증 {val}"
+# 입력한 폴더 주소 — 숫자 타일 아래, 기준·검증 한 줄씩.
+RESULT_REF_ROOT_FMT = "기준  {path}"
+RESULT_VAL_ROOT_FMT = "검증  {path}"
 RESULT_SLOT_ONLY_REF_FMT = "슬롯 불일치  ·  기준 전용: {names}"
 RESULT_SLOT_ONLY_VAL_FMT = "슬롯 불일치  ·  검증 전용: {names}"
 VALUE_NONE = "없음"

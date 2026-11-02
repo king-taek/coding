@@ -303,15 +303,16 @@ class ResultPage(QWidget):
         #   '몇 장이 맞았고 몇 장이 문제인가' 를 스크롤 없이 2초 안에 읽히게 타일로 낸다.
         self._summary_layout.addLayout(self._build_stat_tiles(result))
 
-        # 어느 폴더로 돌린 결과인지 — 타일 아래 한 줄(드래그해 복사할 수 있다).
+        # 어느 폴더로 돌린 결과인지 — 타일 아래, 기준·검증 한 줄씩(드래그해 복사할 수 있다).
         if result.ref_root and result.val_root:
-            path_lab = QLabel(i18n.KO.RESULT_ROOTS_FMT.format(
-                ref=result.ref_root, val=result.val_root), self._summary_card)
-            path_lab.setProperty("role", "muted")
-            path_lab.setWordWrap(True)
-            path_lab.setTextInteractionFlags(
-                Qt.TextInteractionFlag.TextSelectableByMouse)
-            self._summary_layout.addWidget(path_lab)
+            for fmt, root in ((i18n.KO.RESULT_REF_ROOT_FMT, result.ref_root),
+                              (i18n.KO.RESULT_VAL_ROOT_FMT, result.val_root)):
+                path_lab = QLabel(fmt.format(path=root), self._summary_card)
+                path_lab.setProperty("role", "muted")
+                path_lab.setWordWrap(True)
+                path_lab.setTextInteractionFlags(
+                    Qt.TextInteractionFlag.TextSelectableByMouse)
+                self._summary_layout.addWidget(path_lab)
 
         # 빈 쪽은 적지 않는다 — '검증 전용: 없음' 같은 줄은 읽을 것이 없다.
         if result.slot_only_ref:
