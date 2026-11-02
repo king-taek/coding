@@ -608,12 +608,12 @@ def test_no_fields_no_auto_button(styled_qapp, tmp_path, isolated_cache):
 
 
 # ---------------------------------------------------------------------------
-# 교차검증은 양방향이라 '(기준 장비 기준)' 이 없다 — 기준↔검증으로 묶는다.
+# 교차검증은 양방향이라 '(기준 장비 기준)' 이 없다 — 기준 vs 검증으로 묶는다.
 # ---------------------------------------------------------------------------
 def test_cross_check_title_is_bidirectional():
     from aoi_verification.app.ui.widgets.save_name_dialog import compose_title
     f = {"val": "4F-AOI-03", "ref": "AOI-24", "material": "TB500",
          "layer": "RDL4", "sm": "GFW"}
     assert compose_title(f) == "4F-AOI-03 TB500_RDL4_GFW 검증(AOI-24 기준).xlsx"
-    assert compose_title({**f, "cross": "1"}) == "AOI-24↔4F-AOI-03 TB500_RDL4_GFW 교차검증.xlsx"
-    assert compose_title({"val": "B", "ref": "A", "cross": "1"}) == "AOI A↔B 교차검증.xlsx"
+    assert compose_title({**f, "cross": "1"}) == "AOI-24 vs 4F-AOI-03 TB500_RDL4_GFW 교차검증.xlsx"
+    assert compose_title({"val": "B", "ref": "A", "cross": "1"}) == "AOI A vs B 교차검증.xlsx"
