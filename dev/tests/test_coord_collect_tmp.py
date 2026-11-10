@@ -134,3 +134,53 @@ def test_broken_button_does_not_stop_the_app(styled_qapp, monkeypatch):
     mod.attach(win)                                   # 예외가 새지 않는다
     win._coord_collect_btn.setVisible(True)           # 개발자 모드 전환 줄도 그대로 돈다
     win.deleteLater()
+
+
+def test_stop_releases_the_screen_without_waiting_for_the_worker(styled_qapp, monkeypatch):
+    """실측: [중지] 뒤 5분 넘게 '진행 중' 이었다 — NAS 호출에 걸린 작업을 화면이 기다리면 안 된다."""
+    pytest.importorskip("PyQt6.QtWidgets")
+    import threading
+
+    from PyQt6.QtCore import QObject, pyqtSignal
+    from PyQt6.QtWidgets import QMainWindow, QMessageBox
+
+    from aoi_verification.app.ui import coord_collect_tmp as mod
+
+    class _Loading(QObject):
+        cancel_requested = pyqtSignal()
+        shown = True
+
+        def show_overlay(self, message, **kw):
+            self.shown = True
+
+        def set_progress(self, done, total, message):
+            pass
+
+        def hide_overlay(self, then=None):
+            self.shown = False
+
+    gate = threading.Event()
+
+    class _Stuck:
+        @staticmethod
+        def run_nas(argv, out, progress=None, stop=None):
+            gate.wait(5)                                  # NAS 호출 하나에 걸려 있다
+            return None, 0, 0
+
+    win = QMainWindow()
+    said = []
+    monkeypatch.setattr(mod, "_load_tool", lambda: _Stuck)
+    monkeypatch.setattr(mod.sheets, "ask", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(mod.sheets, "info", lambda parent, title, text: said.append(text))
+    mod.attach(win)
+    win._loading = _Loading()
+    win._coord_collect_btn.click()
+    win._loading.cancel_requested.emit()                  # [중지]
+    assert not win._loading.shown and said == [mod.i18n.KO.COORD_COLLECT_STOPPED]
+    win._coord_collect_btn.click()                        # 작업이 아직 살아 있으면 새로 시작하지 않는다
+    assert said[-1] == mod.i18n.KO.COORD_COLLECT_WINDING_DOWN
+    gate.set()
+    win._coord_collector._thread.join(5)
+    styled_qapp.processEvents()
+    assert len(said) == 2                                 # 뒤늦은 결과는 버린다
+    win.deleteLater()

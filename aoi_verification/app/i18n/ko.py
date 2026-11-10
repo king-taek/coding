@@ -531,6 +531,8 @@ COORD_COLLECT_DONE_FMT = (
 )
 COORD_COLLECT_NO_TOOL = "수집 도구(dev/coord_lab.py)가 없습니다. 개발자 모드에서 dev 브랜치로 설치해 주세요."
 COORD_COLLECT_FAIL_FMT = "수집하다 멈췄습니다: {error}"
+COORD_COLLECT_STOPPED = "수집을 중지했습니다. 찾는 중이었다면 결과 파일은 만들지 않습니다."
+COORD_COLLECT_WINDING_DOWN = "방금 중지한 수집이 아직 정리 중입니다. 잠시 뒤 다시 눌러 주세요."
 # ── [좌표수집-임시] 끝 ─────────────────────────────────────────────────────
 
 # ── 개발자 모드 (메인 화면 Ctrl+Shift+D) ───────────────────────────────────

@@ -53,6 +53,7 @@ class _Collector(QObject):
         self._win = window
         self._running = False
         self._stop = threading.Event()
+        self._thread = None
         self.button = QPushButton(i18n.KO.COORD_COLLECT_BUTTON, window.statusBar())
         self.button.setFlat(True)
         self.button.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -63,6 +64,9 @@ class _Collector(QObject):
 
     def start(self) -> None:
         if self._running:
+            return
+        if self._thread is not None and self._thread.is_alive():    # 중지한 작업이 아직 NAS 응답을 기다린다
+            sheets.info(self._win, i18n.KO.COORD_COLLECT_TITLE, i18n.KO.COORD_COLLECT_WINDING_DOWN)
             return
         tool = _load_tool()
         if tool is None:
@@ -86,25 +90,35 @@ class _Collector(QObject):
                     ["--minutes", str(_MINUTES), "--per-lot", str(_PER_LOT), "--lots", str(_LOTS)],
                     out, progress=lambda d, t, m: self.progress.emit(int(d), int(t), str(m)),
                     stop=self._stop.is_set)
-                self.finished.emit(int(wafers), int(odd), str(base), "")
+                self.finished.emit(int(wafers), int(odd), str(base or ""), "")
             except Exception as e:                                  # noqa: BLE001
                 _LOG.exception("좌표 자료 수집 실패")
                 self.finished.emit(0, 0, "", f"{type(e).__name__}: {e}")
 
-        threading.Thread(target=_work, name="coord-collect", daemon=True).start()
+        self._thread = threading.Thread(target=_work, name="coord-collect", daemon=True)
+        self._thread.start()
 
     def _on_cancel(self) -> None:
-        if self._running:
-            self._stop.set()
+        """[중지] — 화면은 **바로** 푼다.  작업 스레드는 NAS 호출 하나가 끝나야 멈출 수 있어 기다리지 않는다."""
+        if not self._running:
+            return
+        self._stop.set()
+        self._close_overlay()
+        sheets.info(self._win, i18n.KO.COORD_COLLECT_TITLE, i18n.KO.COORD_COLLECT_STOPPED)
+
+    def _close_overlay(self) -> None:
+        self._running = False
+        self._win._loading.cancel_requested.disconnect(self._on_cancel)
+        self._win._loading.hide_overlay()
 
     def _on_progress(self, done: int, total: int, message: str) -> None:
         if self._running:
             self._win._loading.set_progress(done, total, message or i18n.KO.COORD_COLLECT_RUNNING)
 
     def _on_finished(self, wafers: int, odd: int, path: str, error: str) -> None:
-        self._running = False
-        self._win._loading.cancel_requested.disconnect(self._on_cancel)
-        self._win._loading.hide_overlay()
+        if not self._running:                    # 중지한 뒤에 도착한 결과 — 이미 화면을 풀었다
+            return
+        self._close_overlay()
         if error:
             sheets.warn(self._win, i18n.KO.COORD_COLLECT_TITLE,
                         i18n.KO.COORD_COLLECT_FAIL_FMT.format(error=error))

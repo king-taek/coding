@@ -325,6 +325,8 @@ UNC_SHARES = [r"\\10.142.80.91\nas3-1"]
 _WAFER_MARK = ("ColorImageGrabingInfo.ini", "Params_WaferInfo.ini")
 _LIVE_CAP = 400          # 폴더마다 읽는 사진 이름 수(정답 표결에는 몇 장이면 된다)
 _DEPTH = 7
+_SCAN_CAP = 5000         # Conder 폴더 하나에서 훑는 항목 수 — 파일 보관 폴더는 수십만 개라 끝이 없다
+_CONDER_SKIP_TOP = ("0. 전산",)   # 고객 폴더가 아닌 파일 보관함(사용자 확인 2026-11-10)
 
 
 def nas_default_roots():
@@ -345,12 +347,15 @@ def nas_default_roots():
     return cam, conder
 
 
-def _subdirs(d: Path):
-    """(이름, 경로, 수정 시각) — 못 읽는 폴더는 빈 목록(NAS 권한 · 끊김)."""
+def _subdirs(d: Path, deadline=None):
+    """(이름, 경로, 수정 시각) — 못 읽는 폴더는 빈 목록(NAS 권한 · 끊김).
+    ``deadline`` 을 주면 항목마다 확인해 큰 폴더 한가운데서도 멈춘다."""
     out = []
     try:
         with os.scandir(d) as it:
             for e in it:
+                if deadline is not None and _expired(deadline):
+                    break
                 try:
                     if e.is_dir(follow_symlinks=False):
                         out.append((e.name, Path(e.path), e.stat().st_mtime))
@@ -380,7 +385,7 @@ def nas_walk(roots, deadline, per_lot=3, lots=5, log=print):
         if _expired(deadline):
             state["cut"] = True
             return False
-        subs = sorted(_subdirs(d), key=lambda t: -t[2])           # 최근 것부터
+        subs = sorted(_subdirs(d, deadline), key=lambda t: -t[2])  # 최근 것부터
         if not subs or depth > _DEPTH:
             return False
         names = sorted(subs)
@@ -410,24 +415,40 @@ def nas_walk(roots, deadline, per_lot=3, lots=5, log=print):
     return found, state["cut"]
 
 
+def strong_id(name: str) -> bool:
+    """폴더 이름만으로 웨이퍼를 가릴 수 있나 — ``9`` · ``01`` 같은 이름은 아무 폴더와나 맞는다."""
+    return len(name) >= 5 and not name.isdigit()
+
+
 def nas_conder(roots, wanted, deadline, log=print):
-    """Conder Scan 에서 **이름이 웨이퍼 ID 인 폴더**만 열어 LIVE 파일명을 읽는다(사진은 안 연다)."""
+    """Conder Scan 에서 **이름이 웨이퍼 ID 인 폴더**만 열어 LIVE 파일명을 읽는다(사진은 안 연다).
+
+    잘못 짚지 않게: 짧거나 숫자뿐인 이름은 찾지 않고(``strong_id``), 파일명에 그 ID 토큰이 든 사진만
+    세며, 고객 폴더가 아닌 보관함(``_CONDER_SKIP_TOP``)은 들어가지 않는다.  최근 폴더부터 본다."""
     live, cut = {}, False
+    wanted = {w for w in wanted if strong_id(w)}
 
     def visit(d: Path, depth: int):
         nonlocal cut
         if _expired(deadline):
             cut = True
             return
-        for name, p, _ in _subdirs(d):
-            if cut:
+        for name, p, _ in sorted(_subdirs(d, deadline), key=lambda t: -t[2]):
+            if cut or _expired(deadline):
+                cut = True
                 return
+            if depth == 0:
+                if name.startswith(_CONDER_SKIP_TOP):
+                    continue
+                log(f"  Conder 훑는 중: {name}")
             if name in wanted:
                 names = []
                 try:
                     with os.scandir(p) as it:
-                        for e in it:
-                            if Path(e.name).suffix.lower() in IMG_EXT:
+                        for i, e in enumerate(it):
+                            if i >= _SCAN_CAP or _expired(deadline):
+                                break
+                            if Path(e.name).suffix.lower() in IMG_EXT and name in Path(e.name).stem.split("_"):
                                 names.append(e.name)
                                 if len(names) >= _LIVE_CAP:
                                     break
@@ -545,7 +566,8 @@ def collect_zip(recs, live_by_dir, base: Path, no_map=(), part_mb=30, file_mb=12
 
 def run_nas(argv, out: Path, progress=None, stop=None):
     """``progress(done, total, 문구)`` — total 0 이면 진행량 모름(busy).  ``stop()`` 이 참이면
-    그 단계에서 멈추고 거기까지 돈 것으로 정리한다(앱의 수집 버튼이 쓴다)."""
+    멈춘다: 폴더를 찾는 중이면 아무것도 남기지 않고 ``(None, 0, 0)``, 계산 중이면 거기까지로 정리한다
+    (앱의 수집 버튼이 쓴다)."""
     progress = progress or (lambda *_: None)
     stop = stop or (lambda: False)
 
@@ -578,6 +600,8 @@ def run_nas(argv, out: Path, progress=None, stop=None):
     wanted = {wafer_name(f) for f in folders}
     live_by_dir, cut2 = nas_conder(conder_roots, wanted, until(t0 + minutes * 60 * 0.85), log)
     for f in folders:                        # 폴더 안에 LIVE 이름 사진이 같이 있는 경우
+        if stop():
+            break
         try:
             names = [e.name for e in os.scandir(f) if Path(e.name).suffix.lower() in IMG_EXT][:_LIVE_CAP]
         except OSError:
@@ -587,6 +611,9 @@ def run_nas(argv, out: Path, progress=None, stop=None):
             live_by_dir[f] = lv
     print(f"\n웨이퍼 폴더 {len(folders)} · Conder 폴더 {len(live_by_dir)} · {time.time() - t0:.0f}초"
           + (" · 시간 제한으로 일부만 돌았습니다" if cut1 or cut2 else ""))
+    if stop():                               # 찾는 도중에 멈췄다 — 반쪽 결과를 남기지 않는다
+        print("중지했습니다.")
+        return None, 0, 0
     recs = []
     for i, f in enumerate(sorted(folders)):
         if stop():
