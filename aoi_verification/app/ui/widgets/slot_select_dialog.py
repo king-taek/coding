@@ -225,13 +225,23 @@ class SlotSelectDialog(QDialog):
                  preselected: Optional[Iterable[str]] = None,
                  ref_dirs: Optional[dict] = None,
                  val_root=None,
+                 title: Optional[str] = None,
+                 hint: Optional[str] = None,
+                 notes: Optional[dict] = None,
+                 search_placeholder: Optional[str] = None,
                  parent=None) -> None:
         """``ref_dirs``·``val_root`` 를 주면 슬롯마다 사진 수를 **워커가** 채운다.
 
         주지 않으면 개수 줄은 '확인 중…' 그대로 남는다 — 개수는 곁들이는 정보이지
-        이 창이 하는 일(슬롯 고르기)의 전제가 아니다."""
+        이 창이 하는 일(슬롯 고르기)의 전제가 아니다.
+
+        ``title``·``hint``·``notes``({이름: 둘째 줄})·``search_placeholder`` 는 슬롯이 아닌 것(엑셀 시트)을
+        같은 창으로 고를 때 쓴다."""
         super().__init__(parent)
-        self.setWindowTitle(i18n.KO.SLOT_SELECT_TITLE)
+        self.setWindowTitle(title or i18n.KO.SLOT_SELECT_TITLE)
+        self._hint_text = hint or i18n.KO.SLOT_SELECT_HINT
+        self._search_text = search_placeholder or i18n.KO.SLOT_SELECT_SEARCH_PLACEHOLDER
+        self._is_slots = title is None          # 슬롯이 아니면 '모든 슬롯' 문구를 쓰지 않는다
         self._slot_names = sorted(set(slot_names))
         self._preselected = (set(preselected) if preselected is not None
                              else set(self._slot_names))
@@ -251,6 +261,9 @@ class SlotSelectDialog(QDialog):
         self._count_token = 0
         self._count_scan: Optional[_SlotCountScan] = None
         self._build()
+        for name, text in (notes or {}).items():
+            if name in self._tiles:
+                self._tiles[name].set_count_text(text)
         self._size_to_content()
         if ref_dirs:
             self._start_counting(ref_dirs, val_root)
@@ -347,14 +360,14 @@ class SlotSelectDialog(QDialog):
         self._head.setProperty("role", "title")
         root.addWidget(self._head)
 
-        hint = QLabel(i18n.KO.SLOT_SELECT_HINT, self)
+        hint = QLabel(self._hint_text, self)
         hint.setProperty("role", "muted")
         hint.setWordWrap(True)
         root.addWidget(hint)
 
         # ── 검색 — 이름을 아는 사용자에게 가장 빠른 길.  열자마자 여기 포커스가 간다.
         self._search = QLineEdit(self)
-        self._search.setPlaceholderText(i18n.KO.SLOT_SELECT_SEARCH_PLACEHOLDER)
+        self._search.setPlaceholderText(self._search_text)
         self._search.setClearButtonEnabled(True)
         self._search.textChanged.connect(self._on_search)
         root.addWidget(self._search)
@@ -570,7 +583,8 @@ class SlotSelectDialog(QDialog):
         n = len(self.selected)
         total = len(self._slot_names)
         self._head.setText(
-            i18n.KO.SLOT_SELECT_COUNT_HEAD_ALL.format(total=total) if n == total
+            i18n.KO.SLOT_SELECT_COUNT_HEAD_ALL.format(total=total)
+            if n == total and self._is_slots
             else i18n.KO.SLOT_SELECT_COUNT_HEAD_FMT.format(n=n, total=total))
         # ★ 0개는 막는다.  호출부(`setup_page._open_slot_select`)가 빈 집합을 '전체
         #   진행'으로 정규화하므로, 전부 해제하고 확인하면 **의도와 정반대로** 모든

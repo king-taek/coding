@@ -834,6 +834,13 @@ EXCEL_REF_DONE_BTN = "엑셀 ✓"
 EXCEL_REF_ERR_NOFILE = "엑셀 파일을 찾을 수 없습니다."
 EXCEL_REF_ERR_OPEN = "엑셀을 열 수 없습니다. 다른 프로그램에서 열려 있거나 손상된 파일일 수 있습니다."
 EXCEL_REF_ERR_NOPHOTO = "이 엑셀에서 기준 사진을 찾지 못했습니다. 앱이 저장한 결과 엑셀인지 확인하세요."
+EXCEL_REF_PICK_SHEETS_TITLE = "기준으로 쓸 시트 선택"
+EXCEL_REF_PICK_SHEETS_HINT = (
+    "이 엑셀은 여러 시트(LOT)에 같은 이름의 슬롯이 있습니다. "
+    "섞이지 않게, 한 LOT 에 해당하는 시트만 고르세요."
+)
+EXCEL_REF_SHEET_COUNT_FMT = "사진 {n}장"
+EXCEL_REF_SHEET_SEARCH = "시트 이름으로 찾기"
 EXCEL_REF_PARTIAL_FMT = "좌표가 없는 사진 {n}장은 이미지 유사도로만 비교합니다."
 SLOT_SELECT_EMPTY = "기준 폴더에서 슬롯(하위 폴더)을 찾지 못했습니다."
 

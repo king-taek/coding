@@ -26,7 +26,8 @@ from typing import Callable, Optional
 from .. import i18n
 from ..coords.excel_ref import SIDECAR_NAME, photo_key
 
-__all__ = ["ExcelRef", "load_excel_ref", "parse_coord_lines", "ExcelRefError"]
+__all__ = ["ExcelRef", "load_excel_ref", "parse_coord_lines", "ExcelRefError",
+           "ExcelRefNeedsSheets"]
 
 _IMG_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
 _SKIP_SHEETS = (i18n.KO.WAFER_MAP_SHEET, i18n.KO.SLOT_MISMATCH_SHEET,
@@ -44,6 +45,33 @@ _BAD_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 class ExcelRefError(Exception):
     """엑셀을 기준으로 쓸 수 없을 때(사유가 사용자에게 그대로 보인다)."""
+
+
+class ExcelRefNeedsSheets(ExcelRefError):
+    """시트마다 같은 슬롯 이름에 **서로 다른** 사진이 있다 — 어느 시트를 쓸지 사용자가 고른다.
+
+    여러 LOT 를 담은 Defect 추출 엑셀이 이렇다: LOT 는 시트 이름에만 있고 B열 슬롯명은
+    LOT 접두를 뺀다(`exporter._write_slot_cell`).  그대로 합치면 다른 LOT 의 같은 이름 슬롯이
+    한 웨이퍼로 섞여 엉뚱한 웨이퍼와 매칭된다.  ``sheets`` 는 ``[(시트 이름, 사진 수)]``."""
+
+    def __init__(self, sheets: list) -> None:
+        super().__init__(i18n.KO.EXCEL_REF_PICK_SHEETS_HINT)
+        self.sheets = list(sheets)
+
+
+def _sheets_conflict(per_sheet: dict) -> bool:
+    """``{시트: {슬롯: {파일명}}}`` → 같은 슬롯을 두 시트가 **서로 다른 사진으로** 가지는가.
+
+    한쪽이 다른 쪽에 포함되면(매칭 결과의 요약 시트 ⊂ 전체 시트) 충돌이 아니다 —
+    같은 사진을 두 번 적은 것이라 지금처럼 한 번만 풀면 된다."""
+    titles = list(per_sheet)
+    for i, a in enumerate(titles):
+        for b in titles[i + 1:]:
+            for slot in per_sheet[a].keys() & per_sheet[b].keys():
+                na, nb = per_sheet[a][slot], per_sheet[b][slot]
+                if na - nb and nb - na:
+                    return True
+    return False
 
 
 @dataclass
@@ -130,24 +158,28 @@ def _photo_cols(ws) -> list[tuple[int, Optional[int]]]:
     return [(c - 1, c) for c in info_cols if c >= 1]
 
 
-def _cache_dir(xlsx: Path) -> Path:
+def _cache_dir(xlsx: Path, sheets: Optional[list] = None) -> Path:
     from .paths import cache_root
     st = xlsx.stat()
+    pick = "\x1f".join(sorted(sheets)) if sheets else "*"
     key = hashlib.sha1(
-        f"v3|{xlsx.resolve()}|{st.st_mtime_ns}|{st.st_size}".encode()).hexdigest()[:16]
+        f"v4|{xlsx.resolve()}|{st.st_mtime_ns}|{st.st_size}|{pick}".encode()).hexdigest()[:16]
     return cache_root() / "excel_ref" / key
 
 
-def load_excel_ref(xlsx, progress: Optional[Callable] = None) -> ExcelRef:
+def load_excel_ref(xlsx, progress: Optional[Callable] = None,
+                   sheets: Optional[list] = None) -> ExcelRef:
     """엑셀을 기준 폴더로 푼다(같은 파일이 안 바뀌었으면 풀어 둔 것을 재사용).
 
-    ``progress(done, total)`` — 그림을 풀 때마다 부른다.  백그라운드 스레드에서 부를 것."""
+    ``progress(done, total)`` — 그림을 풀 때마다 부른다.  백그라운드 스레드에서 부를 것.
+    ``sheets`` — 이 시트들만 쓴다.  주지 않았는데 시트끼리 슬롯이 엇갈리면
+    :class:`ExcelRefNeedsSheets` 를 던진다(여러 LOT 추출 엑셀)."""
     from openpyxl import load_workbook
 
     xlsx = Path(xlsx)
     if not xlsx.is_file():
         raise ExcelRefError(i18n.KO.EXCEL_REF_ERR_NOFILE)
-    root = _cache_dir(xlsx)
+    root = _cache_dir(xlsx, sheets)
     meta = root / ".meta.json"
     if meta.is_file():                         # 이미 푼 적이 있다
         try:
@@ -175,6 +207,8 @@ def load_excel_ref(xlsx, progress: Optional[Callable] = None) -> ExcelRef:
     for ws in wb.worksheets:
         if ws.title.startswith(_SKIP_SHEETS):
             continue
+        if sheets and ws.title not in sheets:
+            continue
         cols = dict(_photo_cols(ws))
         anchors[ws.title] = set()
         for img in getattr(ws, "_images", []):
@@ -193,12 +227,9 @@ def load_excel_ref(xlsx, progress: Optional[Callable] = None) -> ExcelRef:
                 jobs.append((ws, img, r, c, cols[c]))
         if not machine:
             machine = _text(ws.cell(row=2, column=_PHOTO_COL + 1).value).strip()
-    total = len(jobs)
-    n = 0
-    for ws, img, r, c, info_c in jobs:
-        n += 1
-        if progress:
-            progress(n, total)
+    items = []                                 # (ws, image, row, slot, name, coord)
+    per_sheet: dict = {}                       # 시트 → 슬롯 → {파일명}
+    for n, (ws, img, r, c, info_c) in enumerate(jobs, start=1):
         slot = _slot_of(_text(ws.cell(row=r, column=2).value))
         body = _text(ws.cell(row=r, column=c + 1).value)
         lines = [s for s in body.replace("\r", "").split("\n") if s.strip()]
@@ -214,6 +245,18 @@ def load_excel_ref(xlsx, progress: Optional[Callable] = None) -> ExcelRef:
             name = f"사진_{n:04d}"
         if Path(name).suffix.lower() not in _IMG_SUFFIXES:
             name += ".jpg"
+        items.append((ws, img, r, slot, name, coord))
+        per_sheet.setdefault(ws.title, {}).setdefault(slot, set()).add(name.lower())
+    if not sheets and _sheets_conflict(per_sheet):
+        shutil.rmtree(tmp, ignore_errors=True)
+        counts: dict = {}
+        for ws, *_rest in items:
+            counts[ws.title] = counts.get(ws.title, 0) + 1
+        raise ExcelRefNeedsSheets(list(counts.items()))
+    total = len(items)
+    for n, (ws, img, r, slot, name, coord) in enumerate(items, start=1):
+        if progress:
+            progress(n, total)
         key = (slot, name.lower())
         if key in seen:                                  # 요약 · 미매칭 시트에 겹친 행
             skipped += 1

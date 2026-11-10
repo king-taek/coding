@@ -231,3 +231,73 @@ def test_kla_reference_excel_behaves_like_a_kla_folder(tmp_path):
     sc = scan(ref.root, val)
     assert "W6459076XYG1" in sc.common_slot_names             # 이름이 같아 KLA 해석 없이 바로 짝
     assert len(sc.slots["W6459076XYG1"].ref_images) == 2
+
+
+def _two_lot_extract(tmp_path, layout="single"):
+    """LOT 둘에 같은 이름의 슬롯 S1 — 여러 LOT Defect 추출 엑셀(시트가 LOT 마다)."""
+    from aoi_verification.app.models.result import extract_result
+    from aoi_verification.app.workers import exporter as ex
+
+    slots = {}
+    for lot, base in (("LOT_A", 0), ("LOT_B", 10)):
+        f = tmp_path / lot / "S1"
+        f.mkdir(parents=True)
+        ps = []
+        for i, (c, r) in enumerate([(1 + base, 2), (3 + base, 4)]):
+            p = f / f"AOI_RDL4_W1_{c}_{r}_{1000 + i}_{2000 + i}_Bump.jpg"
+            Image.new("RGB", (50, 40), (10 * i, 80, 80)).save(p)
+            ps.append(p)
+        slots[f"{lot}/S1"] = ps
+    dst = tmp_path / "ext2.xlsx"
+    ex.ExcelExporter(extract_result("3", slots), dst_path=dst,
+                     template_path=tmp_path / "none.xlsx",
+                     recipe_layout=layout).run()
+    return dst, slots
+
+
+def test_multi_lot_extract_asks_which_sheet(qapp, isolated_cache, tmp_path):
+    """★ LOT 마다 같은 슬롯 이름 — 그냥 합치면 다른 LOT 사진이 한 웨이퍼로 섞인다.
+    시트를 고르라고 묻고, 고른 시트(LOT)의 사진만 푼다."""
+    dst, slots = _two_lot_extract(tmp_path)
+    with pytest.raises(excel_ref.ExcelRefNeedsSheets) as e:
+        excel_ref.load_excel_ref(dst)
+    titles = [t for t, _n in e.value.sheets]
+    assert "LOT_A" in titles and "LOT_B" in titles
+    assert dict(e.value.sheets)["LOT_A"] == 2
+
+    ref = excel_ref.load_excel_ref(dst, sheets=["LOT_B"])
+    assert ref.photos == 2 and ref.slot_names == ["S1"]
+    got = sorted(p.name for p in (ref.root / "S1").glob("*.jpg"))
+    assert got == sorted(p.name for p in slots["LOT_B/S1"])
+    # 다른 시트를 고르면 다른 폴더로 푼다(앞서 푼 것을 재사용하지 않는다).
+    ref_a = excel_ref.load_excel_ref(dst, sheets=["LOT_A"])
+    assert ref_a.root != ref.root
+    assert sorted(p.name for p in (ref_a.root / "S1").glob("*.jpg")) == \
+        sorted(p.name for p in slots["LOT_A/S1"])
+
+
+def test_summary_subset_sheets_do_not_ask(tmp_path):
+    """매칭 결과처럼 한 시트가 다른 시트에 포함되면(요약·미매칭) 묻지 않는다."""
+    assert not excel_ref._sheets_conflict(
+        {"전체": {"S": {"a", "b"}}, "미매칭": {"S": {"b"}}})
+    assert excel_ref._sheets_conflict(
+        {"LOT_A": {"S": {"a"}}, "LOT_B": {"S": {"b"}}})
+
+
+def test_sheet_picker_reuses_slot_tiles_and_blocks_empty(styled_qapp):
+    """시트 고르기 창 — 슬롯 선택 창을 그대로 쓰되 문구·둘째 줄은 시트용, 처음엔 아무것도 안 골라 확인이 잠긴다."""
+    from aoi_verification.app.ui.widgets.slot_select_dialog import SlotSelectDialog
+    dlg = SlotSelectDialog(["LOT_A", "LOT_B"], preselected=(),
+                           title=K.EXCEL_REF_PICK_SHEETS_TITLE,
+                           hint=K.EXCEL_REF_PICK_SHEETS_HINT,
+                           notes={"LOT_A": "사진 2장", "LOT_B": "사진 3장"})
+    assert dlg.windowTitle() == K.EXCEL_REF_PICK_SHEETS_TITLE
+    assert dlg._tiles["LOT_B"].count_text() == "사진 3장"
+    assert not dlg._ok.isEnabled()
+    dlg._tiles["LOT_B"].setChecked(True)
+    dlg._refresh_counts()
+    assert dlg._ok.isEnabled() and dlg.selected == {"LOT_B"}
+    dlg._tiles["LOT_A"].setChecked(True)
+    dlg._refresh_counts()
+    assert "모든 슬롯" not in dlg._head.text()
+    dlg.deleteLater()

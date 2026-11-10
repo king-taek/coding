@@ -236,6 +236,7 @@ class MainWindow(MultiValFlow, QMainWindow):
     _update_progress = pyqtSignal(int, int, str)   # 다운로드/적용 진행(로딩바)
     _excel_ref_progress = pyqtSignal(int, int)     # 이전 엑셀 → 기준 폴더 풀기 진행
     _excel_ref_done = pyqtSignal(str, object, str)  # 엑셀 경로, ExcelRef|None, 오류 문구
+    _excel_ref_sheets = pyqtSignal(str, list)       # 엑셀 경로, [(시트, 사진 수)] — 고르게 한다
     _update_none = pyqtSignal(str)          # 수동 확인: 최신/확인불가 안내
     _startup_proceed = pyqtSignal()         # 업데이트 흐름 종료 → 나머지 시작 팝업
     # 무거운 모듈(cv2·OpenVINO·numpy·PIL)을 백그라운드에서 다 불러왔다는 신호.
@@ -414,6 +415,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._update_progress.connect(self._on_update_progress)
         self._excel_ref_progress.connect(self._on_excel_ref_progress)
         self._excel_ref_done.connect(self._on_excel_ref_done)
+        self._excel_ref_sheets.connect(self._on_excel_ref_sheets)
         self._update_none.connect(self._on_update_none)
         self._startup_proceed.connect(self._run_startup_popups)
         QTimer.singleShot(400, self._begin_update_check)
@@ -625,8 +627,10 @@ class MainWindow(MultiValFlow, QMainWindow):
 
         threading.Thread(target=_work, name="update-apply", daemon=True).start()
 
-    def _on_excel_ref_requested(self, xlsx: str) -> None:
-        """이전 결과 엑셀 → 기준 폴더(백그라운드 + 로딩바).  끝나면 설정 화면 기준 칸에 넣는다."""
+    def _on_excel_ref_requested(self, xlsx: str, pick: Optional[list] = None) -> None:
+        """이전 결과 엑셀 → 기준 폴더(백그라운드 + 로딩바).  끝나면 설정 화면 기준 칸에 넣는다.
+
+        시트(LOT)끼리 같은 슬롯 이름이 엇갈리면 시트를 고르게 한 뒤 ``sheets`` 로 다시 부른다(``pick``)."""
         self._loading.show_overlay(i18n.KO.EXCEL_REF_LOADING)
         self._loading.set_progress(0, 0, i18n.KO.EXCEL_REF_LOADING)     # busy → 0 에서 안 멈춤
 
@@ -636,8 +640,11 @@ class MainWindow(MultiValFlow, QMainWindow):
             from ..utils import excel_ref
             try:
                 ref = excel_ref.load_excel_ref(
-                    xlsx, progress=lambda d, t: self._excel_ref_progress.emit(int(d), int(t)))
+                    xlsx, progress=lambda d, t: self._excel_ref_progress.emit(int(d), int(t)),
+                    sheets=pick)
                 self._excel_ref_done.emit(xlsx, ref, "")
+            except excel_ref.ExcelRefNeedsSheets as e:
+                self._excel_ref_sheets.emit(xlsx, e.sheets)
             except excel_ref.ExcelRefError as e:
                 self._excel_ref_done.emit(xlsx, None, str(e))
             except Exception:
@@ -645,6 +652,20 @@ class MainWindow(MultiValFlow, QMainWindow):
                 self._excel_ref_done.emit(xlsx, None, i18n.KO.EXCEL_REF_ERR_OPEN)
 
         threading.Thread(target=_work, name="excel-ref", daemon=True).start()
+
+    def _on_excel_ref_sheets(self, xlsx: str, options: list) -> None:
+        """여러 LOT 엑셀 — 기준으로 쓸 시트를 고르게 하고, 고른 시트만 다시 푼다."""
+        self._loading.hide_overlay()
+        from .widgets.slot_select_dialog import SlotSelectDialog
+        names = [t for t, _n in options]
+        dlg = SlotSelectDialog(
+            names, preselected=(), title=i18n.KO.EXCEL_REF_PICK_SHEETS_TITLE,
+            hint=i18n.KO.EXCEL_REF_PICK_SHEETS_HINT,
+            notes={t: i18n.KO.EXCEL_REF_SHEET_COUNT_FMT.format(n=n) for t, n in options},
+            search_placeholder=i18n.KO.EXCEL_REF_SHEET_SEARCH, parent=self)
+        if not (sheets.run(dlg) and dlg.accepted_ok):
+            return
+        self._on_excel_ref_requested(xlsx, sorted(dlg.selected))
 
     def _on_excel_ref_progress(self, done: int, total: int) -> None:
         self._loading.set_progress(done, total, i18n.KO.EXCEL_REF_LOADING)
