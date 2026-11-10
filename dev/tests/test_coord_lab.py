@@ -7,6 +7,7 @@
 
 import os
 import sys
+import time
 import zipfile
 from pathlib import Path
 
@@ -136,3 +137,45 @@ def test_collect_zip_splits_into_parts_under_the_limit(tmp_path):
     assert all(z.stat().st_size <= 2 ** 20 for z in zips)
     names = [x for z in zips for x in zipfile.ZipFile(z).namelist()]     # 조각마다 온전한 zip
     assert sum(x.endswith("/DieLut.dat") for x in names) == 4 and len(names) == len(set(names))
+
+
+def _conder_tree(root):
+    """Conder Scan 흉내: 고객 폴더 하나 + 파일 보관함 하나."""
+    good = root / "531. 고객" / "1. 제품" / "1. LOT (ABC)" / "1. FVI" / "GX57007306"
+    good.mkdir(parents=True)
+    (good / "LOT_GX57007306_3_4_100_200.jpg").write_bytes(b"")
+    (good / "LOT_OTHERWAFER_3_4_100_200.jpg").write_bytes(b"")           # 다른 웨이퍼 사진
+    for name in ("9", "GX57007306"):                                     # 보관함 안의 우연한 같은 이름
+        junk = root / "0. 전산 X" / "PLAT" / name
+        junk.mkdir(parents=True)
+        (junk / f"LOT_{name}_3_4_100_200.jpg").write_bytes(b"")
+    stray = root / "531. 고객" / "9"
+    stray.mkdir()
+    (stray / "LOT_9_3_4_100_200.jpg").write_bytes(b"")
+    return good
+
+
+def test_conder_walk_does_not_take_storage_or_weak_names_for_a_wafer(tmp_path):
+    """실측(2026-11-10): 이름이 ``9`` 인 폴더를 파일 보관함에서 찾아 웨이퍼로 짚었다."""
+    good = _conder_tree(tmp_path)
+    live, cut = lab.nas_conder([tmp_path], {"9", "GX57007306"}, time.time() + 60, log=lambda *_: None)
+    assert not cut and list(live) == [good]
+    assert [n for n, _ in live[good]] == ["LOT_GX57007306_3_4_100_200.jpg"]   # ID 토큰이 든 사진만
+    assert not lab.strong_id("9") and not lab.strong_id("00123") and lab.strong_id("PGEE48")
+
+
+def test_stop_ends_the_walk_at_once_and_leaves_no_files(tmp_path):
+    """[중지] 는 큰 폴더 한가운데서도 먹고, 찾는 중에 멈추면 결과 파일을 만들지 않는다."""
+    _conder_tree(tmp_path)
+    calls = []
+
+    def stop():
+        calls.append(1)
+        return len(calls) > 3                                            # 훑기 시작한 직후 중지
+
+    live, cut = lab.nas_conder([tmp_path], {"GX57007306"}, stop, log=lambda *_: None)
+    assert cut and not live
+    out = tmp_path / "out"
+    out.mkdir()
+    assert lab.run_nas([str(tmp_path)], out, stop=lambda: True) == (None, 0, 0)
+    assert list(out.iterdir()) == []
