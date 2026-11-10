@@ -216,3 +216,93 @@ def test_stopping_midway_keeps_what_was_already_computed(tmp_path):
     assert 0 < wafers < 9                          # 일부만 돌았고
     assert base is not None and Path(str(base) + ".json").is_file()    # 그만큼은 파일로 남았다
     assert any("남은 시간" in m for m in seen)      # 진행 문구가 계속 바뀐다
+
+
+# ───────── 2026-11-11 NAS 1차 수집에서 나온 것 ─────────
+def _block_wafer(d: Path, extra_ini="", prod_extra="", recipe=""):
+    d.mkdir(parents=True)
+    (d / "Params_WaferInfo.ini").write_text(
+        "[Geometry]\nDieStep_X=23003.7\nDieStep_Y=31831.7\n", encoding="utf-8")
+    (d / "ProductInfo.ini").write_text(
+        "[Geometric]\nColsInBlock=18\nRowsInBlock=23\n" + prod_extra, encoding="utf-8")
+    (d / "ColorImageGrabingInfo.ini").write_text(
+        extra_ini + "[78889.195422.c._1_.jpeg]\nX=78889.3504102319\nY=195422.326939756\nCol=61\nRow=141\n"
+        "[64769.194066.c._2_.jpeg]\nX=64769.0133078009\nY=194066.420101495\nCol=50\nRow=140\n", encoding="utf-8")
+    if recipe:
+        (d / "Recipe.ini").write_text(recipe, encoding="utf-8")
+
+
+def test_numbering_pitch_is_step_divided_by_dies_in_block(tmp_path):
+    """실물(Qorvo XP2100, 파일): 스캔 칸 23003.7×31831.7 안에 번호 die 가 18×23 개 —
+    ``Col == floor(X / (DieStep/ColsInBlock))`` 가 397건 전부 맞았고 DieStep 그대로는 전부 틀렸다."""
+    _block_wafer(tmp_path / "LOT" / "W1")
+    r = lab.analyze_camtek(tmp_path / "LOT" / "W1", {})
+    assert r["block"] == (18, 23) and r["px"] == pytest.approx(23003.7 / 18) and r["py"] == pytest.approx(31831.7 / 23)
+    assert r["A1"]["x_bad"] == 0 and r["A1"]["y_diff"] == {"0": [0]}
+    assert "Col≠floor(X/pitch)" not in lab.flags(r)
+
+
+def test_alignment_photos_are_not_counted_as_defects(tmp_path):
+    """실물(TB500 EDC AOI-28, 파일): ``.wlup.jpeg``(Type=18, Col=0·Row=0) 정렬 사진 2장이 검산을 깼다."""
+    wlup = "[148988.179602.wlup.jpeg]\nX=148988.2979\nY=179602.9125\nCol=0\nRow=0\nType=18\n"
+    _block_wafer(tmp_path / "LOT" / "W1", extra_ini=wlup)
+    r = lab.analyze_camtek(tmp_path / "LOT" / "W1", {})
+    assert r["A1"]["n"] == 2 and r["A1"]["x_bad"] == 0 and r["skipped_align"] == 1
+
+
+def _shift_wafer(d: Path, export: bool):
+    d.mkdir(parents=True)
+    (d / "Params_WaferInfo.ini").write_text("[Geometry]\nDieStep_X=1000\nDieStep_Y=1000\n", encoding="utf-8")
+    (d / "ProductInfo.ini").write_text(
+        "[ExportData]\ncMax=11\nrMax=7\ncMin=2\nrMin=2\n" if export else "[General]\nA=1\n", encoding="utf-8")
+    (d / "Recipe.ini").write_text("[Display]\nDisplayRowShift=-3\nDisplayColShift=-1\n", encoding="utf-8")
+    (d / "ColorImageGrabingInfo.ini").write_text(
+        "[a.c.1.jpeg]\nX=5100\nY=3200\nCol=5\nRow=3\n[b.c.2.jpeg]\nX=6300\nY=4400\nCol=6\nRow=4\n", encoding="utf-8")
+    return {d: [(n, lab.parse_live(n)) for n in ("L_T_W_3_4_100_200.jpg", "L_T_W_4_3_300_400.jpg")]}
+
+
+def test_live_names_are_read_as_written_when_the_number_table_agrees(tmp_path):
+    """실물(KENDALL A0 PI3, 관측 10표): 화면 시프트가 (−1,−3)인데 LIVE 이름은 번호표 (2,7) 그대로였다.
+    T254 FS UBM 은 시프트를 더한 이름이었다 — 번호표가 없으면 둘을 가를 수 없으니 그렇게 적는다."""
+    live = _shift_wafer(tmp_path / "A" / "W", export=True)
+    r = lab.analyze_camtek(tmp_path / "A" / "W", live)
+    assert r["truth_live"]["raw"] == (2, 7) and r["truth_live"]["value"] == (2, 7)
+    assert r["truth_live"]["shift_mode"] == "안 더함" and "번호표≠LIVE" not in lab.flags(r)
+    live = _shift_wafer(tmp_path / "B" / "W", export=False)
+    r = lab.analyze_camtek(tmp_path / "B" / "W", live)
+    assert r["truth_live"]["raw"] == (2, 7) and r["truth_live"]["value"] == (1, 10)     # 예전 해석 유지
+    assert r["truth_live"]["shift_mode"] == "미구분"
+
+
+_MAP_TXT = ("DEVICE:AST254\nWAFER:GX57007306\nFNLOC:180\nROWCT:2\nCOLCT:3\nXDIES:14.28\nYDIES:30.99\n"
+            "RowData:___ 000 000\nRowData:000 003 ___\n")
+
+
+def test_conder_map_text_is_collected_with_a_file_list(tmp_path):
+    """Conder 만으로 맵을 그리려면 LOT 폴더의 ``<WaferID>.txt`` 가 필요하다(사용자 요청 2026-11-11)."""
+    good = _conder_tree(tmp_path)
+    lot = good.parent.parent
+    (lot / "GX57007306.txt").write_text(_MAP_TXT, encoding="utf-8")
+    (lot / "OTHERWAFER.txt").write_text(_MAP_TXT, encoding="utf-8")
+    (lot / "요약.xlsx").write_bytes(b"x")
+    extra = {}
+    lab.nas_conder([tmp_path], {"GX57007306": "ABC"}, time.time() + 60, log=lambda *_: None, extra=extra)
+    assert list(extra["maps"]) == [lot / "GX57007306.txt"]
+    assert sorted(extra["files"][lot]) == ["GX57007306.txt", "OTHERWAFER.txt", "요약.xlsx"]
+    info = lab.conder_map_info(extra["maps"][lot / "GX57007306.txt"])
+    assert info == {"FNLOC": 180.0, "ROWCT": 2, "COLCT": 3, "XDIES": 14.28, "YDIES": 30.99,
+                    "rows": 2, "cols": 3, "dies": 4, "bad": 1}
+    zips, n = lab.collect_zip([], {}, tmp_path / "좌표실험_c", conder=extra)        # 이상 폴더가 없어도 담는다
+    names = zipfile.ZipFile(zips[0]).namelist()
+    assert n == 0 and any(x.startswith("Conder/") and x.endswith("GX57007306.txt") for x in names)
+    listing = zipfile.ZipFile(zips[0]).read("Conder/파일목록.txt").decode("utf-8")
+    assert "요약.xlsx" in listing
+
+
+def test_conder_map_is_compared_with_the_camtek_wafer(tmp_path):
+    live = _shift_wafer(tmp_path / "A" / "GX57007306", export=True)
+    r = lab.analyze_camtek(tmp_path / "A" / "GX57007306", live)
+    lab.attach_conder_maps(r, {"maps": {tmp_path / "x" / "GX57007306.txt": _MAP_TXT}})
+    m = r["conder_map"][0]
+    assert m["COLCT"] == 3 and m["exp_cols"] == 10 and m["exp_rows"] == 6
+    assert m["pitch_ratio"] == pytest.approx((14.28 / 1.0, 30.99 / 1.0))        # XDIES(mm→µm) ÷ 번호 pitch

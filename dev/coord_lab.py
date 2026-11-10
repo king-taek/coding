@@ -37,6 +37,8 @@ LOT 마다 웨이퍼 몇 장만 뽑고, 사진은 열지 않고 이름만 읽고
           LOT 같은 LOT 형제의 '웨이퍼 중심이 번호 격자에서 놓인 자리' 를 빌린다(자기 제외) (유도)
           PRD 같은 pitch 의 다른 웨이퍼 전부에서 빌린다(자기 제외)            (유도)
           APP 지금 앱이 채택하는 값(저장소 안에서 돌릴 때만 — 앱이 어디서 틀리는지 보려고)
+    pitch 번호 pitch = DieStep ÷ ``ProductInfo.ini [Geometric] ColsInBlock/RowsInBlock`` (파일, NAS 1차 수집)
+          ``.wlup.`` 정렬 사진은 결함으로 세지 않는다
     정답  LIVE  Conder LIVE 파일명의 col/row(장비 화면 번호)와 INI 결함을 die 안쪽 좌표로 짝지어 표결 (관측)
           EXP   번호표(위와 같은 값 — 그래서 EXP 가설을 EXP 정답으로 채점하지 않는다)            (파일)
     KLA   K1  ``SampleTestPlan`` 범위 = 중심 규칙의 '온전히 드는 die' 범위
@@ -105,8 +107,14 @@ def w2t_center(txt: str | None):
     return ((a22 * -t1 - a12 * -t2) / det, (-a21 * -t1 + a11 * -t2) / det)
 
 
+def is_align_photo(name: str) -> bool:
+    """결함이 아닌 정렬 사진 — ``….wlup.jpeg``(Type=18, Col=0·Row=0).  실물: TB500 EDC AOI-28(파일).
+    결함으로 세면 ``Col == floor(X/pitch)`` 검산이 깨진다.  이름으로만 가린다(Type 값의 뜻은 미확인)."""
+    return ".wlup." in name.lower()
+
+
 def ini_entries(txt: str | None):
-    """ColorImageGrabingInfo.ini → [(이름, X, Y, Col, Row, 레시피)]."""
+    """ColorImageGrabingInfo.ini → [(이름, X, Y, Col, Row, 레시피)].  정렬 사진도 들어 있다(:func:`is_align_photo`)."""
     out = []
     if not txt:
         return out
@@ -457,7 +465,41 @@ def conder_index(roots, deadline, log=print):
     return index, cut
 
 
-def nas_conder(roots, wanted, deadline, log=print, index=None):
+_MAP_CAP = 300_000          # 맵 txt 하나의 크기 상한(실물은 수 KB)
+_FILES_CAP = 200            # 폴더마다 적어 두는 파일 이름 수
+
+
+def conder_map_info(txt: str):
+    """Conder LOT 폴더의 ``<WaferID>.txt`` 요약 — 칸 수 · die 크기 · 노치 · die/불량 칸 수(파일)."""
+    kv = dict(re.findall(r"(?m)^\s*([A-Za-z]\w*)\s*:\s*([^\r\n]*?)\s*$", txt))
+    rows = [ln.split(":", 1)[1].split() for ln in txt.splitlines() if ln.startswith("RowData:")]
+    num = lambda k, f: (f(float(kv[k])) if re.fullmatch(r"-?\d+(\.\d+)?", kv.get(k, "")) else None)
+    cells = [c for row in rows for c in row if not re.fullmatch(r"[_.\-]+", c)]
+    good = kv.get("BCEQU", "000")
+    return {"FNLOC": num("FNLOC", float), "ROWCT": num("ROWCT", int), "COLCT": num("COLCT", int),
+            "XDIES": num("XDIES", float), "YDIES": num("YDIES", float),
+            "rows": len(rows), "cols": max(map(len, rows), default=0),
+            "dies": len(cells), "bad": sum(1 for c in cells if c != good)}
+
+
+def attach_conder_maps(r, extra):
+    """웨이퍼 기록에 그 웨이퍼의 Conder 맵 요약을 붙이고 Camtek 값과 나란히 둔다(Conder 만으로 맵을 그릴 근거)."""
+    out = []
+    for p, txt in (extra or {}).get("maps", {}).items():
+        if r["wafer"] not in re.split(r"[_\s]", Path(p).stem):
+            continue
+        m = dict(conder_map_info(txt), path=str(p))
+        e = r.get("export")
+        if e:
+            m.update(exp_cols=e["cMax"] - e["cMin"] + 1, exp_rows=e["rMax"] - e["rMin"] + 1)
+        if r.get("px") and m["XDIES"] and m["YDIES"]:        # XDIES 는 mm · die 크기(간격 아님, T254 관측)
+            m["pitch_ratio"] = (m["XDIES"] * 1000 / r["px"], m["YDIES"] * 1000 / r["py"])
+        out.append(m)
+    if out:
+        r["conder_map"] = out
+
+
+def nas_conder(roots, wanted, deadline, log=print, index=None, extra=None):
     """Conder Scan 에서 웨이퍼의 LIVE 파일명을 읽는다(사진은 안 연다).
 
     ``wanted`` = {웨이퍼 ID: S/M}.  S/M 이 같은 LOT 폴더 아래만 보고, **파일명에 그 웨이퍼 ID 토큰이 든
@@ -479,17 +521,31 @@ def nas_conder(roots, wanted, deadline, log=print, index=None):
         if cut or _expired(deadline):
             cut = True
             return
-        names = []
+        names, others, maps = [], [], []
         try:
             with os.scandir(d) as it:
                 for i, e in enumerate(it):
                     if i >= _SCAN_CAP or len(names) >= _LIVE_CAP or _expired(deadline):
                         break
                     stem = Path(e.name)
-                    if stem.suffix.lower() in IMG_EXT and ids.intersection(stem.stem.split("_")):
-                        names.append(e.name)
+                    if stem.suffix.lower() in IMG_EXT:
+                        if ids.intersection(stem.stem.split("_")):
+                            names.append(e.name)
+                        continue
+                    if extra is None or not e.is_file():
+                        continue
+                    if len(others) < _FILES_CAP:
+                        others.append(e.name)
+                    if stem.suffix.lower() == ".txt" and ids.intersection(re.split(r"[_\s]", stem.stem)):
+                        maps.append(d / e.name)
         except OSError:
             return
+        if extra is not None and (maps or (others and depth == 0)):
+            extra.setdefault("files", {})[d] = others        # 맵 말고 장비가 남기는 파일이 있는지 보려고
+            for p in maps:
+                txt = read_text(p, _MAP_CAP)
+                if txt and "RowData" in txt:
+                    extra.setdefault("maps", {})[p] = txt
         lv = [(n, q) for n, q in ((n, parse_live(n)) for n in names) if q]
         if lv:
             live[d] = lv
@@ -540,7 +596,7 @@ _COLLECT = ("Params_WaferInfo.ini", "ProductInfo.ini", "Wafer2Table.ini", "Recip
             "s_DieLocation.dat")
 
 
-def collect_zip(recs, live_by_dir, base: Path, no_map=(), part_mb=30, file_mb=12, progress=None):
+def collect_zip(recs, live_by_dir, base: Path, no_map=(), part_mb=30, file_mb=12, progress=None, conder=None):
     """이상 폴더의 원재료만 zip 으로.  사진은 이름만(``사진목록.txt``).
 
     한 파일이 ``part_mb`` 를 넘지 않게 ``_수집.zip`` · ``_수집_2.zip`` … 으로 나눈다(올리기 쉬운 크기).
@@ -548,7 +604,8 @@ def collect_zip(recs, live_by_dir, base: Path, no_map=(), part_mb=30, file_mb=12
     """
     flagged = [(r, flags(r, no_map)) for r in recs]
     flagged = [(r, f) for r, f in flagged if f]
-    if not flagged:
+    conder = conder or {}
+    if not flagged and not conder.get("maps") and not conder.get("files"):
         return [], 0
     limit, per_product = part_mb * 2 ** 20, Counter()
     paths = [base.with_name(base.name + "_수집.zip")]
@@ -601,6 +658,14 @@ def collect_zip(recs, live_by_dir, base: Path, no_map=(), part_mb=30, file_mb=12
                   if w in Path(n).stem.split("_")]
             if lv:
                 text(f"{arc}/사진목록_Conder.txt", "# Conder LIVE 사진 파일명\n" + "\n".join(lv))
+        # Conder 쪽 맵 txt 는 이상 여부와 상관없이 담는다 — Conder 만으로 맵을 그릴 근거(작은 글자 파일).
+        dirs = {}
+        for p, txt in conder.get("maps", {}).items():
+            n = dirs.setdefault(Path(p).parent, len(dirs))
+            text(f"Conder/{n:03d}_{Path(p).parent.name}/{Path(p).name}", txt)
+        if conder.get("files"):
+            text("Conder/파일목록.txt", "# Conder 폴더에 사진 말고 있는 파일(이름만)\n" + "\n".join(
+                f"{d}\t{n}" for d, names in conder["files"].items() for n in sorted(names)))
     finally:
         z.close()
     return paths, len(flagged)
@@ -642,12 +707,12 @@ def run_nas(argv, out: Path, progress=None, stop=None):
     t_walk = t0 + minutes * 60 * 0.85        # 남은 15% 는 결과 쓰기 · 원재료 모으기
     index, _ = conder_index(conder_roots, until(t0 + minutes * 60 * 0.15), log) if conder_roots else ({}, False)
     print(f"Conder S/M {len(index)}종 · LOT 폴더 {sum(map(len, index.values()))} · {time.time() - t0:.0f}초")
-    recs, live_by_dir, no_map, app_note = [], {}, set(), []
+    recs, live_by_dir, no_map, app_note, conder = [], {}, set(), [], {}
     quiet = lambda *_: None
 
     def on_lot(picked):
         wanted = {wafer_name(f): strip_mark_of(f) for f in picked}
-        new = nas_conder(conder_roots, wanted, until(t_walk), quiet, index)[0]
+        new = nas_conder(conder_roots, wanted, until(t_walk), quiet, index, conder)[0]
         live_by_dir.update(new)
         res = app_check([], new)              # LIVE 파일명뿐인 Conder 폴더에서 앱이 맵을 그릴 수 있나
         if isinstance(res, list):
@@ -664,6 +729,7 @@ def run_nas(argv, out: Path, progress=None, stop=None):
             except Exception as e:            # noqa: BLE001 — 한 폴더가 전체를 못 멈춘다
                 r = {"folder": str(f), "wafer": wafer_name(f), "lot": str(f.parent),
                      "notes": [f"읽다 실패 {type(e).__name__}: {e}"]}
+            attach_conder_maps(r, conder)
             recs.append(r)
             res = app_check([r], {})          # 앱 대조도 그 자리에서 — 끝에 몰면 NAS 를 한 번 더 돈다
             (no_map.update if isinstance(res, list) else app_note.append)(res)
@@ -685,7 +751,7 @@ def run_nas(argv, out: Path, progress=None, stop=None):
     for scope in ("LOT", "PRD"):
         borrow(recs, scope)
     base = report(recs, [], [], out, sorted(no_map) if not app_note else app_note[0])
-    zips, n = collect_zip(recs, live_by_dir, base, sorted(no_map), progress=progress)
+    zips, n = collect_zip(recs, live_by_dir, base, sorted(no_map), progress=progress, conder=conder)
     print(f"\n이상 폴더 {n}" + (" — 원재료를 모았습니다: " + ", ".join(z.name for z in zips) if zips
                               else " — 모을 것이 없습니다"))
     return base, len(recs), n
@@ -706,14 +772,25 @@ def analyze_camtek(folder: Path, live_by_dir):
     if not px or not py:
         r["notes"].append("pitch 없음")
         return r
+    entries = ini_entries(read_text(folder / "ColorImageGrabingInfo.ini"))
+    r["skipped_align"] = sum(1 for e in entries if is_align_photo(e[0]))
+    entries = [e for e in entries if not is_align_photo(e[0])]
+    # 번호 die 는 스캔 칸(DieStep)보다 작을 수 있다 — ProductInfo [Geometric] ColsInBlock/RowsInBlock 가
+    # 칸 하나에 든 번호 die 수다(파일: Qorvo XP2100 18×23 · QORVO W97320 19×13 · INCI N7G751 1×2).
+    bc, br = int(key_num(prod, "ColsInBlock") or 1), int(key_num(prod, "RowsInBlock") or 1)
+    if bc >= 1 and br >= 1 and (bc, br) != (1, 1):
+        bad = lambda qx: sum(1 for _, X, _Y, c, *_ in entries if math.floor(X / qx) != c)
+        if bad(px / bc) <= bad(px):               # 나눈 쪽이 더 틀릴 때만 나누지 않는다(그런 실물은 없다)
+            r.update(step=(px, py), block=(bc, br))
+            px, py, psrc = px / bc, py / br, psrc + f" ÷ 칸 안 die {bc}×{br}"
+        else:
+            r["notes"].append(f"칸 안 die {bc}×{br} 로 나누면 더 어긋남")
     dia = key_num(params, "Diameter") or key_num(prod, "Diameter") or 300000.0
     cx, cy, csrc = key_num(params, "Center_X"), key_num(params, "Center_Y"), "Params Center"
     if not cx or not cy:
         w = w2t_center(read_text(_find_up(folder, "Wafer2Table.ini") or folder / "-"))
         cx, cy, csrc = (w[0], w[1], "Wafer2Table") if w else (None, None, "없음")
     r.update(px=px, py=py, pitch_src=psrc, dia=dia, cx=cx, cy=cy, center_src=csrc)
-
-    entries = ini_entries(read_text(folder / "ColorImageGrabingInfo.ini"))
     r["entries"] = len(entries)
     if entries:                                             # A1
         bad = sum(1 for _, X, _Y, c, *_ in entries if math.floor(X / px) != c)
@@ -770,10 +847,28 @@ def analyze_camtek(folder: Path, live_by_dir):
     r["live_n"] = len(lives)
     if lives and entries:
         v = live_vote(entries, lives, px, py)
+        if v is None and "block" in r:
+            # 칸 안 die 제품은 LIVE 의 die 안쪽 좌표가 격자와 수십 µm 어긋난다(관측 3건: 24~38 µm) → 느슨하게 한 번 더.
+            v = live_vote(entries, lives, px, py, tol=45.0)
+            if v:
+                v["loose"] = True
+                v["ok"] = v["votes"] >= 3 and v["votes"] == v["total"]
         if v:
-            # LIVE 는 화면 번호(시프트 포함)다 → 실제 die 번호 기준으로 되돌린다.
-            co, rt = v["value"]
-            v["value"] = (co + r["shift"][0], rt - r["shift"][1])
+            # LIVE 이름이 화면 시프트를 더한 번호인지는 레시피마다 달랐다(관측): T254 FS UBM 은 더했고
+            # KENDALL A0 PI3 는 번호표 번호 그대로였다.  번호표가 있으면 그것으로 가리고, 없으면 예전처럼
+            # 되돌리되 '미구분' 으로 적는다.
+            raw = v["value"]
+            back = (raw[0] + r["shift"][0], raw[1] - r["shift"][1])
+            exp = hyp.get("EXP")
+            if r["shift"] == (0, 0):
+                mode = "없음"
+            elif exp == raw:
+                mode = "안 더함"
+            elif exp == back:
+                mode = "더함"
+            else:
+                mode = "미구분"
+            v.update(raw=raw, value=raw if mode == "안 더함" else back, shift_mode=mode)
             r["truth_live"] = v
     return r
 
@@ -945,6 +1040,22 @@ def report(recs, klas, pairs, out_dir: Path, no_map=None):
     L.append(f"[A1] die 격자가 stage 원점에 고정 — 폴더 {len(a1)} · 결함 {sum(a['n'] for a in a1)} 중 "
              f"Col≠floor(X/pitch) {sum(a['x_bad'] for a in a1)}건 · "
              f"Row 가 레시피별로 어긋난 폴더 {sum(1 for a in a1 if any(v != [0] for v in a['y_diff'].values()))}")
+    blk = Counter(f"{r['block'][0]}×{r['block'][1]}" for r in geo if "block" in r)
+    L.append(f"     칸 안 die 로 pitch 를 나눈 폴더 {sum(blk.values())}"
+             + (" (" + " · ".join(f"{k}: {n}" for k, n in blk.most_common()) + ")" if blk else "")
+             + f" · 뺀 정렬 사진 {sum(r.get('skipped_align', 0) for r in geo)}장")
+    sm = Counter(r["truth_live"]["shift_mode"] for r in geo if r.get("truth_live", {}).get("shift_mode", "없음") != "없음")
+    if sm:
+        L.append("[시프트] 화면 시프트가 있는 레시피의 LIVE 이름 — " + " · ".join(f"{k} {n}장" for k, n in sm.most_common()))
+    cm = [m for r in geo for m in r.get("conder_map", [])]
+    if cm:
+        same = sum(1 for m in cm if "exp_cols" in m and (m["COLCT"], m["ROWCT"]) == (m["exp_cols"], m["exp_rows"]))
+        have = sum(1 for m in cm if "exp_cols" in m)
+        pr = sorted(m["pitch_ratio"][0] for m in cm if "pitch_ratio" in m)
+        L.append(f"[Conder 맵] txt {len(cm)}개 · 칸 수 = 번호표 범위 {same}/{have} · FNLOC≠180 "
+                 f"{sum(1 for m in cm if m['FNLOC'] not in (None, 180.0))} · 불량 칸 표시 없음 "
+                 f"{sum(1 for m in cm if not m['bad'])} · die 크기 없음 {sum(1 for m in cm if not m['XDIES'])}"
+                 + (f" · XDIES÷pitch {pr[0]:.3f}~{pr[-1]:.3f}" if pr else ""))
     L.append("")
     L.append("[번호] 가설별 채점 — 정답 LIVE(관측) / 정답 EXP(파일).  '둘다' = col·row 모두 일치")
     for truth in ("LIVE", "EXP"):
