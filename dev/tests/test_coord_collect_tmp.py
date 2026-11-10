@@ -91,12 +91,12 @@ def test_button_runs_in_background_and_reports(styled_qapp, monkeypatch, tmp_pat
             return tmp_path / "좌표실험", 4, 1
 
     win = QMainWindow()
-    win._loading = _Loading()
     said = []
     monkeypatch.setattr(mod, "_load_tool", lambda: _Tool)
     monkeypatch.setattr(mod.sheets, "ask", lambda *a, **k: QMessageBox.StandardButton.Yes)
     monkeypatch.setattr(mod.sheets, "info", lambda parent, title, text: said.append(text))
-    mod.attach(win)
+    mod.attach(win)                 # 실제 창처럼 로딩바가 생기기 전에 붙인다(그때 죽은 적이 있다)
+    win._loading = _Loading()
 
     win._coord_collect_btn.click()
     deadline = time.time() + 5
@@ -105,4 +105,32 @@ def test_button_runs_in_background_and_reports(styled_qapp, monkeypatch, tmp_pat
     assert said and "4" in said[0]
     assert win._loading.calls[:2] == [("show", True), ("progress", 0, 0)]   # busy 로 시작
     assert ("progress", 1, 4) in win._loading.calls and win._loading.calls[-1] == ("hide",)
+    win.deleteLater()
+
+
+def test_attach_never_touches_the_loading_overlay():
+    """창은 로딩바를 만들기 전에 버튼을 붙인다 — 붙일 때 ``_loading`` 을 만지면 앱이 시작에서 죽는다(실측)."""
+    import ast
+    tree = ast.parse((APP / "ui" / "coord_collect_tmp.py").read_text(encoding="utf-8"))
+    early = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name in ("__init__", "attach")]
+    assert len(early) == 2
+    for fn in early:
+        assert not [n for n in ast.walk(fn) if isinstance(n, ast.Attribute) and n.attr == "_loading"], fn.name
+    src = (APP / "ui" / "main_window.py").read_text(encoding="utf-8")
+    assert src.index("coord_collect_tmp.attach(self)") < src.index("self._loading = LoadingOverlay(self)")
+
+
+def test_broken_button_does_not_stop_the_app(styled_qapp, monkeypatch):
+    pytest.importorskip("PyQt6.QtWidgets")
+    from PyQt6.QtWidgets import QMainWindow
+
+    from aoi_verification.app.ui import coord_collect_tmp as mod
+
+    def boom(window):
+        raise RuntimeError("x")
+
+    monkeypatch.setattr(mod, "_Collector", boom)
+    win = QMainWindow()
+    mod.attach(win)                                   # 예외가 새지 않는다
+    win._coord_collect_btn.setVisible(True)           # 개발자 모드 전환 줄도 그대로 돈다
     win.deleteLater()
