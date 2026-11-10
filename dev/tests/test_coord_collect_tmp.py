@@ -136,8 +136,9 @@ def test_broken_button_does_not_stop_the_app(styled_qapp, monkeypatch):
     win.deleteLater()
 
 
-def test_stop_releases_the_screen_without_waiting_for_the_worker(styled_qapp, monkeypatch):
-    """실측: [중지] 뒤 5분 넘게 '진행 중' 이었다 — NAS 호출에 걸린 작업을 화면이 기다리면 안 된다."""
+def test_second_stop_releases_the_screen_without_waiting_for_the_worker(styled_qapp, monkeypatch):
+    """[중지] 한 번은 저장하고 끝내라는 뜻, 두 번은 화면을 바로 풀라는 뜻.
+    실측: 중지 뒤 5분 넘게 '진행 중' 이었다 — NAS 호출에 걸린 작업을 화면이 끝없이 기다리면 안 된다."""
     pytest.importorskip("PyQt6.QtWidgets")
     import threading
 
@@ -154,7 +155,7 @@ def test_stop_releases_the_screen_without_waiting_for_the_worker(styled_qapp, mo
             self.shown = True
 
         def set_progress(self, done, total, message):
-            pass
+            self.message = message
 
         def hide_overlay(self, then=None):
             self.shown = False
@@ -175,7 +176,10 @@ def test_stop_releases_the_screen_without_waiting_for_the_worker(styled_qapp, mo
     mod.attach(win)
     win._loading = _Loading()
     win._coord_collect_btn.click()
-    win._loading.cancel_requested.emit()                  # [중지]
+    win._loading.cancel_requested.emit()                  # [중지] 한 번 — 저장하는 중
+    assert win._loading.shown and not said and win._loading.message == mod.i18n.KO.COORD_COLLECT_STOPPING
+    assert win._coord_collector._stop.is_set()
+    win._loading.cancel_requested.emit()                  # 한 번 더 — 화면을 바로 푼다
     assert not win._loading.shown and said == [mod.i18n.KO.COORD_COLLECT_STOPPED]
     win._coord_collect_btn.click()                        # 작업이 아직 살아 있으면 새로 시작하지 않는다
     assert said[-1] == mod.i18n.KO.COORD_COLLECT_WINDING_DOWN
