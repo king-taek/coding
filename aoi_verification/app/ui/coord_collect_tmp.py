@@ -59,7 +59,7 @@ class _Collector(QObject):
         self.button.clicked.connect(self.start)
         self.progress.connect(self._on_progress)
         self.finished.connect(self._on_finished)
-        window._loading.cancel_requested.connect(self._on_cancel)
+        # 로딩바(window._loading)는 여기서 만지지 않는다 — 창이 이 버튼을 붙일 때는 아직 없다.
 
     def start(self) -> None:
         if self._running:
@@ -74,6 +74,7 @@ class _Collector(QObject):
             return
         self._running = True
         self._stop.clear()
+        self._win._loading.cancel_requested.connect(self._on_cancel)
         self._win._loading.show_overlay(i18n.KO.COORD_COLLECT_RUNNING, cancelable=True)
         self._win._loading.set_progress(0, 0, i18n.KO.COORD_COLLECT_RUNNING)   # busy → 0 에서 안 멈춤
         out = Path.home() / "Desktop"
@@ -102,6 +103,7 @@ class _Collector(QObject):
 
     def _on_finished(self, wafers: int, odd: int, path: str, error: str) -> None:
         self._running = False
+        self._win._loading.cancel_requested.disconnect(self._on_cancel)
         self._win._loading.hide_overlay()
         if error:
             sheets.warn(self._win, i18n.KO.COORD_COLLECT_TITLE,
@@ -113,8 +115,15 @@ class _Collector(QObject):
 
 def attach(window) -> None:
     """상태바에 버튼을 단다.  ``window._coord_collect_btn`` 으로 보이기/숨기기만 한다."""
-    collector = _Collector(window)
+    window._coord_collect_btn = QPushButton(window)      # 아래가 실패해도 보이기/숨기기 줄이 죽지 않게
+    window._coord_collect_btn.hide()
+    try:
+        collector = _Collector(window)
+        window.statusBar().addPermanentWidget(collector.button)
+        collector.button.setVisible(prefs.load().dev_mode)
+    except Exception:                                    # noqa: BLE001 — 임시 버튼이 앱 시작을 막으면 안 된다
+        _LOG.exception("좌표 자료 수집 버튼을 붙이지 못했습니다")
+        return
+    window._coord_collect_btn.deleteLater()
     window._coord_collector = collector
     window._coord_collect_btn = collector.button
-    window.statusBar().addPermanentWidget(collector.button)
-    collector.button.setVisible(prefs.load().dev_mode)
