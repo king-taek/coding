@@ -479,15 +479,34 @@ _COLLECT = ("Params_WaferInfo.ini", "ProductInfo.ini", "Wafer2Table.ini", "Recip
             "s_DieLocation.dat")
 
 
-def collect_zip(recs, live_by_dir, base: Path, no_map=(), cap_mb=20, file_mb=12):
-    """이상 폴더의 원재료만 zip 으로.  사진은 이름만(``사진목록.txt``).  크기 제한에서 멈춘다."""
+def collect_zip(recs, live_by_dir, base: Path, no_map=(), part_mb=30, file_mb=12):
+    """이상 폴더의 원재료만 zip 으로.  사진은 이름만(``사진목록.txt``).
+
+    한 파일이 ``part_mb`` 를 넘지 않게 ``_수집.zip`` · ``_수집_2.zip`` … 으로 나눈다(올리기 쉬운 크기).
+    각 조각은 따로 풀리는 온전한 zip 이다.  담기 전 크기로 넘길지 정하므로 조각은 한도보다 작다.
+    """
     flagged = [(r, flags(r, no_map)) for r in recs]
     flagged = [(r, f) for r, f in flagged if f]
     if not flagged:
-        return None, 0
-    zpath, used, per_product = base.with_name(base.name + "_수집.zip"), 0, Counter()
-    with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr("이유.txt", "\n".join(f"{r['folder']}\t{'; '.join(f)}" for r, f in flagged))
+        return [], 0
+    limit, per_product = part_mb * 2 ** 20, Counter()
+    paths = [base.with_name(base.name + "_수집.zip")]
+    z = zipfile.ZipFile(paths[0], "w", zipfile.ZIP_DEFLATED)
+
+    def room(size):
+        """``size`` 바이트를 더 담으면 한도를 넘을 때 다음 조각으로 넘어간다."""
+        nonlocal z
+        if z.namelist() and z.fp.tell() + size > limit:
+            z.close()
+            paths.append(base.with_name(f"{base.name}_수집_{len(paths) + 1}.zip"))
+            z = zipfile.ZipFile(paths[-1], "w", zipfile.ZIP_DEFLATED)
+
+    def text(arcname, body):
+        room(len(body.encode("utf-8")) + 1024)
+        z.writestr(arcname, body)
+
+    try:
+        text("이유.txt", "\n".join(f"{r['folder']}\t{'; '.join(f)}" for r, f in flagged))
         for i, (r, _f) in enumerate(flagged):
             key = product_key(r) if "px" in r else "?"
             per_product[key] += 1
@@ -501,11 +520,11 @@ def collect_zip(recs, live_by_dir, base: Path, no_map=(), cap_mb=20, file_mb=12)
                     size = p.stat().st_size
                 except OSError:
                     continue
-                if size > file_mb * 2 ** 20 or used + size > cap_mb * 2 ** 20 * 4:   # 압축 전 기준
+                if size > file_mb * 2 ** 20:
                     continue
+                room(size + 1024)                    # 압축 전 크기 기준 → 조각은 늘 한도 안
                 try:
                     z.write(p, f"{arc}/{name}")
-                    used += size
                 except OSError:
                     continue
             try:
@@ -513,15 +532,15 @@ def collect_zip(recs, live_by_dir, base: Path, no_map=(), cap_mb=20, file_mb=12)
             except OSError:
                 imgs = []
             if imgs:
-                z.writestr(f"{arc}/사진목록.txt", "# 사진 파일명(사진 자체는 담지 않음)\n" + "\n".join(imgs))
+                text(f"{arc}/사진목록.txt", "# 사진 파일명(사진 자체는 담지 않음)\n" + "\n".join(imgs))
             w = r["wafer"]
             lv = [n for d, names in live_by_dir.items() for n, _ in names
                   if w in Path(n).stem.split("_")]
             if lv:
-                z.writestr(f"{arc}/사진목록_Conder.txt", "# Conder LIVE 사진 파일명\n" + "\n".join(lv))
-            if zpath.stat().st_size > cap_mb * 2 ** 20:
-                break
-    return zpath, len(flagged)
+                text(f"{arc}/사진목록_Conder.txt", "# Conder LIVE 사진 파일명\n" + "\n".join(lv))
+    finally:
+        z.close()
+    return paths, len(flagged)
 
 
 def run_nas(argv, out: Path, progress=None, stop=None):
@@ -584,8 +603,9 @@ def run_nas(argv, out: Path, progress=None, stop=None):
         borrow(recs, scope)
     no_map = app_check(recs, live_by_dir)
     base = report(recs, [], [], out, no_map)
-    zpath, n = collect_zip(recs, live_by_dir, base, no_map if isinstance(no_map, list) else ())
-    print(f"\n이상 폴더 {n}" + (f" — 원재료를 모았습니다: {zpath}" if zpath else " — 모을 것이 없습니다"))
+    zips, n = collect_zip(recs, live_by_dir, base, no_map if isinstance(no_map, list) else ())
+    print(f"\n이상 폴더 {n}" + (" — 원재료를 모았습니다: " + ", ".join(z.name for z in zips) if zips
+                              else " — 모을 것이 없습니다"))
     return base, len(recs), n
 
 
