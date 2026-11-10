@@ -5,7 +5,9 @@
 출처 등급: 정답 LIVE = 관측(Conder 파일명) · EXP = 파일(번호표).
 """
 
+import os
 import sys
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -105,9 +107,9 @@ def test_nas_walk_samples_each_lot_and_collects_only_odd_folders(tmp_path):
     recs = [lab.analyze_camtek(f, {}) for f in sorted(folders)]
     odd = {Path(r["folder"]).name: lab.flags(r) for r in recs if lab.flags(r)}
     assert list(odd) == ["X00"] and "중심 없음" in odd["X00"]
-    zpath, n = lab.collect_zip(recs, {}, tmp_path / "좌표실험_test")
-    assert n == 1
-    names = zipfile.ZipFile(zpath).namelist()
+    zips, n = lab.collect_zip(recs, {}, tmp_path / "좌표실험_test")
+    assert n == 1 and [z.name for z in zips] == ["좌표실험_test_수집.zip"]
+    names = zipfile.ZipFile(zips[0]).namelist()
     assert any(x.endswith("X00/Params_WaferInfo.ini") for x in names)
     assert any(x.endswith("X00/사진목록.txt") for x in names)        # 사진은 이름만
     assert not any(x.lower().endswith(".jpeg") for x in names)
@@ -117,3 +119,20 @@ def test_nas_walk_stops_at_deadline(tmp_path):
     _wafer(tmp_path / "LOT" / "W0")
     folders, cut = lab.nas_walk([tmp_path], 0.0, log=lambda *_: None)   # 이미 지난 마감
     assert cut and folders == []
+
+
+def test_collect_zip_splits_into_parts_under_the_limit(tmp_path):
+    """수집 zip 이 한도를 넘으면 따로 풀리는 조각으로 나눈다(사용자 요청: 30 MB)."""
+    root = tmp_path / "AOI-1" / "Scanresult" / "job" / "Setup1"
+    recs = []
+    for i in range(4):
+        folder = root / f"LOT-{i}" / "X00"
+        _wafer(folder, center=False)
+        (folder / "DieLut.dat").write_bytes(os.urandom(400_000))      # 압축되지 않는 0.4 MB
+        recs.append(lab.analyze_camtek(folder, {}))
+    zips, n = lab.collect_zip(recs, {}, tmp_path / "좌표실험_test", part_mb=1)
+    assert n == 4 and len(zips) > 1
+    assert [z.name for z in zips[:2]] == ["좌표실험_test_수집.zip", "좌표실험_test_수집_2.zip"]
+    assert all(z.stat().st_size <= 2 ** 20 for z in zips)
+    names = [x for z in zips for x in zipfile.ZipFile(z).namelist()]     # 조각마다 온전한 zip
+    assert sum(x.endswith("/DieLut.dat") for x in names) == 4 and len(names) == len(set(names))
