@@ -375,7 +375,7 @@ def _expired(deadline) -> bool:
     return deadline() if callable(deadline) else time.time() > deadline
 
 
-def nas_walk(roots, deadline, per_lot=3, lots=5, log=print):
+def nas_walk(roots, deadline, per_lot=3, lots=5, log=print, on_lot=None):
     """웨이퍼 폴더(= INI 가 든 폴더)를 찾는다.  LOT(웨이퍼들의 부모)마다 ``per_lot`` 장,
     한 폴더 아래 LOT 은 최근 ``lots`` 개만 — 번호 기준은 레시피의 것이라 몇 장이면 된다."""
     found, state = [], {"lots": 0, "cut": False}
@@ -395,6 +395,8 @@ def nas_walk(roots, deadline, per_lot=3, lots=5, log=print):
             found.extend(picked)
             state["lots"] += 1
             log(f"  LOT {state['lots']:>4}  웨이퍼 {len(names):>3}장 중 {len(picked)}장  {d}")
+            if on_lot is not None:               # 찾는 즉시 계산한다 — 중간에 멈춰도 거기까지 남는다
+                on_lot(picked)
             return True
         n_lot = 0
         for _, p, _ in subs:
@@ -455,7 +457,7 @@ def conder_index(roots, deadline, log=print):
     return index, cut
 
 
-def nas_conder(roots, wanted, deadline, log=print):
+def nas_conder(roots, wanted, deadline, log=print, index=None):
     """Conder Scan 에서 웨이퍼의 LIVE 파일명을 읽는다(사진은 안 연다).
 
     ``wanted`` = {웨이퍼 ID: S/M}.  S/M 이 같은 LOT 폴더 아래만 보고, **파일명에 그 웨이퍼 ID 토큰이 든
@@ -468,7 +470,9 @@ def nas_conder(roots, wanted, deadline, log=print):
             by_mark.setdefault(mark, set()).add(w)
     if not by_mark:
         return live, False
-    index, cut = conder_index(roots, deadline, log)
+    cut = False
+    if index is None:
+        index, cut = conder_index(roots, deadline, log)
 
     def visit(d: Path, depth: int, ids):
         nonlocal cut
@@ -536,7 +540,7 @@ _COLLECT = ("Params_WaferInfo.ini", "ProductInfo.ini", "Wafer2Table.ini", "Recip
             "s_DieLocation.dat")
 
 
-def collect_zip(recs, live_by_dir, base: Path, no_map=(), part_mb=30, file_mb=12):
+def collect_zip(recs, live_by_dir, base: Path, no_map=(), part_mb=30, file_mb=12, progress=None):
     """이상 폴더의 원재료만 zip 으로.  사진은 이름만(``사진목록.txt``).
 
     한 파일이 ``part_mb`` 를 넘지 않게 ``_수집.zip`` · ``_수집_2.zip`` … 으로 나눈다(올리기 쉬운 크기).
@@ -565,6 +569,8 @@ def collect_zip(recs, live_by_dir, base: Path, no_map=(), part_mb=30, file_mb=12
     try:
         text("이유.txt", "\n".join(f"{r['folder']}\t{'; '.join(f)}" for r, f in flagged))
         for i, (r, _f) in enumerate(flagged):
+            if progress is not None:
+                progress(i, len(flagged), f"이상 폴더 원재료 모으는 중 {i + 1}/{len(flagged)}")
             key = product_key(r) if "px" in r else "?"
             per_product[key] += 1
             if per_product[key] > 4:                 # 같은 제품은 4폴더면 충분하다
@@ -601,9 +607,11 @@ def collect_zip(recs, live_by_dir, base: Path, no_map=(), part_mb=30, file_mb=12
 
 
 def run_nas(argv, out: Path, progress=None, stop=None):
-    """``progress(done, total, 문구)`` — total 0 이면 진행량 모름(busy).  ``stop()`` 이 참이면
-    멈춘다: 폴더를 찾는 중이면 아무것도 남기지 않고 ``(None, 0, 0)``, 계산 중이면 거기까지로 정리한다
-    (앱의 수집 버튼이 쓴다)."""
+    """NAS 를 돌며 **LOT 을 찾는 즉시 계산**하고, 끝나거나 멈추면 그때까지 것으로 결과를 쓴다.
+
+    ``progress(done, total, 문구)`` — total 0 이면 진행량 모름(busy).  ``stop()`` 이 참이면 찾기를 그만두고
+    **지금까지 계산한 웨이퍼로** 결과를 남긴다(앱의 수집 버튼이 쓴다).  예전에는 다 찾은 뒤에 계산해서
+    LOT 3000개를 찾고 멈추면 아무것도 남지 않았다(실측 2026-11-10).  웨이퍼가 하나도 없으면 ``(None, 0, 0)``."""
     progress = progress or (lambda *_: None)
     stop = stop or (lambda: False)
 
@@ -631,43 +639,53 @@ def run_nas(argv, out: Path, progress=None, stop=None):
     print("Camtek 쪽:", *[f"\n  {p}" for p in cam_roots] or ["없음"])
     print("Conder 쪽:", *[f"\n  {p}" for p in conder_roots] or ["없음"])
     t0 = time.time()
-    folders, cut1 = nas_walk(cam_roots, until(t0 + minutes * 60 * 0.6), per_lot, lots, log)
-    klas_files = []
-    wanted = {wafer_name(f): strip_mark_of(f) for f in folders}
-    print(f"S/M 을 아는 웨이퍼 {sum(1 for m in wanted.values() if m)}/{len(wanted)}")
-    live_by_dir, cut2 = nas_conder(conder_roots, wanted, until(t0 + minutes * 60 * 0.85), log)
-    for f in folders:                        # 폴더 안에 LIVE 이름 사진이 같이 있는 경우
-        if stop():
+    t_walk = t0 + minutes * 60 * 0.85        # 남은 15% 는 결과 쓰기 · 원재료 모으기
+    index, _ = conder_index(conder_roots, until(t0 + minutes * 60 * 0.15), log) if conder_roots else ({}, False)
+    print(f"Conder S/M {len(index)}종 · LOT 폴더 {sum(map(len, index.values()))} · {time.time() - t0:.0f}초")
+    recs, live_by_dir, no_map, app_note = [], {}, set(), []
+    quiet = lambda *_: None
+
+    def on_lot(picked):
+        wanted = {wafer_name(f): strip_mark_of(f) for f in picked}
+        new = nas_conder(conder_roots, wanted, until(t_walk), quiet, index)[0]
+        live_by_dir.update(new)
+        res = app_check([], new)              # LIVE 파일명뿐인 Conder 폴더에서 앱이 맵을 그릴 수 있나
+        if isinstance(res, list):
+            no_map.update(res)
+        for f in picked:
+            if stop():
+                return
+            try:                              # 폴더 안에 LIVE 이름 사진이 같이 있는 경우
+                names = [e.name for e in os.scandir(f) if Path(e.name).suffix.lower() in IMG_EXT][:_LIVE_CAP]
+                lv = [(n, q) for n, q in ((n, parse_live(n)) for n in names) if q]
+                if lv:
+                    live_by_dir[f] = lv
+                r = analyze_camtek(f, live_by_dir)
+            except Exception as e:            # noqa: BLE001 — 한 폴더가 전체를 못 멈춘다
+                r = {"folder": str(f), "wafer": wafer_name(f), "lot": str(f.parent),
+                     "notes": [f"읽다 실패 {type(e).__name__}: {e}"]}
+            recs.append(r)
+            res = app_check([r], {})          # 앱 대조도 그 자리에서 — 끝에 몰면 NAS 를 한 번 더 돈다
+            (no_map.update if isinstance(res, list) else app_note.append)(res)
+        left = max(0, int((t_walk - time.time()) / 60))
+        progress(0, 0, f"웨이퍼 {len(recs)}장 계산 · 남은 시간 약 {left}분 · {picked[0].parent.name}"[:70])
+
+    cut = False
+    for i, root in enumerate(cam_roots):      # 장비마다 남은 시간을 고르게 — 첫 장비가 시간을 다 쓰지 않게
+        if stop() or time.time() > t_walk:
+            cut = True
             break
-        try:
-            names = [e.name for e in os.scandir(f) if Path(e.name).suffix.lower() in IMG_EXT][:_LIVE_CAP]
-        except OSError:
-            continue
-        lv = [(n, q) for n, q in ((n, parse_live(n)) for n in names) if q]
-        if lv:
-            live_by_dir[f] = lv
-    print(f"\n웨이퍼 폴더 {len(folders)} · Conder 폴더 {len(live_by_dir)} · {time.time() - t0:.0f}초"
-          + (" · 시간 제한으로 일부만 돌았습니다" if cut1 or cut2 else ""))
-    if stop():                               # 찾는 도중에 멈췄다 — 반쪽 결과를 남기지 않는다
-        print("중지했습니다.")
+        share = time.time() + (t_walk - time.time()) / (len(cam_roots) - i)
+        cut = nas_walk([root], until(share), per_lot, lots, print, on_lot)[1] or cut
+    print(f"\n웨이퍼 폴더 {len(recs)} · Conder 폴더 {len(live_by_dir)} · {time.time() - t0:.0f}초"
+          + (" · 중지했습니다" if stop() else " · 시간 제한으로 일부만 돌았습니다" if cut else ""))
+    if not recs:
         return None, 0, 0
-    recs = []
-    for i, f in enumerate(sorted(folders)):
-        if stop():
-            break
-        progress(i, len(folders), f"계산 {i + 1}/{len(folders)}")
-        try:
-            recs.append(analyze_camtek(f, live_by_dir))
-        except Exception as e:                                  # noqa: BLE001 — 한 폴더가 전체를 못 멈춘다
-            recs.append({"folder": str(f), "wafer": wafer_name(f), "lot": str(f.parent),
-                         "notes": [f"읽다 실패 {type(e).__name__}: {e}"]})
-        if i % 20 == 19:
-            print(f"  계산 {i + 1}/{len(folders)}")
+    progress(0, 0, "결과 정리 중")
     for scope in ("LOT", "PRD"):
         borrow(recs, scope)
-    no_map = app_check(recs, live_by_dir)
-    base = report(recs, [], [], out, no_map)
-    zips, n = collect_zip(recs, live_by_dir, base, no_map if isinstance(no_map, list) else ())
+    base = report(recs, [], [], out, sorted(no_map) if not app_note else app_note[0])
+    zips, n = collect_zip(recs, live_by_dir, base, sorted(no_map), progress=progress)
     print(f"\n이상 폴더 {n}" + (" — 원재료를 모았습니다: " + ", ".join(z.name for z in zips) if zips
                               else " — 모을 것이 없습니다"))
     return base, len(recs), n

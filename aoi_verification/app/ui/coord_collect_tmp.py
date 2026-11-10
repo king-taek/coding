@@ -99,10 +99,14 @@ class _Collector(QObject):
         self._thread.start()
 
     def _on_cancel(self) -> None:
-        """[중지] — 화면은 **바로** 푼다.  작업 스레드는 NAS 호출 하나가 끝나야 멈출 수 있어 기다리지 않는다."""
+        """[중지] 한 번 = 그만 찾고 **지금까지 모은 것을 저장**한다.  한 번 더 = 화면을 바로 푼다
+        (NAS 호출 하나에 걸린 작업 스레드를 화면이 끝없이 기다리지 않게)."""
         if not self._running:
             return
-        self._stop.set()
+        if not self._stop.is_set():
+            self._stop.set()
+            self._win._loading.set_progress(0, 0, i18n.KO.COORD_COLLECT_STOPPING)
+            return
         self._close_overlay()
         sheets.info(self._win, i18n.KO.COORD_COLLECT_TITLE, i18n.KO.COORD_COLLECT_STOPPED)
 
@@ -113,6 +117,8 @@ class _Collector(QObject):
 
     def _on_progress(self, done: int, total: int, message: str) -> None:
         if self._running:
+            if self._stop.is_set():              # 저장 중 — 문구가 '찾는 중' 으로 되돌아가지 않게
+                message = i18n.KO.COORD_COLLECT_STOPPING
             self._win._loading.set_progress(done, total, message or i18n.KO.COORD_COLLECT_RUNNING)
 
     def _on_finished(self, wafers: int, odd: int, path: str, error: str) -> None:
@@ -122,6 +128,9 @@ class _Collector(QObject):
         if error:
             sheets.warn(self._win, i18n.KO.COORD_COLLECT_TITLE,
                         i18n.KO.COORD_COLLECT_FAIL_FMT.format(error=error))
+            return
+        if not wafers:
+            sheets.info(self._win, i18n.KO.COORD_COLLECT_TITLE, i18n.KO.COORD_COLLECT_NOTHING)
             return
         sheets.info(self._win, i18n.KO.COORD_COLLECT_TITLE,
                     i18n.KO.COORD_COLLECT_DONE_FMT.format(wafers=wafers, odd=odd, path=path))

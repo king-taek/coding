@@ -194,3 +194,25 @@ def test_stop_ends_the_walk_at_once_and_leaves_no_files(tmp_path):
     out.mkdir()
     assert lab.run_nas([str(tmp_path)], out, stop=lambda: True) == (None, 0, 0)
     assert list(out.iterdir()) == []
+
+
+def test_stopping_midway_keeps_what_was_already_computed(tmp_path):
+    """실측(2026-11-10): LOT 3000개를 찾은 뒤 멈췄더니 아무것도 남지 않았다 — 찾는 즉시 계산해 남긴다."""
+    root = tmp_path / "AOI-1" / "Scanresult" / "job"
+    for lot in ("Setup1", "Setup2", "Setup3"):
+        for i in range(3):
+            _wafer(root / lot / "CCG" / f"WAFER{i:02d}")
+    out = tmp_path / "out"
+    out.mkdir()
+    seen = []
+
+    def progress(done, total, message):
+        seen.append(message)
+
+    def stop():                                    # 첫 LOT 계산이 끝난 뒤 중지
+        return any(m.startswith("웨이퍼 ") for m in seen)
+
+    base, wafers, _odd = lab.run_nas([str(tmp_path / "AOI-1" / "Scanresult")], out, progress=progress, stop=stop)
+    assert 0 < wafers < 9                          # 일부만 돌았고
+    assert base is not None and Path(str(base) + ".json").is_file()    # 그만큼은 파일로 남았다
+    assert any("남은 시간" in m for m in seen)      # 진행 문구가 계속 바뀐다
