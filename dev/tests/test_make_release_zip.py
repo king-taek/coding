@@ -37,7 +37,7 @@ def test_zip_name_carries_date_and_commit():
 def test_update_leftovers_and_test_results_are_excluded():
     """빌드 머신에서 생긴 찌꺼기가 사용자에게 딸려가면 안 된다."""
     inc = lambda s: rel.should_include(PurePosixPath(s))
-    assert inc("AOI_Verify.exe")
+    assert inc("run_aoi.bat")
     assert inc("app/main.py")
     assert inc("python/python.exe")
     assert inc("runtime/ir/mobilenet_v3_small.xml")
@@ -77,7 +77,7 @@ def test_read_version_tolerates_missing_or_broken(tmp_path):
 # ── 실제 zip 왕복 ──────────────────────────────────────────────────────────
 def _good_bundle(tmp_path) -> Path:
     """검증을 통과하는 최소 배포본 + 섞여 있으면 안 되는 찌꺼기."""
-    out = tmp_path / build.EXE_OUT_DIRNAME
+    out = tmp_path / build.OUT_DIRNAME
     app = out / "app"
     pkg = app / "aoi_verification"
     (pkg / "app" / "ui" / "assets").mkdir(parents=True)
@@ -97,7 +97,8 @@ def _good_bundle(tmp_path) -> Path:
     (app / "양식.xlsx").write_bytes(b"x" * 1000)
     (app / "VERSION").write_text(
         '{"sha": "1234567abcdef", "branch": "b", "repo": "r"}', encoding="utf-8")
-    (out / "AOI_Verify.exe").write_bytes(b"x" * 3_000_000)
+    (out / "run_aoi.bat").write_text("@echo off", encoding="utf-8")
+    (out / "run_aoi_debug.bat").write_text("@echo off", encoding="utf-8")
     (out / "python").mkdir()
     (out / "python" / "python.exe").write_bytes(b"x")
     (out / "python" / "pythonw.exe").write_bytes(b"x")
@@ -135,13 +136,14 @@ def test_make_zip_produces_a_clean_shippable_archive(tmp_path):
         names = z.namelist()
         # 풀면 폴더 하나가 생긴다(파일이 흩어지지 않게).
         assert all(n.startswith("AOI_Verify/") for n in names), names[:5]
-        assert "AOI_Verify/AOI_Verify.exe" in names
+        assert "AOI_Verify/run_aoi.bat" in names
         assert "AOI_Verify/app/main.py" in names
         assert "AOI_Verify/.deps_installed" in names
         # 설치법이 들어 있고 읽힌다.
         assert "AOI_Verify/설치방법.txt" in names
         text = z.read("AOI_Verify/설치방법.txt").decode("utf-8")
-        assert "AOI_Verify.exe" in text and "C:\\AOI_Verify" in text
+        assert "run_aoi.bat" in text and "C:\\AOI_Verify" in text
+        assert "AOI_Verify.exe" not in text            # exe 는 더 이상 없다
         # 찌꺼기는 빠졌다.
         assert not any(n.startswith("AOI_Verify/app.old") for n in names)
         assert not any("결과/" in n for n in names)
@@ -152,7 +154,7 @@ def test_make_zip_produces_a_clean_shippable_archive(tmp_path):
 
 
 def test_make_zip_refuses_a_broken_bundle(tmp_path):
-    """★ 앱이 exe 안에 얼려 들어간 배포본은 zip 하지 않는다 — 사고 재발 방지."""
+    """★ 옛 exe 배포 찌꺼기(_internal)가 남은 폴더는 zip 하지 않는다."""
     out = _good_bundle(tmp_path)
     (out / "_internal").mkdir()               # 앱을 다시 얼린 지문
     logs = []
@@ -179,15 +181,15 @@ def test_never_built_says_so_instead_of_listing_missing_files(tmp_path):
     logs = []
     assert rel.make_zip(tmp_path, log=logs.append) != 0
     joined = "\n".join(logs)
-    assert "build.py exe" in joined
+    assert "build.py portable" in joined
     assert "빌드를 아직 실행하지 않았습니다" in joined
 
 
 def test_partial_build_names_the_stage_it_stopped_at(tmp_path):
     """중간에 멈춘 빌드는 '어느 단계' 인지 알려줘야 다시 시도할 수 있다."""
-    out = tmp_path / build.EXE_OUT_DIRNAME
+    out = tmp_path / build.OUT_DIRNAME
     out.mkdir(parents=True)
-    (out / "AOI_Verify.exe").write_bytes(b"x")     # 런처만 만들어진 상태
+    (out / "python").mkdir()                        # 런타임 폴더만 만들어진 상태
     logs = []
     assert rel.make_zip(tmp_path, log=logs.append) != 0
     assert any("CPython 런타임" in m for m in logs)
@@ -197,7 +199,7 @@ def test_instructions_file_is_readable_by_notepad(tmp_path):
     """BOM 이 없으면 구버전 메모장이 cp949 로 읽어 한글이 깨진다."""
     _good_bundle(tmp_path)
     assert rel.make_zip(tmp_path, log=lambda *a: None, today="20260727") == 0
-    raw = (tmp_path / build.EXE_OUT_DIRNAME / rel.INSTRUCTIONS_NAME).read_bytes()
+    raw = (tmp_path / build.OUT_DIRNAME / rel.INSTRUCTIONS_NAME).read_bytes()
     assert raw.startswith(b"\xef\xbb\xbf"), "UTF-8 BOM 이 없다"
     assert "AOI 레시피 검증" in raw.decode("utf-8-sig")
 
@@ -239,41 +241,8 @@ def test_empty_bundle_is_never_shipped(tmp_path):
     assert any("site-packages" in m for m in logs)
 
 
-# ── lite 배포 zip ────────────────────────────────────────────────────────────
-def test_lite_instructions_warn_about_the_first_run(tmp_path):
-    """★ 첫 실행에 검은 창이 몇 분 떠 있는다 — 미리 말해두지 않으면 사용자가 닫는다.
-
-    닫으면 설치가 반쯤 된 상태로 남고, 사용자는 '고장 났다' 고 판단한다."""
-    lite = rel.instructions_text(lite=True)
-    full = rel.instructions_text(lite=False)
-    for phrase in ("검은 창", "인터넷", "창을 닫지 마세요", "두 번째 실행"):
-        assert phrase in lite, phrase
-    assert "검은 창이 뜨고" not in full          # 전체 배포본에는 해당 없음
-    # 두 판 모두 나머지 안내는 그대로 있어야 한다.
-    for text in (lite, full):
-        for section in ("[1] 설치", "[2] 실행", "[3] 업데이트", "[7] 삭제하려면"):
-            assert section in text
-
-
-def test_lite_zip_verifies_the_lite_folder(tmp_path, monkeypatch):
-    """--lite 는 lite 산출물 폴더를 보고, 그 기준으로 검증해야 한다.
-
-    전체 배포본 기준으로 검증하면 '라이브러리가 없다' 며 멀쩡한 빌드를 거부한다."""
-    seen = {}
-    fake_build = type("B", (), {
-        "exe_out_dirname": staticmethod(lambda lite: "dist/L" if lite else "dist/F"),
-        "verify_checks": staticmethod(
-            lambda out, lite=False: seen.update(out=out, lite=lite) or [(False, "x")]),
-        "report_diagnosis": staticmethod(lambda *a, **k: None),
-    })
-    monkeypatch.setattr(rel, "_load_build_module", lambda: fake_build)
-    assert rel.make_zip(tmp_path, log=lambda *a: None, lite=True) == 1
-    assert seen["lite"] is True
-    assert seen["out"] == tmp_path / "dist" / "L"
-
-
 def test_irbuild_leftovers_never_reach_the_zip():
-    """IR 변환용 임시 트리(수백 MB)가 실리면 lite 의 의미가 사라진다."""
+    """IR 변환용 임시 트리(수백 MB)가 실리면 배포본이 부풀어 오른다."""
     inc = lambda s: rel.should_include(PurePosixPath(s))
     assert not inc(".irbuild/torch/lib/torch_cpu.dll")
     assert inc("runtime/ir/mobilenet_v3_small.bin")

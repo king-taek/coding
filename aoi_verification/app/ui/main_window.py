@@ -234,6 +234,9 @@ class MainWindow(MultiValFlow, QMainWindow):
     _update_found = pyqtSignal(dict)
     _update_applied = pyqtSignal(bool, dict)
     _update_progress = pyqtSignal(int, int, str)   # 다운로드/적용 진행(로딩바)
+    _excel_ref_progress = pyqtSignal(int, int)     # 이전 엑셀 → 기준 폴더 풀기 진행
+    _excel_ref_done = pyqtSignal(str, object, str)  # 엑셀 경로, ExcelRef|None, 오류 문구
+    _excel_ref_sheets = pyqtSignal(str, list)       # 엑셀 경로, [(시트, 사진 수)] — 고르게 한다
     _update_none = pyqtSignal(str)          # 수동 확인: 최신/확인불가 안내
     _startup_proceed = pyqtSignal()         # 업데이트 흐름 종료 → 나머지 시작 팝업
     # 무거운 모듈(cv2·OpenVINO·numpy·PIL)을 백그라운드에서 다 불러왔다는 신호.
@@ -410,6 +413,9 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._update_found.connect(self._on_update_found)
         self._update_applied.connect(self._on_update_applied)
         self._update_progress.connect(self._on_update_progress)
+        self._excel_ref_progress.connect(self._on_excel_ref_progress)
+        self._excel_ref_done.connect(self._on_excel_ref_done)
+        self._excel_ref_sheets.connect(self._on_excel_ref_sheets)
         self._update_none.connect(self._on_update_none)
         self._startup_proceed.connect(self._run_startup_popups)
         QTimer.singleShot(400, self._begin_update_check)
@@ -620,6 +626,60 @@ class MainWindow(MultiValFlow, QMainWindow):
             self._update_applied.emit(bool(ok), info or {})
 
         threading.Thread(target=_work, name="update-apply", daemon=True).start()
+
+    def _on_excel_ref_requested(self, xlsx: str, pick: Optional[list] = None) -> None:
+        """이전 결과 엑셀 → 기준 폴더(백그라운드 + 로딩바).  끝나면 설정 화면 기준 칸에 넣는다.
+
+        시트(LOT)끼리 같은 슬롯 이름이 엇갈리면 시트를 고르게 한 뒤 ``sheets`` 로 다시 부른다(``pick``)."""
+        self._loading.show_overlay(i18n.KO.EXCEL_REF_LOADING)
+        self._loading.set_progress(0, 0, i18n.KO.EXCEL_REF_LOADING)     # busy → 0 에서 안 멈춤
+
+        import threading
+
+        def _work() -> None:
+            from ..utils import excel_ref
+            try:
+                ref = excel_ref.load_excel_ref(
+                    xlsx, progress=lambda d, t: self._excel_ref_progress.emit(int(d), int(t)),
+                    sheets=pick)
+                self._excel_ref_done.emit(xlsx, ref, "")
+            except excel_ref.ExcelRefNeedsSheets as e:
+                self._excel_ref_sheets.emit(xlsx, e.sheets)
+            except excel_ref.ExcelRefError as e:
+                self._excel_ref_done.emit(xlsx, None, str(e))
+            except Exception:
+                _LOG.exception("이전 엑셀 읽기 실패")
+                self._excel_ref_done.emit(xlsx, None, i18n.KO.EXCEL_REF_ERR_OPEN)
+
+        threading.Thread(target=_work, name="excel-ref", daemon=True).start()
+
+    def _on_excel_ref_sheets(self, xlsx: str, options: list) -> None:
+        """여러 LOT 엑셀 — 기준으로 쓸 시트를 고르게 하고, 고른 시트만 다시 푼다."""
+        self._loading.hide_overlay()
+        from .widgets.slot_select_dialog import SlotSelectDialog
+        names = [t for t, _n in options]
+        dlg = SlotSelectDialog(
+            names, preselected=(), title=i18n.KO.EXCEL_REF_PICK_SHEETS_TITLE,
+            hint=i18n.KO.EXCEL_REF_PICK_SHEETS_HINT,
+            notes={t: i18n.KO.EXCEL_REF_SHEET_COUNT_FMT.format(n=n) for t, n in options},
+            search_placeholder=i18n.KO.EXCEL_REF_SHEET_SEARCH, parent=self)
+        if not (sheets.run(dlg) and dlg.accepted_ok):
+            return
+        self._on_excel_ref_requested(xlsx, sorted(dlg.selected))
+
+    def _on_excel_ref_progress(self, done: int, total: int) -> None:
+        self._loading.set_progress(done, total, i18n.KO.EXCEL_REF_LOADING)
+
+    def _on_excel_ref_done(self, xlsx: str, ref, error: str) -> None:
+        self._loading.hide_overlay()
+        if ref is None:
+            sheets.warn(self, i18n.KO.APP_TITLE, error)
+            return
+        self._setup_page.apply_excel_ref(
+            xlsx, str(ref.root), ref.machine, ref.photos, ref.slots, ref.with_coord)
+        if ref.with_coord < ref.photos:
+            sheets.info(self, i18n.KO.APP_TITLE, i18n.KO.EXCEL_REF_PARTIAL_FMT.format(
+                n=ref.photos - ref.with_coord))
 
     def _on_update_progress(self, done: int, total: int, phase: str) -> None:
         """업데이트 진행(다운로드/압축해제/적용) → 로딩바 갱신(메인 스레드).
@@ -1570,7 +1630,7 @@ class MainWindow(MultiValFlow, QMainWindow):
             self._start_cross_b_match(queue)
             return
         self._select_page.set_extract_mode(False)
-        self._select_page.set_reverse(True)
+        self._select_page.set_reverse(True, cross=True)
         self._select_page.load_state(queue=queue, targets={}, excluded={},
                                      history=[], slot_numbers=self._slot_numbers())
         self._phase = PHASE_B_SELECT
@@ -1841,7 +1901,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         restored = ({} if one_side
                     else self._maybe_restore_ref_selection(queue))
         self._select_page.set_extract_mode(one_side)     # '검증' ↔ '추출' 문구
-        self._select_page.set_reverse(False)
+        self._select_page.set_reverse(False, cross=bool(self._cross_stage))
         self._select_page.load_state(
             queue=queue,
             targets=restored, excluded={}, history=[],
@@ -2173,7 +2233,7 @@ class MainWindow(MultiValFlow, QMainWindow):
             return
         queue, pool, auto_mode = nxt
         reverse = self._cross_stage == "B"
-        self._match_page.set_reverse(reverse)
+        self._match_page.set_reverse(reverse, cross=bool(self._cross_stage))
         self._match_page.load_state(
             queue=queue,
             val_pool_by_slot=pool,
@@ -2253,7 +2313,7 @@ class MainWindow(MultiValFlow, QMainWindow):
                 return
             self._snapshot_leg_ctx()         # 2차 — 결과 화면이 이 장비 것을 쓰게
         merged = list(self._matches_b) if reverse else self._merge_matches()
-        self._match_review_page.set_reverse(reverse)
+        self._match_review_page.set_reverse(reverse, cross=bool(self._cross_stage))
         # MatchPage 가 들고 있는 점수 캐시 + val_pool 을 매치 검토 페이지에
         # 넘겨 차순위 후보를 행마다 표시한다 (참고용 시각 정보).
         ctx = self._match_page.review_context()
@@ -2350,7 +2410,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         # ★ 교차검증은 **두 번째 방향(B)의 검토**로 돌아간다.  MatchPage 가 지금 들고 있는
         #   후보·점수가 B 의 것이라 A 검토는 다시 만들 수 없다(A 의 확정분은 그대로 둔다).
         reverse = self._cross_stage == "B"
-        self._match_review_page.set_reverse(reverse)
+        self._match_review_page.set_reverse(reverse, cross=bool(self._cross_stage))
         # '매치 없음' 표시까지 되살리려면 그 행들이 있어야 하므로 **전체 목록**을
         #   기반으로 한다(`_reviewed_matches` 는 표시된 행이 빠진 kept 다).
         if reverse:
@@ -2642,6 +2702,8 @@ class MainWindow(MultiValFlow, QMainWindow):
             mode=self._input.mode,
             ref_machine=self._input.ref_machine,
             val_machine=self._input.val_machine,
+            ref_root=str(self._input.ref_root),
+            val_root=str(self._input.val_root),
             matches=merged,
             slot_only_ref=list(self._scan.ref_only),
             slot_only_val=list(self._scan.val_only),
@@ -2843,8 +2905,11 @@ class MainWindow(MultiValFlow, QMainWindow):
                 tp = rp
         if not (tp.material or tp.layer or tp.sm):
             _LOG.info("자재·Layer·S/M 을 못 읽어 기본 제목을 씁니다: %s", inp.val_root)
-        return {"val": inp.val_machine, "layer": tp.layer,
-                "material": tp.material, "sm": tp.sm, "ref": inp.ref_machine}
+        out = {"val": inp.val_machine, "layer": tp.layer,
+               "material": tp.material, "sm": tp.sm, "ref": inp.ref_machine}
+        if getattr(inp, "mode", "") == cross_check.CROSS_MODE:
+            out["cross"] = "1"          # 양방향 — 제목이 '기준↔검증 … 교차검증'
+        return out
 
     @staticmethod
     def _suggest_result_name(inp: SetupInput) -> str:
@@ -2940,6 +3005,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._stack.addWidget(self._setup_page)
         self._sync_statusbar(self._setup_page)        # 첫 화면도 같은 규칙(크레딧은 한 번만)
         self._setup_page.start_requested.connect(self._on_start)
+        self._setup_page.excel_ref_requested.connect(self._on_excel_ref_requested)
         self._setup_page.update_check_requested.connect(self._manual_update_check)
         self._setup_page.extract_mode_changed.connect(self._on_extract_mode_changed)
         self._setup_page.cross_mode_changed.connect(self._on_extract_mode_changed)

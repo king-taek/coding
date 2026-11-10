@@ -94,9 +94,9 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   `dev` 는 기본 브랜치보다 앞서 있어야 하므로 **기본 브랜치에 바로 머지할 때는 `dev` 에도 함께 머지한다**
   (사용자 지시 2026-10-27; 기본 브랜치 머지 직후 기본 → `dev` PR 로 합친다).
   `whats_new.py` 항목은 `dev` 에서 쓰되 배포 때 함께 나가므로, 배포 PR 전에 맨 위가 맞는지 확인한다.
-  ⚠ **GL 히스토그램은 `dev` 에서만 켠다**(사용자 결정 2026-10-30): `config.GL_HISTOGRAM_READY` 가 `dev` 는 `True`,
-  기본 브랜치는 `False`('Coming soon'). 사용자가 GL 배포를 정하기 전까지 **배포 PR 에서 `False` 로 되돌리고**, 기본 → `dev`
-  머지 뒤에는 `dev` 에서 다시 `True` 로 켠다.
+  ⚠ **GL 히스토그램은 `dev`·기본 브랜치 모두 끈다**(사용자 결정 2026-11-10, 2026-10-30 'dev 만 켬' 을 바꿈):
+  `config.GL_HISTOGRAM_READY = False`('Coming soon'). 두 브랜치를 같게 두기 위해서다 — 배포 PR 에서 값을 뒤집지 않는다.
+  사용자가 GL 배포를 정하면 그때 두 브랜치 모두 `True` 로 바꾼다.
 - 세션마다 별도 **기능 브랜치**가 작업 지시로 지정될 수 있다. 지정되면 거기서 작업·커밋·푸시하고,
   PR 로 `dev` 에 머지한다. 별도 지시가 없으면 `dev` 기준으로 판단한다.
 - 커밋 메시지는 **한국어로 '무엇을·왜'** 중심. PR 은 사용자가 요청할 때 생성한다.
@@ -171,45 +171,36 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
     (`portable_build` 는 `aoi_verification`·`main.py`·`requirements.txt`·`양식.xlsx`·IR 만).
     `docs/사용설명서.pdf`·`docs/상세설명서.pdf` 를 `_UPDATE_KEEP_ONLY` 에서 빼면 사용자에게
     설명서가 영영 가지 않는다. 회귀 가드: `dev/tests/test_update_payload.py`.
-- **실행은 `scripts/run_aoi.bat` 이 런처다**(회사 보안이 서명 없는 exe 를 지운다). bat 도 exe 런처와
-  같은 일을 한다 — `app.new` 교체(실패 시 구버전) → `AOI_APP_HOME` 설정 → 실행. 둘 중 하나만 고치지
-  마라(`test_bootstrap`). bat 은 아이콘을 못 가지므로 앱이 켜질 때 설치 루트에 `.lnk` 를 만든다
+- **실행은 `scripts/run_aoi.bat` 이 런처다**(회사 보안이 서명 없는 exe 를 지운다). bat 이 하는 일은
+  `app.new` 교체(실패 시 구버전) → `AOI_APP_HOME` 설정 → 실행이다(`test_bootstrap`). bat 은 아이콘을 못 가지므로 앱이 켜질 때 설치 루트에 `.lnk` 를 만든다
   (`utils/shortcut.py`, 파일 직접 작성 — PowerShell·VBScript 로 만들지 마라: 보안을 다시 자극한다).
   설치 루트의 bat 은 업데이트 트리 밖이라, 앱이 켜진 뒤 `app\scripts\` 사본으로 바꿔 놓는다
   (`shortcut.refresh_bats`). **pythonw 일 때만·몇 초 뒤**다 — cmd 는 도는 중인 bat 을 다시 읽으므로
   디버그 bat(python.exe)이 도는 동안 바꾸면 엉뚱한 줄이 실행된다. 이 조건을 풀지 마라.
-- **깨지 않아야 할 불변식 3개** (각각 실제 사고에서 나왔다 → `docs/규칙_배경.md`):
-  - **런처 exe(`scripts/exe_launcher.py`)에는 앱 코드를 한 줄도 넣지 않는다.** PyInstaller 의
-    `FrozenImporter` 가 exe 안 사본으로 디스크의 최신 사본을 **가린다**. `exe_launcher.spec` 의
-    `hiddenimports` 는 비어 있고, `aoi_verification` 은 `excludes` 에 있고, `Analysis(pathex=[])`
-    로 저장소 루트를 주지 않는다. `build.py` 의 verify 가 재확인한다.
+- **배포 방식은 하나다**(사용자 결정 2026-11-10): 파이썬·라이브러리·IR·앱을 **전부 담은** `dist/AOI_Verify` 를 zip 으로
+  전달하고, 받는 사람은 풀어서 `run_aoi.bat` 만 실행한다. exe 런처·exe-lite·온라인 다운로드 배포는 없앴다
+  (`build.py portable` + `make_release_zip.py`, 안내는 `docs/배포_가이드.md`). 다시 만들지 마라 — 회사 보안이 서명 없는 exe 를 지운다.
+  사용자 PC 가 첫 실행 때 무언가를 받는 구조도 쓰지 않는다(`.deps_installed` 는 빌드가 항상 남기고 `verify_checks` 가 확인한다).
+- **깨지 않아야 할 불변식 2개** (각각 실제 사고에서 나왔다 → `docs/규칙_배경.md`):
   - **`app.new` 는 완성된 트리일 때만 존재한다.** 만드는 중에는 `app.new.part` 이고, 검증을
     통과한 뒤 rename 한다 — 그 rename 이 곧 '준비 완료' 신호다(별도 marker 파일을 쓰지 마라).
   - **`_write_version` 은 스테이징 트리에 쓴다**(`_write_version_to`). 살아있는 `app/VERSION` 에
     미리 쓰면 교체가 보류·실패했을 때 앱이 '최신입니다' 라며 구버전을 영원히 실행한다.
 - **의존성 패키지**는 모드별로 동작이 다르다:
-  - **exe 배포**: 새 패키지가 필요하면 동봉된 파이썬에 **직접 설치**한다(`_ensure_deps`).
+  - **배포본(bat 런처)**: 새 패키지가 필요하면 동봉된 파이썬에 **직접 설치**한다(`_ensure_deps`).
     **설치가 성공해야만 코드를 적용**한다 — 코드만 새것이 되면 `ImportError` 로 앱이 안 켜진다.
     실패하면 적용하지 않고(`deps_blocked()`) 구버전을 유지한 채 안내한다.
     · 재설치 폭주를 막는 장치: 빌드가 남기는 `.deps_installed` 표식과 비교해 **바뀐 경우에만**
       돌린다. 주석·빈 줄 변경은 `bootstrap.req_lines` 가 정규화해 무시한다.
     · `--upgrade` 를 주지 마라(`pip_install_cmd(..., upgrade=False)`). requirements 가 전부
       `>=` 라 잘 돌던 무거운 패키지까지 최신으로 끌어올려 대용량을 받고 회귀 위험을 만든다.
-  - 포터블/온라인: `requirements.txt` 변경을 감지(`deps_changed()`)해 '수동 갱신' 안내만 한다.
+  - 개발 트리 등 런처가 없는 실행: `requirements.txt` 변경을 감지(`deps_changed()`)해 '수동 갱신' 안내만 한다.
   - 자세한 동작은 `docs/업데이트_동작.md`.
 - **테스트는 절대 진짜 `pip` 을 돌리지 않는다.** `dev/tests/test_updater.py` 의
   `_no_real_subprocess` 오토유즈 픽스처가 `subprocess.call` 을 막는다. pip 을 검증하는
   테스트만 `_fake_pip` 로 덮어쓴다.
-- **lite 배포(`build.py exe-lite`)의 불변식**: 라이브러리를 번들에 넣지 않고 사용자 PC 의
-  첫 실행 때 받는다. **`.deps_installed` 표식이 없다는 사실 자체가 유일한 '설치하라' 신호**다
-  (`bootstrap.ensure_deps`). 빌드가 표식을 미리 찍으면 사용자 PC 가 설치를 건너뛰고
-  ImportError 로 죽는다 — `verify_checks(lite=True)` 가 표식 **부재**를 검사한다.
-  · 설치 자체는 **앱 코드**가 한다. 런처(`scripts/exe_launcher.py`)는 표식 유무로
-    `python.exe`(콘솔 보임)/`pythonw.exe` 만 고른다 — 네트워크·pip 는 업데이트되지 않는
-    런처에 넣지 않는다는 그 파일의 계약을 지킨다.
-  · IR 은 lite 에서도 **동봉**한다. 저장소에 없어서 나중에 받아올 수 없다.
-- 자동 적용은 **포터블·exe 빌드에서만**(개발/git 작업트리는 `is_git_checkout` 으로 차단).
-  exe 빌드에서는 앱이 스테이징만 하고, **다음 실행 때 런처가 교체**한다(실행 중인 앱은 자기가
+- 자동 적용은 **배포본에서만**(개발/git 작업트리는 `is_git_checkout` 으로 차단).
+  앱은 스테이징만 하고, **다음 실행 때 `run_aoi.bat` 이 교체**한다(실행 중인 앱은 자기가
   돌아가는 폴더를 안전하게 바꿀 수 없다). 런처의 모든 실패 경로는 '구버전 그대로 실행' 이다.
 
 ### ⚠️ `requirements.txt` 를 바꿀 때 — 반드시 강조해서 알릴 것
@@ -221,7 +212,7 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
 > 사용자 PC 가 인터넷에 닿으면 앱이 자동으로 설치합니다. 설치가 실패하면 업데이트가
 > 적용되지 않으므로, 그때는
 > **`dist/AOI_Verify` 폴더 전체를 다시 빌드해 zip 으로 전달**해야 합니다
-> (`python scripts/build.py exe`). **`app` 폴더만 전달하면 앱이 실행되지 않습니다.**
+> (`python scripts/build.py portable` 후 `python scripts/make_release_zip.py`). **`app` 폴더만 전달하면 앱이 실행되지 않습니다.**
 
 주석·빈 줄만 바꾼 경우는 해당 없다(`bootstrap.req_lines` 가 정규화해 무시한다).
 테스트 전용 패키지는 여기가 아니라 `dev/requirements-dev.txt` 에 넣는다(배포·업데이트와 무관).
@@ -416,9 +407,9 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
 
 ## 파일 구성 관습
 - 문서는 `docs/`. 사용자가 실행하는 스크립트는 `scripts/`(`run_aoi*.bat`·`run_this_before.py`·
-  `update_app.bat`·`build.py`·`make_release_zip.py`·`launcher.py`·`exe_launcher.py`).
+  `update_app.bat`·`build.py`·`make_release_zip.py`).
   빌드/내부 도구는 `scripts/internal/`
-  (`*.spec`·`build_exe.bat`·`build_online.bat`·`make_portable.bat`·`portable_build.py`·
+  (`make_portable.bat`·`portable_build.py`·
   `verify_no_forbidden.py`). 경로를 바꾸면 이를 호출하는 곳(run_this_before·빌드 bat·README·문서)도
   함께 고친다.
 - **`aoi_verification/app/`** 가 앱 본체: `ui/`(pages·widgets), `workers/`(매칭·OCR·내보내기 등
