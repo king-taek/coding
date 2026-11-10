@@ -408,7 +408,8 @@ def borrow(recs, scope):
             continue
         us, vs = [], []
         for o in recs:
-            if o is r or not o.get("cx") or "hyp" not in o:
+            # 같은 웨이퍼의 다른 사본(샘플 폴더가 여러 곳에 있다)에서 빌리면 자기 답을 베끼는 것이다.
+            if o is r or o["wafer"] == r["wafer"] or not o.get("cx") or "hyp" not in o:
                 continue
             if abs(o["px"] - r["px"]) > 0.01 or abs(o["py"] - r["py"]) > 0.01:
                 continue

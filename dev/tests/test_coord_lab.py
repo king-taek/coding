@@ -53,10 +53,12 @@ def test_no_pure_geometry_rule_numbers_every_product(run):
 def test_borrowed_number_position_matches_truth_and_app(run):
     """LOT/PRD — 다른 웨이퍼의 (u, v)를 빌린 번호가 정답과 같고, 앱의 다단 규칙과도 같다.
 
-    ⚠ R2: 정답이 있는 건 고유 웨이퍼 6장 · 제품 3종뿐이다.  나머지는 '앱과 같다' 일 뿐이다."""
+    ⚠ R2: 정답이 있는 건 고유 웨이퍼 5장 · 제품 2종뿐이다(같은 웨이퍼 사본에서는 빌리지 않는다).  나머지는 '앱과 같다' 일 뿐이다."""
     recs, _, sc = run
     for h in ("LOT", "PRD"):
         assert sc[f"{h}|LIVE"]["both"] == sc[f"{h}|LIVE"]["n"] > 0, h
+    # 독립인 빌릴 곳이 없는 웨이퍼(GX57007306 은 사본뿐)는 가설을 내지 않는다 — 자기 답 베끼기 금지.
+    assert not any("PRD" in r.get("hyp", {}) for r in recs if r["wafer"] == "GX57007306")
     both = [(r["hyp"]["PRD"], r["hyp"]["APP"]) for r in recs
             if r.get("hyp", {}).get("PRD") and r.get("hyp", {}).get("APP")]
     assert len(both) > 50 and all(tuple(a) == tuple(b) for a, b in both)
