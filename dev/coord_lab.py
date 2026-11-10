@@ -8,6 +8,11 @@ LIVE 파일명(사진 또는 ``사진목록*.txt``)을 찾고, 가설마다 답�
 
     python dev/coord_lab.py                      # 저장소 샘플(dev/좌표 확인 · docs)
     python dev/coord_lab.py "<폴더>" ["<폴더>" ...] [--out "<출력 폴더>"]
+    python dev/coord_lab.py --nas ["<폴더>" ...] [--minutes 30] [--per-lot 3] [--lots 5]
+
+``--nas`` 는 NAS 의 Scanresult · Conder Scan 을 **가볍게** 돈다(더블클릭은 ``coord_lab_nas.py``):
+LOT 마다 웨이퍼 몇 장만 뽑고, 사진은 열지 않고 이름만 읽고, 시간 제한에서 멈춘다.  가설끼리
+답이 갈리거나 앱이 정답과 다른 폴더만 원재료(INI · die 목록 · 사진 이름)를 zip 하나로 모은다.
 
 결과: ``좌표실험_<시각>.txt``(사람이 읽는 요약) · ``.json``(전체 수치) · ``.html``(색칠한 표).
 
@@ -309,6 +314,259 @@ def scan(roots):
                     if "DiePitch" in head and "SampleCenterLocation" in head:
                         klas.append(dp / f)
     return camtek, klas, live_by_dir
+
+
+# ───────────────────────── NAS 순회 ─────────────────────────
+import time
+import zipfile
+
+CONDER_ROOT = r"\\k5cifsn2\k5tsvdata$\1. Conder Scan"
+UNC_SHARES = [r"\\10.142.80.91\nas3-1"]
+_WAFER_MARK = ("ColorImageGrabingInfo.ini", "Params_WaferInfo.ini")
+_LIVE_CAP = 400          # 폴더마다 읽는 사진 이름 수(정답 표결에는 몇 장이면 된다)
+_DEPTH = 7
+
+
+def nas_default_roots():
+    """이 PC 에서 보이는 ``<드라이브 또는 공유>\\AOI-*\\Scanresult`` 전부 + Conder Scan."""
+    bases = [Path(f"{c}:\\") for c in "DEFGHIJKLMNOPQRSTUVWXYZ"] + [Path(u) for u in UNC_SHARES]
+    cam, seen = [], set()
+    for b in bases:
+        try:
+            for d in sorted(b.glob("AOI-*")):
+                sr = next((p for p in (d / "Scanresult", d / "ScanResult", d / "ScanResults")
+                           if p.is_dir()), None)
+                if sr is not None and d.name.upper() not in seen:   # 같은 공유가 두 글자로 물려 있다
+                    seen.add(d.name.upper())
+                    cam.append(sr)
+        except OSError:
+            continue
+    conder = [Path(CONDER_ROOT)] if os.path.isdir(CONDER_ROOT) else []
+    return cam, conder
+
+
+def _subdirs(d: Path):
+    """(이름, 경로, 수정 시각) — 못 읽는 폴더는 빈 목록(NAS 권한 · 끊김)."""
+    out = []
+    try:
+        with os.scandir(d) as it:
+            for e in it:
+                try:
+                    if e.is_dir(follow_symlinks=False):
+                        out.append((e.name, Path(e.path), e.stat().st_mtime))
+                except OSError:
+                    continue
+    except OSError:
+        pass
+    return out
+
+
+def _is_wafer(d: Path) -> bool:
+    return any((d / m).is_file() for m in _WAFER_MARK)
+
+
+def nas_walk(roots, deadline, per_lot=3, lots=5, log=print):
+    """웨이퍼 폴더(= INI 가 든 폴더)를 찾는다.  LOT(웨이퍼들의 부모)마다 ``per_lot`` 장,
+    한 폴더 아래 LOT 은 최근 ``lots`` 개만 — 번호 기준은 레시피의 것이라 몇 장이면 된다."""
+    found, state = [], {"lots": 0, "cut": False}
+
+    def visit(d: Path, depth: int) -> bool:
+        """d 가 LOT 이었으면 True."""
+        if time.time() > deadline:
+            state["cut"] = True
+            return False
+        subs = sorted(_subdirs(d), key=lambda t: -t[2])           # 최근 것부터
+        if not subs or depth > _DEPTH:
+            return False
+        names = sorted(subs)
+        if any(_is_wafer(p) for _, p, _ in (names[0], names[len(names) // 2], names[-1])):
+            step = max(1, len(names) // per_lot)
+            picked = [p for _, p, _ in names[::step] if _is_wafer(p)][:per_lot]
+            found.extend(picked)
+            state["lots"] += 1
+            log(f"  LOT {state['lots']:>4}  웨이퍼 {len(names):>3}장 중 {len(picked)}장  {d}")
+            return True
+        n_lot = 0
+        for _, p, _ in subs:
+            if visit(p, depth + 1):
+                n_lot += 1
+                if n_lot >= lots:
+                    break
+            if state["cut"]:
+                break
+        return False
+
+    for r in roots:
+        r = Path(r)
+        if _is_wafer(r):
+            found.append(r)
+        elif not visit(r, 0) and not r.is_dir():
+            log(f"  (못 엶) {r}")
+    return found, state["cut"]
+
+
+def nas_conder(roots, wanted, deadline, log=print):
+    """Conder Scan 에서 **이름이 웨이퍼 ID 인 폴더**만 열어 LIVE 파일명을 읽는다(사진은 안 연다)."""
+    live, cut = {}, False
+
+    def visit(d: Path, depth: int):
+        nonlocal cut
+        if time.time() > deadline:
+            cut = True
+            return
+        for name, p, _ in _subdirs(d):
+            if cut:
+                return
+            if name in wanted:
+                names = []
+                try:
+                    with os.scandir(p) as it:
+                        for e in it:
+                            if Path(e.name).suffix.lower() in IMG_EXT:
+                                names.append(e.name)
+                                if len(names) >= _LIVE_CAP:
+                                    break
+                except OSError:
+                    continue
+                lv = [(n, q) for n, q in ((n, parse_live(n)) for n in names) if q]
+                if lv:
+                    live[p] = lv
+                    log(f"  Conder {name}: LIVE 이름 {len(lv)}  {p}")
+            elif depth < _DEPTH:
+                visit(p, depth + 1)
+
+    for r in roots:
+        visit(Path(r), 0)
+    return live, cut
+
+
+def flags(r, no_map=()):
+    """원재료를 모을 만한 폴더인가 — 이유 목록(없으면 정상)."""
+    out = list(r.get("notes", []))
+    h = r.get("hyp")
+    if h is None:
+        return out or ["기하 못 읽음"]
+    t = (r["truth_live"]["value"] if r.get("truth_live", {}).get("ok") else None) or h.get("EXP")
+    same = lambda a, b: a[0] == b[0] and (None in (a[1], b[1]) or a[1] == b[1])
+    if t and h.get("APP") and not same(h["APP"], t):
+        out.append(f"앱≠정답 {tuple(h['APP'])}≠{tuple(t)}")
+    if h.get("EXP") and r.get("truth_live", {}).get("ok") and not same(h["EXP"], r["truth_live"]["value"]):
+        out.append("번호표≠LIVE")
+    if h.get("EXP") and h.get("LUT") and not same(h["EXP"], h["LUT"]):
+        out.append("번호표≠die목록")
+    if h.get("PRD") and h.get("APP") and not same(h["PRD"], h["APP"]):
+        out.append(f"빌리기≠앱 {tuple(h['PRD'])}≠{tuple(h['APP'])}")
+    if t and h.get("PRD") and not same(h["PRD"], t):
+        out.append("빌리기≠정답")
+    if not (h.get("EXP") or h.get("LUT")) and h.get("C1D") and h.get("G3") and h["C1D"] != h["G3"]:
+        out.append("표 없음+계산식 갈림")
+    if not r.get("cx"):
+        out.append("중심 없음")
+    if r.get("A1", {}).get("x_bad"):
+        out.append("Col≠floor(X/pitch)")
+    if r["folder"] in no_map:
+        out.append("앱이 맵을 못 그림")
+    return out
+
+
+_COLLECT = ("Params_WaferInfo.ini", "ProductInfo.ini", "Wafer2Table.ini", "Recipe.ini", "MultiRecipe.ini",
+            "WaferInfo.ini", "DieLut.dat", "ColorImageGrabingInfo.ini", "s_DieLocation.dat.md",
+            "s_DieLocation.dat")
+
+
+def collect_zip(recs, live_by_dir, base: Path, no_map=(), cap_mb=20, file_mb=12):
+    """이상 폴더의 원재료만 zip 으로.  사진은 이름만(``사진목록.txt``).  크기 제한에서 멈춘다."""
+    flagged = [(r, flags(r, no_map)) for r in recs]
+    flagged = [(r, f) for r, f in flagged if f]
+    if not flagged:
+        return None, 0
+    zpath, used, per_product = base.with_name(base.name + "_수집.zip"), 0, Counter()
+    with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("이유.txt", "\n".join(f"{r['folder']}\t{'; '.join(f)}" for r, f in flagged))
+        for i, (r, _f) in enumerate(flagged):
+            key = product_key(r) if "px" in r else "?"
+            per_product[key] += 1
+            if per_product[key] > 4:                 # 같은 제품은 4폴더면 충분하다
+                continue
+            src = Path(r["folder"])
+            arc = f"{i:03d}_{src.parent.name}_{src.name}"
+            for name in _COLLECT:
+                p = src / name
+                try:
+                    size = p.stat().st_size
+                except OSError:
+                    continue
+                if size > file_mb * 2 ** 20 or used + size > cap_mb * 2 ** 20 * 4:   # 압축 전 기준
+                    continue
+                try:
+                    z.write(p, f"{arc}/{name}")
+                    used += size
+                except OSError:
+                    continue
+            try:
+                imgs = sorted(e.name for e in os.scandir(src) if Path(e.name).suffix.lower() in IMG_EXT)
+            except OSError:
+                imgs = []
+            if imgs:
+                z.writestr(f"{arc}/사진목록.txt", "# 사진 파일명(사진 자체는 담지 않음)\n" + "\n".join(imgs))
+            w = r["wafer"]
+            lv = [n for d, names in live_by_dir.items() for n, _ in names
+                  if w in Path(n).stem.split("_")]
+            if lv:
+                z.writestr(f"{arc}/사진목록_Conder.txt", "# Conder LIVE 사진 파일명\n" + "\n".join(lv))
+            if zpath.stat().st_size > cap_mb * 2 ** 20:
+                break
+    return zpath, len(flagged)
+
+
+def run_nas(argv, out: Path):
+    def opt(name, default):
+        if name in argv:
+            i = argv.index(name)
+            v = argv[i + 1]
+            del argv[i:i + 2]
+            return float(v)
+        return default
+    minutes, per_lot, lots = opt("--minutes", 30), int(opt("--per-lot", 3)), int(opt("--lots", 5))
+    cam_roots, conder_roots = [Path(a) for a in argv], []
+    if not cam_roots:
+        cam_roots, conder_roots = nas_default_roots()
+    else:                                    # 준 폴더 가운데 'Conder' 가 든 경로는 정답 쪽으로 쓴다
+        conder_roots = [p for p in cam_roots if "conder" in str(p).lower()]
+        cam_roots = [p for p in cam_roots if p not in conder_roots]
+    print("Camtek 쪽:", *[f"\n  {p}" for p in cam_roots] or ["없음"])
+    print("Conder 쪽:", *[f"\n  {p}" for p in conder_roots] or ["없음"])
+    t0 = time.time()
+    folders, cut1 = nas_walk(cam_roots, t0 + minutes * 60 * 0.6, per_lot, lots)
+    klas_files = []
+    wanted = {wafer_name(f) for f in folders}
+    live_by_dir, cut2 = nas_conder(conder_roots, wanted, t0 + minutes * 60 * 0.85)
+    for f in folders:                        # 폴더 안에 LIVE 이름 사진이 같이 있는 경우
+        try:
+            names = [e.name for e in os.scandir(f) if Path(e.name).suffix.lower() in IMG_EXT][:_LIVE_CAP]
+        except OSError:
+            continue
+        lv = [(n, q) for n, q in ((n, parse_live(n)) for n in names) if q]
+        if lv:
+            live_by_dir[f] = lv
+    print(f"\n웨이퍼 폴더 {len(folders)} · Conder 폴더 {len(live_by_dir)} · {time.time() - t0:.0f}초"
+          + (" · 시간 제한으로 일부만 돌았습니다" if cut1 or cut2 else ""))
+    recs = []
+    for i, f in enumerate(sorted(folders)):
+        try:
+            recs.append(analyze_camtek(f, live_by_dir))
+        except Exception as e:                                  # noqa: BLE001 — 한 폴더가 전체를 못 멈춘다
+            recs.append({"folder": str(f), "wafer": wafer_name(f), "lot": str(f.parent),
+                         "notes": [f"읽다 실패 {type(e).__name__}: {e}"]})
+        if i % 20 == 19:
+            print(f"  계산 {i + 1}/{len(folders)}")
+    for scope in ("LOT", "PRD"):
+        borrow(recs, scope)
+    no_map = app_check(recs, live_by_dir)
+    base = report(recs, [], [], out, no_map)
+    zpath, n = collect_zip(recs, live_by_dir, base, no_map if isinstance(no_map, list) else ())
+    print(f"\n이상 폴더 {n}" + (f" — 원재료를 모았습니다: {zpath}" if zpath else " — 모을 것이 없습니다"))
+    return base
 
 
 def wafer_name(folder: Path) -> str:
@@ -688,6 +946,9 @@ def main(argv):
         i = argv.index("--out")
         out = Path(argv[i + 1])
         argv = argv[:i] + argv[i + 2:]
+    if "--nas" in argv:
+        argv.remove("--nas")
+        return run_nas(argv, out if out.is_dir() else Path.cwd())
     roots = [Path(a) for a in argv] or [r for r in DEFAULT_ROOTS if r.is_dir()]
     asked = not roots
     while not roots:                       # 저장소 밖에서 더블클릭 — 폴더를 묻는다

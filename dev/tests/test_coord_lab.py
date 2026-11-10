@@ -75,3 +75,45 @@ def test_app_matches_every_sample_with_truth(run):
 def test_kla_plan_range_follows_center_rule(run):
     k1 = [k["K1"] for k in run[1] if "K1" in k]
     assert len(k1) > 40 and all(all(k) for k in k1)
+
+
+# ── NAS 순회 모드 ─────────────────────────────────────────────────────────
+def _wafer(d: Path, center=True):
+    d.mkdir(parents=True)
+    (d / "Params_WaferInfo.ini").write_text(
+        "[Geometric]\nDiameter=300000\n" + ("Center_X=167949\nCenter_Y=178990\n" if center else "")
+        + "[Geometry]\nDieStep_X=37247.9\nDieStep_Y=44905.3\n", encoding="utf-8")
+    (d / "ColorImageGrabingInfo.ini").write_text(
+        "[79771.95864.c.1.1.jpeg]\nX=79771.1\nY=95864.7\nCol=2\nRow=2\nRecipeNumber=1\n", encoding="utf-8")
+    (d / "79771.95864.c.1.1.jpeg").write_bytes(b"")
+
+
+def test_nas_walk_samples_each_lot_and_collects_only_odd_folders(tmp_path):
+    import time
+    import zipfile
+
+    root = tmp_path / "AOI-1" / "Scanresult" / "job" / "Setup1"
+    for i in range(10):
+        _wafer(root / "LOT-A" / f"W{i:02d}")
+    _wafer(root / "LOT-B" / "X00", center=False)                 # 중심이 없는 폴더 = 모을 대상
+    logs = []
+    folders, cut = lab.nas_walk([tmp_path / "AOI-1" / "Scanresult"], time.time() + 60,
+                                per_lot=3, lots=5, log=logs.append)
+    assert not cut
+    assert sorted(f.parent.name for f in folders) == ["LOT-A"] * 3 + ["LOT-B"]   # LOT 마다 몇 장만
+
+    recs = [lab.analyze_camtek(f, {}) for f in sorted(folders)]
+    odd = {Path(r["folder"]).name: lab.flags(r) for r in recs if lab.flags(r)}
+    assert list(odd) == ["X00"] and "중심 없음" in odd["X00"]
+    zpath, n = lab.collect_zip(recs, {}, tmp_path / "좌표실험_test")
+    assert n == 1
+    names = zipfile.ZipFile(zpath).namelist()
+    assert any(x.endswith("X00/Params_WaferInfo.ini") for x in names)
+    assert any(x.endswith("X00/사진목록.txt") for x in names)        # 사진은 이름만
+    assert not any(x.lower().endswith(".jpeg") for x in names)
+
+
+def test_nas_walk_stops_at_deadline(tmp_path):
+    _wafer(tmp_path / "LOT" / "W0")
+    folders, cut = lab.nas_walk([tmp_path], 0.0, log=lambda *_: None)   # 이미 지난 마감
+    assert cut and folders == []
