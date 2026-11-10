@@ -1,6 +1,6 @@
 """build.py / portable_build.py — 빌드 스크립트의 순수 로직 + 주입 흐름 테스트.
 
-실제 PyInstaller/다운로드는 주입(injection)으로 분리돼 있어 무거운 의존성 없이 검증한다.
+실제 다운로드는 주입(injection)으로 분리돼 있어 무거운 의존성 없이 검증한다.
 """
 
 from __future__ import annotations
@@ -25,31 +25,25 @@ portable = _load("portable_build", "scripts/internal/portable_build.py")
 
 
 # ── build.py 순수 로직 ──────────────────────────────────────────────────────
-def test_venv_python_os_specific():
-    p = build.venv_python(Path("/repo"))
-    assert p.parts[-1] in ("python.exe", "python")
-    assert ".venv" in p.parts
-
-
 def test_command_builders():
-    assert build.pyinstaller_cmd("py", Path("a.spec"))[:4] == [
-        "py", "-m", "PyInstaller", "--noconfirm"]
     assert build.pip_install_cmd("py", "-r", "req.txt") == [
         "py", "-m", "pip", "install", "-r", "req.txt"]
     assert build.guard_cmd("py")[0] == "py"
     assert "verify_no_forbidden.py" in build.guard_cmd("py")[1]
 
 
-def test_output_paths():
-    assert build.output_path("online", Path("/r")).name == "AOI_Verify_Online.exe"
-    assert build.output_path("exe", Path("/r")).name == "AOI_Verify"
-    assert build.output_path("portable", Path("/r")).name == "dist_portable"
-
-
 def test_main_usage_and_unknown(capsys):
     assert build.main([]) == 0                      # 비대화형 → 사용법 출력
-    assert "exe" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "portable" in out and "verify" in out
     assert build.main(["nope"]) == 2                # 알 수 없는 종류
+
+
+@pytest.mark.parametrize("kind", ["online", "exe", "exe-lite"])
+def test_removed_build_kinds_are_unknown(kind):
+    """exe 런처·lite·online 배포는 없어졌다 — 알 수 없는 종류로 2 를 돌려준다."""
+    assert build.main([kind]) == 2
+    assert kind not in build._ACTIONS
 
 
 def test_prompt_kind_selection():
@@ -57,8 +51,7 @@ def test_prompt_kind_selection():
     # 번호는 _MENU 순서를 그대로 따른다 — 항목을 추가해도 이 테스트가 따라오게 한다.
     for i, (kind, _desc) in enumerate(build._MENU, start=1):
         assert build._prompt_kind(input_fn=lambda _, s=str(i): s) == kind
-    assert build._prompt_kind(input_fn=lambda _: "exe") == "exe"
-    assert build._prompt_kind(input_fn=lambda _: "exe-lite") == "exe-lite"
+    assert build._prompt_kind(input_fn=lambda _: "portable") == "portable"
     assert build._prompt_kind(input_fn=lambda _: "verify") == "verify"
     assert build._prompt_kind(input_fn=lambda _: "") is None       # Enter=취소
     assert build._prompt_kind(
@@ -74,54 +67,27 @@ def test_removed_onedir_mode_is_gone():
     assert not (_ROOT / "scripts" / "internal" / "build_windows.bat").exists()
 
 
-def test_launcher_spec_cannot_swallow_the_app():
-    """런처 spec 이 앱을 동봉할 통로를 갖지 않는지 — 이 사고의 기계적 재발 방지."""
-    text = (_ROOT / "scripts" / "internal" / "exe_launcher.spec").read_text(
-        encoding="utf-8")
-    assert "hiddenimports = []" in text          # 앱 모듈을 끌어들일 통로 없음
-    assert '"aoi_verification",' in text         # excludes 에 명시
-    assert "pathex=[]" in text                   # 저장소 루트를 Analysis 에 안 준다
-
-
-def test_build_online_injected_flow(monkeypatch):
-    # IR 커밋 게이트는 통과했다고 두고, 그 뒤 빌드 흐름만 본다
-    # (게이트 자체는 test_ir_bundle.test_online_build_refuses_without_committed_ir).
-    monkeypatch.setattr(build, "committed_ir_missing", lambda *a, **k: [])
-    calls = []
-    rc = build.build_online(run=lambda c, cwd=None: calls.append(
-        " ".join(str(x) for x in c)) or 0, log=lambda *a: None)
-    assert rc == 0
-    joined = "\n".join(calls)
-    assert "online.spec" in joined                  # 올바른 spec
-    assert "verify_no_forbidden.py" in joined        # 보안 가드
-    assert "pyinstaller>=6" in joined
-
-
 def _sandbox_build(monkeypatch, tmp_path):
-    """``build_exe`` 를 임시 폴더에서 돌리게 한다.
+    """``build_portable`` 을 임시 폴더에서 돌리게 한다.
 
     ★ 이걸 안 하면 테스트가 **실제 저장소의 dist\\AOI_Verify 를 지운다** — 개발자가
     빌드해 둔 산출물이 pytest 한 번에 날아간다."""
     monkeypatch.setattr(build, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(build, "preflight", lambda *a, **k: 0)   # 디스크/git 검사 제외
-    return tmp_path / build.EXE_OUT_DIRNAME
+    return tmp_path / build.OUT_DIRNAME
 
 
-def _fake_run(calls, out: Path, exe_mb: float = 3.0):
-    """PyInstaller 호출을 보면 얇은 런처 exe 를 만들어 주는 가짜 실행기."""
+def _fake_run(calls):
+    """호출된 명령만 기록하고 성공을 돌려주는 가짜 실행기."""
     def _run(cmd, cwd=None):
-        joined = " ".join(str(x) for x in cmd)
-        calls.append(joined)
-        if "PyInstaller" in joined:
-            out.mkdir(parents=True, exist_ok=True)
-            (out / "AOI_Verify.exe").write_bytes(b"x" * int(exe_mb * 1024 * 1024))
+        calls.append(" ".join(str(x) for x in cmd))
         return 0
     return _run
 
 
-def test_build_exe_builds_launcher_then_reuses_portable(monkeypatch, tmp_path):
-    """exe 빌드는 ① 런처 spec 을 얼리고 ② 포터블 빌더로 런타임·앱을 배치한다."""
-    out = _sandbox_build(monkeypatch, tmp_path)
+def test_build_portable_runs_guard_then_portable_builder(monkeypatch, tmp_path):
+    """빌드는 보안 가드 뒤에 포터블 빌더로 런타임·IR·앱을 배치하고 검증한다."""
+    _sandbox_build(monkeypatch, tmp_path)
     calls = []
     seen = {}
 
@@ -132,23 +98,20 @@ def test_build_exe_builds_launcher_then_reuses_portable(monkeypatch, tmp_path):
             return 0
 
     monkeypatch.setattr(build, "_load_portable_impl", lambda: _FakeImpl)
-    monkeypatch.setattr(build, "verify_exe", lambda *a, **k: 0)
-    rc = build.build_exe(run=_fake_run(calls, out), log=lambda *a: None)
+    monkeypatch.setattr(build, "verify_build", lambda *a, **k: 0)
+    rc = build.build_portable(run=_fake_run(calls), log=lambda *a: None)
     assert rc == 0
-    joined = "\n".join(calls)
-    assert "exe_launcher.spec" in joined             # 얇은 런처 spec
-    assert "verify_no_forbidden.py" in joined        # 보안 가드
-    assert "--distpath" in joined                    # 산출물 위치 지정
-    # 포터블 빌더에 넘긴 옵션 — 병합식 update_app.bat 은 빼고, 백본 IR 은 동봉한다.
-    assert seen["out_dirname"] == build.EXE_OUT_DIRNAME
+    assert any("verify_no_forbidden.py" in c for c in calls)   # 보안 가드
+    assert not any("PyInstaller" in c for c in calls)          # exe 런처 없음
+    assert seen["out_dirname"] == build.OUT_DIRNAME
+    assert seen["bats"] == ("run_aoi.bat", "run_aoi_debug.bat")
     assert "update_app.bat" not in seen["bats"]
     assert seen["bundle_ir"] is True
 
 
 def test_rebuild_removes_stale_onedir_output(monkeypatch, tmp_path):
-    """★ 회귀 가드 — 옛 단독 exe 산출물을 지우지 않으면 검증이 영원히 실패한다.
+    """★ 회귀 가드 — 옛 exe 배포 산출물을 지우지 않으면 검증이 영원히 실패한다.
 
-    PyInstaller 는 onefile 이라 exe 파일 하나만 교체하고 distpath 를 비우지 않으므로,
     빌드가 직접 지워야 한다. 안 지우면 사용자는 '다시 빌드하세요' 안내를 아무리 따라도
     상태를 바꿀 수 없다(무한 루프)."""
     out = _sandbox_build(monkeypatch, tmp_path)
@@ -166,34 +129,25 @@ def test_rebuild_removes_stale_onedir_output(monkeypatch, tmp_path):
     monkeypatch.setattr(build, "_load_portable_impl",
                         lambda: type("I", (), {"run_build": staticmethod(
                             lambda *a, **k: 0)}))
-    monkeypatch.setattr(build, "verify_exe", lambda *a, **k: 0)
-    assert build.build_exe(run=_fake_run([], out), log=lambda *a: None) == 0
+    monkeypatch.setattr(build, "verify_build", lambda *a, **k: 0)
+    assert build.build_portable(run=_fake_run([]), log=lambda *a: None) == 0
 
     assert not (out / "_internal").exists(), "옛 onedir 잔재가 남았다"
     assert not (out / "app.old").exists()
+    assert not (out / "AOI_Verify.exe").exists(), "옛 exe 가 남았다"
     assert (out / "python" / "python.exe").is_file(), "번들 런타임을 지우면 30분을 버린다"
     assert (out / "runtime").is_dir()
     assert (out / "결과" / "사용자결과.xlsx").is_file(), "사용자 산출물을 지웠다"
 
 
-def test_build_exe_stops_when_launcher_came_out_fat(monkeypatch, tmp_path):
-    """런처에 앱이 딸려 들어갔으면 2~3 GB 를 받기 **전에** 멈춰야 한다."""
-    out = _sandbox_build(monkeypatch, tmp_path)
-    monkeypatch.setattr(build, "_load_portable_impl",
-                        lambda: (_ for _ in ()).throw(
-                            AssertionError("무거운 단계로 넘어가면 안 된다")))
-    with pytest.raises(SystemExit):
-        build.build_exe(run=_fake_run([], out, exe_mb=63.0), log=lambda *a: None)
-
-
-def test_build_exe_reports_why_when_stage_fails(monkeypatch, tmp_path):
+def test_build_portable_reports_why_when_stage_fails(monkeypatch, tmp_path):
     """30분 돌리고 실패했는데 '실패했다' 는 말조차 없으면 원인을 알 수 없다."""
-    out = _sandbox_build(monkeypatch, tmp_path)
+    _sandbox_build(monkeypatch, tmp_path)
     monkeypatch.setattr(build, "_load_portable_impl",
                         lambda: type("I", (), {"run_build": staticmethod(
                             lambda *a, **k: 1)}))
     logs = []
-    rc = build.build_exe(run=_fake_run([], out), log=logs.append)
+    rc = build.build_portable(run=_fake_run([]), log=logs.append)
     assert rc != 0
     assert any("실패" in m for m in logs), "실패 사실을 알리지 않았다"
     # run_build 가 이미 정확한 [FAILED] 를 냈으므로 그쪽을 보라고 안내한다
@@ -201,10 +155,10 @@ def test_build_exe_reports_why_when_stage_fails(monkeypatch, tmp_path):
     assert any("확인하세요" in m for m in logs)
 
 
-# ── verify_exe 검증 로직 ────────────────────────────────────────────────────
+# ── verify_build 검증 로직 ────────────────────────────────────────────────────
 def _make_good_bundle(tmp_path) -> Path:
     """검증을 통과하는 최소 산출물을 만든다."""
-    out = tmp_path / build.EXE_OUT_DIRNAME
+    out = tmp_path / build.OUT_DIRNAME
     app = out / "app"
     pkg = app / "aoi_verification"
     (pkg / "app" / "ui" / "assets").mkdir(parents=True)
@@ -222,7 +176,8 @@ def _make_good_bundle(tmp_path) -> Path:
     (app / "양식.xlsx").write_bytes(b"x" * 1000)
     (app / "VERSION").write_text('{"sha": "a", "branch": "b", "repo": "r"}',
                                  encoding="utf-8")
-    (out / "AOI_Verify.exe").write_bytes(b"x" * 3_000_000)
+    (out / "run_aoi.bat").write_text("@echo off", encoding="utf-8")
+    (out / "run_aoi_debug.bat").write_text("@echo off", encoding="utf-8")
     (out / "python").mkdir()
     (out / "python" / "python.exe").write_bytes(b"x")
     (out / "python" / "pythonw.exe").write_bytes(b"x")
@@ -244,14 +199,14 @@ def _make_good_bundle(tmp_path) -> Path:
     return out
 
 
-def test_verify_exe_pass(tmp_path):
+def test_verify_build_pass(tmp_path):
     _make_good_bundle(tmp_path)
     logs = []
-    assert build.verify_exe(tmp_path, log=logs.append) == 0
+    assert build.verify_build(tmp_path, log=logs.append) == 0
     assert any("빌드 정상" in m for m in logs)
 
 
-def test_verify_exe_fails_when_a_bundled_font_is_missing(tmp_path):
+def test_verify_build_fails_when_a_bundled_font_is_missing(tmp_path):
     """★ 폰트가 빠지면 빌드 검증이 잡아야 한다.
 
     `theme.load_app_fonts` 는 실패를 **삼킨다**(폰트가 없다고 앱이 안 뜨면 안 되므로).
@@ -267,40 +222,57 @@ def test_verify_exe_fails_when_a_bundled_font_is_missing(tmp_path):
     assert victim.is_file()
     victim.unlink()
     logs = []
-    assert build.verify_exe(tmp_path, log=logs.append) != 0
+    assert build.verify_build(tmp_path, log=logs.append) != 0
     assert any(_FONT_FILES[0] in m and "[!!]" in m for m in logs)
 
 
-def test_verify_exe_fails_when_app_is_frozen_into_the_exe(tmp_path):
-    """★ 핵심 회귀 가드 — _internal/ 이 생기면 앱을 다시 exe 안에 얼린 것이다."""
+def test_verify_build_fails_when_old_exe_layout_remains(tmp_path):
+    """★ 회귀 가드 — _internal/ 이나 AOI_Verify.exe 가 있으면 옛 exe 배포 찌꺼기다."""
     out = _make_good_bundle(tmp_path)
     (out / "_internal").mkdir()
     logs = []
-    assert build.verify_exe(tmp_path, log=logs.append) != 0
+    assert build.verify_build(tmp_path, log=logs.append) != 0
     assert any("_internal" in m and "[!!]" in m for m in logs)
 
 
-def test_verify_exe_fails_on_empty_app_package(tmp_path):
+def test_verify_checks_fail_when_launcher_exe_exists(tmp_path):
+    """AOI_Verify.exe 가 있으면 실패 — 회사 보안이 지우는 서명 없는 exe 를 쓰지 않는다."""
+    out = _make_good_bundle(tmp_path)
+    assert all(ok for ok, _ in build.verify_checks(out))
+    (out / "AOI_Verify.exe").write_bytes(b"x")
+    bad = [label for ok, label in build.verify_checks(out) if not ok]
+    assert bad and any("AOI_Verify.exe" in b for b in bad)
+
+
+def test_verify_checks_fail_without_run_aoi_bat(tmp_path):
+    """run_aoi.bat 이 곧 런처다 — 없으면 사용자가 앱을 켤 수 없다."""
+    out = _make_good_bundle(tmp_path)
+    (out / "run_aoi.bat").unlink()
+    bad = [label for ok, label in build.verify_checks(out) if not ok]
+    assert bad and any("run_aoi.bat" in b for b in bad)
+
+
+def test_verify_build_fails_on_empty_app_package(tmp_path):
     """폴더만 있고 코드가 없는 상태로는 통과하지 못한다(옛 검증의 빈틈)."""
     out = _make_good_bundle(tmp_path)
     for p in (out / "app" / "aoi_verification").glob("m*.py"):
         p.unlink()
-    assert build.verify_exe(tmp_path, log=lambda *a: None) != 0
+    assert build.verify_build(tmp_path, log=lambda *a: None) != 0
 
 
-def test_verify_exe_fails_without_bundled_ir(tmp_path):
+def test_verify_build_fails_without_bundled_ir(tmp_path):
     """IR 이 없으면 GPU 가속 경로가 통째로 죽는다 — 빌드 실패로 잡는다.
 
     배포본에 torch 가 없어 런타임 변환으로 되살릴 수도 없다."""
     out = _make_good_bundle(tmp_path)
     import shutil
     shutil.rmtree(portable.ir_dir(out))
-    assert build.verify_exe(tmp_path, log=lambda *a: None) != 0
+    assert build.verify_build(tmp_path, log=lambda *a: None) != 0
 
 
-def test_verify_exe_fail_missing_exe(tmp_path):
+def test_verify_build_fail_missing_output(tmp_path):
     logs = []
-    assert build.verify_exe(tmp_path, log=logs.append) != 0
+    assert build.verify_build(tmp_path, log=logs.append) != 0
     assert any("[!!]" in m for m in logs)
 
 
@@ -337,7 +309,7 @@ def test_portable_run_build_aborts_without_runtime(tmp_path, monkeypatch):
 # ── 산출물 상태 진단 — '무엇이 없다' 가 아니라 '무엇을 하라' ──────────────────
 def _stage(tmp_path, *, stage: str) -> Path:
     """지정한 단계까지 진행된 산출물 폴더를 만든다(run_build 의 기록 순서 그대로)."""
-    out = tmp_path / build.EXE_OUT_DIRNAME
+    out = tmp_path / build.OUT_DIRNAME
     if stage == "missing":
         return out
     out.mkdir(parents=True)
@@ -347,10 +319,9 @@ def _stage(tmp_path, *, stage: str) -> Path:
         (out / "_internal").mkdir()
         (out / "AOI_Verify.exe").write_bytes(b"x")
         return out
-    (out / "AOI_Verify.exe").write_bytes(b"x")
-    if stage == "launcher":
-        return out
     (out / "python").mkdir()
+    if stage == "runtime_dir":
+        return out
     (out / "python" / "python.exe").write_bytes(b"x")
     if stage == "runtime":
         return out
@@ -373,7 +344,7 @@ def _stage(tmp_path, *, stage: str) -> Path:
     ("missing", "not_built"),
     ("empty", "not_built"),
     ("stale", "stale_onedir"),
-    ("launcher", "partial:runtime"),
+    ("runtime_dir", "partial:runtime"),
     ("runtime", "partial:deps"),
     ("deps", "partial:ir"),
     ("ir", "partial:appcopy"),
@@ -552,14 +523,14 @@ def test_import_probe_disables_user_site(tmp_path):
     assert "openvino" in cmd[-1] and "PyQt6" in cmd[-1]      # 무거운 것까지 확인
 
 
-def test_build_exe_does_not_guess_when_run_build_already_reported(monkeypatch, tmp_path):
+def test_build_portable_does_not_guess_when_run_build_already_reported(monkeypatch, tmp_path):
     """run_build 가 정확한 이유를 출력했는데 그 위에 추측을 덮으면 모순 안내가 된다."""
-    out = _sandbox_build(monkeypatch, tmp_path)
+    _sandbox_build(monkeypatch, tmp_path)
     monkeypatch.setattr(build, "_load_portable_impl",
                         lambda: type("I", (), {"run_build": staticmethod(
                             lambda *a, **k: 1)}))
     logs = []
-    build.build_exe(run=_fake_run([], out), log=logs.append)
+    build.build_portable(run=_fake_run([]), log=logs.append)
     joined = "\n".join(logs)
     assert "[FAILED]" in joined or "확인하세요" in joined
     assert "진단" not in joined, "이미 사유가 나온 자리에서 추측 진단을 덧붙였다"
@@ -568,7 +539,7 @@ def test_build_exe_does_not_guess_when_run_build_already_reported(monkeypatch, t
 def test_dev_machine_is_checked_before_the_expensive_steps(monkeypatch, tmp_path):
     """★ 순서 회귀 가드 — 개발 PC 검사가 뒤에 있으면 사용자는 CPython 다운로드와
     2~3 GB pip 설치로 30분 이상을 태운 **뒤에야** 같은 실패를 다시 본다."""
-    out = _sandbox_build(monkeypatch, tmp_path)
+    _sandbox_build(monkeypatch, tmp_path)
     monkeypatch.setattr(build, "_load_portable_impl",
                         lambda: (_ for _ in ()).throw(
                             AssertionError("개발 PC 검사 전에 무거운 단계로 갔다")))
@@ -581,10 +552,9 @@ def test_dev_machine_is_checked_before_the_expensive_steps(monkeypatch, tmp_path
 
     monkeypatch.setattr(build, "dev_python", lambda: __import__("sys").executable)
     logs = []
-    assert build.build_exe(run=_run, log=logs.append) != 0
-    # 가드가 첫 명령들 중 하나여야 한다 — PyInstaller 나 pip 보다 앞.
+    assert build.build_portable(run=_run, log=logs.append) != 0
+    # 가드가 첫 명령들 중 하나여야 하고, 무거운 단계(_load_portable_impl)는 안 불린다.
     assert any("verify_no_forbidden" in c for c in calls)
-    assert not any("PyInstaller" in c for c in calls), "런처 빌드까지 갔다"
     assert any("개발 PC" in m for m in logs)
 
 
@@ -594,101 +564,3 @@ def test_dev_python_points_at_the_venv_base(tmp_path):
     p = build.dev_python()
     assert str(_sys.base_prefix) in p
     assert p.endswith("python.exe") or p.endswith("python3")
-
-
-# ── lite 배포 (라이브러리를 빼고 첫 실행 때 받는다) ────────────────────────────
-def _make_good_lite_bundle(tmp_path) -> Path:
-    """lite 산출물 — 전체 배포본과 같되 **라이브러리와 표식이 없다.**"""
-    import shutil
-    full = _make_good_bundle(tmp_path)
-    out = tmp_path / build.EXE_LITE_OUT_DIRNAME
-    out.parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(full), str(out))
-    (out / ".deps_installed").unlink()               # 빌드가 일부러 안 남긴다
-    shutil.rmtree(portable.site_packages_dir(out))   # 라이브러리 없음
-    portable.site_packages_dir(out).mkdir(parents=True)
-    return out
-
-
-def test_build_exe_lite_skips_dependency_install(monkeypatch, tmp_path):
-    """exe-lite 는 포터블 빌더에 install_deps=False 와 lite 산출물 폴더를 넘긴다."""
-    monkeypatch.setattr(build, "REPO_ROOT", tmp_path)
-    monkeypatch.setattr(build, "preflight", lambda *a, **k: 0)
-    out = tmp_path / build.EXE_LITE_OUT_DIRNAME
-    seen = {}
-
-    class _FakeImpl:
-        @staticmethod
-        def run_build(repo_root, py_url, run=None, log=None, **kw):
-            seen.update(kw)
-            return 0
-
-    monkeypatch.setattr(build, "_load_portable_impl", lambda: _FakeImpl)
-    monkeypatch.setattr(build, "verify_exe", lambda *a, **k: 0)
-    assert build.build_exe(run=_fake_run([], out), log=lambda *a: None,
-                           lite=True) == 0
-    assert seen["out_dirname"] == build.EXE_LITE_OUT_DIRNAME
-    assert seen["install_deps"] is False
-    assert seen["bundle_ir"] is True          # IR 은 lite 에서도 동봉한다(가속 유지)
-
-
-def test_exe_and_lite_go_to_different_folders():
-    """같은 폴더에 쓰면 한쪽이 다른 쪽을 덮어써 뭘 전달하는지 알 수 없게 된다."""
-    assert build.exe_out_dirname(False) == build.EXE_OUT_DIRNAME
-    assert build.exe_out_dirname(True) == build.EXE_LITE_OUT_DIRNAME
-    assert build.EXE_OUT_DIRNAME != build.EXE_LITE_OUT_DIRNAME
-
-
-def test_verify_lite_pass(tmp_path):
-    _make_good_lite_bundle(tmp_path)
-    logs = []
-    assert build.verify_exe(tmp_path, log=logs.append, lite=True) == 0
-    assert any("빌드 정상" in m for m in logs)
-
-
-def test_verify_lite_fails_when_marker_was_written(tmp_path):
-    """★ 회귀 가드 — lite 에 표식이 찍혀 나가면 사용자 PC 가 설치를 **건너뛴다.**
-
-    라이브러리는 없는데 '설치됐다' 고 판단하므로 앱이 ImportError 로 죽고, 사용자는
-    되돌릴 방법이 없다.  빌드 단계에서 반드시 잡아야 한다."""
-    out = _make_good_lite_bundle(tmp_path)
-    (out / ".deps_installed").write_text("fp", encoding="utf-8")
-    logs = []
-    assert build.verify_exe(tmp_path, log=logs.append, lite=True) != 0
-    assert any(".deps_installed" in m and "[!!]" in m for m in logs)
-
-
-def test_verify_lite_fails_when_libraries_leaked_in(tmp_path):
-    """라이브러리가 딸려 들어가면 lite 가 아니다 — 커진 걸 모르고 배포하게 된다."""
-    out = _make_good_lite_bundle(tmp_path)
-    (portable.site_packages_dir(out) / "big.bin").write_bytes(
-        b"\x00" * (120 * 1024 * 1024))
-    assert build.verify_exe(tmp_path, log=lambda *a: None, lite=True) != 0
-
-
-def test_verify_lite_still_requires_the_bundled_ir(tmp_path):
-    """IR 은 저장소에 없어 나중에 받을 수 없다 — lite 에서도 반드시 동봉돼야 한다."""
-    import shutil
-    out = _make_good_lite_bundle(tmp_path)
-    shutil.rmtree(portable.ir_dir(out))
-    assert build.verify_exe(tmp_path, log=lambda *a: None, lite=True) != 0
-
-
-def test_lite_diagnose_does_not_call_missing_marker_a_failure(tmp_path):
-    """lite 는 표식이 없는 것이 정상 — '중간에 멈췄다' 로 안내하면 거짓 경보다."""
-    out = _make_good_lite_bundle(tmp_path)
-    assert build.diagnose(out, lite=True)[0] == "complete"
-    assert build.diagnose(out, lite=False)[0] == "partial:deps"
-
-
-def test_lite_verify_skips_the_import_probe(tmp_path):
-    """라이브러리가 아직 없으니 import 프로브는 반드시 실패한다 — 돌리면 안 된다."""
-    _make_good_lite_bundle(tmp_path)
-    probed = []
-
-    def _run(cmd, cwd=None):
-        probed.append(cmd)
-        return 1                      # 돌렸다면 실패했을 것이다
-    assert build.verify_exe(tmp_path, log=lambda *a: None, run=_run,
-                            lite=True) == 0
-    assert probed == [], "lite 에서 import 프로브를 돌렸다"

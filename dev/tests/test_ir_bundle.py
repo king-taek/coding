@@ -190,22 +190,6 @@ def test_missing_committed_ir_falls_back_to_converting(tmp_path):
     assert not (app / p.IR_TMP_DIRNAME).exists()
 
 
-def test_online_build_refuses_without_committed_ir(tmp_path):
-    """온라인 배포는 아무것도 동봉하지 않는다 — IR 이 없으면 가속이 조용히 죽는다."""
-    import importlib.util as u
-    spec = u.spec_from_file_location("build", str(REPO_ROOT / "scripts" / "build.py"))
-    build = u.module_from_spec(spec)
-    spec.loader.exec_module(build)
-
-    assert build.committed_ir_missing(tmp_path)          # 빈 저장소 → 전부 빠짐
-    logs = []
-    assert build.build_online(run=lambda *a, **k: 0, log=logs.append) != 0 or \
-        not build.committed_ir_missing(REPO_ROOT)
-    joined = "\n".join(logs)
-    if build.committed_ir_missing(REPO_ROOT):
-        assert "make_ir.py" in joined, "무엇을 하라는지 알려주지 않았다"
-
-
 # ---------------------------------------------------------------------------
 # 3) lite 배포 — 라이브러리를 빼도 IR 은 구울 수 있어야 한다
 # ---------------------------------------------------------------------------
@@ -217,39 +201,6 @@ def test_ir_build_can_run_without_libraries_in_the_bundle():
     p = _portable()
     assert any("openvino" in r for r in p._BUILD_ONLY_REQS)
     assert "sys.path.append(tmp)" in p._IR_BUILD_SRC
-
-
-def test_lite_build_skips_pip_and_leaves_no_marker(tmp_path, monkeypatch):
-    """★ lite 는 표식을 남기면 안 된다 — 표식 부재가 곧 '첫 실행 때 설치하라' 신호다.
-
-    빌드가 표식을 찍어 보내면 사용자 PC 는 설치를 건너뛰고, 라이브러리가 없는 채로
-    앱을 띄우려다 ImportError 로 죽는다."""
-    p = _portable()
-    (tmp_path / "requirements.txt").write_text("numpy>=1\n", encoding="utf-8")
-    (tmp_path / "main.py").write_text("x", encoding="utf-8")
-    (tmp_path / "aoi_verification").mkdir()
-    (tmp_path / "dev").mkdir()
-
-    out = tmp_path / "dist" / "lite"
-    ppy = p.portable_python(out)
-    ppy.parent.mkdir(parents=True)
-    ppy.write_bytes(b"x")
-
-    cmds = []
-
-    def fake_run(cmd, cwd=None):
-        cmds.append(" ".join(str(c) for c in cmd))
-        return 0
-
-    monkeypatch.setattr(p, "_build_ir", lambda *a, **k: 0)
-    p.run_build(tmp_path, "http://x", run=fake_run, log=lambda *a: None,
-                out_dirname="dist/lite", bats=(), install_deps=False)
-
-    joined = "\n".join(cmds)
-    assert "install --upgrade pip" in joined, "pip 자체는 최신으로 둔다"
-    assert "-r " not in joined, "lite 인데 requirements 를 설치했다"
-    assert not p._import_bootstrap().deps_marker(out).exists(), \
-        "lite 빌드가 .deps_installed 를 남겼다 — 첫 실행이 설치를 건너뛴다"
 
 
 def test_full_build_still_installs_and_marks(tmp_path, monkeypatch):
