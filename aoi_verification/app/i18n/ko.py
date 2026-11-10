@@ -516,6 +516,23 @@ MENU_CHECK_UPDATE = "업데이트 확인"
 SETUP_SECTION_FOLDER = "1  폴더"
 SETUP_SECTION_MODE = "2  방식"
 
+# ── [좌표수집-임시] 시작 — 수집·분석이 끝나면 이 블록을 통째로 지운다 ─────────────
+COORD_COLLECT_BUTTON = "좌표 자료 수집"
+COORD_COLLECT_TITLE = "좌표 자료 수집"
+COORD_COLLECT_ASK = (
+    "NAS 의 Scanresult 와 Conder Scan 을 돌며 좌표 자료를 모읍니다. "
+    "읽기만 하고 사진은 열지 않습니다. 최대 30분이 걸리고 중간에 멈출 수 있습니다."
+)
+COORD_COLLECT_START = "수집 시작"
+COORD_COLLECT_RUNNING = "좌표 자료를 모으는 중"
+COORD_COLLECT_DONE_FMT = (
+    "웨이퍼 폴더 {wafers}개를 확인했고 이상 폴더는 {odd}개입니다.\n"
+    "바탕화면에 생긴 '좌표실험_' 파일들을 올려 주세요.\n{path}"
+)
+COORD_COLLECT_NO_TOOL = "수집 도구(dev/coord_lab.py)가 없습니다. 개발자 모드에서 dev 브랜치로 설치해 주세요."
+COORD_COLLECT_FAIL_FMT = "수집하다 멈췄습니다: {error}"
+# ── [좌표수집-임시] 끝 ─────────────────────────────────────────────────────
+
 # ── 개발자 모드 (메인 화면 Ctrl+Shift+D) ───────────────────────────────────
 DEV_MODE_ON = "개발자 모드를 켰습니다."
 DEV_MODE_OFF = "개발자 모드를 껐습니다. 자동 업데이트는 기본 브랜치를 따릅니다."
