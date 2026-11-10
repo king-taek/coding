@@ -420,49 +420,85 @@ def strong_id(name: str) -> bool:
     return len(name) >= 5 and not name.isdigit()
 
 
+_LOT_MARK = re.compile(r"\(([A-Za-z0-9]{3})\)\s*$")      # Conder LOT 폴더 끝의 S/M: ``106. 6501169AK5 (CCG)``
+_INPUT_LOT = re.compile(r"(?im)^\s*InputLot\s*=[ \t]*([A-Za-z0-9]{3})-")
+_CONDER_BELOW_LOT = 4       # LOT 폴더 아래로 내려가는 깊이(공정 → [구분] → 웨이퍼)
+
+
+def strip_mark_of(folder: Path):
+    """Camtek 웨이퍼 폴더의 S/M(스트립 마크, 3글자).  ``WaferInfo.ini`` 의 ``InputLot=GFW-RDL4`` 첫 하이픈 앞
+    (파일), 없으면 LOT 폴더 이름의 첫 토큰(``CCG`` · ``TSC-FS`` · ``SGG 1018S`` — 가정, 관측 5건).
+    틀려도 정답이 오염되지는 않는다 — Conder 쪽에서 파일명에 웨이퍼 ID 가 든 사진만 센다."""
+    m = _INPUT_LOT.search(read_text(_find_up(folder, "WaferInfo.ini") or folder / "-") or "")
+    if not m:
+        m = re.match(r"([A-Za-z0-9]{3})(?:$|[\s\-_])", folder.parent.name)
+    return m.group(1).upper() if m else None
+
+
+def conder_index(roots, deadline, log=print):
+    """S/M → Conder LOT 폴더들.  구조는 ``고객 \\ 디바이스 \\ N. LOT (S/M) \\ 공정 …`` 이라(실측 2026-11-10:
+    고객 80 · 디바이스 902 · LOT 28,783 · 표식 7,674종) 위 두 단만 열면 LOT 전부가 나온다.
+    트리 전체는 수십만 폴더라 훑지 않는다."""
+    index, cut = {}, False
+    for r in roots:
+        for cust, cp, _ in sorted(_subdirs(Path(r), deadline)):
+            if cust.startswith(_CONDER_SKIP_TOP):
+                continue
+            log(f"  Conder 목록: {cust}")
+            for _dev, dp, _ in _subdirs(cp, deadline):
+                for lot, lp, _ in _subdirs(dp, deadline):
+                    m = _LOT_MARK.search(lot)
+                    if m:
+                        index.setdefault(m.group(1).upper(), []).append(lp)
+            if _expired(deadline):
+                return index, True
+    return index, cut
+
+
 def nas_conder(roots, wanted, deadline, log=print):
-    """Conder Scan 에서 **이름이 웨이퍼 ID 인 폴더**만 열어 LIVE 파일명을 읽는다(사진은 안 연다).
+    """Conder Scan 에서 웨이퍼의 LIVE 파일명을 읽는다(사진은 안 연다).
 
-    잘못 짚지 않게: 짧거나 숫자뿐인 이름은 찾지 않고(``strong_id``), 파일명에 그 ID 토큰이 든 사진만
-    세며, 고객 폴더가 아닌 보관함(``_CONDER_SKIP_TOP``)은 들어가지 않는다.  최근 폴더부터 본다."""
-    live, cut = {}, False
-    wanted = {w for w in wanted if strong_id(w)}
+    ``wanted`` = {웨이퍼 ID: S/M}.  S/M 이 같은 LOT 폴더 아래만 보고, **파일명에 그 웨이퍼 ID 토큰이 든
+    사진**만 센다.  짧거나 숫자뿐인 ID(``strong_id`` 아님)와 S/M 을 모르는 웨이퍼는 찾지 않는다 —
+    이름이 ``9`` 인 폴더를 보관함에서 찾아 웨이퍼로 짚은 적이 있다(실측)."""
+    live = {}
+    by_mark = {}
+    for w, mark in wanted.items():
+        if mark and strong_id(w):
+            by_mark.setdefault(mark, set()).add(w)
+    if not by_mark:
+        return live, False
+    index, cut = conder_index(roots, deadline, log)
 
-    def visit(d: Path, depth: int):
+    def visit(d: Path, depth: int, ids):
         nonlocal cut
-        if _expired(deadline):
+        if cut or _expired(deadline):
             cut = True
             return
-        for name, p, _ in sorted(_subdirs(d, deadline), key=lambda t: -t[2]):
-            if cut or _expired(deadline):
-                cut = True
-                return
-            if depth == 0:
-                if name.startswith(_CONDER_SKIP_TOP):
-                    continue
-                log(f"  Conder 훑는 중: {name}")
-            if name in wanted:
-                names = []
-                try:
-                    with os.scandir(p) as it:
-                        for i, e in enumerate(it):
-                            if i >= _SCAN_CAP or _expired(deadline):
-                                break
-                            if Path(e.name).suffix.lower() in IMG_EXT and name in Path(e.name).stem.split("_"):
-                                names.append(e.name)
-                                if len(names) >= _LIVE_CAP:
-                                    break
-                except OSError:
-                    continue
-                lv = [(n, q) for n, q in ((n, parse_live(n)) for n in names) if q]
-                if lv:
-                    live[p] = lv
-                    log(f"  Conder {name}: LIVE 이름 {len(lv)}  {p}")
-            elif depth < _DEPTH:
-                visit(p, depth + 1)
+        names = []
+        try:
+            with os.scandir(d) as it:
+                for i, e in enumerate(it):
+                    if i >= _SCAN_CAP or len(names) >= _LIVE_CAP or _expired(deadline):
+                        break
+                    stem = Path(e.name)
+                    if stem.suffix.lower() in IMG_EXT and ids.intersection(stem.stem.split("_")):
+                        names.append(e.name)
+        except OSError:
+            return
+        lv = [(n, q) for n, q in ((n, parse_live(n)) for n in names) if q]
+        if lv:
+            live[d] = lv
+            log(f"  Conder LIVE 이름 {len(lv)}  {d}")
+        if depth < _CONDER_BELOW_LOT:
+            for _name, p, _ in _subdirs(d, deadline):
+                visit(p, depth + 1, ids)
 
-    for r in roots:
-        visit(Path(r), 0)
+    for mark, ids in sorted(by_mark.items()):
+        lots = index.get(mark, [])
+        log(f"  Conder S/M {mark}: LOT 폴더 {len(lots)}개 · 웨이퍼 {len(ids)}장")
+        for lp in lots:
+            visit(lp, 0, ids)
     return live, cut
 
 
@@ -597,7 +633,8 @@ def run_nas(argv, out: Path, progress=None, stop=None):
     t0 = time.time()
     folders, cut1 = nas_walk(cam_roots, until(t0 + minutes * 60 * 0.6), per_lot, lots, log)
     klas_files = []
-    wanted = {wafer_name(f) for f in folders}
+    wanted = {wafer_name(f): strip_mark_of(f) for f in folders}
+    print(f"S/M 을 아는 웨이퍼 {sum(1 for m in wanted.values() if m)}/{len(wanted)}")
     live_by_dir, cut2 = nas_conder(conder_roots, wanted, until(t0 + minutes * 60 * 0.85), log)
     for f in folders:                        # 폴더 안에 LIVE 이름 사진이 같이 있는 경우
         if stop():
