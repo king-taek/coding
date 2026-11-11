@@ -306,3 +306,64 @@ def test_conder_map_is_compared_with_the_camtek_wafer(tmp_path):
     m = r["conder_map"][0]
     assert m["COLCT"] == 3 and m["exp_cols"] == 10 and m["exp_rows"] == 6
     assert m["pitch_ratio"] == pytest.approx((14.28 / 1.0, 30.99 / 1.0))        # XDIES(mm→µm) ÷ 번호 pitch
+
+
+# ───────── 3차 수집: 내 결론이 틀렸는지 가리는 항목들 ─────────
+_RECTS = ("[DieRectInfo]\nDiceInBlockFileExists=1\n0_0=1, 20000, 20000, 500, 500\n1_0=1, 19000, 20000, 30000, 500\n"
+          "0_1=1, 20000, 20000, 500, 26000\n1_1=1, 19000, 20000, 30000, 26000\n")
+
+
+def _rect_wafer(d: Path):
+    d.mkdir(parents=True)
+    (d / "Params_WaferInfo.ini").write_text("[Geometry]\nDieStep_X=49157.9\nDieStep_Y=50407.5\n", encoding="utf-8")
+    (d / "ProductInfo.ini").write_text(
+        "[Geometric]\nColsInBlock=2\nRowsInBlock=2\n" + _RECTS + "[ExportData]\ncMax=9\nrMax=9\ncMin=1\nrMin=1\n",
+        encoding="utf-8")
+    (d / "ColorImageGrabingInfo.ini").write_text(           # 첫 결함은 균등 나눔이면 옆 die 로 넘어가는 자리
+        "[a.c.1.jpeg]\nX=73957.9\nY=5000\nCol=2\nRow=0\n[b.c.2.jpeg]\nX=31000\nY=27000\nCol=1\nRow=1\n", encoding="utf-8")
+    return {d: [(n, lab.parse_live(n)) for n in ("L_T_W_1_9_24300_4500.jpg", "L_T_W_0_8_1000_1000.jpg")]}
+
+
+def test_die_in_block_comes_from_the_rect_table_not_even_division(tmp_path):
+    """실물(AMD Sepio 6×13, 파일): 균등 나눔은 357건 중 45건이 틀렸고 ``[DieRectInfo]`` 표는 전부 맞았다.
+    die 안 좌표는 그 die 의 시작점(x0, y0)부터 잰다(관측: XP2100 장비 화면 899·259)."""
+    live = _rect_wafer(tmp_path / "L" / "W")
+    r = lab.analyze_camtek(tmp_path / "L" / "W", live)
+    assert r["sub_rule"] == "칸 표" and r["A1"]["x_bad"] == 0 and r["A1"]["uniform_bad"] == 1
+    assert r["truth_live"]["value"] == (1, 9) and r["truth_live"]["ok"] and not r["truth_live"].get("loose")
+    assert "칸 안 die 제품" in lab.flags(r)
+
+
+def test_single_die_offset_is_tested_both_ways(tmp_path):
+    """칸 안 die 가 하나뿐인 제품도 ``0_0`` 에 시작점이 적혀 있다(N7G751 3.36·1.68) — 빼야 하는지는 표로 가린다."""
+    d = tmp_path / "L" / "W"
+    d.mkdir(parents=True)
+    (d / "Params_WaferInfo.ini").write_text("[Geometry]\nDieStep_X=1000\nDieStep_Y=1000\n", encoding="utf-8")
+    (d / "ProductInfo.ini").write_text("[DieRectInfo]\n0_0=1, 900, 900, 50, 40\n", encoding="utf-8")
+    (d / "ColorImageGrabingInfo.ini").write_text(
+        "[a.c.1.jpeg]\nX=5100\nY=3200\nCol=5\nRow=3\n[b.c.2.jpeg]\nX=6300\nY=4400\nCol=6\nRow=4\n", encoding="utf-8")
+    live = {d: [(n, lab.parse_live(n)) for n in ("L_T_W_3_4_50_160.jpg", "L_T_W_4_3_250_360.jpg")]}
+    r = lab.analyze_camtek(d, live)
+    assert r["rect0"] == (50.0, 40.0) and r["live_x0"] == {"plain": 0, "minus_x0": 2}
+
+
+def test_conder_map_orientation_and_defect_cells_are_checked(tmp_path):
+    """맵 txt 의 '왼쪽부터 · 아래부터' 가 틀렸다면 뒤집은 쪽이 die 목록과 더 맞는다 — 네 방향을 다 센다."""
+    d = tmp_path / "L" / "GX57007306"
+    d.mkdir(parents=True)
+    (d / "Params_WaferInfo.ini").write_text("[Geometry]\nDieStep_X=1000\nDieStep_Y=1000\n", encoding="utf-8")
+    (d / "ColorImageGrabingInfo.ini").write_text("[a.c.1.jpeg]\nX=3100\nY=7200\nCol=3\nRow=7\n", encoding="utf-8")
+    (d / "DieLut.dat").write_text("".join(f'<DieLutData Col="{c}" Row="{r}"/>' for c, r in
+                                          ((2, 7), (3, 7), (3, 6), (4, 6))), encoding="utf-8")
+    live = {d: [(n, lab.parse_live(n)) for n in ("L_T_W_1_0_100_200.jpg", "L_T_W_2_1_300_400.jpg")]}
+    r = lab.analyze_camtek(d, live)
+    lab.attach_conder_maps(r, {"maps": {tmp_path / "x" / "GX57007306.txt": _MAP_TXT}})
+    m = r["conder_map"][0]
+    assert m["orient"] == {"그대로": 4, "좌우": 2, "상하": 2, "둘다": 4} or m["orient"]["그대로"] == 4
+    assert m["cam_dies"] == 4 and m["live_die"] == [2, 2] and m["live_bad"] == [1, 2]
+
+
+def test_walk_order_spreads_over_old_and_new_folders():
+    """1·2차는 가장 최근 폴더만 봤다 — 3차는 오래된 것까지 고르게 본다."""
+    assert lab._spread(list(range(8))) == [0, 4, 2, 6, 1, 5, 3, 7]
+    assert lab._spread([]) == [] and sorted(lab._spread(list(range(5)))) == list(range(5))
