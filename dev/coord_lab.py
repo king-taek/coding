@@ -39,6 +39,9 @@ LOT 마다 웨이퍼 몇 장만 뽑고, 사진은 열지 않고 이름만 읽고
           APP 지금 앱이 채택하는 값(저장소 안에서 돌릴 때만 — 앱이 어디서 틀리는지 보려고)
     pitch 번호 pitch = DieStep ÷ ``ProductInfo.ini [Geometric] ColsInBlock/RowsInBlock`` (파일, NAS 1차 수집)
           ``.wlup.`` 정렬 사진은 결함으로 세지 않는다
+          칸 안 die 는 ``[DieRectInfo]`` 표에서 가장 가까운 die — 균등 나눔은 근사다(AMD Sepio 45/357 틀림)
+    반증  3차 수집부터: 칸 표 대 균등 나눔 · die 시작점을 빼는지 · Conder 맵을 뒤집은 네 방향 ·
+          LIVE 번호가 맵의 die/불량 칸에 드는지 · 사진 종류별 어긋남 · 장비 방향 설정을 함께 적는다
     정답  LIVE  Conder LIVE 파일명의 col/row(장비 화면 번호)와 INI 결함을 die 안쪽 좌표로 짝지어 표결 (관측)
           EXP   번호표(위와 같은 값 — 그래서 EXP 가설을 EXP 정답으로 채점하지 않는다)            (파일)
     KLA   K1  ``SampleTestPlan`` 범위 = 중심 규칙의 '온전히 드는 die' 범위
@@ -136,6 +139,40 @@ def ini_entries(txt: str | None):
             rec = 0
         out.append((name.strip(), X, Y, col, row, rec))
     return out
+
+
+def die_rects(prod: str | None):
+    """``ProductInfo.ini [DieRectInfo]`` → {(a, b): (폭, 높이, x0, y0)} — 큰 칸 안 작은 die 의 자리(파일).
+    첫 값(0/1)의 뜻은 미확인이라 쓰지 않는다."""
+    sec = re.search(r"(?ims)^\s*\[DieRectInfo\]\s*$(.*?)(?=^\s*\[|\Z)", prod or "")
+    out = {}
+    for a, b, w, h, x0, y0 in re.findall(
+            r"(?m)^\s*(\d+)_(\d+)\s*=\s*-?\d+\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)",
+            sec.group(1) if sec else ""):
+        out[(int(a), int(b))] = (float(w), float(h), float(x0), float(y0))
+    return out
+
+
+def rect_locator(rects, bc, br):
+    """칸 안 좌표 (bx, by) → (a, b, die 안 x, die 안 y).  가장 가까운 die 를 고른다(틈에 찍힌 결함도 한 die 에 든다)."""
+    mid = lambda v: sorted(v)[len(v) // 2]
+    xc = [mid([rects[(a, b)][2] + rects[(a, b)][0] / 2 for b in range(br)]) for a in range(bc)]
+    yc = [mid([rects[(a, b)][3] + rects[(a, b)][1] / 2 for a in range(bc)]) for b in range(br)]
+
+    def locate(bx, by):
+        a = min(range(bc), key=lambda k: abs(bx - xc[k]))
+        b = min(range(br), key=lambda k: abs(by - yc[k]))
+        return a, b, bx - rects[(a, b)][2], by - rects[(a, b)][3]
+    return locate
+
+
+def _spread(items):
+    """맨 앞(가장 최근)부터 시작해 전체에 고르게 퍼지는 순서 — 0, n/2, n/4, 3n/4 …
+    최근 것만 보면 시간 제한 안에서 늘 같은 폴더만 본다(1·2차 수집)."""
+    n = len(items)
+    bits = max(1, (n - 1).bit_length())
+    order = sorted(range(1 << bits), key=lambda k: int(format(k, f"0{bits}b")[::-1], 2))
+    return [items[k] for k in order if k < n]
 
 
 def dielut_cells(p: Path):
@@ -269,9 +306,11 @@ def flip_margin(cx, cy, dia, px, py):
     return (min(fx, 1 - fx) * px, min(fy, 1 - fy) * py)
 
 
-def live_vote(entries, lives, px, py, tol=2.5):
-    """LIVE (col,row,x,y) 와 INI 결함을 die 안쪽 좌표로 짝지어 (col_origin, row_total) 을 표결한다."""
-    inner = [(math.floor(X / px), math.floor(Y / py), X % px, Y % py) for _, X, Y, *_ in entries]
+def live_vote(entries, lives, px, py, tol=2.5, inner=None):
+    """LIVE (col,row,x,y) 와 INI 결함을 die 안쪽 좌표로 짝지어 (col_origin, row_total) 을 표결한다.
+    ``inner`` = [(i, j, die 안 x, die 안 y)] 를 주면 그것을 쓴다(칸 표로 계산한 값)."""
+    if inner is None:
+        inner = [(math.floor(X / px), math.floor(Y / py), X % px, Y % py) for _, X, Y, *_ in entries]
     votes = Counter()
     for col, row, x, y in lives:
         hit = {(i - col, j + row) for i, j, xi, yi in inner
@@ -393,7 +432,7 @@ def nas_walk(roots, deadline, per_lot=3, lots=5, log=print, on_lot=None):
         if _expired(deadline):
             state["cut"] = True
             return False
-        subs = sorted(_subdirs(d, deadline), key=lambda t: -t[2])  # 최근 것부터
+        subs = _spread(sorted(_subdirs(d, deadline), key=lambda t: -t[2]))  # 최근 것부터, 오래된 것까지 고르게
         if not subs or depth > _DEPTH:
             return False
         names = sorted(subs)
@@ -482,9 +521,25 @@ def conder_map_info(txt: str):
             "dies": len(cells), "bad": sum(1 for c in cells if c != good)}
 
 
+def conder_cells(txt: str):
+    """맵 txt → (die 칸, 불량 칸, 열 수, 행 수).  칸 = (왼쪽부터 열, **아래부터** 행) — 앱 규칙(관측 9 LOT)."""
+    kv = dict(re.findall(r"(?m)^\s*([A-Za-z]\w*)\s*:\s*([^\r\n]*?)\s*$", txt))
+    rows = [ln.split(":", 1)[1].split() for ln in txt.splitlines() if ln.startswith("RowData:")]
+    n, good = len(rows), kv.get("BCEQU", "000")
+    dies = {(c, n - 1 - i) for i, row in enumerate(rows) for c, v in enumerate(row)
+            if not re.fullmatch(r"[_.\-]+", v)}
+    bad = {(c, n - 1 - i) for i, row in enumerate(rows) for c, v in enumerate(row)
+           if (c, n - 1 - i) in dies and v != good}
+    return dies, bad, max(map(len, rows), default=0), n
+
+
 def attach_conder_maps(r, extra):
-    """웨이퍼 기록에 그 웨이퍼의 Conder 맵 요약을 붙이고 Camtek 값과 나란히 둔다(Conder 만으로 맵을 그릴 근거)."""
+    """웨이퍼 기록에 그 웨이퍼의 Conder 맵 요약을 붙이고 Camtek 값과 나란히 둔다(Conder 만으로 맵을 그릴 근거).
+
+    반증용: 맵을 그대로 · 좌우 · 상하 · 둘 다 뒤집었을 때 Camtek die 목록과 겹치는 칸 수를 다 적는다
+    ('왼쪽부터 · 아래부터' 가 틀렸다면 다른 쪽이 더 크다).  LIVE 사진 번호가 die 칸 · 불량 칸에 드는지도 센다."""
     out = []
+    mine = _LAST if _LAST.get("folder") == r["folder"] else {}
     for p, txt in (extra or {}).get("maps", {}).items():
         if r["wafer"] not in re.split(r"[_\s]", Path(p).stem):
             continue
@@ -494,6 +549,17 @@ def attach_conder_maps(r, extra):
             m.update(exp_cols=e["cMax"] - e["cMin"] + 1, exp_rows=e["rMax"] - e["rMin"] + 1)
         if r.get("px") and m["XDIES"] and m["YDIES"]:        # XDIES 는 mm · die 크기(간격 아님, T254 관측)
             m["pitch_ratio"] = (m["XDIES"] * 1000 / r["px"], m["YDIES"] * 1000 / r["py"])
+        S, bad, C, Rn = conder_cells(txt)
+        D = mine.get("dies")
+        if D:
+            m["cam_dies"] = len(D)
+            m["orient"] = {"그대로": len(D & S), "좌우": len(D & {(C - 1 - c, y) for c, y in S}),
+                           "상하": len(D & {(c, Rn - 1 - y) for c, y in S}),
+                           "둘다": len(D & {(C - 1 - c, Rn - 1 - y) for c, y in S})}
+        lv = mine.get("lives") or []
+        if lv:
+            m["live_die"] = [sum(1 for q in lv if q in S), len(lv)]
+            m["live_bad"] = [sum(1 for q in lv if q in bad), len(lv)]
         out.append(m)
     if out:
         r["conder_map"] = out
@@ -582,6 +648,21 @@ def flags(r, no_map=()):
         out.append("빌리기≠정답")
     if not (h.get("EXP") or h.get("LUT")) and h.get("C1D") and h.get("G3") and h["C1D"] != h["G3"]:
         out.append("표 없음+계산식 갈림")
+    if "block" in r:
+        out.append("칸 안 die 제품")                       # 칸 표 규칙을 원재료로 다시 확인하려고 모은다
+    if tuple(r.get("shift", (0, 0))) != (0, 0):
+        out.append("화면 시프트 있음")
+    if r.get("rect0"):
+        out.append("die 시작점 있음")
+    if any(n and k not in ("c", "wlup") and b for k, (n, b) in r.get("kinds", {}).items()):
+        out.append("결함 아닌 사진 종류 의심")
+    if r.get("env", {}).get("IsPanel") or r.get("env", {}).get("IsMultiIndex") or (r.get("dia") and abs(r["dia"] - 300000) > 1000):
+        out.append("300 mm 원형이 아닌 형태")
+    for m in r.get("conder_map", []):
+        o = m.get("orient")
+        if o and o["그대로"] < max(o.values()):
+            out.append("Conder 맵 방향 의심")
+            break
     if not r.get("cx"):
         out.append("중심 없음")
     if r.get("A1", {}).get("x_bad"):
@@ -761,6 +842,9 @@ def wafer_name(folder: Path) -> str:
     return re.sub(r"\(.*\)$", "", folder.name).strip()
 
 
+_LAST = {}      # 방금 분석한 폴더의 LIVE 번호 · die 목록(Conder 맵 대조에 한 번 쓰고 버린다 — JSON 에 넣기엔 크다)
+
+
 def analyze_camtek(folder: Path, live_by_dir):
     r = {"folder": str(folder), "wafer": wafer_name(folder), "lot": str(folder.parent), "notes": []}
     params = read_text(_find_up(folder, "Params_WaferInfo.ini") or folder / "-")
@@ -773,6 +857,14 @@ def analyze_camtek(folder: Path, live_by_dir):
         r["notes"].append("pitch 없음")
         return r
     entries = ini_entries(read_text(folder / "ColorImageGrabingInfo.ini"))
+    step_x, step_y = px, py
+    kinds = defaultdict(lambda: [0, 0])            # 사진 종류(이름의 셋째 토막: c · t · wlup …)별 [장수, Col 어긋남]
+    for name, X, _Y, c, *_ in entries:
+        tok = name.split(".")
+        k = kinds[tok[2].lower() if len(tok) >= 4 else "?"]
+        k[0] += 1
+        k[1] += math.floor(X / px) != c
+    r["kinds"] = dict(kinds)
     r["skipped_align"] = sum(1 for e in entries if is_align_photo(e[0]))
     entries = [e for e in entries if not is_align_photo(e[0])]
     # 번호 die 는 스캔 칸(DieStep)보다 작을 수 있다 — ProductInfo [Geometric] ColsInBlock/RowsInBlock 가
@@ -792,13 +884,34 @@ def analyze_camtek(folder: Path, live_by_dir):
         cx, cy, csrc = (w[0], w[1], "Wafer2Table") if w else (None, None, "없음")
     r.update(px=px, py=py, pitch_src=psrc, dia=dia, cx=cx, cy=cy, center_src=csrc)
     r["entries"] = len(entries)
+    # 장비 설정 가운데 방향 · 형태에 걸리는 값 — 지금까지 본 것과 다른 제품이 있는지 보려고 적어 둔다.
+    recipe = read_text(folder / "Recipe.ini")
+    r["env"] = {k: key_num(t, k) for t, k in ((recipe, "WaferDisplayOrientation"), (prod, "NotchFlat"),
+                                              (prod, "Flat Pos"), (prod, "IsPanel"), (prod, "IsMultiIndex"))}
+    # die 번호와 die 안 좌표 — 큰 칸 안 die 는 균등하지 않아 [DieRectInfo] 표로 찾는다(AMD Sepio: 균등은 45/357 틀림).
+    rects = die_rects(prod)
+    uniform = [(math.floor(X / px), math.floor(Y / py), X % px, Y % py) for _, X, Y, *_ in entries]
+    inner, alt = uniform, None
+    if "block" in r and all((a, b) in rects for a in range(bc) for b in range(br)):
+        loc = rect_locator(rects, bc, br)
+        inner = []
+        for _, X, Y, *_ in entries:
+            a, b, x, y = loc(X % step_x, Y % step_y)
+            inner.append((math.floor(X / step_x) * bc + a, math.floor(Y / step_y) * br + b, x, y))
+        r["sub_rule"] = "칸 표"
+    elif "block" in r:
+        r["sub_rule"] = "균등(칸 표 없음)"
+    elif (0, 0) in rects and rects[(0, 0)][2:] != (0.0, 0.0):
+        r["rect0"] = rects[(0, 0)][2:]                       # 칸 안 die 가 하나여도 시작점이 적힌 제품
+        alt = [(i, j, x - r["rect0"][0], y - r["rect0"][1]) for i, j, x, y in uniform]
     if entries:                                             # A1
-        bad = sum(1 for _, X, _Y, c, *_ in entries if math.floor(X / px) != c)
         ydiff = defaultdict(set)
-        for _, _X, Y, _c, row, rec in entries:
-            ydiff[rec].add(math.floor(Y / py) - row)
-        r["A1"] = {"n": len(entries), "x_bad": bad,
+        for (i, j, *_), (_, _X, _Y, _c, row, rec) in zip(inner, entries):
+            ydiff[rec].add(j - row)
+        r["A1"] = {"n": len(entries), "x_bad": sum(1 for (i, *_), e in zip(inner, entries) if i != e[3]),
                    "y_diff": {str(k): sorted(v) for k, v in ydiff.items()}}
+        if inner is not uniform:
+            r["A1"]["uniform_bad"] = sum(1 for (i, j, *_), e in zip(uniform, entries) if (i, j) != (e[3], e[4]))
 
     hyp = {}
     sec = re.search(r"(?ims)^\s*\[ExportData\]\s*$(.*?)(?=^\s*\[|\Z)", prod_own or "")
@@ -836,7 +949,6 @@ def analyze_camtek(folder: Path, live_by_dir):
             r["map_cover"] = round(len(dm) / full, 3) if full else None
     r["hyp"] = hyp
 
-    recipe = read_text(folder / "Recipe.ini")
     sc, sr = key_num(recipe, "DisplayColShift"), key_num(recipe, "DisplayRowShift")
     r["shift"] = (int(sc or 0), int(sr or 0))
     r["shift_known"] = recipe is not None and sc is not None
@@ -845,9 +957,18 @@ def analyze_camtek(folder: Path, live_by_dir):
     lives = [p for d, lv in live_by_dir.items() for n, p in lv
              if d == folder or w in Path(n).stem.split("_")]
     r["live_n"] = len(lives)
+    origin = hyp.get("EXP") or hyp.get("LUT") or hyp.get("MAP")
+    cam = lut or dm                                           # Camtek die 목록을 화면 번호로 — Conder 맵과 대조용
+    _LAST.update(folder=str(folder), lives=[(q[0], q[1]) for q in lives],
+                 dies={(i - origin[0], origin[1] - j) for i, j in cam} if cam and origin else None)
     if lives and entries:
-        v = live_vote(entries, lives, px, py)
-        if v is None and "block" in r:
+        v = live_vote(entries, lives, px, py, inner=inner)
+        if alt is not None:                                  # 시작점을 빼야 맞는가(가설) — 두 쪽 표 수를 다 적는다
+            va = live_vote(entries, lives, px, py, inner=alt)
+            r["live_x0"] = {"plain": v["votes"] if v else 0, "minus_x0": va["votes"] if va else 0}
+            if va and (not v or va["votes"] > v["votes"]):
+                v = va
+        if v is None and "block" in r and inner is uniform:
             # 칸 안 die 제품은 LIVE 의 die 안쪽 좌표가 격자와 수십 µm 어긋난다(관측 3건: 24~38 µm) → 느슨하게 한 번 더.
             v = live_vote(entries, lives, px, py, tol=45.0)
             if v:
@@ -1044,6 +1165,25 @@ def report(recs, klas, pairs, out_dir: Path, no_map=None):
     L.append(f"     칸 안 die 로 pitch 를 나눈 폴더 {sum(blk.values())}"
              + (" (" + " · ".join(f"{k}: {n}" for k, n in blk.most_common()) + ")" if blk else "")
              + f" · 뺀 정렬 사진 {sum(r.get('skipped_align', 0) for r in geo)}장")
+    tab = [r["A1"] for r in geo if r.get("sub_rule") == "칸 표" and "A1" in r]
+    if tab:
+        L.append(f"     칸 표로 계산한 결함 {sum(a['n'] for a in tab)} 중 어긋남 {sum(a['x_bad'] for a in tab)} "
+                 f"(균등 나눔이면 {sum(a['uniform_bad'] for a in tab)}) · 칸 표가 없는 칸 안 die 폴더 "
+                 f"{sum(1 for r in geo if str(r.get('sub_rule', '')).startswith('균등'))}")
+    x0 = [r["live_x0"] for r in geo if "live_x0" in r]
+    if x0:
+        L.append(f"[die 시작점] 칸 안 die 가 하나인데 시작점이 적힌 폴더 {sum(1 for r in geo if r.get('rect0'))} · "
+                 f"LIVE 표: 그대로 {sum(v['plain'] for v in x0)} / 시작점을 빼면 {sum(v['minus_x0'] for v in x0)}")
+    kd = defaultdict(lambda: [0, 0])
+    for r in geo:
+        for k, (n, b) in r.get("kinds", {}).items():
+            kd[k][0] += n
+            kd[k][1] += b
+    if kd:
+        L.append("[사진 종류] 장수(스캔 칸 기준 Col 어긋남) — " + " · ".join(f"{k}: {n}({b})" for k, (n, b) in sorted(kd.items())))
+    env = Counter(f"{k}={v:g}" for r in geo for k, v in r.get("env", {}).items() if v is not None)
+    if env:
+        L.append("[장비 설정] " + " · ".join(f"{k}: {n}" for k, n in sorted(env.items())))
     sm = Counter(r["truth_live"]["shift_mode"] for r in geo if r.get("truth_live", {}).get("shift_mode", "없음") != "없음")
     if sm:
         L.append("[시프트] 화면 시프트가 있는 레시피의 LIVE 이름 — " + " · ".join(f"{k} {n}장" for k, n in sm.most_common()))
@@ -1056,6 +1196,15 @@ def report(recs, klas, pairs, out_dir: Path, no_map=None):
                  f"{sum(1 for m in cm if m['FNLOC'] not in (None, 180.0))} · 불량 칸 표시 없음 "
                  f"{sum(1 for m in cm if not m['bad'])} · die 크기 없음 {sum(1 for m in cm if not m['XDIES'])}"
                  + (f" · XDIES÷pitch {pr[0]:.3f}~{pr[-1]:.3f}" if pr else ""))
+        ori = [m["orient"] for m in cm if "orient" in m]
+        if ori:
+            L.append(f"     방향: Camtek die 목록과 가장 잘 겹치는 쪽이 '그대로' {sum(1 for o in ori if o['그대로'] == max(o.values()))}"
+                     f"/{len(ori)} · 완전히 같은 맵 {sum(1 for m in cm if 'orient' in m and m['orient']['그대로'] == m['cam_dies'] == m['dies'])}")
+        ld = [m for m in cm if "live_die" in m]
+        if ld:
+            L.append(f"     LIVE 사진 번호가 die 칸에 {sum(m['live_die'][0] for m in ld)}/{sum(m['live_die'][1] for m in ld)}"
+                     f" · 불량 표시가 있는 맵에서 불량 칸에 {sum(m['live_bad'][0] for m in ld if m['bad'])}"
+                     f"/{sum(m['live_bad'][1] for m in ld if m['bad'])}")
     L.append("")
     L.append("[번호] 가설별 채점 — 정답 LIVE(관측) / 정답 EXP(파일).  '둘다' = col·row 모두 일치")
     for truth in ("LIVE", "EXP"):
