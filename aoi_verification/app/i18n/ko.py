@@ -669,10 +669,15 @@ TALLY_TOOLTIP = (
     "※ 매치 없음·매치 실패는 결과 엑셀에서 ‘미매칭’ 으로 적힙니다."
 )
 BTN_FINISH_REVIEW_KEPT_FMT = "검토 완료 · 유지 {n}"   # ⏎ 제거 — Enter 단축키가 없어졌다
+# 매치 없음이 1장 이상이면 그 수도 함께 — 몇 장이 '미매칭' 으로 나가는지 누르기 전에 보인다.
+BTN_FINISH_REVIEW_KEPT_NONE_FMT = "검토 완료 · 유지 {n} · 매치 없음 {m}"
 CHIP_OVER = "허용 초과"
 CHIP_NO_MATCH = "매치 없음"
-BTN_NO_MATCH_COMPACT = "×"
-BTN_RESTORE_COMPACT = "↩"
+# ★ 기호 한 글자('×'·'↩')였다 — 줄 삭제인지 닫기인지 읽히지 않았다(사용자 지적 2026-11-11, 안 A).
+BTN_NO_MATCH_COMPACT = "✕ 매치 없음"
+BTN_RESTORE_COMPACT = "↩ 되돌리기"
+# 매치 없음으로 표시한 줄 아래 한 줄 — 화면('매치 없음')과 엑셀('미매칭')을 잇는다.
+REVIEW_NO_MATCH_NOTE = "결과에 ‘매치 없음(미매칭)’ 으로 나갑니다 · 후보를 누르면 그 사진으로 바뀝니다"
 REVIEW_EMPTY_HINT = (
     # ★ 화면의 버튼 이름과 같게 적는다 — 예전엔 [완료] 라고 안내했지만 실제 버튼은
     #   '검토 완료 · 유지 n' 이라, 있지도 않은 버튼을 찾게 만들었다.

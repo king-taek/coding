@@ -77,6 +77,9 @@ def _toggle_col_w() -> int:
       이름을 준 목적이 사라진다.  그래서 QSS `role="colHead"`(캡션 크기 · 700 ·
       자간 1px)와 같은 서체로 재고, 옛 실측값을 하한으로 둔다.
     ★ 세 곳(헤더·행 버튼·예약폭 계산)이 **같은 값**을 봐야 하므로 한 번만 재서 기억한다.
+    ★ 버튼에 낱말이 붙었다('✕ 매치 없음' / '↩ 되돌리기', 안 A) — 버튼도 고정 폭이라
+      버튼 낱말까지 함께 재서 넓은 쪽을 쓴다.  버튼 서체는 QSS `compact`(캡션 lg · 700),
+      좌우 패딩 8 · 보더 1 이다.
     """
     global _toggle_col_w_px
     if _toggle_col_w_px is None:
@@ -85,6 +88,13 @@ def _toggle_col_w() -> int:
         f.setWeight(QFont.Weight.Bold)                       # QSS font-weight: 700
         f.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.0)
         need = QFontMetrics(f).horizontalAdvance(i18n.KO.CHIP_NO_MATCH) + 6
+        b = QApplication.font()
+        b.setPixelSize(theme.PROFILE.font_caption_lg)
+        b.setWeight(QFont.Weight.Bold)
+        bm = QFontMetrics(b)
+        need = max(need, *(bm.horizontalAdvance(t) + 2 * 8 + 2 + 4
+                           for t in (i18n.KO.BTN_NO_MATCH_COMPACT,
+                                     i18n.KO.BTN_RESTORE_COMPACT)))
         _toggle_col_w_px = max(_TOGGLE_COL_W_MIN, need)
     return _toggle_col_w_px
 
@@ -262,6 +272,33 @@ class _LazyThumb(QLabel):
                 self._on_view()
             else:
                 _open_fullscreen(self._path, self.window())
+
+
+class _PairCrossOut(QWidget):
+    """'매치 없음' 으로 표시한 줄의 검증 사진 위에 긋는 빨간 사선(안 A).
+
+    ★ 예전엔 표시해도 검증 사진·화살표·거리가 그대로라 **아직 짝이 있는 것처럼** 보였다
+      (후보만 사라졌다).  사진을 옅게 덮고 사선을 그어 '이 짝은 지웠다' 를 그림으로 말한다.
+    ★ 마우스를 받지 않는다 — 아래 사진의 우클릭 '크게 보기' 를 가리지 않게.
+    """
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.hide()
+
+    def paintEvent(self, event):  # noqa: N802
+        from PyQt6.QtGui import QPainter, QPen
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        wash = QColor(theme.PANEL)
+        wash.setAlpha(150)
+        p.fillRect(self.rect(), wash)
+        pen = QPen(QColor(theme.DANGER), 4)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        p.setPen(pen)
+        m = max(6, self.width() // 12)
+        p.drawLine(m, self.height() - m, self.width() - m, m)
 
 
 class _RunnerUpTile(QFrame):
@@ -458,6 +495,8 @@ class _MatchRow(QFrame):
         self._val_img = self._make_thumb(match.val_path, size=self._thumb_px,
                                          on_view=lambda: self._open_compare(0))
         _val_col.addWidget(self._val_img, alignment=Qt.AlignmentFlag.AlignCenter)
+        self._slash = _PairCrossOut(self._val_img)
+        self._slash.setGeometry(self._val_img.rect())
         self._val_score_label = QLabel(
             self._format_score(match.score, verbose=False), self._val_host)
         self._val_score_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -512,12 +551,24 @@ class _MatchRow(QFrame):
         top.addWidget(self.btn_toggle)
 
         outer.addLayout(top)
+        # '매치 없음' 으로 표시한 줄에만 보이는 안내 한 줄 — 화면 낱말과 엑셀 낱말('미매칭')을
+        # 잇고, 후보가 그대로 살아 있다는 것을 말한다(안 A).
+        self._no_match_note = QLabel(i18n.KO.REVIEW_NO_MATCH_NOTE, self)
+        self._no_match_note.setProperty("role", "noMatchNote")
+        self._no_match_note.hide()
+        # 기준 사진 열 아래부터 — 슬롯 열(+간격)만큼 띄운다.
+        note_line = QHBoxLayout()
+        note_line.setContentsMargins(0, 0, 0, 0)
+        note_line.addSpacing(_SLOT_W + 12)
+        note_line.addWidget(self._no_match_note, 1)
+        outer.addLayout(note_line)
         self._apply_state()
 
         # ── 차순위 후보 영역 — 첫 줄은 위 인라인, 추가 줄은 아래 그리드 (#3/#5). ──
         # 클릭하면 그 사진으로 매치 교체 (swap_requested).  처음엔 첫 줄만
         # 인라인으로 보이고 ‘후보 한 줄 더 보기’ 로 아래에 줄을 추가한다.
-        # ‘매치 없음’ 처리 시 _candidate_host 전체(인라인 첫 줄 포함)를 숨긴다 (#1).
+        # ‘매치 없음’ 으로 표시해도 후보는 **숨기지 않는다**(안 A) — 그 줄에서 바로
+        # 다른 사진을 골라 짝을 다시 지을 수 있어야 한다(예전엔 ↩ 를 먼저 눌러야 했다).
         if self._runners_up:
             self._runner_host = QWidget(self)
             host_lay = QVBoxLayout(self._runner_host)
@@ -762,6 +813,7 @@ class _MatchRow(QFrame):
         self._runnerup_px = max(40, int(applied * 0.8))
         self._ref_img.set_size(applied)
         self._val_img.set_size(applied)
+        self._slash.setGeometry(self._val_img.rect())
         # 사진 밑 점수를 담은 컨테이너도 같은 폭이어야 헤더 정렬이 유지된다.
         self._val_host.setFixedWidth(applied)
         for tile in self._runner_tiles:
@@ -888,9 +940,12 @@ class _MatchRow(QFrame):
                                else i18n.KO.CHIP_NO_MATCH)
             self._chip.setProperty("chip", "over" if st == "over" else "none")
         self.setProperty("rowState", st if st != "ok" else "")
-        metric_color = theme.DANGER if st == "over" else theme.INK
+        metric_color = (theme.DANGER if st == "over"
+                        else theme.MUTE if st == "unmatched" else theme.INK)
+        # 매치 없음 — 거리에 취소선(짝을 지웠으니 이 거리는 더 이상 결과가 아니다).
+        strike = " text-decoration: line-through;" if st == "unmatched" else ""
         self._metric_label.setStyleSheet(
-            f"color: {metric_color}; font-weight: 700; font-size: 13px;"
+            f"color: {metric_color}; font-weight: 700; font-size: 13px;{strike}"
         )
         for w in (self._chip, self):
             w.style().unpolish(w)
@@ -918,63 +973,38 @@ class _MatchRow(QFrame):
         p.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), r, r)
 
     def set_unmatched(self, unmatched: bool, *, animate: bool = False) -> None:
-        """``animate`` — 사용자가 방금 누른 경우에만 접힘·펼침을 보여 준다(08안)."""
+        """'매치 없음' 표시를 켜고 끈다(안 A, 사용자 결정 2026-11-11).
+
+        켜면 검증 사진에 사선, 거리에 취소선, 줄 아래 안내 한 줄.  **후보는 그대로 둔다** —
+        후보를 누르면 그 사진으로 바뀌고 표시가 풀린다(`MatchReviewPage._on_swap`).
+        ``animate`` — 사용자가 방금 누른 경우에만 줄 높이 변화를 보여 준다(08안).
+        """
+        from .. import motion
         self._is_unmatched = unmatched
+        h0 = self.height()
         if unmatched:
             # 되돌리기(↩) 상태 — reject 의도 해제(호버에서 위험색 안 뜨게).
             self.btn_toggle.setText(i18n.KO.BTN_RESTORE_COMPACT)
             self.btn_toggle.setToolTip(i18n.KO.BTN_RESTORE_MATCH)
             self.btn_toggle.setProperty("intent", "")
-            # 후보 영역(인라인 첫 줄 + 아래 그리드/‘더 보기’)을 모두 숨긴다 (#1/#3).
-            self._set_candidates_visible(False, animate=animate)
         else:
             self.btn_toggle.setText(i18n.KO.BTN_NO_MATCH_COMPACT)
             self.btn_toggle.setToolTip(i18n.KO.BTN_MARK_NO_MATCH)
             self.btn_toggle.setProperty("intent", "reject")
-            # 후보 영역을 이전 표시 상태로 복원한다 (#1).
-            self._set_candidates_visible(True, animate=animate)
+        self._slash.setGeometry(self._val_img.rect())
+        self._slash.setVisible(unmatched)
+        self._no_match_note.setVisible(unmatched)
         self.btn_toggle.style().unpolish(self.btn_toggle)
         self.btn_toggle.style().polish(self.btn_toggle)
-        # 빨간 테두리 등 상태 스타일은 rowState 프로퍼티로 일괄 적용 (#1).
+        # 빨간 테두리·칩·거리 취소선은 상태 프로퍼티로 일괄 적용 (#1).
         self._apply_state()
-
-    def _set_candidates_visible(self, visible: bool, *,
-                                animate: bool = False) -> None:
-        """인라인 첫 줄 + 아래 후보 호스트의 표시 여부를 한꺼번에 토글 (#1/#3).
-
-        후보가 아예 없는 행이면 첫 줄 컨테이너는 계속 숨김 상태로 둔다.
-        ``animate`` 면 행 높이가 접히고 펼쳐지며 후보가 흐려지고 떠오른다(08안) —
-        예전엔 한 프레임에 사라져 아래 행들이 툭 올라왔다.
-        """
-        from .. import motion
-        hosts = []
-        if self._runners_up:
-            hosts.append(self._first_line_host)
-        if self._runner_host is not None:
-            hosts.append(self._runner_host)
-        # 연타 — 앞 접힘이 끝날 때 숨기기를 하지 않게 세대를 올린다.
-        self._cand_gen = gen = getattr(self, "_cand_gen", 0) + 1
-        animate = animate and bool(hosts) and motion.enabled() and self.isVisible()
-        h0 = self.height()
-        for h in hosts:
-            h.setVisible(visible)
-        if not animate:
-            return
-        self.layout().activate()
-        h1 = self.sizeHint().height()
-        if visible:
-            for h in hosts:
-                motion.fade_in(h, delay_ms=60, duration=motion.DUR_TILE_IN)
-        else:
-            # 접히는 동안 후보가 흐려지는 모습을 보인다 — 다 흐려지면 그때 숨긴다.
-            def _hide(h):
-                if getattr(self, "_cand_gen", 0) == gen:
-                    h.setVisible(False)
-            for h in hosts:
-                h.setVisible(True)
-                motion.fade_out(h, duration=motion.DUR_TILE_IN,
-                                on_done=lambda h=h: _hide(h))
-        motion.animate_height(self, h0, h1, duration=motion.DUR_ROW_RESIZE)
+        if animate and motion.enabled() and self.isVisible():
+            self.layout().activate()
+            motion.animate_height(self, h0, self.sizeHint().height(),
+                                  duration=motion.DUR_ROW_RESIZE)
+            if unmatched:
+                motion.fade_in(self._no_match_note, delay_ms=60,
+                               duration=motion.DUR_TILE_IN)
 
 
 class MatchReviewPage(QWidget):
@@ -1523,6 +1553,11 @@ class MatchReviewPage(QWidget):
                         lane_label=self._lane_label(match.equip),
                         show_ref=show_ref)
         row.setProperty("_laneFollower", not show_ref)
+        # ★ 결과 화면에서 되돌아오면 표시 집합(`_unmatched_keys`)만 되살아나고 행은 새로
+        #   만들어진다 — 여기서 그리지 않으면 위 숫자는 '매치 없음 n' 인데 줄은 평범하게
+        #   보이고, 그 줄의 버튼을 누르면 표시가 **풀렸다**(2026-11-11 발견).
+        if match.key in self._unmatched_keys:
+            row.set_unmatched(True)
         row.toggle_requested.connect(self._on_toggle)
         row.swap_requested.connect(self._on_swap)
         row.more_clicked.connect(self._on_row_more)
@@ -1675,7 +1710,9 @@ class MatchReviewPage(QWidget):
                              self._coord_failed_count, theme.MUTE))
         self._tally_label.setText(sep.join(parts))
         kept = len(self._matches) - len(self._unmatched_keys)
-        self.btn_done.setText(i18n.KO.BTN_FINISH_REVIEW_KEPT_FMT.format(n=kept))
+        self.btn_done.setText(
+            i18n.KO.BTN_FINISH_REVIEW_KEPT_NONE_FMT.format(n=kept, m=none) if none
+            else i18n.KO.BTN_FINISH_REVIEW_KEPT_FMT.format(n=kept))
 
     def _on_done(self) -> None:
         kept: list[MatchResult] = []

@@ -429,6 +429,13 @@ QLabel[role="colHead"] {
     letter-spacing: 1px;
 }
 
+/* '매치 없음' 으로 표시한 줄 아래 안내 한 줄(안 A) — 결과에 '미매칭' 으로 나간다는 것. */
+QLabel[role="noMatchNote"] {
+    color: $danger;
+    font-size: $font_caption_sz;
+    font-weight: 700;
+}
+
 /* 매치 검토 행 상태 — 인라인 스타일 대신 동적 프로퍼티로 칠한다. */
 QFrame[rowState="over"] {
     background-color: $danger_tint_soft;
@@ -919,22 +926,28 @@ QLabel[role="cardTitle"] {
     letter-spacing: 1px;
 }
 
-/* 컴팩트 아이콘 토글 (A2 행 ×/↩) — 평소엔 중립(mute), 상호작용 시에만 의미색.
-   비활성 상태에 풀채도 강조를 두지 않는다(리스트에 빨간 박스 8개 방지). */
+/* 매치 검토 행의 '✕ 매치 없음' / '↩ 되돌리기' 버튼.
+   ★ 기호 한 글자(×/↩, 17px)였다 — 무엇을 하는지 읽히지 않았다(사용자 지적 2026-11-11).
+   낱말을 붙이고 '매치 없음' 은 늘 위험색 테두리로 보인다(사용자가 고른 안 A 시안 그대로 —
+   옛 '평소엔 중립' 결정을 바꿨다).  되돌리기는 중립. */
 QPushButton[compact="true"] {
-    padding: 4px 6px;
-    font-size: 17px;
+    padding: 4px 8px;
+    font-size: $font_caption_lg_sz;
     font-weight: 700;
     color: $ink2;
     border: 1px solid $line_strong;
-    background: transparent;
+    background: $elev;
 }
 QPushButton[compact="true"]:hover {
     color: $ink;
-    border-color: $mute;
+    border-color: $accent;
     background: $elev;
 }
-/* '매치 없음(reject)' 의도일 때만 hover 에서 위험색을 드러낸다. */
+QPushButton[compact="true"][intent="reject"] {
+    color: $danger;
+    border-color: $danger;
+    background: transparent;
+}
 QPushButton[compact="true"][intent="reject"]:hover {
     color: $danger;
     border-color: $danger;
@@ -942,7 +955,7 @@ QPushButton[compact="true"][intent="reject"]:hover {
 }
 QPushButton[compact="true"]:focus {
     border: $focus_w solid $focus;
-    padding: 3px 5px;
+    padding: 3px 7px;
 }
 
 /* 행 안의 액션 버튼 — **반복돼도 무겁지 않은** 테두리 버튼.
