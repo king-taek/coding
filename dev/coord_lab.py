@@ -40,6 +40,8 @@ LOT 마다 웨이퍼 몇 장만 뽑고, 사진은 열지 않고 이름만 읽고
     pitch 번호 pitch = DieStep ÷ ``ProductInfo.ini [Geometric] ColsInBlock/RowsInBlock`` (파일, NAS 1차 수집)
           ``.wlup.`` 정렬 사진은 결함으로 세지 않는다
           칸 안 die 는 ``[DieRectInfo]`` 표에서 가장 가까운 die — 균등 나눔은 근사다(AMD Sepio 45/357 틀림)
+    4차   앞선 수집에서 본 LOT 은 건너뛴다(``--fresh`` 로 끔) · Conder 사진 폴더마다 바로 옆 맵 txt 와만 대조
+          (레시피 섞임 · die 안 좌표가 맵 die 크기를 넘는 사진 · 한 칸 밀림 · 칸 수×크기) · 큰 맵을 자르지 않는다.
     반증  3차 수집부터: 칸 표 대 균등 나눔 · die 시작점을 빼는지 · Conder 맵을 뒤집은 네 방향 ·
           LIVE 번호가 맵의 die/불량 칸에 드는지 · 사진 종류별 어긋남 · 장비 방향 설정을 함께 적는다
     정답  LIVE  Conder LIVE 파일명의 col/row(장비 화면 번호)와 INI 결함을 die 안쪽 좌표로 짝지어 표결 (관측)
@@ -422,7 +424,7 @@ def _expired(deadline) -> bool:
     return deadline() if callable(deadline) else time.time() > deadline
 
 
-def nas_walk(roots, deadline, per_lot=3, lots=5, log=print, on_lot=None):
+def nas_walk(roots, deadline, per_lot=3, lots=5, log=print, on_lot=None, skip=frozenset()):
     """웨이퍼 폴더(= INI 가 든 폴더)를 찾는다.  LOT(웨이퍼들의 부모)마다 ``per_lot`` 장,
     한 폴더 아래 LOT 은 최근 ``lots`` 개만 — 번호 기준은 레시피의 것이라 몇 장이면 된다."""
     found, state = [], {"lots": 0, "cut": False}
@@ -437,6 +439,9 @@ def nas_walk(roots, deadline, per_lot=3, lots=5, log=print, on_lot=None):
             return False
         names = sorted(subs)
         if any(_is_wafer(p) for _, p, _ in (names[0], names[len(names) // 2], names[-1])):
+            if str(d) in skip:                   # 앞선 수집에서 본 LOT — 세지 않고 지나가 새 LOT 을 찾는다
+                state["skipped"] = state.get("skipped", 0) + 1
+                return False
             step = max(1, len(names) // per_lot)
             picked = [p for _, p, _ in names[::step] if _is_wafer(p)][:per_lot]
             found.extend(picked)
@@ -504,7 +509,7 @@ def conder_index(roots, deadline, log=print):
     return index, cut
 
 
-_MAP_CAP = 300_000          # 맵 txt 하나의 크기 상한(실물은 수 KB)
+_MAP_CAP = 4 * 2 ** 20      # 맵 txt 하나의 크기 상한.  300 KB 였을 때 302×273 맵(330 KB)이 잘려 방향을 오판했다(3차 수집)
 _FILES_CAP = 200            # 폴더마다 적어 두는 파일 이름 수
 
 
@@ -526,6 +531,8 @@ def conder_cells(txt: str):
     kv = dict(re.findall(r"(?m)^\s*([A-Za-z]\w*)\s*:\s*([^\r\n]*?)\s*$", txt))
     rows = [ln.split(":", 1)[1].split() for ln in txt.splitlines() if ln.startswith("RowData:")]
     n, good = len(rows), kv.get("BCEQU", "000")
+    if re.fullmatch(r"\d+", kv.get("ROWCT", "")):           # 행 번호는 머리글 행 수 기준 — 본문이 잘려도 안 밀린다
+        n = max(n, int(kv["ROWCT"]))
     dies = {(c, n - 1 - i) for i, row in enumerate(rows) for c, v in enumerate(row)
             if not re.fullmatch(r"[_.\-]+", v)}
     bad = {(c, n - 1 - i) for i, row in enumerate(rows) for c, v in enumerate(row)
@@ -563,6 +570,56 @@ def attach_conder_maps(r, extra):
         out.append(m)
     if out:
         r["conder_map"] = out
+
+
+def conder_folder_checks(live, extra):
+    """Conder 사진 폴더마다 **그 폴더 사진과 바로 옆 맵 txt 만** 대조한다(4차 수집).
+
+    3차까지는 한 웨이퍼의 모든 공정 사진을 모든 맵에 대 봐서, 공정마다 맵이 다른 제품(36열/24열)과
+    레시피가 섞인 폴더를 가려내지 못했다.  앱이 쓰는 자리(사진 폴더의 부모 ``<폴더명>.txt``)만 본다.
+    적는 것: 레시피(이름 앞부분) 종류 · 레시피별 die 안 x/y 최댓값 · 맵 유무 · die 칸/불량 칸에 든 사진 ·
+    불량 칸이 가장 잘 맞는 한 칸 이동 · ``칸 수 × XDIES``(지름과 맞는가) · die 안 좌표가 XDIES 보다 큰 사진."""
+    maps = (extra or {}).get("maps", {})
+    out = []
+    for d, lv in live.items():
+        d = Path(d)
+        rec, inner = Counter(), {}
+        for n, q in lv:
+            key = Path(n).stem.split("_" + d.name + "_")[0] if "_" + d.name + "_" in n else "_".join(n.split("_")[:2])
+            rec[key] += 1
+            mx = inner.setdefault(key, [0.0, 0.0])
+            mx[0], mx[1] = max(mx[0], q[2]), max(mx[1], q[3])
+        r = {"dir": str(d), "n": len(lv), "recipes": dict(rec), "inner_max": inner, "map": False}
+        txt = maps.get(d.parent / f"{d.name}.txt")
+        if txt:
+            info = conder_map_info(txt)
+            S, bad, _C, _R = conder_cells(txt)
+            cells = [(q[0], q[1]) for _n, q in lv]
+            hit = {(dx, dy): sum(1 for c, y in cells if (c + dx, y + dy) in bad)
+                   for dx in (-1, 0, 1) for dy in (-1, 0, 1)}
+            best = max(hit, key=lambda k: (hit[k], k == (0, 0)))
+            r.update(map=True, cols=info["COLCT"], rows=info["ROWCT"], XDIES=info["XDIES"], YDIES=info["YDIES"],
+                     dies=len(S), bad=len(bad), in_die=sum(1 for q in cells if q in S), on_bad=hit[(0, 0)],
+                     shift=list(best), shift_hit=hit[best])
+            if info["XDIES"] and info["YDIES"] and info["COLCT"] and info["ROWCT"]:
+                r["span"] = [info["COLCT"] * info["XDIES"], info["ROWCT"] * info["YDIES"]]     # mm 라면 ≈ 지름
+                r["spill"] = sum(1 for _n, q in lv if q[2] > info["XDIES"] * 1000 or q[3] > info["YDIES"] * 1000)
+        out.append(r)
+    return out
+
+
+def known_lots(out_dir: Path):
+    """앞선 수집에서 이미 본 LOT 폴더 — 다시 돌지 않고 새 LOT 으로 넘어간다.
+    ``coord_lab_seen.txt``(1~3차) + 결과 폴더에 남아 있는 ``좌표실험_*.json``(그 뒤 수집)."""
+    seen = set()
+    listed = read_text(Path(__file__).with_name("coord_lab_seen.txt")) or ""       # 1~3차에 본 LOT(저장소에 둔 목록)
+    seen.update(ln.strip() for ln in listed.splitlines() if ln.strip() and not ln.startswith("#"))
+    for p in sorted(Path(out_dir).glob("좌표실험_*.json")):
+        try:
+            seen.update(r["lot"] for r in json.loads(p.read_text(encoding="utf-8")).get("camtek", []) if r.get("lot"))
+        except (OSError, ValueError, AttributeError, TypeError):
+            continue
+    return seen
 
 
 def nas_conder(roots, wanted, deadline, log=print, index=None, extra=None):
@@ -686,7 +743,7 @@ def collect_zip(recs, live_by_dir, base: Path, no_map=(), part_mb=30, file_mb=12
     flagged = [(r, flags(r, no_map)) for r in recs]
     flagged = [(r, f) for r, f in flagged if f]
     conder = conder or {}
-    if not flagged and not conder.get("maps") and not conder.get("files"):
+    if not flagged and not conder.get("maps") and not conder.get("files") and not live_by_dir:
         return [], 0
     limit, per_product = part_mb * 2 ** 20, Counter()
     paths = [base.with_name(base.name + "_수집.zip")]
@@ -744,6 +801,9 @@ def collect_zip(recs, live_by_dir, base: Path, no_map=(), part_mb=30, file_mb=12
         for p, txt in conder.get("maps", {}).items():
             n = dirs.setdefault(Path(p).parent, len(dirs))
             text(f"Conder/{n:03d}_{Path(p).parent.name}/{Path(p).name}", txt)
+        per_dir = [f"{d}\t{n}" for d, names in live_by_dir.items() if not _is_wafer(Path(d)) for n, _ in names]
+        if per_dir:                                  # 폴더를 가려 다시 대조할 수 있게 — 3차까지는 웨이퍼별로 뭉쳐 담았다
+            text("Conder/사진목록_폴더별.txt", "# Conder 사진 폴더\t파일명\n" + "\n".join(per_dir))
         if conder.get("files"):
             text("Conder/파일목록.txt", "# Conder 폴더에 사진 말고 있는 파일(이름만)\n" + "\n".join(
                 f"{d}\t{n}" for d, names in conder["files"].items() for n in sorted(names)))
@@ -776,6 +836,11 @@ def run_nas(argv, out: Path, progress=None, stop=None):
             return float(v)
         return default
     minutes, per_lot, lots = opt("--minutes", 30), int(opt("--per-lot", 3)), int(opt("--lots", 5))
+    fresh = "--fresh" in argv                 # 앞선 수집에서 본 LOT 도 다시 돈다
+    if fresh:
+        argv.remove("--fresh")
+    seen = frozenset() if fresh else frozenset(known_lots(out))
+    print(f"앞선 수집에서 본 LOT {len(seen)}개는 건너뜁니다" if seen else "앞선 수집 결과 없음 — 전부 새로 돕니다")
     cam_roots, conder_roots = [Path(a) for a in argv], []
     if not cam_roots:
         cam_roots, conder_roots = nas_default_roots()
@@ -823,7 +888,7 @@ def run_nas(argv, out: Path, progress=None, stop=None):
             cut = True
             break
         share = time.time() + (t_walk - time.time()) / (len(cam_roots) - i)
-        cut = nas_walk([root], until(share), per_lot, lots, print, on_lot)[1] or cut
+        cut = nas_walk([root], until(share), per_lot, lots, print, on_lot, seen)[1] or cut
     print(f"\n웨이퍼 폴더 {len(recs)} · Conder 폴더 {len(live_by_dir)} · {time.time() - t0:.0f}초"
           + (" · 중지했습니다" if stop() else " · 시간 제한으로 일부만 돌았습니다" if cut else ""))
     if not recs:
@@ -831,7 +896,8 @@ def run_nas(argv, out: Path, progress=None, stop=None):
     progress(0, 0, "결과 정리 중")
     for scope in ("LOT", "PRD"):
         borrow(recs, scope)
-    base = report(recs, [], [], out, sorted(no_map) if not app_note else app_note[0])
+    dirs = conder_folder_checks({d: lv for d, lv in live_by_dir.items() if not _is_wafer(Path(d))}, conder)
+    base = report(recs, [], [], out, sorted(no_map) if not app_note else app_note[0], conder_dirs=dirs)
     zips, n = collect_zip(recs, live_by_dir, base, sorted(no_map), progress=progress, conder=conder)
     print(f"\n이상 폴더 {n}" + (" — 원재료를 모았습니다: " + ", ".join(z.name for z in zips) if zips
                               else " — 모을 것이 없습니다"))
@@ -1147,7 +1213,7 @@ def product_key(r):
     return f'{r["px"]:.1f}×{r["py"]:.1f}'
 
 
-def report(recs, klas, pairs, out_dir: Path, no_map=None):
+def report(recs, klas, pairs, out_dir: Path, no_map=None, conder_dirs=None):
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     sc, dc = score(recs), discrim(recs)
     L = []
@@ -1275,6 +1341,20 @@ def report(recs, klas, pairs, out_dir: Path, no_map=None):
     for r in recs:
         if "hyp" not in r:
             L.append(f"  (기하 못 읽음) {r['folder']}: {'; '.join(r['notes'])}")
+    if conder_dirs:
+        wm = [c for c in conder_dirs if c["map"]]
+        n_in, n_all = sum(c["in_die"] for c in wm), sum(c["n"] for c in wm)
+        marked = [c for c in wm if c["bad"]]
+        L.append("")
+        L.append(f"[Conder 폴더별] 사진 폴더 {len(conder_dirs)} · 옆에 맵 txt 있음 {len(wm)} · "
+                 f"레시피가 2종 이상 섞인 폴더 {sum(1 for c in conder_dirs if len(c['recipes']) > 1)}")
+        L.append(f"     사진 번호가 그 폴더 맵의 die 칸 안 {n_in}/{n_all} · 불량 칸 "
+                 f"{sum(c['on_bad'] for c in marked)}/{sum(c['n'] for c in marked)}(불량 표시 있는 맵 {len(marked)})")
+        L.append(f"     한 칸 옮겨야 불량 칸이 더 맞는 폴더 {sum(1 for c in marked if c['shift'] != [0, 0])} · "
+                 f"die 안 좌표가 맵의 die 크기보다 큰 사진 {sum(c.get('spill', 0) for c in wm)}장"
+                 f"(폴더 {sum(1 for c in wm if c.get('spill'))}) · 칸 수×크기가 270~330 mm 인 맵 "
+                 f"{sum(1 for c in wm if 'span' in c and all(270 <= v <= 330 for v in c['span']))}/"
+                 f"{sum(1 for c in wm if 'span' in c)}")
 
     out_dir.mkdir(parents=True, exist_ok=True)
     base = out_dir / f"좌표실험_{stamp}"
@@ -1283,7 +1363,8 @@ def report(recs, klas, pairs, out_dir: Path, no_map=None):
     for k in klas:
         k.pop("_def", None)
     base.with_suffix(".json").write_text(json.dumps(
-        {"camtek": recs, "kla": klas, "pairs": pairs, "score": sc, "discrim": dc, "invariant": inv},
+        {"camtek": recs, "kla": klas, "pairs": pairs, "score": sc, "discrim": dc, "invariant": inv,
+         "conder_dirs": conder_dirs or []},
         ensure_ascii=False, indent=1, default=str), encoding="utf-8")
     base.with_suffix(".html").write_text(html_table(geo, sc, text), encoding="utf-8")
     print(text)

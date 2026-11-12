@@ -9,7 +9,8 @@ NAS 순회(``run_nas``)를 백그라운드에서 돌리고 로딩바로 진행�
 1. 이 파일 · ``dev/tests/test_coord_collect_tmp.py``
 2. ``ui/main_window.py`` 의 표시된 두 줄
 3. ``i18n/ko.py`` 의 표시된 블록(시작 ~ 끝)
-4. 도구도 필요 없으면 ``dev/coord_lab.py`` · ``dev/coord_lab_nas.py`` · ``dev/tests/test_coord_lab.py``
+4. 도구도 필요 없으면 ``dev/coord_lab.py`` · ``dev/coord_lab_nas.py`` · ``dev/coord_lab_seen.txt`` ·
+   ``dev/tests/test_coord_lab.py``
 """
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ from .widgets import sheet_host as sheets
 
 _LOG = logging.getLogger("aoi.coord_collect")
 _TOOL = "dev/coord_lab.py"
-_MINUTES, _PER_LOT, _LOTS = 30, 3, 5
+_MINUTES, _PER_LOT, _LOTS = 60, 3, 5
 
 
 def _load_tool():

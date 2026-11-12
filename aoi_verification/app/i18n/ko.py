@@ -521,7 +521,7 @@ COORD_COLLECT_BUTTON = "좌표 자료 수집"
 COORD_COLLECT_TITLE = "좌표 자료 수집"
 COORD_COLLECT_ASK = (
     "NAS 의 Scanresult 와 Conder Scan 을 돌며 좌표 자료를 모읍니다. "
-    "읽기만 하고 사진은 열지 않습니다. 최대 30분이 걸리고, 중지하면 그때까지 모은 것을 저장합니다."
+    "읽기만 하고 사진은 열지 않습니다. 최대 1시간이 걸리고, 중지하면 그때까지 모은 것을 저장합니다."
 )
 COORD_COLLECT_START = "수집 시작"
 COORD_COLLECT_RUNNING = "좌표 자료를 모으는 중"
