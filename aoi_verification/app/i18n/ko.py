@@ -521,18 +521,18 @@ COORD_COLLECT_BUTTON = "좌표 자료 수집"
 COORD_COLLECT_TITLE = "좌표 자료 수집"
 COORD_COLLECT_ASK = (
     "NAS 의 Scanresult 와 Conder Scan 을 돌며 좌표 자료를 모읍니다. "
-    "읽기만 하고 사진은 열지 않습니다. 최대 1시간이 걸리고, 중지하면 그때까지 모은 것을 저장합니다."
+    "읽기만 하고 사진은 열지 않습니다. 최대 2시간이 걸리고, 중지하면 그때까지 모은 것을 저장합니다."
 )
 COORD_COLLECT_START = "수집 시작"
 COORD_COLLECT_RUNNING = "좌표 자료를 모으는 중"
 COORD_COLLECT_DONE_FMT = (
     "웨이퍼 폴더 {wafers}개를 확인했고 이상 폴더는 {odd}개입니다.\n"
-    "바탕화면에 생긴 '좌표실험_' 파일들을 올려 주세요.\n{path}"
+    "바탕화면에 생긴 '좌표실험_…_수집.zip' 을 올려 주세요(20 MB 를 넘으면 여러 개로 나뉩니다).\n{path}"
 )
 COORD_COLLECT_NO_TOOL = "수집 도구(dev/coord_lab.py)가 없습니다. 개발자 모드에서 dev 브랜치로 설치해 주세요."
 COORD_COLLECT_FAIL_FMT = "수집하다 멈췄습니다: {error}"
 COORD_COLLECT_STOPPING = "지금까지 모은 것을 저장하는 중 (한 번 더 누르면 화면을 바로 풉니다)"
-COORD_COLLECT_STOPPED = "화면을 먼저 풀었습니다. 저장이 끝나면 바탕화면에 '좌표실험_' 파일이 생깁니다."
+COORD_COLLECT_STOPPED = "화면을 먼저 풀었습니다. 저장이 끝나면 바탕화면에 '좌표실험_…_수집.zip' 이 생깁니다."
 COORD_COLLECT_NOTHING = "확인한 웨이퍼가 없어 결과 파일을 만들지 않았습니다."
 COORD_COLLECT_WINDING_DOWN = "방금 중지한 수집이 아직 정리 중입니다. 잠시 뒤 다시 눌러 주세요."
 # ── [좌표수집-임시] 끝 ─────────────────────────────────────────────────────
