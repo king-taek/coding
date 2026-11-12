@@ -214,7 +214,9 @@ def test_stopping_midway_keeps_what_was_already_computed(tmp_path):
 
     base, wafers, _odd = lab.run_nas([str(tmp_path / "AOI-1" / "Scanresult")], out, progress=progress, stop=stop)
     assert 0 < wafers < 9                          # 일부만 돌았고
-    assert base is not None and Path(str(base) + ".json").is_file()    # 그만큼은 파일로 남았다
+    (z,) = out.glob("*.zip")                       # 그만큼은 남았다 — 결과물은 zip 하나뿐(사용자 요청 2026-11-12)
+    assert base is not None and sorted(p.name for p in out.iterdir()) == [z.name]
+    assert {Path(str(base)).name + e for e in (".txt", ".json", ".html")} <= set(zipfile.ZipFile(z).namelist())
     assert any("남은 시간" in m for m in seen)      # 진행 문구가 계속 바뀐다
 
 
@@ -409,3 +411,39 @@ def test_lots_seen_in_earlier_runs_are_skipped(tmp_path):
     assert [f.parent.name for f in folders] == ["LOT-B"]         # lots=1 이어도 건너뛴 LOT 은 세지 않는다
     assert all(ln.startswith(("#", "J:", "M:", "X:", "\\\\")) or len(ln) > 3 for ln in
                (lab.REPO / "dev" / "coord_lab_seen.txt").read_text(encoding="utf-8").splitlines())
+
+
+def test_conder_name_coordinates_are_checked_against_the_equipment_defects():
+    """Conder 사진 이름의 번호 · die 안 좌표가 장비가 적은 결함과 같은지 한 장씩 가른다(사용자 요청 2026-11-12)."""
+    inner = [(5, 10, 100.0, 200.0), (6, 10, 300.0, 400.0), (7, 9, 500.0, 600.0)]      # (i, j, die 안 x, y)
+    origin = (2, 12)                                                                # col = i−2, row = 12−j
+    named = [("same.jpg", (3, 2, 100.5, 199.0)),            # 번호도 좌표도 같다
+             ("moved.jpg", (3, 2, 300.0, 400.0)),           # 좌표는 (4,2) 결함 것 — 번호가 col −1
+             ("inner.jpg", (5, 3, 550.0, 600.0)),           # 같은 die 인데 x 가 +50
+             ("flip.jpg", (9, 9, 900.0, 200.0)),            # px−x 로 뒤집어야 맞는다
+             ("none.jpg", (9, 9, 1.0, 1.0))]
+    c = lab.conder_xy_check(inner, origin, named, 1000.0, 1000.0)
+    assert (c["n"], c["same"], c["moved"], c["inner"], c["none"]) == (5, 1, {"-1,0": 1}, 1, 2)
+    assert c["inner_d"] == [50.0, 0.0] and c["flip_x"] == 1 and c["flip_y"] == 0
+    assert [k for k, _n in c["examples"]] == ["moved", "inner"]
+    blind = lab.conder_xy_check(inner, None, named, 1000.0, 1000.0)                 # 번호표가 없으면 좌표만
+    assert blind["xy_only"] == 2 and blind["same"] == 0 and not blind["moved"]
+
+
+def test_odd_folder_raw_includes_small_files_and_setup_level_recipe(tmp_path):
+    """틀린 원인을 찾으려면 정해 둔 이름 말고도 폴더의 설정 · 글자 파일과 위 폴더의 레시피가 있어야 한다."""
+    d = tmp_path / "job" / "Setup1" / "LOT-B" / "X00"
+    _wafer(d, center=False)
+    (d / "Extra.xml").write_text("<a/>", encoding="utf-8")
+    (d / "big.dat").write_bytes(b"0" * 100)
+    (d.parent.parent / "Recipe.ini").write_text("[Display]\nDisplayColShift=0\n", encoding="utf-8")
+    r = lab.analyze_camtek(d, {})
+    report = tmp_path / "좌표실험_t.json"
+    report.write_text("{}", encoding="utf-8")
+    zips, n = lab.collect_zip([r], {}, tmp_path / "좌표실험_t", reports=[report])
+    names = zipfile.ZipFile(zips[0]).namelist()
+    assert n == 1 and names[0] == "좌표실험_t.json"
+    for want in ("X00/Extra.xml", "X00/big.dat", "X00/폴더목록.txt", "X00/_상위/Setup1/Recipe.ini"):
+        assert any(x.endswith(want) for x in names), want
+    assert not any(x.lower().endswith(".jpeg") for x in names)
+    assert lab.collect_zip.__defaults__[1] == 20                    # 20 MB 마다 나눈다(사용자 요청)

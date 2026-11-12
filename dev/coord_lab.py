@@ -40,6 +40,8 @@ LOT 마다 웨이퍼 몇 장만 뽑고, 사진은 열지 않고 이름만 읽고
     pitch 번호 pitch = DieStep ÷ ``ProductInfo.ini [Geometric] ColsInBlock/RowsInBlock`` (파일, NAS 1차 수집)
           ``.wlup.`` 정렬 사진은 결함으로 세지 않는다
           칸 안 die 는 ``[DieRectInfo]`` 표에서 가장 가까운 die — 균등 나눔은 근사다(AMD Sepio 45/357 틀림)
+    5차   결과는 zip 하나로(20 MB 마다 나눔) · 이상 폴더는 작은 설정 · 글자 파일을 전부 담는다 ·
+          Conder 사진 이름의 (col,row,x,y) 를 장비 결함과 한 장씩 대조(번호만 다름 · die 안 좌표만 다름 · 뒤집힘)
     4차   앞선 수집에서 본 LOT 은 건너뛴다(``--fresh`` 로 끔) · Conder 사진 폴더마다 바로 옆 맵 txt 와만 대조
           (레시피 섞임 · die 안 좌표가 맵 die 크기를 넘는 사진 · 한 칸 밀림 · 칸 수×크기) · 큰 맵을 자르지 않는다.
     반증  3차 수집부터: 칸 표 대 균등 나눔 · die 시작점을 빼는지 · Conder 맵을 뒤집은 네 방향 ·
@@ -325,6 +327,51 @@ def live_vote(entries, lives, px, py, tol=2.5, inner=None):
     # 한 표도 die 안쪽 x·y 가 둘 다 2.5 µm 안에서 맞아야 나온다 — 만장일치 2표 이상이면 정답으로 쓴다.
     return {"value": best, "votes": n, "total": total,
             "ok": (n >= 2 and n == total) or (n >= 3 and n >= 0.8 * total)}
+
+
+def conder_xy_check(inner, origin, named, px, py, tol=2.5):
+    """Conder 사진 이름의 (col,row,x,y) 가 **장비가 적은 결함**과 같은가 — 사진마다 갈라 센다(5차 수집).
+
+    ``inner`` = 장비 결함 [(i, j, die 안 x, die 안 y)], ``origin`` = 번호표 원점(col_origin, row_total) 또는 None.
+    same  번호도 die 안 좌표도 같다 · moved  die 안 좌표는 같은데 번호가 다르다(어긋난 칸 수를 센다) ·
+    inner 같은 die 인데 die 안 좌표가 다르다(가장 가까운 결함과의 차이) · none  장비 결함에 짝이 없다
+    (다른 스캔의 사진일 수 있다).  die 안 좌표를 좌우 · 상하로 뒤집어야 맞는 사진도 따로 센다.
+    원점을 모르면 번호는 못 가리고 die 안 좌표가 맞는 사진 수만 적는다(``xy_only``)."""
+    out = {"n": len(named), "same": 0, "moved": {}, "inner": 0, "none": 0, "flip_x": 0, "flip_y": 0,
+           "xy_only": 0, "examples": []}
+    near = lambda a, b: abs(a - b) <= tol
+    cam = [((i - origin[0], origin[1] - j) if origin else None, x, y) for i, j, x, y in inner]
+    by_die = {}
+    for c, x, y in cam:
+        by_die.setdefault(c, []).append((x, y))
+    diffs = []
+    for name, (col, row, x, y) in named:
+        hits = [c for c, xi, yi in cam if near(xi, x) and near(yi, y)]
+        if not origin:
+            out["xy_only"] += bool(hits)
+            kind = "xy" if hits else "none"
+        elif (col, row) in hits:
+            kind = "same"
+        elif hits:
+            kind = "moved"
+            k = f"{col - hits[0][0]},{row - hits[0][1]}"
+            out["moved"][k] = out["moved"].get(k, 0) + 1
+        elif (col, row) in by_die:
+            kind = "inner"
+            dx, dy = min(((x - xi, y - yi) for xi, yi in by_die[(col, row)]), key=lambda d: abs(d[0]) + abs(d[1]))
+            diffs.append((dx, dy))
+        else:
+            kind = "none"
+        if kind in ("same", "inner", "none"):
+            out[kind] += 1
+        if kind in ("inner", "none"):                       # 뒤집힌 표기인가
+            out["flip_x"] += any(near(px - xi, x) and near(yi, y) for _c, xi, yi in cam)
+            out["flip_y"] += any(near(xi, x) and near(py - yi, y) for _c, xi, yi in cam)
+        if kind in ("moved", "inner") and len(out["examples"]) < 8:
+            out["examples"].append([kind, name])
+    if diffs:
+        out["inner_d"] = [round(median(d[0] for d in diffs), 1), round(median(d[1] for d in diffs), 1)]
+    return out
 
 
 # ───────────────────────── 훑기 ─────────────────────────
@@ -614,10 +661,20 @@ def known_lots(out_dir: Path):
     seen = set()
     listed = read_text(Path(__file__).with_name("coord_lab_seen.txt")) or ""       # 1~3차에 본 LOT(저장소에 둔 목록)
     seen.update(ln.strip() for ln in listed.splitlines() if ln.strip() and not ln.startswith("#"))
-    for p in sorted(Path(out_dir).glob("좌표실험_*.json")):
+    texts = []
+    for p in sorted(Path(out_dir).glob("좌표실험_*")):
         try:
-            seen.update(r["lot"] for r in json.loads(p.read_text(encoding="utf-8")).get("camtek", []) if r.get("lot"))
-        except (OSError, ValueError, AttributeError, TypeError):
+            if p.suffix == ".json":
+                texts.append(p.read_text(encoding="utf-8"))
+            elif p.suffix == ".zip":                 # 5차부터 결과는 zip 안에 있다
+                with zipfile.ZipFile(p) as z:
+                    texts += [z.read(n).decode("utf-8") for n in z.namelist() if "/" not in n and n.endswith(".json")]
+        except (OSError, ValueError, zipfile.BadZipFile):
+            continue
+    for t in texts:
+        try:
+            seen.update(r["lot"] for r in json.loads(t).get("camtek", []) if r.get("lot"))
+        except (ValueError, AttributeError, TypeError):
             continue
     return seen
 
@@ -720,6 +777,10 @@ def flags(r, no_map=()):
         if o and o["그대로"] < max(o.values()):
             out.append("Conder 맵 방향 의심")
             break
+    if any(c["moved"] or c["inner"] or c["flip_x"] or c["flip_y"] for c in r.get("conder_xy", [])):
+        out.append("Conder 좌표≠장비 좌표")
+    if r.get("conder_odd"):
+        out.append("Conder 사진·맵 어긋남: " + ", ".join(r["conder_odd"]))
     if not r.get("cx"):
         out.append("중심 없음")
     if r.get("A1", {}).get("x_bad"):
@@ -734,7 +795,35 @@ _COLLECT = ("Params_WaferInfo.ini", "ProductInfo.ini", "Wafer2Table.ini", "Recip
             "s_DieLocation.dat")
 
 
-def collect_zip(recs, live_by_dir, base: Path, no_map=(), part_mb=30, file_mb=12, progress=None, conder=None):
+_RAW_EXT = {".ini", ".dat", ".md", ".xml", ".txt", ".csv", ".lot", ".cfg", ".log", ".json", ".wlup", ".001"}
+_RAW_FILES = 60             # 폴더 하나에서 담는 파일 수
+_UP_NAMES = ("Recipe.ini", "MultiRecipe.ini", "ProductInfo.ini", "WaferInfo.ini", "Params_WaferInfo.ini")
+
+
+def _raw_files(src: Path, file_mb):
+    """원인 조사용으로 담을 파일 — 정해 둔 이름 + 작은 글자·설정 파일 전부(사진 제외).  ``(이름, 크기, 전체 목록 글)``."""
+    picked, listing = [], []
+    try:
+        ents = sorted(os.scandir(src), key=lambda e: e.name)
+    except OSError:
+        return picked, ""
+    for e in ents:
+        try:
+            size = e.stat().st_size if e.is_file() else -1
+        except OSError:
+            continue
+        ext = Path(e.name).suffix.lower()
+        if ext not in IMG_EXT:
+            listing.append(f"{size}\t{e.name}" + ("\\" if size < 0 else ""))
+        if size < 0 or size > file_mb * 2 ** 20 or ext in IMG_EXT:
+            continue
+        if e.name in _COLLECT or ((ext in _RAW_EXT or not ext) and len(picked) < _RAW_FILES):
+            picked.append((e.name, size))
+    return picked, "# 크기(바이트)\t이름 — 사진은 뺐다(사진목록.txt)\n" + "\n".join(listing)
+
+
+def collect_zip(recs, live_by_dir, base: Path, no_map=(), part_mb=20, file_mb=12, progress=None, conder=None,
+                reports=()):
     """이상 폴더의 원재료만 zip 으로.  사진은 이름만(``사진목록.txt``).
 
     한 파일이 ``part_mb`` 를 넘지 않게 ``_수집.zip`` · ``_수집_2.zip`` … 으로 나눈다(올리기 쉬운 크기).
@@ -743,7 +832,8 @@ def collect_zip(recs, live_by_dir, base: Path, no_map=(), part_mb=30, file_mb=12
     flagged = [(r, flags(r, no_map)) for r in recs]
     flagged = [(r, f) for r, f in flagged if f]
     conder = conder or {}
-    if not flagged and not conder.get("maps") and not conder.get("files") and not live_by_dir:
+    reports = [p for p in reports if Path(p).is_file()]
+    if not flagged and not conder.get("maps") and not conder.get("files") and not live_by_dir and not reports:
         return [], 0
     limit, per_product = part_mb * 2 ** 20, Counter()
     paths = [base.with_name(base.name + "_수집.zip")]
@@ -762,27 +852,36 @@ def collect_zip(recs, live_by_dir, base: Path, no_map=(), part_mb=30, file_mb=12
         z.writestr(arcname, body)
 
     try:
+        for p in reports:                            # 결과 요약도 zip 안에 — 올릴 것은 zip 뿐이다(사용자 요청)
+            room(Path(p).stat().st_size + 1024)
+            z.write(p, Path(p).name)
         text("이유.txt", "\n".join(f"{r['folder']}\t{'; '.join(f)}" for r, f in flagged))
         for i, (r, _f) in enumerate(flagged):
             if progress is not None:
                 progress(i, len(flagged), f"이상 폴더 원재료 모으는 중 {i + 1}/{len(flagged)}")
             key = product_key(r) if "px" in r else "?"
             per_product[key] += 1
-            if per_product[key] > 4:                 # 같은 제품은 4폴더면 충분하다
+            if per_product[key] > 8:                 # 같은 제품은 8폴더까지(원인을 가리려면 견줄 폴더가 있어야 한다)
                 continue
             src = Path(r["folder"])
             arc = f"{i:03d}_{src.parent.name}_{src.name}"
-            for name in _COLLECT:
-                p = src / name
-                try:
-                    size = p.stat().st_size
-                except OSError:
-                    continue
-                if size > file_mb * 2 ** 20:
-                    continue
+            files, listing = _raw_files(src, file_mb)
+            for name, size in files:
                 room(size + 1024)                    # 압축 전 크기 기준 → 조각은 늘 한도 안
                 try:
-                    z.write(p, f"{arc}/{name}")
+                    z.write(src / name, f"{arc}/{name}")
+                except OSError:
+                    continue
+            if listing:
+                text(f"{arc}/폴더목록.txt", listing)
+            for name in _UP_NAMES:                   # 레시피 · 제품 설정은 LOT · 셋업 폴더에 있기도 하다
+                up = _find_up(src, name)
+                if up is None or Path(up).parent == src:
+                    continue
+                try:
+                    if Path(up).stat().st_size <= file_mb * 2 ** 20:
+                        room(Path(up).stat().st_size + 1024)
+                        z.write(up, f"{arc}/_상위/{Path(up).parent.name}/{name}")
                 except OSError:
                     continue
             try:
@@ -897,8 +996,22 @@ def run_nas(argv, out: Path, progress=None, stop=None):
     for scope in ("LOT", "PRD"):
         borrow(recs, scope)
     dirs = conder_folder_checks({d: lv for d, lv in live_by_dir.items() if not _is_wafer(Path(d))}, conder)
+    odd = {}
+    for c in dirs:                            # 사진과 옆 맵이 어긋난 폴더 → 그 웨이퍼의 장비 원재료도 모은다
+        why = [t for t, bad in (("die 칸 밖", c["map"] and c["in_die"] < c["n"]), ("크기 넘침", c.get("spill")),
+                                ("한 칸 밀림", c["map"] and c["bad"] and c["shift"] != [0, 0]),
+                                ("레시피 섞임", len(c["recipes"]) > 1)) if bad]
+        if why:
+            odd.setdefault(Path(c["dir"]).name, set()).update(why)
+    for r in recs:
+        if r["wafer"] in odd:
+            r["conder_odd"] = sorted(odd[r["wafer"]])
     base = report(recs, [], [], out, sorted(no_map) if not app_note else app_note[0], conder_dirs=dirs)
-    zips, n = collect_zip(recs, live_by_dir, base, sorted(no_map), progress=progress, conder=conder)
+    loose = [base.with_suffix(e) for e in (".txt", ".json", ".html")]
+    zips, n = collect_zip(recs, live_by_dir, base, sorted(no_map), progress=progress, conder=conder, reports=loose)
+    if zips:                                  # 결과물은 zip 뿐 — 낱개 파일은 zip 에 담았으니 지운다
+        for p in loose:
+            p.unlink(missing_ok=True)
     print(f"\n이상 폴더 {n}" + (" — 원재료를 모았습니다: " + ", ".join(z.name for z in zips) if zips
                               else " — 모을 것이 없습니다"))
     return base, len(recs), n
@@ -1027,6 +1140,13 @@ def analyze_camtek(folder: Path, live_by_dir):
     cam = lut or dm                                           # Camtek die 목록을 화면 번호로 — Conder 맵과 대조용
     _LAST.update(folder=str(folder), lives=[(q[0], q[1]) for q in lives],
                  dies={(i - origin[0], origin[1] - j) for i, j in cam} if cam and origin else None)
+    if entries:                                              # Conder 사진 폴더마다 장비 결함과 한 장씩 대조
+        o = hyp.get("EXP") or hyp.get("LUT")
+        xy = [dict(conder_xy_check(inner, o, named, px, py, 45.0 if "block" in r else 2.5), dir=str(d))
+              for d, named in ((d, [(n, q) for n, q in lv if w in Path(n).stem.split("_")])
+                               for d, lv in live_by_dir.items() if d != folder) if named]
+        if xy:
+            r["conder_xy"] = xy
     if lives and entries:
         v = live_vote(entries, lives, px, py, inner=inner)
         if alt is not None:                                  # 시작점을 빼야 맞는가(가설) — 두 쪽 표 수를 다 적는다
@@ -1341,6 +1461,19 @@ def report(recs, klas, pairs, out_dir: Path, no_map=None, conder_dirs=None):
     for r in recs:
         if "hyp" not in r:
             L.append(f"  (기하 못 읽음) {r['folder']}: {'; '.join(r['notes'])}")
+    xy = [c for r in recs for c in r.get("conder_xy", [])]
+    if xy:
+        mv = Counter()
+        for c in xy:
+            mv.update(c["moved"])
+        tot = sum(c["n"] for c in xy)
+        L.append("")
+        L.append(f"[Conder 좌표 대 장비 좌표] 사진 폴더 {len(xy)} · 사진 {tot} · 번호와 die 안 좌표 모두 같음 "
+                 f"{sum(c['same'] for c in xy)} · 번호만 다름 {sum(mv.values())} · die 안 좌표만 다름 "
+                 f"{sum(c['inner'] for c in xy)} · 짝 없음 {sum(c['none'] for c in xy)} · 번호표 없어 좌표만 맞춤 "
+                 f"{sum(c['xy_only'] for c in xy)}")
+        L.append(f"     번호가 어긋난 칸 수(col,row): {dict(mv.most_common(8)) or '없음'} · 좌우로 뒤집어야 맞음 "
+                 f"{sum(c['flip_x'] for c in xy)} · 상하로 뒤집어야 맞음 {sum(c['flip_y'] for c in xy)}")
     if conder_dirs:
         wm = [c for c in conder_dirs if c["map"]]
         n_in, n_all = sum(c["in_die"] for c in wm), sum(c["n"] for c in wm)

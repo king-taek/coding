@@ -2,7 +2,7 @@
 
 개발자 모드(Ctrl+Shift+D)일 때만 상태바에 버튼 하나가 보인다.  누르면 ``dev/coord_lab.py`` 의
 NAS 순회(``run_nas``)를 백그라운드에서 돌리고 로딩바로 진행을 보인다.  결과는 바탕화면에
-``좌표실험_<시각>.*`` 로 남는다.  읽기 전용이고 앱의 좌표 계산·매칭에는 손대지 않는다.
+``좌표실험_<시각>_수집.zip`` 으로 남는다(20 MB 를 넘으면 ``_수집_2.zip`` …).  읽기 전용이고 앱의 좌표 계산·매칭에는 손대지 않는다.
 
 지우는 법(전부 ``[좌표수집-임시]`` 로 검색된다 — ``test_coord_collect_tmp.py`` 가 이 목록을 지킨다):
 
@@ -29,7 +29,7 @@ from .widgets import sheet_host as sheets
 
 _LOG = logging.getLogger("aoi.coord_collect")
 _TOOL = "dev/coord_lab.py"
-_MINUTES, _PER_LOT, _LOTS = 60, 3, 5
+_MINUTES, _PER_LOT, _LOTS = 120, 3, 5
 
 
 def _load_tool():
