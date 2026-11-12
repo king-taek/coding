@@ -85,6 +85,17 @@ def test_button_runs_in_background_and_reports(styled_qapp, monkeypatch, tmp_pat
             self.calls.append(("hide",))
 
     class _Tool:
+        found = None                                     # 이미 모은 zip 이 있는 폴더(없으면 None)
+
+        @classmethod
+        def find_collected(cls, desktop):
+            return cls.found
+
+        @staticmethod
+        def slim_zips(folder, progress=None):
+            progress(1, 2, "줄여 묶는 중")
+            return [folder / "좌표실험_t_줄임.zip"], 450 * 2 ** 20, 20 * 2 ** 20
+
         @staticmethod
         def run_nas(argv, out, progress=None, stop=None):
             progress(1, 4, "계산 2/4")
@@ -105,6 +116,16 @@ def test_button_runs_in_background_and_reports(styled_qapp, monkeypatch, tmp_pat
     assert said and "4" in said[0]
     assert win._loading.calls[:2] == [("show", True), ("progress", 0, 0)]   # busy 로 시작
     assert ("progress", 1, 4) in win._loading.calls and win._loading.calls[-1] == ("hide",)
+
+    # 이미 모은 zip 이 여러 개면 다시 수집하지 않고 줄여 묶는다(zip 25개를 올릴 수 없었다 — 사용자 2026-11-12)
+    _Tool.found, win._loading.calls = tmp_path, []
+    del said[:]
+    win._coord_collect_btn.click()
+    deadline = time.time() + 5
+    while not said and time.time() < deadline:
+        styled_qapp.processEvents()
+    assert said and "450" in said[0] and "좌표실험_t_줄임.zip" in said[0]
+    assert ("progress", 1, 2) in win._loading.calls and ("progress", 1, 4) not in win._loading.calls
     win.deleteLater()
 
 
@@ -163,6 +184,8 @@ def test_second_stop_releases_the_screen_without_waiting_for_the_worker(styled_q
     gate = threading.Event()
 
     class _Stuck:
+        find_collected = staticmethod(lambda desktop: None)
+
         @staticmethod
         def run_nas(argv, out, progress=None, stop=None):
             gate.wait(5)                                  # NAS 호출 하나에 걸려 있다

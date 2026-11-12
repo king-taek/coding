@@ -74,30 +74,51 @@ class _Collector(QObject):
             sheets.warn(self._win, i18n.KO.COORD_COLLECT_TITLE, i18n.KO.COORD_COLLECT_NO_TOOL)
             return
         yes, no = QMessageBox.StandardButton.Yes, QMessageBox.StandardButton.No
+        out = Path.home() / "Desktop"
+        out = out if out.is_dir() else Path.home()
+        found = tool.find_collected(out)         # 이미 모은 zip 이 여러 개면 다시 수집하지 않고 줄여 묶는다
+        if found is not None and sheets.ask(
+                self._win, i18n.KO.COORD_COLLECT_TITLE, i18n.KO.COORD_COLLECT_SLIM_ASK_FMT.format(folder=found),
+                labels={yes: i18n.KO.COORD_COLLECT_SLIM_START, no: i18n.KO.COORD_COLLECT_SLIM_SKIP}) == yes:
+            self._begin(lambda: self._slim(tool, found))
+            return
         if sheets.ask(self._win, i18n.KO.COORD_COLLECT_TITLE, i18n.KO.COORD_COLLECT_ASK,
                       labels={yes: i18n.KO.COORD_COLLECT_START}) != yes:
             return
+        self._begin(lambda: self._collect(tool, out))
+
+    def _begin(self, job) -> None:
+        """로딩바를 띄우고 ``job`` 을 백그라운드에서 돌린다.  ``job`` 은 ``finished`` 에 실을 값을 돌려준다."""
         self._running = True
         self._stop.clear()
         self._win._loading.cancel_requested.connect(self._on_cancel)
         self._win._loading.show_overlay(i18n.KO.COORD_COLLECT_RUNNING, cancelable=True)
         self._win._loading.set_progress(0, 0, i18n.KO.COORD_COLLECT_RUNNING)   # busy → 0 에서 안 멈춤
-        out = Path.home() / "Desktop"
-        out = out if out.is_dir() else Path.home()
 
         def _work() -> None:
             try:
-                base, wafers, odd = tool.run_nas(
-                    ["--minutes", str(_MINUTES), "--per-lot", str(_PER_LOT), "--lots", str(_LOTS)],
-                    out, progress=lambda d, t, m: self.progress.emit(int(d), int(t), str(m)),
-                    stop=self._stop.is_set)
-                self.finished.emit(int(wafers), int(odd), str(base or ""), "")
+                self.finished.emit(*job(), "")
             except Exception as e:                                  # noqa: BLE001
                 _LOG.exception("좌표 자료 수집 실패")
                 self.finished.emit(0, 0, "", f"{type(e).__name__}: {e}")
 
         self._thread = threading.Thread(target=_work, name="coord-collect", daemon=True)
         self._thread.start()
+
+    def _emit_progress(self, done, total, message) -> None:
+        self.progress.emit(int(done), int(total), str(message))
+
+    def _collect(self, tool, out):
+        base, wafers, odd = tool.run_nas(
+            ["--minutes", str(_MINUTES), "--per-lot", str(_PER_LOT), "--lots", str(_LOTS)],
+            out, progress=self._emit_progress, stop=self._stop.is_set)
+        return int(wafers), int(odd), str(base or "")
+
+    def _slim(self, tool, folder):
+        """이미 모은 zip 을 줄여 묶는다.  ``finished`` 의 웨이퍼 수 자리에 -1 을 실어 '줄였다' 를 알린다."""
+        made, before, after = tool.slim_zips(folder, progress=self._emit_progress)
+        return -1, len(made), i18n.KO.COORD_COLLECT_SLIM_DONE_FMT.format(
+            before=before / 2 ** 20, after=after / 2 ** 20, n=len(made), names="\n".join(str(p) for p in made))
 
     def _on_cancel(self) -> None:
         """[중지] 한 번 = 그만 찾고 **지금까지 모은 것을 저장**한다.  한 번 더 = 화면을 바로 푼다
@@ -129,6 +150,9 @@ class _Collector(QObject):
         if error:
             sheets.warn(self._win, i18n.KO.COORD_COLLECT_TITLE,
                         i18n.KO.COORD_COLLECT_FAIL_FMT.format(error=error))
+            return
+        if wafers < 0:                           # 줄여 묶기가 끝났다 — path 자리에 안내 글이 온다
+            sheets.info(self._win, i18n.KO.COORD_COLLECT_TITLE, path)
             return
         if not wafers:
             sheets.info(self._win, i18n.KO.COORD_COLLECT_TITLE, i18n.KO.COORD_COLLECT_NOTHING)

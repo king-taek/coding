@@ -436,6 +436,7 @@ def test_odd_folder_raw_includes_small_files_and_setup_level_recipe(tmp_path):
     _wafer(d, center=False)
     (d / "Extra.xml").write_text("<a/>", encoding="utf-8")
     (d / "big.dat").write_bytes(b"0" * 100)
+    (d / "huge.dat").write_bytes(b"0" * (lab._RAW_SMALL + 1))
     (d.parent.parent / "Recipe.ini").write_text("[Display]\nDisplayColShift=0\n", encoding="utf-8")
     r = lab.analyze_camtek(d, {})
     report = tmp_path / "좌표실험_t.json"
@@ -445,5 +446,65 @@ def test_odd_folder_raw_includes_small_files_and_setup_level_recipe(tmp_path):
     assert n == 1 and names[0] == "좌표실험_t.json"
     for want in ("X00/Extra.xml", "X00/big.dat", "X00/폴더목록.txt", "X00/_상위/Setup1/Recipe.ini"):
         assert any(x.endswith(want) for x in names), want
+    assert not any(x.endswith("X00/huge.dat") for x in names)      # 큰 .dat 가 zip 25개를 만들었다(5차 수집)
     assert not any(x.lower().endswith(".jpeg") for x in names)
     assert lab.collect_zip.__defaults__[1] == 20                    # 20 MB 마다 나눈다(사용자 요청)
+
+
+_DIELOC_MD = ('<root><RecordSize Size="24"/><Fields><Field Name="Type" Id="1" Offset="0" Vartype="3"/>'
+              '<Field Name="x" Id="2" Offset="8" Vartype="5"/><Field Name="y" Id="3" Offset="16" Vartype="5"/></Fields></root>')
+
+
+def _dieloc(points):
+    import struct
+    return b"".join(struct.pack("<i4xdd", 0, x, y) for x, y in points)
+
+
+def test_die_location_is_kept_as_positions_only():
+    """수 MB 짜리 s_DieLocation.dat 대신 die 위치만 담는다 — 위치는 하나도 잃지 않는다."""
+    pts = [(100.0, 50.0), (200.0, 50.0), (200.0, 150.0)]                # 격자 2×2 에서 한 칸이 빈다
+    body = lab.dieloc_text(_dieloc(pts), _DIELOC_MD)
+    lines = body.splitlines()
+    assert lines[1] == "격자" and lines[2] == "x\t100.0\t200.0" and lines[3] == "y\t50.0\t150.0"
+    assert lines[4:] == ["11", "01"]
+    assert lab.dieloc_text(_dieloc(pts), None) is None                   # 배치를 모르면 바꾸지 않는다
+    assert lab.dieloc_text(b"123", _DIELOC_MD) is None
+
+
+def test_collected_zips_are_repacked_small_without_collecting_again(tmp_path):
+    """zip 25개를 올릴 수 없다(사용자 2026-11-12) — 이미 모은 것을 큰 .dat 만 빼고 다시 묶는다."""
+    big = bytes(range(256)) * 2000                                       # 512 KB
+    with zipfile.ZipFile(tmp_path / "좌표실험_t_수집.zip", "w") as z:
+        z.writestr("좌표실험_t.json", "{}")
+        z.writestr("이유.txt", "a")
+        z.writestr("000_L_W/Recipe.ini", "[Display]")
+        z.writestr("000_L_W/DieAlignment.dat", big)
+        z.writestr("000_L_W/s_DieLocation.dat", _dieloc([(1.0, 2.0)]))
+    with zipfile.ZipFile(tmp_path / "좌표실험_t_수집_2.zip", "w") as z:
+        z.writestr("000_L_W/s_DieLocation.dat.md", _DIELOC_MD)           # 폴더가 두 조각에 걸쳐 있다
+        z.writestr("000_L_W/사진목록.txt", "x" * (lab._RAW_SMALL + 1))    # 우리가 쓴 목록은 커도 남긴다
+        z.writestr("Conder/000_P/W.txt", "ROWCT:1")
+    assert lab.find_collected(tmp_path) is None                          # 두 개쯤은 그냥 올린다
+    (tmp_path / "좌표실험_t_수집_3.zip").write_bytes((tmp_path / "좌표실험_t_수집_2.zip").read_bytes())
+    assert lab.find_collected(tmp_path) == tmp_path
+    made, before, after = lab.slim_zips(tmp_path)
+    names = set(zipfile.ZipFile(made[0]).namelist())
+    assert [p.name for p in made] == ["좌표실험_t_줄임.zip"] and after < before
+    assert names == {"좌표실험_t.json", "이유.txt", "000_L_W/Recipe.ini", "000_L_W/s_DieLocation.txt",
+                     "000_L_W/s_DieLocation.dat.md", "000_L_W/사진목록.txt", "Conder/000_P/W.txt"}
+    assert len(list(tmp_path.glob("*_수집*.zip"))) == 3                   # 원래 zip 은 그대로
+    assert lab.find_collected(tmp_path) is None and lab.slim_zips(tmp_path)[0] == []   # 이미 줄였다
+
+
+def test_conder_photos_of_another_scan_are_not_compared(tmp_path):
+    """같은 웨이퍼라도 다른 공정 · 레시피의 사진은 결함이 다르다 — 5차 수집은 이것을 '좌표가 다르다' 로 셌다."""
+    d = tmp_path / "RCP" / "Setup1" / "LOT-B" / "X00"
+    assert lab.same_scan_prefix(d) == "RCP_LOT-B_X00_"
+    _wafer(d)
+    q = (2, 2, 5276.1, 6054.1)                                           # 장비 결함과 같은 die 안 좌표
+    live = {tmp_path / "conder" / "1. RDL" / "X00": [("RCP_LOT-B_X00_2_2_5276.1_6054.1.jpg", q)],
+            tmp_path / "conder" / "2. PI" / "X00": [("OTHER_LOT-B_X00_2_2_1.0_1.0.jpg", (2, 2, 1.0, 1.0))]}
+    r = lab.analyze_camtek(d, live)
+    assert [(c["n"], Path(c["dir"]).parent.name) for c in r["conder_xy"]] == [(1, "1. RDL")]
+    assert r["conder_xy"][0]["none"] == 0 and r["conder_other_scan"] == 1
+    assert "Conder 좌표≠장비 좌표" not in lab.flags(r)
