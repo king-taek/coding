@@ -367,3 +367,45 @@ def test_walk_order_spreads_over_old_and_new_folders():
     """1·2차는 가장 최근 폴더만 봤다 — 3차는 오래된 것까지 고르게 본다."""
     assert lab._spread(list(range(8))) == [0, 4, 2, 6, 1, 5, 3, 7]
     assert lab._spread([]) == [] and sorted(lab._spread(list(range(5)))) == list(range(5))
+
+
+def test_big_map_is_not_cut_and_row_numbers_follow_the_header():
+    """3차 수집은 맵을 300 KB 에서 잘라 302×273 맵의 행 번호가 26칸 밀렸다 — 방향이 틀린 것처럼 보였다."""
+    assert lab._MAP_CAP >= 2 * 2 ** 20                           # 앱이 읽는 상한(2 MB) 이상
+    cut = "ROWCT:4\nCOLCT:2\nRowData:000 000\nRowData:000 003\n"  # 4행 중 위 2행만 남은 본문
+    dies, bad, _c, n = lab.conder_cells(cut)
+    assert n == 4 and (0, 3) in dies and bad == {(1, 2)}         # 아래부터 센 행 번호가 그대로
+
+
+def test_conder_photo_folder_is_checked_against_its_own_map_only(tmp_path):
+    """공정마다 맵이 다른 제품(36열/24열)이 있다 — 사진 폴더 바로 옆 맵과만 대조하고 섞임 · 넘침 · 밀림을 적는다."""
+    d = tmp_path / "LOT (ABC)" / "2. FVI" / "GX57007306"
+    names = ["2D@R_ABC_GX57007306_1_0_100_200.jpg",              # (1,0) = 불량 칸(003)
+             "2D@R_ABC_GX57007306_2_1_14500_200.jpg",            # die 안 x 14,500 > XDIES 14.28 mm → 옆 die 로 넘친다
+             "INCI_ABC_GX57007306_0_1_100_200.jpg"]              # 다른 레시피 · (0,1) 은 die 가 없는 칸
+    live = {d: [(n, lab.parse_live(n)) for n in names]}
+    maps = {"maps": {d.parent / "GX57007306.txt": _MAP_TXT,
+                     tmp_path / "LOT (ABC)" / "1. OR" / "GX57007306.txt": _MAP_TXT.replace("COLCT:3", "COLCT:9")}}
+    (c,) = lab.conder_folder_checks(live, maps)
+    assert c["map"] and c["cols"] == 3 and c["n"] == 3 and c["recipes"] == {"2D@R_ABC": 2, "INCI_ABC": 1}
+    assert c["in_die"] == 2 and c["on_bad"] == 1 and c["shift"] == [0, 0] and c["spill"] == 1
+    assert c["span"] == pytest.approx([42.84, 61.98]) and c["inner_max"]["2D@R_ABC"] == [14500.0, 200.0]
+    (none,) = lab.conder_folder_checks({tmp_path / "x" / "W1": live[d]}, maps)
+    assert none["map"] is False and "in_die" not in none         # 옆에 맵이 없으면 대조하지 않는다
+
+
+def test_lots_seen_in_earlier_runs_are_skipped(tmp_path):
+    """같은 LOT 을 또 돌면 한 시간이 같은 자료로 찬다 — 앞선 결과에 든 LOT 은 세지 않고 지나간다."""
+    root = tmp_path / "AOI-1" / "Scanresult" / "job" / "Setup1"
+    for lot in ("LOT-A", "LOT-B"):
+        _wafer(root / lot / "W00")
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "좌표실험_1.json").write_text('{"camtek": [{"lot": %s}]}' % __import__("json").dumps(str(root / "LOT-A")),
+                                      encoding="utf-8")
+    seen = lab.known_lots(out)
+    assert str(root / "LOT-A") in seen
+    folders, _cut = lab.nas_walk([tmp_path / "AOI-1"], time.time() + 60, lots=1, log=lambda *_: None, skip=seen)
+    assert [f.parent.name for f in folders] == ["LOT-B"]         # lots=1 이어도 건너뛴 LOT 은 세지 않는다
+    assert all(ln.startswith(("#", "J:", "M:", "X:", "\\\\")) or len(ln) > 3 for ln in
+               (lab.REPO / "dev" / "coord_lab_seen.txt").read_text(encoding="utf-8").splitlines())
