@@ -120,7 +120,7 @@ DUR_SHEET_OPEN = 280     # 04 — 누른 자리에서 커지며 열리는 시트
 SHEET_OPEN_SCALE = 0.94  # 04 — 시작 배율
 SHEET_OPEN_RISE = 8      # 04 — 시작할 때 아래로 내려가 있는 거리
 DUR_SHEET_CLOSE = 160    # 05 — 닫히는 시트 본체(가속).  스크림은 여전히 즉시 사라진다
-SHEET_CLOSE_SCALE = 0.98
+SHEET_CLOSE_SCALE = 1.0   # 2차 P24A — 축소를 뺐다(0.98 은 눈에 안 보이고 닫을 때마다 스무스 변환만 비쌌다)
 SHEET_CLOSE_DROP = 6
 DUR_STAMP_FLASH = 560    # 06 — 선별 결과가 들어간 곳의 한 번 반짝임
 DUR_ROW_RESIZE = 220     # 08·09 — 검토 행이 접히고 펼쳐지는 높이 변화
@@ -140,6 +140,9 @@ DUR_CHECK_OUT = 120      # 16 — 체크 표시가 들어감(가속)
 DUR_TICK_DRAW = 240      # 17 — '복사됨' 옆 체크가 그려지는 시간
 TOAST_RISE_PX = 6        # 17 — 토스트가 떠오르는 거리
 TOAST_LEAVE_PX = 4       # 17 — 토스트가 사라지며 올라가는 거리
+DUR_FADE_OUT = 120       # 2차 P3A·P12A·P15A — 사라지는 옛 문구·줄(가속, 등장보다 짧게)
+DUR_MAP_ROTATE = 220     # 2차 P6A — 노치를 바꾸면 Wafer map 그림이 실제 각도만큼 도는 시간
+DEP_DELAY_MS = 40        # 2차 P12A — 원인(스위치)이 먼저 움직이고 결과(종속 줄)가 이만큼 뒤에
 
 
 def _ease_material_decelerate() -> QEasingCurve:
@@ -834,6 +837,43 @@ def crossfade_from(widget, pixmap, *, duration: int = DUR_TILE_TOGGLE) -> None:
     _run_offset_fade(ghost, offset_from=(0, 0), offset_to=(0, 0),
                      opacity_from=1.0, opacity_to=0.0, duration=duration,
                      delay_ms=0, on_done=ghost.deleteLater)
+
+
+def grab_in_place(widget):
+    """위젯이 **지금 화면에 보이는 그대로**(뒤 바탕까지 불투명하게) 찍는다.
+
+    ★ ``widget.grab()`` 은 위젯이 칠하지 않은 곳이 비어(투명/기본 팔레트) 나온다.
+      그 사본을 새 모습 위에 얹어 흐리면, 새 모습이 빈 곳으로 **첫 프레임부터** 비쳐
+      크로스페이드가 아니라 '툭 바뀜' 이 된다(회색 점선 버튼 → 파란 버튼에서 실측).
+      창에서 그 자리를 찍으면 뒤 카드 색까지 함께 담긴다 — 색을 하드코딩하지 않는다."""
+    from PyQt6.QtCore import QRect
+    win = widget.window()
+    top = widget.mapTo(win, QPoint(0, 0))
+    return win.grab(QRect(top, widget.size()))
+
+
+def crossfade_over(widget, pixmap, *, duration: int = DUR_TILE_TOGGLE,
+                   delay_ms: int = 0, easing=EASE_PRIMARY) -> None:
+    """``crossfade_from`` 과 같지만 사본을 위젯 **안이 아니라 부모 위** 같은 자리에 얹는다.
+
+    ★ 입력란·버튼 **안**에 이펙트 달린 자식을 두면 Qt 가 'A paint device can only be
+      painted by one painter at a time' 경고를 낸다(실측) — 그래서 형제로 둔다.
+    ★ 숨겨진 위젯이어도 마지막 자리(geometry)가 남아 있어 '사라지는 모습' 에도 쓴다.
+    ``delay_ms`` 동안은 옛 모습이 그대로 덮여 있다(원인 먼저, 결과 나중)."""
+    from PyQt6.QtCore import Qt
+    parent = widget.parentWidget()
+    if not enabled() or parent is None or pixmap is None or pixmap.isNull():
+        return
+    ghost = QLabel(parent)
+    ghost.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+    ghost.setStyleSheet("background: transparent;")
+    ghost.setPixmap(pixmap)
+    ghost.setGeometry(widget.geometry())
+    ghost.show()
+    ghost.raise_()
+    _run_offset_fade(ghost, offset_from=(0, 0), offset_to=(0, 0),
+                     opacity_from=1.0, opacity_to=0.0, duration=duration,
+                     delay_ms=delay_ms, on_done=ghost.deleteLater, easing=easing)
 
 
 class CheckBadge(QWidget):

@@ -85,6 +85,19 @@ class NeonButton(QPushButton):
         # ★ `_press_anim` 은 지우지 않는다 — 재사용 슬롯이다(다음 프레스에서 대상만
         #   새 이펙트로 다시 문다).  여기서 None 으로 만들면 매번 새로 생성돼 다시 쌓인다.
 
+    def drop_press_effect(self) -> None:
+        """딥이 돌아오는 중이어도 이펙트를 바로 뗀다 — 부모가 자기 이펙트(페이드)를 씌우기
+        직전에 부른다.  이펙트가 겹치면 Qt 가 'one painter at a time' 을 내며 그 프레임을
+        못 그린다(검증 장비 줄 ✕ → 줄 접기, P15A)."""
+        if self._press_anim is not None:
+            self._press_anim.stop()
+        if self._press_eff is not None:
+            try:
+                self.setGraphicsEffect(None)
+            except RuntimeError:
+                pass
+            self._press_eff = None
+
     def mousePressEvent(self, e):  # noqa: N802
         self._press_feedback(True)
         super().mousePressEvent(e)

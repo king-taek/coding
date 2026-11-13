@@ -18,11 +18,13 @@ from __future__ import annotations
 
 from typing import Optional, Sequence
 
-from PyQt6.QtCore import QEvent, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QRectF, Qt, QVariantAnimation, pyqtSignal
+from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import (QButtonGroup, QGridLayout, QPushButton, QSizePolicy,
                              QWidget)
 
 from ..teardown import tolerate_teardown
+from .. import motion
 from .. import theme
 from .neon_button import NeonButton
 
@@ -134,6 +136,9 @@ class OptionGroup(QWidget):
         # 명시적 배타 그룹 — 부모를 공유해 '우연히' 배타가 되는 상태에 의존하지 않는다.
         self._group = QButtonGroup(self)
         self._group.setExclusive(True)
+        self._slide: Optional[_SegmentSlide] = None
+        self._capturing = False
+        self._prev_key = ""
 
         for key, label in options:
             btn = NeonButton(label, role=role, parent=self)
@@ -163,6 +168,11 @@ class OptionGroup(QWidget):
         if self._keys:
             self.set_current_key(current if current in self._buttons
                                  else self._keys[0])
+        self._prev_key = self.current_key()
+        # ★ `clicked` 가 아니라 `buttonToggled` 에서 건다 — QAbstractButton 은 토글 직후
+        #   clicked 를 내기 **전에** 동기 repaint 를 해서, clicked 에서 걸면 새 모습이
+        #   한 프레임 먼저 비친다(60fps 녹화 실측).  프로그램이 바꾼 선택도 같이 움직인다.
+        self._group.buttonToggled.connect(self._on_toggled)
         self._equalize_segments()
         self._reflow()
 
@@ -224,6 +234,50 @@ class OptionGroup(QWidget):
     # ------------------------------------------------------------------
     def _on_clicked(self, key: str) -> None:
         self.selection_changed.emit(key)
+
+    def _on_toggled(self, btn, checked: bool) -> None:
+        """세그먼트 선택 면이 옛 칸에서 새 칸으로 미끄러진다(P1A).  옆 스위치 노브와 같은 언어."""
+        if self._capturing or not checked:
+            return
+        new = next((k for k, b in self._buttons.items() if b is btn), "")
+        old, self._prev_key = self._prev_key, new
+        if (self._role != "segment" or not new or not old or new == old
+                or not motion.enabled() or not self.isVisible()):
+            return
+        a, b = self._buttons[old].geometry(), self._buttons[new].geometry()
+        if a.top() != b.top():
+            return                                  # 두 줄로 접혔으면 미끄러질 길이 없다
+        start = None
+        if self._slide is not None:                 # 연타 — 지금 자리에서 이어 간다
+            start = self._slide.cur_rect()
+            self._slide.finish()
+        self._slide = _SegmentSlide(self, old, new, self._capture_looks(), start)
+
+    def _capture_looks(self) -> dict:
+        """``{(key, checked): pixmap}`` — 체크를 잠깐 옮겨 가며 **화면 그대로** 찍는다.
+
+        시그널은 막고(`_capturing`), 눌림 이펙트는 찍는 동안 꺼서 어둡게 찍히지 않게 한다.
+        클릭당 한 번, 칸 수 × 칸 수 장(세그먼트는 2칸)이다."""
+        cur = self.current_key()
+        looks = {}
+        effs = []
+        for b in self._buttons.values():
+            e = b.graphicsEffect()
+            if e is not None and e.isEnabled():
+                e.setEnabled(False)
+                effs.append(e)
+        self._capturing = True
+        try:
+            for k in self._keys:
+                self._buttons[k].setChecked(True)
+                for j in self._keys:
+                    looks[(j, j == k)] = motion.grab_in_place(self._buttons[j])
+            self._buttons[cur].setChecked(True)
+        finally:
+            self._capturing = False
+            for e in effs:
+                e.setEnabled(True)
+        return looks
 
     def _reflow(self) -> None:
         widgets = [self._buttons[k] for k in self._keys]
@@ -288,3 +342,90 @@ class OptionGroup(QWidget):
         btn = self._buttons.get(new_key)
         if btn is not None:
             btn.setFocus(Qt.FocusReason.TabFocusReason)
+
+
+def _lerp(a: float, b: float, t: float) -> float:
+    return a + (b - a) * t
+
+
+class _SegmentSlide(QWidget):
+    """세그먼트 위 임시 덮개 — 선택 면(pill)이 옛 칸에서 새 칸으로 미끄러진다(P1A).
+
+    ``DUR_KNOB`` 180ms · ``EASE_PRIMARY``.  찍어 둔 **불투명** 모습으로 두 칸을 덮고:
+    면 밖은 '선택 안 된' 모습, 면은 선택 모습에서 읽은 틴트·테두리 색의 둥근 사각형,
+    면 안 글자는 선택 모습을 칸별로 잘라 그린다.  작은 영역 직접 그리기라 이펙트가 없다.
+    애니메이션은 이 위젯의 자식이고 tick 은 부모(이 위젯)만 건드린다.  끝나면 스스로 지운다."""
+
+    RADIUS = 6
+
+    def __init__(self, group: OptionGroup, old: str, new: str, looks: dict,
+                 start: Optional[QRectF]) -> None:
+        super().__init__(group)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setGeometry(group.rect())
+        self._group, self._new, self._looks = group, new, looks
+        self._rects = {k: QRectF(b.geometry()) for k, b in group._buttons.items()}
+        self._r0 = start if start is not None else self._rects[old]
+        self._t = 0.0
+        self._fill0, self._edge0 = self._colors(looks[(old, True)])
+        self._fill1, self._edge1 = self._colors(looks[(new, True)])
+        anim = QVariantAnimation(self)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        anim.setDuration(motion.DUR_KNOB)
+        anim.setEasingCurve(motion.EASE_PRIMARY)
+        anim.valueChanged.connect(self._tick)
+        anim.finished.connect(self.finish)
+        self.show()
+        self.raise_()
+        anim.start()
+
+    @staticmethod
+    def _colors(pm) -> tuple[QColor, QColor]:
+        """선택 모습에서 면 색(왼쪽 안쪽)과 테두리 색(위 가운데)을 읽는다 — QSS 토큰을 따른다."""
+        img = pm.toImage()
+        d = pm.devicePixelRatio() or 1.0
+        fill = img.pixelColor(int(8 * d), img.height() // 2)
+        edge = img.pixelColor(img.width() // 2, 0)
+        return fill, edge
+
+    def cur_rect(self) -> QRectF:
+        r0, r1 = self._r0, self._rects[self._new]
+        return QRectF(_lerp(r0.left(), r1.left(), self._t), r1.top(),
+                      _lerp(r0.width(), r1.width(), self._t), r1.height())
+
+    def _tick(self, v) -> None:
+        self._t = float(v)
+        self.update()
+
+    def finish(self) -> None:
+        if self._group._slide is self:
+            self._group._slide = None
+        self.hide()
+        self.deleteLater()
+
+    @staticmethod
+    def _mix(a: QColor, b: QColor, t: float) -> QColor:
+        return QColor.fromRgbF(_lerp(a.redF(), b.redF(), t), _lerp(a.greenF(), b.greenF(), t),
+                               _lerp(a.blueF(), b.blueF(), t), _lerp(a.alphaF(), b.alphaF(), t))
+
+    def paintEvent(self, event):  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pill = self.cur_rect()
+        pill_path = QPainterPath()
+        pill_path.addRoundedRect(pill.adjusted(0.5, 0.5, -0.5, -0.5), self.RADIUS, self.RADIUS)
+        for k, r in self._rects.items():            # 1) 전부 '선택 안 된' 모습
+            p.drawPixmap(r.topLeft(), self._looks[(k, False)])
+        p.setPen(QPen(self._mix(self._edge0, self._edge1, self._t), 1.0))
+        p.setBrush(self._mix(self._fill0, self._fill1, self._t))
+        p.drawPath(pill_path)                        # 2) 면
+        inner = pill.adjusted(2, 2, -2, -2)          # 3) 면 안 글자 — 테두리 2px 은 지킨다
+        for k, r in self._rects.items():
+            clip = inner.intersected(r.adjusted(2, 2, -2, -2))
+            if clip.isEmpty():
+                continue
+            p.save()
+            p.setClipRect(clip)
+            p.drawPixmap(r.topLeft(), self._looks[(k, True)])
+            p.restore()

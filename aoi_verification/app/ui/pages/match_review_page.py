@@ -14,16 +14,18 @@
 from __future__ import annotations
 
 import weakref
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 from pathlib import Path
 
-from PyQt6.QtCore import QObject, QPoint, QRect, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPixmap
+from PyQt6.QtCore import (QEvent, QObject, QPoint, QRect, QRectF, Qt, QTimer,
+                          pyqtSignal)
+from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPixmap, QTextDocument
 from PyQt6.QtWidgets import (QApplication, QFrame, QGridLayout, QHBoxLayout,
                              QLabel, QMenu, QScrollArea, QSizePolicy,
                              QVBoxLayout, QWidget)
 
 from ... import i18n
+from .. import motion
 from .. import theme
 from ..deferred import call_later
 from ..score_fmt import fmt_score
@@ -185,6 +187,14 @@ class _ThumbLoader(QObject):
                 thumb._load()
             except RuntimeError:
                 pass                             # 위젯이 이미 사라졌다
+
+
+def _ensure_mid(path: Path) -> None:
+    """일꾼 스레드용 — 중간 크기 캐시 파일만 만든다(실패는 `_load` 의 폴백 그림이 맡는다)."""
+    try:
+        image_io.get_mid_path(Path(path))
+    except Exception:
+        pass
 
 
 _thumb_loader: _ThumbLoader | None = None
@@ -1340,6 +1350,7 @@ class MatchReviewPage(QWidget):
         del self._pending_rows[:self._ROW_BATCH]
         for m in first:
             self._append_row(m)
+        self._warm_entrance_thumbs()
         if not self._pending_rows:
             self._arm_entrance()
             return
@@ -1386,6 +1397,56 @@ class MatchReviewPage(QWidget):
         창이 페이지를 실제로 앉히면 `on_shown()` 이 이걸 깨운다."""
         self._entrance_pending = True
         self._maybe_play_entrance()
+
+    #: 전환 스냅샷 직전, 보이는 썸네일을 기다리는 최대 시간(초) — 첫 진입이 굳지 않게 상한.
+    _SNAPSHOT_THUMB_WAIT_S = 0.25
+
+    def _warm_entrance_thumbs(self) -> None:
+        """첫 행들의 중간 크기 캐시를 **행을 만들자마자** 일꾼 스레드에 맡긴다(F1A).
+
+        화면 전환 스냅샷(`prepare_snapshot`)은 그 뒤에 오므로, 그때는 대개 파일이 이미
+        있어 UI 스레드는 읽기만 한다."""
+        pool = _get_thumb_loader()._pool
+        for row in self._rows[:self._ENTRANCE_ROWS]:
+            for th in row.findChildren(_LazyThumb):
+                pool.submit(_ensure_mid, th._path)
+
+    def prepare_snapshot(self) -> None:
+        """화면 전환이 이 페이지를 찍기 **직전**에 창이 부른다(F1A — 행이 두 번 나타나던 결함).
+
+        예전 스냅샷은 레이아웃이 덜 잡혀 행 높이가 틀리고 썸네일이 빈 흰 상자였다.  전환이
+        끝나면 행들이 다시 아래에서 올라와 같은 행이 두 번 등장했다.  여기서
+        ① 레이아웃을 확정하고 ② 보이는 행의 썸네일을 채운 뒤(최대 0.25초, 못 채운 칸은
+        평소처럼 나중에) ③ 화면 전환 자체를 진입 모션으로 삼아 행 올라오기를 건너뛴다.
+        행이 많아 나눠 만드는 중이면(`_pending_rows`) 올라오기는 그대로 둔다."""
+        if not self._rows:
+            return
+        for _ in range(2):
+            QApplication.sendPostedEvents(None, QEvent.Type.LayoutRequest)
+            if self.layout() is not None:
+                self.layout().activate()
+            if self._scroll_host.layout() is not None:
+                self._scroll_host.layout().activate()
+            self._scroll.widget().adjustSize()
+        vp = self._scroll.viewport()
+        vis = QRect(0, 0, vp.width(), vp.height())
+        thumbs = []
+        for row in self._rows:
+            if row.isHidden():
+                continue
+            if not QRect(row.mapTo(vp, QPoint(0, 0)), row.size()).intersects(vis):
+                continue
+            thumbs += [t for t in row.findChildren(_LazyThumb) if not t._image_loaded]
+        if thumbs:
+            pool = _get_thumb_loader()._pool
+            futs = {pool.submit(_ensure_mid, t._path): t for t in thumbs}
+            done, _ = wait(futs, timeout=self._SNAPSHOT_THUMB_WAIT_S)
+            for f in done:
+                th = futs[f]
+                th._image_loaded = True
+                th._load()
+        if getattr(self, "_entrance_pending", False) and not self._pending_rows:
+            self._entrance_pending = False      # 전환이 곧 진입 모션 — 한 번만 등장
 
     def on_shown(self) -> None:
         """창이 이 페이지를 화면에 앉혔다(`main_window._show_page` 의 커밋 지점)."""
@@ -1709,10 +1770,34 @@ class MatchReviewPage(QWidget):
             parts.append(seg(i18n.KO.TALLY_COORD_FAILED_FMT,
                              self._coord_failed_count, theme.MUTE))
         self._tally_label.setText(sep.join(parts))
+        self._pulse_changed_tally(
+            [("ok", ok), ("over", over), ("none", none),
+             ("fail", self._coord_failed_count)], parts, sep)
         kept = len(self._matches) - len(self._unmatched_keys)
         self.btn_done.setText(
             i18n.KO.BTN_FINISH_REVIEW_KEPT_NONE_FMT.format(n=kept, m=none) if none
             else i18n.KO.BTN_FINISH_REVIEW_KEPT_FMT.format(n=kept))
+
+    def _pulse_changed_tally(self, counts, parts, sep) -> None:
+        """P14B — 바뀐 칸 뒤에만 연한 강조색이 한 번 지나간다.  숫자는 즉시 바뀐다(보간 없음).
+
+        칸 = 0 이 아닌 항목(일치는 늘).  처음 그릴 때와 칸 구성이 같은 값이면 아무것도 안 한다."""
+        segs = [(k, n) for k, n in counts if k == "ok" or n > 0]
+        old = getattr(self, "_tally_segs", None)
+        self._tally_segs = segs
+        lbl = self._tally_label
+        if old is None or old == segs or not motion.enabled() or not lbl.isVisible():
+            return
+        prev = dict(old)
+        changed = {i for i, (k, n) in enumerate(segs) if prev.get(k) != n}
+        band = getattr(self, "_tally_band", None)
+        if band is None:
+            band = self._tally_band = _TallyPulse(lbl)
+        band.setGeometry(lbl.rect())
+        band.set_spans(_rich_spans(lbl, parts, sep, changed))
+        band.show()
+        band.raise_()
+        motion.pulse(band, duration=motion.DUR_SLOW)
 
     def _on_done(self) -> None:
         kept: list[MatchResult] = []
@@ -1726,3 +1811,52 @@ class MatchReviewPage(QWidget):
             else:
                 kept.append(m)
         self.finished.emit(kept, unmatched_refs)
+
+
+def _rich_width(label, html: str) -> float:
+    d = QTextDocument()
+    d.setDefaultFont(label.font())
+    d.setDocumentMargin(0)
+    d.setHtml(html)
+    return d.idealWidth()
+
+
+def _rich_spans(label, parts, sep, wanted) -> list:
+    """리치 텍스트 라벨에서 ``wanted`` 번째 칸들의 가로 범위(라벨 좌표)."""
+    pad = 5
+    x = label.contentsRect().left() + label.margin()
+    sep_w = _rich_width(label, sep)
+    out = []
+    for i, html in enumerate(parts):
+        w = _rich_width(label, html)
+        if i in wanted:
+            out.append(QRectF(x - pad, 0, w + 2 * pad, label.height()))
+        x += w + sep_w
+    return out
+
+
+class _TallyPulse(QWidget):
+    """탤리 라벨 위 투명 띠 — ``motion.pulse`` 가 모는 ``_pulse`` 만큼 칸 뒤를 물들인다(P14B)."""
+
+    ALPHA = 0.22
+
+    def __init__(self, label) -> None:
+        super().__init__(label)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self._spans: list = []
+        self._pulse = 0.0
+
+    def set_spans(self, spans) -> None:
+        self._spans = spans
+
+    def paintEvent(self, event):  # noqa: N802
+        if self._pulse <= 0.0 or not self._spans:
+            return
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        c = QColor(theme.ACCENT)
+        c.setAlphaF(self.ALPHA * self._pulse)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(c)
+        for r in self._spans:
+            p.drawRoundedRect(r, 4, 4)

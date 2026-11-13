@@ -1291,3 +1291,88 @@ def test_lot_merge_keeps_each_slots_cell_when_centers_differ(tmp_path):
     assert got.y - my0 == pytest.approx(own.y - ay0, abs=1e-6)
     assert not merged.mixed_frames
     assert wm.WARN_MIXED_FRAMES not in [c for c, _ in wm.map_warnings(merged)]
+
+
+# ── 2차 모션(P6A 회전 · P18A 휠 줌) — 상태는 즉시, 그림만 따라온다 ──────────────
+def _spin_ms(qapp, ms: int) -> None:
+    from PyQt6.QtCore import QElapsedTimer
+    t = QElapsedTimer()
+    t.start()
+    while t.elapsed() < ms:
+        qapp.processEvents()
+
+
+def _wheel(view, pos, dy=120):
+    from PyQt6.QtCore import QPoint, Qt
+    from PyQt6.QtGui import QWheelEvent
+    return QWheelEvent(pos, QPointF_(view.mapToGlobal(pos.toPoint())), QPoint(0, 0),
+                       QPoint(0, dy), Qt.MouseButton.NoButton,
+                       Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase, False)
+
+
+def QPointF_(p):  # noqa: N802 — 지역 도우미(QPoint → QPointF)
+    from PyQt6.QtCore import QPointF
+    return QPointF(p)
+
+
+def test_rotation_state_is_immediate_and_picture_follows(qt, tmp_path, monkeypatch):
+    """P6A — 회전 값·hit 판정은 누른 즉시 새 값이다.  도는 그림은 220ms 뒤 사라진다."""
+    from aoi_verification.app.ui import motion
+    monkeypatch.setattr(motion, "enabled", lambda: True)
+    view, data = _view_with_points(qt, tmp_path)
+    view.show()
+    view.set_rotation(1)
+    assert view.rotation() == 1
+    assert view._rot_pix is not None and view._rot_deg == 90.0
+    view.grab()                                         # 도는 중 그리기도 예외 없이
+    _spin_ms(qt, motion.DUR_MAP_ROTATE + 120)
+    assert view._rot_pix is None
+    view.set_rotation(0)                                # 반시계 한 칸은 −90°
+    assert view._rot_deg == -90.0
+    view.set_rotation(2)                                # 도는 중 다시 → 옛 회전은 끝내고 180°
+    assert view.rotation() == 2 and view._rot_deg == 180.0
+    _spin_ms(qt, motion.DUR_MAP_ROTATE + 120)
+    view.close()
+
+
+def test_wheel_zoom_animates_to_target_and_keeps_point_under_cursor(qt, tmp_path, monkeypatch):
+    """P18A — 휠 한 칸이 120ms 에 걸쳐 1.25배가 되고, 커서 아래 점은 내내 그 자리다."""
+    from PyQt6.QtCore import QPointF
+    from aoi_verification.app.ui import motion
+    from aoi_verification.app.ui.widgets import wafer_map_view as wmv
+    monkeypatch.setattr(motion, "enabled", lambda: True)
+    view, data = _view_with_points(qt, tmp_path)
+    view.show()
+    pos = QPointF(150, 170)
+    anchor = view._mapper().to_um(pos)
+    view.wheelEvent(_wheel(view, pos))
+    view.wheelEvent(_wheel(view, pos))                  # 연속 휠은 목표에 쌓인다
+    assert view._zoom_to == pytest.approx(wmv.ZOOM_STEP ** 2)
+    _spin_ms(qt, 40)
+    mid = view._mapper().to_um(pos)
+    assert abs(mid.x() - anchor.x()) < 1.0 and abs(mid.y() - anchor.y()) < 1.0
+    _spin_ms(qt, motion.DUR_ZOOM_STEP + 120)
+    assert view.zoom() == pytest.approx(wmv.ZOOM_STEP ** 2)
+    end = view._mapper().to_um(pos)
+    assert abs(end.x() - anchor.x()) < 1.0 and abs(end.y() - anchor.y()) < 1.0
+    view.close()
+
+
+def test_drag_during_wheel_zoom_starts_from_the_target(qt, tmp_path, monkeypatch):
+    """확대가 도는 중에 끌기를 시작하면 확대를 목표값으로 확정한다 — 중간값 위에서 끌지 않게."""
+    from PyQt6.QtCore import QPoint, QPointF, Qt
+    from PyQt6.QtGui import QMouseEvent
+    from PyQt6.QtCore import QEvent
+    from aoi_verification.app.ui import motion
+    from aoi_verification.app.ui.widgets import wafer_map_view as wmv
+    monkeypatch.setattr(motion, "enabled", lambda: True)
+    view, data = _view_with_points(qt, tmp_path)
+    view.show()
+    view.wheelEvent(_wheel(view, QPointF(200, 200)))
+    press = QMouseEvent(QEvent.Type.MouseButtonPress, QPointF(200, 200),
+                        QPointF(view.mapToGlobal(QPoint(200, 200))),
+                        Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton,
+                        Qt.KeyboardModifier.NoModifier)
+    view.mousePressEvent(press)
+    assert view.zoom() == pytest.approx(wmv.ZOOM_STEP)
+    view.close()
