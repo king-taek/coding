@@ -116,6 +116,16 @@ def test_nas_walk_samples_each_lot_and_collects_only_odd_folders(tmp_path):
     assert not any(x.lower().endswith(".jpeg") for x in names)
 
 
+def test_collect_zip_short_name_never_overwrites(tmp_path):
+    """앱은 날짜 폴더에 짧은 이름(``--zip-name``)으로 남긴다 — 같은 날 다시 모아도 앞 zip 을 덮지 않는다."""
+    _wafer(tmp_path / "LOT" / "X00", center=False)
+    recs = [lab.analyze_camtek(tmp_path / "LOT" / "X00", {})]
+    first, _ = lab.collect_zip(recs, {}, tmp_path / "좌표실험_a", zip_stem="집중수집")
+    assert [z.name for z in first] == ["집중수집.zip"]
+    again, _ = lab.collect_zip(recs, {}, tmp_path / "좌표실험_b", zip_stem="집중수집")
+    assert again[0].name.startswith("집중수집_") and again[0] != first[0] and first[0].is_file()
+
+
 def test_nas_walk_stops_at_deadline(tmp_path):
     _wafer(tmp_path / "LOT" / "W0")
     folders, cut = lab.nas_walk([tmp_path], 0.0, log=lambda *_: None)   # 이미 지난 마감
