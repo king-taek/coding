@@ -472,6 +472,13 @@ import time
 import zipfile
 
 CONDER_ROOT = r"\\k5cifsn2\k5tsvdata$\1. Conder Scan"
+# 집중 분석(``--focus``, 2026-11-14) — 번호를 아직 못 정하는 두 무리의 Job 폴더 이름 조각.
+# · SNU-EDGE(GAYHY) 작은 die: 장비 화면 6장 모두 (−1,−1). 같은 셋업(6322)의 SNU·SNU-3D·SNU-SRD 웨이퍼에
+#   번호표·DieLut 이 있는지, Conder 이름(장비 번호)이 몇 장 있는지 본다.
+# · 번호표 없는 블록 제품(AMD Sepio · PHU_9 · PVL-PCM): 같은 셋업에서 번호표 있는 웨이퍼를 찾는다.
+# · 시프트 −1 레시피(T254 H-M1 · FS UBM, Job 에 0858711PD): 맨 왼쪽 열이 화면 col −1 인 Conder 이름이
+#   실제로 생기는지 — 지금까지 이 레시피 Conder 사진은 4 LOT 32장뿐이라 '음수 0장' 이 약한 근거다.
+FOCUS_JOBS = ("W97254Z6B1K16", "AMD Sepio", "3L795426A", "WB90-PV325", "0858711PD")
 UNC_SHARES = [r"\\10.142.80.91\nas3-1"]
 _WAFER_MARK = ("ColorImageGrabingInfo.ini", "Params_WaferInfo.ini")
 _LIVE_CAP = 400          # 폴더마다 읽는 사진 이름 수(정답 표결에는 몇 장이면 된다)
@@ -529,12 +536,14 @@ def _expired(deadline) -> bool:
 _SKIP_SIBLINGS = object()
 
 
-def nas_walk(roots, deadline, per_lot=3, lots=5, log=print, on_lot=None, skip=frozenset(), want=None):
+def nas_walk(roots, deadline, per_lot=3, lots=5, log=print, on_lot=None, skip=frozenset(), want=None,
+             focus=()):
     """웨이퍼 폴더(= INI 가 든 폴더)를 찾는다.  LOT(웨이퍼들의 부모)마다 ``per_lot`` 장,
     한 폴더 아래 LOT 은 최근 ``lots`` 개만 — 번호 기준은 레시피의 것이라 몇 장이면 된다.
     ``want(고른 웨이퍼들)`` 이 거짓이면 그 LOT 은 세지 않고, **같은 폴더의 다른 LOT 도 건너뛴다**
     (시프트 조사 모드) — 레시피는 셋업 폴더 단위라 형제 LOT 도 같다.  예전에는 시프트 없는 셋업의
-    LOT 을 전부 열어 보느라 30분 동안 웨이퍼 3장만 찾았다(1차 시프트 수집, 2026-11-14)."""
+    LOT 을 전부 열어 보느라 30분 동안 웨이퍼 3장만 찾았다(1차 시프트 수집, 2026-11-14).
+    ``focus`` 를 주면 Scanresult 바로 아래(Job 폴더)에서 이름에 그 조각이 든 것만 들어간다(집중 분석)."""
     found, state = [], {"lots": 0, "cut": False}
 
     def visit(d: Path, depth: int):
@@ -543,6 +552,8 @@ def nas_walk(roots, deadline, per_lot=3, lots=5, log=print, on_lot=None, skip=fr
             state["cut"] = True
             return False
         subs = _spread(sorted(_subdirs(d, deadline), key=lambda t: -t[2]))  # 최근 것부터, 오래된 것까지 고르게
+        if depth == 0 and focus:
+            subs = [t for t in subs if any(k.lower() in t[0].lower() for k in focus)]
         if not subs or depth > _DEPTH:
             return False
         names = sorted(subs)
@@ -812,6 +823,8 @@ def nas_conder(roots, wanted, deadline, log=print, index=None, extra=None):
 def flags(r, no_map=()):
     """원재료를 모을 만한 폴더인가 — 이유 목록(없으면 정상)."""
     out = list(r.get("notes", []))
+    if r.get("focus"):
+        out.append("집중 분석 대상")                       # 이상이 없어도 원재료를 담는다 — 같은 셋업끼리 견준다
     h = r.get("hyp")
     if h is None:
         return out or ["기하 못 읽음"]
@@ -925,7 +938,7 @@ def _raw_files(src: Path, file_mb):
 
 
 def collect_zip(recs, live_by_dir, base: Path, no_map=(), part_mb=20, file_mb=12, progress=None, conder=None,
-                reports=()):
+                reports=(), per_product_cap=8):
     """이상 폴더의 원재료만 zip 으로.  사진은 이름만(``사진목록.txt``).
 
     한 파일이 ``part_mb`` 를 넘지 않게 ``_수집.zip`` · ``_수집_2.zip`` … 으로 나눈다(올리기 쉬운 크기).
@@ -963,7 +976,7 @@ def collect_zip(recs, live_by_dir, base: Path, no_map=(), part_mb=20, file_mb=12
                 progress(i, len(flagged), f"이상 폴더 원재료 모으는 중 {i + 1}/{len(flagged)}")
             key = product_key(r) if "px" in r else "?"
             per_product[key] += 1
-            if per_product[key] > 8:                 # 같은 제품은 8폴더까지(원인을 가리려면 견줄 폴더가 있어야 한다)
+            if per_product[key] > per_product_cap:   # 같은 제품은 8폴더까지(집중 분석은 40) — 견줄 폴더가 있어야 한다
                 continue
             src = Path(r["folder"])
             arc = f"{i:03d}_{src.parent.name}_{src.name}"
@@ -1112,6 +1125,11 @@ def run_nas(argv, out: Path, progress=None, stop=None):
     fresh = "--fresh" in argv                 # 앞선 수집에서 본 LOT 도 다시 돈다
     if fresh:
         argv.remove("--fresh")
+    focus = FOCUS_JOBS if "--focus" in argv else ()   # 정해 둔 Job 만, 본 LOT 도 다시, 원재료는 전부(2026-11-14)
+    if focus:
+        argv.remove("--focus")
+        fresh = True
+        print("집중 분석 모드 — Job 이름에", ", ".join(focus), "이(가) 든 폴더만 돕니다")
     shift_only = "--shift-only" in argv       # 화면 시프트가 0 이 아닌 레시피의 LOT 만 모은다(2026-11-13)
     if shift_only:
         argv.remove("--shift-only")
@@ -1153,6 +1171,8 @@ def run_nas(argv, out: Path, progress=None, stop=None):
                 r = {"folder": str(f), "wafer": wafer_name(f), "lot": str(f.parent),
                      "notes": [f"읽다 실패 {type(e).__name__}: {e}"]}
             attach_conder_maps(r, conder)
+            if focus:
+                r["focus"] = True
             recs.append(r)
             res = app_check([r], {})          # 앱 대조도 그 자리에서 — 끝에 몰면 NAS 를 한 번 더 돈다
             (no_map.update if isinstance(res, list) else app_note.append)(res)
@@ -1167,7 +1187,7 @@ def run_nas(argv, out: Path, progress=None, stop=None):
             break
         share = time.time() + (t_walk - time.time()) / (len(cam_roots) - i)
         cut = nas_walk([root], until(share), per_lot, lots, print, on_lot, seen,
-                       (lambda picked: has_shift(picked, census)) if shift_only else None)[1] or cut
+                       (lambda picked: has_shift(picked, census)) if shift_only else None, focus)[1] or cut
     print(f"\n웨이퍼 폴더 {len(recs)} · Conder 폴더 {len(live_by_dir)} · {time.time() - t0:.0f}초"
           + (" · 중지했습니다" if stop() else " · 시간 제한으로 일부만 돌았습니다" if cut else ""))
     census_file = None
@@ -1192,7 +1212,8 @@ def run_nas(argv, out: Path, progress=None, stop=None):
             r["conder_odd"] = sorted(odd[r["wafer"]])
     base = report(recs, [], [], out, sorted(no_map) if not app_note else app_note[0], conder_dirs=dirs)
     loose = [base.with_suffix(e) for e in (".txt", ".json", ".html")] + ([census_file] if census_file else [])
-    zips, n = collect_zip(recs, live_by_dir, base, sorted(no_map), progress=progress, conder=conder, reports=loose)
+    zips, n = collect_zip(recs, live_by_dir, base, sorted(no_map), progress=progress, conder=conder, reports=loose,
+                          per_product_cap=40 if focus else 8)
     if zips:                                  # 결과물은 zip 뿐 — 낱개 파일은 zip 에 담았으니 지운다
         for p in loose:
             p.unlink(missing_ok=True)
