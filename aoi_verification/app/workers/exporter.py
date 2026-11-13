@@ -1439,8 +1439,7 @@ class ExcelExporter(QThread):
         from openpyxl.styles import Alignment, Font
         from openpyxl.utils.units import pixels_to_points
 
-        from ..coords.wafer_map import (WARN_LIVE_UNVERIFIED, is_high_risk, slot_maps,
-                                        warning_reasons)
+        from ..coords.wafer_map import is_high_risk, slot_maps, warning_reasons
 
         ws = wb.create_sheet(title=_safe_sheet_title(
             i18n.KO.WAFER_MAP_SHEET + self._sheet_suffix, set(wb.sheetnames)))
@@ -1472,7 +1471,6 @@ class ExcelExporter(QThread):
             return xli
 
         base = self._prog_done
-        live_seen = False
         for idx, slot in enumerate(rows, start=1):
             if self._stop.is_set():
                 raise _Cancelled
@@ -1492,13 +1490,12 @@ class ExcelExporter(QThread):
             for col, data in (("B", ref), ("C", val)):
                 # 경고는 그림보다 먼저 — 사진 좌표를 전부 못 읽으면 frame 이 None 인데,
                 # 그때야말로 '좌표 없는 사진 N장' 이 엑셀에 남아야 한다.
-                reasons = warning_reasons(data, skip=(WARN_LIVE_UNVERIFIED,))
+                reasons = warning_reasons(data)
                 if reasons:
                     warns.append(i18n.KO.WAFER_MAP_WARN_SIDE_FMT.format(
                         side=(ws[f"{col}1"].value or "").split("\n")[0], reasons=reasons))
                 if data.frame is None:
                     continue
-                live_seen = live_seen or data.live_points > 0
                 try:
                     _add_image_centered(ws, png(data), col, r, px_w, px_w)
                 except Exception:
@@ -1512,16 +1509,6 @@ class ExcelExporter(QThread):
                 w = ws.cell(row=r, column=4, value="\n".join(warns))
                 w.font = Font(color="FFA5271E", bold=True) if danger else Font(color="FF8C4A0F")
                 w.alignment = Alignment(wrap_text=True, vertical="center")
-        # LIVE 파일로 그린 맵이 있으면 표 아래에 재검토 당부(화면 배너와 같은 문구).
-        if live_seen:
-            note_row = len(rows) + 3
-            ws.merge_cells(start_row=note_row, start_column=1,
-                           end_row=note_row, end_column=3)
-            note = ws.cell(row=note_row, column=1,
-                           value=i18n.KO.WAFER_MAP_WARN_LIVE_UNVERIFIED)
-            note.font = Font(bold=True, color="FF8C4A0F")
-            note.alignment = Alignment(wrap_text=True, vertical="center")
-            ws.row_dimensions[note_row].height = 36
         self._prog_done = base + len(rows)
 
     # ------------------------------------------------------------------

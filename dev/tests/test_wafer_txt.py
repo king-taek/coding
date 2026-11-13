@@ -16,6 +16,7 @@ LOT 폴더의 ``<WaferID>.txt`` 가 장비 웨이퍼 맵이고, 파일명 (col,r
 from __future__ import annotations
 
 import logging
+import math
 from pathlib import Path
 
 import pytest
@@ -227,17 +228,17 @@ def _codes(data):
     return [c for c, _ in wm.map_warnings(data)]
 
 
-def test_live_map_always_asks_for_review_even_when_known(tmp_path):
-    """LIVE 파일로 그린 맵은 검증이 아직 충분하지 않다 — 맵·die 크기를 알아도 늘 재검토 당부
-    (사용자 지시).  그 밖의 경고는 없다."""
+def test_live_map_with_known_map_has_no_warning(tmp_path):
+    """맵·die 크기를 아는 LIVE 맵은 경고가 없다 — 늘 붙이던 '검증 부족' 당부는 뺐다
+    (사용자 결정 2026-11-13: Conder 1575장 번호 일치 + XDIES 단위 검사 추가 뒤)."""
     lot = _lot(tmp_path)
     paths = [p for w in sorted(_PHOTOS) for p in _photos(lot, w)]
     data = wm.build_map(resolve_batch(paths))
-    assert wm.map_warnings(data) == [(wm.WARN_LIVE_UNVERIFIED, len(data.points))]
+    assert wm.map_warnings(data) == []
 
 
-def test_excel_wafer_map_sheet_carries_live_review_note(qt, isolated_cache, tmp_path):
-    """엑셀 Wafer Map 시트도 LIVE 파일로 그린 맵이면 표 아래에 같은 당부를 적는다."""
+def test_excel_wafer_map_sheet_has_no_live_review_note(qt, isolated_cache, tmp_path):
+    """엑셀 Wafer Map 시트도 표 아래 LIVE 당부를 더 이상 적지 않는다."""
     pytest.importorskip("openpyxl")
     from openpyxl import load_workbook
 
@@ -253,15 +254,15 @@ def test_excel_wafer_map_sheet_carries_live_review_note(qt, isolated_cache, tmp_
     ExcelExporter(result, dst_path=dst, template_path=tmp_path / "none.xlsx",
                   map_renderer=render_map_png).run()
     ws = load_workbook(str(dst))[i18n.KO.WAFER_MAP_SHEET]
-    assert ws["A4"].value == i18n.KO.WAFER_MAP_WARN_LIVE_UNVERIFIED
-    assert "A4:C4" in {str(r) for r in ws.merged_cells.ranges}
+    assert ws["A4"].value is None
+    assert not ws.merged_cells.ranges
 
 
 def test_excel_wafer_map_sheet_carries_the_banner_warnings(qt, isolated_cache, tmp_path):
     """좌표 전반 점검(2026-10-24) — 화면 배너의 경고(칸이 틀렸을 수 있음)가 엑셀에도 간다.
 
     예전에는 LIVE 당부만 적혀, die 크기 추정·격자 불일치·좌표 없는 사진이 있는 맵도
-    엑셀에서는 멀쩡해 보였다.  LIVE 당부는 표 아래에 한 번만(중복 금지)."""
+    엑셀에서는 멀쩡해 보였다."""
     pytest.importorskip("openpyxl")
     from openpyxl import load_workbook
 
@@ -279,8 +280,6 @@ def test_excel_wafer_map_sheet_carries_the_banner_warnings(qt, isolated_cache, t
     ws = load_workbook(str(dst))[i18n.KO.WAFER_MAP_SHEET]
     assert ws["D1"].value == i18n.KO.WAFER_MAP_SHEET_COL_WARN
     assert i18n.KO.WAFER_MAP_WARN_PITCH_ASSUMED in ws["D2"].value
-    assert i18n.KO.WAFER_MAP_WARN_LIVE_UNVERIFIED not in ws["D2"].value
-    assert ws["A4"].value == i18n.KO.WAFER_MAP_WARN_LIVE_UNVERIFIED
 
 
 def test_excel_warns_even_when_no_photo_could_be_placed(qt, isolated_cache, tmp_path):
@@ -308,14 +307,25 @@ def test_excel_warns_even_when_no_photo_could_be_placed(qt, isolated_cache, tmp_
     assert i18n.KO.WAFER_MAP_WARN_UNPLACED_FMT.format(n=2) in (ws["D2"].value or "")
 
 
-def test_non_live_map_has_no_review_warning():
-    assert wm.map_warnings(wm.MapData(None, (), (), live_points=0)) == []
+def test_unit_error_die_size_is_not_used(tmp_path):
+    """XDIES 를 단위 잘못 적은 큰 값(관측: 3L795426A 316.85 mil 을 mm 로)은 사진이 전부 그
+    안에 들어 예전 검사를 통과하고 점이 전부 웨이퍼 밖에 찍혔다(경고 없음).  die 칸 범위 ×
+    크기가 지름을 넘으면 쓰지 않고 사진으로 추정하며, 추정 경고를 띄운다(2026-11-13)."""
+    lot = _lot(tmp_path, dx="316.85", dy="316.85")       # 19칸 × 316.85 mm ≫ 300 mm
+    data = wm.build_map(resolve_batch(_photos(lot, "GX57004924")))
+    assert data.frame.pitch_x < 300_000 / 10             # die 크기로 쓰지 않았다
+    assert _codes(data) == [wm.WARN_PITCH_ASSUMED]
+    assert all(math.hypot(p.x, p.y) <= data.frame.radius for p in data.points)
+
+
+def test_empty_map_has_no_warning():
+    assert wm.map_warnings(wm.MapData(None, (), ())) == []
 
 
 def test_estimated_die_size_warns(tmp_path):
     lot = _lot(tmp_path, dx="", dy="")
     assert _codes(wm.build_map(resolve_batch(_photos(lot, "GX57004924")))) == \
-        [wm.WARN_PITCH_ASSUMED, wm.WARN_LIVE_UNVERIFIED]
+        [wm.WARN_PITCH_ASSUMED]
 
 
 def test_mixed_grids_and_off_die_and_unplaced_warn(tmp_path):
@@ -360,10 +370,8 @@ def test_dialog_shows_banner_only_when_needed_and_always_the_disclaimer(qt, tmp_
     try:
         dlg.show_folder(ok)
         _wait(qt, dlg)
-        # 칸이 틀렸을 이유는 없지만 LIVE 파일 맵이라 재검토 당부만 뜬다
-        assert dlg.warn_banner.isVisibleTo(dlg)
-        assert i18n.KO.WAFER_MAP_WARN_LIVE_UNVERIFIED in dlg.warn_banner.text()
-        assert i18n.KO.WAFER_MAP_WARN_PITCH_ASSUMED not in dlg.warn_banner.text()
+        # 칸이 틀렸을 이유가 없으면 배너가 없다(LIVE 상시 당부는 2026-11-13 뺐다)
+        assert not dlg.warn_banner.isVisibleTo(dlg)
         assert dlg.disclaimer.isVisibleTo(dlg)
         assert dlg.disclaimer.text() == i18n.KO.WAFER_MAP_DISCLAIMER
         dlg.show_folder(bad)

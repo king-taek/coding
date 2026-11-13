@@ -508,3 +508,22 @@ def test_conder_photos_of_another_scan_are_not_compared(tmp_path):
     assert [(c["n"], Path(c["dir"]).parent.name) for c in r["conder_xy"]] == [(1, "1. RDL")]
     assert r["conder_xy"][0]["none"] == 0 and r["conder_other_scan"] == 1
     assert "Conder 좌표≠장비 좌표" not in lab.flags(r)
+
+
+def test_shift_only_walk_keeps_only_lots_with_a_display_shift(tmp_path):
+    """시프트 조사 모드(2026-11-13) — 화면 시프트가 0 이 아닌 레시피의 LOT 만 모으고, 나머지는
+    세지 않고 지나간다(lots=1 이어도 시프트 LOT 을 찾을 때까지 간다).  위 폴더 레시피도 읽는다."""
+    root = tmp_path / "AOI-1" / "Scanresult" / "job"
+    for lot in ("LOT-A", "LOT-B"):
+        _wafer(root / "Plain" / lot / "W00")
+    _wafer(root / "Shift" / "LOT-C" / "W00")
+    (root / "Shift" / "Recipe.ini").write_text("[Display]\nDisplayColShift=-1\nDisplayRowShift=0\n",
+                                               encoding="utf-8")
+    (root / "Plain" / "LOT-A" / "W00" / "Recipe.ini").write_text("[Display]\nDisplayColShift=0\n",
+                                                                 encoding="utf-8")
+    folders, _cut = lab.nas_walk([tmp_path / "AOI-1"], time.time() + 60, lots=1,
+                                 log=lambda *_: None, want=lab.has_shift)
+    assert [f.parent.name for f in folders] == ["LOT-C"]
+    r = lab.analyze_camtek(folders[0], {})
+    assert r["shift"] == (-1, 0) and r["shift_where"] == "상위"     # 앱은 폴더 안 Recipe.ini 만 본다
+    assert lab.recipe_shift(root / "Plain" / "LOT-B" / "W00") == (None, None)

@@ -57,8 +57,7 @@ def test_high_risk_codes_turn_the_map_banner_red():
     # 번호 계산 · die 없는 칸 · 격자 불일치 → 빨간 큰 배너
     assert wm.is_high_risk(wm.MapData(None, (), (), guessed_points=2))
     assert wm.is_high_risk(wm.MapData(None, (), (), mixed_frames=True))
-    # LIVE 당부 · 좌표 없는 사진만 있으면 주황 한 줄 그대로 — 늘 빨가면 무시하게 된다
-    assert not wm.is_high_risk(wm.MapData(None, (), (), live_points=5))
+    # 좌표 없는 사진만 있으면 주황 한 줄 그대로 — 늘 빨가면 무시하게 된다
     assert not wm.is_high_risk(wm.MapData(None, (), (Path("x.jpg"),)))
     assert not wm.is_high_risk(None)
     assert set(wm.DANGER_CODES) == {wm.WARN_NUMBER_GUESS, wm.WARN_OFF_DIE, wm.WARN_MIXED_FRAMES}

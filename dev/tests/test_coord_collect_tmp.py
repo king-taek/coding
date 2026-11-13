@@ -96,8 +96,11 @@ def test_button_runs_in_background_and_reports(styled_qapp, monkeypatch, tmp_pat
             progress(1, 2, "줄여 묶는 중")
             return [folder / "좌표실험_t_줄임.zip"], 450 * 2 ** 20, 20 * 2 ** 20
 
-        @staticmethod
-        def run_nas(argv, out, progress=None, stop=None):
+        argv = None
+
+        @classmethod
+        def run_nas(cls, argv, out, progress=None, stop=None):
+            cls.argv = list(argv)
             progress(1, 4, "계산 2/4")
             return tmp_path / "좌표실험", 4, 1
 
@@ -114,6 +117,7 @@ def test_button_runs_in_background_and_reports(styled_qapp, monkeypatch, tmp_pat
     while not said and time.time() < deadline:
         styled_qapp.processEvents()
     assert said and "4" in said[0]
+    assert "--shift-only" in _Tool.argv                  # 시프트 있는 레시피만 모은다(2026-11-13)
     assert win._loading.calls[:2] == [("show", True), ("progress", 0, 0)]   # busy 로 시작
     assert ("progress", 1, 4) in win._loading.calls and win._loading.calls[-1] == ("hide",)
 
