@@ -533,7 +533,9 @@ COORD_COLLECT_NO_TOOL = "수집 도구(dev/coord_lab.py)가 없습니다. 개발
 COORD_COLLECT_FAIL_FMT = "수집하다 멈췄습니다: {error}"
 COORD_COLLECT_STOPPING = "지금까지 모은 것을 저장하는 중 (한 번 더 누르면 화면을 바로 풉니다)"
 COORD_COLLECT_STOPPED = "화면을 먼저 풀었습니다. 저장이 끝나면 바탕화면에 '좌표실험_…_수집.zip' 이 생깁니다."
-COORD_COLLECT_NOTHING = "확인한 웨이퍼가 없어 결과 파일을 만들지 않았습니다."
+COORD_COLLECT_NOTHING = (
+    "시프트 있는 웨이퍼를 찾지 못했습니다. 바탕화면의 '좌표실험_…_시프트목록.txt'(확인한 셋업 목록)를 올려 주세요."
+)
 COORD_COLLECT_SLIM_ASK_FMT = (
     "이미 모은 수집 zip 이 여러 개 있습니다.\n{folder}\n"
     "다시 수집하지 않고, 올리기 쉽게 작은 zip 으로 줄여 묶을까요? 원래 zip 은 그대로 둡니다."
