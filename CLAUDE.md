@@ -328,7 +328,7 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   시프트를 더한 번호라 사진 정보·엑셀·맵 툴팁만 `screen_col`/`screen_row` 를 쓴다(T254 FS UBM `-1`, 관측).
   ⚠ **장비는 `WaferDisplayOrientation=2`(Left Bottom)일 때만 시프트를 더한다** — `1` 이면 값이 적혀 있어도 0 으로 본다
   (KENDALL A0 PI3: 장비 화면 1장 + Conder 이름 11장, T254 H-M1·FS UBM 은 2 로 더함, 관측 2026-11-14). 다른 값·키 없음은
-  옛 동작(더함) + 경고. 예측 확인 대기: TB500 R-ETCH(1, 시프트 (1,−6)) 는 안 더해야 한다. 골든: `test_display_shift.py`.
+  옛 동작(더함) + 경고. TB500 R-ETCH(1, 시프트 (1,−6))도 장비 화면 (4,2) 로 안 더함을 확인(관측 2026-11-14). 골든: `test_display_shift.py`.
   LIVE 파일명도 화면 번호다. Conder 폴더엔 Recipe.ini 가 없어 **LOT 맵 txt 불량 칸과 대조해 추정**한다
   (`camtek_live.lot_display_shift`) — 서로 다른 칸 3개 이상 · 맞은 사진의 90% 이상 · 시프트 0 은 10% 이하일 때만
   0 이 아닌 값을 채택한다(시프트 없는 4 LOT 278장은 0, FS UBM 42장은 −1). 맵이 결함을 표시하지 않는 제품(QORVO)은

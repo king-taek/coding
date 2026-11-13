@@ -124,7 +124,7 @@ _TB500_R_ETCH = ("[Display]\nWaferDisplayOrientation=1 ; System Default\n"
 @pytest.mark.parametrize("text, want", [
     (_KENDALL_A0_PI3, (0, 0)),          # System Default — 장비가 안 더함(관측)
     (_T254_H_M1, (-1, 0)),              # Left Bottom — 더함(관측, 번호표 있음)
-    (_TB500_R_ETCH, (0, 0)),            # 규칙의 예측(장비 화면 확인 대기) — 더하면 row 가 음수
+    (_TB500_R_ETCH, (0, 0)),            # 장비 화면 (4,2) 확인(2026-11-14) — 더했다면 (5,−4)
     ("[Display]\nWaferDisplayOrientation=3\nDisplayColShift=-1\n", (-1, 0)),   # 미확인 값: 예전처럼
 ])
 def test_shift_only_when_display_orientation_is_left_bottom(tmp_path, text, want):
