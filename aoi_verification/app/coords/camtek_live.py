@@ -150,8 +150,18 @@ _SHIFT_MIN_SHARE = 0.9        # 어느 후보에든 맞은 사진 중 채택 후
 _SHIFT_MAX_ZERO = 0.1         # 그중 시프트 0 이 맞힌 비율 상한
 _MAX_LOT_TXT = 200            # LOT 폴더에서 보는 맵 txt 상한(엉뚱한 상위 폴더 방어)
 
+# 화면 번호 시프트를 **쓴 적이 있는** Job — LIVE 파일명 맨 앞이 Scanresult Job 폴더 이름이다.
+# 시프트 수집(셋업 1,167개, 관측 2026-11-14)에서 장비가 실제로 더한 레시피는 이 둘뿐(col −1, 방향 2).
+# ⚠ 번호를 고치는 데 쓰지 않는다 — 레시피는 바뀔 수 있다(사용자 지적 2026-11-14).  맵 근거로 시프트를
+# 확인하지 못했을 때 '한 칸 다를 수 있음' 경고를 띄울지 정하는 데만 쓴다(사용자 결정).
+SHIFT_RISK_JOBS = ("R_T254 LIVE_0858711PD_FS UBM", "2D@R5-4DT-T254-H-M1_0858711PD-0A")
 
-@lru_cache(maxsize=64)
+
+def shift_risk_job(stem: str) -> bool:
+    """LIVE 파일명이 시프트를 쓴 적이 있는 Job 으로 시작하나."""
+    return any(stem.startswith(j + "_") for j in SHIFT_RISK_JOBS)
+
+
 def lot_display_shift(lot_folder: Path) -> tuple[int, int]:
     """LOT 폴더의 LIVE 파일명이 **화면 번호**로 적혔다면 그 시프트 ``(col, row)``, 아니면 ``(0, 0)``.
 
@@ -164,6 +174,17 @@ def lot_display_shift(lot_folder: Path) -> tuple[int, int]:
     서로 다른 (웨이퍼, 칸) 이 :data:`_SHIFT_MIN_SUPPORT` 개 이상, 맞은 사진의
     :data:`_SHIFT_MIN_SHARE` 이상을 그 후보가 맞힘, 시프트 0 은 :data:`_SHIFT_MAX_ZERO` 이하.
     ⚠ 맵이 결함을 표시하지 않는 제품(QORVO UBM — 55장 중 0장 일치)은 근거가 없어 0 이다."""
+    return _lot_shift(lot_folder)[0]
+
+
+def lot_shift_confirmed(lot_folder: Path) -> bool:
+    """맵 근거로 시프트(0 포함)를 **확인했나** — 0 도 같은 조건(칸 3개 · 90% · 다른 후보 10% 이하)을 넘어야 참."""
+    return _lot_shift(lot_folder)[1]
+
+
+@lru_cache(maxsize=64)
+def _lot_shift(lot_folder: Path) -> tuple[tuple[int, int], bool]:
+    """``(시프트, 확인했나)`` — :func:`lot_display_shift` 의 본체."""
     from . import wafer_txt
     hits = {sh: 0 for sh in _SHIFTS}          # 후보별 맞힌 사진 수
     support = {sh: set() for sh in _SHIFTS}   # 후보별 맞힌 (웨이퍼, 칸)
@@ -172,7 +193,7 @@ def lot_display_shift(lot_folder: Path) -> tuple[int, int]:
         txts = sorted(p for p in lot_folder.iterdir()
                       if p.suffix.lower() == ".txt" and p.is_file())[:_MAX_LOT_TXT]
     except OSError:
-        return (0, 0)
+        return (0, 0), False
     for t in txts:
         slot = lot_folder / t.stem
         if not slot.is_dir():
@@ -197,21 +218,24 @@ def lot_display_shift(lot_folder: Path) -> tuple[int, int]:
                     any_hit = True
             n_photos += any_hit
     if not n_photos:
-        return (0, 0)
+        return (0, 0), False
     best = max(_SHIFTS, key=lambda sh: (hits[sh], sh == (0, 0)))
     if best == (0, 0):
-        return (0, 0)
+        others = max((n for sh, n in hits.items() if sh != (0, 0)), default=0)
+        return (0, 0), (len(support[best]) >= _SHIFT_MIN_SUPPORT
+                        and hits[best] >= _SHIFT_MIN_SHARE * n_photos
+                        and others <= _SHIFT_MAX_ZERO * n_photos)
     if (len(support[best]) >= _SHIFT_MIN_SUPPORT
             and hits[best] >= _SHIFT_MIN_SHARE * n_photos
             and hits[(0, 0)] <= _SHIFT_MAX_ZERO * n_photos):
         _LOG.warning("%s 의 LIVE 파일명이 LOT 맵 txt 와 col %+d · row %+d 어긋난다 — "
                      "레시피 화면 번호 시프트로 보고 실제 die 로 되돌린다(사진 %d/%d장)",
                      lot_folder, best[0], best[1], hits[best], n_photos)
-        return best
+        return best, True
     _LOG.warning("%s 의 LIVE 파일명이 LOT 맵 txt 불량 칸과 일정하게 맞지 않는다 — "
                  "시프트를 정하지 못해 파일명 번호를 그대로 쓴다(후보별 사진 수 %s)",
                  lot_folder, {sh: n for sh, n in hits.items() if n})
-    return (0, 0)
+    return (0, 0), False
 
 
 def resolve(image_path: Path) -> Optional[DefectCoord]:
