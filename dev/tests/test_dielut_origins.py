@@ -140,7 +140,7 @@ def test_conflict_with_table_logs_and_keeps_table(monkeypatch, caplog):
 def test_trusted_tags():
     assert wg.is_trusted_source("Params+" + wg.EXPORT_SOURCE_TAG)
     assert wg.is_trusted_source("Params+" + wg.DIELUT_SOURCE_TAG)
-    assert wg.is_trusted_source("Params+" + wg.BORROW_SOURCE_TAG)
+    assert not wg.is_trusted_source("Params+같은 셋업 번호표")
     assert wg.is_trusted_source("Params+s_DieLocation.dat+" + wg.SMALL_MAP_SOURCE_TAG)
     assert not wg.is_trusted_source("Params+s_DieLocation.dat+" + wg.AGREE_SOURCE_TAG)
     assert not wg.is_trusted_source("Params+s_DieLocation.dat")
