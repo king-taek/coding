@@ -1,9 +1,9 @@
 """[좌표수집-임시] 좌표 자료 수집 버튼 — **수집·분석이 끝나면 지우는 코드**다.
 
 개발자 모드(Ctrl+Shift+D)일 때만 상태바에 버튼 하나가 보인다.  누르면 ``dev/coord_lab.py`` 의
-NAS 순회(``run_nas``)를 백그라운드에서 돌리고 로딩바로 진행을 보인다.  2026-11-13 부터는
-**화면 번호 시프트(Recipe.ini [Display])가 0 이 아닌 레시피의 LOT 만** 모은다(``--shift-only``,
-사용자 지시 — 시프트 실물이 두 종류뿐이라 규칙을 못 정했다).  결과는 바탕화면에
+NAS 순회(``run_nas``)를 백그라운드에서 돌리고 로딩바로 진행을 보인다.  2026-11-14 부터는
+**번호를 아직 못 정하는 Job 만 집중해서** 모은다(``--focus`` — SNU-EDGE · 번호표 없는 블록 제품,
+목록은 ``coord_lab.FOCUS_JOBS``, 사용자 지시).  시프트 규칙은 장비 화면으로 확정돼 ``--shift-only`` 는 쓰지 않는다.  결과는 바탕화면에
 ``좌표실험_<시각>_수집.zip`` 으로 남는다(20 MB 를 넘으면 ``_수집_2.zip`` …).  읽기 전용이고 앱의 좌표 계산·매칭에는 손대지 않는다.
 
 지우는 법(전부 ``[좌표수집-임시]`` 로 검색된다 — ``test_coord_collect_tmp.py`` 가 이 목록을 지킨다):
@@ -31,8 +31,8 @@ from .widgets import sheet_host as sheets
 
 _LOG = logging.getLogger("aoi.coord_collect")
 _TOOL = "dev/coord_lab.py"
-# 시프트 조사: 시프트 없는 LOT 은 세지 않고 지나가므로 폴더마다 받을 LOT 수를 넉넉히 둔다.
-_MINUTES, _PER_LOT, _LOTS = 30, 3, 30
+# 집중 분석: 정해 둔 Job 몇 개만 돌므로 LOT 마다 웨이퍼를 많이, LOT 도 많이 본다.
+_MINUTES, _PER_LOT, _LOTS = 30, 10, 50
 
 
 def _load_tool():
@@ -113,7 +113,7 @@ class _Collector(QObject):
 
     def _collect(self, tool, out):
         base, wafers, odd = tool.run_nas(
-            ["--minutes", str(_MINUTES), "--per-lot", str(_PER_LOT), "--lots", str(_LOTS), "--shift-only"],
+            ["--minutes", str(_MINUTES), "--per-lot", str(_PER_LOT), "--lots", str(_LOTS), "--focus"],
             out, progress=self._emit_progress, stop=self._stop.is_set)
         return int(wafers), int(odd), str(base or "")
 

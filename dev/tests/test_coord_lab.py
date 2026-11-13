@@ -548,3 +548,15 @@ def test_shift_walk_skips_sibling_lots_of_a_plain_setup_and_lists_every_setup(tm
     out = lab.write_census(census, tmp_path / "목록.txt").read_text(encoding="utf-8").splitlines()
     assert out[0] == "# 확인한 셋업 2개 · 화면 시프트 있음 1개"
     assert out[2].endswith("\t-1,-3\t폴더\t있음") and out[3].endswith("\t레시피 없음\t-\t없음")
+
+
+def test_focus_walk_enters_only_named_jobs_and_keeps_every_wafer(tmp_path):
+    """집중 분석(2026-11-14) — Scanresult 바로 아래 Job 이름에 조각이 든 곳만 돈다.
+    이상이 없는 웨이퍼도 원재료를 담게 '집중 분석 대상' 으로 표시한다."""
+    sr = tmp_path / "AOI-9" / "Scanresult"
+    _wafer(sr / "2D@R3-W97254Z6B1K16_0860699PD-0A" / "6322" / "SNU-EDGE" / "GAYHY01-A7")
+    _wafer(sr / "Other job" / "6322" / "LOT" / "W00")
+    folders, _cut = lab.nas_walk([sr], time.time() + 60, log=lambda *_: None, focus=lab.FOCUS_JOBS)
+    assert [f.name for f in folders] == ["GAYHY01-A7"]
+    assert "집중 분석 대상" in lab.flags({"folder": "x", "focus": True})
+    assert all(k for k in lab.FOCUS_JOBS)

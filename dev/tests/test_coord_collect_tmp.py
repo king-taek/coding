@@ -117,7 +117,7 @@ def test_button_runs_in_background_and_reports(styled_qapp, monkeypatch, tmp_pat
     while not said and time.time() < deadline:
         styled_qapp.processEvents()
     assert said and "4" in said[0]
-    assert "--shift-only" in _Tool.argv                  # 시프트 있는 레시피만 모은다(2026-11-13)
+    assert "--focus" in _Tool.argv and "--shift-only" not in _Tool.argv   # 집중 분석(2026-11-14)
     assert win._loading.calls[:2] == [("show", True), ("progress", 0, 0)]   # busy 로 시작
     assert ("progress", 1, 4) in win._loading.calls and win._loading.calls[-1] == ("hide",)
 
