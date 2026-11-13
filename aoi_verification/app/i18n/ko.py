@@ -517,14 +517,14 @@ SETUP_SECTION_FOLDER = "1  폴더"
 SETUP_SECTION_MODE = "2  방식"
 
 # ── [좌표수집-임시] 시작 — 수집·분석이 끝나면 이 블록을 통째로 지운다 ─────────────
-COORD_COLLECT_BUTTON = "좌표 자료 수집"
-COORD_COLLECT_TITLE = "좌표 자료 수집"
+COORD_COLLECT_BUTTON = "시프트 자료 수집"
+COORD_COLLECT_TITLE = "시프트 자료 수집"
 COORD_COLLECT_ASK = (
-    "NAS 의 Scanresult 와 Conder Scan 을 돌며 좌표 자료를 모읍니다. "
+    "NAS 의 Scanresult 와 Conder Scan 을 돌며 화면 번호 시프트(Recipe.ini)가 있는 레시피의 자료만 모읍니다. "
     "읽기만 하고 사진은 열지 않습니다. 최대 2시간이 걸리고, 중지하면 그때까지 모은 것을 저장합니다."
 )
 COORD_COLLECT_START = "수집 시작"
-COORD_COLLECT_RUNNING = "좌표 자료를 모으는 중"
+COORD_COLLECT_RUNNING = "시프트 있는 레시피를 찾는 중"
 COORD_COLLECT_DONE_FMT = (
     "웨이퍼 폴더 {wafers}개를 확인했고 이상 폴더는 {odd}개입니다.\n"
     "바탕화면에 생긴 '좌표실험_…_수집.zip' 을 올려 주세요(20 MB 를 넘으면 여러 개로 나뉩니다).\n{path}"
@@ -1228,9 +1228,6 @@ WAFER_MAP_WARN_MIXED_FRAMES = "합친 슬롯들의 die 격자가 서로 달라 �
 WAFER_MAP_WARN_UNPLACED_FMT = "좌표를 읽지 못해 맵에서 빠진 사진 {n}장"
 WAFER_MAP_WARN_NUMBER_GUESS_FMT = "col / row 를 장비 번호표 없이 계산한 사진 {n}장 — 장비 화면으로 확인"
 WAFER_MAP_WARN_PITCH_ASSUMED = "die 크기 정보가 없어 사진으로 추정함 — die 칸은 맞지만 die 크기·웨이퍼 외곽은 근사"
-WAFER_MAP_WARN_LIVE_UNVERIFIED = (
-    "LIVE 파일로 만든 맵은 아직 검증이 충분히 이뤄지지 않아 틀린 정보가 있을 수 있습니다 — "
-    "중요한 정보는 반드시 장비 화면이나 원본 데이터로 재검토하세요")
 WAFER_MAP_WARN_SIDE_FMT = "{side} — {reasons}"
 # 칸·번호가 틀렸을 가능성이 큰 맵(번호 계산·die 없는 칸·격자 불일치) — 빨간 큰 배너 머리말
 # (사용자 지시 2026-11-13 "틀릴 확률이 매우 높음!!!!! 뭐 이런식으로").

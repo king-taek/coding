@@ -395,6 +395,24 @@ def _find_up(folder: Path, name: str, levels: int = 2):
     return None
 
 
+def recipe_shift(folder: Path):
+    """``Recipe.ini [Display]`` 화면 번호 시프트 ``((col, row), 찾은 곳)`` — 레시피가 없으면 ``(None, None)``.
+
+    앱(``camtek_ini.display_shift``)은 웨이퍼 폴더의 Recipe.ini 만 본다.  시프트 조사(2026-11-13)
+    에서는 위 폴더에 있는 레시피도 찾아 '앱이 놓치는 시프트' 가 있는지까지 본다."""
+    p = _find_up(folder, "Recipe.ini")
+    if p is None:
+        return None, None
+    t = read_text(p)
+    sc, sr = key_num(t, "DisplayColShift"), key_num(t, "DisplayRowShift")
+    return (int(sc or 0), int(sr or 0)), ("폴더" if p.parent == folder else "상위")
+
+
+def has_shift(picked) -> bool:
+    """LOT 에서 고른 웨이퍼 가운데 화면 시프트가 0 이 아닌 레시피가 있나 — 시프트 조사 모드의 거르개."""
+    return any((recipe_shift(f)[0] or (0, 0)) != (0, 0) for f in picked)
+
+
 def scan(roots):
     camtek, klas, live_by_dir = [], [], {}
     for root in roots:
@@ -479,9 +497,10 @@ def _expired(deadline) -> bool:
     return deadline() if callable(deadline) else time.time() > deadline
 
 
-def nas_walk(roots, deadline, per_lot=3, lots=5, log=print, on_lot=None, skip=frozenset()):
+def nas_walk(roots, deadline, per_lot=3, lots=5, log=print, on_lot=None, skip=frozenset(), want=None):
     """웨이퍼 폴더(= INI 가 든 폴더)를 찾는다.  LOT(웨이퍼들의 부모)마다 ``per_lot`` 장,
-    한 폴더 아래 LOT 은 최근 ``lots`` 개만 — 번호 기준은 레시피의 것이라 몇 장이면 된다."""
+    한 폴더 아래 LOT 은 최근 ``lots`` 개만 — 번호 기준은 레시피의 것이라 몇 장이면 된다.
+    ``want(고른 웨이퍼들)`` 이 거짓이면 그 LOT 은 세지 않고 지나간다(시프트 조사 모드)."""
     found, state = [], {"lots": 0, "cut": False}
 
     def visit(d: Path, depth: int) -> bool:
@@ -499,6 +518,9 @@ def nas_walk(roots, deadline, per_lot=3, lots=5, log=print, on_lot=None, skip=fr
                 return False
             step = max(1, len(names) // per_lot)
             picked = [p for _, p, _ in names[::step] if _is_wafer(p)][:per_lot]
+            if want is not None and not want(picked):
+                state["unwanted"] = state.get("unwanted", 0) + 1
+                return False
             found.extend(picked)
             state["lots"] += 1
             log(f"  LOT {state['lots']:>4}  웨이퍼 {len(names):>3}장 중 {len(picked)}장  {d}")
@@ -1053,6 +1075,10 @@ def run_nas(argv, out: Path, progress=None, stop=None):
     fresh = "--fresh" in argv                 # 앞선 수집에서 본 LOT 도 다시 돈다
     if fresh:
         argv.remove("--fresh")
+    shift_only = "--shift-only" in argv       # 화면 시프트가 0 이 아닌 레시피의 LOT 만 모은다(2026-11-13)
+    if shift_only:
+        argv.remove("--shift-only")
+        print("시프트 조사 모드 — Recipe.ini 화면 시프트가 0 이 아닌 LOT 만 모읍니다")
     seen = frozenset() if fresh else frozenset(known_lots(out))
     print(f"앞선 수집에서 본 LOT {len(seen)}개는 건너뜁니다" if seen else "앞선 수집 결과 없음 — 전부 새로 돕니다")
     cam_roots, conder_roots = [Path(a) for a in argv], []
@@ -1102,7 +1128,8 @@ def run_nas(argv, out: Path, progress=None, stop=None):
             cut = True
             break
         share = time.time() + (t_walk - time.time()) / (len(cam_roots) - i)
-        cut = nas_walk([root], until(share), per_lot, lots, print, on_lot, seen)[1] or cut
+        cut = nas_walk([root], until(share), per_lot, lots, print, on_lot, seen,
+                       has_shift if shift_only else None)[1] or cut
     print(f"\n웨이퍼 폴더 {len(recs)} · Conder 폴더 {len(live_by_dir)} · {time.time() - t0:.0f}초"
           + (" · 중지했습니다" if stop() else " · 시간 제한으로 일부만 돌았습니다" if cut else ""))
     if not recs:
@@ -1243,9 +1270,10 @@ def analyze_camtek(folder: Path, live_by_dir):
             r["map_cover"] = round(len(dm) / full, 3) if full else None
     r["hyp"] = hyp
 
-    sc, sr = key_num(recipe, "DisplayColShift"), key_num(recipe, "DisplayRowShift")
-    r["shift"] = (int(sc or 0), int(sr or 0))
-    r["shift_known"] = recipe is not None and sc is not None
+    shift, where = recipe_shift(folder)
+    r["shift"] = shift or (0, 0)
+    r["shift_known"] = shift is not None
+    r["shift_where"] = where                                 # 폴더(앱이 읽는 곳) · 상위(앱이 못 읽음)
 
     w = r["wafer"]                                           # 정답: LIVE 표결
     lives = [p for d, lv in live_by_dir.items() for n, p in lv
