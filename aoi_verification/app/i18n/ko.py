@@ -521,7 +521,7 @@ COORD_COLLECT_BUTTON = "시프트 자료 수집"
 COORD_COLLECT_TITLE = "시프트 자료 수집"
 COORD_COLLECT_ASK = (
     "NAS 의 Scanresult 와 Conder Scan 을 돌며 화면 번호 시프트(Recipe.ini)가 있는 레시피의 자료만 모읍니다. "
-    "읽기만 하고 사진은 열지 않습니다. 최대 2시간이 걸리고, 중지하면 그때까지 모은 것을 저장합니다."
+    "읽기만 하고 사진은 열지 않습니다. 최대 30분이 걸리고, 중지하면 그때까지 모은 것을 저장합니다."
 )
 COORD_COLLECT_START = "수집 시작"
 COORD_COLLECT_RUNNING = "시프트 있는 레시피를 찾는 중"
