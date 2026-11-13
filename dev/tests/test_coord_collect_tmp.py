@@ -100,12 +100,13 @@ def test_button_runs_in_background_and_reports(styled_qapp, monkeypatch, tmp_pat
 
         @classmethod
         def run_nas(cls, argv, out, progress=None, stop=None):
-            cls.argv = list(argv)
+            cls.argv, cls.out = list(argv), out
             progress(1, 4, "계산 2/4")
             return tmp_path / "좌표실험", 4, 1
 
     win = QMainWindow()
     said = []
+    monkeypatch.setattr(mod, "save_dir", lambda: tmp_path / "저장")
     monkeypatch.setattr(mod, "_load_tool", lambda: _Tool)
     monkeypatch.setattr(mod.sheets, "ask", lambda *a, **k: QMessageBox.StandardButton.Yes)
     monkeypatch.setattr(mod.sheets, "info", lambda parent, title, text: said.append(text))
@@ -118,6 +119,8 @@ def test_button_runs_in_background_and_reports(styled_qapp, monkeypatch, tmp_pat
         styled_qapp.processEvents()
     assert said and "4" in said[0]
     assert "--focus" in _Tool.argv and "--shift-only" not in _Tool.argv   # 집중 분석(2026-11-14)
+    assert _Tool.out == tmp_path / "저장"                                  # 정해 둔 저장 폴더(사용자 지시)
+    assert _Tool.argv[_Tool.argv.index("--zip-name") + 1] == mod._ZIP_NAME
     assert win._loading.calls[:2] == [("show", True), ("progress", 0, 0)]   # busy 로 시작
     assert ("progress", 1, 4) in win._loading.calls and win._loading.calls[-1] == ("hide",)
 
@@ -215,3 +218,15 @@ def test_second_stop_releases_the_screen_without_waiting_for_the_worker(styled_q
     styled_qapp.processEvents()
     assert len(said) == 2                                 # 뒤늦은 결과는 버린다
     win.deleteLater()
+
+
+def test_save_dir_is_project_and_date_folder(tmp_path, monkeypatch):
+    """특별 수집 결과는 ``바탕화면\\프로그램 개발중\\분석용 자료 수집\\프로젝트명\\YYYYMMDD`` 에 남는다(사용자 지시)."""
+    pytest.importorskip("PyQt6.QtWidgets")
+    from datetime import date
+
+    from aoi_verification.app.ui import coord_collect_tmp as mod
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    d = mod.save_dir(date(2026, 11, 14))
+    assert d == tmp_path / "Desktop" / "프로그램 개발중" / "분석용 자료 수집" / "AOI 레시피 검증" / "20261114"
+    assert d.is_dir()

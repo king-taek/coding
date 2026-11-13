@@ -3,8 +3,9 @@
 개발자 모드(Ctrl+Shift+D)일 때만 상태바에 버튼 하나가 보인다.  누르면 ``dev/coord_lab.py`` 의
 NAS 순회(``run_nas``)를 백그라운드에서 돌리고 로딩바로 진행을 보인다.  2026-11-14 부터는
 **번호를 아직 못 정하는 Job 만 집중해서** 모은다(``--focus`` — SNU-EDGE · 번호표 없는 블록 제품,
-목록은 ``coord_lab.FOCUS_JOBS``, 사용자 지시).  시프트 규칙은 장비 화면으로 확정돼 ``--shift-only`` 는 쓰지 않는다.  결과는 바탕화면에
-``좌표실험_<시각>_수집.zip`` 으로 남는다(20 MB 를 넘으면 ``_수집_2.zip`` …).  읽기 전용이고 앱의 좌표 계산·매칭에는 손대지 않는다.
+목록은 ``coord_lab.FOCUS_JOBS``, 사용자 지시).  시프트 규칙은 장비 화면으로 확정돼 ``--shift-only`` 는 쓰지 않는다.  결과는
+``바탕화면\\프로그램 개발중\\분석용 자료 수집\\AOI 레시피 검증\\YYYYMMDD\\집중수집.zip`` 으로 남는다(사용자 지시 2026-11-14,
+20 MB 를 넘으면 ``집중수집_2.zip`` …).  읽기 전용이고 앱의 좌표 계산·매칭에는 손대지 않는다.
 
 지우는 법(전부 ``[좌표수집-임시]`` 로 검색된다 — ``test_coord_collect_tmp.py`` 가 이 목록을 지킨다):
 
@@ -33,6 +34,18 @@ _LOG = logging.getLogger("aoi.coord_collect")
 _TOOL = "dev/coord_lab.py"
 # 집중 분석: 정해 둔 Job 몇 개만 돌므로 LOT 마다 웨이퍼를 많이, LOT 도 많이 본다.
 _MINUTES, _PER_LOT, _LOTS = 30, 10, 50
+# 특별 수집 결과는 늘 이 자리에 '프로젝트명\날짜' 폴더로 남긴다(사용자 지시 2026-11-14).  zip 이름은 짧게.
+_SAVE_ROOT = ("Desktop", *i18n.KO.COORD_COLLECT_SAVE_ROOT)
+_PROJECT = i18n.KO.COORD_COLLECT_PROJECT
+_ZIP_NAME = i18n.KO.COORD_COLLECT_ZIP_NAME
+
+
+def save_dir(today=None) -> Path:
+    r"""``바탕화면\프로그램 개발중\분석용 자료 수집\AOI 레시피 검증\YYYYMMDD`` — 없으면 만든다."""
+    from datetime import date
+    d = Path.home().joinpath(*_SAVE_ROOT, _PROJECT, f"{today or date.today():%Y%m%d}")
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
 
 def _load_tool():
@@ -88,7 +101,7 @@ class _Collector(QObject):
         if sheets.ask(self._win, i18n.KO.COORD_COLLECT_TITLE, i18n.KO.COORD_COLLECT_ASK,
                       labels={yes: i18n.KO.COORD_COLLECT_START}) != yes:
             return
-        self._begin(lambda: self._collect(tool, out))
+        self._begin(lambda: self._collect(tool, save_dir()))
 
     def _begin(self, job) -> None:
         """로딩바를 띄우고 ``job`` 을 백그라운드에서 돌린다.  ``job`` 은 ``finished`` 에 실을 값을 돌려준다."""
@@ -113,7 +126,8 @@ class _Collector(QObject):
 
     def _collect(self, tool, out):
         base, wafers, odd = tool.run_nas(
-            ["--minutes", str(_MINUTES), "--per-lot", str(_PER_LOT), "--lots", str(_LOTS), "--focus"],
+            ["--minutes", str(_MINUTES), "--per-lot", str(_PER_LOT), "--lots", str(_LOTS), "--focus",
+             "--zip-name", _ZIP_NAME],
             out, progress=self._emit_progress, stop=self._stop.is_set)
         return int(wafers), int(odd), str(base or "")
 

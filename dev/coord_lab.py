@@ -938,7 +938,7 @@ def _raw_files(src: Path, file_mb):
 
 
 def collect_zip(recs, live_by_dir, base: Path, no_map=(), part_mb=20, file_mb=12, progress=None, conder=None,
-                reports=(), per_product_cap=8):
+                reports=(), per_product_cap=8, zip_stem=None):
     """이상 폴더의 원재료만 zip 으로.  사진은 이름만(``사진목록.txt``).
 
     한 파일이 ``part_mb`` 를 넘지 않게 ``_수집.zip`` · ``_수집_2.zip`` … 으로 나눈다(올리기 쉬운 크기).
@@ -951,7 +951,10 @@ def collect_zip(recs, live_by_dir, base: Path, no_map=(), part_mb=20, file_mb=12
     if not flagged and not conder.get("maps") and not conder.get("files") and not live_by_dir and not reports:
         return [], 0
     limit, per_product = part_mb * 2 ** 20, Counter()
-    paths = [base.with_name(base.name + "_수집.zip")]
+    stem = zip_stem or base.name + "_수집"              # zip_stem: 저장 폴더가 날짜를 담으면 짧은 이름(2026-11-14)
+    if zip_stem and base.with_name(stem + ".zip").exists():
+        stem = f"{zip_stem}_{datetime.now():%H%M}"       # 같은 날 다시 모으면 덮어쓰지 않는다
+    paths = [base.with_name(stem + ".zip")]
     z = zipfile.ZipFile(paths[0], "w", zipfile.ZIP_DEFLATED)
 
     def room(size):
@@ -959,7 +962,7 @@ def collect_zip(recs, live_by_dir, base: Path, no_map=(), part_mb=20, file_mb=12
         nonlocal z
         if z.namelist() and z.fp.tell() + size > limit:
             z.close()
-            paths.append(base.with_name(f"{base.name}_수집_{len(paths) + 1}.zip"))
+            paths.append(base.with_name(f"{stem}_{len(paths) + 1}.zip"))
             z = zipfile.ZipFile(paths[-1], "w", zipfile.ZIP_DEFLATED)
 
     def text(arcname, body):
@@ -1122,6 +1125,11 @@ def run_nas(argv, out: Path, progress=None, stop=None):
             return float(v)
         return default
     minutes, per_lot, lots = opt("--minutes", 30), int(opt("--per-lot", 3)), int(opt("--lots", 5))
+    zip_stem = None                           # --zip-name 이름: 결과 zip 이름(앱이 날짜 폴더에 저장할 때)
+    if "--zip-name" in argv:
+        i = argv.index("--zip-name")
+        zip_stem = argv[i + 1]
+        del argv[i:i + 2]
     fresh = "--fresh" in argv                 # 앞선 수집에서 본 LOT 도 다시 돈다
     if fresh:
         argv.remove("--fresh")
@@ -1213,7 +1221,7 @@ def run_nas(argv, out: Path, progress=None, stop=None):
     base = report(recs, [], [], out, sorted(no_map) if not app_note else app_note[0], conder_dirs=dirs)
     loose = [base.with_suffix(e) for e in (".txt", ".json", ".html")] + ([census_file] if census_file else [])
     zips, n = collect_zip(recs, live_by_dir, base, sorted(no_map), progress=progress, conder=conder, reports=loose,
-                          per_product_cap=40 if focus else 8)
+                          per_product_cap=40 if focus else 8, zip_stem=zip_stem)
     if zips:                                  # 결과물은 zip 뿐 — 낱개 파일은 zip 에 담았으니 지운다
         for p in loose:
             p.unlink(missing_ok=True)

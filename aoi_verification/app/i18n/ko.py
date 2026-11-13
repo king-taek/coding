@@ -528,12 +528,15 @@ COORD_COLLECT_START = "수집 시작"
 COORD_COLLECT_RUNNING = "집중 분석할 제품을 찾는 중"
 COORD_COLLECT_DONE_FMT = (
     "웨이퍼 폴더 {wafers}개를 확인했고 이상 폴더는 {odd}개입니다.\n"
-    "바탕화면에 생긴 '좌표실험_…_수집.zip' 을 올려 주세요(20 MB 를 넘으면 여러 개로 나뉩니다).\n{path}"
+    "아래 폴더에 생긴 '집중수집.zip' 을 올려 주세요(20 MB 를 넘으면 여러 개로 나뉩니다).\n{path}"
 )
 COORD_COLLECT_NO_TOOL = "수집 도구(dev/coord_lab.py)가 없습니다. 개발자 모드에서 dev 브랜치로 설치해 주세요."
 COORD_COLLECT_FAIL_FMT = "수집하다 멈췄습니다: {error}"
 COORD_COLLECT_STOPPING = "지금까지 모은 것을 저장하는 중 (한 번 더 누르면 화면을 바로 풉니다)"
-COORD_COLLECT_STOPPED = "화면을 먼저 풀었습니다. 저장이 끝나면 바탕화면에 '좌표실험_…_수집.zip' 이 생깁니다."
+COORD_COLLECT_STOPPED = (
+    "화면을 먼저 풀었습니다. 저장이 끝나면 바탕화면 '프로그램 개발중\\분석용 자료 수집\\AOI 레시피 검증\\오늘 날짜' "
+    "폴더에 '집중수집.zip' 이 생깁니다."
+)
 COORD_COLLECT_NOTHING = (
     "집중 분석할 제품의 웨이퍼를 찾지 못했습니다. 이 PC 에서 해당 장비 드라이브(M:, V: 등)가 보이는지 확인해 주세요."
 )
@@ -547,6 +550,10 @@ COORD_COLLECT_SLIM_DONE_FMT = (
     "{before:.0f} MB 를 {after:.1f} MB 로 줄였습니다. 아래 zip {n}개만 올려 주세요.\n{names}"
 )
 COORD_COLLECT_WINDING_DOWN = "방금 중지한 수집이 아직 정리 중입니다. 잠시 뒤 다시 눌러 주세요."
+# 저장 자리: 바탕화면\프로그램 개발중\분석용 자료 수집\프로젝트명\YYYYMMDD\짧은이름.zip (사용자 지시 2026-11-14)
+COORD_COLLECT_SAVE_ROOT = ("프로그램 개발중", "분석용 자료 수집")
+COORD_COLLECT_PROJECT = "AOI 레시피 검증"
+COORD_COLLECT_ZIP_NAME = "집중수집"
 # ── [좌표수집-임시] 끝 ─────────────────────────────────────────────────────
 
 # ── 개발자 모드 (메인 화면 Ctrl+Shift+D) ───────────────────────────────────
