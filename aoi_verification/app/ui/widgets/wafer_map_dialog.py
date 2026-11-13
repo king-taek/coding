@@ -54,7 +54,7 @@ from ... import i18n
 from ...config import CONFIG
 from ...coords import resolve_batch
 from ...coords.wafer_map import (ALL_SLOTS_KEY, MapData, SOURCE_ASSUMED,
-                                 build_map, slot_maps, warning_reasons)
+                                 build_map, is_high_risk, slot_maps, warning_reasons)
 from ...models.result import FinalResult
 from ...models.slot import _list_images, list_slot_dirs
 from ...utils import image_io
@@ -486,7 +486,17 @@ class WaferMapDialog(QDialog):
     def _show_maps(self, left: tuple[str, MapData],
                    right: Optional[tuple[str, MapData]]) -> None:
         self.empty.hide()
-        text = self.warning_text([left] + ([right] if right is not None else []))
+        sides = [left] + ([right] if right is not None else [])
+        text = self.warning_text(sides)
+        # 칸·번호가 틀렸을 가능성이 크면 빨간 큰 배너로 — 주황 한 줄은 지나치기 쉽다.
+        # ★ unpolish/polish 만으로는 색만 바뀌고 **여백(padding)은 옛 값**이 남아 빨간
+        #   테두리가 글자에 붙는다(실측: 여백 4px 그대로).  위젯 스타일시트를 한 번 갈아
+        #   끼우면 여백까지 다시 잰다.
+        role = "dangerBanner" if self.warning_is_danger(sides) else "hintWarn"
+        if self.warn_banner.property("role") != role:
+            self.warn_banner.setProperty("role", role)
+            self.warn_banner.setStyleSheet("/* role */")
+            self.warn_banner.setStyleSheet("")
         self.warn_banner.setText(text)
         self.warn_banner.setVisible(bool(text))
         self.disclaimer.setVisible(not self._fullscreen)
@@ -501,15 +511,24 @@ class WaferMapDialog(QDialog):
             self.right.show()
 
     @staticmethod
+    def warning_is_danger(sides: list[tuple[str, Optional[MapData]]]) -> bool:
+        """어느 한 맵이라도 칸·번호가 틀렸을 가능성이 큰가(:func:`wafer_map.is_high_risk`)."""
+        return any(is_high_risk(data) for _title, data in sides)
+
+    @staticmethod
     def warning_text(sides: list[tuple[str, Optional[MapData]]]) -> str:
-        """경고 배너 문구 — 문제 없으면 빈 문자열.  맵이 둘이면 맵마다 제목을 붙인다."""
+        """경고 배너 문구 — 문제 없으면 빈 문자열.  맵이 둘이면 맵마다 제목을 붙인다.
+
+        틀릴 가능성이 큰 경고가 있으면 머리말을 :data:`WAFER_MAP_DANGER_HEAD` 로 바꾼다."""
         lines = []
         for title, data in sides:
             reasons = warning_reasons(data)
             if reasons:
                 lines.append(i18n.KO.WAFER_MAP_WARN_SIDE_FMT.format(side=title, reasons=reasons)
                              if len(sides) > 1 else reasons)
-        return "\n".join([i18n.KO.WAFER_MAP_WARN_HEAD, *lines]) if lines else ""
+        head = (i18n.KO.WAFER_MAP_DANGER_HEAD if WaferMapDialog.warning_is_danger(sides)
+                else i18n.KO.WAFER_MAP_WARN_HEAD)
+        return "\n".join([head, *lines]) if lines else ""
 
     # ------------------------------------------------------------------
     # 워커 — 좌표 + 썸네일 선로딩, 진행은 오버레이로

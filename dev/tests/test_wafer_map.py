@@ -1247,9 +1247,10 @@ def test_lot_merge_draws_every_slots_die_cells(tmp_path):
     data = wm.build_map(resolve_batch([a / "a.jpeg", b / "b.jpeg"]))
     assert not data.mixed_frames
     assert data.frame.die_cells == {(i, -(j + 1)) for i, j in full}
-    # 합성 폴더엔 장비 번호표([ExportData])가 없지만 중심식 = 격자식 = 맵이 같은 값이라
-    # 번호 경고도 붙지 않는다(2026-10-27 규칙, test_dielut_origins) — 칸 경고도 없어야 한다.
-    assert wm.map_warnings(data) == []
+    # 합성 폴더엔 장비 번호표([ExportData])가 없다.  예전에는 중심식 = 격자식 = 맵이면 번호
+    # 경고를 뺐지만 2026-11-13 반증(HORNET CCU 2폴더)으로 그 규칙을 거뒀다 — 번호 경고만
+    # 남고, 칸 경고(die 밖 점 · 격자 불일치)는 없어야 한다.
+    assert wm.map_warnings(data) == [(wm.WARN_NUMBER_GUESS, 2)]
 
 
 def test_tooltip_shows_die_internal_xy_like_the_equipment(tmp_path):

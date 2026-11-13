@@ -565,6 +565,17 @@ def map_warnings(data: Optional[MapData]) -> list[tuple[str, int]]:
     return out
 
 
+# 칸·번호가 **틀렸을 가능성이 큰** 경고 — 화면 배너를 빨간 큰 경고로 바꾼다(사용자 지시
+# 2026-11-13).  LIVE 당부·die 크기 추정·좌표 없는 사진은 점이 엉뚱한 칸에 찍히는 일이
+# 아니라 넣지 않는다 — 늘 빨갛게 뜨면 정작 위험할 때 무시하게 된다.
+DANGER_CODES = (WARN_NUMBER_GUESS, WARN_OFF_DIE, WARN_MIXED_FRAMES)
+
+
+def is_high_risk(data: Optional[MapData]) -> bool:
+    """:data:`DANGER_CODES` 경고가 하나라도 있는가."""
+    return any(code in DANGER_CODES for code, _n in map_warnings(data))
+
+
 def warning_reasons(data: Optional[MapData], skip: tuple = ()) -> str:
     """:func:`map_warnings` → 사용자 문구(``" · "`` 로 이음).  없으면 빈 문자열.
 

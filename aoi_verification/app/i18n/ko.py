@@ -1028,6 +1028,12 @@ DEFECT_NUMBER_WARN_LABEL = "⚠ 번호"
 DEFECT_NUMBER_WARN_NO_TABLE = "장비 번호표·die 목록이 없고 계산이 서로 달라 확실하지 않은 col / row — 장비 화면으로 확인"
 DEFECT_NUMBER_WARN_KLA_GUESS = "KLA 파일에 웨이퍼 중심이 없어 추정한 col / row — 장비 화면으로 확인"
 DEFECT_NUMBER_WARN_FMT = "⚠ {text}"
+# 매칭·검토 화면 위 큰 경고 — col / row 를 장비 번호표 없이 계산한 웨이퍼(`coords.number_risk`).
+NUMBER_RISK_HEAD = "⚠ 틀릴 확률이 매우 높습니다!!  col / row 번호를 확실히 정하지 못한 웨이퍼가 있습니다"
+NUMBER_RISK_BODY = ("장비 번호표·die 목록이 없어 번호를 계산했습니다. 번호가 한 칸 어긋나면 좌표 매칭도 엇나갈 수 있으니 "
+                    "아래 슬롯은 반드시 장비 화면으로 확인하세요")
+NUMBER_RISK_SLOT_FMT = "{slot} ({n}장)"
+NUMBER_RISK_MORE_FMT = " 외 {n}개 슬롯"
 DEFECT_ABS_XY_LABEL = "wafer x / y"
 DEFECT_ABS_XY_FMT = "wafer x {x:.0f} / y {y:.0f} ㎛"
 
@@ -1226,6 +1232,12 @@ WAFER_MAP_WARN_LIVE_UNVERIFIED = (
     "LIVE 파일로 만든 맵은 아직 검증이 충분히 이뤄지지 않아 틀린 정보가 있을 수 있습니다 — "
     "중요한 정보는 반드시 장비 화면이나 원본 데이터로 재검토하세요")
 WAFER_MAP_WARN_SIDE_FMT = "{side} — {reasons}"
+# 칸·번호가 틀렸을 가능성이 큰 맵(번호 계산·die 없는 칸·격자 불일치) — 빨간 큰 배너 머리말
+# (사용자 지시 2026-11-13 "틀릴 확률이 매우 높음!!!!! 뭐 이런식으로").
+WAFER_MAP_DANGER_HEAD = (
+    "⚠ 틀릴 확률이 매우 높습니다!!  이 Wafer map 의 die 위치·col / row 를 그대로 믿지 말고 "
+    "반드시 장비 화면으로 확인하세요")
+WAFER_MAP_DANGER_SHORT = "⚠ 틀릴 확률이 매우 높음!! 반드시 장비 화면으로 확인"
 WAFER_MAP_SHEET_COL_WARN = "주의(칸이 틀렸을 수 있음)"
 WAFER_MAP_DISCLAIMER = (
     "※ Wafer map 은 파일명·장비 파일로 다시 그린 참고용 그림입니다. "

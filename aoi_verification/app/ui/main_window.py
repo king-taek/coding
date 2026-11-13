@@ -2314,6 +2314,7 @@ class MainWindow(MultiValFlow, QMainWindow):
             coord_mode=ctx.coord_mode,
             tolerance=ctx.tolerance,
             coord_failed_count=ctx.coord_failed_count,
+            number_risk=getattr(ctx, "number_risk", ()),
         )
         self._show_page(self._match_review_page)
 
@@ -2421,6 +2422,7 @@ class MainWindow(MultiValFlow, QMainWindow):
             tolerance=ctx.tolerance,
             coord_failed_count=ctx.coord_failed_count,
             unmatched_keys=marked,
+            number_risk=getattr(ctx, "number_risk", ()),
         )
         self._notify_ready_for_review()
         self._show_page(self._match_review_page)

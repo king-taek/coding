@@ -1439,7 +1439,8 @@ class ExcelExporter(QThread):
         from openpyxl.styles import Alignment, Font
         from openpyxl.utils.units import pixels_to_points
 
-        from ..coords.wafer_map import WARN_LIVE_UNVERIFIED, slot_maps, warning_reasons
+        from ..coords.wafer_map import (WARN_LIVE_UNVERIFIED, is_high_risk, slot_maps,
+                                        warning_reasons)
 
         ws = wb.create_sheet(title=_safe_sheet_title(
             i18n.KO.WAFER_MAP_SHEET + self._sheet_suffix, set(wb.sheetnames)))
@@ -1504,8 +1505,12 @@ class ExcelExporter(QThread):
                     _LOG.exception("Wafer map 그림 생성 실패: %s", label)
                     ws[f"{col}{r}"] = "—"
             if warns:
+                # 칸·번호가 틀렸을 가능성이 크면 화면과 같이 빨간 머리말을 단다(2026-11-13).
+                danger = is_high_risk(ref) or is_high_risk(val)
+                if danger:
+                    warns.insert(0, i18n.KO.WAFER_MAP_DANGER_SHORT)
                 w = ws.cell(row=r, column=4, value="\n".join(warns))
-                w.font = Font(color="FF8C4A0F")
+                w.font = Font(color="FFA5271E", bold=True) if danger else Font(color="FF8C4A0F")
                 w.alignment = Alignment(wrap_text=True, vertical="center")
         # LIVE 파일로 그린 맵이 있으면 표 아래에 재검토 당부(화면 배너와 같은 문구).
         if live_seen:
