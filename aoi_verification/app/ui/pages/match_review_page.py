@@ -37,6 +37,7 @@ from ..widgets.no_wheel_slider import NoWheelSlider
 from ..widgets.zoom_window import FullscreenViewer
 from ..widgets import sheet_host as sheets
 from ... import config as _config
+from ...coords import number_risk as _number_risk
 
 # 허용 오차 폴백 — 값이 안 들어왔을 때만 쓴다.  **단일 출처는 config** 다
 # (예전엔 리터럴 500 이 곳곳에 박혀 있어 기본값을 바꿔도 옛 값이 되살아났다).
@@ -1065,6 +1066,14 @@ class MatchReviewPage(QWidget):
         head.addStretch(1)
         root.addLayout(head)
 
+        # col/row 를 확실히 정하지 못한 웨이퍼 — 빨간 큰 경고(사용자 지시 2026-11-13).
+        # 매칭 화면과 같은 문구(`coords.number_risk.banner_text`).  평소엔 숨김.
+        self.risk_banner = QLabel("", self)
+        self.risk_banner.setProperty("role", "dangerBanner")
+        self.risk_banner.setWordWrap(True)
+        self.risk_banner.hide()
+        root.addWidget(self.risk_banner)
+
 
         bar = QHBoxLayout()
         bar.setSpacing(12)
@@ -1237,7 +1246,8 @@ class MatchReviewPage(QWidget):
                    tolerance: float = _DFLT_TOL,
                    coord_failed_count: int = 0,
                    unmatched_keys: set | None = None,
-                   lanes: list | None = None) -> None:
+                   lanes: list | None = None,
+                   number_risk=()) -> None:
         """매치 검토 화면 초기화.
 
         ``score_cache`` 와 ``val_pool`` 이 함께 주어지면 각 매치 행에 차순위
@@ -1278,6 +1288,9 @@ class MatchReviewPage(QWidget):
             hdr.setText(i18n.KO.COL_DISTANCE if self._coord_mode
                         else i18n.KO.COL_SIMILARITY)
         self._coord_failed_count = int(coord_failed_count)
+        risk_text = _number_risk.banner_text(number_risk) if self._coord_mode else ""
+        self.risk_banner.setText(risk_text)
+        self.risk_banner.setVisible(bool(risk_text))
         # 차순위 swap / 재계산용으로 score_cache + val_pool 참조 보관.
         self._score_cache = score_cache
         self._review_scores = review_scores

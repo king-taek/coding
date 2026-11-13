@@ -48,6 +48,7 @@ from typing import Dict, List, Optional, Set, Tuple
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
 from ..coords import resolve_batch as _resolve_batch
+from ..coords import number_risk as _number_risk
 from ..coords import calibration as _calib
 from ..coords import notch as _notch
 from .. import i18n
@@ -126,6 +127,9 @@ class _CoordSignals(QObject):
     phase = pyqtSignal(str)
     finished = pyqtSignal()
     failed = pyqtSignal(str)
+    # col/row 를 확실히 정하지 못한 슬롯 ((슬롯, 사진 수), ...) — 좌표 파싱 직후 1회.
+    # 화면 위 큰 경고용(`coords.number_risk`, 사용자 지시 2026-11-13).
+    number_risk = pyqtSignal(object)
 
 
 # ---------------------------------------------------------------------------
@@ -159,6 +163,8 @@ class CoordScheduler(QThread):
         # 좌표가 없어 **고전 유사도로 폴백 채점**한 ref — 그 점수는 거리 인코딩이
         # 아니라 진짜 유사도다(모듈 docstring 참고).  값은 건드리지 않고 출처만 남긴다.
         self.classical_refs: Set[Tuple[str, Path]] = set()
+        # col/row 를 확실히 정하지 못한 슬롯 — ``signals.number_risk`` 와 같은 값.
+        self.number_risk: tuple = ()
 
         _dflt = _config.DEFAULT_COORD_TOLERANCE
         tol = getattr(cfg, "coord_tolerance", _dflt) if cfg is not None else _dflt
@@ -199,6 +205,12 @@ class CoordScheduler(QThread):
             all_paths,
             lambda done, total: self.signals.progress.emit(done, total),
         )
+        # 번호 경고는 **원래 좌표**로 센다 — 아래 보정 사본은 매칭 전용이다.
+        self.number_risk = _number_risk.count_by_slot(
+            ((slot, [it.path for it in (*refs, *vals)]) for slot, refs, vals in self._tasks),
+            coord_cache.get)
+        if self.number_risk:
+            self.signals.number_risk.emit(self.number_risk)
         # ★ notch 방향 보정이 먼저다 — KLA↔Camtek 평행이동은 같은 방향으로 맞춘 좌표 위에서 의미가 있다.
         if self._notch_dirs:
             try:

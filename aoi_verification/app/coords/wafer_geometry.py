@@ -44,6 +44,7 @@ from .models import (CAMTEK_COL_OFFSET, CAMTEK_PITCH_X, CAMTEK_PITCH_Y,
 __all__ = ["CamtekGeometry", "KlaGeometry", "camtek_geometry", "kla_geometry",
            "has_camtek_entries", "peek_die_pitch", "live_geometry", "FALLBACK_CAMTEK",
            "FALLBACK_KLA", "EXPORT_SOURCE_TAG", "DIELUT_SOURCE_TAG", "AGREE_SOURCE_TAG",
+           "BORROW_SOURCE_TAG", "SMALL_MAP_SOURCE_TAG", "is_alignment_photo",
            "is_trusted_source", "dielut_cells", "KLA_CENTER_SOURCE"]
 
 _LOG = logging.getLogger("aoi.coords")
@@ -434,6 +435,7 @@ def _grid_check(folder: Path, pitch_x: float, pitch_y: float) -> tuple[bool, boo
         recipes = camtek_ini.load_recipe_folder(folder)
     except Exception:
         return (False, False)
+    raw = {s: v for s, v in raw.items() if not is_alignment_photo(s)}
     if not raw:
         return (False, False)
 
@@ -513,15 +515,40 @@ DIELUT_SOURCE_TAG = _DIELUT_FILE
 # 번호표와 같았고, 틀린 8(AVAGO 2 · QORVO 6)은 전부 둘이 다르거나 격자가 없었다(관측 2026-10-26).
 # 저장소 샘플 83 폴더도 같다(둘 일치 69, 틀림 0).  사용자 결정 2026-10-27: "지금까지 준 샘플에서
 # 전부 정답인 규칙이면 경고 표시 없어도 됨".  둘이 다르거나 하나뿐이면 ⚠(NUMBER_WARN_NO_TABLE).
+# ⚠ 2026-11-13 반증: 번호표를 숨긴 HORNET CCU 2폴더(P8V798-04F4·08D0)에서 둘이 같은 (3, 71) 을
+# 냈는데 번호표·장비 화면(형제 12B2 (61, 44))은 (3, 70) 이었다.  '표본 전부에서 맞았다' 는 조건이
+# 깨졌으므로 이 꼬리표는 더 이상 ⚠ 를 빼지 않는다(기록용으로만 남긴다).
 AGREE_SOURCE_TAG = "중심식=격자식"
-_TRUSTED_TAGS = (EXPORT_SOURCE_TAG, DIELUT_SOURCE_TAG, AGREE_SOURCE_TAG)
+# 번호표가 없는 웨이퍼에서 **같은 셋업 폴더**(같은 LOT · 같은 셋업의 다른 공정·다른 웨이퍼)의
+# 번호표를 빌린 원점.  웨이퍼 중심이 번호 격자에서 놓인 자리 u = cx/px − col_origin,
+# v = row_total + 1 − cy/py 는 die 가 웨이퍼에 인쇄된 위치라 같은 제품이면 같다.
+# 근거(2026-11-13): 큰 die 에서 빌린 값 710/710 이 번호표와 같았고(파일), 번호표가 없는
+# 3D·HORNET CCU·BUMP TOP 2종·XGW-EDGE 를 장비 화면으로 확인했다(관측).  작은 die 는 1칸씩
+# 틀린 적이 있어(7/61) 빌리지 않는다 → :data:`SMALL_MAP_SOURCE_TAG`.
+BORROW_SOURCE_TAG = "같은 셋업 번호표"
+# 작은 die(두 축 모두 :data:`_SMALL_DIE` 이하)는 웨이퍼마다 중심이 수백 µm 만 달라도 칸 경계를
+# 넘어 빌린 원점이 1 바뀐다.  그 웨이퍼의 die 맵(웨이퍼를 70% 이상 덮을 때)은 61/61 맞았다
+# (번호표 59 폴더 · 장비 화면 GNF7K21 (1, 230) · GRN9H (103, 223), 2026-11-13).
+SMALL_MAP_SOURCE_TAG = "작은 die 맵"
+_TRUSTED_TAGS = (EXPORT_SOURCE_TAG, DIELUT_SOURCE_TAG, BORROW_SOURCE_TAG, SMALL_MAP_SOURCE_TAG)
+_SMALL_DIE = 1600.0
+# 정렬 사진(파일명에 ``.wlup``) — 결함이 아니라 die 정렬용으로 찍은 사진이라 INI 의 Col/Row 가
+# 결함과 다른 규칙으로 적힌다.  pitch 검산에 섞으면 X 등호가 깨져 폴더 전체가 절대좌표로
+# 떨어졌다(TB500 RDL3/RDL4 Multi 31/32 폴더, 2026-11-12).  사용자 결정 2026-11-13: 무시한다.
+_ALIGN_PAT = re.compile(r"\.wlup(\.|$)", re.IGNORECASE)
+
+
+def is_alignment_photo(stem: str) -> bool:
+    """정렬 사진(이름에 ``.wlup``)인가 — pitch 검산에서 뺀다.  확장자를 뗀 stem
+    (``148988.179602.wlup``)과 전체 이름(``….wlup.-12.jpeg``) 모두 받는다."""
+    return _ALIGN_PAT.search(stem) is not None
 _DIELUT_REC = re.compile(r"<DieLutData\b([^>]*?)/?>")
 _DIELUT_ATTR = re.compile(r'\b(Col|Row)="(-?\d+)"')
 
 
 def is_trusted_source(source: str) -> bool:
     """:attr:`CamtekGeometry.source` 의 번호 기준이 ⚠ 없이 믿을 것인가 — 장비 기록(번호표 ·
-    die 목록)이거나, 표본 전부에서 맞았던 '중심식=격자식' 일치다.  그 밖은 유도값이라 경고."""
+    die 목록), 같은 셋업에서 빌린 번호표, 작은 die 의 die 맵이다.  그 밖은 유도값이라 경고."""
     return any(tag in source for tag in _TRUSTED_TAGS)
 
 
@@ -666,6 +693,23 @@ def _with_origins(folder: Path, px: float, py: float, src: str) -> CamtekGeometr
     if lut is not None:
         return CamtekGeometry(pitch_x=px, pitch_y=py, col_origin=lut[0], row_total=lut[1],
                               source=f"{src}+{DIELUT_SOURCE_TAG}")
+    if px <= _SMALL_DIE and py <= _SMALL_DIE:
+        # ★ 2순위(작은 die): 그 웨이퍼의 die 맵.  ±1 클램프를 두지 않는다 — 작은 die 에서는
+        #   중심 유도가 수 칸 틀려(GNF7K21: 유도 (1, 452) · 맵·장비 (7, 438)) 클램프가 맞는
+        #   맵을 버렸다.  부분 맵은 _covers_wafer(70%) 가 거른다.  맵이 없거나 일부만이면
+        #   빌리지 않고 아래 유도 경로로 간다(⚠) — 작은 die 는 빌리기가 1칸씩 틀렸다.
+        own = die_map_cells(folder, px, py)
+        if own is not None and _covers_wafer(own, cx, cy, dia, px, py, folder):
+            return CamtekGeometry(pitch_x=px, pitch_y=py,
+                                  col_origin=min(i for i, _ in own),
+                                  row_total=max(j for _, j in own),
+                                  source=f"{src}+{_DIE_MAP_FILE}+{SMALL_MAP_SOURCE_TAG}")
+    else:
+        # ★ 2순위(큰 die): 같은 셋업 폴더의 번호표를 빌린다.
+        got = _borrow_origins(folder, px, py, cx, cy)
+        if got is not None:
+            return CamtekGeometry(pitch_x=px, pitch_y=py, col_origin=got[0], row_total=got[1],
+                                  source=f"{src}+{BORROW_SOURCE_TAG}")
     d_origin = _col_origin(cx, dia, px)
     d_total = _row_total(cy, dia, py)
     grid = _grid_origins(cx, cy, dia, px, py)
@@ -715,6 +759,80 @@ def _with_origins(folder: Path, px: float, py: float, src: str) -> CamtekGeometr
     return CamtekGeometry(pitch_x=px, pitch_y=py,
                           col_origin=d_origin, row_total=d_total,
                           source=f"{src}{_agree(d_origin, d_total)}")
+
+
+# 빌리기에서 훑는 폴더 상한 — NAS 에서 셋업 하나에 공정·웨이퍼가 수백 개여도 멈추지 않게.
+_BORROW_SCAN_MAX = 120
+_BORROW_REFS_MAX = 12
+# 빌린 자리(u, v)가 참조끼리 이만큼 넘게 갈리면 빌리지 않는다(칸 반 개).
+_BORROW_SPREAD_MAX = 0.5
+
+
+def _borrow_origins(folder: Path, px: float, py: float, cx: Optional[float],
+                    cy: Optional[float]) -> Optional[tuple[int, int]]:
+    """같은 셋업 폴더(``folder.parent.parent``)에서 번호표가 있는 웨이퍼의 원점을 빌린다.
+
+    번호표 웨이퍼마다 ``u = cx/px − col_origin``, ``v = row_total + 1 − cy/py`` 를 구해 중앙값을
+    쓴다(pitch 가 같은 것만, 자기 자신 제외 — 같은 웨이퍼의 다른 공정 스캔은 쓴다).  참조가
+    없거나 서로 칸 반 개 넘게 갈리면 None(경고 경로).  전 구간 fail-safe."""
+    if not cx or not cy:
+        return None
+    try:
+        refs = [(u, v) for f, rpx, rpy, u, v in _setup_refs(folder.parent.parent)
+                if f != folder and abs(rpx - px) <= 0.01 and abs(rpy - py) <= 0.01]
+    except Exception:
+        _LOG.warning("같은 셋업의 번호표를 읽다 실패해 빌리지 않습니다: %s", folder, exc_info=True)
+        return None
+    if not refs:
+        return None
+    us = sorted(u for u, _ in refs)
+    vs = sorted(v for _, v in refs)
+    if us[-1] - us[0] > _BORROW_SPREAD_MAX or vs[-1] - vs[0] > _BORROW_SPREAD_MAX:
+        _LOG.warning("같은 셋업 번호표끼리 원점 자리가 갈려(u %.2f~%.2f, v %.2f~%.2f) 빌리지 "
+                     "않습니다: %s", us[0], us[-1], vs[0], vs[-1], folder)
+        return None
+    mu, mv = us[len(us) // 2], vs[len(vs) // 2]
+    col0 = round(cx / px - mu)
+    total = round(mv + cy / py - 1)
+    if col0 < 0 or total < 0:
+        return None
+    return col0, total
+
+
+@lru_cache(maxsize=64)
+def _setup_refs(setup: Path) -> tuple:
+    """셋업 폴더 아래 ``공정/웨이퍼`` 중 번호표(ExportData · DieLut)가 있는 웨이퍼의
+    ``(폴더, px, py, u, v)``.  같은 공정 웨이퍼부터 보지 않고 이름순이다 — 순서는 결과에
+    영향이 없다(중앙값 · 갈림 검사)."""
+    out = []
+    scanned = 0
+    try:
+        layers = sorted(p for p in setup.iterdir() if p.is_dir())
+    except OSError:
+        return ()
+    for layer in layers:
+        try:
+            wafers = sorted(p for p in layer.iterdir() if p.is_dir())
+        except OSError:
+            continue
+        for w in wafers:
+            if scanned >= _BORROW_SCAN_MAX or len(out) >= _BORROW_REFS_MAX:
+                return tuple(out)
+            scanned += 1
+            pk = peek_die_pitch(w)
+            if pk is None:
+                continue
+            rpx, rpy = pk[0], pk[1]
+            rcx, rcy = _wafer_center(w)
+            if not rcx or not rcy:
+                continue
+            dia = _read_diameter(w)
+            org = (_export_origins(w, rpx, rpy, dia, rcx, rcy)
+                   or _dielut_origins(w, rpx, rpy, dia, rcx, rcy))
+            if org is None:
+                continue
+            out.append((w, rpx, rpy, rcx / rpx - org[0], org[1] + 1 - rcy / rpy))
+    return tuple(out)
 
 
 @lru_cache(maxsize=256)
@@ -926,8 +1044,10 @@ def _dat_cells(dat: Path, _mtime_ns: int, _size: int, _md_mtime_ns: int,
         return None
     col_origin = min(i for i, _ in cells)
     row_total = max(j for _, j in cells)
-    if not (0 <= col_origin <= _MAX_DIE_INDEX
-            and 0 <= row_total <= _MAX_DIE_INDEX):
+    # 상식 범위: stage 위 웨이퍼가 지름 두 배보다 멀리 갈 수 없다.  예전에는 고정 상한
+    # _MAX_DIE_INDEX(200)였는데 작은 die 의 정당한 맵(GNF7K21 960×665 → row 452)을 버렸다.
+    if not (0 <= col_origin <= max(_MAX_DIE_INDEX, 2 * _MAX_DIAMETER / px)
+            and 0 <= row_total <= max(_MAX_DIE_INDEX, 2 * _MAX_DIAMETER / py)):
         return None
     return frozenset(cells)
 

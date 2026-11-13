@@ -1,4 +1,4 @@
-"""장비 die 목록(``DieLut.dat``) 번호 기준 · '중심식=격자식' 일치 때 ⚠ 없음 — 회귀 가드.
+"""장비 die 목록(``DieLut.dat``) 번호 기준 · '중심식=격자식' 일치(2026-11-13 부터 ⚠ 유지) — 회귀 가드.
 
 실물(현택님 수집 zip, 2026-10-26) ``dev/좌표 확인/die목록(DieLut)/``:
 
@@ -92,13 +92,15 @@ def test_wafer_map_cells_come_from_dielut():
     assert len(wg.dielut_cells(_RDL2)) == 30
 
 
-def test_without_dielut_agreement_is_trusted(tmp_path):
+def test_without_dielut_agreement_is_no_longer_trusted(tmp_path):
+    """중심식 = 격자식 일치는 값은 맞아도 ⚠ 를 뺄 근거가 아니다 — 2026-11-13 반증
+    (HORNET CCU P8V798-04F4·08D0: 둘 다 (3, 71), 번호표·장비 (3, 70))."""
     d = _copy(tmp_path, _RDL2)
     (d / wg._DIELUT_FILE).unlink()
     g = wg.camtek_geometry(d)
     assert (g.col_origin, g.row_total) == (2, 6)
     assert wg.AGREE_SOURCE_TAG in g.source and wg.DIELUT_SOURCE_TAG not in g.source
-    assert {c.number_warn for c in camtek_ini.load_folder(d).values()} == {""}
+    assert {c.number_warn for c in camtek_ini.load_folder(d).values()} == {NUMBER_WARN_NO_TABLE}
 
 
 def test_disagreement_keeps_the_warning(tmp_path):
@@ -138,6 +140,8 @@ def test_conflict_with_table_logs_and_keeps_table(monkeypatch, caplog):
 def test_trusted_tags():
     assert wg.is_trusted_source("Params+" + wg.EXPORT_SOURCE_TAG)
     assert wg.is_trusted_source("Params+" + wg.DIELUT_SOURCE_TAG)
-    assert wg.is_trusted_source("Params+s_DieLocation.dat+" + wg.AGREE_SOURCE_TAG)
+    assert wg.is_trusted_source("Params+" + wg.BORROW_SOURCE_TAG)
+    assert wg.is_trusted_source("Params+s_DieLocation.dat+" + wg.SMALL_MAP_SOURCE_TAG)
+    assert not wg.is_trusted_source("Params+s_DieLocation.dat+" + wg.AGREE_SOURCE_TAG)
     assert not wg.is_trusted_source("Params+s_DieLocation.dat")
     assert not wg.is_trusted_source("models.py 상수")

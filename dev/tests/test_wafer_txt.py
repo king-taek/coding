@@ -389,3 +389,16 @@ def test_two_maps_name_the_side_in_the_banner():
     assert "기준 · A — " in text and "검증 · B" not in text
     assert WaferMapDialog.warning_text([("x", wm.MapData(None, (), ()))]) == ""
     assert i18n.KO.WAFER_MAP_WARN_UNPLACED_FMT.format(n=1) in text
+
+
+def test_banner_turns_red_when_numbers_or_cells_may_be_wrong():
+    """틀릴 가능성이 큰 맵은 머리말부터 다르다(사용자 지시 2026-11-13)."""
+    from aoi_verification.app import i18n
+    pytest.importorskip("PyQt6.QtWidgets")
+    from aoi_verification.app.ui.widgets.wafer_map_dialog import WaferMapDialog
+    guess = wm.MapData(None, (), (), guessed_points=3)
+    calm = wm.MapData(None, (), (Path("x.jpg"),))
+    assert WaferMapDialog.warning_is_danger([("기준", calm), ("검증", guess)])
+    assert not WaferMapDialog.warning_is_danger([("기준", calm)])
+    assert WaferMapDialog.warning_text([("x", guess)]).startswith(i18n.KO.WAFER_MAP_DANGER_HEAD)
+    assert WaferMapDialog.warning_text([("x", calm)]).startswith(i18n.KO.WAFER_MAP_WARN_HEAD)

@@ -30,6 +30,7 @@ from ...similarity.slot_features import (SlotFeatureCache, SlotPrecomputeWorker,
 from ...workers.matcher import Candidate, MatcherWorker
 from ...workers import efficiency_matcher as _eff
 from ...workers import coord_matcher as _coord
+from ...coords import number_risk as _number_risk
 from ...workers import thumb_plan
 from ...utils.prefs import EngineMode
 from .progress_row import ProgressRowMixin
@@ -100,6 +101,8 @@ class ReviewContext:
     # 좌표 세션에서 **고전 유사도로 폴백 채점된** ref 집합 {(slot, ref_path)}.
     # `fast_results` 안의 점수가 거리인지 유사도인지 가르는 유일한 근거다.
     coord_classical_refs: frozenset = frozenset()
+    # col/row 를 확실히 정하지 못한 슬롯 ((슬롯, 사진 수), ...) — 검토 화면 큰 경고용.
+    number_risk: tuple = ()
 
 
 class MatchPage(ProgressRowMixin, QWidget):
@@ -166,6 +169,8 @@ class MatchPage(ProgressRowMixin, QWidget):
         # `_fast_results` 에는 거리 인코딩과 유사도가 섞여 들어오는데 값만으로는
         # 구분이 안 된다 — 실패 검토 창이 점수를 %로 찍을지 정하는 데 쓴다.
         self._coord_classical_refs: set = set()
+        # col/row 를 확실히 정하지 못한 슬롯 — 좌표 매칭 워커가 알려 준다(`coords.number_risk`).
+        self._number_risk: tuple = ()
         # 실패 검토 창이 **그 자리에서 계산한** (ref, val) 점수의 보관처.
         # ★ `_score_cache` 와 **다른 통**이다 — 그래야 `_launch_matcher` 의
         #   `has_all_pairs` 가 이 값들 때문에 True 로 뒤집혀 2회차 매칭이 낡은
@@ -241,6 +246,14 @@ class MatchPage(ProgressRowMixin, QWidget):
         self.progress_bar.setTextVisible(False)
         self.progress_bar.setVisible(False)
         root.addWidget(self.progress_bar)
+
+        # col/row 를 확실히 정하지 못한 웨이퍼 — 빨간 큰 경고(사용자 지시 2026-11-13
+        # "경고가 나오는 웨이퍼를 진행할 때에는 경고를 크게").  평소엔 숨김.
+        self.risk_banner = QLabel("", self)
+        self.risk_banner.setProperty("role", "dangerBanner")
+        self.risk_banner.setWordWrap(True)
+        self.risk_banner.hide()
+        root.addWidget(self.risk_banner)
 
         # 2 pane — QSplitter 로 사용자가 분할 비율 조절 -------------------
         self._h_splitter = QSplitter(Qt.Orientation.Horizontal, self)
@@ -513,6 +526,7 @@ class MatchPage(ProgressRowMixin, QWidget):
         self._precompute_done = 0
         self._precompute_total = 0
         self._precompute_phase = ""
+        self._set_number_risk(())
         # 슬롯별 ref 수집 — queue 순서를 따라 사용자가 마주칠 순서대로 처리.
         refs_by_slot: dict[str, list[ImageItem]] = defaultdict(list)
         for r in self._state.queue:
@@ -607,6 +621,8 @@ class MatchPage(ProgressRowMixin, QWidget):
             self._on_precompute_finished
         )
         self._precompute_worker.signals.failed.connect(self._on_precompute_failed)
+        if coord_mode:
+            self._precompute_worker.signals.number_risk.connect(self._on_number_risk)
         try:
             self._precompute_worker.signals.phase.connect(self._on_precompute_phase)
         except (AttributeError, TypeError):
@@ -672,6 +688,18 @@ class MatchPage(ProgressRowMixin, QWidget):
                 self._precompute_done, self._precompute_total,
                 self._precompute_phase,
             )
+
+    def _on_number_risk(self, risk) -> None:
+        if not self._precompute_signal_is_current():
+            return
+        self._set_number_risk(risk)
+
+    def _set_number_risk(self, risk) -> None:
+        """큰 경고 배너 갱신 — 경고할 슬롯이 없으면 숨긴다."""
+        self._number_risk = tuple(risk or ())
+        text = _number_risk.banner_text(self._number_risk)
+        self.risk_banner.setText(text)
+        self.risk_banner.setVisible(bool(text))
 
     def _on_precompute_progress(self, done: int, total: int) -> None:
         if not self._precompute_signal_is_current():
@@ -821,6 +849,7 @@ class MatchPage(ProgressRowMixin, QWidget):
             # 실패 집합과 같은 이유로 좌표 모드에서만 의미가 있다.
             coord_classical_refs=(frozenset(self._coord_classical_refs)
                                   if coord_mode else frozenset()),
+            number_risk=self._number_risk if coord_mode else (),
         )
 
     def build_candidates_by_ref(self, matches) -> dict:

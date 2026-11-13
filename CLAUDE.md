@@ -281,16 +281,26 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   `col_origin = min Col`, `row_total = max Row`(전체 레코드, stage 번호). 둘 다 있는 26 LOT·51 폴더에서 번호표와 전부 같았다
   (관측 2026-10-26, 계산이 틀리던 AVAGO 01C1·T254 GX57007306 포함). 검토 전 폴더에도 있지만 **다중 레시피 스캔에만** 있다.
   채택 조건은 번호표와 같고, 번호표와 다르면 번호표를 쓰고 경고를 남긴다(반증 조건, 관측 0건). Wafer map 칸도 이 목록으로 그린다.
-  **⚠(`NUMBER_WARN_NO_TABLE`)은 번호표·DieLut 가 없고 중심식과 3 mm 격자식(맵을 채택했으면 맵도)이 다르거나 하나뿐일 때만** 붙는다
-  (`is_trusted_source`) — 둘이 같을 때 틀린 적이 없다(번호표 있는 123/123 · 저장소 샘플 69/69; 사용자 결정 2026-10-27
-  "지금까지 준 샘플에서 전부 정답인 규칙이면 경고 없이"). **둘이 같다고 번호표·DieLut 보다 앞세우지 마라** — QORVO 처럼 고객 맵을
-  들여온 제품은 die 목록이 기하가 아니다. 골든(실물): `test_dielut_origins.py`.
-- **col/row 번호의 기준은 장비가 쓴 die 맵(`s_DieLocation.dat`)이 2순위다(ExportData·DieLut 가 없을 때)**
+  골든(실물): `test_dielut_origins.py`.
+- **번호표·DieLut 가 둘 다 없으면 2순위는 die 크기로 가른다**(`wafer_geometry._with_origins`, 2026-11-13 검증 후 변경):
+  - **작은 die(두 pitch ≤ 1600 µm)**: 그 웨이퍼의 die 맵이 원 안 온전한 칸의 70% 이상을 담으면 **±1 클램프 없이** 맵 원점을
+    쓴다(`SMALL_MAP_SOURCE_TAG`). 장비 확인 GNF7K21 (1,230) 등 — 클램프가 오히려 맞는 맵을 버렸다(관측).
+    `_dat_cells` 인덱스 상한도 pitch 에 비례한다(작은 die 는 row 가 200 을 넘는다).
+  - **큰 die**: **같은 셋업 폴더(`폴더.parent.parent/*/*`)의 번호표·DieLut 를 빌린다**(`_borrow_origins`, `BORROW_SOURCE_TAG`).
+    pitch 가 같은 참조 웨이퍼마다 `u = cx/px − col0`, `v = row_total + 1 − cy/py` 를 구해 중앙값으로 원점을 정하고,
+    참조끼리 0.5 칸 넘게 다르면 빌리지 않는다. 번호표를 가린 102 폴더 102/102 정답(관측). 실물 골든: `test_origin_borrow.py`(HORNET CCU).
+  - 둘 다 못 하면 아래 die 맵·중심 유도로 가고 **늘 ⚠(`NUMBER_WARN_NO_TABLE`)** 이다. ⚠ **'중심식=격자식' 일치는 더 이상 믿지 않는다**
+    (`AGREE_SOURCE_TAG` 는 `_TRUSTED_TAGS` 밖) — HORNET CCU 04F4/08D0 에서 둘이 같은데 row 가 1 틀렸다(관측, 2026-11-12;
+    2026-10-27 '경고 없이' 결정을 반증이 뒤집음). 이 웨이퍼는 매칭·검토 화면 위에 빨간 큰 경고(`coords.number_risk`)가,
+    Wafer map 에는 빨간 배너(`wafer_map.DANGER_CODES`)가 뜬다(사용자 지시 2026-11-13) — 끄지 마라.
+  - **정렬 사진(`.wlup`)은 pitch 검산에서 뺀다**(`is_alignment_photo`) — die 결함이 아니라 X 등호를 깨 TB500 Multi 폴더가 절대좌표로 떨어졌다.
+  - 검증 장치: `dev/coord_verify.py`(수집 자료로 NAS 경로 트리를 재구성해 번호표를 가리고 앱 결과·Conder·장비 판독과 대조).
+- **col/row 번호의 기준은 장비가 쓴 die 맵(`s_DieLocation.dat`)이 3순위다(위 2순위로 못 정했을 때)**
   (`wafer_geometry._die_map_origins`): `col_origin = min(x_index)`, `row_total = max(y_index)`.
   중심 유도는 폴백이다 — 실측 74장 중 1장(PGEE48)에서 유도식이 row 를 1 크게 냈고 맵이
   장비 화면과 일치했다(§6-N). 레코드 배치는 장비마다 달라(`RecordSize` 72/128) 옆의
   `.dat.md` 사이드카로 읽는다 — 하드코딩하지 마라. **맵은 유도값과 ±1 이내일 때만
-  채택한다**(부분 맵 방어) — 이 클램프를 풀지 마라. 실물 골든: `TestDieMapGolden`.
+  채택한다**(부분 맵 방어) — 이 클램프를 풀지 마라(70% 이상 담은 작은 die 맵만 위 2순위에서 클램프 없이 쓴다). 실물 골든: `TestDieMapGolden`.
   ⚠ 맵은 **그 웨이퍼의 die 목록**이라 가장자리가 빠질 수 있다(§6-P): ① 같은 격자(유도값·pitch
   동일)인 **형제 슬롯의 맵을 합쳐** 기준을 잡고(`lot_die_map_cells` — AVAGO 12/25장 col 1 작음;
   형제 칸은 원 안에 온전한 것만, 중심을 모르면 합치지 않음, Wafer map 도 같은 집합을 그린다),
