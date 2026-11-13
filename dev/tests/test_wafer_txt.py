@@ -262,6 +262,18 @@ def test_live_map_with_known_map_has_no_warning(tmp_path):
     assert wm.map_warnings(data) == []
 
 
+def test_notch_up_map_always_warns(tmp_path):
+    """FNLOC=0 맵은 51/51 로 맞았지만 표본이 적어 늘 경고한다(사용자 지시 2026-11-14 '혹시 몰라').
+    점이 틀릴 근거는 없으므로 빨간 큰 경고(DANGER)는 아니다."""
+    lot = _lot(tmp_path, fn="0")
+    paths = [p for w in sorted(_PHOTOS) for p in _photos(lot, w)]
+    data = wm.build_map(resolve_batch(paths))
+    warns = dict(wm.map_warnings(data))
+    assert warns.get(wm.WARN_NOTCH_UP) == len(paths)
+    assert wm.WARN_NOTCH_UP not in wm.DANGER_CODES
+    assert "노치가 위쪽" in wm.warning_reasons(data)
+
+
 def test_excel_wafer_map_sheet_has_no_live_review_note(qt, isolated_cache, tmp_path):
     """엑셀 Wafer Map 시트도 표 아래 LIVE 당부를 더 이상 적지 않는다."""
     pytest.importorskip("openpyxl")

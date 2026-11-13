@@ -99,6 +99,9 @@ class MapData:
     # col/row 를 장비 번호표 없이 계산한(틀렸을 수 있는) 점 수 — DefectCoord.number_warn.
     # 점 위치는 x/y 라 안 틀리고, 툴팁 번호만 틀렸을 수 있다.
     guessed_points: int = 0
+    # 노치가 위(FNLOC=0)인 Conder 맵으로 칸을 정한 점 수 — 180 과 같은 배치로 읽는다
+    # (관측 51/51)지만 확인한 표본이 적어 늘 알린다(사용자 지시 2026-11-14 '혹시 몰라').
+    notch_up_points: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -500,6 +503,7 @@ def build_map(coords: dict, matched=None) -> MapData:
     points: list[MapPoint] = []
     unplaced: list[Path] = []
     guessed = 0
+    notch_up = 0
     frame: Optional[WaferFrame] = None
     folder_frames: dict = {}
     for path, coord in coords.items():
@@ -519,6 +523,9 @@ def build_map(coords: dict, matched=None) -> MapData:
         xy = _align_phase(xy, folder_frames[key], frame)
         die_known = coord.source != "camtek_abs"
         guessed += bool(coord.number_warn) and die_known
+        if coord.source == "camtek_live":
+            wt = wafer_txt.load(path.parent)
+            notch_up += wt is not None and wt.fnloc == "0"
         points.append(MapPoint(
             path=path, x=xy[0], y=xy[1],
             col=coord.screen_col if die_known else None,
@@ -543,7 +550,8 @@ def build_map(coords: dict, matched=None) -> MapData:
         if len(union) > len(frame.die_cells):
             frame = replace(frame, die_cells=frozenset(union))
     return MapData(frame=frame, points=tuple(points), unplaced=tuple(unplaced),
-                   mixed_frames=mixed, guessed_points=guessed)
+                   mixed_frames=mixed, guessed_points=guessed,
+                   notch_up_points=notch_up)
 
 
 # ---------------------------------------------------------------------------
@@ -554,6 +562,7 @@ WARN_MIXED_FRAMES = "mixed_frames"      # 합친 폴더들의 격자가 서로 �
 WARN_UNPLACED = "unplaced"              # 좌표를 못 놓은 사진이 있다
 WARN_PITCH_ASSUMED = "pitch_assumed"    # die 크기를 사진으로 추정했다(크기·외곽 근사)
 WARN_NUMBER_GUESS = "number_guess"      # col/row 를 장비 번호표 없이 계산한 점이 있다(툴팁 번호)
+WARN_NOTCH_UP = "notch_up"              # 노치가 위(FNLOC=0)인 Conder 맵으로 칸을 정했다
 
 
 def _cell_drawn(frame: WaferFrame, cell: tuple[int, int]) -> bool:
@@ -590,6 +599,8 @@ def map_warnings(data: Optional[MapData]) -> list[tuple[str, int]]:
         out.append((WARN_PITCH_ASSUMED, len(data.points)))
     if data.guessed_points:
         out.append((WARN_NUMBER_GUESS, data.guessed_points))
+    if data.notch_up_points:
+        out.append((WARN_NOTCH_UP, data.notch_up_points))
     return out
 
 
@@ -617,6 +628,7 @@ def warning_reasons(data: Optional[MapData]) -> str:
         WARN_UNPLACED: lambda n: i18n.KO.WAFER_MAP_WARN_UNPLACED_FMT.format(n=n),
         WARN_PITCH_ASSUMED: lambda n: i18n.KO.WAFER_MAP_WARN_PITCH_ASSUMED,
         WARN_NUMBER_GUESS: lambda n: i18n.KO.WAFER_MAP_WARN_NUMBER_GUESS_FMT.format(n=n),
+        WARN_NOTCH_UP: lambda n: i18n.KO.WAFER_MAP_WARN_NOTCH_UP_FMT.format(n=n),
     }
     return " · ".join(fmt[code](n) for code, n in map_warnings(data))
 
