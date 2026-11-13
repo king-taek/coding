@@ -1503,9 +1503,6 @@ class TestDieMapGolden:
 
     @pytest.mark.parametrize("name", sorted(_DIE_MAP_TRUTH))
     def test_geometry_uses_the_die_map(self, name, monkeypatch):
-        # 이 폴더들은 같은 셋업에 번호표 형제가 있어 빌리기가 먼저 같은 값을 낸다(2026-11-13).
-        # 맵 경로 자체를 지키려고 빌리기를 끄고 본다 — 기대값은 그대로다.
-        monkeypatch.setattr(wg, "_borrow_origins", lambda *_a: None)
         col_origin, row_total, _rec = _DIE_MAP_TRUTH[name]
         geom = wg.camtek_geometry(_DIE_MAP_REAL / name)
         assert geom is not None, name

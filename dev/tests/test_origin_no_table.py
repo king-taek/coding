@@ -2,13 +2,12 @@
 
 * 정렬 사진(``.wlup``)은 pitch 검산에서 뺀다 — 섞이면 TB500 Multi 31/32 폴더가 절대좌표로
   떨어졌다(사용자 결정 "정렬사진은 무시").
-* 큰 die: **같은 셋업 폴더**의 번호표를 빌린다(710/710, 장비 화면 3D·HORNET·BUMP TOP 2종·EDGE).
-  참조끼리 갈리거나 pitch 가 다르면 빌리지 않고 ⚠.
+* 다른 웨이퍼(같은 셋업)의 번호표는 **빌리지 않는다**(사용자 결정 2026-11-14 — 배포받는 사람은
+  Conder 만 봐서 쓸 수 없는 방법이라 현택 PC 에서도 쓰지 않는다).  형제 번호표가 있어도 ⚠.
 * 작은 die(두 축 ≤ 1.6 mm): 그 웨이퍼의 die 맵(70% 이상)을 ±1 클램프 없이 쓴다(61/61,
-  GNF7K21 장비 (1, 230)).  맵이 없으면 빌리지 않는다(빌리기 7/61 틀림) → ⚠.
+  GNF7K21 장비 (1, 230)).  맵이 없으면 ⚠.
 * '중심식=격자식' 일치는 더 이상 ⚠ 를 빼지 않는다(HORNET CCU 2폴더 반증).
 
-실물 대조는 ``dev/coord_verify.py`` (수집 172폴더: 번호표 숨김 102/102, 조용히 틀림 0).
 """
 from __future__ import annotations
 
@@ -83,56 +82,27 @@ def test_alignment_photos_do_not_break_the_pitch_check(tmp_path):
     assert g is not None and (g.pitch_x, g.pitch_y) == (px, py)
 
 
-# ── 큰 die: 같은 셋업에서 빌리기 ───────────────────────────────────────────
+# ── 큰 die: 같은 셋업 번호표를 빌리지 않는다 ─────────────────────────────
 
 PX, PY = 8627.0, 7820.4
 C1 = (156848.9, 155044.1)                     # 번호표 웨이퍼의 중심
 T1 = (2, 34, 2, 37)                           # 그 번호표 → 원점 (2, 37)
 
 
-def test_big_die_borrows_from_another_layer_of_the_same_setup(tmp_path):
+def test_big_die_never_borrows_from_another_layer_of_the_same_setup(tmp_path):
     setup = tmp_path / "LOT" / "6321"
     _wafer(setup / "BNU" / "P35004-09G5", PX, PY, *C1, export=T1)
-    # 번호표 없는 BUMP TOP 웨이퍼 — 중심이 x 로 한 칸, y 로 한 칸 옮겨 놓였다.
     tgt = _wafer(setup / "BNU BUMPTOP" / "P35004-01E2", PX, PY, C1[0] + PX, C1[1] + PY)
     g = wg.camtek_geometry(tgt)
-    assert (g.col_origin, g.row_total) == (3, 38)
-    assert wg.BORROW_SOURCE_TAG in g.source
-    assert _warns(tgt) == {""}
-
-
-def test_same_wafer_of_another_layer_is_a_valid_reference(tmp_path):
-    setup = tmp_path / "LOT" / "6321"
-    _wafer(setup / "AWW" / "UQVE05001-01D1", 3485.0, 3838.0, 156004.9, 154957.1,
-           export=(4, 80, 2, 77))
-    tgt = _wafer(setup / "AWW 3D" / "UQVE05001-01D1", 3485.0, 3838.0, 156004.9, 154957.1)
-    g = wg.camtek_geometry(tgt)
-    assert (g.col_origin, g.row_total) == (4, 77) and wg.BORROW_SOURCE_TAG in g.source
-
-
-def test_references_that_disagree_are_not_borrowed(tmp_path):
-    setup = tmp_path / "LOT" / "6321"
-    _wafer(setup / "A" / "W1", PX, PY, *C1, export=T1)
-    _wafer(setup / "A" / "W2", PX, PY, *C1, export=(3, 34, 2, 37))      # 같은 중심, 원점이 1 다름
-    tgt = _wafer(setup / "B" / "W3", PX, PY, *C1)
-    g = wg.camtek_geometry(tgt)
-    assert wg.BORROW_SOURCE_TAG not in g.source
+    assert not wg.is_trusted_source(g.source)
     assert _warns(tgt) == {NUMBER_WARN_NO_TABLE}
 
 
-def test_reference_of_another_pitch_is_ignored(tmp_path):
-    setup = tmp_path / "LOT" / "6321"
-    _wafer(setup / "A" / "W1", PX + 5.0, PY, *C1, export=T1)
-    tgt = _wafer(setup / "B" / "W3", PX, PY, *C1)
-    assert wg.BORROW_SOURCE_TAG not in wg.camtek_geometry(tgt).source
-    assert _warns(tgt) == {NUMBER_WARN_NO_TABLE}
-
-
-def test_a_folder_never_borrows_from_itself(tmp_path):
-    """번호표가 있으면 번호표가 먼저다 — 자기 번호표를 '빌린' 것으로 적지 않는다."""
+def test_own_table_comes_first(tmp_path):
     tgt = _wafer(tmp_path / "LOT" / "6321" / "A" / "W1", PX, PY, *C1, export=T1)
     g = wg.camtek_geometry(tgt)
-    assert wg.EXPORT_SOURCE_TAG in g.source and wg.BORROW_SOURCE_TAG not in g.source
+    assert wg.EXPORT_SOURCE_TAG in g.source and (g.col_origin, g.row_total) == (2, 37)
+    assert _warns(tgt) == {""}
 
 
 # ── 작은 die: die 맵 ──────────────────────────────────────────────────────
@@ -178,37 +148,35 @@ def test_small_die_partial_map_is_not_used(tmp_path):
 
 
 def test_small_die_does_not_borrow(tmp_path):
-    """작은 die 는 빌리기가 1칸씩 틀렸다(7/61) — 형제 번호표가 있어도 빌리지 않고 ⚠."""
+    """형제 번호표가 있어도 빌리지 않고 ⚠."""
     setup = tmp_path / "LOT" / "6322"
     _wafer(setup / "SNU" / "W1", SPX, SPY, *SC, export=(5, 190, 3, 200))
     tgt = _wafer(setup / "SNU-EDGE" / "W2", SPX, SPY, *SC)
-    g = wg.camtek_geometry(tgt)
-    assert wg.BORROW_SOURCE_TAG not in g.source
+    assert not wg.is_trusted_source(wg.camtek_geometry(tgt).source)
     assert _warns(tgt) == {NUMBER_WARN_NO_TABLE}
 
 
-# ── 실물 골든: HORNET CCU (2026-11-13 장비 화면) ───────────────────────────
+# ── 실물: HORNET CCU (2026-11-13 장비 화면) ───────────────────────────────
 # 같은 셋업(6321)의 CCU·CCU RE 웨이퍼 파일(사진 목록 INI 는 앞 12항목만).  CCU P8V798-12B2 는
-# 번호표가 없고, 장비 화면이 사진 299227.110236 을 (61, 44) 로 보여 줬다(관측).  예전 앱은
-# 중심식으로 (62, 46) 을 냈다(⚠).  CCU 04F4·08D0 은 번호표 (3, 70) 이 있는데, 그걸 숨기면
-# 예전 앱은 die 맵 + '중심식=격자식' 으로 (3, 71) 을 **경고 없이** 냈다 — 조용히 틀림의 실례.
+# 번호표가 없고, 장비 화면이 사진 299227.110236 을 (61, 44) 로 보여 줬다(관측).  빌리기를 쓰지
+# 않으므로 앱은 이 번호를 확정하지 못한다 — 대신 반드시 ⚠ 를 띄워야 한다(조용히 틀리면 안 된다).
 
 _HORNET = (Path(__file__).resolve().parents[1] / "좌표 확인" / "빌리기(같은 셋업)"
            / "HORNET 0861404PD-0A" / "6321")
 
 
 @pytest.mark.skipif(not _HORNET.exists(), reason="dev/좌표 확인/빌리기(같은 셋업) 없음")
-def test_hornet_ccu_without_table_matches_the_equipment_screen():
+def test_hornet_ccu_without_table_is_warned():
     f = _HORNET / "CCU" / "P8V798-12B2"
-    g = wg.camtek_geometry(f)
-    assert (g.col_origin, g.row_total) == (3, 70) and wg.BORROW_SOURCE_TAG in g.source
+    assert not wg.is_trusted_source(wg.camtek_geometry(f).source)
     c = camtek_ini.load_folder(f)["299227.110236.c.1956694204"]
-    assert (c.screen_col, c.screen_row) == (61, 44) and c.number_warn == ""
+    assert c.number_warn == NUMBER_WARN_NO_TABLE
 
 
 @pytest.mark.skipif(not _HORNET.exists(), reason="dev/좌표 확인/빌리기(같은 셋업) 없음")
 @pytest.mark.parametrize("wafer", ["P8V798-04F4", "P8V798-08D0"])
-def test_hornet_ccu_hidden_table_is_borrowed_back(tmp_path, wafer):
+def test_hornet_ccu_hidden_table_is_warned(tmp_path, wafer):
+    """번호표를 숨기면 형제 번호표가 있어도 빌리지 않고 ⚠ — 예전 '중심식=격자식' 조용히 틀림 방지."""
     import shutil
     setup = tmp_path / "6321"
     shutil.copytree(_HORNET, setup)
@@ -218,5 +186,4 @@ def test_hornet_ccu_hidden_table_is_borrowed_back(tmp_path, wafer):
     text = pi.read_text(encoding="latin-1")
     pi.write_text(text.replace("[ExportData]", "[ExportDataHidden]"), encoding="latin-1")
     clear_caches()
-    g = wg.camtek_geometry(setup / "CCU" / wafer)
-    assert (g.col_origin, g.row_total) == (3, 70) and wg.BORROW_SOURCE_TAG in g.source
+    assert not wg.is_trusted_source(wg.camtek_geometry(setup / "CCU" / wafer).source)

@@ -273,7 +273,7 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   가능 — "미구분" 을 코드·문서·요청목록에 적으면 된다). **R3** 모든 수치에 출처 등급
   (`관측`/`파일`/`유도`/`가정`/`합성`)을 붙인다. **R4** 합성값을 골든에 넣지 않는다.
 - ⚠ **배포받은 사람은 Conder 만 본다 — Scanresult(NAS)는 개발자(현택) PC 에서만 열린다**(사용자 확인 2026-11-14).
-  Recipe.ini · 번호표 · DieLut · 같은 셋업 빌리기는 Scanresult 전용이라 다른 사람에게는 쓸모가 없다. 새 해법은 'Conder 만 있을 때' 무엇이
+  Recipe.ini · 번호표 · DieLut 는 Scanresult 전용이라 다른 사람에게는 쓸모가 없다. 새 해법은 'Conder 만 있을 때' 무엇이
   나오는지로 먼저 판단하고, Conder 에 없는 정보를 NAS 에서 읽어 오는 설계를 하지 마라. Conder LIVE 파일명 col/row 는 장비 화면 번호라
   번호 원점 문제는 없고, 남는 것은 화면 시프트(맵 대조) · LOT 맵 txt(노치 · die 크기) · 노치가 다른 매칭이다.
 - **Notch 방향(`coords/notch.py` · `workers/notch_auto.py`)은 매칭 계산 전용이다.** Camtek 파일에는 노치 값이 없다(`FlatNotchOrientation=3`
@@ -299,9 +299,9 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   - **작은 die(두 pitch ≤ 1600 µm)**: 그 웨이퍼의 die 맵이 원 안 온전한 칸의 70% 이상을 담으면 **±1 클램프 없이** 맵 원점을
     쓴다(`SMALL_MAP_SOURCE_TAG`). 장비 확인 GNF7K21 (1,230) 등 — 클램프가 오히려 맞는 맵을 버렸다(관측).
     `_dat_cells` 인덱스 상한도 pitch 에 비례한다(작은 die 는 row 가 200 을 넘는다).
-  - **큰 die**: **같은 셋업 폴더(`폴더.parent.parent/*/*`)의 번호표·DieLut 를 빌린다**(`_borrow_origins`, `BORROW_SOURCE_TAG`).
-    pitch 가 같은 참조 웨이퍼마다 `u = cx/px − col0`, `v = row_total + 1 − cy/py` 를 구해 중앙값으로 원점을 정하고,
-    참조끼리 0.5 칸 넘게 다르면 빌리지 않는다. 번호표를 가린 102 폴더 102/102 정답(관측). 실물 골든: `test_origin_borrow.py`(HORNET CCU).
+  - **큰 die**(또는 맵이 모자란 작은 die): 다른 웨이퍼(같은 셋업)의 번호표를 **빌리지 않는다**(사용자 결정 2026-11-14 —
+    배포받는 사람은 Conder 만 봐서 쓸 수 없는 방법이라 현택 PC 에서도 쓰지 않는다. 예전 `_borrow_origins` 는 지웠다 — 다시 만들지 마라).
+    번호표를 가린 102 폴더에서는 맞았지만 이 결정이 우선이다. 그래서 HORNET CCU 12B2(장비 (61, 44))는 ⚠ 로 남는다: `test_origin_no_table.py`.
   - 둘 다 못 하면 아래 die 맵·중심 유도로 가고 **늘 ⚠(`NUMBER_WARN_NO_TABLE`)** 이다. ⚠ **'중심식=격자식' 일치는 더 이상 믿지 않는다**
     (`AGREE_SOURCE_TAG` 는 `_TRUSTED_TAGS` 밖) — HORNET CCU 04F4/08D0 에서 둘이 같은데 row 가 1 틀렸다(관측, 2026-11-12;
     2026-10-27 '경고 없이' 결정을 반증이 뒤집음). 이 웨이퍼는 매칭·검토 화면 위에 빨간 큰 경고(`coords.number_risk`)가,
