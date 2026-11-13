@@ -20,6 +20,7 @@ from ..deferred import call_later
 from ..folder_picker import FolderPicker
 from ..teardown import tolerate_teardown
 from ... import i18n
+from .. import motion
 from .. import theme
 from ...utils import paths
 from ...utils import prefs as _prefs
@@ -720,14 +721,36 @@ class SetupPage(QWidget):
         remove.clicked.connect(lambda: self._remove_val_row(rec))
         self._val_rows_lay.addWidget(host)
         self._refresh_val_add_btn()
+        if motion.enabled() and self.isVisible():
+            # P15A — 줄 높이가 0 에서 열리고(아래 폼이 툭 밀리지 않게) 내용이 뒤따라 나타난다.
+            motion.animate_height(host, 0, host.sizeHint().height(),
+                                  duration=motion.DUR_ROW_RESIZE)
+            motion.fade_in(host, delay_ms=motion.DEP_DELAY_MS,
+                           duration=motion.DUR_TILE_IN)
         if not path:
             edit.setFocus()
 
     def _remove_val_row(self, rec: dict) -> None:
+        if rec not in self._val_rows:
+            return                      # 접히는 중에 ✕ 를 한 번 더 눌렀다
         self._val_rows.remove(rec)
-        rec["host"].setParent(None)
-        rec["host"].deleteLater()
+        host = rec["host"]
         self._refresh_val_add_btn()
+        if not (motion.enabled() and self.isVisible() and host.isVisible()
+                and host.height() > 0):
+            host.setParent(None)
+            host.deleteLater()
+            return
+        # P15A — 접히며 흐려지고, 높이 애니메이션이 끝나는 **같은 신호**에서 뗀다
+        # (묶음이 풀린 원래 높이가 한 프레임도 비치지 않게).
+        for b in host.findChildren(NeonButton):
+            b.drop_press_effect()       # 방금 누른 ✕ 의 딥 이펙트와 겹치지 않게
+        motion.animate_height(host, host.height(), 0,
+                              duration=motion.DUR_ROW_SHRINK, easing=motion.EASE_EXIT)
+        # 페이드는 높이와 **같이** 끝난다 — 먼저 끝나면 이펙트가 떨어져 마지막 40ms 옛 줄이 비친다.
+        motion.fade_out(host, duration=motion.DUR_ROW_SHRINK)
+        host._motionHeightAnim.finished.connect(host.hide)
+        host._motionHeightAnim.finished.connect(host.deleteLater)
 
     def _refresh_val_add_btn(self) -> None:
         n = len(self._val_rows) + 1
@@ -1189,10 +1212,29 @@ class SetupPage(QWidget):
 
         지금 어느 엔진이 도는지는 `_engine_inert_hint` 한 줄과 상단 모드 배지가 말한다."""
         legacy_on = self.legacy_switch.is_on()
+        # P12A — 원인(스위치 노브)이 먼저, 결과(종속 줄)가 40ms 뒤에 바뀐다.  옛 모습을
+        # 찍어 두었다가 그 위에 얹어 흐린다(허용 오차 줄 회색↔활성, 사라지는 줄).
+        dep = motion.enabled() and self.isVisible()
+        was_on = self.legacy_group.isVisible()
+        tol_pm = (motion.grab_in_place(self._tol_row)
+                  if dep and self._tol_row.isVisible()
+                  and self._tol_row.isEnabled() == legacy_on else None)
+        gone = ([(w, motion.grab_in_place(w))
+                 for w in (self.legacy_group, self._threshold_row)]
+                if dep and was_on and not legacy_on else [])
         self.legacy_group.setVisible(legacy_on)
         self._threshold_row.setVisible(legacy_on)
         self._tol_row.setVisible(True)
         self._tol_row.setEnabled(not legacy_on)
+        if tol_pm is not None:
+            motion.crossfade_over(self._tol_row, tol_pm, delay_ms=motion.DEP_DELAY_MS)
+        if dep and legacy_on and not was_on:
+            for w in (self.legacy_group, self._threshold_row):
+                motion.fade_in(w, delay_ms=motion.DEP_DELAY_MS,
+                               duration=motion.DUR_TILE_TOGGLE)
+        for w, pm in gone:          # 자리는 즉시 접히고 옛 모습만 빠르게 빠진다
+            motion.crossfade_over(w, pm, duration=motion.DUR_FADE_OUT,
+                                  easing=motion.EASE_EXIT)
         if legacy_on:
             short = (i18n.KO.ENGINE_MODE_EFFICIENCY_SHORT
                      if self.legacy_group.current_key() == EngineMode.EFFICIENCY
@@ -1713,11 +1755,23 @@ class SetupPage(QWidget):
         return "" if all(SetupPage._dir_state(r) == "" for r in roots) else "missing"
 
     def _set_field_state(self, edit: QLineEdit, state: str) -> None:
-        """동적 프로퍼티 + repolish(안 하면 QSS 가 다시 그려지지 않는다)."""
-        edit.setProperty("state", "invalid" if state else "")
+        """동적 프로퍼티 + repolish(안 하면 QSS 가 다시 그려지지 않는다).
+
+        P3A — 상태가 **실제로 바뀔 때만** 입력란을 140ms 겹쳐 바꾸고, 오류 문구는 6px
+        아래에서 떠오른다.  고치면 옛 문구가 120ms 가속으로 빠진다.  `_validate` 가
+        자주 부르므로 같은 상태면 아무 모션도 없다."""
+        new = "invalid" if state else ""
+        err = edit.property("_errLabel")
+        changed = ((edit.property("state") or "") != new
+                   and motion.enabled() and edit.isVisible())
+        edit_pm = motion.grab_in_place(edit) if changed else None
+        err_pm = (motion.grab_in_place(err)
+                  if changed and not new and err is not None and err.text() else None)
+        edit.setProperty("state", new)
         edit.style().unpolish(edit)
         edit.style().polish(edit)
-        err = edit.property("_errLabel")
+        if edit_pm is not None:
+            motion.crossfade_over(edit, edit_pm)
         if err is not None:
             # ★ 'empty' 분기는 두지 않는다.  `_validate()` 가 빈 필드에는 state 를 주지
             #   않기 때문에(빈 상태에서 빨간 테두리로 겁주지 않으려는 의도) 도달할 수
@@ -1725,8 +1779,14 @@ class SetupPage(QWidget):
             #   도달 불가 분기는 '처리되고 있다'는 착각만 남긴다.
             if state == "missing":
                 err.setText(i18n.KO.SETUP_INVALID_FOLDER)
+                if changed:
+                    motion.rise_in(err, rise_px=motion.TOAST_RISE_PX,
+                                   duration=motion.DUR_TOAST_IN)
             else:
                 err.setText("")
+                if err_pm is not None:
+                    motion.crossfade_over(err, err_pm, duration=motion.DUR_FADE_OUT,
+                                          easing=motion.EASE_EXIT)
             # ★ setVisible 을 쓰지 않는다 — 자리를 예약해 뒀으므로 문자열만 바꾼다.
 
     def set_backend_ready(self, ready: bool) -> None:
@@ -1873,7 +1933,13 @@ class SetupPage(QWidget):
                               "missing" if val_state == "missing" else "")
         dirs_ok = ref_state == "" and val_state == ""
         ok = dirs_ok and self._backend_ready
+        # P2B — 눌러도 되게 **된 순간만** 회색→파랑을 겹쳐 바꾼다(꺼질 때는 즉시).
+        ready_pm = (motion.grab_in_place(self.start_btn)
+                    if ok and not self.start_btn.isEnabled()
+                    and motion.enabled() and self.start_btn.isVisible() else None)
         self.start_btn.setEnabled(ok)
+        if ready_pm is not None:
+            motion.crossfade_over(self.start_btn, ready_pm)
         if hasattr(self, "_start_hint"):
             # 폴더 문제가 먼저다 — 그건 사용자가 지금 고칠 수 있는 것이고,
             # '준비 중' 은 가만히 있으면 저절로 풀린다.

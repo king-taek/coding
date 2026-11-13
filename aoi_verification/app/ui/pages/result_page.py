@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (QCheckBox, QFileDialog, QFrame, QHBoxLayout, QLabel
                               QVBoxLayout, QWidget)
 
 from ... import i18n
+from .. import motion
 from .. import theme
 from ...models.result import FinalResult
 from ...workers.exporter import ExcelExporter
@@ -631,12 +632,31 @@ class ResultPage(QWidget):
         self._saved_label.setText(i18n.KO.RESULT_SAVED_AT_FMT.format(
             time=datetime.now().strftime("%H:%M")))
         self._saved_label.setVisible(True)
+        self._play_saved_tick()
         # 이제부터는 '다시 저장 = 덮어쓰기' 다 — 캡션이 그 사실로 바뀐다(31안).
         self._refresh_save_target()
         # ★ 워커 시그널 슬롯에서 곧바로 모달을 열면 중첩 이벤트 루프가 생긴다 —
         #   한 틱 미뤄 워커가 완전히 빠져나간 뒤에 띄운다.
         self._pending_saved_path = Path(path)
         QTimer.singleShot(0, self._offer_open_saved_file)
+
+    def _play_saved_tick(self) -> None:
+        """P9A — '저장 완료' 앞에 체크가 그어지고 **남는다**, 문구는 6px 떠오른다.
+
+        곧바로 '파일 열기' 시트가 떠도 저장했다는 사실이 화면에 표시로 남는다.
+        (`flash_text` 는 사라지는 토스트라 체크만 꺼내 쓴다.)"""
+        if not motion.enabled():
+            return
+        lab = self._saved_label
+        tick = getattr(lab, "_motionToastTick", None)
+        if tick is None:
+            tick = motion._ToastTick(lab)
+            lab._motionToastTick = tick
+            m = lab.contentsMargins()            # 체크 자리를 글자 앞에 비워 둔다
+            lab.setContentsMargins(m.left() + motion._ToastTick.W + 2, m.top(),
+                                   m.right(), m.bottom())
+        tick.play()
+        motion.rise_in(lab, rise_px=motion.TOAST_RISE_PX, duration=motion.DUR_TOAST_IN)
 
     def _offer_open_saved_file(self) -> None:
         """저장 다음 행동은 예외 없이 '그 파일을 여는 것' 이다 — 경로만 보여 주면

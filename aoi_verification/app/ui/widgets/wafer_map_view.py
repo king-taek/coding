@@ -34,7 +34,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import QLineF, QPoint, QPointF, QRectF, Qt, pyqtSignal
+from PyQt6.QtCore import (QLineF, QPoint, QPointF, QRectF, Qt, QVariantAnimation,
+                          pyqtSignal)
 from PyQt6.QtGui import (QColor, QFontMetricsF, QImage, QPainter, QPainterPath,
                          QPen)
 from PyQt6.QtWidgets import QToolTip, QWidget
@@ -43,6 +44,7 @@ from ... import i18n
 from ...coords.wafer_map import (MapData, MapPoint, cell_bounds, cell_of,
                                  defect_cells, die_grid_segments)
 from ...utils import image_io
+from .. import motion
 from .. import theme
 
 DOT_R = 3.0            # 점 반지름(px) 기본값 — 확대해도 그대로
@@ -292,16 +294,40 @@ class WaferMapView(QWidget):
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.CrossCursor)
         self.setMinimumSize(240, 240)
+        # P6A — 노치를 바꾸면 옛 그림이 실제 각도만큼 돈 뒤 새 그림으로 바뀐다.
+        self._rot_pix = None
+        self._rot_deg = 0.0
+        self._rot_t = 0.0
+        self._rot_anim = QVariantAnimation(self)
+        self._rot_anim.setStartValue(0.0)
+        self._rot_anim.setEndValue(1.0)
+        self._rot_anim.setDuration(motion.DUR_MAP_ROTATE)
+        self._rot_anim.setEasingCurve(motion.EASE_PRIMARY)
+        self._rot_anim.valueChanged.connect(self._on_rot_tick)
+        self._rot_anim.finished.connect(self._on_rot_done)
+        # P18A — 휠 한 칸 확대·축소를 120ms 로.  커서 아래 점은 내내 제자리다.
+        self._zoom_from = 1.0
+        self._zoom_to = 1.0
+        self._pan_from = QPointF(0, 0)
+        self._zoom_anchor = QPointF(0, 0)
+        self._zoom_anim = QVariantAnimation(self)
+        self._zoom_anim.setStartValue(0.0)
+        self._zoom_anim.setEndValue(1.0)
+        self._zoom_anim.setDuration(motion.DUR_ZOOM_STEP)
+        self._zoom_anim.setEasingCurve(motion.EASE_PRIMARY)
+        self._zoom_anim.valueChanged.connect(self._on_zoom_tick)
 
     # ------------------------------------------------------------------
     def set_data(self, data: Optional[MapData]) -> None:
         self._data = data
+        self._end_rotate()
         self.reset_view()
 
     def data(self) -> Optional[MapData]:
         return self._data
 
     def reset_view(self) -> None:
+        self._zoom_anim.stop()
         self._zoom = 1.0
         self._pan = QPointF(0, 0)
         self.update()
@@ -315,12 +341,35 @@ class WaferMapView(QWidget):
         rot %= ROTATIONS
         if rot == self._rot:
             return
+        self._finish_zoom()
+        self._end_rotate()
+        # 가까운 쪽으로 돈다: +1 = 시계 90°, −1 = 반시계 90°, 2 = 180°.
+        steps = (rot - self._rot + 1) % ROTATIONS - 1
+        pix = (self.grab() if motion.enabled() and self.isVisible()
+               and self._mapper() is not None else None)
         # pan 은 '돌린 뒤' 좌표계라, 회전한 만큼 함께 돌려야 보던 자리가 그대로 남는다.
         self._pan = QPointF(*rotate_xy(self._pan.x(), self._pan.y(),
                                        rot - self._rot))
         self._rot = rot
         self._hover = None
+        if pix is not None:
+            self._rot_pix = pix
+            self._rot_deg = 90.0 * steps
+            self._rot_t = 0.0
+            self._rot_anim.start()
         self.update()
+
+    def _on_rot_tick(self, v) -> None:
+        self._rot_t = float(v)
+        self.update()
+
+    def _on_rot_done(self) -> None:
+        self._rot_pix = None
+        self.update()
+
+    def _end_rotate(self) -> None:
+        self._rot_anim.stop()
+        self._rot_pix = None
 
     def rotation(self) -> int:
         return self._rot
@@ -361,6 +410,18 @@ class WaferMapView(QWidget):
     # ------------------------------------------------------------------
     def paintEvent(self, event):            # noqa: N802
         painter = QPainter(self)
+        if self._rot_pix is not None:       # P6A — 찍어 둔 옛 그림을 돌려 보인다
+            try:
+                painter.fillRect(self.rect(), _colors()["bg"])
+                painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+                c = QRectF(self.rect()).center()
+                painter.translate(c)
+                painter.rotate(self._rot_deg * self._rot_t)     # 양수 = 시계 방향
+                painter.translate(-c)
+                painter.drawPixmap(0, 0, self._rot_pix)
+            finally:
+                painter.end()
+            return
         try:
             m = paint_map(painter, QRectF(self.rect()), self._data,
                           zoom=self._zoom, pan=self._pan, rot=self._rot,
@@ -421,23 +482,55 @@ class WaferMapView(QWidget):
         steps = event.angleDelta().y() / 120.0
         if steps == 0:
             return
+        self._end_rotate()                  # 도는 중 그림과 좌표계를 맞춘다
+        running = self._zoom_anim.state() == QVariantAnimation.State.Running
+        base = self._zoom_to if running else self._zoom     # 연속 휠은 목표에 쌓는다
         factor = ZOOM_STEP ** steps
-        new_zoom = min(ZOOM_MAX, max(1.0, self._zoom * factor))
-        if new_zoom == self._zoom:
+        new_zoom = min(ZOOM_MAX, max(1.0, base * factor))
+        if new_zoom == base:
             return
+        event.accept()
         # 커서 아래 평면 좌표가 확대 뒤에도 커서 아래 있도록 pan 을 보정한다.
         anchor = m.to_um(event.position())
-        ratio = self._zoom / new_zoom
-        self._pan = QPointF(anchor.x() - (anchor.x() - self._pan.x()) * ratio,
-                            anchor.y() - (anchor.y() - self._pan.y()) * ratio)
-        self._zoom = new_zoom
+        if not motion.enabled() or not self.isVisible() or self._drag_from is not None:
+            # 끄는 중 휠 — 애니메이션이 끌기 이동을 덮어쓰지 않게 즉시 적용
+            self._zoom_anim.stop()
+            self._apply_zoom(self._zoom, QPointF(self._pan), anchor, new_zoom)
+            self.update()
+            return
+        # 지금 **보이는** 배율·위치에서 새 목표로 이어 간다(연속 휠도 끊기지 않게).
+        self._zoom_from, self._pan_from = self._zoom, QPointF(self._pan)
+        self._zoom_anchor, self._zoom_to = anchor, new_zoom
+        self._zoom_anim.stop()
+        self._zoom_anim.start()
+
+    def _apply_zoom(self, z0: float, pan0: QPointF, anchor: QPointF, z: float) -> None:
+        ratio = z0 / z
+        self._pan = QPointF(anchor.x() - (anchor.x() - pan0.x()) * ratio,
+                            anchor.y() - (anchor.y() - pan0.y()) * ratio)
+        self._zoom = z
         if self._zoom == 1.0:
             self._pan = QPointF(0, 0)
+
+    def _on_zoom_tick(self, v) -> None:
+        e = float(v)
+        z = (self._zoom_to if e >= 1.0
+             else self._zoom_from * (self._zoom_to / self._zoom_from) ** e)  # 배율은 지수로
+        self._apply_zoom(self._zoom_from, self._pan_from, self._zoom_anchor, z)
         self.update()
-        event.accept()
+
+    def _finish_zoom(self) -> None:
+        """돌던 휠 확대를 목표값으로 확정한다 — 끌기·회전이 중간값 위에서 시작하지 않게."""
+        if self._zoom_anim.state() == QVariantAnimation.State.Running:
+            self._zoom_anim.stop()
+            self._on_zoom_tick(1.0)
 
     def mousePressEvent(self, event):       # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton:
+            self._finish_zoom()
+            if self._rot_pix is not None:
+                self._end_rotate()
+                self.update()
             self._drag_from = event.position().toPoint()
 
     def mouseMoveEvent(self, event):        # noqa: N802
