@@ -272,6 +272,14 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   **R1** 경쟁 가설을 하나 이상 세우고 표본이 둘을 구분하는지 계산한다(구분 못 해도 채택은
   가능 — "미구분" 을 코드·문서·요청목록에 적으면 된다). **R3** 모든 수치에 출처 등급
   (`관측`/`파일`/`유도`/`가정`/`합성`)을 붙인다. **R4** 합성값을 골든에 넣지 않는다.
+- ⚠ **배포받은 사람은 Conder 만 본다 — Scanresult(NAS)는 개발자(현택) PC 에서만 열린다**(사용자 확인 2026-11-14).
+  Recipe.ini · 번호표 · DieLut · 같은 셋업 빌리기는 Scanresult 전용이라 다른 사람에게는 쓸모가 없다. 새 해법은 'Conder 만 있을 때' 무엇이
+  나오는지로 먼저 판단하고, Conder 에 없는 정보를 NAS 에서 읽어 오는 설계를 하지 마라. Conder LIVE 파일명 col/row 는 장비 화면 번호라
+  번호 원점 문제는 없고, 남는 것은 화면 시프트(맵 대조) · LOT 맵 txt(노치 · die 크기) · 노치가 다른 매칭이다.
+- **Notch 방향(`coords/notch.py` · `workers/notch_auto.py`)은 매칭 계산 전용이다.** Camtek 파일에는 노치 값이 없다(`FlatNotchOrientation=3`
+  119건 동일) — KLA 정보파일 `OrientationMarkLocation` 만 읽고, Camtek 은 네 방향을 돌려 짝이 가장 많은 쪽을 고른다(짝 8 미만 · 2등의 2배
+  미만이면 판단 안 함 → 사용자에게 묻는다). 실물 Kendall RDL4 KLA(아래) ↔ Camtek(오른쪽) 10쌍(관측). 돌리려면 웨이퍼 중심이 필요해
+  Conder 만 있으면 `NotchError` 로 매칭을 멈춘다 — 중심을 추측해 돌리지 마라. `WaferDisplayOrientation` 은 노치가 아니라 화면 표시 기준(시프트)이다.
 - **col/row 번호의 0순위는 장비가 내보낸 번호 격자 `ProductInfo.ini [ExportData]`다**
   (`wafer_geometry._export_origins`): `col_origin = cMin`, `row_total = rMax`. QORVO(pitch 919.8)는 중심 유도·die 맵·
   3 mm 격자 모두 틀렸고 이 값만 장비 화면·Conder 55장과 맞았다(관측, 2026-10-25). 이미 맞던 165 웨이퍼에서도 기존 결과와 같다.
