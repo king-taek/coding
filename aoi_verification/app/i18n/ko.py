@@ -1236,6 +1236,7 @@ WAFER_MAP_WARN_MIXED_FRAMES = "합친 슬롯들의 die 격자가 서로 달라 �
 WAFER_MAP_WARN_UNPLACED_FMT = "좌표를 읽지 못해 맵에서 빠진 사진 {n}장"
 WAFER_MAP_WARN_NUMBER_GUESS_FMT = "col / row 를 장비 번호표 없이 계산한 사진 {n}장 — 장비 화면으로 확인"
 WAFER_MAP_WARN_NOTCH_UP_FMT = "노치가 위쪽인 맵으로 칸을 정한 사진 {n}장 — 아래쪽 맵과 같다고 보고 읽음, 장비 화면으로 확인"
+WAFER_MAP_WARN_SHIFT_UNKNOWN_FMT = "화면 번호 시프트를 쓴 적 있는 레시피인데 맵으로 확인하지 못한 사진 {n}장 — col / row 가 한 칸 다를 수 있음, 장비 화면으로 확인"
 WAFER_MAP_WARN_PITCH_ASSUMED = "die 크기 정보가 없어 사진으로 추정함 — die 칸은 맞지만 die 크기·웨이퍼 외곽은 근사"
 WAFER_MAP_WARN_SIDE_FMT = "{side} — {reasons}"
 # 칸·번호가 틀렸을 가능성이 큰 맵(번호 계산·die 없는 칸·격자 불일치) — 빨간 큰 배너 머리말

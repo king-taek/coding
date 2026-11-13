@@ -210,3 +210,42 @@ def test_no_map_means_no_shift(tmp_path):
     (tmp_path / "W1").mkdir()
     (tmp_path / "W1" / _live(2)).touch()
     assert camtek_live.lot_display_shift(tmp_path) == (0, 0)
+
+
+# ---------------------------------------------------------------------------
+# 시프트를 확인하지 못한 '시프트 쓴 적 있는 Job' — 번호는 그대로, 노란 경고만(사용자 결정 2026-11-14)
+# ---------------------------------------------------------------------------
+_RISK = "R_T254 LIVE_0858711PD_FS UBM"
+
+
+def _risk_live(col, x=10.0):
+    return f"{_RISK}_UFF-FS_W1_{col}_0_Foreign_{x}_5.0.jpg"
+
+
+def test_risk_job_is_read_from_the_file_name_prefix():
+    assert camtek_live.shift_risk_job(Path(_risk_live(2)).stem)
+    assert not camtek_live.shift_risk_job(Path(_live(2)).stem)
+    assert not camtek_live.shift_risk_job("R_T254 LIVE_0858711PD_FS UBMX_A_W1_2_0_F_1_2")
+
+
+def test_shift_confirmed_only_with_clear_map_evidence(tmp_path):
+    (tmp_path / "a").mkdir()
+    assert camtek_live.lot_shift_confirmed(_materialize_conder(tmp_path / "a"))          # −1 확인
+    zero = _synthetic_lot(tmp_path / "b", {0, 2, 4}, [_live(0), _live(2), _live(4)])
+    assert camtek_live.lot_display_shift(zero) == (0, 0) and camtek_live.lot_shift_confirmed(zero)
+    blank = _synthetic_lot(tmp_path / "c", set(), [_live(1), _live(2)])
+    assert not camtek_live.lot_shift_confirmed(blank)                                    # 불량 표시 없음
+
+
+def test_wafer_map_warns_for_a_risk_job_without_map_evidence(tmp_path):
+    from aoi_verification.app.coords import resolve_batch
+    from aoi_verification.app.coords import wafer_map as wm
+    lot = _synthetic_lot(tmp_path / "risk", set(), [_risk_live(1), _risk_live(3)])
+    data = wm.build_map(resolve_batch(sorted((lot / "W1").iterdir())))
+    warns = dict(wm.map_warnings(data))
+    assert warns.get(wm.WARN_SHIFT_UNKNOWN) == 2
+    assert wm.WARN_SHIFT_UNKNOWN not in wm.DANGER_CODES
+    assert all(p.col in (1, 3) for p in data.points)                 # 번호는 고치지 않는다
+    plain = _synthetic_lot(tmp_path / "plain", set(), [_live(1), _live(3)])
+    data = wm.build_map(resolve_batch(sorted((plain / "W1").iterdir())))
+    assert wm.WARN_SHIFT_UNKNOWN not in dict(wm.map_warnings(data))
