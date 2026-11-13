@@ -215,10 +215,35 @@ def test_without_txt_the_estimate_is_lot_wide_too(tmp_path):
 
 
 def test_unverified_notch_falls_back_not_flipped(tmp_path):
-    """FNLOC≠180 은 맵을 쓰지 않는다 — 계산 격자로 폴백(뒤집힌 맵을 그리지 않는다)."""
+    """FNLOC 이 180·0 이 아니면 맵을 쓰지 않는다 — 계산 격자로 폴백(뒤집힌 맵을 그리지 않는다)."""
     lot = _lot(tmp_path, fn="90")
     frame = wm.frame_for_folder(lot / "GX57004924", "camtek")
     assert frame.die_cells is None and frame.pitch_assumed
+
+
+def test_notch_up_map_reads_the_same_cells(tmp_path):
+    """FNLOC=0 맵도 칸 배치는 180 과 같다(관측: NM3B4 TPDV2 · PIDS5 불량 칸 51/51)."""
+    up = wm.frame_for_folder(_lot(tmp_path / "up", fn="0") / "GX57004924", "camtek")
+    down = wm.frame_for_folder(_lot(tmp_path / "down") / "GX57004924", "camtek")
+    assert up.die_cells is not None and up.die_cells == down.die_cells
+
+
+def test_point_never_spills_into_the_next_die(tmp_path):
+    """die 안 좌표가 그린 die 크기보다 커도 점은 **파일명 번호의 칸 안**에 찍힌다.
+
+    die 크기는 사진·맵으로 짐작하는 값이라 실제보다 작을 수 있다(레시피가 섞인 LOT —
+    수집 맵 3,141장 중 35장이 옆 die 칸에 찍혔다, 관측 2026-11-12).  번호가 칸을 정하고
+    die 안 위치는 그 칸 안에서만 움직인다."""
+    from aoi_verification.app.coords.models import DefectCoord
+    lot = _lot(tmp_path)
+    folder = lot / "GX57004924"
+    frame = wm.frame_for_folder(folder, "camtek")
+    px, py = frame.pitch_x, frame.pitch_y
+    cell = lambda xy: (int((xy[0] - frame.grid_x0) // px), int((xy[1] - frame.grid_y0) // py))  # noqa: E731
+    mid = DefectCoord(col=5, row=4, x=px / 2, y=py / 2, source="camtek_live")
+    for x, y in ((px * 1.03, py / 2), (px / 2, py * 1.03), (-50.0, py / 2), (px / 2, -50.0)):
+        over = DefectCoord(col=5, row=4, x=x, y=y, source="camtek_live")
+        assert cell(wm.to_plane(over, folder)) == cell(wm.to_plane(mid, folder)), (x, y)
 
 
 # ---------------------------------------------------------------------------

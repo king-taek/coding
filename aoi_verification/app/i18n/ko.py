@@ -1031,6 +1031,11 @@ DEFECT_NUMBER_WARN_NO_TABLE = "장비 번호표·die 목록이 없고 계산이 
 DEFECT_NUMBER_WARN_KLA_GUESS = "KLA 파일에 웨이퍼 중심이 없어 추정한 col / row — 장비 화면으로 확인"
 DEFECT_NUMBER_WARN_FMT = "⚠ {text}"
 # 매칭·검토 화면 위 큰 경고 — col / row 를 장비 번호표 없이 계산한 웨이퍼(`coords.number_risk`).
+# 좌표 매칭 중 좌표를 못 읽어 사진 모양(유사도)으로 짝을 찾은 기준 사진 — 검토 화면.
+REVIEW_NO_COORD_BANNER_FMT = ("⚠ 좌표를 못 읽은 기준 사진 {n}장은 좌표 대신 사진 모양(유사도)으로 짝을 찾았습니다. "
+                              "'좌표 없음' 표시가 붙은 줄을 직접 확인해 주세요.")
+REVIEW_NO_COORD_TAG = "좌표 없음"
+REVIEW_NO_COORD_TIP = "이 기준 사진은 좌표를 못 읽어 사진 모양(유사도)으로 후보를 찾았습니다. 점수는 거리(µm)가 아니라 유사도입니다."
 NUMBER_RISK_HEAD = "⚠ 틀릴 확률이 매우 높습니다!!  col / row 번호를 확실히 정하지 못한 웨이퍼가 있습니다"
 NUMBER_RISK_BODY = ("장비 번호표·die 목록이 없어 번호를 계산했습니다. 번호가 한 칸 어긋나면 좌표 매칭도 엇나갈 수 있으니 "
                     "아래 슬롯은 반드시 장비 화면으로 확인하세요")

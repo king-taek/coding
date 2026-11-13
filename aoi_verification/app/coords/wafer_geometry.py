@@ -121,6 +121,114 @@ class CamtekGeometry:
     col_origin: int
     row_total: int
     source: str      # 진단용 — 어느 파일에서 왔는지("fallback" 이면 TB500 상수)
+    # 블록형 제품(장비 한 칸 안에 die 가 여러 개) — 있으면 die 번호·die 안 좌표를 이 표로
+    # 찾는다(:class:`BlockLayout`).  pitch_x/y 는 그때 칸 크기 ÷ 칸 안 die 수(그림용 평균)다.
+    block: Optional["BlockLayout"] = None
+
+
+@dataclass(frozen=True)
+class BlockLayout:
+    """블록형 제품의 칸 안 die 배치 — ``ProductInfo.ini [Geometric] ColsInBlock/RowsInBlock`` ·
+    ``[DieRectInfo] a_b = 사용, 폭, 높이, x0, y0`` (파일).
+
+    장비 한 칸(``XDieIndex``·``DieStep``)에 die 가 ``cols × rows`` 개 들고 크기·간격이 서로
+    다르다.  칸을 똑같이 나누면 AMD Sepio 6×13 에서 357 중 45 가 틀렸고, 이 표로 가장 가까운
+    die 를 고르면 XP2100 · W97320 · AMD 1,035/1,035 가 INI ``Col`` 과 같았다(관측, 3차 수집).
+
+    ``i = floor(X/step_x)·cols + a``, ``x = (X mod step_x) − x0(a, b)`` (Y 동일)."""
+    step_x: float
+    step_y: float
+    cols: int
+    rows: int
+    xc: tuple            # 칸 안 die 열 a 의 중심 x (열마다 행들의 가운데값)
+    yc: tuple            # 칸 안 die 행 b 의 중심 y
+    origin: tuple        # ((a, b), (x0, y0)) …
+
+    def locate(self, X: float, Y: float) -> tuple[int, int, float, float]:
+        """stage ``(X, Y)`` → ``(i, j, die 안 x, die 안 y)``.  틈에 찍힌 결함도 가장 가까운 die 에 든다."""
+        I, J = math.floor(X / self.step_x), math.floor(Y / self.step_y)
+        bx, by = X - I * self.step_x, Y - J * self.step_y
+        a = min(range(self.cols), key=lambda k: abs(bx - self.xc[k]))
+        b = min(range(self.rows), key=lambda k: abs(by - self.yc[k]))
+        x0, y0 = dict(self.origin)[(a, b)]
+        return (I * self.cols + a, J * self.rows + b,
+                float(math.floor(bx - x0)), float(math.floor(by - y0)))
+
+
+_RECT_SECTION = re.compile(r"(?ims)^\s*\[DieRectInfo\]\s*$(.*?)(?=^\s*\[|\Z)")
+_RECT_LINE = re.compile(r"(?m)^\s*(\d+)_(\d+)\s*=\s*-?\d+\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*,"
+                        r"\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)")
+
+
+def block_layout(folder: Path) -> Optional[BlockLayout]:
+    """자기 폴더 ``ProductInfo.ini`` 의 칸 안 배치표 — 블록형이 아니거나 표가 빠지면 ``None``."""
+    txt = read_ini_text(Path(folder) / _EXPORT_FILE)
+    if not txt:
+        return None
+    try:
+        cols = int(_read_key(Path(folder) / _EXPORT_FILE, "ColsInBlock", 1, 10000) or 1)
+        rows = int(_read_key(Path(folder) / _EXPORT_FILE, "RowsInBlock", 1, 10000) or 1)
+    except (TypeError, ValueError):
+        return None
+    if (cols, rows) == (1, 1):
+        return None
+    step_x = _read_key(Path(folder) / _EXPORT_FILE, "XDieIndex")
+    step_y = _read_key(Path(folder) / _EXPORT_FILE, "YDieIndex")
+    sec = _RECT_SECTION.search(txt)
+    if step_x is None or step_y is None or sec is None:
+        return None
+    rects = {(int(a), int(b)): (float(w), float(h), float(x0), float(y0))
+             for a, b, w, h, x0, y0 in _RECT_LINE.findall(sec.group(1))}
+    if not all((a, b) in rects for a in range(cols) for b in range(rows)):
+        return None
+    mid = lambda v: sorted(v)[len(v) // 2]                                  # noqa: E731
+    xc = tuple(mid([rects[(a, b)][2] + rects[(a, b)][0] / 2 for b in range(rows)])
+               for a in range(cols))
+    yc = tuple(mid([rects[(a, b)][3] + rects[(a, b)][1] / 2 for a in range(cols)])
+               for b in range(rows))
+    return BlockLayout(step_x, step_y, cols, rows, xc, yc,
+                       tuple(((a, b), (r[2], r[3])) for (a, b), r in sorted(rects.items())))
+
+
+def _block_geometry(folder: Path) -> Optional[CamtekGeometry]:
+    """블록형 제품의 기하 — 배치표로 찾은 die 번호가 INI ``Col`` 과 **전부** 같고(X 등호),
+    ``Row`` 와의 차가 레시피별 상수일 때만(:func:`_grid_check` 와 같은 기준).
+
+    번호 기준은 자기 폴더 번호표(``[ExportData]``, die 단위 번호)만 쓴다.  없으면 ``None`` —
+    지금처럼 절대좌표 + 경고로 둔다(칸 안 die 를 짐작으로 나누지 않는다)."""
+    from . import camtek_ini      # 순환 import 회피
+
+    lay = block_layout(folder)
+    if lay is None:
+        return None
+    raw = {s: v for s, v in camtek_ini.load_raw_folder(folder).items()
+           if not is_alignment_photo(s)}
+    if not raw:
+        return None
+    recipes = camtek_ini.load_recipe_folder(folder)
+    by_recipe: dict[int, set[int]] = {}
+    for stem, (X, Y, col_i, row_i) in raw.items():
+        i, j, _x, _y = lay.locate(X, Y)
+        if i != col_i:
+            return None
+        by_recipe.setdefault(recipes.get(stem, 0), set()).add(j - row_i)
+    if any(len(d) != 1 for d in by_recipe.values()):
+        return None
+    px, py = lay.step_x / lay.cols, lay.step_y / lay.rows
+    rng = _export_range(folder)
+    cx, cy = _wafer_center(folder)
+    if rng is None or not cx or not cy:
+        return None
+    c_min, c_max, r_min, r_max = rng
+    r = _read_diameter(folder) / 2.0
+    if not (math.floor((cx - r) / px) <= c_min and c_max <= math.floor((cx + r) / px)
+            and math.floor((cy - r) / py) <= r_min and r_max <= math.floor((cy + r) / py)):
+        _LOG.warning("%s [ExportData] 범위가 웨이퍼 밖이라 블록형 번호를 쓰지 않습니다: %s",
+                     _EXPORT_FILE, folder)
+        return None
+    return CamtekGeometry(pitch_x=px, pitch_y=py, col_origin=c_min, row_total=r_max,
+                          source=f"{_EXPORT_FILE}[DieRectInfo {lay.cols}x{lay.rows}]"
+                                 f"+{EXPORT_SOURCE_TAG}", block=lay)
 
 
 @dataclass(frozen=True)
@@ -480,6 +588,10 @@ def camtek_geometry(folder: Path) -> Optional[CamtekGeometry]:
             if src == _CONST_SOURCE and not meaningful:
                 continue      # 검산이 pitch 를 제약하지 못했다 — 상수를 추정으로 쓰지 않는다
             return _with_origins(folder, px, py, src)
+        # 블록형 제품 — 균등 pitch 로는 검산이 안 맞는다.  칸 안 배치표로 한 번 더 본다.
+        blk = _block_geometry(folder)
+        if blk is not None:
+            return blk
         # ★ Camtek INI 자체가 없는 폴더(KLA 슬롯·LIVE 파일명 슬롯)는 **조용히** None.
         #   경고는 '변환할 항목이 있는데 pitch 를 못 정한' 진짜 문제일 때만 낸다 —
         #   안 그러면 KLA 폴더마다 무의미한 경고가 쌓인다.
@@ -615,6 +727,24 @@ def _dielut_origins(folder: Path, px: float, py: float, dia: float,
     return c_min, r_max
 
 
+def _export_range(folder: Path) -> Optional[tuple[int, int, int, int]]:
+    """자기 폴더 ``ProductInfo.ini [ExportData]`` 의 ``(cMin, cMax, rMin, rMax)`` — 없거나 이상하면 None."""
+    txt = read_ini_text(folder / _EXPORT_FILE)
+    if not txt:
+        return None
+    sec = _EXPORT_SECTION.search(txt)
+    if sec is None:
+        return None
+    kv = dict(re.findall(r"(?m)^\s*(\w+)\s*=\s*(-?\d+)\s*(?:;.*)?$", sec.group(1)))
+    try:
+        c_min, c_max, r_min, r_max = (int(kv[k]) for k in _EXPORT_KEYS)
+    except (KeyError, ValueError):
+        return None
+    if not (0 <= c_min <= c_max and 0 <= r_min <= r_max):
+        return None
+    return c_min, c_max, r_min, r_max
+
+
 def _export_origins(folder: Path, px: float, py: float, dia: float,
                     cx: Optional[float], cy: Optional[float]) -> Optional[tuple[int, int]]:
     """``ProductInfo.ini [ExportData] cMin/cMax/rMin/rMax`` 로 ``(col_origin, row_total)``.
@@ -637,19 +767,10 @@ def _export_origins(folder: Path, px: float, py: float, dia: float,
     웨이퍼 중심을 알고 범위가 웨이퍼 원의 인덱스 범위 안이다 · die 맵이 있으면 die 가 전부
     범위 안이다.  관측 171 폴더가 이 조건을 모두 통과했다.  ``_MAX_DIE_INDEX`` 상한은
     여기 쓰지 않는다 — die 가 작은 제품(QORVO row 319)에서 정당한 값을 버린다."""
-    txt = read_ini_text(folder / _EXPORT_FILE)
-    if not txt:
+    rng = _export_range(folder)
+    if rng is None:
         return None
-    sec = _EXPORT_SECTION.search(txt)
-    if sec is None:
-        return None
-    kv = dict(re.findall(r"(?m)^\s*(\w+)\s*=\s*(-?\d+)\s*(?:;.*)?$", sec.group(1)))
-    try:
-        c_min, c_max, r_min, r_max = (int(kv[k]) for k in _EXPORT_KEYS)
-    except (KeyError, ValueError):
-        return None
-    if not (0 <= c_min <= c_max and 0 <= r_min <= r_max):
-        return None
+    c_min, c_max, r_min, r_max = rng
     xi = _read_key(folder / _EXPORT_FILE, "XDieIndex", _MIN_PITCH, _MAX_PITCH)
     yi = _read_key(folder / _EXPORT_FILE, "YDieIndex", _MIN_PITCH, _MAX_PITCH)
     if xi is None or yi is None or abs(xi - px) > 0.01 or abs(yi - py) > 0.01:
