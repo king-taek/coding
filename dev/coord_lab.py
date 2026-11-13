@@ -408,9 +408,38 @@ def recipe_shift(folder: Path):
     return (int(sc or 0), int(sr or 0)), ("폴더" if p.parent == folder else "상위")
 
 
-def has_shift(picked) -> bool:
-    """LOT 에서 고른 웨이퍼 가운데 화면 시프트가 0 이 아닌 레시피가 있나 — 시프트 조사 모드의 거르개."""
-    return any((recipe_shift(f)[0] or (0, 0)) != (0, 0) for f in picked)
+def has_shift(picked, census=None) -> bool:
+    """LOT 에서 고른 웨이퍼 가운데 화면 시프트가 0 이 아닌 레시피가 있나 — 시프트 조사 모드의 거르개.
+
+    ``census`` 리스트를 주면 확인한 LOT 마다 ``(셋업 폴더, 시프트, 레시피 위치, 번호표 유무)`` 를 남긴다 —
+    시프트가 없는 셋업까지 적어야 '몇 개 중 몇 개' 를 말할 수 있다(2차 시프트 수집, 2026-11-14)."""
+    hit = None
+    for f in picked:
+        shift, where = recipe_shift(f)
+        if (shift or (0, 0)) != (0, 0):
+            hit = (f, shift, where)
+            break
+    if census is not None and picked:
+        f, shift, where = hit or (picked[0], *recipe_shift(picked[0]))
+        prod = read_text(_find_up(f, "ProductInfo.ini") or f / "-")
+        census.append((str(f.parent.parent), shift, where, bool(prod and "[ExportData]" in prod)))
+    return hit is not None
+
+
+def write_census(census, path: Path) -> Path:
+    """확인한 셋업 목록 — 셋업마다 한 줄(첫 LOT 기준), 시프트 있는 것부터."""
+    rows = {}
+    for setup, shift, where, table in census:
+        rows.setdefault(setup, (shift, where, table))
+    order = sorted(rows.items(), key=lambda kv: ((kv[1][0] or (0, 0)) == (0, 0), kv[0]))
+    n_shift = sum(1 for _, (sh, _w, _t) in order if (sh or (0, 0)) != (0, 0))
+    lines = [f"# 확인한 셋업 {len(order)}개 · 화면 시프트 있음 {n_shift}개",
+             "# 셋업 폴더\t시프트(col,row)\t레시피 위치\t번호표([ExportData])"]
+    for setup, (shift, where, table) in order:
+        sh = "레시피 없음" if shift is None else f"{shift[0]},{shift[1]}"
+        lines.append(f"{setup}\t{sh}\t{where or '-'}\t{'있음' if table else '없음'}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
 
 
 def scan(roots):
@@ -497,14 +526,19 @@ def _expired(deadline) -> bool:
     return deadline() if callable(deadline) else time.time() > deadline
 
 
+_SKIP_SIBLINGS = object()
+
+
 def nas_walk(roots, deadline, per_lot=3, lots=5, log=print, on_lot=None, skip=frozenset(), want=None):
     """웨이퍼 폴더(= INI 가 든 폴더)를 찾는다.  LOT(웨이퍼들의 부모)마다 ``per_lot`` 장,
     한 폴더 아래 LOT 은 최근 ``lots`` 개만 — 번호 기준은 레시피의 것이라 몇 장이면 된다.
-    ``want(고른 웨이퍼들)`` 이 거짓이면 그 LOT 은 세지 않고 지나간다(시프트 조사 모드)."""
+    ``want(고른 웨이퍼들)`` 이 거짓이면 그 LOT 은 세지 않고, **같은 폴더의 다른 LOT 도 건너뛴다**
+    (시프트 조사 모드) — 레시피는 셋업 폴더 단위라 형제 LOT 도 같다.  예전에는 시프트 없는 셋업의
+    LOT 을 전부 열어 보느라 30분 동안 웨이퍼 3장만 찾았다(1차 시프트 수집, 2026-11-14)."""
     found, state = [], {"lots": 0, "cut": False}
 
-    def visit(d: Path, depth: int) -> bool:
-        """d 가 LOT 이었으면 True."""
+    def visit(d: Path, depth: int):
+        """d 가 LOT 이었으면 True, 원하지 않는 LOT 이면 ``_SKIP_SIBLINGS``."""
         if _expired(deadline):
             state["cut"] = True
             return False
@@ -520,7 +554,7 @@ def nas_walk(roots, deadline, per_lot=3, lots=5, log=print, on_lot=None, skip=fr
             picked = [p for _, p, _ in names[::step] if _is_wafer(p)][:per_lot]
             if want is not None and not want(picked):
                 state["unwanted"] = state.get("unwanted", 0) + 1
-                return False
+                return _SKIP_SIBLINGS
             found.extend(picked)
             state["lots"] += 1
             log(f"  LOT {state['lots']:>4}  웨이퍼 {len(names):>3}장 중 {len(picked)}장  {d}")
@@ -529,7 +563,10 @@ def nas_walk(roots, deadline, per_lot=3, lots=5, log=print, on_lot=None, skip=fr
             return True
         n_lot = 0
         for _, p, _ in subs:
-            if visit(p, depth + 1):
+            got = visit(p, depth + 1)
+            if got is _SKIP_SIBLINGS:
+                break
+            if got:
                 n_lot += 1
                 if n_lot >= lots:
                     break
@@ -1122,6 +1159,7 @@ def run_nas(argv, out: Path, progress=None, stop=None):
         left = max(0, int((t_walk - time.time()) / 60))
         progress(0, 0, f"웨이퍼 {len(recs)}장 계산 · 남은 시간 약 {left}분 · {picked[0].parent.name}"[:70])
 
+    census = []                               # 시프트 조사: 확인한 셋업 전부(시프트 없는 것도)
     cut = False
     for i, root in enumerate(cam_roots):      # 장비마다 남은 시간을 고르게 — 첫 장비가 시간을 다 쓰지 않게
         if stop() or time.time() > t_walk:
@@ -1129,11 +1167,15 @@ def run_nas(argv, out: Path, progress=None, stop=None):
             break
         share = time.time() + (t_walk - time.time()) / (len(cam_roots) - i)
         cut = nas_walk([root], until(share), per_lot, lots, print, on_lot, seen,
-                       has_shift if shift_only else None)[1] or cut
+                       (lambda picked: has_shift(picked, census)) if shift_only else None)[1] or cut
     print(f"\n웨이퍼 폴더 {len(recs)} · Conder 폴더 {len(live_by_dir)} · {time.time() - t0:.0f}초"
           + (" · 중지했습니다" if stop() else " · 시간 제한으로 일부만 돌았습니다" if cut else ""))
+    census_file = None
+    if shift_only:
+        census_file = write_census(census, out / f"좌표실험_{datetime.now():%Y%m%d_%H%M%S}_시프트목록.txt")
+        print(f"확인한 셋업 목록: {census_file}")
     if not recs:
-        return None, 0, 0
+        return census_file, 0, 0
     progress(0, 0, "결과 정리 중")
     for scope in ("LOT", "PRD"):
         borrow(recs, scope)
@@ -1149,7 +1191,7 @@ def run_nas(argv, out: Path, progress=None, stop=None):
         if r["wafer"] in odd:
             r["conder_odd"] = sorted(odd[r["wafer"]])
     base = report(recs, [], [], out, sorted(no_map) if not app_note else app_note[0], conder_dirs=dirs)
-    loose = [base.with_suffix(e) for e in (".txt", ".json", ".html")]
+    loose = [base.with_suffix(e) for e in (".txt", ".json", ".html")] + ([census_file] if census_file else [])
     zips, n = collect_zip(recs, live_by_dir, base, sorted(no_map), progress=progress, conder=conder, reports=loose)
     if zips:                                  # 결과물은 zip 뿐 — 낱개 파일은 zip 에 담았으니 지운다
         for p in loose:

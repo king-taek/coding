@@ -527,3 +527,24 @@ def test_shift_only_walk_keeps_only_lots_with_a_display_shift(tmp_path):
     r = lab.analyze_camtek(folders[0], {})
     assert r["shift"] == (-1, 0) and r["shift_where"] == "상위"     # 앱은 폴더 안 Recipe.ini 만 본다
     assert lab.recipe_shift(root / "Plain" / "LOT-B" / "W00") == (None, None)
+
+
+def test_shift_walk_skips_sibling_lots_of_a_plain_setup_and_lists_every_setup(tmp_path):
+    """레시피는 셋업 단위 — 시프트 없는 셋업은 LOT 하나만 보고 넘어간다(1차 수집은 그 셋업의 LOT 을
+    전부 열어 30분에 웨이퍼 3장뿐이었다).  확인한 셋업은 시프트가 없어도 목록에 남는다."""
+    root = tmp_path / "AOI-1" / "Scanresult" / "job"
+    for lot in ("LOT-A", "LOT-B", "LOT-C"):
+        _wafer(root / "Plain" / lot / "W00")
+    _wafer(root / "Shift" / "LOT-D" / "W00")
+    (root / "Shift" / "LOT-D" / "W00" / "Recipe.ini").write_text(
+        "[Display]\nDisplayColShift=-1\nDisplayRowShift=-3\n", encoding="utf-8")
+    (root / "Shift" / "LOT-D" / "W00" / "ProductInfo.ini").write_text(
+        "[ExportData]\ncMin=1\n", encoding="utf-8")
+    census = []
+    folders, _cut = lab.nas_walk([tmp_path / "AOI-1"], time.time() + 60, lots=5, log=lambda *_: None,
+                                 want=lambda picked: lab.has_shift(picked, census))
+    assert [f.parent.name for f in folders] == ["LOT-D"]
+    assert sorted(Path(c[0]).name for c in census) == ["Plain", "Shift"]   # Plain 은 LOT 하나만 봤다
+    out = lab.write_census(census, tmp_path / "목록.txt").read_text(encoding="utf-8").splitlines()
+    assert out[0] == "# 확인한 셋업 2개 · 화면 시프트 있음 1개"
+    assert out[2].endswith("\t-1,-3\t폴더\t있음") and out[3].endswith("\t레시피 없음\t-\t없음")
