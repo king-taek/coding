@@ -448,11 +448,23 @@ def to_plane(coord: DefectCoord, folder: Path) -> Optional[tuple[float, float]]:
         if c.geom is None:
             return None
         g = c.geom
-        sx = (coord.col + g.col_origin) * g.pitch_x + coord.x
-        sy = (g.row_total - coord.row) * g.pitch_y + coord.y
+        x, y = coord.x, coord.y
+        if coord.source == "camtek_live":       # pitch 가 짐작값일 수 있다(_inside)
+            x, y = _inside(x, g.pitch_x), _inside(y, g.pitch_y)
+        sx = (coord.col + g.col_origin) * g.pitch_x + x
+        sy = (g.row_total - coord.row) * g.pitch_y + y
         return (sx - c.cx, c.cy - sy)
     except Exception:
         return None
+
+
+def _inside(d: float, pitch: float) -> float:
+    """die 안 좌표를 칸 안쪽(양 끝 0.1 % 여유)으로 — 점이 **번호가 정한 칸** 밖으로 나가지 않게.
+
+    LIVE 사진의 pitch 는 짐작값이라 실제 die 보다 작을 수 있다.  그대로 더하면 die 끝의
+    결함이 옆 die 칸에 찍혔다(수집 맵 3,141장 중 35장, 관측 2026-11-12).  칸은 파일명
+    번호가 정하므로(관측 330/330) die 안 위치만 칸 가장자리에 붙인다."""
+    return min(max(d, pitch * 0.001), pitch * 0.999)
 
 
 def _wrap(d: float, pitch: float) -> float:

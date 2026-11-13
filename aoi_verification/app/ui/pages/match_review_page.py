@@ -386,9 +386,14 @@ class _MatchRow(QFrame):
                  tolerance: float = _DFLT_TOL,
                  ref_caption_fmt: str = i18n.KO.COMPARE_REF_CAPTION_FMT,
                  lane_label: str = "",
-                 show_ref: bool = True) -> None:
+                 show_ref: bool = True,
+                 no_coord: bool = False) -> None:
         super().__init__(parent)
         self.match = match
+        # 좌표가 없어 유사도로 후보를 찾은 기준 사진 — 점수는 거리가 아니라 유사도다.
+        self.no_coord = bool(no_coord)
+        if self.no_coord:
+            coord_mode = False
         # 비교 뷰어 왼쪽 사진의 이름표 — 교차검증 역방향에서는 왼쪽이 검증 사진이다.
         self._ref_caption_fmt = ref_caption_fmt
         self._is_unmatched = False
@@ -437,6 +442,12 @@ class _MatchRow(QFrame):
         self._slot_label.setToolTip(match.slot)   # 최소 폭만 부풀린다(가로 넘침).
         self._elide_slot()
         slot_lay.addWidget(self._slot_label)
+        if self.no_coord:
+            tag = QLabel(i18n.KO.REVIEW_NO_COORD_TAG, slot_host)
+            tag.setProperty("role", "warn")
+            tag.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            tag.setToolTip(i18n.KO.REVIEW_NO_COORD_TIP)
+            slot_lay.addWidget(tag)
         # 기준 1 ↔ 검증 여러 장비 — 이 줄이 어느 검증 장비의 후보인지(`multi_val`).
         if lane_label:
             lane = QLabel(lane_label, slot_host)
@@ -1073,6 +1084,13 @@ class MatchReviewPage(QWidget):
         self.risk_banner.setWordWrap(True)
         self.risk_banner.hide()
         root.addWidget(self.risk_banner)
+        # 좌표 없이 유사도로 짝을 찾은 기준 사진 안내(주황 한 줄) — 좌표 모드에서만.
+        self.no_coord_banner = QLabel("", self)
+        self.no_coord_banner.setProperty("role", "hintWarn")
+        self.no_coord_banner.setWordWrap(True)
+        self.no_coord_banner.hide()
+        root.addWidget(self.no_coord_banner)
+        self._no_coord_refs: frozenset = frozenset()
 
 
         bar = QHBoxLayout()
@@ -1247,7 +1265,8 @@ class MatchReviewPage(QWidget):
                    coord_failed_count: int = 0,
                    unmatched_keys: set | None = None,
                    lanes: list | None = None,
-                   number_risk=()) -> None:
+                   number_risk=(),
+                   coord_classical_refs=()) -> None:
         """매치 검토 화면 초기화.
 
         ``score_cache`` 와 ``val_pool`` 이 함께 주어지면 각 매치 행에 차순위
@@ -1291,6 +1310,14 @@ class MatchReviewPage(QWidget):
         risk_text = _number_risk.banner_text(number_risk) if self._coord_mode else ""
         self.risk_banner.setText(risk_text)
         self.risk_banner.setVisible(bool(risk_text))
+        # 좌표 없이 채점된 기준 사진 — 매치 목록에 실린 것만 센다(행 표시와 같은 기준).
+        self._no_coord_refs = (frozenset((s, Path(p)) for s, p in coord_classical_refs)
+                               if self._coord_mode else frozenset())
+        n_no_coord = len({(m.slot, Path(m.ref_path)) for m in self._matches
+                          if self._is_no_coord(m)})
+        self.no_coord_banner.setText(
+            i18n.KO.REVIEW_NO_COORD_BANNER_FMT.format(n=n_no_coord) if n_no_coord else "")
+        self.no_coord_banner.setVisible(bool(n_no_coord))
         # 차순위 swap / 재계산용으로 score_cache + val_pool 참조 보관.
         self._score_cache = score_cache
         self._review_scores = review_scores
@@ -1564,7 +1591,8 @@ class MatchReviewPage(QWidget):
                         tolerance=self._tolerance,
                         ref_caption_fmt=self._ref_caption_fmt(),
                         lane_label=self._lane_label(match.equip),
-                        show_ref=show_ref)
+                        show_ref=show_ref,
+                        no_coord=self._is_no_coord(match))
         row.setProperty("_laneFollower", not show_ref)
         # ★ 결과 화면에서 되돌아오면 표시 집합(`_unmatched_keys`)만 되살아나고 행은 새로
         #   만들어진다 — 여기서 그리지 않으면 위 숫자는 '매치 없음 n' 인데 줄은 평범하게
@@ -1579,6 +1607,10 @@ class MatchReviewPage(QWidget):
         self._rows.append(row)
         self._rows_by_key[match.key] = row
         return row
+
+    def _is_no_coord(self, match) -> bool:
+        """좌표가 없어 사진 모양(유사도)으로 후보를 찾은 기준 사진의 줄인가."""
+        return (match.slot, Path(match.ref_path)) in self._no_coord_refs
 
     def _on_swap(self,
                  old_match: MatchResult,
@@ -1619,6 +1651,7 @@ class MatchReviewPage(QWidget):
                 ref_caption_fmt=self._ref_caption_fmt(),
                 lane_label=self._lane_label(new_match.equip),
                 show_ref=not (old_row.property("_laneFollower") or False),
+                no_coord=self._is_no_coord(new_match),
             )
             new_row.setProperty("_laneFollower", old_row.property("_laneFollower"))
             new_row.toggle_requested.connect(self._on_toggle)

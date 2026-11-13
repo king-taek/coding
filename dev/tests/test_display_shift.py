@@ -110,6 +110,35 @@ def test_no_recipe_means_no_shift(tmp_path):
     assert camtek_ini.display_shift(tmp_path) == (0, 0)
 
 
+# ── 화면 방향(WaferDisplayOrientation)에 따라 장비가 시프트를 더하는지가 갈린다(관측 2026-11-14) ──
+# 실물 [Display] 섹션을 그대로 옮겼다.  KENDALL 은 장비 화면(현택님 확인)·Conder 이름 11장이
+# 번호표 번호 그대로였고, T254 H-M1 은 번호표가 있는데도 Conder 이름 29/30 이 시프트를 더했다.
+_KENDALL_A0_PI3 = ("[Display]\nWaferDisplayOrientation=1 ; System Default\n"
+                   "DisplayRowShift=-3\t\nDisplayColShift=-1\t\n")
+_T254_H_M1 = ("[Display]\nWaferDisplayOrientation=2 ; Left Bottom\n"
+              "DisplayRowShift=0 ; Row Offset\nDisplayColShift=-1 ; Col Offset\n")
+_TB500_R_ETCH = ("[Display]\nWaferDisplayOrientation=1 ; System Default\n"
+                 "DisplayRowShift=-6 ; Row Offset\nDisplayColShift=1 ; Col Offset\n")
+
+
+@pytest.mark.parametrize("text, want", [
+    (_KENDALL_A0_PI3, (0, 0)),          # System Default — 장비가 안 더함(관측)
+    (_T254_H_M1, (-1, 0)),              # Left Bottom — 더함(관측, 번호표 있음)
+    (_TB500_R_ETCH, (0, 0)),            # 규칙의 예측(장비 화면 확인 대기) — 더하면 row 가 음수
+    ("[Display]\nWaferDisplayOrientation=3\nDisplayColShift=-1\n", (-1, 0)),   # 미확인 값: 예전처럼
+])
+def test_shift_only_when_display_orientation_is_left_bottom(tmp_path, text, want):
+    (tmp_path / "Recipe.ini").write_text(text, encoding="utf-8")
+    assert camtek_ini.display_shift(tmp_path) == want
+
+
+def test_golden_recipes_are_left_bottom():
+    """골든(T254 FS UBM 42장)이 시프트를 더하는 건 화면 방향이 2 이기 때문이다."""
+    for wafer in _CAM.iterdir():
+        text = (wafer / "Recipe.ini").read_text(encoding="utf-8", errors="ignore")
+        assert "WaferDisplayOrientation=2" in text, wafer.name
+
+
 # ── Conder scan(LIVE 파일명) 폴더: Recipe.ini 가 없어 LOT 맵 txt 로 시프트를 추정한다 ──
 
 def _materialize_conder(tmp_path: Path) -> Path:

@@ -277,6 +277,11 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   3 mm 격자 모두 틀렸고 이 값만 장비 화면·Conder 55장과 맞았다(관측, 2026-10-25). 이미 맞던 165 웨이퍼에서도 기존 결과와 같다.
   **자기 폴더 파일만**, 네 키 정수 · `XDieIndex/YDieIndex` = 채택 pitch · 중심을 알고 범위가 웨이퍼 원 안 · die 맵이 범위 안일 때만
   쓴다 — 하나라도 어긋나면 아래 규칙으로 간다. `_MAX_DIE_INDEX` 상한은 여기 쓰지 않는다(QORVO row 319). 골든: `test_export_grid.py`.
+- **블록 제품(한 칸에 die 여러 개)**: `ProductInfo.ini [Geometric] ColsInBlock/RowsInBlock` 과 `[DieRectInfo] a_b=사용,폭,높이,x0,y0`
+  가 있으면 `XDieIndex/YDieIndex` 는 **칸 간격**이다(`wafer_geometry.block_layout`·`_block_geometry`). `i = floor(X/칸)×Cols + a`
+  (a = 칸 안 가장 가까운 die 열), die 안 `x = floor(칸 안 X − x0)`. 균등 나눔은 근사라 쓰지 마라(AMD Sepio 45/357 틀림, 칸 표는 795/795).
+  채택 조건: 모든 사진 i = INI Col(X 등호) · j − Row 레시피별 상수 · 자기 폴더 `[ExportData]` 가 원 안 — 번호표 없는 블록 제품은 아직 절대좌표다.
+  장비 확인 XP2100 (25, 111, 899, 259). 실물 골든: `test_block_product.py`.
 - **번호표가 없으면 1순위는 장비가 스캔 때 쓴 die 목록 `DieLut.dat`다**(`wafer_geometry._dielut_origins`):
   `col_origin = min Col`, `row_total = max Row`(전체 레코드, stage 번호). 둘 다 있는 26 LOT·51 폴더에서 번호표와 전부 같았다
   (관측 2026-10-26, 계산이 틀리던 AVAGO 01C1·T254 GX57007306 포함). 검토 전 폴더에도 있지만 **다중 레시피 스캔에만** 있다.
@@ -321,6 +326,9 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   (`camtek_ini.display_shift` → `DefectCoord.col_shift/row_shift`, 사용자 결정 2026-10-25).
   `col`/`row` 는 실제 die — 매칭·Wafer map 위치·KLA·LOT 맵 txt 와 같은 번호다. 장비 화면·LIVE 파일명은
   시프트를 더한 번호라 사진 정보·엑셀·맵 툴팁만 `screen_col`/`screen_row` 를 쓴다(T254 FS UBM `-1`, 관측).
+  ⚠ **장비는 `WaferDisplayOrientation=2`(Left Bottom)일 때만 시프트를 더한다** — `1` 이면 값이 적혀 있어도 0 으로 본다
+  (KENDALL A0 PI3: 장비 화면 1장 + Conder 이름 11장, T254 H-M1·FS UBM 은 2 로 더함, 관측 2026-11-14). 다른 값·키 없음은
+  옛 동작(더함) + 경고. 예측 확인 대기: TB500 R-ETCH(1, 시프트 (1,−6)) 는 안 더해야 한다. 골든: `test_display_shift.py`.
   LIVE 파일명도 화면 번호다. Conder 폴더엔 Recipe.ini 가 없어 **LOT 맵 txt 불량 칸과 대조해 추정**한다
   (`camtek_live.lot_display_shift`) — 서로 다른 칸 3개 이상 · 맞은 사진의 90% 이상 · 시프트 0 은 10% 이하일 때만
   0 이 아닌 값을 채택한다(시프트 없는 4 LOT 278장은 0, FS UBM 42장은 −1). 맵이 결함을 표시하지 않는 제품(QORVO)은
@@ -346,7 +354,9 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
 - **LIVE 파일명 전용 LOT(기하 파일 없음)의 Wafer map 은 LOT 폴더의 `<WaferID>.txt`
   (ROWCT/COLCT/RowData)가 die 맵이다** (`coords.wafer_txt`). 파일명 `col` = 맵 열(왼쪽부터 0),
   `row` = **아래부터 0** — 실측 9 LOT 결함 칸 185 중 184 가 불량 bin(다른 해석은 반증).
-  불변식: `FNLOC`≠180 은 방향 미확인이라 쓰지 않는다(경고). `XDIES/YDIES` 는 die **크기**다
+  불변식: `FNLOC` 가 180·0 이 아니면 방향 미확인이라 쓰지 않는다(경고). **0 은 180 과 같은 칸 배치**로 읽는다
+  (불량 bin 적중 51/51, 다른 방향 ≤ 9, 관측 2026-11-14). 사진 점은 die 칸 밖으로 넘치지 않게 칸 안으로 붙인다
+  (`wafer_map._inside`, camtek_live 만 — 파일명 x·y 가 die 크기를 살짝 넘는 값이 있다). `XDIES/YDIES` 는 die **크기**다
   (간격 아님 — T254 같은 레시피 `DieSize` 와 일치, 다른 제품은 미확인)이고 같은 웨이퍼라도
   파일마다 달랐으므로 **LOT 사진이 전부 그 안에 들고, die 칸 범위 × 크기가 지름의 1.15배 이하일 때만** 쓴다
   (`_txt_fits_wafer` — 단위를 잘못 적은 값이 수집 맵 2,911장 중 136장, 사진 검사만으로는 통과해 점이 전부 웨이퍼 밖에
