@@ -32,7 +32,7 @@ from .widgets import sheet_host as sheets
 _LOG = logging.getLogger("aoi.coord_collect")
 _TOOL = "dev/coord_lab.py"
 # 시프트 조사: 시프트 없는 LOT 은 세지 않고 지나가므로 폴더마다 받을 LOT 수를 넉넉히 둔다.
-_MINUTES, _PER_LOT, _LOTS = 120, 3, 30
+_MINUTES, _PER_LOT, _LOTS = 30, 3, 30
 
 
 def _load_tool():
