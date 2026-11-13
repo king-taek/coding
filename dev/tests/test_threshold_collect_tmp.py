@@ -1,0 +1,152 @@
+"""[Threshold수집-임시] Threshold 자료 수집 버튼 — 버튼을 지울 때 이 파일도 함께 지운다.
+
+지키는 것: ① 지울 곳이 ``threshold_collect_tmp.py`` docstring 의 목록 그대로라는 것,
+② 도구가 Kendall · TB500 Job 만 모으고 사진 · 압축 · 큰 파일은 버리는 것, ③ zip 을 30 MB 조각으로
+나누되 조각을 25 MB 이상 채우는 것, ④ 버튼이 로딩바 규칙대로 도는 것.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import re
+import time
+import zipfile
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[2]
+APP = ROOT / "aoi_verification" / "app"
+MARK = "[Threshold수집-임시]"
+MB = 2 ** 20
+
+
+def _tool():
+    spec = importlib.util.spec_from_file_location("threshold_collect", ROOT / "dev" / "threshold_collect.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_collect_code_lives_only_in_the_listed_places():
+    found = {}
+    for path in APP.rglob("*.py"):
+        lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if MARK in ln]
+        if lines:
+            found[path.relative_to(APP).as_posix()] = lines
+    assert set(found) == {"ui/threshold_collect_tmp.py", "ui/main_window.py", "i18n/ko.py"}
+    assert len(found["ui/main_window.py"]) == 2
+    assert all(ln.rstrip().endswith("이 줄 삭제") for ln in found["ui/main_window.py"])
+    assert len(found["i18n/ko.py"]) == 2
+
+
+def test_nothing_outside_the_marks_mentions_the_button():
+    for path in APP.rglob("*.py"):
+        if path.name == "threshold_collect_tmp.py":
+            continue
+        text = path.read_text(encoding="utf-8")
+        text = re.sub(r"# ── \[Threshold수집-임시\] 시작.*?# ── \[Threshold수집-임시\] 끝[^\n]*", "", text, flags=re.S)
+        text = "\n".join(ln for ln in text.splitlines() if MARK not in ln)
+        assert not re.search(r"threshold_collect|THRESH_COLLECT", text), path
+
+
+def test_strings_used_by_the_button_all_exist():
+    ko = (APP / "i18n" / "ko.py").read_text(encoding="utf-8")
+    used = set(re.findall(r"KO\.(THRESH_COLLECT_\w+)", (APP / "ui" / "threshold_collect_tmp.py").read_text(encoding="utf-8")))
+    defined = set(re.findall(r"^(THRESH_COLLECT_\w+)\s*=", ko, flags=re.M))
+    assert used and used == defined
+
+
+def _wafer(d: Path, recipe: bytes = b"[Recipe]\nMinArea=3\n"):
+    d.mkdir(parents=True)
+    (d / "Params_WaferInfo.ini").write_text("[General]\nSetupPath=c:\\job\\x\\\n")
+    (d / "Recipe.ini").write_bytes(recipe)
+    (d / "Surface.flt").write_bytes(b"\x00" * 152)
+    (d / "W_3_4_Surface Dark_10_20.jpg").write_bytes(b"jpg")
+    (d / "old.zip").write_bytes(b"zip")
+
+
+def test_collects_only_product_jobs_and_drops_useless_files(tmp_path, monkeypatch):
+    tool = _tool()
+    sr = tmp_path / "AOI-13" / "Scanresult"
+    _wafer(sr / "R_KENDALL_A0_PI5" / "SETUP" / "LOT1" / "W01")
+    _wafer(sr / "R_KENDALL_A0_PI5" / "SETUP" / "LOT1" / "W02")
+    _wafer(sr / "R_TB500_LIVE_PI4" / "Setup1" / "LOT9" / "W77", recipe=b"[Recipe]\nMinArea=9\n")
+    _wafer(sr / "R_OTHER_PI4" / "Setup1" / "LOT5" / "W55")
+    (sr / "R_KENDALL_A0_PI5" / "SETUP" / "LOT1" / "W01" / "huge.dat").write_bytes(b"\x00" * (tool.FILE_MB * MB + 1))
+    monkeypatch.setattr(tool, "nas_roots", lambda: [sr])
+    out = tmp_path / "desk"
+    folder, wafers, files = tool.run(out)
+    assert folder.parent == out and folder.name.startswith("Threshold수집_")
+    zips = list(folder.glob("*.zip"))
+    assert len(zips) == 1 and not (folder / "_작업중.zip").exists()
+    names = zipfile.ZipFile(zips[0]).namelist()
+    assert wafers == 3
+    assert not any("R_OTHER" in n for n in names)
+    assert not any(n.endswith((".jpg", ".zip")) or n.endswith("huge.dat") for n in names)
+    assert any(n.endswith("W01/Surface.flt") for n in names)
+    z = zipfile.ZipFile(zips[0])
+    assert "Surface Dark" in z.read("사진목록.txt").decode()           # 사진은 이름만
+    assert "huge.dat" in z.read("파일목록.txt").decode()
+    recipes = [n for n in names if n.endswith("Recipe.ini")]
+    assert len(recipes) == 2                                             # W02 의 같은 레시피는 중복으로 한 번만
+    assert "W02/Recipe.ini" in z.read("중복목록.txt").decode()
+
+
+def test_plan_parts_fills_each_part_between_25_and_30_mb():
+    tool = _tool()
+    sizes = [("요약.txt", 1000)] + [(f"f{i}", s * MB) for i, s in enumerate([12, 7, 9, 4, 6, 3, 2, 8, 5, 1])]
+    parts = tool.plan_parts(sizes)
+    total = dict(sizes)
+    used = [sum(total[n] for n in p) for p in parts]
+    assert parts[0][0] == "요약.txt"
+    assert all(u <= tool.PART_MB * MB for u in used)
+    assert all(u >= tool.MIN_PART_MB * MB for u in used[:-1])
+    assert sorted(n for p in parts for n in p) == sorted(total)
+
+
+def test_button_runs_in_background_and_reports(styled_qapp, monkeypatch, tmp_path):
+    pytest.importorskip("PyQt6.QtWidgets")
+    from PyQt6.QtCore import QObject, pyqtSignal
+    from PyQt6.QtWidgets import QMainWindow, QMessageBox
+
+    from aoi_verification.app.ui import threshold_collect_tmp as mod
+
+    class _Loading(QObject):
+        cancel_requested = pyqtSignal()
+
+        def __init__(self):
+            super().__init__()
+            self.calls = []
+
+        def show_overlay(self, message, **kw):
+            self.calls.append(("show", kw.get("cancelable")))
+
+        def set_progress(self, done, total, message):
+            self.calls.append(("progress", done, total))
+
+        def hide_overlay(self, then=None):
+            self.calls.append(("hide",))
+
+    class _Tool:
+        @staticmethod
+        def run(out, progress=None, stop=None):
+            progress(1, 4, "Job 2/4")
+            return tmp_path / "Threshold수집_x", 3, 12
+
+    win = QMainWindow()
+    said = []
+    monkeypatch.setattr(mod, "_load_tool", lambda: _Tool)
+    monkeypatch.setattr(mod.sheets, "ask", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(mod.sheets, "info", lambda parent, title, text: said.append(text))
+    mod.attach(win)
+    win._loading = _Loading()
+
+    win._thresh_collect_btn.click()
+    deadline = time.time() + 20
+    while not said and time.time() < deadline:
+        styled_qapp.processEvents()
+    assert said and "12" in said[0] and "Threshold수집_x" in said[0]
+    calls = win._loading.calls
+    assert calls[0] == ("show", True) and calls[1] == ("progress", 0, 0)   # busy 로 시작
+    assert calls[-1] == ("hide",)

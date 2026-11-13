@@ -1,0 +1,150 @@
+"""[Threshold수집-임시] Threshold 자료 수집 버튼 — **수집·분석이 끝나면 지우는 코드**다.
+
+개발자 모드(Ctrl+Shift+D)일 때만 상태바에 버튼 하나가 보인다.  누르면 ``dev/threshold_collect.py`` 의
+:func:`run` 을 백그라운드에서 돌리고 로딩바로 진행을 보인다.  Kendall · TB500 레시피의 설정 · 결과 파일을
+바탕화면 ``Threshold수집_<시각>\\`` 폴더에 zip 으로 남긴다(30 MB 를 넘으면 나뉜다, 사용자 지시 2026-11-13).
+읽기 전용이고 앱의 계산에는 손대지 않는다.
+
+지우는 법(전부 ``[Threshold수집-임시]`` 로 검색된다 — ``test_threshold_collect_tmp.py`` 가 이 목록을 지킨다):
+
+1. 이 파일 · ``dev/tests/test_threshold_collect_tmp.py``
+2. ``ui/main_window.py`` 의 표시된 두 줄
+3. ``i18n/ko.py`` 의 표시된 블록(시작 ~ 끝)
+4. 도구도 필요 없으면 ``dev/threshold_collect.py``
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import logging
+import threading
+from pathlib import Path
+
+from PyQt6.QtCore import QObject, Qt, pyqtSignal
+from PyQt6.QtWidgets import QMessageBox, QPushButton
+
+from .. import i18n
+from ..utils import paths, prefs
+from .widgets import sheet_host as sheets
+
+_LOG = logging.getLogger("aoi.threshold_collect")
+_TOOL = "dev/threshold_collect.py"
+
+
+def _load_tool():
+    """``dev/threshold_collect.py`` 를 모듈로 읽는다.  없으면 None(개발자 모드 설치에만 dev/ 가 있다)."""
+    path = paths.resource_path(_TOOL)
+    if not path.is_file():
+        return None
+    spec = importlib.util.spec_from_file_location("threshold_collect", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class _Collector(QObject):
+    """버튼 하나와 그 작업 — 창에 붙어 창과 함께 죽는다."""
+
+    progress = pyqtSignal(int, int, str)          # 작업 스레드 → 메인 스레드(로딩바)
+    finished = pyqtSignal(int, int, str, str)     # 웨이퍼 수, 파일 수, 결과 폴더, 오류
+
+    def __init__(self, window) -> None:
+        super().__init__(window)
+        self._win = window
+        self._running = False
+        self._stop = threading.Event()
+        self._thread = None
+        self.button = QPushButton(i18n.KO.THRESH_COLLECT_BUTTON, window.statusBar())
+        self.button.setFlat(True)
+        self.button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.button.clicked.connect(self.start)
+        self.progress.connect(self._on_progress)
+        self.finished.connect(self._on_finished)
+
+    def start(self) -> None:
+        if self._running:
+            return
+        if self._thread is not None and self._thread.is_alive():    # 중지한 작업이 아직 NAS 응답을 기다린다
+            sheets.info(self._win, i18n.KO.THRESH_COLLECT_TITLE, i18n.KO.THRESH_COLLECT_WINDING_DOWN)
+            return
+        tool = _load_tool()
+        if tool is None:
+            sheets.warn(self._win, i18n.KO.THRESH_COLLECT_TITLE, i18n.KO.THRESH_COLLECT_NO_TOOL)
+            return
+        yes = QMessageBox.StandardButton.Yes
+        if sheets.ask(self._win, i18n.KO.THRESH_COLLECT_TITLE, i18n.KO.THRESH_COLLECT_ASK,
+                      labels={yes: i18n.KO.THRESH_COLLECT_START}) != yes:
+            return
+        out = Path.home() / "Desktop"
+        out = out if out.is_dir() else Path.home()
+        self._running = True
+        self._stop.clear()
+        self._win._loading.cancel_requested.connect(self._on_cancel)
+        self._win._loading.show_overlay(i18n.KO.THRESH_COLLECT_RUNNING, cancelable=True)
+        self._win._loading.set_progress(0, 0, i18n.KO.THRESH_COLLECT_RUNNING)   # busy → 0 에서 안 멈춤
+
+        def _work() -> None:
+            try:
+                folder, wafers, files = tool.run(out, progress=self._emit_progress, stop=self._stop.is_set)
+                self.finished.emit(int(wafers), int(files), str(folder or ""), "")
+            except Exception as e:                                  # noqa: BLE001
+                _LOG.exception("Threshold 자료 수집 실패")
+                self.finished.emit(0, 0, "", f"{type(e).__name__}: {e}")
+
+        self._thread = threading.Thread(target=_work, name="threshold-collect", daemon=True)
+        self._thread.start()
+
+    def _emit_progress(self, done, total, message) -> None:
+        self.progress.emit(int(done), int(total), str(message))
+
+    def _on_cancel(self) -> None:
+        """[중지] 한 번 = 그만 찾고 지금까지 모은 것을 저장한다.  한 번 더 = 화면을 바로 푼다."""
+        if not self._running:
+            return
+        if not self._stop.is_set():
+            self._stop.set()
+            self._win._loading.set_progress(0, 0, i18n.KO.THRESH_COLLECT_STOPPING)
+            return
+        self._close_overlay()
+        sheets.info(self._win, i18n.KO.THRESH_COLLECT_TITLE, i18n.KO.THRESH_COLLECT_STOPPED)
+
+    def _close_overlay(self) -> None:
+        self._running = False
+        self._win._loading.cancel_requested.disconnect(self._on_cancel)
+        self._win._loading.hide_overlay()
+
+    def _on_progress(self, done: int, total: int, message: str) -> None:
+        if self._running:
+            if self._stop.is_set():              # 저장 중 — 문구가 '모으는 중' 으로 되돌아가지 않게
+                message = i18n.KO.THRESH_COLLECT_STOPPING
+            self._win._loading.set_progress(done, total, message or i18n.KO.THRESH_COLLECT_RUNNING)
+
+    def _on_finished(self, wafers: int, files: int, path: str, error: str) -> None:
+        if not self._running:                    # 중지한 뒤에 도착한 결과 — 이미 화면을 풀었다
+            return
+        self._close_overlay()
+        if error:
+            sheets.warn(self._win, i18n.KO.THRESH_COLLECT_TITLE,
+                        i18n.KO.THRESH_COLLECT_FAIL_FMT.format(error=error))
+            return
+        if not path:
+            sheets.info(self._win, i18n.KO.THRESH_COLLECT_TITLE, i18n.KO.THRESH_COLLECT_NOTHING)
+            return
+        sheets.info(self._win, i18n.KO.THRESH_COLLECT_TITLE,
+                    i18n.KO.THRESH_COLLECT_DONE_FMT.format(wafers=wafers, files=files, path=path))
+
+
+def attach(window) -> None:
+    """상태바에 버튼을 단다.  ``window._thresh_collect_btn`` 으로 보이기/숨기기만 한다."""
+    window._thresh_collect_btn = QPushButton(window)     # 아래가 실패해도 보이기/숨기기 줄이 죽지 않게
+    window._thresh_collect_btn.hide()
+    try:
+        collector = _Collector(window)
+        window.statusBar().addPermanentWidget(collector.button)
+        collector.button.setVisible(prefs.load().dev_mode)
+    except Exception:                                    # noqa: BLE001 — 임시 버튼이 앱 시작을 막으면 안 된다
+        _LOG.exception("Threshold 자료 수집 버튼을 붙이지 못했습니다")
+        return
+    window._thresh_collect_btn.deleteLater()
+    window._thresh_collector = collector
+    window._thresh_collect_btn = collector.button
