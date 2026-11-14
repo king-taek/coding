@@ -35,7 +35,7 @@ UNC_SHARES = [r"\\10.142.80.91\nas3-1"]
 WAFER_MARK = ("ColorImageGrabingInfo.ini", "Params_WaferInfo.ini")
 LOTS = 3            # Job 마다 최근 LOT 몇 개
 WAFERS = 2          # LOT 마다 웨이퍼 몇 장
-MINUTES = 40        # 이 시간이 지나면 거기까지 모은 것으로 정리한다
+MINUTES = 60        # 전체 수집 시간 상한 — 지나면 거기까지 모은 것으로 정리한다(2026-11-14 사용자 지정: 최대 1시간)
 FILE_MB = 20        # 이보다 큰 파일은 이름만 남긴다
 TOTAL_MB = 400      # 담은 원본이 이만큼 되면 그만 찾는다
 PART_MB = 30
@@ -160,9 +160,11 @@ def find_conder_lots(root: Path, limit: int, expired, depth: int = 4):
     return found
 
 
-def collect_qorvo(col, say, progress, stop):
+def collect_qorvo(col, say, progress, stop, end=None):
     """QORVO Conder LOT(맵 txt · 사진 이름) 과 같은 장치의 Scanresult LOT(웨이퍼 전부)을 모은다.  웨이퍼 수를 돌려준다."""
     deadline = time.time() + QORVO_MINUTES * 60
+    if end is not None:
+        deadline = min(deadline, end)              # 전체 1시간 상한을 넘지 않게
     start = col.raw
 
     def expired():
@@ -356,7 +358,8 @@ def run(out: Path, progress=None, stop=None):
         progress(0, 0, line[:70])
 
     for k, raw in enumerate(PAIR_LOTS):                    # 비교 스캔 LOT 은 먼저, 웨이퍼 전부
-        if stop():
+        if stop() or time.time() > deadline:
+            say("시간 제한·중지로 비교 LOT 을 여기서 멈춤")
             break
         lot = resolve_pair(raw)
         if lot is None:
@@ -367,16 +370,15 @@ def run(out: Path, progress=None, stop=None):
         col.take_top_files(lot, arc_lot)
         ws = sorted((p for _, p, _, _ in _entries(lot)[0] if is_wafer(p)), key=lambda p: p.name)
         for j, w in enumerate(ws):
-            if stop():
+            if stop() or time.time() > deadline:
                 break
             progress(j, len(ws), f"비교 LOT {k + 1}/{len(PAIR_LOTS)} {lot.name}"[:70])
             col.take_files(w, f"{arc_lot}/{w.name}")
             wafers += 1
         say(f"비교 LOT {lot}  웨이퍼 {len(ws)}")
     if not stop():
-        wafers += collect_qorvo(col, say, progress, stop)
-    pair_raw = col.raw                                     # 아래 용량·시간 한도는 비교 LOT·QORVO 를 뺀 양으로 잰다
-    deadline = time.time() + MINUTES * 60
+        wafers += collect_qorvo(col, say, progress, stop, end=deadline)
+    pair_raw = col.raw                                     # 아래 용량 한도는 비교 LOT·QORVO 를 뺀 양으로 잰다(시간은 전체 1시간)
 
     roots = nas_roots()
     say(f"Scanresult {len(roots)}곳: " + ", ".join(str(r) for r in roots))
