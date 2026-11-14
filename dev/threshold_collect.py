@@ -106,9 +106,20 @@ QORVO_JOB_LOTS = 3       # Scanresult Job 마다 최근 LOT 몇 개(웨이퍼는
 QORVO_KEY_LEN = 8        # Conder 맵 DEVICE 앞 몇 글자로 Scanresult Job 을 찾나(W97218SGZ4BK16 → W97218SG)  — Job 이름에 장치 이름이 그대로 든다(INCI-W97218SGZ4BK16_0860463PD-0A, AOI Capacity 답 2026-11-15)
 QORVO_MINUTES = 12
 QORVO_MB = 150          # QORVO 로 담는 원본 상한(die 맵이 웨이퍼당 약 10 MB)
-# 스캔 기록(AOI_capacity.csv)의 QORVO Scanresult LOT — (장비, Job, Setup, LOT), Job 마다 가장 최근 Pass LOT.
+# 스캔 기록(AOI_capacity.csv)의 QORVO Scanresult LOT — (장비, Job, Setup, LOT).
 # Conder 를 먼저 훑으면 시간 한도에 걸려 Scanresult 가 0개였다(2026-11-15) — 이 목록을 Conder 보다 먼저 모은다.
+# 앞 8개: Conder 장치(W9…K16)와 **같은 웨이퍼 ID** 가 든 LOT(장치마다 겹치는 웨이퍼가 가장 많은 것).  Conder 웨이퍼 ID
+#   (GWL4R01-D6 꼴)는 Scanresult 와 같은 체계라 표 없이 이어진다 — 수집한 Conder 400장 중 328장이 스캔 기록에 있었다.
+# 뒤 7개: XP2100(0861004PD 등) — Conder 폴더가 없는 다른 제품(7L8WW057SOG3 같은 ID 는 이 제품의 OCR 값).
 QORVO_KNOWN_LOTS = [
+    ('AOI-8', '2D@R2-W96721Z5BK16_0858867PD-0A', '6321', 'NPG-EDGE'),  # Conder 와 같은 웨이퍼 25장
+    ('AOI-6', '2D@R2-W96760Z5BK16_0856722PD-0A', '6321', 'THV EDGE'),  # 25장
+    ('AOI-8', '2D@R2-W96798Z5BK16_0857146PD-0B', '6321', 'PHK-EDGE'),  # 25장 (GWL4R01-D6 …)
+    ('AOI-8', '2D@R2-W96816Z5BK16_0857248PD-0B', '6321', 'THW-EDGE'),  # 25장
+    ('AOI-8', '2D@R2-W96817Z5BK16_0857253PD-0A', '6321', 'UUT EDGE'),  # 25장
+    ('AOI-6', '2D@RE-W97115Z6B1K16_0858971PD-0A', '6412', 'TWN'),  # 22장
+    ('AOI-4', '2D@RE-W97135Z6BK16_0859176PD-0A', '6412', 'TWK'),  # 24장
+    ('AOI-11', '2D@RE-W97253Z6B1K16_0860752PD-0A', '6412', 'TWT'),  # 25장
     ('AOI-14', 'R_Qorvo XP2100_0861004PD_RDL1', 'SETUP', 'MMG'),  # 2026-11-10 7장
     ('AOI-14', 'R_Qorvo XP2100_0861004PD_UBM', 'SETUP', '1110_Qorvo XP2100 FRB4 Lot4-5'),  # 2026-11-10 8장
     ('AOI-14', 'R_Qorvo XP2100_0861004PD_PI4_NEW_M', 'SETUP', '1030_Qorvo XP2100_FRB5'),  # 2026-10-30 4장
