@@ -80,6 +80,8 @@ def test_collects_known_lots_and_drops_useless_files(tmp_path, monkeypatch):
     monkeypatch.setattr(tool, "nas_roots", lambda: [sr, sr4])
     monkeypatch.setattr(tool, "PAIR_LOTS", [])
     monkeypatch.setattr(tool, "CONDER_ROOTS", [])
+    monkeypatch.setattr(tool, "KLA_PAIRS", [])
+    monkeypatch.setattr(tool, "QORVO_KNOWN_LOTS", [])
     monkeypatch.setattr(tool, "KNOWN_LOTS", [
         ("AOI-1", "R_KENDALL_A0_PI5", "SETUP", "LOT1"),
         ("4F-AOI-05", "TB500_RDL2 - Multi", "Setup1", "TNY"),
@@ -114,6 +116,8 @@ def test_pair_lots_take_only_the_compared_wafer(tmp_path, monkeypatch):
     monkeypatch.setattr(tool, "PAIR_LOTS", [str(lot)])
     monkeypatch.setattr(tool, "nas_roots", lambda: [])
     monkeypatch.setattr(tool, "CONDER_ROOTS", [])
+    monkeypatch.setattr(tool, "KLA_PAIRS", [])
+    monkeypatch.setattr(tool, "QORVO_KNOWN_LOTS", [])
     folder, wafers, _ = tool.run(tmp_path / "desk")
     names = zipfile.ZipFile(next(folder.glob("*.zip"))).namelist()
     assert wafers == 1
@@ -137,6 +141,8 @@ def test_pair_lots_take_every_wafer_first(tmp_path, monkeypatch):
     monkeypatch.setattr(tool, "PAIR_LOTS", [str(lot), str(tmp_path / "없는폴더")])
     monkeypatch.setattr(tool, "nas_roots", lambda: [])
     monkeypatch.setattr(tool, "CONDER_ROOTS", [])
+    monkeypatch.setattr(tool, "KLA_PAIRS", [])
+    monkeypatch.setattr(tool, "QORVO_KNOWN_LOTS", [])
     folder, wafers, _ = tool.run(tmp_path / "desk")
     z = zipfile.ZipFile(next(folder.glob("*.zip")))
     flts = [n for n in z.namelist() if n.endswith("Surface.flt")]
@@ -145,6 +151,62 @@ def test_pair_lots_take_every_wafer_first(tmp_path, monkeypatch):
     dup = z.read("중복목록.txt").decode()
     assert "W02/Surface.flt" in dup and "W03/Surface.flt" in dup
     assert "비교 LOT 못 찾음" in z.read("요약.txt").decode()
+
+
+def test_kla_pairs_take_camtek_and_kla_folders_side_by_side(tmp_path, monkeypatch):
+    """KLA 폴더는 <루트>\\<날짜>\\<LOT>\\<시각>_<슬롯>, 시각이 안 맞으면 같은 날짜 · 같은 슬롯 폴더를 쓴다."""
+    tool = _tool()
+    sr = tmp_path / "AOI-20" / "Scanresult"
+    _wafer(sr / "TB500_RDL4 - Multi" / "Setup1" / "VPK" / "31266529EWF6")
+    kroot = tmp_path / "H"
+    k1 = kroot / "2026-10-03" / "TB500.INT895@6412" / "2026-10-03-02-08_1"
+    k2 = kroot / "2026-10-03" / "TB500.INT895@6412" / "2026-10-03-02-31_2"
+    for k in (k1, k2):
+        k.mkdir(parents=True)
+        (k / "31266529EWF6.001").write_text('WaferID "31266529EWF6";')
+        (k / "31266529EWF6_2_0_23_2.jpg").write_bytes(b"jpg")
+    monkeypatch.setattr(tool, "kla_bases", lambda: [tmp_path / "없음", kroot])
+    monkeypatch.setattr(tool, "nas_roots", lambda: [sr])
+    monkeypatch.setattr(tool, "PAIR_LOTS", [])
+    monkeypatch.setattr(tool, "CONDER_ROOTS", [])
+    monkeypatch.setattr(tool, "QORVO_KNOWN_LOTS", [])
+    monkeypatch.setattr(tool, "KNOWN_LOTS", [])
+    monkeypatch.setattr(tool, "KLA_PAIRS", [
+        ("4F-K1", "TB500.INT895@6412", "2026-10-03T02:08", "AOI-20", "TB500_RDL4 - Multi", "Setup1", "VPK",
+         ["31266529EWF6", "NOPE"], [1, 2]),
+    ])
+    folder, wafers, _ = tool.run(tmp_path / "desk")
+    z = zipfile.ZipFile(next(folder.glob("*.zip")))
+    names = z.namelist()
+    assert wafers == 1
+    assert "KLA비교/TB500.INT895@6412/Camtek/AOI-20/31266529EWF6/Surface.flt" in names
+    assert "KLA비교/TB500.INT895@6412/KLA/2026-10-03-02-08_1/31266529EWF6.001" in names
+    assert any(n.endswith("2026-10-03-02-31_2/31266529EWF6.001") for n in names) or \
+        "2026-10-03-02-31_2" in z.read("중복목록.txt").decode()         # 시각이 달라도 같은 날짜 · 슬롯 2
+    assert "31266529EWF6_2_0_23_2.jpg" in z.read("사진목록.txt").decode()
+    assert "Camtek 웨이퍼 못 찾음" in z.read("요약.txt").decode()
+
+
+def test_qorvo_known_lots_come_before_conder(tmp_path, monkeypatch):
+    """스캔 기록의 QORVO LOT 은 Conder 를 훑기 전에 모은다(Conder 에서 시간이 다 가도 남게)."""
+    tool = _tool()
+    sr = tmp_path / "AOI-14" / "Scanresult"
+    for w in ("GKT7P03-A6", "GKT7P04-D1", "GKT7P05-F4", "GKT7P06-B2"):
+        _wafer(sr / "R_Qorvo XP2100_0861004PD_RDL1" / "SETUP" / "MMG" / w, recipe=w.encode())
+    monkeypatch.setattr(tool, "nas_roots", lambda: [sr])
+    monkeypatch.setattr(tool, "PAIR_LOTS", [])
+    monkeypatch.setattr(tool, "KLA_PAIRS", [])
+    monkeypatch.setattr(tool, "KNOWN_LOTS", [])
+    monkeypatch.setattr(tool, "CONDER_ROOTS", [str(tmp_path / "conder")])
+    monkeypatch.setattr(tool, "QORVO_KNOWN_LOTS", [("AOI-14", "R_Qorvo XP2100_0861004PD_RDL1", "SETUP", "MMG"),
+                                                   ("AOI-12", "R_Qorvo X", "SETUP", "GONE")])
+    folder, wafers, _ = tool.run(tmp_path / "desk")
+    z = zipfile.ZipFile(next(folder.glob("*.zip")))
+    log = z.read("요약.txt").decode()
+    assert wafers == tool.QORVO_KNOWN_WAFERS                            # 같은 LOT 을 Job 검색에서 다시 담지 않는다
+    assert log.index("QORVO Scanresult LOT") < log.index("QORVO Conder 폴더 못 찾음")
+    assert "QORVO LOT 못 찾음: AOI-12" in log
+    assert any(n.startswith("QORVO/Scanresult/AOI-14/R_Qorvo XP2100_0861004PD_RDL1/SETUP/MMG/") for n in z.namelist())
 
 
 def test_plan_parts_fills_each_part_between_25_and_30_mb():
