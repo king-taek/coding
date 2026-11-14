@@ -1,6 +1,6 @@
 """Surface.flt 바이너리 파서 → 결함 raw geometry 레코드.
 
-각 결과 폴더의 ``Surface.flt`` 는 152바이트 고정 레코드의 연속이다(보고서 기준).
+각 결과 폴더의 ``Surface.flt`` 는 고정 크기 레코드의 연속이다 — 크기는 장비마다 다르다(아래 ★).
 한 레코드에서 절대 좌표(ActualX/ActualY)와 geometry(area/BlobBreadth/BlobFeretMax/
 Contrast)를 읽어 :class:`geometry.resolve` 가 이미지 좌표와 nearest-match 하는 데 쓴다.
 
@@ -21,6 +21,20 @@ HEX + 디코딩 정답값 동봉)을 brute-force 해 확정했다.  레이아웃
     파서가 빈 결과를 돌려주는 안전 폴백은 유지.)
 ──────────────────────────────────────────────────────────────────────────
 
+★ **레코드 크기는 장비마다 다르다** — 152 만 있는 게 아니다(수집 자료 54 파일 전수, 관측
+2026-11-14): 152(41 파일) · 136(8 파일, AOI-5·10) · 120(5 파일, AOI-1 구형 EAGLE).  152 로 고정해
+읽으면 120·136 파일에서 **다른 Defect 의 수치**가 붙었다(앱이 수치를 보인 61 장 중 50 장).  장비 모델명으로는 못 가른다(EAGLETP_106821 = 152).  그래서:
+  1. 옆에 ``Surface.flt.md`` 사이드카가 있으면 그 ``RecordSize`` · ``Field`` 오프셋을 그대로 쓴다.
+  2. 없으면 알려진 레이아웃(``_FIELDS`` + ``_OLD_LAYOUTS``) 중 **파일 길이가 나눠떨어지고 모든
+     레코드가 말이 되는 값**(유한 · 좌표 ±1e6 µm · 크기 ≥ 0)인 것이 **딱 하나**일 때만 쓴다.
+     둘 이상이거나 없으면 **빈 결과**(측정정보 없음) — 틀린 수치보다 빈칸이 낫다.
+     54 파일 전수에서 이 규칙은 54/54 정답을 골랐다(25,080 B 는 152·120 둘 다 나눠지지만
+     120 으로 읽으면 209 중 65 레코드가 말이 안 돼 152 로 정해진다).
+  3. ``recipe`` 칸이 없는 레이아웃(120, 사이드카 없는 136)은 recipe 를 ``None`` 으로 둔다 —
+     136 의 byte 10 은 사이드카에 recipe 가 있는 파일에서만 recipe 이고 없는 파일에선 쓰레기다.
+  · 120·136 의 Contrast 오프셋은 사이드카 값이다(파일 등급) — 실물 13 파일 값이 전부 0 이라
+    값으로는 검산하지 못했다.  회귀 가드: ``test_surface_flt_layouts.py``(실물 바이트).
+
 기존 coords 파서(camtek_ini/kla_info)와 동일한 관습: 폴더 단위 ``lru_cache``,
 fail-safe(파일 없음/손상 시 빈 결과, **절대 raise 안 함**).
 """
@@ -28,6 +42,8 @@ fail-safe(파일 없음/손상 시 빈 결과, **절대 raise 안 함**).
 from __future__ import annotations
 
 import logging
+import math
+import re
 import struct
 from collections import namedtuple
 from functools import lru_cache
@@ -54,6 +70,34 @@ _FIELDS: dict[str, tuple[Optional[int], str]] = {
     "zone":           (61,  "B"),
     "recipe":         (62,  "B"),
 }
+
+# 구형 장비 레이아웃(사이드카 ``Surface.flt.md`` 실물에서 옮김 — 파일 등급).
+# recipe 가 None 이면 그 레이아웃에는 recipe 칸이 없다(값 None).
+_OLD_LAYOUTS: dict[int, dict[str, tuple[Optional[int], str]]] = {
+    136: {  # AOI-5 EAGLET_106102 · AOI-10 EAGLETP_107168
+        "actual_x": (32, "d"), "actual_y": (40, "d"), "area": (72, "d"),
+        "blob_breadth": (80, "d"), "blob_feret_max": (96, "d"),
+        "contrast": (128, "d"), "zone": (9, "B"), "recipe": (None, "B"),
+    },
+    120: {  # AOI-1 EAGLE_106134
+        "actual_x": (32, "d"), "actual_y": (40, "d"), "area": (72, "d"),
+        "blob_breadth": (80, "d"), "blob_feret_max": (96, "d"),
+        "contrast": (112, "d"), "zone": (8, "B"), "recipe": (None, "B"),
+    },
+}
+
+# 사이드카 필드 이름 → RawRecord 필드.  recipe 만 없어도 된다.
+_SIDECAR_NAMES = {
+    "ActualX": "actual_x", "ActualY": "actual_y", "area": "area",
+    "BlobBreadth": "blob_breadth", "BlobFeretMax": "blob_feret_max",
+    "Contrast": "contrast", "zone": "zone", "recipe": "recipe",
+}
+# 사이드카 Vartype(VARIANT 형) → struct 포맷.  실물에 나온 것: 2·3·4·5·17·22.
+_VARTYPE_FMT = {2: "h", 3: "i", 4: "f", 5: "d", 16: "b", 17: "B", 18: "H",
+                19: "I", 22: "i", 23: "I"}
+_RE_SIZE = re.compile(r'<RecordSize\b[^>]*\bSize="(\d+)"')
+_RE_FIELD = re.compile(r"<Field\b([^>]*)>")
+_RE_ATTR = re.compile(r'(\w+)="([^"]*)"')
 
 # 모든 오프셋이 채워졌는지 — 하나라도 None 이면 파서는 비활성(빈 결과).
 _SCHEMA_READY: bool = all(off is not None for off, _ in _FIELDS.values())
@@ -95,67 +139,143 @@ def _unpack(buf: bytes, base: int, offset: int, fmt: str) -> Optional[float]:
         return None
 
 
-def _record_struct():
-    """스키마(`_FIELDS`)를 레코드 **한 개를 한 번에** 푸는 ``struct.Struct`` 로 만든다.
+def _record_struct(size: int, fields: dict):
+    """레이아웃을 레코드 **한 개를 한 번에** 푸는 ``struct.Struct`` 로 만든다.
 
-    반환 ``(Struct, RawRecord 필드 순서로 값을 고르는 인덱스)``.  필드가 겹치거나
-    레코드 밖으로 나가면 ``None`` — 그때는 필드별로 푸는 예전 경로를 쓴다.
-    매번 새로 만든다(테스트가 스키마를 바꿔 끼운다 — 만드는 비용은 무시할 만하다)."""
+    반환 ``(Struct, RawRecord 필드 순서로 값을 고르는 인덱스 — 칸이 없으면 None)``.
+    필드가 겹치거나 레코드 밖으로 나가면 ``None`` — 그때는 필드별로 푸는 경로를 쓴다."""
     parts: list[str] = []
     names: list[str] = []
     pos = 0
-    for name, (off, fmt) in sorted(_FIELDS.items(), key=lambda kv: kv[1][0]):
-        if off is None or off < pos:
+    present = [(n, f) for n, f in fields.items() if f[0] is not None]
+    for name, (off, fmt) in sorted(present, key=lambda kv: kv[1][0]):
+        if off < pos:
             return None
         if off > pos:
             parts.append(f"{off - pos}x")
         parts.append(fmt)
         names.append(name)
         pos = off + struct.calcsize(_BYTE_ORDER + fmt)
-    if pos > _RECORD_SIZE:
+    if pos > size:
         return None
-    if _RECORD_SIZE > pos:
-        parts.append(f"{_RECORD_SIZE - pos}x")
+    if size > pos:
+        parts.append(f"{size - pos}x")
     st = struct.Struct(_BYTE_ORDER + "".join(parts))
-    return st, [names.index(f) for f in RawRecord._fields]
+    return st, [names.index(f) if f in names else None for f in RawRecord._fields]
 
 
-def _parse_flt(path: Path) -> tuple[RawRecord, ...]:
+def _decode(body: bytes, size: int, fields: dict) -> tuple[RawRecord, ...]:
     """★ 레코드마다 ``struct.iter_unpack`` 한 번이다.  예전에는 필드 8개를 따로
     ``unpack_from`` 하고 dict 를 만들어 넘겼는데, Surface.flt 는 **웨이퍼 전체 결함**을
     담아 레코드가 수만 개일 수 있다(Defect 추출 저장이 느린 원인 후보 — 추정이며
     실측 전이다).  값은 같다
-    (같은 바이트 순서·포맷, 꼬리의 불완전 레코드는 예전처럼 버린다) — 회귀 가드
+    (같은 바이트 순서·포맷, 꼬리의 불완전 레코드는 버린다) — 회귀 가드
     ``test_surface_flt.test_fast_parse_matches_field_by_field``."""
-    data = path.read_bytes()
-    fast = _record_struct()
-    if fast is not None:
-        st, order = fast
-        body = data[_HEADER_BYTES:]
-        body = body[:len(body) // _RECORD_SIZE * _RECORD_SIZE]
-        make = RawRecord._make
-        return tuple(make([v[i] for i in order]) for v in st.iter_unpack(body))
-    return _parse_flt_by_field(data)
+    fast = _record_struct(size, fields)
+    if fast is None:
+        return _parse_flt_by_field(body, size, fields)
+    st, order = fast
+    body = body[:len(body) // size * size]
+    make = RawRecord._make
+    return tuple(make([None if i is None else v[i] for i in order])
+                 for v in st.iter_unpack(body))
 
 
-def _parse_flt_by_field(data: bytes) -> tuple[RawRecord, ...]:
-    """필드별로 푸는 예전 경로 — 스키마가 한 번에 풀 수 없는 모양일 때만."""
+def _parse_flt_by_field(data: bytes, size: int, fields: dict) -> tuple[RawRecord, ...]:
+    """필드별로 푸는 예전 경로 — 레이아웃이 한 번에 풀 수 없는 모양일 때만."""
     out: list[RawRecord] = []
-    pos = _HEADER_BYTES
+    pos = 0
     n = len(data)
-    while pos + _RECORD_SIZE <= n:
+    while pos + size <= n:
         vals: dict[str, Optional[float]] = {}
         ok = True
-        for name, (offset, fmt) in _FIELDS.items():
-            v = _unpack(data, pos, offset, fmt)  # type: ignore[arg-type]
+        for name in RawRecord._fields:
+            offset, fmt = fields[name]
+            if offset is None:
+                vals[name] = None
+                continue
+            v = _unpack(data, pos, offset, fmt)
             if v is None:
                 ok = False
                 break
             vals[name] = v
         if ok:
             out.append(RawRecord(**vals))  # type: ignore[arg-type]
-        pos += _RECORD_SIZE
+        pos += size
     return tuple(out)
+
+
+def _sidecar_layout(flt: Path) -> Optional[tuple[int, dict]]:
+    """``Surface.flt.md``(장비가 남긴 레코드 설명) → ``(레코드 크기, 레이아웃)``.
+
+    없거나 필요한 칸(recipe 말고 전부)이 빠졌거나 형을 모르면 ``None``."""
+    md = flt.with_name(flt.name + ".md")
+    if not md.exists():
+        return None
+    text = md.read_bytes().decode("utf-8", errors="replace")
+    m = _RE_SIZE.search(text)
+    if not m or int(m.group(1)) <= 0:
+        return None
+    size = int(m.group(1))
+    fields: dict[str, tuple[Optional[int], str]] = {}
+    for fm in _RE_FIELD.finditer(text):
+        a = dict(_RE_ATTR.findall(fm.group(1)))
+        key = _SIDECAR_NAMES.get(a.get("Name", ""))
+        if key is None:
+            continue
+        fmt = _VARTYPE_FMT.get(int(a["Vartype"])) if a.get("Vartype", "").isdigit() else None
+        if fmt is None or not a.get("Offset", "").isdigit():
+            return None
+        fields[key] = (int(a["Offset"]), fmt)
+    fields.setdefault("recipe", (None, "B"))
+    if set(fields) != set(RawRecord._fields):
+        return None
+    if any(off is not None and off + struct.calcsize(_BYTE_ORDER + fmt) > size
+           for off, fmt in fields.values()):
+        return None
+    return size, fields
+
+
+def _plausible(recs: tuple[RawRecord, ...]) -> bool:
+    """모든 레코드가 말이 되는 값인지 — 틀린 레이아웃으로 읽으면 쓰레기 수가 섞인다."""
+    for r in recs:
+        vals = (r.actual_x, r.actual_y, r.area, r.blob_breadth, r.blob_feret_max,
+                r.contrast)
+        if not all(math.isfinite(v) for v in vals):
+            return False
+        if not (-1e6 < r.actual_x < 1e6 and -1e6 < r.actual_y < 1e6):
+            return False
+        if not (0 <= r.area < 1e9 and 0 <= r.blob_breadth < 1e6
+                and 0 <= r.blob_feret_max < 1e6):
+            return False
+    return True
+
+
+def _parse_flt(path: Path) -> tuple[RawRecord, ...]:
+    """레이아웃을 정해(사이드카 → 길이·값 검사) 레코드를 푼다.  못 정하면 빈 튜플."""
+    data = path.read_bytes()
+    body = data[_HEADER_BYTES:]
+    side = _sidecar_layout(path)
+    if side is not None:
+        return _decode(body, *side)
+    if path.with_name(path.name + ".md").exists():
+        _LOG.warning("Surface.flt.md 를 읽지 못해 길이·값 검사로 레코드 크기를 정함: %s", path)
+    layouts = {_RECORD_SIZE: _FIELDS}
+    for size, fields in _OLD_LAYOUTS.items():
+        layouts.setdefault(size, fields)
+    fits = []
+    for size, fields in layouts.items():
+        if not body or len(body) % size:
+            continue
+        recs = _decode(body, size, fields)
+        if _plausible(recs):
+            fits.append((size, recs))
+    if len(fits) == 1:
+        return fits[0][1]
+    if body:
+        _LOG.warning("Surface.flt 레코드 크기를 정하지 못함(후보 %s, %d 바이트) — "
+                     "측정정보 없음으로 처리: %s", [f[0] for f in fits], len(body), path)
+    return ()
 
 
 @lru_cache(maxsize=256)

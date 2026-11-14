@@ -55,6 +55,20 @@ def _write_flt(folder: Path, *records: bytes) -> None:
     (folder / "Surface.flt").write_bytes(b"".join(records))
 
 
+# 합성 레이아웃을 장비 사이드카(Surface.flt.md) 형식으로 — (이름, 오프셋, Vartype).
+_SYN_SIDECAR_FIELDS = [("ActualX", 0, 4), ("ActualY", 4, 4), ("area", 8, 4),
+                       ("BlobBreadth", 12, 4), ("BlobFeretMax", 16, 4),
+                       ("Contrast", 20, 4), ("zone", 24, 17), ("recipe", 25, 17)]
+
+
+def _write_sidecar(folder: Path, size: int, fields) -> None:
+    body = "".join(f'<Field Name="{n}" Id="{1073741824 + i}" Offset="{o}" Vartype="{v}"/>'
+                   for i, (n, o, v) in enumerate(fields))
+    (folder / "Surface.flt.md").write_text(
+        f'<root><RecordSize Size="{size}"/><Fields>{body}</Fields></root>',
+        encoding="utf-8")
+
+
 # ── 파서 ────────────────────────────────────────────────────────────────
 def test_parse_two_records(monkeypatch, tmp_path):
     _install_schema(monkeypatch)
@@ -78,13 +92,26 @@ def test_missing_file_returns_empty(monkeypatch, tmp_path):
 
 
 def test_truncated_bytes_no_raise(monkeypatch, tmp_path):
+    """길이가 어느 레코드 크기로도 안 나눠지면 레이아웃을 못 정한다 → 빈 결과(raise 없음).
+
+    예전에는 꼬리만 버리고 152 로 읽었는데, 그게 구형 장비(120·136) 파일에 다른 Defect
+    수치를 붙인 원인이었다."""
     _install_schema(monkeypatch)
-    # 레코드 크기보다 짧은 꼬리는 조용히 버린다(raise 없음).
     (tmp_path / "Surface.flt").write_bytes(
         _pack_record(actual_x=1, actual_y=2, area=3, blob_breadth=4,
                      blob_feret_max=5, contrast=6) + b"\x00\x07")
+    assert surface_flt.load_folder(tmp_path) == ()
+
+
+def test_truncated_tail_dropped_when_sidecar_gives_size(monkeypatch, tmp_path):
+    """사이드카가 레코드 크기를 알려 주면 그 크기로 읽고 불완전한 꼬리만 버린다."""
+    _install_schema(monkeypatch)
+    (tmp_path / "Surface.flt").write_bytes(
+        _pack_record(actual_x=1, actual_y=2, area=3, blob_breadth=4,
+                     blob_feret_max=5, contrast=6) + b"\x00\x07")
+    _write_sidecar(tmp_path, 32, _SYN_SIDECAR_FIELDS)
     recs = surface_flt.load_folder(tmp_path)
-    assert len(recs) == 1
+    assert len(recs) == 1 and recs[0].contrast == 6.0
 
 
 def test_schema_live_by_default():
@@ -344,11 +371,10 @@ def test_fast_parse_matches_field_by_field(tmp_path):
     내야 한다(꼬리의 불완전 레코드는 둘 다 버린다)."""
     import random
     rnd = random.Random(7)
-    data = bytes(rnd.getrandbits(8) for _ in range(surface_flt._RECORD_SIZE * 300 + 17))
-    p = tmp_path / "Surface.flt"
-    p.write_bytes(data)
-    fast = surface_flt._parse_flt(p)
-    slow = surface_flt._parse_flt_by_field(data)
+    size, fields = surface_flt._RECORD_SIZE, surface_flt._FIELDS
+    data = bytes(rnd.getrandbits(8) for _ in range(size * 300 + 17))
+    fast = surface_flt._decode(data, size, fields)
+    slow = surface_flt._parse_flt_by_field(data, size, fields)
     assert len(fast) == len(slow) == 300
     # NaN 은 == 가 거짓이라 바이트 표현으로 비교한다.
     assert [tuple(map(repr, r)) for r in fast] == [tuple(map(repr, r)) for r in slow]
@@ -363,7 +389,7 @@ def test_fast_parse_follows_patched_schema(monkeypatch, tmp_path):
     _write_flt(tmp_path, *recs)
     data = (tmp_path / "Surface.flt").read_bytes()
     assert (surface_flt._parse_flt(tmp_path / "Surface.flt")
-            == surface_flt._parse_flt_by_field(data))
+            == surface_flt._parse_flt_by_field(data, _SYN_SIZE, _SYN_FIELDS))
 
 
 def _brute_nearest(records, xy, tol):
