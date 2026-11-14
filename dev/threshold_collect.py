@@ -103,7 +103,7 @@ CONDER_ROOTS = [r"\\k5cifsn2\k5tsvdata$\1. Conder Scan"]
 QORVO_NAME = "QORVO"     # Conder 고객 폴더 이름(예: 575. QORVO US)
 QORVO_LOTS = 4           # Conder 장치 폴더마다 최근 LOT 몇 개
 QORVO_JOB_LOTS = 3       # Scanresult Job 마다 최근 LOT 몇 개(웨이퍼는 전부)
-QORVO_KEY_LEN = 8        # Conder 맵 DEVICE 앞 몇 글자로 Scanresult Job 을 찾나(W97218SGZ4BK16 → W97218SG)
+QORVO_KEY_LEN = 8        # Conder 맵 DEVICE 앞 몇 글자로 Scanresult Job 을 찾나(W97218SGZ4BK16 → W97218SG)  — Job 이름에 장치 이름이 그대로 든다(INCI-W97218SGZ4BK16_0860463PD-0A, AOI Capacity 답 2026-11-15)
 QORVO_MINUTES = 12
 QORVO_MB = 150          # QORVO 로 담는 원본 상한(die 맵이 웨이퍼당 약 10 MB)
 # 스캔 기록(AOI_capacity.csv)의 QORVO Scanresult LOT — (장비, Job, Setup, LOT), Job 마다 가장 최근 Pass LOT.
@@ -119,24 +119,25 @@ QORVO_KNOWN_LOTS = [
 ]
 QORVO_KNOWN_WAFERS = 3   # QORVO_KNOWN_LOTS 의 LOT 마다 웨이퍼 몇 장
 # 같은 웨이퍼를 KLA 와 Camtek 이 같은 층(RDL1~6 · FS …)에서 7일 안에 찍은 것(스캔 기록, 2026-11-15 사용자 요청).
-# (KLA 장비, KLA LOT, KLA 배치 시각, Camtek 장비, Job, Setup, LOT, [웨이퍼 ID], [KLA 슬롯]).
-# KLA 폴더 = <드라이브>\<배치 날짜>\<KLA LOT>\<YYYY-MM-DD-HH-MM>_<슬롯>
-#   (확인: 4F-K1 TB500.INT895@6412 2026-10-03T02:08 슬롯 1 = H:\2026-10-03\TB500.INT895@6412\2026-10-03-02-08_1).
-# KLA 장비마다 드라이브가 달라(H: · W: …) 드라이브를 전부 보고 <날짜>\<LOT> 가 있는 곳을 쓴다.
+# (KLA 장비, KLA LOT, [KLA 웨이퍼 시작 시각], Camtek 장비, Job, Setup, LOT, [웨이퍼 ID], [KLA 슬롯]).
+# KLA 폴더 = <드라이브>\<날짜>\<KLA LOT>\<웨이퍼 시작 YYYY-MM-DD-HH-MM>_<슬롯>  (AOI Capacity 답, 2026-11-15).
+#   웨이퍼 시작 시각 = 스캔 기록 wafer_start_time.  report 의 시각은 LOT 실행 시작이라 폴더 이름과 다르다.
+#   자정을 넘긴 LOT 은 다음 날 폴더에 LOT 전체가 다시 있어, 웨이퍼 시작 날짜 폴더를 보면 늘 있다.
+# 드라이브는 PC 마다 연결이 달라(4F-K1 = H: 또는 L:, K3 = W: …) 드라이브를 전부 보고 <날짜>\<LOT> 가 있는 곳을 쓴다.
 KLA_PAIRS = [
-    ('4F-K1', 'TB500.INT1133@6326', '2026-11-09T22:18', '4F-AOI-05', 'TB500_RDL1_SAO', 'Setup1', 'HKS_4F_AOI05', ['S3G9S016XMF6', 'S3GHK016XMD4'], [25, 22]),
-    ('K5', 'TB500.INT585@6324 RE', '2026-11-09T11:54', 'AOI-19', 'TB500_RDL2 - Multi', 'Setup1', '0', ['54265740EWB2', '54265742EWC3'], [23, 21]),
-    ('4F-K1', 'TB500.INT1431@6412', '2026-11-08T05:38', '4F-AOI-03', 'TB500_RDL4-Multi-Align', 'Setup1', 'VHC', ['33296733EWH2', '33296734EWE1'], [25, 24]),
-    ('4F-K1', 'TB500.INT1046@6324', '2026-11-08T04:38', '4F-AOI-03', 'TB500_RDL2 - Multi', 'Setup1', 'CNA-RDL2_AOI-3', ['43206497EWG6', '43206498EWD5'], [2, 1]),
-    ('4F-K1', 'TB500.INT1185@6322', '2026-11-07T03:14', '4F-AOI-04', 'TB500_RDL3 - Multi', 'Setup1', 'KAV-RDL3-LIFT', ['S3M9N191XMG7', 'S3M9N187XMF6'], [25, 24]),
-    ('K5', 'TB500.INT1099@6324', '2026-11-06T21:00', 'AOI-22', 'TB500_RDL2 - Multi - Swelling', 'Setup1', 'DGM-RDL2 SWELLING', ['49126697EWD2', '49126662EWF3'], [4, 14]),
-    ('K3', 'TB500.INT1279@6412 RE', '2026-11-06T17:37', 'AOI-27', 'TB500_RDL4-Multi', 'Setup1', 'With_EDC', ['S3FAR128XMC6', 'S3FAR079XMA7'], [25, 22]),
-    ('K3', 'TB500.INT1057@6324', '2026-11-06T02:58', 'AOI-22', 'TB500_RDL2 - Multi - Swelling', 'Setup1', 'CNS-RDL2 SWELLING', ['61JV6G04EWD4', '61JV6G08EWF6'], [20, 16]),
-    ('K2', 'INTP-KENDALL-80-2604@6342', '2026-11-11T14:41', 'AOI-13', 'R_KENDALL_A0_FS', 'SETUP', 'AWB-FS', ['W6960194XYA0', 'W6960195XYE2'], [8, 7]),
-    ('K2', 'INTP-KENDALL-85-2604@6342', '2026-11-10T03:25', 'AOI-13', 'R_KENDALL_A0_FS', 'SETUP', 'CSY-FS DIA', ['00NSP126XYG3', '00NSP131XYE3'], [25, 20]),
-    ('K4', 'INTP-KENDALL-118-2609@6324 RE', '2026-10-25T09:08', 'AOI-23', 'R_Kendall RDL4', 'Setup1', 'CUT- WPH test', ['00NVP095XYG5', '00NVP078XYD0'], [4, 20]),
-    ('K2', 'INTP-KENDALL-92-2608@6342', '2026-10-05T19:22', 'AOI-3', 'R_MSFT_KENDALL A0_FS', '6324', 'CTH-FS DIA', ['00NKT225XYA7', '00NKT224XYE0'], [25, 24]),
-    ('K2', 'INTP-KENDALL-82-2604@6342', '2026-08-24T15:03', 'AOI-3', 'R_MSFT_KENDALL A0_FS', '6324', 'CSV-FS DIA', ['W6960048XYC6', 'W6960176XYG7'], [25, 23]),
+    ('4F-K1', 'TB500.INT1133@6326', ['2026-11-10-02-08', '2026-11-10-01-39'], '4F-AOI-05', 'TB500_RDL1_SAO', 'Setup1', 'HKS_4F_AOI05', ['S3G9S016XMF6', 'S3GHK016XMD4'], [25, 22]),
+    ('K5', 'TB500.INT585@6324 RE', ['2026-11-09-13-09', '2026-11-09-12-51'], 'AOI-19', 'TB500_RDL2 - Multi', 'Setup1', '0', ['54265740EWB2', '54265742EWC3'], [23, 21]),
+    ('4F-K1', 'TB500.INT1431@6412', ['2026-11-08-11-45', '2026-11-08-11-32'], '4F-AOI-03', 'TB500_RDL4-Multi-Align', 'Setup1', 'VHC', ['33296733EWH2', '33296734EWE1'], [25, 24]),
+    ('4F-K1', 'TB500.INT1046@6324', ['2026-11-08-05-02', '2026-11-08-04-38'], '4F-AOI-03', 'TB500_RDL2 - Multi', 'Setup1', 'CNA-RDL2_AOI-3', ['43206497EWG6', '43206498EWD5'], [2, 1]),
+    ('4F-K1', 'TB500.INT1185@6322', ['2026-11-07-07-05', '2026-11-07-06-55'], '4F-AOI-04', 'TB500_RDL3 - Multi', 'Setup1', 'KAV-RDL3-LIFT', ['S3M9N191XMG7', 'S3M9N187XMF6'], [25, 24]),
+    ('K5', 'TB500.INT1099@6324', ['2026-11-06-22-28', '2026-11-07-02-53'], 'AOI-22', 'TB500_RDL2 - Multi - Swelling', 'Setup1', 'DGM-RDL2 SWELLING', ['49126697EWD2', '49126662EWF3'], [4, 14]),
+    ('K3', 'TB500.INT1279@6412 RE', ['2026-11-06-18-07', '2026-11-06-17-50'], 'AOI-27', 'TB500_RDL4-Multi', 'Setup1', 'With_EDC', ['S3FAR128XMC6', 'S3FAR079XMA7'], [25, 22]),
+    ('K3', 'TB500.INT1057@6324', ['2026-11-06-09-53', '2026-11-06-08-24'], 'AOI-22', 'TB500_RDL2 - Multi - Swelling', 'Setup1', 'CNS-RDL2 SWELLING', ['61JV6G04EWD4', '61JV6G08EWF6'], [20, 16]),
+    ('K2', 'INTP-KENDALL-80-2604@6342', ['2026-11-11-15-06', '2026-11-11-15-03'], 'AOI-13', 'R_KENDALL_A0_FS', 'SETUP', 'AWB-FS', ['W6960194XYA0', 'W6960195XYE2'], [8, 7]),
+    ('K2', 'INTP-KENDALL-85-2604@6342', ['2026-11-10-04-46', '2026-11-10-04-28'], 'AOI-13', 'R_KENDALL_A0_FS', 'SETUP', 'CSY-FS DIA', ['00NSP126XYG3', '00NSP131XYE3'], [25, 20]),
+    ('K4', 'INTP-KENDALL-118-2609@6324 RE', ['2026-10-25-09-26', '2026-10-25-11-04'], 'AOI-23', 'R_Kendall RDL4', 'Setup1', 'CUT- WPH test', ['00NVP095XYG5', '00NVP078XYD0'], [4, 20]),
+    ('K2', 'INTP-KENDALL-92-2608@6342', ['2026-10-05-20-45', '2026-10-05-20-41'], 'AOI-3', 'R_MSFT_KENDALL A0_FS', '6324', 'CTH-FS DIA', ['00NKT225XYA7', '00NKT224XYE0'], [25, 24]),
+    ('K2', 'INTP-KENDALL-82-2604@6342', ['2026-08-24-16-20', '2026-08-24-16-16'], 'AOI-3', 'R_MSFT_KENDALL A0_FS', '6324', 'CSV-FS DIA', ['W6960048XYC6', 'W6960176XYG7'], [25, 23]),
 ]
 KLA_MINUTES = 12
 _LOT_DEPTH = 4      # Job 아래 LOT 을 찾는 깊이(Setup → [구분] → LOT)
@@ -252,11 +253,10 @@ def kla_bases():
     return [Path(f"{c}:\\") for c in "DEFGHIJKLMNOPQRSTUVWXYZ"] + [Path(u) for u in UNC_SHARES]
 
 
-def find_kla_folder(lot: str, stamp: str, slot: int):
-    """KLA 웨이퍼 폴더 ``<루트>\\<날짜>\\<LOT>\\<YYYY-MM-DD-HH-MM>_<슬롯>``.  시각이 딱 맞는 폴더가 없으면
-    같은 LOT 폴더 안에서 ``_<슬롯>`` 으로 끝나는 것 중 그 날짜로 시작하는 것.  못 찾으면 None."""
-    day = stamp[:10]
-    want = stamp.replace("T", "-").replace(":", "-")[:16] + f"_{slot}"
+def find_kla_folder(lot: str, start: str, slot: int):
+    """KLA 웨이퍼 폴더 ``<루트>\\<날짜>\\<LOT>\\<start>_<슬롯>`` (start = 웨이퍼 시작 ``YYYY-MM-DD-HH-MM``).
+    딱 맞는 폴더가 없으면 그 날짜 LOT 폴더에서 ``_<슬롯>`` 으로 끝나는 것 중 시각이 가장 가까운 것.  못 찾으면 None."""
+    day, want = start[:10], f"{start}_{slot}"
     for b in kla_bases():
         d = b / day / lot
         try:
@@ -266,10 +266,19 @@ def find_kla_folder(lot: str, stamp: str, slot: int):
             continue
         if (d / want).is_dir():
             return d / want
-        cands = sorted(p for n, p, _, _ in _entries(d)[0] if n.endswith(f"_{slot}") and n.startswith(day))
+        cands = [p for n, p, _, _ in _entries(d)[0] if n.endswith(f"_{slot}") and n[:10] == day]
         if cands:
-            return cands[0]
+            return min(cands, key=lambda p: abs(_minutes(p.name[:16]) - _minutes(start)))
     return None
+
+
+def _minutes(stamp: str) -> int:
+    """``YYYY-MM-DD-HH-MM`` → 분(못 읽으면 큰 값)."""
+    try:
+        y, mo, d, h, mi = (int(x) for x in stamp.split("-"))
+        return (((y * 12 + mo) * 31 + d) * 24 + h) * 60 + mi
+    except ValueError:
+        return 10 ** 9
 
 
 def collect_kla_pairs(col, say, progress, stop, end=None):
@@ -279,7 +288,7 @@ def collect_kla_pairs(col, say, progress, stop, end=None):
         deadline = min(deadline, end)
     roots = {_aoi_key(r.parent.name): r for r in nas_roots()} if KLA_PAIRS else {}
     n = 0
-    for i, (kdev, klot, stamp, aoi, job, setup, lot_name, wids, slots) in enumerate(KLA_PAIRS):
+    for i, (kdev, klot, starts, aoi, job, setup, lot_name, wids, slots) in enumerate(KLA_PAIRS):
         if stop() or time.time() > deadline:
             say("KLA: 시간 제한·중지로 여기서 멈춤")
             break
@@ -289,7 +298,7 @@ def collect_kla_pairs(col, say, progress, stop, end=None):
         lot = find_lot(sr, job, setup, lot_name) if sr else None
         if lot is None:
             say(f"KLA 짝 Camtek LOT 못 찾음: {aoi}\\{job}\\{setup}\\{lot_name}")
-        for wid, slot in zip(wids, slots):
+        for wid, start, slot in zip(wids, starts, slots):
             if stop() or time.time() > deadline:
                 break
             if lot is not None:
@@ -299,9 +308,9 @@ def collect_kla_pairs(col, say, progress, stop, end=None):
                 else:
                     col.take_files(w, f"{arc}/Camtek/{aoi}/{w.name}")
                     n += 1
-            k = find_kla_folder(klot, stamp, slot)
+            k = find_kla_folder(klot, start, slot)
             if k is None:
-                say(f"KLA 폴더 못 찾음: {kdev} {stamp[:10]}\\{klot}\\*_{slot} ({wid})")
+                say(f"KLA 폴더 못 찾음: {kdev} {start[:10]}\\{klot}\\{start}_{slot} ({wid})")
             else:
                 col.take_files(k, f"{arc}/KLA/{k.name}")
                 say(f"KLA {kdev} {k}  ↔  {wid}")

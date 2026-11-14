@@ -154,7 +154,7 @@ def test_pair_lots_take_every_wafer_first(tmp_path, monkeypatch):
 
 
 def test_kla_pairs_take_camtek_and_kla_folders_side_by_side(tmp_path, monkeypatch):
-    """KLA 폴더는 <루트>\\<날짜>\\<LOT>\\<시각>_<슬롯>, 시각이 안 맞으면 같은 날짜 · 같은 슬롯 폴더를 쓴다."""
+    """KLA 폴더는 <루트>\\<날짜>\\<LOT>\\<웨이퍼 시작>_<슬롯>, 시각이 안 맞으면 같은 날짜 · 같은 슬롯 중 가장 가까운 폴더를 쓴다."""
     tool = _tool()
     sr = tmp_path / "AOI-20" / "Scanresult"
     _wafer(sr / "TB500_RDL4 - Multi" / "Setup1" / "VPK" / "31266529EWF6")
@@ -172,7 +172,7 @@ def test_kla_pairs_take_camtek_and_kla_folders_side_by_side(tmp_path, monkeypatc
     monkeypatch.setattr(tool, "QORVO_KNOWN_LOTS", [])
     monkeypatch.setattr(tool, "KNOWN_LOTS", [])
     monkeypatch.setattr(tool, "KLA_PAIRS", [
-        ("4F-K1", "TB500.INT895@6412", "2026-10-03T02:08", "AOI-20", "TB500_RDL4 - Multi", "Setup1", "VPK",
+        ("4F-K1", "TB500.INT895@6412", ["2026-10-03-02-08", "2026-10-03-02-30"], "AOI-20", "TB500_RDL4 - Multi", "Setup1", "VPK",
          ["31266529EWF6", "NOPE"], [1, 2]),
     ])
     folder, wafers, _ = tool.run(tmp_path / "desk")
@@ -182,7 +182,7 @@ def test_kla_pairs_take_camtek_and_kla_folders_side_by_side(tmp_path, monkeypatc
     assert "KLA비교/TB500.INT895@6412/Camtek/AOI-20/31266529EWF6/Surface.flt" in names
     assert "KLA비교/TB500.INT895@6412/KLA/2026-10-03-02-08_1/31266529EWF6.001" in names
     assert any(n.endswith("2026-10-03-02-31_2/31266529EWF6.001") for n in names) or \
-        "2026-10-03-02-31_2" in z.read("중복목록.txt").decode()         # 시각이 달라도 같은 날짜 · 슬롯 2
+        "2026-10-03-02-31_2" in z.read("중복목록.txt").decode()         # 1분 달라도 같은 날짜 · 슬롯 2
     assert "31266529EWF6_2_0_23_2.jpg" in z.read("사진목록.txt").decode()
     assert "Camtek 웨이퍼 못 찾음" in z.read("요약.txt").decode()
 
@@ -266,3 +266,17 @@ def test_button_runs_in_background_and_reports(styled_qapp, monkeypatch, tmp_pat
     calls = win._loading.calls
     assert calls[0] == ("show", True) and calls[1] == ("progress", 0, 0)   # busy 로 시작
     assert calls[-1] == ("hide",)
+
+
+def test_kla_folder_uses_wafer_start_day_across_midnight(tmp_path, monkeypatch):
+    """자정을 넘긴 LOT: LOT 실행은 11-09 시작이어도 웨이퍼 시작이 11-10 이면 11-10 폴더에서 찾는다."""
+    tool = _tool()
+    lot = "TB500.INT1133@6326"
+    (tmp_path / "2026-11-09" / lot / "2026-11-09-23-50_1").mkdir(parents=True)
+    want = tmp_path / "2026-11-10" / lot / "2026-11-10-02-08_25"
+    want.mkdir(parents=True)
+    (tmp_path / "2026-11-10" / lot / "2026-11-10-01-39_22").mkdir()
+    monkeypatch.setattr(tool, "kla_bases", lambda: [tmp_path])
+    assert tool.find_kla_folder(lot, "2026-11-10-02-08", 25) == want
+    assert tool.find_kla_folder(lot, "2026-11-10-02-07", 25) == want      # 1분 어긋나도 같은 슬롯
+    assert tool.find_kla_folder(lot, "2026-11-09-22-18", 25) is None      # LOT 실행 시각으로는 못 찾는다
