@@ -1,7 +1,7 @@
 """[Threshold수집-임시] Threshold 자료 수집 버튼 — 버튼을 지울 때 이 파일도 함께 지운다.
 
 지키는 것: ① 지울 곳이 ``threshold_collect_tmp.py`` docstring 의 목록 그대로라는 것,
-② 도구가 Kendall · TB500 Job 만 모으고 사진 · 압축 · 큰 파일은 버리는 것, ③ zip 을 30 MB 조각으로
+② 도구가 Kendall · TB500 Job 만 모으고 사진 · 압축 · 큰 파일은 버리는 것, ③ zip 을 28 MB 조각으로
 나누되 조각을 25 MB 이상 채우는 것, ④ 버튼이 로딩바 규칙대로 도는 것.
 """
 
