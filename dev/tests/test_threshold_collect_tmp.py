@@ -66,31 +66,65 @@ def _wafer(d: Path, recipe: bytes = b"[Recipe]\nMinArea=3\n"):
     (d / "old.zip").write_bytes(b"zip")
 
 
-def test_collects_only_product_jobs_and_drops_useless_files(tmp_path, monkeypatch):
+def test_collects_known_lots_and_drops_useless_files(tmp_path, monkeypatch):
+    """스캔 기록에서 고른 LOT 으로 바로 찾아간다(장비 이름 앞 0 무시 · 구분 폴더 한 단 허용),
+    목록에 없는 LOT 은 담지 않고, 못 찾은 LOT 은 요약에 남긴다."""
     tool = _tool()
-    sr = tmp_path / "AOI-13" / "Scanresult"
+    sr = tmp_path / "AOI-01" / "Scanresult"
+    sr4 = tmp_path / "4F-AOI-05" / "Scanresult"
     _wafer(sr / "R_KENDALL_A0_PI5" / "SETUP" / "LOT1" / "W01")
     _wafer(sr / "R_KENDALL_A0_PI5" / "SETUP" / "LOT1" / "W02")
-    _wafer(sr / "R_TB500_LIVE_PI4" / "Setup1" / "LOT9" / "W77", recipe=b"[Recipe]\nMinArea=9\n")
-    _wafer(sr / "R_OTHER_PI4" / "Setup1" / "LOT5" / "W55")
+    _wafer(sr / "R_KENDALL_A0_PI5" / "SETUP" / "LOT2" / "W03")               # 목록에 없는 LOT
+    _wafer(sr4 / "TB500_RDL2 - Multi" / "Setup1" / "6324" / "TNY" / "W77", recipe=b"[Recipe]\nMinArea=9\n")
     (sr / "R_KENDALL_A0_PI5" / "SETUP" / "LOT1" / "W01" / "huge.dat").write_bytes(b"\x00" * (tool.FILE_MB * MB + 1))
-    monkeypatch.setattr(tool, "nas_roots", lambda: [sr])
+    monkeypatch.setattr(tool, "nas_roots", lambda: [sr, sr4])
+    monkeypatch.setattr(tool, "PAIR_LOTS", [])
+    monkeypatch.setattr(tool, "CONDER_ROOTS", [])
+    monkeypatch.setattr(tool, "KNOWN_LOTS", [
+        ("AOI-1", "R_KENDALL_A0_PI5", "SETUP", "LOT1"),
+        ("4F-AOI-05", "TB500_RDL2 - Multi", "Setup1", "TNY"),
+        ("AOI-9", "R_KENDALL_X", "SETUP", "GONE"),
+    ])
     out = tmp_path / "desk"
     folder, wafers, files = tool.run(out)
     assert folder.parent == out and folder.name.startswith("Threshold수집_")
     zips = list(folder.glob("*.zip"))
     assert len(zips) == 1 and not (folder / "_작업중.zip").exists()
-    names = zipfile.ZipFile(zips[0]).namelist()
+    z = zipfile.ZipFile(zips[0])
+    names = z.namelist()
     assert wafers == 3
-    assert not any("R_OTHER" in n for n in names)
+    assert not any("LOT2" in n for n in names)
+    assert any(n.startswith("4F-AOI-05/TB500_RDL2 - Multi/Setup1/6324/TNY/W77/") for n in names)
     assert not any(n.endswith((".jpg", ".zip")) or n.endswith("huge.dat") for n in names)
     assert any(n.endswith("W01/Surface.flt") for n in names)
-    z = zipfile.ZipFile(zips[0])
     assert "Surface Dark" in z.read("사진목록.txt").decode()           # 사진은 이름만
     assert "huge.dat" in z.read("파일목록.txt").decode()
     recipes = [n for n in names if n.endswith("Recipe.ini")]
     assert len(recipes) == 2                                             # W02 의 같은 레시피는 중복으로 한 번만
     assert "W02/Recipe.ini" in z.read("중복목록.txt").decode()
+    assert "LOT 못 찾음: AOI-9" in z.read("요약.txt").decode()
+
+
+def test_pair_lots_take_only_the_compared_wafer(tmp_path, monkeypatch):
+    """비교 스캔 LOT 에서는 같은 웨이퍼(PAIR_WAFER)만 담는다."""
+    tool = _tool()
+    lot = tmp_path / "4F-AOI-04" / "Scanresult" / "R_TB500_LIVE_PI4 - Enhanced" / "Setup1" / "YDD-No Image"
+    _wafer(lot / "18_20234838EWG1")
+    _wafer(lot / "3_35174140EWD4", recipe=b"[Recipe]\nMinArea=7\n")
+    monkeypatch.setattr(tool, "PAIR_LOTS", [str(lot)])
+    monkeypatch.setattr(tool, "nas_roots", lambda: [])
+    monkeypatch.setattr(tool, "CONDER_ROOTS", [])
+    folder, wafers, _ = tool.run(tmp_path / "desk")
+    names = zipfile.ZipFile(next(folder.glob("*.zip"))).namelist()
+    assert wafers == 1
+    assert any("18_20234838EWG1/Surface.flt" in n for n in names)
+    assert not any("35174140EWD4" in n for n in names)
+
+
+def test_aoi_key_ignores_case_and_leading_zero():
+    tool = _tool()
+    assert tool._aoi_key("AOI-01") == tool._aoi_key("aoi-1") == "AOI-1"
+    assert tool._aoi_key("4F-AOI-05") == "4F-AOI-5"
 
 
 def test_pair_lots_take_every_wafer_first(tmp_path, monkeypatch):
@@ -102,6 +136,7 @@ def test_pair_lots_take_every_wafer_first(tmp_path, monkeypatch):
         _wafer(lot / w)
     monkeypatch.setattr(tool, "PAIR_LOTS", [str(lot), str(tmp_path / "없는폴더")])
     monkeypatch.setattr(tool, "nas_roots", lambda: [])
+    monkeypatch.setattr(tool, "CONDER_ROOTS", [])
     folder, wafers, _ = tool.run(tmp_path / "desk")
     z = zipfile.ZipFile(next(folder.glob("*.zip")))
     flts = [n for n in z.namelist() if n.endswith("Surface.flt")]
