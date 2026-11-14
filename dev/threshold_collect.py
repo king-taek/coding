@@ -8,6 +8,8 @@
     · 이 PC 에서 보이는 ``AOI-*\\Scanresult\\<Job>`` 가운데 Job 이름에 KENDALL 또는 TB500 이 든 것
     · Job · Setup 폴더 바로 아래 파일, Job 마다 최근 LOT :data:`LOTS` 개의 LOT 폴더 바로 아래 파일
     · LOT 마다 웨이퍼 :data:`WAFERS` 장의 폴더 안 파일(하위 폴더 2단계까지)
+    · :data:`PAIR_LOTS` — 같은 웨이퍼를 Contrast 기준만 바꿔 스캔한 LOT 은 **웨이퍼 전부**를 먼저 모은다
+      (미리보기의 '새로 빠짐' 예측을 실제 스캔과 맞춰 보는 자료, 2026-11-14 사용자 지정)
 무엇을 버리나(확실히 필요 없는 것):
     · 사진 · 영상 · 압축 파일 — 사진은 **이름만** ``사진목록.txt`` 에 남긴다(LIVE 이름에 결함 이름이 든다)
     · :data:`FILE_MB` 를 넘는 파일 — 이름 · 크기만 ``파일목록.txt`` 에 남긴다
@@ -38,6 +40,16 @@ MIN_PART_MB = 25
 SKIP_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".gif",
             ".avi", ".mp4", ".wmv", ".zip", ".7z", ".rar", ".gz", ".cab"}
 IMG_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".gif"}
+# 같은 웨이퍼를 Contrast 기준(Avg24~28)만 바꿔 스캔한 LOT — 사용자가 준 주소 그대로(2026-11-14).
+# 이 드라이브가 없으면 UNC_SHARES 아래 같은 경로를 본다.
+PAIR_LOTS = [
+    r"I:\4F-AOI-05\Scanresult\R_TB500_LIVE_PI4 - Enhanced\Setup1\YDD_Contrast Avg28_AOI-5",
+    r"I:\4F-AOI-05\Scanresult\R_TB500_LIVE_PI4 - Enhanced\Setup1\YDD-Contrast Avg24",
+    r"I:\4F-AOI-05\Scanresult\R_TB500_LIVE_PI4 - Enhanced\Setup1\YDD-Contrast Avg26",
+    r"I:\4F-AOI-05\Scanresult\R_TB500_LIVE_PI4 - Enhanced\Setup1\YDD-Contrast Avg27",
+    r"I:\4F-AOI-04\Scanresult\R_TB500_LIVE_PI4 - Enhanced\Setup1\YDD",
+    r"I:\4F-AOI-04\Scanresult\R_TB500_LIVE_PI4 - Enhanced\Setup1\YDD_Contrast Avg28_AOI-4",
+]
 _LOT_DEPTH = 4      # Job 아래 LOT 을 찾는 깊이(Setup → [구분] → LOT)
 _WAFER_DEPTH = 2    # 웨이퍼 폴더 안 하위 폴더 깊이
 
@@ -61,6 +73,19 @@ def nas_roots():
         except OSError:
             continue
     return out
+
+
+def resolve_pair(raw: str):
+    """주소 그대로 있으면 그것, 없으면 드라이브 대신 :data:`UNC_SHARES` 아래 같은 경로.  못 찾으면 None."""
+    p = Path(raw)
+    if p.is_dir():
+        return p
+    rest = p.parts[1:]
+    for u in UNC_SHARES:
+        q = Path(u).joinpath(*rest)
+        if rest and q.is_dir():
+            return q
+    return None
 
 
 def _entries(d: Path):
@@ -219,15 +244,36 @@ def run(out: Path, progress=None, stop=None):
     out_dir.mkdir(parents=True, exist_ok=True)
     staging = out_dir / "_작업중.zip"
     col = Collector(staging)
-    log, wafers = [], 0
+    log, wafers, pair_raw = [], 0, 0
 
     def expired():
-        return stop() or time.time() > deadline or col.raw > TOTAL_MB * 2 ** 20
+        return stop() or time.time() > deadline or col.raw - pair_raw > TOTAL_MB * 2 ** 20
 
     def say(line):
         log.append(line)
         print(line)
         progress(0, 0, line[:70])
+
+    for k, raw in enumerate(PAIR_LOTS):                    # 비교 스캔 LOT 은 먼저, 웨이퍼 전부
+        if stop():
+            break
+        lot = resolve_pair(raw)
+        if lot is None:
+            say(f"비교 LOT 못 찾음: {raw}")
+            continue
+        aoi = lot.parents[3].name if len(lot.parents) > 3 else ""
+        arc_lot = f"비교스캔/{aoi}/{lot.name}"
+        col.take_top_files(lot, arc_lot)
+        ws = sorted((p for _, p, _, _ in _entries(lot)[0] if is_wafer(p)), key=lambda p: p.name)
+        for j, w in enumerate(ws):
+            if stop():
+                break
+            progress(j, len(ws), f"비교 LOT {k + 1}/{len(PAIR_LOTS)} {lot.name}"[:70])
+            col.take_files(w, f"{arc_lot}/{w.name}")
+            wafers += 1
+        say(f"비교 LOT {lot}  웨이퍼 {len(ws)}")
+    pair_raw = col.raw                                     # 아래 용량·시간 한도는 비교 LOT 을 뺀 양으로 잰다
+    deadline = time.time() + MINUTES * 60
 
     roots = nas_roots()
     say(f"Scanresult {len(roots)}곳: " + ", ".join(str(r) for r in roots))

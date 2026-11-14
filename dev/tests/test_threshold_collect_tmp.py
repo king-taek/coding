@@ -93,6 +93,25 @@ def test_collects_only_product_jobs_and_drops_useless_files(tmp_path, monkeypatc
     assert "W02/Recipe.ini" in z.read("중복목록.txt").decode()
 
 
+def test_pair_lots_take_every_wafer_first(tmp_path, monkeypatch):
+    """비교 스캔 LOT(같은 웨이퍼를 Contrast 기준만 바꿔 스캔)은 웨이퍼 수 제한 없이 전부 담고,
+    못 찾은 주소는 요약에 남긴다."""
+    tool = _tool()
+    lot = tmp_path / "4F-AOI-05" / "Scanresult" / "R_TB500_LIVE_PI4 - Enhanced" / "Setup1" / "YDD-Contrast Avg24"
+    for w in ("W01", "W02", "W03"):
+        _wafer(lot / w)
+    monkeypatch.setattr(tool, "PAIR_LOTS", [str(lot), str(tmp_path / "없는폴더")])
+    monkeypatch.setattr(tool, "nas_roots", lambda: [])
+    folder, wafers, _ = tool.run(tmp_path / "desk")
+    z = zipfile.ZipFile(next(folder.glob("*.zip")))
+    flts = [n for n in z.namelist() if n.endswith("Surface.flt")]
+    assert wafers == 3 and len(flts) == 1                                # 내용이 같아 한 번만 담김
+    assert flts[0].startswith("비교스캔/4F-AOI-05/YDD-Contrast Avg24/")
+    dup = z.read("중복목록.txt").decode()
+    assert "W02/Surface.flt" in dup and "W03/Surface.flt" in dup
+    assert "비교 LOT 못 찾음" in z.read("요약.txt").decode()
+
+
 def test_plan_parts_fills_each_part_between_25_and_30_mb():
     tool = _tool()
     sizes = [("요약.txt", 1000)] + [(f"f{i}", s * MB) for i, s in enumerate([12, 7, 9, 4, 6, 3, 2, 8, 5, 1])]
