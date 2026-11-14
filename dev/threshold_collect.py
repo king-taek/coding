@@ -5,10 +5,11 @@
 (``ui/threshold_collect_tmp.py``)이 :func:`run` 을 부르고, 더블클릭으로도 돈다.
 
 무엇을 모으나:
-    · 이 PC 에서 보이는 ``AOI-*\\Scanresult\\<Job>`` 가운데 Job 이름에 KENDALL 또는 TB500 이 든 것
-    · Job · Setup 폴더 바로 아래 파일, Job 마다 최근 LOT :data:`LOTS` 개의 LOT 폴더 바로 아래 파일
+    · :data:`KNOWN_LOTS` — 장비 스캔 기록(AOI_capacity.csv, 2026-11-15)에서 고른 최근 Kendall · TB500 LOT.
+      NAS 를 훑지 않고 ``<장비>\\Scanresult\\<Job>\\<Setup>\\<LOT>`` 로 바로 찾아간다
+    · 그 Job · Setup · LOT 폴더 바로 아래 파일
     · LOT 마다 웨이퍼 :data:`WAFERS` 장의 폴더 안 파일(하위 폴더 2단계까지)
-    · :data:`PAIR_LOTS` — 같은 웨이퍼를 Contrast 기준만 바꿔 스캔한 LOT 은 **웨이퍼 전부**를 먼저 모은다
+    · :data:`PAIR_LOTS` — 같은 웨이퍼(:data:`PAIR_WAFER`)를 Contrast 기준만 바꿔 스캔한 LOT 에서 그 웨이퍼를 먼저 모은다
       (미리보기의 '새로 빠짐' 예측을 실제 스캔과 맞춰 보는 자료, 2026-11-14 사용자 지정)
 무엇을 버리나(확실히 필요 없는 것):
     · 사진 · 영상 · 압축 파일 — 사진은 **이름만** ``사진목록.txt`` 에 남긴다(LIVE 이름에 결함 이름이 든다)
@@ -25,6 +26,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import time
 import zipfile
 from datetime import datetime
@@ -33,7 +35,6 @@ from pathlib import Path
 PRODUCTS = ("KENDALL", "TB500")
 UNC_SHARES = [r"\\10.142.80.91\nas3-1"]
 WAFER_MARK = ("ColorImageGrabingInfo.ini", "Params_WaferInfo.ini")
-LOTS = 3            # Job 마다 최근 LOT 몇 개
 WAFERS = 2          # LOT 마다 웨이퍼 몇 장
 MINUTES = 60        # 전체 수집 시간 상한 — 지나면 거기까지 모은 것으로 정리한다(2026-11-14 사용자 지정: 최대 1시간)
 FILE_MB = 20        # 이보다 큰 파일은 이름만 남긴다
@@ -43,15 +44,56 @@ MIN_PART_MB = 25
 SKIP_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".gif",
             ".avi", ".mp4", ".wmv", ".zip", ".7z", ".rar", ".gz", ".cab"}
 IMG_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".gif"}
-# 같은 웨이퍼를 Contrast 기준(Avg24~28)만 바꿔 스캔한 LOT — 사용자가 준 주소 그대로(2026-11-14).
-# 이 드라이브가 없으면 UNC_SHARES 아래 같은 경로를 본다.
+# 같은 웨이퍼를 Contrast 기준(Avg24~28)만 바꿔 스캔한 LOT(2026-11-14 사용자 지정, 2026-11-15 스캔 기록으로 고침).
+# 스캔 기록상 전부 웨이퍼 20234838EWG1(슬롯 18): Avg24 2309 → Avg26 644 → Avg27 353 → Avg28 164 개.
+# 사용자가 준 AOI-04 'YDD' 에는 다른 웨이퍼(35174140EWD4 …)만 있어 같은 웨이퍼가 든 'YDD-No Image'(43211 개)로
+# 바꾸고, 빠져 있던 AOI-03 Avg28 을 더했다.  이 드라이브가 없으면 UNC_SHARES 아래 같은 경로를 본다.
+PAIR_WAFER = "20234838EWG1"
 PAIR_LOTS = [
     r"I:\4F-AOI-05\Scanresult\R_TB500_LIVE_PI4 - Enhanced\Setup1\YDD_Contrast Avg28_AOI-5",
     r"I:\4F-AOI-05\Scanresult\R_TB500_LIVE_PI4 - Enhanced\Setup1\YDD-Contrast Avg24",
     r"I:\4F-AOI-05\Scanresult\R_TB500_LIVE_PI4 - Enhanced\Setup1\YDD-Contrast Avg26",
     r"I:\4F-AOI-05\Scanresult\R_TB500_LIVE_PI4 - Enhanced\Setup1\YDD-Contrast Avg27",
-    r"I:\4F-AOI-04\Scanresult\R_TB500_LIVE_PI4 - Enhanced\Setup1\YDD",
+    r"I:\4F-AOI-04\Scanresult\R_TB500_LIVE_PI4 - Enhanced\Setup1\YDD-No Image",
     r"I:\4F-AOI-04\Scanresult\R_TB500_LIVE_PI4 - Enhanced\Setup1\YDD_Contrast Avg28_AOI-4",
+    r"I:\4F-AOI-03\Scanresult\R_TB500_LIVE_PI4 - Enhanced\Setup1\YDD_Contrast Avg28_AOI-3",
+]
+# 장비 스캔 기록(AOI_capacity.csv, 2026-11-15 사용자 제공)에서 고른 LOT — (장비, Job, Setup, LOT).
+# Camtek 장비 · Pass · 웨이퍼 5장 이상 · 이름에 TEST 없는 LOT 중 Job 마다 가장 최근 것, 최근 Job 순으로
+# Kendall 20 · TB500 10(TB500 은 이미 모은 자료가 많다).  NAS 에서 지워졌으면 '못 찾음' 으로 남긴다.
+KNOWN_LOTS = [
+    # Kendall
+    ('AOI-16', 'R_KENDALL_A0_PI5', 'SETUP', 'BAD-PIDS5'),  # 2026-11-13 25장
+    ('AOI-1', '2D@RE-KENDALL_MEOL_0859275PD-0C', 'REVERSEETCH', '2DG-1113S'),  # 2026-11-13 12장
+    ('AOI-13', 'R_KENDALL_A0_PI6_0126', 'SETUP', 'GVS-PIDS3'),  # 2026-11-13 27장
+    ('AOI-15', 'R_KENDALL_A0_PI6_0223', 'SETUP', 'DDU-PIDS3'),  # 2026-11-13 25장
+    ('AOI-16', 'R_KENDALL_A0_PI6_0126', 'SETUP', 'PAD-PIDS3'),  # 2026-11-13 25장
+    ('AOI-21', 'R_Kendall A0_PI3', 'Setup1', 'CUV-PIDS9'),  # 2026-11-13 25장
+    ('AOI-1', '2D@R2-KENDALL_MEOL_0859275PD_BS_CAMTEK', '6311', 'HNG 1112N'),  # 2026-11-13 6장
+    ('AOI-7', '2D@R2-KENDALL_MEOL_0859275PD-0C', '6321', '2HG 1112N'),  # 2026-11-13 5장
+    ('AOI-21', 'R_Kendall A0_PI4', 'Setup1', 'CUL-PIDS7'),  # 2026-11-12 48장
+    ('AOI-15', 'R_KENDALL_A0_PI5', 'SETUP', 'AYV-PIDS5'),  # 2026-11-12 24장
+    ('AOI-10', '2D@R2-KENDALL_MEOL_0859275PD-0C', '6321', '2CB 1111N'),  # 2026-11-11 7장
+    ('AOI-13', 'R_KENDALL_A0_FS', 'SETUP', 'AWB-FS-DIA'),  # 2026-11-11 5장
+    ('AOI-5', '2D@RE-KENDALL MEOL_0859275PD', '6412', 'ACF 1111D'),  # 2026-11-11 10장
+    ('AOI-3', 'R_Kendall LIVE_0859275PD_R-Etch', 'MSFT Kendall', '2TL 1111D'),  # 2026-11-11 10장
+    ('AOI-15', 'R_Kendall A0_0859275PD_REVERSE', 'SETUP', 'MCX-1110S'),  # 2026-11-10 6장
+    ('AOI-5', 'R_MSFT KENDALL_0859275PD_REVERSE', 'R-Etch', 'L7G'),  # 2026-11-10 5장
+    ('AOI-13', 'R_KENDALL_A0_PI5', 'SETUP', 'AYY-REWORK_1110D'),  # 2026-11-10 25장
+    ('AOI-15', 'R_KENDALL_A0_PI3_0317', '6412', 'CUU-PIDS9'),  # 2026-11-10 25장
+    ('AOI-13', 'R_KENDALL_A0_PI2', '6412', 'CTY-PIDS11'),  # 2026-11-09 25장
+    ('AOI-15', 'R_MSFT_Kendall_0859275PD_BS-CAMTEK', 'SET UP', 'MBC-1107S 3D RE'),  # 2026-11-07 6장
+    # TB500
+    ('4F-AOI-05', 'TB500_RDL2 - Multi', 'Setup1', 'TNY'),  # 2026-11-13 25장
+    ('AOI-13', 'R_TB500 LIVE_FS', '6324', 'LMW-DIA'),  # 2026-11-13 6장
+    ('4F-AOI-01', '2D@RE-ASTB500-SP822-8MAY_0857984AY', '6412', 'GAV'),  # 2026-11-13 8장
+    ('AOI-3', 'R_TB500 LIVE_FS', '6324', 'WGH-FS DIA'),  # 2026-11-13 6장
+    ('4F-AOI-01', '2D@R2-ASTB500-SP822-8MAY_0857984AY', '6321', 'BPK'),  # 2026-11-13 8장
+    ('4F-AOI-02', '2D@R2-ASTB500-SP822-8MAY_0857984AY', '6321', 'BPC'),  # 2026-11-13 7장
+    ('AOI-17', 'TB500_RDL3 - Multi', 'Setup1', 'BTA-RDL3'),  # 2026-11-13 23장
+    ('AOI-10', '2D@R2-ASTB500-SM822-8MAY_0860154PD_BS UBM', 'SETUP', 'YPH_1113S'),  # 2026-11-13 8장
+    ('AOI-1', 'R_TB500 LIVE_0860154PD_BS UBM', 'SET UP', 'BTM-1113S'),  # 2026-11-13 8장
+    ('4F-AOI-03', 'TB500_RDL2 - Multi', 'Setup1', 'HYP'),  # 2026-11-13 25장
 ]
 # QORVO — Conder 맵 txt 가 사진 이름과 (col 1, row 2) 어긋나는지 다른 LOT 에서도 보려는 자료.
 CONDER_ROOTS = [r"\\k5cifsn2\k5tsvdata$\1. Conder Scan"]
@@ -65,18 +107,14 @@ _LOT_DEPTH = 4      # Job 아래 LOT 을 찾는 깊이(Setup → [구분] → LO
 _WAFER_DEPTH = 2    # 웨이퍼 폴더 안 하위 폴더 깊이
 
 
-def is_product_job(name: str) -> bool:
-    up = name.upper()
-    return any(p in up for p in PRODUCTS)
-
-
 def nas_roots():
-    """이 PC 에서 보이는 ``<드라이브 또는 공유>\\AOI-*\\Scanresult`` 전부(같은 장비는 한 번만)."""
+    """이 PC 에서 보이는 ``<드라이브 또는 공유>\\*AOI-*\\Scanresult`` 전부(같은 장비는 한 번만).
+    ``4F-AOI-05`` 같은 4층 장비도 든다(예전 ``AOI-*`` 는 놓쳤다)."""
     bases = [Path(f"{c}:\\") for c in "DEFGHIJKLMNOPQRSTUVWXYZ"] + [Path(u) for u in UNC_SHARES]
     out, seen = [], set()
     for b in bases:
         try:
-            for d in sorted(b.glob("AOI-*")):
+            for d in sorted(b.glob("*AOI-*")):
                 sr = next((p for p in (d / "Scanresult", d / "ScanResult", d / "ScanResults") if p.is_dir()), None)
                 if sr is not None and d.name.upper() not in seen:
                     seen.add(d.name.upper())
@@ -84,6 +122,11 @@ def nas_roots():
         except OSError:
             continue
     return out
+
+
+def _aoi_key(name: str) -> str:
+    """장비 이름 비교용 — 대소문자와 번호 앞 0 을 무시한다(기록의 'AOI-1' = 폴더 'AOI-01')."""
+    return re.sub(r"-0*(\d+)$", r"-\1", name.strip().upper())
 
 
 def resolve_pair(raw: str):
@@ -369,6 +412,10 @@ def run(out: Path, progress=None, stop=None):
         arc_lot = f"비교스캔/{aoi}/{lot.name}"
         col.take_top_files(lot, arc_lot)
         ws = sorted((p for _, p, _, _ in _entries(lot)[0] if is_wafer(p)), key=lambda p: p.name)
+        mine = [p for p in ws if PAIR_WAFER.upper() in p.name.upper()]
+        if not mine:
+            say(f"비교 LOT 에 {PAIR_WAFER} 없음 — 웨이퍼 전부 담음: {lot}")
+        ws = mine or ws
         for j, w in enumerate(ws):
             if stop() or time.time() > deadline:
                 break
@@ -380,34 +427,34 @@ def run(out: Path, progress=None, stop=None):
         wafers += collect_qorvo(col, say, progress, stop, end=deadline)
     pair_raw = col.raw                                     # 아래 용량 한도는 비교 LOT·QORVO 를 뺀 양으로 잰다(시간은 전체 1시간)
 
-    roots = nas_roots()
-    say(f"Scanresult {len(roots)}곳: " + ", ".join(str(r) for r in roots))
+    roots = {_aoi_key(r.parent.name): r for r in nas_roots()}
+    say(f"Scanresult {len(roots)}곳: " + ", ".join(sorted(roots)))
     jobs = []
-    for r in roots:
-        for name, path, _, _ in sorted(_entries(r)[0]):
-            if is_product_job(name):
-                jobs.append((r.parent.name, path))
-    say(f"Kendall·TB500 Job {len(jobs)}개")
-    for i, (aoi, job) in enumerate(jobs):
+    for i, (aoi, job, setup, lot_name) in enumerate(KNOWN_LOTS):
         if expired():
             say("시간 제한·중지·용량 한도로 여기서 멈춤")
             break
-        progress(i, len(jobs), f"{aoi} {job.name}"[:70])
-        arc_job = f"{aoi}/{job.name}"
-        col.take_top_files(job, arc_job)
-        setups = sorted(_entries(job)[0], key=lambda t: -t[2])[:10]
-        for name, path, _, _ in setups:                    # Setup 폴더 바로 아래 파일(레시피 사본이 있을 수 있다)
-            if not is_wafer(path):
-                col.take_top_files(path, f"{arc_job}/{name}")
-        for lot in find_lots(job, LOTS, expired):
-            arc_lot = f"{arc_job}/{lot.relative_to(job).as_posix()}"
-            col.take_top_files(lot, arc_lot)
-            for w in pick_wafers(lot, WAFERS):
-                if expired():
-                    break
-                col.take_files(w, f"{arc_lot}/{w.name}")
-                wafers += 1
-                say(f"  웨이퍼 {wafers}  {w}")
+        progress(i, len(KNOWN_LOTS), f"{aoi} {lot_name}"[:70])
+        sr = roots.get(_aoi_key(aoi))
+        lot = sr / job / setup / lot_name if sr else None
+        if lot is not None and not lot.is_dir():           # Setup 과 LOT 사이에 구분 폴더가 한 단 더 있는 Job
+            lot = next((d / lot_name for _, d, _, _ in _entries(sr / job / setup)[0]
+                        if (d / lot_name).is_dir()), lot)
+        if lot is None or not lot.is_dir():
+            say(f"LOT 못 찾음: {aoi}\\{job}\\{setup}\\{lot_name}")
+            continue
+        jobs.append((aoi, sr / job))
+        arc_job = f"{aoi}/{job}"
+        col.take_top_files(sr / job, arc_job)
+        col.take_top_files(sr / job / setup, f"{arc_job}/{setup}")
+        arc_lot = f"{arc_job}/{lot.relative_to(sr / job).as_posix()}"
+        col.take_top_files(lot, arc_lot)
+        for w in pick_wafers(lot, WAFERS):
+            if expired():
+                break
+            col.take_files(w, f"{arc_lot}/{w.name}")
+            wafers += 1
+            say(f"  웨이퍼 {wafers}  {w}")
     summary = "\n".join([
         f"Threshold 자료 수집 {stamp}  ({time.time() - t0:.0f}초)",
         f"제품: {', '.join(PRODUCTS)} · Job {len(jobs)} · 웨이퍼 {wafers} · 담은 파일 {col.files}"
