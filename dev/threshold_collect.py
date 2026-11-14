@@ -290,6 +290,8 @@ def collect_kla_pairs(col, say, progress, stop, end=None):
         if lot is None:
             say(f"KLA 짝 Camtek LOT 못 찾음: {aoi}\\{job}\\{setup}\\{lot_name}")
         for wid, slot in zip(wids, slots):
+            if stop() or time.time() > deadline:
+                break
             if lot is not None:
                 w = next((p for _, p, _, _ in _entries(lot)[0] if wid.upper() in p.name.upper() and is_wafer(p)), None)
                 if w is None:
@@ -332,6 +334,8 @@ def collect_qorvo(col, say, progress, stop, end=None):
         col.take_top_files(sr / job, f"QORVO/Scanresult/{sr.parent.name}/{job}")
         col.take_top_files(lot, arc_lot)
         for w in pick_wafers(lot, QORVO_KNOWN_WAFERS):
+            if expired():
+                break
             progress(0, 0, f"QORVO {job} {w.name}"[:70])
             col.take_files(w, f"{arc_lot}/{w.name}")
             wafers += 1
