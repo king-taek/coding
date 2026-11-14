@@ -81,6 +81,7 @@ def test_collects_known_lots_and_drops_useless_files(tmp_path, monkeypatch):
     monkeypatch.setattr(tool, "PAIR_LOTS", [])
     monkeypatch.setattr(tool, "CONDER_ROOTS", [])
     monkeypatch.setattr(tool, "KLA_PAIRS", [])
+    monkeypatch.setattr(tool, "CONDER_ROW_LOTS", [])
     monkeypatch.setattr(tool, "QORVO_KNOWN_LOTS", [])
     monkeypatch.setattr(tool, "KNOWN_LOTS", [
         ("AOI-1", "R_KENDALL_A0_PI5", "SETUP", "LOT1"),
@@ -117,6 +118,7 @@ def test_pair_lots_take_only_the_compared_wafer(tmp_path, monkeypatch):
     monkeypatch.setattr(tool, "nas_roots", lambda: [])
     monkeypatch.setattr(tool, "CONDER_ROOTS", [])
     monkeypatch.setattr(tool, "KLA_PAIRS", [])
+    monkeypatch.setattr(tool, "CONDER_ROW_LOTS", [])
     monkeypatch.setattr(tool, "QORVO_KNOWN_LOTS", [])
     folder, wafers, _ = tool.run(tmp_path / "desk")
     names = zipfile.ZipFile(next(folder.glob("*.zip"))).namelist()
@@ -142,6 +144,7 @@ def test_pair_lots_take_every_wafer_first(tmp_path, monkeypatch):
     monkeypatch.setattr(tool, "nas_roots", lambda: [])
     monkeypatch.setattr(tool, "CONDER_ROOTS", [])
     monkeypatch.setattr(tool, "KLA_PAIRS", [])
+    monkeypatch.setattr(tool, "CONDER_ROW_LOTS", [])
     monkeypatch.setattr(tool, "QORVO_KNOWN_LOTS", [])
     folder, wafers, _ = tool.run(tmp_path / "desk")
     z = zipfile.ZipFile(next(folder.glob("*.zip")))
@@ -196,6 +199,7 @@ def test_qorvo_known_lots_come_before_conder(tmp_path, monkeypatch):
     monkeypatch.setattr(tool, "nas_roots", lambda: [sr])
     monkeypatch.setattr(tool, "PAIR_LOTS", [])
     monkeypatch.setattr(tool, "KLA_PAIRS", [])
+    monkeypatch.setattr(tool, "CONDER_ROW_LOTS", [])
     monkeypatch.setattr(tool, "KNOWN_LOTS", [])
     monkeypatch.setattr(tool, "CONDER_ROOTS", [str(tmp_path / "conder")])
     monkeypatch.setattr(tool, "QORVO_KNOWN_LOTS", [("AOI-14", "R_Qorvo XP2100_0861004PD_RDL1", "SETUP", "MMG"),
@@ -280,3 +284,37 @@ def test_kla_folder_uses_wafer_start_day_across_midnight(tmp_path, monkeypatch):
     assert tool.find_kla_folder(lot, "2026-11-10-02-08", 25) == want
     assert tool.find_kla_folder(lot, "2026-11-10-02-07", 25) == want      # 1분 어긋나도 같은 슬롯
     assert tool.find_kla_folder(lot, "2026-11-09-22-18", 25) is None      # LOT 실행 시각으로는 못 찾는다
+
+
+def test_conder_row_lots_take_step_files_and_target_wafer_photo_names(tmp_path, monkeypatch):
+    """Conder LOT 은 이름 끝 '(코드)' 로 찾고, 단계 폴더의 맵 · lot · csv 와 대상 웨이퍼 사진 이름만 담는다."""
+    tool = _tool()
+    base = tmp_path / "1. Conder Scan"
+    other = base / "1. OTHER" / "3. X" / "5. 6AAA (DDU)"                 # 코드는 같지만 대상 웨이퍼가 없다
+    (other / "1. PI" / "ZZZ").mkdir(parents=True)
+    lot = base / "9. MSFT KENDALL" / "2. KENDALL A0" / "7. 6BBB (DDU)"
+    step = lot / "1. PI6" / "1. OR"
+    (step / "E5025794EWF5").mkdir(parents=True)
+    (step / "E5025794EWF5" / "PI6_3_5_10.5_20.5.jpg").write_bytes(b"jpg")
+    (step / "E5025794EWF5.txt").write_text("DEVICE:K\nROWCT:3\n")
+    (step / "NOTME01EWA1").mkdir()
+    (step / "NOTME01EWA1" / "PI6_1_1_1_1.jpg").write_bytes(b"jpg")
+    (step / "NOTME01EWA1.txt").write_text("DEVICE:K\nROWCT:4\n")
+    (lot / "1. PI6" / "6BBB@6412.lot").write_text("Lot")
+    (lot / "1. PI6" / "6BBB@6412.csv").write_text("Wafer ID")
+    monkeypatch.setattr(tool, "CONDER_ROOTS", [str(base)])
+    monkeypatch.setattr(tool, "CONDER_ROW_LOTS", [("DDU", ["E5025794EWF5"]), ("PAD", ["X"])])
+    for name in ("PAIR_LOTS", "KLA_PAIRS", "QORVO_KNOWN_LOTS", "KNOWN_LOTS"):
+        monkeypatch.setattr(tool, name, [])
+    monkeypatch.setattr(tool, "nas_roots", lambda: [])
+    folder, wafers, _ = tool.run(tmp_path / "desk")
+    z = zipfile.ZipFile(next(folder.glob("*.zip")))
+    names, photos = z.namelist(), z.read("사진목록.txt").decode()
+    arc = "Conder번호확인/9. MSFT KENDALL/2. KENDALL A0/7. 6BBB (DDU)/1. PI6"
+    assert wafers == 1
+    assert f"{arc}/6BBB@6412.lot" in names and f"{arc}/6BBB@6412.csv" in names
+    assert f"{arc}/1. OR/E5025794EWF5.txt" in names
+    assert f"{arc}/1. OR/E5025794EWF5/PI6_3_5_10.5_20.5.jpg" in photos
+    assert "NOTME01EWA1/" not in photos                                    # 다른 웨이퍼 사진은 안 담는다
+    assert "1. OTHER" not in photos + "".join(names)
+    assert "못 찾음: (PAD)" in z.read("요약.txt").decode()

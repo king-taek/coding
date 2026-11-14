@@ -19,6 +19,7 @@
       Conder ``*QORVO*`` 아래 LOT 폴더의 맵 txt · csv · lot 와 웨이퍼 사진 **이름**, 그 Conder 맵의
       DEVICE 앞 :data:`QORVO_KEY_LEN` 글자가 Job 이름에 든 Scanresult LOT 의 **웨이퍼 전부**.
       스캔 기록에서 고른 QORVO Scanresult LOT(:data:`QORVO_KNOWN_LOTS`)은 Conder 보다 먼저 모은다.
+    · :data:`CONDER_ROW_LOTS` — Conder LIVE 파일명 번호로 앱 row 를 확인할 Kendall LOT(맵 txt · lot · csv · 사진 이름).
     · :data:`KLA_PAIRS` — 같은 웨이퍼를 KLA 와 Camtek 이 같은 층에서 찍은 것(스캔 기록, 2026-11-15 사용자 요청).
       Camtek 웨이퍼 폴더와 KLA 웨이퍼 폴더(정보파일 · 사진 이름)를 ``KLA비교/<KLA LOT>/`` 아래 나란히 담는다.
 결과: 바탕화면 ``Threshold수집_<시각>\\`` 폴더 안 zip.  :data:`PART_MB` 를 넘으면 나누되,
@@ -151,6 +152,17 @@ KLA_PAIRS = [
     ('K2', 'INTP-KENDALL-82-2604@6342', ['2026-08-24-16-20', '2026-08-24-16-16'], 'AOI-3', 'R_MSFT_KENDALL A0_FS', '6324', 'CSV-FS DIA', ['W6960048XYC6', 'W6960176XYG7'], [25, 23]),
 ]
 KLA_MINUTES = 12
+# Conder LIVE 파일명 col/row(장비 화면 번호)로 앱 row 를 확인할 자료(2026-11-15, 정보 찾기 쓰레드 요청).
+# (Conder LOT 코드, [웨이퍼 ID]) — `1. Conder Scan` 아래 LOT 폴더 이름이 `(코드)` 로 끝나고 그 안에 웨이퍼 폴더가 있는 곳.
+# 공정 단계 폴더마다 맵 txt · .lot · .csv 를 담고, 대상 웨이퍼 폴더는 사진 이름 전부를 남긴다.
+CONDER_ROW_LOTS = [
+    ('DDU', ['E5025794EWF5', 'E5025779EWD1']),   # 확인 대상(번호표 없음) AOI-15 R_KENDALL_A0_PI6_0223/SETUP/DDU-PIDS3
+    ('PAD', ['07075E39EWF3', '54085438EWG1']),   # 대조군(번호표 있음) AOI-16 R_KENDALL_A0_PI6_0126
+    ('GVS', ['07295277EWE3', '08235229EWC1']),   # 대조군 AOI-13 R_KENDALL_A0_PI6_0126
+    ('CTY', ['00NUR030XYA3', '00NUR042XYG0']),   # 대조군 AOI-13 R_KENDALL_A0_PI2/6412
+]
+CONDER_ROW_MINUTES = 10
+CONDER_FIRST = ("KENDALL", "MSFT", "MICROSOFT")   # 이 이름이 든 고객 폴더부터 본다
 _LOT_DEPTH = 4      # Job 아래 LOT 을 찾는 깊이(Setup → [구분] → LOT)
 _WAFER_DEPTH = 2    # 웨이퍼 폴더 안 하위 폴더 깊이
 
@@ -325,6 +337,58 @@ def collect_kla_pairs(col, say, progress, stop, end=None):
             else:
                 col.take_files(k, f"{arc}/KLA/{k.name}")
                 say(f"KLA {kdev} {k}  ↔  {wid}")
+    return n
+
+
+def collect_conder_rows(col, say, progress, stop, end=None):
+    """:data:`CONDER_ROW_LOTS` — Conder LOT(이름 끝 ``(코드)``)의 단계 폴더 파일과 대상 웨이퍼 사진 이름.  담은 웨이퍼 수."""
+    deadline = time.time() + CONDER_ROW_MINUTES * 60
+    if end is not None:
+        deadline = min(deadline, end)
+
+    def expired():
+        return stop() or time.time() > deadline
+
+    want = {code.upper(): {w.upper() for w in ws} for code, ws in CONDER_ROW_LOTS}
+    left, n = dict(want), 0
+
+    def has_wafer(d: Path, ws, k=0):
+        dirs = _entries(d)[0]
+        if any(any(w in name.upper() for w in ws) for name, _, _, _ in dirs):
+            return True
+        return k < 2 and any(has_wafer(p, ws, k + 1) for _, p, _, _ in dirs)
+
+    def take_lot(d: Path, arc: str, ws, k=0):
+        nonlocal n
+        dirs, files = _entries(d)
+        maps = {name[:-4].upper() for name, _, _, _ in files if name.lower().endswith(".txt")}
+        col.take_top_files(d, arc)                               # 맵 txt · .lot · .csv
+        for name, p, _, _ in sorted(dirs):
+            if expired():
+                return
+            if any(w in name.upper() for w in ws):
+                col.take_files(p, f"{arc}/{name}", depth=_WAFER_DEPTH)   # 사진 이름 전부
+                n += 1
+            elif name.upper() not in maps and k < 3:              # 다른 웨이퍼 폴더는 건너뛰고 단계 폴더만 내려간다
+                take_lot(p, f"{arc}/{name}", ws, k + 1)
+
+    for base in (Path(r) for r in CONDER_ROOTS):
+        customers = sorted(_entries(base)[0], key=lambda e: (not any(s in e[0].upper() for s in CONDER_FIRST), e[0]))
+        for cust_name, cust, _, _ in customers:
+            for dev_name, dev, _, _ in _entries(cust)[0]:
+                if not left or expired():
+                    break
+                progress(0, 0, f"Conder 번호 확인 {cust_name}/{dev_name}"[:70])
+                for lot_name, lot, _, _ in _entries(dev)[0]:
+                    m = re.search(r"\(([^()]+)\)\s*$", lot_name)
+                    code = m.group(1).strip().upper() if m else None
+                    if code not in left or not has_wafer(lot, left[code]):
+                        continue
+                    take_lot(lot, f"Conder번호확인/{cust_name}/{dev_name}/{lot_name}", want[code])
+                    say(f"Conder 번호 확인 LOT {lot}")
+                    left.pop(code)
+    for code in left:
+        say(f"Conder 번호 확인 LOT 못 찾음: ({code})")
     return n
 
 
@@ -572,6 +636,8 @@ def run(out: Path, progress=None, stop=None):
             col.take_files(w, f"{arc_lot}/{w.name}")
             wafers += 1
         say(f"비교 LOT {lot}  웨이퍼 {len(ws)}")
+    if not stop():
+        wafers += collect_conder_rows(col, say, progress, stop, end=deadline)
     if not stop():
         wafers += collect_kla_pairs(col, say, progress, stop, end=deadline)
     if not stop():
