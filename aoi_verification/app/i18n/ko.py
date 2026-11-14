@@ -1032,6 +1032,7 @@ EXPORT_ORIGINAL_QUALITY_TOOLTIP = (
 DEFECT_RECIPE_ZONE_LABEL = "recipe / zone"
 DEFECT_RECIPE_ZONE_VALUE_FMT = "{recipe} / {zone}"
 DEFECT_RECIPE_ZONE_FMT = "recipe {recipe} / zone {zone}"
+DEFECT_RECIPE_NONE_VALUE = "—"  # Surface.flt 에 recipe 칸이 없는 구형 장비
 DEFECT_AREA_LABEL = "area"
 DEFECT_AREA_VALUE_FMT = "{v:.2f} ㎛²"
 DEFECT_WIDTH_LABEL = "width"
