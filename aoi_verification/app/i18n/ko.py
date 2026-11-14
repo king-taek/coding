@@ -516,58 +516,18 @@ MENU_CHECK_UPDATE = "업데이트 확인"
 SETUP_SECTION_FOLDER = "1  폴더"
 SETUP_SECTION_MODE = "2  방식"
 
-# ── [좌표수집-임시] 시작 — 수집·분석이 끝나면 이 블록을 통째로 지운다 ─────────────
-COORD_COLLECT_BUTTON = "집중 자료 수집"
-COORD_COLLECT_TITLE = "집중 자료 수집"
-COORD_COLLECT_ASK = (
-    "NAS 의 Scanresult 와 Conder Scan 에서 번호를 아직 못 정하는 제품(SNU-EDGE, AMD Sepio, PHU, PVL-PCM, T254)만 "
-    "집중해서 모읍니다. "
-    "읽기만 하고 사진은 열지 않습니다. 최대 30분이 걸리고, 중지하면 그때까지 모은 것을 저장합니다."
-)
-COORD_COLLECT_START = "수집 시작"
-COORD_COLLECT_RUNNING = "집중 분석할 제품을 찾는 중"
-COORD_COLLECT_DONE_FMT = (
-    "웨이퍼 폴더 {wafers}개를 확인했고 이상 폴더는 {odd}개입니다.\n"
-    "아래 폴더에 생긴 '집중수집.zip' 을 올려 주세요(20 MB 를 넘으면 여러 개로 나뉩니다).\n{path}"
-)
-COORD_COLLECT_NO_TOOL = "수집 도구(dev/coord_lab.py)가 없습니다. 개발자 모드에서 dev 브랜치로 설치해 주세요."
-COORD_COLLECT_FAIL_FMT = "수집하다 멈췄습니다: {error}"
-COORD_COLLECT_STOPPING = "지금까지 모은 것을 저장하는 중 (한 번 더 누르면 화면을 바로 풉니다)"
-COORD_COLLECT_STOPPED = (
-    "화면을 먼저 풀었습니다. 저장이 끝나면 바탕화면 '프로그램 개발중\\분석용 자료 수집\\AOI 레시피 검증\\오늘 날짜' "
-    "폴더에 '집중수집.zip' 이 생깁니다."
-)
-COORD_COLLECT_NOTHING = (
-    "집중 분석할 제품의 웨이퍼를 찾지 못했습니다. 이 PC 에서 해당 장비 드라이브(M:, V: 등)가 보이는지 확인해 주세요."
-)
-COORD_COLLECT_SLIM_ASK_FMT = (
-    "이미 모은 수집 zip 이 여러 개 있습니다.\n{folder}\n"
-    "다시 수집하지 않고, 올리기 쉽게 작은 zip 으로 줄여 묶을까요? 원래 zip 은 그대로 둡니다."
-)
-COORD_COLLECT_SLIM_START = "줄여 묶기"
-COORD_COLLECT_SLIM_SKIP = "새로 수집"
-COORD_COLLECT_SLIM_DONE_FMT = (
-    "{before:.0f} MB 를 {after:.1f} MB 로 줄였습니다. 아래 zip {n}개만 올려 주세요.\n{names}"
-)
-COORD_COLLECT_WINDING_DOWN = "방금 중지한 수집이 아직 정리 중입니다. 잠시 뒤 다시 눌러 주세요."
-# 저장 자리: 바탕화면\프로그램 개발중\분석용 자료 수집\프로젝트명\YYYYMMDD\짧은이름.zip (사용자 지시 2026-11-14)
-COORD_COLLECT_SAVE_ROOT = ("프로그램 개발중", "분석용 자료 수집")
-COORD_COLLECT_PROJECT = "AOI 레시피 검증"
-COORD_COLLECT_ZIP_NAME = "집중수집"
-# ── [좌표수집-임시] 끝 ─────────────────────────────────────────────────────
-
 # ── [Threshold수집-임시] 시작 — 수집·분석이 끝나면 이 블록을 통째로 지운다 ───────────
 THRESH_COLLECT_BUTTON = "Threshold 자료 수집"
 THRESH_COLLECT_TITLE = "Threshold 자료 수집"
 THRESH_COLLECT_ASK = (
-    "NAS 의 Scanresult 에서 Kendall · TB500 레시피의 설정 · 결과 파일을 모읍니다. "
+    "NAS 의 Scanresult 에서 Kendall · TB500 · QORVO 의 설정 · 결과 파일과 비교 웨이퍼 RichSurface 앞부분을 모읍니다. "
     "읽기만 하고, 사진은 이름만 적습니다. 최대 1시간이 걸리고, 중지하면 그때까지 모은 것을 저장합니다."
 )
 THRESH_COLLECT_START = "수집 시작"
 THRESH_COLLECT_RUNNING = "Kendall · TB500 자료를 모으는 중"
 THRESH_COLLECT_DONE_FMT = (
     "웨이퍼 {wafers}장 · 파일 {files}개를 모았습니다.\n"
-    "아래 폴더 안의 zip 을 전부 올려 주세요(30 MB 를 넘으면 여러 개로 나뉩니다).\n{path}"
+    "아래 폴더 안의 zip 을 전부 올려 주세요(28 MB 를 넘으면 여러 개로 나뉩니다).\n{path}"
 )
 THRESH_COLLECT_NO_TOOL = "수집 도구(dev/threshold_collect.py)가 없습니다. 개발자 모드에서 dev 브랜치로 설치해 주세요."
 THRESH_COLLECT_FAIL_FMT = "수집하다 멈췄습니다: {error}"
