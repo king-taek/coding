@@ -14,6 +14,9 @@
     · 사진 · 영상 · 압축 파일 — 사진은 **이름만** ``사진목록.txt`` 에 남긴다(LIVE 이름에 결함 이름이 든다)
     · :data:`FILE_MB` 를 넘는 파일 — 이름 · 크기만 ``파일목록.txt`` 에 남긴다
     · 내용이 똑같은 파일 — 한 번만 담고 ``중복목록.txt`` 에 적는다(레시피 사본이 웨이퍼마다 있다)
+    · QORVO(2026-11-14 사용자 요청) — Conder 와 Scanresult 가 맵을 다르게 그리는 문제의 자료.
+      Conder ``*QORVO*`` 아래 LOT 폴더의 맵 txt · csv · lot 와 웨이퍼 사진 **이름**, 그 Conder 맵의
+      DEVICE 앞 :data:`QORVO_KEY_LEN` 글자가 Job 이름에 든 Scanresult LOT 의 **웨이퍼 전부**.
 결과: 바탕화면 ``Threshold수집_<시각>\\`` 폴더 안 zip.  :data:`PART_MB` 를 넘으면 나누되,
 나눈 조각은 :data:`MIN_PART_MB` 이상이 되게 채운다(마지막 조각만 작을 수 있다).
 """
@@ -50,6 +53,14 @@ PAIR_LOTS = [
     r"I:\4F-AOI-04\Scanresult\R_TB500_LIVE_PI4 - Enhanced\Setup1\YDD",
     r"I:\4F-AOI-04\Scanresult\R_TB500_LIVE_PI4 - Enhanced\Setup1\YDD_Contrast Avg28_AOI-4",
 ]
+# QORVO — Conder 맵 txt 가 사진 이름과 (col 1, row 2) 어긋나는지 다른 LOT 에서도 보려는 자료.
+CONDER_ROOTS = [r"\\k5cifsn2\k5tsvdata$\1. Conder Scan"]
+QORVO_NAME = "QORVO"     # Conder 고객 폴더 이름(예: 575. QORVO US)
+QORVO_LOTS = 4           # Conder 장치 폴더마다 최근 LOT 몇 개
+QORVO_JOB_LOTS = 3       # Scanresult Job 마다 최근 LOT 몇 개(웨이퍼는 전부)
+QORVO_KEY_LEN = 8        # Conder 맵 DEVICE 앞 몇 글자로 Scanresult Job 을 찾나(W97218SGZ4BK16 → W97218SG)
+QORVO_MINUTES = 12
+QORVO_MB = 150          # QORVO 로 담는 원본 상한(die 맵이 웨이퍼당 약 10 MB)
 _LOT_DEPTH = 4      # Job 아래 LOT 을 찾는 깊이(Setup → [구분] → LOT)
 _WAFER_DEPTH = 2    # 웨이퍼 폴더 안 하위 폴더 깊이
 
@@ -106,6 +117,96 @@ def _entries(d: Path):
 
 def is_wafer(d: Path) -> bool:
     return any((d / m).is_file() for m in WAFER_MARK)
+
+
+def is_conder_lot(d: Path) -> bool:
+    """Conder LOT 폴더 — 하위 폴더(웨이퍼)와 같은 이름의 맵 ``.txt`` 가 하나라도 있다."""
+    dirs, files = _entries(d)
+    names = {n for n, _, _, _ in dirs}
+    return any(n.lower().endswith(".txt") and n[:-4] in names for n, _, _, _ in files)
+
+
+def conder_device(lot: Path):
+    """LOT 폴더의 맵 txt 첫 ``DEVICE:`` 값.  없으면 None."""
+    for n, p, _, size in _entries(lot)[1]:
+        if not n.lower().endswith(".txt") or size > 2 * 2 ** 20:
+            continue
+        try:
+            head = p.read_bytes()[:400].decode("latin-1")
+        except OSError:
+            continue
+        for line in head.splitlines():
+            if line.upper().startswith("DEVICE:") and line[7:].strip():
+                return line[7:].strip()
+    return None
+
+
+def find_conder_lots(root: Path, limit: int, expired, depth: int = 4):
+    """``root`` 아래 Conder LOT 폴더를 최근 것부터 ``limit`` 개."""
+    found = []
+
+    def visit(d: Path, k: int):
+        if len(found) >= limit or k > depth or expired():
+            return
+        if is_conder_lot(d):
+            found.append(d)
+            return
+        for _, p, _, _ in sorted(_entries(d)[0], key=lambda t: -t[2]):
+            visit(p, k + 1)
+            if len(found) >= limit or expired():
+                return
+
+    visit(root, 0)
+    return found
+
+
+def collect_qorvo(col, say, progress, stop):
+    """QORVO Conder LOT(맵 txt · 사진 이름) 과 같은 장치의 Scanresult LOT(웨이퍼 전부)을 모은다.  웨이퍼 수를 돌려준다."""
+    deadline = time.time() + QORVO_MINUTES * 60
+    start = col.raw
+
+    def expired():
+        return stop() or time.time() > deadline or col.raw - start > QORVO_MB * 2 ** 20
+
+    keys, wafers = set(), 0
+    for base in (Path(r) for r in CONDER_ROOTS):
+        customers = [p for n, p, _, _ in _entries(base)[0] if QORVO_NAME in n.upper()]
+        if not customers:
+            say(f"QORVO Conder 폴더 못 찾음: {base}")
+        for cust in customers:
+            for _, dev, _, _ in sorted(_entries(cust)[0], key=lambda t: -t[2]):
+                if expired():
+                    break
+                for lot in find_conder_lots(dev, QORVO_LOTS, expired):
+                    progress(0, 0, f"QORVO Conder {lot.name}"[:70])
+                    arc = f"QORVO/Conder/{lot.relative_to(cust).as_posix()}"
+                    col.take_top_files(lot, arc)
+                    for _, w, _, _ in sorted(_entries(lot)[0]):
+                        col.take_files(w, f"{arc}/{w.name}", depth=_WAFER_DEPTH)   # 사진 이름만(바로 아래)
+                    device = conder_device(lot)
+                    if device:
+                        keys.add(device[:QORVO_KEY_LEN].upper())
+                    say(f"QORVO Conder LOT {lot}  DEVICE {device}")
+    say(f"QORVO Scanresult Job 열쇠: {', '.join(sorted(keys)) or '없음'}")
+    for r in (nas_roots() if keys else []):
+        for name, job, _, _ in sorted(_entries(r)[0]):
+            if expired() or not any(k in name.upper() for k in keys):
+                continue
+            arc_job = f"QORVO/Scanresult/{r.parent.name}/{name}"
+            col.take_top_files(job, arc_job)
+            for lot in find_lots(job, QORVO_JOB_LOTS, expired):
+                arc_lot = f"{arc_job}/{lot.relative_to(job).as_posix()}"
+                col.take_top_files(lot, arc_lot)
+                for w in pick_wafers(lot, 50):
+                    if expired():
+                        break
+                    progress(0, 0, f"QORVO {name} {w.name}"[:70])
+                    col.take_files(w, f"{arc_lot}/{w.name}")
+                    wafers += 1
+                say(f"QORVO Scanresult LOT {lot}")
+    if expired():
+        say("QORVO: 시간 제한·중지·용량 한도로 여기서 멈춤")
+    return wafers
 
 
 def find_lots(job: Path, limit: int, expired):
@@ -272,7 +373,9 @@ def run(out: Path, progress=None, stop=None):
             col.take_files(w, f"{arc_lot}/{w.name}")
             wafers += 1
         say(f"비교 LOT {lot}  웨이퍼 {len(ws)}")
-    pair_raw = col.raw                                     # 아래 용량·시간 한도는 비교 LOT 을 뺀 양으로 잰다
+    if not stop():
+        wafers += collect_qorvo(col, say, progress, stop)
+    pair_raw = col.raw                                     # 아래 용량·시간 한도는 비교 LOT·QORVO 를 뺀 양으로 잰다
     deadline = time.time() + MINUTES * 60
 
     roots = nas_roots()
