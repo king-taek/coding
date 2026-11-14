@@ -561,7 +561,7 @@ THRESH_COLLECT_BUTTON = "Threshold 자료 수집"
 THRESH_COLLECT_TITLE = "Threshold 자료 수집"
 THRESH_COLLECT_ASK = (
     "NAS 의 Scanresult 에서 Kendall · TB500 레시피의 설정 · 결과 파일을 모읍니다. "
-    "읽기만 하고, 사진은 이름만 적습니다. 최대 40분이 걸리고, 중지하면 그때까지 모은 것을 저장합니다."
+    "읽기만 하고, 사진은 이름만 적습니다. 최대 1시간이 걸리고, 중지하면 그때까지 모은 것을 저장합니다."
 )
 THRESH_COLLECT_START = "수집 시작"
 THRESH_COLLECT_RUNNING = "Kendall · TB500 자료를 모으는 중"
