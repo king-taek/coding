@@ -43,8 +43,8 @@ WAFERS = 2          # LOT 마다 웨이퍼 몇 장
 MINUTES = 60        # 전체 수집 시간 상한 — 지나면 거기까지 모은 것으로 정리한다(2026-11-14 사용자 지정: 최대 1시간)
 FILE_MB = 20        # 이보다 큰 파일은 이름만 남긴다
 TOTAL_MB = 400      # 담은 원본이 이만큼 되면 그만 찾는다
-PART_MB = 30
-MIN_PART_MB = 25
+PART_MB = 28          # 올릴 수 있는 한도가 30 MB 보다 작다(30 MB 조각 2개가 안 올라감, 사용자 2026-11-15)
+MIN_PART_MB = 23
 SKIP_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".gif",
             ".avi", ".mp4", ".wmv", ".zip", ".7z", ".rar", ".gz", ".cab"}
 IMG_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".gif"}
