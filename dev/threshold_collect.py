@@ -19,6 +19,9 @@
       Conder ``*QORVO*`` 아래 LOT 폴더의 맵 txt · csv · lot 와 웨이퍼 사진 **이름**, 그 Conder 맵의
       DEVICE 앞 :data:`QORVO_KEY_LEN` 글자가 Job 이름에 든 Scanresult LOT 의 **웨이퍼 전부**.
       스캔 기록에서 고른 QORVO Scanresult LOT(:data:`QORVO_KNOWN_LOTS`)은 Conder 보다 먼저 모은다.
+    · :data:`RICH_LOT` — 비교 웨이퍼의 ``s_RichSurface.dat`` 앞 :data:`RICH_PARTS` 조각(Defect 별 Contrast 후보, ``RichSurface/``).
+    · :data:`QORVO_INI_JOBS` — Conder 와 같은 웨이퍼가 든 QORVO Job 의 **모든 셋업**(EDGE 아닌 것 포함)에서 LOT 마다
+      그 웨이퍼의 :data:`QORVO_INI` 와 첫 웨이퍼의 die 맵만(번호 원점 확인용, 2026-11-15).
     · :data:`CONDER_ROW_LOTS` — Conder LIVE 파일명 번호로 앱 row 를 확인할 Kendall LOT(맵 txt · lot · csv · 사진 이름).
     · :data:`KLA_PAIRS` — 같은 웨이퍼를 KLA 와 Camtek 이 같은 층에서 찍은 것(스캔 기록, 2026-11-15 사용자 요청).
       Camtek 웨이퍼 폴더와 KLA 웨이퍼 폴더(정보파일 · 사진 이름)를 ``KLA비교/<KLA LOT>/`` 아래 나란히 담는다.
@@ -129,7 +132,20 @@ QORVO_KNOWN_LOTS = [
     ('AOI-12', 'R_Qorvo XP2100_0860070PD_RDL2', 'SETUP', '1015_Qorvo XP2100 FRB3_Lot2'),  # 2026-10-15 2장
     ('4F-AOI-02', 'R_Qorvo XP2100_0861004PD_INCI', 'SETUP', 'MMG_SRD'),  # 2026-09-29 6장
 ]
-QORVO_KNOWN_WAFERS = 3   # QORVO_KNOWN_LOTS 의 LOT 마다 웨이퍼 몇 장
+QORVO_KNOWN_WAFERS = 1   # QORVO_KNOWN_LOTS 의 LOT 마다 웨이퍼 몇 장 — 3장이면 LOT 3개에서 용량 한도에 닿았다(사용자 결정 2026-11-15: 1장으로 8 LOT 모두)
+# QORVO 번호 원점 확인(col/row 쓰레드 요청 2026-11-15): Conder 와 같은 웨이퍼가 든 Job 은 EDGE 가 아닌 셋업(FVI · 2D 본 검사)도
+# 본다.  (Job 이름에 든 장치, Conder 웨이퍼 ID 앞부분).  LOT 마다 그 웨이퍼의 작은 ini(:data:`QORVO_INI`)만 담는다.
+QORVO_INI_JOBS = [
+    ('W96721Z5BK16', 'GCTAH'),   # Conder LOT 6I7H2D
+    ('W96760Z5BK16', 'GFCSJ'),   # 6I7NDD
+    ('W96798Z5BK16', 'GWL4R'),   # 6G7ZAD
+    ('W97218SGB1K16', 'SQ6'),    # 6I7L7K(XYT 셋업 포함) · 6H7ENK — SQ67P01 · SQ62G… (col/row 쓰레드)
+]
+QORVO_INI = ("ProductInfo.ini", "WaferMapRecipe.ini", "Params_WaferInfo.ini", "Recipe.ini")
+QORVO_DIE_MAP = ("s_DieLocation.dat", "s_DieLocation.dat.md")   # LOT 마다 첫 웨이퍼만(웨이퍼당 약 10 MB)
+QORVO_INI_LOTS = 40      # Job 마다 LOT 몇 개까지(최근 것부터)
+QORVO_INI_WAFERS = 2     # LOT 마다 웨이퍼 몇 장
+QORVO_INI_MB = 60        # 이 단계로 담는 원본 상한
 # 같은 웨이퍼를 KLA 와 Camtek 이 같은 층(RDL1~6 · FS …)에서 7일 안에 찍은 것(스캔 기록, 2026-11-15 사용자 요청).
 # (KLA 장비, KLA LOT, [KLA 웨이퍼 시작 시각], Camtek 장비, Job, Setup, LOT, [웨이퍼 ID], [KLA 슬롯]).
 # KLA 폴더 = <드라이브>\<날짜>\<KLA LOT>\<웨이퍼 시작 YYYY-MM-DD-HH-MM>_<슬롯>  (AOI Capacity 답, 2026-11-15).
@@ -467,6 +483,45 @@ def collect_qorvo(col, say, progress, stop, end=None):
     return wafers
 
 
+def collect_qorvo_ini(col, say, progress, stop, end=None):
+    """:data:`QORVO_INI_JOBS` 의 Job 을 모든 장비 · 모든 셋업에서 찾아, LOT 마다 Conder 와 같은 웨이퍼의
+    작은 ini 만 담는다(EDGE 만 있던 0245 수집을 메우는 자료).  웨이퍼 수를 돌려준다."""
+    deadline = time.time() + QORVO_MINUTES * 60
+    if end is not None:
+        deadline = min(deadline, end)
+    start = col.raw
+
+    def expired():
+        return stop() or time.time() > deadline or col.raw - start > QORVO_INI_MB * 2 ** 20
+
+    wafers = 0
+    for r in nas_roots():
+        for name, job, _, _ in sorted(_entries(r)[0]):
+            hit = next((w.upper() for key, w in QORVO_INI_JOBS if key in name.upper()), None)
+            if hit is None or expired():
+                continue
+            arc_job = f"QORVO/Scanresult/{r.parent.name}/{name}"
+            col.take_top_files(job, arc_job)
+            for lot in find_lots(job, QORVO_INI_LOTS, expired):
+                if lot == job:
+                    continue
+                arc_lot = f"{arc_job}/{lot.relative_to(job).as_posix()}"
+                col.take_top_files(lot.parent, arc_lot.rsplit("/", 1)[0])   # 셋업 폴더 바로 아래 파일
+                col.take_top_files(lot, arc_lot)
+                ws = [p for p in pick_wafers(lot, 1000) if p.name.upper().startswith(hit)]   # hit '' = 모든 웨이퍼
+                for k, w in enumerate(ws[:QORVO_INI_WAFERS]):
+                    if expired():
+                        break
+                    progress(0, 0, f"QORVO ini {name} {w.name}"[:70])
+                    only = set(QORVO_INI) | (set(QORVO_DIE_MAP) if k == 0 else set())
+                    col.take_files(w, f"{arc_lot}/{w.name}", only=only)
+                    wafers += 1
+                say(f"QORVO ini LOT {lot}  같은 웨이퍼 {len(ws)}장")
+    if expired():
+        say("QORVO ini: 시간 제한·중지·용량 한도로 여기서 멈춤")
+    return wafers
+
+
 def find_lots(job: Path, limit: int, expired):
     """Job 아래에서 웨이퍼 폴더를 담은 LOT 폴더를 최근 것부터 ``limit`` 개 찾는다."""
     found = []
@@ -508,9 +563,12 @@ class Collector:
         self.raw = 0
         self.files = 0
 
-    def take_files(self, folder: Path, arc: str, depth: int = 0):
+    def take_files(self, folder: Path, arc: str, depth: int = 0, only=None):
+        """``only`` 를 주면 그 이름의 파일만 담는다(하위 폴더는 내려가지 않고, 다른 파일은 목록에도 안 남긴다)."""
         dirs, files = _entries(folder)
         for name, path, _, size in sorted(files):
+            if only is not None and name not in only:
+                continue
             ext = Path(name).suffix.lower()
             if ext in IMG_EXT:
                 self.photos.append(f"{arc}/{name}")
@@ -532,7 +590,7 @@ class Collector:
             self.zf.writestr(f"{arc}/{name}", data)
             self.raw += len(data)
             self.files += 1
-        if depth < _WAFER_DEPTH:
+        if depth < _WAFER_DEPTH and only is None:
             for name, path, _, _ in sorted(dirs):
                 self.take_files(path, f"{arc}/{name}", depth + 1)
 
@@ -637,9 +695,13 @@ def run(out: Path, progress=None, stop=None):
             wafers += 1
         say(f"비교 LOT {lot}  웨이퍼 {len(ws)}")
     if not stop():
+        collect_rich_surface(col, say, progress, stop)    # 비교 웨이퍼 RichSurface 앞부분(버튼은 하나, 사용자 지시 2026-11-15)
+    if not stop():
         wafers += collect_conder_rows(col, say, progress, stop, end=deadline)
     if not stop():
         wafers += collect_kla_pairs(col, say, progress, stop, end=deadline)
+    if not stop():
+        wafers += collect_qorvo_ini(col, say, progress, stop, end=deadline)   # 작아서 먼저
     if not stop():
         wafers += collect_qorvo(col, say, progress, stop, end=deadline)
     pair_raw = col.raw                                     # 아래 용량 한도는 비교 LOT·QORVO 를 뺀 양으로 잰다(시간은 전체 1시간)
@@ -685,6 +747,56 @@ def run(out: Path, progress=None, stop=None):
     progress(0, 0, "zip 나누는 중")
     split_zip(staging, out_dir, f"Threshold수집_{stamp}")
     return out_dir, wafers, col.files
+
+
+# RichSurface 앞부분 — Defect 마다 Contrast 가 있을 수 있는 유일한 파일(웨이퍼당 수백 MB)이라 앞부분만 조각으로 받는다(사용자 지시 2026-11-15).
+RICH_LOT = PAIR_LOTS[4]            # 4F-AOI-04 YDD-No Image — 비교 웨이퍼가 든 LOT
+RICH_FILE = "s_RichSurface.dat"
+RICH_PARTS = 4                     # 앞 108 MB
+RICH_PART_BYTES = 27_000_000       # 압축이 안 돼도 zip 조각이 PART_MB 를 넘지 않게
+
+
+def find_rich_surface():
+    """비교 웨이퍼(:data:`PAIR_WAFER`)의 ``s_RichSurface.dat``.  못 찾으면 None."""
+    lot = resolve_pair(RICH_LOT)
+    if lot is None:
+        return None
+    for _, d, _, _ in sorted(_entries(lot)[0]):
+        f = d / RICH_FILE
+        if PAIR_WAFER in d.name.upper() and f.is_file():
+            return f
+    return None
+
+
+def collect_rich_surface(col, say, progress, stop):
+    """앞에서부터 :data:`RICH_PART_BYTES` 씩 :data:`RICH_PARTS` 조각을 따로 담는다 — 조각 하나가 zip 조각
+    하나에 들어간다(압축이 안 돼도 :data:`PART_MB` 아래).  담은 조각 수를 돌려준다."""
+    src = find_rich_surface()
+    if src is None:
+        say(f"RichSurface 못 찾음: {RICH_LOT}\\*{PAIR_WAFER}*\\{RICH_FILE}")
+        return 0
+    size = src.stat().st_size
+    arc = f"RichSurface/{src.parent.name}"
+    md = src.with_name(src.name + ".md")
+    if md.is_file():
+        col.zf.write(md, f"{arc}/{md.name}")
+    made = 0
+    with src.open("rb") as f:
+        for k in range(1, RICH_PARTS + 1):
+            if stop():
+                break
+            progress(k - 1, RICH_PARTS, f"RichSurface 조각 {k}/{RICH_PARTS}")
+            begin = f.tell()
+            data = f.read(RICH_PART_BYTES)
+            if not data:
+                break
+            col.zf.writestr(f"{arc}/s_RichSurface_part{k}.dat", data)
+            col.zf.writestr(f"{arc}/조각{k}.txt", f"{src}\n원래 크기 {size}\n이 조각: {begin} ~ {begin + len(data)} 바이트\n")
+            col.raw += len(data)
+            col.files += 1
+            made += 1
+    say(f"RichSurface {src}  ({size / 1e6:.0f} MB 중 앞 {made}조각)")
+    return made
 
 
 if __name__ == "__main__":
