@@ -318,3 +318,74 @@ def test_conder_row_lots_take_step_files_and_target_wafer_photo_names(tmp_path, 
     assert "NOTME01EWA1/" not in photos                                    # 다른 웨이퍼 사진은 안 담는다
     assert "1. OTHER" not in photos + "".join(names)
     assert "못 찾음: (PAD)" in z.read("요약.txt").decode()
+
+
+def test_rich_surface_head_goes_into_its_own_parts_under_the_limit(tmp_path, monkeypatch):
+    """한 버튼 수집 안에서 RichSurface 앞부분을 조각으로 담는다.  조각 하나가 zip 조각 하나에 들어가고, 이으면 원본 앞부분이다."""
+    tool = _tool()
+    w = tmp_path / "LOT" / f"{tool.PAIR_WAFER}_18"
+    w.mkdir(parents=True)
+    raw = bytes(range(256)) * 400                                         # 102,400 바이트
+    (w / "s_RichSurface.dat").write_bytes(raw)
+    (w / "s_RichSurface.dat.md").write_text("RecordSize 64")
+    (tmp_path / "LOT" / "OTHER01EWA1").mkdir()
+    monkeypatch.setattr(tool, "RICH_LOT", str(tmp_path / "LOT"))
+    monkeypatch.setattr(tool, "RICH_PART_BYTES", 30_000)
+    monkeypatch.setattr(tool, "RICH_PARTS", 3)
+    col = tool.Collector(tmp_path / "s.zip")
+    assert tool.collect_rich_surface(col, lambda *_: None, lambda *_: None, lambda: False) == 3
+    col.close("")
+    with zipfile.ZipFile(tmp_path / "s.zip") as z:
+        arc = f"RichSurface/{w.name}"
+        got = b"".join(z.read(f"{arc}/s_RichSurface_part{k}.dat") for k in (1, 2, 3))
+        assert f"{arc}/s_RichSurface.dat.md" in z.namelist()
+    assert got == raw[:90_000]
+    assert 27_000_000 + 2_000 < tool.PART_MB * MB                          # 실제 조각(27 MB)도 압축 없이 한도 안
+
+
+def test_rich_surface_missing_is_only_noted(tmp_path, monkeypatch):
+    tool = _tool()
+    (tmp_path / "LOT" / "OTHER01EWA1").mkdir(parents=True)
+    monkeypatch.setattr(tool, "RICH_LOT", str(tmp_path / "LOT"))
+    said = []
+    col = tool.Collector(tmp_path / "s.zip")
+    assert tool.collect_rich_surface(col, said.append, lambda *_: None, lambda: False) == 0
+    col.close("")
+    assert said and "못 찾음" in said[0]
+
+
+def test_qorvo_ini_takes_small_ini_from_every_setup_of_conder_wafers(tmp_path, monkeypatch):
+    """EDGE 가 아닌 셋업도 본다.  Conder 와 같은 웨이퍼만, ini 4개와 첫 웨이퍼의 die 맵만 담는다."""
+    tool = _tool()
+    sr = tmp_path / "AOI-8" / "Scanresult"
+    job = sr / "2D@R2-W96721Z5BK16_0858867PD-0A"
+    for setup, lot in (("6321", "NPG-EDGE"), ("6110", "NPG"), ("6110", "NPG-RE")):
+        (job / setup / "WaferMapRecipe.ini").parent.mkdir(parents=True, exist_ok=True)
+        (job / setup / "Setup.ini").write_text(f"[S]\nName={setup}\n")
+        for wid in ("GCTAH01-B0", "GCTAH09-F2", "GCTAH17-E6", "ZZZZZ01-A1"):
+            w = job / setup / lot / wid
+            w.mkdir(parents=True)
+            for n in tool.QORVO_INI:
+                (w / n).write_text(f"[{n}]\nWafer={wid}\nLot={lot}\n")
+            (w / "s_DieLocation.dat").write_bytes(f"{lot}{wid}".encode() * 10)
+            (w / "s_DieLocation.dat.md").write_text(f"{lot} {wid}")
+            (w / "Surface.flt").write_bytes(b"\x00" * 152)
+            (w / "P_1_2_x.jpg").write_bytes(b"jpg")
+    (sr / "R_KENDALL_A0_PI5" / "SETUP" / "LOT1" / "W01").mkdir(parents=True)  # 다른 Job 은 안 본다
+    (sr / "R_KENDALL_A0_PI5" / "SETUP" / "LOT1" / "W01" / "Recipe.ini").write_text("k")
+    monkeypatch.setattr(tool, "nas_roots", lambda: [sr])
+    col = tool.Collector(tmp_path / "s.zip")
+    wafers = tool.collect_qorvo_ini(col, lambda *_: None, lambda *_: None, lambda: False)
+    col.close("")
+    with zipfile.ZipFile(tmp_path / "s.zip") as z:
+        names = z.namelist()
+    assert wafers == 3 * tool.QORVO_INI_WAFERS
+    base = "QORVO/Scanresult/AOI-8/2D@R2-W96721Z5BK16_0858867PD-0A"
+    for setup, lot in (("6321", "NPG-EDGE"), ("6110", "NPG"), ("6110", "NPG-RE")):
+        first, second = f"{base}/{setup}/{lot}/GCTAH01-B0", f"{base}/{setup}/{lot}/GCTAH09-F2"
+        assert all(f"{first}/{n}" in names for n in tool.QORVO_INI + tool.QORVO_DIE_MAP)
+        assert all(f"{second}/{n}" in names for n in tool.QORVO_INI)
+        assert f"{second}/s_DieLocation.dat" not in names                     # die 맵은 LOT 마다 첫 웨이퍼만
+    assert f"{base}/6110/Setup.ini" in names                                  # 셋업 폴더 바로 아래 파일
+    assert not any("ZZZZZ" in n or "GCTAH17" in n or n.endswith(".flt") or "KENDALL" in n for n in names)
+    assert not col.photos                                                     # 사진 이름도 안 남긴다
