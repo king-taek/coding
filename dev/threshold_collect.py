@@ -170,7 +170,7 @@ def collect_qorvo(col, say, progress, stop, end=None):
     def expired():
         return stop() or time.time() > deadline or col.raw - start > QORVO_MB * 2 ** 20
 
-    keys, wafers = set(), 0
+    keys, wafers = {QORVO_NAME}, 0              # Job 이름에 Qorvo 가 든 것(R_Qorvo XP2100_…)도 찾는다
     for base in (Path(r) for r in CONDER_ROOTS):
         customers = [p for n, p, _, _ in _entries(base)[0] if QORVO_NAME in n.upper()]
         if not customers:
