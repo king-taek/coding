@@ -775,6 +775,14 @@ def collect_rich_surface(col, say, progress, stop):
     if src is None:
         say(f"RichSurface 못 찾음: {RICH_LOT}\\*{PAIR_WAFER}*\\{RICH_FILE}")
         return 0
+    try:
+        return _take_rich_surface(col, src, say, progress, stop)
+    except OSError as e:                       # NAS 권한 · 연결 끊김 — 나머지 수집은 계속한다
+        say(f"RichSurface 못 읽음: {src}  {e}")
+        return 0
+
+
+def _take_rich_surface(col, src, say, progress, stop):
     size = src.stat().st_size
     arc = f"RichSurface/{src.parent.name}"
     md = src.with_name(src.name + ".md")

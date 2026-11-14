@@ -389,3 +389,22 @@ def test_qorvo_ini_takes_small_ini_from_every_setup_of_conder_wafers(tmp_path, m
     assert f"{base}/6110/Setup.ini" in names                                  # 셋업 폴더 바로 아래 파일
     assert not any("ZZZZZ" in n or "GCTAH17" in n or n.endswith(".flt") or "KENDALL" in n for n in names)
     assert not col.photos                                                     # 사진 이름도 안 남긴다
+
+
+def test_rich_surface_read_error_does_not_stop_the_collection(tmp_path, monkeypatch):
+    """NAS 권한 · 연결 문제로 RichSurface 를 못 읽어도 기록만 남기고 나머지 수집을 이어 간다."""
+    tool = _tool()
+    w = tmp_path / "LOT" / f"{tool.PAIR_WAFER}_18"
+    w.mkdir(parents=True)
+    (w / "s_RichSurface.dat").write_bytes(b"x" * 100)
+    monkeypatch.setattr(tool, "RICH_LOT", str(tmp_path / "LOT"))
+
+    def _deny(*a, **k):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(tool, "_take_rich_surface", _deny)
+    said = []
+    col = tool.Collector(tmp_path / "s.zip")
+    assert tool.collect_rich_surface(col, said.append, lambda *_: None, lambda: False) == 0
+    col.close("")
+    assert said and "못 읽음" in said[0]
