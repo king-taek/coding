@@ -545,6 +545,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         on = not _prefs.load().dev_mode
         _prefs.patch(dev_mode=on)
         self._dev_btn.setVisible(on)
+        self._setup_page.threshold_btn.setVisible(on)                      # Threshold 미리보기는 개발자 모드 도구
         self._dmine_collect_btn.setVisible(on)                            # [고칠곳수집-임시] 이 줄 삭제
         self._thresh_collect_btn.setVisible(on)                           # [Threshold수집-임시] 이 줄 삭제
         self._sync_statusbar(self._stack.currentWidget())
