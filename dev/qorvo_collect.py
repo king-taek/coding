@@ -2,17 +2,14 @@
 
 읽기 전용 · 표준 파이썬만 쓴다(앱 코드를 불러오지 않는다).  앱의 개발자 모드 버튼
 (``ui/qorvo_collect_tmp.py``)이 :func:`run` 을 부르고, 더블클릭으로도 돈다.
-공통 수집기(``dev/threshold_collect.py``, dev c45b585)의 QORVO 단계와 도움 함수를 옮겨 왔다.
 
-무엇을 모으나(앞 단계부터 — 작고 급한 것 먼저):
-    1. 번호상자 — :data:`BOX_FIRST` 장비(AOI-11)의 **모든 Job** 에서 최근 LOT :data:`BOX_FIRST_LOTS` 개, 웨이퍼 1장의
-       :data:`BOX_FILES` 만.  장비 번호 상자(``ProductInfo.ini [ExportData]``)가 고객 맵(``WaferMapRecipe.ini``
-       RefPoint−CustPoint)보다 넓은 스캔이 그 장비(108150)에서 QORVO 말고도 나오는지 보려는 자료다.
-       다른 장비의 '모든 Job 웨이퍼 1장' 은 [고칠 곳 자료 수집](``dev/data_mining_collect.py``)이 모은다(겹치지 않게 나눔).
-    2. QORVO Scanresult — :data:`QORVO_KNOWN_LOTS`(스캔 기록에서 고른 LOT)와 :data:`W97218_KEY` Job 의 모든 셋업에서
-       LOT 마다 웨이퍼 :data:`QORVO_INI_WAFERS` 장의 :data:`QORVO_INI` 만(:data:`QORVO_INI_PREFER` 웨이퍼 먼저).
-    3. QORVO Conder — 고객 폴더 ``*QORVO*`` 아래 장치마다 최근 LOT :data:`CONDER_LOTS` 개와 :data:`CONDER_MUST`:
-       단계 폴더의 맵 txt · csv · lot 과 웨이퍼 사진 **이름**(±2 시프트 탐색을 여러 LOT 에서 검산하는 자료).
+무엇을 모으나(2026-11-15 22:15 수집 결과로 좁힘, 사용자 '필요한 것만'):
+    AOI-11 의 W97218 LOT 5개(:data:`TARGET_LOTS`)는 기준점이 다른 LOT 과 달라 번호가 (0, 3) 어긋났을 수 있다(계산, 미확인).
+    그것을 확인할 자료만 모은다.
+    1. Scanresult — 모든 장비의 :data:`W97218_KEY` Job 에서 그 이름의 LOT 폴더(``<Job>\\<Setup>\\<LOT>``).
+       AOI-11 과 **다른 장비가 같이 스캔한 웨이퍼**를 :data:`PAIR_WAFERS` 장까지 양쪽 모두, 같이 스캔한 웨이퍼가 없으면
+       LOT 마다 1장.  파일은 :data:`WAFER_FILES` 와 사진 **이름**만.
+    2. Conder — QORVO 고객 폴더의 W97218 장치 아래, 이름에 ``(<그 LOT>)`` 가 붙은 LOT 폴더의 맵 txt · csv · lot 과 사진 **이름**.
 무엇을 버리나: 사진 · 영상 · 압축 파일(사진은 **이름만** ``사진목록.txt``), :data:`FILE_MB` 를 넘는 파일(이름 · 크기만
 ``파일목록.txt``), 내용이 똑같은 파일(한 번만 담고 ``중복목록.txt``).
 결과: 바탕화면 ``QORVO수집_<시각>\\`` 폴더 안 zip.  :data:`PART_MB` 를 넘으면 나눈다.
@@ -31,48 +28,27 @@ from pathlib import Path
 UNC_SHARES = [r"\\10.142.80.91\nas3-1"]
 CONDER_ROOTS = [r"\\k5cifsn2\k5tsvdata$\1. Conder Scan"]
 WAFER_MARK = ("ColorImageGrabingInfo.ini", "Params_WaferInfo.ini")
-MINUTES = 40        # 전체 시간 상한 — 지나면 거기까지 모은 것으로 정리한다
+MINUTES = 15        # 전체 시간 상한 — 지나면 거기까지 모은 것으로 정리한다
+SCAN_MINUTES = 10
+CONDER_MINUTES = 5
 FILE_MB = 20        # 이보다 큰 파일은 이름만 남긴다
 TOTAL_MB = 300      # 담은 원본이 이만큼 되면 그만 찾는다
 PART_MB = 28        # 올릴 수 있는 한도가 30 MB 보다 작다(30 MB 조각 2개가 안 올라감, 사용자 2026-11-15)
 SKIP_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".gif",
             ".avi", ".mp4", ".wmv", ".zip", ".7z", ".rar", ".gz", ".cab"}
 IMG_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".gif"}
-_LOT_DEPTH = 4      # Job 아래 LOT 을 찾는 깊이(Setup → [구분] → LOT)
 _WAFER_DEPTH = 2    # 웨이퍼 폴더 안 하위 폴더 깊이
 
-# 1. 번호상자 — 작은 ini 셋(웨이퍼당 수십 KB).  EquipmentInfo · WaferInfo.ini 에 장비 번호(EagleTP_108150 꼴)가 든다.
-BOX_FILES = ("ProductInfo.ini", "WaferMapRecipe.ini", "WaferInfo.ini", "EquipmentInfo.ini", "Params_WaferInfo.ini")
-BOX_FIRST = ("AOI-11",)     # 번호 상자가 넓었던 장비(6412 CTX, EagleTP_108150) — 먼저, Job 마다 LOT 여러 개
-BOX_FIRST_LOTS = 3
-BOX_MINUTES = 12
-
-# 2. QORVO Scanresult — 스캔 기록(AOI_capacity.csv)에서 고른 LOT (장비, Job, Setup, LOT).  공통 수집기에서 옮김.
-QORVO_KNOWN_LOTS = [
-    ('AOI-11', '2D@RE-W97253Z6B1K16_0860752PD-0A', '6412', 'TWT'),  # 25장 — 같은 장비 AOI-11 의 다른 Job(먼저)
-    ('AOI-8', '2D@R2-W96721Z5BK16_0858867PD-0A', '6321', 'NPG-EDGE'),
-    ('AOI-6', '2D@R2-W96760Z5BK16_0856722PD-0A', '6321', 'THV EDGE'),
-    ('AOI-8', '2D@R2-W96798Z5BK16_0857146PD-0B', '6321', 'PHK-EDGE'),
-    ('AOI-8', '2D@R2-W96816Z5BK16_0857248PD-0B', '6321', 'THW-EDGE'),
-    ('AOI-8', '2D@R2-W96817Z5BK16_0857253PD-0A', '6321', 'UUT EDGE'),
-    ('AOI-6', '2D@RE-W97115Z6B1K16_0858971PD-0A', '6412', 'TWN'),
-    ('AOI-4', '2D@RE-W97135Z6BK16_0859176PD-0A', '6412', 'TWK'),
-]
-W97218_KEY = "W97218"       # 6H7ENK(CTX) · 6H7EMK(CTK) 의 Job — 모든 장비 · 모든 셋업
-QORVO_INI = ("ProductInfo.ini", "WaferMapRecipe.ini", "Params_WaferInfo.ini", "WaferInfo.ini", "EquipmentInfo.ini",
-             "Recipe.ini",
-             "ColorImageGrabingInfo.ini",   # 사진별 X, Y — 두 스캔의 같은 die 짝 검산
-             "Defects.csv")                 # 장비 Export 결과(Col · Row = 장비 화면 번호) — 있으면 정답지
-QORVO_INI_PREFER = {"SQ67P01-D1", "SQ67P13-E6", "SQ67P25-G3"}   # 번호가 (1,2) 밀린 스캔에 찍힌 웨이퍼
-QORVO_INI_LOTS = 40         # Job 마다 LOT 몇 개까지(최근 것부터)
-QORVO_INI_WAFERS = 2        # LOT 마다 웨이퍼 몇 장
-QORVO_MINUTES = 12
-
-# 3. QORVO Conder
+W97218_KEY = "W97218"
+TARGET_LOTS = ("APH", "UAP", "AVY", "TKG", "XLW")   # AOI-11 에서 CustPoint (159,157) · 출발점 (0, 314) 이던 LOT(관측 2026-11-15)
+FIRST_AOI = "AOI-11"
+PAIR_WAFERS = 4     # AOI-11 과 다른 장비가 같이 스캔한 웨이퍼 — LOT 이름마다 이만큼
+WAFER_FILES = ("ProductInfo.ini", "WaferMapRecipe.ini", "Params_WaferInfo.ini", "WaferInfo.ini", "EquipmentInfo.ini",
+               "Recipe.ini",
+               "Wafer2Table.ini",             # 웨이퍼 중심(Params 에 없을 때) — 22:15 수집에 빠져 앱이 중심을 못 찾았다
+               "ColorImageGrabingInfo.ini",   # 사진별 X, Y — 두 스캔의 같은 Defect 짝 검산
+               "Defects.csv")                 # 장비 Export 결과(Col · Row = 장비 화면 번호) — 있으면 정답지
 QORVO_NAME = "QORVO"        # Conder 고객 폴더 이름(예: 575. QORVO US)
-CONDER_LOTS = 8             # 장치 폴더마다 최근 LOT 몇 개
-CONDER_MUST = [r"575. QORVO US\44. W97218SGZ4BK16\75. 6H7ENK (CTX)"]   # 번호가 (1,2) 밀린 LOT — 늘 통째로
-CONDER_MINUTES = 12
 
 
 def nas_roots():
@@ -114,71 +90,6 @@ def _entries(d: Path):
 
 def is_wafer(d: Path) -> bool:
     return any((d / m).is_file() for m in WAFER_MARK)
-
-
-def is_conder_lot(d: Path) -> bool:
-    """Conder LOT 폴더 — 하위 폴더(웨이퍼)와 같은 이름의 맵 ``.txt`` 가 하나라도 있다."""
-    dirs, files = _entries(d)
-    names = {n for n, _, _, _ in dirs}
-    return any(n.lower().endswith(".txt") and n[:-4] in names for n, _, _, _ in files)
-
-
-def find_lot(sr: Path, job: str, setup: str, lot_name: str):
-    """``<Scanresult>\\<Job>\\<Setup>\\<LOT>`` — Setup 과 LOT 사이에 구분 폴더가 한 단 더 있어도 찾는다."""
-    lot = sr / job / setup / lot_name
-    if not lot.is_dir():
-        lot = next((d / lot_name for _, d, _, _ in _entries(sr / job / setup)[0] if (d / lot_name).is_dir()), lot)
-    return lot if lot.is_dir() else None
-
-
-def find_lots(job: Path, limit: int, expired):
-    """Job 아래에서 웨이퍼 폴더를 담은 LOT 폴더를 최근 것부터 ``limit`` 개 찾는다."""
-    found = []
-
-    def visit(d: Path, depth: int):
-        if len(found) >= limit or depth > _LOT_DEPTH or expired():
-            return
-        subs = sorted(_entries(d)[0], key=lambda t: -t[2])
-        if not subs:
-            return
-        probe = [subs[0], subs[len(subs) // 2], subs[-1]]
-        if any(is_wafer(p) for _, p, _, _ in probe):
-            found.append(d)
-            return
-        for _, p, _, _ in subs:
-            visit(p, depth + 1)
-            if len(found) >= limit or expired():
-                return
-
-    visit(job, 0)
-    return found
-
-
-def pick_wafers(lot: Path, n: int):
-    wafers = sorted((p for _, p, _, _ in _entries(lot)[0] if is_wafer(p)), key=lambda p: p.name)
-    if len(wafers) <= n:
-        return wafers
-    step = len(wafers) / n
-    return [wafers[int(i * step)] for i in range(n)]
-
-
-def find_conder_lots(root: Path, limit: int, expired, depth: int = 4):
-    """``root`` 아래 Conder LOT 폴더를 최근 것부터 ``limit`` 개."""
-    found = []
-
-    def visit(d: Path, k: int):
-        if len(found) >= limit or k > depth or expired():
-            return
-        if is_conder_lot(d):
-            found.append(d)
-            return
-        for _, p, _, _ in sorted(_entries(d)[0], key=lambda t: -t[2]):
-            visit(p, k + 1)
-            if len(found) >= limit or expired():
-                return
-
-    visit(root, 0)
-    return found
 
 
 class Collector:
@@ -242,80 +153,73 @@ def _deadline(minutes: float, end: float) -> float:
     return min(time.time() + minutes * 60, end)
 
 
-def collect_boxes(col, say, progress, stop, end):
-    """1. 번호상자 — :data:`BOX_FIRST` 장비의 모든 Job, 최근 LOT 웨이퍼 1장에서 :data:`BOX_FILES` 만.  웨이퍼 수."""
-    deadline = _deadline(BOX_MINUTES, end)
+def target_lot(name: str):
+    """LOT 폴더 이름이 :data:`TARGET_LOTS` 중 하나로 시작하면 그 이름(``APH-EDGE`` · ``UAP SRD`` 도 같은 LOT), 아니면 None."""
+    tok = re.split(r"[\s\-_]+", name.strip().upper())[0]
+    return tok if tok in TARGET_LOTS else None
 
-    def expired():
-        return stop() or time.time() > deadline
 
-    first = {_aoi_key(a) for a in BOX_FIRST}
-    wafers = 0
-    for r in [r for r in nas_roots() if _aoi_key(r.parent.name) in first]:
-        aoi = r.parent.name
-        for name, job, _, _ in sorted(_entries(r)[0], key=lambda t: -t[2]):
+def find_target_lots(roots, expired):
+    """``[(장비 Scanresult, Job, LOT 폴더, LOT 이름, {웨이퍼 이름: 폴더})]`` — ``<Job>\\<Setup>\\<LOT>`` 만 본다
+    (2026-11-15 수집의 W97218 웨이퍼 441장이 모두 이 깊이였다)."""
+    out = []
+    for sr in roots:
+        for jname, job, _, _ in sorted(_entries(sr)[0]):
             if expired():
-                say("번호상자: 시간 제한·중지로 여기서 멈춤")
-                return wafers
-            for lot in find_lots(job, BOX_FIRST_LOTS, expired):
-                ws = pick_wafers(lot, 1)
-                if not ws or lot == job:
-                    continue
-                progress(0, 0, f"번호상자 {aoi} {name}"[:70])
-                col.take_files(ws[0], f"번호상자/{aoi}/{name}/{lot.relative_to(job).as_posix()}/{ws[0].name}",
-                               only=set(BOX_FILES))
-                wafers += 1
-        say(f"번호상자 {aoi} 끝")
-    return wafers
+                return out
+            if W97218_KEY not in jname.upper():
+                continue
+            for _, setup, _, _ in sorted(_entries(job)[0]):
+                for lname, lot, _, _ in sorted(_entries(setup)[0]):
+                    key = target_lot(lname)
+                    if key:
+                        wafers = {n.upper(): p for n, p, _, _ in _entries(lot)[0] if is_wafer(p)}
+                        out.append((sr, job, lot, key, wafers))
+    return out
 
 
-def _take_qorvo_lot(col, sr: Path, job: Path, lot: Path, n: int, expired, progress):
-    arc_lot = f"QORVO/Scanresult/{sr.parent.name}/{job.name}/{lot.relative_to(job).as_posix()}"
-    col.take_top_files(lot.parent, arc_lot.rsplit("/", 1)[0])    # 셋업 폴더 바로 아래 파일
-    col.take_top_files(lot, arc_lot)
-    ws = pick_wafers(lot, 1000)
-    ws.sort(key=lambda p: p.name.upper() not in QORVO_INI_PREFER)
-    for w in ws[:n]:
-        if expired():
-            break
-        progress(0, 0, f"QORVO {job.name} {w.name}"[:70])
-        col.take_files(w, f"{arc_lot}/{w.name}", only=set(QORVO_INI), photos=True)
-    return min(n, len(ws))
+def plan_wafers(found):
+    """LOT 폴더마다 담을 웨이퍼.  AOI-11 과 다른 장비에 같이 있는 웨이퍼를 LOT 이름마다 :data:`PAIR_WAFERS` 장까지
+    (양쪽 다), 그런 웨이퍼가 없는 LOT 폴더는 1장.  ``(계획, {LOT 이름: 같이 스캔한 웨이퍼})``."""
+    first = _aoi_key(FIRST_AOI)
+    on_first, elsewhere = {}, {}
+    for sr, _, _, key, wafers in found:
+        side = on_first if _aoi_key(sr.parent.name) == first else elsewhere
+        side.setdefault(key, set()).update(wafers)
+    shared = {k: sorted(on_first.get(k, set()) & elsewhere.get(k, set()))[:PAIR_WAFERS] for k in TARGET_LOTS}
+    plan = []
+    for sr, job, lot, key, wafers in found:
+        names = [n for n in shared[key] if n in wafers] or sorted(wafers)[:1]
+        plan.append((sr, job, lot, [wafers[n] for n in names]))
+    return plan, shared
 
 
-def collect_qorvo_scan(col, say, progress, stop, end):
-    """2. QORVO Scanresult — 스캔 기록 LOT 먼저, 그다음 :data:`W97218_KEY` Job 의 모든 셋업.  웨이퍼 수."""
-    deadline = _deadline(QORVO_MINUTES, end)
+def collect_scan(col, say, progress, stop, end):
+    """1. Scanresult — :data:`TARGET_LOTS` LOT 의 웨이퍼.  웨이퍼 수."""
+    deadline = _deadline(SCAN_MINUTES, end)
 
     def expired():
         return stop() or time.time() > deadline
 
-    roots = {_aoi_key(r.parent.name): r for r in nas_roots()}
-    wafers, done = 0, set()
-    for aoi, job, setup, lot_name in QORVO_KNOWN_LOTS:
+    progress(0, 0, "Scanresult 에서 LOT 찾는 중")
+    plan, shared = plan_wafers(find_target_lots(nas_roots(), expired))
+    say("같이 스캔한 웨이퍼: " + ", ".join(f"{k} {len(v)}장" for k, v in shared.items()))
+    n = 0
+    for k, (sr, job, lot, wafers) in enumerate(plan, 1):
         if expired():
+            say("Scanresult: 시간 제한·중지로 여기서 멈춤")
             break
-        sr = roots.get(_aoi_key(aoi))
-        lot = find_lot(sr, job, setup, lot_name) if sr else None
-        if lot is None:
-            say(f"QORVO LOT 못 찾음: {aoi}\\{job}\\{setup}\\{lot_name}")
-            continue
-        wafers += _take_qorvo_lot(col, sr, sr / job, lot, 1, expired, progress)
-        done.add(lot)
-        say(f"QORVO Scanresult LOT {lot}")
-    for sr in roots.values():
-        for name, job, _, _ in sorted(_entries(sr)[0]):
-            if expired() or W97218_KEY not in name.upper():
-                continue
-            col.take_top_files(job, f"QORVO/Scanresult/{sr.parent.name}/{name}")
-            for lot in find_lots(job, QORVO_INI_LOTS, expired):
-                if lot == job or lot in done:
-                    continue
-                wafers += _take_qorvo_lot(col, sr, job, lot, QORVO_INI_WAFERS, expired, progress)
-                say(f"QORVO {W97218_KEY} LOT {lot}")
-    if expired():
-        say("QORVO Scanresult: 시간 제한·중지로 여기서 멈춤")
-    return wafers
+        arc = f"QORVO/Scanresult/{sr.parent.name}/{job.name}/{lot.relative_to(job).as_posix()}"
+        progress(k, len(plan), f"Scanresult {sr.parent.name} {lot.name}"[:70])
+        col.take_top_files(lot.parent, arc.rsplit("/", 1)[0])    # Setup 폴더 바로 아래 파일
+        col.take_top_files(lot, arc)
+        for w in wafers:
+            col.take_files(w, f"{arc}/{w.name}", only=set(WAFER_FILES), photos=True)
+            n += 1
+        say(f"Scanresult LOT {lot} 웨이퍼 {len(wafers)}")
+    if not plan:
+        say("Scanresult: 대상 LOT 없음")
+    return n
 
 
 def _conder_steps(d: Path, k=0, out=None):
@@ -345,40 +249,34 @@ def _take_conder_lot(col, lot: Path, arc_lot: str):
 
 
 def collect_conder(col, say, progress, stop, end):
-    """3. QORVO Conder — :data:`CONDER_MUST` 먼저, 그다음 장치마다 최근 LOT.  LOT 수."""
+    """2. Conder — QORVO 고객 폴더의 W97218 장치에서 이름에 ``(<대상 LOT>)`` 가 든 LOT(예: ``75. 6H7ENK (CTX)`` 꼴).  LOT 수."""
     deadline = _deadline(CONDER_MINUTES, end)
 
     def expired():
         return stop() or time.time() > deadline
 
-    n, done = 0, set()
-    for rel in CONDER_MUST:
-        parts = Path(rel.replace("\\", "/")).parts
-        lot = next((Path(b).joinpath(*parts) for b in CONDER_ROOTS if Path(b).joinpath(*parts).is_dir()), None)
-        if lot is None:
-            say(f"Conder LOT 못 찾음: {rel}")
-            continue
-        progress(0, 0, f"Conder {lot.name}"[:70])
-        _take_conder_lot(col, lot, "QORVO/Conder/" + "/".join(parts))
-        done.add(lot)
-        n += 1
+    pat = re.compile(r"\((%s)\)" % "|".join(TARGET_LOTS), re.I)
+    n = 0
     for base in (Path(r) for r in CONDER_ROOTS):
         customers = [p for nm, p, _, _ in _entries(base)[0] if QORVO_NAME in nm.upper()]
         if not customers:
             say(f"QORVO Conder 폴더 못 찾음: {base}")
         for cust in customers:
-            for _, dev, _, _ in sorted(_entries(cust)[0], key=lambda t: -t[2]):
-                if expired():
-                    break
-                for lot in find_conder_lots(dev, CONDER_LOTS, expired):
-                    if lot in done:
+            for dname, dev, _, _ in sorted(_entries(cust)[0]):
+                if W97218_KEY not in dname.upper():
+                    continue
+                for lname, lot, _, _ in sorted(_entries(dev)[0]):
+                    if expired():
+                        say("Conder: 시간 제한·중지로 여기서 멈춤")
+                        return n
+                    if not pat.search(lname):
                         continue
-                    progress(0, 0, f"QORVO Conder {lot.name}"[:70])
-                    _take_conder_lot(col, lot, f"QORVO/Conder/{cust.name}/{lot.relative_to(cust).as_posix()}")
+                    progress(0, 0, f"Conder {lname}"[:70])
+                    _take_conder_lot(col, lot, f"QORVO/Conder/{cust.name}/{dev.name}/{lname}")
                     n += 1
-                    say(f"QORVO Conder LOT {lot}")
-    if expired():
-        say("QORVO Conder: 시간 제한·중지로 여기서 멈춤")
+                    say(f"Conder LOT {lot}")
+    if not n:
+        say("Conder: 대상 LOT 없음")
     return n
 
 
@@ -448,12 +346,11 @@ def run(out: Path, progress=None, stop=None):
 
     roots = nas_roots()
     say(f"Scanresult {len(roots)}곳: " + ", ".join(sorted(r.parent.name for r in roots)))
-    boxes = collect_boxes(col, say, progress, halt, end)
-    scans = 0 if halt() else collect_qorvo_scan(col, say, progress, halt, end)
+    scans = collect_scan(col, say, progress, halt, end)
     lots = 0 if halt() else collect_conder(col, say, progress, halt, end)
     summary = "\n".join([
         f"QORVO 번호 자료 수집 {stamp}  ({time.time() - t0:.0f}초)",
-        f"번호상자 웨이퍼 {boxes} · QORVO Scanresult 웨이퍼 {scans} · QORVO Conder LOT {lots} · 담은 파일 {col.files}"
+        f"Scanresult 웨이퍼 {scans} · Conder LOT {lots} · 담은 파일 {col.files}"
         f" · 원본 {col.raw / 2 ** 20:.1f} MB · 사진 이름 {len(col.photos)} · 중복 {len(col.dups)}",
         "", "기록:", *log, ""])
     col.close(summary)
@@ -466,7 +363,7 @@ def run(out: Path, progress=None, stop=None):
         return None, 0, 0
     progress(0, 0, "zip 나누는 중")
     split_zip(staging, out_dir, f"QORVO수집_{stamp}")
-    return out_dir, boxes + scans + lots, col.files
+    return out_dir, scans + lots, col.files
 
 
 if __name__ == "__main__":
