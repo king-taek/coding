@@ -16,6 +16,7 @@
     · :data:`FILE_MB` 를 넘는 파일 — 이름 · 크기만 ``파일목록.txt`` 에 남긴다
     · 내용이 똑같은 파일 — 한 번만 담고 ``중복목록.txt`` 에 적는다(레시피 사본이 웨이퍼마다 있다)
     · :data:`RICH_LOT` — 비교 웨이퍼의 ``s_RichSurface.dat`` 전체에서 :data:`RICH_COLS` 열만 CSV 로(Defect 후보별 Contrast, ``RichSurface/``).
+    · :data:`EXPORT_WAFERS` — 현택님이 장비에서 [Export] 로 만든 Defects.csv(``Export/``).
     QORVO · 모든 Job · 구형 flt · Conder · KLA 단계는 각 쓰레드의 수집 버튼으로 옮겼다(현택님 지시 2026-11-15 '쓰레드마다 따로').
 결과: 바탕화면 ``Threshold수집_<시각>\\`` 폴더 안 zip.  :data:`PART_MB` 를 넘으면 나누되,
 나눈 조각은 :data:`MIN_PART_MB` 이상이 되게 채운다(마지막 조각만 작을 수 있다).
@@ -96,8 +97,26 @@ KNOWN_LOTS = [
     ('4F-AOI-03', 'TB500_RDL2 - Multi', 'Setup1', 'HYP'),  # 2026-11-13 25장
 ]
 # 다 받은 단계 — :func:`run` 이 건너뛴다(코드는 남긴다).  현택님 지시(2026-11-15): 더 받을 필요 없는 건 수집기에서 계속 뺀다.
-# pair 비교 스캔 · known Kendall/TB500 LOT — 20261115_1856 수집까지 다 받았다(RichSurface 는 앞부분만 받아 전체를 다시 받는다).
-DONE = {"pair", "known"}
+# pair 비교 스캔 · known Kendall/TB500 LOT — 20261115_1856 수집까지 · rich RichSurface 전체 — 20261115_2302 수집으로 다 받았다.
+DONE = {"pair", "known", "rich"}
+# 현택님이 장비에서 [Export] 를 눌러 Defects.csv 를 만들어 줄 웨이퍼(사용자 제안 2026-11-15) — (장비, Job, Setup, LOT, 웨이퍼, 폴더 전부?).
+# Defects.csv = 장비가 화면에 보이는 Defect 별 Area · Width · Length · Classify.  Surface.flt 의 어느 열 · 어느 단위가
+# 장비 필터의 '면적 · 폭' 인지 정해 미리보기의 면적 · 폭 기준을 정확히 하려는 자료다(RTP.txt 는 RDL 면적 38, Zone ini 는 63.96 로 다르다).
+EXPORT_WAFERS = [
+    ("4F-AOI-05", "R_TB500_LIVE_PI4 - Enhanced", "Setup1", "YDD-Contrast Avg24", "20234838EWG1", False),  # RDL Zone(폴더는 받음)
+    ("4F-AOI-04", "R_TB500_LIVE_PI4 - Enhanced", "Setup1", "YDD-No Image", "20234838EWG1", False),       # PI_Opening + RDL, RichSurface 웨이퍼
+    ("AOI-27", "TB500_RDL4-Multi", "Setup1", "With_EDC", "S3FAR079XMA7", True),                         # EDC Good 이 Export 에 나오나
+    ("AOI-15", "R_KENDALL_A0_PI6_0223", "SETUP", "DDU-PIDS3", "E5025794EWF5", False),                   # 다른 제품(Kendall) 단위
+    # 다른 제품 · 헷갈리는 기록(현택님 2026-11-15 '다른 디바이스도').  앞 둘은 이미 Export 함, 나머지는 폴더도 처음 받는다.
+    ("AOI-12", "2D@RE-W97218SGB1K16_0860463PD-0A", "6412", "CTK", "SQ62G01-D7", False),                # QORVO: Contrast 0 · Zone 1 class −93
+    ("AOI-11", "2D@RE-W97218SGB1K16_0860463PD-0A", "6412", "CTX", "SQ67P01-D1", False),                # QORVO: 136 B 구형 기록
+    ("AOI-9", "2D@R2-15966TA0-BW2_0859654PD-0C", "6321", "TYW", "NELA26-01C1", True),                  # AVAGO: Contrast 가 Zone 1 에만
+    ("AOI-12", "2D@R2-3L781987B17-WUP_0858675PD-0B", "6412", "CCG", "3LL641036-01-G1", True),          # TI: Zone 63 도 class 29, Contrast 0
+    ("AOI-3", "R_T254 LIVE_0858711PD_FS UBM", "6324", "TSC-FS", "27125625EWC5", True),                 # T254: 화면 번호 시프트 −1 레시피
+    ("AOI-16", "2D@R5-AS-T254-A01_0857122AY-0B", "6324", "WVU", "GX57007306", True),                   # T254: 부분 맵 · Zone 63 class −22
+    ("AOI-1", "2D@RE-KENDALL_MEOL_0859275PD-0C", "REVERSEETCH", "2DG-1113S", "GX57527840", True),      # 120 B 구형 기록 · class 33
+]
+EXPORT_FILE = "Defects.csv"
 _LOT_DEPTH = 4      # Job 아래 LOT 을 찾는 깊이(Setup → [구분] → LOT)
 _WAFER_DEPTH = 2    # 웨이퍼 폴더 안 하위 폴더 깊이
 
@@ -328,6 +347,8 @@ def run(out: Path, progress=None, stop=None):
         say(f"비교 LOT {lot}  웨이퍼 {len(ws)}")
     if not stop() and "rich" not in DONE:
         collect_rich_surface(col, say, progress, stop)    # 비교 웨이퍼 RichSurface 전체 · 필요한 열만
+    if not stop() and "export" not in DONE:
+        wafers += collect_exports(col, say, progress, stop)
     pair_raw = col.raw                                     # 아래 용량 한도는 비교 LOT·RichSurface 를 뺀 양으로 잰다(시간은 전체 1시간)
 
     roots = {_aoi_key(r.parent.name): r for r in nas_roots()}
@@ -395,6 +416,51 @@ def find_rich_surface():
         if PAIR_WAFER in d.name.upper() and f.is_file():
             return f
     return None
+
+
+def collect_exports(col, say, progress, stop):
+    """:data:`EXPORT_WAFERS` 의 Defects.csv(폴더 전부 표시면 웨이퍼 폴더 전체)를 ``Export/<장비>/<LOT>/<웨이퍼>`` 로 담는다.
+    Export 를 안 눌러 Defects.csv 가 없으면 요약에 적는다.  담은 웨이퍼 수."""
+    roots = {}
+    try:
+        roots = {_aoi_key(r.parent.name): r for r in nas_roots()}
+    except OSError as e:
+        say(f"Export: Scanresult 를 못 읽음 {e}")
+    got, missing = 0, []
+    for k, (aoi, job, setup, lot_name, wafer, full) in enumerate(EXPORT_WAFERS):
+        if stop():
+            break
+        progress(k, len(EXPORT_WAFERS), f"Export {aoi} {lot_name} {wafer}"[:70])
+        try:
+            sr = roots.get(_aoi_key(aoi))
+            lot = find_lot(sr, job, setup, lot_name) if sr else None
+            w = next((d for _, d, _, _ in sorted(_entries(lot)[0]) if wafer in d.name.upper()), None) if lot else None
+            if w is None:
+                say(f"Export 웨이퍼 못 찾음: {aoi}\\{job}\\{setup}\\{lot_name}\\*{wafer}*")
+                missing.append(f"{aoi} {lot_name} {wafer}")
+                continue
+            arc = f"Export/{aoi}/{lot_name}/{w.name}"
+            if full:
+                col.take_files(w, arc)
+            else:
+                col.take_files(w, arc, only={EXPORT_FILE})
+            # 파일목록 줄로 판단한다 — 너무 크거나 못 읽은 파일은 take_files 가 조용히 건너뛰고 그 줄에만 적는다.
+            line = next((s for s in reversed(col.listing) if s.startswith(f"{arc}/{EXPORT_FILE}\t")), None)
+            if line is None:
+                say(f"Defects.csv 없음(Export 전): {w}")
+                missing.append(f"{aoi} {lot_name} {wafer}")
+                continue
+            if "\t담음" not in line:
+                say(f"Defects.csv 못 담음({line.split(chr(9), 2)[-1]}): {w}")
+                missing.append(f"{aoi} {lot_name} {wafer}")
+                continue
+            got += 1
+            say(f"Export {w}")
+        except OSError as e:                   # NAS 권한 · 연결 끊김 — 다음 웨이퍼로
+            say(f"Export 못 읽음: {aoi} {lot_name} {wafer}  {e}")
+            missing.append(f"{aoi} {lot_name} {wafer}")
+    say(f"Export Defects.csv {got}/{len(EXPORT_WAFERS)}" + (f" — 없음: {', '.join(missing)}" if missing else ""))
+    return got
 
 
 def collect_rich_surface(col, say, progress, stop):
