@@ -532,3 +532,40 @@ def test_conder_siblings_take_lots_whose_wafer_is_in_two_steps(tmp_path, monkeyp
     assert f"{arc}/1. OR/GWT2P24-A3/FVI_1_2_3_4.jpg" in col.photos
     assert not any("6H11AA" in n or "Thumbs" in n for n in names)
     assert re.search(r"GWT2P24-A3\.txt\t\d+\t담음\t\d{4}-\d\d-\d\d \d\d:\d\d", listing)       # 수정 시각
+
+
+def test_qorvo_ini_prefers_wafers_from_the_shifted_scan(tmp_path, monkeypatch):
+    tool = _tool()
+    sr = tmp_path / "AOI-11" / "Scanresult"
+    lot = sr / "2D@RE-W97218SGB1K16_0860463PD-0A" / "6321" / "FVI"
+    for wid in ("SQ62G01-A1", "SQ62G02-B2", "SQ67P13-E6"):
+        (lot / wid).mkdir(parents=True)
+        for n in tool.QORVO_INI:
+            (lot / wid / n).write_text(f"{wid} {n}")
+    monkeypatch.setattr(tool, "nas_roots", lambda: [sr])
+    col = tool.Collector(tmp_path / "s.zip")
+    tool.collect_qorvo_ini(col, lambda *_: None, lambda *_: None, lambda: False)
+    col.close("")
+    with zipfile.ZipFile(tmp_path / "s.zip") as z:
+        wafers = {n.split("/")[-2] for n in z.namelist() if n.endswith("ProductInfo.ini")}
+    assert wafers == {"SQ67P13-E6", "SQ62G01-A1"}                             # 밀린 스캔의 웨이퍼 먼저, 2장
+
+
+def test_conder_must_lot_is_taken_whole_and_only_once(tmp_path, monkeypatch):
+    tool = _tool()
+    base = tmp_path / "1. Conder Scan"
+    lot = base / "575. QORVO US" / "44. W97218SGZ4BK16" / "75. 6H7ENK (CTX)"
+    for step in ("1. UBM", "2. FVI"):
+        (lot / step / "SQ67P13-E6").mkdir(parents=True)
+        (lot / step / "SQ67P13-E6.txt").write_text(f"DEVICE:W97218 {step}\n")
+        (lot / step / "SQ67P13-E6" / f"{step[3:]}_1_2_3_4.jpg").write_bytes(b"jpg")
+    monkeypatch.setattr(tool, "CONDER_ROOTS", [str(base)])
+    col = tool.Collector(tmp_path / "s.zip")
+    assert tool.collect_conder_must(col, lambda *_: None, lambda *_: None) == 1
+    assert tool.collect_conder_siblings(col, lambda *_: None, lambda *_: None, lambda: False) == 0   # 두 번 담지 않는다
+    col.close("")
+    with zipfile.ZipFile(tmp_path / "s.zip") as z:
+        names = z.namelist()
+    arc = "Conder옆폴더/575. QORVO US/44. W97218SGZ4BK16/75. 6H7ENK (CTX)"
+    assert f"{arc}/2. FVI/SQ67P13-E6.txt" in names and f"{arc}/1. UBM/SQ67P13-E6.txt" in names
+    assert f"{arc}/2. FVI/SQ67P13-E6/FVI_1_2_3_4.jpg" in col.photos

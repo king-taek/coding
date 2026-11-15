@@ -144,6 +144,8 @@ QORVO_INI_JOBS = [
     ('W96798Z5BK16', 'GWL4R'),   # 6G7ZAD
     ('W97218SGB1K16', 'SQ6'),    # 6I7L7K(XYT 셋업 포함) · 6H7ENK — SQ67P01 · SQ62G… (col/row 쓰레드)
 ]
+# AOI-11 6412 CTX(번호가 (1,2) 밀린 스캔)에 찍힌 웨이퍼 — 다른 셋업에서 찍은 같은 웨이퍼를 먼저 고른다(QORVO 번호 쓰레드 2026-11-15).
+QORVO_INI_PREFER = {"SQ67P01-D1", "SQ67P13-E6", "SQ67P25-G3"}
 QORVO_INI = ("ProductInfo.ini", "WaferMapRecipe.ini", "Params_WaferInfo.ini", "Recipe.ini",
              "ColorImageGrabingInfo.ini",   # 사진별 X, Y — 093 칸 사진으로 Ref−Cust 를 가린다(수집 자료 쓰레드 2026-11-15)
              "WaferInfo.dat")               # die 범위 — 경계상자가 [ExportData] 와 56/56 같았다(번호표 대용 후보)
@@ -168,6 +170,8 @@ ODD_MINUTES = 8
 # Conder 옆 폴더 맵(수집 자료 쓰레드 요청 2026-11-15): 같은 웨이퍼가 두 단계 이상(예: OR · 재 AOI · _재리뷰)에 나오는 LOT.
 # QORVO 는 장치마다, 다른 고객은 고객마다 최근 :data:`SIB_LOTS` 개.  단계 폴더의 txt · lot · csv(수정 시각과 함께)와 사진 이름.
 SIB_LOTS = 8
+# 꼭 담을 Conder LOT(``CONDER_ROOTS`` 기준 경로) — 지난 수집에서 빠졌다(6H7ENK CTX 2. FVI, QORVO 번호 쓰레드 2026-11-15).
+CONDER_MUST = [r"575. QORVO US\44. W97218SGZ4BK16\75. 6H7ENK (CTX)"]
 SIB_MINUTES = 10
 SIB_MB = 200
 QORVO_INI_MB = 150       # 이 단계로 담는 원본 상한(ColorImageGrabingInfo 가 웨이퍼당 최대 5 MB, 지난 수집 관측)
@@ -565,6 +569,31 @@ def _conder_steps(d: Path, k=0, out=None):
     return out
 
 
+def _take_conder_lot(col, lot: Path, arc_lot: str, steps):
+    """단계 폴더 파일(수정 시각과 함께, Thumbs.db 빼고)과 사진 폴더의 사진 이름."""
+    for step, (wafer_dirs, _) in steps.items():
+        arc = arc_lot if step == lot else f"{arc_lot}/{step.relative_to(lot).as_posix()}"
+        col.take_files(step, arc, depth=_WAFER_DEPTH, with_mtime=True, skip=("Thumbs.db",))
+        for name, p in wafer_dirs:
+            col.take_files(p, f"{arc}/{name}", depth=_WAFER_DEPTH, only=set(), photos=True)
+
+
+def collect_conder_must(col, say, progress):
+    """:data:`CONDER_MUST` 의 LOT 을 통째로(단계 폴더 파일 · 사진 이름).  담은 LOT 수를 돌려준다."""
+    n = 0
+    for rel in CONDER_MUST:
+        parts = Path(rel.replace("\\", "/")).parts
+        lot = next((Path(b).joinpath(*parts) for b in CONDER_ROOTS if Path(b).joinpath(*parts).is_dir()), None)
+        if lot is None:
+            say(f"Conder LOT 못 찾음: {rel}")
+            continue
+        progress(0, 0, f"Conder {lot.name}"[:70])
+        _take_conder_lot(col, lot, "Conder옆폴더/" + "/".join(parts), _conder_steps(lot))
+        say(f"Conder 꼭 담을 LOT {lot}")
+        n += 1
+    return n
+
+
 def collect_conder_siblings(col, say, progress, stop, end=None):
     """같은 웨이퍼가 두 단계 이상에 나오는 Conder LOT 의 단계 폴더 파일 · 사진 이름.  담은 LOT 수를 돌려준다."""
     deadline = time.time() + SIB_MINUTES * 60
@@ -578,6 +607,7 @@ def collect_conder_siblings(col, say, progress, stop, end=None):
     def lots_of(d: Path):
         return [(t, p) for n, p, t, _ in _entries(d)[0] if re.search(r"\([^()]+\)\s*$", n)]
 
+    must = {rel.replace("\\", "/") for rel in CONDER_MUST}
     lots = 0
     for base in (Path(r) for r in CONDER_ROOTS):
         for cust_name, cust, _, _ in sorted(_entries(base)[0]):
@@ -591,6 +621,8 @@ def collect_conder_siblings(col, say, progress, stop, end=None):
                 for _, lot in sorted(group, key=lambda t: -t[0]):
                     if picked >= SIB_LOTS or expired():
                         break
+                    if lot.relative_to(base).as_posix() in must:
+                        continue                                      # 꼭 담을 LOT 으로 이미 담았다
                     progress(0, 0, f"Conder 옆 폴더 {cust_name} {lot.name}"[:70])
                     steps = _conder_steps(lot)
                     seen = {}
@@ -599,12 +631,7 @@ def collect_conder_siblings(col, say, progress, stop, end=None):
                             seen[i] = seen.get(i, 0) + 1
                     if len(steps) < 2 or max(seen.values(), default=0) < 2:
                         continue
-                    arc_lot = f"Conder옆폴더/{lot.relative_to(base).as_posix()}"
-                    for step, (wafer_dirs, _) in steps.items():
-                        arc = arc_lot if step == lot else f"{arc_lot}/{step.relative_to(lot).as_posix()}"
-                        col.take_files(step, arc, depth=_WAFER_DEPTH, with_mtime=True, skip=("Thumbs.db",))
-                        for name, p in wafer_dirs:
-                            col.take_files(p, f"{arc}/{name}", depth=_WAFER_DEPTH, only=set(), photos=True)
+                    _take_conder_lot(col, lot, f"Conder옆폴더/{lot.relative_to(base).as_posix()}", steps)
                     picked += 1
                     lots += 1
                     say(f"Conder 옆 폴더 LOT {lot}  단계 {len(steps)}")
@@ -668,6 +695,7 @@ def collect_qorvo_ini(col, say, progress, stop, end=None):
                 col.take_top_files(lot.parent, arc_lot.rsplit("/", 1)[0])   # 셋업 폴더 바로 아래 파일
                 col.take_top_files(lot, arc_lot)
                 ws = [p for p in pick_wafers(lot, 1000) if p.name.upper().startswith(hit)]   # hit '' = 모든 웨이퍼
+                ws.sort(key=lambda p: p.name.upper() not in QORVO_INI_PREFER)   # 번호가 밀린 스캔에 찍힌 웨이퍼 먼저
                 for k, w in enumerate(ws[:QORVO_INI_WAFERS]):
                     if expired():
                         break
@@ -881,6 +909,7 @@ def run(out: Path, progress=None, stop=None):
         say(f"구형 Surface.flt 장비: {', '.join(sorted(odd))}")
         wafers += collect_odd_flt(col, say, progress, stop, odd, end=deadline)
     if not stop():
+        collect_conder_must(col, say, progress)
         collect_conder_siblings(col, say, progress, stop, end=deadline)
     pair_raw = col.raw                                     # 아래 용량 한도는 비교 LOT·QORVO 를 뺀 양으로 잰다(시간은 전체 1시간)
 
