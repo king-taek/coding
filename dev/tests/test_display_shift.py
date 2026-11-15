@@ -334,3 +334,43 @@ def test_within_one_still_wins_over_the_ring(tmp_path):
     """±1 로 정해지면 고리는 보지 않는다(지금까지 맞던 LOT 의 결과는 그대로)."""
     lot = _grid_lot(tmp_path, 20, 20, _BAD, [_live2(c - 1, r) for c, r in _BAD])
     assert camtek_live.lot_display_shift(lot) == (-1, 0)
+
+
+# ---------------------------------------------------------------------------
+# 시프트를 못 정했고 0 으로도 안 맞으면 노란 경고(사용자 결정 2026-11-15 'A') — 번호는 그대로
+# ---------------------------------------------------------------------------
+def test_few_photos_off_by_one_two_get_a_yellow_warning(tmp_path):
+    """사진이 적어(서로 다른 칸 2개 < 3) (1, 2) 를 채택하지 못한 LOT — 예전에는 경고 없이 0 으로 남았다."""
+    from aoi_verification.app.coords import resolve_batch
+    from aoi_verification.app.coords import wafer_map as wm
+    two = sorted(_BAD)[:2]
+    lot = _grid_lot(tmp_path, 20, 20, _BAD, [_live2(c + 1, r + 2) for c, r in two])   # 파일명 = 맵 + (1, 2)
+    assert camtek_live.lot_display_shift(lot) == (0, 0)
+    assert not camtek_live.lot_shift_confirmed(lot)
+    assert camtek_live.lot_shift_doubtful(lot)
+    coords = resolve_batch(sorted((lot / "W1").iterdir()))
+    warns = dict(wm.map_warnings(wm.build_map(coords)))
+    assert warns.get(wm.WARN_MAP_MISMATCH) == 2
+    assert wm.WARN_SHIFT_UNKNOWN not in warns                        # 같은 사진을 두 번 세지 않는다
+    assert wm.WARN_MAP_MISMATCH not in wm.DANGER_CODES               # 노란 경고
+    assert {(c.col, c.row) for c in coords.values()} == {(c + 1, r + 2) for c, r in two}   # 번호는 고치지 않는다
+
+
+def test_no_warning_when_zero_fits_even_if_too_few_to_confirm(tmp_path):
+    """QORVO 미확인 단계 12개는 모두 이 경우(0 이 사진을 다 맞힘, 관측) — 경고하지 않는다."""
+    from aoi_verification.app.coords import resolve_batch
+    from aoi_verification.app.coords import wafer_map as wm
+    lot = _grid_lot(tmp_path, 20, 20, _BAD, [_live2(c, r) for c, r in sorted(_BAD)[:2]])
+    assert not camtek_live.lot_shift_confirmed(lot)
+    assert not camtek_live.lot_shift_doubtful(lot)
+    data = wm.build_map(resolve_batch(sorted((lot / "W1").iterdir())))
+    assert wm.WARN_MAP_MISMATCH not in dict(wm.map_warnings(data))
+
+
+def test_no_warning_without_map_evidence_or_once_confirmed(tmp_path):
+    blank = _synthetic_lot(tmp_path / "blank", set(), [_live(1), _live(2)])       # 불량 표시 없음 — 판단할 근거 없음
+    assert not camtek_live.lot_shift_doubtful(blank)
+    qorvo = _materialize(_QORVO, tmp_path / "1. UBM")                             # (1, 2) 확인한 6H7ENK
+    assert not camtek_live.lot_shift_doubtful(qorvo)
+    ring = _grid_lot(tmp_path / "r", 20, 20, _BAD, [_live2(c - 2, r + 1) for c, r in _BAD])
+    assert not camtek_live.lot_shift_doubtful(ring)
