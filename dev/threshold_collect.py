@@ -15,7 +15,7 @@
     · 사진 · 영상 · 압축 파일 — 사진은 **이름만** ``사진목록.txt`` 에 남긴다(LIVE 이름에 결함 이름이 든다)
     · :data:`FILE_MB` 를 넘는 파일 — 이름 · 크기만 ``파일목록.txt`` 에 남긴다
     · 내용이 똑같은 파일 — 한 번만 담고 ``중복목록.txt`` 에 적는다(레시피 사본이 웨이퍼마다 있다)
-    · :data:`RICH_LOT` — 비교 웨이퍼의 ``s_RichSurface.dat`` 앞 :data:`RICH_PARTS` 조각(Defect 별 Contrast 후보, ``RichSurface/``).
+    · :data:`RICH_LOT` — 비교 웨이퍼의 ``s_RichSurface.dat`` 전체에서 :data:`RICH_COLS` 열만 CSV 로(Defect 후보별 Contrast, ``RichSurface/``).
     QORVO · 모든 Job · 구형 flt · Conder · KLA 단계는 각 쓰레드의 수집 버튼으로 옮겼다(현택님 지시 2026-11-15 '쓰레드마다 따로').
 결과: 바탕화면 ``Threshold수집_<시각>\\`` 폴더 안 zip.  :data:`PART_MB` 를 넘으면 나누되,
 나눈 조각은 :data:`MIN_PART_MB` 이상이 되게 채운다(마지막 조각만 작을 수 있다).
@@ -26,6 +26,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import struct
 import time
 import zipfile
 from datetime import datetime
@@ -95,8 +96,8 @@ KNOWN_LOTS = [
     ('4F-AOI-03', 'TB500_RDL2 - Multi', 'Setup1', 'HYP'),  # 2026-11-13 25장
 ]
 # 다 받은 단계 — :func:`run` 이 건너뛴다(코드는 남긴다).  현택님 지시(2026-11-15): 더 받을 필요 없는 건 수집기에서 계속 뺀다.
-# pair 비교 스캔 · rich RichSurface 앞부분 · known Kendall/TB500 LOT — 20261115_1856 수집까지 다 받았다.
-DONE = {"pair", "rich", "known"}
+# pair 비교 스캔 · known Kendall/TB500 LOT — 20261115_1856 수집까지 다 받았다(RichSurface 는 앞부분만 받아 전체를 다시 받는다).
+DONE = {"pair", "known"}
 _LOT_DEPTH = 4      # Job 아래 LOT 을 찾는 깊이(Setup → [구분] → LOT)
 _WAFER_DEPTH = 2    # 웨이퍼 폴더 안 하위 폴더 깊이
 
@@ -326,7 +327,7 @@ def run(out: Path, progress=None, stop=None):
             wafers += 1
         say(f"비교 LOT {lot}  웨이퍼 {len(ws)}")
     if not stop() and "rich" not in DONE:
-        collect_rich_surface(col, say, progress, stop)    # 비교 웨이퍼 RichSurface 앞부분(버튼은 하나, 사용자 지시 2026-11-15)
+        collect_rich_surface(col, say, progress, stop)    # 비교 웨이퍼 RichSurface 전체 · 필요한 열만
     pair_raw = col.raw                                     # 아래 용량 한도는 비교 LOT·RichSurface 를 뺀 양으로 잰다(시간은 전체 1시간)
 
     roots = {_aoi_key(r.parent.name): r for r in nas_roots()}
@@ -372,11 +373,16 @@ def run(out: Path, progress=None, stop=None):
     return out_dir, wafers, col.files
 
 
-# RichSurface 앞부분 — Defect 마다 Contrast 가 있을 수 있는 유일한 파일(웨이퍼당 수백 MB)이라 앞부분만 조각으로 받는다(사용자 지시 2026-11-15).
+# RichSurface — Defect 후보마다 Contrast · 면적 · 폭이 든 유일한 파일(웨이퍼당 약 500 MB, 레코드 456 바이트).
+# 앞 108 MB 를 받아 보니 RTP 필터(Contrast 평균 · 면적 · 폭)로 장비 Defect 2,291개가 오차 0 으로 나왔다(2026-11-15).
+# 이제 **파일 전체**를 읽되 미리보기에 쓰는 열만 CSV 로 담는다(원본의 약 1/8, 압축하면 더 작다).
 RICH_LOT = PAIR_LOTS[4]            # 4F-AOI-04 YDD-No Image — 비교 웨이퍼가 든 LOT
 RICH_FILE = "s_RichSurface.dat"
-RICH_PARTS = 4                     # 앞 108 MB
-RICH_PART_BYTES = 27_000_000       # 압축이 안 돼도 zip 조각이 PART_MB 를 넘지 않게
+RICH_COLS = ("reclassify", "Type", "x", "y", "zone", "recipe", "AlgIndex", "area", "Breadth", "Length",
+             "AbsDeltaFromRef_Average", "AbsDeltaFromRef_Max", "SignedDeltaFromRef_Average", "GrayLevel_Average",
+             "Polarity")
+RICH_ROWS = 200_000                # CSV 하나에 담는 후보 수(약 11 MB, zip 조각 하나보다 작다)
+_VARTYPE = {"2": "h", "3": "i", "4": "f", "5": "d", "17": "B"}     # .md 의 Vartype → struct
 
 
 def find_rich_surface():
@@ -392,8 +398,7 @@ def find_rich_surface():
 
 
 def collect_rich_surface(col, say, progress, stop):
-    """앞에서부터 :data:`RICH_PART_BYTES` 씩 :data:`RICH_PARTS` 조각을 따로 담는다 — 조각 하나가 zip 조각
-    하나에 들어간다(압축이 안 돼도 :data:`PART_MB` 아래).  담은 조각 수를 돌려준다."""
+    """파일 전체에서 :data:`RICH_COLS` 열만 :data:`RICH_ROWS` 줄씩 CSV 로 담는다.  담은 CSV 수를 돌려준다."""
     src = find_rich_surface()
     if src is None:
         say(f"RichSurface 못 찾음: {RICH_LOT}\\*{PAIR_WAFER}*\\{RICH_FILE}")
@@ -405,28 +410,59 @@ def collect_rich_surface(col, say, progress, stop):
         return 0
 
 
+def rich_layout(md_text: str):
+    """``.md`` → (레코드 크기, [(열 이름, 오프셋, struct 문자)]) — :data:`RICH_COLS` 중 있는 것만, 오프셋 순."""
+    size = int(re.search(r'RecordSize Size="(\d+)"', md_text).group(1))
+    fields = {n: (int(o), _VARTYPE.get(v)) for n, o, v in
+              re.findall(r'Name="([^"]+)" Id="\d+" Offset="(\d+)" Vartype="(\d+)"', md_text)}
+    cols = sorted((fields[n][0], n, fields[n][1]) for n in RICH_COLS if n in fields and fields[n][1])
+    return size, [(n, o, t) for o, n, t in cols]
+
+
 def _take_rich_surface(col, src, say, progress, stop):
     size = src.stat().st_size
     arc = f"RichSurface/{src.parent.name}"
     md = src.with_name(src.name + ".md")
-    if md.is_file():
-        col.zf.write(md, f"{arc}/{md.name}")
-    made = 0
+    if not md.is_file():
+        say(f"RichSurface .md 없음(열 위치를 모름): {md}")
+        return 0
+    md_text = md.read_text(encoding="utf-8", errors="replace")
+    col.zf.writestr(f"{arc}/{md.name}", md_text)
+    rec, cols = rich_layout(md_text)
+    fmt, pos = "<", 0
+    for _, off, t in cols:
+        fmt += f"{off - pos}x{t}" if off > pos else t
+        pos = off + struct.calcsize("<" + t)
+    unpack = struct.Struct(fmt + f"{rec - pos}x").iter_unpack
+    header = ",".join(n for n, _, _ in cols)
+    show = [(".2f" if n in ("x", "y") else ".9g") if t in "fd" else "d" for n, _, t in cols]   # .9g = float32 그대로(경계값이 안 바뀐다)
+    rows, made, total, done = [], 0, size // rec, 0
+
+    def flush():
+        nonlocal rows, made
+        made += 1
+        part, rows = rows[:RICH_ROWS], rows[RICH_ROWS:]
+        col.zf.writestr(f"{arc}/RichSurface_{made:02d}.csv", header + "\n" + "\n".join(part) + "\n")
+        col.raw += sum(map(len, part))
+        col.files += 1
+
     with src.open("rb") as f:
-        for k in range(1, RICH_PARTS + 1):
-            if stop():
-                break
-            progress(k - 1, RICH_PARTS, f"RichSurface 조각 {k}/{RICH_PARTS}")
-            begin = f.tell()
-            data = f.read(RICH_PART_BYTES)
+        while not stop():
+            data = f.read(rec * 20_000)
+            data = data[:len(data) // rec * rec]
             if not data:
                 break
-            col.zf.writestr(f"{arc}/s_RichSurface_part{k}.dat", data)
-            col.zf.writestr(f"{arc}/조각{k}.txt", f"{src}\n원래 크기 {size}\n이 조각: {begin} ~ {begin + len(data)} 바이트\n")
-            col.raw += len(data)
-            col.files += 1
-            made += 1
-    say(f"RichSurface {src}  ({size / 1e6:.0f} MB 중 앞 {made}조각)")
+            for r in unpack(data):
+                rows.append(",".join(format(v, s) for v, s in zip(r, show)))
+            done += len(data) // rec
+            progress(done, total, f"RichSurface 읽는 중 {done:,}/{total:,}")
+            while len(rows) >= RICH_ROWS:
+                flush()
+    while rows:
+        flush()
+    col.zf.writestr(f"{arc}/정보.txt", f"{src}\n원래 크기 {size}\n레코드 {rec} 바이트 · {total}개 중 {done}개 읽음\n"
+                                       f"열: {header}\n")
+    say(f"RichSurface {src}  ({size / 1e6:.0f} MB, 후보 {done:,}/{total:,} · CSV {made}개)")
     return made
 
 

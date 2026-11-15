@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib.util
 import re
+import struct
 import time
 import zipfile
 from pathlib import Path
@@ -204,27 +205,33 @@ def test_button_runs_in_background_and_reports(styled_qapp, monkeypatch, tmp_pat
     assert calls[-1] == ("hide",)
 
 
-def test_rich_surface_head_goes_into_its_own_parts_under_the_limit(tmp_path, monkeypatch):
-    """한 버튼 수집 안에서 RichSurface 앞부분을 조각으로 담는다.  조각 하나가 zip 조각 하나에 들어가고, 이으면 원본 앞부분이다."""
+def test_rich_surface_whole_file_goes_in_as_needed_columns(tmp_path, monkeypatch):
+    """파일 전체를 .md 의 열 위치로 읽어 필요한 열만 CSV 로 담는다.  float32 는 값이 그대로(경계 100 이 안 바뀐다),
+    RICH_ROWS 줄마다 CSV 를 나눈다."""
     tool = _tool()
     w = tmp_path / "LOT" / f"{tool.PAIR_WAFER}_18"
     w.mkdir(parents=True)
-    raw = bytes(range(256)) * 400                                         # 102,400 바이트
-    (w / "s_RichSurface.dat").write_bytes(raw)
-    (w / "s_RichSurface.dat.md").write_text("RecordSize 64")
-    (tmp_path / "LOT" / "OTHER01EWA1").mkdir()
+    md = ('<root><RecordSize Size="40"/><Fields>'
+          '<Field Name="reclassify" Id="1" Offset="0" Vartype="2"/><Field Name="x" Id="2" Offset="8" Vartype="5"/>'
+          '<Field Name="Junk" Id="3" Offset="16" Vartype="4"/><Field Name="area" Id="4" Offset="20" Vartype="4"/>'
+          '<Field Name="AbsDeltaFromRef_Average" Id="5" Offset="24" Vartype="4"/><Field Name="zone" Id="6" Offset="28" Vartype="17"/>'
+          '</Fields></root>')
+    (w / "s_RichSurface.dat.md").write_text(md)
+    recs = [(29, 1.5, 7.0, 26.0, 100.0, 1), (0, 2.25, 7.0, 25.0, 99.99999237060547, 2), (0, 3.0, 7.0, 1.0, 9.0, 1)]
+    raw = b"".join(struct.pack("<h6xdfffB11x", *r) for r in recs)
+    assert len(raw) == 3 * 40
+    (w / "s_RichSurface.dat").write_bytes(raw + b"\x00" * 7)            # 끝 조각(레코드보다 짧음)은 버린다
     monkeypatch.setattr(tool, "RICH_LOT", str(tmp_path / "LOT"))
-    monkeypatch.setattr(tool, "RICH_PART_BYTES", 30_000)
-    monkeypatch.setattr(tool, "RICH_PARTS", 3)
+    monkeypatch.setattr(tool, "RICH_ROWS", 2)
     col = tool.Collector(tmp_path / "s.zip")
-    assert tool.collect_rich_surface(col, lambda *_: None, lambda *_: None, lambda: False) == 3
+    assert tool.collect_rich_surface(col, lambda *_: None, lambda *_: None, lambda: False) == 2
     col.close("")
     with zipfile.ZipFile(tmp_path / "s.zip") as z:
         arc = f"RichSurface/{w.name}"
-        got = b"".join(z.read(f"{arc}/s_RichSurface_part{k}.dat") for k in (1, 2, 3))
-        assert f"{arc}/s_RichSurface.dat.md" in z.namelist()
-    assert got == raw[:90_000]
-    assert 27_000_000 + 2_000 < tool.PART_MB * MB                          # 실제 조각(27 MB)도 압축 없이 한도 안
+        lines = (z.read(f"{arc}/RichSurface_01.csv") + z.read(f"{arc}/RichSurface_02.csv").split(b"\n", 1)[1]).decode().split()
+        assert f"{arc}/s_RichSurface.dat.md" in z.namelist() and "3개 중 3개" in z.read(f"{arc}/정보.txt").decode()
+    assert lines[0] == "reclassify,x,area,AbsDeltaFromRef_Average,zone"          # Junk 는 안 담는다
+    assert lines[1:] == ["29,1.50,26,100,1", "0,2.25,25,99.9999924,2", "0,3.00,1,9,1"]
 
 
 def test_rich_surface_missing_is_only_noted(tmp_path, monkeypatch):
