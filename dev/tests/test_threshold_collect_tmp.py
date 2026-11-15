@@ -78,6 +78,7 @@ def test_collects_known_lots_and_drops_useless_files(tmp_path, monkeypatch):
     _wafer(sr4 / "TB500_RDL2 - Multi" / "Setup1" / "6324" / "TNY" / "W77", recipe=b"[Recipe]\nMinArea=9\n")
     (sr / "R_KENDALL_A0_PI5" / "SETUP" / "LOT1" / "W01" / "huge.dat").write_bytes(b"\x00" * (tool.FILE_MB * MB + 1))
     monkeypatch.setattr(tool, "nas_roots", lambda: [sr, sr4])
+    monkeypatch.setattr(tool, "collect_all_jobs", lambda *a, **k: 0)     # 모든 Job 단계는 따로 시험한다
     monkeypatch.setattr(tool, "PAIR_LOTS", [])
     monkeypatch.setattr(tool, "CONDER_ROOTS", [])
     monkeypatch.setattr(tool, "KLA_PAIRS", [])
@@ -170,6 +171,7 @@ def test_kla_pairs_take_camtek_and_kla_folders_side_by_side(tmp_path, monkeypatc
         (k / "31266529EWF6_2_0_23_2.jpg").write_bytes(b"jpg")
     monkeypatch.setattr(tool, "kla_bases", lambda: [tmp_path / "없음", kroot])
     monkeypatch.setattr(tool, "nas_roots", lambda: [sr])
+    monkeypatch.setattr(tool, "collect_all_jobs", lambda *a, **k: 0)     # 모든 Job 단계는 따로 시험한다
     monkeypatch.setattr(tool, "PAIR_LOTS", [])
     monkeypatch.setattr(tool, "CONDER_ROOTS", [])
     monkeypatch.setattr(tool, "QORVO_KNOWN_LOTS", [])
@@ -197,6 +199,7 @@ def test_qorvo_known_lots_come_before_conder(tmp_path, monkeypatch):
     for w in ("GKT7P03-A6", "GKT7P04-D1", "GKT7P05-F4", "GKT7P06-B2"):
         _wafer(sr / "R_Qorvo XP2100_0861004PD_RDL1" / "SETUP" / "MMG" / w, recipe=w.encode())
     monkeypatch.setattr(tool, "nas_roots", lambda: [sr])
+    monkeypatch.setattr(tool, "collect_all_jobs", lambda *a, **k: 0)     # 모든 Job 단계는 따로 시험한다
     monkeypatch.setattr(tool, "PAIR_LOTS", [])
     monkeypatch.setattr(tool, "KLA_PAIRS", [])
     monkeypatch.setattr(tool, "CONDER_ROW_LOTS", [])
@@ -408,3 +411,35 @@ def test_rich_surface_read_error_does_not_stop_the_collection(tmp_path, monkeypa
     assert tool.collect_rich_surface(col, said.append, lambda *_: None, lambda: False) == 0
     col.close("")
     assert said and "못 읽음" in said[0]
+
+
+def test_all_jobs_take_one_recent_wafer_and_only_the_map_files(tmp_path, monkeypatch):
+    """모든 Job 에서 최근 LOT 웨이퍼 1장씩, 사진 위치 · die 맵 파일만(파일당 상한 안) 담는다."""
+    import os
+    tool = _tool()
+    sr = tmp_path / "AOI-9" / "Scanresult"
+    for job, lots in (("R_OTHER_PRODUCT", ("OLD", "NEW")), ("R_KENDALL_A0_PI5", ("L1",))):
+        for i, lot in enumerate(lots):
+            for wid in ("W01", "W02"):
+                w = sr / job / "SETUP" / lot / wid
+                w.mkdir(parents=True)
+                for n in tool.WIDE_FILES:
+                    (w / n).write_text(f"{job} {lot} {wid} {n}")
+                (w / "Recipe.ini").write_text("x")
+                (w / "Surface.flt").write_bytes(b"\x00" * 152)
+                (w / "P_1_2_x.jpg").write_bytes(b"jpg")
+            os.utime(sr / job / "SETUP" / lot, (1000 + i, 1000 + i))
+    big = sr / "R_OTHER_PRODUCT" / "SETUP" / "NEW" / "W01" / "s_DieLocation.dat"
+    big.write_bytes(b"\x00" * (tool.WIDE_FILE_MB * MB + 1))
+    monkeypatch.setattr(tool, "nas_roots", lambda: [sr])
+    col = tool.Collector(tmp_path / "s.zip")
+    assert tool.collect_all_jobs(col, lambda *_: None, lambda *_: None, lambda: False) == 2
+    col.close("")
+    with zipfile.ZipFile(tmp_path / "s.zip") as z:
+        names = [n for n in z.namelist() if n.startswith("모든Job/")]
+    base = "모든Job/AOI-9/R_OTHER_PRODUCT/SETUP/NEW/W01"
+    assert f"{base}/ColorImageGrabingInfo.ini" in names and f"{base}/WaferInfo.dat" in names
+    assert f"{base}/s_DieLocation.dat" not in names                          # 파일당 상한을 넘는다
+    assert not any("/OLD/" in n or "/W02/" in n for n in names)               # 최근 LOT · 1장만
+    assert not any(n.endswith((".flt", "Recipe.ini")) for n in names)
+    assert any(n.startswith("모든Job/AOI-9/R_KENDALL_A0_PI5/") for n in names)

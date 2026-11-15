@@ -22,6 +22,7 @@
     · :data:`RICH_LOT` — 비교 웨이퍼의 ``s_RichSurface.dat`` 앞 :data:`RICH_PARTS` 조각(Defect 별 Contrast 후보, ``RichSurface/``).
     · :data:`QORVO_INI_JOBS` — Conder 와 같은 웨이퍼가 든 QORVO Job 의 **모든 셋업**(EDGE 아닌 것 포함)에서 LOT 마다
       그 웨이퍼의 :data:`QORVO_INI` 와 첫 웨이퍼의 die 맵만(번호 원점 확인용, 2026-11-15).
+    · :data:`WIDE_FILES` — NAS 의 모든 Job 에서 최근 LOT 웨이퍼 1장의 사진 위치 · die 맵 파일만(``모든Job/``, 맵 구멍 리스크).
     · :data:`CONDER_ROW_LOTS` — Conder LIVE 파일명 번호로 앱 row 를 확인할 Kendall LOT(맵 txt · lot · csv · 사진 이름).
     · :data:`KLA_PAIRS` — 같은 웨이퍼를 KLA 와 Camtek 이 같은 층에서 찍은 것(스캔 기록, 2026-11-15 사용자 요청).
       Camtek 웨이퍼 폴더와 KLA 웨이퍼 폴더(정보파일 · 사진 이름)를 ``KLA비교/<KLA LOT>/`` 아래 나란히 담는다.
@@ -147,6 +148,12 @@ QORVO_INI = ("ProductInfo.ini", "WaferMapRecipe.ini", "Params_WaferInfo.ini", "R
 QORVO_DIE_MAP = ("s_DieLocation.dat", "s_DieLocation.dat.md")   # LOT 마다 첫 웨이퍼만(웨이퍼당 약 10 MB)
 QORVO_INI_LOTS = 40      # Job 마다 LOT 몇 개까지(최근 것부터)
 QORVO_INI_WAFERS = 2     # LOT 마다 웨이퍼 몇 장
+# 맵 안쪽 구멍 리스크(col/row 쓰레드 요청 2026-11-15, 현택님 '진행해'): 제품 폭을 넓히려 NAS 의 **모든 Job** 에서
+# 최근 LOT 웨이퍼 1장씩, 이 파일들만 담는다.  사진 위치(ColorImageGrabingInfo)와 die 맵을 제품별로 맞춰 본다.
+WIDE_FILES = ("s_DieLocation.dat", "s_DieLocation.dat.md", "ColorImageGrabingInfo.ini", "ProductInfo.ini",
+              "Params_WaferInfo.ini", "WaferInfo.dat")
+WIDE_FILE_MB = 12        # 파일당 상한
+WIDE_MINUTES = 10        # 이 단계 시간 상한
 QORVO_INI_MB = 150       # 이 단계로 담는 원본 상한(ColorImageGrabingInfo 가 웨이퍼당 최대 5 MB, 지난 수집 관측)
 # 같은 웨이퍼를 KLA 와 Camtek 이 같은 층(RDL1~6 · FS …)에서 7일 안에 찍은 것(스캔 기록, 2026-11-15 사용자 요청).
 # (KLA 장비, KLA LOT, [KLA 웨이퍼 시작 시각], Camtek 장비, Job, Setup, LOT, [웨이퍼 ID], [KLA 슬롯]).
@@ -485,6 +492,33 @@ def collect_qorvo(col, say, progress, stop, end=None):
     return wafers
 
 
+def collect_all_jobs(col, say, progress, stop, end=None):
+    """NAS 의 모든 Job(최근에 바뀐 것부터, 장비를 섞어서)에서 최근 LOT 웨이퍼 1장의 :data:`WIDE_FILES` 만 담는다.
+    웨이퍼 수를 돌려준다."""
+    deadline = time.time() + WIDE_MINUTES * 60
+    if end is not None:
+        deadline = min(deadline, end)
+
+    def expired():
+        return stop() or time.time() > deadline
+
+    jobs = [(t, r, name, job) for r in nas_roots() for name, job, t, _ in _entries(r)[0]]
+    jobs.sort(key=lambda j: -j[0])
+    say(f"모든 Job: {len(jobs)}개 (최근 것부터)")
+    wafers = 0
+    for k, (_, r, name, job) in enumerate(jobs):
+        if expired():
+            say(f"모든 Job: 시간 제한·중지로 {k}/{len(jobs)} 에서 멈춤")
+            break
+        progress(k, len(jobs), f"모든 Job {r.parent.name} {name}"[:70])
+        for lot in find_lots(job, 1, expired):
+            for w in pick_wafers(lot, 1):
+                arc = f"모든Job/{r.parent.name}/{name}/{lot.relative_to(job).as_posix()}/{w.name}"
+                col.take_files(w, arc, only=set(WIDE_FILES), max_mb=WIDE_FILE_MB)
+                wafers += 1
+    return wafers
+
+
 def collect_qorvo_ini(col, say, progress, stop, end=None):
     """:data:`QORVO_INI_JOBS` 의 Job 을 모든 장비 · 모든 셋업에서 찾아, LOT 마다 Conder 와 같은 웨이퍼의
     작은 ini 만 담는다(EDGE 만 있던 0245 수집을 메우는 자료).  웨이퍼 수를 돌려준다."""
@@ -565,7 +599,7 @@ class Collector:
         self.raw = 0
         self.files = 0
 
-    def take_files(self, folder: Path, arc: str, depth: int = 0, only=None):
+    def take_files(self, folder: Path, arc: str, depth: int = 0, only=None, max_mb=None):
         """``only`` 를 주면 그 이름의 파일만 담는다(하위 폴더는 내려가지 않고, 다른 파일은 목록에도 안 남긴다)."""
         dirs, files = _entries(folder)
         for name, path, _, size in sorted(files):
@@ -575,7 +609,7 @@ class Collector:
             if ext in IMG_EXT:
                 self.photos.append(f"{arc}/{name}")
                 continue
-            if ext in SKIP_EXT or size > FILE_MB * 2 ** 20:
+            if ext in SKIP_EXT or size > (max_mb or FILE_MB) * 2 ** 20:
                 self.listing.append(f"{arc}/{name}\t{size}\t뺌")
                 continue
             try:
@@ -706,6 +740,8 @@ def run(out: Path, progress=None, stop=None):
         wafers += collect_qorvo_ini(col, say, progress, stop, end=deadline)   # 작아서 먼저
     if not stop():
         wafers += collect_qorvo(col, say, progress, stop, end=deadline)
+    if not stop():
+        wafers += collect_all_jobs(col, say, progress, stop, end=deadline)
     pair_raw = col.raw                                     # 아래 용량 한도는 비교 LOT·QORVO 를 뺀 양으로 잰다(시간은 전체 1시간)
 
     roots = {_aoi_key(r.parent.name): r for r in nas_roots()}
