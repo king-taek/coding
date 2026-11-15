@@ -561,8 +561,8 @@ THRESH_COLLECT_WINDING_DOWN = "방금 중지한 수집이 아직 정리 중입�
 QORVO_COLLECT_BUTTON = "QORVO 번호 자료 수집"
 QORVO_COLLECT_TITLE = "QORVO 번호 자료 수집"
 QORVO_COLLECT_ASK = (
-    "NAS 의 Scanresult 와 Conder 에서 QORVO 번호 확인용 설정 파일 · 맵 txt 를 모읍니다. "
-    "읽기만 하고, 사진은 이름만 적습니다. 최대 40분이 걸리고, 중지하면 그때까지 모은 것을 저장합니다."
+    "NAS 의 Scanresult 와 Conder 에서 W97218 LOT 5개(APH · UAP · AVY · TKG · XLW)의 설정 파일 · 맵 txt 를 모읍니다. "
+    "읽기만 하고, 사진은 이름만 적습니다. 10분쯤(최대 15분) 걸리고, 중지하면 그때까지 모은 것을 저장합니다."
 )
 QORVO_COLLECT_START = "수집 시작"
 QORVO_COLLECT_RUNNING = "QORVO 번호 자료를 모으는 중"
