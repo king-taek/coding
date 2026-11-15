@@ -536,6 +536,26 @@ THRESH_COLLECT_STOPPED = "화면을 먼저 풀었습니다. 저장이 끝나면 
 THRESH_COLLECT_NOTHING = "모을 파일(비교 웨이퍼 RichSurface)을 찾지 못해 결과 파일을 만들지 않았습니다."
 THRESH_COLLECT_WINDING_DOWN = "방금 중지한 수집이 아직 정리 중입니다. 잠시 뒤 다시 눌러 주세요."
 # ── [Threshold수집-임시] 끝 ────────────────────────────────────────────────
+# ── [QORVO수집-임시] 시작 — QORVO 번호 조사가 끝나면 이 블록을 통째로 지운다 ───────────
+QORVO_COLLECT_BUTTON = "QORVO 번호 자료 수집"
+QORVO_COLLECT_TITLE = "QORVO 번호 자료 수집"
+QORVO_COLLECT_ASK = (
+    "NAS 의 Scanresult 와 Conder 에서 QORVO 번호 확인용 설정 파일 · 맵 txt 를 모읍니다. "
+    "읽기만 하고, 사진은 이름만 적습니다. 최대 40분이 걸리고, 중지하면 그때까지 모은 것을 저장합니다."
+)
+QORVO_COLLECT_START = "수집 시작"
+QORVO_COLLECT_RUNNING = "QORVO 번호 자료를 모으는 중"
+QORVO_COLLECT_DONE_FMT = (
+    "웨이퍼 · LOT {wafers}개 · 파일 {files}개를 모았습니다.\n"
+    "아래 폴더 안의 zip 을 전부 올려 주세요(28 MB 를 넘으면 여러 개로 나뉩니다).\n{path}"
+)
+QORVO_COLLECT_NO_TOOL = "수집 도구(dev/qorvo_collect.py)가 없습니다. 개발자 모드에서 dev 브랜치로 설치해 주세요."
+QORVO_COLLECT_FAIL_FMT = "수집하다 멈췄습니다: {error}"
+QORVO_COLLECT_STOPPING = "지금까지 모은 것을 저장하는 중 (한 번 더 누르면 화면을 바로 풉니다)"
+QORVO_COLLECT_STOPPED = "화면을 먼저 풀었습니다. 저장이 끝나면 바탕화면의 QORVO수집 폴더에 zip 이 생깁니다."
+QORVO_COLLECT_NOTHING = "QORVO 폴더를 찾지 못해 결과 파일을 만들지 않았습니다."
+QORVO_COLLECT_WINDING_DOWN = "방금 중지한 수집이 아직 정리 중입니다. 잠시 뒤 다시 눌러 주세요."
+# ── [QORVO수집-임시] 끝 ────────────────────────────────────────────────
 
 # ── 개발자 모드 (메인 화면 Ctrl+Shift+D) ───────────────────────────────────
 DEV_MODE_ON = "개발자 모드를 켰습니다."
