@@ -25,6 +25,8 @@ def _tool():
     spec = importlib.util.spec_from_file_location("threshold_collect", ROOT / "dev" / "threshold_collect.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
+    mod.DONE = set()          # 단계별 테스트는 끈 단계도 돌려 본다(끄는 것은 test_done_stages_are_skipped)
+    mod.QORVO_INI_DONE = set()
     return mod
 
 
@@ -486,6 +488,7 @@ def test_odd_flt_takes_pi_live_jobs_first_with_photo_names(tmp_path, monkeypatch
         w.mkdir(parents=True)
         for n in tool.ODD_FILES:
             (w / n).write_text(f"{job} {n}")
+        (w / "Params_WaferInfo.ini").write_text(f"{job} params")
         (w / "Recipe.ini").write_text("x")
         (w / "W01_1_2_Surface Dark_3_4.jpg").write_bytes(b"jpg")
     other = tmp_path / "AOI-07" / "Scanresult" / "R_E_PI" / "SETUP" / "L1" / "W01"   # 152 장비는 안 본다
@@ -501,7 +504,7 @@ def test_odd_flt_takes_pi_live_jobs_first_with_photo_names(tmp_path, monkeypatch
     jobs = {n.split("/")[2] for n in names if n.startswith("구형flt/")}
     assert jobs == {"R_B_PI4", "R_C_LIVE"}                                    # PI · LIVE 먼저, 최대 2개
     assert "구형flt/AOI-05/R_B_PI4/SETUP/L1/W01/RTP.txt" in names
-    assert not any(n.endswith("Recipe.ini") or "AOI-07" in n for n in names)
+    assert not any(n.endswith(("Recipe.ini", "Params_WaferInfo.ini")) or "AOI-07" in n for n in names)
     assert any(p.endswith(".jpg") for p in col.photos)
 
 
@@ -569,3 +572,49 @@ def test_conder_must_lot_is_taken_whole_and_only_once(tmp_path, monkeypatch):
     arc = "Conder옆폴더/575. QORVO US/44. W97218SGZ4BK16/75. 6H7ENK (CTX)"
     assert f"{arc}/2. FVI/SQ67P13-E6.txt" in names and f"{arc}/1. UBM/SQ67P13-E6.txt" in names
     assert f"{arc}/2. FVI/SQ67P13-E6/FVI_1_2_3_4.jpg" in col.photos
+
+
+def test_qorvo_ini_skips_jobs_already_taken(tmp_path, monkeypatch):
+    tool = _tool()
+    tool.QORVO_INI_DONE = {"W96721Z5BK16"}
+    w = tmp_path / "AOI-8" / "Scanresult" / "2D@R2-W96721Z5BK16_0858867PD-0A" / "6321" / "NPG" / "GCTAH01-B0"
+    w.mkdir(parents=True)
+    (w / "ProductInfo.ini").write_text("x")
+    monkeypatch.setattr(tool, "nas_roots", lambda: [tmp_path / "AOI-8" / "Scanresult"])
+    col = tool.Collector(tmp_path / "s.zip")
+    assert tool.collect_qorvo_ini(col, lambda *_: None, lambda *_: None, lambda: False) == 0
+    col.close("")
+
+
+def test_done_stages_are_skipped(tmp_path, monkeypatch):
+    """다 받은 단계(DONE)는 run() 이 건너뛴다 — 다시 모으지 않는다."""
+    tool = _tool()
+    tool.DONE = {"pair", "rich", "conder_rows", "kla", "qorvo", "known"}
+    called = []
+    for name in ("collect_rich_surface", "collect_conder_rows", "collect_kla_pairs", "collect_qorvo",
+                 "collect_qorvo_ini", "collect_all_jobs", "collect_odd_flt", "collect_conder_must",
+                 "collect_conder_siblings"):
+        monkeypatch.setattr(tool, name, lambda *a, _n=name, **k: called.append(_n) or 0)
+    monkeypatch.setattr(tool, "resolve_pair", lambda raw: called.append("pair") or None)
+    monkeypatch.setattr(tool, "find_lot", lambda *a: called.append("known") or None)
+    monkeypatch.setattr(tool, "nas_roots", lambda: [tmp_path])
+    tool.run(tmp_path)
+    assert set(called) == {"collect_qorvo_ini", "collect_all_jobs", "collect_odd_flt",
+                           "collect_conder_must", "collect_conder_siblings"}
+
+
+
+def test_all_jobs_take_multi_recipe_files(tmp_path, monkeypatch):
+    tool = _tool()
+    sr = tmp_path / "AOI-03" / "Scanresult"
+    w = sr / "R_MULTI" / "Setup1" / "L1" / "W01"
+    w.mkdir(parents=True)
+    for n in ("Params_WaferInfo.ini", "Recipe2-ProductInfo.ini", "Recipe1-ProductInfo.ini", "DieLut.dat", "Recipe2.ini"):
+        (w / n).write_text(n)
+    monkeypatch.setattr(tool, "nas_roots", lambda: [sr])
+    col = tool.Collector(tmp_path / "s.zip")
+    tool.collect_all_jobs(col, lambda *_: None, lambda *_: None, lambda: False)
+    col.close("")
+    with zipfile.ZipFile(tmp_path / "s.zip") as z:
+        got = {n.rsplit("/", 1)[-1] for n in z.namelist() if n.startswith("모든Job/")}
+    assert got == {"Params_WaferInfo.ini", "Recipe2-ProductInfo.ini", "Recipe1-ProductInfo.ini", "DieLut.dat"}

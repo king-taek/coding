@@ -144,6 +144,8 @@ QORVO_INI_JOBS = [
     ('W96798Z5BK16', 'GWL4R'),   # 6G7ZAD
     ('W97218SGB1K16', 'SQ6'),    # 6I7L7K(XYT 셋업 포함) · 6H7ENK — SQ67P01 · SQ62G… (col/row 쓰레드)
 ]
+# 다 받은 Job — QORVO 번호 쓰레드(2026-11-15): 앞으로는 W97218 의 모든 셋업 ini · 첫 웨이퍼 die 맵 · Defects.csv 만 필요.
+QORVO_INI_DONE = {"W96721Z5BK16", "W96760Z5BK16", "W96798Z5BK16"}
 # AOI-11 6412 CTX(번호가 (1,2) 밀린 스캔)에 찍힌 웨이퍼 — 다른 셋업에서 찍은 같은 웨이퍼를 먼저 고른다(QORVO 번호 쓰레드 2026-11-15).
 QORVO_INI_PREFER = {"SQ67P01-D1", "SQ67P13-E6", "SQ67P25-G3"}
 QORVO_INI = ("ProductInfo.ini", "WaferMapRecipe.ini", "Params_WaferInfo.ini", "Recipe.ini",
@@ -157,14 +159,16 @@ QORVO_INI_WAFERS = 2     # LOT 마다 웨이퍼 몇 장
 # 최근 LOT 웨이퍼 1장씩, 이 파일들만 담는다.  사진 위치(ColorImageGrabingInfo)와 die 맵을 제품별로 맞춰 본다.
 WIDE_FILES = ("s_DieLocation.dat", "s_DieLocation.dat.md", "ColorImageGrabingInfo.ini", "ProductInfo.ini",
               "Params_WaferInfo.ini", "WaferInfo.dat",
-              "Surface.flt.md", "Defects.csv")       # 장비마다 레코드 크기(수집 자료 쓰레드 Surface.flt 검증, PR #131) — Surface.flt 는 이름 · 크기만
+              "Surface.flt.md",       # 장비마다 레코드 크기(수집 자료 쓰레드 Surface.flt 검증, PR #131) — Surface.flt 는 이름 · 크기만
+              "Defects.csv",
+              "DieLut.dat")           # 다중 레시피 스캔에만 있다 — Recipe*-ProductInfo.ini 와 함께 Kendall 밖 제품의 다중 레시피 규칙 확인
+_RECIPE_PI = re.compile(r"Recipe\d+-ProductInfo\.ini$", re.I)
 WIDE_FILE_MB = 12        # 파일당 상한
 WIDE_MINUTES = 10        # 이 단계 시간 상한
 # 레코드가 152 바이트가 아닌(구형) 장비만 깊게 — 그 장비의 서로 다른 Job 최대 :data:`ODD_JOBS` 개 × 최근 LOT 웨이퍼 1장.
 # Contrast 값이 든 레코드로 RTP.txt 기준과 맞춰 보려 이름에 PI · LIVE 가 든 Job 부터(수집 자료 쓰레드 요청 2026-11-15).
 ODD_SEED = ("AOI-1", "AOI-5", "AOI-10")          # 이미 확인한 구형(120 · 136 · 136)
-ODD_FILES = ("Surface.flt", "Surface.flt.md", "ColorImageGrabingInfo.ini", "RTP.txt", "Zones.ini", "ScanLog.ini",
-             "Params_WaferInfo.ini", "ProductInfo.ini", "Defects.csv")
+ODD_FILES = ("Surface.flt", "Surface.flt.md", "RTP.txt", "Defects.csv")   # + 사진 이름(수집 자료 쓰레드: 이걸로 충분)
 ODD_FIRST = ("PI", "LIVE")
 ODD_JOBS = 8
 ODD_MINUTES = 8
@@ -209,6 +213,10 @@ CONDER_ROW_LOTS = [
 ]
 CONDER_ROW_MINUTES = 10
 CONDER_FIRST = ("KENDALL", "MSFT", "MICROSOFT")   # 이 이름이 든 고객 폴더부터 본다
+# 다 받은 단계 — :func:`run` 이 건너뛴다(코드는 남긴다).  현택님 지시(2026-11-15): 더 받을 필요 없는 건 수집기에서 계속 뺀다.
+# pair 비교 스캔 · rich RichSurface · conder_rows Conder 번호 확인 · kla KLA 짝 · qorvo QORVO 스캔 기록 LOT 과 Conder ·
+# known Kendall/TB500 LOT — 20261115_1856 수집까지 다 받았다(수집 자료 · QORVO 번호 쓰레드 확인).
+DONE = {"pair", "rich", "conder_rows", "kla", "qorvo", "known"}
 _LOT_DEPTH = 4      # Job 아래 LOT 을 찾는 깊이(Setup → [구분] → LOT)
 _WAFER_DEPTH = 2    # 웨이퍼 폴더 안 하위 폴더 깊이
 
@@ -662,7 +670,8 @@ def collect_all_jobs(col, say, progress, stop, end=None, odd=None):
         for lot in find_lots(job, 1, expired):
             for w in pick_wafers(lot, 1):
                 arc = f"모든Job/{r.parent.name}/{name}/{lot.relative_to(job).as_posix()}/{w.name}"
-                col.take_files(w, arc, only=set(WIDE_FILES), max_mb=WIDE_FILE_MB, names_only=("Surface.flt",))
+                col.take_files(w, arc, only=lambda n: n in WIDE_FILES or bool(_RECIPE_PI.match(n)),
+                               max_mb=WIDE_FILE_MB, names_only=("Surface.flt",))
                 size = _record_size(w)
                 if odd is not None and size not in (None, 152):
                     odd.add(_aoi_key(r.parent.name))
@@ -684,7 +693,8 @@ def collect_qorvo_ini(col, say, progress, stop, end=None):
     wafers = 0
     for r in nas_roots():
         for name, job, _, _ in sorted(_entries(r)[0]):
-            hit = next((w.upper() for key, w in QORVO_INI_JOBS if key in name.upper()), None)
+            hit = next((w.upper() for key, w in QORVO_INI_JOBS
+                        if key in name.upper() and key not in QORVO_INI_DONE), None)
             if hit is None or expired():
                 continue
             arc_job = f"QORVO/Scanresult/{r.parent.name}/{name}"
@@ -753,7 +763,7 @@ class Collector:
 
     def take_files(self, folder: Path, arc: str, depth: int = 0, only=None, max_mb=None,
                    photos=False, names_only=(), with_mtime=False, skip=()):
-        """``only`` 를 주면 그 이름의 파일만 담는다(하위 폴더는 내려가지 않고, 다른 파일은 목록에도 안 남긴다).
+        """``only``(이름 집합 또는 이름 → 참/거짓 함수)를 주면 그 파일만 담는다(하위 폴더는 내려가지 않고, 다른 파일은 목록에도 안 남긴다).
         ``photos`` 면 ``only`` 가 있어도 사진 이름은 남기고, ``names_only`` 의 파일은 이름 · 크기만 파일목록에 적는다.
         ``with_mtime`` 이면 파일목록에 수정 시각을 붙인다.  ``skip`` 의 이름은 아예 건너뛴다."""
         dirs, files = _entries(folder)
@@ -763,7 +773,7 @@ class Collector:
             if Path(name).suffix.lower() in IMG_EXT and (only is None or photos):
                 self.photos.append(f"{arc}/{name}")
                 continue
-            if only is not None and name not in only:
+            if only is not None and not (only(name) if callable(only) else name in only):
                 if name in names_only:
                     self.listing.append(f"{arc}/{name}\t{size}\t이름만")
                 continue
@@ -870,7 +880,8 @@ def run(out: Path, progress=None, stop=None):
         print(line)
         progress(0, 0, line[:70])
 
-    for k, raw in enumerate(PAIR_LOTS):                    # 비교 스캔 LOT 은 먼저, 웨이퍼 전부
+    say(f"다 받아서 건너뛰는 단계: {', '.join(sorted(DONE)) or '없음'}")
+    for k, raw in enumerate(PAIR_LOTS if "pair" not in DONE else []):   # 비교 스캔 LOT 은 먼저, 웨이퍼 전부
         if stop() or time.time() > deadline:
             say("시간 제한·중지로 비교 LOT 을 여기서 멈춤")
             break
@@ -893,15 +904,15 @@ def run(out: Path, progress=None, stop=None):
             col.take_files(w, f"{arc_lot}/{w.name}")
             wafers += 1
         say(f"비교 LOT {lot}  웨이퍼 {len(ws)}")
-    if not stop():
+    if not stop() and "rich" not in DONE:
         collect_rich_surface(col, say, progress, stop)    # 비교 웨이퍼 RichSurface 앞부분(버튼은 하나, 사용자 지시 2026-11-15)
-    if not stop():
+    if not stop() and "conder_rows" not in DONE:
         wafers += collect_conder_rows(col, say, progress, stop, end=deadline)
-    if not stop():
+    if not stop() and "kla" not in DONE:
         wafers += collect_kla_pairs(col, say, progress, stop, end=deadline)
-    if not stop():
+    if not stop() and "qorvo_ini" not in DONE:
         wafers += collect_qorvo_ini(col, say, progress, stop, end=deadline)   # 작아서 먼저
-    if not stop():
+    if not stop() and "qorvo" not in DONE:
         wafers += collect_qorvo(col, say, progress, stop, end=deadline)
     odd = {_aoi_key(a) for a in ODD_SEED}
     if not stop():
@@ -917,7 +928,7 @@ def run(out: Path, progress=None, stop=None):
     roots = {_aoi_key(r.parent.name): r for r in nas_roots()}
     say(f"Scanresult {len(roots)}곳: " + ", ".join(sorted(roots)))
     jobs = []
-    for i, (aoi, job, setup, lot_name) in enumerate(KNOWN_LOTS):
+    for i, (aoi, job, setup, lot_name) in enumerate(KNOWN_LOTS if "known" not in DONE else []):
         if expired():
             say("시간 제한·중지·용량 한도로 여기서 멈춤")
             break
