@@ -144,12 +144,42 @@ def load(slot_folder: Path) -> Optional[WaferTxt]:
     """슬롯 폴더의 웨이퍼 맵 — **LOT 폴더(부모)의 ``<슬롯명>.txt``** 만 본다.
 
     다른 자리(예: ``0. ASSY\\…\\Mirroring_Converted``)에도 같은 이름 파일이 있지만
-    대조로 확인한 것은 LOT 폴더의 파일뿐이다.  전 구간 fail-safe."""
+    대조로 확인한 것은 LOT 폴더의 파일뿐이다.  그 이름이 없으면 폴더 이름이 맵 이름과 조금
+    다른 경우(사람이 줄이거나 메모를 붙임)만 :func:`_named_like` 로 메운다.  전 구간 fail-safe."""
     try:
         p = slot_folder.parent / f"{slot_folder.name}.txt"
-        if not p.is_file() or p.stat().st_size > _MAX_BYTES:
+        wafer = slot_folder.name
+        if not p.is_file():
+            p = _named_like(slot_folder)
+            if p is None:
+                return None
+            wafer = p.stem
+        if p.stat().st_size > _MAX_BYTES:
             return None
         text = read_ini_text(p)
-        return parse(text, p, slot_folder.name) if text else None
+        return parse(text, p, wafer) if text else None
     except Exception:
         return None
+
+
+def _named_like(slot_folder: Path) -> Optional[Path]:
+    """폴더 이름이 맵 이름과 조금 다를 때의 맵 — 확신할 수 없으면 None.
+
+    관측(2026-11-15, Conder CTY KENDALL): 폴더 ``00NUR031XY`` ↔ 맵 ``00NUR031XYE5.txt``,
+    ``0NUR043XYC`` ↔ ``00NUR043XYC7.txt``, ``00NUR050XYC0 추가 SRD 필요`` ↔ ``00NUR050XYC0.txt``.
+    맵을 못 찾으면 Wafer map 이 die 크기를 추정하고 빨간 경고를 띄웠다(11 슬롯 21장).
+
+    고정 글자 수는 두지 않는다 — 폴더 이름 첫 토큰(공백 앞)이 맵 이름 안에 있고 그 이름 글자의
+    과반을 덮으며, 그런 맵이 LOT(맵 txt 2장 이상) 안에 **딱 하나**일 때만 쓴다.  둘 이상이면
+    고르지 않는다 — 다른 웨이퍼 맵을 쓰느니 없는 편이 낫다.  맵 머리 ``WAFER`` 는 그 맵 이름과
+    같아야 한다(:func:`parse`)."""
+    tok = (slot_folder.name.split() or [""])[0].lower()
+    if not tok:
+        return None
+    maps = [q for q in slot_folder.parent.iterdir() if q.suffix.lower() == ".txt"]
+    cand = [q for q in maps if tok in q.stem.lower() and 2 * len(tok) > len(q.stem)]
+    if len(maps) < 2 or len(cand) != 1:
+        return None
+    _LOG.info("웨이퍼 맵: 슬롯 %s 와 같은 이름의 맵이 없어 이름이 겹치는 %s 를 씁니다",
+              slot_folder.name, cand[0].name)
+    return cand[0]

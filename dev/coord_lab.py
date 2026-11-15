@@ -1301,6 +1301,8 @@ def analyze_camtek(folder: Path, live_by_dir):
         for (i, j, *_), (_, _X, _Y, _c, row, rec) in zip(inner, entries):
             ydiff[rec].add(j - row)
         r["A1"] = {"n": len(entries), "x_bad": sum(1 for (i, *_), e in zip(inner, entries) if i != e[3]),
+                   # 어긋난 결함의 레시피 — 다중 레시피에서 레시피 N 이름표가 옮겨진 폴더가 있다(2026-11-15)
+                   "x_bad_recipes": sorted({e[5] for (i, *_), e in zip(inner, entries) if i != e[3]}),
                    "y_diff": {str(k): sorted(v) for k, v in ydiff.items()}}
         if inner is not uniform:
             r["A1"]["uniform_bad"] = sum(1 for (i, j, *_), e in zip(uniform, entries) if (i, j) != (e[3], e[4]))
@@ -1564,7 +1566,8 @@ def report(recs, klas, pairs, out_dir: Path, no_map=None, conder_dirs=None):
     L.append("")
     a1 = [r["A1"] for r in geo if "A1" in r]
     L.append(f"[A1] die 격자가 stage 원점에 고정 — 폴더 {len(a1)} · 결함 {sum(a['n'] for a in a1)} 중 "
-             f"Col≠floor(X/pitch) {sum(a['x_bad'] for a in a1)}건 · "
+             f"Col≠floor(X/pitch) {sum(a['x_bad'] for a in a1)}건"
+             f"(레시피 {sorted({k for a in a1 for k in a.get('x_bad_recipes', [])})}) · "
              f"Row 가 레시피별로 어긋난 폴더 {sum(1 for a in a1 if any(v != [0] for v in a['y_diff'].values()))}")
     blk = Counter(f"{r['block'][0]}×{r['block'][1]}" for r in geo if "block" in r)
     L.append(f"     칸 안 die 로 pitch 를 나눈 폴더 {sum(blk.values())}"

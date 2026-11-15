@@ -280,6 +280,10 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   119건 동일) — KLA 정보파일 `OrientationMarkLocation` 만 읽고, Camtek 은 네 방향을 돌려 짝이 가장 많은 쪽을 고른다(짝 8 미만 · 2등의 2배
   미만이면 판단 안 함 → 사용자에게 묻는다). 실물 Kendall RDL4 KLA(아래) ↔ Camtek(오른쪽) 10쌍(관측). 돌리려면 웨이퍼 중심이 필요해
   Conder 만 있으면 `NotchError` 로 매칭을 멈춘다 — 중심을 추측해 돌리지 마라. `WaferDisplayOrientation` 은 노치가 아니라 화면 표시 기준(시프트)이다.
+  짝을 세기 전에 두 폴더 **좌표가 쓴** die pitch(가로 · 세로 — KLA `DiePitch` · Camtek 검산을 통과한 값, `notch_auto._pitch_of`)로 90° 돌림이
+  되는지부터 가른다(`notch_auto._turn_from_pitches`). 검산 없는 `peek_die_pitch` 는 쓰지 마라 — 첫 후보가 검산에서 떨어진 폴더(W97320 1곳)에서 다르다. 그대로면 90° 후보를,
+  바뀌었으면 0° · 180° 후보를 뺀다. 경계는 검증 die 가로 · 세로의 가운데이고 고정 % 는 없다. 정사각형 · 애매 · 값 없음 · 슬롯끼리 다르면 네 방향 모두 본다.
+  TB500.INT1046 은 90° 방향 짝(374)이 맞는 방향(150)보다 많아 틀린 답을 냈다(관측 2026-11-15).
 - **col/row 번호의 0순위는 장비가 내보낸 번호 격자 `ProductInfo.ini [ExportData]`다**
   (`wafer_geometry._export_origins`): `col_origin = cMin`, `row_total = rMax`. QORVO(pitch 919.8)는 중심 유도·die 맵·
   3 mm 격자 모두 틀렸고 이 값만 장비 화면·Conder 55장과 맞았다(관측, 2026-10-25). 이미 맞던 165 웨이퍼에서도 기존 결과와 같다.
@@ -294,7 +298,9 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   `col_origin = min Col`, `row_total = max Row`(전체 레코드, stage 번호). 둘 다 있는 26 LOT·51 폴더에서 번호표와 전부 같았다
   (관측 2026-10-26, 계산이 틀리던 AVAGO 01C1·T254 GX57007306 포함). 검토 전 폴더에도 있지만 **다중 레시피 스캔에만** 있다.
   채택 조건은 번호표와 같고, 번호표와 다르면 번호표를 쓰고 경고를 남긴다(반증 조건, 관측 0건). Wafer map 칸도 이 목록으로 그린다.
-  골든(실물): `test_dielut_origins.py`.
+  레시피 N 의 이름표가 옮겨져 있으면(아래 `recipe_label_shifts`) 그 레시피 칸을 그만큼 되돌려 합친다(레시피 1 틀) —
+  그대로 합치면 끝 줄이 늘어 row 가 1 컸다(E5025794EWF5, 장비 화면 3/3, 관측 2026-11-15).
+  골든(실물): `test_dielut_origins.py` · `test_multi_recipe_labels.py`.
 - **번호표·DieLut 가 둘 다 없으면 2순위는 die 크기로 가른다**(`wafer_geometry._with_origins`, 2026-11-13 검증 후 변경):
   - **작은 die(두 pitch ≤ 1600 µm)**: 그 웨이퍼의 die 맵이 원 안 온전한 칸의 70% 이상을 담으면 **±1 클램프 없이** 맵 원점을
     쓴다(`SMALL_MAP_SOURCE_TAG`). 장비 확인 GNF7K21 (1,230) 등 — 클램프가 오히려 맞는 맵을 버렸다(관측).
@@ -330,6 +336,11 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   그 필드는 pitch 검산의 참조값으로만 쓴다 — 검산도 **X 는 등호, Y 는 레시피별 상수**다
   (`wafer_geometry._grid_check`). **X 등호는 완화하지 마라** — 항목이 1건인 폴더에서
   '상수' 는 공허하게 참이 돼 다른 자재에 TB500 상수가 채택된다(→ `docs/규칙_배경.md`).
+  다중 레시피에서 레시피 N 의 `Col` 이 이름표 차이만큼 옮겨진 폴더(Kendall PI6 · PI2)만 그 차이를 **그 폴더 파일에서 읽어**
+  되돌린 뒤 같은 등호로 본다(`wafer_geometry.recipe_label_shifts`: `Recipe{N}-ProductInfo.ini` − `ProductInfo.ini` 의
+  `AlignmentDieCol/Row`). 두 조건이 다 맞을 때만 쓴다 — ① 두 파일의 `DieTopLeft` 가 반 칸 안 ② DieLut 레시피 N 범위가
+  정확히 그 차이만큼 옮겨짐. 차이를 상수(`+1` 등)로 넣지 마라 — T256 ROTATION 은 정렬 die 번호만 달라 ② 가 막는다.
+  골든: `test_multi_recipe_labels.py`(장비 화면 5/5).
 - **Camtek 레시피의 화면 번호 시프트(`Recipe.ini [Display] DisplayColShift/RowShift`)는 표시에만 쓴다**
   (`camtek_ini.display_shift` → `DefectCoord.col_shift/row_shift`, 사용자 결정 2026-10-25).
   `col`/`row` 는 실제 die — 매칭·Wafer map 위치·KLA·LOT 맵 txt 와 같은 번호다. 장비 화면·LIVE 파일명은
@@ -364,6 +375,9 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
 - **LIVE 파일명 전용 LOT(기하 파일 없음)의 Wafer map 은 LOT 폴더의 `<WaferID>.txt`
   (ROWCT/COLCT/RowData)가 die 맵이다** (`coords.wafer_txt`). 파일명 `col` = 맵 열(왼쪽부터 0),
   `row` = **아래부터 0** — 실측 9 LOT 결함 칸 185 중 184 가 불량 bin(다른 해석은 반증).
+  `<슬롯 폴더 이름>.txt` 가 없으면 폴더 이름이 줄었거나 메모가 붙은 경우만 메운다(`wafer_txt._named_like`, Conder CTY
+  `00NUR031XY` ↔ `00NUR031XYE5.txt`): 폴더 이름 첫 토큰이 맵 이름 안에 있고 그 글자의 과반을 덮는 맵이 LOT(맵 2장 이상)에
+  **딱 하나**일 때만 쓰고, 맵 머리 `WAFER` 는 그 맵 이름과 같아야 한다. 둘 이상이면 고르지 않는다 — 이 조건을 느슨하게 하지 마라.
   불변식: `FNLOC` 가 180·0 이 아니면 방향 미확인이라 쓰지 않는다(경고). **0 은 180 과 같은 칸 배치**로 읽는다
   (불량 bin 적중 51/51, 다른 방향 ≤ 9, 관측 2026-11-14). 표본이 적어 그 맵을 쓴 점이 있으면 Wafer map 에 늘 노란 경고(`WARN_NOTCH_UP`)를 띄운다(사용자 지시 2026-11-14). 사진 점은 die 칸 밖으로 넘치지 않게 칸 안으로 붙인다
   (`wafer_map._inside`, camtek_live 만 — 파일명 x·y 가 die 크기를 살짝 넘는 값이 있다). `XDIES/YDIES` 는 die **크기**다
@@ -425,6 +439,8 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   비-사진 파일(`.001` 이거나 **확장자가 아예 없을 수 있음**, 1~2개)이고 헤더에
   `WaferID "XXXX";` 가 명시돼 있다 — `coords.kla_info.read_wafer_id` 가 후보를 전부 훑는다.
   **사진 파일명 prefix 로 WaferID 를 추측하지 마라**(되돌린 방식 → `docs/규칙_배경.md`).
+  윈도 썸네일 캐시 `Thumbs.db`(`.db`)는 후보에서 뺀다(`kla_info._NON_INFO_SUFFIXES`) — 후보가 둘이 되면 좌표용
+  `_find_info_file` 이 정보파일을 못 골라 그 폴더 좌표가 통째로 빠졌다(CTY RDL4 7장, `test_kla_thumbs_db.py`).
   정보파일이 **비어** 헤더가 없으면(실측: .001 이 0~1 바이트) 정보파일 **이름**의 WaferID 를 쓰되,
   KLA 폴더명 끝 슬롯 번호 = 상대 폴더 `ActiveSlot` 일 때만 짝짓고 경고한다(`slot.wafer_ids_from_broken_info`,
   사용자 결정 2026-10-25). 이름 하나만으로 짝짓지 마라.
