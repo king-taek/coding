@@ -1334,11 +1334,15 @@ class SetupPage(QWidget):
         else:
             self.gl_btn = NeonButton(i18n.KO.GL_COMING_SOON, role="ghost")
             self.gl_btn.setToolTip(i18n.KO.GL_COMING_SOON_TOOLTIP)
+        # Zone 기준을 올리면 Defect 가 몇 개 빠지는지 보는 도구 — Scanresult 폴더가 있어야 해서
+        # 개발자 모드일 때만 보인다(배포받은 사람은 Conder 만 본다, CLAUDE.md).
+        self.threshold_btn = NeonButton(i18n.KO.THRESH_PREVIEW_BUTTON, role="ghost")
+        self.threshold_btn.clicked.connect(lambda: self.show_page("threshold"))
         self.update_btn = NeonButton(i18n.KO.MENU_CHECK_UPDATE, role="ghost")
         self.update_btn.clicked.connect(self.update_check_requested.emit)
         self._nav_buttons = {"match": self.match_btn, "image_info": self.image_info_btn,
                              "wafer_map": self.wafer_map_btn, "extract": self.extract_btn,
-                             "gl": self.gl_btn}
+                             "gl": self.gl_btn, "threshold": self.threshold_btn}
         for b in self._nav_buttons.values():
             b.setProperty("grade", "rail")
             b.setCheckable(True)
@@ -1347,7 +1351,7 @@ class SetupPage(QWidget):
         self.match_btn.setIcon(QIcon(str(paths.logo_path("logo.ico"))))
         for b, icon in ((self.image_info_btn, "camera"), (self.wafer_map_btn, "globe"),
                         (self.extract_btn, "doc"), (self.gl_btn, "bars"),
-                        (self.update_btn, "refresh")):
+                        (self.threshold_btn, "sliders"), (self.update_btn, "refresh")):
             b.setIcon(rail_icon(icon))
         if not config.GL_HISTOGRAM_READY:
             # 누를 수 없게 하되 아이콘은 회색으로 바꾸지 않는다(사용자 요청 '아이콘은 그대로').
@@ -1369,7 +1373,8 @@ class SetupPage(QWidget):
         col.addWidget(self._rail_credit)
         # 레일 순서 계약(test_setup_controls) — 매칭 + 도구 넷.  업데이트는 맨 아래 따로.
         self._tool_buttons = [self.match_btn, self.image_info_btn, self.wafer_map_btn,
-                              self.extract_btn, self.gl_btn]
+                              self.extract_btn, self.gl_btn, self.threshold_btn]
+        self.threshold_btn.setVisible(_prefs.load().dev_mode)
         self._tool_rail = host
         # 접힘 상태 — 상황마다 따로 기억한다(`_rail_should_fold`).  매칭 화면에서 고른 것
         # (`_rail_user_folded`)은 도구 화면·좁은 창에서 잠깐 펼쳐도 바뀌지 않는다.
@@ -1518,7 +1523,7 @@ class SetupPage(QWidget):
         return dlg.windowTitle() if dlg is not None else ""
 
     def current_page(self) -> str:
-        """지금 오른쪽에 보이는 화면 — match · extract · image_info · wafer_map · gl."""
+        """지금 오른쪽에 보이는 화면 — match · extract · image_info · wafer_map · gl · threshold."""
         if self._page_key == "match" and self._extract_mode:
             return "extract"
         return self._page_key
@@ -1582,6 +1587,9 @@ class SetupPage(QWidget):
             from ..widgets.wafer_map_dialog import WaferMapDialog
             dlg = WaferMapDialog(self)
             dlg.fullscreen_changed.connect(self._on_tool_fullscreen)
+        elif key == "threshold":
+            from ..widgets.threshold_preview_dialog import ThresholdPreviewDialog
+            dlg = ThresholdPreviewDialog(self)
         else:
             from ..widgets.gl_viewer_dialog import GlViewerDialog
             dlg = GlViewerDialog(self)

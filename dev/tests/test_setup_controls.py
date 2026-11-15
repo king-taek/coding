@@ -104,7 +104,7 @@ def test_action_bar_index_contract(qapp):
         assert bar.itemAt(1).spacerItem() is not None
         tools = page._tool_buttons
         assert tools == [page.match_btn, page.image_info_btn, page.wafer_map_btn,
-                         page.extract_btn, page.gl_btn]
+                         page.extract_btn, page.gl_btn, page.threshold_btn]
         assert all(page._tool_rail.isAncestorOf(b) for b in tools)
         assert page._tool_rail.isAncestorOf(page.update_btn)
         assert page.update_btn not in tools
