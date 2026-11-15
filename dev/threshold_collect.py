@@ -148,7 +148,8 @@ QORVO_INI_JOBS = [
 QORVO_INI_PREFER = {"SQ67P01-D1", "SQ67P13-E6", "SQ67P25-G3"}
 QORVO_INI = ("ProductInfo.ini", "WaferMapRecipe.ini", "Params_WaferInfo.ini", "Recipe.ini",
              "ColorImageGrabingInfo.ini",   # 사진별 X, Y — 093 칸 사진으로 Ref−Cust 를 가린다(수집 자료 쓰레드 2026-11-15)
-             "WaferInfo.dat")               # die 범위 — 경계상자가 [ExportData] 와 56/56 같았다(번호표 대용 후보)
+             "WaferInfo.dat",               # die 범위 — 경계상자가 [ExportData] 와 56/56 같았다(번호표 대용 후보)
+             "Defects.csv")                 # 장비 Export 결과(Col · Row = 장비 화면 번호, X · Y = die 안 µm) — 번호 정답지(2026-11-15)
 QORVO_DIE_MAP = ("s_DieLocation.dat", "s_DieLocation.dat.md")   # LOT 마다 첫 웨이퍼만(웨이퍼당 약 10 MB)
 QORVO_INI_LOTS = 40      # Job 마다 LOT 몇 개까지(최근 것부터)
 QORVO_INI_WAFERS = 2     # LOT 마다 웨이퍼 몇 장
@@ -156,14 +157,14 @@ QORVO_INI_WAFERS = 2     # LOT 마다 웨이퍼 몇 장
 # 최근 LOT 웨이퍼 1장씩, 이 파일들만 담는다.  사진 위치(ColorImageGrabingInfo)와 die 맵을 제품별로 맞춰 본다.
 WIDE_FILES = ("s_DieLocation.dat", "s_DieLocation.dat.md", "ColorImageGrabingInfo.ini", "ProductInfo.ini",
               "Params_WaferInfo.ini", "WaferInfo.dat",
-              "Surface.flt.md")       # 장비마다 레코드 크기(수집 자료 쓰레드 Surface.flt 검증, PR #131) — Surface.flt 는 이름 · 크기만
+              "Surface.flt.md", "Defects.csv")       # 장비마다 레코드 크기(수집 자료 쓰레드 Surface.flt 검증, PR #131) — Surface.flt 는 이름 · 크기만
 WIDE_FILE_MB = 12        # 파일당 상한
 WIDE_MINUTES = 10        # 이 단계 시간 상한
 # 레코드가 152 바이트가 아닌(구형) 장비만 깊게 — 그 장비의 서로 다른 Job 최대 :data:`ODD_JOBS` 개 × 최근 LOT 웨이퍼 1장.
 # Contrast 값이 든 레코드로 RTP.txt 기준과 맞춰 보려 이름에 PI · LIVE 가 든 Job 부터(수집 자료 쓰레드 요청 2026-11-15).
 ODD_SEED = ("AOI-1", "AOI-5", "AOI-10")          # 이미 확인한 구형(120 · 136 · 136)
 ODD_FILES = ("Surface.flt", "Surface.flt.md", "ColorImageGrabingInfo.ini", "RTP.txt", "Zones.ini", "ScanLog.ini",
-             "Params_WaferInfo.ini", "ProductInfo.ini")
+             "Params_WaferInfo.ini", "ProductInfo.ini", "Defects.csv")
 ODD_FIRST = ("PI", "LIVE")
 ODD_JOBS = 8
 ODD_MINUTES = 8
