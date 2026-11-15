@@ -5,13 +5,16 @@
 화면(현택님 결정 2026-11-13 ~ 11-16):
   * 왼쪽 = **Zone 목록**(같은 이름이라도 레시피가 다르면 따로).  Defect class 로는 고르지 않는다.
   * Zone 안의 기준 묶음(같은 ``Classify``)마다 한 줄 — 묶음이 둘이면 '기준 1 · 기준 2'.
-    Width · Area · Contrast 슬라이더, 시작값과 최솟값 = 레시피 값(**올리기만**).
+    Width · Area · Contrast 슬라이더, 시작값 = 레시피 값.  보통은 **올리기만**(최솟값 = 레시피 값).
+    웨이퍼 폴더에 ``s_RichSurface.dat`` 가 있고 그 Zone 기준을 전부 그 열로 계산할 수 있으면 **내리기**도 된다
+    — 하한 = 후보 값의 최솟값, '새로 생김' = 바꾼 값으로 새로 잡히는 후보 수(사진 없음, :mod:`app.threshold.rich`).
     Contrast 를 안 적는 Zone 은 Contrast 슬라이더를 두지 않는다.
   * 사진 탭: 새로 빠짐 · 남음 · EDC Good(첫 분류가 Good — 세지 않고 따로 보여 준다).
   * 사진을 누르면 그 줄 아래에 값이 펼쳐지고, 거기 사진을 누르면 크게 본다.
   * 슬라이더를 끄는 동안 사진은 빠지는 수가 :data:`LIVE_TILES_MAX` 장 이하일 때만 바로 바꾸고,
     넘으면 손을 뗄 때 바꾼다.  숫자는 늘 바로 바뀐다.
   * 앱 안 설명 문장은 두지 않는다 — 라벨 · 숫자 · 상태만.
+  * HTML 내보내기(현택님 2026-11-15, ★ 저장 대신): 레시피 → 변경 값, 새로 빠지는 수, 분포, 대표 사진 — :mod:`app.threshold.report`.
 
 값은 Zone ini 와 같은 픽셀 단위로 계산하고, 화면에만 µm 로 보인다(면적 = px_x·px_y, 폭 = px_x —
 사진 정보 화면 :mod:`coords.geometry` 와 같은 환산).
@@ -22,15 +25,17 @@
 
 from __future__ import annotations
 
+import base64
 import logging
 import math
+from datetime import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import QLocale, QObject, QRectF, Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QColor, QDoubleValidator, QPainter
-from PyQt6.QtWidgets import (QApplication, QButtonGroup, QDialog, QFrame, QGridLayout,
+from PyQt6.QtCore import QBuffer, QIODevice, QLocale, QObject, QRectF, Qt, QThread, QUrl, pyqtSignal
+from PyQt6.QtGui import QColor, QDesktopServices, QDoubleValidator, QPainter
+from PyQt6.QtWidgets import (QApplication, QButtonGroup, QDialog, QFileDialog, QFrame, QGridLayout,
                              QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QVBoxLayout,
                              QWidget)
 
@@ -40,6 +45,8 @@ from ...coords.geometry import GEOMETRY_MATCH_TOL
 from ...coords.pixel_size import scan_pixel_size_xy
 from ...models.slot import _list_images
 from ...threshold import preview as P
+from ...threshold import report as RP
+from ...threshold import rich as RS
 from ...threshold import rules as R
 from ...utils import image_io
 from .. import theme
@@ -56,6 +63,8 @@ LIVE_TILES_MAX = 100        # 이 수 이하일 때만 슬라이더를 끄는 �
 PAGE_TILES = 60             # 처음 보이는 사진 수 — 나머지는 [더 보기]
 TILE_PX = 132
 DETAIL_PX = 240
+EXPORT_SAMPLES = 8          # HTML 내보내기 — Zone 마다 대표 사진 수
+EXPORT_PHOTO_PX = 200
 _LIVE: set = set()          # 화면이 닫혀도 도는 읽기 스레드를 붙들어 둔다(wafer_map_dialog 와 같은 패턴)
 
 # 화면에 보이는 순서와 단위.  Surface.flt 에 값이 있는 세 기준만 바꿀 수 있다(rules 모듈 docstring).
@@ -75,6 +84,7 @@ class WaferData:
     photos: dict = field(default_factory=dict)      # Defect.index → 사진
     note: str = ""
     misses: int = 0
+    rich: dict = field(default_factory=dict)        # (zone_dir, zone) → RichSurface 후보 값 — 내리기용
 
     def to_um(self, feature: int, v: float) -> float:
         if feature == R.FEATURE_AREA:
@@ -91,7 +101,7 @@ class WaferData:
         return v
 
 
-def load_wafer(folder: Path, report=lambda msg, done=0, total=0: None) -> WaferData:
+def load_wafer(folder: Path, report=lambda msg, done=0, total=0: None, stop=lambda: False) -> WaferData:
     """웨이퍼 폴더 하나를 읽는다(워커 스레드에서).  못 읽은 것은 ``note`` 에 적고 raise 하지 않는다."""
     report(_KO.THRESH_PREVIEW_LOADING)
     defects, goods, note = P.load_all(folder)
@@ -120,6 +130,9 @@ def load_wafer(folder: Path, report=lambda msg, done=0, total=0: None) -> WaferD
         return abs_coord.absolute_xy(path)
 
     w.photos = P.match_photos(defects + goods, photos, xy_of, GEOMETRY_MATCH_TOL)
+    if (folder / RS.RICH_FILE).is_file():
+        report(_KO.THRESH_PREVIEW_RICH)
+        w.rich = RS.load_rich(folder, lambda done, total: report(_KO.THRESH_PREVIEW_RICH, done, total), stop)
     return w
 
 
@@ -139,7 +152,7 @@ class _Load(QThread):
         t = self._token
         try:
             w = load_wafer(self._folder, lambda msg, done=0, total=0:
-                           self.signals.progress.emit(t, done, total, msg))
+                           self.signals.progress.emit(t, done, total, msg), self.isInterruptionRequested)
         except Exception:       # noqa: BLE001 — 실패를 삼키지 않고 화면에 알린다
             _LOG.exception("Threshold 미리보기 읽기 실패: %s", self._folder)
             w = None
@@ -235,6 +248,18 @@ class _BigPhoto(QLabel):
         super().mousePressEvent(e)
 
 
+def _data_uri(photo: Path) -> str:
+    """사진 → 작은 JPEG ``data:`` 주소(HTML 안에 넣는다).  못 읽으면 빈 문자열."""
+    pix = image_io.load_thumb_qpixmap(photo, EXPORT_PHOTO_PX, kind="mid")
+    if pix.isNull():
+        return ""
+    buf = QBuffer()
+    buf.open(QIODevice.OpenModeFlag.WriteOnly)
+    if not pix.save(buf, "JPG", 82):
+        return ""
+    return "data:image/jpeg;base64," + base64.b64encode(bytes(buf.data())).decode("ascii")
+
+
 class ThresholdPreviewDialog(QDialog):
     """왼쪽 메뉴 'Threshold 미리보기' 화면."""
 
@@ -243,6 +268,7 @@ class ThresholdPreviewDialog(QDialog):
         self.setWindowTitle(_KO.THRESH_PREVIEW_TITLE)
         self._w: Optional[WaferData] = None
         self._ov: dict = {}               # {(zone_dir, zone, Classify, FeatureType): 새 LowValue(px)}
+        self._rich_base: dict = {}        # (zone_dir, zone) → 레시피 값 RichSurface 통과 배열(캐시)
         self._zone: Optional[tuple] = None
         self._tab = "drop"
         self._open: Optional[int] = None  # 펼친 Defect.index
@@ -303,6 +329,19 @@ class ThresholdPreviewDialog(QDialog):
         self.drop_value.setStyleSheet("font-size: 40px;")
         box.addWidget(self.drop_value)
         summ.addLayout(box)
+        self.new_box = QWidget(self)
+        nb = QVBoxLayout(self.new_box)
+        nb.setContentsMargins(0, 0, 0, 0)
+        nb.setSpacing(0)
+        cap = QLabel(_KO.THRESH_PREVIEW_APPEARED, self.new_box)
+        cap.setProperty("role", "statCaption")
+        nb.addWidget(cap)
+        self.new_value = QLabel("0", self.new_box)
+        self.new_value.setProperty("role", "statValue")
+        self.new_value.setStyleSheet("font-size: 40px;")
+        nb.addWidget(self.new_value)
+        self.new_box.setVisible(False)
+        summ.addWidget(self.new_box)
         self.keep_label = QLabel("", self)
         self.all_label = QLabel("", self)
         for lab in (self.keep_label, self.all_label):
@@ -312,6 +351,9 @@ class ThresholdPreviewDialog(QDialog):
         self.reset_btn = NeonButton(_KO.THRESH_PREVIEW_RESET, role="ghost")
         self.reset_btn.clicked.connect(self.reset)
         summ.addWidget(self.reset_btn, 0, Qt.AlignmentFlag.AlignBottom)
+        self.export_btn = NeonButton(_KO.THRESH_PREVIEW_EXPORT, role="ghost")
+        self.export_btn.clicked.connect(self._on_export)
+        summ.addWidget(self.export_btn, 0, Qt.AlignmentFlag.AlignBottom)
         main.addLayout(summ)
 
         self.rules = QFrame(self)
@@ -386,6 +428,7 @@ class ThresholdPreviewDialog(QDialog):
         """읽은 웨이퍼를 화면에 올린다(테스트는 스레드 없이 이것만 부른다)."""
         self._w = w
         self._ov = {}
+        self._rich_base = {}
         self._open = None
         self._shown = PAGE_TILES
         self._tab = "drop"
@@ -414,6 +457,23 @@ class ThresholdPreviewDialog(QDialog):
         key = key or self._zone
         return [d for d in self._w.defects if (d.zone_dir, d.zone) == key]
 
+    def _rich_cand(self, key=None):
+        """이 Zone 의 RichSurface 후보 값 — 기준을 전부 그 열로 계산할 수 있을 때만, 아니면 None."""
+        key = key or self._zone
+        cand = self._w.rich.get(key) if self._w else None
+        return cand if cand is not None and RS.supports(self._w.zones.get(key)) else None
+
+    def appeared(self, key=None) -> int:
+        """내린 값으로 새로 잡히는 후보 수(RichSurface 가 있는 Zone 만, 없으면 0)."""
+        key = key or self._zone
+        cand = self._rich_cand(key)
+        if cand is None or not any(k[:2] == key for k in self._ov):
+            return 0
+        zone = self._w.zones[key]
+        if key not in self._rich_base:
+            self._rich_base[key] = RS.passes(cand, zone, key, {})
+        return RS.count_new(cand, zone, key, self._ov, self._rich_base[key])
+
     def dropped(self, key=None) -> list:
         """지금 기준으로 빠지는 Defect — ``[(Defect, (Classify, FeatureType))]``."""
         out = []
@@ -427,6 +487,7 @@ class ThresholdPreviewDialog(QDialog):
     def _render(self) -> None:
         w = self._w
         self.reset_btn.setEnabled(bool(self._ov))
+        self.export_btn.setEnabled(bool(self._ov))
         if w is None or w.note:
             self.check_label.setText(w.note if w else "")
         else:
@@ -474,9 +535,11 @@ class ThresholdPreviewDialog(QDialog):
     def _zone_text(self, key) -> None:
         name, rec = zone_label(key[0], self._w.zones.get(key), key[1])
         drop = len(self.dropped(key))
+        new = self.appeared(key)
         line1 = f"{name}" + (f"  · {rec}" if rec else "")
-        line2 = _KO.THRESH_PREVIEW_ZONE_COUNT.format(n=self._count(key)) + (f"   −{drop:,}" if drop else "")
-        self.zone_btns[key].setText(f"{line1}\n{line2}")
+        line2 = _KO.THRESH_PREVIEW_ZONE_COUNT.format(n=self._count(key))
+        moved = "   ".join(t for t in (f"−{drop:,}" if drop else "", f"+{new:,}" if new else "") if t)
+        self.zone_btns[key].setText(f"{line1}\n{line2}" + (f"\n{moved}" if moved else ""))
 
     def _render_rules(self) -> None:
         self._clear(self._rules_lay)
@@ -535,6 +598,13 @@ class ThresholdPreviewDialog(QDialog):
         hi = max(rec * 2 if rec > 0 else rec + 10 * step, max(zone_vals, default=rec))
         steps = max(1, math.ceil((hi - rec) / step))
         hi = rec + steps * step
+        # 내리기: RichSurface 후보가 있는 Zone 만.  하한 = 후보 값의 최솟값(그 아래는 파일이 모른다).
+        down = 0
+        cand = self._rich_cand()
+        if cand is not None:
+            floor = w.to_um(f.feature, float(cand[f.feature].min())) if len(cand[f.feature]) else rec
+            down = max(0, min(math.ceil((rec - max(floor, 0.0)) / step), math.floor(rec / step)))
+        lo = rec - down * step
         cell = QWidget(self.rules)
         lay = QVBoxLayout(cell)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -562,12 +632,13 @@ class ThresholdPreviewDialog(QDialog):
         h.addStretch(1)
         h.addWidget(delta)
         lay.addLayout(h)
-        hist = _Hist(vals, rec, hi, cell)
+        hist = _Hist(vals, lo, hi, cell)
         lay.addWidget(hist)
         sl = NoWheelSlider(Qt.Orientation.Horizontal, cell)
-        sl.setRange(0, steps)
+        sl.setRange(0, down + steps)
         lay.addWidget(sl)
-        foot = QLabel(_KO.THRESH_PREVIEW_RECIPE_VALUE.format(v=f"{rec:.{dec}f}"), cell)
+        foot = QLabel(_KO.THRESH_PREVIEW_RECIPE_VALUE.format(v=f"{rec:.{dec}f}")
+                      + (f"   {_KO.THRESH_PREVIEW_LOWEST.format(v=f'{lo:.{dec}f}')}" if down else ""), cell)
         foot.setProperty("role", "muted")
         lay.addWidget(foot)
 
@@ -576,28 +647,29 @@ class ThresholdPreviewDialog(QDialog):
         def show(v: float) -> None:
             spin.setText(f"{v:.{dec}f}")
             sl.blockSignals(True)
-            sl.setValue(round((v - rec) / step))
+            sl.setValue(down + round((v - rec) / step))
             sl.blockSignals(False)
             hist.set_cut(v)
             d = v - rec
-            delta.setText(f"+{d:.{dec}f}" if d > 1e-9 else "")
+            delta.setText(f"+{d:.{dec}f}" if d > 1e-9 else f"−{-d:.{dec}f}" if d < -1e-9 else "")
+            delta.setStyleSheet(f"color: {theme.DANGER if d > 0 else theme.PASS}; font-family: {theme.FONT_MONO};")
 
         def apply(v: float, final: bool) -> None:
-            v = min(max(v, rec), hi)
-            if v - rec <= 1e-9:
+            v = min(max(v, lo), hi)
+            if abs(v - rec) <= 1e-9:
                 self._ov.pop(key, None)
             else:
                 self._ov[key] = w.to_px(f.feature, v)
             show(v)
             self._changed(final)
 
-        sl.valueChanged.connect(lambda i: apply(rec + i * step, False))
-        sl.sliderReleased.connect(lambda: apply(rec + sl.value() * step, True))
+        sl.valueChanged.connect(lambda i: apply(rec + (i - down) * step, False))
+        sl.sliderReleased.connect(lambda: apply(rec + (sl.value() - down) * step, True))
         def typed() -> None:
             try:
                 apply(float(spin.text().replace(",", "")), True)
             except ValueError:
-                show(rec + sl.value() * step)          # 못 읽으면 지금 값으로 되돌린다
+                show(rec + (sl.value() - down) * step)  # 못 읽으면 지금 값으로 되돌린다
 
         spin.editingFinished.connect(typed)
         show(cur)
@@ -606,6 +678,7 @@ class ThresholdPreviewDialog(QDialog):
 
     def _changed(self, final: bool) -> None:
         self.reset_btn.setEnabled(bool(self._ov))
+        self.export_btn.setEnabled(bool(self._ov))
         self._zone_text(self._zone)
         drop = self._render_summary()
         if final or drop <= LIVE_TILES_MAX:
@@ -616,6 +689,7 @@ class ThresholdPreviewDialog(QDialog):
         w = self._w
         if w is None or w.note or self._zone is None:
             self.drop_value.setText("0")
+            self.new_box.setVisible(False)
             self.keep_label.setText("")
             self.all_label.setText("")
             for b in self.tab_btns.values():
@@ -627,6 +701,12 @@ class ThresholdPreviewDialog(QDialog):
         self.drop_value.setProperty("tone", "over" if drop else "none")
         self.drop_value.style().unpolish(self.drop_value)
         self.drop_value.style().polish(self.drop_value)
+        self.new_box.setVisible(self._rich_cand() is not None)
+        new = self.appeared()
+        self.new_value.setText(f"{new:,}")
+        self.new_value.setProperty("tone", "ok" if new else "none")
+        self.new_value.style().unpolish(self.new_value)
+        self.new_value.style().polish(self.new_value)
         self.keep_label.setText(_KO.THRESH_PREVIEW_KEPT.format(n=f"{n - drop:,}"))
         self.all_label.setText(_KO.THRESH_PREVIEW_ALL.format(n=f"{n:,}"))
         goods = sum(1 for d in w.goods if (d.zone_dir, d.zone) == self._zone)
@@ -785,6 +865,84 @@ class ThresholdPreviewDialog(QDialog):
         self._ov = {}
         self._open = None
         self._render()
+
+    # ------------------------------------------------------------------ 내보내기
+    def _on_export(self) -> None:
+        """저장 창은 ``open()`` 으로 — ``exec()`` 는 Windows 에서 UI 스레드를 세운다(:mod:`..folder_picker`)."""
+        if not self._ov or self._w is None:
+            return
+        home = Path.home()
+        start = home / "Desktop" if (home / "Desktop").is_dir() else home
+        name = f"Threshold_{self._w.folder.name}_{datetime.now():%Y%m%d_%H%M}.html"
+        dlg = QFileDialog(self, _KO.THRESH_EXPORT_SAVE_TITLE, str(start / name), _KO.THRESH_EXPORT_FILTER)
+        dlg.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
+        dlg.setDefaultSuffix("html")
+        dlg.fileSelected.connect(self._export_to)
+        dlg.finished.connect(dlg.deleteLater)
+        self._save_dlg = dlg
+        dlg.open()
+
+    def _export_to(self, path: str) -> None:
+        if not path:
+            return
+        try:
+            self.export_html(Path(path))
+        except OSError as exc:
+            _LOG.warning("Threshold HTML 저장 실패: %s", exc)
+            self.check_label.setText(_KO.THRESH_EXPORT_FAILED.format(e=exc))
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+
+    def export_html(self, path: Path) -> None:
+        """바꾼 값 · 새로 빠지는 수 · 분포 · Zone 마다 대표 사진 :data:`EXPORT_SAMPLES` 장을 HTML 한 장에."""
+        w = self._w
+        changes = []
+        for (zdir, zid, cls, feat), px in sorted(self._ov.items()):
+            z = w.zones.get((zdir, zid))
+            if z is None or cls not in z.bundles:
+                continue
+            f = next((x for x in z.bundles[cls] if x.feature == feat), None)
+            meta = next((x for x in _FEATURES if x[0] == feat), None)
+            if f is None or meta is None:
+                continue
+            _feat, item, unit, _step, dec = meta
+            name, rec = zone_label(zdir, z, zid)
+            n = list(z.bundles).index(cls) + 1
+            rule = _KO.THRESH_PREVIEW_RULE_N.format(n=n) if len(z.bundles) > 1 else _KO.THRESH_PREVIEW_RULE
+            vals = [w.to_um(feat, P._value(d, feat)) for d in w.defects
+                    if (d.zone_dir, d.zone, d.bin) == (zdir, zid, cls)
+                    and not (feat == R.FEATURE_CONTRAST and P._value(d, feat) == 0)]
+            changes.append(RP.Change(name + (f" · {rec}" if rec else ""), f"{rule} → {self._class_name(cls)}",
+                                     item, unit, w.to_um(feat, f.low), w.to_um(feat, px), dec, tuple(vals)))
+        zones = []
+        total_drop = 0
+        total_new = 0
+        for key in self.zone_keys():
+            drops = self.dropped(key)
+            new = self.appeared(key)
+            if not drops and not new:
+                continue
+            total_drop += len(drops)
+            total_new += new
+            name, rec = zone_label(key[0], w.zones.get(key), key[1])
+            have = sorted(((d, why) for d, why in drops if d.index in w.photos),
+                          key=lambda t: -self._below(t[0], t[1]))     # 기준 바로 아래부터 멀리까지
+            samples = tuple(RP.Sample(_data_uri(w.photos[d.index]), self._class_name(d.bin), self._why_text(d, why))
+                            for d, why in RP.pick_samples(have, EXPORT_SAMPLES))
+            zones.append(RP.ZoneResult(name + (f" · {rec}" if rec else ""), self._count(key), len(drops),
+                                       samples, len(drops) - len(have), new))
+        text = RP.build_html(folder=str(w.folder), when=f"{datetime.now():%Y-%m-%d %H:%M}",
+                             total=len(w.defects), dropped=total_drop, changes=changes, zones=zones,
+                             appeared=total_new)
+        Path(path).write_text(text, encoding="utf-8")
+
+    def _below(self, d: P.Defect, why) -> float:
+        """걸린 값 ÷ 지금 기준 — 항목(Width · Contrast)이 달라도 '기준에서 얼마나 아래' 로 비교한다."""
+        cls, feat = why
+        z = self._w.zones.get((d.zone_dir, d.zone))
+        f = next((x for x in z.bundles.get(cls, ()) if x.feature == feat), None) if z else None
+        cut = self._ov.get((d.zone_dir, d.zone, cls, feat), f.low if f else 0.0)
+        return P._value(d, feat) / cut if cut > 0 else 0.0
 
     def set_value(self, cls: int, feature: int, um: float) -> None:
         """테스트용 — 지금 Zone 의 슬라이더 칸에 µm 값을 넣는다(사용자가 숫자를 친 것과 같다)."""
