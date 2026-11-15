@@ -38,10 +38,16 @@ def test_live_name_tokens():
 
 
 def test_position_grid_is_anchored_at_stage_origin(run):
-    """A1 — 위치 쪽은 이미 하나의 식이다: 결함 전부에서 Col == floor(X/pitch_x)."""
+    """A1 — 위치 쪽은 이미 하나의 식이다: 결함 전부에서 Col == floor(X/pitch_x).
+
+    예외는 다중 레시피 이름표 차이뿐이다 — 레시피 2 의 ``Col`` 이 그 폴더 정렬 die 번호 차이만큼
+    옮겨져 있다(Kendall PI6 E5025779EWD1 레시피 2 3장, 관측 2026-11-15).  앱은 그 차이를 파일에서
+    읽어 되돌린다(``wafer_geometry.recipe_label_shifts``, ``test_multi_recipe_labels.py``)."""
     a1 = [r["A1"] for r in run[0] if "A1" in r]
     assert sum(a["n"] for a in a1) > 6000
-    assert sum(a["x_bad"] for a in a1) == 0
+    bad = [(r["folder"], r["A1"]) for r in run[0] if r.get("A1", {}).get("x_bad")]
+    assert all("다중레시피(이름표 차이)" in f and a["x_bad_recipes"] == [2] for f, a in bad), bad
+    assert sum(a["x_bad"] for _, a in bad) == 3
 
 
 def test_no_pure_geometry_rule_numbers_every_product(run):

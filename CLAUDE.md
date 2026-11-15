@@ -294,7 +294,9 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   `col_origin = min Col`, `row_total = max Row`(전체 레코드, stage 번호). 둘 다 있는 26 LOT·51 폴더에서 번호표와 전부 같았다
   (관측 2026-10-26, 계산이 틀리던 AVAGO 01C1·T254 GX57007306 포함). 검토 전 폴더에도 있지만 **다중 레시피 스캔에만** 있다.
   채택 조건은 번호표와 같고, 번호표와 다르면 번호표를 쓰고 경고를 남긴다(반증 조건, 관측 0건). Wafer map 칸도 이 목록으로 그린다.
-  골든(실물): `test_dielut_origins.py`.
+  레시피 N 의 이름표가 옮겨져 있으면(아래 `recipe_label_shifts`) 그 레시피 칸을 그만큼 되돌려 합친다(레시피 1 틀) —
+  그대로 합치면 끝 줄이 늘어 row 가 1 컸다(E5025794EWF5, 장비 화면 3/3, 관측 2026-11-15).
+  골든(실물): `test_dielut_origins.py` · `test_multi_recipe_labels.py`.
 - **번호표·DieLut 가 둘 다 없으면 2순위는 die 크기로 가른다**(`wafer_geometry._with_origins`, 2026-11-13 검증 후 변경):
   - **작은 die(두 pitch ≤ 1600 µm)**: 그 웨이퍼의 die 맵이 원 안 온전한 칸의 70% 이상을 담으면 **±1 클램프 없이** 맵 원점을
     쓴다(`SMALL_MAP_SOURCE_TAG`). 장비 확인 GNF7K21 (1,230) 등 — 클램프가 오히려 맞는 맵을 버렸다(관측).
@@ -330,6 +332,11 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   그 필드는 pitch 검산의 참조값으로만 쓴다 — 검산도 **X 는 등호, Y 는 레시피별 상수**다
   (`wafer_geometry._grid_check`). **X 등호는 완화하지 마라** — 항목이 1건인 폴더에서
   '상수' 는 공허하게 참이 돼 다른 자재에 TB500 상수가 채택된다(→ `docs/규칙_배경.md`).
+  다중 레시피에서 레시피 N 의 `Col` 이 이름표 차이만큼 옮겨진 폴더(Kendall PI6 · PI2)만 그 차이를 **그 폴더 파일에서 읽어**
+  되돌린 뒤 같은 등호로 본다(`wafer_geometry.recipe_label_shifts`: `Recipe{N}-ProductInfo.ini` − `ProductInfo.ini` 의
+  `AlignmentDieCol/Row`). 두 조건이 다 맞을 때만 쓴다 — ① 두 파일의 `DieTopLeft` 가 반 칸 안 ② DieLut 레시피 N 범위가
+  정확히 그 차이만큼 옮겨짐. 차이를 상수(`+1` 등)로 넣지 마라 — T256 ROTATION 은 정렬 die 번호만 달라 ② 가 막는다.
+  골든: `test_multi_recipe_labels.py`(장비 화면 5/5).
 - **Camtek 레시피의 화면 번호 시프트(`Recipe.ini [Display] DisplayColShift/RowShift`)는 표시에만 쓴다**
   (`camtek_ini.display_shift` → `DefectCoord.col_shift/row_shift`, 사용자 결정 2026-10-25).
   `col`/`row` 는 실제 die — 매칭·Wafer map 위치·KLA·LOT 맵 txt 와 같은 번호다. 장비 화면·LIVE 파일명은

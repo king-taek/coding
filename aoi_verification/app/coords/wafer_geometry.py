@@ -532,6 +532,11 @@ def _grid_check(folder: Path, pitch_x: float, pitch_y: float) -> tuple[bool, boo
     TB500 상수가 채택되는 길이 열린다(``x = −1,652,266 µm`` 참사의 재현).  실제로 기존
     거부 경로는 전부 X 축에서 걸린다.
 
+    다중 레시피에서 레시피 N 의 die 이름표가 레시피 1 틀에서 옮겨져 있으면(Kendall PI6 · PI2:
+    ``Col`` 이 늘 1 크다) 그 사진의 ``Col`` 을 **그 폴더 파일에서 읽은 차이**
+    (:func:`recipe_label_shifts`)만큼 되돌린 뒤 같은 등호로 본다.  완화가 아니라 같은 틀로
+    맞추는 것이다 — 차이를 못 읽으면 지금처럼 등호가 깨져 절대좌표로 간다.
+
     반환 ``(통과, 의미있음)``.  '의미있음' 은 검산이 실제로 pitch 를 제약했는지다 —
     모든 항목이 ``Col=0`` 이면 어떤 pitch 든 통과하므로 검산이 아무 말도 못 한 것이다.
     파일에서 읽은 값은 '통과' 만으로 채택하지만, 상수 후보는 '의미있음' 까지 요구한다.
@@ -547,8 +552,11 @@ def _grid_check(folder: Path, pitch_x: float, pitch_y: float) -> tuple[bool, boo
     if not raw:
         return (False, False)
 
-    # X: 등호 그대로.
-    if not all(math.floor(X / pitch_x) == col_i for X, _, col_i, _ in raw.values()):
+    # X: 등호 그대로.  레시피 N 사진만 그 레시피의 이름표 차이(파일 값)를 뺀 Col 과 비교한다.
+    shifts = recipe_label_shifts(folder)
+    if not all(math.floor(X / pitch_x)
+               == col_i - shifts.get(recipes.get(stem, 0), (0, 0))[0]
+               for stem, (X, _, col_i, _) in raw.items()):
         return (False, False)
 
     # Y: 레시피별로 차이가 일정하기만 하면 된다.
@@ -650,6 +658,9 @@ def is_alignment_photo(stem: str) -> bool:
     return _ALIGN_PAT.search(stem) is not None
 _DIELUT_REC = re.compile(r"<DieLutData\b([^>]*?)/?>")
 _DIELUT_ATTR = re.compile(r'\b(Col|Row)="(-?\d+)"')
+_DIELUT_RECIPE = re.compile(r'\bRecipeNum="(-?\d+)"')
+# 다중 레시피 스캔에서 레시피 N(2, 3, …)의 설정 파일 — 레시피 1 은 ``ProductInfo.ini``.
+_RECIPE_PI = re.compile(r"^Recipe(\d+)-ProductInfo\.ini$", re.IGNORECASE)
 
 
 def is_trusted_source(source: str) -> bool:
@@ -659,31 +670,130 @@ def is_trusted_source(source: str) -> bool:
 
 
 def dielut_cells(folder: Path) -> Optional[frozenset[tuple[int, int]]]:
-    """``DieLut.dat`` 의 die 칸 ``(Col, Row)`` 집합(stage 인덱스).  없거나 비었으면 None.
+    """``DieLut.dat`` 의 die 칸 ``(Col, Row)`` 집합(stage 인덱스, **레시피 1 틀**).  없거나 비었으면 None.
 
-    레시피(RecipeNum)마다 같은 칸이 반복되므로 집합으로 합친다.  Wafer map 의 칸과
-    번호 기준(:func:`_dielut_origins`)이 **같은 집합**을 쓰도록 여기 하나로 읽는다.
-    전 구간 fail-safe."""
+    레시피(RecipeNum)마다 같은 칸이 반복되므로 집합으로 합친다.  레시피 N 의 이름표가
+    옮겨져 있으면(:func:`recipe_label_shifts`) 그 레시피 칸을 그만큼 되돌려 합친다 — 그대로
+    합치면 끝 줄이 하나 늘어 row 가 1 컸다(E5025794EWF5: 장비 화면 (2, 4) ↔ 앱 (2, 5), 관측
+    2026-11-15).  Wafer map 의 칸과 번호 기준(:func:`_dielut_origins`)이 **같은 집합**을 쓰도록
+    여기 하나로 읽는다.  전 구간 fail-safe."""
+    recs = _dielut_by_recipe(folder)
+    if not recs:
+        return None
+    shifts = recipe_label_shifts(folder)
+    cells: set[tuple[int, int]] = set()
+    for recipe, cs in recs.items():
+        dc, dr = shifts.get(recipe, (0, 0))
+        cells.update((c - dc, r - dr) for c, r in cs)
+    return frozenset(cells) or None
+
+
+def _dielut_by_recipe(folder: Path) -> dict[Optional[int], frozenset[tuple[int, int]]]:
+    """``DieLut.dat`` 칸을 레시피(``RecipeNum``)별로 — 번호가 없는 레코드는 키 ``None``.  없으면 빈 dict."""
     p = folder / _DIELUT_FILE
     try:
         st = p.stat()
     except OSError:
-        return None
-    return _dielut_cells(p, st.st_mtime_ns, st.st_size)
+        return {}
+    return dict(_dielut_records(p, st.st_mtime_ns, st.st_size))
 
 
 @lru_cache(maxsize=256)
-def _dielut_cells(p: Path, _mtime_ns: int, _size: int) -> Optional[frozenset[tuple[int, int]]]:
+def _dielut_records(p: Path, _mtime_ns: int, _size: int
+                    ) -> tuple[tuple[Optional[int], frozenset[tuple[int, int]]], ...]:
     try:
         txt = p.read_bytes().decode("utf-8", "replace")
     except OSError:
-        return None
-    cells = set()
+        return ()
+    by: dict[Optional[int], set[tuple[int, int]]] = {}
     for m in _DIELUT_REC.finditer(txt):
         kv = dict(_DIELUT_ATTR.findall(m.group(1)))
         if "Col" in kv and "Row" in kv:
-            cells.add((int(kv["Col"]), int(kv["Row"])))
-    return frozenset(cells) or None
+            rm = _DIELUT_RECIPE.search(m.group(1))
+            by.setdefault(int(rm.group(1)) if rm else None, set()).add(
+                (int(kv["Col"]), int(kv["Row"])))
+    return tuple((k, frozenset(v)) for k, v in by.items())
+
+
+def _box(cells) -> tuple[int, int, int, int]:
+    return (min(c for c, _ in cells), max(c for c, _ in cells),
+            min(r for _, r in cells), max(r for _, r in cells))
+
+
+def recipe_label_shifts(folder: Path) -> dict[int, tuple[int, int]]:
+    """다중 레시피 스캔에서 레시피 N 의 die 이름표가 레시피 1 틀에서 옮겨진 양 ``{N: (dcol, drow)}``.
+
+    장비는 같은 **정렬 die** 를 레시피마다 자기 이름표로 적는다 — 레시피 1 은 ``ProductInfo.ini``,
+    레시피 N 은 ``Recipe{N}-ProductInfo.ini`` 의 ``AlignmentDieCol/Row``.  그 차이 Δ 를 쓰되
+    **두 출처가 같은 말을 할 때만** 쓴다:
+
+    ① 그 정렬 die 의 자리(``DieTopLeft_X/Y``)가 두 파일에서 반 칸(``XDieIndex/YDieIndex`` ÷ 2) 안이다
+       — 다른 die 를 정렬 die 로 고른 레시피가 아니다.
+    ② ``DieLut.dat`` 의 레시피 N 범위가 레시피 1 범위를 **정확히 Δ** 옮긴 것이다
+       — T256 ROTATION(GX57529995)은 정렬 die 번호만 (6, 2) ↔ (2, 8) 로 다르고 두 범위가 같아
+       여기서 막힌다(그 43장은 INI ``Col`` = 좌표 칸, 관측 2026-11-15).
+
+    Δ 가 (0, 0) 이면 (0, 0) 을 넣는다.  값이 하나라도 없거나 조건이 어긋나면 그 레시피는 넣지
+    않는다(지금 동작 그대로).  ★ 고정값('+1' 등)을 두지 마라 — Δ 의 크기와 부호는 그 폴더 자기
+    파일에서만 읽는다(사용자 지시 2026-11-15 '하드코딩 금지').  근거(관측 2026-11-15): Kendall PI6 ·
+    PI2 7 폴더가 Δ (1, 1) 이고 장비 화면 5/5 · 형제 웨이퍼 Conder 이름 143/143 이 레시피 1 틀,
+    다른 다중 레시피 28 폴더는 Δ (0, 0).  전 구간 fail-safe."""
+    try:
+        return dict(_recipe_label_shifts(folder))
+    except Exception:
+        _LOG.exception("레시피별 die 이름표 차이를 읽다 실패해 쓰지 않습니다: %s", folder)
+        return {}
+
+
+def _int_key(path: Path, key: str) -> Optional[int]:
+    v = _read_key(path, key, 0, 1e6)
+    return int(v) if v is not None and v == int(v) else None
+
+
+@lru_cache(maxsize=256)
+def _recipe_label_shifts(folder: Path) -> tuple[tuple[int, tuple[int, int]], ...]:
+    try:
+        names = sorted(f.name for f in folder.iterdir() if _RECIPE_PI.match(f.name))
+    except OSError:
+        return ()
+    if not names:
+        return ()
+    base = folder / _EXPORT_FILE
+    c1, r1 = _int_key(base, "AlignmentDieCol"), _int_key(base, "AlignmentDieRow")
+    if c1 is None or r1 is None:
+        return ()
+    px = _read_key(base, "XDieIndex", _MIN_PITCH, _MAX_PITCH)
+    py = _read_key(base, "YDieIndex", _MIN_PITCH, _MAX_PITCH)
+    boxes: Optional[dict] = None
+    out: list[tuple[int, tuple[int, int]]] = []
+    for name in names:
+        k = int(_RECIPE_PI.match(name).group(1))
+        q = folder / name
+        cn, rn = _int_key(q, "AlignmentDieCol"), _int_key(q, "AlignmentDieRow")
+        if cn is None or rn is None:
+            continue
+        d = (cn - c1, rn - r1)
+        if d != (0, 0):
+            xs = [_read_key(f, "DieTopLeft_X", -1e7, 1e7) for f in (base, q)]
+            ys = [_read_key(f, "DieTopLeft_Y", -1e7, 1e7) for f in (base, q)]
+            if None in xs or None in ys or px is None or py is None:
+                continue
+            if abs(xs[0] - xs[1]) > px / 2 or abs(ys[0] - ys[1]) > py / 2:
+                _LOG.info("레시피 %d 는 다른 die 를 정렬 die 로 골라 이름표 차이 %s 를 쓰지 않습니다: %s",
+                          k, d, folder)
+                continue
+            if boxes is None:
+                boxes = {rk: _box(cs) for rk, cs in _dielut_by_recipe(folder).items() if cs}
+            b1, bk = boxes.get(1), boxes.get(k)
+            if b1 is None or bk is None or bk != (b1[0] + d[0], b1[1] + d[0],
+                                                 b1[2] + d[1], b1[3] + d[1]):
+                _LOG.info("레시피 %d 의 %s 범위가 이름표 차이 %s 만큼 옮겨져 있지 않아 쓰지 않습니다: %s",
+                          k, _DIELUT_FILE, d, folder)
+                continue
+            _LOG.info("레시피 %d 의 die 이름표가 레시피 1 보다 %s 옮겨져 있어 되돌려 씁니다: %s",
+                      k, d, folder)
+        out.append((k, d))
+    return tuple(out)
 
 
 def _dielut_origins(folder: Path, px: float, py: float, dia: float,
