@@ -141,11 +141,13 @@ QORVO_INI_JOBS = [
     ('W96798Z5BK16', 'GWL4R'),   # 6G7ZAD
     ('W97218SGB1K16', 'SQ6'),    # 6I7L7K(XYT 셋업 포함) · 6H7ENK — SQ67P01 · SQ62G… (col/row 쓰레드)
 ]
-QORVO_INI = ("ProductInfo.ini", "WaferMapRecipe.ini", "Params_WaferInfo.ini", "Recipe.ini")
+QORVO_INI = ("ProductInfo.ini", "WaferMapRecipe.ini", "Params_WaferInfo.ini", "Recipe.ini",
+             "ColorImageGrabingInfo.ini",   # 사진별 X, Y — 093 칸 사진으로 Ref−Cust 를 가린다(수집 자료 쓰레드 2026-11-15)
+             "WaferInfo.dat")               # die 범위 — 경계상자가 [ExportData] 와 56/56 같았다(번호표 대용 후보)
 QORVO_DIE_MAP = ("s_DieLocation.dat", "s_DieLocation.dat.md")   # LOT 마다 첫 웨이퍼만(웨이퍼당 약 10 MB)
 QORVO_INI_LOTS = 40      # Job 마다 LOT 몇 개까지(최근 것부터)
 QORVO_INI_WAFERS = 2     # LOT 마다 웨이퍼 몇 장
-QORVO_INI_MB = 60        # 이 단계로 담는 원본 상한
+QORVO_INI_MB = 150       # 이 단계로 담는 원본 상한(ColorImageGrabingInfo 가 웨이퍼당 최대 5 MB, 지난 수집 관측)
 # 같은 웨이퍼를 KLA 와 Camtek 이 같은 층(RDL1~6 · FS …)에서 7일 안에 찍은 것(스캔 기록, 2026-11-15 사용자 요청).
 # (KLA 장비, KLA LOT, [KLA 웨이퍼 시작 시각], Camtek 장비, Job, Setup, LOT, [웨이퍼 ID], [KLA 슬롯]).
 # KLA 폴더 = <드라이브>\<날짜>\<KLA LOT>\<웨이퍼 시작 YYYY-MM-DD-HH-MM>_<슬롯>  (AOI Capacity 답, 2026-11-15).
