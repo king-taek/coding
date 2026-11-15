@@ -55,6 +55,8 @@ def test_zone_pick_and_raise_matches_core(styled_qapp, tmp_path):
         assert dlg.zone_keys() == [("Zones", 1), ("Zones", 63)]          # Defect 많은 순, 기준 없는 255 는 없음
         assert dlg._zone == ("Zones", 1)
         assert dlg.drop_value.text() == "0" and not dlg.reset_btn.isEnabled()
+        assert not dlg.new_box.isVisibleTo(dlg)                          # RichSurface 없음 — 내리기 없음
+        assert dlg.sliders[(14, R.FEATURE_AREA)][0].value() == 0          # 슬라이더 시작 = 레시피 = 맨 왼쪽
         dlg.set_value(14, R.FEATURE_AREA, 40.0)
         core = P.count_by_bin(dlg._w.defects, dlg._w.zones, {("Zones", 1, 14, R.FEATURE_AREA): 40.0 / PX ** 2})
         total, kept = core[("Zones", 1, 14)]
@@ -128,3 +130,50 @@ def test_match_photos_nearest_within_tolerance():
          P.Defect(1, "Zones", 1, 29, 29, 1, 1, 1, 0, 103.0, 100.0))
     xy = {"a": (102.5, 100.0), "b": (200.0, 0.0), "c": None}
     assert P.match_photos(d, ["a", "b", "c"], xy.get, 5.0) == {1: "a"}
+
+
+def test_export_html_lists_change_and_dropped(styled_qapp, tmp_path):
+    """Area 40 µm² 로 올리고 내보내면 기존 → 변경 값 · 빠진 7 · 대표 사진이 HTML 에 들어간다."""
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    dlg = T.ThresholdPreviewDialog()
+    try:
+        dlg.set_wafer(T.load_wafer(_wafer_with_photos(tmp_path)))
+        assert not dlg.export_btn.isEnabled()
+        dlg.set_value(14, R.FEATURE_AREA, 40.0)
+        assert dlg.export_btn.isEnabled()
+        out = tmp_path / "보고.html"
+        dlg.export_html(out)
+        text = out.read_text(encoding="utf-8")
+        assert "30.0" in text and "→ 40.0" in text                      # 레시피 30 µm² → 40
+        assert "−7" in text and text.count("class='tile'") == 7          # 7개 빠짐, 사진 7장(8장 이하라 전부)
+    finally:
+        dlg.deleteLater()
+
+
+def test_lowering_shows_new_count_from_rich_surface(styled_qapp, tmp_path):
+    """RichSurface 가 있는 Zone 은 레시피 아래로 내릴 수 있고 '새로 생김' 이 코어 count_new 와 같다."""
+    from aoi_verification.app.threshold import rich as RS
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    pi = ROOT / "dev" / "Threshold 확인" / "TB500 PI_Opening" / "20234838EWG1"
+    zones = R.read_zones(pi)
+    defects = (P.Defect(0, "Zones", 1, 29, 29, 30.0, 3.0, 4.0, 120.0, 0.0, 0.0),)
+    w = T.WaferData(pi, defects, (), zones, {29: R.ClassInfo("B R Surface Dark", False)}, (1.0, 1.0),
+                    rich=RS.load_rich(pi))
+    dlg = T.ThresholdPreviewDialog()
+    try:
+        dlg.set_wafer(w)
+        assert dlg.new_box.isVisibleTo(dlg) and dlg.new_value.text() == "0"
+        assert dlg.sliders[(29, R.FEATURE_CONTRAST)][0].value() > 0          # 레시피 아래로 내릴 칸이 있다
+        dlg.set_value(29, R.FEATURE_CONTRAST, 70.0)
+        dlg.set_value(29, R.FEATURE_WIDTH, 2.0)
+        dlg.set_value(29, R.FEATURE_AREA, 15.0)
+        assert dlg.new_value.text() == "5" and dlg.drop_value.text() == "0"
+        assert "+5" in dlg.zone_btns[("Zones", 1)].text()
+        out = tmp_path / "내림.html"
+        dlg.export_html(out)
+        text = out.read_text(encoding="utf-8")
+        assert "+5" in text and "100.0" in text and "→ 70.0" in text
+        dlg.reset()
+        assert dlg.new_value.text() == "0"
+    finally:
+        dlg.deleteLater()
