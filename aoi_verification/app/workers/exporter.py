@@ -1539,7 +1539,7 @@ def recipe_of(path) -> tuple[Optional[int], str]:
     이름 파일(`RecipesInfo.ini` 등)이 없어 이름을 못 읽으면 코드로 대신한다."""
     from ..coords import geometry
     res = geometry.resolve(Path(path))
-    if res.status != "ok" or res.geometry is None:
+    if res.status != "ok" or res.geometry is None or res.geometry.recipe is None:
         return None, i18n.KO.EXTRACT_RECIPE_NONE
     g = res.geometry
     return g.recipe, (g.recipe_name

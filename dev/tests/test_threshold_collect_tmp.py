@@ -267,14 +267,15 @@ def test_rich_surface_read_error_does_not_stop_the_collection(tmp_path, monkeypa
 def test_done_stages_are_skipped(tmp_path, monkeypatch):
     """다 받은 단계(DONE)는 run() 이 건너뛴다 — 다시 모으지 않는다."""
     tool = _tool()
-    tool.DONE = {"pair", "known"}
+    tool.DONE = {"pair", "known", "rich"}
     called = []
     monkeypatch.setattr(tool, "collect_rich_surface", lambda *a, **k: called.append("rich") or 0)
+    monkeypatch.setattr(tool, "collect_exports", lambda *a, **k: called.append("export") or 0)
     monkeypatch.setattr(tool, "resolve_pair", lambda raw: called.append("pair") or None)
     monkeypatch.setattr(tool, "find_lot", lambda *a: called.append("known") or None)
     monkeypatch.setattr(tool, "nas_roots", lambda: [tmp_path])
     tool.run(tmp_path)
-    assert called == ["rich"]
+    assert called == ["export"]
 
 
 def test_rich_surface_folder_error_is_only_noted(tmp_path, monkeypatch):
@@ -290,3 +291,89 @@ def test_rich_surface_folder_error_is_only_noted(tmp_path, monkeypatch):
     assert tool.collect_rich_surface(col, said.append, lambda *_: None, lambda: False) == 0
     col.close("")
     assert said and "못 읽음" in said[0] and "WinError 64" in said[0]
+
+
+def test_exports_take_defects_csv_and_note_missing(tmp_path, monkeypatch):
+    """Export 목록 웨이퍼의 Defects.csv 를 담는다.  '폴더 전부' 표시면 웨이퍼 폴더 전체, Export 전이면 요약에 적는다."""
+    tool = _tool()
+    sr = tmp_path / "AOI-27" / "Scanresult"
+    a = sr / "J1" / "Setup1" / "With_EDC" / "S3FAR079XMA7"
+    _wafer(a)
+    (a / "Defects.csv").write_text("#,Type,Area,Width,Length,Col,Row,X,Y,Classify,Visit\n1,1,70,3,9,4,5,10,20,29,0\n")
+    b = sr / "J2" / "SETUP" / "DDU" / "18_E5025794EWF5"
+    _wafer(b)                                                             # Export 전 — Defects.csv 없음
+    c = sr / "J3" / "SETUP" / "L3" / "W9"
+    _wafer(c)
+    (c / "Defects.csv").write_text("#,Area\n1,5\n")
+    monkeypatch.setattr(tool, "nas_roots", lambda: [sr])
+    monkeypatch.setattr(tool, "EXPORT_WAFERS", [
+        ("AOI-27", "J1", "Setup1", "With_EDC", "S3FAR079XMA7", True),
+        ("AOI-27", "J2", "SETUP", "DDU", "E5025794EWF5", False),
+        ("AOI-27", "J3", "SETUP", "L3", "W9", False),
+        ("AOI-99", "J", "S", "L", "W", False),
+    ])
+    said = []
+    col = tool.Collector(tmp_path / "s.zip")
+    assert tool.collect_exports(col, said.append, lambda *_: None, lambda: False) == 2
+    col.close("")
+    names = zipfile.ZipFile(tmp_path / "s.zip").namelist()
+    assert "Export/AOI-27/With_EDC/S3FAR079XMA7/Defects.csv" in names
+    assert "Export/AOI-27/With_EDC/S3FAR079XMA7/Recipe.ini" in names      # 폴더 전부
+    assert names.count("Export/AOI-27/L3/W9/Defects.csv") == 1
+    assert not any(n.startswith("Export/AOI-27/L3/W9/") and not n.endswith("Defects.csv") for n in names)
+    assert not any("DDU" in n for n in names)
+    assert "Defects.csv 없음" in "\n".join(said)
+    assert said[-1].startswith("Export Defects.csv 2장") and "E5025794EWF5" in said[-1] and "AOI-99" in said[-1]
+
+
+def test_export_list_entries_can_match():
+    """웨이퍼 이름은 폴더 이름을 대문자로 바꿔 찾으므로 대문자여야 하고, 담는 자리(장비 · LOT · 웨이퍼)가 겹치면 안 된다."""
+    tool = _tool()
+    seen = set()
+    for aoi, job, setup, lot, wafer, full in tool.EXPORT_WAFERS:
+        assert wafer == wafer.upper() and wafer.strip() == wafer          # 빈 칸 = LOT 전체
+        assert all(s.strip() == s and s for s in (aoi, job, setup, lot))
+        assert isinstance(full, bool)
+        key = (tool._aoi_key(aoi), lot, wafer)
+        assert key not in seen
+        seen.add(key)
+
+
+def test_export_not_counted_when_csv_skipped(tmp_path, monkeypatch):
+    """Defects.csv 가 너무 크거나 못 읽혀 zip 에 안 들어가면 담은 수에 넣지 않고 요약에 적는다."""
+    tool = _tool()
+    sr = tmp_path / "AOI-27" / "Scanresult"
+    a = sr / "J1" / "Setup1" / "L1" / "W1"
+    _wafer(a)
+    (a / "Defects.csv").write_text("#,Area\n1,5\n")
+    monkeypatch.setattr(tool, "nas_roots", lambda: [sr])
+    monkeypatch.setattr(tool, "FILE_MB", 0)                           # 어떤 파일도 크기 상한을 넘는다
+    monkeypatch.setattr(tool, "EXPORT_WAFERS", [("AOI-27", "J1", "Setup1", "L1", "W1", False)])
+    said = []
+    col = tool.Collector(tmp_path / "s.zip")
+    assert tool.collect_exports(col, said.append, lambda *_: None, lambda: False) == 0
+    col.close("")
+    assert "Export/AOI-27/L1/W1/Defects.csv" not in zipfile.ZipFile(tmp_path / "s.zip").namelist()
+    assert any("못 담음" in s for s in said) and said[-1].startswith("Export Defects.csv 0장")
+
+
+def test_export_blank_wafer_takes_whole_lot(tmp_path, monkeypatch):
+    """웨이퍼 이름이 빈 칸이면 LOT 안 웨이퍼마다 Defects.csv 를 담고, Export 안 한 웨이퍼는 요약에 적는다.  없는 LOT 은 '못 찾음'."""
+    tool = _tool()
+    sr = tmp_path / "AOI-3" / "Scanresult"
+    lot = sr / "J" / "6324" / "TSC-FS"
+    for name, export in (("27125631EWE7", True), ("27125632EWA1", True), ("27125633EWB2", False)):
+        _wafer(lot / name)
+        if export:
+            (lot / name / "Defects.csv").write_text(f"#,Area\n1,{name}\n")      # 내용이 다르게(같으면 중복목록으로 간다)
+    monkeypatch.setattr(tool, "nas_roots", lambda: [sr])
+    monkeypatch.setattr(tool, "EXPORT_WAFERS", [("AOI-3", "J", "6324", "TSC-FS", "", False),
+                                                ("AOI-3", "J", "6324", "TSF-FS", "", False)])
+    said = []
+    col = tool.Collector(tmp_path / "s.zip")
+    assert tool.collect_exports(col, said.append, lambda *_: None, lambda: False) == 2
+    col.close("")
+    names = zipfile.ZipFile(tmp_path / "s.zip").namelist()
+    assert "Export/AOI-3/TSC-FS/27125631EWE7/Defects.csv" in names
+    assert "Export/AOI-3/TSC-FS/27125632EWA1/Defects.csv" in names
+    assert "27125633EWB2" in said[-1] and "TSF-FS (LOT 전체)" in said[-1]
