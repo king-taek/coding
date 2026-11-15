@@ -10,8 +10,8 @@ Kendall RDL4 Notch Right: 90° 돌린 뒤 약 635 µm) — 그대로 tol 로 세
 방향을 못 찾았다.  뚜렷하지 않으면(지지 수가 적거나 2등과 비슷) 값을 내지 않는다 —
 ``coords.calibration.auto_offset`` 과 같은 태도다(``MIN_SUPPORT``·``DOMINANCE`` 는 **가정**).
 
-★ die 가 정사각형이 아니면 두 폴더 파일의 die pitch(가로 · 세로)로 90° 돌림이 되는지부터 가른다
-(:func:`_turn_from_pitches`) — 틀린 방향이 짝을 더 많이 낸 일이 있었다(TB500, 관측 2026-11-15).
+★ die 가 정사각형이 아니면 두 폴더 좌표가 쓴 die pitch(가로 · 세로)로 90° 돌림이 되는지부터 가른다
+(:func:`_turn_from_pitches` · :func:`_pitch_of`) — 틀린 방향이 짝을 더 많이 낸 일이 있었다(TB500, 관측 2026-11-15).
 
 사진 수가 많아도 느리지 않게 앞쪽 슬롯 몇 개만 본다(:data:`MAX_SLOTS`).
 """
@@ -72,16 +72,23 @@ def _shared_offset(groups, fixed) -> Tuple[float, float]:
     return _calib._guess_from(votes) or (0.0, 0.0)
 
 
-def _pitch_of(folder: Path) -> Optional[Tuple[float, float]]:
-    """폴더의 die pitch ``(x, y)`` — KLA 정보파일 ``DiePitch``, 없으면 Camtek 설정 파일 값.  없으면 None.
+def _pitch_of(folder: Path, source: str) -> Optional[Tuple[float, float]]:
+    """그 폴더 좌표가 **실제로 쓴** die pitch ``(x, y)`` — 정할 수 없으면 None(그 슬롯은 가르지 않는다).
 
-    둘 다 그 장비 **좌표 틀**의 값이다(그 좌표를 die 번호로 바꿀 때 쓰는 값).  가벼운 머리 읽기만 한다."""
-    from ..coords import kla_info, wafer_geometry
-    v = kla_info.peek_die_pitch(folder)
-    if v:
-        return v
-    w = wafer_geometry.peek_die_pitch(folder)
-    return (w[0], w[1]) if w else None
+    KLA 는 정보파일 ``DiePitch``(:func:`~..coords.wafer_geometry.kla_geometry`, 못 읽어 기본값을 댄
+    경우는 None), Camtek INI 는 검산을 통과해 채택된 값(:func:`~..coords.wafer_geometry.camtek_geometry`)
+    — 둘 다 그 장비 **좌표 틀**의 값이고 notch 돌림(:func:`notch.folder_frame`)도 이 값을 쓴다.
+    검산 없이 파일 첫 후보를 읽는 안내용 ``peek_die_pitch`` 는 쓰지 않는다 — 첫 후보가 검산에서
+    떨어지고 다음 후보로 좌표를 만든 폴더에서 버려진 값으로 맞는 방향을 뺐다(PR #141 리뷰 지적,
+    2026-11-15).  LIVE 파일명(pitch 가 추정일 수 있음) · 절대좌표는 None.  둘 다 캐시된 값이다."""
+    from ..coords import wafer_geometry as wg
+    if source == "kla":
+        k = wg.kla_geometry(folder)
+        return None if k.source == "fallback" else (k.pitch_x, k.pitch_y)
+    if source == "camtek_ini":
+        g = wg.camtek_geometry(folder)
+        return (g.pitch_x, g.pitch_y) if g is not None else None
+    return None
 
 
 def _turn_from_pitches(a: Tuple[float, float], b: Tuple[float, float]) -> Optional[bool]:
@@ -99,13 +106,23 @@ def _turn_from_pitches(a: Tuple[float, float], b: Tuple[float, float]) -> Option
     return None if same == swap else swap
 
 
-def _turn_allowed(groups, pitch_of: Callable = _pitch_of) -> Optional[bool]:
+def _first_folder(paths, coords) -> Optional[Tuple[Path, str]]:
+    """좌표가 있는 첫 사진의 ``(폴더, 좌표 출처)`` — 없으면 None."""
+    for p in paths:
+        c = coords.get(p)
+        if c is not None:
+            return Path(p).parent, c.source
+    return None
+
+
+def _turn_allowed(groups, coords, pitch_of: Callable = _pitch_of) -> Optional[bool]:
     """슬롯마다 :func:`_turn_from_pitches` — 모두 같은 답일 때만 그 답, 하나라도 못 가르면 None."""
     seen = set()
     for refs, vals in groups:
-        if not refs or not vals:
+        ka, kb = _first_folder(refs, coords), _first_folder(vals, coords)
+        if ka is None or kb is None:
             continue
-        a, b = pitch_of(Path(refs[0]).parent), pitch_of(Path(vals[0]).parent)
+        a, b = pitch_of(*ka), pitch_of(*kb)
         if not a or not b:
             continue
         t = _turn_from_pitches(a, b)
@@ -128,9 +145,9 @@ def score_directions(groups: Sequence[Tuple[Sequence, Sequence]],
     scores: Dict[str, int] = {}
     offsets: Dict[str, Tuple[float, float]] = {}
     n = len(notch.DIRECTIONS)
-    # die 가 정사각형이 아니면 가로 · 세로(두 폴더 파일 값)로 90° 돌림이 되는지부터 가른다 —
+    # die 가 정사각형이 아니면 가로 · 세로(두 폴더 좌표가 쓴 값)로 90° 돌림이 되는지부터 가른다 —
     # 짝 수는 우연히 틀린 방향에서 많을 수 있다(TB500: 90° 방향 374 > 맞는 방향 150, 관측 2026-11-15).
-    turn = _turn_allowed(groups)
+    turn = _turn_allowed(groups, coords)
     quarter = ({notch.LEFT, notch.RIGHT} if ref_dir in (notch.UP, notch.DOWN)
                else {notch.UP, notch.DOWN})
     if turn is not None:

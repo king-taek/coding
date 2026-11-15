@@ -280,7 +280,8 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   119건 동일) — KLA 정보파일 `OrientationMarkLocation` 만 읽고, Camtek 은 네 방향을 돌려 짝이 가장 많은 쪽을 고른다(짝 8 미만 · 2등의 2배
   미만이면 판단 안 함 → 사용자에게 묻는다). 실물 Kendall RDL4 KLA(아래) ↔ Camtek(오른쪽) 10쌍(관측). 돌리려면 웨이퍼 중심이 필요해
   Conder 만 있으면 `NotchError` 로 매칭을 멈춘다 — 중심을 추측해 돌리지 마라. `WaferDisplayOrientation` 은 노치가 아니라 화면 표시 기준(시프트)이다.
-  짝을 세기 전에 두 폴더 파일의 die pitch(가로 · 세로)로 90° 돌림이 되는지부터 가른다(`notch_auto._turn_from_pitches`) — 그대로면 90° 후보를,
+  짝을 세기 전에 두 폴더 **좌표가 쓴** die pitch(가로 · 세로 — KLA `DiePitch` · Camtek 검산을 통과한 값, `notch_auto._pitch_of`)로 90° 돌림이
+  되는지부터 가른다(`notch_auto._turn_from_pitches`). 검산 없는 `peek_die_pitch` 는 쓰지 마라 — 첫 후보가 검산에서 떨어진 폴더(W97320 1곳)에서 다르다. 그대로면 90° 후보를,
   바뀌었으면 0° · 180° 후보를 뺀다. 경계는 검증 die 가로 · 세로의 가운데이고 고정 % 는 없다. 정사각형 · 애매 · 값 없음 · 슬롯끼리 다르면 네 방향 모두 본다.
   TB500.INT1046 은 90° 방향 짝(374)이 맞는 방향(150)보다 많아 틀린 답을 냈다(관측 2026-11-15).
 - **col/row 번호의 0순위는 장비가 내보낸 번호 격자 `ProductInfo.ini [ExportData]`다**

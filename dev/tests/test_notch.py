@@ -441,14 +441,65 @@ def test_turn_allowed_needs_every_slot_to_agree():
     from aoi_verification.app.workers import notch_auto as na
     groups = [([Path("/r/a/1.jpg")], [Path("/v/a/1.jpg")]),
               ([Path("/r/b/1.jpg")], [Path("/v/b/1.jpg")])]
+    coords = {p: DefectCoord(col=0, row=0, x=0.0, y=0.0,
+                             source="kla" if p.parts[1] == "r" else "camtek_ini")
+              for refs, vals in groups for p in (*refs, *vals)}
+    asked = []
+
+    def pitch(table):
+        def of(folder, source):
+            asked.append((folder, source))
+            return table.get(folder)
+        return of
+
     tb = (37247.9, 44905.3)
     same = {Path("/r/a"): tb, Path("/v/a"): tb, Path("/r/b"): tb, Path("/v/b"): tb}
-    assert na._turn_allowed(groups, pitch_of=same.get) is False
+    assert na._turn_allowed(groups, coords, pitch_of=pitch(same)) is False
+    assert (Path("/r/a"), "kla") in asked and (Path("/v/a"), "camtek_ini") in asked   # 좌표의 출처로 묻는다
     mixed = {**same, Path("/v/b"): tb[::-1]}
-    assert na._turn_allowed(groups, pitch_of=mixed.get) is None
+    assert na._turn_allowed(groups, coords, pitch_of=pitch(mixed)) is None
     missing = {k: v for k, v in same.items() if k != Path("/v/b")}
-    assert na._turn_allowed(groups, pitch_of=missing.get) is False      # 값 없는 슬롯은 건너뛴다
-    assert na._turn_allowed(groups, pitch_of=lambda _f: None) is None
+    assert na._turn_allowed(groups, coords, pitch_of=pitch(missing)) is False   # 값 없는 슬롯은 건너뛴다
+    assert na._turn_allowed(groups, coords, pitch_of=lambda _f, _s: None) is None
+    assert na._turn_allowed(groups, {}, pitch_of=pitch(same)) is None   # 좌표가 없는 사진의 폴더는 보지 않는다
+
+
+def test_turn_uses_the_pitch_the_coordinates_were_made_with(tmp_path):
+    """Camtek 파일의 첫 pitch 후보(Params DieStep)가 검산에서 떨어지고 다음 후보(ProductInfo)로 좌표를
+    만든 폴더 — 검산 없이 읽은 첫 후보로 가르면 맞는 0° 를 빼고 90° 만 남겼다(PR #141 리뷰 지적, 2026-11-15).
+    돌림 판단은 좌표(와 돌림)가 쓴 pitch 로 하고, 그 값을 정할 수 없으면 가르지 않는다."""
+    pytest.importorskip("PyQt6.QtCore")
+    from aoi_verification.app.coords import camtek_ini, clear_caches
+    from aoi_verification.app.coords import wafer_geometry as wg
+    from aoi_verification.app.workers import notch_auto as na
+    val = tmp_path / "v" / "s"
+    val.mkdir(parents=True)
+    (val / "ColorImageGrabingInfo.ini").write_text(
+        "[a.jpeg]\nX=34500\nY=26400\nCol=3\nRow=2\n[b.jpeg]\nX=51000\nY=60500\nCol=5\nRow=5\n",
+        encoding="utf-8")
+    (val / "Params_WaferInfo.ini").write_text(
+        "[Geometry]\nDieStep_X=12000.000000\nDieStep_Y=10000.000000\n", encoding="utf-8")
+    (val / "ProductInfo.ini").write_text(
+        "[Geometric]\nXDieIndex=10000.000\nYDieIndex=12000.000\n", encoding="utf-8")
+    clear_caches()
+    try:
+        kla_pitch = (10000.0, 12000.0)                        # 기준(KLA) die 는 Camtek 과 같은 모양
+        assert wg.peek_die_pitch(val)[:2] == (12000.0, 10000.0)      # 검산 없는 첫 후보 — 버려진 값
+        assert na._turn_from_pitches(kla_pitch, (12000.0, 10000.0)) is True   # 그 값이면 90° 만 남았다
+        assert na._pitch_of(val, "camtek_ini") == (10000.0, 12000.0)  # 좌표를 만든 값
+        refs = [tmp_path / "r" / "s" / "1.jpg"]
+        vals = [val / f"{k}.jpg" for k in camtek_ini.load_folder(val)]
+        coords = {refs[0]: DefectCoord(col=0, row=0, x=0.0, y=0.0, source="kla"),
+                  **{p: camtek_ini.load_folder(val)[p.stem] for p in vals}}
+        kla_too = lambda folder, source: (kla_pitch if source == "kla"
+                                          else na._pitch_of(folder, source))
+        assert na._turn_allowed([(refs, vals)], coords, pitch_of=kla_too) is False   # 0° · 180° 가 남는다
+        # 정할 수 없는 값은 쓰지 않는다 — KLA 기본값(정보파일 없음) · LIVE 파일명 · 절대좌표
+        assert na._pitch_of(tmp_path / "r" / "s", "kla") is None
+        assert na._pitch_of(val, "camtek_live") is None
+        assert na._pitch_of(val, "camtek_abs") is None
+    finally:
+        clear_caches()
 
 
 @pytest.mark.parametrize("turn, val_dir, want", [
@@ -461,7 +512,7 @@ def test_auto_detect_scores_only_turns_the_die_shape_allows(monkeypatch, turn, v
     pytest.importorskip("PyQt6.QtCore")
     pts = _points(60, seed=3)
     na, groups, table = _auto_setup(monkeypatch, val_dir, pts, pts)
-    monkeypatch.setattr(na, "_turn_allowed", lambda _groups: turn)
+    monkeypatch.setattr(na, "_turn_allowed", lambda *_a: turn)
     res = na.score_directions(groups, "/r", "/v", "down", 200.0,
                               resolve=lambda paths: {p: table[p] for p in paths})
     assert res.direction == want
@@ -479,7 +530,9 @@ def test_tb500_pair_drops_quarter_turns_and_keeps_its_answer():
     groups = [(kla[cf.name], [cf / f"{k}.jpg" for k in camtek_ini.load_folder(cf)])
               for cf in sorted((lot / "Camtek").iterdir()) if kla.get(cf.name)]
     assert len(groups) == 24
-    assert na._turn_allowed(groups) is False
+    from aoi_verification.app.coords import resolve_batch
+    coords = resolve_batch([p for refs, vals in groups for p in (*refs, *vals)])
+    assert na._turn_allowed(groups, coords) is False
     res = na.score_directions(groups, lot / "KLA", lot / "Camtek", "down", 200.0)
     assert res.direction == notch.DOWN and res.support >= 100
     clear_caches()
