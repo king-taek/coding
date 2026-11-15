@@ -267,14 +267,15 @@ def test_rich_surface_read_error_does_not_stop_the_collection(tmp_path, monkeypa
 def test_done_stages_are_skipped(tmp_path, monkeypatch):
     """다 받은 단계(DONE)는 run() 이 건너뛴다 — 다시 모으지 않는다."""
     tool = _tool()
-    tool.DONE = {"pair", "known"}
+    tool.DONE = {"pair", "known", "rich"}
     called = []
     monkeypatch.setattr(tool, "collect_rich_surface", lambda *a, **k: called.append("rich") or 0)
+    monkeypatch.setattr(tool, "collect_exports", lambda *a, **k: called.append("export") or 0)
     monkeypatch.setattr(tool, "resolve_pair", lambda raw: called.append("pair") or None)
     monkeypatch.setattr(tool, "find_lot", lambda *a: called.append("known") or None)
     monkeypatch.setattr(tool, "nas_roots", lambda: [tmp_path])
     tool.run(tmp_path)
-    assert called == ["rich"]
+    assert called == ["export"]
 
 
 def test_rich_surface_folder_error_is_only_noted(tmp_path, monkeypatch):
@@ -290,3 +291,36 @@ def test_rich_surface_folder_error_is_only_noted(tmp_path, monkeypatch):
     assert tool.collect_rich_surface(col, said.append, lambda *_: None, lambda: False) == 0
     col.close("")
     assert said and "못 읽음" in said[0] and "WinError 64" in said[0]
+
+
+def test_exports_take_defects_csv_and_note_missing(tmp_path, monkeypatch):
+    """Export 목록 웨이퍼의 Defects.csv 를 담는다.  '폴더 전부' 표시면 웨이퍼 폴더 전체, Export 전이면 요약에 적는다."""
+    tool = _tool()
+    sr = tmp_path / "AOI-27" / "Scanresult"
+    a = sr / "J1" / "Setup1" / "With_EDC" / "S3FAR079XMA7"
+    _wafer(a)
+    (a / "Defects.csv").write_text("#,Type,Area,Width,Length,Col,Row,X,Y,Classify,Visit\n1,1,70,3,9,4,5,10,20,29,0\n")
+    b = sr / "J2" / "SETUP" / "DDU" / "18_E5025794EWF5"
+    _wafer(b)                                                             # Export 전 — Defects.csv 없음
+    c = sr / "J3" / "SETUP" / "L3" / "W9"
+    _wafer(c)
+    (c / "Defects.csv").write_text("#,Area\n1,5\n")
+    monkeypatch.setattr(tool, "nas_roots", lambda: [sr])
+    monkeypatch.setattr(tool, "EXPORT_WAFERS", [
+        ("AOI-27", "J1", "Setup1", "With_EDC", "S3FAR079XMA7", True),
+        ("AOI-27", "J2", "SETUP", "DDU", "E5025794EWF5", False),
+        ("AOI-27", "J3", "SETUP", "L3", "W9", False),
+        ("AOI-99", "J", "S", "L", "W", False),
+    ])
+    said = []
+    col = tool.Collector(tmp_path / "s.zip")
+    assert tool.collect_exports(col, said.append, lambda *_: None, lambda: False) == 2
+    col.close("")
+    names = zipfile.ZipFile(tmp_path / "s.zip").namelist()
+    assert "Export/AOI-27/With_EDC/S3FAR079XMA7/Defects.csv" in names
+    assert "Export/AOI-27/With_EDC/S3FAR079XMA7/Recipe.ini" in names      # 폴더 전부
+    assert names.count("Export/AOI-27/L3/W9/Defects.csv") == 1
+    assert not any(n.startswith("Export/AOI-27/L3/W9/") and not n.endswith("Defects.csv") for n in names)
+    assert not any("DDU" in n for n in names)
+    assert "Defects.csv 없음" in "\n".join(said)
+    assert said[-1].startswith("Export Defects.csv 2/4") and "E5025794EWF5" in said[-1] and "AOI-99" in said[-1]
