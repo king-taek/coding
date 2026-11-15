@@ -324,3 +324,33 @@ def test_exports_take_defects_csv_and_note_missing(tmp_path, monkeypatch):
     assert not any("DDU" in n for n in names)
     assert "Defects.csv 없음" in "\n".join(said)
     assert said[-1].startswith("Export Defects.csv 2/4") and "E5025794EWF5" in said[-1] and "AOI-99" in said[-1]
+
+
+def test_export_list_entries_can_match():
+    """웨이퍼 이름은 폴더 이름을 대문자로 바꿔 찾으므로 대문자여야 하고, 담는 자리(장비 · LOT · 웨이퍼)가 겹치면 안 된다."""
+    tool = _tool()
+    seen = set()
+    for aoi, job, setup, lot, wafer, full in tool.EXPORT_WAFERS:
+        assert wafer == wafer.upper() and all(s.strip() == s and s for s in (aoi, job, setup, lot, wafer))
+        assert isinstance(full, bool)
+        key = (tool._aoi_key(aoi), lot, wafer)
+        assert key not in seen
+        seen.add(key)
+
+
+def test_export_not_counted_when_csv_skipped(tmp_path, monkeypatch):
+    """Defects.csv 가 너무 크거나 못 읽혀 zip 에 안 들어가면 담은 수에 넣지 않고 요약에 적는다."""
+    tool = _tool()
+    sr = tmp_path / "AOI-27" / "Scanresult"
+    a = sr / "J1" / "Setup1" / "L1" / "W1"
+    _wafer(a)
+    (a / "Defects.csv").write_text("#,Area\n1,5\n")
+    monkeypatch.setattr(tool, "nas_roots", lambda: [sr])
+    monkeypatch.setattr(tool, "FILE_MB", 0)                           # 어떤 파일도 크기 상한을 넘는다
+    monkeypatch.setattr(tool, "EXPORT_WAFERS", [("AOI-27", "J1", "Setup1", "L1", "W1", False)])
+    said = []
+    col = tool.Collector(tmp_path / "s.zip")
+    assert tool.collect_exports(col, said.append, lambda *_: None, lambda: False) == 0
+    col.close("")
+    assert "Export/AOI-27/L1/W1/Defects.csv" not in zipfile.ZipFile(tmp_path / "s.zip").namelist()
+    assert any("못 담음" in s for s in said) and said[-1].startswith("Export Defects.csv 0/1")

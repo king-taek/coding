@@ -541,7 +541,7 @@ DMINE_COLLECT_WINDING_DOWN = "방금 중지한 수집이 아직 정리 중입니
 THRESH_COLLECT_BUTTON = "Threshold 자료 수집"
 THRESH_COLLECT_TITLE = "Threshold 자료 수집"
 THRESH_COLLECT_ASK = (
-    "NAS 의 Scanresult 에서 장비 [Export] 로 만든 Defects.csv(웨이퍼 4장)를 모읍니다. "
+    "NAS 의 Scanresult 에서 장비 [Export] 로 만든 Defects.csv 를 모읍니다. "
     "읽기만 합니다. 몇 분이면 끝나고, 중지하면 그때까지 모은 것을 저장합니다."
 )
 THRESH_COLLECT_START = "수집 시작"

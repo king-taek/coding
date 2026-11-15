@@ -107,6 +107,14 @@ EXPORT_WAFERS = [
     ("4F-AOI-04", "R_TB500_LIVE_PI4 - Enhanced", "Setup1", "YDD-No Image", "20234838EWG1", False),       # PI_Opening + RDL, RichSurface 웨이퍼
     ("AOI-27", "TB500_RDL4-Multi", "Setup1", "With_EDC", "S3FAR079XMA7", True),                         # EDC Good 이 Export 에 나오나
     ("AOI-15", "R_KENDALL_A0_PI6_0223", "SETUP", "DDU-PIDS3", "E5025794EWF5", False),                   # 다른 제품(Kendall) 단위
+    # 다른 제품 · 헷갈리는 기록(현택님 2026-11-15 '다른 디바이스도').  앞 둘은 이미 Export 함, 나머지는 폴더도 처음 받는다.
+    ("AOI-12", "2D@RE-W97218SGB1K16_0860463PD-0A", "6412", "CTK", "SQ62G01-D7", False),                # QORVO: Contrast 0 · Zone 1 class −93
+    ("AOI-11", "2D@RE-W97218SGB1K16_0860463PD-0A", "6412", "CTX", "SQ67P01-D1", False),                # QORVO: 136 B 구형 기록
+    ("AOI-9", "2D@R2-15966TA0-BW2_0859654PD-0C", "6321", "TYW", "NELA26-01C1", True),                  # AVAGO: Contrast 가 Zone 1 에만
+    ("AOI-12", "2D@R2-3L781987B17-WUP_0858675PD-0B", "6412", "CCG", "3LL641036-01-G1", True),          # TI: Zone 63 도 class 29, Contrast 0
+    ("AOI-3", "R_T254 LIVE_0858711PD_FS UBM", "6324", "TSC-FS", "27125625EWC5", True),                 # T254: 화면 번호 시프트 −1 레시피
+    ("AOI-16", "2D@R5-AS-T254-A01_0857122AY-0B", "6324", "WVU", "GX57007306", True),                   # T254: 부분 맵 · Zone 63 class −22
+    ("AOI-1", "2D@RE-KENDALL_MEOL_0859275PD-0C", "REVERSEETCH", "2DG-1113S", "GX57527840", True),      # 120 B 구형 기록 · class 33
 ]
 EXPORT_FILE = "Defects.csv"
 _LOT_DEPTH = 4      # Job 아래 LOT 을 찾는 깊이(Setup → [구분] → LOT)
@@ -436,8 +444,14 @@ def collect_exports(col, say, progress, stop):
                 col.take_files(w, arc)
             else:
                 col.take_files(w, arc, only={EXPORT_FILE})
-            if not (w / EXPORT_FILE).is_file():
+            # 파일목록 줄로 판단한다 — 너무 크거나 못 읽은 파일은 take_files 가 조용히 건너뛰고 그 줄에만 적는다.
+            line = next((s for s in reversed(col.listing) if s.startswith(f"{arc}/{EXPORT_FILE}\t")), None)
+            if line is None:
                 say(f"Defects.csv 없음(Export 전): {w}")
+                missing.append(f"{aoi} {lot_name} {wafer}")
+                continue
+            if "\t담음" not in line:
+                say(f"Defects.csv 못 담음({line.split(chr(9), 2)[-1]}): {w}")
                 missing.append(f"{aoi} {lot_name} {wafer}")
                 continue
             got += 1
