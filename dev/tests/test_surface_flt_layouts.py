@@ -6,6 +6,11 @@ EAGLETP_107168) · 120 5(AOI-1 EAGLE_106134).  152 로 고정해 읽던 앱은 1
 좌표는 같은 폴더 ColorImageGrabingInfo.ini 의 X·Y), 기대값은 장비 사이드카
 (Surface.flt.md) 오프셋으로 앱 코드와 따로 푼 값이다.  ★ 기대값을 고쳐서 통과시키지 마라.
 
+앱은 레코드 배치를 늘 사이드카에서 읽는다 — 장비별 배치표를 코드에 두지 않는다(사용자 지시
+2026-11-15 '하드코딩 금지').  사이드카가 없으면 예전 152 배치만 검사해 읽고, 아니면 빈칸이다.
+수집 네 번의 파일 목록에서 Surface.flt 가 있는 폴더 225곳 모두 사이드카가 있었다(관측 2026-11-15).
+아래 사이드카 문자열은 각 웨이퍼의 실물이다(줄 끝 CRLF 만 LF 로).
+
 출처 등급: 레코드 바이트·사진 X·Y = 관측(실물 파일), 오프셋 = 파일(사이드카).
 120·136 의 Contrast 는 실물 값이 전부 0 이라 오프셋을 값으로는 검산하지 못했다(미구분).
 """
@@ -15,7 +20,7 @@ from pathlib import Path
 from aoi_verification.app.coords import geometry, surface_flt
 
 # AOI-1 EAGLE_106134 · 2D@R2-KENDALL_MEOL_0859275PD_BS_CAMTEK/6311/HNG 1112N/GX57528965
-# 120 B × 3, 사이드카 없음.
+# 120 B × 3.  사이드카는 아래 _SIDECAR_120.
 _FLT_120 = bytes.fromhex(
     "000021000008000002ccccccccccccccea9630c2671df740a385d2e9037d0241ea9630c2671df740a385d2e9"
     "037d0241ffffffff0000000000000000000010400000000000001440000000000000304000000080163a0740"
@@ -27,6 +32,8 @@ _FLT_120 = bytes.fromhex(
     "00001c400000000000003a4000000020c0d90b4000000080aadf1d4000000060ebc31e400000000000000000"
     "0000000000000000"
 )
+# 위 웨이퍼의 사이드카 — recipe 칸이 없다(AOI-1 · 2 사이드카는 모두 같은 내용, 관측).
+_SIDECAR_120 = '<root><RecordSize Size="120"/><Fields><Field Name="reclassify" Id="1073741824" Offset="0" Vartype="2"/><Field Name="orgReclassify" Id="1073741825" Offset="2" Vartype="2"/><Field Name="Type" Id="1073741826" Offset="4" Vartype="3"/><Field Name="zone" Id="1073741827" Offset="8" Vartype="17"/><Field Name="x" Id="1073741828" Offset="16" Vartype="5"/><Field Name="y" Id="1073741829" Offset="24" Vartype="5"/><Field Name="ActualX" Id="1073741830" Offset="32" Vartype="5"/><Field Name="ActualY" Id="1073741831" Offset="40" Vartype="5"/><Field Name="id" Id="1073741832" Offset="48" Vartype="3"/><Field Name="resultID" Id="1073741833" Offset="52" Vartype="3"/><Field Name="BoxWidth" Id="1073741834" Offset="56" Vartype="5"/><Field Name="BoxHeight" Id="1073741835" Offset="64" Vartype="5"/><Field Name="area" Id="1073741836" Offset="72" Vartype="5"/><Field Name="BlobBreadth" Id="1073741837" Offset="80" Vartype="5"/><Field Name="BlobLength" Id="1073741838" Offset="88" Vartype="5"/><Field Name="BlobFeretMax" Id="1073741839" Offset="96" Vartype="5"/><Field Name="particlesNum" Id="1073741840" Offset="104" Vartype="22"/><Field Name="particlesArea" Id="1073741841" Offset="108" Vartype="22"/><Field Name="Contrast" Id="1073741842" Offset="112" Vartype="5"/></Fields></root>\n'
 
 # AOI-5 · 2D@RE-KENDALL MEOL_0859275PD/6412/ACF 1111D/GX57526337 — 136 B × 3, 사이드카 있음(recipe 칸 포함).
 _FLT_136_SIDE = bytes.fromhex(
@@ -43,7 +50,7 @@ _FLT_136_SIDE = bytes.fromhex(
 )
 _SIDECAR_136 = '<root><RecordSize Size="136"/><Fields><Field Name="reclassify" Id="1073741824" Offset="0" Vartype="2"/><Field Name="orgReclassify" Id="1073741825" Offset="2" Vartype="2"/><Field Name="Type" Id="1073741826" Offset="4" Vartype="3"/><Field Name="waferRegion" Id="1073741827" Offset="8" Vartype="17"/><Field Name="zone" Id="1073741828" Offset="9" Vartype="17"/><Field Name="recipe" Id="1073741829" Offset="10" Vartype="17"/><Field Name="x" Id="1073741830" Offset="16" Vartype="5"/><Field Name="y" Id="1073741831" Offset="24" Vartype="5"/><Field Name="ActualX" Id="1073741832" Offset="32" Vartype="5"/><Field Name="ActualY" Id="1073741833" Offset="40" Vartype="5"/><Field Name="id" Id="1073741834" Offset="48" Vartype="3"/><Field Name="resultID" Id="1073741835" Offset="52" Vartype="3"/><Field Name="BoxWidth" Id="1073741836" Offset="56" Vartype="5"/><Field Name="BoxHeight" Id="1073741837" Offset="64" Vartype="5"/><Field Name="area" Id="1073741838" Offset="72" Vartype="5"/><Field Name="BlobBreadth" Id="1073741839" Offset="80" Vartype="5"/><Field Name="BlobLength" Id="1073741840" Offset="88" Vartype="5"/><Field Name="BlobFeretMax" Id="1073741841" Offset="96" Vartype="5"/><Field Name="BlobFeretMaxAngle" Id="1073741842" Offset="104" Vartype="5"/><Field Name="BlobFeretMin" Id="1073741843" Offset="112" Vartype="5"/><Field Name="particlesNum" Id="1073741844" Offset="120" Vartype="22"/><Field Name="particlesArea" Id="1073741845" Offset="124" Vartype="22"/><Field Name="Contrast" Id="1073741846" Offset="128" Vartype="5"/></Fields></root>\n'
 
-# AOI-10 · 2D@R2-ASTB500-SM822-8MAY_0860154PD_BS UBM/SETUP/YPH_1113S/GX57520448 — 136 B × 5, 사이드카 없음.
+# AOI-10 · 2D@R2-ASTB500-SM822-8MAY_0860154PD_BS UBM/SETUP/YPH_1113S/GX57520448 — 136 B × 5.  사이드카는 아래 _SIDECAR_136_NO_RECIPE.
 _FLT_136 = bytes.fromhex(
     "00001d0000040000003fcccccccccccc195f58eae8810341d49abe1d84980141195f58eae8810341d49abe1d"
     "84980141ffffffff000000000000000000001c4000000000000018400000000000003b40000000e08f000e40"
@@ -62,6 +69,9 @@ _FLT_136 = bytes.fromhex(
     "0000000000003e40000000e0a0ba0b4000000080754f2140000000200314234000000000008036c000000000"
     "0000104000000000000000000000000000000000"
 )
+# 위 웨이퍼의 사이드카 — AOI-5 와 크기는 같은 136 인데 recipe 칸이 없다(byte 10 은 빈 자리).
+# AOI-10 · 11 사이드카는 모두 같은 내용(관측).
+_SIDECAR_136_NO_RECIPE = '<root><RecordSize Size="136"/><Fields><Field Name="reclassify" Id="1073741824" Offset="0" Vartype="2"/><Field Name="orgReclassify" Id="1073741825" Offset="2" Vartype="2"/><Field Name="Type" Id="1073741826" Offset="4" Vartype="3"/><Field Name="waferRegion" Id="1073741827" Offset="8" Vartype="17"/><Field Name="zone" Id="1073741828" Offset="9" Vartype="17"/><Field Name="x" Id="1073741829" Offset="16" Vartype="5"/><Field Name="y" Id="1073741830" Offset="24" Vartype="5"/><Field Name="ActualX" Id="1073741831" Offset="32" Vartype="5"/><Field Name="ActualY" Id="1073741832" Offset="40" Vartype="5"/><Field Name="id" Id="1073741833" Offset="48" Vartype="3"/><Field Name="resultID" Id="1073741834" Offset="52" Vartype="3"/><Field Name="BoxWidth" Id="1073741835" Offset="56" Vartype="5"/><Field Name="BoxHeight" Id="1073741836" Offset="64" Vartype="5"/><Field Name="area" Id="1073741837" Offset="72" Vartype="5"/><Field Name="BlobBreadth" Id="1073741838" Offset="80" Vartype="5"/><Field Name="BlobLength" Id="1073741839" Offset="88" Vartype="5"/><Field Name="BlobFeretMax" Id="1073741840" Offset="96" Vartype="5"/><Field Name="BlobFeretMaxAngle" Id="1073741841" Offset="104" Vartype="5"/><Field Name="BlobFeretMin" Id="1073741842" Offset="112" Vartype="5"/><Field Name="particlesNum" Id="1073741843" Offset="120" Vartype="22"/><Field Name="particlesArea" Id="1073741844" Offset="124" Vartype="22"/><Field Name="Contrast" Id="1073741845" Offset="128" Vartype="5"/></Fields></root>\n'
 
 # 152 파일 앞 15 레코드(2,280 B = 152×15 = 120×19 — 두 크기로 다 나눠진다).
 # AOI-7 · 2D@R2-KENDALL_MEOL_0859275PD-0C/6321/2HG 1112N/GX57525988(25,080 B 실물의 앞부분).
@@ -119,6 +129,8 @@ _FLT_152_AMBIG = bytes.fromhex(
     "0000000000001840000000000000334000000040d7c00940000000c0cf9b1740000000802102184000000000"
     "00e050400000000000001040000000000000000000000000000000000000000000000000"
 )
+# 위 웨이퍼의 사이드카(152).  수집한 152 사이드카는 모두 아래 자리가 코드의 ``_FIELDS`` 와 같았다(관측).
+_SIDECAR_152 = '<root><RecordSize Size="152"/><Fields><Field Name="reclassify" Id="1073741824" Offset="0" Vartype="2"/><Field Name="orgReclassify" Id="1073741825" Offset="2" Vartype="2"/><Field Name="Type" Id="1073741826" Offset="4" Vartype="3"/><Field Name="x" Id="1073741827" Offset="8" Vartype="5"/><Field Name="y" Id="1073741828" Offset="16" Vartype="5"/><Field Name="ActualX" Id="1073741829" Offset="24" Vartype="5"/><Field Name="ActualY" Id="1073741830" Offset="32" Vartype="5"/><Field Name="id" Id="1073741831" Offset="40" Vartype="3"/><Field Name="resultID" Id="1073741832" Offset="44" Vartype="3"/><Field Name="frameIdx" Id="1073741833" Offset="48" Vartype="3"/><Field Name="xInFrame" Id="1073741834" Offset="52" Vartype="4"/><Field Name="yInFrame" Id="1073741835" Offset="56" Vartype="4"/><Field Name="waferRegion" Id="1073741836" Offset="60" Vartype="17"/><Field Name="zone" Id="1073741837" Offset="61" Vartype="17"/><Field Name="recipe" Id="1073741838" Offset="62" Vartype="17"/><Field Name="BoxWidth" Id="1073741839" Offset="64" Vartype="5"/><Field Name="BoxHeight" Id="1073741840" Offset="72" Vartype="5"/><Field Name="area" Id="1073741841" Offset="80" Vartype="5"/><Field Name="BlobBreadth" Id="1073741842" Offset="88" Vartype="5"/><Field Name="BlobLength" Id="1073741843" Offset="96" Vartype="5"/><Field Name="BlobFeretMax" Id="1073741844" Offset="104" Vartype="5"/><Field Name="BlobFeretMaxAngle" Id="1073741845" Offset="112" Vartype="5"/><Field Name="BlobFeretMin" Id="1073741846" Offset="120" Vartype="5"/><Field Name="particlesNum" Id="1073741847" Offset="128" Vartype="3"/><Field Name="particlesArea" Id="1073741848" Offset="132" Vartype="3"/><Field Name="Contrast" Id="1073741849" Offset="136" Vartype="5"/><Field Name="taskID" Id="1073741850" Offset="144" Vartype="3"/></Fields></root>\n'
 
 
 def _load(tmp_path: Path, data: bytes, sidecar: str = "") -> tuple:
@@ -134,8 +146,8 @@ def _at(recs, x, y):
     return geometry._nearest(recs, (x, y), geometry.GEOMETRY_MATCH_TOL)
 
 
-def test_120_record_file_decodes_with_old_layout(tmp_path):
-    recs = _load(tmp_path, _FLT_120)
+def test_120_record_file_decodes_with_sidecar(tmp_path):
+    recs = _load(tmp_path, _FLT_120, _SIDECAR_120)
     assert len(recs) == 3
     # (사진 이름, ini X, ini Y) → (area, BlobBreadth, BlobFeretMax, zone)
     for x, y, area, br, fm, zone in [
@@ -151,6 +163,11 @@ def test_120_record_file_decodes_with_old_layout(tmp_path):
         assert r.recipe is None          # 120 레이아웃엔 recipe 칸이 없다
 
 
+def test_120_without_sidecar_gives_empty(tmp_path):
+    """사이드카가 없으면 120 을 짐작하지 않는다 — 360 B 는 152 로 안 나눠져 빈칸(틀린 수치보다 빈칸)."""
+    assert _load(tmp_path, _FLT_120) == ()
+
+
 def test_136_with_sidecar_reads_recipe(tmp_path):
     recs = _load(tmp_path, _FLT_136_SIDE, _SIDECAR_136)
     assert len(recs) == 3
@@ -163,8 +180,8 @@ def test_136_with_sidecar_reads_recipe(tmp_path):
         assert r.zone == 1 and r.recipe == 2
 
 
-def test_136_without_sidecar_found_by_length_and_values(tmp_path):
-    recs = _load(tmp_path, _FLT_136)
+def test_136_sidecar_without_recipe_field(tmp_path):
+    recs = _load(tmp_path, _FLT_136, _SIDECAR_136_NO_RECIPE)
     assert len(recs) == 5
     for x, y, area, br in [(212766.060848664, 193774.077589025, 27.0, 4.40211),
                            (296194.516670147, 140279.315689814, 30.0, 3.46613),
@@ -174,12 +191,18 @@ def test_136_without_sidecar_found_by_length_and_values(tmp_path):
         r = _at(recs, x, y)
         assert r is not None and r.area == area and abs(r.blob_breadth - br) < 1e-5
         assert r.zone == 63
-        # 사이드카 없는 136 은 byte 10 이 recipe 인지 모른다(어떤 파일은 쓰레기) → None
+        # 이 사이드카엔 recipe 칸이 없다 — byte 10 을 recipe 로 짐작하지 않는다 → None
         assert r.recipe is None
 
 
-def test_length_fits_152_and_120_values_decide(tmp_path):
-    """2,280 B 는 152·120 둘 다로 나눠진다 — 120 으로 읽으면 말이 안 되는 값이 섞여 152 로 정한다."""
+def test_136_without_sidecar_gives_empty(tmp_path):
+    """사이드카가 없으면 136 도 짐작하지 않는다 — 680 B 는 152 로 안 나눠져 빈칸."""
+    assert _load(tmp_path, _FLT_136) == ()
+
+
+def test_152_without_sidecar_still_decodes(tmp_path):
+    """사이드카가 없는 152 파일은 예전처럼 152 로 읽는다.  2,280 B 는 120 으로도 나눠지지만
+    코드에는 120 배치가 없으니 고를 일이 없다."""
     recs = _load(tmp_path, _FLT_152_AMBIG)
     assert len(recs) == 15
     for x, y, area, fm in [(60404.084, 148216.184, 21.0, 6.00208),     # 60408.148216.c.-200452034.jpeg
@@ -197,18 +220,37 @@ def test_152_files_unchanged_by_layout_choice(tmp_path):
     assert [tuple(map(repr, r)) for r in recs] == [tuple(map(repr, r)) for r in old]
 
 
-def test_two_layouts_both_plausible_gives_empty(tmp_path):
-    """두 레이아웃이 다 말이 되면 고르지 않는다 — 틀린 수치보다 빈칸."""
-    assert _load(tmp_path, bytes(2280)) == ()
+def test_152_sidecar_gives_same_values_as_built_in_layout(tmp_path):
+    """실물 152 사이드카로 읽어도 코드의 152 배치와 비트까지 같다 — 152 파일은 이번 수정의 영향이 없다."""
+    recs = _load(tmp_path, _FLT_152_AMBIG, _SIDECAR_152)
+    old = surface_flt._decode(_FLT_152_AMBIG, 152, surface_flt._FIELDS)
+    assert [tuple(map(repr, r)) for r in recs] == [tuple(map(repr, r)) for r in old]
 
 
-def test_bad_sidecar_falls_back_to_detection(tmp_path):
-    """사이드카 형을 모르면 믿지 않고 길이·값 검사로 간다."""
+def test_152_with_impossible_values_gives_empty(tmp_path):
+    """사이드카 없이 152 로 나눠져도 말이 안 되는 값(좌표 NaN)이 있으면 빈칸."""
+    import struct
+    buf = bytearray(_FLT_152_AMBIG)
+    struct.pack_into("<d", buf, 152 * 3 + 24, float("nan"))   # 넷째 레코드 ActualX
+    assert _load(tmp_path, bytes(buf)) == ()
+
+
+def test_bad_sidecar_is_not_trusted(tmp_path):
+    """사이드카 형을 모르면 믿지 않는다 — 152 검사로만 가고, 408 B(136×3)는 152 로 안 나눠져 빈칸."""
     bad = _SIDECAR_136.replace('Name="ActualX" Id="1073741832" Offset="32" Vartype="5"',
                                'Name="ActualX" Id="1073741832" Offset="32" Vartype="99"')
     assert bad != _SIDECAR_136
-    recs = _load(tmp_path, _FLT_136_SIDE, bad)
-    assert len(recs) == 3 and recs[0].recipe is None
+    assert _load(tmp_path, _FLT_136_SIDE, bad) == ()
+
+
+def test_bad_sidecar_on_152_file_uses_built_in_layout(tmp_path):
+    """못 읽는 사이드카 옆의 152 파일은 152 검사를 통과하면 예전처럼 읽는다."""
+    bad = _SIDECAR_152.replace('Name="ActualX" Id="1073741829" Offset="24" Vartype="5"',
+                               'Name="ActualX" Id="1073741829" Offset="24" Vartype="99"')
+    assert bad != _SIDECAR_152
+    recs = _load(tmp_path, _FLT_152_AMBIG, bad)
+    old = surface_flt._decode(_FLT_152_AMBIG, 152, surface_flt._FIELDS)
+    assert [tuple(map(repr, r)) for r in recs] == [tuple(map(repr, r)) for r in old]
 
 
 def test_geometry_without_recipe_field(tmp_path):
@@ -218,7 +260,7 @@ def test_geometry_without_recipe_field(tmp_path):
         "Col=0\nRow=0\nRecipeNumber=0\n", encoding="utf-8")
     img = tmp_path / "91187.281918.c.2133359845.jpeg"
     img.write_bytes(b"")
-    _load(tmp_path, _FLT_120)
+    _load(tmp_path, _FLT_120, _SIDECAR_120)
     from aoi_verification.app.coords import camtek_ini
     camtek_ini.load_abs_folder.cache_clear()
     res = geometry.resolve(img)
@@ -240,7 +282,7 @@ def test_screens_show_no_recipe_for_old_layout(tmp_path):
         "Col=0\nRow=0\n", encoding="utf-8")
     img = tmp_path / "94686.151464.c.735978651.jpeg"
     img.write_bytes(b"")
-    _load(tmp_path, _FLT_120)
+    _load(tmp_path, _FLT_120, _SIDECAR_120)
     camtek_ini.load_abs_folder.cache_clear()
     status, measures = single_info.geometry_measures(img)
     assert status == "ok"

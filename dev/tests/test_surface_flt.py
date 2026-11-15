@@ -92,7 +92,7 @@ def test_missing_file_returns_empty(monkeypatch, tmp_path):
 
 
 def test_truncated_bytes_no_raise(monkeypatch, tmp_path):
-    """길이가 어느 레코드 크기로도 안 나눠지면 레이아웃을 못 정한다 → 빈 결과(raise 없음).
+    """사이드카가 없고 길이가 레코드 크기(실물 152 · 여기선 합성 32)로 안 나눠지면 빈 결과(raise 없음).
 
     예전에는 꼬리만 버리고 152 로 읽었는데, 그게 구형 장비(120·136) 파일에 다른 Defect
     수치를 붙인 원인이었다."""

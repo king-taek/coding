@@ -25,13 +25,14 @@ HEX + 디코딩 정답값 동봉)을 brute-force 해 확정했다.  레이아웃
 2026-11-14): 152(41 파일) · 136(8 파일, AOI-5·10) · 120(5 파일, AOI-1 구형 EAGLE).  152 로 고정해
 읽으면 120·136 파일에서 **다른 Defect 의 수치**가 붙었다(앱이 수치를 보인 61 장 중 50 장).  장비 모델명으로는 못 가른다(EAGLETP_106821 = 152).  그래서:
   1. 옆에 ``Surface.flt.md`` 사이드카가 있으면 그 ``RecordSize`` · ``Field`` 오프셋을 그대로 쓴다.
-  2. 없으면 알려진 레이아웃(``_FIELDS`` + ``_OLD_LAYOUTS``) 중 **파일 길이가 나눠떨어지고 모든
-     레코드가 말이 되는 값**(유한 · 좌표 ±1e6 µm · 크기 ≥ 0)인 것이 **딱 하나**일 때만 쓴다.
-     둘 이상이거나 없으면 **빈 결과**(측정정보 없음) — 틀린 수치보다 빈칸이 낫다.
-     54 파일 전수에서 이 규칙은 54/54 정답을 골랐다(25,080 B 는 152·120 둘 다 나눠지지만
-     120 으로 읽으면 209 중 65 레코드가 말이 안 돼 152 로 정해진다).
-  3. ``recipe`` 칸이 없는 레이아웃(120, 사이드카 없는 136)은 recipe 를 ``None`` 으로 둔다 —
-     136 의 byte 10 은 사이드카에 recipe 가 있는 파일에서만 recipe 이고 없는 파일에선 쓰레기다.
+     레코드 크기 · 필드 위치는 **늘 이 파일에서 읽는다** — 장비별 배치표를 코드에 두지 마라
+     (사용자 지시 2026-11-15 '하드코딩 금지').  수집 네 번의 파일 목록에서 Surface.flt 가 있는
+     폴더 225곳 모두 사이드카가 있었다(관측 2026-11-15).
+  2. 사이드카가 없거나 못 읽으면 예전부터 쓰던 152 배치(``_FIELDS``)만 본다 — **파일 길이가
+     152 로 나눠떨어지고 모든 레코드가 말이 되는 값**(유한 · 좌표 ±1e6 µm · 크기 ≥ 0)일 때만
+     쓰고, 아니면 **빈 결과**(측정정보 없음) — 틀린 수치보다 빈칸이 낫다.  152 사이드카
+     110/110(장비 25대)이 ``_FIELDS`` 와 같은 자리였다(관측 2026-11-15).
+  3. ``recipe`` 칸이 없는 레이아웃(120, AOI-10·11 의 136)은 recipe 를 ``None`` 으로 둔다.
   · 120·136 의 Contrast 오프셋은 사이드카 값이다(파일 등급) — 실물 13 파일 값이 전부 0 이라
     값으로는 검산하지 못했다.  회귀 가드: ``test_surface_flt_layouts.py``(실물 바이트).
 
@@ -69,21 +70,6 @@ _FIELDS: dict[str, tuple[Optional[int], str]] = {
     "contrast":       (136, "d"),
     "zone":           (61,  "B"),
     "recipe":         (62,  "B"),
-}
-
-# 구형 장비 레이아웃(사이드카 ``Surface.flt.md`` 실물에서 옮김 — 파일 등급).
-# recipe 가 None 이면 그 레이아웃에는 recipe 칸이 없다(값 None).
-_OLD_LAYOUTS: dict[int, dict[str, tuple[Optional[int], str]]] = {
-    136: {  # AOI-5 EAGLET_106102 · AOI-10 EAGLETP_107168
-        "actual_x": (32, "d"), "actual_y": (40, "d"), "area": (72, "d"),
-        "blob_breadth": (80, "d"), "blob_feret_max": (96, "d"),
-        "contrast": (128, "d"), "zone": (9, "B"), "recipe": (None, "B"),
-    },
-    120: {  # AOI-1 EAGLE_106134
-        "actual_x": (32, "d"), "actual_y": (40, "d"), "area": (72, "d"),
-        "blob_breadth": (80, "d"), "blob_feret_max": (96, "d"),
-        "contrast": (112, "d"), "zone": (8, "B"), "recipe": (None, "B"),
-    },
 }
 
 # 사이드카 필드 이름 → RawRecord 필드.  recipe 만 없어도 된다.
@@ -252,29 +238,22 @@ def _plausible(recs: tuple[RawRecord, ...]) -> bool:
 
 
 def _parse_flt(path: Path) -> tuple[RawRecord, ...]:
-    """레이아웃을 정해(사이드카 → 길이·값 검사) 레코드를 푼다.  못 정하면 빈 튜플."""
+    """사이드카 배치로 레코드를 푼다.  사이드카가 없으면 152 배치가 길이 · 값 검사를
+    통과할 때만 그것으로 풀고, 아니면 빈 튜플."""
     data = path.read_bytes()
     body = data[_HEADER_BYTES:]
     side = _sidecar_layout(path)
     if side is not None:
         return _decode(body, *side)
     if path.with_name(path.name + ".md").exists():
-        _LOG.warning("Surface.flt.md 를 읽지 못해 길이·값 검사로 레코드 크기를 정함: %s", path)
-    layouts = {_RECORD_SIZE: _FIELDS}
-    for size, fields in _OLD_LAYOUTS.items():
-        layouts.setdefault(size, fields)
-    fits = []
-    for size, fields in layouts.items():
-        if not body or len(body) % size:
-            continue
-        recs = _decode(body, size, fields)
+        _LOG.warning("Surface.flt.md 를 읽지 못해 152 배치로만 확인함: %s", path)
+    if body and len(body) % _RECORD_SIZE == 0:
+        recs = _decode(body, _RECORD_SIZE, _FIELDS)
         if _plausible(recs):
-            fits.append((size, recs))
-    if len(fits) == 1:
-        return fits[0][1]
+            return recs
     if body:
-        _LOG.warning("Surface.flt 레코드 크기를 정하지 못함(후보 %s, %d 바이트) — "
-                     "측정정보 없음으로 처리: %s", [f[0] for f in fits], len(body), path)
+        _LOG.warning("Surface.flt 배치를 알 수 없음(설명 파일 없음 · 152 로 안 맞음, %d 바이트) — "
+                     "측정정보 없음으로 처리: %s", len(body), path)
     return ()
 
 
