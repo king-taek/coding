@@ -535,19 +535,6 @@ THRESH_COLLECT_STOPPING = "지금까지 모은 것을 저장하는 중 (한 번 
 THRESH_COLLECT_STOPPED = "화면을 먼저 풀었습니다. 저장이 끝나면 바탕화면의 Threshold수집 폴더에 zip 이 생깁니다."
 THRESH_COLLECT_NOTHING = "Kendall · TB500 웨이퍼 폴더를 찾지 못해 결과 파일을 만들지 않았습니다."
 THRESH_COLLECT_WINDING_DOWN = "방금 중지한 수집이 아직 정리 중입니다. 잠시 뒤 다시 눌러 주세요."
-# 일회성 [수집 zip 다시 담기] — 한 번 쓰고 나면 아래 THRESH_COLLECT_REPACK_* 여섯 개를 지운다(사용자 지시 2026-11-15)
-THRESH_COLLECT_REPACK_BUTTON = "수집 zip 다시 담기"
-THRESH_COLLECT_REPACK_ASK = (
-    "바탕화면의 Threshold수집_20261115_1856 폴더 zip 에서 아직 필요한 것만 골라 zip 을 다시 만듭니다. "
-    "NAS 는 읽지 않고, 원래 폴더는 그대로 둡니다."
-)
-THRESH_COLLECT_REPACK_START = "다시 담기"
-THRESH_COLLECT_REPACK_RUNNING = "필요한 것만 다시 담는 중"
-THRESH_COLLECT_REPACK_DONE_FMT = (
-    "파일 {total}개 중 {kept}개를 남겼습니다.\n"
-    "아래 폴더 안의 zip 을 전부 올려 주세요(28 MB 를 넘으면 여러 개로 나뉩니다).\n{path}"
-)
-THRESH_COLLECT_REPACK_NOTHING = "바탕화면에 Threshold수집_20261115_1856 폴더(zip)가 없습니다."
 # ── [Threshold수집-임시] 끝 ────────────────────────────────────────────────
 
 # ── 개발자 모드 (메인 화면 Ctrl+Shift+D) ───────────────────────────────────
