@@ -192,9 +192,20 @@ def lot_shift_confirmed(lot_folder: Path) -> bool:
     return _lot_shift(lot_folder)[1]
 
 
+def lot_shift_doubtful(lot_folder: Path) -> bool:
+    """시프트를 확인하지 못했는데 **0 으로도 사진이 맵에 안 맞나** — 번호가 몇 칸 어긋났을 수 있다.
+
+    ±2 까지 어디에든 맞은 사진 중 시프트 0 이 맞힌 사진이 :data:`_SHIFT_MIN_SHARE` 미만이면 참.
+    사진이 적어 (1, 2) 같은 시프트를 채택하지 못한 LOT 이 경고 없이 0 으로 남지 않게 한다(사용자 결정
+    2026-11-15 'A 노란 경고').  번호는 고치지 않는다.  QORVO Conder 50개 단계에서 미확인 12개는 모두 0 이
+    맞혀 거짓 경고 0 개였다(관측) — 넓은 번호 상자인데 사진이 적은 실물은 아직 없다(미확인)."""
+    _shift, ok, zero_misses = _lot_shift(lot_folder)
+    return not ok and zero_misses
+
+
 @lru_cache(maxsize=64)
-def _lot_shift(lot_folder: Path) -> tuple[tuple[int, int], bool]:
-    """``(시프트, 확인했나)`` — :func:`lot_display_shift` 의 본체."""
+def _lot_shift(lot_folder: Path) -> tuple[tuple[int, int], bool, bool]:
+    """``(시프트, 확인했나, 시프트 0 이 사진을 못 맞히나)`` — :func:`lot_display_shift` 의 본체."""
     from . import wafer_txt
     cands = _SHIFTS + _RING
     hits = {sh: 0 for sh in cands}            # 후보별 맞힌 사진 수
@@ -205,7 +216,7 @@ def _lot_shift(lot_folder: Path) -> tuple[tuple[int, int], bool]:
         txts = sorted(p for p in lot_folder.iterdir()
                       if p.suffix.lower() == ".txt" and p.is_file())[:_MAX_LOT_TXT]
     except OSError:
-        return (0, 0), False
+        return (0, 0), False, False
     for t in txts:
         slot = lot_folder / t.stem
         if not slot.is_dir():
@@ -232,7 +243,14 @@ def _lot_shift(lot_folder: Path) -> tuple[tuple[int, int], bool]:
             n_photos += any_hit
             n_ring += ring_hit
     if not n_ring:
-        return (0, 0), False
+        return (0, 0), False, False
+    shift, ok = _pick_shift(lot_folder, hits, support, n_photos, n_ring)
+    return shift, ok, hits[(0, 0)] < _SHIFT_MIN_SHARE * n_ring
+
+
+def _pick_shift(lot_folder: Path, hits: dict, support: dict,
+                n_photos: int, n_ring: int) -> tuple[tuple[int, int], bool]:
+    """후보별 맞힌 수 → ``(시프트, 확인했나)``.  ±1 에서 못 정하면 :func:`_ring_shift`."""
     if not n_photos:
         return _ring_shift(lot_folder, hits, support, n_ring)
     best = max(_SHIFTS, key=lambda sh: (hits[sh], sh == (0, 0)))

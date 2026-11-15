@@ -105,6 +105,9 @@ class MapData:
     # 시프트를 쓴 적이 있는 Job 의 Conder 사진인데 맵으로 시프트를 확인하지 못한 점 수 —
     # 번호는 그대로 두고 '한 칸 다를 수 있음' 만 알린다(사용자 결정 2026-11-14).
     shift_unknown_points: int = 0
+    # Conder 맵으로 시프트를 못 정했는데 0 으로도 사진이 맵에 안 맞는 점 수 — 몇 칸 어긋났을 수 있다
+    # (:func:`camtek_live.lot_shift_doubtful`, 사용자 결정 2026-11-15).  번호는 그대로다.
+    map_mismatch_points: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -508,6 +511,7 @@ def build_map(coords: dict, matched=None) -> MapData:
     guessed = 0
     notch_up = 0
     shift_unknown = 0
+    map_mismatch = 0
     frame: Optional[WaferFrame] = None
     folder_frames: dict = {}
     for path, coord in coords.items():
@@ -516,8 +520,12 @@ def build_map(coords: dict, matched=None) -> MapData:
             unplaced.append(path)
             continue
         if coord.source == "camtek_live":     # 놓지 못한 점도 센다 — 번호 자체가 의심이다
-            shift_unknown += (camtek_live.shift_risk_job(path.stem)
-                              and not camtek_live.lot_shift_confirmed(path.parent.parent))
+            lot = path.parent.parent
+            if camtek_live.lot_shift_doubtful(lot):
+                map_mismatch += 1
+            else:
+                shift_unknown += (camtek_live.shift_risk_job(path.stem)
+                                  and not camtek_live.lot_shift_confirmed(lot))
         xy = to_plane(coord, path.parent)
         if xy is None:
             unplaced.append(path)
@@ -558,7 +566,8 @@ def build_map(coords: dict, matched=None) -> MapData:
             frame = replace(frame, die_cells=frozenset(union))
     return MapData(frame=frame, points=tuple(points), unplaced=tuple(unplaced),
                    mixed_frames=mixed, guessed_points=guessed,
-                   notch_up_points=notch_up, shift_unknown_points=shift_unknown)
+                   notch_up_points=notch_up, shift_unknown_points=shift_unknown,
+                   map_mismatch_points=map_mismatch)
 
 
 # ---------------------------------------------------------------------------
@@ -571,6 +580,7 @@ WARN_PITCH_ASSUMED = "pitch_assumed"    # die 크기를 사진으로 추정했�
 WARN_NUMBER_GUESS = "number_guess"      # col/row 를 장비 번호표 없이 계산한 점이 있다(툴팁 번호)
 WARN_NOTCH_UP = "notch_up"              # 노치가 위(FNLOC=0)인 Conder 맵으로 칸을 정했다
 WARN_SHIFT_UNKNOWN = "shift_unknown"    # 시프트를 쓴 적 있는 Job 인데 Conder 맵으로 확인 못 함
+WARN_MAP_MISMATCH = "map_mismatch"      # Conder 맵으로 시프트를 못 정했고 0 으로도 사진이 안 맞음
 
 
 def _cell_drawn(frame: WaferFrame, cell: tuple[int, int]) -> bool:
@@ -611,6 +621,8 @@ def map_warnings(data: Optional[MapData]) -> list[tuple[str, int]]:
         out.append((WARN_NOTCH_UP, data.notch_up_points))
     if data.shift_unknown_points:
         out.append((WARN_SHIFT_UNKNOWN, data.shift_unknown_points))
+    if data.map_mismatch_points:
+        out.append((WARN_MAP_MISMATCH, data.map_mismatch_points))
     return out
 
 
@@ -640,6 +652,7 @@ def warning_reasons(data: Optional[MapData]) -> str:
         WARN_NUMBER_GUESS: lambda n: i18n.KO.WAFER_MAP_WARN_NUMBER_GUESS_FMT.format(n=n),
         WARN_NOTCH_UP: lambda n: i18n.KO.WAFER_MAP_WARN_NOTCH_UP_FMT.format(n=n),
         WARN_SHIFT_UNKNOWN: lambda n: i18n.KO.WAFER_MAP_WARN_SHIFT_UNKNOWN_FMT.format(n=n),
+        WARN_MAP_MISMATCH: lambda n: i18n.KO.WAFER_MAP_WARN_MAP_MISMATCH_FMT.format(n=n),
     }
     return " · ".join(fmt[code](n) for code, n in map_warnings(data))
 
