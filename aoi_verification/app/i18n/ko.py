@@ -541,8 +541,8 @@ DMINE_COLLECT_WINDING_DOWN = "방금 중지한 수집이 아직 정리 중입니
 THRESH_COLLECT_BUTTON = "Threshold 자료 수집"
 THRESH_COLLECT_TITLE = "Threshold 자료 수집"
 THRESH_COLLECT_ASK = (
-    "NAS 의 Scanresult 에서 TB500 비교 웨이퍼의 RichSurface 전체(Threshold 미리보기에 쓰는 열만)를 모읍니다. "
-    "읽기만 합니다. 최대 1시간이 걸리고, 중지하면 그때까지 모은 것을 저장합니다."
+    "NAS 의 Scanresult 에서 장비 [Export] 로 만든 Defects.csv(웨이퍼 4장)를 모읍니다. "
+    "읽기만 합니다. 몇 분이면 끝나고, 중지하면 그때까지 모은 것을 저장합니다."
 )
 THRESH_COLLECT_START = "수집 시작"
 THRESH_COLLECT_RUNNING = "Threshold 자료를 모으는 중"
@@ -554,7 +554,7 @@ THRESH_COLLECT_NO_TOOL = "수집 도구(dev/threshold_collect.py)가 없습니�
 THRESH_COLLECT_FAIL_FMT = "수집하다 멈췄습니다: {error}"
 THRESH_COLLECT_STOPPING = "지금까지 모은 것을 저장하는 중 (한 번 더 누르면 화면을 바로 풉니다)"
 THRESH_COLLECT_STOPPED = "화면을 먼저 풀었습니다. 저장이 끝나면 바탕화면의 Threshold수집 폴더에 zip 이 생깁니다."
-THRESH_COLLECT_NOTHING = "모을 파일(비교 웨이퍼 RichSurface)을 찾지 못해 결과 파일을 만들지 않았습니다."
+THRESH_COLLECT_NOTHING = "Export 한 Defects.csv 를 찾지 못해 결과 파일을 만들지 않았습니다. 장비에서 [Export] 를 눌렀는지 확인해 주세요."
 THRESH_COLLECT_WINDING_DOWN = "방금 중지한 수집이 아직 정리 중입니다. 잠시 뒤 다시 눌러 주세요."
 # ── [Threshold수집-임시] 끝 ────────────────────────────────────────────────
 # ── [QORVO수집-임시] 시작 — QORVO 번호 조사가 끝나면 이 블록을 통째로 지운다 ───────────
