@@ -23,7 +23,8 @@ from pathlib import Path
 from ..coords import surface_flt as _flt
 from .rules import FEATURE_AREA, FEATURE_CONTRAST, FEATURE_WIDTH, read_classes, read_zones, zone_dir_for
 
-__all__ = ["Defect", "load_defects", "contrast_known", "is_kept", "recipe_misses", "count_by_bin"]
+__all__ = ["Defect", "load_all", "load_defects", "match_photos", "contrast_known", "why_dropped",
+           "is_kept", "recipe_misses", "count_by_bin"]
 
 _LOG = logging.getLogger("aoi.threshold")
 
@@ -74,33 +75,68 @@ def _layout(flt: Path):
     return size, fields
 
 
-def load_defects(folder: Path) -> tuple[tuple[Defect, ...], str]:
-    """웨이퍼 폴더 → ``(Defect 들, 문제 설명)``.  문제가 없으면 설명은 빈 문자열.  절대 raise 안 함."""
+def load_all(folder: Path) -> tuple[tuple[Defect, ...], tuple[Defect, ...], str]:
+    """웨이퍼 폴더 → ``(Defect 들, 첫 분류가 Good 인 것(EDC Good) 들, 문제 설명)``.  절대 raise 안 함.
+
+    Good 쪽은 세지 않고 따로 보여 주기만 한다(현택님 2026-11-15 — 장비 리뷰 화면에는 안 보이지만
+    사진은 웨이퍼 폴더에 남아 있다)."""
     try:
         flt = _flt._find_flt(folder)
         if flt is None:
-            return (), "Surface.flt 없음"
+            return (), (), "Surface.flt 없음"
         lay = _layout(flt)
         if lay is None:
-            return (), "Surface.flt.md 없음 또는 못 읽음"
+            return (), (), "Surface.flt.md 없음 또는 못 읽음"
         size, fields = lay
         data = flt.read_bytes()
         classes = read_classes(folder)
     except OSError as e:
         _LOG.warning("Surface.flt 못 읽음: %s (%s)", folder, e)
-        return (), f"못 읽음: {e}"
+        return (), (), f"못 읽음: {e}"
     good = {n for n, c in classes.items() if c.good}
-    out = []
+    kept, goods = [], []
     for i in range(len(data) // size):
         base = i * size
         v = {k: struct.unpack_from("<" + f, data, base + off)[0] for k, (off, f) in fields.items()}
         first = v["org"] or v["cls"]
-        if abs(first) in good:         # 첫 분류가 Good(EDC Good: reclassify 20 · org 0).  Accept 는 지금 분류만 0 이라 남는다.
+        d = Defect(i, zone_dir_for(v.get("recipe")), int(v["zone"]), int(first), int(v["cls"]),
+                   float(v["area"]), float(v["width"]), float(v["length"]),
+                   float(v["contrast"]), float(v["x"]), float(v["y"]))
+        # 첫 분류가 Good(EDC Good: reclassify 20 · org 0).  Accept 는 지금 분류만 0 이라 Defect 로 남는다.
+        (goods if abs(first) in good else kept).append(d)
+    return tuple(kept), tuple(goods), ""
+
+
+def load_defects(folder: Path) -> tuple[tuple[Defect, ...], str]:
+    """웨이퍼 폴더 → ``(Defect 들, 문제 설명)``.  문제가 없으면 설명은 빈 문자열.  절대 raise 안 함."""
+    kept, _good, note = load_all(folder)
+    return kept, note
+
+
+def match_photos(defects, photos, xy_of, tol: float) -> dict:
+    """사진 → Defect 짝짓기: ``{Defect.index: 사진 경로}``.
+
+    ``xy_of(사진)`` 은 그 사진의 절대 좌표(µm) 또는 None(:func:`coords.abs_coord.absolute_xy`).
+    거리 ``tol`` 안에서 가장 가까운 Defect 에 붙인다 — 사진 정보 화면(:mod:`coords.geometry`)과 같은
+    규칙이다.  한 Defect 에 사진이 여럿이면 처음 것을 쓴다."""
+    import bisect
+    import math
+    order = sorted(range(len(defects)), key=lambda i: defects[i].x)
+    xs = [defects[i].x for i in order]
+    out: dict = {}
+    for photo in photos:
+        xy = xy_of(photo)
+        if xy is None:
             continue
-        out.append(Defect(i, zone_dir_for(v.get("recipe")), int(v["zone"]), int(first), int(v["cls"]),
-                          float(v["area"]), float(v["width"]), float(v["length"]),
-                          float(v["contrast"]), float(v["x"]), float(v["y"])))
-    return tuple(out), ""
+        x, y = xy
+        best, best_d = None, tol
+        for j in order[bisect.bisect_left(xs, x - tol): bisect.bisect_right(xs, x + tol)]:
+            d = math.hypot(defects[j].x - x, defects[j].y - y)
+            if d <= best_d:
+                best, best_d = defects[j], d
+        if best is not None:
+            out.setdefault(best.index, photo)
+    return out
 
 
 def contrast_known(defects, zone_dir: str, zone: int) -> bool:
@@ -112,29 +148,40 @@ def _value(d: Defect, feature: int):
     return {FEATURE_AREA: d.area, FEATURE_WIDTH: d.width, FEATURE_CONTRAST: d.contrast}.get(feature)
 
 
-def is_kept(d: Defect, zones: dict, overrides: dict | None = None) -> bool:
-    """묶음 하나라도 통과하면 남는다.  ``overrides`` = ``{(zone_dir, zone, Classify, FeatureType): 새 LowValue}``.
+def why_dropped(d: Defect, zones: dict, overrides: dict | None = None):
+    """빠지면 ``(Classify, FeatureType)`` — 이 Defect 를 떨어뜨린 기준 하나, 남으면 None.
+
+    묶음 하나라도 통과하면 남는다.  ``overrides`` = ``{(zone_dir, zone, Classify, FeatureType): 새 LowValue}``.
+    여러 묶음에서 떨어졌으면 자기 첫 분류 묶음의 기준을 알려 준다(없으면 처음 묶음).
 
     파일에 값이 없는 기준(Polarity · Abs Contrast)과 **Contrast 가 0 인 Defect 의 Contrast** 는 통과로 본다 —
     0 은 '안 잼' 이다: Contrast 기준이 있는 Zone 에서도 다른 검출 방식이 잡은 Defect 는 0 이고, 레시피 값으로
     검산하면 그 Defect 만 빠졌다(TB500 PI_Opening 5개 · AOI-27 Scan Area 1개, 관측 2026-11-16)."""
     z = zones.get((d.zone_dir, d.zone))
     if z is None or not z.bundles:
-        return True
+        return None
     overrides = overrides or {}
+    first = None
     for cls, filters in z.bundles.items():
-        ok = True
+        bad = None
         for f in filters:
             v = _value(d, f.feature)
             if v is None or (f.feature == FEATURE_CONTRAST and v == 0):
                 continue
             low = overrides.get((d.zone_dir, d.zone, cls, f.feature), f.low)
             if not type(f)(f.feature, f.ftype, low, max(low, f.high)).passes(v):
-                ok = False
+                bad = (cls, f.feature)
                 break
-        if ok:
-            return True
-    return False
+        if bad is None:
+            return None
+        if first is None or cls == d.bin:
+            first = bad
+    return first
+
+
+def is_kept(d: Defect, zones: dict, overrides: dict | None = None) -> bool:
+    """묶음 하나라도 통과하면 남는다(:func:`why_dropped`)."""
+    return why_dropped(d, zones, overrides) is None
 
 
 def recipe_misses(defects, zones: dict) -> list:
