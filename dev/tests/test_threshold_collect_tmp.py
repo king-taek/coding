@@ -233,7 +233,8 @@ def test_plan_parts_fills_each_part_between_25_and_30_mb():
     assert sorted(n for p in parts for n in p) == sorted(total)
 
 
-def test_button_runs_in_background_and_reports(styled_qapp, monkeypatch, tmp_path):
+@pytest.mark.parametrize("which", ["collect", "repack"])
+def test_button_runs_in_background_and_reports(styled_qapp, monkeypatch, tmp_path, which):
     pytest.importorskip("PyQt6.QtWidgets")
     from PyQt6.QtCore import QObject, pyqtSignal
     from PyQt6.QtWidgets import QMainWindow, QMessageBox
@@ -262,6 +263,11 @@ def test_button_runs_in_background_and_reports(styled_qapp, monkeypatch, tmp_pat
             progress(1, 4, "Job 2/4")
             return tmp_path / "Threshold수집_x", 3, 12
 
+        @staticmethod
+        def repack(out, progress=None, stop=None):
+            progress(5, 9, "다시 담는 중 5/9")
+            return tmp_path / "Threshold수집_x_다시담음", 5, 12
+
     win = QMainWindow()
     said = []
     monkeypatch.setattr(mod, "_load_tool", lambda: _Tool)
@@ -270,11 +276,12 @@ def test_button_runs_in_background_and_reports(styled_qapp, monkeypatch, tmp_pat
     mod.attach(win)
     win._loading = _Loading()
 
-    win._thresh_collect_btn.click()
+    (win._thresh_collector if which == "collect" else win._thresh_repacker).button.click()
     deadline = time.time() + 20
     while not said and time.time() < deadline:
         styled_qapp.processEvents()
     assert said and "12" in said[0] and "Threshold수집_x" in said[0]
+    assert ("다시담음" in said[0]) == (which == "repack")
     calls = win._loading.calls
     assert calls[0] == ("show", True) and calls[1] == ("progress", 0, 0)   # busy 로 시작
     assert calls[-1] == ("hide",)
