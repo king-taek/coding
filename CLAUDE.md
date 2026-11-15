@@ -432,6 +432,8 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   비-사진 파일(`.001` 이거나 **확장자가 아예 없을 수 있음**, 1~2개)이고 헤더에
   `WaferID "XXXX";` 가 명시돼 있다 — `coords.kla_info.read_wafer_id` 가 후보를 전부 훑는다.
   **사진 파일명 prefix 로 WaferID 를 추측하지 마라**(되돌린 방식 → `docs/규칙_배경.md`).
+  윈도 썸네일 캐시 `Thumbs.db`(`.db`)는 후보에서 뺀다(`kla_info._NON_INFO_SUFFIXES`) — 후보가 둘이 되면 좌표용
+  `_find_info_file` 이 정보파일을 못 골라 그 폴더 좌표가 통째로 빠졌다(CTY RDL4 7장, `test_kla_thumbs_db.py`).
   정보파일이 **비어** 헤더가 없으면(실측: .001 이 0~1 바이트) 정보파일 **이름**의 WaferID 를 쓰되,
   KLA 폴더명 끝 슬롯 번호 = 상대 폴더 `ActiveSlot` 일 때만 짝짓고 경고한다(`slot.wafer_ids_from_broken_info`,
   사용자 결정 2026-10-25). 이름 하나만으로 짝짓지 마라.
