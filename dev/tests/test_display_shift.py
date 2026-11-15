@@ -12,6 +12,9 @@
 
 from __future__ import annotations
 
+import base64
+import gzip
+
 from pathlib import Path
 
 import pytest
@@ -249,3 +252,85 @@ def test_wafer_map_warns_for_a_risk_job_without_map_evidence(tmp_path):
     plain = _synthetic_lot(tmp_path / "plain", set(), [_live(1), _live(3)])
     data = wm.build_map(resolve_batch(sorted((plain / "W1").iterdir())))
     assert wm.WARN_SHIFT_UNKNOWN not in dict(wm.map_warnings(data))
+
+
+# ---------------------------------------------------------------------------
+# ±1 에서 못 정하면 ±2 바깥 고리 — QORVO 6H7ENK CTX(번호 상자가 고객 맵보다 넓은 스캔, 관측 2026-11-15)
+# ---------------------------------------------------------------------------
+_QORVO = Path(__file__).resolve().parents[1] / "좌표 확인" / "장비격자(ExportData)" / "Conder_UBM"   # 맵 = *.txt.gz.b64
+
+
+def _materialize(src: Path, dst: Path) -> Path:
+    dst.mkdir(parents=True)
+    for t in src.glob("*.txt.gz.b64"):      # 맵 txt(400 KB)를 gzip + base64 로 담아 둔 것 — 원본 그대로 푼다
+        (dst / t.name[:-len(".gz.b64")]).write_bytes(gzip.decompress(base64.b64decode(t.read_text())))
+    for wafer in (p for p in src.iterdir() if p.is_dir()):
+        (dst / wafer.name).mkdir()
+        for n in _names(wafer / "사진목록.txt"):
+            (dst / wafer.name / n).touch()
+    return dst
+
+
+def test_qorvo_6h7enk_shift_is_found_on_the_outer_ring(tmp_path):
+    """파일명 − (1, 2) 칸이 55장 모두 불량 bin(093 · 031), 시프트 0 에서는 양품 칸 — 장비 화면 · Export 파일로 확인한 값."""
+    lot = _materialize(_QORVO, tmp_path / "1. UBM")
+    assert camtek_live.lot_display_shift(lot) == (1, 2)
+    assert camtek_live.lot_shift_confirmed(lot)
+
+
+def test_qorvo_6h7enk_numbers_stay_on_screen_and_dots_land_on_the_bad_die(tmp_path):
+    """화면 · 엑셀 번호는 장비 화면(파일명) 그대로, ``col/row`` 는 고객 맵 번호 — 맵 점과 매칭이 쓰는 번호다."""
+    from aoi_verification.app.coords import resolve
+    lot = _materialize(_QORVO, tmp_path / "1. UBM")
+    seen = 0
+    for wafer in sorted(p for p in lot.iterdir() if p.is_dir()):
+        bad = _map_bad_cells(lot / f"{wafer.name}.txt")
+        for photo in sorted(wafer.iterdir()):
+            live = camtek_live.parse_live_name(photo.stem)
+            c = resolve(photo)
+            assert (c.screen_col, c.screen_row) == (live.col, live.row), photo.name
+            assert (c.col, c.row) == (live.col - 1, live.row - 2), photo.name
+            assert (c.col, c.row) in bad, photo.name
+            seen += 1
+    assert seen == 55
+    sample = next(p for p in (lot / "SQ67P01-D1").iterdir() if "_20_140_" in p.name)
+    assert (resolve(sample).col, resolve(sample).row) == (19, 138)      # CTK 장비 화면 번호와 같은 die
+
+
+def _grid_lot(tmp_path: Path, rows: int, cols: int, bad, names) -> Path:
+    """``rows × cols`` 맵(불량 칸 ``bad`` = (열, 아래부터 행)) + LIVE 이름들."""
+    lot = tmp_path / "LOT"
+    (lot / "W1").mkdir(parents=True)
+    lines = [" ".join("009" if (c, rows - 1 - r) in bad else "000" for c in range(cols)) for r in range(rows)]
+    (lot / "W1.txt").write_text(f"WAFER:W1\nFNLOC:180\nROWCT:{rows}\nCOLCT:{cols}\nBCEQU:000\n"
+                                + "".join(f"RowData:{ln}\n" for ln in lines), encoding="utf-8")
+    for n in names:
+        (lot / "W1" / n).touch()
+    return lot
+
+
+# 서로 5칸 넘게 떨어진 불량 칸 — 다른 후보가 우연히 맞지 않게
+_BAD = {(6, 2), (12, 8), (18, 14), (7, 16)}
+
+
+def _live2(col, row, x=10.0):
+    return f"R_DEV_REC_LOT_W1_{col}_{row}_Foreign_{x}_5.0.jpg"
+
+
+def test_outer_ring_shift_is_taken_when_nothing_fits_within_one(tmp_path):
+    lot = _grid_lot(tmp_path, 20, 20, _BAD, [_live2(c - 2, r + 1) for c, r in _BAD])   # 파일명 = 맵 + (−2, 1)
+    assert camtek_live.lot_display_shift(lot) == (-2, 1)
+
+
+def test_outer_ring_rejected_when_a_second_shift_also_fits(tmp_path):
+    """되풀이 무늬(QORVO 특수 die) 때문에 다른 고리 후보도 맞으면(2등 > 10%) 채택하지 않는다."""
+    twin = {(c - 4, r) for c, r in _BAD}           # 같은 무늬가 4칸 옆에 또 있다 → (−2, 1) · (2, 1) 둘 다 맞는다
+    lot = _grid_lot(tmp_path, 20, 20, _BAD | twin, [_live2(c - 2, r + 1) for c, r in _BAD])
+    assert camtek_live.lot_display_shift(lot) == (0, 0)
+    assert not camtek_live.lot_shift_confirmed(lot)
+
+
+def test_within_one_still_wins_over_the_ring(tmp_path):
+    """±1 로 정해지면 고리는 보지 않는다(지금까지 맞던 LOT 의 결과는 그대로)."""
+    lot = _grid_lot(tmp_path, 20, 20, _BAD, [_live2(c - 1, r) for c, r in _BAD])
+    assert camtek_live.lot_display_shift(lot) == (-1, 0)
