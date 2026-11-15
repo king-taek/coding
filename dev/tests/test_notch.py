@@ -418,3 +418,68 @@ def test_auto_detect_offset_vote_does_not_invent_a_direction_on_dense_noise(monk
     res = na.score_directions(groups, "/r", "/v", "down", 200.0,
                               resolve=lambda paths: {p: table[p] for p in paths})
     assert res.direction is None
+
+
+# ── die 모양(가로 · 세로)으로 90° 돌림부터 가른다 ────────────────────────────
+# 관측(2026-11-15, 수집 KLA비교 LOT): TB500.INT1046 은 짝 수가 90° 방향(left 374)에서 맞는 방향(down 150)
+# 보다 많아 틀린 답을 냈다.  두 장비 die 가로 · 세로가 같으면 90° 돌림은 불가능하다.
+@pytest.mark.parametrize("a, b, want", [
+    ((37247.898, 44905.344), (37247.9, 44905.3), False),   # TB500 KLA ↔ Camtek — 그대로
+    ((27474.6, 47836.012), (47835.6, 27474.8), True),      # Kendall 118-2609 RE KLA ↔ AOI-23 — 바뀜
+    ((10000.0, 10000.0), (10000.0, 10000.0), None),        # 정사각형 — 가를 수 없다
+    ((27.4746, 47.836012), (27474.6, 47836.0), None),      # 단위가 다르다 — 쓰지 않는다
+    ((30000.0, 40000.0), (35000.0, 35500.0), None),        # 어느 축에도 가깝지 않다
+])
+def test_turn_from_die_pitches(a, b, want):
+    pytest.importorskip("PyQt6.QtCore")
+    from aoi_verification.app.workers import notch_auto as na
+    assert na._turn_from_pitches(a, b) is want
+
+
+def test_turn_allowed_needs_every_slot_to_agree():
+    pytest.importorskip("PyQt6.QtCore")
+    from aoi_verification.app.workers import notch_auto as na
+    groups = [([Path("/r/a/1.jpg")], [Path("/v/a/1.jpg")]),
+              ([Path("/r/b/1.jpg")], [Path("/v/b/1.jpg")])]
+    tb = (37247.9, 44905.3)
+    same = {Path("/r/a"): tb, Path("/v/a"): tb, Path("/r/b"): tb, Path("/v/b"): tb}
+    assert na._turn_allowed(groups, pitch_of=same.get) is False
+    mixed = {**same, Path("/v/b"): tb[::-1]}
+    assert na._turn_allowed(groups, pitch_of=mixed.get) is None
+    missing = {k: v for k, v in same.items() if k != Path("/v/b")}
+    assert na._turn_allowed(groups, pitch_of=missing.get) is False      # 값 없는 슬롯은 건너뛴다
+    assert na._turn_allowed(groups, pitch_of=lambda _f: None) is None
+
+
+@pytest.mark.parametrize("turn, val_dir, want", [
+    (False, notch.DOWN, notch.DOWN),     # 그대로인 die — 0° 가 남는다
+    (False, notch.LEFT, None),           # die 모양으로는 90° 불가능 → 고르지 않고 묻는다
+    (True, notch.RIGHT, notch.RIGHT),    # 바뀐 die — 90° 만 남는다
+    (True, notch.UP, None),
+])
+def test_auto_detect_scores_only_turns_the_die_shape_allows(monkeypatch, turn, val_dir, want):
+    pytest.importorskip("PyQt6.QtCore")
+    pts = _points(60, seed=3)
+    na, groups, table = _auto_setup(monkeypatch, val_dir, pts, pts)
+    monkeypatch.setattr(na, "_turn_allowed", lambda _groups: turn)
+    res = na.score_directions(groups, "/r", "/v", "down", 200.0,
+                              resolve=lambda paths: {p: table[p] for p in paths})
+    assert res.direction == want
+
+
+def test_tb500_pair_drops_quarter_turns_and_keeps_its_answer():
+    """실물 TB500 RDL4 KLA ↔ Camtek(VPK): 두 장비 die 가로 · 세로가 같아 90° 후보를 빼고, 답은 그대로 down."""
+    pytest.importorskip("PyQt6.QtCore")
+    from aoi_verification.app.coords import camtek_ini, clear_caches, kla_info
+    from aoi_verification.app.workers import notch_auto as na
+    lot = Path(__file__).resolve().parents[1] / "좌표 확인" / "KLA_Camtek(TB500 RDL4)" / "VPK"
+    clear_caches()
+    kla = {kla_info.read_wafer_id(kf): [kf / f"{k}.jpg" for k in kla_info.load_folder(kf)]
+           for kf in sorted((lot / "KLA").iterdir()) if kf.is_dir()}
+    groups = [(kla[cf.name], [cf / f"{k}.jpg" for k in camtek_ini.load_folder(cf)])
+              for cf in sorted((lot / "Camtek").iterdir()) if kla.get(cf.name)]
+    assert len(groups) == 24
+    assert na._turn_allowed(groups) is False
+    res = na.score_directions(groups, lot / "KLA", lot / "Camtek", "down", 200.0)
+    assert res.direction == notch.DOWN and res.support >= 100
+    clear_caches()
