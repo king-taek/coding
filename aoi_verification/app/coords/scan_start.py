@@ -26,7 +26,7 @@ import re
 from dataclasses import replace
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, Iterable, Optional, Tuple
+from typing import Callable, Dict, Iterable, Optional, Tuple
 
 from .ini_text import read_ini_text
 from .wafer_geometry import camtek_geometry
@@ -109,10 +109,15 @@ def start_shift(ref_folders: Iterable[Path], val_folders: Iterable[Path]) -> Tup
     return (sv[0] - sr[0], sv[1] - sr[1])
 
 
-def apply_start_shift(coord_cache: dict, tasks) -> Tuple[dict, Dict[str, Tuple[int, int]]]:
+def apply_start_shift(coord_cache: dict, tasks,
+                      rotated: Optional[Callable[[Path], bool]] = None,
+                      ) -> Tuple[dict, Dict[str, Tuple[int, int]]]:
     """슬롯마다 :func:`start_shift` 를 검증 쪽 Scanresult(``camtek_ini``) 좌표에서 뺀 **새 사본**과 적용한 값.
 
-    ``tasks`` 는 ``(slot, refs, vals)`` — 항목에 ``.path`` 가 있다.  양쪽 다 Scanresult 좌표인 사진만 센다."""
+    ``tasks`` 는 ``(slot, refs, vals)`` — 항목에 ``.path`` 가 있다.  양쪽 다 Scanresult 좌표인 사진만 센다.
+    ``rotated(path)`` 가 참인 사진(notch 회전 대상)이 한 장이라도 있는 슬롯은 손대지 않는다 — 회전은 폴더의
+    원래 번호 기준으로 잡은 웨이퍼 중심에서 번호를 다시 매기므로(:func:`.notch.rotate_coord`), 옮긴 좌표를 돌리면
+    차이만큼 거꾸로 어긋난다."""
     out = coord_cache
     applied: Dict[str, Tuple[int, int]] = {}
 
@@ -123,6 +128,9 @@ def apply_start_shift(coord_cache: dict, tasks) -> Tuple[dict, Dict[str, Tuple[i
     for slot, refs, vals in tasks:
         dc, dr = start_shift(folders(refs), folders(vals))
         if (dc, dr) == (0, 0):
+            continue
+        if rotated is not None and any(rotated(it.path) for it in (*refs, *vals)):
+            _LOG.info("슬롯 %s: notch 회전 대상이라 번호 출발점 차이 (%d, %d) 는 맞추지 않습니다", slot, dc, dr)
             continue
         if out is coord_cache:
             out = dict(coord_cache)

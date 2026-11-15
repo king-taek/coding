@@ -215,7 +215,11 @@ class CoordScheduler(QThread):
         if self.number_risk:
             self.signals.number_risk.emit(self.number_risk)
         # ★ 번호 출발점 맞춤은 notch 회전보다 먼저다 — 장비 번호 그대로의 틀에서 빼야 한다(매칭 사본에만).
-        coord_cache, self.start_shifts = _scan_start.apply_start_shift(coord_cache, self._tasks)
+        # notch 를 돌릴 사진이 있는 슬롯은 뺀다 — 회전이 번호를 웨이퍼 중심에서 다시 매긴다.
+        coord_cache, self.start_shifts = _scan_start.apply_start_shift(
+            coord_cache, self._tasks,
+            (lambda p: not _notch.is_none(_notch.notch_for_path(self._notch_dirs, p)))
+            if self._notch_dirs else None)
         # ★ notch 방향 보정이 먼저다 — KLA↔Camtek 평행이동은 같은 방향으로 맞춘 좌표 위에서 의미가 있다.
         if self._notch_dirs:
             try:

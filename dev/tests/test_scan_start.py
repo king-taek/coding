@@ -59,6 +59,27 @@ def test_real_two_scans_line_up_after_the_start_shift():
     assert all(val[p].col == camtek_ini.load_folder(CTX6412)[p.stem].col for p in val)   # 원본 캐시도 그대로
 
 
+def test_slot_with_notch_rotation_is_left_alone():
+    """notch 를 돌릴 사진이 한 장이라도 있으면 손대지 않는다 — 회전이 번호를 웨이퍼 중심에서 다시 매긴다."""
+    ref, val = _cache(CTX6321), _cache(CTX6412)
+    cache = {**ref, **val}
+    tasks = [("SQ67P01-D1", _items(ref), _items(val))]
+    one = next(iter(ref))
+    assert ss.apply_start_shift(cache, tasks, lambda p: p == one) == (cache, {})
+    assert ss.apply_start_shift(cache, tasks, lambda p: False)[1] == {"SQ67P01-D1": (-3, -7)}
+
+
+def test_rotation_already_cancels_the_start_difference():
+    """왜 회전 슬롯을 빼는가: 번호 기준이 (3, 7) 다른 두 폴더의 같은 Defect 는 돌리면 이미 같은 칸이다(합성)."""
+    from aoi_verification.app.coords import notch
+    f1 = notch.Frame(1000.0, 1000.0, 150.4, 160.6, 150000.0)
+    f2 = notch.Frame(1000.0, 1000.0, 150.4 - 3, 160.6 - 7, 150000.0)
+    c1 = _c(col=120, row=140)
+    c2 = _c(col=117, row=133)
+    r1, r2 = notch.rotate_coord(c1, notch.UP, f1), notch.rotate_coord(c2, notch.UP, f2)
+    assert (r1.col, r1.row) == (r2.col, r2.row)
+
+
 def test_same_scan_twice_changes_nothing():
     cache = _cache(CTX6412)
     out, applied = ss.apply_start_shift(cache, [("s", _items(cache), _items(cache))])
