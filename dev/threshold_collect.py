@@ -493,7 +493,8 @@ def collect_qorvo(col, say, progress, stop, end=None):
 
 
 def collect_all_jobs(col, say, progress, stop, end=None):
-    """NAS 의 모든 Job(최근에 바뀐 것부터, 장비를 섞어서)에서 최근 LOT 웨이퍼 1장의 :data:`WIDE_FILES` 만 담는다.
+    """NAS 의 모든 Job(최근에 바뀐 것부터, 장비를 섞어서)에서 최근 LOT 중 하나(셋업이 여럿이면 가장 최근이 아닐 수 있다 —
+    제품 폭이 목적이라 NAS 읽기를 아낀다)의 웨이퍼 1장에서 :data:`WIDE_FILES` 만 담는다.
     웨이퍼 수를 돌려준다."""
     deadline = time.time() + WIDE_MINUTES * 60
     if end is not None:
