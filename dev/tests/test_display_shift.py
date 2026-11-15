@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 import base64
-import gzip
+import lzma
 
 from pathlib import Path
 
@@ -257,13 +257,13 @@ def test_wafer_map_warns_for_a_risk_job_without_map_evidence(tmp_path):
 # ---------------------------------------------------------------------------
 # ±1 에서 못 정하면 ±2 바깥 고리 — QORVO 6H7ENK CTX(번호 상자가 고객 맵보다 넓은 스캔, 관측 2026-11-15)
 # ---------------------------------------------------------------------------
-_QORVO = Path(__file__).resolve().parents[1] / "좌표 확인" / "장비격자(ExportData)" / "Conder_UBM"   # 맵 = *.txt.gz.b64
+_QORVO = Path(__file__).resolve().parents[1] / "좌표 확인" / "장비격자(ExportData)" / "Conder_UBM"   # 맵 = *.txt.xz.b64
 
 
 def _materialize(src: Path, dst: Path) -> Path:
     dst.mkdir(parents=True)
-    for t in src.glob("*.txt.gz.b64"):      # 맵 txt(400 KB)를 gzip + base64 로 담아 둔 것 — 원본 그대로 푼다
-        (dst / t.name[:-len(".gz.b64")]).write_bytes(gzip.decompress(base64.b64decode(t.read_text())))
+    for t in src.glob("*.txt.xz.b64"):      # 맵 txt(400 KB)를 xz + base64 로 담아 둔 것 — 원본 그대로 푼다
+        (dst / t.name[:-len(".xz.b64")]).write_bytes(lzma.decompress(base64.b64decode(t.read_text())))
     for wafer in (p for p in src.iterdir() if p.is_dir()):
         (dst / wafer.name).mkdir()
         for n in _names(wafer / "사진목록.txt"):
