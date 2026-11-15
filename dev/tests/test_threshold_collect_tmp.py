@@ -275,3 +275,18 @@ def test_done_stages_are_skipped(tmp_path, monkeypatch):
     monkeypatch.setattr(tool, "nas_roots", lambda: [tmp_path])
     tool.run(tmp_path)
     assert called == ["rich"]
+
+
+def test_rich_surface_folder_error_is_only_noted(tmp_path, monkeypatch):
+    """폴더를 찾는 단계(is_dir)에서 권한 · 연결 오류가 나도 기록만 남기고 0 을 돌려준다(작업용 zip 이 살아남게)."""
+    tool = _tool()
+
+    def _deny(raw):
+        raise PermissionError("WinError 64")
+
+    monkeypatch.setattr(tool, "resolve_pair", _deny)
+    said = []
+    col = tool.Collector(tmp_path / "s.zip")
+    assert tool.collect_rich_surface(col, said.append, lambda *_: None, lambda: False) == 0
+    col.close("")
+    assert said and "못 읽음" in said[0] and "WinError 64" in said[0]

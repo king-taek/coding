@@ -399,14 +399,15 @@ def find_rich_surface():
 
 def collect_rich_surface(col, say, progress, stop):
     """파일 전체에서 :data:`RICH_COLS` 열만 :data:`RICH_ROWS` 줄씩 CSV 로 담는다.  담은 CSV 수를 돌려준다."""
-    src = find_rich_surface()
-    if src is None:
-        say(f"RichSurface 못 찾음: {RICH_LOT}\\*{PAIR_WAFER}*\\{RICH_FILE}")
-        return 0
-    try:
+    src = None
+    try:                                       # Windows 는 is_dir() 도 권한 · 연결 끊김(WinError 64/59)을 올린다(수집 자료 쓰레드 지적)
+        src = find_rich_surface()
+        if src is None:
+            say(f"RichSurface 못 찾음: {RICH_LOT}\\*{PAIR_WAFER}*\\{RICH_FILE}")
+            return 0
         return _take_rich_surface(col, src, say, progress, stop)
     except OSError as e:                       # NAS 권한 · 연결 끊김 — 나머지 수집은 계속한다
-        say(f"RichSurface 못 읽음: {src}  {e}")
+        say(f"RichSurface 못 읽음: {src or RICH_LOT}  {e}")
         return 0
 
 
