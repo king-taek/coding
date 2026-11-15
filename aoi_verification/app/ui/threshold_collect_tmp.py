@@ -6,9 +6,6 @@
 바탕화면 ``Threshold수집_<시각>\\`` 폴더에 zip 으로 남긴다(28 MB 를 넘으면 나뉜다, 사용자 지시 2026-11-13 · 28 MB 로 낮춤 2026-11-15).
 읽기 전용이고 앱의 계산에는 손대지 않는다.
 
-옆의 [수집 zip 다시 담기] 는 **일회성**이다(사용자 지시 2026-11-15): NAS 를 다시 훑지 않고 바탕화면의 지난 수집 zip 에서
-아직 필요한 것만 골라 다시 만든다(:func:`repack`).  한 번 쓰고 나면 그 버튼 · 문자열 · ``repack`` 을 지운다.
-
 지우는 법(전부 ``[Threshold수집-임시]`` 로 검색된다 — ``test_threshold_collect_tmp.py`` 가 이 목록을 지킨다):
 
 1. 이 파일 · ``dev/tests/test_threshold_collect_tmp.py``
@@ -25,7 +22,7 @@ import threading
 from pathlib import Path
 
 from PyQt6.QtCore import QObject, Qt, pyqtSignal
-from PyQt6.QtWidgets import QHBoxLayout, QMessageBox, QPushButton, QWidget
+from PyQt6.QtWidgets import QMessageBox, QPushButton
 
 from .. import i18n
 from ..utils import paths, prefs
@@ -46,30 +43,19 @@ def _load_tool():
     return mod
 
 
-def _collect(tool, out, progress, stop):
-    folder, wafers, files = tool.run(out, progress=progress, stop=stop)
-    return folder, i18n.KO.THRESH_COLLECT_DONE_FMT.format(wafers=wafers, files=files, path=folder)
-
-
-def _repack(tool, out, progress, stop):
-    folder, kept, total = tool.repack(out, progress=progress, stop=stop)
-    return folder, i18n.KO.THRESH_COLLECT_REPACK_DONE_FMT.format(kept=kept, total=total, path=folder)
-
-
 class _Collector(QObject):
-    """버튼 하나와 그 작업 — 창에 붙어 창과 함께 죽는다.  ``call(tool, out, progress, stop)`` 은 (결과 폴더, 완료 문구)."""
+    """버튼 하나와 그 작업 — 창에 붙어 창과 함께 죽는다."""
 
     progress = pyqtSignal(int, int, str)          # 작업 스레드 → 메인 스레드(로딩바)
-    finished = pyqtSignal(str, str, str)          # 결과 폴더, 완료 문구, 오류
+    finished = pyqtSignal(int, int, str, str)     # 웨이퍼 수, 파일 수, 결과 폴더, 오류
 
-    def __init__(self, window, label, ask, start, running, nothing, call) -> None:
+    def __init__(self, window) -> None:
         super().__init__(window)
         self._win = window
-        self._ask, self._start, self._run_text, self._nothing, self._call = ask, start, running, nothing, call
         self._running = False
         self._stop = threading.Event()
         self._thread = None
-        self.button = QPushButton(label, window.statusBar())
+        self.button = QPushButton(i18n.KO.THRESH_COLLECT_BUTTON, window.statusBar())
         self.button.setFlat(True)
         self.button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.button.clicked.connect(self.start)
@@ -87,23 +73,24 @@ class _Collector(QObject):
             sheets.warn(self._win, i18n.KO.THRESH_COLLECT_TITLE, i18n.KO.THRESH_COLLECT_NO_TOOL)
             return
         yes = QMessageBox.StandardButton.Yes
-        if sheets.ask(self._win, i18n.KO.THRESH_COLLECT_TITLE, self._ask, labels={yes: self._start}) != yes:
+        if sheets.ask(self._win, i18n.KO.THRESH_COLLECT_TITLE, i18n.KO.THRESH_COLLECT_ASK,
+                      labels={yes: i18n.KO.THRESH_COLLECT_START}) != yes:
             return
         out = Path.home() / "Desktop"
         out = out if out.is_dir() else Path.home()
         self._running = True
         self._stop.clear()
         self._win._loading.cancel_requested.connect(self._on_cancel)
-        self._win._loading.show_overlay(self._run_text, cancelable=True)
-        self._win._loading.set_progress(0, 0, self._run_text)   # busy → 0 에서 안 멈춤
+        self._win._loading.show_overlay(i18n.KO.THRESH_COLLECT_RUNNING, cancelable=True)
+        self._win._loading.set_progress(0, 0, i18n.KO.THRESH_COLLECT_RUNNING)   # busy → 0 에서 안 멈춤
 
         def _work() -> None:
             try:
-                folder, text = self._call(tool, out, self._emit_progress, self._stop.is_set)
-                self.finished.emit(str(folder or ""), text, "")
+                folder, wafers, files = tool.run(out, progress=self._emit_progress, stop=self._stop.is_set)
+                self.finished.emit(int(wafers), int(files), str(folder or ""), "")
             except Exception as e:                                  # noqa: BLE001
                 _LOG.exception("Threshold 자료 수집 실패")
-                self.finished.emit("", "", f"{type(e).__name__}: {e}")
+                self.finished.emit(0, 0, "", f"{type(e).__name__}: {e}")
 
         self._thread = threading.Thread(target=_work, name="threshold-collect", daemon=True)
         self._thread.start()
@@ -131,9 +118,9 @@ class _Collector(QObject):
         if self._running:
             if self._stop.is_set():              # 저장 중 — 문구가 '모으는 중' 으로 되돌아가지 않게
                 message = i18n.KO.THRESH_COLLECT_STOPPING
-            self._win._loading.set_progress(done, total, message or self._run_text)
+            self._win._loading.set_progress(done, total, message or i18n.KO.THRESH_COLLECT_RUNNING)
 
-    def _on_finished(self, path: str, text: str, error: str) -> None:
+    def _on_finished(self, wafers: int, files: int, path: str, error: str) -> None:
         if not self._running:                    # 중지한 뒤에 도착한 결과 — 이미 화면을 풀었다
             return
         self._close_overlay()
@@ -142,33 +129,23 @@ class _Collector(QObject):
                         i18n.KO.THRESH_COLLECT_FAIL_FMT.format(error=error))
             return
         if not path:
-            sheets.info(self._win, i18n.KO.THRESH_COLLECT_TITLE, self._nothing)
+            sheets.info(self._win, i18n.KO.THRESH_COLLECT_TITLE, i18n.KO.THRESH_COLLECT_NOTHING)
             return
-        sheets.info(self._win, i18n.KO.THRESH_COLLECT_TITLE, text)
+        sheets.info(self._win, i18n.KO.THRESH_COLLECT_TITLE,
+                    i18n.KO.THRESH_COLLECT_DONE_FMT.format(wafers=wafers, files=files, path=path))
 
 
 def attach(window) -> None:
-    """상태바에 버튼 두 개(수집 · 다시 담기)를 한 칸에 단다.  ``window._thresh_collect_btn`` 으로 보이기/숨기기만 한다."""
+    """상태바에 버튼을 단다.  ``window._thresh_collect_btn`` 으로 보이기/숨기기만 한다."""
     window._thresh_collect_btn = QPushButton(window)     # 아래가 실패해도 보이기/숨기기 줄이 죽지 않게
     window._thresh_collect_btn.hide()
     try:
-        collector = _Collector(window, i18n.KO.THRESH_COLLECT_BUTTON, i18n.KO.THRESH_COLLECT_ASK,
-                               i18n.KO.THRESH_COLLECT_START, i18n.KO.THRESH_COLLECT_RUNNING,
-                               i18n.KO.THRESH_COLLECT_NOTHING, _collect)
-        repacker = _Collector(window, i18n.KO.THRESH_COLLECT_REPACK_BUTTON, i18n.KO.THRESH_COLLECT_REPACK_ASK,
-                              i18n.KO.THRESH_COLLECT_REPACK_START, i18n.KO.THRESH_COLLECT_REPACK_RUNNING,
-                              i18n.KO.THRESH_COLLECT_REPACK_NOTHING, _repack)
-        box = QWidget(window.statusBar())
-        row = QHBoxLayout(box)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.addWidget(collector.button)
-        row.addWidget(repacker.button)
-        window.statusBar().addPermanentWidget(box)
-        box.setVisible(prefs.load().dev_mode)
+        collector = _Collector(window)
+        window.statusBar().addPermanentWidget(collector.button)
+        collector.button.setVisible(prefs.load().dev_mode)
     except Exception:                                    # noqa: BLE001 — 임시 버튼이 앱 시작을 막으면 안 된다
         _LOG.exception("Threshold 자료 수집 버튼을 붙이지 못했습니다")
         return
     window._thresh_collect_btn.deleteLater()
     window._thresh_collector = collector
-    window._thresh_repacker = repacker
-    window._thresh_collect_btn = box
+    window._thresh_collect_btn = collector.button
