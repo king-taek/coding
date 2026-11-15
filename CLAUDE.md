@@ -339,8 +339,9 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   옛 동작(더함) + 경고. TB500 R-ETCH(1, 시프트 (1,−6))도 장비 화면 (4,2) 로 안 더함을 확인(관측 2026-11-14). 골든: `test_display_shift.py`.
   LIVE 파일명도 화면 번호다. Conder 폴더엔 Recipe.ini 가 없어 **LOT 맵 txt 불량 칸과 대조해 추정**한다
   (`camtek_live.lot_display_shift`) — 서로 다른 칸 3개 이상 · 맞은 사진의 90% 이상 · 시프트 0 은 10% 이하일 때만
-  0 이 아닌 값을 채택한다(시프트 없는 4 LOT 278장은 0, FS UBM 42장은 −1). 맵이 결함을 표시하지 않는 제품(QORVO)은
-  근거가 없어 0. 이 조건을 느슨하게 하지 마라 — 틀린 시프트는 모든 사진을 한 칸 옮긴다. 맵으로 확인하지 못했고 파일명이 시프트를 쓴 적 있는 Job(`camtek_live.SHIFT_RISK_JOBS`, LIVE 파일명 맨 앞 = Scanresult Job 이름)이면 번호는 그대로 두고 Wafer map 에 노란 경고(`WARN_SHIFT_UNKNOWN`)만 띄운다 — 레시피는 바뀔 수 있어 그 목록으로 번호를 고치지 마라(사용자 결정 2026-11-14). row 시프트 실물은 없다(가정).
+  0 이 아닌 값을 채택한다(시프트 없는 4 LOT 278장은 0, FS UBM 42장은 −1). ±1 에서 못 정할 때만 ±2 바깥 고리를 같은 조건 +
+  '2등도 10% 이하' 로 본다 — QORVO 6H7ENK CTX 는 장비 번호 상자가 고객 맵보다 넓어 (1, 2) 어긋났다(장비 화면 · Export 파일 · 55/55,
+  관측 2026-11-15, 사용자 결정 A '번호는 그대로, 매칭만 맞춤'). QORVO 는 특수 die 무늬가 되풀이돼 ±3 이상은 보지 마라. 이 조건을 느슨하게 하지 마라 — 틀린 시프트는 모든 사진을 한 칸 옮긴다. 맵으로 확인하지 못했고 파일명이 시프트를 쓴 적 있는 Job(`camtek_live.SHIFT_RISK_JOBS`, LIVE 파일명 맨 앞 = Scanresult Job 이름)이면 번호는 그대로 두고 Wafer map 에 노란 경고(`WARN_SHIFT_UNKNOWN`)만 띄운다 — 레시피는 바뀔 수 있어 그 목록으로 번호를 고치지 마라(사용자 결정 2026-11-14). row 시프트 실물은 없다(가정).
   ⚠ 시프트 −1 레시피의 맨 왼쪽 열은 화면 col −1 이다 — Scanresult 쪽 앱 화면 번호 (−1, 5) 가 장비 화면과 같았다(T254 UFM-FS W6634103XYB1, 관측 2026-11-14).
   다만 그런 LIVE 파일명이 오면 `parse_live_name` 이 음수로 버린다(Conder 이름 18,322장 중 음수 0장이라 미해결로 둔다). 골든: `test_display_shift.py`.
 - **LIVE 파일명(`camtek_live`)은 정규식이 아니라 `_` 토큰으로 읽는다.** 배치가 셋이라
@@ -383,6 +384,11 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   pitch 검산은 웨이퍼 폴더마다 독립이라 ref 는 통과하고 val 은 실패할 수 있는데, 그러면
   row 규약이 달라(`row_total−y_index` vs `−Row`) `(col,row) ±1` 게이트가 절대 안 맞아
   **그 슬롯이 통째로 '매치 실패'** 가 된다. 섞이면 전부 절대좌표로 내린다.
+- **두 Scanresult 스캔의 번호 출발점 차이는 매칭 사본에서만 뺀다**(`coords/scan_start.py`, 사용자 결정 A 2026-11-15 '번호 그대로, 매칭만 맞춤').
+  스캔마다 `S = (Δc − col_origin, row_total − Δr)`(Δ = `WaferMapRecipe.ini [Input_Update]` RefPoint1 − CustPoint1, 기준은 앱이 실제로 쓴 값)이고
+  슬롯의 검증 쪽 `camtek_ini` 좌표에서 `S_val − S_ref` 를 뺀다(notch 회전 **전**). 보통 스캔끼리는 0 이다(모은 자료의 같은 웨이퍼 쌍 전부 0,
+  QORVO 6H7ENK CTX 6412 만 (1, 2) — 두 스캔에 같이 찍힌 Defect 5개로 확인, 관측). `Enable=1 · PointsSet=1 · Mirror=0 · ImportFlippedMap=0 ·
+  ShiftDie 0 · 두 기준점 쌍의 Δ 같음` 이 아니거나 한쪽 폴더라도 모르면 손대지 않는다(EDGE 레시피는 `Enable=0`). 화면 · 엑셀 · Wafer map 번호에 새게 하지 마라. 골든: `test_scan_start.py`.
 - 좌표 기반 매칭(`workers/coord_matcher.py`)의 후보 게이트는 **(col,row) ±1 이내**다(정답 도구
   AOI Data Viewer VBA `Module_Compare`: `Abs(col차)<=1 And Abs(row차)<=1`). KLA↔Camtek 처럼
   두 장비의 die 인덱스가 1 어긋날 수 있어 정확 일치만 하면 매칭이 전멸한다. 순수 헬퍼

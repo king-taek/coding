@@ -51,6 +51,7 @@ from ..coords import resolve_batch as _resolve_batch
 from ..coords import number_risk as _number_risk
 from ..coords import calibration as _calib
 from ..coords import notch as _notch
+from ..coords import scan_start as _scan_start
 from .. import i18n
 from ..models.slot import ImageItem
 from .matcher import score_ref_classical
@@ -165,6 +166,8 @@ class CoordScheduler(QThread):
         self.classical_refs: Set[Tuple[str, Path]] = set()
         # col/row 를 확실히 정하지 못한 슬롯 — ``signals.number_risk`` 와 같은 값.
         self.number_risk: tuple = ()
+        # 두 Scanresult 스캔의 번호 출발점이 달라 매칭에서만 맞춘 슬롯 → (dc, dr)(`_scan_start`).
+        self.start_shifts: Dict[str, Tuple[int, int]] = {}
 
         _dflt = _config.DEFAULT_COORD_TOLERANCE
         tol = getattr(cfg, "coord_tolerance", _dflt) if cfg is not None else _dflt
@@ -211,6 +214,12 @@ class CoordScheduler(QThread):
             coord_cache.get)
         if self.number_risk:
             self.signals.number_risk.emit(self.number_risk)
+        # ★ 번호 출발점 맞춤은 notch 회전보다 먼저다 — 장비 번호 그대로의 틀에서 빼야 한다(매칭 사본에만).
+        # notch 를 돌릴 사진이 있는 슬롯은 뺀다 — 회전이 번호를 웨이퍼 중심에서 다시 매긴다.
+        coord_cache, self.start_shifts = _scan_start.apply_start_shift(
+            coord_cache, self._tasks,
+            (lambda p: not _notch.is_none(_notch.notch_for_path(self._notch_dirs, p)))
+            if self._notch_dirs else None)
         # ★ notch 방향 보정이 먼저다 — KLA↔Camtek 평행이동은 같은 방향으로 맞춘 좌표 위에서 의미가 있다.
         if self._notch_dirs:
             try:

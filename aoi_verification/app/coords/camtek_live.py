@@ -148,6 +148,13 @@ _SHIFTS = tuple((dc, dr) for dc in (-1, 0, 1) for dr in (-1, 0, 1))
 _SHIFT_MIN_SUPPORT = 3        # 채택에 필요한 서로 다른 (웨이퍼, 칸) 수
 _SHIFT_MIN_SHARE = 0.9        # 어느 후보에든 맞은 사진 중 채택 후보가 맞힌 비율 하한
 _SHIFT_MAX_ZERO = 0.1         # 그중 시프트 0 이 맞힌 비율 상한
+# ±1 에서 못 정했을 때만 보는 바깥 고리(±2, 16가지).  근거: QORVO 6H7ENK CTX 는 장비 번호 상자가
+# 고객 맵보다 넓어 파일명이 맵과 (1, 2) 어긋났다 — 장비 화면 2장 · Export 파일 17/17 · die 목록
+# 겹치기로 확인(관측 2026-11-15).  QORVO 는 특수 die(093·090) 무늬가 되풀이돼 ±2 에서 2등이 1등의
+# 98% 까지 나왔으므로(W96760, 관측) 2등도 :data:`_SHIFT_MAX_ZERO` 이하여야 채택한다.
+# ±3 이상은 우연히 맞는 후보가 늘어(2등 239/544장, 관측) 보지 않는다.
+_RING = tuple((dc, dr) for dc in range(-2, 3) for dr in range(-2, 3)
+              if max(abs(dc), abs(dr)) == 2)
 _MAX_LOT_TXT = 200            # LOT 폴더에서 보는 맵 txt 상한(엉뚱한 상위 폴더 방어)
 
 # 화면 번호 시프트를 **쓴 적이 있는** Job — LIVE 파일명 맨 앞이 Scanresult Job 폴더 이름이다.
@@ -173,7 +180,10 @@ def lot_display_shift(lot_folder: Path) -> tuple[int, int]:
     0 이 아닌 값은 아래를 모두 만족할 때만 채택한다(아니면 0 — 지금까지의 동작):
     서로 다른 (웨이퍼, 칸) 이 :data:`_SHIFT_MIN_SUPPORT` 개 이상, 맞은 사진의
     :data:`_SHIFT_MIN_SHARE` 이상을 그 후보가 맞힘, 시프트 0 은 :data:`_SHIFT_MAX_ZERO` 이하.
-    ⚠ 맵이 결함을 표시하지 않는 제품(QORVO UBM — 55장 중 0장 일치)은 근거가 없어 0 이다."""
+    ±1 에서 못 정하면 ±2 바깥 고리를 같은 조건 + '2등도 10% 이하' 로 한 번 더 본다(:func:`_ring_shift`).
+    QORVO 6H7ENK CTX 는 시프트 0 에서 55장 모두 양품 칸, (1, 2) 에서 55장 모두 불량 bin(093 특수 die
+    52 · 031 3)이었다(관측) — 레시피 시프트가 아니라 장비 번호 상자가 고객 맵보다 넓었던 스캔이다.
+    어느 쪽이든 결과는 같다: ``col/row`` 는 맵 번호, 화면·엑셀 번호는 파일명 그대로."""
     return _lot_shift(lot_folder)[0]
 
 
@@ -186,9 +196,11 @@ def lot_shift_confirmed(lot_folder: Path) -> bool:
 def _lot_shift(lot_folder: Path) -> tuple[tuple[int, int], bool]:
     """``(시프트, 확인했나)`` — :func:`lot_display_shift` 의 본체."""
     from . import wafer_txt
-    hits = {sh: 0 for sh in _SHIFTS}          # 후보별 맞힌 사진 수
-    support = {sh: set() for sh in _SHIFTS}   # 후보별 맞힌 (웨이퍼, 칸)
-    n_photos = 0                              # 어느 후보에든 맞은 사진 수
+    cands = _SHIFTS + _RING
+    hits = {sh: 0 for sh in cands}            # 후보별 맞힌 사진 수
+    support = {sh: set() for sh in cands}     # 후보별 맞힌 (웨이퍼, 칸)
+    n_photos = 0                              # ±1 후보 어디에든 맞은 사진 수
+    n_ring = 0                                # ±2 까지 어디에든 맞은 사진 수
     try:
         txts = sorted(p for p in lot_folder.iterdir()
                       if p.suffix.lower() == ".txt" and p.is_file())[:_MAX_LOT_TXT]
@@ -209,28 +221,54 @@ def _lot_shift(lot_folder: Path) -> tuple[tuple[int, int], bool]:
             got = parse_live_name(stem)
             if got is None:
                 continue
-            any_hit = False
-            for dc, dr in _SHIFTS:
+            any_hit = ring_hit = False
+            for dc, dr in cands:
                 cell = (got.col - dc, wt.rows - 1 - (got.row - dr))
                 if cell in wt.bad:
                     hits[(dc, dr)] += 1
                     support[(dc, dr)].add((t.stem, cell))
-                    any_hit = True
+                    ring_hit = True
+                    any_hit = any_hit or (dc, dr) in _SHIFTS
             n_photos += any_hit
-    if not n_photos:
+            n_ring += ring_hit
+    if not n_ring:
         return (0, 0), False
+    if not n_photos:
+        return _ring_shift(lot_folder, hits, support, n_ring)
     best = max(_SHIFTS, key=lambda sh: (hits[sh], sh == (0, 0)))
     if best == (0, 0):
-        others = max((n for sh, n in hits.items() if sh != (0, 0)), default=0)
-        return (0, 0), (len(support[best]) >= _SHIFT_MIN_SUPPORT
-                        and hits[best] >= _SHIFT_MIN_SHARE * n_photos
-                        and others <= _SHIFT_MAX_ZERO * n_photos)
+        others = max((hits[sh] for sh in _SHIFTS if sh != (0, 0)), default=0)
+        if (len(support[best]) >= _SHIFT_MIN_SUPPORT
+                and hits[best] >= _SHIFT_MIN_SHARE * n_photos
+                and others <= _SHIFT_MAX_ZERO * n_photos):
+            return (0, 0), True
+        return _ring_shift(lot_folder, hits, support, n_ring)
     if (len(support[best]) >= _SHIFT_MIN_SUPPORT
             and hits[best] >= _SHIFT_MIN_SHARE * n_photos
             and hits[(0, 0)] <= _SHIFT_MAX_ZERO * n_photos):
         _LOG.warning("%s 의 LIVE 파일명이 LOT 맵 txt 와 col %+d · row %+d 어긋난다 — "
                      "레시피 화면 번호 시프트로 보고 실제 die 로 되돌린다(사진 %d/%d장)",
                      lot_folder, best[0], best[1], hits[best], n_photos)
+        return best, True
+    return _ring_shift(lot_folder, hits, support, n_ring)
+
+
+def _ring_shift(lot_folder: Path, hits: dict, support: dict,
+                n_ring: int) -> tuple[tuple[int, int], bool]:
+    """±1 로 못 정했을 때 ±2 바깥 고리(:data:`_RING`)에서 고른다 — 못 고르면 ``(0, 0)`` · 미확인.
+
+    ±1 과 같은 세 조건(비율은 ±2 까지 어디에든 맞은 사진 수 기준)에 더해 **2등 후보도 10% 이하**여야
+    한다.  고리 밖(±1 안)이 1등이면 ±1 단계가 이미 못 정한 것이라 채택하지 않는다."""
+    ranked = sorted(hits, key=lambda sh: -hits[sh])
+    best, second = ranked[0], ranked[1]
+    if (best in _RING
+            and len(support[best]) >= _SHIFT_MIN_SUPPORT
+            and hits[best] >= _SHIFT_MIN_SHARE * n_ring
+            and hits[(0, 0)] <= _SHIFT_MAX_ZERO * n_ring
+            and hits[second] <= _SHIFT_MAX_ZERO * n_ring):
+        _LOG.warning("%s 의 LIVE 파일명이 LOT 맵 txt 와 col %+d · row %+d 어긋난다(±2) — "
+                     "장비 번호가 고객 맵과 다르게 매겨진 스캔으로 보고 맵 번호로 되돌린다(사진 %d/%d장)",
+                     lot_folder, best[0], best[1], hits[best], n_ring)
         return best, True
     _LOG.warning("%s 의 LIVE 파일명이 LOT 맵 txt 불량 칸과 일정하게 맞지 않는다 — "
                  "시프트를 정하지 못해 파일명 번호를 그대로 쓴다(후보별 사진 수 %s)",
