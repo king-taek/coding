@@ -79,6 +79,7 @@ def test_collects_known_lots_and_drops_useless_files(tmp_path, monkeypatch):
     (sr / "R_KENDALL_A0_PI5" / "SETUP" / "LOT1" / "W01" / "huge.dat").write_bytes(b"\x00" * (tool.FILE_MB * MB + 1))
     monkeypatch.setattr(tool, "nas_roots", lambda: [sr, sr4])
     monkeypatch.setattr(tool, "collect_all_jobs", lambda *a, **k: 0)     # 모든 Job 단계는 따로 시험한다
+    monkeypatch.setattr(tool, "collect_odd_flt", lambda *a, **k: 0)
     monkeypatch.setattr(tool, "PAIR_LOTS", [])
     monkeypatch.setattr(tool, "CONDER_ROOTS", [])
     monkeypatch.setattr(tool, "KLA_PAIRS", [])
@@ -172,6 +173,7 @@ def test_kla_pairs_take_camtek_and_kla_folders_side_by_side(tmp_path, monkeypatc
     monkeypatch.setattr(tool, "kla_bases", lambda: [tmp_path / "없음", kroot])
     monkeypatch.setattr(tool, "nas_roots", lambda: [sr])
     monkeypatch.setattr(tool, "collect_all_jobs", lambda *a, **k: 0)     # 모든 Job 단계는 따로 시험한다
+    monkeypatch.setattr(tool, "collect_odd_flt", lambda *a, **k: 0)
     monkeypatch.setattr(tool, "PAIR_LOTS", [])
     monkeypatch.setattr(tool, "CONDER_ROOTS", [])
     monkeypatch.setattr(tool, "QORVO_KNOWN_LOTS", [])
@@ -200,6 +202,7 @@ def test_qorvo_known_lots_come_before_conder(tmp_path, monkeypatch):
         _wafer(sr / "R_Qorvo XP2100_0861004PD_RDL1" / "SETUP" / "MMG" / w, recipe=w.encode())
     monkeypatch.setattr(tool, "nas_roots", lambda: [sr])
     monkeypatch.setattr(tool, "collect_all_jobs", lambda *a, **k: 0)     # 모든 Job 단계는 따로 시험한다
+    monkeypatch.setattr(tool, "collect_odd_flt", lambda *a, **k: 0)
     monkeypatch.setattr(tool, "PAIR_LOTS", [])
     monkeypatch.setattr(tool, "KLA_PAIRS", [])
     monkeypatch.setattr(tool, "CONDER_ROW_LOTS", [])
@@ -443,3 +446,89 @@ def test_all_jobs_take_one_recent_wafer_and_only_the_map_files(tmp_path, monkeyp
     assert not any("/OLD/" in n or "/W02/" in n for n in names)               # 최근 LOT · 1장만
     assert not any(n.endswith((".flt", "Recipe.ini")) for n in names)
     assert any(n.startswith("모든Job/AOI-9/R_KENDALL_A0_PI5/") for n in names)
+
+
+def _flt_md(size: int) -> str:
+    return f'<Layout>\n<RecordSize Size="{size}"/>\n</Layout>\n'
+
+
+def test_all_jobs_list_flt_by_name_and_find_old_record_sizes(tmp_path, monkeypatch):
+    """모든 Job 단계는 Surface.flt.md 를 담고 Surface.flt 는 이름 · 크기만 적는다.  152 가 아닌 장비를 알려 준다."""
+    tool = _tool()
+    roots = []
+    for aoi, size in (("AOI-02", 152), ("AOI-12", 120)):
+        sr = tmp_path / aoi / "Scanresult"
+        w = sr / "R_JOB" / "SETUP" / "L1" / "W01"
+        w.mkdir(parents=True)
+        (w / "Params_WaferInfo.ini").write_text("x")
+        (w / "Surface.flt").write_bytes(b"\x00" * size)
+        (w / "Surface.flt.md").write_text(_flt_md(size))
+        roots.append(sr)
+    monkeypatch.setattr(tool, "nas_roots", lambda: roots)
+    odd = set()
+    col = tool.Collector(tmp_path / "s.zip")
+    tool.collect_all_jobs(col, lambda *_: None, lambda *_: None, lambda: False, odd=odd)
+    col.close("")
+    with zipfile.ZipFile(tmp_path / "s.zip") as z:
+        names = z.namelist()
+        listing = z.read("파일목록.txt").decode("utf-8")
+    assert odd == {"AOI-12"}
+    assert "모든Job/AOI-12/R_JOB/SETUP/L1/W01/Surface.flt.md" in names
+    assert not any(n.endswith("/Surface.flt") for n in names)
+    assert "모든Job/AOI-12/R_JOB/SETUP/L1/W01/Surface.flt\t120\t이름만" in listing
+
+
+def test_odd_flt_takes_pi_live_jobs_first_with_photo_names(tmp_path, monkeypatch):
+    tool = _tool()
+    sr = tmp_path / "AOI-05" / "Scanresult"
+    for job in ("R_A_RDL", "R_B_PI4", "R_C_LIVE", "R_D_UBM"):
+        w = sr / job / "SETUP" / "L1" / "W01"
+        w.mkdir(parents=True)
+        for n in tool.ODD_FILES:
+            (w / n).write_text(f"{job} {n}")
+        (w / "Recipe.ini").write_text("x")
+        (w / "W01_1_2_Surface Dark_3_4.jpg").write_bytes(b"jpg")
+    other = tmp_path / "AOI-07" / "Scanresult" / "R_E_PI" / "SETUP" / "L1" / "W01"   # 152 장비는 안 본다
+    other.mkdir(parents=True)
+    (other / "Params_WaferInfo.ini").write_text("x")
+    monkeypatch.setattr(tool, "nas_roots", lambda: [sr, tmp_path / "AOI-07" / "Scanresult"])
+    monkeypatch.setattr(tool, "ODD_JOBS", 2)
+    col = tool.Collector(tmp_path / "s.zip")
+    assert tool.collect_odd_flt(col, lambda *_: None, lambda *_: None, lambda: False, {"AOI-5"}) == 2
+    col.close("")
+    with zipfile.ZipFile(tmp_path / "s.zip") as z:
+        names = z.namelist()
+    jobs = {n.split("/")[2] for n in names if n.startswith("구형flt/")}
+    assert jobs == {"R_B_PI4", "R_C_LIVE"}                                    # PI · LIVE 먼저, 최대 2개
+    assert "구형flt/AOI-05/R_B_PI4/SETUP/L1/W01/RTP.txt" in names
+    assert not any(n.endswith("Recipe.ini") or "AOI-07" in n for n in names)
+    assert any(p.endswith(".jpg") for p in col.photos)
+
+
+def test_conder_siblings_take_lots_whose_wafer_is_in_two_steps(tmp_path, monkeypatch):
+    """같은 웨이퍼가 두 단계에 나오는 LOT 만, 맵 없이 사진만 있는 단계 폴더도 포함해 담는다."""
+    tool = _tool()
+    base = tmp_path / "1. Conder Scan"
+    dev = base / "575. QORVO US" / "1. W96760"
+    two = dev / "3. 6G80DD (THV)"
+    (two / "2. FVI" / "1. OR" / "GWT2P24-A3").mkdir(parents=True)              # 사진만, 맵 없음
+    (two / "2. FVI" / "1. OR" / "GWT2P24-A3" / "FVI_1_2_3_4.jpg").write_bytes(b"jpg")
+    (two / "2. FVI" / "1. OR" / "Thumbs.db").write_bytes(b"thumb")
+    (two / "2. FVI" / "2. 재 AOI" / "GWT2P24-A3").mkdir(parents=True)
+    (two / "2. FVI" / "2. 재 AOI" / "GWT2P24-A3.txt").write_text("DEVICE:W96760\n")
+    (two / "2. FVI" / "2. 재 AOI" / "6G80DD.lot").write_text("lot")
+    one = dev / "4. 6H11AA (TWO)"
+    (one / "1. FVI" / "GXX01-A1").mkdir(parents=True)
+    (one / "1. FVI" / "GXX01-A1.txt").write_text("DEVICE:W96760\n")
+    monkeypatch.setattr(tool, "CONDER_ROOTS", [str(base)])
+    col = tool.Collector(tmp_path / "s.zip")
+    assert tool.collect_conder_siblings(col, lambda *_: None, lambda *_: None, lambda: False) == 1
+    col.close("")
+    with zipfile.ZipFile(tmp_path / "s.zip") as z:
+        names = z.namelist()
+        listing = z.read("파일목록.txt").decode("utf-8")
+    arc = "Conder옆폴더/575. QORVO US/1. W96760/3. 6G80DD (THV)/2. FVI"
+    assert f"{arc}/2. 재 AOI/GWT2P24-A3.txt" in names and f"{arc}/2. 재 AOI/6G80DD.lot" in names
+    assert f"{arc}/1. OR/GWT2P24-A3/FVI_1_2_3_4.jpg" in col.photos
+    assert not any("6H11AA" in n or "Thumbs" in n for n in names)
+    assert re.search(r"GWT2P24-A3\.txt\t\d+\t담음\t\d{4}-\d\d-\d\d \d\d:\d\d", listing)       # 수정 시각
