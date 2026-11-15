@@ -1,16 +1,14 @@
 """make_release_zip.py — 배포용 zip 을 만든다(전달하는 사람이 실행).
 
-``python scripts\\build.py exe`` 로 만든 ``dist\\AOI_Verify\\`` 폴더를 **검증한 뒤**
+``python scripts\\build.py portable`` 로 만든 ``dist\\AOI_Verify\\`` 폴더를 **검증한 뒤**
 설치법을 넣고 zip 하나로 묶는다.  이 zip 파일 하나만 사용자에게 주면 된다.
 
     python scripts\\make_release_zip.py
-    python scripts\\make_release_zip.py --lite   (exe-lite 산출물을 묶는다)
 
 산출물: ``dist\\AOI_Verify_<날짜>_<커밋7자리>.zip``
 
-검증을 통과하지 못하면 **zip 을 만들지 않는다.**  깨진 배포본(특히 앱이 exe 안에 얼려
-들어간 것)을 사용자에게 보내면, 자동 업데이트가 '성공했다' 고 하면서 아무것도 안 바뀌는
-사고가 다시 난다 — 그걸 여기서 막는다.
+검증을 통과하지 못하면 **zip 을 만들지 않는다.**  깨진 배포본(패키지·IR이 빠진 것 등)을
+사용자에게 보내면 압축을 풀어도 앱이 뜨지 않는다 — 그걸 여기서 막는다.
 
 순수 로직(이름 결정·포함 여부·설치법 문구)은 부수효과 없이 분리해 헤드리스 테스트한다.
 """
@@ -80,12 +78,8 @@ def should_include(rel: PurePosixPath) -> bool:
     return True
 
 
-def instructions_text(lite: bool = False) -> str:
-    """zip 안에 넣을 설치법.  메모장에서 열리도록 CRLF 로 쓴다.
-
-    ``lite`` 판은 라이브러리가 들어 있지 않아 **첫 실행이 다르다** — 인터넷이 필요하고,
-    검은 창이 뜬 채 몇 분 걸린다.  그걸 미리 말해 두지 않으면 사용자는 '멈췄다' 고
-    판단해 창을 닫고, 설치가 반쯤 된 상태로 남는다."""
+def instructions_text() -> str:
+    """zip 안에 넣을 설치법.  메모장에서 열리도록 CRLF 로 쓴다."""
     lines = [
         "AOI 레시피 검증 프로그램 — 설치 및 사용 방법",
         "=" * 44,
@@ -108,7 +102,8 @@ def instructions_text(lite: bool = False) -> str:
         "",
         "     그 폴더는 쓰기가 제한되어 자동 업데이트가 되지 않습니다.",
         "",
-        "  4. 파이썬을 따로 설치할 필요는 없습니다. 필요한 것이 모두 들어 있습니다.",
+        "  4. 파이썬을 따로 설치하거나 인터넷에서 무언가를 받을 필요가 없습니다.",
+        "     필요한 것이 모두 들어 있어, 압축만 풀면 바로 실행됩니다.",
         "",
         "",
         "[2] 실행",
@@ -120,23 +115,6 @@ def instructions_text(lite: bool = False) -> str:
         "    아이콘)가 생깁니다. 다음부터는 그것을 더블클릭하면 됩니다.",
         "",
     ]
-    if lite:
-        lines[-1:] = [
-            "",
-            "  ★★ 처음 한 번은 준비 작업이 있습니다 — 꼭 읽어주세요 ★★",
-            "",
-            "     검은 창이 뜨고 글자가 계속 올라갑니다. 이것이 정상입니다.",
-            "     프로그램에 필요한 것들을 인터넷에서 받는 중이며,",
-            "     인터넷 속도에 따라 몇 분 걸립니다.",
-            "",
-            "       · 창을 닫지 마세요. 끝나면 프로그램 창이 저절로 뜹니다.",
-            "       · 이때만 인터넷 연결이 필요합니다.",
-            "       · 두 번째 실행부터는 검은 창 없이 바로 켜집니다.",
-            "",
-            "     받는 도중 실패하면 창에 오류가 표시되고 멈춥니다.",
-            "     그 화면을 캡처해서 담당자에게 보내주세요.",
-            "",
-        ]
     lines += [
         "  * 바탕 화면에 두려면  'AOI 레시피 검증'  바로가기를 바탕 화면으로",
         "    복사하세요.",
@@ -172,16 +150,12 @@ def instructions_text(lite: bool = False) -> str:
         "",
         "  2. 그 창의 내용을 화면 캡처해서 담당자에게 보내주세요.",
         "",
-        "  3. 회사 보안 프로그램이  AOI_Verify.exe  를 지워도 괜찮습니다.",
-        "     실행은  run_aoi.bat  (또는 바로가기)으로 합니다.",
-        "",
         "",
         "[6] 폴더 안에 무엇이 들어 있나요",
         "-" * 44,
         "",
         "  run_aoi.bat         프로그램 실행 (이것을 더블클릭)",
         "  AOI 레시피 검증     위와 같은 실행 바로가기 (처음 실행하면 생깁니다)",
-        "  AOI_Verify.exe      예비 실행 파일 (보안 프로그램이 지워도 괜찮습니다)",
         "  app                 프로그램 본체 (자동 업데이트로 갱신됩니다)",
         "  python              프로그램 구동에 필요한 것들",
         "  runtime             검사에 쓰는 모델 파일",
@@ -226,21 +200,19 @@ def collect_files(out: Path) -> List[Path]:
 
 
 def make_zip(repo_root: Path = REPO_ROOT, log: Callable = print,
-             today: Optional[str] = None, lite: bool = False) -> int:
-    """검증 → 설치법 작성 → zip.  반환 0=성공.
-
-    ``lite`` 는 ``build.py exe-lite`` 산출물(``dist/AOI_Verify_Lite``)을 묶는다."""
+             today: Optional[str] = None) -> int:
+    """검증 → 설치법 작성 → zip.  반환 0=성공."""
     build = _load_build_module()
-    out = repo_root / build.exe_out_dirname(lite)
+    out = repo_root / build.OUT_DIRNAME
 
     # 1) 검증 — 깨진 배포본을 사용자에게 보내지 않기 위한 관문.
     log("[1/3] 배포본 검증 ...")
-    bad = [label for good, label in build.verify_checks(out, lite) if not good]
+    bad = [label for good, label in build.verify_checks(out) if not good]
     if bad:
         # ★ 실패 항목만 나열하면 사용자는 '무엇이 없다' 만 알고 '무엇을 하라' 는 모른다.
         #   빌드를 안 돌린 것 / 옛 산출물이 남은 것 / 중간에 실패한 것은 대응이 전혀 다르다.
         log("[실패] 검증을 통과하지 못했습니다 — zip 을 만들지 않습니다.")
-        build.report_diagnosis(out, log, lite)
+        build.report_diagnosis(out, log)
         log("")
         log("       [참고] 확인되지 않은 항목:")
         for label in bad:
@@ -252,7 +224,7 @@ def make_zip(repo_root: Path = REPO_ROOT, log: Callable = print,
     log("[2/3] 설치법 작성 ...")
     # BOM 있는 UTF-8 — 없으면 구버전 메모장이 cp949 로 읽어 한글이 깨진다.
     # 사용자에게 나가는 유일한 안내 문서라 이게 깨지면 안 된다.
-    (out / INSTRUCTIONS_NAME).write_text(instructions_text(lite),
+    (out / INSTRUCTIONS_NAME).write_text(instructions_text(),
                                          encoding="utf-8-sig")
 
     # 3) zip — 최상위에 AOI_Verify\ 폴더가 오게 담는다(풀면 폴더 하나가 생긴다).
@@ -294,7 +266,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if argv and argv[0] in ("-h", "--help"):
         print(__doc__)
         return 0
-    return make_zip(lite="--lite" in argv)
+    return make_zip()
 
 
 if __name__ == "__main__":

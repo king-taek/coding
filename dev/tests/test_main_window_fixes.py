@@ -40,7 +40,7 @@ def test_reenter_review_b_keeps_empty_reviewed_result(styled_qapp):
     win._b_unmatched_keys = set()
     loaded: dict = {}
     win._match_review_page = SimpleNamespace(
-        set_reverse=lambda on: None,
+        set_reverse=lambda on, cross=False: None,
         load_state=lambda base, **kw: loaded.update(base=list(base)))
     win._match_page = SimpleNamespace(
         review_context=lambda: SimpleNamespace(

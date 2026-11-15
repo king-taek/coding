@@ -263,6 +263,7 @@ def scan_one_side(root: Path, progress=None, only=None) -> ScanResult:
     폴더 종류는 자동으로 가린다:
 
     · 폴더 **바로 안에 결함 사진이 있으면** wafer 폴더 하나 → 슬롯 1개(이름 = 폴더명).
+      단 사진·``.001`` 을 가진 하위 폴더가 2개 이상이면 LOT 폴더다(:func:`_looks_like_lot`).
       이때 ``only`` 는 무시한다 — 하위 폴더(`_recipe_files…` 등)는 슬롯이 아니다.
     · 아니면 LOT 폴더 → 하위 폴더 하나가 슬롯 하나(:func:`scan` 과 같은 규칙).
 
@@ -272,11 +273,41 @@ def scan_one_side(root: Path, progress=None, only=None) -> ScanResult:
     return _scan_dirs(_one_side_dirs(Path(root), only), progress)
 
 
+def _has_slot_content(folder: Path) -> bool:
+    """하위 폴더가 슬롯다운가 — 결함 사진 또는 KLA 정보파일(``.001``)이 바로 안에 있다."""
+    try:
+        with os.scandir(folder) as it:
+            for e in it:
+                if e.name.lower().endswith(".001"):
+                    return True
+                if (config.CONFIG.is_image(e.name) and not is_ignored_name(e.name)
+                        and e.is_file()):
+                    return True
+    except OSError:
+        return False
+    return False
+
+
+def _looks_like_lot(dirs: dict[str, Path]) -> bool:
+    """바로 안에 사진이 있는 폴더가 그래도 LOT 폴더인가 — 슬롯다운 하위 폴더가 2개 이상이면 그렇다.
+
+    KLA LOT 폴더 바로 안에 안내 사진(``REPORT.JPG`` 등)이 있으면 하위 폴더 25개가 통째로
+    무시되고 슬롯이 1개로 나왔다(실측 2026-11-02).  Camtek wafer 폴더의 ``_recipe_files…``
+    는 사진도 ``.001`` 도 없어 여기 걸리지 않는다.  2개째를 찾으면 바로 멈춘다(NAS 왕복)."""
+    found = 0
+    for d in dirs.values():
+        if _has_slot_content(d):
+            found += 1
+            if found >= 2:
+                return True
+    return False
+
+
 def _one_side_dirs(root: Path, only=None) -> dict[str, Path]:
     """{슬롯명 → 폴더} — wafer 폴더면 자기 자신 하나, LOT 폴더면 하위 폴더들."""
-    if _list_images(root):
-        return {root.name: root}
     dirs = _enum_slot_dirs(root)
+    if _list_images(root) and not _looks_like_lot(dirs):
+        return {root.name: root}
     if only is not None:
         wanted = set(only)
         dirs = {n: d for n, d in dirs.items() if n in wanted}

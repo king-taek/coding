@@ -179,6 +179,9 @@ STAGE2_COORD_OFFSET_FMT = "  ·  보정 가로 {dx:+.0f} · 세로 {dy:+.0f} µm
 RESULT_TITLE = "결과"
 # 결과 요약 — 핵심 수치는 타일로, 나머지는 문장으로.
 RESULT_MACHINES_FMT = "기준 장비: {ref}    검증 장비: {val}"
+# 입력한 폴더 주소 — 숫자 타일 아래, 기준·검증 한 줄씩.
+RESULT_REF_ROOT_FMT = "기준  {path}"
+RESULT_VAL_ROOT_FMT = "검증  {path}"
 RESULT_SLOT_ONLY_REF_FMT = "슬롯 불일치  ·  기준 전용: {names}"
 RESULT_SLOT_ONLY_VAL_FMT = "슬롯 불일치  ·  검증 전용: {names}"
 VALUE_NONE = "없음"
@@ -214,6 +217,8 @@ PANEL_MATCH_REF_REVERSE = "검증 사진"
 PANEL_MATCH_CANDIDATES_REVERSE = "기준 장비 후보"
 # 선별·매칭·검토 화면 표제 뒤에 붙는다 — 지금 두 번째 방향이라는 것을 표제가 말한다.
 CROSS_REVERSE_SUFFIX = " · 2차: 검증 → 기준"
+# 교차검증 첫 방향 — 2차 화면에만 방향이 적히면 1차 화면은 '어느 방향인가' 가 비어 보인다.
+CROSS_FORWARD_SUFFIX = " · 1차: 기준 → 검증"
 
 # Stage 2 의 '매치 없음' 사진 팝업
 # ★ 이 팝업의 이름에서 '보류' 를 뺐다.  버튼은 오래 "보류된 사진 보기 (n)" 이었지만
@@ -405,6 +410,10 @@ EXPAND_POSITION_FMT = "{cur} / {total}"
 # 읽으면 아래 폴백 이름을 쓴다 — 저장 창에서 사용자가 칸을 채워 다시 만들 수 있다.
 RESULT_FILE_TITLE_FMT = "{val} {tag} 검증({ref} 기준).xlsx"
 RESULT_FILE_TITLE_FALLBACK_FMT = "AOI {val} 검증 ({ref} 기준).xlsx"
+# 교차검증은 양방향(기준→검증 + 검증→기준)이라 '어느 쪽 기준'이 없다 — 두 장비를 ↔ 로 묶는다.
+#   예: `AOI-24 vs 4F-AOI-03 TB500_RDL4_GFW 교차검증.xlsx`
+CROSS_FILE_TITLE_FMT = "{ref} vs {val} {tag} 교차검증.xlsx"
+CROSS_FILE_TITLE_FALLBACK_FMT = "AOI {ref} vs {val} 교차검증.xlsx"
 TEMPLATE_NOT_FOUND_TITLE = "양식 파일 없음"
 TEMPLATE_NOT_FOUND_BODY = (
     "‘양식’ 폴더 안의 ‘양식.xlsx’ 를 찾을 수 없습니다.\n"
@@ -648,6 +657,10 @@ REVIEW_EMPTY_HINT = (
     #   '검토 완료 · 유지 n' 이라, 있지도 않은 버튼을 찾게 만들었다.
     "자동 매치된 항목이 없습니다.  [검토 완료] 를 누르면 결과 화면으로 이동합니다."
 )
+# 교차검증 1차 검토 — 다음은 결과가 아니라 2차 선별이다(문구가 틀린 곳으로 안내하던 것).
+REVIEW_EMPTY_HINT_CROSS_A = (
+    "자동 매치된 항목이 없습니다.  [검토 완료] 를 누르면 2차 선별로 이동합니다."
+)
 # 검토 리스트 컬럼 헤더 — ★ 이미지 세 종류를 **각자 자기 사진 위**에 놓기 위해
 # 하나였던 'COL_IMAGES = 기준 · 검증 · 후보' 를 셋으로 쪼갰다(한 라벨이면 어느 것도
 # 자기 사진 위에 없다).  폭 정렬은 match_review_page._sync_header_widths 가 맞춘다.
@@ -809,6 +822,26 @@ SELECT_NONE_CHOSEN_BODY = (
     "설정 화면으로 돌아갈까요? (아니오 = 그대로 진행)"
 )
 SLOT_SELECT_NEED_REF = "먼저 기준 폴더를 선택하세요."
+
+# 이전 결과 엑셀을 기준으로 쓰기 (기준 폴더 줄의 [엑셀로])
+EXCEL_REF_BTN = "엑셀로"
+EXCEL_REF_BTN_TIP = "이전 결과 엑셀의 기준 사진·좌표를 기준 폴더 대신 사용"
+EXCEL_REF_PICK_CAPTION = "이전 결과 엑셀 선택"
+EXCEL_REF_FILTER = "엑셀 (*.xlsx)"
+EXCEL_REF_LOADING = "엑셀에서 기준 사진 꺼내는 중…"
+EXCEL_REF_DONE_TIP_FMT = "{name}\n사진 {photos}장 · 슬롯 {groups}개 · 좌표 {coords}장"
+EXCEL_REF_DONE_BTN = "엑셀 ✓"
+EXCEL_REF_ERR_NOFILE = "엑셀 파일을 찾을 수 없습니다."
+EXCEL_REF_ERR_OPEN = "엑셀을 열 수 없습니다. 다른 프로그램에서 열려 있거나 손상된 파일일 수 있습니다."
+EXCEL_REF_ERR_NOPHOTO = "이 엑셀에서 기준 사진을 찾지 못했습니다. 앱이 저장한 결과 엑셀인지 확인하세요."
+EXCEL_REF_PICK_SHEETS_TITLE = "기준으로 쓸 시트 선택"
+EXCEL_REF_PICK_SHEETS_HINT = (
+    "이 엑셀은 여러 시트(LOT)에 같은 이름의 슬롯이 있습니다. "
+    "섞이지 않게, 한 LOT 에 해당하는 시트만 고르세요."
+)
+EXCEL_REF_SHEET_COUNT_FMT = "사진 {n}장"
+EXCEL_REF_SHEET_SEARCH = "시트 이름으로 찾기"
+EXCEL_REF_PARTIAL_FMT = "좌표가 없는 사진 {n}장은 이미지 유사도로만 비교합니다."
 SLOT_SELECT_EMPTY = "기준 폴더에서 슬롯(하위 폴더)을 찾지 못했습니다."
 
 # ── 기준 사진 재사용 (#6) ──────────────────────────────────────────────────
@@ -862,6 +895,10 @@ SAVE_NAME_TITLE = "저장할 파일 이름"
 SAVE_NAME_BODY = (
     "아래 이름으로 저장합니다. 필요하면 고쳐 주세요.\n"
     "규칙: 장비 자재_Layer_S/M 검증(기준 장비 기준)"
+)
+SAVE_NAME_CROSS_BODY = (
+    "아래 이름으로 저장합니다. 필요하면 고쳐 주세요.\n"
+    "규칙: 기준 장비 vs 검증 장비 자재_Layer_S/M 교차검증"
 )
 SAVE_NAME_FOLDER_FMT = "저장 폴더: {path}"
 # 이름 아래 칸들 — 추천값이 들어 있고, 고친 뒤 버튼을 누르면 위 이름을 다시 만든다(사용자 요청 2026-10-30).

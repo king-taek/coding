@@ -113,7 +113,7 @@ def session_cache_dir() -> Path:
 
 
 def _exe_install_root() -> Path | None:
-    """'exe + app 폴더' 설치 루트.  개발/포터블이면 None.
+    """'python + app 폴더' 설치 루트.  개발 실행이면 None.
 
     런처가 넘겨주는 ``AOI_APP_HOME`` 이 1순위지만, **백신이 서명 없는 exe 를 막아
     ``run_aoi.bat`` 으로 켜는 경우**에는 그 변수가 없다(설치방법.txt 가 그 방법을
@@ -128,7 +128,8 @@ def _exe_install_root() -> Path | None:
     if home:
         return Path(home)
     root = _project_root().parent          # app/ 의 부모 = 설치 루트 후보
-    if (root / "AOI_Verify.exe").is_file() and (root / "python").is_dir():
+    launcher = (root / "run_aoi.bat").is_file() or (root / "AOI_Verify.exe").is_file()
+    if launcher and (root / "python").is_dir():
         return root
     return None
 

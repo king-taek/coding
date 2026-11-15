@@ -22,7 +22,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from aoi_verification.app.models.result import (EXTRACT_MODE, FinalResult,  # noqa: E402
                                                 MissEntry, extract_result)
-from aoi_verification.app.models.slot import (rename_slots_by_wafer_id,   # noqa: E402
+from aoi_verification.app.models.slot import (extract_slot_dirs,           # noqa: E402
+                                              rename_slots_by_wafer_id,
                                               scan_one_side)
 
 
@@ -68,6 +69,28 @@ def test_wafer_folder_is_one_slot_even_with_subfolders(tmp_path):
     assert list(sr.slots) == ["GIX5703110"]
     assert [it.filename for it in sr.slots["GIX5703110"].ref_images] == ["1_2_d.jpg"]
     assert sr.slots["GIX5703110"].ref_dir == wafer
+
+
+def test_lot_folder_with_stray_photos_is_still_a_lot(tmp_path):
+    """★ KLA LOT 폴더 바로 안에 안내 사진(1.JPG, REPORT.JPG)이 있어도 하위 폴더가 슬롯이다.
+    실측(2026-11-02, INTP-KENDALL-207-2637@6412): 이 사진 6장 때문에 슬롯 25개가 1개로 나왔다.
+    슬롯 판정은 사진 또는 KLA 정보파일(.001)을 가진 하위 폴더가 2개 이상일 때다."""
+    _touch_jpeg(tmp_path / "REPORT.JPG")
+    _touch_jpeg(tmp_path / "1.JPG")
+    _touch_jpeg(tmp_path / "S1" / "a.jpg")
+    (tmp_path / "S2").mkdir()
+    (tmp_path / "S2" / "lot_WAFER2.001").write_bytes(b"")     # 사진 없이 정보파일만
+    sr = scan_one_side(tmp_path)
+    assert sorted(sr.slots) == ["S1", "S2"]
+    assert extract_slot_dirs(tmp_path).keys() == sr.slots.keys()
+
+
+def test_one_content_subfolder_does_not_make_a_lot(tmp_path):
+    """하위 폴더 하나만 내용이 있으면 wafer 폴더 규칙을 그대로 쓴다."""
+    _touch_jpeg(tmp_path / "x.jpg")
+    _touch_jpeg(tmp_path / "S1" / "a.jpg")
+    (tmp_path / "S2").mkdir()
+    assert list(scan_one_side(tmp_path).slots) == [tmp_path.name]
 
 
 def test_ignored_photos_do_not_make_a_wafer_folder(tmp_path):

@@ -98,90 +98,41 @@ Intel GPU 를 쓰는 환경에서는 실행 시 **OpenVINO 설치 안내** 가 �
 > 가 두 번째 실행할 때도 안전합니다. 디버그를 중간에 강제 종료해도 다음
 > 실행에 영향을 주지 않습니다.
 
-### 3.7 포터블 배포(권장) — 파이썬 없는 PC 에 더블클릭 실행
+### 3.7 배포 — 전부 담은 폴더를 zip 으로 (압축 풀고 `run_aoi.bat`)
 
-파이썬이 설치되지 않은 Windows PC 에서도 실행되도록 **자체 포함 CPython 런타임**
-을 폴더로 동봉합니다.  PyInstaller 부트로더가 회사 백신/보안 정책에 막혀 빌드·실행이
-안 되는 경우를 피하고, **업데이트가 쉬운** 것이 장점입니다.
+배포 방식은 **하나**입니다.  파이썬·라이브러리(PyQt6/openvino 등)·백본 IR·앱을 **전부 담은
+폴더**를 zip 으로 만들어 줍니다.  받는 사람은 **압축을 풀고 `run_aoi.bat` 을 더블클릭**하면
+끝이며, 아무것도 내려받지 않고 파이썬도 필요 없습니다.  exe 는 쓰지 않습니다(회사 보안이
+서명 없는 exe 를 지우기 때문에 `run_aoi.bat` 이 런처 역할을 합니다).
 
-빌드는 **Windows + 인터넷** 환경에서 1회만:
-
-```powershell
-# 저장소 루트에서 (파이썬으로 빌드 — .bat 인코딩 문제 없음)
-python scripts\build.py portable
-```
-
-- 산출물 `dist_portable\` 구조:
-  ```
-  dist_portable\
-    python\         ← 자체 포함 CPython + 의존성(PyQt6/openvino 등) [무거움, 거의 불변]
-    app\            ← aoi_verification 소스 + main.py + 양식.xlsx       [업데이트 대상]
-    run_aoi.bat      ← 콘솔 없이 GUI 실행 (pythonw)
-    run_aoi_debug.bat← 오류 진단용(콘솔 + traceback)
-    update_app.bat   ← app\ 소스만 교체(git pull 또는 새 폴더 복사)
-  ```
-- **배포:** `dist_portable` 폴더 전체를 zip 으로 전달 → 대상 PC 에서 압축 해제 후
-  **`run_aoi.bat` 더블클릭**(파이썬 불필요).
-- **용량:** PyQt6·openvino·opencv 를 포함해 폴더가 큽니다. (백본은 미리 변환한
-  OpenVINO IR 로 동봉하므로 torch 는 들어가지 않습니다.)
-- **쉬운 업데이트:** 무거운 `python\` 은 그대로 두고 **작은 `app\` 소스만 교체**
-  (`update_app.bat`) → 수 MB 만 갱신, 폴더 전체 재배포 불필요.
-- **앱이 안 켜질 때:** `run_aoi_debug.bat` 로 콘솔에 뜨는 오류(traceback)를 확인하세요.
-- `scripts\internal\make_portable.bat` 의 `PY_URL` 다운로드가 404 면, python-build-standalone
-  [releases](https://github.com/astral-sh/python-build-standalone/releases) 에서 최신
-  *install_only Windows x86_64* `.tar.gz` 링크로 `PY_URL` 을 교체 후 재실행하세요.
-
-### 3.8 온라인 다운로드형 작은 .exe — 전달 파일이 가장 작다
-
-**작은 exe 하나**만 주면 되는 방식입니다. exe 에는 **아무것도 들어 있지 않고**, 처음
-실행할 때 인터넷에서 **자체 포함 파이썬 · 앱 · 라이브러리 · 백본 IR 을 전부** 받아
-`%LOCALAPPDATA%\AOI Recipe Verification` 에 설치한 뒤 실행합니다.
-**사용자 PC 에 파이썬이 필요 없습니다.**  **Windows(파이썬 설치) + 인터넷 PC 에서**:
+빌드는 **Windows + 인터넷** PC 에서 배포할 때마다 한 번:
 
 ```powershell
-python scripts\build.py online
+# 저장소 루트에서
+python scripts\build.py portable          # dist\AOI_Verify\ 생성 + 자동 검증
+python scripts\make_release_zip.py        # 검증 통과 시 dist\AOI_Verify_<날짜>_<커밋>.zip
 ```
 
-- 산출물: `dist\AOI_Verify_Online.exe` — **이 파일 하나만 배포**.
-- 사용자 경험: 더블클릭 → 첫 실행은 검은 창에 진행이 뜨며 몇 분 걸리고(수백 MB),
-  이후는 빠릅니다.
-- **자동 업데이트 그대로 동작:** 앱이 쓰기 가능한 `%LOCALAPPDATA%\AOI Recipe Verification` 에 설치되므로,
-  앱 내 자동 업데이트가 그 폴더를 갱신합니다(exe 재배포 불필요).
-- **전제:** 백본 IR 이 저장소에 커밋돼 있어야 합니다(`runtime/ir/`). 없으면 빌드가
-  중단하고 만드는 방법을 알려줍니다 — `python scripts\internal\make_ir.py`.
-- **첫 실행에 인터넷이 필요**합니다(github.com + PyPI). 닿지 못하는 PC 에는
-  **3.9 (exe + app 폴더)** 를 주세요.
-
-### 3.9 (권장) exe + app 폴더 — 파이썬 없는 PC, 자동 업데이트 완전 동작
-
-**얇은 런처 exe** 하나와, 업데이트되는 것들을 담은 **`app\` 폴더**를 함께 전달합니다.
-**Windows(파이썬 설치 + 인터넷) PC 에서**:
-
-```powershell
-python scripts\build.py exe
-```
-
-- 산출물 `dist\AOI_Verify\` 구조(폴더 통째로 zip 배포):
+- 산출물 `dist\AOI_Verify\` 구조:
   ```
   AOI_Verify\
-    AOI_Verify.exe   ← 얇은 런처(수 MB). 앱 코드 0줄, 업데이트되지 않음
-    python\          ← 번들 CPython + 의존성 [무거움, 거의 불변]
-    app\             ← ★ 자동 업데이트가 바꾸는 전부
-      runtime\ir\    ←   백본 OpenVINO IR (덕분에 배포본에 torch 가 없다)
-    결과\             ← 엑셀 출력 (app\ 바깥 — 업데이트에 안 쓸림)
-    run_aoi.bat / run_aoi_debug.bat  ← exe 가 백신에 막힐 때 대체 실행·진단
+    python\          ← 자체 포함 CPython + 의존성 [무거움, 거의 불변]
+    app\             ← aoi_verification 소스 + main.py + 양식.xlsx + runtime\ir  [자동 업데이트 대상]
+    결과\            ← 엑셀 출력 (app\ 바깥 — 업데이트에 안 쓸림)
+    run_aoi.bat       ← 콘솔 없이 GUI 실행 (pythonw) — 업데이트 교체도 여기서 한다
+    run_aoi_debug.bat ← 오류 진단용(콘솔 + traceback)
+    설치방법.txt       ← zip 에 자동으로 들어가는 사용자 안내
   ```
-- **왜 앱을 exe 에 안 넣나:** 예전 단독 exe 는 앱을 exe 안에 얼려 넣어서, 자동 업데이트가
-  새 파일을 디스크에 써도 **실행 중인 파이썬이 exe 안의 옛 코드를 읽었습니다.** "업데이트
-  되었습니다" 라고 하고도 안 바뀌거나, 새 모듈만 반영돼 **새 코드가 옛 코드를 호출**하는
-  상태가 됐습니다. 지금은 바뀌는 것이 전부 `app\` 에 파일로 있습니다.
-- **업데이트 적용 시점:** 실행 중에는 `app.new\` 로 받아만 두고, **다음 실행 때 런처가 교체**
-  합니다. 교체가 중간에 끊겨도 복구하며, 어떤 실패든 **구버전이 살아남습니다.**
-- **설치 경로는 짧게**(예: `C:\AOI_Verify`) — 깊은 한글 경로는 260자 제한에 걸릴 수 있습니다.
-- **첫 실행 경고:** 미서명 exe 는 SmartScreen/Defender 가 “알 수 없는 게시자” 로
-  경고할 수 있습니다 — *추가 정보 → 실행*.  경고 제거가 필요하면 코드 서명(EV 권장).
-- 빌드 후 `verify` 가 자동 실행돼 **`_internal\` 부재**(=앱이 exe 안에 안 들어갔는지)와
-  번들 파이썬의 **실제 앱 import** 를 확인합니다: `python scripts\build.py verify`.
+- **전달:** zip 하나. 받는 사람은 짧은 경로(예: `C:\AOI_Verify`)에 풀고 `run_aoi.bat` 실행.
+- **용량:** PyQt6·openvino·opencv 를 포함해 큽니다(torch 는 IR 동봉으로 빠졌습니다).
+- **업데이트:** 앱이 켜질 때 자동 확인 → `app.new\` 로 받아 두고 **다음 실행 때 `run_aoi.bat`
+  이 교체**합니다.  새 패키지가 필요한 변경이면 zip 을 다시 만들어 전달해야 할 수 있습니다
+  (`docs/업데이트_동작.md`).
+- **앱이 안 켜질 때:** `run_aoi_debug.bat` 의 콘솔 오류(traceback)를 확인하세요.
+- 런타임 다운로드가 404 면 python-build-standalone
+  [releases](https://github.com/astral-sh/python-build-standalone/releases) 에서 최신
+  *install_only Windows x86_64* 링크로 `aoi_verification/app/utils/bootstrap.py` 의
+  `PY_STANDALONE_URL` 을 바꾸세요.
 
 ## 4. 폴더 구조 가정
 

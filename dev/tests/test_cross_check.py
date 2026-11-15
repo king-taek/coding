@@ -115,7 +115,7 @@ class _SelectStub:
     def set_extract_mode(self, on):
         pass
 
-    def set_reverse(self, on):
+    def set_reverse(self, on, cross=False):
         self.reverse = on
 
     def load_state(self, **kw):
@@ -282,6 +282,57 @@ def test_pages_label_the_reverse_direction(styled_qapp):
     finally:
         for w in (sel, mat, rev):
             w.deleteLater()
+
+
+def test_first_direction_is_labelled_only_in_cross_runs(styled_qapp):
+    """1차 화면에도 방향이 적힌다 — 교차검증이 아닌 실행의 표제는 그대로다."""
+    from aoi_verification.app.i18n import ko
+    from aoi_verification.app.ui.pages.match_page import MatchPage
+    from aoi_verification.app.ui.pages.match_review_page import MatchReviewPage
+    from aoi_verification.app.ui.pages.select_page import SelectPage
+
+    sel, rev = SelectPage(), MatchReviewPage()
+    try:
+        sel.set_reverse(False, cross=True)
+        rev.set_reverse(False, cross=True)
+        assert sel.title.text().endswith(ko.CROSS_FORWARD_SUFFIX)
+        assert rev.title.text().endswith(ko.CROSS_FORWARD_SUFFIX)
+        sel.set_reverse(False)
+        rev.set_reverse(False)
+        assert sel.title.text() == ko.STAGE1_TITLE
+        assert rev.title.text() == ko.MATCH_REVIEW_TITLE
+        assert MatchPage._cross is False
+    finally:
+        for w in (sel, rev):
+            w.deleteLater()
+
+
+def test_cross_first_review_empty_hint_points_to_second_pass():
+    """1차 검토의 다음은 결과가 아니라 2차 선별이다 — 빈 목록 안내가 그걸 말한다."""
+    from aoi_verification.app.i18n import ko
+    assert "2차 선별" in ko.REVIEW_EMPTY_HINT_CROSS_A
+    assert "결과" not in ko.REVIEW_EMPTY_HINT_CROSS_A
+
+
+def test_rail_shrinks_links_so_last_cross_step_never_hits_criteria(styled_qapp):
+    """8단계 교차검증 레일 — 선이 남은 이름 폭을 빼고 줄어, 마지막 '결과' 가 판정 기준 줄을 덮지 않는다."""
+    from PyQt6.QtGui import QFontMetrics
+    from aoi_verification.app.i18n import ko
+    from aoi_verification.app.ui.widgets.journey_rail import JourneyRail
+    rail = JourneyRail()
+    try:
+        rail.set_labels(ko.CROSS_JOURNEY_RAIL_STEPS)
+        rail.set_criteria("좌표 매칭 · 허용 오차 200 µm")
+        rail.resize(1280, JourneyRail.RAIL_H)
+        cw = QFontMetrics(rail.font()).horizontalAdvance("좌표 매칭 · 허용 오차 200 µm")
+        right_edge = 1280 - JourneyRail.PAD_X - cw - 20
+        x = JourneyRail.PAD_X + 200
+        room = rail._link_room(x, right_edge, 0)
+        # 뒤따르는 7개 이름의 폭을 뺐으므로, 모든 선을 이 폭으로 그려도 오른쪽 끝을 넘지 않는다.
+        assert room < JourneyRail.LINK_W * 7
+        assert rail._steps_min_right() < 1280
+    finally:
+        rail.deleteLater()
 
 
 # ---------------------------------------------------------------------------

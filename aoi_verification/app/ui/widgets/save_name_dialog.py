@@ -63,8 +63,8 @@ def sanitize_name(text: str) -> tuple[str, str]:
 def compose_title(fields: dict[str, str]) -> str:
     """제목 칸 → 파일 이름(순수 함수 — 헤드리스 테스트).
 
-    ``fields`` 에 ``machine`` 이 있으면 Defect 추출 제목, 아니면 검증 결과 제목이다
-    (``val``·``ref``).  ``layer``·``material``·``sm`` 중 빈 칸은 빠지고, 모두 비면 폴백 이름."""
+    ``fields`` 에 ``machine`` 이 있으면 Defect 추출 제목, ``cross`` 가 있으면 교차검증
+    제목(양방향이라 ``기준 vs 검증``), 아니면 검증 결과 제목이다(``val``·``ref``).  ``layer``·``material``·``sm`` 중 빈 칸은 빠지고, 모두 비면 폴백 이름."""
     # 칸 안의 연속 공백은 하나로 — 빈 장비 칸이 이름에 이중 공백을 남기지 않게.
     g = {k: " ".join((v or "").split()) for k, v in fields.items()}
     tag = "_".join(t for t in (g.get("material", ""), g.get("layer", ""), g.get("sm", ""))
@@ -77,6 +77,12 @@ def _compose(g: dict[str, str], tag: str) -> str:
         if not tag:
             return i18n.KO.EXTRACT_FILE_TITLE_FALLBACK_FMT.format(machine=g["machine"])
         return i18n.KO.EXTRACT_FILE_TITLE_FMT.format(machine=g["machine"], tag=tag)
+    if g.get("cross"):
+        if not tag:
+            return i18n.KO.CROSS_FILE_TITLE_FALLBACK_FMT.format(
+                val=g.get("val", ""), ref=g.get("ref", ""))
+        return i18n.KO.CROSS_FILE_TITLE_FMT.format(
+            val=g.get("val", ""), ref=g.get("ref", ""), tag=tag)
     if not tag:
         return i18n.KO.RESULT_FILE_TITLE_FALLBACK_FMT.format(
             val=g.get("val", ""), ref=g.get("ref", ""))
@@ -106,7 +112,12 @@ class SaveNameDialog(QDialog):
         self._chosen: str | None = None
         self._folder = Path(folder)
         self._fields: dict[str, QLineEdit] = {}
-        self._build(suggested, self._folder, body or i18n.KO.SAVE_NAME_BODY, fields)
+        # 칸이 아닌 제목 종류 표시(``cross``) — 칸 입력과 함께 이름 재생성에 넘긴다.
+        self._kind = {k: v for k, v in (fields or {}).items() if k == "cross"}
+        if body is None:
+            body = (i18n.KO.SAVE_NAME_CROSS_BODY if self._kind.get("cross")
+                    else i18n.KO.SAVE_NAME_BODY)
+        self._build(suggested, self._folder, body, fields)
 
     @property
     def chosen(self) -> str | None:
@@ -193,7 +204,8 @@ class SaveNameDialog(QDialog):
     def _on_auto(self) -> None:
         """칸으로 이름을 다시 만든다.  같은 이름의 파일이 폴더에 있으면 시각을 붙인다
         (검증 시작 때의 추천 이름과 같은 규칙 — 지난 결과를 덮지 않게)."""
-        name = compose_title({k: ed.text() for k, ed in self._fields.items()})
+        name = compose_title({**{k: ed.text() for k, ed in self._fields.items()},
+                              **self._kind})
         try:
             exists = (self._folder / name).exists()
         except (OSError, ValueError):

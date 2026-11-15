@@ -47,6 +47,7 @@ class _Win:
         self._scan = scan
         self._input = object()
         self._restored = restored
+        self._cross_stage = ""
         self._phase = None
         self.shown = []
         self.finished_calls = 0
@@ -59,7 +60,7 @@ class _Win:
             def set_extract_mode(self, on):
                 pass
 
-            def set_reverse(self, on):
+            def set_reverse(self, on, cross=False):
                 pass
 
             def load_state(self, **kw):

@@ -262,7 +262,7 @@ class MultiValFlow:
                     if leg["state"] and leg["state"].get("_leg_ctx")), None)
         if ctx is None:
             ctx = self._match_page.review_context()
-        self._match_review_page.set_reverse(False)
+        self._match_review_page.set_reverse(False, cross=bool(self._cross_stage))
         self._match_review_page.load_state(
             matches, score_cache=ctx.score_cache, val_pool=None,
             review_scores=ctx.review_scores, candidates_by_ref=None,
@@ -363,7 +363,7 @@ class MultiValFlow:
         else:
             base = list(self._matches_b)
         ctx = self._review_ctx()
-        self._match_review_page.set_reverse(True)
+        self._match_review_page.set_reverse(True, cross=True)
         self._match_review_page.load_state(
             base, score_cache=ctx.score_cache,
             val_pool=lc.val_pool if lc else None,

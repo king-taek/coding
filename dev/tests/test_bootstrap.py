@@ -176,11 +176,22 @@ def test_results_stay_outside_app_even_without_the_env_var(tmp_path, monkeypatch
     assert paths.results_dir() == tmp_path / "결과"      # app\ 바깥
 
 
-def test_layout_detection_does_not_fire_for_dev_or_portable(tmp_path, monkeypatch):
-    """개발·포터블에는 AOI_Verify.exe 가 없다 — 오탐하면 결과 위치가 엉뚱해진다."""
+def test_layout_detection_recognises_the_bat_only_bundle(tmp_path, monkeypatch):
+    """exe 없는 배포본(run_aoi.bat + python\ + app\)도 설치 루트로 알아봐야 한다."""
     from aoi_verification.app.utils import paths
     monkeypatch.delenv("AOI_APP_HOME", raising=False)
-    (tmp_path / "python").mkdir()                        # 포터블: python\ 은 있지만 exe 없음
+    (tmp_path / "run_aoi.bat").write_text("@echo off", encoding="utf-8")
+    (tmp_path / "python").mkdir()
+    monkeypatch.setattr(paths, "_project_root", lambda: tmp_path / "app")
+    assert paths._exe_install_root() == tmp_path
+    assert paths.results_dir() == tmp_path / "결과"
+
+
+def test_layout_detection_does_not_fire_for_dev_or_portable(tmp_path, monkeypatch):
+    """개발 트리에는 런처(run_aoi.bat·exe)가 없다 — 오탐하면 결과 위치가 엉뚱해진다."""
+    from aoi_verification.app.utils import paths
+    monkeypatch.delenv("AOI_APP_HOME", raising=False)
+    (tmp_path / "python").mkdir()                        # python\ 은 있지만 런처 없음
     monkeypatch.setattr(paths, "_project_root", lambda: tmp_path / "app")
     assert paths._exe_install_root() is None
     assert paths.results_dir() == tmp_path / "app" / "결과"

@@ -245,6 +245,29 @@ class JourneyRail(QWidget):
         return super().leaveEvent(event)
 
     # ------------------------------------------------------------------
+    def _steps_min_right(self) -> int:
+        """워드마크 + 단계들이 연결선을 가장 짧게(10px) 줄였을 때 차지하는 오른쪽 끝 x."""
+        base = self.font()
+        bold = QFont(base)
+        bold.setBold(True)
+        fm_b, fm_o = QFontMetrics(bold), QFontMetrics(base)
+        x = self.PAD_X + fm_b.horizontalAdvance(i18n.KO.APP_TITLE) + self.WORDMARK_GAP
+        for i, text in enumerate(self._labels):
+            fm = fm_b if i == self._index else fm_o
+            x += self.MARK_D + 7 + fm.horizontalAdvance(text)
+            if i < len(self._labels) - 1:
+                x += 10
+        return x
+
+    def _link_room(self, x: int, right_edge: int, i: int) -> int:
+        """단계 ``i`` 의 다음 연결선 하나에 줄 수 있는 폭 — 뒤따르는 이름들이 쓸 폭은 뺀다."""
+        base = self.font()
+        fm = QFontMetrics(base)
+        rest = sum(self.MARK_D + 7 + fm.horizontalAdvance(t)
+                   for t in self._labels[i + 1:])
+        links = len(self._labels) - 1 - i
+        return (right_edge - x - rest) // max(1, links)
+
     def paintEvent(self, event):  # noqa: N802
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -280,11 +303,15 @@ class JourneyRail(QWidget):
             p.setFont(f)
             fm = QFontMetrics(f)
             cw = fm.horizontalAdvance(self._criteria)
-            p.setPen(mute)
-            p.drawText(QRect(w - self.PAD_X - cw, 0, cw, h - 1),
-                       int(Qt.AlignmentFlag.AlignRight
-                           | Qt.AlignmentFlag.AlignVCenter), self._criteria)
-            right_edge = w - self.PAD_X - cw - 20
+            # ★ 단계가 많은 교차검증(8단계)은 판정 기준 줄과 한 줄에 못 들어가 마지막 '결과' 와
+            #   겹쳤다 — 단계 이름이 우선이고, 자리가 모자라면 이 줄을 뺀다(설정 화면 아래
+            #   바에 같은 문장이 이미 있다).
+            if self._steps_min_right() + 20 + cw <= w - self.PAD_X:
+                p.setPen(mute)
+                p.drawText(QRect(w - self.PAD_X - cw, 0, cw, h - 1),
+                           int(Qt.AlignmentFlag.AlignRight
+                               | Qt.AlignmentFlag.AlignVCenter), self._criteria)
+                right_edge = w - self.PAD_X - cw - 20
 
         # ★ 워드마크 — 시안 레일의 **첫 요소**다(세 레일 목업이 모두 갖고 있다).
         #   페이지 안의 로고 밴드는 사용자 요청으로 스크롤과 함께 밀려 올라가므로,
@@ -379,8 +406,9 @@ class JourneyRail(QWidget):
             x = text_x + tw
             if i < len(self._labels) - 1:
                 # 연결선 — 지나온 구간만 accent.  남는 폭이 모자라면 줄인다.
-                link = max(10, min(self.LINK_W,
-                                   (right_edge - x) // max(1, len(self._labels) - i)))
+                # ★ 남은 폭에서 **남은 단계 이름의 폭**을 먼저 빼고 나눈다 — 예전엔 이름 폭을
+                #   빼지 않아 8단계에서 선이 줄지 않고 마지막 단계가 판정 기준 줄을 덮었다.
+                link = max(10, min(self.LINK_W, self._link_room(x, right_edge, i)))
                 x0, x1 = x + 9, x + link - 9
                 pen = QPen(line2)
                 pen.setWidth(1)

@@ -12,7 +12,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from . import camtek_ini, camtek_live, kla_info
+from . import camtek_ini, camtek_live, excel_ref, kla_info
 from .models import DefectCoord
 
 __all__ = ["resolve", "resolve_batch", "clear_caches", "DefectCoord"]
@@ -38,6 +38,9 @@ def clear_caches() -> None:
 
 def resolve(image_path: Path) -> Optional[DefectCoord]:
     """이미지 경로 → DefectCoord. 세 소스를 순서대로 시도, 모두 실패하면 None."""
+    coord = excel_ref.resolve(image_path)       # 이전 엑셀에서 풀어 둔 기준 사진
+    if coord is not None:
+        return coord
     coord = camtek_live.resolve(image_path)
     if coord is not None:
         return coord

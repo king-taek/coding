@@ -1,21 +1,18 @@
-"""build.py — exe/포터블 빌드 스크립트 (배치 파일 대체).
+"""build.py — 배포본 빌드 스크립트 (배치 파일 대체).
 
 한국어 Windows(cp949) 콘솔에서 ``.bat`` 의 한글이 깨지는 문제를 피하려고, 빌드를
-**파이썬으로** 한다(Python 은 UTF-8 안전).  세 가지 배포 방식을 한 스크립트로 제공:
+**파이썬으로** 한다(Python 은 UTF-8 안전).  배포 방식은 **하나**다:
 
-    python scripts/build.py exe         # exe + app 폴더 (권장)
-    python scripts/build.py exe-lite    # 위와 같되 라이브러리는 첫 실행 때 받음
-    python scripts/build.py portable    # 자체 포함 CPython 폴더(.bat 실행)
-    python scripts/build.py online      # 작은 온라인 launcher exe (PyPI 접속 필요)
+    python scripts/build.py portable    # 자체 포함 폴더(압축 풀고 run_aoi.bat 더블클릭)
 
-``exe`` 는 **얇은 런처 exe + loose 한 app\\ 폴더** 다.  앱 코드를 exe 안에 넣지 않는 것이
-핵심 — 옛 단독 exe(onedir) 는 앱을 exe 안 PYZ 에 넣어서, 자동 업데이트가 디스크에 새
-파일을 써도 실행 중인 파이썬이 그걸 읽지 않아 '성공했다는데 안 바뀌는' 상태가 됐다.
+파이썬·라이브러리·백본 IR·앱 소스를 **전부 담은** ``dist/AOI_Verify/`` 폴더를 만든다.
+사용자 PC 는 압축만 풀면 되고 아무것도 내려받지 않는다.  exe 런처는 없다 — 회사 보안이
+서명 없는 exe 를 지우기 때문에 ``run_aoi.bat`` 이 런처 역할을 한다.
 
 어디서 실행하든(더블클릭/터미널) 저장소 루트로 자동 이동한다.  VS Code 에서 이 파일을
 열고 ‘Run Python File’ 을 눌러도 된다(인자 없으면 사용법 안내).
 
-실제 빌드는 **Windows + 인터넷** 환경에서 한다(PyInstaller 는 크로스컴파일 불가).
+실제 빌드는 **Windows + 인터넷** 환경에서 한다(번들 런타임이 Windows 바이너리).
 순수 판단 로직(명령 구성·검증)은 부수효과 없이 분리해 헤드리스 테스트가 가능하다.
 """
 
@@ -63,22 +60,6 @@ PY_STANDALONE_URL = _py_standalone_url()
 # ---------------------------------------------------------------------------
 # 순수 로직 (테스트 대상) — 부수효과 없음
 # ---------------------------------------------------------------------------
-def venv_python(repo_root: Path) -> Path:
-    """저장소 ``.venv`` 의 파이썬 실행 파일 경로(OS 별)."""
-    if os.name == "nt":
-        return repo_root / ".venv" / "Scripts" / "python.exe"
-    return repo_root / ".venv" / "bin" / "python"
-
-
-def pyinstaller_cmd(python_exe: str, spec: Path,
-                    distpath: Optional[Path] = None) -> List[str]:
-    """PyInstaller 빌드 명령(spec 사용).  ``distpath`` 를 주면 산출물 위치를 지정한다."""
-    cmd = [str(python_exe), "-m", "PyInstaller", "--noconfirm"]
-    if distpath is not None:
-        cmd += ["--distpath", str(distpath)]
-    return cmd + [str(spec)]
-
-
 def pip_install_cmd(python_exe: str, *args: str) -> List[str]:
     return [str(python_exe), "-m", "pip", "install", *args]
 
@@ -88,33 +69,18 @@ def guard_cmd(python_exe: str) -> List[str]:
     return [str(python_exe), str(INTERNAL / "verify_no_forbidden.py")]
 
 
-def output_path(kind: str, repo_root: Path) -> Path:
-    """빌드 종류별 산출물 경로(안내·테스트용)."""
-    return {
-        "online": repo_root / "dist" / "AOI_Verify_Online.exe",
-        "exe": repo_root / "dist" / "AOI_Verify",
-        "exe-lite": repo_root / "dist" / "AOI_Verify_Lite",
-        "portable": repo_root / "dist_portable",
-    }[kind]
+# 산출물 폴더 이름(저장소 루트 기준) — portable_build 에 넘긴다.
+OUT_DIRNAME = "dist/AOI_Verify"
 
 
-# 'exe + app 폴더' 산출물 폴더 이름(저장소 루트 기준) — portable_build 에 넘긴다.
-EXE_OUT_DIRNAME = "dist/AOI_Verify"
-# lite 배포 — 라이브러리를 빼고 사용자 PC 의 첫 실행 때 pip 로 받게 한다.
-EXE_LITE_OUT_DIRNAME = "dist/AOI_Verify_Lite"
-
-
-def exe_out_dirname(lite: bool) -> str:
-    return EXE_LITE_OUT_DIRNAME if lite else EXE_OUT_DIRNAME
-
-# 다시 빌드할 때 **반드시 지워야 할** 것들.  PyInstaller 는 onefile 이라 exe 파일 하나만
+# 다시 빌드할 때 **반드시 지워야 할** 것들.  옛 exe 배포는 exe 파일 하나만
 # 교체하고 distpath 폴더를 비우지 않고, portable_build 도 app/aoi_verification 아래만
 # 지운다.  그래서 옛 방식(단독 exe) 산출물의 `_internal/` 이 남으면 검증이 **영원히**
 # 실패하고, 사용자는 '다시 빌드하세요' 안내를 따라도 상태를 바꿀 수 없다.
 # `.irbuild` 는 IR 변환용 torch 를 푸는 임시 트리다(portable_build.IR_TMP_DIRNAME).
 # 정상 종료 때는 스스로 지워지지만, 중간에 죽으면 수백 MB 가 남아 배포 zip 에 실린다.
 _STALE_ON_REBUILD = ("_internal", "app.new", "app.new.part", "app.old",
-                     "AOI_Verify.exe", ".irbuild")
+                     "AOI_Verify.exe", ".irbuild")   # _internal·AOI_Verify.exe 는 옛 exe 배포 찌꺼기
 # 반대로 **남겨야** 하는 것: python\ 과 runtime\ 은 다시 만들면 30분이 걸리고,
 # portable_build 의 증분 재사용이 이걸 전제로 한다.  결과\ 는 사용자 산출물이다.
 
@@ -152,16 +118,13 @@ def clean_stale_output(out: Path, log: Callable = print) -> int:
 
 # 산출물 상태 진단 — portable_build.run_build 의 **기록 순서가 그대로 단계 사다리**라
 # 별도 마커 없이 '어디까지 갔는지' 를 알 수 있다(마지막 기록이 app/VERSION).
-def diagnose(out: Path, lite: bool = False) -> Tuple[str, List[str]]:
+def diagnose(out: Path) -> Tuple[str, List[str]]:
     """``(상태, [사용자가 할 일 …])``.  순수 — 테스트 대상.
 
     검증이 '무엇이 없다' 를 나열하는 것만으로는 사용자가 다음에 뭘 해야 할지 알 수 없다.
     특히 '빌드를 안 돌린 것' 과 '옛 산출물이 남은 것' 과 '중간에 실패한 것' 은 대응이 전혀
-    다른데 화면에는 똑같이 빨간 줄로만 보인다.
-
-    ``lite`` 배포는 라이브러리를 일부러 넣지 않으므로 ``.deps_installed`` 가 **없는 것이
-    정상**이다 — 그걸 '중간에 멈췄다' 로 읽으면 멀쩡한 빌드를 실패로 안내한다."""
-    cmd = "  python scripts\\build.py " + ("exe-lite" if lite else "exe")
+    다른데 화면에는 똑같이 빨간 줄로만 보인다."""
+    cmd = "  python scripts\\build.py portable"
     if not out.is_dir():
         return "not_built", ["빌드를 아직 실행하지 않았습니다.", cmd]
     if (out / "_internal").is_dir():
@@ -170,13 +133,13 @@ def diagnose(out: Path, lite: bool = False) -> Tuple[str, List[str]]:
             "지금 빌드는 이것을 자동으로 지웁니다. 그래도 남아 있다면 수동으로 지우세요:",
             f"  rmdir /s /q {out}",
             "그 다음:" + cmd]
-    if not (out / "AOI_Verify.exe").is_file() and not (out / "python").is_dir():
+    if not (out / "python").is_dir():
         return "not_built", ["폴더는 있으나 빌드 산출물이 없습니다.", cmd]
     if not (out / "python" / "python.exe").is_file():
         return "partial:runtime", [
             "CPython 런타임을 받아 푸는 단계에서 멈췄습니다.",
             "네트워크(github.com 다운로드)를 확인하고 다시 실행하세요."]
-    if not lite and not (out / ".deps_installed").is_file():
+    if not (out / ".deps_installed").is_file():
         return "partial:deps", [
             "의존성 설치(pip — PyQt6/openvino) 단계에서 멈췄습니다.",
             "네트워크와 디스크 여유 공간을 확인하고 다시 실행하세요.",
@@ -194,10 +157,9 @@ def diagnose(out: Path, lite: bool = False) -> Tuple[str, List[str]]:
     return "complete", []
 
 
-def report_diagnosis(out: Path, log: Callable = print,
-                     lite: bool = False) -> str:
+def report_diagnosis(out: Path, log: Callable = print) -> str:
     """진단을 사람이 읽을 형태로 출력하고 상태를 돌려준다."""
-    state, todo = diagnose(out, lite)
+    state, todo = diagnose(out)
     if state == "complete":
         return state
     log("")
@@ -280,131 +242,9 @@ def check_dev_machine(run: Callable, log: Callable) -> int:
     return 0
 
 
-def _ensure_venv(run: Callable, log: Callable) -> str:
-    """저장소 .venv 를 준비하고 그 파이썬 경로를 돌려준다."""
-    vpy = venv_python(REPO_ROOT)
-    if not vpy.exists():
-        log("[venv] creating .venv ...")
-        if run([sys.executable, "-m", "venv", str(REPO_ROOT / ".venv")]) != 0:
-            raise SystemExit("venv creation failed")
-    if run(pip_install_cmd(str(vpy), "--upgrade", "pip")) != 0:
-        raise SystemExit("pip upgrade failed")     # 아래 단계들과 동일하게 확인한다
-    return str(vpy)
-
-
 # ---------------------------------------------------------------------------
 # 빌드 액션
 # ---------------------------------------------------------------------------
-def committed_ir_missing(repo_root: Path = REPO_ROOT) -> List[str]:
-    """저장소에 커밋되지 않은 백본 IR 목록.  비어 있으면 정상.  순수 — 테스트 대상."""
-    impl = _load_portable_impl()
-    src = impl.repo_ir_dir(repo_root)
-    return [k for k in impl.IR_MODELS
-            if not ((src / f"{k}.xml").is_file() and (src / f"{k}.bin").is_file())]
-
-
-def build_online(run: Callable = _default_run, log: Callable = print) -> int:
-    """작은 온라인 launcher exe — 첫 실행에 파이썬·앱·라이브러리를 **전부** 받는다.
-
-    ★ 백본 IR 은 앱 트리에 실려 함께 내려온다(저장소에 커밋돼 있어야 한다).  이 배포는
-      아무것도 동봉하지 않으므로 **IR 이 저장소에 없으면 만들 수단이 없다** — 그대로
-      내보내면 사용자 PC 에서 고효율 모드의 GPU 가속이 조용히 죽는다.  여기서 막는다."""
-    missing = committed_ir_missing(REPO_ROOT)
-    if missing:
-        log("[실패] 백본 IR 이 저장소에 커밋돼 있지 않습니다: " + ", ".join(missing))
-        log("       온라인 배포는 앱을 GitHub 에서 받아 쓰므로, IR 도 저장소에 있어야 "
-            "합니다.")
-        log("       한 번만 만들어 커밋하세요 (torch 접속이 되는 PC 에서):")
-        log("         pip install torch torchvision openvino")
-        log("         python scripts\\internal\\make_ir.py")
-        log("         git add runtime/ir && git commit -m \"백본 IR 추가\" && git push")
-        log("       (exe / exe-lite 빌드는 IR 이 없어도 그 자리에서 변환하므로 동작합니다.)")
-        return 1
-
-    vpy = _ensure_venv(run, log)
-    if run(pip_install_cmd(vpy, "pyinstaller>=6")) != 0:
-        raise SystemExit("pyinstaller install failed")
-    if run(guard_cmd(vpy)) != 0:
-        raise SystemExit("security guard failed")
-    log("[build] online launcher (onefile, no app/deps bundled) ...")
-    rc = run(pyinstaller_cmd(vpy, INTERNAL / "online.spec"), REPO_ROOT)
-    if rc == 0:
-        log("[done] " + str(output_path("online", REPO_ROOT)))
-        log("       Ship this single file. First run downloads app+packages "
-            "into %LOCALAPPDATA%\\AOI Recipe Verification.")
-    return rc
-
-
-def build_exe(run: Callable = _default_run, log: Callable = print,
-              lite: bool = False) -> int:
-    """exe + app 폴더 — 파이썬 미설치 PC 용이고 **자동 업데이트가 완전히 동작**한다.
-
-    얇은 런처 exe 하나만 얼리고(앱 코드 0줄), 앱 소스·리소스는 ``app\\`` 에 loose 로 둔다.
-    옛 단독 exe(onedir) 는 앱을 exe 안 PYZ 에 넣어서 업데이트가 조용히 무시됐다 —
-    그 구조를 되풀이하지 않기 위한 형태다.
-
-    ``lite=True`` 는 라이브러리를 번들에 넣지 않는다(첫 실행 때 사용자 PC 가 pip 로
-    받는다).  전달 파일이 크게 줄어드는 대신 **각 PC 가 PyPI 에 닿아야** 하므로, 인터넷이
-    막힌 PC 를 위해 전체 배포본도 함께 유지한다.  런처·정리·검증 흐름은 완전히 같다."""
-    out = REPO_ROOT / exe_out_dirname(lite)
-    # ⓪ 30분을 버리기 전에 점검하고, 옛 산출물을 정리한다.
-    if preflight(REPO_ROOT, log) != 0:
-        return 1
-    if check_dev_machine(run, log) != 0:
-        return 1
-    if clean_stale_output(out, log) != 0:
-        return 1
-
-    # ① 런처 exe 먼저 — 여기서 실패하면 무거운 런타임 다운로드 전에 빨리 끝난다.
-    vpy = _ensure_venv(run, log)
-    if run(pip_install_cmd(vpy, "pyinstaller>=6")) != 0:
-        raise SystemExit("pyinstaller install failed")
-    if run(guard_cmd(vpy)) != 0:
-        raise SystemExit("security guard failed")
-    log("[build] thin launcher exe (no app code inside) ...")
-    if run(pyinstaller_cmd(vpy, INTERNAL / "exe_launcher.spec", out), REPO_ROOT) != 0:
-        raise SystemExit("launcher build failed")
-    # 런처가 제대로 얇게 나왔는지 **여기서** 본다 — 2~3 GB 를 받기 전에 멈추기 위해.
-    exe = out / "AOI_Verify.exe"
-    if not exe.is_file():
-        raise SystemExit(f"launcher exe not produced: {exe}")
-    exe_mb = exe.stat().st_size / (1024 ** 2)
-    if (out / "_internal").exists() or exe_mb >= 30:
-        raise SystemExit(
-            f"launcher looks wrong (exe {exe_mb:.1f} MB, _internal "
-            f"{'있음' if (out / '_internal').exists() else '없음'}) — "
-            "앱이 exe 안에 얼려 들어갔을 수 있습니다. exe_launcher.spec 을 확인하세요.")
-    log(f"       launcher OK ({exe_mb:.1f} MB)")
-
-    # ② 번들 런타임 + 앱 소스 — 포터블 빌드와 레이아웃이 같으므로 그대로 재사용한다.
-    impl = _load_portable_impl()
-    rc = impl.run_build(REPO_ROOT, PY_STANDALONE_URL, run=run, log=log,
-                        out_dirname=exe_out_dirname(lite),
-                        bats=("run_aoi.bat", "run_aoi_debug.bat"),
-                        bundle_ir=True, install_deps=not lite)
-    if rc != 0:
-        # run_build 가 이미 정확한 [FAILED] 를 출력했다.  여기서 파일시스템으로 추측한
-        # 진단을 덧붙이면 서로 모순되는 안내가 된다(실제로 그런 일이 있었다).
-        log("[실패] 런타임/앱 배치 단계에서 실패했습니다 — 위의 [FAILED] 메시지를 "
-            "확인하세요.")
-        return rc
-    log("[done] " + str(output_path("exe-lite" if lite else "exe", REPO_ROOT)))
-    log(f"       Ship the whole {exe_out_dirname(lite).replace('/', chr(92))} "
-        "folder (zip).")
-    if lite:
-        log("       ※ 라이브러리는 들어 있지 않습니다 — 사용자 PC 의 첫 실행 때 "
-            "인터넷으로 설치됩니다.")
-    log("")
-    vrc = verify_exe(REPO_ROOT, log, run=run, lite=lite)
-    if vrc != 0:
-        log("[주의] 빌드는 완료됐지만 검증에서 누락 항목이 발견되었습니다.")
-        return vrc
-    log("")
-    log("[다음] 배포용 zip 만들기:  python scripts\\make_release_zip.py"
-        + (" --lite" if lite else ""))
-    return vrc
-
-
 def _load_portable_impl():
     """scripts/internal/portable_build.py 를 패키지 설정 없이 직접 로드."""
     import importlib.util as _u
@@ -416,12 +256,39 @@ def _load_portable_impl():
 
 
 def build_portable(run: Callable = _default_run, log: Callable = print) -> int:
-    """자체 포함 CPython 폴더 빌드(인터넷 없는 PC 용).  네이티브 다운로드/압축은
-    portable_build.run_build 에 위임 — 무거워서 실제 실행은 Windows 에서만."""
-    if check_dev_machine(run, log) != 0:      # exe 모드와 같은 검사를 같은 시점에
+    """자체 포함 폴더 빌드 — 파이썬·라이브러리·IR·앱을 전부 담는다(사용자 PC 는 안 받는다).
+
+    네이티브 다운로드/압축은 portable_build.run_build 에 위임 — 무거워서 실제 실행은
+    Windows 에서만 한다."""
+    out = REPO_ROOT / OUT_DIRNAME
+    # 30분을 버리기 전에 점검하고, 옛 산출물을 정리한다.
+    if preflight(REPO_ROOT, log) != 0:
+        return 1
+    if check_dev_machine(run, log) != 0:
+        return 1
+    if clean_stale_output(out, log) != 0:
         return 1
     impl = _load_portable_impl()
-    return impl.run_build(REPO_ROOT, PY_STANDALONE_URL, run=run, log=log)
+    rc = impl.run_build(REPO_ROOT, PY_STANDALONE_URL, run=run, log=log,
+                        out_dirname=OUT_DIRNAME,
+                        bats=("run_aoi.bat", "run_aoi_debug.bat"),
+                        bundle_ir=True)
+    if rc != 0:
+        # run_build 가 이미 정확한 [FAILED] 를 출력했다.  여기서 파일시스템으로 추측한
+        # 진단을 덧붙이면 서로 모순되는 안내가 된다(실제로 그런 일이 있었다).
+        log("[실패] 런타임/앱 배치 단계에서 실패했습니다 — 위의 [FAILED] 메시지를 "
+            "확인하세요.")
+        return rc
+    log("[done] " + str(out))
+    log(f"       Ship the whole {OUT_DIRNAME.replace('/', chr(92))} folder (zip).")
+    log("")
+    vrc = verify_build(REPO_ROOT, log, run=run)
+    if vrc != 0:
+        log("[주의] 빌드는 완료됐지만 검증에서 누락 항목이 발견되었습니다.")
+        return vrc
+    log("")
+    log("[다음] 배포용 zip 만들기:  python scripts\\make_release_zip.py")
+    return vrc
 
 
 def _dir_size_mb(d: Path) -> float:
@@ -430,34 +297,26 @@ def _dir_size_mb(d: Path) -> float:
     return sum(f.stat().st_size for f in d.rglob("*") if f.is_file()) / (1024 * 1024)
 
 
-def verify_checks(out: Path, lite: bool = False) -> List[tuple]:
-    """'exe + app 폴더' 산출물 검사 목록 ``[(통과여부, 라벨), …]`` — 순수(테스트 대상).
+def verify_checks(out: Path) -> List[tuple]:
+    """산출물 검사 목록 ``[(통과여부, 라벨), …]`` — 순수(테스트 대상).
 
-    옛 검증은 ``_internal/aoi_verification`` 이 '폴더로 존재하는가' 만 봤는데, 그 폴더는
-    리소스 파일(style.qss·assets) 때문에 **앱 코드가 하나도 없어도 만들어진다** — 즉
-    공허하게 통과했다.  여기서는 '통과했다면 실제로 그렇다' 가 성립하는 것만 본다.
-
-    ``lite`` 배포는 라이브러리를 일부러 빼므로 기대값이 **뒤집힌다**: site-packages 는
-    비어 있어야 하고, ``.deps_installed`` 는 **없어야** 한다(있으면 첫 실행이 설치를
-    건너뛰어 앱이 아예 안 뜬다)."""
-    exe = out / "AOI_Verify.exe"
+    '통과했다면 실제로 그렇다' 가 성립하는 것만 본다(폴더가 있다는 사실만으로는 앱 코드가
+    들어 있다는 증거가 못 된다 — 리소스 파일 때문에 코드가 없어도 폴더는 만들어진다)."""
     app = out / "app"
     pkg = app / "aoi_verification"
     checks: List[tuple] = []
 
-    checks.append((exe.is_file(), f"AOI_Verify.exe 존재 ({exe})"))
-    # ★ 핵심 회귀 가드 — _internal/ 이 있으면 앱을 다시 exe 안에 얼렸다는 지문이다.
-    #   (그게 자동 업데이트가 조용히 무시되던 옛 사고의 원인)
-    checks.append((not (out / "_internal").exists(),
-                   "_internal/ 없음 (앱이 exe 안에 얼려지지 않았다는 증거)"))
-    exe_mb = (exe.stat().st_size / (1024 * 1024)) if exe.is_file() else 0.0
-    checks.append((0 < exe_mb < 30,
-                   f"런처 exe 용량 {exe_mb:.1f} MB (30 MB 미만 — 앱/PyQt6 미포함)"))
+    # ★ exe 가 없고 _internal 도 없어야 한다 — 이 배포는 bat 런처뿐이다.
+    checks.append((not (out / "AOI_Verify.exe").exists()
+                   and not (out / "_internal").exists(),
+                   "AOI_Verify.exe·_internal 없음 (exe 런처를 쓰지 않는 배포)"))
+    checks.append(((out / "run_aoi.bat").is_file(), "run_aoi.bat (런처)"))
+    checks.append(((out / "run_aoi_debug.bat").is_file(), "run_aoi_debug.bat"))
 
     checks.append(((out / "python" / "python.exe").is_file(),
                    "python/python.exe (번들 런타임)"))
     checks.append(((out / "python" / "pythonw.exe").is_file(),
-                   "python/pythonw.exe (런처가 실행하는 파일)"))
+                   "python/pythonw.exe (run_aoi.bat 이 실행하는 파일)"))
 
     for rel in ("main.py", "requirements.txt", "양식.xlsx"):
         checks.append(((app / rel).is_file(), f"app/{rel}"))
@@ -496,15 +355,8 @@ def verify_checks(out: Path, lite: bool = False) -> List[tuple]:
     checks.append((not (out / "app.new").exists(), "app.new 없음 (업데이트 찌꺼기 방지)"))
 
     # 의존성 표식 — 없으면 '새 패키지가 필요한 업데이트' 를 감지하지 못한다.
-    # ★ lite 는 정반대다: 표식이 **없어야** 첫 실행이 설치를 한다.  잘못 찍혀 나가면
-    #   사용자 PC 에서 설치를 건너뛰고 ImportError 로 죽는다 — 되돌릴 방법이 없다.
-    marker = (out / ".deps_installed").is_file()
-    if lite:
-        checks.append((not marker,
-                       ".deps_installed 없음 (lite — 첫 실행 때 설치하라는 신호)"))
-    else:
-        checks.append((marker,
-                       ".deps_installed (의존성 표식 — 업데이트 감지의 전제)"))
+    checks.append(((out / ".deps_installed").is_file(),
+                   ".deps_installed (의존성 표식 — 업데이트 감지의 전제)"))
 
     impl = _load_portable_impl()
 
@@ -518,22 +370,15 @@ def verify_checks(out: Path, lite: bool = False) -> List[tuple]:
                    f"{impl.IR_TMP_DIRNAME}/ 없음 (빌드 전용 torch 잔재 방지)"))
 
     sp_mb = _dir_size_mb(impl.site_packages_dir(out))
-    if lite:
-        # 라이브러리가 딸려 들어가면 'lite' 가 아니다 — 전달 파일이 커진 것을 모른 채
-        # 배포하게 된다.  pip 자체(+setuptools)만 있으므로 넉넉히 100 MB 로 잡는다.
-        checks.append((sp_mb < 100,
-                       f"site-packages 용량 {sp_mb:.0f} MB (lite — 100 MB 미만)"))
-    else:
-        # ★ 번들에 패키지가 **실제로** 들어갔는지 — 총 용량은 부분 설치를 못 잡고 사용자
-        #   `결과/` 파일까지 세어 오염된다.  site-packages 를 직접 본다.
-        missing = impl.missing_packages(out, out / "app" / "requirements.txt")
-        checks.append((not missing,
-                       "번들 site-packages 에 필요한 패키지 전부 존재"
-                       + (f" (빠짐: {', '.join(missing[:5])})" if missing else "")))
-        # torch 가 빠지면서 하한이 내려갔다.  '전부 건너뛰어 텅 빈' 상태만 잡으면 되므로
-        # PyQt6+openvino+opencv 만으로도 확실히 넘는 값을 쓴다.
-        checks.append((sp_mb > 200,
-                       f"site-packages 용량 {sp_mb:.0f} MB (200 MB 이상이어야 정상)"))
+    # ★ 번들에 패키지가 **실제로** 들어갔는지 — 총 용량은 부분 설치를 못 잡고 사용자
+    #   `결과/` 파일까지 세어 오염된다.  site-packages 를 직접 본다.
+    missing = impl.missing_packages(out, out / "app" / "requirements.txt")
+    checks.append((not missing,
+                   "번들 site-packages 에 필요한 패키지 전부 존재"
+                   + (f" (빠짐: {', '.join(missing[:5])})" if missing else "")))
+    # '전부 건너뛰어 텅 빈' 상태만 잡으면 되므로 PyQt6+openvino+opencv 만으로도 넘는 값.
+    checks.append((sp_mb > 200,
+                   f"site-packages 용량 {sp_mb:.0f} MB (200 MB 이상이어야 정상)"))
     # ★ torch 가 배포본에 들어가면 이 작업의 목적 자체가 무너진다 — 회귀 가드.
     torch_dir = impl.site_packages_dir(out) / "torch"
     checks.append((not torch_dir.exists(),
@@ -558,23 +403,20 @@ def import_probe_cmd(out: Path) -> List[str]:
     return [str(out / "python" / "python.exe"), "-s", "-c", src]
 
 
-def verify_exe(repo_root: Path = REPO_ROOT, log: Callable = print,
-               run: Optional[Callable] = None, lite: bool = False) -> int:
-    """'exe + app 폴더' 산출물 검증.  빌드 직후 자동 실행되며 수동 호출도 가능:
+def verify_build(repo_root: Path = REPO_ROOT, log: Callable = print,
+                 run: Optional[Callable] = None) -> int:
+    """산출물 검증.  빌드 직후 자동 실행되며 수동 호출도 가능:
     ``python scripts/build.py verify``."""
-    out = repo_root / exe_out_dirname(lite)
-    log(f"[verify] exe + app 폴더 산출물 검증{' (lite)' if lite else ''} ...")
-    checks = verify_checks(out, lite)
+    out = repo_root / OUT_DIRNAME
+    log("[verify] 산출물 검증 ...")
+    checks = verify_checks(out)
     passed = 0
     for good, label in checks:
         log(("  [OK] " if good else "  [!!] ") + label)
         passed += 1 if good else 0
 
     # import 프로브 — Windows 빌드 머신에서만 의미가 있다(번들 런타임이 windows 바이너리).
-    # ★ lite 는 건너뛴다.  라이브러리가 아직 없는 게 정상이라, 돌리면 반드시 실패한다 —
-    #   정상인 빌드를 실패로 보고하는 거짓 경보가 된다.
-    probe_ok = True
-    if not lite and run is not None and (out / "python" / "python.exe").is_file():
+    if run is not None and (out / "python" / "python.exe").is_file():
         probe_ok = run(import_probe_cmd(out)) == 0
         log(("  [OK] " if probe_ok else "  [!!] ")
             + "번들 파이썬으로 앱 import 성공 (폴더 존재로는 증명 못 하는 것)")
@@ -585,40 +427,27 @@ def verify_exe(repo_root: Path = REPO_ROOT, log: Callable = print,
     log(f"[verify] 결과: {passed}/{len(checks)} 통과" +
         (" — 빌드 정상!" if ok else " — 위 [!!] 항목을 확인하세요."))
     if not ok:
-        report_diagnosis(out, log, lite)   # make_release_zip 과 같은 말을 하게 한다
+        report_diagnosis(out, log)   # make_release_zip 과 같은 말을 하게 한다
     return 0 if ok else 1
 
 
 _ACTIONS = {
-    "online": build_online,
-    "exe": build_exe,
-    "exe-lite": lambda run=_default_run, log=print: build_exe(run, log, lite=True),
     "portable": build_portable,
-    "verify": lambda run=_default_run, log=print: verify_exe(REPO_ROOT, log, run=run),
-    "verify-lite": lambda run=_default_run, log=print: verify_exe(
-        REPO_ROOT, log, run=run, lite=True),
+    "verify": lambda run=_default_run, log=print: verify_build(REPO_ROOT, log, run=run),
 }
 
 
 def _usage() -> str:
     return (
-        "사용법: python scripts/build.py <exe|exe-lite|portable|online|verify>\n"
-        "  exe       exe + app 폴더 (권장) — 파이썬 미설치 PC, 자동 업데이트 완전 동작\n"
-        "  exe-lite  위와 같되 **라이브러리를 빼고** 첫 실행 때 사용자 PC 가 받는다\n"
-        "            전달 파일이 훨씬 작다. 대신 각 PC 가 PyPI 에 닿아야 한다\n"
-        "  portable  자체 포함 CPython 폴더 (.bat 실행 — exe 가 백신에 막힐 때)\n"
-        "  online    작은 온라인 launcher exe — 첫 실행 시 인터넷으로 앱/패키지 설치\n"
-        "            ※ 사용자 PC 에 파이썬이 설치돼 있어야 하고, 백본 IR 이 없어\n"
-        "               GPU 가속이 동작하지 않는다 (exe-lite 를 쓸 것)\n"
-        "  verify    exe 빌드 산출물 검증 (빌드 후 자동 실행됨)  · verify-lite\n"
-        "예) python scripts/build.py exe")
+        "사용법: python scripts/build.py <portable|verify>\n"
+        "  portable  파이썬·라이브러리·IR·앱을 전부 담은 폴더(dist/AOI_Verify)\n"
+        "            압축을 풀고 run_aoi.bat 을 더블클릭하면 바로 실행된다\n"
+        "  verify    산출물 검증 (빌드 후 자동 실행됨)\n"
+        "예) python scripts/build.py portable")
 
 
-_MENU = [("exe", "exe + app 폴더 (권장, 자동 업데이트 완전 동작)"),
-         ("exe-lite", "위와 같되 라이브러리는 첫 실행 때 받음 (전달 파일 작음)"),
-         ("portable", "자체 포함 CPython 폴더 (.bat 실행)"),
-         ("online", "작은 온라인 launcher exe (파이썬 설치 필요·가속 없음)"),
-         ("verify", "exe 빌드 산출물 검증")]
+_MENU = [("portable", "전부 담은 폴더 (압축 풀고 run_aoi.bat)"),
+         ("verify", "산출물 검증")]
 
 
 def _prompt_kind(input_fn=input) -> Optional[str]:
@@ -664,8 +493,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(_usage())
         return 2
     if os.name != "nt":
-        print("[주의] 실제 exe/포터블 빌드는 Windows 에서만 동작합니다 "
-              "(PyInstaller 크로스컴파일 불가). 현재 OS 에서는 명령만 확인됩니다.")
+        print("[주의] 실제 빌드는 Windows 에서만 동작합니다 "
+              "(번들 런타임이 Windows 바이너리). 현재 OS 에서는 명령만 확인됩니다.")
     try:
         return action()
     except SystemExit as exc:

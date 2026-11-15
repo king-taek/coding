@@ -3,12 +3,11 @@ REM AOI Recipe Verification - run (GUI only, no console window; uses pythonw).
 REM Sits in the install folder next to python\ and app\; double-click it (or the
 REM "AOI" shortcut the app creates next to it, which carries the app icon).
 REM
-REM This bat IS the launcher (same job as AOI_Verify.exe / exe_launcher.py, which
-REM company security may delete):
+REM This bat IS the launcher (there is no exe launcher any more; company security
+REM deletes unsigned exe files):
 REM   1) apply a staged update: app.new -> app (keeps the old app on any failure)
 REM   2) tell the app a launcher exists (AOI_APP_HOME), so the next update is
 REM      staged into app.new instead of being written over the running app\
-REM Keep it in step with scripts/exe_launcher.py (swap_pending / launch_cmd).
 REM Every failure path below ends in "run the old version as is".
 REM   run_aoi.bat debug  -> same, but in this console with errors visible
 REM                         (that is what run_aoi_debug.bat does).
