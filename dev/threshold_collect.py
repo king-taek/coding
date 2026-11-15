@@ -22,6 +22,9 @@
     · :data:`RICH_LOT` — 비교 웨이퍼의 ``s_RichSurface.dat`` 앞 :data:`RICH_PARTS` 조각(Defect 별 Contrast 후보, ``RichSurface/``).
     · :data:`QORVO_INI_JOBS` — Conder 와 같은 웨이퍼가 든 QORVO Job 의 **모든 셋업**(EDGE 아닌 것 포함)에서 LOT 마다
       그 웨이퍼의 :data:`QORVO_INI` 와 첫 웨이퍼의 die 맵만(번호 원점 확인용, 2026-11-15).
+    · :data:`WIDE_FILES` — NAS 의 모든 Job 에서 최근 LOT 웨이퍼 1장의 사진 위치 · die 맵 파일만(``모든Job/``, 맵 구멍 리스크).
+    · :data:`ODD_FILES` — 레코드가 152 가 아닌 구형 장비의 Job 최대 :data:`ODD_JOBS` 개(``구형flt/``, Surface.flt 검증).
+    · :data:`SIB_LOTS` — 같은 웨이퍼가 두 단계 이상에 나오는 Conder LOT(``Conder옆폴더/``, 옆 폴더 맵 리스크).
     · :data:`CONDER_ROW_LOTS` — Conder LIVE 파일명 번호로 앱 row 를 확인할 Kendall LOT(맵 txt · lot · csv · 사진 이름).
     · :data:`KLA_PAIRS` — 같은 웨이퍼를 KLA 와 Camtek 이 같은 층에서 찍은 것(스캔 기록, 2026-11-15 사용자 요청).
       Camtek 웨이퍼 폴더와 KLA 웨이퍼 폴더(정보파일 · 사진 이름)를 ``KLA비교/<KLA LOT>/`` 아래 나란히 담는다.
@@ -141,12 +144,41 @@ QORVO_INI_JOBS = [
     ('W96798Z5BK16', 'GWL4R'),   # 6G7ZAD
     ('W97218SGB1K16', 'SQ6'),    # 6I7L7K(XYT 셋업 포함) · 6H7ENK — SQ67P01 · SQ62G… (col/row 쓰레드)
 ]
+# 다 받은 Job — QORVO 번호 쓰레드(2026-11-15): 앞으로는 W97218 의 모든 셋업 ini · 첫 웨이퍼 die 맵 · Defects.csv 만 필요.
+QORVO_INI_DONE = {"W96721Z5BK16", "W96760Z5BK16", "W96798Z5BK16"}
+# AOI-11 6412 CTX(번호가 (1,2) 밀린 스캔)에 찍힌 웨이퍼 — 다른 셋업에서 찍은 같은 웨이퍼를 먼저 고른다(QORVO 번호 쓰레드 2026-11-15).
+QORVO_INI_PREFER = {"SQ67P01-D1", "SQ67P13-E6", "SQ67P25-G3"}
 QORVO_INI = ("ProductInfo.ini", "WaferMapRecipe.ini", "Params_WaferInfo.ini", "Recipe.ini",
              "ColorImageGrabingInfo.ini",   # 사진별 X, Y — 093 칸 사진으로 Ref−Cust 를 가린다(수집 자료 쓰레드 2026-11-15)
-             "WaferInfo.dat")               # die 범위 — 경계상자가 [ExportData] 와 56/56 같았다(번호표 대용 후보)
+             "WaferInfo.dat",               # die 범위 — 경계상자가 [ExportData] 와 56/56 같았다(번호표 대용 후보)
+             "Defects.csv")                 # 장비 Export 결과(Col · Row = 장비 화면 번호, X · Y = die 안 µm) — 번호 정답지(2026-11-15)
 QORVO_DIE_MAP = ("s_DieLocation.dat", "s_DieLocation.dat.md")   # LOT 마다 첫 웨이퍼만(웨이퍼당 약 10 MB)
 QORVO_INI_LOTS = 40      # Job 마다 LOT 몇 개까지(최근 것부터)
 QORVO_INI_WAFERS = 2     # LOT 마다 웨이퍼 몇 장
+# 맵 안쪽 구멍 리스크(col/row 쓰레드 요청 2026-11-15, 현택님 '진행해'): 제품 폭을 넓히려 NAS 의 **모든 Job** 에서
+# 최근 LOT 웨이퍼 1장씩, 이 파일들만 담는다.  사진 위치(ColorImageGrabingInfo)와 die 맵을 제품별로 맞춰 본다.
+WIDE_FILES = ("s_DieLocation.dat", "s_DieLocation.dat.md", "ColorImageGrabingInfo.ini", "ProductInfo.ini",
+              "Params_WaferInfo.ini", "WaferInfo.dat",
+              "Surface.flt.md",       # 장비마다 레코드 크기(수집 자료 쓰레드 Surface.flt 검증, PR #131) — Surface.flt 는 이름 · 크기만
+              "Defects.csv",
+              "DieLut.dat")           # 다중 레시피 스캔에만 있다 — Recipe*-ProductInfo.ini 와 함께 Kendall 밖 제품의 다중 레시피 규칙 확인
+_RECIPE_PI = re.compile(r"Recipe\d+-ProductInfo\.ini$", re.I)
+WIDE_FILE_MB = 12        # 파일당 상한
+WIDE_MINUTES = 10        # 이 단계 시간 상한
+# 레코드가 152 바이트가 아닌(구형) 장비만 깊게 — 그 장비의 서로 다른 Job 최대 :data:`ODD_JOBS` 개 × 최근 LOT 웨이퍼 1장.
+# Contrast 값이 든 레코드로 RTP.txt 기준과 맞춰 보려 이름에 PI · LIVE 가 든 Job 부터(수집 자료 쓰레드 요청 2026-11-15).
+ODD_SEED = ("AOI-1", "AOI-5", "AOI-10")          # 이미 확인한 구형(120 · 136 · 136)
+ODD_FILES = ("Surface.flt", "Surface.flt.md", "RTP.txt", "Defects.csv")   # + 사진 이름(수집 자료 쓰레드: 이걸로 충분)
+ODD_FIRST = ("PI", "LIVE")
+ODD_JOBS = 8
+ODD_MINUTES = 8
+# Conder 옆 폴더 맵(수집 자료 쓰레드 요청 2026-11-15): 같은 웨이퍼가 두 단계 이상(예: OR · 재 AOI · _재리뷰)에 나오는 LOT.
+# QORVO 는 장치마다, 다른 고객은 고객마다 최근 :data:`SIB_LOTS` 개.  단계 폴더의 txt · lot · csv(수정 시각과 함께)와 사진 이름.
+SIB_LOTS = 8
+# 꼭 담을 Conder LOT(``CONDER_ROOTS`` 기준 경로) — 지난 수집에서 빠졌다(6H7ENK CTX 2. FVI, QORVO 번호 쓰레드 2026-11-15).
+CONDER_MUST = [r"575. QORVO US\44. W97218SGZ4BK16\75. 6H7ENK (CTX)"]
+SIB_MINUTES = 10
+SIB_MB = 200
 QORVO_INI_MB = 150       # 이 단계로 담는 원본 상한(ColorImageGrabingInfo 가 웨이퍼당 최대 5 MB, 지난 수집 관측)
 # 같은 웨이퍼를 KLA 와 Camtek 이 같은 층(RDL1~6 · FS …)에서 7일 안에 찍은 것(스캔 기록, 2026-11-15 사용자 요청).
 # (KLA 장비, KLA LOT, [KLA 웨이퍼 시작 시각], Camtek 장비, Job, Setup, LOT, [웨이퍼 ID], [KLA 슬롯]).
@@ -181,6 +213,10 @@ CONDER_ROW_LOTS = [
 ]
 CONDER_ROW_MINUTES = 10
 CONDER_FIRST = ("KENDALL", "MSFT", "MICROSOFT")   # 이 이름이 든 고객 폴더부터 본다
+# 다 받은 단계 — :func:`run` 이 건너뛴다(코드는 남긴다).  현택님 지시(2026-11-15): 더 받을 필요 없는 건 수집기에서 계속 뺀다.
+# pair 비교 스캔 · rich RichSurface · conder_rows Conder 번호 확인 · kla KLA 짝 · qorvo QORVO 스캔 기록 LOT 과 Conder ·
+# known Kendall/TB500 LOT — 20261115_1856 수집까지 다 받았다(수집 자료 · QORVO 번호 쓰레드 확인).
+DONE = {"pair", "rich", "conder_rows", "kla", "qorvo", "known"}
 _LOT_DEPTH = 4      # Job 아래 LOT 을 찾는 깊이(Setup → [구분] → LOT)
 _WAFER_DEPTH = 2    # 웨이퍼 폴더 안 하위 폴더 깊이
 
@@ -485,6 +521,164 @@ def collect_qorvo(col, say, progress, stop, end=None):
     return wafers
 
 
+def _record_size(w: Path):
+    """웨이퍼 폴더 ``Surface.flt.md`` 의 RecordSize.  없으면 None."""
+    try:
+        m = re.search(r'RecordSize Size="(\d+)"', (w / "Surface.flt.md").read_text(errors="replace"))
+    except OSError:
+        return None
+    return int(m.group(1)) if m else None
+
+
+def collect_odd_flt(col, say, progress, stop, odd, end=None):
+    """레코드 크기가 152 가 아닌 장비(``odd`` — 장비 이름)의 Job 을 깊게 모은다.  웨이퍼 수를 돌려준다."""
+    deadline = time.time() + ODD_MINUTES * 60
+    if end is not None:
+        deadline = min(deadline, end)
+
+    def expired():
+        return stop() or time.time() > deadline
+
+    wafers = 0
+    for r in nas_roots():
+        aoi = r.parent.name
+        if _aoi_key(aoi) not in odd or expired():
+            continue
+        jobs = sorted(_entries(r)[0], key=lambda e: (not any(k in e[0].upper() for k in ODD_FIRST), -e[2]))
+        taken = 0
+        for name, job, _, _ in jobs:
+            if taken >= ODD_JOBS or expired():
+                break
+            for lot in find_lots(job, 1, expired):
+                for w in pick_wafers(lot, 1):
+                    progress(0, 0, f"구형 Surface.flt {aoi} {name}"[:70])
+                    col.take_files(w, f"구형flt/{aoi}/{name}/{lot.relative_to(job).as_posix()}/{w.name}",
+                                   only=set(ODD_FILES), photos=True)
+                    wafers += 1
+                    taken += 1
+        say(f"구형 Surface.flt {aoi}: Job {taken}개")
+    return wafers
+
+
+def _conder_steps(d: Path, k=0, out=None):
+    """LOT 아래 단계 폴더 → (그 폴더 파일들, 웨이퍼 폴더들, 그 단계의 웨이퍼 ID).  사진이 바로 든 폴더 = 웨이퍼 폴더."""
+    out = {} if out is None else out
+    dirs, files = _entries(d)
+    ids = {n[:-4].upper() for n, _, _, _ in files if n.lower().endswith(".txt")}
+    wafer_dirs = []
+    for name, p, _, _ in dirs:
+        sub_dirs, sub_files = _entries(p)
+        if any(Path(n).suffix.lower() in IMG_EXT for n, _, _, _ in sub_files) or name.upper() in ids:
+            wafer_dirs.append((name, p))
+            ids.add(name.upper())
+        elif k < 3:
+            _conder_steps(p, k + 1, out)
+    if files or wafer_dirs:
+        out[d] = (wafer_dirs, ids)
+    return out
+
+
+def _take_conder_lot(col, lot: Path, arc_lot: str, steps):
+    """단계 폴더 파일(수정 시각과 함께, Thumbs.db 빼고)과 사진 폴더의 사진 이름."""
+    for step, (wafer_dirs, _) in steps.items():
+        arc = arc_lot if step == lot else f"{arc_lot}/{step.relative_to(lot).as_posix()}"
+        col.take_files(step, arc, depth=_WAFER_DEPTH, with_mtime=True, skip=("Thumbs.db",))
+        for name, p in wafer_dirs:
+            col.take_files(p, f"{arc}/{name}", depth=_WAFER_DEPTH, only=set(), photos=True)
+
+
+def collect_conder_must(col, say, progress):
+    """:data:`CONDER_MUST` 의 LOT 을 통째로(단계 폴더 파일 · 사진 이름).  담은 LOT 수를 돌려준다."""
+    n = 0
+    for rel in CONDER_MUST:
+        parts = Path(rel.replace("\\", "/")).parts
+        lot = next((Path(b).joinpath(*parts) for b in CONDER_ROOTS if Path(b).joinpath(*parts).is_dir()), None)
+        if lot is None:
+            say(f"Conder LOT 못 찾음: {rel}")
+            continue
+        progress(0, 0, f"Conder {lot.name}"[:70])
+        _take_conder_lot(col, lot, "Conder옆폴더/" + "/".join(parts), _conder_steps(lot))
+        say(f"Conder 꼭 담을 LOT {lot}")
+        n += 1
+    return n
+
+
+def collect_conder_siblings(col, say, progress, stop, end=None):
+    """같은 웨이퍼가 두 단계 이상에 나오는 Conder LOT 의 단계 폴더 파일 · 사진 이름.  담은 LOT 수를 돌려준다."""
+    deadline = time.time() + SIB_MINUTES * 60
+    if end is not None:
+        deadline = min(deadline, end)
+    start = col.raw
+
+    def expired():
+        return stop() or time.time() > deadline or col.raw - start > SIB_MB * 2 ** 20
+
+    def lots_of(d: Path):
+        return [(t, p) for n, p, t, _ in _entries(d)[0] if re.search(r"\([^()]+\)\s*$", n)]
+
+    must = {rel.replace("\\", "/") for rel in CONDER_MUST}
+    lots = 0
+    for base in (Path(r) for r in CONDER_ROOTS):
+        for cust_name, cust, _, _ in sorted(_entries(base)[0]):
+            if expired():
+                break
+            devs = [p for _, p, _, _ in _entries(cust)[0]]
+            groups = [lots_of(d) for d in devs] if QORVO_NAME in cust_name.upper() else [
+                [lot for d in devs for lot in lots_of(d)]]
+            for group in groups:
+                picked = 0
+                for _, lot in sorted(group, key=lambda t: -t[0]):
+                    if picked >= SIB_LOTS or expired():
+                        break
+                    if lot.relative_to(base).as_posix() in must:
+                        continue                                      # 꼭 담을 LOT 으로 이미 담았다
+                    progress(0, 0, f"Conder 옆 폴더 {cust_name} {lot.name}"[:70])
+                    steps = _conder_steps(lot)
+                    seen = {}
+                    for _, ids in steps.values():
+                        for i in ids:
+                            seen[i] = seen.get(i, 0) + 1
+                    if len(steps) < 2 or max(seen.values(), default=0) < 2:
+                        continue
+                    _take_conder_lot(col, lot, f"Conder옆폴더/{lot.relative_to(base).as_posix()}", steps)
+                    picked += 1
+                    lots += 1
+                    say(f"Conder 옆 폴더 LOT {lot}  단계 {len(steps)}")
+    return lots
+
+
+def collect_all_jobs(col, say, progress, stop, end=None, odd=None):
+    """NAS 의 모든 Job(최근에 바뀐 것부터, 장비를 섞어서)에서 최근 LOT 중 하나(셋업이 여럿이면 가장 최근이 아닐 수 있다 —
+    제품 폭이 목적이라 NAS 읽기를 아낀다)의 웨이퍼 1장에서 :data:`WIDE_FILES` 만 담는다.
+    웨이퍼 수를 돌려준다."""
+    deadline = time.time() + WIDE_MINUTES * 60
+    if end is not None:
+        deadline = min(deadline, end)
+
+    def expired():
+        return stop() or time.time() > deadline
+
+    jobs = [(t, r, name, job) for r in nas_roots() for name, job, t, _ in _entries(r)[0]]
+    jobs.sort(key=lambda j: -j[0])
+    say(f"모든 Job: {len(jobs)}개 (최근 것부터)")
+    wafers = 0
+    for k, (_, r, name, job) in enumerate(jobs):
+        if expired():
+            say(f"모든 Job: 시간 제한·중지로 {k}/{len(jobs)} 에서 멈춤")
+            break
+        progress(k, len(jobs), f"모든 Job {r.parent.name} {name}"[:70])
+        for lot in find_lots(job, 1, expired):
+            for w in pick_wafers(lot, 1):
+                arc = f"모든Job/{r.parent.name}/{name}/{lot.relative_to(job).as_posix()}/{w.name}"
+                col.take_files(w, arc, only=lambda n: n in WIDE_FILES or bool(_RECIPE_PI.match(n)),
+                               max_mb=WIDE_FILE_MB, names_only=("Surface.flt",))
+                size = _record_size(w)
+                if odd is not None and size not in (None, 152):
+                    odd.add(_aoi_key(r.parent.name))
+                wafers += 1
+    return wafers
+
+
 def collect_qorvo_ini(col, say, progress, stop, end=None):
     """:data:`QORVO_INI_JOBS` 의 Job 을 모든 장비 · 모든 셋업에서 찾아, LOT 마다 Conder 와 같은 웨이퍼의
     작은 ini 만 담는다(EDGE 만 있던 0245 수집을 메우는 자료).  웨이퍼 수를 돌려준다."""
@@ -499,7 +693,8 @@ def collect_qorvo_ini(col, say, progress, stop, end=None):
     wafers = 0
     for r in nas_roots():
         for name, job, _, _ in sorted(_entries(r)[0]):
-            hit = next((w.upper() for key, w in QORVO_INI_JOBS if key in name.upper()), None)
+            hit = next((w.upper() for key, w in QORVO_INI_JOBS
+                        if key in name.upper() and key not in QORVO_INI_DONE), None)
             if hit is None or expired():
                 continue
             arc_job = f"QORVO/Scanresult/{r.parent.name}/{name}"
@@ -511,6 +706,7 @@ def collect_qorvo_ini(col, say, progress, stop, end=None):
                 col.take_top_files(lot.parent, arc_lot.rsplit("/", 1)[0])   # 셋업 폴더 바로 아래 파일
                 col.take_top_files(lot, arc_lot)
                 ws = [p for p in pick_wafers(lot, 1000) if p.name.upper().startswith(hit)]   # hit '' = 모든 웨이퍼
+                ws.sort(key=lambda p: p.name.upper() not in QORVO_INI_PREFER)   # 번호가 밀린 스캔에 찍힌 웨이퍼 먼저
                 for k, w in enumerate(ws[:QORVO_INI_WAFERS]):
                     if expired():
                         break
@@ -565,17 +761,27 @@ class Collector:
         self.raw = 0
         self.files = 0
 
-    def take_files(self, folder: Path, arc: str, depth: int = 0, only=None):
-        """``only`` 를 주면 그 이름의 파일만 담는다(하위 폴더는 내려가지 않고, 다른 파일은 목록에도 안 남긴다)."""
+    def take_files(self, folder: Path, arc: str, depth: int = 0, only=None, max_mb=None,
+                   photos=False, names_only=(), with_mtime=False, skip=()):
+        """``only``(이름 집합 또는 이름 → 참/거짓 함수)를 주면 그 파일만 담는다(하위 폴더는 내려가지 않고, 다른 파일은 목록에도 안 남긴다).
+        ``photos`` 면 ``only`` 가 있어도 사진 이름은 남기고, ``names_only`` 의 파일은 이름 · 크기만 파일목록에 적는다.
+        ``with_mtime`` 이면 파일목록에 수정 시각을 붙인다.  ``skip`` 의 이름은 아예 건너뛴다."""
         dirs, files = _entries(folder)
-        for name, path, _, size in sorted(files):
-            if only is not None and name not in only:
+        for name, path, mtime, size in sorted(files):
+            if name in skip:
+                continue
+            if Path(name).suffix.lower() in IMG_EXT and (only is None or photos):
+                self.photos.append(f"{arc}/{name}")
+                continue
+            if only is not None and not (only(name) if callable(only) else name in only):
+                if name in names_only:
+                    self.listing.append(f"{arc}/{name}\t{size}\t이름만")
                 continue
             ext = Path(name).suffix.lower()
             if ext in IMG_EXT:
                 self.photos.append(f"{arc}/{name}")
                 continue
-            if ext in SKIP_EXT or size > FILE_MB * 2 ** 20:
+            if ext in SKIP_EXT or size > (max_mb or FILE_MB) * 2 ** 20:
                 self.listing.append(f"{arc}/{name}\t{size}\t뺌")
                 continue
             try:
@@ -583,7 +789,8 @@ class Collector:
             except OSError as e:
                 self.listing.append(f"{arc}/{name}\t{size}\t못 읽음 {e}")
                 continue
-            self.listing.append(f"{arc}/{name}\t{size}\t담음")
+            stamp = f"\t{datetime.fromtimestamp(mtime):%Y-%m-%d %H:%M}" if with_mtime else ""
+            self.listing.append(f"{arc}/{name}\t{size}\t담음{stamp}")
             h = hashlib.sha1(data).hexdigest()
             if h in self.hashes:
                 self.dups.append(f"{arc}/{name}\t= {self.hashes[h]}")
@@ -673,7 +880,8 @@ def run(out: Path, progress=None, stop=None):
         print(line)
         progress(0, 0, line[:70])
 
-    for k, raw in enumerate(PAIR_LOTS):                    # 비교 스캔 LOT 은 먼저, 웨이퍼 전부
+    say(f"다 받아서 건너뛰는 단계: {', '.join(sorted(DONE)) or '없음'}")
+    for k, raw in enumerate(PAIR_LOTS if "pair" not in DONE else []):   # 비교 스캔 LOT 은 먼저, 웨이퍼 전부
         if stop() or time.time() > deadline:
             say("시간 제한·중지로 비교 LOT 을 여기서 멈춤")
             break
@@ -696,22 +904,31 @@ def run(out: Path, progress=None, stop=None):
             col.take_files(w, f"{arc_lot}/{w.name}")
             wafers += 1
         say(f"비교 LOT {lot}  웨이퍼 {len(ws)}")
-    if not stop():
+    if not stop() and "rich" not in DONE:
         collect_rich_surface(col, say, progress, stop)    # 비교 웨이퍼 RichSurface 앞부분(버튼은 하나, 사용자 지시 2026-11-15)
-    if not stop():
+    if not stop() and "conder_rows" not in DONE:
         wafers += collect_conder_rows(col, say, progress, stop, end=deadline)
-    if not stop():
+    if not stop() and "kla" not in DONE:
         wafers += collect_kla_pairs(col, say, progress, stop, end=deadline)
-    if not stop():
+    if not stop() and "qorvo_ini" not in DONE:
         wafers += collect_qorvo_ini(col, say, progress, stop, end=deadline)   # 작아서 먼저
-    if not stop():
+    if not stop() and "qorvo" not in DONE:
         wafers += collect_qorvo(col, say, progress, stop, end=deadline)
+    odd = {_aoi_key(a) for a in ODD_SEED}
+    if not stop():
+        wafers += collect_all_jobs(col, say, progress, stop, end=deadline, odd=odd)
+    if not stop():
+        say(f"구형 Surface.flt 장비: {', '.join(sorted(odd))}")
+        wafers += collect_odd_flt(col, say, progress, stop, odd, end=deadline)
+    if not stop():
+        collect_conder_must(col, say, progress)
+        collect_conder_siblings(col, say, progress, stop, end=deadline)
     pair_raw = col.raw                                     # 아래 용량 한도는 비교 LOT·QORVO 를 뺀 양으로 잰다(시간은 전체 1시간)
 
     roots = {_aoi_key(r.parent.name): r for r in nas_roots()}
     say(f"Scanresult {len(roots)}곳: " + ", ".join(sorted(roots)))
     jobs = []
-    for i, (aoi, job, setup, lot_name) in enumerate(KNOWN_LOTS):
+    for i, (aoi, job, setup, lot_name) in enumerate(KNOWN_LOTS if "known" not in DONE else []):
         if expired():
             say("시간 제한·중지·용량 한도로 여기서 멈춤")
             break
@@ -749,6 +966,93 @@ def run(out: Path, progress=None, stop=None):
     progress(0, 0, "zip 나누는 중")
     split_zip(staging, out_dir, f"Threshold수집_{stamp}")
     return out_dir, wafers, col.files
+
+
+# [다시 담기 — 일회성] 바탕화면의 지난 수집 폴더에서 아직 필요한 것만 골라 28 MB zip 으로 다시 만든다(현택님 지시 2026-11-15:
+# 다시 수집하면 오래 걸리니 있는 zip 에서 고르기).  NAS 는 읽지 않는다.  쓰고 나면 이 블록 · 버튼을 지운다.
+REPACK_SRC = "Threshold수집_20261115_1856"
+REPACK_KEEP = ("RichSurface/", "QORVO/Scanresult/")
+REPACK_KEEP_IF = ("6H7ENK",)           # QORVO/Conder 중 이 글자가 든 경로(QORVO 번호 쓰레드)
+_LISTS = ("사진목록.txt", "파일목록.txt", "중복목록.txt")
+
+
+def _scan_wafer_ids(names):
+    """``QORVO/Scanresult/…/<웨이퍼>/Params_WaferInfo.ini`` 같은 웨이퍼 표식 파일이 든 폴더 이름(대문자)."""
+    return {n.split("/")[-2].upper() for n in names
+            if n.startswith("QORVO/Scanresult/") and n.rsplit("/", 1)[-1] in WAFER_MARK}
+
+
+def _repack_keep(name: str, wids) -> bool:
+    if name.startswith(REPACK_KEEP):
+        return True
+    if not name.startswith("QORVO/Conder/"):
+        return False
+    if any(k in name for k in REPACK_KEEP_IF):
+        return True
+    segs = [x.upper() for x in name.split("/")]       # 같은 웨이퍼가 Scanresult ini 단계에 있는 Conder 맵 · 사진 이름
+    return any(x in wids or (x.endswith(".TXT") and x[:-4] in wids) for x in segs)
+
+
+def repack(out: Path, progress=None, stop=None):
+    """``out`` (바탕화면) 의 :data:`REPACK_SRC` 폴더 zip 에서 필요한 것만 골라 ``<폴더>_다시담음`` 에 다시 나눠 담는다.
+    ``(결과 폴더, 남긴 파일 수, 원래 파일 수)``.  폴더가 없으면 ``(None, 0, 0)``."""
+    progress = progress or (lambda *_: None)
+    stop = stop or (lambda: False)
+    src = out / REPACK_SRC
+    zips = sorted(p for p in src.glob("*.zip") if not p.name.startswith("_")) if src.is_dir() else []
+    if not zips:
+        return None, 0, 0
+    lists, summary, index = {n: [] for n in _LISTS}, "", {}
+    for z in zips:
+        with zipfile.ZipFile(z) as f:
+            for info in f.infolist():
+                if info.filename in _LISTS:
+                    lists[info.filename] += f.read(info.filename).decode("utf-8", "replace").splitlines()
+                elif info.filename == "요약.txt":
+                    summary += f.read(info.filename).decode("utf-8", "replace")
+                elif not info.is_dir():
+                    index[info.filename] = z
+    wids = _scan_wafer_ids(index) | _scan_wafer_ids(ln.split("\t")[0] for ln in lists["파일목록.txt"])
+    keep = {n for n in index if _repack_keep(n, wids)}
+    # 내용이 같아 한 번만 담긴 파일: 남길 이름인데 원본을 버리면 원본 내용을 그 이름으로 담는다.
+    borrow, dups = {}, []
+    for ln in lists["중복목록.txt"]:
+        dst, _, srcname = ln.partition("\t= ")
+        if not _repack_keep(dst, wids):
+            continue
+        if srcname in keep:
+            dups.append(ln)
+        elif srcname in index:
+            borrow.setdefault(srcname, []).append(dst)
+    dst_dir = out / f"{src.name}_다시담음"
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    staging = dst_dir / "_작업중.zip"
+    done, total = 0, len(keep) + sum(len(v) for v in borrow.values())
+    with zipfile.ZipFile(staging, "w", zipfile.ZIP_DEFLATED) as w:
+        for z in zips:
+            with zipfile.ZipFile(z) as f:
+                for name in f.namelist():
+                    if stop():
+                        break
+                    targets = ([name] if name in keep and index.get(name) == z else []) + (
+                        borrow.get(name, []) if index.get(name) == z else [])
+                    if not targets:
+                        continue
+                    data = f.read(name)
+                    for t in targets:
+                        w.writestr(t, data)
+                        done += 1
+                    progress(done, total, f"다시 담는 중 {done}/{total}")
+        w.writestr("사진목록.txt", "\n".join(ln for ln in lists["사진목록.txt"] if _repack_keep(ln, wids)) + "\n")
+        w.writestr("파일목록.txt", "\n".join(ln for ln in lists["파일목록.txt"]
+                                             if _repack_keep(ln.split("\t")[0], wids)) + "\n")
+        w.writestr("중복목록.txt", "\n".join(dups) + "\n")
+        w.writestr("요약.txt", f"{src.name} 에서 다시 담음 — 남긴 경로: {', '.join(REPACK_KEEP)} · "
+                               f"QORVO/Conder 는 {', '.join(REPACK_KEEP_IF)} 와 Scanresult 와 같은 웨이퍼 · "
+                               f"파일 {done}/{len(index)}\n\n{summary}")
+    progress(0, 0, "zip 나누는 중")
+    split_zip(staging, dst_dir, f"{src.name}_다시")
+    return dst_dir, done, len(index)
 
 
 # RichSurface 앞부분 — Defect 마다 Contrast 가 있을 수 있는 유일한 파일(웨이퍼당 수백 MB)이라 앞부분만 조각으로 받는다(사용자 지시 2026-11-15).
