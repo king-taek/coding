@@ -24,7 +24,7 @@ from ..coords import surface_flt as _flt
 from .rules import FEATURE_AREA, FEATURE_CONTRAST, FEATURE_WIDTH, read_classes, read_zones, zone_dir_for
 
 __all__ = ["Defect", "load_all", "load_defects", "match_photos", "contrast_known", "why_dropped",
-           "is_kept", "recipe_misses", "count_by_bin"]
+           "is_kept", "recipe_misses", "count_by_bin", "recommend"]
 
 _LOG = logging.getLogger("aoi.threshold")
 
@@ -47,6 +47,7 @@ class Defect:
     contrast: float
     x: float            # µm (ActualX)
     y: float
+    wafer: int = 0      # 여러 웨이퍼를 합칠 때 몇 번째 웨이퍼인지 — (wafer, index) 가 Defect 의 키
 
 
 def _layout(flt: Path):
@@ -197,3 +198,62 @@ def count_by_bin(defects, zones: dict, overrides: dict | None = None) -> dict:
         total, kept = out.get(k, (0, 0))
         out[k] = (total + 1, kept + is_kept(d, zones, overrides))
     return out
+
+
+# 자동 추천이 올릴 수 있는 기준 — 하한이 있는 것(1 범위 안 · 4 > · 5 ≥).  나머지는 레시피 그대로.
+_RAISABLE = (1, 4, 5)
+
+
+def _passes_bundle(d: Defect, z, cls: int) -> bool:
+    return why_dropped(d, {(d.zone_dir, d.zone): type(z)(z.zone_id, z.name, {cls: z.bundles[cls]})}) is None
+
+
+def recommend(picked, zones: dict, snap=None) -> tuple[dict, list]:
+    """꼭 잡아야 할 Defect(``picked``)를 전부 남기면서 나머지를 많이 빼는 하한 → ``(overrides, 못 지킨 Defect)``.
+
+    현택님 요청(2026-11-16, 자동 모드): 사용자가 고른 Defect 는 하나도 빠지면 안 되고, 그 안에서
+    Overkill 을 줄인다.  해석(PR 에 적음):
+      · 고른 Defect 마다 지킬 묶음을 정한다 — **자기 첫 분류(bin) 묶음을 레시피 값에서 통과하면 그 묶음**
+        (장비가 그 묶음으로 잡았다), 아니면 레시피 값에서 통과하는 **모든** 묶음(어느 것이 잡았는지 모른다).
+      · 묶음 안은 하한끼리 AND 라, 각 기준을 따로 '지킬 Defect 값의 최솟값' 까지 올리면 **그 배정에서**
+        가장 많이 빠진다(하한을 올리면 빠지는 수는 늘기만 한다).  묶음끼리는 OR 이라 고른 것이 없는 묶음을
+        통과하는 Defect 는 남는다 — 전체 최적은 아니고, 화면은 '새로 빠짐' 숫자를 그대로 보여 준다.
+      · 고른 Defect 가 없는 Zone · 묶음은 건드리지 않는다(돌려주는 키에 없다).  레시피보다 내리지 않는다.
+      · Contrast 0 은 '안 잼'(:func:`why_dropped`) 이라 최솟값에서 뺀다 — 전부 0 이면 Contrast 는 그대로.
+    ``snap(feature, 값 px, 엄격) → px`` 는 화면 표시 자리로 **내림**한 값을 준다 — 화면 숫자를 그대로 장비에
+    적어도 고른 Defect 가 빠지지 않게.  없으면 값 그대로(엄격 '>' 이면 바로 아래 실수).
+    내림·환산 오차로 고른 것이 빠지면 그 Defect 를 지키는 묶음의 추천을 거둔다(레시피 값으로).
+    끝까지 못 지킨 것(레시피 값에서도 이미 빠지는 Defect)을 돌려준다."""
+    import math
+    if snap is None:
+        def snap(_feature, v, strict):
+            return math.nextafter(v, -math.inf) if strict else v
+    guard: dict = {}                    # (zone_dir, zone, Classify) → 지킬 Defect 들
+    owners_of: dict = {}
+    for d in picked:
+        z = zones.get((d.zone_dir, d.zone))
+        if z is None or not z.bundles:
+            continue
+        own = d.bin in z.bundles and _passes_bundle(d, z, d.bin)
+        owners = [d.bin] if own else [c for c in z.bundles if _passes_bundle(d, z, c)]
+        owners_of[id(d)] = [(d.zone_dir, d.zone, c) for c in owners]
+        for c in owners:
+            guard.setdefault((d.zone_dir, d.zone, c), []).append(d)
+    out: dict = {}
+    for (zdir, zid, cls), ds in guard.items():
+        for f in zones[(zdir, zid)].bundles[cls]:
+            if f.ftype not in _RAISABLE:
+                continue
+            vals = [v for v in (_value(d, f.feature) for d in ds)
+                    if v is not None and not (f.feature == FEATURE_CONTRAST and v == 0)]
+            if not vals:
+                continue
+            low = snap(f.feature, min(vals), f.ftype == 4)
+            if low > f.low:
+                out[(zdir, zid, cls, f.feature)] = low
+    for d in picked:                    # 내림 오차 방어 — 지키지 못한 Defect 의 묶음은 레시피 값으로
+        if not is_kept(d, zones, out):
+            for b in owners_of.get(id(d), ()):
+                for k in [k for k in out if k[:3] == b]:
+                    del out[k]
+    return out, [d for d in picked if not is_kept(d, zones, out)]

@@ -33,7 +33,7 @@ def test_load_wafer_reads_pixels_and_pairs_photos(tmp_path):
     w = T.load_wafer(_wafer_with_photos(tmp_path))
     assert w.note == "" and len(w.defects) == 14 and w.goods == ()
     assert w.px == (PX, PX) and w.misses == 0
-    assert sorted(w.photos) == [d.index for d in w.defects]
+    assert sorted(w.photos) == [(0, d.index) for d in w.defects]
     assert abs(w.to_um(R.FEATURE_AREA, 10.4996793) - 30.0) < 0.01          # Zone ini px² → RTP.txt µm²
 
 
@@ -177,3 +177,61 @@ def test_lowering_shows_new_count_from_rich_surface(styled_qapp, tmp_path):
         assert dlg.new_value.text() == "0"
     finally:
         dlg.deleteLater()
+
+
+def test_auto_mode_picks_keep_and_recommend_matches_core(styled_qapp, tmp_path):
+    """자동 추천: 사진을 누르면 꼭 잡기 — 추천값은 코어 recommend 와 같고, 고른 것은 전부 남는다.
+    고른 것을 빼면 그 Zone 은 레시피 값으로 돌아간다.  직접 조정에서 고른 것을 떨어뜨리면 '놓침' 이 뜬다."""
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    dlg = T.ThresholdPreviewDialog()
+    try:
+        dlg.set_wafer(T.load_wafer(_wafer_with_photos(tmp_path)))
+        dlg.set_mode("auto")
+        assert dlg._tab == "keep" and len(dlg.tiles) == 10                 # 처음엔 Zone 1 전부 남음
+        by_area = sorted(dlg._in_zone(), key=lambda d: d.area)
+        a, b = by_area[4], by_area[7]
+        dlg.toggle_pick(T.key_of(a))
+        dlg.toggle_pick(T.key_of(b))
+        rec, missed = P.recommend([a, b], dlg._w.zones, dlg._snap)
+        assert missed == [] and dlg._ov == rec
+        low = dlg._ov[("Zones", 1, 14, R.FEATURE_AREA)]
+        assert low <= a.area and dlg._w.to_um(R.FEATURE_AREA, low) == pytest.approx(
+            int(dlg._w.to_um(R.FEATURE_AREA, a.area) * 10) / 10)            # 화면 자리(0.1 µm²)로 내림
+        core = P.count_by_bin(dlg._w.defects, dlg._w.zones, dlg._ov)[("Zones", 1, 14)]
+        assert dlg.drop_value.text() == str(core[0] - core[1]) == "7"   # Area · Width · Contrast 를 함께 올려 7개
+        assert dlg.tiles[T.key_of(a)].picked and "✓2" in dlg.zone_btns[("Zones", 1)].text()
+        assert "2" in dlg.pick_label.text() and dlg.miss_label.text() == ""
+        dlg.set_mode("manual")                                            # 추천값이 그대로 남는다
+        assert dlg._ov == rec
+        dlg.set_value(14, R.FEATURE_AREA, 9999.0)
+        assert dlg.missed() and dlg.miss_label.text()
+        dlg.set_mode("auto")
+        dlg.toggle_pick(T.key_of(a))
+        dlg.toggle_pick(T.key_of(b))
+        assert dlg._ov == {} and dlg.drop_value.text() == "0"
+    finally:
+        dlg.deleteLater()
+
+
+def test_lot_folder_merges_wafers_and_skips_other_recipe(tmp_path):
+    """LOT 폴더 = 아래 웨이퍼 전부.  기준이 다른 웨이퍼는 빼고, 합친 Defect 는 (웨이퍼, index) 로 겹치지 않는다.
+    LOT 과 그 안의 웨이퍼를 같이 골라도 한 번만 읽는다."""
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    lot = tmp_path / "LOT"
+    lot.mkdir()
+    w1 = _wafer_with_photos(lot)
+    w2 = lot / "27125535EWA6"
+    shutil.copytree(w1, w2)
+    w3 = lot / "27125535EWA7"
+    shutil.copytree(w1, w3)
+    ini = next((w3 / "Zones").glob("amk*.ini"))
+    ini.write_text(ini.read_text(encoding="utf-8", errors="replace").replace("LowValue=", "LowValue=1"),
+                   encoding="utf-8")
+    (lot / "메모").mkdir()                                                # Surface.flt 없는 폴더는 무시
+    folders = T.wafer_folders([lot, w2])
+    assert folders == [w1, w2, w3]
+    m = T.merge_wafers([T.load_wafer(f) for f in folders])
+    assert m.folders == (w1, w2) and m.skipped == (w3,)
+    assert len(m.defects) == 28 and len({T.key_of(d) for d in m.defects}) == 28
+    assert sorted(m.photos) == sorted(T.key_of(d) for d in m.defects)
+    assert m.rich == {}
