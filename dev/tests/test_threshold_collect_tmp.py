@@ -618,3 +618,53 @@ def test_all_jobs_take_multi_recipe_files(tmp_path, monkeypatch):
     with zipfile.ZipFile(tmp_path / "s.zip") as z:
         got = {n.rsplit("/", 1)[-1] for n in z.namelist() if n.startswith("모든Job/")}
     assert got == {"Params_WaferInfo.ini", "Recipe2-ProductInfo.ini", "Recipe1-ProductInfo.ini", "DieLut.dat"}
+
+
+def _old_collection(folder: Path):
+    """PR #132 판 수집 결과 비슷한 zip 두 조각."""
+    folder.mkdir(parents=True)
+    scan = "QORVO/Scanresult/AOI-11/2D@RE-W97218SGB1K16_X/6321/FVI/SQ67P13-E6"
+    with zipfile.ZipFile(folder / "Threshold수집_x_1.zip", "w") as z:
+        z.writestr("요약.txt", "원래 요약")
+        z.writestr("RichSurface/W_18/s_RichSurface_part1.dat", b"r" * 100)
+        z.writestr(f"{scan}/Params_WaferInfo.ini", "p")
+        z.writestr(f"{scan}/ProductInfo.ini", "same")
+        z.writestr("비교스캔/AOI-05/YDD/W/Surface.flt", b"f" * 100)
+        z.writestr("KLA비교/L/KLA/x.001", "k")
+    with zipfile.ZipFile(folder / "Threshold수집_x_2.zip", "w") as z:
+        z.writestr("AOI-16/R_KENDALL/SETUP/L/W/ProductInfo.ini", "same-src")
+        z.writestr("QORVO/Conder/1. W97218/75. 6H7ENK (CTX)/2. FVI/SQ67P01-D1.txt", "map")
+        z.writestr("QORVO/Conder/2. W96760/9. 6G80DD (THV)/1. OR/SQ67P13-E6.txt", "pair map")
+        z.writestr("QORVO/Conder/2. W96760/9. 6G80DD (THV)/1. OR/GXX01-A1.txt", "other")
+        z.writestr("사진목록.txt", "비교스캔/AOI-05/YDD/W/a.jpg\nQORVO/Conder/2. W96760/9. 6G80DD (THV)/1. OR/SQ67P13-E6/b.jpg\n")
+        z.writestr("파일목록.txt", f"{scan}/ProductInfo.ini\t4\t담음\nKLA비교/L/KLA/x.001\t1\t담음\n")
+        z.writestr("중복목록.txt", f"{scan}/Recipe.ini\t= AOI-16/R_KENDALL/SETUP/L/W/ProductInfo.ini\n")
+
+
+def test_repack_keeps_only_what_is_still_needed(tmp_path, monkeypatch):
+    tool = _tool()
+    _old_collection(tmp_path / "Threshold수집_x")
+    monkeypatch.setattr(tool, "REPACK_SRC", "Threshold수집_x")
+    folder, kept, total = tool.repack(tmp_path)
+    assert folder == tmp_path / "Threshold수집_x_다시담음"
+    names, texts = set(), {}
+    for z in folder.glob("*.zip"):
+        with zipfile.ZipFile(z) as f:
+            names |= set(f.namelist())
+            texts.update({n: f.read(n) for n in f.namelist()})
+    scan = "QORVO/Scanresult/AOI-11/2D@RE-W97218SGB1K16_X/6321/FVI/SQ67P13-E6"
+    assert "RichSurface/W_18/s_RichSurface_part1.dat" in names and f"{scan}/ProductInfo.ini" in names
+    assert texts[f"{scan}/Recipe.ini"] == b"same-src"                        # 버린 원본의 내용을 남길 이름으로
+    assert "QORVO/Conder/1. W97218/75. 6H7ENK (CTX)/2. FVI/SQ67P01-D1.txt" in names
+    assert "QORVO/Conder/2. W96760/9. 6G80DD (THV)/1. OR/SQ67P13-E6.txt" in names   # Scanresult 와 같은 웨이퍼
+    assert not any(n.startswith(("비교스캔/", "KLA비교/", "AOI-16/")) or "GXX01" in n for n in names)
+    photos = texts["사진목록.txt"].decode("utf-8")
+    assert "SQ67P13-E6/b.jpg" in photos and "비교스캔" not in photos
+    assert "KLA비교" not in texts["파일목록.txt"].decode("utf-8")
+    assert "원래 요약" in texts["요약.txt"].decode("utf-8")
+    assert (kept, total) == (6, 9)
+
+
+def test_repack_without_the_folder_makes_nothing(tmp_path):
+    tool = _tool()
+    assert tool.repack(tmp_path) == (None, 0, 0)
