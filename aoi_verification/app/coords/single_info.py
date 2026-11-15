@@ -81,7 +81,8 @@ def geometry_measures(image_path: Path) -> tuple[str, list[Measure]]:
             return res.status, []
         g = res.geometry
         # 이름만 표기(코드 숫자 없이). 이름을 못 찾은 자재만 코드로 폴백(빈칸 방지).
-        recipe_disp = g.recipe_name or str(g.recipe)
+        recipe_disp = (i18n.KO.DEFECT_RECIPE_NONE_VALUE if g.recipe is None
+                       else g.recipe_name or str(g.recipe))
         zone_disp = g.zone_name or str(g.zone)
         # contrast 는 일부 자재(예: PI)만 측정 — 0 은 '측정 안 함'이라 0.00 대신 '—'.
         contrast_val = (i18n.KO.DEFECT_CONTRAST_NONE_VALUE if g.contrast == 0
