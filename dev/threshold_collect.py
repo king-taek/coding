@@ -112,7 +112,10 @@ EXPORT_WAFERS = [
     ("AOI-11", "2D@RE-W97218SGB1K16_0860463PD-0A", "6412", "CTX", "SQ67P01-D1", False),                # QORVO: 136 B 구형 기록
     ("AOI-9", "2D@R2-15966TA0-BW2_0859654PD-0C", "6321", "TYW", "NELA26-01C1", True),                  # AVAGO: Contrast 가 Zone 1 에만
     ("AOI-12", "2D@R2-3L781987B17-WUP_0858675PD-0B", "6412", "CCG", "3LL641036-01-G1", True),          # TI: Zone 63 도 class 29, Contrast 0
-    ("AOI-3", "R_T254 LIVE_0858711PD_FS UBM", "6324", "TSC-FS", "27125625EWC5", True),                 # T254: 화면 번호 시프트 −1 레시피
+    # T254: 화면 번호 시프트 −1 레시피.  27125625EWC5 는 장비에서 지워져, 현택님이 LOT 에 남은 6장을 전부 Export 한다(2026-11-15).
+    # 웨이퍼 이름이 빈 칸이면 LOT 안 웨이퍼 전부.  현택님이 'TSF-FS' 로 적어 두 이름을 다 본다(없는 쪽은 '못 찾음' 한 줄).
+    ("AOI-3", "R_T254 LIVE_0858711PD_FS UBM", "6324", "TSC-FS", "", True),
+    ("AOI-3", "R_T254 LIVE_0858711PD_FS UBM", "6324", "TSF-FS", "", True),
     ("AOI-16", "2D@R5-AS-T254-A01_0857122AY-0B", "6324", "WVU", "GX57007306", True),                   # T254: 부분 맵 · Zone 63 class −22
     ("AOI-1", "2D@RE-KENDALL_MEOL_0859275PD-0C", "REVERSEETCH", "2DG-1113S", "GX57527840", True),      # 120 B 구형 기록 · class 33
 ]
@@ -420,7 +423,7 @@ def find_rich_surface():
 
 def collect_exports(col, say, progress, stop):
     """:data:`EXPORT_WAFERS` 의 Defects.csv(폴더 전부 표시면 웨이퍼 폴더 전체)를 ``Export/<장비>/<LOT>/<웨이퍼>`` 로 담는다.
-    Export 를 안 눌러 Defects.csv 가 없으면 요약에 적는다.  담은 웨이퍼 수."""
+    웨이퍼 이름이 빈 칸이면 그 LOT 의 웨이퍼 전부.  Export 를 안 눌러 Defects.csv 가 없으면 요약에 적는다.  담은 웨이퍼 수."""
     roots = {}
     try:
         roots = {_aoi_key(r.parent.name): r for r in nas_roots()}
@@ -434,32 +437,35 @@ def collect_exports(col, say, progress, stop):
         try:
             sr = roots.get(_aoi_key(aoi))
             lot = find_lot(sr, job, setup, lot_name) if sr else None
-            w = next((d for _, d, _, _ in sorted(_entries(lot)[0]) if wafer in d.name.upper()), None) if lot else None
-            if w is None:
+            dirs = sorted(d for _, d, _, _ in _entries(lot)[0]) if lot else []
+            ws = [d for d in dirs if is_wafer(d)] if not wafer else [next((d for d in dirs if wafer in d.name.upper()), None)]
+            ws = [w for w in ws if w is not None]
+            if not ws:
                 say(f"Export 웨이퍼 못 찾음: {aoi}\\{job}\\{setup}\\{lot_name}\\*{wafer}*")
-                missing.append(f"{aoi} {lot_name} {wafer}")
+                missing.append(f"{aoi} {lot_name} {wafer or '(LOT 전체)'}")
                 continue
-            arc = f"Export/{aoi}/{lot_name}/{w.name}"
-            if full:
-                col.take_files(w, arc)
-            else:
-                col.take_files(w, arc, only={EXPORT_FILE})
-            # 파일목록 줄로 판단한다 — 너무 크거나 못 읽은 파일은 take_files 가 조용히 건너뛰고 그 줄에만 적는다.
-            line = next((s for s in reversed(col.listing) if s.startswith(f"{arc}/{EXPORT_FILE}\t")), None)
-            if line is None:
-                say(f"Defects.csv 없음(Export 전): {w}")
-                missing.append(f"{aoi} {lot_name} {wafer}")
-                continue
-            if "\t담음" not in line:
-                say(f"Defects.csv 못 담음({line.split(chr(9), 2)[-1]}): {w}")
-                missing.append(f"{aoi} {lot_name} {wafer}")
-                continue
-            got += 1
-            say(f"Export {w}")
+            for w in ws:
+                arc = f"Export/{aoi}/{lot_name}/{w.name}"
+                if full:
+                    col.take_files(w, arc)
+                else:
+                    col.take_files(w, arc, only={EXPORT_FILE})
+                # 파일목록 줄로 판단한다 — 너무 크거나 못 읽은 파일은 take_files 가 조용히 건너뛰고 그 줄에만 적는다.
+                line = next((s for s in reversed(col.listing) if s.startswith(f"{arc}/{EXPORT_FILE}\t")), None)
+                if line is None:
+                    say(f"Defects.csv 없음(Export 전): {w}")
+                    missing.append(f"{aoi} {lot_name} {w.name}")
+                    continue
+                if "\t담음" not in line:
+                    say(f"Defects.csv 못 담음({line.split(chr(9), 2)[-1]}): {w}")
+                    missing.append(f"{aoi} {lot_name} {w.name}")
+                    continue
+                got += 1
+                say(f"Export {w}")
         except OSError as e:                   # NAS 권한 · 연결 끊김 — 다음 웨이퍼로
             say(f"Export 못 읽음: {aoi} {lot_name} {wafer}  {e}")
-            missing.append(f"{aoi} {lot_name} {wafer}")
-    say(f"Export Defects.csv {got}/{len(EXPORT_WAFERS)}" + (f" — 없음: {', '.join(missing)}" if missing else ""))
+            missing.append(f"{aoi} {lot_name} {wafer or '(LOT 전체)'}")
+    say(f"Export Defects.csv {got}장" + (f" — 없음: {', '.join(missing)}" if missing else ""))
     return got
 
 

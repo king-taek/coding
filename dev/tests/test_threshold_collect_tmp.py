@@ -323,7 +323,7 @@ def test_exports_take_defects_csv_and_note_missing(tmp_path, monkeypatch):
     assert not any(n.startswith("Export/AOI-27/L3/W9/") and not n.endswith("Defects.csv") for n in names)
     assert not any("DDU" in n for n in names)
     assert "Defects.csv 없음" in "\n".join(said)
-    assert said[-1].startswith("Export Defects.csv 2/4") and "E5025794EWF5" in said[-1] and "AOI-99" in said[-1]
+    assert said[-1].startswith("Export Defects.csv 2장") and "E5025794EWF5" in said[-1] and "AOI-99" in said[-1]
 
 
 def test_export_list_entries_can_match():
@@ -331,7 +331,8 @@ def test_export_list_entries_can_match():
     tool = _tool()
     seen = set()
     for aoi, job, setup, lot, wafer, full in tool.EXPORT_WAFERS:
-        assert wafer == wafer.upper() and all(s.strip() == s and s for s in (aoi, job, setup, lot, wafer))
+        assert wafer == wafer.upper() and wafer.strip() == wafer          # 빈 칸 = LOT 전체
+        assert all(s.strip() == s and s for s in (aoi, job, setup, lot))
         assert isinstance(full, bool)
         key = (tool._aoi_key(aoi), lot, wafer)
         assert key not in seen
@@ -353,4 +354,26 @@ def test_export_not_counted_when_csv_skipped(tmp_path, monkeypatch):
     assert tool.collect_exports(col, said.append, lambda *_: None, lambda: False) == 0
     col.close("")
     assert "Export/AOI-27/L1/W1/Defects.csv" not in zipfile.ZipFile(tmp_path / "s.zip").namelist()
-    assert any("못 담음" in s for s in said) and said[-1].startswith("Export Defects.csv 0/1")
+    assert any("못 담음" in s for s in said) and said[-1].startswith("Export Defects.csv 0장")
+
+
+def test_export_blank_wafer_takes_whole_lot(tmp_path, monkeypatch):
+    """웨이퍼 이름이 빈 칸이면 LOT 안 웨이퍼마다 Defects.csv 를 담고, Export 안 한 웨이퍼는 요약에 적는다.  없는 LOT 은 '못 찾음'."""
+    tool = _tool()
+    sr = tmp_path / "AOI-3" / "Scanresult"
+    lot = sr / "J" / "6324" / "TSC-FS"
+    for name, export in (("27125631EWE7", True), ("27125632EWA1", True), ("27125633EWB2", False)):
+        _wafer(lot / name)
+        if export:
+            (lot / name / "Defects.csv").write_text(f"#,Area\n1,{name}\n")      # 내용이 다르게(같으면 중복목록으로 간다)
+    monkeypatch.setattr(tool, "nas_roots", lambda: [sr])
+    monkeypatch.setattr(tool, "EXPORT_WAFERS", [("AOI-3", "J", "6324", "TSC-FS", "", False),
+                                                ("AOI-3", "J", "6324", "TSF-FS", "", False)])
+    said = []
+    col = tool.Collector(tmp_path / "s.zip")
+    assert tool.collect_exports(col, said.append, lambda *_: None, lambda: False) == 2
+    col.close("")
+    names = zipfile.ZipFile(tmp_path / "s.zip").namelist()
+    assert "Export/AOI-3/TSC-FS/27125631EWE7/Defects.csv" in names
+    assert "Export/AOI-3/TSC-FS/27125632EWA1/Defects.csv" in names
+    assert "27125633EWB2" in said[-1] and "TSF-FS (LOT 전체)" in said[-1]
