@@ -1309,6 +1309,9 @@ class SetupPage(QWidget):
         self.rail_fold_btn.clicked.connect(self.toggle_rail)
         hl.addWidget(self.rail_fold_btn)
         self._rail_head = head
+        # 머리줄 높이는 로고(34)에 고정한다 — 접히면 로고가 숨고 [«] 만 남는데, [«] 는
+        # QSS 최소 높이(32)로 줄어 머리줄이 2px 낮아지고 아래 메뉴 버튼이 전부 위로 밀렸다.
+        head.setFixedHeight(34)
         col.addWidget(head)
         col.addSpacing(6)
         # 기본 화면(매칭 설정)으로 돌아오는 버튼 — 아이콘은 프로그램 아이콘(사용자 요청).
@@ -1386,6 +1389,12 @@ class SetupPage(QWidget):
         for lb in (self._title_label, self._rail_credit):
             lb.setMinimumWidth(1)
             lb.setSizePolicy(QSizePolicy.Policy.Ignored, lb.sizePolicy().verticalPolicy())
+        # 접힌 메뉴는 크레딧을 숨기지만 자리는 남긴다 — 자리가 사라지면 [업데이트 확인] 이
+        # 그만큼 아래로 내려가 접힘·펼침에서 높이가 달랐다.  (위 setSizePolicy 가 이 표시를
+        # 지우므로 그 뒤에 둔다.)
+        keep = self._rail_credit.sizePolicy()
+        keep.setRetainSizeWhenHidden(True)
+        self._rail_credit.setSizePolicy(keep)
         self._rail_user_folded = False
         self._rail_tool_open = False         # 도구 화면에서 사용자가 펼쳤나(들어갈 때마다 접힘)
         self._rail_narrow_open = False       # 좁은 창에서 사용자가 펼쳤나(폭이 바뀌면 접힘)

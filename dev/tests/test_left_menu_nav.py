@@ -402,3 +402,28 @@ def test_update_button_shows_checking_on_setup_screen(qapp, no_sheets, monkeypat
         gate.set()
         win._loading.hide_overlay()
         win.close()
+
+
+def test_fold_keeps_every_row_at_the_same_height(styled_qapp):
+    qapp = styled_qapp            # 머리줄 34→32 는 QSS 최소 높이에서 나온다 — 테마가 있어야 재현
+    """접어도 펼쳐도 메뉴 줄의 세로 위치·높이가 같다(사용자 요청 2026-11-16).
+
+    실측 버그: 접으면 로고가 숨어 머리줄이 34→32 로 줄며 메뉴 버튼이 2px 올라가고,
+    크레딧이 자리째 사라져 [업데이트 확인] 이 28px 내려갔다."""
+    page = _page(qapp)
+    try:
+        rows = [page._rail_head, page.rail_fold_btn, *page._tool_buttons, page.update_btn]
+
+        def ys():
+            for _ in range(8):
+                qapp.processEvents()
+            return [(r.mapTo(page._tool_rail, r.rect().topLeft()).y(), r.height())
+                    for r in rows if r.isVisible()]
+
+        unfolded = ys()
+        page.rail_fold_btn.click()
+        page._apply_rail_collapsed(animate=False)
+        assert page.is_rail_folded()
+        assert ys() == unfolded
+    finally:
+        page.close()
