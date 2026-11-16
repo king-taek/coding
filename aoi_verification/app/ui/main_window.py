@@ -303,7 +303,6 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._dev_btn.clicked.connect(self._open_dev_mode)
         self._status_bar.addPermanentWidget(self._dev_btn)
         self._dev_btn.setVisible(_prefs.load().dev_mode)
-        from . import data_mining_collect_tmp; data_mining_collect_tmp.attach(self)   # [고칠곳수집-임시] 이 줄 삭제
         QShortcut(QKeySequence("Ctrl+Shift+D"), self,
                   activated=self._toggle_dev_mode)
         self._mem_timer = QTimer(self)
@@ -547,7 +546,6 @@ class MainWindow(MultiValFlow, QMainWindow):
         _prefs.patch(dev_mode=on)
         self._dev_btn.setVisible(on)
         self._setup_page.threshold_btn.setVisible(on)                      # Threshold 미리보기는 개발자 모드 도구
-        self._dmine_collect_btn.setVisible(on)                            # [고칠곳수집-임시] 이 줄 삭제
         self._sync_statusbar(self._stack.currentWidget())
         self._status_bar.showMessage(
             i18n.KO.DEV_MODE_ON if on else i18n.KO.DEV_MODE_OFF, 4000)

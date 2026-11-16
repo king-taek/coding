@@ -516,27 +516,6 @@ MENU_CHECK_UPDATE = "업데이트 확인"
 SETUP_SECTION_FOLDER = "1  폴더"
 SETUP_SECTION_MODE = "2  방식"
 
-# ── [고칠곳수집-임시] 시작 — 수집·분석이 끝나면 이 블록을 통째로 지운다 ───────────
-DMINE_COLLECT_BUTTON = "고칠 곳 자료 수집"
-DMINE_COLLECT_TITLE = "고칠 곳 자료 수집"
-DMINE_COLLECT_ASK = (
-    "NAS 의 모든 Job 에서 웨이퍼 1장씩 die 맵 · 설정 파일을, 옛 장비에서 Surface.flt 를, Conder 에서 옆 단계 폴더의 맵을 모읍니다. "
-    "읽기만 하고, 사진은 이름만 적습니다. 최대 40분이 걸리고, 중지하면 그때까지 모은 것을 저장합니다."
-)
-DMINE_COLLECT_START = "수집 시작"
-DMINE_COLLECT_RUNNING = "고칠 곳 자료를 모으는 중"
-DMINE_COLLECT_DONE_FMT = (
-    "웨이퍼 {wafers}장 · 파일 {files}개를 모았습니다.\n"
-    "아래 폴더 안의 zip 을 전부 올려 주세요(28 MB 를 넘으면 여러 개로 나뉩니다).\n{path}"
-)
-DMINE_COLLECT_NO_TOOL = "수집 도구(dev/data_mining_collect.py)가 없습니다. 개발자 모드에서 dev 브랜치로 설치해 주세요."
-DMINE_COLLECT_FAIL_FMT = "수집하다 멈췄습니다: {error}"
-DMINE_COLLECT_STOPPING = "지금까지 모은 것을 저장하는 중 (한 번 더 누르면 화면을 바로 풉니다)"
-DMINE_COLLECT_STOPPED = "화면을 먼저 풀었습니다. 저장이 끝나면 바탕화면의 고칠곳수집 폴더에 zip 이 생깁니다."
-DMINE_COLLECT_NOTHING = "NAS 의 Scanresult 와 Conder 폴더를 찾지 못해 결과 파일을 만들지 않았습니다."
-DMINE_COLLECT_WINDING_DOWN = "방금 중지한 수집이 아직 정리 중입니다. 잠시 뒤 다시 눌러 주세요."
-# ── [고칠곳수집-임시] 끝 ────────────────────────────────────────────────
-
 # ── 개발자 모드 (메인 화면 Ctrl+Shift+D) ───────────────────────────────────
 DEV_MODE_ON = "개발자 모드를 켰습니다."
 DEV_MODE_OFF = "개발자 모드를 껐습니다. 자동 업데이트는 기본 브랜치를 따릅니다."
