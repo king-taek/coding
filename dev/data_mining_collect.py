@@ -7,13 +7,13 @@
 
 무엇을 모으나 — 단계마다 시간 · zip 크기 상한이 있고, **한 단계가 실패해도 요약에 적고 다음 단계로 간다**:
     1. ``모든Job/`` — NAS 의 모든 Job 에서 최근 LOT 웨이퍼 1장의 :data:`WIDE_FILES` 와 ``Recipe<N>-ProductInfo.ini``
-       (``Surface.flt`` 는 이름 · 크기만).  장비마다 가장 최근 Job 하나는 꼭 보고(152 가 아닌 장비를 놓치지 않게),
+       (``Surface.flt`` 는 이름 · 크기만), 웨이퍼 폴더 · 부모 2단계의 ``Wafer2Table.ini``(블록 제품 중심).  장비마다 가장 최근 Job 하나는 꼭 보고(152 가 아닌 장비를 놓치지 않게),
        나머지는 같은 Job 이름을 장비가 달라도 한 번만 본다(제품 폭이 목적).
        쓰는 곳: 01 다중 레시피(Kendall 밖 제품) · 05 장비별 레코드 크기 · 맵 구멍과 장비 번호(QORVO 번호 쓰레드).
     2. ``구형flt/`` — 레코드가 152 가 아닌 장비(:data:`ODD_SEED` + 1단계에서 찾은 장비)의 Job 최대 :data:`ODD_JOBS` 개 ×
        최근 LOT 웨이퍼 1장의 :data:`ODD_FILES` 와 사진 이름.  쓰는 곳: 05(PR #131 검증).
     3. ``Conder옆폴더/`` — 같은 웨이퍼가 두 단계 이상에 나오는 Conder LOT 의 단계 폴더 파일(수정 시각과 함께)과
-       사진 이름.  본 LOT 은 담지 않은 것까지 단계 폴더마다 맵 txt · 사진 폴더 이름을 ``Conder이름목록.txt`` 에 적는다.
+       사진 이름.  KLA 사진 폴더의 정보파일(``WaferID`` 헤더)은 본 LOT 도 담는다.  본 LOT 은 담지 않은 것까지 단계 폴더마다 맵 txt · 사진 폴더 이름을 ``Conder이름목록.txt`` 에 적는다.
        쓰는 곳: 06 옆 단계 맵 · 03 폴더 이름표.
 무엇을 버리나: 사진 · 영상 · 압축 파일(사진은 이름만 ``사진목록.txt``), :data:`FILE_MB` 를 넘는 파일(이름 · 크기만
 ``파일목록.txt``), 내용이 같은 파일(한 번만 담고 ``중복목록.txt``).
@@ -34,7 +34,7 @@ from pathlib import Path
 UNC_SHARES = [r"\\10.142.80.91\nas3-1"]
 CONDER_ROOTS = [r"\\k5cifsn2\k5tsvdata$\1. Conder Scan"]
 WAFER_MARK = ("ColorImageGrabingInfo.ini", "Params_WaferInfo.ini")
-MINUTES = 40        # 전체 시간 상한 — 단계 상한의 합(33분)보다 조금 길게
+MINUTES = 85        # 전체 시간 상한 — 단계 상한의 합(78분)보다 조금 길게
 FILE_MB = 20        # 이보다 큰 파일은 이름만 남긴다
 PART_MB = 28        # 올릴 수 있는 한도가 30 MB 보다 작다(30 MB 조각 2개가 안 올라감, 사용자 2026-11-15)
 MIN_PART_MB = 23
@@ -52,11 +52,13 @@ WIDE_FILES = ("s_DieLocation.dat", "s_DieLocation.dat.md", "ColorImageGrabingInf
               "Defects.csv",
               "DieLut.dat",           # 다중 레시피 스캔에만 있다 — Recipe*-ProductInfo.ini 와 함께 01 을 다른 제품에서 확인
               "WaferMapRecipe.ini", "WaferInfo.ini",   # QORVO 번호 쓰레드 요청(2026-11-15)
+              "Wafer2Table.ini",      # 웨이퍼 중심(블록 제품 — 앱이 웨이퍼 폴더 · 부모 2단계에서 찾는다)
               "EquipmentInfo.ini")    # 장비 번호(EagleTP_108150 같은) — 번호 상자가 넓은 스캔이 그 장비뿐인지(QORVO 번호 쓰레드)
 _RECIPE_PI = re.compile(r"Recipe\d+-ProductInfo\.ini$", re.I)
 WIDE_FILE_MB = 12        # 파일당 상한
-WIDE_MINUTES = 15
-WIDE_ZIP_MB = 60
+_W2T_PARENTS = 2         # 앱(wafer_geometry._PARENT_LEVELS)이 Wafer2Table.ini 를 찾는 부모 단계 수
+WIDE_MINUTES = 60        # Job 2,071 중 232 에서 15분이 끝났다(Job 약 15개/분) — 4배
+WIDE_ZIP_MB = 120
 # 2. 레코드가 152 바이트가 아닌(구형) 장비만 깊게 — 그 장비의 서로 다른 Job 최대 ODD_JOBS 개 × 최근 LOT 웨이퍼 1장.
 ODD_SEED = ("AOI-1", "AOI-5", "AOI-10")          # 이미 확인한 구형(120 · 136 · 136)
 ODD_FILES = ("Surface.flt", "Surface.flt.md", "RTP.txt", "Defects.csv")   # + 사진 이름(LIVE 이름의 크기 · 면적과 대조)
@@ -157,6 +159,42 @@ def _record_size(w: Path):
     return int(m.group(1)) if m else None
 
 
+def _take_wafer2table(col, w: Path, job: Path, arc_job: str):
+    """웨이퍼 폴더의 부모(앱이 보는 :data:`_W2T_PARENTS` 단계, Job 폴더까지만)에 있는 ``Wafer2Table.ini`` 를 담는다.
+    웨이퍼 폴더 자신의 것은 :data:`WIDE_FILES` 가 담는다."""
+    up = w
+    for _ in range(_W2T_PARENTS):
+        if up == job:
+            break
+        up = up.parent
+        rel = up.relative_to(job).as_posix()
+        col.take_files(up, arc_job if rel == "." else f"{arc_job}/{rel}", only={"Wafer2Table.ini"})
+
+
+_KLA_HEAD = 65536
+_KLA_ID = re.compile(rb'Wafer\s*ID\s+"', re.I)
+_NON_INFO = (".jpg", ".jpeg", ".pass", ".ini", ".py", ".db")      # coords/kla_info.py 의 _NON_INFO_SUFFIXES 와 같게
+
+
+def kla_info_names(folder: Path) -> set:
+    """사진 폴더의 KLA 정보파일 이름들 — 비-사진 파일 중 헤더에 ``WaferID "..."`` 가 있는 것(확장자 ``.001`` 이거나 없음).
+    내용이 0~1 바이트로 빈 후보도 든다(앱이 파일 **이름** 의 WaferID 를 쓰는 경우)."""
+    out = set()
+    for name, path, _, size in _entries(folder)[1]:
+        if Path(name).suffix.lower() in _NON_INFO or name.startswith("."):
+            continue
+        if size <= 1:
+            out.add(name)
+            continue
+        try:
+            with path.open("rb") as fh:
+                if _KLA_ID.search(fh.read(_KLA_HEAD)):
+                    out.add(name)
+        except OSError:
+            continue
+    return out
+
+
 def _budget(col, stop, end, minutes: float, zip_mb: float):
     """단계 하나의 '그만' 판단 — 중지 · 단계 시간 · 전체 시간 · 이 단계가 늘린 zip 크기."""
     deadline = time.time() + minutes * 60
@@ -193,6 +231,7 @@ def collect_all_jobs(col, say, progress, stop, end=None, odd=None):
                 arc = f"모든Job/{r.parent.name}/{name}/{lot.relative_to(job).as_posix()}/{w.name}"
                 col.take_files(w, arc, only=lambda n: n in WIDE_FILES or bool(_RECIPE_PI.match(n)),
                                max_mb=WIDE_FILE_MB, names_only=("Surface.flt",))
+                _take_wafer2table(col, w, job, f"모든Job/{r.parent.name}/{name}")
                 size = _record_size(w)
                 if odd is not None and size not in (None, 152):
                     odd.add(_aoi_key(r.parent.name))
@@ -292,6 +331,12 @@ def collect_conder_siblings(col, say, progress, stop, end=None):
                     arc_lot = f"Conder옆폴더/{lot.relative_to(base).as_posix()}"
                     sibling = len(steps) >= 2 and max(seen.values(), default=0) >= 2
                     _note_conder_names(col, lot, arc_lot, steps, sibling)
+                    for step, (wafer_dirs, _, _) in steps.items():       # KLA 폴더의 정보파일(사진은 이름만)
+                        sarc = arc_lot if step == lot else f"{arc_lot}/{step.relative_to(lot).as_posix()}"
+                        for wname, wp in wafer_dirs:
+                            names = kla_info_names(wp)
+                            if names:
+                                col.take_files(wp, f"{sarc}/{wname}", only=names, photos=not sibling)   # 옆 폴더 LOT 은 아래에서 사진 이름을 담는다
                     looked += 1
                     if not sibling:
                         continue
