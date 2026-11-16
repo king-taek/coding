@@ -578,7 +578,9 @@ def defect_box(crop_wh, px, width_px: float, length_px: float, area_px2: float =
     Crop 은 Defect 좌표가 가운데 오게 자른다(:func:`coords.scan_image.crop_box` — 원본 밖은 안쪽으로 밀지 않고
     회색으로 채우므로 가장자리 Defect 도 가운데다, 반올림 오차 1px 이내).  한 변 = Defect 크기(폭 · 길이 중 큰 쪽,
     둘 다 없으면 √면적) × :data:`DEFECT_BOX_MULT`, 최소 :data:`DEFECT_BOX_MIN_UM` µm, 최대 Crop 한 변.
-    µm → 픽셀은 Scan 픽셀 크기(``px``)로 — Crop 이 그 크기로 잘렸다."""
+    ``px`` 는 Surface/Color 픽셀 크기 — Defect 크기(폭 · 길이 · 면적, Surface 픽셀) → µm 에만 쓴다.
+    µm → Crop 픽셀은 **Scan** 픽셀 크기로 한다: Crop 은 ``CROP_SIDE_UM`` 을 ``crop.width()`` 픽셀에 담으므로
+    Scan µm/px = ``CROP_SIDE_UM / 폭``(높이도 같은 식).  두 픽셀 크기는 다른 장비의 것이라 섞으면 박스가 틀린다."""
     (cw, ch), (px_x, px_y) = crop_wh, px
     if not (cw > 0 and ch > 0 and px_x > 0 and px_y > 0):
         return None
@@ -586,7 +588,7 @@ def defect_box(crop_wh, px, width_px: float, length_px: float, area_px2: float =
     if size_um <= 0:
         size_um = math.sqrt(max(area_px2, 0.0) * px_x * px_y)
     side_um = min(max(size_um * DEFECT_BOX_MULT, DEFECT_BOX_MIN_UM), SI.CROP_SIDE_UM)
-    bw, bh = side_um / px_x, side_um / px_y
+    bw, bh = side_um * cw / SI.CROP_SIDE_UM, side_um * ch / SI.CROP_SIDE_UM
     return (cw / 2.0 - bw / 2.0, ch / 2.0 - bh / 2.0, bw, bh)
 
 
@@ -968,7 +970,8 @@ class ThresholdPreviewDialog(QDialog):
         w = self._w
         picks = {(_folder_of(w, d), d.index) for d in self._picked.values()} if w is not None else set()
         lost = sum(1 for f, _i in picks if self._owner.get(f) == folder)
-        snap = {"root": folder, "index": self._roots.index(folder), "ov": dict(self._ov), "picks": picks}
+        snap = {"root": folder, "index": self._roots.index(folder), "ov": dict(self._ov), "picks": picks,
+                "lost": lost}
         self._roots.remove(folder)
         self._added = [r for r in self._added if r != folder]
         self._base_reset = False
@@ -992,7 +995,7 @@ class ThresholdPreviewDialog(QDialog):
         w = self._w
         if w is None or w.note or not self._all_ready():
             return
-        if snap["reset"]:
+        if snap["reset"] or (snap["lost"] and self._mode == "auto"):    # 자동 추천은 빠진 고름 때문에 다시 추천됐다 — 그 전 값으로
             self._ov = dict(snap["ov"])
         self._picked.update({key_of(d): d for d in w.defects if (_folder_of(w, d), d.index) in snap["picks"]})
         self._rec_zones = {(d.zone_dir, d.zone) for d in self._picked.values()}
@@ -1349,7 +1352,14 @@ class ThresholdPreviewDialog(QDialog):
         self._drop_cache = {}
         self._picked = ({} if self._base_reset else
                         {key_of(d): d for d in (w.defects if w else ()) if (_folder_of(w, d), d.index) in kept_picks})
+        prev_rec = self._rec_zones
         self._rec_zones = {(d.zone_dir, d.zone) for d in self._picked.values()}
+        if (self._mode == "auto" and same_base and w is not None
+                and {(_folder_of(w, d), d.index) for d in self._picked.values()} != kept_picks):
+            # 폴더를 빼서 꼭 잡기가 줄었다 — 사라진 고름에서 나온 추천이 남지 않게 toggle_pick 과 같은 식으로 다시 추천한다
+            # (고름이 없어진 Zone 은 레시피 값으로, 남은 Zone 은 남은 고름으로).  직접 조정은 그대로 둔다.
+            self._rec_zones = prev_rec
+            self._recommend()
         self._open = None
         self._shown = PAGE_TILES
         self._tab = "keep" if self._mode == "auto" else "drop"
@@ -1929,13 +1939,16 @@ class ThresholdPreviewDialog(QDialog):
         box = defect_box((crop.width(), crop.height()), self._w.px, d.width, d.length, d.area)
         if box is None or pix.isNull():
             return
-        k = pix.width() / crop.width()
+        kx, ky = pix.width() / crop.width(), pix.height() / crop.height()
+        x0, y0 = round(box[0] * kx), round(box[1] * ky)
+        x1, y1 = round((box[0] + box[2]) * kx), round((box[1] + box[3]) * ky)
         p = QPainter(pix)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         pen = QPen(QColor(DEFECT_BOX_RGB))
         pen.setWidth(1)
         pen.setCosmetic(True)
         p.setPen(pen)
-        p.drawRect(QRectF(box[0] * k, box[1] * k, box[2] * k, box[3] * k))
+        p.drawRect(x0, y0, x1 - x0, y1 - y0)
         p.end()
 
     # ------------------------------------------------------------------ 동작

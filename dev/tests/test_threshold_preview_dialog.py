@@ -665,9 +665,14 @@ def test_defect_box_geometry():
     assert (w, h) == (30.0, 30.0)
     _x, _y, w, h = T.defect_box((150, 150), px, 90.0, 5.0)       # 180 µm × 3 > 300 → Crop 한 변
     assert (w, h) == (150.0, 150.0)
-    _x, _y, w, h = T.defect_box((100, 150), (2.0, 4.0), 1.0, 1.0)  # 축마다 픽셀 크기 — 40 µm = 20 × 10 px
-    assert (w, h) == (20.0, 10.0)
+    _x, _y, w, h = T.defect_box((100, 150), (2.0, 4.0), 1.0, 1.0)  # 축마다 Scan 픽셀 크기(300÷100=3, 300÷150=2 µm/px) — 40 µm
+    assert (w, h) == pytest.approx((40 / 3.0, 20.0))
     assert T.defect_box((150, 150), (0.0, 2.0), 1.0, 1.0) is None
+    # Defect 크기는 Surface 픽셀(px) → µm, µm → Crop 픽셀은 Scan 픽셀 크기(300 µm ÷ Crop 폭) — 둘은 다른 값이다.
+    x, y, w, h = T.defect_box((100, 100), (2.0, 2.0), 3.0, 4.0)   # 최소 40 µm, Scan 3 µm/px → 13.33 px
+    assert (w, h) == pytest.approx((40 / 3.0, 40 / 3.0)) and (x + w / 2, y + h / 2) == pytest.approx((50.0, 50.0))
+    _x, _y, w, h = T.defect_box((100, 100), (2.0, 2.0), 10.0, 12.0)  # 24 µm × 3 = 72 µm → 24 px (Surface 2 µm/px 로 나누면 36 — 틀림)
+    assert (w, h) == pytest.approx((24.0, 24.0))
 
 
 def test_scan_detail_draws_red_box_only_for_scan_crop(styled_qapp, tmp_path):
@@ -695,5 +700,94 @@ def test_scan_detail_draws_red_box_only_for_scan_crop(styled_qapp, tmp_path):
         tile_img = dlg.tiles[T.key_of(target)].pic.pixmap().toImage()
         assert not any(tile_img.pixelColor(x, y).red() > 180 and tile_img.pixelColor(x, y).green() < 90
                        for x in range(0, tile_img.width(), 2) for y in range(0, tile_img.height(), 2))
+    finally:
+        dlg.deleteLater()
+
+
+def test_scan_detail_red_box_has_all_four_edges_centered(styled_qapp, tmp_path):
+    """상세 보기 그림에서 빨간 박스의 위 · 아래 · 왼 · 오른 네 변이 모두 있고, Crop 가운데(±2 px)에 대칭이다."""
+    from PyQt6.QtGui import QColor, QImage
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    w, target = _scan_wafer(tmp_path)
+    dlg = T.ThresholdPreviewDialog()
+    try:
+        dlg.set_wafer(T.load_wafer(w))
+        dlg._set_zone((target.zone_dir, target.zone))
+        dlg._set_tab("keep")
+        side = 177                                                     # Scan 300 µm ÷ 177 px — Surface 픽셀 크기와 다르다
+        img = QImage(side, side, QImage.Format.Format_RGB888)
+        img.fill(QColor(110, 110, 110))
+        dlg.set_scans({(w, target.index): img})
+        dlg._toggle(T.key_of(target))
+        pm = dlg.grid_host.findChildren(T._BigPhoto)[0].pixmap()
+        big = pm.toImage()
+        red = [(x, y) for y in range(big.height()) for x in range(big.width())
+               if big.pixelColor(x, y).red() > 200 and big.pixelColor(x, y).green() < 100]
+        assert red
+        xs, ys = [p[0] for p in red], [p[1] for p in red]
+        left, right, top, bottom = min(xs), max(xs), min(ys), max(ys)
+        mid_x, mid_y = (left + right) // 2, (top + bottom) // 2
+        for edge in ([(x, top) for x in range(left, right + 1)], [(x, bottom) for x in range(left, right + 1)],
+                     [(left, y) for y in range(top, bottom + 1)], [(right, y) for y in range(top, bottom + 1)]):
+            assert all(p in set(red) for p in edge)                      # 네 변 모두 이어진 선
+        cx, cy = big.width() / 2.0, big.height() / 2.0
+        assert abs((left + right) / 2.0 - cx) <= 2 and abs((top + bottom) / 2.0 - cy) <= 2
+        assert abs((right - left) - (bottom - top)) <= 1                 # 정사각
+        assert 0 < mid_x < big.width() and 0 < mid_y < big.height()
+    finally:
+        dlg.deleteLater()
+
+
+def test_auto_remove_folder_recommends_again_and_undo_restores(styled_qapp, tmp_path, monkeypatch):
+    """자동 추천: 꼭 잡기가 있던 폴더를 빼면 그 Zone 추천값은 레시피 값으로 돌아가고(남은 고름이 있으면 그걸로 다시 추천),
+    되돌리면 고름과 추천값이 그대로 돌아온다.  직접 조정은 빼도 바꾼 값을 유지한다."""
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    a, lot = _lot_setup(tmp_path)
+    _no_load(monkeypatch, T)
+    dlg = T.ThresholdPreviewDialog()
+    try:
+        _prime(dlg, T, a, lot)
+        dlg.set_folders([a, lot])
+        dlg.set_mode("auto")
+        in_lot = next(d for d in dlg._w.defects if dlg._w.folders[d.wafer] != a)
+        dlg.toggle_pick(T.key_of(in_lot))
+        assert dlg._ov                                                   # 추천이 값을 올렸다
+        picked, ov, rec = dict(dlg._picked), dict(dlg._ov), set(dlg._rec_zones)
+        dlg.remove_folder(lot)                                           # 유일한 꼭 잡기가 사라진다
+        assert not dlg._picked and not dlg._ov and not dlg._rec_zones    # 추천값이 레시피로 돌아감
+        dlg._undo()
+        assert set(dlg._picked) == set(picked) and dlg._ov == ov and dlg._rec_zones == rec
+        # 남은 고름이 있으면 그 고름으로 다시 추천 = 그 고름만 골랐을 때의 추천값
+        in_a = next(d for d in dlg._w.defects if dlg._w.folders[d.wafer] == a)
+        dlg.toggle_pick(T.key_of(in_a))
+        both, ov_both = dict(dlg._picked), dict(dlg._ov)
+        dlg.remove_folder(lot)
+        only_a_ov = dict(dlg._ov)
+        dlg.reset()
+        dlg.toggle_pick(T.key_of(in_a))
+        assert only_a_ov == dlg._ov and len(dlg._picked) == 1
+        dlg.reset()
+        dlg.set_folders([a, lot])
+        for d in both.values():
+            dlg.toggle_pick(T.key_of(d))
+        assert dlg._ov == ov_both
+    finally:
+        dlg.deleteLater()
+
+
+def test_manual_remove_folder_keeps_user_overrides(styled_qapp, tmp_path, monkeypatch):
+    """직접 조정에서는 폴더를 빼도 사용자가 바꾼 값이 그대로다."""
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    a, lot = _lot_setup(tmp_path)
+    _no_load(monkeypatch, T)
+    dlg = T.ThresholdPreviewDialog()
+    try:
+        _prime(dlg, T, a, lot)
+        dlg.set_folders([a, lot])
+        dlg.set_value(14, R.FEATURE_AREA, 40.0)
+        ov = dict(dlg._ov)
+        assert ov
+        dlg.remove_folder(lot)
+        assert dlg._ov == ov
     finally:
         dlg.deleteLater()
