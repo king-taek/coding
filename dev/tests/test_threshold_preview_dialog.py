@@ -258,3 +258,52 @@ def test_adding_a_wafer_keeps_picks_and_values(styled_qapp, tmp_path):
         assert dlg.tiles[(0, d.index)].sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Fixed
     finally:
         dlg.deleteLater()
+
+
+def test_no_color_photo_asks_then_shows_scan_crop(styled_qapp, tmp_path):
+    """Color 사진만 보여 주다가, Color 사진이 없는 Defect 가 있으면 '스캔 사진으로 볼까요?' 를 묻는다.
+    '예' 면 같은 폴더 Scan(.t.) 사진에서 그 Defect 자리를 잘라 타일로 보인다.  '아니요' 면 다시 묻지 않는다."""
+    np = pytest.importorskip("numpy")
+    cv2 = pytest.importorskip("cv2")
+    from PyQt6.QtGui import QImage
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    w = tmp_path / "27125535EWA5"
+    shutil.copytree(FS_UBM, w)
+    names = [n for n in (FS_UBM / "사진목록.txt").read_text(encoding="utf-8").splitlines()
+             if n and not n.startswith("#")]
+    for name in names[:4]:                                  # Color 사진은 4장만 — 나머지 Defect 는 사진 없음
+        (w / name).write_bytes(b"")
+    defects, _note = P.load_defects(w)
+    have = T.load_wafer(w).photos
+    lonely = [d for d in defects if (0, d.index) not in have]
+    target = lonely[0]
+    cv2.imwrite(str(w / "1.2.t.1.jpeg"), np.full((1000, 2000, 3), 90, np.uint8))
+    (w / "ScanResultImageList.txt").write_text(f"Version=1\n1.2.t.1.jpeg,{target.x},{target.y}\n")
+
+    dlg = T.ThresholdPreviewDialog()
+    try:
+        dlg.set_wafer(T.load_wafer(w))
+        assert dlg.scan_ask.isVisibleTo(dlg)
+        assert f"{len(defects) - len(have)}" in dlg.scan_ask_label.text()
+        assert all(isinstance(t, T._Tile) for t in dlg.tiles.values())
+        assert not any(k == T.key_of(target) for k in dlg.tiles)      # 기본은 Color 사진만
+        got = T.scan_crops(dlg._scan_items())
+        assert T.key_of(target) in got and isinstance(got[T.key_of(target)], QImage)
+        side = round(300.0 / PX)                                       # 300 µm Crop
+        assert abs(got[T.key_of(target)].width() - side) <= 1
+        dlg._use_scan = True
+        dlg.scan_ask.setVisible(False)
+        dlg.set_scans(got)
+        dlg._set_zone((target.zone_dir, target.zone))
+        dlg._set_tab("keep")
+        assert T.key_of(target) in dlg.tiles
+
+        dlg2 = T.ThresholdPreviewDialog()
+        dlg2.set_wafer(T.load_wafer(w))
+        dlg2.answer_scan(False)
+        assert not dlg2.scan_ask.isVisibleTo(dlg2)
+        dlg2.set_wafer(T.load_wafer(w))                                # 폴더를 다시 읽어도 다시 묻지 않는다
+        assert not dlg2.scan_ask.isVisibleTo(dlg2)
+        dlg2.deleteLater()
+    finally:
+        dlg.deleteLater()

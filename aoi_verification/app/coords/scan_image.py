@@ -39,7 +39,7 @@ from . import abs_coord, camtek_ini, pixel_size
 from .ini_text import decode_ini_bytes
 
 __all__ = ["SCAN_LIST_NAME", "CROP_SIDE_UM", "Candidate", "ScanMatch",
-           "parse_manifest", "scan_uv", "crop_box", "rank_candidates", "resolve",
+           "parse_manifest", "scan_uv", "crop_box", "rank_candidates", "resolve", "resolve_xy",
            "cut", "load_crop", "load_full", "clear_caches"]
 
 _LOG = logging.getLogger("aoi.scan")
@@ -271,13 +271,23 @@ def resolve(color_path, side_um: float = CROP_SIDE_UM) -> ScanMatch:
 
     예외를 밖으로 내지 않는다 — Scan 실패가 화면·엑셀의 기존 기능을 막으면 안 된다."""
     color = Path(color_path)
+    return _resolve(color.parent, color, lambda: _defect_xy(color), side_um)
+
+
+def resolve_xy(folder, xy, side_um: float = CROP_SIDE_UM) -> ScanMatch:
+    """Color 사진이 없는 결함 — 웨이퍼 폴더와 결함 좌표(µm, ``ColorImageGrabingInfo.ini`` X/Y 와 같은 틀)로
+    :class:`ScanMatch`.  Overkill 튜닝이 Surface.flt Defect(ActualX/Y)에 쓴다.  ``color_path`` 자리에는 폴더."""
+    folder = Path(folder)
+    return _resolve(folder, folder, lambda: xy, side_um)
+
+
+def _resolve(folder: Path, color: Path, get_xy, side_um: float) -> ScanMatch:
     try:
-        folder = color.parent
         status, rows = _index(str(folder), _mtime(folder / SCAN_LIST_NAME),
                               _mtime(folder))
         if status != OK:
             return ScanMatch(status, color)
-        xy = _defect_xy(color)
+        xy = get_xy()
         if xy is None:
             return ScanMatch(NO_COORDINATES, color)
         px = pixel_size.scan_pixel_size_xy(folder)

@@ -42,7 +42,7 @@ from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtCore import QBuffer, QIODevice, QLocale, QObject, QRectF, Qt, QThread, QUrl, pyqtSignal
-from PyQt6.QtGui import QColor, QDesktopServices, QDoubleValidator, QPainter
+from PyQt6.QtGui import QColor, QDesktopServices, QDoubleValidator, QImage, QPainter, QPixmap
 from PyQt6.QtWidgets import (QApplication, QButtonGroup, QDialog, QFileDialog, QFrame, QGridLayout,
                              QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QVBoxLayout,
                              QWidget)
@@ -297,7 +297,7 @@ class _Tile(QFrame):
     clicked = pyqtSignal()
     detail = pyqtSignal()
 
-    def __init__(self, photo: Path, caption: str, value: str, size: int, parent=None,
+    def __init__(self, photo, caption: str, value: str, size: int, parent=None,
                  picked: bool = False, detail_btn: bool = False) -> None:
         super().__init__(parent)
         self.setProperty("role", "card")
@@ -310,8 +310,14 @@ class _Tile(QFrame):
         pic = QLabel(self)
         pic.setFixedSize(size, size)
         pic.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        pic.setPixmap(image_io.cached_tile_pixmap(photo, size))
+        pic.setPixmap(_pixmap(photo, size))
         lay.addWidget(pic)
+        if isinstance(photo, QImage):                   # Color 사진이 없어 Scan 사진에서 잘라 온 것
+            tag = QLabel(_KO.OVERKILL_SCAN_TAG, pic)
+            tag.setStyleSheet(f"background: {theme.PANEL}; color: {theme.INK}; border-radius: 4px;"
+                              " padding: 1px 5px; font-size: 11px; font-weight: 700;")
+            tag.adjustSize()
+            tag.move(6, size - tag.height() - 6)
         self.badge = QLabel("✓", pic)                  # 꼭 잡기 표시
         self.badge.setFixedSize(24, 24)
         self.badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -364,9 +370,68 @@ class _BigPhoto(QLabel):
         super().mousePressEvent(e)
 
 
-def _data_uri(photo: Path) -> str:
+def _pixmap(photo, size: int, kind: str = "") -> QPixmap:
+    """Color 사진 경로 또는 Scan 에서 잘라 온 ``QImage`` → ``size`` 안에 맞춘 그림."""
+    if isinstance(photo, QImage):
+        return QPixmap.fromImage(photo).scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio,
+                                               Qt.TransformationMode.SmoothTransformation)
+    return image_io.load_thumb_qpixmap(photo, size, kind=kind) if kind else image_io.cached_tile_pixmap(photo, size)
+
+
+def scan_crops(items, report=lambda done, total: None, stop=lambda: False) -> dict:
+    """Color 사진이 없는 Defect 들 → ``{키: QImage}`` — 같은 폴더 Scan(``.t.``) 사진의 300 µm Crop.
+
+    ``items`` = ``[(키, 웨이퍼 폴더, (x, y) µm)]``.  계산은 사진 정보 화면 · 엑셀과 같은
+    :mod:`coords.scan_image` 가 한다(Defect ActualX/Y 는 Color 사진 좌표와 같은 틀 — FS UBM 14/14 일치, 관측).
+    같은 Scan 원본을 이어서 자르도록 원본 순으로 정렬한다(디코드 캐시가 작다).  못 자른 Defect 는 빠진다."""
+    from ...coords import scan_image as SI
+    found = []
+    for k, folder, xy in items:
+        if stop():
+            return {}
+        m = SI.resolve_xy(folder, xy)
+        if m.ok:
+            found.append((str(m.best.path), k, m))
+    found.sort(key=lambda t: t[0])
+    out: dict = {}
+    for i, (_p, k, m) in enumerate(found, start=1):
+        if stop():
+            return {}
+        got = SI.load_crop(m)
+        if got is not None:
+            im = got[0].convert("RGB")
+            q = QImage(im.tobytes(), im.width, im.height, 3 * im.width, QImage.Format.Format_RGB888).copy()
+            out[k] = q
+        if i % 20 == 0 or i == len(found):
+            report(i, len(found))
+    return out
+
+
+class _ScanLoad(QThread):
+    class _Signals(QObject):
+        progress = pyqtSignal(int, int, int)           # token, done, total
+        done = pyqtSignal(int, object)                 # token, {키: QImage}
+
+    def __init__(self, token: int, items: list) -> None:
+        super().__init__()
+        self._token, self._items = token, items
+        self.signals = self._Signals()
+        _LIVE.add(self)
+        self.finished.connect(lambda: _LIVE.discard(self))
+
+    def run(self) -> None:      # type: ignore[override]
+        try:
+            got = scan_crops(self._items, lambda d, t: self.signals.progress.emit(self._token, d, t),
+                             self.isInterruptionRequested)
+        except Exception:       # noqa: BLE001 — 실패를 삼키지 않고 로그에 남긴다(사진만 못 보일 뿐)
+            _LOG.exception("Overkill 튜닝 Scan 사진 자르기 실패")
+            got = {}
+        self.signals.done.emit(self._token, got)
+
+
+def _data_uri(photo) -> str:
     """사진 → 작은 JPEG ``data:`` 주소(HTML 안에 넣는다).  못 읽으면 빈 문자열."""
-    pix = image_io.load_thumb_qpixmap(photo, EXPORT_PHOTO_PX, kind="mid")
+    pix = _pixmap(photo, EXPORT_PHOTO_PX, kind="mid")
     if pix.isNull():
         return ""
     buf = QBuffer()
@@ -389,6 +454,10 @@ class ThresholdPreviewDialog(QDialog):
         self._mode = "manual"             # manual(직접 조정) | auto(자동 추천)
         self._picked: dict = {}           # 꼭 잡을 Defect — key_of(d) → Defect
         self._rec_zones: set = set()      # 마지막 추천이 바꾼 Zone — 고름이 바뀌면 이 Zone 들만 다시 계산
+        self._use_scan: Optional[bool] = None   # Color 사진이 없을 때 Scan 사진으로 볼지 — 물어본 답(None = 아직)
+        self._scans: dict = {}            # 키 → Scan 에서 잘라 온 QImage
+        self._scan_thread: Optional[_ScanLoad] = None
+        self._scan_token = 0
         self._ov: dict = {}               # {(zone_dir, zone, Classify, FeatureType): 새 LowValue(px)}
         self._rich_base: dict = {}        # (zone_dir, zone) → 레시피 값 RichSurface 통과 배열(캐시)
         self._zone: Optional[tuple] = None
@@ -509,6 +578,23 @@ class ThresholdPreviewDialog(QDialog):
         self._rules_lay.setSpacing(12)
         main.addWidget(self.rules)
 
+        self.scan_ask = QFrame(self)                 # Color 사진이 없을 때 Scan 사진으로 볼지 묻는다(현택님 2026-11-16)
+        self.scan_ask.setStyleSheet(f"QFrame {{ background: {theme.WARN_TINT}; border-radius: 6px; }}")
+        ask = QHBoxLayout(self.scan_ask)
+        ask.setContentsMargins(14, 8, 8, 8)
+        ask.setSpacing(8)
+        self.scan_ask_label = QLabel("", self.scan_ask)
+        self.scan_ask_label.setStyleSheet("font-weight: 700; background: transparent;")
+        ask.addWidget(self.scan_ask_label, 1)
+        self.scan_yes = NeonButton(_KO.OVERKILL_SCAN_YES, role="primary")
+        self.scan_yes.clicked.connect(lambda: self.answer_scan(True))
+        ask.addWidget(self.scan_yes)
+        self.scan_no = NeonButton(_KO.OVERKILL_SCAN_NO, role="ghost")
+        self.scan_no.clicked.connect(lambda: self.answer_scan(False))
+        ask.addWidget(self.scan_no)
+        self.scan_ask.setVisible(False)
+        main.addWidget(self.scan_ask)
+
         tabs = QHBoxLayout()
         tabs.setSpacing(6)
         self._tabs_lay = tabs
@@ -627,6 +713,10 @@ class ThresholdPreviewDialog(QDialog):
         self._open = None
         self._shown = PAGE_TILES
         self._tab = "keep" if self._mode == "auto" else "drop"
+        self._scans = {}
+        self._scan_token += 1                       # 옛 웨이퍼의 Scan 결과가 늦게 와도 버린다
+        if self._scan_thread is not None and self._scan_thread.isRunning():
+            self._scan_thread.requestInterruption()
         if w is None:
             self._zone = None
             self._render()
@@ -635,6 +725,77 @@ class ThresholdPreviewDialog(QDialog):
         self._zone = next((k for k in zs if w.zones.get(k) and w.zones[k].bundles
                            and self._count(k)), zs[0] if zs else None)
         self._render()
+        if self._use_scan and self._scan_items():
+            self._load_scans()
+
+    # ------------------------------------------------------------------ Scan 사진(Color 가 없을 때)
+    def _no_color(self) -> list:
+        """Color 사진이 없는 Defect."""
+        w = self._w
+        return [d for d in w.defects + w.goods if key_of(d) not in w.photos] if w and not w.note else []
+
+    def _scan_items(self) -> list:
+        """Scan 목록 파일이 있는 웨이퍼의, Color 사진이 없는 Defect — ``[(키, 폴더, (x, y))]``."""
+        from ...coords import scan_image as SI
+        has: dict = {}
+        out = []
+        for d in self._no_color():
+            folder = _folder_of(self._w, d)
+            if folder not in has:
+                has[folder] = (folder / SI.SCAN_LIST_NAME).is_file()
+            if has[folder]:
+                out.append((key_of(d), folder, (d.x, d.y)))
+        return out
+
+    def answer_scan(self, yes: bool) -> None:
+        """'Scan 사진으로 볼까요?' 의 답 — 이 화면을 닫을 때까지 기억한다(폴더를 더해도 다시 묻지 않는다)."""
+        self._use_scan = yes
+        self.scan_ask.setVisible(False)
+        if yes:
+            self._load_scans()
+
+    def _load_scans(self) -> None:
+        items = self._scan_items()
+        if not items:
+            return
+        self._scan_token += 1                       # 폴더 읽기 토큰과 따로 — 서로의 결과를 버리지 않게
+        token = self._scan_token
+        self._loading.show_overlay(_KO.OVERKILL_SCAN_LOADING)
+        self._loading.set_progress(0, 0, _KO.OVERKILL_SCAN_LOADING)
+        th = _ScanLoad(token, items)
+        th.signals.progress.connect(self._on_scan_progress)
+        th.signals.done.connect(self._on_scans)
+        self._scan_thread = th
+        th.start()
+
+    def _on_scan_progress(self, token: int, done: int, total: int) -> None:
+        if token == self._scan_token:
+            self._loading.set_progress(done, total, _KO.OVERKILL_SCAN_LOADING)
+
+    def _on_scans(self, token: int, got: dict) -> None:
+        if token != self._scan_token:
+            return
+        self._loading.hide_overlay()
+        self.set_scans(got)
+
+    def set_scans(self, got: dict) -> None:
+        """잘라 온 Scan 사진을 올린다(테스트는 스레드 없이 이것만 부른다)."""
+        self._scans = dict(got)
+        self._render_tiles()
+
+    def _pic(self, k):
+        """그 Defect 의 그림 — Color 사진 경로, 없으면(Scan 으로 보기로 했을 때) Scan Crop, 둘 다 없으면 None."""
+        ph = self._w.photos.get(k)
+        return ph if ph is not None else (self._scans.get(k) if self._use_scan else None)
+
+    def _render_scan_ask(self) -> None:
+        """Color 사진이 없는 Defect 가 있고 Scan 목록이 있으면, 아직 답을 안 받았을 때만 묻는다."""
+        n = len(self._scan_items()) if self._use_scan is None else 0
+        if n:
+            allgone = not self._w.photos
+            self.scan_ask_label.setText(_KO.OVERKILL_SCAN_ASK_ALL if allgone
+                                        else _KO.OVERKILL_SCAN_ASK.format(n=f"{n:,}"))
+        self.scan_ask.setVisible(bool(n))
 
     def is_loading(self) -> bool:
         return self._thread is not None and self._thread.isRunning()
@@ -707,6 +868,10 @@ class ThresholdPreviewDialog(QDialog):
         self._render_rules()
         self._render_summary()
         self._render_tiles()
+        if w is not None and not w.note:
+            self._render_scan_ask()
+        else:
+            self.scan_ask.setVisible(False)
 
     @staticmethod
     def _clear(lay) -> None:
@@ -970,7 +1135,7 @@ class ThresholdPreviewDialog(QDialog):
             self.no_photo_label.setText("")
             return
         items = self._items()
-        with_photo = [(d, why) for d, why in items if key_of(d) in w.photos]
+        with_photo = [(d, why) for d, why in items if self._pic(key_of(d)) is not None]
         missing = len(items) - len(with_photo)
         self.no_photo_label.setText(_KO.THRESH_PREVIEW_NO_PHOTO.format(n=f"{missing:,}") if missing else "")
         self.empty_label.setText("" if items else (_KO.THRESH_PREVIEW_NONE_DROPPED
@@ -982,7 +1147,7 @@ class ThresholdPreviewDialog(QDialog):
         auto = self._mode == "auto"
         for j, (d, why) in enumerate(shown):
             k = key_of(d)
-            tile = _Tile(w.photos[k], self._class_name(d.bin), self._why_text(d, why), TILE_PX,
+            tile = _Tile(self._pic(k), self._class_name(d.bin), self._why_text(d, why), TILE_PX,
                          self.grid_host, picked=k in self._picked, detail_btn=auto)
             if auto:                                 # 자동 모드: 타일 = 꼭 잡기 토글, ⋯ = 값 펼치기
                 tile.clicked.connect(lambda i=k: self.toggle_pick(i))
@@ -1019,9 +1184,12 @@ class ThresholdPreviewDialog(QDialog):
         pic.setFixedSize(DETAIL_PX, DETAIL_PX)
         pic.setAlignment(Qt.AlignmentFlag.AlignCenter)
         pic.setCursor(Qt.CursorShape.PointingHandCursor)
-        photo = w.photos[key_of(d)]
-        pic.setPixmap(image_io.load_thumb_qpixmap(photo, DETAIL_PX, kind="mid"))
-        pic.clicked.connect(lambda: self._enlarge(photo))
+        photo = self._pic(key_of(d))
+        pic.setPixmap(_pixmap(photo, DETAIL_PX, kind="mid"))
+        if isinstance(photo, QImage):                   # Scan Crop — 크게 볼 원본 파일이 없다
+            pic.setCursor(Qt.CursorShape.ArrowCursor)
+        else:
+            pic.clicked.connect(lambda: self._enlarge(photo))
         lay.addWidget(pic)
         right = QVBoxLayout()
         right.setSpacing(8)
@@ -1055,7 +1223,8 @@ class ThresholdPreviewDialog(QDialog):
                 lab.setStyleSheet(style)
                 g.addWidget(lab, r, c)
         right.addLayout(g)
-        fn = QLabel(str(photo) if len(w.folders) > 1 else photo.name, box)
+        fn = QLabel(_KO.OVERKILL_SCAN_TAG if isinstance(photo, QImage)
+                    else str(photo) if len(w.folders) > 1 else photo.name, box)
         fn.setProperty("role", "muted")
         fn.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         right.addWidget(fn)
@@ -1213,9 +1382,9 @@ class ThresholdPreviewDialog(QDialog):
             total_drop += len(drops)
             total_new += new
             name, rec = zone_label(key[0], w.zones.get(key), key[1])
-            have = sorted(((d, why) for d, why in drops if key_of(d) in w.photos),
+            have = sorted(((d, why) for d, why in drops if self._pic(key_of(d)) is not None),
                           key=lambda t: -self._below(t[0], t[1]))     # 기준 바로 아래부터 멀리까지
-            samples = tuple(RP.Sample(_data_uri(w.photos[key_of(d)]), self._class_name(d.bin), self._why_text(d, why))
+            samples = tuple(RP.Sample(_data_uri(self._pic(key_of(d))), self._class_name(d.bin), self._why_text(d, why))
                             for d, why in RP.pick_samples(have, EXPORT_SAMPLES))
             zones.append(RP.ZoneResult(name + (f" · {rec}" if rec else ""), self._count(key), len(drops),
                                        samples, len(drops) - len(have), new))
@@ -1262,4 +1431,6 @@ class ThresholdPreviewDialog(QDialog):
     def closeEvent(self, e):        # noqa: N802
         if self.is_loading():
             self._thread.requestInterruption()
+        if self._scan_thread is not None and self._scan_thread.isRunning():
+            self._scan_thread.requestInterruption()
         super().closeEvent(e)
