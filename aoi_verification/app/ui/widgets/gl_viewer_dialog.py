@@ -143,6 +143,7 @@ class GlViewerDialog(QDialog):
         self.setAcceptDrops(True)
         self._gl: Optional[loader.GlImage] = None
         self._view: Optional[loader.ViewLoad] = None
+        self._defect_id: Optional[int] = None      # Scan 결함 상자에 만든 ROI 의 id
         self._bits = 8
         self._lo, self._hi = 0, 1
         self._full_hist: Optional[np.ndarray] = None
@@ -231,6 +232,10 @@ class GlViewerDialog(QDialog):
         self._tool_btns["move"].setChecked(True)
         row.addSpacing(10)
         row.addWidget(self._plain(_KO.GL_FIT, lambda: self.canvas.fit(), "F"))
+        self.defect_btn = self._plain(_KO.GL_DEFECT_GO, self._go_defect, "")
+        self.defect_btn.setEnabled(False)
+        self.defect_btn.setToolTip(_KO.GL_DEFECT_GO_OFF_TIP)
+        row.addWidget(self.defect_btn)
         self.undo_btn = self._plain(_KO.GL_UNDO, lambda: self.canvas.undo(), "Ctrl+Z")
         row.addWidget(self.undo_btn)
         row.addWidget(self._plain(_KO.GL_CLEAR, self._clear_rois, ""))
@@ -377,6 +382,28 @@ class GlViewerDialog(QDialog):
             self.canvas.selectionChanged.emit()
             self.canvas.update()
 
+    def _ensure_defect_roi(self) -> None:
+        """Scan 결함 상자에 'Defect' 사각형 ROI 를 둔다(이미 있으면 그대로) — 선택까지 한다."""
+        box = self._view.target_box if self._view else None
+        if not box:
+            return
+        r = self.canvas.rois.get(self._defect_id)
+        if r is None:
+            w, h = self.canvas.image_size()
+            l, t, bw, bh = (int(round(v)) for v in box)
+            r = R.clamp_shape(R.Roi(0, R.RECT, "", "", x=l, y=t, w=bw, h=bh), w, h)
+            self._defect_id = self.canvas.rois.add(r, _KO.GL_ROI_DEFECT, theme.VIEWER_BOX).id
+        else:
+            self.canvas.rois.selected = r.id
+        self.canvas.roisChanged.emit()
+        self.canvas.selectionChanged.emit()
+        self.canvas.update()
+
+    def _go_defect(self) -> None:
+        if self._view and self._view.target_box:
+            self._ensure_defect_roi()
+            self.canvas.zoom_to_box(self._view.target_box)
+
     # ------------------------------------------------------------------
     # 사진 열기
     # ------------------------------------------------------------------
@@ -424,6 +451,7 @@ class GlViewerDialog(QDialog):
         self._view = v
         self._gl = v.image
         self.canvas.rois.reset()
+        self._defect_id = None
         self._bits = v.image.bits
         self._sync_bits_combo(self._bits)
         self._full_hist = analysis.histogram(self._gl.data, self._bits)
@@ -446,8 +474,10 @@ class GlViewerDialog(QDialog):
                   if w in _WARN_TEXT and not (v.scan_name and w == loader.W_COLOR)]
         self.banner.setText("\n".join(notes))
         self.banner.setVisible(bool(notes))
+        self.defect_btn.setEnabled(bool(v.target_box))
+        self.defect_btn.setToolTip("" if v.target_box else _KO.GL_DEFECT_GO_OFF_TIP)
         if v.target_box:
-            self.canvas.set_target_box(v.target_box)
+            self._ensure_defect_roi()
             call_later(self, 0, self._zoom_to_target)
         self._refresh()
         self.canvas.setFocus()
@@ -502,7 +532,6 @@ class GlViewerDialog(QDialog):
         self._view_b, self._gl_b = v, b
         self._full_hist_b = analysis.histogram(b.data, self._bits)
         self.canvas_b.set_image(b.data, self._make_rgb(b), fit=False)
-        self.canvas_b.set_target_box(self.canvas._target)
         self.canvas_b.set_view_state(self.canvas.view_state())
         self.pane_b.setVisible(True)
         self.cap_a.setText(f"A · {Path(self._view.source_path or self._gl.path).name}")

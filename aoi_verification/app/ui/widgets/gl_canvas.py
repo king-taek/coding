@@ -52,7 +52,6 @@ class GlCanvas(QWidget):
         self._scale = 1.0
         self._off = QPointF(0, 0)
         self._fitted = True
-        self._target: Optional[tuple] = None       # Scan 결함 상자(이미지 px: l, t, w, h)
         self._lo = self._hi = None
         self._drag: Optional[dict] = None
         self._space = False
@@ -71,7 +70,6 @@ class GlCanvas(QWidget):
         """분석 배열(원본)과 표시용 RGB 를 함께 받는다.  ``fit`` 이면 화면에 맞춘다."""
         self._data = data
         self.set_display(rgb)
-        self._target = None
         if fit:
             self.fit()
 
@@ -106,11 +104,6 @@ class GlCanvas(QWidget):
         if (scale, ox, oy) == self.view_state():
             return
         self._scale, self._off, self._fitted = scale, QPointF(ox, oy), False
-        self.update()
-
-    def set_target_box(self, box: Optional[tuple]) -> None:
-        """Scan 결함 영역 상자(이미지 px: left, top, w, h) — 노란 점선으로 표시한다."""
-        self._target = box
         self.update()
 
     # ------------------------------------------------------------------
@@ -198,8 +191,6 @@ class GlCanvas(QWidget):
         p.restore()
         if self._scale >= _GRID_FROM:
             self._paint_grid(p)
-        if self._target is not None:
-            self._paint_target(p)
         sel = self.rois.selected
         for r in self.rois.rois:
             if r.id != sel:
@@ -238,18 +229,6 @@ class GlCanvas(QWidget):
             p.drawLine(QPointF(0, sy), QPointF(self.width(), sy))
             p.setPen(light)
             p.drawLine(QPointF(0, sy + 1), QPointF(self.width(), sy + 1))
-
-    def _paint_target(self, p: QPainter) -> None:
-        l, t, bw, bh = self._target
-        a, b = self.to_screen(l, t), self.to_screen(l + bw, t + bh)
-        pen = QPen(QColor(theme.VIEWER_BOX), 2, Qt.PenStyle.DashLine)
-        pen.setCosmetic(True)
-        p.setPen(pen)
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.drawRect(QRectF(a, b))
-        c = self.to_screen(l + bw / 2.0, t + bh / 2.0)
-        p.drawLine(QPointF(c.x() - 8, c.y()), QPointF(c.x() + 8, c.y()))
-        p.drawLine(QPointF(c.x(), c.y() - 8), QPointF(c.x(), c.y() + 8))
 
     def _halo_pen(self, color: str, width: float, dash=False) -> tuple[QPen, QPen]:
         halo = QPen(QColor(0, 0, 0, 200), width + 2)

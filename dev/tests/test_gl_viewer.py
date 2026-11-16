@@ -7,7 +7,7 @@
 3. 크기는 손잡이를 끌어 바꾼다(크기 버튼·키 없음).  숫자 키로 도구가 바뀌지 않는다.
 4. 화면을 줄였다(사용자 HTML 시안 결정 2026-11-16): 통계표·선 프로파일·자동 추천·
    화면 대비 자동·로그 눈금·1:1·크기 버튼이 없다.  통계는 엑셀에만 쓴다.
-5. 컬러 사진은 Scan 의 결함 영역을 확대해 보여 준다.
+5. 컬러 사진은 Scan 의 결함 영역을 확대해 보여 주고, 그 상자에 'Defect' ROI 를 자동으로 둔다.
 """
 
 from __future__ import annotations
@@ -291,7 +291,7 @@ def test_scan_view_sets_target_box_and_zooms_in(styled_qapp):
     d = _make(styled_qapp, view=v)
     _pump()
     c = d.canvas
-    assert c._target == (400, 130, 40, 40)
+    assert [(r.x, r.y, r.w, r.h) for r in c.rois.rois] == [(400, 130, 40, 40)]
     fit = min(c.width() / 800, c.height() / 300)
     assert c.scale() > fit * 3                               # 결함 영역으로 확대됐다
     cx, cy = c.to_screen(420, 150).x(), c.to_screen(420, 150).y()
@@ -299,6 +299,46 @@ def test_scan_view_sets_target_box_and_zooms_in(styled_qapp):
     assert d.banner.isVisible() and "s.t.jpg" in d.banner.text()
     c.fit()                                                  # F — Scan 전체 보기
     assert c.scale() == pytest.approx(fit)
+    d.close()
+
+
+def _defect_view(box=(150, 100, 100, 100)):
+    scan = np.full((H, W), 90, np.uint8)
+    return loader.ViewLoad(loader.GlImage(scan, 8, False, "s.t.jpg", []),
+                           scan_name="s.t.jpg", target_box=box, source_path="c.jpg")
+
+
+def test_target_box_becomes_selected_defect_roi_with_histogram(styled_qapp):
+    d = _make(styled_qapp, view=_defect_view())          # 상자가 이미지(200×150) 밖으로 넘친다
+    rs = d.canvas.rois
+    (r,) = rs.rois
+    assert (r.kind, r.name, r.color) == (R.RECT, "Defect", "#FFD60A")
+    assert (r.x, r.y, r.w, r.h) == (100, 50, 100, 100)    # 이미지 안으로 가둔 상자
+    assert rs.selected == r.id and d.hist_name.text() == "Defect"
+    assert [s[0] for s in d.hist._series] == ["Defect"]
+    assert not hasattr(d.canvas, "set_target_box")
+    d.close()
+
+
+def test_view_without_target_has_no_defect_roi_and_button_disabled(dlg):
+    assert dlg.canvas.rois.rois == []
+    assert not dlg.defect_btn.isEnabled() and dlg.defect_btn.toolTip()
+
+
+def test_defect_button_recreates_roi_once(styled_qapp):
+    d = _make(styled_qapp, view=_defect_view((20, 20, 40, 40)))
+    assert d.defect_btn.isEnabled()
+    d.defect_btn.click()
+    assert len(d.canvas.rois.rois) == 1                   # 이미 있으면 새로 만들지 않는다
+    d._clear_rois()
+    assert d.canvas.rois.rois == []
+    d.defect_btn.click()
+    (r,) = d.canvas.rois.rois
+    assert r.name == "Defect" and (r.x, r.y, r.w, r.h) == (20, 20, 40, 40)
+    assert d.canvas.rois.selected == r.id
+    d.canvas.rois.delete()
+    d.defect_btn.click()
+    assert [x.name for x in d.canvas.rois.rois] == ["Defect"]
     d.close()
 
 
@@ -326,7 +366,7 @@ def test_open_color_photo_end_to_end_switches_to_scan(styled_qapp, tmp_path, mon
             break
         QTest.qWait(20)
     assert d._gl is not None and d._gl.shape == (120, 300)
-    assert d.canvas._target == (130, 40, 40, 40)
+    assert [(r.x, r.y, r.w, r.h) for r in d.canvas.rois.rois] == [(130, 40, 40, 40)]
     d.close()
 
 
