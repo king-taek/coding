@@ -370,17 +370,21 @@ class _Tile(QFrame):
     def __init__(self, photo, caption: str, value: str, size: int, parent=None,
                  picked: bool = False, detail_btn: bool = False) -> None:
         super().__init__(parent)
-        self.setProperty("role", "card")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)   # 덜 찬 줄에서 가로로 늘어나지 않게
         self.picked = picked
+        self.wait_path = None                          # 썸네일을 아직 기다리는 사진 경로(백그라운드가 채운다)
+        self._open = False
+        self._hover = False
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(4, 4, 4, 4)
-        lay.setSpacing(3)
+        lay.setContentsMargins(2, 2, 2, 2)             # 틀 없음 — 사진만, 캡션은 그 아래
+        lay.setSpacing(4)
         pic = QLabel(self)
-        pic.setFixedSize(size, size)
+        pic.setObjectName("tilePic")
+        pic.setFixedSize(size + 4, size + 4)           # 사진 둘레 2px 는 고른 상태·가리킴 표시 자리
         pic.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.pic, self._size = pic, size
+        self._style()
         lay.addWidget(pic)
         self.set_photo(photo)
         self.badge = QLabel("✓", pic)                  # 꼭 잡기 표시
@@ -388,7 +392,7 @@ class _Tile(QFrame):
         self.badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.badge.setStyleSheet(f"background: {theme.ACCENT}; color: {theme.ON_ACCENT}; border-radius: 12px;"
                                  " font-weight: 700;")
-        self.badge.move(6, 6)
+        self.badge.move(8, 8)
         self.badge.setVisible(picked)
         self.detail_btn = None
         if detail_btn:
@@ -398,7 +402,7 @@ class _Tile(QFrame):
             self.detail_btn.setToolTip(_KO.OVERKILL_DETAIL_TIP)
             self.detail_btn.setStyleSheet(f"background: {theme.PANEL}; color: {theme.INK}; border-radius: 4px;"
                                           " font-weight: 700;")
-            self.detail_btn.move(size - 32, 6)
+            self.detail_btn.move(size - 30, 8)
         row = QHBoxLayout()
         row.setSpacing(4)
         cap = QLabel(caption, self)
@@ -417,21 +421,44 @@ class _Tile(QFrame):
         if photo is None:
             pic.setText(_KO.OVERKILL_SCAN_WAIT)
             return
+        if not isinstance(photo, QImage):               # Color 사진 — 캐시에 있으면 바로, 없으면 자리표시 뒤 백그라운드가 채운다
+            pm = image_io._get_tile_cache().get(_tile_key(photo, size))
+            if pm is not None:
+                pic.setPixmap(pm)
+            else:
+                self.wait_path = photo
+            return
         pic.setPixmap(_pixmap(photo, size))
         if isinstance(photo, QImage):                   # Color 사진이 없어 Scan 사진에서 잘라 온 것
             tag = QLabel(_KO.OVERKILL_SCAN_TAG, pic)
             tag.setStyleSheet(f"background: {theme.PANEL}; color: {theme.INK}; border-radius: 4px;"
                               " padding: 1px 5px; font-size: 11px; font-weight: 700;")
             tag.adjustSize()
-            tag.move(6, size - tag.height() - 6)
+            tag.move(8, size - tag.height() - 4)
             tag.show()
 
+    def set_pixmap(self, pm: QPixmap) -> None:
+        self.wait_path = None
+        self.pic.setPixmap(pm)
+
+    def _style(self) -> None:
+        """틀 대신 사진 둘레 2px 만 쓴다 — 고름·펼침 = 강조색, 가리킴 = 옅은 선, 평소 = 투명."""
+        c = theme.ACCENT if (self._open or self.picked) else theme.LINE_STRONG if self._hover else "transparent"
+        self.pic.setStyleSheet(f"QLabel#tilePic {{ background: {theme.PANEL}; border: 2px solid {c}; }}")
+
     def set_open(self, on: bool) -> None:
-        if self.picked:
-            self.setStyleSheet(f"QFrame[role='card'] {{ border: 2px solid {theme.ACCENT};"
-                               f" background: {theme.ACCENT_TINT}; }}")
-        else:
-            self.setStyleSheet(f"QFrame[role='card'] {{ border: 2px solid {theme.ACCENT}; }}" if on else "")
+        self._open = on
+        self._style()
+
+    def enterEvent(self, e):        # noqa: N802
+        self._hover = True
+        self._style()
+        super().enterEvent(e)
+
+    def leaveEvent(self, e):        # noqa: N802
+        self._hover = False
+        self._style()
+        super().leaveEvent(e)
 
     def mousePressEvent(self, e):   # noqa: N802
         if e.button() == Qt.MouseButton.LeftButton:
@@ -450,6 +477,22 @@ class _BigPhoto(QLabel):
         super().mousePressEvent(e)
 
 
+def _tile_key(photo, size: int) -> tuple:
+    """``image_io.cached_tile_pixmap`` 과 같은 캐시 키 — 매치 검토와 같은 LRU 를 나눠 쓴다."""
+    return (str(photo), int(size), False, False)
+
+
+def _mid_key(photo, size: int) -> tuple:
+    """``image_io.load_thumb_qpixmap(kind="mid")`` 와 같은 캐시 키."""
+    return ("thumbq", str(photo), int(size), "mid")
+
+
+class _ThumbBus(QObject):
+    """백그라운드 스레드 → GUI 스레드 전달 통로.  QPixmap 은 GUI 스레드에서만 만든다."""
+
+    ready = pyqtSignal(object, int, str, object)       # 경로 · 크기 · 'thumb'|'mid' · QImage
+
+
 def _pixmap(photo, size: int, kind: str = "") -> QPixmap:
     """Color 사진 경로 또는 Scan 에서 잘라 온 ``QImage`` → ``size`` 안에 맞춘 그림."""
     if isinstance(photo, QImage):
@@ -458,6 +501,7 @@ def _pixmap(photo, size: int, kind: str = "") -> QPixmap:
     return image_io.load_thumb_qpixmap(photo, size, kind=kind) if kind else image_io.cached_tile_pixmap(photo, size)
 
 
+THUMB_WORKERS = 3           # 썸네일을 동시에 몇 장 만들까(NAS 에서 원본을 읽는 일이라 GIL 을 놓는다)
 SCAN_WORKERS = 5            # Scan 원본을 동시에 몇 개 디코드할까 — NAS 지연이 커서 나눠 읽으면 그만큼 줄고, 디코드(PIL)는 GIL 을 놓는다
 SCAN_BATCH = 16             # 잘라 낸 Crop 을 이만큼 모일 때마다 화면에 넘긴다
 
@@ -738,6 +782,13 @@ class ThresholdPreviewDialog(QDialog):
         self._scan_map: Optional[dict] = None   # key_of → ((폴더, index), 폴더, (x, y)) — Scan 목록이 있는 폴더의 Defect
         self._scan_done: set = set()            # 자르기를 시도한 (폴더, index) — 성공은 _scans 에 있다 — 다시 시도하지 않는다
         self._scan_token = 0
+        self._thumb_bus = _ThumbBus(self)      # 사진 썸네일 · 상세 중간 이미지는 백그라운드에서 만들고 GUI 가 받아 올린다
+        self._thumb_bus.ready.connect(self._on_thumb)
+        self._thumb_pool = ThreadPoolExecutor(max_workers=THUMB_WORKERS, thread_name_prefix="overkill-thumb")
+        self._mid_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="overkill-mid")
+        self._wanted: set = set()              # 지금 화면에 필요한 (경로, 크기, 종류) — 여기서 빠진 대기 작업은 건너뛴다(취소)
+        self._pending: set = set()             # 이미 맡긴 작업
+        self._detail_pic: Optional[tuple] = None
         self._drop_cache: dict = {}       # (Zone, 바꾼 값) → 빠지는 Defect — 같은 기준을 다시 세지 않는다
         self._ov: dict = {}               # {(zone_dir, zone, Classify, FeatureType): 새 LowValue(px)}
         self._rich_base: dict = {}        # (zone_dir, zone) → 레시피 값 RichSurface 통과 배열(캐시)
@@ -1670,6 +1721,7 @@ class ThresholdPreviewDialog(QDialog):
         lay.setSpacing(4)
         h = QHBoxLayout()
         h.setSpacing(6)
+        h.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         lab = QLabel(f"{name} ≥", cell)
         lab.setStyleSheet("font-weight: 600;")
         h.addWidget(lab)
@@ -1678,11 +1730,21 @@ class ThresholdPreviewDialog(QDialog):
         val.setNotation(QDoubleValidator.Notation.StandardNotation)
         val.setLocale(QLocale.c())
         spin.setValidator(val)
-        spin.setFixedWidth(90)
+        spin.setObjectName("thrValue")
+        spin.setFixedSize(60, 26)              # 라벨 한 줄 높이 — 값이 라벨 줄의 일부로 읽히게
         spin.setProperty("role", "mono")
         spin.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        # 테두리 없는 칸 + 아래 실선만(포커스는 강조색 2px).  이 화면의 값 칸에만 적용한다.
+        spin.setStyleSheet(
+            f"QLineEdit#thrValue {{ background: transparent; border: none;"
+            f" border-bottom: 1px solid {theme.LINE_STRONG}; border-radius: 0;"
+            f" padding: 0px 2px 1px 2px; min-height: 0px; font-weight: 600; }}"
+            f"QLineEdit#thrValue:hover {{ background: {theme.ACCENT_TINT_SOFT}; }}"
+            f"QLineEdit#thrValue:focus {{ background: transparent; border: none;"
+            f" border-bottom: 2px solid {theme.FOCUS}; padding: 0px 2px 0px 2px; }}")
         h.addWidget(spin)
         if unit:
+            h.addSpacing(-2)                   # 단위를 값 바로 뒤에 붙인다
             u = QLabel(unit, cell)
             u.setProperty("role", "muted")
             h.addWidget(u)
@@ -1816,7 +1878,53 @@ class ThresholdPreviewDialog(QDialog):
         avail = max(TILE_PX, self.grid_host.width() or self.width() - 300)
         return max(1, (avail + self.grid.spacing()) // (TILE_PX + 8 + self.grid.spacing()))
 
+    def _want(self, photo, size: int, kind: str) -> None:
+        """썸네일(`thumb`) · 중간 이미지(`mid`) 한 장을 백그라운드에 맡긴다 — 화면 순서대로 줄을 선다."""
+        key = (str(photo), int(size), kind)
+        self._wanted.add(key)
+        if key in self._pending:
+            return
+        self._pending.add(key)
+        (self._mid_pool if kind == "mid" else self._thumb_pool).submit(self._thumb_job, Path(photo), int(size), kind)
+
+    def _thumb_job(self, path: Path, size: int, kind: str) -> None:
+        """워커 스레드 — 화면에서 빠진 것은 건너뛰고, QImage 까지만 만든다(QPixmap 금지)."""
+        key = (str(path), size, kind)
+        sent = False
+        try:
+            if key not in self._wanted:
+                return
+            tp = image_io.get_mid_path(path) if kind == "mid" else image_io.get_thumb_path(path)
+            img = QImage(str(tp))
+            if img.isNull():
+                return
+            img = img.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            self._thumb_bus.ready.emit(path, size, kind, img)
+            sent = True
+        except Exception:                       # 한 장 실패가 나머지를 막지 않는다 — 자리표시로 남는다
+            _LOG.debug("썸네일 실패: %s", path, exc_info=True)
+        finally:
+            if not sent:
+                self._pending.discard(key)
+
+    def _on_thumb(self, path, size: int, kind: str, img) -> None:
+        """GUI 스레드 — 받은 그림을 캐시에 넣고 기다리던 타일·상세에 올린다."""
+        self._pending.discard((str(path), size, kind))
+        pm = QPixmap.fromImage(img)
+        cache = image_io._get_tile_cache()
+        if kind == "mid":
+            cache.put(_mid_key(path, size), pm)
+            if self._detail_pic is not None and str(self._detail_pic[0]) == str(path):
+                self._detail_pic[1].setPixmap(pm)
+            return
+        cache.put(_tile_key(path, size), pm)
+        for t in self.tiles.values():
+            if t.wait_path is not None and str(t.wait_path) == str(path):
+                t.set_pixmap(pm)
+
     def _render_tiles(self) -> None:
+        self._wanted = set()                    # 화면이 바뀌었다 — 줄 서 있던 것 중 이번 화면에 없는 건 건너뛴다
+        self._detail_pic = None
         self._clear(self.grid)
         self.tiles = {}
         self._tile_defects = {}
@@ -1849,6 +1957,8 @@ class ThresholdPreviewDialog(QDialog):
             else:
                 tile.clicked.connect(lambda i=k: self._toggle(i))
             tile.set_open(self._open == k)
+            if tile.wait_path is not None:
+                self._want(tile.wait_path, TILE_PX, "thumb")
             self.grid.addWidget(tile, r, c)
             self.tiles[k] = tile
             self._tile_defects[k] = d
@@ -1881,11 +1991,23 @@ class ThresholdPreviewDialog(QDialog):
         pic.setAlignment(Qt.AlignmentFlag.AlignCenter)
         pic.setCursor(Qt.CursorShape.PointingHandCursor)
         photo = self._pic(d)
-        if photo is not None:
+        pic.setStyleSheet(f"background: {theme.PANEL};")
+        if isinstance(photo, QImage):                   # Scan Crop — Defect 자리를 빨간 박스로(상세 보기에서만)
             pix = _pixmap(photo, DETAIL_PX, kind="mid")
-            if isinstance(photo, QImage):               # Scan Crop — Defect 자리를 빨간 박스로(상세 보기에서만)
-                self._mark_defect(pix, photo, d)
+            self._mark_defect(pix, photo, d)
             pic.setPixmap(pix)
+        elif photo is not None:                         # Color — 중간 이미지가 준비될 때까지 썸네일을 키워 보여준다
+            cache = image_io._get_tile_cache()
+            pix = cache.get(_mid_key(photo, DETAIL_PX))
+            if pix is None:
+                thumb = cache.get(_tile_key(photo, TILE_PX))
+                if thumb is not None:
+                    pix = thumb.scaled(DETAIL_PX, DETAIL_PX, Qt.AspectRatioMode.KeepAspectRatio,
+                                       Qt.TransformationMode.SmoothTransformation)
+                self._want(photo, DETAIL_PX, "mid")
+                self._detail_pic = (photo, pic)
+            if pix is not None:
+                pic.setPixmap(pix)
         else:
             pic.setText(_KO.OVERKILL_SCAN_WAIT)
         if photo is None or isinstance(photo, QImage):                   # Scan Crop — 크게 볼 원본 파일이 없다
@@ -2155,6 +2277,7 @@ class ThresholdPreviewDialog(QDialog):
             self._last_cols = cols
 
     def closeEvent(self, e):        # noqa: N802
+        self._wanted = set()                       # 줄 서 있는 썸네일 작업은 건너뛴다
         if self.is_loading():
             self._thread.requestInterruption()
         if self._scan_thread is not None and self._scan_thread.isRunning():

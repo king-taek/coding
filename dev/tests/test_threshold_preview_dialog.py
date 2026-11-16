@@ -791,3 +791,42 @@ def test_manual_remove_folder_keeps_user_overrides(styled_qapp, tmp_path, monkey
         assert dlg._ov == ov
     finally:
         dlg.deleteLater()
+
+
+def test_tiles_get_thumbs_in_background_not_on_gui_thread(styled_qapp, tmp_path, monkeypatch):
+    """타일은 자리표시로 바로 뜨고, 썸네일은 백그라운드에서 만들어 신호로 올린다(원본 디코드가 GUI 를 막지 않는다)."""
+    import threading
+    import time
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    from aoi_verification.app.utils import image_io
+    image_io.clear_tile_cache()
+    seen = []
+    real = image_io.get_thumb_path
+
+    def spy(src, **kw):
+        seen.append(threading.current_thread())
+        return real(src, **kw)
+
+    monkeypatch.setattr(image_io, "get_thumb_path", spy)
+    from PyQt6.QtGui import QColor, QImage
+    wafer = _wafer_with_photos(tmp_path)
+    for f in wafer.glob("*.c.*.jpeg"):                                # 빈 파일을 진짜 작은 JPEG 로
+        im = QImage(300, 300, QImage.Format.Format_RGB32)
+        im.fill(QColor(120, 130, 140))
+        assert im.save(str(f), "JPG")
+    dlg = T.ThresholdPreviewDialog()
+    try:
+        dlg.set_wafer(T.load_wafer(wafer))
+        dlg.set_value(14, R.FEATURE_AREA, 40.0)
+        assert dlg.tiles
+        main = threading.current_thread()
+        assert all(t is not main for t in seen)                       # 그리는 동안 GUI 스레드는 만들지 않았다
+        end = time.time() + 10
+        while time.time() < end and any(t.wait_path is not None for t in dlg.tiles.values()):
+            styled_qapp.processEvents()
+            time.sleep(0.01)
+        assert all(t.wait_path is None and t.pic.pixmap() is not None and not t.pic.pixmap().isNull()
+                   for t in dlg.tiles.values())
+        assert seen and all(t is not main for t in seen)
+    finally:
+        dlg.close()
