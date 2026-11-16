@@ -1,7 +1,7 @@
 """GL 히스토그램 뷰어 — 사진 한 장의 밝기(GL) 분포를 ROI 별로 본다.
 
-흐름: 사진 열기(파일·끌어놓기) → ROI(수평선·수직선·사각형·정사각형·원) → 임계값(하한 이하 파랑·
-상한 이상 빨강) → 히스토그램·선 프로파일·통계 → 엑셀·PNG 저장.
+흐름: 사진 열기(파일·끌어놓기) → ROI(사각형·원) → 임계값(하한 이하 파랑·
+상한 이상 빨강) → 히스토그램 → 엑셀(통계·히스토그램)·PNG 저장.
 
 ★ 컬러 결함 사진을 열면 같은 폴더의 Scan 사진에서 결함 영역(300 µm)을 찾아 그 Scan 을 분석
   대상으로 삼고 결함 위치를 확대해 보여 준다(``gl.loader.load_for_view``).
@@ -19,9 +19,9 @@ from typing import Callable, Optional
 import numpy as np
 from PyQt6.QtCore import QObject, QSize, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QImage, QPainter, QPen
-from PyQt6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDialog, QFileDialog,
-                             QFormLayout, QFrame, QHBoxLayout, QHeaderView, QLabel,
-                             QSpinBox, QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout,
+from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog,
+                             QFormLayout, QFrame, QHBoxLayout, QLabel,
+                             QSpinBox, QSplitter, QVBoxLayout,
                              QWidget)
 
 from ... import i18n
@@ -33,7 +33,7 @@ from .. import theme
 from ..deferred import call_later
 from . import sheet_host as sheets
 from .gl_canvas import TOOLS, GlCanvas
-from .gl_charts import HistogramChart, ProfileChart
+from .gl_charts import HistogramChart
 from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
 from .option_group import OptionGroup
@@ -41,9 +41,7 @@ from .option_group import OptionGroup
 _LOG = logging.getLogger("aoi.gl")
 _KO = i18n.KO
 
-_TOOL_LABEL = {"move": _KO.GL_TOOL_MOVE, R.HLINE: _KO.GL_TOOL_HLINE, R.VLINE: _KO.GL_TOOL_VLINE,
-               R.RECT: _KO.GL_TOOL_RECT, R.SQUARE: _KO.GL_TOOL_SQUARE,
-               R.CIRCLE: _KO.GL_TOOL_CIRCLE}
+_TOOL_LABEL = {"move": _KO.GL_TOOL_MOVE, R.RECT: _KO.GL_TOOL_RECT, R.CIRCLE: _KO.GL_TOOL_CIRCLE}
 _BITS_CHOICES = (8, 10, 12, 14, 16)
 _WARN_TEXT = {loader.W_COLOR: _KO.GL_WARN_COLOR, loader.W_JPEG: _KO.GL_WARN_JPEG,
               loader.W_HUGE: _KO.GL_WARN_HUGE}
@@ -57,10 +55,6 @@ _CMP_A, _CMP_B = "#2C5A86", "#C2410C"
 
 def _shape_txt(img: loader.GlImage) -> str:
     return f"{img.shape[1]}×{img.shape[0]}"
-
-
-def _signed(v, nd: int) -> str:
-    return "—" if v is None else (f"{v:+,.{nd}f}" if nd else f"{int(v):+,}")
 
 
 def _delta_row(a: dict, b: dict) -> dict:
@@ -138,14 +132,6 @@ class _RawDialog(QDialog):
                 "bits": int(self.bits.currentText()),
                 "little_endian": self.endian.currentIndex() == 0,
                 "header": self.header.value()}
-
-
-def _mono_item(text: str, right: bool = True) -> QTableWidgetItem:
-    it = QTableWidgetItem(text)
-    it.setFont(QFont(theme.FONT_MONO.split(",")[0].strip('" '), 10))
-    it.setTextAlignment((Qt.AlignmentFlag.AlignRight if right else Qt.AlignmentFlag.AlignLeft)
-                        | Qt.AlignmentFlag.AlignVCenter)
-    return it
 
 
 class GlViewerDialog(QDialog):
@@ -235,33 +221,16 @@ class GlViewerDialog(QDialog):
         row = QHBoxLayout()
         row.setSpacing(6)
         self._tool_btns: dict[str, NeonButton] = {}
-        for i, tool in enumerate(TOOLS, start=1):
-            b = NeonButton(f"{_TOOL_LABEL[tool]} {i}", role="ghost")
+        for tool in TOOLS:
+            b = NeonButton(_TOOL_LABEL[tool], role="ghost")
             b.setCheckable(True)
             b.setFocusPolicy(Qt.FocusPolicy.NoFocus)        # 방향키는 사진 화면이 받는다
-            b.setToolTip(_KO.GL_TOOL_TIP_FMT.format(name=_TOOL_LABEL[tool], key=i))
             b.clicked.connect(lambda _c=False, t=tool: self._set_tool(t))
             self._tool_btns[tool] = b
             row.addWidget(b)
         self._tool_btns["move"].setChecked(True)
         row.addSpacing(10)
-        self.show_h = self._toggle(_KO.GL_SHOW_HLINE, self._on_show_lines)
-        self.show_v = self._toggle(_KO.GL_SHOW_VLINE, self._on_show_lines)
-        row.addWidget(self.show_h)
-        row.addWidget(self.show_v)
-        row.addSpacing(10)
-        lab = QLabel(_KO.GL_SIZE_LABEL, self)
-        lab.setProperty("role", "muted")
-        self.size_minus = self._plain(_KO.GL_SIZE_MINUS, lambda: self.canvas.grow(-2), _KO.GL_SIZE_TIP)
-        self.size_plus = self._plain(_KO.GL_SIZE_PLUS, lambda: self.canvas.grow(2), _KO.GL_SIZE_TIP)
-        for b in (self.size_minus, self.size_plus):
-            b.setMinimumWidth(40)
-        row.addWidget(lab)
-        row.addWidget(self.size_minus)
-        row.addWidget(self.size_plus)
-        row.addSpacing(10)
         row.addWidget(self._plain(_KO.GL_FIT, lambda: self.canvas.fit(), "F"))
-        row.addWidget(self._plain(_KO.GL_ONE_TO_ONE, lambda: self.canvas.set_scale(1.0), ""))
         self.undo_btn = self._plain(_KO.GL_UNDO, lambda: self.canvas.undo(), "Ctrl+Z")
         row.addWidget(self.undo_btn)
         row.addWidget(self._plain(_KO.GL_CLEAR, self._clear_rois, ""))
@@ -271,14 +240,6 @@ class GlViewerDialog(QDialog):
         hint.setProperty("role", "muted")
         col.addWidget(hint)
         return col
-
-    def _toggle(self, text: str, slot) -> NeonButton:
-        b = NeonButton(text, role="ghost")
-        b.setCheckable(True)
-        b.setChecked(True)
-        b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        b.toggled.connect(slot)
-        return b
 
     def _plain(self, text: str, slot, tip: str) -> NeonButton:
         b = NeonButton(text, role="ghost")
@@ -298,8 +259,6 @@ class GlViewerDialog(QDialog):
             c.roisChanged.connect(self._schedule_refresh)
             c.selectionChanged.connect(self._on_selection)
             c.hoverInfo.connect(self._on_hover)
-            c.toolRequested.connect(self._sync_tool_buttons)
-            c.visibilityChanged.connect(self._sync_show_buttons)
             c.viewStateChanged.connect(self._sync_views)
         self.canvas.viewChanged.connect(self._update_status)
         self.cap_a = QLabel("", self)
@@ -324,22 +283,6 @@ class GlViewerDialog(QDialog):
         self.status.setProperty("role", "mono")
         self.status.setMinimumHeight(theme.PROFILE.target_min)
         col.addWidget(self.status)
-        self.table = QTableWidget(0, 9, self)
-        self.table.setHorizontalHeaderLabels([
-            _KO.GL_COL_ROI, _KO.GL_COL_BOX, _KO.GL_COL_COUNT, _KO.GL_COL_MEAN, _KO.GL_COL_STD,
-            _KO.GL_COL_MIN, _KO.GL_COL_MAX, _KO.GL_COL_BELOW, _KO.GL_COL_ABOVE])
-        self.table.verticalHeader().setVisible(False)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        hh = self.table.horizontalHeader()
-        hh.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)     # 위치·크기
-        self.table.setMinimumHeight(150)
-        self.table.setMaximumHeight(210)
-        self.table.cellClicked.connect(self._on_table_click)
-        col.addWidget(self.table)
         return col
 
     def _build_right(self) -> QWidget:
@@ -371,16 +314,13 @@ class GlViewerDialog(QDialog):
         self.thr_note.setProperty("role", "muted")
         col.addWidget(self.thr_note)
         r2 = QHBoxLayout()
-        self.auto_btn = NeonButton(_KO.GL_THR_AUTO, role="ghost")
-        self.auto_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.auto_btn.clicked.connect(self._auto_thresholds)
         self.bits_combo = QComboBox(self)
         self.bits_combo.setAccessibleName(_KO.GL_BITS)
         self.bits_combo.setMinimumWidth(130)
         self.bits_combo.currentIndexChanged.connect(self._on_bits_changed)
-        r2.addWidget(self.auto_btn, 1)
         r2.addWidget(QLabel(_KO.GL_BITS, self))
         r2.addWidget(self.bits_combo)
+        r2.addStretch(1)
         col.addLayout(r2)
         self.scope = OptionGroup([(analysis.SCOPE_ALL, _KO.GL_SCOPE_ALL),
                                   (analysis.SCOPE_ROI, _KO.GL_SCOPE_ROI),
@@ -388,9 +328,6 @@ class GlViewerDialog(QDialog):
                                  current=analysis.SCOPE_ALL, fixed_cols=3, role="segment")
         self.scope.selection_changed.connect(lambda _k: self._schedule_refresh())
         col.addWidget(self.scope)
-        self.auto_contrast = QCheckBox(_KO.GL_AUTO_CONTRAST, self)
-        self.auto_contrast.toggled.connect(lambda _c: self._schedule_refresh())
-        col.addWidget(self.auto_contrast)
         # 히스토그램
         head = QHBoxLayout()
         head.addWidget(self._section(_KO.GL_HIST))
@@ -400,25 +337,19 @@ class GlViewerDialog(QDialog):
         col.addLayout(head)
         opts = QHBoxLayout()
         self.overlay_cb = QCheckBox(_KO.GL_HIST_OVERLAY, self)
-        self.log_cb = QCheckBox(_KO.GL_HIST_LOG, self)
         self.range_cb = QCheckBox(_KO.GL_HIST_DATA_RANGE, self)
-        for cb in (self.overlay_cb, self.log_cb, self.range_cb):
+        for cb in (self.overlay_cb, self.range_cb):
             cb.toggled.connect(lambda _c: self._schedule_refresh())
             opts.addWidget(cb)
         opts.addStretch(1)
         col.addLayout(opts)
         self.hist = HistogramChart(self)
         self.hist.thresholdDragged.connect(self._on_hist_drag)
-        col.addWidget(self.hist, 3)
+        col.addWidget(self.hist, 1)
         self.hist_info = QLabel("", self)
         self.hist_info.setProperty("role", "mono")
         self.hist.hoverText.connect(self.hist_info.setText)
         col.addWidget(self.hist_info)
-        # 프로파일
-        col.addWidget(self._section(_KO.GL_PROFILE))
-        self.profile = ProfileChart(self)
-        self.profile.hoverText.connect(self.hist_info.setText)
-        col.addWidget(self.profile, 2)
         self._sync_bits_combo(8)
         return host
 
@@ -439,19 +370,6 @@ class GlViewerDialog(QDialog):
     def _sync_tool_buttons(self, tool: str) -> None:
         for t, b in self._tool_btns.items():
             b.setChecked(t == tool)
-
-    def _on_show_lines(self, _checked: bool = False) -> None:
-        self.canvas.rois.show_h = self.show_h.isChecked()
-        self.canvas.rois.show_v = self.show_v.isChecked()
-        self.canvas.update()
-        self.canvas_b.update()
-        self._schedule_refresh()
-
-    def _sync_show_buttons(self) -> None:
-        for b, v in ((self.show_h, self.canvas.rois.show_h), (self.show_v, self.canvas.rois.show_v)):
-            b.blockSignals(True)
-            b.setChecked(v)
-            b.blockSignals(False)
 
     def _clear_rois(self) -> None:
         if self.canvas.rois.clear():
@@ -667,7 +585,6 @@ class GlViewerDialog(QDialog):
             sp.blockSignals(False)
         self.canvas.set_thresholds(self._lo, self._hi)
         self.hist.set_thresholds(self._lo, self._hi)
-        self.profile.set_thresholds(self._lo, self._hi)
 
     def _set_thresholds(self, lo: int, hi: int, moved: str) -> None:
         """하한 < 상한을 지킨다 — 움직인 쪽이 반대편을 넘으면 그 자리에서 멈추고 알린다."""
@@ -691,14 +608,6 @@ class GlViewerDialog(QDialog):
             self._set_thresholds(gl, self._hi, "lo")
         else:
             self._set_thresholds(self._lo, gl, "hi")
-
-    def _auto_thresholds(self) -> None:
-        if self._full_hist is None:
-            return
-        self._lo, self._hi = analysis.auto_thresholds(self._full_hist)
-        self.thr_note.setText("")
-        self._sync_spins()
-        self._schedule_refresh()
 
     def _sync_bits_combo(self, auto_bits: int) -> None:
         self.bits_combo.blockSignals(True)
@@ -733,15 +642,11 @@ class GlViewerDialog(QDialog):
         if not self._refresh_timer.isActive():
             self._refresh_timer.start()
 
-    def _visible_rois(self) -> list[R.Roi]:
-        rs = self.canvas.rois
-        return [r for r in rs.rois if rs.visible(r)]
-
     def _make_rgb(self, gl: Optional[loader.GlImage] = None) -> np.ndarray:
         data = (gl or self._gl).data
-        rng = analysis.display_range(data, self._bits, self.auto_contrast.isChecked())
+        rng = analysis.display_range(self._bits)
         return analysis.overlay_rgb(data, rng, self._lo, self._hi,
-                                    self.scope.current_key(), self._visible_rois())
+                                    self.scope.current_key(), self.canvas.rois.rois)
 
     def _refresh(self) -> None:
         if self._gl is None:
@@ -752,19 +657,18 @@ class GlViewerDialog(QDialog):
             self.canvas_b.set_display(self._make_rgb(self._gl_b))
             self.canvas_b.set_thresholds(self._lo, self._hi)
         self._refresh_charts()
-        self._refresh_table()
         self.undo_btn.setEnabled(self.canvas.rois.can_undo())
         self._update_status()
 
     def _refresh_charts(self) -> None:
         data = self._gl.data
         levels = self._levels()
-        rois = self._visible_rois()
+        rois = self.canvas.rois.rois
         active = self.canvas.rois.active()
         series, name = [], _KO.GL_HIST_ALL
         if self._gl_b is not None:
             # 비교: 선택한 ROI(없으면 사진 전체)의 A·B 분포를 % 로 겹친다.
-            if active is not None and self.canvas.rois.visible(active):
+            if active is not None:
                 ha = analysis.histogram(analysis.roi_values(data, active), self._bits)
                 hb = analysis.histogram(analysis.roi_values(self._gl_b.data, active), self._bits)
                 name = active.name
@@ -775,26 +679,16 @@ class GlViewerDialog(QDialog):
             series = [(r.name, r.color, analysis.histogram(analysis.roi_values(data, r), self._bits))
                       for r in rois]
             name = " · ".join(r.name for r in rois)
-        elif active is not None and self.canvas.rois.visible(active):
+        elif active is not None:
             series = [(active.name, theme.MUTE or "#5A574E",
                        analysis.histogram(analysis.roi_values(data, active), self._bits))]
             name = active.name
         else:
             series = [(_KO.GL_HIST_ALL, theme.MUTE or "#5A574E", self._full_hist)]
-        self.hist.set_log(self.log_cb.isChecked())
         self.hist.set_range_data(self.range_cb.isChecked())
         self.hist.set_series(series, levels, normalize=len(series) > 1)
         self.hist.set_thresholds(self._lo, self._hi)
         self.hist_name.setText(name)
-        lines = []
-        for r in (x for x in rois if x.is_line):
-            if self._gl_b is None:
-                lines.append((r.name, r.color, analysis.profile(data, r)))
-            else:
-                lines.append((f"{r.name} A", _CMP_A, analysis.profile(data, r)))
-                lines.append((f"{r.name} B", _CMP_B, analysis.profile(self._gl_b.data, r)))
-        self.profile.set_lines(lines, levels)
-        self.profile.set_thresholds(self._lo, self._hi)
 
     def _stat_row(self, r: Optional[R.Roi], gl: Optional[loader.GlImage] = None) -> dict:
         data = (gl or self._gl).data
@@ -803,12 +697,7 @@ class GlViewerDialog(QDialog):
         else:
             vals = analysis.roi_values(data, r)
             name = r.name
-            if r.kind == R.HLINE:
-                box = _KO.GL_ROW_LINE_FMT.format(axis=_KO.GL_AXIS_ROW, pos=r.pos)
-            elif r.kind == R.VLINE:
-                box = _KO.GL_ROW_LINE_FMT.format(axis=_KO.GL_AXIS_COL, pos=r.pos)
-            else:
-                box = f"({r.x}, {r.y}) {r.w}×{r.h}"
+            box = f"({r.x}, {r.y}) {r.w}×{r.h}"
         st = analysis.stats(vals, self._lo, self._hi)
         st["name"], st["box"] = name, box
         return st
@@ -823,59 +712,6 @@ class GlViewerDialog(QDialog):
             out += [dict(a, name=f"{a['name']} · A"), dict(b, name=f"{b['name']} · B"),
                     _delta_row(a, b)]
         return out
-
-    def _refresh_table(self) -> None:
-        rows = self._stat_rows()
-        rois = [None] + self.canvas.rois.rois
-        if self._gl_b is not None:
-            rois = [r for r in rois for _ in range(3)]
-        self.table.setRowCount(len(rows))
-        sel = self.canvas.rois.selected
-        for i, (st, r) in enumerate(zip(rows, rois)):
-            if st.get("delta"):
-                cells = [st["name"], "", f"{st['n']:+,}",
-                         _signed(st["mean"], 1), _signed(st["std"], 1),
-                         _signed(st["min"], 0), _signed(st["max"], 0),
-                         _signed(st["below"], 0), _signed(st["above"], 0)]
-                for c, text in enumerate(cells):
-                    it = _mono_item(text, right=c >= 2)
-                    it.setForeground(QColor(theme.MUTE or "#5A574E"))
-                    if c == 0 and r is not None:
-                        it.setData(Qt.ItemDataRole.UserRole, r.id)
-                    self.table.setItem(i, c, it)
-                continue
-
-            def pct(c):
-                return f"{c:,} ({c / st['n'] * 100:.1f}%)" if st["n"] else "—"
-            cells = [st["name"], st["box"], f"{st['n']:,}",
-                     "—" if st["mean"] is None else f"{st['mean']:.1f}",
-                     "—" if st["std"] is None else f"{st['std']:.1f}",
-                     "—" if st["min"] is None else f"{st['min']:,}",
-                     "—" if st["max"] is None else f"{st['max']:,}",
-                     pct(st["below"]), pct(st["above"])]
-            for c, text in enumerate(cells):
-                it = _mono_item(text, right=c >= 2)
-                if c == 0 and r is not None:
-                    it.setForeground(QColor(r.color if self._dark_ok(r.color) else theme.INK))
-                    it.setData(Qt.ItemDataRole.UserRole, r.id)
-                self.table.setItem(i, c, it)
-            if r is not None and r.id == sel:
-                self.table.selectRow(i)
-        if sel is None:
-            self.table.clearSelection()
-
-    @staticmethod
-    def _dark_ok(color: str) -> bool:
-        """밝은 ROI 색(흰색·연두)은 밝은 표 바탕에서 안 보인다 — 그런 색은 잉크로 바꾼다."""
-        c = QColor(color)
-        return (0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue()) < 150
-
-    def _on_table_click(self, row: int, _col: int) -> None:
-        it = self.table.item(row, 0)
-        rid = it.data(Qt.ItemDataRole.UserRole) if it else None
-        self.canvas.rois.selected = rid
-        self.canvas.update()
-        self._on_selection()
 
     def _on_selection(self) -> None:
         self._schedule_refresh()
@@ -924,7 +760,7 @@ class GlViewerDialog(QDialog):
         self._toast(_KO.GL_SAVED_FMT.format(name=Path(path).name))
 
     def save_xlsx(self, path: Path) -> None:
-        """통계·히스토그램·선 프로파일을 엑셀 한 장으로 저장한다(헤드리스 호출 가능)."""
+        """통계·히스토그램을 엑셀 한 장으로 저장한다(헤드리스 호출 가능)."""
         data = self._gl.data
         rois = self.canvas.rois.rois
         info = [(_KO.GL_INFO_PHOTO, self._view.source_path if self._view else self._gl.path),
@@ -938,7 +774,6 @@ class GlViewerDialog(QDialog):
             hist_cols = [(_KO.GL_HIST_ALL, self._full_hist)] + [
                 (r.name, analysis.histogram(analysis.roi_values(data, r), self._bits))
                 for r in rois]
-            profiles = [(r.name, analysis.profile(data, r)) for r in rois if r.is_line]
         else:
             info.insert(1, (_KO.GL_INFO_B, self._view_b.source_path if self._view_b else self._gl_b.path))
             db = self._gl_b.data
@@ -947,18 +782,13 @@ class GlViewerDialog(QDialog):
             for r in rois:
                 hist_cols += [(f"{r.name} A", analysis.histogram(analysis.roi_values(data, r), self._bits)),
                               (f"{r.name} B", analysis.histogram(analysis.roi_values(db, r), self._bits))]
-            profiles = []
-            for r in (x for x in rois if x.is_line):
-                profiles += [(f"{r.name} A", analysis.profile(data, r)),
-                             (f"{r.name} B", analysis.profile(db, r))]
         titles = {"info": _KO.GL_XLSX_SHEET_INFO, "stats": _KO.GL_XLSX_SHEET_STATS,
-                  "hist": _KO.GL_XLSX_SHEET_HIST, "profile": _KO.GL_XLSX_SHEET_PROFILE,
-                  "gl": _KO.GL_XLSX_GL, "pos": _KO.GL_XLSX_POS,
+                  "hist": _KO.GL_XLSX_SHEET_HIST, "gl": _KO.GL_XLSX_GL,
                   "stats_cols": [_KO.GL_COL_ROI, _KO.GL_COL_BOX, _KO.GL_COL_COUNT, _KO.GL_COL_MEAN,
                                  _KO.GL_COL_STD, _KO.GL_COL_MIN, _KO.GL_COL_MAX,
                                  _KO.GL_COL_BELOW, _KO.GL_COL_BELOW_PCT, _KO.GL_COL_ABOVE,
                                  _KO.GL_COL_ABOVE_PCT]}
-        wb = build_workbook(info, self._stat_rows(), hist_cols, profiles, titles)
+        wb = build_workbook(info, self._stat_rows(), hist_cols, titles)
         save_workbook(wb, path)
 
     def _on_save_png(self) -> None:
@@ -987,22 +817,15 @@ class GlViewerDialog(QDialog):
             lw = max(1, round(min(w, h) / 500))
             font = QFont(theme.FONT_MONO.split(",")[0].strip('" '), max(8, lw * 6))
             p.setFont(font)
-            for r in self._visible_rois():
+            for r in self.canvas.rois.rois:
                 pen = QPen(QColor(r.color), lw)
                 p.setPen(pen)
                 p.setBrush(Qt.BrushStyle.NoBrush)
-                if r.kind == R.HLINE:
-                    p.drawLine(0, r.pos, w, r.pos)
-                    p.drawText(6, max(r.pos - 4, lw * 8), r.name)
-                elif r.kind == R.VLINE:
-                    p.drawLine(r.pos, 0, r.pos, h)
-                    p.drawText(r.pos + 4, lw * 8, r.name)
+                if r.kind == R.CIRCLE:
+                    p.drawEllipse(r.x, r.y, r.w, r.h)
                 else:
-                    if r.kind == R.CIRCLE:
-                        p.drawEllipse(r.x, r.y, r.w, r.h)
-                    else:
-                        p.drawRect(r.x, r.y, r.w, r.h)
-                    p.drawText(r.x, max(r.y - 4, lw * 8), r.name)
+                    p.drawRect(r.x, r.y, r.w, r.h)
+                p.drawText(r.x, max(r.y - 4, lw * 8), r.name)
             p.end()
         return img
 
