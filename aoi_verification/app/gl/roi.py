@@ -129,10 +129,11 @@ class RoiSet:
                 return c
         return PALETTE[len(self._rois) % len(PALETTE)]
 
-    def add(self, roi: Roi) -> Roi:
-        """새 ROI 를 넣고 선택한다.  id·이름·색은 여기서 정한다."""
+    def add(self, roi: Roi, name: Optional[str] = None, color: Optional[str] = None) -> Roi:
+        """새 ROI 를 넣고 선택한다.  id 는 여기서 정하고, 이름·색은 ``None`` 이면 자동으로 정한다."""
         self.snap()
-        roi = replace(roi, id=self._next, name=self._name(roi.kind), color=self._color())
+        roi = replace(roi, id=self._next, name=name or self._name(roi.kind),
+                      color=color or self._color())
         self._next += 1
         self._rois.append(roi)
         self.selected = roi.id

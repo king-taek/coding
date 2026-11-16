@@ -42,7 +42,6 @@ _LOG = logging.getLogger("aoi.gl")
 _KO = i18n.KO
 
 _TOOL_LABEL = {"move": _KO.GL_TOOL_MOVE, R.RECT: _KO.GL_TOOL_RECT, R.CIRCLE: _KO.GL_TOOL_CIRCLE}
-_BITS_CHOICES = (8, 10, 12, 14, 16)
 _WARN_TEXT = {loader.W_COLOR: _KO.GL_WARN_COLOR, loader.W_JPEG: _KO.GL_WARN_JPEG,
               loader.W_HUGE: _KO.GL_WARN_HUGE}
 
@@ -143,6 +142,7 @@ class GlViewerDialog(QDialog):
         self.setAcceptDrops(True)
         self._gl: Optional[loader.GlImage] = None
         self._view: Optional[loader.ViewLoad] = None
+        self._defect_id: Optional[int] = None      # Scan 결함 상자에 만든 ROI 의 id
         self._bits = 8
         self._lo, self._hi = 0, 1
         self._full_hist: Optional[np.ndarray] = None
@@ -231,6 +231,10 @@ class GlViewerDialog(QDialog):
         self._tool_btns["move"].setChecked(True)
         row.addSpacing(10)
         row.addWidget(self._plain(_KO.GL_FIT, lambda: self.canvas.fit(), "F"))
+        self.defect_btn = self._plain(_KO.GL_DEFECT_GO, self._go_defect, "")
+        self.defect_btn.setEnabled(False)
+        self.defect_btn.setToolTip(_KO.GL_DEFECT_GO_OFF_TIP)
+        row.addWidget(self.defect_btn)
         self.undo_btn = self._plain(_KO.GL_UNDO, lambda: self.canvas.undo(), "Ctrl+Z")
         row.addWidget(self.undo_btn)
         row.addWidget(self._plain(_KO.GL_CLEAR, self._clear_rois, ""))
@@ -313,15 +317,6 @@ class GlViewerDialog(QDialog):
         self.thr_note = QLabel("", self)
         self.thr_note.setProperty("role", "muted")
         col.addWidget(self.thr_note)
-        r2 = QHBoxLayout()
-        self.bits_combo = QComboBox(self)
-        self.bits_combo.setAccessibleName(_KO.GL_BITS)
-        self.bits_combo.setMinimumWidth(130)
-        self.bits_combo.currentIndexChanged.connect(self._on_bits_changed)
-        r2.addWidget(QLabel(_KO.GL_BITS, self))
-        r2.addWidget(self.bits_combo)
-        r2.addStretch(1)
-        col.addLayout(r2)
         self.scope = OptionGroup([(analysis.SCOPE_ALL, _KO.GL_SCOPE_ALL),
                                   (analysis.SCOPE_ROI, _KO.GL_SCOPE_ROI),
                                   (analysis.SCOPE_OFF, _KO.GL_SCOPE_OFF)],
@@ -350,7 +345,6 @@ class GlViewerDialog(QDialog):
         self.hist_info.setProperty("role", "mono")
         self.hist.hoverText.connect(self.hist_info.setText)
         col.addWidget(self.hist_info)
-        self._sync_bits_combo(8)
         return host
 
     def _section(self, text: str) -> QLabel:
@@ -376,6 +370,28 @@ class GlViewerDialog(QDialog):
             self.canvas.roisChanged.emit()
             self.canvas.selectionChanged.emit()
             self.canvas.update()
+
+    def _ensure_defect_roi(self) -> None:
+        """Scan 결함 상자에 'Defect' 사각형 ROI 를 둔다(이미 있으면 그대로) — 선택까지 한다."""
+        box = self._view.target_box if self._view else None
+        if not box:
+            return
+        r = self.canvas.rois.get(self._defect_id)
+        if r is None:
+            w, h = self.canvas.image_size()
+            l, t, bw, bh = (int(round(v)) for v in box)
+            r = R.clamp_shape(R.Roi(0, R.RECT, "", "", x=l, y=t, w=bw, h=bh), w, h)
+            self._defect_id = self.canvas.rois.add(r, _KO.GL_ROI_DEFECT, theme.VIEWER_BOX).id
+        else:
+            self.canvas.rois.selected = r.id
+        self.canvas.roisChanged.emit()
+        self.canvas.selectionChanged.emit()
+        self.canvas.update()
+
+    def _go_defect(self) -> None:
+        if self._view and self._view.target_box:
+            self._ensure_defect_roi()
+            self.canvas.zoom_to_box(self._view.target_box)
 
     # ------------------------------------------------------------------
     # 사진 열기
@@ -424,8 +440,8 @@ class GlViewerDialog(QDialog):
         self._view = v
         self._gl = v.image
         self.canvas.rois.reset()
+        self._defect_id = None
         self._bits = v.image.bits
-        self._sync_bits_combo(self._bits)
         self._full_hist = analysis.histogram(self._gl.data, self._bits)
         if self._gl_b is not None:
             self._full_hist_b = analysis.histogram(self._gl_b.data, self._bits)
@@ -446,8 +462,10 @@ class GlViewerDialog(QDialog):
                   if w in _WARN_TEXT and not (v.scan_name and w == loader.W_COLOR)]
         self.banner.setText("\n".join(notes))
         self.banner.setVisible(bool(notes))
+        self.defect_btn.setEnabled(bool(v.target_box))
+        self.defect_btn.setToolTip("" if v.target_box else _KO.GL_DEFECT_GO_OFF_TIP)
         if v.target_box:
-            self.canvas.set_target_box(v.target_box)
+            self._ensure_defect_roi()
             call_later(self, 0, self._zoom_to_target)
         self._refresh()
         self.canvas.setFocus()
@@ -502,7 +520,6 @@ class GlViewerDialog(QDialog):
         self._view_b, self._gl_b = v, b
         self._full_hist_b = analysis.histogram(b.data, self._bits)
         self.canvas_b.set_image(b.data, self._make_rgb(b), fit=False)
-        self.canvas_b.set_target_box(self.canvas._target)
         self.canvas_b.set_view_state(self.canvas.view_state())
         self.pane_b.setVisible(True)
         self.cap_a.setText(f"A · {Path(self._view.source_path or self._gl.path).name}")
@@ -608,32 +625,6 @@ class GlViewerDialog(QDialog):
             self._set_thresholds(gl, self._hi, "lo")
         else:
             self._set_thresholds(self._lo, gl, "hi")
-
-    def _sync_bits_combo(self, auto_bits: int) -> None:
-        self.bits_combo.blockSignals(True)
-        self.bits_combo.clear()
-        if auto_bits == 8:
-            choices = (8,)
-        else:
-            choices = tuple(b for b in _BITS_CHOICES if b >= 10)
-        for b in choices:
-            self.bits_combo.addItem(
-                (_KO.GL_BITS_AUTO_FMT if b == auto_bits else _KO.GL_BITS_FMT).format(bits=b), b)
-        self.bits_combo.setCurrentIndex(max(0, choices.index(auto_bits)) if auto_bits in choices else 0)
-        self.bits_combo.setEnabled(len(choices) > 1)
-        self.bits_combo.blockSignals(False)
-
-    def _on_bits_changed(self, _i: int) -> None:
-        """16 bit 사진의 GL 범위(10/12/14/16)를 바꾼다 — 분석 범위·판정 기준이 함께 바뀐다."""
-        b = self.bits_combo.currentData()
-        if self._gl is None or b is None or int(b) == self._bits:
-            return
-        self._bits = int(b)
-        self._full_hist = analysis.histogram(self._gl.data, self._bits)
-        self._set_range_widgets()
-        self._lo, self._hi = analysis.auto_thresholds(self._full_hist)
-        self._sync_spins()
-        self._schedule_refresh()
 
     # ------------------------------------------------------------------
     # 갱신
