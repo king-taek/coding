@@ -307,3 +307,75 @@ def test_no_color_photo_asks_then_shows_scan_crop(styled_qapp, tmp_path):
         dlg2.deleteLater()
     finally:
         dlg.deleteLater()
+
+
+def test_group_by_source_keeps_display_order():
+    """같은 Scan 원본은 한 묶음 — 묶음 순서는 처음 나온 자리, 묶음 안은 들어온 순서."""
+    pytest.importorskip("PyQt6.QtWidgets")
+    from types import SimpleNamespace as NS
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    m = lambda p: NS(best=NS(path=Path(p)))             # noqa: E731
+    g = T.group_by_source([("a", m("x.jpg")), ("b", m("y.jpg")), ("c", m("x.jpg"))])
+    assert list(g) == ["x.jpg", "y.jpg"]
+    assert [k for k, _m in g["x.jpg"]] == ["a", "c"]
+
+
+def test_scan_crops_batches_and_decodes_each_source_once(tmp_path, monkeypatch):
+    """원본 하나에서 여러 Defect 를 자를 때 디코드는 한 번, Crop 은 배치로 흘러나온다."""
+    np = pytest.importorskip("numpy")
+    cv2 = pytest.importorskip("cv2")
+    from aoi_verification.app.coords import scan_image as SI
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    w = tmp_path / "W1"
+    w.mkdir()
+    cv2.imwrite(str(w / "1.t.1.jpeg"), np.full((1000, 2000, 3), 90, np.uint8))
+    (w / "ScanResultImageList.txt").write_text("Version=1\n1.t.1.jpeg,0,0\n")
+    monkeypatch.setattr(SI.pixel_size, "scan_pixel_size_xy", lambda f: (PX, PX))
+    SI.clear_caches()
+    n_open = []
+    from PIL import Image
+    orig = Image.open
+    monkeypatch.setattr(Image, "open", lambda p, *a, **k: (n_open.append(str(p)), orig(p, *a, **k))[1])
+    items = [(("k", i), w, (i * 20.0, i * 10.0)) for i in range(40)]
+    SI.resolve_xy(w, (0.0, 0.0))                          # 목록 인덱스(머리 읽기)를 미리 — 아래 센 것은 본 디코드만
+    n_open.clear()
+    batches = []
+    got = T.scan_crops(items, on_batch=batches.append)
+    assert len(got) == 40 and sum(len(b) for b in batches) == 40 and len(batches) >= 2
+    assert sum(1 for p in n_open if p.endswith("1.t.1.jpeg")) == 1       # 디코드 한 번
+
+
+def test_answer_scan_shows_placeholders_then_fills_async(styled_qapp, tmp_path):
+    """'예' 직후 화면을 막지 않고 자리표시 타일이 먼저 서고, Crop 이 도착하면 그림이 채워진다(스레드 포함)."""
+    import time
+    np = pytest.importorskip("numpy")
+    cv2 = pytest.importorskip("cv2")
+    from PyQt6.QtGui import QImage
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    w = tmp_path / "27125535EWA5"
+    shutil.copytree(FS_UBM, w)
+    names = [n for n in (FS_UBM / "사진목록.txt").read_text(encoding="utf-8").splitlines()
+             if n and not n.startswith("#")]
+    for name in names[:4]:
+        (w / name).write_bytes(b"")
+    defects, _note = P.load_defects(w)
+    have = T.load_wafer(w).photos
+    target = [d for d in defects if (0, d.index) not in have][0]
+    cv2.imwrite(str(w / "1.2.t.1.jpeg"), np.full((1000, 2000, 3), 90, np.uint8))
+    (w / "ScanResultImageList.txt").write_text(f"Version=1\n1.2.t.1.jpeg,{target.x},{target.y}\n")
+    dlg = T.ThresholdPreviewDialog()
+    try:
+        dlg.set_wafer(T.load_wafer(w))
+        dlg._set_zone((target.zone_dir, target.zone))
+        dlg._set_tab("keep")
+        dlg.answer_scan(True)
+        k = T.key_of(target)
+        assert k in dlg.tiles                                  # 자리표시 타일이 바로 선다
+        end = time.time() + 20
+        while time.time() < end and dlg._scan_thread is not None:
+            styled_qapp.processEvents()
+            time.sleep(0.01)
+        assert dlg._scan_thread is None and isinstance(dlg._scans.get(k), QImage)
+        assert not dlg.scan_status.text()
+    finally:
+        dlg.deleteLater()

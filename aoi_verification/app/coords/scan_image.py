@@ -40,7 +40,7 @@ from .ini_text import decode_ini_bytes
 
 __all__ = ["SCAN_LIST_NAME", "CROP_SIDE_UM", "Candidate", "ScanMatch",
            "parse_manifest", "scan_uv", "crop_box", "rank_candidates", "resolve", "resolve_xy",
-           "cut", "load_crop", "load_full", "clear_caches"]
+           "cut", "load_crop", "crops_from", "load_full", "clear_caches"]
 
 _LOG = logging.getLogger("aoi.scan")
 
@@ -358,6 +358,20 @@ def load_crop(match: ScanMatch):
         except Exception:
             _LOG.warning("Scan 원본을 읽지 못함: %s", cand.path)
     return None
+
+
+def crops_from(path, boxes) -> Optional[list]:
+    """한 Scan 원본을 **한 번만** 디코드해 ``boxes`` 를 전부 자른다(공유 디코드 캐시를 거치지 않는다 —
+    스레드 여럿이 서로 다른 원본을 동시에 열어도 캐시를 밀어내지 않는다).  못 읽으면 None."""
+    from PIL import Image
+    try:
+        with Image.open(path) as src:
+            im = src.copy()      # EXIF 회전을 적용하지 않는다(raw 규약 — _decode 와 같다)
+        im.load()
+        return [cut(im, b) for b in boxes]
+    except Exception:
+        _LOG.warning("Scan 원본을 읽지 못함: %s", path)
+        return None
 
 
 def load_full(cand: Candidate):

@@ -36,6 +36,7 @@ import base64
 import logging
 import math
 import os
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
@@ -341,14 +342,9 @@ class _Tile(QFrame):
         pic = QLabel(self)
         pic.setFixedSize(size, size)
         pic.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        pic.setPixmap(_pixmap(photo, size))
+        self.pic, self._size = pic, size
         lay.addWidget(pic)
-        if isinstance(photo, QImage):                   # Color 사진이 없어 Scan 사진에서 잘라 온 것
-            tag = QLabel(_KO.OVERKILL_SCAN_TAG, pic)
-            tag.setStyleSheet(f"background: {theme.PANEL}; color: {theme.INK}; border-radius: 4px;"
-                              " padding: 1px 5px; font-size: 11px; font-weight: 700;")
-            tag.adjustSize()
-            tag.move(6, size - tag.height() - 6)
+        self.set_photo(photo)
         self.badge = QLabel("✓", pic)                  # 꼭 잡기 표시
         self.badge.setFixedSize(24, 24)
         self.badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -376,6 +372,21 @@ class _Tile(QFrame):
             v.setStyleSheet(f"color: {theme.DANGER}; font-family: {theme.FONT_MONO};")
             row.addWidget(v)
         lay.addLayout(row)
+
+    def set_photo(self, photo) -> None:
+        """그림을 올린다.  ``None`` = Scan Crop 을 아직 자르는 중(자리표시)."""
+        pic, size = self.pic, self._size
+        if photo is None:
+            pic.setText(_KO.OVERKILL_SCAN_WAIT)
+            return
+        pic.setPixmap(_pixmap(photo, size))
+        if isinstance(photo, QImage):                   # Color 사진이 없어 Scan 사진에서 잘라 온 것
+            tag = QLabel(_KO.OVERKILL_SCAN_TAG, pic)
+            tag.setStyleSheet(f"background: {theme.PANEL}; color: {theme.INK}; border-radius: 4px;"
+                              " padding: 1px 5px; font-size: 11px; font-weight: 700;")
+            tag.adjustSize()
+            tag.move(6, size - tag.height() - 6)
+            tag.show()
 
     def set_open(self, on: bool) -> None:
         if self.picked:
@@ -409,12 +420,32 @@ def _pixmap(photo, size: int, kind: str = "") -> QPixmap:
     return image_io.load_thumb_qpixmap(photo, size, kind=kind) if kind else image_io.cached_tile_pixmap(photo, size)
 
 
-def scan_crops(items, report=lambda done, total: None, stop=lambda: False) -> dict:
+SCAN_WORKERS = 5            # Scan 원본을 동시에 몇 개 디코드할까 — NAS 지연이 커서 나눠 읽으면 그만큼 줄고, 디코드(PIL)는 GIL 을 놓는다
+SCAN_BATCH = 16             # 잘라 낸 Crop 을 이만큼 모일 때마다 화면에 넘긴다
+
+
+def group_by_source(found) -> dict:
+    """``[(키, ScanMatch)]`` → ``{원본 경로: [(키, ScanMatch)]}`` — 같은 Scan 은 한 번만 디코드하려고 묶는다.
+    들어온 순서(= 화면에서 보일 순서)를 지킨다: 묶음은 그 원본이 처음 나온 자리 순, 묶음 안도 들어온 순."""
+    groups: dict = {}
+    for k, m in found:
+        groups.setdefault(str(m.best.path), []).append((k, m))
+    return groups
+
+
+def _to_qimage(im) -> QImage:
+    im = im.convert("RGB")
+    return QImage(im.tobytes(), im.width, im.height, 3 * im.width, QImage.Format.Format_RGB888).copy()
+
+
+def scan_crops(items, report=lambda done, total: None, stop=lambda: False, on_batch=None) -> dict:
     """Color 사진이 없는 Defect 들 → ``{키: QImage}`` — 같은 폴더 Scan(``.t.``) 사진의 300 µm Crop.
 
     ``items`` = ``[(키, 웨이퍼 폴더, (x, y) µm)]``.  계산은 사진 정보 화면 · 엑셀과 같은
     :mod:`coords.scan_image` 가 한다(Defect ActualX/Y 는 Color 사진 좌표와 같은 틀 — FS UBM 14/14 일치, 관측).
-    같은 Scan 원본을 이어서 자르도록 원본 순으로 정렬한다(디코드 캐시가 작다).  못 자른 Defect 는 빠진다."""
+    같은 Scan 원본을 **한 번만** 디코드해 그 원본의 Crop 을 전부 자르고, 원본들은 스레드 여럿이 나눠 읽는다.
+    ``on_batch(dict)`` 를 주면 Crop 이 ``SCAN_BATCH`` 개 모일 때마다(스레드에서) 불러 준다 — 화면이 점진적으로 채워진다.
+    못 자른 Defect 는 빠진다."""
     from ...coords import scan_image as SI
     found = []
     for k, folder, xy in items:
@@ -422,26 +453,65 @@ def scan_crops(items, report=lambda done, total: None, stop=lambda: False) -> di
             return {}
         m = SI.resolve_xy(folder, xy)
         if m.ok:
-            found.append((str(m.best.path), k, m))
-    found.sort(key=lambda t: t[0])
+            found.append((k, m))
+    groups = group_by_source(found)
+    total = len(found)
     out: dict = {}
-    for i, (_p, k, m) in enumerate(found, start=1):
+    lock = threading.Lock()
+    state = {"done": 0}
+    buf: dict = {}
+
+    def flush(force: bool = False) -> None:
+        if buf and (force or len(buf) >= SCAN_BATCH):
+            chunk = dict(buf)
+            buf.clear()
+            if on_batch is not None:
+                on_batch(chunk)
+
+    def one(group: list) -> None:
         if stop():
-            return {}
-        got = SI.load_crop(m)
-        if got is not None:
-            im = got[0].convert("RGB")
-            q = QImage(im.tobytes(), im.width, im.height, 3 * im.width, QImage.Format.Format_RGB888).copy()
-            out[k] = q
-        if i % 20 == 0 or i == len(found):
-            report(i, len(found))
+            return
+        crops = SI.crops_from(group[0][1].best.path, [m.best.box for _k, m in group])
+        for i, (k, m) in enumerate(group):
+            if stop():
+                return
+            if crops is not None:
+                crop = crops[i]
+            else:                                    # 최상위 후보를 못 읽음 — 다음 후보로(load_crop 규약)
+                got = SI.load_crop(m)
+                crop = got[0] if got is not None else None
+            q = _to_qimage(crop) if crop is not None else None
+            with lock:
+                if q is not None:
+                    out[k] = q
+                    buf[k] = q
+                state["done"] += 1
+                flush()
+                report(state["done"], total)
+
+    with ThreadPoolExecutor(max_workers=max(1, min(SCAN_WORKERS, len(groups) or 1))) as pool:
+        futs = [pool.submit(one, g) for g in groups.values()]
+        for f in futs:
+            try:
+                f.result()
+            except Exception:       # noqa: BLE001 — 한 원본 실패가 나머지를 막지 않게
+                _LOG.exception("Overkill 튜닝 Scan 사진 자르기 실패")
+        if stop():
+            for f in futs:
+                f.cancel()
+    if stop():
+        return {}
+    with lock:
+        flush(True)
+        report(total, total)
     return out
 
 
 class _ScanLoad(QThread):
     class _Signals(QObject):
         progress = pyqtSignal(int, int, int)           # token, done, total
-        done = pyqtSignal(int, object)                 # token, {키: QImage}
+        batch = pyqtSignal(int, object)                # token, {키: QImage} — 일부
+        done = pyqtSignal(int, object)                 # token, 시도한 키 목록(못 자른 것 포함)
 
     def __init__(self, token: int, items: list) -> None:
         super().__init__()
@@ -452,12 +522,12 @@ class _ScanLoad(QThread):
 
     def run(self) -> None:      # type: ignore[override]
         try:
-            got = scan_crops(self._items, lambda d, t: self.signals.progress.emit(self._token, d, t),
-                             self.isInterruptionRequested)
+            scan_crops(self._items, lambda d, t: self.signals.progress.emit(self._token, d, t),
+                       self.isInterruptionRequested,
+                       on_batch=lambda b: self.signals.batch.emit(self._token, b))
         except Exception:       # noqa: BLE001 — 실패를 삼키지 않고 로그에 남긴다(사진만 못 보일 뿐)
             _LOG.exception("Overkill 튜닝 Scan 사진 자르기 실패")
-            got = {}
-        self.signals.done.emit(self._token, got)
+        self.signals.done.emit(self._token, [k for k, _f, _xy in self._items])
 
 
 def _data_uri(photo) -> str:
@@ -488,6 +558,8 @@ class ThresholdPreviewDialog(QDialog):
         self._use_scan: Optional[bool] = None   # Color 사진이 없을 때 Scan 사진으로 볼지 — 물어본 답(None = 아직)
         self._scans: dict = {}            # 키 → Scan 에서 잘라 온 QImage
         self._scan_thread: Optional[_ScanLoad] = None
+        self._scan_map: Optional[dict] = None   # 키 → (폴더, (x, y)) — Scan 으로 자를 수 있는 Defect
+        self._scan_done: set = set()            # 자르기를 시도한 키(성공은 _scans 에 있다) — 다시 시도하지 않는다
         self._scan_token = 0
         self._drop_cache: dict = {}       # (Zone, 바꾼 값) → 빠지는 Defect — 같은 기준을 다시 세지 않는다
         self._ov: dict = {}               # {(zone_dir, zone, Classify, FeatureType): 새 LowValue(px)}
@@ -646,6 +718,9 @@ class ThresholdPreviewDialog(QDialog):
         self.no_photo_label.setProperty("role", "muted")
         tabs.addSpacing(8)
         tabs.addWidget(self.no_photo_label)
+        self.scan_status = QLabel("", self)              # Scan 사진을 불러오는 동안의 진행(화면을 막지 않는다)
+        self.scan_status.setProperty("role", "muted")
+        tabs.addWidget(self.scan_status)
         tabs.addStretch(1)
         main.addLayout(tabs)
 
@@ -769,9 +844,13 @@ class ThresholdPreviewDialog(QDialog):
         self._shown = PAGE_TILES
         self._tab = "keep" if self._mode == "auto" else "drop"
         self._scans = {}
+        self._scan_map = None
+        self._scan_done = set()
+        self.scan_status.setText("")
         self._scan_token += 1                       # 옛 웨이퍼의 Scan 결과가 늦게 와도 버린다
         if self._scan_thread is not None and self._scan_thread.isRunning():
             self._scan_thread.requestInterruption()
+        self._scan_thread = None
         if w is None:
             self._zone = None
             self._render()
@@ -780,8 +859,6 @@ class ThresholdPreviewDialog(QDialog):
         self._zone = next((k for k in zs if w.zones.get(k) and w.zones[k].bundles
                            and self._count(k)), zs[0] if zs else None)
         self._render()
-        if self._use_scan and self._scan_items():
-            self._load_scans()
 
     # ------------------------------------------------------------------ Scan 사진(Color 가 없을 때)
     def _no_color(self) -> list:
@@ -789,53 +866,94 @@ class ThresholdPreviewDialog(QDialog):
         w = self._w
         return [d for d in w.defects + w.goods if key_of(d) not in w.photos] if w and not w.note else []
 
+    def _scan_index(self) -> dict:
+        """Scan 목록 파일이 있는 웨이퍼의, Color 사진이 없는 Defect — ``{키: (폴더, (x, y))}``(웨이퍼마다 한 번)."""
+        if self._scan_map is None:
+            from ...coords import scan_image as SI
+            has: dict = {}
+            out = {}
+            for d in self._no_color():
+                folder = _folder_of(self._w, d)
+                if folder not in has:
+                    has[folder] = (folder / SI.SCAN_LIST_NAME).is_file()
+                if has[folder]:
+                    out[key_of(d)] = (folder, (d.x, d.y))
+            self._scan_map = out
+        return self._scan_map
+
     def _scan_items(self) -> list:
-        """Scan 목록 파일이 있는 웨이퍼의, Color 사진이 없는 Defect — ``[(키, 폴더, (x, y))]``."""
-        from ...coords import scan_image as SI
-        has: dict = {}
-        out = []
-        for d in self._no_color():
-            folder = _folder_of(self._w, d)
-            if folder not in has:
-                has[folder] = (folder / SI.SCAN_LIST_NAME).is_file()
-            if has[folder]:
-                out.append((key_of(d), folder, (d.x, d.y)))
-        return out
+        """:meth:`_scan_index` 를 ``[(키, 폴더, (x, y))]`` 로."""
+        return [(k, f, xy) for k, (f, xy) in self._scan_index().items()]
 
     def answer_scan(self, yes: bool) -> None:
         """'Scan 사진으로 볼까요?' 의 답 — 이 화면을 닫을 때까지 기억한다(폴더를 더해도 다시 묻지 않는다)."""
         self._use_scan = yes
         self.scan_ask.setVisible(False)
         if yes:
-            self._load_scans()
+            self._render_tiles()                    # 자리표시 타일이 먼저 보이고, 사진은 보이는 것부터 채워진다
 
-    def _load_scans(self) -> None:
-        items = self._scan_items()
-        if not items:
+    def _scan_pending(self, k) -> bool:
+        """Scan Crop 을 쓰기로 했고 아직 안 잘랐다 — 사진이 '올 예정' 이라 자리표시 타일로 보인다."""
+        return bool(self._use_scan) and k in self._scan_index() and k not in self._scans and k not in self._scan_done
+
+    def _ensure_scans(self) -> None:
+        """지금 화면(탭의 앞 ``_shown`` 장 + 한 쪽)에 필요한데 아직 안 자른 Crop 만 백그라운드로 자른다.
+
+        한 번에 스레드 하나 — 끝나면(:meth:`_on_scans`) 다시 불러 그 사이 늘어난 필요(더 보기·탭 이동)를 이어서 한다.
+        결과는 키로 ``_scans`` 에 쌓여 같은 Defect 를 두 번 자르지 않는다."""
+        if not self._use_scan or self._w is None or self._zone is None:
             return
-        self._scan_token += 1                       # 폴더 읽기 토큰과 따로 — 서로의 결과를 버리지 않게
-        token = self._scan_token
-        self._loading.show_overlay(_KO.OVERKILL_SCAN_LOADING)
-        self._loading.set_progress(0, 0, _KO.OVERKILL_SCAN_LOADING)
-        th = _ScanLoad(token, items)
+        if self._scan_thread is not None and self._scan_thread.isRunning():
+            return
+        want = []
+        idx = self._scan_index()
+        for d, _why in self._items():
+            k = key_of(d)
+            if self._pic(k) is None and not self._scan_pending(k):
+                continue                               # 화면에 안 나오는 것(Scan 도 없음)
+            if self._scan_pending(k):
+                want.append((k, *idx[k]))
+            if len(want) >= self._shown + PAGE_TILES:
+                break
+        if not want:
+            return
+        th = _ScanLoad(self._scan_token, want)
         th.signals.progress.connect(self._on_scan_progress)
+        th.signals.batch.connect(self._on_scan_batch)
         th.signals.done.connect(self._on_scans)
         self._scan_thread = th
+        self.scan_status.setText(_KO.OVERKILL_SCAN_PROGRESS.format(done=0, total=len(want)))
         th.start()
 
     def _on_scan_progress(self, token: int, done: int, total: int) -> None:
         if token == self._scan_token:
-            self._loading.set_progress(done, total, _KO.OVERKILL_SCAN_LOADING)
+            self.scan_status.setText(_KO.OVERKILL_SCAN_PROGRESS.format(done=done, total=total))
 
-    def _on_scans(self, token: int, got: dict) -> None:
+    def _on_scan_batch(self, token: int, got: dict) -> None:
+        """일부 Crop 이 도착 — 이미 그려진 자리표시 타일의 그림만 바꾼다(스크롤·펼침이 그대로)."""
         if token != self._scan_token:
             return
-        self._loading.hide_overlay()
-        self.set_scans(got)
+        self._scans.update(got)
+        for k, q in got.items():
+            t = self.tiles.get(k)
+            if t is not None and self._open != k:
+                t.set_photo(q)
+
+    def _on_scans(self, token: int, keys: list) -> None:
+        if token != self._scan_token:
+            return
+        self._scan_thread = None
+        self.scan_status.setText("")
+        self._scan_done.update(keys)
+        if self._open is not None or any(k not in self._scans for k in keys):
+            self._render_tiles()                    # 못 자른 자리표시는 빠지고(펼친 값은 그림이 바뀌고), 늘어난 필요는 이어서 자른다
+        else:
+            self._ensure_scans()                    # 그 사이 늘어난 필요(더 보기·탭 이동)를 이어서
 
     def set_scans(self, got: dict) -> None:
-        """잘라 온 Scan 사진을 올린다(테스트는 스레드 없이 이것만 부른다)."""
+        """잘라 온 Scan 사진을 올린다(테스트는 스레드 없이 이것만 부른다).  Scan 후보 전부를 시도한 것으로 본다."""
         self._scans = dict(got)
+        self._scan_done = set(self._scan_index())
         self._render_tiles()
 
     def _pic(self, k):
@@ -1194,7 +1312,7 @@ class ThresholdPreviewDialog(QDialog):
             self.no_photo_label.setText("")
             return
         items = self._items()
-        with_photo = [(d, why) for d, why in items if self._pic(key_of(d)) is not None]
+        with_photo = [(d, why) for d, why in items if self._pic(key_of(d)) is not None or self._scan_pending(key_of(d))]
         missing = len(items) - len(with_photo)
         self.no_photo_label.setText(_KO.THRESH_PREVIEW_NO_PHOTO.format(n=f"{missing:,}") if missing else "")
         self.empty_label.setText("" if items else (_KO.THRESH_PREVIEW_NONE_DROPPED
@@ -1230,6 +1348,7 @@ class ThresholdPreviewDialog(QDialog):
             more = NeonButton(_KO.THRESH_PREVIEW_MORE.format(n=f"{len(with_photo) - self._shown:,}"), role="ghost")
             more.clicked.connect(self._more)
             self.grid.addWidget(more, r, 0, 1, min(cols, 2))
+        self._ensure_scans()
 
     def _detail(self, d: P.Defect, why) -> QWidget:
         w = self._w
@@ -1244,8 +1363,11 @@ class ThresholdPreviewDialog(QDialog):
         pic.setAlignment(Qt.AlignmentFlag.AlignCenter)
         pic.setCursor(Qt.CursorShape.PointingHandCursor)
         photo = self._pic(key_of(d))
-        pic.setPixmap(_pixmap(photo, DETAIL_PX, kind="mid"))
-        if isinstance(photo, QImage):                   # Scan Crop — 크게 볼 원본 파일이 없다
+        if photo is not None:
+            pic.setPixmap(_pixmap(photo, DETAIL_PX, kind="mid"))
+        else:
+            pic.setText(_KO.OVERKILL_SCAN_WAIT)
+        if photo is None or isinstance(photo, QImage):                   # Scan Crop — 크게 볼 원본 파일이 없다
             pic.setCursor(Qt.CursorShape.ArrowCursor)
         else:
             pic.clicked.connect(lambda: self._enlarge(photo))
@@ -1282,7 +1404,7 @@ class ThresholdPreviewDialog(QDialog):
                 lab.setStyleSheet(style)
                 g.addWidget(lab, r, c)
         right.addLayout(g)
-        fn = QLabel(_KO.OVERKILL_SCAN_TAG if isinstance(photo, QImage)
+        fn = QLabel(_KO.OVERKILL_SCAN_TAG if photo is None or isinstance(photo, QImage)
                     else str(photo) if len(w.folders) > 1 else photo.name, box)
         fn.setProperty("role", "muted")
         fn.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
