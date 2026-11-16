@@ -2,7 +2,11 @@
 
 현택님 요청(2026-11-16):
   * 폴더는 웨이퍼 폴더 또는 LOT 폴더(바로 아래 웨이퍼들), 여러 개를 [+ 폴더] · 끌어다 놓기로 더한다.
-    Zone 기준 · 픽셀 크기가 같은 웨이퍼 중 가장 많은 무리를 합친다(:func:`merge_wafers`).
+    **처음 고른 폴더의 레시피**(Zone 기준 · 픽셀 크기)와 같은 웨이퍼만 합친다(:func:`merge_wafers`) —
+    더한 폴더 때문에 기준이 뒤바뀌어 조정한 값이 사라지지 않게(현택님 2026-11-16).
+  * 폴더 칩(현택님 2026-11-16): 이름을 누르면 그 폴더 Defect 만 아래 사진에 보이고(값 계산은 전체 그대로),
+    오른쪽 ✕ 로 뺀다(5초 동안 [되돌리기]).  칩마다 Defect 수와 [컬러 | 스캔] 을 둔다.  빼기는 메모리에서 다시
+    합치기만 하고(읽지 않는다), 더하기는 화면을 막지 않고 칩 안에 진행을 보인다.  자리가 모자라면 '+n 더 보기'.
   * [자동 추천]: 사진을 누르면 '꼭 잡기' — 고른 것을 전부 남기며 나머지를 많이 빼는 기준을
     :func:`app.threshold.preview.recommend` 로 계산해 바로 채운다.  고른 것이 있는 Zone 만 바꾼다.
     [직접 조정]으로 넘어가도 값은 그대로라 다듬을 수 있고, 고른 것이 빠지면 '놓침 n' 이 빨갛게 뜬다.
@@ -44,8 +48,9 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import QBuffer, QIODevice, QLocale, QObject, QRectF, Qt, QThread, QUrl, pyqtSignal
-from PyQt6.QtGui import QColor, QDesktopServices, QDoubleValidator, QImage, QPainter, QPixmap
+from PyQt6.QtCore import (QBuffer, QIODevice, QLocale, QObject, QPoint, QRectF, Qt, QThread, QTimer, QUrl,
+                          pyqtSignal)
+from PyQt6.QtGui import (QColor, QDesktopServices, QDoubleValidator, QImage, QPainter, QPen, QPixmap)
 from PyQt6.QtWidgets import (QApplication, QButtonGroup, QDialog, QFileDialog, QFrame, QGridLayout,
                              QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QVBoxLayout,
                              QWidget)
@@ -53,6 +58,7 @@ from PyQt6.QtWidgets import (QApplication, QButtonGroup, QDialog, QFileDialog, Q
 from ... import i18n
 from ...coords import abs_coord
 from ...coords.geometry import GEOMETRY_MATCH_TOL
+from ...coords import scan_image as SI
 from ...coords import surface_flt as _flt
 from ...coords.pixel_size import scan_pixel_size_xy
 from ...models.slot import _list_images, list_slot_dirs
@@ -78,6 +84,9 @@ TILE_PX = 132
 DETAIL_PX = 240
 EXPORT_SAMPLES = 8          # HTML 내보내기 — Zone 마다 대표 사진 수
 EXPORT_PHOTO_PX = 200
+NOTICE_MS = 5000            # 뺐다 · 더했다 알림이 떠 있는 시간(되돌리기도 이 안에)
+FLASH_MS = 1500             # 더한 칩 · 이미 있는 칩이 반짝이는 시간
+MORE_CHIP_PX = 110          # '+n 더 보기' 칩이 차지할 자리
 _LIVE: set = set()          # 화면이 닫혀도 도는 읽기 스레드를 붙들어 둔다(wafer_map_dialog 와 같은 패턴)
 
 # 화면에 보이는 순서와 단위.  Surface.flt 에 값이 있는 세 기준만 바꿀 수 있다(rules 모듈 docstring).
@@ -99,7 +108,8 @@ class WaferData:
     misses: int = 0
     rich: dict = field(default_factory=dict)        # (zone_dir, zone) → RichSurface 후보 값 — 내리기용
     folders: tuple = ()               # 합친 웨이퍼 폴더들(하나면 folder 하나)
-    skipped: tuple = ()               # 못 합친 웨이퍼 폴더 — 못 읽었거나 Zone 기준 · 픽셀 크기가 첫 웨이퍼와 다름
+    skipped: tuple = ()               # 못 합친 웨이퍼 폴더 — 못 읽었거나 Zone 기준 · 픽셀 크기가 기준 웨이퍼와 다름
+    has_scan: bool = False            # 폴더에 Scan 목록이 있다 — 칩의 [스캔] 을 켤 수 있다
 
     def to_um(self, feature: int, v: float) -> float:
         if feature == R.FEATURE_AREA:
@@ -126,7 +136,7 @@ def load_wafer(folder: Path, report=lambda msg, done=0, total=0: None, stop=lamb
     t0 = time.perf_counter()
     defects, goods, note = P.load_all(folder)
     t1 = time.perf_counter()
-    w = WaferData(folder, defects, goods, note=note)
+    w = WaferData(folder, defects, goods, note=note, has_scan=(folder / SI.SCAN_LIST_NAME).is_file())
     if note:
         return w
     w.zones = R.read_zones(folder)
@@ -159,16 +169,21 @@ def load_wafer(folder: Path, report=lambda msg, done=0, total=0: None, stop=lamb
     return w
 
 
+def expand_root(p) -> list:
+    """고른 폴더 하나 → ``[(웨이퍼 폴더, 실제 경로 키)]``.  Surface.flt 가 있으면 그 폴더, 없으면 바로 아래에서
+    Surface.flt 가 든 폴더들(LOT 폴더).  실제 경로 키는 LOT 과 그 안의 웨이퍼를 함께 골라도 한 번만 세려는 것이다."""
+    p = Path(p)
+    found = [p] if _flt._find_flt(p) is not None else [
+        d for _n, d in sorted(list_slot_dirs(p).items()) if _flt._find_flt(d) is not None]
+    return [(d, os.path.normcase(str(d.resolve()))) for d in found]
+
+
 def wafer_folders(paths) -> list:
-    """고른 폴더들 → 웨이퍼 폴더 목록.  Surface.flt 가 있으면 그 폴더, 없으면 바로 아래에서 Surface.flt 가 든
-    폴더들(LOT 폴더).  같은 폴더는 한 번만."""
+    """고른 폴더들 → 웨이퍼 폴더 목록.  같은 폴더는 한 번만."""
     out: list = []
     seen: set = set()
-    for p in map(Path, paths):
-        found = [p] if _flt._find_flt(p) is not None else [
-            d for _n, d in sorted(list_slot_dirs(p).items()) if _flt._find_flt(d) is not None]
-        for d in found:
-            real = os.path.normcase(str(d.resolve()))   # LOT 과 그 안의 웨이퍼를 함께 골라도 한 번만
+    for p in paths:
+        for d, real in expand_root(p):
             if real not in seen:
                 seen.add(real)
                 out.append(d)
@@ -186,24 +201,17 @@ def _folder_of(w: WaferData, d: P.Defect) -> Path:
 
 
 def merge_wafers(ws: list) -> WaferData:
-    """웨이퍼 여러 장을 한 집합으로 — Zone 기준 · 픽셀 크기가 같은 웨이퍼 중 가장 많은 무리만 합친다.
+    """웨이퍼 여러 장을 한 집합으로 — **첫 웨이퍼(읽힌 것 중)의 레시피**(Zone 기준 · 픽셀 크기)와 같은 것만 합친다.
 
-    기준이 다르면(레시피가 다르면) 같은 슬라이더 값으로 셀 수 없어 빼고 ``skipped`` 에 적는다.
+    기준이 다르면(레시피가 다르면) 같은 슬라이더 값으로 셀 수 없어 빼고 ``skipped`` 에 적는다.  기준을 '가장 많은 무리'
+    로 잡으면 다른 레시피 폴더를 더하는 순간 기준이 뒤바뀌어 조정한 값이 사라져서, 처음 고른 쪽으로 고정한다.
     Defect 에는 몇 번째 웨이퍼인지(``wafer``)를 붙이고 사진 짝 키도 (웨이퍼, index) 로 바꾼다.
     RichSurface(내리기)는 한 장일 때만 쓴다."""
     good = [w for w in ws if not w.note]
     if not good:
         return WaferData(ws[0].folder, note=ws[0].note, skipped=tuple(w.folder for w in ws))
-    groups: list = []
-    for w in good:
-        g = next((g for g in groups if g[0].zones == w.zones
-                  and all(abs(a - b) < 1e-6 for a, b in zip(g[0].px, w.px))), None)
-        if g is None:
-            groups.append([w])
-        else:
-            g.append(w)
-    same = max(groups, key=len)
-    base = same[0]
+    base = good[0]
+    same = [w for w in good if w.zones == base.zones and all(abs(a - b) < 1e-6 for a, b in zip(base.px, w.px))]
     out = WaferData(base.folder, zones=base.zones, classes=base.classes, px=base.px,
                     folders=tuple(w.folder for w in same),
                     skipped=tuple(w.folder for w in ws if not any(w is x for x in same)),
@@ -220,18 +228,21 @@ def merge_wafers(ws: list) -> WaferData:
 
 
 class _Load(QThread):
-    """폴더들을 읽어 합친다.  웨이퍼 한 장이면 화면을 먼저 띄우고 RichSurface 는 그 뒤에 읽는다."""
+    """고른 폴더들을 읽는다 — LOT 안 웨이퍼 목록 · 웨이퍼 Defect 를 하나씩 읽어 시그널로 올린다(합치기는 화면이 한다).
+
+    이미 읽은 것(``expand``·``cache`` 에 있는 것)은 다시 읽지 않는다.  끊겨도 다 읽은 웨이퍼는 올린다."""
 
     class _Signals(QObject):
         progress = pyqtSignal(int, int, int, str)     # token, done, total, msg
-        done = pyqtSignal(int, object)                # token, WaferData | None(실패)
-        rich_progress = pyqtSignal(int, int, int)     # token, done, total
-        rich = pyqtSignal(int, object)                # token, RichSurface 후보 값({} = 없음)
+        expanded = pyqtSignal(int, object, object)    # token, 고른 폴더, [(웨이퍼 폴더, 실제 경로 키)]
+        wafer = pyqtSignal(int, object, object)       # token, 웨이퍼 폴더, WaferData
+        done = pyqtSignal(int, bool)                  # token, 성공
 
-    def __init__(self, token: int, roots: list, cache: dict) -> None:
+    def __init__(self, token: int, roots: list, expand: dict, known: set) -> None:
         super().__init__()
         self._token, self._roots = token, list(roots)
-        self.cache = dict(cache)          # 웨이퍼 폴더 → WaferData — '폴더 추가' 때 앞에서 읽은 것은 다시 안 읽는다
+        self._expand = dict(expand)       # 고른 폴더 → 웨이퍼 목록 — LOT 폴더를 NAS 에서 다시 훑지 않는다
+        self._known = set(known)          # 이미 읽은 웨이퍼 폴더
         self.signals = self._Signals()
         _LIVE.add(self)
         self.finished.connect(lambda: _LIVE.discard(self))
@@ -239,46 +250,73 @@ class _Load(QThread):
     def run(self) -> None:      # type: ignore[override]
         t = self._token
         stop = self.isInterruptionRequested
-        folders: list = []
         try:
-            folders = wafer_folders(self._roots)
-            todo = [f for f in folders if f not in self.cache]
-            if len(folders) == 1 and todo:
-                got = load_wafer(folders[0], lambda msg, done=0, total=0:
+            order: list = []
+            seen: set = set()
+            for r in self._roots:
+                if r not in self._expand:
+                    self._expand[r] = expand_root(r)
+                    self.signals.expanded.emit(t, r, self._expand[r])
+                for d, real in self._expand[r]:
+                    if real not in seen:
+                        seen.add(real)
+                        order.append(d)
+            todo = [f for f in order if f not in self._known]
+            if len(todo) == 1:
+                got = load_wafer(todo[0], lambda msg, done=0, total=0:
                                  self.signals.progress.emit(t, done, total, msg), stop, rich=False)
-                if stop():
-                    return
-                self.cache[folders[0]] = got
+                self.signals.wafer.emit(t, todo[0], got)
             elif todo:
                 # 여러 장은 동시에 읽는다 — NAS 는 파일마다 왕복 지연이 대부분이라 한 장씩이면 그만큼 기다린다.
                 self.signals.progress.emit(t, 0, len(todo), _KO.OVERKILL_LOADING_WAFERS.format(i=0, n=len(todo)))
                 with ThreadPoolExecutor(max_workers=min(LOAD_WORKERS, len(todo))) as pool:
                     futs = {pool.submit(load_wafer, f, stop=stop, rich=False): f for f in todo}
+                    cancelled = False
                     for i, fut in enumerate(as_completed(futs), start=1):
-                        if stop():
+                        if stop() and not cancelled:
+                            cancelled = True
                             for f in futs:
-                                f.cancel()
-                            return              # 끊긴 결과는 캐시에 남기지 않는다
-                        self.cache[futs[fut]] = fut.result()
+                                f.cancel()      # 아직 시작 안 한 것만 멈춘다 — 이미 다 읽은 웨이퍼는 아래에서 올린다
+                        if fut.cancelled():
+                            continue
+                        self.signals.wafer.emit(t, futs[fut], fut.result())
                         self.signals.progress.emit(t, i, len(todo),
                                                    _KO.OVERKILL_LOADING_WAFERS.format(i=i, n=len(todo)))
-            ws = [self.cache[f] for f in folders]
-            w = merge_wafers(ws) if ws else WaferData(Path(self._roots[0]), note=_KO.OVERKILL_NO_WAFER)
-        except Exception:       # noqa: BLE001 — 실패를 삼키지 않고 화면에 알린다
-            _LOG.exception("Overkill 튜닝 읽기 실패: %s", self._roots)
-            w = None
-        self.signals.done.emit(t, w)
-        if w is None or w.note or len(folders) != 1:
-            return
-        base = self.cache[folders[0]]
-        if not base.rich and (folders[0] / RS.RICH_FILE).is_file():
-            t0 = time.perf_counter()
-            rich = RS.load_rich(folders[0], lambda done, total: self.signals.rich_progress.emit(t, done, total), stop)
             if stop():
                 return
-            base.rich = rich
-            _LOG.info("Overkill 튜닝 RichSurface %.1f초: %s", time.perf_counter() - t0, folders[0])
-        self.signals.rich.emit(t, base.rich)
+        except Exception:       # noqa: BLE001 — 실패를 삼키지 않고 화면에 알린다
+            _LOG.exception("Overkill 튜닝 읽기 실패: %s", self._roots)
+            self.signals.done.emit(t, False)
+            return
+        self.signals.done.emit(t, True)
+
+
+class _RichLoad(QThread):
+    """웨이퍼 한 장의 RichSurface(내리기용)를 화면을 띄운 뒤 뒤에서 읽는다."""
+
+    class _Signals(QObject):
+        progress = pyqtSignal(int, int, int)          # token, done, total
+        done = pyqtSignal(int, object, object)        # token, 웨이퍼 폴더, 후보 값({} = 없음)
+
+    def __init__(self, token: int, folder: Path) -> None:
+        super().__init__()
+        self._token, self._folder = token, folder
+        self.signals = self._Signals()
+        _LIVE.add(self)
+        self.finished.connect(lambda: _LIVE.discard(self))
+
+    def run(self) -> None:      # type: ignore[override]
+        t0 = time.perf_counter()
+        try:
+            rich = RS.load_rich(self._folder, lambda done, total: self.signals.progress.emit(self._token, done, total),
+                                self.isInterruptionRequested)
+        except Exception:       # noqa: BLE001 — 내리기만 못 쓸 뿐
+            _LOG.exception("Overkill 튜닝 RichSurface 읽기 실패: %s", self._folder)
+            return
+        if self.isInterruptionRequested():
+            return
+        _LOG.info("Overkill 튜닝 RichSurface %.1f초: %s", time.perf_counter() - t0, self._folder)
+        self.signals.done.emit(self._token, self._folder, rich)
 
 
 def zone_label(zone_dir: str, zone: R.Zone | None, zone_id: int) -> tuple[str, str]:
@@ -446,7 +484,6 @@ def scan_crops(items, report=lambda done, total: None, stop=lambda: False, on_ba
     같은 Scan 원본을 **한 번만** 디코드해 그 원본의 Crop 을 전부 자르고, 원본들은 스레드 여럿이 나눠 읽는다.
     ``on_batch(dict)`` 를 주면 Crop 이 ``SCAN_BATCH`` 개 모일 때마다(스레드에서) 불러 준다 — 화면이 점진적으로 채워진다.
     못 자른 Defect 는 빠진다."""
-    from ...coords import scan_image as SI
     found = []
     for k, folder, xy in items:
         if stop():
@@ -530,6 +567,133 @@ class _ScanLoad(QThread):
         self.signals.done.emit(self._token, [k for k, _f, _xy in self._items])
 
 
+DEFECT_BOX_MULT = 3.0          # 상세 보기 빨간 박스 = Defect 크기의 이만큼(현택님 2026-11-16)
+DEFECT_BOX_MIN_UM = 40.0       # 아주 작은 Defect 도 이보다는 넓게 — 가리지 않고 찾을 수 있게
+DEFECT_BOX_RGB = "#E5322D"     # 회색조 Scan 위에서 보이는 고정 빨강(테마 DANGER 는 어두워서 사진 위에서 묻힌다)
+
+
+def defect_box(crop_wh, px, width_px: float, length_px: float, area_px2: float = 0.0):
+    """Scan Crop 안에서 Defect 를 감쌀 정사각 ``(x, y, w, h)``(Crop 픽셀) — 못 구하면 ``None``.
+
+    Crop 은 Defect 좌표가 가운데 오게 자른다(:func:`coords.scan_image.crop_box` — 원본 밖은 안쪽으로 밀지 않고
+    회색으로 채우므로 가장자리 Defect 도 가운데다, 반올림 오차 1px 이내).  한 변 = Defect 크기(폭 · 길이 중 큰 쪽,
+    둘 다 없으면 √면적) × :data:`DEFECT_BOX_MULT`, 최소 :data:`DEFECT_BOX_MIN_UM` µm, 최대 Crop 한 변.
+    µm → 픽셀은 Scan 픽셀 크기(``px``)로 — Crop 이 그 크기로 잘렸다."""
+    (cw, ch), (px_x, px_y) = crop_wh, px
+    if not (cw > 0 and ch > 0 and px_x > 0 and px_y > 0):
+        return None
+    size_um = max(width_px, length_px) * px_x
+    if size_um <= 0:
+        size_um = math.sqrt(max(area_px2, 0.0) * px_x * px_y)
+    side_um = min(max(size_um * DEFECT_BOX_MULT, DEFECT_BOX_MIN_UM), SI.CROP_SIDE_UM)
+    bw, bh = side_um / px_x, side_um / px_y
+    return (cw / 2.0 - bw / 2.0, ch / 2.0 - bh / 2.0, bw, bh)
+
+
+@dataclass
+class _ChipInfo:
+    """폴더 칩 하나를 그리는 데 필요한 것(화면 상태 → 그림)."""
+    root: Path
+    name: str
+    state: str = "ok"             # ok | loading | excluded
+    count: int = 0                # 합친 Defect 수
+    wafers: int = 0               # 합친 웨이퍼 수
+    lot: bool = False
+    partial: int = 0              # LOT 안에서 못 합친 웨이퍼 수
+    progress: str = ""            # loading — '읽는 중 i/n'
+    reason: str = ""              # excluded — '제외: …'
+    can_color: bool = False
+    can_scan: bool = False
+    view: str = "color"
+    selected: bool = False
+    flash: str = ""               # "" | added | dup
+    tip: str = ""
+
+
+class _FolderChip(QFrame):
+    """폴더 칩 — 이름 영역을 누르면 ``select``, 오른쪽 ✕ 칸은 ``remove``, [컬러 | 스캔] 은 ``view``.
+
+    칩 전체가 클릭 영역이고(CLAUDE.md UI 관습) 빼기는 따로 떨어진 ✕ 칸 하나뿐이라 고르다가 빠지지 않는다."""
+
+    select = pyqtSignal()
+    remove = pyqtSignal()
+    view = pyqtSignal(str)
+
+    NAME_MAX_PX = 190
+
+    def __init__(self, info: _ChipInfo, parent=None) -> None:
+        super().__init__(parent)
+        self.info = info
+        self.setObjectName("folderChip")
+        self.setToolTip(info.tip)
+        self.setFixedHeight(34)
+        self._style()
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(10, 0, 0, 0)
+        lay.setSpacing(8)
+        title = info.name + (f" · {_KO.OVERKILL_WAFERS.format(n=info.wafers)}" if info.lot and info.state == "ok" else "")
+        name = QLabel(self.fontMetrics().elidedText(title, Qt.TextElideMode.ElideMiddle, self.NAME_MAX_PX), self)
+        name.setStyleSheet("font-weight: 600; color: "
+                           f"{theme.MUTE if info.state == 'excluded' else theme.ACCENT if info.selected else theme.INK};")
+        lay.addWidget(name)
+        side = {"ok": f"{info.count:,}" + (f" · {_KO.OVERKILL_CHIP_PARTIAL.format(n=info.partial)}" if info.partial else ""),
+                "loading": info.progress, "excluded": info.reason}[info.state]
+        self.side = QLabel(side, self)
+        self.side.setStyleSheet(f"font-family: {theme.FONT_MONO}; color: "
+                                f"{theme.WARN if info.state == 'excluded' or info.partial else theme.MUTE};")
+        lay.addWidget(self.side)
+        self.seg: dict = {}
+        if info.state == "ok":
+            group = QButtonGroup(self)
+            for key, text, can in (("color", _KO.OVERKILL_VIEW_COLOR, info.can_color),
+                                   ("scan", _KO.OVERKILL_VIEW_SCAN, info.can_scan)):
+                b = NeonButton(text, role="segment")
+                b.setCheckable(True)
+                b.setChecked(info.view == key)
+                b.setEnabled(can)
+                b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+                b.setMinimumHeight(22)
+                b.setStyleSheet("QPushButton { padding: 0px 7px; min-height: 18px; font-size: 11px; }")
+                if not can:
+                    b.setToolTip(_KO.OVERKILL_VIEW_NO_COLOR if key == "color" else _KO.OVERKILL_VIEW_NO_SCAN)
+                b.clicked.connect(lambda _c=False, k=key: self.view.emit(k))
+                group.addButton(b)
+                lay.addWidget(b)
+                self.seg[key] = b
+        self.x_btn = NeonButton("✕", role="ghost")           # 빼기 — 이름 영역과 떨어진 칸
+        self.x_btn.setToolTip(_KO.OVERKILL_CHIP_REMOVE_TIP)
+        self.x_btn.setFixedSize(30, 28)
+        self.x_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.x_btn.setStyleSheet(
+            f"QPushButton {{ border: none; border-left: 1px solid {theme.LINE}; border-radius: 0px; padding: 0px;"
+            f" min-height: 0px; background: transparent; color: {theme.INK2}; }}"
+            f"QPushButton:hover {{ background: {theme.DANGER_TINT}; color: {theme.DANGER}; }}")
+        self.x_btn.clicked.connect(self.remove)
+        lay.addWidget(self.x_btn)
+        if info.state == "ok":
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def _style(self) -> None:
+        """평상시는 1px 선, 고름 · 반짝임은 2px 선 — 안쪽 여백(margin)으로 맞춰 칩 크기는 그대로다."""
+        i = self.info
+        if i.flash == "added":
+            border, bg, line, bw = theme.PASS, theme.PASS_TINT, "solid", 2
+        elif i.flash == "dup" or i.selected:
+            border, bg, line, bw = theme.ACCENT, theme.ACCENT_TINT, "solid", 2
+        elif i.state == "excluded":
+            border, bg, line, bw = theme.LINE_STRONG, "transparent", "dashed", 1
+        else:
+            border, bg, line, bw = theme.LINE_STRONG, theme.PANEL, "solid", 1
+        self.setStyleSheet(f"QFrame#folderChip {{ background: {bg}; border: {bw}px {line} {border};"
+                           f" margin: {2 - bw}px; border-radius: 6px; }}"
+                           "QFrame#folderChip QLabel { background: transparent; border: none; margin: 0px; }")
+
+    def mousePressEvent(self, e):   # noqa: N802
+        if e.button() == Qt.MouseButton.LeftButton and self.info.state == "ok":
+            self.select.emit()
+        super().mousePressEvent(e)
+
+
 def _data_uri(photo) -> str:
     """사진 → 작은 JPEG ``data:`` 주소(HTML 안에 넣는다).  못 읽으면 빈 문자열."""
     pix = _pixmap(photo, EXPORT_PHOTO_PX, kind="mid")
@@ -550,16 +714,27 @@ class ThresholdPreviewDialog(QDialog):
         self.setWindowTitle(_KO.THRESH_PREVIEW_TITLE)
         self.setAcceptDrops(True)
         self._w: Optional[WaferData] = None
-        self._roots: list = []            # 고른 폴더(웨이퍼 또는 LOT) — 칩 하나씩
-        self._cache: dict = {}            # (웨이퍼 폴더, RichSurface 읽음) → WaferData
+        self._roots: list = []            # 고른 폴더(웨이퍼 또는 LOT) — 칩 하나씩.  맨 앞이 합치기 기준 레시피를 정한다
+        self._expand: dict = {}           # 고른 폴더 → [(웨이퍼 폴더, 실제 경로 키)] — LOT 을 NAS 에서 다시 훑지 않는다
+        self._cache: dict = {}            # 웨이퍼 폴더 → WaferData — 빼기 · 더하기가 다시 읽지 않고 이걸로 합친다
+        self._owner: dict = {}            # 웨이퍼 폴더 → 그걸 가진 칩(같은 웨이퍼를 두 칩이 가리켜도 앞 칩 하나만)
+        self._order: list = []            # 합칠 웨이퍼 폴더(칩 순서)
+        self._real_owner: dict = {}       # 실제 경로 키 → 칩
+        self._failed: set = set()         # 읽다가 실패한 고른 폴더
+        self._view: dict = {}             # 고른 폴더 → 'color' | 'scan' — 폴더를 빼고 다시 더해도 이 화면을 닫을 때까지 남는다
+        self._sel: Optional[Path] = None  # 사진 칸을 이 칩의 Defect 로만 거른다(값 계산은 전체 그대로)
+        self._added: list = []            # 방금 더해 아직 알리지 않은 칩
+        self._flash: dict = {}            # 칩 → 'added' | 'dup' — 잠깐 반짝이는 칩
+        self._undo_snap: Optional[dict] = None
+        self._base_reset = False          # 마지막으로 합칠 때 기준 레시피가 바뀌어 값을 되돌렸다
+        self._overlay_on = False
         self._mode = "manual"             # manual(직접 조정) | auto(자동 추천)
         self._picked: dict = {}           # 꼭 잡을 Defect — key_of(d) → Defect
         self._rec_zones: set = set()      # 마지막 추천이 바꾼 Zone — 고름이 바뀌면 이 Zone 들만 다시 계산
-        self._use_scan: Optional[bool] = None   # Color 사진이 없을 때 Scan 사진으로 볼지 — 물어본 답(None = 아직)
-        self._scans: dict = {}            # 키 → Scan 에서 잘라 온 QImage
+        self._scans: dict = {}            # (웨이퍼 폴더, Defect.index) → Scan 에서 잘라 온 QImage — 폴더를 더하고 빼도 남는다
         self._scan_thread: Optional[_ScanLoad] = None
-        self._scan_map: Optional[dict] = None   # 키 → (폴더, (x, y)) — Scan 으로 자를 수 있는 Defect
-        self._scan_done: set = set()            # 자르기를 시도한 키(성공은 _scans 에 있다) — 다시 시도하지 않는다
+        self._scan_map: Optional[dict] = None   # key_of → ((폴더, index), 폴더, (x, y)) — Scan 목록이 있는 폴더의 Defect
+        self._scan_done: set = set()            # 자르기를 시도한 (폴더, index) — 성공은 _scans 에 있다 — 다시 시도하지 않는다
         self._scan_token = 0
         self._drop_cache: dict = {}       # (Zone, 바꾼 값) → 빠지는 Defect — 같은 기준을 다시 세지 않는다
         self._ov: dict = {}               # {(zone_dir, zone, Classify, FeatureType): 새 LowValue(px)}
@@ -570,6 +745,12 @@ class ThresholdPreviewDialog(QDialog):
         self._shown = PAGE_TILES
         self._token = 0
         self._thread: Optional[_Load] = None
+        self._rich_token = 0
+        self._rich_thread: Optional[_RichLoad] = None
+        self._rich_folder: Optional[Path] = None
+        self._chips_w = -1
+        self._hidden_chips: list = []
+        self._more_pop: Optional[QFrame] = None
         self._picker = FolderPicker(self)
         self._picker.picked.connect(lambda p: p and self.add_folders([Path(p)]))
         self._build()
@@ -590,15 +771,13 @@ class ThresholdPreviewDialog(QDialog):
         self.pick_btn.setToolTip(_KO.OVERKILL_ADD_FOLDER_TIP)
         self.pick_btn.clicked.connect(self._on_pick)
         top.addWidget(self.pick_btn)
-        chips = QWidget(self)                       # 고른 폴더 — 누르면 뺀다
+        chips = QWidget(self)                       # 고른 폴더 — 이름은 고르기, 오른쪽 ✕ 는 빼기
         chips.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self._chips_host = chips
         self._chips = QHBoxLayout(chips)
         self._chips.setContentsMargins(0, 0, 0, 0)
         self._chips.setSpacing(6)
         top.addWidget(chips, 1)
-        self.wafer_label = QLabel("", self)
-        self.wafer_label.setStyleSheet(f"font-family: {theme.FONT_MONO};")
-        top.addWidget(self.wafer_label)
         self.check_label = QLabel("", self)
         self.check_label.setProperty("role", "muted")
         top.addWidget(self.check_label)
@@ -617,6 +796,26 @@ class ThresholdPreviewDialog(QDialog):
             top.addWidget(b)
             self.mode_btns[key] = b
         root.addLayout(top)
+
+        self.notice = QFrame(self)                   # 뺐다 · 더했다 · 이미 있다 — 5초 동안 뜨는 알림(빼기는 [되돌리기] 가 붙는다)
+        self.notice.setObjectName("notice")
+        nl = QHBoxLayout(self.notice)
+        nl.setContentsMargins(12, 4, 4, 4)
+        nl.setSpacing(8)
+        self.notice_label = QLabel("", self.notice)
+        self.notice_label.setStyleSheet("font-weight: 600; background: transparent;")
+        nl.addWidget(self.notice_label, 1)
+        self.undo_btn = NeonButton(_KO.OVERKILL_UNDO, role="ghost")
+        self.undo_btn.clicked.connect(self._undo)
+        nl.addWidget(self.undo_btn)
+        self.notice.setVisible(False)
+        root.addWidget(self.notice)
+        self._notice_timer = QTimer(self)
+        self._notice_timer.setSingleShot(True)
+        self._notice_timer.timeout.connect(self._hide_notice)
+        self._flash_timer = QTimer(self)
+        self._flash_timer.setSingleShot(True)
+        self._flash_timer.timeout.connect(self._clear_flash)
 
         body = QHBoxLayout()
         body.setSpacing(16)
@@ -685,23 +884,6 @@ class ThresholdPreviewDialog(QDialog):
         self._rules_lay.setSpacing(12)
         main.addWidget(self.rules)
 
-        self.scan_ask = QFrame(self)                 # Color 사진이 없을 때 Scan 사진으로 볼지 묻는다(현택님 2026-11-16)
-        self.scan_ask.setStyleSheet(f"QFrame {{ background: {theme.WARN_TINT}; border-radius: 6px; }}")
-        ask = QHBoxLayout(self.scan_ask)
-        ask.setContentsMargins(14, 8, 8, 8)
-        ask.setSpacing(8)
-        self.scan_ask_label = QLabel("", self.scan_ask)
-        self.scan_ask_label.setStyleSheet("font-weight: 700; background: transparent;")
-        ask.addWidget(self.scan_ask_label, 1)
-        self.scan_yes = NeonButton(_KO.OVERKILL_SCAN_YES, role="primary")
-        self.scan_yes.clicked.connect(lambda: self.answer_scan(True))
-        ask.addWidget(self.scan_yes)
-        self.scan_no = NeonButton(_KO.OVERKILL_SCAN_NO, role="ghost")
-        self.scan_no.clicked.connect(lambda: self.answer_scan(False))
-        ask.addWidget(self.scan_no)
-        self.scan_ask.setVisible(False)
-        main.addWidget(self.scan_ask)
-
         tabs = QHBoxLayout()
         tabs.setSpacing(6)
         self._tabs_lay = tabs
@@ -718,6 +900,9 @@ class ThresholdPreviewDialog(QDialog):
         self.no_photo_label.setProperty("role", "muted")
         tabs.addSpacing(8)
         tabs.addWidget(self.no_photo_label)
+        self.filter_label = QLabel("", self)             # 칩을 골라 그 폴더만 볼 때 — 탭 숫자는 전체 기준이라 따로 알린다
+        self.filter_label.setStyleSheet(f"color: {theme.ACCENT}; font-weight: 600;")
+        tabs.addWidget(self.filter_label)
         self.scan_status = QLabel("", self)              # Scan 사진을 불러오는 동안의 진행(화면을 막지 않는다)
         self.scan_status.setProperty("role", "muted")
         tabs.addWidget(self.scan_status)
@@ -741,68 +926,401 @@ class ThresholdPreviewDialog(QDialog):
     def _on_pick(self) -> None:
         self._picker.open(_KO.THRESH_PREVIEW_PICK_TITLE, str(self._roots[-1]) if self._roots else "")
 
+    def _ready(self, root: Path) -> bool:
+        """그 폴더의 웨이퍼 목록과 웨이퍼 데이터를 이미 메모리에 갖고 있다(읽을 게 없다)."""
+        ents = self._expand.get(root)
+        return root in self._failed or (ents is not None and all(d in self._cache for d, _r in ents))
+
+    def _rebuild_owner(self) -> None:
+        """웨이퍼 → 그걸 가진 칩.  같은 웨이퍼(LOT 과 그 안의 웨이퍼를 같이 고른 경우)는 앞 칩이 가진다."""
+        owner, order, real_owner = {}, [], {}
+        for r in self._roots:
+            for d, real in self._expand.get(r, ()):
+                if real not in real_owner:
+                    real_owner[real] = r
+                    owner[d] = r
+                    order.append(d)
+        self._owner, self._order, self._real_owner = owner, order, real_owner
+
     def add_folders(self, folders) -> None:
-        """고른 폴더(웨이퍼 또는 LOT)를 더한다 — 이미 있는 것은 그대로."""
-        self.set_folders(self._roots + [Path(f) for f in folders if Path(f) not in self._roots])
+        """고른 폴더(웨이퍼 또는 LOT)를 더한다 — 이미 있는 것은 읽지 않고 그 칩을 반짝여 알린다.
+        화면에 이미 뭔가 떠 있으면 막지 않고, 새 칩 안에서만 진행을 보인다."""
+        new: list = []
+        dups: list = []
+        for f in map(Path, folders):
+            owner = f if f in self._roots else self._owner.get(f)
+            if owner is not None:
+                dups.append((f, owner))
+            elif f not in new:
+                new.append(f)
+        if dups:
+            self._flash_chips([o for _f, o in dups], "dup")
+            self._show_notice(_KO.OVERKILL_NOTICE_DUP.format(name=dups[0][0].name), "info")
+        if new:
+            self._roots += new
+            self._added += new
+            self._refresh_roots()
 
     def remove_folder(self, folder: Path) -> None:
-        self.set_folders([r for r in self._roots if r != folder])
+        """칩을 뺀다 — 읽지 않고 메모리에 있는 웨이퍼로 다시 합친다.  5초 동안 [되돌리기]."""
+        if folder not in self._roots:
+            return
+        w = self._w
+        picks = {(_folder_of(w, d), d.index) for d in self._picked.values()} if w is not None else set()
+        lost = sum(1 for f, _i in picks if self._owner.get(f) == folder)
+        snap = {"root": folder, "index": self._roots.index(folder), "ov": dict(self._ov), "picks": picks}
+        self._roots.remove(folder)
+        self._added = [r for r in self._added if r != folder]
+        self._base_reset = False
+        self._refresh_roots()
+        snap["reset"] = self._base_reset
+        text = _KO.OVERKILL_NOTICE_REMOVED.format(name=folder.name)
+        if lost:
+            text += _KO.OVERKILL_NOTICE_PICKS_LOST.format(n=lost)
+        if self._base_reset:
+            text += " · " + _KO.OVERKILL_NOTICE_BASE_RESET
+        self._show_notice(text, "info", undo=snap)
+
+    def _undo(self) -> None:
+        """방금 뺀 칩을 되돌린다 — 그 칩과 (잃은) 꼭 잡기 · (기준이 바뀌어 지워진) 바꾼 값을 읽지 않고 다시 올린다."""
+        snap = self._undo_snap
+        self._hide_notice()
+        if snap is None or snap["root"] in self._roots:
+            return
+        self._roots.insert(min(snap["index"], len(self._roots)), snap["root"])
+        self._refresh_roots()
+        w = self._w
+        if w is None or w.note or not self._all_ready():
+            return
+        if snap["reset"]:
+            self._ov = dict(snap["ov"])
+        self._picked.update({key_of(d): d for d in w.defects if (_folder_of(w, d), d.index) in snap["picks"]})
+        self._rec_zones = {(d.zone_dir, d.zone) for d in self._picked.values()}
+        self._drop_cache = {}
+        self._render()
 
     def set_folders(self, roots) -> None:
-        """이 폴더들을 다시 읽어 합친다(앞에서 읽은 웨이퍼는 다시 안 읽는다)."""
+        """이 폴더들로 바꾼다(읽어 둔 웨이퍼는 다시 안 읽는다)."""
         self._roots = list(roots)
-        self._render_chips()
-        if not self._roots:
-            self._token += 1
-            self.set_wafer(None)
-            return
-        self.show_folder()
+        self._added = []
+        self._refresh_roots()
 
     def show_folder(self, folder: Optional[Path] = None) -> None:
         if folder is not None:                      # 옛 호출(폴더 하나) — 그 폴더로 바꾼다
             self.set_folders([folder])
-            return
-        self._token += 1
-        token = self._token
+        else:
+            self._refresh_roots()
+
+    def _all_ready(self) -> bool:
+        return all(self._ready(r) for r in self._roots)
+
+    def _refresh_roots(self) -> None:
+        """칩 목록이 바뀐 뒤 — 읽을 게 없으면 그 자리에서 합치고(덮개 · 스레드 없음), 있을 때만 읽는다."""
+        if self._sel not in self._roots:
+            self._sel = None
+        self._rebuild_owner()
+        if not self._roots:
+            self._render_chips()
+            self._stop_load()
+            self.set_wafer(None)
+            self._maybe_rich()
+        elif self._all_ready():
+            self._stop_load()
+            self._remerge()
+        else:
+            self._start_load()
+
+    def _stop_load(self) -> None:
+        self._token += 1                            # 옛 읽기의 늦은 마무리는 버린다(다 읽은 웨이퍼는 캐시에 이미 올라왔다)
         if self._thread is not None and self._thread.isRunning():
             self._thread.requestInterruption()
-        self._loading.show_overlay(_KO.THRESH_PREVIEW_LOADING)
-        self._loading.repaint()
-        QApplication.processEvents()
-        th = _Load(token, self._roots, self._cache)
+        if self._overlay_on:
+            self._loading.hide_overlay()
+            self._overlay_on = False
+
+    def _start_load(self) -> None:
+        self._stop_load()
+        if self._w is None or self._w.note:         # 보여 줄 게 아직 없을 때만 화면을 덮는다
+            self._loading.show_overlay(_KO.THRESH_PREVIEW_LOADING)
+            self._overlay_on = True
+            self._loading.repaint()
+            QApplication.processEvents()
+        th = _Load(self._token, self._roots, self._expand, set(self._cache))
         th.signals.progress.connect(self._on_progress)
+        th.signals.expanded.connect(self._on_expanded)
+        th.signals.wafer.connect(self._on_wafer)
         th.signals.done.connect(self._on_loaded)
-        th.signals.rich_progress.connect(self._on_rich_progress)
-        th.signals.rich.connect(self._on_rich)
-        th.finished.connect(lambda t=th: self._cache.update(t.cache))
-        self.rich_label.setText("")
         self._thread = th
+        self._render_chips()
+        th.start()
+
+    def _on_expanded(self, _token: int, root, entries) -> None:
+        self._expand[root] = list(entries)
+        self._rebuild_owner()
+        self._render_chips()
+
+    def _on_wafer(self, _token: int, folder, data) -> None:
+        """웨이퍼 하나를 다 읽었다 — 읽던 중에 끊겨도 이건 버리지 않는다."""
+        self._cache[folder] = data
+        self._render_chips()
+
+    def _on_progress(self, token: int, done: int, total: int, msg: str) -> None:
+        if token == self._token and self._overlay_on:
+            self._loading.set_progress(done, total, msg)
+
+    def _on_loaded(self, token: int, ok: bool) -> None:
+        if token != self._token:
+            return                      # 늦게 온 옛 결과
+        if self._overlay_on:
+            self._loading.hide_overlay()
+            self._overlay_on = False
+        if not ok:
+            self._failed |= {r for r in self._roots if not self._ready(r)}
+        self._remerge()
+
+    def _included(self) -> set:
+        return set(self._w.folders) if self._w is not None and not self._w.note else set()
+
+    def _default_view(self, root: Path) -> str:
+        """칩의 처음 보기 — 컬러 사진이 있으면 컬러, 스캔만 있으면 스캔."""
+        ds = [self._cache[d] for d, _r in self._expand.get(root, ()) if d in self._cache and not self._cache[d].note]
+        if any(c.photos for c in ds):
+            return "color"
+        return "scan" if any(c.has_scan for c in ds) else "color"
+
+    def _remerge(self) -> None:
+        """읽어 둔 웨이퍼로 합쳐 화면에 올린다(동기).  방금 더한 칩이 있으면 그 결과를 알린다."""
+        self._rebuild_owner()
+        added, self._added = self._added, []
+        dups = [r for r in added if r in self._roots and self._expand.get(r)
+                and all(self._real_owner.get(real) != r for _d, real in self._expand[r])]
+        if dups:                                    # LOT 안 웨이퍼를 이미 다 갖고 있다 — 칩을 늘리지 않고 그 칩을 알린다
+            owners = {self._real_owner[real] for r in dups for _d, real in self._expand[r]}
+            for r in dups:
+                self._roots.remove(r)
+            added = [r for r in added if r not in dups]
+            self._rebuild_owner()
+            self._flash_chips(list(owners), "dup")
+            self._show_notice(_KO.OVERKILL_NOTICE_DUP.format(name=dups[0].name), "info")
+        for r in self._roots:
+            if r not in self._view and self._ready(r):
+                self._view[r] = self._default_view(r)
+        ws = [self._cache[f] for f in self._order if f in self._cache]
+        if not self._roots:
+            w = None
+        elif ws:
+            w = merge_wafers(ws)
+        else:
+            w = WaferData(self._roots[0], note=_KO.THRESH_PREVIEW_FAILED if self._failed else _KO.OVERKILL_NO_WAFER)
+        self.set_wafer(w)
+        self._render_chips()
+        self._announce(added)
+        self._maybe_rich()
+
+    def _announce(self, added: list) -> None:
+        """더한 칩의 결과 — 칩을 초록으로 반짝이고 '몇 장 · Defect 몇 개' 를 알린다."""
+        if not added:
+            return
+        inc = self._included()
+        infos = [self._chip_info(r, inc) for r in added]
+        ok = [i for i in infos if i.state == "ok"]
+        if not ok:
+            self._show_notice(_KO.OVERKILL_NOTICE_EXCLUDED.format(name=infos[0].name, why=infos[0].reason), "warn")
+            return
+        w, n = sum(i.wafers for i in ok), sum(i.count for i in ok)
+        self._flash_chips([i.root for i in ok], "added")
+        self._show_notice(_KO.OVERKILL_NOTICE_ADDED.format(name=ok[0].name, w=w, n=n) if len(infos) == 1
+                          else _KO.OVERKILL_NOTICE_ADDED_MANY.format(k=len(ok), w=w, n=n), "ok")
+
+    def _maybe_rich(self) -> None:
+        """남은 웨이퍼가 정확히 한 장이고 RichSurface 를 아직 안 읽었으면 화면을 막지 않고 뒤에서 읽는다(내리기)."""
+        w = self._w
+        want = None
+        if w is not None and not w.note and len(w.folders) == 1 and not w.rich:
+            base = self._cache.get(w.folders[0])
+            if base is not None and not base.rich and (w.folders[0] / RS.RICH_FILE).is_file():
+                want = w.folders[0]
+        if self._rich_thread is not None and self._rich_thread.isRunning() and self._rich_folder != want:
+            self._rich_thread.requestInterruption()
+            self._rich_token += 1
+            self.rich_label.setText("")
+        if want is None or (self._rich_thread is not None and self._rich_thread.isRunning()
+                            and self._rich_folder == want):
+            return
+        self._rich_token += 1
+        th = _RichLoad(self._rich_token, want)
+        th.signals.progress.connect(self._on_rich_progress)
+        th.signals.done.connect(self._on_rich)
+        self._rich_thread, self._rich_folder = th, want
         th.start()
 
     def _on_rich_progress(self, token: int, done: int, total: int) -> None:
-        if token == self._token:
+        if token == self._rich_token:
             self.rich_label.setText(_KO.OVERKILL_RICH_PROGRESS.format(p=int(100 * done / total) if total else 0))
 
-    def _on_rich(self, token: int, rich) -> None:
+    def _on_rich(self, token: int, folder, rich) -> None:
         """뒤에서 읽은 RichSurface 를 올린다 — 바꾼 값은 그대로, 기준 칸만 다시 그려 내리기를 연다."""
-        if token != self._token:
+        if token != self._rich_token:
             return
         self.rich_label.setText("")
-        if not rich or self._w is None or self._w.note:
+        base = self._cache.get(folder)
+        if base is not None:
+            base.rich = rich
+        if not rich or self._w is None or self._w.note or self._w.folders != (folder,):
             return
         self._w.rich = rich
         self._rich_base = {}
         self._render_rules()
         self._render_summary()
 
+    # ------------------------------------------------------------------ 칩
+    def _chip_info(self, root: Path, included: set) -> _ChipInfo:
+        info = _ChipInfo(root, root.name, selected=root == self._sel, flash=self._flash.get(root, ""),
+                         tip=str(root))
+        ents = self._expand.get(root)
+        if root in self._failed:
+            info.state, info.reason = "excluded", _KO.OVERKILL_CHIP_EX_UNREAD
+            return info
+        owned = [d for d, _r in ents or () if self._owner.get(d) == root]
+        if ents is None or (ents and not owned):
+            info.state, info.progress = "loading", _KO.OVERKILL_CHIP_READING_NOCOUNT
+            return info
+        info.lot = not (len(ents) == 1 and ents[0][0] == root)
+        got = [d for d in owned if d in self._cache]
+        if len(got) < len(owned):
+            info.state = "loading"
+            info.progress = _KO.OVERKILL_CHIP_READING.format(i=len(got), n=len(owned))
+            return info
+        data = self._cache
+        ok = [d for d in owned if d in included]
+        if info.lot:
+            info.tip += "\n" + "\n".join(
+                f"{d.name}   " + (f"{len(data[d].defects):,}" if d in included else
+                                  _KO.OVERKILL_CHIP_EX_UNREAD if data[d].note else _KO.OVERKILL_CHIP_EX_RECIPE)
+                for d in owned)
+        if not ok:
+            info.state = "excluded"
+            info.reason = (_KO.OVERKILL_CHIP_EX_RECIPE if any(not data[d].note for d in owned)
+                           else _KO.OVERKILL_CHIP_EX_UNREAD)
+            return info
+        info.count = sum(len(data[d].defects) for d in ok)
+        info.wafers, info.partial = len(ok), len(owned) - len(ok)
+        info.can_color = any(data[d].photos for d in ok)
+        info.can_scan = any(data[d].has_scan for d in ok)
+        info.view = self._view.get(root) or ("color" if info.can_color or not info.can_scan else "scan")
+        return info
+
+    def _make_chip(self, info: _ChipInfo, parent) -> _FolderChip:
+        c = _FolderChip(info, parent)
+        c.select.connect(lambda r=info.root: self.select_folder(r))
+        c.remove.connect(lambda r=info.root: self.remove_folder(r))
+        c.view.connect(lambda m, r=info.root: self.set_view(r, m))
+        return c
+
     def _render_chips(self) -> None:
+        """칩 줄을 다시 그린다.  자리가 모자라면 뒤쪽을 '+n 더 보기' 로 접는다(고른 칩 · 읽는 칩 · 반짝이는 칩은 먼저 남긴다)."""
         self._clear(self._chips)
-        for r in self._roots:
-            b = NeonButton(f"{r.name}  ✕", role="ghost")
-            b.setToolTip(str(r))
-            b.clicked.connect(lambda _c=False, f=r: self.remove_folder(f))
+        inc = self._included()
+        infos = [self._chip_info(r, inc) for r in self._roots]
+        chips = [self._make_chip(i, self._chips_host) for i in infos]
+        gap = self._chips.spacing()
+        avail = self._chips_host.width() if self._chips_host.isVisible() else 0      # 아직 안 그려졌으면 폭을 모른다
+        self._chips_w = self._chips_host.width()
+        show = set(range(len(chips)))
+        if avail > 1 and chips and sum(c.sizeHint().width() + gap for c in chips) - gap > avail:
+            budget = avail - MORE_CHIP_PX - gap
+            prio = [i for i, inf in enumerate(infos) if inf.selected or inf.state == "loading" or inf.flash]
+            show, used = set(), 0
+            for i in prio + [i for i in range(len(chips)) if i not in prio]:
+                need = chips[i].sizeHint().width() + gap
+                if used + need <= budget:
+                    show.add(i)
+                    used += need
+        self._hidden_chips = [infos[i] for i in range(len(chips)) if i not in show]
+        for i, c in enumerate(chips):
+            if i in show:
+                self._chips.addWidget(c)
+            else:
+                c.hide()
+                c.deleteLater()
+        self.more_btn = None
+        if self._hidden_chips:
+            b = NeonButton(_KO.OVERKILL_MORE_FOLDERS.format(n=len(self._hidden_chips)), role="ghost")
+            b.setFixedHeight(34)
+            b.setToolTip(_KO.OVERKILL_MORE_FOLDERS_TIP)
+            b.clicked.connect(self._open_more)
             self._chips.addWidget(b)
+            self.more_btn = b
         self._chips.addStretch(1)
+        if self._more_pop is not None and self._more_pop.isVisible():
+            if self._hidden_chips:
+                self._fill_more()
+            else:
+                self._more_pop.hide()
+
+    def _open_more(self) -> None:
+        """접힌 칩 전체 목록 — 수 · 컬러/스캔 · ✕ · 고르기가 칩 줄과 똑같이 된다."""
+        if self._more_pop is None:
+            pop = QFrame(self, Qt.WindowType.Popup)
+            pop.setObjectName("morePop")
+            pop.setStyleSheet(f"QFrame#morePop {{ background: {theme.PANEL}; border: 1px solid {theme.LINE_STRONG};"
+                              " border-radius: 6px; }")
+            lay = QVBoxLayout(pop)
+            lay.setContentsMargins(8, 8, 8, 8)
+            lay.setSpacing(6)
+            self._more_pop = pop
+        self._fill_more()
+        pop = self._more_pop
+        if self.more_btn is not None:
+            pop.move(self.more_btn.mapToGlobal(QPoint(0, self.more_btn.height() + 4)))
+        pop.show()
+
+    def _fill_more(self) -> None:
+        pop = self._more_pop
+        self._clear(pop.layout())
+        for info in self._hidden_chips:
+            pop.layout().addWidget(self._make_chip(info, pop), 0, Qt.AlignmentFlag.AlignLeft)
+        pop.adjustSize()
+
+    def select_folder(self, root: Path) -> None:
+        """칩 이름을 누르면 그 폴더 Defect 만 사진 칸에 보인다 — 다시 누르면 전체.  숫자 · 값 계산은 늘 전체 기준."""
+        self._sel = None if self._sel == root else root
+        self._open = None
+        self._shown = PAGE_TILES
+        self._render_chips()
+        self._render_tiles()
+
+    def set_view(self, root: Path, mode: str) -> None:
+        """칩의 [컬러 | 스캔] — 그 폴더 Defect 가 컬러 사진으로 보일지 Scan Crop 으로 보일지."""
+        if self._view.get(root) == mode:
+            return
+        self._view[root] = mode
+        self._open = None
+        self._render_chips()
+        self._render_tiles()
+
+    def _flash_chips(self, roots, kind: str) -> None:
+        for r in roots:
+            self._flash[r] = kind
+        self._render_chips()
+        self._flash_timer.start(FLASH_MS)
+
+    def _clear_flash(self) -> None:
+        self._flash.clear()
+        self._render_chips()
+
+    def _show_notice(self, text: str, kind: str = "info", undo: Optional[dict] = None) -> None:
+        bg = {"info": theme.ACCENT_TINT, "ok": theme.PASS_TINT, "warn": theme.WARN_TINT}[kind]
+        self.notice.setStyleSheet(f"QFrame#notice {{ background: {bg}; border-radius: 6px; }}")
+        self.notice_label.setText(text)
+        self._undo_snap = undo
+        self.undo_btn.setVisible(undo is not None)
+        self.notice.setVisible(True)
+        self._notice_timer.start(NOTICE_MS)
+
+    def _hide_notice(self) -> None:
+        self.notice.setVisible(False)
+        self._undo_snap = None
 
     def dragEnterEvent(self, e):    # noqa: N802
         if any(Path(u.toLocalFile()).is_dir() for u in e.mimeData().urls() if u.isLocalFile()):
@@ -815,42 +1333,34 @@ class ThresholdPreviewDialog(QDialog):
             self.add_folders(dirs)
             e.acceptProposedAction()
 
-    def _on_progress(self, token: int, done: int, total: int, msg: str) -> None:
-        if token == self._token:
-            self._loading.set_progress(done, total, msg)
-
-    def _on_loaded(self, token: int, w) -> None:
-        if token != self._token:
-            return                      # 늦게 온 옛 결과
-        self._loading.hide_overlay()
-        self.set_wafer(w if w is not None else WaferData(Path(self._roots[0]) if self._roots else Path(),
-                                                         note=_KO.THRESH_PREVIEW_FAILED))
-
     def set_wafer(self, w: Optional[WaferData]) -> None:
         """읽은 웨이퍼(여러 장이면 합친 것)를 화면에 올린다(테스트는 스레드 없이 이것만 부른다).
 
-        폴더를 더하거나 빼도 남아 있는 웨이퍼의 꼭 잡기와, Zone 기준이 같으면 바꾼 값도 이어 간다."""
+        폴더를 더하거나 빼도 남아 있는 웨이퍼의 꼭 잡기와, 합치기 기준(첫 폴더의 레시피)이 같으면 바꾼 값도 이어 간다.
+        기준이 바뀌면(첫 폴더를 뺐을 때) 바꾼 값 · 꼭 잡기를 처음으로 되돌리고 알린다."""
         prev = self._w
         kept_picks = {(_folder_of(prev, d), d.index) for d in self._picked.values()} if prev else set()
-        keep_ov = prev is not None and w is not None and not w.note and prev.zones == w.zones
+        both = prev is not None and w is not None and not prev.note and not w.note
+        same_base = both and prev.zones == w.zones and prev.px == w.px
+        self._base_reset = bool(both and not same_base)
         self._w = w
-        self._ov = dict(self._ov) if keep_ov else {}
+        self._ov = dict(self._ov) if same_base else {}
         self._rich_base = {}
         self._drop_cache = {}
-        self._picked = {key_of(d): d for d in (w.defects if w else ())
-                        if (_folder_of(w, d), d.index) in kept_picks}
+        self._picked = ({} if self._base_reset else
+                        {key_of(d): d for d in (w.defects if w else ()) if (_folder_of(w, d), d.index) in kept_picks})
         self._rec_zones = {(d.zone_dir, d.zone) for d in self._picked.values()}
         self._open = None
         self._shown = PAGE_TILES
         self._tab = "keep" if self._mode == "auto" else "drop"
-        self._scans = {}
         self._scan_map = None
-        self._scan_done = set()
         self.scan_status.setText("")
-        self._scan_token += 1                       # 옛 웨이퍼의 Scan 결과가 늦게 와도 버린다
+        self._scan_token += 1                       # 옛 목록의 Scan 진행·마무리는 버린다(잘라 둔 Crop 은 캐시에 남는다)
         if self._scan_thread is not None and self._scan_thread.isRunning():
             self._scan_thread.requestInterruption()
         self._scan_thread = None
+        if self._base_reset:
+            self._show_notice(_KO.OVERKILL_NOTICE_BASE_RESET, "warn")
         if w is None:
             self._zone = None
             self._render()
@@ -860,61 +1370,64 @@ class ThresholdPreviewDialog(QDialog):
                            and self._count(k)), zs[0] if zs else None)
         self._render()
 
-    # ------------------------------------------------------------------ Scan 사진(Color 가 없을 때)
-    def _no_color(self) -> list:
-        """Color 사진이 없는 Defect."""
-        w = self._w
-        return [d for d in w.defects + w.goods if key_of(d) not in w.photos] if w and not w.note else []
+    # ------------------------------------------------------------------ Scan 사진
+    def _skey(self, d: P.Defect) -> tuple:
+        """Scan Crop 캐시 키 — 합친 목록 안 위치가 아니라 (웨이퍼 폴더, Defect.index) 라 더하고 빼도 그대로다."""
+        return _folder_of(self._w, d), d.index
+
+    def _has_scan(self, folder: Path) -> bool:
+        c = self._cache.get(folder)
+        return c.has_scan if c is not None else (folder / SI.SCAN_LIST_NAME).is_file()
 
     def _scan_index(self) -> dict:
-        """Scan 목록 파일이 있는 웨이퍼의, Color 사진이 없는 Defect — ``{키: (폴더, (x, y))}``(웨이퍼마다 한 번)."""
+        """Scan 목록이 있는 웨이퍼의 Defect — ``{key_of: ((폴더, index), 폴더, (x, y))}``(목록이 바뀔 때마다 한 번)."""
         if self._scan_map is None:
-            from ...coords import scan_image as SI
             has: dict = {}
             out = {}
-            for d in self._no_color():
-                folder = _folder_of(self._w, d)
+            w = self._w
+            for d in (w.defects + w.goods) if w is not None and not w.note else ():
+                folder = _folder_of(w, d)
                 if folder not in has:
-                    has[folder] = (folder / SI.SCAN_LIST_NAME).is_file()
+                    has[folder] = self._has_scan(folder)
                 if has[folder]:
-                    out[key_of(d)] = (folder, (d.x, d.y))
+                    out[key_of(d)] = ((folder, d.index), folder, (d.x, d.y))
             self._scan_map = out
         return self._scan_map
 
     def _scan_items(self) -> list:
-        """:meth:`_scan_index` 를 ``[(키, 폴더, (x, y))]`` 로."""
-        return [(k, f, xy) for k, (f, xy) in self._scan_index().items()]
+        """:meth:`_scan_index` 를 ``[(키, 폴더, (x, y))]`` 로 — 키는 ``(웨이퍼 폴더, Defect.index)``."""
+        return list(self._scan_index().values())
 
-    def answer_scan(self, yes: bool) -> None:
-        """'Scan 사진으로 볼까요?' 의 답 — 이 화면을 닫을 때까지 기억한다(폴더를 더해도 다시 묻지 않는다)."""
-        self._use_scan = yes
-        self.scan_ask.setVisible(False)
-        if yes:
-            self._render_tiles()                    # 자리표시 타일이 먼저 보이고, 사진은 보이는 것부터 채워진다
+    def _view_of(self, folder: Path) -> str:
+        root = self._owner.get(folder)
+        return self._view.get(root, "color") if root is not None else "color"
 
-    def _scan_pending(self, k) -> bool:
+    def _wants_scan(self, d: P.Defect) -> bool:
+        """이 Defect 는 Scan Crop 으로 보인다 — 칩이 [스캔] 이거나, [컬러] 인데 컬러 사진이 없을 때(대신 채운다)."""
+        return key_of(d) not in self._w.photos or self._view_of(_folder_of(self._w, d)) == "scan"
+
+    def _scan_pending(self, d: P.Defect) -> bool:
         """Scan Crop 을 쓰기로 했고 아직 안 잘랐다 — 사진이 '올 예정' 이라 자리표시 타일로 보인다."""
-        return bool(self._use_scan) and k in self._scan_index() and k not in self._scans and k not in self._scan_done
+        idx = self._scan_index().get(key_of(d))
+        return (idx is not None and self._wants_scan(d) and idx[0] not in self._scans
+                and idx[0] not in self._scan_done)
 
     def _ensure_scans(self) -> None:
         """지금 화면(탭의 앞 ``_shown`` 장 + 한 쪽)에 필요한데 아직 안 자른 Crop 만 백그라운드로 자른다.
 
         한 번에 스레드 하나 — 끝나면(:meth:`_on_scans`) 다시 불러 그 사이 늘어난 필요(더 보기·탭 이동)를 이어서 한다.
         결과는 키로 ``_scans`` 에 쌓여 같은 Defect 를 두 번 자르지 않는다."""
-        if not self._use_scan or self._w is None or self._zone is None:
+        if self._w is None or self._zone is None:
             return
         if self._scan_thread is not None and self._scan_thread.isRunning():
             return
         want = []
         idx = self._scan_index()
         for d, _why in self._items():
-            k = key_of(d)
-            if self._pic(k) is None and not self._scan_pending(k):
-                continue                               # 화면에 안 나오는 것(Scan 도 없음)
-            if self._scan_pending(k):
-                want.append((k, *idx[k]))
-            if len(want) >= self._shown + PAGE_TILES:
-                break
+            if self._scan_pending(d):
+                want.append(idx[key_of(d)])
+                if len(want) >= self._shown + PAGE_TILES:
+                    break
         if not want:
             return
         th = _ScanLoad(self._scan_token, want)
@@ -929,15 +1442,18 @@ class ThresholdPreviewDialog(QDialog):
         if token == self._scan_token:
             self.scan_status.setText(_KO.OVERKILL_SCAN_PROGRESS.format(done=done, total=total))
 
-    def _on_scan_batch(self, token: int, got: dict) -> None:
-        """일부 Crop 이 도착 — 이미 그려진 자리표시 타일의 그림만 바꾼다(스크롤·펼침이 그대로)."""
-        if token != self._scan_token:
-            return
+    def _on_scan_batch(self, _token: int, got: dict) -> None:
+        """일부 Crop 이 도착 — 캐시에 쌓고(목록이 바뀐 뒤 늦게 와도 버리지 않는다), 이미 그려진 자리표시 타일의 그림만 바꾼다."""
         self._scans.update(got)
-        for k, q in got.items():
-            t = self.tiles.get(k)
-            if t is not None and self._open != k:
-                t.set_photo(q)
+        if self._w is None:
+            return
+        for k, t in self.tiles.items():
+            d = self._tile_defects.get(k)
+            if d is None or self._open == k or self._skey(d) not in got:
+                continue
+            photo = self._pic(d)
+            if photo is not None:
+                t.set_photo(photo)
 
     def _on_scans(self, token: int, keys: list) -> None:
         if token != self._scan_token:
@@ -952,23 +1468,17 @@ class ThresholdPreviewDialog(QDialog):
 
     def set_scans(self, got: dict) -> None:
         """잘라 온 Scan 사진을 올린다(테스트는 스레드 없이 이것만 부른다).  Scan 후보 전부를 시도한 것으로 본다."""
-        self._scans = dict(got)
-        self._scan_done = set(self._scan_index())
+        self._scans.update(got)
+        self._scan_done |= {v[0] for v in self._scan_index().values()}
         self._render_tiles()
 
-    def _pic(self, k):
-        """그 Defect 의 그림 — Color 사진 경로, 없으면(Scan 으로 보기로 했을 때) Scan Crop, 둘 다 없으면 None."""
-        ph = self._w.photos.get(k)
-        return ph if ph is not None else (self._scans.get(k) if self._use_scan else None)
-
-    def _render_scan_ask(self) -> None:
-        """Color 사진이 없는 Defect 가 있고 Scan 목록이 있으면, 아직 답을 안 받았을 때만 묻는다."""
-        n = len(self._scan_items()) if self._use_scan is None else 0
-        if n:
-            allgone = not self._w.photos
-            self.scan_ask_label.setText(_KO.OVERKILL_SCAN_ASK_ALL if allgone
-                                        else _KO.OVERKILL_SCAN_ASK.format(n=f"{n:,}"))
-        self.scan_ask.setVisible(bool(n))
+    def _pic(self, d: P.Defect):
+        """그 Defect 의 그림 — 칩이 [컬러] 면 컬러 사진(없으면 Scan Crop), [스캔] 이면 Scan Crop.  아직 없으면 None."""
+        color = self._w.photos.get(key_of(d))
+        idx = self._scan_index().get(key_of(d))
+        if idx is None or (color is not None and not self._wants_scan(d)):
+            return color
+        return self._scans.get(idx[0])
 
     def is_loading(self) -> bool:
         return self._thread is not None and self._thread.isRunning()
@@ -1031,24 +1541,10 @@ class ThresholdPreviewDialog(QDialog):
             n = len(w.defects)
             self.check_label.setText((_KO.THRESH_PREVIEW_CHECK_OK if not w.misses else
                                       _KO.THRESH_PREVIEW_CHECK_BAD).format(ok=n - w.misses, n=n))
-        many = w is not None and (len(w.folders) > 1 or w.skipped)
-        text = _KO.OVERKILL_WAFERS.format(n=len(w.folders)) if many else ""
-        if many and w.skipped:
-            text += "   " + _KO.OVERKILL_SKIPPED.format(n=len(w.skipped))
-        self.wafer_label.setText(text)
-        self.wafer_label.setToolTip("\n".join(
-            [str(f) for f in w.folders] + ([f"— {_KO.OVERKILL_SKIPPED_HEAD}"] + [str(f) for f in w.skipped]
-                                            if w.skipped else [])) if many else "")
-        self.wafer_label.setStyleSheet(f"font-family: {theme.FONT_MONO};"
-                                       + (f" color: {theme.WARN};" if many and w.skipped else ""))
         self._render_zones()
         self._render_rules()
         self._render_summary()
         self._render_tiles()
-        if w is not None and not w.note:
-            self._render_scan_ask()
-        else:
-            self.scan_ask.setVisible(False)
 
     @staticmethod
     def _clear(lay) -> None:
@@ -1287,7 +1783,14 @@ class ThresholdPreviewDialog(QDialog):
         return drop
 
     def _items(self) -> list:
-        """지금 탭의 ``[(Defect, 빠진 이유 | None)]``."""
+        """지금 탭의 ``[(Defect, 빠진 이유 | None)]`` — 칩을 골랐으면 그 폴더 것만(숫자 · 계산은 전체 기준 그대로)."""
+        items = self._tab_items()
+        if self._sel is None:
+            return items
+        w = self._w
+        return [(d, why) for d, why in items if self._owner.get(_folder_of(w, d)) == self._sel]
+
+    def _tab_items(self) -> list:
         w = self._w
         if self._tab == "good":
             return [(d, None) for d in w.goods if (d.zone_dir, d.zone) == self._zone]
@@ -1306,15 +1809,19 @@ class ThresholdPreviewDialog(QDialog):
     def _render_tiles(self) -> None:
         self._clear(self.grid)
         self.tiles = {}
+        self._tile_defects = {}
         w = self._w
         if w is None or w.note or self._zone is None:
             self.empty_label.setText("" if w is None else w.note)
             self.no_photo_label.setText("")
+            self.filter_label.setText("")
             return
         items = self._items()
-        with_photo = [(d, why) for d, why in items if self._pic(key_of(d)) is not None or self._scan_pending(key_of(d))]
+        with_photo = [(d, why) for d, why in items if self._pic(d) is not None or self._scan_pending(d)]
         missing = len(items) - len(with_photo)
         self.no_photo_label.setText(_KO.THRESH_PREVIEW_NO_PHOTO.format(n=f"{missing:,}") if missing else "")
+        self.filter_label.setText(_KO.OVERKILL_FILTER_ONLY.format(name=self._sel.name, n=len(items))
+                                  if self._sel is not None else "")
         self.empty_label.setText("" if items else (_KO.THRESH_PREVIEW_NONE_DROPPED
                                                    if self._tab == "drop" else _KO.THRESH_PREVIEW_NONE))
         cols = self._cols()
@@ -1324,7 +1831,7 @@ class ThresholdPreviewDialog(QDialog):
         auto = self._mode == "auto"
         for j, (d, why) in enumerate(shown):
             k = key_of(d)
-            tile = _Tile(self._pic(k), self._class_name(d.bin), self._why_text(d, why), TILE_PX,
+            tile = _Tile(self._pic(d), self._class_name(d.bin), self._why_text(d, why), TILE_PX,
                          self.grid_host, picked=k in self._picked, detail_btn=auto)
             if auto:                                 # 자동 모드: 타일 = 꼭 잡기 토글, ⋯ = 값 펼치기
                 tile.clicked.connect(lambda i=k: self.toggle_pick(i))
@@ -1334,6 +1841,7 @@ class ThresholdPreviewDialog(QDialog):
             tile.set_open(self._open == k)
             self.grid.addWidget(tile, r, c)
             self.tiles[k] = tile
+            self._tile_defects[k] = d
             if self._open == k:
                 pending = self._detail(d, why)
             c += 1
@@ -1362,9 +1870,12 @@ class ThresholdPreviewDialog(QDialog):
         pic.setFixedSize(DETAIL_PX, DETAIL_PX)
         pic.setAlignment(Qt.AlignmentFlag.AlignCenter)
         pic.setCursor(Qt.CursorShape.PointingHandCursor)
-        photo = self._pic(key_of(d))
+        photo = self._pic(d)
         if photo is not None:
-            pic.setPixmap(_pixmap(photo, DETAIL_PX, kind="mid"))
+            pix = _pixmap(photo, DETAIL_PX, kind="mid")
+            if isinstance(photo, QImage):               # Scan Crop — Defect 자리를 빨간 박스로(상세 보기에서만)
+                self._mark_defect(pix, photo, d)
+            pic.setPixmap(pix)
         else:
             pic.setText(_KO.OVERKILL_SCAN_WAIT)
         if photo is None or isinstance(photo, QImage):                   # Scan Crop — 크게 볼 원본 파일이 없다
@@ -1412,6 +1923,20 @@ class ThresholdPreviewDialog(QDialog):
         right.addStretch(1)
         lay.addLayout(right, 1)
         return box
+
+    def _mark_defect(self, pix: QPixmap, crop: QImage, d: P.Defect) -> None:
+        """Scan Crop 그림 위에 Defect 를 감싼 1px 빨간 박스를 그린다(그림 크기에 맞춰 환산)."""
+        box = defect_box((crop.width(), crop.height()), self._w.px, d.width, d.length, d.area)
+        if box is None or pix.isNull():
+            return
+        k = pix.width() / crop.width()
+        p = QPainter(pix)
+        pen = QPen(QColor(DEFECT_BOX_RGB))
+        pen.setWidth(1)
+        pen.setCosmetic(True)
+        p.setPen(pen)
+        p.drawRect(QRectF(box[0] * k, box[1] * k, box[2] * k, box[3] * k))
+        p.end()
 
     # ------------------------------------------------------------------ 동작
     def _set_zone(self, key) -> None:
@@ -1563,9 +2088,9 @@ class ThresholdPreviewDialog(QDialog):
             total_drop += len(drops)
             total_new += new
             name, rec = zone_label(key[0], w.zones.get(key), key[1])
-            have = sorted(((d, why) for d, why in drops if self._pic(key_of(d)) is not None),
+            have = sorted(((d, why) for d, why in drops if self._pic(d) is not None),
                           key=lambda t: -self._below(t[0], t[1]))     # 기준 바로 아래부터 멀리까지
-            samples = tuple(RP.Sample(_data_uri(self._pic(key_of(d))), self._class_name(d.bin), self._why_text(d, why))
+            samples = tuple(RP.Sample(_data_uri(self._pic(d)), self._class_name(d.bin), self._why_text(d, why))
                             for d, why in RP.pick_samples(have, EXPORT_SAMPLES))
             zones.append(RP.ZoneResult(name + (f" · {rec}" if rec else ""), self._count(key), len(drops),
                                        samples, len(drops) - len(have), new))
@@ -1601,8 +2126,15 @@ class ThresholdPreviewDialog(QDialog):
         dec = next(x[4] for x in _FEATURES if x[0] == feat)
         return f"{next(x[1] for x in _FEATURES if x[0] == feat)[0]} {self._w.to_um(feat, P._value(d, feat)):.{dec}f}"
 
+    def showEvent(self, e):         # noqa: N802
+        super().showEvent(e)
+        if self._roots:
+            self._render_chips()                    # 칩 줄 폭이 정해진 뒤에야 넘치는지 안다
+
     def resizeEvent(self, e):       # noqa: N802
         super().resizeEvent(e)
+        if self._roots and self._chips_host.width() != self._chips_w:
+            self._render_chips()
         if self._w is not None and self.grid.count():
             cols = self._cols()
             if cols != getattr(self, "_last_cols", cols):
@@ -1614,4 +2146,6 @@ class ThresholdPreviewDialog(QDialog):
             self._thread.requestInterruption()
         if self._scan_thread is not None and self._scan_thread.isRunning():
             self._scan_thread.requestInterruption()
+        if self._rich_thread is not None and self._rich_thread.isRunning():
+            self._rich_thread.requestInterruption()
         super().closeEvent(e)
