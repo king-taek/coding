@@ -248,6 +248,8 @@ def test_conder_kla_folder_info_file_is_taken_photos_stay_names(tmp_path, monkey
     arc = "Conder옆폴더/100. CUST/1. DEV/2. L1 (LOT)/1. FVI"
     assert {n for n in names if n.startswith("Conder옆폴더/")} == {
         f"{arc}/2026-08-02-23-09_4/00NUR031.001", f"{arc}/2026-08-02-23-10_5/00NUR032"}
+    assert f"{arc}/2026-08-02-23-09_4/00NUR_2_0_23_2.jpg" in col.photos          # 정보파일만으론 좌표를 사진에 못 잇는다
+    assert f"{arc}/2026-08-02-23-10_5/00NUR_2_0_23_2.jpg" in col.photos
 
 
 def test_unreadable_folder_is_not_a_wafer(tmp_path, monkeypatch):

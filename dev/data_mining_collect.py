@@ -336,7 +336,7 @@ def collect_conder_siblings(col, say, progress, stop, end=None):
                         for wname, wp in wafer_dirs:
                             names = kla_info_names(wp)
                             if names:
-                                col.take_files(wp, f"{sarc}/{wname}", only=names)
+                                col.take_files(wp, f"{sarc}/{wname}", only=names, photos=not sibling)   # 옆 폴더 LOT 은 아래에서 사진 이름을 담는다
                     looked += 1
                     if not sibling:
                         continue
