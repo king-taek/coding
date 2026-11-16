@@ -925,6 +925,12 @@ QFrame[flat="true"] {
     border-radius: 0;
 }
 QFrame[flat="true"][joined="true"] { border-bottom: none; }
+/* 끌어다 놓을 줄 강조(설정 화면 — `SetupPage._set_drop_hl`) */
+QFrame[role="card"][drop="on"],
+QWidget[role="rowHost"][drop="on"] {
+    background-color: $accent_tint;
+    border: 1px solid $accent;
+}
 QLabel[role="sectionHead"] {
     color: $ink;
     font-weight: 700;

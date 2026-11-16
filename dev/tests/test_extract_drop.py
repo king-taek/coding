@@ -69,18 +69,21 @@ def test_drop_fills_empty_rows_then_adds_rows(qapp, tmp_path):
         _drop(page, [w1 / "b.jpeg", lot])               # w1 은 이미 있다
         assert page._lot_paths() == [str(w1), str(w2), str(lot)]
         page.set_extract_mode(False)
-        assert not page.acceptDrops() and page.ref_path_edit.acceptDrops()
+        # 매칭 모드에서도 페이지가 받는다(기준·검증 줄 놓기) — 입력란은 'file:///…' 글자를 끼우지 않게 늘 끈다
+        assert page.acceptDrops() and not page.ref_path_edit.acceptDrops()
     finally:
         page.deleteLater()
 
 
-def test_matching_mode_ignores_drops(qapp, tmp_path):
+def test_matching_mode_drop_fills_ref(qapp, tmp_path):
+    """매칭 모드에서 놓은 폴더는 기준 칸에 들어간다."""
     _lot, w1, _w2 = _tree(tmp_path)
     page = sp.SetupPage()
     try:
         page.ref_path_edit.setText("")
         _drop(page, [w1])
-        assert page.ref_path_edit.text() == ""
+        assert page.ref_path_edit.text() == str(w1)
+        assert len(page._lot_rows) <= 1
     finally:
         page.deleteLater()
 
