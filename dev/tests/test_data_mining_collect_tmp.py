@@ -109,6 +109,27 @@ def test_all_jobs_take_one_recent_wafer_and_only_the_listed_files(tmp_path, monk
     assert "P_1_2_x.jpg" not in txt["사진목록.txt"]                                # 이 단계는 사진 이름도 안 적는다
 
 
+def test_all_jobs_take_wafer2table_from_wafer_and_parents_up_to_the_job(tmp_path, monkeypatch):
+    """블록 제품: 웨이퍼 폴더 · 부모 2단계(Job 폴더까지)의 Wafer2Table.ini 를 같은 경로로 담는다."""
+    tool = _tool()
+    sr = tmp_path / "AOI-14" / "Scanresult"
+    job = sr / "R_BLOCK"
+    _scan_wafer(job / "SETUP" / "1104_X" / "GIX1", tool)
+    (job / "SETUP" / "1104_X" / "GIX1" / "Wafer2Table.ini").write_text("wafer")
+    (job / "SETUP" / "1104_X" / "Wafer2Table.ini").write_text("lot")
+    (job / "SETUP" / "Wafer2Table.ini").write_text("setup")
+    (job / "Wafer2Table.ini").write_text("job")           # 부모 3단계 — 앱이 보지 않는다
+    monkeypatch.setattr(tool, "nas_roots", lambda: [sr])
+    col = tool.Collector(tmp_path / "s.zip")
+    tool.collect_all_jobs(col, _noop, _noop, lambda: False)
+    col.close("")
+    names, _ = _zip_names(tmp_path / "s.zip")
+    base = "모든Job/AOI-14/R_BLOCK"
+    got = {n for n in names if n.endswith("Wafer2Table.ini")}
+    assert got == {f"{base}/SETUP/1104_X/GIX1/Wafer2Table.ini", f"{base}/SETUP/1104_X/Wafer2Table.ini",
+                   f"{base}/SETUP/Wafer2Table.ini"}
+
+
 def test_all_jobs_visit_each_equipment_newest_job_then_each_name_once(tmp_path, monkeypatch):
     """장비마다 가장 최근 Job 은 이름이 겹쳐도 보고(152 가 아닌 장비를 찾게), 나머지는 같은 이름을 한 번만 본다."""
     tool = _tool()
@@ -204,6 +225,31 @@ def test_conder_siblings_take_lots_whose_wafer_is_in_two_steps(tmp_path, monkeyp
             "\t사진 폴더 1: GXX01-A1 memo") in listed                      # 03: 폴더 이름이 맵 이름과 다른 예
 
 
+def test_conder_kla_folder_info_file_is_taken_photos_stay_names(tmp_path, monkeypatch):
+    """사진이 있는 KLA 폴더의 정보파일(.001 · 확장자 없음 · 헤더 WaferID)만 담고 사진 · Thumbs.db · 무관한 파일은 안 담는다.
+    옆 단계 LOT 이 아니어도 담는다."""
+    tool = _tool()
+    base = tmp_path / "1. Conder Scan"
+    lot = base / "100. CUST" / "1. DEV" / "2. L1 (LOT)"
+    k1 = lot / "1. FVI" / "2026-08-02-23-09_4"
+    k2 = lot / "1. FVI" / "2026-08-02-23-10_5"
+    for k in (k1, k2):
+        k.mkdir(parents=True)
+        (k / "00NUR_2_0_23_2.jpg").write_bytes(b"jpg")
+        (k / "Thumbs.db").write_bytes(b"thumb" * 10)
+    (k1 / "00NUR031.001").write_text('FileVersion 1 7;\nWaferID "00NUR031XYE5";\nSlot 4;\n')
+    (k2 / "00NUR032").write_text('WaferID "00NUR032XYE5";\n')                  # 확장자 없음
+    (k2 / "notes.txt").write_text("memo")                                       # 헤더 없음 → 정보파일 아님
+    monkeypatch.setattr(tool, "CONDER_ROOTS", [str(base)])
+    col = tool.Collector(tmp_path / "s.zip")
+    tool.collect_conder_siblings(col, _noop, _noop, lambda: False)
+    col.close("")
+    names, _ = _zip_names(tmp_path / "s.zip")
+    arc = "Conder옆폴더/100. CUST/1. DEV/2. L1 (LOT)/1. FVI"
+    assert {n for n in names if n.startswith("Conder옆폴더/")} == {
+        f"{arc}/2026-08-02-23-09_4/00NUR031.001", f"{arc}/2026-08-02-23-10_5/00NUR032"}
+
+
 def test_unreadable_folder_is_not_a_wafer(tmp_path, monkeypatch):
     """Windows 의 is_file 은 권한 · 네트워크 오류를 올린다 — 그 폴더만 건너뛴다."""
     tool = _tool()
@@ -242,6 +288,13 @@ def test_nothing_found_leaves_no_folder(tmp_path, monkeypatch):
     out = tmp_path / "desk"
     assert tool.run(out) == (None, 0, 0)
     assert not any(out.iterdir())
+
+
+def test_stage_limits_fit_inside_the_total():
+    """전체 시간 상한은 단계 시간 상한의 합보다 길어야 마지막 단계가 잘리지 않는다."""
+    tool = _tool()
+    assert tool.MINUTES > tool.WIDE_MINUTES + tool.ODD_MINUTES + tool.SIB_MINUTES
+    assert tool.PART_MB == 28
 
 
 def test_plan_parts_fills_each_part_between_23_and_28_mb():
