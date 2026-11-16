@@ -42,6 +42,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -59,6 +60,7 @@ from ...models.result import FinalResult
 from ...models.slot import _list_images, list_slot_dirs
 from ...utils import image_io
 from .. import theme
+from ..drop_paths import install_paste, local_paths, split_paths
 from . import sheet_host as sheets
 from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
@@ -286,6 +288,7 @@ class WaferMapDialog(QDialog):
             top.addWidget(self.slots_btn)
             # 사진 보기는 버튼이 아니라 **끌어놓기**다(사용자 요청) — dropEvent.
             self.setAcceptDrops(True)
+            install_paste(self, self._on_paths, self._on_no_path)
             self.folder_label = QLabel("", self)
             self.folder_label.setProperty("role", "monoMuted")
             top.addWidget(self.folder_label, stretch=1)
@@ -632,22 +635,10 @@ class WaferMapDialog(QDialog):
     # ------------------------------------------------------------------
     # 사진 끌어놓기
     # ------------------------------------------------------------------
-    @staticmethod
-    def _dropped(event) -> list[Path]:
-        """끌어놓은 것 중 사진만.  로컬 파일만."""
-        imgs = []
-        exts = {e.lower() for e in CONFIG.image_extensions}
-        md = event.mimeData()
-        for url in (md.urls() if md is not None and md.hasUrls() else []):
-            if not url.isLocalFile():
-                continue
-            p = Path(url.toLocalFile())
-            if p.suffix.lower() in exts:
-                imgs.append(p)
-        return imgs
-
     def dragEnterEvent(self, event):    # noqa: N802
-        if self._dropped(event):
+        # 디스크를 만지지 않는다(NAS) — 로컬 경로가 있으면 받고, 분류는 놓을 때.
+        md = event.mimeData()
+        if md is not None and local_paths(md):
             event.acceptProposedAction()
         else:
             event.ignore()
@@ -656,14 +647,39 @@ class WaferMapDialog(QDialog):
         self.dragEnterEvent(event)
 
     def dropEvent(self, event):         # noqa: N802
-        """사진(여러 장 가능) → 그 결함들만."""
-        imgs = self._dropped(event)
-        if imgs:
-            self.show_images(imgs)
-        else:
+        """사진(여러 장 가능) → 그 결함들만.  폴더 1개 → 폴더 맵."""
+        md = event.mimeData()
+        paths = local_paths(md) if md is not None else []
+        if not paths:
             event.ignore()
             return
         event.acceptProposedAction()
+        self._on_paths(paths)
+
+    def _on_paths(self, paths: list[str]) -> None:
+        exts = {e.lower() for e in CONFIG.image_extensions}
+        folders, images, _others = split_paths(
+            paths, is_dir=os.path.isdir,
+            is_image=lambda p: Path(p).suffix.lower() in exts)
+        images = [p for p in images if os.path.exists(p)]
+        if images:
+            self.show_images([Path(p) for p in images])
+        elif len(folders) == 1:
+            self.show_folder(Path(folders[0]))
+        elif folders:
+            self._notice(i18n.KO.DROP_ONE_AT_A_TIME)
+        elif not any(os.path.exists(p) for p in paths):
+            self._notice(i18n.KO.DROP_NOT_FOUND)
+        else:
+            self._notice(i18n.KO.DROP_WRONG_KIND_FOLDER)
+
+    def _on_no_path(self, has_image: bool) -> None:
+        self._notice(i18n.KO.DROP_NO_PATH_IMAGE if has_image
+                     else i18n.KO.DROP_NOTHING_TO_PASTE)
+
+    def _notice(self, text: str) -> None:
+        """짧은 안내 — 맵 위 경고 배너를 덮지 않게 시트로 띄운다."""
+        sheets.info(self, i18n.KO.WAFER_MAP_TITLE, text)
 
     def _folder_title(self) -> str:
         if len(self._images) == 1:

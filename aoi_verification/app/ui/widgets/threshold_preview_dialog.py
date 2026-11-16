@@ -56,6 +56,7 @@ from PyQt6.QtWidgets import (QApplication, QButtonGroup, QDialog, QFileDialog, Q
                              QWidget)
 
 from ... import i18n
+from ...config import CONFIG
 from ...coords import abs_coord
 from ...coords.geometry import GEOMETRY_MATCH_TOL
 from ...coords import scan_image as SI
@@ -68,6 +69,7 @@ from ...threshold import rich as RS
 from ...threshold import rules as R
 from ...utils import image_io
 from .. import theme
+from ..drop_paths import install_paste, local_paths, split_paths
 from ..folder_picker import FolderPicker
 from . import sheet_host as sheets
 from .loading_overlay import LoadingOverlay
@@ -759,6 +761,7 @@ class ThresholdPreviewDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(_KO.THRESH_PREVIEW_TITLE)
         self.setAcceptDrops(True)
+        install_paste(self, self._add_dropped, self._on_paste_no_path)
         self._w: Optional[WaferData] = None
         self._roots: list = []            # 고른 폴더(웨이퍼 또는 LOT) — 칩 하나씩.  맨 앞이 합치기 기준 레시피를 정한다
         self._expand: dict = {}           # 고른 폴더 → [(웨이퍼 폴더, 실제 경로 키)] — LOT 을 NAS 에서 다시 훑지 않는다
@@ -1377,15 +1380,32 @@ class ThresholdPreviewDialog(QDialog):
         self._undo_snap = None
 
     def dragEnterEvent(self, e):    # noqa: N802
-        if any(Path(u.toLocalFile()).is_dir() for u in e.mimeData().urls() if u.isLocalFile()):
+        if local_paths(e.mimeData()):           # 디스크는 drop 에서만 본다
             e.acceptProposedAction()
 
     def dropEvent(self, e):         # noqa: N802
-        dirs = [Path(u.toLocalFile()) for u in e.mimeData().urls() if u.isLocalFile()]
-        dirs = [d for d in dirs if d.is_dir()]
+        paths = local_paths(e.mimeData())
+        if paths:
+            e.acceptProposedAction()
+            self._add_dropped(paths)
+
+    def _add_dropped(self, paths) -> None:
+        """끌어놓기·붙여넣기 경로 — 폴더는 그대로, 사진은 들어 있는 폴더를 더한다."""
+        folders, images, _ = split_paths(
+            paths, is_dir=lambda p: Path(p).is_dir(),
+            is_image=lambda p: CONFIG.is_image(Path(p).name))
+        dirs = [Path(f) for f in folders]
+        for im in images:
+            d = Path(im).parent
+            if d not in dirs:
+                dirs.append(d)
         if dirs:
             self.add_folders(dirs)
-            e.acceptProposedAction()
+        else:
+            self._show_notice(i18n.KO.DROP_WRONG_KIND_FOLDER, "warn")
+
+    def _on_paste_no_path(self, has_image: bool) -> None:
+        self._show_notice(i18n.KO.DROP_NO_PATH_IMAGE if has_image else i18n.KO.DROP_NOTHING_TO_PASTE, "warn")
 
     def set_wafer(self, w: Optional[WaferData]) -> None:
         """읽은 웨이퍼(여러 장이면 합친 것)를 화면에 올린다(테스트는 스레드 없이 이것만 부른다).

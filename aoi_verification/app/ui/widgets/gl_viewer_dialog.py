@@ -31,6 +31,7 @@ from ...gl import roi as R
 from ...gl.export import build_workbook, save_workbook
 from .. import theme
 from ..deferred import call_later
+from ..drop_paths import install_paste, local_paths
 from . import sheet_host as sheets
 from .gl_canvas import TOOLS, GlCanvas
 from .gl_charts import HistogramChart
@@ -50,6 +51,11 @@ _LIVE_WORKERS: set = set()
 
 # 두 사진 비교 — A(기준)는 청사진 파랑, B(검증)는 주황.  명도 차가 커서 색만으로도 갈린다.
 _CMP_A, _CMP_B = "#2C5A86", "#C2410C"
+
+
+def _view_exts() -> set:
+    """열 수 있는 사진 확장자(파일 열기 창과 끌어놓기가 같이 쓴다)."""
+    return set(CONFIG.image_extensions) | {".tif", ".tiff", ".png", ".bmp", ".raw", ".bin", ".img"}
 
 
 def _shape_txt(img: loader.GlImage) -> str:
@@ -140,6 +146,7 @@ class GlViewerDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(_KO.GL_TITLE)
         self.setAcceptDrops(True)
+        install_paste(self, self._open_first_file, self._on_paste_no_path)
         self._gl: Optional[loader.GlImage] = None
         self._view: Optional[loader.ViewLoad] = None
         self._defect_id: Optional[int] = None      # Scan 결함 상자에 만든 ROI 의 id
@@ -397,7 +404,7 @@ class GlViewerDialog(QDialog):
     # 사진 열기
     # ------------------------------------------------------------------
     def _on_pick(self) -> None:
-        patterns = " ".join(f"*{e}" for e in sorted(set(CONFIG.image_extensions) | {".tif", ".tiff", ".png", ".bmp", ".raw", ".bin", ".img"}))
+        patterns = " ".join(f"*{e}" for e in sorted(_view_exts()))
         start = str(Path(self._gl.path).parent) if self._gl and self._gl.path else ""
         path, _ = QFileDialog.getOpenFileName(self, _KO.GL_OPEN, start,
                                               _KO.GL_OPEN_FILTER_FMT.format(patterns=patterns))
@@ -563,24 +570,26 @@ class GlViewerDialog(QDialog):
 
     # -- 끌어놓기 --------------------------------------------------------
     def dragEnterEvent(self, e):  # noqa: N802
-        if self._dropped(e) is not None:
+        if e.mimeData().hasUrls() and local_paths(e.mimeData()):    # 디스크는 drop 에서만 본다
             e.acceptProposedAction()
 
     def dropEvent(self, e):  # noqa: N802
-        p = self._dropped(e)
-        if p is not None:
+        paths = local_paths(e.mimeData())
+        if paths:
             e.acceptProposedAction()
-            self.open_path(p)
+            self._open_first_file(paths)
 
-    @staticmethod
-    def _dropped(e) -> Optional[Path]:
-        if not e.mimeData().hasUrls():
-            return None
-        for u in e.mimeData().urls():
-            p = Path(u.toLocalFile())
-            if p.is_file():
-                return p
-        return None
+    def _open_first_file(self, paths) -> None:
+        """경로 중 첫 사진 파일을 연다.  (A 가 백그라운드로 읽히는 중이라 B 는 같이 열지 않는다.)"""
+        for s in paths:
+            p = Path(s)
+            if p.suffix.lower() in _view_exts() and p.is_file():
+                self.open_path(p)
+                return
+        self._toast(_KO.DROP_WRONG_KIND_IMAGE, error=True)
+
+    def _on_paste_no_path(self, has_image: bool) -> None:
+        self._toast(_KO.DROP_NO_PATH_IMAGE if has_image else _KO.DROP_NOTHING_TO_PASTE, error=True)
 
     # ------------------------------------------------------------------
     # 임계값·비트

@@ -830,3 +830,29 @@ def test_tiles_get_thumbs_in_background_not_on_gui_thread(styled_qapp, tmp_path,
         assert seen and all(t is not main for t in seen)
     finally:
         dlg.close()
+
+
+def test_drop_and_paste_add_folders(styled_qapp, tmp_path, monkeypatch):
+    """끌어놓기·붙여넣기: 사진은 들어 있는 폴더로, 폴더는 그대로 · 못 쓰는 것은 안내(디스크는 drop 에서만)."""
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    from aoi_verification.app.ui import drop_paths
+    from PyQt6.QtCore import QMimeData, QUrl
+    dlg = T.ThresholdPreviewDialog()
+    try:
+        got = []
+        monkeypatch.setattr(dlg, "add_folders", lambda fs: got.append([Path(f) for f in fs]))
+        d1, d2 = tmp_path / "a", tmp_path / "b"
+        d1.mkdir(); d2.mkdir()
+        (d2 / "x.jpg").write_bytes(b"")
+        (tmp_path / "t.txt").write_text("x")
+        dlg._add_dropped([str(d1), str(d2 / "x.jpg")])
+        assert got == [[d1, d2]]
+        dlg._add_dropped([str(tmp_path / "t.txt")])
+        assert dlg.notice_label.text() == T._KO.DROP_WRONG_KIND_FOLDER and len(got) == 1
+        dlg._on_paste_no_path(True)
+        assert dlg.notice_label.text() == T._KO.DROP_NO_PATH_IMAGE
+        m = QMimeData()
+        m.setUrls([QUrl.fromLocalFile(str(d1))])
+        assert drop_paths.local_paths(m) == [str(d1)]
+    finally:
+        dlg.close()

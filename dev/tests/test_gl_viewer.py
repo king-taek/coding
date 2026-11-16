@@ -542,3 +542,29 @@ def test_compare_hover_works_from_either_canvas(dlg):
     QTest.mouseMove(dlg.canvas_b, _pt(dlg.canvas_b, 20, 30))
     _pump()
     assert "X 20" in dlg.status.text()
+
+
+def test_drop_and_paste_open_first_file_only(styled_qapp, tmp_path, monkeypatch):
+    """끌어놓기·붙여넣기: 첫 사진 파일 하나만 연다(A 가 백그라운드로 읽혀 B 는 같이 못 연다) · 못 쓰는 것은 안내."""
+    from PyQt6.QtCore import QMimeData, QUrl
+    from aoi_verification.app.ui import drop_paths
+    from aoi_verification.app.ui.widgets import gl_viewer_dialog as G
+    d = GlViewerDialog(None)
+    try:
+        opened = []
+        monkeypatch.setattr(d, "open_path", lambda p, **k: opened.append(p.name))
+        a, b = tmp_path / "a.tif", tmp_path / "b.png"
+        a.write_bytes(b"")
+        b.write_bytes(b"")
+        (tmp_path / "t.txt").write_text("x")
+        d._open_first_file([str(tmp_path / "t.txt"), str(a), str(b)])
+        assert opened == ["a.tif"]
+        d._open_first_file([str(tmp_path / "t.txt")])
+        assert d.toast.text() == G._KO.DROP_WRONG_KIND_IMAGE and opened == ["a.tif"]
+        d._on_paste_no_path(True)
+        assert d.toast.text() == G._KO.DROP_NO_PATH_IMAGE
+        m = QMimeData()
+        m.setUrls([QUrl.fromLocalFile(str(a))])
+        assert drop_paths.local_paths(m) == [str(a)]
+    finally:
+        d.close()

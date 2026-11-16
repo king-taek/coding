@@ -166,7 +166,7 @@ MULTI_VAL_DUPLICATE_FMT = "같은 폴더가 두 번 들어 있습니다:\n{path}
 SETUP_FOLDER_LABEL = "최상위 폴더"
 SETUP_MACHINE_LABEL = "호기 번호"
 SETUP_THRESHOLD_LABEL = "유사도 임계치"
-SETUP_FOLDER_PLACEHOLDER = "폴더를 선택해 주세요"
+SETUP_FOLDER_PLACEHOLDER = "폴더를 끌어다 놓거나 선택"
 SETUP_MACHINE_PLACEHOLDER = "호기"
 
 # ── 검증 단계 헤더 ─────────────────────────────────────────────────────────
@@ -1602,3 +1602,12 @@ GL_INFO_SCAN = "Scan 사진"
 GL_INFO_B = "B 사진"
 GL_COL_BELOW_PCT = "하한 이하 %"
 GL_COL_ABOVE_PCT = "상한 이상 %"
+
+# 끌어다 놓기 · 붙여넣기 (ui/drop_paths.py 를 쓰는 화면들의 짧은 안내)
+DROP_ONE_AT_A_TIME = "한 번에 하나씩 놓아 주세요"
+DROP_NO_PATH_IMAGE = "파일 위치가 없는 그림이에요 — 탐색기에서 파일을 복사해 붙여 넣어 주세요"
+DROP_NOT_FOUND = "찾을 수 없는 경로예요"
+DROP_WRONG_KIND_FOLDER = "폴더나 사진을 놓아 주세요"
+DROP_WRONG_KIND_IMAGE = "사진 파일을 놓아 주세요"
+DROP_SETUP_FULL = "기준·검증 칸이 모두 차 있어요 — 바꿀 칸 위에 놓아 주세요"
+DROP_NOTHING_TO_PASTE = "붙여 넣을 파일이 없어요 — 탐색기에서 파일을 복사해 주세요"
