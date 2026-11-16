@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import logging
 import struct
+
+import numpy as np
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -95,14 +97,20 @@ def load_all(folder: Path) -> tuple[tuple[Defect, ...], tuple[Defect, ...], str]
         _LOG.warning("Surface.flt 못 읽음: %s (%s)", folder, e)
         return (), (), f"못 읽음: {e}"
     good = {n for n, c in classes.items() if c.good}
+    # 한 번에 읽는다(numpy) — 레코드마다 struct 로 풀면 Defect 7만 개에 0.5초가 걸렸다(측정 2026-11-16).
+    names = list(fields)
+    dt = np.dtype({"names": names, "formats": ["<" + fields[k][1] for k in names],
+                   "offsets": [fields[k][0] for k in names], "itemsize": size})
+    arr = np.frombuffer(data, dtype=dt, count=len(data) // size)
+    col = {k: arr[k].tolist() for k in names}
+    recipe = col.get("recipe") or [None] * len(arr)
     kept, goods = [], []
-    for i in range(len(data) // size):
-        base = i * size
-        v = {k: struct.unpack_from("<" + f, data, base + off)[0] for k, (off, f) in fields.items()}
-        first = v["org"] or v["cls"]
-        d = Defect(i, zone_dir_for(v.get("recipe")), int(v["zone"]), int(first), int(v["cls"]),
-                   float(v["area"]), float(v["width"]), float(v["length"]),
-                   float(v["contrast"]), float(v["x"]), float(v["y"]))
+    for i, (cls, org, zone, rec, area, width, length, contrast, x, y) in enumerate(zip(
+            col["cls"], col["org"], col["zone"], recipe, col["area"], col["width"], col["length"],
+            col["contrast"], col["x"], col["y"])):
+        first = org or cls
+        d = Defect(i, zone_dir_for(rec), int(zone), int(first), int(cls), float(area), float(width),
+                   float(length), float(contrast), float(x), float(y))
         # 첫 분류가 Good(EDC Good: reclassify 20 · org 0).  Accept 는 지금 분류만 0 이라 Defect 로 남는다.
         (goods if abs(first) in good else kept).append(d)
     return tuple(kept), tuple(goods), ""

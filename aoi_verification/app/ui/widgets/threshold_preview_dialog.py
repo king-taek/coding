@@ -36,6 +36,8 @@ import base64
 import logging
 import math
 import os
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -68,6 +70,7 @@ from .no_wheel_slider import NoWheelSlider
 _LOG = logging.getLogger("aoi.threshold")
 _KO = i18n.KO
 
+LOAD_WORKERS = 6            # 여러 웨이퍼를 동시에 읽는 수(NAS 왕복 지연을 겹친다)
 LIVE_TILES_MAX = 100        # 이 수 이하일 때만 슬라이더를 끄는 동안 사진을 바로 바꾼다(현택님 2026-11-14)
 PAGE_TILES = 60             # 처음 보이는 사진 수 — 나머지는 [더 보기]
 TILE_PX = 132
@@ -119,7 +122,9 @@ def load_wafer(folder: Path, report=lambda msg, done=0, total=0: None, stop=lamb
     ``rich`` 가 거짓이면 RichSurface 를 읽지 않는다 — 여러 장을 합칠 때는 내리기를 하지 않는다
     (웨이퍼당 후보 약 100만 개라 여러 장이면 슬라이더마다 수천만 개를 다시 센다)."""
     report(_KO.THRESH_PREVIEW_LOADING)
+    t0 = time.perf_counter()
     defects, goods, note = P.load_all(folder)
+    t1 = time.perf_counter()
     w = WaferData(folder, defects, goods, note=note)
     if note:
         return w
@@ -145,6 +150,8 @@ def load_wafer(folder: Path, report=lambda msg, done=0, total=0: None, stop=lamb
         return abs_coord.absolute_xy(path)
 
     w.photos = {(0, i): ph for i, ph in P.match_photos(defects + goods, photos, xy_of, GEOMETRY_MATCH_TOL).items()}
+    _LOG.info("Overkill 튜닝 읽기 %s: Defect %d개 %.2f초 · 사진 %d장 짝 %.2f초", folder.name, len(defects),
+              t1 - t0, len(photos), time.perf_counter() - t1)
     if rich and (folder / RS.RICH_FILE).is_file():
         report(_KO.THRESH_PREVIEW_RICH)
         w.rich = RS.load_rich(folder, lambda done, total: report(_KO.THRESH_PREVIEW_RICH, done, total), stop)
@@ -212,41 +219,65 @@ def merge_wafers(ws: list) -> WaferData:
 
 
 class _Load(QThread):
+    """폴더들을 읽어 합친다.  웨이퍼 한 장이면 화면을 먼저 띄우고 RichSurface 는 그 뒤에 읽는다."""
+
     class _Signals(QObject):
         progress = pyqtSignal(int, int, int, str)     # token, done, total, msg
         done = pyqtSignal(int, object)                # token, WaferData | None(실패)
+        rich_progress = pyqtSignal(int, int, int)     # token, done, total
+        rich = pyqtSignal(int, object)                # token, RichSurface 후보 값({} = 없음)
 
     def __init__(self, token: int, roots: list, cache: dict) -> None:
         super().__init__()
         self._token, self._roots = token, list(roots)
-        self.cache = dict(cache)          # 폴더 → WaferData — '폴더 추가' 때 앞에서 읽은 것은 다시 안 읽는다
+        self.cache = dict(cache)          # 웨이퍼 폴더 → WaferData — '폴더 추가' 때 앞에서 읽은 것은 다시 안 읽는다
         self.signals = self._Signals()
         _LIVE.add(self)
         self.finished.connect(lambda: _LIVE.discard(self))
 
     def run(self) -> None:      # type: ignore[override]
         t = self._token
+        stop = self.isInterruptionRequested
+        folders: list = []
         try:
             folders = wafer_folders(self._roots)
-            ws = []
-            for i, folder in enumerate(folders, start=1):
-                if self.isInterruptionRequested():
+            todo = [f for f in folders if f not in self.cache]
+            if len(folders) == 1 and todo:
+                got = load_wafer(folders[0], lambda msg, done=0, total=0:
+                                 self.signals.progress.emit(t, done, total, msg), stop, rich=False)
+                if stop():
                     return
-                head = _KO.OVERKILL_WAFER_N.format(i=i, n=len(folders)) if len(folders) > 1 else ""
-                key = (folder, len(folders) == 1)          # 한 장일 때만 RichSurface 를 읽는다
-                if key not in self.cache:
-                    got = load_wafer(folder, lambda msg, done=0, total=0, h=head:
-                                     self.signals.progress.emit(t, done, total, h + msg),
-                                     self.isInterruptionRequested, rich=key[1])
-                    if self.isInterruptionRequested():
-                        return                  # 중간에 끊긴 결과(RichSurface 빈 값 등)는 캐시에 남기지 않는다
-                    self.cache[key] = got
-                ws.append(self.cache[key])
+                self.cache[folders[0]] = got
+            elif todo:
+                # 여러 장은 동시에 읽는다 — NAS 는 파일마다 왕복 지연이 대부분이라 한 장씩이면 그만큼 기다린다.
+                self.signals.progress.emit(t, 0, len(todo), _KO.OVERKILL_LOADING_WAFERS.format(i=0, n=len(todo)))
+                with ThreadPoolExecutor(max_workers=min(LOAD_WORKERS, len(todo))) as pool:
+                    futs = {pool.submit(load_wafer, f, stop=stop, rich=False): f for f in todo}
+                    for i, fut in enumerate(as_completed(futs), start=1):
+                        if stop():
+                            for f in futs:
+                                f.cancel()
+                            return              # 끊긴 결과는 캐시에 남기지 않는다
+                        self.cache[futs[fut]] = fut.result()
+                        self.signals.progress.emit(t, i, len(todo),
+                                                   _KO.OVERKILL_LOADING_WAFERS.format(i=i, n=len(todo)))
+            ws = [self.cache[f] for f in folders]
             w = merge_wafers(ws) if ws else WaferData(Path(self._roots[0]), note=_KO.OVERKILL_NO_WAFER)
         except Exception:       # noqa: BLE001 — 실패를 삼키지 않고 화면에 알린다
             _LOG.exception("Overkill 튜닝 읽기 실패: %s", self._roots)
             w = None
         self.signals.done.emit(t, w)
+        if w is None or w.note or len(folders) != 1:
+            return
+        base = self.cache[folders[0]]
+        if not base.rich and (folders[0] / RS.RICH_FILE).is_file():
+            t0 = time.perf_counter()
+            rich = RS.load_rich(folders[0], lambda done, total: self.signals.rich_progress.emit(t, done, total), stop)
+            if stop():
+                return
+            base.rich = rich
+            _LOG.info("Overkill 튜닝 RichSurface %.1f초: %s", time.perf_counter() - t0, folders[0])
+        self.signals.rich.emit(t, base.rich)
 
 
 def zone_label(zone_dir: str, zone: R.Zone | None, zone_id: int) -> tuple[str, str]:
@@ -458,6 +489,7 @@ class ThresholdPreviewDialog(QDialog):
         self._scans: dict = {}            # 키 → Scan 에서 잘라 온 QImage
         self._scan_thread: Optional[_ScanLoad] = None
         self._scan_token = 0
+        self._drop_cache: dict = {}       # (Zone, 바꾼 값) → 빠지는 Defect — 같은 기준을 다시 세지 않는다
         self._ov: dict = {}               # {(zone_dir, zone, Classify, FeatureType): 새 LowValue(px)}
         self._rich_base: dict = {}        # (zone_dir, zone) → 레시피 값 RichSurface 통과 배열(캐시)
         self._zone: Optional[tuple] = None
@@ -498,6 +530,9 @@ class ThresholdPreviewDialog(QDialog):
         self.check_label = QLabel("", self)
         self.check_label.setProperty("role", "muted")
         top.addWidget(self.check_label)
+        self.rich_label = QLabel("", self)           # 화면을 띄운 뒤 RichSurface(내리기)를 읽는 동안만
+        self.rich_label.setProperty("role", "muted")
+        top.addWidget(self.rich_label)
         top.addSpacing(12)
         self._mode_group = QButtonGroup(self)
         self.mode_btns = {}
@@ -662,9 +697,28 @@ class ThresholdPreviewDialog(QDialog):
         th = _Load(token, self._roots, self._cache)
         th.signals.progress.connect(self._on_progress)
         th.signals.done.connect(self._on_loaded)
+        th.signals.rich_progress.connect(self._on_rich_progress)
+        th.signals.rich.connect(self._on_rich)
         th.finished.connect(lambda t=th: self._cache.update(t.cache))
+        self.rich_label.setText("")
         self._thread = th
         th.start()
+
+    def _on_rich_progress(self, token: int, done: int, total: int) -> None:
+        if token == self._token:
+            self.rich_label.setText(_KO.OVERKILL_RICH_PROGRESS.format(p=int(100 * done / total) if total else 0))
+
+    def _on_rich(self, token: int, rich) -> None:
+        """뒤에서 읽은 RichSurface 를 올린다 — 바꾼 값은 그대로, 기준 칸만 다시 그려 내리기를 연다."""
+        if token != self._token:
+            return
+        self.rich_label.setText("")
+        if not rich or self._w is None or self._w.note:
+            return
+        self._w.rich = rich
+        self._rich_base = {}
+        self._render_rules()
+        self._render_summary()
 
     def _render_chips(self) -> None:
         self._clear(self._chips)
@@ -707,6 +761,7 @@ class ThresholdPreviewDialog(QDialog):
         self._w = w
         self._ov = dict(self._ov) if keep_ov else {}
         self._rich_base = {}
+        self._drop_cache = {}
         self._picked = {key_of(d): d for d in (w.defects if w else ())
                         if (_folder_of(w, d), d.index) in kept_picks}
         self._rec_zones = {(d.zone_dir, d.zone) for d in self._picked.values()}
@@ -835,13 +890,17 @@ class ThresholdPreviewDialog(QDialog):
         return RS.count_new(cand, zone, key, self._ov, self._rich_base[key])
 
     def dropped(self, key=None) -> list:
-        """지금 기준으로 빠지는 Defect — ``[(Defect, (Classify, FeatureType))]``."""
-        out = []
-        for d in self._in_zone(key):
-            why = P.why_dropped(d, self._w.zones, self._ov)
-            if why is not None:
-                out.append((d, why))
-        return out
+        """지금 기준으로 빠지는 Defect — ``[(Defect, (Classify, FeatureType))]``.
+
+        한 번 그릴 때 같은 계산을 여러 번 부른다(Zone 줄 · 숫자 · 사진) — 같은 기준이면 한 번만 센다."""
+        key = key or self._zone
+        sig = (key, frozenset(self._ov.items()))
+        if sig not in self._drop_cache:
+            if len(self._drop_cache) > 64:
+                self._drop_cache.clear()
+            self._drop_cache[sig] = [(d, why) for d in self._in_zone(key)
+                                     if (why := P.why_dropped(d, self._w.zones, self._ov)) is not None]
+        return self._drop_cache[sig]
 
     # ------------------------------------------------------------------ 그리기
     def _render(self) -> None:
