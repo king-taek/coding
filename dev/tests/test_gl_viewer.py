@@ -216,14 +216,16 @@ def test_threshold_order_is_kept(dlg):
     assert dlg.lo_spin.value() == dlg._lo and dlg.hi_spin.value() == dlg._hi
 
 
-def test_8bit_image_has_no_bit_choice_16bit_has(styled_qapp):
+def test_bit_depth_is_auto_detected_without_range_choice(styled_qapp):
+    from PyQt6.QtWidgets import QComboBox
     d8 = _make(styled_qapp, bits=8)
-    assert not d8.bits_combo.isEnabled() and d8._levels() == 256
     d16 = _make(styled_qapp, bits=16)
-    assert d16.bits_combo.isEnabled()
-    i12 = [i for i in range(d16.bits_combo.count()) if d16.bits_combo.itemData(i) == 12][0]
-    d16.bits_combo.setCurrentIndex(i12)
-    assert d16._levels() == 4096 and len(d16._full_hist) == 4096 and d16._hi <= 4095
+    for d in (d8, d16):
+        assert not hasattr(d, "bits_combo")
+        assert d.findChildren(QComboBox) == []
+    assert d8._bits == 8 and d8._levels() == 256
+    assert d16._bits == d16._gl.bits
+    assert d16._levels() == 1 << d16._gl.bits and len(d16._full_hist) == d16._levels()
     for d in (d8, d16):
         d.close()
 
