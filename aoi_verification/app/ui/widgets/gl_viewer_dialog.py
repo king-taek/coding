@@ -42,7 +42,6 @@ _LOG = logging.getLogger("aoi.gl")
 _KO = i18n.KO
 
 _TOOL_LABEL = {"move": _KO.GL_TOOL_MOVE, R.RECT: _KO.GL_TOOL_RECT, R.CIRCLE: _KO.GL_TOOL_CIRCLE}
-_BITS_CHOICES = (8, 10, 12, 14, 16)
 _WARN_TEXT = {loader.W_COLOR: _KO.GL_WARN_COLOR, loader.W_JPEG: _KO.GL_WARN_JPEG,
               loader.W_HUGE: _KO.GL_WARN_HUGE}
 
@@ -318,15 +317,6 @@ class GlViewerDialog(QDialog):
         self.thr_note = QLabel("", self)
         self.thr_note.setProperty("role", "muted")
         col.addWidget(self.thr_note)
-        r2 = QHBoxLayout()
-        self.bits_combo = QComboBox(self)
-        self.bits_combo.setAccessibleName(_KO.GL_BITS)
-        self.bits_combo.setMinimumWidth(130)
-        self.bits_combo.currentIndexChanged.connect(self._on_bits_changed)
-        r2.addWidget(QLabel(_KO.GL_BITS, self))
-        r2.addWidget(self.bits_combo)
-        r2.addStretch(1)
-        col.addLayout(r2)
         self.scope = OptionGroup([(analysis.SCOPE_ALL, _KO.GL_SCOPE_ALL),
                                   (analysis.SCOPE_ROI, _KO.GL_SCOPE_ROI),
                                   (analysis.SCOPE_OFF, _KO.GL_SCOPE_OFF)],
@@ -355,7 +345,6 @@ class GlViewerDialog(QDialog):
         self.hist_info.setProperty("role", "mono")
         self.hist.hoverText.connect(self.hist_info.setText)
         col.addWidget(self.hist_info)
-        self._sync_bits_combo(8)
         return host
 
     def _section(self, text: str) -> QLabel:
@@ -453,7 +442,6 @@ class GlViewerDialog(QDialog):
         self.canvas.rois.reset()
         self._defect_id = None
         self._bits = v.image.bits
-        self._sync_bits_combo(self._bits)
         self._full_hist = analysis.histogram(self._gl.data, self._bits)
         if self._gl_b is not None:
             self._full_hist_b = analysis.histogram(self._gl_b.data, self._bits)
@@ -637,32 +625,6 @@ class GlViewerDialog(QDialog):
             self._set_thresholds(gl, self._hi, "lo")
         else:
             self._set_thresholds(self._lo, gl, "hi")
-
-    def _sync_bits_combo(self, auto_bits: int) -> None:
-        self.bits_combo.blockSignals(True)
-        self.bits_combo.clear()
-        if auto_bits == 8:
-            choices = (8,)
-        else:
-            choices = tuple(b for b in _BITS_CHOICES if b >= 10)
-        for b in choices:
-            self.bits_combo.addItem(
-                (_KO.GL_BITS_AUTO_FMT if b == auto_bits else _KO.GL_BITS_FMT).format(bits=b), b)
-        self.bits_combo.setCurrentIndex(max(0, choices.index(auto_bits)) if auto_bits in choices else 0)
-        self.bits_combo.setEnabled(len(choices) > 1)
-        self.bits_combo.blockSignals(False)
-
-    def _on_bits_changed(self, _i: int) -> None:
-        """16 bit 사진의 GL 범위(10/12/14/16)를 바꾼다 — 분석 범위·판정 기준이 함께 바뀐다."""
-        b = self.bits_combo.currentData()
-        if self._gl is None or b is None or int(b) == self._bits:
-            return
-        self._bits = int(b)
-        self._full_hist = analysis.histogram(self._gl.data, self._bits)
-        self._set_range_widgets()
-        self._lo, self._hi = analysis.auto_thresholds(self._full_hist)
-        self._sync_spins()
-        self._schedule_refresh()
 
     # ------------------------------------------------------------------
     # 갱신
