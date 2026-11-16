@@ -172,6 +172,11 @@ def key_of(d: P.Defect) -> tuple:
     return d.wafer, d.index
 
 
+def _folder_of(w: WaferData, d: P.Defect) -> Path:
+    """그 Defect 가 나온 웨이퍼 폴더."""
+    return w.folders[d.wafer] if w.folders else w.folder
+
+
 def merge_wafers(ws: list) -> WaferData:
     """웨이퍼 여러 장을 한 집합으로 — Zone 기준 · 픽셀 크기가 같은 웨이퍼 중 가장 많은 무리만 합친다.
 
@@ -230,9 +235,12 @@ class _Load(QThread):
                 head = _KO.OVERKILL_WAFER_N.format(i=i, n=len(folders)) if len(folders) > 1 else ""
                 key = (folder, len(folders) == 1)          # 한 장일 때만 RichSurface 를 읽는다
                 if key not in self.cache:
-                    self.cache[key] = load_wafer(folder, lambda msg, done=0, total=0, h=head:
-                                                 self.signals.progress.emit(t, done, total, h + msg),
-                                                 self.isInterruptionRequested, rich=key[1])
+                    got = load_wafer(folder, lambda msg, done=0, total=0, h=head:
+                                     self.signals.progress.emit(t, done, total, h + msg),
+                                     self.isInterruptionRequested, rich=key[1])
+                    if self.isInterruptionRequested():
+                        return                  # 중간에 끊긴 결과(RichSurface 빈 값 등)는 캐시에 남기지 않는다
+                    self.cache[key] = got
                 ws.append(self.cache[key])
             w = merge_wafers(ws) if ws else WaferData(Path(self._roots[0]), note=_KO.OVERKILL_NO_WAFER)
         except Exception:       # noqa: BLE001 — 실패를 삼키지 않고 화면에 알린다
@@ -294,6 +302,7 @@ class _Tile(QFrame):
         super().__init__(parent)
         self.setProperty("role", "card")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)   # 덜 찬 줄에서 가로로 늘어나지 않게
         self.picked = picked
         lay = QVBoxLayout(self)
         lay.setContentsMargins(4, 4, 4, 4)
@@ -603,12 +612,18 @@ class ThresholdPreviewDialog(QDialog):
                                                          note=_KO.THRESH_PREVIEW_FAILED))
 
     def set_wafer(self, w: Optional[WaferData]) -> None:
-        """읽은 웨이퍼(여러 장이면 합친 것)를 화면에 올린다(테스트는 스레드 없이 이것만 부른다)."""
+        """읽은 웨이퍼(여러 장이면 합친 것)를 화면에 올린다(테스트는 스레드 없이 이것만 부른다).
+
+        폴더를 더하거나 빼도 남아 있는 웨이퍼의 꼭 잡기와, Zone 기준이 같으면 바꾼 값도 이어 간다."""
+        prev = self._w
+        kept_picks = {(_folder_of(prev, d), d.index) for d in self._picked.values()} if prev else set()
+        keep_ov = prev is not None and w is not None and not w.note and prev.zones == w.zones
         self._w = w
-        self._ov = {}
+        self._ov = dict(self._ov) if keep_ov else {}
         self._rich_base = {}
-        self._picked = {}
-        self._rec_zones = set()
+        self._picked = {key_of(d): d for d in (w.defects if w else ())
+                        if (_folder_of(w, d), d.index) in kept_picks}
+        self._rec_zones = {(d.zone_dir, d.zone) for d in self._picked.values()}
         self._open = None
         self._shown = PAGE_TILES
         self._tab = "keep" if self._mode == "auto" else "drop"

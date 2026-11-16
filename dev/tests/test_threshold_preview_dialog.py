@@ -235,3 +235,26 @@ def test_lot_folder_merges_wafers_and_skips_other_recipe(tmp_path):
     assert len(m.defects) == 28 and len({T.key_of(d) for d in m.defects}) == 28
     assert sorted(m.photos) == sorted(T.key_of(d) for d in m.defects)
     assert m.rich == {}
+
+
+def test_adding_a_wafer_keeps_picks_and_values(styled_qapp, tmp_path):
+    """폴더를 더해도 앞 웨이퍼에서 고른 꼭 잡기와 추천값은 그대로다(같은 Zone 기준).  타일은 가로로 늘어나지 않는다."""
+    from PyQt6.QtWidgets import QSizePolicy
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    w1 = _wafer_with_photos(tmp_path)
+    w2 = tmp_path / "27125535EWA6"
+    shutil.copytree(w1, w2)
+    one = T.merge_wafers([T.load_wafer(w1)])
+    dlg = T.ThresholdPreviewDialog()
+    try:
+        dlg.set_wafer(one)
+        dlg.set_mode("auto")
+        d = max(dlg._in_zone(), key=lambda x: x.area)
+        dlg.toggle_pick(T.key_of(d))
+        ov = dict(dlg._ov)
+        assert ov
+        dlg.set_wafer(T.merge_wafers([T.load_wafer(w1), T.load_wafer(w2)]))
+        assert list(dlg._picked) == [(0, d.index)] and dlg._ov == ov
+        assert dlg.tiles[(0, d.index)].sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Fixed
+    finally:
+        dlg.deleteLater()
