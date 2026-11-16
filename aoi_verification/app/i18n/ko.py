@@ -1239,7 +1239,6 @@ OVERKILL_SCAN_ASK_ALL = "컬러 사진이 없습니다 — 스캔 사진으로 �
 OVERKILL_SCAN_YES = "스캔 사진으로 보기"
 OVERKILL_SCAN_NO = "아니요"
 OVERKILL_SCAN_TAG = "Scan"
-OVERKILL_SCAN_LOADING = "스캔 사진 자르는 중"
 OVERKILL_SCAN_PROGRESS = "스캔 사진 불러오는 중 {done}/{total}"
 OVERKILL_SCAN_WAIT = "불러오는 중…"
 OVERKILL_LOADING_WAFERS = "Defect 읽는 중 · 웨이퍼 {i}/{n}"
