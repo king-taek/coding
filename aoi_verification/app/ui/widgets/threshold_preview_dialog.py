@@ -1,4 +1,11 @@
-"""Threshold 미리보기 — 웨이퍼 폴더 하나에서 Zone 기준을 올리면 Defect 가 몇 개 빠지는지 본다.
+"""Overkill 튜닝(옛 이름 Threshold 미리보기) — Zone 기준을 올리면 Defect 가 몇 개 빠지는지 본다.
+
+현택님 요청(2026-11-16):
+  * 폴더는 웨이퍼 폴더 또는 LOT 폴더(바로 아래 웨이퍼들), 여러 개를 [+ 폴더] · 끌어다 놓기로 더한다.
+    Zone 기준 · 픽셀 크기가 같은 웨이퍼 중 가장 많은 무리를 합친다(:func:`merge_wafers`).
+  * [자동 추천]: 사진을 누르면 '꼭 잡기' — 고른 것을 전부 남기며 나머지를 많이 빼는 기준을
+    :func:`app.threshold.preview.recommend` 로 계산해 바로 채운다.  고른 것이 있는 Zone 만 바꾼다.
+    [직접 조정]으로 넘어가도 값은 그대로라 다듬을 수 있고, 고른 것이 빠지면 '놓침 n' 이 빨갛게 뜬다.
 
 계산은 전부 :mod:`app.threshold` 코어가 한다(화면은 숫자를 다시 만들지 않는다).
 
@@ -28,8 +35,9 @@ from __future__ import annotations
 import base64
 import logging
 import math
+import os
 from datetime import datetime
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Optional
 
@@ -42,8 +50,9 @@ from PyQt6.QtWidgets import (QApplication, QButtonGroup, QDialog, QFileDialog, Q
 from ... import i18n
 from ...coords import abs_coord
 from ...coords.geometry import GEOMETRY_MATCH_TOL
+from ...coords import surface_flt as _flt
 from ...coords.pixel_size import scan_pixel_size_xy
-from ...models.slot import _list_images
+from ...models.slot import _list_images, list_slot_dirs
 from ...threshold import preview as P
 from ...threshold import report as RP
 from ...threshold import rich as RS
@@ -85,6 +94,8 @@ class WaferData:
     note: str = ""
     misses: int = 0
     rich: dict = field(default_factory=dict)        # (zone_dir, zone) → RichSurface 후보 값 — 내리기용
+    folders: tuple = ()               # 합친 웨이퍼 폴더들(하나면 folder 하나)
+    skipped: tuple = ()               # 못 합친 웨이퍼 폴더 — 못 읽었거나 Zone 기준 · 픽셀 크기가 첫 웨이퍼와 다름
 
     def to_um(self, feature: int, v: float) -> float:
         if feature == R.FEATURE_AREA:
@@ -101,8 +112,12 @@ class WaferData:
         return v
 
 
-def load_wafer(folder: Path, report=lambda msg, done=0, total=0: None, stop=lambda: False) -> WaferData:
-    """웨이퍼 폴더 하나를 읽는다(워커 스레드에서).  못 읽은 것은 ``note`` 에 적고 raise 하지 않는다."""
+def load_wafer(folder: Path, report=lambda msg, done=0, total=0: None, stop=lambda: False,
+               rich: bool = True) -> WaferData:
+    """웨이퍼 폴더 하나를 읽는다(워커 스레드에서).  못 읽은 것은 ``note`` 에 적고 raise 하지 않는다.
+
+    ``rich`` 가 거짓이면 RichSurface 를 읽지 않는다 — 여러 장을 합칠 때는 내리기를 하지 않는다
+    (웨이퍼당 후보 약 100만 개라 여러 장이면 슬라이더마다 수천만 개를 다시 센다)."""
     report(_KO.THRESH_PREVIEW_LOADING)
     defects, goods, note = P.load_all(folder)
     w = WaferData(folder, defects, goods, note=note)
@@ -129,11 +144,71 @@ def load_wafer(folder: Path, report=lambda msg, done=0, total=0: None, stop=lamb
             report(_KO.THRESH_PREVIEW_PHOTOS, seen, total)
         return abs_coord.absolute_xy(path)
 
-    w.photos = P.match_photos(defects + goods, photos, xy_of, GEOMETRY_MATCH_TOL)
-    if (folder / RS.RICH_FILE).is_file():
+    w.photos = {(0, i): ph for i, ph in P.match_photos(defects + goods, photos, xy_of, GEOMETRY_MATCH_TOL).items()}
+    if rich and (folder / RS.RICH_FILE).is_file():
         report(_KO.THRESH_PREVIEW_RICH)
         w.rich = RS.load_rich(folder, lambda done, total: report(_KO.THRESH_PREVIEW_RICH, done, total), stop)
     return w
+
+
+def wafer_folders(paths) -> list:
+    """고른 폴더들 → 웨이퍼 폴더 목록.  Surface.flt 가 있으면 그 폴더, 없으면 바로 아래에서 Surface.flt 가 든
+    폴더들(LOT 폴더).  같은 폴더는 한 번만."""
+    out: list = []
+    seen: set = set()
+    for p in map(Path, paths):
+        found = [p] if _flt._find_flt(p) is not None else [
+            d for _n, d in sorted(list_slot_dirs(p).items()) if _flt._find_flt(d) is not None]
+        for d in found:
+            real = os.path.normcase(str(d.resolve()))   # LOT 과 그 안의 웨이퍼를 함께 골라도 한 번만
+            if real not in seen:
+                seen.add(real)
+                out.append(d)
+    return out
+
+
+def key_of(d: P.Defect) -> tuple:
+    """Defect 의 키 — 여러 웨이퍼를 합치면 index 가 겹치므로 (웨이퍼, index)."""
+    return d.wafer, d.index
+
+
+def _folder_of(w: WaferData, d: P.Defect) -> Path:
+    """그 Defect 가 나온 웨이퍼 폴더."""
+    return w.folders[d.wafer] if w.folders else w.folder
+
+
+def merge_wafers(ws: list) -> WaferData:
+    """웨이퍼 여러 장을 한 집합으로 — Zone 기준 · 픽셀 크기가 같은 웨이퍼 중 가장 많은 무리만 합친다.
+
+    기준이 다르면(레시피가 다르면) 같은 슬라이더 값으로 셀 수 없어 빼고 ``skipped`` 에 적는다.
+    Defect 에는 몇 번째 웨이퍼인지(``wafer``)를 붙이고 사진 짝 키도 (웨이퍼, index) 로 바꾼다.
+    RichSurface(내리기)는 한 장일 때만 쓴다."""
+    good = [w for w in ws if not w.note]
+    if not good:
+        return WaferData(ws[0].folder, note=ws[0].note, skipped=tuple(w.folder for w in ws))
+    groups: list = []
+    for w in good:
+        g = next((g for g in groups if g[0].zones == w.zones
+                  and all(abs(a - b) < 1e-6 for a, b in zip(g[0].px, w.px))), None)
+        if g is None:
+            groups.append([w])
+        else:
+            g.append(w)
+    same = max(groups, key=len)
+    base = same[0]
+    out = WaferData(base.folder, zones=base.zones, classes=base.classes, px=base.px,
+                    folders=tuple(w.folder for w in same),
+                    skipped=tuple(w.folder for w in ws if not any(w is x for x in same)),
+                    rich=base.rich if len(same) == 1 else {})
+    defects, goods = [], []
+    for i, w in enumerate(same):
+        ds = {d.index: replace(d, wafer=i) for d in w.defects + w.goods}
+        defects += [ds[d.index] for d in w.defects]
+        goods += [ds[d.index] for d in w.goods]
+        out.photos.update({(i, k[1]): ph for k, ph in w.photos.items()})
+        out.misses += w.misses
+    out.defects, out.goods = tuple(defects), tuple(goods)
+    return out
 
 
 class _Load(QThread):
@@ -141,9 +216,10 @@ class _Load(QThread):
         progress = pyqtSignal(int, int, int, str)     # token, done, total, msg
         done = pyqtSignal(int, object)                # token, WaferData | None(실패)
 
-    def __init__(self, token: int, folder: Path) -> None:
+    def __init__(self, token: int, roots: list, cache: dict) -> None:
         super().__init__()
-        self._token, self._folder = token, folder
+        self._token, self._roots = token, list(roots)
+        self.cache = dict(cache)          # 폴더 → WaferData — '폴더 추가' 때 앞에서 읽은 것은 다시 안 읽는다
         self.signals = self._Signals()
         _LIVE.add(self)
         self.finished.connect(lambda: _LIVE.discard(self))
@@ -151,10 +227,24 @@ class _Load(QThread):
     def run(self) -> None:      # type: ignore[override]
         t = self._token
         try:
-            w = load_wafer(self._folder, lambda msg, done=0, total=0:
-                           self.signals.progress.emit(t, done, total, msg), self.isInterruptionRequested)
+            folders = wafer_folders(self._roots)
+            ws = []
+            for i, folder in enumerate(folders, start=1):
+                if self.isInterruptionRequested():
+                    return
+                head = _KO.OVERKILL_WAFER_N.format(i=i, n=len(folders)) if len(folders) > 1 else ""
+                key = (folder, len(folders) == 1)          # 한 장일 때만 RichSurface 를 읽는다
+                if key not in self.cache:
+                    got = load_wafer(folder, lambda msg, done=0, total=0, h=head:
+                                     self.signals.progress.emit(t, done, total, h + msg),
+                                     self.isInterruptionRequested, rich=key[1])
+                    if self.isInterruptionRequested():
+                        return                  # 중간에 끊긴 결과(RichSurface 빈 값 등)는 캐시에 남기지 않는다
+                    self.cache[key] = got
+                ws.append(self.cache[key])
+            w = merge_wafers(ws) if ws else WaferData(Path(self._roots[0]), note=_KO.OVERKILL_NO_WAFER)
         except Exception:       # noqa: BLE001 — 실패를 삼키지 않고 화면에 알린다
-            _LOG.exception("Threshold 미리보기 읽기 실패: %s", self._folder)
+            _LOG.exception("Overkill 튜닝 읽기 실패: %s", self._roots)
             w = None
         self.signals.done.emit(t, w)
 
@@ -202,14 +292,18 @@ class _Hist(QWidget):
 
 
 class _Tile(QFrame):
-    """사진 한 장 + 캡션.  누르면 ``clicked``."""
+    """사진 한 장 + 캡션.  누르면 ``clicked``.  자동 모드에서는 오른쪽 위 작은 버튼이 값 펼치기(``detail``)다."""
 
     clicked = pyqtSignal()
+    detail = pyqtSignal()
 
-    def __init__(self, photo: Path, caption: str, value: str, size: int, parent=None) -> None:
+    def __init__(self, photo: Path, caption: str, value: str, size: int, parent=None,
+                 picked: bool = False, detail_btn: bool = False) -> None:
         super().__init__(parent)
         self.setProperty("role", "card")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)   # 덜 찬 줄에서 가로로 늘어나지 않게
+        self.picked = picked
         lay = QVBoxLayout(self)
         lay.setContentsMargins(4, 4, 4, 4)
         lay.setSpacing(3)
@@ -218,6 +312,22 @@ class _Tile(QFrame):
         pic.setAlignment(Qt.AlignmentFlag.AlignCenter)
         pic.setPixmap(image_io.cached_tile_pixmap(photo, size))
         lay.addWidget(pic)
+        self.badge = QLabel("✓", pic)                  # 꼭 잡기 표시
+        self.badge.setFixedSize(24, 24)
+        self.badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.badge.setStyleSheet(f"background: {theme.ACCENT}; color: {theme.ON_ACCENT}; border-radius: 12px;"
+                                 " font-weight: 700;")
+        self.badge.move(6, 6)
+        self.badge.setVisible(picked)
+        self.detail_btn = None
+        if detail_btn:
+            self.detail_btn = QLabel("⋯", pic)          # 누르면 값 펼치기 — 타일 본체 누름(고르기)과 따로
+            self.detail_btn.setFixedSize(26, 22)
+            self.detail_btn.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.detail_btn.setToolTip(_KO.OVERKILL_DETAIL_TIP)
+            self.detail_btn.setStyleSheet(f"background: {theme.PANEL}; color: {theme.INK}; border-radius: 4px;"
+                                          " font-weight: 700;")
+            self.detail_btn.move(size - 32, 6)
         row = QHBoxLayout()
         row.setSpacing(4)
         cap = QLabel(caption, self)
@@ -231,11 +341,17 @@ class _Tile(QFrame):
         lay.addLayout(row)
 
     def set_open(self, on: bool) -> None:
-        self.setStyleSheet(f"QFrame[role='card'] {{ border: 2px solid {theme.ACCENT}; }}" if on else "")
+        if self.picked:
+            self.setStyleSheet(f"QFrame[role='card'] {{ border: 2px solid {theme.ACCENT};"
+                               f" background: {theme.ACCENT_TINT}; }}")
+        else:
+            self.setStyleSheet(f"QFrame[role='card'] {{ border: 2px solid {theme.ACCENT}; }}" if on else "")
 
     def mousePressEvent(self, e):   # noqa: N802
         if e.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit()
+            hit = self.detail_btn is not None and self.detail_btn.geometry().contains(
+                self.detail_btn.parentWidget().mapFrom(self, e.position().toPoint()))
+            (self.detail if hit else self.clicked).emit()
         super().mousePressEvent(e)
 
 
@@ -261,12 +377,18 @@ def _data_uri(photo: Path) -> str:
 
 
 class ThresholdPreviewDialog(QDialog):
-    """왼쪽 메뉴 'Threshold 미리보기' 화면."""
+    """왼쪽 메뉴 'Overkill 튜닝' 화면."""
 
     def __init__(self, parent=None, folder: Optional[Path] = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(_KO.THRESH_PREVIEW_TITLE)
+        self.setAcceptDrops(True)
         self._w: Optional[WaferData] = None
+        self._roots: list = []            # 고른 폴더(웨이퍼 또는 LOT) — 칩 하나씩
+        self._cache: dict = {}            # (웨이퍼 폴더, RichSurface 읽음) → WaferData
+        self._mode = "manual"             # manual(직접 조정) | auto(자동 추천)
+        self._picked: dict = {}           # 꼭 잡을 Defect — key_of(d) → Defect
+        self._rec_zones: set = set()      # 마지막 추천이 바꾼 Zone — 고름이 바뀌면 이 Zone 들만 다시 계산
         self._ov: dict = {}               # {(zone_dir, zone, Classify, FeatureType): 새 LowValue(px)}
         self._rich_base: dict = {}        # (zone_dir, zone) → 레시피 값 RichSurface 통과 배열(캐시)
         self._zone: Optional[tuple] = None
@@ -276,11 +398,11 @@ class ThresholdPreviewDialog(QDialog):
         self._token = 0
         self._thread: Optional[_Load] = None
         self._picker = FolderPicker(self)
-        self._picker.picked.connect(lambda p: p and self.show_folder(Path(p)))
+        self._picker.picked.connect(lambda p: p and self.add_folders([Path(p)]))
         self._build()
         self._loading = LoadingOverlay(self)
         if folder:
-            self.show_folder(Path(folder))
+            self.set_folders([Path(folder)])
         else:
             self._render()
 
@@ -291,17 +413,33 @@ class ThresholdPreviewDialog(QDialog):
         root.setSpacing(12)
         top = QHBoxLayout()
         top.setSpacing(10)
-        self.pick_btn = NeonButton(_KO.THRESH_PREVIEW_PICK, role="primary")
+        self.pick_btn = NeonButton(_KO.OVERKILL_ADD_FOLDER, role="primary")
+        self.pick_btn.setToolTip(_KO.OVERKILL_ADD_FOLDER_TIP)
         self.pick_btn.clicked.connect(self._on_pick)
         top.addWidget(self.pick_btn)
-        self.path_label = QLabel("", self)
-        self.path_label.setStyleSheet(f"font-family: {theme.FONT_MONO};")
-        self.path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.path_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        top.addWidget(self.path_label, 1)
+        chips = QWidget(self)                       # 고른 폴더 — 누르면 뺀다
+        chips.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self._chips = QHBoxLayout(chips)
+        self._chips.setContentsMargins(0, 0, 0, 0)
+        self._chips.setSpacing(6)
+        top.addWidget(chips, 1)
+        self.wafer_label = QLabel("", self)
+        self.wafer_label.setStyleSheet(f"font-family: {theme.FONT_MONO};")
+        top.addWidget(self.wafer_label)
         self.check_label = QLabel("", self)
         self.check_label.setProperty("role", "muted")
         top.addWidget(self.check_label)
+        top.addSpacing(12)
+        self._mode_group = QButtonGroup(self)
+        self.mode_btns = {}
+        for key, text in (("manual", _KO.OVERKILL_MODE_MANUAL), ("auto", _KO.OVERKILL_MODE_AUTO)):
+            b = NeonButton(text, role="segment")
+            b.setCheckable(True)
+            b.setChecked(key == self._mode)
+            b.clicked.connect(lambda _c=False, k=key: self.set_mode(k))
+            self._mode_group.addButton(b)
+            top.addWidget(b)
+            self.mode_btns[key] = b
         root.addLayout(top)
 
         body = QHBoxLayout()
@@ -347,6 +485,14 @@ class ThresholdPreviewDialog(QDialog):
         for lab in (self.keep_label, self.all_label):
             lab.setStyleSheet(f"font-family: {theme.FONT_MONO}; font-size: 15px;")
             summ.addWidget(lab, 0, Qt.AlignmentFlag.AlignBottom)
+        self.pick_label = QLabel("", self)           # 꼭 잡기 k — 하나라도 빠지면 빨간 '놓침 m'
+        self.pick_label.setStyleSheet(f"font-family: {theme.FONT_MONO}; font-size: 15px; color: {theme.ACCENT};"
+                                      " font-weight: 700;")
+        summ.addWidget(self.pick_label, 0, Qt.AlignmentFlag.AlignBottom)
+        self.miss_label = QLabel("", self)
+        self.miss_label.setStyleSheet(f"font-family: {theme.FONT_MONO}; font-size: 15px; color: {theme.DANGER};"
+                                      " font-weight: 700;")
+        summ.addWidget(self.miss_label, 0, Qt.AlignmentFlag.AlignBottom)
         summ.addStretch(1)
         self.reset_btn = NeonButton(_KO.THRESH_PREVIEW_RESET, role="ghost")
         self.reset_btn.clicked.connect(self.reset)
@@ -365,9 +511,10 @@ class ThresholdPreviewDialog(QDialog):
 
         tabs = QHBoxLayout()
         tabs.setSpacing(6)
+        self._tabs_lay = tabs
         self._tab_group = QButtonGroup(self)
         self.tab_btns = {}
-        for key in ("drop", "keep", "good"):
+        for key in ("drop", "keep", "good", "pick"):
             b = NeonButton("", role="segment")
             b.setCheckable(True)
             b.clicked.connect(lambda _c=False, k=key: self._set_tab(k))
@@ -396,22 +543,62 @@ class ThresholdPreviewDialog(QDialog):
 
     # ------------------------------------------------------------------ 폴더
     def _on_pick(self) -> None:
-        self._picker.open(_KO.THRESH_PREVIEW_PICK_TITLE, str(self._w.folder) if self._w else "")
+        self._picker.open(_KO.THRESH_PREVIEW_PICK_TITLE, str(self._roots[-1]) if self._roots else "")
 
-    def show_folder(self, folder: Path) -> None:
+    def add_folders(self, folders) -> None:
+        """고른 폴더(웨이퍼 또는 LOT)를 더한다 — 이미 있는 것은 그대로."""
+        self.set_folders(self._roots + [Path(f) for f in folders if Path(f) not in self._roots])
+
+    def remove_folder(self, folder: Path) -> None:
+        self.set_folders([r for r in self._roots if r != folder])
+
+    def set_folders(self, roots) -> None:
+        """이 폴더들을 다시 읽어 합친다(앞에서 읽은 웨이퍼는 다시 안 읽는다)."""
+        self._roots = list(roots)
+        self._render_chips()
+        if not self._roots:
+            self._token += 1
+            self.set_wafer(None)
+            return
+        self.show_folder()
+
+    def show_folder(self, folder: Optional[Path] = None) -> None:
+        if folder is not None:                      # 옛 호출(폴더 하나) — 그 폴더로 바꾼다
+            self.set_folders([folder])
+            return
         self._token += 1
         token = self._token
         if self._thread is not None and self._thread.isRunning():
             self._thread.requestInterruption()
-        self.path_label.setText(str(folder))
         self._loading.show_overlay(_KO.THRESH_PREVIEW_LOADING)
         self._loading.repaint()
         QApplication.processEvents()
-        th = _Load(token, folder)
+        th = _Load(token, self._roots, self._cache)
         th.signals.progress.connect(self._on_progress)
         th.signals.done.connect(self._on_loaded)
+        th.finished.connect(lambda t=th: self._cache.update(t.cache))
         self._thread = th
         th.start()
+
+    def _render_chips(self) -> None:
+        self._clear(self._chips)
+        for r in self._roots:
+            b = NeonButton(f"{r.name}  ✕", role="ghost")
+            b.setToolTip(str(r))
+            b.clicked.connect(lambda _c=False, f=r: self.remove_folder(f))
+            self._chips.addWidget(b)
+        self._chips.addStretch(1)
+
+    def dragEnterEvent(self, e):    # noqa: N802
+        if any(Path(u.toLocalFile()).is_dir() for u in e.mimeData().urls() if u.isLocalFile()):
+            e.acceptProposedAction()
+
+    def dropEvent(self, e):         # noqa: N802
+        dirs = [Path(u.toLocalFile()) for u in e.mimeData().urls() if u.isLocalFile()]
+        dirs = [d for d in dirs if d.is_dir()]
+        if dirs:
+            self.add_folders(dirs)
+            e.acceptProposedAction()
 
     def _on_progress(self, token: int, done: int, total: int, msg: str) -> None:
         if token == self._token:
@@ -421,17 +608,29 @@ class ThresholdPreviewDialog(QDialog):
         if token != self._token:
             return                      # 늦게 온 옛 결과
         self._loading.hide_overlay()
-        self.set_wafer(w if w is not None else WaferData(Path(self.path_label.text()),
+        self.set_wafer(w if w is not None else WaferData(Path(self._roots[0]) if self._roots else Path(),
                                                          note=_KO.THRESH_PREVIEW_FAILED))
 
-    def set_wafer(self, w: WaferData) -> None:
-        """읽은 웨이퍼를 화면에 올린다(테스트는 스레드 없이 이것만 부른다)."""
+    def set_wafer(self, w: Optional[WaferData]) -> None:
+        """읽은 웨이퍼(여러 장이면 합친 것)를 화면에 올린다(테스트는 스레드 없이 이것만 부른다).
+
+        폴더를 더하거나 빼도 남아 있는 웨이퍼의 꼭 잡기와, Zone 기준이 같으면 바꾼 값도 이어 간다."""
+        prev = self._w
+        kept_picks = {(_folder_of(prev, d), d.index) for d in self._picked.values()} if prev else set()
+        keep_ov = prev is not None and w is not None and not w.note and prev.zones == w.zones
         self._w = w
-        self._ov = {}
+        self._ov = dict(self._ov) if keep_ov else {}
         self._rich_base = {}
+        self._picked = {key_of(d): d for d in (w.defects if w else ())
+                        if (_folder_of(w, d), d.index) in kept_picks}
+        self._rec_zones = {(d.zone_dir, d.zone) for d in self._picked.values()}
         self._open = None
         self._shown = PAGE_TILES
-        self._tab = "drop"
+        self._tab = "keep" if self._mode == "auto" else "drop"
+        if w is None:
+            self._zone = None
+            self._render()
+            return
         zs = self.zone_keys()
         self._zone = next((k for k in zs if w.zones.get(k) and w.zones[k].bundles
                            and self._count(k)), zs[0] if zs else None)
@@ -494,6 +693,16 @@ class ThresholdPreviewDialog(QDialog):
             n = len(w.defects)
             self.check_label.setText((_KO.THRESH_PREVIEW_CHECK_OK if not w.misses else
                                       _KO.THRESH_PREVIEW_CHECK_BAD).format(ok=n - w.misses, n=n))
+        many = w is not None and (len(w.folders) > 1 or w.skipped)
+        text = _KO.OVERKILL_WAFERS.format(n=len(w.folders)) if many else ""
+        if many and w.skipped:
+            text += "   " + _KO.OVERKILL_SKIPPED.format(n=len(w.skipped))
+        self.wafer_label.setText(text)
+        self.wafer_label.setToolTip("\n".join(
+            [str(f) for f in w.folders] + ([f"— {_KO.OVERKILL_SKIPPED_HEAD}"] + [str(f) for f in w.skipped]
+                                            if w.skipped else [])) if many else "")
+        self.wafer_label.setStyleSheet(f"font-family: {theme.FONT_MONO};"
+                                       + (f" color: {theme.WARN};" if many and w.skipped else ""))
         self._render_zones()
         self._render_rules()
         self._render_summary()
@@ -538,7 +747,9 @@ class ThresholdPreviewDialog(QDialog):
         new = self.appeared(key)
         line1 = f"{name}" + (f"  · {rec}" if rec else "")
         line2 = _KO.THRESH_PREVIEW_ZONE_COUNT.format(n=self._count(key))
-        moved = "   ".join(t for t in (f"−{drop:,}" if drop else "", f"+{new:,}" if new else "") if t)
+        picks = sum(1 for d in self._picked.values() if (d.zone_dir, d.zone) == key)
+        moved = "   ".join(t for t in (f"−{drop:,}" if drop else "", f"+{new:,}" if new else "",
+                                       f"✓{picks:,}" if picks else "") if t)
         self.zone_btns[key].setText(f"{line1}\n{line2}" + (f"\n{moved}" if moved else ""))
 
     def _render_rules(self) -> None:
@@ -694,6 +905,8 @@ class ThresholdPreviewDialog(QDialog):
             self.all_label.setText("")
             for b in self.tab_btns.values():
                 b.setVisible(False)
+            self.pick_label.setText("")
+            self.miss_label.setText("")
             return 0
         n = len(self._in_zone())
         drop = len(self.dropped())
@@ -710,15 +923,25 @@ class ThresholdPreviewDialog(QDialog):
         self.keep_label.setText(_KO.THRESH_PREVIEW_KEPT.format(n=f"{n - drop:,}"))
         self.all_label.setText(_KO.THRESH_PREVIEW_ALL.format(n=f"{n:,}"))
         goods = sum(1 for d in w.goods if (d.zone_dir, d.zone) == self._zone)
-        counts = {"drop": drop, "keep": n - drop, "good": goods}
+        picks = sum(1 for d in self._picked.values() if (d.zone_dir, d.zone) == self._zone)
+        counts = {"drop": drop, "keep": n - drop, "good": goods, "pick": picks}
         names = {"drop": _KO.THRESH_PREVIEW_TAB_DROP, "keep": _KO.THRESH_PREVIEW_TAB_KEEP,
-                 "good": _KO.THRESH_PREVIEW_TAB_GOOD}
-        if self._tab == "good" and not goods:
-            self._tab = "drop"
+                 "good": _KO.THRESH_PREVIEW_TAB_GOOD, "pick": _KO.OVERKILL_TAB_PICK}
+        auto = self._mode == "auto"
+        order = ("keep", "drop", "pick") if auto else ("drop", "keep", "good")
+        shown = {k for k in order if k not in ("good", "pick") or counts[k] > 0 or (k == "pick" and auto)}
+        if self._tab not in shown:
+            self._tab = order[0]
+        for i, k in enumerate(order):                # 자동 모드는 '남음' 이 앞 — 처음엔 전부 남아 있다
+            self._tabs_lay.insertWidget(i, self.tab_btns[k])
         for k, b in self.tab_btns.items():
             b.setText(f"{names[k]}  {counts[k]:,}")
-            b.setVisible(k != "good" or goods > 0)
+            b.setVisible(k in shown)
             b.setChecked(k == self._tab)
+        total_picks = len(self._picked)
+        missed = self.missed()
+        self.pick_label.setText(_KO.OVERKILL_PICKED.format(n=f"{total_picks:,}") if total_picks else "")
+        self.miss_label.setText(_KO.OVERKILL_MISSED.format(n=f"{len(missed):,}") if missed else "")
         return drop
 
     def _items(self) -> list:
@@ -726,10 +949,13 @@ class ThresholdPreviewDialog(QDialog):
         w = self._w
         if self._tab == "good":
             return [(d, None) for d in w.goods if (d.zone_dir, d.zone) == self._zone]
-        drop = {d.index: why for d, why in self.dropped()}
-        if self._tab == "drop":
-            return [(d, drop[d.index]) for d in self._in_zone() if d.index in drop]
-        return [(d, None) for d in self._in_zone() if d.index not in drop]
+        drop = {key_of(d): why for d, why in self.dropped()}
+        if self._tab == "pick":
+            return [(d, drop.get(key_of(d))) for d in self._in_zone() if key_of(d) in self._picked]
+        if self._tab == "drop":                     # 기준 바로 아래부터 — 잡아야 할 것을 먼저 훑게
+            return sorted(((d, drop[key_of(d)]) for d in self._in_zone() if key_of(d) in drop),
+                          key=lambda t: -self._below(*t))
+        return [(d, None) for d in self._in_zone() if key_of(d) not in drop]
 
     def _cols(self) -> int:
         avail = max(TILE_PX, self.grid_host.width() or self.width() - 300)
@@ -744,7 +970,7 @@ class ThresholdPreviewDialog(QDialog):
             self.no_photo_label.setText("")
             return
         items = self._items()
-        with_photo = [(d, why) for d, why in items if d.index in w.photos]
+        with_photo = [(d, why) for d, why in items if key_of(d) in w.photos]
         missing = len(items) - len(with_photo)
         self.no_photo_label.setText(_KO.THRESH_PREVIEW_NO_PHOTO.format(n=f"{missing:,}") if missing else "")
         self.empty_label.setText("" if items else (_KO.THRESH_PREVIEW_NONE_DROPPED
@@ -753,14 +979,20 @@ class ThresholdPreviewDialog(QDialog):
         shown = with_photo[:self._shown]
         r = c = 0
         pending = None
+        auto = self._mode == "auto"
         for j, (d, why) in enumerate(shown):
-            tile = _Tile(w.photos[d.index], self._class_name(d.bin), self._why_text(d, why), TILE_PX,
-                         self.grid_host)
-            tile.clicked.connect(lambda i=d.index: self._toggle(i))
-            tile.set_open(self._open == d.index)
+            k = key_of(d)
+            tile = _Tile(w.photos[k], self._class_name(d.bin), self._why_text(d, why), TILE_PX,
+                         self.grid_host, picked=k in self._picked, detail_btn=auto)
+            if auto:                                 # 자동 모드: 타일 = 꼭 잡기 토글, ⋯ = 값 펼치기
+                tile.clicked.connect(lambda i=k: self.toggle_pick(i))
+                tile.detail.connect(lambda i=k: self._toggle(i))
+            else:
+                tile.clicked.connect(lambda i=k: self._toggle(i))
+            tile.set_open(self._open == k)
             self.grid.addWidget(tile, r, c)
-            self.tiles[d.index] = tile
-            if self._open == d.index:
+            self.tiles[k] = tile
+            if self._open == k:
                 pending = self._detail(d, why)
             c += 1
             if c == cols or j == len(shown) - 1:
@@ -787,14 +1019,15 @@ class ThresholdPreviewDialog(QDialog):
         pic.setFixedSize(DETAIL_PX, DETAIL_PX)
         pic.setAlignment(Qt.AlignmentFlag.AlignCenter)
         pic.setCursor(Qt.CursorShape.PointingHandCursor)
-        photo = w.photos[d.index]
+        photo = w.photos[key_of(d)]
         pic.setPixmap(image_io.load_thumb_qpixmap(photo, DETAIL_PX, kind="mid"))
         pic.clicked.connect(lambda: self._enlarge(photo))
         lay.addWidget(pic)
         right = QVBoxLayout()
         right.setSpacing(8)
         name, rec = zone_label(d.zone_dir, w.zones.get((d.zone_dir, d.zone)), d.zone)
-        t = QLabel(f"{self._class_name(d.bin)}   ·  Zone {name}" + (f" · {rec}" if rec else ""), box)
+        t = QLabel(f"{self._class_name(d.bin)}   ·  Zone {name}" + (f" · {rec}" if rec else "")
+                   + (f"   ·  {w.folders[d.wafer].name}" if len(w.folders) > 1 else ""), box)
         t.setStyleSheet("font-weight: 700;")
         right.addWidget(t)
         g = QGridLayout()
@@ -822,7 +1055,7 @@ class ThresholdPreviewDialog(QDialog):
                 lab.setStyleSheet(style)
                 g.addWidget(lab, r, c)
         right.addLayout(g)
-        fn = QLabel(photo.name, box)
+        fn = QLabel(str(photo) if len(w.folders) > 1 else photo.name, box)
         fn.setProperty("role", "muted")
         fn.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         right.addWidget(fn)
@@ -861,10 +1094,64 @@ class ThresholdPreviewDialog(QDialog):
         sheets.run(FullscreenViewer(photo, self), full_bleed=True)
 
     def reset(self) -> None:
-        """레시피 값으로 되돌리기 — 모든 Zone 의 바꾼 값을 지운다."""
+        """레시피 값으로 되돌리기 — 모든 Zone 의 바꾼 값과 꼭 잡기를 지운다."""
         self._ov = {}
+        self._picked = {}
+        self._rec_zones = set()
         self._open = None
         self._render()
+
+    # ------------------------------------------------------------------ 자동 추천
+    def set_mode(self, mode: str) -> None:
+        """직접 조정 ↔ 자동 추천.  모드만 바꾼다 — 기준값은 그대로(추천값을 직접 조정으로 다듬을 수 있다)."""
+        self._mode = mode
+        self.mode_btns[mode].setChecked(True)
+        self._tab = "keep" if mode == "auto" else "drop"
+        self._open = None
+        self._shown = PAGE_TILES
+        self._render_summary()
+        self._render_tiles()
+
+    def toggle_pick(self, k: tuple) -> None:
+        """꼭 잡을 Defect 를 더하거나 빼고, 고른 것을 전부 남기는 기준을 다시 추천한다."""
+        if k in self._picked:
+            del self._picked[k]
+        else:
+            d = next((x for x in self._w.defects if key_of(x) == k), None)
+            if d is None:
+                return
+            self._picked[k] = d
+        self._recommend()
+        self._render_zones()
+        self._render_rules()
+        self._changed(True)
+
+    def _recommend(self) -> None:
+        """고른 것이 있는(또는 있던) Zone 만 다시 계산한다 — 다른 Zone 의 직접 조정은 그대로 둔다."""
+        picked = list(self._picked.values())
+        zones_now = {(d.zone_dir, d.zone) for d in picked}
+        for k in [k for k in self._ov if k[:2] in zones_now | self._rec_zones]:
+            del self._ov[k]
+        rec, _missed = P.recommend(picked, self._w.zones, self._snap)
+        self._ov.update(rec)
+        self._rec_zones = zones_now
+
+    def _snap(self, feature: int, v: float, strict: bool) -> float:
+        """px 값 → 화면 소수 자리로 **내린** µm 를 다시 px 로.  그 값 이하(엄격이면 미만)를 보장한다."""
+        dec = next((x[4] for x in _FEATURES if x[0] == feature), 2)
+        q = 10 ** dec
+        um = self._w.to_um(feature, v)
+        cut = math.floor(um * q) / q
+        if strict and cut >= um:
+            cut -= 1 / q
+        top = math.nextafter(v, -math.inf) if strict else v
+        return min(self._w.to_px(feature, cut), top)
+
+    def missed(self) -> list:
+        """고른 Defect 중 지금 기준으로 빠지는 것 — 직접 조정에서 너무 올리면 생긴다."""
+        if self._w is None:
+            return []
+        return [d for d in self._picked.values() if not P.is_kept(d, self._w.zones, self._ov)]
 
     # ------------------------------------------------------------------ 내보내기
     def _on_export(self) -> None:
@@ -873,7 +1160,8 @@ class ThresholdPreviewDialog(QDialog):
             return
         home = Path.home()
         start = home / "Desktop" if (home / "Desktop").is_dir() else home
-        name = f"Threshold_{self._w.folder.name}_{datetime.now():%Y%m%d_%H%M}.html"
+        base = self._roots[0].name if len(self._roots) == 1 else self._w.folder.name
+        name = f"Overkill_{base}_{datetime.now():%Y%m%d_%H%M}.html"
         dlg = QFileDialog(self, _KO.THRESH_EXPORT_SAVE_TITLE, str(start / name), _KO.THRESH_EXPORT_FILTER)
         dlg.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
         dlg.setDefaultSuffix("html")
@@ -925,13 +1213,15 @@ class ThresholdPreviewDialog(QDialog):
             total_drop += len(drops)
             total_new += new
             name, rec = zone_label(key[0], w.zones.get(key), key[1])
-            have = sorted(((d, why) for d, why in drops if d.index in w.photos),
+            have = sorted(((d, why) for d, why in drops if key_of(d) in w.photos),
                           key=lambda t: -self._below(t[0], t[1]))     # 기준 바로 아래부터 멀리까지
-            samples = tuple(RP.Sample(_data_uri(w.photos[d.index]), self._class_name(d.bin), self._why_text(d, why))
+            samples = tuple(RP.Sample(_data_uri(w.photos[key_of(d)]), self._class_name(d.bin), self._why_text(d, why))
                             for d, why in RP.pick_samples(have, EXPORT_SAMPLES))
             zones.append(RP.ZoneResult(name + (f" · {rec}" if rec else ""), self._count(key), len(drops),
                                        samples, len(drops) - len(have), new))
-        text = RP.build_html(folder=str(w.folder), when=f"{datetime.now():%Y-%m-%d %H:%M}",
+        where = (str(w.folder) if len(w.folders) <= 1 else
+                 f"{w.folder.parent}  ·  " + ", ".join(f.name for f in w.folders))
+        text = RP.build_html(folder=where, when=f"{datetime.now():%Y-%m-%d %H:%M}",
                              total=len(w.defects), dropped=total_drop, changes=changes, zones=zones,
                              appeared=total_new)
         Path(path).write_text(text, encoding="utf-8")
