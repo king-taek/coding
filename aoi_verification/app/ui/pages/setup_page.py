@@ -1328,7 +1328,7 @@ class SetupPage(QWidget):
         self.extract_btn = NeonButton(i18n.KO.EXTRACT_BUTTON, role="ghost")
         self.extract_btn.setToolTip(i18n.KO.EXTRACT_BUTTON_TOOLTIP)
         self.extract_btn.clicked.connect(lambda: self.show_page("extract"))
-        # 사진 한 장의 GL(밝기) 분포를 히스토그램·선 프로파일·통계로 보는 도구.
+        # 사진 한 장의 GL(밝기) 분포를 히스토그램으로 보는 도구.
         # 준비 전(`config.GL_HISTOGRAM_READY`)에는 아이콘은 그대로 두고 'Coming soon' 으로 막는다.
         if config.GL_HISTOGRAM_READY:
             self.gl_btn = NeonButton(i18n.KO.GL_BUTTON, role="ghost")

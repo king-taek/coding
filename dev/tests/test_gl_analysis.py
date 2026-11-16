@@ -3,9 +3,9 @@
 지키는 계약:
 
 - 분석은 **원본 비트심도 그대로**다(16 bit 값을 8 bit 로 줄여 세지 않는다).
-- 선은 전체 폭·높이이고 자기 축으로만 움직인다.  도형은 이미지 밖으로 나가지 않는다.
+- 도형은 사각형·원뿐이고 이미지 밖으로 나가지 않는다.
 - 원은 픽셀 중심 기준 판정이다.  하한 < 상한을 늘 지킨다.
-- 되돌리기는 50 단계, 선 보기/숨기기는 되돌리기 대상이 아니다.
+- 되돌리기는 50 단계다.
 """
 
 from __future__ import annotations
@@ -24,17 +24,11 @@ def _img(h=40, w=60, bits=16):
 
 
 # ---------------------------------------------------------------- ROI 모델
-def test_hline_moves_only_vertically_and_clamps():
-    r = Roi(1, roi.HLINE, "a", "#fff", pos=5)
-    assert roi.move(r, 99, 3, 60, 40).pos == 8
-    assert roi.move(r, 0, -99, 60, 40).pos == 0
-    assert roi.move(r, 0, 99, 60, 40).pos == 39
-
-
-def test_vline_moves_only_horizontally():
-    r = Roi(1, roi.VLINE, "a", "#fff", pos=5)
-    assert roi.move(r, 4, 99, 60, 40).pos == 9
-    assert roi.move(r, 999, 0, 60, 40).pos == 59
+def test_only_rect_and_circle_kinds_exist():
+    for gone in ("HLINE", "VLINE", "SQUARE", "LINE_KINDS"):
+        assert not hasattr(roi, gone)
+    assert not hasattr(roi, "resize") and not hasattr(RoiSet, "add_line")
+    assert not hasattr(analysis, "profile")
 
 
 def test_shape_move_stays_inside_image():
@@ -45,65 +39,43 @@ def test_shape_move_stays_inside_image():
     assert (m.x, m.y) == (0, 0)
 
 
-def test_circle_resize_keeps_center_and_ratio():
-    r = Roi(1, roi.CIRCLE, "a", "#fff", x=20, y=10, w=10, h=10)
-    g = roi.resize(r, 2, 0, 60, 40)          # 반지름 +1 → 지름 +2
-    assert (g.w, g.h) == (12, 12)
-    assert g.center == r.center
-    s = roi.resize(r, -2, 0, 60, 40)
-    assert (s.w, s.h) == (8, 8)
-
-
-def test_resize_has_minimum_and_image_limit():
-    r = Roi(1, roi.CIRCLE, "a", "#fff", x=20, y=10, w=4, h=4)
-    assert roi.resize(r, -100, 0, 60, 40).w == roi.MIN_SIZE
-    big = roi.resize(r, 1000, 0, 60, 40)
-    assert big.w <= 40 and big.w == big.h        # 이미지 높이(40)를 못 넘는다
-
-
-def test_rect_resize_changes_both_axes_independently():
-    r = Roi(1, roi.RECT, "a", "#fff", x=20, y=10, w=10, h=6)
-    g = roi.resize(r, 4, -2, 60, 40)
-    assert (g.w, g.h) == (14, 4)
-
-
 def test_from_drag_all_quadrants_and_too_small():
-    # 정사각형은 긴 변에 맞추고 드래그 방향을 따른다(이미지 밖은 안으로 민다).
+    # 원은 긴 변에 맞추고 드래그 방향을 따른다(이미지 밖은 안으로 민다).
     cases = {(30, 30): (10, 10, 20), (0, 0): (0, 0, 10),
              (30, 0): (10, 0, 20), (0, 30): (0, 10, 20)}
     for p1, (x, y, s) in cases.items():
-        c = roi.from_drag(roi.SQUARE, (10, 10), p1, 60, 40)
+        c = roi.from_drag(roi.CIRCLE, (10, 10), p1, 60, 40)
         assert (c.x, c.y, c.w, c.h) == (x, y, s, s), p1
     assert roi.from_drag(roi.RECT, (10, 10), (11, 30), 60, 40) is None
     r = roi.from_drag(roi.RECT, (30, 20), (10, 5), 60, 40)
     assert (r.x, r.y, r.w, r.h) == (10, 5, 20, 15)
 
 
-def test_roiset_undo_limit_and_view_toggles_not_undoable():
+def _rect(x=1, y=1):
+    return Roi(0, roi.RECT, "", "", x=x, y=y, w=4, h=4)
+
+
+def test_roiset_undo_limit():
     s = RoiSet()
     for i in range(60):
-        s.add_line(roi.HLINE, i % 40)
+        s.add(_rect(i % 40))
     n = 0
     while s.undo():
         n += 1
     assert n == roi.UNDO_LIMIT
-    s2 = RoiSet()
-    s2.add_line(roi.HLINE, 3)
-    s2.show_h = False
-    assert not s2.visible(s2.rois[0])
-    assert s2.undo() and s2.rois == []          # 숨기기는 기록에 없다 — 추가만 되돌려진다
-    assert s2.show_h is False
 
 
 def test_roiset_delete_clear_names_and_colors():
     s = RoiSet()
-    a = s.add_line(roi.HLINE, 1)
-    b = s.add_line(roi.HLINE, 2)
-    assert (a.name, b.name) == ("수평선 1", "수평선 2")
+    a = s.add(_rect(1))
+    b = s.add(_rect(2))
+    assert (a.name, b.name) == ("사각형 1", "사각형 2")
+    assert s.add(Roi(0, roi.CIRCLE, "", "", x=5, y=5, w=4, h=4)).name == "원 1"
+    s.delete(s.rois[-1].id)
     assert a.color != b.color
     assert s.delete(a.id) and [r.id for r in s.rois] == [b.id]
-    c = s.add_line(roi.HLINE, 3)
-    assert c.name == "수평선 2" or c.name == "수평선 3"
+    c = s.add(_rect(3))
+    assert c.name == "사각형 2" or c.name == "사각형 3"
     assert len({r.name for r in s.rois}) == len(s.rois)
     assert s.clear() and s.rois == [] and s.selected is None
     assert s.undo() and len(s.rois) == 2
@@ -134,13 +106,6 @@ def test_stats_matches_numpy_and_threshold_counts():
     assert e["n"] == 0 and e["mean"] is None
 
 
-def test_line_values_are_full_row_or_column():
-    img = _img()
-    assert np.array_equal(analysis.roi_values(img, Roi(1, roi.HLINE, "", "", pos=7)), img[7, :])
-    assert np.array_equal(analysis.roi_values(img, Roi(1, roi.VLINE, "", "", pos=9)), img[:, 9])
-    assert analysis.roi_values(img, Roi(1, roi.HLINE, "", "", pos=999)).size == 0
-
-
 def test_rect_values_and_circle_is_pixel_center_based():
     img = _img()
     r = Roi(1, roi.RECT, "", "", x=5, y=4, w=10, h=6)
@@ -160,13 +125,6 @@ def test_mask_clips_to_image_for_shapes_outside():
     assert analysis.roi_values(img, r).size == 5 * 5
     far = Roi(2, roi.RECT, "", "", x=500, y=500, w=5, h=5)
     assert analysis.roi_values(img, far).size == 0
-
-
-def test_profile_only_for_lines():
-    img = _img()
-    assert analysis.profile(img, Roi(1, roi.RECT, "", "", x=0, y=0, w=5, h=5)) is None
-    p = analysis.profile(img, Roi(1, roi.HLINE, "", "", pos=3))
-    assert np.array_equal(p, img[3, :])
 
 
 def test_auto_thresholds_and_clamp():
@@ -199,9 +157,10 @@ def test_overlay_scope_all_roi_off_and_colors():
 def test_display_is_view_only_analysis_untouched():
     img = _img()
     before = img.copy()
-    analysis.to_display(img, analysis.display_range(img, 16, True))
+    analysis.to_display(img, analysis.display_range(16))
     assert np.array_equal(img, before)
-    assert analysis.display_range(img, 16, False) == (0, 65535)
+    assert analysis.display_range(16) == (0, 65535)       # 늘 비트 전체 범위
+    assert analysis.display_range(8) == (0, 255)
 
 
 # ------------------------------------------------------------------ 파일
@@ -263,7 +222,7 @@ def test_resize_handle_fixed_opposite_corner_and_flip():
     assert (g.x, g.w, g.y, g.h) == (10, 20, 5, 15)
 
 
-def test_resize_handle_square_circle_keep_ratio():
+def test_resize_handle_circle_keeps_ratio():
     c = Roi(1, roi.CIRCLE, "", "", x=10, y=10, w=20, h=20)
     g = roi.resize_handle(c, "se", 50, 40, 100, 100)
     assert g.w == g.h == 40 and (g.x, g.y) == (10, 10)
@@ -277,7 +236,6 @@ def test_resize_handle_never_leaves_image():
     r = Roi(1, roi.RECT, "", "", x=10, y=10, w=20, h=10)
     g = roi.resize_handle(r, "se", 9999, 9999, 100, 80)
     assert g.x + g.w <= 100 and g.y + g.h <= 80
-    assert roi.resize_handle(Roi(1, roi.HLINE, "", "", pos=3), "e", 5, 5, 9, 9).pos == 3
 
 
 # ----------------------------------------------- 컬러 → Scan 자동 확대
