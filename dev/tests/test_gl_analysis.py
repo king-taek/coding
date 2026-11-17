@@ -296,3 +296,23 @@ def test_gray_photo_is_not_sent_to_scan(tmp_path, monkeypatch):
     (tmp_path / "g.png").write_bytes(cv2.imencode(".png", g)[1].tobytes())
     v = loader.load_for_view(tmp_path / "g.png")
     assert not called and v.scan_name == "" and not v.scan_missing
+
+
+# ---------------------------------------------------------------- 구역 비율(히스토그램 위 글자)
+def test_zone_ratios_follow_the_same_rule_as_the_overlay_and_stats():
+    h = np.zeros(256, np.int64)
+    h[10], h[70], h[71], h[199], h[200], h[255] = 2, 3, 5, 7, 11, 13
+    lo, mid, hi = analysis.zone_ratios(h, 70, 200)
+    tot = h.sum()
+    assert lo == pytest.approx((2 + 3) / tot * 100)         # 하한 '이하' — 하한 값 자신 포함
+    assert hi == pytest.approx((11 + 13) / tot * 100)       # 상한 '이상' — 상한 값 자신 포함
+    assert mid == pytest.approx((5 + 7) / tot * 100)
+    assert lo + mid + hi == pytest.approx(100.0)
+    vals = np.repeat(np.arange(256), h)
+    st = analysis.stats(vals, 70, 200)
+    assert lo == pytest.approx(st["below"] / st["n"] * 100)
+    assert hi == pytest.approx(st["above"] / st["n"] * 100)
+
+
+def test_zone_ratios_empty_histogram_is_all_zero():
+    assert analysis.zone_ratios(np.zeros(256, np.int64), 70, 200) == (0.0, 0.0, 0.0)
