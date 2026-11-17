@@ -1036,6 +1036,7 @@ class ThresholdPreviewDialog(QDialog):
         for b in self.findChildren(QPushButton):     # 열릴 때 첫 버튼이 포커스 링을 달고 나오지 않게
             b.setAutoDefault(False)
         self._loading = LoadingOverlay(self)
+        self._loading.cancel_requested.connect(self._cancel_load)
         if folder:
             self.set_folders([Path(folder)])
         else:
@@ -1378,10 +1379,18 @@ class ThresholdPreviewDialog(QDialog):
             self._loading.hide_overlay()
             self._overlay_on = False
 
+    def _cancel_load(self) -> None:
+        """[중지] — 아직 읽는 폴더를 목록에서 빼고(이미 읽은 폴더는 남긴다) 읽기 전 화면으로 돌아간다."""
+        if not self._overlay_on:
+            return
+        self._roots = [r for r in self._roots if self._ready(r)]
+        self._added = [r for r in self._added if r in self._roots]
+        self._refresh_roots()
+
     def _start_load(self) -> None:
         self._stop_load()
         if self._w is None or self._w.note:         # 보여 줄 게 아직 없을 때만 화면을 덮는다
-            self._loading.show_overlay(_KO.THRESH_PREVIEW_LOADING)
+            self._loading.show_overlay(_KO.THRESH_PREVIEW_LOADING, cancelable=True)
             self._overlay_on = True
             self._loading.repaint()
             QApplication.processEvents()

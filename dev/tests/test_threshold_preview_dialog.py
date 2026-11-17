@@ -1236,3 +1236,55 @@ def test_scan_detail_puts_scan_beside_title_and_file_name_below(styled_qapp, tmp
         assert files and not files[0].isVisibleTo(dlg) and files[0].text() != "Scan"
     finally:
         dlg.deleteLater()
+
+
+# ---------------------------------------------------------------------------------------------- 읽는 중 중지
+def _stub_start(monkeypatch, T):
+    monkeypatch.setattr(T._Load, "start", lambda self: None)
+
+
+def test_loading_overlay_shows_stop_button(styled_qapp, tmp_path, monkeypatch):
+    """읽어야 하는 폴더를 고르면 덮개에 [중지] 가 보인다."""
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    a, _lot = _lot_setup(tmp_path)
+    _stub_start(monkeypatch, T)
+    dlg = T.ThresholdPreviewDialog()
+    try:
+        dlg.set_folders([a])
+        assert dlg._overlay_on
+        assert not dlg._loading._cancel_btn.isHidden()
+    finally:
+        dlg.deleteLater()
+
+
+def test_stop_drops_unread_roots_and_ignores_late_result(styled_qapp, tmp_path, monkeypatch):
+    """[중지] → 읽던 폴더가 빠지고 덮개가 닫힌다.  옛 읽기의 늦은 마무리는 아무것도 바꾸지 않는다."""
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    a, _lot = _lot_setup(tmp_path)
+    _stub_start(monkeypatch, T)
+    dlg = T.ThresholdPreviewDialog()
+    try:
+        dlg.set_folders([a])
+        old = dlg._token
+        dlg._loading.cancel_requested.emit()
+        assert dlg._roots == [] and not dlg._overlay_on and dlg._token > old
+        dlg._on_loaded(old, True)
+        assert dlg._roots == [] and not dlg._overlay_on
+    finally:
+        dlg.deleteLater()
+
+
+def test_stop_keeps_already_read_roots(styled_qapp, tmp_path, monkeypatch):
+    """이미 읽은 폴더가 있으면 그것만 남는다."""
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    a, lot = _lot_setup(tmp_path)
+    dlg = T.ThresholdPreviewDialog()
+    try:
+        _prime(dlg, T, a)
+        _stub_start(monkeypatch, T)
+        dlg.set_folders([a, lot])
+        assert dlg._roots == [a, lot] and dlg._overlay_on
+        dlg._loading.cancel_requested.emit()
+        assert dlg._roots == [a] and not dlg._overlay_on
+    finally:
+        dlg.deleteLater()
