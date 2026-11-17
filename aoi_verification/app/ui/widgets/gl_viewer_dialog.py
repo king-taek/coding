@@ -11,17 +11,18 @@
 
 from __future__ import annotations
 
+import html
 import logging
 import os
 from pathlib import Path
 from typing import Callable, Optional
 
 import numpy as np
-from PyQt6.QtCore import QObject, QSize, Qt, QThread, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QImage, QPainter, QPen
+from PyQt6.QtCore import QObject, QPointF, QRectF, QSize, Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QIcon, QImage, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog,
-                             QFormLayout, QFrame, QHBoxLayout, QLabel,
-                             QSpinBox, QSplitter, QVBoxLayout,
+                             QFormLayout, QFrame, QGridLayout, QHBoxLayout, QLabel,
+                             QMenu, QPushButton, QSpinBox, QSplitter, QToolButton, QVBoxLayout,
                              QWidget)
 
 from ... import i18n
@@ -34,7 +35,7 @@ from ..deferred import call_later
 from ..drop_paths import install_paste, local_paths
 from . import sheet_host as sheets
 from .gl_canvas import TOOLS, GlCanvas
-from .gl_charts import HistogramChart
+from .gl_charts import ALL_ROW, HistogramChart, ThresholdRange
 from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
 from .option_group import OptionGroup
@@ -51,6 +52,41 @@ _LIVE_WORKERS: set = set()
 
 # 두 사진 비교 — A(기준)는 청사진 파랑, B(검증)는 주황.  명도 차가 커서 색만으로도 갈린다.
 _CMP_A, _CMP_B = "#2C5A86", "#C2410C"
+
+
+_INSPECTOR_W = 360      # 오른쪽 인스펙터 고정 폭
+
+
+def _tool_icon(kind: str) -> QIcon:
+    """팔레트 그림(16 px, 선 1.5) — 검은 사진 위라 밝은 잉크로 그린다."""
+    pm = QPixmap(32, 32)
+    pm.setDevicePixelRatio(2.0)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    pen = QPen(QColor(theme.BG or "#ECE9E2"), 1.5)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    p.setPen(pen)
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    L = lambda *v: p.drawLine(QPointF(v[0], v[1]), QPointF(v[2], v[3]))  # noqa: E731
+    if kind == "move":
+        L(8, 2, 8, 14); L(2, 8, 14, 8)
+        for ax, ay, bx, by, cx, cy in ((6, 4, 8, 2, 10, 4), (6, 12, 8, 14, 10, 12),
+                                       (4, 6, 2, 8, 4, 10), (12, 6, 14, 8, 12, 10)):
+            L(ax, ay, bx, by); L(bx, by, cx, cy)
+    elif kind == R.RECT:
+        p.drawRoundedRect(QRectF(2.5, 3.5, 11, 9), 1, 1)
+    elif kind == R.CIRCLE:
+        p.drawEllipse(QRectF(2.5, 2.5, 11, 11))
+    elif kind == "undo":
+        p.drawArc(QRectF(3, 5, 10, 8), 90 * 16, -230 * 16)
+        L(8, 5, 3.5, 5); L(3.5, 5, 6, 2.5); L(3.5, 5, 6, 7.5)
+    elif kind == "clear":
+        L(3, 4.5, 13, 4.5); L(6.5, 2.5, 9.5, 2.5)
+        L(4.5, 4.5, 5.2, 13.5); L(5.2, 13.5, 10.8, 13.5); L(10.8, 13.5, 11.5, 4.5)
+    p.end()
+    return QIcon(pm)
 
 
 def _view_exts() -> set:
@@ -139,6 +175,23 @@ class _RawDialog(QDialog):
                 "header": self.header.value()}
 
 
+class _TickCheck(QCheckBox):
+    """상자 없는 체크 — 켜졌을 때만 글자 왼쪽에 남색 체크 표시를 그린다(꺼짐은 표시 없이 글자 색만).
+    QSS 가 표시기 자리를 비워 두므로 꺼져도 글자 자리는 그대로다."""
+
+    def paintEvent(self, e):  # noqa: N802
+        super().paintEvent(e)
+        if not self.isChecked():
+            return
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        col = QColor(theme.ACCENT if self.isEnabled() else theme.LINE2)
+        p.setPen(QPen(col, 1.6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        cy = self.height() / 2.0
+        p.drawPolyline([QPointF(1.5, cy), QPointF(5.0, cy + 3.5), QPointF(11.5, cy - 3.5)])
+        p.end()
+
+
 class GlViewerDialog(QDialog):
     """GL 뷰어 창.  ``image_path`` 를 주면 바로 연다."""
 
@@ -160,7 +213,7 @@ class GlViewerDialog(QDialog):
         self._syncing_view = False
         self._gen = 0
         self._gen_b = 0
-        self._hover_text = _KO.GL_STATUS_OUT
+        self._hover_text = ""
         self._loading = LoadingOverlay(self)
         self._refresh_timer = QTimer(self)
         self._refresh_timer.setSingleShot(True)
@@ -178,91 +231,158 @@ class GlViewerDialog(QDialog):
     # ------------------------------------------------------------------
     def _build(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(16, 16, 16, 16)
-        root.setSpacing(10)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
         root.addLayout(self._build_head())
-        root.addLayout(self._build_toolbar())
-        self.banner = QLabel("", self)
-        self.banner.setWordWrap(True)
-        self.banner.setProperty("role", "muted")
-        self.banner.setVisible(False)
-        root.addWidget(self.banner)
         body = QHBoxLayout()
-        body.setSpacing(theme.PROFILE.card_pad)
-        body.addLayout(self._build_left(), 3)
-        body.addWidget(self._build_right(), 2)
+        body.setSpacing(0)
+        body.addWidget(self._build_left(), 1)
+        body.addWidget(self._build_right())
         root.addLayout(body, 1)
+        root.addWidget(self._build_status())
+        self._sync_empty_state()
 
     def _build_head(self) -> QHBoxLayout:
+        """머리줄 — 남색 채움은 '엑셀 저장' 하나, PNG 는 외곽선, 나머지는 글자 버튼."""
         bar = QHBoxLayout()
+        bar.setContentsMargins(16, 12, 16, 12)
+        bar.setSpacing(8)
         self.file_label = QLabel("", self)
-        self.file_label.setProperty("role", "muted")
-        self.open_btn = NeonButton(_KO.GL_OPEN, role="primary")
-        self.open_btn.setMinimumHeight(theme.PROFILE.control_h_lg)
+        self.open_btn = NeonButton(_KO.GL_OPEN, role="textAccent")
         self.open_btn.clicked.connect(self._on_pick)
-        self.xlsx_btn = NeonButton(_KO.GL_SAVE_XLSX, role="ghost")
-        self.xlsx_btn.setMinimumHeight(theme.PROFILE.control_h_lg)
+        self.xlsx_btn = NeonButton(_KO.GL_SAVE_XLSX, role="primary")
         self.xlsx_btn.clicked.connect(self._on_save_xlsx)
-        self.png_btn = NeonButton(_KO.GL_SAVE_PNG, role="ghost")
-        self.png_btn.setMinimumHeight(theme.PROFILE.control_h_lg)
-        self.png_btn.clicked.connect(self._on_save_png)
-        self.compare_btn = NeonButton(_KO.GL_COMPARE, role="ghost")
-        self.compare_btn.setMinimumHeight(theme.PROFILE.control_h_lg)
-        self.compare_btn.clicked.connect(self._on_compare)
-        self.png_rois = QCheckBox(_KO.GL_PNG_ROIS, self)
+        self.png_btn = NeonButton(_KO.GL_SAVE_PNG_SHORT, role="ghost")
+        menu = QMenu(self.png_btn)
+        menu.addAction(_KO.GL_SAVE_PNG, self._on_save_png)
+        menu.addSeparator()
+        self.png_rois = menu.addAction(_KO.GL_PNG_ROIS)
+        self.png_rois.setCheckable(True)
         self.png_rois.setChecked(True)
+        self.png_btn.setMenu(menu)
+        self.compare_btn = NeonButton(_KO.GL_COMPARE, role="textAction")
+        self.compare_btn.clicked.connect(self._on_compare)
         self.toast = QLabel("", self)
         self.toast.setProperty("role", "muted")
+        for b in (self.open_btn, self.compare_btn, self.png_btn, self.xlsx_btn):
+            b.setProperty("grade", "panel")             # 머리줄 버튼은 모두 32 px
+        bar.addWidget(self.file_label)
         bar.addWidget(self.open_btn)
-        bar.addWidget(self.file_label, 1)
+        bar.addStretch(1)
         bar.addWidget(self.toast)
         bar.addWidget(self.compare_btn)
-        bar.addWidget(self.png_rois)
         bar.addWidget(self.png_btn)
         bar.addWidget(self.xlsx_btn)
         return bar
 
-    def _build_toolbar(self) -> QVBoxLayout:
-        col = QVBoxLayout()
-        col.setSpacing(4)
-        row = QHBoxLayout()
-        row.setSpacing(6)
-        self._tool_btns: dict[str, NeonButton] = {}
-        for tool in TOOLS:
-            b = NeonButton(_TOOL_LABEL[tool], role="ghost")
-            b.setCheckable(True)
-            b.setFocusPolicy(Qt.FocusPolicy.NoFocus)        # 방향키는 사진 화면이 받는다
-            b.clicked.connect(lambda _c=False, t=tool: self._set_tool(t))
-            self._tool_btns[tool] = b
-            row.addWidget(b)
-        self._tool_btns["move"].setChecked(True)
-        row.addSpacing(10)
-        row.addWidget(self._plain(_KO.GL_FIT, lambda: self.canvas.fit(), "F"))
-        self.defect_btn = self._plain(_KO.GL_DEFECT_GO, self._go_defect, "")
-        self.defect_btn.setEnabled(False)
-        self.defect_btn.setToolTip(_KO.GL_DEFECT_GO_OFF_TIP)
-        row.addWidget(self.defect_btn)
-        self.undo_btn = self._plain(_KO.GL_UNDO, lambda: self.canvas.undo(), "Ctrl+Z")
-        row.addWidget(self.undo_btn)
-        row.addWidget(self._plain(_KO.GL_CLEAR, self._clear_rois, ""))
-        row.addStretch(1)
-        col.addLayout(row)
-        hint = QLabel(_KO.GL_TOOLBAR_HINT, self)
-        hint.setProperty("role", "muted")
-        col.addWidget(hint)
-        return col
+    @staticmethod
+    def _cap_html(tag: str, color: str, name: str) -> str:
+        return f'<span style="color:{color}">■</span> {tag} · {html.escape(name)}'
 
-    def _plain(self, text: str, slot, tip: str) -> NeonButton:
-        b = NeonButton(text, role="ghost")
+    def _set_note(self, notes: list, *, warn: bool = False) -> None:
+        """사진 안내를 상태줄 오른쪽에 한 줄로 둔다(열린 동안 유지).  경고가 있으면 경고색."""
+        text = " · ".join(notes)
+        self.note.setText(text)
+        self.note.setToolTip(text)
+        self.note.setProperty("role", "warn" if warn else "mutedSmall")
+        self.note.style().unpolish(self.note)
+        self.note.style().polish(self.note)
+        self.note.setVisible(bool(notes))
+        self.hint.setVisible(not notes)
+
+    @staticmethod
+    def _set_role(btn: QPushButton, role: str) -> None:
+        if btn.property("role") == role:
+            return
+        btn.setProperty("role", role)
+        btn.style().unpolish(btn)
+        btn.style().polish(btn)
+
+    def _sync_empty_state(self) -> None:
+        """사진이 없으면 '사진 열기' 만 남색 채움이고 사진이 필요한 것은 모두 꺼 둔다."""
+        has = self._gl is not None
+        self._set_role(self.open_btn, "textAccent" if has else "primary")
+        self._set_role(self.xlsx_btn, "primary" if has else "ghost")
+        for b in (self.xlsx_btn, self.png_btn, self.compare_btn, self.clear_btn):
+            b.setEnabled(has)
+        for b in self._tool_btns.values():
+            b.setEnabled(has)
+        if not has:
+            self.undo_btn.setEnabled(False)
+            self.defect_btn.setEnabled(False)
+            for w in (self.overlay_cb, self.range_cb):
+                w.setEnabled(False)
+        else:
+            self.range_cb.setEnabled(True)
+        self.scope.setEnabled(has)
+        self._zoom_bar.setVisible(has)
+
+    def _tool_button(self, text: str, slot, *, icon: str = "", checkable: bool = False,
+                     tip: str = "") -> QToolButton:
+        """사진 위 팔레트의 버튼.  방향키는 사진 화면이 받으므로 포커스를 가져가지 않는다."""
+        b = QToolButton(self)
+        b.setProperty("role", "viewerTool")
         b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        if tip:
-            b.setToolTip(tip)
+        b.setCursor(Qt.CursorShape.PointingHandCursor)
+        b.setCheckable(checkable)
+        b.setAccessibleName(text)
+        if icon:
+            b.setIcon(_tool_icon(icon))
+            b.setIconSize(QSize(16, 16))
+            b.setToolTip(tip or text)           # 그림만 있는 버튼이라 이름을 띄운다
+        else:
+            b.setText(text)
+            if tip:
+                b.setToolTip(tip)
         b.clicked.connect(lambda _c=False: slot())
         return b
 
-    def _build_left(self) -> QVBoxLayout:
-        col = QVBoxLayout()
-        col.setSpacing(8)
+    def _build_overlays(self) -> None:
+        """사진 위에 뜨는 것 둘 — 왼쪽 위 도구 팔레트, 오른쪽 아래 배율 막대."""
+        tools = QFrame(self.canvas)
+        tools.setProperty("role", "viewerTools")
+        col = QVBoxLayout(tools)
+        col.setContentsMargins(4, 4, 4, 4)
+        col.setSpacing(2)
+        self._tool_btns: dict[str, QToolButton] = {}
+        for tool in TOOLS:
+            b = self._tool_button(_TOOL_LABEL[tool], lambda t=tool: self._set_tool(t),
+                                  icon=tool, checkable=True)
+            self._tool_btns[tool] = b
+            col.addWidget(b)
+        self._tool_btns["move"].setChecked(True)
+        sep = QFrame(tools)
+        sep.setProperty("role", "viewerSep")
+        sep.setFixedHeight(1)
+        col.addSpacing(2)
+        col.addWidget(sep)
+        col.addSpacing(2)
+        self.undo_btn = self._tool_button(_KO.GL_UNDO, lambda: self.canvas.undo(), icon="undo",
+                                          tip=f"{_KO.GL_UNDO} (Ctrl+Z)")
+        col.addWidget(self.undo_btn)
+        self.clear_btn = self._tool_button(_KO.GL_CLEAR, self._clear_rois, icon="clear")
+        col.addWidget(self.clear_btn)
+
+        zoom = self._zoom_bar = QFrame(self.canvas)
+        zoom.setProperty("role", "viewerTools")
+        row = QHBoxLayout(zoom)
+        row.setContentsMargins(4, 4, 4, 4)
+        row.setSpacing(2)
+        self.zoom_label = QLabel("", zoom)
+        self.zoom_label.setProperty("role", "viewerZoom")
+        row.addWidget(self.zoom_label)
+        row.addWidget(self._tool_button(_KO.GL_FIT, lambda: self.canvas.fit(), tip="F"))
+        self.defect_btn = self._tool_button(_KO.GL_DEFECT_GO, self._go_defect,
+                                            tip=_KO.GL_DEFECT_GO_OFF_TIP)
+        self.defect_btn.setEnabled(False)
+        row.addWidget(self.defect_btn)
+
+        over = QGridLayout(self.canvas)
+        over.setContentsMargins(12, 12, 12, 12)
+        over.addWidget(tools, 0, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        over.addWidget(zoom, 0, 0, Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignRight)
+
+    def _build_left(self) -> QWidget:
         self.canvas = GlCanvas(self)
         self.canvas_b = GlCanvas(self)
         self.canvas_b.rois = self.canvas.rois          # 같은 ROI 를 두 사진에 함께 쓴다
@@ -272,87 +392,166 @@ class GlViewerDialog(QDialog):
             c.hoverInfo.connect(self._on_hover)
             c.viewStateChanged.connect(self._sync_views)
         self.canvas.viewChanged.connect(self._update_status)
+        self._build_overlays()
         self.cap_a = QLabel("", self)
         self.cap_b = QLabel("", self)
         for cap in (self.cap_a, self.cap_b):
             cap.setProperty("role", "muted")
+            cap.setTextFormat(Qt.TextFormat.RichText)      # 앞의 ■ 견본이 차트 선 색과 같다
+            cap.setContentsMargins(16, 0, 8, 4)
         self.split = QSplitter(Qt.Orientation.Horizontal, self)
         self.split.setChildrenCollapsible(False)
+        self.split.setHandleWidth(1)
         for cap, cv in ((self.cap_a, self.canvas), (self.cap_b, self.canvas_b)):
             pane = QWidget(self.split)
             lay = QVBoxLayout(pane)
             lay.setContentsMargins(0, 0, 0, 0)
-            lay.setSpacing(2)
+            lay.setSpacing(0)
             lay.addWidget(cap)
             lay.addWidget(cv, 1)
             self.split.addWidget(pane)
             cap.setVisible(False)
         self.pane_b = self.split.widget(1)
         self.pane_b.setVisible(False)
-        col.addWidget(self.split, 1)
-        self.status = QLabel("", self)
+        return self.split
+
+    def _build_status(self) -> QFrame:
+        bar = QFrame(self)
+        bar.setProperty("role", "statusBar")
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(16, 4, 16, 4)
+        self.status = QLabel("", bar)
         self.status.setProperty("role", "mono")
         self.status.setMinimumHeight(theme.PROFILE.target_min)
-        col.addWidget(self.status)
-        return col
+        row.addWidget(self.status, 1)
+        self.hint = QLabel(_KO.GL_TOOLBAR_HINT, bar)     # 도움말은 상태줄에만 둔다
+        self.hint.setProperty("role", "mutedSmall")
+        row.addWidget(self.hint)
+        # 사진 안내(Scan 찾음·경고)는 그 사진이 열려 있는 동안 조작 안내 자리를 대신한다.
+        self.note = QLabel("", bar)
+        self.note.setProperty("role", "mutedSmall")
+        self.note.setVisible(False)
+        row.addWidget(self.note)
+        return bar
 
-    def _build_right(self) -> QWidget:
-        host = QWidget(self)
+    def _build_right(self) -> QFrame:
+        """오른쪽 인스펙터 — 폭을 고정해 창이 커지면 사진만 커진다."""
+        host = QFrame(self)
+        host.setProperty("role", "inspector")
+        host.setFixedWidth(_INSPECTOR_W)
         col = QVBoxLayout(host)
-        col.setContentsMargins(0, 0, 0, 0)
-        col.setSpacing(10)
-        # 임계값
+        col.setContentsMargins(24, 16, 16, 12)
+        col.setSpacing(8)
+        # 임계값 — 막대 위 손잡이로 옮긴다.  입력칸은 숫자를 두 번 눌렀을 때만 그 자리에 뜬다.
         col.addWidget(self._section(_KO.GL_THRESHOLD))
-        row = QHBoxLayout()
-        self.lo_spin, self.hi_spin = QSpinBox(self), QSpinBox(self)
+        self.thr_range = ThresholdRange(host)
+        self.thr_range.moved.connect(self._on_hist_drag)
+        self.thr_range.editRequested.connect(self._edit_threshold)
+        self.thr_range.setEnabled(False)            # 사진을 열면 켠다
+        col.addWidget(self.thr_range)
+        self.lo_spin, self.hi_spin = QSpinBox(host), QSpinBox(host)
         for sp, name in ((self.lo_spin, _KO.GL_THR_LOW), (self.hi_spin, _KO.GL_THR_HIGH)):
             sp.setAccessibleName(name)
             sp.setKeyboardTracking(False)
             sp.setRange(0, 255)
-        self.lo_spin.setStyleSheet(f"QSpinBox {{ color: {QColor(47, 111, 224).name()}; }}")
-        self.hi_spin.setStyleSheet(f"QSpinBox {{ color: {QColor(229, 50, 42).name()}; }}")
+            sp.setVisible(False)
+            sp.editingFinished.connect(sp.hide)
         self.lo_spin.valueChanged.connect(lambda v: self._set_thresholds(v, self._hi, "lo"))
         self.hi_spin.valueChanged.connect(lambda v: self._set_thresholds(self._lo, v, "hi"))
-        for lab, sp in ((_KO.GL_THR_LOW, self.lo_spin), (_KO.GL_THR_HIGH, self.hi_spin)):
-            c = QVBoxLayout()
-            l = QLabel(lab, self)
-            l.setProperty("role", "muted")
-            c.addWidget(l)
-            c.addWidget(sp)
-            row.addLayout(c, 1)
-        col.addLayout(row)
         self.thr_note = QLabel("", self)
         self.thr_note.setProperty("role", "muted")
+        self.thr_note.setWordWrap(True)
+        self.thr_note.setVisible(False)
         col.addWidget(self.thr_note)
+        col.addSpacing(4)                        # 임계값 묶음과 색칠 범위는 한 묶음(12)
+        scope_lab = QLabel(_KO.GL_SCOPE_LABEL, host)
+        scope_lab.setProperty("role", "muted")
+        col.addWidget(scope_lab)
         self.scope = OptionGroup([(analysis.SCOPE_ALL, _KO.GL_SCOPE_ALL),
                                   (analysis.SCOPE_ROI, _KO.GL_SCOPE_ROI),
                                   (analysis.SCOPE_OFF, _KO.GL_SCOPE_OFF)],
-                                 current=analysis.SCOPE_ALL, fixed_cols=3, role="segment")
+                                 current=analysis.SCOPE_ALL, fixed_cols=3, role="segment",
+                                 min_tile_w=64)
         self.scope.selection_changed.connect(lambda _k: self._schedule_refresh())
+        for k in self.scope.keys():
+            self.scope.button(k).setProperty("grade", "gl")      # 인스펙터 안 32 px · 같은 글자 크기
         col.addWidget(self.scope)
+        col.addSpacing(16)                       # 묶음 사이 24
         # 히스토그램
         head = QHBoxLayout()
+        head.setSpacing(8)
         head.addWidget(self._section(_KO.GL_HIST))
         self.hist_name = QLabel("", self)
         self.hist_name.setProperty("role", "muted")
+        self.hist_name.setMinimumWidth(0)
         head.addWidget(self.hist_name, 1)
+        self.by_roi_btn = QPushButton(_KO.GL_HIST_BY_ROI, self)
+        self.by_roi_btn.setProperty("role", "histToggle")
+        self.by_roi_btn.setCheckable(True)
+        self.by_roi_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.by_roi_btn.setEnabled(False)
+        self.by_roi_btn.setToolTip(_KO.GL_HIST_BY_ROI_NEED)
+        self.by_roi_btn.toggled.connect(lambda _c: self._on_by_roi_toggled())
+        head.addWidget(self.by_roi_btn)
         col.addLayout(head)
         opts = QHBoxLayout()
-        self.overlay_cb = QCheckBox(_KO.GL_HIST_OVERLAY, self)
-        self.range_cb = QCheckBox(_KO.GL_HIST_DATA_RANGE, self)
+        opts.setSpacing(16)
+        self.overlay_cb = _TickCheck(_KO.GL_HIST_OVERLAY, self)
+        self.range_cb = _TickCheck(_KO.GL_HIST_DATA_RANGE, self)
         for cb in (self.overlay_cb, self.range_cb):
+            cb.setProperty("role", "histOpt")
+            cb.setCursor(Qt.CursorShape.PointingHandCursor)
             cb.toggled.connect(lambda _c: self._schedule_refresh())
             opts.addWidget(cb)
         opts.addStretch(1)
         col.addLayout(opts)
         self.hist = HistogramChart(self)
         self.hist.thresholdDragged.connect(self._on_hist_drag)
+        self.hist.rowClicked.connect(self._on_hist_row)
         col.addWidget(self.hist, 1)
         self.hist_info = QLabel("", self)
         self.hist_info.setProperty("role", "mono")
         self.hist.hoverText.connect(self.hist_info.setText)
         col.addWidget(self.hist_info)
         return host
+
+    def _on_by_roi_toggled(self) -> None:
+        self._sync_hist_controls()
+        self._schedule_refresh()
+
+    def _on_hist_row(self, rid: int) -> None:
+        """줄을 누르면 그 ROI 를 고른다 — 캔버스에서 고른 것과 같은 흐름(selectionChanged)을 탄다."""
+        self.canvas._select(None if rid == ALL_ROW else rid)
+
+    def _sync_hist_controls(self) -> None:
+        """'ROI 별로 보기' 와 '겹쳐 보기' 의 켜짐 조건 — ROI 가 있고 비교 중이 아닐 때만 줄 쌓기."""
+        n = len(self.canvas.rois.rois)
+        comparing = self._gl_b is not None
+        ok = n >= 1 and not comparing
+        btn = self.by_roi_btn
+        if not ok and btn.isChecked():
+            btn.blockSignals(True)
+            btn.setChecked(False)
+            btn.blockSignals(False)
+        btn.setEnabled(ok)
+        btn.setToolTip("" if ok else (_KO.GL_HIST_BY_ROI_CMP if comparing else _KO.GL_HIST_BY_ROI_NEED))
+        self.overlay_cb.setEnabled(not comparing and not btn.isChecked())
+
+    def _edit_threshold(self, which: str, at) -> None:
+        """막대의 숫자 자리에 입력칸을 띄운다(Enter 나 다른 곳을 누르면 닫힌다)."""
+        if self._gl is None:
+            return
+        sp = self.lo_spin if which == "lo" else self.hi_spin
+        (self.hi_spin if which == "lo" else self.lo_spin).hide()
+        host = sp.parentWidget()
+        w, h = 104, sp.sizeHint().height()
+        origin = self.thr_range.mapTo(host, at.toRect().center())
+        x = max(8, min(origin.x() - w // 2, host.width() - w - 8))
+        sp.setGeometry(x, self.thr_range.y(), w, h)
+        sp.show()
+        sp.raise_()
+        sp.setFocus()
+        sp.selectAll()
 
     def _section(self, text: str) -> QLabel:
         l = QLabel(text, self)
@@ -453,6 +652,7 @@ class GlViewerDialog(QDialog):
         if self._gl_b is not None:
             self._full_hist_b = analysis.histogram(self._gl_b.data, self._bits)
         self._set_range_widgets()
+        self.thr_range.setEnabled(True)
         self._lo, self._hi = analysis.auto_thresholds(self._full_hist)
         self._sync_spins()
         rgb = self._make_rgb()
@@ -467,10 +667,10 @@ class GlViewerDialog(QDialog):
             notes.append(_KO.GL_SCAN_MISSING)
         notes += [_WARN_TEXT[w] for w in self._gl.warnings
                   if w in _WARN_TEXT and not (v.scan_name and w == loader.W_COLOR)]
-        self.banner.setText("\n".join(notes))
-        self.banner.setVisible(bool(notes))
+        self._set_note(notes, warn=bool(notes) and not (v.scan_name and len(notes) == 1))
         self.defect_btn.setEnabled(bool(v.target_box))
         self.defect_btn.setToolTip("" if v.target_box else _KO.GL_DEFECT_GO_OFF_TIP)
+        self._sync_empty_state()
         if v.target_box:
             self._ensure_defect_roi()
             call_later(self, 0, self._zoom_to_target)
@@ -529,12 +729,12 @@ class GlViewerDialog(QDialog):
         self.canvas_b.set_image(b.data, self._make_rgb(b), fit=False)
         self.canvas_b.set_view_state(self.canvas.view_state())
         self.pane_b.setVisible(True)
-        self.cap_a.setText(f"A · {Path(self._view.source_path or self._gl.path).name}")
-        self.cap_b.setText(f"B · {Path(v.source_path or b.path).name}")
+        self.cap_a.setText(self._cap_html("A", _CMP_A, Path(self._view.source_path or self._gl.path).name))
+        self.cap_b.setText(self._cap_html("B", _CMP_B, Path(v.source_path or b.path).name))
         self.cap_a.setVisible(True)
         self.cap_b.setVisible(True)
         self.compare_btn.setText(_KO.GL_COMPARE_CLOSE)
-        self.overlay_cb.setEnabled(False)
+        self._sync_hist_controls()
         self.split.setSizes([1, 1])
         self._refresh()
 
@@ -544,7 +744,7 @@ class GlViewerDialog(QDialog):
         self.cap_a.setVisible(False)
         self.cap_b.setVisible(False)
         self.compare_btn.setText(_KO.GL_COMPARE)
-        self.overlay_cb.setEnabled(True)
+        self._sync_hist_controls()
 
     def _sync_views(self) -> None:
         """한쪽을 확대·이동하면 다른 쪽도 같은 자리를 본다(비교는 같은 곳을 보는 일이다)."""
@@ -603,6 +803,7 @@ class GlViewerDialog(QDialog):
             sp.blockSignals(True)
             sp.setRange(0, top)
             sp.blockSignals(False)
+        self.thr_range.set_levels(top + 1)
 
     def _sync_spins(self) -> None:
         for sp, v in ((self.lo_spin, self._lo), (self.hi_spin, self._hi)):
@@ -611,6 +812,7 @@ class GlViewerDialog(QDialog):
             sp.blockSignals(False)
         self.canvas.set_thresholds(self._lo, self._hi)
         self.hist.set_thresholds(self._lo, self._hi)
+        self.thr_range.set_thresholds(self._lo, self._hi)
 
     def _set_thresholds(self, lo: int, hi: int, moved: str) -> None:
         """하한 < 상한을 지킨다 — 움직인 쪽이 반대편을 넘으면 그 자리에서 멈추고 알린다."""
@@ -624,6 +826,7 @@ class GlViewerDialog(QDialog):
             note = _KO.GL_THR_ORDER_NOTE
         self._lo, self._hi = analysis.clamp_thresholds(lo, hi, self._bits)
         self.thr_note.setText(note)
+        self.thr_note.setVisible(bool(note))
         self._sync_spins()
         self._schedule_refresh()
 
@@ -666,6 +869,16 @@ class GlViewerDialog(QDialog):
         rois = self.canvas.rois.rois
         active = self.canvas.rois.active()
         series, name = [], _KO.GL_HIST_ALL
+        self._sync_hist_controls()
+        if self.by_roi_btn.isChecked():
+            rows = [(ALL_ROW, _KO.GL_HIST_ALL, theme.INK2 or "#3D3B35", self._full_hist)]
+            rows += [(r.id, r.name, r.color,
+                      analysis.histogram(analysis.roi_values(data, r), self._bits)) for r in rois]
+            self.hist.set_range_data(self.range_cb.isChecked())
+            self.hist.set_rows(rows, levels, ALL_ROW if active is None else active.id)
+            self.hist.set_thresholds(self._lo, self._hi)
+            self.hist_name.setText("")
+            return
         if self._gl_b is not None:
             # 비교: 선택한 ROI(없으면 사진 전체)의 A·B 분포를 % 로 겹친다.
             if active is not None:
@@ -678,7 +891,7 @@ class GlViewerDialog(QDialog):
         elif self.overlay_cb.isChecked() and len(rois) >= 2:
             series = [(r.name, r.color, analysis.histogram(analysis.roi_values(data, r), self._bits))
                       for r in rois]
-            name = " · ".join(r.name for r in rois)
+            name = ""                                   # 색 견본은 분포 선이 말한다(제목 줄이 좁다)
         elif active is not None:
             series = [(active.name, theme.MUTE or "#5A574E",
                        analysis.histogram(analysis.roi_values(data, active), self._bits))]
@@ -688,7 +901,12 @@ class GlViewerDialog(QDialog):
         self.hist.set_range_data(self.range_cb.isChecked())
         self.hist.set_series(series, levels, normalize=len(series) > 1)
         self.hist.set_thresholds(self._lo, self._hi)
-        self.hist_name.setText(name)
+        self.hist_name.setText(self._elide_name(name))
+        self.hist_name.setToolTip(name)
+
+    def _elide_name(self, name: str) -> str:
+        fm = self.hist_name.fontMetrics()
+        return fm.elidedText(name, Qt.TextElideMode.ElideRight, 88)
 
     def _stat_row(self, r: Optional[R.Roi], gl: Optional[loader.GlImage] = None) -> dict:
         data = (gl or self._gl).data
@@ -718,17 +936,19 @@ class GlViewerDialog(QDialog):
 
     def _on_hover(self, x: int, y: int, gl: int) -> None:
         self._hover_text = (_KO.GL_STATUS_FMT.format(x=x, y=y, gl=gl) if x >= 0
-                            else _KO.GL_STATUS_OUT)
+                            else "")
         self._update_status()
 
     def _update_status(self, *_a) -> None:
         if self._gl is None:
             self.status.setText("")
+            self.zoom_label.setText("")
             return
         h, w = self._gl.shape
         view = _KO.GL_STATUS_VIEW_FMT.format(w=w, h=h, bits=self._bits,
                                              zoom=int(round(self.canvas.scale() * 100)))
-        self.status.setText(f"{self._hover_text}    {view}")
+        self.status.setText(f"{self._hover_text}    {view}".strip())
+        self.zoom_label.setText(f"{int(round(self.canvas.scale() * 100))}%")
 
     def _toast(self, text: str, *, error: bool = False) -> None:
         self.toast.setText(text)

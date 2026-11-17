@@ -87,6 +87,20 @@ def stats(values: np.ndarray, lo: int, hi: int) -> dict:
             "below": int((v <= lo).sum()), "above": int((v >= hi).sum())}
 
 
+def zone_ratios(hist: np.ndarray, lo: int, hi: int) -> tuple[float, float, float]:
+    """히스토그램을 세 구역(하한 이하 · 사이 · 상한 이상)의 % 로 — 화면 칠하기·``stats`` 와 같은 경계.
+
+    하한·상한 값 자신은 각각 '이하'·'이상' 쪽이다.  비었으면 (0, 0, 0)."""
+    h = np.asarray(hist, dtype=np.int64).reshape(-1)
+    total = int(h.sum())
+    if total == 0:
+        return 0.0, 0.0, 0.0
+    below = int(h[:max(0, lo + 1)].sum())
+    above = int(h[max(0, hi):].sum())
+    return (below / total * 100.0, (total - below - above) / total * 100.0,
+            above / total * 100.0)
+
+
 def auto_thresholds(hist: np.ndarray, tail: float = 0.005) -> tuple[int, int]:
     """하위·상위 ``tail`` 비율 지점 → (하한, 상한).  하한 < 상한을 보장한다."""
     total = int(hist.sum())

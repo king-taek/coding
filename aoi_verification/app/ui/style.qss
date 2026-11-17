@@ -1352,3 +1352,388 @@ QLabel[role="viewerPane"] {
     background-color: $viewer_bg;
     border: 1px solid $line;
 }
+
+/* ── GL 히스토그램 뷰어 ────────────────────────────────────────────────
+   사진 위에 뜨는 도구 팔레트·배율 막대, 오른쪽 인스펙터, 머리줄의 글자 버튼.
+   팔레트는 검은 사진 위에 떠서 화면 색($bg)이 아니라 사진 판독용 잉크를 쓴다. */
+QFrame[role="viewerTools"] {
+    background-color: rgba(27, 26, 23, 220);
+    border: none;
+    border-radius: $radius_sm;
+}
+QToolButton[role="viewerTool"] {
+    background: transparent;
+    color: $bg;
+    border: 1px solid transparent;
+    border-radius: $radius_sm;
+    padding: 0px 8px;
+    min-width: 14px;
+    min-height: 30px;
+    font-size: $font_caption_sz;
+}
+QToolButton[role="viewerTool"]:hover {
+    background-color: rgba(255, 255, 255, 36);
+}
+QToolButton[role="viewerTool"]:checked {
+    background-color: $accent;
+}
+QToolButton[role="viewerTool"]:focus {
+    border: 1px solid $bg;
+}
+QToolButton[role="viewerTool"]:disabled {
+    color: $viewer_ink;
+}
+QLabel[role="viewerZoom"] {
+    color: $bg;
+    background: transparent;
+    font-family: $font_mono;
+    font-size: $font_caption_sz;
+    padding: 0px 8px;
+}
+QFrame[role="viewerSep"] {
+    background-color: rgba(255, 255, 255, 60);
+    border: none;
+}
+QFrame[role="inspector"] {
+    background-color: $panel;
+    border: none;
+    border-left: 1px solid $line2;
+}
+QFrame[role="statusBar"] {
+    background-color: $bg;
+    border: none;
+    border-top: 1px solid $line2;
+}
+/* 글자 버튼 — 버튼 위계의 셋째 단(남색 채움 > 외곽선 > 글자). */
+QPushButton[role="textAction"],
+QPushButton[role="textAccent"] {
+    background: transparent;
+    color: $ink2;
+    border: 1px solid transparent;
+    border-radius: $radius_sm;
+    padding: 0px 10px;
+    min-height: 30px;           /* 보더 2 와 합쳐 32 — 옆 외곽선 버튼과 같은 높이 */
+}
+QPushButton[role="textAccent"] {
+    color: $accent;
+    font-weight: 700;
+}
+QPushButton[role="textAction"]:hover,
+QPushButton[role="textAccent"]:hover {
+    background-color: $elev;
+    color: $ink;
+}
+QPushButton[role="textAction"]:focus,
+QPushButton[role="textAccent"]:focus {
+    border: $focus_w solid $focus;
+}
+QPushButton[role="textAction"]:disabled,
+QPushButton[role="textAccent"]:disabled {
+    color: $disabled_ink;
+}
+/* 히스토그램 제목 줄의 'ROI 별로 보기' — 외곽선 32px 토글(켜면 남색 옅은 면). */
+QPushButton[role="histToggle"] {
+    background: transparent;
+    font-size: $font_caption_sz;
+    font-weight: 600;
+    color: $ink2;
+    border: 1px solid $line_strong;
+    border-radius: $radius_sm;
+    padding: 0px 12px;
+    min-height: 30px;
+    max-height: 30px;
+}
+QPushButton[role="histToggle"]:hover {
+    color: $ink;
+    border-color: $accent;
+}
+QPushButton[role="histToggle"]:checked {
+    background-color: $accent_tint;
+    color: $accent;
+    border-color: $accent;
+}
+QPushButton[role="histToggle"]:focus {
+    border: $focus_w solid $focus;
+}
+QPushButton[role="histToggle"]:disabled {
+    color: $disabled_ink;
+    border: 1px solid $line2;
+    background: transparent;
+}
+/* 작은 글자 토글 — 상자 없이 체크 표시(위젯이 그린다) + 글자. */
+QCheckBox[role="histOpt"] {
+    color: $mute;
+    font-size: $font_caption_sz;
+    spacing: 18px;
+    min-height: 24px;
+}
+QCheckBox[role="histOpt"]:hover {
+    color: $ink2;
+}
+QCheckBox[role="histOpt"]:checked {
+    color: $ink;
+}
+QCheckBox[role="histOpt"]:disabled {
+    color: $disabled_ink;
+}
+QCheckBox[role="histOpt"]::indicator {
+    width: 0px;
+    height: 0px;
+    border: none;
+    background: transparent;
+}
+
+/* ===== Overkill 튜닝 — 왼쪽 열(폴더 · Zone) · 한 줄 요약 · 밑줄 탭 · 밀착 타일 · 줄 아래 상세 =====
+   상자 대신 면 색 하나(선택 행)와 1px 선만 쓴다. */
+QFrame[role="ovHeader"] {
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid $line2;
+}
+QFrame[role="ovSide"] {
+    background-color: $panel;
+    border: none;
+    border-right: 1px solid $line2;
+}
+QScrollArea[role="ovSideScroll"],
+QScrollArea[role="ovSideScroll"] > QWidget > QWidget,
+QScrollArea[role="ovSideScroll"] QAbstractScrollArea::viewport {
+    background: transparent;
+    border: none;
+}
+QLabel[role="ovGroupHead"] {
+    color: $mute;
+    font-size: $font_caption_sz;
+}
+QFrame[role="ovRow"] {
+    background: transparent;
+    border: none;
+    border-radius: $radius_sm;
+}
+QFrame[role="ovRow"][selected="true"],
+QFrame[role="ovRow"][flash="on"] {
+    background-color: $accent_tint;
+}
+QLabel[role="ovRowName"] {
+    color: $ink;
+}
+QFrame[role="ovRow"][selected="true"] QLabel[role="ovRowName"] {
+    color: $accent;
+    font-weight: 700;
+}
+QFrame[role="ovRow"][excluded="true"] QLabel[role="ovRowName"] {
+    color: $mute;
+}
+QLabel[role="ovRowCount"] {
+    font-family: $font_mono;
+    font-size: $font_caption_lg_sz;
+    color: $mute;
+}
+QLabel[role="ovRowNote"] {
+    font-size: $font_caption_sz;
+    color: $mute;
+}
+QLabel[role="ovRowNote"][warn="true"] {
+    color: $warn;
+}
+QPushButton[role="ovRowX"] {
+    background: transparent;
+    color: $mute;
+    border: none;
+    border-radius: $radius_sm;
+    padding: 0px;
+}
+QPushButton[role="ovRowX"]:hover {
+    background-color: $danger_tint;
+    color: $danger;
+}
+QPushButton[role="ovView"] {
+    background: transparent;
+    color: $mute;
+    border: none;
+    border-radius: $radius_sm;
+    padding: 0px 8px;
+    font-size: $font_caption_sz;
+}
+QPushButton[role="ovView"]:hover {
+    color: $ink;
+}
+QPushButton[role="ovView"]:checked {
+    color: $accent;
+    font-weight: 700;
+}
+QPushButton[role="ovView"]:disabled {
+    color: $disabled_ink;
+}
+/* GL 인스펙터 안 세그먼트 — 'ROI 별로 보기'(histToggle)와 같은 32 px · 같은 글자 크기, 비활성은 옅은 실선. */
+QPushButton[role="segment"][grade="gl"] {
+    min-height: 30px;
+    max-height: 30px;
+    padding: 0px 14px;
+}
+QPushButton[role="segment"][grade="gl"]:focus {
+    padding: 0px 14px;
+}
+QPushButton[role="segment"][grade="gl"]:disabled,
+QPushButton[role="segment"][grade="gl"]:checked:disabled {
+    border: 1px solid $line2;
+}
+QPushButton[role="segment"][grade="panel"] {
+    min-height: 30px;
+    max-height: 30px;
+    padding: 0px 14px;
+}
+QLabel[role="sumCap"] {
+    color: $mute;
+}
+QLabel[role="sumNum"] {
+    font-family: $font_mono;
+    font-weight: 700;
+    color: $ink;
+}
+QLabel[role="sumNum"][tone="over"] { color: $danger; }
+QLabel[role="sumNum"][tone="ok"] { color: $pass; }
+QLabel[role="sumNum"][tone="pick"] { color: $accent; }
+QFrame[role="ovTabs"] {
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid $line2;
+}
+QPushButton[role="underTab"] {
+    background: transparent;
+    color: $mute;
+    border: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 0px;
+    padding: 0px 2px;
+    min-height: 30px;
+    max-height: 30px;
+}
+QPushButton[role="underTab"]:hover {
+    color: $ink;
+}
+QPushButton[role="underTab"]:checked {
+    color: $ink;
+    font-weight: 700;
+    border-bottom: 2px solid $accent;
+}
+QPushButton[role="underTab"]:focus {
+    border-bottom: 2px solid $focus;
+}
+QLabel[role="ovGroupName"] {
+    font-size: $font_caption_lg_sz;
+    font-weight: 700;
+    color: $ink2;
+}
+QLabel[role="tilePic"] {
+    background-color: $panel;
+    border: none;
+}
+QFrame[role="tileRing"] {
+    background: transparent;
+    border: 2px solid $accent;
+    border-radius: 0px;
+}
+QLabel[role="tileBadge"] {
+    background-color: $accent;
+    color: $on_accent;
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: 700;
+}
+QLabel[role="tileMore"] {
+    background-color: $elev;
+    color: $ink;
+    border: 1px solid $line2;
+    border-radius: $radius_sm;
+    font-weight: 700;
+}
+QLabel[role="tileMark"] {
+    background: transparent;
+    color: $on_accent;
+    font-size: 11px;
+    font-weight: 700;
+}
+QFrame[role="ovDetail"] {
+    background: transparent;
+    border: none;
+    border-top: 1px solid $line2;
+    border-bottom: 1px solid $line2;
+    border-radius: 0px;
+}
+QLabel[role="ovCell"] {
+    font-size: $font_caption_lg_sz;
+    color: $mute;
+}
+QLabel[role="ovCell"][me="true"] {
+    color: $ink;
+    font-weight: 700;
+}
+QLabel[role="ovNum"] {
+    font-family: $font_mono;
+    color: $ink;
+}
+QLabel[role="ovNum"][me="true"] {
+    font-weight: 700;
+}
+QLabel[role="ovNum"][bad="true"] {
+    color: $danger;
+    font-weight: 700;
+}
+QLabel[role="ovNumHead"] {
+    font-size: $font_caption_sz;
+    color: $mute;
+}
+QLabel[role="ovFile"] {
+    font-size: $font_caption_sz;
+    color: $mute;
+}
+
+/* Overkill 기준 열 — 분포 바로 밑 같은 축 슬라이더(상자 없음).  분포 · 자름선 · 손잡이 중심이 같은 x 를 쓴다(손잡이 12px). */
+QLineEdit[role="axisField"] {
+    background-color: $elev;
+    border: 1px solid $line_strong;
+    border-radius: $radius_sm;
+    padding: 0px 8px;
+    min-height: 30px;
+    font-family: $font_mono;
+    color: $ink;
+}
+QLineEdit[role="axisField"]:hover {
+    border-color: $mute;
+}
+QLineEdit[role="axisField"]:focus {
+    border: $focus_w solid $focus;
+    padding: 0px 7px;
+}
+QLabel[role="axisDelta"] {
+    font-family: $font_mono;
+    color: $danger;
+}
+QLabel[role="axisDelta"][tone="ok"] {
+    color: $pass;
+}
+QLabel[role="axisNote"] {
+    color: $mute;
+    font-size: 11px;
+}
+QSlider[role="axis"]::groove:horizontal {
+    height: 4px;
+    background: $line2;
+    border-radius: 2px;
+}
+QSlider[role="axis"]::sub-page:horizontal {
+    background: $accent;
+    border-radius: 2px;
+}
+QSlider[role="axis"]::handle:horizontal {
+    width: 10px;
+    height: 10px;
+    margin: -4px 0px;
+    background: $elev;
+    border: 1px solid $ink;
+    border-radius: 6px;
+}
+QSlider[role="axis"]::handle:horizontal:hover {
+    background: $panel;
+}

@@ -374,9 +374,9 @@ def _prime(dlg, T, *roots):
 
 
 def _chips(dlg, T) -> list:
-    """칩 줄에 놓인 칩(지우려고 숨겨 둔 옛 칩은 레이아웃에 없다)."""
-    items = (dlg._chips.itemAt(i).widget() for i in range(dlg._chips.count()))
-    return [w for w in items if isinstance(w, T._FolderChip)]
+    """왼쪽 열 폴더 목록에 놓인 줄(지우려고 숨겨 둔 옛 줄은 레이아웃에 없다)."""
+    items = (dlg._folder_lay.itemAt(i).widget() for i in range(dlg._folder_lay.count()))
+    return [w for w in items if isinstance(w, T._FolderRow)]
 
 
 def _no_load(monkeypatch, T):
@@ -622,8 +622,10 @@ def test_excluded_chip_and_base_change_resets_values(styled_qapp, tmp_path, monk
         dlg.deleteLater()
 
 
-def test_chip_overflow_collapses_into_more_chip(styled_qapp, tmp_path, monkeypatch):
-    """칩이 줄 폭을 넘으면 뒤쪽은 '+n 더 보기' 로 접히고, 누르면 접힌 칩 전체가 목록으로 뜬다."""
+def test_many_folders_stay_in_the_left_list_and_scroll(styled_qapp, tmp_path, monkeypatch):
+    """폴더가 많아도 접지 않는다 — 왼쪽 열 목록에 전부 줄로 놓이고(+n 더 보기 없음), 열이 세로로만 스크롤된다."""
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtWidgets import QScrollArea
     from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
     base = _wafer_with_photos(tmp_path / "base")
     roots = [base]
@@ -634,21 +636,20 @@ def test_chip_overflow_collapses_into_more_chip(styled_qapp, tmp_path, monkeypat
     _no_load(monkeypatch, T)
     dlg = T.ThresholdPreviewDialog()
     try:
-        dlg.resize(900, 600)
+        dlg.resize(1040, 600)
         dlg.show()
         _prime(dlg, T, *roots)
         dlg.set_folders(roots)
         styled_qapp.processEvents()
-        dlg._render_chips()
-        shown = _chips(dlg, T)
-        assert dlg.more_btn is not None and dlg._hidden_chips
-        assert len(shown) + len(dlg._hidden_chips) == 8 and shown[0].info.root == base
-        assert dlg.more_btn.text() == f"+{len(dlg._hidden_chips)} 더 보기"
-        dlg.select_folder(dlg._hidden_chips[-1].root)              # 고른 칩은 접히지 않고 남는다
-        assert all(i.root != dlg._sel for i in dlg._hidden_chips)
-        dlg._open_more()
-        assert len(dlg._more_pop.findChildren(T._FolderChip)) == len(dlg._hidden_chips)
-        dlg._more_pop.hide()
+        rows = _chips(dlg, T)
+        assert [r.info.root for r in rows] == roots and not hasattr(dlg, "more_btn")
+        side = dlg.findChild(QScrollArea)
+        assert side.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        assert all(r.width() <= T.SIDE_W for r in rows)                 # 잘려 나가거나 가로로 넘치지 않는다
+        dlg.select_folder(roots[-1])
+        styled_qapp.processEvents()
+        assert _chips(dlg, T)[-1].info.selected and _chips(dlg, T)[-1].seg_host.isVisibleTo(dlg)
+        assert not _chips(dlg, T)[0].seg_host.isVisibleTo(dlg)            # 컬러 | 스캔 은 고른 줄에만
     finally:
         dlg.deleteLater()
 
@@ -856,3 +857,281 @@ def test_drop_and_paste_add_folders(styled_qapp, tmp_path, monkeypatch):
         assert drop_paths.local_paths(m) == [str(d1)]
     finally:
         dlg.close()
+
+
+# ---------------------------------------------------------------- 화면 개편(2026-11-17): 왼쪽 열 · 비율 막대 · 밑줄 탭 · 밀착 타일 · 줄 아래 상세
+def _shown_dlg(T, styled_qapp, tmp_path, mode="manual"):
+    dlg = T.ThresholdPreviewDialog()
+    dlg.resize(1280, 800)
+    dlg.show()
+    dlg.set_wafer(T.load_wafer(_wafer_with_photos(tmp_path)))
+    dlg.set_mode(mode)
+    styled_qapp.processEvents()
+    return dlg
+
+
+def test_summary_is_one_line_with_ratio_bar(styled_qapp, tmp_path):
+    """요약은 한 줄 수치(빠짐 · 남음 · 전체) + 비율 막대 하나 — 막대 값이 수치와 같고, 꼭 잡기 · 놓침은 있을 때만 나온다."""
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    dlg = _shown_dlg(T, styled_qapp, tmp_path)
+    try:
+        assert (dlg.ratio.drop, dlg.ratio.total) == (0, 10) and not dlg.ratio.ticks
+        assert (dlg.keep_label.text(), dlg.all_label.text()) == ("10", "10")
+        assert not dlg.pick_box.isVisibleTo(dlg) and not dlg.miss_box.isVisibleTo(dlg)
+        dlg.set_value(14, R.FEATURE_AREA, 40.0)
+        assert (dlg.ratio.drop, dlg.ratio.total) == (7, 10) and dlg.drop_value.property("tone") == "over"
+        assert (dlg.keep_label.text(), dlg.all_label.text()) == ("3", "10")
+        row = dlg.zone_btns[("Zones", 1)]                                # Zone 행의 작은 막대도 같은 값
+        assert (row._drop, row._total) == (7, 10)
+        dlg.set_mode("auto")
+        d = max(dlg._in_zone(), key=lambda x: x.area)
+        dlg.toggle_pick(T.key_of(d))
+        assert dlg.pick_box.isVisibleTo(dlg) and dlg.pick_label.text() == "1"
+        assert len(dlg.ratio.ticks) == 1 and 0 < dlg.ratio.ticks[0] < 1   # 꼭 잡기 눈금
+    finally:
+        dlg.deleteLater()
+
+
+def test_zone_rows_are_rows_not_boxes(styled_qapp, tmp_path):
+    """Zone 은 상자 버튼이 아니라 행(이름 + 작은 막대 + 빠짐 수) — 하나만 골라지고, 글자는 읽을 수 있게 남는다."""
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    dlg = _shown_dlg(T, styled_qapp, tmp_path)
+    try:
+        rows = dlg.zone_btns
+        assert all(isinstance(b, T._ZoneRow) for b in rows.values())
+        assert rows[("Zones", 1)].isChecked() and not rows[("Zones", 63)].isChecked()
+        dlg.set_value(14, R.FEATURE_AREA, 40.0)
+        assert "−7" in rows[("Zones", 1)].text() and "Defect 10" in rows[("Zones", 1)].text()
+        rows[("Zones", 63)].click()
+        assert dlg._zone == ("Zones", 63) and not rows[("Zones", 1)].isChecked()
+        assert rows[("Zones", 1)].grab().width() > 0                      # 그려진다(예외 없음)
+    finally:
+        dlg.deleteLater()
+
+
+def test_left_column_stacks_folders_above_zones_without_chip_row(styled_qapp, tmp_path, monkeypatch):
+    """폴더 칩 줄은 없다 — 왼쪽 열 위가 폴더 목록, 아래가 Zone 이고, 윗줄에는 폴더 버튼이 없다.
+    [컬러 | 스캔] 은 고른 폴더 줄에만 보이고, ✕ 는 줄마다 하나다."""
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    a, lot = _lot_setup(tmp_path)
+    _no_load(monkeypatch, T)
+    dlg = T.ThresholdPreviewDialog()
+    try:
+        dlg.resize(1280, 800)
+        dlg.show()
+        _prime(dlg, T, a, lot)
+        dlg.set_folders([a, lot])
+        styled_qapp.processEvents()
+        assert not hasattr(dlg, "_chips_host")
+        rows = _chips(dlg, T)
+        assert [r.info.root for r in rows] == [a, lot] and all(r.x_btn is not None for r in rows)
+        assert dlg.pick_btn.property("role") == "textAccent"              # 조용한 [+ 폴더]
+        assert dlg.pick_btn.mapTo(dlg, dlg.pick_btn.rect().topLeft()).x() < T.SIDE_W
+        assert rows[0].mapTo(dlg, rows[0].rect().topLeft()).y() < dlg.zone_btns[("Zones", 1)].mapTo(dlg, dlg.zone_btns[("Zones", 1)].rect().topLeft()).y()
+        assert not any(r.seg_host.isVisibleTo(dlg) for r in rows)
+        dlg.select_folder(lot)
+        styled_qapp.processEvents()
+        rows = _chips(dlg, T)
+        assert [r.seg_host.isVisibleTo(dlg) for r in rows] == [False, True]
+        rows[1].x_btn.click()                                              # ✕ — 빼기
+        assert dlg._roots == [a]
+    finally:
+        dlg.deleteLater()
+
+
+def test_underline_tabs_and_tile_class_heading(styled_qapp, tmp_path):
+    """탭은 밑줄 탭(하나만 골라짐), 타일은 분류 이름 제목이 격자 위에 한 번만 — 타일마다 캡션은 없다."""
+    from PyQt6.QtWidgets import QLabel
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    dlg = _shown_dlg(T, styled_qapp, tmp_path)
+    try:
+        assert {b.property("role") for b in dlg.tab_btns.values()} == {"underTab"}
+        dlg.set_value(14, R.FEATURE_AREA, 40.0)
+        assert dlg.tab_btns["drop"].isChecked() and not dlg.tab_btns["keep"].isChecked()
+        dlg.tab_btns["keep"].click()
+        styled_qapp.processEvents()
+        assert dlg._tab == "keep" and dlg.tab_btns["keep"].isChecked() and not dlg.tab_btns["drop"].isChecked()
+        heads = [lab for lab in dlg.grid_host.findChildren(QLabel) if lab.property("role") == "ovGroupName" and lab.isVisibleTo(dlg)]
+        assert len(heads) == 1 and "RDL Defect" in heads[0].text() and "3" in heads[0].text()
+        assert len(dlg.tiles) == 3
+        tile = next(iter(dlg.tiles.values()))
+        assert tile.size().width() == tile.size().height() == T.TILE_PX    # 사진만 — 캡션 줄이 없다
+        assert [lab for lab in tile.findChildren(QLabel) if lab.property("role") == "muted"] == []
+    finally:
+        dlg.deleteLater()
+
+
+def test_tile_marks_scan_s_pick_check_and_hover_more(styled_qapp):
+    """Scan Crop = 왼쪽 아래 흰 S(알약 없음), 꼭 잡기 = 오른쪽 위 체크, … 는 가리킨 타일에만."""
+    from PyQt6.QtCore import QEvent, QPointF
+    from PyQt6.QtGui import QEnterEvent, QImage
+    from PyQt6.QtWidgets import QLabel
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    img = QImage(40, 40, QImage.Format.Format_RGB888)
+    plain = T._Tile(img, T.TILE_PX, picked=False, detail_btn=True)
+    picked = T._Tile(img, T.TILE_PX, picked=True, detail_btn=True)
+    color = T._Tile(Path("x.jpg"), T.TILE_PX)
+    plain.show()
+    marks = [lab.text() for lab in plain.findChildren(QLabel) if lab.property("role") == "tileMark"]
+    assert marks == ["S"] and plain.findChild(QLabel, "") is not None
+    assert not [lab for lab in color.findChildren(QLabel) if lab.property("role") == "tileMark"]
+    assert picked.badge.isVisibleTo(picked) and not plain.badge.isVisibleTo(plain)
+    assert picked.badge.x() > T.TILE_PX // 2 and picked.badge.y() < 12       # 오른쪽 위
+    assert not plain.detail_btn.isVisibleTo(plain)
+    plain.enterEvent(QEnterEvent(QPointF(5, 5), QPointF(5, 5), QPointF(5, 5)))
+    assert plain.detail_btn.isVisibleTo(plain)
+    plain.leaveEvent(QEvent(QEvent.Type.Leave))
+    assert not plain.detail_btn.isVisibleTo(plain)
+
+
+def test_detail_opens_right_under_its_row_as_hairline_band(styled_qapp, tmp_path):
+    """타일을 누르면 그 줄 바로 아래에 위아래 선만 있는 상세가 펼쳐진다(굵은 파란 상자 · 긴 경로 없음).
+    다시 누르거나 [닫기] 로 접는다.  [꼭 잡기] 는 자동 추천에서만 있고 눌러도 열려 있다."""
+    from PyQt6.QtWidgets import QFrame, QPushButton
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    dlg = _shown_dlg(T, styled_qapp, tmp_path)
+    try:
+        dlg.set_value(14, R.FEATURE_AREA, 40.0)
+        keys = list(dlg.tiles)
+        dlg._toggle(keys[0])
+        styled_qapp.processEvents()
+        band = dlg.grid_host.findChildren(QFrame)
+        box = next(f for f in band if f.property("role") == "ovDetail")
+        assert box.property("role") != "card" and "2px" not in box.styleSheet()
+        i = dlg.grid.indexOf(box.parentWidget())
+        r, c, rs, cs = dlg.grid.getItemPosition(i)
+        tile_row = dlg.grid.getItemPosition(dlg.grid.indexOf(dlg.tiles[keys[0]]))[0]
+        assert r == tile_row + 1 and c == 0 and cs == dlg._cols()          # 그 줄 바로 아래, 한 줄 폭
+        names = [b.text() for b in box.findChildren(QPushButton)]
+        assert T._KO.OVERKILL_DETAIL_CLOSE in names and T._KO.OVERKILL_PICK_ACTION not in names   # 직접 조정 — 꼭 잡기 없음
+        assert dlg.tiles[keys[0]].ring.isVisibleTo(dlg)                    # 펼친 타일 표시
+        txt = [lab.text() for lab in box.findChildren(T.QLabel)]
+        assert not any(t.startswith("/") or "Scanresult" in t for t in txt)   # 긴 경로 없음
+        next(b for b in box.findChildren(QPushButton) if b.text() == T._KO.OVERKILL_DETAIL_CLOSE).click()
+        assert dlg._open is None and not [p for p in dlg.grid_host.findChildren(T._BigPhoto) if p.isVisibleTo(dlg)]
+        dlg.set_mode("auto")
+        k0 = next(iter(dlg.tiles))
+        dlg._toggle(k0)
+        styled_qapp.processEvents()
+        box = next(f for f in dlg.grid_host.findChildren(QFrame) if f.property("role") == "ovDetail" and f.isVisibleTo(dlg))
+        pick = next(b for b in box.findChildren(QPushButton) if b.text() == T._KO.OVERKILL_PICK_ACTION)
+        pick.click()
+        styled_qapp.processEvents()
+        assert k0 in dlg._picked and dlg._open == k0             # 눌러도 열려 있고
+        box = next(f for f in dlg.grid_host.findChildren(QFrame) if f.property("role") == "ovDetail" and f.isVisibleTo(dlg))
+        assert any(b.text() == T._KO.OVERKILL_PICK_UNDO for b in box.findChildren(QPushButton))   # 글자가 해제로 바뀐다
+    finally:
+        dlg.deleteLater()
+
+
+def test_detail_table_has_three_rows_by_three_features_right_aligned(styled_qapp, tmp_path):
+    """상세 표 — 이 Defect / 레시피 / 지금 × Width · Area · Contrast, 숫자는 mono 오른쪽 정렬."""
+    from PyQt6.QtCore import Qt
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    dlg = _shown_dlg(T, styled_qapp, tmp_path)
+    try:
+        dlg.set_value(14, R.FEATURE_AREA, 40.0)
+        dlg._toggle(next(iter(dlg.tiles)))
+        labs = dlg.grid_host.findChildren(T.QLabel)
+        nums = [lab for lab in labs if lab.property("role") == "ovNum"]
+        assert len(nums) == 9 and all(lab.alignment() & Qt.AlignmentFlag.AlignRight for lab in nums)
+        heads = [lab.text() for lab in labs if lab.property("role") == "ovNumHead"]
+        assert heads == ["Width µm", "Area µm²", "Contrast"]
+        rows = [lab.text() for lab in labs if lab.property("role") == "ovCell"]
+        assert rows == [T._KO.THRESH_PREVIEW_COL_THIS, T._KO.THRESH_PREVIEW_COL_RECIPE, T._KO.THRESH_PREVIEW_COL_NOW]
+        assert any(lab.property("bad") for lab in nums)                    # 빠지게 만든 값은 빨갛게
+    finally:
+        dlg.deleteLater()
+
+
+def test_rules_panel_is_boxless_with_distribution_aligned_to_slider(styled_qapp, tmp_path):
+    """기준 열: 둥근 상자 없음, 슬라이더 · 분포 · 자름선이 같은 x(손잡이 중심) — 값을 바꾸면 자름선도 따라가고, 슬라이더는 남아 있다."""
+    from PyQt6.QtWidgets import QStyle, QStyleOptionSlider
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    dlg = _shown_dlg(T, styled_qapp, tmp_path)
+    try:
+        assert dlg.rules.property("role") != "card"
+        sl, spin = dlg.sliders[(14, R.FEATURE_AREA)]
+        assert spin.height() == 32 and sl.property("role") == "axis"
+        hist = next(h for h in dlg.rules.findChildren(T._Hist) if h.parentWidget() is sl.parentWidget())
+        assert hist.width() == sl.width()                                   # 같은 폭
+        for um in (30.0, 40.0, 60.0):
+            dlg.set_value(14, R.FEATURE_AREA, um)
+            styled_qapp.processEvents()
+            opt = QStyleOptionSlider()
+            sl.initStyleOption(opt)
+            hr = sl.style().subControlRect(QStyle.ComplexControl.CC_Slider, opt, QStyle.SubControl.SC_SliderHandle, sl)
+            assert abs(hist.cut_x() - hr.center().x()) <= 1.5, um           # 자름선 = 손잡이 중심
+    finally:
+        dlg.deleteLater()
+
+
+# ------------------------------------------------------------------ 2026-11-17 디자인 검토 반영
+def test_empty_overkill_shows_one_line_and_add_button_and_disables_modes(styled_qapp):
+    """폴더가 없으면 본문 가운데 안내 + [+ 폴더](32px), 모드 버튼은 꺼지고 'Zone' 소제목은 숨는다."""
+    from aoi_verification.app import i18n
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    dlg = T.ThresholdPreviewDialog()
+    try:
+        dlg.resize(1280, 800)
+        dlg.show()
+        styled_qapp.processEvents()
+        assert dlg.empty_state.isVisibleTo(dlg)
+        assert dlg.empty_hint.text() == i18n.KO.OVERKILL_EMPTY
+        assert dlg.empty_pick_btn.text() == i18n.KO.OVERKILL_ADD_FOLDER
+        assert dlg.empty_pick_btn.property("role") == "ghost" and dlg.empty_pick_btn.height() == 32
+        assert not any(b.isEnabled() for b in dlg.mode_btns.values())
+        assert not dlg._zone_head.isVisibleTo(dlg) and not dlg.summary.isVisibleTo(dlg)
+        assert dlg.empty_hint.geometry().center().x() > dlg.width() // 3        # 본문 가운데쪽
+    finally:
+        dlg.deleteLater()
+
+
+def test_empty_state_goes_away_with_a_wafer(styled_qapp, tmp_path):
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    dlg = _shown_dlg(T, styled_qapp, tmp_path)
+    try:
+        assert not dlg.empty_state.isVisibleTo(dlg)
+        assert all(b.isEnabled() for b in dlg.mode_btns.values())
+        assert dlg._zone_head.isVisibleTo(dlg) and dlg.summary.isVisibleTo(dlg)
+    finally:
+        dlg.deleteLater()
+
+
+def test_summary_and_tab_use_the_same_word_for_dropped(styled_qapp, tmp_path):
+    from aoi_verification.app import i18n
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    assert i18n.KO.OVERKILL_STAT_DROP == i18n.KO.THRESH_PREVIEW_TAB_DROP == "새로 빠짐"
+
+
+def test_scan_detail_puts_scan_beside_title_and_file_name_below(styled_qapp, tmp_path):
+    """Scan Crop 상세: 'Scan' 은 제목 줄(Zone … 옆), 아래 줄은 파일 이름(끝부분) — 'Scan' 한 단어만 뜨지 않는다."""
+    from PyQt6.QtGui import QColor, QImage
+    from PyQt6.QtWidgets import QLabel
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    w, target = _scan_wafer(tmp_path)
+    dlg = T.ThresholdPreviewDialog()
+    try:
+        dlg.set_wafer(T.load_wafer(w))
+        dlg._set_zone((target.zone_dir, target.zone))
+        dlg._set_tab("keep")
+        side = round(300.0 / PX)
+        img = QImage(side, side, QImage.Format.Format_RGB888)
+        img.fill(QColor(90, 90, 90))
+        img.setText("src", str(w / "wafer1.t.jpg"))
+        dlg.set_scans({(w, target.index): img})
+        dlg._toggle(T.key_of(target))
+        texts = [l.text() for l in dlg.grid_host.findChildren(QLabel)]
+        assert any(t.startswith("Zone ") and t.endswith(" · Scan") for t in texts)
+        files = [l for l in dlg.grid_host.findChildren(QLabel) if l.property("role") == "ovFile"]
+        assert [l.text() for l in files] == ["…/wafer1.t.jpg"]
+        # 원본 이름을 모르면 빈 줄 대신 아예 숨긴다
+        img2 = QImage(side, side, QImage.Format.Format_RGB888)
+        img2.fill(QColor(90, 90, 90))
+        dlg.set_scans({(w, target.index): img2})
+        dlg._toggle(T.key_of(target))
+        dlg._toggle(T.key_of(target))
+        files = [l for l in dlg.grid_host.findChildren(QLabel) if l.property("role") == "ovFile"]
+        assert files and not files[0].isVisibleTo(dlg) and files[0].text() != "Scan"
+    finally:
+        dlg.deleteLater()
