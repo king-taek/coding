@@ -1507,7 +1507,6 @@ class SetupPage(QWidget):
         # 레일 순서 계약(test_setup_controls) — 매칭 + 도구 넷.  업데이트는 맨 아래 따로.
         self._tool_buttons = [self.match_btn, self.image_info_btn, self.wafer_map_btn,
                               self.extract_btn, self.gl_btn, self.threshold_btn]
-        self.threshold_btn.setVisible(_prefs.load().dev_mode)
         self._tool_rail = host
         # 접힘 상태 — 상황마다 따로 기억한다(`_rail_should_fold`).  매칭 화면에서 고른 것
         # (`_rail_user_folded`)은 도구 화면·좁은 창에서 잠깐 펼쳐도 바뀌지 않는다.

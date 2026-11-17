@@ -457,3 +457,14 @@ def test_switch_hot_zone_is_not_the_whole_row(qapp):
         assert "mousePressEvent" not in SwitchRow.__dict__
     finally:
         row.deleteLater()
+
+
+# ── Overkill 튜닝 버튼은 개발자 모드 없이도 보인다 ─────────────────────────────
+def test_threshold_btn_visible_without_dev_mode(styled_qapp):
+    from aoi_verification.app.utils import prefs
+    assert prefs.load().dev_mode is False
+    page = sp.SetupPage()
+    try:
+        assert not page.threshold_btn.isHidden()
+    finally:
+        page.deleteLater()
