@@ -516,6 +516,31 @@ MENU_CHECK_UPDATE = "업데이트 확인"
 SETUP_SECTION_FOLDER = "1  폴더"
 SETUP_SECTION_MODE = "2  방식"
 
+# ── [Conder짝수집-임시] 시작 — 수집·분석이 끝나면 이 블록을 통째로 지운다 ───────────
+CPAIR_COLLECT_BUTTON = "Conder 짝 자료 수집"
+CPAIR_COLLECT_TITLE = "Conder 짝 자료 수집"
+CPAIR_COLLECT_ASK = (
+    "Conder 에서 TB500 · T254 LOT 중 KLA 단계와 Camtek 단계가 함께 있는 LOT 을 장치마다 최근 6개까지 모읍니다"
+    "(KLA 정보파일 · LOT 맵 · 사진 이름). 읽기만 하고 사진은 이름만 적습니다. "
+    "최대 25분이 걸리고, 중지하면 그때까지 모은 것을 저장합니다."
+)
+CPAIR_COLLECT_START = "수집 시작"
+CPAIR_COLLECT_RUNNING = "Conder 짝 자료를 모으는 중"
+CPAIR_COLLECT_DONE_FMT = (
+    "LOT {lots}개 · 파일 {files}개를 모았습니다. "
+    "아래 폴더의 zip 을 전부 올려 주세요(28 MB 를 넘으면 여러 개로 나뉩니다).\n{path}"
+)
+CPAIR_COLLECT_NO_TOOL = "수집 도구(dev/conder_pair_collect.py)가 없습니다. 개발자 모드에서 dev 브랜치로 설치해 주세요."
+CPAIR_COLLECT_FAIL_FMT = "수집하다 멈췄습니다: {error}"
+CPAIR_COLLECT_STOPPING = "지금까지 모은 것을 저장하는 중 (한 번 더 누르면 화면을 바로 풉니다)"
+CPAIR_COLLECT_STOPPED = (
+    "화면을 먼저 풀었습니다. 저장이 끝나면 바탕화면의 프로그램 개발중 · 분석용 자료 수집 · AOI 레시피 검증 폴더 안 "
+    "오늘 날짜 폴더에 zip 이 생깁니다."
+)
+CPAIR_COLLECT_NOTHING = "Conder 폴더를 찾지 못해 결과 파일을 만들지 않았습니다."
+CPAIR_COLLECT_WINDING_DOWN = "방금 중지한 수집이 아직 정리 중입니다. 잠시 뒤 다시 눌러 주세요."
+# ── [Conder짝수집-임시] 끝 ────────────────────────────────────────────────
+
 # ── 개발자 모드 (메인 화면 Ctrl+Shift+D) ───────────────────────────────────
 DEV_MODE_ON = "개발자 모드를 켰습니다."
 DEV_MODE_OFF = "개발자 모드를 껐습니다. 자동 업데이트는 기본 브랜치를 따릅니다."
