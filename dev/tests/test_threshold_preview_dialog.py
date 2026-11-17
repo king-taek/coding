@@ -1024,22 +1024,123 @@ def test_detail_opens_right_under_its_row_as_hairline_band(styled_qapp, tmp_path
         dlg.deleteLater()
 
 
-def test_detail_table_has_three_rows_by_three_features_right_aligned(styled_qapp, tmp_path):
-    """상세 표 — 이 Defect / 레시피 / 지금 × Width · Area · Contrast, 숫자는 mono 오른쪽 정렬."""
-    from PyQt6.QtCore import Qt
+def test_deciding_criterion_is_the_smallest_normalized_margin():
+    """D6 — 판정을 가른 기준 = 슬라이더 범위로 나눈 여유(부호 있는)가 가장 작은 것."""
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    C = T.Criterion
+    # 남음: 셋 다 통과(여유 ≥ 0) — 가장 빠듯한 것(Area: 1.4/30)이 가른다
+    kept = [C("Width", 2.90, 2.00, 4.0, 2), C("Area", 31.4, 30.0, 60.0, 1), C("Contrast", 49.5, 45.0, 20.0, 1)]
+    assert [round(c.norm, 3) for c in kept] == [0.225, 0.023, 0.225]
+    assert T.deciding_criterion(kept) == 1
+    # 단위가 달라도 범위로 나눠 견준다 — 절대 여유가 가장 작은 Width(0.9)가 아니라 Area 가 가른다
+    assert min(range(3), key=lambda i: kept[i].margin) == 0
+    # 빠짐: 모자란(음수) 기준 중 가장 많이 모자란 것
+    dropped = [C("Width", 1.0, 2.0, 4.0, 2), C("Area", 20.0, 30.0, 60.0, 1), C("Contrast", 50.0, 45.0, 20.0, 1)]
+    assert T.deciding_criterion(dropped) == 0
+    assert T.deciding_criterion([]) is None
+    assert T.deciding_criterion([C("A", 1, 1, 0, 1), C("B", 1, 1, 0, 1)]) == 0       # 같으면 앞의 것 · 범위 0 도 안전
+    assert T.signed(1.44, 1) == "+1.4" and T.signed(-0.4, 2) == "−0.40" and T.signed(0.0, 1) == "+0.0"
+
+
+def _open_first_detail(T, dlg, styled_qapp):
+    dlg._toggle(next(iter(dlg.tiles)))
+    styled_qapp.processEvents()
+    return next(f for f in dlg.grid_host.findChildren(T.QFrame) if f.property("role") == "ovDetail")
+
+
+def test_detail_shows_one_sentence_and_three_chips_with_the_deciding_one_marked(styled_qapp, tmp_path):
+    """D6 — 3행 표 대신: 한 문장(가른 기준) + 칩 한 줄(값 · 기준 · 차이), 가른 칩만 강조."""
     from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
     dlg = _shown_dlg(T, styled_qapp, tmp_path)
     try:
         dlg.set_value(14, R.FEATURE_AREA, 40.0)
-        dlg._toggle(next(iter(dlg.tiles)))
-        labs = dlg.grid_host.findChildren(T.QLabel)
-        nums = [lab for lab in labs if lab.property("role") == "ovNum"]
-        assert len(nums) == 9 and all(lab.alignment() & Qt.AlignmentFlag.AlignRight for lab in nums)
-        heads = [lab.text() for lab in labs if lab.property("role") == "ovNumHead"]
-        assert heads == ["Width µm", "Area µm²", "Contrast"]
-        rows = [lab.text() for lab in labs if lab.property("role") == "ovCell"]
-        assert rows == [T._KO.THRESH_PREVIEW_COL_THIS, T._KO.THRESH_PREVIEW_COL_RECIPE, T._KO.THRESH_PREVIEW_COL_NOW]
-        assert any(lab.property("bad") for lab in nums)                    # 빠지게 만든 값은 빨갛게
+        box = _open_first_detail(T, dlg, styled_qapp)
+        labs = box.findChildren(T.QLabel)
+        assert not [l for l in labs if l.property("role") in ("ovNum", "ovNumHead", "ovCell")]
+        assert not any(l.text() in ("이 Defect", "레시피", "지금") for l in labs)
+        verdict = next(l for l in labs if l.property("role") == "ovVerdict")
+        chips = [f for f in box.findChildren(T.QFrame) if f.property("role") == "ovChip"]
+        assert chips and sum(1 for c in chips if c.property("deciding")) == 1
+        d = dlg._tile_defects[next(iter(dlg.tiles))]
+        why = P.why_dropped(d, dlg._w.zones, dlg._ov)
+        crits = dlg._criteria(d, why)
+        k = T.deciding_criterion(crits)
+        assert len(chips) == len(crits) and chips[k].property("deciding") is True
+        assert crits[k].name in verdict.text() and (("빠짐" in verdict.text()) == (why is not None))
+        assert T.signed(crits[k].margin, crits[k].dec) in verdict.text()
+        chip_txt = chips[k].findChildren(T.QLabel)[0].text()
+        assert "기준" in chip_txt and T.signed(crits[k].margin, crits[k].dec) in chip_txt
+        # 기준은 슬라이더 지금 값이다
+        assert f"{crits[k].cut:.{crits[k].dec}f}" in chip_txt
+    finally:
+        dlg.deleteLater()
+
+
+def test_criteria_margin_sign_matches_kept_or_dropped(styled_qapp, tmp_path):
+    """빠진 Defect 의 가른 기준은 값이 지금 기준보다 아래(여유 < 0), 남은 Defect 는 모든 기준이 여유 ≥ 0 이다.
+    (묶음 안은 전부 통과해야 남는다 — ``preview.why_dropped`` 와 같은 규칙.)"""
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    dlg = _shown_dlg(T, styled_qapp, tmp_path)
+    try:
+        dlg.set_value(14, R.FEATURE_AREA, 40.0)
+        drops = dlg.dropped()
+        assert drops
+        for d, why in drops:
+            crits = dlg._criteria(d, why)
+            assert crits and crits[T.deciding_criterion(crits)].margin < 0
+        kept = [d for d in dlg._in_zone() if P.is_kept(d, dlg._w.zones, dlg._ov)]
+        assert kept
+        for d in kept:
+            crits = dlg._criteria(d, None)
+            assert all(c.margin >= 0 for c in crits)
+    finally:
+        dlg.deleteLater()
+
+
+def test_defect_box_toggle_hides_the_red_box_and_persists(styled_qapp, tmp_path):
+    """Defect 표시 토글 — 끄면 빨간 박스 없이 다시 그리고, 고른 값은 다음 상세에도 이어진다.  Scan 이 아니면 토글이 없다."""
+    from PyQt6.QtGui import QColor, QImage
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    w, target = _scan_wafer(tmp_path)
+    dlg = T.ThresholdPreviewDialog()
+    try:
+        dlg.set_wafer(T.load_wafer(w))
+        dlg._set_zone((target.zone_dir, target.zone))
+        dlg._set_tab("keep")
+        side = round(300.0 / PX)
+        img = QImage(side, side, QImage.Format.Format_RGB888)
+        img.fill(QColor(90, 90, 90))
+        dlg.set_scans({(w, target.index): img})
+
+        def reds():
+            styled_qapp.processEvents()
+            im = dlg.grid_host.findChildren(T._BigPhoto)[-1].pixmap().toImage()
+            return sum(1 for x in range(im.width()) for y in range(im.height())
+                       if im.pixelColor(x, y).red() > 180 and im.pixelColor(x, y).green() < 90)
+        dlg._toggle(T.key_of(target))
+        tog = dlg.detail_box_btn
+        assert tog.text() == T._KO.OVERKILL_DEFECT_BOX and tog.isCheckable() and tog.isChecked()
+        assert reds() > 0
+        tog.click()                                                   # 끈다
+        assert not tog.isChecked() and reds() == 0 and dlg._show_box is False
+        dlg._toggle(T.key_of(target))                                 # 닫았다가 다시 열어도
+        dlg._toggle(T.key_of(target))
+        assert not dlg.detail_box_btn.isChecked() and reds() == 0
+        dlg.detail_box_btn.click()                                    # 다시 켠다
+        assert reds() > 0 and dlg._show_box is True
+        tog = dlg.detail_box_btn
+        assert img.pixelColor(side // 2, side // 2).red() == 90       # 원본 Crop 은 건드리지 않는다
+    finally:
+        dlg.deleteLater()
+
+
+def test_defect_box_toggle_is_absent_for_color_photos(styled_qapp, tmp_path):
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    dlg = _shown_dlg(T, styled_qapp, tmp_path)
+    try:
+        dlg.set_value(14, R.FEATURE_AREA, 40.0)
+        box = _open_first_detail(T, dlg, styled_qapp)
+        assert T._KO.OVERKILL_DEFECT_BOX not in [b.text() for b in box.findChildren(T.QPushButton)]
     finally:
         dlg.deleteLater()
 

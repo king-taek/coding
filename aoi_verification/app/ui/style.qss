@@ -1460,27 +1460,20 @@ QPushButton[role="histToggle"]:disabled {
     border: 1px solid $line2;
     background: transparent;
 }
-/* 작은 글자 토글 — 상자 없이 체크 표시(위젯이 그린다) + 글자. */
-QCheckBox[role="histOpt"] {
-    color: $mute;
-    font-size: $font_caption_sz;
-    spacing: 18px;
-    min-height: 24px;
+/* GL 상태줄 읽기값의 구역 글자 — 하한 이하 파랑 · 사이 중립 · 상한 이상 빨강. */
+QLabel[role="glZoneLow"], QLabel[role="glZoneMid"], QLabel[role="glZoneHigh"] {
+    font-family: $font_mono;
 }
-QCheckBox[role="histOpt"]:hover {
+QLabel[role="glZoneLow"] {
+    color: $accent;
+    font-weight: 700;
+}
+QLabel[role="glZoneMid"] {
     color: $ink2;
 }
-QCheckBox[role="histOpt"]:checked {
-    color: $ink;
-}
-QCheckBox[role="histOpt"]:disabled {
-    color: $disabled_ink;
-}
-QCheckBox[role="histOpt"]::indicator {
-    width: 0px;
-    height: 0px;
-    border: none;
-    background: transparent;
+QLabel[role="glZoneHigh"] {
+    color: $danger;
+    font-weight: 700;
 }
 
 /* ===== Overkill 튜닝 — 왼쪽 열(폴더 · Zone) · 한 줄 요약 · 밑줄 탭 · 밀착 타일 · 줄 아래 상세 =====
@@ -1661,28 +1654,44 @@ QFrame[role="ovDetail"] {
     border-bottom: 1px solid $line2;
     border-radius: 0px;
 }
-QLabel[role="ovCell"] {
-    font-size: $font_caption_lg_sz;
+/* 상세의 한 문장 판정 + 값 칩 세 개(결정한 기준만 남색 면 · 테두리). */
+QLabel[role="ovVerdict"] {
+    color: $ink;
+}
+QFrame[role="ovChip"] {
+    background-color: $elev;
+    border: 1px solid $line2;
+    border-radius: $radius_sm;
+}
+QFrame[role="ovChip"][deciding="true"] {
+    background-color: $accent_tint;
+    border: 1px solid $accent;
+}
+QLabel[role="ovChipText"] {
+    background: transparent;
+    color: $ink2;
+}
+QFrame[role="ovChip"][deciding="true"] QLabel[role="ovChipText"] {
+    color: $accent;
+}
+/* 'Defect 표시' — 작은 체크 칩: 꺼짐은 옅은 외곽선, 켜짐은 남색 면 + 테두리 + 체크(아이콘). */
+QPushButton[role="ovBoxToggle"] {
+    background: transparent;
+    border: 1px solid $line_strong;
+    border-radius: $radius_sm;
     color: $mute;
-}
-QLabel[role="ovCell"][me="true"] {
-    color: $ink;
-    font-weight: 700;
-}
-QLabel[role="ovNum"] {
-    font-family: $font_mono;
-    color: $ink;
-}
-QLabel[role="ovNum"][me="true"] {
-    font-weight: 700;
-}
-QLabel[role="ovNum"][bad="true"] {
-    color: $danger;
-    font-weight: 700;
-}
-QLabel[role="ovNumHead"] {
     font-size: $font_caption_sz;
-    color: $mute;
+    padding: 2px 10px;
+    min-height: 22px;
+    max-height: 22px;
+}
+QPushButton[role="ovBoxToggle"]:hover {
+    color: $ink2;
+}
+QPushButton[role="ovBoxToggle"]:checked {
+    background-color: $accent_tint;
+    border-color: $accent;
+    color: $accent;
 }
 QLabel[role="ovFile"] {
     font-size: $font_caption_sz;

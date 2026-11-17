@@ -193,7 +193,10 @@ def test_removed_widgets_are_gone(dlg):
     for gone in ("1:1", "크기", "−", "＋", "로그 눈금", "수평선 보기", "수직선 보기"):
         assert gone not in texts, gone
     assert not any(t.startswith(("자동 추천", "화면 대비")) for t in texts)
-    assert {"맞춤", "ROI끼리 겹쳐 보기", "데이터 범위만"} <= texts
+    assert "맞춤" in texts
+    assert "ROI끼리 겹쳐 보기" not in texts and "데이터 범위만" not in texts      # D2 — 켜짐으로 고정, 토글 없음
+    for attr in ("overlay_cb", "range_cb", "thr_range"):                            # D1 · D2 — 따로 있던 막대·토글
+        assert not hasattr(dlg, attr), attr
     names = {b.accessibleName() for b in dlg.findChildren(QAbstractButton)}
     assert {"되돌리기", "모두 지우기"} <= names                # 그림 버튼은 이름으로 찾는다
     from aoi_verification.app.ui.widgets import gl_charts
@@ -304,7 +307,7 @@ def test_scan_view_sets_target_box_and_zooms_in(styled_qapp):
     cx, cy = c.to_screen(420, 150).x(), c.to_screen(420, 150).y()
     assert abs(cx - c.width() / 2) < 3 and abs(cy - c.height() / 2) < 3    # 결함이 한가운데
     assert not hasattr(d, "banner")                           # 상시 문장은 없다 — 안내는 상태줄 오른쪽에
-    assert d.note.isVisibleTo(d) and "s.t.jpg" in d.note.text() and not d.hint.isVisibleTo(d)
+    assert d.note.isVisibleTo(d) and "s.t.jpg" in d.note.text() and not hasattr(d, "hint")
     assert d.note.parentWidget() is d.status.parentWidget()
     c.fit()                                                  # F — Scan 전체 보기
     assert c.scale() == pytest.approx(fit)
@@ -504,7 +507,7 @@ def test_compare_stat_rows_are_a_b_and_delta(dlg):
                                          f"{r.name} · A", f"{r.name} · B", f"{r.name} · B−A"]
     sub_a, sub_b = dlg._gl.data[10:20, 10:30], b[10:20, 10:30]
     assert rows[5]["mean"] == pytest.approx(float(sub_b.mean()) - float(sub_a.mean()))
-    assert [s[0] for s in dlg.hist._series] == ["A", "B"]
+    assert dlg.hist.compare_mode() and [r[0] for r in dlg.hist.rows()] == [0, 1]
 
 
 def test_compare_rejects_other_size_or_bits(dlg):
@@ -548,7 +551,7 @@ def test_compare_hover_works_from_either_canvas(dlg):
     assert dlg.canvas_b.view_state() == pytest.approx(dlg.canvas.view_state())
     QTest.mouseMove(dlg.canvas_b, _pt(dlg.canvas_b, 20, 30))
     _pump()
-    assert "X 20" in dlg.status.text()
+    assert "x 20" in dlg.status.text()
 
 
 def test_drop_and_paste_open_first_file_only(styled_qapp, tmp_path, monkeypatch):
@@ -591,10 +594,10 @@ def test_head_has_one_primary_and_all_buttons_are_32px(dlg):
 def test_inspector_keeps_its_width_when_the_window_grows(dlg):
     dlg.resize(1100, 700)
     _pump()
-    w0, c0 = dlg.thr_range.parentWidget().width(), dlg.canvas.width()
+    w0, c0 = dlg.hist.parentWidget().width(), dlg.canvas.width()
     dlg.resize(1500, 700)
     _pump()
-    assert dlg.thr_range.parentWidget().width() == w0 == GLV._INSPECTOR_W
+    assert dlg.hist.parentWidget().width() == w0 == GLV._INSPECTOR_W
     assert dlg.canvas.width() == c0 + 400                            # 늘어난 만큼 사진이 커진다
 
 
@@ -605,33 +608,60 @@ def test_tools_float_on_the_photo(dlg):
     assert dlg.zoom_label.text() == f"{int(round(dlg.canvas.scale() * 100))}%"
 
 
-def test_threshold_bar_moves_values_and_keeps_order(dlg):
-    bar = dlg.thr_range
-    y = bar.height() // 2
-    QTest.mouseClick(bar, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
-                     QPoint(int(bar.gl_x(40)), y))
+def _axis_x(h, gl):
+    h._layout()
+    return int(h._gl_x(gl))
+
+
+def _axis_y(h):
+    return int(h._plot.bottom() + 14)            # 밝기 띠 · 손잡이 높이
+
+
+def test_histogram_axis_drag_moves_values_and_keeps_order(dlg):
+    """D1 — 아래 축 하나가 임계값 조작축이다: 손잡이를 끌면 값이 바뀌고, 하한 < 상한을 지킨다."""
+    h = dlg.hist
+    y = _axis_y(h)
+    QTest.mouseClick(h, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(_axis_x(h, 4000), y))
     _pump()
-    assert dlg._lo == bar.x_gl(int(bar.gl_x(40))) and bar.active() == "lo"
-    QTest.keyClick(bar, Qt.Key.Key_Right)
-    lo = dlg._lo
-    QTest.keyClick(bar, Qt.Key.Key_Right, Qt.KeyboardModifier.ShiftModifier)
-    assert dlg._lo == lo + 10
-    # 하한을 상한 너머로 끌면 상한 바로 아래에서 멈추고 알린다
-    QTest.mouseClick(bar, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
-                     QPoint(int(bar.gl_x(dlg._hi)) - 1, y))
-    bar.moved.emit("lo", dlg._hi + 30)
+    assert dlg._lo == h._x_gl(_axis_x(h, 4000)) and h.active() == "lo"
+    hx = _axis_x(h, dlg._hi)                                  # 손잡이를 잡고 끌어 옮긴다
+    QTest.mousePress(h, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(hx, y))
+    QTest.mouseMove(h, QPoint(hx - 40, y))
+    QTest.mouseRelease(h, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(hx - 40, y))
+    _pump()
+    assert h.active() == "hi" and dlg._hi < 65000
+    h.thresholdDragged.emit("lo", dlg._hi + 30)               # 하한을 상한 너머로 끌면 상한 바로 아래에서 멈추고 알린다
     _pump()
     assert dlg._lo == dlg._hi - 1 and dlg.thr_note.isVisibleTo(dlg) and dlg.thr_note.text()
     assert dlg.lo_spin.value() == dlg._lo and dlg.hist._lo == dlg._lo
 
 
-def test_threshold_number_opens_an_input_in_place(dlg):
-    bar = dlg.thr_range
+def test_histogram_axis_keyboard_moves_the_active_handle(dlg):
+    """방향키는 차트가 받는다 — ←→ 1(Shift 10), ↑↓ 손잡이 바꾸기."""
+    h = dlg.hist
+    QTest.mouseClick(h, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(_axis_x(h, 4000), _axis_y(h)))
+    _pump()
+    lo = dlg._lo
+    QTest.keyClick(h, Qt.Key.Key_Right)
+    assert dlg._lo == lo + 1
+    QTest.keyClick(h, Qt.Key.Key_Right, Qt.KeyboardModifier.ShiftModifier)
+    assert dlg._lo == lo + 11
+    QTest.keyClick(h, Qt.Key.Key_Left)
+    assert dlg._lo == lo + 10
+    QTest.keyClick(h, Qt.Key.Key_Up)                          # 상한 손잡이로
+    hi = dlg._hi
+    QTest.keyClick(h, Qt.Key.Key_Left, Qt.KeyboardModifier.ShiftModifier)
+    assert h.active() == "hi" and dlg._hi == hi - 10 and dlg._lo == lo + 10
+
+
+def test_threshold_chip_opens_an_input_in_place_once_below_the_axis(dlg):
+    h = dlg.hist
     assert not dlg.lo_spin.isVisibleTo(dlg) and not dlg.hi_spin.isVisibleTo(dlg)
     _pump()
-    bar.repaint()
-    at = bar._labels["hi"].center().toPoint()
-    QTest.mouseDClick(bar, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, at)
+    chips = h.chip_rects()
+    assert set(chips) == {"lo", "hi"}
+    assert all(c.top() > h._plot.bottom() for c in chips.values())      # 칩은 그래프 위가 아니라 축 아래에 한 번씩
+    QTest.mouseClick(h, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, chips["hi"].center().toPoint())
     _pump()
     assert dlg.hi_spin.isVisibleTo(dlg) and not dlg.lo_spin.isVisibleTo(dlg)
     want = (dlg._lo + dlg._hi) // 2
@@ -641,24 +671,92 @@ def test_threshold_number_opens_an_input_in_place(dlg):
     assert dlg._hi == want and not dlg.hi_spin.isVisibleTo(dlg)
 
 
-def test_status_bar_carries_the_hint_instead_of_a_standing_line(dlg):
-    from PyQt6.QtWidgets import QLabel
-    from aoi_verification.app import i18n
-    hints = [l for l in dlg.findChildren(QLabel) if l.text() == i18n.KO.GL_TOOLBAR_HINT]
-    assert hints == [dlg.hint] and dlg.hint.parentWidget() is dlg.status.parentWidget()
+def test_axis_has_three_ticks_and_chips_never_overlap(styled_qapp):
+    from aoi_verification.app.ui.widgets import gl_charts as C
+    assert C.axis_ticks(0, 255) == [0, 128, 255] and C.axis_ticks(5, 5) == [5]
+    h = C.HistogramChart()
+    h.resize(330, 240)
+    hist = np.zeros(256, np.int64)
+    hist[40:200] = 10
+    h.set_series([("전체", "#888888", hist)], 256)
+    h.set_thresholds(70, 200)
+    c = h.chip_rects()
+    assert c["lo"].right() <= c["hi"].left()
+    h.set_thresholds(126, 130)                                  # 두 칩이 가운데 눈금(128) 자리에 몰려도 겹치지 않는다
+    c = h.chip_rects()
+    assert c["lo"].right() <= c["hi"].left() and not h.grab().toImage().isNull()
 
 
-def test_threshold_bar_is_empty_until_a_photo_opens(styled_qapp):
+def test_histogram_is_empty_and_disabled_until_a_photo_opens(styled_qapp):
     d = GlViewerDialog(None)
     try:
-        assert not d.thr_range.isEnabled()
+        assert not d.hist.isEnabled() and d.hist.chip_rects() == {}
         rng = np.random.default_rng(1)
         d.show_view(loader.ViewLoad(loader.GlImage(rng.integers(0, 255, (H, W)).astype(np.uint8),
                                                    8, False, "y.png", [])))
-        assert d.thr_range.isEnabled()
+        assert d.hist.isEnabled() and set(d.hist.chip_rects()) == {"lo", "hi"}
     finally:
         d.close()
         d.deleteLater()
+
+
+def test_scope_segment_is_first_in_the_inspector(dlg):
+    from PyQt6.QtWidgets import QLabel
+    host = dlg.scope.parentWidget()
+    labels = [w for w in host.findChildren(QLabel) if w.text() in ("색칠 범위", "GL 히스토그램")]
+    assert [w.text() for w in labels] == ["색칠 범위", "GL 히스토그램"]
+    assert dlg.scope.y() < dlg.hist.y()
+    assert not any(w.text() == "판정 임계값" for w in host.findChildren(QLabel))
+
+
+def test_status_bar_shows_hover_readout_and_only_zoom_on_the_right(dlg):
+    """D3 — 왼쪽: 마우스 아래 x y GL · 구역(색은 역할), 오른쪽: 배율만.  고정 힌트 · 크기 중복은 없다."""
+    from aoi_verification.app import i18n
+    assert not hasattr(dlg, "hint") and not hasattr(i18n.KO, "GL_TOOLBAR_HINT")
+    assert dlg.status.text() == "" and dlg.zone_word.text() == "" and dlg.hist.hover_gl() is None
+    assert dlg.zoom_status.text() == f"배율 {int(round(dlg.canvas.scale() * 100))}%"
+    assert "bit" not in dlg.zoom_status.text() and "×" not in dlg.zoom_status.text()
+    lo, hi = dlg._lo, dlg._hi
+    data = dlg._gl.data
+    cases = []
+    for mask, role, word in ((data <= lo, "glZoneLow", i18n.KO.GL_ZONE_LOW),
+                             ((data > lo) & (data < hi), "glZoneMid", i18n.KO.GL_ZONE_MID),
+                             (data >= hi, "glZoneHigh", i18n.KO.GL_ZONE_HIGH)):
+        ys, xs = np.where(mask)
+        if len(xs):
+            cases.append((int(xs[0]), int(ys[0]), role, word))
+    assert len(cases) >= 2
+    for x, y, role, word in cases:
+        QTest.mouseMove(dlg.canvas, _pt(dlg.canvas, x, y))
+        _pump()
+        gl = int(data[y, x])
+        assert dlg.status.text() == f"x {x}  y {y}   GL {gl}"
+        assert word in dlg.zone_word.text() and dlg.zone_word.property("role") == role
+        assert dlg.hist.hover_gl() == gl                          # 히스토그램에 그 GL 의 세로선
+    dlg.canvas.leaveEvent(None)
+    _pump()
+    assert dlg.status.text() == "" and dlg.zone_word.text() == "" and dlg.hist.hover_gl() is None
+
+
+def test_hover_line_is_drawn_on_the_histogram_and_cleared(styled_qapp):
+    from aoi_verification.app.ui.widgets import gl_charts as C
+    h = C.HistogramChart()
+    h.resize(330, 240)
+    hist = np.zeros(256, np.int64)
+    hist[40:60] = 10
+    h.set_series([("전체", "#888888", hist)], 256)
+    h.set_thresholds(70, 200)
+
+    def darkest(x):
+        img = h.grab().toImage()
+        return min(img.pixelColor(xx, y).red() for xx in (x - 1, x, x + 1)
+                   for y in range(int(h._plot.top()) + 2, int(h._plot.bottom()) - 2))
+    h.set_hover_gl(128)
+    h._layout()
+    x = int(round(h._gl_x(128)))
+    with_line = darkest(x)
+    h.set_hover_gl(None)
+    assert darkest(x) > with_line and h.hover_gl() is None
 
 
 # ------------------------------------------------------------------ 히스토그램 개편(시안 A)
@@ -697,16 +795,15 @@ def test_by_roi_button_needs_rois_and_is_off_during_compare(dlg):
     assert btn.isEnabled()
     btn.click()
     _pump(5)
-    assert btn.isChecked() and not dlg.overlay_cb.isEnabled()                # 겹쳐 보기는 같이 못 쓴다
+    assert btn.isChecked()
     btn.click()
     _pump(5)
-    assert dlg.overlay_cb.isEnabled()
     btn.click()
     _pump(5)
     dlg.show_compare(_b_view((dlg._gl.data // 2).astype(np.uint16)))
     _pump(5)
     assert not btn.isEnabled() and not btn.isChecked() and btn.toolTip()
-    assert not dlg.hist.stack_mode() and [s[0] for s in dlg.hist._series] == ["A", "B"]
+    assert dlg.hist.compare_mode() and not dlg.by_roi_btn.isChecked()
 
 
 def test_by_roi_stacks_all_then_each_roi_and_marks_the_selected_one(dlg):
@@ -766,36 +863,7 @@ def test_threshold_lines_still_drag_in_stack_mode_and_clear_when_rois_vanish(dlg
     assert not dlg.by_roi_btn.isEnabled() and not dlg.hist.stack_mode()
 
 
-def test_histogram_plot_lines_up_with_the_threshold_bar(dlg):
-    h, t = dlg.hist, dlg.thr_range
-    h._layout()
-    for gl in (0, 70, dlg._levels() - 1):
-        assert h._gl_x(gl) == pytest.approx(t.gl_x(gl), abs=0.6)
-    dlg.range_cb.setChecked(True)                             # 데이터 범위만 — 맞지 않아도 된다
-    _pump(5)
-
-
 # ------------------------------------------------------------------ 2026-11-17 디자인 검토 반영
-def _grab_tick(cb):
-    cb.resize(max(cb.width(), 160), 24)
-    img = cb.grab().toImage()
-    from PyQt6.QtGui import QColor
-    acc = QColor(GLV.theme.ACCENT)
-    near = lambda c: abs(c.red() - acc.red()) + abs(c.green() - acc.green()) + abs(c.blue() - acc.blue()) < 30  # noqa: E731
-    return any(near(img.pixelColor(x, y)) for x in range(0, 14) for y in range(img.height()))
-
-
-def test_histogram_option_draws_a_tick_only_when_on(dlg):
-    cb = dlg.range_cb
-    dlg.show()
-    _pump()
-    cb.setChecked(False)
-    assert not _grab_tick(cb)                    # 꺼짐: 체크 표시 없음(글자 색만)
-    cb.setChecked(True)
-    assert _grab_tick(cb)
-    assert cb.cursor().shape() == Qt.CursorShape.PointingHandCursor
-
-
 from PyQt6.QtWidgets import QPushButton  # noqa: E402
 
 
@@ -809,7 +877,7 @@ def test_empty_viewer_has_open_as_only_primary_and_disables_the_rest(styled_qapp
         assert [b for b in d.findChildren(QPushButton) if b.property("role") == "primary"] == [d.open_btn]
         assert not any(b.isEnabled() for b in (d.xlsx_btn, d.png_btn, d.compare_btn, d.clear_btn,
                                                d.undo_btn, *d._tool_btns.values()))
-        assert not d.scope.isEnabled() and not d.overlay_cb.isEnabled() and not d.range_cb.isEnabled()
+        assert not d.scope.isEnabled()
         assert not d._zoom_bar.isVisibleTo(d)
         rng = np.random.default_rng(1)
         d.show_view(loader.ViewLoad(loader.GlImage(rng.integers(0, 255, (H, W)).astype(np.uint8),
@@ -817,7 +885,7 @@ def test_empty_viewer_has_open_as_only_primary_and_disables_the_rest(styled_qapp
         _pump()
         assert d.xlsx_btn.property("role") == "primary" and d.open_btn.property("role") == "textAccent"
         assert all(b.isEnabled() for b in (d.xlsx_btn, d.png_btn, d.compare_btn, *d._tool_btns.values()))
-        assert d.scope.isEnabled() and d.range_cb.isEnabled() and d._zoom_bar.isVisibleTo(d)
+        assert d.scope.isEnabled() and d._zoom_bar.isVisibleTo(d)
         assert {b.height() for b in (d.open_btn, d.compare_btn, d.png_btn, d.xlsx_btn)} == {32}
     finally:
         d.close()
@@ -830,31 +898,42 @@ def test_warnings_stay_in_the_status_bar_while_the_photo_is_open(styled_qapp):
     d = _make(styled_qapp, view=loader.ViewLoad(img, source_path="j.jpg"))
     try:
         assert d.note.isVisibleTo(d) and GLV._KO.GL_WARN_JPEG in d.note.text()
-        assert d.note.property("role") == "warn" and not d.hint.isVisibleTo(d)
+        assert d.note.property("role") == "warn" and not hasattr(d, "hint")
         d._toast("x")                                    # 토스트가 사라져도 경고는 남는다
         assert d.note.isVisibleTo(d)
         d.show_view(loader.ViewLoad(loader.GlImage(img.data, 8, False, "k.png", [])))
-        assert not d.note.isVisibleTo(d) and d.hint.isVisibleTo(d)
+        assert not d.note.isVisibleTo(d)
     finally:
         d.close()
 
 
-def test_compare_marks_a_and_b_with_colour_swatches_and_a_legend(dlg):
-    b = loader.GlImage(dlg._gl.data.copy(), dlg._gl.bits, False, "b.tif", [])
+def test_compare_shows_two_stacked_rows_with_own_ratios_and_no_legend(dlg):
+    """D4 — A · B 두 줄(이름 + 색 견본 + 자기 구역 비율), 축 · 임계선은 하나, 범례는 없다."""
+    b = loader.GlImage((dlg._gl.data // 2).astype(dlg._gl.data.dtype), dlg._gl.bits, False, "b.tif", [])
     dlg.show_compare(loader.ViewLoad(b, source_path="b.tif"))
     _pump()
     assert GLV._CMP_A in dlg.cap_a.text() and GLV._CMP_B in dlg.cap_b.text() and "■" in dlg.cap_a.text()
-    assert [n for n, _c, _h in dlg.hist._series] == ["A", "B"]
-    dlg.hist.resize(330, 240)
-    img = dlg.hist.grab().toImage()
+    h = dlg.hist
+    assert h.compare_mode() and not h._series
+    rows = h.rows()
+    assert [r[1] for r in rows] == ["A · x.tif", "B · b.tif"]
+    assert [r[2] for r in rows] == [GLV._CMP_A, GLV._CMP_B]               # 기존 A/B 색 유지
+    assert len(h.row_rects()) == 2
+    ra = analysis.zone_ratios(rows[0][3], dlg._lo, dlg._hi)
+    rb = analysis.zone_ratios(rows[1][3], dlg._lo, dlg._hi)
+    assert ra != rb and sum(ra) == pytest.approx(100.0) and sum(rb) == pytest.approx(100.0)
+    h.resize(330, 480)
+    img = h.grab().toImage()
     from PyQt6.QtGui import QColor
 
-    def has(col):
+    def has(col, rect):
         c0 = QColor(col)
         return any(abs(img.pixelColor(x, y).red() - c0.red()) < 8 and abs(img.pixelColor(x, y).green() - c0.green()) < 8
                    and abs(img.pixelColor(x, y).blue() - c0.blue()) < 8
-                   for x in range(8, 70) for y in range(0, 16))
-    assert has(GLV._CMP_A) and has(GLV._CMP_B)                # 제목 줄 범례의 견본
+                   for x in range(int(rect.left()), int(rect.left()) + 24) for y in range(int(rect.top()), int(rect.top()) + 16))
+    rects = h.row_rects()
+    assert has(GLV._CMP_A, rects[0]) and has(GLV._CMP_B, rects[1])        # 줄 이름 앞 선 견본
+    assert set(h.chip_rects()) == {"lo", "hi"}                              # 축 아래 값 칩은 하나씩만
 
 
 def test_gl_inspector_segments_share_height_and_threshold_ticks_align(dlg):
