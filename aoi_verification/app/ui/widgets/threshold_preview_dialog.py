@@ -49,9 +49,9 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import (QBuffer, QIODevice, QLocale, QObject, QRectF, QSize, Qt, QThread, QTimer, QUrl,
+from PyQt6.QtCore import (QBuffer, QIODevice, QLocale, QObject, QPointF, QRectF, QSize, Qt, QThread, QTimer, QUrl,
                           pyqtSignal)
-from PyQt6.QtGui import (QColor, QDesktopServices, QDoubleValidator, QFont, QFontMetrics, QImage, QPainter, QPainterPath,
+from PyQt6.QtGui import (QColor, QDesktopServices, QDoubleValidator, QFont, QFontMetrics, QIcon, QImage, QPainter, QPainterPath,
                          QPen, QPixmap)
 from PyQt6.QtWidgets import (QAbstractButton, QApplication, QButtonGroup, QDialog, QFileDialog, QFrame, QGridLayout,
                              QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout,
@@ -666,6 +666,57 @@ def defect_box(crop_wh, px, width_px: float, length_px: float, area_px2: float =
     return (cw / 2.0 - bw / 2.0, ch / 2.0 - bh / 2.0, bw, bh)
 
 
+def _check_icon() -> QIcon:
+    """'Defect 표시' 가 켜졌을 때 글자 앞에 붙는 작은 체크(12 px)."""
+    pm = QPixmap(24, 24)
+    pm.setDevicePixelRatio(2.0)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setPen(QPen(QColor(theme.ACCENT), 1.8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+    p.drawPolyline([QPointF(2.0, 6.5), QPointF(5.0, 9.5), QPointF(10.0, 2.5)])
+    p.end()
+    return QIcon(pm)
+
+
+@dataclass(frozen=True)
+class Criterion:
+    """상세 판정의 기준 하나 — 이 Defect 의 값 · 지금 기준(슬라이더) · 슬라이더 범위(모두 µm 단위)."""
+    name: str
+    value: float
+    cut: float
+    span: float
+    dec: int = 1
+
+    @property
+    def margin(self) -> float:
+        """여유 = 값 − 기준.  양수면 통과, 음수면 모자람."""
+        return self.value - self.cut
+
+    @property
+    def norm(self) -> float:
+        """슬라이더 범위로 나눈 여유 — 단위가 다른 항목(Width µm · Area µm² · Contrast)을 견주려고."""
+        return self.margin / self.span if self.span > 0 else self.margin
+
+
+def deciding_criterion(crits) -> Optional[int]:
+    """판정을 가른 기준의 번호 — 정규화한 여유(부호 있는)가 가장 작은 것.
+
+    남는 Defect 는 한 묶음의 기준을 **전부** 통과해야 하므로(묶음 안 AND) 여유가 가장 빠듯한 기준이 '아슬아슬하게 남긴' 것이고,
+    빠진 Defect 는 모자란 기준 중 가장 많이 모자란 것이 가른 것이다.  같으면 앞의 것.  기준이 없으면 None."""
+    best = None
+    for i, c in enumerate(crits):
+        if best is None or c.norm < crits[best].norm:
+            best = i
+    return best
+
+
+def signed(v: float, dec: int) -> str:
+    """부호를 늘 붙인 숫자 — 음수는 −(가운데 줄표)."""
+    t = f"{abs(v):.{dec}f}"
+    return f"+{t}" if v >= 0 else f"−{t}"
+
+
 @dataclass
 class _ChipInfo:
     """폴더 칩 하나를 그리는 데 필요한 것(화면 상태 → 그림)."""
@@ -936,6 +987,8 @@ class ThresholdPreviewDialog(QDialog):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         install_paste(self, self._add_dropped, self._on_paste_no_path)
         self._w: Optional[WaferData] = None
+        self._show_box = True             # 상세의 Scan 그림에 Defect 빨간 상자를 그릴까 — 창이 열려 있는 동안 유지
+        self._axis_span: dict = {}        # (분류, 항목) → 슬라이더 범위(µm) — 판정 문장이 여유를 범위로 나눌 때 쓴다
         self._roots: list = []            # 고른 폴더(웨이퍼 또는 LOT) — 칩 하나씩.  맨 앞이 합치기 기준 레시피를 정한다
         self._expand: dict = {}           # 고른 폴더 → [(웨이퍼 폴더, 실제 경로 키)] — LOT 을 NAS 에서 다시 훑지 않는다
         self._cache: dict = {}            # 웨이퍼 폴더 → WaferData — 빼기 · 더하기가 다시 읽지 않고 이걸로 합친다
@@ -1919,6 +1972,7 @@ class ThresholdPreviewDialog(QDialog):
             floor = w.to_um(f.feature, float(cand[f.feature].min())) if len(cand[f.feature]) else rec
             down = max(0, min(math.ceil((rec - max(floor, 0.0)) / step), math.floor(rec / step)))
         lo = rec - down * step
+        self._axis_span[(cls, f.feature)] = hi - lo
         cell = QWidget(self.rules)
         lay = QVBoxLayout(cell)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -2224,9 +2278,7 @@ class ThresholdPreviewDialog(QDialog):
         photo = self._pic(d)
         pic.setProperty("role", "tilePic")
         if isinstance(photo, QImage):                   # Scan Crop — Defect 자리를 빨간 박스로(상세 보기에서만)
-            pix = _pixmap(photo, DETAIL_PX, kind="mid")
-            self._mark_defect(pix, photo, d)
-            pic.setPixmap(pix)
+            pic.setPixmap(self._scan_pixmap(photo, d))
         elif photo is not None:                         # Color — 중간 이미지가 준비될 때까지 썸네일을 키워 보여준다
             cache = image_io._get_tile_cache()
             pix = cache.get(_mid_key(photo, DETAIL_PX))
@@ -2271,41 +2323,7 @@ class ThresholdPreviewDialog(QDialog):
         close.clicked.connect(lambda _c=False, i=k: self._toggle(i))
         top.addWidget(close)
         right.addLayout(top)
-        g = QGridLayout()
-        g.setHorizontalSpacing(16)
-        g.setVerticalSpacing(4)
-        g.setColumnMinimumWidth(0, 88)
-        for c in (1, 2, 3):
-            g.setColumnMinimumWidth(c, 104)
-        g.setColumnStretch(4, 1)
-        for c, (_f, fname, unit, _s, _d) in enumerate(_FEATURES, start=1):
-            h = QLabel(f"{fname} {unit}".strip(), box)
-            h.setProperty("role", "ovNumHead")
-            h.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            g.addWidget(h, 0, c)
-        z = w.zones.get((d.zone_dir, d.zone))
-        bundle = z.bundles.get(d.bin, ()) if z is not None else ()
-        for r, (label, me) in enumerate(((_KO.THRESH_PREVIEW_COL_THIS, True), (_KO.THRESH_PREVIEW_COL_RECIPE, False),
-                                         (_KO.THRESH_PREVIEW_COL_NOW, False)), start=1):
-            cap = QLabel(label, box)
-            cap.setProperty("role", "ovCell")
-            cap.setProperty("me", me)
-            g.addWidget(cap, r, 0)
-        for c, (feat, _fname, _unit, _step, dec) in enumerate(_FEATURES, start=1):
-            v = P._value(d, feat)
-            f = next((x for x in bundle if x.feature == feat), None)
-            bad = why is not None and why[1] == feat
-            vals = ("—" if (feat == R.FEATURE_CONTRAST and v == 0) else f"{w.to_um(feat, v):.{dec}f}",
-                    "—" if f is None else f"{w.to_um(feat, f.low):.{dec}f}",
-                    "—" if f is None else f"{w.to_um(feat, self._ov.get((d.zone_dir, d.zone, d.bin, feat), f.low)):.{dec}f}")
-            for r, txt in enumerate(vals, start=1):
-                lab = QLabel(txt, box)
-                lab.setProperty("role", "ovNum")
-                lab.setProperty("me", r == 1)
-                lab.setProperty("bad", bad and r != 2)
-                lab.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                g.addWidget(lab, r, c)
-        right.addLayout(g)
+        self._add_verdict(right, box, d, why)
         right.addStretch(1)
         src = photo.text("src") if is_scan else ""          # Scan 원본 파일(잘라 올 때 적어 둔다)
         fn = QLabel(f"…/{Path(src).name}" if src else ("" if photo is None or is_scan else f"…/{photo.name}"), box)
@@ -2314,9 +2332,107 @@ class ThresholdPreviewDialog(QDialog):
             fn.setToolTip(src or str(photo))
         fn.setVisible(bool(fn.text()))
         fn.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        right.addWidget(fn)
+        foot = QHBoxLayout()
+        foot.setSpacing(12)
+        if is_scan:                                     # 빨간 상자는 Scan Crop 에만 있다
+            tog = QPushButton(_KO.OVERKILL_DEFECT_BOX, box)
+            tog.setProperty("role", "ovBoxToggle")
+            tog.setCheckable(True)
+            tog.setChecked(self._show_box)
+            tog.setCursor(Qt.CursorShape.PointingHandCursor)
+            tog.setToolTip(_KO.OVERKILL_DEFECT_BOX_TIP)
+            tog.setIcon(_check_icon() if self._show_box else QIcon())
+            tog.setIconSize(QSize(12, 12))
+            tog.toggled.connect(lambda on, p=pic, im=photo, dd=d: self._set_box(on, p, im, dd))
+            foot.addWidget(tog)
+            self.detail_box_btn = tog
+        foot.addWidget(fn, 1)
+        right.addLayout(foot)
         lay.addLayout(right, 1)
         return wrap
+
+    def _scan_pixmap(self, crop: QImage, d: P.Defect) -> QPixmap:
+        pix = _pixmap(crop, DETAIL_PX, kind="mid")
+        if self._show_box:
+            self._mark_defect(pix, crop, d)
+        return pix
+
+    def _set_box(self, on: bool, pic: QLabel, crop: QImage, d: P.Defect) -> None:
+        """'Defect 표시' — 지금 상세 그림을 다시 그리고, 고른 값은 다음 상세에도 이어진다."""
+        self._show_box = bool(on)
+        if isinstance(self.sender(), QPushButton):
+            self.sender().setIcon(_check_icon() if on else QIcon())
+        pic.setPixmap(self._scan_pixmap(crop, d))
+
+    def _criteria(self, d: P.Defect, why) -> list:
+        """이 Defect 의 판정이 걸린 묶음의 기준들 — 빠졌으면 빠뜨린 묶음, 남았으면 전부 통과한 묶음(자기 분류 먼저).
+
+        ``preview.why_dropped`` 와 같은 규칙이다: 묶음 안은 전부(AND), 묶음끼리는 하나라도(OR) 통과하면 남는다.
+        파일에 값이 없는 기준과 Contrast 0('안 잼')은 빼고, 기준값은 슬라이더로 바꾼 값을 쓴다."""
+        w = self._w
+        z = w.zones.get((d.zone_dir, d.zone))
+        if z is None or not z.bundles:
+            return []
+
+        def active(cls):
+            out = []
+            for f in z.bundles[cls]:
+                v = P._value(d, f.feature)
+                if v is None or (f.feature == R.FEATURE_CONTRAST and v == 0):
+                    continue
+                low = self._ov.get((d.zone_dir, d.zone, cls, f.feature), f.low)
+                out.append((f, v, low, type(f)(f.feature, f.ftype, low, max(low, f.high)).passes(v)))
+            return out
+
+        if why is not None:
+            cls = why[0]
+        else:
+            order = sorted(z.bundles, key=lambda c: c != d.bin)
+            cls = next((c for c in order if all(ok for *_x, ok in active(c))), None)
+            if cls is None:
+                return []
+        crits = []
+        for f, v, low, _ok in active(cls):
+            fname, unit, dec = next(((x[1], x[2], x[4]) for x in _FEATURES if x[0] == f.feature), ("", "", 1))
+            cut = w.to_um(f.feature, low)
+            span = self._axis_span.get((cls, f.feature)) or abs(cut) or 1.0
+            crits.append(Criterion(fname, w.to_um(f.feature, v), cut, span, dec))
+        return crits
+
+    def _add_verdict(self, right: QVBoxLayout, box: QWidget, d: P.Defect, why) -> None:
+        """한 문장(무엇이 가렸나) + 값 칩 한 줄 — 가른 기준 칩만 남색으로 강조."""
+        crits = self._criteria(d, why)
+        k = deciding_criterion(crits)
+        if k is None:
+            return
+        c = crits[k]
+        tmpl = _KO.OVERKILL_VERDICT_KEPT_FMT if why is None else _KO.OVERKILL_VERDICT_DROPPED_FMT
+        mono = theme.FONT_MONO.split(",")[0].strip('" ')
+        head, tail = tmpl.format(name=c.name, delta="{}").split("{}")
+        sentence = QLabel(f'{html.escape(head)}<b style="font-family: {mono};">'
+                          f'{html.escape(signed(c.margin, c.dec))}</b>{html.escape(tail)}', box)
+        sentence.setTextFormat(Qt.TextFormat.RichText)
+        sentence.setProperty("role", "ovVerdict")
+        right.addWidget(sentence)
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        self.detail_chips = []
+        for i, cr in enumerate(crits):
+            chip = QFrame(box)
+            chip.setProperty("role", "ovChip")
+            chip.setProperty("deciding", i == k)
+            cl = QHBoxLayout(chip)
+            cl.setContentsMargins(12, 6, 12, 6)
+            num = lambda t: f'<span style="font-family: {mono};">{html.escape(t)}</span>'   # noqa: E731
+            lab = QLabel(f"{html.escape(cr.name)} {num(f'{cr.value:.{cr.dec}f}')} · {_KO.OVERKILL_CHIP_CUT} "
+                         f"{num(f'{cr.cut:.{cr.dec}f}')} · {num(signed(cr.margin, cr.dec))}", chip)
+            lab.setTextFormat(Qt.TextFormat.RichText)
+            lab.setProperty("role", "ovChipText")
+            cl.addWidget(lab)
+            row.addWidget(chip)
+            self.detail_chips.append(chip)
+        row.addStretch(1)
+        right.addLayout(row)
 
     def _mark_defect(self, pix: QPixmap, crop: QImage, d: P.Defect) -> None:
         """Scan Crop 그림 위에 Defect 를 감싼 1px 빨간 박스를 그린다(그림 크기에 맞춰 환산)."""

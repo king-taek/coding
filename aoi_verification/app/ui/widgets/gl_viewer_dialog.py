@@ -20,7 +20,7 @@ from typing import Callable, Optional
 import numpy as np
 from PyQt6.QtCore import QObject, QPointF, QRectF, QSize, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QIcon, QImage, QPainter, QPen, QPixmap
-from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog,
+from PyQt6.QtWidgets import (QComboBox, QDialog, QFileDialog,
                              QFormLayout, QFrame, QGridLayout, QHBoxLayout, QLabel,
                              QMenu, QPushButton, QSpinBox, QSplitter, QToolButton, QVBoxLayout,
                              QWidget)
@@ -35,7 +35,7 @@ from ..deferred import call_later
 from ..drop_paths import install_paste, local_paths
 from . import sheet_host as sheets
 from .gl_canvas import TOOLS, GlCanvas
-from .gl_charts import ALL_ROW, HistogramChart, ThresholdRange
+from .gl_charts import ALL_ROW, HistogramChart
 from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
 from .option_group import OptionGroup
@@ -175,23 +175,6 @@ class _RawDialog(QDialog):
                 "header": self.header.value()}
 
 
-class _TickCheck(QCheckBox):
-    """상자 없는 체크 — 켜졌을 때만 글자 왼쪽에 남색 체크 표시를 그린다(꺼짐은 표시 없이 글자 색만).
-    QSS 가 표시기 자리를 비워 두므로 꺼져도 글자 자리는 그대로다."""
-
-    def paintEvent(self, e):  # noqa: N802
-        super().paintEvent(e)
-        if not self.isChecked():
-            return
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        col = QColor(theme.ACCENT if self.isEnabled() else theme.LINE2)
-        p.setPen(QPen(col, 1.6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
-        cy = self.height() / 2.0
-        p.drawPolyline([QPointF(1.5, cy), QPointF(5.0, cy + 3.5), QPointF(11.5, cy - 3.5)])
-        p.end()
-
-
 class GlViewerDialog(QDialog):
     """GL 뷰어 창.  ``image_path`` 를 주면 바로 연다."""
 
@@ -213,7 +196,7 @@ class GlViewerDialog(QDialog):
         self._syncing_view = False
         self._gen = 0
         self._gen_b = 0
-        self._hover_text = ""
+        self._hover: Optional[tuple[int, int, int]] = None      # 마우스 아래 (x, y, GL)
         self._loading = LoadingOverlay(self)
         self._refresh_timer = QTimer(self)
         self._refresh_timer.setSingleShot(True)
@@ -288,7 +271,6 @@ class GlViewerDialog(QDialog):
         self.note.style().unpolish(self.note)
         self.note.style().polish(self.note)
         self.note.setVisible(bool(notes))
-        self.hint.setVisible(not notes)
 
     @staticmethod
     def _set_role(btn: QPushButton, role: str) -> None:
@@ -310,10 +292,6 @@ class GlViewerDialog(QDialog):
         if not has:
             self.undo_btn.setEnabled(False)
             self.defect_btn.setEnabled(False)
-            for w in (self.overlay_cb, self.range_cb):
-                w.setEnabled(False)
-        else:
-            self.range_cb.setEnabled(True)
         self.scope.setEnabled(has)
         self._zoom_bar.setVisible(has)
 
@@ -416,22 +394,29 @@ class GlViewerDialog(QDialog):
         return self.split
 
     def _build_status(self) -> QFrame:
+        """상태줄 — 왼쪽은 마우스 아래 읽기값(x y GL · 구역), 오른쪽은 배율만."""
         bar = QFrame(self)
         bar.setProperty("role", "statusBar")
         row = QHBoxLayout(bar)
         row.setContentsMargins(16, 4, 16, 4)
+        row.setSpacing(0)
         self.status = QLabel("", bar)
         self.status.setProperty("role", "mono")
         self.status.setMinimumHeight(theme.PROFILE.target_min)
-        row.addWidget(self.status, 1)
-        self.hint = QLabel(_KO.GL_TOOLBAR_HINT, bar)     # 도움말은 상태줄에만 둔다
-        self.hint.setProperty("role", "mutedSmall")
-        row.addWidget(self.hint)
-        # 사진 안내(Scan 찾음·경고)는 그 사진이 열려 있는 동안 조작 안내 자리를 대신한다.
+        row.addWidget(self.status)
+        self.zone_word = QLabel("", bar)            # 하한 이하(파랑) · 사이(중립) · 상한 이상(빨강) — 색은 QSS 역할
+        self.zone_word.setProperty("role", "glZoneMid")
+        row.addWidget(self.zone_word)
+        row.addStretch(1)
+        # 사진 안내(Scan 찾음·경고)는 그 사진이 열려 있는 동안만 나온다.
         self.note = QLabel("", bar)
         self.note.setProperty("role", "mutedSmall")
         self.note.setVisible(False)
         row.addWidget(self.note)
+        self.zoom_status = QLabel("", bar)
+        self.zoom_status.setProperty("role", "mono")
+        row.addSpacing(16)
+        row.addWidget(self.zoom_status)
         return bar
 
     def _build_right(self) -> QFrame:
@@ -442,28 +427,7 @@ class GlViewerDialog(QDialog):
         col = QVBoxLayout(host)
         col.setContentsMargins(24, 16, 16, 12)
         col.setSpacing(8)
-        # 임계값 — 막대 위 손잡이로 옮긴다.  입력칸은 숫자를 두 번 눌렀을 때만 그 자리에 뜬다.
-        col.addWidget(self._section(_KO.GL_THRESHOLD))
-        self.thr_range = ThresholdRange(host)
-        self.thr_range.moved.connect(self._on_hist_drag)
-        self.thr_range.editRequested.connect(self._edit_threshold)
-        self.thr_range.setEnabled(False)            # 사진을 열면 켠다
-        col.addWidget(self.thr_range)
-        self.lo_spin, self.hi_spin = QSpinBox(host), QSpinBox(host)
-        for sp, name in ((self.lo_spin, _KO.GL_THR_LOW), (self.hi_spin, _KO.GL_THR_HIGH)):
-            sp.setAccessibleName(name)
-            sp.setKeyboardTracking(False)
-            sp.setRange(0, 255)
-            sp.setVisible(False)
-            sp.editingFinished.connect(sp.hide)
-        self.lo_spin.valueChanged.connect(lambda v: self._set_thresholds(v, self._hi, "lo"))
-        self.hi_spin.valueChanged.connect(lambda v: self._set_thresholds(self._lo, v, "hi"))
-        self.thr_note = QLabel("", self)
-        self.thr_note.setProperty("role", "muted")
-        self.thr_note.setWordWrap(True)
-        self.thr_note.setVisible(False)
-        col.addWidget(self.thr_note)
-        col.addSpacing(4)                        # 임계값 묶음과 색칠 범위는 한 묶음(12)
+        # 색칠 범위가 맨 위 — 임계값은 히스토그램 아래 축(손잡이 · 값 칩)이 조작한다.
         scope_lab = QLabel(_KO.GL_SCOPE_LABEL, host)
         scope_lab.setProperty("role", "muted")
         col.addWidget(scope_lab)
@@ -477,6 +441,20 @@ class GlViewerDialog(QDialog):
             self.scope.button(k).setProperty("grade", "gl")      # 인스펙터 안 32 px · 같은 글자 크기
         col.addWidget(self.scope)
         col.addSpacing(16)                       # 묶음 사이 24
+        # 값 입력칸은 칩을 눌렀을 때만 그 자리에 뜬다.
+        self.lo_spin, self.hi_spin = QSpinBox(host), QSpinBox(host)
+        for sp, name in ((self.lo_spin, _KO.GL_THR_LOW), (self.hi_spin, _KO.GL_THR_HIGH)):
+            sp.setAccessibleName(name)
+            sp.setKeyboardTracking(False)
+            sp.setRange(0, 255)
+            sp.setVisible(False)
+            sp.editingFinished.connect(sp.hide)
+        self.lo_spin.valueChanged.connect(lambda v: self._set_thresholds(v, self._hi, "lo"))
+        self.hi_spin.valueChanged.connect(lambda v: self._set_thresholds(self._lo, v, "hi"))
+        self.thr_note = QLabel("", self)
+        self.thr_note.setProperty("role", "muted")
+        self.thr_note.setWordWrap(True)
+        self.thr_note.setVisible(False)
         # 히스토그램
         head = QHBoxLayout()
         head.setSpacing(8)
@@ -494,25 +472,17 @@ class GlViewerDialog(QDialog):
         self.by_roi_btn.toggled.connect(lambda _c: self._on_by_roi_toggled())
         head.addWidget(self.by_roi_btn)
         col.addLayout(head)
-        opts = QHBoxLayout()
-        opts.setSpacing(16)
-        self.overlay_cb = _TickCheck(_KO.GL_HIST_OVERLAY, self)
-        self.range_cb = _TickCheck(_KO.GL_HIST_DATA_RANGE, self)
-        for cb in (self.overlay_cb, self.range_cb):
-            cb.setProperty("role", "histOpt")
-            cb.setCursor(Qt.CursorShape.PointingHandCursor)
-            cb.toggled.connect(lambda _c: self._schedule_refresh())
-            opts.addWidget(cb)
-        opts.addStretch(1)
-        col.addLayout(opts)
         self.hist = HistogramChart(self)
+        self.hist.setEnabled(False)                 # 사진을 열면 켠다
         self.hist.thresholdDragged.connect(self._on_hist_drag)
+        self.hist.editRequested.connect(self._edit_threshold)
         self.hist.rowClicked.connect(self._on_hist_row)
         col.addWidget(self.hist, 1)
         self.hist_info = QLabel("", self)
         self.hist_info.setProperty("role", "mono")
         self.hist.hoverText.connect(self.hist_info.setText)
         col.addWidget(self.hist_info)
+        col.addWidget(self.thr_note)
         return host
 
     def _on_by_roi_toggled(self) -> None:
@@ -524,7 +494,7 @@ class GlViewerDialog(QDialog):
         self.canvas._select(None if rid == ALL_ROW else rid)
 
     def _sync_hist_controls(self) -> None:
-        """'ROI 별로 보기' 와 '겹쳐 보기' 의 켜짐 조건 — ROI 가 있고 비교 중이 아닐 때만 줄 쌓기."""
+        """'ROI 별로 보기' 의 켜짐 조건 — ROI 가 있고 비교 중이 아닐 때만 줄 쌓기."""
         n = len(self.canvas.rois.rois)
         comparing = self._gl_b is not None
         ok = n >= 1 and not comparing
@@ -535,19 +505,19 @@ class GlViewerDialog(QDialog):
             btn.blockSignals(False)
         btn.setEnabled(ok)
         btn.setToolTip("" if ok else (_KO.GL_HIST_BY_ROI_CMP if comparing else _KO.GL_HIST_BY_ROI_NEED))
-        self.overlay_cb.setEnabled(not comparing and not btn.isChecked())
 
     def _edit_threshold(self, which: str, at) -> None:
-        """막대의 숫자 자리에 입력칸을 띄운다(Enter 나 다른 곳을 누르면 닫힌다)."""
+        """히스토그램 값 칩 자리에 입력칸을 띄운다(Enter 나 다른 곳을 누르면 닫힌다)."""
         if self._gl is None:
             return
         sp = self.lo_spin if which == "lo" else self.hi_spin
         (self.hi_spin if which == "lo" else self.lo_spin).hide()
         host = sp.parentWidget()
         w, h = 104, sp.sizeHint().height()
-        origin = self.thr_range.mapTo(host, at.toRect().center())
+        origin = self.hist.mapTo(host, at.toRect().center())
         x = max(8, min(origin.x() - w // 2, host.width() - w - 8))
-        sp.setGeometry(x, self.thr_range.y(), w, h)
+        y = max(8, min(origin.y() - h // 2, host.height() - h - 8))
+        sp.setGeometry(x, y, w, h)
         sp.show()
         sp.raise_()
         sp.setFocus()
@@ -652,7 +622,7 @@ class GlViewerDialog(QDialog):
         if self._gl_b is not None:
             self._full_hist_b = analysis.histogram(self._gl_b.data, self._bits)
         self._set_range_widgets()
-        self.thr_range.setEnabled(True)
+        self.hist.setEnabled(True)
         self._lo, self._hi = analysis.auto_thresholds(self._full_hist)
         self._sync_spins()
         rgb = self._make_rgb()
@@ -803,7 +773,6 @@ class GlViewerDialog(QDialog):
             sp.blockSignals(True)
             sp.setRange(0, top)
             sp.blockSignals(False)
-        self.thr_range.set_levels(top + 1)
 
     def _sync_spins(self) -> None:
         for sp, v in ((self.lo_spin, self._lo), (self.hi_spin, self._hi)):
@@ -812,7 +781,6 @@ class GlViewerDialog(QDialog):
             sp.blockSignals(False)
         self.canvas.set_thresholds(self._lo, self._hi)
         self.hist.set_thresholds(self._lo, self._hi)
-        self.thr_range.set_thresholds(self._lo, self._hi)
 
     def _set_thresholds(self, lo: int, hi: int, moved: str) -> None:
         """하한 < 상한을 지킨다 — 움직인 쪽이 반대편을 넘으면 그 자리에서 멈추고 알린다."""
@@ -874,7 +842,6 @@ class GlViewerDialog(QDialog):
             rows = [(ALL_ROW, _KO.GL_HIST_ALL, theme.INK2 or "#3D3B35", self._full_hist)]
             rows += [(r.id, r.name, r.color,
                       analysis.histogram(analysis.roi_values(data, r), self._bits)) for r in rois]
-            self.hist.set_range_data(self.range_cb.isChecked())
             self.hist.set_rows(rows, levels, ALL_ROW if active is None else active.id)
             self.hist.set_thresholds(self._lo, self._hi)
             self.hist_name.setText("")
@@ -887,19 +854,20 @@ class GlViewerDialog(QDialog):
                 name = active.name
             else:
                 ha, hb = self._full_hist, self._full_hist_b
-            series = [("A", _CMP_A, ha), ("B", _CMP_B, hb)]
-        elif self.overlay_cb.isChecked() and len(rois) >= 2:
-            series = [(r.name, r.color, analysis.histogram(analysis.roi_values(data, r), self._bits))
-                      for r in rois]
-            name = ""                                   # 색 견본은 분포 선이 말한다(제목 줄이 좁다)
+            na = Path(self._view.source_path or self._gl.path).name
+            nb = Path(self._view_b.source_path or self._gl_b.path).name
+            self.hist.set_compare([(0, f"A · {na}", _CMP_A, ha), (1, f"B · {nb}", _CMP_B, hb)], levels)
+            self.hist.set_thresholds(self._lo, self._hi)
+            self.hist_name.setText(self._elide_name(name))
+            self.hist_name.setToolTip(name)
+            return
         elif active is not None:
             series = [(active.name, theme.MUTE or "#5A574E",
                        analysis.histogram(analysis.roi_values(data, active), self._bits))]
             name = active.name
         else:
             series = [(_KO.GL_HIST_ALL, theme.MUTE or "#5A574E", self._full_hist)]
-        self.hist.set_range_data(self.range_cb.isChecked())
-        self.hist.set_series(series, levels, normalize=len(series) > 1)
+        self.hist.set_series(series, levels)
         self.hist.set_thresholds(self._lo, self._hi)
         self.hist_name.setText(self._elide_name(name))
         self.hist_name.setToolTip(name)
@@ -935,20 +903,38 @@ class GlViewerDialog(QDialog):
         self._schedule_refresh()
 
     def _on_hover(self, x: int, y: int, gl: int) -> None:
-        self._hover_text = (_KO.GL_STATUS_FMT.format(x=x, y=y, gl=gl) if x >= 0
-                            else "")
+        """사진 위 마우스 읽기값 — x y GL 과 구역 글자, 히스토그램에는 그 GL 의 세로선."""
+        self._hover = (x, y, gl) if x >= 0 else None
+        self.hist.set_hover_gl(gl if x >= 0 else None)
         self._update_status()
+
+    def _zone_of(self, gl: int) -> tuple[str, str]:
+        if gl <= self._lo:
+            return _KO.GL_ZONE_LOW, "glZoneLow"
+        if gl >= self._hi:
+            return _KO.GL_ZONE_HIGH, "glZoneHigh"
+        return _KO.GL_ZONE_MID, "glZoneMid"
 
     def _update_status(self, *_a) -> None:
         if self._gl is None:
             self.status.setText("")
+            self.zone_word.setText("")
             self.zoom_label.setText("")
+            self.zoom_status.setText("")
             return
-        h, w = self._gl.shape
-        view = _KO.GL_STATUS_VIEW_FMT.format(w=w, h=h, bits=self._bits,
-                                             zoom=int(round(self.canvas.scale() * 100)))
-        self.status.setText(f"{self._hover_text}    {view}".strip())
-        self.zoom_label.setText(f"{int(round(self.canvas.scale() * 100))}%")
+        zoom = int(round(self.canvas.scale() * 100))
+        if self._hover is None:
+            self.status.setText("")
+            self.zone_word.setText("")
+        else:
+            x, y, gl = self._hover
+            word, role = self._zone_of(gl)
+            self.status.setText(_KO.GL_STATUS_FMT.format(x=x, y=y, gl=gl))
+            self.zone_word.setText(f" · {word}")
+            if self.zone_word.property("role") != role:
+                self._set_role(self.zone_word, role)
+        self.zoom_status.setText(_KO.GL_STATUS_ZOOM_FMT.format(zoom=zoom))
+        self.zoom_label.setText(f"{zoom}%")
 
     def _toast(self, text: str, *, error: bool = False) -> None:
         self.toast.setText(text)
