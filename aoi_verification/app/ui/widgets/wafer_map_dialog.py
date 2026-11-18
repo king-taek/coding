@@ -60,7 +60,8 @@ from ...models.result import FinalResult
 from ...models.slot import _list_images, list_slot_dirs
 from ...utils import image_io
 from .. import theme
-from ..drop_paths import install_paste, local_paths, split_paths
+from ..drop_overlay import drop_clear, drop_feedback
+from ..drop_paths import guess_kinds, install_paste, local_paths, split_paths
 from . import sheet_host as sheets
 from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
@@ -635,19 +636,38 @@ class WaferMapDialog(QDialog):
     # ------------------------------------------------------------------
     # 사진 끌어놓기
     # ------------------------------------------------------------------
+    def hideEvent(self, event):         # noqa: N802
+        drop_clear(self)                # 끌던 중에 숨겨져도 표시가 남지 않게
+        super().hideEvent(event)
+
     def dragEnterEvent(self, event):    # noqa: N802
         # 디스크를 만지지 않는다(NAS) — 로컬 경로가 있으면 받고, 분류는 놓을 때.
         md = event.mimeData()
-        if md is not None and local_paths(md):
-            event.acceptProposedAction()
-        else:
+        paths = local_paths(md) if md is not None else []
+        if not paths:
+            drop_clear(self)
             event.ignore()
+            return
+        kinds = guess_kinds(paths)
+        K = i18n.KO
+        if "image" in kinds:
+            text, ok = K.DROP_PILL_SHOW_ON_MAP, True
+        elif "folder" in kinds:
+            text, ok = K.DROP_PILL_FOLDER_MAP, True
+        else:
+            text, ok = K.DROP_PILL_ONLY_FOLDER_PHOTO, False
+        drop_feedback(self, event, None, text, ok)
 
     def dragMoveEvent(self, event):     # noqa: N802
         self.dragEnterEvent(event)
 
+    def dragLeaveEvent(self, event):    # noqa: N802
+        drop_clear(self)
+        event.accept()
+
     def dropEvent(self, event):         # noqa: N802
         """사진(여러 장 가능) → 그 결함들만.  폴더 1개 → 폴더 맵."""
+        drop_clear(self)
         md = event.mimeData()
         paths = local_paths(md) if md is not None else []
         if not paths:

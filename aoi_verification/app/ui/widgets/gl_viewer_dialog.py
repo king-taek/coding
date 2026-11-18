@@ -32,7 +32,8 @@ from ...gl import roi as R
 from ...gl.export import build_workbook, save_workbook
 from .. import theme
 from ..deferred import call_later
-from ..drop_paths import install_paste, local_paths
+from ..drop_overlay import drop_clear, drop_feedback
+from ..drop_paths import guess_kinds, install_paste, local_paths
 from . import sheet_host as sheets
 from .gl_canvas import TOOLS, GlCanvas
 from .gl_charts import ALL_ROW, HistogramChart
@@ -739,11 +740,28 @@ class GlViewerDialog(QDialog):
             self._zoom_to_target()
 
     # -- 끌어놓기 --------------------------------------------------------
+    def hideEvent(self, event):         # noqa: N802
+        drop_clear(self)                # 끌던 중에 숨겨져도 표시가 남지 않게
+        super().hideEvent(event)
+
     def dragEnterEvent(self, e):  # noqa: N802
-        if e.mimeData().hasUrls() and local_paths(e.mimeData()):    # 디스크는 drop 에서만 본다
-            e.acceptProposedAction()
+        paths = local_paths(e.mimeData()) if e.mimeData().hasUrls() else []   # 디스크는 drop 에서만 본다
+        if not paths:
+            drop_clear(self)
+            e.ignore()
+            return
+        ok = "image" in guess_kinds(paths)
+        drop_feedback(self, e, None, _KO.DROP_PILL_OPEN_IMAGE if ok else _KO.DROP_PILL_ONLY_IMAGE, ok)
+
+    def dragMoveEvent(self, e):  # noqa: N802
+        self.dragEnterEvent(e)
+
+    def dragLeaveEvent(self, e):  # noqa: N802
+        drop_clear(self)
+        e.accept()
 
     def dropEvent(self, e):  # noqa: N802
+        drop_clear(self)
         paths = local_paths(e.mimeData())
         if paths:
             e.acceptProposedAction()

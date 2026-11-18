@@ -115,3 +115,13 @@ def test_ctrl_v_with_focused_lineedit_routes_files(styled_qapp):
     assert len(got) == 1                    # 글자 클립보드는 필터가 건드리지 않는다
     assert edit.text() == "글자"            # 평소 붙여넣기가 그대로 동작
     w.close()
+
+
+def test_guess_kinds_by_name_only():
+    from aoi_verification.app.ui.drop_paths import guess_kinds
+    is_img = lambda p: p.lower().endswith((".jpg", ".png"))        # noqa: E731
+    assert guess_kinds(["/x/a.JPG"], is_img) == {"image"}
+    assert guess_kinds(["/x/r.xlsx", "/x/r2.XLSM"], is_img) == {"xlsx"}
+    assert guess_kinds(["/x/LOT", "/x/a.png", "/x/n.txt"], is_img) == {"folder", "image", "other"}
+    # 점 든 폴더 이름은 잘못 거절하지 않는다 — 모르는 확장자는 folder 쪽
+    assert guess_kinds(["/x/TB500.RDL4", "/x/00NUR.001"], is_img) == {"folder"}
