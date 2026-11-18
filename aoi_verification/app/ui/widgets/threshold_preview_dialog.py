@@ -49,7 +49,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import (QBuffer, QIODevice, QLocale, QObject, QPoint, QPointF, QPropertyAnimation, QRectF, QSize, Qt,
+from PyQt6.QtCore import (QBuffer, QCoreApplication, QEvent, QIODevice, QLocale, QObject, QPoint, QPointF, QPropertyAnimation, QRectF, QSize, Qt,
                           QThread, QTimer, QUrl, pyqtProperty, pyqtSignal)
 from PyQt6.QtGui import (QColor, QDesktopServices, QDoubleValidator, QFont, QFontMetrics, QImage, QPainter, QPainterPath,
                          QPen, QPixmap, QPolygonF)
@@ -57,13 +57,14 @@ from PyQt6.QtWidgets import (QAbstractButton, QApplication, QButtonGroup, QDialo
                              QLabel, QLineEdit, QMenu, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
 
 from ... import i18n
-from ...config import CONFIG
+from ...config import CONFIG, Sizing
 from ...coords import abs_coord
 from ...coords.geometry import GEOMETRY_MATCH_TOL
 from ...coords import scan_crop_cache as SCC
 from ...coords import scan_image as SI
 from ...coords import surface_flt as _flt
 from ...coords.pixel_size import scan_pixel_size_xy
+from ...models.lot_info import read_active_slot
 from ...models.slot import _list_images, list_slot_dirs
 from ...threshold import preview as P
 from ...threshold import report as RP
@@ -96,6 +97,7 @@ EXPORT_SAMPLES = 8          # HTML 내보내기 — Zone 마다 대표 사진 �
 EXPORT_PHOTO_PX = 200
 NOTICE_MS = 5000            # 뺐다 · 더했다 알림이 떠 있는 시간(되돌리기도 이 안에)
 PICK_REFRESH_MS = 80        # [Defect 고르기] 팝업에 도착한 사진을 모아 올리는 간격
+WAFER_MERGE_MS = 150        # LOT 안 웨이퍼를 넣고 뺄 때 — 연달아 누르면 모아서 한 번만 합친다
 FLASH_MS = 1500             # 더한 칩 · 이미 있는 칩이 반짝이는 시간
 _LIVE: set = set()          # 화면이 닫혀도 도는 읽기 스레드를 붙들어 둔다(wafer_map_dialog 와 같은 패턴)
 
@@ -120,6 +122,7 @@ class WaferData:
     folders: tuple = ()               # 합친 웨이퍼 폴더들(하나면 folder 하나)
     skipped: tuple = ()               # 못 합친 웨이퍼 폴더 — 못 읽었거나 Zone 기준 · 픽셀 크기가 기준 웨이퍼와 다름
     has_scan: bool = False            # 폴더에 Scan 목록이 있다 — 칩의 [스캔] 을 켤 수 있다
+    slot: str = ""                    # 카세트 슬롯 번호(WaferInfo.ini ActiveSlot) — 모르면 빈 글자
 
     def to_um(self, feature: int, v: float) -> float:
         if feature == R.FEATURE_AREA:
@@ -146,7 +149,8 @@ def load_wafer(folder: Path, report=lambda msg, done=0, total=0: None, stop=lamb
     t0 = time.perf_counter()
     defects, goods, note = P.load_all(folder)
     t1 = time.perf_counter()
-    w = WaferData(folder, defects, goods, note=note, has_scan=(folder / SI.SCAN_LIST_NAME).is_file())
+    w = WaferData(folder, defects, goods, note=note, has_scan=(folder / SI.SCAN_LIST_NAME).is_file(),
+                  slot=read_active_slot(folder) or "")
     if note:
         return w
     w.zones = R.read_zones(folder)
@@ -208,6 +212,11 @@ def key_of(d: P.Defect) -> tuple:
 def _folder_of(w: WaferData, d: P.Defect) -> Path:
     """그 Defect 가 나온 웨이퍼 폴더."""
     return w.folders[d.wafer] if w.folders else w.folder
+
+
+def _wafer_label(folder: Path, data: WaferData) -> str:
+    """LOT 안 웨이퍼 줄 이름 — 슬롯 번호(ActiveSlot)를 알면 ``#슬롯 · 폴더``, 모르면 폴더 이름만."""
+    return _KO.OVERKILL_LOT_WAFER_NAME.format(slot=data.slot, name=folder.name) if data.slot else folder.name
 
 
 def merge_wafers(ws: list) -> WaferData:
@@ -630,6 +639,12 @@ def _mid_key(photo, size: int) -> tuple:
     return ("thumbq", str(photo), int(size), "mid")
 
 
+class _PickBus(QObject):
+    """[적용] 의 추천값 계산(백그라운드) → GUI 스레드 전달 통로."""
+
+    done = pyqtSignal(int, object)       # 토큰 · P.recommend 의 값(실패면 None)
+
+
 class _ThumbBus(QObject):
     """백그라운드 스레드 → GUI 스레드 전달 통로.  QPixmap 은 GUI 스레드에서만 만든다."""
 
@@ -848,6 +863,10 @@ class _ChipInfo:
     selected: bool = False
     flash: str = ""               # "" | added | dup
     tip: str = ""
+    rows: tuple = ()              # LOT — ((웨이퍼 폴더, 이름, Defect 수, 넣었나), …) 보이는 순서
+    parts: str = ""               # LOT 에서 일부만 넣었을 때 '3/8장 · 425'
+    open: bool = False            # LOT 의 웨이퍼 목록이 펴져 있다
+    by_count: bool = False        # 목록을 Defect 많은 순으로
 
 
 class _ElideLabel(QLabel):
@@ -882,6 +901,7 @@ class _FolderRow(QFrame):
     select = pyqtSignal()
     remove = pyqtSignal()
     view = pyqtSignal(str)
+    toggle_open = pyqtSignal()
 
     ROW_H = 32
 
@@ -894,12 +914,23 @@ class _FolderRow(QFrame):
         self.setProperty("excluded", info.state == "excluded")
         self.setToolTip(info.tip)
         col = QVBoxLayout(self)
-        col.setContentsMargins(12, 0, 2, 0)
+        fold = info.state == "ok" and len(info.rows) >= 2           # 웨이퍼를 고를 수 있는 LOT 만 ▾/▸
+        col.setContentsMargins(4 if fold else 12, 0, 2, 0)
         col.setSpacing(0)
         line = QHBoxLayout()
         line.setContentsMargins(0, 0, 0, 0)
         line.setSpacing(4)
-        title = info.name + (f" · {_KO.OVERKILL_WAFERS.format(n=info.wafers)}" if info.lot and info.state == "ok" else "")
+        if fold:
+            self.disc = QPushButton("▾" if info.open else "▸", self)
+            self.disc.setProperty("role", "ovRowDisc")
+            self.disc.setFixedSize(18, 28)
+            self.disc.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.disc.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.disc.setToolTip(_KO.OVERKILL_LOT_TOGGLE_TIP)
+            self.disc.clicked.connect(self.toggle_open)
+            line.addWidget(self.disc)
+        title = info.name + (f" · {_KO.OVERKILL_WAFERS.format(n=info.wafers)}"
+                             if info.lot and info.state == "ok" and not info.parts else "")
         self.name = _ElideLabel(title, self)
         self.name.setProperty("role", "ovRowName")
         self.name.setFixedHeight(self.ROW_H)
@@ -907,7 +938,8 @@ class _FolderRow(QFrame):
         self.seg: dict = {}
         self.side = QLabel("", self)
         if info.state == "ok":
-            self.side.setText(f"{info.count:,}" + (f" · {_KO.OVERKILL_CHIP_PARTIAL.format(n=info.partial)}" if info.partial else ""))
+            self.side.setText(info.parts or f"{info.count:,}" + (
+                f" · {_KO.OVERKILL_CHIP_PARTIAL.format(n=info.partial)}" if info.partial else ""))
             self.side.setProperty("role", "ovRowCount")
             line.addWidget(self.side)
         self.x_btn = QPushButton("✕", self)             # 빼기 — 이름 영역과 떨어진 작은 칸
@@ -957,6 +989,141 @@ class _FolderRow(QFrame):
         if e.button() == Qt.MouseButton.LeftButton and self.info.state == "ok":
             self.select.emit()
         super().mousePressEvent(e)
+
+
+class _OnMark(QWidget):
+    """웨이퍼 줄 앞 표시 — 넣었으면 채운 원 + 체크, 뺐으면 빈 고리."""
+
+    def __init__(self, on: bool, parent=None) -> None:
+        super().__init__(parent)
+        self.on = on
+        self.setFixedSize(14, 14)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+    def paintEvent(self, _e):       # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        r = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+        if self.on:
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(theme.ACCENT))
+            p.drawEllipse(r)
+            pen = QPen(QColor(theme.ON_ACCENT), 1.6)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            p.setPen(pen)
+            x, y, w, h = r.x(), r.y(), r.width(), r.height()
+            p.drawPolyline([QPointF(x + w * .26, y + h * .52), QPointF(x + w * .44, y + h * .70),
+                            QPointF(x + w * .76, y + h * .32)])
+        else:
+            p.setPen(QPen(QColor(theme.LINE_STRONG), 1.2))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawEllipse(r)
+        p.end()
+
+
+class _CountBar(QWidget):
+    """웨이퍼 줄 아래 가는 막대 — 그 LOT 에서 가장 많은 웨이퍼 대비 Defect 수."""
+
+    def __init__(self, ratio: float, on: bool, parent=None) -> None:
+        super().__init__(parent)
+        self.ratio, self.on = ratio, on
+        self.setFixedHeight(3)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+    def paintEvent(self, _e):       # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        r = QRectF(self.rect())
+        rad = r.height() / 2
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(theme.LINE2))
+        p.drawRoundedRect(r, rad, rad)
+        if self.ratio > 0:
+            p.setBrush(QColor(theme.ACCENT if self.on else theme.LINE_STRONG))
+            p.drawRoundedRect(QRectF(0, 0, max(r.height(), r.width() * self.ratio), r.height()), rad, rad)
+        p.end()
+
+
+class _WaferRow(QFrame):
+    """LOT 안 웨이퍼 한 줄 — 표시 · ``#슬롯 · WaferID`` · Defect 수 · 가는 막대.  줄 전체가 누르는 자리(넣기 ↔ 빼기)."""
+
+    toggled = pyqtSignal()
+
+    def __init__(self, label: str, count: int, top: int, on: bool, tip: str, parent=None) -> None:
+        super().__init__(parent)
+        self.on = on
+        self.setProperty("role", "ovRow")
+        self.setProperty("wafer", True)
+        self.setProperty("excluded", not on)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip(tip)
+        col = QVBoxLayout(self)
+        col.setContentsMargins(24, 0, 6, 0)
+        col.setSpacing(0)
+        line = QHBoxLayout()
+        line.setContentsMargins(0, 0, 0, 0)
+        line.setSpacing(8)
+        line.addWidget(_OnMark(on, self))
+        self.name = _ElideLabel(label, self)
+        self.name.setProperty("role", "ovRowName")
+        self.name.setFixedHeight(28)
+        line.addWidget(self.name, 1)
+        self.count = QLabel(f"{count:,}", self)
+        self.count.setProperty("role", "ovRowCount")
+        line.addWidget(self.count)
+        col.addLayout(line)
+        bar = QHBoxLayout()
+        bar.setContentsMargins(22, 0, 0, 7)
+        bar.addWidget(_CountBar(count / top if top else 0.0, on, self))
+        col.addLayout(bar)
+
+    def mousePressEvent(self, e):   # noqa: N802
+        if e.button() == Qt.MouseButton.LeftButton:
+            self.toggled.emit()
+        super().mousePressEvent(e)
+
+
+class _WaferList(QWidget):
+    """펼친 LOT 아래 — [전부 · 없음 · 많은 순] 한 줄과 웨이퍼 줄들."""
+
+    toggled = pyqtSignal(object)        # 웨이퍼 폴더
+    all_on = pyqtSignal()
+    all_off = pyqtSignal()
+    sort_flip = pyqtSignal()
+
+    def __init__(self, info: _ChipInfo, parent=None) -> None:
+        super().__init__(parent)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 6)
+        lay.setSpacing(0)
+        ctl = QHBoxLayout()
+        ctl.setContentsMargins(18, 2, 0, 2)
+        ctl.setSpacing(0)
+        self.ctl: dict = {}
+        for key, text, sig in (("all", _KO.OVERKILL_LOT_ALL, self.all_on), ("none", _KO.OVERKILL_LOT_NONE, self.all_off),
+                               ("top", _KO.OVERKILL_LOT_BY_COUNT, self.sort_flip)):
+            b = QPushButton(text, self)
+            b.setProperty("role", "ovView")
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            b.setFixedHeight(24)
+            if key == "top":
+                b.setCheckable(True)
+                b.setChecked(info.by_count)
+                b.setToolTip(_KO.OVERKILL_LOT_BY_COUNT_TIP)
+            b.clicked.connect(lambda _c=False, sg=sig: sg.emit())
+            ctl.addWidget(b)
+            self.ctl[key] = b
+        ctl.addStretch(1)
+        lay.addLayout(ctl)
+        top = max((c for _d, _n, c, _o in info.rows), default=0)
+        self.rows: list = []
+        for d, name, count, on in info.rows:
+            r = _WaferRow(name, count, top, on, _KO.OVERKILL_LOT_WAFER_TIP.format(name=d.name, n=count), self)
+            r.toggled.connect(lambda d=d: self.toggled.emit(d))
+            lay.addWidget(r)
+            self.rows.append(r)
 
 
 def paint_ratio(p: QPainter, x: float, y: float, w: float, h: float, drop: int, total: int, ticks=(),
@@ -1119,6 +1286,12 @@ class _FullScanLoad(QThread):
         self.signals.done.emit(self._crop, full, box, path)
 
 
+def _settle_layout(_h: int = 0) -> None:
+    """띠 높이를 바꾼 틱에서 밀린 재배치(호스트 크기 갱신)를 바로 끝낸다 — 한 프레임 늦으면 그 사이 위쪽 줄이 눌려 출렁인다."""
+    for _ in range(3):                       # 재배치가 다음 재배치를 부른다(띠 → 호스트 → 스크롤 영역 안 위젯)
+        QCoreApplication.sendPostedEvents(None, int(QEvent.Type.LayoutRequest))
+
+
 class _DetailBand(QWidget):
     """타일 줄 아래 펼쳐지는 값 띠 — 맨 위에 고른 타일 가운데를 가리키는 작은 삼각형(caret)이 있다.
 
@@ -1214,6 +1387,13 @@ class ThresholdPreviewDialog(QDialog):
         self._owner: dict = {}            # 웨이퍼 폴더 → 그걸 가진 칩(같은 웨이퍼를 두 칩이 가리켜도 앞 칩 하나만)
         self._order: list = []            # 합칠 웨이퍼 폴더(칩 순서)
         self._real_owner: dict = {}       # 실제 경로 키 → 칩
+        self._off: set = set()            # LOT 에서 사용자가 뺀 웨이퍼 폴더 — 합치지 않는다(화면을 닫을 때까지만, 저장 안 함)
+        self._open_lots: set = set()      # 웨이퍼 목록을 펼친 LOT
+        self._by_count: set = set()       # 목록을 Defect 많은 순으로 보는 LOT
+        self._merge_timer = QTimer(self)  # 웨이퍼를 연달아 넣고 뺄 때 한 번만 합친다
+        self._merge_timer.setSingleShot(True)
+        self._merge_timer.setInterval(WAFER_MERGE_MS)
+        self._merge_timer.timeout.connect(self._merge_wafer_choice)
         self._failed: set = set()         # 읽다가 실패한 고른 폴더
         self._view: dict = {}             # 고른 폴더 → 'color' | 'scan' — 폴더를 빼고 다시 더해도 이 화면을 닫을 때까지 남는다
         self._sel: Optional[Path] = None  # 사진 칸을 이 칩의 Defect 로만 거른다(값 계산은 전체 그대로)
@@ -1225,6 +1405,9 @@ class ThresholdPreviewDialog(QDialog):
         self._mode = "manual"             # manual(직접 조정) | auto(자동 추천)
         self._picked: dict = {}           # 꼭 잡을 Defect — key_of(d) → Defect
         self._overkill: dict = {}         # Overkill 로 가른 Defect — key_of(d) → Defect (팝업에서 고른다 · 추천에는 안 쓰고 '빠짐 m/n' 만 센다)
+        self._pick_bus = _PickBus(self)
+        self._pick_bus.done.connect(self._on_pick_computed)
+        self._pick_token = 0              # [적용] 계산의 세대 — 늦게 온 옛 결과는 버린다
         self._pick_dlg: Optional[QDialog] = None   # 열려 있는 [Defect 고르기] 팝업
         self._pick_refresh = QTimer(self)          # 사진이 한 장씩 올 때마다 팝업 전체를 훑지 않게 모아서 한 번
         self._pick_refresh.setSingleShot(True)
@@ -1518,7 +1701,8 @@ class ThresholdPreviewDialog(QDialog):
                 if real not in real_owner:
                     real_owner[real] = r
                     owner[d] = r
-                    order.append(d)
+                    if d not in self._off:          # 사용자가 뺀 웨이퍼는 칩에는 남고 합치지 않는다
+                        order.append(d)
         self._owner, self._order, self._real_owner = owner, order, real_owner
 
     def add_folders(self, folders) -> None:
@@ -1598,6 +1782,9 @@ class ThresholdPreviewDialog(QDialog):
         """칩 목록이 바뀐 뒤 — 읽을 게 없으면 그 자리에서 합치고(덮개 · 스레드 없음), 있을 때만 읽는다."""
         if self._sel not in self._roots:
             self._sel = None
+        self._open_lots &= set(self._roots)         # 빠진 LOT 의 고름 · 펼침은 버린다(다시 더하면 전부 넣은 채로)
+        self._by_count &= set(self._roots)
+        self._off &= {d for r in self._roots for d, _r in self._expand.get(r, ())}
         self._rebuild_owner()
         if not self._roots:
             self._render_chips()
@@ -1698,6 +1885,8 @@ class ThresholdPreviewDialog(QDialog):
             w = None
         elif ws:
             w = merge_wafers(ws)
+        elif self._off & set(self._owner):          # 웨이퍼를 전부 뺐다 — 보통 빈 화면
+            w = WaferData(self._roots[0], note=_KO.OVERKILL_LOT_NONE_PICKED)
         else:
             w = WaferData(self._roots[0], note=_KO.THRESH_PREVIEW_FAILED if self._failed else _KO.OVERKILL_NO_WAFER)
         self.set_wafer(w)
@@ -1780,19 +1969,31 @@ class ThresholdPreviewDialog(QDialog):
             info.progress = _KO.OVERKILL_CHIP_READING.format(i=len(got), n=len(owned))
             return info
         data = self._cache
-        ok = [d for d in owned if d in included]
+        active = [d for d in owned if d not in self._off]            # 사용자가 뺀 웨이퍼는 '제외' 가 아니다
+        ok = [d for d in active if d in included]
+        pending = self._merge_timer.isActive()                      # 넣고 뺀 직후 — 합치기 전이라 included 가 옛것
+        if pending:
+            ok = [d for d in active if not data[d].note]
         if info.lot:
             info.tip += "\n" + "\n".join(
-                f"{d.name}   " + (f"{len(data[d].defects):,}" if d in included else
-                                  _KO.OVERKILL_CHIP_EX_UNREAD if data[d].note else _KO.OVERKILL_CHIP_EX_RECIPE)
+                f"{d.name}   " + (f"{len(data[d].defects):,}" if d in included or (d in self._off and not data[d].note)
+                                  else _KO.OVERKILL_CHIP_EX_UNREAD if data[d].note else _KO.OVERKILL_CHIP_EX_RECIPE)
                 for d in owned)
-        if not ok:
+            lst = [d for d in owned if not data[d].note]
+            if len(lst) >= 2:
+                info.open, info.by_count = root in self._open_lots, root in self._by_count
+                rows = [(d, _wafer_label(d, data[d]), len(data[d].defects), d not in self._off) for d in lst]
+                info.rows = tuple(sorted(rows, key=lambda t: -t[2]) if info.by_count else rows)
+                kept = [t for t in rows if t[3]]
+                if len(kept) < len(rows):
+                    info.parts = _KO.OVERKILL_LOT_PARTS.format(k=len(kept), n=len(rows), c=sum(t[2] for t in kept))
+        if not ok and active:
             info.state = "excluded"
             info.reason = (_KO.OVERKILL_CHIP_EX_RECIPE if any(not data[d].note for d in owned)
                            else _KO.OVERKILL_CHIP_EX_UNREAD)
             return info
         info.count = sum(len(data[d].defects) for d in ok)
-        info.wafers, info.partial = len(ok), len(owned) - len(ok)
+        info.wafers, info.partial = len(ok), 0 if pending else len(active) - len(ok)
         info.can_color = any(data[d].photos for d in ok)
         info.can_scan = any(data[d].has_scan for d in ok)
         info.view = self._view.get(root) or ("color" if info.can_color or not info.can_scan else "scan")
@@ -1803,14 +2004,77 @@ class ThresholdPreviewDialog(QDialog):
         c.select.connect(lambda r=info.root: self.select_folder(r))
         c.remove.connect(lambda r=info.root: self.remove_folder(r))
         c.view.connect(lambda m, r=info.root: self.set_view(r, m))
+        if info.rows:
+            c.toggle_open.connect(lambda r=info.root: self.toggle_lot_open(r))
         return c
+
+    def _make_wafer_list(self, info: _ChipInfo) -> _WaferList:
+        lst = _WaferList(info, self)
+        lst.toggled.connect(self.toggle_wafer)
+        lst.all_on.connect(lambda r=info.root: self.set_lot_wafers(r, True))
+        lst.all_off.connect(lambda r=info.root: self.set_lot_wafers(r, False))
+        lst.sort_flip.connect(lambda r=info.root: self.toggle_lot_sort(r))
+        return lst
 
     def _render_chips(self) -> None:
         """왼쪽 열의 폴더 목록을 다시 그린다 — 폴더가 많으면 열이 스크롤되고 접지 않는다."""
         self._clear(self._folder_lay)
         inc = self._included()
         for r in self._roots:
-            self._folder_lay.addWidget(self._make_chip(self._chip_info(r, inc), self))
+            info = self._chip_info(r, inc)
+            self._folder_lay.addWidget(self._make_chip(info, self))
+            if info.open and len(info.rows) >= 2:
+                self._folder_lay.addWidget(self._make_wafer_list(info))
+
+    # ------------------------------------------------------------------ LOT 안 웨이퍼 고르기
+    def toggle_lot_open(self, root: Path) -> None:
+        """LOT 줄의 ▾/▸ — 웨이퍼 목록을 펴고 접는다(합친 결과는 그대로)."""
+        self._open_lots ^= {root}
+        self._render_chips()
+
+    def toggle_lot_sort(self, root: Path) -> None:
+        """[많은 순] — 목록을 Defect 많은 순 ↔ 폴더 순서."""
+        self._by_count ^= {root}
+        self._render_chips()
+
+    def _lot_wafers(self, root: Path) -> list:
+        """그 LOT 칩이 가진 웨이퍼 중 읽힌 것(고를 수 있는 것)."""
+        return [d for d, _r in self._expand.get(root, ())
+                if self._owner.get(d) == root and d in self._cache and not self._cache[d].note]
+
+    def toggle_wafer(self, folder: Path) -> None:
+        """웨이퍼 한 장을 넣거나 뺀다 — 줄 표시는 바로, 합치기는 연달아 누르면 모아서 한 번."""
+        self._off ^= {folder}
+        self._wafers_changed()
+
+    def set_lot_wafers(self, root: Path, on: bool) -> None:
+        """[전부] · [없음] — 그 LOT 의 읽힌 웨이퍼를 전부 넣거나 뺀다."""
+        ds = set(self._lot_wafers(root))
+        self._off = self._off - ds if on else self._off | ds
+        self._wafers_changed()
+
+    def _wafers_changed(self) -> None:
+        self._rebuild_owner()
+        self._render_chips()
+        self._merge_timer.start()
+
+    def flush_wafer_choice(self) -> None:
+        """기다리는 합치기가 있으면 지금 한다(테스트 · 닫기 전)."""
+        if self._merge_timer.isActive():
+            self._merge_timer.stop()
+            self._merge_wafer_choice()
+
+    def _merge_wafer_choice(self) -> None:
+        """고른 웨이퍼로 다시 합친다.  뺀 웨이퍼의 꼭 잡기 · Overkill 은 set_wafer 가 함께 버리고(화면에 없는 Defect 로
+        추천하지 않게) 자동 추천은 남은 고름으로 다시 계산한다."""
+        self._merge_timer.stop()
+        if not self._roots or not self._all_ready():
+            return
+        before = len(self._picked)
+        self._remerge()
+        lost = before - len(self._picked)
+        if lost > 0 and not self._base_reset:
+            self._show_notice(_KO.OVERKILL_NOTICE_WAFER_PICKS_LOST.format(n=lost), "info")
 
     def select_folder(self, root: Path) -> None:
         """칩 이름을 누르면 그 폴더 Defect 만 사진 칸에 보인다 — 다시 누르면 전체.  숫자 · 값 계산은 늘 전체 기준."""
@@ -2548,6 +2812,9 @@ class ThresholdPreviewDialog(QDialog):
             more = NeonButton(_KO.THRESH_PREVIEW_MORE.format(n=f"{len(with_photo) - self._shown:,}"), role="ghost")
             more.clicked.connect(self._more)
             self.grid.addWidget(more, 0, Qt.AlignmentFlag.AlignLeft)
+        # ★ 끝에 늘어나는 빈 칸을 둔다 — 없으면 띠가 접히고 펼쳐지는 동안(레이아웃 합 < 아직 안 줄어든 호스트 높이)의 남는 높이가
+        #   위쪽 줄 · 제목에 나뉘어 눌린 타일이 아래위로 출렁였다(실측: 눌린 줄이 한 프레임에 최대 35 px).
+        self.grid.addStretch(1)
         self._ensure_scans()
 
     def _caret_x(self, k) -> float:
@@ -2806,7 +3073,7 @@ class ThresholdPreviewDialog(QDialog):
         band.show()
         h = band.sizeHint().height()
         if motion.enabled():
-            motion.animate_height(band, 0, h, duration=motion.DUR_ROW_RESIZE)
+            motion.animate_height(band, 0, h, duration=motion.DUR_ROW_RESIZE, on_tick=_settle_layout)
             motion.fade_in(band.content, duration=motion.DUR_TILE_IN)
             anim = getattr(band, "_motionHeightAnim", None)
             if anim is not None:                       # 다 펼쳐진 뒤 띠가 보이게 스크롤(그 전에는 아직 자리가 모자라 끝이 잘린다)
@@ -2829,7 +3096,8 @@ class ThresholdPreviewDialog(QDialog):
         if instant or not motion.enabled() or h <= 0 or not band.isVisible():
             band.dispose()
             return
-        motion.animate_height(band, h, 0, duration=motion.DUR_ROW_SHRINK, easing=motion.EASE_EXIT)
+        motion.animate_height(band, h, 0, duration=motion.DUR_ROW_SHRINK, easing=motion.EASE_EXIT,
+                              on_tick=_settle_layout)
         band._motionHeightAnim.finished.connect(band.dispose, Qt.ConnectionType.SingleShotConnection)
 
     def _more(self) -> None:
@@ -2906,11 +3174,14 @@ class ThresholdPreviewDialog(QDialog):
 
     def _recommend(self) -> None:
         """고른 것이 있는(또는 있던) Zone 만 다시 계산한다 — 다른 Zone 의 직접 조정은 그대로 둔다."""
-        picked = list(self._picked.values())
-        zones_now = {(d.zone_dir, d.zone) for d in picked}
+        rec, _missed = P.recommend(list(self._picked.values()), self._w.zones, self._snap)
+        self._merge_recommended(rec)
+
+    def _merge_recommended(self, rec: dict) -> None:
+        """``P.recommend`` 결과를 직접 조정 값(`_ov`)에 넣는다 — 지금 고른 것의 Zone 만 바뀐다."""
+        zones_now = {(d.zone_dir, d.zone) for d in self._picked.values()}
         for k in [k for k in self._ov if k[:2] in zones_now | self._rec_zones]:
             del self._ov[k]
-        rec, _missed = P.recommend(picked, self._w.zones, self._snap)
         self._ov.update(rec)
         self._rec_zones = zones_now
 
@@ -2939,7 +3210,7 @@ class ThresholdPreviewDialog(QDialog):
         dlg.applied.connect(self._on_pick_applied)
         dlg.finished.connect(self._on_pick_closed)
         self._pick_dlg = dlg
-        sheets.run(dlg)
+        sheets.run(dlg, full_bleed=True)          # 창 전체로 — 큰 사진이 자리를 다 쓴다
 
     def _on_pick_closed(self, _code: int = 0) -> None:
         dlg, self._pick_dlg = self._pick_dlg, None
@@ -2966,11 +3237,11 @@ class ThresholdPreviewDialog(QDialog):
             return None
         if isinstance(photo, QImage):
             return _pixmap(photo, size)
-        key = _tile_key(photo, size) if size <= 200 else _mid_key(photo, size)
+        key = _tile_key(photo, size) if size <= Sizing.THUMB_PX else _mid_key(photo, size)
         return image_io._get_tile_cache().get(key)
 
     def _pick_request(self, ds, size: int) -> None:
-        kind = "thumb" if size <= 200 else "mid"
+        kind = "thumb" if size <= Sizing.THUMB_PX else "mid"
         for d in ds:
             photo = self._pic(d)
             if isinstance(photo, QImage):
@@ -3017,10 +3288,40 @@ class ThresholdPreviewDialog(QDialog):
             return
         self._picked = dict(picked)
         self._overkill = dict(overkill)
-        self._recommend()
-        self._render_zones()
-        self._render_rules()
-        self._changed(True)
+        # 고른 것이 많으면 추천 계산이 길다 — 로딩을 띄우고 계산은 백그라운드에서(UI 스레드를 잡지 않는다).
+        self._pick_token += 1
+        token = self._pick_token
+        self._loading.show_overlay(_KO.THRESH_PREVIEW_APPLYING)
+        self._loading.set_progress(0, 0, _KO.THRESH_PREVIEW_APPLYING)     # 양을 모르니 busy — 0 에 멈추지 않는다
+        self._overlay_on = True
+        self._loading.repaint()
+        zones, snap, chosen = self._w.zones, self._snap, list(self._picked.values())
+
+        def work() -> None:
+            rec = None
+            try:
+                rec = P.recommend(chosen, zones, snap)[0]
+            except Exception:
+                _LOG.exception("Defect 고르기 적용 계산 실패")
+            self._pick_bus.done.emit(token, rec)
+
+        threading.Thread(target=work, name="overkill-apply", daemon=True).start()
+
+    def _on_pick_computed(self, token: int, rec) -> None:
+        """GUI 스레드 — 계산이 끝났다.  추천값을 반영하고 화면을 다시 그린 뒤 로딩을 걷는다."""
+        if token != self._pick_token:
+            return                                   # 그 사이 다시 적용했다 — 옛 결과
+        try:
+            if self._w is not None and rec is not None:
+                self._merge_recommended(rec)
+            if self._w is not None:
+                self._render_zones()
+                self._render_rules()
+                self._changed(True)
+        finally:
+            if self._overlay_on:
+                self._loading.hide_overlay()
+                self._overlay_on = False
 
     def _snap(self, feature: int, v: float, strict: bool) -> float:
         """px 값 → 화면 소수 자리로 **내린** µm 를 다시 px 로.  그 값 이하(엄격이면 미만)를 보장한다."""

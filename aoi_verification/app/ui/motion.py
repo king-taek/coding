@@ -424,21 +424,24 @@ def animate_scroll(bar, target: int, *, duration: int = DUR_BASE) -> None:
 
 
 def animate_height(widget, h0: int, h1: int, *, duration: int,
-                   easing=EASE_PRIMARY) -> None:
+                   easing=EASE_PRIMARY, on_tick=None) -> None:
     """레이아웃 안 위젯의 높이를 ``h0 → h1`` 로 몬다 — 검토 행 접힘·펼침(08·09안).
 
     높이를 최소=최대로 묶어 몰고, 끝나면 묶음을 풀어 레이아웃에 돌려준다.
     ★ 최대만 묶으면 줄어드는 쪽이 안 된다 — 레이아웃이 곧바로 새 sizeHint(작은 값)로
       내려 버린다.  최소도 함께 묶어야 그 사이가 보인다.
     ★ 애니메이션은 위젯당 하나를 재사용하고 tick 은 부모(위젯)만 건드린다(이 모듈 규약).
+    ★ ``on_tick`` — 높이를 바꾼 직후 매 프레임 부른다.  스크롤 영역 안에서는 이 높이 변화가 호스트를 키우고 줄이는
+      재배치가 한 프레임 늦어, 그 틈에 위쪽 줄이 눌려 아래위로 출렁인다 — 부르는 쪽이 밀린 재배치를 같은 틱에서 끝낸다.
     헤드리스면 아무것도 안 한다(레이아웃이 곧바로 새 높이를 준다)."""
     if not enabled() or int(h0) == int(h1):
         return
+    widget._motionHeightTick = on_tick
     anim = getattr(widget, "_motionHeightAnim", None)
     if anim is None:
         widget._motionHeightMin = widget.minimumHeight()
         anim = QVariantAnimation(widget)
-        anim.valueChanged.connect(lambda v: widget.setFixedHeight(int(v)))
+        anim.valueChanged.connect(lambda v: _height_tick(widget, int(v)))
         anim.finished.connect(lambda: _release_height(widget))
         widget._motionHeightAnim = anim
     anim.stop()
@@ -448,6 +451,13 @@ def animate_height(widget, h0: int, h1: int, *, duration: int,
     anim.setEasingCurve(easing)
     widget.setFixedHeight(int(h0))
     anim.start()
+
+
+def _height_tick(widget, h: int) -> None:
+    widget.setFixedHeight(h)
+    cb = getattr(widget, "_motionHeightTick", None)
+    if cb is not None:
+        cb(h)
 
 
 def _release_height(widget) -> None:
