@@ -1580,7 +1580,23 @@ GL_WARN_COLOR = "컬러 사진 · 밝기(0.299R+0.587G+0.114B)로 분석"
 GL_WARN_JPEG = "JPEG 는 원본 GL 과 조금 다를 수 있음"
 GL_WARN_HUGE = "1억 화소 초과 · 느릴 수 있음"
 GL_SCAN_FOUND_FMT = "Scan 사진 {name} 의 결함 위치(300 µm) · 맞춤(F)으로 전체"
-GL_SCAN_MISSING = "Scan 사진을 못 찾아 컬러 사진 밝기로 분석"
+GL_SCAN_MISSING_FMT = "Scan 사진을 못 찾았습니다 — {why} · 컬러 사진 밝기로 분석"
+GL_SCAN_WHY_UNKNOWN = "원인을 알 수 없음"
+GL_SCAN_WHY = {
+    "no_manifest": "폴더에 ScanResultImageList.txt 가 없음",
+    "unsupported_version": "Scan 목록 형식(Version)이 다름",
+    "no_coordinates": "이 사진의 결함 좌표를 못 읽음",
+    "no_pixel_size": "Scan 픽셀 크기를 못 읽음",
+    "no_candidate": "결함 위치를 담은 Scan 사진이 목록에 없음",
+    "unreadable_scan": "Scan 사진을 읽다가 실패",
+}
+GL_SCAN_DIAG = "Scan 진단 수집"
+GL_SCAN_DIAG_TIP = "개발자 모드 · 컬러 결함 사진을 연 뒤 Scan 을 못 찾은 원인 자료를 모아 압축 파일로 저장합니다"
+GL_SCAN_DIAG_BUSY = "Scan 진단 자료를 모으는 중…"
+GL_SCAN_DIAG_DONE_FMT = "Scan 진단 자료를 저장했습니다: {path}"
+GL_SCAN_DIAG_FAILED_FMT = "Scan 진단 수집 실패: {why}"
+SCAN_DIAG_STATUS_TIP = "개발자 모드 · 컬러 결함 사진이 있는 폴더를 골라 Scan 을 못 찾은 원인 자료를 압축 파일로 저장합니다"
+SCAN_DIAG_PICK_TITLE = "Scan 진단할 폴더 선택 (컬러 결함 사진이 있는 폴더)"
 
 GL_RAW_TITLE = "RAW 사진 설정"
 GL_RAW_WIDTH = "가로(px)"

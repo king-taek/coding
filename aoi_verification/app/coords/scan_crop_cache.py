@@ -24,7 +24,7 @@ from .scan_image import CROP_SIDE_UM, SCAN_LIST_NAME
 __all__ = ["manifest_sig", "get", "put"]
 
 _LOG = logging.getLogger("aoi.scan")
-_VERSION = "1"
+_VERSION = "2"   # 2: 다중 레시피 Scan 이 레시피별 픽셀 크기로 바뀜 — 옛 Crop(레시피 1 값으로 자름)을 버린다
 
 
 def _sig_of(path) -> Optional[str]:

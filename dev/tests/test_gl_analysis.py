@@ -271,6 +271,7 @@ def test_color_photo_without_scan_falls_back_to_luminance(tmp_path, monkeypatch)
                         lambda p: scan_image.ScanMatch(scan_image.NO_MANIFEST, cpath))
     v = loader.load_for_view(cpath)
     assert v.scan_missing and v.target_box is None and v.image.color
+    assert v.scan_status == scan_image.NO_MANIFEST
 
 
 def test_scan_failure_never_blocks_opening(tmp_path, monkeypatch):
@@ -284,7 +285,8 @@ def test_scan_failure_never_blocks_opening(tmp_path, monkeypatch):
     def boom(p):
         raise RuntimeError("scan broke")
     monkeypatch.setattr(scan_image, "resolve", boom)
-    assert loader.load_for_view(cpath).scan_missing
+    v = loader.load_for_view(cpath)
+    assert v.scan_missing and v.scan_status == scan_image.UNREADABLE
 
 
 def test_gray_photo_is_not_sent_to_scan(tmp_path, monkeypatch):

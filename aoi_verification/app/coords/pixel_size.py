@@ -62,6 +62,35 @@ def scan_pixel_size_xy(folder: Path):
     return None
 
 
+def scan_pixel_size_xy_recipe(folder: Path, recipe: Optional[int]):
+    """다중 레시피 폴더에서 **레시피 N 의** 2D 스캔 픽셀 크기.  못 찾으면 None.  fail-safe.
+
+    레시피 1(또는 번호 없음)은 :func:`scan_pixel_size_xy` 그대로다.  N ≥ 2 는 배율이 달라
+    픽셀 크기도 다르다 — AOI-22 TB500_RDL3 Multi: 레시피 1 = 20x · 0.3859, 레시피 2 =
+    5x · ``Recipe2-ProductInfo.ini Scan2DPixelSize=1.5380``(파일, Scan 6/6 이 그 값으로만 들어맞음, 관측
+    2026-11-19).  ``Recipe{N}-`` 파일에 값이 없으면 None 이다 — 레시피 1 값으로 대신하지 않는다(4배 어긋났다)."""
+    if recipe is None or recipe <= 1:
+        return scan_pixel_size_xy(folder)
+    return _recipe_pixel_size_xy(Path(folder), int(recipe))
+
+
+@lru_cache(maxsize=256)
+def _recipe_pixel_size_xy(folder: Path, n: int):
+    try:
+        for rel, kx, ky in _SOURCES:
+            if "/" in rel:                    # TrainData/Die.ini 는 레시피별 사본이 따로 없다
+                continue
+            f = folder / f"Recipe{n}-{rel}"
+            x = _read_key(f, kx)
+            if x is None:
+                continue
+            y = _read_key(f, ky) if ky else None
+            return (x, y if y is not None else x)
+    except Exception:
+        return None
+    return None
+
+
 def scan_pixel_size(folder: Path) -> Optional[float]:
     """선형 환산용 px_x(µm/px).  못 찾으면 None."""
     xy = scan_pixel_size_xy(folder)
