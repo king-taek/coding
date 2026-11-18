@@ -1624,7 +1624,12 @@ QLabel[role="tilePic"] {
 }
 QFrame[role="tileRing"] {
     background: transparent;
-    border: 2px solid $accent;
+    border: 3px solid $accent;
+    border-radius: 0px;
+}
+QFrame[role="tileHover"] {
+    background: transparent;
+    border: 2px solid $mute;
     border-radius: 0px;
 }
 QLabel[role="tileBadge"] {
@@ -1641,40 +1646,53 @@ QLabel[role="tileMore"] {
     border-radius: $radius_sm;
     font-weight: 700;
 }
-QLabel[role="tileMark"] {
-    background: transparent;
-    color: $on_accent;
-    font-size: 11px;
+/* Defect 고르기 팝업 — 타일 아래 막대(Overkill=경고색 · Defect=강조색)와 '놓침' 글자. */
+QFrame[role="pickBarOver"] {
+    background-color: $warn;
+    border: none;
+}
+QFrame[role="pickBarDef"] {
+    background-color: $accent;
+    border: none;
+}
+QLabel[role="pickMissed"] {
+    color: $danger;
     font-weight: 700;
 }
+/* 펼친 값 띠 — 강조색을 옅게 깐 면 + 위쪽 강조색 선(윗면 가운데에 고른 타일을 가리키는 작은 삼각형이 붙는다). */
 QFrame[role="ovDetail"] {
-    background: transparent;
+    background-color: $accent_tint_soft;
     border: none;
-    border-top: 1px solid $line2;
+    border-top: 1px solid $accent;
     border-bottom: 1px solid $line2;
     border-radius: 0px;
 }
-/* 상세의 한 문장 판정 + 값 칩 세 개(결정한 기준만 남색 면 · 테두리). */
-QLabel[role="ovVerdict"] {
-    color: $ink;
-}
+/* 상세의 기준 칩 — 이름 · 이 Defect 의 값(크게) · 레시피 기준 · (바꿨으면) 조정 기준. 값이 지금 기준에 걸리면 빨강. */
 QFrame[role="ovChip"] {
     background-color: $elev;
     border: 1px solid $line2;
     border-radius: $radius_sm;
 }
-QFrame[role="ovChip"][deciding="true"] {
-    background-color: $accent_tint;
-    border: 1px solid $accent;
+QLabel[role="ovChipName"] {
+    background: transparent;
+    color: $mute;
 }
-QLabel[role="ovChipText"] {
+QLabel[role="ovChipValue"] {
+    background: transparent;
+    color: $ink;
+    font-family: $font_mono;
+    font-size: 16px;
+    font-weight: 700;
+}
+QLabel[role="ovChipValue"][fail="true"] {
+    color: $danger;
+}
+QLabel[role="ovChipRef"] {
     background: transparent;
     color: $ink2;
+    font-family: $font_mono;
 }
-QFrame[role="ovChip"][deciding="true"] QLabel[role="ovChipText"] {
-    color: $accent;
-}
-/* 'Defect 표시' — 작은 체크 칩: 꺼짐은 옅은 외곽선, 켜짐은 남색 면 + 테두리 + 체크(아이콘). */
+/* 'Defect 표시' — 켜짐/꺼짐을 색으로만: 꺼짐은 조용한 외곽선, 켜짐은 강조색 옅은 면 + 강조색 글자. */
 QPushButton[role="ovBoxToggle"] {
     background: transparent;
     border: 1px solid $line_strong;
@@ -1690,8 +1708,11 @@ QPushButton[role="ovBoxToggle"]:hover {
 }
 QPushButton[role="ovBoxToggle"]:checked {
     background-color: $accent_tint;
-    border-color: $accent;
+    border-color: $accent_tint;
     color: $accent;
+}
+QPushButton[role="ovBoxToggle"]:focus {
+    border-color: $focus;
 }
 QLabel[role="ovFile"] {
     font-size: $font_caption_sz;

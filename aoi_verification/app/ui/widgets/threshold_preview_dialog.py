@@ -49,18 +49,18 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import (QBuffer, QIODevice, QLocale, QObject, QPointF, QRectF, QSize, Qt, QThread, QTimer, QUrl,
-                          pyqtSignal)
-from PyQt6.QtGui import (QColor, QDesktopServices, QDoubleValidator, QFont, QFontMetrics, QIcon, QImage, QPainter, QPainterPath,
-                         QPen, QPixmap)
-from PyQt6.QtWidgets import (QAbstractButton, QApplication, QButtonGroup, QDialog, QFileDialog, QFrame, QGridLayout,
-                             QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout,
-                             QWidget)
+from PyQt6.QtCore import (QBuffer, QIODevice, QLocale, QObject, QPoint, QPointF, QPropertyAnimation, QRectF, QSize, Qt,
+                          QThread, QTimer, QUrl, pyqtProperty, pyqtSignal)
+from PyQt6.QtGui import (QColor, QDesktopServices, QDoubleValidator, QFont, QFontMetrics, QImage, QPainter, QPainterPath,
+                         QPen, QPixmap, QPolygonF)
+from PyQt6.QtWidgets import (QAbstractButton, QApplication, QButtonGroup, QDialog, QFileDialog, QFrame, QHBoxLayout,
+                             QLabel, QLineEdit, QMenu, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
 
 from ... import i18n
 from ...config import CONFIG
 from ...coords import abs_coord
 from ...coords.geometry import GEOMETRY_MATCH_TOL
+from ...coords import scan_crop_cache as SCC
 from ...coords import scan_image as SI
 from ...coords import surface_flt as _flt
 from ...coords.pixel_size import scan_pixel_size_xy
@@ -71,12 +71,14 @@ from ...threshold import rich as RS
 from ...threshold import rules as R
 from ...utils import image_io
 from .. import theme
+from .. import motion
 from ..deferred import call_later
 from ..drop_paths import install_paste, local_paths, split_paths
 from ..folder_picker import FolderPicker
 from . import sheet_host as sheets
 from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
+from .overkill_pick_dialog import OverkillPickDialog
 from .no_wheel_slider import NoWheelSlider
 
 _LOG = logging.getLogger("aoi.threshold")
@@ -92,6 +94,7 @@ SIDE_W = 244                # 왼쪽 열(폴더 · Zone) 폭
 EXPORT_SAMPLES = 8          # HTML 내보내기 — Zone 마다 대표 사진 수
 EXPORT_PHOTO_PX = 200
 NOTICE_MS = 5000            # 뺐다 · 더했다 알림이 떠 있는 시간(되돌리기도 이 안에)
+PICK_REFRESH_MS = 80        # [Defect 고르기] 팝업에 도착한 사진을 모아 올리는 간격
 FLASH_MS = 1500             # 더한 칩 · 이미 있는 칩이 반짝이는 시간
 _LIVE: set = set()          # 화면이 닫혀도 도는 읽기 스레드를 붙들어 둔다(wafer_map_dialog 와 같은 패턴)
 
@@ -333,31 +336,105 @@ def zone_label(zone_dir: str, zone: R.Zone | None, zone_id: int) -> tuple[str, s
     return name, rec
 
 
+LOG_P90_FRAC = 0.10         # 값의 90% 가 선형 축의 앞 10% 안에 몰리면 로그 축(현택님 2026-11-17 — 한두 개가 멀리 튀는 Area 등)
+LOG_STEPS = 200             # 로그 축 슬라이더 칸 수 — 슬라이더는 정수 위치라 칸마다 값을 기하급수로 놓는다
+
+
+def use_log_axis(lo: float, hi: float, values) -> bool:
+    """값 축을 로그로 그릴까 — ``lo > 0`` 이고, 축 안(``lo ~ hi``) 값의 90번째 백분위가 선형 축의 앞 10% 안에 있을 때.
+
+    예: 거의 다 10~20 인데 하나가 4571 이면 선형 축에서는 분포가 왼쪽 끝 한 칸에 눌린다.  값이 없으면 선형."""
+    if not (lo > 0 and hi > lo):
+        return False
+    xs = sorted(v for v in values if lo <= v <= hi)
+    if not xs:
+        return False
+    p90 = xs[min(len(xs) - 1, math.ceil(0.9 * len(xs)) - 1)]
+    return (p90 - lo) < LOG_P90_FRAC * (hi - lo)
+
+
+def log_decades(lo: float, hi: float) -> list:
+    """``lo ~ hi`` 안의 10의 거듭제곱(10, 100, 1000 …) — 로그 축 눈금."""
+    if not (lo > 0 and hi > lo):
+        return []
+    k = math.ceil(math.log10(lo) - 1e-12)
+    out = []
+    while 10 ** k <= hi * (1 + 1e-12):
+        out.append(float(10 ** k))
+        k += 1
+    return out
+
+
+class _Axis:
+    """기준값 축 — 분포 · 자름선 · 레시피 눈금 · 슬라이더가 **같은** 대응을 쓴다(선형 또는 로그).
+
+    ``frac(v)`` 값 → 0~1, ``value(f)`` 0~1 → 값(이어진 값), ``value_at(i)`` / ``index_of(v)`` 슬라이더 정수 위치 ↔ 값.
+    선형은 예전 그대로(레시피 ± ``step`` 의 배수).  로그는 ``LOG_STEPS`` 칸을 기하급수로 놓고 화면 소수 자리로 맞추되
+    맨 끝(최소 · 최대)과 **레시피 값 자리는 정확한 값**이다 — 손잡이가 레시피 값에 늘 닿는다."""
+
+    def __init__(self, lo: float, hi: float, rec: float, step: float, dec: int, down: int, steps: int,
+                 log: bool = False) -> None:
+        self.lo, self.hi, self.rec, self.step, self.dec = lo, hi, rec, step, dec
+        self.down, self.log = down, bool(log and lo > 0 and hi > lo)
+        self.n = LOG_STEPS if self.log else down + steps
+        self._i_rec = round(self.frac(rec) * self.n) if self.log else down
+
+    def frac(self, v: float) -> float:
+        span = (self.hi - self.lo) or 1.0
+        v = min(max(v, self.lo), self.hi)
+        if self.log:
+            return math.log(v / self.lo) / math.log(self.hi / self.lo)
+        return (v - self.lo) / span
+
+    def value(self, f: float) -> float:
+        f = min(max(f, 0.0), 1.0)
+        if self.log:
+            return self.lo * (self.hi / self.lo) ** f
+        return self.lo + f * (self.hi - self.lo)
+
+    def value_at(self, i: int) -> float:
+        if not self.log:
+            return self.rec + (i - self.down) * self.step
+        i = min(max(int(i), 0), self.n)
+        if i == 0:
+            return self.lo
+        if i == self.n:
+            return self.hi
+        if i == self._i_rec:
+            return self.rec
+        return min(max(round(self.value(i / self.n), self.dec), self.lo), self.hi)
+
+    def index_of(self, v: float) -> int:
+        if not self.log:
+            return self.down + round((v - self.rec) / self.step)
+        return min(max(round(self.frac(v) * self.n), 0), self.n)
+
+
 class _Hist(QWidget):
     """기준값 축 위의 Defect 분포 — 슬라이더와 **같은 x · 폭**(손잡이 중심이 다니는 구간 = 양쪽 ``PAD`` 안쪽).
-    지금 기준보다 작은(빠지는) 막대는 빨강, 나머지는 잉크.  기준 위치에서 막대 위까지 자름선이 선다."""
+    지금 기준보다 작은(빠지는) 막대는 빨강, 나머지는 잉크.  기준 위치에서 막대 위까지 자름선이 선다.
+    막대 칸과 자름선은 ``axis``(선형 또는 로그)의 대응을 따른다."""
 
     BINS = 28
     PAD = 6               # 슬라이더 손잡이(12px)의 반지름 — 분포 · 자름선 · 손잡이 중심이 같은 x 를 쓴다
 
-    def __init__(self, values, lo: float, hi: float, parent=None) -> None:
+    def __init__(self, values, lo: float, hi: float, parent=None, axis: Optional[_Axis] = None) -> None:
         super().__init__(parent)
         self.setFixedHeight(40)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._lo, self._hi, self._cut = lo, hi, lo
-        span = (hi - lo) or 1.0
+        self._axis = axis or _Axis(lo, hi, lo, 1.0, 2, 0, 1)
         self._counts = [0] * self.BINS
         for v in values:
             if lo <= v <= hi:
-                self._counts[min(self.BINS - 1, int((v - lo) / span * self.BINS))] += 1
+                self._counts[min(self.BINS - 1, int(self._axis.frac(v) * self.BINS))] += 1
 
     def set_cut(self, v: float) -> None:
         self._cut = v
         self.update()
 
     def cut_x(self) -> float:
-        span = (self._hi - self._lo) or 1.0
-        return self.PAD + (min(max(self._cut, self._lo), self._hi) - self._lo) / span * (self.width() - 2 * self.PAD)
+        return self.PAD + self._axis.frac(self._cut) * (self.width() - 2 * self.PAD)
 
     def paintEvent(self, _e):       # noqa: N802
         p = QPainter(self)
@@ -365,11 +442,10 @@ class _Hist(QWidget):
         x0, w = self.PAD, self.width() - 2 * self.PAD
         top = max(1, max(self._counts))
         bw = w / n
-        span = (self._hi - self._lo) or 1.0
         ink = QColor(theme.INK2)
         ink.setAlpha(190)
         for i, c in enumerate(self._counts):
-            mid = self._lo + (i + 0.5) * span / n
+            mid = self._axis.value((i + 0.5) / n)
             col = QColor(theme.DANGER) if mid < self._cut else ink
             bh = max(1.0, (h - 2) * c / top) if c else 0.0
             if bh:
@@ -380,15 +456,20 @@ class _Hist(QWidget):
 
 
 class _AxisFoot(QWidget):
-    """슬라이더 아래 한 줄 — 레시피 값 자리의 작은 눈금 + '레시피 값', 오른쪽 끝에 축 최댓값."""
+    """슬라이더 아래 한 줄 — 레시피 값 자리의 작은 눈금 + '레시피 값', 오른쪽 끝에 축 최댓값.
+    로그 축이면 그 밑에 10의 거듭제곱 눈금 글자(10 · 100 · 1000)가 한 줄 더 붙어 로그임이 읽힌다."""
 
-    def __init__(self, rec_text: str, max_text: str, rec_frac: float, parent=None) -> None:
+    DECADE_H = 14
+
+    def __init__(self, rec_text: str, max_text: str, axis: _Axis, parent=None) -> None:
         super().__init__(parent)
-        self.setFixedHeight(22)
-        self._frac = rec_frac
+        self._axis = axis
+        self._decades = log_decades(axis.lo, axis.hi) if axis.log else []
+        self.setFixedHeight(22 + (self.DECADE_H if self._decades else 0))
         mono = theme.FONT_MONO.split(",")[0].strip('" ')
+        self._mono = mono
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(0, 8, 0, 0)
+        lay.setContentsMargins(0, 8, 0, self.DECADE_H if self._decades else 0)
         lay.setSpacing(0)
         left = QLabel(rec_text, self)
         left.setProperty("role", "axisNote")
@@ -399,23 +480,42 @@ class _AxisFoot(QWidget):
         right.setStyleSheet(f"font-family: {mono};")
         lay.addWidget(right)
 
+    @staticmethod
+    def tick_text(v: float) -> str:
+        return f"{int(v)}" if v >= 1 else f"{v:g}"
+
     def paintEvent(self, _e):       # noqa: N802
         p = QPainter(self)
-        x = _Hist.PAD + self._frac * (self.width() - 2 * _Hist.PAD)
+        span = self.width() - 2 * _Hist.PAD
+        x = _Hist.PAD + self._axis.frac(self._axis.rec) * span
         p.fillRect(QRectF(x - 0.5, 0, 1, 6), QColor(theme.MUTE))
+        if self._decades:
+            f = QFont(self._mono)
+            f.setPixelSize(10)
+            f.setStyleHint(QFont.StyleHint.Monospace)
+            p.setFont(f)
+            fm = QFontMetrics(f)
+            for v in self._decades:
+                tx = _Hist.PAD + self._axis.frac(v) * span
+                p.fillRect(QRectF(tx - 0.5, 0, 1, 4), QColor(theme.LINE_STRONG))
+                t = self.tick_text(v)
+                tw = fm.horizontalAdvance(t)
+                p.setPen(QColor(theme.MUTE))
+                p.drawText(QRectF(tx - tw / 2, self.height() - self.DECADE_H, tw, self.DECADE_H),
+                           int(Qt.AlignmentFlag.AlignCenter), t)
         p.end()
 
 
 class _Tile(QFrame):
     """사진 한 장 — 테두리 · 캡션 없이 사진만.  누르면 ``clicked``.
 
-    표시는 사진 위 작은 것만: Scan Crop = 왼쪽 아래 흰 ``S``, 꼭 잡기 = 오른쪽 위 작은 체크,
-    펼친 타일 = 2px 강조 테두리.  자동 모드의 ``⋯``(값 펼치기, ``detail``)는 가리킨 타일에만 나온다."""
+    표시는 사진 위 작은 것만: 꼭 잡기 = 오른쪽 위 작은 체크, 펼친 타일 = 3px 강조 테두리, 가리킨 타일 = 옅은 외곽선.
+    우클릭 = [크게보기](``enlarge``)."""
 
     clicked = pyqtSignal()
-    detail = pyqtSignal()
+    enlarge = pyqtSignal()
 
-    def __init__(self, photo, size: int, parent=None, picked: bool = False, detail_btn: bool = False,
+    def __init__(self, photo, size: int, parent=None, picked: bool = False,
                  tip: str = "") -> None:
         super().__init__(parent)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -434,6 +534,14 @@ class _Tile(QFrame):
         self.ring.setGeometry(0, 0, size, size)
         self.ring.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.ring.setVisible(False)
+        self.hover = QFrame(self)                      # 가리킨 타일 — 사진 위 옅은 외곽선(펼친 타일은 ring 이 대신한다)
+        self.hover.setProperty("role", "tileHover")
+        self.hover.setGeometry(0, 0, size, size)
+        self.hover.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.hover.setVisible(False)
+        self.is_open = False
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._on_context_menu)
         self.set_photo(photo)
         self.badge = QLabel("✓", self)                 # 꼭 잡기 표시
         self.badge.setProperty("role", "tileBadge")
@@ -441,15 +549,6 @@ class _Tile(QFrame):
         self.badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.badge.move(size - 22, 6)
         self.badge.setVisible(picked)
-        self.detail_btn = None
-        if detail_btn:
-            self.detail_btn = QLabel("⋯", self)          # 누르면 값 펼치기 — 타일 본체 누름(고르기)과 따로
-            self.detail_btn.setProperty("role", "tileMore")
-            self.detail_btn.setFixedSize(24, 24)
-            self.detail_btn.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.detail_btn.setToolTip(_KO.OVERKILL_DETAIL_TIP)
-            self.detail_btn.move(size - 30, size - 30)
-            self.detail_btn.setVisible(False)
 
     def set_photo(self, photo) -> None:
         """그림을 올린다.  ``None`` = Scan Crop 을 아직 자르는 중(자리표시)."""
@@ -465,39 +564,54 @@ class _Tile(QFrame):
                 self.wait_path = photo
             return
         pic.setPixmap(_pixmap(photo, size))             # Color 사진이 없어 Scan 사진에서 잘라 온 것
-        tag = QLabel(_KO.OVERKILL_SCAN_MARK, self)
-        tag.setProperty("role", "tileMark")
-        tag.adjustSize()
-        tag.move(6, size - tag.height() - 4)
-        tag.show()
 
     def set_pixmap(self, pm: QPixmap) -> None:
         self.wait_path = None
         self.pic.setPixmap(pm)
 
     def set_open(self, on: bool) -> None:
+        self.is_open = bool(on)
         self.ring.setVisible(on)
+        if on:
+            self.hover.setVisible(False)
+
+    def _on_context_menu(self, pos) -> None:
+        if _ask_enlarge(self, self.mapToGlobal(pos)):
+            self.enlarge.emit()
 
     def enterEvent(self, e):        # noqa: N802
-        if self.detail_btn is not None:
-            self.detail_btn.setVisible(True)
+        self.hover.setVisible(not self.is_open)
         super().enterEvent(e)
 
     def leaveEvent(self, e):        # noqa: N802
-        if self.detail_btn is not None:
-            self.detail_btn.setVisible(False)
+        self.hover.setVisible(False)
         super().leaveEvent(e)
 
     def mousePressEvent(self, e):   # noqa: N802
         if e.button() == Qt.MouseButton.LeftButton:
-            hit = (self.detail_btn is not None and self.detail_btn.isVisible()
-                   and self.detail_btn.geometry().contains(e.position().toPoint()))
-            (self.detail if hit else self.clicked).emit()
+            self.clicked.emit()
         super().mousePressEvent(e)
+
+
+def _ask_enlarge(owner: QWidget, global_pos) -> bool:
+    """우클릭 메뉴 [크게보기] — 매치 검토 타일(``zoom_window._MidTile``)과 같은 메뉴.  고르면 True."""
+    menu = QMenu(owner)
+    act = menu.addAction(_KO.CTX_VIEW_LARGER)
+    return menu.exec(global_pos) is act
 
 
 class _BigPhoto(QLabel):
     clicked = pyqtSignal()
+    enlarge = pyqtSignal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._on_context_menu)
+
+    def _on_context_menu(self, pos) -> None:
+        if _ask_enlarge(self, self.mapToGlobal(pos)):
+            self.enlarge.emit()
 
     def mousePressEvent(self, e):   # noqa: N802
         if e.button() == Qt.MouseButton.LeftButton:
@@ -531,6 +645,7 @@ def _pixmap(photo, size: int, kind: str = "") -> QPixmap:
 
 THUMB_WORKERS = 3           # 썸네일을 동시에 몇 장 만들까(NAS 에서 원본을 읽는 일이라 GIL 을 놓는다)
 SCAN_WORKERS = 5            # Scan 원본을 동시에 몇 개 디코드할까 — NAS 지연이 커서 나눠 읽으면 그만큼 줄고, 디코드(PIL)는 GIL 을 놓는다
+SCAN_CACHE_WORKERS = 16     # 캐시된 Crop 의 원본 확인(stat)을 동시에 몇 개 — NAS 왕복이 대부분이다
 SCAN_BATCH = 16             # 잘라 낸 Crop 을 이만큼 모일 때마다 화면에 넘긴다
 
 
@@ -556,15 +671,6 @@ def scan_crops(items, report=lambda done, total: None, stop=lambda: False, on_ba
     같은 Scan 원본을 **한 번만** 디코드해 그 원본의 Crop 을 전부 자르고, 원본들은 스레드 여럿이 나눠 읽는다.
     ``on_batch(dict)`` 를 주면 Crop 이 ``SCAN_BATCH`` 개 모일 때마다(스레드에서) 불러 준다 — 화면이 점진적으로 채워진다.
     못 자른 Defect 는 빠진다."""
-    found = []
-    for k, folder, xy in items:
-        if stop():
-            return {}
-        m = SI.resolve_xy(folder, xy)
-        if m.ok:
-            found.append((k, m))
-    groups = group_by_source(found)
-    total = len(found)
     out: dict = {}
     lock = threading.Lock()
     state = {"done": 0}
@@ -576,6 +682,39 @@ def scan_crops(items, report=lambda done, total: None, stop=lambda: False, on_ba
             buf.clear()
             if on_batch is not None:
                 on_batch(chunk)
+
+    sigs = {f: SCC.manifest_sig(f) for f in {f for _k, f, _xy in items}}
+    pxs = {f: scan_pixel_size_xy(f) for f in sigs}
+
+    def cached(item):
+        _k, folder, xy = item
+        return SCC.get(folder, sigs[folder], xy, pxs[folder])
+
+    with ThreadPoolExecutor(max_workers=max(1, min(SCAN_CACHE_WORKERS, len(items) or 1))) as pool:
+        hits = list(pool.map(cached, items))             # 지난번에 잘라 둔 Crop — 원본(NAS)을 다시 읽지 않는다
+    by_folder: dict = {}                             # 폴더마다 목록 stat 을 한 번만(NAS 왕복) — 순서는 items 그대로
+    for pos, (k, folder, xy) in enumerate(items):
+        if stop():
+            return {}
+        if hits[pos] is not None:
+            crop, src = hits[pos]
+            q = _to_qimage(crop)
+            q.setText("src", src)
+            out[k] = buf[k] = q
+            state["done"] += 1
+            flush()
+            report(state["done"], len(items))
+        else:
+            by_folder.setdefault(folder, []).append((pos, k, xy))
+    slots: list = [None] * len(items)
+    for folder, rows in by_folder.items():
+        if stop():
+            return {}
+        for (pos, k, _xy), m in zip(rows, SI.resolve_xy_many(folder, [r[2] for r in rows])):
+            slots[pos] = (k, m) if m.ok else None
+    found = [x for x in slots if x is not None]
+    groups = group_by_source(found)
+    total = state["done"] + len(found)
 
     def one(group: list) -> None:
         if stop():
@@ -592,6 +731,7 @@ def scan_crops(items, report=lambda done, total: None, stop=lambda: False, on_ba
             q = _to_qimage(crop) if crop is not None else None
             if q is not None and crops is not None:
                 q.setText("src", str(group[0][1].best.path))          # 상세 보기에 파일 이름을 보이려고
+                SCC.put(m.color_path, sigs.get(m.color_path), m.defect_xy, m.pixel_xy, crop, group[0][1].best.path)
             with lock:
                 if q is not None:
                     out[k] = q
@@ -666,55 +806,27 @@ def defect_box(crop_wh, px, width_px: float, length_px: float, area_px2: float =
     return (cw / 2.0 - bw / 2.0, ch / 2.0 - bh / 2.0, bw, bh)
 
 
-def _check_icon() -> QIcon:
-    """'Defect 표시' 가 켜졌을 때 글자 앞에 붙는 작은 체크(12 px)."""
-    pm = QPixmap(24, 24)
-    pm.setDevicePixelRatio(2.0)
-    pm.fill(Qt.GlobalColor.transparent)
-    p = QPainter(pm)
-    p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    p.setPen(QPen(QColor(theme.ACCENT), 1.8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
-    p.drawPolyline([QPointF(2.0, 6.5), QPointF(5.0, 9.5), QPointF(10.0, 2.5)])
-    p.end()
-    return QIcon(pm)
-
-
 @dataclass(frozen=True)
 class Criterion:
-    """상세 판정의 기준 하나 — 이 Defect 의 값 · 지금 기준(슬라이더) · 슬라이더 범위(모두 µm 단위)."""
+    """상세의 기준 하나 — 이 Defect 의 값 · 지금 기준(슬라이더) · 레시피 기준(모두 µm 단위) · 연산자 · 지금 기준에 걸리는지."""
     name: str
     value: float
     cut: float
-    span: float
+    recipe: float
     dec: int = 1
+    op: str = "≥"
+    ok: bool = True
+    unit: str = ""
 
     @property
-    def margin(self) -> float:
-        """여유 = 값 − 기준.  양수면 통과, 음수면 모자람."""
-        return self.value - self.cut
-
-    @property
-    def norm(self) -> float:
-        """슬라이더 범위로 나눈 여유 — 단위가 다른 항목(Width µm · Area µm² · Contrast)을 견주려고."""
-        return self.margin / self.span if self.span > 0 else self.margin
+    def adjusted(self) -> bool:
+        """슬라이더로 레시피 값에서 옮겼다."""
+        return abs(self.cut - self.recipe) > 10 ** -(self.dec + 1)
 
 
-def deciding_criterion(crits) -> Optional[int]:
-    """판정을 가른 기준의 번호 — 정규화한 여유(부호 있는)가 가장 작은 것.
-
-    남는 Defect 는 한 묶음의 기준을 **전부** 통과해야 하므로(묶음 안 AND) 여유가 가장 빠듯한 기준이 '아슬아슬하게 남긴' 것이고,
-    빠진 Defect 는 모자란 기준 중 가장 많이 모자란 것이 가른 것이다.  같으면 앞의 것.  기준이 없으면 None."""
-    best = None
-    for i, c in enumerate(crits):
-        if best is None or c.norm < crits[best].norm:
-            best = i
-    return best
-
-
-def signed(v: float, dec: int) -> str:
-    """부호를 늘 붙인 숫자 — 음수는 −(가운데 줄표)."""
-    t = f"{abs(v):.{dec}f}"
-    return f"+{t}" if v >= 0 else f"−{t}"
+def filter_op(ftype: int) -> str:
+    """FilterType → 기준 앞 연산자.  4 = 초과, 1(범위)·5 = 이상.  Zone 기준은 하한만 다루므로 나머지도 이상으로 본다."""
+    return ">" if ftype == 4 else "≥"
 
 
 @dataclass
@@ -977,6 +1089,113 @@ def _data_uri(photo) -> str:
     return "data:image/jpeg;base64," + base64.b64encode(bytes(buf.data())).decode("ascii")
 
 
+class _FullScanLoad(QThread):
+    """Scan Crop 의 [크게보기] — 같은 폴더의 Scan 원본 전체와 Crop 범위를 뒤에서 읽는다(UI 를 막지 않는다).
+    사진 정보 화면(:mod:`image_info_dialog`)과 같은 :mod:`coords.scan_image` 가 계산한다.  못 읽으면 원본 · 범위 없이 알린다."""
+
+    class _Signals(QObject):
+        done = pyqtSignal(object, object, object, str)      # Crop QImage · 원본 QImage | None · 범위 | None · 원본 경로
+
+    def __init__(self, crop: QImage, folder: Path, xy: tuple, src: str) -> None:
+        super().__init__()
+        self._crop, self._folder, self._xy, self._src = crop, folder, xy, src
+        self.signals = self._Signals()
+        _LIVE.add(self)
+        self.finished.connect(lambda: _LIVE.discard(self))
+
+    def run(self) -> None:      # type: ignore[override]
+        full = box = None
+        path = ""
+        try:
+            m = SI.resolve_xy(self._folder, self._xy)
+            if m.ok:
+                cand = next((c for c in m.candidates if str(c.path) == self._src), m.best)
+                im = SI.load_full(cand)
+                if im is not None:
+                    full, box, path = _to_qimage(im), tuple(cand.box), str(cand.path)
+        except Exception:       # noqa: BLE001 — 못 읽으면 Crop 을 크게 보여 준다
+            _LOG.exception("Overkill 튜닝 Scan 원본 읽기 실패")
+        self.signals.done.emit(self._crop, full, box, path)
+
+
+class _DetailBand(QWidget):
+    """타일 줄 아래 펼쳐지는 값 띠 — 맨 위에 고른 타일 가운데를 가리키는 작은 삼각형(caret)이 있다.
+
+    같은 줄의 다른 타일로 옮기면 띠는 그대로 두고 삼각형만 미끄러진다(:meth:`move_caret`), 내용은 :meth:`swap_content`."""
+
+    CARET_H = 8
+    CARET_HALF_W = 8
+
+    def __init__(self, content: QWidget, caret_x: float, parent=None) -> None:
+        super().__init__(parent)
+        self._caret = float(caret_x)
+        self._caret_anim: Optional[QPropertyAnimation] = None
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, self.CARET_H, 0, 0)
+        lay.setSpacing(0)
+        self.content = content
+        lay.addWidget(content)
+
+    def _get_caret(self) -> float:
+        return self._caret
+
+    def _set_caret(self, v: float) -> None:
+        self._caret = float(v)
+        self.update()
+
+    caret = pyqtProperty(float, _get_caret, _set_caret)
+
+    def move_caret(self, x: float) -> None:
+        if not motion.enabled() or not self.isVisible():
+            self._set_caret(x)
+            return
+        if self._caret_anim is None:
+            self._caret_anim = QPropertyAnimation(self, b"caret", self)
+            self._caret_anim.setEasingCurve(motion.EASE_PRIMARY)
+        self._caret_anim.stop()
+        self._caret_anim.setDuration(motion.dur(motion.DUR_ROW_RESIZE))
+        self._caret_anim.setStartValue(self._caret)
+        self._caret_anim.setEndValue(float(x))
+        self._caret_anim.start()
+
+    def swap_content(self, new: QWidget) -> None:
+        """내용을 새것으로 — 옛 모습을 얹었다가 흐려 서서히 바뀌어 보인다.  높이가 다르면 그만큼만 부드럽게 맞춘다."""
+        old = self.content
+        ghost = motion.grab_in_place(old) if motion.enabled() and self.isVisible() else None
+        h0 = self.height()
+        lay = self.layout()
+        lay.removeWidget(old)
+        old.hide()
+        old.deleteLater()
+        self.content = new
+        lay.addWidget(new)
+        new.show()
+        if ghost is not None:
+            lay.activate()
+            motion.crossfade_over(new, ghost, duration=motion.DUR_TILE_TOGGLE)
+            h1 = self.sizeHint().height()
+            if h1 != h0:
+                motion.animate_height(self, h0, h1, duration=motion.DUR_ROW_RESIZE)
+
+    def dispose(self) -> None:
+        """띠를 레이아웃에서 빼고 지운다(접히는 모션이 끝났을 때 · 바로 치울 때)."""
+        parent = self.parentWidget()
+        lay = parent.layout() if parent is not None else None
+        if lay is not None:
+            lay.removeWidget(self)
+        self.hide()
+        self.deleteLater()
+
+    def paintEvent(self, _e):       # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(theme.ACCENT))
+        h, w = float(self.CARET_H), float(self.CARET_HALF_W)
+        p.drawPolygon(QPolygonF([QPointF(self._caret - w, h), QPointF(self._caret, 0.0), QPointF(self._caret + w, h)]))
+        p.end()
+
+
 class ThresholdPreviewDialog(QDialog):
     """왼쪽 메뉴 'Overkill 튜닝' 화면."""
 
@@ -988,7 +1207,6 @@ class ThresholdPreviewDialog(QDialog):
         install_paste(self, self._add_dropped, self._on_paste_no_path)
         self._w: Optional[WaferData] = None
         self._show_box = True             # 상세의 Scan 그림에 Defect 빨간 상자를 그릴까 — 창이 열려 있는 동안 유지
-        self._axis_span: dict = {}        # (분류, 항목) → 슬라이더 범위(µm) — 판정 문장이 여유를 범위로 나눌 때 쓴다
         self._roots: list = []            # 고른 폴더(웨이퍼 또는 LOT) — 칩 하나씩.  맨 앞이 합치기 기준 레시피를 정한다
         self._expand: dict = {}           # 고른 폴더 → [(웨이퍼 폴더, 실제 경로 키)] — LOT 을 NAS 에서 다시 훑지 않는다
         self._cache: dict = {}            # 웨이퍼 폴더 → WaferData — 빼기 · 더하기가 다시 읽지 않고 이걸로 합친다
@@ -1005,6 +1223,14 @@ class ThresholdPreviewDialog(QDialog):
         self._overlay_on = False
         self._mode = "manual"             # manual(직접 조정) | auto(자동 추천)
         self._picked: dict = {}           # 꼭 잡을 Defect — key_of(d) → Defect
+        self._overkill: dict = {}         # Overkill 로 가른 Defect — key_of(d) → Defect (팝업에서 고른다 · 추천에는 안 쓰고 '빠짐 m/n' 만 센다)
+        self._pick_dlg: Optional[QDialog] = None   # 열려 있는 [Defect 고르기] 팝업
+        self._pick_refresh = QTimer(self)          # 사진이 한 장씩 올 때마다 팝업 전체를 훑지 않게 모아서 한 번
+        self._pick_refresh.setSingleShot(True)
+        self._pick_refresh.setInterval(PICK_REFRESH_MS)
+        self._pick_refresh.timeout.connect(self._refresh_pick_now)
+        self._pick_wanted: set = set()    # 팝업이 요청한 (경로, 크기, 종류) — 타일을 다시 그려도 취소되지 않게
+        self._pick_extra: dict = {}       # 팝업이 요청한 Scan Crop 대기 Defect — key_of → Defect
         self._rec_zones: set = set()      # 마지막 추천이 바꾼 Zone — 고름이 바뀌면 이 Zone 들만 다시 계산
         self._scans: dict = {}            # (웨이퍼 폴더, Defect.index) → Scan 에서 잘라 온 QImage — 폴더를 더하고 빼도 남는다
         self._scan_thread: Optional[_ScanLoad] = None
@@ -1024,6 +1250,12 @@ class ThresholdPreviewDialog(QDialog):
         self._zone: Optional[tuple] = None
         self._tab = "drop"
         self._open: Optional[int] = None  # 펼친 Defect.index
+        self._band: Optional[_DetailBand] = None    # 지금 펼쳐진 값 띠
+        self._band_row: Optional[QWidget] = None    # 그 띠가 붙은 타일 줄
+        self._row_of: dict = {}           # 타일 키 → 그 타일이 든 줄 위젯
+        self._col_of: dict = {}           # 타일 키 → 줄 안 몇 번째(삼각형 x 계산)
+        self._tile_why: dict = {}         # 타일 키 → 빠진 이유(상세를 새로 만들 때)
+        self._full_scan: Optional[_FullScanLoad] = None
         self._shown = PAGE_TILES
         self._token = 0
         self._thread: Optional[_Load] = None
@@ -1071,7 +1303,7 @@ class ThresholdPreviewDialog(QDialog):
             b.setProperty("grade", "panel")
             b.setCheckable(True)
             b.setChecked(key == self._mode)
-            b.clicked.connect(lambda _c=False, k=key: self.set_mode(k))
+            b.clicked.connect(lambda _c=False, k=key: self._on_mode_clicked(k))
             self._mode_group.addButton(b)
             seg.addWidget(b)
             self.mode_btns[key] = b
@@ -1200,9 +1432,15 @@ class ThresholdPreviewDialog(QDialog):
         _b, self.all_label = stat(_KO.OVERKILL_STAT_ALL)
         self.pick_box, self.pick_label = stat(_KO.OVERKILL_STAT_PICKED, "pick")   # 꼭 잡기 k
         self.miss_box, self.miss_label = stat(_KO.OVERKILL_STAT_MISSED, "over")   # 하나라도 빠지면 빨간 '놓침 m'
+        self.ov_box, self.ov_label = stat(_KO.OVERKILL_STAT_OVERKILL_GONE)       # Overkill 빠짐 m/n
         self.pick_box.setVisible(False)
         self.miss_box.setVisible(False)
+        self.ov_box.setVisible(False)
         srow.addStretch(1)
+        self.pick_open_btn = NeonButton(_KO.OVERKILL_PICK_OPEN, role="primary")   # 자동 추천 모드에서만
+        self.pick_open_btn.clicked.connect(self.open_pick_dialog)
+        self.pick_open_btn.setVisible(self._mode == "auto")
+        srow.addWidget(self.pick_open_btn)
         self.reset_btn = NeonButton(_KO.THRESH_PREVIEW_RESET, role="textAction")
         self.reset_btn.clicked.connect(self.reset)
         srow.addWidget(self.reset_btn)
@@ -1249,10 +1487,10 @@ class ThresholdPreviewDialog(QDialog):
         main.addWidget(tabs_host)
 
         self.grid_host = QWidget(self)
-        self.grid = QGridLayout(self.grid_host)
+        self.grid = QVBoxLayout(self.grid_host)         # 분류 제목 · 타일 한 줄(줄 위젯) · 펼친 값 띠가 위에서 아래로 — 띠를 줄 사이에 끼우고 뺀다
         self.grid.setContentsMargins(0, 0, 0, 0)
         self.grid.setSpacing(TILE_GAP)
-        self.grid.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.grid.setAlignment(Qt.AlignmentFlag.AlignTop)
         main.addWidget(self.grid_host)
         self.empty_label = QLabel("", self)
         self.empty_label.setProperty("role", "muted")
@@ -1658,6 +1896,8 @@ class ThresholdPreviewDialog(QDialog):
         self._picked = ({} if self._base_reset else
                         {key_of(d): d for d in (w.defects if w else ()) if (_folder_of(w, d), d.index) in kept_picks})
         prev_rec = self._rec_zones
+        kept_ov = {(_folder_of(prev, d), d.index) for d in self._overkill.values()} if prev else set()
+        self._overkill = {key_of(d): d for d in (w.defects if w else ()) if (_folder_of(w, d), d.index) in kept_ov}
         self._rec_zones = {(d.zone_dir, d.zone) for d in self._picked.values()}
         if (self._mode == "auto" and same_base and w is not None
                 and {(_folder_of(w, d), d.index) for d in self._picked.values()} != kept_picks):
@@ -1727,7 +1967,7 @@ class ThresholdPreviewDialog(QDialog):
         return (idx is not None and self._wants_scan(d) and idx[0] not in self._scans
                 and idx[0] not in self._scan_done)
 
-    def _ensure_scans(self) -> None:
+    def _ensure_scans(self, extra=()) -> None:
         """지금 화면(탭의 앞 ``_shown`` 장 + 한 쪽)에 필요한데 아직 안 자른 Crop 만 백그라운드로 자른다.
 
         한 번에 스레드 하나 — 끝나면(:meth:`_on_scans`) 다시 불러 그 사이 늘어난 필요(더 보기·탭 이동)를 이어서 한다.
@@ -1738,11 +1978,20 @@ class ThresholdPreviewDialog(QDialog):
             return
         want = []
         idx = self._scan_index()
+        first = list(extra) or (list(self._pick_extra.values()) if self._pick_dlg is not None else [])
+        for d in first:                              # [Defect 고르기] 팝업이 부탁한 것을 먼저
+            if self._scan_pending(d) and idx[key_of(d)] not in want:
+                want.append(idx[key_of(d)])
+        window = 0                                   # 화면에 설 사진(이미 있는 것 포함) 수 — 보이는 장 + 한 쪽까지만 센다
         for d, _why in self._items():
             if self._scan_pending(d):
-                want.append(idx[key_of(d)])
-                if len(want) >= self._shown + PAGE_TILES:
-                    break
+                if idx[key_of(d)] not in want:
+                    want.append(idx[key_of(d)])
+            elif self._pic(d) is None:
+                continue                             # 사진이 없어 타일이 서지 않는 Defect — 화면 순서에 안 센다
+            window += 1
+            if window >= self._shown + PAGE_TILES:
+                break                                # (예전엔 '못 자른 것' 만 세어 Defect 3000개를 끝까지 이어서 잘랐다 — 측정 3.9 GB)
         if not want:
             return
         th = _ScanLoad(self._scan_token, want)
@@ -1762,6 +2011,7 @@ class ThresholdPreviewDialog(QDialog):
         self._scans.update(got)
         if self._w is None:
             return
+        self._refresh_pick()
         for k, t in self.tiles.items():
             d = self._tile_defects.get(k)
             if d is None or self._open == k or self._skey(d) not in got:
@@ -1776,6 +2026,7 @@ class ThresholdPreviewDialog(QDialog):
         self._scan_thread = None
         self.scan_status.setText("")
         self._scan_done.update(keys)
+        self._refresh_pick()
         if self._open is not None or any(k not in self._scans for k in keys):
             self._render_tiles()                    # 못 자른 자리표시는 빠지고(펼친 값은 그림이 바뀌고), 늘어난 필요는 이어서 자른다
         else:
@@ -1981,7 +2232,8 @@ class ThresholdPreviewDialog(QDialog):
             floor = w.to_um(f.feature, float(cand[f.feature].min())) if len(cand[f.feature]) else rec
             down = max(0, min(math.ceil((rec - max(floor, 0.0)) / step), math.floor(rec / step)))
         lo = rec - down * step
-        self._axis_span[(cls, f.feature)] = hi - lo
+        axis = _Axis(lo, hi, rec, step, dec, down, steps,
+                     log=use_log_axis(lo, hi, zone_vals))        # 값이 한쪽에 눌리면 로그 축(분포 · 자름선 · 슬라이더가 같은 대응)
         cell = QWidget(self.rules)
         lay = QVBoxLayout(cell)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -2010,26 +2262,28 @@ class ThresholdPreviewDialog(QDialog):
         h.addWidget(delta)
         h.addStretch(1)
         lay.addLayout(h)
-        hist = _Hist(vals, lo, hi, cell)
+        hist = _Hist(vals, lo, hi, cell, axis)
         lay.addWidget(hist)
         sl = NoWheelSlider(Qt.Orientation.Horizontal, cell)
         sl.setProperty("role", "axis")
         sl.setFixedHeight(16)
-        sl.setRange(0, down + steps)
+        sl.setRange(0, axis.n)
         lay.addWidget(sl)
         mono = theme.FONT_MONO.split(",")[0].strip('" ')
         rec_text = (_KO.THRESH_PREVIEW_RECIPE_VALUE.format(v=f'<span style="font-family: {mono};">{rec:.{dec}f}</span>')
                     + (f"   {_KO.THRESH_PREVIEW_LOWEST.format(v=f'{lo:.{dec}f}')}" if down else ""))
-        foot = _AxisFoot(rec_text, f"{hi:.{dec}f}", (rec - lo) / ((hi - lo) or 1.0), cell)
+        foot = _AxisFoot(rec_text, f"{hi:.{dec}f}", axis, cell)
         lay.addWidget(foot)
+        lay.addStretch(1)                      # 로그 축 칸만 눈금 글자 줄이 더 길다 — 위로 붙여 옆 칸과 머리·분포 높이를 맞춘다
 
         cur = w.to_um(f.feature, self._ov[key]) if key in self._ov else rec
 
         def show(v: float) -> None:
             spin.setText(f"{v:.{dec}f}")
-            sl.blockSignals(True)
-            sl.setValue(down + round((v - rec) / step))
-            sl.blockSignals(False)
+            if abs(axis.value_at(sl.value()) - v) > 1e-9:       # 끄는 중 손잡이가 한 칸 되튀지 않게 — 이미 그 값이면 건드리지 않는다
+                sl.blockSignals(True)
+                sl.setValue(axis.index_of(v))
+                sl.blockSignals(False)
             hist.set_cut(v)
             d = v - rec
             delta.setText(f"+{d:.{dec}f}" if d > 1e-9 else f"−{-d:.{dec}f}" if d < -1e-9 else "")
@@ -2046,13 +2300,13 @@ class ThresholdPreviewDialog(QDialog):
             show(v)
             self._changed(final)
 
-        sl.valueChanged.connect(lambda i: apply(rec + (i - down) * step, False))
-        sl.sliderReleased.connect(lambda: apply(rec + (sl.value() - down) * step, True))
+        sl.valueChanged.connect(lambda i: apply(axis.value_at(i), False))
+        sl.sliderReleased.connect(lambda: apply(axis.value_at(sl.value()), True))
         def typed() -> None:
             try:
                 apply(float(spin.text().replace(",", "")), True)
             except ValueError:
-                show(rec + (sl.value() - down) * step)  # 못 읽으면 지금 값으로 되돌린다
+                show(axis.value_at(sl.value()))  # 못 읽으면 지금 값으로 되돌린다
 
         spin.editingFinished.connect(typed)
         show(cur)
@@ -2089,6 +2343,8 @@ class ThresholdPreviewDialog(QDialog):
             self.miss_label.setText("")
             self.pick_box.setVisible(False)
             self.miss_box.setVisible(False)
+            self.ov_box.setVisible(False)
+            self.pick_open_btn.setEnabled(False)
             return 0
         self.summary.setVisible(True)
         self._tabs_host.setVisible(True)
@@ -2125,6 +2381,11 @@ class ThresholdPreviewDialog(QDialog):
         self.pick_box.setVisible(bool(total_picks))
         self.miss_label.setText(f"{len(missed):,}" if missed else "")
         self.miss_box.setVisible(bool(missed))
+        self.pick_open_btn.setVisible(auto)
+        self.pick_open_btn.setEnabled(True)
+        marked = len(self._overkill)
+        self.ov_label.setText(f"{self._overkill_gone(self._ov)}/{marked}" if marked else "")
+        self.ov_box.setVisible(auto and bool(marked))
         return drop
 
     def _items(self) -> list:
@@ -2189,18 +2450,22 @@ class ThresholdPreviewDialog(QDialog):
             cache.put(_mid_key(path, size), pm)
             if self._detail_pic is not None and str(self._detail_pic[0]) == str(path):
                 self._detail_pic[1].setPixmap(pm)
+            self._refresh_pick()
             return
         cache.put(_tile_key(path, size), pm)
         for t in self.tiles.values():
             if t.wait_path is not None and str(t.wait_path) == str(path):
                 t.set_pixmap(pm)
+        self._refresh_pick()
 
     def _render_tiles(self) -> None:
-        self._wanted = set()                    # 화면이 바뀌었다 — 줄 서 있던 것 중 이번 화면에 없는 건 건너뛴다
+        self._wanted = set(self._pick_wanted)   # 화면이 바뀌었다 — 줄 서 있던 것 중 이번 화면에 없는 건 건너뛴다
         self._detail_pic = None
         self._clear(self.grid)
         self.tiles = {}
         self._tile_defects = {}
+        self._row_of, self._col_of, self._tile_why = {}, {}, {}
+        self._band = self._band_row = None
         w = self._w
         if w is None or w.note or self._zone is None:
             self.empty_label.setText("" if w is None else w.note)
@@ -2217,7 +2482,6 @@ class ThresholdPreviewDialog(QDialog):
                                                    if self._tab == "drop" else _KO.THRESH_PREVIEW_NONE))
         cols = self._cols()
         shown = with_photo[:self._shown]
-        auto = self._mode == "auto"
         total: dict = {}
         for d, _why in with_photo:
             total[self._class_name(d.bin)] = total.get(self._class_name(d.bin), 0) + 1
@@ -2225,54 +2489,61 @@ class ThresholdPreviewDialog(QDialog):
         for d, why in shown:
             groups.setdefault(self._class_name(d.bin), []).append((d, why))
         mono = theme.FONT_MONO.split(",")[0].strip('" ')      # 리치텍스트 style 속성에는 목록 대신 첫 이름만
-        r = 0
         for gi, (cname, rows) in enumerate(groups.items()):
             head = QLabel(f'{html.escape(cname)}<span style="font-family: {mono}; font-weight: 400;'
                           f' color: {theme.MUTE};">  {total[cname]:,}</span>', self.grid_host)
             head.setProperty("role", "ovGroupName")
             head.setTextFormat(Qt.TextFormat.RichText)
             head.setContentsMargins(0, 0 if gi == 0 else 24, 0, 8)
-            self.grid.addWidget(head, r, 0, 1, cols)
-            r += 1
-            c = 0
-            pending = None
-            for j, (d, why) in enumerate(rows):
-                k = key_of(d)
-                tile = _Tile(self._pic(d), TILE_PX, self.grid_host, picked=k in self._picked, detail_btn=auto,
-                             tip=f"{cname}  {self._why_text(d, why)}".strip())
-                if auto:                                 # 자동 모드: 타일 = 꼭 잡기 토글, ⋯ = 값 펼치기
-                    tile.clicked.connect(lambda i=k: self.toggle_pick(i))
-                    tile.detail.connect(lambda i=k: self._toggle(i))
-                else:
-                    tile.clicked.connect(lambda i=k: self._toggle(i))
-                tile.set_open(self._open == k)
-                if tile.wait_path is not None:
-                    self._want(tile.wait_path, TILE_PX, "thumb")
-                self.grid.addWidget(tile, r, c)
-                self.tiles[k] = tile
-                self._tile_defects[k] = d
-                if self._open == k:
-                    pending = self._detail(d, why)
-                c += 1
-                if c == cols or j == len(rows) - 1:
-                    r += 1
-                    c = 0
-                    if pending is not None:          # 펼친 값은 그 줄 바로 아래
-                        self.grid.addWidget(pending, r, 0, 1, cols)
-                        r += 1
-                        pending = None
+            self.grid.addWidget(head)
+            for start in range(0, len(rows), cols):
+                row = QWidget(self.grid_host)           # 타일 한 줄 — 펼친 값 띠는 이 줄 바로 아래 끼운다
+                row.setFixedHeight(TILE_PX)
+                rl = QHBoxLayout(row)
+                rl.setContentsMargins(0, 0, 0, 0)
+                rl.setSpacing(TILE_GAP)
+                opened = None
+                for c, (d, why) in enumerate(rows[start:start + cols]):
+                    k = key_of(d)
+                    tile = _Tile(self._pic(d), TILE_PX, row, picked=k in self._picked,
+                                 tip=f"{cname}  {self._why_text(d, why)}".strip())
+                    tile.clicked.connect(lambda i=k: self._toggle(i))     # 두 모드 모두 값 펼치기 — 꼭 잡기는 [Defect 고르기] 팝업에서
+                    tile.enlarge.connect(lambda i=k: self._enlarge_tile(i))
+                    tile.set_open(self._open == k)
+                    if tile.wait_path is not None:
+                        self._want(tile.wait_path, TILE_PX, "thumb")
+                    rl.addWidget(tile)
+                    self.tiles[k] = tile
+                    self._tile_defects[k] = d
+                    self._tile_why[k] = why
+                    self._row_of[k], self._col_of[k] = row, c
+                    if self._open == k:
+                        opened = k
+                rl.addStretch(1)
+                self.grid.addWidget(row)
+                if opened is not None:                   # 펼친 값은 그 줄 바로 아래(다시 그릴 때는 모션 없이 바로)
+                    self._band = self._new_band(opened)
+                    self._band_row = row
+                    self.grid.addWidget(self._band)
         if len(with_photo) > self._shown:
             more = NeonButton(_KO.THRESH_PREVIEW_MORE.format(n=f"{len(with_photo) - self._shown:,}"), role="ghost")
             more.clicked.connect(self._more)
-            self.grid.addWidget(more, r, 0, 1, min(cols, 2))
+            self.grid.addWidget(more, 0, Qt.AlignmentFlag.AlignLeft)
         self._ensure_scans()
 
+    def _caret_x(self, k) -> float:
+        """고른 타일 가운데 x — 줄은 왼쪽부터 같은 간격으로 놓여 칸 번호만으로 정해진다."""
+        return self._col_of[k] * (TILE_PX + TILE_GAP) + TILE_PX / 2
+
+    def _new_band(self, k) -> _DetailBand:
+        return _DetailBand(self._detail(self._tile_defects[k], self._tile_why[k]), self._caret_x(k), self.grid_host)
+
     def _detail(self, d: P.Defect, why) -> QWidget:
-        """타일 줄 바로 아래 펼쳐지는 값 — 위아래 1px 선만 있는 띠(상자 · 굵은 테두리 없음)."""
+        """타일 줄 바로 아래 펼쳐지는 값 — 옅은 강조색 면 + 위아래 1px 선(상자 · 굵은 테두리 없음).  :class:`_DetailBand` 가 감싼다."""
         w = self._w
         wrap = QWidget(self.grid_host)
         wl = QVBoxLayout(wrap)
-        wl.setContentsMargins(0, 8, 0, 8)
+        wl.setContentsMargins(0, 0, 0, 8)
         wl.setSpacing(0)
         box = QFrame(wrap)
         box.setProperty("role", "ovDetail")
@@ -2302,10 +2573,14 @@ class ThresholdPreviewDialog(QDialog):
                 pic.setPixmap(pix)
         else:
             pic.setText(_KO.OVERKILL_SCAN_WAIT)
-        if photo is None or isinstance(photo, QImage):                   # Scan Crop — 크게 볼 원본 파일이 없다
+        if photo is None:
             pic.setCursor(Qt.CursorShape.ArrowCursor)
-        else:
-            pic.clicked.connect(lambda: self._enlarge(photo))
+        else:                                           # Color = 누르거나 우클릭 [크게보기], Scan Crop = 우클릭(원본 위 범위 표시)
+            pic.enlarge.connect(lambda i=key_of(d): self._enlarge_tile(i))
+            if not isinstance(photo, QImage):
+                pic.clicked.connect(lambda: self._enlarge(photo))
+            else:
+                pic.setCursor(Qt.CursorShape.ArrowCursor)
         lay.addWidget(pic, 0, Qt.AlignmentFlag.AlignTop)
         right = QVBoxLayout()
         right.setSpacing(8)
@@ -2322,12 +2597,6 @@ class ThresholdPreviewDialog(QDialog):
         sub.setProperty("role", "muted")
         top.addWidget(sub, 1)
         k = key_of(d)
-        if self._mode == "auto":                        # 꼭 잡기는 자동 추천의 개념 — 직접 조정에서는 두지 않는다
-            pick = NeonButton(_KO.OVERKILL_PICK_UNDO if k in self._picked else _KO.OVERKILL_PICK_ACTION,
-                              role="textAction")
-            pick.clicked.connect(lambda _c=False, i=k: self._pick_in_detail(i))
-            top.addWidget(pick)
-            self.detail_pick_btn = pick
         close = NeonButton(_KO.OVERKILL_DETAIL_CLOSE, role="textAction")
         close.clicked.connect(lambda _c=False, i=k: self._toggle(i))
         top.addWidget(close)
@@ -2350,8 +2619,6 @@ class ThresholdPreviewDialog(QDialog):
             tog.setChecked(self._show_box)
             tog.setCursor(Qt.CursorShape.PointingHandCursor)
             tog.setToolTip(_KO.OVERKILL_DEFECT_BOX_TIP)
-            tog.setIcon(_check_icon() if self._show_box else QIcon())
-            tog.setIconSize(QSize(12, 12))
             tog.toggled.connect(lambda on, p=pic, im=photo, dd=d: self._set_box(on, p, im, dd))
             foot.addWidget(tog)
             self.detail_box_btn = tog
@@ -2369,8 +2636,6 @@ class ThresholdPreviewDialog(QDialog):
     def _set_box(self, on: bool, pic: QLabel, crop: QImage, d: P.Defect) -> None:
         """'Defect 표시' — 지금 상세 그림을 다시 그리고, 고른 값은 다음 상세에도 이어진다."""
         self._show_box = bool(on)
-        if isinstance(self.sender(), QPushButton):
-            self.sender().setIcon(_check_icon() if on else QIcon())
         pic.setPixmap(self._scan_pixmap(crop, d))
 
     def _criteria(self, d: P.Defect, why) -> list:
@@ -2401,43 +2666,36 @@ class ThresholdPreviewDialog(QDialog):
             if cls is None:
                 return []
         crits = []
-        for f, v, low, _ok in active(cls):
+        for f, v, low, ok in active(cls):
             fname, unit, dec = next(((x[1], x[2], x[4]) for x in _FEATURES if x[0] == f.feature), ("", "", 1))
-            cut = w.to_um(f.feature, low)
-            span = self._axis_span.get((cls, f.feature)) or abs(cut) or 1.0
-            crits.append(Criterion(fname, w.to_um(f.feature, v), cut, span, dec))
+            crits.append(Criterion(fname, w.to_um(f.feature, v), w.to_um(f.feature, low), w.to_um(f.feature, f.low), dec,
+                                   filter_op(f.ftype), ok, unit))
         return crits
 
     def _add_verdict(self, right: QVBoxLayout, box: QWidget, d: P.Defect, why) -> None:
-        """한 문장(무엇이 가렸나) + 값 칩 한 줄 — 가른 기준 칩만 남색으로 강조."""
+        """기준마다 칩 하나 — 이름 · 이 Defect 의 값(크게, 지금 기준에 걸리면 빨강) · 레시피 기준 · (옮겼으면) 조정 기준."""
         crits = self._criteria(d, why)
-        k = deciding_criterion(crits)
-        if k is None:
+        if not crits:
             return
-        c = crits[k]
-        tmpl = _KO.OVERKILL_VERDICT_KEPT_FMT if why is None else _KO.OVERKILL_VERDICT_DROPPED_FMT
-        mono = theme.FONT_MONO.split(",")[0].strip('" ')
-        head, tail = tmpl.format(name=c.name, delta="{}").split("{}")
-        sentence = QLabel(f'{html.escape(head)}<b style="font-family: {mono};">'
-                          f'{html.escape(signed(c.margin, c.dec))}</b>{html.escape(tail)}', box)
-        sentence.setTextFormat(Qt.TextFormat.RichText)
-        sentence.setProperty("role", "ovVerdict")
-        right.addWidget(sentence)
         row = QHBoxLayout()
         row.setSpacing(8)
         self.detail_chips = []
-        for i, cr in enumerate(crits):
+        for cr in crits:
             chip = QFrame(box)
             chip.setProperty("role", "ovChip")
-            chip.setProperty("deciding", i == k)
             cl = QHBoxLayout(chip)
             cl.setContentsMargins(12, 6, 12, 6)
-            num = lambda t: f'<span style="font-family: {mono};">{html.escape(t)}</span>'   # noqa: E731
-            lab = QLabel(f"{html.escape(cr.name)} {num(f'{cr.value:.{cr.dec}f}')} · {_KO.OVERKILL_CHIP_CUT} "
-                         f"{num(f'{cr.cut:.{cr.dec}f}')} · {num(signed(cr.margin, cr.dec))}", chip)
-            lab.setTextFormat(Qt.TextFormat.RichText)
-            lab.setProperty("role", "ovChipText")
-            cl.addWidget(lab)
+            cl.setSpacing(10)
+            for text, role in ((cr.name, "ovChipName"), (f"{cr.value:.{cr.dec}f}", "ovChipValue"),
+                               *(((cr.unit, "ovChipName"),) if cr.unit else ()),
+                               (_KO.THRESH_PREVIEW_RECIPE_VALUE.format(v=f"{cr.op} {cr.recipe:.{cr.dec}f}"), "ovChipRef"),
+                               *(((_KO.OVERKILL_CHIP_ADJUSTED.format(v=f"{cr.op} {cr.cut:.{cr.dec}f}"), "ovChipRef"),)
+                                 if cr.adjusted else ())):
+                lab = QLabel(text, chip)
+                lab.setProperty("role", role)
+                if role == "ovChipValue":
+                    lab.setProperty("fail", not cr.ok)
+                cl.addWidget(lab)
             row.addWidget(chip)
             self.detail_chips.append(chip)
         row.addStretch(1)
@@ -2479,15 +2737,81 @@ class ThresholdPreviewDialog(QDialog):
         self._render_tiles()
 
     def _toggle(self, index: int) -> None:
-        self._open = None if self._open == index else index
-        self._render_tiles()
+        """타일을 눌러 값 띠를 펼치고 접는다 — 타일은 다시 만들지 않고 띠만 줄 사이에 끼우고 뺀다(썸네일이 깜박이지 않게)."""
+        old = self._open
+        self._open = None if old == index else index
+        self._show_open(old, self._open)
 
-    def _pick_in_detail(self, k: tuple) -> None:
-        """상세의 [꼭 잡기] — 타일의 체크와 같은 토글이고, 값은 계속 열어 둔다."""
-        self.toggle_pick(k)
-        if self._open != k:
-            self._open = k
-            self._render_tiles()
+    def _outer_scroll(self) -> Optional[QScrollArea]:
+        """이 화면이 들어 있는 가장 가까운 바깥 스크롤 영역(앱에서는 설정 화면의 holder).  없으면 None."""
+        w = self.parentWidget()
+        while w is not None and not isinstance(w, QScrollArea):
+            w = w.parentWidget()
+        return w
+
+    def _show_open(self, old, new) -> None:
+        """펼친 타일이 ``old`` → ``new`` 로 바뀐 것을 화면에 옮긴다.  모션이 꺼진(헤드리스) 때는 모두 바로 적용된다."""
+        if new is not None and new not in self.tiles:
+            self._render_tiles()                       # 보이는 타일이 아니다 — 처음부터 다시 그린다
+            return
+        for k in {old, new} - {None}:
+            t = self.tiles.get(k)
+            if t is not None:
+                t.set_open(k == new)
+        band = self._band
+        if new is None:
+            self._close_band(band)
+            return
+        row = self._row_of[new]
+        if band is None:
+            self._open_band(new, row)
+        elif self._band_row is row:                    # 같은 줄 — 띠 높이는 그대로, 내용만 흐려 바꾸고 삼각형만 미끄러진다
+            band.swap_content(self._detail(self._tile_defects[new], self._tile_why[new]))
+            band.move_caret(self._caret_x(new))
+        else:                                          # 다른 줄 — 누른 타일이 화면에서 제자리에 있게 한 뒤 새 띠를 펼친다
+            above = self.grid.indexOf(band) < self.grid.indexOf(row)
+            area = self._outer_scroll() if above else None
+            shift = band.height() + self.grid.spacing()
+            if area is not None and area.verticalScrollBar().value() >= shift:
+                self._close_band(band, instant=True)   # 위의 띠가 사라진 만큼 누른 타일이 올라온다 — 스크롤을 그만큼 되돌린다
+                bar = area.verticalScrollBar()
+                bar.setValue(bar.value() - shift)
+            else:                                      # 아래 띠거나, 맨 위 근처라 스크롤로 다 못 갚으면 — 띠를 접는 애니메이션으로 부드럽게 올라온다
+                self._close_band(band)
+            self._open_band(new, row)
+
+    def _open_band(self, k, row: QWidget) -> None:
+        band = self._new_band(k)
+        self.grid.insertWidget(self.grid.indexOf(row) + 1, band)
+        self._band, self._band_row = band, row
+        band.show()
+        h = band.sizeHint().height()
+        if motion.enabled():
+            motion.animate_height(band, 0, h, duration=motion.DUR_ROW_RESIZE)
+            motion.fade_in(band.content, duration=motion.DUR_TILE_IN)
+            anim = getattr(band, "_motionHeightAnim", None)
+            if anim is not None:                       # 다 펼쳐진 뒤 띠가 보이게 스크롤(그 전에는 아직 자리가 모자라 끝이 잘린다)
+                anim.finished.connect(self._reveal_band, Qt.ConnectionType.SingleShotConnection)
+                return
+        call_later(self, 0, self._reveal_band)
+
+    def _reveal_band(self) -> None:
+        band = self._band
+        area = self._outer_scroll()
+        if band is not None and area is not None:
+            motion.ensure_visible_animated(area, area.widget(), band)
+
+    def _close_band(self, band: Optional[_DetailBand], instant: bool = False) -> None:
+        if band is None:
+            return
+        if self._band is band:
+            self._band = self._band_row = None
+        h = band.height()
+        if instant or not motion.enabled() or h <= 0 or not band.isVisible():
+            band.dispose()
+            return
+        motion.animate_height(band, h, 0, duration=motion.DUR_ROW_SHRINK, easing=motion.EASE_EXIT)
+        band._motionHeightAnim.finished.connect(band.dispose, Qt.ConnectionType.SingleShotConnection)
 
     def _more(self) -> None:
         self._shown += PAGE_TILES * 2
@@ -2497,10 +2821,41 @@ class ThresholdPreviewDialog(QDialog):
         from .zoom_window import FullscreenViewer
         sheets.run(FullscreenViewer(photo, self), full_bleed=True)
 
+    def _enlarge_tile(self, k) -> None:
+        """우클릭 [크게보기] — Color 사진은 바로, Scan Crop 은 Scan 원본 위에 Crop 범위를 그려(뒤에서 읽어) 연다."""
+        d = self._tile_defects.get(k)
+        if d is None and self._w is not None:
+            d = next((x for x in self._w.defects + self._w.goods if key_of(x) == k), None)
+        photo = self._pic(d) if d is not None else None
+        if photo is None:
+            return
+        if not isinstance(photo, QImage):
+            self._enlarge(photo)
+            return
+        idx = self._scan_index().get(key_of(d))
+        if idx is None:
+            self._on_full_scan(photo, None, None, "")
+            return
+        th = _FullScanLoad(photo, idx[1], idx[2], photo.text("src"))
+        th.signals.done.connect(self._on_full_scan)
+        self._full_scan = th
+        th.start()
+
+    def _on_full_scan(self, crop: QImage, full, box, path: str) -> None:
+        """Scan 원본을 읽었다 — 원본 + 범위, 못 읽었으면 Crop 그 자체를 크게 본다."""
+        self._full_scan = None
+        from .zoom_window import FullscreenViewer
+        if full is not None and box is not None:
+            viewer = FullscreenViewer(Path(path), self, image=full, overlay=box)
+        else:
+            viewer = FullscreenViewer(Path(crop.text("src") or _KO.OVERKILL_SCAN_TAG), self, image=crop)
+        sheets.run(viewer, full_bleed=True)
+
     def reset(self) -> None:
         """레시피 값으로 되돌리기 — 모든 Zone 의 바꾼 값과 꼭 잡기를 지운다."""
         self._ov = {}
         self._picked = {}
+        self._overkill = {}
         self._rec_zones = set()
         self._open = None
         self._render()
@@ -2539,6 +2894,114 @@ class ThresholdPreviewDialog(QDialog):
         rec, _missed = P.recommend(picked, self._w.zones, self._snap)
         self._ov.update(rec)
         self._rec_zones = zones_now
+
+    # ------------------------------------------------------------------ Defect 고르기 팝업
+    def _on_mode_clicked(self, key: str) -> None:
+        """모드 버튼을 눌렀다 — 자동 추천으로 처음 넘어왔는데 고른 것이 없으면 [Defect 고르기] 를 한 번 바로 연다."""
+        prev = self._mode
+        self.set_mode(key)
+        if key == "auto" and prev != "auto" and not self._picked:
+            self.open_pick_dialog()
+
+    def open_pick_dialog(self) -> None:
+        """[Defect 고르기] — 지금 Zone 의 사진을 Overkill ← → Defect 로 가르는 팝업.  [적용] 해야 값이 바뀐다."""
+        w = self._w
+        if w is None or w.note or self._pick_dlg is not None:
+            return
+        zones = []
+        for k in self.zone_keys():
+            name, rec = zone_label(k[0], w.zones.get(k), k[1])
+            zones.append((k, f"{name}" + (f"  · {rec}" if rec else "")))
+        dlg = OverkillPickDialog(zones=zones, zone=self._zone, items_of=self._pick_items, key_of=key_of,
+                                 pixmap_of=self._pick_pixmap, request_pics=self._pick_request,
+                                 caption_of=self._pick_caption, picked=self._picked, overkill=self._overkill,
+                                 preview=self._pick_preview,
+                                 enlarge=lambda d: self._enlarge_tile(key_of(d)), parent=self)
+        dlg.applied.connect(self._on_pick_applied)
+        dlg.finished.connect(self._on_pick_closed)
+        self._pick_dlg = dlg
+        sheets.run(dlg)
+
+    def _on_pick_closed(self, _code: int = 0) -> None:
+        dlg, self._pick_dlg = self._pick_dlg, None
+        self._pick_wanted = set()
+        self._pick_extra = {}
+        if dlg is not None:
+            dlg.deleteLater()
+
+    def _refresh_pick(self) -> None:
+        if self._pick_dlg is not None and not self._pick_refresh.isActive():
+            self._pick_refresh.start()
+
+    def _refresh_pick_now(self) -> None:
+        if self._pick_dlg is not None:
+            self._pick_dlg.refresh_pics()
+
+    def _pick_items(self, zone_key) -> list:
+        """팝업 목록 — 그 Zone 의 Defect 중 사진이 있거나 Scan Crop 을 자르는 중인 것(타일과 같은 기준, 폴더 칩은 따지지 않는다)."""
+        return [d for d in self._in_zone(zone_key) if self._pic(d) is not None or self._scan_pending(d)]
+
+    def _pick_pixmap(self, d: P.Defect, size: int):
+        photo = self._pic(d)
+        if photo is None:
+            return None
+        if isinstance(photo, QImage):
+            return _pixmap(photo, size)
+        key = _tile_key(photo, size) if size <= 200 else _mid_key(photo, size)
+        return image_io._get_tile_cache().get(key)
+
+    def _pick_request(self, ds, size: int) -> None:
+        kind = "thumb" if size <= 200 else "mid"
+        for d in ds:
+            photo = self._pic(d)
+            if isinstance(photo, QImage):
+                continue
+            if photo is not None:
+                self._want(photo, size, kind)
+                self._pick_wanted.add((str(photo), int(size), kind))
+            elif self._scan_pending(d):
+                self._pick_extra[key_of(d)] = d
+        if self._pick_extra:
+            self._ensure_scans(list(self._pick_extra.values()))
+
+    def _pick_caption(self, d: P.Defect) -> str:
+        parts = [self._class_name(d.bin)]
+        for feat, name, unit, _step, dec in _FEATURES:
+            v = P._value(d, feat)
+            if v is None or (feat == R.FEATURE_CONTRAST and v == 0):
+                continue
+            parts.append(f"{name} {self._w.to_um(feat, v):.{dec}f}" + (f" {unit}" if unit else ""))
+        return " · ".join(parts)
+
+    def _overrides_for(self, picked) -> dict:
+        """``_recommend`` 가 만들 값 — 상태는 건드리지 않는다(팝업 미리보기용)."""
+        zones_now = {(d.zone_dir, d.zone) for d in picked}
+        ov = {k: v for k, v in self._ov.items() if k[:2] not in zones_now | self._rec_zones}
+        ov.update(P.recommend(picked, self._w.zones, self._snap)[0])
+        return ov
+
+    def _pick_preview(self, picked, overkill) -> tuple:
+        """적용하면 → ``(새로 빠지는 Defect 수(전체 Zone), 그중 Overkill 로 고른 것, 고른 Defect 중 놓치는 것)``."""
+        w = self._w
+        ov = self._overrides_for(list(picked))
+        gone = {key_of(d) for d in w.defects if not P.is_kept(d, w.zones, ov)}
+        return (len(gone), sum(1 for d in overkill if key_of(d) in gone),
+                sum(1 for d in picked if key_of(d) in gone))
+
+    def _overkill_gone(self, ov: dict) -> int:
+        """Overkill 로 고른 Defect 중 ``ov`` 기준으로 빠지는 수."""
+        return sum(1 for d in self._overkill.values() if not P.is_kept(d, self._w.zones, ov))
+
+    def _on_pick_applied(self, picked: dict, overkill: dict) -> None:
+        """팝업 [적용] — 고른 Defect · Overkill 를 받아 추천값을 다시 계산하고 화면을 다시 그린다."""
+        if self._w is None:
+            return
+        self._picked = dict(picked)
+        self._overkill = dict(overkill)
+        self._recommend()
+        self._render_zones()
+        self._render_rules()
+        self._changed(True)
 
     def _snap(self, feature: int, v: float, strict: bool) -> float:
         """px 값 → 화면 소수 자리로 **내린** µm 를 다시 px 로.  그 값 이하(엄격이면 미만)를 보장한다."""
