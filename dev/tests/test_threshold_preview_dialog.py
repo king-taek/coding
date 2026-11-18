@@ -961,32 +961,27 @@ def test_underline_tabs_and_tile_class_heading(styled_qapp, tmp_path):
         dlg.deleteLater()
 
 
-def test_tile_marks_scan_s_pick_check_and_hover_more(styled_qapp):
-    """Scan Crop = 왼쪽 아래 흰 S(알약 없음), 꼭 잡기 = 오른쪽 위 체크, … 는 가리킨 타일에만."""
-    from PyQt6.QtCore import QEvent, QPointF
-    from PyQt6.QtGui import QEnterEvent, QImage
+def test_tile_marks_pick_check_without_scan_mark_or_more_button(styled_qapp):
+    """Scan Crop 에도 사진 위 글자 표시(S)는 없다.  꼭 잡기 = 오른쪽 위 체크.  가리킬 때 나오던 … 버튼은 없다."""
+    from PyQt6.QtGui import QImage
     from PyQt6.QtWidgets import QLabel
     from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
     img = QImage(40, 40, QImage.Format.Format_RGB888)
-    plain = T._Tile(img, T.TILE_PX, picked=False, detail_btn=True)
-    picked = T._Tile(img, T.TILE_PX, picked=True, detail_btn=True)
+    plain = T._Tile(img, T.TILE_PX, picked=False)
+    picked = T._Tile(img, T.TILE_PX, picked=True)
     color = T._Tile(Path("x.jpg"), T.TILE_PX)
     plain.show()
-    marks = [lab.text() for lab in plain.findChildren(QLabel) if lab.property("role") == "tileMark"]
-    assert marks == ["S"] and plain.findChild(QLabel, "") is not None
+    assert not [lab for lab in plain.findChildren(QLabel) if lab.property("role") == "tileMark"]
     assert not [lab for lab in color.findChildren(QLabel) if lab.property("role") == "tileMark"]
+    assert "S" not in [lab.text() for lab in plain.findChildren(QLabel)]
     assert picked.badge.isVisibleTo(picked) and not plain.badge.isVisibleTo(plain)
     assert picked.badge.x() > T.TILE_PX // 2 and picked.badge.y() < 12       # 오른쪽 위
-    assert not plain.detail_btn.isVisibleTo(plain)
-    plain.enterEvent(QEnterEvent(QPointF(5, 5), QPointF(5, 5), QPointF(5, 5)))
-    assert plain.detail_btn.isVisibleTo(plain)
-    plain.leaveEvent(QEvent(QEvent.Type.Leave))
-    assert not plain.detail_btn.isVisibleTo(plain)
+    assert not hasattr(plain, "detail_btn") and not hasattr(plain, "detail")
 
 
 def test_detail_opens_right_under_its_row_as_hairline_band(styled_qapp, tmp_path):
     """타일을 누르면 그 줄 바로 아래에 위아래 선만 있는 상세가 펼쳐진다(굵은 파란 상자 · 긴 경로 없음).
-    다시 누르거나 [닫기] 로 접는다.  [꼭 잡기] 는 자동 추천에서만 있고 눌러도 열려 있다."""
+    다시 누르거나 [닫기] 로 접는다.  자동 추천에서도 같다 — [꼭 잡기] 버튼은 없다(팝업에서 고른다)."""
     from PyQt6.QtWidgets import QFrame, QPushButton
     from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
     dlg = _shown_dlg(T, styled_qapp, tmp_path)
@@ -998,12 +993,11 @@ def test_detail_opens_right_under_its_row_as_hairline_band(styled_qapp, tmp_path
         band = dlg.grid_host.findChildren(QFrame)
         box = next(f for f in band if f.property("role") == "ovDetail")
         assert box.property("role") != "card" and "2px" not in box.styleSheet()
-        i = dlg.grid.indexOf(box.parentWidget())
-        r, c, rs, cs = dlg.grid.getItemPosition(i)
-        tile_row = dlg.grid.getItemPosition(dlg.grid.indexOf(dlg.tiles[keys[0]]))[0]
-        assert r == tile_row + 1 and c == 0 and cs == dlg._cols()          # 그 줄 바로 아래, 한 줄 폭
+        band_w = dlg._band
+        i = dlg.grid.indexOf(band_w)
+        assert band_w is box.parentWidget().parentWidget() and dlg.grid.itemAt(i - 1).widget() is dlg._row_of[keys[0]]   # 그 줄 바로 아래
         names = [b.text() for b in box.findChildren(QPushButton)]
-        assert T._KO.OVERKILL_DETAIL_CLOSE in names and T._KO.OVERKILL_PICK_ACTION not in names   # 직접 조정 — 꼭 잡기 없음
+        assert T._KO.OVERKILL_DETAIL_CLOSE in names
         assert dlg.tiles[keys[0]].ring.isVisibleTo(dlg)                    # 펼친 타일 표시
         txt = [lab.text() for lab in box.findChildren(T.QLabel)]
         assert not any(t.startswith("/") or "Scanresult" in t for t in txt)   # 긴 경로 없음
@@ -1014,32 +1008,19 @@ def test_detail_opens_right_under_its_row_as_hairline_band(styled_qapp, tmp_path
         dlg._toggle(k0)
         styled_qapp.processEvents()
         box = next(f for f in dlg.grid_host.findChildren(QFrame) if f.property("role") == "ovDetail" and f.isVisibleTo(dlg))
-        pick = next(b for b in box.findChildren(QPushButton) if b.text() == T._KO.OVERKILL_PICK_ACTION)
-        pick.click()
-        styled_qapp.processEvents()
-        assert k0 in dlg._picked and dlg._open == k0             # 눌러도 열려 있고
-        box = next(f for f in dlg.grid_host.findChildren(QFrame) if f.property("role") == "ovDetail" and f.isVisibleTo(dlg))
-        assert any(b.text() == T._KO.OVERKILL_PICK_UNDO for b in box.findChildren(QPushButton))   # 글자가 해제로 바뀐다
+        assert [b.text() for b in box.findChildren(QPushButton)] == [T._KO.OVERKILL_DETAIL_CLOSE]   # 자동 추천도 꼭 잡기 버튼 없음
+        assert dlg._picked == {} and dlg._open == k0
     finally:
         dlg.deleteLater()
 
 
-def test_deciding_criterion_is_the_smallest_normalized_margin():
-    """D6 — 판정을 가른 기준 = 슬라이더 범위로 나눈 여유(부호 있는)가 가장 작은 것."""
+def test_criterion_operator_follows_filter_type_and_flags_adjustment():
+    """기준 앞 연산자 — 1(범위) · 5 는 ≥, 4 는 >.  슬라이더로 옮겼으면(조정) 레시피 값과 다르다."""
     from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    assert T.filter_op(1) == "≥" and T.filter_op(5) == "≥" and T.filter_op(4) == ">"
     C = T.Criterion
-    # 남음: 셋 다 통과(여유 ≥ 0) — 가장 빠듯한 것(Area: 1.4/30)이 가른다
-    kept = [C("Width", 2.90, 2.00, 4.0, 2), C("Area", 31.4, 30.0, 60.0, 1), C("Contrast", 49.5, 45.0, 20.0, 1)]
-    assert [round(c.norm, 3) for c in kept] == [0.225, 0.023, 0.225]
-    assert T.deciding_criterion(kept) == 1
-    # 단위가 달라도 범위로 나눠 견준다 — 절대 여유가 가장 작은 Width(0.9)가 아니라 Area 가 가른다
-    assert min(range(3), key=lambda i: kept[i].margin) == 0
-    # 빠짐: 모자란(음수) 기준 중 가장 많이 모자란 것
-    dropped = [C("Width", 1.0, 2.0, 4.0, 2), C("Area", 20.0, 30.0, 60.0, 1), C("Contrast", 50.0, 45.0, 20.0, 1)]
-    assert T.deciding_criterion(dropped) == 0
-    assert T.deciding_criterion([]) is None
-    assert T.deciding_criterion([C("A", 1, 1, 0, 1), C("B", 1, 1, 0, 1)]) == 0       # 같으면 앞의 것 · 범위 0 도 안전
-    assert T.signed(1.44, 1) == "+1.4" and T.signed(-0.4, 2) == "−0.40" and T.signed(0.0, 1) == "+0.0"
+    assert not C("Area", 12.3, 5.0, 5.0, 1).adjusted
+    assert C("Area", 12.3, 8.0, 5.0, 1).adjusted
 
 
 def _open_first_detail(T, dlg, styled_qapp):
@@ -1048,37 +1029,54 @@ def _open_first_detail(T, dlg, styled_qapp):
     return next(f for f in dlg.grid_host.findChildren(T.QFrame) if f.property("role") == "ovDetail")
 
 
-def test_detail_shows_one_sentence_and_three_chips_with_the_deciding_one_marked(styled_qapp, tmp_path):
-    """D6 — 3행 표 대신: 한 문장(가른 기준) + 칩 한 줄(값 · 기준 · 차이), 가른 칩만 강조."""
+def _chip_texts(chip):
+    return [lab.text() for lab in chip.findChildren(T_QLabel()) if lab.text()]
+
+
+def T_QLabel():
+    from PyQt6.QtWidgets import QLabel
+    return QLabel
+
+
+def test_detail_chip_shows_value_and_recipe_criterion_without_sentence(styled_qapp, tmp_path):
+    """상세 — 문장 없이 기준마다 칩 하나: 이름 · 이 Defect 의 값 · '레시피 ≥ 값'.  옮겼을 때만 '조정 ≥ 값'.  지금 기준에 걸린 값은 빨강."""
     from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
     dlg = _shown_dlg(T, styled_qapp, tmp_path)
     try:
-        dlg.set_value(14, R.FEATURE_AREA, 40.0)
+        dlg._set_tab("keep")
         box = _open_first_detail(T, dlg, styled_qapp)
-        labs = box.findChildren(T.QLabel)
-        assert not [l for l in labs if l.property("role") in ("ovNum", "ovNumHead", "ovCell")]
-        assert not any(l.text() in ("이 Defect", "레시피", "지금") for l in labs)
-        verdict = next(l for l in labs if l.property("role") == "ovVerdict")
-        chips = [f for f in box.findChildren(T.QFrame) if f.property("role") == "ovChip"]
-        assert chips and sum(1 for c in chips if c.property("deciding")) == 1
+        assert not [lab for lab in box.findChildren(T.QLabel) if lab.property("role") == "ovVerdict"]
+        assert not any("차이로" in lab.text() for lab in box.findChildren(T.QLabel))
         d = dlg._tile_defects[next(iter(dlg.tiles))]
-        why = P.why_dropped(d, dlg._w.zones, dlg._ov)
-        crits = dlg._criteria(d, why)
-        k = T.deciding_criterion(crits)
-        assert len(chips) == len(crits) and chips[k].property("deciding") is True
-        assert crits[k].name in verdict.text() and (("빠짐" in verdict.text()) == (why is not None))
-        assert T.signed(crits[k].margin, crits[k].dec) in verdict.text()
-        chip_txt = chips[k].findChildren(T.QLabel)[0].text()
-        assert "기준" in chip_txt and T.signed(crits[k].margin, crits[k].dec) in chip_txt
-        # 기준은 슬라이더 지금 값이다
-        assert f"{crits[k].cut:.{crits[k].dec}f}" in chip_txt
+        crits = dlg._criteria(d, P.why_dropped(d, dlg._w.zones, dlg._ov))
+        chips = [f for f in box.findChildren(T.QFrame) if f.property("role") == "ovChip"]
+        assert crits and len(chips) == len(crits)
+        for chip, cr in zip(chips, crits):
+            txt = _chip_texts(chip)
+            assert cr.name in txt and f"{cr.value:.{cr.dec}f}" in txt
+            assert T._KO.THRESH_PREVIEW_RECIPE_VALUE.format(v=f"{cr.op} {cr.recipe:.{cr.dec}f}") in txt
+            assert not any(t.startswith("조정") for t in txt)                 # 안 옮겼다 — 조정 없음
+        dlg.set_value(14, R.FEATURE_AREA, 40.0)                                  # 슬라이더를 옮긴 뒤
+        dlg._set_tab("drop")
+        keys = list(dlg.tiles)
+        dlg._toggle(keys[0])                                                     # 열면
+        styled_qapp.processEvents()
+        box = next(f for f in dlg.grid_host.findChildren(T.QFrame) if f.property("role") == "ovDetail" and f.isVisibleTo(dlg))
+        d = dlg._tile_defects[keys[0]]
+        crits = dlg._criteria(d, P.why_dropped(d, dlg._w.zones, dlg._ov))
+        area = next(c for c in crits if c.name == "Area")
+        chip = next(f for f in box.findChildren(T.QFrame) if f.property("role") == "ovChip"
+                    and "Area" in _chip_texts(f))
+        assert T._KO.OVERKILL_CHIP_ADJUSTED.format(v=f"≥ {area.cut:.{area.dec}f}") in _chip_texts(chip)
+        assert area.adjusted and f"{area.cut:.1f}" == "40.0"
+        val = next(lab for lab in chip.findChildren(T.QLabel) if lab.property("role") == "ovChipValue")
+        assert bool(val.property("fail")) == (not area.ok)
     finally:
         dlg.deleteLater()
 
 
-def test_criteria_margin_sign_matches_kept_or_dropped(styled_qapp, tmp_path):
-    """빠진 Defect 의 가른 기준은 값이 지금 기준보다 아래(여유 < 0), 남은 Defect 는 모든 기준이 여유 ≥ 0 이다.
-    (묶음 안은 전부 통과해야 남는다 — ``preview.why_dropped`` 와 같은 규칙.)"""
+def test_criteria_ok_flag_matches_kept_or_dropped(styled_qapp, tmp_path):
+    """빠진 Defect 는 걸린 기준이 하나 이상(ok 거짓), 남은 Defect 는 모든 기준이 ok 다(묶음 안은 전부 통과 — ``preview.why_dropped`` 와 같은 규칙)."""
     from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
     dlg = _shown_dlg(T, styled_qapp, tmp_path)
     try:
@@ -1087,12 +1085,11 @@ def test_criteria_margin_sign_matches_kept_or_dropped(styled_qapp, tmp_path):
         assert drops
         for d, why in drops:
             crits = dlg._criteria(d, why)
-            assert crits and crits[T.deciding_criterion(crits)].margin < 0
+            assert crits and any(not c.ok for c in crits)
         kept = [d for d in dlg._in_zone() if P.is_kept(d, dlg._w.zones, dlg._ov)]
         assert kept
         for d in kept:
-            crits = dlg._criteria(d, None)
-            assert all(c.margin >= 0 for c in crits)
+            assert all(c.ok for c in dlg._criteria(d, None))
     finally:
         dlg.deleteLater()
 
@@ -1162,7 +1159,8 @@ def test_rules_panel_is_boxless_with_distribution_aligned_to_slider(styled_qapp,
             opt = QStyleOptionSlider()
             sl.initStyleOption(opt)
             hr = sl.style().subControlRect(QStyle.ComplexControl.CC_Slider, opt, QStyle.SubControl.SC_SliderHandle, sl)
-            assert abs(hist.cut_x() - hr.center().x()) <= 1.5, um           # 자름선 = 손잡이 중심
+            tol = 1.5 + ((hist.width() - 2 * T._Hist.PAD) / sl.maximum() if hist._axis.log else 0)   # 로그 축은 정수 칸에 맞춘다
+            assert abs(hist.cut_x() - hr.center().x()) <= tol, um           # 자름선 = 손잡이 중심
     finally:
         dlg.deleteLater()
 
@@ -1286,5 +1284,341 @@ def test_stop_keeps_already_read_roots(styled_qapp, tmp_path, monkeypatch):
         assert dlg._roots == [a, lot] and dlg._overlay_on
         dlg._loading.cancel_requested.emit()
         assert dlg._roots == [a] and not dlg._overlay_on
+    finally:
+        dlg.deleteLater()
+
+
+# ------------------------------------------------------------------ 2026-11-17 UX 다듬기
+def test_defect_box_toggle_shows_state_by_color_only_no_check_icon(styled_qapp, tmp_path):
+    """'Defect 표시' — 켜짐 · 꺼짐 모두 체크 아이콘이 없다(상태는 색으로만, QSS :checked)."""
+    from PyQt6.QtGui import QColor, QImage
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    w, target = _scan_wafer(tmp_path)
+    dlg = T.ThresholdPreviewDialog()
+    try:
+        dlg.set_wafer(T.load_wafer(w))
+        dlg._set_zone((target.zone_dir, target.zone))
+        dlg._set_tab("keep")
+        side = round(300.0 / PX)
+        img = QImage(side, side, QImage.Format.Format_RGB888)
+        img.fill(QColor(90, 90, 90))
+        dlg.set_scans({(w, target.index): img})
+        dlg._toggle(T.key_of(target))
+        tog = dlg.detail_box_btn
+        assert tog.isChecked() and tog.icon().isNull()
+        tog.click()
+        assert not tog.isChecked() and tog.icon().isNull()
+        assert not hasattr(T, "_check_icon")
+    finally:
+        dlg.deleteLater()
+
+
+def test_clicking_tiles_keeps_tile_widgets_and_opens_closes_the_band(styled_qapp, tmp_path):
+    """타일을 눌러 띠를 펼치고 · 다른 타일로 옮기고 · 접어도 타일 위젯은 그대로다(다시 만들지 않는다 — 썸네일이 깜박이지 않게)."""
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    dlg = _shown_dlg(T, styled_qapp, tmp_path)
+    try:
+        dlg._set_tab("keep")
+        keys = list(dlg.tiles)
+        assert len(keys) >= 2
+        before = {k: id(t) for k, t in dlg.tiles.items()}
+        assert dlg._band is None
+        dlg.tiles[keys[0]].clicked.emit()
+        styled_qapp.processEvents()
+        assert dlg._open == keys[0] and dlg._band is not None and dlg.tiles[keys[0]].is_open
+        band = dlg._band
+        dlg.tiles[keys[1]].clicked.emit()                                  # 다른 타일(같은 줄이든 아래 줄이든)
+        styled_qapp.processEvents()
+        assert dlg._open == keys[1] and dlg._band is not None and dlg._band_row is dlg._row_of[keys[1]]
+        assert dlg.tiles[keys[1]].is_open and not dlg.tiles[keys[0]].is_open
+        assert dlg.grid.itemAt(dlg.grid.indexOf(dlg._band) - 1).widget() is dlg._row_of[keys[1]]
+        if dlg._row_of[keys[0]] is dlg._row_of[keys[1]]:
+            assert dlg._band is band                                       # 같은 줄 — 띠를 새로 만들지 않고 삼각형만 옮긴다
+            assert dlg._band.caret == pytest.approx(dlg._caret_x(keys[1]))
+        dlg.tiles[keys[1]].clicked.emit()                                  # 같은 타일 다시 = 접기
+        styled_qapp.processEvents()
+        assert dlg._open is None and dlg._band is None
+        assert not [b for b in dlg.grid_host.findChildren(T._DetailBand) if b.isVisibleTo(dlg)]
+        assert {k: id(t) for k, t in dlg.tiles.items()} == before
+        assert not any(t.is_open for t in dlg.tiles.values())
+    finally:
+        dlg.deleteLater()
+
+
+def test_open_tile_has_three_px_ring_and_band_caret_points_at_it(styled_qapp, tmp_path):
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    dlg = _shown_dlg(T, styled_qapp, tmp_path)
+    try:
+        dlg._set_tab("keep")
+        k = list(dlg.tiles)[1]
+        dlg._toggle(k)
+        styled_qapp.processEvents()
+        t = dlg.tiles[k]
+        assert t.ring.isVisibleTo(dlg) and not t.hover.isVisibleTo(dlg)
+        assert "3px" in styled_qapp.styleSheet().split('tileRing')[1].split("}")[0]
+        # 삼각형 x = 그 타일 가운데(띠와 줄이 같은 왼쪽 끝)
+        assert (t.mapTo(dlg.grid_host, t.rect().center()).x() - dlg._band.x()) == pytest.approx(dlg._band.caret, abs=1.5)
+    finally:
+        dlg.deleteLater()
+
+
+def _ask_first_action(monkeypatch, T, seen):
+    """우클릭 메뉴를 띄우지 않고 첫 항목을 고른 것으로 한다."""
+    def fake_exec(self, *a, **k):
+        seen.extend(x.text() for x in self.actions())
+        return self.actions()[0]
+    monkeypatch.setattr(T.QMenu, "exec", fake_exec)
+
+
+def test_right_click_on_color_tile_and_big_photo_offers_enlarge(styled_qapp, tmp_path, monkeypatch):
+    from PyQt6.QtCore import QPoint
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    dlg = _shown_dlg(T, styled_qapp, tmp_path)
+    try:
+        dlg._set_tab("keep")
+        seen, shown = [], []
+        _ask_first_action(monkeypatch, T, seen)
+        monkeypatch.setattr(dlg, "_enlarge", lambda photo: shown.append(photo))
+        k = next(iter(dlg.tiles))
+        tile = dlg.tiles[k]
+        tile.customContextMenuRequested.emit(QPoint(5, 5))                 # 우클릭
+        assert seen == [T._KO.CTX_VIEW_LARGER] and shown == [dlg._pic(dlg._tile_defects[k])]
+        assert dlg._open is None and not dlg._picked                       # 선택 · 꼭 잡기는 건드리지 않는다
+        dlg._toggle(k)
+        big = dlg._band.findChildren(T._BigPhoto)[0]
+        big.customContextMenuRequested.emit(QPoint(5, 5))
+        assert len(shown) == 2 and dlg._open == k
+    finally:
+        dlg.deleteLater()
+
+
+def test_right_click_on_scan_tile_opens_full_scan_with_overlay_or_falls_back_to_crop(styled_qapp, tmp_path, monkeypatch):
+    from PyQt6.QtCore import QPoint
+    from PyQt6.QtGui import QColor, QImage
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    from aoi_verification.app.ui.widgets import zoom_window as Z
+    w, target = _scan_wafer(tmp_path)
+    dlg = T.ThresholdPreviewDialog()
+    try:
+        dlg.set_wafer(T.load_wafer(w))
+        dlg._set_zone((target.zone_dir, target.zone))
+        dlg._set_tab("keep")
+        side = round(300.0 / PX)
+        img = QImage(side, side, QImage.Format.Format_RGB888)
+        img.fill(QColor(90, 90, 90))
+        dlg.set_scans({(w, target.index): img})
+        seen, opened = [], []
+        _ask_first_action(monkeypatch, T, seen)
+
+        class _V:
+            def __init__(self, path, parent=None, *, image=None, overlay=None):
+                opened.append((Path(path), image, overlay))
+        monkeypatch.setattr(Z, "FullscreenViewer", _V)
+        monkeypatch.setattr(T.sheets, "run", lambda viewer, **k: None)
+        dlg.tiles[T.key_of(target)].customContextMenuRequested.emit(QPoint(5, 5))
+        assert seen == [T._KO.CTX_VIEW_LARGER]
+        th = dlg._full_scan
+        assert th is not None
+        th.wait(20000)
+        styled_qapp.processEvents()
+        assert len(opened) == 1 and opened[0][1] is not None               # 원본(없으면 Crop 그 자체) 이 열렸다
+        if opened[0][2] is not None:
+            assert len(opened[0][2]) == 4                                  # Scan 원본 위 Crop 범위
+        dlg._on_full_scan(img, None, None, "")                             # 원본을 못 읽으면 Crop 을 크게 본다
+        assert opened[-1][1] is img and opened[-1][2] is None
+    finally:
+        dlg.deleteLater()
+
+
+def test_log_axis_rule_and_roundtrip():
+    """90번째 백분위가 선형 축 앞 10% 안이면 로그.  로그 축의 칸 ↔ 값은 되돌아오고 레시피 · 최소 · 최대에 정확히 닿는다."""
+    import math
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    squashed = [10.0 + i * 0.1 for i in range(100)] + [4571.0]
+    assert T.use_log_axis(5.0, 4571.0, squashed)                             # 거의 다 10~20, 하나만 4571
+    assert not T.use_log_axis(5.0, 100.0, [5.0 + i for i in range(96)])      # 고르게 퍼짐 — 선형
+    assert not T.use_log_axis(0.0, 100.0, [1.0, 2.0]) and not T.use_log_axis(5.0, 5.0, [5.0]) and not T.use_log_axis(5.0, 9.0, [])
+    rec, hi = 5.0, 4571.0
+    ax = T._Axis(rec, hi, rec, 0.5, 1, 0, 1, log=True)
+    assert ax.log and ax.n == T.LOG_STEPS
+    assert ax.value_at(0) == rec and ax.value_at(ax.n) == hi
+    assert ax.frac(rec) == 0 and ax.frac(hi) == 1 and ax.frac(math.sqrt(rec * hi)) == pytest.approx(0.5)
+    for i in range(ax.n + 1):
+        assert ax.index_of(ax.value_at(i)) == i                              # 정수 칸 ↔ 값 되돌아옴
+    assert all(ax.value_at(i) <= ax.value_at(i + 1) for i in range(ax.n))
+    down = T._Axis(2.0, 4571.0, 5.0, 0.5, 1, 6, 1, log=True)                 # 내리기 — 레시피(5.0)가 중간 칸이어도 정확히 닿는다
+    assert down.value_at(down.index_of(5.0)) == 5.0
+    lin = T._Axis(5.0, 25.0, 5.0, 0.5, 1, 0, 40)                             # 선형은 예전 그대로
+    assert not lin.log and lin.value_at(3) == 6.5 and lin.index_of(6.5) == 3 and lin.frac(15.0) == 0.5
+    assert T.log_decades(5.0, 4571.0) == [10.0, 100.0, 1000.0]
+
+
+def test_log_axis_slider_and_histogram_share_the_mapping(styled_qapp, tmp_path):
+    """Area(30~314 µm² — 거의 다 아래쪽)는 로그 축: 슬라이더 맨 앞 = 레시피, 끝 = 최댓값, 입력한 값은 정확히 적용되고 손잡이는 가장 가까운 칸."""
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    dlg = _shown_dlg(T, styled_qapp, tmp_path)
+    try:
+        sl, spin = dlg.sliders[(14, R.FEATURE_AREA)]
+        hist = next(h for h in dlg.rules.findChildren(T._Hist) if h.parentWidget() is sl.parentWidget())
+        foot = next(f for f in dlg.rules.findChildren(T._AxisFoot) if f.parentWidget() is sl.parentWidget())
+        ax = hist._axis
+        assert ax.log and sl.maximum() == ax.n and foot._decades == [100.0]
+        sl.setValue(ax.n)                                                    # 끝까지 — 최댓값
+        assert float(spin.text()) == pytest.approx(ax.hi, abs=0.051)
+        sl.setValue(0)
+        assert float(spin.text()) == pytest.approx(ax.rec, abs=0.051) and not dlg._ov
+        dlg.set_value(14, R.FEATURE_AREA, 100.0)                             # 입력값은 정확히 적용
+        assert float(spin.text()) == 100.0
+        assert sl.value() == ax.index_of(100.0) and abs(ax.value_at(sl.value()) - 100.0) < 100.0 * 0.03
+        assert hist.cut_x() == pytest.approx(T._Hist.PAD + ax.frac(100.0) * (hist.width() - 2 * T._Hist.PAD))
+    finally:
+        dlg.deleteLater()
+
+
+# ---------------------------------------------------------------- Defect 고르기 팝업(2026-11-17)
+def _capture_run(monkeypatch, T):
+    """sheet_host.run 을 막지 않는 가짜로 — 띄운 팝업을 모아 둔다."""
+    shown = []
+    monkeypatch.setattr(T.sheets, "run", lambda dlg, **kw: shown.append(dlg) or 0)
+    return shown
+
+
+def test_auto_mode_tile_click_opens_band_without_picking(styled_qapp, tmp_path):
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    dlg = _shown_dlg(T, styled_qapp, tmp_path, mode="auto")
+    try:
+        k0 = next(iter(dlg.tiles))
+        dlg.tiles[k0].clicked.emit()
+        styled_qapp.processEvents()
+        assert dlg._open == k0 and dlg._band is not None and dlg._picked == {} and dlg._ov == {}
+    finally:
+        dlg.deleteLater()
+
+
+def test_pick_button_only_in_auto_and_needs_wafer(styled_qapp, tmp_path):
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    dlg = _shown_dlg(T, styled_qapp, tmp_path)
+    try:
+        assert not dlg.pick_open_btn.isVisibleTo(dlg)
+        dlg.set_mode("auto")
+        assert dlg.pick_open_btn.isVisibleTo(dlg) and dlg.pick_open_btn.isEnabled()
+        assert dlg.pick_open_btn.text() == T._KO.OVERKILL_PICK_OPEN
+        dlg.set_mode("manual")
+        assert not dlg.pick_open_btn.isVisibleTo(dlg)
+        dlg.set_wafer(None)
+        dlg.set_mode("auto")
+        assert not dlg.pick_open_btn.isEnabled()
+        dlg.open_pick_dialog()                                             # 웨이퍼 없음 — 열리지 않는다
+        assert dlg._pick_dlg is None
+    finally:
+        dlg.deleteLater()
+
+
+def test_open_pick_dialog_builds_with_current_zone_and_items(styled_qapp, tmp_path, monkeypatch):
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    shown = _capture_run(monkeypatch, T)
+    dlg = _shown_dlg(T, styled_qapp, tmp_path, mode="auto")
+    try:
+        dlg.pick_open_btn.click()
+        assert len(shown) == 1 and dlg._pick_dlg is shown[0]
+        pk = shown[0]
+        assert pk._zone == dlg._zone == ("Zones", 1)
+        assert [k for k, _l in pk._zones] == dlg.zone_keys()
+        assert pk._zones[0][1].startswith(T.zone_label("Zones", dlg._w.zones.get(("Zones", 1)), 1)[0])
+        assert {T.key_of(d) for d in pk._items} == {T.key_of(d) for d in dlg._in_zone()}
+        d0 = pk._items[0]
+        assert pk._caption_of(d0).startswith(dlg._class_name(d0.bin)) and "µm" in pk._caption_of(d0)
+        dlg.open_pick_dialog()                                             # 열려 있는 동안 두 번 열리지 않는다
+        assert len(shown) == 1
+        pk.reject()
+        assert dlg._pick_dlg is None and dlg._pick_wanted == set()
+    finally:
+        dlg.deleteLater()
+
+
+def test_mode_click_into_auto_opens_pick_once_only_when_nothing_picked(styled_qapp, tmp_path, monkeypatch):
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    shown = _capture_run(monkeypatch, T)
+    dlg = _shown_dlg(T, styled_qapp, tmp_path)
+    try:
+        dlg.mode_btns["auto"].click()
+        assert len(shown) == 1
+        shown[0].reject()
+        dlg.mode_btns["auto"].click()                                      # 이미 자동 모드 — 다시 열지 않는다
+        assert len(shown) == 1
+        dlg.mode_btns["manual"].click()
+        dlg.toggle_pick(T.key_of(dlg._in_zone()[0]))
+        dlg.mode_btns["auto"].click()                                      # 이미 고른 것이 있다
+        assert len(shown) == 1
+    finally:
+        dlg.deleteLater()
+
+
+def test_pick_applied_sets_picks_and_recommend_and_overkill_stat(styled_qapp, tmp_path, monkeypatch):
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    _capture_run(monkeypatch, T)
+    dlg = _shown_dlg(T, styled_qapp, tmp_path, mode="auto")
+    try:
+        by_area = sorted(dlg._in_zone(), key=lambda d: d.area)
+        a, b = by_area[4], by_area[7]
+        over = [by_area[0], by_area[1], by_area[2]]
+        assert not dlg.ov_box.isVisibleTo(dlg)
+        dlg.open_pick_dialog()
+        dlg._pick_dlg.applied.emit({T.key_of(a): a, T.key_of(b): b}, {T.key_of(d): d for d in over})
+        rec, missed = P.recommend([a, b], dlg._w.zones, dlg._snap)
+        assert missed == [] and dlg._ov == rec and set(dlg._picked) == {T.key_of(a), T.key_of(b)}
+        assert set(dlg._overkill) == {T.key_of(d) for d in over}
+        gone = sum(1 for d in over if not P.is_kept(d, dlg._w.zones, dlg._ov))
+        assert gone > 0 and dlg.ov_box.isVisibleTo(dlg) and dlg.ov_label.text() == f"{gone}/3"
+        dlg.reset()
+        assert dlg._overkill == {} and not dlg.ov_box.isVisibleTo(dlg)
+    finally:
+        dlg.deleteLater()
+
+
+def test_pick_preview_matches_direct_computation_and_keeps_state(styled_qapp, tmp_path, monkeypatch):
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    _capture_run(monkeypatch, T)
+    dlg = _shown_dlg(T, styled_qapp, tmp_path, mode="auto")
+    try:
+        by_area = sorted(dlg._in_zone(), key=lambda d: d.area)
+        picked, over = [by_area[5]], [by_area[0], by_area[9]]
+        before = (dict(dlg._ov), dict(dlg._picked), dict(dlg._overkill), set(dlg._rec_zones))
+        got = dlg._pick_preview(picked, over)
+        assert (dict(dlg._ov), dict(dlg._picked), dict(dlg._overkill), set(dlg._rec_zones)) == before   # 상태는 그대로
+        ov = P.recommend(picked, dlg._w.zones, dlg._snap)[0]
+        not_kept = [d for d in dlg._w.defects if not P.is_kept(d, dlg._w.zones, ov)]
+        keys = {T.key_of(d) for d in not_kept}
+        assert got == (len(not_kept), sum(T.key_of(d) in keys for d in over), 0) and got[0] > 0
+        # 다른 Zone 의 직접 조정은 그대로 센다 + 고른 것이 빠지면 놓침으로 센다
+        dlg.set_value(14, R.FEATURE_AREA, 9999.0)
+        n_manual = dlg._pick_preview([], [])[0]
+        assert n_manual == len([d for d, _w in dlg.dropped()]) == 10
+    finally:
+        dlg.deleteLater()
+
+
+def test_pick_pixmap_and_request_use_tile_cache(styled_qapp, tmp_path, monkeypatch):
+    from PyQt6.QtGui import QPixmap
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    from aoi_verification.app.utils import image_io
+    _capture_run(monkeypatch, T)
+    dlg = _shown_dlg(T, styled_qapp, tmp_path, mode="auto")
+    try:
+        d = dlg._in_zone()[0]
+        photo = dlg._pic(d)
+        assert dlg._pick_pixmap(d, 96) is None
+        asked = []
+        monkeypatch.setattr(dlg, "_want", lambda p, size, kind: asked.append((p, size, kind)))
+        dlg._pick_request([d], 96)
+        dlg._pick_request([d], 720)
+        assert asked == [(photo, 96, "thumb"), (photo, 720, "mid")]
+        assert (str(photo), 96, "thumb") in dlg._pick_wanted
+        pm = QPixmap(8, 8)
+        image_io._get_tile_cache().put(T._tile_key(photo, 96), pm)
+        image_io._get_tile_cache().put(T._mid_key(photo, 720), pm)
+        assert dlg._pick_pixmap(d, 96) is pm and dlg._pick_pixmap(d, 720) is pm
+        dlg._render_tiles()                                                # 다시 그려도 팝업 요청은 취소되지 않는다
+        assert (str(photo), 96, "thumb") in dlg._wanted
     finally:
         dlg.deleteLater()

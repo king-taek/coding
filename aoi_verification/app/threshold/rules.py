@@ -15,6 +15,7 @@ FS UBM: 14 묶음 하나, Export 33/33 의 첫 분류가 14(관측 2026-11-16).
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from functools import lru_cache
@@ -100,8 +101,11 @@ def read_zones(folder: Path) -> dict:
     r"""``{(Zone 폴더 이름, ZoneID): Zone}`` — ``Zones\`` 와 ``RecipeN-Zones\`` 전부."""
     out: dict = {}
     try:
-        dirs = [d for d in folder.iterdir() if d.is_dir()
-                and (d.name.lower() == "zones" or _RECIPE_DIR.match(d.name))]
+        # DirEntry.is_dir() 는 열거 때 받은 값을 쓴다 — Path.is_dir() 는 항목마다 stat 이라 사진이 수천 장인
+        # 웨이퍼 폴더에서 NAS 왕복이 수천 번 났다(측정: Scan 3000장 폴더 stat 3006회).
+        with os.scandir(folder) as it:
+            dirs = [folder / e.name for e in it if e.is_dir()
+                    and (e.name.lower() == "zones" or _RECIPE_DIR.match(e.name))]
     except OSError:
         return out
     for d in dirs:
