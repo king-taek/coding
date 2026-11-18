@@ -237,6 +237,7 @@ class MainWindow(MultiValFlow, QMainWindow):
     _excel_ref_progress = pyqtSignal(int, int)     # 이전 엑셀 → 기준 폴더 풀기 진행
     _excel_ref_done = pyqtSignal(str, object, str)  # 엑셀 경로, ExcelRef|None, 오류 문구
     _excel_ref_sheets = pyqtSignal(str, list)       # 엑셀 경로, [(시트, 사진 수)] — 고르게 한다
+    _scan_diag_done = pyqtSignal(str, str)          # zip 경로, 오류 문구(개발자 모드 Scan 진단)
     _update_none = pyqtSignal(str)          # 수동 확인: 최신/확인불가 안내
     _startup_proceed = pyqtSignal()         # 업데이트 흐름 종료 → 나머지 시작 팝업
     # 무거운 모듈(cv2·OpenVINO·numpy·PIL)을 백그라운드에서 다 불러왔다는 신호.
@@ -303,6 +304,15 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._dev_btn.clicked.connect(self._open_dev_mode)
         self._status_bar.addPermanentWidget(self._dev_btn)
         self._dev_btn.setVisible(_prefs.load().dev_mode)
+        # 개발자 모드 전용 — Scan 을 못 찾는 원인 자료를 폴더째 모은다(`coords/scan_diag.py`).
+        self._scan_diag_btn = QPushButton(i18n.KO.GL_SCAN_DIAG, self._status_bar)
+        self._scan_diag_btn.setFlat(True)
+        self._scan_diag_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._scan_diag_btn.setToolTip(i18n.KO.SCAN_DIAG_STATUS_TIP)
+        self._scan_diag_btn.clicked.connect(self._pick_scan_diag_folder)
+        self._status_bar.addPermanentWidget(self._scan_diag_btn)
+        self._scan_diag_btn.setVisible(_prefs.load().dev_mode)
+        self._scan_diag_picker = None
         QShortcut(QKeySequence("Ctrl+Shift+D"), self,
                   activated=self._toggle_dev_mode)
         self._mem_timer = QTimer(self)
@@ -416,6 +426,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._excel_ref_progress.connect(self._on_excel_ref_progress)
         self._excel_ref_done.connect(self._on_excel_ref_done)
         self._excel_ref_sheets.connect(self._on_excel_ref_sheets)
+        self._scan_diag_done.connect(self._on_scan_diag_done)
         self._update_none.connect(self._on_update_none)
         self._startup_proceed.connect(self._run_startup_popups)
         QTimer.singleShot(400, self._begin_update_check)
@@ -545,11 +556,47 @@ class MainWindow(MultiValFlow, QMainWindow):
         on = not _prefs.load().dev_mode
         _prefs.patch(dev_mode=on)
         self._dev_btn.setVisible(on)
+        self._scan_diag_btn.setVisible(on)
         self._sync_statusbar(self._stack.currentWidget())
         self._status_bar.showMessage(
             i18n.KO.DEV_MODE_ON if on else i18n.KO.DEV_MODE_OFF, 4000)
         if on:
             self._open_dev_mode()
+
+    def _pick_scan_diag_folder(self) -> None:
+        if self._scan_diag_picker is None:
+            from .folder_picker import FolderPicker
+            self._scan_diag_picker = FolderPicker(self)
+            self._scan_diag_picker.picked.connect(self._run_scan_diag)
+        self._scan_diag_picker.open(i18n.KO.SCAN_DIAG_PICK_TITLE)
+
+    def _run_scan_diag(self, folder: str) -> None:
+        """고른 폴더의 Scan 진단 zip 을 백그라운드에서 만든다(로딩바 busy)."""
+        self._loading.show_overlay(i18n.KO.GL_SCAN_DIAG_BUSY)
+        self._loading.set_progress(0, 0, i18n.KO.GL_SCAN_DIAG_BUSY)    # busy → 0 에서 안 멈춤
+
+        import threading
+
+        def _work() -> None:
+            from ..coords import scan_diag
+            try:
+                root = Path(folder)
+                colors = sorted(p for p in root.iterdir()
+                                if ".c." in p.name.lower() and p.suffix.lower() in (".jpeg", ".jpg"))
+                focus = colors[0] if colors else root / "-"   # 폴더만 쓰인다(focus 는 이름뿐)
+                self._scan_diag_done.emit(str(scan_diag.collect(focus)), "")
+            except Exception as e:
+                _LOG.exception("Scan 진단 수집 실패")
+                self._scan_diag_done.emit("", f"{type(e).__name__}: {e}")
+
+        threading.Thread(target=_work, name="scan-diag", daemon=True).start()
+
+    def _on_scan_diag_done(self, path: str, error: str) -> None:
+        self._loading.hide_overlay()
+        if error:
+            sheets.warn(self, i18n.KO.APP_TITLE, i18n.KO.GL_SCAN_DIAG_FAILED_FMT.format(why=error))
+        else:
+            sheets.info(self, i18n.KO.APP_TITLE, i18n.KO.GL_SCAN_DIAG_DONE_FMT.format(path=path))
 
     def _open_dev_mode(self) -> None:
         from .widgets.dev_mode_dialog import DevModeDialog

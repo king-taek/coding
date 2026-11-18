@@ -301,7 +301,7 @@ def test_scan_view_sets_target_box_and_zooms_in(styled_qapp):
     d = _make(styled_qapp, view=v)
     _pump()
     c = d.canvas
-    assert [(r.x, r.y, r.w, r.h) for r in c.rois.rois] == [(400, 130, 40, 40)]
+    assert [(r.x, r.y, r.w, r.h) for r in c.rois.rois] == [(416, 146, 7, 7)]     # 40 px 상자의 1/6, 한가운데
     fit = min(c.width() / 800, c.height() / 300)
     assert c.scale() > fit * 3                               # 결함 영역으로 확대됐다
     cx, cy = c.to_screen(420, 150).x(), c.to_screen(420, 150).y()
@@ -325,7 +325,7 @@ def test_target_box_becomes_selected_defect_roi_with_histogram(styled_qapp):
     rs = d.canvas.rois
     (r,) = rs.rois
     assert (r.kind, r.name, r.color) == (R.RECT, "Defect", "#FFD60A")
-    assert (r.x, r.y, r.w, r.h) == (100, 50, 100, 100)    # 이미지 안으로 가둔 상자
+    assert (r.x, r.y, r.w, r.h) == (183, 133, 17, 17)  # 상자 1/6, 중심이 이미지 밖이라 안으로 가둠
     assert rs.selected == r.id and d.hist_name.text() == "Defect"
     assert [s[0] for s in d.hist._series] == ["Defect"]
     assert not hasattr(d.canvas, "set_target_box")
@@ -346,7 +346,7 @@ def test_defect_button_recreates_roi_once(styled_qapp):
     assert d.canvas.rois.rois == []
     d.defect_btn.click()
     (r,) = d.canvas.rois.rois
-    assert r.name == "Defect" and (r.x, r.y, r.w, r.h) == (20, 20, 40, 40)
+    assert r.name == "Defect" and (r.x, r.y, r.w, r.h) == (36, 36, 7, 7)
     assert d.canvas.rois.selected == r.id
     d.canvas.rois.delete()
     d.defect_btn.click()
@@ -378,7 +378,7 @@ def test_open_color_photo_end_to_end_switches_to_scan(styled_qapp, tmp_path, mon
             break
         QTest.qWait(20)
     assert d._gl is not None and d._gl.shape == (120, 300)
-    assert [(r.x, r.y, r.w, r.h) for r in d.canvas.rois.rois] == [(130, 40, 40, 40)]
+    assert [(r.x, r.y, r.w, r.h) for r in d.canvas.rois.rois] == [(146, 56, 7, 7)]
     d.close()
 
 
@@ -942,3 +942,37 @@ def test_gl_inspector_segments_share_height_and_threshold_ticks_align(dlg):
     heights = {dlg.scope.button(k).height() for k in dlg.scope.keys()} | {dlg.by_roi_btn.height()}
     assert heights == {32}
     assert all(dlg.scope.button(k).property("grade") == "gl" for k in dlg.scope.keys())
+
+
+def test_defect_roi_is_one_sixth_of_box_and_centered(styled_qapp):
+    d = _make(styled_qapp, view=_defect_view((20, 10, 60, 60)))
+    (r,) = d.canvas.rois.rois
+    assert (r.w, r.h) == (10, 10)
+    assert (r.x + r.w / 2, r.y + r.h / 2) == (50, 40)
+    d.close()
+
+
+def test_scan_missing_shows_reason_and_toast(styled_qapp):
+    v = loader.ViewLoad(loader.GlImage(np.full((H, W), 9, np.uint8), 8, True, "c.jpg", []),
+                        scan_missing=True, source_path="c.jpg", scan_status="no_candidate")
+    d = _make(styled_qapp, view=v)
+    assert "결함 위치를 담은 Scan 사진이 목록에 없음" in d.note.text()
+    assert "Scan 사진을 못 찾았습니다" in d.toast.text()
+    d.close()
+
+
+def test_scan_diag_button_only_in_dev_mode(styled_qapp, monkeypatch):
+    class P:
+        dev_mode = False
+    monkeypatch.setattr(GLV._prefs, "load", lambda: P)
+    v = loader.ViewLoad(loader.GlImage(np.full((H, W), 9, np.uint8), 8, True, "c.jpg", []),
+                        scan_missing=True, source_path="c.jpg", scan_status="no_manifest")
+    d = _make(styled_qapp, view=v)
+    assert not d.diag_btn.isVisibleTo(d)
+    P.dev_mode = True
+    d.show_view(v)
+    assert d.diag_btn.isVisibleTo(d) and d.diag_btn.isEnabled()
+    d.show_view(loader.ViewLoad(loader.GlImage(np.full((H, W), 9, np.uint8), 8, False, "g.tif", []),
+                                source_path="g.tif"))
+    assert not d.diag_btn.isEnabled()
+    d.close()

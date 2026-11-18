@@ -11,7 +11,8 @@
 - 결함 X/Y: ``ColorImageGrabingInfo.ini`` 의 원시 X/Y(FaultX/FaultY), 없으면 점표기
   파일명의 앞 두 토큰.  die 좌표·KLA 좌표는 쓰지 않는다.
 - Scan 중심: 같은 폴더 ``ScanResultImageList.txt`` (Version=1) 의 [파일명, X, Y].
-- pixel: :func:`pixel_size.scan_pixel_size_xy`.  **못 읽으면 실패**다 — 다른 기능이
+- pixel: Scan 마다 그 **레시피의** 값(:func:`pixel_size.scan_pixel_size_xy_recipe`, 파일명
+  ``….t.N.jpeg`` 의 N — 다중 레시피는 배율이 달라 픽셀 크기가 4배 다를 수 있다).  **못 읽으면 실패**다 — 다른 기능이
   쓰는 0.77 기본값을 여기에 흘리지 않는다(배율이 틀리면 엉뚱한 곳을 자른다).
 - W/H 는 **실제 JPEG 크기**를 읽는다.  3168×1024 를 상수로 두지 않고, 크기가
   다르다고 2배 같은 보정을 추측하지도 않는다.  축 반전·교환·회전 없음.
@@ -146,18 +147,20 @@ def rank_candidates(defect_xy, entries, pixel_xy,
                     side_um: float = CROP_SIDE_UM) -> list[Candidate]:
     """결함을 원본 안에 담은 Scan 들을 Crop 에 알맞은 순서로.
 
-    ``entries`` = [(경로, 중심XY, (W, H))].  규칙: coverage(요청 Crop 중 원본과 겹치는
+    ``entries`` = [(경로, 중심XY, (W, H))] 또는 [(…, 픽셀XY)] — 넷째 값이 있으면 그 Scan 은
+    ``pixel_xy`` 대신 그 값으로 계산한다(레시피별 픽셀 크기).  규칙: coverage(요청 Crop 중 원본과 겹치는
     비율) 내림차순 → 정규화 중심 거리 오름차순 → 파일명(casefold, 원래 이름) 순.
     manifest 중심이 가장 가까운 것을 고르지 않는다 — Scan 은 가로·세로 범위가 달라
     가까운 중심이 결함을 더 잘 담는다는 보장이 없다."""
     out: list[tuple[tuple, Candidate]] = []
-    for path, center, (w, h) in entries:
-        if w <= 0 or h <= 0:
+    for path, center, (w, h), *own in entries:
+        px = own[0] if own else pixel_xy
+        if w <= 0 or h <= 0 or px is None:
             continue
-        u, v = scan_uv(defect_xy, center, (w, h), pixel_xy)
+        u, v = scan_uv(defect_xy, center, (w, h), px)
         if not (0.0 <= u < w and 0.0 <= v < h):
             continue
-        box = crop_box((u, v), pixel_xy, side_um)
+        box = crop_box((u, v), px, side_um)
         cov = _coverage(box, (w, h))
         dist = ((u - w / 2) / (w / 2)) ** 2 + ((v - h / 2) / (h / 2)) ** 2
         name = Path(path).name
@@ -294,12 +297,36 @@ def _resolve(folder: Path, color: Path, get_xy, side_um: float) -> ScanMatch:
     return _rank(_prepare(folder, color), folder, color, get_xy, side_um)
 
 
+def tile_recipe(name: str) -> Optional[int]:
+    """Scan 파일명 ``X.Y.t.N.jpeg`` 의 레시피 번호 N.  ``X.Y.t.jpeg``(단일 레시피)면 None."""
+    toks = Path(name).stem.split(".")
+    if len(toks) >= 2 and toks[-2].lower() == "t" and toks[-1].isdigit():
+        return int(toks[-1])
+    return None
+
+
+def _with_recipe_px(folder: Path, rows) -> tuple:
+    """행마다 그 Scan 레시피의 픽셀 크기를 붙인다 — 못 읽은 레시피의 행은 None(후보에서 빠진다)."""
+    cache: dict = {}
+    out = []
+    for path, center, wh in rows:
+        n = tile_recipe(Path(path).name)
+        if n not in cache:
+            cache[n] = pixel_size.scan_pixel_size_xy_recipe(folder, n)
+        out.append((path, center, wh, cache[n]))
+    return tuple(out)
+
+
 def _prepare(folder: Path, color: Path):
-    """폴더 단위 준비물 — ``(상태, 행들, 픽셀 크기)``.  못 읽으면 상태에 이유가 있다."""
+    """폴더 단위 준비물 — ``(상태, 행들(+레시피별 픽셀 크기), 폴더 픽셀 크기)``.  못 읽으면 상태에 이유가 있다."""
     try:
         status, rows = _index(str(folder), _mtime(folder / SCAN_LIST_NAME),
                               _mtime(folder))
-        return status, rows, (pixel_size.scan_pixel_size_xy(folder) if status == OK else None), None
+        if status != OK:
+            return status, rows, None, None
+        rows = _with_recipe_px(folder, rows)
+        base = pixel_size.scan_pixel_size_xy(folder)
+        return status, rows, (base or next((r[3] for r in rows if r[3]), None)), None
     except Exception as e:
         _LOG.exception("Scan 연결 실패: %s", color)
         return UNREADABLE, (), None, e
