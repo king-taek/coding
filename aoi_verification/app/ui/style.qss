@@ -1534,6 +1534,25 @@ QPushButton[role="ovRowX"]:hover {
     background-color: $danger_tint;
     color: $danger;
 }
+/* LOT 줄의 ▾/▸ — 웨이퍼 목록 펴기 · 접기. */
+QPushButton[role="ovRowDisc"] {
+    background: transparent;
+    color: $mute;
+    border: none;
+    border-radius: $radius_sm;
+    padding: 0px;
+}
+QPushButton[role="ovRowDisc"]:hover {
+    color: $ink;
+}
+/* LOT 안 웨이퍼 한 줄 — 넣은 줄은 잉크, 뺀 줄은 옅게 + 수에 취소선. */
+QFrame[role="ovRow"][wafer="true"] QLabel[role="ovRowCount"] {
+    color: $ink;
+}
+QFrame[role="ovRow"][wafer="true"][excluded="true"] QLabel[role="ovRowCount"] {
+    color: $mute;
+    text-decoration: line-through;
+}
 QPushButton[role="ovView"] {
     background: transparent;
     color: $mute;
