@@ -1050,7 +1050,6 @@ IMAGE_INFO_SUBTITLE = "결과 엑셀에 찍히는 것과 같은 좌표·계측�
 IMAGE_INFO_PICK = "사진 선택"
 IMAGE_INFO_PICK_ANOTHER = "다른 사진"
 IMAGE_INFO_FILE_FILTER_FMT = "사진 파일 ({patterns})"
-IMAGE_INFO_DROP_HERE = "여기에 놓으세요"
 IMAGE_INFO_NO_FILE = (
     "사진을 이 창으로 끌어다 놓거나, ‘사진 선택’(Ctrl+O) 을 누르세요.\n\n"
     "계측값은 사진이 든 폴더의 정보파일에서 읽습니다 — "
@@ -1617,6 +1616,17 @@ DROP_WRONG_KIND_FOLDER = "폴더나 사진을 놓아 주세요"
 DROP_WRONG_KIND_IMAGE = "사진 파일을 놓아 주세요"
 DROP_SETUP_FULL = "기준·검증 칸이 모두 차 있어요 — 바꿀 칸 위에 놓아 주세요"
 DROP_NOTHING_TO_PASTE = "붙여 넣을 파일이 없어요 — 탐색기에서 파일을 복사해 주세요"
+# 끌어놓기 표시(알약) — 놓으면 무슨 일이 일어나는지 / 왜 못 받는지
+DROP_PILL_REF = "기준 폴더로"
+DROP_PILL_VAL = "검증 폴더로"
+DROP_PILL_EXCEL_REF = "엑셀로 기준 불러오기"
+DROP_PILL_SETUP_FULL = "바꿀 칸 위에 놓으세요"
+DROP_PILL_ADD_FOLDER = "폴더 추가"
+DROP_PILL_OPEN_IMAGE = "사진 열기"
+DROP_PILL_SHOW_ON_MAP = "맵에 표시"
+DROP_PILL_FOLDER_MAP = "폴더 맵 보기"
+DROP_PILL_ONLY_IMAGE = "사진만 받아요"
+DROP_PILL_ONLY_FOLDER_PHOTO = "폴더·사진만 받아요"
 
 # ── Overkill 튜닝 · Defect 고르기 팝업 — 왼쪽 Overkill · 오른쪽 Defect(후보 선별과 같은 짜임) ──
 OVERKILL_PICK_TITLE = "Defect 고르기"

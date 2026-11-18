@@ -117,15 +117,6 @@ def test_drop_resets_slot_selection_like_browse(page, tmp_path, monkeypatch):
     assert calls == [1]
 
 
-def test_highlight_set_and_cleared(page):
-    page._set_drop_hl(page.ref_group)
-    assert page.ref_group.property("drop") == "on"
-    page._set_drop_hl(page.val_group)
-    assert page.ref_group.property("drop") == "" and page.val_group.property("drop") == "on"
-    page._set_drop_hl(None)
-    assert page.val_group.property("drop") == ""
-
-
 def test_tool_screen_ignores_and_extract_unchanged(page, tmp_path):
     a, _ = _tree(tmp_path)
     page._page_key = "gl"

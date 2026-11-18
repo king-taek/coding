@@ -17,7 +17,9 @@ from PyQt6.QtWidgets import (QApplication, QBoxLayout, QDoubleSpinBox, QFrame,
                               QStackedWidget, QVBoxLayout, QWidget)
 
 from ..deferred import call_later
-from ..drop_paths import clean_path_text, install_paste, local_paths, split_paths
+from ..drop_overlay import drop_clear, drop_feedback
+from ..drop_paths import (clean_path_text, guess_kinds, install_paste, local_paths,
+                          split_paths)
 from ..folder_picker import FolderPicker
 from ..teardown import tolerate_teardown
 from ... import i18n
@@ -268,7 +270,6 @@ class SetupPage(QWidget):
         # 놓기·붙여넣기 — 추출 모드는 화면 어디든, 매칭 모드는 기준/검증 줄 위(`dropEvent`).
         # 입력란이 놓기를 가로채 'file:///…' 글자를 끼워 넣지 않게 경로 입력란은 받지 않는다.
         self.setAcceptDrops(True)
-        self._drop_hl: Optional[QWidget] = None
         install_paste(match_host, self._on_paste_paths, self._on_paste_no_path)
 
         # 좁은/짧은 창에서도 모든 컨트롤에 접근 가능하도록 스크롤 영역으로 감싼다.
@@ -809,26 +810,50 @@ class SetupPage(QWidget):
         return not self._extract_mode and self._page_key == "match"
 
     def dragEnterEvent(self, event):        # noqa: N802
-        # 여기서는 디스크를 보지 않는다(NAS 에서 멈추지 않게) — 로컬 경로가 있으면 받는다.
+        # 여기서는 디스크를 보지 않는다(NAS 에서 멈추지 않게) — 이름만 보고 표시를 정한다.
         # 도구 화면이 떠 있을 때는 받지 않는다 — 안 보이는 추출 목록에 몰래 쌓인다.
+        K = i18n.KO
         if self._extract_mode and self._page_key == "match" and self._drop_locals(event):
-            event.acceptProposedAction()
+            ok = bool(guess_kinds(self._drop_locals(event)) & {"folder", "image"})
+            drop_feedback(self, event, self.ref_group,
+                          K.DROP_PILL_ADD_FOLDER if ok else K.DROP_PILL_ONLY_FOLDER_PHOTO, ok)
         elif self._match_drop_active() and local_paths(event.mimeData()):
-            event.acceptProposedAction()
-            self._set_drop_hl(self._drop_row_at(event.position().toPoint()))
+            target, text, ok = self._match_drop_plan(
+                local_paths(event.mimeData()), event.position().toPoint())
+            drop_feedback(self, event, target, text, ok)
         else:
-            self._set_drop_hl(None)
+            drop_clear(self)
             event.ignore()
 
     def dragMoveEvent(self, event):         # noqa: N802
         self.dragEnterEvent(event)
 
     def dragLeaveEvent(self, event):        # noqa: N802
-        self._set_drop_hl(None)
+        drop_clear(self)
         super().dragLeaveEvent(event)
 
+    def _match_drop_plan(self, paths: list[str], pos) -> tuple[Optional[QWidget], str, bool]:
+        """놓으면 어디에 무엇이 되는지 — (표시할 위젯, 알약 글자, 받을 수 있나).
+
+        ``_apply_match_paths`` 와 같은 순서로 판단하되 이름만 본다(디스크 접근 없음)."""
+        K = i18n.KO
+        kinds = guess_kinds(paths)
+        hit = self._drop_row_at(pos)
+        if len(paths) == 1 and kinds == {"xlsx"}:
+            return self.ref_group, K.DROP_PILL_EXCEL_REF, True
+        if not kinds & {"folder", "image"}:
+            return (hit[0] if hit else None), K.DROP_PILL_ONLY_FOLDER_PHOTO, False
+        if hit is None:
+            edit = next((e for e in (self.ref_path_edit, self.val_path_edit)
+                         if not e.text().strip()), None)
+            if edit is None:
+                return None, K.DROP_PILL_SETUP_FULL, False
+            hit = (self.ref_group if edit is self.ref_path_edit else self.val_group, edit)
+        return hit[0], (K.DROP_PILL_REF if hit[1] is self.ref_path_edit
+                        else K.DROP_PILL_VAL), True
+
     def dropEvent(self, event):             # noqa: N802
-        self._set_drop_hl(None)
+        drop_clear(self)
         if self._match_drop_active():
             paths = local_paths(event.mimeData())
             if not paths:
@@ -864,18 +889,6 @@ class SetupPage(QWidget):
             if w.isVisible() and w.rect().contains(w.mapFrom(self, pos)):
                 return w, e
         return None
-
-    def _set_drop_hl(self, w: Optional[QWidget]) -> None:
-        """놓일 줄을 강조한다(동적 프로퍼티 + repolish)."""
-        old = self._drop_hl
-        if w is old:
-            return
-        for x, on in ((old, False), (w, True)):
-            if x is not None:
-                x.setProperty("drop", "on" if on else "")
-                x.style().unpolish(x)
-                x.style().polish(x)
-        self._drop_hl = w
 
     def _drop_notice(self, text: str) -> None:
         sheets.info(self, i18n.KO.APP_TITLE, text)

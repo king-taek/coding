@@ -73,7 +73,8 @@ from ...utils import image_io
 from .. import theme
 from .. import motion
 from ..deferred import call_later
-from ..drop_paths import install_paste, local_paths, split_paths
+from ..drop_overlay import drop_clear, drop_feedback
+from ..drop_paths import guess_kinds, install_paste, local_paths, split_paths
 from ..folder_picker import FolderPicker
 from . import sheet_host as sheets
 from .loading_overlay import LoadingOverlay
@@ -1851,11 +1852,29 @@ class ThresholdPreviewDialog(QDialog):
         self.notice.setVisible(False)
         self._undo_snap = None
 
+    def hideEvent(self, event):         # noqa: N802
+        drop_clear(self)                # 끌던 중에 숨겨져도 표시가 남지 않게
+        super().hideEvent(event)
+
     def dragEnterEvent(self, e):    # noqa: N802
-        if local_paths(e.mimeData()):           # 디스크는 drop 에서만 본다
-            e.acceptProposedAction()
+        paths = local_paths(e.mimeData())       # 디스크는 drop 에서만 본다
+        if not paths:
+            drop_clear(self)
+            e.ignore()
+            return
+        ok = bool(guess_kinds(paths) & {"folder", "image"})
+        drop_feedback(self, e, None, i18n.KO.DROP_PILL_ADD_FOLDER if ok
+                      else i18n.KO.DROP_PILL_ONLY_FOLDER_PHOTO, ok)
+
+    def dragMoveEvent(self, e):     # noqa: N802
+        self.dragEnterEvent(e)
+
+    def dragLeaveEvent(self, e):    # noqa: N802
+        drop_clear(self)
+        e.accept()
 
     def dropEvent(self, e):         # noqa: N802
+        drop_clear(self)
         paths = local_paths(e.mimeData())
         if paths:
             e.acceptProposedAction()

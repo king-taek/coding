@@ -66,6 +66,35 @@ def split_paths(paths, *, is_dir: Callable[[str], bool], is_image: Callable[[str
     return folders, images, others
 
 
+_FILE_SUFFIXES = frozenset({
+    ".txt", ".csv", ".pdf", ".zip", ".7z", ".rar", ".exe", ".ini", ".dat", ".md", ".json",
+    ".xls", ".doc", ".docx", ".ppt", ".pptx", ".py", ".log", ".bat", ".lnk", ".db",
+    ".tif", ".tiff", ".gif", ".webp"})
+
+
+def guess_kinds(paths, is_image: Optional[Callable[[str], bool]] = None) -> set[str]:
+    """경로들의 종류를 **이름만 보고** 짐작한다 — ``image`` · ``xlsx`` · ``folder`` · ``other``.
+
+    dragEnter/dragMove 용이라 디스크를 보지 않는다.  확장자 없는 이름은 ``folder`` 다.
+    ``TB500.RDL4`` 같은 점 든 폴더 이름을 잘못 거절하지 않도록, 알려진 파일 확장자
+    (``_FILE_SUFFIXES``)만 ``other`` 로 본다 — 모르는 확장자는 ``folder`` 쪽이다."""
+    if is_image is None:
+        from ..config import CONFIG
+        is_image = CONFIG.is_image
+    kinds: set[str] = set()
+    for p in paths:
+        suffix = os.path.splitext(p)[1].lower()
+        if suffix in (".xlsx", ".xlsm"):
+            kinds.add("xlsx")
+        elif is_image(p):
+            kinds.add("image")
+        elif not suffix or suffix not in _FILE_SUFFIXES:
+            kinds.add("folder")
+        else:
+            kinds.add("other")
+    return kinds
+
+
 def local_paths(mime) -> list[str]:
     """``QMimeData`` 에서 로컬 경로 목록을 꺼낸다(디스크 접근 없음).
 
