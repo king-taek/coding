@@ -11,15 +11,19 @@ from typing import Optional
 from PyQt6.QtCore import (QObject, QSize, Qt, QThread, QTimer,
                           QVariantAnimation, pyqtSignal)
 from PyQt6.QtGui import QIcon
-from PyQt6.QtWidgets import (QBoxLayout, QDoubleSpinBox, QFrame,
+from PyQt6.QtWidgets import (QApplication, QBoxLayout, QDoubleSpinBox, QFrame,
                               QGridLayout, QHBoxLayout, QLabel, QLineEdit,
                               QMessageBox, QScrollArea, QSizePolicy,
                               QStackedWidget, QVBoxLayout, QWidget)
 
 from ..deferred import call_later
+from ..drop_overlay import drop_clear, drop_feedback
+from ..drop_paths import (clean_path_text, guess_kinds, install_paste, local_paths,
+                          split_paths)
 from ..folder_picker import FolderPicker
 from ..teardown import tolerate_teardown
 from ... import i18n
+from .. import motion
 from .. import theme
 from ...utils import paths
 from ...utils import prefs as _prefs
@@ -263,6 +267,10 @@ class SetupPage(QWidget):
         mh.setSpacing(0)
         self._pages.addWidget(match_host)
         self._match_host = match_host
+        # 놓기·붙여넣기 — 추출 모드는 화면 어디든, 매칭 모드는 기준/검증 줄 위(`dropEvent`).
+        # 입력란이 놓기를 가로채 'file:///…' 글자를 끼워 넣지 않게 경로 입력란은 받지 않는다.
+        self.setAcceptDrops(True)
+        install_paste(match_host, self._on_paste_paths, self._on_paste_no_path)
 
         # 좁은/짧은 창에서도 모든 컨트롤에 접근 가능하도록 스크롤 영역으로 감싼다.
         # 스크롤바는 ‘필요할 때만’ 자동으로 나타난다.
@@ -692,6 +700,7 @@ class SetupPage(QWidget):
             return
         host = QWidget(self._val_list)
         host.setProperty("role", "rowHost")
+        host.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)   # 놓기 강조 배경이 칠해지게
         row = QHBoxLayout(host)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(10)
@@ -700,8 +709,11 @@ class SetupPage(QWidget):
         edit.setMinimumWidth(self._VAL_ROW_EDIT_MIN_W)
         edit.setPlaceholderText(i18n.KO.SETUP_FOLDER_PLACEHOLDER)
         edit.setText(path)
+        edit.setAcceptDrops(False)           # 놓기는 페이지가 받는다(`dropEvent`)
+        edit.textEdited.connect(lambda t: self._normalize_pasted(edit, t))
         browse = NeonButton(i18n.KO.BTN_BROWSE, role="ghost")
         machine_edit = QLineEdit(host)
+        machine_edit.setAcceptDrops(False)   # 폴더를 놓아도 글자로 안 들어가게(페이지가 받는다)
         machine_edit.setPlaceholderText(i18n.KO.MULTI_VAL_MACHINE_PLACEHOLDER)
         machine_edit.setFixedWidth(120)      # 첫 장비와 같은 폭 — 줄 끝이 맞는다
         machine_edit.setText(machine)
@@ -720,14 +732,36 @@ class SetupPage(QWidget):
         remove.clicked.connect(lambda: self._remove_val_row(rec))
         self._val_rows_lay.addWidget(host)
         self._refresh_val_add_btn()
+        if motion.enabled() and self.isVisible():
+            # P15A — 줄 높이가 0 에서 열리고(아래 폼이 툭 밀리지 않게) 내용이 뒤따라 나타난다.
+            motion.animate_height(host, 0, host.sizeHint().height(),
+                                  duration=motion.DUR_ROW_RESIZE)
+            motion.fade_in(host, delay_ms=motion.DEP_DELAY_MS,
+                           duration=motion.DUR_TILE_IN)
         if not path:
             edit.setFocus()
 
     def _remove_val_row(self, rec: dict) -> None:
+        if rec not in self._val_rows:
+            return                      # 접히는 중에 ✕ 를 한 번 더 눌렀다
         self._val_rows.remove(rec)
-        rec["host"].setParent(None)
-        rec["host"].deleteLater()
+        host = rec["host"]
         self._refresh_val_add_btn()
+        if not (motion.enabled() and self.isVisible() and host.isVisible()
+                and host.height() > 0):
+            host.setParent(None)
+            host.deleteLater()
+            return
+        # P15A — 접히며 흐려지고, 높이 애니메이션이 끝나는 **같은 신호**에서 뗀다
+        # (묶음이 풀린 원래 높이가 한 프레임도 비치지 않게).
+        for b in host.findChildren(NeonButton):
+            b.drop_press_effect()       # 방금 누른 ✕ 의 딥 이펙트와 겹치지 않게
+        motion.animate_height(host, host.height(), 0,
+                              duration=motion.DUR_ROW_SHRINK, easing=motion.EASE_EXIT)
+        # 페이드는 높이와 **같이** 끝난다 — 먼저 끝나면 이펙트가 떨어져 마지막 40ms 옛 줄이 비친다.
+        motion.fade_out(host, duration=motion.DUR_ROW_SHRINK)
+        host._motionHeightAnim.finished.connect(host.hide)
+        host._motionHeightAnim.finished.connect(host.deleteLater)
 
     def _refresh_val_add_btn(self) -> None:
         n = len(self._val_rows) + 1
@@ -771,18 +805,64 @@ class SetupPage(QWidget):
             return []
         return [u.toLocalFile() for u in data.urls() if u.toLocalFile()]
 
+    def _match_drop_active(self) -> bool:
+        """매칭 화면이 보일 때만 — 도구 화면이 떠 있으면 안 보이는 입력란에 몰래 들어간다."""
+        return not self._extract_mode and self._page_key == "match"
+
     def dragEnterEvent(self, event):        # noqa: N802
-        # 여기서는 디스크를 보지 않는다(NAS 에서 멈추지 않게) — 로컬 경로가 있으면 받는다.
+        # 여기서는 디스크를 보지 않는다(NAS 에서 멈추지 않게) — 이름만 보고 표시를 정한다.
         # 도구 화면이 떠 있을 때는 받지 않는다 — 안 보이는 추출 목록에 몰래 쌓인다.
+        K = i18n.KO
         if self._extract_mode and self._page_key == "match" and self._drop_locals(event):
-            event.acceptProposedAction()
+            ok = bool(guess_kinds(self._drop_locals(event)) & {"folder", "image"})
+            drop_feedback(self, event, self.ref_group,
+                          K.DROP_PILL_ADD_FOLDER if ok else K.DROP_PILL_ONLY_FOLDER_PHOTO, ok)
+        elif self._match_drop_active() and local_paths(event.mimeData()):
+            target, text, ok = self._match_drop_plan(
+                local_paths(event.mimeData()), event.position().toPoint())
+            drop_feedback(self, event, target, text, ok)
         else:
+            drop_clear(self)
             event.ignore()
 
     def dragMoveEvent(self, event):         # noqa: N802
         self.dragEnterEvent(event)
 
+    def dragLeaveEvent(self, event):        # noqa: N802
+        drop_clear(self)
+        super().dragLeaveEvent(event)
+
+    def _match_drop_plan(self, paths: list[str], pos) -> tuple[Optional[QWidget], str, bool]:
+        """놓으면 어디에 무엇이 되는지 — (표시할 위젯, 알약 글자, 받을 수 있나).
+
+        ``_apply_match_paths`` 와 같은 순서로 판단하되 이름만 본다(디스크 접근 없음)."""
+        K = i18n.KO
+        kinds = guess_kinds(paths)
+        hit = self._drop_row_at(pos)
+        if len(paths) == 1 and kinds == {"xlsx"}:
+            return self.ref_group, K.DROP_PILL_EXCEL_REF, True
+        if not kinds & {"folder", "image"}:
+            return (hit[0] if hit else None), K.DROP_PILL_ONLY_FOLDER_PHOTO, False
+        if hit is None:
+            edit = next((e for e in (self.ref_path_edit, self.val_path_edit)
+                         if not e.text().strip()), None)
+            if edit is None:
+                return None, K.DROP_PILL_SETUP_FULL, False
+            hit = (self.ref_group if edit is self.ref_path_edit else self.val_group, edit)
+        return hit[0], (K.DROP_PILL_REF if hit[1] is self.ref_path_edit
+                        else K.DROP_PILL_VAL), True
+
     def dropEvent(self, event):             # noqa: N802
+        drop_clear(self)
+        if self._match_drop_active():
+            paths = local_paths(event.mimeData())
+            if not paths:
+                event.ignore()
+                return
+            event.acceptProposedAction()
+            hit = self._drop_row_at(event.position().toPoint())
+            self._apply_match_paths(paths, hit[1] if hit else None)
+            return
         if not self._extract_mode or self._page_key != "match":
             event.ignore()
             return
@@ -791,9 +871,95 @@ class SetupPage(QWidget):
             is_image=config.CONFIG.is_image)
         if not folders:
             event.ignore()
+            self._drop_notice(i18n.KO.DROP_WRONG_KIND_FOLDER)
             return
         event.acceptProposedAction()
         self.add_extract_folders(folders)
+
+    # -- 끌어다 놓기 · 붙여넣기(매칭) ----------------------------------
+    def _drop_row_at(self, pos) -> Optional[tuple[QWidget, QLineEdit]]:
+        """커서(페이지 좌표) 아래의 줄 — (강조할 위젯, 그 줄의 경로 입력란).
+
+        추가 검증 줄 → 검증 카드 → 기준 카드 순이다(추가 줄은 검증 카드 안에 있다).
+        위젯의 위치만 본다 — 디스크를 만지지 않는다."""
+        rows = [(r["host"], r["edit"]) for r in self._val_rows]
+        rows += [(self.val_group, self.val_path_edit),
+                 (self.ref_group, self.ref_path_edit)]
+        for w, e in rows:
+            if w.isVisible() and w.rect().contains(w.mapFrom(self, pos)):
+                return w, e
+        return None
+
+    def _drop_notice(self, text: str) -> None:
+        sheets.info(self, i18n.KO.APP_TITLE, text)
+
+    def _apply_match_paths(self, paths: list[str], target: Optional[QLineEdit]) -> None:
+        """놓거나 붙여 넣은 경로를 입력란에 넣는다.  ``target`` 이 없으면 빈 기준 → 빈 검증 순."""
+        import os
+        folders, images, others = split_paths(
+            paths, is_dir=os.path.isdir, is_image=config.CONFIG.is_image,
+            is_xlsx=lambda p: p.lower().endswith((".xlsx", ".xlsm")))
+        if len(paths) == 1 and others and others[0].lower().endswith((".xlsx", ".xlsm")):
+            self.excel_ref_requested.emit(others[0])          # [엑셀로] 와 같은 길
+            return
+        found: dict[str, str] = {}
+        missing = False
+        for f in folders:
+            found.setdefault(os.path.normcase(os.path.normpath(f)), f)
+        for i in images:
+            if os.path.isfile(i):
+                d = os.path.dirname(i)
+                found.setdefault(os.path.normcase(os.path.normpath(d)), d)
+            else:
+                missing = True                # 붙여 넣은 글자 — 없는 사진의 폴더를 채우지 않는다
+        if not found:
+            if missing or any(not os.path.exists(o) for o in others):
+                self._drop_notice(i18n.KO.DROP_NOT_FOUND)
+            else:
+                self._drop_notice(i18n.KO.DROP_WRONG_KIND_FOLDER)
+            return
+        if len(found) > 1:
+            self._drop_notice(i18n.KO.DROP_ONE_AT_A_TIME)
+            return
+        if target is None:
+            target = next((e for e in (self.ref_path_edit, self.val_path_edit)
+                           if not e.text().strip()), None)
+            if target is None:
+                self._drop_notice(i18n.KO.DROP_SETUP_FULL)
+                return
+        self._put_folder(target, next(iter(found.values())))   # [폴더 선택…] 과 같은 길
+
+    def _on_paste_paths(self, paths: list[str]) -> None:
+        if self._extract_mode:
+            folders = extract_drop_folders(
+                paths, is_dir=lambda p: p.is_dir(), is_image=config.CONFIG.is_image)
+            if folders:
+                self.add_extract_folders(folders)
+            else:
+                self._drop_notice(i18n.KO.DROP_WRONG_KIND_FOLDER)
+        else:
+            self._apply_match_paths(paths, self._focused_path_edit())
+
+    def _focused_path_edit(self) -> Optional[QLineEdit]:
+        """붙여넣기 때 포커스가 경로 입력란이면 그 칸이 대상이다."""
+        fw = QApplication.focusWidget()
+        edits = [self.ref_path_edit, self.val_path_edit] + [r["edit"] for r in self._val_rows]
+        return fw if any(fw is e for e in edits) else None
+
+    def _on_paste_no_path(self, has_image: bool) -> None:
+        self._drop_notice(i18n.KO.DROP_NO_PATH_IMAGE if has_image
+                          else i18n.KO.DROP_NOTHING_TO_PASTE)
+
+    @staticmethod
+    def _normalize_pasted(edit: QLineEdit, text: str) -> None:
+        """'경로로 복사'(따옴표)·``file:///`` 글자를 붙여 넣으면 경로로 바꾼다.
+
+        타자 중에는 건드리지 않게 그 두 모양일 때만 본다."""
+        if not text.lstrip().startswith(('"', "file:")):
+            return
+        c = clean_path_text(text)
+        if c and c != text:
+            edit.setText(c)
 
     def add_extract_folders(self, folders: list[str]) -> int:
         """폴더들을 LOT 입력란에 넣는다 — 빈 줄부터 채우고, 모자라면 줄을 늘린다.
@@ -1189,10 +1355,29 @@ class SetupPage(QWidget):
 
         지금 어느 엔진이 도는지는 `_engine_inert_hint` 한 줄과 상단 모드 배지가 말한다."""
         legacy_on = self.legacy_switch.is_on()
+        # P12A — 원인(스위치 노브)이 먼저, 결과(종속 줄)가 40ms 뒤에 바뀐다.  옛 모습을
+        # 찍어 두었다가 그 위에 얹어 흐린다(허용 오차 줄 회색↔활성, 사라지는 줄).
+        dep = motion.enabled() and self.isVisible()
+        was_on = self.legacy_group.isVisible()
+        tol_pm = (motion.grab_in_place(self._tol_row)
+                  if dep and self._tol_row.isVisible()
+                  and self._tol_row.isEnabled() == legacy_on else None)
+        gone = ([(w, motion.grab_in_place(w))
+                 for w in (self.legacy_group, self._threshold_row)]
+                if dep and was_on and not legacy_on else [])
         self.legacy_group.setVisible(legacy_on)
         self._threshold_row.setVisible(legacy_on)
         self._tol_row.setVisible(True)
         self._tol_row.setEnabled(not legacy_on)
+        if tol_pm is not None:
+            motion.crossfade_over(self._tol_row, tol_pm, delay_ms=motion.DEP_DELAY_MS)
+        if dep and legacy_on and not was_on:
+            for w in (self.legacy_group, self._threshold_row):
+                motion.fade_in(w, delay_ms=motion.DEP_DELAY_MS,
+                               duration=motion.DUR_TILE_TOGGLE)
+        for w, pm in gone:          # 자리는 즉시 접히고 옛 모습만 빠르게 빠진다
+            motion.crossfade_over(w, pm, duration=motion.DUR_FADE_OUT,
+                                  easing=motion.EASE_EXIT)
         if legacy_on:
             short = (i18n.KO.ENGINE_MODE_EFFICIENCY_SHORT
                      if self.legacy_group.current_key() == EngineMode.EFFICIENCY
@@ -1267,6 +1452,9 @@ class SetupPage(QWidget):
         self.rail_fold_btn.clicked.connect(self.toggle_rail)
         hl.addWidget(self.rail_fold_btn)
         self._rail_head = head
+        # 머리줄 높이는 로고(34)에 고정한다 — 접히면 로고가 숨고 [«] 만 남는데, [«] 는
+        # QSS 최소 높이(32)로 줄어 머리줄이 2px 낮아지고 아래 메뉴 버튼이 전부 위로 밀렸다.
+        head.setFixedHeight(34)
         col.addWidget(head)
         col.addSpacing(6)
         # 기본 화면(매칭 설정)으로 돌아오는 버튼 — 아이콘은 프로그램 아이콘(사용자 요청).
@@ -1283,7 +1471,7 @@ class SetupPage(QWidget):
         self.extract_btn = NeonButton(i18n.KO.EXTRACT_BUTTON, role="ghost")
         self.extract_btn.setToolTip(i18n.KO.EXTRACT_BUTTON_TOOLTIP)
         self.extract_btn.clicked.connect(lambda: self.show_page("extract"))
-        # 사진 한 장의 GL(밝기) 분포를 히스토그램·선 프로파일·통계로 보는 도구.
+        # 사진 한 장의 GL(밝기) 분포를 히스토그램으로 보는 도구.
         # 준비 전(`config.GL_HISTOGRAM_READY`)에는 아이콘은 그대로 두고 'Coming soon' 으로 막는다.
         if config.GL_HISTOGRAM_READY:
             self.gl_btn = NeonButton(i18n.KO.GL_BUTTON, role="ghost")
@@ -1292,11 +1480,15 @@ class SetupPage(QWidget):
         else:
             self.gl_btn = NeonButton(i18n.KO.GL_COMING_SOON, role="ghost")
             self.gl_btn.setToolTip(i18n.KO.GL_COMING_SOON_TOOLTIP)
+        # Zone 기준을 올리면 Defect 가 몇 개 빠지는지 보는 도구 — Scanresult 폴더가 있어야 해서
+        # 개발자 모드일 때만 보인다(배포받은 사람은 Conder 만 본다, CLAUDE.md).
+        self.threshold_btn = NeonButton(i18n.KO.THRESH_PREVIEW_BUTTON, role="ghost")
+        self.threshold_btn.clicked.connect(lambda: self.show_page("threshold"))
         self.update_btn = NeonButton(i18n.KO.MENU_CHECK_UPDATE, role="ghost")
         self.update_btn.clicked.connect(self.update_check_requested.emit)
         self._nav_buttons = {"match": self.match_btn, "image_info": self.image_info_btn,
                              "wafer_map": self.wafer_map_btn, "extract": self.extract_btn,
-                             "gl": self.gl_btn}
+                             "gl": self.gl_btn, "threshold": self.threshold_btn}
         for b in self._nav_buttons.values():
             b.setProperty("grade", "rail")
             b.setCheckable(True)
@@ -1305,7 +1497,7 @@ class SetupPage(QWidget):
         self.match_btn.setIcon(QIcon(str(paths.logo_path("logo.ico"))))
         for b, icon in ((self.image_info_btn, "camera"), (self.wafer_map_btn, "globe"),
                         (self.extract_btn, "doc"), (self.gl_btn, "bars"),
-                        (self.update_btn, "refresh")):
+                        (self.threshold_btn, "sliders"), (self.update_btn, "refresh")):
             b.setIcon(rail_icon(icon))
         if not config.GL_HISTOGRAM_READY:
             # 누를 수 없게 하되 아이콘은 회색으로 바꾸지 않는다(사용자 요청 '아이콘은 그대로').
@@ -1327,7 +1519,7 @@ class SetupPage(QWidget):
         col.addWidget(self._rail_credit)
         # 레일 순서 계약(test_setup_controls) — 매칭 + 도구 넷.  업데이트는 맨 아래 따로.
         self._tool_buttons = [self.match_btn, self.image_info_btn, self.wafer_map_btn,
-                              self.extract_btn, self.gl_btn]
+                              self.extract_btn, self.gl_btn, self.threshold_btn]
         self._tool_rail = host
         # 접힘 상태 — 상황마다 따로 기억한다(`_rail_should_fold`).  매칭 화면에서 고른 것
         # (`_rail_user_folded`)은 도구 화면·좁은 창에서 잠깐 펼쳐도 바뀌지 않는다.
@@ -1339,6 +1531,12 @@ class SetupPage(QWidget):
         for lb in (self._title_label, self._rail_credit):
             lb.setMinimumWidth(1)
             lb.setSizePolicy(QSizePolicy.Policy.Ignored, lb.sizePolicy().verticalPolicy())
+        # 접힌 메뉴는 크레딧을 숨기지만 자리는 남긴다 — 자리가 사라지면 [업데이트 확인] 이
+        # 그만큼 아래로 내려가 접힘·펼침에서 높이가 달랐다.  (위 setSizePolicy 가 이 표시를
+        # 지우므로 그 뒤에 둔다.)
+        keep = self._rail_credit.sizePolicy()
+        keep.setRetainSizeWhenHidden(True)
+        self._rail_credit.setSizePolicy(keep)
         self._rail_user_folded = False
         self._rail_tool_open = False         # 도구 화면에서 사용자가 펼쳤나(들어갈 때마다 접힘)
         self._rail_narrow_open = False       # 좁은 창에서 사용자가 펼쳤나(폭이 바뀌면 접힘)
@@ -1476,7 +1674,7 @@ class SetupPage(QWidget):
         return dlg.windowTitle() if dlg is not None else ""
 
     def current_page(self) -> str:
-        """지금 오른쪽에 보이는 화면 — match · extract · image_info · wafer_map · gl."""
+        """지금 오른쪽에 보이는 화면 — match · extract · image_info · wafer_map · gl · threshold."""
         if self._page_key == "match" and self._extract_mode:
             return "extract"
         return self._page_key
@@ -1540,6 +1738,9 @@ class SetupPage(QWidget):
             from ..widgets.wafer_map_dialog import WaferMapDialog
             dlg = WaferMapDialog(self)
             dlg.fullscreen_changed.connect(self._on_tool_fullscreen)
+        elif key == "threshold":
+            from ..widgets.threshold_preview_dialog import ThresholdPreviewDialog
+            dlg = ThresholdPreviewDialog(self)
         else:
             from ..widgets.gl_viewer_dialog import GlViewerDialog
             dlg = GlViewerDialog(self)
@@ -1643,6 +1844,8 @@ class SetupPage(QWidget):
         path_edit.setMinimumWidth(self._PATH_MIN_W)
         path_edit.setPlaceholderText(i18n.KO.SETUP_FOLDER_PLACEHOLDER)
         path_edit.setReadOnly(False)
+        path_edit.setAcceptDrops(False)      # 놓기는 페이지가 받는다(`dropEvent`)
+        path_edit.textEdited.connect(lambda t: self._normalize_pasted(path_edit, t))
         browse = NeonButton(i18n.KO.BTN_BROWSE, role="ghost")
         browse.clicked.connect(lambda: self._browse(path_edit))
         grid.addWidget(head, 0, 0)           # 목업: '기준' 이 폴더 줄의 라벨이다
@@ -1665,6 +1868,7 @@ class SetupPage(QWidget):
             grid.addWidget(err, 1, 1, 1, 3)
 
         machine_edit = QLineEdit(card)
+        machine_edit.setAcceptDrops(False)   # 폴더를 놓아도 글자로 안 들어가게(페이지가 받는다)
         machine_edit.setPlaceholderText(i18n.KO.SETUP_MACHINE_PLACEHOLDER)
         machine_label = QLabel(i18n.KO.SETUP_MACHINE_LABEL, card)
         machine_label.hide()
@@ -1713,11 +1917,23 @@ class SetupPage(QWidget):
         return "" if all(SetupPage._dir_state(r) == "" for r in roots) else "missing"
 
     def _set_field_state(self, edit: QLineEdit, state: str) -> None:
-        """동적 프로퍼티 + repolish(안 하면 QSS 가 다시 그려지지 않는다)."""
-        edit.setProperty("state", "invalid" if state else "")
+        """동적 프로퍼티 + repolish(안 하면 QSS 가 다시 그려지지 않는다).
+
+        P3A — 상태가 **실제로 바뀔 때만** 입력란을 140ms 겹쳐 바꾸고, 오류 문구는 6px
+        아래에서 떠오른다.  고치면 옛 문구가 120ms 가속으로 빠진다.  `_validate` 가
+        자주 부르므로 같은 상태면 아무 모션도 없다."""
+        new = "invalid" if state else ""
+        err = edit.property("_errLabel")
+        changed = ((edit.property("state") or "") != new
+                   and motion.enabled() and edit.isVisible())
+        edit_pm = motion.grab_in_place(edit) if changed else None
+        err_pm = (motion.grab_in_place(err)
+                  if changed and not new and err is not None and err.text() else None)
+        edit.setProperty("state", new)
         edit.style().unpolish(edit)
         edit.style().polish(edit)
-        err = edit.property("_errLabel")
+        if edit_pm is not None:
+            motion.crossfade_over(edit, edit_pm)
         if err is not None:
             # ★ 'empty' 분기는 두지 않는다.  `_validate()` 가 빈 필드에는 state 를 주지
             #   않기 때문에(빈 상태에서 빨간 테두리로 겁주지 않으려는 의도) 도달할 수
@@ -1725,8 +1941,14 @@ class SetupPage(QWidget):
             #   도달 불가 분기는 '처리되고 있다'는 착각만 남긴다.
             if state == "missing":
                 err.setText(i18n.KO.SETUP_INVALID_FOLDER)
+                if changed:
+                    motion.rise_in(err, rise_px=motion.TOAST_RISE_PX,
+                                   duration=motion.DUR_TOAST_IN)
             else:
                 err.setText("")
+                if err_pm is not None:
+                    motion.crossfade_over(err, err_pm, duration=motion.DUR_FADE_OUT,
+                                          easing=motion.EASE_EXIT)
             # ★ setVisible 을 쓰지 않는다 — 자리를 예약해 뒀으므로 문자열만 바꾼다.
 
     def set_backend_ready(self, ready: bool) -> None:
@@ -1790,10 +2012,6 @@ class SetupPage(QWidget):
             i18n.KO.EXTRACT_FOLDER_PLACEHOLDER if on
             else i18n.KO.SETUP_FOLDER_PLACEHOLDER)
         self._sync_nav_checked()
-        # 추출 모드에서는 사진·폴더를 화면 어디에 놓아도 입력란에 들어간다(사용자 요청).
-        # 첫 입력란이 놓기를 가로채 'file:///…' 글자를 끼워 넣지 않게, 그때만 페이지가 받는다.
-        self.setAcceptDrops(on)
-        self.ref_path_edit.setAcceptDrops(not on)
         self._refresh_start_text()
         self._validate()
         self.extract_mode_changed.emit(on)
@@ -1873,7 +2091,13 @@ class SetupPage(QWidget):
                               "missing" if val_state == "missing" else "")
         dirs_ok = ref_state == "" and val_state == ""
         ok = dirs_ok and self._backend_ready
+        # P2B — 눌러도 되게 **된 순간만** 회색→파랑을 겹쳐 바꾼다(꺼질 때는 즉시).
+        ready_pm = (motion.grab_in_place(self.start_btn)
+                    if ok and not self.start_btn.isEnabled()
+                    and motion.enabled() and self.start_btn.isVisible() else None)
         self.start_btn.setEnabled(ok)
+        if ready_pm is not None:
+            motion.crossfade_over(self.start_btn, ready_pm)
         if hasattr(self, "_start_hint"):
             # 폴더 문제가 먼저다 — 그건 사용자가 지금 고칠 수 있는 것이고,
             # '준비 중' 은 가만히 있으면 저절로 풀린다.
@@ -2085,7 +2309,10 @@ class SetupPage(QWidget):
         self._excel_ref_btn.setToolTip(tip)
 
     def _on_folder_picked(self, path: str) -> None:
-        target = getattr(self, "_browse_target", None)
+        self._put_folder(getattr(self, "_browse_target", None), path)
+
+    def _put_folder(self, target, path: str) -> None:
+        """``target`` 입력란에 폴더를 넣는다(기준이면 슬롯·엑셀 선택 초기화) — 고르기·놓기 공용."""
         if target is None or not path:
             return
         import time

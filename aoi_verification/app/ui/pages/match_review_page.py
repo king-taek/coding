@@ -14,16 +14,18 @@
 from __future__ import annotations
 
 import weakref
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 from pathlib import Path
 
-from PyQt6.QtCore import QObject, QPoint, QRect, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPixmap
+from PyQt6.QtCore import (QEvent, QObject, QPoint, QRect, QRectF, Qt, QTimer,
+                          pyqtSignal)
+from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPixmap, QTextDocument
 from PyQt6.QtWidgets import (QApplication, QFrame, QGridLayout, QHBoxLayout,
                              QLabel, QMenu, QScrollArea, QSizePolicy,
                              QVBoxLayout, QWidget)
 
 from ... import i18n
+from .. import motion
 from .. import theme
 from ..deferred import call_later
 from ..score_fmt import fmt_score
@@ -37,6 +39,7 @@ from ..widgets.no_wheel_slider import NoWheelSlider
 from ..widgets.zoom_window import FullscreenViewer
 from ..widgets import sheet_host as sheets
 from ... import config as _config
+from ...coords import number_risk as _number_risk
 
 # 허용 오차 폴백 — 값이 안 들어왔을 때만 쓴다.  **단일 출처는 config** 다
 # (예전엔 리터럴 500 이 곳곳에 박혀 있어 기본값을 바꿔도 옛 값이 되살아났다).
@@ -77,6 +80,9 @@ def _toggle_col_w() -> int:
       이름을 준 목적이 사라진다.  그래서 QSS `role="colHead"`(캡션 크기 · 700 ·
       자간 1px)와 같은 서체로 재고, 옛 실측값을 하한으로 둔다.
     ★ 세 곳(헤더·행 버튼·예약폭 계산)이 **같은 값**을 봐야 하므로 한 번만 재서 기억한다.
+    ★ 버튼에 낱말이 붙었다('✕ 매치 없음' / '↩ 되돌리기', 안 A) — 버튼도 고정 폭이라
+      버튼 낱말까지 함께 재서 넓은 쪽을 쓴다.  버튼 서체는 QSS `compact`(캡션 lg · 700),
+      좌우 패딩 8 · 보더 1 이다.
     """
     global _toggle_col_w_px
     if _toggle_col_w_px is None:
@@ -85,6 +91,13 @@ def _toggle_col_w() -> int:
         f.setWeight(QFont.Weight.Bold)                       # QSS font-weight: 700
         f.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.0)
         need = QFontMetrics(f).horizontalAdvance(i18n.KO.CHIP_NO_MATCH) + 6
+        b = QApplication.font()
+        b.setPixelSize(theme.PROFILE.font_caption_lg)
+        b.setWeight(QFont.Weight.Bold)
+        bm = QFontMetrics(b)
+        need = max(need, *(bm.horizontalAdvance(t) + 2 * 8 + 2 + 4
+                           for t in (i18n.KO.BTN_NO_MATCH_COMPACT,
+                                     i18n.KO.BTN_RESTORE_COMPACT)))
         _toggle_col_w_px = max(_TOGGLE_COL_W_MIN, need)
     return _toggle_col_w_px
 
@@ -177,6 +190,14 @@ class _ThumbLoader(QObject):
                 pass                             # 위젯이 이미 사라졌다
 
 
+def _ensure_mid(path: Path) -> None:
+    """일꾼 스레드용 — 중간 크기 캐시 파일만 만든다(실패는 `_load` 의 폴백 그림이 맡는다)."""
+    try:
+        image_io.get_mid_path(Path(path))
+    except Exception:
+        pass
+
+
 _thumb_loader: _ThumbLoader | None = None
 
 
@@ -264,6 +285,33 @@ class _LazyThumb(QLabel):
                 _open_fullscreen(self._path, self.window())
 
 
+class _PairCrossOut(QWidget):
+    """'매치 없음' 으로 표시한 줄의 검증 사진 위에 긋는 빨간 사선(안 A).
+
+    ★ 예전엔 표시해도 검증 사진·화살표·거리가 그대로라 **아직 짝이 있는 것처럼** 보였다
+      (후보만 사라졌다).  사진을 옅게 덮고 사선을 그어 '이 짝은 지웠다' 를 그림으로 말한다.
+    ★ 마우스를 받지 않는다 — 아래 사진의 우클릭 '크게 보기' 를 가리지 않게.
+    """
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.hide()
+
+    def paintEvent(self, event):  # noqa: N802
+        from PyQt6.QtGui import QPainter, QPen
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        wash = QColor(theme.PANEL)
+        wash.setAlpha(150)
+        p.fillRect(self.rect(), wash)
+        pen = QPen(QColor(theme.DANGER), 4)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        p.setPen(pen)
+        m = max(6, self.width() // 12)
+        p.drawLine(m, self.height() - m, self.width() - m, m)
+
+
 class _RunnerUpTile(QFrame):
     """클릭 가능한 차순위 후보 썸네일.  클릭 시 swap_requested(item, score).
 
@@ -348,9 +396,14 @@ class _MatchRow(QFrame):
                  tolerance: float = _DFLT_TOL,
                  ref_caption_fmt: str = i18n.KO.COMPARE_REF_CAPTION_FMT,
                  lane_label: str = "",
-                 show_ref: bool = True) -> None:
+                 show_ref: bool = True,
+                 no_coord: bool = False) -> None:
         super().__init__(parent)
         self.match = match
+        # 좌표가 없어 유사도로 후보를 찾은 기준 사진 — 점수는 거리가 아니라 유사도다.
+        self.no_coord = bool(no_coord)
+        if self.no_coord:
+            coord_mode = False
         # 비교 뷰어 왼쪽 사진의 이름표 — 교차검증 역방향에서는 왼쪽이 검증 사진이다.
         self._ref_caption_fmt = ref_caption_fmt
         self._is_unmatched = False
@@ -399,6 +452,12 @@ class _MatchRow(QFrame):
         self._slot_label.setToolTip(match.slot)   # 최소 폭만 부풀린다(가로 넘침).
         self._elide_slot()
         slot_lay.addWidget(self._slot_label)
+        if self.no_coord:
+            tag = QLabel(i18n.KO.REVIEW_NO_COORD_TAG, slot_host)
+            tag.setProperty("role", "warn")
+            tag.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            tag.setToolTip(i18n.KO.REVIEW_NO_COORD_TIP)
+            slot_lay.addWidget(tag)
         # 기준 1 ↔ 검증 여러 장비 — 이 줄이 어느 검증 장비의 후보인지(`multi_val`).
         if lane_label:
             lane = QLabel(lane_label, slot_host)
@@ -458,6 +517,8 @@ class _MatchRow(QFrame):
         self._val_img = self._make_thumb(match.val_path, size=self._thumb_px,
                                          on_view=lambda: self._open_compare(0))
         _val_col.addWidget(self._val_img, alignment=Qt.AlignmentFlag.AlignCenter)
+        self._slash = _PairCrossOut(self._val_img)
+        self._slash.setGeometry(self._val_img.rect())
         self._val_score_label = QLabel(
             self._format_score(match.score, verbose=False), self._val_host)
         self._val_score_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -512,12 +573,24 @@ class _MatchRow(QFrame):
         top.addWidget(self.btn_toggle)
 
         outer.addLayout(top)
+        # '매치 없음' 으로 표시한 줄에만 보이는 안내 한 줄 — 화면 낱말과 엑셀 낱말('미매칭')을
+        # 잇고, 후보가 그대로 살아 있다는 것을 말한다(안 A).
+        self._no_match_note = QLabel(i18n.KO.REVIEW_NO_MATCH_NOTE, self)
+        self._no_match_note.setProperty("role", "noMatchNote")
+        self._no_match_note.hide()
+        # 기준 사진 열 아래부터 — 슬롯 열(+간격)만큼 띄운다.
+        note_line = QHBoxLayout()
+        note_line.setContentsMargins(0, 0, 0, 0)
+        note_line.addSpacing(_SLOT_W + 12)
+        note_line.addWidget(self._no_match_note, 1)
+        outer.addLayout(note_line)
         self._apply_state()
 
         # ── 차순위 후보 영역 — 첫 줄은 위 인라인, 추가 줄은 아래 그리드 (#3/#5). ──
         # 클릭하면 그 사진으로 매치 교체 (swap_requested).  처음엔 첫 줄만
         # 인라인으로 보이고 ‘후보 한 줄 더 보기’ 로 아래에 줄을 추가한다.
-        # ‘매치 없음’ 처리 시 _candidate_host 전체(인라인 첫 줄 포함)를 숨긴다 (#1).
+        # ‘매치 없음’ 으로 표시해도 후보는 **숨기지 않는다**(안 A) — 그 줄에서 바로
+        # 다른 사진을 골라 짝을 다시 지을 수 있어야 한다(예전엔 ↩ 를 먼저 눌러야 했다).
         if self._runners_up:
             self._runner_host = QWidget(self)
             host_lay = QVBoxLayout(self._runner_host)
@@ -762,6 +835,7 @@ class _MatchRow(QFrame):
         self._runnerup_px = max(40, int(applied * 0.8))
         self._ref_img.set_size(applied)
         self._val_img.set_size(applied)
+        self._slash.setGeometry(self._val_img.rect())
         # 사진 밑 점수를 담은 컨테이너도 같은 폭이어야 헤더 정렬이 유지된다.
         self._val_host.setFixedWidth(applied)
         for tile in self._runner_tiles:
@@ -888,9 +962,12 @@ class _MatchRow(QFrame):
                                else i18n.KO.CHIP_NO_MATCH)
             self._chip.setProperty("chip", "over" if st == "over" else "none")
         self.setProperty("rowState", st if st != "ok" else "")
-        metric_color = theme.DANGER if st == "over" else theme.INK
+        metric_color = (theme.DANGER if st == "over"
+                        else theme.MUTE if st == "unmatched" else theme.INK)
+        # 매치 없음 — 거리에 취소선(짝을 지웠으니 이 거리는 더 이상 결과가 아니다).
+        strike = " text-decoration: line-through;" if st == "unmatched" else ""
         self._metric_label.setStyleSheet(
-            f"color: {metric_color}; font-weight: 700; font-size: 13px;"
+            f"color: {metric_color}; font-weight: 700; font-size: 13px;{strike}"
         )
         for w in (self._chip, self):
             w.style().unpolish(w)
@@ -918,63 +995,38 @@ class _MatchRow(QFrame):
         p.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), r, r)
 
     def set_unmatched(self, unmatched: bool, *, animate: bool = False) -> None:
-        """``animate`` — 사용자가 방금 누른 경우에만 접힘·펼침을 보여 준다(08안)."""
+        """'매치 없음' 표시를 켜고 끈다(안 A, 사용자 결정 2026-11-11).
+
+        켜면 검증 사진에 사선, 거리에 취소선, 줄 아래 안내 한 줄.  **후보는 그대로 둔다** —
+        후보를 누르면 그 사진으로 바뀌고 표시가 풀린다(`MatchReviewPage._on_swap`).
+        ``animate`` — 사용자가 방금 누른 경우에만 줄 높이 변화를 보여 준다(08안).
+        """
+        from .. import motion
         self._is_unmatched = unmatched
+        h0 = self.height()
         if unmatched:
             # 되돌리기(↩) 상태 — reject 의도 해제(호버에서 위험색 안 뜨게).
             self.btn_toggle.setText(i18n.KO.BTN_RESTORE_COMPACT)
             self.btn_toggle.setToolTip(i18n.KO.BTN_RESTORE_MATCH)
             self.btn_toggle.setProperty("intent", "")
-            # 후보 영역(인라인 첫 줄 + 아래 그리드/‘더 보기’)을 모두 숨긴다 (#1/#3).
-            self._set_candidates_visible(False, animate=animate)
         else:
             self.btn_toggle.setText(i18n.KO.BTN_NO_MATCH_COMPACT)
             self.btn_toggle.setToolTip(i18n.KO.BTN_MARK_NO_MATCH)
             self.btn_toggle.setProperty("intent", "reject")
-            # 후보 영역을 이전 표시 상태로 복원한다 (#1).
-            self._set_candidates_visible(True, animate=animate)
+        self._slash.setGeometry(self._val_img.rect())
+        self._slash.setVisible(unmatched)
+        self._no_match_note.setVisible(unmatched)
         self.btn_toggle.style().unpolish(self.btn_toggle)
         self.btn_toggle.style().polish(self.btn_toggle)
-        # 빨간 테두리 등 상태 스타일은 rowState 프로퍼티로 일괄 적용 (#1).
+        # 빨간 테두리·칩·거리 취소선은 상태 프로퍼티로 일괄 적용 (#1).
         self._apply_state()
-
-    def _set_candidates_visible(self, visible: bool, *,
-                                animate: bool = False) -> None:
-        """인라인 첫 줄 + 아래 후보 호스트의 표시 여부를 한꺼번에 토글 (#1/#3).
-
-        후보가 아예 없는 행이면 첫 줄 컨테이너는 계속 숨김 상태로 둔다.
-        ``animate`` 면 행 높이가 접히고 펼쳐지며 후보가 흐려지고 떠오른다(08안) —
-        예전엔 한 프레임에 사라져 아래 행들이 툭 올라왔다.
-        """
-        from .. import motion
-        hosts = []
-        if self._runners_up:
-            hosts.append(self._first_line_host)
-        if self._runner_host is not None:
-            hosts.append(self._runner_host)
-        # 연타 — 앞 접힘이 끝날 때 숨기기를 하지 않게 세대를 올린다.
-        self._cand_gen = gen = getattr(self, "_cand_gen", 0) + 1
-        animate = animate and bool(hosts) and motion.enabled() and self.isVisible()
-        h0 = self.height()
-        for h in hosts:
-            h.setVisible(visible)
-        if not animate:
-            return
-        self.layout().activate()
-        h1 = self.sizeHint().height()
-        if visible:
-            for h in hosts:
-                motion.fade_in(h, delay_ms=60, duration=motion.DUR_TILE_IN)
-        else:
-            # 접히는 동안 후보가 흐려지는 모습을 보인다 — 다 흐려지면 그때 숨긴다.
-            def _hide(h):
-                if getattr(self, "_cand_gen", 0) == gen:
-                    h.setVisible(False)
-            for h in hosts:
-                h.setVisible(True)
-                motion.fade_out(h, duration=motion.DUR_TILE_IN,
-                                on_done=lambda h=h: _hide(h))
-        motion.animate_height(self, h0, h1, duration=motion.DUR_ROW_RESIZE)
+        if animate and motion.enabled() and self.isVisible():
+            self.layout().activate()
+            motion.animate_height(self, h0, self.sizeHint().height(),
+                                  duration=motion.DUR_ROW_RESIZE)
+            if unmatched:
+                motion.fade_in(self._no_match_note, delay_ms=60,
+                               duration=motion.DUR_TILE_IN)
 
 
 class MatchReviewPage(QWidget):
@@ -1034,6 +1086,21 @@ class MatchReviewPage(QWidget):
         head.addWidget(self.title)
         head.addStretch(1)
         root.addLayout(head)
+
+        # col/row 를 확실히 정하지 못한 웨이퍼 — 빨간 큰 경고(사용자 지시 2026-11-13).
+        # 매칭 화면과 같은 문구(`coords.number_risk.banner_text`).  평소엔 숨김.
+        self.risk_banner = QLabel("", self)
+        self.risk_banner.setProperty("role", "dangerBanner")
+        self.risk_banner.setWordWrap(True)
+        self.risk_banner.hide()
+        root.addWidget(self.risk_banner)
+        # 좌표 없이 유사도로 짝을 찾은 기준 사진 안내(주황 한 줄) — 좌표 모드에서만.
+        self.no_coord_banner = QLabel("", self)
+        self.no_coord_banner.setProperty("role", "hintWarn")
+        self.no_coord_banner.setWordWrap(True)
+        self.no_coord_banner.hide()
+        root.addWidget(self.no_coord_banner)
+        self._no_coord_refs: frozenset = frozenset()
 
 
         bar = QHBoxLayout()
@@ -1207,7 +1274,9 @@ class MatchReviewPage(QWidget):
                    tolerance: float = _DFLT_TOL,
                    coord_failed_count: int = 0,
                    unmatched_keys: set | None = None,
-                   lanes: list | None = None) -> None:
+                   lanes: list | None = None,
+                   number_risk=(),
+                   coord_classical_refs=()) -> None:
         """매치 검토 화면 초기화.
 
         ``score_cache`` 와 ``val_pool`` 이 함께 주어지면 각 매치 행에 차순위
@@ -1248,6 +1317,17 @@ class MatchReviewPage(QWidget):
             hdr.setText(i18n.KO.COL_DISTANCE if self._coord_mode
                         else i18n.KO.COL_SIMILARITY)
         self._coord_failed_count = int(coord_failed_count)
+        risk_text = _number_risk.banner_text(number_risk) if self._coord_mode else ""
+        self.risk_banner.setText(risk_text)
+        self.risk_banner.setVisible(bool(risk_text))
+        # 좌표 없이 채점된 기준 사진 — 매치 목록에 실린 것만 센다(행 표시와 같은 기준).
+        self._no_coord_refs = (frozenset((s, Path(p)) for s, p in coord_classical_refs)
+                               if self._coord_mode else frozenset())
+        n_no_coord = len({(m.slot, Path(m.ref_path)) for m in self._matches
+                          if self._is_no_coord(m)})
+        self.no_coord_banner.setText(
+            i18n.KO.REVIEW_NO_COORD_BANNER_FMT.format(n=n_no_coord) if n_no_coord else "")
+        self.no_coord_banner.setVisible(bool(n_no_coord))
         # 차순위 swap / 재계산용으로 score_cache + val_pool 참조 보관.
         self._score_cache = score_cache
         self._review_scores = review_scores
@@ -1310,6 +1390,7 @@ class MatchReviewPage(QWidget):
         del self._pending_rows[:self._ROW_BATCH]
         for m in first:
             self._append_row(m)
+        self._warm_entrance_thumbs()
         if not self._pending_rows:
             self._arm_entrance()
             return
@@ -1356,6 +1437,56 @@ class MatchReviewPage(QWidget):
         창이 페이지를 실제로 앉히면 `on_shown()` 이 이걸 깨운다."""
         self._entrance_pending = True
         self._maybe_play_entrance()
+
+    #: 전환 스냅샷 직전, 보이는 썸네일을 기다리는 최대 시간(초) — 첫 진입이 굳지 않게 상한.
+    _SNAPSHOT_THUMB_WAIT_S = 0.25
+
+    def _warm_entrance_thumbs(self) -> None:
+        """첫 행들의 중간 크기 캐시를 **행을 만들자마자** 일꾼 스레드에 맡긴다(F1A).
+
+        화면 전환 스냅샷(`prepare_snapshot`)은 그 뒤에 오므로, 그때는 대개 파일이 이미
+        있어 UI 스레드는 읽기만 한다."""
+        pool = _get_thumb_loader()._pool
+        for row in self._rows[:self._ENTRANCE_ROWS]:
+            for th in row.findChildren(_LazyThumb):
+                pool.submit(_ensure_mid, th._path)
+
+    def prepare_snapshot(self) -> None:
+        """화면 전환이 이 페이지를 찍기 **직전**에 창이 부른다(F1A — 행이 두 번 나타나던 결함).
+
+        예전 스냅샷은 레이아웃이 덜 잡혀 행 높이가 틀리고 썸네일이 빈 흰 상자였다.  전환이
+        끝나면 행들이 다시 아래에서 올라와 같은 행이 두 번 등장했다.  여기서
+        ① 레이아웃을 확정하고 ② 보이는 행의 썸네일을 채운 뒤(최대 0.25초, 못 채운 칸은
+        평소처럼 나중에) ③ 화면 전환 자체를 진입 모션으로 삼아 행 올라오기를 건너뛴다.
+        행이 많아 나눠 만드는 중이면(`_pending_rows`) 올라오기는 그대로 둔다."""
+        if not self._rows:
+            return
+        for _ in range(2):
+            QApplication.sendPostedEvents(None, QEvent.Type.LayoutRequest)
+            if self.layout() is not None:
+                self.layout().activate()
+            if self._scroll_host.layout() is not None:
+                self._scroll_host.layout().activate()
+            self._scroll.widget().adjustSize()
+        vp = self._scroll.viewport()
+        vis = QRect(0, 0, vp.width(), vp.height())
+        thumbs = []
+        for row in self._rows:
+            if row.isHidden():
+                continue
+            if not QRect(row.mapTo(vp, QPoint(0, 0)), row.size()).intersects(vis):
+                continue
+            thumbs += [t for t in row.findChildren(_LazyThumb) if not t._image_loaded]
+        if thumbs:
+            pool = _get_thumb_loader()._pool
+            futs = {pool.submit(_ensure_mid, t._path): t for t in thumbs}
+            done, _ = wait(futs, timeout=self._SNAPSHOT_THUMB_WAIT_S)
+            for f in done:
+                th = futs[f]
+                th._image_loaded = True
+                th._load()
+        if getattr(self, "_entrance_pending", False) and not self._pending_rows:
+            self._entrance_pending = False      # 전환이 곧 진입 모션 — 한 번만 등장
 
     def on_shown(self) -> None:
         """창이 이 페이지를 화면에 앉혔다(`main_window._show_page` 의 커밋 지점)."""
@@ -1521,8 +1652,14 @@ class MatchReviewPage(QWidget):
                         tolerance=self._tolerance,
                         ref_caption_fmt=self._ref_caption_fmt(),
                         lane_label=self._lane_label(match.equip),
-                        show_ref=show_ref)
+                        show_ref=show_ref,
+                        no_coord=self._is_no_coord(match))
         row.setProperty("_laneFollower", not show_ref)
+        # ★ 결과 화면에서 되돌아오면 표시 집합(`_unmatched_keys`)만 되살아나고 행은 새로
+        #   만들어진다 — 여기서 그리지 않으면 위 숫자는 '매치 없음 n' 인데 줄은 평범하게
+        #   보이고, 그 줄의 버튼을 누르면 표시가 **풀렸다**(2026-11-11 발견).
+        if match.key in self._unmatched_keys:
+            row.set_unmatched(True)
         row.toggle_requested.connect(self._on_toggle)
         row.swap_requested.connect(self._on_swap)
         row.more_clicked.connect(self._on_row_more)
@@ -1531,6 +1668,10 @@ class MatchReviewPage(QWidget):
         self._rows.append(row)
         self._rows_by_key[match.key] = row
         return row
+
+    def _is_no_coord(self, match) -> bool:
+        """좌표가 없어 사진 모양(유사도)으로 후보를 찾은 기준 사진의 줄인가."""
+        return (match.slot, Path(match.ref_path)) in self._no_coord_refs
 
     def _on_swap(self,
                  old_match: MatchResult,
@@ -1571,6 +1712,7 @@ class MatchReviewPage(QWidget):
                 ref_caption_fmt=self._ref_caption_fmt(),
                 lane_label=self._lane_label(new_match.equip),
                 show_ref=not (old_row.property("_laneFollower") or False),
+                no_coord=self._is_no_coord(new_match),
             )
             new_row.setProperty("_laneFollower", old_row.property("_laneFollower"))
             new_row.toggle_requested.connect(self._on_toggle)
@@ -1674,8 +1816,34 @@ class MatchReviewPage(QWidget):
             parts.append(seg(i18n.KO.TALLY_COORD_FAILED_FMT,
                              self._coord_failed_count, theme.MUTE))
         self._tally_label.setText(sep.join(parts))
+        self._pulse_changed_tally(
+            [("ok", ok), ("over", over), ("none", none),
+             ("fail", self._coord_failed_count)], parts, sep)
         kept = len(self._matches) - len(self._unmatched_keys)
-        self.btn_done.setText(i18n.KO.BTN_FINISH_REVIEW_KEPT_FMT.format(n=kept))
+        self.btn_done.setText(
+            i18n.KO.BTN_FINISH_REVIEW_KEPT_NONE_FMT.format(n=kept, m=none) if none
+            else i18n.KO.BTN_FINISH_REVIEW_KEPT_FMT.format(n=kept))
+
+    def _pulse_changed_tally(self, counts, parts, sep) -> None:
+        """P14B — 바뀐 칸 뒤에만 연한 강조색이 한 번 지나간다.  숫자는 즉시 바뀐다(보간 없음).
+
+        칸 = 0 이 아닌 항목(일치는 늘).  처음 그릴 때와 칸 구성이 같은 값이면 아무것도 안 한다."""
+        segs = [(k, n) for k, n in counts if k == "ok" or n > 0]
+        old = getattr(self, "_tally_segs", None)
+        self._tally_segs = segs
+        lbl = self._tally_label
+        if old is None or old == segs or not motion.enabled() or not lbl.isVisible():
+            return
+        prev = dict(old)
+        changed = {i for i, (k, n) in enumerate(segs) if prev.get(k) != n}
+        band = getattr(self, "_tally_band", None)
+        if band is None:
+            band = self._tally_band = _TallyPulse(lbl)
+        band.setGeometry(lbl.rect())
+        band.set_spans(_rich_spans(lbl, parts, sep, changed))
+        band.show()
+        band.raise_()
+        motion.pulse(band, duration=motion.DUR_SLOW)
 
     def _on_done(self) -> None:
         kept: list[MatchResult] = []
@@ -1689,3 +1857,52 @@ class MatchReviewPage(QWidget):
             else:
                 kept.append(m)
         self.finished.emit(kept, unmatched_refs)
+
+
+def _rich_width(label, html: str) -> float:
+    d = QTextDocument()
+    d.setDefaultFont(label.font())
+    d.setDocumentMargin(0)
+    d.setHtml(html)
+    return d.idealWidth()
+
+
+def _rich_spans(label, parts, sep, wanted) -> list:
+    """리치 텍스트 라벨에서 ``wanted`` 번째 칸들의 가로 범위(라벨 좌표)."""
+    pad = 5
+    x = label.contentsRect().left() + label.margin()
+    sep_w = _rich_width(label, sep)
+    out = []
+    for i, html in enumerate(parts):
+        w = _rich_width(label, html)
+        if i in wanted:
+            out.append(QRectF(x - pad, 0, w + 2 * pad, label.height()))
+        x += w + sep_w
+    return out
+
+
+class _TallyPulse(QWidget):
+    """탤리 라벨 위 투명 띠 — ``motion.pulse`` 가 모는 ``_pulse`` 만큼 칸 뒤를 물들인다(P14B)."""
+
+    ALPHA = 0.22
+
+    def __init__(self, label) -> None:
+        super().__init__(label)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self._spans: list = []
+        self._pulse = 0.0
+
+    def set_spans(self, spans) -> None:
+        self._spans = spans
+
+    def paintEvent(self, event):  # noqa: N802
+        if self._pulse <= 0.0 or not self._spans:
+            return
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        c = QColor(theme.ACCENT)
+        c.setAlphaF(self.ALPHA * self._pulse)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(c)
+        for r in self._spans:
+            p.drawRoundedRect(r, 4, 4)

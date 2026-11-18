@@ -1,4 +1,4 @@
-"""GL 분석 결과 → 엑셀 한 장(통합 문서).  시트: 분석 조건 · ROI 통계 · 히스토그램 · 선 프로파일.
+"""GL 분석 결과 → 엑셀 한 장(통합 문서).  시트: 분석 조건 · ROI 통계 · 히스토그램.
 
 이 모듈은 값을 **그대로 옮기기만** 한다(계산은 ``analysis``).  엑셀 저장 관례는 결과 엑셀과
 같다 — 임시 파일에 쓰고, 회사 메타데이터를 걷어 낸 뒤 ``os.replace`` 로 교체한다.
@@ -23,12 +23,11 @@ def _stat_cells(row: dict) -> list:
 
 
 def build_workbook(info: Sequence[tuple[str, object]], stats_rows: Sequence[dict],
-                   hist_cols: Sequence[tuple[str, np.ndarray]],
-                   profiles: Sequence[tuple[str, np.ndarray]], titles: dict):
+                   hist_cols: Sequence[tuple[str, np.ndarray]], titles: dict):
     """통합 문서를 만든다.
 
     ``hist_cols`` — [(이름, 길이 2**bits 의 히스토그램)].  모든 열이 0 인 GL 행은 뺀다.
-    ``profiles``  — [(이름, 위치별 GL 배열)].  ``titles`` — 시트·열 이름(한국어, ko.py)."""
+    ``titles`` — 시트·열 이름(한국어, ko.py)."""
     from openpyxl import Workbook
     from openpyxl.styles import Font
     from openpyxl.utils import get_column_letter
@@ -69,14 +68,6 @@ def build_workbook(info: Sequence[tuple[str, object]], stats_rows: Sequence[dict
         stack = np.vstack([np.asarray(h, dtype=np.int64) for _n, h in hist_cols])
         for gl in np.flatnonzero(stack.sum(axis=0))[:MAX_SHEET_ROWS - 1]:
             ws.append([int(gl)] + [int(v) for v in stack[:, gl]])
-
-    ws = wb.create_sheet(titles["profile"])
-    ws.append([titles["pos"]] + [n for n, _v in profiles])
-    for c in ws[1]:
-        c.font = bold
-    longest = max((len(v) for _n, v in profiles), default=0)
-    for i in range(min(longest, MAX_SHEET_ROWS - 1)):
-        ws.append([i] + [int(v[i]) if i < len(v) else None for _n, v in profiles])
     return wb
 
 

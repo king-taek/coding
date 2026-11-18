@@ -104,7 +104,7 @@ def test_action_bar_index_contract(qapp):
         assert bar.itemAt(1).spacerItem() is not None
         tools = page._tool_buttons
         assert tools == [page.match_btn, page.image_info_btn, page.wafer_map_btn,
-                         page.extract_btn, page.gl_btn]
+                         page.extract_btn, page.gl_btn, page.threshold_btn]
         assert all(page._tool_rail.isAncestorOf(b) for b in tools)
         assert page._tool_rail.isAncestorOf(page.update_btn)
         assert page.update_btn not in tools
@@ -457,3 +457,14 @@ def test_switch_hot_zone_is_not_the_whole_row(qapp):
         assert "mousePressEvent" not in SwitchRow.__dict__
     finally:
         row.deleteLater()
+
+
+# ── Overkill 튜닝 버튼은 개발자 모드 없이도 보인다 ─────────────────────────────
+def test_threshold_btn_visible_without_dev_mode(styled_qapp):
+    from aoi_verification.app.utils import prefs
+    assert prefs.load().dev_mode is False
+    page = sp.SetupPage()
+    try:
+        assert not page.threshold_btn.isHidden()
+    finally:
+        page.deleteLater()

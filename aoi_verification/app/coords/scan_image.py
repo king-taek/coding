@@ -39,8 +39,8 @@ from . import abs_coord, camtek_ini, pixel_size
 from .ini_text import decode_ini_bytes
 
 __all__ = ["SCAN_LIST_NAME", "CROP_SIDE_UM", "Candidate", "ScanMatch",
-           "parse_manifest", "scan_uv", "crop_box", "rank_candidates", "resolve",
-           "cut", "load_crop", "load_full", "clear_caches"]
+           "parse_manifest", "scan_uv", "crop_box", "rank_candidates", "resolve", "resolve_xy", "resolve_xy_many",
+           "cut", "load_crop", "crops_from", "load_full", "clear_caches"]
 
 _LOG = logging.getLogger("aoi.scan")
 
@@ -200,7 +200,7 @@ def _mtime(p: Path) -> int:
 
 # Scan 머리(W, H)를 동시에 몇 개까지 읽을까 — NAS 는 한 번 열 때마다 왕복 지연이 있어
 # 수백 장을 차례로 열면 수 초가 걸린다.  지연이 대부분이라 나눠 열면 그만큼 줄어든다.
-_SIZE_WORKERS = 16
+_SIZE_WORKERS = 48
 _index_lock = threading.Lock()
 
 
@@ -271,16 +271,50 @@ def resolve(color_path, side_um: float = CROP_SIDE_UM) -> ScanMatch:
 
     예외를 밖으로 내지 않는다 — Scan 실패가 화면·엑셀의 기존 기능을 막으면 안 된다."""
     color = Path(color_path)
+    return _resolve(color.parent, color, lambda: _defect_xy(color), side_um)
+
+
+def resolve_xy(folder, xy, side_um: float = CROP_SIDE_UM) -> ScanMatch:
+    """Color 사진이 없는 결함 — 웨이퍼 폴더와 결함 좌표(µm, ``ColorImageGrabingInfo.ini`` X/Y 와 같은 틀)로
+    :class:`ScanMatch`.  Overkill 튜닝이 Surface.flt Defect(ActualX/Y)에 쓴다.  ``color_path`` 자리에는 폴더."""
+    folder = Path(folder)
+    return _resolve(folder, folder, lambda: xy, side_um)
+
+
+def resolve_xy_many(folder, xys, side_um: float = CROP_SIDE_UM) -> list:
+    """:func:`resolve_xy` 를 한 폴더의 결함 여럿에 — 목록·폴더 mtime stat 과 픽셀 크기 조회를 **한 번만** 한다.
+    결과는 ``xys`` 와 같은 순서·같은 값(하나씩 부른 것과 같다).  NAS 에서는 결함마다 stat 2번이 왕복이라
+    120개만 해도 1초 넘게 걸렸다(측정)."""
+    folder = Path(folder)
+    prep = _prepare(folder, folder)
+    return [_rank(prep, folder, folder, lambda xy=xy: xy, side_um) for xy in xys]
+
+
+def _resolve(folder: Path, color: Path, get_xy, side_um: float) -> ScanMatch:
+    return _rank(_prepare(folder, color), folder, color, get_xy, side_um)
+
+
+def _prepare(folder: Path, color: Path):
+    """폴더 단위 준비물 — ``(상태, 행들, 픽셀 크기)``.  못 읽으면 상태에 이유가 있다."""
     try:
-        folder = color.parent
         status, rows = _index(str(folder), _mtime(folder / SCAN_LIST_NAME),
                               _mtime(folder))
+        return status, rows, (pixel_size.scan_pixel_size_xy(folder) if status == OK else None), None
+    except Exception as e:
+        _LOG.exception("Scan 연결 실패: %s", color)
+        return UNREADABLE, (), None, e
+
+
+def _rank(prep, folder: Path, color: Path, get_xy, side_um: float) -> ScanMatch:
+    status, rows, px, err = prep
+    try:
+        if err is not None:
+            return ScanMatch(UNREADABLE, color)
         if status != OK:
             return ScanMatch(status, color)
-        xy = _defect_xy(color)
+        xy = get_xy()
         if xy is None:
             return ScanMatch(NO_COORDINATES, color)
-        px = pixel_size.scan_pixel_size_xy(folder)
         if px is None:
             return ScanMatch(NO_PIXEL_SIZE, color, xy)
         cands = rank_candidates(xy, rows, px, side_um)
@@ -348,6 +382,71 @@ def load_crop(match: ScanMatch):
         except Exception:
             _LOG.warning("Scan 원본을 읽지 못함: %s", cand.path)
     return None
+
+
+_SENTINEL = 1          # 맨 아래 줄이 통째로 이 값이면 '거기까지 안 풀렸다' 로 보고 전체 디코드로 돌아간다
+
+
+def _decode_top(path, bottom: int):
+    """JPEG 위쪽 ``bottom`` 줄만 푼 이미지(나머지 줄은 쓰지 않는다) — 못 하면 None(호출부가 전체 디코드).
+
+    JPEG 는 위에서부터 한 줄씩 풀리므로 Crop 아래쪽은 풀 필요도, 읽을 필요도 없다(측정: 위 200줄 3 ms ·
+    전체 15 ms, NAS 에서는 읽는 바이트도 같은 비율로 준다).  **푼 줄은 전체 디코드와 같은 값이다**(테스트로 확인).
+    일부러 일찍 멈추면 디코더가 '깨짐' 코드를 돌려줘 진짜 깨진 파일과 구분이 안 되므로, 버퍼를 한 값으로 채워 두고
+    맨 아래 줄이 그대로면(= 거기까지 못 풀었다) None 을 돌려 전체 디코드가 판정하게 한다."""
+    from PIL import Image
+    with Image.open(path) as im:
+        if (im.format != "JPEG" or im.mode not in ("L", "RGB") or len(im.tile) != 1
+                or im.tile[0].codec_name != "jpeg" or bottom >= im.height):
+            return None
+        im.load_prepare()
+        im.im = Image.core.fill(im.mode, im.size, _SENTINEL if im.mode == "L" else (_SENTINEL,) * 3)
+        codec, _ext, offset, args = im.tile[0]
+        dec = Image._getdecoder(im.mode, codec, args, im.decoderconfig)
+        dec.setimage(im.im, (0, 0, im.width, bottom))
+        im.fp.seek(offset)
+        rest = b""
+        while True:
+            fresh = im.fp.read(65536)
+            if not fresh and not rest:
+                return None                     # 파일이 줄 수를 못 채우고 끝남 — 전체 디코드가 오류로 알린다
+            rest += fresh
+            n, _err = dec.decode(rest)
+            if n < 0:
+                break
+            if n == 0 and not fresh:
+                return None                     # 더 줄 데이터가 없는데 디코더도 못 나아감
+            rest = rest[n:]                      # 디코더가 덜 쓴 뒷부분은 다음 덩어리 앞에 붙인다(ImageFile.load 와 같다)
+        im.tile = []                             # crop() 이 다시 풀려 하지 않게
+        ext = im.crop((0, bottom - 1, im.width, bottom)).getextrema()
+        if all(b == (_SENTINEL, _SENTINEL) for b in (ext if im.mode == "RGB" else (ext,))):
+            return None
+        return im.copy()
+
+
+def crops_from(path, boxes) -> Optional[list]:
+    """한 Scan 원본을 **한 번만** 디코드해 ``boxes`` 를 전부 자른다(공유 디코드 캐시를 거치지 않는다 —
+    스레드 여럿이 서로 다른 원본을 동시에 열어도 캐시를 밀어내지 않는다).  못 읽으면 None.
+
+    Crop 이 닿는 맨 아래 줄까지만 푼다(:func:`_decode_top`) — 그것이 안 되면 전체 디코드."""
+    from PIL import Image
+    try:
+        im = None
+        if boxes:
+            need = max(min(b[1] + b[3], 1 << 30) for b in boxes)
+            if need >= 1:
+                try:
+                    im = _decode_top(path, need)
+                except Exception:
+                    im = None                    # 부분 디코드 실패 — 아래 전체 디코드가 같은 파일을 판정한다
+        if im is None:
+            with Image.open(path) as src:
+                im = src.copy()  # EXIF 회전을 적용하지 않는다(raw 규약 — _decode 와 같다)
+            im.load()
+        return [cut(im, b) for b in boxes]
+    except Exception:
+        _LOG.warning("Scan 원본을 읽지 못함: %s", path)
+        return None
 
 
 def load_full(cand: Candidate):

@@ -10,6 +10,9 @@ Kendall RDL4 Notch Right: 90° 돌린 뒤 약 635 µm) — 그대로 tol 로 세
 방향을 못 찾았다.  뚜렷하지 않으면(지지 수가 적거나 2등과 비슷) 값을 내지 않는다 —
 ``coords.calibration.auto_offset`` 과 같은 태도다(``MIN_SUPPORT``·``DOMINANCE`` 는 **가정**).
 
+★ die 가 정사각형이 아니면 두 폴더 좌표가 쓴 die pitch(가로 · 세로)로 90° 돌림이 되는지부터 가른다
+(:func:`_turn_from_pitches` · :func:`_pitch_of`) — 틀린 방향이 짝을 더 많이 낸 일이 있었다(TB500, 관측 2026-11-15).
+
 사진 수가 많아도 느리지 않게 앞쪽 슬롯 몇 개만 본다(:data:`MAX_SLOTS`).
 """
 
@@ -17,6 +20,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -68,6 +72,66 @@ def _shared_offset(groups, fixed) -> Tuple[float, float]:
     return _calib._guess_from(votes) or (0.0, 0.0)
 
 
+def _pitch_of(folder: Path, source: str) -> Optional[Tuple[float, float]]:
+    """그 폴더 좌표가 **실제로 쓴** die pitch ``(x, y)`` — 정할 수 없으면 None(그 슬롯은 가르지 않는다).
+
+    KLA 는 정보파일 ``DiePitch``(:func:`~..coords.wafer_geometry.kla_geometry`, 못 읽어 기본값을 댄
+    경우는 None), Camtek INI 는 검산을 통과해 채택된 값(:func:`~..coords.wafer_geometry.camtek_geometry`)
+    — 둘 다 그 장비 **좌표 틀**의 값이고 notch 돌림(:func:`notch.folder_frame`)도 이 값을 쓴다.
+    검산 없이 파일 첫 후보를 읽는 안내용 ``peek_die_pitch`` 는 쓰지 않는다 — 첫 후보가 검산에서
+    떨어지고 다음 후보로 좌표를 만든 폴더에서 버려진 값으로 맞는 방향을 뺐다(PR #141 리뷰 지적,
+    2026-11-15).  LIVE 파일명(pitch 가 추정일 수 있음) · 절대좌표는 None.  둘 다 캐시된 값이다."""
+    from ..coords import wafer_geometry as wg
+    if source == "kla":
+        k = wg.kla_geometry(folder)
+        return None if k.source == "fallback" else (k.pitch_x, k.pitch_y)
+    if source == "camtek_ini":
+        g = wg.camtek_geometry(folder)
+        return (g.pitch_x, g.pitch_y) if g is not None else None
+    return None
+
+
+def _turn_from_pitches(a: Tuple[float, float], b: Tuple[float, float]) -> Optional[bool]:
+    """기준 ``a`` · 검증 ``b`` 의 die pitch 로 본 90° 돌림 — True 면 가로 · 세로가 바뀌어 90° 만 가능,
+    False 면 그대로라 0° · 180° 만 가능, None 이면 가를 수 없다(정사각형 · 애매 · 단위가 다름).
+
+    고정 % 기준은 두지 않는다 — 경계는 검증 die 의 가로 · 세로 **가운데**다(각 축이 어느 쪽에 더
+    가까운가).  관측(2026-11-15): TB500 두 장비 37,247.9 × 44,905.3 = 그대로, Kendall KLA 27,474.6 ×
+    47,836.0 ↔ Camtek 47,835.6 × 27,474.8 = 바뀜(실물 짝도 90°)."""
+    half = abs(b[0] - b[1]) / 2
+    if half <= 0:
+        return None
+    same = abs(a[0] - b[0]) < half and abs(a[1] - b[1]) < half
+    swap = abs(a[0] - b[1]) < half and abs(a[1] - b[0]) < half
+    return None if same == swap else swap
+
+
+def _first_folder(paths, coords) -> Optional[Tuple[Path, str]]:
+    """좌표가 있는 첫 사진의 ``(폴더, 좌표 출처)`` — 없으면 None."""
+    for p in paths:
+        c = coords.get(p)
+        if c is not None:
+            return Path(p).parent, c.source
+    return None
+
+
+def _turn_allowed(groups, coords, pitch_of: Callable = _pitch_of) -> Optional[bool]:
+    """슬롯마다 :func:`_turn_from_pitches` — 모두 같은 답일 때만 그 답, 하나라도 못 가르면 None."""
+    seen = set()
+    for refs, vals in groups:
+        ka, kb = _first_folder(refs, coords), _first_folder(vals, coords)
+        if ka is None or kb is None:
+            continue
+        a, b = pitch_of(*ka), pitch_of(*kb)
+        if not a or not b:
+            continue
+        t = _turn_from_pitches(a, b)
+        if t is None:
+            return None
+        seen.add(t)
+    return next(iter(seen)) if len(seen) == 1 else None
+
+
 def score_directions(groups: Sequence[Tuple[Sequence, Sequence]],
                      ref_root, val_root, ref_dir: str, tol: float, *,
                      resolve: Callable = None,
@@ -81,9 +145,19 @@ def score_directions(groups: Sequence[Tuple[Sequence, Sequence]],
     scores: Dict[str, int] = {}
     offsets: Dict[str, Tuple[float, float]] = {}
     n = len(notch.DIRECTIONS)
+    # die 가 정사각형이 아니면 가로 · 세로(두 폴더 좌표가 쓴 값)로 90° 돌림이 되는지부터 가른다 —
+    # 짝 수는 우연히 틀린 방향에서 많을 수 있다(TB500: 90° 방향 374 > 맞는 방향 150, 관측 2026-11-15).
+    turn = _turn_allowed(groups, coords)
+    quarter = ({notch.LEFT, notch.RIGHT} if ref_dir in (notch.UP, notch.DOWN)
+               else {notch.UP, notch.DOWN})
+    if turn is not None:
+        _LOG.info("Notch 자동 감지: die 가로·세로(파일 값)로 보아 %s 방향은 후보에서 뺍니다",
+                  sorted(d for d in notch.DIRECTIONS if (d in quarter) != turn))
     for i, d in enumerate(notch.DIRECTIONS):
         if progress:
             progress(i, n)
+        if turn is not None and (d in quarter) != turn:
+            continue                      # die 모양으로 보아 불가능한 돌림
         dirs = ((str(ref_root), ref_dir), (str(val_root), d))
         try:
             fixed = notch.apply_notch(

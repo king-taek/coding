@@ -1,0 +1,106 @@
+FileVersion 1 2;
+FileTimestamp 09-15-26 19:58:57;
+InspectionStationID "KLA" "LDS CIRCL" "K3";
+SampleType WAFER;
+ResultTimestamp 09-15-26 13:17:19;
+LotID "INTP-KENDALL-104-2608@6324";
+SampleSize 1 300;
+DeviceID "KENDALL_INTP";
+SetupID "ROOT-HVM-KENDALL_INTP-SEQ_KENDALL_RDL4_K3" 09-14-26 16:43:00;
+StepID "SEQ_KENDALL_RDL4_K3";
+SampleOrientationMarkType NOTCH;
+OrientationMarkLocation DOWN;
+DiePitch 2.7474600000e+004 4.7836012000e+004;
+DieOrigin 0.0000000000e+000 0.0000000000e+000;
+WaferID "00NUR030XYA3";
+Slot 25;
+SampleCenterLocation -7.2900000000e+002 -5.9400000000e+002;
+ClassLookup 15
+  0 "	Unclassified"
+  3 "Metal Residue	"
+  1 "Undersized Bump	"
+  2 "Missing bump	"
+  4 "Bridged Bumps	"
+  7 "Irregular Bump	"
+  9 "Oversized Bump	"
+  14 "RDL defect	"
+  22 "Scratch	"
+  23 "re-passivation defect	"
+  31 "Foreign Material	"
+  94 "Other	"
+  777 "Monitor1	"
+  778 "Monitor2	"
+  779 "Monitor3	"  ;
+OrientationInstructions "Front";
+CoordinatesMirrored NO;
+InspectionTest 3;
+SampleTestPlan 40
+  -5 -1 
+  -5 0 
+  -4 -2 
+  -4 -1 
+  -4 0 
+  -4 1 
+  -3 -2 
+  -3 -1 
+  -3 0 
+  -3 1 
+  -2 -2 
+  -2 -1 
+  -2 0 
+  -2 1 
+  -1 -3 
+  -1 -2 
+  -1 -1 
+  -1 0 
+  -1 1 
+  -1 2 
+  0 -3 
+  0 -2 
+  0 -1 
+  0 0 
+  0 1 
+  0 2 
+  1 -2 
+  1 -1 
+  1 0 
+  1 1 
+  2 -2 
+  2 -1 
+  2 0 
+  2 1 
+  3 -2 
+  3 -1 
+  3 0 
+  3 1 
+  4 -1 
+  4 0 ;
+AreaPerTest 1.0514200000e+011;
+DefectRecordSpec 22 DEFECTID X Y XREL YREL XINDEX YINDEX XSIZE YSIZE DEFECTAREA DSIZE CLASSNUMBER TEST CLUSTERNUMBER ROUGHBINNUMBER FINEBINNUMBER CHANNELID MACROSIGCLASS INTENSITY MACROSIGID IMAGECOUNT IMAGELIST ;
+DefectList;
+TiffFileName 00NUR030XYA3_-1_1_31_1.jpg;
+DefectList
+ 1 -9304.708 64186.410 17440.890 15756.398 -1 1 15.620 11.710 182.960000 15.620 31 3 0 0 2 2 0 2334 0 1 1 1 0;
+TiffFileName 00NUR030XYA3_3_1_31_2.jpg;
+DefectList
+ 2 102755.580 59004.880 19602.781 10574.868 3 1 1.300 1.300 1.690000 1.300 31 3 0 0 2 2 0 2279 0 1 1 1 0;
+TiffFileName 00NUR030XYA3_3_0_31_3.jpg;
+DefectList
+ 3 90843.710 1391.490 7690.911 797.490 3 0 3.900 2.600 10.160000 3.900 31 3 0 0 1 1 0 724 0 1 1 1 0;
+TiffFileName 00NUR030XYA3_-4_0_31_4.jpg;
+DefectList
+ 4 -84137.818 601.840 25031.579 7.840 -4 0 18.220 7.810 142.300000 18.220 31 3 0 0 4 4 0 1450 0 1 1 1 0;
+TiffFileName 00NUR030XYA3_-1_-1_31_5.jpg;
+DefectList
+ 5 -3929.268 -39473.328 22816.330 7768.681 -1 -1 15.620 6.510 101.640000 15.620 31 3 0 0 2 2 0 2250 0 1 1 1 0;
+TiffFileName 00NUR030XYA3_-2_-1_31_6.jpg;
+DefectList
+ 6 -38956.818 -39150.548 15263.380 8091.461 -2 -1 6.510 27.330 177.880000 27.330 31 3 0 0 4 4 0 2639 0 1 1 1 0;
+TiffFileName 00NUR030XYA3_2_-2_31_7.jpg;
+DefectList
+ 7 72470.910 -57917.318 16792.711 37160.703 2 -2 6.510 5.210 33.880000 6.510 31 3 0 0 2 2 0 1258 0 1 1 1 0;
+SummarySpec 5
+  TESTNO    NDEFECT    DEFDENSITY    NDIE    NDEFDIE  ;
+SummaryList 
+  3    7    6.6576614840e-003    40    17  ;
+EndOfFile;

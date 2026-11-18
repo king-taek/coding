@@ -44,6 +44,7 @@ from .models import (CAMTEK_COL_OFFSET, CAMTEK_PITCH_X, CAMTEK_PITCH_Y,
 __all__ = ["CamtekGeometry", "KlaGeometry", "camtek_geometry", "kla_geometry",
            "has_camtek_entries", "peek_die_pitch", "live_geometry", "FALLBACK_CAMTEK",
            "FALLBACK_KLA", "EXPORT_SOURCE_TAG", "DIELUT_SOURCE_TAG", "AGREE_SOURCE_TAG",
+           "SMALL_MAP_SOURCE_TAG", "is_alignment_photo",
            "is_trusted_source", "dielut_cells", "KLA_CENTER_SOURCE"]
 
 _LOG = logging.getLogger("aoi.coords")
@@ -120,6 +121,114 @@ class CamtekGeometry:
     col_origin: int
     row_total: int
     source: str      # 진단용 — 어느 파일에서 왔는지("fallback" 이면 TB500 상수)
+    # 블록형 제품(장비 한 칸 안에 die 가 여러 개) — 있으면 die 번호·die 안 좌표를 이 표로
+    # 찾는다(:class:`BlockLayout`).  pitch_x/y 는 그때 칸 크기 ÷ 칸 안 die 수(그림용 평균)다.
+    block: Optional["BlockLayout"] = None
+
+
+@dataclass(frozen=True)
+class BlockLayout:
+    """블록형 제품의 칸 안 die 배치 — ``ProductInfo.ini [Geometric] ColsInBlock/RowsInBlock`` ·
+    ``[DieRectInfo] a_b = 사용, 폭, 높이, x0, y0`` (파일).
+
+    장비 한 칸(``XDieIndex``·``DieStep``)에 die 가 ``cols × rows`` 개 들고 크기·간격이 서로
+    다르다.  칸을 똑같이 나누면 AMD Sepio 6×13 에서 357 중 45 가 틀렸고, 이 표로 가장 가까운
+    die 를 고르면 XP2100 · W97320 · AMD 1,035/1,035 가 INI ``Col`` 과 같았다(관측, 3차 수집).
+
+    ``i = floor(X/step_x)·cols + a``, ``x = (X mod step_x) − x0(a, b)`` (Y 동일)."""
+    step_x: float
+    step_y: float
+    cols: int
+    rows: int
+    xc: tuple            # 칸 안 die 열 a 의 중심 x (열마다 행들의 가운데값)
+    yc: tuple            # 칸 안 die 행 b 의 중심 y
+    origin: tuple        # ((a, b), (x0, y0)) …
+
+    def locate(self, X: float, Y: float) -> tuple[int, int, float, float]:
+        """stage ``(X, Y)`` → ``(i, j, die 안 x, die 안 y)``.  틈에 찍힌 결함도 가장 가까운 die 에 든다."""
+        I, J = math.floor(X / self.step_x), math.floor(Y / self.step_y)
+        bx, by = X - I * self.step_x, Y - J * self.step_y
+        a = min(range(self.cols), key=lambda k: abs(bx - self.xc[k]))
+        b = min(range(self.rows), key=lambda k: abs(by - self.yc[k]))
+        x0, y0 = dict(self.origin)[(a, b)]
+        return (I * self.cols + a, J * self.rows + b,
+                float(math.floor(bx - x0)), float(math.floor(by - y0)))
+
+
+_RECT_SECTION = re.compile(r"(?ims)^\s*\[DieRectInfo\]\s*$(.*?)(?=^\s*\[|\Z)")
+_RECT_LINE = re.compile(r"(?m)^\s*(\d+)_(\d+)\s*=\s*-?\d+\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*,"
+                        r"\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)")
+
+
+def block_layout(folder: Path) -> Optional[BlockLayout]:
+    """자기 폴더 ``ProductInfo.ini`` 의 칸 안 배치표 — 블록형이 아니거나 표가 빠지면 ``None``."""
+    txt = read_ini_text(Path(folder) / _EXPORT_FILE)
+    if not txt:
+        return None
+    try:
+        cols = int(_read_key(Path(folder) / _EXPORT_FILE, "ColsInBlock", 1, 10000) or 1)
+        rows = int(_read_key(Path(folder) / _EXPORT_FILE, "RowsInBlock", 1, 10000) or 1)
+    except (TypeError, ValueError):
+        return None
+    if (cols, rows) == (1, 1):
+        return None
+    step_x = _read_key(Path(folder) / _EXPORT_FILE, "XDieIndex")
+    step_y = _read_key(Path(folder) / _EXPORT_FILE, "YDieIndex")
+    sec = _RECT_SECTION.search(txt)
+    if step_x is None or step_y is None or sec is None:
+        return None
+    rects = {(int(a), int(b)): (float(w), float(h), float(x0), float(y0))
+             for a, b, w, h, x0, y0 in _RECT_LINE.findall(sec.group(1))}
+    if not all((a, b) in rects for a in range(cols) for b in range(rows)):
+        return None
+    mid = lambda v: sorted(v)[len(v) // 2]                                  # noqa: E731
+    xc = tuple(mid([rects[(a, b)][2] + rects[(a, b)][0] / 2 for b in range(rows)])
+               for a in range(cols))
+    yc = tuple(mid([rects[(a, b)][3] + rects[(a, b)][1] / 2 for a in range(cols)])
+               for b in range(rows))
+    return BlockLayout(step_x, step_y, cols, rows, xc, yc,
+                       tuple(((a, b), (r[2], r[3])) for (a, b), r in sorted(rects.items())))
+
+
+def _block_geometry(folder: Path) -> Optional[CamtekGeometry]:
+    """블록형 제품의 기하 — 배치표로 찾은 die 번호가 INI ``Col`` 과 **전부** 같고(X 등호),
+    ``Row`` 와의 차가 레시피별 상수일 때만(:func:`_grid_check` 와 같은 기준).
+
+    번호 기준은 자기 폴더 번호표(``[ExportData]``, die 단위 번호)만 쓴다.  없으면 ``None`` —
+    지금처럼 절대좌표 + 경고로 둔다(칸 안 die 를 짐작으로 나누지 않는다)."""
+    from . import camtek_ini      # 순환 import 회피
+
+    lay = block_layout(folder)
+    if lay is None:
+        return None
+    raw = {s: v for s, v in camtek_ini.load_raw_folder(folder).items()
+           if not is_alignment_photo(s)}
+    if not raw:
+        return None
+    recipes = camtek_ini.load_recipe_folder(folder)
+    by_recipe: dict[int, set[int]] = {}
+    for stem, (X, Y, col_i, row_i) in raw.items():
+        i, j, _x, _y = lay.locate(X, Y)
+        if i != col_i:
+            return None
+        by_recipe.setdefault(recipes.get(stem, 0), set()).add(j - row_i)
+    if any(len(d) != 1 for d in by_recipe.values()):
+        return None
+    px, py = lay.step_x / lay.cols, lay.step_y / lay.rows
+    rng = _export_range(folder)
+    cx, cy = _wafer_center(folder)
+    if rng is None or not cx or not cy:
+        return None
+    c_min, c_max, r_min, r_max = rng
+    r = _read_diameter(folder) / 2.0
+    if not (math.floor((cx - r) / px) <= c_min and c_max <= math.floor((cx + r) / px)
+            and math.floor((cy - r) / py) <= r_min and r_max <= math.floor((cy + r) / py)):
+        _LOG.warning("%s [ExportData] 범위가 웨이퍼 밖이라 블록형 번호를 쓰지 않습니다: %s",
+                     _EXPORT_FILE, folder)
+        return None
+    return CamtekGeometry(pitch_x=px, pitch_y=py, col_origin=c_min, row_total=r_max,
+                          source=f"{_EXPORT_FILE}[DieRectInfo {lay.cols}x{lay.rows}]"
+                                 f"+{EXPORT_SOURCE_TAG}", block=lay)
 
 
 @dataclass(frozen=True)
@@ -423,6 +532,11 @@ def _grid_check(folder: Path, pitch_x: float, pitch_y: float) -> tuple[bool, boo
     TB500 상수가 채택되는 길이 열린다(``x = −1,652,266 µm`` 참사의 재현).  실제로 기존
     거부 경로는 전부 X 축에서 걸린다.
 
+    다중 레시피에서 레시피 N 의 die 이름표가 레시피 1 틀에서 옮겨져 있으면(Kendall PI6 · PI2:
+    ``Col`` 이 늘 1 크다) 그 사진의 ``Col`` 을 **그 폴더 파일에서 읽은 차이**
+    (:func:`recipe_label_shifts`)만큼 되돌린 뒤 같은 등호로 본다.  완화가 아니라 같은 틀로
+    맞추는 것이다 — 차이를 못 읽으면 지금처럼 등호가 깨져 절대좌표로 간다.
+
     반환 ``(통과, 의미있음)``.  '의미있음' 은 검산이 실제로 pitch 를 제약했는지다 —
     모든 항목이 ``Col=0`` 이면 어떤 pitch 든 통과하므로 검산이 아무 말도 못 한 것이다.
     파일에서 읽은 값은 '통과' 만으로 채택하지만, 상수 후보는 '의미있음' 까지 요구한다.
@@ -434,11 +548,15 @@ def _grid_check(folder: Path, pitch_x: float, pitch_y: float) -> tuple[bool, boo
         recipes = camtek_ini.load_recipe_folder(folder)
     except Exception:
         return (False, False)
+    raw = {s: v for s, v in raw.items() if not is_alignment_photo(s)}
     if not raw:
         return (False, False)
 
-    # X: 등호 그대로.
-    if not all(math.floor(X / pitch_x) == col_i for X, _, col_i, _ in raw.values()):
+    # X: 등호 그대로.  레시피 N 사진만 그 레시피의 이름표 차이(파일 값)를 뺀 Col 과 비교한다.
+    shifts = recipe_label_shifts(folder)
+    if not all(math.floor(X / pitch_x)
+               == col_i - shifts.get(recipes.get(stem, 0), (0, 0))[0]
+               for stem, (X, _, col_i, _) in raw.items()):
         return (False, False)
 
     # Y: 레시피별로 차이가 일정하기만 하면 된다.
@@ -478,6 +596,10 @@ def camtek_geometry(folder: Path) -> Optional[CamtekGeometry]:
             if src == _CONST_SOURCE and not meaningful:
                 continue      # 검산이 pitch 를 제약하지 못했다 — 상수를 추정으로 쓰지 않는다
             return _with_origins(folder, px, py, src)
+        # 블록형 제품 — 균등 pitch 로는 검산이 안 맞는다.  칸 안 배치표로 한 번 더 본다.
+        blk = _block_geometry(folder)
+        if blk is not None:
+            return blk
         # ★ Camtek INI 자체가 없는 폴더(KLA 슬롯·LIVE 파일명 슬롯)는 **조용히** None.
         #   경고는 '변환할 항목이 있는데 pitch 를 못 정한' 진짜 문제일 때만 낸다 —
         #   안 그러면 KLA 폴더마다 무의미한 경고가 쌓인다.
@@ -513,44 +635,165 @@ DIELUT_SOURCE_TAG = _DIELUT_FILE
 # 번호표와 같았고, 틀린 8(AVAGO 2 · QORVO 6)은 전부 둘이 다르거나 격자가 없었다(관측 2026-10-26).
 # 저장소 샘플 83 폴더도 같다(둘 일치 69, 틀림 0).  사용자 결정 2026-10-27: "지금까지 준 샘플에서
 # 전부 정답인 규칙이면 경고 표시 없어도 됨".  둘이 다르거나 하나뿐이면 ⚠(NUMBER_WARN_NO_TABLE).
+# ⚠ 2026-11-13 반증: 번호표를 숨긴 HORNET CCU 2폴더(P8V798-04F4·08D0)에서 둘이 같은 (3, 71) 을
+# 냈는데 번호표·장비 화면(형제 12B2 (61, 44))은 (3, 70) 이었다.  '표본 전부에서 맞았다' 는 조건이
+# 깨졌으므로 이 꼬리표는 더 이상 ⚠ 를 빼지 않는다(기록용으로만 남긴다).
 AGREE_SOURCE_TAG = "중심식=격자식"
-_TRUSTED_TAGS = (EXPORT_SOURCE_TAG, DIELUT_SOURCE_TAG, AGREE_SOURCE_TAG)
+# 작은 die(두 축 모두 :data:`_SMALL_DIE` 이하)는 그 웨이퍼의 die 맵(웨이퍼를 70% 이상 덮을 때)은 61/61 맞았다
+# (번호표 59 폴더 · 장비 화면 GNF7K21 (1, 230) · GRN9H (103, 223), 2026-11-13).
+SMALL_MAP_SOURCE_TAG = "작은 die 맵"
+# 다른 웨이퍼(같은 셋업)의 번호표를 빌리는 방법은 쓰지 않는다(사용자 결정 2026-11-14) —
+# 배포받는 사람은 Conder 만 봐서 그 방법을 쓸 수 없고, 현택 PC 에서도 쓰지 않기로 했다.
+_TRUSTED_TAGS = (EXPORT_SOURCE_TAG, DIELUT_SOURCE_TAG, SMALL_MAP_SOURCE_TAG)
+_SMALL_DIE = 1600.0
+# 정렬 사진(파일명에 ``.wlup``) — 결함이 아니라 die 정렬용으로 찍은 사진이라 INI 의 Col/Row 가
+# 결함과 다른 규칙으로 적힌다.  pitch 검산에 섞으면 X 등호가 깨져 폴더 전체가 절대좌표로
+# 떨어졌다(TB500 RDL3/RDL4 Multi 31/32 폴더, 2026-11-12).  사용자 결정 2026-11-13: 무시한다.
+_ALIGN_PAT = re.compile(r"\.wlup(\.|$)", re.IGNORECASE)
+
+
+def is_alignment_photo(stem: str) -> bool:
+    """정렬 사진(이름에 ``.wlup``)인가 — pitch 검산에서 뺀다.  확장자를 뗀 stem
+    (``148988.179602.wlup``)과 전체 이름(``….wlup.-12.jpeg``) 모두 받는다."""
+    return _ALIGN_PAT.search(stem) is not None
 _DIELUT_REC = re.compile(r"<DieLutData\b([^>]*?)/?>")
 _DIELUT_ATTR = re.compile(r'\b(Col|Row)="(-?\d+)"')
+_DIELUT_RECIPE = re.compile(r'\bRecipeNum="(-?\d+)"')
+# 다중 레시피 스캔에서 레시피 N(2, 3, …)의 설정 파일 — 레시피 1 은 ``ProductInfo.ini``.
+_RECIPE_PI = re.compile(r"^Recipe(\d+)-ProductInfo\.ini$", re.IGNORECASE)
 
 
 def is_trusted_source(source: str) -> bool:
     """:attr:`CamtekGeometry.source` 의 번호 기준이 ⚠ 없이 믿을 것인가 — 장비 기록(번호표 ·
-    die 목록)이거나, 표본 전부에서 맞았던 '중심식=격자식' 일치다.  그 밖은 유도값이라 경고."""
+    die 목록)과 작은 die 의 die 맵이다.  그 밖은 유도값이라 경고."""
     return any(tag in source for tag in _TRUSTED_TAGS)
 
 
 def dielut_cells(folder: Path) -> Optional[frozenset[tuple[int, int]]]:
-    """``DieLut.dat`` 의 die 칸 ``(Col, Row)`` 집합(stage 인덱스).  없거나 비었으면 None.
+    """``DieLut.dat`` 의 die 칸 ``(Col, Row)`` 집합(stage 인덱스, **레시피 1 틀**).  없거나 비었으면 None.
 
-    레시피(RecipeNum)마다 같은 칸이 반복되므로 집합으로 합친다.  Wafer map 의 칸과
-    번호 기준(:func:`_dielut_origins`)이 **같은 집합**을 쓰도록 여기 하나로 읽는다.
-    전 구간 fail-safe."""
+    레시피(RecipeNum)마다 같은 칸이 반복되므로 집합으로 합친다.  레시피 N 의 이름표가
+    옮겨져 있으면(:func:`recipe_label_shifts`) 그 레시피 칸을 그만큼 되돌려 합친다 — 그대로
+    합치면 끝 줄이 하나 늘어 row 가 1 컸다(E5025794EWF5: 장비 화면 (2, 4) ↔ 앱 (2, 5), 관측
+    2026-11-15).  Wafer map 의 칸과 번호 기준(:func:`_dielut_origins`)이 **같은 집합**을 쓰도록
+    여기 하나로 읽는다.  전 구간 fail-safe."""
+    recs = _dielut_by_recipe(folder)
+    if not recs:
+        return None
+    shifts = recipe_label_shifts(folder)
+    cells: set[tuple[int, int]] = set()
+    for recipe, cs in recs.items():
+        dc, dr = shifts.get(recipe, (0, 0))
+        cells.update((c - dc, r - dr) for c, r in cs)
+    return frozenset(cells) or None
+
+
+def _dielut_by_recipe(folder: Path) -> dict[Optional[int], frozenset[tuple[int, int]]]:
+    """``DieLut.dat`` 칸을 레시피(``RecipeNum``)별로 — 번호가 없는 레코드는 키 ``None``.  없으면 빈 dict."""
     p = folder / _DIELUT_FILE
     try:
         st = p.stat()
     except OSError:
-        return None
-    return _dielut_cells(p, st.st_mtime_ns, st.st_size)
+        return {}
+    return dict(_dielut_records(p, st.st_mtime_ns, st.st_size))
 
 
 @lru_cache(maxsize=256)
-def _dielut_cells(p: Path, _mtime_ns: int, _size: int) -> Optional[frozenset[tuple[int, int]]]:
+def _dielut_records(p: Path, _mtime_ns: int, _size: int
+                    ) -> tuple[tuple[Optional[int], frozenset[tuple[int, int]]], ...]:
     try:
         txt = p.read_bytes().decode("utf-8", "replace")
     except OSError:
-        return None
-    cells = set()
+        return ()
+    by: dict[Optional[int], set[tuple[int, int]]] = {}
     for m in _DIELUT_REC.finditer(txt):
         kv = dict(_DIELUT_ATTR.findall(m.group(1)))
         if "Col" in kv and "Row" in kv:
-            cells.add((int(kv["Col"]), int(kv["Row"])))
-    return frozenset(cells) or None
+            rm = _DIELUT_RECIPE.search(m.group(1))
+            by.setdefault(int(rm.group(1)) if rm else None, set()).add(
+                (int(kv["Col"]), int(kv["Row"])))
+    return tuple((k, frozenset(v)) for k, v in by.items())
+
+
+def _box(cells) -> tuple[int, int, int, int]:
+    return (min(c for c, _ in cells), max(c for c, _ in cells),
+            min(r for _, r in cells), max(r for _, r in cells))
+
+
+def recipe_label_shifts(folder: Path) -> dict[int, tuple[int, int]]:
+    """다중 레시피 스캔에서 레시피 N 의 die 이름표가 레시피 1 틀에서 옮겨진 양 ``{N: (dcol, drow)}``.
+
+    장비는 같은 **정렬 die** 를 레시피마다 자기 이름표로 적는다 — 레시피 1 은 ``ProductInfo.ini``,
+    레시피 N 은 ``Recipe{N}-ProductInfo.ini`` 의 ``AlignmentDieCol/Row``.  그 차이 Δ 를 쓰되
+    **두 출처가 같은 말을 할 때만** 쓴다:
+
+    ① 그 정렬 die 의 자리(``DieTopLeft_X/Y``)가 두 파일에서 반 칸(``XDieIndex/YDieIndex`` ÷ 2) 안이다
+       — 다른 die 를 정렬 die 로 고른 레시피가 아니다.
+    ② ``DieLut.dat`` 의 레시피 N 범위가 레시피 1 범위를 **정확히 Δ** 옮긴 것이다
+       — T256 ROTATION(GX57529995)은 정렬 die 번호만 (6, 2) ↔ (2, 8) 로 다르고 두 범위가 같아
+       여기서 막힌다(그 43장은 INI ``Col`` = 좌표 칸, 관측 2026-11-15).
+
+    Δ 가 (0, 0) 이면 (0, 0) 을 넣는다.  값이 하나라도 없거나 조건이 어긋나면 그 레시피는 넣지
+    않는다(지금 동작 그대로).  ★ 고정값('+1' 등)을 두지 마라 — Δ 의 크기와 부호는 그 폴더 자기
+    파일에서만 읽는다(사용자 지시 2026-11-15 '하드코딩 금지').  근거(관측 2026-11-15): Kendall PI6 ·
+    PI2 7 폴더가 Δ (1, 1) 이고 장비 화면 5/5 · 형제 웨이퍼 Conder 이름 143/143 이 레시피 1 틀,
+    다른 다중 레시피 28 폴더는 Δ (0, 0).  전 구간 fail-safe."""
+    try:
+        return dict(_recipe_label_shifts(folder))
+    except Exception:
+        _LOG.exception("레시피별 die 이름표 차이를 읽다 실패해 쓰지 않습니다: %s", folder)
+        return {}
+
+
+def _int_key(path: Path, key: str) -> Optional[int]:
+    v = _read_key(path, key, 0, 1e6)
+    return int(v) if v is not None and v == int(v) else None
+
+
+@lru_cache(maxsize=256)
+def _recipe_label_shifts(folder: Path) -> tuple[tuple[int, tuple[int, int]], ...]:
+    try:
+        names = sorted(f.name for f in folder.iterdir() if _RECIPE_PI.match(f.name))
+    except OSError:
+        return ()
+    if not names:
+        return ()
+    base = folder / _EXPORT_FILE
+    c1, r1 = _int_key(base, "AlignmentDieCol"), _int_key(base, "AlignmentDieRow")
+    if c1 is None or r1 is None:
+        return ()
+    px = _read_key(base, "XDieIndex", _MIN_PITCH, _MAX_PITCH)
+    py = _read_key(base, "YDieIndex", _MIN_PITCH, _MAX_PITCH)
+    boxes: Optional[dict] = None
+    out: list[tuple[int, tuple[int, int]]] = []
+    for name in names:
+        k = int(_RECIPE_PI.match(name).group(1))
+        q = folder / name
+        cn, rn = _int_key(q, "AlignmentDieCol"), _int_key(q, "AlignmentDieRow")
+        if cn is None or rn is None:
+            continue
+        d = (cn - c1, rn - r1)
+        if d != (0, 0):
+            xs = [_read_key(f, "DieTopLeft_X", -1e7, 1e7) for f in (base, q)]
+            ys = [_read_key(f, "DieTopLeft_Y", -1e7, 1e7) for f in (base, q)]
+            if None in xs or None in ys or px is None or py is None:
+                continue
+            if abs(xs[0] - xs[1]) > px / 2 or abs(ys[0] - ys[1]) > py / 2:
+                _LOG.info("레시피 %d 는 다른 die 를 정렬 die 로 골라 이름표 차이 %s 를 쓰지 않습니다: %s",
+                          k, d, folder)
+                continue
+            if boxes is None:
+                boxes = {rk: _box(cs) for rk, cs in _dielut_by_recipe(folder).items() if cs}
+            b1, bk = boxes.get(1), boxes.get(k)
+            if b1 is None or bk is None or bk != (b1[0] + d[0], b1[1] + d[0],
+                                                 b1[2] + d[1], b1[3] + d[1]):
+                _LOG.info("레시피 %d 의 %s 범위가 이름표 차이 %s 만큼 옮겨져 있지 않아 쓰지 않습니다: %s",
+                          k, _DIELUT_FILE, d, folder)
+                continue
+            _LOG.info("레시피 %d 의 die 이름표가 레시피 1 보다 %s 옮겨져 있어 되돌려 씁니다: %s",
+                      k, d, folder)
+        out.append((k, d))
+    return tuple(out)
 
 
 def _dielut_origins(folder: Path, px: float, py: float, dia: float,
@@ -588,6 +831,24 @@ def _dielut_origins(folder: Path, px: float, py: float, dia: float,
     return c_min, r_max
 
 
+def _export_range(folder: Path) -> Optional[tuple[int, int, int, int]]:
+    """자기 폴더 ``ProductInfo.ini [ExportData]`` 의 ``(cMin, cMax, rMin, rMax)`` — 없거나 이상하면 None."""
+    txt = read_ini_text(folder / _EXPORT_FILE)
+    if not txt:
+        return None
+    sec = _EXPORT_SECTION.search(txt)
+    if sec is None:
+        return None
+    kv = dict(re.findall(r"(?m)^\s*(\w+)\s*=\s*(-?\d+)\s*(?:;.*)?$", sec.group(1)))
+    try:
+        c_min, c_max, r_min, r_max = (int(kv[k]) for k in _EXPORT_KEYS)
+    except (KeyError, ValueError):
+        return None
+    if not (0 <= c_min <= c_max and 0 <= r_min <= r_max):
+        return None
+    return c_min, c_max, r_min, r_max
+
+
 def _export_origins(folder: Path, px: float, py: float, dia: float,
                     cx: Optional[float], cy: Optional[float]) -> Optional[tuple[int, int]]:
     """``ProductInfo.ini [ExportData] cMin/cMax/rMin/rMax`` 로 ``(col_origin, row_total)``.
@@ -610,19 +871,10 @@ def _export_origins(folder: Path, px: float, py: float, dia: float,
     웨이퍼 중심을 알고 범위가 웨이퍼 원의 인덱스 범위 안이다 · die 맵이 있으면 die 가 전부
     범위 안이다.  관측 171 폴더가 이 조건을 모두 통과했다.  ``_MAX_DIE_INDEX`` 상한은
     여기 쓰지 않는다 — die 가 작은 제품(QORVO row 319)에서 정당한 값을 버린다."""
-    txt = read_ini_text(folder / _EXPORT_FILE)
-    if not txt:
+    rng = _export_range(folder)
+    if rng is None:
         return None
-    sec = _EXPORT_SECTION.search(txt)
-    if sec is None:
-        return None
-    kv = dict(re.findall(r"(?m)^\s*(\w+)\s*=\s*(-?\d+)\s*(?:;.*)?$", sec.group(1)))
-    try:
-        c_min, c_max, r_min, r_max = (int(kv[k]) for k in _EXPORT_KEYS)
-    except (KeyError, ValueError):
-        return None
-    if not (0 <= c_min <= c_max and 0 <= r_min <= r_max):
-        return None
+    c_min, c_max, r_min, r_max = rng
     xi = _read_key(folder / _EXPORT_FILE, "XDieIndex", _MIN_PITCH, _MAX_PITCH)
     yi = _read_key(folder / _EXPORT_FILE, "YDieIndex", _MIN_PITCH, _MAX_PITCH)
     if xi is None or yi is None or abs(xi - px) > 0.01 or abs(yi - py) > 0.01:
@@ -666,6 +918,17 @@ def _with_origins(folder: Path, px: float, py: float, src: str) -> CamtekGeometr
     if lut is not None:
         return CamtekGeometry(pitch_x=px, pitch_y=py, col_origin=lut[0], row_total=lut[1],
                               source=f"{src}+{DIELUT_SOURCE_TAG}")
+    if px <= _SMALL_DIE and py <= _SMALL_DIE:
+        # ★ 2순위(작은 die): 그 웨이퍼의 die 맵.  ±1 클램프를 두지 않는다 — 작은 die 에서는
+        #   중심 유도가 수 칸 틀려(GNF7K21: 유도 (1, 452) · 맵·장비 (7, 438)) 클램프가 맞는
+        #   맵을 버렸다.  부분 맵은 _covers_wafer(70%) 가 거른다.  맵이 없거나 일부만이면
+        #   아래 유도 경로로 간다(⚠).
+        own = die_map_cells(folder, px, py)
+        if own is not None and _covers_wafer(own, cx, cy, dia, px, py, folder):
+            return CamtekGeometry(pitch_x=px, pitch_y=py,
+                                  col_origin=min(i for i, _ in own),
+                                  row_total=max(j for _, j in own),
+                                  source=f"{src}+{_DIE_MAP_FILE}+{SMALL_MAP_SOURCE_TAG}")
     d_origin = _col_origin(cx, dia, px)
     d_total = _row_total(cy, dia, py)
     grid = _grid_origins(cx, cy, dia, px, py)
@@ -926,8 +1189,10 @@ def _dat_cells(dat: Path, _mtime_ns: int, _size: int, _md_mtime_ns: int,
         return None
     col_origin = min(i for i, _ in cells)
     row_total = max(j for _, j in cells)
-    if not (0 <= col_origin <= _MAX_DIE_INDEX
-            and 0 <= row_total <= _MAX_DIE_INDEX):
+    # 상식 범위: stage 위 웨이퍼가 지름 두 배보다 멀리 갈 수 없다.  예전에는 고정 상한
+    # _MAX_DIE_INDEX(200)였는데 작은 die 의 정당한 맵(GNF7K21 960×665 → row 452)을 버렸다.
+    if not (0 <= col_origin <= max(_MAX_DIE_INDEX, 2 * _MAX_DIAMETER / px)
+            and 0 <= row_total <= max(_MAX_DIE_INDEX, 2 * _MAX_DIAMETER / py)):
         return None
     return frozenset(cells)
 

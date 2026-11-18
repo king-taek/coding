@@ -1,18 +1,17 @@
-"""GL 뷰어의 사진 화면 — 확대·이동, 전체 폭 수평/수직선, 도형(사각형·정사각형·원).
+"""GL 뷰어의 사진 화면 — 확대·이동, 도형(사각형·원).
 
 좌표는 모두 이미지 픽셀로 저장하고 그릴 때만 화면 좌표로 바꾼다 — 그래서 확대·축소·이동을
-해도 선과 도형이 자동으로 맞는다.  수평선·수직선은 **보이는 화면 전체를 가로질러** 긋는다.
+해도 도형이 자동으로 맞는다.
 
 조작
-- 선택한 ROI: 방향키로 1 px(Shift 10 px) 이동, ``+`` / ``-`` 로 크기 2 px(원은 반지름 1 px)씩.
-- 선: 마우스로 끌어 옮긴다.  도형: 몸통을 끌어 옮기고 손잡이로 키운다.
+- 선택한 ROI: 방향키로 1 px(Shift 10 px) 이동.
+- 도형: 몸통을 끌어 옮기고 손잡이로 크기를 바꾼다.
 - 휠 확대(커서 기준), 가운데·오른쪽 버튼 또는 Space+끌기로 이동, ``F`` 맞춤.
 """
 
 from __future__ import annotations
 
 import time
-from dataclasses import replace
 from typing import Optional
 
 import numpy as np
@@ -27,11 +26,10 @@ from ...gl.roi import Roi, RoiSet
 from .. import theme
 
 TOOL_MOVE = "move"
-TOOLS = (TOOL_MOVE, R.HLINE, R.VLINE, R.RECT, R.SQUARE, R.CIRCLE)
+TOOLS = (TOOL_MOVE, R.RECT, R.CIRCLE)
 
 _MIN_SCALE, _MAX_SCALE = 0.02, 64.0
 _GRID_FROM = 12.0               # 이 배율부터 픽셀 격자를 그린다
-_HIT_PX = 6                     # 선을 집는 허용 거리(화면 px)
 _HANDLE_PX = 9                  # 손잡이 크기(화면 px)
 _DRAG_START_PX = 4              # 이만큼 움직여야 '끌기' 로 본다
 _KEY_COALESCE_S = 0.8           # 방향키 연타는 되돌리기 한 번으로 묶는다
@@ -42,8 +40,6 @@ class GlCanvas(QWidget):
     selectionChanged = pyqtSignal()
     hoverInfo = pyqtSignal(int, int, int)      # x, y, GL (사진 밖이면 x = -1)
     viewChanged = pyqtSignal(float)            # 배율
-    toolRequested = pyqtSignal(str)            # 단축키로 도구가 바뀜
-    visibilityChanged = pyqtSignal()           # 선 보이기 상태가 바뀜
     viewStateChanged = pyqtSignal()            # 배율·이동이 바뀜(두 사진 비교의 화면 동기화)
 
     def __init__(self, parent=None) -> None:
@@ -56,7 +52,6 @@ class GlCanvas(QWidget):
         self._scale = 1.0
         self._off = QPointF(0, 0)
         self._fitted = True
-        self._target: Optional[tuple] = None       # Scan 결함 상자(이미지 px: l, t, w, h)
         self._lo = self._hi = None
         self._drag: Optional[dict] = None
         self._space = False
@@ -75,7 +70,6 @@ class GlCanvas(QWidget):
         """분석 배열(원본)과 표시용 RGB 를 함께 받는다.  ``fit`` 이면 화면에 맞춘다."""
         self._data = data
         self.set_display(rgb)
-        self._target = None
         if fit:
             self.fit()
 
@@ -110,11 +104,6 @@ class GlCanvas(QWidget):
         if (scale, ox, oy) == self.view_state():
             return
         self._scale, self._off, self._fitted = scale, QPointF(ox, oy), False
-        self.update()
-
-    def set_target_box(self, box: Optional[tuple]) -> None:
-        """Scan 결함 영역 상자(이미지 px: left, top, w, h) — 노란 점선으로 표시한다."""
-        self._target = box
         self.update()
 
     # ------------------------------------------------------------------
@@ -202,14 +191,12 @@ class GlCanvas(QWidget):
         p.restore()
         if self._scale >= _GRID_FROM:
             self._paint_grid(p)
-        if self._target is not None:
-            self._paint_target(p)
         sel = self.rois.selected
         for r in self.rois.rois:
-            if self.rois.visible(r) and r.id != sel:
+            if r.id != sel:
                 self._paint_roi(p, r, False)
         a = self.rois.active()
-        if a is not None and self.rois.visible(a):
+        if a is not None:
             self._paint_roi(p, a, True)
         if self._drag and self._drag.get("mode") == "draw":
             self._paint_draft(p)
@@ -243,18 +230,6 @@ class GlCanvas(QWidget):
             p.setPen(light)
             p.drawLine(QPointF(0, sy + 1), QPointF(self.width(), sy + 1))
 
-    def _paint_target(self, p: QPainter) -> None:
-        l, t, bw, bh = self._target
-        a, b = self.to_screen(l, t), self.to_screen(l + bw, t + bh)
-        pen = QPen(QColor(theme.VIEWER_BOX), 2, Qt.PenStyle.DashLine)
-        pen.setCosmetic(True)
-        p.setPen(pen)
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.drawRect(QRectF(a, b))
-        c = self.to_screen(l + bw / 2.0, t + bh / 2.0)
-        p.drawLine(QPointF(c.x() - 8, c.y()), QPointF(c.x() + 8, c.y()))
-        p.drawLine(QPointF(c.x(), c.y() - 8), QPointF(c.x(), c.y() + 8))
-
     def _halo_pen(self, color: str, width: float, dash=False) -> tuple[QPen, QPen]:
         halo = QPen(QColor(0, 0, 0, 200), width + 2)
         pen = QPen(QColor(color), width)
@@ -267,20 +242,6 @@ class GlCanvas(QWidget):
     def _paint_roi(self, p: QPainter, r: Roi, active: bool) -> None:
         halo, pen = self._halo_pen(r.color, 3 if active else 2)
         p.setBrush(Qt.BrushStyle.NoBrush)
-        if r.kind == R.HLINE:
-            y = self.to_screen(0, r.pos + 0.5).y()
-            for q in (halo, pen):
-                p.setPen(q)
-                p.drawLine(QPointF(0, y), QPointF(self.width(), y))
-            self._paint_pill(p, r.name, QPointF(8, y), r.color, above=True)
-            return
-        if r.kind == R.VLINE:
-            x = self.to_screen(r.pos + 0.5, 0).x()
-            for q in (halo, pen):
-                p.setPen(q)
-                p.drawLine(QPointF(x, 0), QPointF(x, self.height()))
-            self._paint_pill(p, r.name, QPointF(x + 6, 8), r.color, above=False)
-            return
         a, b = self.to_screen(r.x, r.y), self.to_screen(r.x + r.w, r.y + r.h)
         rect = QRectF(a, b)
         for q in (halo, pen):
@@ -352,7 +313,7 @@ class GlCanvas(QWidget):
 
     def _hit_handle(self, pos: QPointF) -> Optional[str]:
         a = self.rois.active()
-        if a is None or a.is_line or not self.rois.visible(a):
+        if a is None:
             return None
         tol = _HANDLE_PX / 2.0 + 3
         for name, c in self._handle_points(a):
@@ -360,32 +321,9 @@ class GlCanvas(QWidget):
                 return name
         return None
 
-    def _grabbable_lines(self) -> tuple:
-        """현재 도구로 집을 수 있는 선 종류.  이동 도구는 둘 다, 선 도구는 자기 종류만(다른 종류의
-        선 위를 눌러도 새 선이 그어진다), 도형 도구는 선을 집지 않는다(도형 그리기 시작을 가로채지 않게)."""
-        if self.tool == TOOL_MOVE:
-            return R.LINE_KINDS
-        if self.tool in R.LINE_KINDS:
-            return (self.tool,)
-        return ()
-
-    def _hit_line(self, pos: QPointF) -> Optional[Roi]:
-        best, best_d = None, _HIT_PX + 1
-        kinds = self._grabbable_lines()
-        for r in reversed(self.rois.rois):
-            if r.kind not in kinds or not self.rois.visible(r):
-                continue
-            d = (abs(self.to_screen(0, r.pos + 0.5).y() - pos.y()) if r.kind == R.HLINE
-                 else abs(self.to_screen(r.pos + 0.5, 0).x() - pos.x()))
-            if d <= _HIT_PX and d < best_d:
-                best, best_d = r, d
-        return best
-
     def _hit_shape(self, pos: QPointF) -> Optional[Roi]:
         ix, iy = self.to_image(pos.x(), pos.y())
         for r in reversed(self.rois.rois):
-            if r.is_line or not self.rois.visible(r):
-                continue
             if r.kind == R.CIRCLE:
                 cx, cy = r.center
                 if ((ix - cx) / (r.w / 2.0)) ** 2 + ((iy - cy) / (r.h / 2.0)) ** 2 <= 1.0:
@@ -437,30 +375,12 @@ class GlCanvas(QWidget):
         if h:
             self._drag = {"mode": "resize", "handle": h, "snapped": False}
             return
-        line = self._hit_line(pos)
-        if line is not None:
-            self._select(line.id)
-            self._drag = {"mode": "moveline", "rid": line.id, "snapped": False}
-            return
         shape = self._hit_shape(pos)
-        draws = self.tool in (R.RECT, R.SQUARE, R.CIRCLE)
+        draws = self.tool in (R.RECT, R.CIRCLE)
         if shape is not None and (not draws or shape.id == self.rois.selected):
             self._select(shape.id)
             self._drag = {"mode": "moveshape", "rid": shape.id, "last": self.to_image(pos.x(), pos.y()),
                           "snapped": False, "frac": (0.0, 0.0)}
-            return
-        if self.tool in (R.HLINE, R.VLINE):
-            px, py = self._pixel_at(pos.x(), pos.y())
-            line = self.rois.add_line(self.tool, py if self.tool == R.HLINE else px)
-            if self.tool == R.HLINE:
-                self.rois.show_h = True
-            else:
-                self.rois.show_v = True
-            self.visibilityChanged.emit()
-            self.selectionChanged.emit()
-            self.roisChanged.emit()
-            self._drag = {"mode": "moveline", "rid": line.id, "snapped": True}
-            self.update()
             return
         if draws:
             p0 = self._pixel_at(pos.x(), pos.y())
@@ -488,17 +408,6 @@ class GlCanvas(QWidget):
             self._fitted = False
             self.viewStateChanged.emit()
             self.update()
-        elif mode == "moveline":
-            r = self.rois.get(d["rid"])
-            if r is None:
-                return
-            px, py = self._pixel_at(pos.x(), pos.y())
-            new = replace(r, pos=py if r.kind == R.HLINE else px)
-            if new.pos != r.pos:
-                self._snap_once(d)
-                self.rois.replace_roi(new)
-                self.roisChanged.emit()
-                self.update()
         elif mode == "moveshape":
             r = self.rois.get(d["rid"])
             if r is None:
@@ -568,10 +477,6 @@ class GlCanvas(QWidget):
             return
         if self._hit_handle(pos):
             self.setCursor(Qt.CursorShape.SizeAllCursor)
-        elif self._hit_line(pos) is not None:
-            ln = self._hit_line(pos)
-            self.setCursor(Qt.CursorShape.SplitVCursor if ln.kind == R.HLINE
-                           else Qt.CursorShape.SplitHCursor)
         else:
             self._update_cursor()
 
@@ -629,21 +534,6 @@ class GlCanvas(QWidget):
         self.update()
         return True
 
-    def grow(self, step: int) -> bool:
-        """선택한 도형의 크기를 ``step`` px(지름·변) 바꾼다.  원은 반지름 ``step/2`` px."""
-        r = self.rois.active()
-        w, h = self.image_size()
-        if r is None or r.is_line or w <= 0:
-            return False
-        new = R.resize(r, step, step, w, h)
-        if new == r:
-            return False
-        self._snap_for_key(r.id, "size")
-        self.rois.replace_roi(new)
-        self.roisChanged.emit()
-        self.update()
-        return True
-
     def delete_selected(self) -> bool:
         if self.rois.delete():
             self.selectionChanged.emit()
@@ -670,12 +560,6 @@ class GlCanvas(QWidget):
         if k in arrows:
             self.nudge(*arrows[k])
             e.accept()
-        elif k in (Qt.Key.Key_Plus, Qt.Key.Key_Equal, Qt.Key.Key_BracketRight):
-            self.grow(20 if big else 2)
-            e.accept()
-        elif k in (Qt.Key.Key_Minus, Qt.Key.Key_Underscore, Qt.Key.Key_BracketLeft):
-            self.grow(-20 if big else -2)
-            e.accept()
         elif k in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
             self.delete_selected()
             e.accept()
@@ -695,11 +579,6 @@ class GlCanvas(QWidget):
         elif k == Qt.Key.Key_Space and not e.isAutoRepeat():
             self._space = True
             self._update_cursor()
-            e.accept()
-        elif Qt.Key.Key_1 <= k <= Qt.Key.Key_6 and not mods:
-            t = TOOLS[int(k - Qt.Key.Key_1)]
-            self.set_tool(t)
-            self.toolRequested.emit(t)
             e.accept()
         else:
             super().keyPressEvent(e)

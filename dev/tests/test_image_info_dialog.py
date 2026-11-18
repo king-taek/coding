@@ -292,3 +292,31 @@ def test_notice_never_scrolls_horizontally(styled_qapp, isolated_cache,
         label = notice[0]
         assert label.height() >= label.heightForWidth(label.width())
         dlg.deleteLater()
+
+
+def test_paste_opens_image_and_flashes_notices(qapp, isolated_cache, tmp_path, monkeypatch):
+    """Ctrl+V — 사진 경로는 열고, 사진 아닌 것·없는 경로·그림 픽셀은 짧은 안내."""
+    img = tmp_path / "a.jpeg"
+    img.write_bytes(b"x")
+    dlg = ImageInfoDialog()
+    shown, flashed = [], []
+    monkeypatch.setattr(dlg, "show_image", lambda p: shown.append(p))
+    monkeypatch.setattr(dlg, "_flash", flashed.append)
+    try:
+        dlg._on_paste_paths([str(img)])
+        assert shown == [img] and not flashed
+        dlg._on_paste_paths([str(tmp_path / "a.txt")])
+        dlg._on_paste_paths([str(tmp_path / "nope.jpeg")])
+        dlg._on_paste_paths([str(tmp_path / "a.txt"), str(img)])   # 첫 사진을 연다
+        assert shown == [img, img]
+        shown.clear()
+        flashed.clear()
+        dlg._on_paste_paths([str(tmp_path / "a.txt")])
+        dlg._on_paste_paths([str(tmp_path / "nope.jpeg")])
+        dlg._on_paste_no_path(True)
+        dlg._on_paste_no_path(False)
+        assert shown == []
+        assert flashed == [i18n.KO.DROP_WRONG_KIND_IMAGE, i18n.KO.DROP_NOT_FOUND,
+                           i18n.KO.DROP_NO_PATH_IMAGE, i18n.KO.DROP_NOTHING_TO_PASTE]
+    finally:
+        dlg.deleteLater()

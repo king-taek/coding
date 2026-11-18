@@ -1502,7 +1502,7 @@ class TestDieMapGolden:
     """실물 ``s_DieLocation.dat`` 3건 — 골든 2건 보존 + 어긋나던 1건 교정."""
 
     @pytest.mark.parametrize("name", sorted(_DIE_MAP_TRUTH))
-    def test_geometry_uses_the_die_map(self, name):
+    def test_geometry_uses_the_die_map(self, name, monkeypatch):
         col_origin, row_total, _rec = _DIE_MAP_TRUTH[name]
         geom = wg.camtek_geometry(_DIE_MAP_REAL / name)
         assert geom is not None, name

@@ -130,11 +130,10 @@ SELECT_SINGLE_SLOT_THRESHOLD = 300
 # 메모리 압박 토스트 임계치 — 캐시 한도 + 1 GB 워킹셋.
 MEMORY_PRESSURE_BYTES = PIXMAP_CACHE_MAX_BYTES + 1024 * 1024 * 1024
 
-# GL 히스토그램 — 아직 배포하지 않는다(사용자 결정 2026-10-30).  거짓이면 왼쪽 메뉴에
-# 아이콘만 남기고 'Coming soon' 으로 막고, 사진 정보의 [GL 보기] 도 숨긴다.  코드는 그대로
-# 두므로 준비되면 이 값만 True 로 바꾼다.  dev·기본 브랜치 모두 False 로 같게 둔다
-# (사용자 결정 2026-11-10, CLAUDE.md 브랜치 규칙).
-GL_HISTOGRAM_READY = False
+# GL 히스토그램 — 거짓이면 왼쪽 메뉴에 아이콘만 남기고 'Coming soon' 으로 막고, 사진 정보의
+# [GL 보기] 도 숨긴다.  dev · 기본 브랜치 모두 True(사용자 결정 2026-11-19, 배포 결정 — CLAUDE.md
+# 브랜치 규칙).  배포 PR 에서 값을 뒤집지 않는다.
+GL_HISTOGRAM_READY = True
 
 
 # ---------------------------------------------------------------------------

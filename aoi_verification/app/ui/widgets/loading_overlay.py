@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import math
 import re
+import time
 
 from PyQt6.QtCore import (QEasingCurve, QElapsedTimer, QEvent, QRect, QRectF, Qt,
                           QTimer, QVariantAnimation, pyqtSignal)
@@ -442,6 +443,9 @@ class _BusyStripe(QWidget):
             p.drawRoundedRect(max(0, sx), 0, min(sw, w - max(0, sx)), h, r, r)
 
 
+# P19A — 직전 제목 크로스페이드 시작 뒤 이만큼 지나야 다시 겹쳐 바꾼다(빠른 연속 변경은 즉시).
+_TITLE_XFADE_GAP_S = 0.20
+
 _NBSP = "\u00a0"
 _NBHY = "\u2011"      # 하이픈에서도 끊기지 않게(4F-/K-01 로 갈라졌다)
 
@@ -537,6 +541,7 @@ class LoadingOverlay(QWidget):
         self._stage_label.setProperty("role", "loadingStage")
         self._stage_label.hide()          # 단계 정보를 준 호출부에서만 보인다
         self._label = QLabel("", self._content)
+        self._title_xfade_at = 0.0
         self._label.setProperty("role", "loadingTitle")
         self._label.setWordWrap(True)
         # ★ 폭을 못 박는다 — 안 그러면 긴 메시지가 패널을 옆으로 늘린다.
@@ -829,7 +834,16 @@ class LoadingOverlay(QWidget):
         두 줄이 눌려 들어가 맵 아래가 잘린다."""
         text = _wrap_friendly(message)
         if self._label.text() != text:
+            # P19A — 단계가 넘어가면 옛 제목이 140ms 에 걷힌다.  0.2초 안에 또 바뀌면
+            # 그냥 바꾼다(빠른 연속 변경이 깜빡임으로 보이지 않게).  진행 막대 계약은 그대로.
+            now = time.perf_counter()
+            before = (self._label.grab()
+                      if motion.enabled() and self._label.isVisible()
+                      and now - self._title_xfade_at >= _TITLE_XFADE_GAP_S else None)
             self._label.setText(text)
+            if before is not None:
+                self._title_xfade_at = now
+                motion.crossfade_from(self._label, before)
             # 레이아웃 캐시가 옛 줄 수라 먼저 무효화해야 새 높이가 나온다.
             lay = self._panel.layout()
             if lay is not None:

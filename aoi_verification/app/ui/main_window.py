@@ -2333,6 +2333,8 @@ class MainWindow(MultiValFlow, QMainWindow):
             coord_mode=ctx.coord_mode,
             tolerance=ctx.tolerance,
             coord_failed_count=ctx.coord_failed_count,
+            number_risk=getattr(ctx, "number_risk", ()),
+            coord_classical_refs=getattr(ctx, "coord_classical_refs", ()),
         )
         self._show_page(self._match_review_page)
 
@@ -2440,6 +2442,8 @@ class MainWindow(MultiValFlow, QMainWindow):
             tolerance=ctx.tolerance,
             coord_failed_count=ctx.coord_failed_count,
             unmatched_keys=marked,
+            number_risk=getattr(ctx, "number_risk", ()),
+            coord_classical_refs=getattr(ctx, "coord_classical_refs", ()),
         )
         self._notify_ready_for_review()
         self._show_page(self._match_review_page)
@@ -3370,6 +3374,10 @@ class MainWindow(MultiValFlow, QMainWindow):
             return
         forward = self._page_order(w) >= self._page_order(old)
         self._stack.setCurrentWidget(w)        # 레이아웃 확정 후 스냅샷
+        # 페이지가 '찍히기 전에 마칠 일' 이 있으면(검토: 레이아웃 확정·보이는 썸네일) 먼저.
+        prep = getattr(w, "prepare_snapshot", None)
+        if callable(prep):
+            prep()
         # ★ `w.grab()` 을 쓰지 마라 — 페이지는 배경을 안 칠하고 창이 뒤에서 칠하므로,
         #   떼어 찍으면 빈 자리가 Qt 기본 팔레트(#efefef, 밝은 회색)로 채워진다.
         #   자세한 근거는 `motion.snapshot`.

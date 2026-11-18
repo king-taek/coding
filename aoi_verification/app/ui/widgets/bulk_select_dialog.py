@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout,
 
 from ..teardown import tolerate_teardown
 from ... import config, i18n
+from .. import motion
 from .. import theme
 from ...models.slot import ImageItem
 from ...utils import image_io
@@ -99,8 +100,19 @@ class _SelectTile(QFrame):
         self._cap = cap
         self._elide_caption()
         lay.addWidget(cap)
+        # P11A — 슬롯 고르기 타일(`_SlotTile`)과 같은 언어: 체크 배지 + 옛 모습 크로스페이드.
+        self._badge = motion.CheckBadge(self, on=False)
+        self._place_badge()
 
     # ------------------------------------------------------------------
+    def _place_badge(self) -> None:
+        self._badge.move(self.width() - self._badge.width() - 8, 8)
+        self._badge.raise_()
+
+    def resizeEvent(self, event):  # noqa: N802
+        super().resizeEvent(event)
+        self._place_badge()
+
     def _apply_scaled(self) -> None:
         if self._source_pix is None or self._source_pix.isNull():
             return
@@ -130,8 +142,11 @@ class _SelectTile(QFrame):
 
     def mousePressEvent(self, event):  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton:
+            before = self.grab() if motion.enabled() else None
             self._selected = not self._selected
-            self._refresh_visual()
+            self._refresh_visual(animate=True)
+            if before is not None:
+                motion.crossfade_from(self, before)
             self.toggled.emit(self.item, self._selected)
         elif event.button() == Qt.MouseButton.RightButton:
             # 우클릭 → 크게 보기 (선택 상태는 건드리지 않음).
@@ -151,8 +166,16 @@ class _SelectTile(QFrame):
         return (f"#selTile {{ border: 2px solid {theme.ACCENT}; border-radius: 8px;"
                 f" background: {theme.ACCENT_TINT_SOFT}; }}")
 
-    def _refresh_visual(self) -> None:
+    def _refresh_visual(self, *, animate: bool = False) -> None:
+        """``animate`` 는 사용자가 **그 타일을** 눌렀을 때만 — 전체 선택·끌어 고르기는
+        여러 장이 한꺼번에 바뀌므로 배지도 즉시 바꾼다(타일마다 애니메이션을 쌓지 않는다)."""
         self.setStyleSheet(self._sel_style() if self._selected else "")
+        if animate:
+            self._badge.set_on(self._selected)
+        else:
+            self._badge._anim.stop()
+            self._badge._tick(1.0 if self._selected else 0.0)
+        self._badge.raise_()
 
 
 class BulkSelectDialog(QDialog):

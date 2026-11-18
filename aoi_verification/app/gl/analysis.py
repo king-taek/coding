@@ -1,4 +1,4 @@
-"""GL 분석 — 히스토그램·ROI 통계·선 프로파일·임계값 판정·화면 표시용 변환.
+"""GL 분석 — 히스토그램·ROI 통계·임계값 판정·화면 표시용 변환.
 
 모두 **원본 비트심도 그대로** 계산한다.  8 bit 로 줄여 센 값은 쓰지 않는다
 (이 앱은 검증 신뢰성이 우선이다).  화면 표시용 8 bit 변환은 ``to_display`` 하나뿐이고,
@@ -7,11 +7,9 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 import numpy as np
 
-from .roi import CIRCLE, HLINE, VLINE, Roi
+from .roi import CIRCLE, Roi
 
 LOW_RGB = (40, 128, 255)       # 하한 이하 — 파랑
 HIGH_RGB = (255, 44, 36)       # 상한 이상 — 빨강
@@ -29,14 +27,6 @@ def roi_mask(roi: Roi, shape_hw: tuple[int, int]) -> np.ndarray:
     """ROI 안쪽 픽셀 불리언 마스크(이미지 전체 크기).  원은 **픽셀 중심** 기준으로 판정한다."""
     h, w = shape_hw
     m = np.zeros((h, w), dtype=bool)
-    if roi.kind == HLINE:
-        if 0 <= roi.pos < h:
-            m[roi.pos, :] = True
-        return m
-    if roi.kind == VLINE:
-        if 0 <= roi.pos < w:
-            m[:, roi.pos] = True
-        return m
     x0, y0 = max(0, roi.x), max(0, roi.y)
     x1, y1 = min(w, roi.x + roi.w), min(h, roi.y + roi.h)
     if x1 <= x0 or y1 <= y0:
@@ -54,10 +44,6 @@ def roi_mask(roi: Roi, shape_hw: tuple[int, int]) -> np.ndarray:
 def roi_values(img: np.ndarray, roi: Roi) -> np.ndarray:
     """ROI 안의 GL 값 1차원 배열(복사본 아님일 수 있다 — 읽기만 한다)."""
     h, w = img.shape
-    if roi.kind == HLINE:
-        return img[roi.pos, :] if 0 <= roi.pos < h else img[:0, 0]
-    if roi.kind == VLINE:
-        return img[:, roi.pos] if 0 <= roi.pos < w else img[:0, 0]
     x0, y0 = max(0, roi.x), max(0, roi.y)
     x1, y1 = min(w, roi.x + roi.w), min(h, roi.y + roi.h)
     if x1 <= x0 or y1 <= y0:
@@ -101,11 +87,18 @@ def stats(values: np.ndarray, lo: int, hi: int) -> dict:
             "below": int((v <= lo).sum()), "above": int((v >= hi).sum())}
 
 
-def profile(img: np.ndarray, roi: Roi) -> Optional[np.ndarray]:
-    """선 위의 위치별 GL.  선이 아니면 ``None``(도형은 프로파일이 없다)."""
-    if roi.kind not in (HLINE, VLINE):
-        return None
-    return np.array(roi_values(img, roi))
+def zone_ratios(hist: np.ndarray, lo: int, hi: int) -> tuple[float, float, float]:
+    """히스토그램을 세 구역(하한 이하 · 사이 · 상한 이상)의 % 로 — 화면 칠하기·``stats`` 와 같은 경계.
+
+    하한·상한 값 자신은 각각 '이하'·'이상' 쪽이다.  비었으면 (0, 0, 0)."""
+    h = np.asarray(hist, dtype=np.int64).reshape(-1)
+    total = int(h.sum())
+    if total == 0:
+        return 0.0, 0.0, 0.0
+    below = int(h[:max(0, lo + 1)].sum())
+    above = int(h[max(0, hi):].sum())
+    return (below / total * 100.0, (total - below - above) / total * 100.0,
+            above / total * 100.0)
 
 
 def auto_thresholds(hist: np.ndarray, tail: float = 0.005) -> tuple[int, int]:
@@ -133,12 +126,8 @@ def clamp_thresholds(lo: int, hi: int, bits: int) -> tuple[int, int]:
 # ---------------------------------------------------------------------------
 # 화면 표시
 # ---------------------------------------------------------------------------
-def display_range(img: np.ndarray, bits: int, auto: bool) -> tuple[int, int]:
-    """화면 대비 범위.  ``auto`` 면 실제 최소~최대로 늘린다(보기 전용 — 분석 값은 그대로)."""
-    if auto and img.size:
-        lo, hi = int(img.min()), int(img.max())
-        if hi > lo:
-            return lo, hi
+def display_range(bits: int) -> tuple[int, int]:
+    """화면 대비 범위 — 늘 비트 전체 범위다(보기 전용 — 분석 값은 그대로)."""
     return 0, levels(bits) - 1
 
 

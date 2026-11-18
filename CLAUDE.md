@@ -94,9 +94,8 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   `dev` 는 기본 브랜치보다 앞서 있어야 하므로 **기본 브랜치에 바로 머지할 때는 `dev` 에도 함께 머지한다**
   (사용자 지시 2026-10-27; 기본 브랜치 머지 직후 기본 → `dev` PR 로 합친다).
   `whats_new.py` 항목은 `dev` 에서 쓰되 배포 때 함께 나가므로, 배포 PR 전에 맨 위가 맞는지 확인한다.
-  ⚠ **GL 히스토그램은 `dev`·기본 브랜치 모두 끈다**(사용자 결정 2026-11-10, 2026-10-30 'dev 만 켬' 을 바꿈):
-  `config.GL_HISTOGRAM_READY = False`('Coming soon'). 두 브랜치를 같게 두기 위해서다 — 배포 PR 에서 값을 뒤집지 않는다.
-  사용자가 GL 배포를 정하면 그때 두 브랜치 모두 `True` 로 바꾼다.
+  ⚠ **GL 히스토그램은 `dev`·기본 브랜치 모두 켠다**(사용자 결정 2026-11-19, 배포 결정; 2026-11-16 'dev 만 켬' 을 바꿈):
+  `config.GL_HISTOGRAM_READY = True`. 배포 PR 에서 값을 뒤집지 않는다.
 - 세션마다 별도 **기능 브랜치**가 작업 지시로 지정될 수 있다. 지정되면 거기서 작업·커밋·푸시하고,
   PR 로 `dev` 에 머지한다. 별도 지시가 없으면 `dev` 기준으로 판단한다.
 - 커밋 메시지는 **한국어로 '무엇을·왜'** 중심. PR 은 사용자가 요청할 때 생성한다.
@@ -272,25 +271,54 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   **R1** 경쟁 가설을 하나 이상 세우고 표본이 둘을 구분하는지 계산한다(구분 못 해도 채택은
   가능 — "미구분" 을 코드·문서·요청목록에 적으면 된다). **R3** 모든 수치에 출처 등급
   (`관측`/`파일`/`유도`/`가정`/`합성`)을 붙인다. **R4** 합성값을 골든에 넣지 않는다.
+- ⚠ **배포받은 사람은 Conder 만 본다 — Scanresult(NAS)는 개발자(현택) PC 에서만 열린다**(사용자 확인 2026-11-14).
+  Recipe.ini · 번호표 · DieLut 는 Scanresult 전용이라 다른 사람에게는 쓸모가 없다. 새 해법은 'Conder 만 있을 때' 무엇이
+  나오는지로 먼저 판단하고, Conder 에 없는 정보를 NAS 에서 읽어 오는 설계를 하지 마라. Conder LIVE 파일명 col/row 는 장비 화면 번호라
+  번호 원점 문제는 없고, 남는 것은 화면 시프트(맵 대조) · LOT 맵 txt(노치 · die 크기) · 노치가 다른 매칭이다.
+- **Notch 방향(`coords/notch.py` · `workers/notch_auto.py`)은 매칭 계산 전용이다.** Camtek 파일에는 노치 값이 없다(`FlatNotchOrientation=3`
+  119건 동일) — KLA 정보파일 `OrientationMarkLocation` 만 읽고, Camtek 은 네 방향을 돌려 짝이 가장 많은 쪽을 고른다(짝 8 미만 · 2등의 2배
+  미만이면 판단 안 함 → 사용자에게 묻는다). 실물 Kendall RDL4 KLA(아래) ↔ Camtek(오른쪽) 10쌍(관측). 돌리려면 웨이퍼 중심이 필요해
+  Conder 만 있으면 `NotchError` 로 매칭을 멈춘다 — 중심을 추측해 돌리지 마라. `WaferDisplayOrientation` 은 노치가 아니라 화면 표시 기준(시프트)이다.
+  짝을 세기 전에 두 폴더 **좌표가 쓴** die pitch(가로 · 세로 — KLA `DiePitch` · Camtek 검산을 통과한 값, `notch_auto._pitch_of`)로 90° 돌림이
+  되는지부터 가른다(`notch_auto._turn_from_pitches`). 검산 없는 `peek_die_pitch` 는 쓰지 마라 — 첫 후보가 검산에서 떨어진 폴더(W97320 1곳)에서 다르다. 그대로면 90° 후보를,
+  바뀌었으면 0° · 180° 후보를 뺀다. 경계는 검증 die 가로 · 세로의 가운데이고 고정 % 는 없다. 정사각형 · 애매 · 값 없음 · 슬롯끼리 다르면 네 방향 모두 본다.
+  TB500.INT1046 은 90° 방향 짝(374)이 맞는 방향(150)보다 많아 틀린 답을 냈다(관측 2026-11-15).
 - **col/row 번호의 0순위는 장비가 내보낸 번호 격자 `ProductInfo.ini [ExportData]`다**
   (`wafer_geometry._export_origins`): `col_origin = cMin`, `row_total = rMax`. QORVO(pitch 919.8)는 중심 유도·die 맵·
   3 mm 격자 모두 틀렸고 이 값만 장비 화면·Conder 55장과 맞았다(관측, 2026-10-25). 이미 맞던 165 웨이퍼에서도 기존 결과와 같다.
   **자기 폴더 파일만**, 네 키 정수 · `XDieIndex/YDieIndex` = 채택 pitch · 중심을 알고 범위가 웨이퍼 원 안 · die 맵이 범위 안일 때만
   쓴다 — 하나라도 어긋나면 아래 규칙으로 간다. `_MAX_DIE_INDEX` 상한은 여기 쓰지 않는다(QORVO row 319). 골든: `test_export_grid.py`.
+- **블록 제품(한 칸에 die 여러 개)**: `ProductInfo.ini [Geometric] ColsInBlock/RowsInBlock` 과 `[DieRectInfo] a_b=사용,폭,높이,x0,y0`
+  가 있으면 `XDieIndex/YDieIndex` 는 **칸 간격**이다(`wafer_geometry.block_layout`·`_block_geometry`). `i = floor(X/칸)×Cols + a`
+  (a = 칸 안 가장 가까운 die 열), die 안 `x = floor(칸 안 X − x0)`. 균등 나눔은 근사라 쓰지 마라(AMD Sepio 45/357 틀림, 칸 표는 795/795).
+  채택 조건: 모든 사진 i = INI Col(X 등호) · j − Row 레시피별 상수 · 자기 폴더 `[ExportData]` 가 원 안 — 번호표 없는 블록 제품은 아직 절대좌표다.
+  장비 확인 XP2100 (25, 111, 899, 259). 실물 골든: `test_block_product.py`.
 - **번호표가 없으면 1순위는 장비가 스캔 때 쓴 die 목록 `DieLut.dat`다**(`wafer_geometry._dielut_origins`):
   `col_origin = min Col`, `row_total = max Row`(전체 레코드, stage 번호). 둘 다 있는 26 LOT·51 폴더에서 번호표와 전부 같았다
   (관측 2026-10-26, 계산이 틀리던 AVAGO 01C1·T254 GX57007306 포함). 검토 전 폴더에도 있지만 **다중 레시피 스캔에만** 있다.
   채택 조건은 번호표와 같고, 번호표와 다르면 번호표를 쓰고 경고를 남긴다(반증 조건, 관측 0건). Wafer map 칸도 이 목록으로 그린다.
-  **⚠(`NUMBER_WARN_NO_TABLE`)은 번호표·DieLut 가 없고 중심식과 3 mm 격자식(맵을 채택했으면 맵도)이 다르거나 하나뿐일 때만** 붙는다
-  (`is_trusted_source`) — 둘이 같을 때 틀린 적이 없다(번호표 있는 123/123 · 저장소 샘플 69/69; 사용자 결정 2026-10-27
-  "지금까지 준 샘플에서 전부 정답인 규칙이면 경고 없이"). **둘이 같다고 번호표·DieLut 보다 앞세우지 마라** — QORVO 처럼 고객 맵을
-  들여온 제품은 die 목록이 기하가 아니다. 골든(실물): `test_dielut_origins.py`.
-- **col/row 번호의 기준은 장비가 쓴 die 맵(`s_DieLocation.dat`)이 2순위다(ExportData·DieLut 가 없을 때)**
+  레시피 N 의 이름표가 옮겨져 있으면(아래 `recipe_label_shifts`) 그 레시피 칸을 그만큼 되돌려 합친다(레시피 1 틀) —
+  그대로 합치면 끝 줄이 늘어 row 가 1 컸다(E5025794EWF5, 장비 화면 3/3, 관측 2026-11-15).
+  골든(실물): `test_dielut_origins.py` · `test_multi_recipe_labels.py`.
+- **번호표·DieLut 가 둘 다 없으면 2순위는 die 크기로 가른다**(`wafer_geometry._with_origins`, 2026-11-13 검증 후 변경):
+  - **작은 die(두 pitch ≤ 1600 µm)**: 그 웨이퍼의 die 맵이 원 안 온전한 칸의 70% 이상을 담으면 **±1 클램프 없이** 맵 원점을
+    쓴다(`SMALL_MAP_SOURCE_TAG`). 장비 확인 GNF7K21 (1,230) 등 — 클램프가 오히려 맞는 맵을 버렸다(관측).
+    `_dat_cells` 인덱스 상한도 pitch 에 비례한다(작은 die 는 row 가 200 을 넘는다).
+  - **큰 die**(또는 맵이 모자란 작은 die): 다른 웨이퍼(같은 셋업)의 번호표를 **빌리지 않는다**(사용자 결정 2026-11-14 —
+    배포받는 사람은 Conder 만 봐서 쓸 수 없는 방법이라 현택 PC 에서도 쓰지 않는다. 예전 `_borrow_origins` 는 지웠다 — 다시 만들지 마라).
+    번호표를 가린 102 폴더에서는 맞았지만 이 결정이 우선이다. 그래서 HORNET CCU 12B2(장비 (61, 44))는 ⚠ 로 남는다: `test_origin_no_table.py`.
+  - 둘 다 못 하면 아래 die 맵·중심 유도로 가고 **늘 ⚠(`NUMBER_WARN_NO_TABLE`)** 이다. ⚠ **'중심식=격자식' 일치는 더 이상 믿지 않는다**
+    (`AGREE_SOURCE_TAG` 는 `_TRUSTED_TAGS` 밖) — HORNET CCU 04F4/08D0 에서 둘이 같은데 row 가 1 틀렸다(관측, 2026-11-12;
+    2026-10-27 '경고 없이' 결정을 반증이 뒤집음). 이 웨이퍼는 매칭·검토 화면 위에 빨간 큰 경고(`coords.number_risk`)가,
+    Wafer map 에는 빨간 배너(`wafer_map.DANGER_CODES`)가 뜬다(사용자 지시 2026-11-13) — 끄지 마라.
+  - **정렬 사진(`.wlup`)은 pitch 검산에서 뺀다**(`is_alignment_photo`) — die 결함이 아니라 X 등호를 깨 TB500 Multi 폴더가 절대좌표로 떨어졌다.
+  - 검증 장치: `dev/coord_verify.py`(수집 자료로 NAS 경로 트리를 재구성해 번호표를 가리고 앱 결과·Conder·장비 판독과 대조).
+- **col/row 번호의 기준은 장비가 쓴 die 맵(`s_DieLocation.dat`)이 3순위다(위 2순위로 못 정했을 때)**
   (`wafer_geometry._die_map_origins`): `col_origin = min(x_index)`, `row_total = max(y_index)`.
   중심 유도는 폴백이다 — 실측 74장 중 1장(PGEE48)에서 유도식이 row 를 1 크게 냈고 맵이
   장비 화면과 일치했다(§6-N). 레코드 배치는 장비마다 달라(`RecordSize` 72/128) 옆의
   `.dat.md` 사이드카로 읽는다 — 하드코딩하지 마라. **맵은 유도값과 ±1 이내일 때만
-  채택한다**(부분 맵 방어) — 이 클램프를 풀지 마라. 실물 골든: `TestDieMapGolden`.
+  채택한다**(부분 맵 방어) — 이 클램프를 풀지 마라(70% 이상 담은 작은 die 맵만 위 2순위에서 클램프 없이 쓴다). 실물 골든: `TestDieMapGolden`.
   ⚠ 맵은 **그 웨이퍼의 die 목록**이라 가장자리가 빠질 수 있다(§6-P): ① 같은 격자(유도값·pitch
   동일)인 **형제 슬롯의 맵을 합쳐** 기준을 잡고(`lot_die_map_cells` — AVAGO 12/25장 col 1 작음;
   형제 칸은 원 안에 온전한 것만, 중심을 모르면 합치지 않음, Wafer map 도 같은 집합을 그린다),
@@ -307,15 +335,25 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   그 필드는 pitch 검산의 참조값으로만 쓴다 — 검산도 **X 는 등호, Y 는 레시피별 상수**다
   (`wafer_geometry._grid_check`). **X 등호는 완화하지 마라** — 항목이 1건인 폴더에서
   '상수' 는 공허하게 참이 돼 다른 자재에 TB500 상수가 채택된다(→ `docs/규칙_배경.md`).
+  다중 레시피에서 레시피 N 의 `Col` 이 이름표 차이만큼 옮겨진 폴더(Kendall PI6 · PI2)만 그 차이를 **그 폴더 파일에서 읽어**
+  되돌린 뒤 같은 등호로 본다(`wafer_geometry.recipe_label_shifts`: `Recipe{N}-ProductInfo.ini` − `ProductInfo.ini` 의
+  `AlignmentDieCol/Row`). 두 조건이 다 맞을 때만 쓴다 — ① 두 파일의 `DieTopLeft` 가 반 칸 안 ② DieLut 레시피 N 범위가
+  정확히 그 차이만큼 옮겨짐. 차이를 상수(`+1` 등)로 넣지 마라 — T256 ROTATION 은 정렬 die 번호만 달라 ② 가 막는다.
+  골든: `test_multi_recipe_labels.py`(장비 화면 5/5).
 - **Camtek 레시피의 화면 번호 시프트(`Recipe.ini [Display] DisplayColShift/RowShift`)는 표시에만 쓴다**
   (`camtek_ini.display_shift` → `DefectCoord.col_shift/row_shift`, 사용자 결정 2026-10-25).
   `col`/`row` 는 실제 die — 매칭·Wafer map 위치·KLA·LOT 맵 txt 와 같은 번호다. 장비 화면·LIVE 파일명은
   시프트를 더한 번호라 사진 정보·엑셀·맵 툴팁만 `screen_col`/`screen_row` 를 쓴다(T254 FS UBM `-1`, 관측).
+  ⚠ **장비는 `WaferDisplayOrientation=2`(Left Bottom)일 때만 시프트를 더한다** — `1` 이면 값이 적혀 있어도 0 으로 본다
+  (KENDALL A0 PI3: 장비 화면 1장 + Conder 이름 11장, T254 H-M1·FS UBM 은 2 로 더함, 관측 2026-11-14). 다른 값·키 없음은
+  옛 동작(더함) + 경고. TB500 R-ETCH(1, 시프트 (1,−6))도 장비 화면 (4,2) 로 안 더함을 확인(관측 2026-11-14). 골든: `test_display_shift.py`.
   LIVE 파일명도 화면 번호다. Conder 폴더엔 Recipe.ini 가 없어 **LOT 맵 txt 불량 칸과 대조해 추정**한다
   (`camtek_live.lot_display_shift`) — 서로 다른 칸 3개 이상 · 맞은 사진의 90% 이상 · 시프트 0 은 10% 이하일 때만
-  0 이 아닌 값을 채택한다(시프트 없는 4 LOT 278장은 0, FS UBM 42장은 −1). 맵이 결함을 표시하지 않는 제품(QORVO)은
-  근거가 없어 0. 이 조건을 느슨하게 하지 마라 — 틀린 시프트는 모든 사진을 한 칸 옮긴다. row 시프트 실물은 없다(가정).
-  ⚠ 시프트 −1 레시피의 맨 왼쪽 열은 화면 col −1 이라 `parse_live_name` 이 음수로 버린다(미해결). 골든: `test_display_shift.py`.
+  0 이 아닌 값을 채택한다(시프트 없는 4 LOT 278장은 0, FS UBM 42장은 −1). ±1 에서 못 정할 때만 ±2 바깥 고리를 같은 조건 +
+  '2등도 10% 이하' 로 본다 — QORVO 6H7ENK CTX 는 장비 번호 상자가 고객 맵보다 넓어 (1, 2) 어긋났다(장비 화면 · Export 파일 · 55/55,
+  관측 2026-11-15, 사용자 결정 A '번호는 그대로, 매칭만 맞춤'). QORVO 는 특수 die 무늬가 되풀이돼 ±3 이상은 보지 마라. 이 조건을 느슨하게 하지 마라 — 틀린 시프트는 모든 사진을 한 칸 옮긴다. 맵으로 확인하지 못했고 파일명이 시프트를 쓴 적 있는 Job(`camtek_live.SHIFT_RISK_JOBS`, LIVE 파일명 맨 앞 = Scanresult Job 이름)이면 번호는 그대로 두고 Wafer map 에 노란 경고(`WARN_SHIFT_UNKNOWN`)만 띄운다 — 레시피는 바뀔 수 있어 그 목록으로 번호를 고치지 마라(사용자 결정 2026-11-14). Job 과 상관없이, 못 정했는데 시프트 0 도 사진의 90% 를 못 맞히면 노란 경고(`WARN_MAP_MISMATCH`, `camtek_live.lot_shift_doubtful`)를 띄운다 — 번호는 그대로다(사용자 결정 2026-11-15, QORVO 50개 단계 거짓 경고 0). row 시프트 실물은 없다(가정).
+  ⚠ 시프트 −1 레시피의 맨 왼쪽 열은 화면 col −1 이다 — Scanresult 쪽 앱 화면 번호 (−1, 5) 가 장비 화면과 같았다(T254 UFM-FS W6634103XYB1, 관측 2026-11-14).
+  다만 그런 LIVE 파일명이 오면 `parse_live_name` 이 음수로 버린다(Conder 이름 18,322장 중 음수 0장이라 미해결로 둔다). 골든: `test_display_shift.py`.
 - **LIVE 파일명(`camtek_live`)은 정규식이 아니라 `_` 토큰으로 읽는다.** 배치가 셋이라
   (`x_y_이름` · `이름_x_y` · `이름_x_y_크기_면적`) 정규식으로는 서로 잡아먹는다 —
   실제로 greedy `.+`+`$` 가 **맨 뒤 두 수치(DYSize·DArea)를 x·y 로** 집어 30,212 µm
@@ -336,22 +374,34 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
 - **LIVE 파일명 전용 LOT(기하 파일 없음)의 Wafer map 은 LOT 폴더의 `<WaferID>.txt`
   (ROWCT/COLCT/RowData)가 die 맵이다** (`coords.wafer_txt`). 파일명 `col` = 맵 열(왼쪽부터 0),
   `row` = **아래부터 0** — 실측 9 LOT 결함 칸 185 중 184 가 불량 bin(다른 해석은 반증).
-  불변식: `FNLOC`≠180 은 방향 미확인이라 쓰지 않는다(경고). `XDIES/YDIES` 는 die **크기**다
+  `<슬롯 폴더 이름>.txt` 가 없으면 폴더 이름이 줄었거나 메모가 붙은 경우만 메운다(`wafer_txt._named_like`, Conder CTY
+  `00NUR031XY` ↔ `00NUR031XYE5.txt`): 폴더 이름 첫 토큰이 맵 이름 안에 있고 그 글자의 과반을 덮는 맵이 LOT(맵 2장 이상)에
+  **딱 하나**일 때만 쓰고, 맵 머리 `WAFER` 는 그 맵 이름과 같아야 한다. 둘 이상이면 고르지 않는다 — 이 조건을 느슨하게 하지 마라.
+  불변식: `FNLOC` 가 180·0 이 아니면 방향 미확인이라 쓰지 않는다(경고). **0 은 180 과 같은 칸 배치**로 읽는다
+  (불량 bin 적중 51/51, 다른 방향 ≤ 9, 관측 2026-11-14). 표본이 적어 그 맵을 쓴 점이 있으면 Wafer map 에 늘 노란 경고(`WARN_NOTCH_UP`)를 띄운다(사용자 지시 2026-11-14). 사진 점은 die 칸 밖으로 넘치지 않게 칸 안으로 붙인다
+  (`wafer_map._inside`, camtek_live 만 — 파일명 x·y 가 die 크기를 살짝 넘는 값이 있다). `XDIES/YDIES` 는 die **크기**다
   (간격 아님 — T254 같은 레시피 `DieSize` 와 일치, 다른 제품은 미확인)이고 같은 웨이퍼라도
-  파일마다 달랐으므로 **LOT 사진이 전부 그 안에 들 때만** 쓴다. pitch 추정은 **슬롯 단위로
+  파일마다 달랐으므로 **LOT 사진이 전부 그 안에 들고, die 칸 범위 × 크기가 지름의 1.15배 이하일 때만** 쓴다
+  (`_txt_fits_wafer` — 단위를 잘못 적은 값이 수집 맵 2,911장 중 136장, 사진 검사만으로는 통과해 점이 전부 웨이퍼 밖에
+  경고 없이 찍혔다, 관측 2026-11-12). pitch 추정은 **슬롯 단위로
   하지 마라** — 사진 수에 따라 슬롯마다 격자가 달라져 LOT 합산에서 (3,3)이 (9,3)에 찍혔다.
   같은 LOT(`camtek_live.lot_key`) 사진 전체로 한 번 추정하고 die 맵이 원을 채우게 맞춘다
   (`_fit_to_wafer`, 사진 좌표가 하한). 회귀 가드: `test_wafer_txt.py`.
 - **Wafer map 경고**: 칸이 틀렸을 수 있는 맵(die 없는 칸에 찍힌 점·슬롯 간 격자 불일치·
   좌표 없는 사진·die 크기 추정)은 `wafer_map.map_warnings` 로 판정해 화면 위 배너로 알린다.
-  중심 가정·계산 격자는 거의 늘 붙어 배너에 넣지 않는다(범례만).  단 **LIVE 파일명으로 그린
-  맵은 늘** 재검토 당부를 띄운다(`WARN_LIVE_UNVERIFIED`, 엑셀 Wafer Map 시트에도) — 그 경로는
-  아직 검증이 충분하지 않다(사용자 지시).  검증이 끝나기 전에는 빼지 마라. 맵 아래에는 '참고용' 안내가
+  중심 가정·계산 격자는 거의 늘 붙어 배너에 넣지 않는다(범례만).  LIVE 파일명 맵에 늘 붙이던
+  재검토 당부는 뺐다(사용자 결정 2026-11-13 — Conder 1575장 번호 일치, XDIES 단위 검사 추가 뒤).
+  번호 계산·die 없는 칸·격자 불일치는 빨간 큰 배너다(`DANGER_CODES`). 맵 아래에는 '참고용' 안내가
   상시 붙는다(`WAFER_MAP_DISCLAIMER`, 사용자 요청).
 - **한 매칭 실행 안에서 Camtek 좌표 프레임은 하나여야 한다**(`coords.resolve_batch`).
   pitch 검산은 웨이퍼 폴더마다 독립이라 ref 는 통과하고 val 은 실패할 수 있는데, 그러면
   row 규약이 달라(`row_total−y_index` vs `−Row`) `(col,row) ±1` 게이트가 절대 안 맞아
   **그 슬롯이 통째로 '매치 실패'** 가 된다. 섞이면 전부 절대좌표로 내린다.
+- **두 Scanresult 스캔의 번호 출발점 차이는 매칭 사본에서만 뺀다**(`coords/scan_start.py`, 사용자 결정 A 2026-11-15 '번호 그대로, 매칭만 맞춤').
+  스캔마다 `S = (Δc − col_origin, row_total − Δr)`(Δ = `WaferMapRecipe.ini [Input_Update]` RefPoint1 − CustPoint1, 기준은 앱이 실제로 쓴 값)이고
+  슬롯의 검증 쪽 `camtek_ini` 좌표에서 `S_val − S_ref` 를 뺀다(notch 회전 **전**). 보통 스캔끼리는 0 이다(모은 자료의 같은 웨이퍼 쌍 전부 0,
+  QORVO 6H7ENK CTX 6412 만 (1, 2) — 두 스캔에 같이 찍힌 Defect 5개로 확인, 관측). `Enable=1 · PointsSet=1 · Mirror=0 · ImportFlippedMap=0 ·
+  ShiftDie 0 · 두 기준점 쌍의 Δ 같음` 이 아니거나 한쪽 폴더라도 모르면 손대지 않는다(EDGE 레시피는 `Enable=0`). 화면 · 엑셀 · Wafer map 번호에 새게 하지 마라. 골든: `test_scan_start.py`.
 - 좌표 기반 매칭(`workers/coord_matcher.py`)의 후보 게이트는 **(col,row) ±1 이내**다(정답 도구
   AOI Data Viewer VBA `Module_Compare`: `Abs(col차)<=1 And Abs(row차)<=1`). KLA↔Camtek 처럼
   두 장비의 die 인덱스가 1 어긋날 수 있어 정확 일치만 하면 매칭이 전멸한다. 순수 헬퍼
@@ -388,6 +438,8 @@ UI 사용성. **공통 원칙: 정확도(검증 신뢰성)는 절대 깨지 않�
   비-사진 파일(`.001` 이거나 **확장자가 아예 없을 수 있음**, 1~2개)이고 헤더에
   `WaferID "XXXX";` 가 명시돼 있다 — `coords.kla_info.read_wafer_id` 가 후보를 전부 훑는다.
   **사진 파일명 prefix 로 WaferID 를 추측하지 마라**(되돌린 방식 → `docs/규칙_배경.md`).
+  윈도 썸네일 캐시 `Thumbs.db`(`.db`)는 후보에서 뺀다(`kla_info._NON_INFO_SUFFIXES`) — 후보가 둘이 되면 좌표용
+  `_find_info_file` 이 정보파일을 못 골라 그 폴더 좌표가 통째로 빠졌다(CTY RDL4 7장, `test_kla_thumbs_db.py`).
   정보파일이 **비어** 헤더가 없으면(실측: .001 이 0~1 바이트) 정보파일 **이름**의 WaferID 를 쓰되,
   KLA 폴더명 끝 슬롯 번호 = 상대 폴더 `ActiveSlot` 일 때만 짝짓고 경고한다(`slot.wafer_ids_from_broken_info`,
   사용자 결정 2026-10-25). 이름 하나만으로 짝짓지 마라.

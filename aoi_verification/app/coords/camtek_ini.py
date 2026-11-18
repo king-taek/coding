@@ -95,6 +95,9 @@ def load_folder(folder: Path) -> dict[str, DefectCoord]:
 
 _RECIPE_INI = "Recipe.ini"
 _SHIFT_KEYS = ("DisplayColShift", "DisplayRowShift")
+_ORIENT_KEY = "WaferDisplayOrientation"
+_ORIENT_SHIFTED = "2"      # Left Bottom — 장비가 시프트를 더한다(관측)
+_ORIENT_DEFAULT = "1"      # System Default — 더하지 않는다(관측)
 
 
 @lru_cache(maxsize=256)
@@ -107,6 +110,14 @@ def display_shift(folder: Path) -> tuple[int, int]:
     68장은 전부 0.  ⚠ row 시프트가 0 이 아닌 실물은 아직 없다 — 같은 부호로 더한다는 건
     col 에서 옮겨 온 **가정**이다.
 
+    ★ **장비는 같은 섹션의 ``WaferDisplayOrientation=2``(Left Bottom) 일 때만 시프트를 더한다**
+    (관측 2026-11-14, 시프트 수집 2차).  2 인 T254 FS UBM(42장)·T254 H-M1(번호표 있음, Conder
+    이름 29/30) 은 더했고, 1(System Default) 인 KENDALL A0 PI3 (−1, −3) 는 장비 화면(현택님 확인
+    1건)·Conder 이름(11장) 모두 번호표 번호 그대로였다.  경쟁 가설 '번호표가 있으면 안 더함' 은
+    H-M1 이 반증했다.  1 인데 더하면 화면 row 가 음수가 된다(KENDALL −2, TB500 R-ETCH −5) —
+    장비가 쓸 수 없는 번호라 이 규칙과 맞는다.  1 도 2 도 아닌 값·값 없음은 실물이 없어
+    예전처럼 더하고 경고한다.
+
     매칭·Wafer map 위치에는 쓰지 않는다 — KLA·LOT 맵 txt·시프트 없는 레시피는 실제 die
     번호를 쓰므로, 시프트를 섞으면 같은 die 가 1 어긋난다.  값은 줄 끝 ``; 주석`` 을 버리고
     정수로 읽으며, 정수가 아니면 경고하고 0 으로 둔다(화면 표기만 바뀌므로 매칭은 안전)."""
@@ -115,6 +126,7 @@ def display_shift(folder: Path) -> tuple[int, int]:
     if text is None:
         return (0, 0)
     found = {k: 0 for k in _SHIFT_KEYS}
+    orientation = None
     section = ""
     for line in text.splitlines():
         line = line.strip()
@@ -124,14 +136,26 @@ def display_shift(folder: Path) -> tuple[int, int]:
         if section != "display" or "=" not in line:
             continue
         key, val = (t.strip() for t in line.split("=", 1))
+        val = val.split(";", 1)[0].strip()
+        if key == _ORIENT_KEY:
+            orientation = val
+            continue
         if key not in found:
             continue
-        val = val.split(";", 1)[0].strip()
         try:
             found[key] = int(val)
         except ValueError:
             _LOG.warning("%s 의 %s=%r 를 정수로 못 읽어 0 으로 둡니다.", p, key, val)
-    return (found["DisplayColShift"], found["DisplayRowShift"])
+    shift = (found["DisplayColShift"], found["DisplayRowShift"])
+    if shift == (0, 0) or orientation == _ORIENT_SHIFTED:
+        return shift
+    if orientation == _ORIENT_DEFAULT:
+        _LOG.info("%s 의 화면 시프트 %s 는 화면 방향이 System Default(1)라 장비가 더하지 않는다 — "
+                  "화면 번호 = 실제 die 번호", p, shift)
+        return (0, 0)
+    _LOG.warning("%s 의 화면 방향 %s=%r 는 확인한 적이 없다 — 시프트 %s 를 더해 둔다",
+                 p, _ORIENT_KEY, orientation, shift)
+    return shift
 
 
 def _extract_coord(content: str,
@@ -154,14 +178,18 @@ def _coord_from_raw(raw: tuple[float, float, int, int],
     #   (recipe1 Row=3, recipe2 Row=4).  필드를 그대로 쓰면 die 내부 y 가 −15349 같은
     #   음수가 된다 — die 안의 위치로 불가능한 값이다.  그 필드는 pitch 검산의
     #   참조값으로만 쓴다(`wafer_geometry._grid_check`).
-    x_index = math.floor(X / geom.pitch_x)
-    y_index = math.floor(Y / geom.pitch_y)
+    if geom.block is not None:
+        # 블록형 제품 — 칸 안 배치표로 die 를 찾는다(wafer_geometry.BlockLayout).
+        x_index, y_index, x, y = geom.block.locate(X, Y)
+    else:
+        x_index = math.floor(X / geom.pitch_x)
+        y_index = math.floor(Y / geom.pitch_y)
+        # 버림(floor) — 장비 화면·정답 데이터와 표기를 일치시킨다.  거리 계산 변화는
+        # ref/val 양쪽 동일 규칙으로 2 µm 미만이라 매칭 판정(20/200 µm)에 영향 없다.
+        x = float(math.floor(X - x_index * geom.pitch_x))
+        y = float(math.floor(Y - y_index * geom.pitch_y))
     col = x_index - geom.col_origin
     row = geom.row_total - y_index
-    # 버림(floor) — 장비 화면·정답 데이터와 표기를 일치시킨다.  거리 계산 변화는
-    # ref/val 양쪽 동일 규칙으로 2 µm 미만이라 매칭 판정(20/200 µm)에 영향 없다.
-    x = float(math.floor(X - x_index * geom.pitch_x))
-    y = float(math.floor(Y - y_index * geom.pitch_y))
     # 번호 기준이 장비 기록(번호표 · die 목록)도, 표본 전부에서 맞았던 '중심식=격자식' 일치도
     # 아니면 틀렸을 수 있다 — 화면에 경고만(wafer_geometry.is_trusted_source).
     warn = "" if is_trusted_source(geom.source) else NUMBER_WARN_NO_TABLE

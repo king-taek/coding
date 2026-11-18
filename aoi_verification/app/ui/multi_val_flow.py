@@ -253,6 +253,14 @@ class MultiValFlow:
                 failed += lc.ctx.coord_failed_count
         return matches, lanes, marked, failed
 
+    def _multi_number_risk(self) -> tuple:
+        """장비 구간마다 센 번호 경고 슬롯을 합친다 — 합친 검토 화면의 큰 경고용."""
+        from ..coords import number_risk
+        return number_risk.merge(*(
+            getattr(leg["state"]["_leg_ctx"].ctx, "number_risk", ())
+            for leg in self._legs
+            if leg["state"] and leg["state"].get("_leg_ctx")))
+
     def _show_multi_review(self) -> None:
         """구간 전부의 1차 매칭 → 검토 화면 한 번(기준 사진 1장 + 장비별 줄)."""
         self._save_leg()
@@ -267,7 +275,8 @@ class MultiValFlow:
             matches, score_cache=ctx.score_cache, val_pool=None,
             review_scores=ctx.review_scores, candidates_by_ref=None,
             coord_mode=ctx.coord_mode, tolerance=ctx.tolerance,
-            coord_failed_count=failed, unmatched_keys=marked, lanes=lanes)
+            coord_failed_count=failed, unmatched_keys=marked, lanes=lanes,
+            number_risk=self._multi_number_risk())
         self._notify_ready_for_review()
         self._show_page(self._match_review_page)
 
@@ -371,7 +380,8 @@ class MultiValFlow:
             candidates_by_ref=lc.candidates_by_ref if lc else None,
             coord_mode=ctx.coord_mode, tolerance=ctx.tolerance,
             coord_failed_count=ctx.coord_failed_count,
-            unmatched_keys=self._b_unmatched_keys)
+            unmatched_keys=self._b_unmatched_keys,
+            number_risk=getattr(ctx, "number_risk", ()))
         self._legs[self._leg_idx]["b_done"] = False
         self._show_page(self._match_review_page)
         return True

@@ -31,7 +31,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
-from . import kla_info, wafer_geometry as wg, wafer_txt
+from . import camtek_live, kla_info, wafer_geometry as wg, wafer_txt
 from .models import DefectCoord
 from ..models.result import EXTRACT_MODE
 
@@ -39,8 +39,7 @@ __all__ = ["WaferFrame", "MapPoint", "MapData", "frame_for_folder", "to_plane",
            "build_map", "grid_lines", "die_grid_segments", "cell_of",
            "cell_bounds", "defect_cells", "slot_maps", "ALL_SLOTS_KEY", "map_warnings",
            "warning_reasons",
-           "WARN_OFF_DIE", "WARN_MIXED_FRAMES", "WARN_UNPLACED", "WARN_PITCH_ASSUMED",
-           "WARN_LIVE_UNVERIFIED"]
+           "WARN_OFF_DIE", "WARN_MIXED_FRAMES", "WARN_UNPLACED", "WARN_PITCH_ASSUMED"]
 
 _LOG = logging.getLogger("aoi.coords.wafer_map")
 
@@ -97,12 +96,18 @@ class MapData:
     # 점이 엉뚱한 칸에 찍힌다(실측: 파일명 (3,3) 이 (9,3) 칸).  :func:`map_warnings`.
     # 위상(중심)만 다른 것은 :func:`_align_phase` 가 맞추므로 여기 들지 않는다.
     mixed_frames: bool = False
-    # LIVE 파일명(`camtek_live`)으로 놓은 점 수 — 그 경로는 아직 검증이 충분하지 않다
-    # (사용자 지시: 맵을 볼 때마다 재검토를 당부한다).
-    live_points: int = 0
     # col/row 를 장비 번호표 없이 계산한(틀렸을 수 있는) 점 수 — DefectCoord.number_warn.
     # 점 위치는 x/y 라 안 틀리고, 툴팁 번호만 틀렸을 수 있다.
     guessed_points: int = 0
+    # 노치가 위(FNLOC=0)인 Conder 맵으로 칸을 정한 점 수 — 180 과 같은 배치로 읽는다
+    # (관측 51/51)지만 확인한 표본이 적어 늘 알린다(사용자 지시 2026-11-14 '혹시 몰라').
+    notch_up_points: int = 0
+    # 시프트를 쓴 적이 있는 Job 의 Conder 사진인데 맵으로 시프트를 확인하지 못한 점 수 —
+    # 번호는 그대로 두고 '한 칸 다를 수 있음' 만 알린다(사용자 결정 2026-11-14).
+    shift_unknown_points: int = 0
+    # Conder 맵으로 시프트를 못 정했는데 0 으로도 사진이 맵에 안 맞는 점 수 — 몇 칸 어긋났을 수 있다
+    # (:func:`camtek_live.lot_shift_doubtful`, 사용자 결정 2026-11-15).  번호는 그대로다.
+    map_mismatch_points: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -201,16 +206,41 @@ def _txt_pitch(wt: "wafer_txt.WaferTxt", folder: Path
     ``XDIES/YDIES`` 는 die **크기**라 간격보다 스크라이브 폭만큼 작지만(T254 0.8 %) 간격이
     파일에 없어 그대로 격자 간격으로 쓴다.  **같은 LOT 사진이 전부 그 안에 들어갈 때만**
     쓴다(같은 웨이퍼라도 파일마다 다른 값이 관측됐다 — :mod:`.wafer_txt`).  아니면 LOT
-    사진으로 추정하고 :func:`_fit_to_wafer` 로 맵을 웨이퍼 원에 맞춘다."""
+    사진으로 추정하고 :func:`_fit_to_wafer` 로 맵을 웨이퍼 원에 맞춘다.
+
+    ★ **die 칸 범위 × 크기가 웨이퍼 지름을 넘으면 쓰지 않는다**(:func:`_txt_fits_wafer`).
+    사진 검사는 '너무 작은' 값만 거른다 — 단위를 잘못 적은 큰 값(3L795426A XDIES 316.85,
+    mil 을 mm 로)은 사진이 전부 그 안에 들어 통과했고, 점이 전부 웨이퍼 밖에 찍혔는데
+    경고가 없었다(수집 맵 2,911장 중 74장이 지름의 37~38배, 관측 2026-11-12)."""
     ext = _live_extent(folder)
-    if wt.die_x and wt.die_y and (ext is None or (ext[0] < wt.die_x and ext[1] < wt.die_y)):
+    if wt.die_x and wt.die_y and not _txt_fits_wafer(wt, wg._read_diameter(folder)):
+        _LOG.warning("웨이퍼 맵 %s 의 XDIES/YDIES(%.1f/%.1f µm) × die 칸 수가 웨이퍼 지름보다 "
+                     "커서 die 크기로 쓰지 않고 사진으로 추정한다(단위 오류 의심)",
+                     wt.path, wt.die_x, wt.die_y)
+    elif wt.die_x and wt.die_y and (ext is None or (ext[0] < wt.die_x and ext[1] < wt.die_y)):
         return (wt.die_x, wt.die_y), False
-    if wt.die_x and wt.die_y:
+    elif wt.die_x and wt.die_y:
         _LOG.warning("웨이퍼 맵 %s 의 XDIES/YDIES(%.1f/%.1f µm)보다 큰 사진 좌표(%.1f/%.1f)가 "
                      "있어 die 크기로 쓰지 않고 사진으로 추정한다", wt.path, wt.die_x,
                      wt.die_y, ext[0], ext[1])
     est = _live_pitch_estimate(folder)
     return (est, True) if est is not None else (None, False)
+
+
+# die 칸 범위 × XDIES 가 지름의 이 배를 넘으면 단위 오류로 본다.  수집 맵 2,911장
+# (관측 2026-11-12): 정상 0.5~1.0(중앙 0.90), 1.7 이 62장(GX575 Mirroring_Converted —
+# 맵이 잘못됐거나 die 크기가 다른 값, 사진 추정으로 넘긴다), 37~38 이 74장(단위 오류).
+_TXT_SPAN_MAX = 1.15
+
+
+def _txt_fits_wafer(wt: "wafer_txt.WaferTxt", diameter: float) -> bool:
+    """die 가 있는 칸의 가로·세로 범위 × die 크기가 웨이퍼 지름 안에 드는가."""
+    if not wt.cells:
+        return True
+    cs = [c for c, _ in wt.cells]
+    js = [j for _, j in wt.cells]
+    span = max((max(cs) - min(cs) + 1) * wt.die_x, (max(js) - min(js) + 1) * wt.die_y)
+    return span <= _TXT_SPAN_MAX * diameter
 
 
 # die 맵이 웨이퍼 원을 채우는 비율 — 최외곽 die 모서리 / 반경.  ``XDIES`` 가 있던 실측
@@ -427,11 +457,23 @@ def to_plane(coord: DefectCoord, folder: Path) -> Optional[tuple[float, float]]:
         if c.geom is None:
             return None
         g = c.geom
-        sx = (coord.col + g.col_origin) * g.pitch_x + coord.x
-        sy = (g.row_total - coord.row) * g.pitch_y + coord.y
+        x, y = coord.x, coord.y
+        if coord.source == "camtek_live":       # pitch 가 짐작값일 수 있다(_inside)
+            x, y = _inside(x, g.pitch_x), _inside(y, g.pitch_y)
+        sx = (coord.col + g.col_origin) * g.pitch_x + x
+        sy = (g.row_total - coord.row) * g.pitch_y + y
         return (sx - c.cx, c.cy - sy)
     except Exception:
         return None
+
+
+def _inside(d: float, pitch: float) -> float:
+    """die 안 좌표를 칸 안쪽(양 끝 0.1 % 여유)으로 — 점이 **번호가 정한 칸** 밖으로 나가지 않게.
+
+    LIVE 사진의 pitch 는 짐작값이라 실제 die 보다 작을 수 있다.  그대로 더하면 die 끝의
+    결함이 옆 die 칸에 찍혔다(수집 맵 3,141장 중 35장, 관측 2026-11-12).  칸은 파일명
+    번호가 정하므로(관측 330/330) die 안 위치만 칸 가장자리에 붙인다."""
+    return min(max(d, pitch * 0.001), pitch * 0.999)
 
 
 def _wrap(d: float, pitch: float) -> float:
@@ -466,8 +508,10 @@ def build_map(coords: dict, matched=None) -> MapData:
     """
     points: list[MapPoint] = []
     unplaced: list[Path] = []
-    live = 0
     guessed = 0
+    notch_up = 0
+    shift_unknown = 0
+    map_mismatch = 0
     frame: Optional[WaferFrame] = None
     folder_frames: dict = {}
     for path, coord in coords.items():
@@ -475,6 +519,13 @@ def build_map(coords: dict, matched=None) -> MapData:
         if coord is None:
             unplaced.append(path)
             continue
+        if coord.source == "camtek_live":     # 놓지 못한 점도 센다 — 번호 자체가 의심이다
+            lot = path.parent.parent
+            if camtek_live.lot_shift_doubtful(lot):
+                map_mismatch += 1
+            else:
+                shift_unknown += (camtek_live.shift_risk_job(path.stem)
+                                  and not camtek_live.lot_shift_confirmed(lot))
         xy = to_plane(coord, path.parent)
         if xy is None:
             unplaced.append(path)
@@ -486,8 +537,10 @@ def build_map(coords: dict, matched=None) -> MapData:
             frame = folder_frames[key]
         xy = _align_phase(xy, folder_frames[key], frame)
         die_known = coord.source != "camtek_abs"
-        live += coord.source == "camtek_live"
         guessed += bool(coord.number_warn) and die_known
+        if coord.source == "camtek_live":
+            wt = wafer_txt.load(path.parent)
+            notch_up += wt is not None and wt.fnloc == "0"
         points.append(MapPoint(
             path=path, x=xy[0], y=xy[1],
             col=coord.screen_col if die_known else None,
@@ -512,7 +565,9 @@ def build_map(coords: dict, matched=None) -> MapData:
         if len(union) > len(frame.die_cells):
             frame = replace(frame, die_cells=frozenset(union))
     return MapData(frame=frame, points=tuple(points), unplaced=tuple(unplaced),
-                   mixed_frames=mixed, live_points=live, guessed_points=guessed)
+                   mixed_frames=mixed, guessed_points=guessed,
+                   notch_up_points=notch_up, shift_unknown_points=shift_unknown,
+                   map_mismatch_points=map_mismatch)
 
 
 # ---------------------------------------------------------------------------
@@ -522,8 +577,10 @@ WARN_OFF_DIE = "off_die"                # die 가 없는 칸(또는 원 밖)에 
 WARN_MIXED_FRAMES = "mixed_frames"      # 합친 폴더들의 격자가 서로 다르다
 WARN_UNPLACED = "unplaced"              # 좌표를 못 놓은 사진이 있다
 WARN_PITCH_ASSUMED = "pitch_assumed"    # die 크기를 사진으로 추정했다(크기·외곽 근사)
-WARN_LIVE_UNVERIFIED = "live_unverified"  # LIVE 파일명으로 그린 맵 — 검증이 아직 충분하지 않다
 WARN_NUMBER_GUESS = "number_guess"      # col/row 를 장비 번호표 없이 계산한 점이 있다(툴팁 번호)
+WARN_NOTCH_UP = "notch_up"              # 노치가 위(FNLOC=0)인 Conder 맵으로 칸을 정했다
+WARN_SHIFT_UNKNOWN = "shift_unknown"    # 시프트를 쓴 적 있는 Job 인데 Conder 맵으로 확인 못 함
+WARN_MAP_MISMATCH = "map_mismatch"      # Conder 맵으로 시프트를 못 정했고 0 으로도 사진이 안 맞음
 
 
 def _cell_drawn(frame: WaferFrame, cell: tuple[int, int]) -> bool:
@@ -540,8 +597,8 @@ def map_warnings(data: Optional[MapData]) -> list[tuple[str, int]]:
 
     **칸이 틀렸을 수 있는 것**만 고른다.  중심 가정·계산 격자는 거의 모든 LIVE·INI
     폴더에 붙어 늘 뜨면 무시하게 되므로 범례에만 둔다(:class:`WaferFrame` 플래그).
-    단 **LIVE 파일명으로 그린 맵은 늘 경고한다**(사용자 지시) — 그 경로의 검증이 아직
-    충분하지 않아, 중요한 정보는 재검토하라고 매번 알린다.
+    LIVE 파일명 맵에 늘 붙이던 '검증 부족' 당부는 뺐다(사용자 결정 2026-11-13: 수집 자료
+    Conder 1575장 번호 일치, XDIES 단위 오류 검사 추가 후).
     순수 — 헤드리스 테스트한다."""
     if data is None:
         return []
@@ -558,29 +615,46 @@ def map_warnings(data: Optional[MapData]) -> list[tuple[str, int]]:
         out.append((WARN_UNPLACED, len(data.unplaced)))
     if fr is not None and fr.pitch_assumed:
         out.append((WARN_PITCH_ASSUMED, len(data.points)))
-    if data.live_points:
-        out.append((WARN_LIVE_UNVERIFIED, data.live_points))
     if data.guessed_points:
         out.append((WARN_NUMBER_GUESS, data.guessed_points))
+    if data.notch_up_points:
+        out.append((WARN_NOTCH_UP, data.notch_up_points))
+    if data.shift_unknown_points:
+        out.append((WARN_SHIFT_UNKNOWN, data.shift_unknown_points))
+    if data.map_mismatch_points:
+        out.append((WARN_MAP_MISMATCH, data.map_mismatch_points))
     return out
 
 
-def warning_reasons(data: Optional[MapData], skip: tuple = ()) -> str:
+# 칸·번호가 **틀렸을 가능성이 큰** 경고 — 화면 배너를 빨간 큰 경고로 바꾼다(사용자 지시
+# 2026-11-13).  LIVE 당부·die 크기 추정·좌표 없는 사진은 점이 엉뚱한 칸에 찍히는 일이
+# 아니라 넣지 않는다 — 늘 빨갛게 뜨면 정작 위험할 때 무시하게 된다.
+DANGER_CODES = (WARN_NUMBER_GUESS, WARN_OFF_DIE, WARN_MIXED_FRAMES)
+
+
+def is_high_risk(data: Optional[MapData]) -> bool:
+    """:data:`DANGER_CODES` 경고가 하나라도 있는가."""
+    return any(code in DANGER_CODES for code, _n in map_warnings(data))
+
+
+def warning_reasons(data: Optional[MapData]) -> str:
     """:func:`map_warnings` → 사용자 문구(``" · "`` 로 이음).  없으면 빈 문자열.
 
     화면 배너와 엑셀 Wafer Map 시트가 **같은 문구**를 쓰게 한 곳에 둔다 — 예전에는
     배너에만 있어 엑셀로 나간 맵은 칸이 틀렸을 수 있다는 사실이 빠졌다(좌표 전반 점검,
-    2026-10-24).  ``skip`` 의 코드는 뺀다(엑셀은 LIVE 당부를 표 아래에 따로 적는다)."""
+    2026-10-24)."""
     from .. import i18n
     fmt = {
         WARN_OFF_DIE: lambda n: i18n.KO.WAFER_MAP_WARN_OFF_DIE_FMT.format(n=n),
         WARN_MIXED_FRAMES: lambda n: i18n.KO.WAFER_MAP_WARN_MIXED_FRAMES,
         WARN_UNPLACED: lambda n: i18n.KO.WAFER_MAP_WARN_UNPLACED_FMT.format(n=n),
         WARN_PITCH_ASSUMED: lambda n: i18n.KO.WAFER_MAP_WARN_PITCH_ASSUMED,
-        WARN_LIVE_UNVERIFIED: lambda n: i18n.KO.WAFER_MAP_WARN_LIVE_UNVERIFIED,
         WARN_NUMBER_GUESS: lambda n: i18n.KO.WAFER_MAP_WARN_NUMBER_GUESS_FMT.format(n=n),
+        WARN_NOTCH_UP: lambda n: i18n.KO.WAFER_MAP_WARN_NOTCH_UP_FMT.format(n=n),
+        WARN_SHIFT_UNKNOWN: lambda n: i18n.KO.WAFER_MAP_WARN_SHIFT_UNKNOWN_FMT.format(n=n),
+        WARN_MAP_MISMATCH: lambda n: i18n.KO.WAFER_MAP_WARN_MAP_MISMATCH_FMT.format(n=n),
     }
-    return " · ".join(fmt[code](n) for code, n in map_warnings(data) if code not in skip)
+    return " · ".join(fmt[code](n) for code, n in map_warnings(data))
 
 
 def grid_lines(frame: WaferFrame) -> tuple[list[float], list[float]]:

@@ -42,6 +42,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -54,11 +55,13 @@ from ... import i18n
 from ...config import CONFIG
 from ...coords import resolve_batch
 from ...coords.wafer_map import (ALL_SLOTS_KEY, MapData, SOURCE_ASSUMED,
-                                 build_map, slot_maps, warning_reasons)
+                                 build_map, is_high_risk, slot_maps, warning_reasons)
 from ...models.result import FinalResult
 from ...models.slot import _list_images, list_slot_dirs
 from ...utils import image_io
 from .. import theme
+from ..drop_overlay import drop_clear, drop_feedback
+from ..drop_paths import guess_kinds, install_paste, local_paths, split_paths
 from . import sheet_host as sheets
 from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
@@ -286,6 +289,7 @@ class WaferMapDialog(QDialog):
             top.addWidget(self.slots_btn)
             # 사진 보기는 버튼이 아니라 **끌어놓기**다(사용자 요청) — dropEvent.
             self.setAcceptDrops(True)
+            install_paste(self, self._on_paths, self._on_no_path)
             self.folder_label = QLabel("", self)
             self.folder_label.setProperty("role", "monoMuted")
             top.addWidget(self.folder_label, stretch=1)
@@ -486,7 +490,17 @@ class WaferMapDialog(QDialog):
     def _show_maps(self, left: tuple[str, MapData],
                    right: Optional[tuple[str, MapData]]) -> None:
         self.empty.hide()
-        text = self.warning_text([left] + ([right] if right is not None else []))
+        sides = [left] + ([right] if right is not None else [])
+        text = self.warning_text(sides)
+        # 칸·번호가 틀렸을 가능성이 크면 빨간 큰 배너로 — 주황 한 줄은 지나치기 쉽다.
+        # ★ unpolish/polish 만으로는 색만 바뀌고 **여백(padding)은 옛 값**이 남아 빨간
+        #   테두리가 글자에 붙는다(실측: 여백 4px 그대로).  위젯 스타일시트를 한 번 갈아
+        #   끼우면 여백까지 다시 잰다.
+        role = "dangerBanner" if self.warning_is_danger(sides) else "hintWarn"
+        if self.warn_banner.property("role") != role:
+            self.warn_banner.setProperty("role", role)
+            self.warn_banner.setStyleSheet("/* role */")
+            self.warn_banner.setStyleSheet("")
         self.warn_banner.setText(text)
         self.warn_banner.setVisible(bool(text))
         self.disclaimer.setVisible(not self._fullscreen)
@@ -501,15 +515,24 @@ class WaferMapDialog(QDialog):
             self.right.show()
 
     @staticmethod
+    def warning_is_danger(sides: list[tuple[str, Optional[MapData]]]) -> bool:
+        """어느 한 맵이라도 칸·번호가 틀렸을 가능성이 큰가(:func:`wafer_map.is_high_risk`)."""
+        return any(is_high_risk(data) for _title, data in sides)
+
+    @staticmethod
     def warning_text(sides: list[tuple[str, Optional[MapData]]]) -> str:
-        """경고 배너 문구 — 문제 없으면 빈 문자열.  맵이 둘이면 맵마다 제목을 붙인다."""
+        """경고 배너 문구 — 문제 없으면 빈 문자열.  맵이 둘이면 맵마다 제목을 붙인다.
+
+        틀릴 가능성이 큰 경고가 있으면 머리말을 :data:`WAFER_MAP_DANGER_HEAD` 로 바꾼다."""
         lines = []
         for title, data in sides:
             reasons = warning_reasons(data)
             if reasons:
                 lines.append(i18n.KO.WAFER_MAP_WARN_SIDE_FMT.format(side=title, reasons=reasons)
                              if len(sides) > 1 else reasons)
-        return "\n".join([i18n.KO.WAFER_MAP_WARN_HEAD, *lines]) if lines else ""
+        head = (i18n.KO.WAFER_MAP_DANGER_HEAD if WaferMapDialog.warning_is_danger(sides)
+                else i18n.KO.WAFER_MAP_WARN_HEAD)
+        return "\n".join([head, *lines]) if lines else ""
 
     # ------------------------------------------------------------------
     # 워커 — 좌표 + 썸네일 선로딩, 진행은 오버레이로
@@ -613,38 +636,70 @@ class WaferMapDialog(QDialog):
     # ------------------------------------------------------------------
     # 사진 끌어놓기
     # ------------------------------------------------------------------
-    @staticmethod
-    def _dropped(event) -> list[Path]:
-        """끌어놓은 것 중 사진만.  로컬 파일만."""
-        imgs = []
-        exts = {e.lower() for e in CONFIG.image_extensions}
-        md = event.mimeData()
-        for url in (md.urls() if md is not None and md.hasUrls() else []):
-            if not url.isLocalFile():
-                continue
-            p = Path(url.toLocalFile())
-            if p.suffix.lower() in exts:
-                imgs.append(p)
-        return imgs
+    def hideEvent(self, event):         # noqa: N802
+        drop_clear(self)                # 끌던 중에 숨겨져도 표시가 남지 않게
+        super().hideEvent(event)
 
     def dragEnterEvent(self, event):    # noqa: N802
-        if self._dropped(event):
-            event.acceptProposedAction()
-        else:
+        # 디스크를 만지지 않는다(NAS) — 로컬 경로가 있으면 받고, 분류는 놓을 때.
+        md = event.mimeData()
+        paths = local_paths(md) if md is not None else []
+        if not paths:
+            drop_clear(self)
             event.ignore()
+            return
+        kinds = guess_kinds(paths)
+        K = i18n.KO
+        if "image" in kinds:
+            text, ok = K.DROP_PILL_SHOW_ON_MAP, True
+        elif "folder" in kinds:
+            text, ok = K.DROP_PILL_FOLDER_MAP, True
+        else:
+            text, ok = K.DROP_PILL_ONLY_FOLDER_PHOTO, False
+        drop_feedback(self, event, None, text, ok)
 
     def dragMoveEvent(self, event):     # noqa: N802
         self.dragEnterEvent(event)
 
+    def dragLeaveEvent(self, event):    # noqa: N802
+        drop_clear(self)
+        event.accept()
+
     def dropEvent(self, event):         # noqa: N802
-        """사진(여러 장 가능) → 그 결함들만."""
-        imgs = self._dropped(event)
-        if imgs:
-            self.show_images(imgs)
-        else:
+        """사진(여러 장 가능) → 그 결함들만.  폴더 1개 → 폴더 맵."""
+        drop_clear(self)
+        md = event.mimeData()
+        paths = local_paths(md) if md is not None else []
+        if not paths:
             event.ignore()
             return
         event.acceptProposedAction()
+        self._on_paths(paths)
+
+    def _on_paths(self, paths: list[str]) -> None:
+        exts = {e.lower() for e in CONFIG.image_extensions}
+        folders, images, _others = split_paths(
+            paths, is_dir=os.path.isdir,
+            is_image=lambda p: Path(p).suffix.lower() in exts)
+        images = [p for p in images if os.path.exists(p)]
+        if images:
+            self.show_images([Path(p) for p in images])
+        elif len(folders) == 1:
+            self.show_folder(Path(folders[0]))
+        elif folders:
+            self._notice(i18n.KO.DROP_ONE_AT_A_TIME)
+        elif not any(os.path.exists(p) for p in paths):
+            self._notice(i18n.KO.DROP_NOT_FOUND)
+        else:
+            self._notice(i18n.KO.DROP_WRONG_KIND_FOLDER)
+
+    def _on_no_path(self, has_image: bool) -> None:
+        self._notice(i18n.KO.DROP_NO_PATH_IMAGE if has_image
+                     else i18n.KO.DROP_NOTHING_TO_PASTE)
+
+    def _notice(self, text: str) -> None:
+        """짧은 안내 — 맵 위 경고 배너를 덮지 않게 시트로 띄운다."""
+        sheets.info(self, i18n.KO.WAFER_MAP_TITLE, text)
 
     def _folder_title(self) -> str:
         if len(self._images) == 1:

@@ -33,8 +33,11 @@ _LOG = logging.getLogger("aoi.coords")
 __all__ = ["resolve", "load_folder", "load_folder_raw", "read_wafer_id",
            "read_slot_no", "read_header_ids", "peek_die_pitch"]
 
-# 정보파일 후보에서 제외할 확장자 — 사진/패스/설정/스크립트.
-_NON_INFO_SUFFIXES = ('.jpg', '.jpeg', '.pass', '.ini', '.py')
+# 정보파일 후보에서 제외할 확장자 — 사진/패스/설정/스크립트/윈도 썸네일 캐시.
+# ``.db``: 사진 폴더를 탐색기로 열면 윈도가 ``Thumbs.db`` 를 남긴다.  그러면 후보가 둘이 돼
+# 좌표용 :func:`_find_info_file` 이 정보파일을 못 골라 그 폴더 좌표가 통째로 빠졌다
+# (Conder CTY RDL4 00NUR030XYA3 — 확장자 없는 정보파일 + Thumbs.db, 좌표 있는 7장, 관측 2026-11-15).
+_NON_INFO_SUFFIXES = ('.jpg', '.jpeg', '.pass', '.ini', '.py', '.db')
 
 # DefectList 행: 공백/탭 구분 숫자 필드
 # 필드 순서(0-based): 0=ID, 1=X, 2=Y, 3=XREL, 4=YREL, 5=XINDEX, 6=YINDEX, ...

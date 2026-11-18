@@ -115,16 +115,19 @@ def resolve(image_path: Path) -> GeometryResult:
             px_x = px_y = SURFACE_LEN_FACTOR
         else:
             px_x, px_y = xy
+        # 구형 장비 레이아웃엔 recipe 칸이 없다(surface_flt) — 지어내지 않고 None.
+        recipe = None if rec.recipe is None else int(rec.recipe)
         geom = DefectGeometry(
             area_um2=rec.area * px_x * px_y,
             width_um=rec.blob_breadth * px_x,
             length_um=rec.blob_feret_max * px_x,
             contrast=rec.contrast,
             zone=int(rec.zone),
-            recipe=int(rec.recipe),
+            recipe=recipe,
             pixel_um=px_x,
             zone_name=zone_name.name_for(folder, int(rec.zone)) or "",
-            recipe_name=recipe_name.name_for(folder, int(rec.recipe)) or "",
+            recipe_name=("" if recipe is None
+                         else recipe_name.name_for(folder, recipe) or ""),
         )
         return GeometryResult("ok", geom)
     except Exception:

@@ -1,0 +1,15 @@
+#,Type,Area,Width,Length,Col,Row,X,Y,Classify,Visit
+1,Surface-amk_mask_6_110,314.28,10.16,23.66,-1,5,6439,26137,Foreign Material,RDL Defect
+2,Surface-amk_mask_6_110,40,4.2,10.15,-1,4,13195,9798,Accept,X
+3,Surface-amk_mask_6_110,40,4.2,10.15,2,7,5577,7456,Accept,X
+4,Surface-amk_mask_6_110,31.43,3.83,8.58,2,7,5123,7844,Accept,X
+5,Surface-Scan Area,2997.11,9.34,180.86,3,1,13435,1777,Foreign Material,B R Surface Bright
+6,Surface-Scan Area,559.99,9.06,50.05,3,1,13324,1817,Foreign Material,B R Surface Bright
+7,Surface-amk_mask_6_110,34.29,3.38,10.15,5,6,11778,6293,Accept,X
+8,Surface-amk_mask_6_110,31.43,2.9,10.15,5,1,12033,22905,Accept,X
+9,Surface-Scan Area,51.43,7.11,9.23,7,8,14246,1355,Accept,X
+10,Surface-amk_mask_6_110,31.43,2.14,13.64,14,3,11443,8852,Accept,X
+11,Surface-amk_mask_6_110,31.43,3.2,10.15,15,4,10269,4856,Accept,X
+12,Surface-amk_mask_6_110,31.43,3.47,9.23,15,4,10166,5131,Accept,X
+13,Surface-amk_mask_6_110,31.43,2.54,11.83,16,6,1317,27313,Accept,X
+14,Surface-Scan Area,48.57,6.86,9.23,17,3,14246,3754,Accept,X

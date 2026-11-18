@@ -48,6 +48,8 @@ from ...config import CONFIG
 from ...coords import scan_image, single_info
 from ...utils import image_io as _io
 from .. import motion, theme
+from ..drop_overlay import drop_clear, drop_feedback
+from ..drop_paths import install_paste
 from . import sheet_host as sheets
 from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
@@ -222,6 +224,7 @@ class ImageInfoDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(i18n.KO.IMAGE_INFO_TITLE)
         self.setAcceptDrops(True)
+        install_paste(self, self._on_paste_paths, self._on_paste_no_path)
         self._path: Path | None = None
         self._groups: list = []
         self._scan_gen = 0
@@ -315,7 +318,7 @@ class ImageInfoDialog(QDialog):
         self._set_scan_visible(False)
         lay.addStretch(1)
         self._preview_host = host
-        self._set_drop_active(False)
+        self._style_preview()
         return host
 
     def _build_sheet(self) -> QWidget:
@@ -382,45 +385,57 @@ class ImageInfoDialog(QDialog):
         if path:
             self.show_image(Path(path))
 
+    def hideEvent(self, event):         # noqa: N802
+        drop_clear(self)                # 끌던 중에 숨겨져도 표시가 남지 않게
+        super().hideEvent(event)
+
     def dragEnterEvent(self, event):        # noqa: N802
-        if self._dropped_image(event) is None:
-            event.ignore()
-            return
-        event.acceptProposedAction()
-        self._set_drop_active(True)
+        ok = self._dropped_image(event) is not None
+        drop_feedback(self, event, None, i18n.KO.DROP_PILL_OPEN_IMAGE if ok
+                      else i18n.KO.DROP_PILL_ONLY_IMAGE, ok)
+
+    def dragMoveEvent(self, event):         # noqa: N802
+        self.dragEnterEvent(event)
 
     def dragLeaveEvent(self, event):        # noqa: N802
-        self._set_drop_active(False)
+        drop_clear(self)
         event.accept()
 
     def dropEvent(self, event):             # noqa: N802
-        self._set_drop_active(False)
+        drop_clear(self)
         path = self._dropped_image(event)
         if path is None:
             event.ignore()
             return
         event.acceptProposedAction()
         self.show_image(path)
+        self._style_preview()               # 사진이 들어왔으니 점선 → 실선
 
-    def _set_drop_active(self, on: bool) -> None:
-        """드롭 대상임을 미리보기 면이 스스로 말하게 — 놓기 전에 보인다.
-
-        프레임 관습은 검토 화면 썸네일과 같다(`match_review_page` 의 thumb_frame):
-        비어 있으면 점선, 사진이 들어오면 실선.  드래그가 들어온 순간만 강조 잉크로
-        바뀐다 — 새 색을 만들지 않고 ACCENT 를 그대로 쓴다.
-        """
-        radius = theme.PROFILE.radius_sm
-        if on:
-            self.preview.setStyleSheet(
-                f"border: 1px solid {theme.ACCENT}; border-radius: {radius}px;"
-                f" background-color: {theme.ACCENT_TINT}; color: {theme.ACCENT};")
+    def _on_paste_paths(self, paths: list[str]) -> None:
+        """Ctrl+V — 처음 만나는 사진 경로를 연다.  디스크 확인은 여기(붙여넣기)에서만."""
+        first = next((p for p in paths if CONFIG.is_image(p)), None)
+        if first is None:
+            self._flash(i18n.KO.DROP_WRONG_KIND_IMAGE)
+        elif not os.path.isfile(first):
+            self._flash(i18n.KO.DROP_NOT_FOUND)
         else:
-            style = "solid" if self._path is not None else "dashed"
-            self.preview.setStyleSheet(
-                f"border: 1px {style} {theme.THUMB_FRAME};"
-                f" border-radius: {radius}px; color: {theme.MUTE};")
-        self.preview.setText(
-            i18n.KO.IMAGE_INFO_DROP_HERE if (on and self._path is None) else "")
+            self.show_image(Path(first))
+
+    def _on_paste_no_path(self, has_image: bool) -> None:
+        self._flash(i18n.KO.DROP_NO_PATH_IMAGE if has_image
+                    else i18n.KO.DROP_NOTHING_TO_PASTE)
+
+    def _flash(self, text: str) -> None:
+        motion.flash_text(self._toast, text, hold_ms=_TOAST_MS)
+
+    def _style_preview(self) -> None:
+        """미리보기 프레임 — 비어 있으면 점선, 사진이 들어오면 실선(검토 화면 썸네일과 같은 관습).
+
+        끌어놓기 표시는 ``drop_overlay`` 가 맡는다."""
+        style = "solid" if self._path is not None else "dashed"
+        self.preview.setStyleSheet(
+            f"border: 1px {style} {theme.THUMB_FRAME};"
+            f" border-radius: {theme.PROFILE.radius_sm}px; color: {theme.MUTE};")
 
     @staticmethod
     def _dropped_image(event) -> Path | None:

@@ -67,7 +67,7 @@ class DefectGeometry:
     length_um: float    # BlobFeretMax(px) × pixel_um
     contrast: float     # Surface.flt Contrast (그대로)
     zone: int           # Surface.flt zone 코드 (예: 1=PI Opening, 63=Scan Area)
-    recipe: int         # Surface.flt recipe 코드
+    recipe: Optional[int]  # Surface.flt recipe 코드. 그 칸이 없는 레이아웃(구형 장비)은 None
     pixel_um: float     # 환산에 쓴 2D 스캔 픽셀 크기(µm/px). 결과 폴더에서 읽음(없으면 0.77)
     zone_name: str = ""    # recipe 파일의 ZoneName(자재별). 없으면 빈 문자열(코드만 표시)
     recipe_name: str = ""  # recipe 파일의 RecipeName(자재별). 없으면 빈 문자열(코드만 표시)
