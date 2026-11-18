@@ -147,15 +147,18 @@ def _ini_fields(folder: Path) -> dict:
 def _nearest(xy, entries, pixel_xy) -> dict | None:
     """결함이 어느 Scan 에도 안 들 때, 이미지 범위 밖으로 가장 덜 벗어난 타일."""
     best = None
-    for path, center, (w, h) in entries:
-        u, v = scan_image.scan_uv(xy, center, (w, h), pixel_xy)
+    for path, center, (w, h), *own in entries:
+        px = own[0] if own else pixel_xy                # 레시피별 픽셀 크기(scan_image._with_recipe_px)
+        if px is None:
+            continue
+        u, v = scan_image.scan_uv(xy, center, (w, h), px)
         dx = max(0.0 - u, 0.0, u - (w - 1))
         dy = max(0.0 - v, 0.0, v - (h - 1))
         d = (dx * dx + dy * dy) ** 0.5
         if best is None or d < best["outside_px"]:
             best = {"name": Path(path).name, "suffix": _suffix(Path(path).name),
                     "uv": [round(u, 1), round(v, 1)], "size": [w, h], "outside_px": round(d, 1),
-                    "outside_um": round(d * (pixel_xy[0] + pixel_xy[1]) / 2.0, 1)}
+                    "outside_um": round(d * (px[0] + px[1]) / 2.0, 1), "pixel_xy": list(px)}
     return best
 
 
@@ -185,7 +188,7 @@ def _photos(folder: Path, focus: Path, names: list[str]) -> list[dict]:
                 rec["best"] = {"name": b.path.name, "coverage": round(b.coverage, 3),
                                "uv": [round(b.uv[0], 1), round(b.uv[1], 1)]}
             if m.status == scan_image.NO_CANDIDATE and xy and px and rows:
-                rec["nearest_tile"] = _nearest(xy, rows, px)
+                rec["nearest_tile"] = _nearest(xy, scan_image._with_recipe_px(folder, rows), px)
         except Exception as e:
             rec["status"] = scan_image.UNREADABLE
             rec["error"] = f"{type(e).__name__}: {e}"
