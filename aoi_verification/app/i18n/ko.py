@@ -1595,6 +1595,8 @@ GL_SCAN_DIAG_TIP = "개발자 모드 · 컬러 결함 사진을 연 뒤 Scan 을
 GL_SCAN_DIAG_BUSY = "Scan 진단 자료를 모으는 중…"
 GL_SCAN_DIAG_DONE_FMT = "Scan 진단 자료를 저장했습니다: {path}"
 GL_SCAN_DIAG_FAILED_FMT = "Scan 진단 수집 실패: {why}"
+SCAN_DIAG_STATUS_TIP = "개발자 모드 · 컬러 결함 사진이 있는 폴더를 골라 Scan 을 못 찾은 원인 자료를 압축 파일로 저장합니다"
+SCAN_DIAG_PICK_TITLE = "Scan 진단할 폴더 선택 (컬러 결함 사진이 있는 폴더)"
 
 GL_RAW_TITLE = "RAW 사진 설정"
 GL_RAW_WIDTH = "가로(px)"
