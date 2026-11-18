@@ -1477,10 +1477,24 @@ def test_log_axis_slider_and_histogram_share_the_mapping(styled_qapp, tmp_path):
 
 # ---------------------------------------------------------------- Defect 고르기 팝업(2026-11-17)
 def _capture_run(monkeypatch, T):
-    """sheet_host.run 을 막지 않는 가짜로 — 띄운 팝업을 모아 둔다."""
-    shown = []
-    monkeypatch.setattr(T.sheets, "run", lambda dlg, **kw: shown.append(dlg) or 0)
+    """sheet_host.run 을 막지 않는 가짜로 — 띄운 팝업을 모아 둔다(넘긴 옵션은 `shown_kw`)."""
+    class _Shown(list):
+        kw: list = []
+
+    shown = _Shown()
+    shown.kw = []
+    monkeypatch.setattr(T.sheets, "run", lambda dlg, **kw: shown.append(dlg) or shown.kw.append(kw) or 0)
     return shown
+
+
+def _wait_apply(dlg, qapp, limit_s=10.0):
+    """[적용] 의 백그라운드 계산이 끝나 로딩이 걷힐 때까지 이벤트를 돌린다."""
+    import time
+    t0 = time.perf_counter()
+    while dlg._overlay_on and time.perf_counter() - t0 < limit_s:
+        qapp.processEvents()
+        time.sleep(0.005)
+    assert not dlg._overlay_on
 
 
 def test_auto_mode_tile_click_opens_band_without_picking(styled_qapp, tmp_path):
@@ -1521,6 +1535,7 @@ def test_open_pick_dialog_builds_with_current_zone_and_items(styled_qapp, tmp_pa
     try:
         dlg.pick_open_btn.click()
         assert len(shown) == 1 and dlg._pick_dlg is shown[0]
+        assert shown.kw == [{"full_bleed": True}]                          # 창 전체로 띄운다
         pk = shown[0]
         assert pk._zone == dlg._zone == ("Zones", 1)
         assert [k for k, _l in pk._zones] == dlg.zone_keys()
@@ -1565,6 +1580,7 @@ def test_pick_applied_sets_picks_and_recommend_and_overkill_stat(styled_qapp, tm
         assert not dlg.ov_box.isVisibleTo(dlg)
         dlg.open_pick_dialog()
         dlg._pick_dlg.applied.emit({T.key_of(a): a, T.key_of(b): b}, {T.key_of(d): d for d in over})
+        _wait_apply(dlg, styled_qapp)
         rec, missed = P.recommend([a, b], dlg._w.zones, dlg._snap)
         assert missed == [] and dlg._ov == rec and set(dlg._picked) == {T.key_of(a), T.key_of(b)}
         assert set(dlg._overkill) == {T.key_of(d) for d in over}
@@ -1620,5 +1636,72 @@ def test_pick_pixmap_and_request_use_tile_cache(styled_qapp, tmp_path, monkeypat
         assert dlg._pick_pixmap(d, 96) is pm and dlg._pick_pixmap(d, 720) is pm
         dlg._render_tiles()                                                # 다시 그려도 팝업 요청은 취소되지 않는다
         assert (str(photo), 96, "thumb") in dlg._wanted
+    finally:
+        dlg.deleteLater()
+
+
+def test_pick_thumb_quality_shares_disk_thumb_size(styled_qapp, tmp_path, monkeypatch):
+    """팝업이 미리 불러 두는 '썸네일 화질' 은 디스크 썸네일 크기(THUMB_PX)다 — 같은 캐시 종류('thumb')를 쓰고, 중간 이미지만 'mid'."""
+    from aoi_verification.app.ui.widgets import overkill_pick_dialog as O
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    _capture_run(monkeypatch, T)
+    dlg = _shown_dlg(T, styled_qapp, tmp_path, mode="auto")
+    try:
+        d = dlg._in_zone()[0]
+        photo = dlg._pic(d)
+        asked = []
+        monkeypatch.setattr(dlg, "_want", lambda p, size, kind: asked.append((size, kind)))
+        dlg._pick_request([d], O._THUMB)
+        dlg._pick_request([d], O._BIG)
+        assert asked == [(O._THUMB, "thumb"), (O._BIG, "mid")] and O._THUMB == T.Sizing.THUMB_PX
+        assert photo is not None
+    finally:
+        dlg.deleteLater()
+
+
+def test_apply_large_set_shows_loading_and_does_not_block(styled_qapp, tmp_path, monkeypatch):
+    """많이 고르고 [적용] — 로딩(busy)이 뜨고, 계산은 백그라운드에서 끝나 로딩이 걷힌다(예외 없음, 결과는 직접 계산과 같다)."""
+    import dataclasses
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    _capture_run(monkeypatch, T)
+    dlg = _shown_dlg(T, styled_qapp, tmp_path, mode="auto")
+    try:
+        base = dlg._in_zone()
+        many = [dataclasses.replace(base[i % len(base)], index=1000 + i) for i in range(3000)]
+        picked = {T.key_of(d): d for d in many[:1500]}
+        over = {T.key_of(d): d for d in many[1500:]}
+        seen = []
+        monkeypatch.setattr(dlg._loading, "set_progress", lambda done, total, msg="": seen.append((done, total, msg)))
+        dlg._on_pick_applied(picked, over)
+        assert dlg._overlay_on and dlg._loading.isVisibleTo(dlg)           # 계산이 끝나기 전에 로딩이 떠 있다
+        assert seen and seen[0][:2] == (0, 0) and seen[0][2] == T._KO.THRESH_PREVIEW_APPLYING   # 양을 모르니 busy
+        _wait_apply(dlg, styled_qapp)
+        assert len(dlg._picked) == 1500 and len(dlg._overkill) == 1500
+        assert dlg._ov == P.recommend(list(picked.values()), dlg._w.zones, dlg._snap)[0]
+    finally:
+        dlg.deleteLater()
+
+
+def test_apply_late_result_of_older_apply_is_dropped(styled_qapp, tmp_path, monkeypatch):
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    _capture_run(monkeypatch, T)
+    dlg = _shown_dlg(T, styled_qapp, tmp_path, mode="auto")
+    try:
+        dlg._pick_token = 5
+        dlg._overlay_on = True
+        dlg._on_pick_computed(4, {("x", 1, 2): 3.0})            # 옛 세대 — 버린다
+        assert dlg._overlay_on and ("x", 1, 2) not in dlg._ov
+    finally:
+        dlg.deleteLater()
+
+
+def test_detail_rows_end_with_stretch_so_surplus_height_does_not_move_rows(styled_qapp, tmp_path):
+    """띠가 접히고 펼쳐지는 동안의 남는 높이를 끝의 빈 칸이 받는다 — 위쪽 줄이 출렁이지 않는다."""
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    dlg = _shown_dlg(T, styled_qapp, tmp_path, mode="manual")
+    try:
+        dlg._set_tab("keep")
+        last = dlg.grid.itemAt(dlg.grid.count() - 1)
+        assert last.spacerItem() is not None and last.widget() is None
     finally:
         dlg.deleteLater()
