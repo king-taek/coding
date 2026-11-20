@@ -23,7 +23,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..coords import surface_flt as _flt
-from .rules import FEATURE_AREA, FEATURE_CONTRAST, FEATURE_WIDTH, read_classes, read_zones, zone_dir_for
+from .rules import (FEATURE_AREA, FEATURE_CONTRAST, FEATURE_WIDTH, event_mask, read_classes, read_zones,
+                    zone_dir_for)
 
 __all__ = ["Defect", "load_all", "load_defects", "match_photos", "contrast_known", "why_dropped",
            "is_kept", "recipe_misses", "count_by_bin", "recommend"]
@@ -33,7 +34,8 @@ _LOG = logging.getLogger("aoi.threshold")
 # 사이드카 이름 → Defect 칸.  recipe 는 없어도 된다(옛 기록).
 _NEED = {"reclassify": "cls", "orgReclassify": "org", "zone": "zone", "recipe": "recipe",
          "area": "area", "BlobBreadth": "width", "BlobFeretMax": "length", "Contrast": "contrast",
-         "ActualX": "x", "ActualY": "y"}
+         "ActualX": "x", "ActualY": "y", "Type": "rtype"}
+_OPTIONAL = {"recipe", "rtype"}
 
 
 @dataclass(frozen=True)
@@ -50,6 +52,7 @@ class Defect:
     x: float            # µm (ActualX)
     y: float
     wafer: int = 0      # 여러 웨이퍼를 합칠 때 몇 번째 웨이퍼인지 — (wafer, index) 가 Defect 의 키
+    by_filter: bool = True  # Feature Filter 묶음을 거쳐 잡힌 Defect(Event)인가 — 아니면 검출 단계가 잡아 기준과 무관
 
 
 def _layout(flt: Path):
@@ -72,7 +75,7 @@ def _layout(flt: Path):
         if key and fmt and a.get("Offset", "").isdigit():
             fields[key] = (int(a["Offset"]), fmt)
     size = int(m.group(1))
-    if set(_NEED.values()) - {"recipe"} - set(fields) or any(
+    if set(_NEED.values()) - _OPTIONAL - set(fields) or any(
             off + struct.calcsize("<" + f) > size for off, f in fields.values()):
         return None
     return size, fields
@@ -104,13 +107,19 @@ def load_all(folder: Path) -> tuple[tuple[Defect, ...], tuple[Defect, ...], str]
     arr = np.frombuffer(data, dtype=dt, count=len(data) // size)
     col = {k: arr[k].tolist() for k in names}
     recipe = col.get("recipe") or [None] * len(arr)
+    # 결과 비트(Type)로 Feature Filter 를 거친 Event Defect 만 기준에 걸리게 한다 — 비트 값은 폴더의
+    # EquipmentClassifications.ini 에서 읽는다(:func:`rules.event_mask`).  둘 중 하나라도 없으면 전부 기준 대상.
+    mask = event_mask(folder)
+    rtype = col.get("rtype") if mask else None
+    rtype = rtype or [None] * len(arr)
     kept, goods = [], []
-    for i, (cls, org, zone, rec, area, width, length, contrast, x, y) in enumerate(zip(
+    for i, (cls, org, zone, rec, area, width, length, contrast, x, y, rt) in enumerate(zip(
             col["cls"], col["org"], col["zone"], recipe, col["area"], col["width"], col["length"],
-            col["contrast"], col["x"], col["y"])):
+            col["contrast"], col["x"], col["y"], rtype)):
         first = org or cls
         d = Defect(i, zone_dir_for(rec), int(zone), int(first), int(cls), float(area), float(width),
-                   float(length), float(contrast), float(x), float(y))
+                   float(length), float(contrast), float(x), float(y),
+                   by_filter=rt is None or bool(int(rt) & mask))
         # 첫 분류가 Good(EDC Good: reclassify 20 · org 0).  Accept 는 지금 분류만 0 이라 Defect 로 남는다.
         (goods if abs(first) in good else kept).append(d)
     return tuple(kept), tuple(goods), ""
@@ -169,10 +178,11 @@ def why_dropped(d: Defect, zones: dict, overrides: dict | None = None):
     z = zones.get((d.zone_dir, d.zone))
     if z is None or not z.bundles:
         return None
-    # 첫 분류(bin)가 이 Zone 묶음 어디에도 없으면 Feature Filter 가 매긴 Defect 가 아니다(다른 검출 단계가
-    # 잡았다) — 기준을 바꿔도 남는다.  TB500_RDL3 Multi x5 Space: bin 54 두 개, 묶음은 29 하나뿐 —
-    # 하나는 레시피 값에서도 29 묶음에 걸려 '빠짐' 으로 보였다(관측 2026-11-21, 16장 Defect 19,081 중 2개).
-    if d.bin not in z.bundles:
+    # Feature Filter 를 거치지 않은 Defect 는 기준을 바꿔도 남는다 — 검출 단계(Zone ini [Surface] DarkArea ·
+    # BrightArea 등)가 잡고 ClassificationConvertTable 로 bin 을 받았다.  가르는 근거 두 가지:
+    #   1. 결과 비트(Type)가 Event 가 아님(:func:`rules.event_mask`) — TB500_RDL3 Multi 16장 Type 8 680개 · 16 3개.
+    #   2. (Type 을 못 읽을 때) 첫 분류가 이 Zone 묶음 어디에도 없음 — Space 의 bin 54(묶음은 29 하나).
+    if not d.by_filter or d.bin not in z.bundles:
         return None
     overrides = overrides or {}
     first = None

@@ -60,3 +60,18 @@ def test_pick_uses_open_overkill_folders(qapp, monkeypatch, tmp_path):
     monkeypatch.setattr(win, "_run_scan_diag_many", lambda roots: ran.append(roots))
     win._pick_scan_diag_folder()
     assert ran == [[tmp_path / "LOT"]] and win._scan_diag_picker is None
+
+
+def test_overkill_folders_found_anywhere_and_remembered(qapp, monkeypatch, tmp_path):
+    """Overkill 튜닝 화면이 최상위 창(전체화면)에 있어도 찾고, 닫힌 뒤에도 마지막 폴더로 모은다."""
+    from aoi_verification.app.ui.widgets.threshold_preview_dialog import ThresholdPreviewDialog
+    win = _window(monkeypatch)
+    dlg = ThresholdPreviewDialog(None)                  # main window 밖(최상위)
+    dlg._roots = [tmp_path / "LOT"]
+    assert win._overkill_folders() == [tmp_path / "LOT"]
+    dlg.deleteLater()
+    qapp.processEvents()
+    dlg = None
+    import gc
+    gc.collect()
+    assert win._overkill_folders() == [tmp_path / "LOT"]

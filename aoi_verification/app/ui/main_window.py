@@ -566,13 +566,17 @@ class MainWindow(MultiValFlow, QMainWindow):
             self._open_dev_mode()
 
     def _overkill_folders(self) -> list:
-        """열려 있는 Overkill 튜닝 화면이 고른 폴더들(웨이퍼 또는 LOT) — 없으면 빈 목록."""
+        """Overkill 튜닝 화면이 고른 폴더들(웨이퍼 또는 LOT).  보이는 화면 → 숨은 화면 → 마지막으로 본 폴더 순.
+
+        화면은 Setup 의 도구 페이지에도, 전체화면 창(최상위)에도 있을 수 있어 앱 전체 위젯에서 찾는다."""
+        from PyQt6.QtWidgets import QApplication
         from .widgets.threshold_preview_dialog import ThresholdPreviewDialog
-        for dlg in self.findChildren(ThresholdPreviewDialog):
-            roots = list(getattr(dlg, "_roots", []) or [])
-            if roots and dlg.isVisible():
-                return roots
-        return []
+        found = [w for w in QApplication.allWidgets() if isinstance(w, ThresholdPreviewDialog)
+                 and list(getattr(w, "_roots", []) or [])]
+        found.sort(key=lambda w: not w.isVisible())
+        if found:
+            self._last_overkill_roots = list(found[0]._roots)
+        return list(getattr(self, "_last_overkill_roots", []) or [])
 
     def _pick_scan_diag_folder(self) -> None:
         roots = self._overkill_folders()

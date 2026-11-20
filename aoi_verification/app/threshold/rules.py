@@ -28,7 +28,8 @@ from ..coords.pixel_size import scan_pixel_size_xy, scan_pixel_size_xy_recipe
 
 _LOG = logging.getLogger("aoi.threshold")
 
-__all__ = ["Filter", "Zone", "ClassInfo", "read_zones", "read_classes", "zone_dir_for", "zones_in_flt_px",
+__all__ = ["Filter", "Zone", "ClassInfo", "read_zones", "read_classes", "zone_dir_for",
+           "surface_result_types", "event_mask", "zones_in_flt_px",
            "recipe_scale", "read_recipe_names", "read_detect_values",
            "FEATURE_AREA", "FEATURE_WIDTH", "FEATURE_CONTRAST"]
 
@@ -229,3 +230,39 @@ def read_recipe_names(folder: Path) -> dict:
         if nm:
             out[int(m.group(1))] = nm.group(1)
     return out
+
+
+_RT_LINE = re.compile(r"(?m)^\s*(-?\d+)\s*=\s*([^;\r\n]*);\s*(RT2D_[A-Z_]+)")
+
+
+@lru_cache(maxsize=64)
+def surface_result_types(folder: Path) -> dict:
+    r"""``EquipmentClassifications.ini [SURFACE]`` → ``{비트 값: (이름, 'RT2D_…')}``.  없으면 빈 dict.
+
+    Surface.flt 의 ``Type`` 은 이 비트다 — 어느 검출 단계가 Defect 를 잡았는지.  ``RT2D_EVENT`` ·
+    ``RT2D_WL_EVENT``(Event Defect)만 Zone 의 Feature Filter 묶음을 거쳐 그 ``Classify`` 를 받고, 나머지
+    (``RT2D_AREA_DARK`` 8 · ``RT2D_AREA_BRIGHT`` 16 · ``RT2D_LENGTH_*`` …)는 Zone ini ``[Surface]`` 의
+    DarkArea · BrightArea 등 검출 단계가 잡아 ``ClassificationConvertTable.ini [Surface_CONVERT]`` 로 bin 을 받는다
+    (TB500_RDL3 Multi 16장: Type 536870912 → 29 21,047개 · 8 → 29 680개(Contrast 전부 0) · 16 → 54 3개, 관측 2026-11-21).
+    비트 값은 늘 이 파일에서 읽는다 — 코드에 박지 않는다."""
+    text = read_ini_text(folder / "EquipmentClassifications.ini") or ""
+    heads = list(_SECTION.finditer(text))
+    sec = next((i for i, h in enumerate(heads) if h.group(1).strip().upper() == "SURFACE"), None)
+    if sec is None:
+        return {}
+    body = text[heads[sec].end(): heads[sec + 1].start() if sec + 1 < len(heads) else len(text)]
+    out: dict = {}
+    for m in _RT_LINE.finditer(body):
+        try:
+            out[int(m.group(1))] = (m.group(2).strip(), m.group(3))
+        except ValueError:
+            continue
+    return out
+
+
+def event_mask(folder: Path):
+    """Feature Filter 를 거치는 결과 비트(Event Defect)의 합.  파일이 없거나 Event 줄이 없으면 None — 그러면
+    Type 으로 가르지 않는다(:func:`surface_result_types`)."""
+    bits = [v for v, (_n, tok) in surface_result_types(folder).items() if v > 0 and tok in ("RT2D_EVENT", "RT2D_WL_EVENT")]
+    return sum(bits) if bits else None
+

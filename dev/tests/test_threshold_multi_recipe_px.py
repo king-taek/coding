@@ -140,3 +140,24 @@ def test_defect_whose_bin_has_no_bundle_is_never_dropped():
     assert P.recipe_misses([d], z) == []
     own = P.Defect(1, "Recipe2-Zones", 1, 29, 29, 31.0, 3.17, 5.0, 0.0, 0.0, 0.0)
     assert not P.is_kept(own, z)                    # 자기 묶음(29)에서 떨어지는 건 그대로 빠짐
+
+
+def test_event_mask_read_from_equipment_classifications(tmp_path):
+    """Event 비트는 코드에 박지 않고 EquipmentClassifications.ini [SURFACE] 에서 읽는다."""
+    from aoi_verification.app.threshold import rules
+    (tmp_path / "EquipmentClassifications.ini").write_text(
+        "[SURFACE]\n    -1 =0 ; ResType Internal Use\n     8=Dark Surface defect; RT2D_AREA_DARK[8]\n"
+        "536870912=Event Defect;\tRT2D_EVENT\n1073741824=Wafer Level Event Defect;\tRT2D_WL_EVENT\n[SOLDER]\n16=x; RT2D_EVENT\n")
+    assert rules.event_mask(tmp_path) == 536870912 + 1073741824
+    assert rules.surface_result_types(tmp_path)[8][1] == "RT2D_AREA_DARK"
+    assert rules.event_mask(tmp_path / "없음") is None
+
+
+def test_detection_stage_defect_is_never_dropped():
+    """Feature Filter 를 안 거친(검출 단계) Defect 는 자기 bin 묶음이 있어도 기준과 무관하게 남는다."""
+    from aoi_verification.app.threshold import preview as P
+    from aoi_verification.app.threshold.rules import Filter, Zone
+    z = {("Recipe2-Zones", 63): Zone(63, "Scan Area", {29: (Filter(2, 5, 3.0, 3.0),)})}
+    d = P.Defect(0, "Recipe2-Zones", 63, 29, 29, 9.0, 1.0, 3.0, 0.0, 0.0, 0.0, by_filter=False)
+    assert P.is_kept(d, z, {("Recipe2-Zones", 63, 29, 2): 50.0})
+    assert not P.is_kept(P.Defect(1, "Recipe2-Zones", 63, 29, 29, 9.0, 1.0, 3.0, 0.0, 0.0, 0.0), z)
