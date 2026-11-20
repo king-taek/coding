@@ -143,3 +143,24 @@ def test_collect_skips_wafer_align_zip(tmp_path):
     (f / "WaferAlignData.zip").write_bytes(b"PK" * 100)
     with zipfile.ZipFile(scan_diag.collect(ok, tmp_path / "o")) as zf:
         assert not any(n.endswith("WaferAlignData.zip") for n in zf.namelist())
+
+
+def test_collect_many_keeps_only_files_the_recipe_analysis_reads(tmp_path):
+    """LOT 수집은 분석에 쓰는 파일만 — 큰 .dat · .dcm · .zip · 사진별 목록은 뺀다(사용자 지시 2026-11-21)."""
+    lot = tmp_path / "LOT"
+    w = lot / "W1"
+    (w / "Recipe3-Zones").mkdir(parents=True)
+    keep = ("Surface.flt", "Surface.flt.md", "Defects.csv", "RTP.txt", "ManReClassify.ini",
+            "EquipmentClassifications.ini", "RecipesInfo.ini", "Recipe3-ProductInfo.ini", "Params_WaferInfo.ini")
+    drop = ("s_RichSurface.dat", "DieRegPos.dat.dcm", "Other.zip", "ScanResultImageList.txt",
+            "ColorImageGrabingInfo.ini", "FocusMappingDebug_x5.txt")
+    for n in keep + drop:
+        (w / n).write_bytes(b"x")
+    (w / "Big.ini").write_bytes(b"x" * (scan_diag._LEAN_INI_MAX + 1))
+    (w / "Recipe3-Zones" / "ScanArea.ini").write_text("[General]\n")
+    (w / "Recipe3-Zones" / "mask.dat").write_bytes(b"x")
+    (lot / "setup.ini").write_text("[A]\n")
+    (lot / "setup.dat").write_bytes(b"x")
+    with zipfile.ZipFile(scan_diag.collect_many([w], tmp_path / "o")) as zf:
+        copied = {n.split("copy/", 1)[1] for n in zf.namelist() if "/copy/" in n}
+    assert copied == set(keep) | {"Recipe3-Zones/ScanArea.ini", "_상위폴더/setup.ini"}

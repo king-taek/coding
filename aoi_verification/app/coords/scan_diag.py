@@ -33,6 +33,12 @@ _SKIP_NAMES = {"waferaligndata.zip"}
 
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
 _MAX_COPY = 20 * 1024 * 1024
+# LOT(레시피 분석) 수집은 분석에 쓰는 파일만 담는다(사용자 지시 2026-11-21 '필요한 것만').  쓰는 것 = Defect 값
+# (Surface.flt · .md) · Export 정답(Defects.csv) · 기준 설명(RTP.txt) · ini(Zone 기준 · 분류 · 결과 비트 · 레시피
+# 픽셀 · 배율).  .dat · .dcm · .zip(s_RichSurface.dat · WaferAlignData.zip 등)과 사진마다 한 줄인 큰 목록은 뺀다.
+_LEAN_NAMES = {"surface.flt", "surface.flt.md", "defects.csv", "rtp.txt"}
+_LEAN_SKIP_INI = {"colorimagegrabinginfo.ini"}      # 사진마다 한 섹션(0.7 MB) — Scan 진단용이라 LOT 수집엔 안 쓴다
+_LEAN_INI_MAX = 1024 * 1024
 _FIELDS = ("RecipeNumber", "X", "Y", "FaultX", "FaultY", "PixelSizeX", "PixelSizeY",
            "OpticName", "Mag", "Type", "ImageSizeX", "ImageSizeY")
 _NONE = "없음"
@@ -385,24 +391,39 @@ def _small_files(folder: Path):
             continue
 
 
-def _copy_targets(folder: Path, parent: bool = True):
+def _lean_ok(p: Path, names=_LEAN_NAMES) -> bool:
+    n = p.name.lower()
+    if n in names:
+        return True
+    if p.suffix.lower() != ".ini" or n in _LEAN_SKIP_INI:
+        return False
+    try:
+        return p.stat().st_size <= _LEAN_INI_MAX
+    except OSError:
+        return False
+
+
+def _copy_targets(folder: Path, parent: bool = True, lean: bool = False):
     """``(원본, zip 안 이름)`` — 폴더 바로 아래 파일 · Zone 폴더(``Zones``·``RecipeN-Zones``) · TrainData ini ·
-    윗 폴더(Setup)의 파일(최대 100개)."""
+    윗 폴더(Setup)의 파일(최대 100개).  ``lean`` 이면 레시피 분석에 쓰는 파일만(:func:`_lean_ok`)."""
+    keep = _lean_ok if lean else (lambda p, names=None: True)
     for p in _small_files(folder):
-        yield p, f"copy/{p.name}"
+        if keep(p):
+            yield p, f"copy/{p.name}"
     with os.scandir(folder) as it:
         dirs = [Path(e.path) for e in it if Path(e.name).suffix.lower() not in _IMAGE_EXTS and e.is_dir()]
     for d in dirs:
         if _ZONE_DIR.match(d.name):
             for p in _small_files(d):
-                yield p, f"copy/{d.name}/{p.name}"
+                if keep(p):
+                    yield p, f"copy/{d.name}/{p.name}"
         elif d.name == "TrainData":
             for p in d.glob("*.ini"):
                 yield p, f"copy/TrainData/{p.name}"
     if not parent:
         return
     try:
-        for i, p in enumerate(_small_files(folder.parent)):
+        for i, p in enumerate(p for p in _small_files(folder.parent) if keep(p, ())):
             if i >= _COPY_PARENT_MAX:
                 break
             yield p, f"copy/_상위폴더/{p.name}"
@@ -419,7 +440,7 @@ def _write_folder(z: zipfile.ZipFile, color: Path, prefix: str = "", parent: boo
     z.writestr(prefix + "diag.json", json.dumps(d, ensure_ascii=False, indent=2))
     z.writestr(prefix + "files.txt", "\n".join(f"{n}\t{s}" for n, s in listing) + "\n")
     try:
-        for p, arc in _copy_targets(folder, parent):
+        for p, arc in _copy_targets(folder, parent, lean=not scan):
             z.write(p, prefix + arc)
     except OSError:
         pass
