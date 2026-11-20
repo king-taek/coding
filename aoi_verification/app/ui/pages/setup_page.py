@@ -553,14 +553,10 @@ class SetupPage(QWidget):
         # Defect 추출 — 첫 LOT 줄의 [슬롯 선택](추출 모드에서만 보인다).
         self._lot1_slot_btn = NeonButton(i18n.KO.EXTRACT_SLOT_BTN_ALL, role="ghost")
         self._lot1_slot_btn.setVisible(False)
-        # 이전 결과 엑셀을 기준으로 — 매칭 모드의 기준 폴더 줄 끝(추출 모드에서는 감춘다).
-        self._excel_ref_btn = NeonButton(i18n.KO.EXCEL_REF_BTN, role="ghost")
-        self._excel_ref_btn.setToolTip(i18n.KO.EXCEL_REF_BTN_TIP)
-        self._excel_ref_btn.clicked.connect(self._pick_excel_ref)
         self.ref_group, self.ref_path_edit, self.ref_machine_edit = \
             self._make_machine_group(i18n.KO.SETUP_REF_GROUP,
-                                     extra=self._lot1_slot_btn,
-                                     extra2=self._excel_ref_btn)
+                                     extra=self._lot1_slot_btn)
+        self.ref_path_edit.setPlaceholderText(i18n.KO.SETUP_REF_FOLDER_PLACEHOLDER)
         self._build_lot_list()
         self.val_group, self.val_path_edit, self.val_machine_edit = \
             self._make_machine_group(i18n.KO.SETUP_VAL_GROUP)
@@ -900,7 +896,7 @@ class SetupPage(QWidget):
             paths, is_dir=os.path.isdir, is_image=config.CONFIG.is_image,
             is_xlsx=lambda p: p.lower().endswith((".xlsx", ".xlsm")))
         if len(paths) == 1 and others and others[0].lower().endswith((".xlsx", ".xlsm")):
-            self.excel_ref_requested.emit(others[0])          # [엑셀로] 와 같은 길
+            self.excel_ref_requested.emit(others[0])          # 엑셀 끌어다 놓기·붙여넣기 길
             return
         found: dict[str, str] = {}
         missing = False
@@ -1817,8 +1813,7 @@ class SetupPage(QWidget):
                    + SetupPage._VAL_REMOVE_W + 20)
         return max(w_names, w_extra)
 
-    def _make_machine_group(self, title: str, extra: Optional[QWidget] = None,
-                            extra2: Optional[QWidget] = None
+    def _make_machine_group(self, title: str, extra: Optional[QWidget] = None
                             ) -> tuple[QWidget, QLineEdit, QLineEdit]:
         """기준/검증 장비 입력 카드.
 
@@ -1861,11 +1856,7 @@ class SetupPage(QWidget):
         err.setProperty("role", "error")
         err.setMinimumHeight(12)
         err.setWordWrap(True)
-        if extra2 is not None:               # 매칭 모드의 [엑셀로] — [폴더 선택…] 바로 아래(카드 폭을 늘리지 않는다)
-            grid.addWidget(err, 1, 1, 1, 2)
-            grid.addWidget(extra2, 1, 3, Qt.AlignmentFlag.AlignTop)
-        else:
-            grid.addWidget(err, 1, 1, 1, 3)
+        grid.addWidget(err, 1, 1, 1, 3)
 
         machine_edit = QLineEdit(card)
         machine_edit.setAcceptDrops(False)   # 폴더를 놓아도 글자로 안 들어가게(페이지가 받는다)
@@ -1996,7 +1987,6 @@ class SetupPage(QWidget):
         self._map_switch.setVisible(on)                    # 추출 전용 옵션
         self._cross_switch.setVisible(not on)              # 매칭 전용 옵션
         self._lot1_slot_btn.setVisible(on)
-        self._excel_ref_btn.setVisible(not on)
         self._lot_list.setVisible(on)
         self._scope_row.setVisible(not on)
         # 자동화 툴팁 — 매칭 문구는 '매치·검토 화면' 을 말한다(추출에는 없다).
@@ -2010,7 +2000,7 @@ class SetupPage(QWidget):
             else i18n.KO.AUTOMATION_AUTO_ALL)
         self.ref_path_edit.setPlaceholderText(
             i18n.KO.EXTRACT_FOLDER_PLACEHOLDER if on
-            else i18n.KO.SETUP_FOLDER_PLACEHOLDER)
+            else i18n.KO.SETUP_REF_FOLDER_PLACEHOLDER)
         self._sync_nav_checked()
         self._refresh_start_text()
         self._validate()
@@ -2274,25 +2264,7 @@ class SetupPage(QWidget):
         self._folder_picker.open(i18n.KO.SETUP_FOLDER_LABEL)
 
     # ── 이전 결과 엑셀을 기준으로 ─────────────────────────────────────────────
-    def _pick_excel_ref(self) -> None:
-        """[엑셀로] — 엑셀 파일 하나를 **비동기로** 고른다(`exec()` 금지: 폴더 선택과 같은 이유)."""
-        from PyQt6.QtWidgets import QFileDialog
-        dlg = getattr(self, "_excel_dialog", None)
-        if dlg is None:
-            dlg = QFileDialog(self, i18n.KO.EXCEL_REF_PICK_CAPTION, "",
-                              i18n.KO.EXCEL_REF_FILTER)
-            dlg.setFileMode(QFileDialog.FileMode.ExistingFile)
-            dlg.fileSelected.connect(self._on_excel_picked)
-            self._excel_dialog = dlg
-        dlg.open()
-
-    def _on_excel_picked(self, path: str) -> None:
-        if path:
-            self.excel_ref_requested.emit(path)
-
     def _reset_excel_ref_btn(self) -> None:
-        self._excel_ref_btn.setText(i18n.KO.EXCEL_REF_BTN)
-        self._excel_ref_btn.setToolTip(i18n.KO.EXCEL_REF_BTN_TIP)
         self.ref_path_edit.setToolTip("")
 
     def apply_excel_ref(self, xlsx: str, root: str, machine: str,
@@ -2305,8 +2277,6 @@ class SetupPage(QWidget):
         tip = i18n.KO.EXCEL_REF_DONE_TIP_FMT.format(
             name=Path(xlsx).name, photos=photos, groups=slots, coords=coords)
         self.ref_path_edit.setToolTip(tip)
-        self._excel_ref_btn.setText(i18n.KO.EXCEL_REF_DONE_BTN)
-        self._excel_ref_btn.setToolTip(tip)
 
     def _on_folder_picked(self, path: str) -> None:
         self._put_folder(getattr(self, "_browse_target", None), path)

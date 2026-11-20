@@ -167,6 +167,7 @@ SETUP_FOLDER_LABEL = "최상위 폴더"
 SETUP_MACHINE_LABEL = "호기 번호"
 SETUP_THRESHOLD_LABEL = "유사도 임계치"
 SETUP_FOLDER_PLACEHOLDER = "폴더를 끌어다 놓거나 선택"
+SETUP_REF_FOLDER_PLACEHOLDER = "폴더 또는 이전 결과 엑셀을 끌어다 놓거나 선택"
 SETUP_MACHINE_PLACEHOLDER = "호기"
 
 # ── 검증 단계 헤더 ─────────────────────────────────────────────────────────
@@ -829,13 +830,8 @@ SELECT_NONE_CHOSEN_BODY = (
 SLOT_SELECT_NEED_REF = "먼저 기준 폴더를 선택하세요."
 
 # 이전 결과 엑셀을 기준으로 쓰기 (기준 폴더 줄의 [엑셀로])
-EXCEL_REF_BTN = "엑셀로"
-EXCEL_REF_BTN_TIP = "이전 결과 엑셀의 기준 사진·좌표를 기준 폴더 대신 사용"
-EXCEL_REF_PICK_CAPTION = "이전 결과 엑셀 선택"
-EXCEL_REF_FILTER = "엑셀 (*.xlsx)"
 EXCEL_REF_LOADING = "엑셀에서 기준 사진 꺼내는 중…"
 EXCEL_REF_DONE_TIP_FMT = "{name}\n사진 {photos}장 · 슬롯 {groups}개 · 좌표 {coords}장"
-EXCEL_REF_DONE_BTN = "엑셀 ✓"
 EXCEL_REF_ERR_NOFILE = "엑셀 파일을 찾을 수 없습니다."
 EXCEL_REF_ERR_OPEN = "엑셀을 열 수 없습니다. 다른 프로그램에서 열려 있거나 손상된 파일일 수 있습니다."
 EXCEL_REF_ERR_NOPHOTO = "이 엑셀에서 기준 사진을 찾지 못했습니다. 앱이 저장한 결과 엑셀인지 확인하세요."
