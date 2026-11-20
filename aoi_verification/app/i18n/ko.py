@@ -699,6 +699,13 @@ VIEWER_COPIED_CROP = "구역 복사됨 ({w}×{h}px)"
 VIEWER_BOX_OFF = "박스 끄기"
 VIEWER_BOX_ON = "박스 켜기"
 VIEWER_BOX_TIP = "Scan 범위 박스를 숨기거나 다시 보여줍니다 (B)"
+# Defect 의 Scan 사진 — Overkill 튜닝의 크게보기에서만
+VIEWER_SCAN_CHECKING = "Scan 확인 중…"
+VIEWER_SCAN_YES = "Scan 있음"
+VIEWER_SCAN_NONE = "Scan 없음"
+VIEWER_SCAN_VIEW = "Scan image 보기"
+VIEWER_SCAN_BACK = "Color 사진 보기"
+VIEWER_SCAN_TIP = "이 Defect 자리의 Scan 사진(300 µm Crop)을 보여 줍니다"
 # ※ 검토 화면의 키보드 상호작용(↑↓ 줄 이동 · R 매치 없음 · Enter 검토 완료)과 키캡 힌트
 #   줄, '확인 필요만' 필터는 제거했다.  '매치 없음'은 행마다 있는 ✕ 토글, '검토 완료'는
 #   상단 버튼이 한다.  Enter 가 검토 전체를 끝내던 것은 특히 위험했다.
@@ -1242,6 +1249,9 @@ THRESH_PREVIEW_ZONE_COUNT = "Defect {n:,}"
 THRESH_PREVIEW_RECIPE = "레시피 {n}"
 THRESH_PREVIEW_DROPPED = "새로 빠짐"
 THRESH_PREVIEW_RESET = "레시피 값으로 되돌리기"
+THRESH_PREVIEW_RESET_TIP = "지금 보고 있는 Zone 만 레시피 값으로 되돌립니다 (다른 Zone 은 그대로)"
+OVERKILL_SAVED_LOAD = "저장한 선택 불러오기"
+OVERKILL_SAVED_LOAD_TIP = "이 웨이퍼 폴더에서 전에 고른 Overkill · Defect 를 다시 불러옵니다 (고를 때 자동 저장됩니다)"
 THRESH_PREVIEW_NO_FILTER = "Feature Filter 없음"
 THRESH_PREVIEW_RULE = "기준"
 THRESH_PREVIEW_RULE_N = "기준 {n}"

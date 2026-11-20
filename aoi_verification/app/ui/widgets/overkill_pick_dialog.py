@@ -37,7 +37,6 @@ _BIG = 800             # 가운데 큰 사진 요청 크기(= 디스크 중간 �
 _PRELOAD_MAX = 1500    # 열 때 한 번에 미리 불러 둘 사진 수(지금 사진에서 가까운 순) — 움직일 때마다 앞쪽을 더 채운다
 _PREFETCH_BIG = 3      # 지금 사진 뒤로 큰 그림을 미리 읽어 둘 장 수
 _PREVIEW_MS = 150      # 결과 미리보기(전체 Defect 훑기) 계산을 결정이 멎은 뒤로 미루는 시간
-_SWIPE_PX = 48
 
 
 def _fit(pm: QPixmap, w: int, h: int, dpr: float) -> QPixmap:
@@ -405,6 +404,8 @@ class OverkillPickDialog(QDialog):
                         ("Z", self._undo)):
             sc = QShortcut(QKeySequence(key), self, activated=fn)
             sc.setAutoRepeat(False)
+        for key, step in (("Up", -1), ("Down", 1)):         # ← → 는 결정이라, 결정 없이 사진만 넘겨 볼 때는 ↑ ↓
+            QShortcut(QKeySequence(key), self, activated=lambda s=step: self._browse(s))
         sc = QShortcut(QKeySequence.StandardKey.Undo, self, activated=self._undo)
         sc.setAutoRepeat(False)
         for key in ("Return", "Enter"):
@@ -619,6 +620,17 @@ class OverkillPickDialog(QDialog):
         x = self._cur * (_STRIP_PX + _STRIP_GAP)
         motion.animate_scroll(bar, x - (self.strip_scroll.viewport().width() - _STRIP_PX) // 2)
 
+    def _browse(self, step: int) -> None:
+        """↑ ↓ — 결정하지 않고 앞 · 뒤 사진으로 간다(맨 끝에서는 멈춤).  띠는 그 사진이 보이게 따라 간다."""
+        i = self._cur + step
+        if self._combo_open() or not 0 <= i < len(self._items):
+            return
+        self._set_cur(i)
+        self._refresh_all()
+
+    def _combo_open(self) -> bool:
+        return self.combo.hasFocus()
+
     def _goto(self, d) -> None:
         key = self._key_of(d)
         zk = self._zone_of.get(key, self._zone)
@@ -647,7 +659,6 @@ class OverkillPickDialog(QDialog):
             self._advance()
             return
         self._history.append((key, d, prev, self._zone))
-        self._swipe(side)
         self._put(key, d, side)
         self._tile_at(self._cur).set_state(side)
         panel = self.left if side == _OVER else self.right
@@ -671,7 +682,7 @@ class OverkillPickDialog(QDialog):
     def _advance(self) -> None:
         nxt = self._next_undecided(self._cur)
         if nxt >= 0:
-            self._set_cur(nxt, animate=True)
+            self._set_cur(nxt)               # 결정하면 다음 사진은 애니메이션 없이 바로 바뀐다(Z 되돌리기만 페이드인)
         self._refresh_all()
 
     def _undo(self) -> None:
@@ -687,20 +698,6 @@ class OverkillPickDialog(QDialog):
                 self._tile_at(i).set_state(prev)
                 break
         self._refresh_all()
-
-    def _swipe(self, side: str) -> None:
-        """결정한 사진의 사본이 결정한 쪽으로 밀리며 사라진다(`motion.swipe_out`)."""
-        if not motion.enabled() or not self.big.has_photo():
-            return
-        shot = self.big.grab()
-        ghost = QLabel(self.big.parentWidget())
-        ghost.setPixmap(shot)
-        ghost.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        ghost.setGeometry(self.big.geometry())
-        ghost.show()
-        ghost.raise_()
-        motion.swipe_out(ghost, dx=_SWIPE_PX if side == _DEF else -_SWIPE_PX,
-                         duration=motion.DUR_SWIPE_OUT, on_done=ghost.deleteLater)
 
     # ------------------------------------------------------------ 표시 갱신
     def _refresh_all(self) -> None:
