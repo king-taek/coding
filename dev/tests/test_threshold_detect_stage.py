@@ -177,6 +177,9 @@ def _many(tmp_path, n=300):
 def test_rule_rows_share_one_column_grid(styled_qapp, tmp_path):
     """기준 줄과 검출 단계 줄의 슬라이더 칸이 세로로 맞는다 — 머리 열 폭이 같고 칸 수를 빈 칸으로 맞춘다."""
     T, w = _many(tmp_path, 3)
+    (tmp_path / "Zones").mkdir()
+    (tmp_path / "Zones" / "ScanArea.ini").write_text(_SURF + "Low_Delta=55\nBright_Thr=240\n")
+    assert R.read_detect_values(tmp_path, "Zones", 63)                 # 파일에는 못 바꾸는 값이 있다
     dlg = T.ThresholdPreviewDialog()
     try:
         dlg.resize(1400, 900)
@@ -187,6 +190,7 @@ def test_rule_rows_share_one_column_grid(styled_qapp, tmp_path):
         assert x[(29, R.FEATURE_WIDTH)] == x[("dark", "area")]
         texts = [lab.text() for lab in dlg.rules.findChildren(T.QLabel)]
         assert not any("앱에서 못 바꿈" in t or "Feature Filter 가 아니라" in t for t in texts)
+        assert not any("Low_Delta" in t or "Bright_Thr" in t for t in texts)      # 못 바꾸는 값은 안 띄운다
     finally:
         dlg.deleteLater()
 

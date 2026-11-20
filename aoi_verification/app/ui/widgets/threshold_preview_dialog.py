@@ -2535,10 +2535,9 @@ class ThresholdPreviewDialog(QDialog):
                     cells.append(self._feature_cell(cls, f, name, unit, step, dec))
                 rows.append((_KO.THRESH_PREVIEW_RULE_N.format(n=i) if many else _KO.THRESH_PREVIEW_RULE,
                              f"→ {self._class_name(cls)}", cells))
-        shown = set()
         detect = self._detect_cells(z)
         if detect:
-            cells, shown, stages = detect
+            cells, stages = detect
             rows.append((_KO.THRESH_PREVIEW_DETECT_STAGE_HEAD, "→ " + " · ".join(stages), cells))
         ncol = max((len(r[2]) for r in rows), default=0)     # 줄마다 칸 수가 달라도 세로 줄이 맞게 빈 칸으로 채운다
         for i, (title, sub, cells) in enumerate(rows):
@@ -2555,7 +2554,6 @@ class ThresholdPreviewDialog(QDialog):
             for _ in range(ncol - len(cells)):
                 row.addWidget(QWidget(self.rules), 1)
             self._rules_lay.addLayout(row)
-        self._add_detect_note(shown)
 
     def _rule_head(self, title: str, sub: str) -> QWidget:
         """줄 머리(왼쪽 고정 폭 열) — 제목과 그 아래 한 줄.  길면 줄을 바꿔 잘리지 않게 한다."""
@@ -2577,7 +2575,7 @@ class ThresholdPreviewDialog(QDialog):
 
     def _detect_cells(self, z):
         """검출 단계(Dark/Bright) 하한 칸들 — 이 Zone 에 검출 단계 Defect 가 있는 극성만.
-        ``(칸들, 보여 준 ini 키 이름(소문자), 극성 이름들)`` — 읽기 전용 검출 값 글에서 중복을 뺀다.  없으면 None."""
+        ``(칸들, 극성 이름들)``.  없으면 None.  앱에서 못 바꾸는 검출 값은 화면에 띄우지 않는다(현택님 2026-11-21)."""
         if z is None or not z.detect:
             return None
         mine = [d for d in self._in_zone() if not d.by_filter and d.stage is not None]
@@ -2592,25 +2590,7 @@ class ThresholdPreviewDialog(QDialog):
             cells.append(self._limit_cell((*self._zone, stage, kind), (stage, kind), feat, z.detect[(stage, kind)],
                                           name, unit, step, dec, vals, vals, False, ("Surface", ini, "detect")))
         stages = [st.capitalize() for st in ("dark", "bright") if any(r[0] == st for r in rows)]
-        return cells, {r[2].lower() for r in rows}, stages
-
-    def _add_detect_note(self, skip: set = frozenset()) -> None:
-        """지금 Zone 의 나머지 검출 값(Zone ini — 앱에서 못 바꿈)을 슬라이더 열 아래 작은 글씨로.  값은 쓰인 그대로."""
-        vals = [(k, v) for k, v in R.read_detect_values(self._w.folder, *self._zone) if k.lower() not in skip]
-        if not vals:
-            return
-        unit = {"darkarea": " px", "brightarea": " px", "darkdiameter": " px", "brightdiameter": " px"}
-        txt = "  ·  ".join(f"{k} {v.rstrip('0').rstrip('.') if '.' in v else v}{unit.get(k.lower(), '')}"
-                          for k, v in vals)
-        body = QLabel(txt, self.rules)
-        body.setProperty("role", "muted")
-        body.setStyleSheet("font-size: 11px;")
-        body.setWordWrap(True)
-        row = QHBoxLayout()
-        row.setSpacing(RULE_GAP)
-        row.addSpacing(RULE_HEAD_W)                    # 슬라이더 칸과 같은 왼쪽 선
-        row.addWidget(body, 1)
-        self._rules_lay.addLayout(row)
+        return cells, stages
 
     def _feature_cell(self, cls: int, f: R.Filter, name: str, unit: str, step: float, dec: int) -> QWidget:
         w = self._w
@@ -2669,14 +2649,14 @@ class ThresholdPreviewDialog(QDialog):
             top.addWidget(bar)
             col = QVBoxLayout()
             col.setSpacing(0)
-            lab = QLabel(f"{ikey} ≥", cell)
-            lab.setStyleSheet(f"font-family: {mono}; font-size: 15px; font-weight: 700;")
-            col.addWidget(lab)
-            sec_txt = f"[{sec}]"                 # 소분류(Classify N)는 줄 머리 '→ 분류 이름' 이 이미 말한다(현택님 2026-11-21 뺌)
-            sl2 = QLabel(sec_txt, cell)
+            # 섹션 이름을 위에, 키를 아래 크게(현택님 2026-11-21).  소분류(Classify N)는 줄 머리 '→ 분류 이름' 이 이미 말한다.
+            sl2 = QLabel(f"[{sec}]", cell)
             sl2.setProperty("role", "muted")
             sl2.setStyleSheet(f"font-family: {mono}; font-size: 10px;")
             col.addWidget(sl2)
+            lab = QLabel(f"{ikey} ≥", cell)
+            lab.setStyleSheet(f"font-family: {mono}; font-size: 15px; font-weight: 700;")
+            col.addWidget(lab)
             top.addLayout(col, 1)
             lay.addLayout(top)
             ini_lab = QLabel(f"ini {px_txt}", cell)
