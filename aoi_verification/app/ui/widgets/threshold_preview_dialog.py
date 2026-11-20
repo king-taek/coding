@@ -94,6 +94,8 @@ TILE_PX = 132
 TILE_GAP = 2                # 밀착 인화 — 타일 사이 간격
 DETAIL_PX = 200
 SIDE_W = 244                # 왼쪽 열(폴더 · Zone) 폭
+RULE_HEAD_W = 136           # 기준 줄 머리(기준 · 검출 단계) 열 폭 — 모든 줄이 같은 폭이라 슬라이더 칸이 세로로 맞는다
+RULE_GAP = 20               # 기준 줄 안 칸 사이
 EXPORT_SAMPLES = 8          # HTML 내보내기 — Zone 마다 대표 사진 수
 EXPORT_PHOTO_PX = 200
 NOTICE_MS = 5000            # 뺐다 · 더했다 알림이 떠 있는 시간(되돌리기도 이 안에)
@@ -2516,98 +2518,99 @@ class ThresholdPreviewDialog(QDialog):
             return
         self.rules.setVisible(True)
         z = w.zones.get(self._zone)
+        rows: list = []                                # [(머리 제목, 머리 아래 줄, [칸…])] — 모든 줄을 같은 칸 격자에 맞춘다
         if z is None or not z.bundles:
             lab = QLabel(_KO.THRESH_PREVIEW_NO_FILTER, self.rules)
             lab.setProperty("role", "muted")
             self._rules_lay.addWidget(lab)
-            self._add_detect_note(self._add_detect_group(z))
-            return
-        known = P.contrast_known(w.defects, *self._zone)
-        many = len(z.bundles) > 1
-        for i, (cls, filters) in enumerate(z.bundles.items(), start=1):
-            if i > 1:
+        else:
+            known = P.contrast_known(w.defects, *self._zone)
+            many = len(z.bundles) > 1
+            for i, (cls, filters) in enumerate(z.bundles.items(), start=1):
+                cells = []
+                for feat, name, unit, step, dec in _FEATURES:
+                    f = next((x for x in filters if x.feature == feat), None)
+                    if f is None or (feat == R.FEATURE_CONTRAST and not known):
+                        continue                   # Contrast 를 안 적는 Zone — 슬라이더 없음(현택님 2026-11-16)
+                    cells.append(self._feature_cell(cls, f, name, unit, step, dec))
+                rows.append((_KO.THRESH_PREVIEW_RULE_N.format(n=i) if many else _KO.THRESH_PREVIEW_RULE,
+                             f"→ {self._class_name(cls)}", cells))
+        shown = set()
+        detect = self._detect_cells(z)
+        if detect:
+            cells, shown, stages = detect
+            rows.append((_KO.THRESH_PREVIEW_DETECT_STAGE_HEAD, "→ " + " · ".join(stages), cells))
+        ncol = max((len(r[2]) for r in rows), default=0)     # 줄마다 칸 수가 달라도 세로 줄이 맞게 빈 칸으로 채운다
+        for i, (title, sub, cells) in enumerate(rows):
+            if i:
                 rule = QFrame(self.rules)
                 rule.setFrameShape(QFrame.Shape.HLine)
                 rule.setStyleSheet(f"color: {theme.LINE2};")
                 self._rules_lay.addWidget(rule)
             row = QHBoxLayout()
-            row.setSpacing(20)
-            head = QVBoxLayout()
-            head.setSpacing(2)
-            t = QLabel(_KO.THRESH_PREVIEW_RULE_N.format(n=i) if many else _KO.THRESH_PREVIEW_RULE, self.rules)
-            t.setStyleSheet("font-weight: 700;")
-            head.addWidget(t)
-            sub = QLabel(f"→ {self._class_name(cls)}", self.rules)
-            sub.setProperty("role", "muted")
-            head.addWidget(sub)
-            head.addStretch(1)
-            hw = QWidget(self.rules)
-            hw.setLayout(head)
-            hw.setFixedWidth(136)
-            row.addWidget(hw)
-            for feat, name, unit, step, dec in _FEATURES:
-                f = next((x for x in filters if x.feature == feat), None)
-                if f is None or (feat == R.FEATURE_CONTRAST and not known):
-                    continue                       # Contrast 를 안 적는 Zone — 슬라이더 없음(현택님 2026-11-16)
-                row.addWidget(self._feature_cell(cls, f, name, unit, step, dec), 1)
-            row.addStretch(0)
+            row.setSpacing(RULE_GAP)
+            row.addWidget(self._rule_head(title, sub), 0, Qt.AlignmentFlag.AlignTop)
+            for c in cells:
+                row.addWidget(c, 1)
+            for _ in range(ncol - len(cells)):
+                row.addWidget(QWidget(self.rules), 1)
             self._rules_lay.addLayout(row)
-        self._add_detect_note(self._add_detect_group(z))
+        self._add_detect_note(shown)
 
-    def _add_detect_group(self, z) -> set:
-        """Feature Filter 아래 '검출 단계 (Dark/Bright)' — 이 Zone 에 검출 단계 Defect 가 있는 극성의 하한만 슬라이더로.
-        돌려주는 것 = 여기서 보여 준 ini 키 이름(소문자) — 읽기 전용 검출 값 글에서 중복을 뺀다."""
+    def _rule_head(self, title: str, sub: str) -> QWidget:
+        """줄 머리(왼쪽 고정 폭 열) — 제목과 그 아래 한 줄.  길면 줄을 바꿔 잘리지 않게 한다."""
+        hw = QWidget(self.rules)
+        hw.setFixedWidth(RULE_HEAD_W)
+        head = QVBoxLayout(hw)
+        head.setContentsMargins(0, 0, 0, 0)
+        head.setSpacing(2)
+        t = QLabel(title, hw)
+        t.setStyleSheet("font-weight: 700;")
+        t.setWordWrap(True)
+        head.addWidget(t)
+        if sub:
+            s = QLabel(sub, hw)
+            s.setProperty("role", "muted")
+            s.setWordWrap(True)
+            head.addWidget(s)
+        return hw
+
+    def _detect_cells(self, z):
+        """검출 단계(Dark/Bright) 하한 칸들 — 이 Zone 에 검출 단계 Defect 가 있는 극성만.
+        ``(칸들, 보여 준 ini 키 이름(소문자), 극성 이름들)`` — 읽기 전용 검출 값 글에서 중복을 뺀다.  없으면 None."""
         if z is None or not z.detect:
-            return set()
+            return None
         mine = [d for d in self._in_zone() if not d.by_filter and d.stage is not None]
         rows = [r for r in _DETECT_ROWS if (r[0], r[1]) in z.detect and any(d.stage == r[0] for d in mine)]
         if not rows:
-            return set()
+            return None
         w = self._w
-        rule = QFrame(self.rules)
-        rule.setFrameShape(QFrame.Shape.HLine)
-        rule.setStyleSheet(f"color: {theme.LINE2};")
-        self._rules_lay.addWidget(rule)
-        head = QVBoxLayout()
-        head.setSpacing(2)
-        t = QLabel(_KO.THRESH_PREVIEW_DETECT_STAGE, self.rules)
-        t.setStyleSheet("font-weight: 700;")
-        head.addWidget(t)
-        sub = QLabel(_KO.THRESH_PREVIEW_DETECT_STAGE_SUB, self.rules)
-        sub.setProperty("role", "muted")
-        sub.setWordWrap(True)
-        head.addWidget(sub)
-        hw = QWidget(self.rules)
-        hw.setLayout(head)
-        self._rules_lay.addWidget(hw)
-        row = QHBoxLayout()
-        row.setSpacing(20)
+        cells = []
         for stage, kind, ini, name, feat in rows:
             _f, _n, unit, step, dec = next(x for x in _FEATURES if x[0] == feat)
             vals = [w.to_um(feat, d.area if kind == "area" else d.width) for d in mine if d.stage == stage]
-            row.addWidget(self._limit_cell((*self._zone, stage, kind), (stage, kind), feat, z.detect[(stage, kind)],
-                                           name, unit, step, dec, vals, vals, False, ("Surface", ini, "detect")), 1)
-        row.addStretch(0)
-        self._rules_lay.addLayout(row)
-        return {r[2].lower() for r in rows}
+            cells.append(self._limit_cell((*self._zone, stage, kind), (stage, kind), feat, z.detect[(stage, kind)],
+                                          name, unit, step, dec, vals, vals, False, ("Surface", ini, "detect")))
+        stages = [st.capitalize() for st in ("dark", "bright") if any(r[0] == st for r in rows)]
+        return cells, {r[2].lower() for r in rows}, stages
 
     def _add_detect_note(self, skip: set = frozenset()) -> None:
-        """지금 Zone 의 검출 값(Zone ini — 앱에서 못 바꿈)을 작은 글씨로.  값은 쓰인 그대로, 면적 칸은 레시피 px(환산 안 함)."""
+        """지금 Zone 의 나머지 검출 값(Zone ini — 앱에서 못 바꿈)을 슬라이더 열 아래 작은 글씨로.  값은 쓰인 그대로."""
         vals = [(k, v) for k, v in R.read_detect_values(self._w.folder, *self._zone) if k.lower() not in skip]
         if not vals:
             return
         unit = {"darkarea": " px", "brightarea": " px", "darkdiameter": " px", "brightdiameter": " px"}
         txt = "  ·  ".join(f"{k} {v.rstrip('0').rstrip('.') if '.' in v else v}{unit.get(k.lower(), '')}"
                           for k, v in vals)
-        head = QLabel(_KO.THRESH_PREVIEW_DETECT, self.rules)
-        head.setProperty("role", "muted")
-        head.setStyleSheet("font-size: 11px; font-weight: 700;")
         body = QLabel(txt, self.rules)
         body.setProperty("role", "muted")
         body.setStyleSheet("font-size: 11px;")
         body.setWordWrap(True)
-        self._rules_lay.addWidget(head)
-        self._rules_lay.addWidget(body)
+        row = QHBoxLayout()
+        row.setSpacing(RULE_GAP)
+        row.addSpacing(RULE_HEAD_W)                    # 슬라이더 칸과 같은 왼쪽 선
+        row.addWidget(body, 1)
+        self._rules_lay.addLayout(row)
 
     def _feature_cell(self, cls: int, f: R.Filter, name: str, unit: str, step: float, dec: int) -> QWidget:
         w = self._w
@@ -2669,7 +2672,7 @@ class ThresholdPreviewDialog(QDialog):
             lab = QLabel(f"{ikey} ≥", cell)
             lab.setStyleSheet(f"font-family: {mono}; font-size: 15px; font-weight: 700;")
             col.addWidget(lab)
-            sec_txt = f"[{sec}]" if sub == "detect" else f"[{sec}] · {sub}"
+            sec_txt = f"[{sec}]"                 # 소분류(Classify N)는 줄 머리 '→ 분류 이름' 이 이미 말한다(현택님 2026-11-21 뺌)
             sl2 = QLabel(sec_txt, cell)
             sl2.setProperty("role", "muted")
             sl2.setStyleSheet(f"font-family: {mono}; font-size: 10px;")
@@ -2761,7 +2764,9 @@ class ThresholdPreviewDialog(QDialog):
         self.export_btn.setEnabled(bool(self._ov))
         self._zone_text(self._zone)
         drop = self._render_summary()
-        if final or drop <= LIVE_TILES_MAX:
+        # 끄는 동안은 다시 그릴 사진이 적을 때만 바로 바꾼다 — [남음] 탭에 사진 1,110장이면 한 칸마다 0.7 초씩 멈춰
+        # 손잡이 · 화면이 깨져 보였다(실측 2026-11-21).  많으면 손을 뗄 때 한 번만 그린다.
+        if final or (drop <= LIVE_TILES_MAX and min(len(self._items()), self._shown) <= LIVE_TILES_MAX):
             self._open = None if self._tab != "good" else self._open
             self._render_tiles()
 
@@ -2904,6 +2909,16 @@ class ThresholdPreviewDialog(QDialog):
         self._refresh_pick()
 
     def _render_tiles(self) -> None:
+        """사진 격자를 다시 그린다 — 다 만들 때까지 칠하지 않아 지우고 채우는 중간 모습이 비치지 않게 한다."""
+        top = self.window()
+        frozen = top.updatesEnabled()
+        top.setUpdatesEnabled(False)
+        try:
+            self._render_tiles_now()
+        finally:
+            top.setUpdatesEnabled(frozen)
+
+    def _render_tiles_now(self) -> None:
         self._wanted = set(self._pick_wanted)   # 화면이 바뀌었다 — 줄 서 있던 것 중 이번 화면에 없는 건 건너뛴다
         self._detail_pic = None
         self._clear(self.grid)
@@ -3293,17 +3308,33 @@ class ThresholdPreviewDialog(QDialog):
         elif self._band_row is row:                    # 같은 줄 — 띠 높이는 그대로, 내용만 흐려 바꾸고 삼각형만 미끄러진다
             band.swap_content(self._detail(self._tile_defects[new], self._tile_why[new]))
             band.move_caret(self._caret_x(new))
-        else:                                          # 다른 줄 — 누른 타일이 화면에서 제자리에 있게 한 뒤 새 띠를 펼친다
-            above = self.grid.indexOf(band) < self.grid.indexOf(row)
-            area = self._outer_scroll() if above else None
-            shift = band.height() + self.grid.spacing()
-            if area is not None and area.verticalScrollBar().value() >= shift:
-                self._close_band(band, instant=True)   # 위의 띠가 사라진 만큼 누른 타일이 올라온다 — 스크롤을 그만큼 되돌린다
+        else:                                          # 다른 줄 — 띠를 한 번에 옮긴다(접히고 펼쳐지는 두 모션이 겹치면 번쩍였다, 현택님 2026-11-21)
+            self._move_band(band, new, row)
+
+    def _move_band(self, band: _DetailBand, k, row: QWidget) -> None:
+        """펼친 띠를 다른 줄 아래로 한 프레임에 옮긴다 — 누른 타일은 화면에서 제자리, 내용만 짧게 흐려 바뀐다.
+        띠가 위에 있었으면 빠진 높이만큼 스크롤을 되돌리고, 새 띠가 화면 밖으로 나가면 그때만 부드럽게 스크롤한다."""
+        area = self._outer_scroll()
+        above = self.grid.indexOf(band) < self.grid.indexOf(row)
+        shift = band.height() + self.grid.spacing()
+        top = self.window()
+        frozen = top.updatesEnabled()
+        top.setUpdatesEnabled(False)                   # 빼고 끼우는 중간 모습이 칠해지지 않게
+        try:
+            self._close_band(band, instant=True)
+            new = self._new_band(k)
+            self.grid.insertWidget(self.grid.indexOf(row) + 1, new)
+            self._band, self._band_row = new, row
+            new.show()
+            _settle_layout()
+            if above and area is not None:
                 bar = area.verticalScrollBar()
                 bar.setValue(bar.value() - shift)
-            else:                                      # 아래 띠거나, 맨 위 근처라 스크롤로 다 못 갚으면 — 띠를 접는 애니메이션으로 부드럽게 올라온다
-                self._close_band(band)
-            self._open_band(new, row)
+        finally:
+            top.setUpdatesEnabled(frozen)
+        if motion.enabled():
+            motion.fade_in(new.content, duration=motion.DUR_TILE_TOGGLE)
+        call_later(self, 0, self._reveal_band)
 
     def _open_band(self, k, row: QWidget) -> None:
         band = self._new_band(k)

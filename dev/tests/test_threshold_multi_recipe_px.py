@@ -175,7 +175,7 @@ def test_slider_label_shows_ini_name_and_recipe_px(styled_qapp, tmp_path):
         dlg.set_wafer(data)
         texts = [lab.text() for lab in dlg.rules.findChildren(T.QLabel)]
         assert "Width ≥" in texts and "Area ≥" in texts
-        assert "[Surface Feature Filter] · Classify 5" in texts
+        assert "[Surface Feature Filter]" in texts and not any("Classify" in t for t in texts)
         assert "ini 5 px" in texts and "ini 25 px²" in texts      # flt px(1.25 · 1.5625)가 아니라 ini 값
     finally:
         dlg.deleteLater()

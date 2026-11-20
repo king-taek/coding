@@ -133,7 +133,7 @@ def test_dialog_shows_detect_group_and_raised_dark_area_drops_type8(styled_qapp,
         assert ("dark", "area") in dlg.sliders and ("dark", "width") in dlg.sliders
         assert ("bright", "area") not in dlg.sliders                       # 레시피에 없음(검출 Defect 도 없음)
         texts = [lab.text() for lab in dlg.rules.findChildren(T.QLabel)]
-        assert _KO.THRESH_PREVIEW_DETECT_STAGE in texts
+        assert _KO.THRESH_PREVIEW_DETECT_STAGE_HEAD in texts and "→ Dark" in texts
         assert dlg.drop_value.text() == "0" and not dlg.reset_btn.isEnabled()
         dlg.set_value("dark", "area", 50.0)
         assert dlg._ov == {("Zones", 63, "dark", "area"): 50.0}
@@ -149,5 +149,84 @@ def test_dialog_shows_detect_group_and_raised_dark_area_drops_type8(styled_qapp,
         dlg.set_value("dark", "area", 50.0)
         dlg.export_html(out)
         assert "Dark Area" in out.read_text(encoding="utf-8")
+    finally:
+        dlg.deleteLater()
+
+
+def _many(tmp_path, n=300):
+    """검출 단계 Defect + 기준 Defect n 개, 모두 사진이 있는 웨이퍼(사진은 한 장을 하드링크)."""
+    import os
+    from PyQt6.QtGui import QColor, QImage
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    base = tmp_path / "b.png"
+    img = QImage(8, 8, QImage.Format.Format_RGB32)
+    img.fill(QColor(90, 90, 90))
+    img.save(str(base))
+    ds = tuple(_d(i, None, 99.0, 3.0 + i * 0.01, by_filter=True) for i in range(n)) + (_d(n, "dark", 40.0, 3.5),)
+    photos = {}
+    for d in ds:
+        p = tmp_path / f"{d.index}.png"
+        os.link(base, p)
+        photos[T.key_of(d)] = p
+    zones = {("Zones", 63): _zone(dark_area=38.0, dark_width=3.0)}
+    w = T.WaferData(tmp_path, ds, (), zones, {29: R.ClassInfo("A", False)}, (1.0, 1.0))
+    w.photos = photos
+    return T, w
+
+
+def test_rule_rows_share_one_column_grid(styled_qapp, tmp_path):
+    """기준 줄과 검출 단계 줄의 슬라이더 칸이 세로로 맞는다 — 머리 열 폭이 같고 칸 수를 빈 칸으로 맞춘다."""
+    T, w = _many(tmp_path, 3)
+    dlg = T.ThresholdPreviewDialog()
+    try:
+        dlg.resize(1400, 900)
+        dlg.show()
+        dlg.set_wafer(w)
+        styled_qapp.processEvents()
+        x = {k: sl.mapTo(dlg, sl.rect().topLeft()).x() for k, (sl, _sp) in dlg.sliders.items()}
+        assert x[(29, R.FEATURE_WIDTH)] == x[("dark", "area")]
+        texts = [lab.text() for lab in dlg.rules.findChildren(T.QLabel)]
+        assert not any("앱에서 못 바꿈" in t or "Feature Filter 가 아니라" in t for t in texts)
+    finally:
+        dlg.deleteLater()
+
+
+def test_dragging_slider_does_not_redraw_hundreds_of_photos(styled_qapp, tmp_path, monkeypatch):
+    """[남음] 에 사진이 많으면 끄는 동안은 다시 그리지 않고 손을 뗄 때 한 번만 — 한 칸마다 수백 장을 새로 만들면 멈춰 깨져 보였다."""
+    T, w = _many(tmp_path)
+    dlg = T.ThresholdPreviewDialog()
+    try:
+        dlg.set_wafer(w)
+        dlg._set_tab("keep")
+        dlg._shown = 1000
+        dlg._render_tiles()
+        calls = []
+        real = dlg._render_tiles_now
+        monkeypatch.setattr(dlg, "_render_tiles_now", lambda: (calls.append(1), real()))
+        sl, _spin = dlg.sliders[(29, R.FEATURE_WIDTH)]
+        sl.setValue(1)
+        assert calls == []
+        sl.sliderReleased.emit()
+        assert calls == [1]
+    finally:
+        dlg.deleteLater()
+
+
+def test_opening_photo_in_other_row_moves_band_in_one_step(styled_qapp, tmp_path):
+    """다른 줄 사진을 고르면 띠가 한 번에 옮겨진다 — 접히는 띠와 펼치는 띠가 함께 있지 않다."""
+    T, w = _many(tmp_path, 40)
+    dlg = T.ThresholdPreviewDialog()
+    try:
+        dlg.resize(1400, 900)
+        dlg.set_wafer(w)
+        dlg._set_tab("keep")
+        rows = [r for r in dlg._tile_rows if r]
+        assert len(rows) >= 3
+        dlg._toggle(rows[0][0])
+        dlg._toggle(rows[2][0])
+        bands = [dlg.grid.itemAt(i).widget() for i in range(dlg.grid.count())
+                 if isinstance(dlg.grid.itemAt(i).widget(), T._DetailBand)]
+        assert len(bands) == 1 and dlg._band is bands[0] and dlg._band_row is dlg._row_of[rows[2][0]]
+        assert dlg.grid.indexOf(bands[0]) == dlg.grid.indexOf(dlg._band_row) + 1
     finally:
         dlg.deleteLater()
