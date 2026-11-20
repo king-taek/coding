@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
@@ -29,7 +29,8 @@ from ..coords.pixel_size import scan_pixel_size_xy, scan_pixel_size_xy_recipe
 _LOG = logging.getLogger("aoi.threshold")
 
 __all__ = ["Filter", "Zone", "ClassInfo", "read_zones", "read_classes", "zone_dir_for",
-           "surface_result_types", "event_mask", "zones_in_flt_px",
+           "surface_result_types", "event_mask", "zones_in_flt_px", "stage_masks",
+           "DETECT_KEYS", "detect_polarity",
            "recipe_scale", "read_recipe_names", "read_detect_values",
            "FEATURE_AREA", "FEATURE_WIDTH", "FEATURE_CONTRAST"]
 
@@ -63,6 +64,9 @@ class Zone:
     zone_id: int
     name: str
     bundles: dict       # Classify → tuple[Filter, …]  (묶음 안 AND, 묶음끼리 OR)
+    # 검출 단계 하한(``[Surface]`` DarkArea · DarkDiameter · BrightArea · BrightDiameter) → ``{(극성, 종류): 값}``.
+    # 극성 'dark'/'bright', 종류 'area'(px²)/'width'(px).  0 이하·없음은 안 적는다(꺼짐).  레시피 자기 픽셀 단위.
+    detect: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -77,6 +81,34 @@ def zone_dir_for(recipe) -> str:
     레시피 하나인 스캔은 recipe 0 · ``Zones\``(FS UBM), 여러 개면 1 · ``Zones\`` 와 N · ``RecipeN-Zones\``
     (TB500 No Image 1 · 2)였다 — 관측 2가지뿐이라 **가정**이다.  recipe 칸이 없는 옛 기록(None)은 ``Zones``."""
     return f"Recipe{recipe}-Zones" if isinstance(recipe, int) and recipe >= 2 else "Zones"
+
+
+# [Surface] 키 → (극성, 종류).  Area 는 flt ``area`` · Diameter 는 flt ``BlobBreadth``(폭)와 비교한다 —
+# TB500_RDL3 Multi x5: DarkArea 38 · DarkDiameter 3 → Type 8 677개 최소 area 38.1 · 폭 3.01, Space BrightArea 30 ·
+# BrightDiameter 3 → Type 16 최소 31.1 · 3.17(관측 2026-11-21).  비교는 이상(≥)으로 **가정**(표본 최소값이 기준 바로 위).
+DETECT_KEYS = {"darkarea": ("dark", "area"), "darkdiameter": ("dark", "width"),
+               "brightarea": ("bright", "area"), "brightdiameter": ("bright", "width")}
+
+
+def _parse_detect(text: str, heads) -> dict:
+    """첫 ``[Surface]``(AlgorithmName=Surface · Enable=1)의 검출 단계 하한 → ``{(극성, 종류): 값}``."""
+    for i, h in enumerate(heads):
+        if h.group(1).strip().lower() != "surface":
+            continue
+        body = text[h.end(): heads[i + 1].start() if i + 1 < len(heads) else len(text)]
+        kv = {k.lower(): v.strip() for k, v in re.findall(r"(?m)^\s*([^=\s;#][^=\r\n]*?)\s*=\s*([^\r\n]*)", body)}
+        if kv.get("algorithmname", "").lower() != "surface" or kv.get("enable", "1") not in ("1", "1.0"):
+            continue
+        out = {}
+        for k, key in DETECT_KEYS.items():
+            try:
+                v = float(kv[k])
+            except (KeyError, ValueError):
+                continue
+            if v > 0:
+                out[key] = v
+        return out
+    return {}
 
 
 def _parse_zone(text: str) -> Zone | None:
@@ -100,7 +132,7 @@ def _parse_zone(text: str) -> Zone | None:
         if cls >= 0 and kv.get("enable", "1").strip() not in ("0", "0.0"):
             bundles.setdefault(cls, []).append(f)
     return Zone(int(zid.group(1)), name.group(1) if name else "",
-                {c: tuple(fs) for c, fs in bundles.items()})
+                {c: tuple(fs) for c, fs in bundles.items()}, _parse_detect(text, heads))
 
 
 @lru_cache(maxsize=64)
@@ -151,8 +183,15 @@ def recipe_scale(folder: Path, zone_dir: str):
     m = _RECIPE_DIR.match(zone_dir)
     if not m or int(m.group(1)) < 2:
         return 1.0, 1.0
+    mags = read_recipe_values(folder, "ScanMag")
+    n = int(m.group(1))
+    if mags.get(n) is not None and mags.get(n) == mags.get(1):
+        # 같은 배율(예: 5x 와 5x)이면 같은 픽셀이다 — 1.538 vs 1.536 은 보정 차이라 바꾸면 오히려 틀렸다:
+        # x5 Scan Area DarkArea 38 인데 Dark Defect 최솟값 38.099, 0.27% 늘린 38.10 이면 14개가 빠졌다(관측 2026-11-21).
+        # 배율이 다를 때(5x → 20x)만 바꾼다.  배율을 모르면 픽셀 크기로만 판단한다.
+        return 1.0, 1.0
     ref = scan_pixel_size_xy(folder)
-    rec = scan_pixel_size_xy_recipe(folder, int(m.group(1)))
+    rec = scan_pixel_size_xy_recipe(folder, n)
     if not ref or not rec:
         _LOG.warning("레시피 %s 픽셀 크기를 몰라 Zone 기준을 폴더 기준으로 못 바꿈: %s (폴더 %s · 레시피 %s)",
                      m.group(1), folder, ref, rec)
@@ -180,9 +219,11 @@ def zones_in_flt_px(folder: Path, zones: dict) -> dict:
             out[key] = z
             continue
         k = {FEATURE_AREA: area, FEATURE_WIDTH: lin}
+        # 검출 단계 값도 같은 배율 — 레시피 자기 픽셀 기준이라고 **가정**한다(Zone 기준과 같은 ini · 같은 규약, 미확인).
         out[key] = Zone(z.zone_id, z.name, {c: tuple(
             Filter(f.feature, f.ftype, f.low * k.get(f.feature, 1.0), f.high * k.get(f.feature, 1.0)) for f in fs)
-            for c, fs in z.bundles.items()})
+            for c, fs in z.bundles.items()},
+            {(pol, kind): v * (area if kind == "area" else lin) for (pol, kind), v in z.detect.items()})
     return out
 
 
@@ -218,6 +259,11 @@ def read_detect_values(folder: Path, zone_dir: str, zone_id: int) -> list:
 @lru_cache(maxsize=64)
 def read_recipe_names(folder: Path) -> dict:
     """``RecipesInfo.ini [Recipe-N] Name=`` → ``{N: 이름}``.  없으면 빈 dict."""
+    return read_recipe_values(folder, "Name")
+
+
+def read_recipe_values(folder: Path, key: str) -> dict:
+    """``RecipesInfo.ini [Recipe-N] <key>=`` → ``{N: 값(글자)}``.  없으면 빈 dict."""
     text = read_ini_text(Path(folder) / "RecipesInfo.ini") or ""
     heads = list(_SECTION.finditer(text))
     out: dict = {}
@@ -226,7 +272,7 @@ def read_recipe_names(folder: Path) -> dict:
         if not m:
             continue
         body = text[h.end(): heads[i + 1].start() if i + 1 < len(heads) else len(text)]
-        nm = re.search(r"(?im)^\s*Name\s*=\s*(\S.*?)\s*$", body)
+        nm = re.search(r"(?im)^\s*" + re.escape(key) + r"\s*=\s*(\S.*?)\s*$", body)
         if nm:
             out[int(m.group(1))] = nm.group(1)
     return out
@@ -266,3 +312,23 @@ def event_mask(folder: Path):
     bits = [v for v, (_n, tok) in surface_result_types(folder).items() if v > 0 and tok in ("RT2D_EVENT", "RT2D_WL_EVENT")]
     return sum(bits) if bits else None
 
+
+def stage_masks(folder: Path) -> dict:
+    """``{'dark': 비트 합, 'bright': 비트 합}`` — 결과 이름(RT2D_…)에 DARK · BRIGHT 가 든 비트.  파일에서 읽고 코드에 박지 않는다.
+    Event 비트는 뺀다.  없으면 빈 dict."""
+    out: dict = {}
+    for v, (_n, tok) in surface_result_types(folder).items():
+        if v <= 0 or tok in ("RT2D_EVENT", "RT2D_WL_EVENT"):
+            continue
+        for pol in ("dark", "bright"):
+            if pol.upper() in tok:
+                out[pol] = out.get(pol, 0) | v
+    return out
+
+
+def detect_polarity(masks: dict, rtype) -> str | None:
+    """결과 비트 → 'dark'/'bright'(둘 다 걸리거나 어느 쪽도 아니면 None — 그 Defect 는 안 건드린다)."""
+    if rtype is None:
+        return None
+    hit = [p for p, m in masks.items() if int(rtype) & m]
+    return hit[0] if len(hit) == 1 else None

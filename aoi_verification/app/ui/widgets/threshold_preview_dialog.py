@@ -108,6 +108,17 @@ _FEATURES = ((R.FEATURE_WIDTH, "Width", "µm", 0.05, 2),
              (R.FEATURE_CONTRAST, "Contrast", "", 1.0, 1))
 
 
+# 검출 단계 하한(Zone ini [Surface]) — (극성, 종류) → (ini 이름, 화면 이름, Feature 번호).  단위 · 간격은 _FEATURES 와 같다.
+_DETECT_ROWS = (("dark", "area", "DarkArea", "Dark Area", R.FEATURE_AREA),
+                ("dark", "width", "DarkDiameter", "Dark Diameter", R.FEATURE_WIDTH),
+                ("bright", "area", "BrightArea", "Bright Area", R.FEATURE_AREA),
+                ("bright", "width", "BrightDiameter", "Bright Diameter", R.FEATURE_WIDTH))
+
+
+def detect_label(stage: str, kind: str) -> str:
+    return next(r[3] for r in _DETECT_ROWS if r[:2] == (stage, kind))
+
+
 @dataclass
 class WaferData:
     folder: Path
@@ -2509,7 +2520,7 @@ class ThresholdPreviewDialog(QDialog):
             lab = QLabel(_KO.THRESH_PREVIEW_NO_FILTER, self.rules)
             lab.setProperty("role", "muted")
             self._rules_lay.addWidget(lab)
-            self._add_detect_note()
+            self._add_detect_note(self._add_detect_group(z))
             return
         known = P.contrast_known(w.defects, *self._zone)
         many = len(z.bundles) > 1
@@ -2541,11 +2552,48 @@ class ThresholdPreviewDialog(QDialog):
                 row.addWidget(self._feature_cell(cls, f, name, unit, step, dec), 1)
             row.addStretch(0)
             self._rules_lay.addLayout(row)
-        self._add_detect_note()
+        self._add_detect_note(self._add_detect_group(z))
 
-    def _add_detect_note(self) -> None:
+    def _add_detect_group(self, z) -> set:
+        """Feature Filter 아래 '검출 단계 (Dark/Bright)' — 이 Zone 에 검출 단계 Defect 가 있는 극성의 하한만 슬라이더로.
+        돌려주는 것 = 여기서 보여 준 ini 키 이름(소문자) — 읽기 전용 검출 값 글에서 중복을 뺀다."""
+        if z is None or not z.detect:
+            return set()
+        mine = [d for d in self._in_zone() if not d.by_filter and d.stage is not None]
+        rows = [r for r in _DETECT_ROWS if (r[0], r[1]) in z.detect and any(d.stage == r[0] for d in mine)]
+        if not rows:
+            return set()
+        w = self._w
+        rule = QFrame(self.rules)
+        rule.setFrameShape(QFrame.Shape.HLine)
+        rule.setStyleSheet(f"color: {theme.LINE2};")
+        self._rules_lay.addWidget(rule)
+        head = QVBoxLayout()
+        head.setSpacing(2)
+        t = QLabel(_KO.THRESH_PREVIEW_DETECT_STAGE, self.rules)
+        t.setStyleSheet("font-weight: 700;")
+        head.addWidget(t)
+        sub = QLabel(_KO.THRESH_PREVIEW_DETECT_STAGE_SUB, self.rules)
+        sub.setProperty("role", "muted")
+        sub.setWordWrap(True)
+        head.addWidget(sub)
+        hw = QWidget(self.rules)
+        hw.setLayout(head)
+        self._rules_lay.addWidget(hw)
+        row = QHBoxLayout()
+        row.setSpacing(20)
+        for stage, kind, ini, name, feat in rows:
+            _f, _n, unit, step, dec = next(x for x in _FEATURES if x[0] == feat)
+            vals = [w.to_um(feat, d.area if kind == "area" else d.width) for d in mine if d.stage == stage]
+            row.addWidget(self._limit_cell((*self._zone, stage, kind), (stage, kind), feat, z.detect[(stage, kind)],
+                                           name, unit, step, dec, vals, vals, False), 1)
+        row.addStretch(0)
+        self._rules_lay.addLayout(row)
+        return {r[2].lower() for r in rows}
+
+    def _add_detect_note(self, skip: set = frozenset()) -> None:
         """지금 Zone 의 검출 값(Zone ini — 앱에서 못 바꿈)을 작은 글씨로.  값은 쓰인 그대로, 면적 칸은 레시피 px(환산 안 함)."""
-        vals = R.read_detect_values(self._w.folder, *self._zone)
+        vals = [(k, v) for k, v in R.read_detect_values(self._w.folder, *self._zone) if k.lower() not in skip]
         if not vals:
             return
         unit = {"darkarea": " px", "brightarea": " px", "darkdiameter": " px", "brightdiameter": " px"}
@@ -2563,21 +2611,27 @@ class ThresholdPreviewDialog(QDialog):
 
     def _feature_cell(self, cls: int, f: R.Filter, name: str, unit: str, step: float, dec: int) -> QWidget:
         w = self._w
-        key = (*self._zone, cls, f.feature)
-        rec = w.to_um(f.feature, f.low)
         zone_vals = [w.to_um(f.feature, P._value(d, f.feature)) for d in self._in_zone()]
         vals = [w.to_um(f.feature, P._value(d, f.feature)) for d in self._in_zone() if d.bin == cls]
         if f.feature == R.FEATURE_CONTRAST:
             vals = [v for v in vals if v != 0]
+        return self._limit_cell((*self._zone, cls, f.feature), (cls, f.feature), f.feature, f.low, name, unit, step,
+                                dec, zone_vals, vals, True)
+
+    def _limit_cell(self, key: tuple, slider_key: tuple, feature: int, low_px: float, name: str, unit: str,
+                    step: float, dec: int, zone_vals: list, vals: list, can_down: bool) -> QWidget:
+        """슬라이더 칸 하나 — Feature Filter 기준과 검출 단계 하한이 함께 쓴다(``key`` 만 다르다)."""
+        w = self._w
+        rec = w.to_um(feature, low_px)
         # 끝 = 이 Zone 에서 가장 큰 값(그 위로 올리면 전부 빠져 더 볼 게 없다) — 레시피의 2배보다 작으면 2배.
         hi = max(rec * 2 if rec > 0 else rec + 10 * step, max(zone_vals, default=rec))
         steps = max(1, math.ceil((hi - rec) / step))
         hi = rec + steps * step
         # 내리기: RichSurface 후보가 있는 Zone 만.  하한 = 후보 값의 최솟값(그 아래는 파일이 모른다).
         down = 0
-        cand = self._rich_cand()
+        cand = self._rich_cand() if can_down else None
         if cand is not None:
-            floor = w.to_um(f.feature, float(cand[f.feature].min())) if len(cand[f.feature]) else rec
+            floor = w.to_um(feature, float(cand[feature].min())) if len(cand[feature]) else rec
             down = max(0, min(math.ceil((rec - max(floor, 0.0)) / step), math.floor(rec / step)))
         lo = rec - down * step
         axis = _Axis(lo, hi, rec, step, dec, down, steps,
@@ -2624,7 +2678,7 @@ class ThresholdPreviewDialog(QDialog):
         lay.addWidget(foot)
         lay.addStretch(1)                      # 로그 축 칸만 눈금 글자 줄이 더 길다 — 위로 붙여 옆 칸과 머리·분포 높이를 맞춘다
 
-        cur = w.to_um(f.feature, self._ov[key]) if key in self._ov else rec
+        cur = w.to_um(feature, self._ov[key]) if key in self._ov else rec
 
         def show(v: float) -> None:
             spin.setText(f"{v:.{dec}f}")
@@ -2644,7 +2698,7 @@ class ThresholdPreviewDialog(QDialog):
             if abs(v - rec) <= 1e-9:
                 self._ov.pop(key, None)
             else:
-                self._ov[key] = w.to_px(f.feature, v)
+                self._ov[key] = w.to_px(feature, v)
             show(v)
             self._changed(final)
 
@@ -2653,7 +2707,7 @@ class ThresholdPreviewDialog(QDialog):
         def typed() -> None:
             # 커서만 넣었다 빼도 editingFinished 가 온다 — 화면에 적힌 글자 그대로면 바꾼 게 아니다.
             # (적힌 글자는 화면 자리로 반올림돼 레시피 값 37.96 이 38.0 으로 박혀 그 사이 Defect 가 빠졌다.)
-            now = w.to_um(f.feature, self._ov[key]) if key in self._ov else rec
+            now = w.to_um(feature, self._ov[key]) if key in self._ov else rec
             if spin.text().strip() == f"{now:.{dec}f}":
                 return
             try:
@@ -2663,7 +2717,7 @@ class ThresholdPreviewDialog(QDialog):
 
         spin.editingFinished.connect(typed)
         show(cur)
-        self.sliders[(cls, f.feature)] = (sl, spin)
+        self.sliders[slider_key] = (sl, spin)
         return cell
 
     def _changed(self, final: bool) -> None:
@@ -2963,8 +3017,11 @@ class ThresholdPreviewDialog(QDialog):
         top.addWidget(close)
         right.addLayout(top)
         self._add_verdict(right, box, d, why)
-        if not d.by_filter:                             # 검출 단계가 잡은 Defect — 기준을 바꿔도 안 빠진다(P.why_dropped)
-            note = QLabel(_KO.OVERKILL_NOT_BY_FILTER, box)
+        if not d.by_filter:                             # 검출 단계가 잡은 Defect — Feature Filter 가 아니라 검출 하한이 거른다
+            z = w.zones.get((d.zone_dir, d.zone))
+            fixed = d.stage is None or z is None or not any((d.stage, k) in z.detect for k in ("area", "width"))
+            note = QLabel((_KO.OVERKILL_NOT_BY_FILTER_FIXED if fixed else _KO.OVERKILL_NOT_BY_FILTER)
+                          .format(name=self._stage_name(d)), box)
             note.setProperty("role", "muted")
             note.setWordWrap(True)
             right.addWidget(note)
@@ -3004,12 +3061,36 @@ class ThresholdPreviewDialog(QDialog):
         self._show_box = bool(on)
         pic.setPixmap(self._scan_pixmap(crop, d))
 
+    def _stage_name(self, d: P.Defect) -> str:
+        """검출 단계 Defect 의 결과 이름 — EquipmentClassifications 의 이름(예: Area Dark).  못 읽으면 RT2D 이름 · 비트."""
+        rt = d.rtype or 0
+        names = [n for bit, (n, _t) in R.surface_result_types(self._w.folder).items() if bit > 0 and rt & bit]
+        return " · ".join(names) or (d.stage or str(rt))
+
+    def _detect_criteria(self, d: P.Defect) -> list:
+        """검출 단계 Defect 의 칩 — 이 극성의 Area · Diameter 하한(µm), 지금 값으로 걸리는지."""
+        w = self._w
+        z = w.zones.get((d.zone_dir, d.zone))
+        out = []
+        for stage, kind, _ini, name, feat in _DETECT_ROWS:
+            ok = P.detect_ok(d, z, kind, self._ov) if stage == d.stage else None
+            if ok is None:
+                continue
+            rec = z.detect[(stage, kind)]
+            cut = self._ov.get((d.zone_dir, d.zone, stage, kind), rec)
+            _f, _n, unit, _s, dec = next(x for x in _FEATURES if x[0] == feat)
+            out.append(Criterion(name, w.to_um(feat, d.area if kind == "area" else d.width), w.to_um(feat, cut),
+                                 w.to_um(feat, rec), dec, "≥", ok, unit))
+        return out
+
     def _criteria(self, d: P.Defect, why) -> list:
         """이 Defect 의 판정이 걸린 묶음의 기준들 — 빠졌으면 빠뜨린 묶음, 남았으면 전부 통과한 묶음(자기 분류 먼저).
 
         ``preview.why_dropped`` 와 같은 규칙이다: 묶음 안은 전부(AND), 묶음끼리는 하나라도(OR) 통과하면 남는다.
         파일에 값이 없는 기준과 Contrast 0('안 잼')은 빼고, 기준값은 슬라이더로 바꾼 값을 쓴다."""
         w = self._w
+        if not d.by_filter:
+            return self._detect_criteria(d)
         z = w.zones.get((d.zone_dir, d.zone))
         if z is None or not z.bundles:
             return []
@@ -3578,8 +3659,20 @@ class ThresholdPreviewDialog(QDialog):
         """바꾼 값 · 새로 빠지는 수 · 분포 · Zone 마다 대표 사진 :data:`EXPORT_SAMPLES` 장을 HTML 한 장에."""
         w = self._w
         changes = []
-        for (zdir, zid, cls, feat), px in sorted(self._ov.items()):
+        for (zdir, zid, cls, feat), px in sorted(self._ov.items(), key=lambda kv: tuple(map(str, kv[0]))):
             z = w.zones.get((zdir, zid))
+            if z is not None and isinstance(cls, str):          # 검출 단계 하한
+                if (cls, feat) not in z.detect:
+                    continue
+                fno = R.FEATURE_AREA if feat == "area" else R.FEATURE_WIDTH
+                _f, _n, unit, _step, dec = next(x for x in _FEATURES if x[0] == fno)
+                name, rec = w.label((zdir, zid))
+                vals = [w.to_um(fno, d.area if feat == "area" else d.width) for d in w.defects
+                        if (d.zone_dir, d.zone, d.stage) == (zdir, zid, cls) and not d.by_filter]
+                changes.append(RP.Change(name + (f" · {rec}" if rec else ""), _KO.THRESH_PREVIEW_DETECT_STAGE,
+                                         detect_label(cls, feat), unit, w.to_um(fno, z.detect[(cls, feat)]),
+                                         w.to_um(fno, px), dec, tuple(vals)))
+                continue
             if z is None or cls not in z.bundles:
                 continue
             f = next((x for x in z.bundles[cls] if x.feature == feat), None)
@@ -3622,6 +3715,10 @@ class ThresholdPreviewDialog(QDialog):
     def _below(self, d: P.Defect, why) -> float:
         """걸린 값 ÷ 지금 기준 — 항목(Width · Contrast)이 달라도 '기준에서 얼마나 아래' 로 비교한다."""
         cls, feat = why
+        if isinstance(cls, str):                        # 검출 단계 — (극성, 'area'|'width')
+            z = self._w.zones.get((d.zone_dir, d.zone))
+            cut = self._ov.get((d.zone_dir, d.zone, cls, feat), z.detect.get((cls, feat), 0.0) if z else 0.0)
+            return (d.area if feat == "area" else d.width) / cut if cut > 0 else 0.0
         z = self._w.zones.get((d.zone_dir, d.zone))
         f = next((x for x in z.bundles.get(cls, ()) if x.feature == feat), None) if z else None
         cut = self._ov.get((d.zone_dir, d.zone, cls, feat), f.low if f else 0.0)
@@ -3640,6 +3737,10 @@ class ThresholdPreviewDialog(QDialog):
     def _why_text(self, d: P.Defect, why) -> str:
         if why is None:
             return ""
+        if isinstance(why[0], str):
+            feat = R.FEATURE_AREA if why[1] == "area" else R.FEATURE_WIDTH
+            dec = next(x[4] for x in _FEATURES if x[0] == feat)
+            return f"{detect_label(*why)} {self._w.to_um(feat, d.area if why[1] == 'area' else d.width):.{dec}f}"
         feat = why[1]
         dec = next(x[4] for x in _FEATURES if x[0] == feat)
         return f"{next(x[1] for x in _FEATURES if x[0] == feat)[0]} {self._w.to_um(feat, P._value(d, feat)):.{dec}f}"
