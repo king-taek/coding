@@ -161,3 +161,21 @@ def test_detection_stage_defect_is_never_dropped():
     d = P.Defect(0, "Recipe2-Zones", 63, 29, 29, 9.0, 1.0, 3.0, 0.0, 0.0, 0.0, by_filter=False)
     assert P.is_kept(d, z, {("Recipe2-Zones", 63, 29, 2): 50.0})
     assert not P.is_kept(P.Defect(1, "Recipe2-Zones", 63, 29, 29, 9.0, 1.0, 3.0, 0.0, 0.0, 0.0), z)
+
+
+def test_slider_label_shows_ini_name_and_recipe_px(styled_qapp, tmp_path):
+    """슬라이더 이름표 = ini 섹션 · 키(현택님 B3 안 2026-11-21), 'ini' 숫자 = 파일에 적힌 레시피 px 그대로."""
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    w = _wafer(tmp_path)
+    zones = R.zones_in_flt_px(w, R.read_zones(w))
+    defects = (P.Defect(0, "Recipe3-Zones", 1, 5, 5, 5.0, 1.3, 9.5, 9.0, 1000.0, 2000.0),)
+    data = T.WaferData(w, defects, (), zones, R.read_classes(w), (1.6, 1.6))
+    dlg = T.ThresholdPreviewDialog()
+    try:
+        dlg.set_wafer(data)
+        texts = [lab.text() for lab in dlg.rules.findChildren(T.QLabel)]
+        assert "Width ≥" in texts and "Area ≥" in texts
+        assert "[Surface Feature Filter] · Classify 5" in texts
+        assert "ini 5 px" in texts and "ini 25 px²" in texts      # flt px(1.25 · 1.5625)가 아니라 ini 값
+    finally:
+        dlg.deleteLater()

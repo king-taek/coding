@@ -2586,7 +2586,7 @@ class ThresholdPreviewDialog(QDialog):
             _f, _n, unit, step, dec = next(x for x in _FEATURES if x[0] == feat)
             vals = [w.to_um(feat, d.area if kind == "area" else d.width) for d in mine if d.stage == stage]
             row.addWidget(self._limit_cell((*self._zone, stage, kind), (stage, kind), feat, z.detect[(stage, kind)],
-                                           name, unit, step, dec, vals, vals, False), 1)
+                                           name, unit, step, dec, vals, vals, False, ("Surface", ini, "detect")), 1)
         row.addStretch(0)
         self._rules_lay.addLayout(row)
         return {r[2].lower() for r in rows}
@@ -2615,11 +2615,13 @@ class ThresholdPreviewDialog(QDialog):
         vals = [w.to_um(f.feature, P._value(d, f.feature)) for d in self._in_zone() if d.bin == cls]
         if f.feature == R.FEATURE_CONTRAST:
             vals = [v for v in vals if v != 0]
+        sec = "Surface Feature Filter"
+        ini = (sec, f.name[len(sec):].strip() or name, f"Classify {cls}") if f.name else None
         return self._limit_cell((*self._zone, cls, f.feature), (cls, f.feature), f.feature, f.low, name, unit, step,
-                                dec, zone_vals, vals, True)
+                                dec, zone_vals, vals, True, ini)
 
     def _limit_cell(self, key: tuple, slider_key: tuple, feature: int, low_px: float, name: str, unit: str,
-                    step: float, dec: int, zone_vals: list, vals: list, can_down: bool) -> QWidget:
+                    step: float, dec: int, zone_vals: list, vals: list, can_down: bool, ini: tuple | None = None) -> QWidget:
         """슬라이더 칸 하나 — Feature Filter 기준과 검출 단계 하한이 함께 쓴다(``key`` 만 다르다)."""
         w = self._w
         rec = w.to_um(feature, low_px)
@@ -2642,9 +2644,41 @@ class ThresholdPreviewDialog(QDialog):
         lay.setSpacing(4)
         h = QHBoxLayout()                      # 열 머리 한 줄 — 이름 + 값 칸 + 단위 + 변화량
         h.setSpacing(8)
-        lab = QLabel(f"{name} ≥", cell)
-        lab.setProperty("role", "sumCap")
-        h.addWidget(lab)
+        mono = theme.FONT_MONO
+        px_unit = {R.FEATURE_AREA: " px²", R.FEATURE_WIDTH: " px"}.get(feature, "")
+        # ini 에 적힌 숫자 = 레시피 자기 픽셀(화면 값은 flt 픽셀로 바꾼 것이라 되돌린다, rules.zones_in_flt_px)
+        lin, area = R.recipe_scale(w.folder, self._zone[0])
+        ini_px = low_px / {R.FEATURE_AREA: area, R.FEATURE_WIDTH: lin}.get(feature, 1.0)
+        px_txt = f"{ini_px:.4f}".rstrip("0").rstrip(".") + px_unit
+        ini_lab = None
+        if ini is None:
+            lab = QLabel(f"{name} ≥", cell)
+            lab.setProperty("role", "sumCap")
+            h.addWidget(lab)
+        else:
+            sec, ikey, sub = ini
+            # 키 크게, 구간 작게, 단계마다 가는 색 띠(파랑 Feature Filter · 주황 검출 단계 [Surface])
+            top = QHBoxLayout()
+            top.setSpacing(8)
+            bar = QFrame(cell)
+            bar.setFixedWidth(3)
+            bar.setStyleSheet(f"background: {theme.WARN if sub == 'detect' else theme.ACCENT}; border: none;")
+            top.addWidget(bar)
+            col = QVBoxLayout()
+            col.setSpacing(0)
+            lab = QLabel(f"{ikey} ≥", cell)
+            lab.setStyleSheet(f"font-family: {mono}; font-size: 15px; font-weight: 700;")
+            col.addWidget(lab)
+            sec_txt = f"[{sec}]" if sub == "detect" else f"[{sec}] · {sub}"
+            sl2 = QLabel(sec_txt, cell)
+            sl2.setProperty("role", "muted")
+            sl2.setStyleSheet(f"font-family: {mono}; font-size: 10px;")
+            col.addWidget(sl2)
+            top.addLayout(col, 1)
+            lay.addLayout(top)
+            ini_lab = QLabel(f"ini {px_txt}", cell)
+            ini_lab.setProperty("role", "muted")
+            ini_lab.setStyleSheet(f"font-family: {mono}; font-size: 10px;")
         spin = QLineEdit(cell)                 # 위·아래 버튼 없이 숫자만 친다 — 조금씩은 슬라이더로
         val = QDoubleValidator(0.0, 1e9, dec, spin)   # 범위 밖 값도 받아서 apply 가 끝으로 맞춘다
         val.setNotation(QDoubleValidator.Notation.StandardNotation)
@@ -2658,6 +2692,8 @@ class ThresholdPreviewDialog(QDialog):
             u = QLabel(unit, cell)
             u.setProperty("role", "muted")
             h.addWidget(u)
+        if ini_lab is not None:
+            h.addWidget(ini_lab)
         delta = QLabel("", cell)
         delta.setProperty("role", "axisDelta")
         h.addSpacing(4)

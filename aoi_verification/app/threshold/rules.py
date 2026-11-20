@@ -52,6 +52,7 @@ class Filter:
     ftype: int          # FilterType 1~8 (RTP.txt 설명: 1 범위 안 · 2 범위 밖 · 3 = · 4 > · 5 ≥ · 6 < · 7 ≤ · 8 ≠)
     low: float
     high: float
+    name: str = field(default="", compare=False)    # ini 섹션 제목('Surface Feature Filter Width') — 화면 이름표용
 
     def passes(self, v: float) -> bool:
         lo, hi = self.low, self.high
@@ -126,7 +127,7 @@ def _parse_zone(text: str) -> Zone | None:
         try:
             cls = int(float(kv["classify"]))
             f = Filter(int(float(kv["featuretype"])), int(float(kv["filtertype"])),
-                       float(kv["lowvalue"]), float(kv.get("highvalue", kv["lowvalue"])))
+                       float(kv["lowvalue"]), float(kv.get("highvalue", kv["lowvalue"])), h.group(1).strip())
         except (KeyError, ValueError):
             continue
         if cls >= 0 and kv.get("enable", "1").strip() not in ("0", "0.0"):
@@ -221,7 +222,7 @@ def zones_in_flt_px(folder: Path, zones: dict) -> dict:
         k = {FEATURE_AREA: area, FEATURE_WIDTH: lin}
         # 검출 단계 값도 같은 배율 — 레시피 자기 픽셀 기준이라고 **가정**한다(Zone 기준과 같은 ini · 같은 규약, 미확인).
         out[key] = Zone(z.zone_id, z.name, {c: tuple(
-            Filter(f.feature, f.ftype, f.low * k.get(f.feature, 1.0), f.high * k.get(f.feature, 1.0)) for f in fs)
+            Filter(f.feature, f.ftype, f.low * k.get(f.feature, 1.0), f.high * k.get(f.feature, 1.0), f.name) for f in fs)
             for c, fs in z.bundles.items()},
             {(pol, kind): v * (area if kind == "area" else lin) for (pol, kind), v in z.detect.items()})
     return out

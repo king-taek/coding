@@ -10,10 +10,27 @@ from aoi_verification.app.ui import main_window as mw   # noqa: E402
 from aoi_verification.app.utils import prefs           # noqa: E402
 
 
+_WINDOWS: list = []
+
+
+@pytest.fixture(autouse=True)
+def _delete_windows(qapp):
+    """테스트마다 만든 MainWindow 를 바로 지운다 — 남겨 두면 다음 창을 만드는 중 GC 가 옛 창을 치우다
+    프로세스가 죽었다(병렬 실행에서 세 번째 창 생성 중 abort, 2026-11-21)."""
+    yield
+    while _WINDOWS:
+        w = _WINDOWS.pop()
+        w.close()
+        w.deleteLater()
+    qapp.processEvents()
+
+
 def _window(monkeypatch):
     monkeypatch.setattr(mw.MainWindow, "_start_backend_import_async", lambda self: None)
     monkeypatch.setattr(mw.MainWindow, "_open_dev_mode", lambda self: None)
-    return mw.MainWindow()
+    w = mw.MainWindow()
+    _WINDOWS.append(w)
+    return w
 
 
 def test_button_follows_dev_mode(qapp, monkeypatch):
@@ -68,7 +85,9 @@ def test_overkill_folders_found_anywhere_and_remembered(qapp, monkeypatch, tmp_p
     win = _window(monkeypatch)
     dlg = ThresholdPreviewDialog(None)                  # main window 밖(최상위)
     dlg._roots = [tmp_path / "LOT"]
+    dlg.show()                                          # 보이는 화면이 먼저 — 다른 테스트가 남긴 숨은 화면에 밀리지 않게
     assert win._overkill_folders() == [tmp_path / "LOT"]
+    dlg.hide()
     dlg.deleteLater()
     qapp.processEvents()
     dlg = None
