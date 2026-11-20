@@ -106,3 +106,22 @@ def test_recipes_compares_per_recipe_pixel(tmp_path):
     assert row["pass_um"] == 1                      # 1.3 × 1.6 = 2.08 µm ≥ 5 × 0.4 = 2.0 µm, 1.2 × 1.6 = 1.92 µm 탈락
     assert row["surface_params"]["Low_Delta"] == "40"
     assert d["export_csv"]["by_type"]["Surface-RDL"]["rows"] == 1
+
+
+def test_collect_many_puts_each_wafer_in_its_folder(tmp_path):
+    lot = tmp_path / "LOT"
+    lot.mkdir()
+    (lot / "setup.ini").write_text("[A]\nB=1\n")
+    ws = []
+    for n in ("W1", "W2"):
+        w = lot / n
+        w.mkdir()
+        (w / "Recipe.ini").write_text("[General]\n")
+        ws.append(w)
+    seen = []
+    zp = scan_diag.collect_many(ws, tmp_path / "o", progress=lambda d, t: seen.append((d, t)))
+    assert zp.name.startswith("Scan진단_LOT_") and seen == [(1, 2), (2, 2)]
+    with zipfile.ZipFile(zp) as zf:
+        names = set(zf.namelist())
+    assert {"W1/diag.json", "W2/diag.json", "W1/copy/Recipe.ini", "W2/copy/Recipe.ini"} <= names
+    assert "W1/copy/_상위폴더/setup.ini" in names and "W2/copy/_상위폴더/setup.ini" not in names

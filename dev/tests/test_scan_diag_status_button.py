@@ -34,7 +34,7 @@ def test_run_writes_zip_for_picked_folder(qapp, monkeypatch, tmp_path):
     out = tmp_path / "out"
     real = scan_diag.collect
     seen = {}
-    monkeypatch.setattr(scan_diag, "collect", lambda p: seen.setdefault("p", p) and real(p, out))
+    monkeypatch.setattr(scan_diag, "collect", lambda p, out_root=None: seen.setdefault("p", p) and real(p, out))
     win = _window(monkeypatch)
     got = []
     win._scan_diag_done.disconnect()
@@ -49,3 +49,13 @@ def test_run_writes_zip_for_picked_folder(qapp, monkeypatch, tmp_path):
     assert got and got[0][1] == ""
     assert seen["p"].name == "1.2.c.5.2.jpeg"
     assert got[0][0].endswith(".zip") and (out / got[0][0].split("/")[-1]).is_file()
+
+
+def test_pick_uses_open_overkill_folders(qapp, monkeypatch, tmp_path):
+    """Overkill 튜닝에 연 LOT 이 있으면 폴더 고르기 없이 그 폴더로 바로 모은다."""
+    win = _window(monkeypatch)
+    ran = []
+    monkeypatch.setattr(win, "_overkill_folders", lambda: [tmp_path / "LOT"])
+    monkeypatch.setattr(win, "_run_scan_diag_many", lambda roots: ran.append(roots))
+    win._pick_scan_diag_folder()
+    assert ran == [[tmp_path / "LOT"]] and win._scan_diag_picker is None

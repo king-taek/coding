@@ -21,7 +21,7 @@ from pathlib import Path
 from . import abs_coord, camtek_ini, pixel_size, scan_image
 from .ini_text import decode_ini_bytes, read_ini_text
 
-__all__ = ["collect", "gather"]
+__all__ = ["collect", "collect_many", "gather"]
 
 _SURFACE_KEYS = ("Enable", "Bright_Thr", "Low_Delta", "High_Delta", "VDark_Delta", "BrightArea", "DarkArea",
                  "BrightDiameter", "DarkDiameter", "BrightLength", "DarkLength", "Area", "Diameter", "Length")
@@ -370,7 +370,7 @@ def _small_files(folder: Path):
             continue
 
 
-def _copy_targets(folder: Path):
+def _copy_targets(folder: Path, parent: bool = True):
     """``(원본, zip 안 이름)`` — 폴더 바로 아래 파일 · Zone 폴더(``Zones``·``RecipeN-Zones``) · TrainData ini ·
     윗 폴더(Setup)의 파일(최대 100개)."""
     for p in _small_files(folder):
@@ -387,6 +387,8 @@ def _copy_targets(folder: Path):
         elif d.name == "TrainData":
             for p in d.glob("*.ini"):
                 yield p, f"copy/TrainData/{p.name}"
+    if not parent:
+        return
     try:
         for i, p in enumerate(_small_files(folder.parent)):
             if i >= _COPY_PARENT_MAX:
@@ -396,22 +398,59 @@ def _copy_targets(folder: Path):
         pass
 
 
+def _focus(folder: Path) -> Path:
+    """폴더의 첫 컬러 사진(이름순) — 없으면 이름뿐인 자리표(폴더만 쓰인다)."""
+    try:
+        colors = sorted(p for p in folder.iterdir()
+                        if ".c." in p.name.lower() and p.suffix.lower() in (".jpeg", ".jpg"))
+    except OSError:
+        colors = []
+    return colors[0] if colors else folder / "-"
+
+
+def _write_folder(z: zipfile.ZipFile, color: Path, prefix: str = "", parent: bool = True) -> None:
+    folder = color.parent
+    d = gather(color)
+    listing = d["files"] if isinstance(d["files"], list) else []
+    z.writestr(prefix + "report.txt", _report(d))
+    z.writestr(prefix + "diag.json", json.dumps(d, ensure_ascii=False, indent=2))
+    z.writestr(prefix + "files.txt", "\n".join(f"{n}\t{s}" for n, s in listing) + "\n")
+    try:
+        for p, arc in _copy_targets(folder, parent):
+            z.write(p, prefix + arc)
+    except OSError:
+        pass
+
+
 def collect(color_path, out_root=None) -> Path:
     """진단 zip 을 쓰고 그 경로를 돌려준다.  zip 을 못 쓸 때만 예외를 낸다."""
     color = Path(color_path)
-    folder = color.parent
     root = Path(out_root) if out_root else _default_root()
     root.mkdir(parents=True, exist_ok=True)
-    d = gather(color)
-    listing = d["files"] if isinstance(d["files"], list) else []
-    out = root / f"Scan진단_{folder.name}_{datetime.now().strftime('%H%M%S')}.zip"
+    out = root / f"Scan진단_{color.parent.name}_{datetime.now().strftime('%H%M%S')}.zip"
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr("report.txt", _report(d))
-        z.writestr("diag.json", json.dumps(d, ensure_ascii=False, indent=2))
-        z.writestr("files.txt", "\n".join(f"{n}\t{s}" for n, s in listing) + "\n")
-        try:
-            for p, arc in _copy_targets(folder):
-                z.write(p, arc)
-        except OSError:
-            pass
+        _write_folder(z, color)
+    return out
+
+
+def collect_many(folders, out_root=None, progress=None) -> Path:
+    """웨이퍼 폴더 여러 개(LOT)를 zip 하나에 ``<웨이퍼 폴더 이름>/`` 으로 나눠 담는다.
+
+    ``progress(done, total)`` 은 웨이퍼 하나를 끝낼 때마다 부른다.  윗 폴더(Setup) 파일은 웨이퍼마다
+    같으니 첫 웨이퍼에만 담긴다."""
+    folders = [Path(f) for f in folders]
+    if len(folders) == 1:
+        return collect(_focus(folders[0]), out_root)
+    root = Path(out_root) if out_root else _default_root()
+    root.mkdir(parents=True, exist_ok=True)
+    lot = folders[0].parent.name if folders else "-"
+    out = root / f"Scan진단_{lot}_{datetime.now().strftime('%H%M%S')}.zip"
+    seen: set = set()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for i, f in enumerate(folders):
+            name = f.name if f.name not in seen else f"{f.name}_{i}"
+            seen.add(name)
+            _write_folder(z, _focus(f), f"{name}/", parent=(i == 0))
+            if progress is not None:
+                progress(i + 1, len(folders))
     return out
