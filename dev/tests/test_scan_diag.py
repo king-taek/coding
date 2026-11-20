@@ -125,3 +125,14 @@ def test_collect_many_puts_each_wafer_in_its_folder(tmp_path):
         names = set(zf.namelist())
     assert {"W1/diag.json", "W2/diag.json", "W1/copy/Recipe.ini", "W2/copy/Recipe.ini"} <= names
     assert "W1/copy/_상위폴더/setup.ini" in names and "W2/copy/_상위폴더/setup.ini" not in names
+
+
+def test_collect_many_skips_per_photo_scan_work(tmp_path, monkeypatch):
+    """LOT 수집은 빠른 모드 — 사진마다 Scan 을 찾지 않는다(NAS 에서 웨이퍼 하나에 수 분 걸렸다)."""
+    f, _ok = _folder(tmp_path)
+    monkeypatch.setattr(scan_diag, "_photos", lambda *a: pytest.fail("사진별 Scan 판정을 돌렸다"))
+    monkeypatch.setattr(scan_diag, "_tile_sizes", lambda *a: pytest.fail("Scan 타일을 열었다"))
+    zp = scan_diag.collect_many([f], tmp_path / "o")
+    with zipfile.ZipFile(zp) as zf:
+        d = json.loads(zf.read("W1/diag.json"))
+    assert "skipped" in d["photos"] and d["recipes"]["names"] is not None

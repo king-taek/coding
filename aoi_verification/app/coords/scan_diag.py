@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import zipfile
 from collections import Counter, defaultdict
@@ -56,13 +57,15 @@ def _guard(out: dict, key: str, fn):
 
 
 def _listing(folder: Path) -> list[tuple[str, int]]:
+    # DirEntry 는 열거 때 받은 정보를 쓴다(Windows) — Path.stat() 은 사진 수천 장마다 NAS 왕복이었다.
     out = []
-    for p in sorted(folder.iterdir(), key=lambda q: q.name.casefold()):
-        try:
-            out.append((p.name, p.stat().st_size if p.is_file() else -1))
-        except OSError:
-            out.append((p.name, -1))
-    return out
+    with os.scandir(folder) as it:
+        for e in it:
+            try:
+                out.append((e.name, e.stat().st_size if e.is_file() else -1))
+            except OSError:
+                out.append((e.name, -1))
+    return sorted(out, key=lambda t: t[0].casefold())
 
 
 def _counts(names) -> dict:
@@ -320,7 +323,9 @@ def _summary(photos) -> dict:
     return {k: dict(v) for k, v in sorted(t.items())}
 
 
-def gather(color_path) -> dict:
+def gather(color_path, scan: bool = True) -> dict:
+    """``scan=False`` 면 사진마다 Scan 을 찾는 구역(타일 크기 · 사진별 판정)을 건너뛴다 — NAS 에서 사진
+    수천 장을 하나씩 열어 웨이퍼 하나에 수 분이 걸렸다.  레시피 분석(LOT 수집)에는 필요 없다."""
     color = Path(color_path)
     folder = color.parent
     d: dict = {"folder": str(folder), "focus_photo": color.name,
@@ -331,8 +336,11 @@ def gather(color_path) -> dict:
     _guard(d, "counts", lambda: _counts(names))
     _guard(d, "manifest", lambda: _manifest(folder, set(names)))
     _guard(d, "pixel_size", lambda: _pixel(folder))
-    _guard(d, "scan_tile_sizes", lambda: _tile_sizes(folder, names))
-    _guard(d, "photos", lambda: _photos(folder, color, names))
+    if scan:
+        _guard(d, "scan_tile_sizes", lambda: _tile_sizes(folder, names))
+        _guard(d, "photos", lambda: _photos(folder, color, names))
+    else:
+        d["scan_tile_sizes"] = d["photos"] = {"skipped": "레시피 수집(빠른 모드)"}
     _guard(d, "recipes", lambda: _recipes(folder))
     _guard(d, "export_csv", lambda: _export_csv(folder))
     d["summary"] = _summary(d["photos"])
@@ -361,11 +369,15 @@ def _report(d: dict) -> str:
 
 
 def _small_files(folder: Path):
-    for p in folder.iterdir():
+    # 사진은 이름으로 먼저 거른다 — 사진마다 stat 하면 NAS 에서 느리다.
+    with os.scandir(folder) as it:
+        entries = list(it)
+    for e in entries:
+        if Path(e.name).suffix.lower() in _IMAGE_EXTS or e.name.lower() == "thumbs.db":
+            continue
         try:
-            if (p.is_file() and p.suffix.lower() not in _IMAGE_EXTS and p.name.lower() != "thumbs.db"
-                    and p.stat().st_size <= _MAX_COPY):
-                yield p
+            if e.is_file() and e.stat().st_size <= _MAX_COPY:
+                yield Path(e.path)
         except OSError:
             continue
 
@@ -375,12 +387,9 @@ def _copy_targets(folder: Path, parent: bool = True):
     윗 폴더(Setup)의 파일(최대 100개)."""
     for p in _small_files(folder):
         yield p, f"copy/{p.name}"
-    for d in folder.iterdir():
-        try:
-            if not d.is_dir():
-                continue
-        except OSError:
-            continue
+    with os.scandir(folder) as it:
+        dirs = [Path(e.path) for e in it if Path(e.name).suffix.lower() not in _IMAGE_EXTS and e.is_dir()]
+    for d in dirs:
         if _ZONE_DIR.match(d.name):
             for p in _small_files(d):
                 yield p, f"copy/{d.name}/{p.name}"
@@ -398,19 +407,10 @@ def _copy_targets(folder: Path, parent: bool = True):
         pass
 
 
-def _focus(folder: Path) -> Path:
-    """폴더의 첫 컬러 사진(이름순) — 없으면 이름뿐인 자리표(폴더만 쓰인다)."""
-    try:
-        colors = sorted(p for p in folder.iterdir()
-                        if ".c." in p.name.lower() and p.suffix.lower() in (".jpeg", ".jpg"))
-    except OSError:
-        colors = []
-    return colors[0] if colors else folder / "-"
-
-
-def _write_folder(z: zipfile.ZipFile, color: Path, prefix: str = "", parent: bool = True) -> None:
+def _write_folder(z: zipfile.ZipFile, color: Path, prefix: str = "", parent: bool = True,
+                  scan: bool = True) -> None:
     folder = color.parent
-    d = gather(color)
+    d = gather(color, scan)
     listing = d["files"] if isinstance(d["files"], list) else []
     z.writestr(prefix + "report.txt", _report(d))
     z.writestr(prefix + "diag.json", json.dumps(d, ensure_ascii=False, indent=2))
@@ -436,21 +436,20 @@ def collect(color_path, out_root=None) -> Path:
 def collect_many(folders, out_root=None, progress=None) -> Path:
     """웨이퍼 폴더 여러 개(LOT)를 zip 하나에 ``<웨이퍼 폴더 이름>/`` 으로 나눠 담는다.
 
+    레시피 분석용 빠른 모드다 — 사진마다 Scan 을 찾는 구역은 건너뛴다(그건 GL 의 Scan 진단 · :func:`collect`).
     ``progress(done, total)`` 은 웨이퍼 하나를 끝낼 때마다 부른다.  윗 폴더(Setup) 파일은 웨이퍼마다
     같으니 첫 웨이퍼에만 담긴다."""
     folders = [Path(f) for f in folders]
-    if len(folders) == 1:
-        return collect(_focus(folders[0]), out_root)
     root = Path(out_root) if out_root else _default_root()
     root.mkdir(parents=True, exist_ok=True)
-    lot = folders[0].parent.name if folders else "-"
+    lot = (folders[0].name if len(folders) == 1 else folders[0].parent.name) if folders else "-"
     out = root / f"Scan진단_{lot}_{datetime.now().strftime('%H%M%S')}.zip"
     seen: set = set()
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         for i, f in enumerate(folders):
             name = f.name if f.name not in seen else f"{f.name}_{i}"
             seen.add(name)
-            _write_folder(z, _focus(f), f"{name}/", parent=(i == 0))
+            _write_folder(z, f / "-", f"{name}/", parent=(i == 0), scan=False)
             if progress is not None:
                 progress(i + 1, len(folders))
     return out

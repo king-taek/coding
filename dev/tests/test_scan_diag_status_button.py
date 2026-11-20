@@ -32,9 +32,10 @@ def test_run_writes_zip_for_picked_folder(qapp, monkeypatch, tmp_path):
     folder.mkdir()
     (folder / "1.2.c.5.2.jpeg").write_bytes(b"x")
     out = tmp_path / "out"
-    real = scan_diag.collect
+    real = scan_diag.collect_many
     seen = {}
-    monkeypatch.setattr(scan_diag, "collect", lambda p, out_root=None: seen.setdefault("p", p) and real(p, out))
+    monkeypatch.setattr(scan_diag, "collect_many",
+                        lambda fs, out_root=None, progress=None: seen.setdefault("p", fs) and real(fs, out, progress))
     win = _window(monkeypatch)
     got = []
     win._scan_diag_done.disconnect()
@@ -47,7 +48,7 @@ def test_run_writes_zip_for_picked_folder(qapp, monkeypatch, tmp_path):
             break
         time.sleep(0.02)
     assert got and got[0][1] == ""
-    assert seen["p"].name == "1.2.c.5.2.jpeg"
+    assert [f.name for f in seen["p"]] == ["W01"]
     assert got[0][0].endswith(".zip") and (out / got[0][0].split("/")[-1]).is_file()
 
 
