@@ -128,3 +128,15 @@ def test_zone_label_shows_recipe_when_multi():
     assert zone_label("Zones", None, 1, names, True) == ("Zone 1", "Align")
     assert zone_label("Recipe3-Zones", None, 1, names, True) == ("Zone 1", "x20")
     assert zone_label("Recipe2-Zones", None, 1, names, True) == ("Zone 1", "레시피 2")
+
+
+def test_defect_whose_bin_has_no_bundle_is_never_dropped():
+    """첫 분류(bin)가 그 Zone 묶음에 없으면 Feature Filter 와 무관 — 레시피 값 · 올린 값 모두 남는다(TB500 x5 Space bin 54)."""
+    from aoi_verification.app.threshold import preview as P
+    from aoi_verification.app.threshold.rules import Filter, Zone
+    z = {("Recipe2-Zones", 1): Zone(1, "Space", {29: (Filter(2, 5, 3.25, 3.25),)})}
+    d = P.Defect(0, "Recipe2-Zones", 1, 54, 54, 31.0, 3.17, 5.0, 0.0, 0.0, 0.0)
+    assert P.is_kept(d, z) and P.is_kept(d, z, {("Recipe2-Zones", 1, 29, 2): 10.0})
+    assert P.recipe_misses([d], z) == []
+    own = P.Defect(1, "Recipe2-Zones", 1, 29, 29, 31.0, 3.17, 5.0, 0.0, 0.0, 0.0)
+    assert not P.is_kept(own, z)                    # 자기 묶음(29)에서 떨어지는 건 그대로 빠짐

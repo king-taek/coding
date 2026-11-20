@@ -169,6 +169,11 @@ def why_dropped(d: Defect, zones: dict, overrides: dict | None = None):
     z = zones.get((d.zone_dir, d.zone))
     if z is None or not z.bundles:
         return None
+    # 첫 분류(bin)가 이 Zone 묶음 어디에도 없으면 Feature Filter 가 매긴 Defect 가 아니다(다른 검출 단계가
+    # 잡았다) — 기준을 바꿔도 남는다.  TB500_RDL3 Multi x5 Space: bin 54 두 개, 묶음은 29 하나뿐 —
+    # 하나는 레시피 값에서도 29 묶음에 걸려 '빠짐' 으로 보였다(관측 2026-11-21, 16장 Defect 19,081 중 2개).
+    if d.bin not in z.bundles:
+        return None
     overrides = overrides or {}
     first = None
     for cls, filters in z.bundles.items():
