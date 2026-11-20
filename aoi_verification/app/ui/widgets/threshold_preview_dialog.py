@@ -124,6 +124,13 @@ class WaferData:
     skipped: tuple = ()               # 못 합친 웨이퍼 폴더 — 못 읽었거나 Zone 기준 · 픽셀 크기가 기준 웨이퍼와 다름
     has_scan: bool = False            # 폴더에 Scan 목록이 있다 — 칩의 [스캔] 을 켤 수 있다
     slot: str = ""                    # 카세트 슬롯 번호(WaferInfo.ini ActiveSlot) — 모르면 빈 글자
+    _multi: object = field(default=None, repr=False, compare=False)   # Defect 가 든 Zone 폴더가 둘 이상인가(캐시)
+
+    def label(self, key) -> tuple:
+        """Zone 키 → ``(이름, 레시피 표시)`` — 레시피가 여럿이면 어느 레시피 Zone 인지 늘 적는다."""
+        if self._multi is None:
+            self._multi = len({d.zone_dir for d in self.defects + self.goods}) > 1
+        return zone_label(key[0], self.zones.get(key), key[1], R.read_recipe_names(self.folder), self._multi)
 
     def to_um(self, feature: int, v: float) -> float:
         if feature == R.FEATURE_AREA:
@@ -154,7 +161,7 @@ def load_wafer(folder: Path, report=lambda msg, done=0, total=0: None, stop=lamb
                   slot=read_active_slot(folder) or "")
     if note:
         return w
-    w.zones = R.read_zones(folder)
+    w.zones = R.zones_in_flt_px(folder, R.read_zones(folder))     # flt 와 같은 픽셀로 — rules.zones_in_flt_px
     w.classes = R.read_classes(folder)
     px = scan_pixel_size_xy(folder)
     if not px:
@@ -339,12 +346,18 @@ class _RichLoad(QThread):
         self.signals.done.emit(self._token, self._folder, rich)
 
 
-def zone_label(zone_dir: str, zone: R.Zone | None, zone_id: int) -> tuple[str, str]:
-    """``(Zone 이름, 레시피 표시)`` — ``Zones`` 는 레시피 표시 없음, ``Recipe2-Zones`` 는 '레시피 2'."""
+def zone_label(zone_dir: str, zone: R.Zone | None, zone_id: int, names: dict | None = None,
+               multi: bool = False) -> tuple[str, str]:
+    """``(Zone 이름, 레시피 표시)`` — 레시피 하나뿐인 ``Zones`` 는 표시 없음, ``Recipe2-Zones`` 는 '레시피 2'.
+
+    ``multi``(폴더에 Defect 가 든 Zone 폴더가 둘 이상)이면 ``Zones`` 도 레시피 1 로 적는다 — 레시피마다 같은 이름의 Zone
+    (Recipe3 ScanArea · Recipe2 Scan Area)이 있어 구분이 안 된다.  ``names`` = ``{N: RecipesInfo.ini 이름}``
+    이면 '레시피 N' 대신 그 이름(x20 등), 없으면 '레시피 N'."""
     name = zone.name if zone is not None and zone.name else f"Zone {zone_id}"
-    rec = "" if zone_dir == "Zones" else _KO.THRESH_PREVIEW_RECIPE.format(
-        n=zone_dir.removeprefix("Recipe").removesuffix("-Zones"))
-    return name, rec
+    if zone_dir == "Zones" and not multi:
+        return name, ""
+    n = 1 if zone_dir == "Zones" else int(zone_dir.removeprefix("Recipe").removesuffix("-Zones"))
+    return name, (names or {}).get(n) or _KO.THRESH_PREVIEW_RECIPE.format(n=n)
 
 
 LOG_P90_FRAC = 0.10         # 값의 90% 가 선형 축의 앞 10% 안에 몰리면 로그 축(현택님 2026-11-17 — 한두 개가 멀리 튀는 Area 등)
@@ -2478,7 +2491,7 @@ class ThresholdPreviewDialog(QDialog):
         return sorted((pos[k] + 0.5) / len(order) for k in self._picked if k in pos)
 
     def _zone_text(self, key) -> None:
-        name, rec = zone_label(key[0], self._w.zones.get(key), key[1])
+        name, rec = self._w.label(key)
         picks = sum(1 for d in self._picked.values() if (d.zone_dir, d.zone) == key)
         self.zone_btns[key].set_data(f"{name}" + (f"  · {rec}" if rec else ""), self._count(key),
                                      len(self.dropped(key)), self.appeared(key), picks, self._zone_ticks(key))
@@ -2496,6 +2509,7 @@ class ThresholdPreviewDialog(QDialog):
             lab = QLabel(_KO.THRESH_PREVIEW_NO_FILTER, self.rules)
             lab.setProperty("role", "muted")
             self._rules_lay.addWidget(lab)
+            self._add_detect_note()
             return
         known = P.contrast_known(w.defects, *self._zone)
         many = len(z.bundles) > 1
@@ -2527,6 +2541,25 @@ class ThresholdPreviewDialog(QDialog):
                 row.addWidget(self._feature_cell(cls, f, name, unit, step, dec), 1)
             row.addStretch(0)
             self._rules_lay.addLayout(row)
+        self._add_detect_note()
+
+    def _add_detect_note(self) -> None:
+        """지금 Zone 의 검출 값(Zone ini — 앱에서 못 바꿈)을 작은 글씨로.  값은 쓰인 그대로, 면적 칸은 레시피 px(환산 안 함)."""
+        vals = R.read_detect_values(self._w.folder, *self._zone)
+        if not vals:
+            return
+        unit = {"darkarea": " px", "brightarea": " px", "darkdiameter": " px", "brightdiameter": " px"}
+        txt = "  ·  ".join(f"{k} {v.rstrip('0').rstrip('.') if '.' in v else v}{unit.get(k.lower(), '')}"
+                          for k, v in vals)
+        head = QLabel(_KO.THRESH_PREVIEW_DETECT, self.rules)
+        head.setProperty("role", "muted")
+        head.setStyleSheet("font-size: 11px; font-weight: 700;")
+        body = QLabel(txt, self.rules)
+        body.setProperty("role", "muted")
+        body.setStyleSheet("font-size: 11px;")
+        body.setWordWrap(True)
+        self._rules_lay.addWidget(head)
+        self._rules_lay.addWidget(body)
 
     def _feature_cell(self, cls: int, f: R.Filter, name: str, unit: str, step: float, dec: int) -> QWidget:
         w = self._w
@@ -2912,7 +2945,7 @@ class ThresholdPreviewDialog(QDialog):
         lay.addWidget(pic, 0, Qt.AlignmentFlag.AlignTop)
         right = QVBoxLayout()
         right.setSpacing(8)
-        name, rec = zone_label(d.zone_dir, w.zones.get((d.zone_dir, d.zone)), d.zone)
+        name, rec = w.label((d.zone_dir, d.zone))
         top = QHBoxLayout()
         top.setSpacing(8)
         t = QLabel(self._class_name(d.bin), box)
@@ -3367,7 +3400,7 @@ class ThresholdPreviewDialog(QDialog):
             return
         zones = []
         for k in self.zone_keys():
-            name, rec = zone_label(k[0], w.zones.get(k), k[1])
+            name, rec = w.label(k)
             zones.append((k, f"{name}" + (f"  · {rec}" if rec else "")))
         dlg = OverkillPickDialog(zones=zones, zone=self._zone, items_of=self._pick_items, key_of=key_of,
                                  pixmap_of=self._pick_pixmap, request_pics=self._pick_request,
@@ -3549,7 +3582,7 @@ class ThresholdPreviewDialog(QDialog):
             if f is None or meta is None:
                 continue
             _feat, item, unit, _step, dec = meta
-            name, rec = zone_label(zdir, z, zid)
+            name, rec = w.label((zdir, zid))
             n = list(z.bundles).index(cls) + 1
             rule = _KO.THRESH_PREVIEW_RULE_N.format(n=n) if len(z.bundles) > 1 else _KO.THRESH_PREVIEW_RULE
             vals = [w.to_um(feat, P._value(d, feat)) for d in w.defects
@@ -3567,7 +3600,7 @@ class ThresholdPreviewDialog(QDialog):
                 continue
             total_drop += len(drops)
             total_new += new
-            name, rec = zone_label(key[0], w.zones.get(key), key[1])
+            name, rec = w.label(key)
             have = sorted(((d, why) for d, why in drops if self._pic(d) is not None),
                           key=lambda t: -self._below(t[0], t[1]))     # 기준 바로 아래부터 멀리까지
             samples = tuple(RP.Sample(_data_uri(self._pic(d)), self._class_name(d.bin), self._why_text(d, why))

@@ -1253,6 +1253,7 @@ THRESH_PREVIEW_RESET_TIP = "지금 보고 있는 Zone 만 레시피 값으로 �
 OVERKILL_SAVED_LOAD = "저장한 선택 불러오기"
 OVERKILL_SAVED_LOAD_TIP = "이 웨이퍼 폴더에서 전에 고른 Overkill · Defect 를 다시 불러옵니다 (고를 때 자동 저장됩니다)"
 THRESH_PREVIEW_NO_FILTER = "Feature Filter 없음"
+THRESH_PREVIEW_DETECT = "레시피 검출 값 (앱에서 못 바꿈)"
 THRESH_PREVIEW_RULE = "기준"
 THRESH_PREVIEW_RULE_N = "기준 {n}"
 THRESH_PREVIEW_RECIPE_VALUE = "레시피 {v}"

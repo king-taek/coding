@@ -136,3 +136,10 @@ def test_collect_many_skips_per_photo_scan_work(tmp_path, monkeypatch):
     with zipfile.ZipFile(zp) as zf:
         d = json.loads(zf.read("W1/diag.json"))
     assert "skipped" in d["photos"] and d["recipes"]["names"] is not None
+
+
+def test_collect_skips_wafer_align_zip(tmp_path):
+    f, ok = _folder(tmp_path)
+    (f / "WaferAlignData.zip").write_bytes(b"PK" * 100)
+    with zipfile.ZipFile(scan_diag.collect(ok, tmp_path / "o")) as zf:
+        assert not any(n.endswith("WaferAlignData.zip") for n in zf.namelist())

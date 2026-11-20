@@ -21,9 +21,15 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-from ..coords.ini_text import read_ini_text
+import logging
 
-__all__ = ["Filter", "Zone", "ClassInfo", "read_zones", "read_classes", "zone_dir_for",
+from ..coords.ini_text import read_ini_text
+from ..coords.pixel_size import scan_pixel_size_xy, scan_pixel_size_xy_recipe
+
+_LOG = logging.getLogger("aoi.threshold")
+
+__all__ = ["Filter", "Zone", "ClassInfo", "read_zones", "read_classes", "zone_dir_for", "zones_in_flt_px",
+           "recipe_scale", "read_recipe_names", "read_detect_values",
            "FEATURE_AREA", "FEATURE_WIDTH", "FEATURE_CONTRAST"]
 
 # Zone ini FeatureType — 섹션 이름과 짝지어 본 값(수집 자료 Zone ini 전부, 관측 2026-11-16):
@@ -133,4 +139,93 @@ def read_classes(folder: Path) -> dict:
     out: dict = {}
     for m in re.finditer(r"(?m)^\s*(-?\d+)\s*=\s*([^,\r\n]*),([^,\r\n]*)", text):
         out[int(m.group(1))] = ClassInfo(m.group(2).strip(), m.group(3).strip().lower() == "good")
+    return out
+
+
+def recipe_scale(folder: Path, zone_dir: str):
+    """``RecipeN-Zones`` 기준 값(레시피 N 의 픽셀) → Surface.flt 값의 픽셀(폴더 기준)로 바꾸는 ``(선형 배율, 면적 배율)``.
+
+    ``Zones``(레시피 1 · 하나뿐인 스캔)이거나, 두 픽셀 크기를 하나라도 모르거나, 같으면 ``(1.0, 1.0)``.
+    폭 · 길이는 X 픽셀 크기 비, 면적은 X·Y 픽셀 크기 비다.  모르는 값을 짐작해 채우지 않는다(모르면 경고만)."""
+    m = _RECIPE_DIR.match(zone_dir)
+    if not m or int(m.group(1)) < 2:
+        return 1.0, 1.0
+    ref = scan_pixel_size_xy(folder)
+    rec = scan_pixel_size_xy_recipe(folder, int(m.group(1)))
+    if not ref or not rec:
+        _LOG.warning("레시피 %s 픽셀 크기를 몰라 Zone 기준을 폴더 기준으로 못 바꿈: %s (폴더 %s · 레시피 %s)",
+                     m.group(1), folder, ref, rec)
+        return 1.0, 1.0
+    lin, area = rec[0] / ref[0], (rec[0] * rec[1]) / (ref[0] * ref[1])
+    return (lin, area) if abs(lin - 1.0) > 1e-9 or abs(area - 1.0) > 1e-9 else (1.0, 1.0)
+
+
+def zones_in_flt_px(folder: Path, zones: dict) -> dict:
+    r"""``read_zones`` 결과를 **Surface.flt 와 같은 픽셀 단위**로 바꾼 사본.  ``Zones`` 는 그대로.
+
+    왜: Surface.flt 의 면적 · BlobBreadth · BlobFeretMax 는 **레시피와 상관없이 폴더 픽셀 크기**
+    (``Params_WaferInfo RefPixelSizeX``)의 px 다(Export Defects.csv µm = flt × 폴더 픽셀, 정확히 일치).
+    그런데 ``RecipeN-Zones`` 의 면적(px²) · 폭(px) 기준은 **그 레시피 자기 픽셀 크기**
+    (``RecipeN-ProductInfo.ini Scan2DPixelSize``)의 px 다.  AOI-20 TB500_RDL3 Multi(11장, 관측 2026-11-20):
+    레시피 3(x20, 0.3859) Surface_RDL 폭 5.1832932 px × 0.3859 = 2.000 µm · 면적 26.8665 px² × 0.3859² = 4.00 µm²
+    — 장비 기준은 µm 로 2 · 4.  숫자를 그대로 flt 와 비교하면 레시피 3 Defect 가 0/190 통과, µm 로 맞추면 190/190
+    통과(= 장비).  레시피 2(x5, 1.538)는 폴더 1.536 과 거의 같아 어느 쪽이든 같았다.  Contrast 는 단위 없음.
+    FeatureType 1(면적) × (레시피 px/폴더 px)² · 2(폭)× 비.  RichSurface 값도 같은 폴더 px 라고 **가정**한다(미확인).
+    장비에 적을 값은 :func:`to_recipe_px` 로 되돌린다."""
+    out: dict = {}
+    for key, z in zones.items():
+        lin, area = recipe_scale(folder, key[0])
+        if lin == 1.0 and area == 1.0:
+            out[key] = z
+            continue
+        k = {FEATURE_AREA: area, FEATURE_WIDTH: lin}
+        out[key] = Zone(z.zone_id, z.name, {c: tuple(
+            Filter(f.feature, f.ftype, f.low * k.get(f.feature, 1.0), f.high * k.get(f.feature, 1.0)) for f in fs)
+            for c, fs in z.bundles.items()})
+    return out
+
+
+_SURF = ("Low_Delta", "High_Delta", "Bright_Thr", "DarkArea", "BrightArea", "DarkDiameter", "BrightDiameter")
+_GEN = ("AdaptDetect_Dark_Contrast_Seed", "AdaptDetect_Dark_Contrast_Body", "AdaptDetect_Bright_Contrast_Seed",
+        "AdaptDetect_Bright_Contrast_Body", "FixedDetect_Dark_Contrast_Seed", "FixedDetect_Bright_Contrast_Seed")
+
+
+def read_detect_values(folder: Path, zone_dir: str, zone_id: int) -> list:
+    """그 Zone ini 의 검출 값(앱에서 못 바꿈) → ``[(이름, 값 글자)]``.  ``[Surface]`` 알고리즘 Zone 과
+    ``[GenesisV12]`` Zone 의 정해진 키 중 파일에 있는 것만(값은 쓰인 그대로 — 단위 환산 안 함).  못 읽으면 빈 목록."""
+    try:
+        for p in sorted((Path(folder) / zone_dir).glob("*.ini")):
+            text = read_ini_text(p) or ""
+            zid = _ZONE_ID.search(text)
+            if not zid or int(zid.group(1)) != zone_id:
+                continue
+            heads = list(_SECTION.finditer(text))
+            out = []
+            for sect, keys in (("surface", _SURF), ("genesisv12", _GEN)):
+                for i, h in enumerate(heads):
+                    if h.group(1).strip().lower() != sect:
+                        continue
+                    body = text[h.end(): heads[i + 1].start() if i + 1 < len(heads) else len(text)]
+                    kv = {k.lower(): v.strip() for k, v in re.findall(r"(?m)^\s*([^=\s;#][^=\r\n]*?)\s*=\s*([^\r\n]*)", body)}
+                    out += [(k, kv[k.lower()]) for k in keys if kv.get(k.lower(), "") != ""]
+            return out
+    except OSError:
+        pass
+    return []
+
+
+@lru_cache(maxsize=64)
+def read_recipe_names(folder: Path) -> dict:
+    """``RecipesInfo.ini [Recipe-N] Name=`` → ``{N: 이름}``.  없으면 빈 dict."""
+    text = read_ini_text(Path(folder) / "RecipesInfo.ini") or ""
+    heads = list(_SECTION.finditer(text))
+    out: dict = {}
+    for i, h in enumerate(heads):
+        m = re.fullmatch(r"(?i)recipe-(\d+)", h.group(1).strip())
+        if not m:
+            continue
+        body = text[h.end(): heads[i + 1].start() if i + 1 < len(heads) else len(text)]
+        nm = re.search(r"(?im)^\s*Name\s*=\s*(\S.*?)\s*$", body)
+        if nm:
+            out[int(m.group(1))] = nm.group(1)
     return out

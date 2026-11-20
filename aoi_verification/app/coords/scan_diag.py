@@ -28,6 +28,8 @@ _SURFACE_KEYS = ("Enable", "Bright_Thr", "Low_Delta", "High_Delta", "VDark_Delta
                  "BrightDiameter", "DarkDiameter", "BrightLength", "DarkLength", "Area", "Diameter", "Length")
 _ZONE_DIR = re.compile(r"(?i)^(zones|recipe\d+-zones)$")
 _COPY_PARENT_MAX = 100
+# 레시피 분석에 안 쓰는데 큰 파일 — WaferAlignData.zip 이 LOT 수집 zip 의 97%(256 MB)였다(관측 2026-11-21).
+_SKIP_NAMES = {"waferaligndata.zip"}
 
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
 _MAX_COPY = 20 * 1024 * 1024
@@ -373,7 +375,8 @@ def _small_files(folder: Path):
     with os.scandir(folder) as it:
         entries = list(it)
     for e in entries:
-        if Path(e.name).suffix.lower() in _IMAGE_EXTS or e.name.lower() == "thumbs.db":
+        if (Path(e.name).suffix.lower() in _IMAGE_EXTS or e.name.lower() == "thumbs.db"
+                or e.name.lower() in _SKIP_NAMES):
             continue
         try:
             if e.is_file() and e.stat().st_size <= _MAX_COPY:
