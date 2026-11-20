@@ -3,6 +3,9 @@
 ``collect(color_path)`` 가 같은 폴더의 목록·INI·픽셀 크기·Scan 크기·사진별 판정을 모아 zip 하나로 쓴다.
 사진(JPEG 등)은 절대 담지 않는다 — 파일 이름·크기만 ``files.txt`` 에 남긴다.
 각 구역은 따로 try/except 라 한 곳이 깨져도 나머지가 남고, 오류는 글로 적는다.
+
+레시피 값 분석용 구역(``recipes``·``export_csv``)도 함께 모은다 — 다중 레시피 폴더에서 레시피마다 Zone 기준 ·
+픽셀 크기 · 검출 값(Low_Delta 등)이 다르고, Defect 수치가 어느 픽셀 크기로 환산돼 기준과 비교되는지 따져 보려는 자료다.
 """
 
 from __future__ import annotations
@@ -19,6 +22,11 @@ from . import abs_coord, camtek_ini, pixel_size, scan_image
 from .ini_text import decode_ini_bytes, read_ini_text
 
 __all__ = ["collect", "gather"]
+
+_SURFACE_KEYS = ("Enable", "Bright_Thr", "Low_Delta", "High_Delta", "VDark_Delta", "BrightArea", "DarkArea",
+                 "BrightDiameter", "DarkDiameter", "BrightLength", "DarkLength", "Area", "Diameter", "Length")
+_ZONE_DIR = re.compile(r"(?i)^(zones|recipe\d+-zones)$")
+_COPY_PARENT_MAX = 100
 
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
 _MAX_COPY = 20 * 1024 * 1024
@@ -130,6 +138,114 @@ def _tile_sizes(folder: Path, names: list[str]) -> dict:
     return {k: dict(v) for k, v in by.items()}
 
 
+def _recipe_names(folder: Path) -> dict:
+    """RecipesInfo.ini 의 ``[Recipe-N]``(이름 · 픽셀 크기 · 배율)과 MultiRecipe.ini 의 줄(레시피 순서)."""
+    out: dict = {"recipes_info": {}, "multi_recipe": None}
+    txt = read_ini_text(folder / "RecipesInfo.ini") or ""
+    for m in re.finditer(r"(?ims)^\s*\[Recipe-(\d+)\]\s*$(.*?)(?=^\s*\[|\Z)", txt):
+        out["recipes_info"][m.group(1)] = dict(re.findall(
+            r"(?m)^\s*(Name|Scan2DPixelSize|ColorPixelSize|ScanMag|VerMag)\s*=\s*(.*?)\s*$", m.group(2)))
+    multi = read_ini_text(folder / "MultiRecipe.ini")
+    if multi is not None:
+        out["multi_recipe"] = [ln.strip() for ln in multi.splitlines() if ln.strip()][:40]
+    return out
+
+
+def _zone_params(path: Path) -> dict:
+    kv = _kv_of(path, _SURFACE_KEYS)
+    kv.pop("present", None)
+    return {k: v for k, v in kv.items() if v is not None}
+
+
+def _passes(zone, rows) -> int:
+    """Zone 묶음 하나라도 전부(AND) 통과한 Defect 수."""
+    from ..threshold import rules
+    n = 0
+    for r in rows:
+        vals = {rules.FEATURE_AREA: r.area, rules.FEATURE_WIDTH: r.blob_breadth, rules.FEATURE_CONTRAST: r.contrast}
+        if any(all(f.passes(vals[f.feature]) for f in fs if f.feature in vals) for fs in zone.bundles.values()):
+            n += 1
+    return n
+
+
+def _scaled(zone, k_area: float, k_width: float):
+    """기준 값(px)에 환산 계수를 곱한 Zone — 면적은 면적 계수, 폭은 폭 계수, Contrast 는 그대로."""
+    from ..threshold import rules
+
+    def k(f):
+        return k_area if f.feature == rules.FEATURE_AREA else k_width if f.feature == rules.FEATURE_WIDTH else 1.0
+    return rules.Zone(zone.zone_id, zone.name, {
+        c: tuple(rules.Filter(f.feature, f.ftype, f.low * k(f), f.high * k(f)) for f in fs)
+        for c, fs in zone.bundles.items()})
+
+
+def _zone_rows(folder: Path, zones: dict, by: dict, ref) -> list:
+    out = []
+    for (d, zid), z in sorted(zones.items()):
+        m = re.match(r"(?i)recipe(\d+)-", d)
+        n = int(m.group(1)) if m else 1
+        rows = by.get((n, zid), [])
+        px = pixel_size.scan_pixel_size_xy_recipe(folder, n)
+        e = {"zone_dir": d, "zone_id": zid, "zone_name": z.name, "recipe": n, "recipe_pixel_xy": list(px) if px else None,
+             "filters": {str(c): [[f.feature, f.ftype, f.low, f.high] for f in fs] for c, fs in z.bundles.items()},
+             "flt_n": len(rows)}
+        ini = folder / d / f"{z.name}.ini"
+        e["surface_params"] = _zone_params(ini) if ini.is_file() else {}
+        if rows:
+            e["flt_range"] = {"area": [min(r.area for r in rows), max(r.area for r in rows)],
+                              "width": [min(r.blob_breadth for r in rows), max(r.blob_breadth for r in rows)],
+                              "length": [min(r.blob_feret_max for r in rows), max(r.blob_feret_max for r in rows)],
+                              "contrast": [min(r.contrast for r in rows), max(r.contrast for r in rows)],
+                              "contrast_zero": sum(1 for r in rows if r.contrast == 0)}
+            e["pass_raw"] = _passes(z, rows)
+            if ref and px:
+                # flt 를 폴더 RefPixelSize 로, 기준을 이 레시피 픽셀 크기로 µm 로 바꿔 같은 µm 끼리 비교한다.
+                # 기준 px 를 flt 의 px 로 되돌리면 같은 비교다: 기준 × (레시피 픽셀 / Ref 픽셀)^차원.
+                e["pass_um"] = _passes(_scaled(z, (px[0] / ref[0]) ** 2, px[0] / ref[0]), rows)
+        out.append(e)
+    return out
+
+
+def _recipes(folder: Path) -> dict:
+    """레시피마다 Zone 기준(px)과 Surface.flt 수치 · 통과 수를 한 표로 — 기준이 어느 환산에서 맞는지 보는 자료.
+
+    ``pass_raw`` = flt 숫자를 기준 숫자와 그대로 비교, ``pass_um`` = 기준(px)을 그 레시피 픽셀 크기로 µm 로,
+    flt 를 폴더 RefPixelSize 로 µm 로 바꿔 같은 µm 끼리 비교(Export Defects.csv 의 환산과 같은 방식).
+    장비가 Defect 로 남긴 수(``flt_n``)와 맞는 쪽이 맞는 환산이다."""
+    from ..threshold import rules
+    from . import surface_flt
+    ref = pixel_size.scan_pixel_size_xy(folder)
+    recs = surface_flt.load_folder(folder)
+    by: dict = defaultdict(list)
+    for r in recs:
+        by[(r.recipe if r.recipe is not None else 1, r.zone)].append(r)
+    return {"names": _recipe_names(folder), "ref_pixel_xy": list(ref) if ref else None, "flt_records": len(recs),
+            "zones": _zone_rows(folder, rules.read_zones(folder), by, ref)}
+
+
+def _export_csv(folder: Path) -> dict:
+    """Export 로 생긴 ``Defects.csv`` 요약 — Zone(Type)별 줄 수와 면적 · 폭 · 길이 범위(µm)."""
+    import csv
+    p = folder / "Defects.csv"
+    if not p.is_file():
+        return {"present": False}
+    rows = list(csv.DictReader(p.read_text(encoding="utf-8-sig", errors="replace").splitlines()))
+    by: dict = defaultdict(list)
+    for r in rows:
+        by[r.get("Type", "")].append(r)
+    out = {}
+    for t, v in by.items():
+        rng = {}
+        for k in ("Area", "Width", "Length"):
+            try:
+                xs = [float(x[k]) for x in v]
+                rng[k] = [min(xs), max(xs)]
+            except (KeyError, ValueError):
+                pass
+        out[t] = {"rows": len(v), **rng}
+    return {"present": True, "rows": len(rows), "by_type": out}
+
+
 def _ini_fields(folder: Path) -> dict:
     ini = camtek_ini._find_ini(folder)
     if ini is None:
@@ -217,6 +333,8 @@ def gather(color_path) -> dict:
     _guard(d, "pixel_size", lambda: _pixel(folder))
     _guard(d, "scan_tile_sizes", lambda: _tile_sizes(folder, names))
     _guard(d, "photos", lambda: _photos(folder, color, names))
+    _guard(d, "recipes", lambda: _recipes(folder))
+    _guard(d, "export_csv", lambda: _export_csv(folder))
     d["summary"] = _summary(d["photos"])
     return d
 
@@ -229,7 +347,8 @@ def _report(d: dict) -> str:
     if not d["summary"]:
         L.append("  (컬러 사진 없음)")
     for title, key in (("사진 개수 (레시피별)", "counts"), ("Scan 목록", "manifest"),
-                       ("픽셀 크기", "pixel_size"), ("Scan 타일 JPEG 크기 (레시피별)", "scan_tile_sizes")):
+                       ("픽셀 크기", "pixel_size"), ("Scan 타일 JPEG 크기 (레시피별)", "scan_tile_sizes"),
+                       ("레시피별 Zone 기준 · Surface.flt 수치", "recipes"), ("Export Defects.csv", "export_csv")):
         L += ["", f"## {title}", json.dumps(d[key], ensure_ascii=False, indent=2)]
     L += ["", "## 컬러 사진별 판정"]
     ph = d["photos"]
@@ -241,21 +360,40 @@ def _report(d: dict) -> str:
     return "\n".join(L) + "\n"
 
 
-def _copy_targets(folder: Path):
-    seen = set()
-    cands = list(folder.iterdir())
-    td = folder / "TrainData"
-    if td.is_dir():
-        cands += list(td.glob("*.ini"))
-    for p in cands:
+def _small_files(folder: Path):
+    for p in folder.iterdir():
         try:
-            if (not p.is_file() or p.suffix.lower() in _IMAGE_EXTS or p.name.lower() == "thumbs.db"
-                    or p.stat().st_size > _MAX_COPY or p in seen):
+            if (p.is_file() and p.suffix.lower() not in _IMAGE_EXTS and p.name.lower() != "thumbs.db"
+                    and p.stat().st_size <= _MAX_COPY):
+                yield p
+        except OSError:
+            continue
+
+
+def _copy_targets(folder: Path):
+    """``(원본, zip 안 이름)`` — 폴더 바로 아래 파일 · Zone 폴더(``Zones``·``RecipeN-Zones``) · TrainData ini ·
+    윗 폴더(Setup)의 파일(최대 100개)."""
+    for p in _small_files(folder):
+        yield p, f"copy/{p.name}"
+    for d in folder.iterdir():
+        try:
+            if not d.is_dir():
                 continue
         except OSError:
             continue
-        seen.add(p)
-        yield p
+        if _ZONE_DIR.match(d.name):
+            for p in _small_files(d):
+                yield p, f"copy/{d.name}/{p.name}"
+        elif d.name == "TrainData":
+            for p in d.glob("*.ini"):
+                yield p, f"copy/TrainData/{p.name}"
+    try:
+        for i, p in enumerate(_small_files(folder.parent)):
+            if i >= _COPY_PARENT_MAX:
+                break
+            yield p, f"copy/_상위폴더/{p.name}"
+    except OSError:
+        pass
 
 
 def collect(color_path, out_root=None) -> Path:
@@ -272,8 +410,7 @@ def collect(color_path, out_root=None) -> Path:
         z.writestr("diag.json", json.dumps(d, ensure_ascii=False, indent=2))
         z.writestr("files.txt", "\n".join(f"{n}\t{s}" for n, s in listing) + "\n")
         try:
-            for p in _copy_targets(folder):
-                arc = f"copy/TrainData/{p.name}" if p.parent.name == "TrainData" else f"copy/{p.name}"
+            for p, arc in _copy_targets(folder):
                 z.write(p, arc)
         except OSError:
             pass

@@ -68,3 +68,41 @@ def test_collect_survives_missing_manifest(tmp_path):
         diag = json.loads(zf.read("diag.json"))
     assert diag["manifest"] == {"present": False}
     assert diag["summary"]["1"] == {"no_manifest": 1}
+
+
+def _flt_bytes(rows):
+    """152 B 레코드(TB500 배치: area 80 · breadth 88 · contrast 136 · zone 61 · recipe 62)."""
+    import struct
+    out = b""
+    for zone, recipe, area, width, contrast in rows:
+        rec = bytearray(152)
+        struct.pack_into("<BB", rec, 61, zone, recipe)
+        struct.pack_into("<dd", rec, 80, area, width)
+        struct.pack_into("<d", rec, 136, contrast)
+        out += bytes(rec)
+    return out
+
+
+def test_recipes_compares_per_recipe_pixel(tmp_path):
+    """레시피 3(픽셀 0.4)의 기준 px 는 flt(Ref 픽셀 1.6) 숫자와 그대로 비교하면 틀리고, µm 로 맞춰야 맞는다."""
+    f, ok = _folder(tmp_path)
+    (f / "Params_WaferInfo.ini").write_text("[Info]\nRefPixelSizeX=1.6\nRefPixelSizeY=1.6\n")
+    (f / "Recipe3-ProductInfo.ini").write_text("[Geometric]\nScan2DPixelSize=0.4\n")
+    z = f / "Recipe3-Zones"
+    z.mkdir()
+    (z / "RDL.ini").write_text(
+        "[General]\nZoneName=RDL\nZoneID=1\n[Surface]\nLow_Delta=40\n"
+        "[Surface Feature Filter 1]\nEnable=1\nClassify=29\nFeatureType=2\nFilterType=5\nLowValue=5\nHighValue=5\n")
+    (f / "Surface.flt").write_bytes(_flt_bytes([(1, 3, 10.0, 1.3, 50.0), (1, 3, 10.0, 1.2, 50.0)]))
+    (f / "Defects.csv").write_text("#,Type,Area,Width,Length,Col,Row,X,Y,Classify,Visit\n"
+                                   "1,Surface-RDL,25.6,2.08,3,0,0,1,1,A,\n", encoding="utf-8-sig")
+    zp = scan_diag.collect(ok, tmp_path / "o")
+    with zipfile.ZipFile(zp) as zf:
+        d = json.loads(zf.read("diag.json"))
+        assert "copy/Recipe3-Zones/RDL.ini" in zf.namelist()
+    row = next(e for e in d["recipes"]["zones"] if e["zone_dir"] == "Recipe3-Zones")
+    assert row["flt_n"] == 2 and row["recipe_pixel_xy"] == [0.4, 0.4]
+    assert row["pass_raw"] == 0                     # 1.3 px < 5 px
+    assert row["pass_um"] == 1                      # 1.3 × 1.6 = 2.08 µm ≥ 5 × 0.4 = 2.0 µm, 1.2 × 1.6 = 1.92 µm 탈락
+    assert row["surface_params"]["Low_Delta"] == "40"
+    assert d["export_csv"]["by_type"]["Surface-RDL"]["rows"] == 1
