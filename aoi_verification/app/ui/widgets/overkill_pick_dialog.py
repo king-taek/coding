@@ -404,8 +404,6 @@ class OverkillPickDialog(QDialog):
                         ("Z", self._undo)):
             sc = QShortcut(QKeySequence(key), self, activated=fn)
             sc.setAutoRepeat(False)
-        for key, step in (("Up", -1), ("Down", 1)):         # ← → 는 결정이라, 결정 없이 사진만 넘겨 볼 때는 ↑ ↓
-            QShortcut(QKeySequence(key), self, activated=lambda s=step: self._browse(s))
         sc = QShortcut(QKeySequence.StandardKey.Undo, self, activated=self._undo)
         sc.setAutoRepeat(False)
         for key in ("Return", "Enter"):
@@ -619,17 +617,6 @@ class OverkillPickDialog(QDialog):
         bar = self.strip_scroll.horizontalScrollBar()
         x = self._cur * (_STRIP_PX + _STRIP_GAP)
         motion.animate_scroll(bar, x - (self.strip_scroll.viewport().width() - _STRIP_PX) // 2)
-
-    def _browse(self, step: int) -> None:
-        """↑ ↓ — 결정하지 않고 앞 · 뒤 사진으로 간다(맨 끝에서는 멈춤).  띠는 그 사진이 보이게 따라 간다."""
-        i = self._cur + step
-        if self._combo_open() or not 0 <= i < len(self._items):
-            return
-        self._set_cur(i)
-        self._refresh_all()
-
-    def _combo_open(self) -> bool:
-        return self.combo.hasFocus()
 
     def _goto(self, d) -> None:
         key = self._key_of(d)

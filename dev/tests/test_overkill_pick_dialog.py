@@ -281,22 +281,15 @@ def test_deciding_switches_big_photo_without_animation_but_undo_still_fades(styl
     assert dlg.current_key() == ("a", 1) and fades == [dlg.big]
 
 
-def test_up_down_browse_photos_without_deciding(styled_qapp):
-    """← → 는 결정이고, ↑ ↓ 는 결정 없이 앞 · 뒤 사진을 넘겨 본다(맨 끝에서 멈춤)."""
+def test_up_down_do_nothing_only_left_right_move(styled_qapp):
+    """Defect 고르기 창의 방향 이동은 ← → (결정)만이다 — ↑ ↓ 는 아무것도 안 한다(사용자 지시 2026-11-21)."""
     env = Env()
     dlg = env.make()
     dlg.show()
     dlg.activateWindow()
     QTest.qWaitForWindowActive(dlg)
+    start = dlg.current_key()
     QTest.keyClick(dlg, Qt.Key.Key_Down)
-    QTest.keyClick(dlg, Qt.Key.Key_Down)
-    assert dlg.current_key() == ("a", 2) and dlg.picked() == {} and dlg.overkill() == {}
     QTest.keyClick(dlg, Qt.Key.Key_Up)
-    assert dlg.current_key() == ("a", 1)
-    for _ in range(6):
-        QTest.keyClick(dlg, Qt.Key.Key_Down)
-    assert dlg.current_key() == ("a", 3)
-    for _ in range(6):
-        QTest.keyClick(dlg, Qt.Key.Key_Up)
-    assert dlg.current_key() == ("a", 0)
+    assert dlg.current_key() == start and dlg.picked() == {} and dlg.overkill() == {}
     dlg.close()
