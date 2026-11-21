@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import pytest
@@ -38,7 +39,8 @@ def _d(i, stage, area, width, by_filter=False) -> P.Defect:
 
 def test_parse_detect_limits():
     z = R._parse_zone(_SURF)
-    assert z.detect == {("bright", "area"): 30.0, ("bright", "width"): 3.0, ("dark", "area"): 38.0}   # 0 · 9999999 아님 → Length 는 안 읽음
+    assert z.detect == {("bright", "area"): 30.0, ("bright", "width"): 3.0, ("dark", "area"): 38.0,
+                        ("dark", "width"): 0.0, ("dark", "length"): math.inf}    # 0 = 하한 없음 · 9999999 = 끈 조건
     assert R._parse_zone(_SURF.replace("Enable=1", "Enable=0")).detect == {}
     assert R._parse_zone(_SURF.replace("AlgorithmName=Surface", "AlgorithmName=Other")).detect == {}
     assert R._parse_zone("[General]\nZoneID=1\n").detect == {}
@@ -234,3 +236,25 @@ def test_opening_photo_in_other_row_moves_band_in_one_step(styled_qapp, tmp_path
         assert dlg.grid.indexOf(bands[0]) == dlg.grid.indexOf(dlg._band_row) + 1
     finally:
         dlg.deleteLater()
+
+
+def test_detect_rule_is_diameter_and_area_or_length():
+    """장비 규칙: Diameter 를 넘고 Area 나 Length 중 하나를 넘으면 남는다(RTP.txt 설명).  Area 를 끈(9999999)
+    레시피는 Length 로 거른다 — 실물 UWB_1120S GX57529668 Scan Area(Area 9999999 · Diameter 3 · Length 6 px)의
+    검출 Defect 23 px² · 폭 3.842 · 길이 7.31 은 장비가 남겼다(관측 2026-11-21).  수집 79장 4,937개 전부 이 규칙으로 남음."""
+    z = R._parse_zone("[General]\nZoneID=63\n[Surface]\nEnable=1\nAlgorithmName=Surface\n"
+                      "DarkArea=9999999\nDarkDiameter=3.000000\nDarkLength=6\n")
+    real = _d(0, "dark", 23.0, 3.842)
+    real = P.Defect(**{**real.__dict__, "length": 7.31})
+    assert P.why_dropped(real, {("Zones", 63): z}) is None                    # 옛 규칙(Area 만)은 빠진다고 했다
+    short = P.Defect(**{**real.__dict__, "length": 5.0})
+    assert P.why_dropped(short, {("Zones", 63): z}) == ("dark", "length")       # Area 는 꺼져 있어 Length 가 이유
+    thin = P.Defect(**{**real.__dict__, "width": 2.9})
+    assert P.why_dropped(thin, {("Zones", 63): z}) == ("dark", "width")
+    # Length 를 끈 레시피(TB500)는 Area 로 — Area 를 넘으면 남고 못 넘으면 빠진다
+    tb = R._parse_zone(_SURF)
+    assert P.why_dropped(_d(1, "dark", 40.0, 3.5), {("Zones", 63): tb}) is None
+    assert P.why_dropped(_d(2, "dark", 30.0, 3.5), {("Zones", 63): tb}) == ("dark", "area")
+    # Length 하한 0(없음)이면 Area 를 못 넘어도 남는다
+    zero = R._parse_zone(_SURF.replace("DarkLength=9999999", "DarkLength=0"))
+    assert P.why_dropped(_d(3, "dark", 30.0, 3.5), {("Zones", 63): zero}) is None

@@ -15,6 +15,7 @@ FS UBM: 14 묶음 하나, Export 33/33 의 첫 분류가 14(관측 2026-11-16).
 
 from __future__ import annotations
 
+import math
 import os
 import re
 from dataclasses import dataclass, field
@@ -87,12 +88,15 @@ def zone_dir_for(recipe) -> str:
 # [Surface] 키 → (극성, 종류).  Area 는 flt ``area`` · Diameter 는 flt ``BlobBreadth``(폭)와 비교한다 —
 # TB500_RDL3 Multi x5: DarkArea 38 · DarkDiameter 3 → Type 8 677개 최소 area 38.1 · 폭 3.01, Space BrightArea 30 ·
 # BrightDiameter 3 → Type 16 최소 31.1 · 3.17(관측 2026-11-21).  비교는 이상(≥)으로 **가정**(표본 최소값이 기준 바로 위).
-DETECT_KEYS = {"darkarea": ("dark", "area"), "darkdiameter": ("dark", "width"),
-               "brightarea": ("bright", "area"), "brightdiameter": ("bright", "width")}
+DETECT_KEYS = {"darkarea": ("dark", "area"), "darkdiameter": ("dark", "width"), "darklength": ("dark", "length"),
+               "brightarea": ("bright", "area"), "brightdiameter": ("bright", "width"), "brightlength": ("bright", "length")}
+# 이 값 이상이면 그 조건을 끈 것(장비가 '9999999' 를 적는다) — 그 갈래로는 통과하지 못한다(inf 로 둔다).
+DETECT_OFF = 9_999_999.0
 
 
 def _parse_detect(text: str, heads) -> dict:
-    """첫 ``[Surface]``(AlgorithmName=Surface · Enable=1)의 검출 단계 하한 → ``{(극성, 종류): 값}``."""
+    """첫 ``[Surface]``(AlgorithmName=Surface · Enable=1)의 검출 단계 하한 → ``{(극성, 종류): 값}``.
+    종류 = 'area' · 'width'(Diameter) · 'length'.  0 = 하한 없음(늘 통과), 9999999 이상 = 끈 조건(inf)."""
     for i, h in enumerate(heads):
         if h.group(1).strip().lower() != "surface":
             continue
@@ -106,8 +110,9 @@ def _parse_detect(text: str, heads) -> dict:
                 v = float(kv[k])
             except (KeyError, ValueError):
                 continue
-            if v > 0:
-                out[key] = v
+            # 끈 조건(9999999)은 inf — 그 갈래로는 통과 못 함.  0 은 하한 없음(늘 통과)이지만 키가 있다는 사실은
+            # 남긴다: Area 를 못 넘어도 Length 가 0 이면 남는다(키가 아예 없을 때만 그 갈래를 안 본다).
+            out[key] = math.inf if v >= DETECT_OFF else max(v, 0.0)
         return out
     return {}
 
@@ -224,7 +229,7 @@ def zones_in_flt_px(folder: Path, zones: dict) -> dict:
         out[key] = Zone(z.zone_id, z.name, {c: tuple(
             Filter(f.feature, f.ftype, f.low * k.get(f.feature, 1.0), f.high * k.get(f.feature, 1.0), f.name) for f in fs)
             for c, fs in z.bundles.items()},
-            {(pol, kind): v * (area if kind == "area" else lin) for (pol, kind), v in z.detect.items()})
+            {(pol, kind): v * (area if kind == "area" else lin) for (pol, kind), v in z.detect.items()})   # inf × k = inf
     return out
 
 

@@ -161,6 +161,7 @@ def test_collect_many_keeps_only_files_the_recipe_analysis_reads(tmp_path):
     (w / "Recipe3-Zones" / "mask.dat").write_bytes(b"x")
     (lot / "setup.ini").write_text("[A]\n")
     (lot / "setup.dat").write_bytes(b"x")
+    (lot / "Recipe2-RTP.txt").write_text("[Scan Area]\n")
     with zipfile.ZipFile(scan_diag.collect_many([w], tmp_path / "o")) as zf:
         copied = {n.split("copy/", 1)[1] for n in zf.namelist() if "/copy/" in n}
-    assert copied == set(keep) | {"Recipe3-Zones/ScanArea.ini", "_상위폴더/setup.ini"}
+    assert copied == set(keep) | {"Recipe3-Zones/ScanArea.ini", "_상위폴더/setup.ini", "_상위폴더/Recipe2-RTP.txt"}

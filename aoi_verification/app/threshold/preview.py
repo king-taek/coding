@@ -16,6 +16,7 @@ Defect 를 모른다.  여기서는 파일 안 Defect 만 센다(내리기는 Ri
 from __future__ import annotations
 
 import dataclasses
+import math
 import logging
 import struct
 
@@ -172,30 +173,47 @@ def _value(d: Defect, feature: int):
     return {FEATURE_AREA: d.area, FEATURE_WIDTH: d.width, FEATURE_CONTRAST: d.contrast}.get(feature)
 
 
+def _detect_value(d: Defect, kind: str) -> float:
+    return d.area if kind == "area" else d.width if kind == "width" else d.length
+
+
+def _detect_low(d: Defect, z, kind: str, overrides: dict | None):
+    """그 칸의 하한(px) — 덮어쓴 값이 있으면 그것.  파일에 키가 없으면 None, 0 은 하한 없음, 끈 조건이면 inf."""
+    key = (d.zone_dir, d.zone, d.stage, kind)
+    if overrides and key in overrides:
+        return overrides[key]
+    return z.detect.get((d.stage, kind))
+
+
 def _detect_why(d: Defect, z, overrides: dict | None):
-    """검출 단계 Defect 가 빠지면 ``(극성, 'area'|'width')``, 남으면 None.  면적 · 폭이 하한 **미만**이면 빠진다
-    (장비는 이상 통과 — 가정).  하한이 없는 칸(꺼짐 · 못 읽음)은 보지 않는다.  키 ``(zone_dir, zone, 극성, 종류)`` 는
-    Feature Filter 키(Classify 가 정수)와 겹치지 않는다."""
+    """검출 단계 Defect 가 빠지면 ``(극성, 'area'|'width'|'length')``, 남으면 None.
+
+    장비 규칙(RTP.txt 설명 'Area>RTP AND Diameter > RTP width' · 'Length >RTP Length AND diameter > RTP width'):
+    **Diameter 를 넘고, Area 나 Length 중 하나를 넘으면** 남는다.  끈 조건(9999999)은 그 갈래로 통과 못 하고,
+    하한 없음(0)은 늘 통과다.  수집 79장 검출 단계 Defect 4,937개 전부 이 규칙으로 남았다 — Area 만 보던 옛 규칙은
+    563개만 남겼다(UWB · FVC · T4M 처럼 Area 를 끄고 Length 로 거르는 레시피, 관측 2026-11-21).
+    키 ``(zone_dir, zone, 극성, 종류)`` 는 Feature Filter 키(Classify 가 정수)와 겹치지 않는다."""
     if z is None or d.stage is None:
         return None
-    for kind in ("area", "width"):
-        if detect_ok(d, z, kind, overrides) is False:
-            return (d.stage, kind)
+    if detect_ok(d, z, "width", overrides) is False:
+        return (d.stage, "width")
+    branch = {k: detect_ok(d, z, k, overrides) for k in ("area", "length")}
+    seen = [k for k, ok in branch.items() if ok is not None]       # 파일에 키가 있는 갈래만(옛 파일엔 Length 가 없다)
+    if seen and not any(branch[k] for k in seen):
+        lows = {k: _detect_low(d, z, k, overrides) for k in seen}
+        return (d.stage, next((k for k in seen if lows[k] != math.inf), seen[0]))
     return None
 
 
 def detect_ok(d: Defect, z, kind: str, overrides: dict | None = None):
-    """검출 하한 한 칸을 통과하나 — 통과 True · 걸림 False · 하한이 없으면(꺼짐 · 못 읽음 · 검출 단계 Defect 아님) None."""
+    """검출 하한 한 칸을 통과하나 — 통과 True · 걸림 False · 파일에 그 키가 없으면(검출 단계 Defect 아님 포함) None.
+    끈 조건(inf)은 False — 그 갈래로는 통과하지 못한다(빠질지는 :func:`_detect_why` 가 갈래를 묶어 정한다)."""
     if z is None or d.stage is None:
         return None
-    key = (d.zone_dir, d.zone, d.stage, kind)
-    if overrides and key in overrides:
-        low = overrides[key]
-    else:
-        low = z.detect.get((d.stage, kind))
-        if low is None:
-            return None
-    return (d.area if kind == "area" else d.width) >= low
+    low = _detect_low(d, z, kind, overrides)
+    if low is None:
+        return None
+    return _detect_value(d, kind) >= low
 
 
 def why_dropped(d: Defect, zones: dict, overrides: dict | None = None):
@@ -292,8 +310,8 @@ def recommend(picked, zones: dict, snap=None) -> tuple[dict, list]:
         z = zones.get((d.zone_dir, d.zone))
         if not d.by_filter:             # 검출 단계 Defect — 묶음이 아니라 검출 하한(극성별)이 거른다
             if z is not None and d.stage is not None:
-                for kind, v in (("area", d.area), ("width", d.width)):
-                    if (d.stage, kind) in z.detect:
+                for kind, v in (("area", d.area), ("width", d.width), ("length", d.length)):
+                    if 0 < z.detect.get((d.stage, kind), 0) < math.inf:    # 하한 없음 · 끈 조건은 올리지 않는다
                         k = (d.zone_dir, d.zone, d.stage, kind)
                         stage_min[k] = min(v, stage_min.get(k, v))
             continue
@@ -317,7 +335,7 @@ def recommend(picked, zones: dict, snap=None) -> tuple[dict, list]:
             if low > f.low:
                 out[(zdir, zid, cls, f.feature)] = low
     for k, v in stage_min.items():      # 검출 하한: 고른 것 중 가장 작은 값까지(레시피보다 내리지 않는다)
-        low = snap(FEATURE_AREA if k[3] == "area" else FEATURE_WIDTH, v, False)
+        low = snap(FEATURE_AREA if k[3] == "area" else FEATURE_WIDTH, v, False)      # Length 도 폭과 같은 길이 단위
         if low > zones[k[:2]].detect[(k[2], k[3])]:
             out[k] = low
     for d in picked:                    # 내림 오차 방어 — 지키지 못한 Defect 의 묶음은 레시피 값으로

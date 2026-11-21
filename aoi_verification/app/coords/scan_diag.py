@@ -393,7 +393,7 @@ def _small_files(folder: Path):
 
 def _lean_ok(p: Path, names=_LEAN_NAMES) -> bool:
     n = p.name.lower()
-    if n in names:
+    if n in names or (n.endswith(".txt") and "rtp" in n):      # 레시피마다 RTP(RecipeN-RTP.txt 등)도 — 이름은 미확인
         return True
     if p.suffix.lower() != ".ini" or n in _LEAN_SKIP_INI:
         return False

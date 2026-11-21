@@ -111,10 +111,18 @@ _FEATURES = ((R.FEATURE_WIDTH, "Width", "µm", 0.05, 2),
 
 
 # 검출 단계 하한(Zone ini [Surface]) — (극성, 종류) → (ini 이름, 화면 이름, Feature 번호).  단위 · 간격은 _FEATURES 와 같다.
+# Length 는 길이라 폭(Width)과 같은 단위 · 간격을 쓴다.  끈 조건(9999999) · 하한 없음(0) 칸은 띄우지 않는다.
 _DETECT_ROWS = (("dark", "area", "DarkArea", "Dark Area", R.FEATURE_AREA),
                 ("dark", "width", "DarkDiameter", "Dark Diameter", R.FEATURE_WIDTH),
+                ("dark", "length", "DarkLength", "Dark Length", R.FEATURE_WIDTH),
                 ("bright", "area", "BrightArea", "Bright Area", R.FEATURE_AREA),
-                ("bright", "width", "BrightDiameter", "Bright Diameter", R.FEATURE_WIDTH))
+                ("bright", "width", "BrightDiameter", "Bright Diameter", R.FEATURE_WIDTH),
+                ("bright", "length", "BrightLength", "Bright Length", R.FEATURE_WIDTH))
+
+
+def _shown_limit(z, stage: str, kind: str) -> bool:
+    """화면에 슬라이더로 띄울 검출 하한인가 — 끈 조건(inf) · 하한 없음(0) · 없는 키는 바꿀 게 없어 안 띄운다."""
+    return 0 < z.detect.get((stage, kind), 0) < math.inf
 
 
 def detect_label(stage: str, kind: str) -> str:
@@ -2579,14 +2587,14 @@ class ThresholdPreviewDialog(QDialog):
         if z is None or not z.detect:
             return None
         mine = [d for d in self._in_zone() if not d.by_filter and d.stage is not None]
-        rows = [r for r in _DETECT_ROWS if (r[0], r[1]) in z.detect and any(d.stage == r[0] for d in mine)]
+        rows = [r for r in _DETECT_ROWS if _shown_limit(z, r[0], r[1]) and any(d.stage == r[0] for d in mine)]
         if not rows:
             return None
         w = self._w
         cells = []
         for stage, kind, ini, name, feat in rows:
             _f, _n, unit, step, dec = next(x for x in _FEATURES if x[0] == feat)
-            vals = [w.to_um(feat, d.area if kind == "area" else d.width) for d in mine if d.stage == stage]
+            vals = [w.to_um(feat, P._detect_value(d, kind)) for d in mine if d.stage == stage]
             cells.append(self._limit_cell((*self._zone, stage, kind), (stage, kind), feat, z.detect[(stage, kind)],
                                           name, unit, step, dec, vals, vals, False, ("Surface", ini, "detect")))
         stages = [st.capitalize() for st in ("dark", "bright") if any(r[0] == st for r in rows)]
@@ -3050,7 +3058,7 @@ class ThresholdPreviewDialog(QDialog):
         self._add_verdict(right, box, d, why)
         if not d.by_filter:                             # 검출 단계가 잡은 Defect — Feature Filter 가 아니라 검출 하한이 거른다
             z = w.zones.get((d.zone_dir, d.zone))
-            fixed = d.stage is None or z is None or not any((d.stage, k) in z.detect for k in ("area", "width"))
+            fixed = d.stage is None or z is None or not any(_shown_limit(z, d.stage, k) for k in ("area", "width", "length"))
             note = QLabel((_KO.OVERKILL_NOT_BY_FILTER_FIXED if fixed else _KO.OVERKILL_NOT_BY_FILTER)
                           .format(name=self._stage_name(d)), box)
             note.setProperty("role", "muted")
@@ -3105,12 +3113,12 @@ class ThresholdPreviewDialog(QDialog):
         out = []
         for stage, kind, _ini, name, feat in _DETECT_ROWS:
             ok = P.detect_ok(d, z, kind, self._ov) if stage == d.stage else None
-            if ok is None:
+            if ok is None or not _shown_limit(z, stage, kind):
                 continue
             rec = z.detect[(stage, kind)]
             cut = self._ov.get((d.zone_dir, d.zone, stage, kind), rec)
             _f, _n, unit, _s, dec = next(x for x in _FEATURES if x[0] == feat)
-            out.append(Criterion(name, w.to_um(feat, d.area if kind == "area" else d.width), w.to_um(feat, cut),
+            out.append(Criterion(name, w.to_um(feat, P._detect_value(d, kind)), w.to_um(feat, cut),
                                  w.to_um(feat, rec), dec, "≥", ok, unit))
         return out
 
@@ -3714,7 +3722,7 @@ class ThresholdPreviewDialog(QDialog):
                 fno = R.FEATURE_AREA if feat == "area" else R.FEATURE_WIDTH
                 _f, _n, unit, _step, dec = next(x for x in _FEATURES if x[0] == fno)
                 name, rec = w.label((zdir, zid))
-                vals = [w.to_um(fno, d.area if feat == "area" else d.width) for d in w.defects
+                vals = [w.to_um(fno, P._detect_value(d, feat)) for d in w.defects
                         if (d.zone_dir, d.zone, d.stage) == (zdir, zid, cls) and not d.by_filter]
                 changes.append(RP.Change(name + (f" · {rec}" if rec else ""), _KO.THRESH_PREVIEW_DETECT_STAGE,
                                          detect_label(cls, feat), unit, w.to_um(fno, z.detect[(cls, feat)]),
@@ -3762,10 +3770,10 @@ class ThresholdPreviewDialog(QDialog):
     def _below(self, d: P.Defect, why) -> float:
         """걸린 값 ÷ 지금 기준 — 항목(Width · Contrast)이 달라도 '기준에서 얼마나 아래' 로 비교한다."""
         cls, feat = why
-        if isinstance(cls, str):                        # 검출 단계 — (극성, 'area'|'width')
+        if isinstance(cls, str):                        # 검출 단계 — (극성, 'area'|'width'|'length')
             z = self._w.zones.get((d.zone_dir, d.zone))
             cut = self._ov.get((d.zone_dir, d.zone, cls, feat), z.detect.get((cls, feat), 0.0) if z else 0.0)
-            return (d.area if feat == "area" else d.width) / cut if cut > 0 else 0.0
+            return P._detect_value(d, feat) / cut if 0 < cut < math.inf else 0.0
         z = self._w.zones.get((d.zone_dir, d.zone))
         f = next((x for x in z.bundles.get(cls, ()) if x.feature == feat), None) if z else None
         cut = self._ov.get((d.zone_dir, d.zone, cls, feat), f.low if f else 0.0)
@@ -3787,7 +3795,7 @@ class ThresholdPreviewDialog(QDialog):
         if isinstance(why[0], str):
             feat = R.FEATURE_AREA if why[1] == "area" else R.FEATURE_WIDTH
             dec = next(x[4] for x in _FEATURES if x[0] == feat)
-            return f"{detect_label(*why)} {self._w.to_um(feat, d.area if why[1] == 'area' else d.width):.{dec}f}"
+            return f"{detect_label(*why)} {self._w.to_um(feat, P._detect_value(d, why[1])):.{dec}f}"
         feat = why[1]
         dec = next(x[4] for x in _FEATURES if x[0] == feat)
         return f"{next(x[1] for x in _FEATURES if x[0] == feat)[0]} {self._w.to_um(feat, P._value(d, feat)):.{dec}f}"
