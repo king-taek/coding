@@ -222,8 +222,11 @@ class FullscreenViewer(QDialog):
 
     def __init__(self, image_path: Path, parent=None, *,
                  image: Optional[QImage] = None,
-                 overlay: Optional[tuple[int, int, int, int]] = None) -> None:
-        """``image`` 를 주면 그 픽셀을 그대로 보여 준다(mid·원본 로드 생략).
+                 overlay: Optional[tuple[int, int, int, int]] = None,
+                 scan_slot: bool = False) -> None:
+        """``scan_slot`` 이면 이 Defect 의 Scan 사진이 있는지 알리는 표시와 [Scan image 보기] 를 단다 —
+        부모가 찾아 :meth:`set_scan_crop` 으로 알려 준다(없으면 표시만 '없음').
+        ``image`` 를 주면 그 픽셀을 그대로 보여 준다(mid·원본 로드 생략).
         ``overlay`` = 그 이미지 픽셀 좌표의 (left, top, w, h) 사각형 — 사진에 굽지 않고
         그릴 때마다 위에 덧그린다(Scan 원본 위 Crop 범위 표시)."""
         super().__init__(parent)
@@ -295,12 +298,59 @@ class FullscreenViewer(QDialog):
             self._btn_box.clicked.connect(self._toggle_box)
             row.addWidget(self._btn_box)
             QShortcut(QKeySequence("B"), self, activated=self._toggle_box)
+        self._scan_img: Optional[QImage] = None     # 이 Defect 의 Scan Crop — 있으면 [Scan image 보기]
+        self._scan_on = False                       # 지금 Scan Crop 을 보는 중
+        self._late_orig: Optional[QImage] = None    # Scan 을 보는 사이 도착한 Color 원본
+        self._color_state: Optional[tuple] = None   # Scan 으로 바꾸기 전 (pix, orig, overlay)
+        self._scan_tag: Optional[QLabel] = None
+        self._btn_scan: Optional[NeonButton] = None
+        if scan_slot:
+            self._scan_tag = QLabel(i18n.KO.VIEWER_SCAN_CHECKING, self)
+            self._scan_tag.setProperty("role", "viewerHint")
+            row.addWidget(self._scan_tag)
+            self._btn_scan = NeonButton(i18n.KO.VIEWER_SCAN_VIEW, role="ghost")
+            self._btn_scan.setToolTip(i18n.KO.VIEWER_SCAN_TIP)
+            self._btn_scan.setStyleSheet(btn_css)
+            self._btn_scan.clicked.connect(self._toggle_scan)
+            self._btn_scan.setVisible(False)            # Scan 이 있다고 확인된 뒤에만
+            row.addWidget(self._btn_scan)
         row.addWidget(self._hint, 1)
         lay.addLayout(row)
         QShortcut(QKeySequence.StandardKey.Copy, self, activated=self._copy_original)
         QShortcut(QKeySequence("Esc"), self, activated=self.close)
         if image is None:
             self._start_original_load()
+
+    # -- Scan image ------------------------------------------------------
+    def set_scan_crop(self, img: Optional[QImage]) -> None:
+        """부모가 이 Defect 의 Scan Crop 을 찾았다(``None`` = 없음).  표시를 바꾸고, 있으면 [Scan image 보기] 를 켠다."""
+        if self._scan_tag is None:
+            return
+        has = img is not None and not img.isNull()
+        self._scan_img = img if has else None
+        self._scan_tag.setText(i18n.KO.VIEWER_SCAN_YES if has else i18n.KO.VIEWER_SCAN_NONE)
+        if self._btn_scan is not None:
+            self._btn_scan.setVisible(has)
+
+    def _toggle_scan(self) -> None:
+        """Color 사진 ↔ Scan Crop 을 이 자리에서 바꾼다(뷰어를 또 열지 않는다)."""
+        if self._btn_scan is None or self._scan_img is None:
+            return
+        if not self._scan_on:
+            self._color_state = (self._pix, self._orig, self._overlay)
+            self._pix = QPixmap.fromImage(self._scan_img)
+            self._orig, self._overlay = self._scan_img, None
+        elif self._color_state is not None:
+            self._pix, self._orig, self._overlay = self._color_state
+            self._color_state = None
+        self._scan_on = not self._scan_on
+        self._btn_scan.setText(i18n.KO.VIEWER_SCAN_BACK if self._scan_on else i18n.KO.VIEWER_SCAN_VIEW)
+        self._fitted = False                        # 크기가 다른 사진이라 다시 창에 맞춘다
+        self._offset_x = self._offset_y = 0
+        self._redraw()
+        if not self._scan_on and self._late_orig is not None:
+            late, self._late_orig = self._late_orig, None
+            self._on_original_loaded(late)
 
     # -- 복사(원본 화질) -------------------------------------------------
     def _original_image(self) -> QImage:
@@ -415,6 +465,9 @@ class FullscreenViewer(QDialog):
         ★ 배율을 픽셀 비율로 나눠 준다 — 안 그러면 화질이 좋아지는 순간 사진이
         갑자기 몇 배로 커진다.  사용자가 이미 줌/팬 했더라도 화면은 그대로다."""
         if img.isNull():
+            return
+        if self._scan_on:               # Scan Crop 을 보는 중 — 늦게 온 Color 원본은 Color 로 돌아갈 때 적용한다
+            self._late_orig = img
             return
         self._orig = img                # 복사용 — 아래 상한 축소 전의 원본
         # 지나치게 큰 원본은 뷰포트의 몇 배 선까지만 — 휠 줌 응답을 지키기 위해.

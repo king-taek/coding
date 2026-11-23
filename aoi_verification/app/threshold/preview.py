@@ -15,6 +15,8 @@ Defect 를 모른다.  여기서는 파일 안 Defect 만 센다(내리기는 Ri
 
 from __future__ import annotations
 
+import dataclasses
+import math
 import logging
 import struct
 
@@ -23,7 +25,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..coords import surface_flt as _flt
-from .rules import FEATURE_AREA, FEATURE_CONTRAST, FEATURE_WIDTH, read_classes, read_zones, zone_dir_for
+from .rules import (FEATURE_AREA, FEATURE_CONTRAST, FEATURE_WIDTH, detect_polarity, event_mask, read_classes,
+                    read_zones, stage_masks, zone_dir_for)
 
 __all__ = ["Defect", "load_all", "load_defects", "match_photos", "contrast_known", "why_dropped",
            "is_kept", "recipe_misses", "count_by_bin", "recommend"]
@@ -33,7 +36,8 @@ _LOG = logging.getLogger("aoi.threshold")
 # 사이드카 이름 → Defect 칸.  recipe 는 없어도 된다(옛 기록).
 _NEED = {"reclassify": "cls", "orgReclassify": "org", "zone": "zone", "recipe": "recipe",
          "area": "area", "BlobBreadth": "width", "BlobFeretMax": "length", "Contrast": "contrast",
-         "ActualX": "x", "ActualY": "y"}
+         "ActualX": "x", "ActualY": "y", "Type": "rtype"}
+_OPTIONAL = {"recipe", "rtype"}
 
 
 @dataclass(frozen=True)
@@ -50,6 +54,9 @@ class Defect:
     x: float            # µm (ActualX)
     y: float
     wafer: int = 0      # 여러 웨이퍼를 합칠 때 몇 번째 웨이퍼인지 — (wafer, index) 가 Defect 의 키
+    by_filter: bool = True  # Feature Filter 묶음을 거쳐 잡힌 Defect(Event)인가 — 아니면 검출 단계가 잡았다
+    rtype: int | None = None    # 검출 단계가 잡았으면 결과 비트(Surface.flt Type) — 이름은 rules.surface_result_types
+    stage: str | None = None    # 검출 단계가 잡았으면 'dark'/'bright'(결과 이름의 DARK · BRIGHT) — 그 Zone 의 검출 하한이 거른다
 
 
 def _layout(flt: Path):
@@ -72,7 +79,7 @@ def _layout(flt: Path):
         if key and fmt and a.get("Offset", "").isdigit():
             fields[key] = (int(a["Offset"]), fmt)
     size = int(m.group(1))
-    if set(_NEED.values()) - {"recipe"} - set(fields) or any(
+    if set(_NEED.values()) - _OPTIONAL - set(fields) or any(
             off + struct.calcsize("<" + f) > size for off, f in fields.values()):
         return None
     return size, fields
@@ -104,13 +111,22 @@ def load_all(folder: Path) -> tuple[tuple[Defect, ...], tuple[Defect, ...], str]
     arr = np.frombuffer(data, dtype=dt, count=len(data) // size)
     col = {k: arr[k].tolist() for k in names}
     recipe = col.get("recipe") or [None] * len(arr)
+    # 결과 비트(Type)로 Feature Filter 를 거친 Event Defect 만 기준에 걸리게 한다 — 비트 값은 폴더의
+    # EquipmentClassifications.ini 에서 읽는다(:func:`rules.event_mask`).  둘 중 하나라도 없으면 전부 기준 대상.
+    mask = event_mask(folder)
+    rtype = col.get("rtype") if mask else None
+    rtype = rtype or [None] * len(arr)
+    masks = stage_masks(folder) if mask else {}
     kept, goods = [], []
-    for i, (cls, org, zone, rec, area, width, length, contrast, x, y) in enumerate(zip(
+    for i, (cls, org, zone, rec, area, width, length, contrast, x, y, rt) in enumerate(zip(
             col["cls"], col["org"], col["zone"], recipe, col["area"], col["width"], col["length"],
-            col["contrast"], col["x"], col["y"])):
+            col["contrast"], col["x"], col["y"], rtype)):
         first = org or cls
         d = Defect(i, zone_dir_for(rec), int(zone), int(first), int(cls), float(area), float(width),
-                   float(length), float(contrast), float(x), float(y))
+                   float(length), float(contrast), float(x), float(y),
+                   by_filter=rt is None or bool(int(rt) & mask))
+        if not d.by_filter:
+            d = dataclasses.replace(d, stage=detect_polarity(masks, rt), rtype=int(rt))
         # 첫 분류가 Good(EDC Good: reclassify 20 · org 0).  Accept 는 지금 분류만 0 이라 Defect 로 남는다.
         (goods if abs(first) in good else kept).append(d)
     return tuple(kept), tuple(goods), ""
@@ -157,6 +173,49 @@ def _value(d: Defect, feature: int):
     return {FEATURE_AREA: d.area, FEATURE_WIDTH: d.width, FEATURE_CONTRAST: d.contrast}.get(feature)
 
 
+def _detect_value(d: Defect, kind: str) -> float:
+    return d.area if kind == "area" else d.width if kind == "width" else d.length
+
+
+def _detect_low(d: Defect, z, kind: str, overrides: dict | None):
+    """그 칸의 하한(px) — 덮어쓴 값이 있으면 그것.  파일에 키가 없으면 None, 0 은 하한 없음, 끈 조건이면 inf."""
+    key = (d.zone_dir, d.zone, d.stage, kind)
+    if overrides and key in overrides:
+        return overrides[key]
+    return z.detect.get((d.stage, kind))
+
+
+def _detect_why(d: Defect, z, overrides: dict | None):
+    """검출 단계 Defect 가 빠지면 ``(극성, 'area'|'width'|'length')``, 남으면 None.
+
+    장비 규칙(RTP.txt 설명 'Area>RTP AND Diameter > RTP width' · 'Length >RTP Length AND diameter > RTP width'):
+    **Diameter 를 넘고, Area 나 Length 중 하나를 넘으면** 남는다.  끈 조건(9999999)은 그 갈래로 통과 못 하고,
+    하한 없음(0)은 늘 통과다.  수집 79장 검출 단계 Defect 4,937개 전부 이 규칙으로 남았다 — Area 만 보던 옛 규칙은
+    563개만 남겼다(UWB · FVC · T4M 처럼 Area 를 끄고 Length 로 거르는 레시피, 관측 2026-11-21).
+    키 ``(zone_dir, zone, 극성, 종류)`` 는 Feature Filter 키(Classify 가 정수)와 겹치지 않는다."""
+    if z is None or d.stage is None:
+        return None
+    if detect_ok(d, z, "width", overrides) is False:
+        return (d.stage, "width")
+    branch = {k: detect_ok(d, z, k, overrides) for k in ("area", "length")}
+    seen = [k for k, ok in branch.items() if ok is not None]       # 파일에 키가 있는 갈래만(옛 파일엔 Length 가 없다)
+    if seen and not any(branch[k] for k in seen):
+        lows = {k: _detect_low(d, z, k, overrides) for k in seen}
+        return (d.stage, next((k for k in seen if lows[k] != math.inf), seen[0]))
+    return None
+
+
+def detect_ok(d: Defect, z, kind: str, overrides: dict | None = None):
+    """검출 하한 한 칸을 통과하나 — 통과 True · 걸림 False · 파일에 그 키가 없으면(검출 단계 Defect 아님 포함) None.
+    끈 조건(inf)은 False — 그 갈래로는 통과하지 못한다(빠질지는 :func:`_detect_why` 가 갈래를 묶어 정한다)."""
+    if z is None or d.stage is None:
+        return None
+    low = _detect_low(d, z, kind, overrides)
+    if low is None:
+        return None
+    return _detect_value(d, kind) >= low
+
+
 def why_dropped(d: Defect, zones: dict, overrides: dict | None = None):
     """빠지면 ``(Classify, FeatureType)`` — 이 Defect 를 떨어뜨린 기준 하나, 남으면 None.
 
@@ -167,7 +226,15 @@ def why_dropped(d: Defect, zones: dict, overrides: dict | None = None):
     0 은 '안 잼' 이다: Contrast 기준이 있는 Zone 에서도 다른 검출 방식이 잡은 Defect 는 0 이고, 레시피 값으로
     검산하면 그 Defect 만 빠졌다(TB500 PI_Opening 5개 · AOI-27 Scan Area 1개, 관측 2026-11-16)."""
     z = zones.get((d.zone_dir, d.zone))
+    if not d.by_filter:                  # 검출 단계가 잡은 Defect — Feature Filter 가 아니라 검출 하한이 거른다
+        return _detect_why(d, z, overrides)
     if z is None or not z.bundles:
+        return None
+    # Feature Filter 를 거치지 않은 Defect 는 기준을 바꿔도 남는다 — 검출 단계(Zone ini [Surface] DarkArea ·
+    # BrightArea 등)가 잡고 ClassificationConvertTable 로 bin 을 받았다.  가르는 근거 두 가지:
+    #   1. 결과 비트(Type)가 Event 가 아님(:func:`rules.event_mask`) — TB500_RDL3 Multi 16장 Type 8 680개 · 16 3개.
+    #   2. (Type 을 못 읽을 때) 첫 분류가 이 Zone 묶음 어디에도 없음 — Space 의 bin 54(묶음은 29 하나).
+    if d.bin not in z.bundles:
         return None
     overrides = overrides or {}
     first = None
@@ -238,8 +305,16 @@ def recommend(picked, zones: dict, snap=None) -> tuple[dict, list]:
             return math.nextafter(v, -math.inf) if strict else v
     guard: dict = {}                    # (zone_dir, zone, Classify) → 지킬 Defect 들
     owners_of: dict = {}
+    stage_min: dict = {}                # (zone_dir, zone, 극성, 종류) → 고른 검출 단계 Defect 값의 최솟값
     for d in picked:
         z = zones.get((d.zone_dir, d.zone))
+        if not d.by_filter:             # 검출 단계 Defect — 묶음이 아니라 검출 하한(극성별)이 거른다
+            if z is not None and d.stage is not None:
+                for kind, v in (("area", d.area), ("width", d.width), ("length", d.length)):
+                    if 0 < z.detect.get((d.stage, kind), 0) < math.inf:    # 하한 없음 · 끈 조건은 올리지 않는다
+                        k = (d.zone_dir, d.zone, d.stage, kind)
+                        stage_min[k] = min(v, stage_min.get(k, v))
+            continue
         if z is None or not z.bundles:
             continue
         own = d.bin in z.bundles and _passes_bundle(d, z, d.bin)
@@ -259,8 +334,14 @@ def recommend(picked, zones: dict, snap=None) -> tuple[dict, list]:
             low = snap(f.feature, min(vals), f.ftype == 4)
             if low > f.low:
                 out[(zdir, zid, cls, f.feature)] = low
+    for k, v in stage_min.items():      # 검출 하한: 고른 것 중 가장 작은 값까지(레시피보다 내리지 않는다)
+        low = snap(FEATURE_AREA if k[3] == "area" else FEATURE_WIDTH, v, False)      # Length 도 폭과 같은 길이 단위
+        if low > zones[k[:2]].detect[(k[2], k[3])]:
+            out[k] = low
     for d in picked:                    # 내림 오차 방어 — 지키지 못한 Defect 의 묶음은 레시피 값으로
         if not is_kept(d, zones, out):
+            for k in [k for k in out if not d.by_filter and k[:2] == (d.zone_dir, d.zone) and k[2] == d.stage]:
+                del out[k]
             for b in owners_of.get(id(d), ()):
                 for k in [k for k in out if k[:3] == b]:
                     del out[k]
