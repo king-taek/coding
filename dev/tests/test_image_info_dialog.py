@@ -320,3 +320,37 @@ def test_paste_opens_image_and_flashes_notices(qapp, isolated_cache, tmp_path, m
                            i18n.KO.DROP_NO_PATH_IMAGE, i18n.KO.DROP_NOTHING_TO_PASTE]
     finally:
         dlg.deleteLater()
+
+
+def test_dividers_only_between_clusters(qapp, isolated_cache, tmp_path):
+    """구분선은 묶음이 바뀌는 곳에만 — 묶음 안 행은 ``rule="none"``(사용자 지시 2026-11-23).
+
+    묶음이 없는 행(``cluster=""``)은 옛 모양 그대로 행마다 선을 긋는다."""
+    from PyQt6.QtWidgets import QFrame
+
+    from aoi_verification.app.coords.single_info import InfoGroup, InfoRow
+    rows = (InfoRow("a", "1", cluster="x"), InfoRow("b", "2", cluster="x"),
+            InfoRow("c", "3", cluster="y"), InfoRow("d", "4", cluster="y"),
+            InfoRow("e", "5"), InfoRow("f", "6"))
+    dlg = ImageInfoDialog(image_path=str(_kla_image(tmp_path)))
+    dlg._groups = [InfoGroup("g", rows)]
+    dlg._render()
+    frames = [f for f in dlg._scroll.widget().findChildren(QFrame)
+              if f.property("role") == "row"]
+    assert [f.property("rule") == "none" for f in frames] == \
+        [True, False, True, False, False, False]
+    dlg.deleteLater()
+
+
+def test_qss_hides_divider_inside_cluster():
+    """``rule="none"`` 행은 아래 눈금을 투명한 행 테두리 색으로 — 두께는 같아 높이가 안 바뀐다."""
+    from pathlib import Path
+
+    from aoi_verification.app.ui import theme
+    src = Path(theme.__file__).with_name("style.qss").read_text(encoding="utf-8")
+    qss = theme.render_qss(src)
+    head = 'QFrame[role="row"][rule="none"]'
+    assert head in qss
+    body = qss.split(head, 1)[1].split("}", 1)[0]
+    assert "border-bottom: 1px solid" in body
+    assert theme.TOKENS["row_border"] in body
