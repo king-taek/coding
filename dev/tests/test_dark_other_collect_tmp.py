@@ -124,8 +124,8 @@ def test_nothing_found_leaves_no_folder(tmp_path):
 
 def test_list_and_limits():
     tool = _tool()
-    assert tool.WAFERS == [r"P:\AOI-21\Scanresult\TB500_RDL2 - Multi\Setup1\CPG-RDL2\18216H95EWB1"]
-    assert tool._split(tool.WAFERS[0]) == ("AOI-21", ["TB500_RDL2 - Multi", "Setup1", "CPG-RDL2", "18216H95EWB1"])
+    assert tool.WAFERS == [r"X:\AOI-3\Scanresult\2D@R5-AS-T254-A01_0856927AY-0B BS CUP\6324\CMG-RE MIs AOI-16"]
+    assert tool._split(tool.WAFERS[0]) == ("AOI-3", ["2D@R5-AS-T254-A01_0856927AY-0B BS CUP", "6324", "CMG-RE MIs AOI-16"])
     assert tool.PART_MB == 28 and tool.FILE_MB == 30
 
 

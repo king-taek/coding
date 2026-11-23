@@ -522,7 +522,7 @@ SETUP_SECTION_MODE = "2  방식"
 DKOT_COLLECT_BUTTON = "B R Other 수집"
 DKOT_COLLECT_TITLE = "B R Other ↔ Dark 자료 수집"
 DKOT_COLLECT_ASK = (
-    "AOI-21 TB500_RDL2 - Multi 18216H95EWB1 웨이퍼 폴더에서 결과 파일(flt · ini · Recipe2-*)을 모읍니다. "
+    "AOI-3 T254 BS CUP · CMG-RE MIs AOI-16 LOT 폴더에서 결과 파일(flt · ini · Recipe2-* · Defects.csv)을 모읍니다. "
     "읽기만 하고, 사진은 이름만 적습니다. 중지하면 그때까지 모은 것을 저장합니다."
 )
 DKOT_COLLECT_START = "수집 시작"
@@ -535,7 +535,7 @@ DKOT_COLLECT_NO_TOOL = "수집 도구(dev/dark_other_collect.py)가 없습니다
 DKOT_COLLECT_FAIL_FMT = "수집하다 멈췄습니다: {error}"
 DKOT_COLLECT_STOPPING = "지금까지 모은 것을 저장하는 중 (한 번 더 누르면 화면을 바로 풉니다)"
 DKOT_COLLECT_STOPPED = "화면을 먼저 풀었습니다. 저장이 끝나면 바탕화면의 DarkOther수집 폴더에 zip 이 생깁니다."
-DKOT_COLLECT_NOTHING = "웨이퍼 폴더를 찾지 못해 결과 파일을 만들지 않았습니다. P: 드라이브(AOI-21)가 열리는지 확인해 주세요."
+DKOT_COLLECT_NOTHING = "웨이퍼 폴더를 찾지 못해 결과 파일을 만들지 않았습니다. X: 드라이브(AOI-3)가 열리는지 확인해 주세요."
 DKOT_COLLECT_WINDING_DOWN = "방금 중지한 수집이 아직 정리 중입니다. 잠시 뒤 다시 눌러 주세요."
 # ── [DarkOther수집-임시] 끝 ────────────────────────────────────────────────
 

@@ -27,9 +27,11 @@ import zlib
 from datetime import datetime
 from pathlib import Path, PureWindowsPath
 
-# 현택님이 준 웨이퍼(2026-11-23) — 레시피 2(x5) Scan Area 의 'B R Other' 가 Dark 파라미터로 바뀐다.
+# 현택님이 준 폴더(2026-11-23).  AOI-21 18216H95EWB1 은 받았다(15:37) — 지금은 두 번째 것만 모은다.
+# AOI-3 CMG-RE: 레시피 2(BS_2)에서 Dark · Bright 가 같은 검출 단계로 보인다.  LOT 폴더라 안의 웨이퍼를 전부 담는다
+# (깊이 :data:`WAFER_DEPTH` = LOT/웨이퍼/RecipeN-Zones/파일).  현택님이 Export 를 눌러 Defects.csv 가 있다.
 WAFERS = [
-    r"P:\AOI-21\Scanresult\TB500_RDL2 - Multi\Setup1\CPG-RDL2\18216H95EWB1",
+    r"X:\AOI-3\Scanresult\2D@R5-AS-T254-A01_0856927AY-0B BS CUP\6324\CMG-RE MIs AOI-16",
 ]
 UNC_SHARES = [r"\\10.142.80.91\nas3-1"]
 MINUTES = 30        # 전체 시간 상한
