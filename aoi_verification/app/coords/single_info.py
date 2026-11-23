@@ -31,7 +31,7 @@ from pathlib import Path
 from .. import i18n
 from . import abs_coord, geometry, kla_info
 from . import resolve as _resolve_coord
-from .models import NUMBER_WARN_KLA_GUESS, NUMBER_WARN_NO_TABLE
+from .models import KIND_HEIGHT, NUMBER_WARN_KLA_GUESS, NUMBER_WARN_NO_TABLE
 
 __all__ = ["Measure", "InfoRow", "InfoGroup", "measures", "geometry_lines",
            "coord_lines", "defect_lines", "describe", "has_measurements"]
@@ -84,10 +84,7 @@ def geometry_measures(image_path: Path) -> tuple[str, list[Measure]]:
         recipe_disp = (i18n.KO.DEFECT_RECIPE_NONE_VALUE if g.recipe is None
                        else g.recipe_name or str(g.recipe))
         zone_disp = g.zone_name or str(g.zone)
-        # contrast 는 일부 자재(예: PI)만 측정 — 0 은 '측정 안 함'이라 0.00 대신 '—'.
-        contrast_val = (i18n.KO.DEFECT_CONTRAST_NONE_VALUE if g.contrast == 0
-                        else i18n.KO.DEFECT_CONTRAST_VALUE_FMT.format(v=g.contrast))
-        return "ok", [
+        head = [
             Measure(
                 label=i18n.KO.DEFECT_RECIPE_ZONE_LABEL,
                 value=i18n.KO.DEFECT_RECIPE_ZONE_VALUE_FMT.format(
@@ -95,6 +92,24 @@ def geometry_measures(image_path: Path) -> tuple[str, list[Measure]]:
                 line=i18n.KO.DEFECT_RECIPE_ZONE_FMT.format(
                     recipe=recipe_disp, zone=zone_disp),
             ),
+            # 장비 Export 의 Type 과 같은 모양 — '<검사>-<Zone>'(예: Height-amk_mask_6_170).
+            _m(i18n.KO.DEFECT_TYPE_LABEL,
+               i18n.KO.DEFECT_TYPE_VALUE_FMT.format(kind=g.kind, zone=zone_disp)),
+        ]
+        # 이름 두 가지(사용자 결정 2026-11-23 '둘 다') — 사전에 없으면 그 줄만 뺀다.
+        if g.type_name:
+            head.append(_m(i18n.KO.DEFECT_TYPE_NAME_LABEL, g.type_name))
+        if g.class_name:
+            head.append(_m(i18n.KO.DEFECT_CLASS_LABEL, g.class_name))
+        if g.kind == KIND_HEIGHT:
+            return "ok", head + [
+                _m(i18n.KO.DEFECT_HEIGHT_LABEL,
+                   i18n.KO.DEFECT_HEIGHT_VALUE_FMT.format(v=g.height_um)),
+            ]
+        # contrast 는 일부 자재(예: PI)만 측정 — 0 은 '측정 안 함'이라 0.00 대신 '—'.
+        contrast_val = (i18n.KO.DEFECT_CONTRAST_NONE_VALUE if g.contrast == 0
+                        else i18n.KO.DEFECT_CONTRAST_VALUE_FMT.format(v=g.contrast))
+        return "ok", head + [
             _m(i18n.KO.DEFECT_AREA_LABEL,
                i18n.KO.DEFECT_AREA_VALUE_FMT.format(v=g.area_um2)),
             _m(i18n.KO.DEFECT_WIDTH_LABEL,

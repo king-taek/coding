@@ -221,10 +221,15 @@ def test_152_files_unchanged_by_layout_choice(tmp_path):
 
 
 def test_152_sidecar_gives_same_values_as_built_in_layout(tmp_path):
-    """실물 152 사이드카로 읽어도 코드의 152 배치와 비트까지 같다 — 152 파일은 이번 수정의 영향이 없다."""
+    """실물 152 사이드카로 읽어도 코드의 152 배치와 비트까지 같다 — 152 파일은 이번 수정의 영향이 없다.
+
+    사이드카에만 있는 이름 표시용 칸(Type · reclassify, 2026-11-23)은 코드 배치에 없으니 비교에서 뺀다."""
     recs = _load(tmp_path, _FLT_152_AMBIG, _SIDECAR_152)
     old = surface_flt._decode(_FLT_152_AMBIG, 152, surface_flt._FIELDS)
-    assert [tuple(map(repr, r)) for r in recs] == [tuple(map(repr, r)) for r in old]
+    measured = [f for f in surface_flt.RawRecord._fields if f not in ("type", "reclassify")]
+    assert [tuple(repr(getattr(r, f)) for f in measured) for r in recs] == \
+        [tuple(repr(getattr(r, f)) for f in measured) for r in old]
+    assert all(r.type is not None and r.reclassify is not None for r in recs)
 
 
 def test_152_with_impossible_values_gives_empty(tmp_path):

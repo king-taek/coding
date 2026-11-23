@@ -313,6 +313,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._status_bar.addPermanentWidget(self._scan_diag_btn)
         self._scan_diag_btn.setVisible(_prefs.load().dev_mode)
         self._scan_diag_picker = None
+        from . import multi_recipe_collect_tmp; multi_recipe_collect_tmp.attach(self)   # [멀티레시피수집-임시] 이 줄 삭제
         QShortcut(QKeySequence("Ctrl+Shift+D"), self,
                   activated=self._toggle_dev_mode)
         self._mem_timer = QTimer(self)
@@ -557,6 +558,7 @@ class MainWindow(MultiValFlow, QMainWindow):
         _prefs.patch(dev_mode=on)
         self._dev_btn.setVisible(on)
         self._scan_diag_btn.setVisible(on)
+        self._mrcp_collect_btn.setVisible(on)                             # [멀티레시피수집-임시] 이 줄 삭제
         self._sync_statusbar(self._stack.currentWidget())
         self._status_bar.showMessage(
             i18n.KO.DEV_MODE_ON if on else i18n.KO.DEV_MODE_OFF, 4000)

@@ -133,20 +133,24 @@ def _camtek_folder(tmp_path, monkeypatch, *, contrast=108.0):
 
 
 def test_geometry_lines_order_and_names(tmp_path, monkeypatch):
-    """표기 순서: recipe/zone → area → width → length → contrast, 이름만 표기."""
+    """표기 순서: recipe/zone → type → area → width → length → contrast, 이름만 표기.
+
+    type 은 장비 Export 의 Type 모양('<검사>-<Zone>', 2026-11-23).  이름 사전이 없는 폴더라 defect ·
+    classify 줄은 없다."""
     img = _camtek_folder(tmp_path, monkeypatch)
     lines = single_info.geometry_lines(img)
     assert lines[0] == "recipe PI / zone PI_Opening"
-    assert lines[1].startswith("area ")
-    assert lines[2].startswith("width ")
-    assert lines[3].startswith("length ")
-    assert lines[4] == "contrast 108.00"
+    assert lines[1] == "type Surface-PI_Opening"
+    assert lines[2].startswith("area ")
+    assert lines[3].startswith("width ")
+    assert lines[4].startswith("length ")
+    assert lines[5] == "contrast 108.00"
 
 
 def test_contrast_zero_is_dash_not_number(tmp_path, monkeypatch):
     """contrast 0 = '측정 안 함' — 0.00 으로 오해되지 않게 '—' 로."""
     img = _camtek_folder(tmp_path, monkeypatch, contrast=0.0)
-    assert single_info.geometry_lines(img)[4] == (
+    assert single_info.geometry_lines(img)[5] == (
         f"{i18n.KO.DEFECT_CONTRAST_LABEL} {i18n.KO.DEFECT_CONTRAST_NONE_VALUE}")
 
 
