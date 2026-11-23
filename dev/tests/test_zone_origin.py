@@ -236,3 +236,13 @@ def test_params_fold_and_four_limits(dlg):
     assert dlg._passed == [] and dlg.chips_host.isVisibleTo(dlg)
     dlg.toggle_params()
     assert dlg.min_edits == {} and dlg._flags.min_contrast == 1e9          # 접어도 값은 그대로(칩으로 보인다)
+
+
+def test_caught_not_shown_anywhere(dlg):
+    """'잡힌 곳'(기준 묶음 · 검출 단계 …)은 값 칸 · 표 · 사진 설명 어디에도 안 나온다(현택님 요청 2026-11-24)."""
+    from PyQt6.QtWidgets import QLabel
+    from aoi_verification.app.ui.widgets import zone_origin_dialog as Z
+    assert "caught" not in [k for k, _n, _d in Z.TABLE_COLS]
+    kv = [lab.text() for lab in dlg.kv_host.findChildren(QLabel)]
+    assert "잡힌 곳" not in kv and not any(t.startswith(("검출 단계", "기준 묶음")) for t in kv)
+    assert all("검출 단계" not in t.toolTip() and "기준 묶음" not in t.toolTip() for t in dlg._tiles.values())

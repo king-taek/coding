@@ -69,7 +69,7 @@ PARAMS = (("min_area", _KO.ZO_MIN_AREA), ("min_width", _KO.ZO_MIN_WIDTH), ("min_
           ("min_contrast", _KO.ZO_MIN_CONTRAST))
 TABLE_COLS = (("wafer", _KO.ZO_COL_WAFER, None), ("recipe", _KO.ZO_COL_RECIPE, None), ("zone", _KO.ZO_COL_ZONE, None),
               ("first_name", _KO.ZO_COL_CLASS, None), ("cur_name", _KO.ZO_COL_CUR, None),
-              ("type_name", _KO.ZO_COL_TYPE, None), ("caught", _KO.ZO_COL_CAUGHT, None),
+              ("type_name", _KO.ZO_COL_TYPE, None),
               ("area", _KO.ZO_COL_AREA, 1), ("width", _KO.ZO_COL_WIDTH, 2), ("length", _KO.ZO_COL_LENGTH, 2),
               ("contrast", _KO.ZO_COL_CONTRAST, 1), ("height", _KO.ZO_COL_HEIGHT, 1), ("photo", _KO.ZO_COL_PHOTO, None))
 
@@ -867,7 +867,7 @@ class ZoneOriginDialog(QDialog):
                 self._tile_rows.append([])
                 for it in rows[start:start + cols]:
                     k = item_key(it)
-                    tile = _Tile(it.photo, TILE_PX, row, tip=f"{it.first_name}\n{it.type_name} · {it.caught}\n"
+                    tile = _Tile(it.photo, TILE_PX, row, tip=f"{it.first_name}\n{it.type_name}\n"
                                                              f"{self.wafer_label(it.wafer)}")
                     if it.photo is None:
                         tile.pic.setText(_KO.ZO_NO_PHOTO)
@@ -949,7 +949,7 @@ class ZoneOriginDialog(QDialog):
         rows = [(_KO.ZO_ROW_WAFER, self.wafer_label(it.wafer)), (_KO.ZO_ROW_RECIPE, it.recipe),
                 (_KO.ZO_ROW_ZONE, it.zone), None, (_KO.ZO_ROW_CLASS, _class_name(it.first_name)),
                 (_KO.ZO_ROW_CUR, _class_name(it.cur_name)),
-                (_KO.ZO_ROW_TYPE, it.type_name), (_KO.ZO_ROW_CAUGHT, it.caught), None]
+                (_KO.ZO_ROW_TYPE, it.type_name), None]
         if it.kind == B.KIND_HEIGHT:
             rows.append(("Height", f"{fmt_num(it.height, 2)} µm"))
         else:
