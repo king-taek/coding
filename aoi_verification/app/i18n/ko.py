@@ -1090,6 +1090,7 @@ SCAN_IMAGE_LOADING = "Scan 이미지 불러오는 중"
 SCAN_IMAGE_LOADING_DOTS = ("●  ○  ○", "○  ●  ○", "○  ○  ●", "○  ●  ○")
 SCAN_IMAGE_UNREADABLE = "Scan 이미지를 읽을 수 없음"
 SCAN_IMAGE_OPEN_TIP = "누르면 전체 Scan 이미지에서 이 범위를 보여줍니다"
+IMAGE_INFO_OPEN_TIP = "누르면 크게 보여줍니다"
 # 엑셀 — Scan 열 머리(2행)와, Scan 열이 생긴 시트에서 그 행만 Scan 이 없을 때의 칸 문구.
 SCAN_EXCEL_HEADER_FMT = "{machine} Scan"
 SCAN_EXCEL_HEADER = "Scan"

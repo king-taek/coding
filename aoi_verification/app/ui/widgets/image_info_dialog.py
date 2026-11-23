@@ -313,8 +313,9 @@ class ImageInfoDialog(QDialog):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(8)
 
-        self.preview = QLabel(host)
+        self.preview = _ClickLabel(host)
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview.clicked.connect(self._open_full_color)
         self.preview.setFixedSize(_PREVIEW_MIN_W, _PREVIEW_MIN_W)
         # 프레임이 사진을 **딱 감싸도록** 위쪽 정렬로 두고, 크기는 픽스맵에 맞춘다.
         lay.addWidget(self.preview, alignment=Qt.AlignmentFlag.AlignTop
@@ -596,6 +597,13 @@ class ImageInfoDialog(QDialog):
         self.scan_view.setToolTip(i18n.KO.SCAN_IMAGE_OPEN_TIP)
         self.scan_view.setAccessibleName(i18n.KO.SCAN_IMAGE_TITLE)
 
+    def _open_full_color(self) -> None:
+        """사진(Color) 미리보기를 누르면 기존 전체화면 뷰어로 크게 본다(Scan 칸과 같은 뷰어)."""
+        if self._path is None:
+            return
+        from .zoom_window import FullscreenViewer
+        sheets.run(FullscreenViewer(self._path, self), full_bleed=True)
+
     def _open_full_scan(self) -> None:
         """전체 Scan 원본에 잘라낸 범위를 덧그려 기존 전체화면 뷰어로 연다."""
         if self._scan_full is None or self._scan_box is None:
@@ -621,7 +629,11 @@ class ImageInfoDialog(QDialog):
                       min(_PREVIEW_MAX_W, avail * 0.36)))
         if self._path is None:
             self.preview.setFixedSize(box, box)
+            self.preview.setCursor(Qt.CursorShape.ArrowCursor)
+            self.preview.setToolTip("")
             return
+        self.preview.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.preview.setToolTip(i18n.KO.IMAGE_INFO_OPEN_TIP)
         pix = _io.load_thumb_qpixmap(self._path, box, kind="mid")
         # Scan 이 있으면 세로를 둘이 나눠 쓴다 — Color 가 높이를 다 먹으면 Scan 이 120px 대로
         # 쪼그라든다(흑백이 작다는 지적).  Color 를 줄여 Scan 이 Color 와 비슷한 크기가 되게 한다.

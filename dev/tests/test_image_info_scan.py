@@ -173,6 +173,33 @@ def test_click_opens_full_scan_with_overlay(qapp, isolated_cache, tmp_path, monk
     _idle()
 
 
+def test_click_on_color_preview_opens_full_viewer(qapp, isolated_cache, tmp_path, monkeypatch):
+    """Color 미리보기도 Scan 칸처럼 누르면 크게 보기(전체화면 뷰어)가 열린다."""
+    from PyQt6.QtCore import Qt
+    color = _wafer(tmp_path, manifest=False)
+    dlg = iid.ImageInfoDialog(image_path=str(color))
+    dlg.show()
+    QApplication.processEvents()
+    assert dlg.preview.cursor().shape() == Qt.CursorShape.PointingHandCursor
+    opened = []
+    monkeypatch.setattr(iid.sheets, "run", lambda w, **k: opened.append(w))
+    dlg.preview.clicked.emit()
+    (viewer,) = opened
+    assert isinstance(viewer, FullscreenViewer) and viewer._path == color
+    assert viewer._overlay is None
+    viewer.close()
+    dlg.close()
+    _idle()
+
+
+def test_click_on_empty_color_preview_does_nothing(qapp, isolated_cache, monkeypatch):
+    dlg = iid.ImageInfoDialog()
+    opened = []
+    monkeypatch.setattr(iid.sheets, "run", lambda w, **k: opened.append(w))
+    dlg.preview.clicked.emit()
+    assert opened == []
+
+
 def test_pil_to_qimage_keeps_pixels(qapp):
     im = Image.new("L", (3, 2))
     im.putdata([0, 50, 100, 150, 200, 250])
