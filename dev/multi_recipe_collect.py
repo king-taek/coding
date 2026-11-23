@@ -23,6 +23,7 @@ import os
 import re
 import time
 import zipfile
+import zlib
 from datetime import datetime
 from pathlib import Path, PureWindowsPath
 
@@ -46,6 +47,7 @@ FILE_MB = 30        # 이보다 큰 파일은 이름만 남긴다(사용자 지�
 PART_MB = 28        # 30 MB 조각은 올라가지 않았다(사용자 2026-11-15)
 WAFER_DEPTH = 3     # 웨이퍼 폴더 안 하위 폴더 깊이
 MB = 2 ** 20
+_ENTRY_OVERHEAD = 76 + 1024     # zip 머리 · 목록 칸(이름 길이 제외) — 조각 크기를 잴 때와 같게 넉넉히
 IMG_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".gif"}
 SKIP_EXT = IMG_EXT | {".avi", ".mp4", ".wmv", ".zip", ".7z", ".rar", ".gz", ".cab"}
 _SCANRESULT = re.compile(r"^scanresults?$", re.I)
@@ -127,6 +129,8 @@ class Collector:
         """``folder`` 의 파일을 담는다.  ``depth`` > 0 이면 하위 폴더도 그만큼 내려간다."""
         dirs, files = _entries(folder)
         for name, path, size, mtime in files:
+            if expired():
+                return
             ext = Path(name).suffix.lower()
             if ext in IMG_EXT:
                 self.photos.append(f"{arc}/{name}")
@@ -145,8 +149,14 @@ class Collector:
             if h in self.hashes:
                 self.dups.append(f"{arc}/{name}\t= {self.hashes[h]}")
                 continue
+            info = zipfile.ZipInfo(f"{arc}/{name}", time.localtime(mtime)[:6])
+            info.compress_type = zipfile.ZIP_DEFLATED
+            packed = len(zlib.compress(data, 6))
+            if packed + _ENTRY_OVERHEAD + 2 * len(info.filename.encode()) > PART_MB * MB:
+                self.listing[-1] = f"{arc}/{name}\t{size}\t뺌(압축해도 {PART_MB} MB 초과)\t{stamp}"
+                continue
             self.hashes[h] = f"{arc}/{name}"
-            self.zf.writestr(f"{arc}/{name}", data)
+            self.zf.writestr(info, data)
             self.files += 1
         if depth > 0:
             for name, path, _, _ in dirs:
@@ -194,7 +204,7 @@ def split_zip(staging: Path, out_dir: Path, stem: str):
         staging.replace(final)
         return [final]
     with zipfile.ZipFile(staging) as src:
-        sizes = [(i.filename, i.compress_size + 76 + 2 * len(i.filename.encode())) for i in src.infolist()]
+        sizes = [(i.filename, i.compress_size + _ENTRY_OVERHEAD + 2 * len(i.filename.encode())) for i in src.infolist()]
         made = []
         for k, names in enumerate(plan_parts(sizes), 1):
             p = out_dir / f"{stem}_{k}.zip"

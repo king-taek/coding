@@ -184,3 +184,35 @@ def test_button_runs_in_background_and_reports(styled_qapp, monkeypatch, tmp_pat
     calls = win._loading.calls
     assert calls[0] == ("show", True) and calls[1] == ("progress", 0, 0)   # busy 로 시작
     assert calls[-1] == ("hide",)
+
+
+def test_file_that_cannot_fit_one_part_is_listed_not_zipped(tmp_path, monkeypatch):
+    """압축해도 한 조각(28 MB)을 넘는 파일은 올릴 수 없다 — 이름 · 크기만 적는다."""
+    import os as _os
+    tool = _tool()
+    sr, w = _fake_nas(tmp_path)
+    (w / "Big.flt").write_bytes(_os.urandom(4096))          # 압축이 안 되는 내용
+    monkeypatch.setattr(tool, "PART_MB", 3000 / MB)
+    out = tmp_path / "out"
+    out.mkdir()
+    folder, _, _ = tool.run(out, wafers=[r"V:\AOI-16\Scanresult\2D@R5-T254\6324\CMG\GX1"],
+                            roots={"AOI-16": sr})
+    names, listing = set(), ""
+    for z in folder.glob("*.zip"):
+        with zipfile.ZipFile(z) as zf:
+            names |= set(zf.namelist())
+            if "파일목록.txt" in zf.namelist():
+                listing = zf.read("파일목록.txt").decode()
+    assert not any(n.endswith("Big.flt") for n in names)
+    assert "Big.flt\t4096\t뺌(압축해도" in listing
+    assert any(n.endswith("Defects.csv") for n in names)
+
+
+def test_stop_is_checked_between_files(tmp_path):
+    tool = _tool()
+    sr, w = _fake_nas(tmp_path)
+    col = tool.Collector(tmp_path / "s.zip")
+    calls = iter([False, False, True])            # 사진(이름만) · Defects.csv 다음에 중지
+    col.take(w, "a", 0, expired=lambda: next(calls, True))
+    col.close("")
+    assert col.files == 1                                      # 첫 파일만 담고 멈춤
