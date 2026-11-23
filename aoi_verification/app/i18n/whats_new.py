@@ -18,6 +18,16 @@
 
 ENTRIES = [
     {
+        "id": "2026-11-24-zone-origin-simple",
+        "date": "2026-11-24",
+        "headline": "어느 Zone에서 왔니? 화면을\n간단히 했습니다",
+        "summary": "왼쪽 바에서 ‘잡힌 곳’ · ‘그 밖에’ 를 없애고 ‘재 분류’ 로도 고릅니다. 칸 이름은 Bin · Recipe 입니다.\n"
+                   "사진 위 분류 표시는 지우고, 값 칸에 ‘첫 분류 · 재 분류’ 두 줄로 보입니다.",
+        "others": [
+            ("어느 Zone에서 왔니?", "Area · Width · Length · Contrast 하한을 [파라미터 열기] 안에 접어 두었습니다"),
+        ],
+    },
+    {
         "id": "2026-11-23-height-info",
         "date": "2026-11-23",
         "headline": "3D(Height) Defect 사진에도\nRecipe · Zone · Height 가 나옵니다",

@@ -90,6 +90,9 @@ def test_flags_hide_good_and_filter():
     assert B.Flags(changed=True).ok(changed) and not B.Flags(changed=True).ok(small)
     assert not B.Flags(photo=True).ok(small)
     assert not B.Flags(min_length=1).ok(_item(length=None))
+    assert not B.Flags(min_width=3).ok(_item()) and B.Flags(min_width=2).ok(_item())       # width 2.0
+    assert not B.Flags(min_contrast=1).ok(_item(contrast=None))
+    assert B.Flags(min_contrast=5).ok(_item(contrast=5.0)) and not B.Flags(min_contrast=6).ok(_item(contrast=5.0))
 
 
 def test_sort_items_none_last_both_ways():
@@ -119,7 +122,7 @@ def test_dialog_starts_with_all_and_first_open(dlg):
 
 
 def test_dialog_toggle_facet_narrows_and_chip(dlg):
-    dlg.toggle("caught", "Height")
+    dlg.toggle("recipe", "BS_3D")
     assert len(dlg._passed) == 11 and all(i.kind == B.KIND_HEIGHT for i in dlg._passed)
     assert dlg.current().kind == B.KIND_HEIGHT           # 값 칸은 늘 보이는 Defect 하나
     assert dlg.chips_host.isVisibleTo(dlg)
@@ -189,3 +192,47 @@ def test_dialog_cap_and_conder_alert(styled_qapp, tmp_path):
     finally:
         d.close()
         d.deleteLater()
+
+
+def test_dialog_has_no_removed_filters(dlg):
+    """현택님 요청(2026-11-24): '잡힌 곳' · '그 밖에' 칸과 사진 위 분류 표시는 없앴다."""
+    from PyQt6.QtWidgets import QLabel
+    assert "caught" not in dict(B.FACETS)
+    assert not any(k == "caught" for k, _v in dlg.facet_rows)
+    texts = [lab.text() for lab in dlg.findChildren(QLabel)]
+    assert not any(t.startswith("→ ") for t in texts)
+    heads = [lab.text() for lab in dlg.side_scroll.widget().findChildren(QLabel)]
+    assert not any(t.startswith(("그 밖에", "잡힌 곳")) for t in heads)
+    assert "Bin" in heads and "Recipe" in heads           # '분류 이름 · 첫 분류' · '레시피' 를 바꾼 이름
+    assert not any(t in ("검토로 분류가 바뀐 것만", "사진 있는 것만", "EDC Good 도 보기") for t in texts)
+
+
+def test_detail_shows_first_and_re_class_lines(dlg):
+    """값 칸 분류는 '첫 분류: …' · '재 분류: …' 두 줄 — '검토로 바뀜' · '같음' 문구 없이 이름만(현택님 예시)."""
+    from PyQt6.QtWidgets import QLabel
+    it = dlg.current()
+    texts = [lab.text() for lab in dlg.kv_host.findChildren(QLabel)]
+    i, j = texts.index("첫 분류"), texts.index("재 분류")
+    assert texts[i + 1] == it.first_name.split(" · ", 1)[-1] and " · " not in texts[i + 1]
+    assert texts[j + 1] == it.cur_name.split(" · ", 1)[-1]
+    assert not any(t in ("검토로 바뀜", "같음", "지금 분류", "분류 이름") or t.startswith("검토로 바뀜") for t in texts)
+
+
+def test_left_bar_has_re_class_facet(dlg):
+    """왼쪽 바에서 재 분류(검토 뒤 분류)도 고른다 — Bin 바로 아래."""
+    assert [k for k, _t in B.FACETS][:2] == ["first_name", "cur_name"]
+    v = dlg._order["cur_name"][0]
+    dlg.toggle("cur_name", v)
+    assert dlg._passed and all(i.cur_name == v for i in dlg._passed)
+
+
+def test_params_fold_and_four_limits(dlg):
+    """Area · Width · Length · Contrast 하한은 [파라미터 열기] 안에 접혀 있다가 편다 — 입력칸은 낮게(24px)."""
+    assert dlg.min_edits == {} and dlg.param_btn.text().endswith("파라미터 열기")
+    dlg.toggle_params()
+    assert list(dlg.min_edits) == ["min_area", "min_width", "min_length", "min_contrast"]
+    assert all(ed.height() == 24 for ed in dlg.min_edits.values())
+    dlg.set_flag("min_contrast", 1e9)
+    assert dlg._passed == [] and dlg.chips_host.isVisibleTo(dlg)
+    dlg.toggle_params()
+    assert dlg.min_edits == {} and dlg._flags.min_contrast == 1e9          # 접어도 값은 그대로(칩으로 보인다)

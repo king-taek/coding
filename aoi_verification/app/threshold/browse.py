@@ -47,7 +47,7 @@ KIND_SURFACE, KIND_HEIGHT = "surface", "height"
 SURFACE_PHOTO_TYPE = 0      # 사진 정보 파일 Type — EquipmentClassifications [SURFACE] 의 -1 값(파일, class_names 와 같은 규칙)
 
 # 골라 보는 칸 — (Item 속성, 화면 이름).  순서 = 화면 왼쪽 위→아래.
-FACETS = (("first_name", _KO.ZO_FACET_CLASS), ("type_name", _KO.ZO_FACET_TYPE), ("caught", _KO.ZO_FACET_CAUGHT),
+FACETS = (("first_name", _KO.ZO_FACET_CLASS), ("cur_name", _KO.ZO_FACET_CUR), ("type_name", _KO.ZO_FACET_TYPE),
           ("recipe", _KO.ZO_FACET_RECIPE), ("zone", _KO.ZO_FACET_ZONE), ("wafer", _KO.ZO_FACET_WAFER))
 
 # 정렬 — (키, 화면 이름).  값이 없는 Defect 는 늘 맨 뒤.
@@ -219,7 +219,9 @@ class Flags:
     photo: bool = False         # 사진 있는 것만
     good: bool = False          # EDC Good 도 보기
     min_area: float = 0.0       # µm²
+    min_width: float = 0.0      # µm
     min_length: float = 0.0     # µm
+    min_contrast: float = 0.0
 
     def ok(self, it: Item) -> bool:
         if it.good and not self.good:
@@ -228,10 +230,11 @@ class Flags:
             return False
         if self.photo and it.photo is None:
             return False
-        if self.min_area > 0 and (it.area is None or it.area < self.min_area):
-            return False
-        if self.min_length > 0 and (it.length is None or it.length < self.min_length):
-            return False
+        for k in ("area", "width", "length", "contrast"):
+            lo = getattr(self, "min_" + k)
+            v = getattr(it, k)
+            if lo > 0 and (v is None or v < lo):
+                return False
         return True
 
 

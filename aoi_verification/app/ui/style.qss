@@ -1764,6 +1764,25 @@ QLineEdit[role="axisField"]:focus {
     border: $focus_w solid $focus;
     padding: 0px 7px;
 }
+/* 어느 Zone에서 왔니? 왼쪽 바 하한 칸 — 고르기 줄(30px)에 맞춘 낮은 입력칸. */
+QLineEdit[role="zoParam"] {
+    background-color: $elev;
+    border: 1px solid $line;
+    border-radius: $radius_sm;
+    padding: 0px 6px;
+    min-height: 22px;           /* 보더 2 와 합쳐 24 — 위 고르기 줄보다 낮게 */
+    max-height: 22px;
+    font-family: $font_mono;
+    font-size: $font_caption_lg_sz;
+    color: $ink;
+}
+QLineEdit[role="zoParam"]:hover {
+    border-color: $mute;
+}
+QLineEdit[role="zoParam"]:focus {
+    border: $focus_w solid $focus;
+    padding: 0px 5px;
+}
 QLabel[role="axisDelta"] {
     font-family: $font_mono;
     color: $danger;

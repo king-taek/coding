@@ -64,7 +64,9 @@ _LIVE: set = set()          # 화면이 닫혀도 도는 읽기 스레드를 붙
 # 정렬 — (키, 이름, 소수 자리).  browse.SORT_KEYS 중 값 정렬만(웨이퍼 순은 기본 묶음이 이미 그렇다).
 SORTS = (("area", "Area", 1), ("width", "Width", 2), ("length", "Length", 2), ("contrast", "Contrast", 1),
          ("height", "Height", 1))
-FACET_SUB = {"first_name": _KO.ZO_FACET_CLASS_SUB}
+# 왼쪽 바 아래 하한 칸 — (Flags 키, 이름).  [파라미터 열기] 로 펴야 보인다.
+PARAMS = (("min_area", _KO.ZO_MIN_AREA), ("min_width", _KO.ZO_MIN_WIDTH), ("min_length", _KO.ZO_MIN_LENGTH),
+          ("min_contrast", _KO.ZO_MIN_CONTRAST))
 TABLE_COLS = (("wafer", _KO.ZO_COL_WAFER, None), ("recipe", _KO.ZO_COL_RECIPE, None), ("zone", _KO.ZO_COL_ZONE, None),
               ("first_name", _KO.ZO_COL_CLASS, None), ("cur_name", _KO.ZO_COL_CUR, None),
               ("type_name", _KO.ZO_COL_TYPE, None), ("caught", _KO.ZO_COL_CAUGHT, None),
@@ -195,31 +197,6 @@ class _FacetRow(QFrame):
         super().mousePressEvent(e)
 
 
-class _Switch(QFrame):
-    """그 밖에 — 켜고 끄는 한 줄(누름 자리 = 줄 전체)."""
-
-    clicked = pyqtSignal()
-
-    def __init__(self, text: str, on: bool, parent=None) -> None:
-        super().__init__(parent)
-        self.setProperty("role", "ovRow")
-        self.setProperty("selected", "true" if on else "false")
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setMinimumHeight(30)
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(8, 4, 8, 4)
-        lay.setSpacing(8)
-        lay.addWidget(_OnMark(on, self))
-        lab = QLabel(text, self)
-        lab.setProperty("role", "ovRowName")
-        lay.addWidget(lab, 1)
-
-    def mousePressEvent(self, e):   # noqa: N802
-        if e.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit()
-        super().mousePressEvent(e)
-
-
 class _Pic(QLabel):
     """오른쪽 값 칸의 사진 한 장 — 누르면 크게."""
 
@@ -256,6 +233,7 @@ class ZoneOriginDialog(QDialog):
         self._order: dict = {}            # 칸 → 값 순서(읽을 때 한 번)
         self._sel: dict = {k: set() for k, _n in B.FACETS}
         self._flags = B.Flags()
+        self._params_open = False         # [파라미터 열기] — 기본 접힘
         self._sort: Optional[tuple] = None          # (키, 큰 순?)
         self._view = "tiles"
         self._shown = PAGE_TILES
@@ -744,7 +722,7 @@ class ZoneOriginDialog(QDialog):
             il.addWidget(hint)
         else:
             for k, title in B.FACETS:
-                head = QLabel(title + (f"  ·  {FACET_SUB[k]}" if k in FACET_SUB else ""), inner)
+                head = QLabel(title, inner)
                 head.setProperty("role", "ovGroupHead")
                 head.setContentsMargins(8, 10, 0, 4)
                 il.addWidget(head)
@@ -767,24 +745,20 @@ class ZoneOriginDialog(QDialog):
                         wrap.setContentsMargins(30, 0, 8, 2)
                         wrap.addWidget(cb)
                         il.addLayout(wrap)
-            head = QLabel(_KO.ZO_FACET_MORE, inner)
-            head.setProperty("role", "ovGroupHead")
-            head.setContentsMargins(8, 10, 0, 4)
-            il.addWidget(head)
-            self.switches: dict = {}
-            for key, text in (("changed", _KO.ZO_ONLY_CHANGED), ("photo", _KO.ZO_ONLY_PHOTO),
-                              ("good", _KO.ZO_SHOW_GOOD)):
-                sw = _Switch(text, getattr(self._flags, key), inner)
-                sw.clicked.connect(lambda key=key: self.set_flag(key, not getattr(self._flags, key)))
-                il.addWidget(sw)
-                self.switches[key] = sw
+            self.param_btn = NeonButton(_KO.ZO_PARAM_CLOSE if self._params_open else _KO.ZO_PARAM_OPEN,
+                                        role="textAction", parent=inner)
+            self.param_btn.clicked.connect(self.toggle_params)
+            il.addSpacing(8)
+            il.addWidget(self.param_btn, 0, Qt.AlignmentFlag.AlignLeft)
             self.min_edits: dict = {}
-            for key, text in (("min_area", _KO.ZO_MIN_AREA), ("min_length", _KO.ZO_MIN_LENGTH)):
+            for key, text in PARAMS if self._params_open else ():
                 row = QHBoxLayout()
-                row.setContentsMargins(8, 2, 8, 2)
+                row.setContentsMargins(8, 1, 8, 1)
                 lab = QLabel(text, inner)
+                lab.setProperty("role", "ovRowName")
                 row.addWidget(lab, 1)
                 ed = QLineEdit(inner)
+                ed.setProperty("role", "zoParam")
                 ed.setFixedWidth(76)
                 ed.setAlignment(Qt.AlignmentFlag.AlignRight)
                 ed.setPlaceholderText("0")
@@ -807,13 +781,10 @@ class ZoneOriginDialog(QDialog):
                 if v in self._sel[k]:
                     chips.append((self.facet_label(k, v), lambda k=k, v=v: self.toggle(k, v)))
         f = self._flags
-        for key, text in (("changed", _KO.ZO_ONLY_CHANGED), ("photo", _KO.ZO_ONLY_PHOTO), ("good", _KO.ZO_SHOW_GOOD)):
+        for key, name in (("min_area", "Area"), ("min_width", "Width"), ("min_length", "Length"),
+                          ("min_contrast", "Contrast")):
             if getattr(f, key):
-                chips.append((text, lambda key=key: self.set_flag(key, False)))
-        if f.min_area:
-            chips.append((f"Area ≥ {f.min_area:g}", lambda: self.set_flag("min_area", 0.0)))
-        if f.min_length:
-            chips.append((f"Length ≥ {f.min_length:g}", lambda: self.set_flag("min_length", 0.0)))
+                chips.append((f"{name} ≥ {getattr(f, key):g}", lambda key=key: self.set_flag(key, 0.0)))
         for text, fn in chips:
             b = NeonButton(f"{text}  ✕", role="ovView")
             b.setCheckable(True)
@@ -903,12 +874,6 @@ class ZoneOriginDialog(QDialog):
                         tile.pic.setStyleSheet(f"color: {theme.MUTE};")
                     elif tile.wait_path is not None:
                         self._want(tile.wait_path, TILE_PX, "thumb")
-                    if it.changed:
-                        mk = QLabel(f"→ {_short_class(it.cur_name)}", tile)
-                        mk.setStyleSheet(f"background: {theme.WARN}; color: #fff; font-size: 10px; font-weight: 700;"
-                                         " padding: 0px 4px; border-radius: 3px;")
-                        mk.move(4, 4)
-                        mk.setToolTip(_KO.ZO_ROW_CHANGED)
                     if self._sort is not None:
                         tile.set_caption(fmt_num(getattr(it, self._sort[0]), dec[self._sort[0]]))
                     tile.set_open(self._open == k)
@@ -953,8 +918,6 @@ class ZoneOriginDialog(QDialog):
             for c, (k, _n, d) in enumerate(TABLE_COLS):
                 if k == "wafer":
                     text = self.wafer_label(it.wafer)
-                elif k == "cur_name":
-                    text = it.cur_name if it.changed else _KO.ZO_ROW_SAME
                 elif k == "photo":
                     text = "●" if it.photo is not None else ""
                 elif d is not None:
@@ -984,8 +947,8 @@ class ZoneOriginDialog(QDialog):
             return
         _clear(self.kv)
         rows = [(_KO.ZO_ROW_WAFER, self.wafer_label(it.wafer)), (_KO.ZO_ROW_RECIPE, it.recipe),
-                (_KO.ZO_ROW_ZONE, it.zone), None, (_KO.ZO_ROW_CLASS, it.first_name),
-                (_KO.ZO_ROW_CUR, f"{_KO.ZO_ROW_CHANGED} · {it.cur_name}" if it.changed else _KO.ZO_ROW_SAME),
+                (_KO.ZO_ROW_ZONE, it.zone), None, (_KO.ZO_ROW_CLASS, _class_name(it.first_name)),
+                (_KO.ZO_ROW_CUR, _class_name(it.cur_name)),
                 (_KO.ZO_ROW_TYPE, it.type_name), (_KO.ZO_ROW_CAUGHT, it.caught), None]
         if it.kind == B.KIND_HEIGHT:
             rows.append(("Height", f"{fmt_num(it.height, 2)} µm"))
@@ -1111,6 +1074,11 @@ class ZoneOriginDialog(QDialog):
             self._refresh_order()
         self._shown = PAGE_TILES
         self._render()
+
+    def toggle_params(self) -> None:
+        """[파라미터 열기] — Area · Width · Length · Contrast 하한 칸을 펴고 접는다(기본 접힘)."""
+        self._params_open = not self._params_open
+        self._render(keep_scroll=True)
 
     def clear_all(self) -> None:
         for s in self._sel.values():
@@ -1374,8 +1342,8 @@ def _with_wafer(it: B.Item, n: int) -> B.Item:
     return it if it.wafer == n else replace(it, wafer=n)
 
 
-def _short_class(name: str) -> str:
-    """'0 · Accept' → 'Accept' — 사진 위 작은 표시용."""
+def _class_name(name: str) -> str:
+    """'29 · B R Surface Dark' → 'B R Surface Dark' — 값 칸의 첫 분류 · 재 분류(현택님 예시 그대로)."""
     return name.split(" · ", 1)[-1]
 
 
