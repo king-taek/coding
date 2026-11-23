@@ -33,10 +33,12 @@ VCS/캐시는 제외하고, 무거운 ``python/`` 런타임도 건드리지 않�
 from __future__ import annotations
 
 import json
+import logging
 import os
 import socket
 import ssl
 import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -49,6 +51,8 @@ from . import paths
 #   경로(온라인 launcher)에서도 안전하게 import 된다.  그 경로가 얼린 exe 라
 #   `scripts/internal/online.spec` 의 hiddenimports 에도 i18n 을 명시해 두었다.
 from .. import i18n
+
+_LOG = logging.getLogger(__name__)
 
 DEFAULT_REPO = "king-taek/coding"
 # 자동 업데이트의 단일 기준은 **저장소의 GitHub 기본(default) 브랜치**다(과거엔 main 이었으나
@@ -246,6 +250,87 @@ def _staging_dir(root: Optional[Path], app_root: Path) -> Path:
     바뀌어 원자성이 사라진다.  미완성 트리에는 ``.part`` 이름을 주고, 완성된 뒤에만
     ``app.new`` 로 rename 한다(그 rename 이 곧 준비 완료 신호다)."""
     return (root / "app.new.part") if root else (app_root / ".update.part")
+
+
+# Windows 는 폴더 안 파일을 누가 열고 있으면 그 폴더 이름을 바꾸지 못한다(PermissionError,
+# WinError 5).  막 복사한 파일은 보안 검사가 곧바로 열어 본다 — 실측(2026-11-23, 설치 PC
+# 60회): 10% 가 거부됐고 전부 0.3 초 안에 다음 시도에서 풀렸다.  예전 코드는 딱 한 번만
+# 시도해서 그 10% 가 그대로 '업데이트 실패' 가 됐다.  풀리는 즉시 끝나고, 최대 약 15 초.
+_RENAME_WAITS = (0.2, 0.5, 1, 1.5, 2, 3, 3, 4)
+
+
+def _rename_dir(src: Path, dst: Path) -> None:
+    """폴더 rename 한 번 — 테스트가 이 함수만 바꿔 '잠김' 을 흉내 낸다."""
+    os.rename(src, dst)
+
+
+def _rename_with_retry(src: Path, dst: Path, emit, waits=None) -> None:
+    """``src → dst`` rename — 잠겨 있으면(PermissionError) 잠깐 기다렸다 다시 한다.
+
+    rename 하나는 원자적이라 '완성된 트리만 app.new' 불변식은 그대로다.  끝까지 안 되면
+    마지막 예외를 그대로 올린다(호출부가 사용자 문구로 바꾼다)."""
+    waits = _RENAME_WAITS if waits is None else tuple(waits)
+    for n in range(len(waits) + 1):
+        try:
+            _rename_dir(src, dst)
+        except PermissionError as exc:
+            if n == len(waits):
+                _LOG.warning("rename 실패 %d회, 포기: %s → %s (winerror=%s, %s)",
+                             n + 1, src, dst, getattr(exc, "winerror", None), exc)
+                raise
+            _LOG.info("rename 거부 %d회째, %.1f초 뒤 재시도: %s → %s (winerror=%s)",
+                      n + 1, waits[n], src, dst, getattr(exc, "winerror", None))
+            emit(0, 0, i18n.KO.UPDATE_PHASE_WAIT_LOCK)   # busy — 0 에서 멈추지 않게
+            time.sleep(waits[n])
+        else:
+            if n:
+                _LOG.info("rename 성공(%d회째): %s → %s", n + 1, src, dst)
+            return
+
+
+# 치울 폴더는 제자리에서 지우지 않고 먼저 이 이름으로 옮긴다.  rmtree 가 잠긴 파일에서
+# 멈추면 반쯤 지워진 폴더가 그 이름을 계속 차지해 다음 rename 이 거부된다.  옮긴 뒤 지우면
+# 지우기가 실패해도 이름은 비고, 찌꺼기는 다음 업데이트 때 다시 지운다.
+# 런처(bat)는 정확히 ``app.new`` 만 본다 — 이 이름은 건드리지 않는다.
+_TRASH_MARK = ".trash-"
+
+
+def _move_aside(path: Path, emit) -> Optional[Path]:
+    """``path`` 를 ``<이름>.trash-<시각>`` 으로 옮기고 그 경로를 돌려준다(없으면 None).
+
+    지난번에 못 지운 ``<이름>.trash-*`` 도 이때 다시 지운다."""
+    import shutil
+
+    for old in path.parent.glob(path.name + _TRASH_MARK + "*"):
+        if old.is_dir():
+            shutil.rmtree(old, ignore_errors=True)
+    if not os.path.lexists(path):
+        return None
+    trash = path.with_name(f"{path.name}{_TRASH_MARK}{time.time_ns()}")
+    _rename_with_retry(path, trash, emit)
+    return trash
+
+
+def _promote_pending(staging: Path, pending: Path, emit) -> None:
+    """검증된 ``app.new.part`` 를 ``app.new`` 로 — 이 rename 이 '준비 완료' 신호다.
+
+    개발자 모드 설치는 '이미 받아 둠' 확인을 건너뛰므로 재시작 전의 ``app.new`` 가 남아
+    있을 수 있다.  먼저 옆으로 옮기고, 새 rename 이 끝내 실패하면 **되돌려 놓는다**
+    (완성된 트리였으므로 불변식이 그대로다).  옛것은 성공한 뒤에만 지운다."""
+    import shutil
+
+    aside = _move_aside(pending, emit)
+    try:
+        _rename_with_retry(staging, pending, emit)
+    except OSError:
+        if aside is not None:
+            try:
+                _rename_with_retry(aside, pending, emit, (0.5, 1, 2))
+            except OSError as exc:
+                _LOG.warning("옛 app.new 되돌리기 실패: %s (%s)", aside, exc)
+        raise
+    if aside is not None:
+        shutil.rmtree(aside, ignore_errors=True)
 
 
 def _version_file() -> Path:
@@ -984,8 +1069,16 @@ def download_and_apply(repo: str, branch: str, target_sha: str,
         # 3) 준비 — 새 트리를 통째로 만들고(삭제 전파·__pycache__ 정리가 여기서 공짜),
         #    VERSION 도 **스테이징 트리에** 써서 적용이 성공해야만 유효해지게 한다.
         install_root = _install_root()
-        staging = _staging_dir(install_root, app_root)
-        shutil.rmtree(staging, ignore_errors=True)
+        target = _staging_dir(install_root, app_root)
+        if install_root is not None:
+            # 지난번 실패가 남긴 트리 — 옆으로 옮겨 치운다.  못 옮기면 예외이고, 이때
+            # staging 은 아직 None 이라 finally 가 그 자리를 반쯤 지우지 않는다.
+            trash = _move_aside(target, _emit)
+            if trash is not None:
+                shutil.rmtree(trash, ignore_errors=True)
+        else:
+            shutil.rmtree(target, ignore_errors=True)
+        staging = target
         _stage_tree(src_root, staging, _emit, full=dev)
         _write_version_to(staging, target_sha, branch, repo, dev)
 
@@ -1002,14 +1095,19 @@ def download_and_apply(repo: str, branch: str, target_sha: str,
                 _deps_blocked = True     # UI 가 '새 배포본을 받으라' 고 안내한다
                 return False
             pending = _pending_dir(install_root)
-            shutil.rmtree(pending, ignore_errors=True)
-            staging.rename(pending)                  # ★ 이 rename 이 '준비 완료' 신호
+            _promote_pending(staging, pending, _emit)    # ★ 이 rename 이 '준비 완료' 신호
             staging = None                           # finally 가 지우지 않도록
         else:                                        # 포터블/온라인 — 제자리 적용
             _promote_in_place(staging, app_root, _emit)
             _write_version(target_sha, branch, repo, dev)
         _emit(1, 1, i18n.KO.UPDATE_PHASE_DONE)
         return True
+    except PermissionError as exc:
+        # 내 PC 의 파일이 잠긴 것이다(보안 검사 등) — GitHub 탓으로 보이지 않게
+        # 호스트 없는 전용 문구로 알린다(예전 문구: "PermissionError — api.github.com …").
+        _LOG.warning("업데이트 파일 잠김: %s", exc)
+        _last_error = i18n.KO.UPDATE_ERR_LOCKED_FMT.format(error=exc)
+        return False
     except Exception as exc:
         _last_error = _describe_err(exc, url)
         return False
