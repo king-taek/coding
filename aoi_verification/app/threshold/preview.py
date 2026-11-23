@@ -58,6 +58,7 @@ class Defect:
     by_filter: bool = True  # Feature Filter 묶음을 거쳐 잡힌 Defect(Event)인가 — 아니면 검출 단계가 잡았다
     rtype: int | None = None    # 검출 단계가 잡았으면 결과 비트(Surface.flt Type) — 이름은 rules.surface_result_types
     stage: str | None = None    # 검출 단계가 잡았으면 'dark'/'bright'(결과 이름의 DARK · BRIGHT) — 그 Zone 의 검출 하한이 거른다
+    type_bits: int | None = None    # Surface.flt Type 원래 값(어느 Defect 든) — 검출 종류 이름용('어느 Zone에서 왔니?').  칸이 없으면 None
     blob_length: float | None = None    # px (BlobLength) — Feature Filter Length 가 보는 값.  사이드카에 없으면 None(그 기준은 안 봄)
 
 
@@ -116,14 +117,14 @@ def load_all(folder: Path) -> tuple[tuple[Defect, ...], tuple[Defect, ...], str]
     # 결과 비트(Type)로 Feature Filter 를 거친 Event Defect 만 기준에 걸리게 한다 — 비트 값은 폴더의
     # EquipmentClassifications.ini 에서 읽는다(:func:`rules.event_mask`).  둘 중 하나라도 없으면 전부 기준 대상.
     mask = event_mask(folder)
-    rtype = col.get("rtype") if mask else None
-    rtype = rtype or [None] * len(arr)
+    raw_type = col.get("rtype") or [None] * len(arr)
+    rtype = raw_type if mask else [None] * len(arr)
     masks = stage_masks(folder) if mask else {}
     blen = col.get("blen") or [None] * len(arr)
     kept, goods = [], []
-    for i, (cls, org, zone, rec, area, width, length, contrast, x, y, rt, bl) in enumerate(zip(
+    for i, (cls, org, zone, rec, area, width, length, contrast, x, y, rt, bl, bits) in enumerate(zip(
             col["cls"], col["org"], col["zone"], recipe, col["area"], col["width"], col["length"],
-            col["contrast"], col["x"], col["y"], rtype, blen)):
+            col["contrast"], col["x"], col["y"], rtype, blen, raw_type)):
         # orgReclassify 가 class 번호가 아니면(ManReClassify 에 없음) 지금 분류를 쓴다 — 구형 EAGLE 120 바이트 기록은 그 칸에
         # 다른 값이 있다: AOI-1 KENDALL MEOL GX57527840 첫 분류 23504 ~ 27526 이 915/915 class 목록 밖이고, 지금 분류 33 이
         # 그 Zone [Surface] Classify=33 과 맞았다(관측 2026-11-23).  class 목록을 못 읽거나 지금 분류도 목록 밖이면 그대로 둔다.
@@ -131,7 +132,8 @@ def load_all(folder: Path) -> tuple[tuple[Defect, ...], tuple[Defect, ...], str]
         first = cls if org and classes and abs(int(org)) not in classes and abs(int(cls)) in classes else (org or cls)
         d = Defect(i, zone_dir_for(rec), int(zone), int(first), int(cls), float(area), float(width),
                    float(length), float(contrast), float(x), float(y),
-                   by_filter=rt is None or bool(int(rt) & mask), blob_length=None if bl is None else float(bl))
+                   by_filter=rt is None or bool(int(rt) & mask), blob_length=None if bl is None else float(bl),
+                   type_bits=None if bits is None else int(bits))
         if not d.by_filter:
             d = dataclasses.replace(d, stage=detect_polarity(masks, rt), rtype=int(rt))
         # 첫 분류가 Good(EDC Good: reclassify 20 · org 0).  Accept 는 지금 분류만 0 이라 Defect 로 남는다.

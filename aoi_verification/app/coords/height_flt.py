@@ -34,12 +34,14 @@ _LOG = logging.getLogger("aoi.coords")
 HEIGHT_PHOTO_TYPE = 2
 
 _FLT_NAMES = ("Height.flt", "height.flt")
-# 사이드카 필드 이름 → 레코드 칸.  recipe · Type · reclassify 는 없어도 된다.
+# 사이드카 필드 이름 → 레코드 칸.  recipe · Type · reclassify · orgReclassify 는 없어도 된다.
 _NAMES = {"x": "x", "y": "y", "zone": "zone", "height": "height",
-          "recipe": "recipe", "Type": "type", "reclassify": "reclassify"}
+          "recipe": "recipe", "Type": "type", "reclassify": "reclassify", "orgReclassify": "org"}
 _REQUIRED = ("x", "y", "zone", "height")
 
-HeightRecord = namedtuple("HeightRecord", ["x", "y", "zone", "height", "recipe", "type", "reclassify"])
+# org = 첫 분류(orgReclassify, 장비가 붙인 것) — '어느 Zone에서 왔니?' 가 Surface 와 같은 규칙(org 0 이면 reclassify)으로 쓴다.
+HeightRecord = namedtuple("HeightRecord", ["x", "y", "zone", "height", "recipe", "type", "reclassify", "org"],
+                          defaults=(None,))
 
 
 def _find(folder: Path) -> Optional[Path]:

@@ -45,6 +45,12 @@ def _paint_sliders(p: QPainter) -> None:
         p.drawEllipse(QPointF(x, y), 1.8, 1.8)
 
 
+def _paint_search(p: QPainter) -> None:
+    """돋보기 — 어느 Zone에서 왔니?(Defect 를 분류로 찾아보기)."""
+    p.drawEllipse(QPointF(8.5, 8.5), 5.2, 5.2)
+    p.drawLine(QPointF(12.3, 12.3), QPointF(17, 17))
+
+
 def _paint_refresh(p: QPainter) -> None:
     p.drawArc(QRectF(3.5, 3.5, 13, 13), 40 * 16, 270 * 16)
     p.drawLine(QPointF(15.8, 3.2), QPointF(16.6, 7.2))
@@ -66,12 +72,12 @@ def _paint_unfold(p: QPainter) -> None:
 
 
 _PAINTERS = {"camera": _paint_camera, "globe": _paint_globe, "doc": _paint_doc,
-             "bars": _paint_bars, "sliders": _paint_sliders, "refresh": _paint_refresh,
+             "bars": _paint_bars, "sliders": _paint_sliders, "search": _paint_search, "refresh": _paint_refresh,
              "fold": _paint_fold, "unfold": _paint_unfold}
 
 
 def rail_icon(name: str) -> QIcon:
-    """``name`` 아이콘(camera·globe·doc·bars·sliders·refresh·fold·unfold) — 알 수 없는 이름은 빈 아이콘."""
+    """``name`` 아이콘(camera·globe·doc·bars·sliders·search·refresh·fold·unfold) — 알 수 없는 이름은 빈 아이콘."""
     paint = _PAINTERS.get(name)
     if paint is None:
         return QIcon()
