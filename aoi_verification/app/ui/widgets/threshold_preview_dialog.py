@@ -104,8 +104,10 @@ WAFER_MERGE_MS = 150        # LOT 안 웨이퍼를 넣고 뺄 때 — 연달아 
 FLASH_MS = 1500             # 더한 칩 · 이미 있는 칩이 반짝이는 시간
 _LIVE: set = set()          # 화면이 닫혀도 도는 읽기 스레드를 붙들어 둔다(wafer_map_dialog 와 같은 패턴)
 
-# 화면에 보이는 순서와 단위.  Surface.flt 에 값이 있는 세 기준만 바꿀 수 있다(rules 모듈 docstring).
+# 화면에 보이는 순서와 단위(Zone ini 와 같은 순서).  Surface.flt 에 값이 있는 네 기준만 바꿀 수 있다(rules 모듈 docstring).
+# Length 는 그 Zone 묶음에 의미 있는 Length 기준이 있을 때만 칸이 생긴다(rules.condition_matters).
 _FEATURES = ((R.FEATURE_WIDTH, "Width", "µm", 0.05, 2),
+             (R.FEATURE_LENGTH, "Length", "µm", 0.05, 2),
              (R.FEATURE_AREA, "Area", "µm²", 0.5, 1),
              (R.FEATURE_CONTRAST, "Contrast", "", 1.0, 1))
 
@@ -204,14 +206,14 @@ class WaferData:
     def to_um(self, feature: int, v: float) -> float:
         if feature == R.FEATURE_AREA:
             return v * self.px[0] * self.px[1]
-        if feature == R.FEATURE_WIDTH:
+        if feature in (R.FEATURE_WIDTH, R.FEATURE_LENGTH):
             return v * self.px[0]
         return v
 
     def to_px(self, feature: int, v: float) -> float:
         if feature == R.FEATURE_AREA:
             return v / (self.px[0] * self.px[1])
-        if feature == R.FEATURE_WIDTH:
+        if feature in (R.FEATURE_WIDTH, R.FEATURE_LENGTH):
             return v / self.px[0]
         return v
 
@@ -391,7 +393,7 @@ def _in_frame(w: WaferData, frame: dict) -> WaferData:
 
     def zone(zd, z):
         lin, area = ks[zd]
-        f_k = {R.FEATURE_AREA: area, R.FEATURE_WIDTH: lin}
+        f_k = {R.FEATURE_AREA: area, R.FEATURE_WIDTH: lin, R.FEATURE_LENGTH: lin}
         return R.Zone(z.zone_id, z.name, {c: tuple(
             R.Filter(f.feature, f.ftype, f.low * f_k.get(f.feature, 1.0), f.high * f_k.get(f.feature, 1.0), f.name)
             for f in fs) for c, fs in z.bundles.items()},
@@ -401,7 +403,8 @@ def _in_frame(w: WaferData, frame: dict) -> WaferData:
         if d.zone_dir not in ks:
             return d
         lin, area = ks[d.zone_dir]
-        return replace(d, area=d.area * area, width=d.width * lin, length=d.length * lin)
+        return replace(d, area=d.area * area, width=d.width * lin, length=d.length * lin,
+                       blob_length=None if d.blob_length is None else d.blob_length * lin)
 
     return replace(w, zones={k: zone(k[0], z) if k[0] in ks else z for k, z in w.zones.items()},
                    defects=tuple(map(defect, w.defects)), goods=tuple(map(defect, w.goods)),
@@ -411,7 +414,7 @@ def _in_frame(w: WaferData, frame: dict) -> WaferData:
 def _ov_k(key: tuple, k: tuple) -> float:
     """바꾼 값 키 ``(Zone 폴더, Zone, 분류|극성, FeatureType|종류)`` 에 곱할 배율."""
     lin, area = k
-    return area if key[3] in (R.FEATURE_AREA, "area") else lin if key[3] in (R.FEATURE_WIDTH, "width", "length") else 1.0
+    return area if key[3] in (R.FEATURE_AREA, "area") else lin if key[3] in (R.FEATURE_WIDTH, R.FEATURE_LENGTH, "width", "length") else 1.0
 
 
 def _fits(acc_zones: dict, acc_optics: dict, acc_id: tuple, w: WaferData) -> bool:
@@ -2847,6 +2850,8 @@ class ThresholdPreviewDialog(QDialog):
                     f = next((x for x in filters if x.feature == feat), None)
                     if f is None or (feat == R.FEATURE_CONTRAST and not known):
                         continue                   # Contrast 를 안 적는 Zone — 슬라이더 없음(현택님 2026-11-16)
+                    if feat == R.FEATURE_LENGTH and any(d.blob_length is None for d in self._in_zone()):
+                        continue                   # BlobLength 가 없는 옛 기록이 섞임 — 그 Defect 는 Length 로 안 빠져 숫자가 틀린다
                     cells.append(self._feature_cell(cls, f, name, unit, step, dec))
                 rows.append((_KO.THRESH_PREVIEW_RULE_N.format(n=i) if many else _KO.THRESH_PREVIEW_RULE,
                              f"→ {self._class_name(cls)}", cells))
@@ -2909,8 +2914,9 @@ class ThresholdPreviewDialog(QDialog):
 
     def _feature_cell(self, cls: int, f: R.Filter, name: str, unit: str, step: float, dec: int) -> QWidget:
         w = self._w
-        zone_vals = [w.to_um(f.feature, P._value(d, f.feature)) for d in self._in_zone()]
-        vals = [w.to_um(f.feature, P._value(d, f.feature)) for d in self._in_zone() if d.bin == cls]
+        zone_vals = [w.to_um(f.feature, v) for v in (P._value(d, f.feature) for d in self._in_zone()) if v is not None]
+        vals = [w.to_um(f.feature, v) for v in (P._value(d, f.feature) for d in self._in_zone() if d.bin == cls)
+                if v is not None]
         if f.feature == R.FEATURE_CONTRAST:
             vals = [v for v in vals if v != 0]
         sec = "Surface Feature Filter"
@@ -2943,11 +2949,11 @@ class ThresholdPreviewDialog(QDialog):
         h = QHBoxLayout()                      # 열 머리 한 줄 — 이름 + 값 칸 + 단위 + 변화량
         h.setSpacing(8)
         mono = theme.FONT_MONO
-        px_unit = {R.FEATURE_AREA: " px²", R.FEATURE_WIDTH: " px"}.get(feature, "")
+        px_unit = {R.FEATURE_AREA: " px²", R.FEATURE_WIDTH: " px", R.FEATURE_LENGTH: " px"}.get(feature, "")
         # ini 에 적힌 숫자 = 레시피 자기 픽셀(화면 값은 flt 픽셀로 바꾼 것이라 되돌린다, rules.zones_in_flt_px)
         # 합친 웨이퍼면 그 Zone 값의 픽셀 기준(_in_frame) — 기준 웨이퍼에 그 레시피 파일이 없어도 맞는 배율
         lin, area = w.scales.get(self._zone[0]) or R.recipe_scale(w.folder, self._zone[0])
-        ini_px = low_px / {R.FEATURE_AREA: area, R.FEATURE_WIDTH: lin}.get(feature, 1.0)
+        ini_px = low_px / {R.FEATURE_AREA: area, R.FEATURE_WIDTH: lin, R.FEATURE_LENGTH: lin}.get(feature, 1.0)
         px_txt = f"{ini_px:.4f}".rstrip("0").rstrip(".") + px_unit
         ini_lab = None
         if ini is None:
@@ -3959,10 +3965,12 @@ class ThresholdPreviewDialog(QDialog):
 
     def _pick_caption(self, d: P.Defect) -> str:
         parts = [self._class_name(d.bin)]
+        z = self._w.zones.get((d.zone_dir, d.zone))
+        has_len = d.by_filter and z is not None and any(f.feature == R.FEATURE_LENGTH for fs in z.bundles.values() for f in fs)
         for feat, name, unit, _step, dec in _FEATURES:
             v = P._value(d, feat)
-            if v is None or (feat == R.FEATURE_CONTRAST and v == 0):
-                continue
+            if v is None or (feat == R.FEATURE_CONTRAST and v == 0) or (feat == R.FEATURE_LENGTH and not has_len):
+                continue                       # Length 는 그 Zone 에 Length 기준이 있을 때만(BlobLength)
             parts.append(f"{name} {self._w.to_um(feat, v):.{dec}f}" + (f" {unit}" if unit else ""))
         return " · ".join(parts)
 
@@ -4103,7 +4111,7 @@ class ThresholdPreviewDialog(QDialog):
             n = list(z.bundles).index(cls) + 1
             rule = _KO.THRESH_PREVIEW_RULE_N.format(n=n) if len(z.bundles) > 1 else _KO.THRESH_PREVIEW_RULE
             vals = [w.to_um(feat, P._value(d, feat)) for d in w.defects
-                    if (d.zone_dir, d.zone, d.bin) == (zdir, zid, cls)
+                    if (d.zone_dir, d.zone, d.bin) == (zdir, zid, cls) and P._value(d, feat) is not None
                     and not (feat == R.FEATURE_CONTRAST and P._value(d, feat) == 0)]
             changes.append(RP.Change(name + (f" · {rec}" if rec else ""), f"{rule} → {self._class_name(cls)}",
                                      item, unit, w.to_um(feat, f.low), w.to_um(feat, px), dec, tuple(vals)))

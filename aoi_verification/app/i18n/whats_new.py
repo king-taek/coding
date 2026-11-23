@@ -37,6 +37,7 @@ ENTRIES = [
             ("사진 정보", "컬러 사진도 Scan 사진처럼 누르면 크게 봅니다"),
             ("Overkill 튜닝", "펼친 Scan 사진도 컬러 사진처럼 누르면 크게 봅니다(우클릭 없이)"),
             ("Overkill 튜닝", "사진 목록을 Area · Width · Length · Contrast 로 정렬합니다 — 다시 누르면 높은 순 ↔ 낮은 순"),
+            ("Overkill 튜닝", "레시피에 Length 기준이 있으면 Length 슬라이더도 나옵니다(늘 통과하는 값으로 적힌 기준은 뺍니다)"),
         ],
     },
     {

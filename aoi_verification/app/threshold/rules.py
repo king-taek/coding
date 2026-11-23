@@ -34,12 +34,14 @@ __all__ = ["Filter", "Zone", "ClassInfo", "read_zones", "read_classes", "zone_di
            "DETECT_KEYS", "detect_polarity",
            "recipe_scale", "read_recipe_names", "read_detect_values", "recipe_identity", "same_recipe",
            "read_scan_optics",
-           "FEATURE_AREA", "FEATURE_WIDTH", "FEATURE_CONTRAST"]
+           "FEATURE_AREA", "FEATURE_WIDTH", "FEATURE_LENGTH", "FEATURE_CONTRAST", "condition_matters"]
 
 # Zone ini FeatureType — 섹션 이름과 짝지어 본 값(수집 자료 Zone ini 전부, 관측 2026-11-16):
-# 1 Area · 2 Width · 12 Contrast Average · 14 Polarity · 45 Abs Contrast Average.
-# Surface.flt 에 값이 있는 것은 앞의 셋뿐이라 그 셋만 미리보기로 바꿀 수 있다.
-FEATURE_AREA, FEATURE_WIDTH, FEATURE_CONTRAST = 1, 2, 12
+# 1 Area · 2 Width · 3 Length · 12 Contrast Average · 14 Polarity · 45 Abs Contrast Average.
+# Surface.flt 에 값이 있는 것은 앞의 넷뿐이라 그 넷만 미리보기로 바꿀 수 있다.
+# Length = flt ``BlobLength``(BlobFeretMax 아님): Test_TB500_RDL2 - Multi x5 Scan Area 42장 Event Defect 232/232 가
+# 묶음 판정과 맞았다(FeretMax 면 224/232, 관측 2026-11-23).  수집 Zone ini 중 Length 기준은 이 레시피뿐이다.
+FEATURE_AREA, FEATURE_WIDTH, FEATURE_LENGTH, FEATURE_CONTRAST = 1, 2, 3, 12
 
 _SECTION = re.compile(r"(?m)^\s*\[([^\]]+)\]\s*$")
 _KEY = re.compile(r"(?im)^\s*(Enable|Classify|FeatureType|FilterType|LowValue|HighValue)\s*=\s*([-+\d.eE]+)")
@@ -118,6 +120,17 @@ def _parse_detect(text: str, heads) -> dict:
     return {}
 
 
+def condition_matters(f: Filter) -> bool:
+    """이 조건에 걸려 빠질 수 있는 값(0 이상 · :data:`DETECT_OFF` 미만)이 하나라도 있나.
+
+    현택님(2026-11-23): Length 기준은 파라미터에 있으면 넣고, **무의미하게** 적혀 있으면 뺀다.  무의미 =
+    늘 통과하는 조건 — ``≥ 0 이하`` · ``> 음수`` · ``≤ / < 9999999 이상`` · ``범위 [0 이하, 9999999 이상]``.
+    크기 값은 음수가 없고 장비는 9999999 를 '끈 값' 으로 적는다(:data:`DETECT_OFF`).  빼도 판정은 같다(늘 통과)."""
+    lo, hi = f.low, f.high
+    return {5: lo > 0, 4: lo >= 0, 7: lo < DETECT_OFF, 6: lo < DETECT_OFF,
+            1: not (lo <= 0 and hi >= DETECT_OFF)}.get(f.ftype, True)
+
+
 def _parse_zone(text: str) -> Zone | None:
     zid = _ZONE_ID.search(text)
     if not zid:
@@ -137,7 +150,10 @@ def _parse_zone(text: str) -> Zone | None:
         except (KeyError, ValueError):
             continue
         if cls >= 0 and kv.get("enable", "1").strip() not in ("0", "0.0"):
-            bundles.setdefault(cls, []).append(f)
+            fs = bundles.setdefault(cls, [])        # 묶음은 남긴다 — Length 하나뿐인 묶음이면 '늘 통과' 묶음이다(OR)
+            if f.feature == FEATURE_LENGTH and not condition_matters(f):
+                continue                # 무의미한 Length 기준 — 슬라이더로 내놓지 않는다(판정은 같다)
+            fs.append(f)
     return Zone(int(zid.group(1)), name.group(1) if name else "",
                 {c: tuple(fs) for c, fs in bundles.items()}, _parse_detect(text, heads))
 
@@ -225,7 +241,7 @@ def zones_in_flt_px(folder: Path, zones: dict) -> dict:
         if lin == 1.0 and area == 1.0:
             out[key] = z
             continue
-        k = {FEATURE_AREA: area, FEATURE_WIDTH: lin}
+        k = {FEATURE_AREA: area, FEATURE_WIDTH: lin, FEATURE_LENGTH: lin}
         # 검출 단계 값도 같은 배율 — 레시피 자기 픽셀 기준이라고 **가정**한다(Zone 기준과 같은 ini · 같은 규약, 미확인).
         out[key] = Zone(z.zone_id, z.name, {c: tuple(
             Filter(f.feature, f.ftype, f.low * k.get(f.feature, 1.0), f.high * k.get(f.feature, 1.0), f.name) for f in fs)

@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..coords import surface_flt as _flt
-from .rules import (FEATURE_AREA, FEATURE_CONTRAST, FEATURE_WIDTH, detect_polarity, event_mask, read_classes,
+from .rules import (FEATURE_AREA, FEATURE_CONTRAST, FEATURE_LENGTH, FEATURE_WIDTH, detect_polarity, event_mask, read_classes,
                     read_zones, stage_masks, zone_dir_for)
 
 __all__ = ["Defect", "load_all", "load_defects", "wafer_cap", "match_photos", "contrast_known", "why_dropped",
@@ -37,8 +37,8 @@ _LOG = logging.getLogger("aoi.threshold")
 # 사이드카 이름 → Defect 칸.  recipe 는 없어도 된다(옛 기록).
 _NEED = {"reclassify": "cls", "orgReclassify": "org", "zone": "zone", "recipe": "recipe",
          "area": "area", "BlobBreadth": "width", "BlobFeretMax": "length", "Contrast": "contrast",
-         "ActualX": "x", "ActualY": "y", "Type": "rtype"}
-_OPTIONAL = {"recipe", "rtype"}
+         "ActualX": "x", "ActualY": "y", "Type": "rtype", "BlobLength": "blen"}
+_OPTIONAL = {"recipe", "rtype", "blen"}
 
 
 @dataclass(frozen=True)
@@ -58,6 +58,7 @@ class Defect:
     by_filter: bool = True  # Feature Filter 묶음을 거쳐 잡힌 Defect(Event)인가 — 아니면 검출 단계가 잡았다
     rtype: int | None = None    # 검출 단계가 잡았으면 결과 비트(Surface.flt Type) — 이름은 rules.surface_result_types
     stage: str | None = None    # 검출 단계가 잡았으면 'dark'/'bright'(결과 이름의 DARK · BRIGHT) — 그 Zone 의 검출 하한이 거른다
+    blob_length: float | None = None    # px (BlobLength) — Feature Filter Length 가 보는 값.  사이드카에 없으면 None(그 기준은 안 봄)
 
 
 def _layout(flt: Path):
@@ -118,14 +119,15 @@ def load_all(folder: Path) -> tuple[tuple[Defect, ...], tuple[Defect, ...], str]
     rtype = col.get("rtype") if mask else None
     rtype = rtype or [None] * len(arr)
     masks = stage_masks(folder) if mask else {}
+    blen = col.get("blen") or [None] * len(arr)
     kept, goods = [], []
-    for i, (cls, org, zone, rec, area, width, length, contrast, x, y, rt) in enumerate(zip(
+    for i, (cls, org, zone, rec, area, width, length, contrast, x, y, rt, bl) in enumerate(zip(
             col["cls"], col["org"], col["zone"], recipe, col["area"], col["width"], col["length"],
-            col["contrast"], col["x"], col["y"], rtype)):
+            col["contrast"], col["x"], col["y"], rtype, blen)):
         first = org or cls
         d = Defect(i, zone_dir_for(rec), int(zone), int(first), int(cls), float(area), float(width),
                    float(length), float(contrast), float(x), float(y),
-                   by_filter=rt is None or bool(int(rt) & mask))
+                   by_filter=rt is None or bool(int(rt) & mask), blob_length=None if bl is None else float(bl))
         if not d.by_filter:
             d = dataclasses.replace(d, stage=detect_polarity(masks, rt), rtype=int(rt))
         # 첫 분류가 Good(EDC Good: reclassify 20 · org 0).  Accept 는 지금 분류만 0 이라 Defect 로 남는다.
@@ -191,7 +193,8 @@ def contrast_known(defects, zone_dir: str, zone: int) -> bool:
 
 
 def _value(d: Defect, feature: int):
-    return {FEATURE_AREA: d.area, FEATURE_WIDTH: d.width, FEATURE_CONTRAST: d.contrast}.get(feature)
+    return {FEATURE_AREA: d.area, FEATURE_WIDTH: d.width, FEATURE_LENGTH: d.blob_length,
+            FEATURE_CONTRAST: d.contrast}.get(feature)
 
 
 def _detect_value(d: Defect, kind: str) -> float:
