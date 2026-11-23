@@ -153,7 +153,9 @@ class WaferData:
         if self._multi is None:
             # Defect 가 레시피 1 에만 있어도 다른 레시피 Zone 줄이 같은 이름으로 서므로, 폴더의 Zone 폴더 수로도 본다.
             self._multi = len({d.zone_dir for d in self.defects + self.goods} | {k[0] for k in self.zones}) > 1
-        return zone_label(key[0], self.zones.get(key), key[1], R.read_recipe_names(self.folder), self._multi)
+        # 이름은 합친 웨이퍼들에서 모은 것 — 기준 웨이퍼에 RecipesInfo.ini 가 없어도(결과가 끊긴 스캔) 다른 장의 이름을 쓴다
+        names = dict(self.recipe_id[1]) or R.read_recipe_names(self.folder)
+        return zone_label(key[0], self.zones.get(key), key[1], names, self._multi)
 
     def to_um(self, feature: int, v: float) -> float:
         if feature == R.FEATURE_AREA:
@@ -250,28 +252,64 @@ def _wafer_label(folder: Path, data: WaferData) -> str:
     return _KO.OVERKILL_LOT_WAFER_NAME.format(slot=data.slot, name=folder.name) if data.slot else folder.name
 
 
-def same_base(a: WaferData, b: WaferData) -> bool:
-    """두 웨이퍼를 같은 슬라이더로 셀 수 있나 — Zone 기준 · 픽셀 크기가 같고 **같은 레시피로 스캔한 것**.
+def _by_dir(zones: dict) -> dict:
+    """``{(Zone 폴더, ZoneID): Zone}`` → ``{Zone 폴더: {ZoneID: Zone}}``."""
+    out: dict = {}
+    for (zdir, zid), z in zones.items():
+        out.setdefault(zdir, {})[zid] = z
+    return out
 
-    레시피가 다르면 스캔을 새로 한 것이라 Zone 이름 · 값이 같아도 따로 튜닝한다(현택님 2026-11-23) — 레시피는
-    파일에서 읽는다(:func:`rules.recipe_identity`, 모르는 칸은 비교하지 않는다)."""
-    return (a.zones == b.zones and all(abs(x - y) < 1e-6 for x, y in zip(a.px, b.px))
-            and R.same_recipe(a.recipe_id, b.recipe_id))
+
+def _zones_fit(a: dict, b: dict) -> bool:
+    """두 웨이퍼의 Zone 기준을 한 슬라이더로 볼 수 있나 — **둘 다 가진 레시피 Zone 폴더는 통째로 같아야** 하고,
+    한쪽에만 있는 레시피 폴더는 괜찮다(그 레시피 결과가 없는 웨이퍼 — 예: Defect 3,000개 한도에서 끊겨
+    ``Recipe2-Zones`` 를 안 남긴 YDD-PIDS3 RE 35174144EWF6, 관측 2026-11-23, 현택님 결정 2026-11-23).
+    겹치는 레시피 폴더가 하나도 없으면 맞지 않는다."""
+    da, db = _by_dir(a), _by_dir(b)
+    if not da and not db:
+        return True                     # 둘 다 Zone 파일이 없다 — 예전 비교(빈 것끼리 같음)와 같게
+    shared = da.keys() & db.keys()
+    return bool(shared) and all(da[k] == db[k] for k in shared)
+
+
+def _fits(acc_zones: dict, acc_px: tuple, acc_id: tuple, w: WaferData) -> bool:
+    return (_zones_fit(acc_zones, w.zones) and all(abs(x - y) < 1e-6 for x, y in zip(acc_px, w.px))
+            and R.same_recipe(acc_id, w.recipe_id))
+
+
+def _join_id(a: tuple, b: tuple) -> tuple:
+    """레시피 정보 합치기 — 모르는 칸은 아는 쪽 값으로 채운다(:func:`rules.same_recipe` 를 통과한 둘만)."""
+    return tuple(x or y for x, y in zip(a, b))
+
+
+def same_base(a: WaferData, b: WaferData) -> bool:
+    """두 웨이퍼를 같은 슬라이더로 셀 수 있나 — 같은 레시피로 스캔했고(:func:`rules.recipe_identity`, 모르는 칸은
+    비교하지 않는다), 픽셀 크기가 같고, 둘 다 가진 레시피의 Zone 기준이 같은 것(:func:`_zones_fit`).
+
+    레시피가 다르면 스캔을 새로 한 것이라 Zone 이름 · 값이 같아도 따로 튜닝한다(현택님 2026-11-23)."""
+    return _fits(a.zones, a.px, a.recipe_id, b)
 
 
 def merge_wafers(ws: list) -> WaferData:
-    """웨이퍼 여러 장을 한 집합으로 — **첫 웨이퍼(읽힌 것 중)의 레시피**(Zone 기준 · 픽셀 크기)와 같은 것만 합친다.
+    """웨이퍼 여러 장을 한 집합으로 — **첫 웨이퍼(읽힌 것 중)의 레시피**와 같은 것만 합친다(:func:`same_base`).
 
     기준이 다르면(레시피가 다르면) 같은 슬라이더 값으로 셀 수 없어 빼고 ``skipped`` 에 적는다.  기준을 '가장 많은 무리'
     로 잡으면 다른 레시피 폴더를 더하는 순간 기준이 뒤바뀌어 조정한 값이 사라져서, 처음 고른 쪽으로 고정한다.
+    한 레시피 결과가 없는 웨이퍼도 합칠 수 있어서, Zone 기준은 합친 웨이퍼들의 것을 모으고 다음 웨이퍼는 **모은 것**과
+    비교한다(둘째 · 셋째가 서로 다른 레시피 2 를 들고 와 섞이지 않게).
     Defect 에는 몇 번째 웨이퍼인지(``wafer``)를 붙이고 사진 짝 키도 (웨이퍼, index) 로 바꾼다.
     RichSurface(내리기)는 한 장일 때만 쓴다."""
     good = [w for w in ws if not w.note]
     if not good:
         return WaferData(ws[0].folder, note=ws[0].note, skipped=tuple(w.folder for w in ws))
     base = good[0]
-    same = [w for w in good if same_base(base, w)]
-    out = WaferData(base.folder, zones=base.zones, classes=base.classes, px=base.px, recipe_id=base.recipe_id,
+    zones, rid, same = dict(base.zones), base.recipe_id, [base]
+    for w in good[1:]:
+        if _fits(zones, base.px, rid, w):
+            same.append(w)
+            zones.update({k: z for k, z in w.zones.items() if k not in zones})
+            rid = _join_id(rid, w.recipe_id)
+    out = WaferData(base.folder, zones=zones, classes=base.classes, px=base.px, recipe_id=rid,
                     folders=tuple(w.folder for w in same),
                     skipped=tuple(w.folder for w in ws if not any(w is x for x in same)),
                     rich=base.rich if len(same) == 1 else {})
