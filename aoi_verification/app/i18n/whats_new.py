@@ -26,6 +26,7 @@ ENTRIES = [
         "others": [
             ("사진 정보 · 엑셀", "Surface Defect 에도 type(Surface-Zone) · 종류 이름 · 분류 이름 줄이 붙습니다"),
             ("Defect 추출", "3D 사진이 ‘Recipe 없음’ 대신 그 레시피(예: BS_3D) 묶음으로 들어갑니다"),
+            ("사진 정보", "Scan 이 없는 컬러 사진은 [GL 보기] 가 꺼집니다 — 회색 사진 · Scan 을 찾은 컬러 사진만 열립니다"),
         ],
     },
     {
