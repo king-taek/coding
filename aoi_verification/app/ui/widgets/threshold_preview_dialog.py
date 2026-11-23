@@ -2,7 +2,7 @@
 
 현택님 요청(2026-11-16):
   * 폴더는 웨이퍼 폴더 또는 LOT 폴더(바로 아래 웨이퍼들), 여러 개를 [+ 폴더] · 끌어다 놓기로 더한다.
-    **처음 고른 폴더의 레시피**(Zone 기준 · 픽셀 크기)와 같은 웨이퍼만 합친다(:func:`merge_wafers`) —
+    **처음 고른 폴더의 레시피**(Zone 기준 · 픽셀 크기 · 파일에 적힌 Job/레시피)와 같은 웨이퍼만 합친다(:func:`merge_wafers`) —
     더한 폴더 때문에 기준이 뒤바뀌어 조정한 값이 사라지지 않게(현택님 2026-11-16).
   * 폴더 칩(현택님 2026-11-16): 이름을 누르면 그 폴더 Defect 만 아래 사진에 보이고(값 계산은 전체 그대로),
     오른쪽 ✕ 로 뺀다(5초 동안 [되돌리기]).  칩마다 Defect 수와 [컬러 | 스캔] 을 둔다.  빼기는 메모리에서 다시
@@ -142,15 +142,17 @@ class WaferData:
     misses: int = 0
     rich: dict = field(default_factory=dict)        # (zone_dir, zone) → RichSurface 후보 값 — 내리기용
     folders: tuple = ()               # 합친 웨이퍼 폴더들(하나면 folder 하나)
-    skipped: tuple = ()               # 못 합친 웨이퍼 폴더 — 못 읽었거나 Zone 기준 · 픽셀 크기가 기준 웨이퍼와 다름
+    skipped: tuple = ()               # 못 합친 웨이퍼 폴더 — 못 읽었거나 레시피(:func:`same_base`)가 기준 웨이퍼와 다름
     has_scan: bool = False            # 폴더에 Scan 목록이 있다 — 칩의 [스캔] 을 켤 수 있다
     slot: str = ""                    # 카세트 슬롯 번호(WaferInfo.ini ActiveSlot) — 모르면 빈 글자
-    _multi: object = field(default=None, repr=False, compare=False)   # Defect 가 든 Zone 폴더가 둘 이상인가(캐시)
+    recipe_id: tuple = ("", ())       # 어느 레시피로 스캔했나(SetupPath · 레시피 이름들) — :func:`rules.recipe_identity`
+    _multi: object = field(default=None, repr=False, compare=False)   # 레시피(Zone 폴더)가 둘 이상인가(캐시)
 
     def label(self, key) -> tuple:
         """Zone 키 → ``(이름, 레시피 표시)`` — 레시피가 여럿이면 어느 레시피 Zone 인지 늘 적는다."""
         if self._multi is None:
-            self._multi = len({d.zone_dir for d in self.defects + self.goods}) > 1
+            # Defect 가 레시피 1 에만 있어도 다른 레시피 Zone 줄이 같은 이름으로 서므로, 폴더의 Zone 폴더 수로도 본다.
+            self._multi = len({d.zone_dir for d in self.defects + self.goods} | {k[0] for k in self.zones}) > 1
         return zone_label(key[0], self.zones.get(key), key[1], R.read_recipe_names(self.folder), self._multi)
 
     def to_um(self, feature: int, v: float) -> float:
@@ -179,7 +181,7 @@ def load_wafer(folder: Path, report=lambda msg, done=0, total=0: None, stop=lamb
     defects, goods, note = P.load_all(folder)
     t1 = time.perf_counter()
     w = WaferData(folder, defects, goods, note=note, has_scan=(folder / SI.SCAN_LIST_NAME).is_file(),
-                  slot=read_active_slot(folder) or "")
+                  slot=read_active_slot(folder) or "", recipe_id=R.recipe_identity(folder))
     if note:
         return w
     w.zones = R.zones_in_flt_px(folder, R.read_zones(folder))     # flt 와 같은 픽셀로 — rules.zones_in_flt_px
@@ -248,6 +250,15 @@ def _wafer_label(folder: Path, data: WaferData) -> str:
     return _KO.OVERKILL_LOT_WAFER_NAME.format(slot=data.slot, name=folder.name) if data.slot else folder.name
 
 
+def same_base(a: WaferData, b: WaferData) -> bool:
+    """두 웨이퍼를 같은 슬라이더로 셀 수 있나 — Zone 기준 · 픽셀 크기가 같고 **같은 레시피로 스캔한 것**.
+
+    레시피가 다르면 스캔을 새로 한 것이라 Zone 이름 · 값이 같아도 따로 튜닝한다(현택님 2026-11-23) — 레시피는
+    파일에서 읽는다(:func:`rules.recipe_identity`, 모르는 칸은 비교하지 않는다)."""
+    return (a.zones == b.zones and all(abs(x - y) < 1e-6 for x, y in zip(a.px, b.px))
+            and R.same_recipe(a.recipe_id, b.recipe_id))
+
+
 def merge_wafers(ws: list) -> WaferData:
     """웨이퍼 여러 장을 한 집합으로 — **첫 웨이퍼(읽힌 것 중)의 레시피**(Zone 기준 · 픽셀 크기)와 같은 것만 합친다.
 
@@ -259,8 +270,8 @@ def merge_wafers(ws: list) -> WaferData:
     if not good:
         return WaferData(ws[0].folder, note=ws[0].note, skipped=tuple(w.folder for w in ws))
     base = good[0]
-    same = [w for w in good if w.zones == base.zones and all(abs(a - b) < 1e-6 for a, b in zip(base.px, w.px))]
-    out = WaferData(base.folder, zones=base.zones, classes=base.classes, px=base.px,
+    same = [w for w in good if same_base(base, w)]
+    out = WaferData(base.folder, zones=base.zones, classes=base.classes, px=base.px, recipe_id=base.recipe_id,
                     folders=tuple(w.folder for w in same),
                     skipped=tuple(w.folder for w in ws if not any(w is x for x in same)),
                     rich=base.rich if len(same) == 1 else {})
@@ -371,7 +382,7 @@ def zone_label(zone_dir: str, zone: R.Zone | None, zone_id: int, names: dict | N
                multi: bool = False) -> tuple[str, str]:
     """``(Zone 이름, 레시피 표시)`` — 레시피 하나뿐인 ``Zones`` 는 표시 없음, ``Recipe2-Zones`` 는 '레시피 2'.
 
-    ``multi``(폴더에 Defect 가 든 Zone 폴더가 둘 이상)이면 ``Zones`` 도 레시피 1 로 적는다 — 레시피마다 같은 이름의 Zone
+    ``multi``(폴더에 레시피 Zone 폴더가 둘 이상)이면 ``Zones`` 도 레시피 1 로 적는다 — 레시피마다 같은 이름의 Zone
     (Recipe3 ScanArea · Recipe2 Scan Area)이 있어 구분이 안 된다.  ``names`` = ``{N: RecipesInfo.ini 이름}``
     이면 '레시피 N' 대신 그 이름(x20 등), 없으면 '레시피 N'."""
     name = zone.name if zone is not None and zone.name else f"Zone {zone_id}"
@@ -379,6 +390,17 @@ def zone_label(zone_dir: str, zone: R.Zone | None, zone_id: int, names: dict | N
         return name, ""
     n = 1 if zone_dir == "Zones" else int(zone_dir.removeprefix("Recipe").removesuffix("-Zones"))
     return name, (names or {}).get(n) or _KO.THRESH_PREVIEW_RECIPE.format(n=n)
+
+
+def recipe_no(zone_dir: str) -> int:
+    """Zone 폴더 이름 → 레시피 번호(``Zones`` = 1, ``RecipeN-Zones`` = N) — Zone 목록을 레시피 순으로 놓는 데 쓴다."""
+    return 1 if zone_dir == "Zones" else int(zone_dir.removeprefix("Recipe").removesuffix("-Zones"))
+
+
+def recipe_head(zone_dir: str, rec: str) -> str:
+    """Zone 목록의 레시피 머리줄 — 이름이 있으면 '레시피 N · 이름', 없으면 '레시피 N'."""
+    plain = _KO.THRESH_PREVIEW_RECIPE.format(n=recipe_no(zone_dir))
+    return plain if rec == plain else _KO.THRESH_PREVIEW_RECIPE_HEAD.format(n=recipe_no(zone_dir), name=rec)
 
 
 LOG_P90_FRAC = 0.10         # 값의 90% 가 선형 축의 앞 10% 안에 몰리면 로그 축(현택님 2026-11-17 — 한두 개가 멀리 튀는 Area 등)
@@ -1603,6 +1625,7 @@ class ThresholdPreviewDialog(QDialog):
         self._zone_group = QButtonGroup(self)
         self._zone_group.setExclusive(True)
         self.zone_btns = {}
+        self.recipe_heads: dict = {}          # 레시피가 여럿일 때 Zone 목록의 레시피 머리줄(Zone 폴더 → QLabel)
 
         main = self._main = QVBoxLayout()
         main.setContentsMargins(12, 16, 12, 12)       # 왼쪽 열 244 + 좌우 12 + 기준 패널 최소 772 = 창 최소 폭 1040
@@ -2236,10 +2259,10 @@ class ThresholdPreviewDialog(QDialog):
         prev = self._w
         kept_picks = {(_folder_of(prev, d), d.index) for d in self._picked.values()} if prev else set()
         both = prev is not None and w is not None and not prev.note and not w.note
-        same_base = both and prev.zones == w.zones and prev.px == w.px
-        self._base_reset = bool(both and not same_base)
+        same = both and same_base(prev, w)
+        self._base_reset = bool(both and not same)
         self._w = w
-        self._ov = dict(self._ov) if same_base else {}
+        self._ov = dict(self._ov) if same else {}
         self._rich_base = {}
         self._drop_cache = {}
         self._picked = ({} if self._base_reset else
@@ -2248,7 +2271,7 @@ class ThresholdPreviewDialog(QDialog):
         kept_ov = {(_folder_of(prev, d), d.index) for d in self._overkill.values()} if prev else set()
         self._overkill = {key_of(d): d for d in (w.defects if w else ()) if (_folder_of(w, d), d.index) in kept_ov}
         self._rec_zones = {(d.zone_dir, d.zone) for d in self._picked.values()}
-        if (self._mode == "auto" and same_base and w is not None
+        if (self._mode == "auto" and same and w is not None
                 and {(_folder_of(w, d), d.index) for d in self._picked.values()} != kept_picks):
             # 폴더를 빼서 꼭 잡기가 줄었다 — 사라진 고름에서 나온 추천이 남지 않게 toggle_pick 과 같은 식으로 다시 추천한다
             # (고름이 없어진 Zone 은 레시피 값으로, 남은 Zone 은 남은 고름으로).  직접 조정은 그대로 둔다.
@@ -2400,13 +2423,13 @@ class ThresholdPreviewDialog(QDialog):
 
     # ------------------------------------------------------------------ 계산
     def zone_keys(self) -> list:
-        """Defect 가 있거나 기준이 있는 Zone — Defect 많은 순."""
+        """Defect 가 있거나 기준이 있는 Zone — **레시피 순으로 먼저 나누고**, 그 안에서 Defect 많은 순(현택님 2026-11-23)."""
         w = self._w
         if w is None:
             return []
         keys = {(d.zone_dir, d.zone) for d in w.defects + w.goods}
         keys |= {k for k, z in w.zones.items() if z.bundles}
-        return sorted(keys, key=lambda k: (-self._count(k), k))
+        return sorted(keys, key=lambda k: (recipe_no(k[0]), -self._count(k), k))
 
     def _count(self, key) -> int:
         return sum(1 for d in self._w.defects if (d.zone_dir, d.zone) == key)
@@ -2491,9 +2514,17 @@ class ThresholdPreviewDialog(QDialog):
             self._zone_group.removeButton(b)
         self._clear(self._zone_col)
         self.zone_btns = {}
+        self.recipe_heads = {}
         if self._w is None or self._w.note:
             return
         for key in self.zone_keys():
+            rec = self._w.label(key)[1]
+            if rec and key[0] not in self.recipe_heads:       # 레시피가 여럿이면 레시피 머리줄 아래에 그 레시피 Zone 들
+                head = QLabel(recipe_head(key[0], rec), self)
+                head.setProperty("role", "ovGroupName")
+                head.setContentsMargins(12, 0 if not self.recipe_heads else 12, 0, 2)
+                self._zone_col.addWidget(head)
+                self.recipe_heads[key[0]] = head
             b = _ZoneRow(self)
             b.setChecked(key == self._zone)
             b.clicked.connect(lambda _c=False, k=key: self._set_zone(k))
@@ -2513,9 +2544,9 @@ class ThresholdPreviewDialog(QDialog):
         return sorted((pos[k] + 0.5) / len(order) for k in self._picked if k in pos)
 
     def _zone_text(self, key) -> None:
-        name, rec = self._w.label(key)
+        name, _rec = self._w.label(key)          # 레시피는 머리줄에 있다(:meth:`_render_zones`) — 줄에는 Zone 이름만
         picks = sum(1 for d in self._picked.values() if (d.zone_dir, d.zone) == key)
-        self.zone_btns[key].set_data(f"{name}" + (f"  · {rec}" if rec else ""), self._count(key),
+        self.zone_btns[key].set_data(name, self._count(key),
                                      len(self.dropped(key)), self.appeared(key), picks, self._zone_ticks(key))
 
     def _render_rules(self) -> None:
