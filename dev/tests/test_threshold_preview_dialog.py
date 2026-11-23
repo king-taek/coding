@@ -1428,6 +1428,41 @@ def test_right_click_on_scan_tile_opens_full_scan_with_overlay_or_falls_back_to_
             assert len(opened[0][2]) == 4                                  # Scan 원본 위 Crop 범위
         dlg._on_full_scan(img, None, None, "")                             # 원본을 못 읽으면 Crop 을 크게 본다
         assert opened[-1][1] is img and opened[-1][2] is None
+        n = len(opened)
+        dlg._enlarge_tile(T.key_of(target))                                # 빠른 두 번 클릭 — 읽는 중에는 한 번만
+        dlg._enlarge_tile(T.key_of(target))
+        th = dlg._full_scan
+        th.wait(20000)
+        styled_qapp.processEvents()
+        assert len(opened) == n + 1
+    finally:
+        dlg.deleteLater()
+
+
+def test_left_click_on_scan_big_photo_enlarges_like_right_click(styled_qapp, tmp_path, monkeypatch):
+    """펼친 값의 Scan Crop 사진도 Color 처럼 누르면 크게 본다 — 우클릭 [크게보기] 와 같은 경로."""
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtGui import QColor, QImage
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    w, target = _scan_wafer(tmp_path)
+    dlg = T.ThresholdPreviewDialog()
+    try:
+        dlg.set_wafer(T.load_wafer(w))
+        dlg._set_zone((target.zone_dir, target.zone))
+        dlg._set_tab("keep")
+        side = round(300.0 / PX)
+        img = QImage(side, side, QImage.Format.Format_RGB888)
+        img.fill(QColor(90, 90, 90))
+        dlg.set_scans({(w, target.index): img})
+        k = T.key_of(target)
+        dlg._toggle(k)
+        assert isinstance(dlg._pic(dlg._tile_defects[k]), QImage)
+        big = dlg._band.findChildren(T._BigPhoto)[0]
+        assert big.cursor().shape() == Qt.CursorShape.PointingHandCursor
+        asked = []
+        monkeypatch.setattr(dlg, "_enlarge_tile", lambda i: asked.append(i))
+        big.clicked.emit()
+        assert asked == [k]
     finally:
         dlg.deleteLater()
 

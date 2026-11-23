@@ -3212,12 +3212,12 @@ class ThresholdPreviewDialog(QDialog):
             pic.setText(_KO.OVERKILL_SCAN_WAIT)
         if photo is None:
             pic.setCursor(Qt.CursorShape.ArrowCursor)
-        else:                                           # Color = 누르거나 우클릭 [크게보기], Scan Crop = 우클릭(원본 위 범위 표시)
+        else:                                           # 누르거나 우클릭 [크게보기] — Color 는 그대로, Scan Crop 은 원본 위 범위 표시
             pic.enlarge.connect(lambda i=key_of(d): self._enlarge_tile(i))
             if not isinstance(photo, QImage):
                 pic.clicked.connect(lambda: self._enlarge(photo, d))
             else:
-                pic.setCursor(Qt.CursorShape.ArrowCursor)
+                pic.clicked.connect(lambda i=key_of(d): self._enlarge_tile(i))
         lay.addWidget(pic, 0, Qt.AlignmentFlag.AlignTop)
         right = QVBoxLayout()
         right.setSpacing(8)
@@ -3581,6 +3581,8 @@ class ThresholdPreviewDialog(QDialog):
         idx = self._scan_index().get(key_of(d))
         if idx is None:
             self._on_full_scan(photo, None, None, "")
+            return
+        if self._full_scan is not None:         # 이미 원본을 읽는 중 — 빠른 두 번 클릭이 뷰어를 두 장 띄우지 않게
             return
         th = _FullScanLoad(photo, idx[1], idx[2], photo.text("src"))
         th.signals.done.connect(self._on_full_scan)
