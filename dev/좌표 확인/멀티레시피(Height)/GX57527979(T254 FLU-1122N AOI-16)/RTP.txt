@@ -1,0 +1,107 @@
+[PostProcess]   ; Zone name
+Alg = Warp_Direction_Calculation
+Inner_Radius_[Microns] = 1 ;  ( Radius of the inner circle, points inside are inner~8388863 ) 
+Outer_Radius_[Microns] = 2 ;  ( Radius of the outer circle, The points outside of it are outer~16711808 ) 
+
+Alg = Volume
+Shape_Violation_USL = 90000 ;  ( The Max bump volume allowed. ) 
+Shape_Violation_LSL = 9000 ;  ( The Min bump volume allowed. ) 
+
+Alg = Coplanarity
+Plane_Id = 0 ;  ( Coplanarity PlaneId~255 ) 
+Reference_Plane_Id = 0 ;  ( Reference Plane Id for plane/plane calc~33023 ) 
+Max_Avg._Dist_Above_Ref_Plane_Avg. = 50 ;  ( Maximum allowe value of avg height above reference plane~33023 ) 
+Max_Avg._Dist_Below_Ref_Plane_Avg. = 50 ;  ( Maximum allowe value of avg height below reference plane~33023 ) 
+Max_Cop._Delta_From_Ref._Plane_Cop. = 50 ;  ( Maximum delta of (measured) height cop. from (measured) reference plane cop.~33023 ) 
+Coplanarity_USL = 13 ;  ( Maximum allowed coplanarity value [micron].~8454143 ) 
+Coplanarity_Method = 1 ;  ( Method used to calculate the coplanarity. 1=Peak to Peak  2=Peak to Average  3=Seated Plane 4=Global Plane 5=Neighboring bumps~8454143 ) 
+Calculate_All_Methods = 1 ;  ( Enable-> Caculate all coplanarity methods for SPC ) 
+LSL_Bump_Height_Average = 0 ;  ( LSL allowed for Average bump height per die [Microns]~8454143 ) 
+USL_Bump_Height_Average = 500 ;  ( USL allowed for Average bump height per die [Microns]~8454143 ) 
+Bump_to_Surface_height = 1 ;  ( Enable-> Bump to surface calculation ) 
+SeatPlaneMode = 0 ;  ( Enable Enahnaced Seated Plane ) 
+PerpendicularDist = 0 ;  ( Calculate perpendicular dist from plane ) 
+Include_Zero_Bumps_in_Plane = 0 ;  ( Include Zero Bumps in Plane ) 
+Ignore_Critical_Bumps = 0 ;  (  ) 
+Ignore_Outlier_Defects = 0 ;  (  ) 
+Ignore_Outlier_All = 0 ;  (  ) 
+
+Alg = Zone_Coplanarity_Params
+Plane_Id = 0 ;  ( PlaneId as Defined in Coplanarity PostProcess~255 ) 
+Max_Distance_Above_Plane = 0 ;  ( -1 - From Global 0 - No defect ) 
+Max_Distance_Below_Plane = 35 ;  ( -1 - From Global 0 - No defect ) 
+Neighbor_Dir = 0 ;  ( 1-Horizontal, 2-Vertical, 0-Both ) 
+Neighbor_Angle = 0 ;  ( For Horizontal/Vertical, (dy/dx)/(dx/dy) * 100 resp. [for bumps in DieEdit] ) 
+
+Alg = Height_Post_Process
+Correlation_range = 0.15 ;  ( Tolerance range for correlation (area)~8454143 ) 
+
+Alg = Target_Measurement
+max_dX_[Micron] = -1 ;  (  ) 
+max_dY_[Micron] = -1 ;  (  ) 
+max_allowed_defects = 0 ;  (  ) 
+
+Alg = SB_Die_Level
+Max_Diff_In_Percent = 100 ;  ( Maximum allowed delta [%] from average bump radius~12615935 ) 
+Max_Diff_In_Microns = 100 ;  ( Maximum allowed delta [�] from average bump radius.~12615935 ) 
+STDV_of_Average = 100 ;  ( Maximum Allowed Standard Deviation For Bump Radius ) 
+Include_defective_Bumps = 1 ;  ( Enable-> Include =Use All bump 0=Only Good Bumps ) 
+Include_Zero_Bumps_in_Plane = 0 ;  ( Include Zero Bumps in Plane ) 
+Group_Id = 0 ;  ( These parameters are using for results produced for a zone with specific SB Die Level Group Id ) 
+
+
+
+[amk_mask_6_170]   ; Zone name
+Alg = CTS_Height_Measure_HD
+LSL_Height = 55.25 ;  ( Minimum Bump Height allowed ) 
+Surface_height_noise_level = 0.1 ;  ( Noise level of surface measure for corr. mode [microns]. ) 
+Height_Offset = 0 ;  ( Height Offset in um ) 
+Height_Gain = 1 ;  ( Height Gain factor ) 
+USL_Height = 77 ;  ( Maximum Bump Height allowed ) 
+Image_Margin = 0 ;  ( Image X-Axis one side margin in px applied to both sides ) 
+
+Alg = Surface
+Min_Defect_Area_-_Bright = 28497641.69 ;  in {area , µ} ( Filtering - Min area of Bright surface defect. Hint: Area>RTP AND Diameter > RTP width~8454143 ) 
+Min_Defect_Width_-_Bright = 3 ;  ( Filtering -Min width of Bright surface defect.~8454143 ) 
+Min_Defect_Length_-_Bright = 10.13 ;  in {µ} ( Filtering -Min length of Bright surface defect. Hint: Length >RTP Length AND diameter > RTP width~8454143 ) 
+Contrast_Delta_-_Bright = 30 ;  ( Detection - Minimum bright defect contrast (above Max reference)~8454143 ) 
+Min_Defect_Area_-_Dark = 28497641.69 ;  in {area , µ} ( Filtering -Min area of Dark surface defect.  Hint: Area>RTP AND Diameter > RTP breadth.~16744703 ) 
+Min_Defect_Width_-_Dark = 3 ;  ( Filtering -Min width of Dark surface defect.~16744703 ) 
+Min_Defect_Length_-_Dark = 10.13 ;  in {µ} ( Filtering -Min length of Dark surface defect. Hint: Length >BBox Length AND diameter > RTP breadth.~16744703 ) 
+Contrast_Delta_-_Dark = 30 ;  ( Detection - Minimum dark defect contrast (below Min reference)~16744703 ) 
+Clustering_Candidate_Area = 0 ;  in {area , µ} ( Clustering - minimum Area of candidate for clustering~8454016 ) 
+Clustering_Candidate_Diameter = 0 ;  in {µ} ( Clustering - minimum Width of candidate for clustering~8454016 ) 
+Clustering_Distance = 0 ;  in {µ} ( Maximum Distance between candidates to group.~8454016 ) 
+Isolated_Zone = 0 ;  ( Marked - split defect located between 2 different zones~14737632 ) 
+Bright_Uncertainty = 0 ;  ( Detection - Reduces sensitivity along bright edges. affects the maximum reference. can take fractional values.~65535 ) 
+Dark_Uncertainty = 0 ;  ( Detection - Reduces sensitivity along dark edges. affects the minimum reference. can take fractional values.~16711935 ) 
+Elongation = 0 ;  ( Filtering - filters out any blobs with elongation(length/width) below this value. 0 - disabled.~33023 ) 
+Rich_Events_Min_Area = 0 ;  in {area , µ} ( Filtering - Minimum blob area to be considered for rich classification. (per zone)~8421631 ) 
+Rich_Events_Cluster_-_Max_Distance = 0 ;  in {µ} ( Filtering - Maximum distance to cluster 2 defects.~8421631 ) 
+Rich_Events_Cluster_Unite_Polarities = 0 ;  ( Filtering - Cluster bright and dark defects together~8421631 ) 
+
+
+
+[Scan_Area]   ; Zone name
+Alg = Surface
+Min_Defect_Area_-_Bright = 28497641.69 ;  in {area , µ} ( Filtering - Min area of Bright surface defect. Hint: Area>RTP AND Diameter > RTP width~8454143 ) 
+Min_Defect_Width_-_Bright = 3 ;  ( Filtering -Min width of Bright surface defect.~8454143 ) 
+Min_Defect_Length_-_Bright = 10.13 ;  in {µ} ( Filtering -Min length of Bright surface defect. Hint: Length >RTP Length AND diameter > RTP width~8454143 ) 
+Contrast_Delta_-_Bright = 30 ;  ( Detection - Minimum bright defect contrast (above Max reference)~8454143 ) 
+Min_Defect_Area_-_Dark = 28497641.69 ;  in {area , µ} ( Filtering -Min area of Dark surface defect.  Hint: Area>RTP AND Diameter > RTP breadth.~16744703 ) 
+Min_Defect_Width_-_Dark = 3 ;  ( Filtering -Min width of Dark surface defect.~16744703 ) 
+Min_Defect_Length_-_Dark = 8.44 ;  in {µ} ( Filtering -Min length of Dark surface defect. Hint: Length >BBox Length AND diameter > RTP breadth.~16744703 ) 
+Contrast_Delta_-_Dark = 28 ;  ( Detection - Minimum dark defect contrast (below Min reference)~16744703 ) 
+Clustering_Candidate_Area = 0 ;  in {area , µ} ( Clustering - minimum Area of candidate for clustering~8454016 ) 
+Clustering_Candidate_Diameter = 0 ;  in {µ} ( Clustering - minimum Width of candidate for clustering~8454016 ) 
+Clustering_Distance = 0 ;  in {µ} ( Maximum Distance between candidates to group.~8454016 ) 
+Isolated_Zone = 0 ;  ( Marked - split defect located between 2 different zones~14737632 ) 
+Bright_Uncertainty = 0 ;  ( Detection - Reduces sensitivity along bright edges. affects the maximum reference. can take fractional values.~65535 ) 
+Dark_Uncertainty = 0 ;  ( Detection - Reduces sensitivity along dark edges. affects the minimum reference. can take fractional values.~16711935 ) 
+Elongation = -1 ;  ( Filtering - filters out any blobs with elongation(length/width) below this value. 0 - disabled.~33023 ) 
+Rich_Events_Min_Area = 0 ;  in {area , µ} ( Filtering - Minimum blob area to be considered for rich classification. (per zone)~8421631 ) 
+Rich_Events_Cluster_-_Max_Distance = 0 ;  in {µ} ( Filtering - Maximum distance to cluster 2 defects.~8421631 ) 
+Rich_Events_Cluster_Unite_Polarities = 0 ;  ( Filtering - Cluster bright and dark defects together~8421631 ) 
+
+
+

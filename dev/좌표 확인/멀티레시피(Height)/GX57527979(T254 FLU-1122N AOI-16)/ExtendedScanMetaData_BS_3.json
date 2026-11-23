@@ -1,0 +1,16 @@
+{
+  "RecipeSignatureObj": {
+    "CreationDateTime": {
+      "DateTime": "11/22/2026 10:59:41 PM",
+      "ParseFormat": "M/d/yyyy h:m:s tt"
+    },
+    "HashKeyPerFile": {
+      "OpticPreset.ini": "9ed7d50a-cd13-bce3-6f7b-fa30b197b174"
+    }
+  },
+  "UniqueIdentifier": "eb1f0867-1f24-4bed-90c9-3396c32a50c3",
+  "ModelUsedInScan": {
+    "ModelSignature": "",
+    "ModelName": ""
+  }
+}

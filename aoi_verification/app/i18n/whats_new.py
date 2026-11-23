@@ -18,6 +18,17 @@
 
 ENTRIES = [
     {
+        "id": "2026-11-23-height-info",
+        "date": "2026-11-23",
+        "headline": "3D(Height) Defect 사진에도\nRecipe · Zone · Height 가 나옵니다",
+        "summary": "멀티 레시피 스캔의 3D 레시피 사진(예: BS_3D)이 사진 정보 · 엑셀에 Recipe · Zone · Height 와\n"
+                   "이름(Missing Bump · B R Height LSL)을 보입니다. 장비 Export 와 같은 값입니다.",
+        "others": [
+            ("사진 정보 · 엑셀", "Surface Defect 에도 type(Surface-Zone) · 종류 이름 · 분류 이름 줄이 붙습니다"),
+            ("Defect 추출", "3D 사진이 ‘Recipe 없음’ 대신 그 레시피(예: BS_3D) 묶음으로 들어갑니다"),
+        ],
+    },
+    {
         "id": "2026-11-21-excel-drop",
         "date": "2026-11-21",
         "headline": "[엑셀로] 버튼 대신\n엑셀을 끌어다 놓습니다",

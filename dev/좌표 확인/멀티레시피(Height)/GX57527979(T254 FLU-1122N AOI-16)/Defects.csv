@@ -1,0 +1,353 @@
+#,Type,Area,Width,Length,Col,Row,X,Y,Classify,Visit
+1,Surface-amk_mask_6_170,59.84,5.83,10.78,1,6,238,2686,Accept,X
+2,Surface-amk_mask_6_170,42.75,6.51,8.85,1,4,7246,12353,Accept,X
+3,Surface-amk_mask_6_170,39.9,5.61,8.57,1,4,12586,20653,Accept,X
+4,Surface-amk_mask_6_170,45.59,6.61,8.57,1,2,6982,24334,Accept,X
+5,Surface-Scan Area,42.75,5.65,8.57,2,5,2833,6243,Accept,X
+6,Surface-amk_mask_6_170,424.6,5.62,62.31,2,4,214,17847,Accept,X
+7,Surface-amk_mask_6_170,421.75,5.62,61.66,2,4,214,17096,Accept,X
+8,Surface-amk_mask_6_170,418.9,5.52,61.66,2,4,214,17246,Accept,X
+9,Surface-amk_mask_6_170,416.05,5.67,61.66,2,4,514,17096,Accept,X
+10,Surface-Scan Area,416.05,5.82,60.1,2,4,934,17103,Accept,X
+11,Surface-amk_mask_6_170,410.35,5.49,60.75,2,4,365,17095,Accept,X
+12,Surface-amk_mask_6_170,410.35,5.6,61.93,2,4,1043,17105,Accept,X
+13,Surface-amk_mask_6_170,407.5,5.45,60.75,2,4,1002,17323,Accept,X
+14,Surface-Scan Area,401.81,5.65,59.19,2,4,824,17214,Accept,X
+15,Surface-amk_mask_6_170,398.96,5.42,60.75,2,4,215,16794,Accept,X
+16,Surface-amk_mask_6_170,398.96,5.33,61.02,2,4,365,16795,Accept,X
+17,Surface-amk_mask_6_170,398.96,5.37,60.75,2,4,365,17245,Accept,X
+18,Surface-amk_mask_6_170,396.11,5.42,60.75,2,4,365,16945,Accept,X
+19,Surface-amk_mask_6_170,393.26,5.49,59.19,2,4,214,16495,Accept,X
+20,Surface-amk_mask_6_170,393.26,5.28,61.02,2,4,214,16946,Accept,X
+21,Surface-amk_mask_6_170,393.26,5.32,60.18,2,4,1177,17147,Accept,X
+22,Surface-amk_mask_6_170,393.26,5.6,59.46,2,4,934,17213,Accept,X
+23,Surface-amk_mask_6_170,393.26,5.38,61.02,2,4,214,17396,Accept,X
+24,Surface-amk_mask_6_170,390.41,5.21,61.02,2,4,515,16795,Accept,X
+25,Surface-Scan Area,390.41,5.26,62.57,2,4,750,16936,Accept,X
+26,Surface-amk_mask_6_170,390.41,5.63,59.46,2,4,513,16945,Accept,X
+27,Surface-amk_mask_6_170,387.56,5.39,60.37,2,4,513,17246,Accept,X
+28,Surface-amk_mask_6_170,387.56,5.33,60.75,2,4,214,17546,Accept,X
+29,Surface-amk_mask_6_170,384.71,5.18,60.1,2,4,365,16496,Accept,X
+30,Surface-amk_mask_6_170,384.71,5.48,60.1,2,4,514,17395,Accept,X
+31,Surface-amk_mask_6_170,381.86,5.38,61.02,2,4,824,17324,Accept,X
+32,Surface-amk_mask_6_170,381.86,5.21,62.58,2,4,363,17547,Accept,X
+33,Surface-amk_mask_6_170,381.86,5.48,59.46,2,4,513,17546,Accept,X
+34,Surface-Scan Area,376.16,5.18,60.1,2,4,825,17498,Accept,X
+35,Surface-amk_mask_6_170,367.61,6.22,51.01,2,4,252,17116,Accept,X
+36,Surface-amk_mask_6_170,367.61,5.22,59.19,2,4,365,17395,Accept,X
+37,Surface-amk_mask_6_170,361.91,5.78,51.01,2,4,403,17115,Accept,X
+38,Surface-Scan Area,356.21,5.22,56.99,2,4,1145,16936,Accept,X
+39,Surface-amk_mask_6_170,356.21,5.8,53.02,2,4,861,17346,Accept,X
+40,Surface-amk_mask_6_170,356.21,5.8,51.82,2,4,402,17417,Accept,X
+41,Surface-amk_mask_6_170,356.21,5.9,51.01,2,4,862,17520,Accept,X
+42,Surface-amk_mask_6_170,353.36,5.83,51.01,2,4,552,17265,Accept,X
+43,Surface-amk_mask_6_170,353.36,5.9,51.01,2,4,252,17266,Accept,X
+44,Surface-amk_mask_6_170,350.51,5.63,53.02,2,4,1081,17126,Accept,X
+45,Surface-amk_mask_6_170,350.51,5.83,50.37,2,4,404,17265,Accept,X
+46,Surface-amk_mask_6_170,347.66,5.85,50.37,2,4,402,16816,Accept,X
+47,Surface-amk_mask_6_170,347.66,5.55,53.49,2,4,972,17234,Accept,X
+48,Surface-amk_mask_6_170,347.66,6.04,49.45,2,4,1388,17345,Accept,X
+49,Surface-amk_mask_6_170,344.81,5.93,50.37,2,4,253,17415,Accept,X
+50,Surface-amk_mask_6_170,341.96,5.62,51.82,2,4,251,16816,Accept,X
+51,Surface-amk_mask_6_170,336.26,5.59,51.93,2,4,552,16815,Accept,X
+52,Surface-amk_mask_6_170,336.26,5.84,49.45,2,4,552,17115,Accept,X
+53,Surface-amk_mask_6_170,333.41,5.69,50.37,2,4,403,16966,Accept,X
+54,Surface-amk_mask_6_170,333.41,5.71,50.63,2,4,1211,17169,Accept,X
+55,Surface-amk_mask_6_170,330.56,5.58,50.37,2,4,252,16966,Accept,X
+56,Surface-amk_mask_6_170,330.56,5.71,49.45,2,4,1562,17169,Accept,X
+57,Surface-amk_mask_6_170,330.56,5.76,48.24,2,4,1562,17346,Accept,X
+58,Surface-amk_mask_6_170,327.71,5.41,51.82,2,4,1386,17169,Accept,X
+59,Surface-amk_mask_6_170,327.71,5.68,50.37,2,4,1037,17344,Accept,X
+60,Surface-amk_mask_6_170,327.71,5.66,49.45,2,4,1212,17345,Accept,X
+61,Surface-amk_mask_6_170,327.71,5.48,51.01,2,4,552,17415,Accept,X
+62,Surface-amk_mask_6_170,322.01,5.37,50.64,2,4,552,16965,Accept,X
+63,Surface-amk_mask_6_170,319.16,5.3,50.63,2,4,972,17126,Accept,X
+64,Surface-amk_mask_6_170,319.16,5.57,50.37,2,4,1037,17520,Accept,X
+65,Surface-amk_mask_6_170,307.77,5.3,51.01,2,4,862,17236,Accept,X
+66,Surface-amk_mask_6_170,230.82,5.49,39.07,2,4,1154,16481,Accept,X
+67,Surface-amk_mask_6_170,56.99,5.26,11.42,2,4,1189,17330,Accept,X
+68,Surface-amk_mask_6_170,567.09,7.08,63.76,2,3,217,12592,Accept,X
+69,Surface-amk_mask_6_170,564.24,7.16,63.76,2,3,367,12592,Accept,X
+70,Surface-amk_mask_6_170,561.39,7.37,62.57,2,3,516,12592,Accept,X
+71,Surface-amk_mask_6_170,561.39,7.07,64.95,2,3,517,12743,Accept,X
+72,Surface-amk_mask_6_170,558.54,6.78,64.95,2,3,217,12743,Accept,X
+73,Surface-amk_mask_6_170,555.69,7.14,62.57,2,3,1187,12700,Accept,X
+74,Surface-amk_mask_6_170,541.44,7.01,62.57,2,3,366,12743,Accept,X
+75,Surface-amk_mask_6_170,527.19,6.87,62.57,2,3,1305,12700,Accept,X
+76,Surface-amk_mask_6_170,524.34,6.13,62.47,2,3,948,12566,Accept,X
+77,Surface-amk_mask_6_170,518.64,6.87,62.57,2,3,1424,12700,Accept,X
+78,Surface-Scan Area,510.09,6.58,63.76,2,3,1543,12566,Accept,X
+79,Surface-amk_mask_6_170,504.39,6.59,62.57,2,3,1543,12830,Accept,X
+80,Surface-amk_mask_6_170,495.84,5.78,62.47,2,3,1067,12565,Accept,X
+81,Surface-amk_mask_6_170,492.99,5.22,65.96,2,3,1423,12564,Accept,X
+82,Surface-amk_mask_6_170,487.3,6.41,61.66,2,3,948,12832,Accept,X
+83,Surface-amk_mask_6_170,481.6,6.02,60.1,2,3,830,12567,Accept,X
+84,Surface-amk_mask_6_170,481.6,6.12,61.66,2,3,1186,12831,Accept,X
+85,Surface-amk_mask_6_170,478.75,6.97,55.4,2,3,1338,12721,Accept,X
+86,Surface-amk_mask_6_170,470.2,6.78,57.79,2,3,1456,12721,Accept,X
+87,Surface-amk_mask_6_170,470.2,5.95,59.73,2,3,1421,12831,Accept,X
+88,Surface-amk_mask_6_170,464.5,6.47,59.46,2,3,829,12831,Accept,X
+89,Surface-amk_mask_6_170,458.8,6.84,55.43,2,3,399,12614,Accept,X
+90,Surface-amk_mask_6_170,458.8,7.12,55.4,2,3,249,12614,Accept,X
+91,Surface-amk_mask_6_170,453.1,6.94,54.21,2,3,549,12614,Accept,X
+92,Surface-amk_mask_6_170,450.25,6.07,59.46,2,3,1186,12568,Accept,X
+93,Surface-Scan Area,450.25,6.1,61.37,2,3,1065,12699,Accept,X
+94,Surface-amk_mask_6_170,447.4,6.11,61.4,2,3,1305,12831,Accept,X
+95,Surface-amk_mask_6_170,444.55,6.03,60.1,2,3,1066,12831,Accept,X
+96,Surface-Scan Area,438.85,5.91,61.4,2,3,948,12698,Accept,X
+97,Surface-Scan Area,438.85,6.06,57.79,2,3,828,12698,Accept,X
+98,Surface-amk_mask_6_170,436,6.78,54.78,2,3,1576,12589,Accept,X
+99,Surface-Scan Area,436,5.84,61.37,2,3,1543,12699,Accept,X
+100,Surface-amk_mask_6_170,427.45,5.84,61.66,2,3,1304,12569,Accept,X
+101,Surface-amk_mask_6_170,424.6,5.91,59.46,2,3,1727,12568,Accept,X
+102,Surface-Scan Area,381.86,5.46,60.18,2,3,1726,12698,Accept,X
+103,Surface-amk_mask_6_170,367.61,5.51,55.4,2,3,1574,12721,Accept,X
+104,Surface-amk_mask_6_170,361.91,5.73,54.13,2,3,984,12721,Accept,X
+105,Surface-amk_mask_6_170,359.06,5.54,54.21,2,3,1457,12588,Accept,X
+106,Surface-amk_mask_6_170,344.81,5.44,52.57,2,3,866,12720,Accept,X
+107,Surface-amk_mask_6_170,341.96,5.62,50.63,2,3,865,12589,Accept,X
+108,Surface-amk_mask_6_170,341.96,5.39,51.82,2,3,982,12590,Accept,X
+109,Surface-amk_mask_6_170,327.71,5.16,53.02,2,3,1219,12589,Accept,X
+110,Surface-amk_mask_6_170,76.94,7.43,12.98,2,3,961,12311,Accept,X
+111,Surface-amk_mask_6_170,76.94,6.33,12.98,2,3,1080,12311,Accept,X
+112,Surface-amk_mask_6_170,76.94,7.43,12.98,2,3,1435,12443,Accept,X
+113,Surface-amk_mask_6_170,74.09,6.66,12.98,2,3,1317,12311,Accept,X
+114,Surface-amk_mask_6_170,74.09,6.66,12.98,2,3,1554,12575,Accept,X
+115,Surface-amk_mask_6_170,68.39,6.13,12.34,2,3,961,12443,Accept,X
+116,Surface-amk_mask_6_170,68.39,6.13,12.34,2,3,1079,12575,Accept,X
+117,Surface-amk_mask_6_170,68.39,5.62,12.43,2,3,1199,12575,Accept,X
+118,Surface-amk_mask_6_170,68.39,5.46,12.34,2,3,528,12598,Accept,X
+119,Surface-Scan Area,65.54,5.21,12.98,2,3,526,12389,Accept,X
+120,Surface-amk_mask_6_170,62.69,5.82,11.42,2,3,1197,12312,Accept,X
+121,Surface-amk_mask_6_170,62.69,5.82,11.42,2,3,1435,12312,Accept,X
+122,Surface-amk_mask_6_170,62.69,6.6,11.42,2,3,1859,12444,Accept,X
+123,Surface-amk_mask_6_170,62.69,5.82,11.42,2,3,527,12449,Accept,X
+124,Surface-amk_mask_6_170,56.99,5.47,11.42,2,3,228,12449,Accept,X
+125,Surface-amk_mask_6_170,56.99,5.26,11.42,2,3,843,12576,Accept,X
+126,Surface-amk_mask_6_170,56.99,5.26,11.42,2,3,1435,12576,Accept,X
+127,Surface-Scan Area,54.14,5.43,11.24,2,3,436,12389,Accept,X
+128,Surface-amk_mask_6_170,54.14,5.43,11.24,2,3,1741,12443,Accept,X
+129,Surface-amk_mask_6_170,51.29,5.39,10.78,2,3,378,12599,Accept,X
+130,Surface-amk_mask_6_170,34.2,5.76,7.01,2,2,9770,27484,Accept,X
+131,Surface-amk_mask_6_170,51.29,6.42,10.13,4,6,239,736,Accept,X
+132,Surface-amk_mask_6_170,48.44,6.85,9.22,4,6,12585,26259,Accept,X
+133,Surface-amk_mask_6_170,42.75,5.65,8.57,4,6,7224,1755,Accept,X
+134,Surface-amk_mask_6_170,42.75,5.65,8.57,4,6,12585,26435,Accept,X
+135,Surface-amk_mask_6_170,42.75,5.65,9.22,4,6,12269,1539,Accept,X
+136,Surface-amk_mask_6_170,39.9,5.61,8.57,4,6,9882,2993,Accept,X
+137,Surface-amk_mask_6_170,42.75,5.65,8.57,4,3,12586,23454,Accept,X
+138,Surface-amk_mask_6_170,45.59,6.61,8.57,4,1,7154,23983,Accept,X
+139,Surface-amk_mask_6_170,42.75,6.51,8.85,4,1,9781,22758,Accept,X
+140,Surface-amk_mask_6_170,42.75,6.51,8.85,4,1,9848,14555,Accept,X
+141,Surface-amk_mask_6_170,42.75,5.65,8.57,4,1,9957,19780,Accept,X
+142,Surface-amk_mask_6_170,42.75,5.65,8.57,4,1,7154,24334,Accept,X
+143,Surface-amk_mask_6_170,39.9,6.26,8.85,4,1,9939,17367,Accept,X
+144,Surface-amk_mask_6_170,34.2,5.76,7.01,5,7,9773,19956,Accept,X
+145,Surface-amk_mask_6_170,34.2,5.76,7.01,5,1,9770,27309,Accept,X
+146,Surface-amk_mask_6_170,34.2,5.06,7.66,5,1,9768,24507,Accept,X
+147,Surface-Scan Area,48.44,5.34,10.13,6,3,5789,12397,Accept,X
+148,Surface-amk_mask_6_170,51.29,6.42,9.22,7,7,5345,11654,Accept,X
+149,Surface-amk_mask_6_170,39.9,5.61,8.57,7,7,9960,5511,Accept,X
+150,Surface-amk_mask_6_170,39.9,5.61,8.57,7,7,9949,14054,Accept,X
+151,Surface-amk_mask_6_170,42.75,6.51,8.85,7,6,1726,19080,Accept,X
+152,Surface-amk_mask_6_170,45.59,6.61,8.57,7,5,12528,9584,Accept,X
+153,Surface-amk_mask_6_170,42.75,5.65,8.57,7,5,12286,6864,Accept,X
+154,Surface-amk_mask_6_170,45.59,5.67,9.22,7,3,7154,29937,Accept,X
+155,Surface-amk_mask_6_170,42.75,5.65,8.57,7,3,1376,29936,Accept,X
+156,Surface-amk_mask_6_170,39.9,5.61,8.57,7,3,849,29946,Accept,X
+157,Surface-Scan Area,222.28,5.45,20.78,7,2,11853,24816,Accept,X
+158,Surface-amk_mask_6_170,48.44,6.85,9.22,7,2,9783,28185,Accept,X
+159,Surface-amk_mask_6_170,39.9,5.61,8.57,7,2,7238,4245,Accept,X
+160,Surface-amk_mask_6_170,56.99,7.45,9.22,7,1,9869,30057,Accept,X
+161,Surface-amk_mask_6_170,54.14,6.28,9.22,7,1,1374,24858,Accept,X
+162,Surface-amk_mask_6_170,51.29,7.1,9.22,7,1,9782,29935,Accept,X
+163,Surface-amk_mask_6_170,48.44,6.85,9.22,7,1,9742,5509,Accept,X
+164,Surface-amk_mask_6_170,48.44,6.85,9.22,7,1,9924,30701,Accept,X
+165,Surface-amk_mask_6_170,48.44,6.85,9.22,7,1,9519,30057,Accept,X
+166,Surface-amk_mask_6_170,48.44,6.85,9.22,7,1,9694,30057,Accept,X
+167,Surface-amk_mask_6_170,45.59,5.28,9.22,7,1,9774,30402,Accept,X
+168,Surface-amk_mask_6_170,45.59,5.67,9.22,7,1,387,24605,Accept,X
+169,Surface-amk_mask_6_170,45.59,6.61,8.57,7,1,7069,30402,Accept,X
+170,Surface-amk_mask_6_170,42.75,5.65,8.57,7,1,1198,25032,Accept,X
+171,Surface-amk_mask_6_170,42.75,5.65,8.57,7,1,1024,25207,Accept,X
+172,Surface-amk_mask_6_170,42.75,5.65,8.57,7,1,1515,30703,Accept,X
+173,Surface-amk_mask_6_170,42.75,5.65,8.57,7,1,854,10838,Accept,X
+174,Surface-amk_mask_6_170,42.75,6.51,8.85,7,1,537,3137,Accept,X
+175,Surface-amk_mask_6_170,39.9,5.61,8.57,7,1,849,22406,Accept,X
+176,Surface-amk_mask_6_170,51.29,6.42,9.22,7,0,2777,29238,Accept,X
+177,Surface-amk_mask_6_170,48.44,6.85,9.22,7,0,7154,24334,Accept,X
+178,Surface-amk_mask_6_170,45.59,5.67,9.22,7,0,12162,7713,Accept,X
+179,Surface-amk_mask_6_170,39.9,6.26,7.66,8,4,9861,30058,Accept,X
+180,Surface-amk_mask_6_170,34.2,5.06,7.66,8,4,9772,27311,Accept,X
+181,Surface-Scan Area,59.84,6.13,11.42,9,4,5043,26506,Accept,X
+182,Surface-amk_mask_6_170,71.24,6.77,11.24,10,8,7546,15056,Accept,X
+183,Surface-amk_mask_6_170,42.75,5.65,8.57,10,8,12759,18376,Accept,X
+184,Surface-amk_mask_6_170,45.59,5.67,8.85,10,6,1359,8195,Accept,X
+185,Surface-amk_mask_6_170,42.75,5.65,8.57,10,6,6239,2608,Accept,X
+186,Surface-amk_mask_6_170,39.9,5.61,8.57,10,6,12750,2545,Accept,X
+187,Surface-amk_mask_6_170,45.59,6.61,8.57,10,5,9772,30404,Accept,X
+188,Surface-amk_mask_6_170,42.75,5.2,8.57,10,5,9923,30704,Accept,X
+189,Surface-amk_mask_6_170,42.75,5.65,9.22,10,4,9959,5719,Accept,X
+190,Surface-amk_mask_6_170,39.9,6.26,8.85,10,4,9947,13853,Accept,X
+191,Surface-amk_mask_6_170,54.14,5.43,10.04,10,3,386,5239,Accept,X
+192,Surface-amk_mask_6_170,51.29,7.1,9.22,10,3,7154,29585,Accept,X
+193,Surface-amk_mask_6_170,48.44,6.96,8.57,10,3,1373,29937,Accept,X
+194,Surface-amk_mask_6_170,48.44,6.85,9.22,10,3,387,13495,Accept,X
+195,Surface-amk_mask_6_170,48.44,6.85,9.22,10,3,1729,7962,Accept,X
+196,Surface-amk_mask_6_170,45.59,5.67,9.22,10,3,1358,5266,Accept,X
+197,Surface-amk_mask_6_170,45.59,6.61,8.57,10,3,848,21705,Accept,X
+198,Surface-amk_mask_6_170,45.59,6.61,8.57,10,3,1725,21705,Accept,X
+199,Surface-amk_mask_6_170,45.59,6.61,8.57,10,3,12583,29585,Accept,X
+200,Surface-amk_mask_6_170,45.59,5.67,9.22,10,3,12495,29710,Accept,X
+201,Surface-amk_mask_6_170,45.59,6.75,8.85,10,3,1140,16254,Accept,X
+202,Surface-amk_mask_6_170,45.59,6.61,8.57,10,3,1374,24331,Accept,X
+203,Surface-amk_mask_6_170,42.75,5.2,8.57,10,3,1605,5266,Accept,X
+204,Surface-amk_mask_6_170,42.75,5.65,8.57,10,3,1549,21705,Accept,X
+205,Surface-amk_mask_6_170,42.75,6.51,8.85,10,3,12583,29235,Accept,X
+206,Surface-amk_mask_6_170,42.75,6.51,8.85,10,3,939,16254,Accept,X
+207,Surface-amk_mask_6_170,39.9,5.61,8.57,10,3,1640,16153,Accept,X
+208,Surface-amk_mask_6_170,39.9,5.61,8.57,10,3,848,24332,Accept,X
+209,Surface-amk_mask_6_170,45.59,6.61,8.57,10,2,12551,1542,Accept,X
+210,Surface-amk_mask_6_170,42.75,5.65,8.57,10,2,12715,9714,Accept,X
+211,Surface-amk_mask_6_170,42.75,5.65,8.57,10,2,12527,12498,Accept,X
+212,Surface-amk_mask_6_170,42.75,5.65,8.57,10,2,12156,1537,Accept,X
+213,Surface-amk_mask_6_170,39.9,5.61,8.57,10,2,12161,4300,Accept,X
+214,Surface-amk_mask_6_170,54.14,7.2,9.22,10,1,9870,30056,Accept,X
+215,Surface-amk_mask_6_170,48.44,5.34,8.85,10,1,9848,13554,Accept,X
+216,Surface-amk_mask_6_170,48.44,5.34,9.22,10,1,5544,11250,Accept,X
+217,Surface-amk_mask_6_170,45.59,6.61,8.57,10,1,9958,21879,Accept,X
+218,Surface-amk_mask_6_170,42.75,5.65,8.57,10,1,1209,10969,Accept,X
+219,Surface-amk_mask_6_170,42.75,5.65,8.57,10,1,9957,27310,Accept,X
+220,Surface-amk_mask_6_170,45.59,6.61,8.57,10,0,7154,29764,Accept,X
+221,Surface-amk_mask_6_170,42.75,5.65,8.57,10,0,6978,29588,Accept,X
+222,Surface-amk_mask_6_170,37.05,6.01,7.66,11,6,9774,22408,Accept,X
+223,Surface-amk_mask_6_170,48.44,6.96,8.57,11,4,1223,5803,Accept,X
+224,Surface-amk_mask_6_170,34.2,5.76,7.01,11,4,9941,8475,Accept,X
+225,Surface-amk_mask_6_170,34.2,5.76,7.01,11,4,9936,13852,Accept,X
+226,Surface-Scan Area,39.9,5.61,8.57,11,2,12237,3555,Accept,X
+227,Surface-amk_mask_6_170,39.9,6.26,7.66,11,1,9861,30058,Accept,X
+228,Surface-amk_mask_6_170,37.05,6.01,7.66,11,1,9773,29939,Accept,X
+229,Surface-Scan Area,153.88,5.47,21.95,12,2,11082,21566,Accept,X
+230,Surface-Scan Area,54.14,5.21,10.78,13,7,4284,22288,Accept,X
+231,Surface-Scan Area,341.96,5.46,45.04,13,5,13951,5983,Accept,X
+232,Surface-Scan Area,91.19,5.61,17.21,13,5,13935,6014,Accept,X
+233,Surface-amk_mask_6_170,54.14,6.28,10.13,13,4,1160,23624,Accept,X
+234,Surface-Scan Area,56.99,5.26,10.78,13,3,6566,3739,Accept,X
+235,Surface-amk_mask_6_170,39.9,5.61,8.57,13,3,9958,5510,Accept,X
+236,Surface-amk_mask_6_170,42.75,6.51,8.85,13,1,6945,7850,Accept,X
+237,Surface-amk_mask_6_170,39.9,5.61,8.57,13,1,7146,7658,Accept,X
+238,Surface-amk_mask_6_170,39.9,5.61,8.57,13,1,9783,28186,Accept,X
+239,Surface-Scan Area,755.17,6.62,93.6,14,6,915,7918,Accept,X
+240,Surface-amk_mask_6_170,681.07,6.28,90.02,14,6,1016,8025,Accept,X
+241,Surface-amk_mask_6_170,644.03,7.34,68.53,14,6,221,7940,Accept,X
+242,Surface-amk_mask_6_170,644.03,7.54,67.34,14,6,221,8089,Accept,X
+243,Surface-amk_mask_6_170,638.33,7.59,67.34,14,6,371,7938,Accept,X
+244,Surface-amk_mask_6_170,632.63,7.37,68.53,14,6,221,7639,Accept,X
+245,Surface-amk_mask_6_170,629.78,7.45,67.34,14,6,371,8089,Accept,X
+246,Surface-amk_mask_6_170,621.23,7.55,66.15,14,6,521,8089,Accept,X
+247,Surface-amk_mask_6_170,618.38,7.51,66.15,14,6,521,7938,Accept,X
+248,Surface-amk_mask_6_170,618.38,7.13,68.53,14,6,1467,8115,Accept,X
+249,Surface-Scan Area,618.38,7.81,64.95,14,6,923,8115,Accept,X
+250,Surface-amk_mask_6_170,587.03,6.6,68.53,14,6,1467,7807,Accept,X
+251,Surface-amk_mask_6_170,521.49,6.34,64.95,14,6,1220,7652,Accept,X
+252,Surface-amk_mask_6_170,510.09,6.04,66.15,14,6,1344,8191,Accept,X
+253,Surface-amk_mask_6_170,490.15,5.8,66.15,14,6,1468,7960,Accept,X
+254,Surface-amk_mask_6_170,490.15,6.1,63.76,14,6,1219,8114,Accept,X
+255,Surface-amk_mask_6_170,487.3,5.71,66.15,14,6,1591,7883,Accept,X
+256,Surface-amk_mask_6_170,484.45,5.81,66.15,14,6,1344,8038,Accept,X
+257,Surface-amk_mask_6_170,481.6,5.65,66.15,14,6,1344,7884,Accept,X
+258,Surface-amk_mask_6_170,475.9,5.47,67.34,14,6,1344,7576,Accept,X
+259,Surface-amk_mask_6_170,475.9,5.65,64.95,14,6,1591,8036,Accept,X
+260,Surface-amk_mask_6_170,473.05,5.83,64.95,14,6,1219,7806,Accept,X
+261,Surface-amk_mask_6_170,470.2,5.81,64.95,14,6,1838,7729,Accept,X
+262,Surface-amk_mask_6_170,467.35,5.67,64.95,14,6,1837,7574,Accept,X
+263,Surface-amk_mask_6_170,467.35,5.63,66.15,14,6,1221,7959,Accept,X
+264,Surface-amk_mask_6_170,453.1,5.45,64.95,14,6,1591,8191,Accept,X
+265,Surface-amk_mask_6_170,413.2,6.31,55.4,14,6,547,7964,Accept,X
+266,Surface-amk_mask_6_170,410.35,6.27,55.4,14,6,547,7813,Accept,X
+267,Surface-amk_mask_6_170,401.81,6.27,54.21,14,6,397,7814,Accept,X
+268,Surface-amk_mask_6_170,390.41,6.26,53.02,14,6,248,7814,Accept,X
+269,Surface-amk_mask_6_170,390.41,6.13,54.21,14,6,1617,7908,Accept,X
+270,Surface-amk_mask_6_170,384.71,5.9,55.4,14,6,1245,7831,Accept,X
+271,Surface-amk_mask_6_170,381.86,6.03,54.21,14,6,397,7965,Accept,X
+272,Surface-amk_mask_6_170,379.01,6.16,53.02,14,6,1493,7833,Accept,X
+273,Surface-amk_mask_6_170,379.01,6.11,53.02,14,6,248,7964,Accept,X
+274,Surface-amk_mask_6_170,370.46,5.73,54.21,14,6,1093,7792,Accept,X
+275,Surface-amk_mask_6_170,370.46,5.78,54.21,14,6,1493,7986,Accept,X
+276,Surface-amk_mask_6_170,361.91,5.93,51.82,14,6,1369,7910,Accept,X
+277,Surface-amk_mask_6_170,359.06,5.9,53.02,14,6,1246,7986,Accept,X
+278,Surface-amk_mask_6_170,316.31,5.62,48.24,14,6,1054,8040,Accept,X
+279,Surface-amk_mask_6_170,313.46,5.64,48.24,14,6,953,7930,Accept,X
+280,Surface-amk_mask_6_170,290.67,5.12,48.24,14,6,987,7791,Accept,X
+281,Surface-amk_mask_6_170,76.94,5.71,12.34,14,6,1598,7582,Accept,X
+282,Surface-amk_mask_6_170,68.39,6.13,11.42,14,6,1721,7814,Accept,X
+283,Surface-amk_mask_6_170,65.54,5.61,12.34,14,6,1474,7813,Accept,X
+284,Surface-amk_mask_6_170,65.54,5.61,12.98,14,6,1351,7891,Accept,X
+285,Surface-amk_mask_6_170,65.54,5.61,12.34,14,6,1845,7891,Accept,X
+286,Surface-Scan Area,65.54,5.07,12.98,14,6,256,7894,Accept,X
+287,Surface-amk_mask_6_170,65.54,5.82,11.42,14,6,932,7912,Accept,X
+288,Surface-Scan Area,62.69,5.82,12.43,14,6,315,7742,Accept,X
+289,Surface-amk_mask_6_170,62.69,5.17,12.98,14,6,529,7796,Accept,X
+290,Surface-amk_mask_6_170,59.84,6.79,10.78,14,6,1597,7737,Accept,X
+291,Surface-amk_mask_6_170,59.84,6.79,10.78,14,6,1227,7968,Accept,X
+292,Surface-amk_mask_6_170,59.84,5.83,11.42,14,6,1722,7968,Accept,X
+293,Surface-Scan Area,59.84,5.13,12.34,14,6,763,8014,Accept,X
+294,Surface-amk_mask_6_170,56.99,5.84,11.42,14,6,1722,7659,Accept,X
+295,Surface-amk_mask_6_170,56.99,6.19,11.42,14,6,1598,7890,Accept,X
+296,Surface-Scan Area,56.99,5.26,12.43,14,6,286,7893,Accept,X
+297,Surface-amk_mask_6_170,54.14,5.21,11.42,14,6,1476,7659,Accept,X
+298,Surface-amk_mask_6_170,51.29,5.15,10.78,14,6,1032,8024,Accept,X
+299,Surface-Scan Area,42.75,5.65,9.22,14,6,316,7713,Accept,X
+300,Surface-amk_mask_6_170,42.75,5.65,9.22,14,6,379,7795,Accept,X
+301,Surface-amk_mask_6_170,34.2,5.76,7.01,14,2,9774,25035,Accept,X
+302,Surface-Scan Area,151.03,6.4,20.51,14,1,3347,16103,Accept,X
+303,Surface-amk_mask_6_170,37.05,6.01,7.66,14,1,9771,27311,Accept,X
+304,Surface-amk_mask_6_170,37.05,6.01,7.66,14,1,8639,15556,Accept,X
+305,Surface-amk_mask_6_170,34.2,5.76,7.01,14,1,9938,11052,Accept,X
+306,Surface-amk_mask_6_170,48.44,6.85,9.22,16,4,7223,1625,Accept,X
+307,Surface-amk_mask_6_170,39.9,5.61,8.57,16,4,12585,26258,Accept,X
+308,Surface-amk_mask_6_170,45.59,6.61,8.57,16,3,1749,8601,Accept,X
+309,Surface-amk_mask_6_170,170.98,7.31,18.95,17,2,1888,26080,Scratch,B R Surface Bright
+310,Surface-amk_mask_6_170,85.49,9.24,12.34,17,2,2415,25556,Scratch,B R Surface Bright
+311,Surface-amk_mask_6_170,79.79,8.89,11.42,17,2,5043,22405,Scratch,B R Surface Bright
+312,Surface-amk_mask_6_170,74.09,8.3,10.78,17,2,4866,22755,Scratch,B R Surface Bright
+313,Surface-amk_mask_6_170,71.24,6.77,10.78,17,2,5041,22579,Scratch,B R Surface Bright
+314,Surface-amk_mask_6_170,71.24,8.3,10.78,17,2,4692,22930,Scratch,B R Surface Bright
+315,Surface-amk_mask_6_170,68.39,7.64,10.78,17,2,227,30008,Scratch,B R Surface Bright
+316,Surface-amk_mask_6_170,68.39,6.13,11.82,17,2,2939,25035,Scratch,B R Surface Bright
+317,Surface-amk_mask_6_170,68.39,8.05,10.78,17,2,5217,22230,Scratch,B R Surface Bright
+318,Surface-amk_mask_6_170,65.54,8.05,10.78,17,2,5217,22054,Scratch,B R Surface Bright
+319,Surface-amk_mask_6_170,65.54,8.05,10.78,17,2,5393,22054,Scratch,B R Surface Bright
+320,Surface-amk_mask_6_170,62.69,6.6,10.13,17,2,5393,21880,Scratch,B R Surface Bright
+321,Surface-amk_mask_6_170,59.84,7.7,10.04,17,2,4868,22580,Scratch,B R Surface Bright
+322,Surface-amk_mask_6_170,59.84,7.45,9.22,17,2,4692,23105,Scratch,B R Surface Bright
+323,Surface-amk_mask_6_170,56.99,7.45,10.13,17,2,2589,25383,Scratch,B R Surface Bright
+324,Surface-amk_mask_6_170,54.14,6.28,9.22,17,2,2063,25907,Scratch,B R Surface Bright
+325,Surface-amk_mask_6_170,51.29,5.39,10.13,17,2,378,30006,Scratch,B R Surface Bright
+326,Surface-amk_mask_6_170,51.29,7.1,9.22,17,2,2239,25734,Scratch,B R Surface Bright
+327,Surface-amk_mask_6_170,51.29,7.1,9.22,17,2,6092,20126,Scratch,B R Surface Bright
+328,Surface-amk_mask_6_170,48.44,6.85,9.22,17,2,6092,19602,Scratch,B R Surface Bright
+329,Surface-amk_mask_6_170,48.44,6.85,9.22,17,2,6092,19952,Scratch,B R Surface Bright
+330,Surface-amk_mask_6_170,45.59,6.61,8.57,17,2,4867,22930,Scratch,B R Surface Bright
+331,Surface-amk_mask_6_170,45.59,5.67,8.85,17,2,6189,17544,Scratch,B R Surface Bright
+332,Surface-amk_mask_6_170,42.75,5.65,8.57,17,2,378,29707,Scratch,B R Surface Bright
+333,Surface-amk_mask_6_170,42.75,5.65,8.57,17,2,527,29857,Scratch,B R Surface Bright
+334,Surface-amk_mask_6_170,39.9,6.26,7.66,17,2,2764,25208,Scratch,B R Surface Bright
+335,Surface-amk_mask_6_170,39.9,6.26,8.85,17,2,6092,19777,Scratch,B R Surface Bright
+336,Surface-amk_mask_6_170,39.9,5.61,8.57,17,2,5918,20303,Scratch,B R Surface Bright
+337,Surface-amk_mask_6_170,37.05,6.01,7.66,17,2,6093,19076,Scratch,B R Surface Bright
+338,Surface-amk_mask_6_170,37.05,6.01,7.66,17,2,6092,19428,Scratch,B R Surface Bright
+339,Surface-amk_mask_6_170,37.05,6.01,7.66,17,2,6092,20302,Scratch,B R Surface Bright
+340,Height-amk_mask_6_170,50.19,0,0,17,2,2586,25381,Undersized Bump,B R Height LSL
+341,Height-amk_mask_6_170,50.83,0,0,17,2,2234,25731,Undersized Bump,B R Height LSL
+342,Height-amk_mask_6_170,51.46,0,0,17,2,2759,25206,Undersized Bump,B R Height LSL
+343,Height-amk_mask_6_170,50.14,0,0,17,2,2410,25555,Undersized Bump,B R Height LSL
+344,Height-amk_mask_6_170,51.08,0,0,17,2,1359,26783,Undersized Bump,B R Height LSL
+345,Height-amk_mask_6_170,48.05,0,0,17,2,1886,26082,Undersized Bump,B R Height LSL
+346,Height-amk_mask_6_170,53.86,0,0,17,2,1535,26432,Undersized Bump,B R Height LSL
+347,Height-amk_mask_6_170,52.59,0,0,17,2,1535,26607,Undersized Bump,B R Height LSL
+348,Height-amk_mask_6_170,53.34,0,0,17,2,1710,26432,Undersized Bump,B R Height LSL
+349,Height-amk_mask_6_170,49.46,0,0,17,2,1710,26258,Undersized Bump,B R Height LSL
+350,Height-amk_mask_6_170,49.74,0,0,17,2,2059,25906,Undersized Bump,B R Height LSL
+351,Coplanarity-Scan Area,19.39,63.92,0,17,2,3113,26604,Coplanarity Defect,B R Cop
+352,Surface-Scan Area,51.29,6.42,10.13,18,3,1200,29666,Accept,X
