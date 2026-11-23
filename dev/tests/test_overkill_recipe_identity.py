@@ -223,3 +223,44 @@ def test_recipe_head_text():
     assert (recipe_no("Zones"), recipe_no("Recipe3-Zones")) == (1, 3)
     assert recipe_head("Recipe3-Zones", "x20") == "레시피 3 · x20"
     assert recipe_head("Recipe2-Zones", "레시피 2") == "레시피 2"               # 이름이 없으면 번호만
+
+
+# --------------------------------------------------------------------------- 한 레시피 결과가 없는 웨이퍼
+def _drop_recipe2(w: Path) -> None:
+    """레시피 2 결과가 없는 웨이퍼 — YDD-PIDS3 RE 35174144EWF6(Defect 3,000개 한도에서 끊겨 Recipe2-Zones ·
+    RecipesInfo.ini 가 없다, 관측 2026-11-23)와 같은 모양."""
+    shutil.rmtree(w / "Recipe2-Zones")
+    (w / "RecipesInfo.ini").unlink()
+
+
+def test_wafer_missing_one_recipe_merges_with_same_recipe(tmp_path):
+    """같은 레시피인데 레시피 2 결과가 없는 웨이퍼도 합친다 — 레시피 1 Zone 은 둘 다, 레시피 2 Zone 은 있는 쪽만."""
+    pytest.importorskip("PyQt6.QtWidgets")
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    full = _multi(tmp_path / "a", _rec(1, 12.0, 1000.0) + _rec(2, 12.0, 1100.0))
+    cut = _multi(tmp_path / "b", _rec(1, 12.0, 1000.0) + _rec(1, 30.0, 1200.0))
+    _drop_recipe2(cut)
+    for order in ([cut, full], [full, cut]):                          # 어느 쪽을 먼저 골라도
+        R.read_recipe_names.cache_clear()
+        R.read_zones.cache_clear()
+        m = T.merge_wafers([T.load_wafer(f) for f in order])
+        assert m.folders == tuple(order) and m.skipped == ()
+        assert set(m.zones) == {("Zones", 1), ("Recipe2-Zones", 1)}
+        assert m.label(("Recipe2-Zones", 1)) == ("amk_mask_6_170", "BS_2")       # 이름은 RecipesInfo 가 있는 장에서
+        assert sorted((d.zone_dir, d.wafer) for d in m.defects if d.zone_dir == "Recipe2-Zones") == [
+            ("Recipe2-Zones", order.index(full))]
+
+
+def test_shared_recipe_with_other_values_is_still_excluded(tmp_path):
+    """둘 다 가진 레시피의 Zone 값이 하나라도 다르면 예전처럼 뺀다 — 셋째 장은 둘째 장이 들고 온 레시피 2 와도 맞아야 한다."""
+    pytest.importorskip("PyQt6.QtWidgets")
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    cut = _multi(tmp_path / "a", _rec(1, 12.0, 1000.0))
+    _drop_recipe2(cut)
+    full = _multi(tmp_path / "b", _rec(2, 12.0, 1100.0))
+    other = _multi(tmp_path / "c", _rec(2, 12.0, 1100.0))
+    ini = other / "Recipe2-Zones" / "amk_mask_6_170.ini"
+    ini.write_text(ini.read_text(encoding="utf-8").replace("LowValue=10.0", "LowValue=11.0"), encoding="utf-8")
+    R.read_zones.cache_clear()
+    m = T.merge_wafers([T.load_wafer(f) for f in (cut, full, other)])
+    assert m.folders == (cut, full) and m.skipped == (other,)
