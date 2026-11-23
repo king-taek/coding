@@ -3,18 +3,16 @@ r"""[Surface없음수집-임시] Surface.flt 없는 폴더 수집 — Overkill �
 읽기 전용 · 표준 파이썬만 쓴다(앱 코드를 불러오지 않는다).  앱의 개발자 모드 버튼
 (``ui/noflt_collect_tmp.py``)이 :func:`run` 을 부르고, VS Code 에서 바로 돌려도 된다.
 
-왜: ``R_TB500_LIVE_PI4 - Enhanced\Setup1\YDD-PIDS3 RE`` 에서 Overkill 튜닝이 Surface.flt 를 못 찾았다.
-같은 Job 의 다른 LOT(예: VHM_PIDS3 · SXK-PIDS3)에는 Surface.flt 가 있었다(수집 2026-11-15).  왜 없는지,
-대신 Defect 값이 어느 파일에 있는지(다른 ``*.flt`` · ``Defects.csv`` · ``s_RichSurface.dat``) 보려면
-그 폴더 전체와 '있는' 옆 폴더를 나란히 봐야 한다.
+왜: ``R_TB500_LIVE_PI4 - Enhanced\Setup1\YDD-PIDS3 RE`` 의 5 웨이퍼 중 3 곳은 사진만 있고 결과 파일
+(ini · flt · Defects.csv)이 없었다(1차 수집 2026-11-23).  현택님이 장비 화면에서 그 3 웨이퍼를 열고 Export 를
+누른 뒤(2026-11-23 13:00 KST), 무엇이 새로 생겼는지(특히 ``Defects.csv``) 본다.
 
 무엇을 모으나:
-    1. :data:`TARGETS` 폴더(LOT 또는 웨이퍼) — 사진이 아닌 파일 전부(하위 폴더 :data:`TARGET_DEPTH` 단계까지).
-       사진은 이름만 ``사진목록.txt``.
-    2. 그 부모 폴더(셋업 · Job, Scanresult 바로 아래까지)의 **파일만**.
-    3. 옆 LOT 목록(``옆폴더목록.txt``) — 같은 셋업 폴더 아래 LOT · 웨이퍼마다 파일 이름 · 크기 · 날짜만(내용 없음).
-    4. 비교용: 옆 웨이퍼 중 Surface.flt 가 있는 가장 최근 :data:`COMPARE_N` 곳 — 1 과 같은 방식으로 담는다.
-무엇을 버리나: 압축 · 영상 파일, :data:`FILE_MB` MB 를 넘는 파일(이름 · 크기만 ``파일목록.txt``), 내용이 같은 파일.
+    1. :data:`TARGETS` 웨이퍼 폴더 — 사진이 아닌 파일 전부(하위 폴더 :data:`TARGET_DEPTH` 단계까지).
+       사진은 이름만 ``사진목록.txt``(이름 끝 숫자 = 레시피 번호 확인용).
+    2. 그 LOT 폴더의 **파일만**(Export 가 LOT 쪽에 썼을 때를 대비).
+    1차 수집에서 담은 부모(셋업 · Job) 파일 · 옆 LOT 목록 · 비교용 웨이퍼는 뺐다(이미 받았다).
+무엇을 버리나: 압축 · 영상 파일, :data:`FILE_MB` MB 를 넘는 파일(이름 · 크기 · 시각만 ``파일목록.txt``), 내용이 같은 파일.
 결과: 바탕화면 ``Surface없음수집_<시각>\`` 폴더 안 zip.  :data:`PART_MB` MB 를 넘으면 나눈다.
 """
 
@@ -29,21 +27,14 @@ import zlib
 from datetime import datetime
 from pathlib import Path, PureWindowsPath
 
-# 현택님이 Export 를 눌러 둔 폴더(2026-11-23) — LOT 폴더다(아래에 웨이퍼 폴더들).  첫 줄이 Surface.flt 없는 폴더,
-# 아래 둘은 같은 셋업의 비교 스캔(현택님 추가 2026-11-23 11:14).
-TARGETS = [
-    r"I:\4F-AOI-04\Scanresult\R_TB500_LIVE_PI4 - Enhanced\Setup1\YDD-PIDS3 RE",
-    r"I:\4F-AOI-04\Scanresult\R_TB500_LIVE_PI4 - Enhanced\Setup1\YDD_Contrast Avg28_AOI-4",
-    r"I:\4F-AOI-04\Scanresult\R_TB500_LIVE_PI4 - Enhanced\Setup1\YDD-No Image",
-]
+# 사진만 있던 웨이퍼 3 곳 — 현택님이 장비 화면에서 열고 Export 를 누른다(2026-11-23 12:59 KST).
+_LOT = r"I:\4F-AOI-04\Scanresult\R_TB500_LIVE_PI4 - Enhanced\Setup1\YDD-PIDS3 RE"
+TARGETS = [_LOT + "\\" + w for w in ("35174142EWE5", "35174140EWD4", "35174664EWD0")]
 UNC_SHARES = [r"\\10.142.80.91\nas3-1"]
 MINUTES = 20        # 전체 시간 상한
 FILE_MB = 30        # 이보다 큰 파일은 이름만 남긴다(사용자 지시)
 PART_MB = 28        # 30 MB 조각은 올라가지 않았다(사용자 2026-11-15)
-TARGET_DEPTH = 4    # 고른 폴더 안 하위 폴더 깊이(LOT → 웨이퍼 → Zones → …)
-WAFER_DEPTH = 3     # 비교용 웨이퍼 폴더 안 하위 폴더 깊이
-COMPARE_N = 2       # 비교용으로 담을 옆 웨이퍼 수(Surface.flt 있는 것)
-LIST_LINES = 20000  # 옆폴더목록.txt 줄 상한
+TARGET_DEPTH = 3    # 웨이퍼 폴더 안 하위 폴더 깊이(웨이퍼 → Zones → …)
 MB = 2 ** 20
 _ENTRY_OVERHEAD = 76 + 1024     # zip 머리 · 목록 칸(이름 길이 제외) — 조각 크기를 잴 때와 같게 넉넉히
 IMG_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".gif"}
@@ -221,92 +212,35 @@ def _arc_for(raw: str, k: int) -> str:
     return "/".join(rel)
 
 
-def _has_flt(folder: Path) -> bool:
-    try:
-        return any((folder / n).is_file() for n in ("Surface.flt", "surface.flt"))
-    except OSError:
-        return False
-
-
-def list_siblings(setup: Path, arc: str, skip, expired):
-    """셋업 폴더 아래 LOT · 웨이퍼 폴더마다 사진이 아닌 파일의 이름 · 크기 · 날짜(내용 없음).
-
-    ``(목록 줄들, Surface.flt 가 든 웨이퍼 폴더 [(수정 시각, 경로, zip 안 경로)])``.  ``skip`` 은 고른 폴더들(이미 담는다)."""
-    skip = {os.path.normcase(str(p)) for p in skip}
-    lines, with_flt = [], []
-    lots, _ = _entries(setup)
-    for lot_name, lot, _, _ in lots:
-        if expired() or len(lines) >= LIST_LINES:
-            lines.append("(시간 · 줄 상한으로 여기서 멈춤)")
-            break
-        if os.path.normcase(str(lot)) in skip:
-            continue
-        wafers, lot_files = _entries(lot)
-        lines.append(f"{arc}/{lot_name}/\t웨이퍼 {len(wafers)}\t파일 {len(lot_files)}")
-        for w_name, w, _, _ in wafers:
-            if expired() or len(lines) >= LIST_LINES:
-                break
-            subs, files = _entries(w)
-            photos = sum(1 for f in files if Path(f[0]).suffix.lower() in IMG_EXT)
-            others = [f for f in files if Path(f[0]).suffix.lower() not in IMG_EXT]
-            flts = [f for f in others if f[0].lower().endswith(".flt")]
-            lines.append(f"{arc}/{lot_name}/{w_name}/\t사진 {photos}\t하위폴더 {len(subs)}"
-                         f"\tflt {', '.join(f[0] for f in flts) or '없음'}")
-            for name, _, size, mtime in others:
-                lines.append(f"{arc}/{lot_name}/{w_name}/{name}\t{size}\t{datetime.fromtimestamp(mtime):%Y-%m-%d %H:%M}")
-            flt = next((f for f in flts if f[0].lower() == "surface.flt"), None)
-            if flt is not None:
-                with_flt.append((flt[3], w, f"{arc}/{lot_name}/{w_name}"))
-    return lines, with_flt
-
-
 def collect(col, targets, say, progress, expired, roots=None):
-    """고른 폴더 · 부모 파일 · 옆 목록 · 비교용 웨이퍼를 담는다.  (찾은 폴더 수, 옆 목록 줄들)."""
+    """웨이퍼 폴더와 그 LOT 폴더의 파일을 담는다.  찾은 웨이퍼 수."""
     found = 0
-    sib_lines = []
-    parents_done = set()
-    setups = {}                     # 셋업 폴더 → (zip 안 경로, 고른 폴더들)
+    lots_done = set()
     for k, raw in enumerate(targets, 1):
         if expired():
             say(f"시간 제한 · 중지로 {k - 1}/{len(targets)} 에서 멈춤")
             break
-        progress(0, 0, f"폴더 {k}/{len(targets)} {Path(raw).name}")
+        progress(0, 0, f"웨이퍼 {k}/{len(targets)} {PureWindowsPath(raw).name}")
         t = locate(raw, roots)
         if t is None:
             say(f"못 찾음: {raw}")
             continue
         arc = _arc_for(raw, k)
-        before = len(col.listing)
+        before, photos_before = len(col.listing), len(col.photos)
         col.take(t, arc, TARGET_DEPTH, expired)
-        names = [ln.split("\t")[0][len(arc) + 1:] for ln in col.listing[before:]]
+        rows = [ln.split("\t") for ln in col.listing[before:]]
+        names = [r[0][len(arc) + 1:] for r in rows]
         csv = [n for n in names if n.rsplit("/", 1)[-1].lower() == "defects.csv"]
         flts = sorted({n.rsplit("/", 1)[-1] for n in names if n.lower().endswith(".flt")})
+        newest = max((r[-1] for r in rows), default="없음")
         found += 1
-        say(f"담음: {t}  파일 {len(names)} · Defects.csv {len(csv)} · flt 종류 {', '.join(flts) or '없음'}")
-        # 부모(셋업 · Job) 폴더의 파일만 — Scanresult 바로 아래(Job)까지.
-        up, up_arc = t.parent, arc.rsplit("/", 1)[0]
-        while "/" in up_arc and not _SCANRESULT.match(up.name):
-            key = up_arc.lower()
-            if key not in parents_done:
-                parents_done.add(key)
-                col.take(up, up_arc, 0)
-            up, up_arc = up.parent, up_arc.rsplit("/", 1)[0]
-        setups.setdefault(t.parent, (arc.rsplit("/", 1)[0], []))[1].append(t)
-    # 옆 LOT 목록 + Surface.flt 가 있는 최근 웨이퍼 몇 곳 — 셋업 폴더마다 한 번.
-    for setup, (s_arc, picked) in setups.items():
-        if expired():
-            break
-        progress(0, 0, "옆 폴더 목록 만드는 중")
-        lines, with_flt = list_siblings(setup, s_arc, picked, expired)
-        sib_lines += lines
-        say(f"옆 폴더 {setup}: 줄 {len(lines)} · Surface.flt 있는 웨이퍼 {len(with_flt)}")
-        for _, w, w_arc in sorted(with_flt, key=lambda x: -x[0])[:COMPARE_N]:
-            if expired():
-                break
-            progress(0, 0, f"비교용 {Path(w_arc).name}")
-            col.take(w, w_arc, WAFER_DEPTH, expired)
-            say(f"비교용으로 담음: {w}")
-    return found, sib_lines
+        say(f"담음: {t}  파일 {len(names)} · 사진 {len(col.photos) - photos_before} · Defects.csv {len(csv)}"
+            f" · flt 종류 {', '.join(flts) or '없음'} · 가장 최근 파일 {newest}")
+        lot, lot_arc = t.parent, arc.rsplit("/", 1)[0]
+        if lot_arc.lower() not in lots_done:
+            lots_done.add(lot_arc.lower())
+            col.take(lot, lot_arc, 0)
+    return found
 
 
 def run(out: Path, progress=None, stop=None, targets=None, roots=None):
@@ -332,18 +266,16 @@ def run(out: Path, progress=None, stop=None, targets=None, roots=None):
     def expired():
         return stop() or time.time() > deadline
 
-    sib = []
     try:
-        found, sib = collect(col, targets, say, progress, expired, roots)
+        found = collect(col, targets, say, progress, expired, roots)
     except Exception as e:                      # noqa: BLE001 — 수집 도구는 끝까지 zip 을 남긴다
         say(f"오류로 멈춤 — {type(e).__name__}: {e}")
         found = 0
     summary = "\n".join([
         f"Surface.flt 없는 폴더 수집 {stamp}  ({time.time() - t0:.0f}초)",
-        f"폴더 {found}/{len(targets)} · 담은 파일 {col.files}"
+        f"웨이퍼 {found}/{len(targets)} · 담은 파일 {col.files}"
         f" · zip {col.zipped() / MB:.1f} MB · 사진 이름 {len(col.photos)} · 중복 {len(col.dups)}",
         "", "기록:", *log, ""])
-    col.zf.writestr("옆폴더목록.txt", "\n".join(sib) + "\n")
     col.close(summary)
     if not found:
         staging.unlink(missing_ok=True)
