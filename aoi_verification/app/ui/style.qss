@@ -418,6 +418,10 @@ QFrame[role="row"] {
     border-bottom: 1px solid $row_divider;
     border-radius: $row_radius;
 }
+/* 같은 묶음 안의 행 — 아래 눈금을 감춘다(단일 사진 정보 표).  두께는 그대로 둬 행 높이가 안 바뀐다. */
+QFrame[role="row"][rule="none"] {
+    border-bottom: 1px solid $row_border;
+}
 
 /* 점수 컬럼 눈금 — 이미지 영역과 우측 거리 컬럼을 가르는 1px 눈금.
    score_rule = ink 반투명이라 시트 위에서 또렷. */
@@ -1651,6 +1655,17 @@ QLabel[role="tileBadge"] {
     border-radius: 8px;
     font-size: 11px;
     font-weight: 700;
+}
+/* 사진 칸 정렬 줄 — 고르지 않은 글자는 보통 굵기(고른 것만 강조색 · 굵게). */
+QPushButton[role="ovView"][sort="true"]:!checked {
+    font-weight: 400;
+}
+/* 정렬 중일 때 사진 아래에 붙는 그 값 — 사진 위 얇은 띠. */
+QLabel[role="tileCap"] {
+    background-color: $panel;
+    color: $ink;
+    font-family: $font_mono;
+    font-size: 11px;
 }
 QLabel[role="tileMore"] {
     background-color: $elev;

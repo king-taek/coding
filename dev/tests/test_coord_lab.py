@@ -66,8 +66,11 @@ def test_borrowed_number_position_matches_truth_and_app(run):
     recs, _, sc = run
     for h in ("LOT", "PRD"):
         assert sc[f"{h}|LIVE"]["both"] == sc[f"{h}|LIVE"]["n"] > 0, h
-    # 독립인 빌릴 곳이 없는 웨이퍼(GX57007306 은 사본뿐)는 가설을 내지 않는다 — 자기 답 베끼기 금지.
-    assert not any("PRD" in r.get("hyp", {}) for r in recs if r["wafer"] == "GX57007306")
+    # 같은 웨이퍼 사본에서는 빌리지 않는다 — 자기 답 베끼기 금지.  GX57007306 은 2026-11-23 에 같은 제품의
+    # 다른 웨이퍼(GX57527979, 멀티레시피(Height) 골든)가 들어와 그 웨이퍼에서만 빌리고, 번호표와 같다.
+    gx = [r for r in recs if r["wafer"] == "GX57007306"]
+    assert gx and all(r["hyp"].get("PRD") == (2, 10) for r in gx)
+    assert {r["hyp"]["EXP"] for r in gx if "EXP" in r["hyp"]} == {(2, 10)}
     # stage 위 놓인 자리가 한 열 다른 두 스캔(RDL2 AOI-5 col 기준 2 ↔ RDL4 col 기준 1)을 넘나든다.
     assert {tuple(r["hyp"]["PRD"]) for r in recs
             if r.get("hyp", {}).get("PRD") and abs(r["px"] - 37247.9) < 0.01} == {(1, 6)}

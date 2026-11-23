@@ -67,9 +67,11 @@ def test_zone_pick_and_raise_matches_core(styled_qapp, tmp_path):
         assert dlg._open is not None
         dlg._set_zone(("Zones", 63))                                    # Scan Area: Feature Filter 없음
         assert dlg.zone_btns[("Zones", 63)].isChecked() and dlg.sliders == {}
-        dlg.reset()
+        dlg.reset()                                                     # 다른 Zone 에서 눌러도 Zone 1 값은 그대로
         dlg._set_zone(("Zones", 1))
-        assert dlg.drop_value.text() == "0"
+        assert dlg.drop_value.text() == "7" and dlg.reset_btn.isEnabled()
+        dlg.reset()
+        assert dlg.drop_value.text() == "0" and not dlg.reset_btn.isEnabled()
     finally:
         dlg.deleteLater()
 
@@ -1378,7 +1380,7 @@ def test_right_click_on_color_tile_and_big_photo_offers_enlarge(styled_qapp, tmp
         dlg._set_tab("keep")
         seen, shown = [], []
         _ask_first_action(monkeypatch, T, seen)
-        monkeypatch.setattr(dlg, "_enlarge", lambda photo: shown.append(photo))
+        monkeypatch.setattr(dlg, "_enlarge", lambda photo, d=None: shown.append(photo))
         k = next(iter(dlg.tiles))
         tile = dlg.tiles[k]
         tile.customContextMenuRequested.emit(QPoint(5, 5))                 # 우클릭
@@ -1426,6 +1428,41 @@ def test_right_click_on_scan_tile_opens_full_scan_with_overlay_or_falls_back_to_
             assert len(opened[0][2]) == 4                                  # Scan 원본 위 Crop 범위
         dlg._on_full_scan(img, None, None, "")                             # 원본을 못 읽으면 Crop 을 크게 본다
         assert opened[-1][1] is img and opened[-1][2] is None
+        n = len(opened)
+        dlg._enlarge_tile(T.key_of(target))                                # 빠른 두 번 클릭 — 읽는 중에는 한 번만
+        dlg._enlarge_tile(T.key_of(target))
+        th = dlg._full_scan
+        th.wait(20000)
+        styled_qapp.processEvents()
+        assert len(opened) == n + 1
+    finally:
+        dlg.deleteLater()
+
+
+def test_left_click_on_scan_big_photo_enlarges_like_right_click(styled_qapp, tmp_path, monkeypatch):
+    """펼친 값의 Scan Crop 사진도 Color 처럼 누르면 크게 본다 — 우클릭 [크게보기] 와 같은 경로."""
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtGui import QColor, QImage
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    w, target = _scan_wafer(tmp_path)
+    dlg = T.ThresholdPreviewDialog()
+    try:
+        dlg.set_wafer(T.load_wafer(w))
+        dlg._set_zone((target.zone_dir, target.zone))
+        dlg._set_tab("keep")
+        side = round(300.0 / PX)
+        img = QImage(side, side, QImage.Format.Format_RGB888)
+        img.fill(QColor(90, 90, 90))
+        dlg.set_scans({(w, target.index): img})
+        k = T.key_of(target)
+        dlg._toggle(k)
+        assert isinstance(dlg._pic(dlg._tile_defects[k]), QImage)
+        big = dlg._band.findChildren(T._BigPhoto)[0]
+        assert big.cursor().shape() == Qt.CursorShape.PointingHandCursor
+        asked = []
+        monkeypatch.setattr(dlg, "_enlarge_tile", lambda i: asked.append(i))
+        big.clicked.emit()
+        assert asked == [k]
     finally:
         dlg.deleteLater()
 
@@ -1703,5 +1740,249 @@ def test_detail_rows_end_with_stretch_so_surplus_height_does_not_move_rows(style
         dlg._set_tab("keep")
         last = dlg.grid.itemAt(dlg.grid.count() - 1)
         assert last.spacerItem() is not None and last.widget() is None
+    finally:
+        dlg.deleteLater()
+
+
+_ROUND = """[General]
+ZoneName=ROUND
+ZoneID=3
+[Surface Feature Filter Area]
+Classify=29
+FeatureType=1
+FilterType=5
+LowValue=37.96
+"""
+
+
+def test_untouched_value_field_losing_focus_keeps_recipe_value(styled_qapp, tmp_path):
+    """값 칸에 커서만 넣었다 빼도(editingFinished) 레시피 값이 화면 자리로 반올림된 값(37.96 → 38.0)으로 박혀
+    그 사이 Defect(37.98)가 '새로 빠짐' 이 되던 문제 — 바꾸지 않았으면 레시피 값 그대로여야 한다."""
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    (tmp_path / "Zones").mkdir()
+    (tmp_path / "Zones" / "R.ini").write_text(_ROUND)
+    zones = R.read_zones(tmp_path)
+    defects = (P.Defect(0, "Zones", 3, 29, 29, 37.98, 3.0, 9.0, 0.0, 0.0, 0.0),)
+    w = T.WaferData(tmp_path, defects, (), zones, {29: R.ClassInfo("A", False)}, (1.0, 1.0))
+    dlg = T.ThresholdPreviewDialog()
+    try:
+        dlg.set_wafer(w)
+        spin = dlg.sliders[(29, R.FEATURE_AREA)][1]
+        assert spin.text() == "38.0" and dlg.drop_value.text() == "0"
+        spin.editingFinished.emit()                                   # 커서만 넣었다 뺌
+        assert dlg._ov == {} and dlg.drop_value.text() == "0" and not dlg.reset_btn.isEnabled()
+        dlg.set_value(29, R.FEATURE_AREA, 38.5)                       # 실제로 바꾸면 그대로 반영
+        assert dlg.drop_value.text() == "1"
+    finally:
+        dlg.deleteLater()
+
+
+def _two_zone_wafer(T, folder: Path):
+    """Zone 1 · Zone 2 가 각각 Area ≥ 10 기준 하나 — Defect 는 Zone 마다 3개."""
+    zones = {("Zones", z): R.Zone(z, f"Z{z}", {29: (R.Filter(R.FEATURE_AREA, 5, 10.0, 10.0),)}) for z in (1, 2)}
+    defects = tuple(P.Defect(i, "Zones", 1 + i // 3, 29, 29, 20.0 + 10 * (i % 3), 3.0, 9.0, 0.0, float(i), 0.0)
+                    for i in range(6))
+    return T.WaferData(folder, defects, (), zones, {29: R.ClassInfo("A", False)}, (1.0, 1.0))
+
+
+def test_reset_only_touches_the_current_zone(styled_qapp, tmp_path):
+    """Zone 하나에서 [레시피 값으로 되돌리기] 를 눌렀더니 모든 Zone 이 되돌아가던 문제 — 지금 Zone 만 되돌린다."""
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    dlg = T.ThresholdPreviewDialog()
+    try:
+        dlg.set_wafer(_two_zone_wafer(T, tmp_path))
+        z1, z2 = ("Zones", 1), ("Zones", 2)
+        dlg._set_zone(z1)
+        dlg.set_value(29, R.FEATURE_AREA, 25.0)
+        k = next(k for k in dlg._ov)
+        d1, d2 = (next(d for d in dlg._w.defects if (d.zone_dir, d.zone) == z) for z in (z1, z2))
+        dlg._picked[T.key_of(d1)] = d1
+        dlg._picked[T.key_of(d2)] = d2
+        dlg._overkill[T.key_of(d2)] = d2
+        dlg._set_zone(z2)
+        dlg.set_value(29, R.FEATURE_AREA, 35.0)
+        assert {k[:2] for k in dlg._ov} == {z1, z2} and dlg.reset_btn.isEnabled()
+        dlg.reset()                                                   # Zone 2 에서 되돌림
+        assert {k[:2] for k in dlg._ov} == {z1}
+        assert set(dlg._picked) == {T.key_of(d1)} and dlg._overkill == {}
+        assert not dlg.reset_btn.isEnabled()
+        dlg._set_zone(z1)
+        assert dlg.reset_btn.isEnabled() and dlg._ov[k] == 25.0       # Zone 1 값은 그대로
+        dlg.reset()
+        assert dlg._ov == {} and dlg._picked == {}
+    finally:
+        dlg.deleteLater()
+
+
+def test_picks_are_saved_on_apply_and_loadable_later(styled_qapp, tmp_path, monkeypatch):
+    """[적용] 하면 고른 것이 자동 저장되고, 새 화면에서 [저장한 선택 불러오기] 로 같은 추천값이 돌아온다."""
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    from aoi_verification.app.threshold import saved_picks as SP
+    _capture_run(monkeypatch, T)
+    dlg = T.ThresholdPreviewDialog()
+    dlg.set_mode("auto")
+    try:
+        dlg.set_wafer(_two_zone_wafer(T, tmp_path))
+        assert not dlg.saved_btn.isEnabled()
+        z1 = ("Zones", 1)
+        ds = [d for d in dlg._w.defects if (d.zone_dir, d.zone) == z1]
+        dlg.open_pick_dialog()
+        dlg._pick_dlg.applied.emit({T.key_of(ds[1]): ds[1]}, {T.key_of(ds[0]): ds[0]})
+        _wait_apply(dlg, styled_qapp)
+        want_ov, want_picked = dict(dlg._ov), set(dlg._picked)
+        assert want_ov and SP.load(tmp_path, 6) == {z1: ({ds[1].index}, {ds[0].index})}
+        assert dlg.saved_btn.isEnabled()
+    finally:
+        dlg.deleteLater()
+    dlg2 = T.ThresholdPreviewDialog()
+    dlg2.set_mode("auto")
+    try:
+        dlg2.set_wafer(_two_zone_wafer(T, tmp_path))
+        assert dlg2._picked == {} and dlg2.saved_btn.isEnabled()
+        dlg2.load_saved_picks()
+        assert set(dlg2._picked) == want_picked and dlg2._ov == want_ov
+        assert [T.key_of(d) for d in dlg2._overkill.values()] == [T.key_of(ds[0])]
+        dlg2.reset()                                                   # 그 Zone 을 되돌리면 저장분도 비운다
+        assert SP.load(tmp_path, 6) == {} and not dlg2.saved_btn.isEnabled()
+    finally:
+        dlg2.deleteLater()
+
+
+def test_saved_picks_of_other_zones_survive_before_loading(styled_qapp, tmp_path, monkeypatch):
+    """[저장한 선택 불러오기] 를 누르기 전에 다른 Zone 을 고르거나 값만 되돌려도 예전 저장분은 남는다(Zone 단위 저장)."""
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    from aoi_verification.app.threshold import saved_picks as SP
+    _capture_run(monkeypatch, T)
+    z1, z2 = ("Zones", 1), ("Zones", 2)
+    dlg = T.ThresholdPreviewDialog()
+    dlg.set_mode("auto")
+    try:
+        dlg.set_wafer(_two_zone_wafer(T, tmp_path))
+        ds1 = [d for d in dlg._w.defects if (d.zone_dir, d.zone) == z1]
+        ds2 = [d for d in dlg._w.defects if (d.zone_dir, d.zone) == z2]
+        SP.save(tmp_path, 6, {z1: ({ds1[1].index}, {ds1[0].index})})      # 예전에 저장한 Zone 1 선택
+        dlg._set_zone(z2)
+        dlg.set_value(29, R.FEATURE_AREA, 35.0)                           # 값만 바꾸고
+        dlg.reset()                                                       # 되돌림 — 고른 것은 없었다
+        assert SP.load(tmp_path, 6) == {z1: ({ds1[1].index}, {ds1[0].index})}
+        dlg.open_pick_dialog()
+        dlg._pick_dlg.applied.emit({T.key_of(ds2[0]): ds2[0]}, {})        # Zone 2 만 고르고 적용
+        _wait_apply(dlg, styled_qapp)
+        assert SP.load(tmp_path, 6) == {z1: ({ds1[1].index}, {ds1[0].index}), z2: ({ds2[0].index}, set())}
+        dlg.load_saved_picks()                                            # 불러오면 둘 다 돌아온다
+        assert set(dlg._picked) == {T.key_of(ds1[1]), T.key_of(ds2[0])}
+    finally:
+        dlg.deleteLater()
+
+
+def test_saved_picks_ignored_when_defect_count_differs(tmp_path):
+    """다시 스캔해 Defect 수가 달라진 폴더는 옛 index 가 엉뚱한 Defect 를 가리키니 쓰지 않는다."""
+    from aoi_verification.app.threshold import saved_picks as SP
+    SP.save(tmp_path, 6, {("Zones", 1): ({1}, {0})})
+    assert SP.load(tmp_path, 6) == {("Zones", 1): ({1}, {0})} and SP.load(tmp_path, 7) == {}
+
+
+def test_arrow_keys_move_the_open_photo_in_the_grid(styled_qapp, tmp_path):
+    """사진 목록에서 방향키로 현재(펼친) 사진이 그 방향으로 옮겨 간다 — 좌우는 줄을 넘어 이어지고, 위아래는 같은 칸."""
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtTest import QTest
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    dlg = _shown_dlg(T, styled_qapp, tmp_path)
+    try:
+        dlg._set_tab("keep")
+        dlg._cols = lambda: 4                                              # 한 줄 4장 — 줄이 여러 개
+        dlg._render_tiles()
+        rows = dlg._tile_rows
+        assert len(rows) >= 3 and len(rows[0]) == 4
+        QTest.keyClick(dlg, Qt.Key.Key_Right)                              # 아무것도 안 펼쳤으면 첫 사진
+        assert dlg._open == rows[0][0] and dlg.tiles[rows[0][0]].is_open
+        QTest.keyClick(dlg, Qt.Key.Key_Left)                               # 맨 앞에서는 멈춘다
+        assert dlg._open == rows[0][0]
+        for _ in range(4):
+            QTest.keyClick(dlg, Qt.Key.Key_Right)
+        assert dlg._open == rows[1][0] and dlg.tiles[rows[1][0]].is_open and not dlg.tiles[rows[0][0]].is_open
+        QTest.keyClick(dlg, Qt.Key.Key_Down)
+        assert dlg._open == rows[2][0]
+        QTest.keyClick(dlg, Qt.Key.Key_Up)
+        QTest.keyClick(dlg, Qt.Key.Key_Up)
+        assert dlg._open == rows[0][0] and dlg._band_row is dlg._row_of[rows[0][0]]
+        QTest.keyClick(dlg, Qt.Key.Key_Up)                                 # 맨 위에서는 멈춘다
+        assert dlg._open == rows[0][0]
+    finally:
+        dlg.deleteLater()
+
+
+def test_arrow_keys_stay_with_the_slider_when_it_has_focus(styled_qapp, tmp_path):
+    """슬라이더에 포커스가 있으면 방향키는 슬라이더 값을 바꾸고 사진은 옮기지 않는다."""
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtTest import QTest
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    dlg = _shown_dlg(T, styled_qapp, tmp_path)
+    try:
+        sl = next(iter(dlg.sliders.values()))[0]
+        sl.setFocus()
+        QTest.keyClick(sl, Qt.Key.Key_Right)
+        assert dlg._open is None
+    finally:
+        dlg.deleteLater()
+
+
+def _enlarged_viewer(dlg, T, monkeypatch, styled_qapp, defect):
+    """크게보기를 열어(시트는 가짜로 가로챈다) 뷰어를 돌려준다 — Scan 확인 스레드가 끝날 때까지 기다린다."""
+    import time
+    from PyQt6.QtGui import QPixmap
+    src = dlg._w.folder / "fake_mid.png"                      # 사진 파일은 빈 파일이라 뷰어가 쓸 그림을 대신 준다
+    QPixmap(400, 300).save(str(src))
+    monkeypatch.setattr(T.image_io, "get_mid_path", lambda p, **k: src)
+    got = []
+    monkeypatch.setattr(T.sheets, "run", lambda dlg_, **kw: got.append(dlg_) or 0)
+    dlg._enlarge_tile(T.key_of(defect))
+    viewer = got[0]
+    t0 = time.perf_counter()
+    while viewer._scan_tag.text() == T._KO.VIEWER_SCAN_CHECKING and time.perf_counter() - t0 < 10:
+        styled_qapp.processEvents()
+        time.sleep(0.01)
+    return viewer
+
+
+def test_enlarged_color_photo_shows_scan_indicator_and_switches_to_scan_crop(styled_qapp, tmp_path, monkeypatch):
+    """Color 사진 크게보기 — 그 Defect 의 Scan 이 있으면 '있음' 표시 + [Scan image 보기] 로 Scan Crop 을 같은 자리에서 본다
+    (다시 누르면 Color 로 돌아간다).  Scan 이 없으면 '없음' 이고 버튼은 안 나온다."""
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    w, target = _scan_wafer(tmp_path)
+    colored = next(d for d in P.load_defects(w)[0] if d is not target and (0, d.index) in T.load_wafer(w).photos)
+    lst = w / "ScanResultImageList.txt"
+    import cv2
+    import numpy as np
+    cv2.imwrite(str(w / "1.3.t.1.jpeg"), np.full((1000, 2000, 3), 60, np.uint8))
+    lst.write_text(lst.read_text() + f"1.3.t.1.jpeg,{colored.x},{colored.y}\n")        # 컬러 있는 Defect 도 Scan 이 덮는다
+    far = next(d for d in P.load_defects(w)[0] if d.index not in (target.index, colored.index)
+               and (0, d.index) in T.load_wafer(w).photos and (abs(d.x - colored.x) + abs(d.y - colored.y)) > 20000)
+    dlg = T.ThresholdPreviewDialog()
+    try:
+        dlg.set_wafer(T.load_wafer(w))
+        dlg._set_zone((colored.zone_dir, colored.zone))
+        v = _enlarged_viewer(dlg, T, monkeypatch, styled_qapp, dlg._w.defects[colored.index])
+        assert v._scan_tag.text() == T._KO.VIEWER_SCAN_YES and not v._btn_scan.isHidden()
+        color_pix = v._pix
+        v._btn_scan.click()
+        assert v._scan_on and v._pix is not color_pix and v._pix.width() == v._scan_img.width()
+        assert v._btn_scan.text() == T._KO.VIEWER_SCAN_BACK
+        v._btn_scan.click()
+        assert not v._scan_on and v._pix is color_pix and v._btn_scan.text() == T._KO.VIEWER_SCAN_VIEW
+        v2 = _enlarged_viewer(dlg, T, monkeypatch, styled_qapp, dlg._w.defects[far.index])
+        assert v2._scan_tag.text() == T._KO.VIEWER_SCAN_NONE and v2._btn_scan.isHidden()
+    finally:
+        dlg.deleteLater()
+
+
+def test_enlarged_photo_without_scan_list_says_none_at_once(styled_qapp, tmp_path, monkeypatch):
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    dlg = T.ThresholdPreviewDialog()
+    try:
+        dlg.set_wafer(T.load_wafer(_wafer_with_photos(tmp_path)))
+        d = dlg._w.defects[0]
+        v = _enlarged_viewer(dlg, T, monkeypatch, styled_qapp, d)
+        assert v._scan_tag.text() == T._KO.VIEWER_SCAN_NONE and v._btn_scan.isHidden()
     finally:
         dlg.deleteLater()

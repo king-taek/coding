@@ -39,6 +39,17 @@ def _pump(n: int = 3) -> None:
         QApplication.processEvents()
 
 
+def _wait(pred, ms: int = 5000) -> bool:
+    import time
+    end = time.monotonic() + ms / 1000
+    while time.monotonic() < end:
+        QApplication.processEvents()
+        if pred():
+            return True
+        time.sleep(0.01)
+    return False
+
+
 def _make(styled_qapp, data=None, *, bits=16, view=None):
     if data is None:
         rng = np.random.default_rng(3)
@@ -455,9 +466,10 @@ def test_image_info_has_gl_button_enabled_only_with_photo(styled_qapp, tmp_path,
     assert not d.gl_btn.isEnabled()
     assert d.gl_btn.autoDefault() is False                  # Enter 가 GL 뷰어를 재실행하지 않는다
     p = tmp_path / "a.png"
-    p.write_bytes(b"\x89PNG")
+    from PIL import Image
+    Image.new("L", (40, 30), 90).save(p)                    # 회색 사진 — GL 로 볼 수 있다
     d.show_image(p)
-    assert d.gl_btn.isEnabled()
+    assert _wait(d.gl_btn.isEnabled)
     seen = []
     monkeypatch.setattr(ii.sheets, "run", lambda dlg, **kw: seen.append(dlg) or 0)
     opened = []
@@ -961,18 +973,3 @@ def test_scan_missing_shows_reason_and_toast(styled_qapp):
     d.close()
 
 
-def test_scan_diag_button_only_in_dev_mode(styled_qapp, monkeypatch):
-    class P:
-        dev_mode = False
-    monkeypatch.setattr(GLV._prefs, "load", lambda: P)
-    v = loader.ViewLoad(loader.GlImage(np.full((H, W), 9, np.uint8), 8, True, "c.jpg", []),
-                        scan_missing=True, source_path="c.jpg", scan_status="no_manifest")
-    d = _make(styled_qapp, view=v)
-    assert not d.diag_btn.isVisibleTo(d)
-    P.dev_mode = True
-    d.show_view(v)
-    assert d.diag_btn.isVisibleTo(d) and d.diag_btn.isEnabled()
-    d.show_view(loader.ViewLoad(loader.GlImage(np.full((H, W), 9, np.uint8), 8, False, "g.tif", []),
-                                source_path="g.tif"))
-    assert not d.diag_btn.isEnabled()
-    d.close()

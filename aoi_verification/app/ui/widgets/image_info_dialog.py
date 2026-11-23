@@ -7,7 +7,9 @@
 형태는 앱의 '도면' 언어를 그대로 쓴다(새 시각 언어를 만들지 않는다):
 
 - 계측은 **타이틀블록 + 하이라인 눈금 표**다 — ``role="listHeader"``/``colHead`` 로
-  덮개를 씌우고, 행마다 ``QFrame[role="row"]`` 의 아래 눈금이 항목을 가른다.
+  덮개를 씌우고, ``QFrame[role="row"]`` 의 아래 눈금이 항목을 가른다.  눈금은
+  **묶음(``InfoRow.cluster``)이 바뀌는 곳에만** 긋는다 — 행마다 그으면 선이 너무
+  많아 읽기 어렵다(사용자 지시 2026-11-23).  묶음 안 행은 ``rule="none"``.
 - 값은 **라벨 열(고정 폭) 바로 오른쪽에서 좌측 정렬로 시작**한다.  오른쪽 끝에 붙이면
   창이 넓어질수록 라벨과 값 사이가 벌어져 항목마다 눈이 좌우로 왕복한다 — 시작선을
   하나로 모으면 수치를 위아래로 훑을 수 있다.
@@ -46,6 +48,7 @@ from ... import i18n
 from ... import config
 from ...config import CONFIG
 from ...coords import scan_image, single_info
+from ...gl import loader as gl_loader
 from ...utils import image_io as _io
 from .. import motion, theme
 from ..drop_overlay import drop_clear, drop_feedback
@@ -88,6 +91,7 @@ class _ScanLoader(QThread):
 
     class _Signals(QObject):
         found = pyqtSignal(int)                          # 세대 — Scan 있음 판정
+        gl = pyqtSignal(int, bool)                       # 세대, GL 로 볼 수 있는 사진인가
         done = pyqtSignal(int, str, object, object, object, str)
         # (세대, 상태, Crop QImage, 전체 QImage, Crop 범위, Scan 파일명)
 
@@ -110,6 +114,14 @@ class _ScanLoader(QThread):
         announced = (self._path.parent / scan_image.SCAN_LIST_NAME).exists()
         if announced:
             self.signals.found.emit(self._gen)
+        # GL 은 회색 사진이거나, 컬러면 Scan 을 찾았을 때만 의미가 있다 — 컬러를 흑백으로
+        # 바꿔 보는 것은 쓸모가 없다(사용자 지시 2026-11-23).  못 읽는 사진도 끈다.
+        try:
+            color = gl_loader.is_color(self._path)
+        except Exception:
+            color = None
+        if color is not True:
+            self.signals.gl.emit(self._gen, color is False)
         m = scan_image.resolve(self._path)
         if not m.ok:
             self.signals.done.emit(self._gen, m.status, None, None, None, "")
@@ -122,6 +134,8 @@ class _ScanLoader(QThread):
                                    None, None, None, "")
             return
         crop, cand = res
+        if color:
+            self.signals.gl.emit(self._gen, True)       # 뷰어가 이 Scan 으로 갈아탄다
         full = scan_image.load_full(cand)
         self.signals.done.emit(
             self._gen, scan_image.OK, pil_to_qimage(crop),
@@ -299,8 +313,9 @@ class ImageInfoDialog(QDialog):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(8)
 
-        self.preview = QLabel(host)
+        self.preview = _ClickLabel(host)
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview.clicked.connect(self._open_full_color)
         self.preview.setFixedSize(_PREVIEW_MIN_W, _PREVIEW_MIN_W)
         # 프레임이 사진을 **딱 감싸도록** 위쪽 정렬로 두고, 크기는 픽스맵에 맞춘다.
         lay.addWidget(self.preview, alignment=Qt.AlignmentFlag.AlignTop
@@ -346,7 +361,8 @@ class ImageInfoDialog(QDialog):
         bar.addWidget(self._toast)
         bar.addStretch(1)
         # 지금 보고 있는 사진을 그대로 GL 히스토그램 뷰어로 넘긴다(컬러 결함 사진이면 Scan 의
-        # 결함 영역이 확대돼 열린다).  사진이 없으면 누를 수 없다.
+        # 결함 영역이 확대돼 열린다).  사진이 없거나, Scan 없는 컬러 사진이면 누를 수 없다
+        # (`_ScanLoader` 가 판정한다).
         self.gl_btn = NeonButton(i18n.KO.IMAGE_INFO_GL, role="ghost")
         self.gl_btn.setMinimumHeight(theme.PROFILE.control_h_lg)
         self.gl_btn.setToolTip(i18n.KO.GL_BUTTON_TOOLTIP)
@@ -463,7 +479,7 @@ class ImageInfoDialog(QDialog):
         돌린다.  덮개는 **정보가 오면 바로** 걷힌다 — Scan 원본(수 MB)을 기다리지 않는다.
         Scan 은 자기 칸에서 '불러오는 중' 점 애니메이션으로 따로 기다린다(사용자 요청)."""
         self._path = Path(path)
-        self.gl_btn.setEnabled(True)
+        self.gl_btn.setEnabled(False)     # GL 로 볼 수 있는지는 `_ScanLoader` 가 알려 준다
         self._info_gen += 1
         self._scan_gen += 1               # 이전 사진의 Scan 결과가 늦게 와도 버린다
         if not _async_info():
@@ -502,10 +518,15 @@ class ImageInfoDialog(QDialog):
         self._set_scan_visible(False)
         ld = _ScanLoader(self._path, self._scan_gen)
         ld.signals.found.connect(self._on_scan_found)
+        ld.signals.gl.connect(self._on_gl_known)
         ld.signals.done.connect(self._on_scan_done)
         _LIVE_SCAN_LOADS.add(ld)
         ld.finished.connect(lambda: _LIVE_SCAN_LOADS.discard(ld))
         ld.start()
+
+    def _on_gl_known(self, gen: int, ok: bool) -> None:
+        if gen == self._scan_gen:
+            self.gl_btn.setEnabled(ok)
 
     def _on_scan_found(self, gen: int) -> None:
         if gen != self._scan_gen:
@@ -576,6 +597,13 @@ class ImageInfoDialog(QDialog):
         self.scan_view.setToolTip(i18n.KO.SCAN_IMAGE_OPEN_TIP)
         self.scan_view.setAccessibleName(i18n.KO.SCAN_IMAGE_TITLE)
 
+    def _open_full_color(self) -> None:
+        """사진(Color) 미리보기를 누르면 기존 전체화면 뷰어로 크게 본다(Scan 칸과 같은 뷰어)."""
+        if self._path is None:
+            return
+        from .zoom_window import FullscreenViewer
+        sheets.run(FullscreenViewer(self._path, self), full_bleed=True)
+
     def _open_full_scan(self) -> None:
         """전체 Scan 원본에 잘라낸 범위를 덧그려 기존 전체화면 뷰어로 연다."""
         if self._scan_full is None or self._scan_box is None:
@@ -601,7 +629,11 @@ class ImageInfoDialog(QDialog):
                       min(_PREVIEW_MAX_W, avail * 0.36)))
         if self._path is None:
             self.preview.setFixedSize(box, box)
+            self.preview.setCursor(Qt.CursorShape.ArrowCursor)
+            self.preview.setToolTip("")
             return
+        self.preview.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.preview.setToolTip(i18n.KO.IMAGE_INFO_OPEN_TIP)
         pix = _io.load_thumb_qpixmap(self._path, box, kind="mid")
         # Scan 이 있으면 세로를 둘이 나눠 쓴다 — Color 가 높이를 다 먹으면 Scan 이 120px 대로
         # 쪼그라든다(흑백이 작다는 지적).  Color 를 줄여 Scan 이 Color 와 비슷한 크기가 되게 한다.
@@ -697,8 +729,14 @@ class ImageInfoDialog(QDialog):
         lay.setSpacing(0)
 
         lay.addWidget(self._group_header(block, group.title, label_w))
-        for row in group.rows:
-            lay.addWidget(self._row_widget(block, row, label_w))
+        rows = group.rows
+        for i, row in enumerate(rows):
+            frame = self._row_widget(block, row, label_w)
+            # 다음 행이 같은 묶음이면 아래 눈금을 감춘다 — 묶음 사이에만 선.
+            if i + 1 < len(rows) and row.cluster \
+                    and rows[i + 1].cluster == row.cluster:
+                frame.setProperty("rule", "none")
+            lay.addWidget(frame)
         return block
 
     @staticmethod
