@@ -25,7 +25,7 @@ from pathlib import Path
 import logging
 
 from ..coords.ini_text import read_ini_text
-from ..coords.pixel_size import scan_pixel_size_xy, scan_pixel_size_xy_recipe
+from ..coords.pixel_size import recipe_pixel_pair, scan_pixel_size_xy, scan_pixel_size_xy_recipe
 
 _LOG = logging.getLogger("aoi.threshold")
 
@@ -34,12 +34,14 @@ __all__ = ["Filter", "Zone", "ClassInfo", "read_zones", "read_classes", "zone_di
            "DETECT_KEYS", "detect_polarity",
            "recipe_scale", "read_recipe_names", "read_detect_values", "recipe_identity", "same_recipe",
            "read_scan_optics",
-           "FEATURE_AREA", "FEATURE_WIDTH", "FEATURE_CONTRAST"]
+           "FEATURE_AREA", "FEATURE_WIDTH", "FEATURE_LENGTH", "FEATURE_CONTRAST", "condition_matters", "same_value"]
 
 # Zone ini FeatureType — 섹션 이름과 짝지어 본 값(수집 자료 Zone ini 전부, 관측 2026-11-16):
-# 1 Area · 2 Width · 12 Contrast Average · 14 Polarity · 45 Abs Contrast Average.
-# Surface.flt 에 값이 있는 것은 앞의 셋뿐이라 그 셋만 미리보기로 바꿀 수 있다.
-FEATURE_AREA, FEATURE_WIDTH, FEATURE_CONTRAST = 1, 2, 12
+# 1 Area · 2 Width · 3 Length · 12 Contrast Average · 14 Polarity · 45 Abs Contrast Average.
+# Surface.flt 에 값이 있는 것은 앞의 넷뿐이라 그 넷만 미리보기로 바꿀 수 있다.
+# Length = flt ``BlobLength``(BlobFeretMax 아님): Test_TB500_RDL2 - Multi x5 Scan Area 42장 Event Defect 232/232 가
+# 묶음 판정과 맞았다(FeretMax 면 224/232, 관측 2026-11-23).  수집 Zone ini 중 Length 기준은 이 레시피뿐이다.
+FEATURE_AREA, FEATURE_WIDTH, FEATURE_LENGTH, FEATURE_CONTRAST = 1, 2, 3, 12
 
 _SECTION = re.compile(r"(?m)^\s*\[([^\]]+)\]\s*$")
 _KEY = re.compile(r"(?im)^\s*(Enable|Classify|FeatureType|FilterType|LowValue|HighValue)\s*=\s*([-+\d.eE]+)")
@@ -58,8 +60,23 @@ class Filter:
 
     def passes(self, v: float) -> bool:
         lo, hi = self.low, self.high
-        return {1: lo <= v <= hi, 2: not (lo <= v <= hi), 3: v == lo, 4: v > lo,
-                5: v >= lo, 6: v < lo, 7: v <= lo, 8: v != lo}.get(self.ftype, True)
+        lo_eq, hi_eq = same_value(v, lo), same_value(v, hi)
+        inside = (lo <= v or lo_eq) and (v <= hi or hi_eq)
+        return {1: inside, 2: not inside, 3: lo_eq, 4: v > lo,
+                5: v >= lo or lo_eq, 6: v < lo, 7: v <= lo or lo_eq, 8: v != lo}.get(self.ftype, True)
+
+
+# 레시피 N 기준을 flt 픽셀로 옮기면(× 배율) 장비가 계산한 같은 값과 끝자리만 달라진다 — 레시피 2 DarkArea 35 px ×
+# (0.7698/0.3852)² = 139.78201638182864, 장비 flt 값 139.7820163818286(관측 2026-11-23, 같은 값).  그 부동소수 반올림만
+# 같은 값으로 본다(상대 1e-9 — 보정값이 아니다: 값을 옮기지 않고, 그보다 큰 차이는 그대로 다르다).  같음을 포함하는
+# 비교(≥ · ≤ · 범위 · =)에만 쓴다 — 엄격 비교(> · <)는 그대로 둔다(자동 추천이 '바로 아래 실수' 로 내려 놓는다).
+_SAME_REL = 1e-9
+
+
+def same_value(a: float, b: float) -> bool:
+    if a == b:
+        return True
+    return math.isfinite(a) and math.isfinite(b) and abs(a - b) <= _SAME_REL * max(abs(a), abs(b))
 
 
 @dataclass(frozen=True)
@@ -118,6 +135,17 @@ def _parse_detect(text: str, heads) -> dict:
     return {}
 
 
+def condition_matters(f: Filter) -> bool:
+    """이 조건에 걸려 빠질 수 있는 값(0 이상 · :data:`DETECT_OFF` 미만)이 하나라도 있나.
+
+    현택님(2026-11-23): Length 기준은 파라미터에 있으면 넣고, **무의미하게** 적혀 있으면 뺀다.  무의미 =
+    늘 통과하는 조건 — ``≥ 0 이하`` · ``> 음수`` · ``≤ / < 9999999 이상`` · ``범위 [0 이하, 9999999 이상]``.
+    크기 값은 음수가 없고 장비는 9999999 를 '끈 값' 으로 적는다(:data:`DETECT_OFF`).  빼도 판정은 같다(늘 통과)."""
+    lo, hi = f.low, f.high
+    return {5: lo > 0, 4: lo >= 0, 7: lo < DETECT_OFF, 6: lo < DETECT_OFF,
+            1: not (lo <= 0 and hi >= DETECT_OFF)}.get(f.ftype, True)
+
+
 def _parse_zone(text: str) -> Zone | None:
     zid = _ZONE_ID.search(text)
     if not zid:
@@ -137,7 +165,10 @@ def _parse_zone(text: str) -> Zone | None:
         except (KeyError, ValueError):
             continue
         if cls >= 0 and kv.get("enable", "1").strip() not in ("0", "0.0"):
-            bundles.setdefault(cls, []).append(f)
+            fs = bundles.setdefault(cls, [])        # 묶음은 남긴다 — Length 하나뿐인 묶음이면 '늘 통과' 묶음이다(OR)
+            if f.feature == FEATURE_LENGTH and not condition_matters(f):
+                continue                # 무의미한 Length 기준 — 슬라이더로 내놓지 않는다(판정은 같다)
+            fs.append(f)
     return Zone(int(zid.group(1)), name.group(1) if name else "",
                 {c: tuple(fs) for c, fs in bundles.items()}, _parse_detect(text, heads))
 
@@ -197,8 +228,9 @@ def recipe_scale(folder: Path, zone_dir: str):
         # x5 Scan Area DarkArea 38 인데 Dark Defect 최솟값 38.099, 0.27% 늘린 38.10 이면 14개가 빠졌다(관측 2026-11-21).
         # 배율이 다를 때(5x → 20x)만 바꾼다.  배율을 모르면 픽셀 크기로만 판단한다.
         return 1.0, 1.0
-    ref = scan_pixel_size_xy(folder)
-    rec = scan_pixel_size_xy_recipe(folder, n)
+    # 두 값은 같은 파일 짝(표기값끼리)에서 읽는다 — :func:`coords.pixel_size.recipe_pixel_pair`.  짝이 없을 때만 옛 방식.
+    pair = recipe_pixel_pair(folder, n)
+    ref, rec = pair if pair else (scan_pixel_size_xy(folder), scan_pixel_size_xy_recipe(folder, n))
     if not ref or not rec:
         _LOG.warning("레시피 %s 픽셀 크기를 몰라 Zone 기준을 폴더 기준으로 못 바꿈: %s (폴더 %s · 레시피 %s)",
                      m.group(1), folder, ref, rec)
@@ -217,15 +249,15 @@ def zones_in_flt_px(folder: Path, zones: dict) -> dict:
     레시피 3(x20, 0.3859) Surface_RDL 폭 5.1832932 px × 0.3859 = 2.000 µm · 면적 26.8665 px² × 0.3859² = 4.00 µm²
     — 장비 기준은 µm 로 2 · 4.  숫자를 그대로 flt 와 비교하면 레시피 3 Defect 가 0/190 통과, µm 로 맞추면 190/190
     통과(= 장비).  레시피 2(x5, 1.538)는 폴더 1.536 과 거의 같아 어느 쪽이든 같았다.  Contrast 는 단위 없음.
-    FeatureType 1(면적) × (레시피 px/폴더 px)² · 2(폭)× 비.  RichSurface 값도 같은 폴더 px 라고 **가정**한다(미확인).
-    장비에 적을 값은 :func:`to_recipe_px` 로 되돌린다."""
+    FeatureType 1(면적) × (레시피 px/폴더 px)² · 2(폭) · 3(길이) × 비 — 두 픽셀 크기는 표기값 짝(:func:`recipe_scale`).  RichSurface 값도 같은 폴더 px 라고 **가정**한다(미확인).
+    장비에 적을 값은 같은 배율로 되돌린다(화면 :mod:`threshold_preview_dialog`)."""
     out: dict = {}
     for key, z in zones.items():
         lin, area = recipe_scale(folder, key[0])
         if lin == 1.0 and area == 1.0:
             out[key] = z
             continue
-        k = {FEATURE_AREA: area, FEATURE_WIDTH: lin}
+        k = {FEATURE_AREA: area, FEATURE_WIDTH: lin, FEATURE_LENGTH: lin}
         # 검출 단계 값도 같은 배율 — 레시피 자기 픽셀 기준이라고 **가정**한다(Zone 기준과 같은 ini · 같은 규약, 미확인).
         out[key] = Zone(z.zone_id, z.name, {c: tuple(
             Filter(f.feature, f.ftype, f.low * k.get(f.feature, 1.0), f.high * k.get(f.feature, 1.0), f.name) for f in fs)
