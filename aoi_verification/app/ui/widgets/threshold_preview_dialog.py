@@ -43,6 +43,7 @@ import math
 import os
 import threading
 import time
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from dataclasses import dataclass, field, replace
@@ -104,8 +105,10 @@ WAFER_MERGE_MS = 150        # LOT 안 웨이퍼를 넣고 뺄 때 — 연달아 
 FLASH_MS = 1500             # 더한 칩 · 이미 있는 칩이 반짝이는 시간
 _LIVE: set = set()          # 화면이 닫혀도 도는 읽기 스레드를 붙들어 둔다(wafer_map_dialog 와 같은 패턴)
 
-# 화면에 보이는 순서와 단위.  Surface.flt 에 값이 있는 세 기준만 바꿀 수 있다(rules 모듈 docstring).
+# 화면에 보이는 순서와 단위(Zone ini 와 같은 순서).  Surface.flt 에 값이 있는 네 기준만 바꿀 수 있다(rules 모듈 docstring).
+# Length 는 그 Zone 묶음에 의미 있는 Length 기준이 있을 때만 칸이 생긴다(rules.condition_matters).
 _FEATURES = ((R.FEATURE_WIDTH, "Width", "µm", 0.05, 2),
+             (R.FEATURE_LENGTH, "Length", "µm", 0.05, 2),
              (R.FEATURE_AREA, "Area", "µm²", 0.5, 1),
              (R.FEATURE_CONTRAST, "Contrast", "", 1.0, 1))
 
@@ -204,14 +207,14 @@ class WaferData:
     def to_um(self, feature: int, v: float) -> float:
         if feature == R.FEATURE_AREA:
             return v * self.px[0] * self.px[1]
-        if feature == R.FEATURE_WIDTH:
+        if feature in (R.FEATURE_WIDTH, R.FEATURE_LENGTH):
             return v * self.px[0]
         return v
 
     def to_px(self, feature: int, v: float) -> float:
         if feature == R.FEATURE_AREA:
             return v / (self.px[0] * self.px[1])
-        if feature == R.FEATURE_WIDTH:
+        if feature in (R.FEATURE_WIDTH, R.FEATURE_LENGTH):
             return v / self.px[0]
         return v
 
@@ -391,7 +394,7 @@ def _in_frame(w: WaferData, frame: dict) -> WaferData:
 
     def zone(zd, z):
         lin, area = ks[zd]
-        f_k = {R.FEATURE_AREA: area, R.FEATURE_WIDTH: lin}
+        f_k = {R.FEATURE_AREA: area, R.FEATURE_WIDTH: lin, R.FEATURE_LENGTH: lin}
         return R.Zone(z.zone_id, z.name, {c: tuple(
             R.Filter(f.feature, f.ftype, f.low * f_k.get(f.feature, 1.0), f.high * f_k.get(f.feature, 1.0), f.name)
             for f in fs) for c, fs in z.bundles.items()},
@@ -401,7 +404,8 @@ def _in_frame(w: WaferData, frame: dict) -> WaferData:
         if d.zone_dir not in ks:
             return d
         lin, area = ks[d.zone_dir]
-        return replace(d, area=d.area * area, width=d.width * lin, length=d.length * lin)
+        return replace(d, area=d.area * area, width=d.width * lin, length=d.length * lin,
+                       blob_length=None if d.blob_length is None else d.blob_length * lin)
 
     return replace(w, zones={k: zone(k[0], z) if k[0] in ks else z for k, z in w.zones.items()},
                    defects=tuple(map(defect, w.defects)), goods=tuple(map(defect, w.goods)),
@@ -411,7 +415,7 @@ def _in_frame(w: WaferData, frame: dict) -> WaferData:
 def _ov_k(key: tuple, k: tuple) -> float:
     """바꾼 값 키 ``(Zone 폴더, Zone, 분류|극성, FeatureType|종류)`` 에 곱할 배율."""
     lin, area = k
-    return area if key[3] in (R.FEATURE_AREA, "area") else lin if key[3] in (R.FEATURE_WIDTH, "width", "length") else 1.0
+    return area if key[3] in (R.FEATURE_AREA, "area") else lin if key[3] in (R.FEATURE_WIDTH, R.FEATURE_LENGTH, "width", "length") else 1.0
 
 
 def _fits(acc_zones: dict, acc_optics: dict, acc_id: tuple, w: WaferData) -> bool:
@@ -2847,13 +2851,14 @@ class ThresholdPreviewDialog(QDialog):
                     f = next((x for x in filters if x.feature == feat), None)
                     if f is None or (feat == R.FEATURE_CONTRAST and not known):
                         continue                   # Contrast 를 안 적는 Zone — 슬라이더 없음(현택님 2026-11-16)
+                    if feat == R.FEATURE_LENGTH and any(d.blob_length is None for d in self._in_zone()):
+                        continue                   # BlobLength 가 없는 옛 기록이 섞임 — 그 Defect 는 Length 로 안 빠져 숫자가 틀린다
                     cells.append(self._feature_cell(cls, f, name, unit, step, dec))
                 rows.append((_KO.THRESH_PREVIEW_RULE_N.format(n=i) if many else _KO.THRESH_PREVIEW_RULE,
                              f"→ {self._class_name(cls)}", cells))
-        detect = self._detect_cells(z)
-        if detect:
-            cells, stages = detect
-            rows.append((_KO.THRESH_PREVIEW_DETECT_STAGE_HEAD, "→ " + " · ".join(stages), cells))
+        for stage, cells, bins in self._detect_cells(z) or ():
+            rows.append((_KO.THRESH_PREVIEW_DETECT_STAGE_HEAD.format(pol=stage.capitalize()),
+                         "→ " + " · ".join(self._class_name(b) for b in bins), cells))
         ncol = max((len(r[2]) for r in rows), default=0)     # 줄마다 칸 수가 달라도 세로 줄이 맞게 빈 칸으로 채운다
         for i, (title, sub, cells) in enumerate(rows):
             if i:
@@ -2889,28 +2894,36 @@ class ThresholdPreviewDialog(QDialog):
         return hw
 
     def _detect_cells(self, z):
-        """검출 단계(Dark/Bright) 하한 칸들 — 이 Zone 에 검출 단계 Defect 가 있는 극성만.
-        ``(칸들, 극성 이름들)``.  없으면 None.  앱에서 못 바꾸는 검출 값은 화면에 띄우지 않는다(현택님 2026-11-21)."""
+        """검출 단계 하한 칸들 — **극성마다 한 줄**(Dark · Bright), 이 Zone 에 그 극성 검출 단계 Defect 가 있을 때만.
+        ``[(극성, 칸들, 그 Defect 들의 분류 번호)]``.  없으면 None.  앱에서 못 바꾸는 검출 값은 화면에 띄우지 않는다(현택님 2026-11-21).
+
+        장비 파일에서는 Dark · Bright 하한이 같은 ``[Surface]`` 한 섹션에 있지만, 각 하한은 자기 극성 Defect 만 거른다 —
+        한 줄에 같이 두면 같은 단계로 보여 헷갈렸다(현택님 2026-11-23, T254 BS CUP BS_2).  분류는 ``[Surface] Classify`` 가
+        0 보다 크면 그 번호(BS_2 = 33 B R Surface, Dark · Bright 둘 다), 아니면 결과 종류마다 변환표 번호라 Defect 에서 읽는다."""
         if z is None or not z.detect:
             return None
         mine = [d for d in self._in_zone() if not d.by_filter and d.stage is not None]
-        rows = [r for r in _DETECT_ROWS if _shown_limit(z, r[0], r[1]) and any(d.stage == r[0] for d in mine)]
-        if not rows:
-            return None
         w = self._w
-        cells = []
-        for stage, kind, ini, name, feat in rows:
-            _f, _n, unit, step, dec = next(x for x in _FEATURES if x[0] == feat)
-            vals = [w.to_um(feat, P._detect_value(d, kind)) for d in mine if d.stage == stage]
-            cells.append(self._limit_cell((*self._zone, stage, kind), (stage, kind), feat, z.detect[(stage, kind)],
-                                          name, unit, step, dec, vals, vals, False, ("Surface", ini, "detect")))
-        stages = [st.capitalize() for st in ("dark", "bright") if any(r[0] == st for r in rows)]
-        return cells, stages
+        out = []
+        for stage in ("dark", "bright"):
+            rows = [r for r in _DETECT_ROWS if r[0] == stage and _shown_limit(z, stage, r[1])]
+            own = [d for d in mine if d.stage == stage]
+            if not rows or not own:
+                continue
+            cells = []
+            for _st, kind, ini, name, feat in rows:
+                _f, _n, unit, step, dec = next(x for x in _FEATURES if x[0] == feat)
+                vals = [w.to_um(feat, P._detect_value(d, kind)) for d in own]
+                cells.append(self._limit_cell((*self._zone, stage, kind), (stage, kind), feat, z.detect[(stage, kind)],
+                                              name, unit, step, dec, vals, vals, False, ("Surface", ini, "detect")))
+            out.append((stage, cells, [b for b, _n in Counter(d.bin for d in own).most_common()]))
+        return out or None
 
     def _feature_cell(self, cls: int, f: R.Filter, name: str, unit: str, step: float, dec: int) -> QWidget:
         w = self._w
-        zone_vals = [w.to_um(f.feature, P._value(d, f.feature)) for d in self._in_zone()]
-        vals = [w.to_um(f.feature, P._value(d, f.feature)) for d in self._in_zone() if d.bin == cls]
+        zone_vals = [w.to_um(f.feature, v) for v in (P._value(d, f.feature) for d in self._in_zone()) if v is not None]
+        vals = [w.to_um(f.feature, v) for v in (P._value(d, f.feature) for d in self._in_zone() if d.bin == cls)
+                if v is not None]
         if f.feature == R.FEATURE_CONTRAST:
             vals = [v for v in vals if v != 0]
         sec = "Surface Feature Filter"
@@ -2943,11 +2956,11 @@ class ThresholdPreviewDialog(QDialog):
         h = QHBoxLayout()                      # 열 머리 한 줄 — 이름 + 값 칸 + 단위 + 변화량
         h.setSpacing(8)
         mono = theme.FONT_MONO
-        px_unit = {R.FEATURE_AREA: " px²", R.FEATURE_WIDTH: " px"}.get(feature, "")
+        px_unit = {R.FEATURE_AREA: " px²", R.FEATURE_WIDTH: " px", R.FEATURE_LENGTH: " px"}.get(feature, "")
         # ini 에 적힌 숫자 = 레시피 자기 픽셀(화면 값은 flt 픽셀로 바꾼 것이라 되돌린다, rules.zones_in_flt_px)
         # 합친 웨이퍼면 그 Zone 값의 픽셀 기준(_in_frame) — 기준 웨이퍼에 그 레시피 파일이 없어도 맞는 배율
         lin, area = w.scales.get(self._zone[0]) or R.recipe_scale(w.folder, self._zone[0])
-        ini_px = low_px / {R.FEATURE_AREA: area, R.FEATURE_WIDTH: lin}.get(feature, 1.0)
+        ini_px = low_px / {R.FEATURE_AREA: area, R.FEATURE_WIDTH: lin, R.FEATURE_LENGTH: lin}.get(feature, 1.0)
         px_txt = f"{ini_px:.4f}".rstrip("0").rstrip(".") + px_unit
         ini_lab = None
         if ini is None:
@@ -3959,10 +3972,12 @@ class ThresholdPreviewDialog(QDialog):
 
     def _pick_caption(self, d: P.Defect) -> str:
         parts = [self._class_name(d.bin)]
+        z = self._w.zones.get((d.zone_dir, d.zone))
+        has_len = d.by_filter and z is not None and any(f.feature == R.FEATURE_LENGTH for fs in z.bundles.values() for f in fs)
         for feat, name, unit, _step, dec in _FEATURES:
             v = P._value(d, feat)
-            if v is None or (feat == R.FEATURE_CONTRAST and v == 0):
-                continue
+            if v is None or (feat == R.FEATURE_CONTRAST and v == 0) or (feat == R.FEATURE_LENGTH and not has_len):
+                continue                       # Length 는 그 Zone 에 Length 기준이 있을 때만(BlobLength)
             parts.append(f"{name} {self._w.to_um(feat, v):.{dec}f}" + (f" {unit}" if unit else ""))
         return " · ".join(parts)
 
@@ -4103,7 +4118,7 @@ class ThresholdPreviewDialog(QDialog):
             n = list(z.bundles).index(cls) + 1
             rule = _KO.THRESH_PREVIEW_RULE_N.format(n=n) if len(z.bundles) > 1 else _KO.THRESH_PREVIEW_RULE
             vals = [w.to_um(feat, P._value(d, feat)) for d in w.defects
-                    if (d.zone_dir, d.zone, d.bin) == (zdir, zid, cls)
+                    if (d.zone_dir, d.zone, d.bin) == (zdir, zid, cls) and P._value(d, feat) is not None
                     and not (feat == R.FEATURE_CONTRAST and P._value(d, feat) == 0)]
             changes.append(RP.Change(name + (f" · {rec}" if rec else ""), f"{rule} → {self._class_name(cls)}",
                                      item, unit, w.to_um(feat, f.low), w.to_um(feat, px), dec, tuple(vals)))

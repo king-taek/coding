@@ -6,6 +6,7 @@ import json
 
 import pytest
 
+from aoi_verification.app import i18n
 from aoi_verification.app.utils import updater
 
 # 테스트에서 가정하는 '저장소 기본 브랜치'(실제 조회는 네트워크라 스텁).  입력 브랜치와
@@ -632,6 +633,125 @@ def test_incomplete_staging_never_becomes_a_ready_signal(tmp_path, monkeypatch):
     assert not (root / "app.new").exists()
     assert not (root / "app.new.part").exists()
     assert (app / "main.py").read_text() == "OLD"
+
+
+# ── Windows 잠김(WinError 5) — 보안 검사가 막 복사한 파일을 잠깐 잡으면 rename 이 거부된다 ──
+#    실측(2026-11-23): 60회 중 10% 거부, 전부 0.3 초 안에 다음 시도에서 풀림.
+def _locked_rename(monkeypatch, fail_times: int, only_src: str = "app.new.part"):
+    """``only_src`` 이름의 폴더 rename 을 ``fail_times`` 번 거부한다(그 뒤 성공).
+
+    기다림은 없앤다 — 진짜로 15초를 기다리지 않게."""
+    real = updater._rename_dir
+    seen = {"n": 0}
+
+    def _rename(src, dst):
+        if updater.Path(src).name == only_src and seen["n"] < fail_times:
+            seen["n"] += 1
+            raise PermissionError(13, "액세스가 거부되었습니다", str(src))
+        real(src, dst)
+
+    monkeypatch.setattr(updater, "_rename_dir", _rename)
+    monkeypatch.setattr(updater.time, "sleep", lambda s: None)
+    return seen
+
+
+def test_briefly_locked_rename_is_retried_and_succeeds(tmp_path, monkeypatch):
+    """★ 실제 사용자 오류 — 한 번 거부돼도 다시 해서 성공한다.  로딩바는 busy 로 움직인다."""
+    root, app = _exe_install(tmp_path, monkeypatch)
+    zip_bytes = _make_branch_zip(tmp_path)
+    monkeypatch.setattr(updater, "_urlopen",
+                        lambda url, headers, timeout: _FakeResp(zip_bytes))
+    seen = _locked_rename(monkeypatch, fail_times=3)
+    phases = []
+
+    ok = updater.download_and_apply(
+        "o/r", "x", "NEWSHA", progress=lambda d, t, ph: phases.append((d, t, ph)))
+
+    assert ok is True and seen["n"] == 3
+    assert (root / "app.new" / "main.py").read_text() == "print('hi')\n"
+    assert not (root / "app.new.part").exists()
+    assert (0, 0, i18n.KO.UPDATE_PHASE_WAIT_LOCK) in phases   # 0 에서 멈춘 바가 아니다
+    assert (app / "main.py").read_text() == "OLD"
+
+
+def test_lock_that_never_clears_fails_cleanly_without_blaming_github(tmp_path, monkeypatch):
+    """끝내 잠겨 있으면 실패 — app.new 는 생기지 않고 반쪽 .part 도 남지 않으며, 사유는
+    'api.github.com' 이 아니라 PC 의 잠김을 말한다(예전 문구가 GitHub 탓처럼 보였다)."""
+    root, app = _exe_install(tmp_path, monkeypatch)
+    zip_bytes = _make_branch_zip(tmp_path)
+    monkeypatch.setattr(updater, "_urlopen",
+                        lambda url, headers, timeout: _FakeResp(zip_bytes))
+    seen = _locked_rename(monkeypatch, fail_times=10**6)
+
+    assert updater.download_and_apply("o/r", "x", "NEWSHA") is False
+    assert seen["n"] == len(updater._RENAME_WAITS) + 1     # 정해진 만큼만 기다린다
+    err = updater.last_error()
+    assert err.startswith(i18n.KO.UPDATE_ERR_LOCKED_FMT.split("{")[0])
+    assert "github" not in err.lower()
+    assert not (root / "app.new").exists()
+    assert not (root / "app.new.part").exists()
+    assert (app / "main.py").read_text() == "OLD"
+
+
+def test_retry_budget_stays_short():
+    """기다림은 최대 약 15초 — 실측 잠김(≤0.3초)에 넉넉하고, 사용자를 오래 붙잡지 않는다."""
+    assert 5 <= sum(updater._RENAME_WAITS) <= 20
+
+
+def test_previous_app_new_is_restored_when_the_new_one_cannot_take_its_place(
+        tmp_path, monkeypatch):
+    """개발자 모드로 다시 받을 때 재시작 전의 app.new 가 있으면 — 새 rename 이 끝내 실패해도
+    그 완성된 app.new 는 그대로 남는다(예전 제자리 rmtree 는 반쯤 지운 채 이름을 막았다)."""
+    root, _app = _exe_install(tmp_path, monkeypatch)
+    old_new = root / "app.new"
+    old_new.mkdir()
+    (old_new / "main.py").write_text("PENDING", encoding="utf-8")
+    zip_bytes = _make_branch_zip(tmp_path)
+    monkeypatch.setattr(updater, "_urlopen",
+                        lambda url, headers, timeout: _FakeResp(zip_bytes))
+    _locked_rename(monkeypatch, fail_times=10**6)
+
+    assert updater.download_and_apply("o/r", "x", "NEWSHA") is False
+    assert (old_new / "main.py").read_text() == "PENDING"
+    assert not list(root.glob("*.trash-*"))
+
+
+def test_previous_app_new_is_replaced_and_leftovers_are_swept(tmp_path, monkeypatch):
+    """옛 app.new 는 새것으로 바뀌고, 지난번 못 지운 찌꺼기(.trash-*·반쪽 .part)도 치운다."""
+    root, _app = _exe_install(tmp_path, monkeypatch)
+    (root / "app.new").mkdir()
+    (root / "app.new" / "main.py").write_text("PENDING", encoding="utf-8")
+    (root / "app.new.trash-1").mkdir()
+    (root / "app.new.part.trash-1").mkdir()
+    (root / "app.new.part").mkdir()
+    (root / "app.new.part" / "half.py").write_text("x", encoding="utf-8")
+    zip_bytes = _make_branch_zip(tmp_path)
+    monkeypatch.setattr(updater, "_urlopen",
+                        lambda url, headers, timeout: _FakeResp(zip_bytes))
+
+    assert updater.download_and_apply("o/r", "x", "NEWSHA") is True
+    assert (root / "app.new" / "main.py").read_text() == "print('hi')\n"
+    assert not (root / "app.new" / "half.py").exists()
+    assert not list(root.glob("*.trash-*"))
+    assert not (root / "app.new.part").exists()
+
+
+def test_locked_leftover_part_is_not_half_deleted(tmp_path, monkeypatch):
+    """지난번 찌꺼기 .part 가 잠겨 옮기지 못하면 — 잠김 문구로 실패하되 그 자리를
+    rmtree 로 반쯤 지우지 않는다(다음 업데이트 때 다시 옮긴다)."""
+    root, _app = _exe_install(tmp_path, monkeypatch)
+    part = root / "app.new.part"
+    part.mkdir()
+    (part / "a.py").write_text("x", encoding="utf-8")
+    (part / "b.py").write_text("y", encoding="utf-8")
+    zip_bytes = _make_branch_zip(tmp_path)
+    monkeypatch.setattr(updater, "_urlopen",
+                        lambda url, headers, timeout: _FakeResp(zip_bytes))
+    _locked_rename(monkeypatch, fail_times=10**6)
+
+    assert updater.download_and_apply("o/r", "x", "NEWSHA") is False
+    assert updater.last_error().startswith(i18n.KO.UPDATE_ERR_LOCKED_FMT.split("{")[0])
+    assert sorted(p.name for p in part.iterdir()) == ["a.py", "b.py"]
 
 
 def _fake_pip(monkeypatch, rc: int, calls: list):

@@ -562,6 +562,7 @@ UPDATE_PHASE_EXTRACT = "업데이트 압축 해제 중…"
 UPDATE_PHASE_PREPARE = "업데이트 준비 중…"
 UPDATE_PHASE_DEPS = "필요한 패키지 설치 중…"
 UPDATE_PHASE_APPLY = "업데이트 적용 중…"
+UPDATE_PHASE_WAIT_LOCK = "보안 검사가 새 파일 확인을 마치길 기다리는 중…"
 UPDATE_PHASE_DONE = "업데이트 완료"
 # 사용자에게는 크게 두 단계로만 보인다 — 받는 일(다운로드) / 그 뒤 전부(설치: 압축 해제·
 # 준비·패키지·적용).  `UPDATE_PHASE_DOWNLOAD` 만 1단계, 나머지 phase 는 2단계다.
@@ -583,6 +584,8 @@ UPDATE_ERR_STAT_FAIL_FMT = "파일 확인 실패: {rel} ({error})"
 UPDATE_ERR_PIP_START_FMT = "패키지 설치를 시작하지 못했습니다 ({error})"
 UPDATE_ERR_PIP_RC_FMT = "패키지 설치 실패 (pip 종료코드 {rc})"
 UPDATE_ERR_VERIFY_FMT = "업데이트 준비 검증 실패 — {reason}"
+UPDATE_ERR_LOCKED_FMT = ("보안 검사(백신 등)가 새 버전 폴더를 잡고 있어 마무리를 못 했습니다 — "
+                         "잠시 후 다시 시도해 주세요. ({error})")
 
 # ── OpenVINO 설치 워커의 결과 사유 (learning/openvino_installer.py) ─────────
 # OPENVINO_INSTALL_FAILED_FMT 의 {error} 로 그대로 사용자에게 보인다.
@@ -1264,7 +1267,7 @@ OVERKILL_SAVED_LOAD = "저장한 선택 불러오기"
 OVERKILL_SAVED_LOAD_TIP = "이 웨이퍼 폴더에서 전에 고른 Overkill · Defect 를 다시 불러옵니다 (고를 때 자동 저장됩니다)"
 THRESH_PREVIEW_NO_FILTER = "Feature Filter 없음"
 THRESH_PREVIEW_DETECT_STAGE = "검출 단계 (Dark/Bright)"
-THRESH_PREVIEW_DETECT_STAGE_HEAD = "검출 단계"          # 기준 줄 머리(아래 줄에 → Dark · Bright)
+THRESH_PREVIEW_DETECT_STAGE_HEAD = "{pol} 검출 단계"    # 기준 줄 머리, 극성마다 한 줄(아래 줄에 → 분류 이름)
 THRESH_PREVIEW_RULE = "기준"
 THRESH_PREVIEW_RULE_N = "기준 {n}"
 THRESH_PREVIEW_RECIPE_VALUE = "레시피 {v}"

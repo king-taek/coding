@@ -26,8 +26,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..coords import surface_flt as _flt
-from .rules import (FEATURE_AREA, FEATURE_CONTRAST, FEATURE_WIDTH, detect_polarity, event_mask, read_classes,
-                    read_zones, stage_masks, zone_dir_for)
+from .rules import (FEATURE_AREA, FEATURE_CONTRAST, FEATURE_LENGTH, FEATURE_WIDTH, detect_polarity, event_mask, read_classes,
+                    read_zones, same_value, stage_masks, zone_dir_for)
 
 __all__ = ["Defect", "load_all", "load_defects", "wafer_cap", "match_photos", "contrast_known", "why_dropped",
            "is_kept", "recipe_misses", "count_by_bin", "recommend"]
@@ -37,8 +37,8 @@ _LOG = logging.getLogger("aoi.threshold")
 # 사이드카 이름 → Defect 칸.  recipe 는 없어도 된다(옛 기록).
 _NEED = {"reclassify": "cls", "orgReclassify": "org", "zone": "zone", "recipe": "recipe",
          "area": "area", "BlobBreadth": "width", "BlobFeretMax": "length", "Contrast": "contrast",
-         "ActualX": "x", "ActualY": "y", "Type": "rtype"}
-_OPTIONAL = {"recipe", "rtype"}
+         "ActualX": "x", "ActualY": "y", "Type": "rtype", "BlobLength": "blen"}
+_OPTIONAL = {"recipe", "rtype", "blen"}
 
 
 @dataclass(frozen=True)
@@ -59,6 +59,7 @@ class Defect:
     rtype: int | None = None    # 검출 단계가 잡았으면 결과 비트(Surface.flt Type) — 이름은 rules.surface_result_types
     stage: str | None = None    # 검출 단계가 잡았으면 'dark'/'bright'(결과 이름의 DARK · BRIGHT) — 그 Zone 의 검출 하한이 거른다
     type_bits: int | None = None    # Surface.flt Type 원래 값(어느 Defect 든) — 검출 종류 이름용('어느 Zone에서 왔니?').  칸이 없으면 None
+    blob_length: float | None = None    # px (BlobLength) — Feature Filter Length 가 보는 값.  사이드카에 없으면 None(그 기준은 안 봄)
 
 
 def _layout(flt: Path):
@@ -119,14 +120,19 @@ def load_all(folder: Path) -> tuple[tuple[Defect, ...], tuple[Defect, ...], str]
     raw_type = col.get("rtype") or [None] * len(arr)
     rtype = raw_type if mask else [None] * len(arr)
     masks = stage_masks(folder) if mask else {}
+    blen = col.get("blen") or [None] * len(arr)
     kept, goods = [], []
-    for i, (cls, org, zone, rec, area, width, length, contrast, x, y, rt, bits) in enumerate(zip(
+    for i, (cls, org, zone, rec, area, width, length, contrast, x, y, rt, bl, bits) in enumerate(zip(
             col["cls"], col["org"], col["zone"], recipe, col["area"], col["width"], col["length"],
-            col["contrast"], col["x"], col["y"], rtype, raw_type)):
-        first = org or cls
+            col["contrast"], col["x"], col["y"], rtype, blen, raw_type)):
+        # orgReclassify 가 class 번호가 아니면(ManReClassify 에 없음) 지금 분류를 쓴다 — 구형 EAGLE 120 바이트 기록은 그 칸에
+        # 다른 값이 있다: AOI-1 KENDALL MEOL GX57527840 첫 분류 23504 ~ 27526 이 915/915 class 목록 밖이고, 지금 분류 33 이
+        # 그 Zone [Surface] Classify=33 과 맞았다(관측 2026-11-23).  class 목록을 못 읽거나 지금 분류도 목록 밖이면 그대로 둔다.
+        # ⚠ 사람이 Accept(0) 로 바꾼 구형 기록이면 Good 으로 빠진다 — 실물 표본 없음(미확인).
+        first = cls if org and classes and abs(int(org)) not in classes and abs(int(cls)) in classes else (org or cls)
         d = Defect(i, zone_dir_for(rec), int(zone), int(first), int(cls), float(area), float(width),
                    float(length), float(contrast), float(x), float(y),
-                   by_filter=rt is None or bool(int(rt) & mask),
+                   by_filter=rt is None or bool(int(rt) & mask), blob_length=None if bl is None else float(bl),
                    type_bits=None if bits is None else int(bits))
         if not d.by_filter:
             d = dataclasses.replace(d, stage=detect_polarity(masks, rt), rtype=int(rt))
@@ -193,7 +199,8 @@ def contrast_known(defects, zone_dir: str, zone: int) -> bool:
 
 
 def _value(d: Defect, feature: int):
-    return {FEATURE_AREA: d.area, FEATURE_WIDTH: d.width, FEATURE_CONTRAST: d.contrast}.get(feature)
+    return {FEATURE_AREA: d.area, FEATURE_WIDTH: d.width, FEATURE_LENGTH: d.blob_length,
+            FEATURE_CONTRAST: d.contrast}.get(feature)
 
 
 def _detect_value(d: Defect, kind: str) -> float:
@@ -236,7 +243,8 @@ def detect_ok(d: Defect, z, kind: str, overrides: dict | None = None):
     low = _detect_low(d, z, kind, overrides)
     if low is None:
         return None
-    return _detect_value(d, kind) >= low
+    v = _detect_value(d, kind)
+    return v >= low or same_value(v, low)
 
 
 def why_dropped(d: Defect, zones: dict, overrides: dict | None = None):
@@ -260,10 +268,12 @@ def why_dropped(d: Defect, zones: dict, overrides: dict | None = None):
     if d.bin not in z.bundles:
         return None
     overrides = overrides or {}
+    # 자기 묶음을 레시피 값에서 잴 수 있는 값으로도 통과할 때만 '자기 묶음 안 값' 을 근거로 쓴다(앞뒤가 안 맞으면 옛 방식).
+    own_ok = _passes_measured(d, z.bundles[d.bin])
     first = None
     for cls, filters in z.bundles.items():
-        bad = None
-        for f in filters:
+        bad = None if cls == d.bin or not own_ok else _ruled_out_by_own(z, d.bin, cls)
+        for f in () if bad else filters:
             v = _value(d, f.feature)
             if v is None or (f.feature == FEATURE_CONTRAST and v == 0):
                 continue
@@ -276,6 +286,44 @@ def why_dropped(d: Defect, zones: dict, overrides: dict | None = None):
         if first is None or cls == d.bin:
             first = bad
     return first
+
+
+_MEASURED = (FEATURE_AREA, FEATURE_WIDTH, FEATURE_LENGTH, FEATURE_CONTRAST)      # Surface.flt 에 값이 있는 Feature
+
+
+def _passes_measured(d: Defect, filters) -> bool:
+    return all(f.passes(v) for f in filters
+               if (v := _value(d, f.feature)) is not None and not (f.feature == FEATURE_CONTRAST and v == 0))
+
+
+def _span(f):
+    """기준 하나가 통과시키는 값의 구간 ``(아래, 아래 포함, 위, 위 포함)`` — 한 구간으로 안 되는 꼴(2 범위 밖 · 8 ≠)은 None."""
+    lo, hi = f.low, f.high
+    return {1: (lo, True, hi, True), 3: (lo, True, lo, True), 4: (lo, False, math.inf, False),
+            5: (lo, True, math.inf, False), 6: (-math.inf, False, lo, False), 7: (-math.inf, False, lo, True)}.get(f.ftype)
+
+
+def _apart(a, b) -> bool:
+    """두 구간이 겹치지 않나."""
+    if a is None or b is None:
+        return False
+    (alo, alc, ahi, ahc), (blo, blc, bhi, bhc) = a, b
+    return ahi < blo or bhi < alo or (ahi == blo and not (ahc and blc)) or (bhi == alo and not (bhc and alc))
+
+
+def _ruled_out_by_own(z, own: int, cls: int):
+    """자기 묶음(``own``)을 통과했다는 사실만으로 묶음 ``cls`` 를 못 통과한다고 알 수 있으면 ``(cls, FeatureType)``, 모르면 None.
+
+    flt 에 값이 없는 Feature(Polarity 14 등)는 그 Defect 값을 모르지만, 장비가 그 Defect 를 ``own`` 묶음으로 분류했으니
+    값은 ``own`` 의 그 기준 안에 있다.  ``cls`` 의 같은 Feature 기준과 구간이 겹치지 않으면 ``cls`` 로는 못 남는다.
+    AOI-21 · 4F-AOI-04 Kendall RDL: 29 = Polarity ≥ 60 · 28 = Polarity ≤ 40 이라 잴 수 있는 값으로는 B R Other(28) 805개가
+    29 묶음도 통과해 보였다 — 28 기준을 올려도 그 Defect 가 '29 로 남는다' 고 세어 하나도 안 빠졌다(관측 2026-11-23).
+    구간이 겹치거나 한쪽에만 있는 기준은 모른다(지금처럼 통과로 본다)."""
+    mine = {f.feature: _span(f) for f in z.bundles.get(own, ()) if f.feature not in _MEASURED}
+    for f in z.bundles.get(cls, ()):
+        if f.feature in mine and _apart(mine[f.feature], _span(f)):
+            return (cls, f.feature)
+    return None
 
 
 def is_kept(d: Defect, zones: dict, overrides: dict | None = None) -> bool:

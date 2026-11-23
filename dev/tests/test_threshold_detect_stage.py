@@ -135,7 +135,8 @@ def test_dialog_shows_detect_group_and_raised_dark_area_drops_type8(styled_qapp,
         assert ("dark", "area") in dlg.sliders and ("dark", "width") in dlg.sliders
         assert ("bright", "area") not in dlg.sliders                       # 레시피에 없음(검출 Defect 도 없음)
         texts = [lab.text() for lab in dlg.rules.findChildren(T.QLabel)]
-        assert _KO.THRESH_PREVIEW_DETECT_STAGE_HEAD in texts and "→ Dark" in texts
+        assert _KO.THRESH_PREVIEW_DETECT_STAGE_HEAD.format(pol="Dark") in texts and "→ A" in texts
+        assert _KO.THRESH_PREVIEW_DETECT_STAGE_HEAD.format(pol="Bright") not in texts      # Bright 검출 Defect 없음
         assert dlg.drop_value.text() == "0" and not dlg.reset_btn.isEnabled()
         dlg.set_value("dark", "area", 50.0)
         assert dlg._ov == {("Zones", 63, "dark", "area"): 50.0}
