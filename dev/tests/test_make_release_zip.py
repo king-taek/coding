@@ -46,6 +46,8 @@ def test_update_leftovers_and_test_results_are_excluded():
     assert not inc("app.new/main.py")
     assert not inc("app.old/main.py")
     assert not inc("app.new.part/main.py")
+    assert not inc("app.new.trash-1700000000/main.py")
+    assert not inc("app.new.part.trash-1700000000/main.py")
     assert not inc("결과/시험출력.xlsx")
     assert not inc("app/aoi_verification/__pycache__/x.pyc")
     # IR 변환용 torch 임시 트리(수백 MB) — 빌드가 중간에 죽었을 때만 남는다.

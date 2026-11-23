@@ -71,6 +71,9 @@ def should_include(rel: PurePosixPath) -> bool:
         return False
     if parts[0] in _SKIP_TOP:
         return False
+    # 업데이트가 옆으로 치워 둔 app.new(.part).trash-* — 못 지운 찌꺼기다.
+    if parts[0].startswith("app.new") and ".trash-" in parts[0]:
+        return False
     # app\ 안의 __pycache__ 는 넣지 않는다 — 자동 업데이트도 새 트리에서 이걸 없애므로,
     # 배포본에 낡은 바이트코드를 심어두면 그 정리 효과가 반감된다.
     if parts[0] == "app" and "__pycache__" in parts:
