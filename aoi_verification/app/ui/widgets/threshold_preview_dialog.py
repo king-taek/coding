@@ -236,7 +236,7 @@ def no_flt_dirs(p) -> list:
         return []
     subs = [d for _n, d in sorted(list_slot_dirs(p).items()) if _flt._find_flt(d) is None]
     out = []
-    for d in subs or [p]:
+    for d in [p, *subs]:                   # 고른 폴더 자신도 본다 — 웨이퍼 폴더에 Zones 같은 하위 폴더가 있어도
         try:
             names = [e.name for e in os.scandir(d) if e.is_file()]
         except OSError:

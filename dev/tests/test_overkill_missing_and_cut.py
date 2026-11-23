@@ -72,6 +72,10 @@ def test_no_flt_dirs_names_the_dropped_wafers(tmp_path):
     assert T.no_flt_dirs(lot) == [(lot / "35174140EWD4", False), (lot / "35174142EWE5", True)]
     assert T.no_flt_dirs(lot / "35174142EWE5") == [(lot / "35174142EWE5", True)]   # 웨이퍼 폴더를 바로 골라도
     assert T.no_flt_dirs(lot / "35174143EWB4") == []
+    zones = lot / "35174142EWE5" / "Zones"                 # 웨이퍼 폴더에 하위 폴더가 있어도 그 폴더 자신을 알린다
+    zones.mkdir()
+    (zones / "PI.ini").write_text("x")
+    assert T.no_flt_dirs(lot / "35174142EWE5") == [(lot / "35174142EWE5", True)]
     assert [d for d, _r in T.expand_root(lot)] == [lot / "35174143EWB4"]          # 튜닝에는 여전히 한 장만
 
 
