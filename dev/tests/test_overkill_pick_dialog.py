@@ -263,3 +263,33 @@ def test_preview_is_deferred_until_decisions_pause(styled_qapp):
     assert len(env.calls) == n0                                     # 눌러 대는 동안 전체 훑기는 하지 않는다
     dlg.flush_preview()
     assert len(env.calls) == n0 + 1 and env.calls[-1] == (1, 1)
+
+
+def test_deciding_switches_big_photo_without_animation_but_undo_still_fades(styled_qapp, monkeypatch):
+    """결정(← →)하면 가운데 큰 사진은 스와이프 · 페이드 없이 바로 다음 사진으로 바뀐다.  Z(되돌리기)는 페이드인을 그대로 쓴다."""
+    monkeypatch.setattr(motion, "enabled", lambda: True)
+    fades, swipes = [], []
+    monkeypatch.setattr(motion, "fade_in", lambda w, **kw: fades.append(w))
+    monkeypatch.setattr(motion, "swipe_out", lambda *a, **kw: swipes.append(a))
+    monkeypatch.setattr(motion, "flash_outline", lambda *a, **kw: None)
+    monkeypatch.setattr(motion, "animate_scroll", lambda *a, **kw: None)
+    dlg = Env().make()
+    dlg.btn_def.click()
+    dlg.btn_over.click()
+    assert dlg.current_key() == ("a", 2) and fades == [] and swipes == []
+    dlg._undo()
+    assert dlg.current_key() == ("a", 1) and fades == [dlg.big]
+
+
+def test_up_down_do_nothing_only_left_right_move(styled_qapp):
+    """Defect 고르기 창의 방향 이동은 ← → (결정)만이다 — ↑ ↓ 는 아무것도 안 한다(사용자 지시 2026-11-21)."""
+    env = Env()
+    dlg = env.make()
+    dlg.show()
+    dlg.activateWindow()
+    QTest.qWaitForWindowActive(dlg)
+    start = dlg.current_key()
+    QTest.keyClick(dlg, Qt.Key.Key_Down)
+    QTest.keyClick(dlg, Qt.Key.Key_Up)
+    assert dlg.current_key() == start and dlg.picked() == {} and dlg.overkill() == {}
+    dlg.close()

@@ -3,11 +3,15 @@
 ``collect(color_path)`` 가 같은 폴더의 목록·INI·픽셀 크기·Scan 크기·사진별 판정을 모아 zip 하나로 쓴다.
 사진(JPEG 등)은 절대 담지 않는다 — 파일 이름·크기만 ``files.txt`` 에 남긴다.
 각 구역은 따로 try/except 라 한 곳이 깨져도 나머지가 남고, 오류는 글로 적는다.
+
+레시피 값 분석용 구역(``recipes``·``export_csv``)도 함께 모은다 — 다중 레시피 폴더에서 레시피마다 Zone 기준 ·
+픽셀 크기 · 검출 값(Low_Delta 등)이 다르고, Defect 수치가 어느 픽셀 크기로 환산돼 기준과 비교되는지 따져 보려는 자료다.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
 import zipfile
 from collections import Counter, defaultdict
@@ -18,10 +22,23 @@ from pathlib import Path
 from . import abs_coord, camtek_ini, pixel_size, scan_image
 from .ini_text import decode_ini_bytes, read_ini_text
 
-__all__ = ["collect", "gather"]
+__all__ = ["collect", "collect_many", "gather"]
+
+_SURFACE_KEYS = ("Enable", "Bright_Thr", "Low_Delta", "High_Delta", "VDark_Delta", "BrightArea", "DarkArea",
+                 "BrightDiameter", "DarkDiameter", "BrightLength", "DarkLength", "Area", "Diameter", "Length")
+_ZONE_DIR = re.compile(r"(?i)^(zones|recipe\d+-zones)$")
+_COPY_PARENT_MAX = 100
+# 레시피 분석에 안 쓰는데 큰 파일 — WaferAlignData.zip 이 LOT 수집 zip 의 97%(256 MB)였다(관측 2026-11-21).
+_SKIP_NAMES = {"waferaligndata.zip"}
 
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
 _MAX_COPY = 20 * 1024 * 1024
+# LOT(레시피 분석) 수집은 분석에 쓰는 파일만 담는다(사용자 지시 2026-11-21 '필요한 것만').  쓰는 것 = Defect 값
+# (Surface.flt · .md) · Export 정답(Defects.csv) · 기준 설명(RTP.txt) · ini(Zone 기준 · 분류 · 결과 비트 · 레시피
+# 픽셀 · 배율).  .dat · .dcm · .zip(s_RichSurface.dat · WaferAlignData.zip 등)과 사진마다 한 줄인 큰 목록은 뺀다.
+_LEAN_NAMES = {"surface.flt", "surface.flt.md", "defects.csv", "rtp.txt"}
+_LEAN_SKIP_INI = {"colorimagegrabinginfo.ini"}      # 사진마다 한 섹션(0.7 MB) — Scan 진단용이라 LOT 수집엔 안 쓴다
+_LEAN_INI_MAX = 1024 * 1024
 _FIELDS = ("RecipeNumber", "X", "Y", "FaultX", "FaultY", "PixelSizeX", "PixelSizeY",
            "OpticName", "Mag", "Type", "ImageSizeX", "ImageSizeY")
 _NONE = "없음"
@@ -48,13 +65,15 @@ def _guard(out: dict, key: str, fn):
 
 
 def _listing(folder: Path) -> list[tuple[str, int]]:
+    # DirEntry 는 열거 때 받은 정보를 쓴다(Windows) — Path.stat() 은 사진 수천 장마다 NAS 왕복이었다.
     out = []
-    for p in sorted(folder.iterdir(), key=lambda q: q.name.casefold()):
-        try:
-            out.append((p.name, p.stat().st_size if p.is_file() else -1))
-        except OSError:
-            out.append((p.name, -1))
-    return out
+    with os.scandir(folder) as it:
+        for e in it:
+            try:
+                out.append((e.name, e.stat().st_size if e.is_file() else -1))
+            except OSError:
+                out.append((e.name, -1))
+    return sorted(out, key=lambda t: t[0].casefold())
 
 
 def _counts(names) -> dict:
@@ -128,6 +147,114 @@ def _tile_sizes(folder: Path, names: list[str]) -> dict:
     for n, wh in zip(tiles, sizes):
         by[_suffix(n)][f"{wh[0]}x{wh[1]}" if wh else "읽기 실패"] += 1
     return {k: dict(v) for k, v in by.items()}
+
+
+def _recipe_names(folder: Path) -> dict:
+    """RecipesInfo.ini 의 ``[Recipe-N]``(이름 · 픽셀 크기 · 배율)과 MultiRecipe.ini 의 줄(레시피 순서)."""
+    out: dict = {"recipes_info": {}, "multi_recipe": None}
+    txt = read_ini_text(folder / "RecipesInfo.ini") or ""
+    for m in re.finditer(r"(?ims)^\s*\[Recipe-(\d+)\]\s*$(.*?)(?=^\s*\[|\Z)", txt):
+        out["recipes_info"][m.group(1)] = dict(re.findall(
+            r"(?m)^\s*(Name|Scan2DPixelSize|ColorPixelSize|ScanMag|VerMag)\s*=\s*(.*?)\s*$", m.group(2)))
+    multi = read_ini_text(folder / "MultiRecipe.ini")
+    if multi is not None:
+        out["multi_recipe"] = [ln.strip() for ln in multi.splitlines() if ln.strip()][:40]
+    return out
+
+
+def _zone_params(path: Path) -> dict:
+    kv = _kv_of(path, _SURFACE_KEYS)
+    kv.pop("present", None)
+    return {k: v for k, v in kv.items() if v is not None}
+
+
+def _passes(zone, rows) -> int:
+    """Zone 묶음 하나라도 전부(AND) 통과한 Defect 수."""
+    from ..threshold import rules
+    n = 0
+    for r in rows:
+        vals = {rules.FEATURE_AREA: r.area, rules.FEATURE_WIDTH: r.blob_breadth, rules.FEATURE_CONTRAST: r.contrast}
+        if any(all(f.passes(vals[f.feature]) for f in fs if f.feature in vals) for fs in zone.bundles.values()):
+            n += 1
+    return n
+
+
+def _scaled(zone, k_area: float, k_width: float):
+    """기준 값(px)에 환산 계수를 곱한 Zone — 면적은 면적 계수, 폭은 폭 계수, Contrast 는 그대로."""
+    from ..threshold import rules
+
+    def k(f):
+        return k_area if f.feature == rules.FEATURE_AREA else k_width if f.feature == rules.FEATURE_WIDTH else 1.0
+    return rules.Zone(zone.zone_id, zone.name, {
+        c: tuple(rules.Filter(f.feature, f.ftype, f.low * k(f), f.high * k(f)) for f in fs)
+        for c, fs in zone.bundles.items()})
+
+
+def _zone_rows(folder: Path, zones: dict, by: dict, ref) -> list:
+    out = []
+    for (d, zid), z in sorted(zones.items()):
+        m = re.match(r"(?i)recipe(\d+)-", d)
+        n = int(m.group(1)) if m else 1
+        rows = by.get((n, zid), [])
+        px = pixel_size.scan_pixel_size_xy_recipe(folder, n)
+        e = {"zone_dir": d, "zone_id": zid, "zone_name": z.name, "recipe": n, "recipe_pixel_xy": list(px) if px else None,
+             "filters": {str(c): [[f.feature, f.ftype, f.low, f.high] for f in fs] for c, fs in z.bundles.items()},
+             "flt_n": len(rows)}
+        ini = folder / d / f"{z.name}.ini"
+        e["surface_params"] = _zone_params(ini) if ini.is_file() else {}
+        if rows:
+            e["flt_range"] = {"area": [min(r.area for r in rows), max(r.area for r in rows)],
+                              "width": [min(r.blob_breadth for r in rows), max(r.blob_breadth for r in rows)],
+                              "length": [min(r.blob_feret_max for r in rows), max(r.blob_feret_max for r in rows)],
+                              "contrast": [min(r.contrast for r in rows), max(r.contrast for r in rows)],
+                              "contrast_zero": sum(1 for r in rows if r.contrast == 0)}
+            e["pass_raw"] = _passes(z, rows)
+            if ref and px:
+                # flt 를 폴더 RefPixelSize 로, 기준을 이 레시피 픽셀 크기로 µm 로 바꿔 같은 µm 끼리 비교한다.
+                # 기준 px 를 flt 의 px 로 되돌리면 같은 비교다: 기준 × (레시피 픽셀 / Ref 픽셀)^차원.
+                e["pass_um"] = _passes(_scaled(z, (px[0] / ref[0]) ** 2, px[0] / ref[0]), rows)
+        out.append(e)
+    return out
+
+
+def _recipes(folder: Path) -> dict:
+    """레시피마다 Zone 기준(px)과 Surface.flt 수치 · 통과 수를 한 표로 — 기준이 어느 환산에서 맞는지 보는 자료.
+
+    ``pass_raw`` = flt 숫자를 기준 숫자와 그대로 비교, ``pass_um`` = 기준(px)을 그 레시피 픽셀 크기로 µm 로,
+    flt 를 폴더 RefPixelSize 로 µm 로 바꿔 같은 µm 끼리 비교(Export Defects.csv 의 환산과 같은 방식).
+    장비가 Defect 로 남긴 수(``flt_n``)와 맞는 쪽이 맞는 환산이다."""
+    from ..threshold import rules
+    from . import surface_flt
+    ref = pixel_size.scan_pixel_size_xy(folder)
+    recs = surface_flt.load_folder(folder)
+    by: dict = defaultdict(list)
+    for r in recs:
+        by[(r.recipe if r.recipe is not None else 1, r.zone)].append(r)
+    return {"names": _recipe_names(folder), "ref_pixel_xy": list(ref) if ref else None, "flt_records": len(recs),
+            "zones": _zone_rows(folder, rules.read_zones(folder), by, ref)}
+
+
+def _export_csv(folder: Path) -> dict:
+    """Export 로 생긴 ``Defects.csv`` 요약 — Zone(Type)별 줄 수와 면적 · 폭 · 길이 범위(µm)."""
+    import csv
+    p = folder / "Defects.csv"
+    if not p.is_file():
+        return {"present": False}
+    rows = list(csv.DictReader(p.read_text(encoding="utf-8-sig", errors="replace").splitlines()))
+    by: dict = defaultdict(list)
+    for r in rows:
+        by[r.get("Type", "")].append(r)
+    out = {}
+    for t, v in by.items():
+        rng = {}
+        for k in ("Area", "Width", "Length"):
+            try:
+                xs = [float(x[k]) for x in v]
+                rng[k] = [min(xs), max(xs)]
+            except (KeyError, ValueError):
+                pass
+        out[t] = {"rows": len(v), **rng}
+    return {"present": True, "rows": len(rows), "by_type": out}
 
 
 def _ini_fields(folder: Path) -> dict:
@@ -204,7 +331,9 @@ def _summary(photos) -> dict:
     return {k: dict(v) for k, v in sorted(t.items())}
 
 
-def gather(color_path) -> dict:
+def gather(color_path, scan: bool = True) -> dict:
+    """``scan=False`` 면 사진마다 Scan 을 찾는 구역(타일 크기 · 사진별 판정)을 건너뛴다 — NAS 에서 사진
+    수천 장을 하나씩 열어 웨이퍼 하나에 수 분이 걸렸다.  레시피 분석(LOT 수집)에는 필요 없다."""
     color = Path(color_path)
     folder = color.parent
     d: dict = {"folder": str(folder), "focus_photo": color.name,
@@ -215,8 +344,13 @@ def gather(color_path) -> dict:
     _guard(d, "counts", lambda: _counts(names))
     _guard(d, "manifest", lambda: _manifest(folder, set(names)))
     _guard(d, "pixel_size", lambda: _pixel(folder))
-    _guard(d, "scan_tile_sizes", lambda: _tile_sizes(folder, names))
-    _guard(d, "photos", lambda: _photos(folder, color, names))
+    if scan:
+        _guard(d, "scan_tile_sizes", lambda: _tile_sizes(folder, names))
+        _guard(d, "photos", lambda: _photos(folder, color, names))
+    else:
+        d["scan_tile_sizes"] = d["photos"] = {"skipped": "레시피 수집(빠른 모드)"}
+    _guard(d, "recipes", lambda: _recipes(folder))
+    _guard(d, "export_csv", lambda: _export_csv(folder))
     d["summary"] = _summary(d["photos"])
     return d
 
@@ -229,7 +363,8 @@ def _report(d: dict) -> str:
     if not d["summary"]:
         L.append("  (컬러 사진 없음)")
     for title, key in (("사진 개수 (레시피별)", "counts"), ("Scan 목록", "manifest"),
-                       ("픽셀 크기", "pixel_size"), ("Scan 타일 JPEG 크기 (레시피별)", "scan_tile_sizes")):
+                       ("픽셀 크기", "pixel_size"), ("Scan 타일 JPEG 크기 (레시피별)", "scan_tile_sizes"),
+                       ("레시피별 Zone 기준 · Surface.flt 수치", "recipes"), ("Export Defects.csv", "export_csv")):
         L += ["", f"## {title}", json.dumps(d[key], ensure_ascii=False, indent=2)]
     L += ["", "## 컬러 사진별 판정"]
     ph = d["photos"]
@@ -241,40 +376,104 @@ def _report(d: dict) -> str:
     return "\n".join(L) + "\n"
 
 
-def _copy_targets(folder: Path):
-    seen = set()
-    cands = list(folder.iterdir())
-    td = folder / "TrainData"
-    if td.is_dir():
-        cands += list(td.glob("*.ini"))
-    for p in cands:
+def _small_files(folder: Path):
+    # 사진은 이름으로 먼저 거른다 — 사진마다 stat 하면 NAS 에서 느리다.
+    with os.scandir(folder) as it:
+        entries = list(it)
+    for e in entries:
+        if (Path(e.name).suffix.lower() in _IMAGE_EXTS or e.name.lower() == "thumbs.db"
+                or e.name.lower() in _SKIP_NAMES):
+            continue
         try:
-            if (not p.is_file() or p.suffix.lower() in _IMAGE_EXTS or p.name.lower() == "thumbs.db"
-                    or p.stat().st_size > _MAX_COPY or p in seen):
-                continue
+            if e.is_file() and e.stat().st_size <= _MAX_COPY:
+                yield Path(e.path)
         except OSError:
             continue
-        seen.add(p)
-        yield p
+
+
+def _lean_ok(p: Path, names=_LEAN_NAMES) -> bool:
+    n = p.name.lower()
+    if n in names or (n.endswith(".txt") and "rtp" in n):      # 레시피마다 RTP(RecipeN-RTP.txt 등)도 — 이름은 미확인
+        return True
+    if p.suffix.lower() != ".ini" or n in _LEAN_SKIP_INI:
+        return False
+    try:
+        return p.stat().st_size <= _LEAN_INI_MAX
+    except OSError:
+        return False
+
+
+def _copy_targets(folder: Path, parent: bool = True, lean: bool = False):
+    """``(원본, zip 안 이름)`` — 폴더 바로 아래 파일 · Zone 폴더(``Zones``·``RecipeN-Zones``) · TrainData ini ·
+    윗 폴더(Setup)의 파일(최대 100개).  ``lean`` 이면 레시피 분석에 쓰는 파일만(:func:`_lean_ok`)."""
+    keep = _lean_ok if lean else (lambda p, names=None: True)
+    for p in _small_files(folder):
+        if keep(p):
+            yield p, f"copy/{p.name}"
+    with os.scandir(folder) as it:
+        dirs = [Path(e.path) for e in it if Path(e.name).suffix.lower() not in _IMAGE_EXTS and e.is_dir()]
+    for d in dirs:
+        if _ZONE_DIR.match(d.name):
+            for p in _small_files(d):
+                if keep(p):
+                    yield p, f"copy/{d.name}/{p.name}"
+        elif d.name == "TrainData":
+            for p in d.glob("*.ini"):
+                yield p, f"copy/TrainData/{p.name}"
+    if not parent:
+        return
+    try:
+        for i, p in enumerate(p for p in _small_files(folder.parent) if keep(p, ())):
+            if i >= _COPY_PARENT_MAX:
+                break
+            yield p, f"copy/_상위폴더/{p.name}"
+    except OSError:
+        pass
+
+
+def _write_folder(z: zipfile.ZipFile, color: Path, prefix: str = "", parent: bool = True,
+                  scan: bool = True) -> None:
+    folder = color.parent
+    d = gather(color, scan)
+    listing = d["files"] if isinstance(d["files"], list) else []
+    z.writestr(prefix + "report.txt", _report(d))
+    z.writestr(prefix + "diag.json", json.dumps(d, ensure_ascii=False, indent=2))
+    z.writestr(prefix + "files.txt", "\n".join(f"{n}\t{s}" for n, s in listing) + "\n")
+    try:
+        for p, arc in _copy_targets(folder, parent, lean=not scan):
+            z.write(p, prefix + arc)
+    except OSError:
+        pass
 
 
 def collect(color_path, out_root=None) -> Path:
     """진단 zip 을 쓰고 그 경로를 돌려준다.  zip 을 못 쓸 때만 예외를 낸다."""
     color = Path(color_path)
-    folder = color.parent
     root = Path(out_root) if out_root else _default_root()
     root.mkdir(parents=True, exist_ok=True)
-    d = gather(color)
-    listing = d["files"] if isinstance(d["files"], list) else []
-    out = root / f"Scan진단_{folder.name}_{datetime.now().strftime('%H%M%S')}.zip"
+    out = root / f"Scan진단_{color.parent.name}_{datetime.now().strftime('%H%M%S')}.zip"
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr("report.txt", _report(d))
-        z.writestr("diag.json", json.dumps(d, ensure_ascii=False, indent=2))
-        z.writestr("files.txt", "\n".join(f"{n}\t{s}" for n, s in listing) + "\n")
-        try:
-            for p in _copy_targets(folder):
-                arc = f"copy/TrainData/{p.name}" if p.parent.name == "TrainData" else f"copy/{p.name}"
-                z.write(p, arc)
-        except OSError:
-            pass
+        _write_folder(z, color)
+    return out
+
+
+def collect_many(folders, out_root=None, progress=None) -> Path:
+    """웨이퍼 폴더 여러 개(LOT)를 zip 하나에 ``<웨이퍼 폴더 이름>/`` 으로 나눠 담는다.
+
+    레시피 분석용 빠른 모드다 — 사진마다 Scan 을 찾는 구역은 건너뛴다(그건 GL 의 Scan 진단 · :func:`collect`).
+    ``progress(done, total)`` 은 웨이퍼 하나를 끝낼 때마다 부른다.  윗 폴더(Setup) 파일은 웨이퍼마다
+    같으니 첫 웨이퍼에만 담긴다."""
+    folders = [Path(f) for f in folders]
+    root = Path(out_root) if out_root else _default_root()
+    root.mkdir(parents=True, exist_ok=True)
+    lot = (folders[0].name if len(folders) == 1 else folders[0].parent.name) if folders else "-"
+    out = root / f"Scan진단_{lot}_{datetime.now().strftime('%H%M%S')}.zip"
+    seen: set = set()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for i, f in enumerate(folders):
+            name = f.name if f.name not in seen else f"{f.name}_{i}"
+            seen.add(name)
+            _write_folder(z, f / "-", f"{name}/", parent=(i == 0), scan=False)
+            if progress is not None:
+                progress(i + 1, len(folders))
     return out
