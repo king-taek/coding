@@ -301,3 +301,53 @@ def test_describe_reads_the_ini_only_once(tmp_path, monkeypatch):
     assert "col / row" in _labels(groups)
     assert camtek_ini.load_abs_folder(tmp_path)[img.stem.lower()] == (
         145523.83432694, 119503.165751992)
+
+
+# ---------------------------------------------------------------------------
+# 정보 화면 묶음 — 구분선은 묶음 사이에만(사용자 지시 2026-11-23)
+def _clusters(group) -> list[str]:
+    """연속한 같은 묶음을 하나로 줄인 순서."""
+    out: list[str] = []
+    for r in group.rows:
+        if not out or out[-1] != r.cluster:
+            out.append(r.cluster)
+    return out
+
+
+def test_describe_groups_rows_into_clusters(tmp_path, monkeypatch):
+    """파일 · 위치 · 분류 · 크기 · 스탬프 순서로 묶이고, 묶음이 끊겨 다시 나오지 않는다."""
+    img = _camtek_folder(tmp_path, monkeypatch)
+    groups = single_info.describe(img)
+    files = _group(groups, i18n.KO.IMAGE_INFO_GROUP_FILE)
+    assert _clusters(files) == [single_info.CLUSTER_FILE]
+    defect = _group(groups, i18n.KO.IMAGE_INFO_GROUP_DEFECT)
+    assert _clusters(defect) == [single_info.CLUSTER_WHERE,
+                                 single_info.CLUSTER_WHAT,
+                                 single_info.CLUSTER_SIZE,
+                                 single_info.CLUSTER_STAMP]
+    by_label = {r.label: r.cluster for r in defect.rows if r.label}
+    assert by_label[i18n.KO.DEFECT_COLROW_LABEL] == single_info.CLUSTER_WHERE
+    assert by_label[i18n.KO.DEFECT_RECIPE_ZONE_LABEL] == single_info.CLUSTER_WHAT
+    assert by_label[i18n.KO.DEFECT_TYPE_LABEL] == single_info.CLUSTER_WHAT
+    assert by_label[i18n.KO.DEFECT_AREA_LABEL] == single_info.CLUSTER_SIZE
+    assert by_label[i18n.KO.IMAGE_INFO_ROW_PIXEL] == single_info.CLUSTER_SIZE
+
+
+def test_every_measure_has_a_cluster(tmp_path, monkeypatch):
+    """새 계측 줄을 넣고 묶음을 빼먹으면 화면에서 엉뚱한 곳에 선이 생긴다 — 빈 값 금지."""
+    img = _camtek_folder(tmp_path, monkeypatch)
+    assert all(m.cluster for m in single_info.measures(img))
+    for g in single_info.describe(img):
+        assert all(r.cluster for r in g.rows), g.title
+
+
+def test_describe_kla_rows_are_clustered(tmp_path):
+    (tmp_path / "info.001").write_text(_KLA_INFO, encoding="utf-8")
+    img = tmp_path / "W6459076XYG1_2_0_23_2.jpg"
+    img.write_bytes(b"x")
+    groups = single_info.describe(img)
+    assert _clusters(_group(groups, i18n.KO.IMAGE_INFO_GROUP_FILE)) == \
+        [single_info.CLUSTER_FILE]
+    defect = _group(groups, i18n.KO.IMAGE_INFO_GROUP_DEFECT)
+    assert _clusters(defect)[0] == single_info.CLUSTER_WHERE
+    assert all(r.cluster for r in defect.rows)

@@ -7,7 +7,9 @@
 형태는 앱의 '도면' 언어를 그대로 쓴다(새 시각 언어를 만들지 않는다):
 
 - 계측은 **타이틀블록 + 하이라인 눈금 표**다 — ``role="listHeader"``/``colHead`` 로
-  덮개를 씌우고, 행마다 ``QFrame[role="row"]`` 의 아래 눈금이 항목을 가른다.
+  덮개를 씌우고, ``QFrame[role="row"]`` 의 아래 눈금이 항목을 가른다.  눈금은
+  **묶음(``InfoRow.cluster``)이 바뀌는 곳에만** 긋는다 — 행마다 그으면 선이 너무
+  많아 읽기 어렵다(사용자 지시 2026-11-23).  묶음 안 행은 ``rule="none"``.
 - 값은 **라벨 열(고정 폭) 바로 오른쪽에서 좌측 정렬로 시작**한다.  오른쪽 끝에 붙이면
   창이 넓어질수록 라벨과 값 사이가 벌어져 항목마다 눈이 좌우로 왕복한다 — 시작선을
   하나로 모으면 수치를 위아래로 훑을 수 있다.
@@ -715,8 +717,14 @@ class ImageInfoDialog(QDialog):
         lay.setSpacing(0)
 
         lay.addWidget(self._group_header(block, group.title, label_w))
-        for row in group.rows:
-            lay.addWidget(self._row_widget(block, row, label_w))
+        rows = group.rows
+        for i, row in enumerate(rows):
+            frame = self._row_widget(block, row, label_w)
+            # 다음 행이 같은 묶음이면 아래 눈금을 감춘다 — 묶음 사이에만 선.
+            if i + 1 < len(rows) and row.cluster \
+                    and rows[i + 1].cluster == row.cluster:
+                frame.setProperty("rule", "none")
+            lay.addWidget(frame)
         return block
 
     @staticmethod
