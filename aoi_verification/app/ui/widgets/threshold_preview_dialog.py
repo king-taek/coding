@@ -1466,6 +1466,7 @@ class ThresholdPreviewDialog(QDialog):
         self._pick_bus = _PickBus(self)
         self._pick_bus.done.connect(self._on_pick_computed)
         self._pick_token = 0              # [적용] 계산의 세대 — 늦게 온 옛 결과는 버린다
+        self._pick_touched: set = set()   # 마지막 [적용] 에서 고른 것이 바뀐 Zone — 그 Zone 저장분만 고친다
         self._pick_dlg: Optional[QDialog] = None   # 열려 있는 [Defect 고르기] 팝업
         self._pick_refresh = QTimer(self)          # 사진이 한 장씩 올 때마다 팝업 전체를 훑지 않게 모아서 한 번
         self._pick_refresh.setSingleShot(True)
@@ -3425,12 +3426,13 @@ class ThresholdPreviewDialog(QDialog):
         z = self._zone
         if z is None:
             return
+        had = any((d.zone_dir, d.zone) == z for d in (*self._picked.values(), *self._overkill.values()))
         self._ov = {k: v for k, v in self._ov.items() if k[:2] != z}
         self._picked = {k: d for k, d in self._picked.items() if (d.zone_dir, d.zone) != z}
         self._overkill = {k: d for k, d in self._overkill.items() if (d.zone_dir, d.zone) != z}
         self._rec_zones.discard(z)
         self._open = None
-        self._save_picks()
+        self._save_picks({z} if had else set())   # 고른 것 없이 값만 되돌렸으면 저장분은 그대로
         self._render()
 
     # ------------------------------------------------------------------ 자동 추천
@@ -3447,14 +3449,14 @@ class ThresholdPreviewDialog(QDialog):
     def toggle_pick(self, k: tuple) -> None:
         """꼭 잡을 Defect 를 더하거나 빼고, 고른 것을 전부 남기는 기준을 다시 추천한다."""
         if k in self._picked:
-            del self._picked[k]
+            d = self._picked.pop(k)
         else:
             d = next((x for x in self._w.defects if key_of(x) == k), None)
             if d is None:
                 return
             self._picked[k] = d
         self._recommend()
-        self._save_picks()
+        self._save_picks({(d.zone_dir, d.zone)})
         self._render_zones()
         self._render_rules()
         self._changed(True)
@@ -3481,15 +3483,20 @@ class ThresholdPreviewDialog(QDialog):
         folders = w.folders or (w.folder,)
         return [(i, f, sum(1 for d in w.defects + w.goods if d.wafer == i)) for i, f in enumerate(folders)]
 
-    def _save_picks(self) -> None:
-        """지금 고른 것(꼭 잡기 · Overkill)을 폴더별 · Zone 별로 남긴다 — 이 PC 안에서만(:mod:`...threshold.saved_picks`)."""
+    def _save_picks(self, touched=frozenset()) -> None:
+        """지금 고른 것(꼭 잡기 · Overkill)을 폴더별 · Zone 별로 남긴다 — 이 PC 안에서만(:mod:`...threshold.saved_picks`).
+
+        ``touched`` = 이번에 사용자가 고른 것을 바꾼 Zone.  저장분은 **Zone 단위로** 고친다: 지금 고른 것이 있는 Zone 과
+        ``touched`` Zone 만 지금 것으로 바꾸고, 나머지 Zone 의 저장분은 그대로 둔다 — [저장한 선택 불러오기] 를
+        누르기 전에 다른 Zone 을 고르거나 값만 되돌렸다고 예전에 저장한 선택이 지워지지 않게."""
         for i, folder, n in self._wafer_folders():
             zones: dict = {}
             for which, src in ((0, self._picked), (1, self._overkill)):
                 for d in src.values():
                     if d.wafer == i:
                         zones.setdefault((d.zone_dir, d.zone), (set(), set()))[which].add(d.index)
-            SP.save(folder, n, zones)
+            kept = {z: v for z, v in SP.load(folder, n).items() if z not in touched and z not in zones}
+            SP.save(folder, n, {**kept, **zones})
         self._refresh_saved_btn()
 
     def _saved_picks(self) -> tuple[dict, dict]:
@@ -3627,6 +3634,8 @@ class ThresholdPreviewDialog(QDialog):
         """팝업 [적용] — 고른 Defect · Overkill 를 받아 추천값을 다시 계산하고 화면을 다시 그린다."""
         if self._w is None:
             return
+        self._pick_touched = {(d.zone_dir, d.zone) for src in (self._picked, self._overkill, picked, overkill)
+                              for d in src.values()}     # 팝업에서 비운 Zone 도 — 그 Zone 저장분을 지운다
         self._picked = dict(picked)
         self._overkill = dict(overkill)
         # 고른 것이 많으면 추천 계산이 길다 — 로딩을 띄우고 계산은 백그라운드에서(UI 스레드를 잡지 않는다).
@@ -3655,7 +3664,7 @@ class ThresholdPreviewDialog(QDialog):
         try:
             if self._w is not None and rec is not None:
                 self._merge_recommended(rec)
-                self._save_picks()
+                self._save_picks(self._pick_touched)
             if self._w is not None:
                 self._render_zones()
                 self._render_rules()

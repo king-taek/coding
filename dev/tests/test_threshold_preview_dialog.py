@@ -1813,6 +1813,33 @@ def test_picks_are_saved_on_apply_and_loadable_later(styled_qapp, tmp_path, monk
         dlg2.deleteLater()
 
 
+def test_saved_picks_of_other_zones_survive_before_loading(styled_qapp, tmp_path, monkeypatch):
+    """[저장한 선택 불러오기] 를 누르기 전에 다른 Zone 을 고르거나 값만 되돌려도 예전 저장분은 남는다(Zone 단위 저장)."""
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    from aoi_verification.app.threshold import saved_picks as SP
+    _capture_run(monkeypatch, T)
+    z1, z2 = ("Zones", 1), ("Zones", 2)
+    dlg = T.ThresholdPreviewDialog()
+    dlg.set_mode("auto")
+    try:
+        dlg.set_wafer(_two_zone_wafer(T, tmp_path))
+        ds1 = [d for d in dlg._w.defects if (d.zone_dir, d.zone) == z1]
+        ds2 = [d for d in dlg._w.defects if (d.zone_dir, d.zone) == z2]
+        SP.save(tmp_path, 6, {z1: ({ds1[1].index}, {ds1[0].index})})      # 예전에 저장한 Zone 1 선택
+        dlg._set_zone(z2)
+        dlg.set_value(29, R.FEATURE_AREA, 35.0)                           # 값만 바꾸고
+        dlg.reset()                                                       # 되돌림 — 고른 것은 없었다
+        assert SP.load(tmp_path, 6) == {z1: ({ds1[1].index}, {ds1[0].index})}
+        dlg.open_pick_dialog()
+        dlg._pick_dlg.applied.emit({T.key_of(ds2[0]): ds2[0]}, {})        # Zone 2 만 고르고 적용
+        _wait_apply(dlg, styled_qapp)
+        assert SP.load(tmp_path, 6) == {z1: ({ds1[1].index}, {ds1[0].index}), z2: ({ds2[0].index}, set())}
+        dlg.load_saved_picks()                                            # 불러오면 둘 다 돌아온다
+        assert set(dlg._picked) == {T.key_of(ds1[1]), T.key_of(ds2[0])}
+    finally:
+        dlg.deleteLater()
+
+
 def test_saved_picks_ignored_when_defect_count_differs(tmp_path):
     """다시 스캔해 Defect 수가 달라진 폴더는 옛 index 가 엉뚱한 Defect 를 가리키니 쓰지 않는다."""
     from aoi_verification.app.threshold import saved_picks as SP
