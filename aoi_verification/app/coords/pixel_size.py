@@ -91,6 +91,31 @@ def _recipe_pixel_size_xy(folder: Path, n: int):
     return None
 
 
+@lru_cache(maxsize=256)
+def recipe_pixel_pair(folder: Path, n: int):
+    """``(폴더 값, 레시피 N 값)`` — **같은 파일 짝**(``ProductInfo.ini`` ↔ ``Recipe{N}-ProductInfo.ini`` 등)에서 읽은
+    두 픽셀 크기 ``(x, y)``.  짝이 하나도 없으면 None.  fail-safe.
+
+    레시피끼리 기준값을 옮길 때 쓴다(:func:`threshold.rules.recipe_scale`).  장비는 두 레시피의 **표기값**끼리 나눈다 —
+    레시피 2 Defect 면적이 ``(0.7698/0.3852)²`` 로 나누면 정수 픽셀 수가 되고(수집 30 웨이퍼 1,816/1,816),
+    폴더 정밀값 ``RefPixelSizeX`` 0.3851656 으로 나누면 1/1,816 만 정수였다(관측 2026-11-23).  정밀값 ÷ 표기값으로
+    옮기면 기준이 0.02% 커져 기준과 같은 Defect 27개가 '레시피 값인데 빠짐' 으로 나왔다."""
+    try:
+        for rel, kx, ky in _SOURCES:
+            if "/" in rel or kx.startswith("Ref"):      # 표기값만 — 정밀값(RefPixelSize)끼리 나누지 않는다
+                continue
+            base = _read_key(folder / rel, kx)
+            rec = _read_key(folder / f"Recipe{n}-{rel}", kx)
+            if base is None or rec is None:
+                continue
+            by = _read_key(folder / rel, ky) if ky else None
+            ry = _read_key(folder / f"Recipe{n}-{rel}", ky) if ky else None
+            return (base, by if by is not None else base), (rec, ry if ry is not None else rec)
+    except Exception:
+        return None
+    return None
+
+
 def scan_pixel_size(folder: Path) -> Optional[float]:
     """선형 환산용 px_x(µm/px).  못 찾으면 None."""
     xy = scan_pixel_size_xy(folder)

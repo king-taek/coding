@@ -25,7 +25,7 @@ from pathlib import Path
 import logging
 
 from ..coords.ini_text import read_ini_text
-from ..coords.pixel_size import scan_pixel_size_xy, scan_pixel_size_xy_recipe
+from ..coords.pixel_size import recipe_pixel_pair, scan_pixel_size_xy, scan_pixel_size_xy_recipe
 
 _LOG = logging.getLogger("aoi.threshold")
 
@@ -34,7 +34,7 @@ __all__ = ["Filter", "Zone", "ClassInfo", "read_zones", "read_classes", "zone_di
            "DETECT_KEYS", "detect_polarity",
            "recipe_scale", "read_recipe_names", "read_detect_values", "recipe_identity", "same_recipe",
            "read_scan_optics",
-           "FEATURE_AREA", "FEATURE_WIDTH", "FEATURE_LENGTH", "FEATURE_CONTRAST", "condition_matters"]
+           "FEATURE_AREA", "FEATURE_WIDTH", "FEATURE_LENGTH", "FEATURE_CONTRAST", "condition_matters", "same_value"]
 
 # Zone ini FeatureType — 섹션 이름과 짝지어 본 값(수집 자료 Zone ini 전부, 관측 2026-11-16):
 # 1 Area · 2 Width · 3 Length · 12 Contrast Average · 14 Polarity · 45 Abs Contrast Average.
@@ -60,8 +60,23 @@ class Filter:
 
     def passes(self, v: float) -> bool:
         lo, hi = self.low, self.high
-        return {1: lo <= v <= hi, 2: not (lo <= v <= hi), 3: v == lo, 4: v > lo,
-                5: v >= lo, 6: v < lo, 7: v <= lo, 8: v != lo}.get(self.ftype, True)
+        lo_eq, hi_eq = same_value(v, lo), same_value(v, hi)
+        inside = (lo <= v or lo_eq) and (v <= hi or hi_eq)
+        return {1: inside, 2: not inside, 3: lo_eq, 4: v > lo,
+                5: v >= lo or lo_eq, 6: v < lo, 7: v <= lo or lo_eq, 8: v != lo}.get(self.ftype, True)
+
+
+# 레시피 N 기준을 flt 픽셀로 옮기면(× 배율) 장비가 계산한 같은 값과 끝자리만 달라진다 — 레시피 2 DarkArea 35 px ×
+# (0.7698/0.3852)² = 139.78201638182864, 장비 flt 값 139.7820163818286(관측 2026-11-23, 같은 값).  그 부동소수 반올림만
+# 같은 값으로 본다(상대 1e-9 — 보정값이 아니다: 값을 옮기지 않고, 그보다 큰 차이는 그대로 다르다).  같음을 포함하는
+# 비교(≥ · ≤ · 범위 · =)에만 쓴다 — 엄격 비교(> · <)는 그대로 둔다(자동 추천이 '바로 아래 실수' 로 내려 놓는다).
+_SAME_REL = 1e-9
+
+
+def same_value(a: float, b: float) -> bool:
+    if a == b:
+        return True
+    return math.isfinite(a) and math.isfinite(b) and abs(a - b) <= _SAME_REL * max(abs(a), abs(b))
 
 
 @dataclass(frozen=True)
@@ -213,8 +228,9 @@ def recipe_scale(folder: Path, zone_dir: str):
         # x5 Scan Area DarkArea 38 인데 Dark Defect 최솟값 38.099, 0.27% 늘린 38.10 이면 14개가 빠졌다(관측 2026-11-21).
         # 배율이 다를 때(5x → 20x)만 바꾼다.  배율을 모르면 픽셀 크기로만 판단한다.
         return 1.0, 1.0
-    ref = scan_pixel_size_xy(folder)
-    rec = scan_pixel_size_xy_recipe(folder, n)
+    # 두 값은 같은 파일 짝(표기값끼리)에서 읽는다 — :func:`coords.pixel_size.recipe_pixel_pair`.  짝이 없을 때만 옛 방식.
+    pair = recipe_pixel_pair(folder, n)
+    ref, rec = pair if pair else (scan_pixel_size_xy(folder), scan_pixel_size_xy_recipe(folder, n))
     if not ref or not rec:
         _LOG.warning("레시피 %s 픽셀 크기를 몰라 Zone 기준을 폴더 기준으로 못 바꿈: %s (폴더 %s · 레시피 %s)",
                      m.group(1), folder, ref, rec)
@@ -233,8 +249,8 @@ def zones_in_flt_px(folder: Path, zones: dict) -> dict:
     레시피 3(x20, 0.3859) Surface_RDL 폭 5.1832932 px × 0.3859 = 2.000 µm · 면적 26.8665 px² × 0.3859² = 4.00 µm²
     — 장비 기준은 µm 로 2 · 4.  숫자를 그대로 flt 와 비교하면 레시피 3 Defect 가 0/190 통과, µm 로 맞추면 190/190
     통과(= 장비).  레시피 2(x5, 1.538)는 폴더 1.536 과 거의 같아 어느 쪽이든 같았다.  Contrast 는 단위 없음.
-    FeatureType 1(면적) × (레시피 px/폴더 px)² · 2(폭)× 비.  RichSurface 값도 같은 폴더 px 라고 **가정**한다(미확인).
-    장비에 적을 값은 :func:`to_recipe_px` 로 되돌린다."""
+    FeatureType 1(면적) × (레시피 px/폴더 px)² · 2(폭) · 3(길이) × 비 — 두 픽셀 크기는 표기값 짝(:func:`recipe_scale`).  RichSurface 값도 같은 폴더 px 라고 **가정**한다(미확인).
+    장비에 적을 값은 같은 배율로 되돌린다(화면 :mod:`threshold_preview_dialog`)."""
     out: dict = {}
     for key, z in zones.items():
         lin, area = recipe_scale(folder, key[0])

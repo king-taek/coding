@@ -20,7 +20,7 @@ from aoi_verification.app.threshold import rules as R
 ROOT = Path(__file__).resolve().parents[2]
 RDL2 = ROOT / "dev" / "Threshold 확인" / "TB500_RDL2 Multi x5" / "32256E25EWB4"
 KEY = ("Recipe2-Zones", 63)
-LIN = 1.538 / 0.3851656          # Recipe2-ProductInfo Scan2DPixelSize ÷ Params_WaferInfo RefPixelSizeX
+LIN = 1.538 / 0.3852             # Recipe2-ProductInfo ÷ ProductInfo Scan2DPixelSize — 같은 파일 짝(pixel_size.recipe_pixel_pair)
 
 
 def _load(folder=RDL2):

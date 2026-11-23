@@ -25,7 +25,7 @@ from pathlib import Path
 import numpy as np
 
 from ..coords import surface_flt as _flt
-from .rules import FEATURE_AREA, FEATURE_CONTRAST, FEATURE_WIDTH, Filter, Zone, zone_dir_for
+from .rules import _SAME_REL, FEATURE_AREA, FEATURE_CONTRAST, FEATURE_WIDTH, Filter, Zone, zone_dir_for
 
 __all__ = ["RICH_FILE", "load_rich", "supports", "passes", "count_new"]
 
@@ -104,10 +104,19 @@ def supports(zone: Zone | None) -> bool:
         f.feature in _FEATURE_COL for fs in zone.bundles.values() for f in fs)
 
 
+def _same(v: np.ndarray, x: float) -> np.ndarray:
+    """:func:`rules.same_value` 의 배열판 — 레시피 N 기준을 옮긴 부동소수 끝자리만 같은 값으로 본다."""
+    if not np.isfinite(x):
+        return v == x
+    return (v == x) | (np.abs(v - x) <= _SAME_REL * np.maximum(np.abs(v), abs(x)))
+
+
 def _mask(f: Filter, v: np.ndarray, low: float) -> np.ndarray:
     hi = f.high
-    return {1: (low <= v) & (v <= hi), 2: ~((low <= v) & (v <= hi)), 3: v == low, 4: v > low,
-            5: v >= low, 6: v < low, 7: v <= low, 8: v != low}.get(f.ftype, np.ones(v.shape, bool))
+    lo_eq, hi_eq = _same(v, low), _same(v, hi)
+    inside = ((low <= v) | lo_eq) & ((v <= hi) | hi_eq)
+    return {1: inside, 2: ~inside, 3: lo_eq, 4: v > low,
+            5: (v >= low) | lo_eq, 6: v < low, 7: (v <= low) | lo_eq, 8: v != low}.get(f.ftype, np.ones(v.shape, bool))
 
 
 def passes(cand: dict, zone: Zone, key: tuple, overrides: dict) -> np.ndarray:
