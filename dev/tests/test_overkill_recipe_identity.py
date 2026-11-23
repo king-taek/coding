@@ -264,3 +264,107 @@ def test_shared_recipe_with_other_values_is_still_excluded(tmp_path):
     R.read_zones.cache_clear()
     m = T.merge_wafers([T.load_wafer(f) for f in (cut, full, other)])
     assert m.folders == (cut, full) and m.skipped == (other,)
+
+
+# --------------------------------------------------------------------------- 스캔 광학이 다르면 다른 레시피
+_ACTIVE = ("[a5ef0cf7]\nScenarioName=ScenarioGrab_8eb8\nOpticsName=x7.5\nOpticId=737a\n"
+           "[9a15d3bb]\nScenarioName=Scan2d\nOpticsName={name}\nOpticId=e8e4\n")
+
+
+def _optic(w: Path, prefix: str = "", gl: str = "784.195595434267", zwafer: str = "4.50458576105711",
+           name: str = "New") -> None:
+    """YDD-PIDS3 RE 35174143EWB4 와 같은 모양(일부 키만) — ``ActiveScenarioOptics.ini`` Scan2d → ``OpticPreset.ini [New]``."""
+    (w / f"{prefix}ActiveScenarioOptics.ini").write_text(_ACTIVE.format(name=name), encoding="utf-8")
+    (w / f"{prefix}OpticPreset.ini").write_text(
+        "[General]\nVersion=1\n[x7.5]\nMag=7.5\nLightSrcRef_NominalGL=10\n"
+        f"[{name}]\nId=e8e48676\nZwafer={zwafer}\nMag=10\nCameraName=TDI\nLightSrcRef_NominalGL={gl}\n"
+        "LightSrcRef_ColorFilter=CSI3\nAnalogGain=2\n", encoding="utf-8")
+
+
+def test_read_scan_optics_follows_scan2d_scenario(tmp_path):
+    w = tmp_path / "w"
+    w.mkdir()
+    assert R.read_scan_optics(w) == {}                                  # 파일이 없으면 모른다
+    _optic(w)
+    _optic(w, "Recipe2-", gl="370.617252397479", name="2D")
+    o = R.read_scan_optics(w)
+    assert set(o) == {"Zones", "Recipe2-Zones"}
+    one = dict(o["Zones"])
+    assert one["lightsrcref_nominalgl"] == 784.195595434267 and one["mag"] == 10.0     # [x7.5] 가 아니라 Scan2d 의 [New]
+    assert "id" not in one and "zwafer" not in one                      # 웨이퍼 · 장비마다 바뀌는 칸은 뺀다
+    assert dict(o["Recipe2-Zones"])["lightsrcref_nominalgl"] == 370.617252397479
+    (w / "Recipe2-ActiveScenarioOptics.ini").write_text("[x]\nScenarioName=ScanCTS\nOpticsName=ScanCTS\n",
+                                                        encoding="utf-8")
+    assert set(R.read_scan_optics(w)) == {"Zones"}                      # Scan2d 가 없는 레시피(3D)는 적지 않는다
+
+
+def test_merge_skips_wafer_with_other_scan_optics(tmp_path):
+    """Zone · 레시피 이름이 같아도 스캔 광학(밝기)이 다르면 뺀다 — 초점 높이만 다르면 합친다 · 모르는 레시피는 안 본다."""
+    pytest.importorskip("PyQt6.QtWidgets")
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    base = _multi(tmp_path / "a", _rec(1, 12.0, 1000.0))
+    focus = _multi(tmp_path / "b", _rec(1, 12.0, 1000.0))
+    bright = _multi(tmp_path / "c", _rec(1, 12.0, 1000.0))
+    cut = _multi(tmp_path / "d", _rec(1, 12.0, 1000.0))
+    for w in (base, focus, bright, cut):
+        _optic(w)
+        _optic(w, "Recipe2-", gl="370.6", name="2D")
+    _optic(focus, zwafer="4.61")
+    _optic(bright, "Recipe2-", gl="380.0", name="2D")                   # 레시피 2 밝기만 다르다
+    for f in ("Recipe2-ActiveScenarioOptics.ini", "Recipe2-OpticPreset.ini"):
+        (cut / f).unlink()                                              # 레시피 2 광학을 모른다(결과가 끊긴 스캔)
+    m = T.merge_wafers([T.load_wafer(f) for f in (base, focus, bright, cut)])
+    assert m.folders == (base, focus, cut) and m.skipped == (bright,)
+    assert not T.same_base(T.load_wafer(base), T.load_wafer(bright))   # 웨이퍼를 바꿀 때도 다른 레시피로 본다
+
+
+# --------------------------------------------------------------------------- 픽셀 크기가 다른 폴더
+def _px(w: Path, x: float) -> None:
+    (w / "Params_WaferInfo.ini").write_text(f"RefPixelSizeX={x}\nRefPixelSizeY={x}\n", encoding="utf-8")
+
+
+def test_merge_other_pixel_size_same_mag_keeps_pixels(tmp_path):
+    """폴더 픽셀만 다르면(장비 보정 차이, 배율 같음) 합치고 **값은 픽셀 그대로** 센다 — 장비가 ini px 와 flt px 를 바로
+    비교하기 때문(1.538 → 1.536 비로 바꾸면 14개가 빠졌다, 관측 2026-11-21).  빼지 않는다."""
+    pytest.importorskip("PyQt6.QtWidgets")
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    a = _multi(tmp_path / "a", _rec(1, 12.0, 1000.0) + _rec(2, 9.0, 1100.0))
+    b = _multi(tmp_path / "b", _rec(1, 10.5, 1000.0) + _rec(2, 10.0, 1100.0))
+    _px(b, 1.62)
+    wa, wb = T.load_wafer(a), T.load_wafer(b)
+    assert wa.px != wb.px
+    m = T.merge_wafers([wa, wb])
+    assert m.folders == (a, b) and m.skipped == () and m.px == wa.px
+    assert m.zones == wa.zones                                          # 기준값은 ini 숫자 그대로
+    assert sorted(d.area for d in m.defects if d.wafer == 1) == sorted(d.area for d in wb.defects)
+
+
+def test_merge_other_pixel_size_other_mag_recipe_converts_to_base_pixels(tmp_path):
+    """배율이 다른 레시피(µm 로 비교되는 쪽)는 폴더 픽셀이 다르면 기준 웨이퍼 픽셀로 바꿔 합친다 — 바꾼 뒤에도 Defect 마다
+    '값 ÷ 기준값' 이 그 웨이퍼 혼자일 때와 같다(= 장비와 같은 통과 · 탈락).  장비에 적을 숫자도 그대로다."""
+    pytest.importorskip("PyQt6.QtWidgets")
+    from aoi_verification.app.ui.widgets import threshold_preview_dialog as T
+    from aoi_verification.app.coords import pixel_size as PS
+    a = _multi(tmp_path / "a", _rec(2, 60.0, 1100.0))
+    b = _multi(tmp_path / "b", _rec(2, 61.0, 1100.0) + _rec(1, 11.0, 1000.0))
+    for w in (a, b):
+        (w / "RecipesInfo.ini").write_text("[Recipe-1]\nName=BS_1\nScanMag=5\n[Recipe-2]\nName=BS_2\nScanMag=20\n",
+                                           encoding="utf-8")
+        (w / "Recipe2-ProductInfo.ini").write_text("[General]\nScan2DPixelSize=0.4\n", encoding="utf-8")
+    _px(b, 1.62)
+    PS.scan_pixel_size_xy.cache_clear()
+    PS._recipe_pixel_size_xy.cache_clear()
+    R.read_recipe_names.cache_clear()
+    wa, wb = T.load_wafer(a), T.load_wafer(b)
+    key = ("Recipe2-Zones", 1)
+    low = lambda w: w.zones[key].bundles[5][0].low                     # noqa: E731
+    assert low(wa) != pytest.approx(low(wb))                            # 그대로 비교하면 다른 기준값
+    m = T.merge_wafers([wa, wb])
+    assert m.folders == (a, b) and m.skipped == ()
+    assert low(m) == low(wa)
+    own = {d.index: d.area / low(wb) for d in wb.defects if d.zone_dir == "Recipe2-Zones"}
+    got = {d.index: d.area / low(m) for d in m.defects if d.wafer == 1 and d.zone_dir == "Recipe2-Zones"}
+    assert got == pytest.approx(own)
+    r1 = [d.area for d in m.defects if d.wafer == 1 and d.zone_dir == "Zones"]
+    assert r1 == [11.0]                                                 # 레시피 1(배율 같음)은 픽셀 그대로
+    assert low(m) / m.scales[key[0]][1] == pytest.approx(10.0)          # 장비 ini 숫자로 되돌리면 10
