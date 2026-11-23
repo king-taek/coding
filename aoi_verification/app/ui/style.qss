@@ -1656,6 +1656,17 @@ QLabel[role="tileBadge"] {
     font-size: 11px;
     font-weight: 700;
 }
+/* 사진 칸 정렬 줄 — 고르지 않은 글자는 보통 굵기(고른 것만 강조색 · 굵게). */
+QPushButton[role="ovView"][sort="true"]:!checked {
+    font-weight: 400;
+}
+/* 정렬 중일 때 사진 아래에 붙는 그 값 — 사진 위 얇은 띠. */
+QLabel[role="tileCap"] {
+    background-color: $panel;
+    color: $ink;
+    font-family: $font_mono;
+    font-size: 11px;
+}
 QLabel[role="tileMore"] {
     background-color: $elev;
     color: $ink;

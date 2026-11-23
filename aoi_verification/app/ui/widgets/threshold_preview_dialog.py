@@ -47,7 +47,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from PyQt6.QtCore import (QBuffer, QCoreApplication, QEvent, QIODevice, QLocale, QObject, QPoint, QPointF, QPropertyAnimation, QRectF, QSize, Qt,
                           QThread, QTimer, QUrl, pyqtProperty, pyqtSignal)
@@ -108,6 +108,35 @@ _LIVE: set = set()          # 화면이 닫혀도 도는 읽기 스레드를 붙
 _FEATURES = ((R.FEATURE_WIDTH, "Width", "µm", 0.05, 2),
              (R.FEATURE_AREA, "Area", "µm²", 0.5, 1),
              (R.FEATURE_CONTRAST, "Contrast", "", 1.0, 1))
+
+# 사진 칸 정렬 줄 — (키, 이름, 단위, 소수 자리).  '기본' 은 정렬하지 않은 원래 순서(새로 빠짐 = 기준에 가까운 순).
+SORT_KEYS = (("area", "Area", "µm²", 1), ("width", "Width", "µm", 2),
+             ("length", _KO.OVERKILL_SORT_LENGTH, "µm", 2), ("contrast", "Contrast", "", 1))
+CAPTION_H = 18              # 정렬 중 사진 아래 값 띠 높이
+
+
+def sort_value(w: "WaferData", d: P.Defect, key: str) -> Optional[float]:
+    """정렬 값(화면 단위 µm · µm²) — Contrast 0 은 '안 잼' 이라 값 없음(None)."""
+    if key == "area":
+        return w.to_um(R.FEATURE_AREA, d.area)
+    if key == "width":
+        return w.to_um(R.FEATURE_WIDTH, d.width)
+    if key == "length":
+        return w.to_um(R.FEATURE_WIDTH, d.length)      # Length 는 길이 — Width 와 같은 단위(_DETECT_ROWS)
+    return d.contrast or None
+
+
+def sort_in_groups(items: list, group_of: Callable, value_of: Callable, desc: bool) -> list:
+    """분류 묶음 순서는 그대로 두고 묶음 안만 값으로 정렬한다.  값 없음은 어느 방향이든 묶음 맨 뒤, 같은 값은 원래 순서."""
+    rank: dict = {}
+    for it in items:
+        rank.setdefault(group_of(it), len(rank))
+
+    def key(it):
+        v = value_of(it)
+        return rank[group_of(it)], v is None, 0.0 if v is None else (-v if desc else v)
+
+    return sorted(items, key=key)
 
 
 # 검출 단계 하한(Zone ini [Surface]) — (극성, 종류) → (ini 이름, 화면 이름, Feature 번호).  단위 · 간격은 _FEATURES 와 같다.
@@ -760,6 +789,17 @@ class _Tile(QFrame):
         self.badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.badge.move(size - 22, 6)
         self.badge.setVisible(picked)
+        self.cap = QLabel("", self)                    # 정렬 중일 때만 — 그 정렬 값
+        self.cap.setProperty("role", "tileCap")
+        self.cap.setGeometry(0, size - CAPTION_H, size, CAPTION_H)
+        self.cap.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.cap.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.cap.setVisible(False)
+
+    def set_caption(self, text: str) -> None:
+        self.cap.setText(text)
+        self.cap.setVisible(bool(text))
+        self.ring.raise_()                             # 펼친 테두리는 값 띠 위로
 
     def set_photo(self, photo) -> None:
         """그림을 올린다.  ``None`` = Scan Crop 을 아직 자르는 중(자리표시)."""
@@ -1658,6 +1698,7 @@ class ThresholdPreviewDialog(QDialog):
         self._rich_base: dict = {}        # (zone_dir, zone) → 레시피 값 RichSurface 통과 배열(캐시)
         self._zone: Optional[tuple] = None
         self._tab = "drop"
+        self._sort: dict = {}             # 탭 → (정렬 키, 높은 순?) — 없으면 기본 순서.  화면을 닫을 때까지만(저장 안 함)
         self._open: Optional[int] = None  # 펼친 Defect.index
         self._band: Optional[_DetailBand] = None    # 지금 펼쳐진 값 띠
         self._band_row: Optional[QWidget] = None    # 그 띠가 붙은 타일 줄
@@ -1902,6 +1943,28 @@ class ThresholdPreviewDialog(QDialog):
         self.scan_status.setProperty("role", "muted")
         tabs.addWidget(self.scan_status)
         main.addWidget(tabs_host)
+
+        self.sort_bar = QWidget(self)                    # 정렬 줄 — 글자를 누르면 정렬, 다시 누르면 ▼(높은 순) ↔ ▲(낮은 순)
+        sb = QHBoxLayout(self.sort_bar)
+        sb.setContentsMargins(0, 0, 0, 0)
+        sb.setSpacing(0)
+        self._sort_group = QButtonGroup(self)
+        self._sort_group.setExclusive(True)
+        self.sort_btns = {}
+        for key, name in (("base", _KO.OVERKILL_SORT_BASE),) + tuple((k, n) for k, n, _u, _d in SORT_KEYS):
+            b = QPushButton(name, self.sort_bar)
+            b.setProperty("role", "ovView")
+            b.setProperty("sort", "true")
+            b.setCheckable(True)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            b.setFixedHeight(24)
+            b.clicked.connect(lambda _c=False, k=key: self.set_sort(k))
+            self._sort_group.addButton(b)
+            sb.addWidget(b)
+            self.sort_btns[key] = b
+        sb.addStretch(1)
+        main.addWidget(self.sort_bar)
 
         self.grid_host = QWidget(self)
         self.grid = QVBoxLayout(self.grid_host)         # 분류 제목 · 타일 한 줄(줄 위젯) · 펼친 값 띠가 위에서 아래로 — 띠를 줄 사이에 끼우고 뺀다
@@ -3103,9 +3166,15 @@ class ThresholdPreviewDialog(QDialog):
             self.empty_label.setText("" if w is None else w.note)
             self.no_photo_label.setText("")
             self.filter_label.setText("")
+            self._sync_sort_bar(False)
             return
         items = self._items()
         with_photo = [(d, why) for d, why in items if self._pic(d) is not None or self._scan_pending(d)]
+        cur = self._sort.get(self._tab)
+        if cur is not None:                            # 전체를 먼저 정렬해 [더 보기] 가 같은 순서로 이어진다
+            with_photo = sort_in_groups(with_photo, lambda t: self._class_name(t[0].bin),
+                                        lambda t: sort_value(w, t[0], cur[0]), cur[1])
+        self._sync_sort_bar(bool(with_photo))
         missing = len(items) - len(with_photo)
         self.no_photo_label.setText(_KO.THRESH_PREVIEW_NO_PHOTO.format(n=f"{missing:,}") if missing else "")
         self.filter_label.setText(_KO.OVERKILL_FILTER_ONLY.format(name=self._sel.name, n=len(items))
@@ -3143,6 +3212,7 @@ class ThresholdPreviewDialog(QDialog):
                     tile.clicked.connect(lambda i=k: self._toggle(i))     # 두 모드 모두 값 펼치기 — 꼭 잡기는 [Defect 고르기] 팝업에서
                     tile.enlarge.connect(lambda i=k: self._enlarge_tile(i))
                     tile.set_open(self._open == k)
+                    tile.set_caption(self._caption(d))
                     if tile.wait_path is not None:
                         self._want(tile.wait_path, TILE_PX, "thumb")
                     rl.addWidget(tile)
@@ -3404,6 +3474,35 @@ class ThresholdPreviewDialog(QDialog):
         self._shown = PAGE_TILES
         self._render_summary()
         self._render_tiles()
+
+    def set_sort(self, key: str) -> None:
+        """정렬 줄 — 같은 글자를 다시 누르면 방향만 바꾸고, 다른 글자는 높은 순부터.  '기본' 은 원래 순서."""
+        cur = self._sort.get(self._tab)
+        if key == "base":
+            self._sort.pop(self._tab, None)
+        elif cur is not None and cur[0] == key:
+            self._sort[self._tab] = (key, not cur[1])
+        else:
+            self._sort[self._tab] = (key, True)
+        self._shown = PAGE_TILES
+        self._render_tiles()
+
+    def _sync_sort_bar(self, visible: bool) -> None:
+        cur = self._sort.get(self._tab)
+        on = cur[0] if cur else "base"
+        names = dict(((k, n) for k, n, _u, _d in SORT_KEYS), base=_KO.OVERKILL_SORT_BASE)
+        for k, b in self.sort_btns.items():
+            b.setChecked(k == on)
+            b.setText(f"{names[k]} {'▼' if cur[1] else '▲'}" if k == on and cur else names[k])
+        self.sort_bar.setVisible(visible)
+
+    def _caption(self, d: P.Defect) -> str:
+        cur = self._sort.get(self._tab)
+        if cur is None:
+            return ""
+        _k, _n, unit, dec = next(x for x in SORT_KEYS if x[0] == cur[0])
+        v = sort_value(self._w, d, cur[0])
+        return "—" if v is None else f"{v:,.{dec}f} {unit}".rstrip()
 
     def _toggle(self, index: int) -> None:
         """타일을 눌러 값 띠를 펼치고 접는다 — 타일은 다시 만들지 않고 띠만 줄 사이에 끼우고 뺀다(썸네일이 깜박이지 않게)."""
