@@ -538,28 +538,6 @@ MRCP_COLLECT_NOTHING = "웨이퍼 폴더를 하나도 찾지 못해 결과 파�
 MRCP_COLLECT_WINDING_DOWN = "방금 중지한 수집이 아직 정리 중입니다. 잠시 뒤 다시 눌러 주세요."
 # ── [멀티레시피수집-임시] 끝 ────────────────────────────────────────────────
 
-# ── [Surface없음수집-임시] 시작 — 수집·분석이 끝나면 이 블록을 통째로 지운다 ───────────
-NOFLT_COLLECT_BUTTON = "Surface 없음 수집"
-NOFLT_COLLECT_TITLE = "Surface.flt 없는 폴더 수집"
-NOFLT_COLLECT_ASK = (
-    "Export 를 눌러 둔 4F-AOI-04 PI4 Enhanced 폴더 3곳(YDD-PIDS3 RE · YDD_Contrast Avg28_AOI-4 · YDD-No Image)과 "
-    "Surface.flt 가 있는 옆 폴더 2곳에서 Defects.csv 와 결과 파일(flt · ini)을 모읍니다. "
-    "읽기만 하고, 사진은 이름만 적습니다. 중지하면 그때까지 모은 것을 저장합니다."
-)
-NOFLT_COLLECT_START = "수집 시작"
-NOFLT_COLLECT_RUNNING = "Surface.flt 없는 폴더 자료를 모으는 중"
-NOFLT_COLLECT_DONE_FMT = (
-    "폴더 {wafers}곳 · 파일 {files}개를 모았습니다.\n"
-    "아래 폴더 안의 zip 을 전부 올려 주세요(28 MB 를 넘으면 여러 개로 나뉩니다).\n{path}"
-)
-NOFLT_COLLECT_NO_TOOL = "수집 도구(dev/noflt_collect.py)가 없습니다. 개발자 모드에서 이 브랜치로 설치해 주세요."
-NOFLT_COLLECT_FAIL_FMT = "수집하다 멈췄습니다: {error}"
-NOFLT_COLLECT_STOPPING = "지금까지 모은 것을 저장하는 중 (한 번 더 누르면 화면을 바로 풉니다)"
-NOFLT_COLLECT_STOPPED = "화면을 먼저 풀었습니다. 저장이 끝나면 바탕화면의 Surface없음수집 폴더에 zip 이 생깁니다."
-NOFLT_COLLECT_NOTHING = "폴더를 하나도 찾지 못해 결과 파일을 만들지 않았습니다. I: 드라이브(4F-AOI-04)가 열리는지 확인해 주세요."
-NOFLT_COLLECT_WINDING_DOWN = "방금 중지한 수집이 아직 정리 중입니다. 잠시 뒤 다시 눌러 주세요."
-# ── [Surface없음수집-임시] 끝 ────────────────────────────────────────────────
-
 # ── 개발자 모드 (메인 화면 Ctrl+Shift+D) ───────────────────────────────────
 DEV_MODE_ON = "개발자 모드를 켰습니다."
 DEV_MODE_OFF = "개발자 모드를 껐습니다. 자동 업데이트는 기본 브랜치를 따릅니다."
