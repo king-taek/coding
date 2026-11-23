@@ -58,6 +58,7 @@ class Defect:
     by_filter: bool = True  # Feature Filter 묶음을 거쳐 잡힌 Defect(Event)인가 — 아니면 검출 단계가 잡았다
     rtype: int | None = None    # 검출 단계가 잡았으면 결과 비트(Surface.flt Type) — 이름은 rules.surface_result_types
     stage: str | None = None    # 검출 단계가 잡았으면 'dark'/'bright'(결과 이름의 DARK · BRIGHT) — 그 Zone 의 검출 하한이 거른다
+    type_bits: int | None = None    # Surface.flt Type 원래 값(어느 Defect 든) — 검출 종류 이름용('어느 Zone에서 왔니?').  칸이 없으면 None
 
 
 def _layout(flt: Path):
@@ -115,17 +116,18 @@ def load_all(folder: Path) -> tuple[tuple[Defect, ...], tuple[Defect, ...], str]
     # 결과 비트(Type)로 Feature Filter 를 거친 Event Defect 만 기준에 걸리게 한다 — 비트 값은 폴더의
     # EquipmentClassifications.ini 에서 읽는다(:func:`rules.event_mask`).  둘 중 하나라도 없으면 전부 기준 대상.
     mask = event_mask(folder)
-    rtype = col.get("rtype") if mask else None
-    rtype = rtype or [None] * len(arr)
+    raw_type = col.get("rtype") or [None] * len(arr)
+    rtype = raw_type if mask else [None] * len(arr)
     masks = stage_masks(folder) if mask else {}
     kept, goods = [], []
-    for i, (cls, org, zone, rec, area, width, length, contrast, x, y, rt) in enumerate(zip(
+    for i, (cls, org, zone, rec, area, width, length, contrast, x, y, rt, bits) in enumerate(zip(
             col["cls"], col["org"], col["zone"], recipe, col["area"], col["width"], col["length"],
-            col["contrast"], col["x"], col["y"], rtype)):
+            col["contrast"], col["x"], col["y"], rtype, raw_type)):
         first = org or cls
         d = Defect(i, zone_dir_for(rec), int(zone), int(first), int(cls), float(area), float(width),
                    float(length), float(contrast), float(x), float(y),
-                   by_filter=rt is None or bool(int(rt) & mask))
+                   by_filter=rt is None or bool(int(rt) & mask),
+                   type_bits=None if bits is None else int(bits))
         if not d.by_filter:
             d = dataclasses.replace(d, stage=detect_polarity(masks, rt), rtype=int(rt))
         # 첫 분류가 Good(EDC Good: reclassify 20 · org 0).  Accept 는 지금 분류만 0 이라 Defect 로 남는다.
