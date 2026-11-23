@@ -24,6 +24,7 @@ ENTRIES = [
         "summary": "멀티 레시피 스캔의 3D 레시피 사진(예: BS_3D)이 사진 정보 · 엑셀에 Recipe · Zone · Height 와\n"
                    "이름(Missing Bump · B R Height LSL)을 보입니다. 장비 Export 와 같은 값입니다.",
         "others": [
+            ("새 메뉴", "어느 Zone에서 왔니? — LOT · 웨이퍼 폴더의 Defect 를 분류 이름 · 검출 종류 · 레시피 · Zone 으로 골라 사진으로 봅니다"),
             ("사진 정보 · 엑셀", "Surface Defect 에도 type(Surface-Zone) · 종류 이름 · 분류 이름 줄이 붙습니다"),
             ("Defect 추출", "3D 사진이 ‘Recipe 없음’ 대신 그 레시피(예: BS_3D) 묶음으로 들어갑니다"),
             ("사진 정보", "Scan 이 없는 컬러 사진은 [GL 보기] 가 꺼집니다 — 회색 사진 · Scan 을 찾은 컬러 사진만 열립니다"),
