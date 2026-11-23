@@ -33,6 +33,7 @@ __all__ = ["Filter", "Zone", "ClassInfo", "read_zones", "read_classes", "zone_di
            "surface_result_types", "event_mask", "zones_in_flt_px", "stage_masks",
            "DETECT_KEYS", "detect_polarity",
            "recipe_scale", "read_recipe_names", "read_detect_values", "recipe_identity", "same_recipe",
+           "read_scan_optics",
            "FEATURE_AREA", "FEATURE_WIDTH", "FEATURE_CONTRAST"]
 
 # Zone ini FeatureType — 섹션 이름과 짝지어 본 값(수집 자료 Zone ini 전부, 관측 2026-11-16):
@@ -275,6 +276,63 @@ def recipe_identity(folder: Path) -> tuple:
     m = _SETUP_PATH.search(read_ini_text(Path(folder) / "Params_WaferInfo.ini") or "")
     setup = m.group(1).strip().rstrip("\\/").lower() if m else ""
     return setup, tuple(sorted(read_recipe_names(Path(folder)).items()))
+
+
+# 웨이퍼 · 장비마다 달라지는 광학 칸 — 레시피 차이가 아니다: Id(GUID), 초점 높이(Zwafer · FocusPosAboveChuck)
+_OPTIC_SKIP = frozenset({"id", "zwafer", "focusposabovechuck"})
+_ACTIVE_OPTICS = re.compile(r"(?i)^(?:Recipe(\d+)-)?ActiveScenarioOptics\.ini$")
+
+
+def _ini_sections(text: str) -> dict:
+    """INI 글 → ``{섹션 이름: {키(소문자): 값}}``."""
+    out: dict = {}
+    cur = None
+    for line in text.splitlines():
+        m = _SECTION.match(line)
+        if m:
+            cur = out.setdefault(m.group(1).strip(), {})
+        elif cur is not None and "=" in line:
+            k, v = line.split("=", 1)
+            cur[k.strip().lower()] = v.strip()
+    return out
+
+
+def _optic_value(v: str):
+    """숫자는 숫자로(``2`` = ``2.0``), 나머지는 글자 그대로."""
+    try:
+        return float(v)
+    except ValueError:
+        return v
+
+
+def read_scan_optics(folder: Path) -> dict:
+    r"""레시피별 **스캔 광학 값**(밝기 · 색 필터 · 게인 · 배율 …) → ``{Zone 폴더: ((키, 값), …)}``.
+
+    ``ActiveScenarioOptics.ini`` 에서 ``ScenarioName=Scan2d`` 의 ``OpticsName`` 을 찾고, ``OpticPreset.ini`` 의 그 섹션을
+    읽는다(현택님 2026-11-23: 'optic 밝기는 이 파일들로').  레시피 N(≥2)은 ``RecipeN-`` 이 붙은 두 파일 → ``RecipeN-Zones``.
+    YDD-PIDS3 RE: Scan2d → ``[New]`` (Mag 10 · TDI · LightSrcRef_NominalGL 784.2 · CSI3, 관측).  웨이퍼마다 달라지는
+    ``Id`` · ``Zwafer`` · ``FocusPosAboveChuck`` 는 뺀다.  파일이 없거나 Scan2d 가 없는 레시피(3D ``ScanCTS``)는 적지 않는다
+    — 모르는 것은 비교하지 않는다."""
+    folder = Path(folder)
+    out: dict = {}
+    try:
+        names = [p.name for p in folder.iterdir()]
+    except OSError:
+        return out
+    for name in names:
+        m = _ACTIVE_OPTICS.match(name)
+        if not m:
+            continue
+        n = int(m.group(1)) if m.group(1) else 1
+        pre = f"Recipe{n}-" if m.group(1) else ""
+        active = _ini_sections(read_ini_text(folder / name) or "")
+        optics = [s.get("opticsname") for s in active.values() if (s.get("scenarioname") or "").lower() == "scan2d"]
+        if len(optics) != 1 or not optics[0]:
+            continue
+        sect = _ini_sections(read_ini_text(folder / f"{pre}OpticPreset.ini") or "").get(optics[0])
+        if sect:
+            out[zone_dir_for(n)] = tuple(sorted((k, _optic_value(v)) for k, v in sect.items() if k not in _OPTIC_SKIP))
+    return out
 
 
 def same_recipe(a: tuple, b: tuple) -> bool:
