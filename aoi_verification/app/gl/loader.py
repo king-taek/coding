@@ -118,6 +118,23 @@ def load_image(path) -> GlImage:
                    color, str(p), warnings)
 
 
+_GRAY_MODES = ("1", "L", "I;16", "I;16L", "I;16B")
+
+
+def is_color(path) -> bool:
+    """:func:`load_image` 가 이 사진을 컬러로 볼까.  머리(모드)만으로 회색이면 디코드하지 않는다.
+
+    못 읽는 사진은 :class:`GlLoadError` 를 낸다(GL 로도 못 연다)."""
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            if im.mode in _GRAY_MODES:
+                return False
+    except Exception:
+        pass                                # Pillow 가 못 여는 형식은 아래 디코드가 판정한다
+    return load_image(path).color
+
+
 def guess_raw_side(nbytes: int, bits: int, header: int = 0) -> int:
     """파일 크기로 정사각형 한 변을 추정한다.  딱 맞지 않으면 0."""
     px = (nbytes - header) // (2 if bits > 8 else 1)
