@@ -542,14 +542,14 @@ MRCP_COLLECT_WINDING_DOWN = "방금 중지한 수집이 아직 정리 중입니�
 NOFLT_COLLECT_BUTTON = "Surface 없음 수집"
 NOFLT_COLLECT_TITLE = "Surface.flt 없는 폴더 수집"
 NOFLT_COLLECT_ASK = (
-    "Export 를 눌러 둔 YDD-PIDS3 RE 웨이퍼 3곳(35174142EWE5 · 35174140EWD4 · 35174664EWD0)에서 "
-    "Defects.csv 와 결과 파일(flt · ini)을 모읍니다. "
+    "Export 를 눌러 둔 4F-AOI-04 PI4 Enhanced 폴더 3곳(YDD-PIDS3 RE · YDD_Contrast Avg28_AOI-4 · YDD-No Image)과 "
+    "Surface.flt 가 있는 옆 폴더 2곳에서 Defects.csv 와 결과 파일(flt · ini)을 모읍니다. "
     "읽기만 하고, 사진은 이름만 적습니다. 중지하면 그때까지 모은 것을 저장합니다."
 )
 NOFLT_COLLECT_START = "수집 시작"
 NOFLT_COLLECT_RUNNING = "Surface.flt 없는 폴더 자료를 모으는 중"
 NOFLT_COLLECT_DONE_FMT = (
-    "웨이퍼 {wafers}곳 · 파일 {files}개를 모았습니다.\n"
+    "폴더 {wafers}곳 · 파일 {files}개를 모았습니다.\n"
     "아래 폴더 안의 zip 을 전부 올려 주세요(28 MB 를 넘으면 여러 개로 나뉩니다).\n{path}"
 )
 NOFLT_COLLECT_NO_TOOL = "수집 도구(dev/noflt_collect.py)가 없습니다. 개발자 모드에서 이 브랜치로 설치해 주세요."

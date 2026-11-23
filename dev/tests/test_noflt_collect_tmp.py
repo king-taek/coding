@@ -1,9 +1,9 @@
 """[Surface없음수집-임시] Surface.flt 없는 폴더 수집 버튼 — 버튼을 지울 때 이 파일도 함께 지운다.
 
 지키는 것: ① 지울 곳이 ``noflt_collect_tmp.py`` docstring 의 목록 그대로라는 것,
-② 고른 웨이퍼 폴더의 사진이 아닌 파일을 담고 사진 · 큰 파일 · 압축은 이름만 남기는 것,
-③ LOT 폴더는 파일만 담고 셋업 · Job · 옆 LOT 은 담지 않는 것(1차 수집에서 받았다),
-④ zip 을 28 MB 조각으로 나누는 것, ⑤ 버튼이 로딩바 규칙대로 도는 것.
+② 고른 LOT 폴더 아래 웨이퍼의 사진이 아닌 파일을 담고 사진 · 큰 파일 · 압축은 이름만 남기는 것,
+③ 부모 폴더(Job 까지)는 파일만 담는 것, ④ 옆 LOT 은 목록만 남기고 Surface.flt 가 있는 최근 웨이퍼만 비교용으로 담는 것,
+⑤ zip 을 28 MB 조각으로 나누는 것, ⑥ 버튼이 로딩바 규칙대로 도는 것.
 """
 
 from __future__ import annotations
@@ -62,34 +62,39 @@ def test_strings_used_by_the_button_all_exist():
 
 
 def _fake_nas(tmp_path: Path):
-    """``<share>/4F-AOI-04/Scanresult/<Job>/Setup1/<LOT>/<Wafer>`` — 고른 웨이퍼 하나 + 같은 LOT 의 다른 웨이퍼 + 옆 LOT."""
+    """``<share>/4F-AOI-04/Scanresult/<Job>/Setup1/<LOT>/<Wafer>`` — 고른 LOT 하나 + 옆 LOT 둘."""
     sr = tmp_path / "share" / "4F-AOI-04" / "Scanresult"
     setup = sr / JOB / "Setup1"
-    lot = setup / "YDD-PIDS3 RE"
-    w = lot / "35174142EWE5"
+    w = setup / "YDD-PIDS3 RE" / "W1"
     (w / "Zones").mkdir(parents=True)
     (w / "Defects.csv").write_text("#,Type,Area\n1,Surface-PI,3\n")
     (w / "DieAlignMiss.flt").write_bytes(b"\x01" * 64)
-    (w / "1.2.c.3.1.jpeg").write_bytes(b"jpg")
+    (w / "1.2.c.3.jpeg").write_bytes(b"jpg")
     (w / "WaferAlignData.zip").write_bytes(b"zip")
     (w / "Zones" / "PI.ini").write_text("[General]\nZoneName=PI\nZoneID=1\n")
-    (lot / "lot.ini").write_text("lot")
-    (lot / "35174143EWB4").mkdir()
-    (lot / "35174143EWB4" / "Surface.flt").write_bytes(b"\x02" * 152)
+    (w.parent / "lot.ini").write_text("lot")
     (setup / "setup.ini").write_text("setup")
     (sr / JOB / "Recipe.ini").write_text("[x]\n")
-    (setup / "VHM_PIDS3" / "S0").mkdir(parents=True)
-    (setup / "VHM_PIDS3" / "S0" / "Surface.flt").write_bytes(b"\x03" * 152)
+    (sr / "top.ini").write_text("scanresult level")
+    for i, lot in enumerate(("VHM_PIDS3", "SXK-PIDS3", "OLD")):
+        s = setup / lot / f"S{i}"
+        s.mkdir(parents=True)
+        (s / "Surface.flt").write_bytes(bytes([i]) * 152)
+        (s / "Surface.flt.md").write_text('<RecordSize Size="152"/>')
+        (s / "9.9.c.9.jpeg").write_bytes(b"jpg")
+        os.utime(s / "Surface.flt", (1_700_000_000, 1_700_000_000 + (0 if lot == "OLD" else (i + 1) * 3600)))
+    (setup / "EMPTY" / "E1").mkdir(parents=True)
+    (setup / "EMPTY" / "E1" / "ProductInfo.ini").write_text("[x]\n")
     return sr, w
 
 
-def test_collects_wafer_files_lot_files_and_photo_names(tmp_path):
+def test_collects_target_parents_siblings_and_photo_names(tmp_path):
     tool = _tool()
     sr, _ = _fake_nas(tmp_path)
-    lot = rf"I:\4F-AOI-04\Scanresult\{JOB}\Setup1\YDD-PIDS3 RE"
+    raw = rf"I:\4F-AOI-04\Scanresult\{JOB}\Setup1\YDD-PIDS3 RE"
     out = tmp_path / "out"
     out.mkdir()
-    folder, found, _files = tool.run(out, targets=[lot + r"\35174142EWE5", lot + r"\none"],
+    folder, found, _files = tool.run(out, targets=[raw, rf"I:\4F-AOI-04\Scanresult\{JOB}\Setup1\none"],
                                      roots={"4F-AOI-04": sr})
     assert found == 1 and folder is not None
     (z,) = sorted(folder.glob("*.zip"))
@@ -98,18 +103,22 @@ def test_collects_wafer_files_lot_files_and_photo_names(tmp_path):
         listing = zf.read("파일목록.txt").decode()
         photos = zf.read("사진목록.txt").decode()
         summary = zf.read("요약.txt").decode()
-    base = f"4F-AOI-04/{JOB}/Setup1/YDD-PIDS3 RE"
-    assert {f"{base}/35174142EWE5/Defects.csv", f"{base}/35174142EWE5/DieAlignMiss.flt",
-            f"{base}/35174142EWE5/Zones/PI.ini", f"{base}/lot.ini"} <= names
+        siblings = zf.read("옆폴더목록.txt").decode()
+    base = f"4F-AOI-04/{JOB}/Setup1"
+    assert {f"{base}/YDD-PIDS3 RE/W1/Defects.csv", f"{base}/YDD-PIDS3 RE/W1/DieAlignMiss.flt",
+            f"{base}/YDD-PIDS3 RE/W1/Zones/PI.ini", f"{base}/YDD-PIDS3 RE/lot.ini",
+            f"{base}/setup.ini", f"4F-AOI-04/{JOB}/Recipe.ini"} <= names
     assert not any(n.endswith((".jpeg", ".zip")) for n in names)
-    assert f"{base}/35174142EWE5/1.2.c.3.1.jpeg" in photos
-    # 1차 수집에서 받은 것은 다시 담지 않는다 — 셋업 · Job 파일, 같은 LOT 의 다른 웨이퍼, 옆 LOT.
-    assert not any(n.endswith(("setup.ini", "Recipe.ini")) or "35174143EWB4" in n or "VHM_PIDS3" in n
-                   for n in names)
-    assert "옆폴더목록.txt" not in names
-    assert "Defects.csv 1" in summary and "사진 1" in summary and "flt 종류 DieAlignMiss.flt" in summary
-    assert "못 찾음" in summary
-    assert f"{base}/35174142EWE5/WaferAlignData.zip\t" in listing
+    assert f"{base}/YDD-PIDS3 RE/W1/1.2.c.3.jpeg" in photos
+    assert not any("top.ini" in n for n in names)                         # Scanresult 위는 안 담는다
+    # 옆 LOT: 목록에는 전부, 내용은 Surface.flt 가 가장 최근인 두 곳만
+    assert f"{base}/SXK-PIDS3/S1/Surface.flt" in names and f"{base}/VHM_PIDS3/S0/Surface.flt" in names
+    assert not any("/OLD/" in n or "/EMPTY/" in n for n in names)
+    assert f"{base}/OLD/S2/\t사진 1\t하위폴더 0\tflt Surface.flt" in siblings
+    assert f"{base}/EMPTY/E1/ProductInfo.ini\t" in siblings
+    assert "YDD-PIDS3 RE" not in siblings                                 # 고른 폴더는 목록에 다시 안 넣는다
+    assert "flt 종류 DieAlignMiss.flt" in summary and "Defects.csv 1" in summary and "못 찾음" in summary
+    assert f"{base}/YDD-PIDS3 RE/W1/WaferAlignData.zip\t" in listing
 
 
 def test_nothing_found_leaves_no_folder(tmp_path):
@@ -120,8 +129,7 @@ def test_nothing_found_leaves_no_folder(tmp_path):
 
 def test_targets_and_limits():
     tool = _tool()
-    assert [t.rsplit("\\", 1)[1] for t in tool.TARGETS] == ["35174142EWE5", "35174140EWD4", "35174664EWD0"]
-    assert all(t.rsplit("\\", 2)[1] == "YDD-PIDS3 RE" for t in tool.TARGETS)
+    assert len(tool.TARGETS) == 3 and tool.TARGETS[0].endswith("YDD-PIDS3 RE")
     assert all(tool._split(t)[0] == "4F-AOI-04" for t in tool.TARGETS)
     assert tool.PART_MB == 28 and tool.FILE_MB == 30
 
