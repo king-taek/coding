@@ -39,6 +39,17 @@ def _pump(n: int = 3) -> None:
         QApplication.processEvents()
 
 
+def _wait(pred, ms: int = 5000) -> bool:
+    import time
+    end = time.monotonic() + ms / 1000
+    while time.monotonic() < end:
+        QApplication.processEvents()
+        if pred():
+            return True
+        time.sleep(0.01)
+    return False
+
+
 def _make(styled_qapp, data=None, *, bits=16, view=None):
     if data is None:
         rng = np.random.default_rng(3)
@@ -455,9 +466,10 @@ def test_image_info_has_gl_button_enabled_only_with_photo(styled_qapp, tmp_path,
     assert not d.gl_btn.isEnabled()
     assert d.gl_btn.autoDefault() is False                  # Enter 가 GL 뷰어를 재실행하지 않는다
     p = tmp_path / "a.png"
-    p.write_bytes(b"\x89PNG")
+    from PIL import Image
+    Image.new("L", (40, 30), 90).save(p)                    # 회색 사진 — GL 로 볼 수 있다
     d.show_image(p)
-    assert d.gl_btn.isEnabled()
+    assert _wait(d.gl_btn.isEnabled)
     seen = []
     monkeypatch.setattr(ii.sheets, "run", lambda dlg, **kw: seen.append(dlg) or 0)
     opened = []

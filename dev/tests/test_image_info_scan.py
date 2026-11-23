@@ -230,3 +230,56 @@ def test_scan_gets_about_half_the_column_height(qapp, isolated_cache, tmp_path):
     assert dlg.scan_view.height() >= dlg.preview.height() * 0.8
     dlg.close()
     _idle()
+
+
+# ------------------------------------------------------------------ GL 보기 버튼
+# 컬러를 흑백으로 바꿔 보는 GL 은 쓸모가 없다(사용자 지시 2026-11-23).  GL 뷰어는 컬러 결함
+# 사진이면 Scan 으로 갈아타므로, 버튼은 '회색 사진' 이거나 'Scan 을 찾은 컬러 사진' 일 때만 켠다.
+def test_gl_button_on_for_color_with_scan(qapp, isolated_cache, tmp_path):
+    dlg = iid.ImageInfoDialog(image_path=str(_wafer(tmp_path)))
+    assert _wait(lambda: dlg._scan_crop is not None)
+    _idle()
+    assert dlg.gl_btn.isEnabled()
+    dlg.close()
+
+
+def test_gl_button_off_for_color_without_scan(qapp, isolated_cache, tmp_path):
+    dlg = iid.ImageInfoDialog(image_path=str(_wafer(tmp_path, manifest=False)))
+    _idle()
+    assert not dlg.gl_btn.isEnabled()
+    dlg.close()
+
+
+def test_gl_button_on_for_gray_photo(qapp, isolated_cache, tmp_path):
+    p = tmp_path / "g.png"
+    Image.new("L", (40, 30), 90).save(p)
+    dlg = iid.ImageInfoDialog(image_path=str(p))
+    _idle()
+    assert dlg.gl_btn.isEnabled()
+    # 회색을 RGB 로 저장한 사진(R=G=B)도 회색이다 — 뷰어 판정(`loader.load_image`)과 같다.
+    q = tmp_path / "g_rgb.png"
+    Image.new("RGB", (40, 30), (90, 90, 90)).save(q)
+    dlg.show_image(q)
+    _idle()
+    assert dlg.gl_btn.isEnabled()
+    dlg.close()
+
+
+def test_gl_button_off_for_unreadable_photo(qapp, isolated_cache, tmp_path):
+    p = tmp_path / "bad.png"
+    p.write_bytes(b"\x89PNG")
+    dlg = iid.ImageInfoDialog(image_path=str(p))
+    _idle()
+    assert not dlg.gl_btn.isEnabled()
+    dlg.close()
+
+
+def test_gl_button_turns_off_when_switching_to_color_without_scan(qapp, isolated_cache, tmp_path):
+    dlg = iid.ImageInfoDialog(image_path=str(_wafer(tmp_path, "A")))
+    _idle()
+    assert dlg.gl_btn.isEnabled()
+    dlg.show_image(_wafer(tmp_path, "B", manifest=False))
+    assert not dlg.gl_btn.isEnabled()                          # 판정 전에는 꺼 둔다
+    _idle()
+    assert not dlg.gl_btn.isEnabled()
+    dlg.close()

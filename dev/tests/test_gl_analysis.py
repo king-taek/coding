@@ -186,6 +186,26 @@ def test_gray_saved_as_rgb_is_not_color_but_real_color_is(tmp_path):
     assert lc.color and loader.W_COLOR in lc.warnings and lc.data.ndim == 2
 
 
+def test_is_color_matches_load_image(tmp_path):
+    """GL 보기 버튼 판정(`is_color`)은 뷰어가 쓰는 `load_image().color` 와 같아야 한다."""
+    cv2 = pytest.importorskip("cv2")
+    gray = np.full((16, 16), 90, np.uint8)
+    g3 = np.dstack([gray] * 3)
+    c = g3.copy()
+    c[..., 2] = 200
+    a16 = _img(16, 16)
+    cases = {"g.png": gray, "g3.png": g3, "c.png": c, "c.jpg": c, "g16.tif": a16}
+    for name, arr in cases.items():
+        p = tmp_path / name
+        p.write_bytes(cv2.imencode(p.suffix, arr)[1].tobytes())
+        assert loader.is_color(p) == loader.load_image(p).color, name
+    assert loader.is_color(tmp_path / "c.png") and not loader.is_color(tmp_path / "g16.tif")
+    bad = tmp_path / "bad.png"
+    bad.write_bytes(b"not an image")
+    with pytest.raises(loader.GlLoadError):
+        loader.is_color(bad)
+
+
 def test_load_missing_or_garbage_raises_korean_error(tmp_path):
     with pytest.raises(loader.GlLoadError):
         loader.load_image(tmp_path / "없음.png")

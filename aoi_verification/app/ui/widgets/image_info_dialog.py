@@ -46,6 +46,7 @@ from ... import i18n
 from ... import config
 from ...config import CONFIG
 from ...coords import scan_image, single_info
+from ...gl import loader as gl_loader
 from ...utils import image_io as _io
 from .. import motion, theme
 from ..drop_overlay import drop_clear, drop_feedback
@@ -88,6 +89,7 @@ class _ScanLoader(QThread):
 
     class _Signals(QObject):
         found = pyqtSignal(int)                          # 세대 — Scan 있음 판정
+        gl = pyqtSignal(int, bool)                       # 세대, GL 로 볼 수 있는 사진인가
         done = pyqtSignal(int, str, object, object, object, str)
         # (세대, 상태, Crop QImage, 전체 QImage, Crop 범위, Scan 파일명)
 
@@ -110,6 +112,14 @@ class _ScanLoader(QThread):
         announced = (self._path.parent / scan_image.SCAN_LIST_NAME).exists()
         if announced:
             self.signals.found.emit(self._gen)
+        # GL 은 회색 사진이거나, 컬러면 Scan 을 찾았을 때만 의미가 있다 — 컬러를 흑백으로
+        # 바꿔 보는 것은 쓸모가 없다(사용자 지시 2026-11-23).  못 읽는 사진도 끈다.
+        try:
+            color = gl_loader.is_color(self._path)
+        except Exception:
+            color = None
+        if color is not True:
+            self.signals.gl.emit(self._gen, color is False)
         m = scan_image.resolve(self._path)
         if not m.ok:
             self.signals.done.emit(self._gen, m.status, None, None, None, "")
@@ -122,6 +132,8 @@ class _ScanLoader(QThread):
                                    None, None, None, "")
             return
         crop, cand = res
+        if color:
+            self.signals.gl.emit(self._gen, True)       # 뷰어가 이 Scan 으로 갈아탄다
         full = scan_image.load_full(cand)
         self.signals.done.emit(
             self._gen, scan_image.OK, pil_to_qimage(crop),
@@ -346,7 +358,8 @@ class ImageInfoDialog(QDialog):
         bar.addWidget(self._toast)
         bar.addStretch(1)
         # 지금 보고 있는 사진을 그대로 GL 히스토그램 뷰어로 넘긴다(컬러 결함 사진이면 Scan 의
-        # 결함 영역이 확대돼 열린다).  사진이 없으면 누를 수 없다.
+        # 결함 영역이 확대돼 열린다).  사진이 없거나, Scan 없는 컬러 사진이면 누를 수 없다
+        # (`_ScanLoader` 가 판정한다).
         self.gl_btn = NeonButton(i18n.KO.IMAGE_INFO_GL, role="ghost")
         self.gl_btn.setMinimumHeight(theme.PROFILE.control_h_lg)
         self.gl_btn.setToolTip(i18n.KO.GL_BUTTON_TOOLTIP)
@@ -463,7 +476,7 @@ class ImageInfoDialog(QDialog):
         돌린다.  덮개는 **정보가 오면 바로** 걷힌다 — Scan 원본(수 MB)을 기다리지 않는다.
         Scan 은 자기 칸에서 '불러오는 중' 점 애니메이션으로 따로 기다린다(사용자 요청)."""
         self._path = Path(path)
-        self.gl_btn.setEnabled(True)
+        self.gl_btn.setEnabled(False)     # GL 로 볼 수 있는지는 `_ScanLoader` 가 알려 준다
         self._info_gen += 1
         self._scan_gen += 1               # 이전 사진의 Scan 결과가 늦게 와도 버린다
         if not _async_info():
@@ -502,10 +515,15 @@ class ImageInfoDialog(QDialog):
         self._set_scan_visible(False)
         ld = _ScanLoader(self._path, self._scan_gen)
         ld.signals.found.connect(self._on_scan_found)
+        ld.signals.gl.connect(self._on_gl_known)
         ld.signals.done.connect(self._on_scan_done)
         _LIVE_SCAN_LOADS.add(ld)
         ld.finished.connect(lambda: _LIVE_SCAN_LOADS.discard(ld))
         ld.start()
+
+    def _on_gl_known(self, gen: int, ok: bool) -> None:
+        if gen == self._scan_gen:
+            self.gl_btn.setEnabled(ok)
 
     def _on_scan_found(self, gen: int) -> None:
         if gen != self._scan_gen:
