@@ -418,6 +418,10 @@ QFrame[role="row"] {
     border-bottom: 1px solid $row_divider;
     border-radius: $row_radius;
 }
+/* 같은 묶음 안의 행 — 아래 눈금을 감춘다(단일 사진 정보 표).  두께는 그대로 둬 행 높이가 안 바뀐다. */
+QFrame[role="row"][rule="none"] {
+    border-bottom: 1px solid $row_border;
+}
 
 /* 점수 컬럼 눈금 — 이미지 영역과 우측 거리 컬럼을 가르는 1px 눈금.
    score_rule = ink 반투명이라 시트 위에서 또렷. */

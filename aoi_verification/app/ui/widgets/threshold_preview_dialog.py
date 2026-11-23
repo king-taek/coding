@@ -147,14 +147,30 @@ class WaferData:
     slot: str = ""                    # 카세트 슬롯 번호(WaferInfo.ini ActiveSlot) — 모르면 빈 글자
     cut: tuple = ()                   # 장비 저장 상한에 닿은 웨이퍼 ((폴더, 상한), …) — Defect 가 일부만 있다
     recipe_id: tuple = ("", ())       # 어느 레시피로 스캔했나(SetupPath · 레시피 이름들) — :func:`rules.recipe_identity`
+    optics: dict = field(default_factory=dict)      # Zone 폴더 → 스캔 광학 값 — :func:`rules.read_scan_optics`
+    scales: dict = field(default_factory=dict)      # Zone 폴더 → (선형, 면적) ini → flt 배율 — :func:`rules.recipe_scale`
     _multi: object = field(default=None, repr=False, compare=False)   # 레시피(Zone 폴더)가 둘 이상인가(캐시)
+    _zidx: object = field(default=None, repr=False, compare=False)    # (defects, {Zone 키: [Defect]}) — :meth:`by_zone` 캐시
 
     def label(self, key) -> tuple:
         """Zone 키 → ``(이름, 레시피 표시)`` — 레시피가 여럿이면 어느 레시피 Zone 인지 늘 적는다."""
         if self._multi is None:
             # Defect 가 레시피 1 에만 있어도 다른 레시피 Zone 줄이 같은 이름으로 서므로, 폴더의 Zone 폴더 수로도 본다.
             self._multi = len({d.zone_dir for d in self.defects + self.goods} | {k[0] for k in self.zones}) > 1
-        return zone_label(key[0], self.zones.get(key), key[1], R.read_recipe_names(self.folder), self._multi)
+        # 이름은 합친 웨이퍼들에서 모은 것 — 기준 웨이퍼에 RecipesInfo.ini 가 없어도(결과가 끊긴 스캔) 다른 장의 이름을 쓴다
+        names = dict(self.recipe_id[1]) or R.read_recipe_names(self.folder)
+        return zone_label(key[0], self.zones.get(key), key[1], names, self._multi)
+
+    def by_zone(self) -> dict:
+        """``{(zone_dir, zone): [Defect, …]}`` — ``defects`` 순서 그대로.  한 번만 나눠 둔다(Zone 마다 전체를 훑으면
+        Defect 10만 개 · Zone 20 에서 그릴 때마다 수백만 번 비교했다).  ``defects`` 가 바뀌면(``is`` 비교) 다시 나눈다."""
+        c = self._zidx
+        if c is None or c[0] is not self.defects:
+            idx: dict = {}
+            for d in self.defects:
+                idx.setdefault((d.zone_dir, d.zone), []).append(d)
+            c = self._zidx = (self.defects, idx)
+        return c[1]
 
     def to_um(self, feature: int, v: float) -> float:
         if feature == R.FEATURE_AREA:
@@ -179,16 +195,19 @@ def load_wafer(folder: Path, report=lambda msg, done=0, total=0: None, stop=lamb
     (웨이퍼당 후보 약 100만 개라 여러 장이면 슬라이더마다 수천만 개를 다시 센다)."""
     report(_KO.THRESH_PREVIEW_LOADING)
     t0 = time.perf_counter()
+    SP.folder_key(folder)       # 저장분 키(resolve = NAS 왕복)를 여기(워커)서 미리 — 화면이 그릴 때마다 웨이퍼 수만큼 기다리지 않게
     defects, goods, note = P.load_all(folder)
     t1 = time.perf_counter()
     w = WaferData(folder, defects, goods, note=note, has_scan=(folder / SI.SCAN_LIST_NAME).is_file(),
-                  slot=read_active_slot(folder) or "", recipe_id=R.recipe_identity(folder))
+                  slot=read_active_slot(folder) or "", recipe_id=R.recipe_identity(folder),
+                  optics=R.read_scan_optics(folder))
     if note:
         return w
     cap = P.wafer_cap(folder)
     if cap and len(defects) + len(goods) >= cap:
         w.cut = ((folder, cap),)
     w.zones = R.zones_in_flt_px(folder, R.read_zones(folder))     # flt 와 같은 픽셀로 — rules.zones_in_flt_px
+    w.scales = {zd: R.recipe_scale(folder, zd) for zd in {k[0] for k in w.zones}}
     w.classes = R.read_classes(folder)
     px = scan_pixel_size_xy(folder)
     if not px:
@@ -276,34 +295,159 @@ def _wafer_label(folder: Path, data: WaferData) -> str:
     return _KO.OVERKILL_LOT_WAFER_NAME.format(slot=data.slot, name=folder.name) if data.slot else folder.name
 
 
-def same_base(a: WaferData, b: WaferData) -> bool:
-    """두 웨이퍼를 같은 슬라이더로 셀 수 있나 — Zone 기준 · 픽셀 크기가 같고 **같은 레시피로 스캔한 것**.
+def _by_dir(zones: dict) -> dict:
+    """``{(Zone 폴더, ZoneID): Zone}`` → ``{Zone 폴더: {ZoneID: Zone}}``."""
+    out: dict = {}
+    for (zdir, zid), z in zones.items():
+        out.setdefault(zdir, {})[zid] = z
+    return out
 
-    레시피가 다르면 스캔을 새로 한 것이라 Zone 이름 · 값이 같아도 따로 튜닝한다(현택님 2026-11-23) — 레시피는
-    파일에서 읽는다(:func:`rules.recipe_identity`, 모르는 칸은 비교하지 않는다)."""
-    return (a.zones == b.zones and all(abs(x - y) < 1e-6 for x, y in zip(a.px, b.px))
-            and R.same_recipe(a.recipe_id, b.recipe_id))
+
+def _close(a: float, b: float) -> bool:
+    return a == b or math.isclose(a, b, rel_tol=1e-9)
+
+
+def _zone_same(a, b) -> bool:
+    """Zone 기준 둘이 같은가 — 픽셀 환산(:func:`_in_frame`)의 반올림 차이만 봐준다."""
+    if (a.zone_id, a.name) != (b.zone_id, b.name) or a.bundles.keys() != b.bundles.keys() \
+            or a.detect.keys() != b.detect.keys():
+        return False
+    for c, fa in a.bundles.items():
+        fb = b.bundles[c]
+        if len(fa) != len(fb) or any((x.feature, x.ftype) != (y.feature, y.ftype) or not _close(x.low, y.low)
+                                     or not _close(x.high, y.high) for x, y in zip(fa, fb)):
+            return False
+    return all(_close(v, b.detect[k]) for k, v in a.detect.items())
+
+
+def _zones_fit(a: dict, b: dict) -> bool:
+    """두 웨이퍼의 Zone 기준을 한 슬라이더로 볼 수 있나 — **둘 다 가진 레시피 Zone 폴더는 통째로 같아야** 하고,
+    한쪽에만 있는 레시피 폴더는 괜찮다(그 레시피 결과가 없는 웨이퍼 — 예: Defect 3,000개 한도에서 끊겨
+    ``Recipe2-Zones`` 를 안 남긴 YDD-PIDS3 RE 35174144EWF6, 관측 2026-11-23, 현택님 결정 2026-11-23).
+    겹치는 레시피 폴더가 하나도 없으면 맞지 않는다."""
+    da, db = _by_dir(a), _by_dir(b)
+    if not da and not db:
+        return True                     # 둘 다 Zone 파일이 없다 — 예전 비교(빈 것끼리 같음)와 같게
+    shared = da.keys() & db.keys()
+    return bool(shared) and all(da[k].keys() == db[k].keys() and all(_zone_same(da[k][z], db[k][z]) for z in da[k])
+                                for k in shared)
+
+
+def _optics_fit(a: dict, b: dict) -> bool:
+    """둘 다 아는 레시피의 스캔 광학(밝기 · 필터 · 게인 · 배율 …)이 같은가 — 하나라도 다르면 다른 레시피다(현택님
+    2026-11-23).  한쪽만 아는 레시피(파일이 없거나 결과가 끊긴 스캔)는 비교하지 않는다."""
+    return all(a[k] == b[k] for k in a.keys() & b.keys())
+
+
+def _frame_k(w: WaferData, frame: dict, zone_dir: str) -> tuple:
+    """``w`` 의 그 레시피 값(flt px) → 기준(``frame`` = 기준 웨이퍼 ``scales``)의 flt px 로 바꾸는 ``(선형, 면적)`` 배율.
+    기준에 없는 레시피는 바꾸지 않는다(1) — 그 레시피는 ``w`` 의 배율이 기준이 된다.
+
+    장비는 ``flt 값 ≥ ini 값 × 배율``(:func:`rules.recipe_scale` — 레시피 1 · 같은 배율이면 1, 즉 **픽셀끼리** 비교)로
+    거르므로, ``w`` 의 값에 ``base 배율 / w 배율`` 을 곱하면 base 기준 슬라이더 하나로 두 웨이퍼를 장비와 똑같이 센다.
+    레시피 1 · 같은 배율 레시피는 폴더 픽셀이 달라도(장비 보정 차이) 1 이다 — 픽셀 크기 비로 바꾸면 장비와 어긋난다
+    (x5 1.538 vs 1.536, 0.27% 늘리면 14개가 빠졌다, 관측 2026-11-21)."""
+    if zone_dir not in frame:
+        return 1.0, 1.0
+    (bl, ba), (wl, wa) = frame[zone_dir], w.scales.get(zone_dir, (1.0, 1.0))
+    return bl / wl, ba / wa
+
+
+def _in_frame(w: WaferData, frame: dict) -> WaferData:
+    """``w`` 의 Defect 크기 · Zone 기준을 기준(``frame``)의 픽셀로 바꾼 사본(배율이 모두 1 이면 그대로) — :func:`_frame_k`."""
+    ks = {zd: _frame_k(w, frame, zd) for zd in w.scales}
+    ks = {zd: k for zd, k in ks.items() if k != (1.0, 1.0)}
+    if not ks:
+        return w
+
+    def zone(zd, z):
+        lin, area = ks[zd]
+        f_k = {R.FEATURE_AREA: area, R.FEATURE_WIDTH: lin}
+        return R.Zone(z.zone_id, z.name, {c: tuple(
+            R.Filter(f.feature, f.ftype, f.low * f_k.get(f.feature, 1.0), f.high * f_k.get(f.feature, 1.0), f.name)
+            for f in fs) for c, fs in z.bundles.items()},
+            {(pol, kind): v * (area if kind == "area" else lin) for (pol, kind), v in z.detect.items()})
+
+    def defect(d):
+        if d.zone_dir not in ks:
+            return d
+        lin, area = ks[d.zone_dir]
+        return replace(d, area=d.area * area, width=d.width * lin, length=d.length * lin)
+
+    return replace(w, zones={k: zone(k[0], z) if k[0] in ks else z for k, z in w.zones.items()},
+                   defects=tuple(map(defect, w.defects)), goods=tuple(map(defect, w.goods)),
+                   scales={zd: frame.get(zd, k) for zd, k in w.scales.items()})
+
+
+def _ov_k(key: tuple, k: tuple) -> float:
+    """바꾼 값 키 ``(Zone 폴더, Zone, 분류|극성, FeatureType|종류)`` 에 곱할 배율."""
+    lin, area = k
+    return area if key[3] in (R.FEATURE_AREA, "area") else lin if key[3] in (R.FEATURE_WIDTH, "width", "length") else 1.0
+
+
+def _fits(acc_zones: dict, acc_optics: dict, acc_id: tuple, w: WaferData) -> bool:
+    """(base 픽셀로 바꾼) ``w`` 를 모은 것과 합칠 수 있나 — Zone 기준 · 스캔 광학 · 레시피 정보."""
+    return (_zones_fit(acc_zones, w.zones) and _optics_fit(acc_optics, w.optics)
+            and R.same_recipe(acc_id, w.recipe_id))
+
+
+def _join_id(a: tuple, b: tuple) -> tuple:
+    """레시피 정보 합치기 — 모르는 칸은 아는 쪽 값으로 채운다(:func:`rules.same_recipe` 를 통과한 둘만)."""
+    return tuple(x or y for x, y in zip(a, b))
+
+
+def same_base(a: WaferData, b: WaferData) -> bool:
+    """두 웨이퍼를 같은 슬라이더로 셀 수 있나 — 같은 레시피로 스캔했고(:func:`rules.recipe_identity`, 모르는 칸은
+    비교하지 않는다), 둘 다 가진 레시피의 스캔 광학(:func:`_optics_fit`)과 Zone 기준(:func:`_zones_fit`)이 같은 것.
+    픽셀 크기가 달라도 ``b`` 를 ``a`` 의 픽셀로 바꿔 본다(:func:`_in_frame`).
+
+    레시피가 다르면 스캔을 새로 한 것이라 Zone 이름 · 값이 같아도 따로 튜닝한다(현택님 2026-11-23)."""
+    return _fits(a.zones, a.optics, a.recipe_id, _in_frame(b, a.scales))
+
+
+def _with_wafer(d: P.Defect, i: int) -> P.Defect:
+    """``replace(d, wafer=i)`` 와 같은 값 — 합칠 때 Defect 마다 부르므로 dataclass 의 replace(필드 검사 · __init__)를
+    건너뛰고 속성만 복사한다(10만 개에 1초 → 0.1초).  ``P.Defect`` 는 frozen · slots 없음 · __post_init__ 없음이라
+    결과가 같다 — 회귀 가드 ``test_overkill_remove_speed``."""
+    if d.wafer == i:
+        return d
+    n = object.__new__(P.Defect)
+    n.__dict__.update(d.__dict__)
+    n.__dict__["wafer"] = i
+    return n
 
 
 def merge_wafers(ws: list) -> WaferData:
-    """웨이퍼 여러 장을 한 집합으로 — **첫 웨이퍼(읽힌 것 중)의 레시피**(Zone 기준 · 픽셀 크기)와 같은 것만 합친다.
+    """웨이퍼 여러 장을 한 집합으로 — **첫 웨이퍼(읽힌 것 중)의 레시피**와 같은 것만 합친다(:func:`same_base`).
 
     기준이 다르면(레시피가 다르면) 같은 슬라이더 값으로 셀 수 없어 빼고 ``skipped`` 에 적는다.  기준을 '가장 많은 무리'
     로 잡으면 다른 레시피 폴더를 더하는 순간 기준이 뒤바뀌어 조정한 값이 사라져서, 처음 고른 쪽으로 고정한다.
+    한 레시피 결과가 없는 웨이퍼도 합칠 수 있어서, Zone 기준은 합친 웨이퍼들의 것을 모으고 다음 웨이퍼는 **모은 것**과
+    비교한다(둘째 · 셋째가 서로 다른 레시피 2 를 들고 와 섞이지 않게).
     Defect 에는 몇 번째 웨이퍼인지(``wafer``)를 붙이고 사진 짝 키도 (웨이퍼, index) 로 바꾼다.
     RichSurface(내리기)는 한 장일 때만 쓴다."""
     good = [w for w in ws if not w.note]
     if not good:
         return WaferData(ws[0].folder, note=ws[0].note, skipped=tuple(w.folder for w in ws))
     base = good[0]
-    same = [w for w in good if same_base(base, w)]
-    out = WaferData(base.folder, zones=base.zones, classes=base.classes, px=base.px, recipe_id=base.recipe_id,
+    zones, optics, rid, same = dict(base.zones), dict(base.optics), base.recipe_id, [base]
+    scales = dict(base.scales)
+    for w in good[1:]:
+        w = _in_frame(w, scales)
+        if _fits(zones, optics, rid, w):
+            same.append(w)
+            zones.update({k: z for k, z in w.zones.items() if k not in zones})
+            optics.update({k: o for k, o in w.optics.items() if k not in optics})
+            scales.update({k: v for k, v in w.scales.items() if k not in scales})
+            rid = _join_id(rid, w.recipe_id)
+    out = WaferData(base.folder, zones=zones, classes=base.classes, px=base.px, recipe_id=rid,
+                    optics=optics, scales=scales,
                     folders=tuple(w.folder for w in same),
-                    skipped=tuple(w.folder for w in ws if not any(w is x for x in same)),
+                    skipped=tuple(w.folder for w in ws if not any(w.folder == x.folder for x in same)),
                     rich=base.rich if len(same) == 1 else {})
     defects, goods = [], []
     for i, w in enumerate(same):
-        ds = {d.index: replace(d, wafer=i) for d in w.defects + w.goods}
+        ds = {d.index: _with_wafer(d, i) for d in w.defects + w.goods}
         defects += [ds[d.index] for d in w.defects]
         goods += [ds[d.index] for d in w.goods]
         out.photos.update({(i, k[1]): ph for k, ph in w.photos.items()})
@@ -1857,6 +2001,7 @@ class ThresholdPreviewDialog(QDialog):
         """칩을 뺀다 — 읽지 않고 메모리에 있는 웨이퍼로 다시 합친다.  5초 동안 [되돌리기]."""
         if folder not in self._roots:
             return
+        t0 = time.perf_counter()
         w = self._w
         picks = {(_folder_of(w, d), d.index) for d in self._picked.values()} if w is not None else set()
         lost = sum(1 for f, _i in picks if self._owner.get(f) == folder)
@@ -1873,6 +2018,10 @@ class ThresholdPreviewDialog(QDialog):
         if self._base_reset:
             text += " · " + _KO.OVERKILL_NOTICE_BASE_RESET
         self._show_notice(text, "info", undo=snap)
+        nw = self._w
+        _LOG.info("Overkill 튜닝 폴더 빼기 %s: %.2f초 (남은 웨이퍼 %d장 · Defect %d개)", folder.name,
+                  time.perf_counter() - t0, len(nw.folders) if nw is not None else 0,
+                  len(nw.defects) if nw is not None else 0)
 
     def _undo(self) -> None:
         """방금 뺀 칩을 되돌린다 — 그 칩과 (잃은) 꼭 잡기 · (기준이 바뀌어 지워진) 바꾼 값을 읽지 않고 다시 올린다."""
@@ -2323,7 +2472,8 @@ class ThresholdPreviewDialog(QDialog):
         same = both and same_base(prev, w)
         self._base_reset = bool(both and not same)
         self._w = w
-        self._ov = dict(self._ov) if same else {}
+        # 바꾼 값은 옛 기준 웨이퍼의 픽셀 — 기준 웨이퍼가 바뀌었으면 새 기준 픽셀로(같은 장비 숫자가 되게, _frame_k)
+        self._ov = {k: v * _ov_k(k, _frame_k(prev, w.scales, k[0])) for k, v in self._ov.items()} if same else {}
         self._rich_base = {}
         self._drop_cache = {}
         self._picked = ({} if self._base_reset else
@@ -2493,11 +2643,11 @@ class ThresholdPreviewDialog(QDialog):
         return sorted(keys, key=lambda k: (recipe_no(k[0]), -self._count(k), k))
 
     def _count(self, key) -> int:
-        return sum(1 for d in self._w.defects if (d.zone_dir, d.zone) == key)
+        return len(self._w.by_zone().get(key, ()))
 
     def _in_zone(self, key=None) -> list:
         key = key or self._zone
-        return [d for d in self._w.defects if (d.zone_dir, d.zone) == key]
+        return list(self._w.by_zone().get(key, ()))
 
     def _rich_cand(self, key=None):
         """이 Zone 의 RichSurface 후보 값 — 기준을 전부 그 열로 계산할 수 있을 때만, 아니면 None."""
@@ -2732,7 +2882,8 @@ class ThresholdPreviewDialog(QDialog):
         mono = theme.FONT_MONO
         px_unit = {R.FEATURE_AREA: " px²", R.FEATURE_WIDTH: " px"}.get(feature, "")
         # ini 에 적힌 숫자 = 레시피 자기 픽셀(화면 값은 flt 픽셀로 바꾼 것이라 되돌린다, rules.zones_in_flt_px)
-        lin, area = R.recipe_scale(w.folder, self._zone[0])
+        # 합친 웨이퍼면 그 Zone 값의 픽셀 기준(_in_frame) — 기준 웨이퍼에 그 레시피 파일이 없어도 맞는 배율
+        lin, area = w.scales.get(self._zone[0]) or R.recipe_scale(w.folder, self._zone[0])
         ini_px = low_px / {R.FEATURE_AREA: area, R.FEATURE_WIDTH: lin}.get(feature, 1.0)
         px_txt = f"{ini_px:.4f}".rstrip("0").rstrip(".") + px_unit
         ini_lab = None
@@ -3574,7 +3725,10 @@ class ThresholdPreviewDialog(QDialog):
         if w is None:
             return []
         folders = w.folders or (w.folder,)
-        return [(i, f, sum(1 for d in w.defects + w.goods if d.wafer == i)) for i, f in enumerate(folders)]
+        counts: dict = {}
+        for d in w.defects + w.goods:               # 한 번에 센다(웨이퍼마다 전체를 훑었다)
+            counts[d.wafer] = counts.get(d.wafer, 0) + 1
+        return [(i, f, counts.get(i, 0)) for i, f in enumerate(folders)]
 
     def _save_picks(self, touched=frozenset()) -> None:
         """지금 고른 것(꼭 잡기 · Overkill)을 폴더별 · Zone 별로 남긴다 — 이 PC 안에서만(:mod:`...threshold.saved_picks`).
@@ -3582,14 +3736,17 @@ class ThresholdPreviewDialog(QDialog):
         ``touched`` = 이번에 사용자가 고른 것을 바꾼 Zone.  저장분은 **Zone 단위로** 고친다: 지금 고른 것이 있는 Zone 과
         ``touched`` Zone 만 지금 것으로 바꾸고, 나머지 Zone 의 저장분은 그대로 둔다 — [저장한 선택 불러오기] 를
         누르기 전에 다른 Zone 을 고르거나 값만 되돌렸다고 예전에 저장한 선택이 지워지지 않게."""
-        for i, folder, n in self._wafer_folders():
-            zones: dict = {}
-            for which, src in ((0, self._picked), (1, self._overkill)):
-                for d in src.values():
-                    if d.wafer == i:
-                        zones.setdefault((d.zone_dir, d.zone), (set(), set()))[which].add(d.index)
-            kept = {z: v for z, v in SP.load(folder, n).items() if z not in touched and z not in zones}
-            SP.save(folder, n, {**kept, **zones})
+        wfs = self._wafer_folders()
+        mine: dict = {}                             # 웨이퍼 순번 → 지금 고른 것(Zone 별) — 한 번에 나눈다
+        for which, src in ((0, self._picked), (1, self._overkill)):
+            for d in src.values():
+                mine.setdefault(d.wafer, {}).setdefault((d.zone_dir, d.zone), (set(), set()))[which].add(d.index)
+        out = []
+        for (i, folder, n), old in zip(wfs, SP.load_many([(f, n) for _i, f, n in wfs])):   # 파일은 한 번 읽고 한 번 쓴다
+            zones = mine.get(i, {})
+            kept = {z: v for z, v in old.items() if z not in touched and z not in zones}
+            out.append((folder, n, {**kept, **zones}))
+        SP.save_many(out)
         self._refresh_saved_btn()
 
     def _saved_picks(self) -> tuple[dict, dict]:
@@ -3599,9 +3756,13 @@ class ThresholdPreviewDialog(QDialog):
         over: dict = {}
         if w is None:
             return picked, over
+        wfs = self._wafer_folders()
+        saved = SP.load_many([(f, n) for _i, f, n in wfs])
+        if not any(saved):
+            return picked, over                     # 저장분이 없다(보통) — Defect 표를 만들 필요가 없다
         by_idx = {(d.wafer, d.index): d for d in w.defects}
-        for i, folder, n in self._wafer_folders():
-            for (zdir, zid), (pk, ov) in SP.load(folder, n).items():
+        for (i, _folder, _n), got in zip(wfs, saved):
+            for (zdir, zid), (pk, ov) in got.items():
                 for idxs, out in ((pk, picked), (ov, over)):
                     for idx in idxs:
                         d = by_idx.get((i, idx))
