@@ -517,26 +517,6 @@ MENU_CHECK_UPDATE = "업데이트 확인"
 SETUP_SECTION_FOLDER = "1  폴더"
 SETUP_SECTION_MODE = "2  방식"
 
-# ── [멀티레시피수집-임시] 시작 — 수집·분석이 끝나면 이 블록을 통째로 지운다 ───────────
-MRCP_COLLECT_BUTTON = "멀티 레시피 수집"
-MRCP_COLLECT_TITLE = "멀티 레시피 Defect 정보 수집"
-MRCP_COLLECT_ASK = (
-    "Export 를 눌러 둔 AOI-16 T254 웨이퍼 10곳에서 Defects.csv 와 결과 파일(flt · ini)을 모읍니다. "
-    "읽기만 하고, 사진은 이름만 적습니다. 중지하면 그때까지 모은 것을 저장합니다."
-)
-MRCP_COLLECT_START = "수집 시작"
-MRCP_COLLECT_RUNNING = "멀티 레시피 자료를 모으는 중"
-MRCP_COLLECT_DONE_FMT = (
-    "웨이퍼 {wafers}장 · 파일 {files}개를 모았습니다.\n"
-    "아래 폴더 안의 zip 을 전부 올려 주세요(28 MB 를 넘으면 여러 개로 나뉩니다).\n{path}"
-)
-MRCP_COLLECT_NO_TOOL = "수집 도구(dev/multi_recipe_collect.py)가 없습니다. 개발자 모드에서 이 브랜치로 설치해 주세요."
-MRCP_COLLECT_FAIL_FMT = "수집하다 멈췄습니다: {error}"
-MRCP_COLLECT_STOPPING = "지금까지 모은 것을 저장하는 중 (한 번 더 누르면 화면을 바로 풉니다)"
-MRCP_COLLECT_STOPPED = "화면을 먼저 풀었습니다. 저장이 끝나면 바탕화면의 멀티레시피수집 폴더에 zip 이 생깁니다."
-MRCP_COLLECT_NOTHING = "웨이퍼 폴더를 하나도 찾지 못해 결과 파일을 만들지 않았습니다. V: 드라이브(AOI-16)가 열리는지 확인해 주세요."
-MRCP_COLLECT_WINDING_DOWN = "방금 중지한 수집이 아직 정리 중입니다. 잠시 뒤 다시 눌러 주세요."
-# ── [멀티레시피수집-임시] 끝 ────────────────────────────────────────────────
 
 # ── 개발자 모드 (메인 화면 Ctrl+Shift+D) ───────────────────────────────────
 DEV_MODE_ON = "개발자 모드를 켰습니다."
@@ -1633,13 +1613,6 @@ GL_SCAN_WHY = {
     "no_candidate": "결함 위치를 담은 Scan 사진이 목록에 없음",
     "unreadable_scan": "Scan 사진을 읽다가 실패",
 }
-GL_SCAN_DIAG = "Scan 진단 수집"
-GL_SCAN_DIAG_TIP = "개발자 모드 · 컬러 결함 사진을 연 뒤 Scan 을 못 찾은 원인 자료를 모아 압축 파일로 저장합니다"
-GL_SCAN_DIAG_BUSY = "Scan 진단 자료를 모으는 중…"
-GL_SCAN_DIAG_DONE_FMT = "Scan 진단 자료를 저장했습니다: {path}"
-GL_SCAN_DIAG_FAILED_FMT = "Scan 진단 수집 실패: {why}"
-SCAN_DIAG_STATUS_TIP = "개발자 모드 · 웨이퍼 폴더를 골라 Scan 연결 · 레시피 값(Zone 기준 · 픽셀 크기 · Export) 분석 자료를 압축 파일로 저장합니다"
-SCAN_DIAG_PICK_TITLE = "자료를 모을 웨이퍼 폴더 선택"
 
 GL_RAW_TITLE = "RAW 사진 설정"
 GL_RAW_WIDTH = "가로(px)"
