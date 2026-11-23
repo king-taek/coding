@@ -1294,6 +1294,8 @@ THRESH_PREVIEW_NO_PHOTO = "사진 없음 {n}"
 THRESH_PREVIEW_NONE_DROPPED = "새로 빠지는 Defect 없음"
 THRESH_PREVIEW_NONE = "없음"
 THRESH_PREVIEW_MORE = "더 보기 +{n}"
+OVERKILL_SORT_BASE = "기본"               # 사진 칸 정렬 줄 — 새로 빠짐 = 기준에 가까운 순, 나머지 = 파일 순서
+OVERKILL_SORT_LENGTH = "Length"
 OVERKILL_CHIP_ADJUSTED = "조정 {v}"
 OVERKILL_DEFECT_BOX = "Defect 표시"
 OVERKILL_DEFECT_BOX_TIP = "Scan 사진에 Defect 자리를 빨간 상자로 표시합니다"
