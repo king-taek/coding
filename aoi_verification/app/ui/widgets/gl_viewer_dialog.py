@@ -18,8 +18,8 @@ from pathlib import Path
 from typing import Callable, Optional
 
 import numpy as np
-from PyQt6.QtCore import QObject, QPointF, QRectF, QSize, Qt, QThread, QTimer, QUrl, pyqtSignal
-from PyQt6.QtGui import QColor, QDesktopServices, QFont, QIcon, QImage, QPainter, QPen, QPixmap
+from PyQt6.QtCore import QObject, QPointF, QRectF, QSize, Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QIcon, QImage, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (QComboBox, QDialog, QFileDialog,
                              QFormLayout, QFrame, QGridLayout, QHBoxLayout, QLabel,
                              QMenu, QPushButton, QSpinBox, QSplitter, QToolButton, QVBoxLayout,
@@ -31,7 +31,6 @@ from ...gl import analysis, loader
 from ...gl import roi as R
 from ...gl.export import build_workbook, save_workbook
 from .. import theme
-from ...utils import prefs as _prefs
 from ..deferred import call_later
 from ..drop_overlay import drop_clear, drop_feedback
 from ..drop_paths import guess_kinds, install_paste, local_paths
@@ -359,13 +358,6 @@ class GlViewerDialog(QDialog):
                                             tip=_KO.GL_DEFECT_GO_OFF_TIP)
         self.defect_btn.setEnabled(False)
         row.addWidget(self.defect_btn)
-        # 개발자 모드 전용 — Scan 을 못 찾는 원인을 현장 폴더에서 모아 온다.
-        self.diag_btn = NeonButton(_KO.GL_SCAN_DIAG, role="ghost")
-        self.diag_btn.setToolTip(_KO.GL_SCAN_DIAG_TIP)
-        self.diag_btn.setEnabled(False)
-        self.diag_btn.setVisible(self._dev_mode())
-        self.diag_btn.clicked.connect(self._collect_scan_diag)
-        row.addWidget(self.diag_btn)
 
         over = QGridLayout(self.canvas)
         over.setContentsMargins(12, 12, 12, 12)
@@ -581,36 +573,6 @@ class GlViewerDialog(QDialog):
         self.canvas.selectionChanged.emit()
         self.canvas.update()
 
-    @staticmethod
-    def _dev_mode() -> bool:
-        try:
-            return bool(_prefs.load().dev_mode)
-        except Exception:
-            return False
-
-    def _collect_scan_diag(self) -> None:
-        v = self._view
-        if not (v and v.source_path):
-            return
-        from ...coords import scan_diag
-        src = v.source_path
-        self._gen_diag = getattr(self, "_gen_diag", 0) + 1
-        w = _Worker(self._gen_diag, lambda: str(scan_diag.collect(src)))
-        w.signals.done.connect(self._on_diag_done)
-        self._loading.show_overlay(_KO.GL_SCAN_DIAG_BUSY)
-        self._loading.set_progress(0, 0, _KO.GL_SCAN_DIAG_BUSY)    # busy — 0 에 멈추지 않는다
-        w.start()
-
-    def _on_diag_done(self, gen: int, result, err: str) -> None:
-        if gen != getattr(self, "_gen_diag", 0):
-            return
-        self._loading.hide_overlay()
-        if err or not result:
-            self._toast(_KO.GL_SCAN_DIAG_FAILED_FMT.format(why=err), error=True)
-            return
-        self._toast(_KO.GL_SCAN_DIAG_DONE_FMT.format(path=result))
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(result).parent)))
-
     def _go_defect(self) -> None:
         if self._view and self._view.target_box:
             self._ensure_defect_roi()
@@ -689,8 +651,6 @@ class GlViewerDialog(QDialog):
         self._set_note(notes, warn=bool(notes) and not (v.scan_name and len(notes) == 1))
         self.defect_btn.setEnabled(bool(v.target_box))
         self.defect_btn.setToolTip("" if v.target_box else _KO.GL_DEFECT_GO_OFF_TIP)
-        self.diag_btn.setVisible(self._dev_mode())
-        self.diag_btn.setEnabled(bool(v.source_path and (v.scan_name or v.scan_missing)))
         self._sync_empty_state()
         if v.target_box:
             self._ensure_defect_roi()
