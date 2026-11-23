@@ -303,7 +303,6 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._dev_btn.clicked.connect(self._open_dev_mode)
         self._status_bar.addPermanentWidget(self._dev_btn)
         self._dev_btn.setVisible(_prefs.load().dev_mode)
-        from . import dark_other_collect_tmp; dark_other_collect_tmp.attach(self)   # [DarkOther수집-임시] 이 줄 삭제
         QShortcut(QKeySequence("Ctrl+Shift+D"), self,
                   activated=self._toggle_dev_mode)
         self._mem_timer = QTimer(self)
@@ -546,7 +545,6 @@ class MainWindow(MultiValFlow, QMainWindow):
         on = not _prefs.load().dev_mode
         _prefs.patch(dev_mode=on)
         self._dev_btn.setVisible(on)
-        self._dkot_collect_btn.setVisible(on)                             # [DarkOther수집-임시] 이 줄 삭제
         self._sync_statusbar(self._stack.currentWidget())
         self._status_bar.showMessage(
             i18n.KO.DEV_MODE_ON if on else i18n.KO.DEV_MODE_OFF, 4000)
