@@ -145,6 +145,7 @@ class WaferData:
     skipped: tuple = ()               # 못 합친 웨이퍼 폴더 — 못 읽었거나 Zone 기준 · 픽셀 크기가 기준 웨이퍼와 다름
     has_scan: bool = False            # 폴더에 Scan 목록이 있다 — 칩의 [스캔] 을 켤 수 있다
     slot: str = ""                    # 카세트 슬롯 번호(WaferInfo.ini ActiveSlot) — 모르면 빈 글자
+    cut: tuple = ()                   # 장비 저장 상한에 닿은 웨이퍼 ((폴더, 상한), …) — Defect 가 일부만 있다
     _multi: object = field(default=None, repr=False, compare=False)   # Defect 가 든 Zone 폴더가 둘 이상인가(캐시)
 
     def label(self, key) -> tuple:
@@ -182,6 +183,9 @@ def load_wafer(folder: Path, report=lambda msg, done=0, total=0: None, stop=lamb
                   slot=read_active_slot(folder) or "")
     if note:
         return w
+    cap = P.wafer_cap(folder)
+    if cap and len(defects) + len(goods) >= cap:
+        w.cut = ((folder, cap),)
     w.zones = R.zones_in_flt_px(folder, R.read_zones(folder))     # flt 와 같은 픽셀로 — rules.zones_in_flt_px
     w.classes = R.read_classes(folder)
     px = scan_pixel_size_xy(folder)
@@ -219,6 +223,28 @@ def expand_root(p) -> list:
     found = [p] if _flt._find_flt(p) is not None else [
         d for _n, d in sorted(list_slot_dirs(p).items()) if _flt._find_flt(d) is not None]
     return [(d, os.path.normcase(str(d.resolve()))) for d in found]
+
+
+def no_flt_dirs(p) -> list:
+    """고른 폴더 → Surface.flt 가 없어 튜닝에서 빠지는 웨이퍼 폴더 ``[(폴더, 사진만인가)]``.
+
+    사진만 있고 결과 파일(ini · flt)이 하나도 없는 웨이퍼가 있다 — YDD-PIDS3 RE 5장 중 3장, 장비 화면에서도
+    조회되지 않았다(관측 2026-11-23).  :func:`expand_root` 는 이런 폴더를 말없이 빼므로 화면이 따로 알린다.
+    사진이 하나도 없는 하위 폴더(Zones 등)는 웨이퍼가 아니라 세지 않는다."""
+    p = Path(p)
+    if _flt._find_flt(p) is not None:
+        return []
+    subs = [d for _n, d in sorted(list_slot_dirs(p).items()) if _flt._find_flt(d) is None]
+    out = []
+    for d in subs or [p]:
+        try:
+            names = [e.name for e in os.scandir(d) if e.is_file()]
+        except OSError:
+            continue
+        photos = {f.name for f in _list_images(d)}
+        if photos:
+            out.append((d, all(n in photos or n.lower() == "thumbs.db" for n in names)))
+    return out
 
 
 def wafer_folders(paths) -> list:
@@ -271,6 +297,7 @@ def merge_wafers(ws: list) -> WaferData:
         goods += [ds[d.index] for d in w.goods]
         out.photos.update({(i, k[1]): ph for k, ph in w.photos.items()})
         out.misses += w.misses
+        out.cut += w.cut
     out.defects, out.goods = tuple(defects), tuple(goods)
     return out
 
@@ -283,6 +310,7 @@ class _Load(QThread):
     class _Signals(QObject):
         progress = pyqtSignal(int, int, int, str)     # token, done, total, msg
         expanded = pyqtSignal(int, object, object)    # token, 고른 폴더, [(웨이퍼 폴더, 실제 경로 키)]
+        no_flt = pyqtSignal(int, object, object)      # token, 고른 폴더, [(Surface.flt 없는 웨이퍼 폴더, 사진만인가)]
         wafer = pyqtSignal(int, object, object)       # token, 웨이퍼 폴더, WaferData
         done = pyqtSignal(int, bool)                  # token, 성공
 
@@ -305,6 +333,7 @@ class _Load(QThread):
                 if r not in self._expand:
                     self._expand[r] = expand_root(r)
                     self.signals.expanded.emit(t, r, self._expand[r])
+                    self.signals.no_flt.emit(t, r, no_flt_dirs(r))
                 for d, real in self._expand[r]:
                     if real not in seen:
                         seen.add(real)
@@ -1442,6 +1471,7 @@ class ThresholdPreviewDialog(QDialog):
         self._roots: list = []            # 고른 폴더(웨이퍼 또는 LOT) — 칩 하나씩.  맨 앞이 합치기 기준 레시피를 정한다
         self._expand: dict = {}           # 고른 폴더 → [(웨이퍼 폴더, 실제 경로 키)] — LOT 을 NAS 에서 다시 훑지 않는다
         self._cache: dict = {}            # 웨이퍼 폴더 → WaferData — 빼기 · 더하기가 다시 읽지 않고 이걸로 합친다
+        self._no_flt: dict = {}           # 고른 폴더 → [(Surface.flt 없는 웨이퍼 폴더, 사진만인가)] — 빨간 줄로 알린다
         self._owner: dict = {}            # 웨이퍼 폴더 → 그걸 가진 칩(같은 웨이퍼를 두 칩이 가리켜도 앞 칩 하나만)
         self._order: list = []            # 합칠 웨이퍼 폴더(칩 순서)
         self._real_owner: dict = {}       # 실제 경로 키 → 칩
@@ -1620,6 +1650,16 @@ class ThresholdPreviewDialog(QDialog):
         nl.addWidget(self.undo_btn)
         self.notice.setVisible(False)
         main.addWidget(self.notice)
+        self.alert = QFrame(self)                    # 빠진 웨이퍼 · 상한에서 잘린 웨이퍼 — 폴더가 있는 동안 늘 보인다
+        self.alert.setObjectName("alert")
+        al = QHBoxLayout(self.alert)
+        al.setContentsMargins(12, 6, 12, 6)
+        self.alert_label = QLabel("", self.alert)
+        self.alert_label.setWordWrap(True)
+        self.alert_label.setStyleSheet("font-weight: 600; background: transparent;")
+        al.addWidget(self.alert_label, 1)
+        self.alert.setVisible(False)
+        main.addWidget(self.alert)
         # 폴더가 없을 때의 본문 — 한 줄 안내 + [+ 폴더].  폴더를 더하면 사라진다.
         self.empty_state = QWidget(self)
         el = QVBoxLayout(self.empty_state)
@@ -1889,6 +1929,7 @@ class ThresholdPreviewDialog(QDialog):
         th = _Load(self._token, self._roots, self._expand, set(self._cache))
         th.signals.progress.connect(self._on_progress)
         th.signals.expanded.connect(self._on_expanded)
+        th.signals.no_flt.connect(self._on_no_flt)
         th.signals.wafer.connect(self._on_wafer)
         th.signals.done.connect(self._on_loaded)
         self._thread = th
@@ -1899,6 +1940,26 @@ class ThresholdPreviewDialog(QDialog):
         self._expand[root] = list(entries)
         self._rebuild_owner()
         self._render_chips()
+
+    def _on_no_flt(self, _token: int, root, dirs) -> None:
+        self._no_flt[root] = list(dirs)
+        self._render_alert()
+
+    def _render_alert(self) -> None:
+        """빨간 줄 — 튜닝에서 빠진 웨이퍼(Surface.flt 없음)와 장비 저장 상한에서 잘린 웨이퍼.  둘 다 없으면 숨긴다."""
+        lines = []
+        for r in self._roots:
+            dirs = self._no_flt.get(r, ())
+            for photos_only, fmt in ((True, _KO.OVERKILL_ALERT_PHOTOS_ONLY), (False, _KO.OVERKILL_ALERT_NO_FLT)):
+                names = [d.name for d, only in dirs if only == photos_only]
+                if names:
+                    lines.append(fmt.format(n=len(names), names=" · ".join(names)))
+        w = self._w
+        for folder, cap in (w.cut if w is not None and not w.note else ()):
+            lines.append(_KO.OVERKILL_ALERT_CUT.format(name=folder.name, cap=cap))
+        self.alert.setStyleSheet(f"QFrame#alert {{ background: {theme.DANGER_TINT}; border-radius: 6px; }}")
+        self.alert_label.setText("\n".join(lines))
+        self.alert.setVisible(bool(lines))
 
     def _on_wafer(self, _token: int, folder, data) -> None:
         """웨이퍼 하나를 다 읽었다 — 읽던 중에 끊겨도 이건 버리지 않는다."""
@@ -2468,6 +2529,7 @@ class ThresholdPreviewDialog(QDialog):
             n = len(w.defects)
             self.check_label.setText((_KO.THRESH_PREVIEW_CHECK_OK if not w.misses else
                                       _KO.THRESH_PREVIEW_CHECK_BAD).format(ok=n - w.misses, n=n))
+        self._render_alert()
         self._render_zones()
         self._sync_empty()
         self._render_rules()
