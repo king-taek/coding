@@ -1275,6 +1275,7 @@ THRESH_PREVIEW_CHECK_BAD = "⚠ 검산 {ok:,} / {n:,}"
 THRESH_PREVIEW_ZONE = "Zone"
 THRESH_PREVIEW_ZONE_COUNT = "Defect {n:,}"
 THRESH_PREVIEW_RECIPE = "레시피 {n}"
+THRESH_PREVIEW_RECIPE_HEAD = "레시피 {n} · {name}"   # Overkill 튜닝 Zone 목록의 레시피 머리줄
 THRESH_PREVIEW_DROPPED = "새로 빠짐"
 THRESH_PREVIEW_RESET = "레시피 값으로 되돌리기"
 THRESH_PREVIEW_RESET_TIP = "지금 보고 있는 Zone 만 레시피 값으로 되돌립니다 (다른 Zone 은 그대로)"

@@ -32,7 +32,7 @@ _LOG = logging.getLogger("aoi.threshold")
 __all__ = ["Filter", "Zone", "ClassInfo", "read_zones", "read_classes", "zone_dir_for",
            "surface_result_types", "event_mask", "zones_in_flt_px", "stage_masks",
            "DETECT_KEYS", "detect_polarity",
-           "recipe_scale", "read_recipe_names", "read_detect_values",
+           "recipe_scale", "read_recipe_names", "read_detect_values", "recipe_identity", "same_recipe",
            "FEATURE_AREA", "FEATURE_WIDTH", "FEATURE_CONTRAST"]
 
 # Zone ini FeatureType — 섹션 이름과 짝지어 본 값(수집 자료 Zone ini 전부, 관측 2026-11-16):
@@ -260,6 +260,26 @@ def read_detect_values(folder: Path, zone_dir: str, zone_id: int) -> list:
     except OSError:
         pass
     return []
+
+
+_SETUP_PATH = re.compile(r"(?im)^\s*SetupPath\s*=[ \t]*(.*?)\s*$")
+
+
+def recipe_identity(folder: Path) -> tuple:
+    r"""웨이퍼 폴더가 어느 레시피로 스캔됐나 → ``(SetupPath, ((N, 이름), …))``.  모르는 칸은 ``""`` · ``()``.
+
+    ``Params_WaferInfo.ini SetupPath`` = ``c:\job\<Job>\<Setup>\Recipes\<레시피 1 이름>\`` (수집 526 폴더 전부 이 꼴,
+    관측 2026-11-23), 다중 레시피면 ``RecipesInfo.ini`` 의 레시피 이름들.  Zone ini 내용이 같아도 Job · 레시피가 다르면
+    다른 스캔이라 따로 튜닝한다(현택님 2026-11-23) — Zone 내용만으로 '같은 레시피' 라고 보지 않으려고 파일에서 읽는다.
+    경로는 대소문자 · 끝 ``\`` 를 맞춘다(윈도 경로)."""
+    m = _SETUP_PATH.search(read_ini_text(Path(folder) / "Params_WaferInfo.ini") or "")
+    setup = m.group(1).strip().rstrip("\\/").lower() if m else ""
+    return setup, tuple(sorted(read_recipe_names(Path(folder)).items()))
+
+
+def same_recipe(a: tuple, b: tuple) -> bool:
+    """:func:`recipe_identity` 둘이 같은 레시피인가 — 한쪽이라도 모르는 칸(빈 값)은 비교하지 않는다(증거가 아니다)."""
+    return all(not x or not y or x == y for x, y in zip(a, b))
 
 
 @lru_cache(maxsize=64)
