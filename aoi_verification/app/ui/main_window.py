@@ -237,8 +237,6 @@ class MainWindow(MultiValFlow, QMainWindow):
     _excel_ref_progress = pyqtSignal(int, int)     # 이전 엑셀 → 기준 폴더 풀기 진행
     _excel_ref_done = pyqtSignal(str, object, str)  # 엑셀 경로, ExcelRef|None, 오류 문구
     _excel_ref_sheets = pyqtSignal(str, list)       # 엑셀 경로, [(시트, 사진 수)] — 고르게 한다
-    _scan_diag_done = pyqtSignal(str, str)          # zip 경로, 오류 문구(개발자 모드 Scan 진단)
-    _scan_diag_progress = pyqtSignal(int, int)      # 끝낸 웨이퍼 수, 전체
     _update_none = pyqtSignal(str)          # 수동 확인: 최신/확인불가 안내
     _startup_proceed = pyqtSignal()         # 업데이트 흐름 종료 → 나머지 시작 팝업
     # 무거운 모듈(cv2·OpenVINO·numpy·PIL)을 백그라운드에서 다 불러왔다는 신호.
@@ -305,16 +303,6 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._dev_btn.clicked.connect(self._open_dev_mode)
         self._status_bar.addPermanentWidget(self._dev_btn)
         self._dev_btn.setVisible(_prefs.load().dev_mode)
-        # 개발자 모드 전용 — Scan 을 못 찾는 원인 자료를 폴더째 모은다(`coords/scan_diag.py`).
-        self._scan_diag_btn = QPushButton(i18n.KO.GL_SCAN_DIAG, self._status_bar)
-        self._scan_diag_btn.setFlat(True)
-        self._scan_diag_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._scan_diag_btn.setToolTip(i18n.KO.SCAN_DIAG_STATUS_TIP)
-        self._scan_diag_btn.clicked.connect(self._pick_scan_diag_folder)
-        self._status_bar.addPermanentWidget(self._scan_diag_btn)
-        self._scan_diag_btn.setVisible(_prefs.load().dev_mode)
-        self._scan_diag_picker = None
-        from . import multi_recipe_collect_tmp; multi_recipe_collect_tmp.attach(self)   # [멀티레시피수집-임시] 이 줄 삭제
         QShortcut(QKeySequence("Ctrl+Shift+D"), self,
                   activated=self._toggle_dev_mode)
         self._mem_timer = QTimer(self)
@@ -428,8 +416,6 @@ class MainWindow(MultiValFlow, QMainWindow):
         self._excel_ref_progress.connect(self._on_excel_ref_progress)
         self._excel_ref_done.connect(self._on_excel_ref_done)
         self._excel_ref_sheets.connect(self._on_excel_ref_sheets)
-        self._scan_diag_done.connect(self._on_scan_diag_done)
-        self._scan_diag_progress.connect(self._on_scan_diag_progress)
         self._update_none.connect(self._on_update_none)
         self._startup_proceed.connect(self._run_startup_popups)
         QTimer.singleShot(400, self._begin_update_check)
@@ -559,70 +545,11 @@ class MainWindow(MultiValFlow, QMainWindow):
         on = not _prefs.load().dev_mode
         _prefs.patch(dev_mode=on)
         self._dev_btn.setVisible(on)
-        self._scan_diag_btn.setVisible(on)
-        self._mrcp_collect_btn.setVisible(on)                             # [멀티레시피수집-임시] 이 줄 삭제
         self._sync_statusbar(self._stack.currentWidget())
         self._status_bar.showMessage(
             i18n.KO.DEV_MODE_ON if on else i18n.KO.DEV_MODE_OFF, 4000)
         if on:
             self._open_dev_mode()
-
-    def _overkill_folders(self) -> list:
-        """Overkill 튜닝 화면이 고른 폴더들(웨이퍼 또는 LOT).  보이는 화면 → 숨은 화면 → 마지막으로 본 폴더 순.
-
-        화면은 Setup 의 도구 페이지에도, 전체화면 창(최상위)에도 있을 수 있어 앱 전체 위젯에서 찾는다."""
-        from PyQt6.QtWidgets import QApplication
-        from .widgets.threshold_preview_dialog import ThresholdPreviewDialog
-        found = [w for w in QApplication.allWidgets() if isinstance(w, ThresholdPreviewDialog)
-                 and list(getattr(w, "_roots", []) or [])]
-        found.sort(key=lambda w: not w.isVisible())
-        if found:
-            self._last_overkill_roots = list(found[0]._roots)
-        return list(getattr(self, "_last_overkill_roots", []) or [])
-
-    def _pick_scan_diag_folder(self) -> None:
-        roots = self._overkill_folders()
-        if roots:                                   # Overkill 튜닝에 연 LOT · 웨이퍼를 그대로 모은다(사용자 지시 2026-11-21)
-            self._run_scan_diag_many(roots)
-            return
-        if self._scan_diag_picker is None:
-            from .folder_picker import FolderPicker
-            self._scan_diag_picker = FolderPicker(self)
-            self._scan_diag_picker.picked.connect(self._run_scan_diag)
-        self._scan_diag_picker.open(i18n.KO.SCAN_DIAG_PICK_TITLE)
-
-    def _run_scan_diag(self, folder: str) -> None:
-        self._run_scan_diag_many([folder])
-
-    def _run_scan_diag_many(self, roots: list) -> None:
-        """고른 폴더(웨이퍼 또는 LOT)의 진단 zip 을 백그라운드에서 만든다.  LOT 이면 안의 웨이퍼 전부."""
-        self._loading.show_overlay(i18n.KO.GL_SCAN_DIAG_BUSY)
-        self._loading.set_progress(0, 0, i18n.KO.GL_SCAN_DIAG_BUSY)    # busy → 0 에서 안 멈춤
-
-        import threading
-
-        def _work() -> None:
-            from ..coords import scan_diag
-            from .widgets.threshold_preview_dialog import wafer_folders
-            try:
-                folders = wafer_folders(roots) or [Path(r) for r in roots]   # Surface.flt 없는 폴더는 그대로
-                out = scan_diag.collect_many(folders, progress=self._scan_diag_progress.emit)
-                self._scan_diag_done.emit(str(out), "")
-            except Exception as e:
-                _LOG.exception("Scan 진단 수집 실패")
-                self._scan_diag_done.emit("", f"{type(e).__name__}: {e}")
-
-        threading.Thread(target=_work, name="scan-diag", daemon=True).start()
-
-    def _on_scan_diag_progress(self, done: int, total: int) -> None:
-        self._loading.set_progress(done, total, i18n.KO.GL_SCAN_DIAG_BUSY)
-
-    def _on_scan_diag_done(self, path: str, error: str) -> None:
-        self._loading.hide_overlay()
-        if error:
-            sheets.warn(self, i18n.KO.APP_TITLE, i18n.KO.GL_SCAN_DIAG_FAILED_FMT.format(why=error))
-        else:
-            sheets.info(self, i18n.KO.APP_TITLE, i18n.KO.GL_SCAN_DIAG_DONE_FMT.format(path=path))
 
     def _open_dev_mode(self) -> None:
         from .widgets.dev_mode_dialog import DevModeDialog

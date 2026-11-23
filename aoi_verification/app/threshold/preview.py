@@ -18,6 +18,7 @@ from __future__ import annotations
 import dataclasses
 import math
 import logging
+import re
 import struct
 
 import numpy as np
@@ -28,7 +29,7 @@ from ..coords import surface_flt as _flt
 from .rules import (FEATURE_AREA, FEATURE_CONTRAST, FEATURE_WIDTH, detect_polarity, event_mask, read_classes,
                     read_zones, stage_masks, zone_dir_for)
 
-__all__ = ["Defect", "load_all", "load_defects", "match_photos", "contrast_known", "why_dropped",
+__all__ = ["Defect", "load_all", "load_defects", "wafer_cap", "match_photos", "contrast_known", "why_dropped",
            "is_kept", "recipe_misses", "count_by_bin", "recommend"]
 
 _LOG = logging.getLogger("aoi.threshold")
@@ -130,6 +131,26 @@ def load_all(folder: Path) -> tuple[tuple[Defect, ...], tuple[Defect, ...], str]
         # 첫 분류가 Good(EDC Good: reclassify 20 · org 0).  Accept 는 지금 분류만 0 이라 Defect 로 남는다.
         (goods if abs(first) in good else kept).append(d)
     return tuple(kept), tuple(goods), ""
+
+
+_CAP_FILE = "GlobalRTP.ini"
+_CAP_RE = re.compile(r"^\s*MaxFaultsPerWafer\s*=\s*(\d+)\s*$", re.M | re.I)
+
+
+def wafer_cap(folder: Path) -> int:
+    """장비가 웨이퍼 한 장에 저장하는 Defect 상한(``GlobalRTP.ini`` 의 ``MaxFaultsPerWafer``).  모르면 0.
+
+    Surface.flt 레코드 수가 이 값에 닿으면 장비가 그 자리에서 저장을 멈춘 것이다 — 파일에는 앞쪽 Defect 만 남는다.
+    35174144EWF6(YDD-PIDS3 RE): ScanLog DefectsNum 3,030 · Surface.flt 3,000 · 상한 3,000, 웨이퍼 한쪽(x < 152 mm)과
+    레시피 2 가 통째로 빠졌다(관측 2026-11-23).  수집 웨이퍼 41장 중 상한에 닿은 것은 이 한 장이다.
+    ScanLog ``DefectsNum`` 은 판단에 쓰지 않는다 — 상한에 안 닿은 T254 다중 레시피 웨이퍼에서도 flt 와 달랐다
+    (429 · 1,834, 관측)."""
+    try:
+        text = (folder / _CAP_FILE).read_bytes().decode("utf-8", errors="replace")
+    except OSError:
+        return 0
+    m = _CAP_RE.search(text)
+    return int(m.group(1)) if m else 0
 
 
 def load_defects(folder: Path) -> tuple[tuple[Defect, ...], str]:
