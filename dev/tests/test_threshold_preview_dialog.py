@@ -1401,7 +1401,13 @@ def _ask_first_action(monkeypatch, T, seen):
     def fake_exec(self, *a, **k):
         seen.extend(x.text() for x in self.actions())
         return self.actions()[0]
-    monkeypatch.setattr(T.QMenu, "exec", fake_exec)
+    from PyQt6.QtWidgets import QMenu
+    monkeypatch.setattr(QMenu, "exec", fake_exec)
+
+
+def _menu3(T):
+    """모든 사진의 우클릭 메뉴 세 항목(``photo_menu``, 현택님 2026-11-24)."""
+    return [T._KO.CTX_VIEW_LARGER, T._KO.CTX_PHOTO_INFO, T._KO.CTX_PHOTO_GL]
 
 
 def test_right_click_on_color_tile_and_big_photo_offers_enlarge(styled_qapp, tmp_path, monkeypatch):
@@ -1416,7 +1422,7 @@ def test_right_click_on_color_tile_and_big_photo_offers_enlarge(styled_qapp, tmp
         k = next(iter(dlg.tiles))
         tile = dlg.tiles[k]
         tile.customContextMenuRequested.emit(QPoint(5, 5))                 # 우클릭
-        assert seen == [T._KO.CTX_VIEW_LARGER] and shown == [dlg._pic(dlg._tile_defects[k])]
+        assert seen == _menu3(T) and shown == [dlg._pic(dlg._tile_defects[k])]
         assert dlg._open is None and not dlg._picked                       # 선택 · 꼭 잡기는 건드리지 않는다
         dlg._toggle(k)
         big = dlg._band.findChildren(T._BigPhoto)[0]
@@ -1450,7 +1456,7 @@ def test_right_click_on_scan_tile_opens_full_scan_with_overlay_or_falls_back_to_
         monkeypatch.setattr(Z, "FullscreenViewer", _V)
         monkeypatch.setattr(T.sheets, "run", lambda viewer, **k: None)
         dlg.tiles[T.key_of(target)].customContextMenuRequested.emit(QPoint(5, 5))
-        assert seen == [T._KO.CTX_VIEW_LARGER]
+        assert seen == _menu3(T)
         th = dlg._full_scan
         assert th is not None
         th.wait(20000)

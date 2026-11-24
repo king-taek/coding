@@ -21,7 +21,7 @@ from PyQt6.QtCore import (QEvent, QObject, QPoint, QRect, QRectF, Qt, QTimer,
                           pyqtSignal)
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPixmap, QTextDocument
 from PyQt6.QtWidgets import (QApplication, QFrame, QGridLayout, QHBoxLayout,
-                             QLabel, QMenu, QScrollArea, QSizePolicy,
+                             QLabel, QScrollArea, QSizePolicy,
                              QVBoxLayout, QWidget)
 
 from ... import i18n
@@ -37,6 +37,7 @@ from ..widgets.app_logo import build_logo_label
 from ..widgets.loading_overlay import LoadingOverlay
 from ..widgets.no_wheel_slider import NoWheelSlider
 from ..widgets.zoom_window import FullscreenViewer
+from ..widgets import photo_menu
 from ..widgets import sheet_host as sheets
 from ... import config as _config
 from ...coords import number_risk as _number_risk
@@ -279,10 +280,7 @@ class _LazyThumb(QLabel):
         self._apply_scaled()
 
     def _on_context_menu(self, pos) -> None:
-        menu = QMenu(self)
-        act = menu.addAction(i18n.KO.CTX_VIEW_LARGER)
-        chosen = menu.exec(self.mapToGlobal(pos))
-        if chosen is act:
+        if photo_menu.ask(self, self.mapToGlobal(pos), self._path):
             self._view_large()
 
     def _view_large(self) -> None:
@@ -379,15 +377,17 @@ class _RunnerUpTile(QFrame):
             self.swap_requested.emit(self.item, self.score)
         super().mousePressEvent(event)
 
-    # ★ 더블클릭 확대는 제거했다 — 후보를 연달아 눌러 교체하다 보면 두 번째 클릭이
-    #   더블클릭으로 붙어 원하지 않는 비교 창이 떴다(사용자 지적).  프레스는 '교체'라는
-    #   잦은 동작이고 확대는 드문 동작이라, 같은 버튼의 연타에 둘을 겹치면 잦은 쪽이
-    #   드문 쪽을 오발한다.  확대는 아래 우클릭 메뉴로만 연다.
+    def mouseDoubleClickEvent(self, event):  # noqa: N802
+        # 더블클릭 = 크게 보기(현택님 2026-11-24 결정으로 바꿈 — 예전엔 오발 때문에 뺐다).
+        # 첫 번째 누름은 이미 교체를 했다 — 교체한 뒤 크게 보는 것은 괜찮다(같은 결정).
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.view_requested.emit(self.item)
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
     def _on_context_menu(self, pos) -> None:
-        menu = QMenu(self)
-        act = menu.addAction(i18n.KO.CTX_VIEW_LARGER)
-        chosen = menu.exec(self.mapToGlobal(pos))
-        if chosen is act:
+        if photo_menu.ask(self, self.mapToGlobal(pos), self.item.path):
             self.view_requested.emit(self.item)
 
 

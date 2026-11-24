@@ -87,7 +87,7 @@ BULK_SIZE_LABEL = "사진 크기"
 BULK_PAGE_PREV = "◀ 이전"
 BULK_PAGE_NEXT = "다음 ▶"
 BULK_PAGE_LABEL_FMT = "페이지 {page} / {total}"
-BULK_TILE_ZOOM_TOOLTIP = "우클릭하여 크게 보기"
+BULK_TILE_ZOOM_TOOLTIP = "더블클릭: 크게 보기"
 BTN_MOVE_TO_EXCLUDE = "제외로 이동"
 BTN_MOVE_TO_TARGET = "검증 대상으로 이동"
 BTN_BACK_TO_CENTER = "중앙으로 복귀(재결정)"
@@ -1034,8 +1034,10 @@ GROUP_HEADER_NO_FMT = "{slot}\n#{no} · {count}장"
 LOT_COUNTS_PREFIX = "슬롯별 장수:  "
 
 # ── UI 개선 (#11 / #13 / #16) ─────────────────────────────────────────────
-# 썸네일 우클릭 컨텍스트 메뉴 — 원본 크게 보기 (#13).
-CTX_VIEW_LARGER = "크게보기"
+# 사진 우클릭 메뉴 — 어느 화면이든 같은 세 항목(현택님 2026-11-24, ``widgets/photo_menu``).
+CTX_VIEW_LARGER = "크게 보기"
+CTX_PHOTO_INFO = "Defect 정보 조회"
+CTX_PHOTO_GL = "GL 히스토그램"
 # 매치 검토 각 행 slot 라벨 아래 ‘크게 보기’ 버튼 — 좌우 비교 뷰어를 연다.
 # ★ 확대 글리프(⤢/⧉ 등)를 **붙이지 않는다.**  이 글자들은 폰트 폴백이 플랫폼마다 달라
 #   컬러 이모지로 렌더되는 경우가 있다(실측: 이 리눅스 캡처 박스에서 주황·파랑 화살표로

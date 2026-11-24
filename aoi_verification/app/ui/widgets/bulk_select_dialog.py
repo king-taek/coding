@@ -31,6 +31,7 @@ from .neon_button import NeonButton
 from . import popup_layout
 from .no_wheel_slider import NoWheelSlider
 from .option_group import columns_for_width
+from . import photo_menu
 from . import sheet_host as sheets
 
 
@@ -150,9 +151,20 @@ class _SelectTile(QFrame):
                 motion.crossfade_from(self, before)
             self.toggled.emit(self.item, self._selected)
         elif event.button() == Qt.MouseButton.RightButton:
-            # 우클릭 → 크게 보기 (선택 상태는 건드리지 않음).
-            self.zoom_requested.emit(self.item)
+            # 우클릭 → 모든 사진과 같은 메뉴(``photo_menu``).  선택 상태는 건드리지 않는다.
+            if photo_menu.ask(self, event.globalPosition().toPoint(), self.item.path):
+                self.zoom_requested.emit(self.item)
+            event.accept()
+            return
         super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):  # noqa: N802
+        # 더블클릭 = 크게 보기(현택님 2026-11-24).  첫 누름이 이미 선택을 토글했다 — 그대로 둔다.
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.zoom_requested.emit(self.item)
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
 
     def set_selected(self, selected: bool) -> None:
         if selected == self._selected:

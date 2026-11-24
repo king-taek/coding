@@ -55,7 +55,7 @@ from PyQt6.QtCore import (QBuffer, QCoreApplication, QEvent, QIODevice, QLocale,
 from PyQt6.QtGui import (QColor, QDesktopServices, QDoubleValidator, QFont, QFontMetrics, QImage, QPainter, QPainterPath,
                          QPen, QPixmap, QPolygonF)
 from PyQt6.QtWidgets import (QAbstractButton, QAbstractSlider, QApplication, QButtonGroup, QDialog, QFrame, QHBoxLayout,
-                             QLabel, QLineEdit, QMenu, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
+                             QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
 
 from ... import i18n
 from ...config import CONFIG, Sizing
@@ -80,6 +80,7 @@ from ..drop_overlay import drop_clear, drop_feedback
 from ..drop_paths import guess_kinds, install_paste, local_paths, split_paths
 from ..folder_picker import FolderPicker, SavePicker, last_dir
 from ..undo_keys import bind_undo
+from . import photo_menu
 from . import sheet_host as sheets
 from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
@@ -784,7 +785,7 @@ class _Tile(QFrame):
     """사진 한 장 — 테두리 · 캡션 없이 사진만.  누르면 ``clicked``.
 
     표시는 사진 위 작은 것만: 꼭 잡기 = 오른쪽 위 작은 체크, 펼친 타일 = 3px 강조 테두리, 가리킨 타일 = 옅은 외곽선.
-    우클릭 = [크게보기](``enlarge``)."""
+    더블클릭 · 우클릭 [크게 보기] = ``enlarge`` (우클릭 메뉴는 모든 사진과 같은 ``photo_menu``)."""
 
     clicked = pyqtSignal()
     enlarge = pyqtSignal()
@@ -798,6 +799,7 @@ class _Tile(QFrame):
         self.setToolTip(tip)
         self.picked = picked
         self.wait_path = None                          # 썸네일을 아직 기다리는 사진 경로(백그라운드가 채운다)
+        self.photo_path = None                         # Color 사진 경로 — 우클릭 [Defect 정보 조회] · [GL 히스토그램] 용
         pic = QLabel(self)
         pic.setProperty("role", "tilePic")
         pic.setGeometry(0, 0, size, size)
@@ -842,6 +844,7 @@ class _Tile(QFrame):
             pic.setText(_KO.OVERKILL_SCAN_WAIT)
             return
         if not isinstance(photo, QImage):               # Color 사진 — 캐시에 있으면 바로, 없으면 자리표시 뒤 백그라운드가 채운다
+            self.photo_path = photo
             pm = image_io._get_tile_cache().get(_tile_key(photo, size))
             if pm is not None:
                 pic.setPixmap(pm)
@@ -861,8 +864,16 @@ class _Tile(QFrame):
             self.hover.setVisible(False)
 
     def _on_context_menu(self, pos) -> None:
-        if _ask_enlarge(self, self.mapToGlobal(pos)):
+        if photo_menu.ask(self, self.mapToGlobal(pos), self.photo_path):
             self.enlarge.emit()
+
+    def mouseDoubleClickEvent(self, e):  # noqa: N802
+        # 더블클릭 = 크게 보기(현택님 2026-11-24).  첫 누름은 이미 값을 펼쳤다 — 그대로 둔다.
+        if e.button() == Qt.MouseButton.LeftButton:
+            self.enlarge.emit()
+            e.accept()
+            return
+        super().mouseDoubleClickEvent(e)
 
     def enterEvent(self, e):        # noqa: N802
         self.hover.setVisible(not self.is_open)
@@ -878,24 +889,20 @@ class _Tile(QFrame):
         super().mousePressEvent(e)
 
 
-def _ask_enlarge(owner: QWidget, global_pos) -> bool:
-    """우클릭 메뉴 [크게보기] — 매치 검토 타일(``zoom_window._MidTile``)과 같은 메뉴.  고르면 True."""
-    menu = QMenu(owner)
-    act = menu.addAction(_KO.CTX_VIEW_LARGER)
-    return menu.exec(global_pos) is act
-
-
 class _BigPhoto(QLabel):
+    """펼친 값 칸의 사진 — 누르면 크게, 우클릭은 모든 사진과 같은 메뉴(``photo_menu``)."""
+
     clicked = pyqtSignal()
     enlarge = pyqtSignal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        self.photo_path = None                         # Color 사진 경로 — Scan Crop 이면 None
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._on_context_menu)
 
     def _on_context_menu(self, pos) -> None:
-        if _ask_enlarge(self, self.mapToGlobal(pos)):
+        if photo_menu.ask(self, self.mapToGlobal(pos), self.photo_path):
             self.enlarge.emit()
 
     def mousePressEvent(self, e):   # noqa: N802
@@ -2699,6 +2706,11 @@ class ThresholdPreviewDialog(QDialog):
             return color
         return self._scans.get(idx[0])
 
+    def _photo_path(self, d: P.Defect):
+        """그 Defect 의 Color 사진 경로 — Scan Crop 뿐이면 None(우클릭 [Defect 정보 조회] · [GL 히스토그램] 이 꺼진다)."""
+        photo = self._pic(d)
+        return None if photo is None or isinstance(photo, QImage) else photo
+
     def is_loading(self) -> bool:
         return self._thread is not None and self._thread.isRunning()
 
@@ -3360,9 +3372,10 @@ class ThresholdPreviewDialog(QDialog):
             pic.setText(_KO.OVERKILL_SCAN_WAIT)
         if photo is None:
             pic.setCursor(Qt.CursorShape.ArrowCursor)
-        else:                                           # 누르거나 우클릭 [크게보기] — Color 는 그대로, Scan Crop 은 원본 위 범위 표시
+        else:                                           # 누르거나 우클릭 [크게 보기] — Color 는 그대로, Scan Crop 은 원본 위 범위 표시
             pic.enlarge.connect(lambda i=key_of(d): self._enlarge_tile(i))
             if not isinstance(photo, QImage):
+                pic.photo_path = photo
                 pic.clicked.connect(lambda: self._enlarge(photo, d))
             else:
                 pic.clicked.connect(lambda i=key_of(d): self._enlarge_tile(i))
@@ -3925,7 +3938,8 @@ class ThresholdPreviewDialog(QDialog):
                                  pixmap_of=self._pick_pixmap, request_pics=self._pick_request,
                                  caption_of=self._pick_caption, picked=self._picked, overkill=self._overkill,
                                  preview=self._pick_preview,
-                                 enlarge=lambda d: self._enlarge_tile(key_of(d)), parent=self)
+                                 enlarge=lambda d: self._enlarge_tile(key_of(d)),
+                                 path_of=self._photo_path, parent=self)
         dlg.applied.connect(self._on_pick_applied)
         dlg.finished.connect(self._on_pick_closed)
         self._pick_dlg = dlg

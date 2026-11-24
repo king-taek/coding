@@ -112,6 +112,9 @@ class _ThumbTile(QFrame):
             self._expand_btn = btn
 
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        # 우클릭 = 모든 사진과 같은 메뉴(``photo_menu``, 현택님 2026-11-24).
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._on_context_menu)
 
     # ------------------------------------------------------------------
     def _load_pix(self) -> None:
@@ -191,15 +194,24 @@ class _ThumbTile(QFrame):
         super().mousePressEvent(event)
 
     def mouseDoubleClickEvent(self, event):  # noqa: N802
-        # 인라인 선택 모드에서 더블클릭 = 선택 해제 (확대 모드 제거).
-        # 더블클릭 직전의 단일 press 가 토글했더라도 여기서 OFF 로 고정 →
-        # 더블클릭은 항상 ‘해제’로 끝난다.  super() 를 호출하면 QWidget 기본
-        # 구현이 press 를 재생성해 다시 토글하므로 여기서 종료한다.
-        if self._inline_select and event.button() == Qt.MouseButton.LeftButton:
-            self.set_inline_selected(False)
-            self.sel_toggled.emit(self.entry, False)
+        # 더블클릭 = 크게 보기(현택님 2026-11-24 결정 — 예전 '인라인 선택 해제' 를 바꿨다).
+        # 첫 누름이 이미 선택을 토글했다면 그대로 둔다.  super() 를 부르면 QWidget 기본
+        # 구현이 누름을 한 번 더 만들어 다시 토글하므로 여기서 끝낸다.
+        if event.button() == Qt.MouseButton.LeftButton:
+            event.accept()
+            self.open_large()
             return
         super().mouseDoubleClickEvent(event)
+
+    def _on_context_menu(self, pos) -> None:
+        from . import photo_menu
+        if photo_menu.ask(self, self.mapToGlobal(pos), self.entry.item.path):
+            self.open_large()
+
+    def open_large(self) -> None:
+        """사진 한 장을 큰 화면(``FullscreenViewer``)으로 — 휠 확대 · 끌어 옮기기."""
+        from . import photo_menu
+        photo_menu.open_large(self, self.entry.item.path)
 
 
 class _PlusTile(QFrame):

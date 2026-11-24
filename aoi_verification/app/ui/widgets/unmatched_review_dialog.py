@@ -42,7 +42,7 @@ from PyQt6.QtCore import QObject, QSize, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QCursor, QIcon, QPixmap
 from PyQt6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout,
                               QHBoxLayout, QLabel, QListWidget,
-                              QListWidgetItem, QMenu, QMessageBox,
+                              QListWidgetItem, QMessageBox,
                               QScrollArea, QVBoxLayout, QWidget)
 
 from ... import config, i18n
@@ -53,6 +53,7 @@ from ...models.slot import ImageItem
 from ...utils import image_io
 from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
+from . import photo_menu
 from . import sheet_host as sheets
 
 # 허용 오차 폴백 — 값이 안 들어왔을 때만 쓴다.  **단일 출처는 config** 다
@@ -197,7 +198,7 @@ class _CandidateTile(QFrame):
     """후보 사진 타일.
 
     - 클릭 = 선택(파란 테두리)만, 즉시 매칭하지 않는다 (#1a).
-    - 우클릭 '크게 보기' = 좌우(기준·후보) 비교 크게보기 (#1e).
+    - 더블클릭 · 우클릭 [크게 보기] = 좌우(기준·후보) 비교 크게보기 (#1e).
     - 이미지는 사전 생성된 mid 캐시를 소스로 빠르게 로드하고(#1c), 슬라이더로
       재디코드 없이 인플레이스 재스케일한다.
     """
@@ -341,14 +342,30 @@ class _CandidateTile(QFrame):
             self.selected.emit(self.item)
         super().mousePressEvent(event)
 
-    # ★ 더블클릭 확대는 제거했다 — 후보를 연달아 누르다 보면 두 번째 클릭이 더블클릭으로
-    #   붙어 원하지 않는 비교 창이 떴다(사용자 지적).  확대는 우클릭 메뉴로만 연다.
-    def _on_context_menu(self, pos) -> None:
-        menu = QMenu(self)
-        act = menu.addAction(i18n.KO.CTX_VIEW_LARGER)
-        chosen = menu.exec(self.mapToGlobal(pos))
-        if chosen is act:
+    def mouseDoubleClickEvent(self, event):  # noqa: N802
+        # 더블클릭 = 크게 보기(현택님 2026-11-24).  첫 누름이 이미 골랐다 — 고른 뒤 크게 보는 것은 괜찮다.
+        if event.button() == Qt.MouseButton.LeftButton:
             self.view_requested.emit(self.item)
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+    def _on_context_menu(self, pos) -> None:
+        if photo_menu.ask(self, self.mapToGlobal(pos), self.item.path):
+            self.view_requested.emit(self.item)
+
+
+class _RefPhoto(QLabel):
+    """왼쪽 기준 사진 — 더블클릭 = 크게 보기(현택님 2026-11-24, 모든 사진과 같게)."""
+
+    double_clicked = pyqtSignal()
+
+    def mouseDoubleClickEvent(self, event):  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.double_clicked.emit()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
 
 
 # ---------------------------------------------------------------------------
@@ -565,15 +582,13 @@ class UnmatchedReviewDialog(QDialog):
         self.ref_filename.setProperty("role", "mutedPad2")
         self.ref_filename.setWordWrap(True)
         ll.addWidget(self.ref_filename)
-        self.ref_img = QLabel(left)
+        self.ref_img = _RefPhoto(left)
         self.ref_img.setFixedSize(self._ref_px, self._ref_px)
         self.ref_img.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.ref_img.setProperty("role", "photoFrame")
-        # 우클릭 ‘크게보기’ — 후보와 동일한 좌우 비교 창을 열되, 기준 사진은 가장
+        # 더블클릭 · 우클릭 ‘크게 보기’ — 후보와 동일한 좌우 비교 창을 열되, 기준 사진은 가장
         # 유사도가 높은 후보부터(start=0) 보여준다 (#13).
-        # ★ 더블클릭 확대는 제거했다(사용자 지적).  여기에 걸려 있던 것은 인스턴스 메서드
-        #   몽키패치라 더 나빴다 — QLabel 의 이벤트 핸들러를 람다로 갈아끼우면 위젯이
-        #   자기 클래스 계약 밖에서 동작해 다음 사람이 찾을 수 없다.
+        self.ref_img.double_clicked.connect(lambda: self._open_compare(0))
         self.ref_img.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.ref_img.customContextMenuRequested.connect(self._on_ref_context_menu)
         ll.addWidget(self.ref_img, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -1152,10 +1167,10 @@ class UnmatchedReviewDialog(QDialog):
         self._open_compare(start)
 
     def _on_ref_context_menu(self, pos) -> None:
-        """기준 사진 우클릭 → 유사도순 좌우 비교 크게보기."""
-        menu = QMenu(self.ref_img)
-        act = menu.addAction(i18n.KO.CTX_VIEW_LARGER)
-        if menu.exec(self.ref_img.mapToGlobal(pos)) is act:
+        """기준 사진 우클릭 → 모든 사진과 같은 메뉴, [크게 보기] 는 유사도순 좌우 비교."""
+        cur = self._current()
+        path = Path(cur.path) if cur is not None else None
+        if photo_menu.ask(self.ref_img, self.ref_img.mapToGlobal(pos), path):
             self._open_compare(0)
 
     def _make_match(self, ref_entry: MissEntry, val_item: ImageItem) -> None:

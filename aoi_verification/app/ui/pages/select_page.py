@@ -470,12 +470,12 @@ class SelectPage(ProgressRowMixin, QWidget):
             # 타일 절반 크기 → 같은 폭에 3 열 그리드 깔리도록.
             columns=3,
             tile_px=side_tile,
-            inline_select=True,        # 타일 클릭=선택 / 더블클릭=해제 (Ctrl+A=전체)
+            inline_select=True,        # 타일 클릭=선택 / 더블클릭=크게 보기 (Ctrl+A=전체)
         )
         self.left_panel.selection_action.connect(self._on_batch_action)
         self.left_panel.tile_clicked.connect(self._on_tile_click)
         self.left_panel.plus_clicked.connect(self._on_plus_click)
-        # 후보 패널은 확대(줌) 모드를 두지 않는다 — 더블클릭은 선택 해제용.
+        # 후보 패널은 확대(줌) 모드를 두지 않는다 — 크게 보기는 더블클릭 · 우클릭 메뉴.
         # 3 col × (120 thumb + 14 padding) + spacing + 패널 padding 을 담을 최소
         # 너비.  좁은 창에선 세로 스택으로 reflow 되어 무관.
         self.left_panel.setMinimumWidth(220)
@@ -541,6 +541,8 @@ class SelectPage(ProgressRowMixin, QWidget):
         self.center_img = ScalableImage(center_card)
         self.center_img.installEventFilter(self)   # 사진이 그려졌는지 = 입력 잠금 해제 · 누르면 크게
         self.center_img.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.center_img.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.center_img.customContextMenuRequested.connect(self._on_center_menu)
         self.center_img.set_center_crop(int(self.crop_group.current_key() or "100") / 100)
         self._img_scroll = QScrollArea(center_card)
         self._img_scroll.setWidgetResizable(False)
@@ -1071,11 +1073,20 @@ class SelectPage(ProgressRowMixin, QWidget):
     def eventFilter(self, obj, event):                  # noqa: N802
         if obj is self.center_img and event.type() == QEvent.Type.Paint:
             self._mark_shown()
-        elif (obj is self.center_img and event.type() == QEvent.Type.MouseButtonPress
+        elif (obj is self.center_img
+              and event.type() in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonDblClick)
               and event.button() == Qt.MouseButton.LeftButton and self._current is not None):
-            self._open_center_large()       # 사진을 누르면 크게(현택님) — 결정은 버튼·방향키만
+            self._open_center_large()       # 사진을 누르면(더블클릭도) 크게(현택님) — 결정은 버튼·방향키만
             return True
         return super().eventFilter(obj, event)
+
+    def _on_center_menu(self, pos) -> None:
+        """가운데 사진 우클릭 — 모든 사진과 같은 메뉴(``photo_menu``)."""
+        if self._current is None:
+            return
+        from ..widgets import photo_menu
+        if photo_menu.ask(self.center_img, self.center_img.mapToGlobal(pos), self._current.path):
+            self._open_center_large()
 
     def _open_center_large(self) -> None:
         from ..widgets.zoom_window import FullscreenViewer

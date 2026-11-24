@@ -39,6 +39,7 @@ from .. import motion, theme
 from ..drop_overlay import drop_clear, drop_feedback
 from ..drop_paths import guess_kinds, install_paste, local_paths, split_paths
 from ..folder_picker import FolderPicker
+from . import photo_menu
 from . import sheet_host as sheets
 from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
@@ -220,12 +221,17 @@ class _FacetRow(QFrame):
 
 
 class _Pic(QLabel):
-    """오른쪽 값 칸의 사진 한 장 — 누르면 크게."""
+    """오른쪽 값 칸의 사진 한 장 — 누르면 크게.  우클릭은 모든 사진과 같은 메뉴(``photo_menu``).
+
+    ``path_of`` 는 지금 보이는 사진의 경로(우클릭 [Defect 정보 조회] · [GL 히스토그램]) — Scan Crop 은 없다."""
 
     clicked = pyqtSignal()
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent=None, path_of=None) -> None:
         super().__init__(parent)
+        self._path_of = path_of
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._on_context_menu)
         self.setFixedSize(DETAIL_PIC, DETAIL_PIC)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setStyleSheet(f"background: #000; color: {theme.MUTE};")
@@ -243,6 +249,14 @@ class _Pic(QLabel):
         if e.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit()
         super().mousePressEvent(e)
+
+    def _on_context_menu(self, pos) -> None:
+        pm = self.pixmap()
+        if pm is None or pm.isNull():               # 자리 글('없음'·'…')뿐이면 메뉴도 없다
+            return
+        path = self._path_of() if self._path_of is not None else None
+        if photo_menu.ask(self, self.mapToGlobal(pos), path):
+            self.clicked.emit()
 
 
 class ZoneOriginDialog(QDialog):
@@ -461,7 +475,7 @@ class ZoneOriginDialog(QDialog):
         dl.setSpacing(10)
         pics = QHBoxLayout()
         pics.setSpacing(6)
-        self.color_pic, self.scan_pic = _Pic(det), _Pic(det)
+        self.color_pic, self.scan_pic = _Pic(det, path_of=self._current_photo), _Pic(det)
         self.color_pic.clicked.connect(self.enlarge_open)
         self.scan_pic.clicked.connect(self._enlarge_scan)
         for pic, cap in ((self.color_pic, _KO.ZO_DETAIL_COLOR), (self.scan_pic, _KO.ZO_DETAIL_SCAN)):
@@ -1453,6 +1467,10 @@ class ZoneOriginDialog(QDialog):
         viewer = FullscreenViewer(Path(crop.text("src") or _KO.ZO_DETAIL_SCAN), self, image=crop)
         sheets.run(viewer, full_bleed=True)
         viewer.deleteLater()
+
+    def _current_photo(self):
+        it = self.current()
+        return it.photo if it is not None else None
 
     def open_info(self) -> None:
         it = self.current()

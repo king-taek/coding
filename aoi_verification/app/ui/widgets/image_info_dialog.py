@@ -61,6 +61,7 @@ from .. import motion, theme
 from ..drop_overlay import drop_clear, drop_feedback
 from ..drop_paths import install_paste
 from ..folder_picker import FilePicker
+from . import photo_menu
 from . import sheet_host as sheets
 from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
@@ -233,12 +234,27 @@ def _async_info() -> bool:
 
 
 class _ClickLabel(QLabel):
+    """누르면 크게(``clicked``).  우클릭은 모든 사진과 같은 메뉴(``photo_menu``) — [크게 보기] 도 ``clicked``."""
+
     clicked = pyqtSignal()
+
+    def __init__(self, parent=None, path_of=None) -> None:
+        super().__init__(parent)
+        self._path_of = path_of or (lambda: None)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._on_context_menu)
 
     def mousePressEvent(self, e):           # noqa: N802
         if e.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit()
         super().mousePressEvent(e)
+
+    def _on_context_menu(self, pos) -> None:
+        pm = self.pixmap()
+        if pm is None or pm.isNull():               # 사진이 없으면(빈 칸 · '불러오는 중') 메뉴도 없다
+            return
+        if photo_menu.ask(self, self.mapToGlobal(pos), self._path_of()):
+            self.clicked.emit()
 
 
 def _shape_columns(grid: QGridLayout, label_w: int) -> None:
@@ -353,7 +369,7 @@ class ImageInfoDialog(QDialog):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(8)
 
-        self.preview = _ClickLabel(host)
+        self.preview = _ClickLabel(host, path_of=lambda: self._path)
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview.clicked.connect(self._open_full_color)
         self.preview.setFixedSize(_PREVIEW_MIN_W, _PREVIEW_MIN_W)

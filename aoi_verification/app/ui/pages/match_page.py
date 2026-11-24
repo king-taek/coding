@@ -302,6 +302,7 @@ class MatchPage(ProgressRowMixin, QWidget):
 
         # 이미지 (스크롤 영역) -----------------------------------------
         self.center_img = ScalableImage(center)
+        self.center_img.enable_photo_mouse()             # 더블클릭 = 크게 · 우클릭 = 사진 메뉴(현택님 2026-11-24)
         self._img_scroll = QScrollArea(center)
         self._img_scroll.setWidgetResizable(False)
         self._img_scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)

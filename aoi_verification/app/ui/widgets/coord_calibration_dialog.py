@@ -27,6 +27,7 @@ from ... import i18n
 from ...coords import calibration as cal
 from ...utils import image_io
 from .. import theme
+from . import photo_menu
 from .neon_button import NeonButton
 from . import popup_layout
 from .option_group import columns_for_width
@@ -80,9 +81,13 @@ class _PhotoTile(QFrame):
                  clickable: bool = True, parent=None) -> None:
         super().__init__(parent)
         self.key = key
+        self._path = path
         self._selected = False
         self._px = px
         self._name_text = path.name
+        # 더블클릭 = 크게 · 우클릭 = 모든 사진과 같은 메뉴(현택님 2026-11-24)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._on_context_menu)
         self.setObjectName("calTile")
         self.setProperty("role", "card-soft")
         if clickable:
@@ -140,6 +145,18 @@ class _PhotoTile(QFrame):
         if event.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit(self.key)
         super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):  # noqa: N802
+        # 첫 누름이 이미 골랐다 — 고른 뒤 크게 보는 것은 괜찮다(현택님 2026-11-24).
+        if event.button() == Qt.MouseButton.LeftButton:
+            event.accept()
+            photo_menu.open_large(self, self._path)
+            return
+        super().mouseDoubleClickEvent(event)
+
+    def _on_context_menu(self, pos) -> None:
+        if photo_menu.ask(self, self.mapToGlobal(pos), self._path):
+            photo_menu.open_large(self, self._path)
 
 
 class CoordCalibrationDialog(QDialog):
