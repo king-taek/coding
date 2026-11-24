@@ -898,7 +898,7 @@ DEFECT_RECIPE_NONE_VALUE = "—"  # Surface.flt 에 recipe 칸이 없는 구형 
 # 장비 Export 와 같은 Type('<검사>-<Zone>') · 종류 이름(EquipmentClassifications) · 분류 이름(Export Classify).
 DEFECT_TYPE_LABEL = "type"
 DEFECT_TYPE_VALUE_FMT = "{kind}-{zone}"
-DEFECT_TYPE_NAME_LABEL = "defect"
+DEFECT_TYPE_NAME_LABEL = "Defect"
 DEFECT_CLASS_LABEL = "classify"
 # Height.flt(3D) Defect 의 높이 — 장비 Export 의 Height 값.
 DEFECT_HEIGHT_LABEL = "height"

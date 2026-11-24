@@ -89,7 +89,7 @@ def test_info_lines_for_a_height_photo():
     p = WAFER / "275316.275316.c._9_.4.jpeg"
     lines = single_info.defect_lines(p)
     assert lines[:5] == ["recipe BS_3D / zone amk_mask_6_170", "type Height-amk_mask_6_170",
-                         f"defect {geometry.resolve(p).geometry.type_name}", "classify Undersized Bump",
+                         f"Defect {geometry.resolve(p).geometry.type_name}", "classify Undersized Bump",
                          f"height {geometry.resolve(p).geometry.height_um:.2f} ㎛"]
     assert not any(ln.startswith(("area", "width", "length", "contrast")) for ln in lines)
 

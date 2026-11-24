@@ -111,3 +111,61 @@ def test_screen_says_defect_and_zone_in_english() -> None:
                  for text in _all_texts(getattr(i18n.KO, name)) if "결함" in text]
     assert offenders == [], f"'결함' 이 남아 있다: {sorted(set(offenders))}"
     assert i18n.KO.OVERKILL_PICK_ZONE_TIP == "Zone"
+
+
+# ── 통일성 점검 2차(현택님 2026-11-24) — 낱말 · 단위 · 문장 꼴 가드 ──────────────
+# 엑셀 D열 한 줄 표기 — `utils/excel_ref` 가 ㎛ 로 되읽으므로 화면 단위(µm)로 바꾸지 않는다.
+_EXCEL_UM_KEYS = {"EXPORT_KLA_NATIVE_FMT", "DEFECT_XY_FMT", "DEFECT_ABS_XY_FMT",
+                  "DEFECT_HEIGHT_FMT", "DEFECT_AREA_FMT", "DEFECT_WIDTH_FMT",
+                  "DEFECT_LENGTH_FMT"}
+# 엑셀 시트 이름 'Wafer Map' — `utils/excel_ref` 가 이 이름으로 시트를 건너뛴다.
+_WAFER_MAP_SHEET_KEYS = {"WAFER_MAP_SHEET", "EXTRACT_WAFER_MAP_SWITCH"}
+
+_BANNED = [
+    # (무엇, 정규식, 예외 키)
+    ("'미매칭'·'미매치' → '매치 없음'", r"미매칭|미매치", set()),
+    ("'일치' → '매치'('슬롯 불일치' 는 다른 뜻)", r"(?<!불)일치", set()),
+    ("화면 단위는 µm", r"㎛", _EXCEL_UM_KEYS),
+    ("소문자 defect → Defect", r"(?<![A-Za-z_{])defect(?![A-Za-z_])", set()),
+    ("화면 이름은 'Defect Map'", r"Wafer [Mm]ap", _WAFER_MAP_SHEET_KEYS),
+    ("'재 분류' → '재분류'", r"재 분류", set()),
+    ("col / row 한 꼴", r"[Cc]ol, [Rr]ow|Col / Row|col \{[^}]*\} · row", set()),
+    ("개수는 '{n}건'·'{n}개' 붙여 쓰기", r"\} 건|\d 건", set()),
+    ("% 붙여 쓰기", r"[\d}] %", set()),
+    ("' · ' 는 한 칸", r"  ·|·  ", set()),
+    ("확인 질문은 '~할까요?'", r"하시겠", set()),
+    ("저장 실패는 '저장 실패 · 이유'", r"저장하지 못했|저장 실패:", set()),
+    ("진행 문구는 '~하는 중'(점 없이)", r"중…|중입니다…", set()),
+    ("더 보기는 '+n'", r"\(\+\{", set()),
+    ("뺀 알림은 '{name} 뺌'", r"뺐습니다", set()),
+    ("슬롯 모름은 '—'", r"#\?", set()),
+]
+
+
+def _ko_texts():
+    for name in dir(i18n.KO):
+        if name.isupper():
+            for text in _all_texts(getattr(i18n.KO, name)):
+                yield name, text
+
+
+def test_ui_wording_guard() -> None:
+    import re
+    offenders = []
+    for what, pattern, allowed in _BANNED:
+        rx = re.compile(pattern)
+        offenders += [f"{what}: {name} = {text[:50]!r}" for name, text in _ko_texts()
+                      if name not in allowed and rx.search(text)]
+    assert offenders == [], "화면 문구 규칙 위반:\n  " + "\n  ".join(offenders)
+
+
+def test_excel_um_keys_still_say_the_old_unit() -> None:
+    """예외 목록이 거꾸로 µm 로 바뀌면 옛 결과 엑셀을 되읽는 정규식이 깨진다."""
+    for name in _EXCEL_UM_KEYS:
+        assert "㎛" in getattr(i18n.KO, name), name
+    assert i18n.KO.WAFER_MAP_SHEET == "Wafer Map", "엑셀 시트 이름은 그대로(excel_ref 가 이 이름을 본다)"
+
+
+def test_save_failures_share_one_form() -> None:
+    for name in ("SAVE_FAIL_FMT", "THRESH_EXPORT_FAILED", "GL_SAVE_FAILED_FMT"):
+        assert getattr(i18n.KO, name).startswith("저장 실패 · {"), name
