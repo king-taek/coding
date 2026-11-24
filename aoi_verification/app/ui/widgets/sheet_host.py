@@ -32,7 +32,7 @@ from typing import Optional
 from PyQt6.QtCore import (QEvent, QEventLoop, QPoint, QPointF,
                           QPropertyAnimation, QRect, QSize, Qt,
                           QVariantAnimation, pyqtSignal)
-from PyQt6.QtGui import QColor, QCursor, QPainter
+from PyQt6.QtGui import QColor, QCursor, QPainter, QPen
 from PyQt6.QtWidgets import (QAbstractButton, QApplication, QDialog,
                              QGraphicsOpacityEffect, QGridLayout, QHBoxLayout,
                              QLabel, QMessageBox, QSizePolicy, QVBoxLayout,
@@ -99,6 +99,34 @@ class _Scrim(QWidget):
         p.fillRect(self.rect(), QColor(r, g, b, int(a * self._fade)))
 
 
+class _CloseIcon(NeonButton):
+    """제목줄의 닫기 — '닫기' 글자 대신 ✕ 하나(현택님 2026-11-24, P7a).
+
+    ★ 글자 '✕'(U+2715)는 앱 글꼴(NanumSquare)에 **없다**(실측: 동봉 8개 파일 모두) —
+    PC 마다 다른 대체 글꼴로 그려져 모양이 달라진다.  그래서 선 두 개를 직접 그린다.
+    면·테두리·포커스 링은 QSS(``rowAction``)가 칠하고, 이름·툴팁은 '닫기' 다."""
+
+    SIZE = 30
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__("", role="rowAction", parent=parent)
+        self.setFixedSize(self.SIZE, self.SIZE)
+        self.setAccessibleName(i18n.KO.MSG_BTN_CLOSE)
+        self.setToolTip(i18n.KO.MSG_BTN_CLOSE)
+
+    def paintEvent(self, event):  # noqa: N802
+        super().paintEvent(event)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(QPen(QColor(theme.INK if self.underMouse() else theme.INK2), 1.6,
+                      Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        c = QPointF(self.width() / 2, self.height() / 2)
+        r = 5.0
+        p.drawLine(c + QPointF(-r, -r), c + QPointF(r, r))
+        p.drawLine(c + QPointF(-r, r), c + QPointF(r, -r))
+        p.end()
+
+
 class _SheetFrame(QWidget):
     """시트 껍데기 — **제목줄(제목 + ✕)** 과 테두리.
 
@@ -124,16 +152,20 @@ class _SheetFrame(QWidget):
         lbl.setProperty("role", "sheetTitle")
         h.addWidget(lbl)
         h.addStretch(1)
-        btn = NeonButton(i18n.KO.MSG_BTN_CLOSE, role="rowAction", parent=bar)
-        btn.setToolTip(i18n.KO.MSG_BTN_CLOSE)
+        btn = _CloseIcon(bar)
         btn.clicked.connect(self.close_requested.emit)
         h.addWidget(btn)
         v.addWidget(bar)
         self._bar = bar
+        self._close_btn = btn
 
         self._body = QVBoxLayout()
         self._body.setContentsMargins(0, 0, 0, 0)
         v.addLayout(self._body, 1)
+
+    def set_close_visible(self, visible: bool) -> None:
+        """제목줄의 ✕ 만 감춘다 — 자기 [취소] 가 있는 작은 팝업(``POPUP_SMALL``)용."""
+        self._close_btn.setVisible(visible)
 
     def set_bar_visible(self, visible: bool) -> None:
         """제목줄을 감춘다/되돌린다 — '내용만 남기는' 보기(맵 전체화면)용.
@@ -174,6 +206,10 @@ class _SheetFrame(QWidget):
             max(base.height(),
                 ch.height() + bar_h + margins.top() + margins.bottom()),
         )
+
+
+#: 자기 [취소] 버튼을 가진 **작은** 대화상자가 켜 두는 클래스 속성 — 시트 제목줄 ✕ 를 뺀다.
+POPUP_SMALL_ATTR = "POPUP_SMALL"
 
 
 class SheetHost(QWidget):
@@ -371,6 +407,10 @@ class SheetHost(QWidget):
         if chrome:
             frame = _SheetFrame(self, widget.windowTitle())
             frame.set_content(widget)
+            # 작은 팝업은 제목줄 ✕ 를 뺀다 — 아래 [취소] 와 닫는 길이 둘이 되지 않게
+            # (현택님 2026-11-24, P3–P6 A안).  Esc 는 그대로 `reject` 다.
+            frame.set_close_visible(
+                full_bleed or not getattr(widget, POPUP_SMALL_ATTR, False))
             # 다이얼로그의 ✕ 는 OS 창처럼 `reject` 로 간다 — `close()` 는 아래 필터가
             # 가로채 다이얼로그의 `reject` 를 건너뛰었다(미확정 선택을 묻는 창이 묻지
             # 않고 닫혔다).  Esc 와 같은 길이다.

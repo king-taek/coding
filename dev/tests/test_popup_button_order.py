@@ -151,3 +151,68 @@ def test_escape_means_no_or_cancel(host, buttons, want):
     QTimer.singleShot(40, lambda: _press_enter_then_escape(h, got))
     assert sh.ask(win, "t", "b", buttons, want) == want
     assert got["still_open"]
+
+
+# ── 제목줄 닫기: 글자 대신 ✕ 그림, 작은 팝업은 없음 ───────────────────────────
+def _frame_close(styled_qapp, dlg, *, full_bleed=False):
+    """``dlg`` 를 시트로 띄워 제목줄 닫기 버튼과 그 보임 여부를 돌려준다."""
+    from PyQt6.QtWidgets import QDialog
+    win = QWidget()
+    win.resize(1000, 800)
+    h = sh.SheetHost(win)
+    win._sheets = h
+    win.show()
+    got = {}
+
+    def look():
+        frame = h._stack[-1]["frame"]
+        btn = frame._close_btn
+        got.update(visible=btn.isVisible(), text=btn.text(),
+                   name=btn.accessibleName(), tip=btn.toolTip(),
+                   icon=isinstance(btn, sh._CloseIcon))
+        dlg.reject()
+
+    QTimer.singleShot(40, look)
+    assert isinstance(dlg, QDialog)
+    h.run(dlg, full_bleed=full_bleed)
+    h.close_all()
+    win.hide()
+    win.deleteLater()
+    styled_qapp.processEvents()
+    return got
+
+
+def test_title_bar_close_is_an_icon_named_close(styled_qapp):
+    from PyQt6.QtWidgets import QDialog
+    dlg = QDialog()
+    dlg.setWindowTitle("큰 창")
+    got = _frame_close(styled_qapp, dlg)
+    assert got["icon"] and got["visible"]
+    assert got["text"] == "", "글자 '닫기' 가 남아 있다"
+    assert got["name"] == got["tip"] == i18n.KO.MSG_BTN_CLOSE
+
+
+def test_close_icon_is_painted_not_a_font_glyph(styled_qapp):
+    """✕ 글자는 앱 글꼴에 없다 — 선으로 그려 PC 마다 같은 모양이다."""
+    btn = sh._CloseIcon(None)
+    try:
+        btn.resize(btn.SIZE, btn.SIZE)
+        img = btn.grab().toImage()
+        c = img.pixelColor(btn.SIZE // 2, btn.SIZE // 2)
+        bg = img.pixelColor(4, btn.SIZE // 2)
+        assert c != bg, "가운데에 ✕ 가 그려지지 않았다"
+    finally:
+        btn.deleteLater()
+
+
+@pytest.mark.parametrize("modname,factory", [
+    ("save_name_dialog", lambda m, tmp: m.SaveNameDialog("a.xlsx", tmp)),
+    ("notch_dialog", lambda m, tmp: m.NotchDialog("A", "B", "down", "down")),
+    ("slot_select_dialog", lambda m, tmp: m.SlotSelectDialog(["S1", "S2"])),
+])
+def test_small_popups_drop_the_title_bar_close(styled_qapp, tmp_path, modname, factory):
+    import importlib
+    mod = importlib.import_module(f"aoi_verification.app.ui.widgets.{modname}")
+    dlg = factory(mod, tmp_path)
+    got = _frame_close(styled_qapp, dlg)
+    assert got["visible"] is False, f"{modname}: 작은 팝업에 제목줄 ✕ 가 남아 있다"

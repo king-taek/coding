@@ -104,6 +104,9 @@ _FIELD_LABELS = (
 class SaveNameDialog(QDialog):
     """추천 이름을 보여주고 고치게 한다.  :attr:`chosen` 이 결과(취소면 ``None``)."""
 
+    #: 작은 팝업 — 시트 제목줄 ✕ 를 뺀다(자기 [취소] 가 있다, `sheet_host.POPUP_SMALL_ATTR`).
+    POPUP_SMALL = True
+
     def __init__(self, suggested: str, folder: Path, parent=None,
                  *, fields: dict[str, str] | None = None) -> None:
         super().__init__(parent)

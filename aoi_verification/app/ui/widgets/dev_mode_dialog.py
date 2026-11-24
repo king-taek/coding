@@ -32,6 +32,9 @@ __all__ = ["DevModeDialog"]
 class DevModeDialog(QDialog):
     """:attr:`install_info` 가 결과다 — [이 브랜치로 설치] 를 눌렀으면 받을 대상 dict."""
 
+    #: 작은 팝업 — 시트 제목줄 ✕ 를 뺀다(자기 [취소] 가 있다, `sheet_host.POPUP_SMALL_ATTR`).
+    POPUP_SMALL = True
+
     _branches_loaded = pyqtSignal(list, str)           # (이름들, 실패 사유)
     _checked = pyqtSignal(str, dict, bool)             # (status, info, 설치까지)
 

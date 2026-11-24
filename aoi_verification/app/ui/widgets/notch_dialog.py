@@ -19,6 +19,9 @@ __all__ = ["NotchDialog"]
 
 
 class NotchDialog(QDialog):
+    #: 작은 팝업 — 시트 제목줄 ✕ 를 뺀다(자기 [취소] 가 있다, `sheet_host.POPUP_SMALL_ATTR`).
+    POPUP_SMALL = True
+
     def __init__(self, ref_label: str, val_label: str, ref_dir: str, val_dir: str,
                  parent=None, *, auto_args=None, auto_result=None) -> None:
         """``auto_args`` = ``(groups, ref_root, val_root, tol)`` — 있으면 [자동 감지] 가 생긴다.

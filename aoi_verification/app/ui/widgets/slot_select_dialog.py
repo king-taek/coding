@@ -217,6 +217,9 @@ class _SlotTile(NeonButton):
 class SlotSelectDialog(QDialog):
     """검색 + 밀집 그리드로 진행할 슬롯을 고른다."""
 
+    #: 작은 팝업 — 시트 제목줄 ✕ 를 뺀다(자기 [취소] 가 있다, `sheet_host.POPUP_SMALL_ATTR`).
+    POPUP_SMALL = True
+
     selection_changed = pyqtSignal(int)          # 선택 개수 (테스트·확장용)
 
     def __init__(self,

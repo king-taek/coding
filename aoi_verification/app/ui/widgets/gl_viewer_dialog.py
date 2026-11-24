@@ -139,6 +139,9 @@ class _Worker(QThread):
 class _RawDialog(QDialog):
     """RAW 사진은 크기를 파일에서 알 수 없어 직접 받는다(파일 크기로 정사각형을 추정해 채운다)."""
 
+    #: 작은 팝업 — 시트 제목줄 ✕ 를 뺀다(자기 [취소] 가 있다, `sheet_host.POPUP_SMALL_ATTR`).
+    POPUP_SMALL = True
+
     def __init__(self, path: Path, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle(_KO.GL_RAW_TITLE)
