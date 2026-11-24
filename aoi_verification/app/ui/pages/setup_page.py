@@ -661,7 +661,7 @@ class SetupPage(QWidget):
     # 기준 1 ↔ 검증 여러 장비 — 검증 카드 안의 추가 장비 줄 + [+ 검증 장비 추가]
     # ------------------------------------------------------------------
     MAX_VALS = 5             # 첫 검증 장비 포함
-    # 추가 장비 줄(✕ · 라벨 · 폴더 · 호기 · [폴더 선택…])이 들어갈 카드의 하한.  ★ 줄을
+    # 추가 장비 줄(라벨 · ✕ · 폴더 · 호기 · [폴더 선택…])이 들어갈 카드의 하한.  ★ 줄을
     # 추가하는 순간 카드의 최소 폭이 커져 두 열 ↔ 한 열이 뒤집히면 화면이 튄다 — 그래서
     # 줄이 없을 때도 이 값을 두 열 판단에 미리 넣는다(`_side_by_side_fits`).
     _VAL_ROW_EDIT_MIN_W = 150
@@ -717,11 +717,11 @@ class SetupPage(QWidget):
         remove = NeonButton("✕", role="ghost")
         remove.setToolTip(i18n.KO.MULTI_VAL_REMOVE)
         remove.setAccessibleName(i18n.KO.MULTI_VAL_REMOVE)
-        # ✕ 는 라벨 왼쪽 — 줄 끝이 첫 장비(…[폴더 선택])와 같고, 라벨+✕ 가 첫 장비의
-        # 라벨 폭을 나눠 써서 입력란이 첫 장비와 같은 자리에서 시작한다.
+        # 라벨 · ✕ 가 첫 장비의 라벨 폭을 나눠 쓴다 — '검증 N' 이 '검증 1' 과 같은 자리에서
+        # 시작하고, ✕ 는 줄마다 같은 열에 서며, 입력란은 첫 장비와 같은 자리에서 시작한다.
         remove.setFixedWidth(self._VAL_REMOVE_W)
         label.setFixedWidth(self._row_label_w(label) - self._VAL_REMOVE_W - 10)
-        for w in (remove, label, edit, machine_edit, browse):   # ✕ · 라벨 · 경로 · 호기 · 폴더 선택
+        for w in (label, remove, edit, machine_edit, browse):   # 라벨 · ✕ · 경로 · 호기 · 폴더 선택
             row.addWidget(w, 1 if w is edit else 0)
         rec = {"host": host, "edit": edit, "machine": machine_edit, "label": label}
         self._val_rows.append(rec)
@@ -765,6 +765,11 @@ class SetupPage(QWidget):
         self._val_add_btn.setText(i18n.KO.MULTI_VAL_ADD_FMT.format(
             n=n, max=self.MAX_VALS))
         self._val_add_btn.setEnabled(n < self.MAX_VALS)
+        # 줄이 둘 이상이면 첫 줄도 번호로 — '검증 1', '검증 2', …  하나면 '검증 장비'.
+        head = self.val_group.property("_headLabel")
+        if head is not None:
+            head.setText(i18n.KO.MULTI_VAL_ROW_FMT.format(n=1) if self._val_rows
+                         else i18n.KO.SETUP_VAL_GROUP)
         for k, r in enumerate(self._val_rows, start=2):        # 줄 번호
             r["label"].setText(i18n.KO.MULTI_VAL_ROW_FMT.format(n=k))
 
