@@ -208,11 +208,11 @@ def test_dialog_has_no_removed_filters(dlg):
 
 
 def test_detail_shows_first_and_re_class_lines(dlg):
-    """값 칸 분류는 '첫 분류: …' · '재 분류: …' 두 줄 — '검토로 바뀜' · '같음' 문구 없이 이름만(현택님 예시)."""
+    """값 칸 분류는 '첫 분류: …' · '재분류: …' 두 줄 — '검토로 바뀜' · '같음' 문구 없이 이름만(현택님 예시)."""
     from PyQt6.QtWidgets import QLabel
     it = dlg.current()
     texts = [lab.text() for lab in dlg.kv_host.findChildren(QLabel)]
-    i, j = texts.index("첫 분류"), texts.index("재 분류")
+    i, j = texts.index("첫 분류"), texts.index("재분류")
     assert texts[i + 1] == it.first_name.split(" · ", 1)[-1] and " · " not in texts[i + 1]
     assert texts[j + 1] == it.cur_name.split(" · ", 1)[-1]
     assert not any(t in ("검토로 바뀜", "같음", "지금 분류", "분류 이름") or t.startswith("검토로 바뀜") for t in texts)
@@ -313,7 +313,7 @@ def test_dialog_coord_filter_and_detail(dlg):
     from PyQt6.QtWidgets import QLabel
     texts = [lab.text() for lab in dlg.kv_host.findChildren(QLabel)]
     for key, val in (("LOT", "FLU-1122N"), ("Wafer", "GX57527979"), ("슬롯#", "1"),
-                     ("col, row", f"{dlg.current().col}, {dlg.current().row}")):
+                     ("col / row", f"{dlg.current().col} / {dlg.current().row}")):
         assert texts[texts.index(key) + 1] == val
 
 

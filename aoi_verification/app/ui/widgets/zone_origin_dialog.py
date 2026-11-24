@@ -1598,7 +1598,7 @@ def _class_name(name: str) -> str:
 
 
 def _colrow(it: B.Item) -> str:
-    return f"{it.col}, {it.row}" if it.col is not None and it.row is not None else "—"
+    return f"{it.col} / {it.row}" if it.col is not None and it.row is not None else "—"
 
 
 def _int_or_none(text: str) -> Optional[int]:
