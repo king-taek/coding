@@ -124,7 +124,9 @@ _PHOTO_SCREENS = [
 def test_every_photo_screen_uses_the_one_menu(rel):
     src = (_APP / "ui" / rel).read_text(encoding="utf-8")
     assert "photo_menu.ask(" in src, rel
-    assert not re.search(r"\bQMenu\(", src), f"{rel} 가 자기 QMenu 를 만든다"
+    # 사진이 아닌 버튼 메뉴는 그 줄에 '사진 메뉴 아님' 을 적어 둔다(Overkill 선택 목록 저장 · 열기).
+    code = "\n".join(ln for ln in src.splitlines() if "사진 메뉴 아님" not in ln)
+    assert not re.search(r"\bQMenu\(", code), f"{rel} 가 자기 QMenu 를 만든다"
 
 
 # ── 각 사진: 우클릭 = 같은 메뉴(그 사진 경로) · 더블클릭 = 크게 ─────────────────────────

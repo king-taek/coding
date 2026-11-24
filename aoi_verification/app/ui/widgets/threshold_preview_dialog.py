@@ -1964,7 +1964,7 @@ class ThresholdPreviewDialog(QDialog):
         self.saved_btn.setEnabled(False)
         srow.addWidget(self.saved_btn)
         self.list_btn = NeonButton(_KO.OVERKILL_LIST, role="textAction")   # 고른 것 ↔ CSV(현택님 2026-11-24 안 B) — 줄이 넘치지 않게 메뉴 하나
-        list_menu = QMenu(self.list_btn)
+        list_menu = QMenu(self.list_btn)            # 사진 메뉴 아님 — 선택 목록 저장 · 열기
         self.list_save_act = list_menu.addAction(_KO.OVERKILL_LIST_SAVE, self._on_list_save)
         self.list_open_act = list_menu.addAction(_KO.OVERKILL_LIST_OPEN, self._on_list_open)
         self.list_btn.clicked.connect(lambda: list_menu.popup(self.list_btn.mapToGlobal(QPoint(0, self.list_btn.height()))))
