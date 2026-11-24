@@ -379,10 +379,10 @@ class ExcelExporter(QThread):
         # row 2 의 ‘AOI-N’ 헤더를 실제 호기 번호로 교체 (#3).
         ref_label = _machine_label(self._result.ref_machine)
         val_label = _machine_label(self._result.val_machine)
-        if ref_label:
-            ws[f"{COL_REF}{HEADER_AOI_ROW}"] = ref_label
-        if val_label:
-            ws[f"{COL_VAL}{HEADER_AOI_ROW}"] = val_label
+        # 호기를 비워 두면 양식의 자리표시('AOI-17' · 'AOI-23')를 남기지 않고 비운다 —
+        # 남기면 다른 장비 번호가 결과에 찍히고, 이전 결과 엑셀 읽기가 그 번호를 호기로 가져온다.
+        ws[f"{COL_REF}{HEADER_AOI_ROW}"] = ref_label or None
+        ws[f"{COL_VAL}{HEADER_AOI_ROW}"] = val_label or None
         if self._extract:
             # 추출은 장비가 하나다 — D열은 두 번째 장비가 아니라 C열 사진의 정보 칸.
             ws[f"{COL_VAL}{HEADER_AOI_ROW}"] = i18n.KO.EXTRACT_INFO_HEADER

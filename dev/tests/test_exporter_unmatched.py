@@ -526,3 +526,34 @@ def test_machine_label_rule():
     assert _machine_label("") == ""
     assert _machine_label("   ") == ""
     assert _machine_label(None) == ""
+
+
+@pytest.mark.parametrize("ref_m, val_m, want", [
+    ("", "", (None, None)),
+    ("17", "", ("AOI-17", None)),
+    ("", "K-2", (None, "AOI(K-2)")),
+])
+def test_empty_machine_clears_template_placeholder(qapp, isolated_cache, tmp_path,
+                                                   ref_m, val_m, want):
+    """호기를 비우면 양식의 자리표시 'AOI-17'·'AOI-23' 이 결과에 남지 않는다."""
+    from openpyxl import load_workbook
+    from aoi_verification.app.utils import paths
+    from aoi_verification.app.workers.exporter import COL_REF, COL_VAL, HEADER_AOI_ROW
+
+    tpl = paths.template_path()
+    if not tpl.exists():
+        pytest.skip("양식.xlsx 없음")
+    src = tmp_path / "src"
+    src.mkdir()
+    ref = _make_image(src, "ref.jpeg")
+    val = _make_image(src, "val.jpeg")
+    result = FinalResult(mode="single", ref_machine=ref_m, val_machine=val_m,
+                         matches=[MatchResult(slot="S1", ref_path=ref, val_path=val,
+                                              score=0.9)])
+    dst = tmp_path / "out.xlsx"
+    ExcelExporter(result, dst_path=dst, template_path=tpl).run()
+    wb = load_workbook(str(dst))
+    ws = next(w for w in wb.worksheets
+              if w[f"{COL_REF}{HEADER_AOI_ROW}"].value or w["B3"].value == "S1")
+    assert (ws[f"{COL_REF}{HEADER_AOI_ROW}"].value,
+            ws[f"{COL_VAL}{HEADER_AOI_ROW}"].value) == want
