@@ -1094,6 +1094,23 @@ SCAN_IMAGE_LOADING_DOTS = ("●  ○  ○", "○  ●  ○", "○  ○  ●", "�
 SCAN_IMAGE_UNREADABLE = "Scan 이미지를 읽을 수 없음"
 SCAN_IMAGE_OPEN_TIP = "누르면 전체 Scan 이미지에서 이 범위를 보여줍니다"
 IMAGE_INFO_OPEN_TIP = "누르면 크게 보여줍니다"
+# ── 흑백 Scan 사진만 넣었을 때 — 그 안에 찍힌 Defect 를 찾아 잘라 보인다(사용자 요청 2026-11-24) ──
+IMAGE_INFO_ROW_SCAN = "Scan 사진"
+IMAGE_INFO_ROW_DEFECT_PHOTO = "Defect 사진"
+SCAN_DEFECT_TITLE_FMT = "Defect 위치 ({um:.0f} ㎛)"
+SCAN_DEFECT_STEP_FMT = "Defect {i} / {n}"
+SCAN_DEFECT_PREV = "◀"
+SCAN_DEFECT_NEXT = "▶"
+SCAN_DEFECT_NONE = "이 Scan 사진 안에 찍힌 Defect 가 없습니다."
+# 찾지 못한 이유 — scan_image 상태 코드별.  없는 코드는 SCAN_DEFECT_FAIL_OTHER.
+SCAN_DEFECT_FAIL = {
+    "no_manifest": "폴더에 ScanResultImageList.txt 가 없어 이 Scan 사진의 위치를 모릅니다.",
+    "unsupported_version": "ScanResultImageList.txt 형식을 읽을 수 없습니다.",
+    "not_listed": "ScanResultImageList.txt 에 이 Scan 사진이 없습니다.",
+    "no_pixel_size": "이 Scan 레시피의 픽셀 크기를 읽지 못해 Defect 위치를 계산할 수 없습니다.",
+    "no_coordinates": "폴더에 ColorImageGrabingInfo.ini 가 없어 Defect 를 찾을 수 없습니다.",
+}
+SCAN_DEFECT_FAIL_OTHER = "Scan 사진을 읽을 수 없습니다."
 # 엑셀 — Scan 열 머리(2행)와, Scan 열이 생긴 시트에서 그 행만 Scan 이 없을 때의 칸 문구.
 SCAN_EXCEL_HEADER_FMT = "{machine} Scan"
 SCAN_EXCEL_HEADER = "Scan"
