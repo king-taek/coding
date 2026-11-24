@@ -47,7 +47,7 @@ from pathlib import Path
 from PyQt6.QtCore import QObject, QRectF, QSize, QThread, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import (QColor, QFontMetrics, QImage, QKeySequence, QPainter, QPen,
                          QPixmap, QShortcut)
-from PyQt6.QtWidgets import (QApplication, QDialog, QFileDialog, QFrame,
+from PyQt6.QtWidgets import (QApplication, QDialog, QFrame,
                              QGridLayout, QHBoxLayout, QLabel, QScrollArea,
                              QSizePolicy, QVBoxLayout, QWidget)
 
@@ -60,6 +60,7 @@ from ...utils import image_io as _io
 from .. import motion, theme
 from ..drop_overlay import drop_clear, drop_feedback
 from ..drop_paths import install_paste
+from ..folder_picker import FilePicker
 from . import sheet_host as sheets
 from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
@@ -305,6 +306,8 @@ class ImageInfoDialog(QDialog):
         self._sheet: _ScanSheet | None = None     # 흑백 Scan 사진을 넣었을 때만
         self._hit_i = 0
         self._loading = LoadingOverlay(self)
+        self._picker = FilePicker(self, purpose="image_info")
+        self._picker.picked.connect(lambda paths: self.show_image(Path(paths[0])))
         self._build()
         if image_path:
             self.show_image(Path(image_path))
@@ -463,15 +466,12 @@ class ImageInfoDialog(QDialog):
     # 입력 — 파일 선택 / 드래그&드롭
     # ------------------------------------------------------------------
     def _on_pick(self) -> None:
-        # QFileDialog 는 시트로 감싸지 않는다 — OS 파일 브라우저를 그대로 쓴다
-        # (sheet_host 모듈 docstring 의 명시적 결정).
+        # OS 파일 브라우저를 그대로 쓴다(sheet_host 모듈 docstring 의 결정) — 비동기로
+        # (`ui/folder_picker.py`, `exec()` 는 Windows 에서 UI 스레드를 세운다).
         patterns = " ".join(f"*{e}" for e in CONFIG.image_extensions)
         start = str(self._path.parent) if self._path else ""
-        path, _ = QFileDialog.getOpenFileName(
-            self, i18n.KO.IMAGE_INFO_PICK, start,
-            i18n.KO.IMAGE_INFO_FILE_FILTER_FMT.format(patterns=patterns))
-        if path:
-            self.show_image(Path(path))
+        self._picker.open(i18n.KO.IMAGE_INFO_PICK, start,
+                          i18n.KO.IMAGE_INFO_FILE_FILTER_FMT.format(patterns=patterns))
 
     def hideEvent(self, event):         # noqa: N802
         drop_clear(self)                # 끌던 중에 숨겨져도 표시가 남지 않게

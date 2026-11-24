@@ -54,7 +54,7 @@ from PyQt6.QtCore import (QBuffer, QCoreApplication, QEvent, QIODevice, QLocale,
                           QThread, QTimer, QUrl, pyqtProperty, pyqtSignal)
 from PyQt6.QtGui import (QColor, QDesktopServices, QDoubleValidator, QFont, QFontMetrics, QImage, QPainter, QPainterPath,
                          QPen, QPixmap, QPolygonF)
-from PyQt6.QtWidgets import (QAbstractButton, QAbstractSlider, QApplication, QButtonGroup, QDialog, QFileDialog, QFrame, QHBoxLayout,
+from PyQt6.QtWidgets import (QAbstractButton, QAbstractSlider, QApplication, QButtonGroup, QDialog, QFrame, QHBoxLayout,
                              QLabel, QLineEdit, QMenu, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
 
 from ... import i18n
@@ -78,7 +78,7 @@ from .. import motion
 from ..deferred import call_later
 from ..drop_overlay import drop_clear, drop_feedback
 from ..drop_paths import guess_kinds, install_paste, local_paths, split_paths
-from ..folder_picker import FolderPicker
+from ..folder_picker import FolderPicker, SavePicker, last_dir
 from . import sheet_host as sheets
 from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
@@ -1746,8 +1746,10 @@ class ThresholdPreviewDialog(QDialog):
         self._rich_token = 0
         self._rich_thread: Optional[_RichLoad] = None
         self._rich_folder: Optional[Path] = None
-        self._picker = FolderPicker(self)
+        self._picker = FolderPicker(self, purpose="threshold_folder")
         self._picker.picked.connect(lambda p: p and self.add_folders([Path(p)]))
+        self._save_picker = SavePicker(self, purpose="threshold_export")
+        self._save_picker.picked.connect(self._export_to)
         self._build()
         for b in self.findChildren(QPushButton):     # 열릴 때 첫 버튼이 포커스 링을 달고 나오지 않게
             b.setAutoDefault(False)
@@ -4067,16 +4069,12 @@ class ThresholdPreviewDialog(QDialog):
         if not self._ov or self._w is None:
             return
         home = Path.home()
-        start = home / "Desktop" if (home / "Desktop").is_dir() else home
+        last = last_dir("threshold_export")          # 마지막으로 저장한 폴더가 먼저
+        start = Path(last) if last else home / "Desktop" if (home / "Desktop").is_dir() else home
         base = self._roots[0].name if len(self._roots) == 1 else self._w.folder.name
         name = f"Overkill_{base}_{datetime.now():%Y%m%d_%H%M}.html"
-        dlg = QFileDialog(self, _KO.THRESH_EXPORT_SAVE_TITLE, str(start / name), _KO.THRESH_EXPORT_FILTER)
-        dlg.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
-        dlg.setDefaultSuffix("html")
-        dlg.fileSelected.connect(self._export_to)
-        dlg.finished.connect(dlg.deleteLater)
-        self._save_dlg = dlg
-        dlg.open()
+        self._save_picker.open(_KO.THRESH_EXPORT_SAVE_TITLE, str(start / name),
+                               _KO.THRESH_EXPORT_FILTER, "html")
 
     def _export_to(self, path: str) -> None:
         if not path:

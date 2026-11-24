@@ -94,12 +94,21 @@ def test_reopen_while_open_reuses_the_same_dialog(host, qapp):
     first.reject()
 
 
-def test_no_blocking_static_folder_dialog_in_ui_sources():
-    """정적 `getExistingDirectory`(= exec) 로 되돌리지 않는다 — 설정 화면 · Wafer map."""
-    pat = re.compile(r"QFileDialog\.getExistingDirectory\s*\(")
-    hits = [str(p.relative_to(_UI)) for p in _UI.rglob("*.py")
+def test_no_blocking_static_file_dialog_in_app_sources():
+    """정적 ``QFileDialog.get*``(= exec) 로 되돌리지 않는다 — 폴더 · 사진 열기 · 저장 전부."""
+    pat = re.compile(r"\bget(ExistingDirectory|OpenFileNames?|SaveFileName|"
+                     r"ExistingDirectoryUrl|OpenFileUrls?|SaveFileUrl)\s*\(")
+    hits = [str(p.relative_to(_APP)) for p in _APP.rglob("*.py")
             if pat.search(p.read_text(encoding="utf-8"))]
-    assert hits == [], f"UI 스레드를 세우는 폴더 선택이 돌아왔다: {hits}"
+    assert hits == [], f"UI 스레드를 세우는 고르기 창이 돌아왔다: {hits}"
+
+
+def test_file_dialogs_are_built_only_by_the_picker_module():
+    """``QFileDialog(`` 를 직접 만드는 곳은 `ui/folder_picker.py` 하나다 — 로그·기억·돌려쓰기를 함께 받게."""
+    pat = re.compile(r"\bQFileDialog\s*\(")
+    hits = [str(p.relative_to(_APP)) for p in _APP.rglob("*.py")
+            if p.name != "folder_picker.py" and pat.search(p.read_text(encoding="utf-8"))]
+    assert hits == [], f"고르기 창을 직접 만든다 — folder_picker 를 써라: {hits}"
 
 
 def test_picker_module_never_calls_exec():

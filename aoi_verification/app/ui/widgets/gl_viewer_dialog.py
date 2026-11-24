@@ -20,7 +20,7 @@ from typing import Callable, Optional
 import numpy as np
 from PyQt6.QtCore import QObject, QPointF, QRectF, QSize, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QIcon, QImage, QPainter, QPen, QPixmap
-from PyQt6.QtWidgets import (QComboBox, QDialog, QFileDialog,
+from PyQt6.QtWidgets import (QComboBox, QDialog,
                              QFormLayout, QFrame, QGridLayout, QHBoxLayout, QLabel,
                              QMenu, QPushButton, QSpinBox, QSplitter, QToolButton, QVBoxLayout,
                              QWidget)
@@ -34,6 +34,7 @@ from .. import theme
 from ..deferred import call_later
 from ..drop_overlay import drop_clear, drop_feedback
 from ..drop_paths import guess_kinds, install_paste, local_paths
+from ..folder_picker import FilePicker, SavePicker, last_dir
 from . import sheet_host as sheets
 from .gl_canvas import TOOLS, GlCanvas
 from .gl_charts import ALL_ROW, HistogramChart
@@ -206,6 +207,16 @@ class GlViewerDialog(QDialog):
         self._refresh_timer.setSingleShot(True)
         self._refresh_timer.setInterval(0)
         self._refresh_timer.timeout.connect(self._refresh)
+        # OS 파일 창은 전부 비동기(`ui/folder_picker.py`) — `exec()` 는 Windows 에서
+        # UI 스레드를 세운다.  열기 · 비교는 같은 사진 폴더를, 저장 둘은 같은 저장 폴더를 기억한다.
+        self._open_picker = FilePicker(self, purpose="gl_open")
+        self._open_picker.picked.connect(lambda paths: self.open_path(Path(paths[0])))
+        self._cmp_picker = FilePicker(self, purpose="gl_open")
+        self._cmp_picker.picked.connect(self._on_cmp_picked)
+        self._xlsx_picker = SavePicker(self, purpose="gl_save")
+        self._xlsx_picker.picked.connect(self._on_xlsx_picked)
+        self._png_picker = SavePicker(self, purpose="gl_save")
+        self._png_picker.picked.connect(self._on_png_picked)
         self._build()
         if image_path:
             self.open_path(Path(image_path))
@@ -584,10 +595,8 @@ class GlViewerDialog(QDialog):
     def _on_pick(self) -> None:
         patterns = " ".join(f"*{e}" for e in sorted(_view_exts()))
         start = str(Path(self._gl.path).parent) if self._gl and self._gl.path else ""
-        path, _ = QFileDialog.getOpenFileName(self, _KO.GL_OPEN, start,
-                                              _KO.GL_OPEN_FILTER_FMT.format(patterns=patterns))
-        if path:
-            self.open_path(Path(path))
+        self._open_picker.open(_KO.GL_OPEN, start,
+                               _KO.GL_OPEN_FILTER_FMT.format(patterns=patterns))
 
     def open_path(self, path: Path, *, raw: Optional[dict] = None) -> None:
         """사진을 연다(백그라운드).  RAW 는 설정을 묻는다."""
@@ -672,10 +681,12 @@ class GlViewerDialog(QDialog):
         start = str(Path(self._gl.path).parent) if self._gl.path else ""
         patterns = " ".join(f"*{e}" for e in sorted(set(CONFIG.image_extensions)
                                                     | {".tif", ".tiff", ".png", ".bmp"}))
-        path, _ = QFileDialog.getOpenFileName(self, _KO.GL_CMP_PICK, start,
-                                              _KO.GL_OPEN_FILTER_FMT.format(patterns=patterns))
-        if path:
-            self.open_path_b(Path(path))
+        self._cmp_picker.open(_KO.GL_CMP_PICK, start,
+                              _KO.GL_OPEN_FILTER_FMT.format(patterns=patterns))
+
+    def _on_cmp_picked(self, paths: list) -> None:
+        if self._gl is not None and self._gl_b is None:     # 고르는 사이 상태가 바뀌었으면 무시
+            self.open_path_b(Path(paths[0]))
 
     def open_path_b(self, path: Path) -> None:
         """B 사진을 연다(백그라운드).  A 와 같은 크기·같은 비트여야 ROI 를 그대로 겹칠 수 있다."""
@@ -974,16 +985,21 @@ class GlViewerDialog(QDialog):
     def _default_name(self, suffix: str) -> str:
         base = Path(self._view.source_path if self._view and self._view.source_path
                     else (self._gl.path if self._gl else "gl")).stem
-        folder = Path(self._gl.path).parent if self._gl and self._gl.path else Path.home()
+        # 마지막으로 저장한 폴더가 먼저, 없으면 사진 옆.
+        last = last_dir("gl_save")
+        folder = (Path(last) if last else Path(self._gl.path).parent
+                  if self._gl and self._gl.path else Path.home())
         return str(folder / f"{base}_GL{suffix}")
 
     def _on_save_xlsx(self) -> None:
         if self._gl is None:
             self._toast(_KO.GL_NO_IMAGE, error=True)
             return
-        path, _ = QFileDialog.getSaveFileName(self, _KO.GL_SAVE_XLSX_TITLE,
-                                              self._default_name(".xlsx"), "Excel (*.xlsx)")
-        if not path:
+        self._xlsx_picker.open(_KO.GL_SAVE_XLSX_TITLE, self._default_name(".xlsx"),
+                               "Excel (*.xlsx)", "xlsx")
+
+    def _on_xlsx_picked(self, path: str) -> None:
+        if not path or self._gl is None:
             return
         try:
             self.save_xlsx(Path(path))
@@ -1029,9 +1045,11 @@ class GlViewerDialog(QDialog):
         if self._gl is None:
             self._toast(_KO.GL_NO_IMAGE, error=True)
             return
-        path, _ = QFileDialog.getSaveFileName(self, _KO.GL_SAVE_PNG_TITLE,
-                                              self._default_name(".png"), "PNG (*.png)")
-        if not path:
+        self._png_picker.open(_KO.GL_SAVE_PNG_TITLE, self._default_name(".png"),
+                              "PNG (*.png)", "png")
+
+    def _on_png_picked(self, path: str) -> None:
+        if not path or self._gl is None:
             return
         try:
             self.save_png(Path(path), with_rois=self.png_rois.isChecked())

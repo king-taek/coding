@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtWidgets import (QCheckBox, QFileDialog, QFrame, QHBoxLayout, QLabel,
+from PyQt6.QtWidgets import (QCheckBox, QFrame, QHBoxLayout, QLabel,
                               QVBoxLayout, QWidget)
 
 from ... import i18n
@@ -15,6 +15,7 @@ from .. import motion
 from .. import theme
 from ...models.result import FinalResult
 from ...workers.exporter import ExcelExporter
+from ..folder_picker import SavePicker
 from ..widgets.app_logo import build_logo_label
 from ..widgets.loading_overlay import LoadingOverlay
 from ..widgets.neon_button import NeonButton
@@ -89,6 +90,9 @@ class ResultPage(QWidget):
         self._exported = False
         # 여러 검증 장비 — 엑셀 저장 때 장비마다의 결과를 받아 오는 함수(None = 한 장비).
         self._results_provider = None
+        # 세션 없이 결과만 보일 때의 저장 위치 창 — 비동기(`ui/folder_picker.py`).
+        self._save_picker = SavePicker(self, purpose="result_save")
+        self._save_picker.picked.connect(self._on_save_picked)
         self._build()
 
     # ------------------------------------------------------------------
@@ -552,14 +556,20 @@ class ResultPage(QWidget):
                 val=self._result.val_machine,
                 ts=ts,
             )
-            dst, _ = QFileDialog.getSaveFileName(
-                self, i18n.KO.SAVE_DIALOG_TITLE, filename,
-                "Excel (*.xlsx)",
-            )
-            if not dst:
-                return
-            self._save_path = Path(dst)
+            # 비동기 OS 창 — `exec()` 는 Windows 에서 UI 스레드를 세운다.  고르면
+            # `_on_save_picked` 가 저장을 시작하고, 취소하면 아무 일도 없다.
+            self._save_picker.open(i18n.KO.SAVE_DIALOG_TITLE, filename,
+                                   "Excel (*.xlsx)", "xlsx")
+            return
+        self._start_export()
 
+    def _on_save_picked(self, dst: str) -> None:
+        if not dst or self._result is None:
+            return
+        self._save_path = Path(dst)
+        self._start_export()
+
+    def _start_export(self) -> None:
         self._loading.show_overlay(i18n.KO.LOAD_EXPORT)
         self._exporter = ExcelExporter(
             self._result, self._save_path, template_path=self._template_path,
