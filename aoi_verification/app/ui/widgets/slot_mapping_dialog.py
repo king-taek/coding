@@ -29,6 +29,7 @@ from PyQt6.QtWidgets import (QAbstractItemView, QDialog, QHBoxLayout, QLabel,
 from ... import i18n
 from .. import theme
 from .neon_button import NeonButton
+from . import popup_layout
 
 # KLA 헤더(OCR 구간) 미리보기 — 좁게(가로·세로 축소).
 _CROP_W = 180
@@ -255,15 +256,12 @@ class SlotMappingDialog(QDialog):
         self._pairs_list.itemDoubleClicked.connect(self._on_pair_double_clicked)
         root.addWidget(self._pairs_list, stretch=1)
 
-        bar = QHBoxLayout()
-        bar.addStretch(1)
         cancel = NeonButton(i18n.KO.BTN_CANCEL, role="ghost")
         cancel.clicked.connect(self.reject)
         ok = NeonButton(i18n.KO.BTN_OK, role="primary")
         ok.clicked.connect(self.accept)
-        bar.addWidget(cancel)
-        bar.addWidget(ok)
-        root.addLayout(bar)
+        root.addLayout(popup_layout.dialog_row(
+            QHBoxLayout(), cancels=[cancel], primaries=[ok]))
 
         self._auto_suggest()
 

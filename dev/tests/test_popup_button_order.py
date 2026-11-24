@@ -216,3 +216,54 @@ def test_small_popups_drop_the_title_bar_close(styled_qapp, tmp_path, modname, f
     dlg = factory(mod, tmp_path)
     got = _frame_close(styled_qapp, dlg)
     assert got["visible"] is False, f"{modname}: 작은 팝업에 제목줄 ✕ 가 남아 있다"
+
+
+# ── 대화상자: 오른쪽 아래 [취소][확인], 높이 44 ─────────────────────────────
+def _cancel_ok(dlg, cancel_text, ok_role="primary"):
+    from aoi_verification.app.ui.widgets.neon_button import NeonButton
+    btns = [b for b in dlg.findChildren(NeonButton) if b.isVisible()]
+    cancel = [b for b in btns if b.text() == cancel_text]
+    ok = [b for b in btns if b.property("role") == ok_role]
+    assert len(cancel) == 1 and ok, [b.text() for b in btns]
+
+    def _pos(b):
+        p = b.mapTo(dlg, b.rect().topLeft())
+        return (p.y(), p.x())
+    return cancel[0], max(ok, key=_pos)       # 맨 아래 줄의 주 버튼
+
+
+@pytest.mark.parametrize("make,cancel_text", [
+    (lambda tmp: __import__("aoi_verification.app.ui.widgets.save_name_dialog",
+                            fromlist=["x"]).SaveNameDialog("a.xlsx", tmp),
+     i18n.KO.SAVE_NAME_CANCEL),
+    (lambda tmp: __import__("aoi_verification.app.ui.widgets.notch_dialog",
+                            fromlist=["x"]).NotchDialog("A", "B", "down", "down"),
+     i18n.KO.NOTCH_CANCEL),
+    (lambda tmp: __import__("aoi_verification.app.ui.widgets.slot_select_dialog",
+                            fromlist=["x"]).SlotSelectDialog(["S1", "S2"]),
+     i18n.KO.BTN_CANCEL),
+    (lambda tmp: __import__("aoi_verification.app.ui.widgets.slot_mapping_dialog",
+                            fromlist=["x"]).SlotMappingDialog(["A"], ["B"]),
+     i18n.KO.BTN_CANCEL),
+    (lambda tmp: __import__("aoi_verification.app.ui.widgets.bulk_select_dialog",
+                            fromlist=["x"]).BulkSelectDialog(
+        "t", {}, actions=[("x", "X", "primary")]),
+     i18n.KO.BTN_CANCEL),
+])
+def test_dialog_puts_cancel_left_of_ok_bottom_right(styled_qapp, tmp_path, make,
+                                                    cancel_text):
+    dlg = make(tmp_path)
+    try:
+        dlg.resize(900, 600)
+        _shown(styled_qapp, dlg)
+        cancel, ok = _cancel_ok(dlg, cancel_text)
+        cx = cancel.mapTo(dlg, cancel.rect().topLeft()).x()
+        ox = ok.mapTo(dlg, ok.rect().topLeft()).x()
+        assert cx < ox, "[취소] 는 [확인] 왼쪽"
+        assert ok.mapTo(dlg, ok.rect().topRight()).x() > dlg.width() * 0.7, \
+            "[확인] 이 오른쪽 아래가 아니다"
+        assert cancel.property("role") == "ghost"
+        assert cancel.height() == ok.height() == _H
+    finally:
+        dlg.hide()
+        dlg.deleteLater()

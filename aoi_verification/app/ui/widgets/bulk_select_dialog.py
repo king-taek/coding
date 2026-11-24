@@ -28,6 +28,7 @@ from .. import theme
 from ...models.slot import ImageItem
 from ...utils import image_io
 from .neon_button import NeonButton
+from . import popup_layout
 from .no_wheel_slider import NoWheelSlider
 from .option_group import columns_for_width
 from . import sheet_host as sheets
@@ -330,19 +331,15 @@ class BulkSelectDialog(QDialog):
             page_bar.addStretch(1)
             root.addLayout(page_bar)
 
-        # 하단 액션 바
-        bar = QHBoxLayout()
-        bar.setSpacing(8)
+        # 하단 액션 바 — 보조 버튼은 왼쪽, 오른쪽 아래는 [취소][…][주 액션]
+        # (현택님 2026-11-24, P6 A안).
         # 전체 선택 / 해제 보조 버튼 — 가독성 위해 대비 높은 role.
         # ★ 한 화면에 채운 강조 버튼은 하나뿐이어야 한다 — 주 액션(우측)과 시선이
         #   갈리지 않게 보조 버튼 둘 다 ghost 로 둔다(role="default" 는 QSS 에 없는 등급).
         self.btn_select_all = NeonButton(i18n.KO.BULK_SELECT_ALL, role="ghost")
         self.btn_select_all.clicked.connect(self._select_all)
-        bar.addWidget(self.btn_select_all)
         self.btn_clear = NeonButton(i18n.KO.BULK_DESELECT_ALL, role="ghost")
         self.btn_clear.clicked.connect(self._clear_selection)
-        bar.addWidget(self.btn_clear)
-        bar.addStretch(1)
 
         # 액션 버튼들 — sizeHint 보다 작게 줄어들지 않도록 최소 폭을 명시.
         self._action_buttons: list[NeonButton] = []
@@ -352,14 +349,17 @@ class BulkSelectDialog(QDialog):
                 lambda _c=False, a=action_id: self._fire(a)
             )
             btn.setMinimumWidth(max(btn.sizeHint().width(), 160))
-            bar.addWidget(btn)
             self._action_buttons.append(btn)
 
         # 닫기
         btn_close = NeonButton(i18n.KO.BTN_CANCEL, role="ghost")
         btn_close.clicked.connect(self.reject)
-        bar.addWidget(btn_close)
-        root.addLayout(bar)
+        acts = self._action_buttons
+        root.addLayout(popup_layout.dialog_row(
+            QHBoxLayout(), left=[self.btn_select_all, self.btn_clear],
+            cancels=[btn_close],
+            others=[b for b in acts if b.property("role") != "primary"],
+            primaries=[b for b in acts if b.property("role") == "primary"]))
 
     # ------------------------------------------------------------------
     def _render_page(self) -> None:

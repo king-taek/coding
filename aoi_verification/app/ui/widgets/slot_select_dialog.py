@@ -46,6 +46,7 @@ from PyQt6.QtWidgets import (QApplication, QDialog, QGridLayout, QHBoxLayout,
 from ... import i18n
 from .. import theme
 from .neon_button import NeonButton
+from . import popup_layout
 from .option_group import reflow_into_grid
 
 # 타일 최소 폭 — 실제 폭은 열 수 계산이 늘려 준다.  슬롯명은 'PI_Opening_A1' 처럼
@@ -442,18 +443,12 @@ class SlotSelectDialog(QDialog):
         # ── 바닥: 취소·확인(우).
         # ★ 키 안내 문구는 없앴다 — 타일 키보드 이동을 없앴으므로 안내할 키가
         #   남지 않았다.  지키지 못할 약속을 화면에 적어 두지 않는다.
-        bar = QHBoxLayout()
-        bar.setSpacing(8)
-        bar.addStretch(1)
         cancel = NeonButton(i18n.KO.BTN_CANCEL, role="ghost")
-        cancel.setMinimumHeight(theme.PROFILE.control_h_lg)
         cancel.clicked.connect(self.reject)
         self._ok = NeonButton(i18n.KO.BTN_OK, role="primary")
-        self._ok.setMinimumHeight(theme.PROFILE.control_h_lg)
         self._ok.clicked.connect(self._on_ok)
-        bar.addWidget(cancel)
-        bar.addWidget(self._ok)
-        root.addLayout(bar)
+        root.addLayout(popup_layout.dialog_row(
+            QHBoxLayout(), cancels=[cancel], primaries=[self._ok]))
 
         # ★ Ctrl+A / Ctrl+D 단축키는 없앴다(사용자 결정) — [전체]/[해제] 버튼이
         #   같은 일을 하고 화면에 보인다.  숨은 키는 남기지 않는다.

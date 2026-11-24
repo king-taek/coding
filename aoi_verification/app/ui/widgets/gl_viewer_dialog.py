@@ -40,6 +40,7 @@ from .gl_canvas import TOOLS, GlCanvas
 from .gl_charts import ALL_ROW, HistogramChart
 from .loading_overlay import LoadingOverlay
 from .neon_button import NeonButton
+from . import popup_layout
 from .option_group import OptionGroup
 
 _LOG = logging.getLogger("aoi.gl")
@@ -166,15 +167,12 @@ class _RawDialog(QDialog):
         form.addRow(_KO.GL_RAW_BITS, self.bits)
         form.addRow(_KO.GL_RAW_ENDIAN, self.endian)
         form.addRow(_KO.GL_RAW_HEADER, self.header)
-        row = QHBoxLayout()
         ok = NeonButton(_KO.GL_RAW_OK, role="primary")
         cancel = NeonButton(_KO.GL_RAW_CANCEL, role="ghost")
         ok.clicked.connect(self.accept)
         cancel.clicked.connect(self.reject)
-        row.addStretch(1)
-        row.addWidget(cancel)
-        row.addWidget(ok)
-        form.addRow(row)
+        form.addRow(popup_layout.dialog_row(
+            QHBoxLayout(), cancels=[cancel], primaries=[ok]))
 
     def settings(self) -> dict:
         return {"width": self.width_.value(), "height": self.height_.value(),

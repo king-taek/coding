@@ -34,6 +34,7 @@ from PyQt6.QtWidgets import (QDialog, QGridLayout, QHBoxLayout, QLabel,
 from ... import i18n
 from .. import theme
 from .neon_button import NeonButton
+from . import popup_layout
 
 __all__ = ["SaveNameDialog", "sanitize_name", "compose_title"]
 
@@ -175,17 +176,13 @@ class SaveNameDialog(QDialog):
         where.setWordWrap(True)
         root.addWidget(where)
 
-        row = QHBoxLayout()
-        row.setSpacing(8)
-        row.addStretch(1)
         self.btn_cancel = NeonButton(i18n.KO.SAVE_NAME_CANCEL, role="ghost")
         self.btn_cancel.clicked.connect(self.reject)
         self.btn_ok = NeonButton(i18n.KO.SAVE_NAME_OK, role="primary")
         self.btn_ok.setDefault(True)
         self.btn_ok.clicked.connect(self._on_ok)
-        row.addWidget(self.btn_cancel)
-        row.addWidget(self.btn_ok)
-        root.addLayout(row)
+        root.addLayout(popup_layout.dialog_row(
+            QHBoxLayout(), cancels=[self.btn_cancel], primaries=[self.btn_ok]))
 
         self.edit.setFocus(Qt.FocusReason.OtherFocusReason)
         self._revalidate()

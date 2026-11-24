@@ -28,6 +28,7 @@ from ...coords import calibration as cal
 from ...utils import image_io
 from .. import theme
 from .neon_button import NeonButton
+from . import popup_layout
 from .option_group import columns_for_width
 
 _SRC_TILE_PX = 120
@@ -273,20 +274,14 @@ class CoordCalibrationDialog(QDialog):
         pl.addWidget(self._warn)
         root.addWidget(pairs_box)
 
-        bar = QHBoxLayout()
-        bar.setSpacing(8)
-        bar.addStretch(1)
         skip = NeonButton(i18n.KO.COORD_CAL_SKIP, role="ghost")
-        skip.setMinimumHeight(theme.PROFILE.control_h_lg)
         skip.clicked.connect(self.reject)
         skip.setAutoDefault(False)
         self._apply = NeonButton(i18n.KO.COORD_CAL_APPLY, role="primary")
-        self._apply.setMinimumHeight(theme.PROFILE.control_h_lg)
         self._apply.clicked.connect(self._on_apply)
         self._apply.setAutoDefault(False)
-        bar.addWidget(skip)
-        bar.addWidget(self._apply)
-        root.addLayout(bar)
+        root.addLayout(popup_layout.dialog_row(
+            QHBoxLayout(), cancels=[skip], primaries=[self._apply]))
 
     def sizeHint(self) -> QSize:  # noqa: N802
         return QSize(1200, 860)
