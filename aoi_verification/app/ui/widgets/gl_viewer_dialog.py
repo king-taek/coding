@@ -991,22 +991,17 @@ class GlViewerDialog(QDialog):
     # ------------------------------------------------------------------
     def _default_name(self, suffix: str) -> str:
         """기본 저장 이름 — 다른 도구와 같은 규칙 ``<도구>_<대상>_<YYYYMMDD_HHMM>``, 폴더도 같은
-        결과 폴더(``paths.results_dir``).  예전엔 사진이 있는 NAS 폴더에 ``<사진>_GL`` 로 썼다."""
+        결과 폴더(``paths.results_dir``, 마지막 저장 폴더가 있으면 그곳).  예전엔 사진이 있는 NAS 폴더에 ``<사진>_GL`` 로 썼다."""
         from datetime import datetime
 
         from ...utils import paths
 
         base = Path(self._view.source_path if self._view and self._view.source_path
                     else (self._gl.path if self._gl else "gl")).stem
-<<<<<<< ours
-        # 마지막으로 저장한 폴더가 먼저, 없으면 사진 옆.
+        # 마지막으로 저장한 폴더가 먼저, 없으면 결과 폴더.
         last = last_dir("gl_save")
-        folder = (Path(last) if last else Path(self._gl.path).parent
-                  if self._gl and self._gl.path else Path.home())
-        return str(folder / f"{base}_GL{suffix}")
-=======
-        return str(paths.results_dir() / f"GL_{base}_{datetime.now():%Y%m%d_%H%M}{suffix}")
->>>>>>> theirs
+        folder = Path(last) if last else paths.results_dir()
+        return str(folder / f"GL_{base}_{datetime.now():%Y%m%d_%H%M}{suffix}")
 
     def _on_save_xlsx(self) -> None:
         if self._gl is None:
